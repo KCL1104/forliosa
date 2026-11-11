@@ -4,12 +4,19 @@ import tailwindcss from "@tailwindcss/vite"
 import react from "@vitejs/plugin-react"
 import { defineConfig } from "vite"
 
+// `/api` 轉給本機後端：`pnpm dev:api` 時前端用同源的 /api/v1，session cookie 不必跨站。
+// 後端位址可用 FORLIOSA_API_ORIGIN 覆寫（例如 http://127.0.0.1:8001）。
+const apiProxy = {
+  "/api": { target: process.env.FORLIOSA_API_ORIGIN ?? "http://localhost:8000", changeOrigin: false },
+}
+
 export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
-  server: { port: 5173, host: true },
+  server: { port: 5173, host: true, proxy: apiProxy },
+  preview: { port: 4173, proxy: apiProxy },
   build: {
     rollupOptions: {
       output: {

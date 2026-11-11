@@ -266,6 +266,8 @@ def _valuation_from_ratios(info: InstrumentInfo, candles: list, ratios: dict, st
 
 def revenue(md: MarketData, symbol: str) -> list[dict[str, Any]]:
     info = require_instrument(md, symbol)
+    if info.type != "stock" or info.market == "US":
+        return []  # ETFs have no revenue; US filings are not covered (saves upstream quota)
     ans = md.monthly_revenue(info.symbol)
     return [
         {"period": r.period, "revenue": r.revenue, "yoy_pct": ser.ratio(r.yoy_pct), "mom_pct": ser.ratio(r.mom_pct),

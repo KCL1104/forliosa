@@ -2,8 +2,11 @@ import { PencilIcon, PlusIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
-import { useAccounts, useCreateAccount, useUpdateAccount, useUpdatePreferences } from "@/api/queries"
-import type { Account, Preferences } from "@/api/types"
+import { useAccounts, useCreateAccount, useUpdateAccount } from "@/api/queries"
+import type { Account } from "@/api/types"
+import { BenchmarkSelect } from "@/components/benchmark-select"
+import { usePrefSetter } from "@/hooks/use-pref-setter"
+import { BENCHMARK_OPTIONS } from "@/lib/labels"
 import { Chop, DemoChop, SoonChop } from "@/components/chop"
 import { RangeChips } from "@/components/charts/chart-kit"
 import { PageHeader } from "@/components/section"
@@ -14,34 +17,9 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatMoney } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { usePrefs, type PrefsState } from "@/stores/prefs"
+import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
 
-type PrefPatch = Partial<Pick<PrefsState, "colorConvention" | "theme" | "quantityUnit" | "privacyDefault" | "costMethod" | "benchmark" | "compactNumbers">>
-
-/** 本機立即生效，再同步到伺服器；失敗時還原並通知 */
-function usePrefSetter() {
-  const set = usePrefs((s) => s.set)
-  const mutation = useUpdatePreferences()
-  return (patch: PrefPatch) => {
-    const before = Object.fromEntries(Object.keys(patch).map((k) => [k, usePrefs.getState()[k as keyof PrefPatch]])) as PrefPatch
-    set(patch)
-    const server: Partial<Preferences> = {}
-    if (patch.colorConvention) server.color_convention = patch.colorConvention
-    if (patch.theme) server.theme = patch.theme
-    if (patch.quantityUnit) server.quantity_unit = patch.quantityUnit
-    if (patch.privacyDefault !== undefined) server.privacy_mode = patch.privacyDefault
-    if (patch.costMethod) server.cost_method = patch.costMethod
-    if (patch.benchmark) server.benchmark = patch.benchmark
-    if (Object.keys(server).length === 0) return
-    mutation.mutate(server, {
-      onError: () => {
-        set(before)
-        toast.error("設定沒有存到伺服器，已還原", { description: "請檢查網路後再試一次。" })
-      },
-    })
-  }
-}
 
 export function SettingsPage() {
   const p = usePrefs()
@@ -117,17 +95,11 @@ export function SettingsPage() {
             ]}
           />
         </Row>
-        <Row label="績效比較基準" description="發行量加權股價報酬指數需要後端提供資料（待確認）。">
-          <RangeChips
-            label="績效比較基準"
-            value={p.benchmark}
-            onChange={(v) => setPref({ benchmark: v })}
-            options={[
-              { value: "0050.TW", label: "元大台灣50" },
-              { value: "006208.TW", label: "富邦台50" },
-              { value: "VOO", label: "S&P 500（VOO）" },
-            ]}
-          />
+        <Row
+          label="績效比較基準"
+          description={BENCHMARK_OPTIONS.find((o) => o.value === p.benchmark)?.description ?? "報酬含息，可直接和你的時間加權報酬比較。"}
+        >
+          <BenchmarkSelect value={p.benchmark} onChange={(v) => setPref({ benchmark: v })} />
         </Row>
       </Group>
 
@@ -261,25 +233,24 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
   const save = () => {
     setTouched(true)
     if (nameBad || discountBad) return
-    const patch = {
+    const editable = {
       name: name.trim(),
       broker: broker.trim(),
-      currency,
-      tracking_mode: mode,
-      fee_rate: currency === "USD" ? 0.001 : 0.001425,
       fee_discount: d / 10,
       min_fee: Number(minFee) || 0,
       min_fee_odd_lot: Number(minOdd) || 0,
     }
     const done = {
       onSuccess: () => {
-        toast.success(isNew ? `已新增「${patch.name}」` : `已更新「${patch.name}」`)
+        toast.success(isNew ? `已新增「${editable.name}」` : `已更新「${editable.name}」`)
         onClose()
       },
-      onError: () => toast.error(isNew ? "新增失敗，請稍後再試" : "更新失敗，請稍後再試"),
+      onError: (err: Error) =>
+        toast.error(isNew ? "新增失敗，表單內容仍保留" : "更新失敗，表單內容仍保留", { description: err.message }),
     }
-    if (isNew) create.mutate(patch, done)
-    else update.mutate({ id: account.id, patch }, done)
+    // 編輯時不送幣別、追蹤方式與費率：已有交易的帳戶不能改幣別，也不要覆蓋自訂費率
+    if (isNew) create.mutate({ ...editable, currency, tracking_mode: mode, fee_rate: currency === "USD" ? 0.001 : 0.001425 }, done)
+    else update.mutate({ id: account.id, patch: editable }, done)
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>

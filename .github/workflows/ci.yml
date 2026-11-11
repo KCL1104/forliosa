@@ -20,3 +20,40 @@ jobs:
       - run: uv sync --frozen
       - run: uv run ruff check .
       - run: uv run pytest -q
+
+  web:
+    name: Web typecheck, lint, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # No `version`: pnpm/action-setup reads `packageManager` (pnpm@10.28.0) from the root package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @forliosa/web typecheck
+      - run: pnpm --filter @forliosa/web lint
+      - run: pnpm --filter @forliosa/web test
+      # Without VITE_API_BASE_URL this is the mock-data build; Cloudflare Pages sets the real API URL.
+      - run: pnpm --filter @forliosa/web build
+
+      # Impeccable design detector on apps/web/src. The launcher downloads its engine binary from the
+      # pbakaus/impeccable GitHub releases (checksum-verified) into ~/.impeccable/bin/<version>.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.impeccable/bin
+          key: impeccable-engine-${{ runner.os }}-${{ hashFiles('.claude/skills/impeccable/scripts/VERSION', '.claude/skills/impeccable/scripts/engine-checksums.txt') }}
+      - name: Impeccable detect (apps/web/src)
+        run: |
+          set +e
+          .claude/skills/impeccable/scripts/impeccable detect --github apps/web/src
+          code=$?
+          set -e
+          case "$code" in
+            0) echo "Impeccable: no findings" ;;
+            2) echo "::error title=Impeccable::design findings in apps/web/src (see the annotations above)"; exit 1 ;;
+            1) echo "::error title=Impeccable::the scan failed (exit 1): fix the scan, a skipped design gate is not a pass"; exit 1 ;;
+            *) echo "::error title=Impeccable::the launcher could not run the engine (exit $code), e.g. the engine download from GitHub releases failed"; exit 1 ;;
+          esac

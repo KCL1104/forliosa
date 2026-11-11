@@ -38,11 +38,27 @@
 - **clarify**：全站 zh-TW；錯誤訊息寫原因與做法；河流圖與績效指標都有白話說明。
 - **polish**：移除 shadcn nova 的玻璃模糊、統一 6／10px 圓角、按下回饋 scale 0.97、⌘K 不做動畫、蓋章動畫只在儲存成功時。
 
+## 與真實後端整合（2026-11-11 晚）
+
+- `pnpm dev:api`：Vite proxy `/api` → `localhost:8000`，同源 cookie；`AuthGate` 先確認 `GET /me`，開發模式自動開發登入，
+  其他情況顯示「請先登入」說明（正式登入 TODO）；使用中收到 401 會回到登入畫面。
+- 型別依後端 `CONTRACT_NOTES` 對齊（可為 null 的報價欄位、`Holding.is_demo`、`Valuation.notes`、`DividendRecord.is_demo`、
+  現金類交易的 `quantity/price = null`…），畫面一律顯示「—」。
+- 首頁與績效頁的 1D／5D 改用後端的 `range=1D`／`5D`，不再在前端裁切；基準可選 0050、加權報酬指數（`^TAIEXTR`）、
+  006208、VOO，設定頁與績效頁都能改，存到 `PATCH /me/preferences`。
+- 「示範資料」只標在真的是模擬的地方：持股頁逐檔標「示範報價」（美股），總覽／績效頁標「含示範資料」並列出是哪幾檔。
+- 修正：交易列刪除後確認框沒有關、且被下一筆沿用（可能誤刪下一筆）；⌘K 第二次搜尋按 Enter 沒反應；
+  表單關閉後「復原」沒有通知；估值頁的資料頻率與來源說明；美股股利單位。
+- mock 的手續費改為元以下捨去（與後端相同：1,070,000 × 0.1425% × 0.28 → 426），也支援 1D／5D 與基準選擇。
+- Playwright 對真實 API 走過所有頁面與互動，沒有 console 錯誤與失敗請求（除了登入前預期的 401）；
+  真實資料截圖在 `docs/screenshots/real/`（`pnpm screenshots:real`）。
+
 ## 尚未完成／下一步
 
 - 實機（iPhone／Android）檢查 safe area 與鍵盤＋抽屜。
 - 「只記持股」帳戶的批次快照輸入畫面（`PUT /accounts/{id}/holdings`）。
 - 刪除帳戶的 UI。
-- 接上真實後端後，用 `VITE_API_BASE_URL` 跑一次冒煙測試，並對照 OpenAPI 產生的型別。
+- 對照後端 OpenAPI 自動產生型別（目前 `src/api/types.ts` 手動維護，已與真實 API 對過）。
+- 正式登入畫面（Email、Google）。
 - M2：SSE 即時報價（NumberFlow 原地更新＋變動標示）、自選同步、籌碼／新聞分頁。
 - 待確認事項見 `OPEN_QUESTIONS.md`。

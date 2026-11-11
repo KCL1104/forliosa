@@ -247,8 +247,8 @@ class Transaction(BaseModel):
     symbol: str | None
     type: str
     trade_date: date
-    quantity: float
-    price: float
+    quantity: float | None
+    price: float | None
     amount: float
     fee: float
     tax: float

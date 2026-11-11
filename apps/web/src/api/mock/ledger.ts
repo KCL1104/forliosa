@@ -255,6 +255,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string): Holding[
       unrealized_pnl_pct: r4(mv / pos.costTwd - 1),
       weight: 0,
       account_ids: [...pos.accounts],
+      is_demo: true,
     })
   }
   const total = rows.reduce((s, h) => s + h.market_value, 0)
@@ -328,12 +329,28 @@ interface DailyRow extends PerformancePoint {
   outflow: number
 }
 
-function dailyRows(txns: Transaction[], accountId?: string): DailyRow[] {
+/**
+ * 示範用的基準：真實後端支援任何商品與 `^TAIEXTR`（加權報酬指數）；mock 沒有指數資料，
+ * 以 0050 的示範走勢代替（整份回應本來就是 is_demo）。
+ */
+const MOCK_BENCHMARKS: Record<string, { proxy: string; name: string }> = {
+  "0050.TW": { proxy: "0050.TW", name: "元大台灣50" },
+  "006208.TW": { proxy: "0050.TW", name: "富邦台50" },
+  "^TAIEXTR": { proxy: "0050.TW", name: "發行量加權股價報酬指數" },
+  VOO: { proxy: "VOO", name: "Vanguard S&P 500 ETF" },
+}
+
+export function mockBenchmark(symbol: string | undefined): { symbol: string; proxy: string; name: string } {
+  const key = symbol && MOCK_BENCHMARKS[symbol] ? symbol : "0050.TW"
+  return { symbol: key, ...MOCK_BENCHMARKS[key]! }
+}
+
+function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW"): DailyRow[] {
   const relevant = txns.filter((x) => !accountId || x.account_id === accountId)
   const first = relevant.find((x) => x.symbol)?.trade_date
   if (!first) return []
   const days = tradingDays(1800).filter((d) => d >= first)
-  const bench = findInstrument("0050.TW")!
+  const bench = findInstrument(mockBenchmark(benchmark).proxy)!
   const qty = new Map<string, number>()
   const rows: DailyRow[] = []
   let idx = 0
@@ -394,7 +411,8 @@ function dailyRows(txns: Transaction[], accountId?: string): DailyRow[] {
   return rows
 }
 
-function rangeStart(range: PerformanceRange): string {
+/** 1D／5D 以交易日計（見 rangeRows），這裡只處理日曆區間 */
+function rangeStart(range: Exclude<PerformanceRange, "1D" | "5D">): string {
   switch (range) {
     case "1M": return addDays(MOCK_TODAY, -31)
     case "3M": return addDays(MOCK_TODAY, -92)
@@ -428,11 +446,13 @@ function xirr(flows: { t: string; amount: number }[]): number | null {
   return Number.isFinite(rate) ? rate : null
 }
 
-export function buildPerformance(txns: Transaction[], range: PerformanceRange, accountId?: string): Performance {
-  const all = dailyRows(txns, accountId)
-  const start = rangeStart(range)
-  const rows = all.filter((x) => x.t >= start)
-  const benchSpec = findInstrument("0050.TW")!
+export function buildPerformance(txns: Transaction[], range: PerformanceRange, accountId?: string, benchmark?: string): Performance {
+  const bench = mockBenchmark(benchmark)
+  const all = dailyRows(txns, accountId, bench.symbol)
+  // 1D／5D：最後 N 個交易日的報酬，序列第一點是基準收盤（與後端相同）
+  const days = range === "1D" ? 1 : range === "5D" ? 5 : null
+  const rows = days !== null ? all.slice(-(days + 1)) : all.filter((x) => x.t >= rangeStart(range as Exclude<PerformanceRange, "1D" | "5D">))
+  const benchSpec = { symbol: bench.symbol, name: bench.name }
   if (rows.length < 2) {
     return {
       range, start_date: rows[0]?.t ?? MOCK_TODAY, end_date: MOCK_TODAY, twr: null, xirr: null, max_drawdown: null, volatility: null,
@@ -467,16 +487,18 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     { t: rows[rows.length - 1]!.t, amount: rows[rows.length - 1]!.market_value },
   ].filter((f) => f.amount !== 0)
   const startDate = rows[0]!.t
+  // 1D／5D 的第一點是基準日：當天的股利與已實現損益不算在區間內
+  const flowsFrom = days !== null ? rows[1]!.t : startDate
   const dividends = new Map<string, number>()
   const realized = new Map<number, number>()
   const state = replay(txns, MOCK_TODAY, accountId)
   for (const e of state.realizedEvents) {
-    if (e.t < startDate) continue
+    if (e.t < flowsFrom) continue
     const y = Number(e.t.slice(0, 4))
     realized.set(y, (realized.get(y) ?? 0) + e.amount)
   }
   for (const x of txns) {
-    if (x.type !== "cash_dividend" || x.trade_date < startDate) continue
+    if (x.type !== "cash_dividend" || x.trade_date < flowsFrom) continue
     if (accountId && x.account_id !== accountId) continue
     const m = x.trade_date.slice(0, 7)
     dividends.set(m, (dividends.get(m) ?? 0) + (x.amount - x.tax - x.health_insurance) * fxFor(x.currency, x.trade_date))
@@ -488,6 +510,7 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     end_date: MOCK_TODAY,
     twr: r4(last.twr_index - 1),
     xirr: (() => {
+      if (days !== null) return null // 一到五天的現金流年化沒有意義
       const v = xirr(flows)
       return v === null ? null : r4(v)
     })(),

@@ -59,7 +59,7 @@ def patch_preferences(body: PreferencesPatch, user: UserModel = Depends(current_
                       db: Session = Depends(get_db)):
     changes = body.model_dump(exclude_unset=True, exclude_none=True)
     if "benchmark" in changes:
-        sym = get_market_data().resolve(changes["benchmark"])
+        sym = get_market_data().resolve_benchmark(changes["benchmark"])
         if sym is None:
             raise ApiError(422, "unknown_symbol", f"找不到基準商品：{changes['benchmark']}")
         changes["benchmark"] = sym

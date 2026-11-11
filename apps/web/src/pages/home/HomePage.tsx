@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router"
 import { ArrowRightIcon, FileUpIcon, PencilLineIcon } from "lucide-react"
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 import { useHoldings, usePerformance, useSummary } from "@/api/queries"
 import type { Holding, PerformanceRange, PortfolioSummary } from "@/api/types"
 import { useUi } from "@/app/ui-store"
-import { DemoChop, SoonChop } from "@/components/chop"
+import { PortfolioDemoChop, SoonChop } from "@/components/chop"
 import { Legend, RangeChips } from "@/components/charts/chart-kit"
 import { ReturnChart } from "@/components/charts/ReturnChart"
 import { FlowMoney, FlowPct, Money, Pct } from "@/components/finance"
@@ -15,6 +15,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, formatDateShort, formatDateTime, formatDaysUntil, formatPercent, toneClass } from "@/lib/format"
 import { foldSlices } from "@/lib/allocation"
+import { benchmarkLabel } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 
@@ -76,7 +77,7 @@ function Hero({ summary, holdings }: { summary?: PortfolioSummary; holdings?: Ho
           <h2 id="hero-title" className="text-md font-medium text-muted-foreground">
             總資產
           </h2>
-          <DemoChop show={summary.is_demo} />
+          <PortfolioDemoChop isDemo={summary.is_demo} holdings={holdings} />
           <span className="text-sm text-muted-foreground">{formatDateTime(summary.as_of)} 收盤</span>
         </div>
         <FlowMoney value={summary.market_value} className="hero-figure text-hero-sm font-semibold tracking-[-0.02em] sm:text-hero" />
@@ -143,7 +144,7 @@ function Hero({ summary, holdings }: { summary?: PortfolioSummary; holdings?: Ho
 }
 
 // ── 報酬走勢 ──────────────────────────────────────────────
-type HomeRange = "1D" | "5D" | "1M" | "6M" | "YTD" | "1Y" | "ALL"
+type HomeRange = Exclude<PerformanceRange, "3M">
 const HOME_RANGES: { value: HomeRange; label: string }[] = [
   { value: "1D", label: "1D" },
   { value: "5D", label: "5D" },
@@ -153,24 +154,16 @@ const HOME_RANGES: { value: HomeRange; label: string }[] = [
   { value: "1Y", label: "1Y" },
   { value: "ALL", label: "全部" },
 ]
-/** API 沒有 1D／5D：以 1M 資料裁切（見 OPEN_QUESTIONS） */
-const API_RANGE: Record<HomeRange, PerformanceRange> = { "1D": "1M", "5D": "1M", "1M": "1M", "6M": "6M", YTD: "YTD", "1Y": "1Y", ALL: "ALL" }
-
 function PerformancePanel({ className }: { className?: string }) {
   const [range, setRange] = useState<HomeRange>("1Y")
   const [showBench, setShowBench] = useState(true)
-  const perf = usePerformance(API_RANGE[range])
-  const series = useMemo(() => {
-    const s = perf.data?.series ?? []
-    if (range === "1D") return s.slice(-2)
-    if (range === "5D") return s.slice(-6)
-    return s
-  }, [perf.data, range])
-  const first = series[0]
-  const last = series.at(-1)
-  const mine = first && last ? last.twr_index / first.twr_index - 1 : null
-  const bench = first?.benchmark_index && last?.benchmark_index ? last.benchmark_index / first.benchmark_index - 1 : null
-  const benchName = perf.data?.benchmark?.name ?? "元大台灣50"
+  const benchmark = usePrefs((s) => s.benchmark)
+  // 1D／5D 由後端以交易日計算（第一點是基準收盤），不在前端裁切
+  const perf = usePerformance(range, undefined, benchmark)
+  const series = perf.data?.series ?? []
+  const mine = perf.data?.twr ?? null
+  const bench = perf.data?.benchmark?.twr ?? null
+  const benchName = perf.data?.benchmark?.name ?? benchmarkLabel(benchmark)
 
   return (
     <Panel
@@ -219,7 +212,7 @@ function PerformancePanel({ className }: { className?: string }) {
         )}
       </div>
       {range === "1D" && (
-        <p className="mt-2 text-sm text-muted-foreground">盤中走勢要等即時行情（M2）上線；現在先顯示昨收到今收。</p>
+        <p className="mt-2 text-sm text-muted-foreground">前一個交易日收盤到最新價；盤中走勢圖要等即時行情（M2）上線。</p>
       )}
     </Panel>
   )
@@ -340,7 +333,9 @@ function DividendsPanel({ summary }: { summary?: PortfolioSummary }) {
                 </span>
                 <span className="min-w-0">
                   <span className="block truncate text-md">{d.name}</span>
-                  <span className="num block text-sm text-muted-foreground">每股 {d.cash_dividend} 元</span>
+                  <span className="num block text-sm text-muted-foreground">
+                    每股 {/\.TWO?$/.test(d.symbol) ? `${d.cash_dividend} 元` : `US$${d.cash_dividend}`}
+                  </span>
                 </span>
                 <span className="text-right">
                   <span className="block text-xs text-muted-foreground">預估入帳</span>

@@ -1,8 +1,9 @@
 import { render, screen } from "@testing-library/react"
 import { act } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
-import { Chop } from "@/components/chop"
-import { Money, Pct, Quantity } from "@/components/finance"
+import type { Holding } from "@/api/types"
+import { Chop, PortfolioDemoChop } from "@/components/chop"
+import { FlowPct, Money, Pct, Price, PriceChange, Quantity } from "@/components/finance"
 import { MASK, MINUS } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 
@@ -60,5 +61,26 @@ describe("<Chop>", () => {
     const el = screen.getByText("已入帳")
     expect(el).toHaveClass("chop")
     expect(el).toHaveClass("chop-press")
+  })
+})
+
+describe("可為 null 的欄位（CONTRACT_NOTES）", () => {
+  it("沒有昨收時漲跌顯示「—」，不顯示 NaN", () => {
+    const { container } = render(<PriceChange change={null} pct={null} market="TWSE" />)
+    expect(container.textContent).toBe("—")
+    expect(render(<Price value={null} market="TWSE" />).container.textContent).toBe("—")
+    expect(render(<FlowPct value={null} />).container.textContent).toBe("—")
+  })
+})
+
+describe("<PortfolioDemoChop>", () => {
+  const h = (code: string, market: Holding["market"], is_demo: boolean) => ({ code, market, is_demo }) as Holding
+  it("只有美股是模擬報價時標「含示範資料」並列出代號", () => {
+    render(<PortfolioDemoChop isDemo holdings={[h("2330", "TWSE", false), h("AAPL", "US", true)]} />)
+    expect(screen.getByRole("button", { name: "含示範資料" })).toBeInTheDocument()
+  })
+  it("全部真實時不顯示", () => {
+    const { container } = render(<PortfolioDemoChop isDemo={false} holdings={[h("2330", "TWSE", false)]} />)
+    expect(container).toBeEmptyDOMElement()
   })
 })

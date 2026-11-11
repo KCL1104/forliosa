@@ -17,11 +17,11 @@ import {
   formatCompact,
   formatDate,
   formatMoney,
-  formatNumber,
   formatPercent,
   formatPrice,
   formatQuantity,
   formatRevenueThousands,
+  formatVolume,
   MASK,
 } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
@@ -39,7 +39,7 @@ export function OverviewTab({ instrument, quote }: { instrument: InstrumentDetai
         ["最高", <Price value={quote.high} market={m} />],
         ["最低", <Price value={quote.low} market={m} />],
         ["昨收", <Price value={quote.prev_close} market={m} />],
-        ["成交量", <span className="num">{m === "US" ? `${formatCompact(quote.volume)} 股` : `${formatNumber(Math.round(quote.volume / 1000))} 張`}</span>],
+        ["成交量", <span className="num">{formatVolume(quote.volume, m, { compact: true })}</span>],
         ["市值", instrument.market_cap ? <span className="num">{m === "US" ? "US$" : "NT$"}{formatCompact(instrument.market_cap)}</span> : "—"],
         ["本益比", cur?.per != null ? <span className="num">{cur.per.toFixed(1)} 倍</span> : "—"],
         ["股價淨值比", cur?.pbr != null ? <span className="num">{cur.pbr.toFixed(2)} 倍</span> : "—"],
@@ -64,7 +64,7 @@ export function OverviewTab({ instrument, quote }: { instrument: InstrumentDetai
       </Panel>
       <Panel title="公司小卡" titleId="company-title">
         <div className="flex flex-col gap-4">
-          <p className="max-w-prose text-md">{instrument.summary ?? "目前沒有這家公司的簡介。"}</p>
+          <p className="max-w-prose text-md">{instrument.summary?.trim() || (instrument.type === "etf" ? "ETF 是一籃子股票，沒有公司簡介；可到「股利」分頁看配息紀錄。" : "目前沒有這家公司的簡介。")}</p>
           <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-md">
             <dt className="text-muted-foreground">市場</dt>
             <dd>{MARKET_LABEL[instrument.market]}{instrument.type === "etf" ? "・ETF" : ""}</dd>
@@ -91,7 +91,7 @@ export function OverviewTab({ instrument, quote }: { instrument: InstrumentDetai
               </>
             )}
           </dl>
-          <p className="text-xs text-muted-foreground">資料來源：{instrument.data_sources.join("；")}</p>
+          {instrument.data_sources.length > 0 && <p className="text-xs text-muted-foreground">資料來源：{instrument.data_sources.join("；")}</p>}
         </div>
       </Panel>
     </div>
@@ -227,13 +227,19 @@ export function DividendsTab({ instrument, quote, today }: { instrument: Instrum
   for (const d of list) byYear.set(d.year, (byYear.get(d.year) ?? 0) + d.cash_dividend)
   const years = [...byYear.entries()].sort((a, b) => a[0] - b[0]).map(([year, cash]) => ({ year: String(year), cash }))
   const unit = instrument.market === "US" ? "美元" : "元"
+  const isDemo = list.some((d) => d.is_demo)
   return (
     <div className="flex flex-col gap-4">
+      {isDemo && (
+        <p className="flex items-center gap-2 text-sm text-muted-foreground">
+          <DemoChop /> 這檔的配息紀錄是模擬資料。
+        </p>
+      )}
       {upcoming.length > 0 && (
         <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-xl border border-primary/30 bg-accent px-4 py-3">
           <Chop>即將除息</Chop>
           {upcoming.map((d) => (
-            <span key={d.period} className="text-md">
+            <span key={`${d.period}-${d.ex_dividend_date}`} className="text-md">
               <span className="num font-medium">{formatDate(d.ex_dividend_date!)}</span> 除息，每股 <span className="num font-medium">{d.cash_dividend}</span> {unit}
               {quote && <span className="text-muted-foreground">（以現價計殖利率 {formatPercent(d.cash_dividend / quote.price, { signed: false })}）</span>}
             </span>
@@ -275,7 +281,7 @@ export function DividendsTab({ instrument, quote, today }: { instrument: Instrum
               </thead>
               <tbody>
                 {list.map((d) => (
-                  <tr key={d.period} className="border-b border-hairline last:border-0">
+                  <tr key={`${d.period}-${d.ex_dividend_date}`} className="border-b border-hairline last:border-0">
                     <th scope="row" className="num px-4 py-2 text-left font-normal sm:px-5">{d.period}</th>
                     <td className="num px-3 text-right">{d.cash_dividend.toFixed(d.cash_dividend < 1 ? 3 : 2)}</td>
                     <td className="num px-3 text-right text-muted-foreground">{d.stock_dividend ? d.stock_dividend.toFixed(2) : "—"}</td>

@@ -1,7 +1,7 @@
 import type { InstrumentDetail } from "../types"
 
 /** 示範資料用的商品主檔。數字為示意，不代表真實行情。 */
-export interface MockInstrumentSpec extends InstrumentDetail {
+export interface MockInstrumentSpec extends Omit<InstrumentDetail, "is_demo"> {
   /** 示範報價：現價與昨收 */
   price: number
   prev_close: number

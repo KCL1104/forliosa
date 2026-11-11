@@ -11,8 +11,9 @@ interface Row {
 }
 
 /**
- * 報酬走勢：我的（TWR 指數）與基準，兩者都換算成「相對起點的 %」放在同一個軸上
- * （dataviz：不用雙軸；以共同基期指數化）。
+ * 報酬走勢：我的（TWR 指數）與基準，兩者都換算成「區間累積報酬 %」放在同一個軸上
+ * （dataviz：不用雙軸；以共同基期指數化）。API 的指數以區間起點前的收盤為 1.0，
+ * 所以 `twr_index − 1` 就是到那一天為止的區間報酬，最後一點等於 `Performance.twr`。
  */
 export function ReturnChart({
   series,
@@ -25,11 +26,10 @@ export function ReturnChart({
   benchmarkName: string
   height?: number
 }) {
-  const base = series[0]
   const rows: Row[] = series.map((p) => ({
     t: p.t,
-    mine: base ? p.twr_index / base.twr_index - 1 : 0,
-    bench: p.benchmark_index !== null && base?.benchmark_index ? p.benchmark_index / base.benchmark_index - 1 : null,
+    mine: p.twr_index - 1,
+    bench: p.benchmark_index !== null ? p.benchmark_index - 1 : null,
   }))
   const spanDays = rows.length
   const tickFmt = (t: string) => (spanDays > 260 ? t.slice(0, 7).replace("-", "/") : formatDateShort(t, false))

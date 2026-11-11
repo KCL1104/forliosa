@@ -1,5 +1,9 @@
 import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { api } from "./index"
+import { api, DEV_LOGIN } from "./index"
+import {
+  ApiError,
+  type User,
+} from "./types"
 import type {
   AccountInput,
   HistoryRange,
@@ -26,7 +30,29 @@ export const qk = {
   transactions: (query: TransactionQuery) => ["transactions", query] as const,
 }
 
-export const meQuery = () => queryOptions({ queryKey: qk.me, queryFn: () => api.getMe(), staleTime: 5 * 60_000 })
+let devAutoLoginTried = false
+
+/**
+ * `GET /me`；開發模式連真實後端時，第一次 401 會自動開發登入（每次載入頁面最多一次，避免迴圈）。
+ * 開發登入失敗（例如後端不是 dev）時保留原本的 401，由 AuthGate 顯示登入說明。
+ */
+async function fetchMe(): Promise<User> {
+  try {
+    return await api.getMe()
+  } catch (err) {
+    if (DEV_LOGIN.auto && !devAutoLoginTried && err instanceof ApiError && err.status === 401) {
+      devAutoLoginTried = true
+      try {
+        return await api.devLogin({ email: DEV_LOGIN.email })
+      } catch {
+        throw err
+      }
+    }
+    throw err
+  }
+}
+
+export const meQuery = () => queryOptions({ queryKey: qk.me, queryFn: fetchMe, staleTime: 5 * 60_000 })
 export const accountsQuery = () => queryOptions({ queryKey: qk.accounts, queryFn: () => api.listAccounts(), staleTime: 5 * 60_000 })
 export const summaryQuery = (accountId?: string) =>
   queryOptions({ queryKey: qk.summary(accountId), queryFn: () => api.getPortfolioSummary(accountId), staleTime: 30_000 })

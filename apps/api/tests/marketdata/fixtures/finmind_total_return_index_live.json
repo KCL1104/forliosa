@@ -1,0 +1,36 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "price": 99315.03,
+   "stock_id": "TAIEX",
+   "date": "2026-11-04"
+  },
+  {
+   "price": 96137.37,
+   "stock_id": "TAIEX",
+   "date": "2026-11-05"
+  },
+  {
+   "price": 91806.06,
+   "stock_id": "TAIEX",
+   "date": "2026-11-06"
+  },
+  {
+   "price": 96338.5,
+   "stock_id": "TAIEX",
+   "date": "2026-11-09"
+  },
+  {
+   "price": 98767.01,
+   "stock_id": "TAIEX",
+   "date": "2026-11-10"
+  },
+  {
+   "price": 102340.2,
+   "stock_id": "TAIEX",
+   "date": "2026-11-11"
+  }
+ ]
+}

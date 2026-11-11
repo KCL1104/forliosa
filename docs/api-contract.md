@@ -41,7 +41,7 @@
     "quantity_unit": "lot",         // "lot" 以張顯示（X 張＋Y 股）| "share" 以股顯示
     "privacy_mode": false,          // true 時前端遮蔽金額與股數
     "cost_method": "average",       // "average" 移動平均 | "fifo"
-    "benchmark": "0050.TW"
+    "benchmark": "0050.TW"          // 任何商品代號，或 "^TAIEXTR"（發行量加權股價報酬指數）
   }
 }
 ```
@@ -172,8 +172,8 @@
   // "buy" | "sell" | "cash_dividend" | "stock_dividend" | "split" | "capital_reduction"
   // | "deposit" | "withdrawal" | "fee" | "tax" | "interest"
   "trade_date": "2026-11-10",
-  "quantity": 1000,               // 股數；split 為「每 1 股變成幾股」；capital_reduction 為「每 1 股減少幾股」
-  "price": 1070.0,                // buy/sell 成交價；stock_dividend 為每股配股「元」；cash_dividend 為每股現金股利
+  "quantity": 1000,               // 股數；split 為「每 1 股變成幾股」；capital_reduction 為「每 1 股減少幾股」；現金類為 null
+  "price": 1070.0,                // buy/sell 成交價；stock_dividend 為每股配股「元」；cash_dividend 為每股現金股利；現金類與 split 為 null
   "amount": 1070000,              // 成交金額或現金金額（交易幣別）
   "fee": 426,                     // 1,070,000 × 0.1425% × 0.28 = 426.93，無條件捨去
   "tax": 0,
@@ -195,7 +195,7 @@
 |---|---|---|
 | GET | `/portfolio/summary?account_id=` | `PortfolioSummary`（不帶 `account_id` 為全部帳戶） |
 | GET | `/portfolio/holdings?account_id=` | `Holding[]` |
-| GET | `/portfolio/performance?range=1Y&benchmark=0050.TW&account_id=` | `Performance`；`range`：`1M`、`3M`、`6M`、`YTD`、`1Y`、`ALL` |
+| GET | `/portfolio/performance?range=1Y&benchmark=0050.TW&account_id=` | `Performance`；`range`：`1D`、`5D`、`1M`、`3M`、`6M`、`YTD`、`1Y`、`ALL`（`1D`／`5D` 以交易日計，第一點是基準收盤）；`benchmark` 省略時用使用者偏好，可為任何商品或 `^TAIEXTR` |
 
 ```json
 // PortfolioSummary

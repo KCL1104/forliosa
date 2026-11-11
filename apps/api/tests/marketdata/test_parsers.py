@@ -14,6 +14,7 @@ from forliosa.marketdata.finmind import (
     extract_rows,
     parse_dividends,
     parse_exchange_rate,
+    parse_index,
     parse_month_revenue,
     parse_per,
     parse_price,
@@ -233,3 +234,12 @@ def test_previous_session_close_becomes_prev_close():
                           source="finmind")
     merged = _merge_quotes(today, yesterday)
     assert merged.prev_close == D("2285") and not merged.is_demo
+
+
+def test_finmind_total_return_index_live():
+    """TaiwanStockTotalReturnIndex data_id=TAIEX (發行量加權股價報酬指數), used for the ^TAIEXTR benchmark."""
+    series = parse_index(extract_rows(load("finmind_total_return_index_live.json")))
+    assert series[0] == (date(2026, 11, 4), D("99315.03"))
+    assert series[-1] == (date(2026, 11, 11), D("102340.2"))
+    assert [d for d, _ in series] == sorted(d for d, _ in series)
+    assert parse_index([{"date": "2026-11-12", "price": 0}, {"date": "", "price": 1}]) == []

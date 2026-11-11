@@ -4,7 +4,7 @@ import { useMemo, useState } from "react"
 import { useAccounts, useHoldings } from "@/api/queries"
 import type { Holding, Market } from "@/api/types"
 import { useUi } from "@/app/ui-store"
-import { DemoChop } from "@/components/chop"
+import { PortfolioDemoChop } from "@/components/chop"
 import { RangeChips } from "@/components/charts/chart-kit"
 import { Money, Pct, Price, Quantity } from "@/components/finance"
 import { PageHeader } from "@/components/section"
@@ -39,7 +39,9 @@ export function HoldingsPage() {
   const rows = useMemo(() => {
     const list = (holdings.data ?? []).filter((h) => market === "ALL" || h.market === market)
     const dir = sort.dir === "asc" ? 1 : -1
-    return [...list].sort((a, b) => (sort.key === "name" ? a.code.localeCompare(b.code) * dir : (a[sort.key] - b[sort.key]) * dir))
+    // 沒有值（例如沒有昨收時的今日漲跌）一律排在最後
+    const val = (h: Holding, k: Exclude<SortKey, "name">) => h[k] ?? (dir === 1 ? Infinity : -Infinity)
+    return [...list].sort((a, b) => (sort.key === "name" ? a.code.localeCompare(b.code) * dir : (val(a, sort.key) - val(b, sort.key)) * dir))
   }, [holdings.data, market, sort])
 
   const totals = useMemo(() => {
@@ -56,7 +58,7 @@ export function HoldingsPage() {
     <div>
       <PageHeader
         title="持股"
-        meta={api.kind === "mock" && <DemoChop />}
+        meta={<PortfolioDemoChop isDemo={api.kind === "mock" || (holdings.data ?? []).some((h) => h.is_demo)} holdings={holdings.data} />}
         description="所有券商帳戶合併計算，均價含買進手續費（移動平均）。"
         actions={
           <Button onClick={() => openTradeForm()} variant="outline">
@@ -189,6 +191,7 @@ function HoldingsTable({
                   <span className="num block text-sm text-muted-foreground">
                     {h.code}・{MARKET_LABEL[h.market]}
                     {h.type === "etf" ? "・ETF" : ""}
+                    {h.is_demo && api.kind === "http" && <span className="ml-1.5 text-xs" title="這一檔的報價是模擬資料">（示範報價）</span>}
                   </span>
                 </Link>
               </th>
@@ -234,6 +237,7 @@ function HoldingCards({ rows }: { rows: Holding[] }) {
               <div className="flex items-baseline gap-2">
                 <span className="truncate font-medium" title={h.name}>{h.name}</span>
                 <span className="num shrink-0 text-sm text-muted-foreground">{h.code}</span>
+                {h.is_demo && api.kind === "http" && <span className="shrink-0 text-xs text-muted-foreground">示範報價</span>}
               </div>
               <div className="mt-0.5 flex flex-wrap items-baseline gap-x-2 text-sm text-muted-foreground">
                 <Quantity shares={h.quantity} market={h.market} />

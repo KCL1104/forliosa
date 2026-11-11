@@ -31,10 +31,17 @@ from forliosa.timeutil import iso_taipei
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
 
+# Fields a transaction type does not use are null in responses (stored as 0), per CONTRACT_NOTES.
+CASH_TYPES = frozenset({"deposit", "withdrawal", "fee", "tax", "interest"})
+
+
 def txn_out(t: TxnModel) -> dict:
+    no_qty = t.type in CASH_TYPES
+    no_price = no_qty or t.type == "split" or (t.type == "capital_reduction" and not t.price)
     return {
         "id": t.id, "account_id": t.account_id, "symbol": t.symbol, "type": t.type, "trade_date": t.trade_date,
-        "quantity": ser.qty(t.quantity), "price": ser.price(t.price), "amount": ser.money(t.amount),
+        "quantity": None if no_qty else ser.qty(t.quantity), "price": None if no_price else ser.price(t.price),
+        "amount": ser.money(t.amount),
         "fee": ser.money(t.fee), "tax": ser.money(t.tax), "health_insurance": ser.money(t.health_insurance),
         "currency": t.currency, "is_day_trade": t.is_day_trade, "note": t.note, "source": t.source,
         "created_at": iso_taipei(t.created_at),

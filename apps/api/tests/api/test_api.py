@@ -382,3 +382,70 @@ def test_nice_multiples():
     assert nice_multiples(vals) == [12, 18, 24, 30, 36]
     assert nice_multiples([4.5, 6.0, 9.6] * 10) == [4.5, 6.0, 7.5, 9.0, 10.5]
     assert nice_multiples([1.0]) == []
+
+
+# -- integration additions (1D/5D, total-return index benchmark, null fields) ---------------------
+def test_performance_short_ranges(client, seeded):
+    full = client.get(f"{API}/portfolio/performance", params={"range": "ALL"}).json()["series"]
+    one = client.get(f"{API}/portfolio/performance", params={"range": "1D"}).json()
+    # 1D = previous close -> latest close: two points, the first one is the base (index 1.0)
+    assert [p["t"] for p in one["series"]] == [p["t"] for p in full[-2:]]
+    assert one["series"][0]["twr_index"] == 1.0 and one["series"][0]["benchmark_index"] == 1.0
+    assert one["start_date"] == full[-2]["t"] and one["end_date"] == full[-1]["t"]
+    assert one["twr"] == pytest.approx(full[-1]["twr_index"] / full[-2]["twr_index"] - 1, abs=1e-5)
+    assert one["xirr"] is None  # annualizing one day is meaningless
+    five = client.get(f"{API}/portfolio/performance", params={"range": "5D"}).json()
+    # 5D = the last 5 trading days: base close + 5 points
+    assert [p["t"] for p in five["series"]] == [p["t"] for p in full[-6:]]
+    assert five["series"][0]["twr_index"] == 1.0
+    assert five["twr"] == pytest.approx(full[-1]["twr_index"] / full[-6]["twr_index"] - 1, abs=1e-5)
+    assert five["benchmark"]["twr"] == pytest.approx(
+        full[-1]["benchmark_index"] / full[-6]["benchmark_index"] - 1, abs=1e-5)
+    assert five["xirr"] is None and five["max_drawdown"] <= 0
+
+
+def test_total_return_index_benchmark(client, seeded, market):
+    from decimal import Decimal
+
+    from forliosa.marketdata.base import BaseProvider
+    from forliosa.marketdata.demo import DemoProvider
+    from forliosa.marketdata.service import MarketData, set_market_data
+    from forliosa.timeutil import is_tw_trading_day
+
+    class FakeIndexProvider(BaseProvider):
+        name = "fake-index"
+
+        def index_history(self, index_id, start, end):
+            assert index_id == "TAIEX"
+            return [(d, Decimal(20000) * Decimal("1.001") ** i) for i, d in enumerate(tw_trading_days(start, end))]
+
+    # No index data (offline demo provider): the benchmark has a name but no line.
+    r = client.patch(f"{API}/me/preferences", json={"benchmark": "taiextr"})
+    assert r.status_code == 200 and r.json()["preferences"]["benchmark"] == "^TAIEXTR"
+    p = client.get(f"{API}/portfolio/performance", params={"range": "1M"}).json()
+    assert p["benchmark"] == {"symbol": "^TAIEXTR", "name": "發行量加權股價報酬指數", "twr": None}
+    assert all(pt["benchmark_index"] is None for pt in p["series"])
+
+    set_market_data(MarketData([FakeIndexProvider(), DemoProvider()]))
+    try:
+        p = client.get(f"{API}/portfolio/performance", params={"range": "5D", "benchmark": "^TAIEXTR"}).json()
+        tw_days = sum(1 for pt in p["series"][1:] if is_tw_trading_day(date.fromisoformat(pt["t"])))
+        # A total-return index already includes dividends: its daily change is the benchmark return.
+        assert p["benchmark"]["twr"] == pytest.approx(1.001 ** tw_days - 1, abs=1e-6)
+        assert p["series"][0]["benchmark_index"] == 1.0 and p["is_demo"] is True  # holdings are demo
+    finally:
+        set_market_data(market)
+
+
+def test_cash_and_split_transactions_have_null_quantity_and_price(client):
+    acc = make_account(client)
+    dep = add_txn(client, account_id=acc["id"], type="deposit", trade_date=trading_day(30).isoformat(), amount=500000)
+    assert dep["symbol"] is None and dep["quantity"] is None and dep["price"] is None
+    add_txn(client, account_id=acc["id"], symbol="0050", type="buy", trade_date=trading_day(30).isoformat(),
+            quantity=1000, price=100)
+    split = add_txn(client, account_id=acc["id"], symbol="0050", type="split", trade_date=trading_day(10).isoformat(),
+                    quantity=4)
+    assert split["quantity"] == 4 and split["price"] is None
+    page = client.get(f"{API}/transactions", params={"type": "deposit"}).json()
+    assert page["items"][0]["quantity"] is None
+    assert client.get(f"{API}/instruments/0050.TW/revenue").json() == []  # ETFs have no monthly revenue

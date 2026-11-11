@@ -169,8 +169,16 @@ export function formatDateShort(d: string, withWeekday = true): string {
   return `${m}/${day}${withWeekday ? `（${WEEKDAYS[w]}）` : ""}`
 }
 
-/** ISO 時間戳 → 台北時間「11/11 13:30」 */
-export function formatDateTime(iso: string): string {
+/** 成交量：台股以張（1 張 = 1,000 股）、美股以股；資料源沒有時為「—」 */
+export function formatVolume(shares: number | null | undefined, market: Market, opts: { compact?: boolean } = {}): string {
+  if (shares === null || shares === undefined) return "—"
+  if (market === "US") return `${opts.compact ? formatCompact(shares) : formatNumber(shares)} 股`
+  return `${formatNumber(Math.round(shares / 1000))} 張`
+}
+
+/** ISO 時間戳 → 台北時間「11/11 13:30」；沒有時間（資料源未提供）時為「—」 */
+export function formatDateTime(iso: string | null | undefined): string {
+  if (!iso) return "—"
   const f = new Intl.DateTimeFormat("zh-TW", {
     timeZone: TZ,
     month: "numeric",

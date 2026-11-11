@@ -37,6 +37,7 @@ from forliosa.marketdata.base import (
 from forliosa.marketdata.catalog import KNOWN_SPLITS
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.http import HttpFetcher
+from forliosa.marketdata.indices import INDICES, resolve_index
 from forliosa.timeutil import last_tw_trading_day, market_close_dt
 
 log = logging.getLogger(__name__)
@@ -92,8 +93,14 @@ class MarketData:
 
     def status(self) -> list[dict[str, Any]]:
         now = time.monotonic()
-        return [{"name": p.name, "is_demo": p.is_demo, "available": self._down_until.get(p.name, 0) <= now}
-                for p in self.providers]
+        out = []
+        for p in self.providers:
+            available = self._down_until.get(p.name, 0) <= now
+            backing_off = getattr(p, "backing_off", None)
+            if callable(backing_off) and backing_off():
+                available = False  # answers from its disk cache only
+            out.append({"name": p.name, "is_demo": p.is_demo, "available": available})
+        return out
 
     def _real_anchor(self, symbol: str) -> tuple[date, Decimal] | None:
         """Latest real close for the demo provider to anchor its synthetic path."""
@@ -137,6 +144,16 @@ class MarketData:
         if syms:
             return sorted(syms)[0]
         return None
+
+    def resolve_benchmark(self, text: str) -> str | None:
+        """A benchmark is an index (``^TAIEXTR``) or any known instrument (``0050`` -> ``0050.TW``)."""
+        return resolve_index(text) or self.resolve(text)
+
+    def benchmark_name(self, symbol: str) -> str:
+        if symbol in INDICES:
+            return INDICES[symbol].name
+        info = self.instrument(symbol)
+        return info.name if info else symbol
 
     def instrument(self, symbol: str) -> InstrumentInfo | None:
         sym = self.resolve(symbol)
@@ -246,6 +263,23 @@ class MarketData:
             return candles
         assert q.price is not None and q.open is not None and q.high is not None and q.low is not None
         return [*candles, Candle(q.trade_date, q.open, q.high, q.low, q.price, q.volume)]
+
+    def index_history(self, symbol: str, start: date, end: date) -> HistoryResult:
+        """Daily levels of a benchmark index (``^TAIEXTR``) as close-only candles; empty when unavailable.
+
+        There is no synthetic fallback: an index without real data yields no benchmark line.
+        """
+        idx = INDICES.get(symbol)
+        if idx is None:
+            return HistoryResult(symbol, [], False, "")
+        for p in self._available():
+            fn = getattr(p, "index_history", None)
+            if fn is None or p.is_demo:
+                continue
+            value = self._call(p, lambda fn=fn: fn(idx.data_id, start, end))
+            if value:
+                return HistoryResult(symbol, [Candle(d, v, v, v, v, 0) for d, v in value], False, p.name)
+        return HistoryResult(symbol, [], False, "")
 
     def valuation_ratios(self, symbol: str, start: date, end: date) -> dict[date, dict] | None:
         """Real daily PER / PBR / dividend yield when a provider publishes them (FinMind)."""

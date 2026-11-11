@@ -349,5 +349,6 @@ export function dividendRecords(spec: MockInstrumentSpec): DividendRecord[] {
     stock_dividend: stock,
     ex_dividend_date: ex,
     payment_date: pay,
+    is_demo: true,
   }))
 }

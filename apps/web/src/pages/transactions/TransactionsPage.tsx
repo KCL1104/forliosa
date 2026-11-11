@@ -159,6 +159,8 @@ export function TransactionsPage() {
           <GroupedVirtuoso
             useWindowScroll
             groupCounts={groupCounts}
+            // 以交易 id 當 key：刪除一筆後，列的狀態（例如開著的確認框）不會被下一筆沿用
+            computeItemKey={(index) => items[index]?.id ?? index}
             increaseViewportBy={400}
             endReached={() => list.hasNextPage && !list.isFetchingNextPage && void list.fetchNextPage()}
             groupContent={(gi) => (
@@ -295,12 +297,13 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
           <AlertDialogCancel>取消</AlertDialogCancel>
           <AlertDialogAction
             variant="destructive"
-            onClick={() =>
+            onClick={() => {
+              setConfirm(false)
               remove.mutate(t.id, {
                 onSuccess: () => toast.success("已刪除這筆交易"),
-                onError: () => toast.error("刪除失敗，請稍後再試"),
+                onError: (err) => toast.error("刪除失敗", { description: err.message }),
               })
-            }
+            }}
           >
             刪除
           </AlertDialogAction>

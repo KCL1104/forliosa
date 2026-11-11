@@ -204,11 +204,12 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
           description: <StampLine />,
           action: {
             label: "復原",
+            // 表單已關閉（元件卸載），mutate 的回呼不會執行：用 mutateAsync 的 Promise
             onClick: () =>
-              remove.mutate(txn.id, {
-                onSuccess: () => toast("已復原這筆交易"),
-                onError: () => toast.error("復原失敗，請到交易紀錄手動刪除"),
-              }),
+              void remove.mutateAsync(txn.id).then(
+                () => toast("已復原這筆交易"),
+                () => toast.error("復原失敗，請到交易紀錄手動刪除"),
+              ),
           },
         })
         onDone()
@@ -224,7 +225,14 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
       onSuccess: () => {
         toast("已刪除這筆交易", {
           description: "持股與績效已重新計算。",
-          action: { label: "復原", onClick: () => create.mutate(rest, { onSuccess: () => toast.success("已復原") }) },
+          action: {
+            label: "復原",
+            onClick: () =>
+              void create.mutateAsync(rest).then(
+                () => toast.success("已復原"),
+                (err: Error) => toast.error("復原失敗", { description: err.message }),
+              ),
+          },
         })
         onDone()
       },
@@ -462,6 +470,7 @@ function AccountSelect({ accounts, value, onChange }: { accounts: Account[]; val
 /** 代號搜尋（cmdk，支援中文股名） */
 function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; onChange: (i: Instrument | null) => void; invalid?: boolean }) {
   const [q, setQ] = useState("")
+  const [active, setActive] = useState("")
   const search = useInstrumentSearch(q)
   const listId = useId()
   if (value) {
@@ -476,8 +485,10 @@ function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; 
     )
   }
   const results = search.data ?? []
+  // 非同步結果：選取不在清單裡時改選第一項，打字後直接按 Enter 就能選
+  const selected = results.some((i) => i.symbol === active) ? active : (results[0]?.symbol ?? "")
   return (
-    <CommandPrimitive shouldFilter={false} label="搜尋股票" className="relative">
+    <CommandPrimitive shouldFilter={false} value={selected} onValueChange={setActive} label="搜尋股票" className="relative">
       <CommandPrimitive.Input
         value={q}
         onValueChange={setQ}

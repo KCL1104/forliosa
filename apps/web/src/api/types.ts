@@ -1,5 +1,6 @@
 /**
  * API 型別：與 docs/api-contract.md（v1 草稿）逐欄對應，欄位一律 snake_case。
+ * 可為 null 的欄位與後端新增的欄位依 apps/api/CONTRACT_NOTES.md（以真實後端驗證過）。
  * 後端改由 FastAPI 的 OpenAPI 產生型別後，這個檔案應改為自動產生的版本。
  */
 
@@ -26,7 +27,7 @@ export interface User {
 
 export interface DevLoginBody {
   email: string
-  display_name: string
+  display_name?: string
 }
 
 // ── 券商帳戶 ──────────────────────────────────────────────
@@ -74,19 +75,23 @@ export interface InstrumentDetail extends Instrument {
   shares_outstanding: number | null
   market_cap: number | null
   data_sources: string[]
+  /** 公司資料（簡介、題材）是否為示範資料 */
+  is_demo: boolean
 }
 
+/** 報價：資料源沒有的欄位為 null（CONTRACT_NOTES「可能為 null」） */
 export interface Quote {
   symbol: string
   price: number
-  prev_close: number
-  change: number
-  change_pct: number
-  open: number
-  high: number
-  low: number
-  volume: number
-  as_of: string
+  prev_close: number | null
+  change: number | null
+  change_pct: number | null
+  open: number | null
+  high: number | null
+  low: number | null
+  /** 股數（MIS 的「張」已乘 1,000） */
+  volume: number | null
+  as_of: string | null
   is_realtime: boolean
   is_demo: boolean
   source: string
@@ -131,6 +136,8 @@ export interface Valuation {
     dividend_yield: number | null
     per_percentile_5y: number | null
   }
+  /** 河流圖的說明與資料來源，例如「EPS ≤ 0，本益比區間留白」 */
+  notes: string[]
   is_demo: boolean
 }
 
@@ -140,7 +147,7 @@ export interface MonthlyRevenue {
   revenue: number
   yoy_pct: number | null
   mom_pct: number | null
-  ytd: number
+  ytd: number | null
   ytd_yoy_pct: number | null
 }
 
@@ -151,6 +158,8 @@ export interface DividendRecord {
   stock_dividend: number
   ex_dividend_date: string | null
   payment_date: string | null
+  /** 陣列回應沒有整體的 is_demo，逐筆標示 */
+  is_demo: boolean
 }
 
 // ── 交易 ──────────────────────────────────────────────────
@@ -247,18 +256,20 @@ export interface PortfolioSummary {
   market_value: number
   cost_basis: number
   unrealized_pnl: number
-  unrealized_pnl_pct: number
+  /** 分母（成本）為 0 時為 null */
+  unrealized_pnl_pct: number | null
   realized_pnl: number
   dividend_income: number
   total_pnl: number
-  total_return_pct: number
+  total_return_pct: number | null
   day_change: number
-  day_change_pct: number
+  day_change_pct: number | null
   allocation: {
     by_market: AllocationSlice[]
     by_industry: AllocationSlice[]
     by_currency: AllocationSlice[]
     by_type: AllocationSlice[]
+    by_account?: AllocationSlice[]
   }
   upcoming_dividends: UpcomingDividend[]
   is_demo: boolean
@@ -275,18 +286,22 @@ export interface Holding {
   quantity: number
   avg_cost: number
   cost_basis: number
-  price: number
-  prev_close: number
+  /** 沒有報價時為 null（以成本計值，並標示 is_demo） */
+  price: number | null
+  prev_close: number | null
   market_value: number
   day_change: number
-  day_change_pct: number
+  day_change_pct: number | null
   unrealized_pnl: number
-  unrealized_pnl_pct: number
+  unrealized_pnl_pct: number | null
   weight: number
   account_ids: string[]
+  /** 這一檔的報價是否含模擬資料 */
+  is_demo: boolean
 }
 
-export type PerformanceRange = "1M" | "3M" | "6M" | "YTD" | "1Y" | "ALL"
+/** 1D／5D 以交易日計，第一個點是基準收盤（twr_index = 1.0） */
+export type PerformanceRange = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "ALL"
 
 export interface PerformancePoint {
   t: string
@@ -298,8 +313,9 @@ export interface PerformancePoint {
 
 export interface Performance {
   range: PerformanceRange
-  start_date: string
-  end_date: string
+  /** 沒有交易時為 null */
+  start_date: string | null
+  end_date: string | null
   twr: number | null
   xirr: number | null
   max_drawdown: number | null

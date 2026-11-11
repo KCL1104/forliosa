@@ -120,7 +120,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
   return {
     kind: "mock",
-    devLogin: (body) => wait(() => (user = { ...user, email: body.email, display_name: body.display_name })),
+    devLogin: (body) =>
+      wait(() => (user = { ...user, email: body.email, display_name: body.display_name ?? body.email.split("@")[0]! })),
     logout: () => wait(undefined),
     getMe: () => wait(() => user),
     updatePreferences: (patch) => wait(() => (user = { ...user, preferences: { ...user.preferences, ...patch } })),
@@ -175,6 +176,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         return {
           ...strip(s), summary: s.summary, chain_stage: s.chain_stage, themes: s.themes,
           shares_outstanding: s.shares_outstanding, market_cap: s.market_cap, data_sources: s.data_sources,
+          is_demo: true,
         }
       }),
     getQuote: (symbol) => wait(() => quoteOf(spec(symbol))),
@@ -206,6 +208,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
                 ? null
                 : Math.round((pers.filter((p) => p <= currentPer).length / pers.length) * 100) / 100,
           },
+          notes: s.type === "etf" ? ["ETF 沒有每股盈餘與淨值，不提供本益比與股價淨值比區間"] : ["示範資料：EPS、淨值與倍數皆為模擬"],
           is_demo: true,
         }
       }),
@@ -280,6 +283,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
     getPortfolioSummary: (accountId) => wait(() => buildSummary(txns, accountId)),
     getHoldings: (accountId) => wait(() => buildHoldings(txns, accountId)),
-    getPerformance: ({ range, account_id }) => wait(() => buildPerformance(txns, range, account_id)),
+    getPerformance: ({ range, account_id, benchmark }) =>
+      wait(() => buildPerformance(txns, range, account_id, benchmark ?? user.preferences.benchmark)),
   }
 }

@@ -25,7 +25,9 @@ curl -c cookies.txt -X POST http://localhost:8000/api/v1/auth/dev-login \
 curl -b cookies.txt http://localhost:8000/api/v1/portfolio/summary
 ```
 
-前端 Vite dev server（`http://localhost:5173`）已在 CORS 允許清單內，請求時要帶 `credentials: "include"`。
+前端用 `pnpm dev:web:api`（repo 根目錄）啟動時，Vite 會把 `/api` 轉給 `http://localhost:8000`（同源，不需要 CORS），
+沒有 session 時自動以 `demo@forliosa.local` 開發登入。直接跨來源呼叫時，`http://localhost:5173` 已在 CORS 允許清單內，
+請求要帶 `credentials: "include"`。
 
 ### 使用 PostgreSQL
 
@@ -91,7 +93,7 @@ src/forliosa/
 |---|---|---|
 | shioaji-data（GitHub raw） | 商品主檔（約 2,000 家上市櫃公司）、公司簡介、題材、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版，**須標示來源**；AI 整理的簡介、產業鏈、題材授權「待定」，回應的 `data_sources` 會分開標示 |
 | 證交所 MIS（mis.twse.com.tw） | 盤中與收盤報價 | ⚠️ **非官方 API**，偶爾回 502、可能被封鎖；**商業化前必須換成有授權的即時行情** |
-| FinMind v4 | 日線（未還原）、本益比／淨值比／殖利率、股利、匯率 | ⚠️ 免費版**不可商用**（商用需 Sponsor Pro）；匿名額度很小，回應都快取在 `var/cache/finmind`，可設定 `FINMIND_TOKEN` |
+| FinMind v4 | 日線（未還原）、本益比／淨值比／殖利率、股利、匯率、發行量加權股價報酬指數（績效基準 `^TAIEXTR`） | ⚠️ 免費版**不可商用**（商用需 Sponsor Pro）；匿名額度很小，回應都快取在 `var/cache/finmind`，可設定 `FINMIND_TOKEN`。額度用完（402）或連線失敗時自行暫停呼叫 15／5 分鐘，期間只用磁碟快取（過期的也用），不會讓已快取的真實資料變成示範資料 |
 | 證交所／櫃買中心 OpenAPI | 收盤行情、本益比、除權息預告、休市日（只有最新一天） | 政府開放資料，可商用並標示來源（解析器已完成，預設未啟用） |
 | Yahoo Finance | 未使用 | ⚠️ 條款禁止轉發，只能當個人備援，不可在本服務中提供給使用者 |
 | 示範資料（demo） | 美股（AAPL、NVDA、VOO、QQQ）與所有缺資料時的備援 | 以固定種子產生的模擬走勢，`is_demo: true` |
@@ -100,6 +102,7 @@ src/forliosa/
 
 ## 部署到 Railway
 
+完整步驟（含 Cloudflare Pages、網域、cookie 與 CORS、第一次部署檢查清單）見 [`docs/deploy.md`](../../docs/deploy.md)。
 一個 repo 建四個服務：**api**、**worker**、PostgreSQL、Redis（Redis 目前非必要）。
 
 1. **api**：Root Directory 設 `apps/api`，Config File Path 設 `/apps/api/railway.toml`。
@@ -107,10 +110,10 @@ src/forliosa/
    健康檢查 `/api/v1/health`。
 2. **worker**：同一個 Root Directory，Config File Path 設 `/apps/api/railway.worker.toml`
    （同一個 image，啟動指令改為 `python -m forliosa.worker`；migration 只由 api 執行）。
-3. 環境變數（兩個服務都要）：`FORLIOSA_ENV=prod`、`DATABASE_URL`（引用 Railway Postgres）、
-   `SESSION_SECRET`（必填，prod 沒設會拒絕啟動）、`CORS_ORIGINS`（前端網址）、`COOKIE_DOMAIN`
-   （前後端共用主網域時，例如 `.example.com`）、`MARKET_DATA_PROVIDERS`、`FINMIND_TOKEN`（選填）。
-4. 建議為 api 與 worker 掛載 volume 到 `/app/var`。
+3. 環境變數：`FORLIOSA_ENV=prod`、`DATABASE_URL`（引用 Railway Postgres）、`MARKET_DATA_PROVIDERS`、
+   `FINMIND_TOKEN`（選填）；api 另需 `SESSION_SECRET`（必填，prod 沒設會拒絕啟動）、`CORS_ORIGINS`（前端網址，
+   prod 不可為 `*`）、`COOKIE_DOMAIN`（選填，例如 `.example.com`；不設則是 host-only cookie）。
+4. 建議為 api 與 worker 各自掛載 volume 到 `/app/var`（image 以非 root 執行，掛 volume 時設 `RAILWAY_RUN_UID=0`）。
 
 > 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，而正式登入（Email、Google）尚未實作，
 > 所以目前的正式環境還無法登入（見 CONTRACT_NOTES 的待決事項）。

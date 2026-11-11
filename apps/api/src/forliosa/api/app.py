@@ -17,9 +17,15 @@ API_PREFIX = "/api/v1"
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    if settings.forliosa_env == "prod" and settings.session_secret == DEFAULT_SESSION_SECRET:
-        raise RuntimeError("SESSION_SECRET must be set in production")
+    if settings.forliosa_env == "prod":
+        if settings.session_secret == DEFAULT_SESSION_SECRET:
+            raise RuntimeError("SESSION_SECRET must be set in production")
+        if "*" in settings.cors_origins:
+            # With credentials a wildcard would let any site make requests with the user's cookie.
+            raise RuntimeError("CORS_ORIGINS must list the frontend origins explicitly in production (no *)")
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    if settings.forliosa_env == "prod" and not settings.secure_cookies:
+        logging.getLogger(__name__).warning("COOKIE_SECURE=false in production: the session cookie is sent over HTTP")
     app = FastAPI(
         title="Forliosa API",
         version="0.1.0",

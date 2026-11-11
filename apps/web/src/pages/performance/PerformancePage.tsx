@@ -1,8 +1,10 @@
 import { useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
-import { useAccounts, usePerformance } from "@/api/queries"
+import { useAccounts, useHoldings, usePerformance } from "@/api/queries"
 import type { Performance, PerformanceRange } from "@/api/types"
-import { DemoChop } from "@/components/chop"
+import { BenchmarkSelect } from "@/components/benchmark-select"
+import { PortfolioDemoChop } from "@/components/chop"
+import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
 import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
 import { ReturnChart } from "@/components/charts/ReturnChart"
@@ -17,6 +19,8 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 
 const RANGES: { value: PerformanceRange; label: string }[] = [
+  { value: "1D", label: "1D" },
+  { value: "5D", label: "5D" },
   { value: "1M", label: "1M" },
   { value: "3M", label: "3M" },
   { value: "6M", label: "6M" },
@@ -29,15 +33,22 @@ export function PerformancePage() {
   const [range, setRange] = useState<PerformanceRange>("1Y")
   const [account, setAccount] = useState<string | undefined>()
   const accounts = useAccounts()
-  const perf = usePerformance(range, account)
+  const benchmark = usePrefs((s) => s.benchmark)
+  const setPref = usePrefSetter()
+  const perf = usePerformance(range, account, benchmark)
+  const holdings = useHoldings(account)
   const p = perf.data
 
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title="績效分析"
-        meta={p?.is_demo && <DemoChop />}
-        description={p ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}。價格用未還原收盤價，股利另以交易紀錄計入。` : "時間加權報酬、XIRR、回撤與基準比較。"}
+        meta={p && <PortfolioDemoChop isDemo={p.is_demo} holdings={holdings.data} />}
+        description={
+          p?.start_date && p.end_date
+            ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}。價格用未還原收盤價，股利另以交易紀錄計入。`
+            : "時間加權報酬、XIRR、回撤與基準比較。"
+        }
       />
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />
@@ -54,7 +65,10 @@ export function PerformancePage() {
             {(accounts.data ?? []).map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <span className="text-sm text-muted-foreground">基準：{p?.benchmark?.name ?? "元大台灣50"}（可在設定更改）</span>
+        <span className="inline-flex items-center gap-2 text-sm text-muted-foreground">
+          比較基準
+          <BenchmarkSelect size="sm" value={benchmark} onChange={(v) => setPref({ benchmark: v })} />
+        </span>
       </div>
 
       {perf.isError ? (
@@ -82,6 +96,9 @@ export function PerformancePage() {
                 { label: p.benchmark?.name ?? "基準", color: "var(--chart-2)", shape: "line", value: formatPercent(p.benchmark?.twr) },
               ]}
             />
+            {p.benchmark && p.benchmark.twr === null && (
+              <p className="mb-2 text-sm text-muted-foreground">「{p.benchmark.name}」這段期間沒有資料，暫時無法比較。</p>
+            )}
             <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} height={300} />
           </Panel>
           <ValuePanel p={p} />
@@ -113,7 +130,7 @@ function Metrics({ p }: { p: Performance }) {
       label: "年化 XIRR",
       help: "把每一筆投入與取回的時間點算進去，反映你實際賺了多少（年化）。",
       value: p.xirr === null ? <span className="text-muted-foreground">—</span> : <Pct value={p.xirr} />,
-      sub: p.xirr === null ? "期間太短或現金流不足，無法計算" : "金額加權",
+      sub: p.xirr === null ? (p.range === "1D" || p.range === "5D" ? "5 天以內不年化" : "期間太短或現金流不足，無法計算") : "金額加權",
     },
     {
       label: "最大回撤",

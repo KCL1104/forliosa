@@ -24,6 +24,7 @@ from forliosa.domain.performance import (
     xirr_flows,
 )
 from forliosa.marketdata.base import InstrumentInfo, QuoteData, code_of_symbol, market_of_symbol
+from forliosa.marketdata.indices import is_index
 from forliosa.marketdata.service import MarketData
 from forliosa.models import User
 from forliosa.services.ledger_io import FxBook, LedgerInput, load_ledger_input, preferences_of
@@ -232,7 +233,10 @@ def summary(state: PortfolioState, md: MarketData) -> dict[str, Any]:
 
 
 # -- performance --------------------------------------------------------------------------------
-PERFORMANCE_RANGES = ("1M", "3M", "6M", "YTD", "1Y", "ALL")
+PERFORMANCE_RANGES = ("1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "ALL")
+# Short ranges counted in trading days. Their series starts with the base close (twr_index 1.0):
+# 1D = previous close -> latest close/quote (2 points), 5D = the last 5 trading days (6 points).
+TRADING_DAY_RANGES = {"1D": 1, "5D": 5}
 
 
 def add_months(d: date, months: int) -> date:
@@ -290,10 +294,11 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     if range_ not in PERFORMANCE_RANGES:
         raise unprocessable(f"不支援的區間：{range_}（可用 {'、'.join(PERFORMANCE_RANGES)}）")
     prefs = preferences_of(user)
-    bench_symbol = md.resolve(benchmark or prefs["benchmark"])
+    bench_symbol = md.resolve_benchmark(benchmark or prefs["benchmark"])
     if bench_symbol is None:
         raise unprocessable(f"找不到基準商品：{benchmark or prefs['benchmark']}", code="unknown_symbol")
-    bench_info = md.instrument(bench_symbol)
+    bench_name = md.benchmark_name(bench_symbol)
+    bench_is_index = is_index(bench_symbol)
 
     inp = load_ledger_input(db, user, account_id)
     if account_id and not inp.accounts:
@@ -303,7 +308,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     empty = {
         "range": range_, "start_date": None, "end_date": None, "twr": None, "xirr": None, "max_drawdown": None,
         "volatility": None,
-        "benchmark": {"symbol": bench_symbol, "name": bench_info.name if bench_info else bench_symbol, "twr": None},
+        "benchmark": {"symbol": bench_symbol, "name": bench_name, "twr": None},
         "series": [], "dividends_by_month": [], "realized_by_year": [], "is_demo": False,
     }
     if inception is None or inception > today:
@@ -313,9 +318,10 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")}
         | {s.symbol for s in inp.snapshots})
     hist_start = inception - timedelta(days=14)
-    md.quotes([*symbols, bench_symbol])  # one batched quote call warms the cache used by history()
+    # one batched quote call warms the cache used by history()
+    md.quotes([*symbols] if bench_is_index else [*symbols, bench_symbol])
     histories = {s: md.history(s, hist_start, today) for s in symbols}
-    bench_hist = md.history(bench_symbol, hist_start, today)
+    bench_hist = (md.index_history if bench_is_index else md.history)(bench_symbol, hist_start, today)
     is_demo = any(h.is_demo for h in histories.values())
 
     last_close_day = max((h.candles[-1].t for h in histories.values() if h.candles), default=None)
@@ -342,25 +348,50 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         is_demo = True
     points = sim.points
 
-    nominal = range_start(range_, end, inception)
-    si = next((i for i, p in enumerate(points) if p.t >= nominal), len(points) - 1)
-    # Never start before the first day with money in the portfolio.
-    first_active = next((i for i, p in enumerate(points) if p.value > 0 or p.inflow > 0), si)
-    si = max(si, first_active)
     ei = len(points) - 1
+    # Never start before the first day with money in the portfolio.
+    first_active = next((i for i, p in enumerate(points) if p.value > 0 or p.inflow > 0), ei)
+    days = TRADING_DAY_RANGES.get(range_)
+    if days is not None:
+        # The window opens on a base close (twr_index 1.0, its own return excluded) and covers the
+        # last ``days`` daily returns. A younger portfolio opens on the day before its first money
+        # (value 0) or, when there is no such day on the axis, on its first day like the long ranges.
+        if ei - days >= first_active:
+            si, based = ei - days, True
+        elif first_active > 0:
+            si, based = first_active - 1, True
+        else:
+            si, based = 0, False
+    else:
+        nominal = range_start(range_, end, inception)
+        si = next((i for i, p in enumerate(points) if p.t >= nominal), ei)
+        si = max(si, first_active)
+        based = False
     window = points[si:ei + 1]
     returns = [p.daily_return for p in window]
+    if based:
+        returns[0] = 0.0
     index = twr_index(returns)
     active_returns = [p.daily_return for i, p in enumerate(window)
-                      if (points[si + i - 1].value if si + i > 0 else ZERO) + p.inflow > 0]
+                      if (points[si + i - 1].value if si + i > 0 else ZERO) + p.inflow > 0
+                      and not (based and i == 0)]
 
-    # Benchmark: total return (dividends reinvested on ex-date), aligned to the same axis.
+    # Benchmark: total return (dividends reinvested on ex-date), aligned to the same axis. A total
+    # return index (^TAIEXTR) already includes dividends: its plain daily change is the return.
     b_closes = _forward_filled(axis, {c.t: c.c for c in bench_hist.candles})
-    b_divs = {e.ex_dividend_date: e.cash_dividend for e in md.dividends(bench_symbol).value if e.ex_dividend_date}
-    b_splits = {e.date: e.ratio for e in md.corporate_events(bench_symbol) if e.kind == "split"}
+    if bench_is_index:
+        b_divs: dict[date, Decimal] = {}
+        b_splits: dict[date, Decimal] = {}
+    else:
+        b_divs = {e.ex_dividend_date: e.cash_dividend for e in md.dividends(bench_symbol).value
+                  if e.ex_dividend_date}
+        b_splits = {e.date: e.ratio for e in md.corporate_events(bench_symbol) if e.kind == "split"}
     b_returns = benchmark_returns(axis, b_closes.get, lambda d: b_divs.get(d, ZERO),
                                   lambda d: b_splits.get(d, Decimal(1)))
-    b_index = twr_index(b_returns[si:ei + 1]) if b_closes else []
+    b_window = b_returns[si:ei + 1]
+    if based and b_window:
+        b_window[0] = 0.0
+    b_index = twr_index(b_window) if b_closes else []
     is_demo |= bench_hist.is_demo
 
     series = [
@@ -376,13 +407,14 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
 
     by_month: dict[str, Decimal] = defaultdict(Decimal)
     by_year: dict[int, Decimal] = defaultdict(Decimal)
-    for p in window:
+    for p in window[1:] if based else window:  # the base day's flows are before the window
         if p.dividends:
             by_month[p.t.strftime("%Y-%m")] += p.dividends
         if p.realized:
             by_year[p.t.year] += p.realized
 
-    rate = xirr(xirr_flows(points, si, ei))
+    # Annualizing one to five days of cash flows is meaningless: no XIRR for the short ranges.
+    rate = None if days is not None else xirr(xirr_flows(points, si, ei))
     vol = annualized_volatility(active_returns)
     return {
         "range": range_,
@@ -394,7 +426,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "volatility": round(vol, 6) if vol is not None else None,
         "benchmark": {
             "symbol": bench_symbol,
-            "name": bench_info.name if bench_info else bench_symbol,
+            "name": bench_name,
             "twr": round(b_index[-1] - 1.0, 6) if b_index else None,
         },
         "series": series,

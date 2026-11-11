@@ -46,6 +46,20 @@ class Settings(BaseSettings):
             return [s.strip() for s in v.split(",") if s.strip()]
         return v
 
+    @field_validator("cors_origins")
+    @classmethod
+    def _normalize_origins(cls, v: list[str]) -> list[str]:
+        """Browsers send ``Origin: https://app.example.com`` (no path, no trailing slash)."""
+        return list(dict.fromkeys(o.strip().rstrip("/") for o in v if o.strip()))
+
+    @field_validator("cookie_domain", mode="before")
+    @classmethod
+    def _blank_cookie_domain(cls, v: object) -> object:
+        """``COOKIE_DOMAIN=`` (empty) means a host-only cookie, not ``Domain=``."""
+        if isinstance(v, str) and not v.strip():
+            return None
+        return v.strip() if isinstance(v, str) else v
+
     @field_validator("database_url")
     @classmethod
     def _psycopg_driver(cls, v: str) -> str:

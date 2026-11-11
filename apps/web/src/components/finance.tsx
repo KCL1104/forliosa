@@ -66,13 +66,20 @@ export function Pct({ value, className, glyph = true, decimals = 2 }: { value: n
   )
 }
 
-/** 價格（公開資訊，不遮蔽） */
-export function Price({ value, market, className }: { value: number; market: Market; className?: string }) {
+/** 價格（公開資訊，不遮蔽）；沒有報價時顯示「—」 */
+export function Price({ value, market, className }: { value: number | null | undefined; market: Market; className?: string }) {
   return <span className={cn("num whitespace-nowrap", className)}>{formatPrice(value, market)}</span>
 }
 
-/** 漲跌點數＋幅度，例如「▲ 15.00（+1.40%）」 */
-export function PriceChange({ change, pct, market, className }: { change: number; pct: number; market: Market; className?: string }) {
+/** 漲跌點數＋幅度，例如「▲ 15.00（+1.40%）」；沒有昨收時無法計算，顯示「—」 */
+export function PriceChange({ change, pct, market, className }: { change: number | null; pct: number | null; market: Market; className?: string }) {
+  if (change === null) {
+    return (
+      <span className={cn("num text-muted-foreground", className)} title="資料源沒有提供昨收，無法計算漲跌">
+        —
+      </span>
+    )
+  }
   const d = direction(change)
   const abs = formatPrice(Math.abs(change), market)
   return (
@@ -135,7 +142,8 @@ export function FlowMoney({
   )
 }
 
-export function FlowPct({ value, className }: { value: number; className?: string }) {
+export function FlowPct({ value, className }: { value: number | null; className?: string }) {
+  if (value === null) return <span className={cn("num text-muted-foreground", className)}>—</span>
   const d = direction(value)
   return (
     <span className={cn("num inline-flex items-baseline gap-0.5 whitespace-nowrap", toneClass(d), className)}>

@@ -2,22 +2,35 @@ import type { Account, TradePreview, TransactionInput } from "../types"
 import type { MockInstrumentSpec } from "./instruments"
 
 /**
- * 示範用的台股稅費規則（後端才是正式實作；這裡只為了讓 mock 預估合理）。
- * - 手續費：成交金額 × 0.1425% × 折扣，四捨五入（與 api-contract 範例一致），低於最低手續費以最低計（零股另計）
- * - 證交稅（賣出）：股票 0.3%、ETF 0.1%、當沖 0.15%
- * - 二代健保：單筆股利 ≥ NT$20,000 扣 2.11%
- * - 美股股利：預扣 30% 稅
+ * 示範用的稅費規則：與後端 `apps/api/src/forliosa/domain/fees.py` 相同（規則字串也相同），
+ * 讓 mock 與真實 API 的試算結果一致。
+ * - 台股手續費：floor(成交金額 × 0.1425% × 折扣)，元以下捨去；低於最低手續費以最低計（未滿 1,000 股用零股最低）
+ *   例：1,070,000 × 0.1425% × 0.28 = 426.93 → 426（docs/api-contract.md 的範例）
+ * - 美股手續費：成交金額 × 費率 × 折扣，四捨五入到分；低於最低以最低計
+ * - 證交稅（賣出）：股票 0.3%、ETF 0.1%、當沖 0.15%（至 2027-12-31），元以下捨去；美股無
+ * - 二代健保：單筆股利 ≥ NT$20,000 扣 2.11%（元以下四捨五入）；美股股利預扣 30%
  */
 export const TW_FEE_RATE = 0.001425
 export const NHI_RATE = 0.0211
 export const NHI_THRESHOLD = 20000
+const DAY_TRADE_SUNSET = "2027-12-31"
 
 const round2 = (n: number) => Math.round(n * 100) / 100
+/** 元以下捨去（加一點點容差，避免 0.1425% 這類小數的浮點誤差讓整數變成 x.9999） */
+export const truncate = (n: number) => Math.floor(n + 1e-9)
+
+function pctLabel(rate: number) {
+  return `${Number((rate * 100).toFixed(6))}%`
+}
 
 function discountLabel(discount: number) {
   if (discount >= 1) return "無折扣"
-  const zhe = Math.round(discount * 100) / 10
-  return `${zhe} 折`
+  return `${Number((discount * 10).toFixed(4))} 折`
+}
+
+function money(n: number, currency: "TWD" | "USD" = "TWD") {
+  const prefix = currency === "USD" ? "US$" : "NT$"
+  return `${prefix}${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n)}`
 }
 
 export function computePreview(
@@ -27,59 +40,88 @@ export function computePreview(
 ): TradePreview {
   const qty = body.quantity ?? 0
   const price = body.price ?? 0
-  const isUS = account?.currency === "USD" || spec?.market === "US"
+  const isUS = spec ? spec.market === "US" : account?.currency === "USD"
   const rules: string[] = []
 
   if (body.type === "buy" || body.type === "sell") {
-    const gross = isUS ? round2(qty * price) : Math.round(qty * price)
+    const gross = body.amount ?? round2(qty * price)
     const feeRate = account?.fee_rate ?? TW_FEE_RATE
     const discount = account?.fee_discount ?? 1
-    const isOdd = !isUS && qty % 1000 !== 0
-    const minFee = isOdd ? (account?.min_fee_odd_lot ?? 1) : (account?.min_fee ?? 20)
-    // 折扣後手續費：依 api-contract 範例（1,070,000 × 0.1425% × 2.8 折 = 427）四捨五入；券商實務可能捨去，見 OPEN_QUESTIONS
-    let fee = isUS ? round2(gross * feeRate * discount) : Math.round(gross * feeRate * discount)
-    const usedMin = gross > 0 && fee < minFee
-    if (usedMin) fee = minFee
-    rules.push(`手續費 ${(feeRate * 100).toFixed(4).replace(/0+$/, "")}% × ${discountLabel(discount)}`)
-    if (usedMin) rules.push(`低於最低手續費，以 ${isUS ? "US$" : "NT$"}${minFee} 計${isOdd ? "（零股）" : ""}`)
+    let fee: number
+    if (body.fee != null) {
+      fee = body.fee
+      rules.push(`手續費：使用者輸入 ${money(fee, isUS ? "USD" : "TWD")}`)
+    } else if (!isUS) {
+      const odd = qty < 1000
+      const minFee = odd ? (account?.min_fee_odd_lot ?? 1) : (account?.min_fee ?? 20)
+      fee = truncate(gross * feeRate * discount)
+      rules.push(`手續費 ${pctLabel(feeRate)} × ${discountLabel(discount)}，元以下捨去`)
+      if (gross > 0 && fee < minFee) {
+        fee = minFee
+        rules.push(`低於${odd ? "零股最低手續費" : "最低手續費"}，以 ${money(minFee)} 計`)
+      }
+    } else if (feeRate <= 0) {
+      fee = Math.max(0, account?.min_fee ?? 0)
+      rules.push("美股手續費：帳戶未設定費率（以 0 計）")
+    } else {
+      fee = round2(gross * feeRate * discount)
+      rules.push(`美股手續費 ${pctLabel(feeRate)} × ${discountLabel(discount)}`)
+      const minFee = account?.min_fee ?? 0
+      if (fee < minFee) {
+        fee = minFee
+        rules.push(`低於最低手續費，以 ${money(minFee, "USD")} 計`)
+      }
+    }
 
     let tax = 0
-    if (body.type === "sell" && !isUS) {
-      const isEtf = spec?.type === "etf"
-      const rate = body.is_day_trade && !isEtf ? 0.0015 : isEtf ? 0.001 : 0.003
-      tax = Math.floor(gross * rate)
-      rules.push(
-        body.is_day_trade && !isEtf
-          ? "證交稅：當沖 0.15%（減半優惠至 2027-12-31）"
-          : `證交稅：${isEtf ? "ETF 0.1%" : "股票 0.3%"}`,
-      )
-    } else if (body.type === "buy") {
-      rules.push(isUS ? "美股買進：無證交稅" : "證交稅：買進免稅")
+    if (body.type === "sell") {
+      if (body.tax != null) {
+        tax = body.tax
+        rules.push(`證交稅：使用者輸入 ${money(tax, isUS ? "USD" : "TWD")}`)
+      } else if (isUS) {
+        rules.push("美股無證交稅")
+      } else {
+        const isEtf = spec?.type === "etf"
+        let rate = 0.003
+        let rule = "證交稅：股票 0.3%"
+        if (isEtf) {
+          rate = 0.001
+          rule = `證交稅：ETF 0.1%${body.is_day_trade ? "（ETF 當沖稅率相同）" : ""}`
+        } else if (body.is_day_trade && body.trade_date <= DAY_TRADE_SUNSET) {
+          rate = 0.0015
+          rule = `證交稅：當沖減半 0.15%（優惠至 ${DAY_TRADE_SUNSET}）`
+        }
+        tax = truncate(gross * rate)
+        rules.push(`${rule}，元以下捨去`)
+      }
     } else {
-      rules.push("美股賣出：無證交稅")
+      rules.push(isUS ? "美股無證交稅" : "證交稅：買進免稅")
     }
-    if (body.fee != null) fee = body.fee
-    if (body.tax != null) tax = body.tax
     const net = body.type === "buy" ? -(gross + fee) : gross - fee - tax
-    return { gross, fee, tax, health_insurance: 0, net_cash: isUS ? round2(net) : net, rules }
+    return { gross, fee, tax, health_insurance: 0, net_cash: round2(net), rules }
   }
 
   if (body.type === "cash_dividend") {
-    const gross = body.amount ?? (isUS ? round2(qty * price) : Math.round(qty * price))
+    const gross = body.amount ?? (isUS ? truncate(qty * price * 100) / 100 : truncate(qty * price))
+    if (body.amount == null) rules.push(`股利 = ${qty} 股 × ${price} 元`)
     let tax = 0
     let nhi = 0
     if (isUS) {
       tax = round2(gross * 0.3)
-      rules.push("美股股利：預扣 30% 稅")
-    } else if (gross >= NHI_THRESHOLD) {
-      nhi = Math.round(gross * NHI_RATE)
-      rules.push("二代健保補充保費：單筆股利 ≥ NT$20,000，扣 2.11%")
+      rules.push("美股股利預扣稅 30%", "二代健保：海外股利不適用")
     } else {
-      rules.push("單筆股利未達 NT$20,000，不扣二代健保")
+      if (gross >= NHI_THRESHOLD) {
+        nhi = Math.round(Math.min(gross, 10_000_000) * NHI_RATE)
+        rules.push("二代健保：單筆股利 ≥ NT$20,000，扣 2.11%（元以下四捨五入）")
+      } else {
+        rules.push("二代健保：單筆股利未達 NT$20,000，免扣")
+      }
+      rules.push("股利所得稅：不計入績效（申報時另行試算）")
     }
     if (body.health_insurance != null) nhi = body.health_insurance
     if (body.tax != null) tax = body.tax
-    return { gross, fee: 0, tax, health_insurance: nhi, net_cash: round2(gross - tax - nhi), rules }
+    const fee = body.fee ?? 0
+    return { gross, fee, tax, health_insurance: nhi, net_cash: round2(gross - tax - nhi - fee), rules }
   }
 
   const amount = body.amount ?? 0

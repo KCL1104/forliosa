@@ -34,6 +34,7 @@ export function ValuationTab({ instrument }: { instrument: InstrumentDetail }) {
           }
         />
         <YieldPanel valuation={v} />
+        <Notes notes={v.notes} />
       </div>
     )
   }
@@ -50,12 +51,34 @@ export function ValuationTab({ instrument }: { instrument: InstrumentDetail }) {
             ...(hasPbr ? [{ value: "pbr" as const, label: "股價淨值比河流圖" }] : []),
           ]}
         />
-        <span className="text-sm text-muted-foreground">近 5 年・每週</span>
+        <span className="text-sm text-muted-foreground">近 5 年・{cadenceLabel(v)}</span>
         {v.is_demo && <DemoChop className="ml-auto" />}
       </div>
       <RiverPanel valuation={v} mode={activeMode} instrument={instrument} />
       <YieldPanel valuation={v} />
+      <Notes notes={v.notes} />
     </div>
+  )
+}
+
+/** 資料頻率：真實資料是每個交易日，示範資料是每週 */
+function cadenceLabel(v: Valuation): string {
+  const first = v.series[0]
+  const last = v.series.at(-1)
+  if (!first || !last || v.series.length < 2) return "每個交易日"
+  const days = (Date.parse(last.t) - Date.parse(first.t)) / 86_400_000 / (v.series.length - 1)
+  return days > 4 ? "每週" : "每個交易日"
+}
+
+/** 後端的說明（資料來源、EPS ≤ 0 留白等）：來源必須標示 */
+function Notes({ notes }: { notes: string[] }) {
+  if (notes.length === 0) return null
+  return (
+    <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+      {notes.map((n) => (
+        <li key={n}>・{n}</li>
+      ))}
+    </ul>
   )
 }
 

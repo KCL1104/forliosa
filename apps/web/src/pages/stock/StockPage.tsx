@@ -10,7 +10,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ApiError } from "@/api/types"
-import { formatDateTime, formatNumber } from "@/lib/format"
+import { formatDateTime, formatVolume } from "@/lib/format"
 import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
@@ -31,6 +31,22 @@ const TABS: { value: StockTab; label: string; soon?: boolean }[] = [
   { value: "news", label: "新聞", soon: true },
   { value: "ai", label: "AI 報告", soon: true },
 ]
+
+const SOURCE_LABEL: Record<string, string> = {
+  twse_mis: "證交所 MIS",
+  "twse-mis": "證交所 MIS",
+  "shioaji-data": "shioaji-data",
+  finmind: "FinMind",
+  twse_openapi: "證交所 OpenAPI",
+  tpex_openapi: "櫃買中心 OpenAPI",
+  demo: "示範資料",
+  mock: "示範資料",
+}
+
+/** 報價來源（可能是多個合併，例如 shioaji-data+finmind） */
+function sourceLabel(source: string): string {
+  return [...new Set(source.split("+").map((s) => SOURCE_LABEL[s] ?? s))].join("＋")
+}
 
 export function StockPage() {
   const { symbol } = useParams({ from: "/stock/$symbol" })
@@ -55,7 +71,7 @@ export function StockPage() {
   }
   const i = instrument.data
   const q = quote.data
-  const today = q?.as_of.slice(0, 10) ?? ""
+  const today = q?.as_of?.slice(0, 10) ?? ""
 
   return (
     <div className="flex flex-col gap-5">
@@ -87,7 +103,8 @@ export function StockPage() {
             {q && i && (
               <p className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm text-muted-foreground">
                 <span>{q.is_realtime ? "即時" : "收盤"}・{formatDateTime(q.as_of)}（台北時間）</span>
-                <span>成交量 <span className="num">{i.market === "US" ? `${formatNumber(q.volume)} 股` : `${formatNumber(Math.round(q.volume / 1000))} 張`}</span></span>
+                <span>成交量 <span className="num">{formatVolume(q.volume, i.market)}</span></span>
+                {q.source && <span>來源 {sourceLabel(q.source)}</span>}
                 {q.is_demo && <DemoChop />}
               </p>
             )}

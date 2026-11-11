@@ -54,14 +54,20 @@ describe("配置圖：超過 6 類合併為「其他」", () => {
   })
 })
 
-describe("示範稅費試算（與 spec §4.3 規則一致）", () => {
+describe("示範稅費試算（與後端 domain/fees.py 規則一致）", () => {
   const tw = ACCOUNTS[0]!
-  it("買進整股：0.1425% × 2.8 折（與 api-contract 範例 427 一致）", () => {
+  it("買進整股：0.1425% × 2.8 折，元以下捨去（api-contract 範例：426.93 → 426）", () => {
     const p = computePreview({ account_id: tw.id, symbol: "2330.TW", type: "buy", trade_date: "2026-11-11", quantity: 1000, price: 1070 }, tw, findInstrument("2330.TW"))
     expect(p.gross).toBe(1_070_000)
-    expect(p.fee).toBe(427)
+    expect(p.fee).toBe(426)
     expect(p.tax).toBe(0)
-    expect(p.net_cash).toBe(-1_070_427)
+    expect(p.net_cash).toBe(-1_070_426)
+    expect(p.rules).toEqual(["手續費 0.1425% × 2.8 折，元以下捨去", "證交稅：買進免稅"])
+  })
+  it("無折扣時整數金額不會因浮點誤差少 1 元", () => {
+    const noDiscount = { ...tw, fee_discount: 1 }
+    const p = computePreview({ account_id: tw.id, symbol: "2330.TW", type: "buy", trade_date: "2026-11-11", quantity: 1000, price: 1000 }, noDiscount, findInstrument("2330.TW"))
+    expect(p.fee).toBe(1425)
   })
   it("零股低於最低手續費以零股最低計", () => {
     const p = computePreview({ account_id: tw.id, symbol: "0050.TW", type: "buy", trade_date: "2026-11-11", quantity: 10, price: 72.4 }, tw, findInstrument("0050.TW"))

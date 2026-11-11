@@ -23,6 +23,7 @@ export function CommandSearch() {
   const togglePrivacy = usePrefs((s) => s.togglePrivacy)
   const navigate = useNavigate()
   const [q, setQ] = useState("")
+  const [active, setActive] = useState("")
   const search = useInstrumentSearch(q)
 
   useEffect(() => {
@@ -54,6 +55,13 @@ export function CommandSearch() {
 
   const results = search.data ?? []
   const pages = [...NAV_MAIN, ...NAV_AI, ...NAV_DATA].filter((p) => !q || p.label.includes(q.trim()))
+  // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用
+  const values = [
+    ...results.map((i) => i.symbol),
+    ...(q.trim() ? [] : ["new-trade", "privacy"]),
+    ...pages.map((p) => `page:${p.to}`),
+  ]
+  const selected = values.includes(active) ? active : (values[0] ?? "")
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
@@ -63,7 +71,7 @@ export function CommandSearch() {
       >
         <DialogTitle className="sr-only">搜尋股票與功能</DialogTitle>
         <DialogDescription className="sr-only">輸入股票代號或中文名稱，例如 2330 或 台積</DialogDescription>
-        <CommandPrimitive shouldFilter={false} loop className="flex flex-col" label="搜尋股票與功能">
+        <CommandPrimitive shouldFilter={false} loop value={selected} onValueChange={setActive} className="flex flex-col" label="搜尋股票與功能">
           <div className="flex items-center gap-2.5 border-b px-4">
             <SearchIcon className="size-4.5 shrink-0 text-muted-foreground" aria-hidden />
             <CommandPrimitive.Input

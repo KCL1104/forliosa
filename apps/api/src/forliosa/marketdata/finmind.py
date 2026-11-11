@@ -14,9 +14,14 @@ back as ``{"msg": "Requests reach the upper limit…", "status": 402}``.
   CashExDividendTradingDate, CashDividendPaymentDate, …
 * TaiwanStockMonthRevenue: date, stock_id, country, revenue (NT$), revenue_month, revenue_year.
 * TaiwanExchangeRate (data_id=USD): date, currency, cash_buy, cash_sell, spot_buy, spot_sell.
+* TaiwanStockTotalReturnIndex (data_id=TAIEX | TPEx): date, stock_id, price — 發行量加權股價報酬指數
+  （含息）／櫃買報酬指數, used as a performance benchmark (see ``marketdata/indices.py``).
 
 Every response is cached on disk (``var/cache/finmind``) so the small anonymous quota is spent at
 most once per dataset/symbol per TTL; a stale cached copy is used when FinMind is unreachable.
+After a failed request (quota 402, network) the provider backs off by itself for a while and
+answers from the disk cache only, so one exhausted quota does not hide data that is already cached
+(the facade's per-provider circuit breaker is disabled for this provider: ``cooldown_seconds = 0``).
 
 ⚠ FinMind's free tier is non-commercial; commercial use needs the Sponsor Pro plan.
 """
@@ -57,6 +62,9 @@ API_URL = "https://api.finmindtrade.com/api/v4/data"
 HISTORY_START = date(2018, 1, 1)
 TTL_PRICES = 3 * 3600
 TTL_SLOW = 24 * 3600  # dividends, revenue
+# After a failed request: no network calls for this long (the anonymous quota resets hourly).
+BACKOFF_QUOTA_SECONDS = 15 * 60
+BACKOFF_ERROR_SECONDS = 5 * 60
 
 
 def extract_rows(payload: Any) -> list[dict[str, Any]]:
@@ -167,6 +175,18 @@ def parse_month_revenue(rows: list[dict[str, Any]]) -> list[RevenueRow]:
     return out
 
 
+def parse_index(rows: list[dict[str, Any]]) -> list[tuple[date, Decimal]]:
+    """TaiwanStockTotalReturnIndex rows -> [(date, index level)], oldest first."""
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("date"))
+        v = parse_decimal(r.get("price"))
+        if d is not None and v is not None and v > 0:
+            out.append((d, v))
+    out.sort()
+    return out
+
+
 def parse_exchange_rate(rows: list[dict[str, Any]]) -> dict[date, Decimal]:
     """Spot mid rate = (spot_buy + spot_sell) / 2, TWD per 1 USD."""
     out: dict[date, Decimal] = {}
@@ -182,6 +202,8 @@ def parse_exchange_rate(rows: list[dict[str, Any]]) -> dict[date, Decimal]:
 class FinMindProvider(BaseProvider):
     name = "finmind"
     is_demo = False
+    # The facade must keep asking this provider while it backs off: cached answers stay valid.
+    cooldown_seconds = 0
 
     def __init__(self, token: str | None = None, fetcher: HttpFetcher | None = None,
                  cache_dir: Path | None = None, today_fn=date.today):
@@ -191,11 +213,16 @@ class FinMindProvider(BaseProvider):
         self.today_fn = today_fn
         self._mem: dict[str, tuple[float, list[dict[str, Any]]]] = {}
         self._lock = threading.Lock()
+        self._backoff_until = 0.0
+        self._clock = time.time
+
+    def backing_off(self) -> bool:
+        return self._clock() < self._backoff_until
 
     def _rows(self, dataset: str, data_id: str, start: date, ttl: int) -> list[dict[str, Any]]:
         """Rows of ``dataset`` for ``data_id`` from ``start`` to today, cached (memory + disk)."""
         key = f"{dataset}-{data_id}-{start.isoformat()}"
-        now = time.time()
+        now = self._clock()
         with self._lock:
             hit = self._mem.get(key)
         if hit and now - hit[0] < ttl:
@@ -209,11 +236,17 @@ class FinMindProvider(BaseProvider):
                     self._mem[key] = (doc["fetched_at"], doc["rows"])
                 return doc["rows"]
             stale = doc["rows"]
+        if now < self._backoff_until:
+            if stale is not None:
+                return stale
+            raise ProviderUnavailable(f"FinMind 暫停呼叫（額度或連線問題），{dataset} {data_id} 沒有快取")
         params = {"dataset": dataset, "data_id": data_id, "start_date": start.isoformat()}
         headers = {"Authorization": f"Bearer {self.token}"} if self.token else None
         try:
             rows = extract_rows(self.fetcher.get_json(API_URL, params=params, headers=headers))
-        except ProviderUnavailable:
+        except ProviderUnavailable as exc:
+            quota = "402" in str(exc) or "upper limit" in str(exc)
+            self._backoff_until = now + (BACKOFF_QUOTA_SECONDS if quota else BACKOFF_ERROR_SECONDS)
             if stale is not None:
                 log.warning("FinMind %s %s unreachable; using stale cache", dataset, data_id)
                 with self._lock:
@@ -270,6 +303,11 @@ class FinMindProvider(BaseProvider):
             return None
         rows = self._rows("TaiwanStockMonthRevenue", code_of_symbol(symbol), date(2018, 1, 1), TTL_SLOW)
         return parse_month_revenue(rows) or None
+
+    def index_history(self, index_id: str, start: date, end: date) -> list[tuple[date, Decimal]] | None:
+        """Daily levels of a TWSE/TPEx total-return index (data_id ``TAIEX`` or ``TPEx``)."""
+        series = parse_index(self._rows("TaiwanStockTotalReturnIndex", index_id, HISTORY_START, TTL_PRICES))
+        return [(d, v) for d, v in series if start <= d <= end] or None
 
     def fx_history(self, pair: str, start: date, end: date) -> dict[date, Decimal] | None:
         if pair != "USDTWD":

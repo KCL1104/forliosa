@@ -6,6 +6,7 @@
 
 - [產品需求規格](docs/product-spec.md)
 - [API 介面合約](docs/api-contract.md)
+- [部署指南（Cloudflare Pages＋Railway）](docs/deploy.md)
 - [研究報告：台股 AI 開源投資管理平台](reports/台股%20AI%20開源投資管理平台.md)
 
 ## 專案結構
@@ -20,7 +21,23 @@ docs/     規格與設計文件
 
 ## 開發
 
-後端與前端各自的啟動方式見 `apps/api/README.md` 與 `apps/web/README.md`。
+需要 Python 3.13＋[uv](https://docs.astral.sh/uv/)、Node 22（≥ 22.12）＋pnpm 10。在本機同時跑後端與前端：
+
+```bash
+# 終端機 1：後端（SQLite，開發模式），http://localhost:8000
+cd apps/api
+uv sync
+uv run python -m forliosa.seed          # 建立資料表與示範使用者 demo@forliosa.local（兩年交易，真實台股收盤價）
+uv run uvicorn forliosa.main:app --port 8000
+
+# 終端機 2：前端連後端，http://localhost:5173
+pnpm install
+pnpm dev:web:api                        # Vite 把 /api 轉給 localhost:8000（同源 cookie），自動以示範使用者開發登入
+```
+
+只想看畫面、不跑後端：`pnpm dev:web`（瀏覽器內的 mock 示範資料）。測試：`apps/api` 裡 `uv run pytest`、`uv run ruff check .`；
+前端 `pnpm --filter @forliosa/web typecheck`、`lint`、`test`、`build`。CI 見 `.github/workflows/ci.yml`。
+細節見 `apps/api/README.md` 與 `apps/web/README.md`。
 
 ## 授權聲明
 

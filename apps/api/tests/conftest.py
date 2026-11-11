@@ -11,6 +11,7 @@ os.environ.setdefault("DEMO_JITTER", "false")
 import pytest
 from fastapi.testclient import TestClient
 
+import forliosa.models  # noqa: F401 - register every table on Base.metadata before create_all
 from forliosa.db import Base, make_engine, set_engine
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
