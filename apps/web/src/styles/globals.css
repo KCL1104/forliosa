@@ -1,0 +1,392 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/source-sans-3/wght.css";
+@import "@fontsource-variable/noto-sans-tc/wght.css";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* 以下 custom variants 取自 shadcn/ui 的 tailwind.css（MIT），讓 Base UI 的 data-* 狀態可用 */
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-selected {
+  &:where([data-selected="true"]) {
+    @slot;
+  }
+}
+@custom-variant data-disabled {
+  &:where([data-disabled="true"]),
+  &:where([data-disabled]:not([data-disabled="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-active {
+  &:where([data-state="active"]),
+  &:where([data-active]:not([data-active="false"])) {
+    @slot;
+  }
+}
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/*
+ * Forliosa 設計 token（世界觀：印鑑與印台）。說明見 /DESIGN.md。
+ * 青田石的冷灰底、墨色側欄、藍色印台的「印泥藍」做操作色；
+ * 朱泥紅只用在品牌章；紅綠只用於漲跌（依 data-convention 對應）。
+ */
+:root {
+  --background: oklch(0.972 0.005 195);
+  --foreground: oklch(0.23 0.025 262);
+  --card: oklch(0.996 0.002 195);
+  --card-foreground: oklch(0.23 0.025 262);
+  --popover: oklch(0.996 0.002 195);
+  --popover-foreground: oklch(0.23 0.025 262);
+  --muted: oklch(0.945 0.007 205);
+  --muted-foreground: oklch(0.47 0.018 255);
+  --border: oklch(0.885 0.009 215);
+  --hairline: oklch(0.92 0.007 215);
+  --input: oklch(0.83 0.012 225);
+  --ring: oklch(0.52 0.14 258);
+  --primary: oklch(0.44 0.135 259);
+  --primary-foreground: oklch(0.985 0.005 250);
+  --secondary: oklch(0.935 0.012 240);
+  --secondary-foreground: oklch(0.23 0.025 262);
+  --accent: oklch(0.935 0.022 255);
+  --accent-foreground: oklch(0.32 0.09 259);
+  --destructive: oklch(0.5 0.17 30);
+  --destructive-foreground: oklch(0.985 0.005 250);
+
+  /* 側欄：靛青墨 */
+  --rail: oklch(0.255 0.05 263);
+  --rail-foreground: oklch(0.94 0.012 250);
+  --rail-muted: oklch(0.76 0.035 255);
+  --rail-active: oklch(0.345 0.07 262);
+  --rail-border: oklch(0.32 0.05 263);
+
+  /* 朱泥（品牌章專用） */
+  --seal: oklch(0.565 0.19 33);
+  --seal-foreground: oklch(0.985 0.01 60);
+
+  /* 漲跌原色 */
+  --red: oklch(0.545 0.205 26);
+  --green: oklch(0.5 0.13 152);
+  --amber: oklch(0.62 0.13 75);
+
+  /* 圖表系列：我的＝印泥藍、基準＝石灰，其餘為配置圖用 */
+  --chart-1: oklch(0.47 0.14 259);
+  --chart-2: oklch(0.66 0.02 230);
+  --chart-3: oklch(0.72 0.12 78);
+  --chart-4: oklch(0.56 0.07 195);
+  --chart-5: oklch(0.62 0.1 290);
+  --chart-6: oklch(0.78 0.07 240);
+  --chart-7: oklch(0.5 0.05 30);
+  --chart-grid: oklch(0.9 0.008 215);
+
+  /* 估值河流圖：便宜→昂貴，單一色相（不用紅綠，避免與漲跌混淆） */
+  --band-1: oklch(0.955 0.02 245);
+  --band-2: oklch(0.905 0.04 250);
+  --band-3: oklch(0.85 0.06 254);
+  --band-4: oklch(0.79 0.08 257);
+  --band-5: oklch(0.72 0.1 259);
+
+  --radius: 0.625rem;
+  color-scheme: light;
+}
+
+.dark {
+  --background: oklch(0.175 0.014 258);
+  --foreground: oklch(0.935 0.008 250);
+  --card: oklch(0.212 0.016 258);
+  --card-foreground: oklch(0.935 0.008 250);
+  --popover: oklch(0.235 0.018 258);
+  --popover-foreground: oklch(0.935 0.008 250);
+  --muted: oklch(0.25 0.016 258);
+  --muted-foreground: oklch(0.73 0.016 250);
+  --border: oklch(0.31 0.016 258);
+  --hairline: oklch(0.27 0.015 258);
+  --input: oklch(0.4 0.02 258);
+  --ring: oklch(0.72 0.115 256);
+  --primary: oklch(0.74 0.11 256);
+  --primary-foreground: oklch(0.2 0.04 260);
+  --secondary: oklch(0.27 0.02 258);
+  --secondary-foreground: oklch(0.935 0.008 250);
+  --accent: oklch(0.29 0.04 258);
+  --accent-foreground: oklch(0.9 0.04 255);
+  --destructive: oklch(0.66 0.17 28);
+  --destructive-foreground: oklch(0.18 0.02 30);
+
+  --rail: oklch(0.145 0.03 263);
+  --rail-foreground: oklch(0.93 0.012 250);
+  --rail-muted: oklch(0.74 0.03 255);
+  --rail-active: oklch(0.255 0.055 262);
+  --rail-border: oklch(0.22 0.03 263);
+
+  --seal: oklch(0.62 0.18 33);
+
+  --red: oklch(0.7 0.18 25);
+  --green: oklch(0.74 0.15 152);
+  --amber: oklch(0.78 0.12 78);
+
+  --chart-1: oklch(0.74 0.12 256);
+  --chart-2: oklch(0.6 0.02 240);
+  --chart-3: oklch(0.78 0.12 78);
+  --chart-4: oklch(0.68 0.07 195);
+  --chart-5: oklch(0.7 0.1 290);
+  --chart-6: oklch(0.56 0.06 245);
+  --chart-7: oklch(0.62 0.06 30);
+  --chart-grid: oklch(0.28 0.014 258);
+
+  --band-1: oklch(0.26 0.03 255);
+  --band-2: oklch(0.31 0.05 256);
+  --band-3: oklch(0.37 0.07 257);
+  --band-4: oklch(0.43 0.09 258);
+  --band-5: oklch(0.5 0.11 259);
+  color-scheme: dark;
+}
+
+/* 紅漲綠跌（預設）／綠漲紅跌 */
+:root,
+[data-convention="tw"] {
+  --rise: var(--red);
+  --fall: var(--green);
+}
+[data-convention="us"] {
+  --rise: var(--green);
+  --fall: var(--red);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-hairline: var(--hairline);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-rail: var(--rail);
+  --color-rail-foreground: var(--rail-foreground);
+  --color-rail-muted: var(--rail-muted);
+  --color-rail-active: var(--rail-active);
+  --color-rail-border: var(--rail-border);
+  --color-seal: var(--seal);
+  --color-seal-foreground: var(--seal-foreground);
+  --color-rise: var(--rise);
+  --color-fall: var(--fall);
+  --color-amber: var(--amber);
+  --color-chart-1: var(--chart-1);
+  --color-chart-2: var(--chart-2);
+  --color-chart-3: var(--chart-3);
+  --color-chart-4: var(--chart-4);
+  --color-chart-5: var(--chart-5);
+  --color-chart-grid: var(--chart-grid);
+
+  --radius-sm: 4px;
+  --radius-md: 6px;
+  --radius-lg: 8px;
+  --radius-xl: var(--radius);
+  --radius-2xl: 14px;
+
+  --font-sans: "Source Sans 3 Variable", "Noto Sans TC Variable", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+
+  /* 固定 rem 字級（Operate：不用流體字級），比例約 1.2 */
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.1rem;
+  --text-sm: 0.8125rem;
+  --text-sm--line-height: 1.25rem;
+  --text-md: 0.875rem;
+  --text-md--line-height: 1.35rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.6rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.6rem;
+  --text-xl: 1.375rem;
+  --text-xl--line-height: 1.8rem;
+  --text-2xl: 1.75rem;
+  --text-2xl--line-height: 2.2rem;
+  --text-hero: 2.5rem;
+  --text-hero--line-height: 1.1;
+
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --animate-stamp: stamp 180ms var(--ease-out);
+}
+
+@keyframes stamp {
+  from {
+    transform: scale(1.12);
+    opacity: 0;
+  }
+  to {
+    transform: scale(1);
+    opacity: 1;
+  }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  html {
+    -webkit-tap-highlight-color: transparent;
+    -webkit-text-size-adjust: 100%;
+    overscroll-behavior: none;
+    background: var(--background);
+  }
+  body {
+    min-height: 100dvh;
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    font-size: 1rem;
+    line-height: 1.6;
+    /* 全站等寬數字：金額、股數、日期都對齊 */
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--primary) 22%, transparent);
+    color: inherit;
+  }
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+    caret-color: var(--primary);
+  }
+  button,
+  a,
+  [role="button"],
+  [role="tab"] {
+    touch-action: manipulation;
+  }
+  button,
+  [role="button"],
+  [role="tab"] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+  h1,
+  h2,
+  h3 {
+    text-wrap: balance;
+  }
+  p {
+    text-wrap: pretty;
+  }
+  /* 捲軸跟著主題 */
+  * {
+    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+    scrollbar-width: thin;
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *,
+    ::before,
+    ::after {
+      animation-duration: 1ms !important;
+      transition-duration: 1ms !important;
+    }
+  }
+}
+
+@layer components {
+  /* 「章」：資料狀態標記（示範資料、預估、即將推出…） */
+  .chop {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    border: 1.5px solid currentColor;
+    border-radius: 3px;
+    padding: 0 0.35rem;
+    height: 1.375rem;
+    font-size: var(--text-xs);
+    line-height: 1;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    white-space: nowrap;
+    color: var(--primary);
+  }
+  .chop-press {
+    animation: var(--animate-stamp);
+  }
+  /* 數字：表格與金額 */
+  .num {
+    font-variant-numeric: tabular-nums;
+    font-feature-settings: "tnum" 1, "lnum" 1;
+    letter-spacing: -0.005em;
+  }
+  .press {
+    transition: transform 140ms var(--ease-out), background-color 140ms ease, color 140ms ease;
+  }
+  .press:active {
+    transform: scale(0.97);
+  }
+  .safe-bottom {
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+  }
+  .safe-top {
+    padding-top: env(safe-area-inset-top, 0px);
+  }
+}
+
+/* 大數字用比例數字（dataviz：tabular 只用在需要直向對齊的地方） */
+.hero-figure {
+  font-variant-numeric: proportional-nums;
+  font-feature-settings: "pnum" 1, "lnum" 1;
+}

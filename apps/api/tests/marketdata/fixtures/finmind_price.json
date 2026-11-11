@@ -1,0 +1,4 @@
+{"msg": "success", "status": 200, "data": [
+  {"date": "2026-11-10", "stock_id": "2330", "Trading_Volume": 28000000, "Trading_money": 67760000000, "open": 2410.0, "max": 2430.0, "min": 2400.0, "close": 2425.0, "spread": 15.0, "Trading_turnover": 61234},
+  {"date": "2026-11-09", "stock_id": "2330", "Trading_Volume": 31000000, "Trading_money": 74090000000, "open": 2380.0, "max": 2415.0, "min": 2375.0, "close": 2410.0, "spread": 25.0, "Trading_turnover": 66011}
+]}

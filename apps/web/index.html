@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="zh-Hant-TW" data-convention="tw">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
+    <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f3f5f5" />
+    <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#14161c" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="description" content="Forliosa：以台股為主的投資管理——跨券商持倉帳本、真實報酬、個股估值河流圖與 AI 分析。" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>Forliosa｜台股投資管理</title>
+    <script>
+      // 在 React 載入前套用主題與漲跌慣例，避免閃爍
+      try {
+        var raw = localStorage.getItem("forliosa:prefs")
+        var s = raw ? JSON.parse(raw).state : null
+        var theme = (s && s.theme) || "system"
+        var dark = theme === "dark" || (theme === "system" && matchMedia("(prefers-color-scheme: dark)").matches)
+        if (dark) document.documentElement.classList.add("dark")
+        if (s && s.colorConvention) document.documentElement.dataset.convention = s.colorConvention
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <a href="#main" class="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-md focus:bg-card focus:px-3 focus:py-2">跳到主要內容</a>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

@@ -1,0 +1,5 @@
+[
+  {"Date": "1150929", "Code": "2330", "Name": "台積電", "TradeVolume": "31855287", "TradeValue": "77463413685", "OpeningPrice": "2395.00", "HighestPrice": "2440.00", "LowestPrice": "2390.00", "ClosingPrice": "2440.00", "Change": "+35.0000", "Transaction": "65271"},
+  {"Date": "1150929", "Code": "0050", "Name": "元大台灣50", "TradeVolume": "41200321", "TradeValue": "3651230000", "OpeningPrice": "88.10", "HighestPrice": "88.90", "LowestPrice": "87.95", "ClosingPrice": "88.65", "Change": "-0.2500", "Transaction": "30211"},
+  {"Date": "1150929", "Code": "9999", "Name": "停牌", "TradeVolume": "0", "TradeValue": "0", "OpeningPrice": "--", "HighestPrice": "--", "LowestPrice": "--", "ClosingPrice": "--", "Change": "0.0000", "Transaction": "0"}
+]
