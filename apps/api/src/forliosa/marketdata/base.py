@@ -76,9 +76,10 @@ class QuoteData:
     is_demo: bool = False
     source: str = ""
 
-    _MERGEABLE = ("price", "prev_close", "open", "high", "low", "volume", "as_of", "trade_date")
+    _MERGEABLE = ("price", "prev_close", "open", "high", "low", "volume")
 
     def missing(self) -> list[str]:
+        """Missing *data* fields (as_of / trade_date are metadata and never borrowed)."""
         return [f for f in self._MERGEABLE if getattr(self, f) is None]
 
     def merged_with(self, other: QuoteData) -> QuoteData:

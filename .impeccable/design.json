@@ -1,0 +1,210 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-11T16:16:56.487300+00:00",
+  "title": "Design System: Forliosa",
+  "extensions": {
+    "colorMeta": {
+      "stamp-blue": {
+        "role": "primary",
+        "displayName": "印泥藍 Stamp Blue",
+        "canonical": "oklch(0.44 0.135 259)",
+        "tonalRamp": [
+          "oklch(0.22 0.07 259)",
+          "oklch(0.32 0.1 259)",
+          "oklch(0.44 0.135 259)",
+          "oklch(0.55 0.13 258)",
+          "oklch(0.66 0.11 257)",
+          "oklch(0.77 0.08 256)",
+          "oklch(0.87 0.045 255)",
+          "oklch(0.95 0.02 255)"
+        ]
+      },
+      "ground-stone": {
+        "role": "neutral",
+        "displayName": "青田石 Stone Ground",
+        "canonical": "oklch(0.972 0.005 195)",
+        "tonalRamp": [
+          "oklch(0.2 0.01 200)",
+          "oklch(0.32 0.01 200)",
+          "oklch(0.45 0.01 200)",
+          "oklch(0.58 0.01 200)",
+          "oklch(0.7 0.008 200)",
+          "oklch(0.82 0.007 200)",
+          "oklch(0.91 0.006 198)",
+          "oklch(0.972 0.005 195)"
+        ]
+      },
+      "rail-indigo": {
+        "role": "neutral",
+        "displayName": "靛青墨 Rail Indigo",
+        "canonical": "oklch(0.255 0.05 263)"
+      },
+      "seal-vermilion": {
+        "role": "tertiary",
+        "displayName": "朱泥 Seal Vermilion（品牌章專用）",
+        "canonical": "oklch(0.565 0.19 33)"
+      },
+      "price-red": {
+        "role": "semantic",
+        "displayName": "漲（台灣慣例）",
+        "canonical": "oklch(0.545 0.205 26)"
+      },
+      "price-green": {
+        "role": "semantic",
+        "displayName": "跌（台灣慣例）",
+        "canonical": "oklch(0.5 0.13 152)"
+      }
+    },
+    "typographyMeta": {
+      "hero": {
+        "displayName": "Hero figure",
+        "purpose": "總資產、現價、目前本益比；比例數字。"
+      },
+      "dense": {
+        "displayName": "Dense",
+        "purpose": "表格、清單、表單；等寬數字。"
+      },
+      "chop": {
+        "displayName": "Chop",
+        "purpose": "章內文字：資料狀態。"
+      }
+    },
+    "shadows": [
+      {
+        "name": "float",
+        "value": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
+        "purpose": "只用在 tooltip、popover、toast 這些浮起的元素。"
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "進場、按下回饋、蓋章。"
+      },
+      {
+        "name": "ease-drawer",
+        "value": "cubic-bezier(0.32, 0.72, 0, 1)",
+        "purpose": "手機抽屜（Vaul）。"
+      },
+      {
+        "name": "stamp",
+        "value": "180ms ease-out scale(1.12→1) + opacity",
+        "purpose": "儲存交易成功時「已入帳」章蓋下。"
+      },
+      {
+        "name": "press",
+        "value": "140ms ease-out scale(0.97)",
+        "purpose": "按鈕與列的按下回饋。"
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "md",
+        "value": "768px（表格↔卡片）"
+      },
+      {
+        "name": "lg",
+        "value": "1024px（側欄、Dialog↔Drawer）"
+      },
+      {
+        "name": "xl",
+        "value": "1280px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Chop 章",
+      "kind": "chip",
+      "refersTo": "chop",
+      "description": "資料狀態標記：示範資料、預估、即將推出、已入帳。",
+      "html": "<span class=\"ds-chop\">示範資料</span> <span class=\"ds-chop ds-chop-muted\">M4 推出</span>",
+      "css": ".ds-chop{display:inline-flex;align-items:center;height:22px;padding:0 5.6px;border:1.5px solid currentColor;border-radius:3px;font-size:12px;font-weight:600;letter-spacing:.06em;line-height:1;color:var(--primary,oklch(0.44 0.135 259));white-space:nowrap}.ds-chop-muted{color:var(--muted-foreground,oklch(0.47 0.018 255))}"
+    },
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "主要動作：記一筆、儲存。",
+      "html": "<button class=\"ds-btn\">＋ 記一筆</button>",
+      "css": ".ds-btn{height:36px;padding:0 12px;border:0;border-radius:6px;background:var(--primary,oklch(0.44 0.135 259));color:#fff;font-size:14px;font-weight:500;transition:transform 140ms cubic-bezier(.23,1,.32,1),background-color 140ms}.ds-btn:hover{background:color-mix(in oklch,var(--primary,oklch(0.44 0.135 259)) 88%,transparent)}.ds-btn:active{transform:scale(.97)}.ds-btn:focus-visible{outline:2px solid var(--ring,oklch(0.52 0.14 258));outline-offset:2px}"
+    },
+    {
+      "name": "Segmented",
+      "kind": "custom",
+      "refersTo": "segmented-active",
+      "description": "區間與分類切換。",
+      "html": "<div class=\"ds-seg\" role=\"radiogroup\"><button role=\"radio\" aria-checked=\"false\">1M</button><button role=\"radio\" aria-checked=\"true\">1Y</button><button role=\"radio\" aria-checked=\"false\">全部</button></div>",
+      "css": ".ds-seg{display:flex;gap:2px}.ds-seg button{height:32px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:oklch(0.47 0.018 255);font-size:13px;font-weight:500}.ds-seg button:hover{background:oklch(0.945 0.007 205);color:oklch(0.23 0.025 262)}.ds-seg button[aria-checked=true]{background:oklch(0.935 0.022 255);color:oklch(0.32 0.09 259);box-shadow:inset 0 0 0 1px color-mix(in oklch,oklch(0.44 0.135 259) 30%,transparent)}"
+    },
+    {
+      "name": "Panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "資料區塊：細線外框、10px 圓角、不巢狀。",
+      "html": "<section class=\"ds-panel\"><h2>即將除權息</h2><p>11/18 國泰永續高股息　每股 0.55 元</p></section>",
+      "css": ".ds-panel{background:oklch(0.996 0.002 195);border:1px solid oklch(0.885 0.009 215);border-radius:10px;padding:12px 20px 16px}.ds-panel h2{margin:0 0 8px;font-size:16px;font-weight:600}.ds-panel p{margin:0;font-size:14px;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Price change",
+      "kind": "custom",
+      "refersTo": "price-red",
+      "description": "漲跌：顏色＋▲▼（紅漲綠跌，可切換）。",
+      "html": "<span class=\"ds-up\">▲ +1.40%</span> <span class=\"ds-down\">▼ −1.85%</span>",
+      "css": ".ds-up{color:oklch(0.545 0.205 26);font-variant-numeric:tabular-nums}.ds-down{color:oklch(0.5 0.13 152);font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Rail nav item",
+      "kind": "nav",
+      "refersTo": "nav-rail-item-active",
+      "description": "桌面靛青側欄的導覽列。",
+      "html": "<nav class=\"ds-rail\"><a aria-current=\"page\">總覽</a><a>持股</a><a>AI 助理 <small>M4</small></a></nav>",
+      "css": ".ds-rail{background:oklch(0.255 0.05 263);padding:8px;width:220px;display:flex;flex-direction:column;gap:2px}.ds-rail a{display:flex;justify-content:space-between;height:40px;align-items:center;padding:0 12px;border-radius:6px;color:oklch(0.76 0.035 255);font-size:14px}.ds-rail a:hover{background:color-mix(in oklch,oklch(0.345 0.07 262) 60%,transparent);color:#fff}.ds-rail a[aria-current=page]{background:oklch(0.345 0.07 262);color:oklch(0.94 0.012 250);font-weight:500}.ds-rail small{font-size:12px;opacity:.8}"
+    }
+  ],
+  "narrative": {
+    "northStar": "蓋章為憑（The Bank-Counter Seal）",
+    "overview": "Forliosa 借用台灣銀行臨櫃的印鑑與印台：資料狀態以方形章標示。Operate 介面，世界只提供字型、色盤、密度與章這個招牌動作；導覽與控制項都是標準元件。首頁簡潔、細節頁密集。",
+    "keyCharacteristics": [
+      "青田石冷灰底＋靛青墨側欄",
+      "印泥藍是唯一操作色",
+      "朱泥只在品牌章",
+      "紅綠只表示漲跌並配 ▲▼",
+      "全站等寬數字，大數字用比例數字",
+      "細線而非陰影"
+    ],
+    "rules": [
+      {
+        "name": "The One Job Rule",
+        "body": "每個顏色只有一個工作。",
+        "section": "colors"
+      },
+      {
+        "name": "The Glyph Pair Rule",
+        "body": "漲跌顏色一定配 ▲▼。",
+        "section": "colors"
+      },
+      {
+        "name": "The Tabular Ledger Rule",
+        "body": "全站等寬數字；獨立大數字用比例數字；負號用 U+2212。",
+        "section": "typography"
+      }
+    ],
+    "dos": [
+      "用章標示資料狀態",
+      "隱私模式遮蔽金額與股數、保留百分比",
+      "空狀態給一個現在能做的動作"
+    ],
+    "donts": [
+      "朱泥紅不出現在品牌章以外",
+      "不用雙 Y 軸",
+      "不用玻璃模糊與漸層文字",
+      "不加 eyebrow 小標"
+    ]
+  }
+}

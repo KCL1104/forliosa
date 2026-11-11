@@ -313,13 +313,18 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")}
         | {s.symbol for s in inp.snapshots})
     hist_start = inception - timedelta(days=14)
+    md.quotes([*symbols, bench_symbol])  # one batched quote call warms the cache used by history()
     histories = {s: md.history(s, hist_start, today) for s in symbols}
     bench_hist = md.history(bench_symbol, hist_start, today)
     is_demo = any(h.is_demo for h in histories.values())
 
     last_close_day = max((h.candles[-1].t for h in histories.values() if h.candles), default=None)
     end = min(today, last_close_day) if last_close_day else last_tw_trading_day(today)
-    axis = tw_trading_days(inception, end)
+    # Date axis = days on which any held instrument actually traded (from the price data itself),
+    # so exchange holidays need no calendar; fall back to the built-in TW calendar without data.
+    axis = sorted({c.t for h in histories.values() for c in h.candles if inception <= c.t <= end})
+    if not axis:
+        axis = tw_trading_days(inception, end)
     if not axis:
         return empty
 

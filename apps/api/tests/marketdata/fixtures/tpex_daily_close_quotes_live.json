@@ -1,0 +1,42 @@
+[
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "6488",
+  "CompanyName": "環球晶",
+  "Close": "635.00",
+  "Change": "+23.00",
+  "Open": "612.00",
+  "High": "635.00",
+  "Low": "603.00",
+  "Average": "617.26",
+  "TradingShares": "11401175",
+  "TransactionAmount": "7037484299",
+  "TransactionNumber": "18703",
+  "LatestBidPrice": "634.00",
+  "LatesAskPrice": "635.00",
+  "Capitals": "528113725",
+  "NextReferencePrice": "635.00",
+  "NextLimitUp": "698.00",
+  "NextLimitDown": "572.00"
+ },
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "8299",
+  "CompanyName": "群聯",
+  "Close": "1730.00",
+  "Change": "+55.00",
+  "Open": "1660.00",
+  "High": "1740.00",
+  "Low": "1635.00",
+  "Average": "1693.79",
+  "TradingShares": "3262536",
+  "TransactionAmount": "5526042595",
+  "TransactionNumber": "10329",
+  "LatestBidPrice": "1730.00",
+  "LatesAskPrice": "1735.00",
+  "Capitals": "221439247",
+  "NextReferencePrice": "1730.00",
+  "NextLimitUp": "1900.00",
+  "NextLimitDown": "1560.00"
+ }
+]

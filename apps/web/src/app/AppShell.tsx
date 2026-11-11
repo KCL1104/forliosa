@@ -2,7 +2,7 @@ import { Link, Outlet, useRouterState } from "@tanstack/react-router"
 import { EyeIcon, EyeOffIcon, MonitorIcon, MoonIcon, PlusIcon, SearchIcon, SunIcon } from "lucide-react"
 import { api } from "@/api"
 import { useMe } from "@/api/queries"
-import { SealMark, Wordmark } from "@/components/brand"
+import { Wordmark } from "@/components/brand"
 import { DemoChop } from "@/components/chop"
 import { Button } from "@/components/ui/button"
 import {
@@ -53,7 +53,8 @@ function Sidebar() {
   const pathname = usePathname()
   const me = useMe()
   return (
-    <aside className="sticky top-0 hidden h-dvh flex-col bg-rail text-rail-foreground lg:flex" aria-label="主要導覽">
+    <div className="hidden bg-rail lg:block">
+    <aside className="sticky top-0 flex h-dvh flex-col bg-rail text-rail-foreground" aria-label="主要導覽">
       <div className="flex h-16 items-center px-5">
         <Link to="/" className="rounded-md outline-offset-4" aria-label="Forliosa 首頁">
           <Wordmark />
@@ -69,6 +70,7 @@ function Sidebar() {
         {isDemo && <DemoChop tone="rail" />}
       </div>
     </aside>
+    </div>
   )
 }
 
@@ -89,7 +91,7 @@ function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
             >
               <item.icon className="size-[18px] shrink-0" aria-hidden />
               <span className="flex-1">{item.label}</span>
-              {item.milestone && <span className="text-xs text-rail-muted/80">{item.milestone}</span>}
+              {item.milestone && <span className="text-xs text-rail-muted">{item.milestone}</span>}
             </Link>
           </li>
         )
@@ -105,7 +107,7 @@ function TopBar() {
     <header className="safe-top sticky top-0 z-30 border-b border-hairline bg-background">
       <div className="mx-auto flex h-14 w-full max-w-[1280px] items-center gap-2 px-4 sm:px-6 lg:h-16 lg:px-8">
         <Link to="/" className="mr-1 rounded-md lg:hidden" aria-label="Forliosa 首頁">
-          <SealMark size={28} />
+          <Wordmark />
         </Link>
         <button
           type="button"
@@ -118,7 +120,6 @@ function TopBar() {
         </button>
         <div className="flex-1 md:hidden" />
         <div className="ml-auto flex items-center gap-1.5">
-          {isDemo && <DemoChop className="mr-1 lg:hidden" />}
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSearchOpen(true)} aria-label="搜尋股票">
             <SearchIcon />
           </Button>

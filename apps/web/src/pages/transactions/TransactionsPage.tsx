@@ -28,10 +28,10 @@ import { Drawer, DrawerContent, DrawerFooter, DrawerHeader, DrawerTitle } from "
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
-import { direction, formatDateShort, formatMoney, formatPrice, formatQuantity, toneClass } from "@/lib/format"
+import { direction, formatDateShort, MASK, formatMoney, formatPrice, formatQuantity, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-import { TYPE_LABEL } from "./TradeForm"
+import { TYPE_LABEL } from "@/lib/labels"
 
 type Period = "month" | "year" | "all"
 const PERIODS: { value: Period; label: string }[] = [
@@ -252,7 +252,7 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
           {t.source === "import" && <Chop tone="muted">匯入</Chop>}
         </span>
         <span className="num block truncate text-sm text-muted-foreground lg:hidden">
-          {formatDateShort(t.trade_date)}・{privacy ? "••••" : qtyText}
+          {formatDateShort(t.trade_date)}・{privacy ? MASK : qtyText}
         </span>
         {t.note && t.symbol && <span className="hidden truncate text-sm text-muted-foreground lg:block">{t.note}</span>}
       </span>

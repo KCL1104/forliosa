@@ -1,0 +1,20 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2026-11-10",
+   "stock_id": "2330",
+   "dividend_yield": 0.96,
+   "PER": 26.49,
+   "PBR": 9.21
+  },
+  {
+   "date": "2026-11-11",
+   "stock_id": "2330",
+   "dividend_yield": 0.92,
+   "PER": 27.76,
+   "PBR": 9.66
+  }
+ ]
+}

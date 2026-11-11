@@ -17,7 +17,11 @@ from forliosa.marketdata.base import ProviderUnavailable
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "forliosa/0.1 (portfolio tracker; +https://github.com/)"
+USER_AGENT = "forliosa/0.1 (portfolio tracker)"
+# MIS rejects non-browser clients; a generic browser UA (no personal details) is used there.
+BROWSER_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
+)
 
 
 class RateLimiter:
@@ -62,18 +66,19 @@ DEFAULT_LIMITER = RateLimiter(
 
 class HttpFetcher:
     def __init__(self, timeout: float = 20.0, limiter: RateLimiter | None = None, retries: int = 2,
-                 client: httpx.Client | None = None):
+                 client: httpx.Client | None = None, user_agent: str = USER_AGENT, backoff: float = 1.0):
         self.limiter = limiter or DEFAULT_LIMITER
         self.retries = retries
+        self.backoff = backoff
         self.client = client or httpx.Client(
-            timeout=timeout, headers={"User-Agent": USER_AGENT, "Accept": "application/json"},
+            timeout=timeout, headers={"User-Agent": user_agent, "Accept": "application/json"},
             follow_redirects=True,
         )
 
     def get_bytes(self, url: str, params: dict[str, Any] | None = None,
                   headers: dict[str, str] | None = None) -> bytes:
         host = urlparse(url).hostname or ""
-        delay = 1.0
+        delay = self.backoff
         last_exc: Exception | None = None
         for attempt in range(self.retries + 1):
             self.limiter.wait(host)
@@ -84,7 +89,7 @@ class HttpFetcher:
             else:
                 if resp.status_code == 200:
                     return resp.content
-                if resp.status_code in (403, 404, 405, 407, 451):
+                if resp.status_code in (402, 403, 404, 405, 407, 429, 451):
                     raise ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
                 last_exc = ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
             if attempt < self.retries:

@@ -3,7 +3,7 @@ import { ArrowRightIcon, FileUpIcon, PencilLineIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 import { useHoldings, usePerformance, useSummary } from "@/api/queries"
-import type { AllocationSlice, Holding, PerformanceRange, PortfolioSummary } from "@/api/types"
+import type { Holding, PerformanceRange, PortfolioSummary } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { DemoChop, SoonChop } from "@/components/chop"
 import { Legend, RangeChips } from "@/components/charts/chart-kit"
@@ -14,6 +14,7 @@ import { ChartSkeleton, EmptyState, ErrorState, SkeletonLines } from "@/componen
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, formatDateShort, formatDateTime, formatDaysUntil, formatPercent, toneClass } from "@/lib/format"
+import { foldSlices } from "@/lib/allocation"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 
@@ -78,7 +79,7 @@ function Hero({ summary, holdings }: { summary?: PortfolioSummary; holdings?: Ho
           <DemoChop show={summary.is_demo} />
           <span className="text-sm text-muted-foreground">{formatDateTime(summary.as_of)} 收盤</span>
         </div>
-        <FlowMoney value={summary.market_value} className="hero-figure text-[2.25rem] leading-none font-semibold tracking-[-0.02em] sm:text-[3rem]" />
+        <FlowMoney value={summary.market_value} className="hero-figure text-hero-sm font-semibold tracking-[-0.02em] sm:text-hero" />
         <dl className="grid grid-cols-1 gap-x-10 gap-y-4 sm:grid-cols-2">
           <div className="flex min-w-0 flex-col gap-1">
             <dt className="text-sm text-muted-foreground">今日損益</dt>
@@ -109,7 +110,7 @@ function Hero({ summary, holdings }: { summary?: PortfolioSummary; holdings?: Ho
       </div>
 
       <div className="flex min-w-0 flex-col gap-2 lg:border-l lg:border-hairline lg:pl-8">
-        <h3 className="text-sm font-medium text-muted-foreground">今天誰影響最大</h3>
+        <h3 className="text-md font-medium text-muted-foreground">今天誰影響最大</h3>
         {movers.length === 0 ? (
           <p className="text-md text-muted-foreground">今天持股都沒有漲跌。</p>
         ) : (
@@ -119,7 +120,7 @@ function Hero({ summary, holdings }: { summary?: PortfolioSummary; holdings?: Ho
                 <Link
                   to="/stock/$symbol"
                   params={{ symbol: h.symbol }}
-                  className="press -mx-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-2 py-1.5 hover:bg-muted"
+                  className="row-link grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-1.5"
                 >
                   <span className="truncate text-md">
                     {h.name} <span className="num text-sm text-muted-foreground">{h.code}</span>
@@ -173,6 +174,7 @@ function PerformancePanel({ className }: { className?: string }) {
 
   return (
     <Panel
+      titleSize="lg"
       title="報酬走勢"
       titleId="perf-title"
       className={className}
@@ -221,7 +223,7 @@ function PerformancePanel({ className }: { className?: string }) {
 // ── AI 今日重點（M4） ─────────────────────────────────────
 function AiPanel() {
   return (
-    <Panel title="AI 今日重點" titleId="ai-title" aside={<SoonChop milestone="M4" />}>
+    <Panel titleSize="lg" title="AI 今日重點" titleId="ai-title" aside={<SoonChop milestone="M4" />}>
       <p className="text-md text-muted-foreground">
         每個交易日收盤後，AI 會只根據你的持股，整理成三段重點。數字都來自資料查詢，並標示資料日期。
       </p>
@@ -253,29 +255,14 @@ const ALLOC_TABS: { value: AllocKey; label: string }[] = [
   { value: "by_industry", label: "產業" },
   { value: "by_currency", label: "幣別" },
 ]
-const SLICE_COLORS = ["var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-6)", "var(--chart-5)", "var(--chart-2)"]
-
-/** 超過 6 塊的部分合併成「其他」（dataviz：不產生第 7 個顏色） */
-export function foldSlices(slices: AllocationSlice[], max = 6): AllocationSlice[] {
-  if (slices.length <= max) return slices
-  const head = slices.slice(0, max - 1)
-  const tail = slices.slice(max - 1)
-  return [
-    ...head,
-    {
-      key: "__other",
-      label: `其他 ${tail.length} 項`,
-      value: tail.reduce((s, x) => s + x.value, 0),
-      weight: tail.reduce((s, x) => s + x.weight, 0),
-    },
-  ]
-}
+/** 分類色固定順序（dataviz：依實體、不依排名；第 6 塊一定是「其他」石灰） */
+const SLICE_COLORS = ["var(--chart-1)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)", "var(--chart-6)", "var(--chart-2)"]
 
 function AllocationPanel({ summary }: { summary?: PortfolioSummary }) {
   const [key, setKey] = useState<AllocKey>("by_type")
   const slices = summary ? foldSlices(summary.allocation[key]) : []
   return (
-    <Panel title="資產配置" titleId="alloc-title">
+    <Panel titleSize="lg" title="資產配置" titleId="alloc-title">
       <RangeChips label="配置分類" value={key} options={ALLOC_TABS} onChange={setKey} />
       {!summary ? (
         <ChartSkeleton height={180} className="mt-3" />
@@ -327,7 +314,7 @@ function DividendsPanel({ summary }: { summary?: PortfolioSummary }) {
   const today = summary?.as_of.slice(0, 10) ?? ""
   const list = summary?.upcoming_dividends ?? []
   return (
-    <Panel title="即將除權息" titleId="div-title" aside={<span className="text-sm text-muted-foreground">60 天內</span>}>
+    <Panel titleSize="lg" title="即將除權息" titleId="div-title" aside={<span className="text-sm text-muted-foreground">60 天內</span>}>
       {!summary ? (
         <SkeletonLines rows={3} />
       ) : list.length === 0 ? (
@@ -340,7 +327,7 @@ function DividendsPanel({ summary }: { summary?: PortfolioSummary }) {
                 to="/stock/$symbol"
                 params={{ symbol: d.symbol }}
                 search={{ tab: "dividends" }}
-                className="press -mx-2 grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 rounded-md px-2 py-2.5 hover:bg-muted"
+                className="row-link grid grid-cols-[64px_minmax(0,1fr)_auto] items-center gap-3 py-2.5"
               >
                 <span className="flex flex-col leading-tight">
                   <span className="num text-md font-semibold">{formatDateShort(d.ex_dividend_date, false)}</span>
@@ -368,6 +355,7 @@ function TopHoldingsPanel({ holdings, className }: { holdings?: Holding[]; class
   const top = (holdings ?? []).slice(0, 5)
   return (
     <Panel
+      titleSize="lg"
       title="前五大持股"
       titleId="top-title"
       className={className}
@@ -387,7 +375,7 @@ function TopHoldingsPanel({ holdings, className }: { holdings?: Holding[]; class
               <Link
                 to="/stock/$symbol"
                 params={{ symbol: h.symbol }}
-                className="press -mx-2 grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 rounded-md px-2 py-2 hover:bg-muted"
+                className="row-link grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 py-2"
               >
                 <span className="min-w-0">
                   <span className="block truncate text-md" title={h.name}>

@@ -1,7 +1,7 @@
 """initial schema
 
 Revision ID: 0001
-Revises: 
+Revises:
 Create Date: 2026-11-11 16:00:56.590899
 """
 
@@ -11,7 +11,6 @@ import sqlalchemy as sa
 from alembic import op
 
 import forliosa.db
-
 
 revision: str = '0001'
 down_revision: str | None = None

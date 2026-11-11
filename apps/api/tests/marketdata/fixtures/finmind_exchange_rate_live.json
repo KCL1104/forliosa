@@ -1,0 +1,22 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2026-11-10",
+   "currency": "USD",
+   "cash_buy": 32.475,
+   "cash_sell": 33.145,
+   "spot_buy": 32.825,
+   "spot_sell": 32.925
+  },
+  {
+   "date": "2026-11-11",
+   "currency": "USD",
+   "cash_buy": 32.47,
+   "cash_sell": 33.14,
+   "spot_buy": 32.82,
+   "spot_sell": 32.92
+  }
+ ]
+}

@@ -1,7 +1,8 @@
 import { Area, CartesianGrid, ComposedChart, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import type { PerformancePoint } from "@/api/types"
 import { formatDateShort, formatPercent } from "@/lib/format"
-import { AXIS_TICK, ChartTooltipBox, GRID_STROKE } from "./chart-kit"
+import { ChartTooltipBox } from "./chart-kit"
+import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 
 interface Row {
   t: string

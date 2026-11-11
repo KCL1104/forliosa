@@ -1,0 +1,67 @@
+[
+ {
+  "Date": "1151110",
+  "Code": "0050",
+  "Name": "元大台灣50",
+  "TradeVolume": "192801381",
+  "TradeValue": "19169454097",
+  "OpeningPrice": "99.55",
+  "HighestPrice": "100.50",
+  "LowestPrice": "97.80",
+  "ClosingPrice": "99.70",
+  "Change": "2.2500",
+  "Transaction": "207122"
+ },
+ {
+  "Date": "1151110",
+  "Code": "0055",
+  "Name": "元大MSCI金融",
+  "TradeVolume": "1617624",
+  "TradeValue": "81053824",
+  "OpeningPrice": "50.50",
+  "HighestPrice": "50.90",
+  "LowestPrice": "49.51",
+  "ClosingPrice": "50.15",
+  "Change": "-0.2000",
+  "Transaction": "4994"
+ },
+ {
+  "Date": "1151110",
+  "Code": "00625K",
+  "Name": "富邦上証+R",
+  "TradeVolume": "",
+  "TradeValue": "",
+  "OpeningPrice": "",
+  "HighestPrice": "",
+  "LowestPrice": "",
+  "ClosingPrice": "",
+  "Change": "0.0000",
+  "Transaction": ""
+ },
+ {
+  "Date": "1151110",
+  "Code": "00878",
+  "Name": "國泰永續高股息",
+  "TradeVolume": "77407499",
+  "TradeValue": "2568174251",
+  "OpeningPrice": "33.30",
+  "HighestPrice": "33.57",
+  "LowestPrice": "32.77",
+  "ClosingPrice": "32.95",
+  "Change": "0.1800",
+  "Transaction": "46897"
+ },
+ {
+  "Date": "1151110",
+  "Code": "2330",
+  "Name": "台積電",
+  "TradeVolume": "36575797",
+  "TradeValue": "82847295812",
+  "OpeningPrice": "2265.00",
+  "HighestPrice": "2285.00",
+  "LowestPrice": "2230.00",
+  "ClosingPrice": "2285.00",
+  "Change": "50.0000",
+  "Transaction": "143496"
+ }
+]

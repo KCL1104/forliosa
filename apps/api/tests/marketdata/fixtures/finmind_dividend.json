@@ -1,4 +1,0 @@
-{"msg": "success", "status": 200, "data": [
-  {"date": "2026-06-12", "stock_id": "2330", "year": "115年第1季", "StockEarningsDistribution": 0.0, "StockStatutorySurplus": 0.0, "StockExDividendTradingDate": "", "TotalEmployeeStockDividend": 0.0, "CashEarningsDistribution": 6.0, "CashStatutorySurplus": 0.0, "CashExDividendTradingDate": "2026-06-11", "CashDividendPaymentDate": "2026-07-09", "AnnouncementDate": "2026-05-12"},
-  {"date": "2025-08-20", "stock_id": "6488", "year": "113年", "StockEarningsDistribution": 0.5, "StockStatutorySurplus": 0.0, "StockExDividendTradingDate": "2025-08-14", "CashEarningsDistribution": 8.0, "CashStatutorySurplus": 0.0, "CashExDividendTradingDate": "2025-08-14", "CashDividendPaymentDate": "2025-09-10"}
-]}

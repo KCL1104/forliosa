@@ -6,8 +6,11 @@ Field names are taken from sources, not guessed:
   ``/exchangeReport/TWT48U_ALL``, ``/holidaySchedule/holidaySchedule`` — the swagger bundled with
   twjackysu/TWSEMCPServer (``staticFiles/swagger_decoded.json``). Dates are ROC ("1150929").
 * MIS ``getStockInfo.jsp`` ``msgArray`` keys — mlouielu/twstock ``realtime.py`` and its mock data
-  (c, n, z, y, o, h, l, v, tlong, d, t, ex, b, a …). ``z`` is "-" when there was no trade yet;
-  ``v`` (accumulated volume) is in lots of 1,000 shares.
+  (c, n, z, y, o, h, l, v, tlong, d, t, ex, b, a …), checked against a live response on
+  2026-11-11 (the body starts with blank lines; ``|`` in ``ex_ch`` must be URL-encoded; a browser
+  User-Agent is required). ``z`` (last trade) is "-" between trades / before the first trade;
+  then ``pz`` (seen in live responses as the latest trade price) is used, and with no trade at
+  all today the reference price ``y``. ``v`` (accumulated volume) is in lots of 1,000 shares.
 
 ⚠ MIS is *not* an official API (TWSE licenses real-time data separately). It must be replaced by
 a licensed feed before any commercial use. Requests are spaced ≥ 0.5 s apart (shared limiter).
@@ -15,8 +18,8 @@ a licensed feed before any commercial use. Requests are spaced ≥ 0.5 s apart (
 
 from __future__ import annotations
 
-import time
-from datetime import UTC, date, datetime
+import time as _time
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -32,8 +35,8 @@ from forliosa.marketdata.base import (
     parse_tw_date,
     tw_symbol,
 )
-from forliosa.marketdata.http import HttpFetcher
-from forliosa.timeutil import TAIPEI, market_close_dt
+from forliosa.marketdata.http import BROWSER_USER_AGENT, HttpFetcher
+from forliosa.timeutil import TAIPEI, is_tw_market_open, market_close_dt, now_taipei
 
 OPENAPI_BASE = "https://openapi.twse.com.tw/v1"
 MIS_URL = "https://mis.twse.com.tw/stock/api/getStockInfo.jsp"
@@ -125,19 +128,36 @@ def parse_mis(payload: dict[str, Any]) -> dict[str, QuoteData]:
             continue
         market = "TPEX" if item.get("ex") == "otc" else "TWSE"
         symbol = tw_symbol(code, market)
+        # "d" + "t" = last regular-session trade (Taipei); "tlong" can be later (after-hours update).
+        d = parse_tw_date(item.get("d"))
+        as_of = None
+        try:
+            if d is not None and item.get("t"):
+                as_of = datetime.combine(d, time.fromisoformat(str(item["t"])), TAIPEI)
+        except ValueError:
+            as_of = None
         tlong = parse_int(item.get("tlong"))
-        as_of = datetime.fromtimestamp(tlong / 1000, tz=UTC).astimezone(TAIPEI) if tlong else None
-        d = parse_tw_date(item.get("d")) or (as_of.date() if as_of else None)
+        if as_of is None and tlong:
+            as_of = datetime.fromtimestamp(tlong / 1000, tz=UTC).astimezone(TAIPEI)
+        d = d or (as_of.date() if as_of else None)
         lots = parse_int(item.get("v"))
+        prev_close = parse_decimal(item.get("y"))
+        high, low = parse_decimal(item.get("h")), parse_decimal(item.get("l"))
+        price = parse_decimal(item.get("z")) or parse_decimal(item.get("pz"))
+        if price is None and high is None and low is None:
+            price = prev_close  # no trade yet today: show the reference price (change 0)
         out[symbol] = QuoteData(
             symbol=symbol,
-            price=parse_decimal(item.get("z")),  # None when no trade yet ("-")
-            prev_close=parse_decimal(item.get("y")),
+            price=price,
+            prev_close=prev_close,
             open=parse_decimal(item.get("o")),
-            high=parse_decimal(item.get("h")),
-            low=parse_decimal(item.get("l")),
+            high=high,
+            low=low,
             volume=lots * 1000 if lots is not None else None,
-            as_of=as_of, trade_date=d, is_realtime=True, source="twse-mis",
+            # Live only while the market is open now; after the close it is the day's final price.
+            as_of=as_of, trade_date=d,
+            is_realtime=bool(as_of and is_tw_market_open() and as_of.date() == now_taipei().date()),
+            source="twse-mis",
         )
     return out
 
@@ -153,12 +173,12 @@ class TwseOpenApiProvider(BaseProvider):
 
     def _get(self, path: str) -> Any:
         hit = self._cache.get(path)
-        if hit and time.monotonic() - hit[0] < self.CACHE_SECONDS:
+        if hit and _time.monotonic() - hit[0] < self.CACHE_SECONDS:
             return hit[1]
         data = self.fetcher.get_json(f"{OPENAPI_BASE}{path}")
         if not isinstance(data, list):
             raise ProviderUnavailable(f"TWSE OpenAPI {path} 格式不符")
-        self._cache[path] = (time.monotonic(), data)
+        self._cache[path] = (_time.monotonic(), data)
         return data
 
     def quotes(self, symbols: list[str]) -> dict[str, QuoteData] | None:
@@ -186,9 +206,10 @@ class TwseMisProvider(BaseProvider):
 
     name = "twse_mis"
     is_demo = False
+    cooldown_seconds = 60  # MIS answers 502 intermittently; retry soon rather than in 5 minutes
 
     def __init__(self, fetcher: HttpFetcher | None = None):
-        self.fetcher = fetcher or HttpFetcher(timeout=8.0)
+        self.fetcher = fetcher or HttpFetcher(timeout=8.0, retries=2, user_agent=BROWSER_USER_AGENT, backoff=0.3)
 
     def quotes(self, symbols: list[str]) -> dict[str, QuoteData] | None:
         tw = [s for s in symbols if market_of_symbol(s) != "US"]

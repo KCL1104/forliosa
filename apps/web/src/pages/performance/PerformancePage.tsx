@@ -1,0 +1,297 @@
+import { useState } from "react"
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { useAccounts, usePerformance } from "@/api/queries"
+import type { Performance, PerformanceRange } from "@/api/types"
+import { DemoChop } from "@/components/chop"
+import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
+import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
+import { ReturnChart } from "@/components/charts/ReturnChart"
+import { Pct } from "@/components/finance"
+import { PageHeader, Panel } from "@/components/section"
+import { ChartSkeleton, ErrorState } from "@/components/states"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
+import { cn } from "@/lib/utils"
+import { usePrefs } from "@/stores/prefs"
+
+const RANGES: { value: PerformanceRange; label: string }[] = [
+  { value: "1M", label: "1M" },
+  { value: "3M", label: "3M" },
+  { value: "6M", label: "6M" },
+  { value: "YTD", label: "YTD" },
+  { value: "1Y", label: "1Y" },
+  { value: "ALL", label: "全部" },
+]
+
+export function PerformancePage() {
+  const [range, setRange] = useState<PerformanceRange>("1Y")
+  const [account, setAccount] = useState<string | undefined>()
+  const accounts = useAccounts()
+  const perf = usePerformance(range, account)
+  const p = perf.data
+
+  return (
+    <div className="flex flex-col gap-4">
+      <PageHeader
+        title="績效分析"
+        meta={p?.is_demo && <DemoChop />}
+        description={p ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}。價格用未還原收盤價，股利另以交易紀錄計入。` : "時間加權報酬、XIRR、回撤與基準比較。"}
+      />
+      <div className="flex flex-wrap items-center gap-3">
+        <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />
+        <Select
+          value={account ?? "all"}
+          onValueChange={(v) => setAccount(v === "all" ? undefined : (v as string))}
+          items={[{ value: "all", label: "全部帳戶" }, ...(accounts.data ?? []).map((a) => ({ value: a.id, label: a.name }))]}
+        >
+          <SelectTrigger size="sm" className="min-w-36" aria-label="帳戶">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">全部帳戶</SelectItem>
+            {(accounts.data ?? []).map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <span className="text-sm text-muted-foreground">基準：{p?.benchmark?.name ?? "元大台灣50"}（可在設定更改）</span>
+      </div>
+
+      {perf.isError ? (
+        <ErrorState error={perf.error} onRetry={() => void perf.refetch()} />
+      ) : !p ? (
+        <>
+          <div className="grid grid-cols-2 gap-px overflow-hidden rounded-xl border bg-border lg:grid-cols-4">
+            {Array.from({ length: 4 }, (_, i) => <div key={i} className="bg-card p-4"><Skeleton className="h-4 w-20" /><Skeleton className="mt-2 h-7 w-24" /></div>)}
+          </div>
+          <ChartSkeleton height={300} />
+        </>
+      ) : p.series.length < 2 ? (
+        <Panel>
+          <p className="font-medium">資料還不夠計算績效</p>
+          <p className="text-md text-muted-foreground">至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。</p>
+        </Panel>
+      ) : (
+        <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
+          <Metrics p={p} />
+          <Panel title="與基準比較" titleId="cmp-title">
+            <Legend
+              className="mb-2"
+              items={[
+                { label: "我的（時間加權）", color: "var(--chart-1)", shape: "line", value: <span className={toneClass(direction(p.twr))}>{formatPercent(p.twr)}</span> },
+                { label: p.benchmark?.name ?? "基準", color: "var(--chart-2)", shape: "line", value: formatPercent(p.benchmark?.twr) },
+              ]}
+            />
+            <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} height={300} />
+          </Panel>
+          <ValuePanel p={p} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <DividendsByMonth p={p} />
+            <RealizedByYear p={p} />
+          </div>
+          <Definitions />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function Metrics({ p }: { p: Performance }) {
+  const excess = p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
+  const items: { label: string; help: string; value: React.ReactNode; sub?: React.ReactNode }[] = [
+    {
+      label: "時間加權報酬（TWR）",
+      help: "排除資金進出的影響，用來比較「選股與操作能力」。",
+      value: <Pct value={p.twr} />,
+      sub: excess !== null && (
+        <span>
+          比 {p.benchmark?.name} <span className={toneClass(direction(excess))}>{excess >= 0 ? "多" : "少"} {formatPercent(Math.abs(excess), { signed: false })}</span>
+        </span>
+      ),
+    },
+    {
+      label: "年化 XIRR",
+      help: "把每一筆投入與取回的時間點算進去，反映你實際賺了多少（年化）。",
+      value: p.xirr === null ? <span className="text-muted-foreground">—</span> : <Pct value={p.xirr} />,
+      sub: p.xirr === null ? "期間太短或現金流不足，無法計算" : "金額加權",
+    },
+    {
+      label: "最大回撤",
+      help: "期間內從最高點往下跌的最大幅度（以時間加權指數計算）。",
+      value: <span className="num">{formatPercent(p.max_drawdown)}</span>,
+      sub: "越接近 0 越穩",
+    },
+    {
+      label: "年化波動度",
+      help: "每日報酬的標準差 × √252。數字越大，帳面起伏越大。",
+      value: <span className="num">{formatPercent(p.volatility, { signed: false })}</span>,
+      sub: "每日報酬年化",
+    },
+  ]
+  return (
+    <dl className="grid grid-cols-1 gap-px overflow-hidden rounded-xl border bg-hairline min-[420px]:grid-cols-2 lg:grid-cols-4">
+      {items.map((m) => (
+        <div key={m.label} className="flex flex-col gap-1 bg-card p-4">
+          <dt className="text-sm text-muted-foreground">
+            <Tip>
+              <TooltipTrigger render={<span className="cursor-help underline decoration-dotted underline-offset-4">{m.label}</span>} />
+              <TooltipContent className="max-w-64">{m.help}</TooltipContent>
+            </Tip>
+          </dt>
+          <dd className="text-2xl font-semibold">{m.value}</dd>
+          {m.sub && <dd className="text-sm text-muted-foreground">{m.sub}</dd>}
+        </div>
+      ))}
+    </dl>
+  )
+}
+
+function ValuePanel({ p }: { p: Performance }) {
+  const privacy = usePrefs((s) => s.privacyMode)
+  const last = p.series.at(-1)!
+  return (
+    <Panel
+      title="市值與投入本金"
+      titleId="value-title"
+      aside={
+        <span className="text-md text-muted-foreground">
+          {privacy ? MASK : `市值 ${formatMoneyCompact(last.market_value)}・淨投入 ${formatMoneyCompact(last.net_invested)}`}
+        </span>
+      }
+    >
+      <Legend
+        className="mb-2"
+        items={[
+          { label: "市值", color: "var(--chart-1)" },
+          { label: "淨投入本金", color: "var(--chart-2)", shape: "line" },
+        ]}
+      />
+      {privacy ? (
+        <p className="py-10 text-center text-md text-muted-foreground">隱私模式開啟中，金額圖表已隱藏。</p>
+      ) : (
+        <div className="h-[220px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={p.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+              <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={56} tickFormatter={(t: string) => t.slice(0, 7).replace("-", "/")} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={64} tickFormatter={(n: number) => formatCompact(n, 0)} />
+              <Tooltip
+                cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}
+                content={({ active, payload }) => {
+                  const r = active ? (payload?.[0]?.payload as Performance["series"][number] | undefined) : undefined
+                  return r ? (
+                    <ChartTooltipBox
+                      title={formatDate(r.t)}
+                      rows={[
+                        { label: "市值", value: formatMoney(r.market_value), color: "var(--chart-1)" },
+                        { label: "淨投入", value: formatMoney(r.net_invested), color: "var(--chart-2)", shape: "line" },
+                      ]}
+                    />
+                  ) : null
+                }}
+              />
+              <Area dataKey="market_value" type="monotone" stroke="var(--chart-1)" strokeWidth={2} fill="var(--chart-1)" fillOpacity={0.1} isAnimationActive={false} />
+              <Line dataKey="net_invested" type="stepAfter" stroke="var(--chart-2)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function DividendsByMonth({ p }: { p: Performance }) {
+  const privacy = usePrefs((s) => s.privacyMode)
+  const total = p.dividends_by_month.reduce((s, d) => s + d.amount, 0)
+  return (
+    <Panel title="每月股利" titleId="divm-title" aside={<span className="num text-md text-muted-foreground">{privacy ? MASK : `合計 ${formatMoney(total)}`}</span>}>
+      {p.dividends_by_month.length === 0 ? (
+        <p className="text-md text-muted-foreground">這段期間沒有收到股利。</p>
+      ) : privacy ? (
+        <p className="py-10 text-center text-md text-muted-foreground">隱私模式開啟中，金額圖表已隱藏。</p>
+      ) : (
+        <div className="h-[200px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={p.dividends_by_month} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+              <XAxis dataKey="month" tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={monthTick} minTickGap={12} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} tickFormatter={(n: number) => formatCompact(n, 1)} />
+              <Tooltip
+                cursor={{ fill: "var(--muted)" }}
+                content={({ active, payload }) => {
+                  const r = active ? (payload?.[0]?.payload as { month: string; amount: number } | undefined) : undefined
+                  return r ? <ChartTooltipBox title={r.month.replace("-", "/")} rows={[{ label: "股利（已扣二代健保）", value: formatMoney(r.amount), color: "var(--chart-1)" }]} /> : null
+                }}
+              />
+              <Bar dataKey="amount" fill="var(--chart-1)" radius={[4, 4, 0, 0]} maxBarSize={28} isAnimationActive={false} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+    </Panel>
+  )
+}
+
+function RealizedByYear({ p }: { p: Performance }) {
+  const privacy = usePrefs((s) => s.privacyMode)
+  return (
+    <Panel title="每年已實現損益" titleId="real-title">
+      {p.realized_by_year.length === 0 ? (
+        <p className="text-md text-muted-foreground">這段期間沒有賣出，沒有已實現損益。</p>
+      ) : privacy ? (
+        <p className="py-10 text-center text-md text-muted-foreground">隱私模式開啟中，金額圖表已隱藏。</p>
+      ) : (
+        <div className="h-[200px] w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={p.realized_by_year.map((r) => ({ ...r, year: String(r.year) }))} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+              <CartesianGrid vertical={false} stroke={GRID_STROKE} />
+              <XAxis dataKey="year" tick={AXIS_TICK} tickLine={false} axisLine={false} />
+              <YAxis
+                tick={AXIS_TICK}
+                tickLine={false}
+                axisLine={false}
+                width={56}
+                domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
+                tickFormatter={(n: number) => formatCompact(n, 1)}
+              />
+              <ReferenceLine y={0} stroke="var(--muted-foreground)" />
+              <Tooltip
+                cursor={{ fill: "var(--muted)" }}
+                content={({ active, payload }) => {
+                  const r = active ? (payload?.[0]?.payload as { year: string; amount: number } | undefined) : undefined
+                  return r ? <ChartTooltipBox title={`${r.year} 年`} rows={[{ label: "已實現損益", value: formatMoney(r.amount, { signed: true }) }]} /> : null
+                }}
+              />
+              <Bar dataKey="amount" radius={[4, 4, 4, 4]} maxBarSize={48} isAnimationActive={false}>
+                {p.realized_by_year.map((r) => (
+                  <Cell key={r.year} fill={r.amount >= 0 ? "var(--rise)" : "var(--fall)"} />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+      <ul className="mt-2 flex flex-wrap gap-x-4 text-sm">
+        {p.realized_by_year.map((r) => (
+          <li key={r.year} className="num">
+            <span className="text-muted-foreground">{r.year}：</span>
+            <span className={toneClass(direction(r.amount))}>{privacy ? MASK : `${direction(r.amount) === "up" ? "▲" : direction(r.amount) === "down" ? "▼" : ""}${formatMoney(r.amount, { signed: true })}`}</span>
+          </li>
+        ))}
+      </ul>
+    </Panel>
+  )
+}
+
+function Definitions() {
+  return (
+    <details className="group rounded-xl border bg-card px-4 py-3 sm:px-5">
+      <summary className="cursor-pointer text-md font-medium marker:text-muted-foreground">計算方式</summary>
+      <div className="mt-3 flex max-w-prose flex-col gap-2 text-md text-muted-foreground">
+        <p>投資組合價值是每天收盤後所有持股的市值（美股依當日匯率換算成新台幣），第一版不含現金部位。</p>
+        <p>每日報酬 = （當日市值 + 當日流出）÷（前一日市值 + 當日流入）− 1。買進成本（含手續費）視為開盤前流入；賣出淨收入與現金股利（扣二代健保）視為收盤後流出。</p>
+        <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率；最大回撤以 TWR 指數計算。</p>
+      </div>
+    </details>
+  )
+}

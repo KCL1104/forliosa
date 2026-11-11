@@ -12,7 +12,9 @@ export function Panel({
   className,
   bodyClassName,
   aside,
+  titleSize = "md",
 }: {
+  titleSize?: "md" | "lg"
   title?: React.ReactNode
   titleId?: string
   action?: React.ReactNode
@@ -26,7 +28,7 @@ export function Panel({
       {(title || action) && (
         <header className="flex min-h-12 items-center gap-3 px-4 pt-3 sm:px-5">
           {title && (
-            <h2 id={titleId} className="flex min-w-0 flex-1 items-center gap-2 text-base font-semibold">
+            <h2 id={titleId} className={cn("flex min-w-0 flex-1 items-center gap-2 font-semibold", titleSize === "lg" ? "text-xl" : "text-base")}>
               {title}
             </h2>
           )}

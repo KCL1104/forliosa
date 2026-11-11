@@ -27,7 +27,7 @@ export function Wordmark({ className }: { className?: string }) {
   return (
     <span className={cn("inline-flex items-center gap-2.5", className)}>
       <SealMark />
-      <span className="text-[1.0625rem] font-semibold tracking-[-0.01em]">Forliosa</span>
+      <span className="text-lg font-semibold tracking-[-0.01em]">Forliosa</span>
     </span>
   )
 }

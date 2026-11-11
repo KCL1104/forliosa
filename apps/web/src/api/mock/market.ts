@@ -134,23 +134,51 @@ export function usdTwd(day: string): number {
 export const FX_NOW = 31.85
 
 // ── 估值 ─────────────────────────────────────────────────
+/** 季初收盤價（估值基準每季更新一次） */
+function quarterStartClose(spec: MockInstrumentSpec, day: string): number {
+  const m = Number(day.slice(5, 7))
+  const qStart = `${day.slice(0, 4)}-${String(Math.floor((m - 1) / 3) * 3 + 1).padStart(2, "0")}-01`
+  return closeOn(spec, qStart)
+}
+
+/**
+ * 示範 EPS／每股淨值：讓「倍數」在區間內緩慢擺盪（約 3 年一個循環），
+ * 再整體縮放，使最新一季剛好等於 eps_now／bvps_now。河流圖因此看起來像真的。
+ */
+function ratioWave(spec: MockInstrumentSpec, day: string, mid: number, amp: number): number {
+  const t = (parseDay(day).getTime() - parseDay("2020-01-01").getTime()) / (365.25 * 86400000)
+  const phase = (hashPhase(spec.symbol) % 628) / 100
+  return mid * (1 + amp * Math.sin((2 * Math.PI * t) / 3.1 + phase))
+}
+function hashPhase(s: string) {
+  let h = 7
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0
+  return h
+}
+function quarterKey(day: string) {
+  const m = Number(day.slice(5, 7))
+  return `${day.slice(0, 4)}-${String(Math.floor((m - 1) / 3) * 3 + 1).padStart(2, "0")}-15`
+}
+function rawBase(spec: MockInstrumentSpec, day: string, multiples: number[]) {
+  const mid = (multiples[0]! + multiples[multiples.length - 1]!) / 2
+  const q = quarterKey(day)
+  return quarterStartClose(spec, day) / ratioWave(spec, q, mid, 0.22)
+}
 function epsAt(spec: MockInstrumentSpec, day: string): number | null {
-  if (spec.eps_now === undefined) return null
+  if (spec.eps_now === undefined || !spec.per_multiples) return null
   for (const w of NEGATIVE_EPS_WINDOWS[spec.symbol] ?? []) {
     if (day >= w.from && day <= w.to) return w.eps
   }
-  // 季度階梯：每季更新一次
-  const years = (parseDay(MOCK_TODAY).getTime() - parseDay(day).getTime()) / (365.25 * 86400000)
-  const quarters = Math.floor(years * 4)
-  const g = spec.eps_growth ?? 0
-  const r = rng(`eps:${spec.symbol}:${quarters}`)
-  return round(spec.eps_now / Math.pow(1 + g, quarters / 4) * (1 + (r() - 0.5) * 0.06), 2)
+  const scale = spec.eps_now / rawBase(spec, MOCK_TODAY, spec.per_multiples)
+  return round(rawBase(spec, day, spec.per_multiples) * scale, 2)
 }
 function bvpsAt(spec: MockInstrumentSpec, day: string): number | null {
-  if (spec.bvps_now === undefined) return null
+  if (spec.bvps_now === undefined || !spec.pbr_multiples) return null
+  const scale = spec.bvps_now / rawBase(spec, MOCK_TODAY, spec.pbr_multiples)
+  // 淨值變動比 EPS 平緩：與線性成長混合
   const years = (parseDay(MOCK_TODAY).getTime() - parseDay(day).getTime()) / (365.25 * 86400000)
-  const quarters = Math.floor(years * 4)
-  return round(spec.bvps_now / Math.pow(1.09, quarters / 4), 2)
+  const trend = spec.bvps_now / Math.pow(1.1, Math.floor(years * 4) / 4)
+  return round(0.5 * rawBase(spec, day, spec.pbr_multiples) * scale + 0.5 * trend, 2)
 }
 
 export function valuationSeries(spec: MockInstrumentSpec, years: number): ValuationPoint[] {
@@ -158,6 +186,8 @@ export function valuationSeries(spec: MockInstrumentSpec, years: number): Valuat
   const from = addDays(MOCK_TODAY, -Math.round(years * 365.25))
   const pts: ValuationPoint[] = []
   const divs = dividendRecords(spec)
+  const exDates = divs.map((d) => d.ex_dividend_date).filter((d): d is string => !!d).sort()
+  const firstEx = exDates[0] ?? null
   const inRange = candles.filter((c) => c.t >= from)
   inRange.forEach((c, i) => {
     // 每週一個點，最後一天一定要有
@@ -167,6 +197,8 @@ export function valuationSeries(spec: MockInstrumentSpec, years: number): Valuat
     const trailing = divs
       .filter((d) => d.ex_dividend_date && d.ex_dividend_date <= c.t && d.ex_dividend_date > addDays(c.t, -365))
       .reduce((s, d) => s + d.cash_dividend, 0)
+    // 示範股利資料只涵蓋近幾年：涵蓋範圍以前的殖利率視為「無資料」，不是 0
+    const covered = firstEx !== null && c.t >= addDays(firstEx, 365)
     pts.push({
       t: c.t,
       close: c.c,
@@ -174,7 +206,7 @@ export function valuationSeries(spec: MockInstrumentSpec, years: number): Valuat
       bvps,
       per: eps !== null && eps > 0 ? round(c.c / eps, 2) : null,
       pbr: bvps ? round(c.c / bvps, 2) : null,
-      dividend_yield: trailing > 0 ? round(trailing / c.c, 4) : spec.type === "etf" || spec.eps_now !== undefined ? 0 : null,
+      dividend_yield: covered ? round(trailing / c.c, 4) : null,
     })
   })
   return pts

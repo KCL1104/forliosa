@@ -207,3 +207,9 @@ export function formatDaysUntil(target: string, today: string): string {
 export function formatRevenueThousands(v: number): string {
   return formatCompact(v * 1000)
 }
+
+/** 換算出的價位（河流圖倍數價）：≥1000 取整數、≥100 一位小數、其餘兩位 */
+export function formatPriceLevel(p: number, market: Market = "TWSE"): string {
+  if (market === "US") return formatNumber(p, 2)
+  return formatNumber(p, p >= 1000 ? 0 : p >= 100 ? 1 : 2)
+}

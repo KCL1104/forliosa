@@ -356,11 +356,8 @@ class Ledger:
                 gross = t.quantity * t.price
                 proceeds = gross - t.fee - t.tax
                 cost, cost_twd = pos.remove(qty, t.trade_date, t.is_day_trade)
-                if qty < t.quantity and t.quantity > 0:
-                    # Non-strict: book only the covered part of the proceeds as realized.
-                    proceeds_booked = proceeds * qty / t.quantity
-                else:
-                    proceeds_booked = proceeds
+                # Non-strict mode clamps an oversell: book only the covered part of the proceeds.
+                proceeds_booked = proceeds * qty / t.quantity if qty < t.quantity else proceeds
                 pnl = proceeds_booked - cost
                 self.realized.append(RealizedEvent(
                     t.trade_date, t.account_id, t.symbol, t.id, "trade", qty, proceeds_booked, cost, pnl,

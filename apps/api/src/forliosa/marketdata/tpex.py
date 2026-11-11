@@ -8,7 +8,8 @@ Field names verified from twjackysu/TWSEMCPServer:
   (tests/contract/test_otc_api.py, tests/unit/test_free_sources_unit.py).
 * Website ``/www/zh-tw/afterTrading/peQryDate?response=json`` (P/E, yield, P/B; any date) —
   ``tables[0].fields`` = 股票代號, 公司名稱, 本益比, 每股股利, 股利年度, 殖利率(%), 股價淨值比,
-  財報年/季 (from 2025-01-02); "N/A" when missing (sources/tpex/pe_qry_date.py).
+  財報年/季 (from 2025-01-02); "N/A" when missing (sources/tpex/pe_qry_date.py). Live response
+  (2026-11-11): top-level ``date`` "20261111"; the table also carries ``date`` "115/11/11".
 """
 
 from __future__ import annotations
@@ -63,7 +64,7 @@ def parse_pe_qry_date(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
         col = {name: fields.index(name) for name in ("股票代號", "本益比", "殖利率(%)", "股價淨值比")}
     except ValueError as exc:
         raise ProviderUnavailable(f"TPEx peQryDate 欄位改變：{fields}") from exc
-    served = parse_tw_date(payload.get("date"))
+    served = parse_tw_date(payload.get("date")) or parse_tw_date(tables[0].get("date"))
     out = {}
     for row in tables[0]["data"]:
         code = str(row[col["股票代號"]]).strip()

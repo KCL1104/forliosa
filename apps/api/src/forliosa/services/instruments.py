@@ -89,34 +89,33 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
     }
 
 
-def _nice_step(span: float, count: int) -> float:
-    raw = span / max(count - 1, 1)
-    if raw <= 0:
-        return 1.0
-    mag = 10 ** math.floor(math.log10(raw))
-    for m in (1, 2, 2.5, 5, 10):
-        if raw <= m * mag:
-            return m * mag
-    return 10 * mag
+_MANTISSAS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0)
 
 
 def nice_multiples(values: list[float], count: int = 5) -> list[float]:
-    """Evenly spaced round multiples spanning the 5th–95th percentile of ``values``."""
+    """``count`` evenly spaced round multiples covering the 5th–95th percentile of ``values``.
+
+    The smallest "nice" step (1, 1.5, 2, 2.5, 3, 4, 5, 6, 8 × 10ⁿ) whose band, starting at a multiple
+    of the step at or below the low end, reaches the high end — e.g. PER 13.4–31.5 -> 12, 18 … 36.
+    """
     vals = sorted(v for v in values if v is not None and v > 0 and math.isfinite(v))
     if len(vals) < 2:
         return []
     lo = vals[int(0.05 * (len(vals) - 1))]
-    hi = vals[int(math.ceil(0.95 * (len(vals) - 1)))]
+    hi = vals[math.ceil(0.95 * (len(vals) - 1))]
     if hi <= lo:
         hi = lo * 1.2
-    step = _nice_step(hi - lo, count)
-    start = math.floor(lo / step) * step
-    if start + step * (count - 1) < hi:
-        step = _nice_step((hi - start), count)
-    out = [round(start + i * step, 2) for i in range(count)]
-    if out[0] <= 0:
-        out = [round(step * (i + 1), 2) for i in range(count)]
-    return out
+    raw = (hi - lo) / (count - 1)
+    mag = 10 ** math.floor(math.log10(raw))
+    for step in [m * mag for m in _MANTISSAS] + [m * mag * 10 for m in _MANTISSAS]:
+        if step < raw * 0.999:
+            continue
+        start = math.floor(lo / step) * step
+        if start <= 0:
+            start = step
+        if start + step * (count - 1) >= hi:
+            return [round(start + i * step, 2) for i in range(count)]
+    return []
 
 
 def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]:
@@ -127,6 +126,9 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
     start = range_start(range_, today, date(1990, 1, 1))
     five_y = range_start("5Y", today, date(1990, 1, 1))
     hist = md.history(info.symbol, min(start, five_y), today)
+    ratios = md.valuation_ratios(info.symbol, min(start, five_y), today) if info.type == "stock" else None
+    if ratios:
+        return _valuation_from_ratios(info, hist.candles, ratios, start, five_y, hist.is_demo)
     fundamentals = md.valuation_inputs(info.symbol) if info.type == "stock" else None
     divs = md.dividends(info.symbol)
     notes: list[str] = []
@@ -193,6 +195,63 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
         "symbol": info.symbol,
         "per_multiples": nice_multiples(per_vals),
         "pbr_multiples": nice_multiples(pbr_vals),
+        "series": series,
+        "current": {
+            "per": current_per,
+            "pbr": last["pbr"] if last else None,
+            "dividend_yield": last["dividend_yield"] if last else None,
+            "per_percentile_5y": percentile,
+        },
+        "notes": notes,
+        "is_demo": is_demo,
+    }
+
+
+def _valuation_from_ratios(info: InstrumentInfo, candles: list, ratios: dict, start: date, five_y: date,
+                           is_demo: bool) -> dict[str, Any]:
+    """Valuation from published daily PER / PBR / yield (e.g. TWSE via FinMind).
+
+    eps_ttm = close / PER and bvps = close / PBR, so the river bands (eps_ttm × multiple) pass
+    exactly through the published ratios. Days without a published ratio (e.g. today's close
+    before the ratios are out) carry the previous EPS / BVPS / dividend forward.
+    """
+    series = []
+    per_5y: list[float] = []
+    eps = bvps = dps = None
+    no_eps_days = 0
+    for c in candles:
+        r = ratios.get(c.t)
+        if r is not None:
+            per, pbr, dy = r.get("per"), r.get("pbr"), r.get("dividend_yield")
+            eps = c.c / per if per else None
+            bvps = c.c / pbr if pbr else bvps
+            dps = dy * c.c if dy is not None else dps
+            if per is None:
+                no_eps_days += 1
+        per_v = c.c / eps if eps else None
+        pbr_v = c.c / bvps if bvps else None
+        dy_v = dps / c.c if dps is not None and c.c else None
+        if c.t >= five_y and per_v is not None:
+            per_5y.append(float(per_v))
+        if c.t < start:
+            continue
+        series.append({
+            "t": c.t, "close": ser.price(c.c), "eps_ttm": ser.price(eps), "bvps": ser.price(bvps),
+            "per": ser.price(per_v), "pbr": ser.price(pbr_v), "dividend_yield": ser.ratio(dy_v),
+        })
+    notes = ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值（經 FinMind 取得）；EPS = 收盤價 ÷ 本益比"]
+    per_vals = [p["per"] for p in series if p["per"] is not None]
+    if not per_vals or no_eps_days:
+        notes.append("期間內有近四季 EPS 小於或等於 0 的日子，本益比無意義，該段區間留白")
+    last = series[-1] if series else None
+    current_per = last["per"] if last else None
+    percentile = None
+    if current_per is not None and per_5y:
+        percentile = ser.ratio(Decimal(sum(1 for v in per_5y if v <= current_per)) / Decimal(len(per_5y)))
+    return {
+        "symbol": info.symbol,
+        "per_multiples": nice_multiples(per_vals),
+        "pbr_multiples": nice_multiples([p["pbr"] for p in series if p["pbr"] is not None]),
         "series": series,
         "current": {
             "per": current_per,

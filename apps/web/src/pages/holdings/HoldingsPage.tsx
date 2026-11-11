@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { api } from "@/api"
 import { formatPercent } from "@/lib/format"
+import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import type { HoldingsSearch } from "@/router"
 
@@ -25,7 +26,6 @@ const MARKETS: { value: "ALL" | Market; label: string }[] = [
   { value: "TPEX", label: "上櫃" },
   { value: "US", label: "美股" },
 ]
-const MARKET_LABEL: Record<Market, string> = { TWSE: "上市", TPEX: "上櫃", US: "美股" }
 
 export function HoldingsPage() {
   const search = useSearch({ from: "/holdings" }) as HoldingsSearch

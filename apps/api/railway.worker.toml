@@ -1,0 +1,11 @@
+# Railway config-as-code for the **worker** service (same image, different start command).
+# Service settings: Root Directory = apps/api, Config File Path = /apps/api/railway.worker.toml
+# Migrations are run by the api service only.
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+watchPatterns = ["apps/api/**"]
+
+[deploy]
+startCommand = "python -m forliosa.worker"
+restartPolicyType = "ALWAYS"

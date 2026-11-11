@@ -13,8 +13,8 @@ import logging
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import dataclass
-from datetime import date
+from dataclasses import dataclass, replace
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -34,8 +34,10 @@ from forliosa.marketdata.base import (
     code_of_symbol,
     market_of_symbol,
 )
+from forliosa.marketdata.catalog import KNOWN_SPLITS
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.http import HttpFetcher
+from forliosa.timeutil import last_tw_trading_day, market_close_dt
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -76,8 +78,9 @@ class MarketData:
             return fn()
         except Exception as exc:  # any upstream failure -> fall back to the next provider
             log.warning("market data provider %s failed: %s", provider.name, exc)
+            cooldown = getattr(provider, "cooldown_seconds", COOLDOWN_SECONDS)
             with self._lock:
-                self._down_until[provider.name] = time.monotonic() + COOLDOWN_SECONDS
+                self._down_until[provider.name] = time.monotonic() + cooldown
             return None
 
     def _first(self, method: str, *args: Any) -> Answer | None:
@@ -199,10 +202,15 @@ class MarketData:
                     break
                 got = self._call(p, lambda p=p, need=need: p.quotes(need)) or {}
                 for s, q in got.items():
-                    partial[s] = partial[s].merged_with(q) if s in partial else q
+                    if s in partial:
+                        partial[s] = _merge_quotes(partial[s], q)
+                    elif q.price is not None:
+                        partial[s] = q
             for s, q in partial.items():
                 if q.price is None:
                     continue
+                if q.as_of is None and q.trade_date is not None:
+                    q = replace(q, as_of=market_close_dt(q.trade_date))
                 self._quote_cache[s] = (now, q)
                 out[s] = q
         return out
@@ -222,7 +230,33 @@ class MarketData:
         ans = self._first("history", symbol, start, end)
         if ans is None:
             return HistoryResult(symbol, [], False, "")
-        return HistoryResult(symbol, list(ans.value), ans.is_demo, ans.source)
+        candles = list(ans.value)
+        if not ans.is_demo:
+            candles = self._with_today(symbol, candles, end)
+        return HistoryResult(symbol, candles, ans.is_demo, ans.source)
+
+    def _with_today(self, symbol: str, candles: list[Candle], end: date) -> list[Candle]:
+        """Daily sources publish after the close; append the latest day from a complete real quote."""
+        q = self.quote(symbol)
+        if q is None or q.is_demo or q.trade_date is None or q.trade_date > end:
+            return candles
+        if candles and q.trade_date <= candles[-1].t:
+            return candles
+        if None in (q.price, q.open, q.high, q.low) or q.volume is None:
+            return candles
+        assert q.price is not None and q.open is not None and q.high is not None and q.low is not None
+        return [*candles, Candle(q.trade_date, q.open, q.high, q.low, q.price, q.volume)]
+
+    def valuation_ratios(self, symbol: str, start: date, end: date) -> dict[date, dict] | None:
+        """Real daily PER / PBR / dividend yield when a provider publishes them (FinMind)."""
+        for p in self._available():
+            fn = getattr(p, "valuation_ratios", None)
+            if fn is None or p.is_demo:
+                continue
+            value = self._call(p, lambda fn=fn: fn(symbol, start, end))
+            if value:
+                return value
+        return None
 
     def closes(self, symbol: str, start: date, end: date) -> tuple[dict[date, Decimal], bool]:
         h = self.history(symbol, start, end)
@@ -235,8 +269,16 @@ class MarketData:
         return ans
 
     def corporate_events(self, symbol: str) -> list[CorporateEvent]:
-        ans = self._first("corporate_events", symbol)
-        return list(ans.value) if ans else []
+        """Known real splits (reference data) plus any a real provider reports."""
+        events = [CorporateEvent(symbol, d, "split", r) for d, r in KNOWN_SPLITS.get(symbol, ())]
+        for p in self._available():
+            if p.is_demo:
+                continue
+            more = self._call(p, lambda p=p: p.corporate_events(symbol))
+            for e in more or []:
+                if all((e.date, e.kind) != (x.date, x.kind) for x in events):
+                    events.append(e)
+        return sorted(events, key=lambda e: e.date)
 
     def monthly_revenue(self, symbol: str) -> Answer[list[RevenueRow]]:
         ans = self._first("monthly_revenue", symbol)
@@ -278,6 +320,24 @@ class MarketData:
         return dict(ans.value), ans.is_demo
 
 
+def _previous_session(symbol: str, d: date) -> date:
+    prev = d - timedelta(days=1)
+    if market_of_symbol(symbol) == "US":
+        while prev.weekday() >= 5:
+            prev -= timedelta(days=1)
+        return prev
+    return last_tw_trading_day(prev)
+
+
+def _merge_quotes(base: QuoteData, other: QuoteData) -> QuoteData:
+    """Fill ``base``'s gaps from ``other``; a close from the previous session becomes prev_close."""
+    if (base.prev_close is None and other.price is not None and base.trade_date and other.trade_date
+            and other.trade_date == _previous_session(base.symbol, base.trade_date)):
+        sources = "+".join(dict.fromkeys(x for x in (base.source, other.source) if x))
+        base = replace(base, prev_close=other.price, is_demo=base.is_demo or other.is_demo, source=sources)
+    return base.merged_with(other)
+
+
 def build_providers(settings: Settings) -> list[BaseProvider]:
     from forliosa.marketdata.finmind import FinMindProvider
     from forliosa.marketdata.shioaji_data import ShioajiDataProvider
@@ -289,8 +349,9 @@ def build_providers(settings: Settings) -> list[BaseProvider]:
         "shioaji_data": lambda: ShioajiDataProvider(settings.shioaji_data_base_url, settings.cache_dir, fetcher),
         "twse_openapi": lambda: TwseOpenApiProvider(HttpFetcher(timeout=10, retries=0)),
         "tpex_openapi": lambda: TpexOpenApiProvider(HttpFetcher(timeout=10, retries=0)),
-        "twse_mis": lambda: TwseMisProvider(HttpFetcher(timeout=8, retries=0)),
-        "finmind": lambda: FinMindProvider(settings.finmind_token, HttpFetcher(timeout=10, retries=0)),
+        "twse_mis": lambda: TwseMisProvider(),
+        "finmind": lambda: FinMindProvider(settings.finmind_token, HttpFetcher(timeout=20, retries=0),
+                                           cache_dir=settings.cache_dir),
         "demo": lambda: DemoProvider(),
     }
     providers: list[BaseProvider] = []

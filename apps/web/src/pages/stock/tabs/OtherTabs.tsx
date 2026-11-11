@@ -6,7 +6,8 @@ import { api } from "@/api"
 import { useDividends, useHoldings, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, Quote } from "@/api/types"
 import { useUi } from "@/app/ui-store"
-import { AXIS_TICK, ChartTooltipBox, GRID_STROKE, monthTick } from "@/components/charts/chart-kit"
+import { ChartTooltipBox } from "@/components/charts/chart-kit"
+import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
 import { Chop, DemoChop, SoonChop } from "@/components/chop"
 import { Money, Pct, Price, Quantity } from "@/components/finance"
 import { Panel } from "@/components/section"
@@ -21,11 +22,11 @@ import {
   formatPrice,
   formatQuantity,
   formatRevenueThousands,
+  MASK,
 } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
-import { TYPE_LABEL } from "@/pages/transactions/TradeForm"
+import { MARKET_LABEL, TYPE_LABEL } from "@/lib/labels"
 
-const MARKET_LABEL = { TWSE: "上市", TPEX: "上櫃", US: "美股" } as const
 
 // ── 總覽 ─────────────────────────────────────────────────
 export function OverviewTab({ instrument, quote }: { instrument: InstrumentDetail; quote?: Quote }) {
@@ -157,7 +158,7 @@ export function FinancialsTab({ instrument }: { instrument: InstrumentDetail }) 
               />
               <Bar dataKey="revenue" radius={[4, 4, 0, 0]} isAnimationActive={false}>
                 {data.map((r) => (
-                  <Cell key={r.period} fill={r === latest ? "var(--chart-1)" : "var(--chart-6)"} />
+                  <Cell key={r.period} fill={r === latest ? "var(--chart-1)" : "color-mix(in oklch, var(--chart-1) 42%, var(--card))"} />
                 ))}
               </Bar>
             </BarChart>
@@ -346,11 +347,11 @@ export function MyTradesTab({ instrument }: { instrument: InstrumentDetail }) {
                 <span className="flex min-w-0 items-center gap-2">
                   <Chop tone={t.type === "buy" || t.type === "sell" ? "ink" : "muted"}>{TYPE_LABEL[t.type]}</Chop>
                   <span className="num truncate">
-                    {privacy ? "••••" : t.quantity !== null ? formatQuantity(t.quantity, unit, instrument.market) : ""}
+                    {privacy ? MASK : t.quantity !== null ? formatQuantity(t.quantity, unit, instrument.market) : ""}
                     {t.price !== null && t.type !== "split" ? ` @ ${formatPrice(t.price, instrument.market)}` : ""}
                   </span>
                 </span>
-                <span className="num text-right">{privacy ? "••••" : formatMoney(t.amount, { currency: t.currency })}</span>
+                <span className="num text-right">{privacy ? MASK : formatMoney(t.amount, { currency: t.currency })}</span>
               </li>
             ))}
           </ul>

@@ -30,7 +30,7 @@ def portfolio_holdings(account_id: str | None = None, user: User = Depends(curre
 
 @router.get("/performance", response_model=Performance)
 def portfolio_performance(
-    range: str = Query("1Y"),  # noqa: A002
+    range: str = Query("1Y"),
     benchmark: str | None = None,
     account_id: str | None = None,
     user: User = Depends(current_user),

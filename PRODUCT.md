@@ -4,7 +4,7 @@
 
 > 由 `/impeccable init` 產生（2026-11-11）。
 > **訪談替代說明**：這次 init 由前端子代理在產品負責人睡眠時執行，沒有可用的提問工具，因此依 init 參考檔的規則「只從明確的需求文件推論」。所有內容取自 `docs/product-spec.md`、`docs/api-contract.md` 與交辦說明；標示 **〔推論〕** 的項目是子代理的推論，待產品負責人確認（彙整在 `apps/web/OPEN_QUESTIONS.md`）。
-> impeccable.style 在此網路環境被封鎖，所以 concept-seed 的線上目錄（catalog challengers）無法取得，走離線降級流程；見 `DESIGN.md`。
+> 網路：init 與第一次 concept-seed 執行時 impeccable.style 被封鎖（降級流程）；稍後網路開通，已用同一個 seed 重擲並取得 catalog challengers，評比結果記在 `apps/web/.impeccable/surfaces/src-pages-home-homepage-tsx.md`，視覺決定見 `DESIGN.md`。init 本身不需要 catalog，因此內容不變。
 
 ## Platform
 

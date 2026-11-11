@@ -40,7 +40,9 @@ from forliosa.timeutil import market_close_dt
 
 log = logging.getLogger(__name__)
 
-SOURCE_OFFICIAL = "shioaji-data：公司基本資料、每日收盤與市值（臺灣證券交易所、證券櫃檯買賣中心；政府資料開放授權條款第 1 版）"
+SOURCE_OFFICIAL = (
+    "shioaji-data：公司基本資料、每日收盤與市值（臺灣證券交易所、證券櫃檯買賣中心；政府資料開放授權條款第 1 版）"
+)
 SOURCE_FINANCIALS = "shioaji-data：月營收、季財報（公開資訊觀測站；政府資料開放授權條款第 1 版）"
 SOURCE_RESEARCH = "shioaji-data 公司研究：業務簡介、產業鏈位置、題材（AI 整理並交叉核對，授權待定）"
 

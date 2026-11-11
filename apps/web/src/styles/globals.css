@@ -108,13 +108,13 @@
   --green: oklch(0.5 0.13 152);
   --amber: oklch(0.62 0.13 75);
 
-  /* 圖表系列：我的＝印泥藍、基準＝石灰，其餘為配置圖用 */
-  --chart-1: oklch(0.47 0.14 259);
+  /* 圖表系列（已用 dataviz validate_palette 驗證）：1 我的／印泥藍、2 基準與「其他」石灰、3–6 配置圖分類色 */
+  --chart-1: oklch(0.494 0.141 258.8);
   --chart-2: oklch(0.66 0.02 230);
-  --chart-3: oklch(0.72 0.12 78);
-  --chart-4: oklch(0.56 0.07 195);
-  --chart-5: oklch(0.62 0.1 290);
-  --chart-6: oklch(0.78 0.07 240);
+  --chart-3: oklch(0.659 0.136 68.8);
+  --chart-4: oklch(0.624 0.105 194.9);
+  --chart-5: oklch(0.546 0.175 285.2);
+  --chart-6: oklch(0.621 0.163 346.6);
   --chart-7: oklch(0.5 0.05 30);
   --chart-grid: oklch(0.9 0.008 215);
 
@@ -163,16 +163,16 @@
   --green: oklch(0.74 0.15 152);
   --amber: oklch(0.78 0.12 78);
 
-  --chart-1: oklch(0.74 0.12 256);
+  --chart-1: oklch(0.669 0.141 257.9);
   --chart-2: oklch(0.6 0.02 240);
-  --chart-3: oklch(0.78 0.12 78);
-  --chart-4: oklch(0.68 0.07 195);
-  --chart-5: oklch(0.7 0.1 290);
-  --chart-6: oklch(0.56 0.06 245);
+  --chart-3: oklch(0.66 0.13 72);
+  --chart-4: oklch(0.66 0.104 191.7);
+  --chart-5: oklch(0.658 0.148 288.4);
+  --chart-6: oklch(0.664 0.158 351);
   --chart-7: oklch(0.62 0.06 30);
   --chart-grid: oklch(0.28 0.014 258);
 
-  --band-1: oklch(0.26 0.03 255);
+  --band-1: oklch(0.29 0.035 255);
   --band-2: oklch(0.31 0.05 256);
   --band-3: oklch(0.37 0.07 257);
   --band-4: oklch(0.43 0.09 258);
@@ -227,6 +227,7 @@
   --color-chart-3: var(--chart-3);
   --color-chart-4: var(--chart-4);
   --color-chart-5: var(--chart-5);
+  --color-chart-6: var(--chart-6);
   --color-chart-grid: var(--chart-grid);
 
   --radius-sm: 4px;
@@ -252,8 +253,10 @@
   --text-xl--line-height: 1.8rem;
   --text-2xl: 1.75rem;
   --text-2xl--line-height: 2.2rem;
-  --text-hero: 2.5rem;
-  --text-hero--line-height: 1.1;
+  --text-hero: 3rem;
+  --text-hero--line-height: 1;
+  --text-hero-sm: 2.25rem;
+  --text-hero-sm--line-height: 1;
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
@@ -281,6 +284,7 @@
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
     overscroll-behavior: none;
+    scrollbar-gutter: stable;
     background: var(--background);
   }
   body {
@@ -389,4 +393,22 @@
 .hero-figure {
   font-variant-numeric: proportional-nums;
   font-feature-settings: "pnum" 1, "lnum" 1;
+}
+
+@layer components {
+  /* 清單列連結（首頁各卡片、更多頁）：整列可點、按下回饋 */
+  .row-link {
+    margin-inline: -0.5rem;
+    border-radius: var(--radius-md);
+    padding-inline: 0.5rem;
+    transition: transform 140ms var(--ease-out), background-color 140ms ease;
+  }
+  .row-link:active {
+    transform: scale(0.985);
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .row-link:hover {
+      background: var(--muted);
+    }
+  }
 }

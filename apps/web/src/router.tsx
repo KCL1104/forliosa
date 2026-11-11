@@ -56,7 +56,7 @@ const settingsRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/settings/SettingsPage"), "SettingsPage"),
 })
 
-const placeholder = (path: string, name: "WatchlistPage" | "AiPage" | "ReportsPage" | "GroupsPage" | "ImportPage" | "MorePage") =>
+const placeholder = <P extends string>(path: P, name: "WatchlistPage" | "AiPage" | "ReportsPage" | "GroupsPage" | "ImportPage" | "MorePage") =>
   createRoute({
     getParentRoute: () => rootRoute,
     path,

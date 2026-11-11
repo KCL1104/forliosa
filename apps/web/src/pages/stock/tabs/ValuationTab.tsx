@@ -1,55 +1,16 @@
 import { useMemo, useState } from "react"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { useValuation } from "@/api/queries"
-import type { InstrumentDetail, Valuation, ValuationPoint } from "@/api/types"
-import { AXIS_TICK, ChartTooltipBox, GRID_STROKE, Legend, RangeChips } from "@/components/charts/chart-kit"
+import type { InstrumentDetail, Valuation } from "@/api/types"
+import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
+import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { DemoChop } from "@/components/chop"
 import { Panel } from "@/components/section"
 import { ChartSkeleton, EmptyState, ErrorState } from "@/components/states"
-import { formatDate, formatNumber, formatPercent, formatPrice } from "@/lib/format"
-import { cn } from "@/lib/utils"
+import { buildRiver, invalidRuns, type Mode } from "@/lib/valuation"
+import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
 
-type Mode = "per" | "pbr"
 const BAND_VARS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
-
-export interface RiverRow {
-  t: string
-  close: number
-  ratio: number | null
-  base: number | null
-  /** 堆疊用：b0 = base×m0，bi = base×(mi − mi−1)；base ≤ 0 時為 null（留白） */
-  bands: (number | null)[]
-}
-
-/** 河流圖資料：eps_ttm × 倍數 或 bvps × 倍數。基準 ≤ 0 時整段留白。 */
-export function buildRiver(series: ValuationPoint[], multiples: number[], mode: Mode): RiverRow[] {
-  return series.map((p) => {
-    const base = mode === "per" ? p.eps_ttm : p.bvps
-    const valid = base !== null && base > 0
-    return {
-      t: p.t,
-      close: p.close,
-      ratio: mode === "per" ? p.per : p.pbr,
-      base,
-      bands: multiples.map((m, i) => (valid ? base! * (i === 0 ? m : m - multiples[i - 1]!) : null)),
-    }
-  })
-}
-
-/** 找出基準 ≤ 0 的連續期間 */
-export function invalidRuns(rows: RiverRow[]): { from: string; to: string }[] {
-  const runs: { from: string; to: string }[] = []
-  let start: string | null = null
-  rows.forEach((r, i) => {
-    const bad = r.base === null || r.base <= 0
-    if (bad && start === null) start = r.t
-    if ((!bad || i === rows.length - 1) && start !== null) {
-      runs.push({ from: start, to: bad ? r.t : rows[i - 1]!.t })
-      start = null
-    }
-  })
-  return runs
-}
 
 export function ValuationTab({ instrument }: { instrument: InstrumentDetail }) {
   const valuation = useValuation(instrument.symbol)
@@ -120,7 +81,18 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
     if (idx === -1) return `高於 ${multiples.at(-1)} 倍（最貴的區間以上）`
     return `介於 ${multiples[idx - 1]} 倍與 ${multiples[idx]} 倍之間`
   })()
-  const bandPrices = lastValid ? multiples.map((m) => ({ m, price: lastValid.base! * m })) : []
+  const bandPrices = lastValid ? multiples.map((m, idx) => ({ kind: "band" as const, m, idx, price: lastValid.base! * m })) : []
+  // 由貴到便宜排列，並把「現價」插在對應位置
+  const bandRows: ({ kind: "band"; m: number; idx: number; price: number } | { kind: "price"; price: number })[] = []
+  let placed = false
+  for (const b of [...bandPrices].reverse()) {
+    if (!placed && last && last.close >= b.price) {
+      bandRows.push({ kind: "price", price: last.close })
+      placed = true
+    }
+    bandRows.push(b)
+  }
+  if (!placed && last) bandRows.push({ kind: "price", price: last.close })
 
   return (
     <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
@@ -181,7 +153,7 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
                         { label: ratioLabel, value: r.ratio !== null ? `${r.ratio.toFixed(1)} 倍` : "不適用" },
                         { label: baseLabel, value: r.base !== null ? `${unit}${r.base.toFixed(2)}` : "—" },
                         ...(valid
-                          ? [...multiples].reverse().map((m) => ({ label: `${m} 倍`, value: formatPrice(r.base! * m, market), color: BAND_VARS[multiples.indexOf(m)] }))
+                          ? [...multiples].reverse().map((m) => ({ label: `${m} 倍`, value: formatPriceLevel(r.base! * m, market), color: BAND_VARS[multiples.indexOf(m)] }))
                           : []),
                       ]}
                     />
@@ -204,7 +176,7 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
         ) : (
           <div className="flex flex-col gap-4">
             <div>
-              <p className="num text-hero font-semibold leading-none">
+              <p className="hero-figure text-hero-sm font-semibold">
                 {currentRatio?.toFixed(1)}
                 <span className="ml-1 text-lg font-medium text-muted-foreground">倍</span>
               </p>
@@ -228,22 +200,24 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
             <table className="w-full text-md">
               <caption className="mb-1 text-left text-sm text-muted-foreground">各倍數對應的股價（今天）</caption>
               <tbody>
-                {[...bandPrices].reverse().map(({ m, price }) => {
-                  const idx = multiples.indexOf(m)
-                  const here = last && last.close >= price && (idx === multiples.length - 1 || last.close < multiples[idx + 1]! * last.base!)
-                  return (
-                    <tr key={m} className={cn("border-b border-hairline last:border-0", here && "font-semibold")}>
-                      <th scope="row" className="py-1.5 text-left font-normal">
+                {bandRows.map((row) =>
+                  row.kind === "price" ? (
+                    <tr key="price" className="border-b border-hairline bg-accent font-semibold text-accent-foreground">
+                      <th scope="row" className="py-1.5 pl-2 text-left">現價</th>
+                      <td className="num py-1.5 pr-2 text-right" colSpan={2}>{formatPrice(row.price, market)}</td>
+                    </tr>
+                  ) : (
+                    <tr key={row.m} className="border-b border-hairline last:border-0">
+                      <th scope="row" className="py-1.5 pl-2 text-left font-normal">
                         <span className="inline-flex items-center gap-2">
-                          <span aria-hidden className="size-2.5 rounded-[3px]" style={{ background: BAND_VARS[idx] }} />
-                          {m} 倍
+                          <span aria-hidden className="size-2.5 rounded-[3px] ring-1 ring-border" style={{ background: BAND_VARS[row.idx] }} />
+                          {row.m} 倍
                         </span>
                       </th>
-                      <td className="num py-1.5 text-right">{formatPrice(price, market)}</td>
-                      <td className="w-16 py-1.5 text-right text-xs text-muted-foreground">{here ? "◀ 現價" : ""}</td>
+                      <td className="num py-1.5 pr-2 text-right" colSpan={2}>{formatPriceLevel(row.price, market)}</td>
                     </tr>
-                  )
-                })}
+                  ),
+                )}
               </tbody>
             </table>
           </div>

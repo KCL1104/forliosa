@@ -74,12 +74,12 @@ def batch_quotes(symbols: str = Query(max_length=2000), _user: User = Depends(cu
 
 
 @router.get("/instruments/{symbol}/history", response_model=History)
-def instrument_history(symbol: str, range: str = Query("1M"), _user: User = Depends(current_user)):  # noqa: A002
+def instrument_history(symbol: str, range: str = Query("1M"), _user: User = Depends(current_user)):
     return svc.history(get_market_data(), symbol, range.upper())
 
 
 @router.get("/instruments/{symbol}/valuation", response_model=Valuation)
-def instrument_valuation(symbol: str, range: str = Query("5Y"), _user: User = Depends(current_user)):  # noqa: A002
+def instrument_valuation(symbol: str, range: str = Query("5Y"), _user: User = Depends(current_user)):
     return svc.valuation(get_market_data(), symbol, range.upper())
 
 

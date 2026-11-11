@@ -1,8 +1,5 @@
 import { cn } from "@/lib/utils"
-
-/** recharts 共用設定：細線、淡格線、等寬刻度 */
-export const AXIS_TICK = { fontSize: 12, fill: "var(--muted-foreground)" } as const
-export const GRID_STROKE = "var(--chart-grid)"
+export { RangeChips } from "@/components/segmented"
 
 export interface TooltipRow {
   label: string
@@ -55,46 +52,3 @@ export function Legend({ items, className }: { items: { label: string; color: st
   )
 }
 
-/** 區間選擇（章鈕）：1M／6M／YTD…，鍵盤可操作 */
-export function RangeChips<T extends string>({
-  value,
-  options,
-  onChange,
-  label,
-  className,
-}: {
-  value: T
-  options: readonly { value: T; label: string }[]
-  onChange: (v: T) => void
-  label: string
-  className?: string
-}) {
-  return (
-    <div role="radiogroup" aria-label={label} className={cn("no-scrollbar -mx-1 flex items-center gap-0.5 overflow-x-auto px-1", className)}>
-      {options.map((o) => {
-        const active = o.value === value
-        return (
-          <button
-            key={o.value}
-            type="button"
-            role="radio"
-            aria-checked={active}
-            onClick={() => onChange(o.value)}
-            className={cn(
-              "press h-8 shrink-0 rounded-md px-2.5 text-sm font-medium text-muted-foreground outline-offset-0 hover:bg-muted hover:text-foreground pointer-coarse:h-10",
-              active && "bg-accent text-accent-foreground ring-1 ring-primary/30 ring-inset hover:bg-accent",
-            )}
-          >
-            {o.label}
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
-/** 月份刻度：2026-03 → 3月、跨年時 2026 */
-export function monthTick(t: string): string {
-  const [y, m] = t.split("-")
-  return m === "01" ? `${y}` : `${Number(m)}月`
-}

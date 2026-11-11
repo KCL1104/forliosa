@@ -165,6 +165,7 @@ export interface LedgerState {
   positions: Map<string, Position>
   realizedTwd: number
   realizedByYear: Map<number, number>
+  realizedEvents: { t: string; amount: number }[]
   dividendsTwd: number
 }
 
@@ -177,6 +178,7 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
   let realizedTwd = 0
   let dividendsTwd = 0
   const realizedByYear = new Map<number, number>()
+  const realizedEvents: { t: string; amount: number }[] = []
   for (const x of txns) {
     if (x.trade_date > until) break
     if (accountId && x.account_id !== accountId) continue
@@ -203,6 +205,7 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
         realizedTwd += r
         const year = Number(x.trade_date.slice(0, 4))
         realizedByYear.set(year, (realizedByYear.get(year) ?? 0) + r)
+        realizedEvents.push({ t: x.trade_date, amount: r })
         pos.qty -= q
         pos.cost -= pos.cost * ratio
         pos.costTwd -= pos.costTwd * ratio
@@ -222,7 +225,7 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
         break
     }
   }
-  return { positions, realizedTwd, realizedByYear, dividendsTwd }
+  return { positions, realizedTwd, realizedByYear, realizedEvents, dividendsTwd }
 }
 
 const r2 = (n: number) => Math.round(n * 100) / 100
@@ -467,7 +470,11 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
   const dividends = new Map<string, number>()
   const realized = new Map<number, number>()
   const state = replay(txns, MOCK_TODAY, accountId)
-  for (const [y, v] of state.realizedByYear) if (`${y}-12-31` >= startDate) realized.set(y, v)
+  for (const e of state.realizedEvents) {
+    if (e.t < startDate) continue
+    const y = Number(e.t.slice(0, 4))
+    realized.set(y, (realized.get(y) ?? 0) + e.amount)
+  }
   for (const x of txns) {
     if (x.type !== "cash_dividend" || x.trade_date < startDate) continue
     if (accountId && x.account_id !== accountId) continue

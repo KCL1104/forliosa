@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
-from typing_extensions import Annotated
 
 API_ROOT = Path(__file__).resolve().parents[2]  # apps/api
+DEFAULT_SESSION_SECRET = "dev-insecure-session-secret-change-me"
 
 
 class Settings(BaseSettings):
@@ -22,13 +22,15 @@ class Settings(BaseSettings):
     cors_origins: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["http://localhost:5173", "http://127.0.0.1:5173"]
     )
-    session_secret: str = "dev-insecure-session-secret-change-me"
+    session_secret: str = DEFAULT_SESSION_SECRET
     session_ttl_days: int = 30
     cookie_secure: bool | None = None  # None -> secure in prod
     cookie_domain: str | None = None
 
+    # Highest priority first. twse_mis: real quotes; shioaji_data: master/profile/revenue/EPS;
+    # finmind: real daily history, PER/PBR, dividends, USD/TWD; demo: synthetic fallback.
     market_data_providers: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["shioaji_data", "demo"]
+        default_factory=lambda: ["twse_mis", "shioaji_data", "finmind", "demo"]
     )
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
     cache_dir: Path = Path("var/cache")
@@ -42,6 +44,15 @@ class Settings(BaseSettings):
     def _split_csv(cls, v: object) -> object:
         if isinstance(v, str):
             return [s.strip() for s in v.split(",") if s.strip()]
+        return v
+
+    @field_validator("database_url")
+    @classmethod
+    def _psycopg_driver(cls, v: str) -> str:
+        """Railway/Heroku style ``postgres://`` / ``postgresql://`` -> SQLAlchemy + psycopg 3."""
+        for prefix in ("postgres://", "postgresql://"):
+            if v.startswith(prefix):
+                return "postgresql+psycopg://" + v[len(prefix):]
         return v
 
     @property

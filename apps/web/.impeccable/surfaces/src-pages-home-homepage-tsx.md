@@ -66,6 +66,28 @@ FORM: 自有清單第 7 名（印鑑與朱泥）；seed:bf59ff6fbd34ea97。Signa
 
 FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, DESIGN.md, and every shipping raster carrying its provenance
 
-## Grounded candidate list（concept-seed 降級擲骰，無 challengers）
+## Grounded candidate list 與 challengers
 
-依共鳴排序：1 存摺（紙本印刷）、2 經濟日報股市行情版（新聞紙表格）、3 台北捷運導視系統（識別系統）、4 紅包與春聯（儀式物件）、5 郵局儲金綠（識別系統）、6 台灣高山茶園等高線（自然地景）、7 **印鑑與朱泥**（器物、臨櫃儀式）。擲骰指定 7。impeccable.style 無法連線，所以沒有 catalog challengers 與 QUALITY BAR 圖卡；沒有人可在決策頁回答，因此直接採用指定方向（未重擲）。IMPECCABLE’S PICK（未採用）為 1 存摺──風險：過於熟悉、容易變成「橫線帳簿」的戲服。
+依共鳴排序的自有清單：1 存摺（紙本印刷）、2 經濟日報股市行情版（新聞紙表格）、3 台北捷運導視系統（識別系統）、4 紅包與春聯（儀式物件）、5 郵局儲金綠（識別系統）、6 台灣高山茶園等高線（自然地景）、7 **印鑑與朱泥**（器物、臨櫃儀式）。擲骰指定 7（seed:bf59ff6fbd34ea97）。
+
+第一次擲骰時 impeccable.style 被封鎖（降級、無 challengers）；之後網路開通，以同一個 seed 重擲（`--from`，catalog c3b204a1eed6）取得 6 個 challengers。融合產品事實後，以「受眾認同」「產品清楚」兩軸評比：
+
+| Challenger | 判定 | 理由 |
+|---|---|---|
+| 暗房曝光紀錄（operate-b-exposure-record-zone-sheets） | declined | 受眾陌生；交叉陰影表衝突增加判讀負擔 |
+| 航空時刻表玻片架（rw-timetable-slide-rack） | declined | 單一字級與 11° 斜置違背「大數字一眼看懂」 |
+| 機場黃色導視（wayfinding-…-terminal-yellow） | declined | 黃色導視不是台灣投資人的日常；顏色專責的紀律可借 |
+| 登機證＋登機門看板（vernacular-ephemera-boarding-pass-and-gate-board） | competitive（產品清楚） | 「變動保持亮著直到被看到」很適合報價，但受眾認同低於印鑑 |
+| 日本高密度網站（japanese-high-density-web） | competitive（受眾認同） | 台灣財經網站正是東亞高密度傳統；但 utility-red 分頁與「紅漲」衝突，首頁要的是簡潔 |
+| 角色商品型錄（pop-culture-shelf-character-goods-catalog） | declined | 與金融工具的信任感衝突 |
+
+沒有 challenger 兩軸都勝出，且無人可在決策頁回答 → 依 new-work 規則採用指定方向（印鑑與朱泥）。IMPECCABLE’S PICK（未採用）：1 存摺──風險：過於熟悉，容易變成「橫線帳簿」戲服。
+
+### Raises（向 challengers 借的紀律，不借外衣）
+
+- **RAISE（日本高密度網站）**：細節頁（持股、個股、交易）用細線分隔的密集模組，縮小卡片間距與內距，不做留白膨脹；首頁維持簡潔。
+- **RAISE（登機證＋登機門看板）**：報價變動以 NumberFlow 原地換數字，不重排、不閃爍整列；M2 即時行情上線後，變動的價格保留淡色標示直到下一次更新。
+- **RAISE（機場黃色導視）**：每個顏色只有一個工作——朱泥＝品牌章、印泥藍＝操作與選取與「我的」系列、紅綠＝漲跌、琥珀＝自選星號。
+- **RAISE（航空時刻表玻片架）**：資訊密集處的層級靠字重、色調與細線，不靠再多一個字級（全站 7 個字級）。
+- **RAISE（暗房曝光紀錄）**：估值河流圖只用單一色相的 5 階色帶，階數固定，不加第二種色相。
+- **RAISE（角色商品型錄）**：群組排行（M5）以整格重排的有限名單呈現。

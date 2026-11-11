@@ -210,3 +210,8 @@ def test_cash_balance_tracking():
     led = replay(txns).ledger
     # 500,000 - 100,040 + 12 - 100,000 = 299,972
     assert led.cash[(ACC, "TWD")] == D(299972)
+
+
+def test_non_strict_oversell_with_nothing_held_books_no_gain():
+    led = replay([tx("sell", date(2025, 1, 3), qty=100, price=10)]).ledger
+    assert led.realized[0].pnl == 0 and led.warnings

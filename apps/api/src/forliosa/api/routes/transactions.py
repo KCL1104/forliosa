@@ -65,7 +65,7 @@ def _owned(db: Session, user: User, txn_id: str) -> TxnModel:
 def list_transactions(
     account_id: str | None = None,
     symbol: str | None = None,
-    type: TxnTypeLiteral | None = None,  # noqa: A002
+    type: TxnTypeLiteral | None = None,
     from_: date | None = Query(default=None, alias="from"),
     to: date | None = None,
     limit: int = Query(default=50, ge=1, le=200),

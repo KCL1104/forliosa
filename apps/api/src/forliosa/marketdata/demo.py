@@ -17,8 +17,9 @@ import zlib
 from collections import OrderedDict
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
+from zoneinfo import ZoneInfo
 
 from forliosa.marketdata.base import (
     BaseProvider,
@@ -147,8 +148,9 @@ class DemoProvider(BaseProvider):
     def _default_anchor_date(self, symbol: str) -> date:
         now = self.today_fn().astimezone(TAIPEI)
         if market_of_symbol(symbol) == "US":
-            d = now.date() - timedelta(days=1)  # US close lands on the next Taipei morning
-            while d.weekday() >= 5:
+            ny = now.astimezone(ZoneInfo("America/New_York"))
+            d = ny.date() if ny.time() >= time(16, 0) else ny.date() - timedelta(days=1)
+            while d.weekday() >= 5:  # latest completed US session (holidays ignored in demo data)
                 d -= timedelta(days=1)
             return d
         d = now.date()
@@ -287,7 +289,7 @@ class DemoProvider(BaseProvider):
             # the previous close as published.
             out[s] = QuoteData(
                 symbol=s, price=last.c, prev_close=prev, open=last.o, high=last.h, low=last.l, volume=last.v,
-                as_of=market_close_dt(last.t), trade_date=last.t, is_realtime=False, is_demo=True,
+                as_of=_close_dt(s, last.t), trade_date=last.t, is_realtime=False, is_demo=True,
                 source="demo",
             )
         return out
@@ -394,6 +396,12 @@ def _bridge(raw: list[float], days: list[date], waypoints: tuple[tuple[str, str]
             c = c0 + (c1 - c0) * (i - i0) / (i1 - i0)
         out[i] = raw[i] * math.exp(c)
     return out
+
+
+def _close_dt(symbol: str, d: date) -> datetime:
+    if market_of_symbol(symbol) == "US":
+        return datetime.combine(d, time(16, 0), ZoneInfo("America/New_York"))
+    return market_close_dt(d)
 
 
 def _latest_reported_quarter(today: date) -> tuple[int, int]:

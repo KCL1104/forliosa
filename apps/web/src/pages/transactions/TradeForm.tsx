@@ -17,22 +17,11 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { formatMoney, formatQuantity, todayInTaipei } from "@/lib/format"
+import { TYPE_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
+import { FormField as Row } from "@/components/form-field"
 import { usePrefs } from "@/stores/prefs"
 
-export const TYPE_LABEL: Record<TransactionType, string> = {
-  buy: "買進",
-  sell: "賣出",
-  cash_dividend: "現金股利",
-  stock_dividend: "股票股利",
-  split: "分割",
-  capital_reduction: "減資",
-  deposit: "存入",
-  withdrawal: "提出",
-  fee: "手續費",
-  tax: "稅",
-  interest: "利息",
-}
 
 type MainType = "buy" | "sell" | "cash_dividend" | "other"
 const MAIN_TYPES: { value: MainType; label: string }[] = [
@@ -127,16 +116,14 @@ export function TradeForm({ initialSymbol, onDone, layout }: { initialSymbol?: s
   const [submitted, setSubmitted] = useState(false)
   const set = (patch: Partial<FormState>) => setF((s) => ({ ...s, ...patch }))
 
-  // 預設帳戶與預先帶入的代號
-  useEffect(() => {
-    if (!f.accountId && accounts.data?.[0]) set({ accountId: accounts.data[0].id })
-  }, [accounts.data, f.accountId])
+  // 預先帶入的代號（帳戶未選時預設第一個）
   useEffect(() => {
     if (!initialSymbol) return
     void api.getInstrument(initialSymbol).then((i) => setF((s) => (s.symbol ? s : { ...s, symbol: i })))
   }, [initialSymbol])
 
-  const account = accounts.data?.find((a) => a.id === f.accountId)
+  const accountId = f.accountId || accounts.data?.[0]?.id || ""
+  const account = accounts.data?.find((a) => a.id === accountId)
   const type: TransactionType = f.mainType === "other" ? f.otherType : f.mainType
   const isCash = CASH_TYPES.includes(type)
   const isUS = account?.currency === "USD" || f.symbol?.market === "US"
@@ -242,7 +229,7 @@ export function TradeForm({ initialSymbol, onDone, layout }: { initialSymbol?: s
 
         <div className="grid gap-4 sm:grid-cols-2">
           <Row label="帳戶">
-            <AccountSelect accounts={accounts.data ?? []} value={f.accountId} onChange={(id) => set({ accountId: id })} />
+            <AccountSelect accounts={accounts.data ?? []} value={accountId} onChange={(id) => set({ accountId: id })} />
           </Row>
           <Row label="日期" htmlFor="trade-date">
             <Input id="trade-date" type="date" value={f.date} max={todayInTaipei()} onChange={(e) => set({ date: e.target.value })} />
@@ -383,28 +370,6 @@ function StampLine() {
   )
 }
 
-function Row({ label, htmlFor, error, hint, children }: { label: string; htmlFor?: string; error?: string | null; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex min-w-0 flex-col gap-1.5">
-      <div className="flex items-baseline justify-between gap-2">
-        {htmlFor ? (
-          <label htmlFor={htmlFor} className="text-sm font-medium">
-            {label}
-          </label>
-        ) : (
-          <span className="text-sm font-medium">{label}</span>
-        )}
-        {hint && <span className="num text-xs text-muted-foreground">{hint}</span>}
-      </div>
-      {children}
-      {error && (
-        <p role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
-      )}
-    </div>
-  )
-}
 
 function AccountSelect({ accounts, value, onChange }: { accounts: Account[]; value: string; onChange: (id: string) => void }) {
   return (

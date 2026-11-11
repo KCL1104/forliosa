@@ -11,6 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ApiError } from "@/api/types"
 import { formatDateTime, formatNumber } from "@/lib/format"
+import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
 import { useWatchlist } from "@/stores/watchlist"
@@ -30,7 +31,6 @@ const TABS: { value: StockTab; label: string; soon?: boolean }[] = [
   { value: "news", label: "新聞", soon: true },
   { value: "ai", label: "AI 報告", soon: true },
 ]
-const MARKET_LABEL = { TWSE: "上市", TPEX: "上櫃", US: "美股" } as const
 
 export function StockPage() {
   const { symbol } = useParams({ from: "/stock/$symbol" })
@@ -64,7 +64,7 @@ export function StockPage() {
           <div className="min-w-0">
             {i ? (
               <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-                <h1 className="min-w-0 text-2xl font-semibold tracking-[-0.01em] break-words">{i.name}</h1>
+                <h1 className={cn("min-w-0 font-semibold tracking-[-0.01em] break-words", i.name.length > 12 ? "text-xl sm:text-2xl" : "text-2xl")}>{i.name}</h1>
                 <span className="num text-lg text-muted-foreground">{i.code}</span>
                 <span className="flex items-center gap-1.5 text-sm text-muted-foreground">
                   {MARKET_LABEL[i.market]}
@@ -77,7 +77,7 @@ export function StockPage() {
             <div className="mt-2 flex flex-wrap items-baseline gap-x-4 gap-y-1">
               {q && i ? (
                 <>
-                  <FlowMoney value={q.price} currency={i.currency} decimals={i.market === "US" || q.price < 1000 ? 2 : 0} publicValue className="hero-figure text-[2.25rem] leading-none font-semibold tracking-[-0.02em]" />
+                  <FlowMoney value={q.price} currency={i.currency} decimals={i.market === "US" || q.price < 1000 ? 2 : 0} publicValue className="hero-figure text-hero-sm font-semibold tracking-[-0.02em]" />
                   <PriceChange change={q.change} pct={q.change_pct} market={i.market} className="text-lg font-medium" />
                 </>
               ) : (
@@ -117,9 +117,9 @@ export function StockPage() {
         <div className="sticky top-14 z-20 -mx-4 border-b border-hairline bg-background px-4 sm:-mx-6 sm:px-6 lg:top-16 lg:-mx-8 lg:px-8">
           <TabsList variant="line" className="no-scrollbar h-11 w-full justify-start gap-1 overflow-x-auto">
             {TABS.map((t) => (
-              <TabsTrigger key={t.value} value={t.value} className={cn("h-11 shrink-0 flex-none px-3 text-md", t.soon && "text-muted-foreground")}>
+              <TabsTrigger key={t.value} value={t.value} className="h-11 shrink-0 flex-none px-3 text-md">
                 {t.label}
-                {t.soon && <span className="text-xs text-muted-foreground/80">即將推出</span>}
+                {t.soon && <span className="text-xs font-normal">即將推出</span>}
               </TabsTrigger>
             ))}
           </TabsList>

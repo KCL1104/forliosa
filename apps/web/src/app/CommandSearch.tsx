@@ -1,16 +1,16 @@
 import { useNavigate } from "@tanstack/react-router"
 import { Command as CommandPrimitive } from "cmdk"
-import { CornerDownLeftIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { CornerDownLeftIcon, EyeOffIcon, PlusIcon, SearchIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useInstrumentSearch } from "@/api/queries"
 import type { Instrument } from "@/api/types"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { NAV_AI, NAV_DATA, NAV_MAIN } from "./nav"
 import { useUi } from "./ui-store"
 
-const MARKET_LABEL = { TWSE: "上市", TPEX: "上櫃", US: "美股" } as const
 
 /**
  * ⌘K 全域搜尋（cmdk）：代號或中文股名搜尋商品，也能跳頁與執行常用動作。
@@ -105,7 +105,7 @@ export function CommandSearch() {
                   <span className="flex-1">記一筆交易</span>
                 </CommandPrimitive.Item>
                 <CommandPrimitive.Item value="privacy" onSelect={() => { togglePrivacy(); close() }} className={itemClass}>
-                  <span className="chop h-5 text-[10px]">隱</span>
+                  <EyeOffIcon className="size-4 text-muted-foreground" aria-hidden />
                   <span className="flex-1">切換隱私模式</span>
                 </CommandPrimitive.Item>
               </CommandPrimitive.Group>

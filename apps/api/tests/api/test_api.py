@@ -233,7 +233,8 @@ def test_unknown_symbol_and_validation_errors(client):
 def test_holdings_snapshot_mode(client):
     txn_acc = make_account(client)
     r = client.put(f"{API}/accounts/{txn_acc['id']}/holdings",
-                   json={"as_of": "2026-01-05", "holdings": [{"symbol": "2330.TW", "quantity": 1500, "avg_cost": 612.5}]})
+                   json={"as_of": "2026-01-05",
+                         "holdings": [{"symbol": "2330.TW", "quantity": 1500, "avg_cost": 612.5}]})
     assert r.status_code == 409
     acc = make_account(client, name="只記持股", tracking_mode="holdings")
     as_of = trading_day(30).isoformat()
@@ -371,3 +372,13 @@ def test_health_and_openapi(app):
     assert c.get(f"{API}/health").json()["status"] == "ok"
     spec = c.get(f"{API}/openapi.json").json()
     assert "/api/v1/portfolio/performance" in spec["paths"]
+
+
+def test_nice_multiples():
+    from forliosa.services.instruments import nice_multiples
+
+    # 5th–95th percentile 13.36–31.48 -> step 6 from 12
+    vals = [13.36] * 5 + [20.0] * 90 + [31.48] * 5
+    assert nice_multiples(vals) == [12, 18, 24, 30, 36]
+    assert nice_multiples([4.5, 6.0, 9.6] * 10) == [4.5, 6.0, 7.5, 9.0, 10.5]
+    assert nice_multiples([1.0]) == []

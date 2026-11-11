@@ -39,10 +39,13 @@ packages = ["src/forliosa"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
-filterwarnings = ["error::DeprecationWarning:forliosa.*"]
+filterwarnings = [
+    "error::DeprecationWarning:forliosa.*",
+    "ignore:Using `httpx` with `starlette.testclient`",
+]
 
 [tool.ruff]
-line-length = 110
+line-length = 120
 target-version = "py313"
 src = ["src", "tests"]
 

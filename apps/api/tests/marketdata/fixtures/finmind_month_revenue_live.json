@@ -1,0 +1,51 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2026-07-01",
+   "stock_id": "2330",
+   "country": "Taiwan",
+   "revenue": 442679969000,
+   "revenue_month": 6,
+   "revenue_year": 2026,
+   "create_time": "2026-07-13"
+  },
+  {
+   "date": "2026-08-01",
+   "stock_id": "2330",
+   "country": "Taiwan",
+   "revenue": 467580548000,
+   "revenue_month": 7,
+   "revenue_year": 2026,
+   "create_time": "2026-08-10"
+  },
+  {
+   "date": "2026-09-01",
+   "stock_id": "2330",
+   "country": "Taiwan",
+   "revenue": 514805337000,
+   "revenue_month": 8,
+   "revenue_year": 2026,
+   "create_time": "2026-09-10"
+  },
+  {
+   "date": "2026-10-01",
+   "stock_id": "2330",
+   "country": "Taiwan",
+   "revenue": 511857399000,
+   "revenue_month": 9,
+   "revenue_year": 2026,
+   "create_time": "2026-10-08"
+  },
+  {
+   "date": "2026-11-01",
+   "stock_id": "2330",
+   "country": "Taiwan",
+   "revenue": 586890319000,
+   "revenue_month": 10,
+   "revenue_year": 2026,
+   "create_time": "2026-11-10"
+  }
+ ]
+}

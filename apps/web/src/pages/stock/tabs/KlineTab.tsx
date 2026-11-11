@@ -17,6 +17,7 @@ import { ChartSkeleton, ErrorState } from "@/components/states"
 import { useResolvedTheme } from "@/hooks/use-theme"
 import { cssVarColor } from "@/lib/css-color"
 import { formatDate, formatNumber, formatPrice, MINUS } from "@/lib/format"
+import { aggregate, type Interval } from "@/lib/kline"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 
@@ -28,7 +29,6 @@ const RANGES: { value: HistoryRange; label: string }[] = [
   { value: "5Y", label: "5Y" },
   { value: "MAX", label: "全部" },
 ]
-type Interval = "d" | "w" | "m"
 const INTERVALS: { value: Interval; label: string }[] = [
   { value: "d", label: "日 K" },
   { value: "w", label: "週 K" },
@@ -41,36 +41,6 @@ const MAS = [
 ] as const
 
 const toTime = (t: string) => (Date.parse(`${t}T00:00:00Z`) / 1000) as UTCTimestamp
-
-/** 日 K 聚合成週 K／月 K */
-export function aggregate(candles: Candle[], interval: Interval): Candle[] {
-  if (interval === "d") return candles
-  const out: Candle[] = []
-  const keyOf = (t: string) => {
-    if (interval === "m") return t.slice(0, 7)
-    const d = new Date(`${t}T00:00:00Z`)
-    const monday = new Date(d)
-    monday.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7))
-    return monday.toISOString().slice(0, 10)
-  }
-  let cur: Candle | null = null
-  let key = ""
-  for (const c of candles) {
-    const k = keyOf(c.t)
-    if (!cur || k !== key) {
-      if (cur) out.push(cur)
-      cur = { ...c }
-      key = k
-    } else {
-      cur.h = Math.max(cur.h, c.h)
-      cur.l = Math.min(cur.l, c.l)
-      cur.c = c.c
-      cur.v += c.v
-    }
-  }
-  if (cur) out.push(cur)
-  return out
-}
 
 function movingAverage(candles: Candle[], n: number) {
   const out: { time: UTCTimestamp; value: number }[] = []

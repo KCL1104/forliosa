@@ -2,6 +2,7 @@
 
 前端（`apps/web`）與後端（`apps/api`）共用的介面定義。M1、M2 的端點在此定義；M3–M5（匯入、AI、分享）之後補上。
 後端完成後會以 FastAPI 自動產生的 OpenAPI（`/api/v1/openapi.json`）為準，這份文件是開發初期的共同約定。
+後端實作與本文件的差異（新增欄位、可為 null 的欄位、各交易類型的欄位用法）記錄在 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)。
 
 ## 通用規則
 
@@ -174,7 +175,7 @@
   "quantity": 1000,               // 股數；split 為「每 1 股變成幾股」；capital_reduction 為「每 1 股減少幾股」
   "price": 1070.0,                // buy/sell 成交價；stock_dividend 為每股配股「元」；cash_dividend 為每股現金股利
   "amount": 1070000,              // 成交金額或現金金額（交易幣別）
-  "fee": 427,
+  "fee": 426,                     // 1,070,000 × 0.1425% × 0.28 = 426.93，無條件捨去
   "tax": 0,
   "health_insurance": 0,          // 二代健保補充保費（現金股利）
   "currency": "TWD",
@@ -185,7 +186,7 @@
 }
 
 // TradePreview
-{"gross": 1070000, "fee": 427, "tax": 0, "health_insurance": 0, "net_cash": -1070427, "rules": ["手續費 0.1425% × 2.8 折", "證交稅：買進免稅"]}
+{"gross": 1070000, "fee": 426, "tax": 0, "health_insurance": 0, "net_cash": -1070426, "rules": ["手續費 0.1425% × 2.8 折", "證交稅：買進免稅"]}
 ```
 
 ## 投資組合
