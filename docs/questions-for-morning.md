@@ -4,28 +4,13 @@
 
 ## A. 需要你操作或授權
 
-### A1. 啟用 Impeccable 的自動設計檢查（hook）
+### A1. ~~啟用 Impeccable 的自動設計檢查（hook）~~ ✅ 已完成
 
-- **狀況**：Impeccable 建議安裝 design hook：每次修改 UI 檔案後、以及每次回合結束時，自動掃描設計問題。這需要在 `.claude/settings.json` 加入 hook 設定，被 Claude Code 的自動模式判定為「修改 Claude 自身設定」而擋下，我沒有繞過。
-- **目前替代做法**：前端開發時手動執行 `impeccable detect`，效果相同但要記得跑。
-- **建議**：同意加入。你可以回覆「同意加 hook」，或自己把下面內容存成 `.claude/settings.json`：
+你在 2026-11-11 晚上同意後，已加入 `.claude/settings.json`。下次開啟工作階段起，每次修改 UI 檔案後與每回合結束時會自動掃描設計問題。
 
-```json
-{
-  "hooks": {
-    "SessionStart": [{"hooks": [{"type": "command", "command": "[ ! -f \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" ] || \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" hook", "timeout": 5}]}],
-    "PostToolUse": [{"matcher": "Edit|Write", "hooks": [{"type": "command", "command": "[ ! -f \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" ] || \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" hook", "timeout": 5}]}],
-    "Stop": [{"hooks": [{"type": "command", "command": "[ ! -f \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" ] || \"${CLAUDE_PROJECT_DIR}/.claude/skills/impeccable/scripts/impeccable\" hook", "timeout": 30}]}]
-  }
-}
-```
+### A2. ~~開放開發環境連到台股資料網站~~ ✅ 已完成
 
-### A2. 開放開發環境連到台股資料網站
-
-- **狀況**：這個雲端開發環境的網路擋住了 `openapi.twse.com.tw`、`www.twse.com.tw`、`mis.twse.com.tw`、`www.tpex.org.tw`、`api.finmindtrade.com`、`query1.finance.yahoo.com`、`impeccable.style`。所以目前：
-  - 證交所、櫃買、FinMind 的資料解析程式只能用測試資料驗證，沒有實際連線測過。
-  - 歷史股價、估值、股利是**示範資料**（畫面上有標示）；只有公司資料、最新收盤價、月營收、財報來自 shioaji-data 的真實資料。
-- **建議**：允許這幾個網址，我就能用真實資料測試。你回覆後，我會送出環境設定變更，你在畫面上按核准即可。
+已建立專用的個人雲端環境「forliosa」（不影響你其他專案用的 Default 環境），開放：`openapi.twse.com.tw`、`www.twse.com.tw`、`mis.twse.com.tw`、`www.tpex.org.tw`、`opendata.tdcc.com.tw`、`api.finmindtrade.com`、`finmind.github.io`、`query1.finance.yahoo.com`、`impeccable.style`。實測都能連線（Yahoo 對未帶瀏覽器標頭的請求會回 429，只當備援）。之後開這個 repo 的工作階段請選「forliosa」環境。
 
 ### A3. 準備帳號（之後部署需要）
 
