@@ -1,0 +1,11 @@
+{
+  "name": "forliosa",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev:web": "pnpm --filter @forliosa/web dev",
+    "build:web": "pnpm --filter @forliosa/web build",
+    "test:web": "pnpm --filter @forliosa/web test",
+    "design:detect": ".claude/skills/impeccable/scripts/impeccable detect apps/web/src"
+  }
+}
