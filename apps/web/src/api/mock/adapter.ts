@@ -260,8 +260,16 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         const found = txns.find((t) => t.id === id)
         if (!found) throw new ApiError(404, "not_found", "找不到這筆交易")
         Object.assign(found, patch)
+        // 沒有手動覆寫稅費時，依新內容重新計算
+        if (patch.fee === undefined || patch.tax === undefined) {
+          const p = computePreview({ ...found }, accounts.find((a) => a.id === found.account_id), found.symbol ? findInstrument(found.symbol) : undefined)
+          if (patch.fee === undefined) found.fee = p.fee
+          if (patch.tax === undefined) found.tax = p.tax
+          found.health_insurance = p.health_insurance
+          found.amount = patch.amount ?? p.gross
+        }
         sortTxns()
-        return found
+        return { ...found }
       }),
     deleteTransaction: (id) =>
       wait(() => {

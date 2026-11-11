@@ -207,8 +207,13 @@ function PerformancePanel({ className }: { className?: string }) {
       <div className={cn("mt-2 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
         {perf.isError ? (
           <ErrorState error={perf.error} onRetry={() => void perf.refetch()} />
-        ) : series.length < 2 ? (
+        ) : !perf.data ? (
           <ChartSkeleton height={240} />
+        ) : series.length < 2 ? (
+          <div className="flex h-[240px] flex-col items-start justify-center gap-1 rounded-lg border border-dashed px-5">
+            <p className="font-medium">走勢圖需要至少兩個交易日</p>
+            <p className="text-md text-muted-foreground">剛開始追蹤的持股，下一個交易日收盤後就會出現報酬走勢。</p>
+          </div>
         ) : (
           <ReturnChart series={series} showBenchmark={showBench} benchmarkName={benchName} height={240} />
         )}

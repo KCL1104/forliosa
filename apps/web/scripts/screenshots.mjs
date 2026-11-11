@@ -34,7 +34,7 @@ const SHOTS = [
       await page.getByRole("option", { name: /2330/ }).first().click()
       await page.locator("#trade-qty").fill("1")
       await page.locator("#trade-price").fill("1085")
-      await page.getByText("應付").waitFor({ timeout: 5000 })
+      await page.getByText("應付").first().waitFor({ timeout: 8000 })
     },
   },
   { name: "performance", path: "/performance", ready: "text=最大回撤" },

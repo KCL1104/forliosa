@@ -130,7 +130,6 @@ export function FlowMoney({
         prefix={prefix}
         locales="zh-TW"
         format={{ minimumFractionDigits: digits, maximumFractionDigits: digits }}
-        willChange
       />
     </span>
   )

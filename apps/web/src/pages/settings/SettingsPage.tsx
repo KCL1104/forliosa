@@ -1,8 +1,8 @@
-import { PencilIcon } from "lucide-react"
+import { PencilIcon, PlusIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
-import { useAccounts, useUpdateAccount, useUpdatePreferences } from "@/api/queries"
+import { useAccounts, useCreateAccount, useUpdateAccount, useUpdatePreferences } from "@/api/queries"
 import type { Account, Preferences } from "@/api/types"
 import { Chop, DemoChop, SoonChop } from "@/components/chop"
 import { RangeChips } from "@/components/charts/chart-kit"
@@ -185,12 +185,20 @@ function Accounts() {
   const [editing, setEditing] = useState<Account | null>(null)
   return (
     <section aria-labelledby="set-accounts" className="flex flex-col gap-2">
-      <h2 id="set-accounts" className="text-lg font-semibold">券商帳戶</h2>
-      <p className="text-md text-muted-foreground">手續費折扣與最低手續費用來自動計算每筆交易的費用。</p>
+      <div className="flex flex-wrap items-end justify-between gap-2">
+        <div>
+          <h2 id="set-accounts" className="text-lg font-semibold">券商帳戶</h2>
+          <p className="text-md text-muted-foreground">手續費折扣與最低手續費用來自動計算每筆交易的費用。</p>
+        </div>
+        <Button variant="outline" size="sm" onClick={() => setEditing(NEW_ACCOUNT)}>
+          <PlusIcon />
+          新增帳戶
+        </Button>
+      </div>
       {!accounts.data ? (
         <SkeletonLines rows={3} />
       ) : accounts.data.length === 0 ? (
-        <p className="rounded-xl border border-dashed p-5 text-md text-muted-foreground">還沒有帳戶。新增帳戶的功能會和登入一起上線（M1）。</p>
+        <p className="rounded-xl border border-dashed p-5 text-md text-muted-foreground">還沒有帳戶。先新增一個，例如「永豐－一般」，記交易時才會自動算手續費。</p>
       ) : (
         <ul className="flex flex-col divide-y divide-hairline rounded-xl border bg-card">
           {accounts.data.map((a) => (
@@ -215,44 +223,93 @@ function Accounts() {
           ))}
         </ul>
       )}
-      {editing && <AccountDialog account={editing} onClose={() => setEditing(null)} />}
+      {editing && <AccountDialog key={editing.id || "new"} account={editing} onClose={() => setEditing(null)} />}
     </section>
   )
 }
 
+const NEW_ACCOUNT: Account = {
+  id: "",
+  name: "",
+  broker: "",
+  currency: "TWD",
+  fee_rate: 0.001425,
+  fee_discount: 0.6,
+  min_fee: 20,
+  min_fee_odd_lot: 1,
+  tracking_mode: "transactions",
+  created_at: "",
+}
+
+/** 新增或編輯帳戶（account.id 為空字串時為新增） */
 function AccountDialog({ account, onClose }: { account: Account; onClose: () => void }) {
+  const isNew = !account.id
   const update = useUpdateAccount()
+  const create = useCreateAccount()
   const [name, setName] = useState(account.name)
+  const [broker, setBroker] = useState(account.broker)
+  const [currency, setCurrency] = useState(account.currency)
+  const [mode, setMode] = useState(account.tracking_mode)
   const [discount, setDiscount] = useState(String(Math.round(account.fee_discount * 100) / 10))
   const [minFee, setMinFee] = useState(String(account.min_fee))
   const [minOdd, setMinOdd] = useState(String(account.min_fee_odd_lot))
+  const [touched, setTouched] = useState(false)
   const d = Number(discount)
-  const invalid = !name.trim() || Number.isNaN(d) || d <= 0 || d > 10
+  const discountBad = Number.isNaN(d) || d <= 0 || d > 10
+  const nameBad = !name.trim()
+  const pending = update.isPending || create.isPending
   const save = () => {
-    if (invalid) return
-    update.mutate(
-      { id: account.id, patch: { name: name.trim(), fee_discount: d / 10, min_fee: Number(minFee) || 0, min_fee_odd_lot: Number(minOdd) || 0 } },
-      {
-        onSuccess: () => {
-          toast.success(`已更新「${name.trim()}」`)
-          onClose()
-        },
-        onError: () => toast.error("更新失敗，請稍後再試"),
+    setTouched(true)
+    if (nameBad || discountBad) return
+    const patch = {
+      name: name.trim(),
+      broker: broker.trim(),
+      currency,
+      tracking_mode: mode,
+      fee_rate: currency === "USD" ? 0.001 : 0.001425,
+      fee_discount: d / 10,
+      min_fee: Number(minFee) || 0,
+      min_fee_odd_lot: Number(minOdd) || 0,
+    }
+    const done = {
+      onSuccess: () => {
+        toast.success(isNew ? `已新增「${patch.name}」` : `已更新「${patch.name}」`)
+        onClose()
       },
-    )
+      onError: () => toast.error(isNew ? "新增失敗，請稍後再試" : "更新失敗，請稍後再試"),
+    }
+    if (isNew) create.mutate(patch, done)
+    else update.mutate({ id: account.id, patch }, done)
   }
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">編輯帳戶</DialogTitle>
-          <DialogDescription>折扣用「幾折」輸入，例如 2.8 折就填 2.8。</DialogDescription>
+          <DialogTitle className="text-lg font-semibold">{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
+          <DialogDescription>折扣用「幾折」輸入，例如 2.8 折就填 2.8；不知道的話先填 6，之後可以改。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
-          <Field label="帳戶名稱" htmlFor="acc-name"><Input id="acc-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} /></Field>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <Field label="帳戶名稱" htmlFor="acc-name" error={touched && nameBad ? "請填帳戶名稱，例如「永豐－一般」" : undefined}>
+              <Input id="acc-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="例如：永豐－一般" aria-invalid={touched && nameBad} />
+            </Field>
+            <Field label="券商" htmlFor="acc-broker">
+              <Input id="acc-broker" value={broker} onChange={(e) => setBroker(e.target.value)} maxLength={40} placeholder="例如：永豐金證券" />
+            </Field>
+          </div>
+          {isNew && (
+            <div className="grid gap-3 sm:grid-cols-2">
+              <Field label="幣別">
+                <RangeChips label="幣別" value={currency} onChange={setCurrency} options={[{ value: "TWD", label: "新台幣" }, { value: "USD", label: "美元（複委託）" }]} />
+              </Field>
+              <Field label="追蹤方式">
+                <RangeChips label="追蹤方式" value={mode} onChange={setMode} options={[{ value: "transactions", label: "逐筆交易" }, { value: "holdings", label: "只記持股" }]} />
+              </Field>
+            </div>
+          )}
           <div className="grid grid-cols-3 gap-3">
-            <Field label="手續費折扣（折）" htmlFor="acc-discount" error={invalid && name.trim() ? "請填 0.1 到 10" : undefined}>
-              <Input id="acc-discount" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} aria-invalid={invalid && !!name.trim()} />
+            <Field label="手續費折扣（折）" htmlFor="acc-discount" error={touched && discountBad ? "請填 0.1 到 10" : undefined}>
+              <Input id="acc-discount" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} aria-invalid={touched && discountBad} />
             </Field>
             <Field label="最低手續費" htmlFor="acc-min"><Input id="acc-min" inputMode="decimal" value={minFee} onChange={(e) => setMinFee(e.target.value)} /></Field>
             <Field label="零股最低" htmlFor="acc-odd"><Input id="acc-odd" inputMode="decimal" value={minOdd} onChange={(e) => setMinOdd(e.target.value)} /></Field>
@@ -260,7 +317,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
         </div>
         <DialogFooter className={cn("gap-2")}>
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={save} disabled={invalid || update.isPending}>{update.isPending ? "儲存中…" : "儲存"}</Button>
+          <Button onClick={save} disabled={pending}>{pending ? "儲存中…" : isNew ? "新增帳戶" : "儲存"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

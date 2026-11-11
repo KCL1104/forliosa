@@ -15,7 +15,11 @@ export default defineConfig({
       output: {
         manualChunks(id) {
           if (id.includes("lightweight-charts")) return "kline"
-          if (id.includes("recharts") || id.includes("d3-")) return "charts"
+          if (id.includes("recharts") || id.includes("d3-") || id.includes("victory-vendor")) return "charts"
+          if (id.includes("@fontsource")) return undefined
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return "react"
+          if (id.includes("@tanstack")) return "tanstack"
+          if (id.includes("@base-ui") || id.includes("@floating-ui")) return "base-ui"
         },
       },
     },

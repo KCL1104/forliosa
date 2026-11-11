@@ -3,7 +3,7 @@ import type { MockInstrumentSpec } from "./instruments"
 
 /**
  * 示範用的台股稅費規則（後端才是正式實作；這裡只為了讓 mock 預估合理）。
- * - 手續費：成交金額 × 0.1425% × 折扣，無條件捨去，低於最低手續費以最低計（零股另計）
+ * - 手續費：成交金額 × 0.1425% × 折扣，四捨五入（與 api-contract 範例一致），低於最低手續費以最低計（零股另計）
  * - 證交稅（賣出）：股票 0.3%、ETF 0.1%、當沖 0.15%
  * - 二代健保：單筆股利 ≥ NT$20,000 扣 2.11%
  * - 美股股利：預扣 30% 稅
@@ -36,7 +36,8 @@ export function computePreview(
     const discount = account?.fee_discount ?? 1
     const isOdd = !isUS && qty % 1000 !== 0
     const minFee = isOdd ? (account?.min_fee_odd_lot ?? 1) : (account?.min_fee ?? 20)
-    let fee = isUS ? round2(gross * feeRate * discount) : Math.floor(gross * feeRate * discount)
+    // 折扣後手續費：依 api-contract 範例（1,070,000 × 0.1425% × 2.8 折 = 427）四捨五入；券商實務可能捨去，見 OPEN_QUESTIONS
+    let fee = isUS ? round2(gross * feeRate * discount) : Math.round(gross * feeRate * discount)
     const usedMin = gross > 0 && fee < minFee
     if (usedMin) fee = minFee
     rules.push(`手續費 ${(feeRate * 100).toFixed(4).replace(/0+$/, "")}% × ${discountLabel(discount)}`)

@@ -112,6 +112,15 @@ export function useUpdatePreferences() {
     onSuccess: (user) => qc.setQueryData(qk.me, user),
   })
 }
+export function useCreateAccount() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: AccountInput) => api.createAccount(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.accounts })
+    },
+  })
+}
 export function useUpdateAccount() {
   const qc = useQueryClient()
   return useMutation({

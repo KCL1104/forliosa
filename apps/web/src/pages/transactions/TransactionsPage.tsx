@@ -94,7 +94,7 @@ export function TransactionsPage() {
       <PageHeader
         title="交易紀錄"
         meta={api.kind === "mock" && <DemoChop />}
-        description="由新到舊。手續費與稅依帳戶設定自動計算，也可以手動覆寫。"
+        description="由新到舊，點一筆可以編輯或刪除。手續費與稅依帳戶設定自動計算。"
         actions={
           <>
             {!isDesktop && (
@@ -228,6 +228,7 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const remove = useDeleteTransaction()
+  const openTradeForm = useUi((s) => s.openTradeForm)
   const [confirm, setConfirm] = useState(false)
   const market = t.symbol?.endsWith(".TWO") ? "TPEX" : t.currency === "USD" ? "US" : "TWSE"
   const name = t.symbol ? t.symbol.replace(/\.(TW|TWO)$/, "") : "現金"
@@ -238,14 +239,27 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
     t.type === "split" ? `1 股 → ${t.quantity} 股` : t.quantity !== null ? `${formatQuantity(t.quantity, unit, market)}${t.price !== null ? ` × ${formatPrice(t.price, market)}` : ""}` : ""
 
   return (
-    <div className="group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 border-b border-hairline px-4 py-2.5 text-md last:border-0 lg:grid-cols-[96px_96px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_120px_40px]">
+    <>
+    <div
+      role="button"
+      tabIndex={0}
+      aria-label={`編輯 ${formatDateShort(t.trade_date)} ${TYPE_LABEL[t.type]} ${t.symbol ? name : ""}`}
+      onClick={() => openTradeForm({ edit: t })}
+      onKeyDown={(e) => {
+        if (e.target !== e.currentTarget) return
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault()
+          openTradeForm({ edit: t })
+        }
+      }}
+      className="group grid cursor-pointer grid-cols-[minmax(0,1fr)_auto] hover:bg-muted/50 focus-visible:bg-muted/50 focus-visible:outline-offset-[-2px] items-center gap-x-3 gap-y-0.5 border-b border-hairline px-4 py-2.5 text-md last:border-0 lg:grid-cols-[96px_96px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.9fr)_120px_40px]">
       <span className="num hidden text-muted-foreground lg:block">{formatDateShort(t.trade_date)}</span>
       <span className="hidden lg:block"><Chop tone={t.type === "buy" || t.type === "sell" ? "ink" : "muted"}>{TYPE_LABEL[t.type]}</Chop></span>
       <span className="min-w-0">
         <span className="flex items-center gap-2">
           <span className="lg:hidden"><Chop tone={t.type === "buy" || t.type === "sell" ? "ink" : "muted"}>{TYPE_LABEL[t.type]}</Chop></span>
           {t.symbol ? (
-            <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className="num truncate font-medium hover:underline">{name}</Link>
+            <Link to="/stock/$symbol" params={{ symbol: t.symbol }} onClick={(e) => e.stopPropagation()} className="num truncate font-medium hover:underline">{name}</Link>
           ) : (
             <span className="truncate text-muted-foreground">{t.note || "現金"}</span>
           )}
@@ -264,35 +278,36 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
       <span className="num hidden text-right text-muted-foreground lg:block">{costs > 0 ? (privacy ? <Masked /> : formatMoney(costs, { currency: t.currency })) : "—"}</span>
       <span className="hidden truncate text-sm text-muted-foreground lg:block" title={account?.name}>{account?.name}</span>
       <span className="hidden justify-end lg:flex">
-        <Button variant="ghost" size="icon-sm" className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={`刪除 ${formatDateShort(t.trade_date)} 的${TYPE_LABEL[t.type]}`} onClick={() => setConfirm(true)}>
+        <Button variant="ghost" size="icon-sm" className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100" aria-label={`刪除 ${formatDateShort(t.trade_date)} 的${TYPE_LABEL[t.type]}`} onClick={(e) => { e.stopPropagation(); setConfirm(true) }}>
           <Trash2Icon />
         </Button>
       </span>
-      <AlertDialog open={confirm} onOpenChange={setConfirm}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>刪除這筆交易？</AlertDialogTitle>
-            <AlertDialogDescription>
-              {formatDateShort(t.trade_date)} {TYPE_LABEL[t.type]} {t.symbol ? name : ""}。刪除後持股、損益與績效會重新計算。
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>取消</AlertDialogCancel>
-            <AlertDialogAction
-              variant="destructive"
-              onClick={() =>
-                remove.mutate(t.id, {
-                  onSuccess: () => toast.success("已刪除這筆交易"),
-                  onError: () => toast.error("刪除失敗，請稍後再試"),
-                })
-              }
-            >
-              刪除
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
+    <AlertDialog open={confirm} onOpenChange={setConfirm}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>刪除這筆交易？</AlertDialogTitle>
+          <AlertDialogDescription>
+            {formatDateShort(t.trade_date)} {TYPE_LABEL[t.type]} {t.symbol ? name : ""}。刪除後持股、損益與績效會重新計算。
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>取消</AlertDialogCancel>
+          <AlertDialogAction
+            variant="destructive"
+            onClick={() =>
+              remove.mutate(t.id, {
+                onSuccess: () => toast.success("已刪除這筆交易"),
+                onError: () => toast.error("刪除失敗，請稍後再試"),
+              })
+            }
+          >
+            刪除
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+    </>
   )
 }
 

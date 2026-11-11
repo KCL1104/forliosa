@@ -1,15 +1,16 @@
 import { useQuery } from "@tanstack/react-query"
 import { Command as CommandPrimitive } from "cmdk"
-import { XIcon } from "lucide-react"
+import { Trash2Icon, XIcon } from "lucide-react"
 import { useEffect, useId, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
-import { useAccounts, useCreateTransaction, useDeleteTransaction, useInstrumentSearch } from "@/api/queries"
-import type { Account, Instrument, TradePreview, TransactionInput, TransactionType } from "@/api/types"
+import { useAccounts, useCreateTransaction, useDeleteTransaction, useInstrumentSearch, useUpdateTransaction } from "@/api/queries"
+import type { Account, Instrument, TradePreview, Transaction, TransactionInput, TransactionType } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { Chop } from "@/components/chop"
 import { RangeChips } from "@/components/charts/chart-kit"
-import { Button } from "@/components/ui/button"
+import { Link } from "@tanstack/react-router"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from "@/components/ui/drawer"
 import { Input } from "@/components/ui/input"
@@ -35,11 +36,12 @@ const CASH_TYPES: TransactionType[] = ["deposit", "withdrawal", "fee", "tax", "i
 
 /** 掛在 AppShell：依裝置用 Dialog（桌面）或 Vaul Drawer（手機） */
 export function TradeFormHost() {
-  const { open, symbol } = useUi((s) => s.tradeForm)
+  const { open, symbol, edit } = useUi((s) => s.tradeForm)
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
-  const title = "記一筆交易"
-  const description = "填好數量與價格後，右側會即時試算手續費與稅。"
+  const title = edit ? "編輯交易" : "記一筆交易"
+  const description = isDesktop ? "填好數量與價格後，右側會即時試算手續費與稅。" : "填好數量與價格後，下方會即時試算手續費與稅。"
+  const formKey = edit?.id ?? "new"
 
   if (isDesktop) {
     return (
@@ -49,7 +51,7 @@ export function TradeFormHost() {
             <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
             <DialogDescription className="text-md">{description}</DialogDescription>
           </DialogHeader>
-          {open && <TradeForm initialSymbol={symbol} onDone={close} layout="split" />}
+          {open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="split" />}
         </DialogContent>
       </Dialog>
     )
@@ -61,7 +63,7 @@ export function TradeFormHost() {
           <DrawerTitle className="text-lg font-semibold">{title}</DrawerTitle>
           <DrawerDescription className="text-md">{description}</DrawerDescription>
         </DrawerHeader>
-        <div className="overflow-y-auto overscroll-contain">{open && <TradeForm initialSymbol={symbol} onDone={close} layout="stack" />}</div>
+        <div className="overflow-y-auto overscroll-contain">{open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="stack" />}</div>
       </DrawerContent>
     </Drawer>
   )
@@ -95,32 +97,43 @@ function useDebounced<T>(value: T, ms = 300): T {
   return v
 }
 
-export function TradeForm({ initialSymbol, onDone, layout }: { initialSymbol?: string; onDone: () => void; layout: "split" | "stack" }) {
+function initialState(edit: Transaction | undefined, unitPref: "lot" | "share"): FormState {
+  if (!edit) {
+    return { accountId: "", mainType: "buy", otherType: "deposit", symbol: null, date: todayInTaipei(), qtyText: "", qtyUnit: unitPref, priceText: "", amountText: "", dayTrade: false, note: "" }
+  }
+  const main: MainType = edit.type === "buy" || edit.type === "sell" || edit.type === "cash_dividend" ? edit.type : "other"
+  return {
+    accountId: edit.account_id,
+    mainType: main,
+    otherType: main === "other" ? edit.type : "deposit",
+    symbol: null,
+    date: edit.trade_date,
+    // 編輯時一律以「股」帶入，避免張／股換算誤差
+    qtyText: edit.quantity !== null ? String(edit.quantity) : "",
+    qtyUnit: "share",
+    priceText: edit.price !== null ? String(edit.price) : "",
+    amountText: CASH_TYPES.includes(edit.type) ? String(edit.amount) : "",
+    dayTrade: edit.is_day_trade,
+    note: edit.note,
+  }
+}
+
+export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymbol?: string; edit?: Transaction; onDone: () => void; layout: "split" | "stack" }) {
   const accounts = useAccounts()
   const unitPref = usePrefs((s) => s.quantityUnit)
   const create = useCreateTransaction()
+  const update = useUpdateTransaction()
   const remove = useDeleteTransaction()
-  const [f, setF] = useState<FormState>({
-    accountId: "",
-    mainType: "buy",
-    otherType: "deposit",
-    symbol: null,
-    date: todayInTaipei(),
-    qtyText: "",
-    qtyUnit: unitPref,
-    priceText: "",
-    amountText: "",
-    dayTrade: false,
-    note: "",
-  })
+  const [f, setF] = useState<FormState>(() => initialState(edit, unitPref))
   const [submitted, setSubmitted] = useState(false)
   const set = (patch: Partial<FormState>) => setF((s) => ({ ...s, ...patch }))
 
   // 預先帶入的代號（帳戶未選時預設第一個）
+  const presetSymbol = edit?.symbol ?? initialSymbol
   useEffect(() => {
-    if (!initialSymbol) return
-    void api.getInstrument(initialSymbol).then((i) => setF((s) => (s.symbol ? s : { ...s, symbol: i })))
-  }, [initialSymbol])
+    if (!presetSymbol) return
+    void api.getInstrument(presetSymbol).then((i) => setF((s) => (s.symbol ? s : { ...s, symbol: i })))
+  }, [presetSymbol])
 
   const accountId = f.accountId || accounts.data?.[0]?.id || ""
   const account = accounts.data?.find((a) => a.id === accountId)
@@ -169,6 +182,19 @@ export function TradeForm({ initialSymbol, onDone, layout }: { initialSymbol?: s
     e.preventDefault()
     setSubmitted(true)
     if (hasError || !body) return
+    if (edit) {
+      update.mutate(
+        { id: edit.id, patch: body },
+        {
+          onSuccess: () => {
+            toast.success("已更新這筆交易", { description: <StampLine /> })
+            onDone()
+          },
+          onError: (err) => toast.error("更新失敗，表單內容仍保留", { description: err instanceof Error ? err.message : undefined }),
+        },
+      )
+      return
+    }
     create.mutate(body, {
       onSuccess: (txn) => {
         const what = isCash
@@ -191,12 +217,31 @@ export function TradeForm({ initialSymbol, onDone, layout }: { initialSymbol?: s
     })
   }
 
+  const deleteWithUndo = () => {
+    if (!edit) return
+    const { id: _id, created_at: _c, source: _s, ...rest } = edit
+    remove.mutate(edit.id, {
+      onSuccess: () => {
+        toast("已刪除這筆交易", {
+          description: "持股與績效已重新計算。",
+          action: { label: "復原", onClick: () => create.mutate(rest, { onSuccess: () => toast.success("已復原") }) },
+        })
+        onDone()
+      },
+      onError: () => toast.error("刪除失敗，請稍後再試"),
+    })
+  }
+  const busy = create.isPending || update.isPending
+
   if (accounts.isLoading) return <div className="p-6"><Skeleton className="h-64 w-full" /></div>
   if (accounts.data?.length === 0)
     return (
       <div className="flex flex-col gap-2 p-6 text-md">
         <p className="font-medium">還沒有券商帳戶</p>
-        <p className="text-muted-foreground">先到「設定」新增一個帳戶（例如「永豐－一般」），手續費折扣才能算對。</p>
+        <p className="text-muted-foreground">先新增一個帳戶（例如「永豐－一般」），手續費折扣才能算對。</p>
+        <Link to="/settings" onClick={onDone} className={cn(buttonVariants({ variant: "outline" }), "mt-2 self-start")}>
+          到設定新增帳戶
+        </Link>
       </div>
     )
 
@@ -309,16 +354,41 @@ export function TradeForm({ initialSymbol, onDone, layout }: { initialSymbol?: s
           <Chop tone="muted">預估</Chop>
         </div>
         <PreviewBody preview={preview.data} loading={preview.isFetching && !preview.data} ready={!!debounced} currency={account?.currency ?? "TWD"} type={type} />
-        <div className="mt-auto flex gap-2 pt-2">
-          <Button type="button" variant="outline" className="flex-1" onClick={onDone}>
-            取消
-          </Button>
-          <Button type="submit" className="flex-1" disabled={create.isPending}>
-            {create.isPending ? "儲存中…" : "儲存"}
-          </Button>
-        </div>
+        {layout === "split" && <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} className="mt-auto pt-2" />}
       </aside>
+      {layout === "stack" && (
+        <div className="safe-bottom sticky bottom-0 z-10 border-t bg-popover px-4 pt-3 pb-3">
+          {preview.data && (
+            <p className="mb-2 flex items-baseline justify-between text-md">
+              <span className="text-muted-foreground">{preview.data.net_cash < 0 ? "應付" : "實收"}（預估）</span>
+              <span className="num font-semibold">{formatMoney(Math.abs(preview.data.net_cash), { currency: account?.currency ?? "TWD" })}</span>
+            </p>
+          )}
+          <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} />
+        </div>
+      )}
     </form>
+  )
+}
+
+function Actions({ edit, busy, onCancel, onDelete, className }: { edit: boolean; busy: boolean; onCancel: () => void; onDelete: () => void; className?: string }) {
+  return (
+    <div className={cn("flex flex-col gap-2", className)}>
+      <div className="flex gap-2">
+        <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
+          取消
+        </Button>
+        <Button type="submit" className="flex-1" disabled={busy}>
+          {busy ? "儲存中…" : edit ? "儲存變更" : "儲存"}
+        </Button>
+      </div>
+      {edit && (
+        <Button type="button" variant="ghost" className="text-destructive" onClick={onDelete}>
+          <Trash2Icon />
+          刪除這筆交易
+        </Button>
+      )}
+    </div>
   )
 }
 

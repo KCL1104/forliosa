@@ -16,9 +16,19 @@ export function RangeChips<T extends string>({
   label: string
   className?: string
 }) {
+  // WAI-ARIA radiogroup：只有選取中的項目可 Tab，方向鍵切換
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const delta = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0
+    if (!delta) return
+    e.preventDefault()
+    const next = options[(i + delta + options.length) % options.length]!
+    onChange(next.value)
+    const group = e.currentTarget.parentElement
+    requestAnimationFrame(() => (group?.querySelector<HTMLButtonElement>('[aria-checked="true"]'))?.focus())
+  }
   return (
     <div role="radiogroup" aria-label={label} className={cn("no-scrollbar -mx-1 flex items-center gap-0.5 overflow-x-auto px-1", className)}>
-      {options.map((o) => {
+      {options.map((o, i) => {
         const active = o.value === value
         return (
           <button
@@ -26,6 +36,8 @@ export function RangeChips<T extends string>({
             type="button"
             role="radio"
             aria-checked={active}
+            tabIndex={active || (!options.some((x) => x.value === value) && i === 0) ? 0 : -1}
+            onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
             className={cn(
               "press h-8 shrink-0 rounded-md px-2.5 text-sm font-medium text-muted-foreground outline-offset-0 hover:bg-muted hover:text-foreground pointer-coarse:h-10",
