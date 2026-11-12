@@ -29,7 +29,7 @@ export function FormField({
         ) : (
           <span className="text-sm font-medium">{label}</span>
         )}
-        {hint && <span className="num text-xs text-muted-foreground">{hint}</span>}
+        {hint && <span className="num text-sm text-ink-2">{hint}</span>}
       </div>
       {children}
       {error && (

@@ -25,7 +25,7 @@ describe("交易來源標示", () => {
     expect(el).not.toHaveClass("text-ai")
     expect(el.getAttribute("title")).toContain("除息日")
   })
-  it("改過的標「自動・已修改」；AI 建立的是紫色文楷；自己記的什麼都沒有", () => {
+  it("改過的標「自動・已修改」；AI 建立的是紫色（固定標籤不用楷體）；自己記的什麼都沒有", () => {
     const { container } = render(
       <div>
         <SourceTag source="auto_edited" />
@@ -34,7 +34,8 @@ describe("交易來源標示", () => {
       </div>,
     )
     expect(screen.getByText("自動・已修改")).toHaveClass("demo-tag")
-    expect(screen.getByText("由 AI 建立")).toHaveClass("font-ai", "text-ai")
+    expect(screen.getByText("由 AI 建立")).toHaveClass("text-ai")
+    expect(screen.getByText("由 AI 建立")).not.toHaveClass("font-ai")
     expect(container.firstElementChild!.children).toHaveLength(2)
   })
 })

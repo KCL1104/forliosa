@@ -1,8 +1,10 @@
+import { ScrollRow } from "@/components/scroll-row"
 import { cn } from "@/lib/utils"
 
 /**
  * 區間選擇（1日…全部、季／年…）：role=radiogroup，方向鍵切換。
- * 選取＝墨色實底（和帳本分段同一套語言）。
+ * 選取＝選取語法 (b)（`sel-chip`：淺色墨色實底；深色格線藍底＋內框）。
+ * 放不下時橫向捲動（ScrollRow）：被遮住的一邊淡出，選取中的選項捲進畫面。
  */
 export function RangeChips<T extends string>({
   value,
@@ -27,7 +29,7 @@ export function RangeChips<T extends string>({
     requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus())
   }
   return (
-    <div role="radiogroup" aria-label={label} className={cn("no-scrollbar -mx-1 flex items-center gap-0.5 overflow-x-auto px-1 py-0.5", className)}>
+    <ScrollRow role="radiogroup" aria-label={label} className={cn("-mx-1 items-center gap-0.5 px-1 py-0.5", className)}>
       {options.map((o, i) => {
         const active = o.value === value
         return (
@@ -39,21 +41,18 @@ export function RangeChips<T extends string>({
             tabIndex={active || (!options.some((x) => x.value === value) && i === 0) ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
-            className={cn(
-              "press h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:h-11 pointer-coarse:px-3",
-              active && "bg-act font-medium text-act-fg hover:bg-act hover:text-act-fg",
-            )}
+            className="press sel-chip h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-11 pointer-coarse:px-3"
           >
             {o.label}
           </button>
         )
       })}
-    </div>
+    </ScrollRow>
   )
 }
 
 /**
- * 分段（帳本：持倉・交易・股利・績效）：1px 鉛筆灰外框、選取＝墨色實底。
+ * 分段（帳本：持倉・交易・股利・績效）：1px 鉛筆灰外框，選取＝選取語法 (b)（`sel-chip`）。
  * role=tablist；方向鍵切換。
  */
 export function Segmented<T extends string>({
@@ -95,10 +94,7 @@ export function Segmented<T extends string>({
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
-            className={cn(
-              "press relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 hover:bg-hov hover:text-ink before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-[38px] max-lg:flex-1 max-lg:px-2",
-              active && "bg-act font-medium text-act-fg hover:bg-act hover:text-act-fg",
-            )}
+            className="press sel-chip relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-[38px] max-lg:flex-1 max-lg:px-2"
           >
             {o.label}
             {o.count !== undefined && o.count !== null && <span className="num text-sm font-normal opacity-85 max-lg:hidden">{o.count}</span>}

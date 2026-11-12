@@ -60,7 +60,7 @@ export function Pct({ value, className, glyph = true, decimals = 2 }: { value: n
   const d = direction(value)
   return (
     <span className={cn("num inline-flex items-baseline gap-0.5 whitespace-nowrap", toneClass(d), className)}>
-      {glyph && d !== "flat" && <span aria-hidden className="text-[0.8em] leading-none">{directionGlyph(d)}</span>}
+      {glyph && d !== "flat" && <span aria-hidden className="leading-none">{directionGlyph(d)}</span>}
       {/* 有 ▲▼ 時不再加正負號（台灣慣例：▲4.81%） */}
       <span>{formatPercent(glyph && value !== null && value !== undefined ? Math.abs(value) : value, { decimals, signed: !glyph })}</span>
       {glyph && <span className="sr-only">{d === "up" ? "上漲" : d === "down" ? "下跌" : "持平"}</span>}
@@ -87,7 +87,7 @@ export function PriceChange({ change, pct, market, className }: { change: number
   return (
     <span className={cn("num inline-flex items-baseline gap-1.5 whitespace-nowrap", toneClass(d), className)}>
       <span>
-        {d !== "flat" && <span aria-hidden className="mr-0.5 text-[0.8em]">{directionGlyph(d)}</span>}
+        {d !== "flat" && <span aria-hidden className="mr-0.5">{directionGlyph(d)}</span>}
         {d === "down" ? MINUS : d === "up" ? "+" : ""}
         {abs}
       </span>
@@ -149,7 +149,7 @@ export function FlowPct({ value, className }: { value: number | null; className?
   const d = direction(value)
   return (
     <span className={cn("num inline-flex items-baseline gap-0.5 whitespace-nowrap", toneClass(d), className)}>
-      {d !== "flat" && <span aria-hidden className="text-[0.75em]">{directionGlyph(d)}</span>}
+      {d !== "flat" && <span aria-hidden className="leading-none">{directionGlyph(d)}</span>}
       <NumberFlow
         value={Math.abs(value)}
         prefix={d === "down" ? MINUS : d === "up" ? "+" : ""}
@@ -163,12 +163,12 @@ export function FlowPct({ value, className }: { value: number | null; className?
 
 /**
  * 交易來源標示：自動入帳（「自動」「自動・已修改」）與匯入是淡墨細框小字，可滑過看說明；
- * AI 建立的是紫色文楷「由 AI 建立」；自己記的不標示。
+ * AI 建立的是紫色「由 AI 建立」（AI 做的事＝紫色；這是固定標籤不是模型寫的字，所以不用楷體）；自己記的不標示。
  */
 export function SourceTag({ source, className }: { source: TransactionSource; className?: string }) {
   const tag = SOURCE_TAG[source]
   if (!tag) return null
-  if (tag.ai) return <span className={cn("font-ai text-sm text-ai", className)}>{tag.label}</span>
+  if (tag.ai) return <span className={cn("text-sm font-medium text-ai", className)}>{tag.label}</span>
   return (
     <span className={cn("demo-tag text-ink-2", className)} title={tag.title}>
       {tag.label}

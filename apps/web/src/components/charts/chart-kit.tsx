@@ -20,7 +20,7 @@ export function ChartTooltipBox({ title, rows, className }: { title: React.React
             {r.color && (
               <span
                 aria-hidden
-                className={cn("shrink-0", r.shape === "line" ? "h-0.5 w-3 rounded-full" : "size-2.5 rounded-[3px]")}
+                className={cn("shrink-0", r.shape === "line" ? "h-0.5 w-3 rounded-full" : "size-2.5 rounded-xs")}
                 style={{ background: r.color }}
               />
             )}
@@ -41,7 +41,7 @@ export function Legend({ items, className }: { items: { label: string; color: st
         <li key={i.label} className="inline-flex items-center gap-1.5">
           <span
             aria-hidden
-            className={cn("shrink-0", i.shape === "line" ? "h-0.5 w-3.5 rounded-full" : "size-2.5 rounded-[3px]")}
+            className={cn("shrink-0", i.shape === "line" ? "h-0.5 w-3.5 rounded-full" : "size-2.5 rounded-xs")}
             style={{ background: i.color }}
           />
           <span className="text-muted-foreground">{i.label}</span>

@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 
 /**
- * 每月扣款日（1–28，可複選）：7 欄的日期格，選取＝墨色實底（和區間、分段同一套語言）。
+ * 每月扣款日（1–28，可複選）：7 欄的日期格，選取＝選取語法 (b)（`sel-chip`，和區間、分段同一套）。
  * 一個 role=group，每格是 aria-pressed 的按鈕；方向鍵在格子之間移動。只到 28 日，因為每個月都有。
  */
 export function DayOfMonthPicker({
@@ -40,8 +40,8 @@ export function DayOfMonthPicker({
             onClick={() => toggle(d)}
             onKeyDown={(e) => onKeyDown(e, d)}
             className={cn(
-              "press num grid h-9 place-items-center rounded-sm border text-md pointer-coarse:h-11",
-              on ? "border-act bg-act font-medium text-act-fg" : "border-rule text-ink hover:border-ctl hover:bg-hov",
+              "press sel-chip num grid h-9 place-items-center rounded-sm border text-md pointer-coarse:h-11",
+              on ? "border-transparent" : "border-rule text-ink hover:border-ctl",
               invalid && !on && "border-ctl",
             )}
           >
