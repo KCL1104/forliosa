@@ -31,7 +31,7 @@ export const TYPE_LABEL: Record<TransactionType, string> = {
 }
 
 /**
- * 交易來源的標示（`null` = 不標示）。`ai` 用紫色文楷（AI 唯一的識別），其他是淡墨細框小字。
+ * 交易來源的標示（`null` = 不標示）。`ai` 用紫色（AI 做的事；固定標籤，不用楷體），其他是淡墨細框小字。
  * 自動入帳是系統依規則記的，不是 AI：不用紫色。
  */
 export const SOURCE_TAG: Record<TransactionSource, { label: string; title?: string; ai?: boolean } | null> = {

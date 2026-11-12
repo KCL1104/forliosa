@@ -66,8 +66,58 @@
 }
 
 /*
+ * 選取的語法（全站只有三種，見 DESIGN.md「Selected states」）。
+ * 狀態跟著 ARIA／Base UI 的屬性走，元件不用自己寫條件 class；未選取的字色由元件決定（通常 text-ink-2）。
+ */
+/* (a) 文字分頁與導覽：選取＝墨色、700、2px 墨色底線；沒有底色 */
+@utility sel-tab {
+  border-bottom: 2px solid transparent;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      color: var(--ink);
+    }
+  }
+  &:is([aria-selected="true"], [aria-current]:not([aria-current="false"]), [data-active]:not([data-active="false"])) {
+    color: var(--ink);
+    font-weight: 700;
+    border-bottom-color: var(--ink);
+  }
+}
+/* (b) 分段、區間、篩選、日期格、切換群組：選取＝on-bg 底＋on-fg 字＋1px 內框 on-ring */
+@utility sel-chip {
+  transition:
+    background-color 120ms ease,
+    color 120ms ease,
+    box-shadow 120ms ease;
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      background-color: var(--hov);
+      color: var(--ink);
+    }
+  }
+  &:is([aria-checked="true"], [aria-pressed="true"], [aria-selected="true"], [data-pressed]:not([data-pressed="false"])) {
+    background-color: var(--on-bg);
+    color: var(--on-fg);
+    box-shadow: inset 0 0 0 1px var(--on-ring);
+    font-weight: 500;
+  }
+}
+/* (c) 清單裡選取的那一列：淡墨底＋開頭 2px 墨色線 */
+@utility sel-row {
+  &:is([aria-selected="true"], [aria-current]:not([aria-current="false"])) {
+    background-color: var(--hov);
+    box-shadow: inset 2px 0 0 var(--ink);
+  }
+}
+/* 選取語法是系統的一部分：不管原始碼裡有沒有出現都產生 */
+@source inline("sel-tab sel-chip sel-row");
+
+/*
  * Forliosa 設計 token —— 世界觀：學校聯絡簿。說明見 /DESIGN.md。
- * 淺色是紙白、深色是夜間筆記本；1px 藍灰格線就是結構（表格不包卡片）；
+ * 淺色是紙白、深色是藍黑夜間筆記本；1px 藍灰格線就是結構（表格不包卡片）；
  * 藍黑原子筆墨是文字與動作；紫色只屬於 AI（老師的筆）；紅綠只表示價格漲跌。
  */
 :root {
@@ -84,6 +134,14 @@
   --act: #1f2a44;
   --act-fg: #fbfbf8;
   --act-hover: #0f1730;
+
+  /*
+   * 選取（分段、區間、篩選、日期格、開關）：同一套語法。
+   * 淺色是墨色實底＋紙色字；深色是格線色調的藍底＋墨色字＋1px 內框（不是白色實塊）。
+   */
+  --on-bg: var(--ink);
+  --on-fg: var(--paper);
+  --on-ring: var(--ink);
 
   /* AI：老師的筆（紫） */
   --ai: #5b3fa0;
@@ -133,39 +191,50 @@
   color-scheme: light;
 }
 
+/*
+ * 深色：藍黑夜間筆記本。頁面是深藍黑（色相 224），印刷格線是看得見但安靜的藍線，字是淡紙白。
+ * 對比（WCAG）：ink 15.1:1、ink-2 7.5:1（raised 7.0:1）、ctl 3.3:1、ai 8.3:1（ai-wash 7.6:1）、
+ * 漲 6.6:1、跌 8.3:1；選取的內框 on-ring 對紙 6.2:1。
+ */
 .dark {
-  --paper: #14171f;
-  --raised: #1b2029;
-  --rule: #2a3140;
-  --ink: #e6e9f0;
-  --ink-2: #97a0b4;
-  --ctl: #5e6880;
-  --hov: #1f2531;
-  --sel: rgb(230 233 240 / 0.1);
-  --lift: rgb(0 0 0 / 0.45);
-  --act: #e6e9f0;
-  --act-fg: #14171f;
-  --act-hover: #ffffff;
+  --paper: #0e1424;
+  --raised: #141b2e;
+  --rule: #2a3754;
+  --ink: #e6e9f2;
+  --ink-2: #9ba6c0;
+  --ctl: #5a6888;
+  --hov: #172038;
+  --sel: #1f2a45;
+  --lift: rgb(2 5 14 / 0.55);
+  /* 主要按鈕：藍調的紙（不是純白） */
+  --act: #dbe2f1;
+  --act-fg: #0e1424;
+  --act-hover: #eef2fa;
 
-  --ai: #a996f0;
-  --ai-wash: #1d1a2c;
-  --ai-rule: #5f4f9a;
+  --on-bg: #24314d;
+  --on-fg: var(--ink);
+  --on-ring: #8796ba;
+
+  --ai: #b4a3f5;
+  --ai-wash: #1a1a35;
+  --ai-rule: #6b5dbb;
 
   --red: #ff6b6b;
   --green: #4cc38a;
 
-  --chart-bench: #7a8399;
+  --chart-bench: #7d89a8;
   --chart-blue: #7fa6e0;
   --chart-ochre: #d2a75a;
-  --chart-grid: #232a37;
+  --chart-grid: #1d2741;
 
-  --band-1: #1c2330;
-  --band-2: #232c3c;
-  --band-3: #2c3849;
-  --band-4: #364559;
-  --band-5: #42536b;
+  /* 估值河流圖：同一個藍色相 5 階，越貴越亮 */
+  --band-1: #16203a;
+  --band-2: #1d2a4a;
+  --band-3: #26365c;
+  --band-4: #31456f;
+  --band-5: #3e5584;
 
-  --scrim: rgb(0 0 0 / 0.55);
+  --scrim: rgb(3 6 15 / 0.6);
   color-scheme: dark;
 }
 
@@ -192,6 +261,9 @@
   --color-act: var(--act);
   --color-act-fg: var(--act-fg);
   --color-act-hover: var(--act-hover);
+  --color-on-bg: var(--on-bg);
+  --color-on-fg: var(--on-fg);
+  --color-on-ring: var(--on-ring);
   --color-ai: var(--ai);
   --color-ai-wash: var(--ai-wash);
   --color-ai-rule: var(--ai-rule);
@@ -394,7 +466,7 @@
     font-feature-settings: "pnum" 1, "lnum" 1;
   }
 
-  /* AI 的話：老師的筆——紫色文楷 */
+  /* AI 的話：老師的筆——紫色楷體。只給模型真的寫出來的字；規則或範本產生的句子用墨色 Noto Sans */
   .ai-voice {
     font-family: var(--font-ai);
     color: var(--ai);
@@ -427,6 +499,66 @@
   }
   .ruled-row:active {
     background: var(--hov);
+  }
+
+  /*
+   * 表頭（印好的表格）：13px 淡墨標籤，下面雙線（1px 格線、2px 空隙、1px 格線）。
+   * 用在 <thead>、表頭的 <tr>，或 div／li 做的格線清單表頭。雙線畫在背景，不佔版面：表頭列自己不要再加 border-b。
+   */
+  .form-head {
+    font-size: var(--text-sm);
+    line-height: var(--text-sm--line-height);
+    font-weight: 400;
+    color: var(--ink-2);
+    white-space: nowrap;
+  }
+  .form-head:not(thead, tr),
+  thead.form-head > tr > *,
+  tr.form-head > * {
+    font-weight: 400;
+    background-image: linear-gradient(var(--rule), var(--rule)), linear-gradient(var(--rule), var(--rule));
+    background-repeat: no-repeat;
+    background-size: 100% 1px;
+    background-position:
+      0 100%,
+      0 calc(100% - 3px);
+  }
+
+  /* 聯絡簿的日期格：日期是墨色 500，星期是 12px 淡墨（.weekday），右邊一條格線 */
+  .date-cell {
+    color: var(--ink);
+    font-weight: 500;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
+    padding-inline-end: 0.75rem;
+    border-inline-end: 1px solid var(--rule);
+  }
+  .date-cell .weekday {
+    font-size: var(--text-xs);
+    font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  /* 橫向捲動的分頁／選項列（ScrollRow）：只有被遮住的那一邊淡出（遮罩只看透明度，用不透明的墨色當實心） */
+  .scroll-row {
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scrollbar-width: none;
+    --fade-start: 0px;
+    --fade-end: 0px;
+  }
+  .scroll-row::-webkit-scrollbar {
+    display: none;
+  }
+  .scroll-row[data-overflow-start] {
+    --fade-start: 28px;
+  }
+  .scroll-row[data-overflow-end] {
+    --fade-end: 28px;
+  }
+  .scroll-row:is([data-overflow-start], [data-overflow-end]) {
+    -webkit-mask-image: linear-gradient(to right, transparent, var(--ink) var(--fade-start), var(--ink) calc(100% - var(--fade-end)), transparent);
+    mask-image: linear-gradient(to right, transparent, var(--ink) var(--fade-start), var(--ink) calc(100% - var(--fade-end)), transparent);
   }
 
   /* 控制項：方肩、1px 灰框 */

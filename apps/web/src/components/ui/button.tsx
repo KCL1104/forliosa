@@ -8,6 +8,8 @@ import { cn } from "@/lib/utils"
  * - outline：1px 鉛筆灰框（次要動作）
  * - ghost：透明（工具列圖示）
  * - ai：紫色虛線（只屬於 AI 的動作，例如「待簽名」）
+ * - sign：簽名格的語法（表單上唯一「定案」的動作：建立群組、儲存、加入群組、記一筆的送出）——
+ *   直角、墨色底、內縮 3px 的 1px 細框（40%）、14px 粗體；高度和一般按鈕相同（40px，觸控 44px）
  */
 const buttonVariants = cva(
   "rounded-sm border border-transparent bg-clip-padding text-md font-medium press [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-ink [&_svg]:pointer-events-none [&_svg]:shrink-0",
@@ -21,6 +23,7 @@ const buttonVariants = cva(
         destructive: "bg-act text-act-fg hover:bg-act-hover",
         ai: "border-dashed border-ai-rule bg-ai-wash text-ai hover:border-ai focus-visible:outline-ai",
         link: "h-auto px-0 text-ink underline underline-offset-3 hover:text-ink-2",
+        sign: "relative rounded-none border-0 bg-act font-bold text-act-fg hover:bg-act-hover after:pointer-events-none after:absolute after:inset-0.75 after:border after:border-current after:opacity-40",
       },
       size: {
         default: "h-10 gap-2 px-3 pointer-coarse:h-11",
@@ -33,6 +36,11 @@ const buttonVariants = cva(
         "icon-lg": "size-11",
       },
     },
+    compoundVariants: [
+      // 簽名格的字要有呼吸空間（內框不能貼字）
+      { variant: "sign", size: "default", class: "px-5" },
+      { variant: "sign", size: "lg", class: "px-6" },
+    ],
     defaultVariants: {
       variant: "default",
       size: "default",

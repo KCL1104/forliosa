@@ -27,6 +27,6 @@ export function useApplyDocumentPrefs() {
     root.style.colorScheme = resolved
     root.dataset.convention = convention
     const bg = getComputedStyle(root).getPropertyValue("--background").trim()
-    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", bg || (resolved === "dark" ? "#14161c" : "#f3f5f5")))
+    document.querySelectorAll('meta[name="theme-color"]').forEach((m) => m.setAttribute("content", bg || (resolved === "dark" ? "#0e1424" : "#fbfbf8")))
   }, [resolved, convention])
 }

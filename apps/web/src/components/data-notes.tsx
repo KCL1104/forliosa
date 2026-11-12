@@ -1,4 +1,3 @@
-import { Link } from "@tanstack/react-router"
 import { cn } from "@/lib/utils"
 
 /**
@@ -17,14 +16,8 @@ export function DataNotes({ notes, className }: { notes?: string[] | null; class
   )
 }
 
-/** 頁尾的小連結：資料來源與授權（政府資料開放授權條款要求顯名） */
-export function SourcesFooter({ className }: { className?: string }) {
-  return (
-    <p className={cn("mt-12 border-t border-rule pt-3 text-xs text-ink-2", className)}>
-      行情與公司資料來自政府開放資料。
-      <Link to="/data-sources" className="ml-1 text-ink underline underline-offset-3 hover:decoration-2">
-        資料來源與授權
-      </Link>
-    </p>
-  )
-}
+/**
+ * 頁尾的「資料來源與授權」搬到 `@/components/sources`（SourcesProvider＋useSourceNote＋SourcesFooter）。
+ * 這裡保留同名匯出，舊的匯入不用改；新程式請從 `@/components/sources` 匯入。
+ */
+export { SourcesFooter } from "./sources"

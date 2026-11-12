@@ -20,13 +20,19 @@ function Tabs({
   )
 }
 
+/**
+ * 分頁列（聯絡簿）：
+ * - line（預設）：文字分頁，選取語法 (a)——墨色、700、2px 墨色底線；底下一條格線
+ * - default 以外的 `segmented`：1px 鉛筆灰外框的分段，選取語法 (b)
+ */
 const tabsListVariants = cva(
-  "rounded-lg p-[3px] group-data-horizontal/tabs:h-8 data-[variant=line]:rounded-none group/tabs-list inline-flex w-fit items-center justify-center text-muted-foreground group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col",
+  "group/tabs-list inline-flex w-fit items-center text-ink-2 group-data-vertical/tabs:h-fit group-data-vertical/tabs:flex-col",
   {
     variants: {
       variant: {
-        default: "bg-muted",
-        line: "gap-1 bg-transparent",
+        default: "gap-1 border-b border-rule",
+        line: "gap-1 border-b border-rule",
+        segmented: "gap-1 rounded-md border border-ctl p-1",
       },
     },
     defaultVariants: {
@@ -55,10 +61,11 @@ function TabsTrigger({ className, ...props }: TabsPrimitive.Tab.Props) {
     <TabsPrimitive.Tab
       data-slot="tabs-trigger"
       className={cn(
-        "gap-1.5 rounded-md border border-transparent px-1.5 py-0.5 text-sm font-medium group-data-[variant=default]/tabs-list:data-active:shadow-sm group-data-[variant=line]/tabs-list:data-active:shadow-none [&_svg:not([class*='size-'])]:size-4 has-data-[icon=inline-end]:pr-1 has-data-[icon=inline-start]:pl-1 relative inline-flex h-[calc(100%-1px)] flex-1 items-center justify-center whitespace-nowrap text-muted-foreground transition-colors group-data-vertical/tabs:w-full group-data-vertical/tabs:justify-start hover:text-foreground focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 focus-visible:outline-1 focus-visible:outline-ring disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 dark:text-muted-foreground dark:hover:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-active:bg-transparent dark:group-data-[variant=line]/tabs-list:data-active:border-transparent dark:group-data-[variant=line]/tabs-list:data-active:bg-transparent",
-        "data-active:bg-background data-active:text-foreground dark:data-active:border-input dark:data-active:bg-input/30 dark:data-active:text-foreground",
-        "after:absolute after:bg-primary after:opacity-0 after:transition-opacity group-data-horizontal/tabs:after:inset-x-0 group-data-horizontal/tabs:after:bottom-[-5px] group-data-horizontal/tabs:after:h-0.5 group-data-vertical/tabs:after:inset-y-0 group-data-vertical/tabs:after:-right-1 group-data-vertical/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-active:after:opacity-100",
+        "relative inline-flex shrink-0 items-center justify-center gap-1.5 whitespace-nowrap text-base text-ink-2 outline-none disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        // (a) 文字分頁：底線壓在分頁列的格線上
+        "group-data-[variant=default]/tabs-list:sel-tab group-data-[variant=line]/tabs-list:sel-tab group-data-[variant=default]/tabs-list:-mb-px group-data-[variant=line]/tabs-list:-mb-px group-data-[variant=default]/tabs-list:h-12 group-data-[variant=line]/tabs-list:h-12 group-data-[variant=default]/tabs-list:px-3 group-data-[variant=line]/tabs-list:px-3",
+        // (b) 分段
+        "group-data-[variant=segmented]/tabs-list:sel-chip group-data-[variant=segmented]/tabs-list:h-[34px] group-data-[variant=segmented]/tabs-list:rounded-sm group-data-[variant=segmented]/tabs-list:px-4",
         className
       )}
       {...props}
