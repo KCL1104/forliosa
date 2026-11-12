@@ -55,6 +55,10 @@ export type AiContext =
 
 const MAX = 3
 
+/** 上市股票沒有逐檔三大法人與外資持股（不顯示），外資動向改問 AI：上網搜尋新聞，附來源與日期 */
+export const FOREIGN_FLOW_QUESTION = "最近外資對這檔的動向？"
+export const isListedStock = (s: Pick<StockData, "market" | "type">) => s.market === "TWSE" && s.type === "stock"
+
 /** 單一持股權重門檻、前三大合計門檻、單一產業門檻：任一超過就出現「會不會太集中」 */
 export const CONCENTRATION = { single: 0.15, top3: 0.45, industry: 0.4 } as const
 
@@ -92,6 +96,7 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
     const d = direction(pct)
     out.push({ kind: "why_move", symbol: s.symbol, text: `${s.name}今天為什麼${d === "down" ? "跌" : "漲"}？`, lines: ["今天", `為什麼${d === "down" ? "跌" : "漲"}？`] })
   }
+  if (isListedStock(s)) out.push({ kind: "foreign_flow", symbol: s.symbol, text: FOREIGN_FLOW_QUESTION, lines: ["最近外資", "對這檔的動向？"] })
   if (held) {
     const next = s.position?.upcoming_dividend
     if (next && daysBetween(today, next.ex_dividend_date) <= 31) out.push({ kind: "next_dividend", symbol: s.symbol, text: "這次除息我可以領多少？", lines: ["這次除息", "我可以領多少？"] })
@@ -116,6 +121,7 @@ export function classifyQuestion(text: string, ctx: AiContext): SuggestionKind |
   const t = text.replace(/\s/g, "")
   if (ctx.route === "stock") {
     if (/(為什麼|為何|原因).*(漲|跌)|怎麼(漲|跌)/.test(t)) return "why_move"
+    if (isListedStock(ctx.stock) && /(外資|法人|投信|自營商)/.test(t) && /(動向|買|賣|進出|布局|佈局|調節|持股)/.test(t)) return "foreign_flow"
     if (/(加碼|攤平|均價)/.test(t) && ctx.stock.position) return "add_one_lot"
     if (/(成本).*(河流|本益比|位置)/.test(t) && ctx.stock.position) return "cost_on_river"
     if (/(除息|股利|配息).*(領|多少)/.test(t)) return ctx.stock.position ? "next_dividend" : "if_hold_dividend"
@@ -213,15 +219,16 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
 
 function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today: string, asOf?: string | null): Answer | null {
   const link = (tab: string, label: string): AnswerLink => ({ label, to: "/stock/$symbol", params: { symbol: s.symbol }, search: { tab } })
+  const listed = s.market === "TWSE"
   switch (kind) {
     case "why_move": {
       if (!s.why?.show) {
-        return { text: `${s.name}今天的漲跌在平常的範圍內（${pctGlyph(s.quote?.change_pct)}），沒有出現異常的成交量、法人或事件。`, links: [link("chips", "看籌碼")], asOf }
+        return { text: `${s.name}今天的漲跌在平常的範圍內（${pctGlyph(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
       }
       return {
         text: `${s.name}今天${pctGlyph(s.quote?.change_pct)}。目前看得到的是：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
         rows: s.why.reasons.map((r) => ({ label: r.text, value: "" })),
-        links: [link("chips", "看法人買賣"), link("events", "看事件")],
+        links: [link("chips", listed ? "看籌碼" : "看法人買賣"), link("events", "看事件")],
         asOf: s.why.as_of ?? asOf,
         followUps: s.position ? ["加碼 1 張，均價會變多少？"] : ["現在的本益比算貴嗎？"],
       }
@@ -288,6 +295,12 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
         asOf,
       }
     }
+    case "foreign_flow":
+      // 本機規則版沒有網路搜尋：說明為什麼沒有數字、給現在看得到的資料（真實後端由 AI 搜尋新聞，附來源與日期）
+      return {
+        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供，沒有免費、可商用的來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期；完整的 AI 回答開放後再問我，我不想給你猜的答案。`,
+        links: [link("chips", "看融資融券"), link("events", "看公告")],
+      }
     default:
       return null
   }

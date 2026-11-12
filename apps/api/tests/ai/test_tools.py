@@ -155,6 +155,33 @@ def test_stock_tools_return_compact_json(two_users):
         json.loads(out.content)
     _, hist = run(ctx, "get_stock_history", symbol="2330", range="1Y")
     assert len(hist["closes"]) <= 31 and hist["stats"]["days"] > 100
+    # listed (TWSE) stocks: no per-stock institutional flows or foreign holding, and the tool says why
+    _, chips = run(ctx, "get_chips", symbol="2330", range="1M")
+    assert chips["institutional_net_lots_total"] is None and chips["institutional_last_10_days"] == []
+    assert chips["foreign_holding_pct"] is None and any("上市股票" in n for n in chips["notes"])
+    desc = next(t.description for t in TOOLS if t.name == "get_chips")
+    assert "TWSE-listed" in desc and "search the web" in desc
+
+
+def test_web_fetch_never_reads_the_twse_website_or_mis():
+    s = get_settings()
+    fetch = next(t for t in server_tools(s) if t["name"] == "web_fetch")
+    # default (no allow-list): blocked_domains only — the API takes allowed_domains OR blocked_domains
+    assert fetch["blocked_domains"] == ["www.twse.com.tw", "mis.twse.com.tw"] and "allowed_domains" not in fetch
+    search = next(t for t in server_tools(s) if t["name"] == "web_search")
+    assert "blocked_domains" not in search  # search results (news) are unaffected
+    # an allow-list that would cover them is narrowed: twse.com.tw -> openapi.twse.com.tw; the hosts themselves drop
+    official = s.model_copy(update={"ai_web_fetch_allowed_domains": ["official", "www.twse.com.tw", "mis.twse.com.tw"]})
+    fetch = next(t for t in server_tools(official) if t["name"] == "web_fetch")
+    assert "blocked_domains" not in fetch
+    assert "openapi.twse.com.tw" in fetch["allowed_domains"] and "tpex.org.tw" in fetch["allowed_domains"]
+    assert not {"twse.com.tw", "www.twse.com.tw", "mis.twse.com.tw"} & set(fetch["allowed_domains"])
+    # "*" means unrestricted: back to blocked_domains
+    star = s.model_copy(update={"ai_web_fetch_allowed_domains": ["*"]})
+    assert next(t for t in server_tools(star) if t["name"] == "web_fetch")["blocked_domains"]
+    # only blocked hosts configured: no web_fetch at all rather than an unrestricted one
+    only = s.model_copy(update={"ai_web_fetch_allowed_domains": ["mis.twse.com.tw"]})
+    assert [t["name"] for t in server_tools(only)] == ["web_search"]
 
 
 def test_draft_event_and_signature_flow(client, pool, fake, engine):

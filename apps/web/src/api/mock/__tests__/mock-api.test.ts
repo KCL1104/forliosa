@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest"
 import { createMockAdapter } from "@/api/mock/adapter"
+import { findInstrument } from "@/api/mock/instruments"
+import { closeOn } from "@/api/mock/market"
 
 /** mock 要和真實後端的語意一致（apps/api/CONTRACT_NOTES.md） */
 describe("mock adapter 與後端一致", () => {
@@ -58,8 +60,13 @@ describe("重新設計新增的端點（形狀與 api-contract 一致）", () =>
     expect((await api.getWhy("2317.TW")).show).toBe(false)
   })
   it("籌碼、財報、事件、新聞、本週事項", async () => {
-    const c = await api.getChips("2330.TW", "1M")
+    const c = await api.getChips("6488.TWO", "1M")
     expect(c.institutional[0]).toEqual(expect.objectContaining({ foreign: expect.any(Number), total: expect.any(Number) }))
+    // 上市股票：任何模式都沒有逐檔三大法人與外資持股（融資融券、股權分散照常）
+    const listed = await api.getChips("2330.TW", "1M")
+    expect([listed.institutional, listed.foreign_holding_pct]).toEqual([[], []])
+    expect(listed.margin.length).toBeGreaterThan(0)
+    expect(listed.notes?.[0]).toContain("上市股票")
     const f = await api.getFinancials("2330.TW", "quarterly")
     expect(f.income.eps).toHaveLength(f.periods.length)
     expect((await api.getFinancials("0050.TW")).periods).toEqual([])
@@ -195,9 +202,18 @@ describe("定期定額", () => {
     const before = (await api.listTransactions({ limit: 200 })).items.length
     const d = await api.draftRecurring(plans[1]!.id)
     expect(d.transaction).toMatchObject({ type: "buy", trade_date: "2026-11-12", source: "ai_draft" })
+    expect(d.price_as_of).toBe("2026-11-12")
     expect(d.transaction.quantity).toBe(Math.floor(4000 / d.transaction.price))
     expect(d.preview.tax).toBe(0)
     expect((await api.listTransactions({ limit: 200 })).items.length).toBe(before)
+
+    // 補記過去的扣款（0050 的 11/6）：成交日是扣款日，用那天的收盤價，不是最近收盤價
+    const missed = await api.draftRecurring(plans[0]!.id, "2026-11-06")
+    const close = closeOn(findInstrument("0050.TW")!, "2026-11-06")
+    expect(missed).toMatchObject({ date: "2026-11-06", price_as_of: "2026-11-06" })
+    expect(missed.transaction).toMatchObject({ trade_date: "2026-11-06", price: close, quantity: Math.floor(10_000 / close) })
+    expect(close).not.toBe(findInstrument("0050.TW")!.price)
+    expect(missed.preview.rules[0]).toContain("（11/6）")
 
     // 週末順延：每月 14 日（2026-11-14 是星期六）→ 11/16
     const created = await api.createRecurring({ account_id: tw!.id, symbol: "2330.TW", amount: 1000, day_of_month: [14] })

@@ -135,7 +135,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 | 證交所網站（T86、MI_QFIIS…）、MIS、櫃買網站、MOPS 網站 | **不使用**（已移除；舊存檔的 `twse-web`／`twse-mis` 資料列也不讀） | **不使用** |
 | 盤中走勢 `/intraday` | `points: []`＋`notes` | 同左 |
 | 新聞 `/news` | 官方公告（重大訊息、證交所新聞） | 同左，FinMind 開啟時另加媒體標題（非商用） |
-| 上市股票三大法人、外資持股 | 不提供（證交所 OpenAPI 沒有個股資料），`chips.notes` 說明 | 同左（FinMind 開啟時可回補） |
+| 上市股票三大法人、外資持股 | 不提供（證交所 OpenAPI 沒有個股資料），`chips.notes` 說明 | 同左（FinMind 開啟時也不向它要這兩個資料集，只要融資融券；回補也一樣：FinMind 是轉載證交所網站） |
 
 ### 每個回應的 `sources`
 
@@ -167,7 +167,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 |---|---|
 | `overview` | 多 `symbol`。`pe`／`pb`／`dividend_yield` 是證交所／櫃買公布值（存檔，personal 時 FinMind 補舊資料）；ETF 沒有公布殖利率時以近 12 個月現金股利 ÷ 現價計算。`eps_ttm` = shioaji-data 官方季報最近四季 EPS 合計（沒有季報時用 收盤價 ÷ 本益比）。`last_cash_dividend`／`ex_dividend_date` 是**最近一次（含已公告未除息）**的現金股利。`avg_volume_3m` 為近 3 個月日均量（股）。`status.attention` = 最近一個交易日或今天被列為注意股；`status.disposition` = 今天落在處置期間內 |
 | `intraday` | 多 `notes`、`is_demo`。**目前 `points` 一律是 `[]`**（沒有授權的盤中來源；MIS 已移除），`notes` 說明；`reference_price` 是當天的參考價；`is_partial` 台股為 `true`。日後接上授權來源時 `points[].volume` 是該分鐘的成交量（股） |
-| `chips` | 多 `symbol`、`notes`；`range` 可用 `1M`、`3M`、`6M`、`1Y`。法人單位張（股數 ÷ 1000，保留小數）；外資持股 `pct` 是比率（0.2949）。**上櫃**股票的法人與外資持股來自櫃買 OpenAPI（`tpex_3insti_daily_trading`、`tpex_3insti_qfii`，每日存檔）；**上市**股票沒有（`notes` 說明）。`major_holders.buckets` 是集保 15 個持股分級（另有 `label`，例如「1,000 張以上」）；`pct` 是比率。集保只能下載當週，所以從開始存檔那週起才有資料 |
+| `chips` | 多 `symbol`、`notes`；`range` 可用 `1M`、`3M`、`6M`、`1Y`。法人單位張（股數 ÷ 1000，保留小數）；外資持股 `pct` 是比率（0.2949）。**上櫃**股票的法人與外資持股來自櫃買 OpenAPI（`tpex_3insti_daily_trading`、`tpex_3insti_qfii`，每日存檔）；**上市**股票任何模式都是空陣列（`notes` 一律有那句說明；`services/stock.py` 的 `LISTED_CHIPS_NOTE`），存檔裡已有的列（例如舊的 FinMind 回補）也不讀。`major_holders.buckets` 是集保 15 個持股分級（另有 `label`，例如「1,000 張以上」）；`pct` 是比率。集保只能下載當週，所以從開始存檔那週起才有資料 |
 | `financials` | 多 `symbol`、`period`、`notes`。來源是 shioaji-data 官方季報（2023Q1 起，單季數字，千元）；若存檔中有更新一季的 OpenAPI 財報（`t187ap06` 是**年初至今累計數**），以「本季累計 − 上季累計」換成單季，現金流量為 `null`。`net_income` 是歸屬母公司業主淨利；`free_cash_flow` = 營業 + 投資活動現金流量（OpenAPI／shioaji-data 沒有資本支出科目）。`annual` 只列四季齊全的年度，EPS 用第四季的全年累計 EPS |
 | `events` | 每筆多 `sources`、`estimated`、`period`；由新到舊排序（含未來）。範圍：過去 365 天到未來 120 天；`earnings`／`revenue_release`／`investor_conference` 用**實際日期**（見「2026-11-12 第二批」），只有查不到時才用法定期限（季報 5/15、8/14、11/14、3/31；營收每月 10 日；`estimated: true`，前後 60–90 天）。`mine`：未來的除權息／發放 = 目前持有；過去的 = 該日有記股利交易（`amount_estimate` 為實際入帳金額）；其他事件 = 目前持有。除息金額未公告時 `detail` 為「金額尚未公告」 |
 | `news` | 每筆多 `sources`、`category`。**官方公告**：該公司的重大訊息與點名該公司的證交所新聞（最近 90 天，最多 30 筆），`source: "公告"`；FinMind 媒體標題只在 personal 明確開啟時附加（`category: "media"`） |
@@ -248,7 +248,10 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   `next_date` 是今天（含）之後的下一次扣款日，停用或已結束為 `null`。
 - `/portfolio/upcoming` 列出期間內每一次扣款（`type: "recurring"`、`amount_estimate` = 扣款金額，是**流出**），只算啟用中的計畫，
   也遵守 `account_id` 篩選。
-- **草稿**：股數 = floor(金額 ÷ 最近收盤價)（含零股），手續費依帳戶設定另計（零股最低 1 元）、買進免稅；回應
+- **草稿**：成交日 = 扣款日；股數 = floor(金額 ÷ 收盤價)（含零股），手續費依帳戶設定另計（零股最低 1 元）、買進免稅。收盤價：扣款日已經過去
+  （`?date=` 補記）用扣款日當天的收盤價（`md.history(symbol, 扣款日, 扣款日)`，`price_as_of` = 扣款日）；今天或之後用最近收盤價
+  （盤中是前一天收盤）；過去的扣款日沒有**真實**收盤價時用最近收盤價，`preview.rules` 第二行說明（personal 模式下示範 K 線
+  不算那天的收盤價：存檔缺那天時 `md.history` 會用示範資料補，`close_on` 不收）。回應
   `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction, preview: TradePreview, is_demo, sources}`，`transaction`
   可以直接 `POST /transactions`（`source: "ai_draft"`）。沒有收盤價 422 `no_price`（commercial 不會用示範價格）；金額不足一股
   422 `amount_too_small`；計畫沒有下一次扣款 409。
@@ -666,8 +669,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 11. ~~**`position` 已出清的股票**~~：已決定（2026-11-12）：`position` 維持 `null`，出清的回合與買賣點改由
     `GET /portfolio/closed` 與 `GET /instruments/{symbol}/position/history` 提供。
 12. ~~**commercial 模式的歷史資料**~~：已決定（2026-11-12）：commercial 從不使用示範資料，存檔不足時回空並在 `notes` 說「資料累積中」。
-13. **上市股票三大法人**：證交所 OpenAPI 沒有個股資料（只有櫃買有），上市股票的法人與外資持股是空的；證交所網站 T86 不可程式下載。
-    合法路線：Data E-Shop「三大法人買賣超檔」外部使用（約 NT$3,000／月，待確認）或書面同意（詢問信草稿見 `docs/research/data-sources-licensing.md` §1.9）。
+13. ~~**上市股票三大法人**~~：已決定（產品負責人 2026-11-12）：不寄信給證交所、不買 Data E-Shop，上市股票的逐檔三大法人與外資持股**不顯示**
+    （任何模式，含 FinMind：上市股票只向 FinMind 要融資融券，不下載法人與持股資料集；上櫃照常）。個股頁的空狀態可直接問 AI「最近外資對這檔的動向？」（建議問題 `foreign_flow`），AI 用網路搜尋新聞回答並附來源與日期；
+    `web_fetch` 封鎖 `www.twse.com.tw`、`mis.twse.com.tw`。之後要用時：Data E-Shop「三大法人買賣超檔」或書面同意（詢問信草稿見 `docs/research/data-sources-licensing.md` §1.9）。
 14. **新聞來源**：目前只有官方公告（重大訊息、證交所新聞）。媒體新聞需要授權（中央社等，需詢價）。
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。
 16. ~~**財報公布日**~~：已實作（2026-11-12），實際日期來自重大訊息與月營收資料集；查不到才用法定期限（`estimated: true`）。
@@ -792,7 +796,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 - **工具**：15 個 client tools（2026-11-12 加 `get_derivatives_overview`，見「第三批」），全部 `strict: true`、`additionalProperties: false`、沒有使用者 id 欄位（伺服器帶入登入者）；可選參數合計 15
   個（上限 24）。結果是精簡 JSON（例如 K 線只給統計與最多 30 個取樣點、籌碼只給最近 10 日與區間合計），保留 `as_of`、`is_demo`、`sources`。
   其他使用者的帳戶 id 會回錯誤，不會被當成篩選條件。伺服器工具：`web_search_20260318`（`user_location` 台北／TW、`max_uses` 3、預設不限網域）、
-  `web_fetch_20260318`（只限官方網域、`max_uses` 2、`max_content_tokens` 8000、開啟引用）。
+  `web_fetch_20260318`（預設不限網域但 `blocked_domains` 封鎖 `www.twse.com.tw`、`mis.twse.com.tw`，`max_uses` 2、`max_content_tokens` 8000、開啟引用；
+  設了 `AI_WEB_FETCH_ALLOWED_DOMAINS` 時改用 `allowed_domains`，並拿掉這兩個主機、`twse.com.tw` 換成 `openapi.twse.com.tw`，因為 API 只接受兩者之一）。
+  系統提示：上市股票沒有逐檔法人資料，問外資動向時用 `web_search` 找新聞、每一點附來源與日期、不寫搜尋結果沒有的張數。
 - **草稿**：`draft_transaction` 跑和 `POST /transactions/preview` 相同的稅費計算，再用帳本嚴格重播檢查（例如賣超過持股 → 工具錯誤，
   不產生草稿），通過才存 `ai_drafts`（`pending`）並送 `draft` 事件。**不會寫入 `transactions`**。沒給價格時用最近收盤價估算並寫在 `notes`；
   有多個帳戶又沒指定時回帳戶清單讓 AI 追問；賣出時若只有一個帳戶持有該股就用那個帳戶。簽名後請前端 `PATCH /ai/drafts/{id}`
@@ -808,7 +814,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 - **為什麼漲跌**（預設開啟）：只在規則判斷 `show: true` 時才問模型（`web_search`、一句話、45 字內、必須有引用，否則
   `NONE`）。結果依「代號＋交易日」存 `ai_why_cache`，所有使用者共用；失敗 30 分鐘後才重試，找不到原因（`empty`）當天不再問。
   預設在背景執行緒產生（第一次回規則句，之後回 AI 句）；`AI_WHY_BLOCKING=1` 則同步等待。任何錯誤都回規則句。用餘裕最多的金鑰槽。
-- **建議問題** `GET /ai/suggestions`：規則與前端離線版相同（`apps/web/src/ai/suggestions.ts`），不呼叫模型。
+- **建議問題** `GET /ai/suggestions`：規則與前端離線版相同（`apps/web/src/ai/suggestions.ts`），不呼叫模型。上市個股多一題 `foreign_flow`「最近外資對這檔的動向？」（排在 `why_move` 之後，最多 3 題）。
 - **Live smoke**：`uv run python -m forliosa.ai.smoke`（需要金鑰；沒有示範使用者會先 seed）：一題用工具的持股問題、一題需要網路搜尋的
   台積電問題，印出用量、估計費用、「無來源」標記與每個金鑰槽的狀態。`--analyst 2330.TW NVDA`（最多 2 檔）只跑法人觀點的生成
   （不寫資料庫），印出搜尋關鍵字、每個搜尋結果的 `page_age`、thinking 摘要、模型回報的原始內容、留下與刪掉的項目（附原因）、秒數與費用。
@@ -898,7 +904,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 ### AI 待產品負責人確認
 
 1. ~~額度數字~~：已確認（2026-11-12）每天 50 題、每月 300 萬計費 token。
-2. ~~網路搜尋來源~~：已決定不限網域、由模型判斷（只限財經資訊）。待確認：`web_fetch` 仍只限官方網域（讀全文較貴、轉載風險較高），要不要也放寬？
+2. ~~網路搜尋來源~~：已決定不限網域、由模型判斷（只限財經資訊）。`web_fetch` 預設也不限網域，但封鎖證交所網站與 MIS（2026-11-12，見上方「工具」）。
 3. ~~為什麼漲跌 AI 句~~：已決定預設開啟。
 4. ~~對話保存期限~~：已決定 30 天。待確認：要不要在設定頁讓使用者自己刪除全部 AI 對話（目前只能一段一段刪）？
 5. ~~免責聲明~~：已決定由前端固定顯示（`done.disclaimer`／`/ai/usage.disclaimer`），前端需要改為顯示這行字。

@@ -34,6 +34,7 @@ import re
 import threading
 import time
 from collections import Counter
+from collections.abc import Callable, Iterable
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
@@ -65,6 +66,8 @@ TTL_SLOW = 24 * 3600  # dividends, revenue
 # After a failed request: no network calls for this long (the anonymous quota resets hourly).
 BACKOFF_QUOTA_SECONDS = 15 * 60
 BACKOFF_ERROR_SECONDS = 5 * 60
+# ``chips`` datasets (TaiwanStockInstitutionalInvestorsBuySell, …MarginPurchaseShortSale, …Shareholding).
+CHIPS_DATASETS = ("institutional", "margin", "foreign")
 
 
 def extract_rows(payload: Any) -> list[dict[str, Any]]:
@@ -309,9 +312,13 @@ class FinMindProvider(BaseProvider):
         series = parse_index(self._rows("TaiwanStockTotalReturnIndex", index_id, HISTORY_START, TTL_PRICES))
         return [(d, v) for d, v in series if start <= d <= end] or None
 
-    def chips(self, symbol: str, start: date) -> dict[str, list[dict[str, Any]]]:
-        """Institutional net (shares), margin balances (lots), foreign holding (fraction) since ``start``."""
-        return _chips(self, symbol, start)
+    def chips(self, symbol: str, start: date,
+              datasets: Iterable[str] = CHIPS_DATASETS) -> dict[str, list[dict[str, Any]]]:
+        """Institutional net (shares), margin balances (lots), foreign holding (fraction) since ``start``.
+
+        Only the ``datasets`` asked for (``institutional`` / ``margin`` / ``foreign``) are requested; the
+        others come back empty. Each one is a separate request against the small anonymous quota."""
+        return _chips(self, symbol, start, datasets)
 
     def news(self, symbol: str, days: int = 3) -> list[dict[str, Any]]:
         return _news(self, symbol, days)
@@ -386,22 +393,30 @@ def parse_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
-def _chips(self: FinMindProvider, symbol: str, start: date) -> dict[str, list[dict[str, Any]]]:
+_CHIPS_SOURCES: dict[str, tuple[str, Callable[[list[dict[str, Any]]], list[dict[str, Any]]]]] = {
+    "institutional": ("TaiwanStockInstitutionalInvestorsBuySell", parse_institutional),
+    "margin": ("TaiwanStockMarginPurchaseShortSale", parse_margin),
+    "foreign": ("TaiwanStockShareholding", parse_shareholding),
+}
+
+
+def _chips(self: FinMindProvider, symbol: str, start: date,
+           datasets: Iterable[str] = CHIPS_DATASETS) -> dict[str, list[dict[str, Any]]]:
+    wanted = set(datasets)
+    unknown = wanted - set(_CHIPS_SOURCES)
+    if unknown:
+        raise ValueError(f"unknown chips datasets: {sorted(unknown)}")
+    out: dict[str, list[dict[str, Any]]] = {key: [] for key in _CHIPS_SOURCES}
     if market_of_symbol(symbol) == "US":
-        return {"institutional": [], "margin": [], "foreign": []}
+        return out
     code = code_of_symbol(symbol)
     # A fixed start per year keeps the cache key stable (the anonymous quota is tiny).
     base = date(min(start.year, self.today_fn().year - 1), 1, 1)
-
-    def rows(dataset: str) -> list[dict[str, Any]]:
-        return [r for r in self._rows(dataset, code, base, TTL_PRICES)
-                if (parse_tw_date(r.get("date")) or date.min) >= start]
-
-    return {
-        "institutional": parse_institutional(rows("TaiwanStockInstitutionalInvestorsBuySell")),
-        "margin": parse_margin(rows("TaiwanStockMarginPurchaseShortSale")),
-        "foreign": parse_shareholding(rows("TaiwanStockShareholding")),
-    }
+    for key, (dataset, parse) in _CHIPS_SOURCES.items():
+        if key in wanted:
+            out[key] = parse([r for r in self._rows(dataset, code, base, TTL_PRICES)
+                              if (parse_tw_date(r.get("date")) or date.min) >= start])
+    return out
 
 
 def _news(self: FinMindProvider, symbol: str, days: int = 3) -> list[dict[str, Any]]:

@@ -69,7 +69,7 @@ export function RecurringPlans() {
           <h2 id="set-recurring" className="text-lg font-bold">
             定期定額
           </h2>
-          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日 AI 會照最近收盤價寫好草稿，漏記的在 7 天內提醒補記；你簽名才入帳。</p>
+          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日 AI 會照最近收盤價寫好草稿，漏記的在 7 天內提醒補記（照那天的收盤價）；你簽名才入帳。</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setEditing("new")} disabled={!accounts.data || twd.length === 0}>
           <PlusIcon />
@@ -240,7 +240,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="text-lg font-bold">{plan ? "修改定期定額" : "新增定期定額"}</DialogTitle>
-          <DialogDescription>股數 = 扣款金額 ÷ 最近收盤價（無條件捨去，含零股），手續費另計。</DialogDescription>
+          <DialogDescription>股數 = 扣款金額 ÷ 收盤價（無條件捨去，含零股），手續費另計；補記過去的扣款用那天的收盤價。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
           <Field label="股票或 ETF" error={touched ? errors.symbol : null}>
@@ -301,7 +301,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
   )
 }
 
-/** 以最近收盤價估算一次能買幾股（只是提示；草稿以扣款日前的最近收盤價計算） */
+/** 以最近收盤價估算一次能買幾股（只是提示；草稿在扣款日用最近收盤價，補記過去的扣款用那天的收盤價） */
 function SharesHint({ symbol, amount }: { symbol: Instrument; amount: number }) {
   const quote = useQuote(symbol.symbol)
   const price = quote.data?.price

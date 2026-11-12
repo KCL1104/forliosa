@@ -54,7 +54,7 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
       )}
       <div className="grid gap-10 lg:grid-cols-2">
         {!us && inst.type === "stock" && <RevenueBrief symbol={inst.symbol} />}
-        {!us && <ChipsBrief symbol={inst.symbol} />}
+        {!us && <ChipsBrief inst={inst} />}
       </div>
       {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
       {inst.type === "stock" && <AnalystViewsCard key={inst.symbol} inst={inst} />}
@@ -176,18 +176,41 @@ function RevenueBrief({ symbol }: { symbol: string }) {
   )
 }
 
-function ChipsBrief({ symbol }: { symbol: string }) {
+function ChipsBrief({ inst }: { inst: InstrumentDetail }) {
+  const symbol = inst.symbol
   const chips = useChips(symbol, "1M")
   const c = chips.data
   if (chips.isLoading) return <Skeleton className="h-40 w-full rounded-sm" />
-  if (!c || c.institutional.length === 0) return null
-  const last5 = c.institutional.slice(-5)
-  const sum = (k: "foreign" | "trust" | "dealer") => last5.reduce((s, r) => s + r[k], 0)
+  const listed = inst.market === "TWSE"
+  if (!c || (!listed && c.institutional.length === 0)) return null
   const m = c.margin
-  const marginChange = m.length > 5 ? m.at(-1)!.margin_balance - m.at(-6)!.margin_balance : null
+  const change = (k: "margin_balance" | "short_balance") => (m.length > 5 ? m.at(-1)![k] - m.at(-6)![k] : null)
+  const marginChange = change("margin_balance")
   const bigs = (c.major_holders?.buckets ?? []).filter((b) => /^1,?000/.test(b.label ?? b.level) && /以上/.test(b.label ?? b.level))
   const big = bigs.length ? { pct: bigs.reduce((s, b) => s + b.pct, 0) } : undefined
   const lot = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatCompact(Math.abs(n), 1)} 張`
+  if (listed) {
+    // 上市股票沒有逐檔三大法人與外資持股：只列融資融券與集保大戶，並說一句為什麼
+    if (m.length === 0 && !big) return null
+    const shortChange = change("short_balance")
+    return (
+      <Section title="籌碼" titleId="ov-chips" aside="近 5 個交易日" action={<MoreLink symbol={symbol} tab="chips" />}>
+        <KeyGrid
+          cols={2}
+          className="lg:grid-cols-2"
+          items={[
+            { label: "融資餘額", value: m.length ? `${formatNumber(m.at(-1)!.margin_balance)} 張` : "—" },
+            { label: "融資增減", value: marginChange === null ? "—" : lot(marginChange) },
+            { label: "融券增減", value: shortChange === null ? "—" : lot(shortChange) },
+            { label: "千張大戶", value: big ? formatPercent(big.pct, { signed: false, decimals: 1 }) : "—" },
+          ]}
+        />
+        <p className="mt-3 text-md text-ink-2">上市{inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人與外資持股。</p>
+      </Section>
+    )
+  }
+  const last5 = c.institutional.slice(-5)
+  const sum = (k: "foreign" | "trust" | "dealer") => last5.reduce((s, r) => s + r[k], 0)
   return (
     <Section title="籌碼" titleId="ov-chips" aside="近 5 個交易日" action={<MoreLink symbol={symbol} tab="chips" />}>
       <KeyGrid

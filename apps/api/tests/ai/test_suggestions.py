@@ -37,6 +37,21 @@ def test_stock_page(client):
     assert s2["symbol"] == "0050.TW" and any(a["kind"] == "watchlist_add" for a in s2["actions"])
 
 
+def test_listed_stocks_ask_about_foreign_investors(client):
+    """Listed stocks show no per-stock 三大法人／外資持股: the question is answered from web news by the model."""
+    acc = make_account(client)
+    buy(client, acc, "2330", 1000, 600)
+    for symbol in ("2330.TW", "2317.TW"):  # held and not held
+        s = client.get(f"{API}/ai/suggestions", params={"route": f"/stock/{symbol}"}).json()
+        flow = [q for q in s["questions"] if q["kind"] == "foreign_flow"]
+        assert flow == [{"kind": "foreign_flow", "text": "最近外資對這檔的動向？",
+                         "lines": ["最近外資", "對這檔的動向？"], "symbol": symbol}], s["questions"]
+    # not for TPEx stocks (their flows are on the page), ETFs or US stocks
+    for symbol in ("6488.TWO", "0050.TW", "AAPL"):
+        s = client.get(f"{API}/ai/suggestions", params={"route": f"/stock/{symbol}"}).json()
+        assert all(q["kind"] != "foreign_flow" for q in s["questions"]), symbol
+
+
 def test_groups_and_unknown_routes(client):
     assert [q["kind"] for q in client.get(f"{API}/ai/suggestions?route=/groups").json()["questions"]] == [
         "group_share"]

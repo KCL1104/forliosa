@@ -45,12 +45,35 @@ describe("個股頁的建議問題", () => {
       },
       TODAY,
     )
-    expect(s.map((x) => x.kind)).toEqual(["why_move", "next_dividend", "cost_on_river"])
+    expect(s.map((x) => x.kind)).toEqual(["why_move", "foreign_flow", "next_dividend"])
     expect(s[0]!.text).toBe("台積電今天為什麼漲？")
   })
-  it("未持有：貴不貴、持有 1 張能領多少", () => {
+  it("未持有：外資動向（上市個股）、貴不貴、持有 1 張能領多少", () => {
     const s = stockSuggestions({ ...base, position: null, overview: { pe: 20, last_cash_dividend: 5 } as never }, TODAY)
-    expect(s.map((x) => x.kind)).toEqual(["is_expensive", "if_hold_dividend"])
+    expect(s.map((x) => x.kind)).toEqual(["foreign_flow", "is_expensive", "if_hold_dividend"])
+    expect(s[0]).toMatchObject({ text: "最近外資對這檔的動向？", lines: ["最近外資", "對這檔的動向？"], symbol: "2330.TW" })
+    expect(s.some((x) => /建議|本頁/.test(x.text))).toBe(false)
+  })
+  it("上市個股才問外資動向：上櫃（頁面有櫃買的法人資料）、上市 ETF、美股不問", () => {
+    const kinds = (p: { symbol: string; market: "TWSE" | "TPEX" | "US"; type: "stock" | "etf" }) =>
+      stockSuggestions({ ...base, ...p, position: null, overview: { pe: 20 } as never }, TODAY).map((x) => x.kind)
+    expect(kinds({ symbol: "6488.TWO", market: "TPEX", type: "stock" })).not.toContain("foreign_flow")
+    expect(kinds({ symbol: "0050.TW", market: "TWSE", type: "etf" })).not.toContain("foreign_flow")
+    expect(kinds({ symbol: "NVDA", market: "US", type: "stock" })).not.toContain("foreign_flow")
+  })
+  it("外資動向：自由提問也對得到；本機規則版不給數字，說明原因並連到看得到的資料", () => {
+    const ctx: AiContext = { route: "stock", stock: { ...base, position: null } }
+    expect(classifyQuestion("外資最近在賣台積電嗎", ctx)).toBe("foreign_flow")
+    expect(classifyQuestion("最近外資對這檔的動向？", ctx)).toBe("foreign_flow")
+    const tpex: AiContext = { route: "stock", stock: { ...base, symbol: "6488.TWO", market: "TPEX" as const, position: null } }
+    expect(classifyQuestion("外資最近在賣嗎", tpex)).toBeNull()
+    const a = answerFor("foreign_flow", { ctx, privacy: false, today: TODAY })!
+    expect(a.text).toContain("不顯示")
+    // 和籌碼分頁空狀態（後端 notes）的說法一致：證交所以付費商品提供，不是「沒有可商用的資料」
+    expect(a.text).toContain("證交所以付費商品提供")
+    expect(a.text).not.toContain("沒有可商用的資料")
+    expect(a.text).not.toMatch(/\d+ 張/)
+    expect(a.links!.map((l) => l.search)).toEqual([{ tab: "chips" }, { tab: "events" }])
   })
 })
 

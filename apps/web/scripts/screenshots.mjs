@@ -142,6 +142,15 @@ const fxSource = async (page) => {
   })
 }
 
+/** 上市股票的籌碼：按空狀態裡的「最近外資對這檔的動向？」交給 AI（mock 是本機規則版的說明） */
+const foreignAsk = async (page, mobile) => {
+  await toTabs(page)
+  await page.locator("main").getByRole("button", { name: "最近外資對這檔的動向？" }).click()
+  await page.getByText(/逐檔三大法人買賣超與外資持股比，證交所以付費商品提供/).first().waitFor({ timeout: 8000 })
+  // 桌面：頁面停在分頁（只捲面板），空狀態和回答同時出現；手機是全螢幕的問 AI
+  if (mobile) await page.waitForTimeout(400)
+}
+
 /** 每個畫面：路徑、就緒條件、截圖前要做的動作 */
 const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
@@ -154,7 +163,9 @@ const SHOTS = [
   { name: "stock-2409-analyst-unavailable", path: "/stock/2409.TW", ready: "text=參考價", action: analystSearch(/法人觀點暫時查不到/) },
   { name: "ledger-recurring-marks", path: "/", ready: "text=總資產", action: recurringMarks },
   { name: "stock-2330-valuation", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: toTabs },
-  { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=三大法人資料累積中", action: toTabs },
+  { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人與外資持股", action: toTabs },
+  { name: "stock-6488-chips", path: "/stock/6488.TWO?tab=chips", ready: "text=三大法人買賣超", action: toTabs },
+  { name: "stock-2330-foreign-ask", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人與外資持股", action: foreignAsk },
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
   { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
   { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },

@@ -84,3 +84,43 @@ def test_only_open_data_endpoints_are_fetched(engine, market):
         assert etf.values["index_name"] == "臺灣50指數" and etf.values["listed"] == "2003-06-30"
         assert etf.values["units"] == 25048000000 and "陳重銓" not in str(etf.values)
         assert db.get(MarketHoliday, date(2026, 12, 25)).name == "行憲紀念日"
+
+
+def test_finmind_backfill_skips_listed_institutional_flows(engine, monkeypatch):
+    """Personal opt-in only. Listed (TWSE) stocks get margin only: their 三大法人／外資持股 are never shown, so
+    those FinMind datasets are not even requested (each dataset is one request against the small quota)."""
+    import forliosa.archive as archive_mod
+    import forliosa.marketdata.finmind as finmind_mod
+
+    day = {"date": "2026-11-11"}
+    payloads = {
+        "TaiwanStockInstitutionalInvestorsBuySell": [{**day, "name": "Foreign_Investor", "buy": 5000, "sell": 4000}],
+        "TaiwanStockMarginPurchaseShortSale": [{**day, "MarginPurchaseTodayBalance": 10, "ShortSaleTodayBalance": 2,
+                                                "MarginPurchaseLimit": 100}],
+        "TaiwanStockShareholding": [{**day, "ForeignInvestmentSharesRatio": 50, "ForeignInvestmentShares": 100}],
+    }
+
+    class RecordingFetcher:
+        def __init__(self):
+            self.calls: list[tuple[str, str]] = []
+
+        def get_json(self, url, params=None, headers=None):
+            self.calls.append((params["data_id"], params["dataset"]))
+            return {"msg": "success", "status": 200, "data": payloads[params["dataset"]]}
+
+    fetcher = RecordingFetcher()
+    real = finmind_mod.FinMindProvider
+    monkeypatch.setattr(finmind_mod, "FinMindProvider", lambda *a, **k: real(
+        fetcher=fetcher, cache_dir=None, today_fn=lambda: date(2026, 11, 12)))
+    monkeypatch.setattr(archive_mod._time, "sleep", lambda s: None)
+    with Session(engine) as db:
+        archive_mod.finmind_backfill(db, ["2330.TW", "6488.TWO", "AAPL"], date(2026, 11, 1))
+        assert db.scalars(select(MarginDaily.symbol).order_by(MarginDaily.symbol)).all() == ["2330.TW", "6488.TWO"]
+        assert db.scalars(select(InstitutionalDaily.symbol)).all() == ["6488.TWO"]
+        assert db.scalars(select(ForeignHoldingDaily.symbol)).all() == ["6488.TWO"]
+    assert sorted(fetcher.calls) == [
+        ("2330", "TaiwanStockMarginPurchaseShortSale"),
+        ("6488", "TaiwanStockInstitutionalInvestorsBuySell"),
+        ("6488", "TaiwanStockMarginPurchaseShortSale"),
+        ("6488", "TaiwanStockShareholding"),
+    ]

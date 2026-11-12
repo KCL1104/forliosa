@@ -60,6 +60,11 @@ RECOMMENDED_NEWS_DOMAINS = [*OFFICIAL_DOMAINS, "cna.com.tw", "money.udn.com", "c
                             "digitimes.com.tw", "reuters.com", "bloomberg.com"]
 USER_LOCATION = {"type": "approximate", "city": "Taipei", "region": "Taiwan", "country": "TW",
                  "timezone": "Asia/Taipei"}
+# web_fetch never reads the TWSE website or MIS (their terms forbid automated downloads without written consent);
+# web_search results are not affected. The API takes allowed_domains OR blocked_domains, and a domain covers its
+# subdomains, so an allow-list entry that covers a blocked host is narrowed to the hosts we may read.
+FETCH_BLOCKED_DOMAINS = ["www.twse.com.tw", "mis.twse.com.tw"]
+_FETCH_NARROWED = {"twse.com.tw": ["openapi.twse.com.tw"]}
 _REJECTED_HINT = re.compile(r"not (?:be )?(?:allowed|supported|enabled|available|permitted)|unsupported|disabled|"
                             r"does not support|do not support|cannot use|can't use", re.IGNORECASE)
 _excluded: dict[str, dict[str, Any]] = {}  # server tool type -> {type, name, reason, at}
@@ -685,7 +690,9 @@ TOOLS: list[ToolSpec] = sorted([
     ToolSpec("get_chips",
              "Chip data of a Taiwan stock: net buy/sell of foreign investors, investment trusts and dealers (lots), "
              "margin/short balances, foreign holding % and TDCC shareholder distribution. Call this for questions "
-             "about institutional flows, 法人, 融資融券 or 大戶.",
+             "about institutional flows, 法人, 融資融券 or 大戶. TWSE-listed (上市) stocks have no per-stock "
+             "institutional flows or foreign holding here (TPEx 上櫃 stocks do): for their 外資／法人 activity, search "
+             "the web for recent news and cite each source with its date.",
              {"symbol": _SYMBOL, "range": {"type": "string", "enum": ["1M", "3M", "6M", "1Y"]}},
              ("symbol", "range"), get_chips, _sym_label("查看 ", " 籌碼")),
     ToolSpec("get_financials",
@@ -756,6 +763,20 @@ def _domains(values: list[str], defaults: dict[str, list[str]]) -> list[str]:
     return list(dict.fromkeys(d for d in out if d))
 
 
+def _fetch_allowed(domains: list[str]) -> list[str]:
+    """``allowed_domains`` for web_fetch without the blocked hosts: a blocked host itself is dropped, a parent
+    domain of one (``twse.com.tw``) is replaced by the hosts we may read (``openapi.twse.com.tw``)."""
+    out: list[str] = []
+    for d in domains:
+        if d in FETCH_BLOCKED_DOMAINS:
+            continue
+        if any(b.endswith(f".{d}") for b in FETCH_BLOCKED_DOMAINS):
+            out.extend(_FETCH_NARROWED.get(d, []))
+            continue
+        out.append(d)
+    return list(dict.fromkeys(out))
+
+
 def server_tools(settings: Settings, *, fetch: bool = True, max_uses: int | None = None) -> list[dict[str, Any]]:
     """web_search / web_fetch (versions 20260318). Direct calls (no dynamic filtering) unless
     ``AI_WEB_DYNAMIC_FILTERING`` — lower latency and eligible for zero data retention."""
@@ -776,8 +797,14 @@ def server_tools(settings: Settings, *, fetch: bool = True, max_uses: int | None
         allowed = _domains(settings.ai_web_fetch_allowed_domains,
                            {"official": OFFICIAL_DOMAINS, "recommended": RECOMMENDED_NEWS_DOMAINS})
         if allowed and "*" not in allowed:
-            fetch_tool["allowed_domains"] = allowed
-        tools.append(fetch_tool)
+            narrowed = _fetch_allowed(allowed)
+            if narrowed:
+                fetch_tool["allowed_domains"] = narrowed
+                tools.append(fetch_tool)
+            # every configured domain was a blocked host: no fetch rather than an unrestricted one
+        else:
+            fetch_tool["blocked_domains"] = list(FETCH_BLOCKED_DOMAINS)
+            tools.append(fetch_tool)
     with _excluded_lock:
         return [t for t in tools if t["type"] not in _excluded]
 

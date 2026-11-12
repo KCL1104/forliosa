@@ -3,6 +3,7 @@
 // 以及第二批：出清紀錄、定期定額（設定與扣款日草稿）、公告、1 日走勢的授權說明、資料來源與授權、商用模式沒有示範標記；
 // 第三批：法人觀點（展開 → 查詢 → 搜尋中 → 結果／查無／查不到）、持倉的定期定額標記、補記漏記的扣款、已出清依年份分組。
 // 第四批：股利自動入帳（交易與股利頁的「自動」、編輯後「自動・已修改」、刪除後不再出現）。
+// 第五批：上市股票不顯示逐檔三大法人（空狀態＋問 AI 外資動向，上櫃照常）、補記定期定額用扣款日的收盤價。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
 
@@ -25,7 +26,7 @@ const ROUTES = [
   // 友達虧損的年份在商用模式的存檔起點之前：用示範資料（personal）看「本益比沒有意義」
   ["/stock/2409.TW?tab=valuation&policy=personal", "本益比沒有意義"],
   ["/stock/2330.TW?tab=financials&policy=commercial", "營業利益率"],
-  ["/stock/2330.TW?tab=chips", "三大法人資料累積中"],
+  ["/stock/2330.TW?tab=chips", "上市股票不顯示逐檔三大法人與外資持股"],
   ["/stock/6488.TWO?tab=chips", "三大法人買賣超"],
   ["/stock/2603.TW", "過去的持有"],
   ["/data-sources", "上市個股日成交資訊"],
@@ -170,11 +171,29 @@ await check("補記：11/06 的 0050 扣款沒有記 → 草稿成交日 11/6 �
   await page.getByRole("heading", { name: /買進 元大台灣50/ }).waitFor({ timeout: 8000 })
   await page.getByText(/成交日 11\/6/).last().waitFor()
   await page.getByText(/11\/6 是元大台灣50定期定額的扣款日/).waitFor()
+  // 扣款日已經過去：用那天（11/6）的收盤價，不是最近收盤價
+  await page.getByText(/我先照那天的收盤價算好股數/).waitFor()
+  await page.getByText(/以 11\/6 收盤價/).last().waitFor()
   await page.getByRole("button", { name: "簽名：確認入帳" }).click()
   await page.getByText(/已入帳：買進 元大台灣50/).waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "新對話" }).click()
   await page.waitForTimeout(1000)
   if (await page.getByRole("button", { name: /補記 11\/06 的 0050/ }).count()) throw new Error("still offered after signing")
+})
+await check("上市股票的籌碼：三大法人與外資持股是空狀態，AI 面板與空狀態都能問外資動向；上櫃照常", async () => {
+  await page.goto(base + "/stock/2330.TW?tab=chips", { waitUntil: "networkidle" })
+  await page.getByText("上市股票不顯示逐檔三大法人與外資持股").waitFor({ timeout: 8000 })
+  await page.getByText("上市股票不顯示逐檔外資持股比").waitFor()
+  if (await page.getByText("資料不足。").count()) throw new Error("foreign holding should explain, not say 資料不足")
+  const asks = page.getByRole("button", { name: "最近外資對這檔的動向？" })
+  if ((await asks.count()) !== 2) throw new Error(`expected the panel chip and the empty-state button, got ${await asks.count()}`)
+  await page.locator("main").getByRole("button", { name: "最近外資對這檔的動向？" }).click()
+  await page.getByText(/逐檔三大法人買賣超與外資持股比，證交所以付費商品提供/).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "新對話" }).click()
+  await page.goto(base + "/stock/6488.TWO?tab=chips", { waitUntil: "networkidle" })
+  await page.getByRole("heading", { name: "三大法人買賣超" }).waitFor({ timeout: 8000 })
+  if (await page.getByRole("button", { name: "最近外資對這檔的動向？" }).count()) throw new Error("TPEx stocks have the data on the page")
+  await page.goto(base + "/", { waitUntil: "networkidle" })
 })
 await check("已出清：依年份分組（新的在前、最近一年展開、有小計），展開 2025 點長榮到「過去的持有」", async () => {
   await page.getByRole("button", { name: /^已出清/ }).click()
@@ -267,6 +286,8 @@ await check("設定：新增定期定額（驗證 → 儲存）、暫停、修�
   await page.getByRole("switch", { name: /暫停「元大高股息」/ }).click()
   await page.getByText("已暫停").first().waitFor()
   await page.getByRole("button", { name: "修改「元大高股息」定期定額" }).click()
+  // 表單帶入原本的商品是非同步的：還沒帶入就按儲存會停在「請選擇台股或 ETF」（機器忙時偶爾發生）
+  await page.getByRole("dialog").getByText("元大高股息").waitFor({ timeout: 8000 })
   await page.getByLabel("每次扣款（新台幣）").fill("5000")
   await page.getByRole("button", { name: "儲存" }).click()
   await page.getByText("每月 5、20 日・NT$5,000").waitFor()

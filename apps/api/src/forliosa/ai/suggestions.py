@@ -21,6 +21,7 @@ log = logging.getLogger(__name__)
 MAX_QUESTIONS = 3
 DIVIDEND_WINDOW_DAYS = 31
 CONCENTRATION = {"single": 0.15, "top3": 0.45, "industry": 0.4}
+FOREIGN_FLOW_QUESTION = "最近外資對這檔的動向？"
 
 
 def _q(kind: str, text: str, a: str, b: str, symbol: str | None = None) -> dict[str, Any]:
@@ -72,6 +73,9 @@ def stock_questions(info: Any, quote: Any, overview: dict | None, position: dict
         pct = getattr(quote, "change", None)
         word = "跌" if pct is not None and pct < 0 else "漲"
         out.append(_q("why_move", f"{info.name}今天為什麼{word}？", "今天", f"為什麼{word}？", sym))
+    if info.market == "TWSE" and info.type == "stock":
+        # Listed stocks show no per-stock 三大法人／外資持股; the model answers from web news with sources and dates.
+        out.append(_q("foreign_flow", FOREIGN_FLOW_QUESTION, "最近外資", "對這檔的動向？", sym))
     ov = overview or {}
     if position:
         nxt = position.get("upcoming_dividend")
