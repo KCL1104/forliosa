@@ -5,7 +5,7 @@ import { useAccounts, useClosedPositions } from "@/api/queries"
 import type { Account, ClosedRound } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
 import { ErrorState } from "@/components/states"
-import { direction, directionGlyph, formatMoney, toneClass } from "@/lib/format"
+import { direction, formatMoney, toneClass } from "@/lib/format"
 import { closedByYear, closedTotals, holdingPeriod, type ClosedYear } from "@/lib/ledger-display"
 import { codeOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
@@ -14,7 +14,7 @@ import { useLedgerPrefs } from "./ledger-prefs"
 
 /**
  * 已出清：持倉底下一個安靜、預設收合的區塊。出清的股票不在持股裡，回合紀錄留在這裡。
- * 依出清年份分組（新的年份在前），每一年可以收合、有當年已實現損益小計（▲▼）；預設只展開最近一年。
+ * 依出清年份分組（新的年份在前），每一年可以收合、有當年已實現損益小計（金額用 +／−，不加 ▲▼）；預設只展開最近一年。
  * 桌面一張格線表（名稱・持有期間・已實現損益・領過股利・手續費與稅，每一年一個 tbody），手機三行列。點一列到個股頁的「過去的持有」。
  */
 export function ClosedRounds() {
@@ -51,7 +51,6 @@ export function ClosedRounds() {
           <span className="num ml-auto text-sm font-normal text-ink-2">
             已實現
             <span className={cn("ml-1.5", toneClass(d))}>
-              {d !== "flat" && <span aria-hidden className="mr-0.5">{directionGlyph(d)}</span>}
               {privacy ? <Masked /> : formatMoney(totals.realized, { signed: true })}
               <span className="sr-only">{d === "up" ? "獲利" : d === "down" ? "虧損" : ""}</span>
             </span>
@@ -74,13 +73,12 @@ function accountName(accounts: Account[], id: string) {
   return accounts.find((a) => a.id === id)?.name ?? ""
 }
 
-/** 一年的已實現小計：漲跌色＋▲▼（與螢幕閱讀器的獲利／虧損），隱私模式遮蔽 */
+/** 一年的已實現小計：漲跌色＋正負號（金額不加 ▲▼；螢幕閱讀器讀「獲利／虧損」），隱私模式遮蔽 */
 function YearTotal({ value, className }: { value: number; className?: string }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const d = direction(value)
   return (
     <span className={cn("num whitespace-nowrap", toneClass(d), className)}>
-      {d !== "flat" && <span aria-hidden className="mr-0.5">{directionGlyph(d)}</span>}
       {privacy ? <Masked /> : formatMoney(value, { signed: true })}
       <span className="sr-only">{d === "up" ? "獲利" : d === "down" ? "虧損" : ""}</span>
     </span>
@@ -202,7 +200,7 @@ function ClosedList({ years, isOpen, onToggle, accounts, multiAccount }: YearPro
                 aria-expanded={open}
                 aria-controls={listId}
                 onClick={() => onToggle(y.year)}
-                className="flex min-h-14 w-full items-end gap-2 border-b border-rule pb-2 text-left"
+                className={cn("flex min-h-14 w-full items-end gap-2 pb-2 text-left", !open && "border-b border-rule")}
               >
                 <span className="num text-base font-medium">{y.year} 年</span>
                 <span className="num text-sm text-ink-2">{yearCount(y)}</span>
@@ -211,32 +209,39 @@ function ClosedList({ years, isOpen, onToggle, accounts, multiAccount }: YearPro
               </button>
             </h3>
             {open && (
-              <ul id={listId} aria-label={`${y.year} 年出清`}>
-                {y.rounds.map((r) => {
-                  const period = holdingPeriod(r)
-                  return (
-                    <li key={`${r.account_id}-${r.symbol}-${r.opened_at}`}>
-                      <Link to="/stock/$symbol" params={{ symbol: r.symbol }} className="ruled-row grid grid-cols-[1fr_auto] content-center gap-x-3 gap-y-0.5 py-3">
-                        <span className="truncate text-lg leading-6 font-medium">{r.name}</span>
-                        <span className={cn("num text-right text-lg leading-6", toneClass(direction(r.realized_pnl)))}>{privacy ? <Masked /> : formatMoney(r.realized_pnl, { signed: true })}</span>
-                        <span className="num text-sm leading-5 text-ink-2">
-                          {codeOf(r.symbol)} ・ {period.days}
-                          {multiAccount && ` ・ ${accountName(accounts, r.account_id)}`}
-                        </span>
-                        <span className="text-right text-base leading-5">
-                          <Pct value={r.realized_pnl_pct} />
-                        </span>
-                        {/* 三段各自不換行，段與段之間可以換行（「・」前面不能斷行，所以用 flex-wrap） */}
-                        <span className="num col-span-2 mt-0.5 flex flex-wrap text-sm leading-5 text-ink-2">
-                          <span className="whitespace-nowrap">{period.range}</span>
-                          <span className="whitespace-nowrap">・股利 {r.dividends_received ? money(r.dividends_received) : "—"}</span>
-                          <span className="whitespace-nowrap">・手續費與稅 {money(r.fees_and_taxes)}</span>
-                        </span>
-                      </Link>
-                    </li>
-                  )
-                })}
-              </ul>
+              <>
+                {/* 印好的表頭：展開時就在年份下面（雙線取代年份列的底線） */}
+                <div aria-hidden className="form-head flex h-8 items-end justify-between pb-2">
+                  <span>名稱・持有</span>
+                  <span>已實現</span>
+                </div>
+                <ul id={listId} aria-label={`${y.year} 年出清`}>
+                  {y.rounds.map((r) => {
+                    const period = holdingPeriod(r)
+                    return (
+                      <li key={`${r.account_id}-${r.symbol}-${r.opened_at}`}>
+                        <Link to="/stock/$symbol" params={{ symbol: r.symbol }} className="ruled-row grid grid-cols-[1fr_auto] content-center gap-x-3 gap-y-0.5 py-3">
+                          <span className="truncate text-lg leading-6 font-medium">{r.name}</span>
+                          <span className={cn("num text-right text-lg leading-6", toneClass(direction(r.realized_pnl)))}>{privacy ? <Masked /> : formatMoney(r.realized_pnl, { signed: true })}</span>
+                          <span className="num text-sm leading-5 text-ink-2">
+                            {codeOf(r.symbol)} ・ {period.days}
+                            {multiAccount && ` ・ ${accountName(accounts, r.account_id)}`}
+                          </span>
+                          <span className="text-right text-base leading-5">
+                            <Pct value={r.realized_pnl_pct} />
+                          </span>
+                          {/* 三段各自不換行，段與段之間可以換行（「・」前面不能斷行，所以用 flex-wrap） */}
+                          <span className="num col-span-2 mt-0.5 flex flex-wrap text-sm leading-5 text-ink-2">
+                            <span className="whitespace-nowrap">{period.range}</span>
+                            <span className="whitespace-nowrap">・股利 {r.dividends_received ? money(r.dividends_received) : "—"}</span>
+                            <span className="whitespace-nowrap">・手續費與稅 {money(r.fees_and_taxes)}</span>
+                          </span>
+                        </Link>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </>
             )}
           </section>
         )

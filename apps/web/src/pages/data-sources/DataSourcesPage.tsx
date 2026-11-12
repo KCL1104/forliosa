@@ -40,7 +40,8 @@ export function DataSourcesPage() {
               授權條款
             </h2>
             {a.notice.map((n) => (
-              <p key={n} className="max-w-prose text-md">
+              // 長網址不能撐寬頁面：任何地方都可以斷行
+              <p key={n} className="max-w-prose text-md [overflow-wrap:anywhere]">
                 <Linkified text={n} />
               </p>
             ))}
@@ -118,14 +119,15 @@ export function DataSourcesPage() {
   )
 }
 
-/** 授權條款文字裡的網址變成連結 */
+/** 授權條款文字裡的網址變成連結（網址在全形標點前結束，例如「（https://…）」的右括號不算網址） */
+const URL_RE = /(https?:\/\/[^\s（）「」『』〈〉，。；、]+)/
 function Linkified({ text }: { text: string }) {
-  const parts = text.split(/(https?:\/\/\S+)/)
+  const parts = text.split(URL_RE)
   return (
     <>
       {parts.map((p, i) =>
         /^https?:\/\//.test(p) ? (
-          <a key={i} href={p} target="_blank" rel="noreferrer" className="underline underline-offset-3">
+          <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all underline underline-offset-3">
             {p}
           </a>
         ) : (

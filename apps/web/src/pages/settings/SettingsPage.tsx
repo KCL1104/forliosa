@@ -122,12 +122,6 @@ function Settings() {
       <RecurringPlans />
 
       <Delegations />
-
-      <Group title="之後會有的設定">
-        <Row label="AI 額度與用量"><span className="text-sm text-ink-2">之後開放</span></Row>
-        <Row label="通知"><span className="text-sm text-ink-2">之後開放</span></Row>
-        <Row label="資料匯出與刪除帳號"><span className="text-sm text-ink-2">之後開放</span></Row>
-      </Group>
       </div>
       {/* 資料來源：一頁一個頁尾（設定頁沒有自己的資料，就是連到完整顯名聲明） */}
       <SourcesFooter className="max-w-[816px]" />

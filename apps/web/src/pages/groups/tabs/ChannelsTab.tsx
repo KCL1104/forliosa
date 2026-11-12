@@ -78,7 +78,7 @@ function Status({ configured, status }: { configured: boolean; status: "active" 
 
 function Disabled({ reason, owner }: { reason: string | null; owner: boolean }) {
   return (
-    <p role="status" className="mb-3 border-l-2 border-ink py-1 pl-3 text-base">
+    <p role="status" className="mb-3 border-y border-rule py-2.5 text-base">
       這個頻道已停用{reason ? `：${reason}` : ""}。{owner ? "重新設定後恢復推播。" : "擁有者重新設定後恢復推播。"}
     </p>
   )

@@ -231,6 +231,12 @@ const m5Privacy = async (page) => {
   await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
   await page.getByLabel("已隱藏").first().waitFor()
 }
+/** 改了名字之後才出現的簽名格（顯示名稱、群組名稱） */
+const editField = (label, text) => async (page) => {
+  const input = page.getByLabel(label, { exact: true })
+  await input.fill(text)
+  await input.evaluate((el) => window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 160 : 120), behavior: "instant" }))
+}
 const m5Delegations = async (page) => {
   await page.evaluate(() => {
     const el = document.getElementById("delegations")
@@ -254,6 +260,7 @@ const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
   { name: "ledger-draft", path: "/", ready: "text=總資產", action: (page, mobile) => draft(page, mobile) },
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
+  { name: "ledger-transactions-symbol", path: "/?view=transactions&symbol=2330.TW", ready: "text=只看 2330" },
   { name: "ledger-dividends", path: "/?view=dividends", ready: "text=已入帳" },
   { name: "ledger-performance", path: "/?view=performance", ready: "text=比較基準" },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
@@ -295,6 +302,7 @@ const SHOTS = [
   { name: "stock-aapl-events", path: "/stock/AAPL?tab=events", ready: "text=10-K 年度報告", action: toTabs },
   { name: "settings", path: "/settings", ready: "text=新增定期定額" },
   { name: "settings-recurring", path: "/settings", ready: "text=新增定期定額", action: recurring },
+  { name: "settings-profile-edited", path: "/settings", ready: "text=新增定期定額", action: editField("顯示名稱", "示範使用者二") },
   { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
   { name: "data-sources-fx", path: "/data-sources", ready: "text=銀行間新臺幣對美元收盤匯率", action: fxSource },
   { name: "history", path: "/history", ready: "text=發起新對話" },
@@ -319,6 +327,8 @@ const SHOTS = [
   { name: "m5-group-digests", path: "/groups/grp_family?tab=digests", ready: "text=本週報酬" },
   { name: "m5-group-share", path: "/groups/grp_family?tab=share", ready: "text=附上成交價", action: m5ShareAmounts },
   { name: "m5-group-members", path: "/groups/grp_family?tab=members", ready: "text=邀請連結" },
+  { name: "m5-group-rename", path: "/groups/grp_family?tab=members", ready: "text=邀請連結", action: editField("群組名稱", "家族投資（2026）") },
+  { name: "m5-group-feed-member", path: "/groups/grp_family?tab=feed&member=usr_dad", ready: "text=只看爸爸" },
   { name: "m5-group-channels", path: "/groups/grp_family?tab=channels", ready: "text=Webhook 網址結尾" },
   { name: "m5-member", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益" },
   { name: "m5-member-privacy", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益", action: m5Privacy },

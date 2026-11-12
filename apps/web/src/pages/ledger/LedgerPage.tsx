@@ -27,6 +27,7 @@ import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
+import { trendMissingReason } from "./trend-reason"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -150,15 +151,11 @@ function Delta({ amount, pct, className }: { amount: number; pct: number | null;
 function useTrend() {
   const perf = usePerformance("1M")
   const values = (perf.data?.series ?? []).map((p) => p.market_value)
-  return { values, loading: perf.isLoading, notes: perf.data?.notes ?? [] }
+  return { values, loading: perf.isLoading, isError: perf.isError, notes: perf.data?.notes ?? [] }
 }
 
-/**
- * 走勢畫不出來時（商用模式含美股、存檔還不夠）：右半邊不空著，一行說明為什麼，連到績效（那裡有完整說明與「只看新台幣帳戶」）。
- * 原因取自後端的 notes，不另外推測。
- */
-function TrendMissing({ notes }: { notes: string[] }) {
-  const reason = notes.some((n) => n.includes("美股")) ? "含美股，算不出來" : "資料還不夠"
+/** 走勢畫不出來、而且後端說了原因時：右半邊一行說明，連到績效（那裡有完整說明與「只看新台幣帳戶」）。 */
+function TrendMissing({ reason }: { reason: string }) {
   return (
     <Link to="/" search={{ view: "performance" }} className="mb-1.5 shrink-0 text-right text-sm text-ink-2 underline-offset-3 hover:text-ink hover:underline">
       近 1 個月走勢：{reason}
@@ -173,6 +170,7 @@ function HeroDesktop({ summary }: { summary?: PortfolioSummary }) {
   const privacy = usePrefs((s) => s.privacyMode)
   if (!summary) return <HeroSkeleton />
   const up = (trend.values.at(-1) ?? 0) >= (trend.values[0] ?? 0)
+  const missingReason = trendMissingReason(trend.notes)
   return (
     <div className="flex items-end justify-between gap-8">
       <div className="min-w-0">
@@ -197,7 +195,7 @@ function HeroDesktop({ summary }: { summary?: PortfolioSummary }) {
           </div>
         </dl>
       </div>
-      {showTrend && trend.values.length < 2 && !trend.loading && <TrendMissing notes={trend.notes} />}
+      {showTrend && trend.values.length < 2 && !trend.loading && !trend.isError && missingReason && <TrendMissing reason={missingReason} />}
       {showTrend && trend.values.length > 1 && (
         <figure className="mb-1.5 text-right" aria-label={`近 1 個月總資產走勢：${up ? "上升" : "下降"}`}>
           {privacy ? (

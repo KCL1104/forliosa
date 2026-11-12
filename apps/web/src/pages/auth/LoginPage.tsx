@@ -38,7 +38,7 @@ export function LoginPage() {
         <p className="text-ink-2">{next.startsWith("/invite/") ? "登入後回到邀請，選好要分享什麼再加入群組。" : "第一次用 Discord 登入時會自動建立帳號。"}</p>
       </div>
       {error && (
-        <p role="alert" className="border-l-2 border-ink py-1 pl-3 text-base">
+        <p role="alert" className="border-y border-rule py-2.5 text-base">
           {error}
         </p>
       )}

@@ -140,7 +140,8 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
           </Section>
         )}
         {p.holdings && (
-          <Section title="持股" titleId="mp-holdings" aside="權重，不含股數與金額">
+          // 權重清單最寬 720px：標題的格線跟著清單一樣寬
+          <Section title="持股" titleId="mp-holdings" aside="權重，不含股數與金額" className="max-w-[720px]">
             {p.holdings.length === 0 ? <p className="text-md text-ink-2">目前沒有持股。</p> : <WeightList holdings={p.holdings} className="-mt-3" />}
           </Section>
         )}

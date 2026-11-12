@@ -6,6 +6,7 @@ import { DemoTag, Section } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { formatPercent } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
+import { cn } from "@/lib/utils"
 
 /** 持股：共同持股（兩人以上）、產業、每位分享了持股的成員的權重（沒有股數與金額） */
 export function HoldingsTab({ group }: { group: Group }) {
@@ -66,11 +67,11 @@ export function HoldingsTab({ group }: { group: Group }) {
   )
 }
 
-/** 權重清單：名稱、代號、細長的墨色比例條、百分比 */
+/** 權重清單：名稱、代號、細長的比例條、百分比。最寬 720px，寬螢幕上長條和百分比不會離名稱太遠 */
 export function WeightList({ holdings, className }: { holdings: SharedHolding[]; className?: string }) {
   const max = Math.max(...holdings.map((x) => x.weight), 0.0001)
   return (
-    <ul className={className}>
+    <ul className={cn("max-w-[720px]", className)}>
       {holdings.map((x) => (
         <li key={x.symbol} className="grid h-11 grid-cols-[minmax(0,1fr)_88px_56px] items-center gap-3 border-b border-rule">
           <Link to="/stock/$symbol" params={{ symbol: x.symbol }} className="min-w-0 truncate hover:underline">

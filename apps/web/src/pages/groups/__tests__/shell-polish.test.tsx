@@ -8,12 +8,15 @@ import type { Group } from "@/api/types"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { DateCell } from "@/pages/ledger/date-cell"
 import { DividendsView } from "@/pages/ledger/DividendsView"
+import { trendMissingReason } from "@/pages/ledger/trend-reason"
+import { Profile } from "@/pages/settings/Profile"
 import { FeedTab } from "../tabs/FeedTab"
 import { RankingTab } from "../tabs/RankingTab"
 
 /**
- * 外殼與帳本／群組的潤飾：來源只在頁尾出現一次、排行的總報酬和期間報酬一樣是一欄主數字、
- * 動態的動作有看得到的字、帳本清單第一欄是聯絡簿的日期格（日期＋星期）。
+ * 外殼與帳本／群組的潤飾：來源只在頁尾出現一次、排行的總報酬是一欄主數字（不是小字第二行）、
+ * 動態的動作有看得到的字、帳本清單第一欄是聯絡簿的日期格（日期＋星期）、
+ * 走勢的原因只說後端講過的、簽名格只在改過之後出現。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -105,5 +108,27 @@ describe("聯絡簿的日期格", () => {
     const rows = within(received).getAllByRole("listitem")
     expect(rows.length).toBeGreaterThan(0)
     for (const row of rows) expect(row.firstElementChild).toHaveClass("date-cell")
+  })
+})
+
+describe("帳本主數字列：走勢畫不出來的原因", () => {
+  it("只說後端 notes 講過的原因；沒講就不寫", () => {
+    expect(trendMissingReason(["AAPL：美股目前沒有可商用的行情來源，不提供價格資料，含美股時無法計算績效", "資料累積中：自 2026-10-01 起存檔"])).toBe("含美股，算不出來")
+    expect(trendMissingReason(["資料累積中：自 2026-10-01 起存檔"])).toBe("資料還不夠")
+    expect(trendMissingReason([])).toBeNull()
+    expect(trendMissingReason(["其他說明"])).toBeNull()
+  })
+})
+
+describe("設定：顯示名稱", () => {
+  it("沒改名字時沒有「儲存」；改了才出現簽名格，清空時不能按", async () => {
+    const user = userEvent.setup()
+    renderInRouter(<Profile />)
+    const input = await screen.findByLabelText("顯示名稱", undefined, T)
+    expect(screen.queryByRole("button", { name: "儲存" })).toBeNull()
+    await user.type(input, "2")
+    expect(screen.getByRole("button", { name: "儲存" })).toBeEnabled()
+    await user.clear(input)
+    expect(screen.getByRole("button", { name: "儲存" })).toBeDisabled()
   })
 })

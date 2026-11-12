@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { direction, directionGlyph, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
+import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly, useWho } from "@/api/view-as"
@@ -326,7 +326,7 @@ function RealizedByYear({ p }: { p: Performance }) {
           <li key={r.year} className="num">
             <span className="text-ink-2">{r.year}：</span>
             <span className={toneClass(direction(r.amount))}>
-              {privacy ? MASK : `${directionGlyph(direction(r.amount))}${formatMoney(r.amount, { signed: true })}`}
+              {privacy ? MASK : formatMoney(r.amount, { signed: true })}
               <span className="sr-only">{direction(r.amount) === "up" ? "獲利" : direction(r.amount) === "down" ? "虧損" : ""}</span>
             </span>
           </li>
@@ -341,6 +341,7 @@ function Definitions() {
     <details className="group border-y border-rule py-3">
       <summary className="cursor-pointer text-md font-medium marker:text-ink-2">計算方式</summary>
       <div className="mt-3 flex max-w-prose flex-col gap-2 text-md text-ink-2">
+        <p>價格用未還原收盤價；股利另以交易紀錄計入。</p>
         <p>投資組合價值是每天收盤後所有持股的市值（美股依中央銀行公布的當日新臺幣對美元收盤匯率換算成新台幣），第一版不含現金部位。</p>
         <p>每日報酬 = （當日市值 + 當日流出）÷（前一日市值 + 當日流入）− 1。買進成本（含手續費）視為開盤前流入；賣出淨收入與現金股利（扣二代健保）視為收盤後流出。</p>
         <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率；最大回撤以 TWR 指數計算。</p>
