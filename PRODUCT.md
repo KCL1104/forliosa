@@ -75,6 +75,7 @@ Forliosa 是以台股為主的投資管理 web app，把三件事放在同一處
   - 研究依據：`docs/research/ui-redesign-research-2.md`。
 - **AI 不說明自己（產品負責人 2026-11-12）**：建議問題、動作、摘要都是依目前頁面自動偵測後直接出現；介面上不放「本頁建議」「依頁面推薦」這類說明機制的字樣。
 - **個股頁**：要有 Google Finance 等級的資訊覆蓋度（總覽、收益、財務、事件、關鍵數據、新聞、「為什麼漲跌」），再加上台股特有資料（法人、融資融券、月營收、除權息、估值河流圖）；研究見 `docs/research/stock-page-research.md`。
+- **資料只用可合法商用的來源（產品負責人 2026-11-12）**：預設 `DATA_POLICY=commercial`，只用政府開放資料（證交所、櫃買、集保等）與我們自己存的歷史；FinMind、Yahoo、證交所盤中網站（MIS）不用。缺資料的地方老實顯示「資料累積中」或空狀態，不用示範資料充數。可以自行爬取，但必須先確認該網站條款與法規允許（研究見 `docs/research/data-sources-licensing.md`）。
 - **深淺色**：兩種都做；產品負責人平常用深色模式。
 - **個股頁**：重點一頁（報價、AI 摘要、估值位置、月營收、我的部位）＋進階分頁。
 - 參考函式庫（產品負責人指定）：shadcn/ui、Base UI、Radix、Sonner、Vaul、cmdk、NumberFlow；展示性元件參考 Beautiful UI、RareUI、Magic UI、Aceternity UI、21st.dev（只用在展示性畫面，需通過 critique）。
