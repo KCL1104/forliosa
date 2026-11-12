@@ -3,7 +3,7 @@ import { createJSONStorage, persist } from "zustand/middleware"
 import type { Delegation, UserRef } from "./types"
 
 /**
- * 以唯讀身分查看別人的資產（授權查看，docs/m5-sharing-contract.md）。
+ * 以唯讀身分查看別人的資產（授權查看，docs/api-contract.md「分享（M5）」）。
  * 查看中 API client 在請求加上 `X-Forliosa-View-As: <delegation_id>`；伺服器以路由白名單決定能讀什麼，
  * 寫入一律 403 `read_only`，授權失效 403 `delegation_revoked`（前端退出查看模式，見 main.tsx）。
  *

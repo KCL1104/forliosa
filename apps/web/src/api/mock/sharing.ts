@@ -39,7 +39,7 @@ import { PEOPLE, STATIC_PROFILES, type PeriodReturns, type RawTrade } from "./me
 
 /**
  * 分享（M5）的 mock：群組、授權查看、動態、留言與表情、週報、頻道。
- * 隱私規則和合約一樣（docs/m5-sharing-contract.md）：
+ * 隱私規則和合約一樣（docs/api-contract.md「分享（M5）」）：
  * - 每次讀取時依「目前」的分享設定重新投影；沒開放的鍵不存在，不是 null 也不是 0。
  * - 沒開放的成員不出現在排行、動態、持股；`SharedPortfolio` 沒開任何項目時只回身分欄位。
  * - 不是成員 → 404 not_found；權限不足 → 403 forbidden；看不到的留言對象一律 404。

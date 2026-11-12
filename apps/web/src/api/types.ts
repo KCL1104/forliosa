@@ -718,7 +718,7 @@ export interface AnalystViews {
   notes?: string[]
 }
 
-// ── 分享（M5，docs/m5-sharing-contract.md）─────────────────────
+// ── 分享（M5，docs/api-contract.md「分享（M5）」）─────────────────────
 // 分享投影：沒開放的欄位「鍵不存在」（不是 null 也不是 0）。型別一律寫成選用欄位，前端只顯示存在的部分，
 // 不拿成員名單去比對排行或動態，也不顯示「某某沒分享」。
 

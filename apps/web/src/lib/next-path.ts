@@ -1,5 +1,5 @@
 /**
- * 登入後要回去的網址（`next`）：和後端同一個規則（docs/m5-sharing-contract.md）——
+ * 登入後要回去的網址（`next`）：和後端同一個規則（docs/api-contract.md「分享（M5）」）——
  * 必須是站內路徑，不能是 `//evil.com`、`/\evil.com` 這種會被瀏覽器當成別的網站的寫法；不符合就回首頁。
  */
 const NEXT_RE = /^\/(?![/\\])[\x21-\x7E]{0,511}$/

@@ -4,7 +4,7 @@ import { ApiError, type ForliosaApi } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
 
 /**
- * mock 的分享投影要和合約一樣（docs/m5-sharing-contract.md）：
+ * mock 的分享投影要和合約一樣（docs/api-contract.md「分享（M5）」）：
  * 沒開放的鍵不存在、沒開放的人不出現、看不到的留言對象 404、查看模式的路由白名單。
  */
 const fresh = () => createMockAdapter({ latency: [0, 0] })
