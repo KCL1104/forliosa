@@ -73,6 +73,8 @@ describe("法人觀點的狀態", () => {
       error: { during: "post", code: "ai_daily_limit" },
     })
     expect(run([{ type: "search", at: 1 }, { type: "failed", during: "post", message: "AI 暫時無法使用", code: "ai_unavailable" }], none)).toMatchObject({ phase: "unavailable" })
+    // 後端還沒有這個端點：安靜的說明，不是「伺服器回應錯誤（404）」
+    expect(run([{ type: "load" }, { type: "failed", during: "get", message: "伺服器回應錯誤（404）", code: "http_404" }])).toMatchObject({ phase: "unavailable", error: { message: "這項資料還沒有開放。" } })
   })
 
   it("重複的請求不會疊加：GET 進行中再 load、POST 進行中再 search 都不變", () => {

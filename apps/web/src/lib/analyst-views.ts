@@ -88,6 +88,10 @@ export function analystReducer(s: AnalystState, e: AnalystEvent): AnalystState {
       if (s.phase === "searching" && e.during === "get") return { ...s, inFlight: null }
       // AI 暫停（503）：和 `unavailable` 一樣是安靜的說明，不是錯誤
       if (e.code === "ai_unavailable") return { ...s, phase: "unavailable", inFlight: null, error: { message: e.message, code: e.code, during: e.during }, searchStartedAt: null }
+      // 後端還沒有這個端點（404）：同樣安靜地說明，不顯示「伺服器回應錯誤（404）」
+      if (e.code === "not_found" || e.code === "http_404") {
+        return { ...s, phase: "unavailable", inFlight: null, error: { message: "這項資料還沒有開放。", code: e.code, during: e.during }, searchStartedAt: null }
+      }
       return { ...s, phase: "error", inFlight: null, error: { message: e.message, code: e.code ?? null, during: e.during }, searchStartedAt: null }
     }
     case "timeout":

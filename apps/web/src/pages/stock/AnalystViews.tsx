@@ -145,7 +145,8 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
         <div>
           <p className="ai-voice max-w-prose text-xl leading-snug">正在找近期媒體報導的法人觀點，找到的每一筆都會附上來源。</p>
           <p className="mt-2 flex min-h-6 items-center gap-2 text-sm text-ink-2">
-            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-ai motion-safe:animate-pulse" />
+            {/* 靜止的紫點＋寫明正在做什麼（不用脈動假裝即時） */}
+            <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-ai" />
             <span className="min-w-0 truncate">搜尋網路：{inst.name} 法人評等與目標價…</span>
           </p>
         </div>
@@ -264,7 +265,7 @@ function ViewsTable({ items }: { items: AnalystView[] }) {
             <td className="truncate py-2 pr-3">{ratingLine(v)}</td>
             <td className="num py-2 pr-6 text-right whitespace-nowrap">{formatTarget(v.target_price, v.currency)}</td>
             <td className="py-2 text-md">
-              <SourceLink v={v} className="h-8" />
+              <SourceLink v={v} className="h-8 pointer-coarse:h-11" />
             </td>
           </tr>
         ))}
