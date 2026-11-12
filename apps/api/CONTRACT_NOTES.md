@@ -315,7 +315,8 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | `conditional` | 推定為 OGDL（同一 OpenAPI、同一機關），但 data.gov.tw 沒找到個別資料集：期交所〈期貨每日交易行情〉〈選擇權每日交易行情〉〈每日外幣參考匯率〉〈選擇權大額交易人未沖銷部位資料〉，以及 catalog 一樣標 conditional 的〈最後結算價〉〈保證金一覽表〉×3〈股票期貨／選擇權交易標的〉 | **照常存檔，但不顯示**，直到 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`） |
 
 - `personal`（非商用、明確開啟）一律顯示。判斷集中在 `datapolicy.dataset_served(key, policy)`；API、AI 工具、匯率都經過它。
-- 詢問信草稿（寄 swagger 上的窗口 s0160116@taifex.com.tw）與收到回覆後要做的事：[`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)。
+- 詢問信草稿（寄 swagger 上的窗口 s0160116@taifex.com.tw）與收到回覆後要做的事：[`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)
+  （產品負責人 2026-11-12 決定先不寄，所以開關維持 `false`）。
 - 期交所 swagger 的 `info.description` 只連到網站使用條款，沒有連 data.gov.tw；顯名格式照舊，例如
   「臺灣期貨交易所〈臺指選擇權Put/Call比〉（2026），依政府資料開放授權條款第 1 版」。
 
@@ -449,8 +450,10 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 19. **重大訊息的連結**：OpenAPI 的重大訊息沒有單則網址，`/news` 的 `url` 先指向公開資訊觀測站重大訊息查詢頁
     （`https://mops.twse.com.tw/mops/#/web/t05st01`）。這個環境連不到 MOPS，網址格式沒能驗證。
 20. **期交所有條件資料集的授權**（2026-11-12）：期貨／選擇權每日交易行情、每日外幣參考匯率、選擇權大額交易人等已每日存檔，
-    commercial 下要等期交所書面確認才顯示。請寄出 [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)
-    的信；同意後設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（只同意部分資料集時，改逐一把 `license_status` 設為 `ogdl`）。
+    commercial 下要等期交所書面確認才顯示。產品負責人已決定**先不寄信**；詢問信草稿留在
+    [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)。日後寄出並取得同意後設定
+    `TAIFEX_CONDITIONAL_CONFIRMED=true`（只同意部分資料集時，改逐一把 `license_status` 設為 `ogdl`）。在那之前 USD/TWD 固定 31.5
+    （`PRODUCT.md` 提到的央行 7232 匯率尚未驗證、這個環境連不到，沒有實作）。
 21. **資本公積配發的稅務處理**：事件與股利的說明寫「一般不屬股利所得、不扣二代健保（依公司公告的來源為準）」，帳本的二代健保計算**沒有改**
     （仍以整筆股利判斷）。要不要讓記帳時依 `cash_sources` 自動排除資本公積部分，請決定。
 22. **股利決議沒有對上除權息預告時**：目前顯示 `status: "resolved"`、`ex_dividend_date: null`，包括「其實已在存檔前除權息」的舊決議

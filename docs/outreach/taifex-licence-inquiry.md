@@ -4,6 +4,9 @@
 > 能否依《政府資料開放授權條款－第 1 版》（OGDL）在收費 App 中顯示。
 > 收件窗口取自期交所 OpenAPI swagger（`https://openapi.taifex.com.tw/swagger.json`）的「聯絡窗口」：`s0160116@taifex.com.tw`。
 > 寄出前請補上〔〕內的寄件人資料；收到書面同意後，在部署環境設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（見下方「收到回覆後」）。
+>
+> **狀態：產品負責人 2026-11-12 決定先不寄信**（`PRODUCT.md`「初期資料源不付費」）。草稿保留備用；在寄出並取得同意前，
+> `TAIFEX_CONDITIONAL_CONFIRMED` 維持預設 `false`，這些資料集只存檔、不顯示。
 
 ---
 

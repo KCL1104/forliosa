@@ -141,7 +141,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     divs = md.dividends(sym)
     cash_events = [e for e in divs.value if e.ex_dividend_date and e.cash_dividend > 0]
     last_div = max(cash_events, key=lambda e: e.ex_dividend_date) if cash_events else None
-    if divs.value:
+    if cash_events:  # only ex-dated cash dividends are used here (resolutions without an ex-date are not)
         is_demo |= divs.is_demo
         sources += ["demo"] if divs.is_demo else tagged(divs.source, "ex_dividend")
     if dy is None and price:

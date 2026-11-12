@@ -191,7 +191,7 @@ await check("持倉：有定期定額的股票有標記，按下到設定的那�
   await page.goto(base + "/", { waitUntil: "networkidle" })
   const mark = page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額：每月 6 日 NT\$10,000/ })
   await mark.hover()
-  await page.getByRole("tooltip").getByText("定期定額：每月 6 日 NT$10,000").waitFor({ timeout: 5000 })
+  await page.locator('[data-slot="tooltip-content"]').getByText("定期定額：每月 6 日 NT$10,000").waitFor({ timeout: 5000 })
   await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額：每月 12、26 日/ }).waitFor()
   if (await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額/ }).count() !== 2) throw new Error("expected 2 markers")
   await mark.click()
@@ -210,7 +210,7 @@ await check("法人觀點：預設收合；2330 展開就有 3 筆（日期・�
   if ((await toggle.getAttribute("aria-expanded")) !== "false") throw new Error("should start collapsed")
   await toggle.click()
   const table = page.getByRole("table", { name: "法人觀點" })
-  await table.getByText("外資券商 A").waitFor({ timeout: 8000 })
+  await table.getByText("外資券商 A", { exact: true }).waitFor({ timeout: 8000 })
   if ((await table.locator("tbody tr").count()) !== 3) throw new Error("expected 3 rows")
   await table.getByText("1,350 元").waitFor()
   await page.getByText("非 Forliosa 建議").first().waitFor()
@@ -230,7 +230,7 @@ await check("法人觀點：2881 查完沒有報導、2409 查不到、ETF 沒�
   await page.goto(base + "/stock/2881.TW", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: /法人觀點/ }).click()
   await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
-  await page.getByText("近期查無法人報導").waitFor({ timeout: 15000 })
+  await page.getByText("近期查無法人報導").first().waitFor({ timeout: 15000 })
   await page.goto(base + "/stock/2409.TW", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: /法人觀點/ }).click()
   await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
@@ -302,6 +302,7 @@ await check("手機：持倉列有定期定額標記，按標記到設定、按�
   await m.goto(base + "/", { waitUntil: "networkidle" })
   // 按在列的右半邊（現價），不是名稱
   const row = list.locator("li").filter({ hasText: "元大台灣50" })
+  await row.evaluate((el) => el.scrollIntoView({ block: "center" }))
   const box = await row.boundingBox()
   await m.mouse.click(box.x + box.width - 30, box.y + box.height / 2)
   await m.waitForURL(/\/stock\/0050\.TW/)
@@ -309,7 +310,7 @@ await check("手機：持倉列有定期定額標記，按標記到設定、按�
 await check("手機：法人觀點三行列＋免責", async () => {
   await m.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
   await m.getByRole("button", { name: /法人觀點/ }).click()
-  await m.getByRole("list", { name: "法人觀點" }).getByText("外資券商 A").waitFor({ timeout: 8000 })
+  await m.getByRole("list", { name: "法人觀點" }).getByText("外資券商 A", { exact: true }).waitFor({ timeout: 8000 })
   await m.getByText("非 Forliosa 建議").first().waitFor()
 })
 await check("手機：底部分頁到紀錄", async () => {

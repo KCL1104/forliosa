@@ -269,6 +269,9 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     summary = detail.get("summary")
     ov = svc.overview(ctx.db, ctx.md, sym)
     divs = instr.dividends(ctx.md, sym)[:4]
+    div_sources = [x for d in divs for x in d.get("sources") or []]
+    divs = [_pick(d, "year", "period", "cash_dividend", "stock_dividend", "ex_dividend_date", "payment_date",
+                  "status", "progress", "board_date", "cash_sources", "is_demo") for d in divs]
     return {
         **instr.instrument_out(info),
         "summary": summary[:240] if isinstance(summary, str) else None,
@@ -277,7 +280,7 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
                        "volume", "as_of", "is_realtime", "is_demo") if q is not None else None,
         "overview": {k: v for k, v in ov.items() if k not in ("symbol", "sources")},
         "recent_dividends": divs,
-        "sources": ov.get("sources", []),
+        "sources": list(dict.fromkeys([*ov.get("sources", []), *div_sources])),
     }
 
 

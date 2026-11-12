@@ -42,7 +42,7 @@ const draft = async (page, mobile) => {
   if (mobile) await page.getByLabel(/搜尋股票、提問/).blur()
 }
 
-/** 已出清：展開持倉底下的區塊，捲到它的標題 */
+/** 已出清：展開持倉底下的區塊（依年份分組，最近一年展開），捲到它的標題 */
 const closed = async (page) => {
   await page.getByRole("button", { name: /已出清/ }).click()
   await page.locator("#closed-list").waitFor()
@@ -50,6 +50,28 @@ const closed = async (page) => {
     const el = document.getElementById("closed-title")
     if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 340 : 260), behavior: "instant" })
   })
+}
+/** 法人觀點：展開總覽的收合區塊（2330 今天已經有人查過，直接有 3 筆），捲到它的標題 */
+const analyst = async (page, mobile) => {
+  await page.getByRole("button", { name: /法人觀點/ }).click()
+  await page.locator("#ov-analyst-body").getByText(/查詢時間/).waitFor({ timeout: 8000 })
+  await page.evaluate((m) => {
+    const el = document.getElementById("ov-analyst-title")
+    // 桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
+  }, mobile)
+}
+/** 持倉的定期定額標記：桌面滑過 0050 的標記看說明；手機捲到持倉清單 */
+const recurringMarks = async (page, mobile) => {
+  if (mobile) {
+    await page.evaluate(() => {
+      const el = document.querySelector('ul[aria-label="持倉"]')
+      if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - 140, behavior: "instant" })
+    })
+    return
+  }
+  await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額：每月 6 日/ }).hover()
+  await page.locator('[data-slot="tooltip-content"]').waitFor()
 }
 /** 設定 → 定期定額 */
 const recurring = async (page) => {
@@ -74,6 +96,8 @@ const SHOTS = [
   { name: "ledger-draft", path: "/", ready: "text=總資產", action: (page, mobile) => draft(page, mobile) },
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
+  { name: "stock-2330-analyst", path: "/stock/2330.TW", ready: "text=參考價", action: analyst },
+  { name: "ledger-recurring-marks", path: "/", ready: "text=總資產", action: recurringMarks },
   { name: "stock-2330-valuation", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: toTabs },
   { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=三大法人資料累積中", action: toTabs },
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
