@@ -570,6 +570,37 @@ class Position(BaseModel):
     is_demo: bool
 
 
+class ClosedRound(BaseModel):
+    """One holding round (0 → >0 → 0 shares) of a symbol in one account; amounts in TWD."""
+
+    symbol: str
+    name: str
+    account_id: str
+    currency: str
+    opened_at: date
+    closed_at: date
+    holding_days: int
+    total_bought_qty: float
+    total_sold_qty: float
+    cost_basis: float
+    realized_pnl: float
+    realized_pnl_pct: float | None
+    dividends_received: float
+    fees_and_taxes: float
+    sources: list[str] = []
+
+
+class HistoryMarker(PositionMarker):
+    account_id: str
+
+
+class PositionHistory(BaseModel):
+    symbol: str
+    rounds: list[ClosedRound]
+    markers: list[HistoryMarker]
+    sources: list[str] = []
+
+
 class WhyReason(BaseModel):
     kind: Literal["price_move", "volume", "limit_up", "limit_down", "attention", "disposition", "ex_dividend",
                   "earnings", "revenue_release"]

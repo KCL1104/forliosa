@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
-from forliosa.api.schemas import Holding, Performance, PortfolioSummary, UpcomingItem
+from forliosa.api.schemas import ClosedRound, Holding, Performance, PortfolioSummary, UpcomingItem
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
@@ -26,6 +26,13 @@ def portfolio_summary(account_id: str | None = None, user: User = Depends(curren
 def portfolio_holdings(account_id: str | None = None, user: User = Depends(current_user),
                        db: Session = Depends(get_db)):
     return svc.holdings(svc.compute_state(db, user, get_market_data(), account_id))
+
+
+@router.get("/closed", response_model=list[ClosedRound], summary="出清紀錄：已全部賣出的持股回合（最近出清的在前）")
+def portfolio_closed(account_id: str | None = None, user: User = Depends(current_user),
+                     db: Session = Depends(get_db)):
+    md = get_market_data()
+    return svc.closed_positions(svc.ledger_view(db, user, md, account_id), md)
 
 
 @router.get("/performance", response_model=Performance)

@@ -14,6 +14,7 @@ from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.domain.fees import ZERO
 from forliosa.domain.ledger import Ledger, replay
+from forliosa.domain.rounds import Round, holding_rounds
 from forliosa.domain.performance import (
     annualized_volatility,
     benchmark_returns,
@@ -82,13 +83,26 @@ def _info(md: MarketData, symbol: str) -> InstrumentInfo | None:
     return md.instrument(symbol)
 
 
-def compute_state(db: Session, user: User, md: MarketData, account_id: str | None = None) -> PortfolioState:
+@dataclass
+class LedgerView:
+    """The replayed ledger without quotes (closed rounds, markers)."""
+
+    inp: LedgerInput
+    ledger: Ledger
+    fx: FxBook
+
+
+def ledger_view(db: Session, user: User, md: MarketData, account_id: str | None = None) -> LedgerView:
     inp = load_ledger_input(db, user, account_id)
     if account_id and not inp.accounts:
         raise not_found("找不到帳戶")
-    start = inp.first_date or today_taipei()
-    fx = FxBook.load(md, start)
-    led = replay(inp.ledger_txns(fx), inp.method, inp.openings(fx)).ledger
+    fx = FxBook.load(md, inp.first_date or today_taipei())
+    return LedgerView(inp, replay(inp.ledger_txns(fx), inp.method, inp.openings(fx)).ledger, fx)
+
+
+def compute_state(db: Session, user: User, md: MarketData, account_id: str | None = None) -> PortfolioState:
+    view = ledger_view(db, user, md, account_id)
+    inp, fx, led = view.inp, view.fx, view.ledger
 
     grouped: dict[str, HoldingRow] = {}
     for pos in led.open_positions():
@@ -232,6 +246,42 @@ def summary(state: PortfolioState, md: MarketData) -> dict[str, Any]:
         "upcoming_dividends": upcoming,
         "is_demo": is_demo,
     }
+
+
+# -- closed positions (出清紀錄) -------------------------------------------------------------------
+def round_out(r: Round, md: MarketData) -> dict[str, Any]:
+    """A holding round in TWD (see :mod:`forliosa.domain.rounds` for every field's definition)."""
+    from forliosa.datapolicy import labels
+
+    info = md.instrument(r.symbol)
+    return {
+        "symbol": r.symbol,
+        "name": info.name if info else r.symbol,
+        "account_id": r.account_id,
+        "currency": r.currency,
+        "opened_at": r.opened_at,
+        "closed_at": r.closed_at,
+        "holding_days": r.holding_days,
+        "total_bought_qty": ser.qty(r.bought_qty),
+        "total_sold_qty": ser.qty(r.sold_qty),
+        "cost_basis": ser.money(r.buy_cost),
+        "realized_pnl": ser.money(r.realized),
+        "realized_pnl_pct": ser.ratio(r.realized_pct),
+        "dividends_received": ser.money(r.dividends),
+        "fees_and_taxes": ser.money(r.fees_and_taxes),
+        "sources": labels(["ledger"]),
+    }
+
+
+def closed_rounds(view: LedgerView | PortfolioState, symbol: str | None = None) -> list[Round]:
+    """Closed rounds, most recently closed first (a symbol can have several)."""
+    rounds = [r for r in holding_rounds(view.ledger) if r.is_closed and (symbol is None or r.symbol == symbol)]
+    rounds.sort(key=lambda r: (r.closed_at, r.opened_at, r.symbol, r.account_id), reverse=True)
+    return rounds
+
+
+def closed_positions(view: LedgerView, md: MarketData) -> list[dict[str, Any]]:
+    return [round_out(r, md) for r in closed_rounds(view)]
 
 
 # -- performance --------------------------------------------------------------------------------

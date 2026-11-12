@@ -33,7 +33,14 @@ from forliosa.models import (
     User,
 )
 from forliosa.services.instruments import change_base, require_instrument
-from forliosa.services.portfolio import add_months, compute_state, range_start
+from forliosa.services.portfolio import (
+    add_months,
+    closed_rounds,
+    compute_state,
+    ledger_view,
+    range_start,
+    round_out,
+)
 from forliosa.timeutil import (
     TAIPEI,
     is_tw_market_open,
@@ -584,17 +591,7 @@ def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, 
     dividends = sum((e.net_twd for e in led.income if e.symbol == sym), Decimal(0))
     mv = row.market_value
     unreal = mv - row.cost_twd
-    markers = []
-    kinds = {"buy": "buy", "sell": "sell", "cash_dividend": "dividend", "stock_dividend": "stock_dividend"}
-    for t in sorted(state.inp.effective_transactions(), key=lambda t: (t.trade_date, t.created_at)):
-        if t.symbol != sym or t.type not in kinds:
-            continue
-        eff = led.effective.get(t.id)
-        quantity = eff.quantity if eff is not None and t.type == "stock_dividend" else t.quantity
-        markers.append({"date": t.trade_date, "type": kinds[t.type],
-                        "quantity": ser.qty(quantity) if t.type != "cash_dividend" else ser.qty(t.quantity) or None,
-                        "price": ser.price(t.price) if t.type in ("buy", "sell", "cash_dividend") else None,
-                        "amount": ser.money(t.amount)})
+    markers = _markers(state, sym)
     today = today_taipei()
     divs = md.dividends(sym)
     upcoming = sorted((e for e in divs.value if e.ex_dividend_date and e.ex_dividend_date > today
@@ -620,6 +617,41 @@ def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, 
         "as_of": iso_taipei(q.as_of) if q and q.as_of else iso_taipei(state.as_of),
         "sources": labels(["ledger", *(_split(q.source) if q else [])]),
         "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
+    }
+
+
+_MARKER_KINDS = {"buy": "buy", "sell": "sell", "cash_dividend": "dividend", "stock_dividend": "stock_dividend"}
+
+
+def _markers(state, sym: str, with_account: bool = False) -> list[dict[str, Any]]:
+    """Buy / sell / dividend markers of ``sym`` in trade-date order (all accounts in the state)."""
+    led = state.ledger
+    out = []
+    for t in sorted(state.inp.effective_transactions(), key=lambda t: (t.trade_date, t.created_at)):
+        if t.symbol != sym or t.type not in _MARKER_KINDS:
+            continue
+        eff = led.effective.get(t.id)
+        quantity = eff.quantity if eff is not None and t.type == "stock_dividend" else t.quantity
+        m = {"date": t.trade_date, "type": _MARKER_KINDS[t.type],
+             "quantity": ser.qty(quantity) if t.type != "cash_dividend" else ser.qty(t.quantity) or None,
+             "price": ser.price(t.price) if t.type in ("buy", "sell", "cash_dividend") else None,
+             "amount": ser.money(t.amount)}
+        if with_account:
+            m["account_id"] = t.account_id
+        out.append(m)
+    return out
+
+
+def position_history(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, Any]:
+    """Closed rounds and every trade / dividend marker of ``symbol``, also when it is no longer held."""
+    info = require_instrument(md, symbol)
+    sym = info.symbol
+    view = ledger_view(db, user, md)
+    return {
+        "symbol": sym,
+        "rounds": [round_out(r, md) for r in closed_rounds(view, sym)],
+        "markers": _markers(view, sym, with_account=True),
+        "sources": labels(["ledger"]),
     }
 
 

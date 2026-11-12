@@ -6,7 +6,17 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
-from forliosa.api.schemas import Chips, Financials, Intraday, NewsItem, Overview, Position, StockEvent, Why
+from forliosa.api.schemas import (
+    Chips,
+    Financials,
+    Intraday,
+    NewsItem,
+    Overview,
+    Position,
+    PositionHistory,
+    StockEvent,
+    Why,
+)
 from forliosa.archive import tracked_symbols
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
@@ -51,6 +61,12 @@ def news(symbol: str, _user: User = Depends(current_user)):
 @router.get("/position", response_model=Position | None, summary="我的部位（未持有回 null）")
 def position(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     return svc.position(db, get_market_data(), user, symbol)
+
+
+@router.get("/position/history", response_model=PositionHistory,
+            summary="我的交易歷史：已出清的回合與所有買賣點（未持有也會回傳）")
+def position_history(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return svc.position_history(db, get_market_data(), user, symbol)
 
 
 @router.get("/why", response_model=Why, summary="為什麼漲跌（規則判斷，只在異常時 show=true）")
