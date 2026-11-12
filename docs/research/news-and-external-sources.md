@@ -116,3 +116,12 @@
 - **員工人數**：台股沒有可商用的逐公司來源（ESG 資料集沒有這個欄位；年報、公開資訊觀測站禁止程式下載）。不放。
 - **公司簡介**：中文維基百科節錄（CC BY-SA 4.0：標條目連結與授權、不讓 AI 改寫、需開放 zh.wikipedia.org 與 www.wikidata.org），沒有條目的公司改用 AI 依官方資料寫的 2–3 句；或只用 AI 簡介。shioaji-data 的簡介授權待定，正式模式不顯示。
 - **美股**：SEC submissions 有產業、總部城市、交易所、會計年度結束日、曾用名稱；官網、簡介、員工數都沒有（員工數要從 10-K／20-F 文字擷取，P2）。
+
+## 10. 自架搜尋引擎與 GDELT 實測（2026-11-12）
+
+- **元搜尋（SearXNG、Whoogle）**：不自己收錄，只是自動查詢 Google／Bing，違反它們的條款且會被擋。不用。
+- **自建爬蟲＋索引（YaCy、Nutch＋OpenSearch）**：等於自己爬媒體網站並存全文，就是 §1 排除的高風險做法。不用。
+- **GDELT DOC 2.0 API**（`api.gdeltproject.org/api/v2/doc/doc`，已加入環境允許清單）：GDELT 官方「unlimited and unrestricted use for any academic, commercial, or governmental use of any kind without fee」，要引用 GDELT 並連到 gdeltproject.org。我們只取標題、網址、媒體、時間，自己不爬任何網站。
+  - 實測：`TSMC sourcecountry:taiwan`、最近 3 天 → 23 則，全部中文，來源有聯合、中央社、自由（含自由財經）、中時、ETtoday、三立、TVBS、新頭殼、蕃薯藤、美國之音中文台，最新一則距實際刊出約 15–30 分鐘。
+  - 注意：查詢要用**英文**（GDELT 把各語言翻成英文索引），中文關鍵字 `台積電 sourcelang:chinese` 查到 0 則；標題字元間會多出空白，要正規化；會有雜訊（例如只順帶提到台積電的地方新聞），要求標題含公司名稱或代號再列；這次樣本沒看到鉅亨。
+  - 限制：每個 IP 每 5 秒 1 次（沙盒共用出口常回 429），適合 worker 背景批次查，不適合在使用者請求時即時查。
