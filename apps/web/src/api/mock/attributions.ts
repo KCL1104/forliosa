@@ -68,6 +68,12 @@ const SEC_ROWS: Row[] = [
   ["sec-edgar/tickers", SEC, "公司代號與 CIK 對照表（company_tickers.json）", "https://www.sec.gov/files/company_tickers.json", "美股代號對應 SEC 公司編號（CIK）"],
 ]
 
+/** 新聞報導的來源（後端 datapolicy.py 的 gdelt/doc、yahoo-rss/stock） */
+const GDELT_TERMS_URL = "https://www.gdeltproject.org/about.html#termsofuse"
+export const GDELT_ATTRIBUTION = `The GDELT Project〈GDELT DOC 2.0 新聞索引〉（${YEAR}），依 GDELT 使用條款引用：https://www.gdeltproject.org/`
+export const YAHOO_RSS_ATTRIBUTION = `Yahoo股市〈個股新聞 RSS〉（${YEAR}），保留「Yahoo股市」與原始媒體標示（非商用）`
+export const AI_SEARCH_ATTRIBUTION = "AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）"
+
 export function secSourceOf(key: string, year = YEAR): string {
   const row = SEC_ROWS.find((r) => r[0] === key)
   return row ? `${row[1]}〈${row[2]}〉（${year}），美國政府公開資料` : key
@@ -81,7 +87,18 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
   for (const [key, agency, dataset, url, used_for] of SEC_ROWS) {
     datasets.push({ key, agency, dataset, url, used_for, year: YEAR, license: SEC_LICENSE, license_url: SEC_LICENSE_URL, commercial: true, attribution: secSourceOf(key) })
   }
+  datasets.push({
+    key: "gdelt/doc", agency: "The GDELT Project", dataset: "GDELT DOC 2.0 新聞索引", url: "https://api.gdeltproject.org/api/v2/doc/doc",
+    used_for: "個股頁「新聞報導」：媒體標題、媒體名稱、時間與原文連結", year: YEAR, license: "GDELT 使用條款（免費、可商用，需引用 GDELT）",
+    license_url: GDELT_TERMS_URL, commercial: true, attribution: GDELT_ATTRIBUTION,
+  })
   if (policy === "personal") {
+    datasets.push({
+      key: "yahoo-rss/stock", agency: "Yahoo股市", dataset: "個股新聞 RSS", url: "https://tw.stock.yahoo.com/rss-index",
+      used_for: "個股頁「新聞報導」（只在 DATA_POLICY=personal）：標題、原始媒體、時間與連結", year: YEAR,
+      license: "Yahoo股市 RSS 使用條款（限個人、非商業用途）", license_url: "https://tw.stock.yahoo.com/rss-index", commercial: false,
+      attribution: YAHOO_RSS_ATTRIBUTION,
+    })
     datasets.push({
       key: "finmind", agency: "FinMind", dataset: "FinMind 開放 API（台股資料）", url: "https://finmind.github.io/",
       used_for: "僅在明確設定時：回補、新聞（非商用）", year: YEAR, license: "FinMind 使用條款（非商用）",
@@ -94,11 +111,14 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
       "此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。",
       `政府資料開放授權條款：${OGDL_URL}`,
       `${SEC}：sec.gov 上的政府內容與 EDGAR 公開申報可自由存取與再利用（${SEC_LICENSE_URL}）`,
+      `The GDELT Project：資料集可「unlimited and unrestricted use for any academic, commercial, or governmental use of any kind without fee」，需引用 GDELT 並連到 https://www.gdeltproject.org/（${GDELT_TERMS_URL}）`,
     ],
     datasets,
     not_used: [
       "臺灣證券交易所網站（T86 三大法人、MI_QFIIS 外資持股等）與基本市況報導 MIS：網站條款禁止未經同意以程式下載",
       "證券櫃檯買賣中心網站歷史查詢、公開資訊觀測站網站：同上，只使用 OpenAPI 版本",
+      "新聞網站本身：不爬取，也不存內文、摘要或圖片；「新聞報導」只存標題、媒體、時間與原文連結",
+      ...(policy === "personal" ? [] : ["Yahoo股市 RSS（個股新聞）：條款限個人、非商業使用，只在 DATA_POLICY=personal 使用"]),
     ],
   }
 }

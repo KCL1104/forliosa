@@ -488,13 +488,21 @@ export interface InstrumentEvent {
 
 export type NewsCategory = "material_info" | "exchange_news" | "media"
 
-/** 公告：官方的重大訊息與證交所新聞（`source: "公告"`）；媒體標題只在 personal 明確開啟時出現 */
+/**
+ * `/instruments/{symbol}/news`：先列官方公告（重大訊息、證交所新聞，`source: "公告"`），再列新聞報導（`category: "media"`）。
+ * 新聞報導只有媒體原標題、媒體名稱（`outlet`）、時間與原文連結；`source` 是怎麼找到的（GDELT、AI 搜尋、SearXNG、Yahoo股市、FinMind）。
+ */
 export interface NewsItem {
   published_at: string
   title: string
+  /** 「公告」；新聞報導：GDELT | AI 搜尋 | SearXNG | Yahoo股市 | FinMind */
   source: string
+  /** 新聞報導的媒體名稱（聯合新聞網、中央社…；不認得的媒體是網域）；官方公告為 null */
+  outlet?: string | null
   url: string
   category?: NewsCategory
+  /** 來源只給日期沒有時間：顯示日期，不顯示「N 小時前」 */
+  date_only?: boolean
   sources?: string[]
 }
 

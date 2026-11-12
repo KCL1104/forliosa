@@ -799,3 +799,64 @@ class SecFiling(Base):
     primary_document: Mapped[str] = mapped_column(String(200), default="")
     source: Mapped[str] = mapped_column(String(32), default="sec-edgar")
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+# -- News (個股頁「新聞報導」; forliosa.news) -------------------------------------------------------------------
+class NewsArticle(Base):
+    """One media headline about one symbol: **metadata only** — the headline, outlet, time and link. Never the
+    article text, a description / og:description or an image (docs/research/news-and-external-sources.md §1).
+    Deleted ``NEWS_RETENTION_DAYS`` (30) after publication."""
+
+    __tablename__ = "news_articles"
+    __table_args__ = (UniqueConstraint("symbol", "url_key", name="uq_news_articles_symbol_url"),
+                      Index("ix_news_articles_symbol_published", "symbol", "published_at"),
+                      Index("ix_news_articles_published", "published_at"))
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20))
+    url_key: Mapped[str] = mapped_column(String(64))  # sha256 of the normalised URL
+    url: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)  # normalised headline
+    outlet: Mapped[str] = mapped_column(String(100))  # 聯合新聞網; unknown outlets: their domain
+    domain: Mapped[str] = mapped_column(String(253))
+    published_at: Mapped[datetime] = mapped_column(TZDateTime)
+    date_only: Mapped[bool] = mapped_column(Boolean, default=False)  # the source gave a date without a time
+    source: Mapped[str] = mapped_column(String(16))  # gdelt | ai_search | searxng | yahoo_rss
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class NewsBlockedDomain(Base):
+    """Takedown blocklist (下架處理): an outlet that asked to be removed. Its headlines are deleted, never stored
+    again and never shown (subdomains included). ``python -m forliosa.news block|unblock|blocked``."""
+
+    __tablename__ = "news_blocked_domains"
+
+    domain: Mapped[str] = mapped_column(String(253), primary_key=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class NewsTrackedView(Base):
+    """When a symbol's news was last viewed: only the symbol and the time, never who viewed it. Symbols viewed in
+    the last ``NEWS_VIEW_DAYS`` days are refreshed by the news worker job."""
+
+    __tablename__ = "news_tracked_views"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_viewed_at: Mapped[datetime] = mapped_column(TZDateTime)
+
+
+class NewsFetchState(Base):
+    """Per source and symbol: the last attempt / success and its outcome. ``symbol = "*"`` is the source as a
+    whole (``backoff_until`` after a 429 or a block: the source is not asked again before then)."""
+
+    __tablename__ = "news_fetch_state"
+
+    source: Mapped[str] = mapped_column(String(16), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    last_status: Mapped[str] = mapped_column(String(24), default="")  # ok | empty | error | rate_limited | blocked
+    items: Mapped[int] = mapped_column(default=0)
+    failures: Mapped[int] = mapped_column(default=0)
+    backoff_until: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)

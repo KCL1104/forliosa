@@ -22,6 +22,10 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
 * ``ai_analyst_purge`` — every hour at :05: deletes shared analyst views 24 hours after they were created
   (``forliosa.ai.analyst.purge_expired``; reads purge them too, so an expired entry is never shown).
+* ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
+  watched, or viewed in the last 3 days), one GDELT request per symbol spaced ≥ 5 s, backing off after a 429; AI
+  web search fills gaps within the monthly budget; headlines older than 30 days are deleted
+  (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only.
 
 There is no intraday polling: the former MIS job was removed (2026-11-12) because TWSE's website terms
 forbid automated downloads from mis.twse.com.tw and real-time / delayed quotes need a paid licence.
@@ -47,6 +51,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from forliosa.archive import Archiver, default_fetcher, tracked_symbols
+from forliosa.config import get_settings
 from forliosa.db import get_engine, session_factory
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.service import MarketData, get_market_data
@@ -155,6 +160,9 @@ class Worker:
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
             Job("ai_analyst_purge", daily_at(*(time(h, 5) for h in range(24))), self.ai_analyst_purge),
         ]
+        settings = get_settings()
+        if settings.news_enabled:
+            self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh))
 
     async def archive(self, groups: list[str]) -> None:
         def run() -> list:
@@ -200,6 +208,16 @@ class Worker:
         n = await asyncio.to_thread(run)
         if n:
             log.info("analyst views: %d expired entries deleted", n)
+
+    async def news_refresh(self) -> None:
+        from forliosa.news.service import refresh
+
+        def run():
+            with session_factory()() as db:
+                # A batch never holds the scheduler for longer than the refresh interval.
+                return refresh(db, self.md, deadline_seconds=get_settings().news_refresh_minutes * 60 * 0.8)
+
+        await asyncio.to_thread(run)
 
     def stop(self) -> None:
         self._stop.set()

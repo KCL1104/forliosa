@@ -339,7 +339,7 @@
 | GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}`；**上市（TWSE）股票的 `institutional`、`foreign_holding_pct` 任何模式都是 `[]`**，`notes` 說明原因（產品負責人 2026-11-12：不寄信給證交所、不買 Data E-Shop；上櫃照常用櫃買 OpenAPI）；融資融券與集保照常 |
 | GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元（美股：美元、公司會計年度，見「美股基本面（SEC EDGAR）」） |
 | GET | `/instruments/{symbol}/events?mine=false` | `[{date, type, title, detail, url, mine, amount_estimate}]`；`type`：`ex_dividend`、`dividend_payment`、`earnings`、`revenue_release`、`material_info`、`attention`、`disposition`、`shareholder_meeting`；美股另有 `sec_filing`（`form`：8-K／10-Q／10-K） |
-| GET | `/instruments/{symbol}/news` | `[{published_at, title, source, url}]`（只有標題、來源、連結） |
+| GET | `/instruments/{symbol}/news` | `[{published_at, title, source, outlet, url, category, date_only, sources}]`：官方公告在前、新聞報導在後（只有標題、媒體、時間、連結；見「新聞報導」） |
 | GET | `/instruments/{symbol}/position` | 未持有回 `null`；否則 `{quantity, avg_cost, cost_basis, market_value, unrealized_pnl, unrealized_pnl_pct, realized_pnl, dividends_received, day_change, markers: [{date, type: "buy"\|"sell"\|"dividend"\|"stock_dividend", quantity, price, amount}], upcoming_dividend: {ex_dividend_date, amount_estimate} \| null}` |
 | GET | `/instruments/{symbol}/why` | `{show, headline, reasons: [{kind, text}], as_of}`；規則判斷（漲跌 ±3%、成交量 2 倍、漲跌停、注意／處置、除權息日、財報日），M4 前用模板句，之後由 AI 改寫 |
 
@@ -380,6 +380,7 @@
 - `/portfolio/upcoming` 的 `type: "recurring"`：扣款日遇非交易日順延（證交所休市日），多 `plan_id`、`account_id`、`scheduled_date`；`amount_estimate` 為扣款金額。
 - `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集第一次出現的日期），查不到才用法定期限並標 `estimated: true`。
 - `/instruments/{symbol}/news`：官方公告（重大訊息、證交所新聞），每筆多 `category: "material_info" | "exchange_news" | "media"`，官方公告的 `source` 是 `"公告"`。
+  媒體新聞（`category: "media"`）見下方「新聞報導（2026-11-12）」。
 - `POST /transactions` 的 `source` 可為 `"ai_draft"`。
 
 ### 第三批（2026-11-12）：開放資料 P0——期交所、報酬指數、股利決議、公司基本資料
@@ -422,6 +423,33 @@
 - `/meta/attributions`：`datasets` 多 `cbc-opendata/fx`（`agency: "中央銀行"`、`license_status: "ogdl"`、`license_basis: "data.gov.tw 7232"`、
   `last_updated` = 存檔最新的匯率日期）；期交所 `taifex-openapi/fx` 仍在 `conditional[]`，`used_for` 改為「只存檔」。
 - AI 工具 `get_portfolio_summary`、`get_holdings`、`get_position`（美股）的 `notes` 多匯率來源與「美股市值以 YYYY-MM-DD 的 USD/TWD X 換算成新台幣」。
+
+### 新聞報導（2026-11-12）：媒體原標題＋媒體＋時間＋原文連結
+產品負責人決定（`PRODUCT.md`「相關新聞」與「個股頁補強」第 1、2 項；研究 [`docs/research/news-and-external-sources.md`](research/news-and-external-sources.md)）。
+細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 新聞報導」。沒有新端點：`GET /instruments/{symbol}/news` 在官方公告之後加上媒體標題。
+
+```json
+[
+  {"published_at": "2026-11-11T17:30:00+08:00", "title": "代子公司 TSMC Arizona 公告取得機器設備", "source": "公告",
+   "outlet": null, "url": "https://mops.twse.com.tw/mops/#/web/t05st01", "category": "material_info", "date_only": false,
+   "sources": ["臺灣證券交易所〈上市公司每日重大訊息〉（2026），依政府資料開放授權條款第 1 版"]},
+  {"published_at": "2026-11-12T15:00:00+08:00", "title": "台積電CPO霸主地位穩了？法人看好2027年EPS估達151元", "source": "GDELT",
+   "outlet": "新頭殼", "url": "https://newtalk.tw/news/view/2026-11-12/1070753", "category": "media", "date_only": false,
+   "sources": ["The GDELT Project〈GDELT DOC 2.0 新聞索引〉（2026），依 GDELT 使用條款引用：https://www.gdeltproject.org/"]}
+]
+```
+
+- **順序**：先官方公告（台股；最近 90 天、最多 30 則，新的在前），再新聞報導（最近 30 天、最多 40 則，新的在前）。美股只有新聞報導。
+- **新聞報導**（`category: "media"`）：`title` 是媒體原標題（去掉 GDELT 插入的空白與「| 財經」「- 自由財經」這類重複媒體或版名的尾巴）；
+  `outlet` 是媒體名稱（依網域：udn.com 聯合新聞網、money.udn.com 經濟日報、cna.com.tw 中央社…；不認得的顯示網域）；
+  `url` 是原文連結；`source` 是怎麼找到的：`"GDELT"`、`"AI 搜尋"`、`"SearXNG"`、`"Yahoo股市"`（只有 `DATA_POLICY=personal`）、`"FinMind"`（personal 明確開啟）；
+  `date_only: true` 表示來源只給日期（顯示日期，不顯示「N 小時前」）。官方公告的 `outlet` 是 `null`、`date_only` 是 `false`。
+- **不提供**內文、摘要、og:description、圖片或縮圖；同一則（同網址或幾乎相同的標題）只列一次，原始媒體優先於轉載（Yahoo、LINE TODAY、MSN）。
+- **前端**：個股頁總覽的「新聞報導」區（桌機兩欄、手機一欄，先列 8 則，「顯示更多」）：「媒體・N 小時前」，標題連到原文（新視窗，`rel="noopener noreferrer"`）；
+  有 `source: "GDELT"` 時，下方引用 The GDELT Project 並連到 https://www.gdeltproject.org/（使用條款要求）；`source: "Yahoo股市"` 要同時顯示「Yahoo股市」與原始媒體。
+  「公告」區與事件分頁只放官方公告（`category` 不是 `media`）。
+- `/meta/attributions` 多了 `gdelt/doc`（`license_status: "open"`，可商用、需引用），personal 另有 `yahoo-rss/stock`（`license_status: "non_commercial"`）；
+  `notice` 多一行 GDELT 條款，commercial 的 `not_used` 多「新聞網站本身」與「Yahoo股市 RSS」兩行。
 
 ## AI（M4）
 

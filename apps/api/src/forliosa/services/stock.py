@@ -7,13 +7,13 @@ with 「非商用」). Archive tables are read with the policy's source filter, 
 
 from __future__ import annotations
 
-import contextlib
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import and_, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
@@ -686,40 +686,57 @@ def _published_at(r: MarketEvent) -> str:
 
 
 def news(db: Session, md: MarketData, symbol: str) -> list[dict[str, Any]]:
-    """Official announcement headlines (公告): the company's 重大訊息 and TWSE news that names it.
+    """Official announcements (公告) first, then media headlines (新聞報導).
 
-    Both are government open data (t187ap04_L / mopsfin_t187ap04_O, TWSE /news/newsList), archived daily.
-    Under an explicit personal opt-in with FinMind configured, FinMind media headlines are appended
-    (labelled 非商用).
+    * Official (``category: material_info | exchange_news``, ``source: "公告"``): the company's 重大訊息 and TWSE
+      news that names it — government open data (t187ap04_L / mopsfin_t187ap04_O, TWSE /news/newsList), archived
+      daily; the last 90 days, at most 30. Taiwan stocks only.
+    * Media (``category: "media"``): headlines collected by the news worker (:mod:`forliosa.news`) — the original
+      title, ``outlet`` (媒體名稱), ``published_at`` and the link to the original site, ``source`` naming how it was
+      found (GDELT, AI 搜尋, SearXNG, Yahoo股市; FinMind under an explicit personal opt-in). Metadata only.
+
+    Viewing a symbol's news records the symbol and time (no user) so the worker keeps it fresh for 3 days.
     """
+    from forliosa.news import service as news_service
+    from forliosa.news.normalize import Headline, clean_title
+
     info = require_instrument(md, symbol)
-    if info.market == "US":
-        return []
     sym = info.symbol
-    since = today_taipei() - timedelta(days=NEWS_DAYS)
-    company = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.type == "material_info",
-                                        MarketEvent.date >= since)
-    exchange = select(MarketEvent).where(
-        MarketEvent.type == "exchange_news", MarketEvent.date >= since,
-        or_(MarketEvent.symbol == sym,
-            and_(MarketEvent.symbol == MARKET_SYMBOL, MarketEvent.title.contains(info.name))))
-    rows = [*db.scalars(_filtered(company, MarketEvent, md)), *db.scalars(_filtered(exchange, MarketEvent, md))]
-    rows.sort(key=lambda r: (r.date, str((r.data or {}).get("time") or "")), reverse=True)
-    out = [{"published_at": _published_at(r), "title": r.title, "source": "公告",
-            "url": r.url or MOPS_MATERIAL_URL, "category": r.type, "sources": labels([_event_source(r)])}
-           for r in rows[:NEWS_LIMIT]]
-    fm = md.provider("finmind") if md.policy == "personal" else None
+    out: list[dict[str, Any]] = []
+    if info.market != "US":
+        since = today_taipei() - timedelta(days=NEWS_DAYS)
+        company = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.type == "material_info",
+                                            MarketEvent.date >= since)
+        exchange = select(MarketEvent).where(
+            MarketEvent.type == "exchange_news", MarketEvent.date >= since,
+            or_(MarketEvent.symbol == sym,
+                and_(MarketEvent.symbol == MARKET_SYMBOL, MarketEvent.title.contains(info.name))))
+        rows = [*db.scalars(_filtered(company, MarketEvent, md)), *db.scalars(_filtered(exchange, MarketEvent, md))]
+        rows.sort(key=lambda r: (r.date, str((r.data or {}).get("time") or "")), reverse=True)
+        out = [{"published_at": _published_at(r), "title": r.title, "source": "公告", "outlet": None,
+                "url": r.url or MOPS_MATERIAL_URL, "category": r.type, "date_only": False,
+                "sources": labels([_event_source(r)])}
+               for r in rows[:NEWS_LIMIT]]
+    extra: list[Headline] = []
+    fm = md.provider("finmind") if md.policy == "personal" and info.market != "US" else None
     if fm is not None:
         try:
             items = fm.news(sym)  # type: ignore[attr-defined]
-        except Exception:  # quota (402) or network: official announcements only
+        except Exception:  # quota (402) or network: the stored headlines only
             items = []
         for n in items[:NEWS_LIMIT]:
-            published = n["published_at"]
-            with contextlib.suppress(ValueError):
-                published = iso_taipei(datetime.fromisoformat(published).replace(tzinfo=TAIPEI))
-            out.append({"published_at": published, "title": n["title"], "source": n["source"], "url": n["url"],
-                        "category": "media", "sources": labels(["finmind"])})
+            try:
+                published = datetime.fromisoformat(n["published_at"]).replace(tzinfo=TAIPEI)
+            except ValueError:
+                continue
+            outlet = n["source"] or "FinMind"
+            extra.append(Headline(title=clean_title(n["title"], n["url"], outlet), url=n["url"], outlet=outlet[:100],
+                                  domain="", published_at=published, source="finmind"))
+    out += news_service.media_items(db, md, info, extra=extra)
+    try:
+        news_service.record_view(db, sym)
+    except SQLAlchemyError:  # never fail the page over the view note
+        db.rollback()
     return out
 
 

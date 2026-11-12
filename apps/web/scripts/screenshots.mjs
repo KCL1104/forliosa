@@ -142,6 +142,28 @@ const fxSource = async (page) => {
   })
 }
 
+/** 新聞報導：捲到總覽的「新聞報導」標題（桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列） */
+const toNews = async (page, mobile) => {
+  await page.locator("#ov-media").waitFor({ timeout: 8000 })
+  await page.evaluate((m) => {
+    const el = document.getElementById("ov-media")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
+  }, mobile)
+}
+/** 新聞報導：按「顯示更多」後捲回標題 */
+const newsMore = async (page, mobile) => {
+  await toNews(page, mobile)
+  await page.getByRole("button", { name: /顯示更多/ }).click()
+  await toNews(page, mobile)
+}
+/** 資料來源頁的 GDELT（新聞報導的授權） */
+const gdeltSource = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("ds-The GDELT Project")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
+
 /** 上市股票的籌碼：按空狀態裡的「最近外資對這檔的動向？」交給 AI（mock 是本機規則版的說明） */
 const foreignAsk = async (page, mobile) => {
   await toTabs(page)
@@ -169,6 +191,12 @@ const SHOTS = [
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
   { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
   { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },
+  // 新聞報導：媒體原標題＋媒體＋時間＋原文連結（GDELT 為主、AI 搜尋補缺），沒有報導時的空狀態，美股英文媒體
+  { name: "stock-2330-news", path: "/stock/2330.TW", ready: "text=參考價", action: toNews },
+  { name: "stock-2330-news-more", path: "/stock/2330.TW", ready: "text=參考價", action: newsMore },
+  { name: "stock-2317-news-empty", path: "/stock/2317.TW", ready: "text=參考價", action: toNews },
+  { name: "stock-nvda-news", path: "/stock/NVDA", ready: "text=參考價", action: toNews },
+  { name: "data-sources-gdelt", path: "/data-sources", ready: "text=GDELT DOC 2.0 新聞索引", action: gdeltSource },
   // 美股：SEC EDGAR 的季報（美元、公司會計年度）與 8-K／10-Q／10-K 申報
   { name: "stock-aapl-financials", path: "/stock/AAPL?tab=financials", ready: "text=FY2026Q4", action: toTabs },
   { name: "stock-aapl-events", path: "/stock/AAPL?tab=events", ready: "text=10-K 年度報告", action: toTabs },

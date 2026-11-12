@@ -21,7 +21,7 @@ import type {
   Why,
   WhyReason,
 } from "../types"
-import { secSourceOf, sourceOf } from "./attributions"
+import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
 import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
@@ -411,12 +411,62 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
   return out.sort((a, b) => b.date.localeCompare(a.date))
 }
 
-// ── news：官方公告（重大訊息、證交所新聞），personal 另加媒體標題（非商用） ─────────────
-const MEDIA: Record<string, [string, string, number][]> = {
+// ── news：官方公告（重大訊息、證交所新聞），再加新聞報導（媒體原標題＋媒體＋時間＋原文連結） ─────────────
+// 示範標題（不是真實新聞）；連結指向該媒體首頁。[標題, 媒體, 網址, 幾小時前, 收集方式, 只有日期]
+type MockMedia = [title: string, outlet: string, url: string, hoursAgo: number, source?: "GDELT" | "AI 搜尋" | "Yahoo股市", dateOnly?: boolean]
+const MEDIA: Record<string, MockMedia[]> = {
   "2330.TW": [
-    ["台積電先進封裝擴產，CoWoS 月產能明年再增五成", "鉅亨網", 2],
-    ["外資連四賣台積電，法人：短線調節不改長線趨勢", "經濟日報", 5],
+    ["台積電先進封裝擴產，CoWoS 月產能明年再增五成", "經濟日報", "https://money.udn.com/money/index", 1],
+    ["台積電熊本二廠規劃導入 3 奈米 日本補助案拍板", "中央社", "https://www.cna.com.tw/list/afe.aspx", 2],
+    ["外資連四賣台積電 法人：短線調節不改長線趨勢", "工商時報", "https://www.ctee.com.tw/", 3],
+    ["台積電 10 月營收創新高 年增四成", "自由時報", "https://ec.ltn.com.tw/", 5],
+    ["台積電美國亞利桑那廠第二座晶圓廠提前量產", "聯合新聞網", "https://udn.com/news/index", 6],
+    ["AI 需求延續 台積電明年資本支出估再提高", "中時新聞網", "https://www.chinatimes.com/money/", 9],
+    ["台積電董事會核准資本預算 擴充先進製程產能", "ETtoday", "https://finance.ettoday.net/", 20],
+    ["半導體設備交期縮短 台積電供應鏈接單轉強", "TVBS", "https://news.tvbs.com.tw/money", 26],
+    ["台積電 2 奈米良率傳捷報 蘋果明年新機搶先採用", "三立", "https://www.setn.com/ViewAll.aspx?PageGroupID=2", 30],
+    ["台積電赴德設廠進度 歐洲客戶車用晶片需求回溫", "新頭殼", "https://newtalk.tw/news/subcategory/2/", 44],
+    ["TSMC lifts capex outlook as AI chip demand stays strong", "Reuters", "https://www.reuters.com/technology/", 52],
+    ["台積電 ADR 夜盤走揚 台股期貨同步反彈", "鉅亨網", "https://news.cnyes.com/", 70, "AI 搜尋", true],
   ],
+  "2454.TW": [
+    ["聯發科天璣新晶片打進旗艦手機 第四季出貨看增", "經濟日報", "https://money.udn.com/money/index", 4],
+    ["聯發科攜手輝達 車用晶片明年量產", "中央社", "https://www.cna.com.tw/list/afe.aspx", 30],
+  ],
+  "6488.TWO": [
+    ["環球晶美國新廠啟用 客戶認證進度超前", "工商時報", "https://www.ctee.com.tw/", 7],
+    ["矽晶圓報價落底？環球晶：庫存調整進入尾聲", "MoneyDJ", "https://www.moneydj.com/", 50, "AI 搜尋", true],
+  ],
+  NVDA: [
+    ["Nvidia shares slide as investors weigh leadership questions", "Reuters", "https://www.reuters.com/technology/", 2],
+    ["Nvidia board meets to discuss CEO succession plan", "Bloomberg", "https://www.bloomberg.com/technology", 6],
+    ["What Nvidia's guidance means for AI chip stocks", "CNBC", "https://www.cnbc.com/technology/", 18],
+    ["輝達財報前夕 台廠供應鏈法人買盤回流", "經濟日報", "https://money.udn.com/money/index", 28],
+  ],
+}
+/** personal 模式另有 Yahoo股市 RSS（條款限非商用）：保留「Yahoo股市」與原始媒體 */
+const MEDIA_PERSONAL: Record<string, MockMedia[]> = {
+  "2330.TW": [["員工個資外洩？台積電：無證據顯示系統遭入侵", "MoneyDJ", "https://tw.stock.yahoo.com/tw-market", 4, "Yahoo股市"]],
+}
+
+const MEDIA_SOURCE: Record<string, string> = { GDELT: GDELT_ATTRIBUTION, "AI 搜尋": AI_SEARCH_ATTRIBUTION, Yahoo股市: YAHOO_RSS_ATTRIBUTION }
+
+function mediaOf(spec: MockInstrumentSpec, commercial: boolean): NewsItem[] {
+  const rows = [...(MEDIA[spec.symbol] ?? []), ...(commercial ? [] : (MEDIA_PERSONAL[spec.symbol] ?? []))]
+  return rows.map(([title, outlet, url, hoursAgo, source = "GDELT", dateOnly = false]) => {
+    // 和後端一樣用台北時間（+08:00）；只有日期的是當天 00:00
+    const local = new Date(Date.parse(MOCK_AS_OF) - hoursAgo * 3_600_000 + 8 * 3_600_000).toISOString().slice(0, 19)
+    return {
+      published_at: `${dateOnly ? `${local.slice(0, 10)}T00:00:00` : local}+08:00`,
+      title,
+      source,
+      outlet,
+      url,
+      category: "media" as const,
+      date_only: dateOnly,
+      sources: [MEDIA_SOURCE[source]!],
+    }
+  })
 }
 
 export function buildNews(spec: MockInstrumentSpec, commercial = false): NewsItem[] {
@@ -424,23 +474,18 @@ export function buildNews(spec: MockInstrumentSpec, commercial = false): NewsIte
     published_at: `${date}T${category === "material_info" ? `17:${String(30 - i * 7).padStart(2, "0")}:00` : "00:00:00"}+08:00`,
     title,
     source: "公告",
+    outlet: null,
     url: category === "material_info" ? MOPS_URL : TWSE_NEWS_URL,
     category,
+    date_only: false,
     sources: commercial
       ? [sourceOf(category === "material_info" ? `${tw(spec)}/material_info` : "twse-openapi/news")]
       : DEMO_SRC,
   }))
-  const media: NewsItem[] = commercial
-    ? []
-    : (MEDIA[spec.symbol] ?? []).map(([title, source, hoursAgo]) => ({
-        published_at: new Date(Date.parse(MOCK_AS_OF) - hoursAgo * 3_600_000 + 90 * 60_000).toISOString(),
-        title,
-        source,
-        url: `https://www.google.com/search?q=${encodeURIComponent(title)}`,
-        category: "media" as const,
-        sources: ["FinMind（非商用）"],
-      }))
-  return [...official, ...media].sort((a, b) => b.published_at.localeCompare(a.published_at))
+  official.sort((a, b) => b.published_at.localeCompare(a.published_at))
+  const media = mediaOf(spec, commercial).sort((a, b) => b.published_at.localeCompare(a.published_at))
+  // 與後端相同：先列官方公告，再列新聞報導
+  return [...official, ...media]
 }
 
 // ── position ─────────────────────────────────────────────

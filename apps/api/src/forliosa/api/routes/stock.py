@@ -54,7 +54,8 @@ def events(symbol: str, mine: bool = Query(False), user: User = Depends(current_
     return svc.events(db, get_market_data(), user, symbol, mine)
 
 
-@router.get("/news", response_model=list[NewsItem], summary="公告：重大訊息與證交所新聞（官方開放資料，標題＋連結）")
+@router.get("/news", response_model=list[NewsItem],
+            summary="公告（重大訊息、證交所新聞）＋新聞報導（媒體原標題、媒體名稱、時間、原文連結）")
 def news(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
     return svc.news(db, get_market_data(), symbol)
 

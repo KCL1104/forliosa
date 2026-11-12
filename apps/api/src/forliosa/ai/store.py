@@ -34,13 +34,14 @@ from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, BrokerAccount
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
-FEATURES = ("chat", "why", "import", "report", "analyst")
+FEATURES = ("chat", "why", "import", "report", "analyst", "news")  # news: system-paid (user_id NULL)
 TITLE_MAX = 40
 
 
 def model_for(feature: str, settings: Settings) -> str:
     override = {"chat": settings.ai_model_chat, "why": settings.ai_model_why, "import": settings.ai_model_import,
-                "report": settings.ai_model_report, "analyst": settings.ai_model_analyst}.get(feature)
+                "report": settings.ai_model_report, "analyst": settings.ai_model_analyst,
+                "news": settings.ai_model_news}.get(feature)
     return (override or settings.ai_model).strip()
 
 

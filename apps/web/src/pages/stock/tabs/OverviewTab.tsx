@@ -5,16 +5,18 @@ import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } f
 import type { InstrumentDetail, MonthlyRevenue, Position, Quote } from "@/api/types"
 import { Section } from "@/components/section"
 import { announcementHost, eventLabel, eventTitle, NEWS_CATEGORY_LABEL } from "@/lib/events"
+import { officialNews } from "@/lib/news"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { formatQuote } from "@/lib/tick"
 import { AnalystViewsCard } from "../AnalystViews"
+import { NewsCoverage } from "../NewsCoverage"
 import { KeyGrid, NotYet, Sources } from "./kit"
 
 const BANDS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
 
-/** 總覽：關鍵數據、估值位置、月營收、籌碼摘要、法人觀點（收合）、接下來、公告、公司 */
+/** 總覽：關鍵數據、估值位置、月營收、籌碼摘要、法人觀點（收合）、接下來、新聞報導、公告、公司 */
 export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
   const overview = useOverview(inst.symbol)
   const o = overview.data
@@ -59,7 +61,8 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
       {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
       {inst.type === "stock" && <AnalystViewsCard key={inst.symbol} inst={inst} />}
       <Upcoming inst={inst} position={position} />
-      <Announcements inst={inst} />
+      <NewsCoverage key={`news-${inst.symbol}`} inst={inst} />
+      {!us && <Announcements inst={inst} />}
       <Company inst={inst} sources={o?.sources ?? inst.data_sources} />
     </div>
   )
@@ -273,11 +276,11 @@ function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Positi
 
 /**
  * 公告：該公司的重大訊息與證交所公告（官方資料，`source: "公告"`），連到原文。
- * 不是媒體新聞；只有 personal 模式明確開啟時才會混入媒體標題，並標「媒體（非商用）」。
+ * 媒體新聞（`category: "media"`）在上面的「新聞報導」，這裡不列。
  */
 function Announcements({ inst }: { inst: InstrumentDetail }) {
   const news = useNews(inst.symbol)
-  const rows = (news.data ?? []).slice(0, 4)
+  const rows = officialNews(news.data).slice(0, 4)
   if (news.isLoading) return <Skeleton className="h-28 w-full rounded-sm" />
   const sources = [...new Set(rows.flatMap((n) => n.sources ?? []))]
   return (
@@ -287,18 +290,17 @@ function Announcements({ inst }: { inst: InstrumentDetail }) {
       ) : (
         <ul className="-mt-3">
           {rows.map((n) => {
-            const media = n.category === "media"
             const kind = n.category ? NEWS_CATEGORY_LABEL[n.category] : "公告"
             return (
               <li key={`${n.published_at}-${n.title}`} className="border-b border-rule">
                 <a href={n.url} target="_blank" rel="noreferrer" className="group grid grid-cols-[1fr_auto] items-baseline gap-x-3 py-3 sm:grid-cols-[96px_1fr_auto]">
                   <span className="num text-md text-ink-2 max-sm:col-span-2 max-sm:row-start-2">
                     {formatDateShort(n.published_at.slice(0, 10), false)}
-                    <span className="sm:hidden">・{media ? `${n.source}（非商用）` : kind}</span>
+                    <span className="sm:hidden">・{kind}</span>
                   </span>
-                  <span className="min-w-0 group-hover:underline">{n.title}</span>
-                  <span className="flex shrink-0 items-center gap-1 text-sm text-ink-2 max-sm:row-start-1">
-                    <span className="max-sm:hidden">{media ? `${n.source}（非商用）` : kind}</span>
+                  <span className="min-w-0 group-hover:underline max-sm:col-start-1 max-sm:row-start-1">{n.title}</span>
+                  <span className="flex shrink-0 items-center gap-1 text-sm text-ink-2 max-sm:col-start-2 max-sm:row-start-1">
+                    <span className="max-sm:hidden">{kind}</span>
                     <ArrowUpRightIcon aria-hidden className="size-3.5" />
                   </span>
                   <span className="sr-only">（在{announcementHost(n.url)}查看，另開新視窗）</span>

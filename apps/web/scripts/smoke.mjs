@@ -266,10 +266,24 @@ await check("個股：1 日走勢說明需要授權，按「看 5 日走勢」�
   await page.getByRole("button", { name: "看 5 日走勢" }).click()
   await page.getByRole("radio", { name: "5日", checked: true }).waitFor()
 })
-await check("個股總覽：「公告」（官方），沒有「新聞」", async () => {
+await check("個股總覽：「新聞報導」（媒體原標題＋媒體＋時間，連到原文）與「公告」（官方）分開；顯示更多", async () => {
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
-  await page.getByRole("heading", { name: "公告" }).waitFor()
-  if (await page.getByRole("heading", { name: "新聞" }).count()) throw new Error("新聞 heading still present")
+  await page.getByRole("heading", { name: "公告", exact: true }).waitFor()
+  const news = page.getByRole("region", { name: "新聞報導" })
+  await news.waitFor()
+  const headlines = news.getByRole("listitem").getByRole("link")
+  if ((await headlines.count()) !== 8) throw new Error(`expected 8 headlines, got ${await headlines.count()}`)
+  const rel = await headlines.first().getAttribute("rel")
+  if ((await headlines.first().getAttribute("target")) !== "_blank" || !rel?.includes("noopener")) throw new Error(`link attrs ${rel}`)
+  if (await news.locator("img").count()) throw new Error("news must not show images")
+  await news.getByRole("link", { name: /The GDELT Project/ }).waitFor()
+  await news.getByRole("button", { name: /顯示更多/ }).click()
+  if ((await headlines.count()) <= 8) throw new Error("顯示更多 did not add headlines")
+  // 公告只有官方來源（媒體在新聞報導）
+  const official = page.getByRole("region", { name: "公告" })
+  if (await official.getByText("經濟日報").count()) throw new Error("media headline in 公告")
+  await page.goto(base + "/stock/2317.TW", { waitUntil: "networkidle" })
+  await page.getByText(/最近沒有找到鴻海的媒體報導/).waitFor()
 })
 await check("設定：新增定期定額（驗證 → 儲存）、暫停、修改、刪除（確認）", async () => {
   await page.goto(base + "/settings#recurring", { waitUntil: "networkidle" })

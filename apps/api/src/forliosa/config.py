@@ -104,6 +104,50 @@ class Settings(BaseSettings):
     ai_retention_days: int = 30
     # Who may read GET /ai/admin/keys outside FORLIOSA_ENV=dev/test (comma-separated emails).
     ai_admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    ai_model_news: str | None = None
+
+    # -- News (個股頁「新聞報導」, forliosa.news): metadata only — headline, outlet, time, link ------------------
+    # The worker refreshes the tracked symbols (held, watched, or viewed in the last NEWS_VIEW_DAYS days) every
+    # NEWS_REFRESH_MINUTES with GDELT DOC 2.0 (free, commercial use allowed with a citation to gdeltproject.org).
+    news_enabled: bool = True
+    news_refresh_minutes: int = Field(default=45, ge=15)
+    news_retention_days: int = Field(default=30, ge=1)
+    news_view_days: int = Field(default=3, ge=1)
+    news_max_symbols_per_run: int = Field(default=150, ge=1)
+    news_gdelt_enabled: bool = True
+    news_gdelt_interval_seconds: float = Field(default=6.0, ge=5.0)  # GDELT: one request every 5 s per IP
+    # AI web search fills gaps: only for a symbol whose free sources gave fewer than NEWS_AI_MIN_ITEMS headlines in
+    # the last 7 days, at most once per NEWS_AI_INTERVAL_HOURS per symbol, paid by the system (feature "news" in
+    # ai_usage) and stopped for the rest of the (UTC) month once NEWS_AI_BUDGET_USD is spent.
+    news_ai_enabled: bool = True
+    news_ai_budget_usd: float = Field(default=30.0, ge=0)
+    news_ai_min_items: int = Field(default=3, ge=1)
+    news_ai_interval_hours: float = Field(default=24.0, ge=1)
+    # SearXNG (self-hosted metasearch, JSON API): off unless NEWS_SEARXNG_URL is set (product owner 2026-11-12).
+    # Querying upstream search engines automatically breaks their terms; the operator carries that risk.
+    news_searxng_url: str | None = None
+    news_searxng_interval_seconds: float = Field(default=10.0, ge=3.0)
+    news_searxng_backoff_minutes: float = Field(default=120.0, ge=10.0)
+    # Yahoo股市 per-stock RSS: its terms allow personal, non-commercial use only — used only under
+    # DATA_POLICY=personal (this switch can turn it off there too).
+    news_yahoo_rss: bool = True
+    # Takedown blocklist by domain (a domain blocks its subdomains), on top of the news_blocked_domains table
+    # that ``python -m forliosa.news block <domain>`` maintains.
+    news_blocked_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
+    @field_validator("news_blocked_domains", mode="before")
+    @classmethod
+    def _split_news_domains(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [s.strip().lower().removeprefix("www.") for s in v.split(",") if s.strip()]
+        return v
+
+    @field_validator("news_searxng_url", mode="before")
+    @classmethod
+    def _blank_searxng(cls, v: object) -> object:
+        if isinstance(v, str):
+            return v.strip().rstrip("/") or None
+        return v
 
     @field_validator("ai_web_search_allowed_domains", "ai_web_fetch_allowed_domains", "ai_admin_emails",
                      mode="before")

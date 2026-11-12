@@ -1,7 +1,7 @@
 import { createHttpAdapter } from "./http"
 import { createMockAdapter, readMockScenario } from "./mock/adapter"
 import { readMockPolicy } from "./mock/commercial"
-import { MOCK_TODAY } from "./mock/market"
+import { MOCK_AS_OF, MOCK_TODAY } from "./mock/market"
 import { todayInTaipei } from "@/lib/format"
 import type { ForliosaApi } from "./types"
 
@@ -37,6 +37,11 @@ export const DEV_LOGIN = {
 /** 「今天」：示範資料固定在 MOCK_TODAY（截圖與測試穩定），真實後端用台北時區的今天 */
 export function appToday(): string {
   return api.kind === "mock" ? MOCK_TODAY : todayInTaipei()
+}
+
+/** 「現在」：示範資料固定在 MOCK_AS_OF（「N 小時前」在截圖與測試中穩定），真實後端用目前時間 */
+export function appNow(): Date {
+  return api.kind === "mock" ? new Date(MOCK_AS_OF) : new Date()
 }
 
 export * from "./types"

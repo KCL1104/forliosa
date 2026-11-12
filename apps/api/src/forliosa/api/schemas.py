@@ -566,11 +566,16 @@ class StockEvent(BaseModel):
 
 
 class NewsItem(BaseModel):
+    """An official announcement (``source: "公告"``) or a media headline (``category: "media"``: original title,
+    ``outlet``, time and the link to the original site; ``source`` names how it was found)."""
+
     published_at: str
     title: str
-    source: str  # 「公告」 for official announcements
+    source: str  # 「公告」; media: GDELT | AI 搜尋 | SearXNG | Yahoo股市 | FinMind
+    outlet: str | None = None  # media only: 聯合新聞網, 中央社 … (unknown outlets: their domain)
     url: str
     category: Literal["material_info", "exchange_news", "media"] = "media"
+    date_only: bool = False  # the source gave a date without a time (show the date, not「N 小時前」)
     sources: list[str] = []
 
 

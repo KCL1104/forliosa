@@ -142,10 +142,19 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(one.series[0]!.twr_index).toBe(1)
     expect(one.notes?.[0]).toContain("資料累積中")
   })
-  it("公告取代新聞：source 是「公告」、有 category；上市股票沒有個股法人", async () => {
+  it("公告在前、新聞報導在後；新聞報導只有標題、媒體、時間、連結；上市股票沒有個股法人", async () => {
     const news = await api.getNews("2330.TW")
-    expect(news.length).toBeGreaterThan(0)
-    expect(news.every((n) => n.source === "公告" && (n.category === "material_info" || n.category === "exchange_news"))).toBe(true)
+    const official = news.filter((n) => n.category !== "media")
+    const media = news.filter((n) => n.category === "media")
+    expect(official.length).toBeGreaterThan(0)
+    expect(official.every((n) => n.source === "公告" && (n.category === "material_info" || n.category === "exchange_news"))).toBe(true)
+    expect(news.indexOf(media[0]!)).toBe(official.length)
+    expect(media.length).toBeGreaterThan(8)
+    expect(media.every((n) => n.outlet && /^https:\/\//.test(n.url) && ["GDELT", "AI 搜尋"].includes(n.source))).toBe(true)
+    // 商用模式沒有 Yahoo股市 RSS（條款限非商用）
+    expect(media.some((n) => n.source === "Yahoo股市")).toBe(false)
+    expect(media.some((n) => n.source === "GDELT" && n.sources?.[0]?.includes("gdeltproject.org"))).toBe(true)
+    expect((await api.getNews("2317.TW")).filter((n) => n.category === "media")).toEqual([])
     const c = await api.getChips("2330.TW", "3M")
     expect(c.institutional).toEqual([])
     expect(c.notes?.[0]).toContain("上市股票")
@@ -238,13 +247,16 @@ describe("資料來源與授權", () => {
     expect(a.datasets.length).toBeGreaterThan(20)
     for (const d of a.datasets) {
       // 政府資料開放授權條款：「依…第 1 版」；SEC EDGAR 是美國政府公開資料（授權連結另列）
-      const tail = d.key.startsWith("sec-edgar/") ? "美國政府公開資料" : `依${d.license}`
+      // GDELT（新聞報導）：使用條款要求引用並連回 gdeltproject.org
+      const tail = d.key.startsWith("sec-edgar/") ? "美國政府公開資料" : d.key === "gdelt/doc" ? "依 GDELT 使用條款引用：https://www.gdeltproject.org/" : `依${d.license}`
       expect(d.attribution).toBe(`${d.agency}〈${d.dataset}〉（${d.year}），${tail}`)
     }
     expect(a.datasets.filter((d) => d.key.startsWith("sec-edgar/")).map((d) => d.license_url)).toEqual(Array(3).fill("https://www.sec.gov/about/webmaster-frequently-asked-questions"))
     expect(a.datasets.every((d) => d.commercial)).toBe(true)
+    expect(a.datasets.some((d) => d.key === "yahoo-rss/stock")).toBe(false)
     const p = await createMockAdapter({ latency: [0, 0], policy: "personal" }).getAttributions()
     expect(p.datasets.some((d) => !d.commercial)).toBe(true)
+    expect(p.datasets.find((d) => d.key === "yahoo-rss/stock")?.commercial).toBe(false)
   })
 
   it("美股的台幣金額附上中央銀行收盤匯率的顯名聲明", async () => {

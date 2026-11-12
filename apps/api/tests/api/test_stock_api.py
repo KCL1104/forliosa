@@ -206,8 +206,10 @@ def test_news_from_finmind_is_labelled_non_commercial(client, use_market):
 
     use_market(MarketData([FakeFinMind(), DemoProvider()], policy="personal"))
     n = client.get(f"{API}/instruments/2330/news").json()
-    assert n == [{"published_at": "2026-11-11T08:30:00+08:00", "title": "台積電法說會", "source": "鉅亨網",
-                  "url": "https://news.cnyes.com/news/id/1", "category": "media", "sources": ["FinMind（非商用）"]}]
+    # media headlines name the outlet in ``outlet`` and how they were found in ``source``
+    assert n == [{"published_at": "2026-11-11T08:30:00+08:00", "title": "台積電法說會", "source": "FinMind",
+                  "outlet": "鉅亨網", "url": "https://news.cnyes.com/news/id/1", "category": "media",
+                  "date_only": False, "sources": ["FinMind（非商用）"]}]
     use_market(MarketData([FakeFinMind(), DemoProvider()], policy="commercial"))
     assert client.get(f"{API}/instruments/2330/news").json() == []
 

@@ -25,6 +25,12 @@ Licence status (``Dataset.license_status``, from docs/research/open-data-invento
 * ``public`` — US government public data (SEC EDGAR): "All Government-created content on sec.gov and EDGAR
   public filing content are free to access and reuse" (SEC Webmaster FAQ). Served normally; the attribution names
   the agency and dataset with 「美國政府公開資料」 instead of the OGDL.
+* ``open`` — a free licence that allows commercial use with a citation: the GDELT Project ("unlimited and
+  unrestricted use for any academic, commercial, or governmental use of any kind without fee", citing GDELT and
+  linking gdeltproject.org). Used for the 「新聞報導」 headlines (title, outlet, time, link only).
+* ``non_commercial`` — usable only under ``DATA_POLICY=personal``: Yahoo股市's RSS (personal, non-commercial use;
+  keep 「Yahoo股市」 and the original outlet). Never served, and left out of the attribution list, under
+  ``commercial``.
 * ``conditional`` — presumed OGDL (same OpenAPI, same agency) but no individual data.gov.tw dataset was found:
   TAIFEX 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人, 最後結算價, 保證金, 股票期貨／選擇權標的.
   They are **archived**, but under ``commercial`` they are **not served** until the owner sets
@@ -62,8 +68,14 @@ SEC_LICENSE_URL = "https://www.sec.gov/about/webmaster-frequently-asked-question
 SEC_ATTRIBUTION = "美國政府公開資料"
 SEC_NOTICE = f"{SEC}：sec.gov 上的政府內容與 EDGAR 公開申報可自由存取與再利用（{SEC_LICENSE_URL}）"
 CBC_API = "https://cpx.cbc.gov.tw/api/OpenData"
+GDELT = "The GDELT Project"
+GDELT_SITE = "https://www.gdeltproject.org/"
+GDELT_TERMS_URL = "https://www.gdeltproject.org/about.html#termsofuse"
+GDELT_NOTICE = ("The GDELT Project：資料集可「unlimited and unrestricted use for any academic, commercial, or "
+                f"governmental use of any kind without fee」，需引用 GDELT 並連到 {GDELT_SITE}（{GDELT_TERMS_URL}）")
+YAHOO_RSS_TERMS_URL = "https://tw.stock.yahoo.com/rss-index"
 
-LicenseStatus = Literal["ogdl", "public", "conditional"]
+LicenseStatus = Literal["ogdl", "public", "open", "conditional", "non_commercial"]
 CONDITIONAL_NOTE = ("期交所 OpenAPI 的這個資料集在 data.gov.tw 沒有找到對應的政府資料開放授權條款資料集，"
                     "已存檔，但在期交所書面確認可商用前不顯示（TAIFEX_CONDITIONAL_CONFIRMED）")
 
@@ -83,8 +95,8 @@ class Dataset:
 
     @property
     def commercial(self) -> bool:
-        """Usable commercially without further confirmation (OGDL or US government public data)."""
-        return self.license_status in ("ogdl", "public")
+        """Usable commercially without further confirmation (OGDL, US government public data, GDELT)."""
+        return self.license_status in ("ogdl", "public", "open")
 
 
 DATASETS: dict[str, Dataset] = {d.key: d for d in (
@@ -213,6 +225,16 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     # -- 中央銀行 (data.gov.tw 7232): the whole daily history since 2008 in one JSON array (marketdata/cbc.py).
     Dataset("cbc-opendata/fx", CBC, "銀行間新臺幣對美元收盤匯率", f"{CBC_API}/FTDOpenData_Day",
             "美股換算新台幣", basis="data.gov.tw 7232"),
+    # -- News headlines (forliosa.news): title, outlet, time and link only — never text, descriptions or images.
+    Dataset("gdelt/doc", GDELT, "GDELT DOC 2.0 新聞索引", "https://api.gdeltproject.org/api/v2/doc/doc",
+            "個股頁「新聞報導」：媒體標題、媒體名稱、時間與原文連結", "open",
+            "GDELT Terms of Use：unlimited and unrestricted use … without fee（需引用並連回 gdeltproject.org）",
+            "GDELT 使用條款（免費、可商用，需引用 GDELT）", GDELT_TERMS_URL, f"依 GDELT 使用條款引用：{GDELT_SITE}"),
+    Dataset("yahoo-rss/stock", "Yahoo股市", "個股新聞 RSS", YAHOO_RSS_TERMS_URL,
+            "個股頁「新聞報導」（只在 DATA_POLICY=personal）：標題、原始媒體、時間與連結", "non_commercial",
+            "RSS 使用條款：個人和非營利組織可以在非商業用途內免費使用，須保留「Yahoo股市」與原始媒體標示",
+            "Yahoo股市 RSS 使用條款（限個人、非商業用途）", YAHOO_RSS_TERMS_URL,
+            "保留「Yahoo股市」與原始媒體標示" + NON_COMMERCIAL_SUFFIX),
     Dataset("shioaji-data/official",
             "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）",
             "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data",
@@ -234,6 +256,11 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "demo": ("示範資料（模擬）", True),
     "finmind": ("FinMind" + NON_COMMERCIAL_SUFFIX, False),
     "yahoo": ("Yahoo Finance" + NON_COMMERCIAL_SUFFIX, False),
+    # News headline sources (forliosa.news; labelled through DATASETS where a dataset exists).
+    "gdelt": ("", True),
+    "ai-search": ("AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）", True),
+    "searxng": ("SearXNG 自架元搜尋（只取標題、媒體、時間與連結）", True),
+    "yahoo-rss": ("", False),
     # Removed sources whose rows may still be in an old archive: never served in any mode.
     "twse-mis": ("證交所 MIS 盤中行情・已停用" + NON_COMMERCIAL_SUFFIX, False),
     "twse-web": ("證交所網站資料・已停用" + NON_COMMERCIAL_SUFFIX, False),
@@ -283,14 +310,17 @@ def attribution(ds: Dataset, year: int | None = None) -> str:
     return f"{ds.agency}〈{ds.title}〉（{year or _year()}），{ds.attribution_tail}"
 
 
+_DEFAULT_DATASET = {"shioaji-data": "shioaji-data/official", "gdelt": "gdelt/doc", "yahoo-rss": "yahoo-rss/stock"}
+
+
 def label(source: str) -> str:
     """User-facing text for a source key, ``key/kind`` names a dataset (licence attribution format)."""
     raw = source.strip()
     key = _key(raw)
     kind = raw.split("/", 1)[1] if "/" in raw else None
     ds = DATASETS.get(f"{key}/{kind}") if kind else None
-    if ds is None and key == "shioaji-data":
-        ds = DATASETS["shioaji-data/official"]
+    if ds is None and key in _DEFAULT_DATASET:
+        ds = DATASETS[_DEFAULT_DATASET[key]]
     if ds is not None:
         return attribution(ds)
     if key in _SOURCES:
@@ -374,6 +404,8 @@ def dataset_served(key: str, policy: Policy, confirmed: bool | None = None) -> b
     ds = DATASETS.get(key)
     if ds is None or ds.commercial or policy == "personal":
         return True
+    if ds.license_status == "non_commercial":
+        return False
     return conditional_confirmed() if confirmed is None else confirmed
 
 
@@ -382,7 +414,7 @@ def _item(d: Dataset, year: int, served: bool, confirmed: bool, status: dict[str
     return {"key": d.key, "agency": d.agency, "dataset": d.title, "url": d.url, "used_for": d.used_for,
             "year": year, "license": d.license, "license_url": d.license_url,
             "license_status": d.license_status, "license_basis": d.basis or None,
-            "commercial": d.commercial or confirmed, "served": served,
+            "commercial": d.commercial or (confirmed and d.license_status == "conditional"), "served": served,
             "last_updated": st.get("data_date"), "last_fetched": st.get("fetched_at"),
             "attribution": attribution(d, year)}
 
@@ -400,6 +432,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     status = status or {}
     items, pending = [], []
     for d in DATASETS.values():
+        if d.license_status == "non_commercial" and policy != "personal":
+            continue  # never used under commercial (listed in not_used instead)
         served = dataset_served(d.key, policy, confirmed)
         (items if served else pending).append(_item(d, year, served, confirmed, status))
     for item in pending:
@@ -419,7 +453,7 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     return {
         "policy": policy,
         "taifex_conditional_confirmed": confirmed,
-        "notice": [f"{OGDL_NOTICE}", f"政府資料開放授權條款：{OGDL_URL}", SEC_NOTICE],
+        "notice": [f"{OGDL_NOTICE}", f"政府資料開放授權條款：{OGDL_URL}", SEC_NOTICE, GDELT_NOTICE],
         "datasets": items,
         "conditional": pending,
         "stale": stale,
@@ -428,5 +462,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
             "證券櫃檯買賣中心網站歷史查詢、公開資訊觀測站網站：同上，只使用 OpenAPI 版本",
             "臺灣期貨交易所網站（歷史行情查詢等）：只使用 OpenAPI（openapi.taifex.com.tw/v1）",
             "期交所每筆成交資料（TimeAndSalesData、OptionsTimeAndSalesData、價差每筆成交）：檔案數百 MB，不下載",
+            "新聞網站本身：不爬取，也不存內文、摘要或圖片；「新聞報導」只存標題、媒體、時間與原文連結",
+            *([] if policy == "personal" else
+              ["Yahoo股市 RSS（個股新聞）：條款限個人、非商業使用，只在 DATA_POLICY=personal 使用"]),
         ],
     }

@@ -81,6 +81,7 @@ uv run python -m forliosa.worker
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
+| 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）用 GDELT 查媒體標題（每次間隔 ≥ 6 秒，429 就暫停），少於 3 則才用 AI 搜尋補（每月上限 US$30）；只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」） |
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
@@ -223,6 +224,10 @@ src/forliosa/
 | 中央銀行開放資料（`cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day`） | 〈銀行間新臺幣對美元收盤匯率〉：USD/TWD（美股換算新台幣；2008-01-02 起每個營業日） | 同上（data.gov.tw 7232） |
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
+| GDELT DOC 2.0（`api.gdeltproject.org`） | 個股頁「新聞報導」：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
+| AI 網路搜尋（Claude `web_search`） | 新聞報導補缺（GDELT 少於 3 則時）；標題與連結取自搜尋結果 | 系統付費，每月上限 `NEWS_AI_BUDGET_USD`（30） |
+| SearXNG（自架） | 新聞報導的備用來源，**預設關**（`NEWS_SEARXNG_URL`） | 自動查詢上游搜尋引擎違反它們的條款，由營運者承擔 |
+| Yahoo股市 RSS | personal 明確開啟時：新聞報導 | ⚠️ 條款限個人、非商業使用；保留「Yahoo股市」與原始媒體 |
 | 示範資料（demo） | personal 的缺資料備援；commercial 只提供商品名稱清單 | 模擬資料，`is_demo: true` |
 | ~~證交所 MIS、證交所網站 T86／MI_QFIIS、櫃買網站 peQryDate~~ | 已移除（2026-11-12） | 網站條款禁止程式下載 |
 
@@ -238,7 +243,7 @@ src/forliosa/
 | 期貨行情（台指期、夜盤） | `/derivatives/overview.futures: []`、`/derivatives/futures/{code}/history` 空＋`notes` | 同上（期交所〈期貨每日交易行情〉授權待確認） |
 | 基準指數 `^TAIEXTR`、`^TPEXTR` 的早期歷史 | 只有 2026-11-02 之後 | 報酬指數 OpenAPI 只給當月；更早要 FinMind（personal）或購買 |
 | 上櫃公司的股利決議 | 上櫃股票只有除權息預告後才出現在 `/dividends` | 櫃買 `mopsfin_t187ap39_O` 停在 2021-08 |
-| 媒體新聞 | `/news` 只有官方公告（重大訊息、證交所新聞，`source: "公告"`） | 媒體新聞需授權 |
+| ~~媒體新聞~~ | 已有（2026-11-12）：`/news` 在官方公告後列出新聞報導（GDELT、AI 搜尋補缺；只有標題、媒體、時間、連結） | — |
 | 開始存檔前已公布的月營收日期 | 事件用法定期限，`estimated: true` | 只能從存檔第一次看到的日期判斷 |
 
 快取放在 `var/cache/`（已列入 .gitignore）。部署時建議掛載 volume，避免每次重啟都重新下載 shioaji-data 檔案。
