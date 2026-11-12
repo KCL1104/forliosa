@@ -27,6 +27,7 @@ from forliosa.ids import new_id
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.service import MarketData
 from forliosa.models import BrokerAccount, RecurringPlan, User
+from forliosa.services.scope import account_filter
 from forliosa.timeutil import (
     has_official_calendar,
     iso_taipei,
@@ -102,6 +103,9 @@ def plans_of(db: Session, user: User, account_ids: list[str] | None = None) -> l
     stmt = select(RecurringPlan).where(RecurringPlan.user_id == user.id)
     if account_ids is not None:
         stmt = stmt.where(RecurringPlan.account_id.in_(account_ids))
+    allowed = account_filter(db, user.id)  # read-only viewing: only the delegated accounts' plans
+    if allowed is not None:
+        stmt = stmt.where(RecurringPlan.account_id.in_(sorted(allowed)))
     return list(db.scalars(stmt.order_by(RecurringPlan.created_at, RecurringPlan.id)))
 
 

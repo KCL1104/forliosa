@@ -44,6 +44,22 @@ def no_sec_network():
 
 
 @pytest.fixture(autouse=True)
+def no_discord_network():
+    """No test may reach discord.com: every Discord request fails unless a test installs a mock transport with
+    ``forliosa.services.discord_oauth.set_transport``."""
+    import httpx
+
+    from forliosa.services import discord_oauth
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network disabled in tests", request=request)
+
+    discord_oauth.set_transport(httpx.MockTransport(refuse))
+    yield
+    discord_oauth.set_transport(None)
+
+
+@pytest.fixture(autouse=True)
 def builtin_calendar():
     """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
     from forliosa.timeutil import set_official_holidays

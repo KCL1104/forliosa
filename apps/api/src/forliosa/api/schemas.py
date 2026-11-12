@@ -41,7 +41,20 @@ class User(BaseModel):
     id: str
     email: str
     display_name: str
+    avatar_url: str | None = None
     preferences: Preferences
+
+
+class MePatch(StrictModel):
+    display_name: str = Field(description="1–30 字（去頭尾空白）")
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not 1 <= len(v) <= 30:
+            raise ValueError("顯示名稱需為 1–30 字")
+        return v
 
 
 class DevLoginIn(StrictModel):

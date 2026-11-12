@@ -115,7 +115,8 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 |---|---|---|
 | cookie | `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=30 天` | `FORLIOSA_ENV=prod` 時自動 `Secure`（`COOKIE_SECURE` 可覆寫） |
 | `COOKIE_DOMAIN` | 選填，例如 `.example.com` | 不設＝只屬於 `api.example.com` 的 host-only cookie，這樣就能用；設了則子網域共用。空字串視為不設 |
-| `CORS_ORIGINS` | `https://app.example.com`（逗號分隔） | 結尾的 `/` 會自動去掉；正式環境不能是 `*`（會拒絕啟動），因為帶 cookie 的請求不能對所有網站開放 |
+| `CORS_ORIGINS` | `https://app.example.com`（逗號分隔） | 結尾的 `/` 會自動去掉；正式環境不能是 `*`（會拒絕啟動），因為帶 cookie 的請求不能對所有網站開放；也是 CSRF 檢查的允許清單（M5） |
+| `FRONTEND_URL` | `https://app.example.com` | M5 起正式環境必填：Discord 登入後導回、邀請連結用它；必須是 `CORS_ORIGINS` 之一、https |
 | 登出 | 刪除 cookie 時帶同樣的 `Domain`／`Secure` | 否則瀏覽器不會刪掉 |
 
 測試：`tests/api/test_deploy_config.py`。部署步驟見 [`docs/deploy.md`](../../docs/deploy.md)。
@@ -919,3 +920,142 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 10. **法人觀點的報導日期與 90 天**：顯示的是報導日期（搜尋結果核對），不是券商報告日期；超過 90 天的不列（研究稿建議 90 天）。
     台股常見「媒體報導晚券商報告幾天」，要不要改成標「舊資料」而不是不列？
 11. **法人觀點算一題**：和對話共用每天 50 題；失敗後 10 分鐘可重查，重查再算一題。
+
+## 2026-11-12 分享（M5）第一批：登入、授權唯讀查看、親友群組
+
+依 [`docs/api-contract.md`](../../docs/api-contract.md)「分享（M5）」實作。**這一批還沒有**：群組 AI 週報（`GET /groups/{id}/digests`、
+worker 的 Message Batches）、頻道（`/groups/{id}/channels*`、推播 outbox、Telegram `getUpdates` 輪詢）。它們用的資料表已經在同一個
+migration `0010` 建好（`group_digests`、`group_channels`、`notification_outbox`、`telegram_link_codes`），`Group.push_targets` 已從
+`group_channels` 讀取（在頻道端點做好之前一律是空陣列）。
+
+### 新增的欄位與合約沒寫的細節
+
+| 位置 | 實作 |
+|---|---|
+| `User` | 多 `avatar_url`（Discord 頭像，`https://cdn.discordapp.com/avatars/<id>/<hash>.png?size=128`，沒有頭像為 `null`） |
+| `GET /auth/discord/start` | Discord 沒設定時同樣 302 到 `{FRONTEND_URL}/login?error=oauth_disabled`；`next` 超過 2048 字回 422 |
+| `POST /delegations` | 對象不是同群組成員、或是自己：404（先判斷，再判斷已授權過的 409）。離開群組後既有授權照常有效，但不能再新增 |
+| `PATCH /delegations/{id}` | 被授權者呼叫回 403 `forbidden`；不相干的人 404 |
+| `Delegation.accounts` | `scope: "all"` 時列出授權者目前所有帳戶 |
+| `DelegationCandidate.delegation_id` | 沒授權過為 `null` |
+| `GroupSummary` | `GET /groups` 依我加入的順序；`latest_activity_at` = 目前**看得到的**動態（含成員加入）與看得到的對象上的留言中最新的時間（被關掉的分享不會讓它變動）；`latest_digest_at` = 最新 `ready` 週報的 `created_at` |
+| `InviteOut` | 多 `created_at`；`GET /groups/{id}/invites` 的項目沒有 `url` 這個鍵 |
+| `InvitePreview.inviter_display_name` | 建立邀請的人已離開群組時改顯示目前 owner 的名稱 |
+| `POST /invites/{token}/accept`、`PUT /groups/{id}/share` | `share` 的六個開關**全部必填**（少一個 422）：前端必須讓本人確認每一項。成功回 200 |
+| `LeaderboardEntry.rank` | 沒有名次時是 `null`（鍵存在）：排行關閉，或該成員這期沒有數字 |
+| `FeedItem`（`member_joined`） | 只有 `id`、`type`、`user_id`、`display_name`、`avatar_url`、`created_at`（= 加入時間）；不能留言或按表情 |
+| `FeedItem`（`trade`）`created_at` | 合併的交易裡最晚建立的那一筆的建立時間 |
+| `Comment` | 多 `avatar_url`（已離開、已刪除的帳號為 `null`） |
+| `PUT`／`DELETE /groups/{id}/reactions` | 回 200 `{"target", "reactions": [{"emoji", "count", "mine"}]}`（該對象目前的統計） |
+| 錯誤 | 群組角色不足 403 `forbidden`；owner 想離開 409 `conflict`（先轉移）；改 owner 的角色、轉移給自己 422；轉移或變更的對象不是成員 404 |
+
+### 登入（Discord OAuth）
+
+- `state`：32 bytes 隨機值；cookie 內容是 `base64url(JSON{s, n, e}).base64url(HMAC)`，`n` 是驗證過的 `next`、`e` 是到期時間（10 分鐘），
+  HMAC 金鑰由 `SESSION_SECRET` 以 HKDF 衍生（用途 `oauth-state`，和其他用途的金鑰互不通用）。callback 先驗簽章與到期，再以固定時間比對
+  `state`；不論成敗都刪除 cookie。
+- `next`「解碼一次」= 框架對 query string 的那一次解碼；之後不再解碼，所以 `next=%252F%252Fevil.com` 會因為不是 `/` 開頭而變成 `/`。
+- Discord 的 access token 只用來讀一次 `/users/@me`，之後立刻呼叫 Discord 撤銷（失敗也不影響登入）；token、授權碼、client secret 都不寫進
+  資料庫或 log。`user_identities` 只存 Discord id 與 Discord 回報的 email。
+- 帳號對應照合約。已連結的帳號每次登入：`user_identities.email` 照 Discord 回報的更新；`users.email` 只在 Discord 說已驗證、而且沒有被別的
+  帳號使用時才跟著換；頭像一律更新。新帳號的 `display_name` 取 global name，否則 username，截到 30 字。
+- 同一個 Discord 帳號同時第一次登入兩次（唯一鍵衝突）→ 後到的那次 `oauth_failed`。
+- `GET /auth/providers` 的 `discord` 是三個 `DISCORD_*` 環境變數都有值；`dev_login` 是 `FORLIOSA_ENV` 為 `dev`／`test`。
+- 正式環境啟動檢查（不印出任何值）：`SESSION_SECRET`、`CORS_ORIGINS` 不可為 `*`（原有）；`FRONTEND_URL` 必填、必須是 `CORS_ORIGINS` 之一、
+  兩者都是 https；三個 `DISCORD_*` 只設一部分 → 拒絕啟動；有設 Discord 時 `DISCORD_REDIRECT_URI` 必須是 https。開發環境沒設 `FRONTEND_URL`
+  時，登入後的導向與邀請連結用 `CORS_ORIGINS` 的第一個。
+- **Access log 去敏**：uvicorn 的 access log 會記錄完整網址，因此 `logredact.py` 把 `code`、`state` 參數與 `/invites/<token>` 換成 `***`
+  （`create_app` 時安裝）。
+
+### CSRF
+
+非 `GET`／`HEAD`／`OPTIONS` 的請求帶 `Origin` 時必須完全等於 `CORS_ORIGINS` 其中一個（不分大小寫、結尾 `/` 忽略），`Origin: null` 也拒絕；
+沒有 `Origin` 的請求（curl、伺服器之間）照常通過。**本機開發**：Vite 以 `/api` 代理轉發時瀏覽器仍會送 `Origin: http://localhost:<port>`，
+用 5173 以外的埠連真的後端時要把那個 origin 加進 `CORS_ORIGINS`，否則所有寫入（含開發登入）都是 403。
+
+### 唯讀查看（`X-Forliosa-View-As`）
+
+- `api/middleware.py` 的路由白名單（預設拒絕）。合約第 1 類的 `GET` 以授權者身分執行；第 2 類忽略標頭（另外也忽略 `/health`、`/meta/*`）；
+  其他一律拒絕：非 `GET` → `read_only`，其他 `GET`（包括 `/instruments/{symbol}/analyst-views`、`/recurring`、`/ai/*`、`/watchlist`、
+  `/groups/*`、`/delegations*`、`/invites/*`）→ `view_as_not_allowed`。被拒絕的請求不查授權是否有效；白名單內的讀取才查，失效一律
+  `delegation_revoked`。
+- **範圍集中在一處**（`services/scope.py`）：解析授權後把「授權者 id＋允許的帳戶」存在這個請求的資料庫 session 上；`load_ledger_input`
+  （摘要、持股、`allocation.by_account`、績效、出清、本週事項、部位、部位歷史、事件的 `mine`／`amount_estimate`）、`GET /accounts`、
+  `GET /accounts/{id}/holdings`、`/transactions`、定期定額（`upcoming` 的扣款）都經過它，所以授權者就像只有那些帳戶。範圍外的 `account_id`、
+  帳戶或交易 id → 404。`/transactions?account_id=` 只在查看模式下對範圍外帳戶回 404（自己查看時維持原本回空清單）。
+- 查看模式下同一個 session 拒絕任何寫入（`before_flush` 直接丟 403 `read_only`），所以即使某個讀取路徑想寫（例如股利同步），也寫不進去。
+- 成本法、基準用授權者的偏好（計算本來就以授權者身分）；顯示偏好由前端用查看者自己的 `GET /me`。
+
+### 分享投影（`services/sharing.py`）
+
+- 群組與授權讀別人的資料只經過這個模組：`enter_view_as`（授權）、`shared_portfolio`、`group_holdings`、`leaderboard`、`feed_items`、
+  `target_visible`。每次請求重新讀成員身分與分享設定。
+- 區塊內容：`returns` = `{day, month, year, total}`（`total` 與 `PortfolioSummary.total_return_pct` 同算法，含股利、依成員自己的成本法）；
+  `holdings` = `{symbol, name, weight}`（依權重由大到小）；`amounts` = `{market_value, day_change, total_pnl}`（2 位小數）。三個都沒開時
+  `SharedPortfolio` 只有 `user_id`、`display_name`、`avatar_url`（連 `is_demo` 都沒有）。
+- `GroupHoldings.industries`：開了持股的成員中，持有該產業任何一檔的人數（1 人也列；`common` 才限 2 人以上）。
+- 測試（`tests/api/test_m5_privacy.py`）跑過五個開關的 32 種組合：沒開的區塊鍵不存在；回應中沒有股數、成本、帳戶名稱或 id、備註、手續費、
+  交易 id；金額只在開了 `amounts` 的 `amounts` 區塊、價格只在開了 `trades`＋`trade_prices` 的動態裡。
+
+### 排行
+
+- `date`（最新收盤）：交易日 13:30 以後是今天，否則前一個交易日；若 `^TAIEXTR` 與 0050 的資料都還沒到那一天，用兩者中最新的日期。
+  `as_of` 是該日 13:30（台北）。
+- 期間起點：`day` = 前一個交易日、`month` = 上月最後一個交易日、`year` = 去年最後一個交易日（台股行事曆）。`DATA_POLICY=commercial` 時起點
+  早於存檔第一天就改成存檔第一天，`notes` 第一行說明「資料累積中：自 … 起存檔；期間從 … 收盤開始計算」。
+- 成員報酬：所有帳戶合併，從今年的起點收盤開始逐日模擬（`domain.performance.simulate`，與績效頁同一套 TWR 公式），起點之前的交易都在起點
+  當天入帳（起點當天的報酬不算）；期間內完全沒有投入的成員該期為 `null`。年度區間內任何一天有持股沒有收盤價 → 三個期間都是 `null`。
+  每次請求重算（目前沒有快取）。
+- 基準：`^TAIEXTR` 為指數收盤比；0050 為含息報酬（除息日再投入，同績效頁的基準算法）。沒有資料時 `return_pct` 為 `null`，commercial 下
+  `notes` 說明「基準 … 目前沒有可商用的資料」。
+- `sources` 只列「本系統帳本」與兩個基準的資料來源：**不列**成員持股的價格來源（否則來源清單會透露有人持有某類商品）。
+
+### 交易動態
+
+- 範圍：開了 `trades` 的成員、`manual`／`import`／`ai_draft` 的 `buy`／`sell`、`trade_date` 在「今天（台北）往前 90 天」到今天之間
+  （未來日期不列）。「只記持股」帳戶在快照日當天或之前的交易不列（帳本也不算它們）。
+- 合併鍵：成員×交易日×商品×買賣。`count` = 筆數；`price` = 以股數加權的平均成交價（4 位小數，不含費用）、`currency` = 交易幣別，只有開了
+  `trade_prices` 才有這兩個鍵。
+- `id`：`gfi_` + 以 `SESSION_SECRET` 衍生金鑰（用途 `feed-item-id`）對合併鍵做的 HMAC（26 字）。同一則在不同群組 id 相同，但留言與表情都
+  依群組分開存。
+- 分頁：依 (`trade_date`（加入動態用加入日）, `created_at`, `id`) 由新到舊；`cursor` 編碼最後一則的三個值。`user_id` 不是成員時回空清單
+  （和「沒有資料」一樣）。
+- **刪除**：一則動態的最後一筆交易被刪除、改到別的日期／商品／方向，或整個帳戶被刪除時，所有群組裡這則的留言與表情一起刪除。
+
+### 留言與表情
+
+- `target` 格式 `trade:<id>`、`digest:<id>`、`leaderboard:<YYYY-MM-DD>`；`digest` 必須是這個群組 `ready` 的週報；`leaderboard` 的日期必須在
+  群組建立日（台北）到今天之間。看不到、不存在、別的群組的一律 404「找不到討論對象」。刪除留言也要求對象目前看得到。
+- 作者已離開：`display_name`「已離開的成員」、`user_id`／`avatar_url` 為 `null`；作者帳號已刪除（`user_id` 被設為 null）：「已刪除的帳號」。
+  已離開成員按過的表情仍然計數。
+- `can_delete`：作者本人，或 owner／admin。
+
+### 群組與邀請
+
+- 邀請 token 32 bytes（256 bits），資料庫只存 SHA-256；網址 `{FRONTEND_URL}/invite/{token}`。接受時以條件式 UPDATE 計次，單次邀請同時被兩人
+  接受只有一人成功（另一人 410）。上限在接受時檢查：群組已有 50 人、或本人已在 20 個群組 → 409 `limit_reached`。
+- 管理員**移除**別人時撤回群組所有還有效的多次邀請；成員自己**離開**不會撤回。離開或被移除時分享設定刪除，重新加入時由邀請的 `share` 重新選，
+  並產生新的 `member_joined`。
+- `push_targets` 只列 `status = active` 的頻道；Telegram 的 `label` 用 `chat_title`。
+- 刪除群組時一併刪除留言、表情、邀請、週報、頻道、推播 outbox、Telegram 綁定碼、成員與分享設定。
+
+### 資料表（migration `0010`）
+
+`users.avatar_url`、`user_identities`、`delegations`、`delegation_accounts`、`groups`、`group_members`、`group_share_settings`（含 `trades_enabled_at`、
+`push_enabled_at`：開關**最近一次打開**的時間）、`group_invites`、`group_comments`、`group_reactions`、`group_digests`、`group_channels`、
+`notification_outbox`、`telegram_link_codes`。
+
+### 金鑰與加密（`crypto.py`）
+
+- 由 `SESSION_SECRET` 以 HKDF-SHA256 衍生：`oauth-state`（state 簽章）、`feed-item-id`（動態 id）、`channel-webhook`（Discord webhook 網址的
+  Fernet 加密，第二批使用）。
+- **更換 `SESSION_SECRET` 的後果**：所有人登出；已存的 webhook 網址解不開（owner 要重新設定頻道）；動態 id 全部改變，舊的交易動態留言找不到
+  對象（不再顯示）。
+- 邀請 token、Telegram 綁定碼只存 SHA-256（不需要金鑰）。
+
+### 分享（M5）待產品負責人確認
+
+1. **`FRONTEND_URL` 變成正式環境必填**：沒設定時 API 拒絕啟動。部署這一版之前要先在 Railway 的 api 服務設 `FRONTEND_URL=https://app.<網域>`。
+2. **更換 `SESSION_SECRET`** 會讓交易動態的舊留言找不到對象（見上）。建議先維持一把金鑰；之後若需要定期換 session 金鑰，再另外加一個專給分享用的金鑰。
+3. **群組建立者也有一則「加入」動態**（建立群組那一刻）。建議維持（實作最單純，也讓新群組的動態不是空的）。
+4. **排行每次請求重算**：成員多（接近 50 人）時可能要幾秒。建議第二批加「每個交易日收盤後算一次」的快取。

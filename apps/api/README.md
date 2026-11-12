@@ -255,11 +255,11 @@ src/forliosa/
    （同一個 image，啟動指令改為 `python -m forliosa.worker`；migration 只由 api 執行）。
 3. 環境變數：`FORLIOSA_ENV=prod`、`DATABASE_URL`（引用 Railway Postgres）；`DATA_POLICY` 不用設（預設 `commercial`，
    給別人用的部署**不要**設成 `personal`）、`MARKET_DATA_PROVIDERS` 用預設即可；api 另需 `SESSION_SECRET`（必填，prod 沒設會拒絕啟動）、`CORS_ORIGINS`（前端網址，
-   prod 不可為 `*`）、`COOKIE_DOMAIN`（選填，例如 `.example.com`；不設則是 host-only cookie）。
+   prod 不可為 `*`）、`FRONTEND_URL`（必填，前端網址，必須是 `CORS_ORIGINS` 之一）、`DISCORD_CLIENT_ID`／`DISCORD_CLIENT_SECRET`／
+   `DISCORD_REDIRECT_URI`（Discord 登入，見 `docs/deploy.md` 2.4 節）、`COOKIE_DOMAIN`（選填，例如 `.example.com`；不設則是 host-only cookie）。
 4. 建議為 api 與 worker 各自掛載 volume 到 `/app/var`（image 以非 root 執行，掛 volume 時設 `RAILWAY_RUN_UID=0`）。
 
-> 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，而正式登入（Email、Google）尚未實作，
-> 所以目前的正式環境還無法登入（見 CONTRACT_NOTES 的待決事項）。
+> 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，正式登入用 Discord（M5）：沒設三個 `DISCORD_*` 時正式環境沒有人能登入。
 
 ## 已知限制
 

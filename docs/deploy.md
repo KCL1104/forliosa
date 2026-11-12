@@ -12,8 +12,8 @@ Forliosa 由兩部分組成：
 
 以下用 `example.com` 代表你的網域，請換成實際的網域。
 
-> ⚠️ **目前的正式環境還不能登入**：正式登入（Email、Google）尚未實作，而 `FORLIOSA_ENV=prod` 時開發登入是關閉的。
-> 部署可以先驗證網路、資料庫、cookie 與 CORS 設定，但使用者會看到「請先登入」說明頁。詳見文末「還沒準備好上線的部分」。
+> 正式登入用 **Discord**（M5）：要先在 Discord Developer Portal 建立應用程式（第 2.4 節），把三個 `DISCORD_*` 變數與 `FRONTEND_URL`
+> 設到 api 服務上。沒設 Discord 時 API 仍可啟動，但沒有人能登入（`FORLIOSA_ENV=prod` 時開發登入是關閉的）；`FRONTEND_URL` 則是必填。
 
 ## 1. 網域與 cookie：一定要在同一個網站底下
 
@@ -63,8 +63,12 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 |---|---|---|---|
 | `FORLIOSA_ENV` | ✅ | `prod` | image 預設已是 `prod`；開發登入關閉、cookie 加 `Secure` |
 | `DATABASE_URL` | ✅ | `${{Postgres.DATABASE_URL}}` | Railway 的 `postgresql://` 會自動換成 `postgresql+psycopg://` |
-| `SESSION_SECRET` | ✅ | 64 字以上的隨機字串 | `python -c "import secrets; print(secrets.token_urlsafe(48))"`；沒設會拒絕啟動。更換會讓所有人登出 |
-| `CORS_ORIGINS` | ✅ | `https://app.example.com` | 見第 1 節 |
+| `SESSION_SECRET` | ✅ | 64 字以上的隨機字串 | `python -c "import secrets; print(secrets.token_urlsafe(48))"`；沒設會拒絕啟動。更換會讓所有人登出、群組頻道的 Discord webhook 要重設、交易動態的舊留言找不到對象（見 `apps/api/CONTRACT_NOTES.md`「金鑰與加密」） |
+| `CORS_ORIGINS` | ✅ | `https://app.example.com` | 見第 1 節；也是寫入請求的 `Origin` 允許清單（CSRF） |
+| `FRONTEND_URL` | ✅ | `https://app.example.com` | 前端網址：Discord 登入後導回這裡、邀請連結也用它。必須是 `CORS_ORIGINS` 之一、https，否則拒絕啟動 |
+| `DISCORD_CLIENT_ID` | 登入用 | Discord 應用程式的 Client ID | 見 2.4 節；三個 `DISCORD_*` 要一起設，只設一部分會拒絕啟動 |
+| `DISCORD_CLIENT_SECRET` | 登入用 | Discord 應用程式的 Client Secret | **機密**：只放在 Railway Variables，不要貼到聊天、issue 或程式碼；程式不會寫進 log |
+| `DISCORD_REDIRECT_URI` | 登入用 | `https://api.example.com/api/v1/auth/discord/callback` | 必須和 Developer Portal 的 Redirect 一字不差，https |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |
 | `DATA_POLICY` | | `commercial`（預設） | 只用可合法商用的政府開放資料與自己的存檔；**不要改成 `personal`**（見 `docs/research/data-sources-licensing.md`） |
 | `MARKET_DATA_PROVIDERS` | | 留空 | 用程式預設（開放資料與存檔）；商用模式下 FinMind、MIS 不會啟用 |
@@ -92,6 +96,22 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 > 現況：worker 會在交易日盤中輪詢持股報價、收盤後把真實收盤價寫進 `prices_daily`。但 API 目前**還不讀**
 > `prices_daily`，而且盤中報價快取在各自的程序記憶體（要等 Redis 版本才共用），所以 worker 現在可以先不部署；
 > 部署它的好處是開始累積每日收盤價存檔。
+
+### 2.4 Discord 登入（Discord Developer Portal）
+
+1. 用產品負責人的 Discord 帳號打開 <https://discord.com/developers/applications> → **New Application**，名稱填 `Forliosa`
+   （使用者授權時會看到這個名稱與圖示）。
+2. **OAuth2** 頁：
+   - 複製 **Client ID** → Railway api 服務的 `DISCORD_CLIENT_ID`。
+   - **Client Secret** 按 Reset Secret 後複製 → `DISCORD_CLIENT_SECRET`（只會顯示一次；外洩時回這裡重設，並更新 Railway）。
+   - **Redirects** 加一筆 `https://api.example.com/api/v1/auth/discord/callback`（換成實際的 API 網域），同一個字串設成 `DISCORD_REDIRECT_URI`。
+     本機開發另加 `http://localhost:8000/api/v1/auth/discord/callback`（開發環境可以用 http；正式環境必須 https）。
+   - 不需要 bot、不需要 OAuth2 URL Generator：登入只用 `identify` 與 `email` 兩個 scope，由 API 自己組授權網址。
+3. （選用）**General Information** 上傳圖示、填隱私權政策與服務條款網址（公開給其他人用之前建議補上）。
+4. Railway api 服務設好 `FRONTEND_URL`、三個 `DISCORD_*` 後重新部署，確認：
+   - `curl https://api.example.com/api/v1/auth/providers` 回 `{"discord": true, "dev_login": false}`。
+   - 打開 `https://app.example.com/login` 按「以 Discord 登入」→ Discord 授權頁 → 回到前端，`GET /api/v1/me` 是 200。
+5. 登入規則（帳號對應、已驗證 email、失敗代碼 `oauth_*`）見 `docs/api-contract.md`「分享（M5）」→「登入」。
 
 ## 3. Cloudflare Pages：前端
 
@@ -147,24 +167,26 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 7. [ ] Cloudflare Pages：設定建置與 `NODE_VERSION`、`PNPM_VERSION`、`VITE_API_BASE_URL=https://api.example.com`，部署成功。
 8. [ ] Pages 加自訂網域 `app.example.com`。
 9. [ ] 確認 `CORS_ORIGINS` 剛好等於 `https://app.example.com`（大小寫、沒有路徑）。
-10. [ ] 打開 `https://app.example.com`：應該看到「請先登入」說明頁（正式登入尚未推出），瀏覽器 DevTools 的
+10. [ ] 打開 `https://app.example.com`：未登入時看到登入頁，瀏覽器 DevTools 的
         `GET https://api.example.com/api/v1/me` 是 401、回應標頭有 `access-control-allow-origin: https://app.example.com`
         與 `access-control-allow-credentials: true`，沒有 CORS 錯誤。
 11. [ ] 直接開 `https://app.example.com/stock/2330.TW` 不是 404（`_redirects` 生效）。
 12. [ ] （選用）worker 服務部署，記錄中看到排程啟動。
-13. [ ] 正式登入完成後再補：登入流程、cookie 在 `Application → Cookies` 顯示 `Secure`、`HttpOnly`、`SameSite=Lax`。
+13. [ ] Discord 登入（第 2.4 節）：登入後 cookie 在 `Application → Cookies` 顯示 `forliosa_session` 有 `Secure`、`HttpOnly`、`SameSite=Lax`；
+        授權過程中的 `__Host-forliosa_oauth` 在回到前端後就被刪除。
 
 ## 6. 還沒準備好上線的部分
 
 | 項目 | 現況 | 上線前需要 |
 |---|---|---|
-| **登入** | 只有開發登入（`POST /auth/dev-login`，`FORLIOSA_ENV=dev` 才開放）；正式環境無法登入 | Email magic link 或 Google OAuth；帳號建立流程 |
+| **登入** | Discord OAuth（M5，後端完成；開放任何 Discord 帳號註冊） | 建立 Discord 應用程式（2.4 節）；隱私權政策與服務條款 |
 | **盤中行情** | 沒有授權來源，1 日走勢為空狀態（證交所網站與 MIS 依條款不得自動擷取） | 若需要：向證交所購買延遲行情（約每月 NT$30,000） |
 | **上市個股三大法人、外資持股** | 開放資料沒有逐檔資料；上櫃股票有 | 先寄信詢問證交所，再決定是否購買 Data E-Shop「三大法人買賣超檔」（約每月 NT$3,000） |
 | **美股** | 商用模式下沒有報價與績效（價格為空）；基本面可用 SEC EDGAR（需聯絡信箱） | 決定美股價格來源（使用者自備 Tiingo key 或購買商用授權） |
 | **shioaji-data AI 研究資料** | 公司簡介、產業鏈、題材的授權「待定」，商用模式下不顯示 | 確認授權 |
 | **多副本** | 報價快取在 API 程序記憶體；SSE 每個副本各自輪詢 | Redis 共用報價後才能開多個 api 副本 |
-| **CSRF** | 依賴 `SameSite=Lax`＋CORS 白名單（JSON 請求需預檢） | 正式登入時一併評估 CSRF token；同網域其他子網域也算同網站 |
+| **CSRF** | `SameSite=Lax`＋CORS 白名單，另外所有寫入請求檢查 `Origin` 必須在 `CORS_ORIGINS` 內（M5） | 同網域其他子網域也算同網站：不要把不受信任的服務放在同一個網域底下 |
+| **群組週報與頻道推播** | 資料表已建立，端點與 worker 是 M5 第二批 | `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME`（第二批的部署說明會補上） |
 | **帳戶刪除 UI、只記持股快照輸入畫面** | API 已有，前端還沒有畫面 | 見 `apps/web/OPEN_QUESTIONS.md` |
 | **資料備份、監控** | 未設定 | Railway Postgres 備份、錯誤追蹤（例如 Sentry）、uptime 監控 |
 | **個資法** | 資料匯出／刪除帳號（M5） | 上線前的隱私權政策與服務條款 |

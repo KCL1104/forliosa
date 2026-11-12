@@ -11,7 +11,9 @@ from sqlalchemy import (
     Boolean,
     Date,
     ForeignKey,
+    ForeignKeyConstraint,
     Index,
+    Integer,
     String,
     Text,
     UniqueConstraint,
@@ -28,6 +30,7 @@ class User(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
     display_name: Mapped[str] = mapped_column(String(100))
+    avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Discord avatar (M5)
     preferences: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
@@ -799,3 +802,216 @@ class SecFiling(Base):
     primary_document: Mapped[str] = mapped_column(String(200), default="")
     source: Mapped[str] = mapped_column(String(32), default="sec-edgar")
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+# -- M5: login identities, delegations, groups (docs/api-contract.md 「分享（M5）」) ------------------------------
+class UserIdentity(Base):
+    """An external login linked to a user: ``provider`` = ``discord``, ``subject`` = the Discord user id. One Discord
+    id per user; the provider's access / refresh tokens are never stored (used once to read the profile)."""
+
+    __tablename__ = "user_identities"
+    __table_args__ = (
+        UniqueConstraint("provider", "subject", name="uq_user_identity_subject"),
+        UniqueConstraint("user_id", "provider", name="uq_user_identity_user_provider"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    provider: Mapped[str] = mapped_column(String(16))
+    subject: Mapped[str] = mapped_column(String(64))
+    email: Mapped[str | None] = mapped_column(String(320), nullable=True)  # as last reported by the provider
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    last_login_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class Delegation(Base):
+    """One-to-one read-only access: ``viewer`` may view ``owner``'s ledger (``scope`` all | accounts)."""
+
+    __tablename__ = "delegations"
+    __table_args__ = (UniqueConstraint("owner_id", "viewer_id", name="uq_delegation_owner_viewer"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    viewer_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    scope: Mapped[str] = mapped_column(String(8), default="all")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class DelegationAccount(Base):
+    """The accounts of a ``scope = accounts`` delegation; deleting the account removes it from the scope."""
+
+    __tablename__ = "delegation_accounts"
+
+    delegation_id: Mapped[str] = mapped_column(ForeignKey("delegations.id", ondelete="CASCADE"), primary_key=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("broker_accounts.id", ondelete="CASCADE"), primary_key=True,
+                                            index=True)
+
+
+class Group(Base):
+    __tablename__ = "groups"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    ranking_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class GroupMember(Base):
+    """``role``: owner (exactly one) | admin | member. Join order = ``joined_at``."""
+
+    __tablename__ = "group_members"
+
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    role: Mapped[str] = mapped_column(String(8), default="member")
+    joined_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class GroupShareSetting(Base):
+    """What one member shares in one group. Deleted with the membership (leaving, removal); chosen again on rejoin.
+    ``trades_enabled_at`` / ``push_enabled_at``: when ``trades`` / ``push`` were last turned on (push only sends
+    trades created after both)."""
+
+    __tablename__ = "group_share_settings"
+    __table_args__ = (
+        ForeignKeyConstraint(["group_id", "user_id"], ["group_members.group_id", "group_members.user_id"],
+                             ondelete="CASCADE", name="fk_group_share_member"),
+    )
+
+    group_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    returns: Mapped[bool] = mapped_column(Boolean, default=True)
+    holdings: Mapped[bool] = mapped_column(Boolean, default=False)
+    amounts: Mapped[bool] = mapped_column(Boolean, default=False)
+    trades: Mapped[bool] = mapped_column(Boolean, default=False)
+    trade_prices: Mapped[bool] = mapped_column(Boolean, default=False)
+    push: Mapped[bool] = mapped_column(Boolean, default=False)
+    trades_enabled_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    push_enabled_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class GroupInvite(Base):
+    """An invite link. Only the SHA-256 of the random token (256 bits) is stored; the URL is shown once."""
+
+    __tablename__ = "group_invites"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    multi_use: Mapped[bool] = mapped_column(Boolean, default=False)
+    uses: Mapped[int] = mapped_column(Integer, default=0)
+    expires_at: Mapped[datetime] = mapped_column(TZDateTime)
+    revoked_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class GroupComment(Base):
+    """A comment on ``target`` (``trade:<feed item id>`` | ``digest:<id>`` | ``leaderboard:<YYYY-MM-DD>``).
+    ``user_id`` is null once the author's account is deleted."""
+
+    __tablename__ = "group_comments"
+    __table_args__ = (Index("ix_group_comments_target", "group_id", "target", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"))
+    target: Mapped[str] = mapped_column(String(64))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    body: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class GroupReaction(Base):
+    __tablename__ = "group_reactions"
+
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    target: Mapped[str] = mapped_column(String(64), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    emoji: Mapped[str] = mapped_column(String(16), primary_key=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class GroupDigest(Base):
+    """群組 AI 週報. ``facts`` are stored by ``user_id`` and filtered by the current memberships and share settings on
+    every read. ``status``: pending | ready | failed."""
+
+    __tablename__ = "group_digests"
+    __table_args__ = (UniqueConstraint("group_id", "week_start", name="uq_group_digest_week"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    week_start: Mapped[date] = mapped_column(Date)
+    week_end: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    batch_id: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class GroupChannel(Base):
+    """A group's push channel (``kind`` discord | telegram; one each). The Discord webhook URL is stored encrypted
+    (``crypto.encrypt_secret``); responses only show ``webhook_hint`` (its last 4 characters). ``status`` active |
+    disabled (``disabled_reason``). ``configured_at``: trades created before it are never pushed."""
+
+    __tablename__ = "group_channels"
+
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(10), primary_key=True)
+    status: Mapped[str] = mapped_column(String(10), default="active")
+    disabled_reason: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    webhook_encrypted: Mapped[str | None] = mapped_column(Text, nullable=True)
+    webhook_hint: Mapped[str | None] = mapped_column(String(8), nullable=True)
+    telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    notify_trades: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_digest: Mapped[bool] = mapped_column(Boolean, default=True)
+    configured_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    configured_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class NotificationOutbox(Base):
+    """Pending pushes to group channels. A trade row references its transaction (deleted with it, so a trade deleted
+    within the 15-minute delay is never sent); everything sent is re-checked against the share settings at send
+    time. ``status``: pending | sent | failed | cancelled; retried with exponential backoff up to 5 attempts."""
+
+    __tablename__ = "notification_outbox"
+    __table_args__ = (Index("ix_notification_outbox_due", "status", "not_before"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    channel_kind: Mapped[str] = mapped_column(String(10))
+    kind: Mapped[str] = mapped_column(String(10))  # trade | digest
+    dedupe_key: Mapped[str] = mapped_column(String(160), unique=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
+    transaction_id: Mapped[str | None] = mapped_column(ForeignKey("transactions.id", ondelete="CASCADE"),
+                                                       nullable=True, index=True)
+    digest_id: Mapped[str | None] = mapped_column(ForeignKey("group_digests.id", ondelete="CASCADE"), nullable=True)
+    status: Mapped[str] = mapped_column(String(10), default="pending")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    not_before: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    last_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    sent_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class TelegramLinkCode(Base):
+    """A one-time ``/link <code>`` code (10 minutes) that binds a Telegram group chat to a Forliosa group; only the
+    SHA-256 of the code is stored."""
+
+    __tablename__ = "telegram_link_codes"
+
+    code_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    created_by: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    expires_at: Mapped[datetime] = mapped_column(TZDateTime)
+    used_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)

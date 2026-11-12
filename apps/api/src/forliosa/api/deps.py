@@ -37,6 +37,14 @@ def create_session(db: Session, user: User, response: Response) -> None:
     )
 
 
+def rotate_session(db: Session, request: Request, user: User, response: Response) -> None:
+    """Sign ``user`` in with a fresh session id; a session the browser already had is deleted first."""
+    token = request.cookies.get(COOKIE_NAME)
+    if token:
+        db.execute(delete(UserSession).where(UserSession.id == _token_hash(token)))
+    create_session(db, user, response)
+
+
 def destroy_session(db: Session, request: Request, response: Response) -> None:
     token = request.cookies.get(COOKIE_NAME)
     if token:
@@ -51,7 +59,19 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
-def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+def session_user(request: Request, db: Session) -> User | None:
+    """The signed-in user of this request's session cookie, or None."""
+    token = request.cookies.get(COOKIE_NAME)
+    if not token:
+        return None
+    sess = db.get(UserSession, _token_hash(token))
+    if sess is None or _aware(sess.expires_at) <= now_utc():
+        return None
+    return db.get(User, sess.user_id)
+
+
+def signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """The signed-in user, never a delegation's owner (for endpoints that must act as the viewer themselves)."""
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise ApiError(401, "unauthorized", "請先登入")
@@ -64,10 +84,28 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
+def current_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """The user whose data this request reads.
+
+    Normally the signed-in user. On an allow-listed read under ``X-Forliosa-View-As`` (``api.middleware``) it is the
+    delegation's **owner**, with the request's database session limited to the delegated accounts and refusing every
+    write (``services.scope``); a delegation that does not exist, was revoked or is not the viewer's → 403
+    ``delegation_revoked``.
+    """
+    viewer = signed_in_user(request, db)
+    delegation_id = request.scope.get("state", {}).get("view_as")
+    if not delegation_id:
+        return viewer
+    from forliosa.services import sharing
+
+    return sharing.enter_view_as(db, viewer, delegation_id)
+
+
 def purge_expired_sessions(db: Session) -> int:
     res = db.execute(delete(UserSession).where(UserSession.expires_at <= now_utc()))
     db.commit()
     return res.rowcount or 0
 
 
-__all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "select"]
+__all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "select", "session_user",
+           "signed_in_user"]

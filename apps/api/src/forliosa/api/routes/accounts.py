@@ -17,7 +17,7 @@ from forliosa.domain.fees import COMMISSION_RATE, DEFAULT_MIN_FEE
 from forliosa.ids import new_id
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import AutoDividendSkip, BrokerAccount, HoldingSnapshot, Transaction, User
-from forliosa.services import auto_dividends
+from forliosa.services import auto_dividends, scope, sharing
 from forliosa.timeutil import iso_taipei
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -34,14 +34,14 @@ def account_out(a: BrokerAccount) -> dict:
 
 def get_owned_account(db: Session, user: User, account_id: str) -> BrokerAccount:
     acc = db.get(BrokerAccount, account_id)
-    if acc is None or acc.user_id != user.id:
+    if acc is None or acc.user_id != user.id or not scope.account_visible(db, user.id, acc.id):
         raise not_found("找不到帳戶")
     return acc
 
 
 @router.get("", response_model=list[Account])
 def list_accounts(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    rows = db.scalars(select(BrokerAccount).where(BrokerAccount.user_id == user.id)
+    rows = db.scalars(select(BrokerAccount).where(BrokerAccount.id.in_(scope.account_ids(db, user.id)))
                       .order_by(BrokerAccount.created_at, BrokerAccount.id))
     return [account_out(a) for a in rows]
 
@@ -85,7 +85,10 @@ def update_account(account_id: str, body: AccountPatch, user: User = Depends(cur
 @router.delete("/{account_id}", status_code=204)
 def delete_account(account_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     acc = get_owned_account(db, user, account_id)
+    keys = sharing.trade_keys(db.scalars(select(Transaction).where(Transaction.account_id == acc.id,
+                                                                   Transaction.user_id == user.id)))
     db.execute(delete(Transaction).where(Transaction.account_id == acc.id, Transaction.user_id == user.id))
+    sharing.purge_trade_threads(db, user.id, keys)  # a group feed item goes with its last transaction
     db.execute(delete(HoldingSnapshot).where(HoldingSnapshot.account_id == acc.id))
     db.execute(delete(AutoDividendSkip).where(AutoDividendSkip.account_id == acc.id))
     db.delete(acc)

@@ -26,7 +26,7 @@ from forliosa.domain.ledger import SECURITY_TYPES, LedgerError, TxnType, replay
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
 from forliosa.models import BrokerAccount, Transaction, User
-from forliosa.services import auto_dividends
+from forliosa.services import auto_dividends, sharing
 from forliosa.services.ledger_io import fee_schedule, instrument_ref, load_ledger_input, shares_held
 from forliosa.timeutil import now_utc
 
@@ -304,6 +304,7 @@ def create(db: Session, user: User, data: dict[str, Any], md: MarketData) -> Tra
 def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md: MarketData) -> Transaction:
     data = {f: getattr(txn, f) for f in FIELDS}
     old_scope = _dividend_scope(txn)
+    old_feed_keys = sharing.trade_keys([txn])
     # Editing an automatic dividend turns it into the user's own version: the sync never touches it again.
     edited_auto = auto_dividends.key_of(txn) if txn.source == auto_dividends.AUTO else None
     if txn.source == auto_dividends.AUTO:
@@ -333,6 +334,8 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
     if edited_auto is not None:
         auto_dividends.remember_skip(db, user, edited_auto, "edited")
     auto_dividends.after_user_change(db, user, md, old_scope + _dividend_scope(txn))
+    db.flush()
+    sharing.purge_trade_threads(db, user.id, old_feed_keys)  # the old group feed item may have no trade left
     db.commit()
     return txn
 
@@ -344,8 +347,11 @@ def delete(db: Session, user: User, txn: Transaction, md: MarketData) -> None:
     auto_key = auto_dividends.key_of(txn) if txn.source == auto_dividends.AUTO else None
     validate_ledger(db, user, account, None, remove_id=txn.id, md=md, skip=auto_key)
     scope = _dividend_scope(txn)
+    feed_keys = sharing.trade_keys([txn])
     db.delete(txn)
     if auto_key is not None:
         auto_dividends.remember_skip(db, user, auto_key, "deleted")
     auto_dividends.after_user_change(db, user, md, scope)
+    db.flush()
+    sharing.purge_trade_threads(db, user.id, feed_keys)  # its group feed item (and comments) go with the last trade
     db.commit()

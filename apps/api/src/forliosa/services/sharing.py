@@ -1,0 +1,641 @@
+"""Sharing projection: the ONLY way group and delegation code reads another user's data (docs/api-contract.md
+「分享（M5）」).
+
+* **Delegations** (read-only viewing): :func:`enter_view_as` resolves ``X-Forliosa-View-As`` on every request and
+  limits the request to the delegation's *current* scope (``services.scope``); revoked or foreign → 403
+  ``delegation_revoked``.
+* **Groups**: everything a member sees of another member is built here from that member's *current* share settings in
+  that group, re-applied on every read (turning a toggle off, leaving the group: gone at once, from the feed too).
+  A block whose toggle is off is **absent** (no key — not ``null``, not 0); a member who shares nothing is simply not
+  in the leaderboard, holdings or feed (nothing says "did not share"). Weights are rounded to 0.01 and returns to
+  0.0001; amounts (only with ``amounts``) to 2 decimals. Projections never contain quantities, account names, notes,
+  fees, transaction ids or prices (prices only in the feed with ``trade_prices``).
+
+Group feed items are computed, not stored: a trade item is one member's buys (or sells) of one symbol on one Taipei
+day (``manual`` / ``import`` / ``ai_draft`` buy / sell rows only), its id a keyed hash of that key
+(:func:`feed_item_id`). Comments and reactions on a trade item are deleted with its last underlying transaction
+(:func:`purge_trade_threads`).
+"""
+
+from __future__ import annotations
+
+import base64
+import binascii
+import bisect
+from collections import defaultdict
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from decimal import ROUND_HALF_UP, Decimal
+from typing import Any
+
+from sqlalchemy import delete, func, select
+from sqlalchemy.orm import Session
+
+from forliosa.api import serialize as ser
+from forliosa.api.errors import ApiError, unprocessable
+from forliosa.crypto import keyed_id
+from forliosa.datapolicy import labels, tagged
+from forliosa.domain.fees import ZERO
+from forliosa.domain.performance import benchmark_returns, simulate
+from forliosa.marketdata.service import MarketData
+from forliosa.models import (
+    BrokerAccount,
+    Delegation,
+    DelegationAccount,
+    Group,
+    GroupComment,
+    GroupDigest,
+    GroupMember,
+    GroupReaction,
+    GroupShareSetting,
+    HoldingSnapshot,
+    Transaction,
+    User,
+)
+from forliosa.services.ledger_io import FxBook, load_ledger_input
+from forliosa.services.portfolio import PortfolioState, compute_state
+from forliosa.services.scope import ViewScope, set_view_scope
+from forliosa.timeutil import (
+    MARKET_CLOSE,
+    TAIPEI,
+    is_tw_trading_day,
+    iso_taipei,
+    last_tw_trading_day,
+    market_close_dt,
+    now_taipei,
+    today_taipei,
+    tw_trading_days,
+)
+
+SHARE_KEYS = ("returns", "holdings", "amounts", "trades", "trade_prices", "push")
+DEFAULT_SHARE = {"returns": True, "holdings": False, "amounts": False, "trades": False, "trade_prices": False,
+                 "push": False}
+PERIODS = ("day", "month", "year")
+BENCHMARKS = ("^TAIEXTR", "0050.TW")
+FEED_DAYS = 90
+FEED_SOURCES = ("manual", "import", "ai_draft")
+FEED_SIDES = ("buy", "sell")
+REACTION_EMOJI = ("👍", "🎉", "🔥", "😮", "😢", "👀")
+LEFT_MEMBER = "已離開的成員"
+DELETED_ACCOUNT = "已刪除的帳號"
+
+
+# -- rounding ---------------------------------------------------------------------------------------------
+def _round(value: Decimal | float, places: int) -> float:
+    d = value if isinstance(value, Decimal) else Decimal(repr(value))
+    f = float(d.quantize(Decimal(1).scaleb(-places), rounding=ROUND_HALF_UP))
+    return 0.0 if f == 0 else f
+
+
+def weight(value: Decimal | float) -> float:
+    """Shared weights: 0.01."""
+    return _round(value, 2)
+
+
+def pct(value: Decimal | float | None) -> float | None:
+    """Shared returns: 0.0001."""
+    return None if value is None else _round(value, 4)
+
+
+# -- delegations: read-only viewing ------------------------------------------------------------------------
+def enter_view_as(db: Session, viewer: User, delegation_id: str) -> User:
+    """Resolve the delegation behind ``X-Forliosa-View-As`` for ``viewer`` and limit this request to its current
+    scope. Returns the owner, whose data the request then reads (as if the owner had only the delegated accounts)."""
+    dlg = db.get(Delegation, delegation_id)
+    owner = db.get(User, dlg.owner_id) if dlg is not None and dlg.viewer_id == viewer.id else None
+    if dlg is None or owner is None:
+        raise ApiError(403, "delegation_revoked", "這份唯讀授權已撤銷或不存在")
+    ids = None if dlg.scope == "all" else frozenset(
+        db.scalars(select(DelegationAccount.account_id).where(DelegationAccount.delegation_id == dlg.id)))
+    set_view_scope(db, ViewScope(dlg.id, owner.id, viewer.id, ids))
+    return owner
+
+
+# -- group membership and share settings -------------------------------------------------------------------
+@dataclass
+class Member:
+    user: User
+    role: str
+    joined_at: datetime
+    share: GroupShareSetting | None
+
+    @property
+    def user_id(self) -> str:
+        return self.user.id
+
+    def shares(self, key: str) -> bool:
+        return bool(self.share is not None and getattr(self.share, key))
+
+
+def members_of(db: Session, group_id: str) -> list[Member]:
+    """Current members in join order, with their share settings in this group."""
+    rows = db.execute(
+        select(GroupMember, User, GroupShareSetting)
+        .join(User, User.id == GroupMember.user_id)
+        .outerjoin(GroupShareSetting, (GroupShareSetting.group_id == GroupMember.group_id)
+                   & (GroupShareSetting.user_id == GroupMember.user_id))
+        .where(GroupMember.group_id == group_id)
+        .order_by(GroupMember.joined_at, GroupMember.user_id)
+    ).all()
+    return [Member(u, m.role, m.joined_at, s) for m, u, s in rows]
+
+
+def share_out(s: GroupShareSetting | None) -> dict[str, bool]:
+    if s is None:
+        return dict(DEFAULT_SHARE)
+    return {k: bool(getattr(s, k)) for k in SHARE_KEYS}
+
+
+def identity(user: User) -> dict[str, Any]:
+    return {"user_id": user.id, "display_name": user.display_name, "avatar_url": user.avatar_url}
+
+
+# -- one member's numbers ------------------------------------------------------------------------------------
+@dataclass
+class PeriodWindow:
+    end: date  # the latest close
+    starts: dict[str, date]  # period -> base close (shared by every member and the benchmarks)
+    clipped: bool  # a start was moved to the first archived day
+    archive_since: date | None
+
+
+def latest_close(md: MarketData, now: datetime | None = None) -> date:
+    """The latest Taiwan close: today after 13:30 on a trading day, else the previous trading day — or the newest
+    benchmark close when the data has not caught up yet."""
+    now = (now or now_taipei()).astimezone(TAIPEI)
+    today = now.date()
+    clock = today if is_tw_trading_day(today) and now.time() >= MARKET_CLOSE else last_tw_trading_day(
+        today - timedelta(days=1))
+    lo = clock - timedelta(days=14)
+    newest = [h.candles[-1].t for h in (md.index_history("^TAIEXTR", lo, clock), md.history("0050.TW", lo, clock))
+              if h.candles]
+    return min(clock, max(newest)) if newest else clock
+
+
+def period_window(md: MarketData, end: date | None = None) -> PeriodWindow:
+    end = end or latest_close(md)
+    starts = {
+        "day": last_tw_trading_day(end - timedelta(days=1)),
+        "month": last_tw_trading_day(end.replace(day=1) - timedelta(days=1)),
+        "year": last_tw_trading_day(date(end.year, 1, 1) - timedelta(days=1)),
+    }
+    since = md.archive_since() if md.policy == "commercial" else None
+    clipped = False
+    if since is not None:
+        for k, s in starts.items():
+            if s < since:
+                starts[k] = min(since, end)
+                clipped = True
+    return PeriodWindow(end, starts, clipped, since)
+
+
+def _forward_filled(axis: list[date], closes: dict[date, Decimal]) -> dict[date, Decimal]:
+    out: dict[date, Decimal] = {}
+    known = sorted(closes)
+    j = 0
+    last: Decimal | None = None
+    for d in axis:
+        while j < len(known) and known[j] <= d:
+            last = closes[known[j]]
+            j += 1
+        if last is not None:
+            out[d] = last
+    return out
+
+
+def _axis(window: PeriodWindow) -> list[date]:
+    base = min(window.starts.values())
+    axis = tw_trading_days(base, window.end)
+    if not axis or axis[0] != base:
+        axis = sorted({base, *axis})
+    return axis
+
+
+def _window_return(daily: list[float], active: list[bool], axis: list[date], start: date, end: date) -> float | None:
+    """TWR over (start, end] from daily returns on ``axis``; None when nothing was invested in the window."""
+    if start >= end:
+        return None
+    s = bisect.bisect_right(axis, start) - 1
+    e = bisect.bisect_right(axis, end) - 1
+    if s < 0 or e <= s or not any(active[s + 1:e + 1]):
+        return None
+    acc = 1.0
+    for r in daily[s + 1:e + 1]:
+        acc *= 1.0 + r
+    return acc - 1.0
+
+
+def member_period_returns(db: Session, md: MarketData, user: User, window: PeriodWindow) -> dict[str, float | None]:
+    """Day / month / year time-weighted returns of all of ``user``'s accounts combined (TWD, closes), from the
+    window's common start dates. A member who starts holding during a period counts from the first day with holdings.
+    Any holding without a close on any day of the window (e.g. US stocks under commercial) → every period None."""
+    none = dict.fromkeys(PERIODS)
+    inp = load_ledger_input(db, user)
+    if inp.first_date is None or inp.first_date > window.end:
+        return none
+    axis = _axis(window)
+    symbols = sorted({t.symbol for t in inp.effective_transactions() if t.symbol and t.type in (
+        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")}
+        | {s.symbol for s in inp.snapshots})
+    lookback = axis[0] - timedelta(days=14)
+    closes = {s: _forward_filled(axis, {c.t: c.c for c in md.history(s, lookback, window.end).candles})
+              for s in symbols}
+    fx = FxBook.load(md, inp.first_date, window.end)
+    sim = simulate(inp.ledger_txns(fx), axis, lambda s, d: closes.get(s, {}).get(d),
+                   lambda c, d: fx.rate(c, d), inp.method, inp.openings(fx))
+    points = sim.points
+    if any(p.unpriced for p in points):
+        return none
+    daily = [p.daily_return for p in points]
+    active = [False] + [points[i - 1].value + points[i].inflow > 0 for i in range(1, len(points))]
+    return {k: _window_return(daily, active, axis, window.starts[k], window.end) for k in PERIODS}
+
+
+@dataclass
+class Totals:
+    market_value: Decimal
+    cost: Decimal
+    total_pnl: Decimal
+    day_change: Decimal
+
+    @property
+    def total_return(self) -> Decimal | None:
+        return self.total_pnl / self.cost if self.cost else None
+
+
+def totals(state: PortfolioState) -> Totals:
+    """Same arithmetic as ``PortfolioSummary`` (total P&L = unrealized + realized + dividends)."""
+    mv = sum((r.market_value for r in state.rows), ZERO)
+    cost = sum((r.cost_twd for r in state.rows), ZERO)
+    realized = sum((e.pnl_twd for e in state.ledger.realized), ZERO)
+    dividends = sum((e.net_twd for e in state.ledger.income), ZERO)
+    return Totals(mv, cost, mv - cost + realized + dividends, sum((r.day_change for r in state.rows), ZERO))
+
+
+def holdings_list(state: PortfolioState) -> list[dict[str, Any]]:
+    """Symbol, name and weight only (no quantities, prices, amounts or accounts)."""
+    total = sum((r.market_value for r in state.rows), ZERO)
+    out = [{"symbol": r.symbol, "name": r.info.name if r.info else r.symbol,
+            "weight": weight(r.market_value / total) if total else 0.0,
+            "_industry": r.info.industry if r.info else None}
+           for r in state.rows if r.quantity > 0]
+    out.sort(key=lambda h: (-h["weight"], h["symbol"]))
+    return out
+
+
+class Projector:
+    """Builds members' shared blocks for one request (each member's ledger is computed at most once)."""
+
+    def __init__(self, db: Session, md: MarketData):
+        self.db = db
+        self.md = md
+        self._states: dict[str, PortfolioState] = {}
+        self._returns: dict[str, dict[str, float | None]] = {}
+        self._window: PeriodWindow | None = None
+
+    @property
+    def window(self) -> PeriodWindow:
+        if self._window is None:
+            self._window = period_window(self.md)
+        return self._window
+
+    def state(self, user: User) -> PortfolioState:
+        if user.id not in self._states:
+            self._states[user.id] = compute_state(self.db, user, self.md)
+        return self._states[user.id]
+
+    def period_returns(self, user: User) -> dict[str, float | None]:
+        if user.id not in self._returns:
+            self._returns[user.id] = member_period_returns(self.db, self.md, user, self.window)
+        return self._returns[user.id]
+
+    def returns_block(self, user: User) -> dict[str, float | None]:
+        r = self.period_returns(user)
+        return {"day": pct(r["day"]), "month": pct(r["month"]), "year": pct(r["year"]),
+                "total": pct(totals(self.state(user)).total_return)}
+
+    def holdings_block(self, user: User) -> list[dict[str, Any]]:
+        return [{k: v for k, v in h.items() if not k.startswith("_")} for h in holdings_list(self.state(user))]
+
+    def amounts_block(self, user: User) -> dict[str, float | None]:
+        t = totals(self.state(user))
+        return {"market_value": ser.money(t.market_value), "day_change": ser.money(t.day_change),
+                "total_pnl": ser.money(t.total_pnl)}
+
+    def is_demo(self, user: User) -> bool:
+        return self.state(user).is_demo
+
+
+# -- shared portfolio, holdings overlap, leaderboard ---------------------------------------------------------
+def shared_portfolio(proj: Projector, member: Member) -> dict[str, Any]:
+    """One member's ``SharedPortfolio``: identity, then only the blocks the member shares in this group."""
+    out = identity(member.user)
+    any_block = False
+    if member.shares("returns"):
+        out["returns"] = proj.returns_block(member.user)
+        any_block = True
+    if member.shares("holdings"):
+        out["holdings"] = proj.holdings_block(member.user)
+        any_block = True
+    if member.shares("amounts"):
+        out["amounts"] = proj.amounts_block(member.user)
+        any_block = True
+    if any_block:
+        out["is_demo"] = proj.is_demo(member.user)
+    return out
+
+
+def group_holdings(proj: Projector, members: list[Member]) -> dict[str, Any]:
+    sharing = [m for m in members if m.shares("holdings")]
+    rows: list[dict[str, Any]] = []
+    holders: dict[str, set[str]] = defaultdict(set)
+    names: dict[str, str] = {}
+    industries: dict[str, set[str]] = defaultdict(set)
+    is_demo = False
+    for m in sharing:
+        hs = holdings_list(proj.state(m.user))
+        is_demo |= proj.is_demo(m.user)
+        rows.append({**identity(m.user), "holdings": [{k: v for k, v in h.items() if not k.startswith("_")}
+                                                      for h in hs]})
+        for h in hs:
+            holders[h["symbol"]].add(m.user_id)
+            names[h["symbol"]] = h["name"]
+            if h["_industry"]:
+                industries[h["_industry"]].add(m.user_id)
+    common = [{"symbol": s, "name": names[s], "holder_count": len(u)} for s, u in holders.items() if len(u) >= 2]
+    common.sort(key=lambda c: (-c["holder_count"], c["symbol"]))
+    inds = [{"industry": k, "holder_count": len(u)} for k, u in industries.items()]
+    inds.sort(key=lambda c: (-c["holder_count"], c["industry"]))
+    return {"members": rows, "common": common, "industries": inds, "is_demo": is_demo}
+
+
+def _benchmark_period_returns(md: MarketData, window: PeriodWindow) -> tuple[list[dict[str, Any]], list[str], bool,
+                                                                           list[str]]:
+    axis = _axis(window)
+    lookback = axis[0] - timedelta(days=14)
+    rows: list[dict[str, Any]] = []
+    sources: list[str] = []
+    notes: list[str] = []
+    is_demo = False
+    for sym in BENCHMARKS:
+        if sym.startswith("^"):
+            hist = md.index_history(sym, lookback, window.end)
+            kind = "index"
+            divs: dict[date, Decimal] = {}
+            splits: dict[date, Decimal] = {}
+        else:
+            hist = md.history(sym, lookback, window.end)
+            kind = "price"
+            divs = {e.ex_dividend_date: e.cash_dividend for e in md.dividends(sym).value if e.ex_dividend_date}
+            splits = {e.date: e.ratio for e in md.corporate_events(sym) if e.kind == "split"}
+        closes = _forward_filled(axis, {c.t: c.c for c in hist.candles})
+        is_demo |= hist.is_demo
+        if hist.source:
+            sources.extend(tagged(hist.source, kind))
+        daily = benchmark_returns(axis, closes.get, lambda d, divs=divs: divs.get(d, ZERO),
+                                  lambda d, splits=splits: splits.get(d, Decimal(1)))
+        priced = [d in closes for d in axis]
+        out: dict[str, float | None] = {}
+        for k in PERIODS:
+            s = bisect.bisect_right(axis, window.starts[k]) - 1
+            ok = s >= 0 and priced[s] and priced[-1]
+            out[k] = _window_return(daily, [True] * len(axis), axis, window.starts[k], window.end) if ok else None
+        rows.append({"symbol": sym, "name": md.benchmark_name(sym), "_returns": out})
+        if md.policy == "commercial" and not closes:
+            notes.append(f"基準 {md.benchmark_name(sym)} 目前沒有可商用的資料")
+    return rows, sources, is_demo, notes
+
+
+def rank_entries(entries: list[dict[str, Any]], ranked: bool) -> list[dict[str, Any]]:
+    """Ranked: by ``return_pct`` (already rounded to 4 places) descending, ties share a rank (1, 1, 3), members
+    without a value last with no rank. Unranked: join order, no ranks."""
+    if not ranked:
+        return [{**e, "rank": None} for e in entries]
+    valued = sorted((e for e in entries if e["return_pct"] is not None), key=lambda e: -e["return_pct"])
+    out = []
+    for e in valued:
+        out.append({**e, "rank": 1 + sum(1 for o in valued if o["return_pct"] > e["return_pct"])})
+    out.extend({**e, "rank": None} for e in entries if e["return_pct"] is None)
+    return out
+
+
+def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str, period: str) -> dict[str, Any]:
+    if period not in PERIODS:
+        raise unprocessable(f"不支援的期間：{period}（可用 day、month、year）")
+    window = proj.window
+    is_demo = False
+    entries = []
+    for m in members:
+        if not m.shares("returns"):
+            continue
+        r = proj.period_returns(m.user)
+        is_demo |= proj.is_demo(m.user)
+        entries.append({**identity(m.user), "return_pct": pct(r[period]),
+                        "total_return_pct": pct(totals(proj.state(m.user)).total_return), "is_me": m.user_id == me_id})
+    bench, sources, bench_demo, notes = _benchmark_period_returns(proj.md, window)
+    if window.clipped and window.archive_since is not None:
+        notes.insert(0, f"資料累積中：自 {window.archive_since.isoformat()} 起存檔；"
+                        f"期間從 {window.starts[period].isoformat()} 收盤開始計算")
+    return {
+        "period": period,
+        "date": window.end,
+        "start_date": window.starts[period],
+        "as_of": iso_taipei(market_close_dt(window.end)),
+        "ranked": bool(group.ranking_enabled),
+        "entries": rank_entries(entries, bool(group.ranking_enabled)),
+        "benchmarks": [{"symbol": b["symbol"], "name": b["name"], "return_pct": pct(b["_returns"][period])}
+                       for b in bench],
+        "notes": notes,
+        "sources": labels(["ledger", *sources]),
+        "is_demo": is_demo or bench_demo,
+    }
+
+
+# -- feed -----------------------------------------------------------------------------------------------------
+def feed_item_id(user_id: str, trade_date: date, symbol: str, side: str) -> str:
+    """Stable, unguessable id of one member's buys (or sells) of ``symbol`` on ``trade_date``."""
+    return "gfi_" + keyed_id("feed-item-id", f"trade|{user_id}|{trade_date.isoformat()}|{symbol}|{side}")
+
+
+def joined_item_id(group_id: str, user_id: str, joined_at: datetime) -> str:
+    return "gfi_" + keyed_id("feed-item-id", f"joined|{group_id}|{user_id}|{joined_at.isoformat()}")
+
+
+def _feed_window(today: date | None = None) -> tuple[date, date]:
+    today = today or today_taipei()
+    return today - timedelta(days=FEED_DAYS), today
+
+
+def _reaction_summary(db: Session, group_id: str, targets: list[str], me_id: str
+                      ) -> tuple[dict[str, int], dict[str, list[dict[str, Any]]]]:
+    if not targets:
+        return {}, {}
+    counts = dict(db.execute(
+        select(GroupComment.target, func.count()).where(GroupComment.group_id == group_id,
+                                                         GroupComment.target.in_(targets))
+        .group_by(GroupComment.target)).all())
+    rx: dict[str, dict[str, list[int]]] = defaultdict(lambda: defaultdict(lambda: [0, 0]))
+    for target, emoji, uid in db.execute(
+            select(GroupReaction.target, GroupReaction.emoji, GroupReaction.user_id)
+            .where(GroupReaction.group_id == group_id, GroupReaction.target.in_(targets))):
+        cell = rx[target][emoji]
+        cell[0] += 1
+        cell[1] |= uid == me_id
+    reactions = {t: [{"emoji": e, "count": rx[t][e][0], "mine": bool(rx[t][e][1])}
+                     for e in REACTION_EMOJI if e in rx[t]] for t in rx}
+    return counts, reactions
+
+
+def reactions_for(db: Session, group_id: str, target: str, me_id: str) -> list[dict[str, Any]]:
+    return _reaction_summary(db, group_id, [target], me_id)[1].get(target, [])
+
+
+def feed_items(db: Session, md: MarketData, group: Group, members: list[Member], me_id: str,
+               user_id: str | None = None, with_social: bool = True) -> list[dict[str, Any]]:
+    """Every visible feed item of the group, newest first (trade date, then created time, then id)."""
+    lo, hi = _feed_window()
+    chosen = [m for m in members if user_id is None or m.user_id == user_id]
+    sharing = {m.user_id: m for m in chosen if m.shares("trades")}
+    items: list[tuple[tuple, dict[str, Any]]] = []
+    if sharing:
+        txns = db.scalars(select(Transaction).where(
+            Transaction.user_id.in_(sorted(sharing)), Transaction.type.in_(FEED_SIDES),
+            Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
+            Transaction.trade_date >= lo, Transaction.trade_date <= hi))
+        # Holdings-only accounts: like the ledger, transactions on or before the snapshot date do not count.
+        snapshot_as_of = dict(db.execute(
+            select(HoldingSnapshot.account_id, func.max(HoldingSnapshot.as_of))
+            .join(BrokerAccount, BrokerAccount.id == HoldingSnapshot.account_id)
+            .where(HoldingSnapshot.user_id.in_(sorted(sharing)), BrokerAccount.tracking_mode == "holdings")
+            .group_by(HoldingSnapshot.account_id)).all())
+        merged: dict[tuple[str, date, str, str], dict[str, Any]] = {}
+        for t in txns:
+            as_of = snapshot_as_of.get(t.account_id)
+            if as_of is not None and t.trade_date <= as_of:
+                continue
+            key = (t.user_id, t.trade_date, t.symbol or "", t.type)
+            cell = merged.setdefault(key, {"count": 0, "qty": ZERO, "value": ZERO, "currency": t.currency,
+                                           "created_at": t.created_at})
+            cell["count"] += 1
+            cell["qty"] += t.quantity or ZERO
+            cell["value"] += (t.quantity or ZERO) * (t.price or ZERO)
+            cell["created_at"] = max(cell["created_at"], t.created_at)
+        for (uid, d, sym, side), cell in merged.items():
+            m = sharing[uid]
+            info = md.instrument(sym)
+            item: dict[str, Any] = {
+                "id": feed_item_id(uid, d, sym, side), "type": "trade", **identity(m.user),
+                "side": side, "symbol": sym, "name": info.name if info else sym, "trade_date": d,
+                "count": cell["count"],
+            }
+            if m.shares("trade_prices") and cell["qty"] > 0:
+                item["price"] = ser.price(cell["value"] / cell["qty"])
+                item["currency"] = cell["currency"]
+            item["created_at"] = iso_taipei(cell["created_at"])
+            items.append(((d, cell["created_at"], item["id"]), item))
+    for m in chosen:
+        joined = m.joined_at.astimezone(TAIPEI).date()
+        if lo <= joined <= hi:
+            item = {"id": joined_item_id(group.id, m.user_id, m.joined_at), "type": "member_joined",
+                    **identity(m.user), "created_at": iso_taipei(m.joined_at)}
+            items.append(((joined, m.joined_at, item["id"]), item))
+    items.sort(key=lambda kv: kv[0], reverse=True)
+    out = []
+    for key, item in items:
+        item["_key"] = key
+        out.append(item)
+    if with_social:
+        trade_targets = [f"trade:{i['id']}" for i in out if i["type"] == "trade"]
+        counts, reactions = _reaction_summary(db, group.id, trade_targets, me_id)
+        for i in out:
+            if i["type"] == "trade":
+                t = f"trade:{i['id']}"
+                i["comment_count"] = counts.get(t, 0)
+                i["reactions"] = reactions.get(t, [])
+    return out
+
+
+def _encode_cursor(key: tuple) -> str:
+    d, created, item_id = key
+    raw = f"{d.isoformat()}|{created.astimezone(TAIPEI).isoformat()}|{item_id}"
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def _decode_cursor(cursor: str) -> tuple:
+    try:
+        raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()
+        d, created, item_id = raw.split("|", 2)
+        return date.fromisoformat(d), datetime.fromisoformat(created), item_id
+    except (ValueError, binascii.Error, UnicodeDecodeError) as exc:
+        raise unprocessable("分頁游標無效") from exc
+
+
+def feed_page(db: Session, md: MarketData, group: Group, members: list[Member], me_id: str, limit: int,
+              cursor: str | None, user_id: str | None) -> dict[str, Any]:
+    items = feed_items(db, md, group, members, me_id, user_id)
+    if cursor:
+        after = _decode_cursor(cursor)
+        items = [i for i in items if i["_key"] < after]
+    page = items[:limit]
+    nxt = _encode_cursor(page[-1]["_key"]) if len(items) > limit else None
+    return {"items": [{k: v for k, v in i.items() if k != "_key"} for i in page], "next_cursor": nxt}
+
+
+def visible_trade_ids(db: Session, md: MarketData, group: Group, members: list[Member]) -> set[str]:
+    return {i["id"] for i in feed_items(db, md, group, members, "", with_social=False) if i["type"] == "trade"}
+
+
+def latest_activity(db: Session, md: MarketData, group: Group, members: list[Member]) -> datetime | None:
+    """Newest visible feed item or comment on a visible target (nothing hidden moves it)."""
+    items = feed_items(db, md, group, members, "", with_social=False)
+    newest = [max(i["_key"][1] for i in items)] if items else []
+    targets = [f"trade:{i['id']}" for i in items if i["type"] == "trade"]
+    q = select(func.max(GroupComment.created_at)).where(GroupComment.group_id == group.id)
+    ready = [f"digest:{d}" for d in db.scalars(select(GroupDigest.id).where(GroupDigest.group_id == group.id,
+                                                                           GroupDigest.status == "ready"))]
+    c = db.scalar(q.where(GroupComment.target.in_(targets + ready) | GroupComment.target.like("leaderboard:%")))
+    if c is not None:
+        newest.append(c)
+    return max(newest) if newest else None
+
+
+# -- comment targets -------------------------------------------------------------------------------------------
+def target_visible(db: Session, md: MarketData, group: Group, members: list[Member], target: str) -> bool:
+    """A comment / reaction target of this group that the current projection shows (else the caller answers 404)."""
+    kind, _, ref = target.partition(":")
+    if kind == "trade":
+        return ref.startswith("gfi_") and ref in visible_trade_ids(db, md, group, members)
+    if kind == "digest":
+        d = db.get(GroupDigest, ref)
+        return d is not None and d.group_id == group.id and d.status == "ready"
+    if kind == "leaderboard":
+        try:
+            day = date.fromisoformat(ref)
+        except ValueError:
+            return False
+        return group.created_at.astimezone(TAIPEI).date() <= day <= today_taipei()
+    return False
+
+
+# -- deleting a trade deletes its feed item's thread ---------------------------------------------------------
+TradeKey = tuple[date, str, str]  # (trade_date, symbol, side)
+
+
+def trade_keys(txns: Iterable[Transaction]) -> list[TradeKey]:
+    """Feed keys of the transactions that can appear in a feed (call before they are deleted or changed)."""
+    return [(t.trade_date, t.symbol, t.type) for t in txns
+            if t.type in FEED_SIDES and t.source in FEED_SOURCES and t.symbol]
+
+
+def purge_trade_threads(db: Session, user_id: str, keys: Iterable[TradeKey]) -> None:
+    """Delete the comments and reactions (in every group) of feed items that no transaction backs any more."""
+    for d, symbol, side in set(keys):
+        left = db.scalar(select(func.count()).select_from(Transaction).where(
+            Transaction.user_id == user_id, Transaction.trade_date == d, Transaction.symbol == symbol,
+            Transaction.type == side, Transaction.source.in_(FEED_SOURCES)))
+        if left:
+            continue
+        target = f"trade:{feed_item_id(user_id, d, symbol, side)}"
+        db.execute(delete(GroupComment).where(GroupComment.target == target))
+        db.execute(delete(GroupReaction).where(GroupReaction.target == target))

@@ -6,9 +6,9 @@ from fastapi import APIRouter, Depends, Request, Response
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from forliosa.api.deps import create_session, current_user, destroy_session
+from forliosa.api.deps import create_session, current_user, destroy_session, signed_in_user
 from forliosa.api.errors import ApiError
-from forliosa.api.schemas import DevLoginIn, PreferencesPatch, User
+from forliosa.api.schemas import DevLoginIn, MePatch, PreferencesPatch, User
 from forliosa.config import get_settings
 from forliosa.db import get_db
 from forliosa.ids import new_id
@@ -20,7 +20,7 @@ router = APIRouter(tags=["auth"])
 
 
 def user_out(user: UserModel) -> dict:
-    return {"id": user.id, "email": user.email, "display_name": user.display_name,
+    return {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url,
             "preferences": preferences_of(user)}
 
 
@@ -51,6 +51,13 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 @router.get("/me", response_model=User, tags=["me"])
 def me(user: UserModel = Depends(current_user)):
+    return user_out(user)
+
+
+@router.patch("/me", response_model=User, tags=["me"], summary="修改顯示名稱（群組裡顯示的就是這個名稱）")
+def patch_me(body: MePatch, user: UserModel = Depends(signed_in_user), db: Session = Depends(get_db)):
+    user.display_name = body.display_name
+    db.commit()
     return user_out(user)
 
 

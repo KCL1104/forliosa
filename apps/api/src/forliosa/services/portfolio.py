@@ -285,7 +285,7 @@ def closed_positions(view: LedgerView, md: MarketData) -> list[dict[str, Any]]:
 
 
 # -- performance --------------------------------------------------------------------------------
-PERFORMANCE_RANGES = ("1D", "5D", "1M", "3M", "6M", "YTD", "1Y", "ALL")
+PERFORMANCE_RANGES = ("1D", "5D", "MTD", "1M", "3M", "6M", "YTD", "1Y", "ALL")
 # Short ranges counted in trading days. Their series starts with the base close (twr_index 1.0):
 # 1D = previous close -> latest close/quote (2 points), 5D = the last 5 trading days (6 points).
 TRADING_DAY_RANGES = {"1D": 1, "5D": 5}
@@ -414,6 +414,17 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
             si, based = first_active - 1, True
         else:
             si, based = 0, False
+    elif range_ == "MTD":
+        # Month to date (the share card's 「本月」): based on the previous month's last close, like the group
+        # leaderboard's month. A portfolio younger than that opens on the day before its first money.
+        month_start = end.replace(day=1)
+        prior = [i for i, p in enumerate(points) if p.t < month_start]
+        if prior and prior[-1] >= first_active:
+            si, based = prior[-1], True
+        elif first_active > 0:
+            si, based = first_active - 1, True
+        else:
+            si, based = 0, False
     else:
         nominal = range_start(range_, end, inception)
         si = next((i for i, p in enumerate(points) if p.t >= nominal), ei)
@@ -489,7 +500,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     # window opens with the base day's market value as the initial investment.
     if days is not None:
         rate = None
-    elif clipped:
+    elif clipped or (range_ == "MTD" and based):
         rate = xirr(xirr_flows(points, si + 1, ei)) if si < ei else None
     else:
         rate = xirr(xirr_flows(points, si, ei))
