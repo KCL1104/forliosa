@@ -48,7 +48,7 @@ const closed = async (page) => {
   await page.locator("#closed-list").waitFor()
   await page.evaluate(() => {
     const el = document.getElementById("closed-title")
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 340 : 260), behavior: "instant" })
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 340 : 90), behavior: "instant" })
   })
 }
 /** 法人觀點：展開總覽的收合區塊（2330 今天已經有人查過，直接有 3 筆），捲到它的標題 */
