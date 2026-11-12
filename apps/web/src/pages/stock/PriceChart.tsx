@@ -313,7 +313,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <RangeChips label="區間" value={range} options={RANGES} onChange={setRange} />
         <p className="ml-auto flex flex-wrap gap-x-3 text-xs text-ink-2">
-          {showMine && !isIntraday && (showAvg || marks.some((m) => candles.length > 0 && m.date >= candles[0]!.t)) && <span>B 買進・S 賣出・D 股利{showAvg && "・┈ 均價"}</span>}
+          {showMine && !isIntraday && !empty && (showAvg || marks.some((m) => candles.length > 0 && m.date >= candles[0]!.t)) && <span>B 買進・S 賣出・D 股利{showAvg && "・┈ 均價"}</span>}
           {moments && !isIntraday && momentList.length > 0 && <span>◆ 單日漲跌 ≥ 3%</span>}
           {comparing && <span>- - {COMPARES.find((c) => c.value === compare)?.label}</span>}
           {!comparing && kind === "candle" && mas.length > 0 && <span>{mas.map((n) => `MA${n}`).join("・")}</span>}

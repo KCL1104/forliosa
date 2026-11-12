@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react"
 import { useUi } from "@/app/ui-store"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { DISCLAIMER, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
+import { DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
+import { useAiUsage } from "./remote-hooks"
 import { DraftCard } from "./DraftCard"
 import type { Citation } from "./remote"
 import type { useAiRunner } from "./runner"
@@ -17,6 +18,8 @@ type Runner = ReturnType<typeof useAiRunner>
 export function Conversation({ thread, runner, size = "panel", onNavigate }: { thread: Thread; runner: Runner; size?: "panel" | "screen"; onNavigate?: () => void }) {
   const drafts = useAi((s) => s.drafts)
   const focusDraftId = useAi((s) => s.focusDraftId)
+  // 免責聲明：這則回答的 done.disclaimer → /ai/usage 的 disclaimer → 常數
+  const fallbackDisclaimer = useAiUsage().data?.disclaimer ?? DISCLAIMER
   const endRef = useRef<HTMLDivElement>(null)
   const count = thread.messages.length
   const last = thread.messages[count - 1]
@@ -40,7 +43,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
         ) : (
           <div key={m.id} className="note-in mt-4 flex flex-col" aria-busy={m.streaming || undefined}>
             <span className="sr-only">AI：</span>
-            {m.text && <AiText text={stripDisclaimer(m.text, m.disclaimer ?? DISCLAIMER)} ungrounded={m.ungrounded} size={size} />}
+            {m.text && <AiText text={stripDisclaimer(m.text, m.disclaimer ?? fallbackDisclaimer)} ungrounded={m.ungrounded} size={size} />}
             {m.streaming && <StreamingLine message={m} />}
             {m.answer && <AnswerView answer={m.answer} runner={runner} size={size} onNavigate={onNavigate} />}
             {m.error && <ErrorNote code={m.error.code} message={m.error.message} size={size} />}
@@ -58,7 +61,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
               ) : null,
             )}
             {!m.streaming && m.citations && m.citations.length > 0 && <Citations items={m.citations} />}
-            {!m.streaming && (m.text || m.answer) && !m.error && <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? DISCLAIMER}</p>}
+            {!m.streaming && (m.text || m.answer) && !m.error && <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? fallbackDisclaimer}</p>}
           </div>
         ),
       )}
@@ -92,7 +95,7 @@ export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: 
 function UngroundedMark({ passage }: { passage: UngroundedPassage }) {
   const [open, setOpen] = useState(false)
   const note = "這段沒有附來源，請自行查證。"
-  const reason = passage.reason && passage.reason.trim() !== note ? passage.reason.trim() : ""
+  const reason = groundingReason(passage.reason)
   return (
     <>
       <button

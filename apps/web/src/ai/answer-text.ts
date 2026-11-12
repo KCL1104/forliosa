@@ -8,7 +8,7 @@
 export const DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 
 /** 「僅供參考，非投資建議。」「AI 分析僅供參考，不構成投資建議」這類句子（可在一行的結尾） */
-const DISCLAIMER_TAIL = /[，,。．\s]*(?:以上)?(?:內容|資訊|分析|AI\s*分析)?(?:僅供參考)[，,、\s]*(?:並)?(?:非|不構成|不代表|不是)(?:任何)?投資建議[。．.!！]*\s*$/
+const DISCLAIMER_TAIL = /[，,。．\s]*(?:以上)?(?:內容|資訊|分析|回答|AI\s*分析|AI\s*回答)?(?:僅供參考)[，,、\s]*(?:並)?(?:非|不構成|不代表|不是)(?:任何)?投資建議[。．.!！]*\s*$/
 
 export function stripDisclaimer(text: string, disclaimer: string = DISCLAIMER): string {
   const trimmed = text.replace(/\s+$/, "")
@@ -100,4 +100,16 @@ export function parseGrounding(data: unknown): UngroundedPassage[] {
       end: typeof o.end === "number" ? o.end : null,
     }]
   })
+}
+
+/** grounding 的 reason 代碼（後端 `ai/grounding.py`）→ 給人看的話；認不得的代碼不顯示 */
+const REASON_TEXT: Record<string, string> = {
+  uncited_news_claim: "像新聞敘述，但沒有對到任何引用的來源。",
+}
+
+export function groundingReason(reason: string | null | undefined): string {
+  const r = (reason ?? "").trim()
+  if (!r) return ""
+  if (REASON_TEXT[r]) return REASON_TEXT[r]
+  return /^[a-z0-9_:-]+$/i.test(r) ? "" : r
 }

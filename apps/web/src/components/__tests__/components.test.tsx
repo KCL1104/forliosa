@@ -123,12 +123,12 @@ describe("<DataNotes>", () => {
 
 describe("<AiText> 無來源標記", () => {
   it("段落後面一個安靜的「無來源」，按下展開「請自行查證」", () => {
-    render(<AiText text="台積電今天上漲。外資連四天賣超。" ungrounded={[{ text: "外資連四天賣超。", reason: "沒有引用來源" }]} size="panel" />)
+    render(<AiText text="台積電今天上漲。外資連四天賣超。" ungrounded={[{ text: "外資連四天賣超。", reason: "uncited_news_claim" }]} size="panel" />)
     const mark = screen.getByRole("button", { name: "無來源" })
     expect(mark).toHaveAttribute("aria-expanded", "false")
     expect(mark.className).not.toMatch(/rise|fall|red/)
     fireEvent.click(mark)
-    expect(screen.getByRole("note")).toHaveTextContent("這段沒有附來源，請自行查證。沒有引用來源")
+    expect(screen.getByRole("note")).toHaveTextContent("這段沒有附來源，請自行查證。像新聞敘述，但沒有對到任何引用的來源。")
   })
   it("沒有 grounding 時就是一般的 AI 文字", () => {
     render(<AiText text="你好。" size="panel" />)

@@ -12,6 +12,7 @@ import type {
   PerformanceRange,
   Preferences,
   RecurringPlanInput,
+  Transaction,
   TransactionInput,
   TransactionQuery,
 } from "./types"
@@ -46,6 +47,19 @@ export const qk = {
   positionHistory: (symbol: string) => ["portfolio", "position-history", symbol] as const,
   recurring: ["recurring"] as const,
   attributions: ["meta", "attributions"] as const,
+}
+
+/** 後端每頁最多 200 筆：依 cursor 一頁一頁讀，最多讀到 `max` 筆（回傳是否還有更多） */
+export const PAGE_LIMIT = 200
+export async function listTransactionsUpTo(query: Omit<TransactionQuery, "limit" | "cursor">, max: number): Promise<{ items: Transaction[]; more: boolean }> {
+  const items: Transaction[] = []
+  let cursor: string | null = null
+  do {
+    const page = await api.listTransactions({ ...query, limit: Math.min(PAGE_LIMIT, max - items.length), cursor })
+    items.push(...page.items)
+    cursor = page.next_cursor
+  } while (cursor && items.length < max)
+  return { items, more: !!cursor }
 }
 
 let devAutoLoginTried = false

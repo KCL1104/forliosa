@@ -2,8 +2,8 @@ import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
 import { CoinsIcon } from "lucide-react"
 import { useMemo } from "react"
-import { api, appToday } from "@/api"
-import { useHoldings, useSummary, useUpcoming } from "@/api/queries"
+import { appToday } from "@/api"
+import { listTransactionsUpTo, useHoldings, useSummary, useUpcoming } from "@/api/queries"
 import type { Transaction } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { Masked } from "@/components/finance"
@@ -25,7 +25,7 @@ export function DividendsView() {
   const received = useQuery({
     queryKey: ["transactions", "dividends"],
     queryFn: async () => {
-      const [cash, stock] = await Promise.all([api.listTransactions({ type: "cash_dividend", limit: 300 }), api.listTransactions({ type: "stock_dividend", limit: 300 })])
+      const [cash, stock] = await Promise.all([listTransactionsUpTo({ type: "cash_dividend" }, 600), listTransactionsUpTo({ type: "stock_dividend" }, 600)])
       return [...cash.items, ...stock.items].sort((a, b) => b.trade_date.localeCompare(a.trade_date))
     },
   })

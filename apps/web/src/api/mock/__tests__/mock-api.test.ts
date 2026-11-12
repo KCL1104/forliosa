@@ -170,12 +170,12 @@ describe("定期定額", () => {
     const up = await api.getUpcoming(7)
     expect(up.find((u) => u.type === "recurring")).toMatchObject({ date: "2026-11-12", plan_id: plans[1]!.id, amount_estimate: 4000 })
 
-    const before = (await api.listTransactions({ limit: 500 })).items.length
+    const before = (await api.listTransactions({ limit: 200 })).items.length
     const d = await api.draftRecurring(plans[1]!.id)
     expect(d.transaction).toMatchObject({ type: "buy", trade_date: "2026-11-12", source: "ai_draft" })
     expect(d.transaction.quantity).toBe(Math.floor(4000 / d.transaction.price))
     expect(d.preview.tax).toBe(0)
-    expect((await api.listTransactions({ limit: 500 })).items.length).toBe(before)
+    expect((await api.listTransactions({ limit: 200 })).items.length).toBe(before)
 
     // 週末順延：每月 14 日（2026-11-14 是星期六）→ 11/16
     const created = await api.createRecurring({ account_id: tw!.id, symbol: "2330.TW", amount: 1000, day_of_month: [14] })

@@ -80,10 +80,10 @@ export function StockPage() {
       ) : (
         <>
           <Breadcrumb inst={inst} held={!!position.data} />
-          <QuoteHeader inst={inst} quote={quote.data} />
+          <QuoteHeader inst={inst} quote={quote.data} missing={quote.isError} />
           <WhyLine inst={inst} />
           {position.data ? (
-            <PositionBlock inst={inst} position={position.data} rounds={rounds} />
+            <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!quote.isError} />
           ) : (
             rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
           )}
@@ -205,7 +205,18 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   )
 }
 
-function QuoteHeader({ inst, quote }: { inst: InstrumentDetail; quote?: Quote }) {
+function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?: Quote; missing?: boolean }) {
+  if (missing && !quote) {
+    // 沒有報價（商用模式的美股）：不放一個大大的「—」，直接說明
+    return (
+      <header className="mt-1">
+        <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
+        <p className="mt-2 max-w-prose text-md text-ink-2">
+          {inst.market === "US" ? "美股目前沒有可商用的報價來源（需要授權的行情），暫不提供價格與走勢；持股以成本計值。" : "目前沒有報價。"}
+        </p>
+      </header>
+    )
+  }
   const ref = quote?.reference_price ?? quote?.prev_close ?? null
   const limits = quote && quote.limit_up !== undefined && quote.limit_up !== null ? { up: quote.limit_up, down: quote.limit_down ?? null } : limitPrices(ref, inst.market, inst.type)
   const change = quote ? (quote.change ?? (ref !== null ? quote.price - ref : null)) : null
@@ -318,7 +329,7 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
 }
 
 /** 我的部位：兩行（股數、均價、未實現、今日、已領股利）＋展開 */
-function PositionBlock({ inst, position: p, rounds }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[] }) {
+function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
@@ -341,13 +352,17 @@ function PositionBlock({ inst, position: p, rounds }: { inst: InstrumentDetail; 
           <Item
             label="未實現"
             value={
-              <span className={toneClass(direction(p.unrealized_pnl))}>
-                {money(p.unrealized_pnl, true)}
-                <span className="ml-1.5 text-md">{formatPercent(p.unrealized_pnl_pct)}</span>
-              </span>
+              priced ? (
+                <span className={toneClass(direction(p.unrealized_pnl))}>
+                  {money(p.unrealized_pnl, true)}
+                  <span className="ml-1.5 text-md">{formatPercent(p.unrealized_pnl_pct)}</span>
+                </span>
+              ) : (
+                <span className="text-ink-2" title="沒有報價，以成本計值">—</span>
+              )
             }
           />
-          <Item className="max-sm:hidden" label="今日" value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />
+          <Item className="max-sm:hidden" label="今日" value={priced ? <span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span> : <span className="text-ink-2">—</span>} />
           <Item className="max-sm:hidden" label="已領股利" value={money(p.dividends_received)} />
         </dl>
         <button
@@ -364,9 +379,9 @@ function PositionBlock({ inst, position: p, rounds }: { inst: InstrumentDetail; 
       {open && (
         <div id="position-more" className="note-in grid gap-x-10 gap-y-4 border-t border-rule py-4 md:grid-cols-2">
           <dl className="num grid grid-cols-2 gap-x-6 gap-y-2 text-md">
-            <Item className="sm:hidden" label="今日" value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />
+            <Item className="sm:hidden" label="今日" value={priced ? <span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span> : <span className="text-ink-2">—</span>} />
             <Item className="sm:hidden" label="已領股利" value={money(p.dividends_received)} />
-            <Item label="市值" value={money(p.market_value)} />
+            <Item label={priced ? "市值" : "市值（以成本計）"} value={money(p.market_value)} />
             <Item label="成本" value={money(p.cost_basis)} />
             <Item label="已實現" value={<span className={toneClass(direction(p.realized_pnl))}>{money(p.realized_pnl, true)}</span>} />
             {rounds.length > 0 && (

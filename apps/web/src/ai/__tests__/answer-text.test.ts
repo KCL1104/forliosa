@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { DISCLAIMER, parseGrounding, splitUngrounded, stripDisclaimer } from "@/ai/answer-text"
+import { DISCLAIMER, groundingReason, parseGrounding, splitUngrounded, stripDisclaimer } from "@/ai/answer-text"
 import { applyChatEvent } from "@/ai/remote"
 import type { Message } from "@/ai/types"
 
@@ -10,6 +10,10 @@ describe("免責聲明由介面固定顯示：模型最後一行同樣的話不�
   })
   it("同一行有資料時間：保留時間，只拿掉免責那一句", () => {
     expect(stripDisclaimer("鴻海今天平盤。\n資料至 11/12 13:30，僅供參考，非投資建議。")).toBe("鴻海今天平盤。\n資料至 11/12 13:30")
+  })
+  it("後端的固定文字「AI 回答僅供參考，非投資建議。」", () => {
+    expect(stripDisclaimer("好的。\nAI 回答僅供參考，非投資建議。", "AI 回答僅供參考，非投資建議。")).toBe("好的。")
+    expect(stripDisclaimer("好的。\nAI 回答僅供參考，非投資建議。")).toBe("好的。")
   })
   it("後端給的 disclaimer 文字優先比對", () => {
     expect(stripDisclaimer("好的。\n以上內容不構成任何建議。", "以上內容不構成任何建議。")).toBe("好的。")
@@ -38,6 +42,15 @@ describe("無來源段落", () => {
   it("重疊的段落只標一次", () => {
     const seg = splitUngrounded(text, [{ text: "外資連四天賣超。" }, { text: "連四天賣超" }])
     expect(seg.filter((s) => s.ungrounded)).toHaveLength(1)
+  })
+  it("後端的 GroundingItem（index、start／end、reason 代碼、signals）", () => {
+    const t = "台積電今天上漲。董事會批准投資 Anthropic 與 OpenAI。"
+    const items = parseGrounding({ items: [{ index: 1, start: 8, end: t.length, text: "董事會批准投資 Anthropic 與 OpenAI。", reason: "uncited_news_claim", signals: ["verb:批准"] }] })
+    const seg = splitUngrounded(t, items)
+    expect(seg[1]).toMatchObject({ text: "董事會批准投資 Anthropic 與 OpenAI。" })
+    expect(groundingReason("uncited_news_claim")).toBe("像新聞敘述，但沒有對到任何引用的來源。")
+    expect(groundingReason("some_new_code")).toBe("")
+    expect(groundingReason("引用沒有涵蓋這句")).toBe("引用沒有涵蓋這句")
   })
   it("grounding 事件的資料容錯：{items}、陣列、單一物件、壞資料", () => {
     expect(parseGrounding({ items: [{ text: "A", reason: "r", start: 1, end: 2 }] })).toEqual([{ text: "A", reason: "r", start: 1, end: 2 }])

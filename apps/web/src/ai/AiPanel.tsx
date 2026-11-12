@@ -133,12 +133,13 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
  * 輸入框下方一行：還沒有對話時是免責聲明（對話中每則回答下方已經固定顯示）；提問額度快用完時多一句。
  */
 export function FooterNote({ className }: { className?: string }) {
-  const note = usageNote(useAiUsage().data)
+  const usage = useAiUsage().data
+  const note = usageNote(usage)
   const inThread = !!useCurrentThread()
   if (inThread && !note) return null
   return (
     <p className={cn("mt-2.5 text-xs text-ink-2", className)}>
-      {!inThread && DISCLAIMER}
+      {!inThread && (usage?.disclaimer ?? DISCLAIMER)}
       {note && <span className={cn("text-ink", !inThread && "ml-1")}>{note}</span>}
     </p>
   )

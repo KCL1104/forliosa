@@ -119,6 +119,8 @@ export interface AiUsage {
   cost_usd_month: number
   model: string
   available: boolean
+  /** 固定顯示的免責聲明（後端提供） */
+  disclaimer?: string
 }
 
 function prefix(): string {

@@ -345,6 +345,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
     listTransactions: (query) =>
       wait(() => {
+        // 與後端相同：每頁最多 200 筆
+        if ((query.limit ?? 50) > 200) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：筆數")
         const filtered = txns
           .filter((t) => !query.account_id || t.account_id === query.account_id)
           .filter((t) => !query.symbol || t.symbol === query.symbol)
