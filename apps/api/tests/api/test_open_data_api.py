@@ -1,6 +1,6 @@
 """Open-data additions through the API under DATA_POLICY=commercial: derivatives (TAIFEX, with the conditional
 licence gate), the ^TAIEXTR benchmark from the archive, dividend resolutions, company profiles, official ex-rights
-reference prices, TAIFEX FX and /meta/attributions."""
+reference prices, USD/TWD from the central bank (TAIFEX FX archived only) and /meta/attributions."""
 
 from __future__ import annotations
 
@@ -177,21 +177,89 @@ def test_official_ex_rights_reference_wins(engine, archived):
     assert ref["2330.TW"][0] == D("2395")  # TWT84U as before
 
 
-def test_taifex_fx_is_gated_by_the_licence_setting(engine, archived, monkeypatch):
+CBC_NOTE = "USD/TWD 匯率：中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版"
+
+
+def test_fx_uses_the_central_bank_series_in_every_mode(engine, archived, monkeypatch):
+    from forliosa.models import FxRate
     from forliosa.services.ledger_io import FxBook
-    from forliosa.services.portfolio import FX_PENDING_NOTE, fx_notes
+    from forliosa.services.portfolio import fx_notes
 
     md = archived
-    fx = FxBook.load(md, date(2026, 11, 1), date(2026, 11, 11))
-    assert fx.fixed and fx.rate("USD", date(2026, 11, 11)) == D("31.5")
-    assert fx_notes(fx, md) == [FX_PENDING_NOTE]
+    fx = FxBook.load(md, date(2026, 11, 1), date(2026, 11, 12))
+    assert not fx.fixed and fx.source == "cbc-opendata"
+    assert fx.rate("USD", date(2026, 11, 11)) == D("32.86") and fx.latest("USD") == D("32.889")
+    assert fx.rate("USD", date(2026, 11, 8)) == D("32.768")  # a Sunday: Friday's close
+    assert fx_notes(fx, today=date(2026, 11, 12)) == [CBC_NOTE]
+    # TAIFEX's reference rate is archived (other pairs too) but never used, whatever the licence setting says
+    with Session(engine) as db:
+        assert db.get(FxRate, ("CNYTWD", date(2026, 11, 11))).source == "taifex-openapi"
+        assert db.get(FxRate, ("USDTWD", date(2026, 11, 11))).source == "cbc-opendata"
     monkeypatch.setattr(get_settings(), "taifex_conditional_confirmed", True)
-    fx = FxBook.load(md, date(2026, 11, 1), date(2026, 11, 11))
-    assert not fx.fixed and fx.rate("USD", date(2026, 11, 11)) == D("32.86") and fx.source == "taifex-openapi"
-    assert fx_notes(fx, md) == [
-        "USD/TWD 匯率：臺灣期貨交易所〈每日外幣參考匯率〉（2026），依政府資料開放授權條款第 1 版"]
-    personal = ArchiveProvider("personal", session_fn=lambda: Session(engine), taifex_confirmed=False)
-    assert personal.fx_history("USDTWD", date(2026, 11, 1), date(2026, 11, 11))  # non-commercial use: served
+    assert FxBook.load(md, date(2026, 11, 1), date(2026, 11, 12)).source == "cbc-opendata"
+    for policy in ("commercial", "personal"):
+        arch = ArchiveProvider(policy, session_fn=lambda: Session(engine), taifex_confirmed=True)
+        series = arch.fx_history("USDTWD", date(2026, 11, 1), date(2026, 11, 12))
+        assert series[date(2026, 11, 12)] == D("32.889") and arch.sources_for("fx_history", "USDTWD") == [
+            "cbc-opendata"]
+        assert arch.fx_history("CNYTWD", date(2026, 11, 1), date(2026, 11, 12)) is None
+    # the series begins 2008-01-02: an older trade uses that first rate
+    old = FxBook.load(md, date(2007, 6, 1), date(2026, 11, 12))
+    assert old.rate("USD", date(2007, 6, 1)) == D("32.443")
+
+
+def test_fx_falls_back_to_the_documented_fixed_rate(engine):
+    from forliosa.services.ledger_io import FX_FALLBACK, FxBook
+    from forliosa.services.portfolio import FX_MISSING_NOTE, fx_notes
+
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine)), DemoProvider()],
+                    policy="commercial")
+    fx = FxBook.load(md, date(2026, 11, 1), date(2026, 11, 12))
+    assert fx.fixed and fx.latest_point() is None and fx_notes(fx) == []  # no US amount converted yet
+    assert fx.rate("USD", date(2026, 11, 11)) == FX_FALLBACK == D("31.5")
+    assert fx_notes(fx) == [FX_MISSING_NOTE] and "中央銀行" in FX_MISSING_NOTE
+
+
+def test_fx_note_says_when_the_series_stopped(archived):
+    from forliosa.services.ledger_io import FxBook
+    from forliosa.services.portfolio import fx_notes, fx_tool_notes
+
+    fx = FxBook.load(archived, date(2026, 11, 1), date(2026, 11, 12))
+    fx.latest("USD")
+    assert fx_notes(fx, today=date(2026, 11, 26)) == [CBC_NOTE]  # two weeks: still fine
+    assert fx_notes(fx, today=date(2026, 11, 27)) == [
+        CBC_NOTE, "USD/TWD 匯率只到 2026-11-12（32.889），之後的日子沿用這個匯率"]
+    assert fx_tool_notes(fx, today=date(2026, 11, 12)) == [
+        CBC_NOTE, "美股市值以 2026-11-12 的 USD/TWD 32.889 換算成新台幣；成本、已實現損益與股利用各交易日的匯率"]
+    assert fx_tool_notes(FxBook(), today=date(2026, 11, 12)) == []  # no US amount: nothing to say
+
+
+def test_us_holdings_are_valued_with_the_central_bank_rate(client, archived, engine):
+    import json
+
+    from forliosa.ai.tools import ToolContext, execute
+    from forliosa.models import User
+
+    r = client.post(f"{API}/accounts", json={"name": "Firstrade", "broker": "Firstrade", "currency": "USD"})
+    assert r.status_code == 201, r.text
+    r = client.post(f"{API}/transactions", json={"account_id": r.json()["id"], "symbol": "AAPL", "type": "buy",
+                                                 "trade_date": "2026-11-03", "quantity": 10, "price": 200})
+    assert r.status_code == 201, r.text
+    paid = D(str(r.json()["amount"])) + D(str(r.json()["fee"]))
+    h = client.get(f"{API}/portfolio/holdings").json()[0]
+    # cost at the trade date's closing rate (2026-11-03: 32.76); no US quote under commercial, so the market
+    # value is the cost in USD at the newest rate (2026-11-12: 32.889)
+    assert h["cost_basis"] == pytest.approx(float(paid * D("32.76")), abs=0.01)
+    assert h["market_value"] == pytest.approx(float(paid * D("32.889")), abs=0.01)
+    pos = client.get(f"{API}/instruments/AAPL/position").json()
+    assert CBC_NOTE.removeprefix("USD/TWD 匯率：") in pos["sources"]
+    with Session(engine) as db:
+        me = db.query(User).filter_by(email="demo@forliosa.local").one()
+        ctx = ToolContext(db=db, user=me, md=archived)
+        rate_line = "美股市值以 2026-11-12 的 USD/TWD 32.889 換算成新台幣；成本、已實現損益與股利用各交易日的匯率"
+        for tool, args in (("get_holdings", {}), ("get_portfolio_summary", {}), ("get_position", {"symbol": "AAPL"})):
+            notes = json.loads(execute(ctx, tool, args).content)["notes"]
+            assert CBC_NOTE in notes and rate_line in notes, (tool, notes)
 
 
 def test_attributions_list_licence_status_conditional_and_stale(client, archived, monkeypatch):
@@ -208,6 +276,12 @@ def test_attributions_list_licence_status_conditional_and_stale(client, archived
     assert served["twse-openapi/index"]["last_updated"] == "2026-11-11"
     assert served["taifex-openapi/put_call_ratio"]["attribution"] == (
         "臺灣期貨交易所〈臺指選擇權Put/Call比〉（2026），依政府資料開放授權條款第 1 版")
+    cbc = served["cbc-opendata/fx"]
+    assert cbc["attribution"] == "中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版"
+    assert (cbc["agency"], cbc["license_status"], cbc["license_basis"], cbc["commercial"], cbc["last_updated"]) == (
+        "中央銀行", "ogdl", "data.gov.tw 7232", True, "2026-11-12")
+    assert cbc["url"] == "https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day"
+    assert "只存檔" in pending["taifex-openapi/fx"]["used_for"]
     stale = {s["key"]: s for s in meta["stale"]}
     assert stale["twse-openapi/breadth"]["last_updated"] == "2026-06-05"
     assert stale["tpex-openapi/dividend_resolution"]["last_updated"] == "2021-08-04"

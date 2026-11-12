@@ -55,15 +55,16 @@ class RateLimiter:
 
 
 # Polite intervals per host (docs/research/data-sources-licensing.md §4.4, open-data-inventory.md §12.2):
-# TWSE ≥ 3 s, TPEx, TDCC and TAIFEX ≥ 2 s.
+# TWSE ≥ 3 s, TPEx, TDCC, TAIFEX and the central bank ≥ 2 s.
 DEFAULT_LIMITER = RateLimiter(
     default_interval=0.0,
     per_host={"twse.com.tw": 3.0, "tpex.org.tw": 2.0, "tdcc.com.tw": 2.0, "taifex.com.tw": 2.0,
-              "finmindtrade.com": 0.25},
+              "cbc.gov.tw": 2.0, "finmindtrade.com": 0.25},
 )
 
 # Source allowlist: the only URLs the server may fetch. Official open data published under the Open
-# Government Data License (TWSE / TPEx / TAIFEX OpenAPI, TDCC open data), shioaji-data's official files, and
+# Government Data License (TWSE / TPEx / TAIFEX OpenAPI, TDCC open data, the central bank's open-data API for
+# 銀行間新臺幣對美元收盤匯率 — data.gov.tw 7232), shioaji-data's official files, and
 # FinMind (only constructed under an explicit DATA_POLICY=personal opt-in). Website pages of TWSE / TPEx /
 # TAIFEX / MIS / MOPS are deliberately absent: their terms forbid automated downloads without written consent.
 # TAIFEX: only the /v1/ data endpoints (they answer 200 directly; /v1/swagger.json is a 302 and never needed).
@@ -72,6 +73,7 @@ ALLOWED_URL_PREFIXES = (
     "https://www.tpex.org.tw/openapi/",
     "https://opendata.tdcc.com.tw/",
     "https://openapi.taifex.com.tw/v1/",
+    "https://cpx.cbc.gov.tw/api/OpenData/",
     "https://raw.githubusercontent.com/Sinotrade/shioaji-data/",
     "https://api.finmindtrade.com/",
 )

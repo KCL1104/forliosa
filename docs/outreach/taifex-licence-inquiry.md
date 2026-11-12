@@ -7,6 +7,9 @@
 >
 > **狀態：產品負責人 2026-11-12 決定先不寄信**（`PRODUCT.md`「初期資料源不付費」）。草稿保留備用；在寄出並取得同意前，
 > `TAIFEX_CONDITIONAL_CONFIRMED` 維持預設 `false`，這些資料集只存檔、不顯示。
+>
+> **2026-11-12 更新**：USD/TWD 已改用中央銀行〈銀行間新臺幣對美元收盤匯率〉（data.gov.tw 7232，OGDL；數字與期交所 USD/NTD 逐日相同），
+> 不再需要第 3 項。日後真的要寄信時，可以把第 3 項刪掉或改成「其他外幣匯率」。
 
 ---
 
@@ -46,10 +49,10 @@ Forliosa 開發者　〔姓名〕〔Email〕〔電話〕
 | 回覆 | 要做的事 |
 |---|---|
 | 書面同意可依 OGDL 商用（全部或部分資料集） | 部署環境設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`；若只同意部分資料集，請改為逐一開放（`datapolicy.DATASETS` 的 `license_status` 改成 `ogdl`，並在 `basis` 記下回覆日期），不要用總開關。把回覆信存檔（例如 `docs/research/`）。 |
-| 需要另簽授權或付費 | 維持 `false`（預設）；`/derivatives/overview` 繼續只顯示三大法人、大額交易人（期貨）與 Put/Call 比；USD/TWD 維持固定 31.5 並在績效 `notes` 說明。 |
+| 需要另簽授權或付費 | 維持 `false`（預設）；`/derivatives/overview` 繼續只顯示三大法人、大額交易人（期貨）與 Put/Call 比。USD/TWD 不受影響（2026-11-12 起用中央銀行〈銀行間新臺幣對美元收盤匯率〉）。 |
 | 沒有回覆 | 同上，維持 `false`。 |
 
 開關的效果（`DATA_POLICY=commercial` 時）：
 
 - `false`（預設）：上述資料集照常每日存檔，但 API、AI 工具與 `/meta/attributions` 的 `datasets` 都不顯示；`/meta/attributions.conditional` 列出它們與原因。
-- `true`：期貨行情（`/derivatives/overview.futures`、`/derivatives/futures/{code}/history`）、選擇權大額交易人、USD/TWD 參考匯率開始顯示，並附顯名聲明。
+- `true`：期貨行情（`/derivatives/overview.futures`、`/derivatives/futures/{code}/history`）、選擇權大額交易人開始顯示，並附顯名聲明。〈每日外幣參考匯率〉仍只存檔：USD/TWD 換算已改用中央銀行〈銀行間新臺幣對美元收盤匯率〉（數字相同、授權明確）。

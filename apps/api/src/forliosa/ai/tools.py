@@ -185,9 +185,10 @@ def get_portfolio_summary(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import portfolio as svc
 
     account_id = _own_account_id(ctx, args.get("account_id"))
-    s = svc.summary(svc.compute_state(ctx.db, ctx.user, ctx.md, account_id), ctx.md)
+    state = svc.compute_state(ctx.db, ctx.user, ctx.md, account_id)
+    s = svc.summary(state, ctx.md)
     alloc = s.get("allocation") or {}
-    return {
+    out = {
         **_pick(s, "as_of", "market_value", "cost_basis", "unrealized_pnl", "unrealized_pnl_pct", "realized_pnl",
                 "dividend_income", "total_pnl", "total_return_pct", "day_change", "day_change_pct", "is_demo"),
         "allocation": {k: [_pick(i, "label", "value", "weight") for i in (v or [])[:6]]
@@ -196,6 +197,9 @@ def get_portfolio_summary(ctx: ToolContext, args: dict[str, Any]) -> Any:
         "accounts": _account_list(ctx),
         "currency": "TWD",
     }
+    if fx := svc.fx_tool_notes(state.fx):
+        out["notes"] = fx
+    return out
 
 
 def get_holdings(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -208,7 +212,8 @@ def get_holdings(ctx: ToolContext, args: dict[str, Any]) -> Any:
             "prev_close", "market_value", "day_change", "day_change_pct", "unrealized_pnl", "unrealized_pnl_pct",
             "weight", "is_demo")
     return {"as_of": iso_taipei(state.as_of), "count": len(rows), "holdings": [_pick(h, *keys) for h in rows],
-            "notes": ["金額為新台幣；avg_cost、price 為原幣；quantity 為股數（1 張 = 1000 股）"]}
+            "notes": ["金額為新台幣；avg_cost、price 為原幣；quantity 為股數（1 張 = 1000 股）",
+                      *svc.fx_tool_notes(state.fx)]}
 
 
 def get_transactions(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -404,6 +409,9 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import stock as svc
+    from forliosa.services.ledger_io import FxBook
+    from forliosa.services.portfolio import fx_tool_notes
+    from forliosa.timeutil import today_taipei
 
     info = resolve_instrument(ctx.md, args["symbol"])
     pos = svc.position(ctx.db, ctx.md, ctx.user, info.symbol)
@@ -411,10 +419,14 @@ def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
         return {"symbol": info.symbol, "name": info.name, "held": False,
                 "note": "目前沒有持有這檔；過去的交易可用 get_transactions 查詢"}
     markers = pos.get("markers") or []
+    notes = ["金額為新台幣；avg_cost 為原幣；quantity 為股數"]
+    if pos.get("currency", "TWD") != "TWD":
+        fx = FxBook.load(ctx.md, today_taipei())
+        fx.latest(pos["currency"])  # marks the book as converting a US amount
+        notes.extend(fx_tool_notes(fx))
     return {"symbol": info.symbol, "name": info.name, "held": True,
             **{k: v for k, v in pos.items() if k not in ("markers", "symbol", "sources")},
-            "trades_count": len(markers), "recent_trades": markers[-10:],
-            "notes": ["金額為新台幣；avg_cost 為原幣；quantity 為股數"]}
+            "trades_count": len(markers), "recent_trades": markers[-10:], "notes": notes}
 
 
 def search_instruments(ctx: ToolContext, args: dict[str, Any]) -> Any:

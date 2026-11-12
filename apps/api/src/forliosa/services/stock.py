@@ -722,7 +722,8 @@ def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, 
             "amount_estimate": ser.money(row.quantity * upcoming[0].cash_dividend * row.fx),
         } if upcoming else None,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else iso_taipei(state.as_of),
-        "sources": labels(["ledger", *(tagged(q.source, "price") if q else [])]),
+        "sources": labels(["ledger", *(tagged(q.source, "price") if q else []),
+                           *(tagged(state.fx.source, "fx") if row.currency != "TWD" else [])]),
         "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
     }
 

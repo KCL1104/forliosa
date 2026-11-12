@@ -506,7 +506,7 @@ class MarketData:
         return series, is_demo
 
     def fx_series_with_source(self, pair: str, start: date, end: date) -> tuple[dict[date, Decimal], bool, str]:
-        """FX series and the source keys behind it (archive: ``taifex-openapi``; empty when none answered)."""
+        """FX series and the source keys behind it (archive: ``cbc-opendata``; empty when none answered)."""
         for p in self._available():
             value = self._call(p, lambda p=p: p.fx_history(pair, start, end))
             if value:

@@ -17783,21 +17783,21 @@
    "path_or_url": "https://data.gov.tw/dataset/7232",
    "method": "GET",
    "title_zh": "銀行間市場新臺幣對美元收盤匯率",
-   "description": "台北外匯經紀公司資料，日／月／年資料；data.gov.tw 頁面列有日資料、月平均、年平均三個 API 與 OAS 文件",
+   "description": "台北外匯經紀公司資料，日／月／年資料；日資料 API：https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day（JSON 陣列，一次回全部歷史），另有 FTDOpenData_Month（西元年月）、FTDOpenData_Year（鍵「西元年」，2026-11-12 實測回的是月資料）",
    "key_fields": [
     "日期",
-    "收盤匯率"
+    "NTD_USD"
    ],
-   "update_frequency": "每營業日（頁面 metadata 寫「每1年」，與內容不符）",
-   "history_depth": "長期歷史（日資料自 1980 年代起，待下載確認）",
+   "update_frequency": "每營業日，當天下午公布（2026-11-12 的匯率 17:12 已有；頁面 metadata 寫「每1年」，與內容不符）",
+   "history_depth": "日資料 2008-01-02 起（2026-11-12 共 4,686 個營業日）",
    "license": "政府資料開放授權條款第 1 版",
    "attribution_required": true,
    "commercial_ok": true,
-   "rate_limit_notes": "未知",
+   "rate_limit_notes": "未公布；Forliosa 每 2 秒最多一次、每天一次",
    "forliosa_use": "fx",
    "priority": "P1",
-   "already_used": false,
-   "verified": "search（data.gov.tw 7232 摘要；metadata 更新 2024-12-25）；本沙箱連不到 data.gov.tw、cbc.gov.tw"
+   "already_used": true,
+   "verified": "2026-11-12 直接下載 FTDOpenData_Day／Month／Year（cpx.cbc.gov.tw 開通後）；與期交所 USD/NTD 逐日相同；Forliosa 已採用（datapolicy cbc-opendata/fx）"
   },
   {
    "provider": "中央銀行",

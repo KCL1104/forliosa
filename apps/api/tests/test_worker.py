@@ -53,5 +53,6 @@ def test_evening_and_weekly_runs_include_the_new_groups():
     from forliosa.archive import JOB_GROUPS
     from forliosa.worker import EVENING_GROUPS, WEEKLY_GROUPS
 
-    assert {"taifex", "companies", "financials"} <= set(EVENING_GROUPS) and set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
+    assert {"taifex", "cbc", "companies", "financials"} <= set(EVENING_GROUPS)
+    assert set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
     assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) == set(JOB_GROUPS)

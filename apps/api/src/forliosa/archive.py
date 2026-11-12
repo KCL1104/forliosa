@@ -4,7 +4,7 @@ Run once from the command line::
 
     uv run python -m forliosa.archive run                    # every job that applies to DATA_POLICY
     uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | companies | financials | taifex |
-                                                             # tdcc | weekly
+                                                             # cbc | tdcc | weekly
     uv run python -m forliosa.archive backfill --days 90     # personal opt-in only, see "Backfill" below
 
 The worker runs the same jobs on a schedule (``forliosa.worker``). Every write is an upsert keyed on
@@ -36,13 +36,17 @@ dividend_resolutions        TWSE t187ap45_L 股利分派情形 (board / AGM reso
 company_profiles            TWSE t187ap03_L, TPEx mopsfin_t187ap03_O (issued shares, industry, listing date)
 ex_rights_results           TPEx tpex_exright_daily (official reference price and limits on ex-dates)
 taifex_*                    TAIFEX OpenAPI (group ``taifex``, daily 21:40; ``weekly``: final settlement prices,
-fx_rates                    SSF/SSO lists). DailyForeignExchangeRates -> fx_rates (USDTWD …, multi-day upsert)
+fx_rates                    SSF/SSO lists). DailyForeignExchangeRates -> fx_rates (USDTWD …, multi-day upsert;
+                            archived only: a central-bank USDTWD row of the same day is never overwritten)
+fx_rates (USDTWD)           中央銀行 FTDOpenData_Day 銀行間新臺幣對美元收盤匯率 (group ``cbc``, 21:40; every response
+                            is the whole history since 2008, so the first run backfills it; later runs write only
+                            new or changed days). Source ``cbc-opendata``: the only USD/TWD series used for valuation
 dataset_status              newest data date per dataset (shown in /meta/attributions; ``weekly`` also checks the
                             stale endpoints twtazu_od and t187ap09_L)
 ==========================  =========================================================
 
-Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw`` and
-``openapi.taifex.com.tw/v1`` are fetched (see the allowlist in ``marketdata/http.py``). The TWSE / TPEx / TAIFEX
+Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw``, ``openapi.taifex.com.tw/v1``
+and ``cpx.cbc.gov.tw/api/OpenData`` are fetched (see the allowlist in ``marketdata/http.py``). The TWSE / TPEx / TAIFEX
 **websites** forbid automated downloads without written consent, so the former T86 / MI_QFIIS website jobs and
 the website backfill were removed (2026-11-12). There is no official per-stock history API: the archive only
 grows from the day the worker starts. ``backfill`` remains only for FinMind under an explicit
@@ -66,6 +70,7 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import Policy
+from forliosa.marketdata import cbc
 from forliosa.marketdata import opendata as od
 from forliosa.marketdata import taifex as tf
 from forliosa.marketdata.base import ProviderUnavailable, tw_symbol
@@ -115,14 +120,16 @@ INDUSTRIES = ("ci", "basi", "bd", "fh", "ins", "mim")
 MARGIN_READY = time(21, 0)
 
 # twse / tpex: latest-day datasets (08:10, 14:40, 21:40); companies: slow-changing large files (21:40);
-# taifex: TAIFEX daily datasets (21:40); weekly (Saturday): TAIFEX final settlement + SSF/SSO lists, and the
-# stale-endpoint check.
-JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "tdcc", "weekly")
+# taifex: TAIFEX daily datasets (21:40); cbc: the central bank's USD/TWD closing rate (21:40; published the same
+# afternoon); weekly (Saturday): TAIFEX final settlement + SSF/SSO lists, and the stale-endpoint check.
+JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "tdcc", "weekly")
 
 
 def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
-           update: Iterable[str] | None = None) -> int:
-    """INSERT … ON CONFLICT (keys) DO UPDATE (``update`` columns) or DO NOTHING (``update=()``)."""
+           update: Iterable[str] | None = None, where: Any = None) -> int:
+    """INSERT … ON CONFLICT (keys) DO UPDATE (``update`` columns) or DO NOTHING (``update=()``).
+
+    ``where`` (a condition on the existing row) limits which conflicting rows are updated; the others are kept."""
     if not rows:
         return 0
     dialect = db.get_bind().dialect.name
@@ -133,7 +140,8 @@ def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
         stmt = insert(model).values(chunk)
         cols = list(update) if update is not None else [k for k in chunk[0] if k not in keys]
         if cols:
-            stmt = stmt.on_conflict_do_update(index_elements=keys, set_={c: stmt.excluded[c] for c in cols})
+            stmt = stmt.on_conflict_do_update(index_elements=keys, set_={c: stmt.excluded[c] for c in cols},
+                                              where=where)
         else:
             stmt = stmt.on_conflict_do_nothing(index_elements=keys)
         db.execute(stmt)
@@ -541,10 +549,26 @@ class Archiver:
 
     def taifex_fx(self) -> int:
         """DailyForeignExchangeRates (about six weeks per response) -> fx_rates (pair USDTWD …), upserted.
-        Archived under every policy; served only when datapolicy.dataset_served("taifex-openapi/fx") allows."""
+
+        Archived under every policy but never used for valuation: USD/TWD comes from the central bank
+        (:meth:`cbc_fx`). ``fx_rates`` keeps one row per (pair, date), so a central-bank USDTWD row is never
+        overwritten here (TAIFEX publishes the same number; only the source key would change)."""
         rows = [{**r, "source": tf.SOURCE} for r in tf.parse_fx(self._taifex("DailyForeignExchangeRates"))]
-        n = upsert(self.db, FxRate, rows, ["pair", "date"])
+        n = upsert(self.db, FxRate, rows, ["pair", "date"], where=FxRate.source != cbc.SOURCE)
         self._status("taifex-openapi/fx", tf.latest_date(rows, "date"), n)
+        return n
+
+    # -- 中央銀行 ---------------------------------------------------------------------------------
+    def cbc_fx(self) -> int:
+        """中央銀行〈銀行間新臺幣對美元收盤匯率〉 -> fx_rates USDTWD (source ``cbc-opendata``).
+
+        Every response is the whole history since 2008-01-02, so the first run backfills it; later runs write
+        only days that are new or changed (a TAIFEX row of the same day becomes the central bank's)."""
+        rows = cbc.parse_fx_day(self._json(cbc.FX_DAY_URL))
+        have = {(r.date, r.rate, r.source) for r in self.db.scalars(select(FxRate).where(FxRate.pair == cbc.PAIR))}
+        changed = [{**r, "source": cbc.SOURCE} for r in rows if (r["date"], r["rate"], cbc.SOURCE) not in have]
+        n = upsert(self.db, FxRate, changed, ["pair", "date"])
+        self._status(cbc.FX_DATASET, rows[-1]["date"] if rows else None, n)
         return n
 
     def taifex_margins(self) -> int:
@@ -639,6 +663,8 @@ class Archiver:
                              ("taifex put/call", self.taifex_put_call), ("taifex fx", self.taifex_fx),
                              ("taifex margins", self.taifex_margins)):
                 self._run(name, fn)
+        if "cbc" in groups:
+            self._run("cbc fx FTDOpenData_Day", self.cbc_fx)
         if "tdcc" in groups:
             self._run("tdcc distribution", self.tdcc)
         if "weekly" in groups:
@@ -699,7 +725,7 @@ def main(argv: list[str] | None = None) -> None:
     from forliosa.config import get_settings
     from forliosa.db import session_factory
 
-    parser = argparse.ArgumentParser(description="官方開放資料存檔（證交所、櫃買中心、期交所、集保）")
+    parser = argparse.ArgumentParser(description="官方開放資料存檔（證交所、櫃買中心、期交所、中央銀行、集保）")
     sub = parser.add_subparsers(dest="cmd", required=True)
     run_p = sub.add_parser("run", help="執行一次每日存檔")
     run_p.add_argument("--only", default="", help=f"逗號分隔：{','.join(JOB_GROUPS)}")

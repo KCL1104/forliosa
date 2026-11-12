@@ -43,6 +43,7 @@ const ROWS: Row[] = [
   ["tpex-openapi/balance", "證券櫃檯買賣中心", "上櫃公司資產負債表", "https://www.tpex.org.tw/openapi/v1/mopsfin_t187ap07_O_ci", "季報資產負債"],
   ["tpex-openapi/margins", "證券櫃檯買賣中心", "上櫃公司營益分析查詢彙總表", "https://www.tpex.org.tw/openapi/v1/mopsfin_187ap17_O", "利潤率"],
   ["tdcc-opendata/distribution", "臺灣集中保管結算所", "集保戶股權分散表", "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5", "大戶持股分級"],
+  ["cbc-opendata/fx", "中央銀行", "銀行間新臺幣對美元收盤匯率", "https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day", "美股換算新台幣"],
   ["shioaji-data/official", "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）", "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data", "商品主檔、月營收、季報、市值"],
 ]
 

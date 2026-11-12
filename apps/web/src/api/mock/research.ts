@@ -439,7 +439,8 @@ export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[], com
     upcoming_dividend: next && !(commercial && spec.market === "US") ? { ex_dividend_date: next.ex_dividend_date!, amount_estimate: round(next.cash_dividend * holding.quantity * fx, 0) } : null,
     currency: spec.currency,
     as_of: MOCK_AS_OF,
-    sources: ["本系統帳本"],
+    // 美股的台幣金額用到匯率：後端一併列出匯率資料集的顯名聲明（商用模式是中央銀行的收盤匯率）
+    sources: ["本系統帳本", ...(spec.currency === "USD" ? [commercial ? sourceOf("cbc-opendata/fx") : "示範資料（模擬）"] : [])],
     is_demo: !commercial,
   }
 }

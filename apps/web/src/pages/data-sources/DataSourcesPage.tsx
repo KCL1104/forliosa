@@ -24,7 +24,7 @@ export function DataSourcesPage() {
     <div className="mx-auto flex w-full max-w-[880px] flex-col gap-10 px-5 pt-2 pb-10 md:px-8 lg:pt-10">
       <PageHeader
         title="資料來源與授權"
-        description="行情、公司資料與公告只用可合法商用的政府開放資料，以及我們從這些資料自建的每日存檔。下面是每個資料集的顯名聲明。"
+        description="行情、匯率、公司資料與公告只用可合法商用的政府開放資料，以及我們從這些資料自建的每日存檔。下面是每個資料集的顯名聲明。"
       />
       {q.isError ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />

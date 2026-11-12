@@ -54,6 +54,8 @@ ROUTES = {
     "/mopsfin_t187ap07_O_ins": "tpex_t187ap07_o_ins_live_20261112.json",
     "/mopsfin_t187ap07_O_mim": "tpex_t187ap07_o_mim_live_20261112.json",
     "/mopsfin_t187ap06_O_bd": "tpex_t187ap06_o_bd_live_20261112.json",
+    # 中央銀行 (cpx.cbc.gov.tw/api/OpenData): the live answer is the whole history since 2008; trimmed to 36 days
+    "/FTDOpenData_Day": "cbc_ftd_day_live_20261112.json",
 }
 
 # TAIFEX OpenAPI (fetched as bytes: JSON or CSV). DailyForeignExchangeRates is the CSV variant Cloudflare served.

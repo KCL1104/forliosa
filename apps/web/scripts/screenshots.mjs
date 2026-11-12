@@ -124,6 +124,14 @@ const autoEdit = async (page) => {
   await page.getByRole("dialog").getByText("台積電").waitFor({ timeout: 8000 })
 }
 
+/** 資料來源：捲到「中央銀行」那一段（USD/TWD 匯率） */
+const fxSource = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("ds-中央銀行")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
+
 /** 每個畫面：路徑、就緒條件、截圖前要做的動作 */
 const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
@@ -139,6 +147,7 @@ const SHOTS = [
   { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },
   { name: "settings-recurring", path: "/settings", ready: "text=新增定期定額", action: recurring },
   { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
+  { name: "data-sources-fx", path: "/data-sources", ready: "text=銀行間新臺幣對美元收盤匯率", action: fxSource },
   { name: "history", path: "/history", ready: "text=發起新對話" },
   { name: "ledger-auto-dividends-transactions", path: "/?view=transactions", ready: "text=月", action: autoEdited },
   { name: "ledger-auto-dividends-dividends", path: "/?view=dividends", ready: "text=已入帳", action: received },

@@ -274,7 +274,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 股利歷史 | `/dividends` 只有存檔的除權息預告，加上證交所〈上市公司股利分派情形〉的董事會／股東會決議（2026-11-12 起，見「第三批」）；陣列型回應沒有 `notes`，可能是 `[]` |
 | 績效 | 持股期間沒有每天的真實收盤價時 `series: []`＋`notes`；存檔足夠後從第一個完整存檔日（當作基準收盤，`twr_index` 1.0）開始，`notes` 說明起點 |
 | 美股 | 沒有報價（`/quote` 404、`Holding.price: null` 以成本計值、`is_demo: false`）、績效空＋`notes` |
-| USD/TWD 匯率 | 期交所〈每日外幣參考匯率〉已每日存檔，但授權「有條件」：`TAIFEX_CONDITIONAL_CONFIRMED=true` 前固定 31.5，績效 `notes` 說明（見「第三批」） |
+| ~~USD/TWD 匯率~~ | **已有（2026-11-12）**：中央銀行〈銀行間新臺幣對美元收盤匯率〉（OGDL），任何模式都用；完全沒有存檔時才固定 31.5，績效 `notes` 說明（見「2026-11-12 匯率改用中央銀行開放資料」） |
 | 基準 `^TAIEXTR`／`^TPEXTR` | 2026-11-12 起由存檔提供（證交所 2026-11-02、櫃買 2026-11-02 起）；更早的日子沒有資料 |
 | 媒體新聞 | 沒有；`/news` 只有官方公告 |
 | shioaji-data AI 研究（簡介、產業鏈、題材） | `summary`／`chain_stage` 為 `null`、`themes: []` |
@@ -314,7 +314,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 狀態 | 意義 | `DATA_POLICY=commercial` 時 |
 |---|---|---|
 | `ogdl` | 機關以政府資料開放授權條款第 1 版釋出（證交所 swagger 連到 data.gov.tw/license；櫃買、集保與期交所三大法人／期貨大額交易人／Put/Call 比在 data.gov.tw 有對應資料集） | 照常顯示，附顯名聲明 |
-| `conditional` | 推定為 OGDL（同一 OpenAPI、同一機關），但 data.gov.tw 沒找到個別資料集：期交所〈期貨每日交易行情〉〈選擇權每日交易行情〉〈每日外幣參考匯率〉〈選擇權大額交易人未沖銷部位資料〉，以及 catalog 一樣標 conditional 的〈最後結算價〉〈保證金一覽表〉×3〈股票期貨／選擇權交易標的〉 | **照常存檔，但不顯示**，直到 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`） |
+| `conditional` | 推定為 OGDL（同一 OpenAPI、同一機關），但 data.gov.tw 沒找到個別資料集：期交所〈期貨每日交易行情〉〈選擇權每日交易行情〉〈每日外幣參考匯率〉〈選擇權大額交易人未沖銷部位資料〉，以及 catalog 一樣標 conditional 的〈最後結算價〉〈保證金一覽表〉×3〈股票期貨／選擇權交易標的〉 | **照常存檔，但不顯示**，直到 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`）。〈每日外幣參考匯率〉例外：2026-11-12 起只存檔，開關打開也不用（USD/TWD 改用中央銀行） |
 
 - `personal`（非商用、明確開啟）一律顯示。判斷集中在 `datapolicy.dataset_served(key, policy)`；API、AI 工具、匯率都經過它。
 - 詢問信草稿（寄 swagger 上的窗口 s0160116@taifex.com.tw）與收到回覆後要做的事：[`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)
@@ -356,7 +356,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | `Overview`、`InstrumentDetail` | `listed_date` | 上市／上櫃日期 |
 | `Overview.market_cap`、`shares_outstanding`（以及 `InstrumentDetail`） | 改用官方資料 | 證交所〈上市公司基本資料〉／櫃買〈上櫃股票基本資料〉的已發行普通股數；市值 = 股數 × 最新存檔收盤價；`sources` 列出該資料集。沒有存檔時才用 shioaji-data（不會把官方股數和別的來源的市值混用） |
 | `InstrumentDetail.industry` | 主檔沒有產業時用公司基本資料的產業別 | 資料集只給代碼（"24"），對照證交所產業分類（`opendata.INDUSTRY_CODES`） |
-| `Performance.notes` | 匯率說明 | 有美股時：「USD/TWD 匯率：臺灣期貨交易所〈每日外幣參考匯率〉（2026），依政府資料開放授權條款第 1 版」，或授權未確認時「USD/TWD 以固定 31.5 換算：…確認前不使用」 |
+| `Performance.notes` | 匯率說明 | 有美股時說明 USD/TWD 的來源；2026-11-12 起改為中央銀行（見「2026-11-12 匯率改用中央銀行開放資料」） |
 | `/meta/attributions` | 每筆多 `license_status`、`license_basis`、`served`、`last_updated`（存檔看到的最新資料日期）、`last_fetched`；最上層多 `taifex_conditional_confirmed`、`conditional[]`（已存檔但未顯示的資料集＋原因）、`stale[]`（停更端點：`key, agency, dataset, url, last_updated, checked_at, used, note`） | `datasets` 仍只列「目前顯示」的資料集（前端可直接用）；`commercial` 欄位在有條件資料集確認前是 `false` |
 
 參考價：櫃買〈上櫃股票除權除息計算結果表〉（`tpex_exright_daily`）有該股當天的官方值時優先使用（開始交易基準價、漲跌停），
@@ -376,7 +376,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | `taifex_institutional` | 三大法人 5 個依日期資料集；`scope`：`all`、`fut_opt`、`futures`、`options`、`calls_puts`；金額一律千元（總表原為百萬元，×1000） | `taifex` | 21:40 |
 | `taifex_large_traders` | 期貨、選擇權大額交易人（`settlement_month` 保留原值：999912＝全部月份、666666＝週契約合計） | `taifex` | 21:40 |
 | `taifex_put_call_ratio` | `PutCallRatio`（回應含近一個月：upsert，第一次就回補） | `taifex` | 21:40 |
-| `fx_rates`（既有表） | `DailyForeignExchangeRates` → `USDTWD`、`CNYTWD`、`EURUSD`、`USDJPY`、`GBPUSD`、`AUDUSD`、`USDHKD`、`USDCNY`、`USDZAR`、`NZDUSD`（回應含近 6 週：upsert） | `taifex` | 21:40 |
+| `fx_rates`（既有表） | `DailyForeignExchangeRates` → `USDTWD`、`CNYTWD`、`EURUSD`、`USDJPY`、`GBPUSD`、`AUDUSD`、`USDHKD`、`USDCNY`、`USDZAR`、`NZDUSD`（回應含近 6 週：upsert；同一天已有中央銀行的 `USDTWD` 時不覆蓋，見「2026-11-12 匯率改用中央銀行開放資料」） | `taifex` | 21:40 |
 | `taifex_margins` | 保證金一覽表（指數、股票、ETF）：**內容變動才新增一列** | `taifex` | 21:40 |
 | `taifex_contract_map` | 中文商品名稱 → 代號（臺股期貨 → TX）：內建對照＋大額交易人與股票期貨保證金資料中的名稱 | `taifex` | 21:40 |
 | `taifex_final_settlement`、`taifex_underlyings` | `FinalSettlementPrice`；`SSFLists`、`SSOLists` | `weekly` | 週六 10:00（和集保一起） |
@@ -484,6 +484,58 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   `parse_twt48u_all` 有註記；存檔的上市、上櫃預告都這樣換算）。還沒有用真實的配股預告驗證過；若單位不同，自動配股的股數會錯，
   第一次遇到真實配股時要核對。
 
+## 2026-11-12 匯率改用中央銀行開放資料
+
+產品負責人決定不寄信給期交所，USD/TWD 改用中央銀行〈銀行間新臺幣對美元收盤匯率〉（[`docs/handoff.md`](../../docs/handoff.md) §3.3）；
+對外行為見 [`docs/api-contract.md`](../../docs/api-contract.md)「匯率」。沒有新端點、沒有新遷移（沿用 `fx_rates`）。
+
+### 來源（2026-11-12 實測）
+
+| 項目 | 內容 |
+|---|---|
+| 資料集 | data.gov.tw 7232〈銀行間新臺幣對美元收盤匯率〉，提供機關中央銀行（資料來自台北外匯經紀公司），政府資料開放授權條款第 1 版 |
+| 端點 | `GET https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day`（`application/json`，約 190 KB）。另有 `FTDOpenData_Month`（月平均，鍵 `西元年月`）與 `FTDOpenData_Year`（文件說年平均，實測回的是同樣的月資料、鍵 `西元年`）：都不用 |
+| 格式 | 一個陣列、舊到新：`[{"日期": "20080102", "NTD_USD": "32.443"}, …]`；`日期` 西元 `YYYYMMDD`，`NTD_USD` = 1 美元兌新臺幣，字串、1–3 位小數；沒有查詢參數，每次都是**完整歷史** |
+| 涵蓋 | 4,686 個營業日，2008-01-02 到 2026-11-12（當天 17:12 已有 2026-11-12 的 32.889）；沒有缺值、沒有重複日期 |
+| 與期交所比對 | 期交所〈每日外幣參考匯率〉的 USD/NTD 與這個序列**完全相同**（fixture 的 27 個交易日 2026-10-01 … 11-11 全部一致） |
+| 白名單 | `marketdata/http.py` 加 `https://cpx.cbc.gov.tw/api/OpenData/`（只有開放資料 API；央行網站與統計資料庫頁面不在內），每 2 秒最多一次 |
+| 顯名 | `datapolicy.DATASETS["cbc-opendata/fx"]`：「中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版」，`license_status: ogdl`、`basis: data.gov.tw 7232`；來源鍵 `cbc-opendata` |
+
+### 存檔（`archive.py`：`Archiver.cbc_fx`，群組 `cbc`）
+
+- worker 的晚間存檔（交易日 21:40，`EVENING_GROUPS`）跑一次；手動：`uv run python -m forliosa.archive run --only cbc`。
+- 第一次執行就回補 2008 年起的全部歷史（實測 4,686 筆）；之後只寫**新的或數字改過的**日子（第二次執行 0 筆），`dataset_status["cbc-opendata/fx"]` 記最新的匯率日期。
+- 解析在 `marketdata/cbc.py`（`parse_fx_day`）：沒有日期或匯率不是正數的列略過；回應不是陣列、或非空卻一列都解析不了（欄位改名）時記錯誤，不寫 0 筆了事。
+- **與期交所共用 `fx_rates`**：主鍵是 `(pair, date)`，同一天只能有一列 `USDTWD`。央行那一列優先：`cbc_fx` 會把同一天期交所的列改成央行的（數字相同，只換 `source`）；
+  `taifex_fx` 用條件 upsert（`WHERE fx_rates.source != 'cbc-opendata'`），不會覆蓋央行的列。期交所其他 9 個匯率照舊存。
+  結果是：期交所的 `USDTWD` 只會留在央行還沒公布的那幾個小時（同一天 21:40 兩個工作都跑，所以通常不會留下）。
+
+### 使用（`FxBook`）
+
+- `ArchiveProvider.fx_history` 只讀 `source = 'cbc-opendata'` 的 `USDTWD`（也只回 `USDTWD`）；不再看 `TAIFEX_CONDITIONAL_CONFIRMED`。
+  archive 是第一個 provider，所以任何 `DATA_POLICY` 都先用央行；只有存檔是空的時候，personal 才會輪到 FinMind／示範資料，commercial 則用固定 31.5。
+- 某天的匯率 = 該日或之前最近一個營業日的收盤匯率；2008-01-02 以前的交易用序列的第一筆（2008-01-02 的 32.443）。
+- 成本、賣出、股利用各自交易日的匯率；市值用最新匯率（`FxBook.latest`；當天下午公布前是前一個營業日）。
+
+### 說明文字
+
+| 位置 | 內容 |
+|---|---|
+| `Performance.notes`（有美股時） | 「USD/TWD 匯率：中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版」；personal 用到 FinMind／示範資料時列它們的標籤（例「USD/TWD 匯率：示範資料（模擬）」）；完全沒有存檔時 `FX_MISSING_NOTE`「USD/TWD 以固定 31.5 換算：還沒有中央銀行〈銀行間新臺幣對美元收盤匯率〉的存檔」；最新匯率比今天早 14 天以上（`FX_STALE_DAYS`，比農曆年休市長）再加「USD/TWD 匯率只到 YYYY-MM-DD（匯率），之後的日子沿用這個匯率」。commercial 下持有美股的期間沒有可商用的美股價格、績效算不出來，所以這段 `notes` 多半出現在 personal，或美股已經賣出、績效區間只剩台股的時候 |
+| `/instruments/{symbol}/position` | 美股的 `sources` 多上面的顯名聲明 |
+| `/meta/attributions` | `datasets` 多 `cbc-opendata/fx`（`last_updated` 是最新匯率日期）；`taifex-openapi/fx` 留在 `conditional[]`，`used_for`「只存檔（USD/TWD 換算改用中央銀行〈銀行間新臺幣對美元收盤匯率〉）」 |
+| AI 工具 | `get_portfolio_summary`（新 `notes`）、`get_holdings`、`get_position`（美股）的 `notes` 多匯率來源與「美股市值以 YYYY-MM-DD 的 USD/TWD X 換算成新台幣；成本、已實現損益與股利用各交易日的匯率」（`portfolio.fx_tool_notes`） |
+
+- 移除 `portfolio.FX_PENDING_NOTE`（期交所授權待確認的說明）；`fx_notes(fx, today=None)` 不再需要 `MarketData`。
+- 測試：`tests/archive/test_cbc_parser.py`（解析、與期交所一致、壞資料、白名單）、`tests/archive/test_open_data_jobs.py`（回補、冪等、與期交所互不覆蓋、更正）、
+  `tests/api/test_open_data_api.py`（`FxBook`、31.5 備援、停更說明、美股持股估值、AI 工具、`/meta/attributions`）。fixture `cbc_ftd_day_live_20261112.json` 是真實回應
+  裁成 36 天（2008 開頭 3 天、跨年 5 天、2026-10-01 起 28 天）；測試不連網。
+
+### 已知缺口
+
+- 只有 USD/TWD。其他幣別（港股、日股）沒有可商用的開放來源，目前也沒有這類商品。
+- 交易日當天的市值在央行下午公布前用前一個營業日的匯率（約 16:00–17:00 之後的 21:40 存檔才更新）。
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。
@@ -510,8 +562,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。
 16. ~~**財報公布日**~~：已實作（2026-11-12），實際日期來自重大訊息與月營收資料集；查不到才用法定期限（`estimated: true`）。
 17. **美股基本面（SEC EDGAR）與匯率**：EDGAR 研究判定可商用，但**尚未加入**，等產品負責人決定（需在 User-Agent 寫聯絡信箱）。
-    匯率：2026-11-12 起存期交所〈每日外幣參考匯率〉，但要等期交所確認授權（「第三批」待確認 20）才使用；央行／臺銀未驗證，沒有加入。
-    在那之前 USD/TWD 固定 31.5。
+    ~~匯率~~：已解決（2026-11-12）：USD/TWD 改用中央銀行〈銀行間新臺幣對美元收盤匯率〉（data.gov.tw 7232，OGDL），見「2026-11-12 匯率改用中央銀行開放資料」。
 18. **月營收資料集是否逐日更新**：`t187ap05_L`／`mopsfin_t187ap05_O` 的「出表日期」在 2026-11-12 是 1151111（申報期限之後）。
     若它在每月 1–10 日逐日更新，「第一次看到的日期」就是實際公布日（誤差一天內）；若只在期限後產生一次，營收公布日會晚於實際。
     12 月初要觀察一次。
@@ -520,8 +571,8 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 20. **期交所有條件資料集的授權**（2026-11-12）：期貨／選擇權每日交易行情、每日外幣參考匯率、選擇權大額交易人等已每日存檔，
     commercial 下要等期交所書面確認才顯示。產品負責人已決定**先不寄信**；詢問信草稿留在
     [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)。日後寄出並取得同意後設定
-    `TAIFEX_CONDITIONAL_CONFIRMED=true`（只同意部分資料集時，改逐一把 `license_status` 設為 `ogdl`）。在那之前 USD/TWD 固定 31.5
-    （`PRODUCT.md` 提到的央行 7232 匯率尚未驗證、這個環境連不到，沒有實作）。
+    `TAIFEX_CONDITIONAL_CONFIRMED=true`（只同意部分資料集時，改逐一把 `license_status` 設為 `ogdl`）。USD/TWD 不受這個開關影響：
+    2026-11-12 起用中央銀行 7232（已驗證、已實作），期交所〈每日外幣參考匯率〉只存檔。
 21. ~~資本公積配發的稅務處理~~ **已決定（產品負責人 2026-11-12）：自動排除。** 記現金股利且沒有手動輸入二代健保時，
     依官方股利決議（`cash_sources`）把資本公積發放的部分排除：付款日對上 120 天內最近的除息日（有填每股股利時只對同金額的除息日），
     有股數就用「股數 × 每股資本公積」（元以下捨去），否則依比例；排除後的股利所得未達 2 萬就不扣，達到就以股利所得 × 2.11% 計。
