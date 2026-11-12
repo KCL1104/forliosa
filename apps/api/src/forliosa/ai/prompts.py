@@ -63,6 +63,80 @@ MOVED_NOTE = "- 先前的對話只保留文字（沒有工具結果與網路搜�
 # The fixed one-sentence decline of the scope pre-check (``scope``).
 OFF_TOPIC_REPLY = "這超出我能協助的範圍，我只處理投資理財、台美股與你的持股；要不要看看今天的持股表現？"
 
+# -- analyst views (``analyst``) -------------------------------------------------------------------------------
+# A separate prompt: the chat prompt above keeps 「也不給目標價」 unchanged. This one only lets the model *quote*
+# ratings and target prices that third parties have already published, each tied to one article it found. The
+# model's only output is the ``report_analyst_views`` call; the server keeps an item only when its URL is one of
+# the search results the model received and the article date can be checked (``analyst.verify``).
+ANALYST_SYSTEM = """你是財經資料整理員，替 Forliosa 的個股頁整理「第三方機構已經公開發表的評等與目標價」。Forliosa 只轉述別人已發表的看法，不提供自己的意見。
+
+## 任務
+用 web_search 找這檔股票近 90 天內的新聞報導，把報導中寫到的券商、投顧、投資銀行等具名機構（以下稱機構）對它的評等或目標價逐筆整理出來，最後呼叫 report_analyst_views 回報，最多 8 筆，新的優先。這個工具呼叫是你唯一的輸出。
+
+## 搜尋
+- 台股用繁體中文關鍵字（例如「台積電 目標價」「台積電 外資 評等」），美股用英文（例如「NVIDIA analyst price target」）；結果不夠時換個關鍵字再搜。
+- 採用信譽良好的財經媒體報導或機構自己的公告。不採用論壇、社群貼文、內容農場，也不採用股價行情頁、技術分析頁與目標價預測彙整頁（例如 Yahoo 股市報價頁、Goodinfo、TradingView、TipRanks、MarketBeat）。
+- 你的訓練資料比今天早很多：只根據這次搜尋到的內容整理，不要憑記憶補資料。
+
+## 怎麼列
+- 搜尋到的報導只要寫出某家具名機構對這檔股票的評等或目標價（包括「維持」），就列一筆；一篇報導寫到好幾家機構時，每家各列一筆，url 相同沒關係。
+- url：逐字使用搜尋結果中那篇報導的網址，不可自己組合或修改。
+- institution：機構名稱照報導的寫法（例如「摩根士丹利」「大摩」「Morgan Stanley」）。報導只寫「法人」「外資圈」「美系外資」「外資券商」「分析師普遍」這類沒有寫出機構名稱的說法，不要列。
+- action：只能是 調升、調降、維持、首評；報導沒寫就填 未註明。
+- rating_text：評等照原文（例如「加碼」「優於大盤」「Overweight」「Buy」），不要翻譯成看好或看壞；報導沒寫評等就填 null。
+- target_price：只抄報導明寫、屬於這個掛牌市場的目標價數字，不換算、不四捨五入、不自己估；報導沒寫就填 null。currency 填那個目標價的幣別。台股的目標價是新台幣；同一家公司在美國的 ADR（例如台積電的 TSM）的美元目標價不屬於台股，不要列。
+- date：那篇報導的日期（YYYY-MM-DD）。搜尋結果只寫「N days ago」時，用今天的日期往前推算；伺服器會再用搜尋結果核對日期，不必因為日期而不列。
+- 評等與目標價都沒有的不要列。同一家機構只列最新的一次。
+- 每一筆都要依序寫齊 url、institution、action、rating_text、target_price、currency、date 七個欄位（沒有的值填 null），不要把其他欄位寫進 url 的字串裡。
+
+## 不要做
+- 不給你自己的評等、目標價或看法；不計算平均、中位數、上漲空間或報酬率；不排名、不比較誰對；不寫買進、賣出或任何操作建議。
+- 不要在工具呼叫以外寫任何文字。
+
+找不到符合條件的報導時，也要呼叫 report_analyst_views，items 給空清單。"""  # noqa: E501
+
+ANALYST_TOOL_NAME = "report_analyst_views"
+# Every property is required (a missing value is ``null``) and ``url`` comes first: under strict tool use the input
+# is generated in schema order, so with optional fields the model could not add a skipped field later and wrote
+# it into the open ``url`` string instead (live 2026-11-12: ``"url": "https://…','target_price':3800,"``).
+ANALYST_TOOL: dict = {
+    "name": ANALYST_TOOL_NAME,
+    "description": ("回報整理好的第三方機構評等與目標價（每筆對應一篇搜尋到的報導，最多 8 筆；找不到就給空清單）。"
+                    "每筆七個欄位都要寫，沒有的值填 null。這是唯一的輸出方式。"),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "items": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "url": {"type": "string", "description": "搜尋結果中那篇報導的網址（逐字，只有網址）"},
+                        "institution": {"type": "string", "description": "機構名稱，照報導原文"},
+                        "action": {"type": "string", "enum": ["調升", "調降", "維持", "首評", "未註明"]},
+                        "rating_text": {"anyOf": [{"type": "string"}, {"type": "null"}],
+                                        "description": "評等原文；報導沒寫就填 null"},
+                        "target_price": {"anyOf": [{"type": "number"}, {"type": "null"}],
+                                         "description": "報導明寫的目標價；沒寫就填 null"},
+                        "currency": {"type": "string", "enum": ["TWD", "USD", "OTHER"],
+                                     "description": "目標價的幣別；沒有目標價時填這檔股票的交易幣別"},
+                        "date": {"type": "string", "format": "date", "description": "報導發布日期 YYYY-MM-DD"},
+                    },
+                    "required": ["url", "institution", "action", "rating_text", "target_price", "currency", "date"],
+                    "additionalProperties": False,
+                },
+            },
+        },
+        "required": ["items"],
+        "additionalProperties": False,
+    },
+}
+# Fixed text shown above the analyst views (``GET/POST /instruments/{symbol}/analyst-views``).
+ANALYST_DISCLAIMER = "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。"
+# Sent once when the model ended its turn without calling ``report_analyst_views``.
+ANALYST_NUDGE = "請用 report_analyst_views 回報整理結果；沒有符合條件的報導就給空清單。不要寫其他文字。"
+
 ROUTE_LABELS = {"ledger": "帳本首頁", "stock": "個股頁", "groups": "群組", "history": "對話紀錄", "other": "其他頁面"}
 _WEEKDAYS = "一二三四五六日"
 
@@ -108,3 +182,10 @@ def why_question(name: str, symbol: str, market: str, day: str, reasons: list[st
     return (f"股票：{name}（{symbol}，{market_label}）\n交易日：{day}\n"
             f"規則偵測到的異常：{'；'.join(reasons) or '無'}\n"
             "請搜尋後用一句話說明原因；找不到可靠原因就輸出 NONE。")
+
+
+def analyst_question(name: str, symbol: str, market: str, currency: str, today: str, since: str) -> str:
+    market_label = {"TWSE": "上市", "TPEX": "上櫃", "US": "美股"}.get(market, market)
+    currency_label = {"TWD": "新台幣", "USD": "美元"}.get(currency, currency)
+    return (f"股票：{name}（{symbol}，{market_label}，以{currency_label}交易）\n今天：{today}（台北）\n"
+            f"請搜尋 {since} 之後的報導，整理機構的評等與目標價，然後呼叫 report_analyst_views。")

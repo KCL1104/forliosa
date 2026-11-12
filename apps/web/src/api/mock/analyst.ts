@@ -94,9 +94,11 @@ export function createAnalystStore(opts: { delayMs?: number; now?: () => number 
       // 今天已經有一份（或正在查）：共用，不重查
       if (cur.status !== "none") return cur
       const t = new Date(now() + 8 * 3600_000).toISOString().slice(11, 16)
+      // 後端：查不到時 notes 寫 10 分鐘後可以再查（過了之後 GET 回 none，畫面重新出現查詢按鈕；mock 不模擬這一段）
+      const retryAt = new Date(now() + 8 * 3600_000 + delay + 10 * 60_000).toISOString().slice(11, 16)
       const final: AnalystViews =
         s === "2409.TW"
-          ? { status: "unavailable", symbol: s, as_of: null, expires_at: null, items: [], disclaimer: ANALYST_DISCLAIMER, notes: ["這次沒有找到可以引用、附日期與來源的報導，稍後再試。"] }
+          ? { status: "unavailable", symbol: s, as_of: null, expires_at: expires(t), items: [], disclaimer: ANALYST_DISCLAIMER, notes: [`${retryAt} 之後可以再查一次。`] }
           : { status: "ready", symbol: s, as_of: asOf(t), expires_at: expires(t), items: s === "2881.TW" ? [] : generatedViews(s), disclaimer: ANALYST_DISCLAIMER, notes: [] }
       entries.set(s, { status: "pending", readyAt: now() + delay, final })
       return current(s)

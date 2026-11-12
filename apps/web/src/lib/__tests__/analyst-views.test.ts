@@ -6,6 +6,7 @@ import {
   ANALYST_TIMEOUT_MS,
   analystReducer,
   formatTarget,
+  loadOnOpen,
   nextPoll,
   phaseOf,
   ratingLine,
@@ -82,6 +83,22 @@ describe("法人觀點的狀態", () => {
     expect(analystReducer(loading, { type: "load" })).toBe(loading)
     const posting = run([{ type: "search", at: 1 }])
     expect(analystReducer(posting, { type: "search", at: 2 })).toBe(posting)
+  })
+
+  it("查不到之後收合再展開會重新讀：10 分鐘後後端回 none，就回到查詢按鈕", () => {
+    expect(loadOnOpen(ANALYST_INITIAL)).toBe(true)
+    const unavailable = run([{ type: "load" }, { type: "loaded", data: { status: "unavailable", notes: ["14:10 之後可以再查一次。"] }, at: 0 }])
+    expect(loadOnOpen(unavailable)).toBe(true)
+    // 重讀時保留「查不到」的說明（不閃回骨架），回應是 none 就出現查詢按鈕
+    const reloading = run([{ type: "load" }], unavailable)
+    expect(reloading).toMatchObject({ phase: "unavailable", inFlight: "get" })
+    expect(loadOnOpen(reloading)).toBe(false)
+    expect(run([{ type: "loaded", data: { status: "none" }, at: 600_000 }], reloading).phase).toBe("none")
+    // 錯誤也重讀；已有結果或搜尋中不重讀（當天共用同一份）
+    expect(loadOnOpen(run([{ type: "load" }, { type: "failed", during: "get", message: "網路" }]))).toBe(true)
+    expect(loadOnOpen(run([{ type: "loaded", data: ready([item()]), at: 0 }]))).toBe(false)
+    expect(loadOnOpen(run([{ type: "loaded", data: ready([]), at: 0 }]))).toBe(false)
+    expect(loadOnOpen(run([{ type: "search", at: 0 }, { type: "searched", data: { status: "pending" }, at: 1 }]))).toBe(false)
   })
 })
 

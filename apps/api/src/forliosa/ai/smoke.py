@@ -6,6 +6,11 @@
 ``--keys`` only sends one tiny request (``max_tokens=1``) through every key slot and prints each slot's workspace id,
 to check that ``CLAUDE_API_KEY_1..3`` really belong to three different workspaces (cost: a few millionths of a USD).
 
+``--analyst 2330.TW NVDA`` runs the analyst-views generation (``forliosa.ai.analyst.run_model``: web search,
+``report_analyst_views``, grounding) for each symbol (at most 2) without touching the database, and prints the
+searches, every search result's ``page_age``, the model's candidates, the verified items, the dropped ones with
+their reason, the time it took, token usage and the estimated cost.
+
 Prints the streamed answer, tool steps, citations, grounding flags, token usage and the estimated cost of each
 turn, then the state of every key slot. Needs a key (``CLAUDE_API_KEY_<n>`` / ``ANTHROPIC_API_KEY``, or
 ``AI_DEV_DUMMY_KEY=1`` behind a key-injecting proxy). Exit code 2 when no key is configured, 1 when a turn
@@ -75,10 +80,69 @@ def check_workspaces(pool, model: str) -> int:
     return 1 if failed else 0
 
 
+def check_analyst(pool, settings, symbols: list[str]) -> int:
+    """Live analyst-views generations (no database writes). 1 when one ended ``unavailable``."""
+    import time
+
+    from forliosa.ai import analyst
+    from forliosa.ids import new_id
+    from forliosa.timeutil import TAIPEI, now_utc
+
+    md = get_market_data()
+    failed = False
+    for symbol in symbols[:2]:
+        info = md.instrument(symbol)
+        if info is None or info.type != "stock":
+            print(f"\n=== {symbol}：不是可查詢的個股，略過")
+            failed = True
+            continue
+        print(f"\n=== 法人觀點：{info.name}（{info.symbol}）")
+        calls: list[tuple[int, str, CallUsage]] = []
+
+        def record(slot, msg, calls=calls) -> None:
+            calls.append((slot, msg.model, CallUsage.from_sdk(msg.usage)))
+
+        started = time.monotonic()
+        try:
+            out = analyst.run_model(info, now_utc().astimezone(TAIPEI).date(), new_id("anv"), pool, settings,
+                                    record, thinking_display="summarized",
+                                    reference=analyst.reference_price(md, info.symbol))
+        except Exception as exc:  # errors never contain the key
+            print(f"  ✗ {type(exc).__name__}：{getattr(exc, 'message', exc)}")
+            failed = True
+            continue
+        elapsed = time.monotonic() - started
+        for q in out.queries:
+            print(f"  搜尋：{q}")
+        for r in out.results:
+            print(f"  結果：page_age={r.page_age!r}  {r.title[:60]}  {r.url}")
+        for line in out.transcript:
+            print(f"  〔{line[:600]}〕")
+        for c in out.candidates:
+            print(f"  模型列出：{c}")
+        for d in out.dropped:
+            print(f"  ✗ 刪除（{d.reason}）：{d.candidate.get('institution')} {d.candidate.get('url')}")
+        for i in out.items:
+            print(f"  ✓ {i['date']} {i['institution']} {i['action']}「{i['rating_text'] or ''}」"
+                  f" 目標價 {i['target_price']} {i['currency']}｜{i['source_title']}｜{i['url']}")
+        cost = sum(float(estimate_cost(model or settings.ai_model, u)) for _, model, u in calls)
+        total = CallUsage()
+        for _, _, u in calls:
+            total.add(u)
+        print(f"--- 狀態 {out.status}{f'（{out.reason}）' if out.reason else ''}（stop={out.stop_reason}）、"
+              f"{out.calls} 次呼叫（槽 "
+              f"{', '.join(f'#{s}' for s, _, _ in calls)}）、{elapsed:.1f} 秒；輸入 {total.input_tokens}、輸出 "
+              f"{total.output_tokens}、搜尋 {total.web_search_requests} 次；估計 US${cost:.5f}")
+        failed = failed or out.status != "ready"
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Forliosa AI live smoke test (real API, small cost)")
     parser.add_argument("--only", type=int, choices=[1, 2], help="run only question 1 or 2")
     parser.add_argument("--keys", action="store_true", help="only check which workspace each key slot belongs to")
+    parser.add_argument("--analyst", nargs="+", metavar="SYMBOL",
+                        help="only run the analyst-views generation for these stocks (at most 2)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     settings = get_settings()
@@ -92,6 +156,8 @@ def main(argv: list[str] | None = None) -> int:
     print(f"金鑰槽：{slot_names}；模型：{settings.ai_model_chat or settings.ai_model}")
     if args.keys:
         return check_workspaces(pool, settings.ai_model)
+    if args.analyst:
+        return check_analyst(pool, settings, args.analyst)
     failed = False
     grand = CallUsage()
     grand_cost = 0.0

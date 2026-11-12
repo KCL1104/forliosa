@@ -69,8 +69,10 @@ class Settings(BaseSettings):
     ai_model_why: str | None = None
     ai_model_import: str | None = None
     ai_model_report: str | None = None
+    ai_model_analyst: str | None = None
     ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_why: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    ai_effort_analyst: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_max_tokens_chat: int = 8000
     ai_max_tool_rounds: int = 8
     ai_daily_message_limit: int = 50  # chat messages per user per Taipei day (0 = no limit)
@@ -91,6 +93,10 @@ class Settings(BaseSettings):
     ai_eager_tool_streaming: bool = False
     ai_why_enabled: bool = True  # cached per symbol per trading day; rule text on any failure
     ai_why_blocking: bool = False  # True: /why waits for the model; False: generate in the background
+    # Analyst views (/instruments/{symbol}/analyst-views): third-party ratings found by web search, shared per
+    # symbol per trading day; off = POST answers "unavailable" without a model call.
+    ai_analyst_enabled: bool = True
+    ai_analyst_search_max_uses: int = 3
     # Off-topic requests (coding, homework, role-play …) with no finance word are declined without a model call.
     ai_scope_precheck: bool = True
     # Threads, messages and drafts are deleted this many days after their last activity (0 = keep forever).

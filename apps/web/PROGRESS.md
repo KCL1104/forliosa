@@ -39,6 +39,7 @@
 | 定期定額標記 | ✅ 持倉桌面表與手機列：有啟用中計畫的股票名稱旁一個淡墨日曆圖示（可點範圍 44px），滑過「定期定額：每月 6 日 NT$10,000」（隱私模式遮金額），按下到 `/settings#plan-<id>`（捲到那一列、淡墨底標示）。手機列改成「名稱連結的 ::after 蓋滿整列」，標記才能是另一個連結 | `src/pages/ledger/RecurringMark.tsx`、`use-active-plans.ts`、`HoldingsView.tsx`、`settings/RecurringPlans.tsx` |
 | 補記扣款 | ✅ 最近 7 天漏記的扣款（同帳戶同一檔在扣款日之後、下一次扣款之前沒有買進，也沒寫過草稿）→ AI 面板「補記 11/06 的 0050 定期定額」（最舊在前、最多 3 筆，今天的仍在最前）→ `POST /recurring/{id}/draft?date=`（後端支援 `date`）→ 草稿成交日是那天、說明請照對帳單改 → 簽名才入帳 | `src/ai/recurring-offer.ts`、`runner.ts` |
 | 已出清依年份 | ✅ 依 `closed_at` 年份分組、新的在前，每年可收合（最近一年預設展開），年份列有已實現小計（▲▼）；桌面每年一個 tbody、小計對齊「已實現損益」欄；手機每年一個 h3＋清單 | `src/pages/ledger/ClosedRounds.tsx`、`src/lib/ledger-display.ts` |
+| 法人觀點接後端 | ✅ 2026-11-12：api 模式本來就走 `http.ts` 的 `GET/POST /instruments/{symbol}/analyst-views`，後端完成（`forliosa.ai.analyst`）；`rating_text` 改為可 null、mock 的「查不到」改成後端的「HH:MM 之後可以再查一次。」；截圖補上搜尋中（2454）、查無（2881）、查不到（2409）三種狀態 | `src/api/types.ts`、`src/api/mock/analyst.ts`、`scripts/screenshots.mjs` |
 | 資料來源頁 | ✅ 說明法人觀點不是授權資料庫（有人查詢時 AI 搜尋公開報導、當天共用、隔天刪除） | `src/pages/data-sources/DataSourcesPage.tsx` |
 
 ## 第四批（2026-11-12）：股利自動入帳（docs/handoff.md §3.0）

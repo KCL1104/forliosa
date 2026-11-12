@@ -482,7 +482,7 @@
              {"kind": "watchlist_add", "label": "加入自選", "prompt": null, "symbol": "2330.TW", "count": null},
              {"kind": "review_drafts", "label": "確認 2 筆草稿", "prompt": null, "symbol": null, "count": 2}]}
 
-// Usage（上限為 null 表示不限制）
+// Usage（上限為 null 表示不限制；messages_today 含今天觸發的法人觀點查詢，每次算一題）
 {"date": "2026-11-12", "month": "2026-11", "messages_today": 3, "daily_message_limit": 50, "messages_remaining": 47,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
  "model": "claude-haiku-5-5", "available": true, "disclaimer": "AI 回答僅供參考，非投資建議。"}
@@ -508,27 +508,31 @@
 
 ### 法人觀點與美股基本面（2026-11-12 新增；法人觀點待後端實作，美股基本面已實作）
 
-**法人觀點**（產品負責人同意：AI 可引用第三方已公開的評級與目標價，必附來源與日期；AI 自己不給目標價；不計算平均、上漲空間、不排名、不寫買賣提示）
+**法人觀點**（產品負責人同意：AI 可引用第三方已公開的評級與目標價，必附來源與日期；AI 自己不給目標價；不計算平均、上漲空間、不排名、不寫買賣提示）。後端已實作（`forliosa.ai.analyst`，2026-11-12）。
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/instruments/{symbol}/analyst-views` | 讀取當日共用快取；沒有時回 `{status: "none"}` |
-| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋產生（同一檔同一交易日全體使用者共用一份，24 小時後刪除；計入觸發者的 AI 額度） |
+| GET | `/instruments/{symbol}/analyst-views` | 讀取當日共用結果；沒有時回 `status: "none"`。查不到（`unavailable`）超過 10 分鐘後也回 `none`，讓畫面重新出現查詢按鈕 |
+| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋並立刻回 `pending`（在背景產生，實測約 20–30 秒）；之後用 GET 輪詢。今天已經有 `pending`／`ready`（或 10 分鐘內的 `unavailable`）時直接回那一份，**不重查、不計費** |
 
 ```json
 {
   "status": "ready",                 // "none" | "pending" | "ready" | "unavailable"
   "symbol": "2330.TW",
-  "as_of": "2026-11-12T14:05:00+08:00",
-  "expires_at": "2026-11-13T14:05:00+08:00",
+  "as_of": "2026-11-12T14:05:00+08:00",       // 查詢完成時間（只有 ready 有）
+  "expires_at": "2026-11-13T14:05:00+08:00",  // 建立後 24 小時，到時刪除（none 時為 null）
   "items": [
-    {"institution": "某外資券商", "action": "調升", "rating_text": "加碼", "target_price": 1350, "currency": "TWD",
+    {"institution": "範例證券", "action": "調升", "rating_text": "加碼", "target_price": 1350, "currency": "TWD",
      "date": "2026-11-10", "source_title": "報導標題", "url": "https://…"}
   ],
   "disclaimer": "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。",
-  "notes": []
+  "notes": []                         // unavailable 時例如 "14:20 之後可以再查一次。"
 }
 ```
-最多 5 筆，依日期新到舊；沒有日期或來源的項目不列。
+- **共用**：同一檔、同一個台股交易日（台北時間今天；週末與休市日算最近一個交易日）全體使用者共用一份，建立後 24 小時刪除。
+- **計費**：觸發搜尋的人算一題（`/ai/usage.messages_today`，和對話共用 `AI_DAILY_MESSAGE_LIMIT`），token 計入他的每月額度；其他人讀同一份不計。額度用完回 429 `ai_daily_limit`／`ai_monthly_budget`；沒有可用金鑰回 503 `ai_unavailable`；功能關閉（`AI_ANALYST_ENABLED=false` 或網路搜尋停用）回 200 `unavailable`＋說明，不計費。
+- **只有個股**：ETF 回 422 `analyst_views_stocks_only`（ETF 沒有個別機構的評等與目標價）；找不到商品 404。
+- **items**：最多 5 筆，依報導日期新到舊，同一家機構只留最新一筆（大摩／摩根士丹利／Morgan Stanley 這類常見別名算同一家；`institution` 照報導原文）。每筆的 `url` 必定是這次 AI 網路搜尋實際拿到的搜尋結果之一，`source_title` 是該搜尋結果自己的標題；`date` 是那篇報導的日期，由搜尋結果的網址日期或頁面日期核對（核對不到、超過 90 天、沒有具名機構——「美系外資」「外資券商」「Wall Street analysts」這類泛稱也算沒有具名——、評等與目標價都沒有、目標價幣別不是這檔股票的交易幣別，或來源是評等彙整站／報價頁／評等預測頁的，都不列）。`action` 是 調升／調降／維持／首評，報導沒寫為 `""`；`rating_text`、`target_price` 照報導原文，沒寫為 `null`；`currency` 是這檔股票的交易幣別。數字不換算、不平均、不比較。
+- **ready 且 items 是空的**＝近期查無附來源與日期的機構報導。核對後一筆都沒有，但搜尋結果裡有**這檔股票**的評等／目標價標題，或有候選只因網址或日期核對不到而被刪掉時，不宣稱「查無」，改回 `unavailable`（10 分鐘後可重查）；別檔股票的評等新聞不算。
 
 **美股基本面（SEC EDGAR，2026-11-12 已實作）**：User-Agent 需含聯絡信箱（`Forliosa/1.0 <SEC_CONTACT_EMAIL>`），從環境變數 `SEC_CONTACT_EMAIL` 讀取，不寫進程式碼；請求頻率 ≤ 10 次／秒（每個行程 ≤ 4 次／秒）。資料是美國政府公開資料（「sec.gov 的政府內容與 EDGAR 公開申報可自由存取與再利用」），`sources` 顯名為「美國證券交易委員會（SEC）〈資料集〉（年），美國政府公開資料」。後端把抓到的資料存在自己的資料庫：worker 每天更新有人持有或自選的美股，請求當下快取超過 24 小時才重抓（短逾時，失敗就用快取並在 `notes` 說明）。沒有設定信箱、SEC 拒絕連線、或找不到公司時回空資料＋`notes`，不用示範資料。實作細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「第四批」。
 
