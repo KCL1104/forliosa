@@ -14,7 +14,6 @@ from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.domain.fees import ZERO
 from forliosa.domain.ledger import Ledger, replay
-from forliosa.domain.rounds import Round, holding_rounds
 from forliosa.domain.performance import (
     annualized_volatility,
     benchmark_returns,
@@ -24,6 +23,7 @@ from forliosa.domain.performance import (
     xirr,
     xirr_flows,
 )
+from forliosa.domain.rounds import Round, holding_rounds
 from forliosa.marketdata.base import InstrumentInfo, QuoteData, code_of_symbol, market_of_symbol
 from forliosa.marketdata.indices import is_index
 from forliosa.marketdata.service import MarketData
@@ -522,12 +522,14 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
 UPCOMING_MAX_DAYS = 90
 
 
-def upcoming(state: PortfolioState, md: MarketData, days: int) -> list[dict[str, Any]]:
-    """Ex-dividend dates and dividend payments of current holdings in [today, today + days].
+def upcoming(state: PortfolioState, md: MarketData, days: int,
+             recurring: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
+    """Ex-dividend dates and dividend payments of current holdings in [today, today + days], plus the
+    recurring-plan debits (定期定額, built by ``services.recurring.upcoming_items``).
 
     ``amount_estimate`` = shares held now × cash dividend per share (gross, TWD). For a payment whose
     ex-date already passed, a recorded cash-dividend transaction's amount is used when there is one.
-    Recurring items (定期定額) need a recurring-plan model that does not exist yet: none are returned.
+    For a recurring debit it is the plan's amount (money going out).
     """
     from forliosa.datapolicy import labels
 
@@ -559,5 +561,6 @@ def upcoming(state: PortfolioState, md: MarketData, days: int) -> list[dict[str,
                 out.append({"date": pay, "type": "dividend_payment", "symbol": r.symbol,
                             "title": f"{name} 現金股利入帳", "amount_estimate": ser.money(amount),
                             "is_demo": ev.is_demo or ans.is_demo, "sources": sources})
-    out.sort(key=lambda u: (u["date"], u["type"], u["symbol"]))
+    out.extend(recurring or [])
+    out.sort(key=lambda u: (u["date"], u["type"], u["symbol"] or ""))
     return out

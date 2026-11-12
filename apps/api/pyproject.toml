@@ -14,6 +14,7 @@ dependencies = [
     "httpx>=0.28",
     "psycopg[binary]>=3.2",
     "tzdata>=2024.2",
+    "anthropic>=2.8.0",
 ]
 
 [project.optional-dependencies]

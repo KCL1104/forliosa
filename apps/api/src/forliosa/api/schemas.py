@@ -223,7 +223,7 @@ class TransactionIn(StrictModel):
     currency: Literal["TWD", "USD"] | None = None
     is_day_trade: bool = False
     note: str = Field(default="", max_length=2000)
-    source: Literal["manual", "import"] = "manual"
+    source: Literal["manual", "import", "ai_draft"] = "manual"
 
     @field_validator("symbol")
     @classmethod
@@ -245,7 +245,7 @@ class TransactionPatch(StrictModel):
     currency: Literal["TWD", "USD"] | None = None
     is_day_trade: bool | None = None
     note: str | None = Field(default=None, max_length=2000)
-    source: Literal["manual", "import"] | None = None
+    source: Literal["manual", "import", "ai_draft"] | None = None
 
 
 class Transaction(BaseModel):
@@ -645,4 +645,92 @@ class UpcomingItem(BaseModel):
     title: str
     amount_estimate: float | None
     is_demo: bool = False
+    sources: list[str] = []
+    # recurring only
+    plan_id: str | None = None
+    account_id: str | None = None
+    scheduled_date: date | None = None  # the plan's day before moving to the next trading day
+
+
+# -- recurring plans (定期定額) ---------------------------------------------------------------------------
+def _days_of_month(v: int | list[int] | None) -> list[int] | None:
+    if v is None:
+        return None
+    days = [v] if isinstance(v, int) else list(v)
+    if not days:
+        raise ValueError("至少要有一個扣款日")
+    if any(not isinstance(d, int) or isinstance(d, bool) or not 1 <= d <= 28 for d in days):
+        raise ValueError("扣款日必須是 1–28 的整數")
+    return sorted(set(days))
+
+
+class RecurringPlanIn(StrictModel):
+    account_id: str
+    symbol: str = Field(min_length=1, max_length=20)
+    amount: Decimal = Field(gt=0, le=Decimal(100_000_000), description="每次扣款金額（新台幣）")
+    day_of_month: int | list[int] = Field(description="每月扣款日 1–28；可為整數或陣列（如 [6, 16, 26]）")
+    start_date: date | None = None
+    end_date: date | None = None
+    active: bool = True
+    note: str = Field(default="", max_length=500)
+
+    @field_validator("day_of_month")
+    @classmethod
+    def _days(cls, v: int | list[int] | None) -> list[int] | None:
+        return _days_of_month(v)
+
+
+class RecurringPlanPatch(StrictModel):
+    account_id: str | None = None
+    symbol: str | None = Field(default=None, min_length=1, max_length=20)
+    amount: Decimal | None = Field(default=None, gt=0, le=Decimal(100_000_000))
+    day_of_month: int | list[int] | None = None
+    start_date: date | None = None
+    end_date: date | None = None
+    active: bool | None = None
+    note: str | None = Field(default=None, max_length=500)
+
+    @field_validator("day_of_month")
+    @classmethod
+    def _days(cls, v: int | list[int] | None) -> list[int] | None:
+        return _days_of_month(v)
+
+
+class RecurringPlanOut(BaseModel):
+    id: str
+    account_id: str
+    symbol: str
+    name: str
+    amount: float
+    day_of_month: list[int]
+    start_date: date
+    end_date: date | None
+    active: bool
+    note: str
+    next_date: date | None
+    created_at: str
+    updated_at: str
+
+
+class DraftTransaction(BaseModel):
+    account_id: str
+    symbol: str
+    type: Literal["buy"]
+    trade_date: date
+    quantity: float
+    price: float
+    note: str
+    source: Literal["ai_draft"]
+
+
+class RecurringDraft(BaseModel):
+    plan_id: str
+    scheduled_date: date
+    date: date
+    name: str
+    amount: float
+    price_as_of: date
+    transaction: DraftTransaction
+    preview: TradePreview
+    is_demo: bool
     sources: list[str] = []

@@ -28,6 +28,7 @@ REPORT_WORDS = ("財務報告", "財報", "財務報表")
 CONFERENCE_WORDS = ("法人說明會", "法說會", "投資人說明會", "業績發表會")
 _CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _ROC_DATE = r"(\d{2,3})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})"
+_YEAR = r"([0-9]{2,3}|[一二三四五六七八九十百〇零]+)"  # ROC year: 115 or 一百一十五
 
 
 @dataclass(frozen=True)
@@ -73,12 +74,12 @@ def report_period(title: str, detail: str, announced: date) -> str | None:
         except ValueError:
             pass
     quarter_words = {"一": 1, "二": 2, "三": 3, "四": 4, "1": 1, "2": 2, "3": 3, "4": 4}
-    m = re.search(r"([0-9]{2,3}|[一二三四五六七八九十百〇零]+)\s*年度?\s*(?:第\s*([一二三四1-4])\s*季|(上半年))", title)
+    m = re.search(rf"{_YEAR}\s*年度?\s*(?:第\s*([一二三四1-4])\s*季|(上半年))", title)
     if m:
         roc = cn_number(m.group(1))
         q = 2 if m.group(3) else quarter_words[m.group(2)]
         return f"{roc + 1911}Q{q}" if roc else None
-    m = re.search(r"([0-9]{2,3}|[一二三四五六七八九十百〇零]+)\s*年度", title)
+    m = re.search(rf"{_YEAR}\s*年度", title)
     if m and "季" not in title and (roc := cn_number(m.group(1))):
         return f"{roc + 1911}Q4"  # 年度財務報告
     m = re.search(r"第\s*([一二三四1-4])\s*季", title)
@@ -90,7 +91,7 @@ def report_period(title: str, detail: str, announced: date) -> str | None:
 
 
 def revenue_period(title: str) -> str | None:
-    m = re.search(r"([0-9]{2,3}|[一二三四五六七八九十百〇零]+)\s*年\s*([0-9]{1,2}|[一二三四五六七八九十]+)\s*月份?", title)
+    m = re.search(rf"{_YEAR}\s*年\s*([0-9]{{1,2}}|[一二三四五六七八九十]+)\s*月份?", title)
     if not m:
         return None
     roc, month = cn_number(m.group(1)), cn_number(m.group(2))

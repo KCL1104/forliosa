@@ -1,9 +1,14 @@
-"""Seed a demo user with two accounts and ~2 years of realistic transactions.
+"""Seed a demo user with two accounts, ~2 years of realistic transactions and a 定期定額 plan.
 
 Usage: ``uv run python -m forliosa.seed`` (runs ``alembic upgrade head`` first; re-running replaces
-the demo user's data). Every price is the close the market-data facade returns for that day, and
-every transaction goes through the same service as ``POST /transactions`` — so fees, taxes and the
-NHI premium are auto-calculated by the production rules and the ledger is validated.
+the demo user's data). Every transaction goes through the same service as ``POST /transactions`` — so
+fees, taxes and the NHI premium are auto-calculated by the production rules and the ledger is validated.
+
+Trade prices: under ``DATA_POLICY=personal`` each price is the close the market-data facade returns for
+that day (real where available). Under ``commercial`` (the default) there is no commercially usable price
+history before our archive starts, so the demo user's trades — fictional user input, not market data —
+are priced from a private synthetic path that ends at the real latest close. The API itself never serves
+demo market data under ``commercial``; it makes no FinMind / MIS / Yahoo call either way.
 """
 
 from __future__ import annotations
@@ -23,8 +28,9 @@ from forliosa.config import API_ROOT
 from forliosa.db import session_factory
 from forliosa.ids import new_id
 from forliosa.marketdata.base import Candle, market_of_symbol
+from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, get_market_data
-from forliosa.models import BrokerAccount, User, WatchlistItem
+from forliosa.models import BrokerAccount, RecurringPlan, User, WatchlistItem
 from forliosa.services import transactions as txn_svc
 from forliosa.services.ledger_io import DEFAULT_PREFERENCES, load_ledger_input, shares_held
 from forliosa.timeutil import today_taipei
@@ -71,10 +77,18 @@ class PriceBook:
         return self.candles(symbol)[-1]
 
 
+def trade_price_source(md: MarketData) -> MarketData:
+    """Where the seed reads its (fictional) trade prices and dividends from; see the module docstring."""
+    if md.demo_data_allowed:
+        return md
+    return MarketData([DemoProvider(anchor_fn=md._real_anchor)], policy="personal")
+
+
 class Seeder:
-    def __init__(self, db: Session, md: MarketData, today: date):
+    def __init__(self, db: Session, md: MarketData, today: date, prices: MarketData | None = None):
         self.db, self.md, self.today = db, md, today
-        self.prices = PriceBook(md, today - timedelta(days=760), today)
+        self.pmd = prices or trade_price_source(md)
+        self.prices = PriceBook(self.pmd, today - timedelta(days=760), today)
         self.count = 0
         self.first_buy: dict[str, date] = {}
 
@@ -100,7 +114,7 @@ class Seeder:
     def dividends(self, user: User, acc: BrokerAccount, symbol: str, since: date, until: date | None = None,
                   cash: bool = True, stock: bool = True) -> None:
         """Record every dividend of ``symbol`` with an ex-date in (since, until] on its ex-date."""
-        ans = self.md.dividends(symbol)
+        ans = self.pmd.dividends(symbol)
         last_day = self.prices.candles(symbol)[-1].t if self.prices.candles(symbol) else self.today
         for ev in sorted(ans.value, key=lambda e: e.ex_dividend_date or date.min):
             ex = ev.ex_dividend_date
@@ -164,7 +178,7 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
     s.trade(user, tw, "buy", "00878.TW", 680, 10000)
     # 2317: size the position so that its next annual cash dividend is ≥ NT$20,000 (NHI premium applies)
     hh_buy = s.prices.on_or_after("2317.TW", today - timedelta(days=650)).t
-    future = [e for e in md.dividends("2317.TW").value
+    future = [e for e in s.pmd.dividends("2317.TW").value
               if e.ex_dividend_date and e.ex_dividend_date > hh_buy and e.cash_dividend > 0]
     dps = min(future, key=lambda e: e.ex_dividend_date).cash_dividend if future else Decimal(5)
     hh_qty = max(5000, math.ceil(Decimal(21000) / dps / 1000) * 1000)
@@ -206,6 +220,11 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
     for sym in ("AAPL", "VOO"):
         s.dividends(user, us, sym, since=today - timedelta(days=365))
 
+    # -- 定期定額: 0050, NT$5,000 on the 6th and the 19th ------------------------------------------------
+    db.add(RecurringPlan(id=new_id("rcp"), user_id=user.id, account_id=tw.id, symbol="0050.TW", amount=Decimal(5000),
+                         days_of_month=[6, 19], start_date=today - timedelta(days=120), end_date=None, active=True,
+                         note="示範：每月 6 日、19 日扣款"))
+
     # -- watchlist ---------------------------------------------------------------------------------
     for sym in DEMO_WATCHLIST:
         resolved = md.resolve(sym)
@@ -221,6 +240,7 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
         "real_price_symbols": real,
         "demo_price_symbols": sorted(s.prices.demo_symbols),
         "stock_dividend": stock_div[0] if stock_div else None,
+        "policy": md.policy,
     }
 
 
@@ -235,7 +255,11 @@ def main() -> None:
     with session_factory()() as db:
         result = seed(db, md)
     print(f"示範資料建立完成：{result['transactions']} 筆交易")
-    print(f"  使用者：{DEMO_EMAIL}（{result['user_id']}）")
+    print(f"  使用者：{DEMO_EMAIL}（{result['user_id']}）；定期定額：0050 每月 6、19 日 NT$5,000")
+    if result["policy"] == "commercial":
+        print("  DATA_POLICY=commercial：交易價格是虛構的示範帳本輸入；行情只用官方開放資料與自建存檔，")
+        print("  存檔不足處顯示「資料累積中」（先執行 python -m forliosa.archive run 存一次官方資料）")
+        return
     print(f"  真實價格：{', '.join(result['real_price_symbols']) or '無'}")
     print(f"  示範價格：{', '.join(result['demo_price_symbols']) or '無'}")
     if result["stock_dividend"]:

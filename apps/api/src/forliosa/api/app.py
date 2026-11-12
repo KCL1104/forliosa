@@ -8,7 +8,7 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from forliosa.api.errors import install_error_handlers
-from forliosa.api.routes import accounts, market, portfolio, stock, transactions, users, watchlist
+from forliosa.api.routes import accounts, market, portfolio, recurring, stock, transactions, users, watchlist
 from forliosa.config import DEFAULT_SESSION_SECRET, get_settings
 from forliosa.marketdata.service import get_market_data
 
@@ -50,7 +50,7 @@ def create_app() -> FastAPI:
         md = get_market_data()
         return {"status": "ok", "env": settings.forliosa_env, "data_policy": md.policy, "providers": md.status()}
 
-    for module in (users, accounts, market, stock, transactions, portfolio, watchlist):
+    for module in (users, accounts, market, stock, transactions, portfolio, watchlist, recurring):
         api.include_router(module.router)
     app.include_router(api)
     return app
