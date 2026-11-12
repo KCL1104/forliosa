@@ -154,3 +154,16 @@ def test_stock_dividend_shares_and_cash_in_lieu():
     assert stock_dividend_shares(D(1000), D("1.5")) == (D(150), D(0))
     # 1,234 shares × 0.5 元 / 10 = 61.7 -> 61 shares + 0.7 share × NT$10 = NT$7 cash
     assert stock_dividend_shares(D(1234), D("0.5")) == (D(61), D(7))
+
+
+def test_capital_surplus_is_left_out_of_the_nhi_premium():
+    # 台泥-like: NT$30,000 paid, all from 資本公積 -> no dividend income, no premium
+    p = preview_cash_dividend(D(30000), "TWD", TSMC, capital_surplus=D(30000))
+    assert p.health_insurance == 0 and p.net_cash == D(30000)
+    assert any("資本公積" in r for r in p.rules)
+    # NT$50,000 of which NT$20,000 is capital surplus: base 30,000 × 2.11% = 633
+    p = preview_cash_dividend(D(50000), "TWD", TSMC, capital_surplus=D(20000))
+    assert p.health_insurance == D(633)
+    # income part below the NT$20,000 threshold once the surplus is excluded
+    p = preview_cash_dividend(D(25000), "TWD", TSMC, capital_surplus=D(10000))
+    assert p.health_insurance == 0 and any("股利所得未達" in r for r in p.rules)

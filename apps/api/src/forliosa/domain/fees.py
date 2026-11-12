@@ -175,19 +175,29 @@ def transaction_tax(
     return truncate(gross * rate), [rule + "，元以下捨去"]
 
 
-def nhi_premium(amount: Decimal, currency: str = "TWD") -> tuple[Decimal, list[str]]:
+def nhi_premium(amount: Decimal, currency: str = "TWD", capital_surplus: Decimal = ZERO) -> tuple[Decimal, list[str]]:
     """二代健保補充保費 on a single cash-dividend payment.
 
     2.11% when the single payment is >= NT$20,000 (base capped at NT$10,000,000), rounded half-up
     to whole NT$. Only Taiwan-dollar dividends from Taiwan issuers are subject to it.
+
+    ``capital_surplus`` is the part of the payment distributed from 資本公積: it is generally not dividend
+    income, so it is left out of both the NT$20,000 threshold and the premium base.
     """
     if currency != "TWD":
         return ZERO, ["二代健保：海外股利不適用"]
-    if amount < NHI_THRESHOLD:
-        return ZERO, [f"二代健保：單筆股利未達 {fmt_money(NHI_THRESHOLD)}，免扣"]
-    base = min(amount, NHI_CAP)
+    rules: list[str] = []
+    excluded = min(max(capital_surplus, ZERO), amount)
+    income = amount - excluded
+    if excluded > 0:
+        rules.append(f"二代健保：其中資本公積發放 {fmt_money(excluded)} 一般不屬股利所得，不計入")
+    if income < NHI_THRESHOLD:
+        label = "股利所得" if excluded > 0 else "單筆股利"
+        return ZERO, [*rules, f"二代健保：{label}未達 {fmt_money(NHI_THRESHOLD)}，免扣"]
+    base = min(income, NHI_CAP)
+    label = "股利所得" if excluded > 0 else "單筆股利"
     return round_half_up(base * NHI_RATE), [
-        f"二代健保：單筆股利 ≥ {fmt_money(NHI_THRESHOLD)}，扣 {fmt_pct(NHI_RATE)}（元以下四捨五入）"
+        *rules, f"二代健保：{label} ≥ {fmt_money(NHI_THRESHOLD)}，扣 {fmt_pct(NHI_RATE)}（元以下四捨五入）"
     ]
 
 
@@ -218,9 +228,11 @@ def preview_sell(
 
 
 def preview_cash_dividend(
-    amount: Decimal, currency: str, instrument: InstrumentRef | None, fee: Decimal = ZERO
+    amount: Decimal, currency: str, instrument: InstrumentRef | None, fee: Decimal = ZERO,
+    capital_surplus: Decimal = ZERO,
 ) -> FeeBreakdown:
-    """Cash dividend: NHI premium for TWD payments, 30% US withholding for US issuers."""
+    """Cash dividend: NHI premium for TWD payments (``capital_surplus`` part excluded), 30% US withholding
+    for US issuers."""
     rules: list[str] = []
     tax = ZERO
     nhi = ZERO
@@ -229,7 +241,7 @@ def preview_cash_dividend(
         rules.append(f"美股股利預扣稅 {fmt_pct(US_DIVIDEND_WITHHOLDING)}")
         rules.append("二代健保：海外股利不適用")
     else:
-        nhi, nhi_rules = nhi_premium(amount, currency)
+        nhi, nhi_rules = nhi_premium(amount, currency, capital_surplus)
         rules.extend(nhi_rules)
         rules.append("股利所得稅：不計入績效（申報時另行試算）")
     if fee > 0:

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -17,6 +17,7 @@ from forliosa.domain.fees import (
     dividend_cash_amount,
     fmt_money,
     preview_cash_dividend,
+    round_half_up,
     stock_dividend_shares,
     transaction_tax,
     truncate,
@@ -48,6 +49,38 @@ def _get_account(db: Session, user: User, account_id: str) -> BrokerAccount:
     if acc is None or acc.user_id != user.id:
         raise ApiError(404, "not_found", "找不到帳戶")
     return acc
+
+
+# A cash dividend is paid within weeks of its ex-date (TSMC ≈ 1 month); a payment is matched to the latest
+# ex-date at most this many days earlier.
+DIVIDEND_PAYMENT_WINDOW_DAYS = 120
+
+
+def capital_surplus_part(md: MarketData, symbol: str, trade_date: date, amount: Decimal,
+                         shares: Decimal | None, per_share: Decimal | None) -> Decimal:
+    """NT$ of a cash-dividend payment distributed from 資本公積, per the official resolution (t187ap45_L).
+
+    The payment is matched to the latest ex-dividend date on or before ``trade_date`` (within
+    ``DIVIDEND_PAYMENT_WINDOW_DAYS``; with ``per_share`` given, only an ex-date with that cash per share).
+    0 when nothing matches, the resolution has no capital-surplus part, or the data is unavailable.
+    """
+    try:
+        events = md.dividends(symbol).value or []
+    except Exception:  # market data is best effort here: the premium then covers the whole payment
+        return ZERO
+    tol = Decimal("0.001")
+    dated = [e for e in events if e.ex_dividend_date is not None and e.cash_dividend > 0
+             and e.ex_dividend_date <= trade_date <= e.ex_dividend_date + timedelta(days=DIVIDEND_PAYMENT_WINDOW_DAYS)
+             and (not per_share or abs(e.cash_dividend - per_share) <= tol)]
+    if not dated:
+        return ZERO
+    event = max(dated, key=lambda e: e.ex_dividend_date)
+    if not event.cash_sources or event.cash_sources[2] <= 0:
+        return ZERO
+    surplus_per_share = event.cash_sources[2]
+    part = (truncate(shares * surplus_per_share) if shares
+            else round_half_up(amount * surplus_per_share / event.cash_dividend))
+    return min(part, amount)
 
 
 def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
@@ -124,7 +157,10 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
                 qty = shares
                 rules.append(f"股利 = {qty} 股 × {px} 元")
             fee = fee if fee is not None else ZERO
-            auto = preview_cash_dividend(amount, currency, ref, fee)
+            surplus = ZERO
+            if nhi is None and ref.is_tw and currency == "TWD" and symbol:
+                surplus = capital_surplus_part(md, symbol, trade_date, amount, qty, px)
+            auto = preview_cash_dividend(amount, currency, ref, fee, capital_surplus=surplus)
             nhi = nhi if nhi is not None else auto.health_insurance
             tax = tax if tax is not None else auto.tax
             rules += auto.rules
