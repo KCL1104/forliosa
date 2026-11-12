@@ -299,6 +299,123 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 - **休市日**（`holidaySchedule`）存進 `market_holidays`，載入後所有交易日計算都用官方日期。
 - 上櫃個股三大法人（`tpex_3insti_daily_trading`）與外資持股（`tpex_3insti_qfii`）原本就每日存檔，顯名聲明已補齊。
 
+## 2026-11-12 第三批：開放資料 P0（期交所、報酬指數、股利決議、公司基本資料）
+
+依 [`docs/research/open-data-inventory.md`](../../docs/research/open-data-inventory.md)（§11 建議清單、§12 期交所實作規格）與
+[`open-data-catalog.json`](../../docs/research/open-data-catalog.json)。所有欄位名稱都在 2026-11-12 對真實回應核對過，測試 fixture
+是精簡後的真實回應（`tests/archive/fixtures/taifex_*`、`twse_mi_index_*`、`twse_t187ap45_l_*` …）。
+
+### 授權狀態與期交所「有條件」資料集（產品負責人決定）
+
+`datapolicy.DATASETS` 每一筆多了 `license_status`：
+
+| 狀態 | 意義 | `DATA_POLICY=commercial` 時 |
+|---|---|---|
+| `ogdl` | 機關以政府資料開放授權條款第 1 版釋出（證交所 swagger 連到 data.gov.tw/license；櫃買、集保與期交所三大法人／期貨大額交易人／Put/Call 比在 data.gov.tw 有對應資料集） | 照常顯示，附顯名聲明 |
+| `conditional` | 推定為 OGDL（同一 OpenAPI、同一機關），但 data.gov.tw 沒找到個別資料集：期交所〈期貨每日交易行情〉〈選擇權每日交易行情〉〈每日外幣參考匯率〉〈選擇權大額交易人未沖銷部位資料〉，以及 catalog 一樣標 conditional 的〈最後結算價〉〈保證金一覽表〉×3〈股票期貨／選擇權交易標的〉 | **照常存檔，但不顯示**，直到 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`） |
+
+- `personal`（非商用、明確開啟）一律顯示。判斷集中在 `datapolicy.dataset_served(key, policy)`；API、AI 工具、匯率都經過它。
+- 詢問信草稿（寄 swagger 上的窗口 s0160116@taifex.com.tw）與收到回覆後要做的事：[`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)。
+- 期交所 swagger 的 `info.description` 只連到網站使用條款，沒有連 data.gov.tw；顯名格式照舊，例如
+  「臺灣期貨交易所〈臺指選擇權Put/Call比〉（2026），依政府資料開放授權條款第 1 版」。
+
+### 新端點
+
+| 方法 | 路徑 | 回傳 |
+|---|---|---|
+| GET | `/derivatives/overview` | `DerivativesOverview`（見下） |
+| GET | `/derivatives/futures/{code}/history?range=3M` | `{code, name, range, series: [{t, contract_month, open, high, low, close, change, change_pct, volume, settlement_price, open_interest, after_hours: {open, high, low, close, change, change_pct, volume} \| null}], notes, sources}`；`range`：`1M`、`3M`、`6M`、`1Y`、`MAX`；代號格式不對 422、從沒出現過的契約 404 |
+
+`DerivativesOverview`：
+
+| 欄位 | 內容 |
+|---|---|
+| `as_of` | 用到的資料中最新的交易日 |
+| `futures[]` | TX、MTX、TE、TF 的**近月**（當天一般交易時段最小的月契約，週契約與價差不算）：`{code, name, contract_month, regular: {open, high, low, close, change, change_pct, volume, settlement_price, open_interest}, after_hours: {…同左但沒有結算價與未平倉}}`。**有條件資料集**：未確認前是 `[]` |
+| `put_call_ratio` | `{date, volume_ratio, oi_ratio, put_volume, call_volume, put_oi, call_oi, oi_ratio_prev}`；比率是分數（0.6517 = 65.17%） |
+| `institutional.TX`、`.TXO` | 三大法人（`investor`：`dealers`／`trust`／`foreign`，另有 `investor_name` 中文）：`oi_net`（口，正＝淨多）、`oi_net_change`（與前一個存檔交易日相比，沒有前一天時 `null`）、`oi_long`、`oi_short`、`oi_net_value_k`（千元）、`net_volume`（當日交易口數淨額）；TXO 另有 `calls`、`puts`（買賣權分計） |
+| `large_traders.TX` | 期貨大額交易人（臺股期貨＝TX＋MTX/4）：`all_months`（`SettlementMonth` 999912）與 `near_month`：`top5_buy/sell`、`top10_buy/sell`、`top5_net`、`top10_net`、`market_oi`、`specific`（特定法人：`TypeOfTraders` 1）|
+| `large_traders.TXO` | 選擇權大額交易人（買權、賣權，全部月份）。**有條件資料集**：未確認前 `null` |
+| `served` | `{futures, options_large_traders}`：這兩部分目前是否顯示 |
+| `notes`、`sources` | 授權待確認的說明、夜盤說明；顯名聲明 |
+
+- **夜盤**：期交所把盤後交易時段算在下一個交易日。`after_hours` 是**同一個交易日**的夜盤（前一個交易日 15:00 開盤、當天 05:00 收盤），
+  漲跌以前一個交易日的結算價計算，和當天一般時段同一個基準（TX 2026-11-11：前一日結算 42,646；夜盤 42,522 −124；一般 44,091 +1,445）。
+  所以不需要清晨另外存檔，21:40 那次就涵蓋。
+- **AI**：新工具 `get_derivatives_overview`（沒有參數、`strict`、唯讀、不含使用者資料）回傳同樣內容的精簡版；系統提示的工具說明多一行。
+
+### 新增的欄位（都不影響既有欄位）
+
+| 位置 | 新增 | 說明 |
+|---|---|---|
+| `DividendRecord`（`/instruments/{symbol}/dividends`） | `status`（`announced`＝有除權息日、`resolved`＝只有董事會／股東會決議）、`progress`（決議進度原文）、`board_date`、`meeting_date`、`cash_sources: {earnings, legal_reserve, capital_surplus} \| null`、`sources` | 決議來自證交所〈上市公司股利分派情形〉（`t187ap45_L`）。決議與除權息預告的對應：依除權息日先後，配給董事會日期在除權息日前 200 天內、每股現金（±0.001）與配股都相同、最早決議的那一筆（台積電 2026Q1、Q2 都是 7 元，不會配錯）。沒有對上的決議 `ex_dividend_date: null`：除權息日還沒公告，**或在開始存檔前就已除權息**（存檔不知道日期）。排序：除權息日，沒有時用董事會日期，新到舊 |
+| `StockEvent.type` | `dividend_resolution` | 日期是董事會（擬議）日；`detail` 例「現金股利 0.8 元（資本公積 0.8 元）；資本公積發放的現金一般不屬股利所得、不扣二代健保（依公司公告的來源為準）。進度：股東會確認，股東會 2026-05-22」 |
+| `Overview`、`InstrumentDetail` | `listed_date` | 上市／上櫃日期 |
+| `Overview.market_cap`、`shares_outstanding`（以及 `InstrumentDetail`） | 改用官方資料 | 證交所〈上市公司基本資料〉／櫃買〈上櫃股票基本資料〉的已發行普通股數；市值 = 股數 × 最新存檔收盤價；`sources` 列出該資料集。沒有存檔時才用 shioaji-data（不會把官方股數和別的來源的市值混用） |
+| `InstrumentDetail.industry` | 主檔沒有產業時用公司基本資料的產業別 | 資料集只給代碼（"24"），對照證交所產業分類（`opendata.INDUSTRY_CODES`） |
+| `Performance.notes` | 匯率說明 | 有美股時：「USD/TWD 匯率：臺灣期貨交易所〈每日外幣參考匯率〉（2026），依政府資料開放授權條款第 1 版」，或授權未確認時「USD/TWD 以固定 31.5 換算：…確認前不使用」 |
+| `/meta/attributions` | 每筆多 `license_status`、`license_basis`、`served`、`last_updated`（存檔看到的最新資料日期）、`last_fetched`；最上層多 `taifex_conditional_confirmed`、`conditional[]`（已存檔但未顯示的資料集＋原因）、`stale[]`（停更端點：`key, agency, dataset, url, last_updated, checked_at, used, note`） | `datasets` 仍只列「目前顯示」的資料集（前端可直接用）；`commercial` 欄位在有條件資料集確認前是 `false` |
+
+參考價：櫃買〈上櫃股票除權除息計算結果表〉（`tpex_exright_daily`）有該股當天的官方值時優先使用（開始交易基準價、漲跌停），
+其次才是 TWT84U／櫃買 NextReferencePrice，最後才是自算。證交所沒有對應的 OpenAPI 資料集（inventory 未列；TWT84U 本身就是官方當日參考價）。
+除權息預告金額「尚未公告」時，也用這個資料集的現金股利補上。
+
+### 存檔
+
+| 資料表 | 來源 | 群組（`archive run --only`） | 排程 |
+|---|---|---|---|
+| `index_daily` | 證交所 `MI_INDEX`（267 個指數，最新一天）、`MFI94U`（本月每日報酬指數，第一次執行即回補本月）；櫃買 `tpex_index`（本月 OHLC）、`tpex_reward_index`（本月櫃買／報酬指數） | `twse`、`tpex` | 08:10、14:40、21:40 |
+| `ex_rights_results` | 櫃買 `tpex_exright_daily` | `tpex` | 同上 |
+| `dividend_resolutions` | 證交所 `t187ap45_L`（約 2.5 MB） | `companies` | 21:40 |
+| `company_profiles` | 證交所 `t187ap03_L`、櫃買 `mopsfin_t187ap03_O`（只存公司資料；董事長、發言人、會計師姓名與電話是個資，不存） | `companies` | 21:40 |
+| `taifex_futures_daily` | `DailyMarketReportFut`（全存，含夜盤、週契約、價差） | `taifex` | 21:40 |
+| `taifex_options_daily` | `DailyMarketReportOpt`：TXO、TEO、TFO 全存；其他（股票／ETF 選擇權）只存最近兩個到期月份（含該月的週契約） | `taifex` | 21:40 |
+| `taifex_institutional` | 三大法人 5 個依日期資料集；`scope`：`all`、`fut_opt`、`futures`、`options`、`calls_puts`；金額一律千元（總表原為百萬元，×1000） | `taifex` | 21:40 |
+| `taifex_large_traders` | 期貨、選擇權大額交易人（`settlement_month` 保留原值：999912＝全部月份、666666＝週契約合計） | `taifex` | 21:40 |
+| `taifex_put_call_ratio` | `PutCallRatio`（回應含近一個月：upsert，第一次就回補） | `taifex` | 21:40 |
+| `fx_rates`（既有表） | `DailyForeignExchangeRates` → `USDTWD`、`CNYTWD`、`EURUSD`、`USDJPY`、`GBPUSD`、`AUDUSD`、`USDHKD`、`USDCNY`、`USDZAR`、`NZDUSD`（回應含近 6 週：upsert） | `taifex` | 21:40 |
+| `taifex_margins` | 保證金一覽表（指數、股票、ETF）：**內容變動才新增一列** | `taifex` | 21:40 |
+| `taifex_contract_map` | 中文商品名稱 → 代號（臺股期貨 → TX）：內建對照＋大額交易人與股票期貨保證金資料中的名稱 | `taifex` | 21:40 |
+| `taifex_final_settlement`、`taifex_underlyings` | `FinalSettlementPrice`；`SSFLists`、`SSOLists` | `weekly` | 週六 10:00（和集保一起） |
+| `dataset_status` | 每個資料集最新的資料日期；`weekly` 另外檢查停更的 `twtazu_od`、`t187ap09_L`（只記日期，不存資料） | 全部 | 每次存檔 |
+
+- 不下載：`TimeAndSalesData`、`OptionsTimeAndSalesData`（數百 MB）、`TimeAndSalesDataOnCalendarSpreadOrders`。
+- 白名單加 `https://openapi.taifex.com.tw/v1/`（只有資料端點；`/v1/swagger.json` 是 302），每 2 秒最多一次；期交所網站一律不抓。
+- 交易日沿用證交所 `holidaySchedule`（期貨與股票同日休市）。
+
+### 期交所解析陷阱（`marketdata/taifex.py`）
+
+- **同一端點可能回 JSON 也可能回 CSV**（2026-11-12 實測發現）：資料端點在 Cloudflare 後面，快取存什麼就回什麼，不看 `Accept`。
+  `DailyForeignExchangeRates` 當天回的是 CSV（`content-disposition: …csv`、UTF-8 BOM，欄名是 swagger 的中文說明、「／」寫成「_」，
+  例如 `美元_新台幣(匯率)`），其他端點是 JSON。所以一律用 `decode_rows` 解析，每個欄位同時接受 JSON 鍵與中文欄名。
+- 數字都是字串；缺值 `"NULL"`、`"-"`、`""`；百分比有 `"1.90%"` 與 `"107.08"`（`PutCallVolumeRatio%`）兩種，都轉成分數。
+- 日期是西元 `YYYYMMDD`（證交所、櫃買多為民國年；櫃買 `tpex_index` 也是西元、`tpex_reward_index` 是民國年）。
+- `ContractMonth(Week)`：`202611`、`202611W2`／`202611F2`（週三／週五到期的週契約）、`202611/202612`（價差：價格是價差，結算價與未平倉是 `-`）。
+  MTX 週契約到期當天一般時段的結算價是 `"0"`。
+- 盤後列的 `SettlementPrice` 是 `"NULL"`、`OpenInterest` 是 `"-"`。
+- 三大法人用中文商品名稱、行情用代號：`taifex_contract_map`；大額交易人的名稱又略有不同（「櫃買期貨」vs「櫃買指數期貨」、「臺股期貨(TX+MTX/4)」），
+  股票期貨在大額交易人是 `CD`、在行情與保證金是 `CDF`。
+- 大額交易人 `999912` 是全部月份合計（TXO 999912 買權未平倉 88,811 ＝ Put/Call 比的 `CallOI`），`666666` 推定是週契約合計；
+  `TypeOfTraders` 1 的數字都不大於 0，推定是「其中特定法人」。
+- **`FinalSettlementPrice` 停更**：2026-11-12 回應中最新的最後結算日是 2025-12-05（inventory 說「2025-12 起」應是誤讀）；仍每週存，`/meta/attributions.stale` 列出。
+
+### 資料品質修正
+
+- 櫃買財報的金融、金控、保險、異業產業別（`mopsfin_t187ap06_O_*`／`07_O_*`）只回一列空白（代號、年度都是空字串，出表日期 1100616）：
+  跳過，該工作記 0 筆而不是錯誤。
+- 財報 upsert 改為**合併**：新回應某個科目是空值時，不會蓋掉已存檔的值。
+- 證券業（`06_O_bd`）的科目名稱不同：`收益`、`營業利益`、`淨利（損）歸屬於母公司業主`，已加入對照。
+- `/meta/attributions.stale` 列出停更端點與最後資料日期：`twtazu_od`（2026-06-05）、`t187ap09_L`（2026-08-19；每週檢查一次）、
+  `mopsfin_t187ap39_O`（2021-08-04）、櫃買財報空白產業別（2021-06-16）、期交所 `FinalSettlementPrice`（2025-12-05）。
+
+### 已知缺口
+
+- **上櫃公司的股利決議沒有開放來源**：櫃買 `mopsfin_t187ap39_O`（股利分派情形）停在 2021-08。上櫃股票的股利只能等除權息預告（`tpex_exright_prepost`）
+  與除權息計算結果（`tpex_exright_daily`），`status` 一律是 `announced`。
+- 報酬指數只從 2026-11-02 起（`MFI94U`／`tpex_reward_index` 只給本月）；更早的基準要 personal＋FinMind，或日後購買歷史資料。
+- 股利決議早於存檔的除權息日不知道：這類決議 `ex_dividend_date: null`。
+- 產業別代碼對照是證交所產業分類的標準代碼（資料集本身只給代碼），新增產業時要更新。
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。
@@ -331,6 +448,13 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
     12 月初要觀察一次。
 19. **重大訊息的連結**：OpenAPI 的重大訊息沒有單則網址，`/news` 的 `url` 先指向公開資訊觀測站重大訊息查詢頁
     （`https://mops.twse.com.tw/mops/#/web/t05st01`）。這個環境連不到 MOPS，網址格式沒能驗證。
+20. **期交所有條件資料集的授權**（2026-11-12）：期貨／選擇權每日交易行情、每日外幣參考匯率、選擇權大額交易人等已每日存檔，
+    commercial 下要等期交所書面確認才顯示。請寄出 [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)
+    的信；同意後設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（只同意部分資料集時，改逐一把 `license_status` 設為 `ogdl`）。
+21. **資本公積配發的稅務處理**：事件與股利的說明寫「一般不屬股利所得、不扣二代健保（依公司公告的來源為準）」，帳本的二代健保計算**沒有改**
+    （仍以整筆股利判斷）。要不要讓記帳時依 `cash_sources` 自動排除資本公積部分，請決定。
+22. **股利決議沒有對上除權息預告時**：目前顯示 `status: "resolved"`、`ex_dividend_date: null`，包括「其實已在存檔前除權息」的舊決議
+    （例如台積電 2025Q4）。若前端覺得混淆，可以只顯示董事會日期在最近 N 天內的決議，請決定 N。
 
 ## AI（M4，2026-11-12）
 
