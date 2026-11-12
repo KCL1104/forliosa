@@ -51,7 +51,7 @@ describe("個股頁的建議問題", () => {
   it("未持有：外資動向（上市個股）、貴不貴、持有 1 張能領多少", () => {
     const s = stockSuggestions({ ...base, position: null, overview: { pe: 20, last_cash_dividend: 5 } as never }, TODAY)
     expect(s.map((x) => x.kind)).toEqual(["foreign_flow", "is_expensive", "if_hold_dividend"])
-    expect(s[0]).toMatchObject({ text: "最近外資對這檔的動向？", lines: ["最近外資", "對這檔的動向？"], symbol: "2330.TW" })
+    expect(s[0]).toMatchObject({ text: "最近外資對這檔的動向？", symbol: "2330.TW" })
     expect(s.some((x) => /建議|本頁/.test(x.text))).toBe(false)
   })
   it("上市個股才問外資動向：上櫃（頁面有櫃買的法人資料）、上市 ETF、美股不問", () => {
@@ -82,10 +82,11 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
     route: "ledger",
     ledger: { holdings: [h({ name: "環球晶", day_change: -7500, day_change_pct: -0.0185 }), h({ name: "國泰永續高股息", day_change: -662, day_change_pct: -0.0022 })], summary: summary() },
   }
-  it("誰拖累：依今日損益排序，句子用百分比、數字列用金額", () => {
+  it("誰拖累：依今日損益排序，句子用文字說漲跌（▲▼ 只在數字列），數字列用金額＋百分比", () => {
     const a = answerFor("drag", { ctx, privacy: false, today: TODAY })!
-    expect(a.text).toContain("環球晶（▼1.85%）")
-    expect(a.rows![0]).toMatchObject({ label: "環球晶", value: "−NT$7,500", tone: "down" })
+    expect(a.text).toContain("環球晶（下跌 1.85%）")
+    expect(a.text).not.toMatch(/[▲▼]/)
+    expect(a.rows![0]).toMatchObject({ label: "環球晶", value: "−NT$7,500", tone: "down", hint: "▼1.85%" })
   })
   it("隱私模式：金額變成遮罩", () => {
     const a = answerFor("drag", { ctx, privacy: true, today: TODAY })!
@@ -95,7 +96,9 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
     expect(classifyQuestion("今天是誰拖累我", ctx)).toBe("drag")
     expect(classifyQuestion("持股集中嗎", ctx)).toBe("concentration")
     const f = fallbackAnswer("幫我分析台積電的護城河", ctx)
-    expect(f.text).toContain("下一階段")
+    // 現在式：只說現在能做什麼，不承諾時程，也不扮演 AI 的人格
+    expect(f.text).toContain("這裡先不回答")
+    expect(f.text).not.toMatch(/下一階段|開放|猜的答案/)
     expect(f.links!.length).toBeGreaterThan(0)
   })
 })

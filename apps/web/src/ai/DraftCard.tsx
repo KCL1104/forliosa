@@ -33,7 +33,7 @@ interface Props {
 /**
  * 交易草稿（紫色虛線、尚未生效）。
  * 「怎麼算的 ⌄」展開稅費規則；「修改」原地改股數、價格、日期；方形「簽名｜確認入帳」才會真的入帳。
- * 簽名後格子留下使用者的簽名（文楷），草稿變成實線。
+ * 簽名後格子留下使用者名字的第一個字（墨色 Noto Sans：這是使用者的字，不是模型寫的），草稿變成實線。
  */
 export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused }: Props) {
   const privacy = usePrefs((s) => s.privacyMode)
@@ -107,9 +107,16 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
           ) : (
             <>
               <Cell label="股數" value={privacy ? <Masked /> : input.quantity !== null ? `${formatNumber(input.quantity, 0)} 股` : "—"} />
+              {/* 和「2,000 股」同一套語法：值後面接單位（台股「52.40 元」、美股「182.30 美元」） */}
               <Cell
                 label={input.type === "stock_dividend" ? "每股配股（元）" : "成交價"}
-                value={input.price != null ? `${input.type === "stock_dividend" ? "" : "@"}${formatPrice(input.price, instrument.market)}` : "—"}
+                value={
+                  input.price == null
+                    ? "—"
+                    : input.type === "stock_dividend"
+                      ? formatPrice(input.price, instrument.market)
+                      : `${formatPrice(input.price, instrument.market)} ${currency === "USD" ? "美元" : "元"}`
+                }
                 right
               />
               <Cell label="手續費" value={preview ? money(preview.fee) : "…"} />
@@ -201,13 +208,13 @@ function Cell({ label, value, right }: { label: string; value: React.ReactNode; 
   )
 }
 
-/** 方形簽名格：按下才入帳；簽名後留下使用者的字（文楷，由左往右寫出） */
+/** 方形簽名格：按下才入帳；簽名後留下使用者的字（墨色，由左往右寫出） */
 function SignBox({ signed, signature, disabled, onSign, signedAt }: { signed: boolean; signature: string; disabled: boolean; onSign: () => void; signedAt?: string }) {
   if (signed) {
     const time = signedAt ? new Date(signedAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Taipei" }) : ""
     return (
       <span className="sign-box" data-signed role="img" aria-label={`已簽名入帳 ${time}`}>
-        <span className="sign-write font-ai text-2xl leading-none text-ink">{signature}</span>
+        <span className="sign-write text-2xl leading-none font-medium text-ink">{signature}</span>
         <small className="num text-xs font-normal text-ink-2">{time} 入帳</small>
       </span>
     )

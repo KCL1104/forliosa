@@ -471,6 +471,8 @@
     font-family: var(--font-ai);
     color: var(--ai);
     font-weight: 400;
+    /* 楷體在 tw-kai.css 放大到 120%（墨跡和 Noto Sans TC 的漢字等高），字距只收一點點；數字（Noto Sans）不會被擠 */
+    letter-spacing: -0.01em;
   }
 
   /* 示範資料：細框小字，資料狀態而不是品牌 */

@@ -120,7 +120,7 @@ describe("漏記的定期定額（最近 7 天）", () => {
   })
   it("11/06 沒有買進紀錄 → 補記 11/06 的 0050；記了（當天或之後）就不提", () => {
     const [o] = missedDebits([plan({})], today, [], [])
-    expect(o).toMatchObject({ kind: "recurring_draft", text: "補記 11/06 的 0050 定期定額", lines: ["11/06 扣款", "補記 0050 定期定額"], recurring: { planId: "p1", scheduledDate: "2026-11-06", date: "2026-11-06", missed: true } })
+    expect(o).toMatchObject({ kind: "recurring_draft", text: "補記 11/06 的 0050 定期定額", recurring: { planId: "p1", scheduledDate: "2026-11-06", date: "2026-11-06", missed: true } })
     expect(missedDebits([plan({})], today, [buyOn("0050.TW", "2026-11-06")], [])).toEqual([])
     expect(missedDebits([plan({})], today, [buyOn("0050.TW", "2026-11-09")], [])).toEqual([])
     // 別的帳戶、別的股票、扣款日之前的買進都不算

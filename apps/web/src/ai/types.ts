@@ -22,8 +22,6 @@ export type SuggestionKind =
 export interface Suggestion {
   kind: SuggestionKind
   text: string
-  /** 手機卡片用的兩行版本（第一行短） */
-  lines?: [string, string]
   symbol?: string
   /** 定期定額扣款日的草稿（`recurring_draft`）：計畫與原本的扣款日；`missed`＝最近 7 天漏記、補記 */
   recurring?: { planId: string; scheduledDate: string; date: string; name: string; missed?: boolean }
@@ -44,7 +42,7 @@ export interface AnswerLink {
   search?: Record<string, string>
 }
 
-/** AI 的回答：一句話（紫色文楷）＋可選的數字列＋可以接著去的地方＋資料時間 */
+/** 本機規則版的回答（不是模型寫的，墨色 Noto Sans）：一句話＋可選的數字列＋可以接著去的地方＋資料時間 */
 export interface Answer {
   text: string
   rows?: AnswerRow[]
@@ -87,6 +85,11 @@ export interface Message {
   id: string
   role: "user" | "ai"
   text?: string
+  /**
+   * `text` 是模型寫的（`/ai/chat` 串流、`/ai/threads` 載入）＝紫色楷體；`false` 是本機規則或範本寫的句子
+   * （草稿的說明、定期定額的說明）＝墨色 Noto Sans。舊紀錄沒有這個欄位：連後端的對話視為模型寫的。
+   */
+  model?: boolean
   answer?: Answer
   draftId?: string
   /** 後端 AI 一次回答裡產生的草稿（可能不只一份） */

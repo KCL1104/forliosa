@@ -3,7 +3,7 @@ import { viewAsId } from "@/api/view-as"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { useAiContext } from "./context"
 import { useAiRunner, type AiAction } from "./runner"
-import { useAi } from "./store"
+import { openDraft, useAi } from "./store"
 
 /**
  * 查看別人的資產時不用 AI（AI 面板沒有掛載，AI 也不讀被查看者的資料）。畫面上的 AI 動作都已隱藏，
@@ -41,14 +41,7 @@ export function useAskAi() {
     /** 打開面板並捲到某份草稿 */
     showDraft: (id: string | null) => {
       reveal()
-      const s = useAi.getState()
-      const draft = id ? s.drafts[id] : undefined
-      if (draft) {
-        const thread = s.threads.find((t) => t.messages.some((m) => m.draftId === id || m.draftIds?.includes(id!)))
-        if (thread) s.openThread(thread.id)
-      }
-      s.focusDraft(id)
-      window.setTimeout(() => useAi.getState().focusDraft(null), 2400)
+      openDraft(id)
     },
     reveal,
   }

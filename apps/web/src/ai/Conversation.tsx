@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router"
-import { ArrowUpRightIcon, CircleAlertIcon, CornerDownRightIcon } from "lucide-react"
+import { ArrowUpRightIcon, CircleAlertIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { useUi } from "@/app/ui-store"
 import { formatDateTime } from "@/lib/format"
@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils"
 import { DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
 import { useAiUsage } from "./remote-hooks"
 import { DraftCard } from "./DraftCard"
+import { textLink } from "./Home"
 import type { Citation } from "./remote"
 import type { useAiRunner } from "./runner"
 import { useAi } from "./store"
@@ -14,7 +15,10 @@ import type { Answer, AnswerLink, Message, Thread } from "./types"
 
 type Runner = ReturnType<typeof useAiRunner>
 
-/** 對話：使用者的話靠右（格線小框），AI 的話是紫色文楷；草稿卡跟在 AI 的話後面 */
+/**
+ * 對話：使用者的話靠右（格線小框、墨色）；模型寫的話是紫色楷體，本機規則或範本寫的句子是墨色 Noto Sans；
+ * 草稿卡跟在後面。
+ */
 export function Conversation({ thread, runner, size = "panel", onNavigate }: { thread: Thread; runner: Runner; size?: "panel" | "screen"; onNavigate?: () => void }) {
   const drafts = useAi((s) => s.drafts)
   const focusDraftId = useAi((s) => s.focusDraftId)
@@ -47,7 +51,12 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
         ) : (
           <div key={m.id} className="note-in mt-4 flex flex-col" aria-busy={m.streaming || undefined}>
             <span className="sr-only">AI：</span>
-            {m.text && <AiText text={stripDisclaimer(m.text, m.disclaimer ?? fallbackDisclaimer)} ungrounded={m.ungrounded} size={size} />}
+            {m.text &&
+              ((m.model ?? !!thread.remoteId) ? (
+                <AiText text={stripDisclaimer(m.text, m.disclaimer ?? fallbackDisclaimer)} ungrounded={m.ungrounded} size={size} />
+              ) : (
+                <RuleText text={m.text} size={size} />
+              ))}
             {m.streaming && <StreamingLine message={m} />}
             {m.answer && <AnswerView answer={m.answer} runner={runner} size={size} onNavigate={onNavigate} />}
             {m.error && <ErrorNote code={m.error.code} message={m.error.message} size={size} />}
@@ -65,7 +74,10 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
               ) : null,
             )}
             {!m.streaming && m.citations && m.citations.length > 0 && <Citations items={m.citations} />}
-            {!m.streaming && (m.text || m.answer) && !m.error && <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? fallbackDisclaimer}</p>}
+            {/* 免責只跟著回答（模型的回答、規則版回答）；草稿前的說明是照使用者的指令算的稅費，不是建議，不加 */}
+            {!m.streaming && !m.error && (m.answer || (m.text && m.model !== false)) && (
+              <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? fallbackDisclaimer}</p>
+            )}
           </div>
         ),
       )}
@@ -74,14 +86,19 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   )
 }
 
+/** 模型寫的字：楷體約 17px（手機 18px）、行高 1.8，長回答在 400px 的面板裡也讀得下去 */
+const modelSize = { panel: "text-lg leading-[1.8]", screen: "text-[1.125rem] leading-[1.8]" } as const
+/** 規則或範本寫的句子：墨色 Noto Sans，和介面的內文同一級 */
+const ruleSize = { panel: "text-base leading-relaxed", screen: "text-[1rem] leading-relaxed" } as const
+
 /**
- * AI 的話（紫色文楷）。後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
+ * 模型寫的話（紫色楷體）。後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
  * 後面接一個安靜的「無來源」小標記（淡墨，不用紅色）；按下展開說明。
  */
 export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: UngroundedPassage[]; size: "panel" | "screen" }) {
   const segments = splitUngrounded(text, ungrounded)
   return (
-    <p className={cn("ai-voice whitespace-pre-line", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>
+    <p className={cn("ai-voice whitespace-pre-line", modelSize[size])}>
       {segments.map((seg, i) =>
         seg.ungrounded ? (
           <span key={i}>
@@ -94,6 +111,11 @@ export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: 
       )}
     </p>
   )
+}
+
+/** 本機規則或範本寫的句子（草稿的說明、規則版的回答）：不是模型寫的，墨色 Noto Sans、不用紫色 */
+function RuleText({ text, size }: { text: string; size: "panel" | "screen" }) {
+  return <p className={cn("whitespace-pre-line text-ink", ruleSize[size])}>{text}</p>
 }
 
 function UngroundedMark({ passage }: { passage: UngroundedPassage }) {
@@ -132,10 +154,10 @@ function StreamingLine({ message }: { message: Message }) {
   )
 }
 
-/** 拒答是 AI 自己說的話（文楷）；額度、連線等狀況是一行說明 */
+/** 拒答是模型自己說的話（楷體）；額度、連線等狀況是一行說明 */
 function ErrorNote({ code, message, size }: { code: string; message: string; size: "panel" | "screen" }) {
   if (code === "refusal") {
-    return <p className={cn("ai-voice", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>{message}</p>
+    return <p className={cn("ai-voice", modelSize[size])}>{message}</p>
   }
   return (
     <p className="mt-2 flex items-start gap-2 text-md text-ink-2" role="status">
@@ -165,7 +187,7 @@ function Citations({ items }: { items: Citation[] }) {
   })
   return (
     <div className="mt-3">
-      <p className="text-xs text-ink-2">來源</p>
+      <p className="text-sm text-ink-2">來源</p>
       <ul className="mt-1.5 flex flex-wrap gap-1.5">
         {unique.slice(0, 8).map((c) => {
           const host = hostOf(c.url)
@@ -173,7 +195,7 @@ function Citations({ items }: { items: Citation[] }) {
           const body = (
             <>
               <span className="min-w-0 truncate">{label}</span>
-              {host && host !== label && <span className="num shrink-0 text-xs text-ink-2">{host}</span>}
+              {host && host !== label && <span className="num shrink-0 text-ink-2">{host}</span>}
               {c.url && <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0 text-ink-2" />}
             </>
           )
@@ -200,7 +222,7 @@ function Citations({ items }: { items: Citation[] }) {
 function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runner: Runner; size: "panel" | "screen"; onNavigate?: () => void }) {
   return (
     <div className="flex flex-col">
-      <p className={cn("ai-voice", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>{answer.text}</p>
+      <RuleText text={answer.text} size={size} />
       {answer.rows && answer.rows.length > 0 && (
         <dl className="mt-3 border-t border-rule">
           {answer.rows.map((r) => (
@@ -209,7 +231,8 @@ function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runn
               {(r.value || r.hint) && (
                 <dd className={cn("num shrink-0 text-md", r.tone === "up" ? "text-rise" : r.tone === "down" ? "text-fall" : "text-ink")}>
                   {r.value}
-                  {r.hint && <span className="ml-2 text-sm text-ink-2">{r.hint}</span>}
+                  {/* 漲跌的百分比（▲▼）跟著漲跌色；其他補充（每股配息）是淡墨 */}
+                  {r.hint && <span className={cn("ml-2 text-sm", r.tone !== "up" && r.tone !== "down" && "text-ink-2")}>{r.hint}</span>}
                 </dd>
               )}
             </div>
@@ -224,18 +247,17 @@ function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runn
         </div>
       )}
       {answer.followUps && answer.followUps.length > 0 && (
-        <ul className="mt-3 flex flex-col gap-1.5">
+        <ul aria-label="接著問" className="mt-2 flex flex-col text-md">
           {answer.followUps.map((f) => (
             <li key={f}>
-              <button type="button" onClick={() => void runner.submit(f)} className="press inline-flex min-h-9 items-center gap-1.5 text-left text-md text-ai hover:underline pointer-coarse:min-h-11">
-                <CornerDownRightIcon aria-hidden className="size-4 shrink-0" />
+              <button type="button" onClick={() => void runner.submit(f)} className={textLink}>
                 {f}
               </button>
             </li>
           ))}
         </ul>
       )}
-      {answer.asOf && <p className="mt-2 text-xs text-ink-2">資料至 {formatDateTime(answer.asOf)}</p>}
+      {answer.asOf && <p className="mt-2 text-sm text-ink-2">資料至 {formatDateTime(answer.asOf)}</p>}
     </div>
   )
 }
