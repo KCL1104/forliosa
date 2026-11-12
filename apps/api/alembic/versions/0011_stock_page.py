@@ -135,6 +135,10 @@ def upgrade() -> None:
     sa.Column('wikidata_id', sa.String(length=20), nullable=True),
     sa.Column('facts_key', sa.String(length=64), nullable=True),
     sa.Column('model', sa.String(length=64), nullable=True),
+    sa.Column('sources', sa.JSON(), nullable=True),
+    sa.Column('ai_failed_key', sa.String(length=64), nullable=True),
+    sa.Column('ai_failures', sa.Integer(), server_default='0', nullable=False),
+    sa.Column('ai_attempted_at', forliosa.db.TZDateTime(timezone=True), nullable=True),
     sa.Column('checked_at', forliosa.db.TZDateTime(timezone=True), nullable=False),
     sa.Column('updated_at', forliosa.db.TZDateTime(timezone=True), nullable=False),
     sa.PrimaryKeyConstraint('symbol')

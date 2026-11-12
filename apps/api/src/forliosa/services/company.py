@@ -19,7 +19,10 @@ Description
 * ``kind = "ai"``: without an article, 2–3 sentences written by the model from official facts only (industry,
   incorporation and listing dates, HQ, paid-in capital, latest monthly revenue scale, the ESG product-category
   text) — no person's name — labelled 「AI 依公開資料整理」 and regenerated only when those facts change
-  (``facts_key``). System-paid (``ai_usage.feature = "company"``), at most ``COMPANY_AI_PER_RUN`` per run.
+  (``facts_key``). The datasets those facts came from are stored with it and listed in ``sources``.
+  System-paid (``ai_usage.feature = "company"``), at most ``COMPANY_AI_PER_RUN`` model calls per run (refused replies
+  and API errors count). A refused reply (too long, a person's name, cut off) or an API error is remembered with
+  its facts: the same facts are tried again only after 24 hours, then 48, 96 … (at most 30 days).
 
 Refresh: worker job ``company_refresh`` (hourly) for tracked symbols (held, watched, viewed in the last
 ``NEWS_VIEW_DAYS`` days), at most ``COMPANY_MAX_SYMBOLS_PER_RUN`` per run, one Wikimedia request at a time; a 429 /
@@ -33,6 +36,7 @@ import hashlib
 import html
 import json
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
@@ -56,6 +60,8 @@ log = logging.getLogger(__name__)
 
 FEATURE = "company"
 WIKI_PAUSE = timedelta(hours=6)
+AI_RETRY_AFTER = timedelta(hours=24)  # after a refused reply / API error for the same facts, doubling each time
+AI_RETRY_MAX = timedelta(days=30)
 AI_LABEL = "AI 依公開資料整理"
 WIKI_LABEL = "節錄"
 _paused_until: datetime | None = None  # process-wide: after a Wikimedia 429 / 403
@@ -187,10 +193,13 @@ def about(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     else:
         _tw_stock(db, md, info, out)
     if info.type == "stock":
-        desc = description_out(db.get(CompanyDescription, info.symbol))
+        row = db.get(CompanyDescription, info.symbol)
+        desc = description_out(row)
         out["description"] = desc
         if desc and desc["kind"] == "wikipedia":
             out["sources"] = [*out["sources"], *labels(["wikipedia/zh"])]
+        elif desc and row is not None:  # AI: every dataset its facts came from (ESG, monthly revenue …)
+            out["sources"] = list(dict.fromkeys([*out["sources"], *labels(row.sources or [])]))
         try:  # the worker looks up the description of recently viewed symbols (symbol + time only)
             from forliosa.news.service import record_view
 
@@ -215,10 +224,19 @@ def _yi(amount: Decimal | int | None) -> str | None:
 
 def official_facts(db: Session, md: MarketData, info: InstrumentInfo) -> dict[str, str] | None:
     """The facts an AI description may use. Only official open data; 董事長／總經理 are deliberately absent."""
+    got = facts_with_sources(db, md, info)
+    return got[0] if got else None
+
+
+def facts_with_sources(db: Session, md: MarketData, info: InstrumentInfo
+                       ) -> tuple[dict[str, str], list[str]] | None:
+    """:func:`official_facts` and the dataset keys they came from (``twse-openapi/company``,
+    ``tpex-openapi/revenue``, ``twse-openapi/esg_products`` …), for the description's ``sources``."""
     row = _profile_row(db, md, info.symbol)
     if row is None:
         return None
     v = row.values or {}
+    sources = [f"{row.source}/company"]
     facts: dict[str, str] = {"公司": str(v.get("short_name") or info.name), "全名": str(v.get("name") or "")}
     if row.industry:
         facts["產業別"] = row.industry
@@ -242,15 +260,39 @@ def official_facts(db: Session, md: MarketData, info: InstrumentInfo) -> dict[st
         period = str(rev.data.get("period") or "")
         if amount and len(period) == 7:
             facts["最近月營收"] = f"{period[:4]} 年 {int(period[5:])} 月{amount}"
+            sources.append(f"{rev.source}/revenue")
     esg = db.scalar(select(EsgProductOutput).where(EsgProductOutput.symbol == info.symbol,
                                                    source_clause(EsgProductOutput.source, md.policy)))
     if esg is not None:
         facts["依產品類別之產品產量（ESG 揭露）"] = esg.text[:200]
-    return facts
+        sources.append(f"{esg.source}/esg_products")
+    return facts, sources
 
 
 def facts_key(facts: dict[str, str]) -> str:
     return hashlib.sha256(json.dumps(facts, ensure_ascii=False, sort_keys=True).encode("utf-8")).hexdigest()
+
+
+_TITLE_PREFIX = re.compile(r"^[^:：]{0,12}[:：]\s*")  # 「總裁: 」「董事長：」 as published before some names
+_NAME_SPLIT = re.compile(r"[、，,;；/／|｜\n]+")
+
+
+def person_names(*values: Any) -> list[str]:
+    """The names to keep out of an AI description, from 董事長／總經理 as published: 「總裁: 魏哲家」 -> 魏哲家;
+    several people (「魏哲家、劉德音」) are split; a spaced name is checked joined and by its parts. Parts shorter than
+    two characters (three for Latin letters) are dropped — they would match ordinary words."""
+    out: list[str] = []
+    for value in values:
+        for piece in _NAME_SPLIT.split(str(value or "")):
+            name = _TITLE_PREFIX.sub("", piece.strip()).strip()
+            if not name:
+                continue
+            candidates = [name, re.sub(r"\s+", "", name), *name.split()]
+            for c in candidates:
+                long_enough = len(c) >= 3 if c.isascii() else len(c) >= 2
+                if long_enough and c not in out:
+                    out.append(c)
+    return out
 
 
 def _clean_ai_text(text: str, forbidden: list[str]) -> str | None:
@@ -259,7 +301,8 @@ def _clean_ai_text(text: str, forbidden: list[str]) -> str | None:
     s = " ".join((text or "").split()).strip().strip("「」\"")
     if not (20 <= len(s) <= COMPANY_MAX_CHARS) or "http" in s or s.count("。") > 4:
         return None
-    if any(name and name in s for name in forbidden):  # never a person's name (none is given; double check)
+    joined = re.sub(r"\s+", "", s)
+    if any(name and (name in s or name in joined) for name in forbidden):  # never a person's name (double check)
         return None
     return s
 
@@ -308,7 +351,9 @@ class RefreshReport:
     symbols: int = 0
     wiki_lookups: int = 0
     wiki_found: int = 0
+    ai_calls: int = 0  # model calls, refused replies and API errors included (COMPANY_AI_PER_RUN)
     ai_written: int = 0
+    ai_backing_off: int = 0  # skipped: the same facts failed recently
     paused: bool = False
     errors: list[str] = field(default_factory=list)
 
@@ -376,26 +421,50 @@ def refresh_one(db: Session, md: MarketData, info: InstrumentInfo, *, settings: 
         row = db.get(CompanyDescription, info.symbol)
     # AI only once a lookup found no article (kind "none"), or to rewrite an AI text whose facts changed
     if row is not None and row.kind in ("none", "ai") and info.market != "US" and ai is not None \
-            and report.ai_written < settings.company_ai_per_run:
-        facts = official_facts(db, md, info)
-        if facts is None:
+            and report.ai_calls < settings.company_ai_per_run:
+        got_facts = facts_with_sources(db, md, info)
+        if got_facts is None:
             return True
+        facts, sources = got_facts
         key = facts_key(facts)
-        if row is not None and row.kind == "ai" and row.facts_key == key:
+        if row.kind == "ai" and row.facts_key == key:
+            return True
+        if row.ai_failed_key == key and row.ai_attempted_at is not None \
+                and now < _aware(row.ai_attempted_at) + ai_retry_delay(row.ai_failures):
+            report.ai_backing_off += 1  # these facts failed recently: no new call (and no new cost) yet
             return True
         prof = _profile_row(db, md, info.symbol)
-        forbidden = [str((prof.values or {}).get(k) or "") for k in ("chairman", "president")] if prof else []
+        v = (prof.values or {}) if prof else {}
+        forbidden = person_names(v.get("chairman"), v.get("president"))
+        report.ai_calls += 1
         try:
             got = ai.write(db, facts)
-        except Exception as exc:  # no key / API error: keep what we have
+        except Exception as exc:  # no key / API error: keep what we have, back off like a refused reply
             report.errors.append(f"{info.symbol} ai: {type(exc).__name__}")
+            db.rollback()
+            _ai_failed(db, info.symbol, key, now)
             return True
         text = _clean_ai_text(got[0], forbidden) if got else None
         if text:
             report.ai_written += 1
             _store(db, info.symbol, now, kind="ai", text=text, title=None, url=None, revision_id=None,
-                   wikidata_id=None, facts_key=key, model=got[1] if got else None)
+                   wikidata_id=None, facts_key=key, model=got[1] if got else None, sources=sources,
+                   ai_failed_key=None, ai_failures=0, ai_attempted_at=now)
+        else:
+            _ai_failed(db, info.symbol, key, now)
     return True
+
+
+def ai_retry_delay(failures: int) -> timedelta:
+    """24 h after the first failure for the same facts, then doubling, at most 30 days."""
+    return min(AI_RETRY_AFTER * (2 ** max(failures - 1, 0)), AI_RETRY_MAX)
+
+
+def _ai_failed(db: Session, symbol: str, key: str, now: datetime) -> None:
+    """Remember a refused reply / API error for these facts (the text shown, if any, is left as it is)."""
+    row = db.get(CompanyDescription, symbol)
+    failures = (row.ai_failures or 0) + 1 if row is not None and row.ai_failed_key == key else 1
+    _store(db, symbol, now, ai_failed_key=key, ai_failures=failures, ai_attempted_at=now)
 
 
 def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, client: Any = "default",
@@ -446,7 +515,8 @@ def main(argv: list[str] | None = None) -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     with session_factory()() as db:
         rep = refresh(db, get_market_data(), symbols=args.symbols or None)
-    print(f"  股票 {rep.symbols}、維基查詢 {rep.wiki_lookups}、找到 {rep.wiki_found}、AI 簡介 {rep.ai_written}"
+    print(f"  股票 {rep.symbols}、維基查詢 {rep.wiki_lookups}、找到 {rep.wiki_found}、AI 呼叫 {rep.ai_calls}、"
+          f"AI 簡介 {rep.ai_written}" + (f"、退避中 {rep.ai_backing_off}" if rep.ai_backing_off else "")
           + ("、維基百科暫停（429／403）" if rep.paused else ""))
 
 

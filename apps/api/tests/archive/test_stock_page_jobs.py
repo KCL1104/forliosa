@@ -92,7 +92,14 @@ def test_address_city_and_website_rules():
     assert cd.hq_from_address("Suite 102, Cannon Place, Grand Cayman", "TWSE") is None
     assert cd.hq_from_address("6F, No.23, Siyuan Rd.Xinzhuang Dist., New Taipei City, Taiwan", "TPEX") == "新北市"
     assert cd.hq_from_address("Sec. 3, Minsheng E. Rd.,Songshan Dist.Taipei City 105, Taiwan", "TPEX") == "台北市"
-    assert cd.hq_from_address("No.160, Sec. 1, Ping-Tung Rd., Ping-Jen City, Taoyuan Hsien", "TPEX") is None
+    # a street named after a city is not the city (review 2026-11-12): 平鎮 is in Taoyuan
+    assert cd.hq_from_address("No.160, Sec. 1, Ping-Tung Rd., Ping-Jen City, Taoyuan Hsien", "TPEX") == "桃園市"
+    assert cd.hq_from_address("No. 1, Keelung Rd., Xinyi Dist., Taipei City 110", "TPEX") == "台北市"
+    # … and a bare 「Taipei」 / 「Hsinchu」 leaves the city open, so the street name does not win
+    for street_only in ("No. 1, Sec. 2, Keelung Rd., Xinyi Dist., Taipei 110, Taiwan (R.O.C.)",
+                        "9F., No. 76, Sec. 1, Keelung Rd., Taipei, Taiwan", "No. 20, Taoyuan St., Taipei 100, Taiwan",
+                        "No.8, Tainan Rd., Hsinchu", "No. 3, Kaohsiung Street, Chiayi"):
+        assert cd.hq_from_address(street_only, "TPEX") is None, street_only
     assert cd.hq_from_address("Science-Based Industrial Park Hsinchu, Taiwan", "TPEX") == "新竹科學園區"
     assert cd.hq_from_address("12F, 105, Sec. 2, Tun-Hwa S. Rd.Taipei Taiwan", "TPEX") is None  # bare "Taipei"
     assert cd.registration_country("KY 開曼群島            ") == "開曼群島"
@@ -151,3 +158,49 @@ def test_tpex50_constituents_daily(engine):
         rows = list(db.scalars(select(IndexConstituent)))
         assert len(rows) == 50 and {r.index_code for r in rows} == {"TPEX50"}
         assert db.get(IndexConstituent, ("TPEX50", date(2026, 11, 12), "3105.TWO")) is not None
+
+
+def test_failed_company_upsert_never_logs_the_chairman_or_president(engine, caplog, monkeypatch):
+    """A DB error while upserting company_profiles (lock, timeout, lost connection) must not write the rows it was
+    writing — 董事長／總經理 included — into the worker log or the job result (review 2026-11-12)."""
+    import json
+    import sqlite3
+
+    from sqlalchemy.exc import OperationalError
+
+    from forliosa.archive import safe_error
+    from forliosa.db import make_engine
+
+    profiles = load("twse_t187ap03_l_related_live_20261112.json")
+    names = {v for r in profiles for v in (r.get("董事長"), r.get("總經理")) if v}
+    assert len(names) >= 10
+    escaped = {json.dumps(n)[1:-1] for n in names}  # 「張…」 as the JSON column binds them
+
+    class Fetcher(FakeFetcher):
+        def get_json(self, url, params=None, headers=None):
+            if url.endswith("/opendata/t187ap03_L"):
+                return profiles
+            return super().get_json(url, params, headers)
+
+    real = engine.dialect.do_execute
+
+    def locked(cursor, statement, parameters, context=None):
+        if "company_profiles" in statement and statement.lstrip().upper().startswith("INSERT"):
+            raise sqlite3.OperationalError("database is locked")
+        return real(cursor, statement, parameters, context)
+
+    monkeypatch.setattr(engine.dialect, "do_execute", locked)
+    caplog.set_level(logging.DEBUG)
+    with Session(engine) as db:
+        results = {r.name: r for r in Archiver(db, Fetcher(), "commercial", now_fn=lambda: NOW).run(["companies"])}
+    failed = results["twse companies t187ap03_L"]
+    assert failed.error == "OperationalError: database is locked"
+    assert "archive twse companies t187ap03_L failed: OperationalError: database is locked" in caplog.text
+    leaked = [n for n in names | escaped if n in caplog.text or n in (failed.error or "")]
+    assert not leaked
+    # the engine hides bound parameters everywhere (the API error handler logs tracebacks too)
+    assert make_engine("sqlite://").hide_parameters is True
+    # and an error raised with its parameters and a Postgres DETAIL line keeps only the driver's first line
+    exc = OperationalError("INSERT INTO company_profiles …", {"values": json.dumps({"chairman": "張安平"})},
+                           Exception("null value in column \"x\"\nDETAIL:  Failing row contains (張安平)."))
+    assert safe_error(exc) == 'Exception: null value in column "x"'

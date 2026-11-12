@@ -60,6 +60,10 @@ def test_gdelt_query_is_english_with_the_country_or_language_filter():
     assert gdelt_query(query()) == "(TSMC OR 2330) sourcecountry:taiwan"
     assert gdelt_query(query("2317", "鴻海", english=("HON HAI",))) == '("HON HAI" OR 2317) sourcecountry:taiwan'
     assert gdelt_query(query("1538", "正峰", english=("JF",))) == "1538 sourcecountry:taiwan"  # too short
+    # an everyday word would fill the 75 records with other news: the code finds the stock's own articles
+    assert gdelt_query(query("3105", "穩懋", english=("WIN",), symbol="3105.TWO", market="TPEX")) == \
+        "3105 sourcecountry:taiwan"
+    assert gdelt_query(query("2308", "台達電", english=("DELTA",))) == "2308 sourcecountry:taiwan"
     us = query("NVDA", "NVIDIA", "US", ("NVIDIA",), symbol="NVDA")
     assert gdelt_query(us) == "(NVIDIA OR NVDA) sourcelang:english"
 

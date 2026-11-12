@@ -191,8 +191,11 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           title="外資持股比"
           titleId="chips-foreign"
           aside={
-            listed && top
-              ? `${formatPercent(top.pct, { signed: false })}・前 20 名第 ${top.rank} 名`
+            // 上市股票只在最新一份前 20 名名單上才顯示（掉出名單時不拿以前在榜的持股比當現在的）
+            listed
+              ? top
+                ? `${formatPercent(top.pct, { signed: false })}・前 20 名第 ${top.rank} 名`
+                : undefined
               : c.foreign_holding_pct.length
                 ? formatPercent(c.foreign_holding_pct.at(-1)!.pct, { signed: false })
                 : undefined

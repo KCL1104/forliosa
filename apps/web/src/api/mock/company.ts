@@ -111,8 +111,12 @@ const TSMC_WIKI: CompanyDescription = {
   text: "台灣積體電路製造，簡稱台積電、TSMC，與旗下子公司合稱台積電集團，是臺灣一家專注於半導體晶片製造的高科技跨國企業，總部位於新竹科學園區，近年市值穩居全球前十大企業，也是全球最領先的半導體晶片製造商。台積電開創了專業積體電路製造服務 商業模式，只為客戶製造晶片，不設計、生產或銷售自有品牌的半導體產品，以確保不與客戶競爭；此一模式也促成了全球無廠IC設計產業的興起。",
 }
 /** 示範：沒有維基百科條目時，AI 只依官方資料寫的 2–3 句（真實環境由 worker 產生） */
-const AI_DESCRIPTIONS: Record<string, string> = {
-  "6488.TWO": "環球晶圓是半導體業公司，2011 年成立、2015 年在櫃買中心上櫃，總部位於新竹科學園區。依 ESG 揭露，主要產品為半導體晶片與晶錠；實收資本額約 53 億元。",
+const AI_DESCRIPTIONS: Record<string, { text: string; sources: string[] }> = {
+  "6488.TWO": {
+    text: "環球晶圓是半導體業公司，2011 年成立、2015 年在櫃買中心上櫃，總部位於新竹科學園區。依 ESG 揭露，主要產品為半導體晶片與晶錠；實收資本額約 53 億元。",
+    // 與後端相同：AI 簡介用到的官方資料集都列進來源（這段用了 ESG 產品類別）
+    sources: ["tpex-openapi/esg_products"],
+  },
 }
 
 function age(from: string | null | undefined): number | null {
@@ -146,9 +150,13 @@ export function buildCompany(spec: MockInstrumentSpec): CompanyAbout {
   if (!facts) return { ...base, notes: ["公司基本資料尚未存檔"] }
   const wiki = spec.symbol === "2330.TW" ? TSMC_WIKI : null
   const ai = AI_DESCRIPTIONS[spec.symbol]
-  const description: CompanyDescription | null = wiki ?? (ai ? { kind: "ai", label: "AI 依公開資料整理", text: ai, updated_at: "2026-11-12T14:35:00+08:00" } : null)
+  const description: CompanyDescription | null = wiki ?? (ai ? { kind: "ai", label: "AI 依公開資料整理", text: ai.text, updated_at: "2026-11-12T14:35:00+08:00" } : null)
   return {
     ...base, ...facts, short_name: spec.name, years_since_incorporation: age(facts.incorporated), description, data_date: "2026-11-11",
-    sources: [sourceOf(spec.market === "TPEX" ? "tpex-openapi/company" : "twse-openapi/company"), ...(wiki ? [WIKIPEDIA_ATTRIBUTION] : [])],
+    sources: [
+      sourceOf(spec.market === "TPEX" ? "tpex-openapi/company" : "twse-openapi/company"),
+      ...(wiki ? [WIKIPEDIA_ATTRIBUTION] : []),
+      ...(!wiki && ai ? ai.sources.map(sourceOf) : []),
+    ],
   }
 }

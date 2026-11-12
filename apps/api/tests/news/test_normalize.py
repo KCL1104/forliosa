@@ -106,6 +106,28 @@ def test_relevance_needs_the_name_code_or_english_short_name():
     assert jf.names == ("正峰",) and not is_relevant("JF Morgan report", jf)
     us = make_terms("NVIDIA", "NVDA", ["NVIDIA"], ["輝達"])
     assert is_relevant("輝達財報優於預期", us) and is_relevant("Why NVDA fell today", us)
+    assert is_relevant("Nvidia shares slide", us)  # a single word as a proper noun, any case after the capital
+
+
+def test_everyday_english_short_names_need_their_published_case():
+    """穩懋 「WIN」, 台達電 「DELTA」, Apple: an everyday word is the company only as an acronym in capitals or a
+    capitalised proper noun (review 2026-11-12)."""
+    win = make_terms("穩懋", "3105", ["WIN"])
+    assert is_relevant("WIN Semiconductors expands GaN capacity", win) and is_relevant("穩懋10月營收", win)
+    assert not is_relevant("Taiwan clinches WBC win over Japan", win)
+    assert not is_relevant("Lai says Taiwan will win trust of allies", win)
+    assert not is_relevant("Taiwan Clinches WBC Win Over Japan", win)  # title case is not the acronym
+    delta = make_terms("台達電", "2308", ["DELTA"])
+    assert is_relevant("DELTA posts record October sales", delta) and is_relevant("台達電(2308)法說", delta)
+    assert not is_relevant("Delta Air Lines adds Taipei route", delta)
+    assert not is_relevant("Flood risk in Mekong delta", delta)
+    apple = make_terms("Apple", "AAPL", ["Apple", "Apple Inc."], ["蘋果"])
+    assert is_relevant("Apple unveils new MacBook", apple) and is_relevant("APPLE shares rise", apple)
+    assert is_relevant("Why apple inc. stock rose", apple)  # the full name, any case
+    assert not is_relevant("Washington apple harvest hit by early frost", apple)
+    hon_hai = make_terms("鴻海", "2317", ["HON HAI"])
+    assert is_relevant("Hon Hai Precision lifts outlook", hon_hai)  # several words: any case
+    assert is_relevant("MediaTek unveils Dimensity", make_terms("聯發科", "2454", ["MediaTek"]))
 
 
 def h(title: str, url: str, minutes: int, source: str = "gdelt") -> Headline:

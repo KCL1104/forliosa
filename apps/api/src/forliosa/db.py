@@ -67,7 +67,10 @@ _SessionLocal: sessionmaker[Session] | None = None
 
 
 def make_engine(url: str) -> Engine:
-    kwargs: dict = {"pool_pre_ping": True}
+    # hide_parameters: a failed statement's message (logged by the worker, the archive and the API error handler)
+    # must not carry the bound values — company_profiles holds 董事長／總經理 (kept without history), the ledger
+    # holds users' trades.
+    kwargs: dict = {"pool_pre_ping": True, "hide_parameters": True}
     if url.startswith("sqlite"):
         path = url.split("///", 1)[-1]
         if path and path != ":memory:":

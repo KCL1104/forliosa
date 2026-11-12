@@ -14,6 +14,8 @@ export const accumulatingNote = (since = ARCHIVE_START) => `資料累積中：�
 export const US_NOTE = "美股目前沒有可商用的行情來源，不提供價格資料"
 export const INTRADAY_NOTE = "目前沒有授權的盤中行情來源（證交所即時／延遲行情需付費授權），不提供分時走勢"
 export const TWSE_CHIPS_NOTE = "證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；外資持股只公布持股比率前 20 名；上櫃股票由櫃買中心 OpenAPI 每日存檔"
+/** 名列外資持股前 20 名的上市股票：同樣說明為什麼沒有三大法人，但不含外資持股那一句 */
+export const TWSE_INST_NOTE = "證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；上櫃股票由櫃買中心 OpenAPI 每日存檔"
 export const TOP20_NOTE = "證交所只公布外資持股比率前 20 名，本股只有名列前 20 名的日子才有外資持股比"
 export const INDEX_NOTE = "發行量加權股價報酬指數目前沒有可商用的來源，暫時無法比較"
 

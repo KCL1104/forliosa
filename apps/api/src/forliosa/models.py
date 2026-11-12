@@ -953,7 +953,10 @@ class CompanyDescription(Base):
     """The 「關於」 description (decision 7): a zh.wikipedia excerpt (``kind = "wikipedia"``, CC BY-SA 4.0: title,
     link and revision kept, the text never rewritten by AI; refreshed monthly) or, without an article, an AI-written
     2–3 sentence description from official facts only (``kind = "ai"``, regenerated only when ``facts_key`` — a hash
-    of those facts — changes). ``kind = "none"``: looked up, nothing to show."""
+    of those facts — changes; ``sources``: the datasets those facts came from). ``kind = "none"``: looked up, nothing
+    to show. A model reply that was refused (too long, a name, cut off) or an API error is remembered with the facts
+    it was for (``ai_failed_key``, ``ai_failures``, ``ai_attempted_at``): the same facts are retried only after a
+    back-off (24 h, doubling)."""
 
     __tablename__ = "company_descriptions"
 
@@ -966,5 +969,9 @@ class CompanyDescription(Base):
     wikidata_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
     facts_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sources: Mapped[list | None] = mapped_column(JSON, nullable=True)  # dataset keys behind an AI description
+    ai_failed_key: Mapped[str | None] = mapped_column(String(64), nullable=True)  # facts of the last failed attempt
+    ai_failures: Mapped[int] = mapped_column(default=0, server_default="0")  # in a row, for ai_failed_key
+    ai_attempted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)  # last AI call
     checked_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)  # last Wikipedia lookup
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)  # text last changed

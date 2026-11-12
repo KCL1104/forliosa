@@ -30,7 +30,7 @@ from typing import Any, Protocol
 
 from forliosa.marketdata.base import ProviderUnavailable
 from forliosa.marketdata.http import HttpFetcher, HttpStatusError
-from forliosa.news.normalize import Terms
+from forliosa.news.normalize import Terms, is_common_word
 
 log = logging.getLogger(__name__)
 
@@ -89,10 +89,15 @@ def _quoted(term: str) -> str:
 # -- GDELT ---------------------------------------------------------------------------------------------------
 def gdelt_query(q: Query) -> str:
     """``(TSMC OR 2330) sourcecountry:taiwan`` / ``(NVIDIA OR NVDA) sourcelang:english``. Terms shorter than three
-    characters are left out (GDELT rejects them and they match too much)."""
+    characters are left out (GDELT rejects them and they match too much). For a Taiwan stock an English short name
+    that is an everyday word (穩懋 「WIN」, 台達電 「DELTA」) is left out too: GDELT would answer with the newest
+    articles using the word and the stock's own would not fit in the 75 records — the code finds those
+    (``3105 sourcecountry:taiwan``)."""
     terms: list[str] = []
     for t in (*q.english, q.code):
         t = " ".join((t or "").split())
+        if q.taiwan and t != q.code and is_common_word(t):
+            continue
         if len(t) >= 3 and t.isascii() and t.casefold() not in (x.casefold().strip('"') for x in terms):
             terms.append(_quoted(t))
     if not terms:

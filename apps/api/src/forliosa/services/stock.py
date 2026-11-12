@@ -54,6 +54,9 @@ from forliosa.timeutil import (
 CHIPS_RANGES = ("1M", "3M", "6M", "1Y")
 LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
                      "外資持股只公布持股比率前 20 名；上櫃股票由櫃買中心 OpenAPI 每日存檔")
+# A listed stock on the latest top-20 list: the same reason for the missing 三大法人, without the 外資持股 clause
+LISTED_INST_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
+                    "上櫃股票由櫃買中心 OpenAPI 每日存檔")
 TOP20_NOTE = "證交所只公布外資持股比率前 20 名，本股只有名列前 20 名的日子才有外資持股比"
 FINANCIAL_PERIODS = ("quarterly", "annual")
 EVENT_PAST_DAYS = 365
@@ -245,9 +248,13 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     listed = info.market == "TWSE"
     inst = {} if listed else {r.date: r for r in rows(InstitutionalDaily)}
     margin = {r.date: r for r in rows(MarginDaily)}
-    # Listed stocks: only the days the stock was in TWSE's 外資持股前 20 名 (MI_QFIIS_sort_20, decision 8)
+    # Listed stocks: only the days the stock was in TWSE's 外資持股前 20 名 (MI_QFIIS_sort_20, decision 8), and only
+    # while it is on the latest list — a stock that dropped off gets the contract's empty series (its last
+    # in-list pct would read as today's holding)
     foreign = {r.date: r for r in rows(ForeignHoldingTop20 if listed else ForeignHoldingDaily)}
     top20 = _foreign_top20(db, md, sym) if listed else None
+    if listed and top20 is None:
+        foreign = {}
     sources = [*tagged([r.source for r in inst.values()], "institutional"),
                *tagged([r.source for r in margin.values()], "margin"),
                *tagged([r.source for r in foreign.values()], "foreign_top20" if listed else "foreign_holding")]
@@ -268,8 +275,8 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
                     if r["date"] not in target and start <= r["date"] <= today:
                         target[r["date"]] = _Row(**r, source="finmind")
                         sources.append("finmind")
-    if listed:
-        notes.append(TOP20_NOTE if foreign or top20 else LISTED_CHIPS_NOTE)
+    if listed:  # why there are no 三大法人 always; the top-20 note on top of it while the stock is on the list
+        notes += [LISTED_INST_NOTE, TOP20_NOTE] if top20 else [LISTED_CHIPS_NOTE]
 
     def lots(shares: int | None) -> float | None:
         return ser.price(Decimal(shares) / 1000) if shares is not None else None

@@ -10,7 +10,8 @@
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
+from decimal import Decimal as D
 
 import pytest
 from sqlalchemy import select
@@ -143,6 +144,102 @@ def test_ai_text_naming_a_person_is_rejected(engine, stock_archive, settings, fa
         assert db.get(CompanyDescription, "3680.TWO").kind == "none"
 
 
+def test_ai_text_naming_a_person_without_the_published_title_is_rejected(engine, stock_archive, settings, fake,
+                                                                         pool):
+    """「總裁: 魏哲家」 as published: the model writing only 「魏哲家」 is still caught (review 2026-11-12)."""
+    from forliosa.models import CompanyProfile
+
+    assert company_svc.person_names("總裁: 魏哲家", "董事長：劉德音、魏哲家") == ["魏哲家", "劉德音"]
+    assert company_svc.person_names("Chairman: John Smith", "林 添瑞") == [
+        "John Smith", "JohnSmith", "John", "Smith", "林 添瑞", "林添瑞", "添瑞"]
+    assert company_svc.person_names(None, "", "－") == []
+    with Session(engine) as db:
+        prof = db.get(CompanyProfile, "3680.TWO")
+        prof.values = {**prof.values, "president": "總經理: 王小明"}
+        db.commit()
+        fake.reply(text("家登精密工業由王小明領導，是一家半導體業公司，總部位於新北市。"))
+        company_svc.refresh(db, stock_archive, settings=settings, client=wiki(),
+                            ai=company_svc.AiWriter(pool, settings), symbols=["3680.TWO"], now_fn=lambda: NOW)
+        assert db.get(CompanyDescription, "3680.TWO").kind == "none"
+
+
+def test_refused_ai_replies_back_off_and_count_against_the_run(engine, stock_archive, settings, fake, pool):
+    """A reply that is refused (here: too long) is not requested again every hour: the same facts wait 24 h, then
+    48 h …; every call counts against COMPANY_AI_PER_RUN, refused or not (review 2026-11-12)."""
+    too_long = "家登精密工業是一家半導體業公司，" * 12
+    for _ in range(3):  # exactly the three calls expected below
+        fake.reply(text(too_long))
+    args = {"settings": settings, "client": wiki(), "ai": company_svc.AiWriter(pool, settings),
+            "symbols": ["3680.TWO"]}
+    with Session(engine) as db:
+        for h in range(4):  # four hourly runs: one call
+            rep = company_svc.refresh(db, stock_archive, now_fn=lambda h=h: NOW + timedelta(hours=h), **args)
+        assert len(fake.requests) == 1 and rep.ai_backing_off == 1 and rep.ai_calls == 0
+        row = db.get(CompanyDescription, "3680.TWO")
+        assert (row.kind, row.ai_failures) == ("none", 1) and row.ai_failed_key
+        company_svc.refresh(db, stock_archive, now_fn=lambda: NOW + timedelta(hours=24), **args)
+        assert len(fake.requests) == 2 and db.get(CompanyDescription, "3680.TWO").ai_failures == 2
+        company_svc.refresh(db, stock_archive, now_fn=lambda: NOW + timedelta(hours=24 + 47), **args)
+        assert len(fake.requests) == 2  # the second failure waits 48 h
+        company_svc.refresh(db, stock_archive, now_fn=lambda: NOW + timedelta(hours=24 + 48), **args)
+        assert len(fake.requests) == 3
+        # new facts are tried at once
+        from forliosa.models import CompanyProfile
+
+        prof = db.get(CompanyProfile, "3680.TWO")
+        prof.values = {**prof.values, "paid_in_capital": prof.values["paid_in_capital"] * 2}
+        db.commit()
+        fake.reply(text("家登精密工業是一家半導體業公司，總部位於新北市，實收資本額約 20 億元。"))
+        company_svc.refresh(db, stock_archive, now_fn=lambda: NOW + timedelta(hours=73), **args)
+        row = db.get(CompanyDescription, "3680.TWO")
+        assert (row.kind, row.ai_failures, row.ai_failed_key) == ("ai", 0, None)
+    # the per-run cap counts calls, not successes: two symbols, a cap of one, a refused reply -> one call
+    capped = settings.model_copy(update={"company_ai_per_run": 1})
+    fake.reply(text(too_long))
+    with Session(engine) as db:
+        before = len(fake.requests)
+        rep = company_svc.refresh(db, stock_archive, settings=capped, client=wiki(),
+                                  ai=company_svc.AiWriter(pool, capped), symbols=["6488.TWO", "5347.TWO"],
+                                  now_fn=lambda: NOW + timedelta(days=10))
+        assert rep.ai_calls == 1 and len(fake.requests) == before + 1
+
+
+def test_api_errors_back_off_too(engine, stock_archive, settings):
+    class Failing:
+        calls = 0
+
+        def write(self, db, facts):
+            Failing.calls += 1
+            raise RuntimeError("overloaded")
+
+    with Session(engine) as db:
+        for h in range(3):
+            company_svc.refresh(db, stock_archive, settings=settings, client=wiki(), ai=Failing(),
+                                symbols=["3680.TWO"], now_fn=lambda h=h: NOW + timedelta(hours=h))
+        assert Failing.calls == 1 and db.get(CompanyDescription, "3680.TWO").ai_failures == 1
+
+
+def test_ai_description_lists_every_dataset_its_facts_came_from(client, engine, stock_archive, settings, fake,
+                                                                pool):
+    """環球晶 has no zh.wikipedia article: its AI description used the ESG product text and the monthly revenue, so
+    「來源」 names those datasets too, not only 公司基本資料 (review 2026-11-12)."""
+    fake.reply(text("環球晶圓是一家半導體業公司，總部位於新竹科學園區，主要產品為半導體晶片。"))
+    with Session(engine) as db:
+        company_svc.refresh(db, stock_archive, settings=settings, client=wiki(),
+                            ai=company_svc.AiWriter(pool, settings), symbols=["6488.TWO"], now_fn=lambda: NOW)
+        row = db.get(CompanyDescription, "6488.TWO")
+        assert row.kind == "ai"
+        assert row.sources == ["tpex-openapi/company", "tpex-openapi/revenue", "tpex-openapi/esg_products"]
+    body = json.dumps(fake.requests[0]["body"], ensure_ascii=False)
+    assert "ESG" in body and "最近月營收" in body
+    c = client.get(f"{API}/instruments/6488.TWO/company").json()
+    assert c["description"]["kind"] == "ai"
+    srcs = " ".join(c["sources"])
+    assert "〈上櫃股票基本資料〉" in srcs and "〈上櫃公司每月營業收入彙總表〉" in srcs
+    assert "〈上櫃公司企業ESG資訊揭露彙總資料-產品品質與安全〉" in srcs
+    assert len(c["sources"]) == len(set(c["sources"]))
+
+
 def test_wikimedia_429_pauses_the_lookups(engine, stock_archive, settings):
     refusing = FakeWikimediaFetcher(refuse=True)
     with Session(engine) as db:
@@ -231,3 +328,28 @@ def test_listed_stock_in_the_top20_shows_its_foreign_holding(client, stock_archi
     tsmc = client.get(f"{API}/instruments/2330.TW/chips?range=1M").json()
     assert tsmc["foreign_top20"] is None and tsmc["foreign_holding_pct"] == []
     assert any("前 20 名" in n for n in tsmc["notes"])
+
+
+def test_listed_stock_in_the_top20_keeps_the_institutional_reason(client, stock_archive):
+    """On the list: why there are no 三大法人 (the paid TWSE product) and the top-20 note, each once."""
+    from forliosa.services import stock as stock_svc
+
+    ase = client.get(f"{API}/instruments/3711.TW/chips?range=1M").json()
+    assert ase["notes"] == [stock_svc.LISTED_INST_NOTE, stock_svc.TOP20_NOTE]
+    assert "以付費商品提供" in ase["notes"][0] and "上市股票" in ase["notes"][0]
+
+
+def test_listed_stock_that_dropped_off_the_top20_has_no_foreign_series(client, stock_archive, engine):
+    """In the list two days ago, not on the latest list: no stale pct next to 「不在名單上」 (contract: empty series
+    plus the reason)."""
+    from forliosa.models import ForeignHoldingTop20
+    from forliosa.services import stock as stock_svc
+
+    with Session(engine) as db:
+        db.add(ForeignHoldingTop20(date=date(2026, 11, 10), symbol="2330.TW", rank=20, pct=D("0.7210"),
+                                   shares=1, source="twse-openapi"))
+        db.commit()
+    tsmc = client.get(f"{API}/instruments/2330.TW/chips?range=1M").json()
+    assert tsmc["foreign_top20"] is None and tsmc["foreign_holding_pct"] == []
+    assert tsmc["notes"] == [stock_svc.LISTED_CHIPS_NOTE]
+    assert "外資及陸資持股前20名彙總表" not in " ".join(tsmc["sources"])

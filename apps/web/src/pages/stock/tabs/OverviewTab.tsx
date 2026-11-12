@@ -4,6 +4,7 @@ import { appToday } from "@/api"
 import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, MonthlyRevenue, Position, Quote } from "@/api/types"
 import { Section } from "@/components/section"
+import { ErrorState } from "@/components/states"
 import { announcementHost, eventLabel, eventTitle, NEWS_CATEGORY_LABEL } from "@/lib/events"
 import { officialNews } from "@/lib/news"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -294,7 +295,9 @@ function Announcements({ inst }: { inst: InstrumentDetail }) {
   const sources = [...new Set(rows.flatMap((n) => n.sources ?? []))]
   return (
     <Section title="公告" titleId="ov-news" action={<MoreLink symbol={inst.symbol} tab="events" label="所有事件" />}>
-      {rows.length === 0 ? (
+      {news.isError && !news.data ? (
+        <ErrorState title="公告沒有載入" error={news.error} onRetry={() => void news.refetch()} />
+      ) : rows.length === 0 ? (
         <p className="text-md text-ink-2">最近 90 天沒有{inst.name}的重大訊息或證交所公告。</p>
       ) : (
         <ul className="-mt-3">

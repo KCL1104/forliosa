@@ -7,15 +7,17 @@ Up to four cards, chosen by rules from government open data only (no AI, no othe
   shown as an index card, or left out when there is no archived level). The card never says that an ETF *holds*
   the stock: 臺灣50's constituent list belongs to TWSE / FTSE and may not be republished without consent.
 * **關係企業** — TWSE ``t187ap11_L`` / TPEx ``mopsfin_t187ap11_O`` (董監事持股餘額明細): a listed company that is a
-  法人董事 or 大股東 of this one, or the other way round (``board_links``, the latest month; largest first).
+  法人董事 or 大股東 of this one, or the other way round (``board_links``; each dataset's own latest month, since
+  TWSE and TPEx publish on different days; largest first).
 * **同業** — same 產業別 (t187ap03), closest market cap (shares × latest archived close); the industry's largest
   company first when it is not this one. 其他業 (20) and 其他電子業 (31) are too broad: 31 uses the electronics
   industries (24–31) by market cap, 20 the user's own holdings. 存託憑證 (91) never appears.
 * **ETF pages** — ETFs tracking the same index with the same fund type (t187ap47_L), then the same type with the
-  most holders (TDCC 2-22 / 2-23 集保股東戶數).
+  most holders (TDCC 2-22 / 2-23 集保股東戶數, each market's latest month).
 
 Each card: symbol, name, reason, ``reason_label``, the latest close and change, and ``sparkline`` (archived closes of
-about a month). The frontend hides the row when fewer than two cards come back.
+about a month). A candidate without a card (an index without archived levels, a company without archived closes) is
+skipped and the next candidate takes its place. The frontend hides the row when fewer than two cards come back.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
@@ -64,6 +66,7 @@ class Candidate:
     sources: list[str] = field(default_factory=list)
     is_index: bool = False
     name: str | None = None  # the official short name (company profile / fund profile) when known
+    period: str | None = None  # affiliates: 資料年月 of the board_links row
 
 
 @dataclass
@@ -134,14 +137,17 @@ def _benchmark(db: Session, md: MarketData, user: User, info: InstrumentInfo) ->
 
 # -- affiliates (board_links) ----------------------------------------------------------------------------------
 def _affiliates(db: Session, md: MarketData, info: InstrumentInfo, companies: dict[str, Company],
-                self_name: str) -> tuple[list[Candidate], str | None]:
+                self_name: str) -> list[Candidate]:
+    """Links of the latest month **of each dataset** (t187ap11_L and mopsfin_t187ap11_O are published on different
+    days: one month-wide maximum would drop the other market's links until it catches up)."""
     clause = source_clause(BoardLink.source, md.policy)
-    period = db.scalar(select(func.max(BoardLink.period)).where(clause))
-    if period is None:
-        return [], None
-    rows = list(db.scalars(select(BoardLink).where(clause, BoardLink.period == period,
-                                                   (BoardLink.symbol == info.symbol)
-                                                   | (BoardLink.holder_symbol == info.symbol))))
+    latest = list(db.execute(select(BoardLink.source, func.max(BoardLink.period)).where(clause)
+                             .group_by(BoardLink.source)))
+    if not latest:
+        return []
+    rows = list(db.scalars(select(BoardLink).where(
+        clause, or_(*(and_(BoardLink.source == src, BoardLink.period == period) for src, period in latest)),
+        (BoardLink.symbol == info.symbol) | (BoardLink.holder_symbol == info.symbol))))
     found: dict[str, Candidate] = {}
     for r in rows:
         if r.holder_symbol == info.symbol:  # this company sits on the other one's board / holds > 10 %
@@ -151,9 +157,9 @@ def _affiliates(db: Session, md: MarketData, info: InstrumentInfo, companies: di
         comp = companies.get(other)
         if comp is None or comp.industry_code == DEPOSITARY_RECEIPTS or other == info.symbol:
             continue
-        found.setdefault(other, Candidate(other, "affiliate", label, [f"{r.source}/board"], name=comp.short_name))
-    ordered = sorted(found.values(), key=lambda c: -(companies[c.symbol].cap or 0))
-    return ordered, period
+        found.setdefault(other, Candidate(other, "affiliate", label, [f"{r.source}/board"], name=comp.short_name,
+                                          period=r.period))
+    return sorted(found.values(), key=lambda c: -(companies[c.symbol].cap or 0))
 
 
 # -- peers -----------------------------------------------------------------------------------------------------
@@ -207,19 +213,31 @@ def _fund_kind(fund_type: str | None) -> str:
     return "同類型"
 
 
+def _latest_holders(db: Session, md: MarketData, symbols: list[str]) -> dict[str, int]:
+    """集保股東戶數 of ``symbols`` from the latest month of their own market's dataset (2-22 上市 / 2-23 上櫃 come
+    out on different days: a month taken over both would leave one market without counts)."""
+    if not symbols:
+        return {}
+    clause = source_clause(HolderCountMonthly.source, md.policy)
+    rows = list(db.execute(select(HolderCountMonthly.symbol, HolderCountMonthly.period, HolderCountMonthly.holders)
+                           .where(clause, HolderCountMonthly.symbol.in_(symbols))))
+    latest: dict[str, str] = {}
+    for sym, period, _ in rows:
+        market = market_of_symbol(sym)
+        latest[market] = max(latest.get(market, period), period)
+    return {sym: n for sym, period, n in rows if period == latest[market_of_symbol(sym)]}
+
+
 def _etf_candidates(db: Session, md: MarketData, info: InstrumentInfo) -> list[Candidate]:
     funds = {f.symbol: (f.values or {}) for f in db.scalars(select(FundProfile).where(
         source_clause(FundProfile.source, md.policy)))}
     me = funds.get(info.symbol)
     if me is None:
         return []
-    clause = source_clause(HolderCountMonthly.source, md.policy)
-    period = db.scalar(select(func.max(HolderCountMonthly.period)).where(clause))
-    holders = {h.symbol: h.holders for h in db.scalars(select(HolderCountMonthly).where(
-        clause, HolderCountMonthly.period == period))} if period else {}
     index = (me.get("index_name") or "").strip()
     kind = me.get("fund_type")
     same_type = [s for s, v in funds.items() if s != info.symbol and v.get("fund_type") == kind]
+    holders = _latest_holders(db, md, same_type)
     by_holders = sorted(same_type, key=lambda s: -(holders.get(s) or 0))
     src = ["twse-openapi/fund"]
     out = [Candidate(s, "same_index", "追蹤同一指數", src, name=funds[s].get("short_name")) for s in by_holders
@@ -271,47 +289,53 @@ def related(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, A
     if info.market == "US":
         out["notes"].append("美股目前沒有可商用的相關股票資料")
         return out
-    candidates: list[Candidate] = []
+    today = today_taipei()
+    built: dict[str, tuple[dict[str, Any], str] | None] = {}
+
+    def card_of(c: Candidate) -> tuple[dict[str, Any], str] | None:
+        """The candidate's card, or ``None`` when it has nothing to show (built once, quoted one by one: the peer
+        pool can be a whole industry, and usually only the first few are needed)."""
+        if c.symbol not in built:
+            quotes = {} if c.is_index else md.quotes([c.symbol])
+            built[c.symbol] = _card(md, c, quotes, today)
+        return built[c.symbol]
+
+    picked: list[Candidate] = []
+
+    def take(items: Iterable[Candidate], n: int) -> None:
+        """Up to ``n`` more cards from ``items`` in order; a candidate without a card is skipped (the next one
+        takes its place), so a missing index level or a company without closes does not shrink the row."""
+        for c in items:
+            if len(picked) >= MAX_CARDS or n <= 0:
+                return
+            if c.symbol != sym and all(c.symbol != p.symbol for p in picked) and card_of(c) is not None:
+                picked.append(c)
+                n -= 1
+
     notes: list[str] = []
     if info.type == "etf":
-        candidates = _etf_candidates(db, md, info)
+        take(_etf_candidates(db, md, info), MAX_CARDS)
     else:
         companies = _companies(db, md)
         me = companies.get(sym)
         _with_caps(db, md, companies.values())
         bench = _benchmark(db, md, user, info)
-        affiliates, period = _affiliates(db, md, info, companies, me.short_name if me else info.name) \
-            if me else ([], None)
+        affiliates = _affiliates(db, md, info, companies, me.short_name if me else info.name) if me else []
         peers = _peers(db, md, user, info, me, companies) if me else []
         misc = bool(me and me.industry_code in MISC_INDUSTRIES)
-        picked: list[Candidate] = []
-
-        def take(items: list[Candidate], n: int) -> None:
-            for c in items:
-                if len(picked) >= MAX_CARDS or n <= 0:
-                    return
-                if c.symbol != sym and all(c.symbol != p.symbol for p in picked):
-                    picked.append(c)
-                    n -= 1
-
+        # the benchmark card goes first, then the affiliates, then the peers (as picked)
         if bench:
             take([bench], 1)
         take(affiliates, 2 if misc else 1)
         take(peers, MAX_CARDS)
         take(affiliates, MAX_CARDS)
-        # the benchmark card goes first, then the affiliates, then the peers (as picked)
-        candidates = picked
-        if period and any(c.reason == "affiliate" for c in picked):
-            notes.append(f"關係企業依董監事持股餘額明細（{period[:4]} 年 {int(period[5:])} 月）")
-    candidates = candidates[:MAX_CARDS]
-    today = today_taipei()
-    quotes = md.quotes([c.symbol for c in candidates if not c.is_index]) if candidates else {}
+        periods = sorted({c.period for c in picked if c.reason == "affiliate" and c.period})
+        if periods:
+            months = "、".join(f"{p[:4]} 年 {int(p[5:])} 月" for p in periods)
+            notes.append(f"關係企業依董監事持股餘額明細（{months}）")
     sources: list[str] = []
-    for c in candidates:
-        built = _card(md, c, quotes, today)
-        if built is None:
-            continue
-        card, price_source = built
+    for c in picked:
+        card, price_source = card_of(c)  # type: ignore[misc]  # picked only holds candidates with a card
         out["items"].append(card)
         sources += [*c.sources, *([price_source] if c.is_index else tagged(price_source, "price"))]
     out["sources"] = labels(sources)

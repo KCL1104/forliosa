@@ -495,10 +495,12 @@
   ETF：`fund: {fund_type, index_name, custodian, units}`、成立與上市日期。
 - **`description`**：`kind: "wikipedia"`＝中文維基百科條目開頭節錄（zh-tw 字形、在句號處截斷、**原文不改寫**），前端標「節錄」並連到條目與 CC BY-SA 4.0；
   `kind: "ai"`＝沒有條目時 AI 只依官方資料（產業、成立與上市日期、總部、實收資本額、最近月營收規模、ESG 產品類別）寫的 2–3 句，`label`「AI 依公開資料整理」，
+  外層 `sources` 列出寫這段時用到的每個資料集（公司基本資料，以及有用到時的月營收、ESG 產品與安全），
   不含人名；沒有時 `null`。簡介由 worker 每小時處理追蹤中的股票（維基百科每月更新一次，AI 只在官方資料變動時重寫），第一次看的股票稍後才有。
 - **上市股票外資持股**：`GET /instruments/{symbol}/chips` 多 `foreign_top20: {as_of, rank, pct, limit_pct} | null`。上市股票名列證交所
   〈集中市場外資及陸資持股前 20 名彙總表〉（`MI_QFIIS_sort_20`）時，`foreign_holding_pct` 是在榜那些天的持股比、`notes` 說明「證交所只公布前 20 名」；
-  不在榜時維持空陣列＋說明。上市股票的 `institutional` 仍然一律是空的。前端：籌碼分頁「外資持股比」與總覽籌碼小卡的「外資持股」。
+  不在**最新一份**名單上時維持空陣列＋說明（區間內曾經在榜也一樣，避免把以前的持股比當成現在的）。上市股票的 `notes` 一律說明為什麼沒有三大法人：
+  在榜時是不含外資持股那句的版本，再加前 20 名的說明。上市股票的 `institutional` 仍然一律是空的。前端：籌碼分頁「外資持股比」與總覽籌碼小卡的「外資持股」。
 - `/meta/attributions`：多 `twse-openapi/foreign_top20`、`twse-openapi/board`、`tpex-openapi/board`、`tpex-openapi/tpex50`、`tdcc-opendata/holders_twse`、
   `tdcc-opendata/holders_tpex`、`twse-openapi/esg_products`、`tpex-openapi/esg_products`、`wikipedia/zh`（`license_status: "open"`，CC BY-SA 4.0）、
   `wikidata/entities`（CC0）；`notice` 多一行維基百科授權。

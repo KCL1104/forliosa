@@ -445,10 +445,17 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
     info = resolve_instrument(ctx.md, args["symbol"])
     items = svc.news(ctx.db, ctx.md, info.symbol)[:12]
-    out: dict[str, Any] = {"symbol": info.symbol, "name": info.name,
-                           "headlines": [_pick(n, "published_at", "title", "source", "url") for n in items]}
-    if not items:
-        out["note"] = "最近沒有公告標題；媒體新聞請改用 web_search"
+    out: dict[str, Any] = {
+        "symbol": info.symbol, "name": info.name,
+        "headlines": [_pick(n, "published_at", "title", "category", "outlet", "source", "url") for n in items],
+        # the attribution each item carries (OGDL datasets, The GDELT Project with gdeltproject.org …), once
+        "sources": list(dict.fromkeys(x for n in items for x in n.get("sources") or [])),
+    }
+    if any(n.get("category") == "media" for n in items):
+        out["note"] = ("category media：媒體原標題（outlet 為媒體），只有標題沒有內文；提到時寫出媒體名稱與連結，"
+                       "內容以原文為準，需要細節再用 web_search")
+    elif not items:
+        out["note"] = "最近沒有公告或媒體標題；需要新聞時請改用 web_search"
     return out
 
 
@@ -712,9 +719,10 @@ TOOLS: list[ToolSpec] = sorted([
                                                "description": "true = only events relevant to the user's holdings"}},
              ("symbol", "mine_only"), get_events, _sym_label("查看 ", " 事件")),
     ToolSpec("get_news",
-             "Recent official announcement headlines for a Taiwan stock (company material information and exchange "
-             "news: title, source, link). Media coverage is not included: search the web for it when the "
-             "question needs recent news about the company.",
+             "Recent headlines for a stock: official announcements of a Taiwan stock (company material information "
+             "and exchange news), then media headlines (category media: the original title, outlet, time and link, "
+             "found via The GDELT Project and similar indexes; titles only, no article text), with their sources. "
+             "Search the web when the question needs more than these headlines.",
              {"symbol": _SYMBOL}, ("symbol",), get_news, _sym_label("查看 ", " 新聞")),
     ToolSpec("get_position",
              "The user's own position in one stock: shares, average cost, cost basis, market value, unrealized and "

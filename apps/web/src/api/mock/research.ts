@@ -22,7 +22,7 @@ import type {
   WhyReason,
 } from "../types"
 import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
-import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
+import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE, TWSE_INST_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, FX_NOW, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, rng, tradingDays } from "./market"
@@ -169,7 +169,8 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", c
     const top20Rows = top20
       ? tradingDays(top20.days).map((t, i, all) => ({ t, pct: i === all.length - 1 ? top20.pct : round(top20.pct - (all.length - 1 - i) * 0.0004 + (wiggle() - 0.5) * 0.0012, 4) }))
       : []
-    const notes = [...(listed ? [top20 ? TOP20_NOTE : TWSE_CHIPS_NOTE] : []), ...(short ? [accumulatingNote()] : [])]
+    // 與後端相同：上市股票一律說明為什麼沒有三大法人；在榜時另加前 20 名的說明
+    const notes = [...(listed ? (top20 ? [TWSE_INST_NOTE, TOP20_NOTE] : [TWSE_CHIPS_NOTE]) : []), ...(short ? [accumulatingNote()] : [])]
     const src = listed
       ? [sourceOf("twse-openapi/margin"), ...(top20 ? [sourceOf("twse-openapi/foreign_top20")] : []), sourceOf("tdcc-opendata/distribution")]
       : [sourceOf("tpex-openapi/institutional"), sourceOf("tpex-openapi/foreign_holding"), sourceOf("tpex-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
@@ -422,41 +423,44 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
 }
 
 // ── news：官方公告（重大訊息、證交所新聞），再加新聞報導（媒體原標題＋媒體＋時間＋原文連結） ─────────────
-// 示範標題（不是真實新聞）；連結指向該媒體首頁。[標題, 媒體, 網址, 幾小時前, 收集方式, 只有日期]
+// 示範標題：虛構的媒體（名稱都有「示範」）、中性的標題、連到 example.com——不掛真實媒體的名字，
+// 也不寫人事、個資、訴訟這類敏感事件（真實的標題只會來自後端的新聞 worker）。
+// [標題, 媒體, 網址, 幾小時前, 收集方式, 只有日期]
 type MockMedia = [title: string, outlet: string, url: string, hoursAgo: number, source?: "GDELT" | "AI 搜尋" | "Yahoo股市", dateOnly?: boolean]
+const DEMO_NEWS_URL = "https://example.com/demo-news"
 const MEDIA: Record<string, MockMedia[]> = {
   "2330.TW": [
-    ["台積電先進封裝擴產，CoWoS 月產能明年再增五成", "經濟日報", "https://money.udn.com/money/index", 1],
-    ["台積電熊本二廠規劃導入 3 奈米 日本補助案拍板", "中央社", "https://www.cna.com.tw/list/afe.aspx", 2],
-    ["外資連四賣台積電 法人：短線調節不改長線趨勢", "工商時報", "https://www.ctee.com.tw/", 3],
-    ["台積電 10 月營收創新高 年增四成", "自由時報", "https://ec.ltn.com.tw/", 5],
-    ["台積電美國亞利桑那廠第二座晶圓廠提前量產", "聯合新聞網", "https://udn.com/news/index", 6],
-    ["AI 需求延續 台積電明年資本支出估再提高", "中時新聞網", "https://www.chinatimes.com/money/", 9],
-    ["台積電董事會核准資本預算 擴充先進製程產能", "ETtoday", "https://finance.ettoday.net/", 20],
-    ["半導體設備交期縮短 台積電供應鏈接單轉強", "TVBS", "https://news.tvbs.com.tw/money", 26],
-    ["台積電 2 奈米良率傳捷報 蘋果明年新機搶先採用", "三立", "https://www.setn.com/ViewAll.aspx?PageGroupID=2", 30],
-    ["台積電赴德設廠進度 歐洲客戶車用晶片需求回溫", "新頭殼", "https://newtalk.tw/news/subcategory/2/", 44],
-    ["TSMC lifts capex outlook as AI chip demand stays strong", "Reuters", "https://www.reuters.com/technology/", 52],
-    ["台積電 ADR 夜盤走揚 台股期貨同步反彈", "鉅亨網", "https://news.cnyes.com/", 70, "AI 搜尋", true],
+    ["台積電先進封裝產能擴充 示範新聞標題", "示範財經日報", `${DEMO_NEWS_URL}/2330-1`, 1],
+    ["台積電海外新廠進度說明 示範新聞標題", "示範新聞網", `${DEMO_NEWS_URL}/2330-2`, 2],
+    ["法人看半導體供應鏈 台積電列觀察名單（示範）", "示範商業時報", `${DEMO_NEWS_URL}/2330-3`, 3],
+    ["台積電月營收公布 市場關注年增率（示範）", "示範晚報", `${DEMO_NEWS_URL}/2330-4`, 5],
+    ["晶圓代工產業動態整理：台積電篇（示範）", "示範產業週刊", `${DEMO_NEWS_URL}/2330-5`, 6],
+    ["AI 伺服器需求與台積電資本支出（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2330-6`, 9],
+    ["台積電董事會例行會議 示範新聞標題", "示範財經日報", `${DEMO_NEWS_URL}/2330-7`, 20],
+    ["半導體設備交期與台積電供應鏈（示範）", "示範電子報", `${DEMO_NEWS_URL}/2330-8`, 26],
+    ["台積電先進製程時程整理（示範）", "示範科技新聞", `${DEMO_NEWS_URL}/2330-9`, 30],
+    ["台積電歐洲廠進度與車用晶片需求（示範）", "示範商業時報", `${DEMO_NEWS_URL}/2330-10`, 44],
+    ["TSMC capex outlook: a sample headline", "Demo Markets Daily", `${DEMO_NEWS_URL}/2330-11`, 52],
+    ["台積電 ADR 與台股期貨夜盤（示範）", "示範財經網", `${DEMO_NEWS_URL}/2330-12`, 70, "AI 搜尋", true],
   ],
   "2454.TW": [
-    ["聯發科天璣新晶片打進旗艦手機 第四季出貨看增", "經濟日報", "https://money.udn.com/money/index", 4],
-    ["聯發科攜手輝達 車用晶片明年量產", "中央社", "https://www.cna.com.tw/list/afe.aspx", 30],
+    ["聯發科新晶片出貨展望（示範）", "示範財經日報", `${DEMO_NEWS_URL}/2454-1`, 4],
+    ["聯發科車用晶片布局整理（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2454-2`, 30],
   ],
   "6488.TWO": [
-    ["環球晶美國新廠啟用 客戶認證進度超前", "工商時報", "https://www.ctee.com.tw/", 7],
-    ["矽晶圓報價落底？環球晶：庫存調整進入尾聲", "MoneyDJ", "https://www.moneydj.com/", 50, "AI 搜尋", true],
+    ["環球晶海外新廠進度（示範）", "示範商業時報", `${DEMO_NEWS_URL}/6488-1`, 7],
+    ["矽晶圓庫存與報價動態（示範）", "示範財經網", `${DEMO_NEWS_URL}/6488-2`, 50, "AI 搜尋", true],
   ],
   NVDA: [
-    ["Nvidia shares slide as investors weigh leadership questions", "Reuters", "https://www.reuters.com/technology/", 2],
-    ["Nvidia board meets to discuss CEO succession plan", "Bloomberg", "https://www.bloomberg.com/technology", 6],
-    ["What Nvidia's guidance means for AI chip stocks", "CNBC", "https://www.cnbc.com/technology/", 18],
-    ["輝達財報前夕 台廠供應鏈法人買盤回流", "經濟日報", "https://money.udn.com/money/index", 28],
+    ["Nvidia earnings preview: a sample headline", "Demo Markets Daily", `${DEMO_NEWS_URL}/nvda-1`, 2],
+    ["AI chip demand and Nvidia's data center sales (sample)", "Demo Tech Wire", `${DEMO_NEWS_URL}/nvda-2`, 6],
+    ["What analysts watch in Nvidia's guidance (sample)", "Demo Business Review", `${DEMO_NEWS_URL}/nvda-3`, 18],
+    ["輝達財報前 台廠供應鏈動態（示範）", "示範財經日報", `${DEMO_NEWS_URL}/nvda-4`, 28],
   ],
 }
 /** personal 模式另有 Yahoo股市 RSS（條款限非商用）：保留「Yahoo股市」與原始媒體 */
 const MEDIA_PERSONAL: Record<string, MockMedia[]> = {
-  "2330.TW": [["員工個資外洩？台積電：無證據顯示系統遭入侵", "MoneyDJ", "https://tw.stock.yahoo.com/tw-market", 4, "Yahoo股市"]],
+  "2330.TW": [["台積電相關新聞（Yahoo股市 RSS 示範）", "示範財經網", `${DEMO_NEWS_URL}/yahoo-2330-1`, 4, "Yahoo股市"]],
 }
 
 const MEDIA_SOURCE: Record<string, string> = { GDELT: GDELT_ATTRIBUTION, "AI 搜尋": AI_SEARCH_ATTRIBUTION, Yahoo股市: YAHOO_RSS_ATTRIBUTION }

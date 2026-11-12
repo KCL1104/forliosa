@@ -80,6 +80,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+from sqlalchemy.exc import StatementError
 from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import Policy
@@ -181,6 +182,20 @@ def tracked_symbols(db: Session) -> list[str]:
     return sorted(s for s in syms if s)
 
 
+def safe_error(exc: BaseException) -> str:
+    """A failed job's message without the rows it was writing. A SQLAlchemy statement error names the statement and
+    (unless the engine hides them) its parameters — company_profiles' ``values`` carry 董事長／總經理, which are
+    overwritten daily and must not pile up in logs — and Postgres adds a DETAIL line that repeats the failing row.
+    Only the driver's error class and its first line are kept."""
+    if isinstance(exc, StatementError):
+        orig = exc.orig
+        if orig is None:
+            return type(exc).__name__
+        lines = str(orig).strip().splitlines()
+        return f"{type(orig).__name__}: {lines[0]}" if lines else type(orig).__name__
+    return str(exc)
+
+
 @dataclass
 class JobResult:
     name: str
@@ -211,9 +226,10 @@ class Archiver:
         try:
             n = fn()
         except Exception as exc:  # one failing dataset must not stop the others
-            log.warning("archive %s failed: %s", name, exc)
+            message = safe_error(exc)
+            log.warning("archive %s failed: %s", name, message)
             self.db.rollback()
-            self.results.append(JobResult(name, 0, str(exc)[:200]))
+            self.results.append(JobResult(name, 0, message[:200]))
             return 0
         log.info("archive %s: %d rows", name, n)
         self.results.append(JobResult(name, n))

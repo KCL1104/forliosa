@@ -4,6 +4,7 @@ import { appNow } from "@/api"
 import { useNews } from "@/api/queries"
 import type { InstrumentDetail, NewsItem } from "@/api/types"
 import { Section } from "@/components/section"
+import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { GDELT_URL, mediaNews, NEWS_PAGE_SIZE, newsSourcesUsed, outletLabel, relativeTime } from "@/lib/news"
@@ -24,6 +25,14 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
   const news = useNews(inst.symbol)
   const [shown, setShown] = useState(NEWS_PAGE_SIZE)
   if (news.isLoading) return <Skeleton className="h-48 w-full rounded-sm" />
+  // 請求失敗不能說成「沒有報導」：顯示錯誤與重試（已有資料時照常顯示，背景重抓失敗不打斷）
+  if (news.isError && !news.data) {
+    return (
+      <Section title="新聞報導" titleId="ov-media">
+        <ErrorState title="新聞報導沒有載入" error={news.error} onRetry={() => void news.refetch()} />
+      </Section>
+    )
+  }
   const items = mediaNews(news.data)
   const now = appNow()
   const used = newsSourcesUsed(items)

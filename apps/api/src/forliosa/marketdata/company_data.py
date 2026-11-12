@@ -216,8 +216,11 @@ _PARK = re.compile(r"^(?P<city>新竹[市縣]?)?(?P<park>科學(?:工業)?園區
 _OTHER_PARK = re.compile(r"^(\S{2,4}科學(?:工業)?園區)")
 _CITY = re.compile(r"^(\S\S[縣市])")
 
+# A place name followed by one of these is a street (「Keelung Rd.」「Taoyuan St.」 in Taipei), not the city.
+_EN_STREET = (r"(?![\s.-]*(?:rd|road|st|street|ave|avenue|blvd|boulevard|ln|lane|alley|aly|expwy|expressway|hwy"
+              r"|highway)\b)")
 # English (TPEx Address) -> 縣市; only names that are unambiguous on their own.
-_EN_PLACES: tuple[tuple[re.Pattern[str], str], ...] = tuple((re.compile(p), zh) for p, zh in (
+_EN_PLACES: tuple[tuple[re.Pattern[str], str], ...] = tuple((re.compile(f"(?:{p}){_EN_STREET}"), zh) for p, zh in (
     (r"new\s*taipei", "新北市"),
     (r"taipei\s*(county|hsien)", "新北市"),
     (r"(?<!new )taipei\s*city", "台北市"),
@@ -241,6 +244,11 @@ _EN_PLACES: tuple[tuple[re.Pattern[str], str], ...] = tuple((re.compile(p), zh) 
     (r"peng\s*-?\s*hu", "澎湖縣"),
     (r"kinmen", "金門縣"),
 ))
+# Names that leave the city open on their own: 「Taipei」 (台北市 or the former Taipei County), 「Hsinchu」 and
+# 「Chiayi」 (city or county). They make the address uncertain rather than naming a city.
+_EN_BARE = re.compile(r"(?:(?<!new)(?<!new )(?<!new-)taipei(?!\s*-?\s*(?:city|county|hsien))"
+                      r"|hsin\s*-?\s*chu(?!\s*-?\s*(?:city|county|hsien|science))"
+                      r"|chia\s*-?\s*yi(?!\s*-?\s*(?:city|county|hsien)))" + _EN_STREET)
 _EN_HSINCHU_PARK = re.compile(r"hsin\s*-?\s*chu\s*science|science[\s-]*(based)?[\s-]*(indust\w*)?[\s-]*park")
 _EN_HSINCHU = re.compile(r"hsin\s*-?\s*chu")
 
@@ -259,11 +267,15 @@ def _hq_zh(address: str) -> str | None:
 
 
 def _hq_en(address: str) -> str | None:
+    """Exactly one city / county named, and nothing that leaves it open: street names (「Keelung Rd.」) are not
+    places; a bare 「Taipei」「Hsinchu」「Chiayi」 makes the answer uncertain (``None``)."""
     a = re.sub(r"\s+", " ", address.replace("　", " ")).lower()
     found = {zh for pattern, zh in _EN_PLACES if pattern.search(a)}
     hsinchu_park = bool(_EN_HSINCHU_PARK.search(a)) and bool(_EN_HSINCHU.search(a))
     if hsinchu_park and found <= {"新竹市", "新竹縣"}:
         return "新竹科學園區"
+    if _EN_BARE.search(a):
+        return None
     return found.pop() if len(found) == 1 else None  # none or several places: not certain
 
 

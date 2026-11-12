@@ -155,6 +155,13 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(media.some((n) => n.source === "Yahoo股市")).toBe(false)
     expect(media.some((n) => n.source === "GDELT" && n.sources?.[0]?.includes("gdeltproject.org"))).toBe(true)
     expect((await api.getNews("2317.TW")).filter((n) => n.category === "media")).toEqual([])
+    // 示範新聞不掛真實媒體：媒體名稱都有「示範」或 Demo、連到 example.com（審查 2026-11-12）
+    for (const sym of ["2330.TW", "2454.TW", "6488.TWO", "NVDA"]) {
+      for (const n of (await api.getNews(sym)).filter((x) => x.category === "media")) {
+        expect(n.outlet).toMatch(/示範|Demo/)
+        expect(new URL(n.url).hostname).toBe("example.com")
+      }
+    }
     const c = await api.getChips("2330.TW", "3M")
     expect(c.institutional).toEqual([])
     expect(c.notes?.[0]).toContain("上市股票")
@@ -164,7 +171,10 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     const ase = await api.getChips("3711.TW", "1M")
     expect(ase.foreign_top20).toEqual({ as_of: "2026-11-12", rank: 12, pct: 0.7552, limit_pct: 1 })
     expect(ase.foreign_holding_pct.at(-1)?.pct).toBe(0.7552)
-    expect(ase.notes?.[0]).toContain("前 20 名")
+    // 在榜時仍說明為什麼沒有三大法人（與後端相同），再加前 20 名的說明
+    expect(ase.notes?.[0]).toContain("上市股票")
+    expect(ase.notes?.[0]).toContain("以付費商品提供")
+    expect(ase.notes?.[1]).toContain("前 20 名")
     expect(ase.sources.join("")).toContain("外資及陸資持股前20名彙總表")
     const tsmc = await api.getChips("2330.TW", "1M")
     expect(tsmc.foreign_top20).toBeNull()
@@ -194,6 +204,8 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(c.sources.join("")).toContain("CC BY-SA 4.0")
     const gw = await api.getCompany("6488.TWO")
     expect(gw.description).toMatchObject({ kind: "ai", label: "AI 依公開資料整理" })
+    // AI 簡介用到 ESG 產品類別：來源也列 ESG 資料集
+    expect(gw.sources.join("")).toContain("上櫃公司企業ESG資訊揭露彙總資料-產品品質與安全")
     expect(gw.description!.text).not.toContain(gw.chairman!)
     expect((await api.getCompany("AAPL")).hq).toBe("Cupertino, CA")
   })

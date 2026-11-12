@@ -333,6 +333,33 @@ def test_us_stocks_get_media_only(client, engine, commercial_md):
     assert [(x["category"], x["outlet"]) for x in n] == [("media", "Reuters")]
 
 
+def test_ai_get_news_tool_gives_media_headlines_with_their_sources(client, engine, commercial_md):
+    """The AI tool sees what /news shows — official announcements, then media headlines — with the outlet and the
+    attribution each item needs (GDELT's citation), so an answer that repeats a headline can name where it is from."""
+    import json
+
+    from forliosa.ai.tools import TOOLS_BY_NAME, ToolContext, execute
+    from forliosa.models import User
+
+    now = now_utc()
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [
+            service.Headline("台積電CPO霸主地位穩了？", "https://newtalk.tw/news/view/2026-11-12/1", "新頭殼",
+                             "newtalk.tw", now - timedelta(hours=3), "gdelt")], now)
+        me = db.scalar(select(User).where(User.email == "demo@forliosa.local"))
+        out = execute(ToolContext(db=db, user=me, md=commercial_md), "get_news", {"symbol": "2330"})
+    assert not out.is_error, out.content
+    data = json.loads(out.content)
+    media = [n for n in data["headlines"] if n.get("category") == "media"]
+    assert media == [{"published_at": media[0]["published_at"], "title": "台積電CPO霸主地位穩了？",
+                      "category": "media", "outlet": "新頭殼", "source": "GDELT",
+                      "url": "https://newtalk.tw/news/view/2026-11-12/1"}]
+    assert label("gdelt/doc") in data["sources"] and len(data["sources"]) == len(set(data["sources"]))
+    assert "outlet" in data["note"]
+    spec = TOOLS_BY_NAME["get_news"]
+    assert "not included" not in spec.description and "GDELT" in spec.description
+
+
 # -- attribution and worker --------------------------------------------------------------------------------------
 def test_attributions_name_gdelt_and_keep_yahoo_personal_only():
     com = attributions("commercial", confirmed=True)

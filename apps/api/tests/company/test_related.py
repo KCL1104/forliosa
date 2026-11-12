@@ -89,3 +89,64 @@ def test_depositary_receipts_never_appear(client, stock_archive, engine):
         db.commit()
     cards = related(client, "2330.TW")["items"]
     assert "2454.TW" not in {c["symbol"] for c in cards}
+
+
+def test_affiliates_use_each_datasets_latest_month(client, stock_archive, engine):
+    """TWSE's t187ap11_L moves to 2026-10 while TPEx's mopsfin_t187ap11_O is still at 2026-09: the TPEx links stay
+    (one month-wide maximum dropped them until TPEx caught up)."""
+    from datetime import date
+
+    from sqlalchemy import select
+    from sqlalchemy.orm import Session
+
+    from forliosa.models import BoardLink
+
+    with Session(engine) as db:
+        for r in list(db.scalars(select(BoardLink).where(BoardLink.source == "twse-openapi"))):
+            db.add(BoardLink(symbol=r.symbol, holder_symbol=r.holder_symbol, period="2026-10", roles=r.roles,
+                             shares=r.shares, data_date=date(2026, 11, 20), source=r.source))
+        db.commit()
+    vis = related(client, "5347.TWO")
+    assert ("2330.TW", "affiliate", "世界的大股東") in {(c["symbol"], c["reason"], c["reason_label"])
+                                                    for c in vis["items"]}
+    assert vis["notes"] == ["關係企業依董監事持股餘額明細（2026 年 9 月）"]
+    tsmc = related(client, "2330.TW")
+    assert [(c["symbol"], c["reason"]) for c in tsmc["items"]][:2] == [("0050.TW", "benchmark"),
+                                                                       ("3443.TW", "affiliate")]
+    assert tsmc["notes"] == ["關係企業依董監事持股餘額明細（2026 年 10 月）"]
+    assert any(c["symbol"] == "5483.TWO" and c["reason"] == "affiliate" for c in related(client, "6488.TWO")["items"])
+
+
+def test_etf_holders_use_each_markets_latest_month(client, stock_archive, engine):
+    """A newer 2-23 (上櫃) month must not leave the listed ETFs without their 2-22 holder counts."""
+    from sqlalchemy.orm import Session
+
+    from forliosa.models import HolderCountMonthly
+
+    with Session(engine) as db:
+        db.add(HolderCountMonthly(symbol="006201.TWO", period="2026-11", holders=5000, source="tdcc-opendata"))
+        db.commit()
+    out = related(client, "0050.TW")
+    assert [(c["symbol"], c["reason"]) for c in out["items"]] == [
+        ("006208.TW", "same_index"), ("0056.TW", "same_type"), ("00878.TW", "same_type"), ("00919.TW", "same_type")]
+
+
+def test_a_candidate_without_a_card_is_replaced_by_the_next(client, stock_archive, engine):
+    """An index benchmark without archived levels and an affiliate without archived closes do not shrink the row:
+    the next candidates fill the four cards."""
+    from sqlalchemy import delete
+    from sqlalchemy.orm import Session
+
+    from forliosa.models import IndexDaily, PriceDaily
+
+    r = client.patch(f"{API}/me/preferences", json={"benchmark": "^TAIEXTR"})
+    assert r.status_code == 200, r.text
+    with Session(engine) as db:
+        db.execute(delete(IndexDaily))
+        db.execute(delete(PriceDaily).where(PriceDaily.symbol == "3443.TW"))
+        db.commit()
+    cards = related(client, "2330.TW")["items"]
+    assert len(cards) == 4
+    assert "^TAIEXTR" not in {c["symbol"] for c in cards} and "3443.TW" not in {c["symbol"] for c in cards}
+    assert cards[0]["reason"] == "affiliate"  # the next affiliate by market cap (世界) takes 創意's place
+    assert [c["reason"] for c in cards[1:]] == ["peer", "peer", "peer"]

@@ -153,6 +153,55 @@ def url_key(url: str) -> str:
 
 
 # -- relevance ----------------------------------------------------------------------------------------------
+# Everyday English words that are also English short names (穩懋 「WIN」, 台達電 「DELTA」, 巨大 「GIANT」…). GDELT
+# matches its machine-translated text case-insensitively, so such a word as a query term returns the newest
+# articles about anything (「win」 in a sports or election story) and fills the 75-record answer: for Taiwan stocks
+# the query uses the code instead (sources.gdelt_query). Not exhaustive; the case rules in is_relevant are the
+# general guard.
+COMMON_WORDS = frozenset({
+    "ace", "act", "aim", "air", "all", "alpha", "apex", "apple", "arc", "art", "asia", "astro", "atlas", "aura",
+    "best", "big", "bio", "blue", "bold", "bond", "boss", "bravo", "bright", "capital", "care", "central",
+    "champion", "chief", "china", "city", "clear", "cloud", "core", "crown", "crystal", "data", "day", "delta",
+    "diamond", "dragon", "dream", "eagle", "east", "eastern", "echo", "eco", "edge", "elite", "energy", "ever",
+    "evergreen", "excel", "fair", "fast", "first", "focus", "formosa", "fortune", "forward", "free", "fresh",
+    "friend", "fusion", "future", "gain", "general", "genius", "giant", "global", "globe", "gold", "golden", "grace",
+    "grand", "great", "green", "group", "harvest", "hero", "high", "home", "honor", "hope", "horizon", "icon",
+    "ideal", "image", "impact", "infinity", "insight", "joy", "key", "king", "leader", "legend", "life", "light",
+    "link", "lion", "live", "lucky", "magic", "major", "march", "master", "max", "media", "merit", "metro", "micro",
+    "mobile", "modern", "motion", "nano", "nation", "national", "net", "new", "nexus", "noble", "north", "nova",
+    "ocean", "omega", "one", "open", "orient", "pacific", "peak", "pearl", "phoenix", "pilot", "pioneer", "planet",
+    "plus", "point", "power", "premier", "president", "prime", "pro", "progress", "pure", "quality", "quest", "rich",
+    "rise", "rising", "royal", "ruby", "run", "safe", "sail", "san", "sea", "sense", "shine", "signal", "silver",
+    "simple", "smart", "solar", "solid", "sonic", "south", "southern", "spark", "speed", "spirit", "standard",
+    "star", "state", "sun", "sunny", "super", "supreme", "swift", "system", "taiwan", "target", "team", "tiger",
+    "time", "top", "total", "tower", "trend", "trinity", "true", "trust", "union", "unique", "united", "unity",
+    "universal", "value", "victory", "vision", "vital", "vivid", "wave", "way", "west", "western", "win", "wing",
+    "winner", "wisdom", "wise", "wonder", "world", "young", "zen",
+})
+
+
+def is_common_word(term: str) -> bool:
+    return " ".join(term.split()).casefold() in COMMON_WORDS
+
+
+def _ascii_name_pattern(name: str) -> re.Pattern[str]:
+    """How an English name must appear in a headline, as a whole word:
+
+    * an all-capital single word of at most five letters (TSMC, UMC, WIN, DELTA) is an acronym: only in capitals —
+      「WIN Semiconductors」 counts, 「Taiwan clinches WBC win」 and 「Mekong delta」 do not;
+    * another single word (NVIDIA, Apple, MediaTek, Gudeng) as a proper noun: its first letter as published
+      (capital), the rest in any case — 「Nvidia shares」 counts, 「Washington apple harvest」 does not;
+    * a name of several words (「HON HAI」「Apple Inc.」) in any case.
+    """
+    edge_l, edge_r = r"(?<![A-Za-z0-9])", r"(?![A-Za-z0-9])"
+    if " " in name or not name.isalpha():
+        return re.compile(edge_l + re.escape(name) + edge_r, re.IGNORECASE)
+    if name.isupper() and len(name) <= 5:
+        return re.compile(edge_l + re.escape(name) + edge_r)
+    first = re.escape(name[0]) if name[0].isupper() else f"(?i:{re.escape(name[0])})"
+    return re.compile(edge_l + first + f"(?i:{re.escape(name[1:])})" + edge_r)
+
+
 @dataclass(frozen=True)
 class Terms:
     """What makes a headline about this company: its Chinese short name, its code and its English short name
@@ -184,14 +233,14 @@ _NUMBER_UNITS = "(?:\\s*(?:元|點|億|萬|張|股|倍|年|月|日|人|家|%|" +
 
 
 def is_relevant(title: str, terms: Terms) -> bool:
-    """The headline (after ``clean_title``) names the company, its code or its English short name."""
+    """The headline (after ``clean_title``) names the company, its code or its English short name (English names
+    by the case rules of :func:`_ascii_name_pattern`, so an everyday word is not taken for the company)."""
     text = title.casefold()
     for n in terms.names:
-        t = n.casefold()
         if n.isascii():
-            if re.search(rf"(?<![a-z0-9]){re.escape(t)}(?![a-z0-9])", text):
+            if _ascii_name_pattern(n).search(title):
                 return True
-        elif t in text:
+        elif n.casefold() in text:
             return True
     for c in terms.codes:
         # 2330 in 「台積電(2330)」「2330.TW」, not in 「23301」「2330點」「2330元」「$2330」「2026年」

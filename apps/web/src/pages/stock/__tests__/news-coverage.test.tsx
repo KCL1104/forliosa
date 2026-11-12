@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import type { NewsItem } from "@/api/types"
 import { mediaNews, officialNews, outletLabel, relativeTime } from "@/lib/news"
@@ -12,6 +12,10 @@ function withQueries(ui: React.ReactNode) {
 }
 
 const NOW = new Date("2026-11-12T13:30:00+08:00")
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
 
 describe("新聞報導的顯示規則", () => {
   it("相對時間：分鐘、小時、天，7 天以上與只有日期時顯示日期", () => {
@@ -49,7 +53,7 @@ describe("總覽的「新聞報導」", () => {
       expect(a.getAttribute("rel")).toContain("noreferrer")
     }
     expect(section.querySelector("img")).toBeNull()
-    expect(within(section).getByText("經濟日報")).toBeInTheDocument()
+    expect(within(section).getAllByText("示範財經日報").length).toBeGreaterThan(0)
     expect(within(section).getByText("1 小時前")).toBeInTheDocument()
     const gdelt = within(section).getByRole("link", { name: /The GDELT Project/ })
     expect(gdelt).toHaveAttribute("href", "https://www.gdeltproject.org/")
@@ -58,6 +62,19 @@ describe("總覽的「新聞報導」", () => {
     expect(all).toHaveLength(12)
     expect(within(section).queryByRole("button", { name: /顯示更多/ })).toBeNull()
     expect(section.textContent).toContain("AI 網路搜尋")
+  })
+  it("請求失敗時顯示錯誤與重試，不說成「沒有報導」", async () => {
+    const tsmc = await api.getInstrument("2330.TW")
+    const spy = vi.spyOn(api, "getNews").mockRejectedValueOnce(new Error("network"))
+    withQueries(<NewsCoverage inst={tsmc} />)
+    const alert = await screen.findByRole("alert", undefined, { timeout: 3000 })
+    expect(alert.textContent).toContain("新聞報導沒有載入")
+    expect(screen.queryByText(/最近沒有找到/)).toBeNull()
+    fireEvent.click(within(alert).getByRole("button", { name: /重新載入/ }))
+    // 重試時先回到載入中，成功後才是清單（區塊重新掛上，所以重新找）
+    await screen.findAllByText("示範財經日報", undefined, { timeout: 3000 })
+    expect(within(screen.getByRole("region", { name: "新聞報導" })).queryByRole("alert")).toBeNull()
+    expect(spy).toHaveBeenCalledTimes(2)
   })
   it("沒有報導時說明，不留空白", async () => {
     const honhai = await api.getInstrument("2317.TW")

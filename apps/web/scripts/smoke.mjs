@@ -282,7 +282,7 @@ await check("個股總覽：「新聞報導」（媒體原標題＋媒體＋時�
   if ((await headlines.count()) <= 8) throw new Error("顯示更多 did not add headlines")
   // 公告只有官方來源（媒體在新聞報導）
   const official = page.getByRole("region", { name: "公告" })
-  if (await official.getByText("經濟日報").count()) throw new Error("media headline in 公告")
+  if (await official.getByText("示範財經日報").count()) throw new Error("media headline in 公告")
   await page.goto(base + "/stock/2317.TW", { waitUntil: "networkidle" })
   await page.getByText(/最近沒有找到鴻海的媒體報導/).waitFor()
 })
