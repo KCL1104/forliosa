@@ -74,7 +74,7 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
       <div className="min-w-0 flex-1">
         <div className="flex items-baseline justify-between gap-3">
           {item.type === "member_joined" ? (
-            <p className="min-w-0 text-base text-ink-2">
+            <p className="min-w-0 text-base">
               {showName ? name : null}
               {showName ? " 加入了群組" : "加入了群組"}
             </p>
@@ -92,7 +92,7 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
               <Reactions groupId={groupId} target={`trade:${item.id}`} reactions={item.reactions} />
               <CommentsToggle count={item.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />
             </div>
-            {open && <CommentThread id={threadId} groupId={groupId} target={`trade:${item.id}`} className="mt-2 border-l-2 border-rule pl-3" />}
+            {open && <CommentThread id={threadId} groupId={groupId} target={`trade:${item.id}`} className="mt-2 border-l border-rule pl-3" />}
           </>
         )}
       </div>

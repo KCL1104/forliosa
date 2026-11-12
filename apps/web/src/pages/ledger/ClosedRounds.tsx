@@ -51,7 +51,7 @@ export function ClosedRounds() {
           <span className="num ml-auto text-sm font-normal text-ink-2">
             已實現
             <span className={cn("ml-1.5", toneClass(d))}>
-              {d !== "flat" && <span aria-hidden className="mr-0.5 text-[0.8em]">{directionGlyph(d)}</span>}
+              {d !== "flat" && <span aria-hidden className="mr-0.5">{directionGlyph(d)}</span>}
               {privacy ? <Masked /> : formatMoney(totals.realized, { signed: true })}
               <span className="sr-only">{d === "up" ? "獲利" : d === "down" ? "虧損" : ""}</span>
             </span>
@@ -63,7 +63,7 @@ export function ClosedRounds() {
         <div id="closed-list" className="note-in">
           <ClosedTable years={years} isOpen={yearOpen} onToggle={toggleYear} accounts={accounts.data ?? []} multiAccount={multiAccount} />
           <ClosedList years={years} isOpen={yearOpen} onToggle={toggleYear} accounts={accounts.data ?? []} multiAccount={multiAccount} />
-          <p className="mt-2 text-xs text-ink-2">已實現損益扣除買賣手續費與證交稅；股利已扣二代健保，出清後才入帳的股利算在最近一個回合。</p>
+          <p className="mt-2 text-sm text-ink-2">已實現損益扣除買賣手續費與證交稅；股利已扣二代健保，出清後才入帳的股利算在最近一個回合。</p>
         </div>
       )}
     </section>
@@ -80,7 +80,7 @@ function YearTotal({ value, className }: { value: number; className?: string }) 
   const d = direction(value)
   return (
     <span className={cn("num whitespace-nowrap", toneClass(d), className)}>
-      {d !== "flat" && <span aria-hidden className="mr-0.5 text-[0.8em]">{directionGlyph(d)}</span>}
+      {d !== "flat" && <span aria-hidden className="mr-0.5">{directionGlyph(d)}</span>}
       {privacy ? <Masked /> : formatMoney(value, { signed: true })}
       <span className="sr-only">{d === "up" ? "獲利" : d === "down" ? "虧損" : ""}</span>
     </span>
@@ -113,10 +113,10 @@ function ClosedTable({ years, isOpen, onToggle, accounts, multiAccount }: YearPr
   const navigate = useNavigate()
   const privacy = usePrefs((s) => s.privacyMode)
   const money = (n: number) => (privacy ? <Masked /> : formatMoney(n, { bare: true }))
-  const th = "h-10 border-b border-rule text-sm font-normal text-ink-2"
+  const th = "h-10"
   return (
     <table className="w-full border-collapse max-md:hidden" aria-label="已出清">
-      <thead>
+      <thead className="form-head">
         <tr>
           <th scope="col" className={cn(th, "text-left")}>名稱</th>
           <th scope="col" className={cn(th, "text-left")}>持有期間</th>

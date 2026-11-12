@@ -233,7 +233,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={submit} disabled={pending || (!editing && list.length === 0)}>
+          <Button variant="sign" onClick={submit} disabled={pending || (!editing && list.length === 0)}>
             {pending ? "儲存中…" : editing ? "儲存" : "授權"}
           </Button>
         </DialogFooter>

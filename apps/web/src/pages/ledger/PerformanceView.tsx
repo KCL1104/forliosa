@@ -15,7 +15,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
+import { direction, directionGlyph, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly, useWho } from "@/api/view-as"
@@ -47,12 +47,6 @@ export function PerformanceView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="flex flex-wrap items-center gap-2 text-sm text-ink-2">
-        {p?.start_date && p.end_date
-          ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}。價格用未還原收盤價，股利另以交易紀錄計入。`
-          : "時間加權報酬、XIRR、回撤與基準比較。"}
-        {p?.is_demo && <DemoTag title={holdings.data?.some((h) => h.is_demo) ? "含示範資料" : undefined} />}
-      </p>
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />
         <Select
@@ -72,6 +66,13 @@ export function PerformanceView() {
           比較基準
           {!readOnly && <BenchmarkSelect size="sm" value={prefBenchmark} onChange={(v) => setPref({ benchmark: v })} />}
         </span>
+        {/* 期間（計算方式在最下面的「計算方式」） */}
+        {(p?.start_date && p.end_date) || p?.is_demo ? (
+          <p className="num flex items-center gap-2 text-sm text-ink-2 lg:ml-auto">
+            {p.start_date && p.end_date && `${formatDate(p.start_date)} – ${formatDate(p.end_date)}`}
+            {p.is_demo && <DemoTag title={holdings.data?.some((h) => h.is_demo) ? "含示範資料" : undefined} />}
+          </p>
+        ) : null}
       </div>
 
       {perf.isError ? (
@@ -93,7 +94,7 @@ export function PerformanceView() {
             <Legend
               className="mb-2"
               items={[
-                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <span className={toneClass(direction(p.twr))}>{formatPercent(p.twr)}</span> },
+                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <Pct value={p.twr} /> },
                 { label: p.benchmark?.name ?? "基準", color: "var(--chart-bench)", shape: "line", value: formatPercent(p.benchmark?.twr) },
               ]}
             />
@@ -152,8 +153,9 @@ function Metrics({ p }: { p: Performance }) {
       help: "排除資金進出的影響，用來比較「選股與操作能力」。",
       value: <Pct value={p.twr} />,
       sub: excess !== null && (
+        // 和基準的差距不是價格漲跌：不用紅綠，用「多／少」說方向
         <span>
-          比 {p.benchmark?.name} <span className={toneClass(direction(excess))}>{excess >= 0 ? "多" : "少"} {formatPercent(Math.abs(excess), { signed: false })}</span>
+          比 {p.benchmark?.name} {excess >= 0 ? "多" : "少"} <span className="num font-medium text-ink">{formatPercent(Math.abs(excess), { signed: false })}</span>
         </span>
       ),
     },
@@ -323,7 +325,10 @@ function RealizedByYear({ p }: { p: Performance }) {
         {p.realized_by_year.map((r) => (
           <li key={r.year} className="num">
             <span className="text-ink-2">{r.year}：</span>
-            <span className={toneClass(direction(r.amount))}>{privacy ? MASK : `${direction(r.amount) === "up" ? "▲" : direction(r.amount) === "down" ? "▼" : ""}${formatMoney(r.amount, { signed: true })}`}</span>
+            <span className={toneClass(direction(r.amount))}>
+              {privacy ? MASK : `${directionGlyph(direction(r.amount))}${formatMoney(r.amount, { signed: true })}`}
+              <span className="sr-only">{direction(r.amount) === "up" ? "獲利" : direction(r.amount) === "down" ? "虧損" : ""}</span>
+            </span>
           </li>
         ))}
       </ul>

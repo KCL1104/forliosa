@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { PinIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpIcon, PinIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useHoldings, useIntraday, useWatchlist } from "@/api/queries"
 import type { Holding, WatchItem } from "@/api/types"
@@ -150,15 +150,16 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
     const key = SORTABLE[c]
     const active = key && sort.key === key
     return (
-      <th key={c} scope="col" className={cn("h-10 border-b border-rule text-right text-sm font-normal text-ink-2", WIDTH[c])} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}>
+      <th key={c} scope="col" className={cn("h-10 text-right", WIDTH[c])} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}>
         {key ? (
           <button
             type="button"
             onClick={() => onSort({ key, dir: active && sort.dir === "desc" ? "asc" : "desc" })}
-            className={cn("inline-flex h-8 items-center gap-1 rounded-sm px-1 hover:text-ink", active && "text-ink")}
+            className={cn("-mr-1 inline-flex h-8 items-center gap-0.5 rounded-sm px-1 hover:text-ink", active && "text-ink")}
           >
             {COLUMN_LABEL[c]}
-            {active && <span aria-hidden className="text-[0.7em]">{sort.dir === "desc" ? "▼" : "▲"}</span>}
+            {/* 排序方向用箭頭（▲▼ 是價格漲跌的符號，不拿來表示排序） */}
+            {active && (sort.dir === "desc" ? <ArrowDownIcon aria-hidden className="size-3.5" /> : <ArrowUpIcon aria-hidden className="size-3.5" />)}
           </button>
         ) : (
           COLUMN_LABEL[c]
@@ -170,9 +171,9 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   const plans = useActivePlans()
   return (
     <table className="w-full border-collapse max-md:hidden" aria-label="持倉">
-      <thead>
+      <thead className="form-head">
         <tr>
-          <th scope="col" className="h-10 border-b border-rule text-left text-sm font-normal text-ink-2">
+          <th scope="col" className="h-10 text-left">
             名稱
           </th>
           {columns.map(header)}
@@ -321,7 +322,7 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
   const plans = useActivePlans()
   return (
     <div className="md:hidden">
-      <div className="flex h-11 items-end justify-between border-b border-rule pb-2 text-sm text-ink-2">
+      <div className="form-head flex h-11 items-end justify-between pb-2">
         <span>持有 {rows.length} 檔</span>
         <span>現價・今日漲跌</span>
       </div>

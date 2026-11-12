@@ -26,6 +26,7 @@ import { asOfLabel } from "@/lib/as-of"
 import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -47,7 +48,7 @@ export function LedgerPage() {
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
 
   return (
-    <div className="mx-auto w-full max-w-[1180px] px-5 pt-3 pb-10 md:px-8 lg:pt-10 xl:px-14 xl:pb-14">
+    <PageFrame>
       <h1 className="sr-only">帳本</h1>
       {summary.isError ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
@@ -112,7 +113,7 @@ export function LedgerPage() {
         )}
       </div>
       <SourcesFooter />
-    </div>
+    </PageFrame>
   )
 }
 
@@ -136,7 +137,8 @@ function Delta({ amount, pct, className }: { amount: number; pct: number | null;
   return (
     <span className={cn("num inline-flex items-baseline gap-2 whitespace-nowrap", toneClass(d), className)}>
       {privacy ? <Masked /> : formatMoney(amount, { signed: true })}
-      <span className="text-[0.82em]">
+      {/* 百分比和金額同一個字級；▲▼ 跟著字級（不另外縮小） */}
+      <span>
         {directionGlyph(direction(pct))}
         {formatPercent(pct === null ? null : Math.abs(pct), { signed: false, decimals: Math.abs(pct ?? 0) >= 0.1 ? 1 : 2 })}
       </span>
@@ -148,7 +150,20 @@ function Delta({ amount, pct, className }: { amount: number; pct: number | null;
 function useTrend() {
   const perf = usePerformance("1M")
   const values = (perf.data?.series ?? []).map((p) => p.market_value)
-  return { values, loading: perf.isLoading }
+  return { values, loading: perf.isLoading, notes: perf.data?.notes ?? [] }
+}
+
+/**
+ * 走勢畫不出來時（商用模式含美股、存檔還不夠）：右半邊不空著，一行說明為什麼，連到績效（那裡有完整說明與「只看新台幣帳戶」）。
+ * 原因取自後端的 notes，不另外推測。
+ */
+function TrendMissing({ notes }: { notes: string[] }) {
+  const reason = notes.some((n) => n.includes("美股")) ? "含美股，算不出來" : "資料還不夠"
+  return (
+    <Link to="/" search={{ view: "performance" }} className="mb-1.5 shrink-0 text-right text-sm text-ink-2 underline-offset-3 hover:text-ink hover:underline">
+      近 1 個月走勢：{reason}
+    </Link>
+  )
 }
 
 function HeroDesktop({ summary }: { summary?: PortfolioSummary }) {
@@ -182,6 +197,7 @@ function HeroDesktop({ summary }: { summary?: PortfolioSummary }) {
           </div>
         </dl>
       </div>
+      {showTrend && trend.values.length < 2 && !trend.loading && <TrendMissing notes={trend.notes} />}
       {showTrend && trend.values.length > 1 && (
         <figure className="mb-1.5 text-right" aria-label={`近 1 個月總資產走勢：${up ? "上升" : "下降"}`}>
           {privacy ? (
@@ -251,7 +267,7 @@ function HeroMobile({ summary }: { summary?: PortfolioSummary }) {
 
 function demoTitle(holdings?: { name: string; is_demo: boolean }[]) {
   const names = (holdings ?? []).filter((h) => h.is_demo).map((h) => h.name)
-  return api.kind === "mock" ? "目前沒有連到後端，所有數字都是示範資料" : names.length ? `含示範報價：${names.join("、")}` : "含示範資料"
+  return api.kind === "mock" ? "目前沒有連到伺服器，所有數字都是示範資料" : names.length ? `含示範報價：${names.join("、")}` : "含示範資料"
 }
 
 function HeroSkeleton() {

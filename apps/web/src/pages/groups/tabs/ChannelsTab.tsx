@@ -189,7 +189,7 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
         </label>
       </div>
       <div className="flex gap-2">
-        <Button type="submit" disabled={put.isPending || !url.trim()}>
+        <Button type="submit" variant="sign" disabled={put.isPending || !url.trim()}>
           {put.isPending ? "傳送測試訊息…" : "儲存並送測試訊息"}
         </Button>
         {replacing && (

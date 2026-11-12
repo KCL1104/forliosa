@@ -2,6 +2,7 @@ import { EyeIcon } from "lucide-react"
 import { useViewingAs } from "@/api/view-as"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
+import { PageFrame } from "./PageFrame"
 import { scopeText, useSyncViewAsTarget, useViewAsControls } from "./view-as"
 
 /** 手機橫幅的高度（兩行：名稱＋範圍）；AppShell 把頁面裡 sticky 分頁列排在它下面 */
@@ -44,7 +45,7 @@ export function ViewAsBlocked({ title }: { title: string }) {
   const target = useViewingAs()
   const { exit } = useViewAsControls()
   return (
-    <div className="mx-auto flex w-full max-w-[880px] flex-col items-start gap-3 px-5 pt-6 pb-10 md:px-8 lg:pt-10">
+    <PageFrame className="flex flex-col items-start gap-3">
       <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{title}</h1>
       <p className="max-w-prose text-base text-ink-2">
         正在查看 {target?.owner.display_name ?? "別人"} 的資產，這裡是你自己的{title}，結束查看後才能使用。
@@ -52,6 +53,6 @@ export function ViewAsBlocked({ title }: { title: string }) {
       <Button variant="outline" onClick={exit}>
         結束查看
       </Button>
-    </div>
+    </PageFrame>
   )
 }

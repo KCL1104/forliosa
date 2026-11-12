@@ -3,6 +3,7 @@ import { ArrowLeftIcon } from "lucide-react"
 import { useFeed, useGroup, useSharedPortfolio } from "@/api/sharing-queries"
 import { ApiError, type SharedPortfolio } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { UserAvatar } from "@/components/avatar"
 import { Money, Pct } from "@/components/finance"
@@ -30,7 +31,7 @@ function Member() {
   const member = group.data?.members.find((m) => m.user_id === userId)
   const missing = (shared.error instanceof ApiError && shared.error.status === 404) || (group.error instanceof ApiError && group.error.status === 404)
   return (
-    <div className="mx-auto w-full max-w-[880px] px-5 pt-2 pb-10 md:px-8 lg:pt-6">
+    <PageFrame className="lg:pt-6">
       <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
         <Link
           to="/groups/$groupId"
@@ -57,7 +58,7 @@ function Member() {
       ) : (
         <SharedPortfolioView p={shared.data} groupId={groupId} role={member ? ROLE_LABEL[member.role] : undefined} isMe={member?.is_me ?? false} />
       )}
-    </div>
+    </PageFrame>
   )
 }
 

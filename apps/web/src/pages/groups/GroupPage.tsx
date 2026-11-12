@@ -1,14 +1,16 @@
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeftIcon } from "lucide-react"
-import { lazy, Suspense, useEffect, useRef } from "react"
+import { lazy, Suspense } from "react"
 import { useGroup } from "@/api/sharing-queries"
 import { ApiError, type Group } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
+import { ScrollRow } from "@/components/scroll-row"
+import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { ErrorState } from "@/components/states"
 import { buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { cn } from "@/lib/utils"
 import type { GroupSearch, GroupTab } from "@/router"
 import { ROLE_LABEL } from "./labels"
 import { RankingTab } from "./tabs/RankingTab"
@@ -30,11 +32,15 @@ const TABS: { value: GroupTab; label: string }[] = [
   { value: "channels", label: "頻道" },
 ]
 
-/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・持股・週報・我的分享・成員・頻道） */
+/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・持股・週報・我的分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源） */
 export function GroupPage() {
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="群組" />
-  return <GroupView />
+  return (
+    <SourcesProvider>
+      <GroupView />
+    </SourcesProvider>
+  )
 }
 
 function GroupView() {
@@ -45,7 +51,7 @@ function GroupView() {
   const missing = group.error instanceof ApiError && group.error.status === 404
 
   return (
-    <div className="mx-auto w-full max-w-[1080px] px-5 pt-2 pb-10 md:px-8 lg:pt-6 xl:px-14">
+    <PageFrame className="lg:pt-6">
       <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
         <Link to="/groups" className="-ml-1 inline-flex h-9 items-center gap-1 rounded-sm px-1 text-ink hover:bg-hov pointer-coarse:h-11">
           <ArrowLeftIcon aria-hidden className="size-4" />
@@ -64,7 +70,8 @@ function GroupView() {
       ) : (
         <Loaded group={group.data} tab={tab} member={search.member} />
       )}
-    </div>
+      <SourcesFooter />
+    </PageFrame>
   )
 }
 
@@ -82,16 +89,6 @@ function GroupMissing() {
 
 function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: string }) {
   const navigate = useNavigate()
-  const tablist = useRef<HTMLDivElement>(null)
-  // 手機上分頁列可以橫向捲動：選取中的分頁捲進畫面（例如直接打開「成員」）
-  useEffect(() => {
-    const list = tablist.current
-    const el = list?.querySelector<HTMLElement>('[aria-selected="true"]')
-    if (!list || !el) return
-    if (el.offsetLeft + el.offsetWidth > list.scrollLeft + list.clientWidth || el.offsetLeft < list.scrollLeft) {
-      list.scrollLeft = Math.max(0, el.offsetLeft - 16)
-    }
-  }, [tab])
   const go = (t: GroupTab, focus = false) => {
     void navigate({ to: "/groups/$groupId", params: { groupId: group.id }, search: { tab: t === "ranking" ? undefined : t }, replace: true, resetScroll: false })
     if (focus) requestAnimationFrame(() => document.getElementById(`group-tab-${t}`)?.focus())
@@ -107,7 +104,8 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
       </header>
 
       <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-6 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
-        <div ref={tablist} role="tablist" aria-label="群組內容" className="no-scrollbar flex gap-1 overflow-x-auto">
+        {/* 手機放不下時橫向捲動（ScrollRow）：被遮住的那一邊淡出，選取中的分頁（例如直接打開「成員」）捲進畫面 */}
+        <ScrollRow role="tablist" aria-label="群組內容" className="flex gap-1">
           {TABS.map((t, i) => {
             const active = t.value === tab
             return (
@@ -126,16 +124,13 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
                   go(TABS[(i + d + TABS.length) % TABS.length]!.value, true)
                 }}
                 onClick={() => go(t.value)}
-                className={cn(
-                  "-mb-px flex h-12 shrink-0 items-center border-b-2 px-3 text-base transition-colors",
-                  active ? "border-ink font-bold text-ink" : "border-transparent text-ink-2 hover:text-ink",
-                )}
+                className="sel-tab -mb-px flex h-12 shrink-0 items-center px-3 text-base text-ink-2"
               >
                 {t.label}
               </button>
             )
           })}
-        </div>
+        </ScrollRow>
       </div>
 
       <div id="group-tabpanel" role="tabpanel" aria-labelledby={`group-tab-${tab}`} className="pt-6">

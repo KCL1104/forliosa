@@ -296,7 +296,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
             </label>
             <Input id="group-rename" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-invalid={bad} />
           </div>
-          <Button type="submit" variant="outline" disabled={bad || trimmed === group.name || update.isPending}>
+          <Button type="submit" variant="sign" className="self-start sm:self-auto" disabled={bad || trimmed === group.name || update.isPending}>
             儲存
           </Button>
         </form>

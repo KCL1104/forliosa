@@ -410,7 +410,7 @@ await check("群組：建立群組 → 產生邀請連結（只顯示一次）",
   await page.goto(base + "/groups", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "建立群組" }).first().click()
   await page.getByLabel("群組名稱").fill("冒煙測試群")
-  await page.getByRole("button", { name: "建立", exact: true }).click()
+  await page.getByRole("dialog").getByRole("button", { name: "建立群組" }).click()
   await page.getByRole("heading", { name: "冒煙測試群", exact: true }).waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "產生邀請連結" }).click()
   const url = await page.getByRole("textbox", { name: "邀請連結" }).inputValue()

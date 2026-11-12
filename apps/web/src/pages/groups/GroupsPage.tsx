@@ -7,6 +7,7 @@ import { usePerformance, useSummary } from "@/api/queries"
 import { useCreateGroup, useGroups } from "@/api/sharing-queries"
 import { ApiError, type GroupSummary } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageHeader, Section } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
@@ -28,10 +29,9 @@ function Groups() {
   const groups = useGroups()
   const [creating, setCreating] = useState(false)
   return (
-    <div className="mx-auto w-full max-w-[880px] px-5 pt-2 pb-10 md:px-8 lg:pt-10">
+    <PageFrame>
       <PageHeader
         title="群組"
-        description="和家人朋友比較報酬，每個群組各自決定分享什麼。"
         actions={
           <Button onClick={() => setCreating(true)}>
             <PlusIcon />
@@ -61,7 +61,7 @@ function Groups() {
       )}
       {creating && <CreateGroupDialog onClose={() => setCreating(false)} />}
       <ShareCard />
-    </div>
+    </PageFrame>
   )
 }
 
@@ -138,8 +138,8 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button type="submit" form="create-group" disabled={create.isPending}>
-            {create.isPending ? "建立中…" : "建立"}
+          <Button type="submit" variant="sign" form="create-group" disabled={create.isPending}>
+            {create.isPending ? "建立中…" : "建立群組"}
           </Button>
         </DialogFooter>
       </DialogContent>

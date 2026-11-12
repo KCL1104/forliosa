@@ -1,5 +1,5 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router"
-import { EyeIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PenToolIcon, SearchIcon, UsersIcon } from "lucide-react"
+import { EyeIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PenLineIcon, SearchIcon, UsersIcon } from "lucide-react"
 import { useReadOnly, useViewingAs } from "@/api/view-as"
 import { AiPanel } from "@/ai/AiPanel"
 import { AiScreen } from "@/ai/AiScreen"
@@ -64,10 +64,8 @@ function PrivacyButton({ size = "desktop" }: { size?: "desktop" | "mobile" }) {
       aria-label={privacy ? "隱私模式開啟中：顯示金額" : "隱私模式：遮蔽金額"}
       title={privacy ? "顯示金額" : "遮蔽金額（截圖用）"}
       onClick={toggle}
-      className={cn(
-        "press grid place-items-center text-ink-2 hover:text-ink aria-pressed:text-ink",
-        size === "desktop" ? "size-10 rounded-sm border border-transparent hover:border-rule aria-pressed:border-rule" : "size-11 rounded-full active:bg-hov",
-      )}
+      // 開著＝選取語法 (b)：on-bg 底＋on-fg 字＋內框（淺色是墨色方塊、深色是格線藍底）
+      className={cn("press sel-chip grid place-items-center text-ink-2", size === "desktop" ? "size-10 rounded-sm" : "size-11 rounded-full active:bg-hov")}
     >
       {privacy ? <EyeOffIcon aria-hidden className={size === "desktop" ? "size-[18px]" : "size-[22px]"} /> : <EyeIcon aria-hidden className={size === "desktop" ? "size-[18px]" : "size-[22px]"} />}
     </button>
@@ -91,10 +89,7 @@ function TopBar() {
                 key={n.to}
                 to={n.to}
                 aria-current={active ? "page" : undefined}
-                className={cn(
-                  "-mb-px flex items-center border-b-2 px-3.5 text-base transition-colors",
-                  active ? "border-ink font-bold text-ink" : "border-transparent text-ink-2 hover:text-ink",
-                )}
+                className="sel-tab -mb-px flex items-center px-3.5 text-base text-ink-2"
               >
                 {n.label}
               </Link>
@@ -185,7 +180,8 @@ function Dock() {
             aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : "問 AI"}
             className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-sm font-bold text-ai shadow-lift"
           >
-            <PenToolIcon aria-hidden className="size-[22px]" />
+            {/* 和桌面 AI 面板的「問 AI」同一個圖示（紫色的筆） */}
+            <PenLineIcon aria-hidden className="size-[22px]" />
             問 AI
             {pending > 0 && (
               <span className="num absolute -top-1.5 right-1 grid h-5 min-w-5 place-items-center rounded-full bg-ai px-1 text-xs font-medium text-raised">{pending}</span>

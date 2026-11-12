@@ -254,6 +254,8 @@ const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
   { name: "ledger-draft", path: "/", ready: "text=總資產", action: (page, mobile) => draft(page, mobile) },
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
+  { name: "ledger-dividends", path: "/?view=dividends", ready: "text=已入帳" },
+  { name: "ledger-performance", path: "/?view=performance", ready: "text=比較基準" },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
   { name: "stock-2330-analyst", path: "/stock/2330.TW", ready: "text=參考價", action: analyst },
   { name: "stock-2454-analyst-searching", path: "/stock/2454.TW", ready: "text=參考價", action: analystSearch(/正在找近期媒體報導/) },
@@ -291,6 +293,7 @@ const SHOTS = [
   // 美股：SEC EDGAR 的季報（美元、公司會計年度）與 8-K／10-Q／10-K 申報
   { name: "stock-aapl-financials", path: "/stock/AAPL?tab=financials", ready: "text=FY2026Q4", action: toTabs },
   { name: "stock-aapl-events", path: "/stock/AAPL?tab=events", ready: "text=10-K 年度報告", action: toTabs },
+  { name: "settings", path: "/settings", ready: "text=新增定期定額" },
   { name: "settings-recurring", path: "/settings", ready: "text=新增定期定額", action: recurring },
   { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
   { name: "data-sources-fx", path: "/data-sources", ready: "text=銀行間新臺幣對美元收盤匯率", action: fxSource },

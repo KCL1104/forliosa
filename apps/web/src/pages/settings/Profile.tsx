@@ -45,7 +45,7 @@ function ProfileForm({ name: initial, email, avatar }: { name: string; email: st
             {bad ? "請填 1 到 30 個字。" : `群組裡大家看到的名字。登入帳號：${email}`}
           </p>
         </div>
-        <Button type="submit" variant="outline" disabled={bad || trimmed === initial || update.isPending} className="sm:mb-6">
+        <Button type="submit" variant="sign" disabled={bad || trimmed === initial || update.isPending} className="self-start sm:mb-6 sm:self-auto">
           {update.isPending ? "儲存中…" : "儲存"}
         </Button>
       </form>

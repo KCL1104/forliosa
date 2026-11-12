@@ -7,12 +7,13 @@ import { SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { EMOJI_LABEL } from "./labels"
 
 /**
- * 表情：已經有人按的表情（數字＋自己按過的是墨色框），旁邊一個「加表情」打開六個固定的表情。
+ * 表情：已經有人按的表情（數字；自己按過的用選取語法 (b)），旁邊一個「表情」打開六個固定的表情。
  * 按下立即反映，伺服器回來後以伺服器的計數為準。
  */
 export function Reactions({ groupId, target, reactions, className }: { groupId: string; target: CommentTarget; reactions: Reaction[]; className?: string }) {
@@ -50,10 +51,7 @@ export function Reactions({ groupId, target, reactions, className }: { groupId: 
           aria-pressed={r.mine}
           aria-label={`${EMOJI_LABEL[r.emoji]} ${r.count}${r.mine ? "，你按過" : ""}`}
           onClick={() => press(r.emoji)}
-          className={cn(
-            "press inline-flex h-7 items-center gap-1 rounded-full border px-2 text-sm pointer-coarse:h-9",
-            r.mine ? "border-ink bg-sel text-ink" : "border-rule text-ink-2 hover:border-ctl",
-          )}
+          className="press sel-chip inline-flex h-7 items-center gap-1 rounded-full border border-rule px-2 text-sm text-ink-2 aria-pressed:border-transparent pointer-coarse:h-9"
         >
           <span aria-hidden>{r.emoji}</span>
           <span className="num">{r.count}</span>
@@ -62,14 +60,16 @@ export function Reactions({ groupId, target, reactions, className }: { groupId: 
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           render={
+            // 和「留言」一樣有看得到的字（不是只有圖示）
             <button
               type="button"
               aria-label="加表情"
-              className="press grid size-7 place-items-center rounded-full text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-9"
+              className="press inline-flex h-7 items-center gap-1.5 rounded-sm px-1.5 text-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink pointer-coarse:h-9"
             />
           }
         >
           <SmilePlusIcon aria-hidden className="size-4" />
+          表情
         </PopoverTrigger>
         <PopoverContent className="w-auto flex-row gap-1 p-1.5" side="top" align="start">
           {REACTION_EMOJIS.map((e) => {
@@ -85,7 +85,7 @@ export function Reactions({ groupId, target, reactions, className }: { groupId: 
                   press(e)
                   setOpen(false)
                 }}
-                className={cn("press grid size-9 place-items-center rounded-sm text-lg hover:bg-hov", mine && "bg-sel")}
+                className="press sel-chip grid size-9 place-items-center rounded-sm text-lg"
               >
                 {e}
               </button>
@@ -178,14 +178,21 @@ function DeleteComment({ onConfirm, pending }: { onConfirm: () => void; pending:
     )
   }
   return (
-    <button
-      type="button"
-      aria-label="刪除這則留言"
-      onClick={() => setConfirming(true)}
-      className="grid size-7 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-9"
-    >
-      <Trash2Icon aria-hidden className="size-4" />
-    </button>
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label="刪除這則留言"
+            onClick={() => setConfirming(true)}
+            className="grid size-7 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-9"
+          />
+        }
+      >
+        <Trash2Icon aria-hidden className="size-4" />
+      </TooltipTrigger>
+      <TooltipContent>刪除這則留言</TooltipContent>
+    </Tooltip>
   )
 }
 
