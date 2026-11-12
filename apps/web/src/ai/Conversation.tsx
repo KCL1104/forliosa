@@ -19,8 +19,10 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   const endRef = useRef<HTMLDivElement>(null)
   const count = thread.messages.length
   const last = thread.messages[count - 1]
-  // 串流時跟著新的字往下捲（每多約一行才捲一次）
-  const growth = last?.streaming ? Math.floor((last.text?.length ?? 0) / 40) + (last.tools?.length ?? 0) : 0
+  // 串流時跟著新的字往下捲（每多約一行才捲一次）；草稿卡與來源出現時也捲
+  const growth = last?.streaming
+    ? Math.floor((last.text?.length ?? 0) / 40) + (last.tools?.length ?? 0) * 100 + (last.draftIds?.length ?? 0) * 1000
+    : -((last?.draftIds?.length ?? 0) + (last?.citations?.length ?? 0))
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ block: "end" })
@@ -63,10 +65,9 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   )
 }
 
-/** 串流中：還沒有字時一個安靜的紫點；查資料時一行灰字（只在串流時出現） */
+/** 串流中：一個安靜的紫點；查資料時旁邊一行灰字（回答寫完就消失） */
 function StreamingLine({ message }: { message: Message }) {
   const running = [...(message.tools ?? [])].reverse().find((t) => t.status === "running")
-  if (!running && message.text) return null
   return (
     <p className="mt-2 flex min-h-6 items-center gap-2 text-sm text-ink-2" role="status">
       <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-ai motion-safe:animate-pulse" />

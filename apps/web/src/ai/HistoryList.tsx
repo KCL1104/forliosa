@@ -1,15 +1,18 @@
 import { EllipsisIcon, SquarePenIcon, Trash2Icon } from "lucide-react"
 import { useState } from "react"
+import { toast } from "sonner"
 import { api } from "@/api"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { aiRemote } from "./remote"
+import { useRemoteThreadActions, useRemoteThreads } from "./remote-hooks"
 import { useAi } from "./store"
 import type { Thread } from "./types"
 
 /**
  * 紀錄：發起新對話、過去的對話、AI 任務。
- * M4 之前：對話存在這台瀏覽器；AI 任務是示範資料（排程在 M4 定義端點）。
+ * 連真實後端時對話來自 `/ai/threads`（跨裝置）；mock 模式存在這台瀏覽器。AI 任務是示範資料（排程尚未開放）。
  */
 const SEEDED: Thread[] = [
   { id: "seed_why", title: "為什麼台積電今天漲 4.83%？", updatedAt: "2026-11-12T13:41:00+08:00", messages: [], seeded: true },
@@ -38,10 +41,28 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
   const deleteThread = useAi((s) => s.deleteThread)
   const [hidden, setHidden] = useState<string[]>([])
   const [tasks, setTasks] = useState<Task[]>(api.kind === "mock" ? TASKS : [])
+  const remote = useRemoteThreads()
+  const remoteActions = useRemoteThreadActions()
   const seeded = api.kind === "mock" ? SEEDED.filter((t) => !hidden.includes(t.id) && !threads.some((x) => x.title === t.title)) : []
-  const all = [...threads.filter((t) => t.messages.length > 0), ...seeded].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+  const all = aiRemote
+    ? (remote.data?.items ?? []).map((t): Thread => ({ id: t.id, remoteId: t.id, title: t.title, updatedAt: t.updated_at, messages: [] }))
+    : [...threads.filter((t) => t.messages.length > 0), ...seeded].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+
+  const remove = (t: Thread) => {
+    if (t.seeded) return setHidden((h) => [...h, t.id])
+    if (t.remoteId) {
+      remoteActions.remove(t.remoteId).catch((err: unknown) => toast.error("沒有刪除", { description: err instanceof Error ? err.message : "請再試一次" }))
+      return
+    }
+    deleteThread(t.id)
+  }
 
   const open = (t: Thread) => {
+    if (t.remoteId) {
+      onOpen?.()
+      remoteActions.open(t.remoteId).catch((err: unknown) => toast.error("對話打不開", { description: err instanceof Error ? err.message : "請再試一次" }))
+      return
+    }
     if (t.seeded) {
       // 示範紀錄：用目前的資料重新問一次
       newThread()
@@ -71,7 +92,16 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
       </button>
 
       <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-6 text-sm" : "mt-9 text-base")}>對話</H>
-      {all.length === 0 ? (
+      {aiRemote && remote.isPending ? (
+        <p className="py-4 text-md text-ink-2" role="status">正在載入對話…</p>
+      ) : aiRemote && remote.isError ? (
+        <p className="py-4 text-md text-ink-2">
+          對話紀錄暫時載入不了。
+          <button type="button" onClick={() => void remote.refetch()} className="press ml-1 text-ink underline underline-offset-4">
+            再試一次
+          </button>
+        </p>
+      ) : all.length === 0 ? (
         <p className="py-4 text-md text-ink-2">還沒有對話。問過的問題和 AI 寫的草稿會留在這裡。</p>
       ) : (
         <ul>
@@ -84,7 +114,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
               <button
                 type="button"
                 aria-label={`刪除對話「${t.title}」`}
-                onClick={() => (t.seeded ? setHidden((h) => [...h, t.id]) : deleteThread(t.id))}
+                onClick={() => remove(t)}
                 className="press grid size-11 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink"
               >
                 <Trash2Icon aria-hidden className="size-5" />
@@ -96,7 +126,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
 
       <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-base")}>AI 任務</H>
       {tasks.length === 0 ? (
-        <p className="py-4 text-md text-ink-2">排定的健檢、提醒與報告會出現在這裡（M4 開放）。</p>
+        <p className="py-4 text-md text-ink-2">排定的健檢、提醒與報告會出現在這裡（之後開放）。</p>
       ) : (
         <ul>
           {tasks.map((t) => (

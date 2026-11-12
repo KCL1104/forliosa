@@ -163,7 +163,10 @@ export const aiApi = {
 export function createSseParser(onEvent: (e: ChatEvent) => void): (chunk: string) => void {
   let buffer = ""
   return (chunk: string) => {
-    buffer += chunk.replace(/\r\n?/g, "\n")
+    buffer += chunk
+    // CRLF / CR → LF; a trailing \r may be the first half of a \r\n split across chunks
+    const tail = buffer.endsWith("\r") ? "\r" : ""
+    buffer = (tail ? buffer.slice(0, -1) : buffer).replace(/\r\n?/g, "\n")
     let cut = buffer.indexOf("\n\n")
     while (cut !== -1) {
       const block = buffer.slice(0, cut)
@@ -183,6 +186,7 @@ export function createSseParser(onEvent: (e: ChatEvent) => void): (chunk: string
       }
       cut = buffer.indexOf("\n\n")
     }
+    buffer += tail
   }
 }
 

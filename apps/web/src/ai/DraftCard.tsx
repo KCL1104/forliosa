@@ -8,6 +8,19 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import type { Draft } from "./types"
 
+const VERBS: Record<string, string> = {
+  buy: "買進",
+  sell: "賣出",
+  cash_dividend: "股利入帳",
+  stock_dividend: "配股入帳",
+  deposit: "存入現金",
+  withdrawal: "提出現金",
+  fee: "費用",
+  tax: "稅",
+  interest: "利息入帳",
+}
+const CASH_TYPES = new Set(["deposit", "withdrawal", "fee", "tax", "interest"])
+
 interface Props {
   draft: Draft
   onSign: () => void
@@ -31,7 +44,9 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   const titleId = useId()
   const { input, instrument, preview, status } = draft
   const isDividend = input.type === "cash_dividend"
-  const verb = isDividend ? "股利入帳" : input.type === "sell" ? "賣出" : "買進"
+  // 後端 AI 也會起草配股與現金類交易（存入、提出、費用、稅、利息）
+  const isCash = CASH_TYPES.has(input.type)
+  const verb = VERBS[input.type] ?? "交易"
   const currency = instrument.currency
   const signed = status === "signed"
   const discarded = status === "discarded"
@@ -47,7 +62,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   const money = (n: number) => (privacy ? <Masked /> : formatMoney(n, { currency, bare: true }))
 
   if (discarded) {
-    return <p className="mt-3 text-sm text-ink-2">已捨棄這份草稿（{verb} {instrument.name}）。</p>
+    return <p className="mt-3 text-sm text-ink-2">已捨棄這份草稿（{verb}{isCash ? "" : ` ${instrument.name}`}）。</p>
   }
 
   return (
@@ -62,12 +77,13 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
     >
       <header className="border-b border-rule px-4 pt-3.5 pb-3">
         <h3 id={titleId} className="flex items-baseline gap-2 text-lg font-bold text-ai">
-          {verb} {instrument.name}
-          <span className="num text-sm font-normal">{instrument.code}</span>
+          {verb}
+          {!isCash && ` ${instrument.name}`}
+          {!isCash && <span className="num text-sm font-normal">{instrument.code}</span>}
           <span className="sr-only">{signed ? "，已入帳" : "，草稿，尚未入帳"}</span>
         </h3>
         <p className="mt-0.5 text-sm text-ink-2">
-          {isDividend ? "入帳日" : "成交日"} {formatDateShort(input.trade_date)}
+          {isDividend ? "入帳日" : isCash ? "日期" : "成交日"} {formatDateShort(input.trade_date)}
           {account && <span>・{account.name}</span>}
         </p>
       </header>
@@ -76,7 +92,12 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
         <EditFields draft={draft} accounts={sameCurrency} onRevise={onRevise} />
       ) : (
         <dl className="grid grid-cols-2">
-          {isDividend ? (
+          {isCash ? (
+            <>
+              <Cell label="金額" value={preview ? money(preview.gross) : "…"} />
+              <Cell label="稅與費用" value={preview ? money(preview.tax + preview.fee) : "…"} right />
+            </>
+          ) : isDividend ? (
             <>
               <Cell label="股利總額" value={input.amount != null ? money(input.amount) : "—"} />
               <Cell label="二代健保" value={preview ? money(preview.health_insurance) : "…"} right />
@@ -86,13 +107,17 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
           ) : (
             <>
               <Cell label="股數" value={privacy ? <Masked /> : input.quantity !== null ? `${formatNumber(input.quantity, 0)} 股` : "—"} />
-              <Cell label="成交價" value={input.price !== null ? `@${formatPrice(input.price, instrument.market)}` : "—"} right />
+              <Cell
+                label={input.type === "stock_dividend" ? "每股配股（元）" : "成交價"}
+                value={input.price != null ? `${input.type === "stock_dividend" ? "" : "@"}${formatPrice(input.price, instrument.market)}` : "—"}
+                right
+              />
               <Cell label="手續費" value={preview ? money(preview.fee) : "…"} />
               <Cell label={currency === "USD" ? "稅" : "證交稅"} value={preview ? money(preview.tax) : "…"} right />
             </>
           )}
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-4 py-3">
-            <dt className="font-bold text-ink">{isDividend ? "實拿" : input.type === "sell" ? "實收" : "合計"}</dt>
+            <dt className="font-bold text-ink">{isDividend ? "實拿" : input.type === "sell" ? "實收" : isCash ? "金額" : "合計"}</dt>
             <dd className="num text-xl font-bold text-ai" aria-live="polite">
               {status === "loading" || total === null ? (
                 <span className="text-base font-normal text-ink-2">計算中…</span>
