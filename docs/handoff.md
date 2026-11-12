@@ -44,6 +44,23 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 
 ## 3. 接下來要做（依序）
 
+### 3.0 股利自動入帳（產品負責人 2026-11-12 選定，先做這個）
+
+**背景**：產品負責人原本以為股利已反映在股價上、不必記。討論後的結論是：除息時股價下跌、現金進銀行；Forliosa 看不到銀行，不記股利就會把股利當成虧損（例：0056 十張、每股配 2 元 → 帳上少 2 萬、−5%），報酬也和含息基準不公平。但**使用者不應該需要手動記**，所以改成系統依規則自動入帳（不是 AI、不需要確認）。
+
+**規則**
+- 對象：台股上市、上櫃的現金股利與配股（除息／除權預告 `TWT48U_ALL`、`tpex_exright_prepost`，金額為 0 或未公告的不記）。美股目前沒有可商用的股利資料，仍需手動。
+- 股數：除息（權）日前一天收盤時，該帳戶的持股（`services/ledger_io.shares_held(before=ex_date)`）；只記帳戶模式的帳戶，在快照日之後的除息日。
+- 日期：記在**除息（權）日**，讓股價下跌和股利同一天抵銷（績效不會在除息到發放之間出現假跌）；發放日若已公告寫在備註。
+- 金額：走現有 `services/transactions.compute()`，所以現金股利 = 股數 × 每股（元以下捨去），二代健保自動估算（含資本公積排除，見 §5）；配股用 `stock_dividend_shares`（不足一股折現金）。
+- `Transaction.source = "auto"`；畫面標「自動」。
+- **使用者自己記的優先**：同帳戶同商品在除息日起 120 天內已有手動（或 AI 草稿簽名）的同類股利交易，就不產生／移除自動那筆。
+- 使用者**修改**自動那筆：保留並改成 `source = "auto_edited"`，之後同步不再覆蓋。使用者**刪除**：記一筆「略過」（新表，例如 `auto_dividend_skips(account_id, symbol, ex_date, kind)`），之後不再產生。
+- **同步**：`sync_auto_dividends(db, user, md)` 計算應有的自動股利，跟現有 `source="auto"` 的列比對後新增／更新金額／刪除（例如使用者回頭補了一筆除息前的買進、或刪掉賣出）。觸發時機：交易新增／修改／刪除之後、快照更新之後、worker 每天存檔後（除息預告每天更新）。
+- 帳本、績效、已出清回合、股利頁、「接下來 7 天」都直接吃這些交易，不需要另外改計算。
+
+**要更新**：Alembic 新遷移（略過表）、`docs/api-contract.md`（`source` 多了 `auto`、`auto_edited`；刪除自動股利的行為）、`apps/api/CONTRACT_NOTES.md`、`docs/product-spec.md`、前端交易列表與股利頁的「自動」標記與說明（編輯會變成手動版本、刪除後不會再自動產生）。示範帳號原本手動記的股利維持手動（手動優先）。測試要涵蓋：除息前一天才買／當天賣、零股、帳戶模式快照、手動優先、編輯、刪除後不再產生、回補交易後重算、上櫃、未公告金額。
+
 ### 3.1 SEC EDGAR 美股基本面與申報
 
 - User-Agent：`Forliosa/1.0 <SEC_CONTACT_EMAIL>`，**email 只從環境變數讀，不寫進程式碼、測試或文件**。請求 ≤ 10 次／秒。
@@ -102,7 +119,7 @@ cd apps/web && pnpm typecheck && pnpm lint && pnpm test && pnpm build
 - **報酬指數**：`^TAIEXTR`（MI_INDEX／MFI94U）、新增 `^TPEXTR`。`MFI94U` 曾回 307，已和 MI_INDEX 拆成獨立工作。
 - **股利決議**（t187ap45_L）：`/dividends` 與事件類型 `dividend_resolution`，現金依盈餘／法定公積／資本公積分列（`cash_sources`）。上櫃沒有決議資料（`mopsfin_t187ap39_O` 停在 2021-08）。
 - **公司基本資料**：已發行股數、市值、上市日用官方資料；不存個人姓名電話。
-- **二代健保**：記現金股利且沒手動填二代健保時，依官方決議排除資本公積部分（`services/transactions.py` 的 `capital_surplus_part`）。**產品負責人之後質疑是否需要這麼細**，見 §7 第一項。
+- **二代健保**：記現金股利且沒手動填二代健保時，依官方決議排除資本公積部分（`services/transactions.py` 的 `capital_surplus_part`）。股利自動入帳（§3.0）也走這條路，所以保留。
 - **前端**：法人觀點卡片（mock：`src/api/mock/analyst.ts`；邏輯 `src/lib/analyst-views.ts`；UI `src/pages/stock/AnalystViews.tsx`；只對股票顯示、不對 ETF）、定期定額標記、7 天內漏扣款的補記草稿、已出清依年份分組。
 - **`smoke --keys`**：見 §1。
 
@@ -123,7 +140,7 @@ cd apps/web && pnpm typecheck && pnpm lint && pnpm test && pnpm build
 
 ## 7. 等產品負責人的事
 
-- **現金股利要算多細（2026-11-12 討論中）**：產品負責人覺得「應該不用特別計算現金股利」。選項：A（建議）以實收金額為準，系統只預填「持股 × 每股股利」減一般 2.11% 估計，資本公積特例撤掉；B 完全不試算，只問實收金額；C 維持現在（含資本公積排除）。決定後照做；選 A 或 B 時撤掉 `capital_surplus_part` 與相關測試，並更新 `CONTRACT_NOTES.md` 待確認 21 與 `docs/product-spec.md`。
+- ~~現金股利要算多細~~ **已決定：自動入帳（見 §3.0）**，資本公積排除保留。
 - 部署：網域、Cloudflare、Railway、Google OAuth、Telegram bot（見 `docs/questions-for-morning.md` A3、E1、E2）。
 - M3 對帳單匯入：需要各券商對帳單樣本（遮蔽個資）。
 - 美股報價來源（見 3.5）。
