@@ -94,6 +94,28 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(h.notes?.[0]).toMatch(/^資料累積中：自 \d{4}-\d{2}-\d{2} 起存檔$/)
     expect((await api.getHistory("2330.TW", "1M")).notes).toEqual([])
   })
+  it("美股：SEC EDGAR 的財報（美元、公司會計年度）與 8-K／10-Q／10-K 申報", async () => {
+    const f = await api.getFinancials("AAPL", "quarterly")
+    expect(f).toMatchObject({ currency: "USD", amount_unit: 1, is_demo: false })
+    expect(f.periods.at(-1)).toBe("FY2026Q4")
+    expect(f.period_ends?.at(-1)).toBe("2026-09-26")
+    expect(f.sources[0]).toMatch(/^美國證券交易委員會（SEC）〈EDGAR XBRL 財報數據/)
+    expect((await api.getFinancials("AAPL", "annual")).periods.at(-1)).toBe("FY2026")
+    const filings = (await api.getEvents("AAPL")).filter((e) => e.type === "sec_filing")
+    expect(filings.map((e) => e.form)).toEqual(expect.arrayContaining(["10-K", "10-Q", "8-K"]))
+    expect(filings.every((e) => e.url?.startsWith("https://www.sec.gov/Archives/edgar/data/320193/"))).toBe(true)
+    expect((await api.getOverview("AAPL")).eps_ttm).toBe(8.98)
+    expect((await api.getFinancials("VOO")).notes).toEqual(["ETF 沒有財務報表資料"])
+    // 股票分割：沒被重編的舊年度已換算成目前的股數（NVIDIA 2021 年 1 拆 4、2024 年 1 拆 10），不會出現 3.85 → 0.17
+    const nvda = await api.getFinancials("NVDA", "annual")
+    const shares = (nvda.shares?.diluted_average ?? []).filter((v): v is number => v !== null)
+    expect(shares.length).toBe(nvda.periods.length)
+    expect(Math.max(...shares) / Math.min(...shares)).toBeLessThan(1.1)
+    expect(nvda.income.eps[nvda.periods.indexOf("FY2022")]).toBe(0.385)
+    expect(nvda.notes?.some((n) => n.includes("2024-08-28 起申報的財報反映 1 股拆成 10 股"))).toBe(true)
+    // 美股沒有可商用的配息來源：股利是空的（畫面要說「沒有來源」，不是「沒有配過息」）
+    expect(await api.getDividends("VOO")).toEqual([])
+  })
   it("盤中走勢一律沒有點，notes 說明沒有授權來源", async () => {
     const i = await api.getIntraday("2330.TW")
     expect(i.points).toEqual([])
@@ -198,7 +220,12 @@ describe("資料來源與授權", () => {
     const a = await createMockAdapter({ latency: [0, 0] }).getAttributions()
     expect(a.policy).toBe("commercial")
     expect(a.datasets.length).toBeGreaterThan(20)
-    for (const d of a.datasets) expect(d.attribution).toBe(`${d.agency}〈${d.dataset}〉（${d.year}），依${d.license}`)
+    for (const d of a.datasets) {
+      // 政府資料開放授權條款：「依…第 1 版」；SEC EDGAR 是美國政府公開資料（授權連結另列）
+      const tail = d.key.startsWith("sec-edgar/") ? "美國政府公開資料" : `依${d.license}`
+      expect(d.attribution).toBe(`${d.agency}〈${d.dataset}〉（${d.year}），${tail}`)
+    }
+    expect(a.datasets.filter((d) => d.key.startsWith("sec-edgar/")).map((d) => d.license_url)).toEqual(Array(3).fill("https://www.sec.gov/about/webmaster-frequently-asked-questions"))
     expect(a.datasets.every((d) => d.commercial)).toBe(true)
     const p = await createMockAdapter({ latency: [0, 0], policy: "personal" }).getAttributions()
     expect(p.datasets.some((d) => !d.commercial)).toBe(true)

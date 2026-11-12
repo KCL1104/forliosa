@@ -22,7 +22,11 @@ USER_AGENT = "forliosa/0.1 (portfolio tracker; Forliosa data archiver)"
 
 
 class RateLimiter:
-    """Minimum interval between requests to the same host (thread-safe)."""
+    """Minimum interval between requests to the same host (thread-safe).
+
+    Hosts that match a ``per_host`` suffix share one budget: ``data.sec.gov`` and ``www.sec.gov`` both count
+    against ``sec.gov`` (SEC's fair-access limit is per requester, not per host name).
+    """
 
     def __init__(self, default_interval: float = 0.0, per_host: dict[str, float] | None = None):
         self.default_interval = default_interval
@@ -38,28 +42,38 @@ class RateLimiter:
                 return interval
         return self.default_interval
 
+    def bucket(self, host: str) -> str:
+        """The key a host's requests are counted under: its ``per_host`` suffix, else the host itself."""
+        for suffix in self.per_host:
+            if host == suffix or host.endswith("." + suffix):
+                return suffix
+        return host
+
     def wait(self, host: str) -> float:
         """Block until the host's interval has passed; returns seconds slept."""
         interval = self.interval_for(host)
+        key = self.bucket(host)
         with self._lock:
             now = self._clock()
-            last = self._last.get(host)
+            last = self._last.get(key)
             slept = 0.0
             if last is not None and interval > 0:
                 remaining = interval - (now - last)
                 if remaining > 0:
                     self._sleep(remaining)
                     slept = remaining
-            self._last[host] = self._clock()
+            self._last[key] = self._clock()
             return slept
 
 
 # Polite intervals per host (docs/research/data-sources-licensing.md §4.4, open-data-inventory.md §12.2):
-# TWSE ≥ 3 s, TPEx, TDCC and TAIFEX ≥ 2 s.
+# TWSE ≥ 3 s, TPEx, TDCC and TAIFEX ≥ 2 s. SEC EDGAR allows 10 requests / s per requester across all of
+# sec.gov; one process stays at ≤ 4 / s (0.25 s), so the API server and the worker together stay under 10 / s.
+SEC_INTERVAL_SECONDS = 0.25
 DEFAULT_LIMITER = RateLimiter(
     default_interval=0.0,
     per_host={"twse.com.tw": 3.0, "tpex.org.tw": 2.0, "tdcc.com.tw": 2.0, "taifex.com.tw": 2.0,
-              "finmindtrade.com": 0.25},
+              "finmindtrade.com": 0.25, "sec.gov": SEC_INTERVAL_SECONDS},
 )
 
 # Source allowlist: the only URLs the server may fetch. Official open data published under the Open
@@ -67,6 +81,9 @@ DEFAULT_LIMITER = RateLimiter(
 # FinMind (only constructed under an explicit DATA_POLICY=personal opt-in). Website pages of TWSE / TPEx /
 # TAIFEX / MIS / MOPS are deliberately absent: their terms forbid automated downloads without written consent.
 # TAIFEX: only the /v1/ data endpoints (they answer 200 directly; /v1/swagger.json is a 302 and never needed).
+# SEC EDGAR (US government public data; "free to access and reuse"): only the three JSON datasets Forliosa uses —
+# the ticker -> CIK map, XBRL company facts and the submissions (filing list). Filing documents themselves are
+# linked, never downloaded.
 ALLOWED_URL_PREFIXES = (
     "https://openapi.twse.com.tw/v1/",
     "https://www.tpex.org.tw/openapi/",
@@ -74,11 +91,22 @@ ALLOWED_URL_PREFIXES = (
     "https://openapi.taifex.com.tw/v1/",
     "https://raw.githubusercontent.com/Sinotrade/shioaji-data/",
     "https://api.finmindtrade.com/",
+    "https://www.sec.gov/files/company_tickers.json",
+    "https://data.sec.gov/api/xbrl/companyfacts/",
+    "https://data.sec.gov/submissions/",
 )
 
 
 def url_allowed(url: str) -> bool:
     return url.startswith(ALLOWED_URL_PREFIXES)
+
+
+class HttpStatusError(ProviderUnavailable):
+    """The upstream answered with a refusal status (403, 404, 429, a redirect …); ``status`` is the HTTP code."""
+
+    def __init__(self, message: str, status: int):
+        super().__init__(message)
+        self.status = status
 
 
 class HttpFetcher:
@@ -109,7 +137,7 @@ class HttpFetcher:
                 if resp.status_code == 200:
                     return resp.content
                 if resp.status_code in (402, 403, 404, 405, 407, 429, 451) or 300 <= resp.status_code < 400:
-                    raise ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
+                    raise HttpStatusError(f"{host} 回應 HTTP {resp.status_code}", resp.status_code)
                 last_exc = ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
             if attempt < self.retries:
                 time.sleep(delay)

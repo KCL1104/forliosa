@@ -34,7 +34,12 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
   const lot = us ? 1 : 1000
 
   if (rows.length === 0) {
-    return <p className="border-y border-rule py-6 text-md text-ink-2">{inst.name}過去沒有配息紀錄。</p>
+    // 美股沒有可商用的配息來源（後端與商用 mock 都回空陣列）：不能說成「沒有配過息」
+    return (
+      <p className="border-y border-rule py-6 text-md text-ink-2">
+        {us ? `美股目前沒有可商用的配息資料來源，這裡還不能顯示${inst.name}的配息。` : `${inst.name}過去沒有配息紀錄。`}
+      </p>
+    )
   }
   return (
     <div className="flex flex-col gap-12">

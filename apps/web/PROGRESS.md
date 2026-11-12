@@ -51,6 +51,15 @@
 | AI | ✅ 「股利入帳」的提問說明台股會自動入帳、範例改成美股（從台股個股頁進來時說可以更正金額）；後續建議只提美股入帳；台股現金股利草稿在 120 天內已有自動入帳時加一行「9/16 除息的股利已經自動入帳；簽名後改以這筆為準，不會重複計算」 | `src/ai/runner.ts` |
 | mock | ✅ 與後端相同的同步（`syncAutoDividends`）：除息預告＝存檔起點後的台股紀錄；股數＝除息日前一天收盤的持股；自己記的（manual／import／ai_draft，除息日起 120 天內）優先；改了 → `auto_edited`＋略過；刪了 → 略過；交易新增／修改／刪除、持股快照、追蹤模式變更後重算。示範資料：8 月以前自己記的股利維持手動，之後的 2330（9/16）、6488（9/22，上櫃）、2454（10/8，零股）是自動入帳；美股照舊手動。另修正 mock 修改交易原地改物件（列表不會更新）、改股數時金額不重算的問題 | `src/api/mock/auto-dividends.ts`、`ledger.ts`、`adapter.ts` |
 
+## 第五批（2026-11-12）：美股財報與申報（SEC EDGAR）
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ `Financials` 多 `currency`、`amount_unit`（台股 1000、美股 1）、`period_ends`、`shares`、`as_of`；事件類型多 `sec_filing`＋`form`。mock 的 AAPL、NVDA 用後端對 SEC 真實資料（2026-11-12）的輸出（`sec-data.ts`，不是模擬數字），兩種政策都一樣；總覽的近四季 EPS 也來自它；資料來源頁多三個 SEC 資料集（授權連結是 SEC 的網站政策） | `src/api/types.ts`、`mock/sec-data.ts`、`mock/research.ts`、`mock/attributions.ts` |
+| 財務分頁 | ✅ 美股個股不再是空狀態：季／年財報表格（美元、公司會計年度 `FY2026Q4`，表頭第二行「至 2026/09/26」），單位說明「美元；EPS 為稀釋每股盈餘」，首句「FY2026Q4 EPS 2.10 美元，比去年同季成長 14%」；說明（會計年度、單季推算方式、股票分割換算）逐行列出、和資料來源分開；沒有月營收。美股 ETF：「ETF 沒有自己的財報」＋「美股目前也沒有可商用的配息資料來源」（不再叫人去看股利分頁）；美股的股利分頁沒有資料時寫「美股目前沒有可商用的配息資料來源」，不說成「過去沒有配息紀錄」。SEC 未啟用或找不到公司：「目前沒有這家公司的 SEC 財報」＋後端 notes | `src/pages/stock/tabs/FinancialsTab.tsx` |
+| 事件分頁 | ✅ SEC 申報依表單標類型：10-K「年報」、10-Q「季報」、8-K「重大事件」（修正加「修正」），標題如「8-K 營運結果與財務狀況」，連到 sec.gov 原文（「在 SEC EDGAR 查看」）；持有時年報、季報算「我的」；美股的頁尾說明改成 SEC 版本 | `src/pages/stock/tabs/EventsTab.tsx`、`src/lib/events.ts`（`eventLabel`） |
+| 截圖 | ✅ `stock-aapl-financials-*`、`stock-aapl-events-*`（桌面／iPhone、淺／深） | `scripts/screenshots.mjs` |
+
 ## 驗證
 
 - `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（13 檔 166 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記；第四批新增：來源標示、編輯說明與「沒改不送出」、AI 會取代的自動入帳、mock 股利自動入帳的同步規則）、`pnpm build` 全部通過。
@@ -91,7 +100,7 @@ Emil Kowalski skills：`mobile-native`（theme-color 改成紙色、hover 一律
 
 1. AI 任務、對話紀錄目前存在這台瀏覽器（示範的任務是 mock）；M4 定義端點後改由後端同步。
 2. ~~「本週 N 件事」的定期定額~~：後端已有 `/recurring`，本週事項列出每一次扣款。
-3. ETF 折溢價、成分股，美股財報與籌碼：設計過的空狀態，等資料來源（研究稿 Q10、Q11）。
+3. ETF 折溢價、成分股，美股籌碼：設計過的空狀態，等資料來源（研究稿 Q10、Q11）。美股財報已接 SEC EDGAR（第四批）。
 4. 比較線「加權報酬指數」需要後端的 `/instruments/^TAIEXTR/history`；mock 以 0050 代替。真實後端沒有時圖會停留在不比較。
 5. 漲跌停與參考價以後端為準；前端只在報價沒有帶時才自行計算（`lib/tick.ts`）。
 6. 產品負責人決定預設 `DATA_POLICY=commercial`：盤中走勢、媒體新聞、上市股票的法人、美股報價是空的並帶 `notes`；前端照實顯示。mock 預設也模擬商用模式（`?policy=personal` 看舊的示範資料）。

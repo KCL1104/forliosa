@@ -51,7 +51,15 @@ def test_upsert_closes_stores_only_real_prices(engine):
 
 def test_evening_and_weekly_runs_include_the_new_groups():
     from forliosa.archive import JOB_GROUPS
-    from forliosa.worker import EVENING_GROUPS, WEEKLY_GROUPS
+    from forliosa.worker import EVENING_GROUPS, SEC_GROUPS, WEEKLY_GROUPS, Worker
 
     assert {"taifex", "companies", "financials"} <= set(EVENING_GROUPS) and set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
-    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) == set(JOB_GROUPS)
+    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) == set(JOB_GROUPS)
+    # SEC EDGAR runs every day (US filings do not follow the Taiwan trading calendar), after the US close
+    job = next(j for j in Worker(md=object()).jobs if j.name == "sec_archive")  # type: ignore[arg-type]
+    from datetime import datetime
+
+    from forliosa.timeutil import TAIPEI
+
+    saturday = datetime(2026, 11, 14, 7, 55, tzinfo=TAIPEI)
+    assert job.due(saturday, None) and not job.due(saturday.replace(hour=7, minute=40), None)

@@ -12,6 +12,9 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   run covers it (no early-morning job).
 * ``weekly_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable), TAIFEX final
   settlement prices and SSF / SSO lists, and the stale-endpoint check (twtazu_od, t187ap09_L).
+* ``sec_archive`` — every day 07:50 Taipei (after the US close, when the day's 8-Ks and 10-Qs are in): SEC EDGAR
+  company facts and filings of every tracked US stock (``forliosa.archive`` group ``sec``; skipped without
+  SEC_CONTACT_EMAIL). Requests also refresh a stale company on demand.
 * ``auto_dividends`` — after each archive run with the ``twse`` / ``tpex`` groups (08:10 covers today's ex-dates):
   ``forliosa.services.auto_dividends.sync_all_users`` books, corrects or removes automatic dividends.
 * ``ai_retention`` — every day 04:20: deletes AI threads, messages and drafts whose last activity is older than
@@ -52,6 +55,7 @@ log = logging.getLogger("forliosa.worker")
 # Archive groups per run (forliosa.archive.JOB_GROUPS).
 EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex"]
 WEEKLY_GROUPS = ["tdcc", "weekly"]
+SEC_GROUPS = ["sec"]
 
 
 @dataclass
@@ -144,6 +148,7 @@ class Worker:
             Job("daily_archive_evening", daily_at(time(21, 40), only_if=lambda n: is_tw_trading_day(n.date())),
                 lambda: self.archive(EVENING_GROUPS)),
             Job("weekly_archive", weekly_at(5, time(10, 0)), self.weekly_archive),
+            Job("sec_archive", daily_at(time(7, 50)), lambda: self.archive(SEC_GROUPS)),
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
         ]
 

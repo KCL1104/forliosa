@@ -6,7 +6,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, field_validator
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 API_ROOT = Path(__file__).resolve().parents[2]  # apps/api
@@ -46,6 +46,14 @@ class Settings(BaseSettings):
     # this to true (see docs/outreach/taifex-licence-inquiry.md and datapolicy.dataset_served).
     taifex_conditional_confirmed: bool = False
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
+    # SEC EDGAR (US fundamentals and filings). SEC requires a declared User-Agent with a contact e-mail:
+    # "Forliosa/1.0 <SEC_CONTACT_EMAIL>". The address is read from the environment only (SecretStr: never shown
+    # in reprs or settings dumps, never logged); without it SEC is disabled and US financials / filings return an
+    # empty state with a note. Cached rows older than SEC_STALE_HOURS are refreshed on demand (short timeout).
+    sec_contact_email: SecretStr | None = None
+    sec_enabled: bool = True
+    sec_stale_hours: float = 24.0
+    sec_on_demand_timeout_seconds: float = 6.0
     cache_dir: Path = Path("var/cache")
     http_timeout_seconds: float = 20.0
     finmind_token: str | None = None

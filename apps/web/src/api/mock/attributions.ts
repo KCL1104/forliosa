@@ -52,8 +52,24 @@ export function attributionOf(agency: string, dataset: string, year = YEAR): str
 
 /** 依資料集 key（例如 `twse-openapi/price`）取得顯名聲明，給各端點的 `sources` 用 */
 export function sourceOf(key: string): string {
+  if (key.startsWith("sec-edgar/")) return secSourceOf(key)
   const row = ROWS.find((r) => r[0] === key)
   return row ? attributionOf(row[1], row[2]) : key
+}
+
+/** SEC EDGAR：美國政府公開資料（「sec.gov 的政府內容與 EDGAR 公開申報可自由存取與再利用」），顯名結尾不同 */
+const SEC = "美國證券交易委員會（SEC）"
+const SEC_LICENSE = "SEC 網站政策：sec.gov 的政府內容與 EDGAR 公開申報可自由存取與再利用"
+const SEC_LICENSE_URL = "https://www.sec.gov/about/webmaster-frequently-asked-questions"
+const SEC_ROWS: Row[] = [
+  ["sec-edgar/companyfacts", SEC, "EDGAR XBRL 財報數據（companyfacts）", "https://data.sec.gov/api/xbrl/companyfacts/", "美股季報、年報：營收、淨利、稀釋 EPS、資產負債、現金流量"],
+  ["sec-edgar/submissions", SEC, "EDGAR 公司申報清單（submissions）", "https://data.sec.gov/submissions/", "美股事件：8-K、10-Q、10-K 申報（附 sec.gov 原文連結）"],
+  ["sec-edgar/tickers", SEC, "公司代號與 CIK 對照表（company_tickers.json）", "https://www.sec.gov/files/company_tickers.json", "美股代號對應 SEC 公司編號（CIK）"],
+]
+
+export function secSourceOf(key: string, year = YEAR): string {
+  const row = SEC_ROWS.find((r) => r[0] === key)
+  return row ? `${row[1]}〈${row[2]}〉（${year}），美國政府公開資料` : key
 }
 
 export function buildAttributions(policy: "commercial" | "personal"): Attributions {
@@ -61,6 +77,9 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
     key, agency, dataset, url, used_for, year: YEAR, license: OGDL, license_url: OGDL_URL, commercial: true,
     attribution: attributionOf(agency, dataset),
   }))
+  for (const [key, agency, dataset, url, used_for] of SEC_ROWS) {
+    datasets.push({ key, agency, dataset, url, used_for, year: YEAR, license: SEC_LICENSE, license_url: SEC_LICENSE_URL, commercial: true, attribution: secSourceOf(key) })
+  }
   if (policy === "personal") {
     datasets.push({
       key: "finmind", agency: "FinMind", dataset: "FinMind 開放 API（台股資料）", url: "https://finmind.github.io/",
@@ -70,7 +89,11 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
   }
   return {
     policy,
-    notice: ["此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。", `政府資料開放授權條款：${OGDL_URL}`],
+    notice: [
+      "此開放資料依政府資料開放授權條款 (Open Government Data License) 進行公眾釋出，使用者於遵守本條款各項規定之前提下，得利用之。",
+      `政府資料開放授權條款：${OGDL_URL}`,
+      `${SEC}：sec.gov 上的政府內容與 EDGAR 公開申報可自由存取與再利用（${SEC_LICENSE_URL}）`,
+    ],
     datasets,
     not_used: [
       "臺灣證券交易所網站（T86 三大法人、MI_QFIIS 外資持股等）與基本市況報導 MIS：網站條款禁止未經同意以程式下載",

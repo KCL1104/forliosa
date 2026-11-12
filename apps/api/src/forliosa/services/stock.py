@@ -121,6 +121,14 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
             sources += tagged(rsrc, "valuation")
 
     eps_ttm = None
+    shares_outstanding = prof.shares_outstanding
+    if info.market == "US" and info.type == "stock":  # SEC EDGAR cache (diluted EPS, cover-page shares)
+        from forliosa.services import sec as sec_svc
+
+        key = sec_svc.cached_key_data(db, sym)
+        eps_ttm = key["eps_ttm"]
+        shares_outstanding = shares_outstanding or key["shares_outstanding"]
+        sources += key["sources"]
     if _is_tw_stock(info):
         st = md.statements(sym)
         quarters = _quarterly_table(st.value) if st else {}
@@ -177,7 +185,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
         "eps_ttm": ser.price(eps_ttm),
         "high_52w": ser.price(max(c.h for c in year)) if year else None,
         "low_52w": ser.price(min(c.l for c in year)) if year else None,
-        "shares_outstanding": prof.shares_outstanding,
+        "shares_outstanding": shares_outstanding,
         "listed_date": prof.listed_date,
         "status": status,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else None,
@@ -386,15 +394,20 @@ def financials(db: Session, md: MarketData, symbol: str, period: str) -> dict[st
     info = require_instrument(md, symbol)
     sym = info.symbol
     out: dict[str, Any] = {
-        "symbol": sym, "period": period, "periods": [],
+        "symbol": sym, "period": period, "periods": [], "period_ends": [],
+        "currency": info.currency, "amount_unit": 1000,
         "income": {k: [] for k in ("revenue", "gross_profit", "operating_income", "net_income", "eps")},
         "balance": {k: [] for k in ("total_assets", "total_liabilities", "equity")},
         "cashflow": {k: [] for k in ("operating", "investing", "financing", "free_cash_flow")},
         "margins": {k: [] for k in ("gross", "operating", "net")},
-        "sources": [], "notes": [],
+        "shares": None, "as_of": None, "sources": [], "notes": [],
     }
+    if info.market == "US" and info.type == "stock":  # SEC EDGAR company facts (USD, fiscal periods)
+        from forliosa.services import sec as sec_svc
+
+        return sec_svc.financials(db, info, period, out)
     if not _is_tw_stock(info):
-        out["notes"].append("ETF 與美股沒有財務報表資料" if info.type == "etf" or info.market == "US" else "")
+        out["notes"].append("ETF 沒有財務報表資料" if info.type == "etf" else "")
         out["notes"] = [n for n in out["notes"] if n]
         return out
     ans = md.statements(sym)
@@ -409,6 +422,7 @@ def financials(db: Session, md: MarketData, symbol: str, period: str) -> dict[st
         out["notes"].append("年度數字為四季加總（損益、現金流量）與第四季底餘額（資產負債）；只列四季齊全的年度")
     periods = sorted(table)
     out["periods"] = periods
+    out["period_ends"] = [_period_end(p) for p in periods]
 
     def col(item: str) -> list[float | None]:
         return [ser.price(table[p].get(item)) if item == "eps" else ser.money(table[p].get(item)) for p in periods]
@@ -433,6 +447,18 @@ def financials(db: Session, md: MarketData, symbol: str, period: str) -> dict[st
     out["notes"].append("金額單位：新台幣千元；自由現金流量 = 營業活動現金流量 + 投資活動現金流量")
     out["sources"] = labels(sources)
     return out
+
+
+def _period_end(period: str) -> date | None:
+    """Taiwan reporting periods are calendar quarters / years: ``2026Q2`` -> 2026-06-30, ``2025`` -> 2025-12-31."""
+    try:
+        year = int(period[:4])
+        if len(period) == 4:
+            return date(year, 12, 31)
+        q = int(period[-1])
+        return add_months(date(year, 3 * q, 1), 1) - timedelta(days=1)
+    except (ValueError, IndexError):
+        return None
 
 
 def _annual(table: dict[str, dict[str, Decimal | None]]) -> dict[str, dict[str, Decimal | None]]:
@@ -526,6 +552,11 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
         out.append({"date": d, "type": type_, "title": title, "detail": detail, "url": url, "mine": mine,
                     "amount_estimate": ser.money(amount), "estimated": estimated, "period": period,
                     "sources": labels(sources or [])})
+
+    if info.market == "US" and info.type == "stock":  # 8-K / 10-Q / 10-K from SEC EDGAR submissions
+        from forliosa.services import sec as sec_svc
+
+        out += sec_svc.filing_events(db, info, lo, hi, held=qty > 0, today=today)
 
     divs = md.dividends(sym)
     div_sources = ["demo"] if divs.is_demo else tagged(divs.source, "ex_dividend")

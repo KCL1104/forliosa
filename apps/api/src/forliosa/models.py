@@ -730,3 +730,51 @@ class TaifexUnderlying(Base):
     first_seen: Mapped[date] = mapped_column(Date)
     last_seen: Mapped[date] = mapped_column(Date)
     source: Mapped[str] = mapped_column(String(32))
+
+
+# -- SEC EDGAR (US fundamentals and filings; forliosa.services.sec) -------------------------------------
+class SecTicker(Base):
+    """www.sec.gov/files/company_tickers.json: ticker -> CIK (SEC's ticker spelling, e.g. ``BRK-B``)."""
+
+    __tablename__ = "sec_tickers"
+
+    ticker: Mapped[str] = mapped_column(String(20), primary_key=True)
+    cik: Mapped[int] = mapped_column(BigInteger, index=True)
+    title: Mapped[str] = mapped_column(String(200), default="")
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class SecCompany(Base):
+    """One SEC registrant: the trimmed XBRL company facts (only the us-gaap tags Forliosa shows, one value per
+    period) and when its companyfacts / submissions were last fetched. ``facts`` is
+    ``{"v": 2, "tags": {tag: {unit: [[start, end, value, fy, fp, filed], …]}}, "splits": [[first filed, ratio], …]}``
+    (see ``marketdata.sec``; facts of an older ``v`` are fetched again)."""
+
+    __tablename__ = "sec_companies"
+
+    cik: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    name: Mapped[str] = mapped_column(String(200), default="")
+    fiscal_year_end: Mapped[str | None] = mapped_column(String(4), nullable=True)  # "0926" (MMDD)
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    shares_outstanding: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # dei cover page
+    shares_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    facts_fetched_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    filings_fetched_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    source: Mapped[str] = mapped_column(String(32), default="sec-edgar")
+
+
+class SecFiling(Base):
+    """8-K / 10-Q / 10-K (and amendments) from data.sec.gov/submissions: only the index fields and the link."""
+
+    __tablename__ = "sec_filings"
+    __table_args__ = (Index("ix_sec_filings_cik_date", "cik", "filing_date"),)
+
+    cik: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=False)
+    accession: Mapped[str] = mapped_column(String(24), primary_key=True)  # 0000320193-26-000026
+    form: Mapped[str] = mapped_column(String(12))
+    filing_date: Mapped[date] = mapped_column(Date)
+    report_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    items: Mapped[str] = mapped_column(String(120), default="")  # 8-K items, e.g. "2.02,9.01"
+    primary_document: Mapped[str] = mapped_column(String(200), default="")
+    source: Mapped[str] = mapped_column(String(32), default="sec-edgar")
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)

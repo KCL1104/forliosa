@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from forliosa.marketdata.base import ProviderUnavailable
 from forliosa.timeutil import TAIPEI
@@ -109,3 +110,41 @@ class FakeFetcher:
                 if url.endswith(suffix):
                     return (FIX / name).read_bytes()
         raise ProviderUnavailable(f"no fixture for {url}")
+
+
+# SEC EDGAR (trimmed live responses, 2026-11-12): AAPL companyfacts + submissions, NVDA companyfacts (with the
+# EPS and share counts around its 2021 and 2024 stock splits), a ticker subset.
+SEC_FACTS = {320193: "sec_companyfacts_aapl_live_20261112.json", 1045810: "sec_companyfacts_nvda_live_20261112.json"}
+SEC_SUBMISSIONS = {320193: "sec_submissions_aapl_live_20261112.json"}
+
+
+class FakeSecClient:
+    """Stands in for ``forliosa.marketdata.sec.SecClient``: serves the fixtures, counts calls, can fail on demand.
+
+    ``fail``: an exception raised by every call (e.g. ``HttpStatusError("data.sec.gov 回應 HTTP 403", 403)``).
+    Companies without a fixture answer like SEC's 404 (``None``).
+    """
+
+    def __init__(self, fail: Exception | None = None, facts: dict[int, Any] | None = None):
+        self.calls: list[str] = []
+        self.fail = fail
+        self.facts = facts or {}  # raw companyfacts by CIK, in place of the fixtures
+
+    def _call(self, what: str) -> None:
+        self.calls.append(what)
+        if self.fail is not None:
+            raise self.fail
+
+    def tickers(self):
+        self._call("tickers")
+        return load("sec_company_tickers_live_20261112.json")
+
+    def company_facts(self, cik: int):
+        self._call(f"facts:{cik}")
+        if cik in self.facts:
+            return self.facts[cik]
+        return load(SEC_FACTS[cik]) if cik in SEC_FACTS else None
+
+    def submissions(self, cik: int):
+        self._call(f"submissions:{cik}")
+        return load(SEC_SUBMISSIONS[cik]) if cik in SEC_SUBMISSIONS else None

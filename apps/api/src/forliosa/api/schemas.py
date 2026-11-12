@@ -524,14 +524,27 @@ class MarginSeries(BaseModel):
     net: list[float | None]
 
 
+class FinancialShares(BaseModel):
+    """US stocks (SEC EDGAR): cover-page shares outstanding and the diluted weighted-average share count."""
+
+    outstanding: int | None
+    outstanding_as_of: date | None
+    diluted_average: list[int | None]
+
+
 class Financials(BaseModel):
     symbol: str
     period: str
-    periods: list[str]
+    periods: list[str]  # Taiwan "2026Q2" / "2025"; US fiscal "FY2026Q1" / "FY2025"
+    period_ends: list[date | None] = []  # last day of each period (US fiscal periods end on the company's dates)
+    currency: Literal["TWD", "USD"] = "TWD"
+    amount_unit: int = 1000  # amounts × amount_unit = currency units (Taiwan: thousands; US: 1)
     income: IncomeSeries
     balance: BalanceSeries
     cashflow: CashflowSeries
     margins: MarginSeries
+    shares: FinancialShares | None = None
+    as_of: str | None = None  # US: when the SEC company facts were fetched
     sources: list[str]
     notes: list[str] = []
 
@@ -539,7 +552,8 @@ class Financials(BaseModel):
 class StockEvent(BaseModel):
     date: date
     type: Literal["ex_dividend", "dividend_payment", "dividend_resolution", "earnings", "revenue_release",
-                  "investor_conference", "material_info", "attention", "disposition", "shareholder_meeting"]
+                  "investor_conference", "material_info", "attention", "disposition", "shareholder_meeting",
+                  "sec_filing"]
     title: str
     detail: str
     url: str | None
@@ -547,6 +561,7 @@ class StockEvent(BaseModel):
     amount_estimate: float | None
     estimated: bool = False  # true only for a legal-deadline fallback (no actual date known yet)
     period: str | None = None  # earnings "2026Q3", revenue_release "2026-10"
+    form: str | None = None  # sec_filing: "8-K" | "10-Q" | "10-K" (or "/A" amendments)
     sources: list[str] = []
 
 

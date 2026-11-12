@@ -496,6 +496,99 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   `parse_twt48u_all` 有註記；存檔的上市、上櫃預告都這樣換算）。還沒有用真實的配股預告驗證過；若單位不同，自動配股的股數會錯，
   第一次遇到真實配股時要核對。
 
+## 2026-11-12 第四批：SEC EDGAR 美股基本面與申報
+
+程式：`marketdata/sec.py`（下載與解析）、`services/sec.py`（快取、即時更新、組成回應）、`archive.py` 的 `sec` 群組、
+`worker.py` 的 `sec_archive`；資料表 `sec_tickers`、`sec_companies`、`sec_filings`（migration `0008_sec_edgar`）。合約見
+[`docs/api-contract.md`](../../docs/api-contract.md)「美股基本面（SEC EDGAR）」。
+
+### 來源與授權
+
+| 資料集 key | 網址 | 用在 |
+|---|---|---|
+| `sec-edgar/tickers` | `https://www.sec.gov/files/company_tickers.json` | 代號 → CIK（SEC 的拼法：`BRK.B` 查 `BRK-B`） |
+| `sec-edgar/companyfacts` | `https://data.sec.gov/api/xbrl/companyfacts/CIK##########.json` | 財報數字 |
+| `sec-edgar/submissions` | `https://data.sec.gov/submissions/CIK##########.json` | 8-K／10-Q／10-K 申報清單 |
+
+- 授權：SEC Webmaster FAQ「All Government-created content on sec.gov and EDGAR public filing content are free to access and
+  reuse」（2026-11-12 讀到原文）。`datapolicy.DATASETS` 的 `license_status: "public"`，顯名「美國證券交易委員會（SEC）〈資料集〉（年），
+  美國政府公開資料」，`/meta/attributions` 每筆的 `license`／`license_url` 是 SEC 的政策頁，`notice` 多一行 SEC 的說明。
+- 只下載這三個 JSON（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`）；申報文件本身只給連結，不下載。
+- **User-Agent**：`Forliosa/1.0 <SEC_CONTACT_EMAIL>`。信箱只從環境變數讀（`Settings.sec_contact_email` 是 `SecretStr`，repr／dump
+  都看不到），不寫進程式碼、測試、文件或日誌；格式不符（空白、角括號、換行）視同未設定。
+- **頻率**：SEC 上限每秒 10 次（以請求者計）。`DEFAULT_LIMITER` 對 `sec.gov` 每 0.25 秒一次（每個行程 ≤ 4 次／秒），而且
+  `data.sec.gov` 與 `www.sec.gov` 共用同一個額度；API 伺服器加 worker 合計也在 10 次／秒以下。
+- **被拒絕就停**：403、429 或轉址（`HttpStatusError`）視為封鎖：這個行程一小時內不再向 SEC 發任何請求（回應的 `notes` 說明），
+  worker 的工作直接以錯誤結束，不重試、不繞過。其他錯誤（逾時、5xx）只讓那家公司 10 分鐘內不再試。
+
+### 快取與更新
+
+- worker 每天 07:50（台北，美股收盤後；不看台股交易日）跑 `archive` 的 `sec` 群組：更新代號表，再更新**所有使用者帳本、持股快照、
+  自選裡的美股個股**（ETF 跳過）超過 12 小時沒更新的 companyfacts 與 submissions。`dataset_status` 記最新的申報日（`/meta/attributions`
+  的 `last_updated`）。手動：`uv run python -m forliosa.archive run --only sec`。
+- 請求當下：快取超過 `SEC_STALE_HOURS`（24）就先向 SEC 取一次（逾時 `SEC_ON_DEMAND_TIMEOUT_SECONDS`＝6 秒、不重試），失敗就用快取並在
+  `notes` 寫「SEC EDGAR 暫時無法連線，稍後再試；顯示 YYYY-MM-DD HH:MM 取得的資料」。同一家公司同時只會有一個請求在抓。
+- `/overview` 只讀快取（不連 SEC），所以美股的 `eps_ttm`、`shares_outstanding` 要等 worker 或財務分頁抓過一次才有。
+- 沒設 `SEC_CONTACT_EMAIL`：完全不連 SEC；財務回空＋`notes: ["SEC EDGAR 尚未啟用：伺服器沒有設定 SEC 要求的聯絡信箱（SEC_CONTACT_EMAIL），
+  目前沒有美股財報與申報資料"]`，事件不含申報；worker 的結果列「sec edgar（未設定 SEC_CONTACT_EMAIL，略過）」。`FORLIOSA_ENV=test`
+  一律不建立真的連線（測試用假 client）。
+
+### 財報怎麼算（`marketdata/sec.summarize`）
+
+- 科目（us-gaap，依序取第一個有該期數字的標籤）：營收 `Revenues` → `RevenueFromContractWithCustomerExcludingAssessedTax` →
+  `RevenueFromContractWithCustomerIncludingAssessedTax` → `SalesRevenueNet`；毛利 `GrossProfit`；營業利益 `OperatingIncomeLoss`；
+  淨利 `NetIncomeLoss` → `NetIncomeLossAvailableToCommonStockholdersBasic` → `ProfitLoss`；EPS `EarningsPerShareDiluted` →
+  `EarningsPerShareBasicAndDiluted`；資產 `Assets`；負債 `Liabilities`（沒有時 = `LiabilitiesAndStockholdersEquity` − 含非控制權益的權益）；
+  權益 `StockholdersEquity`；營業／投資／籌資現金流 `NetCashProvidedByUsedIn…Activities`（→ `…ContinuingOperations`）；資本支出
+  `PaymentsToAcquirePropertyPlantAndEquipment` → `PaymentsToAcquireProductiveAssets`；稀釋加權平均股數
+  `WeightedAverageNumberOfDilutedSharesOutstanding`；流通股數 `dei:EntityCommonStockSharesOutstanding`（封面頁，最新一筆）。
+- 只用 10-K、10-Q（含 `/A`）的數字；同一期（start, end）只留一個值：**數字取最新申報**（重編後的數字），**會計年度標籤取最早申報**
+  （那一期是當期的那份報告）。存最近 12 年。
+- **比較數字的年度**：companyfacts 的 `fy` 是「那份申報」的年度，所以同一份申報裡的比較數字（一年前、兩年前）標的是較晚的年度。存的時候
+  依那一期結束日和申報本身當期結束日差幾年往回推：新上市公司第一份 FY2025 10-K 帶的 2023、2024 年是 `FY2023`、`FY2024`，下一份 10-Q
+  的去年同季是 `FY2025Q1`（以前會變成 `FY2025`、`FY2026`、`FY2027Q1`）。
+- **期間**：12 個月（350–380 天）的期間就是一個會計年度，名稱取最小的 `fy`；例：Apple 2025-09-28～2026-09-26 是 `FY2026`，NVIDIA
+  2025-01-27～2026-01-25 是 `FY2026`。季度 `FY2026Q1`…`Q4` 依結束日距會計年度開始的天數判斷。`period_ends` 是各期最後一天。
+- **股票分割**（`marketdata/sec.find_splits`）：分割後的報告只重編它列出的期間（10-K 三年、10-Q 去年同期），更早的期間停在舊股數，所以
+  「每期取最新申報」的 EPS、平均股數會混用兩種基準（NVIDIA 年報曾是 FY2022 3.85 → FY2023 0.17）。做法：同一期在前後兩份申報的股數
+  （`WeightedAverageNumberOfDilutedSharesOutstanding`、`…SharesOutstandingBasic`、`…ShareOutstandingBasicAndDiluted`）差一個分割比例
+  （p/q，q ≤ 5，至少 6/5、最多 500，誤差 1%）就是分割，一期就算；把分割定位在「最後一份舊基準申報」與「第一份新基準申報」之間，
+  短的區間先看，矛盾的忽略；修正申報（`/A`）不算新基準。沒有股數標籤的期間（Alphabet 2022 年前的股數只有分類別的）用 EPS（四捨五入到
+  分，至少 0.10），要兩期一致，且同一區間股數沒變就不算。結果存在 `facts.splits`（`[["2024-08-28", "10"], …]`：第一份新基準申報日、
+  每 1 股變幾股；反分割如 `"1/8"`），`summarize` 把那天以前申報的 EPS ÷ 比例、平均股數 × 比例，再推算第四季（全年 − 前三季累計都在同一
+  基準）。顯示期間內有分割時 `notes` 加一行說明。用 2026-11-12 的 SEC 資料核對：AAPL（2014 1 拆 7、2020 1 拆 4）、NVDA（2021 1 拆 4、
+  2024 1 拆 10）、TSLA、GOOGL（EPS）、AMZN、WMT、CMG（1 拆 50）、AVGO、SMCI、GE（8 合 1）都找到，MSFT 沒有誤判。
+- 快取的 `facts.v` 是 2；舊版（1，沒有分割資料、比較數字的年度沒往回推）的公司資料在下次請求或 worker 時重抓。
+- **單季數字**：有三個月的數字就用；否則用年初至今的累計相減（10-Q 的現金流量是累計；第四季 = 全年 − 前三季累計，因為 10-K 只報全年）。
+  EPS 相減是近似值（股數會變），平均股數不推算（第四季為 `null`）。有推算時 `notes` 會說明。
+- 自由現金流量 = 營業活動現金流量 − 資本支出（美國慣用定義；台股仍是營業 + 投資）。
+- `overview.eps_ttm`（美股）：最近四季的稀釋 EPS 加總；剛好是一整個會計年度時用 10-K 的全年 EPS（各季加總不一定等於全年）。
+- 銀行等沒有營收／毛利標籤的公司：那幾列是 `null`（例如 JPMorgan 的季營收）。外國公司（20-F、IFRS）沒有 us-gaap 數字：回空＋notes。
+
+### 申報事件
+
+- `/events` 對美股個股加上 `type: "sec_filing"`，`form` 為 `8-K`、`10-Q`、`10-K` 或其修正 `…/A`（其他表單如 Form 4、S-8、DEF 14A 不列）。
+  `date` 是申報日；`title`：「10-K 年度報告」「10-Q 季度報告」「8-K 營運結果與財務狀況」（8-K 用第一個不是 9.01 的項目名稱，修正加「（修正）」）；
+  `detail`：「會計年度截至 2026-09-26」「季度截至 2026-06-27」「申報項目：2.02 營運結果與財務狀況、9.01 財務報表與附件；事件日期 2026-11-02」；
+  `url`：`https://www.sec.gov/Archives/edgar/data/{CIK}/{accession 去掉 -}/{主文件}`。
+- `mine`：持有時 10-K／10-Q 都是 true，8-K 只有最近 7 天的是 true。存最近 400 天，顯示範圍與其他事件相同（過去 365 天）。
+
+### 環境變數
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `SEC_CONTACT_EMAIL` | 空 | SEC 要求的聯絡信箱，只放進 User-Agent。沒設就不連 SEC |
+| `SEC_ENABLED` | `true` | `false` 可整個關掉 SEC |
+| `SEC_STALE_HOURS` | 24 | 請求當下超過幾小時就重抓 |
+| `SEC_ON_DEMAND_TIMEOUT_SECONDS` | 6 | 請求當下抓 SEC 的逾時（worker 用 30 秒、重試一次） |
+
+### 已知限制
+
+- 商品清單（`master`）的美股仍只有內建的 AAPL、NVDA、VOO、QQQ：SEC 代號表只拿來查 CIK，沒有把一萬多檔美股加進搜尋（見「待確認」23）。
+- 美股報價、股利仍沒有可商用來源（前端的股利分頁對美股寫「美股目前沒有可商用的配息資料來源」，不說成沒有配過息）。
+- 在 10-Q 裡也報近 12 個月（TTM）數字的公司（例如 Amazon 的現金流量）：TTM 期間也是 12 個月，現在會被當成會計年度，年報與季度標籤會錯（AAPL、NVDA 沒有這個情形）。把 SEC 代號表加進商品清單（待確認 24）之前要先改成只認 10-K 的 12 個月期間。
+- NVIDIA 2014-01-26 結束的會計年度在 SEC 資料裡標成 `fy` 2013，所以那一年叫 `FY2013`、下一年接 `FY2015`（在 10 年的顯示範圍之外）。
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。
@@ -521,7 +614,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 14. **新聞來源**：目前只有官方公告（重大訊息、證交所新聞）。媒體新聞需要授權（中央社等，需詢價）。
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。
 16. ~~**財報公布日**~~：已實作（2026-11-12），實際日期來自重大訊息與月營收資料集；查不到才用法定期限（`estimated: true`）。
-17. **美股基本面（SEC EDGAR）與匯率**：EDGAR 研究判定可商用，但**尚未加入**，等產品負責人決定（需在 User-Agent 寫聯絡信箱）。
+17. **美股基本面（SEC EDGAR）與匯率**：~~EDGAR 尚未加入~~ **已實作（2026-11-12，見「第四批」）**：美股財報與 8-K／10-Q／10-K 申報。
     匯率：2026-11-12 起存期交所〈每日外幣參考匯率〉，但要等期交所確認授權（「第三批」待確認 20）才使用；央行／臺銀未驗證，沒有加入。
     在那之前 USD/TWD 固定 31.5。
 18. **月營收資料集是否逐日更新**：`t187ap05_L`／`mopsfin_t187ap05_O` 的「出表日期」在 2026-11-12 是 1151111（申報期限之後）。
@@ -543,6 +636,12 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
     （例如台積電 2025Q4）。若前端覺得混淆，可以只顯示董事會日期在最近 N 天內的決議，請決定 N。
 23. **刪除或改過的自動股利沒辦法恢復**：刪除（或修改）一筆自動入帳的股利後，略過紀錄永久保留，目前沒有端點列出或清除；使用者只能自己新增一筆。
     建議：先維持現狀，等有人反映再加 `GET /auto-dividend-skips` 與 `DELETE /auto-dividend-skips/{id}`（刪掉後下一次同步就補回），前端放在帳戶設定裡。
+
+24. **美股商品清單**（2026-11-12）：SEC〈company_tickers.json〉有一萬多檔美股代號與公司名（英文），目前只用來查 CIK；商品搜尋與記帳
+    只認內建的 AAPL、NVDA、VOO、QQQ。要不要把 SEC 的代號加進商品清單（搜尋、記帳、財報與申報都能用；但沒有中文名、沒有價格）？
+    建議：加，但搜尋時排在台股之後、只在輸入英文代號時出現，並標「沒有報價」。
+25. **美股財報的季度標示**（2026-11-12）：目前用公司會計年度（Apple 的 `FY2026Q1` = 2025-09-28～2025-12-27），表頭另標結束日。
+    另一種是用日曆季（`2025Q4`）。建議：維持會計年度（和公司新聞稿、媒體報導一致）。
 
 ## AI（M4，2026-11-12）
 

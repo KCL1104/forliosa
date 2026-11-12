@@ -32,6 +32,18 @@ def no_real_ai_keys():
 
 
 @pytest.fixture(autouse=True)
+def no_sec_network():
+    """No test may reach SEC EDGAR (the sandbox may have SEC_CONTACT_EMAIL set): SEC is disabled unless a test
+    installs a fake client with ``forliosa.services.sec.set_sec_client``."""
+    from forliosa.services.sec import reset_sec_state, set_sec_client
+
+    reset_sec_state()
+    set_sec_client(None)
+    yield
+    reset_sec_state()
+
+
+@pytest.fixture(autouse=True)
 def builtin_calendar():
     """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
     from forliosa.timeutil import set_official_holidays

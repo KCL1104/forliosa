@@ -432,13 +432,25 @@ export interface Chips {
 export type FinancialsPeriod = "quarterly" | "annual"
 type Col = (number | null)[]
 
-/** 財務報表：每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元 */
+/**
+ * 財務報表：每個欄位是與 `periods` 等長的陣列。
+ * 台股：期間 `2026Q2`／`2025`，金額單位新台幣千元（`amount_unit: 1000`）。
+ * 美股（SEC EDGAR）：期間是公司會計年度 `FY2026Q1`／`FY2025`，金額單位美元（`amount_unit: 1`），EPS 為稀釋 EPS。
+ */
 export interface Financials {
   periods: string[]
+  /** 每期最後一天（美股會計年度不一定在月底結束） */
+  period_ends?: (string | null)[]
+  currency?: "TWD" | "USD"
+  /** 金額 × amount_unit = 幣別單位（台股 1000，美股 1） */
+  amount_unit?: number
   income: { revenue: Col; gross_profit: Col; operating_income: Col; net_income: Col; eps: Col }
   balance: { total_assets: Col; total_liabilities: Col; equity: Col }
   cashflow: { operating: Col; investing: Col; financing: Col; free_cash_flow: Col }
   margins: { gross: Col; operating: Col; net: Col }
+  /** 美股：封面頁的流通股數與稀釋加權平均股數 */
+  shares?: { outstanding: number | null; outstanding_as_of: string | null; diluted_average: (number | null)[] } | null
+  as_of?: string | null
   sources: string[]
   is_demo?: boolean
   notes?: string[]
@@ -454,6 +466,8 @@ export type InstrumentEventType =
   | "attention"
   | "disposition"
   | "shareholder_meeting"
+  /** 美股：SEC 的 8-K／10-Q／10-K 申報（`form`），連到 sec.gov 原文 */
+  | "sec_filing"
 
 export interface InstrumentEvent {
   date: string
@@ -468,6 +482,8 @@ export interface InstrumentEvent {
   estimated?: boolean
   /** 財報「2026Q3」、營收「2026-10」 */
   period?: string | null
+  /** sec_filing：「8-K」「10-Q」「10-K」（修正是「/A」） */
+  form?: string | null
 }
 
 export type NewsCategory = "material_info" | "exchange_news" | "media"

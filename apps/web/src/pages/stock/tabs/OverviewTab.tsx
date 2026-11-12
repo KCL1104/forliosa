@@ -4,7 +4,7 @@ import { appToday } from "@/api"
 import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, MonthlyRevenue, Position, Quote } from "@/api/types"
 import { Section } from "@/components/section"
-import { announcementHost, EVENT_LABEL, eventTitle, NEWS_CATEGORY_LABEL } from "@/lib/events"
+import { announcementHost, eventLabel, eventTitle, NEWS_CATEGORY_LABEL } from "@/lib/events"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
@@ -224,7 +224,7 @@ function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Positi
                 {formatDateShort(e.date)}
                 <span className="block text-xs text-ink-2 sm:hidden">{formatDaysUntil(e.date, today)}</span>
               </span>
-              <span className="text-md text-ink-2 max-sm:hidden">{EVENT_LABEL[e.type] ?? e.type}</span>
+              <span className="text-md text-ink-2 max-sm:hidden">{eventLabel(e)}</span>
               <span className="min-w-0">
                 {eventTitle(e)}
                 {e.estimated && (
