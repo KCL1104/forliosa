@@ -40,7 +40,10 @@ def test_bad_rows_are_skipped_and_a_renamed_field_is_an_error():
                              {"日期": "", "NTD_USD": "32.9"}, {"日期": "20261113", "NTD_USD": "0"}, "x",
                              {"日期": "20261111", "NTD_USD": "32.86"}])
     assert rows == [{"date": date(2026, 11, 11), "pair": "USDTWD", "rate": D("32.86")}]
-    assert cbc.parse_fx_day([]) == []
+    with pytest.raises(ProviderUnavailable, match="空的"):  # a valid answer is always the whole history
+        cbc.parse_fx_day([])
+    with pytest.raises(ProviderUnavailable, match="欄位不符"):  # only unusable rows
+        cbc.parse_fx_day([{"日期": "20261112", "NTD_USD": ""}, "x"])
     with pytest.raises(ProviderUnavailable, match="欄位不符"):
         cbc.parse_fx_day([{"Date": "20261111", "USD": "32.86"}])
     with pytest.raises(ProviderUnavailable, match="格式不符"):

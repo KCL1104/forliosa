@@ -34,6 +34,7 @@ from forliosa.models import (
 from forliosa.services.announcements import classify
 from forliosa.services.instruments import change_base, require_instrument
 from forliosa.services.portfolio import (
+    PortfolioState,
     add_months,
     closed_rounds,
     compute_state,
@@ -686,10 +687,13 @@ def news(db: Session, md: MarketData, symbol: str) -> list[dict[str, Any]]:
 
 
 # -- position -------------------------------------------------------------------------------------------
-def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, Any] | None:
+def position(db: Session, md: MarketData, user: User, symbol: str,
+             state: PortfolioState | None = None) -> dict[str, Any] | None:
+    """The user's open position in ``symbol`` (None when not held). Pass ``state`` to read the values from a
+    portfolio state the caller also uses (the AI tool takes its FX notes from ``state.fx``)."""
     info = require_instrument(md, symbol)
     sym = info.symbol
-    state = compute_state(db, user, md)
+    state = state or compute_state(db, user, md)
     row = next((r for r in state.rows if r.symbol == sym), None)
     if row is None or row.quantity <= 0:
         return None

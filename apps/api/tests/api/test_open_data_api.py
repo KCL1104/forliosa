@@ -226,12 +226,77 @@ def test_fx_note_says_when_the_series_stopped(archived):
 
     fx = FxBook.load(archived, date(2026, 11, 1), date(2026, 11, 12))
     fx.latest("USD")
-    assert fx_notes(fx, today=date(2026, 11, 26)) == [CBC_NOTE]  # two weeks: still fine
-    assert fx_notes(fx, today=date(2026, 11, 27)) == [
-        CBC_NOTE, "USD/TWD 匯率只到 2026-11-12（32.889），之後的日子沿用這個匯率"]
+    assert fx_notes(fx, today=date(2026, 11, 25)) == [CBC_NOTE]  # 13 days: still fine
+    stale = [CBC_NOTE, "USD/TWD 匯率只到 2026-11-12（32.889），之後的日子沿用這個匯率"]
+    assert fx_notes(fx, today=date(2026, 11, 26)) == stale  # 14 days or more (「比今天早 14 天以上」)
+    assert fx_notes(fx, today=date(2026, 11, 27)) == stale
     assert fx_tool_notes(fx, today=date(2026, 11, 12)) == [
         CBC_NOTE, "美股市值以 2026-11-12 的 USD/TWD 32.889 換算成新台幣；成本、已實現損益與股利用各交易日的匯率"]
     assert fx_tool_notes(FxBook(), today=date(2026, 11, 12)) == []  # no US amount: nothing to say
+
+
+def test_a_stalled_archive_carries_its_last_rate_forward(client, engine, market, monkeypatch):
+    """The archive stopped on 2026-10-09 (worker down, or the endpoint renamed its fields): every user values USD
+    at that last rate with the stale note, never at the fixed 31.5 with "no archive", whenever they started."""
+    import json
+
+    from forliosa.ai.tools import ToolContext, execute
+    from forliosa.models import FxRate, User
+    from forliosa.services import ledger_io
+    from forliosa.services import portfolio as psvc
+    from forliosa.services.ledger_io import FxBook
+    from forliosa.services.portfolio import FX_MISSING_NOTE, fx_notes
+
+    today = date(2026, 11, 12)
+    monkeypatch.setattr(psvc, "today_taipei", lambda: today)
+    monkeypatch.setattr(ledger_io, "today_taipei", lambda: today)
+    with Session(engine) as db:
+        for d, rate, source in ((date(2025, 2, 27), "32.8", "cbc-opendata"),
+                                (date(2026, 10, 8), "31.95", "cbc-opendata"),
+                                (date(2026, 10, 9), "31.9", "cbc-opendata"),
+                                (date(2026, 11, 11), "32.86", "taifex-openapi")):  # archived, never used
+            db.add(FxRate(pair="USDTWD", date=d, rate=D(rate), source=source))
+        db.commit()
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine)), DemoProvider()],
+                    policy="commercial")
+    stale = "USD/TWD 匯率只到 2026-10-09（31.9），之後的日子沿用這個匯率"
+    # only the newest earlier row is carried into the window, not the whole history
+    arch = ArchiveProvider("commercial", session_fn=lambda: Session(engine))
+    assert arch.fx_history("USDTWD", date(2026, 11, 3), today) == {date(2026, 10, 9): D("31.9")}
+    assert arch.fx_history("USDTWD", date(2025, 3, 1), date(2025, 3, 31)) == {date(2025, 2, 27): D("32.8")}
+    assert arch.fx_history("USDTWD", date(2025, 1, 1), date(2025, 1, 31)) is None  # before the series begins
+    for first_trade in (date(2025, 3, 1), date(2026, 11, 3), today):
+        fx = FxBook.load(md, first_trade)
+        assert not fx.fixed and fx.source == "cbc-opendata", first_trade
+        assert fx.latest("USD") == D("31.9") and fx.rate("USD", date(2026, 11, 11)) == D("31.9"), first_trade
+        assert fx_notes(fx) == [CBC_NOTE, stale], first_trade
+    assert FxBook.load(md, date(2025, 3, 1)).rate("USD", date(2025, 3, 3)) == D("32.8")
+
+    set_market_data(md)
+    try:
+        acc = client.post(f"{API}/accounts", json={"name": "Firstrade", "broker": "Firstrade", "currency": "USD"})
+        r = client.post(f"{API}/transactions", json={"account_id": acc.json()["id"], "symbol": "AAPL", "type": "buy",
+                                                     "trade_date": "2026-11-03", "quantity": 10, "price": 200})
+        assert r.status_code == 201, r.text
+        paid = D(str(r.json()["amount"])) + D(str(r.json()["fee"]))
+        h = client.get(f"{API}/portfolio/holdings").json()[0]
+        assert h["cost_basis"] == pytest.approx(float(paid * D("31.9")), abs=0.01)
+        assert h["market_value"] == pytest.approx(float(paid * D("31.9")), abs=0.01)
+        pos = client.get(f"{API}/instruments/AAPL/position").json()
+        assert pos["market_value"] == h["market_value"]
+        with Session(engine) as db:
+            me = db.query(User).filter_by(email="demo@forliosa.local").one()
+            ctx = ToolContext(db=db, user=me, md=md)
+            rate_line = "美股市值以 2026-10-09 的 USD/TWD 31.9 換算成新台幣；成本、已實現損益與股利用各交易日的匯率"
+            for tool, args in (("get_holdings", {}), ("get_portfolio_summary", {}),
+                               ("get_position", {"symbol": "AAPL"})):
+                out = json.loads(execute(ctx, tool, args).content)
+                assert out["notes"][-3:] == [CBC_NOTE, stale, rate_line] and FX_MISSING_NOTE not in out["notes"], (
+                    tool, out["notes"])
+            assert json.loads(execute(ctx, "get_position", {"symbol": "AAPL"}).content)["market_value"] == (
+                pos["market_value"])
+    finally:
+        set_market_data(market)
 
 
 def test_us_holdings_are_valued_with_the_central_bank_rate(client, archived, engine):

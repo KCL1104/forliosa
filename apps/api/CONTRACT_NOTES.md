@@ -505,7 +505,8 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 - worker 的晚間存檔（交易日 21:40，`EVENING_GROUPS`）跑一次；手動：`uv run python -m forliosa.archive run --only cbc`。
 - 第一次執行就回補 2008 年起的全部歷史（實測 4,686 筆）；之後只寫**新的或數字改過的**日子（第二次執行 0 筆），`dataset_status["cbc-opendata/fx"]` 記最新的匯率日期。
-- 解析在 `marketdata/cbc.py`（`parse_fx_day`）：沒有日期或匯率不是正數的列略過；回應不是陣列、或非空卻一列都解析不了（欄位改名）時記錯誤，不寫 0 筆了事。
+- 解析在 `marketdata/cbc.py`（`parse_fx_day`）：沒有日期或匯率不是正數的列略過；回應不是陣列、是空陣列（正常回應一定是 2008 年起的完整歷史）、
+  或一列都解析不了（欄位改名）時記錯誤，不寫 0 筆了事，`dataset_status` 也不動（`/meta/attributions` 的 `last_updated` 保留上一次的日期）。
 - **與期交所共用 `fx_rates`**：主鍵是 `(pair, date)`，同一天只能有一列 `USDTWD`。央行那一列優先：`cbc_fx` 會把同一天期交所的列改成央行的（數字相同，只換 `source`）；
   `taifex_fx` 用條件 upsert（`WHERE fx_rates.source != 'cbc-opendata'`），不會覆蓋央行的列。期交所其他 9 個匯率照舊存。
   結果是：期交所的 `USDTWD` 只會留在央行還沒公布的那幾個小時（同一天 21:40 兩個工作都跑，所以通常不會留下）。
@@ -513,7 +514,10 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 ### 使用（`FxBook`）
 
 - `ArchiveProvider.fx_history` 只讀 `source = 'cbc-opendata'` 的 `USDTWD`（也只回 `USDTWD`）；不再看 `TAIFEX_CONDITIONAL_CONFIRMED`。
-  archive 是第一個 provider，所以任何 `DATA_POLICY` 都先用央行；只有存檔是空的時候，personal 才會輪到 FinMind／示範資料，commercial 則用固定 31.5。
+  回傳區間 [start, end] 的列，**加上 start 之前最新的一列**（不是固定往前看幾天）：存檔停更（worker 沒跑、端點改欄位名）時，
+  不論使用者第一筆交易在哪天，都沿用最後一筆匯率並加停更說明，不會因為區間裡沒有列就退回固定 31.5 並誤稱「還沒有存檔」。
+  archive 是第一個 provider，所以任何 `DATA_POLICY` 都先用央行；只有存檔完全是空的時候，personal 才會輪到 FinMind／示範資料，commercial 則用固定 31.5
+  （停更的存檔也算有存檔：personal 不會因此改用 FinMind）。
 - 某天的匯率 = 該日或之前最近一個營業日的收盤匯率；2008-01-02 以前的交易用序列的第一筆（2008-01-02 的 32.443）。
 - 成本、賣出、股利用各自交易日的匯率；市值用最新匯率（`FxBook.latest`；當天下午公布前是前一個營業日）。
 
@@ -521,14 +525,15 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 | 位置 | 內容 |
 |---|---|
-| `Performance.notes`（有美股時） | 「USD/TWD 匯率：中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版」；personal 用到 FinMind／示範資料時列它們的標籤（例「USD/TWD 匯率：示範資料（模擬）」）；完全沒有存檔時 `FX_MISSING_NOTE`「USD/TWD 以固定 31.5 換算：還沒有中央銀行〈銀行間新臺幣對美元收盤匯率〉的存檔」；最新匯率比今天早 14 天以上（`FX_STALE_DAYS`，比農曆年休市長）再加「USD/TWD 匯率只到 YYYY-MM-DD（匯率），之後的日子沿用這個匯率」。commercial 下持有美股的期間沒有可商用的美股價格、績效算不出來，所以這段 `notes` 多半出現在 personal，或美股已經賣出、績效區間只剩台股的時候 |
+| `Performance.notes`（有美股時） | 「USD/TWD 匯率：中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版」；personal 用到 FinMind／示範資料時列它們的標籤（例「USD/TWD 匯率：示範資料（模擬）」）；完全沒有存檔時 `FX_MISSING_NOTE`「USD/TWD 以固定 31.5 換算：還沒有中央銀行〈銀行間新臺幣對美元收盤匯率〉的存檔」；最新匯率比今天早 14 天以上（含 14 天；`FX_STALE_DAYS`，比農曆年休市長）再加「USD/TWD 匯率只到 YYYY-MM-DD（匯率），之後的日子沿用這個匯率」。commercial 下持有美股的期間沒有可商用的美股價格、績效算不出來，所以這段 `notes` 多半出現在 personal，或美股已經賣出、績效區間只剩台股的時候 |
 | `/instruments/{symbol}/position` | 美股的 `sources` 多上面的顯名聲明 |
 | `/meta/attributions` | `datasets` 多 `cbc-opendata/fx`（`last_updated` 是最新匯率日期）；`taifex-openapi/fx` 留在 `conditional[]`，`used_for`「只存檔（USD/TWD 換算改用中央銀行〈銀行間新臺幣對美元收盤匯率〉）」 |
-| AI 工具 | `get_portfolio_summary`（新 `notes`）、`get_holdings`、`get_position`（美股）的 `notes` 多匯率來源與「美股市值以 YYYY-MM-DD 的 USD/TWD X 換算成新台幣；成本、已實現損益與股利用各交易日的匯率」（`portfolio.fx_tool_notes`） |
+| AI 工具 | `get_portfolio_summary`（新 `notes`）、`get_holdings`、`get_position`（美股）的 `notes` 多匯率來源與「美股市值以 YYYY-MM-DD 的 USD/TWD X 換算成新台幣；成本、已實現損益與股利用各交易日的匯率」（`portfolio.fx_tool_notes`）。三個工具都用算出金額的同一個 `PortfolioState.fx`（`get_position` 把 state 傳給 `stock.position`），說明不會跟金額對不上 |
 
 - 移除 `portfolio.FX_PENDING_NOTE`（期交所授權待確認的說明）；`fx_notes(fx, today=None)` 不再需要 `MarketData`。
 - 測試：`tests/archive/test_cbc_parser.py`（解析、與期交所一致、壞資料、白名單）、`tests/archive/test_open_data_jobs.py`（回補、冪等、與期交所互不覆蓋、更正）、
-  `tests/api/test_open_data_api.py`（`FxBook`、31.5 備援、停更說明、美股持股估值、AI 工具、`/meta/attributions`）。fixture `cbc_ftd_day_live_20261112.json` 是真實回應
+  `tests/api/test_open_data_api.py`（`FxBook`、31.5 備援、停更說明與 14 天門檻、停更很久（查詢區間裡一列都沒有）的存檔仍沿用最後匯率、美股持股估值、AI 工具、`/meta/attributions`）；
+  空陣列記錯誤：`test_cbc_parser.py`、`test_open_data_jobs.py`。fixture `cbc_ftd_day_live_20261112.json` 是真實回應
   裁成 36 天（2008 開頭 3 天、跨年 5 天、2026-10-01 起 28 天）；測試不連網。
 
 ### 已知缺口

@@ -148,16 +148,21 @@ class ArchiveProvider(BaseProvider):
 
     def fx_history(self, pair: str, start: date, end: date) -> dict[date, Decimal] | None:
         """USD/TWD from 中央銀行〈銀行間新臺幣對美元收盤匯率〉 only (``fx_rates`` rows with source ``cbc-opendata``,
-        OGDL; ten days before ``start`` are included so the first day has a rate). TAIFEX 每日外幣參考匯率 rows in
-        the same table are archived but never used for valuation (product owner 2026-11-12)."""
+        OGDL): the rows in [``start``, ``end``] plus the newest row before ``start``, so the first day has a rate
+        however long ago the series last moved. An archive that stopped (worker down, renamed fields) thus carries
+        its last rate forward for everyone instead of looking empty to a recent ``start`` (fixed 31.5). TAIFEX
+        每日外幣參考匯率 rows in the same table are archived but never used for valuation (product owner
+        2026-11-12)."""
         from forliosa.models import FxRate
 
         if pair != cbc.PAIR:
             return None
+        series = self._filter(select(FxRate).where(FxRate.pair == pair, FxRate.source == cbc.SOURCE), FxRate)
         with self.session_fn() as db:
-            stmt = select(FxRate).where(FxRate.pair == pair, FxRate.source == cbc.SOURCE,
-                                        FxRate.date >= start - timedelta(days=10), FxRate.date <= end)
-            rows = list(db.scalars(self._filter(stmt, FxRate)))
+            rows = list(db.scalars(series.where(FxRate.date >= start, FxRate.date <= end).order_by(FxRate.date)))
+            before = db.scalar(series.where(FxRate.date < start).order_by(FxRate.date.desc()).limit(1))
+        if before is not None:
+            rows.insert(0, before)
         self._remember("fx_history", pair, rows)
         return {r.date: r.rate for r in rows} or None
 

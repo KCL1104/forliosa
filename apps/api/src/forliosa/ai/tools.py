@@ -409,21 +409,18 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import stock as svc
-    from forliosa.services.ledger_io import FxBook
-    from forliosa.services.portfolio import fx_tool_notes
-    from forliosa.timeutil import today_taipei
+    from forliosa.services.portfolio import compute_state, fx_tool_notes
 
     info = resolve_instrument(ctx.md, args["symbol"])
-    pos = svc.position(ctx.db, ctx.md, ctx.user, info.symbol)
+    state = compute_state(ctx.db, ctx.user, ctx.md)
+    pos = svc.position(ctx.db, ctx.md, ctx.user, info.symbol, state)
     if pos is None:
         return {"symbol": info.symbol, "name": info.name, "held": False,
                 "note": "目前沒有持有這檔；過去的交易可用 get_transactions 查詢"}
     markers = pos.get("markers") or []
     notes = ["金額為新台幣；avg_cost 為原幣；quantity 為股數"]
     if pos.get("currency", "TWD") != "TWD":
-        fx = FxBook.load(ctx.md, today_taipei())
-        fx.latest(pos["currency"])  # marks the book as converting a US amount
-        notes.extend(fx_tool_notes(fx))
+        notes.extend(fx_tool_notes(state.fx))  # the same book that valued the position above
     return {"symbol": info.symbol, "name": info.name, "held": True,
             **{k: v for k, v in pos.items() if k not in ("markers", "symbol", "sources")},
             "trades_count": len(markers), "recent_trades": markers[-10:], "notes": notes}

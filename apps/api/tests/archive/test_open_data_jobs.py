@@ -129,6 +129,20 @@ def test_central_bank_fx_failure_is_recorded(engine):
         assert count(db, FxRate) == 0
 
 
+def test_central_bank_fx_empty_answer_is_an_error_and_keeps_the_last_date(engine):
+    """The endpoint always answers the whole history since 2008: an empty array is an outage, not 0 new days."""
+    with Session(engine) as db:
+        run(db, ["cbc"])
+        before = db.get(DatasetStatus, "cbc-opendata/fx")
+        assert before.data_date == date(2026, 11, 12)
+        results = run(db, ["cbc"], Patched({"/FTDOpenData_Day": lambda _data: []}))
+        assert results[0].error and "空的" in results[0].error and results[0].rows == 0
+        db.expire_all()
+        status = db.get(DatasetStatus, "cbc-opendata/fx")
+        assert (status.data_date, status.rows) == (date(2026, 11, 12), 36)  # /meta/attributions keeps last_updated
+        assert count(db, FxRate) == 36
+
+
 def test_margins_are_stored_only_when_they_change(engine):
     with Session(engine) as db:
         run(db, ["taifex"])

@@ -524,8 +524,9 @@ FX_STALE_DAYS = 14  # longer than any Taiwan market closure (Lunar New Year), so
 
 def fx_notes(fx: FxBook, today: date | None = None) -> list[str]:
     """How USD amounts were converted: the central bank's closing rate (its attribution; FinMind / demo data only
-    under personal), or the fixed 31.5 when there is no series. A series that stopped more than
-    :data:`FX_STALE_DAYS` before ``today`` says so (later days reuse its last rate)."""
+    under personal), or the fixed 31.5 when there is no series. A series whose newest rate is
+    :data:`FX_STALE_DAYS` or more days before ``today`` (「比今天早 14 天以上」) says so (later days reuse its last
+    rate)."""
     from forliosa.datapolicy import labels, tagged
 
     if not fx.used_usd:
@@ -534,7 +535,7 @@ def fx_notes(fx: FxBook, today: date | None = None) -> list[str]:
     if point is None:
         return [FX_MISSING_NOTE]
     notes = ["USD/TWD 匯率：" + "、".join(labels(tagged(fx.source, "fx")))] if fx.source else []
-    if point[0] < (today or today_taipei()) - timedelta(days=FX_STALE_DAYS):
+    if point[0] <= (today or today_taipei()) - timedelta(days=FX_STALE_DAYS):
         notes.append(f"USD/TWD 匯率只到 {point[0].isoformat()}（{point[1].normalize():f}），之後的日子沿用這個匯率")
     return notes
 

@@ -563,12 +563,13 @@ class Archiver:
         """中央銀行〈銀行間新臺幣對美元收盤匯率〉 -> fx_rates USDTWD (source ``cbc-opendata``).
 
         Every response is the whole history since 2008-01-02, so the first run backfills it; later runs write
-        only days that are new or changed (a TAIFEX row of the same day becomes the central bank's)."""
-        rows = cbc.parse_fx_day(self._json(cbc.FX_DAY_URL))
+        only days that are new or changed (a TAIFEX row of the same day becomes the central bank's). An empty or
+        unparseable answer raises before anything is written, so ``dataset_status`` keeps the last good date."""
+        rows = cbc.parse_fx_day(self._json(cbc.FX_DAY_URL))  # never empty
         have = {(r.date, r.rate, r.source) for r in self.db.scalars(select(FxRate).where(FxRate.pair == cbc.PAIR))}
         changed = [{**r, "source": cbc.SOURCE} for r in rows if (r["date"], r["rate"], cbc.SOURCE) not in have]
         n = upsert(self.db, FxRate, changed, ["pair", "date"])
-        self._status(cbc.FX_DATASET, rows[-1]["date"] if rows else None, n)
+        self._status(cbc.FX_DATASET, rows[-1]["date"], n)
         return n
 
     def taifex_margins(self) -> int:

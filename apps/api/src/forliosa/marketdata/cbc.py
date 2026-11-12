@@ -32,11 +32,15 @@ PAIR = "USDTWD"
 def parse_fx_day(rows: Any) -> list[dict[str, Any]]:
     """FTDOpenData_Day -> ``[{date, pair: "USDTWD", rate}]`` sorted by date (one row per day).
 
-    Rows without a date or a positive rate are skipped. A non-empty answer in which no row parses (the fields
-    were renamed) raises :class:`ProviderUnavailable`, so the archive job records an error instead of 0 rows.
+    Rows without a date or a positive rate are skipped. Every valid answer is the whole history since 2008, so an
+    empty array (an upstream glitch) or one in which no row parses (the fields were renamed) raises
+    :class:`ProviderUnavailable`: the archive job records an error instead of a 0-row success that would erase the
+    dataset's last date.
     """
     if not isinstance(rows, list):
         raise ProviderUnavailable("中央銀行 FTDOpenData_Day 格式不符（不是陣列）")
+    if not rows:
+        raise ProviderUnavailable("中央銀行 FTDOpenData_Day 回應是空的（正常回應是 2008 年起的完整歷史）")
     out: dict[date, dict[str, Any]] = {}
     for r in rows:
         if not isinstance(r, dict):
@@ -46,6 +50,6 @@ def parse_fx_day(rows: Any) -> list[dict[str, Any]]:
         if d is None or rate is None or rate <= 0:
             continue
         out[d] = {"date": d, "pair": PAIR, "rate": rate}
-    if rows and not out:
+    if not out:
         raise ProviderUnavailable("中央銀行 FTDOpenData_Day 欄位不符（找不到 日期／NTD_USD）")
     return [out[d] for d in sorted(out)]
