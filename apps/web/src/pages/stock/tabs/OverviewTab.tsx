@@ -1,9 +1,9 @@
 import { Link } from "@tanstack/react-router"
 import { ArrowUpRightIcon, ChevronRightIcon } from "lucide-react"
-import { appToday } from "@/api"
+import { api, appToday } from "@/api"
 import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, MonthlyRevenue, Position, Quote } from "@/api/types"
-import { Section } from "@/components/section"
+import { DemoTag, Section } from "@/components/section"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
@@ -261,7 +261,7 @@ function News({ symbol }: { symbol: string }) {
   const rows = (news.data ?? []).slice(0, 3)
   if (news.isLoading) return <Skeleton className="h-28 w-full rounded-sm" />
   return (
-    <Section title="新聞" titleId="ov-news">
+    <Section title="新聞" titleId="ov-news" action={api.kind === "mock" ? <DemoTag title="示範標題，不是真實新聞" /> : undefined}>
       {rows.length === 0 ? (
         <p className="text-md text-ink-2">最近沒有相關新聞。</p>
       ) : (

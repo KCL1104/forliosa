@@ -219,7 +219,7 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
               aria-checked={kind === k}
               disabled={isIntraday && k === "candle"}
               onClick={() => setKind(k)}
-              className={cn("h-7 rounded-[3px] px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-9", kind === k && "bg-act text-act-fg")}
+              className={cn("h-7 rounded-[3px] px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:px-3", kind === k && "bg-act text-act-fg")}
             >
               {k === "line" ? "線" : "K 線"}
             </button>

@@ -1,6 +1,6 @@
 import NumberFlow from "@number-flow/react"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { ArrowLeftIcon, ChevronDownIcon, PlusIcon, StarIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, StarIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import { ApiError } from "@/api"
 import { useInstrument, useOverview, usePosition, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
@@ -254,7 +254,8 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
       onClick={() => ask.submit(`${inst.name}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
       className="ai-voice press mt-3 block max-w-full text-left text-lg leading-snug hover:underline hover:decoration-ai-rule hover:underline-offset-4 lg:text-xl"
     >
-      {why.data.headline} ›
+      {why.data.headline}
+      <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em]" />
     </button>
   )
 }
@@ -332,7 +333,8 @@ function PositionBlock({ inst, position: p }: { inst: InstrumentDetail; position
             </ul>
             <div className="mt-3 flex flex-wrap gap-2">
               <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm" })}>
-                在帳本中查看 ›
+                在帳本中查看
+                <ChevronRightIcon aria-hidden />
               </Link>
               <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
                 記一筆

@@ -40,7 +40,7 @@ export function RangeChips<T extends string>({
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
             className={cn(
-              "press h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:h-10",
+              "press h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:h-11 pointer-coarse:px-3",
               active && "bg-act font-medium text-act-fg hover:bg-act hover:text-act-fg",
             )}
           >
@@ -96,7 +96,7 @@ export function Segmented<T extends string>({
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
             className={cn(
-              "press relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 hover:bg-hov hover:text-ink max-lg:h-[38px] max-lg:flex-1 max-lg:px-2",
+              "press relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 hover:bg-hov hover:text-ink before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-[38px] max-lg:flex-1 max-lg:px-2",
               active && "bg-act font-medium text-act-fg hover:bg-act hover:text-act-fg",
             )}
           >

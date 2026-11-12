@@ -135,7 +135,7 @@ function Dock() {
   return (
     <>
       <div aria-hidden className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-[calc(env(safe-area-inset-bottom,0px)+108px)] bg-gradient-to-b from-transparent to-paper to-25%" />
-      <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom,0px)+6px)] z-30 flex h-16 gap-2">
+      <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom,0px)+6px)] z-30 mx-auto flex h-16 max-w-[520px] gap-2">
         <nav aria-label="主要" className="flex flex-1 rounded-full border border-rule bg-raised shadow-lift">
           {TABS.map((t) => {
             const active = t.match(pathname)

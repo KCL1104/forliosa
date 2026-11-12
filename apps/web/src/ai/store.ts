@@ -92,6 +92,13 @@ export const useAi = create<AiState>()(
             .slice(0, 20),
         ),
       }),
+      // 每次打開 app 從問候與建議開始（舊對話留在「紀錄」）；有待簽名草稿的對話例外，直接回到它
+      onRehydrateStorage: () => (state) => {
+        if (!state?.threadId) return
+        const thread = state.threads.find((t) => t.id === state.threadId)
+        const pending = thread?.messages.some((m) => m.draftId && state.drafts[m.draftId]?.status === "pending")
+        if (!pending) state.threadId = null
+      },
     },
   ),
 )
