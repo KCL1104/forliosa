@@ -3,6 +3,10 @@
 ``ai_analyst_views``: one entry per symbol per Taiwan trading day (``forliosa.ai.analyst``), deleted 24 hours after
 it was created. Only the verified items of one answer are kept (no history, no aggregates).
 
+Merging: ``0008_sec_edgar`` (branch ``wip/sec``) also follows ``0007``. When both are merged, set
+``down_revision = '0008'`` here (and ``Revises: 0008`` below) so there is one head; ``tests/test_migrations.py``
+fails while there are two.
+
 Revision ID: 0009
 Revises: 0007
 Create Date: 2026-11-12 20:00:00.000000

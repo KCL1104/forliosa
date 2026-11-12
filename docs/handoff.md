@@ -70,7 +70,10 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 
 ### 3.2 法人觀點後端（`/instruments/{symbol}/analyst-views`）
 
-- [x] **已完成（2026-11-12，分支 `wip/analyst`）**：`ai/analyst.py`、遷移 `0009`、獨立提示＋strict 工具、網址與報導日期核對、共用 24 小時、計入觸發者額度、ETF 回 422；2 次 live（2330.TW）搜尋正常但回報 0 筆，已加防護，**需再跑一次 `smoke --analyst 2330.TW NVDA` 確認**（見 `apps/api/CONTRACT_NOTES.md`「實測費用」）。
+- [x] **已完成（2026-11-12，分支 `wip/analyst`）**：`ai/analyst.py`、遷移 `0009`、獨立提示＋strict 工具、網址與報導日期核對、共用 24 小時、計入觸發者額度、ETF 回 422。
+- **live 驗證（2026-11-12）**：前兩次 2330.TW 回報 0 筆的根因已找到——strict 工具的選填欄位讓模型把目標價寫進 `url` 字串（原始回報 `"url": "https://…','target_price':3800,"`）；工具改成七個欄位全部必填（沒有的值填 `null`）、`url` 在前之後，`smoke --analyst 2330.TW NVDA` 兩檔都是 `ready`、各 5 筆核對過的項目（約 US$0.06、55 秒，見 `apps/api/CONTRACT_NOTES.md`「實測費用」第 3、4 次）。
+- 審查後補強：核對後一筆都沒留下時，只有在搜尋結果沒有**這檔**的評等標題、也沒有因網址／日期核對不到而刪掉的候選時才存成「查無」，否則 `unavailable`；「美系外資」「外資券商」等泛稱不列（**待產品負責人確認**，CONTRACT_NOTES 待確認 9）；大摩／摩根士丹利等別名去重；更多彙整站與評等頁不算報導；目標價與真實股價差太多（0.4–3 倍以外）當成其他幣別刪掉（內部過濾、不顯示）；網址日期不再把 `/年/月/數字編號` 讀成日期；前端「查不到」後收合再展開會重新讀取。
+- **合併注意**：`wip/sec` 的 `0008_sec_edgar` 和這裡的 `0009_ai_analyst_views` 都接在 `0007` 後面。兩個都合併後，把 `0009` 的 `down_revision` 改成 `'0008'`（docstring 的 `Revises:` 一起改），否則會有兩個 head；`tests/test_migrations.py` 會在這時失敗提醒。
 
 - 合約已定：`docs/api-contract.md`「法人觀點與美股基本面」段。GET 讀當日共用快取；POST 觸發 AI 網路搜尋；同一檔同一交易日全體共用、24 小時後刪除、計入觸發者額度；最多 5 筆、依日期新到舊、沒有日期或來源的不列。
 - 規則（`PRODUCT.md`、`docs/research/analyst-ratings.md`）：只引用第三方已公開的評級與目標價；AI 自己不給目標價；不算平均、上漲空間、不排名、不寫買賣提示；標示第三方觀點、非 Forliosa 建議。

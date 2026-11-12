@@ -105,7 +105,8 @@ def check_analyst(pool, settings, symbols: list[str]) -> int:
         started = time.monotonic()
         try:
             out = analyst.run_model(info, now_utc().astimezone(TAIPEI).date(), new_id("anv"), pool, settings,
-                                    record, thinking_display="summarized")
+                                    record, thinking_display="summarized",
+                                    reference=analyst.reference_price(md, info.symbol))
         except Exception as exc:  # errors never contain the key
             print(f"  ✗ {type(exc).__name__}：{getattr(exc, 'message', exc)}")
             failed = True
@@ -128,7 +129,8 @@ def check_analyst(pool, settings, symbols: list[str]) -> int:
         total = CallUsage()
         for _, _, u in calls:
             total.add(u)
-        print(f"--- 狀態 {out.status}（stop={out.stop_reason}）、{out.calls} 次呼叫（槽 "
+        print(f"--- 狀態 {out.status}{f'（{out.reason}）' if out.reason else ''}（stop={out.stop_reason}）、"
+              f"{out.calls} 次呼叫（槽 "
               f"{', '.join(f'#{s}' for s, _, _ in calls)}）、{elapsed:.1f} 秒；輸入 {total.input_tokens}、輸出 "
               f"{total.output_tokens}、搜尋 {total.web_search_requests} 次；估計 US${cost:.5f}")
         failed = failed or out.status != "ready"

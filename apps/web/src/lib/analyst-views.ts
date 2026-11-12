@@ -10,7 +10,7 @@ import { formatQuote } from "@/lib/tick"
 /** 後端沒有附免責文字時用的常數（和合約範例相同） */
 export const ANALYST_DISCLAIMER_FALLBACK = "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。"
 export const ANALYST_MAX_ITEMS = 5
-/** 後端實測（2026-11-12，2 次網路搜尋）一次生成約 13–17 秒；每 2.5 秒問一次 */
+/** 後端實測（2026-11-12，2–3 次網路搜尋）一次生成約 20–30 秒；每 2.5 秒問一次 */
 export const ANALYST_POLL_MS = 2500
 /** 搜尋超過這麼久還沒好：停止輪詢，請使用者稍後再打開（後端 5 分鐘沒完成會改成 `unavailable`） */
 export const ANALYST_TIMEOUT_MS = 90_000
@@ -99,6 +99,15 @@ export function analystReducer(s: AnalystState, e: AnalystEvent): AnalystState {
       if (s.phase !== "searching") return s
       return { ...s, phase: "error", inFlight: null, searchStartedAt: null, error: { message: "這次查得比平常久，稍後再打開看看。", code: "timeout", during: "get" } }
   }
+}
+
+/**
+ * 展開卡片時要不要 GET：第一次展開，或上次停在「查不到」／錯誤時（後端 10 分鐘後對 `unavailable` 回 `none`，
+ * 重新展開就會回到查詢按鈕）。已有結果（`ready`／`empty`）或搜尋中不重讀：當天共用同一份。
+ */
+export function loadOnOpen(s: AnalystState): boolean {
+  if (s.inFlight) return false
+  return s.phase === "idle" || s.phase === "unavailable" || s.phase === "error"
 }
 
 /** 輪詢：搜尋中、沒有請求在等時，下一步是再 GET 一次，或已經逾時 */

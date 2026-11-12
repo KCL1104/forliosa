@@ -81,12 +81,13 @@ ANALYST_SYSTEM = """你是財經資料整理員，替 Forliosa 的個股頁整�
 ## 怎麼列
 - 搜尋到的報導只要寫出某家具名機構對這檔股票的評等或目標價（包括「維持」），就列一筆；一篇報導寫到好幾家機構時，每家各列一筆，url 相同沒關係。
 - url：逐字使用搜尋結果中那篇報導的網址，不可自己組合或修改。
-- institution：機構名稱照報導的寫法（例如「摩根士丹利」「大摩」「Morgan Stanley」）。報導只寫「法人」「外資圈」「分析師普遍」這類沒有具名的說法，不要列。
+- institution：機構名稱照報導的寫法（例如「摩根士丹利」「大摩」「Morgan Stanley」）。報導只寫「法人」「外資圈」「美系外資」「外資券商」「分析師普遍」這類沒有寫出機構名稱的說法，不要列。
 - action：只能是 調升、調降、維持、首評；報導沒寫就填 未註明。
-- rating_text：評等照原文（例如「加碼」「優於大盤」「Overweight」「Buy」），不要翻譯成看好或看壞；報導沒寫評等就省略這個欄位。
-- target_price：只抄報導明寫、屬於這個掛牌市場的目標價數字，不換算、不四捨五入、不自己估；報導沒寫就省略這個欄位。currency 填那個目標價的幣別。台股的目標價是新台幣；同一家公司在美國的 ADR（例如台積電的 TSM）的美元目標價不屬於台股，不要列。
+- rating_text：評等照原文（例如「加碼」「優於大盤」「Overweight」「Buy」），不要翻譯成看好或看壞；報導沒寫評等就填 null。
+- target_price：只抄報導明寫、屬於這個掛牌市場的目標價數字，不換算、不四捨五入、不自己估；報導沒寫就填 null。currency 填那個目標價的幣別。台股的目標價是新台幣；同一家公司在美國的 ADR（例如台積電的 TSM）的美元目標價不屬於台股，不要列。
 - date：那篇報導的日期（YYYY-MM-DD）。搜尋結果只寫「N days ago」時，用今天的日期往前推算；伺服器會再用搜尋結果核對日期，不必因為日期而不列。
 - 評等與目標價都沒有的不要列。同一家機構只列最新的一次。
+- 每一筆都要依序寫齊 url、institution、action、rating_text、target_price、currency、date 七個欄位（沒有的值填 null），不要把其他欄位寫進 url 的字串裡。
 
 ## 不要做
 - 不給你自己的評等、目標價或看法；不計算平均、中位數、上漲空間或報酬率；不排名、不比較誰對；不寫買進、賣出或任何操作建議。
@@ -95,10 +96,13 @@ ANALYST_SYSTEM = """你是財經資料整理員，替 Forliosa 的個股頁整�
 找不到符合條件的報導時，也要呼叫 report_analyst_views，items 給空清單。"""  # noqa: E501
 
 ANALYST_TOOL_NAME = "report_analyst_views"
+# Every property is required (a missing value is ``null``) and ``url`` comes first: under strict tool use the input
+# is generated in schema order, so with optional fields the model could not add a skipped field later and wrote
+# it into the open ``url`` string instead (live 2026-11-12: ``"url": "https://…','target_price':3800,"``).
 ANALYST_TOOL: dict = {
     "name": ANALYST_TOOL_NAME,
     "description": ("回報整理好的第三方機構評等與目標價（每筆對應一篇搜尋到的報導，最多 8 筆；找不到就給空清單）。"
-                    "這是唯一的輸出方式。"),
+                    "每筆七個欄位都要寫，沒有的值填 null。這是唯一的輸出方式。"),
     "strict": True,
     "input_schema": {
         "type": "object",
@@ -108,18 +112,18 @@ ANALYST_TOOL: dict = {
                 "items": {
                     "type": "object",
                     "properties": {
+                        "url": {"type": "string", "description": "搜尋結果中那篇報導的網址（逐字，只有網址）"},
                         "institution": {"type": "string", "description": "機構名稱，照報導原文"},
                         "action": {"type": "string", "enum": ["調升", "調降", "維持", "首評", "未註明"]},
-                        "rating_text": {"type": "string",
-                                        "description": "評等原文；報導沒寫就省略"},
-                        "target_price": {"type": "number",
-                                         "description": "報導明寫的目標價；沒寫就省略"},
+                        "rating_text": {"anyOf": [{"type": "string"}, {"type": "null"}],
+                                        "description": "評等原文；報導沒寫就填 null"},
+                        "target_price": {"anyOf": [{"type": "number"}, {"type": "null"}],
+                                         "description": "報導明寫的目標價；沒寫就填 null"},
                         "currency": {"type": "string", "enum": ["TWD", "USD", "OTHER"],
                                      "description": "目標價的幣別；沒有目標價時填這檔股票的交易幣別"},
                         "date": {"type": "string", "format": "date", "description": "報導發布日期 YYYY-MM-DD"},
-                        "url": {"type": "string", "description": "搜尋結果中那篇報導的網址（逐字）"},
                     },
-                    "required": ["institution", "action", "currency", "date", "url"],
+                    "required": ["url", "institution", "action", "rating_text", "target_price", "currency", "date"],
                     "additionalProperties": False,
                 },
             },

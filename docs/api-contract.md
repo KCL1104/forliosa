@@ -470,7 +470,7 @@
 | 方法 | 路徑 | 說明 |
 |---|---|---|
 | GET | `/instruments/{symbol}/analyst-views` | 讀取當日共用結果；沒有時回 `status: "none"`。查不到（`unavailable`）超過 10 分鐘後也回 `none`，讓畫面重新出現查詢按鈕 |
-| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋並立刻回 `pending`（在背景產生，實測約 13–17 秒）；之後用 GET 輪詢。今天已經有 `pending`／`ready`（或 10 分鐘內的 `unavailable`）時直接回那一份，**不重查、不計費** |
+| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋並立刻回 `pending`（在背景產生，實測約 20–30 秒）；之後用 GET 輪詢。今天已經有 `pending`／`ready`（或 10 分鐘內的 `unavailable`）時直接回那一份，**不重查、不計費** |
 
 ```json
 {
@@ -479,7 +479,7 @@
   "as_of": "2026-11-12T14:05:00+08:00",       // 查詢完成時間（只有 ready 有）
   "expires_at": "2026-11-13T14:05:00+08:00",  // 建立後 24 小時，到時刪除（none 時為 null）
   "items": [
-    {"institution": "某外資券商", "action": "調升", "rating_text": "加碼", "target_price": 1350, "currency": "TWD",
+    {"institution": "範例證券", "action": "調升", "rating_text": "加碼", "target_price": 1350, "currency": "TWD",
      "date": "2026-11-10", "source_title": "報導標題", "url": "https://…"}
   ],
   "disclaimer": "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。",
@@ -489,7 +489,7 @@
 - **共用**：同一檔、同一個台股交易日（台北時間今天；週末與休市日算最近一個交易日）全體使用者共用一份，建立後 24 小時刪除。
 - **計費**：觸發搜尋的人算一題（`/ai/usage.messages_today`，和對話共用 `AI_DAILY_MESSAGE_LIMIT`），token 計入他的每月額度；其他人讀同一份不計。額度用完回 429 `ai_daily_limit`／`ai_monthly_budget`；沒有可用金鑰回 503 `ai_unavailable`；功能關閉（`AI_ANALYST_ENABLED=false` 或網路搜尋停用）回 200 `unavailable`＋說明，不計費。
 - **只有個股**：ETF 回 422 `analyst_views_stocks_only`（ETF 沒有個別機構的評等與目標價）；找不到商品 404。
-- **items**：最多 5 筆，依報導日期新到舊，同一家機構只留最新一筆。每筆的 `url` 必定是這次 AI 網路搜尋實際拿到的搜尋結果之一，`source_title` 是該搜尋結果自己的標題；`date` 是那篇報導的日期，由搜尋結果的網址日期或頁面日期核對（核對不到、超過 90 天、沒有具名機構、評等與目標價都沒有、目標價幣別不是這檔股票的交易幣別，或來源是評等彙整站／報價頁的，都不列）。`action` 是 調升／調降／維持／首評，報導沒寫為 `""`；`rating_text`、`target_price` 照報導原文，沒寫為 `null`；`currency` 是這檔股票的交易幣別。數字不換算、不平均、不比較。
-- **ready 且 items 是空的**＝近期查無附來源與日期的機構報導。模型回報「沒有」但搜尋結果的標題明顯有評等／目標價時，不宣稱「查無」，改回 `unavailable`。
+- **items**：最多 5 筆，依報導日期新到舊，同一家機構只留最新一筆（大摩／摩根士丹利／Morgan Stanley 這類常見別名算同一家；`institution` 照報導原文）。每筆的 `url` 必定是這次 AI 網路搜尋實際拿到的搜尋結果之一，`source_title` 是該搜尋結果自己的標題；`date` 是那篇報導的日期，由搜尋結果的網址日期或頁面日期核對（核對不到、超過 90 天、沒有具名機構——「美系外資」「外資券商」「Wall Street analysts」這類泛稱也算沒有具名——、評等與目標價都沒有、目標價幣別不是這檔股票的交易幣別，或來源是評等彙整站／報價頁／評等預測頁的，都不列）。`action` 是 調升／調降／維持／首評，報導沒寫為 `""`；`rating_text`、`target_price` 照報導原文，沒寫為 `null`；`currency` 是這檔股票的交易幣別。數字不換算、不平均、不比較。
+- **ready 且 items 是空的**＝近期查無附來源與日期的機構報導。核對後一筆都沒有，但搜尋結果裡有**這檔股票**的評等／目標價標題，或有候選只因網址或日期核對不到而被刪掉時，不宣稱「查無」，改回 `unavailable`（10 分鐘後可重查）；別檔股票的評等新聞不算。
 
 **美股基本面（SEC EDGAR）**：User-Agent 需含聯絡信箱，從環境變數 `SEC_CONTACT_EMAIL` 讀取，不寫進程式碼；請求頻率 ≤ 10 次／秒。端點與欄位待後端實作時補上（`/instruments/{symbol}/financials` 對美股回傳 companyfacts 摘要、`/instruments/{symbol}/events` 加入 8-K／10-Q／10-K 申報）。

@@ -14,6 +14,7 @@ import {
   analystReducer,
   formatTarget,
   hostOf,
+  loadOnOpen,
   nextPoll,
   ratingLine,
   viewDate,
@@ -61,9 +62,9 @@ function useAnalystViews(symbol: string) {
   }, [state, get])
   return {
     state,
-    /** 第一次展開才讀 */
+    /** 第一次展開，或上次查不到／出錯時重新展開，才讀 */
     ensureLoaded: () => {
-      if (state.phase === "idle" && !state.inFlight) get()
+      if (loadOnOpen(state)) get()
     },
     retry: () => (state.error?.during === "post" ? search() : get()),
     search,
