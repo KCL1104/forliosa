@@ -5,11 +5,13 @@ import type { EtfNav, InstrumentDetail, NavPoint } from "@/api/types"
 import { ChartTooltipBox } from "@/components/charts/chart-kit"
 import { Section } from "@/components/section"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useSourceNote } from "@/hooks/use-source-note"
 import { type ChartDay, chartDays, formatNav, formatPremium, NAV_MIN_POINTS, spanLabel } from "@/lib/etf-nav"
 import { AXIS_TICK } from "@/lib/chart"
 import { formatDate, formatDateShort, formatPercent } from "@/lib/format"
 import { formatQuote } from "@/lib/tick"
-import { KeyGrid, NotYet, Sources } from "./tabs/kit"
+import { KeyGrid, NotYet } from "./tabs/kit"
+import { sourceNotes } from "./text"
 
 const TRACKING_ERROR = "追蹤誤差不提供：標的指數的每日資料沒有開放授權。"
 const md = (d: string) => formatDateShort(d, false)
@@ -17,50 +19,69 @@ const md = (d: string) => formatDateShort(d, false)
 /**
  * 淨值與折溢價（台股 ETF）：金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉＋同一天的官方收盤價。
  * 折溢價不是價格漲跌，所以全部用墨色與文字「溢價／折價」，不用紅綠、不加 ▲▼。
+ * - `section`（估值分頁）：自己的區塊標題＋淨值・收盤・折溢價三格＋走勢。
+ * - `band`（總覽的鍵值帶）：淨值與折溢價已經在鍵值格裡，這裡只接著放走勢、說明與逐日數字（標題安靜）。
+ * 資料來源登記到頁尾。
  */
-export function EtfNavSection({ inst, titleId = "ov-premium" }: { inst: InstrumentDetail; titleId?: string }) {
+export function EtfNavSection({ inst, titleId, variant = "section" }: { inst: InstrumentDetail; titleId?: string; variant?: "section" | "band" }) {
   const overview = useOverview(inst.symbol)
   const n = overview.data?.etf_nav
+  useSourceNote(sourceNotes(n?.sources))
   if (overview.isLoading) return <Skeleton className="h-40 w-full rounded-sm" />
   if (!n) return null
+  if (variant === "band") {
+    const id = titleId ?? "ov-premium"
+    return (
+      <section aria-labelledby={id} className="mt-6">
+        <h3 id={id} className="text-md font-medium text-ink">
+          折溢價走勢
+        </h3>
+        {n.nav === null ? (
+          <div className="mt-1 flex flex-col gap-0.5 text-sm text-ink-2">
+            <p className="text-ink">{n.notes[0] ?? "還沒有這檔 ETF 的淨值"}</p>
+            <p>{TRACKING_ERROR}</p>
+          </div>
+        ) : (
+          <NavBody inst={inst} n={n} figures={false} />
+        )}
+      </section>
+    )
+  }
   return (
-    <Section title="淨值與折溢價" titleId={titleId}>
-      {n.nav === null ? (
-        <NotYet title={n.notes[0] ?? "還沒有這檔 ETF 的淨值"}>{TRACKING_ERROR}</NotYet>
-      ) : (
-        <NavBody inst={inst} n={n} />
-      )}
-      <Sources items={n.sources} />
+    <Section title="淨值與折溢價" titleId={titleId ?? "val-premium"}>
+      {n.nav === null ? <NotYet title={n.notes[0] ?? "還沒有這檔 ETF 的淨值"}>{TRACKING_ERROR}</NotYet> : <NavBody inst={inst} n={n} />}
     </Section>
   )
 }
 
-function NavBody({ inst, n }: { inst: InstrumentDetail; n: EtfNav }) {
+function NavBody({ inst, n, figures = true }: { inst: InstrumentDetail; n: EtfNav; figures?: boolean }) {
   const price = (v: number | null | undefined) => formatQuote(v, inst.market, inst.type)
   const at = n.history.at(-1)
   const sameDay = n.premium_date !== null && n.premium_date === n.nav_date && n.premium_date === n.close_date
   const chart = n.history.length >= NAV_MIN_POINTS
   return (
     <>
-      <KeyGrid
-        items={[
-          { label: n.nav_date ? `淨值（${md(n.nav_date)}）` : "淨值", value: formatNav(n.nav), title: n.fund_name ?? undefined },
-          { label: n.close_date ? `收盤（${md(n.close_date)}）` : "收盤", value: price(n.close) },
-          { label: n.premium_date ? `折溢價（${md(n.premium_date)}）` : "折溢價", value: formatPremium(n.premium_pct), wide: true },
-        ]}
-      />
+      {figures && (
+        <KeyGrid
+          items={[
+            { label: n.nav_date ? `淨值（${md(n.nav_date)}）` : "淨值", value: formatNav(n.nav), title: n.fund_name ?? undefined },
+            { label: n.close_date ? `收盤（${md(n.close_date)}）` : "收盤", value: price(n.close) },
+            { label: n.premium_date ? `折溢價（${md(n.premium_date)}）` : "折溢價", value: formatPremium(n.premium_pct), wide: true },
+          ]}
+        />
+      )}
       {at && !sameDay && n.nav_date && n.close_date && (
-        <p className="mt-3 max-w-prose text-md text-ink">
+        <p className="mt-2 max-w-prose text-md text-ink">
           最新的淨值是 {md(n.nav_date)}、收盤是 {md(n.close_date)}；折溢價用兩者都有的 {md(at.t)} 計算（收盤 {price(at.close)}、淨值 {formatNav(at.nav)}）。
         </p>
       )}
       {chart && <PremiumChart points={n.history} missing={n.history_missing} price={price} />}
-      {n.notes.map((note) => (
-        <p key={note} className="mt-3 text-md text-ink-2">
-          {note}
-        </p>
-      ))}
-      <p className="mt-3 text-md text-ink-2">{TRACKING_ERROR}</p>
+      <div className="mt-2 flex flex-col gap-0.5 text-sm text-ink-2">
+        {n.notes.map((note) => (
+          <p key={note}>{note}</p>
+        ))}
+        <p>{TRACKING_ERROR}</p>
+      </div>
       {n.history.length > 0 && <DailyTable inst={inst} points={n.history} />}
     </>
   )
@@ -82,8 +103,8 @@ function PremiumChart({ points, missing, price }: { points: NavPoint[]; missing:
   const span = spanLabel(points, missing)
   const summary = `${span}的折溢價：最低 ${formatPremium(lo.premium_pct)}（${md(lo.t)}），最高 ${formatPremium(hi.premium_pct)}（${md(hi.t)}），${md(last.t)} ${formatPremium(last.premium_pct)}`
   return (
-    <figure className="mt-5">
-      <figcaption className="text-md text-ink">{span}</figcaption>
+    <figure className="mt-3">
+      <figcaption className="text-sm text-ink-2">{span}</figcaption>
       <div className="mt-2 h-[132px] w-full" role="img" aria-label={summary}>
         <ResponsiveContainer width="100%" height="100%">
           <LineChart data={chartDays(points, missing)} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -124,8 +145,10 @@ function PremiumChart({ points, missing, price }: { points: NavPoint[]; missing:
           </LineChart>
         </ResponsiveContainer>
       </div>
-      <p className="mt-1 text-sm text-ink-2">
-        區間 {formatPremium(lo.premium_pct)}（{md(lo.t)}）到 {formatPremium(hi.premium_pct)}（{md(hi.t)}）
+      <p className="num mt-1 text-sm text-ink">
+        <span className="text-ink-2">區間</span> {formatPremium(lo.premium_pct)}
+        <span className="text-ink-2">（{md(lo.t)}）到</span> {formatPremium(hi.premium_pct)}
+        <span className="text-ink-2">（{md(hi.t)}）</span>
       </p>
     </figure>
   )
@@ -135,19 +158,19 @@ function PremiumChart({ points, missing, price }: { points: NavPoint[]; missing:
 function DailyTable({ inst, points }: { inst: InstrumentDetail; points: NavPoint[] }) {
   const price = (v: number) => formatQuote(v, inst.market, inst.type)
   return (
-    <details className="group mt-2">
+    <details className="group mt-1">
       <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sm text-sm text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
         逐日數字（{points.length} 天）
         <ChevronDownIcon aria-hidden className="size-4 transition-transform duration-150 group-open:rotate-180 motion-reduce:transition-none" />
       </summary>
-      <div className="max-h-72 overflow-y-auto border-t border-rule">
+      <div className="max-h-72 overflow-y-auto">
         <table className="w-full text-md">
-          <thead className="sticky top-0 bg-paper text-sm text-ink-2">
-            <tr className="border-b border-rule">
-              <th scope="col" className="py-2 text-left font-normal">日期</th>
-              <th scope="col" className="py-2 text-right font-normal">收盤</th>
-              <th scope="col" className="py-2 text-right font-normal">淨值</th>
-              <th scope="col" className="py-2 text-right font-normal">折溢價</th>
+          <thead className="form-head sticky top-0 bg-paper">
+            <tr>
+              <th scope="col" className="h-10 text-left">日期</th>
+              <th scope="col" className="h-10 text-right">收盤</th>
+              <th scope="col" className="h-10 text-right">淨值</th>
+              <th scope="col" className="h-10 text-right">折溢價</th>
             </tr>
           </thead>
           <tbody className="num">

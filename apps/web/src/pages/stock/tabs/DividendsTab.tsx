@@ -10,7 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { formatDateShort, formatMoney, formatPercent } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
-import { KeyGrid, TabLead } from "./kit"
+import { Fig, KeyGrid, TabLead } from "./kit"
 
 /** 股利：我的（已領、下次可領、二代健保；查看模式是「爸爸的股利」）＋歷年配息 */
 export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
@@ -47,7 +47,15 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
     <div className="flex flex-col gap-12">
       <div>
         <TabLead>
-          {next ? `${formatDateShort(next.ex_dividend_date!)} 除息，每股 ${unit}${next.cash_dividend} 元。` : ttm > 0 ? `過去一年每股共配 ${unit}${Math.round(ttm * 100) / 100} 元。` : null}
+          {next ? (
+            <>
+              {formatDateShort(next.ex_dividend_date!)} 除息，每股 <Fig>{unit}{next.cash_dividend}</Fig> 元。
+            </>
+          ) : ttm > 0 ? (
+            <>
+              過去一年每股共配 <Fig>{unit}{Math.round(ttm * 100) / 100}</Fig> 元。
+            </>
+          ) : null}
         </TabLead>
         <KeyGrid
           items={[
@@ -74,8 +82,8 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
             ]}
           />
         ) : (
-          <p className="text-base">
-            持有 {us ? "1 股" : "1 張"}，以過去一年的配息估算，一年約可領 <span className="num font-medium">{ttm > 0 ? formatMoney(ttm * lot, { currency: cur }) : "—"}</span>。
+          <p className="text-base text-ink">
+            持有 {us ? "1 股" : "1 張"}，以過去一年的配息估算，一年約可領 <Fig>{ttm > 0 ? formatMoney(ttm * lot, { currency: cur }) : "—"}</Fig>。
             <span className="text-ink-2">未來配息不一定相同。</span>
           </p>
         )}
@@ -105,12 +113,12 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
         <div className="overflow-x-auto">
           <table className="w-full min-w-[480px] border-collapse text-md">
             <thead>
-              <tr className="border-b border-rule text-sm text-ink-2">
-                <th scope="col" className="h-9 text-left font-normal">期別</th>
-                <th scope="col" className="text-right font-normal">現金股利</th>
-                <th scope="col" className="text-right font-normal">股票股利</th>
-                <th scope="col" className="text-right font-normal">除息日</th>
-                <th scope="col" className="text-right font-normal">發放日</th>
+              <tr className="form-head">
+                <th scope="col" className="h-10 text-left">期別</th>
+                <th scope="col" className="h-10 text-right">現金股利</th>
+                <th scope="col" className="h-10 text-right">股票股利</th>
+                <th scope="col" className="h-10 text-right">除息日</th>
+                <th scope="col" className="h-10 text-right">發放日</th>
               </tr>
             </thead>
             <tbody>

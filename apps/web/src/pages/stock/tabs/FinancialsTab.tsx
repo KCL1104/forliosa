@@ -10,7 +10,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
 import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent, formatRevenueThousands } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { NotYet, Sources, TabLead } from "./kit"
+import { DataNotes } from "@/components/data-notes"
+import { useSourceNote } from "@/hooks/use-source-note"
+import { sourceNotes } from "../text"
+import { Fig, NotYet, TabLead } from "./kit"
 
 /**
  * 財務：月營收（放最上面）→ 季報／年報 → 資產負債與現金流。ETF 改成「成分股與配息」。
@@ -53,8 +56,14 @@ function Revenue({ symbol }: { symbol: string }) {
   const n = streak(all)
   const data = rows.map((r) => ({ ...r, yi: r.revenue / 1e5 }))
   return (
-    <Section title="月營收" titleId="fin-rev" aside="單位：新台幣（公開資訊觀測站）">
-      <TabLead>{n >= 2 ? `${Number(last.period.slice(5))} 月營收年增 ${formatPercent(last.yoy_pct, { decimals: 0 })}，連續 ${n} 個月成長。` : null}</TabLead>
+    <Section title="月營收" titleId="fin-rev" aside="單位：新台幣">
+      <TabLead>
+        {n >= 2 ? (
+          <>
+            {Number(last.period.slice(5))} 月營收年增 <Fig>{formatPercent(last.yoy_pct, { decimals: 0 })}</Fig>，連續 <Fig>{n}</Fig> 個月成長。
+          </>
+        ) : null}
+      </TabLead>
       <div className="h-[220px] w-full">
         <ResponsiveContainer width="100%" height="100%">
           <BarChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
@@ -88,12 +97,12 @@ function Revenue({ symbol }: { symbol: string }) {
         <table className="w-full min-w-[520px] border-collapse text-md">
           <caption className="sr-only">近 12 個月營收</caption>
           <thead>
-            <tr className="border-b border-rule text-sm text-ink-2">
-              <th scope="col" className="h-9 text-left font-normal">月份</th>
-              <th scope="col" className="text-right font-normal">營收</th>
-              <th scope="col" className="text-right font-normal">月增</th>
-              <th scope="col" className="text-right font-normal">年增</th>
-              <th scope="col" className="text-right font-normal">累計年增</th>
+            <tr className="form-head">
+              <th scope="col" className="h-10 text-left">月份</th>
+              <th scope="col" className="h-10 text-right">營收</th>
+              <th scope="col" className="h-10 text-right">月增</th>
+              <th scope="col" className="h-10 text-right">年增</th>
+              <th scope="col" className="h-10 text-right">累計年增</th>
             </tr>
           </thead>
           <tbody>
@@ -130,6 +139,7 @@ function Statements({ symbol }: { symbol: string }) {
   const [period, setPeriod] = useState<FinancialsPeriod>("quarterly")
   const fin = useFinancials(symbol, period)
   const f = fin.data
+  useSourceNote(sourceNotes(f?.sources))
   // 台股金額是新台幣千元；美股（SEC EDGAR）是美元，期間是公司的會計年度
   const usd = f?.currency === "USD"
   const unit = f?.amount_unit ?? 1000
@@ -159,24 +169,27 @@ function Statements({ symbol }: { symbol: string }) {
       ) : (
         <>
           <TabLead>
-            {epsNow !== null && epsPrev !== null && epsPrev > 0
-              ? `${f.periods[lastIdx]} EPS ${epsNow.toFixed(2)} ${usd ? "美元" : "元"}，${period === "quarterly" ? "比去年同季" : "比前一年"}${epsNow >= epsPrev ? "成長" : "減少"} ${formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}。`
-              : null}
+            {epsNow !== null && epsPrev !== null && epsPrev > 0 ? (
+              <>
+                {f.periods[lastIdx]} EPS <Fig>{epsNow.toFixed(2)}</Fig> {usd ? "美元" : "元"}，{period === "quarterly" ? "比去年同季" : "比前一年"}
+                {epsNow >= epsPrev ? "成長" : "減少"} <Fig>{formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}</Fig>。
+              </>
+            ) : null}
           </TabLead>
           <div className="overflow-x-auto">
             <table className="w-full min-w-[560px] border-collapse text-md">
               <thead>
-                <tr className="border-b border-rule text-sm text-ink-2">
-                  <th scope="col" className="h-9 text-left font-normal">
+                <tr className="form-head">
+                  <th scope="col" className="h-10 text-left">
                     項目
                   </th>
                   {shown.map((p, i) => {
                     const end = usd ? ends[offset + i] : null
                     return (
-                      <th key={p} scope="col" className={cn("num text-right font-normal", end && "py-1.5")}>
+                      <th key={p} scope="col" className={cn("num h-10 text-right", end && "pt-1.5 pb-2.5")}>
                         {p}
                         {/* 美股的會計年度不一定跟日曆年：標出這一期結束的日期 */}
-                        {end && <span className="block text-xs">至 {formatDate(end)}</span>}
+                        {end && <span className="block">至 {formatDate(end)}</span>}
                       </th>
                     )
                   })}
@@ -201,25 +214,11 @@ function Statements({ symbol }: { symbol: string }) {
               </tbody>
             </table>
           </div>
-          {usd ? (
-            // 美股的說明（會計年度、單位、推算方式）較長：逐行列出，和資料來源分開
-            <>
-              <ul className="mt-3 flex flex-col gap-0.5 text-xs text-ink-2">
-                {(f.notes ?? []).map((n) => (
-                  <li key={n}>{n}</li>
-                ))}
-              </ul>
-              <Sources className="mt-1" items={f.sources} />
-            </>
-          ) : (
-            <div className="mt-2 flex flex-wrap items-center gap-3">
-              {f.is_demo && <DemoTag />}
-              <Sources className="mt-0" items={[...(f.notes ?? []), ...f.sources]} />
-            </div>
-          )}
-          <p className="mt-1 text-xs text-ink-2">
-            {usd ? "10-Q、10-K 與財報新聞稿（8-K）的原文請見「事件」分頁的 SEC 連結；不提供分析師預估。" : "法說會簡報與影音請見「事件」分頁的連結；不提供分析師預估。"}
-          </p>
+          {/* 說明（會計年度、單位、推算方式）照原文放在表下；資料來源登記到頁尾 */}
+          <div className="mt-2 flex flex-wrap items-start gap-3">
+            {f.is_demo && <DemoTag />}
+            <DataNotes notes={f.notes} />
+          </div>
         </>
       )}
     </Section>

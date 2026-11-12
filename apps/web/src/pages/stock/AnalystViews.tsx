@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { ArrowUpRightIcon, ChevronDownIcon, CircleAlertIcon, RotateCcwIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon, SearchIcon } from "lucide-react"
 import { useCallback, useEffect, useReducer, useState } from "react"
 import { ApiError, api, appToday } from "@/api"
 import type { AnalystView, InstrumentDetail } from "@/api/types"
@@ -92,11 +92,11 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
           aria-expanded={open}
           aria-controls="ov-analyst-body"
           onClick={toggle}
-          className="group flex min-h-11 w-full items-end gap-x-3 border-b border-rule pb-2 text-left"
+          className="group flex min-h-10 w-full items-end gap-x-3 border-b border-rule pb-2 text-left"
         >
-          <span className="text-xl font-bold">法人觀點</span>
+          <span className="text-lg font-bold">法人觀點</span>
           <span className="pb-px text-sm font-normal text-ink-2">第三方意見</span>
-          <ChevronDownIcon aria-hidden className={cn("mb-1 ml-auto size-[18px] shrink-0 text-ink-2 transition-transform duration-200 group-hover:text-ink", open && "rotate-180")} />
+          <ChevronDownIcon aria-hidden className={cn("mb-0.5 ml-auto size-[18px] shrink-0 text-ink-2 transition-transform duration-200 group-hover:text-ink", open && "rotate-180")} />
         </button>
       </h2>
       {open && (
@@ -144,7 +144,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
     case "searching":
       return (
         <div>
-          <p className="ai-voice max-w-prose text-xl leading-snug">正在找近期媒體報導的法人觀點，找到的每一筆都會附上來源。</p>
+          <p className="max-w-prose text-base text-ink">正在找近期媒體報導的法人觀點，找到的每一筆都會附上來源。</p>
           <p className="mt-2 flex min-h-6 items-center gap-2 text-sm text-ink-2">
             {/* 靜止的紫點＋寫明正在做什麼（不用脈動假裝即時） */}
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-ai" />
@@ -171,11 +171,8 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
     case "unavailable":
       return (
         <>
-          <p className="flex items-start gap-2 text-md text-ink">
-            <CircleAlertIcon aria-hidden className="mt-1 size-4 shrink-0 text-ink-2" />
-            <span>法人觀點暫時查不到，稍後再打開看看。</span>
-          </p>
-          <DataNotes notes={[...(notes ?? []), ...(state.error ? [state.error.message] : [])]} className="mt-1 pl-6" />
+          <p className="text-md text-ink">法人觀點暫時查不到，稍後再打開看看。</p>
+          <DataNotes notes={[...(notes ?? []), ...(state.error ? [state.error.message] : [])]} className="mt-1" />
         </>
       )
     case "error":
@@ -187,7 +184,6 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
           </p>
           {state.error?.code !== "ai_daily_limit" && state.error?.code !== "ai_monthly_budget" && (
             <Button variant="outline" size="sm" onClick={onRetry}>
-              <RotateCcwIcon />
               再試一次
             </Button>
           )}
@@ -212,7 +208,7 @@ function SearchPrompt({ onSearch }: { onSearch: () => void }) {
           : null
   return (
     <div className="flex flex-col items-start gap-3">
-      <p className="max-w-prose text-md text-ink-2">近期媒體報導的機構評等與目標價，最多 5 筆，每筆附報導日期與原文連結。</p>
+      <p className="max-w-prose text-md text-ink">近期媒體報導的機構評等與目標價，最多 5 筆，每筆附報導日期與原文連結。</p>
       <Button variant="outline" onClick={onSearch} disabled={off}>
         <SearchIcon aria-hidden className="text-ai" />
         查詢近期法人觀點
@@ -225,8 +221,8 @@ function SearchPrompt({ onSearch }: { onSearch: () => void }) {
 function Footer({ asOf, notes }: { asOf?: string | null; notes?: string[] }) {
   return (
     <div className="mt-2.5 flex flex-col gap-0.5">
-      {asOf && <p className="num text-xs text-ink-2">查詢時間 {formatDateTime(asOf)}・以原始報導為準</p>}
-      <DataNotes notes={notes} className="text-xs" />
+      {asOf && <p className="num text-sm text-ink-2">查詢時間 {formatDateTime(asOf)}・以原始報導為準</p>}
+      <DataNotes notes={notes} />
     </div>
   )
 }
@@ -236,8 +232,7 @@ function SourceLink({ v, className }: { v: AnalystView; className?: string }) {
   return (
     <a href={v.url} target="_blank" rel="noopener noreferrer" className={cn("group inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-sm", className)}>
       <span className="min-w-0 truncate group-hover:underline">{v.source_title}</span>
-      {host && <span className="num shrink-0 text-xs text-ink-2">{host}</span>}
-      <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0 text-ink-2" />
+      {host && <span className="num shrink-0 text-sm text-ink-2">{host}</span>}
       <span className="sr-only">（另開新視窗）</span>
     </a>
   )
@@ -246,10 +241,10 @@ function SourceLink({ v, className }: { v: AnalystView; className?: string }) {
 /** 桌面：格線表（日期・機構・評等・目標價・來源），評等與目標價照原文，不上色、不排序以外的加工 */
 function ViewsTable({ items }: { items: AnalystView[] }) {
   const today = appToday()
-  const th = "h-10 border-b border-rule text-sm font-normal text-ink-2"
+  const th = "h-10"
   return (
     <table className="w-full table-fixed border-collapse max-md:hidden" aria-label="法人觀點">
-      <thead>
+      <thead className="form-head">
         <tr>
           <th scope="col" className={cn(th, "w-[76px] text-left")}>日期</th>
           <th scope="col" className={cn(th, "w-[18%] text-left")}>機構</th>
@@ -261,7 +256,7 @@ function ViewsTable({ items }: { items: AnalystView[] }) {
       <tbody>
         {items.map((v) => (
           <tr key={`${v.date}-${v.institution}-${v.url}`} className="border-b border-rule">
-            <td className="num h-[52px] py-2 text-md text-ink-2">{viewDate(v.date, today)}</td>
+            <td className="num h-[52px] py-2 text-md">{viewDate(v.date, today)}</td>
             <th scope="row" className="truncate py-2 pr-3 text-left font-medium">{v.institution}</th>
             <td className="truncate py-2 pr-3">{ratingLine(v)}</td>
             <td className="num py-2 pr-6 text-right whitespace-nowrap">{formatTarget(v.target_price, v.currency)}</td>

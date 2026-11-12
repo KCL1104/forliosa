@@ -32,6 +32,7 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useResolvedTheme } from "@/hooks/use-theme"
+import { useSourceNote } from "@/hooks/use-source-note"
 import { cssVarColor } from "@/lib/css-color"
 import { formatDate, formatNumber, formatPercent, formatPrice } from "@/lib/format"
 import { formatQuote } from "@/lib/tick"
@@ -39,6 +40,7 @@ import { dayTime, importantMoments, movingAverage } from "@/lib/chart-math"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly } from "@/api/view-as"
+import { sourceNotes } from "./text"
 
 export type ChartRange = "1D" | HistoryRange
 const RANGES: { value: ChartRange; label: string }[] = [
@@ -61,6 +63,9 @@ const COMPARES = [
   { value: "^TAIEXTR", label: "加權報酬指數" },
   { value: "0050.TW", label: "元大台灣50" },
 ] as const
+
+/** 圖表庫的顯名（Apache-2.0 的 NOTICE 要求標示並連到 TradingView）：登記到頁尾的資料來源 */
+const CHART_LIBRARY = { name: "TradingView Lightweight Charts™", licence: "Apache-2.0", href: "https://www.tradingview.com/" }
 
 /** 台北時間的「09:01」當成 UTC 顯示（圖表軸以 UTC 呈現） */
 const minuteTime = (date: string, hm: string, us: boolean) => {
@@ -99,6 +104,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const showMine = (!!position || marks.length > 0) && !privacy
   const showAvg = !!position && !privacy
   const points = intraday.data?.points ?? []
+  useSourceNote([CHART_LIBRARY, ...sourceNotes(history.data?.sources)])
 
   useEffect(() => {
     const el = box.current
@@ -108,6 +114,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
     const fall = cssVarColor("--fall")
     const ink = cssVarColor("--ink")
     const ink2 = cssVarColor("--ink-2")
+    // 軸上的標籤（最後價、均價、參考價、十字線）：選取語法的底色——淺色是墨色實底，深色是格線藍底，不是白色實塊
+    const labelBg = cssVarColor("--on-bg")
+    const labelFg = cssVarColor("--on-fg")
     const chart = createChart(el, {
       autoSize: true,
       layout: {
@@ -120,7 +129,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       grid: { vertLines: { visible: false }, horzLines: { color: cssVarColor("--chart-grid") } },
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.1, bottom: volume && !isIntraday ? 0.24 : 0.08 }, mode: comparing ? PriceScaleMode.Percentage : PriceScaleMode.Normal },
       timeScale: { borderVisible: false, rightOffset: 2, fixLeftEdge: true, fixRightEdge: true, timeVisible: isIntraday, secondsVisible: false },
-      crosshair: { mode: CrosshairMode.Magnet, vertLine: { color: ink2, labelBackgroundColor: ink }, horzLine: { color: ink2, labelBackgroundColor: ink } },
+      crosshair: { mode: CrosshairMode.Magnet, vertLine: { color: ink2, labelBackgroundColor: labelBg }, horzLine: { color: ink2, labelBackgroundColor: labelBg } },
       localization: { locale: "zh-TW", priceFormatter: (p: number) => (comparing ? `${p >= 0 ? "+" : ""}${p.toFixed(1)}%` : formatQuote(p, inst.market, inst.type)), dateFormat: "yyyy/MM/dd" },
       handleScroll: { vertTouchDrag: false },
     })
@@ -129,10 +138,11 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       const ref = intraday.data?.reference_price ?? intraday.data?.prev_close ?? points[0]!.price
       const last = points.at(-1)!.price
       const line = chart.addSeries(LineSeries, { color: last >= ref ? rise : fall, lineWidth: 2, priceLineVisible: false, lastValueVisible: true })
+      const axisLabel = { axisLabelColor: labelBg, axisLabelTextColor: labelFg }
       const us = inst.market === "US"
       line.setData(points.map((p) => ({ time: minuteTime(intraday.data!.date, p.t, us), value: p.price })))
-      line.createPriceLine({ price: ref, color: ink2, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "參考價" })
-      if (showAvg) line.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價" })
+      line.createPriceLine({ price: ref, color: ink2, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "參考價", ...axisLabel })
+      if (showAvg) line.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價", ...axisLabel })
       chart.timeScale().fitContent()
       const byTime = new Map(points.map((p) => [minuteTime(intraday.data!.date, p.t, us), p]))
       chart.subscribeCrosshairMove((e) => {
@@ -152,9 +162,14 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
     const main =
       kind === "candle" && !comparing
         ? chart.addSeries(CandlestickSeries, { upColor: rise, downColor: fall, wickUpColor: rise, wickDownColor: fall, borderVisible: false, priceLineVisible: false, autoscaleInfoProvider })
-        : chart.addSeries(LineSeries, { color: ink, lineWidth: 2, priceLineVisible: false, autoscaleInfoProvider })
+        : chart.addSeries(LineSeries, { color: ink, lineWidth: 2, priceLineVisible: false, lastValueVisible: false, autoscaleInfoProvider })
     if (kind === "candle" && !comparing) main.setData(candles.map((c) => ({ time: dayTime(c.t), open: c.o, high: c.h, low: c.l, close: c.c })))
     else main.setData(candles.map((c) => ({ time: dayTime(c.t), value: c.c })))
+    // 線圖的最後價：用價格線畫軸上的標籤（不畫線），底色跟著選取語法（線本身的顏色在深色是淡色，會變成白色實塊）
+    const axisLabel = { axisLabelColor: labelBg, axisLabelTextColor: labelFg }
+    if (!(kind === "candle" && !comparing)) {
+      main.createPriceLine({ price: candles.at(-1)!.c, color: ink, lineVisible: false, axisLabelVisible: true, title: "", ...axisLabel })
+    }
 
     if (comparing) {
       const cmp = chart.addSeries(LineSeries, { color: cssVarColor("--chart-bench"), lineWidth: 2, lineStyle: LineStyle.Dashed, priceLineVisible: false, lastValueVisible: true })
@@ -185,7 +200,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
         else if (m.type === "sell") markers.push({ time: dayTime(t), position: "aboveBar", color: ink, shape: "arrowDown", text: "S" })
         else markers.push({ time: dayTime(t), position: "aboveBar", color: ink2, shape: "circle", text: "D", size: 0.6 })
       }
-      if (showAvg && !comparing) main.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價" })
+      if (showAvg && !comparing) main.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價", ...axisLabel })
     }
     if (moments) {
       for (const m of momentList) markers.push({ time: dayTime(m.t), position: m.ret >= 0 ? "aboveBar" : "belowBar", color: cssVarColor("--chart-ochre"), shape: "circle", size: 0, text: "◆" })
@@ -213,8 +228,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
 
   return (
     <section aria-label="走勢圖" className="mt-6">
-      <div className="flex flex-wrap items-center gap-2">
-        <div role="radiogroup" aria-label="圖表類型" className="flex rounded-sm border border-ctl p-0.5">
+      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+        <div role="radiogroup" aria-label="圖表類型" className="flex gap-0.5 rounded-sm border border-ctl p-0.5">
           {(["line", "candle"] as const).map((k) => (
             <button
               key={k}
@@ -223,7 +238,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
               aria-checked={kind === k}
               disabled={isIntraday && k === "candle"}
               onClick={() => setKind(k)}
-              className={cn("h-7 rounded-[3px] px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:px-3", kind === k && "bg-act text-act-fg")}
+              className="sel-chip h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:px-3"
             >
               {k === "line" ? "線" : "K 線"}
             </button>
@@ -264,18 +279,21 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
             </DropdownMenuCheckboxItem>
           </DropdownMenuContent>
         </DropdownMenu>
-        <button
-          type="button"
-          aria-pressed={moments}
-          disabled={isIntraday}
-          onClick={() => setMoments(!moments)}
-          className="press ml-auto inline-flex h-8 items-center gap-1.5 rounded-sm px-2 text-sm text-ink-2 hover:bg-hov aria-pressed:text-ink disabled:opacity-40 pointer-coarse:h-10"
-        >
-          <span aria-hidden className={cn(moments ? "text-chart-ochre" : "text-ctl")}>
-            ◆
-          </span>
-          重要時刻
-        </button>
+        {/* 開關和「線／K 線」同一種外框：按下＝選取語法 (b)，◆ 是圖上標記的圖例 */}
+        <div className="ml-auto flex rounded-sm border border-ctl p-0.5">
+          <button
+            type="button"
+            aria-pressed={moments}
+            disabled={isIntraday}
+            onClick={() => setMoments(!moments)}
+            className="press sel-chip inline-flex h-7 items-center gap-1.5 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10"
+          >
+            <span aria-hidden className={cn(moments ? "text-chart-ochre" : "text-ctl")}>
+              ◆
+            </span>
+            重要時刻
+          </button>
+        </div>
       </div>
 
       <p className="num mt-2 flex min-h-5 flex-wrap gap-x-3 text-sm text-ink-2" aria-live="off">
@@ -313,15 +331,17 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <RangeChips label="區間" value={range} options={RANGES} onChange={setRange} />
-        <p className="ml-auto flex flex-wrap gap-x-3 text-xs text-ink-2">
+        <p className="ml-auto flex flex-wrap gap-x-3 text-sm text-ink-2">
           {showMine && !isIntraday && !empty && (showAvg || marks.some((m) => candles.length > 0 && m.date >= candles[0]!.t)) && <span>B 買進・S 賣出・D 股利{showAvg && "・┈ 均價"}</span>}
           {moments && !isIntraday && momentList.length > 0 && <span>◆ 單日漲跌 ≥ 3%</span>}
           {comparing && <span>- - {COMPARES.find((c) => c.value === compare)?.label}</span>}
           {!comparing && kind === "candle" && mas.length > 0 && <span>{mas.map((n) => `MA${n}`).join("・")}</span>}
         </p>
       </div>
-      {!isIntraday && !empty && <DataNotes notes={[...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])]} className="mt-1 text-xs" />}
-      <p className="mt-1 text-xs text-ink-2">價格為未還原收盤價。圖表由 TradingView Lightweight Charts™ 繪製。</p>
+      <DataNotes
+        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), "價格為未還原收盤價。"] : []}
+        className="mt-1"
+      />
     </section>
   )
 }
@@ -333,7 +353,7 @@ function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
     <div className="flex h-full flex-col items-start justify-center gap-2 border-y border-dashed border-rule px-1">
       <p className="font-medium">{us ? "美股走勢暫時沒有" : "走勢資料累積中"}</p>
       <DataNotes notes={notes} className="max-w-prose text-md" />
-      {!us && <p className="max-w-prose text-md text-ink-2">官方開放資料只提供當天的收盤，所以從開始存檔那天起每個交易日累積一點；累積兩天以上就會畫出走勢。</p>}
+      {!us && <p className="max-w-prose text-md text-ink-2">官方開放資料只有當天的收盤，從開始存檔那天起每個交易日累積一點，滿兩天就會畫出走勢。</p>}
     </div>
   )
 }

@@ -150,10 +150,10 @@ const toNews = async (page, mobile) => {
     if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
   }, mobile)
 }
-/** 新聞報導：按「顯示更多」後捲回標題 */
+/** 新聞報導：按「看更多」後捲回標題 */
 const newsMore = async (page, mobile) => {
   await toNews(page, mobile)
-  await page.getByRole("button", { name: /顯示更多/ }).click()
+  await page.getByRole("button", { name: /看更多/ }).click()
   await toNews(page, mobile)
 }
 /** 資料來源頁的 GDELT（新聞報導的授權） */
@@ -271,7 +271,7 @@ const SHOTS = [
   { name: "stock-2330-news", path: "/stock/2330.TW", ready: "text=參考價", action: toNews },
   { name: "stock-2330-news-more", path: "/stock/2330.TW", ready: "text=參考價", action: newsMore },
   { name: "stock-2317-news-empty", path: "/stock/2317.TW", ready: "text=參考價", action: toNews },
-  { name: "stock-nvda-news", path: "/stock/NVDA", ready: "text=參考價", action: toNews },
+  { name: "stock-nvda-news", path: "/stock/NVDA", ready: "text=新聞報導", action: toNews },
   { name: "data-sources-gdelt", path: "/data-sources", ready: "text=GDELT DOC 2.0 新聞索引", action: gdeltSource },
   { name: "data-sources-news", path: "/data-sources", ready: "text=GDELT DOC 2.0 新聞索引", action: otherSources },
   // 相關股票（基準／成分股、關係企業、同業；ETF 頁同指數）、關於〈公司〉（維基百科節錄／AI 簡介＋官方資料）、上市股票外資持股前 20 名
@@ -280,13 +280,13 @@ const SHOTS = [
   { name: "stock-0050-related", path: "/stock/0050.TW", ready: "text=參考價", action: toSection("ov-related") },
   { name: "stock-2330-about", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-company") },
   { name: "stock-6488-about", path: "/stock/6488.TWO", ready: "text=參考價", action: toSection("ov-company") },
-  { name: "stock-aapl-about", path: "/stock/AAPL", ready: "text=參考價", action: toSection("ov-company") },
+  { name: "stock-aapl-about", path: "/stock/AAPL", ready: "text=關於「Apple」", action: toSection("ov-company") },
   { name: "stock-3711-chips", path: "/stock/3711.TW?tab=chips", ready: "text=前 20 名第 12 名", action: toForeign },
   { name: "data-sources-wikipedia", path: "/data-sources", ready: "text=中文維基百科條目（開頭節錄）", action: wikiSource },
   // ETF 淨值與折溢價（證期局〈證券投資信託基金每日淨值〉＋同一天的收盤）：0050 有走勢、00878 資料累積中、00679B 淨值晚一天
-  { name: "stock-0050-nav", path: "/stock/0050.TW", ready: "text=參考價", action: toSection("ov-premium") },
-  { name: "stock-00878-nav", path: "/stock/00878.TW", ready: "text=參考價", action: toSection("ov-premium") },
-  { name: "stock-00679b-nav", path: "/stock/00679B.TWO", ready: "text=參考價", action: toSection("ov-premium") },
+  { name: "stock-0050-nav", path: "/stock/0050.TW", ready: "text=參考價", action: toSection("ov-key") },
+  { name: "stock-00878-nav", path: "/stock/00878.TW", ready: "text=參考價", action: toSection("ov-key") },
+  { name: "stock-00679b-nav", path: "/stock/00679B.TWO", ready: "text=參考價", action: toSection("ov-key") },
   { name: "data-sources-nav", path: "/data-sources", ready: "text=證券投資信託基金每日淨值", action: navSource },
   // 美股：SEC EDGAR 的季報（美元、公司會計年度）與 8-K／10-Q／10-K 申報
   { name: "stock-aapl-financials", path: "/stock/AAPL?tab=financials", ready: "text=FY2026Q4", action: toTabs },

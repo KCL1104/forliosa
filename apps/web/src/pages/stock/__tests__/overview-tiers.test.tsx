@@ -1,0 +1,164 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
+import { fireEvent, render, screen, within } from "@testing-library/react"
+import { describe, expect, it } from "vitest"
+import { api } from "@/api"
+import { SourcesFooter, SourcesProvider } from "@/components/sources"
+import { monthTicks } from "../month-ticks"
+import { OverviewTab } from "../tabs/OverviewTab"
+import { TabLead } from "../tabs/kit"
+import { sourceNotes, withFigures } from "../text"
+
+/** 個股頁的樣子：區塊在 SourcesProvider 裡，頁尾一個「資料來源與授權」；Link 需要 router */
+function renderPage(ui: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () => (
+        <SourcesProvider>
+          {ui}
+          <SourcesFooter />
+        </SourcesProvider>
+      ),
+    }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  )
+}
+
+const T = { timeout: 8000 }
+
+// 整個總覽一次載入十幾個查詢：全部測試一起跑時比較慢，給長一點的時間
+describe("總覽的三層", { timeout: 20_000 }, () => {
+  it("第一層：一條鍵值帶；估值位置只說一次，規則句是墨色 Noto Sans（不是紫色楷體），刻度尺不用 ▼△", async () => {
+    const inst = await api.getInstrument("2330.TW")
+    const position = await api.getPosition("2330.TW")
+    renderPage(<OverviewTab inst={inst} position={position} />)
+    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
+    const sentence = await within(band).findByText(/比過去 5 年/, undefined, T)
+    expect(sentence.closest(".ai-voice")).toBeNull()
+    expect(sentence.className).toContain("text-ink")
+    // 百分位只說一次（不在格子、刻度或別的句子重複）
+    // 月營收與籌碼各自載入：兩個都出現了再檢查
+    await within(band).findByText("10 月營收", undefined, T)
+    await within(band).findByText("融資餘額", undefined, T)
+    expect(band.textContent!.match(/\d+% 的日子/g)).toHaveLength(1)
+    expect(band.textContent).not.toMatch(/[▼△▲]/)
+    expect(band.querySelector(".ai-voice")).toBeNull()
+    // 月營收、籌碼併進同一張鍵值格；連續成長併在年增那一格；報價下方已有的參考價、漲跌停不重複
+    const terms = within(band).getAllByRole("term").map((t) => t.textContent)
+    expect(terms).toEqual(expect.arrayContaining(["開盤", "股價淨值比", "10 月營收", "營收年增", "融資餘額", "千張大戶"]))
+    expect(terms).not.toContain("本益比")
+    expect(terms).not.toContain("參考價")
+    expect(terms).not.toContain("漲停 / 跌停")
+    expect(within(band).getByText(/^連 \d+ 個月$/)).toBeInTheDocument()
+    // 持有時：成本在尺上（隱私模式關閉）
+    expect(within(band).getByText(/^你的成本 \d+\.\d 倍/)).toBeInTheDocument()
+  })
+
+  it("第二層：接下來與公告合併成一張依日期排的表，第一欄是聯絡簿的日期格", async () => {
+    const inst = await api.getInstrument("2330.TW")
+    renderPage(<OverviewTab inst={inst} position={null} />)
+    const events = await screen.findByRole("region", { name: "事件" }, T)
+    const rows = await within(events).findAllByRole("listitem", undefined, T)
+    expect(rows.length).toBeGreaterThan(3)
+    const cells = rows.map((r) => r.querySelector(".date-cell"))
+    expect(cells.every(Boolean)).toBe(true)
+    expect(cells[0]!.querySelector(".weekday")?.textContent).toMatch(/^（.）$/)
+    // 有官方公告（連到原文）也有接下來的事
+    expect(events.textContent).toContain("重大訊息")
+    expect(events.textContent).toMatch(/\d+ 天後/)
+    // 依日期排：往下越來越晚（跨年的 1/8 在 12/11 之後）
+    const order = rows.map((r) => r.textContent!.match(/天(前|後)/)?.[1] === "前")
+    expect(order.indexOf(false)).toBeGreaterThan(0)
+    expect(order.slice(order.indexOf(false)).every((past) => !past)).toBe(true)
+    // 沒有另外的「接下來」「公告」兩個區塊
+    expect(screen.queryByRole("region", { name: "接下來" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "公告" })).toBeNull()
+  })
+
+  it("第三層與頁尾：新聞先 3 則；各區塊不寫授權段落，整頁只有一個「資料來源與授權」", async () => {
+    const inst = await api.getInstrument("2330.TW")
+    renderPage(<OverviewTab inst={inst} position={null} />)
+    const news = await screen.findByRole("region", { name: "新聞報導" }, T)
+    await within(news).findAllByRole("link", undefined, T)
+    expect(within(news).getAllByRole("link")).toHaveLength(3)
+    expect(within(news).getByRole("button", { name: /看更多/ })).toBeInTheDocument()
+    await screen.findByRole("region", { name: "相關股票" }, T)
+    await screen.findByRole("region", { name: "關於「台積電」" }, T)
+    expect(document.body.textContent).not.toContain("資料來源：")
+    expect(document.body.textContent).not.toContain("依政府資料開放授權條款第 1 版")
+    const footer = screen.getAllByRole("button", { name: /資料來源與授權/ })
+    expect(footer).toHaveLength(1)
+    fireEvent.click(footer[0]!)
+    expect(screen.getByText("臺灣證券交易所〈上市公司基本資料〉（2026）")).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: /The GDELT Project/ })).toHaveAttribute("href", "https://www.gdeltproject.org/")
+  })
+
+  it("ETF：鍵值格只有 ETF 有的欄位（淨值、折溢價、殖利率…），沒有本益比、股價淨值比、EPS 這些「—」", async () => {
+    const inst = await api.getInstrument("0050.TW")
+    renderPage(<OverviewTab inst={inst} position={null} />)
+    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
+    await within(band).findByText("淨值（11/12）", undefined, T)
+    const terms = within(band).getAllByRole("term").map((t) => t.textContent)
+    expect(terms.slice(0, 3)).toEqual(["淨值（11/12）", "折溢價（11/12）", "殖利率"])
+    for (const stockOnly of ["本益比", "股價淨值比", "近四季 EPS", "營收年增"]) expect(terms).not.toContain(stockOnly)
+    expect(within(band).getAllByRole("definition").map((d) => d.textContent)).not.toContain("—")
+    // 折溢價走勢接在格子下面（標題安靜）
+    expect(within(band).getByRole("region", { name: "折溢價走勢" })).toBeInTheDocument()
+  })
+})
+
+describe("規則句與來源的小工具", () => {
+  it("分頁第一行是墨色 Noto Sans，不是紫色楷體", () => {
+    render(<TabLead>本益比 20.8 倍。</TabLead>)
+    const p = screen.getByText("本益比 20.8 倍。")
+    expect(p.className).not.toContain("ai-voice")
+    expect(p.className).toContain("text-ink")
+  })
+
+  it("規則句（例如「為什麼」那一行）的數字標成 600，文字不變", () => {
+    const { container } = render(<p>{withFigures("成交量是近 20 日均量的 2.1 倍，漲 4.83%")}</p>)
+    expect(container.textContent).toBe("成交量是近 20 日均量的 2.1 倍，漲 4.83%")
+    expect([...container.querySelectorAll(".font-semibold")].map((n) => n.textContent)).toEqual(["20", "2.1 倍", "4.83%"])
+  })
+
+  it("後端的顯名聲明 → 頁尾的來源：網址拆成連結，文字不改寫", () => {
+    expect(sourceNotes(["The GDELT Project〈GDELT DOC 2.0 新聞索引〉（2026），依 GDELT 使用條款引用：https://www.gdeltproject.org/"])).toEqual([
+      { name: "The GDELT Project〈GDELT DOC 2.0 新聞索引〉（2026）", licence: "GDELT 使用條款引用", href: "https://www.gdeltproject.org/" },
+    ])
+    expect(sourceNotes(["臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版"])).toEqual([
+      { name: "臺灣證券交易所〈上市個股日成交資訊〉（2026）", licence: "政府資料開放授權條款第 1 版" },
+    ])
+    expect(sourceNotes(null)).toEqual([])
+  })
+})
+
+describe("估值圖的月份刻度", () => {
+  const weekly = (from: string, weeks: number) =>
+    Array.from({ length: weeks }, (_, i) => new Date(Date.parse(`${from}T00:00:00Z`) + i * 7 * 86_400_000).toISOString().slice(0, 10))
+
+  it("每個月第一個點一個刻度，不跳過某個月、不重複", () => {
+    const { ticks, format } = monthTicks(weekly("2026-06-05", 24), 8)
+    expect(ticks.map(format)).toEqual(["2026/06", "2026/07", "2026/08", "2026/09", "2026/10", "2026/11"])
+  })
+
+  it("放不下時每 3／6／12 個月一個，對齊日曆", () => {
+    const five = weekly("2021-11-12", 261)
+    const narrow = monthTicks(five, 4)
+    expect(narrow.ticks.map(narrow.format)).toEqual(["2022", "2024", "2026"])
+    const wide = monthTicks(five, 12)
+    expect(wide.ticks.map(wide.format)).toEqual(["2022/01", "2022/07", "2023/01", "2023/07", "2024/01", "2024/07", "2025/01", "2025/07", "2026/01", "2026/07"])
+    const labels = wide.ticks.map(wide.format)
+    expect(new Set(labels).size).toBe(labels.length)
+  })
+
+  it("只有一個月的資料時用頭尾兩天", () => {
+    const { ticks, format } = monthTicks(["2026-11-03", "2026-11-10", "2026-11-17"], 6)
+    expect(ticks.map(format)).toEqual(["11/3", "11/17"])
+  })
+})

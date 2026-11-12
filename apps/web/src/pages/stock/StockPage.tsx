@@ -1,15 +1,16 @@
 import NumberFlow from "@number-flow/react"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, StarIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, StarIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import { ApiError } from "@/api"
 import { useInstrument, useOverview, usePosition, usePositionHistory, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
-import type { ClosedRound, InstrumentDetail, Position, Quote } from "@/api/types"
+import type { ClosedRound, InstrumentDetail, Position, Quote, Why } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
-import { SourcesFooter } from "@/components/data-notes"
 import { holdingPeriod } from "@/lib/ledger-display"
 import { useAskAi } from "@/ai/use-ask"
+import { ScrollRow } from "@/components/scroll-row"
 import { DemoTag } from "@/components/section"
+import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { ErrorState } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -20,8 +21,10 @@ import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { asOfLabel } from "@/lib/as-of"
+import { useSourceNote } from "@/hooks/use-source-note"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
+import { sourceNotes, withFigures } from "./text"
 import { useReadOnly, useWho } from "@/api/view-as"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
@@ -42,8 +45,17 @@ const TABS: { value: StockTab; label: string }[] = [
 /**
  * 個股頁：上半部共用（報價、「為什麼」那一行、我的部位、走勢圖），下半部六個分頁。
  * 持有的人先看到自己：部位緊接在價格下，圖上有均價線與買賣點（隱私模式隱藏）。
+ * 各區塊用到的資料來源登記到頁尾，整頁只有一個「資料來源與授權」。
  */
 export function StockPage() {
+  return (
+    <SourcesProvider>
+      <StockPageInner />
+    </SourcesProvider>
+  )
+}
+
+function StockPageInner() {
   const { symbol } = useParams({ from: "/stock/$symbol" })
   const search = useSearch({ from: "/stock/$symbol" })
   const navigate = useNavigate()
@@ -93,7 +105,7 @@ export function StockPage() {
       )}
 
       <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
-        <div role="tablist" aria-label="個股資料" className="no-scrollbar flex gap-1 overflow-x-auto">
+        <ScrollRow role="tablist" aria-label="個股資料" className="gap-1">
           {TABS.map((t) => {
             const active = t.value === tab
             return (
@@ -115,16 +127,13 @@ export function StockPage() {
                   requestAnimationFrame(() => document.getElementById(`stock-tab-${next.value}`)?.focus())
                 }}
                 onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: t.value === "overview" ? undefined : t.value }, replace: true, resetScroll: false })}
-                className={cn(
-                  "-mb-px flex h-12 shrink-0 items-center border-b-2 px-3 text-base transition-colors",
-                  active ? "border-ink font-bold text-ink" : "border-transparent text-ink-2 hover:text-ink",
-                )}
+                className="sel-tab -mb-px flex h-12 shrink-0 items-center px-3 text-base text-ink-2"
               >
                 {t.label}
               </button>
             )
           })}
-        </div>
+        </ScrollRow>
       </div>
 
       <div id="stock-tabpanel" role="tabpanel" aria-labelledby={`stock-tab-${tab}`} className="pt-6">
@@ -200,7 +209,6 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
           </Button>
         )}
         <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
-          <PlusIcon />
           記一筆
         </Button>
       </span>}
@@ -214,7 +222,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
     return (
       <header className="mt-1">
         <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
-        <p className="mt-2 max-w-prose text-md text-ink-2">
+        <p className="mt-2 max-w-prose text-md text-ink">
           {inst.market === "US" ? "美股目前沒有可商用的報價來源（需要授權的行情），暫不提供價格與走勢；持股以成本計值。" : "目前沒有報價。"}
         </p>
       </header>
@@ -252,12 +260,16 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
         </p>
         {atLimit && <span className={cn("demo-tag font-medium", atLimit === "up" ? "border-rise text-rise" : "border-fall text-fall")}>{atLimit === "up" ? "漲停" : "跌停"}</span>}
       </div>
-      <p className="num mt-1 flex flex-wrap gap-x-3 text-sm text-ink-2">
+      <p className="num mt-1 flex flex-wrap gap-x-4 text-sm text-ink-2">
         <span>{quote ? asOfLabel(quote.as_of) || "—" : "—"}</span>
-        {ref !== null && <span>參考價 {formatQuote(ref, inst.market, inst.type)}</span>}
+        {ref !== null && (
+          <span>
+            參考價 <span className="text-ink">{formatQuote(ref, inst.market, inst.type)}</span>
+          </span>
+        )}
         {limits && (
           <span>
-            漲停 {formatQuote(limits.up, inst.market, inst.type)} ・ 跌停 {formatQuote(limits.down, inst.market, inst.type)}
+            漲停 <span className="text-ink">{formatQuote(limits.up, inst.market, inst.type)}</span>・跌停 <span className="text-ink">{formatQuote(limits.down, inst.market, inst.type)}</span>
           </span>
         )}
         {quote?.is_demo && <span className="sm:hidden">示範資料</span>}
@@ -266,23 +278,37 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
   )
 }
 
-/** 「為什麼漲跌」：只在異常時出現（紫色文楷），點了交給 AI 展開 */
+/**
+ * 「為什麼漲跌」：只在異常時出現，點了交給 AI 展開。
+ * 句子是規則判斷的（漲跌幅、量、漲跌停…），所以是墨色 Noto Sans、數字 600；
+ * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是紫色楷體。
+ */
 function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
   const quote = useQuote(inst.symbol)
   const ask = useAskAi()
   const readOnly = useReadOnly()
+  useSourceNote(sourceNotes(why.data?.show ? why.data.sources : null))
   if (!why.data?.show || !why.data.headline) return null
   const d = direction(quote.data?.change_pct)
-  if (readOnly) return <p className="ai-voice mt-3 max-w-full text-lg leading-snug lg:text-xl">{why.data.headline}</p>
+  const modelWritten = (why.data as Why & { ai?: boolean }).ai === true
+  const headline = why.data.headline
+  const text = modelWritten ? headline : withFigures(headline)
+  const voice = modelWritten ? "ai-voice text-lg leading-snug" : "text-base text-ink"
+  if (readOnly) return <p className={cn("mt-3 max-w-prose", voice)}>{text}</p>
+  // 最後一個字和 › 綁在一起，換行時 › 不會自己掉到下一行
+  const head = modelWritten ? headline.slice(0, -1) : withFigures(headline.slice(0, -1))
   return (
     <button
       type="button"
       onClick={() => ask.submit(`${inst.name}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
-      className="ai-voice press mt-3 block max-w-full text-left text-lg leading-snug hover:underline hover:decoration-ai-rule hover:underline-offset-4 lg:text-xl"
+      className={cn("press mt-3 block max-w-prose text-left underline-offset-4 hover:underline", modelWritten ? "hover:decoration-ai-rule" : "hover:decoration-ctl", voice)}
     >
-      {why.data.headline}
-      <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em]" />
+      {head}
+      <span className="whitespace-nowrap">
+        {headline.slice(-1)}
+        <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em] text-ai" />
+      </span>
     </button>
   )
 }
@@ -300,10 +326,9 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
         <h2 id="past-title" className="text-base font-bold">
           過去的持有
         </h2>
-        <p className="text-sm text-ink-2">{rounds.length > 1 ? `出清過 ${rounds.length} 次` : "已全部賣出"}，不在持倉裡。</p>
-        <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className="ml-auto inline-flex h-9 items-center gap-0.5 rounded-sm text-sm text-ink-2 hover:text-ink pointer-coarse:h-11">
+        <p className="text-md text-ink">{rounds.length > 1 ? `出清過 ${rounds.length} 次` : "已全部賣出"}，不在持倉裡。</p>
+        <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className="ml-auto inline-flex h-9 items-center rounded-sm text-sm text-ink-2 hover:text-ink hover:underline pointer-coarse:h-11">
           在帳本中查看
-          <ChevronRightIcon aria-hidden className="size-4" />
         </Link>
       </div>
       <ul>
@@ -360,9 +385,9 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
             label="未實現"
             value={
               priced ? (
-                <span className={toneClass(direction(p.unrealized_pnl))}>
-                  {money(p.unrealized_pnl, true)}
-                  <span className="ml-1.5 text-md">{formatPercent(p.unrealized_pnl_pct)}</span>
+                <span className="inline-flex items-baseline gap-1.5">
+                  <span className={toneClass(direction(p.unrealized_pnl))}>{money(p.unrealized_pnl, true)}</span>
+                  <Pct value={p.unrealized_pnl_pct} className="text-md" />
                 </span>
               ) : (
                 <span className="text-ink-2" title="沒有報價，以成本計值">—</span>
@@ -425,7 +450,6 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
             <div className="mt-3 flex flex-wrap gap-2">
               <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm" })}>
                 在帳本中查看
-                <ChevronRightIcon aria-hidden />
               </Link>
               {!readOnly && (
                 <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>

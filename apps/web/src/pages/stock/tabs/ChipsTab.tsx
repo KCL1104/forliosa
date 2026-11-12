@@ -13,7 +13,10 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent } from "@/lib/format"
-import { NotYet, Sources, TabLead } from "./kit"
+import { DataNotes } from "@/components/data-notes"
+import { useSourceNote } from "@/hooks/use-source-note"
+import { sourceNotes } from "../text"
+import { Fig, NotYet, TabLead } from "./kit"
 import { useReadOnly } from "@/api/view-as"
 
 const RANGES: { value: ChipsRange; label: string }[] = [
@@ -36,13 +39,19 @@ function runOf(values: number[]): { side: "buy" | "sell" | null; days: number } 
   return { side, days }
 }
 
-function lead(c: Chips): string | null {
-  const parts: string[] = []
+/** 分頁第一行（規則句）：投信、外資連續買超／賣超 3 天以上才說 */
+function lead(c: Chips): React.ReactNode {
+  const parts: React.ReactNode[] = []
   const f = runOf(c.institutional.map((r) => r.foreign))
   const t = runOf(c.institutional.map((r) => r.trust))
-  if (t.days >= 3) parts.push(`投信連 ${t.days} 天${t.side === "buy" ? "買超" : "賣超"}`)
-  if (f.days >= 3) parts.push(`外資連 ${f.days} 天${f.side === "buy" ? "買超" : "賣超"}`)
-  return parts.length ? `${parts.join("，")}。` : null
+  if (t.days >= 3) parts.push(<span key="t">投信連 <Fig>{t.days}</Fig> 天{t.side === "buy" ? "買超" : "賣超"}</span>)
+  if (f.days >= 3) parts.push(<span key="f">外資連 <Fig>{f.days}</Fig> 天{f.side === "buy" ? "買超" : "賣超"}</span>)
+  if (!parts.length) return null
+  return (
+    <>
+      {parts.flatMap((p, i) => (i ? ["，", p] : [p]))}。
+    </>
+  )
 }
 
 /** 千張大戶（1,000 張以上）分級 */
@@ -77,6 +86,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   const [range, setRange] = useState<ChipsRange>("3M")
   const chips = useChips(inst.symbol, range)
   const listed = inst.market === "TWSE"
+  useSourceNote(sourceNotes(chips.data?.sources))
   if (inst.market === "US") {
     return <NotYet title="美股沒有台股的法人與融資融券資料">美股的機構持股（13F）一季公布一次，之後再評估是否加入。</NotYet>
   }
@@ -99,13 +109,15 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   const otherNotes = (c.notes ?? []).filter((n) => !listedNotes.includes(n) && !top20Notes.includes(n))
   const top = c.foreign_top20 ?? null
   return (
-    <div className="flex flex-col gap-12">
-      <div className="flex flex-wrap items-center gap-3">
-        <RangeChips label="籌碼區間" value={range} options={RANGES} onChange={setRange} />
-        <span className="text-sm text-ink-2">{lastDay ? `資料至 ${formatDate(lastDay)}・` : ""}單位：張</span>
-        {c.is_demo && <DemoTag className="ml-auto" />}
+    <div className="flex flex-col gap-10">
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-center gap-3">
+          <RangeChips label="籌碼區間" value={range} options={RANGES} onChange={setRange} />
+          <span className="text-sm text-ink-2">{lastDay ? `資料至 ${formatDate(lastDay)}・` : ""}單位：張</span>
+          {c.is_demo && <DemoTag className="ml-auto" />}
+        </div>
+        <TabLead className="mb-0">{lead(c)}</TabLead>
       </div>
-      <TabLead className="-mt-6 mb-0">{lead(c)}</TabLead>
 
       {listed ? (
         <Section title="三大法人買賣超" titleId="chips-inst">
@@ -151,12 +163,12 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
         <div className="mt-5 overflow-x-auto">
           <table className="w-full min-w-[480px] border-collapse text-md">
             <thead>
-              <tr className="border-b border-rule text-sm text-ink-2">
-                <th scope="col" className="h-9 text-left font-normal">日期</th>
-                <th scope="col" className="text-right font-normal">外資</th>
-                <th scope="col" className="text-right font-normal">投信</th>
-                <th scope="col" className="text-right font-normal">自營商</th>
-                <th scope="col" className="text-right font-normal">合計</th>
+              <tr className="form-head">
+                <th scope="col" className="h-10 text-left">日期</th>
+                <th scope="col" className="h-10 text-right">外資</th>
+                <th scope="col" className="h-10 text-right">投信</th>
+                <th scope="col" className="h-10 text-right">自營商</th>
+                <th scope="col" className="h-10 text-right">合計</th>
               </tr>
             </thead>
             <tbody>
@@ -182,7 +194,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
       </Section>
       )}
 
-      <div className="grid gap-12 lg:grid-cols-2">
+      <div className="grid gap-10 lg:grid-cols-2">
         <Section title="融資餘額" titleId="chips-margin" aside={c.margin.length ? `${formatNumber(c.margin.at(-1)!.margin_balance)} 張` : undefined}>
           <MiniLine data={c.margin.map((m) => ({ t: m.t, v: m.margin_balance }))} color="var(--chart-mine)" label="融資餘額" fmt={(v) => `${formatNumber(v)} 張`} />
         </Section>
@@ -227,7 +239,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           )}
         </Section>
       </div>
-      <Sources items={[...otherNotes, ...c.sources]} />
+      <DataNotes notes={otherNotes} />
     </div>
   )
 }
