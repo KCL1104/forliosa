@@ -21,11 +21,12 @@ import type {
   Why,
   WhyReason,
 } from "../types"
-import { sourceOf } from "./attributions"
+import { secSourceOf, sourceOf } from "./attributions"
 import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, FX_NOW, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, rng, tradingDays } from "./market"
+import { SEC_MOCK } from "./sec-data"
 
 const DEMO_SRC = ["示範資料（模擬數字，不代表真實行情）"]
 const tw = (spec: MockInstrumentSpec) => (spec.market === "TPEX" ? "tpex-openapi" : "twse-openapi")
@@ -42,12 +43,14 @@ export function limitsOf(spec: MockInstrumentSpec) {
 // ── overview ─────────────────────────────────────────────
 export function buildOverview(spec: MockInstrumentSpec, commercial = false): InstrumentOverview {
   if (commercial && spec.market === "US") {
-    // 美股沒有可商用的行情來源：所有欄位 null（與後端相同）
+    // 美股沒有可商用的行情來源：價格欄位 null；近四季 EPS 與流通股數來自 SEC EDGAR 的存檔（與後端相同）
+    const sec = spec.type === "stock" ? SEC_MOCK[spec.symbol] : undefined
     return {
       symbol: spec.symbol, open: null, high: null, low: null, prev_close: null, reference_price: null, limit_up: null, limit_down: null,
       volume: null, avg_volume_3m: null, market_cap: null, pe: null, pb: null, dividend_yield: null, last_cash_dividend: null,
-      ex_dividend_date: null, eps_ttm: null, high_52w: null, low_52w: null, shares_outstanding: null,
-      status: { attention: false, disposition: false, note: null }, as_of: null, sources: ["內建商品清單"], is_demo: false,
+      ex_dividend_date: null, eps_ttm: sec?.eps_ttm ?? null, high_52w: null, low_52w: null, shares_outstanding: sec?.shares_outstanding ?? null,
+      status: { attention: false, disposition: false, note: null }, as_of: null,
+      sources: ["內建商品清單", ...(sec ? [secSourceOf("sec-edgar/companyfacts")] : [])], is_demo: false,
     }
   }
   const candles = dailyCandles(spec)
@@ -223,6 +226,7 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", c
 
 // ── financials（季報／年報） ─────────────────────────────
 export function buildFinancials(spec: MockInstrumentSpec, period: FinancialsPeriod = "quarterly", commercial = false): Financials {
+  if (spec.market === "US") return usFinancials(spec, period)
   if (commercial) {
     const f = buildFinancials(spec, period)
     return { ...f, is_demo: false, sources: f.periods.length ? [sourceOf("shioaji-data/official")] : [] }
@@ -236,7 +240,7 @@ export function buildFinancials(spec: MockInstrumentSpec, period: FinancialsPeri
     sources: DEMO_SRC,
     is_demo: true,
   }
-  if (spec.market === "US" || spec.type === "etf" || !spec.revenue_base || !spec.eps_now) return empty
+  if (spec.type === "etf" || !spec.revenue_base || !spec.eps_now) return empty
   const rev = monthlyRevenue(spec)
   const r = rng(`fin:${spec.symbol}:${period}`)
   const shares = (spec.shares_outstanding ?? 1e9) / 1000 // 千股
@@ -289,6 +293,34 @@ export function buildFinancials(spec: MockInstrumentSpec, period: FinancialsPeri
   }
 }
 
+/** 美股：SEC EDGAR 的真實財報（sec-data.ts，兩種政策都一樣；不是示範數字） */
+function usFinancials(spec: MockInstrumentSpec, period: FinancialsPeriod): Financials {
+  const sec = spec.type === "stock" ? SEC_MOCK[spec.symbol] : undefined
+  if (sec) return { ...sec[period], is_demo: false }
+  return {
+    periods: [], period_ends: [], currency: "USD", amount_unit: 1,
+    income: { revenue: [], gross_profit: [], operating_income: [], net_income: [], eps: [] },
+    balance: { total_assets: [], total_liabilities: [], equity: [] },
+    cashflow: { operating: [], investing: [], financing: [], free_cash_flow: [] },
+    margins: { gross: [], operating: [], net: [] },
+    shares: null, sources: [], is_demo: false,
+    notes: [spec.type === "etf" ? "ETF 沒有財務報表資料" : "SEC EDGAR 找不到這個代號（ETF 與外國公司通常不在美國申報 10-K／10-Q）"],
+  }
+}
+
+/** 美股：SEC 的 8-K／10-Q／10-K；持有時 10-K、10-Q 算「我的」，8-K 只算最近 7 天的 */
+function secFilings(spec: MockInstrumentSpec, qty: number): InstrumentEvent[] {
+  const sec = spec.type === "stock" ? SEC_MOCK[spec.symbol] : undefined
+  const src = [secSourceOf("sec-edgar/submissions")]
+  return (sec?.filings ?? []).map((f) => {
+    const periodic = /^10-[KQ]/.test(f.form)
+    return {
+      date: f.date, type: "sec_filing" as const, form: f.form, title: f.title, detail: f.detail || null, url: f.url,
+      mine: qty > 0 && (periodic || f.date >= addDays(MOCK_TODAY, -7)), amount_estimate: null, estimated: false, period: null, sources: src,
+    }
+  })
+}
+
 // ── events ───────────────────────────────────────────────
 /** 官方公告（示範標題）：重大訊息與證交所新聞。事件的 material_info 和 /news 的重大訊息是同一則（與後端相同） */
 const ANNOUNCEMENTS: Record<string, [date: string, category: "material_info" | "exchange_news", title: string][]> = {
@@ -313,7 +345,9 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
   const qty = holding?.quantity ?? 0
   const fx = spec.currency === "USD" ? FX_NOW : 1
   const src = commercial ? [sourceOf(`${tw(spec)}/ex_dividend`)] : DEMO_SRC
-  if (commercial && spec.market === "US") return []
+  // 美股沒有可商用的股利資料；SEC 申報是真實資料，兩種政策都有
+  if (spec.market === "US") out.push(...secFilings(spec, qty))
+  if (commercial && spec.market === "US") return out.sort((a, b) => b.date.localeCompare(a.date))
   for (const d of dividendRecords(spec)) {
     if (d.ex_dividend_date && d.cash_dividend > 0) {
       const future = d.ex_dividend_date >= MOCK_TODAY

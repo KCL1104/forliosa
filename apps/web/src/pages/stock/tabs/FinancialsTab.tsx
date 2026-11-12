@@ -8,17 +8,24 @@ import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
-import { formatCompact, formatDateShort, formatNumber, formatPercent, formatRevenueThousands } from "@/lib/format"
+import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent, formatRevenueThousands } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { NotYet, Sources, TabLead } from "./kit"
 
-/** 財務：月營收（放最上面）→ 季報／年報 → 資產負債與現金流。ETF 改成「成分股與配息」 */
+/**
+ * 財務：月營收（放最上面）→ 季報／年報 → 資產負債與現金流。ETF 改成「成分股與配息」。
+ * 美股：SEC EDGAR 的 10-Q／10-K（美元、公司會計年度），沒有月營收。
+ */
 export function FinancialsTab({ inst }: { inst: InstrumentDetail }) {
   if (inst.market === "US") {
-    return (
-      <NotYet title="美股財報還沒有可授權的資料來源">
-        規劃使用 SEC EDGAR 的公開財報；接上後這裡會有季報、三大報表與自由現金流。現在可以看總覽的關鍵數據與股利。
-      </NotYet>
-    )
+    if (inst.type === "etf") {
+      return (
+        <NotYet title="ETF 沒有自己的財報">
+          SEC 的 10-K／10-Q 是公司的財報；{inst.name}的持股與費用率要看發行商公告。現在可以看「股利」分頁的歷年配息。
+        </NotYet>
+      )
+    }
+    return <Statements symbol={inst.symbol} />
   }
   if (inst.type === "etf") return <EtfHoldings inst={inst} />
   return (
@@ -123,8 +130,11 @@ function Statements({ symbol }: { symbol: string }) {
   const [period, setPeriod] = useState<FinancialsPeriod>("quarterly")
   const fin = useFinancials(symbol, period)
   const f = fin.data
+  // 台股金額是新台幣千元；美股（SEC EDGAR）是美元，期間是公司的會計年度
+  const usd = f?.currency === "USD"
+  const unit = f?.amount_unit ?? 1000
   const fmt = (v: number | null, kind: "money" | "pct" | "eps") =>
-    v === null ? "—" : kind === "money" ? formatCompact(v * 1000, 0) : kind === "pct" ? formatPercent(v, { signed: false, decimals: 1 }) : v.toFixed(2)
+    v === null ? "—" : kind === "money" ? formatCompact(v * unit, 0) : kind === "pct" ? formatPercent(v, { signed: false, decimals: 1 }) : v.toFixed(2)
   // 對去年同季（季報）或前一年（年報）
   const lag = period === "quarterly" ? 4 : 1
   const shown = f ? f.periods.slice(-(period === "quarterly" ? 4 : 5)) : []
@@ -132,11 +142,12 @@ function Statements({ symbol }: { symbol: string }) {
   const lastIdx = f ? f.periods.length - 1 : 0
   const epsNow = f?.income.eps[lastIdx] ?? null
   const epsPrev = f && lastIdx - lag >= 0 ? (f.income.eps[lastIdx - lag] ?? null) : null
+  const ends = f?.period_ends ?? []
   return (
     <Section
       title="財報"
       titleId="fin-statements"
-      aside="單位：新台幣；EPS 元"
+      aside={usd ? "單位：美元；EPS 為稀釋每股盈餘（美元）" : "單位：新台幣；EPS 元"}
       action={<RangeChips label="期間" value={period} onChange={setPeriod} options={[{ value: "quarterly", label: "季" }, { value: "annual", label: "年" }]} />}
     >
       {fin.isError ? (
@@ -144,12 +155,12 @@ function Statements({ symbol }: { symbol: string }) {
       ) : !f ? (
         <Skeleton className="h-72 w-full rounded-sm" />
       ) : f.periods.length === 0 ? (
-        <NotYet title="財報資料累積中">{f.notes?.join(" ")}</NotYet>
+        <NotYet title={usd ? "目前沒有這家公司的 SEC 財報" : "財報資料累積中"}>{f.notes?.join(" ")}</NotYet>
       ) : (
         <>
           <TabLead>
             {epsNow !== null && epsPrev !== null && epsPrev > 0
-              ? `${f.periods[lastIdx]} EPS ${epsNow.toFixed(2)} 元，${period === "quarterly" ? "比去年同季" : "比前一年"}${epsNow >= epsPrev ? "成長" : "減少"} ${formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}。`
+              ? `${f.periods[lastIdx]} EPS ${epsNow.toFixed(2)} ${usd ? "美元" : "元"}，${period === "quarterly" ? "比去年同季" : "比前一年"}${epsNow >= epsPrev ? "成長" : "減少"} ${formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}。`
               : null}
           </TabLead>
           <div className="overflow-x-auto">
@@ -159,11 +170,16 @@ function Statements({ symbol }: { symbol: string }) {
                   <th scope="col" className="h-9 text-left font-normal">
                     項目
                   </th>
-                  {shown.map((p) => (
-                    <th key={p} scope="col" className="num text-right font-normal">
-                      {p}
-                    </th>
-                  ))}
+                  {shown.map((p, i) => {
+                    const end = usd ? ends[offset + i] : null
+                    return (
+                      <th key={p} scope="col" className={cn("num text-right font-normal", end && "py-1.5")}>
+                        {p}
+                        {/* 美股的會計年度不一定跟日曆年：標出這一期結束的日期 */}
+                        {end && <span className="block text-xs">至 {formatDate(end)}</span>}
+                      </th>
+                    )
+                  })}
                 </tr>
               </thead>
               <tbody>
@@ -185,11 +201,25 @@ function Statements({ symbol }: { symbol: string }) {
               </tbody>
             </table>
           </div>
-          <div className="mt-2 flex flex-wrap items-center gap-3">
-            {f.is_demo && <DemoTag />}
-            <Sources className="mt-0" items={[...(f.notes ?? []), ...f.sources]} />
-          </div>
-          <p className="mt-1 text-xs text-ink-2">法說會簡報與影音請見「事件」分頁的連結；不提供分析師預估。</p>
+          {usd ? (
+            // 美股的說明（會計年度、單位、推算方式）較長：逐行列出，和資料來源分開
+            <>
+              <ul className="mt-3 flex flex-col gap-0.5 text-xs text-ink-2">
+                {(f.notes ?? []).map((n) => (
+                  <li key={n}>{n}</li>
+                ))}
+              </ul>
+              <Sources className="mt-1" items={f.sources} />
+            </>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-3">
+              {f.is_demo && <DemoTag />}
+              <Sources className="mt-0" items={[...(f.notes ?? []), ...f.sources]} />
+            </div>
+          )}
+          <p className="mt-1 text-xs text-ink-2">
+            {usd ? "10-Q、10-K 與財報新聞稿（8-K）的原文請見「事件」分頁的 SEC 連結；不提供分析師預估。" : "法說會簡報與影音請見「事件」分頁的連結；不提供分析師預估。"}
+          </p>
         </>
       )}
     </Section>

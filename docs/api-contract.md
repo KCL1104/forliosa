@@ -294,8 +294,8 @@
 | GET | `/instruments/{symbol}/overview` | `{open, high, low, prev_close, reference_price, limit_up, limit_down, volume, avg_volume_3m, market_cap, pe, pb, dividend_yield, last_cash_dividend, ex_dividend_date, eps_ttm, high_52w, low_52w, shares_outstanding, status: {attention, disposition, note}, as_of, sources, is_demo}`；欄位缺資料時為 `null` |
 | GET | `/instruments/{symbol}/intraday` | `{symbol, date, prev_close, reference_price, points: [{t: "09:01", price, volume}], is_partial, sources}`；只有持股與自選會累積盤中點（每 30–60 秒輪詢），其他回 `points: []` |
 | GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}` |
-| GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元 |
-| GET | `/instruments/{symbol}/events?mine=false` | `[{date, type, title, detail, url, mine, amount_estimate}]`；`type`：`ex_dividend`、`dividend_payment`、`earnings`、`revenue_release`、`material_info`、`attention`、`disposition`、`shareholder_meeting` |
+| GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元（美股：美元、公司會計年度，見「美股基本面（SEC EDGAR）」） |
+| GET | `/instruments/{symbol}/events?mine=false` | `[{date, type, title, detail, url, mine, amount_estimate}]`；`type`：`ex_dividend`、`dividend_payment`、`earnings`、`revenue_release`、`material_info`、`attention`、`disposition`、`shareholder_meeting`；美股另有 `sec_filing`（`form`：8-K／10-Q／10-K） |
 | GET | `/instruments/{symbol}/news` | `[{published_at, title, source, url}]`（只有標題、來源、連結） |
 | GET | `/instruments/{symbol}/position` | 未持有回 `null`；否則 `{quantity, avg_cost, cost_basis, market_value, unrealized_pnl, unrealized_pnl_pct, realized_pnl, dividends_received, day_change, markers: [{date, type: "buy"\|"sell"\|"dividend"\|"stock_dividend", quantity, price, amount}], upcoming_dividend: {ex_dividend_date, amount_estimate} \| null}` |
 | GET | `/instruments/{symbol}/why` | `{show, headline, reasons: [{kind, text}], as_of}`；規則判斷（漲跌 ±3%、成交量 2 倍、漲跌停、注意／處置、除權息日、財報日），M4 前用模板句，之後由 AI 改寫 |
@@ -464,7 +464,7 @@
 
 `kind`（建議問題）：帳本 `onboard`、`drag`、`lift`、`dividends_next`、`concentration`；個股 `why_move`、`next_dividend`、`cost_on_river`、`add_one_lot`、`is_expensive`、`if_hold_dividend`；群組 `group_share`（與前端離線規則相同）。
 
-### 法人觀點與美股基本面（2026-11-12 新增，待後端實作）
+### 法人觀點與美股基本面（2026-11-12 新增；法人觀點待後端實作，美股基本面已實作）
 
 **法人觀點**（產品負責人同意：AI 可引用第三方已公開的評級與目標價，必附來源與日期；AI 自己不給目標價；不計算平均、上漲空間、不排名、不寫買賣提示）
 | 方法 | 路徑 | 說明 |
@@ -488,4 +488,50 @@
 ```
 最多 5 筆，依日期新到舊；沒有日期或來源的項目不列。
 
-**美股基本面（SEC EDGAR）**：User-Agent 需含聯絡信箱，從環境變數 `SEC_CONTACT_EMAIL` 讀取，不寫進程式碼；請求頻率 ≤ 10 次／秒。端點與欄位待後端實作時補上（`/instruments/{symbol}/financials` 對美股回傳 companyfacts 摘要、`/instruments/{symbol}/events` 加入 8-K／10-Q／10-K 申報）。
+**美股基本面（SEC EDGAR，2026-11-12 已實作）**：User-Agent 需含聯絡信箱（`Forliosa/1.0 <SEC_CONTACT_EMAIL>`），從環境變數 `SEC_CONTACT_EMAIL` 讀取，不寫進程式碼；請求頻率 ≤ 10 次／秒（每個行程 ≤ 4 次／秒）。資料是美國政府公開資料（「sec.gov 的政府內容與 EDGAR 公開申報可自由存取與再利用」），`sources` 顯名為「美國證券交易委員會（SEC）〈資料集〉（年），美國政府公開資料」。後端把抓到的資料存在自己的資料庫：worker 每天更新有人持有或自選的美股，請求當下快取超過 24 小時才重抓（短逾時，失敗就用快取並在 `notes` 說明）。沒有設定信箱、SEC 拒絕連線、或找不到公司時回空資料＋`notes`，不用示範資料。實作細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「第四批」。
+
+只對**美股個股**（`market: "US"`、`type: "stock"`）；美股 ETF 的 financials 回空＋`notes: ["ETF 沒有財務報表資料"]`，events 不含申報。
+
+`GET /instruments/{symbol}/financials?period=quarterly|annual`：與台股同一個形狀，另有下列欄位（台股也會帶，值不同）：
+
+| 欄位 | 台股 | 美股 |
+|---|---|---|
+| `periods` | `"2026Q2"`、`"2025"`（日曆季／年） | 公司會計年度 `"FY2026Q1"`、`"FY2025"`（Apple 的 FY2026Q1 是 2025-09-28～2025-12-27）；季報最多 12 期、年報最多 10 年，舊到新 |
+| `period_ends` | 各期最後一天（季底、12/31） | 各期最後一天（會計年度不一定在月底結束，例如 `"2026-09-26"`） |
+| `currency` | `"TWD"` | `"USD"` |
+| `amount_unit` | `1000`（金額單位千元） | `1`（金額單位美元） |
+| `income.eps` | 基本 EPS（元） | **稀釋** EPS（美元） |
+| `cashflow.free_cash_flow` | 營業 + 投資活動現金流量 | 營業活動現金流量 − 購置不動產、廠房及設備 |
+| `shares` | `null` | `{outstanding, outstanding_as_of, diluted_average: [...]}`：封面頁流通股數與日期、各期稀釋加權平均股數（推算的季度為 `null`） |
+| `as_of` | `null` | 這份公司資料從 SEC 取得的時間（ISO，+08:00） |
+
+```json
+// GET /instruments/AAPL/financials?period=quarterly（節錄）
+{"symbol": "AAPL", "period": "quarterly", "currency": "USD", "amount_unit": 1,
+ "periods": ["…", "FY2026Q3", "FY2026Q4"], "period_ends": ["…", "2026-06-27", "2026-09-26"],
+ "income": {"revenue": [… , 109417000000, 114477000000], "eps": [… , 2.02, 2.1], "…": []},
+ "shares": {"outstanding": 14532182000, "outstanding_as_of": "2026-10-23", "diluted_average": [… , 14714676000, null]},
+ "as_of": "2026-11-12T08:05:00+08:00",
+ "sources": ["美國證券交易委員會（SEC）〈EDGAR XBRL 財報數據（companyfacts）〉（2026），美國政府公開資料"],
+ "notes": ["美股依公司會計年度標示：FY2026Q1 是 2025-09-28 至 2025-12-27 的季度", "金額單位：美元；…",
+           "10-Q 的現金流量是年初至今累計、10-K 只報全年：單季數字由累計數相減得出", "第四季（或只有累計數的季度）EPS 為累計 EPS 相減的近似值"]}
+```
+
+- 單季數字：有三個月的數字就用；只有年初至今累計時用相減（第四季 = 全年 − 前三季累計）。這類推算會在 `notes` 說明，EPS 推算是近似值。
+- 同一期被後來的報告重編（例如股票分割後的 EPS）時用最新的數字。
+- `GET /instruments/{symbol}/overview`（美股個股）：`eps_ttm` = 最近四季稀釋 EPS（剛好一整個會計年度時用 10-K 全年 EPS），`shares_outstanding` = 封面頁流通股數；只讀快取，沒抓過時為 `null`。
+
+`GET /instruments/{symbol}/events`（美股個股）加入 SEC 申報：
+
+| 欄位 | 值 |
+|---|---|
+| `type` | `"sec_filing"` |
+| `form` | `"8-K"`、`"10-Q"`、`"10-K"` 或修正 `"8-K/A"`、`"10-Q/A"`、`"10-K/A"`（其他表單不列；台股事件沒有這個欄位或為 `null`） |
+| `date` | 申報日 |
+| `title` | 「10-K 年度報告」「10-Q 季度報告」「8-K 營運結果與財務狀況」（8-K 用申報項目名稱；修正加「（修正）」） |
+| `detail` | 「會計年度截至 2026-09-26」「季度截至 2026-06-27」「申報項目：2.02 營運結果與財務狀況、9.01 財務報表與附件；事件日期 2026-11-02」 |
+| `url` | sec.gov 原文：`https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm` |
+| `mine` | 持有時 10-K、10-Q 為 `true`；8-K 只有最近 7 天的為 `true` |
+| `sources` | `["美國證券交易委員會（SEC）〈EDGAR 公司申報清單（submissions）〉（2026），美國政府公開資料"]` |
+
+`GET /meta/attributions`：多三個資料集 `sec-edgar/tickers`、`sec-edgar/companyfacts`、`sec-edgar/submissions`（`license_status: "public"`，`license`／`license_url` 是 SEC 的網站政策），`notice` 多一行 SEC 的再利用說明。AI 工具 `get_financials`、`get_events` 對美股回傳同樣的資料（`units` 寫明美元與會計年度）。

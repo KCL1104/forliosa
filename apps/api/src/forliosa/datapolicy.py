@@ -1,8 +1,8 @@
 """Data-source policy (``DATA_POLICY``), the source allowlist and the attribution text in ``sources``.
 
 * ``commercial`` (default): only legally commercially usable data — government open data (TWSE / TPEx
-  OpenAPI, TDCC open data), shioaji-data's official files and our own archive built from them. Never demo
-  data: endpoints return empty data with a 「資料累積中」 note instead.
+  OpenAPI, TDCC open data, SEC EDGAR for US companies), shioaji-data's official files and our own archive built
+  from them. Never demo data: endpoints return empty data with a 「資料累積中」 note instead.
 * ``personal`` (explicit opt-in): demo data fills gaps, and FinMind can be enabled by listing it in
   ``MARKET_DATA_PROVIDERS``; its rows are labelled 「非商用」.
 * **Never, in any mode**: the TWSE / TPEx / MIS / MOPS *websites* (their terms forbid automated downloads
@@ -21,6 +21,9 @@ Licence status (``Dataset.license_status``, from docs/research/open-data-invento
 * ``ogdl`` — the agency publishes the dataset under the OGDL (TWSE swagger links data.gov.tw/license; TPEx,
   TDCC and the TAIFEX institutional / large-trader / put-call datasets have matching data.gov.tw OGDL
   datasets). Served normally, with attribution.
+* ``public`` — US government public data (SEC EDGAR): "All Government-created content on sec.gov and EDGAR
+  public filing content are free to access and reuse" (SEC Webmaster FAQ). Served normally; the attribution names
+  the agency and dataset with 「美國政府公開資料」 instead of the OGDL.
 * ``conditional`` — presumed OGDL (same OpenAPI, same agency) but no individual data.gov.tw dataset was found:
   TAIFEX 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人, 最後結算價, 保證金, 股票期貨／選擇權標的.
   They are **archived**, but under ``commercial`` they are **not served** until the owner sets
@@ -50,8 +53,13 @@ TWSE_API = "https://openapi.twse.com.tw/v1"
 MEETINGS = "公司召開股東常（臨時）會日期、地點及採用電子投票情形等資料彙總表"
 TPEX_API = "https://www.tpex.org.tw/openapi/v1"
 TAIFEX_API = "https://openapi.taifex.com.tw/v1"
+SEC = "美國證券交易委員會（SEC）"
+SEC_LICENSE = "SEC 網站政策：sec.gov 的政府內容與 EDGAR 公開申報可自由存取與再利用"
+SEC_LICENSE_URL = "https://www.sec.gov/about/webmaster-frequently-asked-questions"
+SEC_ATTRIBUTION = "美國政府公開資料"
+SEC_NOTICE = f"{SEC}：sec.gov 上的政府內容與 EDGAR 公開申報可自由存取與再利用（{SEC_LICENSE_URL}）"
 
-LicenseStatus = Literal["ogdl", "conditional"]
+LicenseStatus = Literal["ogdl", "public", "conditional"]
 CONDITIONAL_NOTE = ("期交所 OpenAPI 的這個資料集在 data.gov.tw 沒有找到對應的政府資料開放授權條款資料集，"
                     "已存檔，但在期交所書面確認可商用前不顯示（TAIFEX_CONDITIONAL_CONFIRMED）")
 
@@ -65,6 +73,14 @@ class Dataset:
     used_for: str
     license_status: LicenseStatus = "ogdl"
     basis: str = ""  # why the licence status (e.g. "data.gov.tw 11592")
+    license: str = OGDL
+    license_url: str = OGDL_URL
+    attribution_tail: str = f"依{OGDL}"  # the end of the attribution line
+
+    @property
+    def commercial(self) -> bool:
+        """Usable commercially without further confirmation (OGDL or US government public data)."""
+        return self.license_status in ("ogdl", "public")
 
 
 DATASETS: dict[str, Dataset] = {d.key: d for d in (
@@ -179,6 +195,16 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
             "個股是否有股票期貨", "conditional", "data.gov.tw 未找到個別資料集"),
     Dataset("taifex-openapi/sso_list", TAIFEX, "股票選擇權交易標的", f"{TAIFEX_API}/SSOLists",
             "個股是否有股票選擇權", "conditional", "data.gov.tw 未找到個別資料集"),
+    # -- SEC EDGAR (US government public data; data.sec.gov / www.sec.gov, ≤ 10 requests / s, declared UA).
+    Dataset("sec-edgar/companyfacts", SEC, "EDGAR XBRL 財報數據（companyfacts）",
+            "https://data.sec.gov/api/xbrl/companyfacts/", "美股季報、年報：營收、淨利、稀釋 EPS、資產負債、現金流量",
+            "public", "SEC Webmaster FAQ", SEC_LICENSE, SEC_LICENSE_URL, SEC_ATTRIBUTION),
+    Dataset("sec-edgar/submissions", SEC, "EDGAR 公司申報清單（submissions）", "https://data.sec.gov/submissions/",
+            "美股事件：8-K、10-Q、10-K 申報（附 sec.gov 原文連結）",
+            "public", "SEC Webmaster FAQ", SEC_LICENSE, SEC_LICENSE_URL, SEC_ATTRIBUTION),
+    Dataset("sec-edgar/tickers", SEC, "公司代號與 CIK 對照表（company_tickers.json）",
+            "https://www.sec.gov/files/company_tickers.json", "美股代號對應 SEC 公司編號（CIK）",
+            "public", "SEC Webmaster FAQ", SEC_LICENSE, SEC_LICENSE_URL, SEC_ATTRIBUTION),
     Dataset("shioaji-data/official",
             "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）",
             "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data",
@@ -191,6 +217,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "tpex-openapi": (f"{TPEX}〈OpenAPI 開放資料〉", True),
     "tdcc-opendata": (f"{TDCC}〈開放資料〉", True),
     "taifex-openapi": (f"{TAIFEX}〈OpenAPI 開放資料〉", True),
+    "sec-edgar": (f"{SEC} EDGAR（{SEC_ATTRIBUTION}）", True),
     "shioaji-data": ("", True),  # labelled through DATASETS["shioaji-data/official"]
     "archive": ("Forliosa 自建存檔（證交所、櫃買中心開放資料）", True),
     "ledger": ("本系統帳本", True),
@@ -244,7 +271,7 @@ def _year() -> int:
 
 
 def attribution(ds: Dataset, year: int | None = None) -> str:
-    return f"{ds.agency}〈{ds.title}〉（{year or _year()}），依{OGDL}"
+    return f"{ds.agency}〈{ds.title}〉（{year or _year()}），{ds.attribution_tail}"
 
 
 def label(source: str) -> str:
@@ -336,7 +363,7 @@ def dataset_served(key: str, policy: Policy, confirmed: bool | None = None) -> b
     ``commercial`` only when ``TAIFEX_CONDITIONAL_CONFIRMED=true`` (the owner has TAIFEX's confirmation).
     """
     ds = DATASETS.get(key)
-    if ds is None or ds.license_status == "ogdl" or policy == "personal":
+    if ds is None or ds.commercial or policy == "personal":
         return True
     return conditional_confirmed() if confirmed is None else confirmed
 
@@ -344,9 +371,9 @@ def dataset_served(key: str, policy: Policy, confirmed: bool | None = None) -> b
 def _item(d: Dataset, year: int, served: bool, confirmed: bool, status: dict[str, dict]) -> dict:
     st = status.get(d.key) or {}
     return {"key": d.key, "agency": d.agency, "dataset": d.title, "url": d.url, "used_for": d.used_for,
-            "year": year, "license": OGDL, "license_url": OGDL_URL,
+            "year": year, "license": d.license, "license_url": d.license_url,
             "license_status": d.license_status, "license_basis": d.basis or None,
-            "commercial": d.license_status == "ogdl" or confirmed, "served": served,
+            "commercial": d.commercial or confirmed, "served": served,
             "last_updated": st.get("data_date"), "last_fetched": st.get("fetched_at"),
             "attribution": attribution(d, year)}
 
@@ -383,7 +410,7 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     return {
         "policy": policy,
         "taifex_conditional_confirmed": confirmed,
-        "notice": [f"{OGDL_NOTICE}", f"政府資料開放授權條款：{OGDL_URL}"],
+        "notice": [f"{OGDL_NOTICE}", f"政府資料開放授權條款：{OGDL_URL}", SEC_NOTICE],
         "datasets": items,
         "conditional": pending,
         "stale": stale,

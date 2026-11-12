@@ -3,6 +3,7 @@
  * - `earnings` 是財報公布、`investor_conference` 是法說會（日期是開會當天）
  * - `estimated: true` 只有法定期限的備援：標題去掉「（預估）」，改用「預估」標記
  * - `/news` 現在是官方公告（重大訊息、證交所新聞）；事件裡的 `material_info` 和公告的重大訊息是同一則，合併時去重
+ * - 美股的 `sec_filing` 是 SEC 的 8-K／10-Q／10-K（`form`），標題已含表單名稱，連到 sec.gov 原文
  */
 import type { InstrumentEvent, NewsCategory, NewsItem } from "@/api/types"
 
@@ -17,7 +18,21 @@ export const EVENT_LABEL: Record<string, string> = {
   attention: "注意股",
   disposition: "處置",
   shareholder_meeting: "股東會",
+  sec_filing: "SEC 申報",
   trade: "我的交易",
+}
+
+/** 美股 SEC 申報的表單名稱（`/A` 是修正版） */
+const FORM_LABEL: Record<string, string> = { "10-K": "年報", "10-Q": "季報", "8-K": "重大事件" }
+
+/** 時間軸左欄的類型名稱：SEC 申報依表單（10-K 年報、10-Q 季報、8-K 重大事件），其他依事件類型 */
+export function eventLabel(e: { type: string; form?: string | null }): string {
+  if (e.type === "sec_filing" && e.form) {
+    const amended = e.form.endsWith("/A")
+    const base = FORM_LABEL[e.form.replace(/\/A$/, "")]
+    if (base) return amended ? `${base}修正` : base
+  }
+  return EVENT_LABEL[e.type] ?? e.type
 }
 
 export const NEWS_CATEGORY_LABEL: Record<NewsCategory, string> = {
@@ -31,6 +46,7 @@ export function announcementHost(url: string): string {
   if (url.includes("mops.twse.com.tw")) return "公開資訊觀測站"
   if (url.includes("tpex.org.tw")) return "櫃買中心"
   if (url.includes("twse.com.tw")) return "證交所"
+  if (url.includes("sec.gov")) return "SEC EDGAR"
   try {
     return new URL(url).hostname.replace(/^www\./, "")
   } catch {

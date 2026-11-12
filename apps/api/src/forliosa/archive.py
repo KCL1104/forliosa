@@ -4,7 +4,7 @@ Run once from the command line::
 
     uv run python -m forliosa.archive run                    # every job that applies to DATA_POLICY
     uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | companies | financials | taifex |
-                                                             # tdcc | weekly
+                                                             # tdcc | weekly | sec
     uv run python -m forliosa.archive backfill --days 90     # personal opt-in only, see "Backfill" below
 
 The worker runs the same jobs on a schedule (``forliosa.worker``). Every write is an upsert keyed on
@@ -39,10 +39,14 @@ taifex_*                    TAIFEX OpenAPI (group ``taifex``, daily 21:40; ``wee
 fx_rates                    SSF/SSO lists). DailyForeignExchangeRates -> fx_rates (USDTWD …, multi-day upsert)
 dataset_status              newest data date per dataset (shown in /meta/attributions; ``weekly`` also checks the
                             stale endpoints twtazu_od and t187ap09_L)
+sec_tickers, sec_companies, SEC EDGAR (group ``sec``, daily 07:50, US government public data): the ticker -> CIK
+sec_filings                 map, trimmed XBRL company facts and 8-K / 10-Q / 10-K filings of every tracked US
+                            stock (``forliosa.services.sec``; needs SEC_CONTACT_EMAIL, skipped without it)
 ==========================  =========================================================
 
-Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw`` and
-``openapi.taifex.com.tw/v1`` are fetched (see the allowlist in ``marketdata/http.py``). The TWSE / TPEx / TAIFEX
+Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw``,
+``openapi.taifex.com.tw/v1`` and the three SEC EDGAR JSON datasets are fetched (see the allowlist in
+``marketdata/http.py``). The TWSE / TPEx / TAIFEX
 **websites** forbid automated downloads without written consent, so the former T86 / MI_QFIIS website jobs and
 the website backfill were removed (2026-11-12). There is no official per-stock history API: the archive only
 grows from the day the worker starts. ``backfill`` remains only for FinMind under an explicit
@@ -116,8 +120,9 @@ MARGIN_READY = time(21, 0)
 
 # twse / tpex: latest-day datasets (08:10, 14:40, 21:40); companies: slow-changing large files (21:40);
 # taifex: TAIFEX daily datasets (21:40); weekly (Saturday): TAIFEX final settlement + SSF/SSO lists, and the
-# stale-endpoint check.
-JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "tdcc", "weekly")
+# stale-endpoint check; sec (07:50 daily): SEC EDGAR facts and filings of tracked US stocks.
+JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "tdcc", "weekly", "sec")
+SEC_DISABLED = "sec edgar（未設定 SEC_CONTACT_EMAIL，略過）"
 
 
 def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
@@ -164,6 +169,7 @@ class Archiver:
     policy: Policy = "commercial"
     now_fn: Callable[[], datetime] = now_taipei
     results: list[JobResult] = field(default_factory=list)
+    sec_client: Any = None  # SEC EDGAR client (tests inject a fake); None: built from SEC_CONTACT_EMAIL
 
     # -- plumbing ------------------------------------------------------------------------------
     def _json(self, url: str, params: dict[str, Any] | None = None) -> Any:
@@ -607,6 +613,20 @@ class Archiver:
                 for r in parsed if not market or r["code"] in market]
         return upsert(self.db, ShareholdingDistribution, rows, ["symbol", "date", "level"])
 
+    # -- SEC EDGAR (US stocks) -------------------------------------------------------------------
+    def sec_edgar(self, client: Any) -> int:
+        """Ticker map, company facts and filings of every tracked US stock (forliosa.services.sec). A refusal from
+        SEC (403 / 429 / redirect) ends the job with an error; it is not retried until the next run."""
+        from forliosa.marketdata.base import market_of_symbol
+        from forliosa.services import sec as sec_svc
+
+        symbols = sec_svc.us_stock_symbols([s for s in tracked_symbols(self.db) if market_of_symbol(s) == "US"])
+        counts = sec_svc.sync_symbols(self.db, client, symbols)
+        for key, d in sec_svc.latest_data_dates(self.db).items():
+            self._status(key, d, counts["companies"] if key.endswith("companyfacts") else counts["filings"])
+        log.info("sec edgar: %s", counts)
+        return counts["tickers"] + counts["companies"] + counts["filings"]
+
     # -- entry points ----------------------------------------------------------------------------
     def run(self, only: Iterable[str] | None = None) -> list[JobResult]:
         groups = set(only or JOB_GROUPS)
@@ -646,6 +666,14 @@ class Archiver:
                              ("taifex SSF/SSO lists", self.taifex_underlyings),
                              ("stale endpoints check", self.stale_check)):
                 self._run(name, fn)
+        if "sec" in groups:
+            from forliosa.services import sec as sec_svc
+
+            client = self.sec_client or sec_svc.sec_client(on_demand=False)
+            if client is None:
+                self.results.append(JobResult(SEC_DISABLED))
+            else:
+                self._run("sec edgar", lambda: self.sec_edgar(client))
         return self.results
 
     def backfill(self, days: int = 90, symbols: list[str] | None = None,
@@ -699,7 +727,7 @@ def main(argv: list[str] | None = None) -> None:
     from forliosa.config import get_settings
     from forliosa.db import session_factory
 
-    parser = argparse.ArgumentParser(description="官方開放資料存檔（證交所、櫃買中心、期交所、集保）")
+    parser = argparse.ArgumentParser(description="官方開放資料存檔（證交所、櫃買中心、期交所、集保、SEC EDGAR）")
     sub = parser.add_subparsers(dest="cmd", required=True)
     run_p = sub.add_parser("run", help="執行一次每日存檔")
     run_p.add_argument("--only", default="", help=f"逗號分隔：{','.join(JOB_GROUPS)}")

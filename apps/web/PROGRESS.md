@@ -41,6 +41,15 @@
 | 已出清依年份 | ✅ 依 `closed_at` 年份分組、新的在前，每年可收合（最近一年預設展開），年份列有已實現小計（▲▼）；桌面每年一個 tbody、小計對齊「已實現損益」欄；手機每年一個 h3＋清單 | `src/pages/ledger/ClosedRounds.tsx`、`src/lib/ledger-display.ts` |
 | 資料來源頁 | ✅ 說明法人觀點不是授權資料庫（有人查詢時 AI 搜尋公開報導、當天共用、隔天刪除） | `src/pages/data-sources/DataSourcesPage.tsx` |
 
+## 第四批（2026-11-12）：美股財報與申報（SEC EDGAR）
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ `Financials` 多 `currency`、`amount_unit`（台股 1000、美股 1）、`period_ends`、`shares`、`as_of`；事件類型多 `sec_filing`＋`form`。mock 的 AAPL、NVDA 用後端對 SEC 真實資料（2026-11-12）的輸出（`sec-data.ts`，不是模擬數字），兩種政策都一樣；總覽的近四季 EPS 也來自它；資料來源頁多三個 SEC 資料集（授權連結是 SEC 的網站政策） | `src/api/types.ts`、`mock/sec-data.ts`、`mock/research.ts`、`mock/attributions.ts` |
+| 財務分頁 | ✅ 美股個股不再是空狀態：季／年財報表格（美元、公司會計年度 `FY2026Q4`，表頭第二行「至 2026/09/26」），單位說明「美元；EPS 為稀釋每股盈餘」，首句「FY2026Q4 EPS 2.10 美元，比去年同季成長 14%」；說明（會計年度、單季推算方式）逐行列出、和資料來源分開；沒有月營收。美股 ETF：「ETF 沒有自己的財報」。SEC 未啟用或找不到公司：「目前沒有這家公司的 SEC 財報」＋後端 notes | `src/pages/stock/tabs/FinancialsTab.tsx` |
+| 事件分頁 | ✅ SEC 申報依表單標類型：10-K「年報」、10-Q「季報」、8-K「重大事件」（修正加「修正」），標題如「8-K 營運結果與財務狀況」，連到 sec.gov 原文（「在 SEC EDGAR 查看」）；持有時年報、季報算「我的」；美股的頁尾說明改成 SEC 版本 | `src/pages/stock/tabs/EventsTab.tsx`、`src/lib/events.ts`（`eventLabel`） |
+| 截圖 | ✅ `stock-aapl-financials-*`、`stock-aapl-events-*`（桌面／iPhone、淺／深） | `scripts/screenshots.mjs` |
+
 ## 驗證
 
 - `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（11 檔 145 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記）、`pnpm build` 全部通過。
@@ -81,7 +90,7 @@ Emil Kowalski skills：`mobile-native`（theme-color 改成紙色、hover 一律
 
 1. AI 任務、對話紀錄目前存在這台瀏覽器（示範的任務是 mock）；M4 定義端點後改由後端同步。
 2. ~~「本週 N 件事」的定期定額~~：後端已有 `/recurring`，本週事項列出每一次扣款。
-3. ETF 折溢價、成分股，美股財報與籌碼：設計過的空狀態，等資料來源（研究稿 Q10、Q11）。
+3. ETF 折溢價、成分股，美股籌碼：設計過的空狀態，等資料來源（研究稿 Q10、Q11）。美股財報已接 SEC EDGAR（第四批）。
 4. 比較線「加權報酬指數」需要後端的 `/instruments/^TAIEXTR/history`；mock 以 0050 代替。真實後端沒有時圖會停留在不比較。
 5. 漲跌停與參考價以後端為準；前端只在報價沒有帶時才自行計算（`lib/tick.ts`）。
 6. 產品負責人決定預設 `DATA_POLICY=commercial`：盤中走勢、媒體新聞、上市股票的法人、美股報價是空的並帶 `notes`；前端照實顯示。mock 預設也模擬商用模式（`?policy=personal` 看舊的示範資料）。

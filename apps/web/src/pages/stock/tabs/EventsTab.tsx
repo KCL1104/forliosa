@@ -7,7 +7,7 @@ import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
-import { announcementHost, EVENT_LABEL, eventTitle, mergeAnnouncements, NEWS_CATEGORY_LABEL, type TimelineRow } from "@/lib/events"
+import { announcementHost, eventLabel, eventTitle, mergeAnnouncements, NEWS_CATEGORY_LABEL, type TimelineRow } from "@/lib/events"
 import { formatDateShort, formatDaysUntil, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
@@ -16,6 +16,7 @@ import { Sources } from "./kit"
 /**
  * 事件：過去與接下來的時間軸。官方公告（重大訊息、證交所公告）也在這條軸上，標「公告」並連到原文；
  * 法定期限的備援日期標「預估」。「只看我的」包含我的交易（含已出清的）與我可領的股利。
+ * 美股：SEC 的 10-K 年報、10-Q 季報、8-K 重大事件，連到 sec.gov 原文。
  */
 export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail; position: Position | null; markers?: PositionMarker[] }) {
   const events = useEvents(inst.symbol)
@@ -59,7 +60,11 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
       </Section>
       <Section title="過去" titleId="ev-past">
         <Timeline rows={past} today={today} privacy={privacy} empty={filter === "mine" ? "沒有你的交易或股利紀錄。" : "沒有過去的事件。"} />
-        <p className="mt-3 text-xs text-ink-2">財報、營收與法說會用實際公布日；還不知道時以法定期限標「預估」。公告的內容以公開資訊觀測站、證交所原文為準。</p>
+        <p className="mt-3 text-xs text-ink-2">
+          {inst.market === "US"
+            ? "美股的申報來自 SEC EDGAR，內容以 sec.gov 原文為準；8-K「營運結果與財務狀況」通常是財報新聞稿。"
+            : "財報、營收與法說會用實際公布日；還不知道時以法定期限標「預估」。公告的內容以公開資訊觀測站、證交所原文為準。"}
+        </p>
         <Sources items={sources} />
       </Section>
     </div>
@@ -79,7 +84,7 @@ function Timeline({ rows, today, privacy, empty, future }: { rows: TimelineRow[]
               {formatDateShort(e.date)}
               {future && <span className="block text-xs text-ink-2">{formatDaysUntil(e.date, today)}</span>}
             </span>
-            <span className={cn("text-md max-sm:col-start-2 max-sm:row-start-1", e.mine ? "font-medium text-ink" : "text-ink-2")}>{EVENT_LABEL[e.type] ?? e.type}</span>
+            <span className={cn("text-md max-sm:col-start-2 max-sm:row-start-1", e.mine ? "font-medium text-ink" : "text-ink-2")}>{eventLabel(e)}</span>
             <span className="min-w-0 max-sm:col-start-2">
               {e.url ? (
                 <a href={e.url} target="_blank" rel="noreferrer" className="inline-flex items-baseline gap-1 hover:underline">

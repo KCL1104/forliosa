@@ -145,6 +145,8 @@ Forliosa 是一個**以台股為主的投資管理 web app**，結合三件事�
 | **估值** | 本益比河流圖、股價淨值比河流圖、殖利率走勢（對標 Yahoo 股市「價值評估」頁）；EPS ≤ 0 時本益比區間留白並說明原因 | TWSE `BWIBBU`、TPEx 本益比、FinMind `TaiwanStockPER` |
 | 籌碼 | 三大法人買賣超、融資融券、集保股權分散 | TWSE、TPEx、TDCC、FinMind |
 | 財務 | 月營收（年增、月增）、季 EPS、毛利率、三大報表重點 | shioaji-data（月營收 2023-10 起、季報 2023Q1 起），更早的歷史用 FinMind |
+| 財務（美股） | 季報／年報（依公司會計年度，例如 FY2026Q1）：營收、毛利率、營業利益率、淨利率、稀釋 EPS、總資產、負債比、營業與自由現金流；金額單位美元。沒有月營收 | SEC EDGAR XBRL companyfacts（美國政府公開資料，2026-11-12 起） |
+| 事件（美股） | SEC 申報：10-K 年報、10-Q 季報、8-K 重大事件（依申報項目標示，例如營運結果與財務狀況＝財報新聞稿），連到 sec.gov 原文；持有時年報與季報算「我的」 | SEC EDGAR submissions |
 | 股利 | 歷年現金與股票股利、殖利率、填息天數 | TWSE 除權息資料、FinMind |
 | 新聞 | 個股相關新聞 | FinMind `TaiwanStockNews` |
 | AI 報告 | 最新的個股深度報告與歷史版本 | 本系統 |
@@ -375,6 +377,7 @@ flowchart LR
 | FinMind | 歷史本益比、法人、財報、股利、新聞、報酬指數 | 免費版註冊後每小時 600 次 | ❌ 只有 Sponsor Pro（NT$3,330／月）允許商用 |
 | TDCC 集保 | 股權分散 | 免費 CSV，只保留當週，要每週存檔 | 政府開放資料 |
 | Yahoo Finance | 美股報價、台股備援 | 免費 | ❌ 條款禁止轉發 |
+| SEC EDGAR（data.sec.gov、www.sec.gov） | 美股財報（XBRL companyfacts）、8-K／10-Q／10-K 申報清單、代號與 CIK 對照 | 免費；每秒最多 10 次，User-Agent 必須寫聯絡信箱（環境變數 `SEC_CONTACT_EMAIL`）；後端每天存一次，請求時超過 24 小時才重抓 | ✅ 美國政府公開資料，「可自由存取與再利用」 |
 
 ## 9. 核心資料模型（初稿）
 

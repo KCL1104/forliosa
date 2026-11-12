@@ -367,14 +367,23 @@ def get_financials(ctx: ToolContext, args: dict[str, Any]) -> Any:
     def tail(group: dict[str, list] | None) -> dict[str, list]:
         return {k: v[cut:] for k, v in (group or {}).items()}
 
-    revenue = instr.revenue(ctx.md, info.symbol)[-6:] if info.type == "stock" else []
-    return {
+    us = f.get("currency") == "USD"
+    revenue = instr.revenue(ctx.md, info.symbol)[-6:] if info.type == "stock" and not us else []
+    out = {
         "symbol": info.symbol, "name": info.name, "period": args["period"], "periods": periods[cut:],
         "income": tail(f.get("income")), "balance": tail(f.get("balance")), "cashflow": tail(f.get("cashflow")),
         "margins": tail(f.get("margins")),
-        "monthly_revenue_last_6": revenue,
-        "units": "金額單位新台幣千元；margins 為比率", "notes": f.get("notes") or [], "sources": f.get("sources"),
+        "units": ("金額單位美元；EPS 為稀釋每股盈餘（美元）；periods 是公司會計年度（FY2026Q1 = 會計年度 2026 第一季，"
+                  "period_ends 是各期最後一天）；margins 為比率") if us else "金額單位新台幣千元；margins 為比率",
+        "notes": f.get("notes") or [], "sources": f.get("sources"),
     }
+    if us:
+        out["period_ends"] = (f.get("period_ends") or [])[cut:]
+        out["shares"] = f.get("shares")
+        out["as_of"] = f.get("as_of")
+    else:
+        out["monthly_revenue_last_6"] = revenue
+    return out
 
 
 def get_events(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -385,7 +394,7 @@ def get_events(ctx: ToolContext, args: dict[str, Any]) -> Any:
     today = today_taipei()
     upcoming = [e for e in evs if e["date"] >= today][-10:]
     past = [e for e in evs if e["date"] < today][:10]
-    keys = ("date", "type", "title", "detail", "url", "mine", "amount_estimate")
+    keys = ("date", "type", "form", "title", "detail", "url", "mine", "amount_estimate")
     return {"symbol": info.symbol, "name": info.name, "today": today,
             "upcoming": [_pick(e, *keys) for e in upcoming], "recent": [_pick(e, *keys) for e in past]}
 
@@ -639,15 +648,18 @@ TOOLS: list[ToolSpec] = sorted([
              {"symbol": _SYMBOL, "range": {"type": "string", "enum": ["1M", "3M", "6M", "1Y"]}},
              ("symbol", "range"), get_chips, _sym_label("查看 ", " 籌碼")),
     ToolSpec("get_financials",
-             "Financial statements of a Taiwan stock (last 8 quarters or years): revenue, gross/operating/net income, "
-             "EPS, margins, balance sheet and cash flow, plus the last 6 months of monthly revenue with YoY. Call "
-             "this for questions about earnings, revenue growth or margins.",
+             "Financial statements of a stock (last 8 quarters or years): revenue, gross/operating/net income, "
+             "EPS, margins, balance sheet and cash flow. Taiwan stocks: TWD thousands, plus the last 6 months of "
+             "monthly revenue with YoY. US stocks: SEC EDGAR filings (10-Q / 10-K) in USD, labelled by the "
+             "company's fiscal year (FY2026Q1), with diluted EPS and shares. Call this for questions about "
+             "earnings, revenue growth or margins.",
              {"symbol": _SYMBOL, "period": {"type": "string", "enum": ["quarterly", "annual"]}},
              ("symbol", "period"), get_financials, _sym_label("查看 ", " 財報")),
     ToolSpec("get_events",
              "Dated events of a stock: ex-dividend and payment dates, earnings and revenue deadlines, material "
-             "announcements, attention/disposition, shareholder meetings. Call this for questions about when "
-             "something happens or what was announced.",
+             "announcements, attention/disposition, shareholder meetings; for US stocks the SEC filings (8-K with "
+             "its items, 10-Q, 10-K) with sec.gov links. Call this for questions about when something happens or "
+             "what was announced or filed.",
              {"symbol": _SYMBOL, "mine_only": {"type": "boolean",
                                                "description": "true = only events relevant to the user's holdings"}},
              ("symbol", "mine_only"), get_events, _sym_label("查看 ", " 事件")),

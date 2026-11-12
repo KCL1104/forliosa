@@ -3,7 +3,7 @@ import type { ClosedRound, InstrumentEvent, NewsItem, RecurringPlan, Transaction
 import { createMockAdapter } from "@/api/mock/adapter"
 import { missedDebits, planDebits, recurringOffers } from "@/ai/recurring-offer"
 import type { Draft } from "@/ai/types"
-import { eventTitle, mergeAnnouncements } from "@/lib/events"
+import { announcementHost, eventLabel, eventTitle, mergeAnnouncements } from "@/lib/events"
 import { activePlansBySymbol, closedByYear, closedTotals, daysLabel, holdingPeriod, planStatus, recurringLabel, unpricedHoldings, upcomingShort, upcomingText } from "@/lib/ledger-display"
 
 const round = (p: Partial<ClosedRound>): ClosedRound => ({
@@ -64,6 +64,14 @@ describe("事件與公告", () => {
   it("預估：標題去掉「（預估）」，改用標記", () => {
     expect(eventTitle({ title: "2026Q3 財報公布期限（預估）", estimated: true })).toBe("2026Q3 財報公布期限")
     expect(eventTitle({ title: "2026Q3 法說會", estimated: false })).toBe("2026Q3 法說會")
+  })
+  it("美股 SEC 申報依表單標類型；連結說明寫 SEC EDGAR", () => {
+    expect(eventLabel({ type: "sec_filing", form: "10-K" })).toBe("年報")
+    expect(eventLabel({ type: "sec_filing", form: "10-Q/A" })).toBe("季報修正")
+    expect(eventLabel({ type: "sec_filing", form: "8-K" })).toBe("重大事件")
+    expect(eventLabel({ type: "sec_filing", form: "S-1" })).toBe("SEC 申報")
+    expect(eventLabel({ type: "investor_conference" })).toBe("法說會")
+    expect(announcementHost("https://www.sec.gov/Archives/edgar/data/320193/000032019326000026/aapl-20260926.htm")).toBe("SEC EDGAR")
   })
   it("公告併入時間軸：同日同標題的重大訊息補上連結，不重複；證交所公告各成一列", () => {
     const rows = mergeAnnouncements([ev({})], [news({}), news({ published_at: "2026-11-10T00:00:00+08:00", title: "暫停交易公告", category: "exchange_news", url: "https://www.twse.com.tw/zh/news/newsList.html" })])
