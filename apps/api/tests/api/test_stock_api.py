@@ -179,7 +179,11 @@ def test_events(client, archived, frozen_today):
     mine = client.get(f"{API}/instruments/6488/events?mine=true").json()
     assert mine and all(e["mine"] for e in mine)
     quanta = client.get(f"{API}/instruments/2382/events").json()
-    assert any(e["type"] == "material_info" and "財務報告" in e["title"] for e in quanta)
+    # the board-approval announcement is the actual 2026Q3 report date (no estimated deadline for it)
+    q3 = [e for e in quanta if e["type"] == "earnings" and e["period"] == "2026Q3"]
+    assert [(e["date"], e["estimated"], e["title"]) for e in q3] == [("2026-11-11", False, "2026Q3 財報公布")]
+    assert "財務報告" in q3[0]["detail"] and not any(e["type"] == "material_info" and "財務報告" in e["title"]
+                                                    for e in quanta)
 
 
 def test_news_degrades_without_finmind(client):

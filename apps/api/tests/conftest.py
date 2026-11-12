@@ -17,6 +17,15 @@ from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
 
 
+@pytest.fixture(autouse=True)
+def builtin_calendar():
+    """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
+    from forliosa.timeutil import set_official_holidays
+
+    yield
+    set_official_holidays([], [])
+
+
 @pytest.fixture(scope="session")
 def market() -> MarketData:
     md = MarketData([DemoProvider()], policy="personal")  # offline demo data (explicit opt-in)
