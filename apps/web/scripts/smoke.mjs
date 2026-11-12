@@ -330,7 +330,7 @@ await check("ETF 淨值與折溢價：0050 同一天、有走勢與逐日數字�
   const nav = page.getByRole("region", { name: "淨值與折溢價" })
   await nav.getByText("淨值（11/12）").waitFor({ timeout: 8000 })
   await nav.getByText(/^(溢價|折價) \d\.\d\d%$/).first().waitFor()
-  await nav.getByRole("img", { name: /近 60 個交易日的折溢價/ }).waitFor()
+  await nav.getByRole("img", { name: /^60 個有資料的交易日（\d+\/\d+–11\/12）的折溢價/ }).waitFor()
   await nav.getByText("追蹤誤差不提供：標的指數的每日資料沒有開放授權。").waitFor()
   await nav.getByText(/金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉/).waitFor()
   await nav.getByText(/逐日數字（60 天）/).click()

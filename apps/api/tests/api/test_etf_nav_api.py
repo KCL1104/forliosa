@@ -53,6 +53,7 @@ def test_same_day_premium_with_a_full_history(client, engine):
     assert len(n["history"]) == 25 and n["history"][0] == {"t": days[0].isoformat(), "nav": 100.0, "close": 100.5,
                                                             "premium_pct": 0.005}
     assert n["history_start"] == days[0].isoformat() and n["notes"] == []  # ≥ 20 points: no 資料累積中
+    assert n["history_missing"] == []  # every trading day in the span has a point
     assert n["sources"] == [NAV_ATTRIBUTION, TWSE_PRICE] and NAV_ATTRIBUTION in o["sources"]
     assert (n["currency"], n["fund_name"]) == ("TWD", "元大台灣卓越50基金")
 
@@ -79,9 +80,10 @@ def test_no_same_day_pair_no_premium_and_never_a_demo_or_finmind_close(client, e
         add(db, "006208.TW", {}, {date(2026, 11, 12): "999"}, source="demo")
     n = ov(client, "006208.TW")["etf_nav"]
     assert (n["nav"], n["nav_date"], n["close"], n["close_date"]) == (231.48, "2026-11-12", 236.6, "2026-11-11")
-    assert n["premium_pct"] is None and n["premium_date"] is None and n["history"] == []
+    assert n["premium_pct"] is None and n["premium_date"] is None and n["history"] == [] and n["history_missing"] == []
     assert n["notes"] == [svc.NO_MATCH_NOTE, "資料累積中：淨值自 2026-11-12 起存檔"]
-    assert n["sources"] == [NAV_ATTRIBUTION]
+    # the 11/11 close is shown, so its dataset is attributed even though no date pairs up
+    assert n["sources"] == [NAV_ATTRIBUTION, TWSE_PRICE]
 
 
 def test_etf_without_nav_and_stocks_without_the_block(client, engine):
@@ -89,8 +91,13 @@ def test_etf_without_nav_and_stocks_without_the_block(client, engine):
     assert n["nav"] is None and n["notes"] == [svc.NO_ARCHIVE_NOTE] and n["sources"] == []
     with Session(engine) as db:
         add(db, "0050.TW", {date(2026, 11, 12): "101.04"}, {})
+        add(db, "00919.TW", {}, {date(2026, 11, 12): "22.64"})  # an archived close, but no NAV for this ETF
     n = ov(client, "00919.TW")["etf_nav"]  # the dataset is archived, this ETF is not in it
     assert n["nav"] is None and n["notes"] == [svc.NOT_IN_DATASET_NOTE]
+    # no NAV: every number is null (the close too, as the contract says) and nothing to attribute
+    assert all(n[k] is None for k in ("nav_date", "currency", "fund_name", "close", "close_date", "premium_pct",
+                                      "premium_date", "history_start"))
+    assert (n["history"], n["history_missing"], n["sources"]) == ([], [], [])
     assert ov(client, "2330.TW")["etf_nav"] is None
     assert ov(client, "VOO")["etf_nav"] is None
 
@@ -106,6 +113,23 @@ def test_history_is_capped_and_oldest_first(engine):
     assert len(n["history"]) == svc.HISTORY_POINTS == 60
     assert n["history"][0]["t"] == days[10] and n["history"][-1]["t"] == days[-1]
     assert n["premium_pct"] == -0.002 and n["history_start"] == days[0]
+
+
+def test_archive_gaps_are_listed_as_missing_trading_days(client, engine):
+    """The worker was down 11/2–11/6 (11/4 has a NAV but no close): the points skip five trading days, and the gap is
+    listed instead of hidden. 10/26 has no row either, but it is a market holiday, so it is not missing."""
+    from forliosa.ai.tools import _etf_nav_for_ai
+
+    gap = [date(2026, 11, d) for d in (2, 3, 4, 5, 6)]
+    days = [d for d in weekdays(date(2026, 11, 12), 40) if d not in gap and d != date(2026, 10, 26)]
+    with Session(engine) as db:
+        add(db, "0050.TW", {d: "100" for d in days} | {date(2026, 11, 4): "100"}, {d: "100.1" for d in days})
+    n = ov(client, "0050.TW")["etf_nav"]
+    assert len(n["history"]) == len(days) and n["history"][0]["t"] == days[0].isoformat()
+    assert n["history_missing"] == [d.isoformat() for d in gap]
+    r = _etf_nav_for_ai(n)["history_range"]
+    assert (r["points"], r["missing_trading_days"], r["from"], r["to"]) == (
+        len(days), 5, days[0].isoformat(), "2026-11-12")
 
 
 def test_ai_overview_tool_gets_a_trimmed_block_with_the_same_date_rule(client, engine):
@@ -124,8 +148,9 @@ def test_ai_overview_tool_gets_a_trimmed_block_with_the_same_date_rule(client, e
     assert (n["nav"], n["premium_pct"], n["premium_date"]) == (100.0, 0.002, "2026-11-12")
     assert len(n["recent"]) == 10 and n["recent"][-1]["t"] == "2026-11-12"
     r = n["history_range"]
-    assert (r["days"], r["max"], r["min"]) == (30, {"t": days[3].isoformat(), "premium_pct": 0.006},
-                                               {"t": days[7].isoformat(), "premium_pct": -0.001})
+    assert (r["points"], r["max"], r["min"]) == (30, {"t": days[3].isoformat(), "premium_pct": 0.006},
+                                                 {"t": days[7].isoformat(), "premium_pct": -0.001})
+    assert (r["from"], r["to"]) == (days[0].isoformat(), "2026-11-12") and "days" not in r
     assert "same date" in n["note"] or "premium_date only" in n["note"]
     assert "tracking error" in n["note"]
     assert NAV_ATTRIBUTION in out["sources"]

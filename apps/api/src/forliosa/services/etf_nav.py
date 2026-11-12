@@ -8,6 +8,11 @@
   day's NAV, and TWSE's close file can lag a day, so the latest NAV and the latest close often differ: the premium is
   then computed on the newest date both exist, and both latest dates are returned so the page can show them).
 * History builds up from the first archived NAV; the page draws the series from :data:`MIN_POINTS` points on.
+  ``history_missing`` lists the trading days inside the history's span with no same-day pair (the worker was down, a
+  file was not archived — the NAV file holds only the latest day, so they never come back): the page breaks the line
+  there and says how many, instead of calling N points 「近 N 個交易日」.
+* Every number in the block has its dataset in ``sources``: the NAV, and the close's exchange file whenever a close is
+  returned (also when no date pairs up). Without a NAV the block is empty: no close either, ``sources`` ``[]``.
 * No tracking error: it needs the index's daily returns, and index data has no open licence.
 """
 
@@ -23,9 +28,11 @@ from sqlalchemy.orm import Session
 from forliosa.api import serialize as ser
 from forliosa.archive import OFFICIAL_CLOSE_SOURCES
 from forliosa.datapolicy import labels
+from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.fund_nav import NAV_DATASET
 from forliosa.models import EtfNav, PriceDaily
+from forliosa.timeutil import tw_trading_days
 
 MIN_POINTS = 20  # same-day (close, NAV) pairs before the history is drawn
 HISTORY_POINTS = 60  # at most this many points in the response (about three months of trading days)
@@ -45,26 +52,35 @@ def premium(close: Decimal, nav: Decimal) -> Decimal | None:
     return close / nav - 1 if nav and nav > 0 else None
 
 
+def missing_days(db: Session, days: list[date]) -> list[date]:
+    """Trading days between the first and last of ``days`` (sorted) that are not in it — gaps in the archive.
+
+    Uses TWSE's archived holiday schedule when there is one (else the built-in calendar), like the other calendars."""
+    if len(days) < 2:
+        return []
+    load_official_calendar(db)
+    have = set(days)
+    return [d for d in tw_trading_days(days[0], days[-1]) if d not in have]
+
+
 def etf_nav(db: Session, info: InstrumentInfo) -> dict[str, Any] | None:
     """The ``etf_nav`` block of ``GET /instruments/{symbol}/overview``; ``None`` for stocks and US listings."""
     if info.market == "US" or info.type != "etf":
         return None
     sym = info.symbol
     latest = db.scalars(select(EtfNav).where(EtfNav.symbol == sym).order_by(EtfNav.date.desc()).limit(1)).first()
-    last_close = db.scalars(select(PriceDaily).where(
-        PriceDaily.symbol == sym, PriceDaily.source.in_(OFFICIAL_CLOSE_SOURCES)).order_by(PriceDaily.date.desc())
-        .limit(1)).first()
     out: dict[str, Any] = {
-        "nav": None, "nav_date": None, "currency": None, "fund_name": None,
-        "close": ser.price(last_close.close) if last_close else None,
-        "close_date": last_close.date if last_close else None,
-        "premium_pct": None, "premium_date": None, "history": [], "history_start": None,
+        "nav": None, "nav_date": None, "currency": None, "fund_name": None, "close": None, "close_date": None,
+        "premium_pct": None, "premium_date": None, "history": [], "history_start": None, "history_missing": [],
         "notes": [], "sources": [],
     }
-    if latest is None:
+    if latest is None:  # no NAV: every number stays null (the quote is elsewhere in the overview)
         any_nav = db.scalar(select(EtfNav.symbol).limit(1)) is not None
         out["notes"].append(NOT_IN_DATASET_NOTE if any_nav else NO_ARCHIVE_NOTE)
         return out
+    last_close = db.scalars(select(PriceDaily).where(
+        PriceDaily.symbol == sym, PriceDaily.source.in_(OFFICIAL_CLOSE_SOURCES)).order_by(PriceDaily.date.desc())
+        .limit(1)).first()
 
     start = db.scalar(select(func.min(EtfNav.date)).where(EtfNav.symbol == sym))
     since = latest.date - timedelta(days=LOOKBACK_DAYS)
@@ -79,12 +95,17 @@ def etf_nav(db: Session, info: InstrumentInfo) -> dict[str, Any] | None:
             points.append({"t": d, "nav": ser.price(navs[d].nav), "close": ser.price(closes[d].close),
                            "premium_pct": ser.ratio(p)})
             close_sources[f"{closes[d].source}/price"] = None
+    if last_close is not None:  # shown with its date even when no date pairs up, so its dataset is listed too
+        close_sources[f"{last_close.source}/price"] = None
     out.update({
         "nav": ser.price(latest.nav), "nav_date": latest.date, "currency": latest.currency,
         "fund_name": latest.fund_name, "history_start": start,
+        "close": ser.price(last_close.close) if last_close else None,
+        "close_date": last_close.date if last_close else None,
     })
     if points:
         out["premium_pct"], out["premium_date"] = points[-1]["premium_pct"], points[-1]["t"]
+        out["history_missing"] = missing_days(db, [p["t"] for p in points])
     else:
         out["notes"].append(NO_MATCH_NOTE)
     if len(points) < MIN_POINTS and start is not None:

@@ -5,7 +5,7 @@ import type { EtfNav, InstrumentDetail, NavPoint } from "@/api/types"
 import { ChartTooltipBox } from "@/components/charts/chart-kit"
 import { Section } from "@/components/section"
 import { Skeleton } from "@/components/ui/skeleton"
-import { formatNav, formatPremium, NAV_MIN_POINTS } from "@/lib/etf-nav"
+import { type ChartDay, chartDays, formatNav, formatPremium, NAV_MIN_POINTS, spanLabel } from "@/lib/etf-nav"
 import { AXIS_TICK } from "@/lib/chart"
 import { formatDate, formatDateShort, formatPercent } from "@/lib/format"
 import { formatQuote } from "@/lib/tick"
@@ -54,7 +54,7 @@ function NavBody({ inst, n }: { inst: InstrumentDetail; n: EtfNav }) {
           最新的淨值是 {md(n.nav_date)}、收盤是 {md(n.close_date)}；折溢價用兩者都有的 {md(at.t)} 計算（收盤 {price(at.close)}、淨值 {formatNav(at.nav)}）。
         </p>
       )}
-      {chart && <PremiumChart points={n.history} price={price} />}
+      {chart && <PremiumChart points={n.history} missing={n.history_missing} price={price} />}
       {n.notes.map((note) => (
         <p key={note} className="mt-3 text-md text-ink-2">
           {note}
@@ -74,18 +74,19 @@ function ticksFor(points: NavPoint[]): number[] {
   return [...new Set([lo, 0, hi])].sort((a, b) => a - b)
 }
 
-function PremiumChart({ points, price }: { points: NavPoint[]; price: (v: number) => string }) {
+function PremiumChart({ points, missing, price }: { points: NavPoint[]; missing: string[]; price: (v: number) => string }) {
   const ticks = ticksFor(points)
   const lo = points.reduce((a, p) => (p.premium_pct < a.premium_pct ? p : a))
   const hi = points.reduce((a, p) => (p.premium_pct > a.premium_pct ? p : a))
   const last = points.at(-1)!
-  const summary = `近 ${points.length} 個交易日的折溢價，${md(points[0]!.t)} 到 ${md(last.t)}：最低 ${formatPremium(lo.premium_pct)}（${md(lo.t)}），最高 ${formatPremium(hi.premium_pct)}（${md(hi.t)}），${md(last.t)} ${formatPremium(last.premium_pct)}`
+  const span = spanLabel(points, missing)
+  const summary = `${span}的折溢價：最低 ${formatPremium(lo.premium_pct)}（${md(lo.t)}），最高 ${formatPremium(hi.premium_pct)}（${md(hi.t)}），${md(last.t)} ${formatPremium(last.premium_pct)}`
   return (
     <figure className="mt-5">
-      <figcaption className="text-md text-ink">近 {points.length} 個交易日</figcaption>
+      <figcaption className="text-md text-ink">{span}</figcaption>
       <div className="mt-2 h-[132px] w-full" role="img" aria-label={summary}>
         <ResponsiveContainer width="100%" height="100%">
-          <LineChart data={points} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+          <LineChart data={chartDays(points, missing)} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
             <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={64} tickFormatter={(t: string) => md(t)} />
             <YAxis
               tick={AXIS_TICK}
@@ -100,20 +101,26 @@ function PremiumChart({ points, price }: { points: NavPoint[]; price: (v: number
             <Tooltip
               cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}
               content={({ active, payload }) => {
-                const p = active ? (payload?.[0]?.payload as NavPoint | undefined) : undefined
-                return p ? (
+                const d = active ? (payload?.[0]?.payload as ChartDay | undefined) : undefined
+                if (!d) return null
+                const p = d.point
+                return (
                   <ChartTooltipBox
-                    title={formatDate(p.t)}
-                    rows={[
-                      { label: "折溢價", value: formatPremium(p.premium_pct) },
-                      { label: "收盤", value: price(p.close) },
-                      { label: "淨值", value: formatNav(p.nav) },
-                    ]}
+                    title={formatDate(d.t)}
+                    rows={
+                      p
+                        ? [
+                            { label: "折溢價", value: formatPremium(p.premium_pct) },
+                            { label: "收盤", value: price(p.close) },
+                            { label: "淨值", value: formatNav(p.nav) },
+                          ]
+                        : [{ label: "折溢價", value: "沒有資料" }]
+                    }
                   />
-                ) : null
+                )
               }}
             />
-            <Line dataKey="premium_pct" stroke="var(--ink)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--paper)", strokeWidth: 2 }} />
+            <Line dataKey="premium_pct" connectNulls={false} stroke="var(--ink)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--paper)", strokeWidth: 2 }} />
           </LineChart>
         </ResponsiveContainer>
       </div>

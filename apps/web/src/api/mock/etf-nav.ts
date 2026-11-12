@@ -52,9 +52,10 @@ export function buildEtfNav(spec: MockInstrumentSpec): EtfNav | null {
   if (spec.market === "US" || spec.type !== "etf") return null
   const priceKey = spec.market === "TPEX" ? "tpex-openapi/price" : "twse-openapi/price"
   const scenario = SCENARIOS[spec.symbol] ?? DEFAULT_SCENARIO
+  // 沒有淨值：所有數字都是 null（收盤價也不給，和後端一樣）、沒有要顯名的資料集
   const empty: EtfNav = {
-    nav: null, nav_date: null, currency: null, fund_name: null, close: spec.price, close_date: MOCK_TODAY,
-    premium_pct: null, premium_date: null, history: [], history_start: null, notes: [NAV_NOT_IN_DATASET_NOTE], sources: [],
+    nav: null, nav_date: null, currency: null, fund_name: null, close: null, close_date: null,
+    premium_pct: null, premium_date: null, history: [], history_start: null, history_missing: [], notes: [NAV_NOT_IN_DATASET_NOTE], sources: [],
   }
   if (scenario === "missing") return empty
 
@@ -86,6 +87,8 @@ export function buildEtfNav(spec: MockInstrumentSpec): EtfNav | null {
     premium_date: last.t,
     history,
     history_start: points[0]!.t,
+    // 示範存檔每個交易日都有（缺口的畫法見 EtfNavSection 的測試）
+    history_missing: [],
     notes: points.length < MIN_POINTS ? [`資料累積中：淨值自 ${points[0]!.t} 起存檔`] : [],
     sources: [sourceOf(NAV_SOURCE_KEY), sourceOf(priceKey)],
   }

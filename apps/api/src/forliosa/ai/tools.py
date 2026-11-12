@@ -326,19 +326,23 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
 ETF_NAV_AI_NOTE = ("premium_pct = close ÷ NAV − 1 on premium_date only (the newest date with both an official close "
                    "and a NAV; never mix dates). Positive = 溢價 (trading above NAV), negative = 折價. Say the date. "
+                   "history_range.points counts days that have both, not trading days: say the from–to dates, and "
+                   "missing_trading_days are archive gaps in between. "
                    "There is no tracking error: the index's daily data has no open licence.")
 
 
 def _etf_nav_for_ai(block: dict[str, Any]) -> dict[str, Any]:
     """The overview's ``etf_nav`` for the model: the latest values, the range of the archived history and its last
-    10 points (the page draws up to 60)."""
+    10 points (the page draws up to 60). ``points`` counts days with data, not trading days: archive gaps inside
+    ``from``–``to`` are counted in ``missing_trading_days``."""
     hist = block.get("history") or []
     out = {k: block.get(k) for k in ("nav", "nav_date", "currency", "close", "close_date", "premium_pct",
                                      "premium_date", "history_start", "notes")}
     if hist:
         lo = min(hist, key=lambda p: p["premium_pct"])
         hi = max(hist, key=lambda p: p["premium_pct"])
-        out["history_range"] = {"days": len(hist), "from": hist[0]["t"], "to": hist[-1]["t"],
+        out["history_range"] = {"points": len(hist), "from": hist[0]["t"], "to": hist[-1]["t"],
+                                "missing_trading_days": len(block.get("history_missing") or []),
                                 "min": {"t": lo["t"], "premium_pct": lo["premium_pct"]},
                                 "max": {"t": hi["t"], "premium_pct": hi["premium_pct"]}}
         out["recent"] = hist[-10:]

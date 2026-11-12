@@ -411,21 +411,25 @@ export interface NavPoint {
 /**
  * ETF 淨值：金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（data.gov.tw 11109）。
  * 折溢價只用同一天的收盤價與淨值；`premium_date` 是兩者都有的最近一天（海外標的的淨值常是前一個營業日）。
+ * `nav` 是 null 時其他數字也都是 null（收盤價也不給）、`sources` 是空陣列。
  */
 export interface EtfNav {
   nav: number | null
   nav_date: string | null
   currency: string | null
   fund_name: string | null
-  /** 最近一筆存檔的官方收盤價 */
+  /** 最近一筆存檔的官方收盤價（有淨值時才有） */
   close: number | null
   close_date: string | null
   premium_pct: number | null
   premium_date: string | null
-  /** 由舊到新，最多 60 個交易日；滿 20 點才畫走勢 */
+  /** 由舊到新，最多 60 個有資料的交易日（不一定連續）；滿 20 點才畫走勢 */
   history: NavPoint[]
   history_start: string | null
+  /** `history` 第一點到最後一點之間沒有資料的交易日（存檔缺口；走勢在這裡斷開） */
+  history_missing: string[]
   notes: string[]
+  /** 區塊裡每個數字的資料集：淨值，加上收盤價的證交所／櫃買資料集 */
   sources: string[]
 }
 

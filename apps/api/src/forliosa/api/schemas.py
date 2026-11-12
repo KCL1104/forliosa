@@ -445,16 +445,17 @@ class NavPoint(BaseModel):
 class EtfNavOut(BaseModel):
     """ETF NAV (證券期貨局〈證券投資信託基金每日淨值〉) and the after-close premium / discount on the same date."""
 
-    nav: float | None  # latest archived NAV
+    nav: float | None  # latest archived NAV; when null every number below is null too
     nav_date: date | None
     currency: str | None
     fund_name: str | None  # 基金名稱 as published
-    close: float | None  # latest archived official close
+    close: float | None  # latest archived official close (only with a NAV)
     close_date: date | None
     premium_pct: float | None  # on premium_date: the newest date with both a close and a NAV
     premium_date: date | None
     history: list[NavPoint]  # same-day points, oldest first (at most 60)
     history_start: date | None  # first archived NAV of this ETF
+    history_missing: list[date] = []  # trading days inside the history's span with no same-day point (archive gaps)
     notes: list[str]
     sources: list[str]
 

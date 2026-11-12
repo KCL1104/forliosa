@@ -1,4 +1,5 @@
-import { formatNumber, formatPercent } from "@/lib/format"
+import type { NavPoint } from "@/api/types"
+import { formatDateShort, formatNumber, formatPercent } from "@/lib/format"
 
 /** 走勢要有這麼多個同一天的（收盤、淨值）才畫，和後端 `etf_nav.MIN_POINTS` 相同 */
 export const NAV_MIN_POINTS = 20
@@ -25,4 +26,26 @@ export function formatNav(n: number | null | undefined): string {
   if (n === null || n === undefined) return "—"
   const decimals = Math.min(4, Math.max(2, (String(n).split(".")[1] ?? "").length))
   return formatNumber(n, decimals)
+}
+
+/** 圖上的一天：沒有資料的交易日 `premium_pct` 是 null，線在那裡斷開（不把前後兩點直接連起來） */
+export type ChartDay = { t: string; premium_pct: number | null; point?: NavPoint }
+
+/** 有資料的點加上後端的 `history_missing`（存檔缺口），依日期排好 */
+export function chartDays(points: NavPoint[], missing: string[]): ChartDay[] {
+  const days: ChartDay[] = [
+    ...points.map((p) => ({ t: p.t, premium_pct: p.premium_pct, point: p })),
+    ...missing.map((t) => ({ t, premium_pct: null })),
+  ]
+  return days.sort((a, b) => a.t.localeCompare(b.t))
+}
+
+/**
+ * 走勢的標題：「60 個有資料的交易日（8/17–11/12）」。點數是同一天有收盤也有淨值的天數，
+ * 存檔有缺口時不是連續的交易日，所以不寫「近 N 個交易日」；有缺口時多一句「中間 K 個交易日沒有資料」。
+ */
+export function spanLabel(points: NavPoint[], missing: string[]): string {
+  const md = (d: string) => formatDateShort(d, false)
+  const span = `${points.length} 個有資料的交易日（${md(points[0]!.t)}–${md(points.at(-1)!.t)}）`
+  return missing.length ? `${span}，中間 ${missing.length} 個交易日沒有資料` : span
 }
