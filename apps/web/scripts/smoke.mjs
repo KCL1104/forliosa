@@ -2,6 +2,7 @@
 // 走過每個路由，確認關鍵文字出現、沒有 console 錯誤；也測試 AI 草稿→簽名入帳→復原、隱私模式、⌘K、手機的問 AI，
 // 以及第二批：出清紀錄、定期定額（設定與扣款日草稿）、公告、1 日走勢的授權說明、資料來源與授權、商用模式沒有示範標記；
 // 第三批：法人觀點（展開 → 查詢 → 搜尋中 → 結果／查無／查不到）、持倉的定期定額標記、補記漏記的扣款、已出清依年份分組。
+// 第四批：股利自動入帳（交易與股利頁的「自動」、編輯後「自動・已修改」、刪除後不再出現）。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
 
@@ -281,6 +282,30 @@ await check("頭像選單：資料來源與授權（完整顯名聲明）", asyn
 await check("紀錄：對話保留 30 天", async () => {
   await page.goto(base + "/history", { waitUntil: "networkidle" })
   await page.getByText("對話紀錄保留 30 天。").first().waitFor()
+})
+
+// ── 第四批：股利自動入帳 ─────────────────────────────────────
+await check("股利頁：台股股利標「自動」，有一行說明", async () => {
+  await page.goto(base + "/?view=dividends", { waitUntil: "networkidle" })
+  await page.getByText("台股股利在除息日自動入帳，美股股利要自己記。").waitFor({ timeout: 8000 })
+  const tags = page.locator("#div-received").locator("xpath=ancestor::section[1]").getByText("自動", { exact: true })
+  if ((await tags.count()) !== 3) throw new Error(`expected 3 自動 tags, got ${await tags.count()}`)
+})
+await check("交易：編輯自動入帳的股利（說明）→ 儲存後「自動・已修改」；刪除自動那筆（確認框說明）後不再出現", async () => {
+  await page.goto(base + "/?view=transactions", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: /^編輯 10\/8.*2454（自動）$/ }).click()
+  await page.getByText(/儲存變更後就是你自己的版本/).waitFor({ timeout: 8000 })
+  await page.getByRole("dialog").getByText("聯發科").waitFor({ timeout: 8000 })
+  await page.locator("#trade-note").fill("零股")
+  await page.getByRole("button", { name: "儲存變更" }).click()
+  await page.getByRole("button", { name: /^編輯 10\/8.*2454（自動・已修改）$/ }).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "刪除 9/22（二） 的現金股利" }).click()
+  const dialog = page.getByRole("alertdialog")
+  await dialog.getByText(/這筆股利之後也不會再自動入帳/).waitFor()
+  await dialog.getByRole("button", { name: "刪除" }).click()
+  await page.getByText("已刪除這筆交易").waitFor({ timeout: 8000 })
+  await page.waitForTimeout(500)
+  if (await page.getByRole("button", { name: /6488（自動）$/ }).count()) throw new Error("deleted automatic dividend came back")
 })
 
 // 手機：浮動分頁＋問 AI 全螢幕（搜尋住在這裡）

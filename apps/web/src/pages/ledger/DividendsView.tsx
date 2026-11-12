@@ -127,14 +127,17 @@ export function DividendsView() {
                     {rows.map((t) => (
                       <li key={t.id} className="grid grid-cols-[88px_1fr_auto] items-baseline gap-3 border-b border-rule py-2.5 md:grid-cols-[120px_1fr_auto_auto]">
                         <span className="num text-ink-2">{formatDateShort(t.trade_date)}</span>
-                        <span className="min-w-0 truncate">
-                          {t.symbol && (
-                            <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className="font-medium hover:underline">
-                              {nameOf.get(t.symbol) ?? codeOf(t.symbol)}
-                            </Link>
-                          )}
-                          <span className="ml-2 text-sm text-ink-2">{t.type === "stock_dividend" ? "股票股利" : t.price !== null ? `每股 ${t.price} 元` : "現金股利"}</span>
-                          <SourceTag source={t.source} className="ml-2" />
+                        {/* 名稱太長時截斷名稱與每股金額，來源標示一定看得到 */}
+                        <span className="flex min-w-0 items-baseline">
+                          <span className="min-w-0 truncate">
+                            {t.symbol && (
+                              <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className="font-medium hover:underline">
+                                {nameOf.get(t.symbol) ?? codeOf(t.symbol)}
+                              </Link>
+                            )}
+                            <span className="ml-2 text-sm text-ink-2">{t.type === "stock_dividend" ? "股票股利" : t.price !== null ? `每股 ${t.price} 元` : "現金股利"}</span>
+                          </span>
+                          <SourceTag source={t.source} className="ml-2 shrink-0" />
                         </span>
                         <span className="num hidden text-right text-sm text-ink-2 md:block">
                           {t.health_insurance > 0 ? <>健保 {privacy ? "••••" : formatNumber(t.health_insurance)}</> : t.tax > 0 ? <>預扣 {privacy ? "••••" : formatNumber(t.tax, t.currency === "USD" ? 2 : 0)}</> : ""}

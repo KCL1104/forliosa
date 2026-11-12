@@ -41,11 +41,21 @@
 | 已出清依年份 | ✅ 依 `closed_at` 年份分組、新的在前，每年可收合（最近一年預設展開），年份列有已實現小計（▲▼）；桌面每年一個 tbody、小計對齊「已實現損益」欄；手機每年一個 h3＋清單 | `src/pages/ledger/ClosedRounds.tsx`、`src/lib/ledger-display.ts` |
 | 資料來源頁 | ✅ 說明法人觀點不是授權資料庫（有人查詢時 AI 搜尋公開報導、當天共用、隔天刪除） | `src/pages/data-sources/DataSourcesPage.tsx` |
 
+## 第四批（2026-11-12）：股利自動入帳（docs/handoff.md §3.0）
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ `TransactionSource` 加上 `auto`（系統在除息日自動入帳的台股股利）、`auto_edited`（使用者改過的）；`TransactionInput.source` 不能是這兩個（後端 POST／PATCH 也拒絕） | `src/api/types.ts` |
+| 來源標示 | ✅ `SOURCE_TAG`（每種來源一個對應）＋`<SourceTag>`：「自動」「自動・已修改」「匯入」是淡墨細框小字（可滑過看說明，不用 AI 的紫色），「由 AI 建立」維持紫色文楷；交易列表、股利頁「已入帳」都用它（股利頁名稱太長時截斷名稱，標示一定看得到）；交易列的 aria-label 帶來源；隱私模式不顯示自動入帳的備註（寫著持有股數） | `src/lib/labels.ts`、`src/components/finance.tsx`、`src/pages/ledger/TransactionsView.tsx`、`DividendsView.tsx` |
+| 說明 | ✅ 股利頁「已入帳」上方一行「台股股利在除息日自動入帳，美股股利要自己記。」（空狀態也改）；編輯自動那筆時表單上方說明「儲存變更後就是你自己的版本，系統不會再更新；刪除後也不會再自動入帳」（改過的：「系統不會再更新它」）；刪除確認框與刪除通知加一句「這筆股利之後不會再自動入帳」；沒改任何欄位就按儲存不送出（維持「自動」） | `src/pages/transactions/TradeForm.tsx`、`src/lib/ledger-display.ts` |
+| AI | ✅ 「股利入帳」的提問說明台股會自動入帳、範例改成美股（從台股個股頁進來時說可以更正金額）；後續建議只提美股入帳；台股現金股利草稿在 120 天內已有自動入帳時加一行「9/16 除息的股利已經自動入帳；簽名後改以這筆為準，不會重複計算」 | `src/ai/runner.ts` |
+| mock | ✅ 與後端相同的同步（`syncAutoDividends`）：除息預告＝存檔起點後的台股紀錄；股數＝除息日前一天收盤的持股；自己記的（manual／import／ai_draft，除息日起 120 天內）優先；改了 → `auto_edited`＋略過；刪了 → 略過；交易新增／修改／刪除、持股快照、追蹤模式變更後重算。示範資料：8 月以前自己記的股利維持手動，之後的 2330（9/16）、6488（9/22，上櫃）、2454（10/8，零股）是自動入帳；美股照舊手動。另修正 mock 修改交易原地改物件（列表不會更新）、改股數時金額不重算的問題 | `src/api/mock/auto-dividends.ts`、`ledger.ts`、`adapter.ts` |
+
 ## 驗證
 
-- `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（11 檔 145 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記）、`pnpm build` 全部通過。
-- Playwright 冒煙（`node scripts/smoke.mjs`，mock 模式）：22 個路由＋28 個流程全部通過；第三批新增：補記 11/06 的 0050（草稿成交日 11/6 → 簽名 → 不再提出）、已出清年份（2026／2025／2024、最近一年展開、小計）、持倉標記（說明、到設定的那個計畫、隱私模式遮金額）、法人觀點（預設收合、2330 三筆＋免責、2454 查詢 → 搜尋中 → 結果、2881 查無、2409 查不到、ETF 沒有）、手機的標記與整列點擊、手機法人觀點。
-- 截圖（`pnpm screenshots`）：`docs/screenshots/v2/`，58 張全部重拍（mock 資料有變）；新增 `stock-2330-analyst-*`、`ledger-recurring-marks-*`，`ledger-closed-*` 改成年份分組。
+- `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（13 檔 166 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記；第四批新增：來源標示、編輯說明與「沒改不送出」、AI 會取代的自動入帳、mock 股利自動入帳的同步規則）、`pnpm build` 全部通過。
+- Playwright 冒煙（`node scripts/smoke.mjs`，mock 模式）：22 個路由＋30 個流程全部通過（第四批新增：股利頁的「自動」與說明；編輯自動那筆 → 「自動・已修改」、刪除自動那筆後不再出現）；第三批新增：補記 11/06 的 0050（草稿成交日 11/6 → 簽名 → 不再提出）、已出清年份（2026／2025／2024、最近一年展開、小計）、持倉標記（說明、到設定的那個計畫、隱私模式遮金額）、法人觀點（預設收合、2330 三筆＋免責、2454 查詢 → 搜尋中 → 結果、2881 查無、2409 查不到、ETF 沒有）、手機的標記與整列點擊、手機法人觀點。
+- 截圖（`pnpm screenshots`）：`docs/screenshots/v2/`，58 張全部重拍（mock 資料有變）；新增 `stock-2330-analyst-*`、`ledger-recurring-marks-*`，`ledger-closed-*` 改成年份分組。第四批新增 12 張 `ledger-auto-dividends-{transactions,dividends,edit}-{desktop,iphone}-{light,dark}`（只拍新的：其他畫面的數字沒變，交易列表的股利改在除息日、多了「自動」）。
 - Impeccable detector：原始碼 0 項；即時網址（帳本、2330、2454、NVDA、設定、資料來源；1440 與 390）0 項；展開後的狀態以 `--cdp` 掃（法人觀點 ready／none／searching／empty、已出清年份；1440 與 390）修正前 1 項（搜尋中的脈動紫點）→ 0 項。
 - 寬度檢查：390、820、1024、1280、1440、1920 都沒有水平捲動。
 
