@@ -437,3 +437,29 @@
 ```
 
 `kind`（建議問題）：帳本 `onboard`、`drag`、`lift`、`dividends_next`、`concentration`；個股 `why_move`、`next_dividend`、`cost_on_river`、`add_one_lot`、`is_expensive`、`if_hold_dividend`；群組 `group_share`（與前端離線規則相同）。
+
+### 法人觀點與美股基本面（2026-11-12 新增，待後端實作）
+
+**法人觀點**（產品負責人同意：AI 可引用第三方已公開的評級與目標價，必附來源與日期；AI 自己不給目標價；不計算平均、上漲空間、不排名、不寫買賣提示）
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/instruments/{symbol}/analyst-views` | 讀取當日共用快取；沒有時回 `{status: "none"}` |
+| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋產生（同一檔同一交易日全體使用者共用一份，24 小時後刪除；計入觸發者的 AI 額度） |
+
+```json
+{
+  "status": "ready",                 // "none" | "pending" | "ready" | "unavailable"
+  "symbol": "2330.TW",
+  "as_of": "2026-11-12T14:05:00+08:00",
+  "expires_at": "2026-11-13T14:05:00+08:00",
+  "items": [
+    {"institution": "某外資券商", "action": "調升", "rating_text": "加碼", "target_price": 1350, "currency": "TWD",
+     "date": "2026-11-10", "source_title": "報導標題", "url": "https://…"}
+  ],
+  "disclaimer": "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。",
+  "notes": []
+}
+```
+最多 5 筆，依日期新到舊；沒有日期或來源的項目不列。
+
+**美股基本面（SEC EDGAR）**：User-Agent 需含聯絡信箱，從環境變數 `SEC_CONTACT_EMAIL` 讀取，不寫進程式碼；請求頻率 ≤ 10 次／秒。端點與欄位待後端實作時補上（`/instruments/{symbol}/financials` 對美股回傳 companyfacts 摘要、`/instruments/{symbol}/events` 加入 8-K／10-Q／10-K 申報）。
