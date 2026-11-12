@@ -179,7 +179,12 @@ export function useAcceptInvite(token: string) {
 // ── 我的分享 ──────────────────────────────────────────────
 export function usePutShare(id: string) {
   const qc = useQueryClient()
+  const key = sk.share(id)
   return useMutation({
+    mutationKey: key,
+    // 一次送一筆、照按的順序：每筆都是完整的六個開關，並行送出時可能後發先至，
+    // 舊的那筆最後寫入就把剛關掉的分享（例如交易動態）又打開了。開關本身照樣立即反應（onMutate 不排隊）。
+    scope: { id: `share:${id}` },
     mutationFn: (share: ShareSettings) => api.putShare(id, share),
     onMutate: async (share) => {
       // 開關立即反應；失敗時還原
@@ -191,7 +196,10 @@ export function usePutShare(id: string) {
     onError: (_e, _s, ctx) => {
       if (ctx?.before) qc.setQueryData(sk.group(id), ctx.before)
     },
-    onSettled: () => void qc.invalidateQueries({ queryKey: sk.group(id) }),
+    // 還有排在後面的分享設定時先不重抓：伺服器還沒寫入下一筆，重抓會讓開關跳回舊的狀態；最後一筆完成才整組重抓
+    onSettled: () => {
+      if (qc.isMutating({ mutationKey: key }) <= 1) void qc.invalidateQueries({ queryKey: sk.group(id) })
+    },
   })
 }
 

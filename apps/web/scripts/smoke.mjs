@@ -105,11 +105,17 @@ await check("股利指令：00878 配息 1,100 寫成草稿", async () => {
   await page.getByRole("heading", { name: /股利入帳 國泰永續高股息/ }).waitFor({ timeout: 8000 })
 })
 
-await check("自由提問：誠實說明下一階段，給手動路徑", async () => {
+await check("自由提問：誠實說明這裡先不回答（不猜、不承諾時程），給手動路徑", async () => {
   const box = page.getByLabel("提出問題或下指令")
   await box.fill("台積電的護城河是什麼")
   await box.press("Enter")
-  await page.getByText(/完整的 AI 回答在下一階段開放/).last().waitFor({ timeout: 5000 })
+  // 規則版回答用現在式：說明這題要查資料、這裡先不回答，再給最接近的手動路徑（帳本上是「看持倉」）
+  const panel = page.getByRole("complementary", { name: "問 AI" })
+  await panel.getByText(/這題要查資料並附來源，這裡先不回答/).last().waitFor({ timeout: 5000 })
+  if (await panel.getByText(/下一階段/).count()) throw new Error("fallback must not promise a timeline")
+  const path = panel.getByRole("link", { name: /看持倉/ }).last()
+  await path.waitFor()
+  if ((await path.getAttribute("href")) !== "/") throw new Error(`manual path ${await path.getAttribute("href")}`)
 })
 
 await check("手動記帳表單（備援路徑）：試算稅費並儲存", async () => {
@@ -268,7 +274,10 @@ await check("法人觀點：2881 查完沒有報導、2409 查不到、ETF 沒�
   await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
   await page.getByText("法人觀點暫時查不到，稍後再打開看看。").waitFor({ timeout: 15000 })
   await page.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
-  await page.getByText("近四季 EPS").waitFor()
+  // ETF 的鍵值帶只列 ETF 有的欄位（沒有近四季 EPS）：等總覽的第三層（法人觀點也在這一層）出現再判斷
+  await page.getByRole("region", { name: "關鍵數據" }).getByText(/^淨值（/).first().waitFor({ timeout: 8000 })
+  await page.getByRole("region", { name: "新聞報導" }).waitFor({ timeout: 8000 })
+  if (await page.getByRole("region", { name: "關鍵數據" }).getByText("近四季 EPS").count()) throw new Error("ETF key band lists EPS")
   if (await page.getByRole("button", { name: /法人觀點/ }).count()) throw new Error("ETF should not have 法人觀點")
 })
 await check("個股：1 日走勢說明需要授權，按「看 5 日走勢」切換", async () => {
@@ -278,22 +287,36 @@ await check("個股：1 日走勢說明需要授權，按「看 5 日走勢」�
   await page.getByRole("button", { name: "看 5 日走勢" }).click()
   await page.getByRole("radio", { name: "5日", checked: true }).waitFor()
 })
-await check("個股總覽：「新聞報導」（媒體原標題＋媒體＋時間，連到原文）與「公告」（官方）分開；顯示更多", async () => {
+await check("個股總覽：「新聞報導」（媒體原標題＋媒體＋時間，連到原文；先 3 則、看更多）與「事件」裡的官方公告分開；GDELT 在頁尾", async () => {
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
-  await page.getByRole("heading", { name: "公告", exact: true }).waitFor()
+  // 官方公告（重大訊息、證交所公告）併進「事件」表：連到官方原文、另開新視窗；不混進媒體的標題
+  const events = page.getByRole("region", { name: "事件" })
+  const official = events.getByRole("link", { name: /（在(公開資訊觀測站|證交所)查看，另開新視窗）/ })
+  await official.first().waitFor({ timeout: 8000 })
+  if ((await official.count()) !== 3) throw new Error(`expected 3 official announcements, got ${await official.count()}`)
+  for (const link of await official.all()) {
+    if ((await link.getAttribute("target")) !== "_blank") throw new Error("official link must open a new tab")
+    if (!/^https:\/\/(mops\.twse|www\.twse)\.com\.tw\//.test((await link.getAttribute("href")) ?? "")) throw new Error(`official link is not an official host: ${await link.getAttribute("href")}`)
+  }
+  if (await events.locator('a[href*="demo-news"]').count()) throw new Error("media headline in 事件")
+  // 新聞報導：媒體原標題＋媒體＋時間，連到原文（另開新視窗、noopener）；不放圖片；先 3 則，「看更多」再加
   const news = page.getByRole("region", { name: "新聞報導" })
   await news.waitFor()
   const headlines = news.getByRole("listitem").getByRole("link")
-  if ((await headlines.count()) !== 8) throw new Error(`expected 8 headlines, got ${await headlines.count()}`)
+  if ((await headlines.count()) !== 3) throw new Error(`expected 3 headlines, got ${await headlines.count()}`)
   const rel = await headlines.first().getAttribute("rel")
   if ((await headlines.first().getAttribute("target")) !== "_blank" || !rel?.includes("noopener")) throw new Error(`link attrs ${rel}`)
+  await news.getByRole("listitem").first().getByText("示範財經日報", { exact: true }).waitFor()
+  await news.getByRole("listitem").first().locator("time").getByText("1 小時前").waitFor()
   if (await news.locator("img").count()) throw new Error("news must not show images")
-  await news.getByRole("link", { name: /The GDELT Project/ }).waitFor()
-  await news.getByRole("button", { name: /顯示更多/ }).click()
-  if ((await headlines.count()) <= 8) throw new Error("顯示更多 did not add headlines")
-  // 公告只有官方來源（媒體在新聞報導）
-  const official = page.getByRole("region", { name: "公告" })
-  if (await official.getByText("示範財經日報").count()) throw new Error("media headline in 公告")
+  if (await news.getByRole("link", { name: /（在(公開資訊觀測站|證交所)查看/ }).count()) throw new Error("official announcement in 新聞報導")
+  await news.getByRole("button", { name: "看更多" }).click()
+  if ((await headlines.count()) <= 3) throw new Error("看更多 did not add headlines")
+  // GDELT 的使用條款要求引用並連回 gdeltproject.org：在頁尾的「資料來源與授權」
+  await page.getByRole("button", { name: "資料來源與授權" }).click()
+  const gdelt = page.locator("footer").getByRole("link", { name: /The GDELT Project/ })
+  await gdelt.waitFor()
+  if ((await gdelt.getAttribute("href")) !== "https://www.gdeltproject.org/") throw new Error(`GDELT link ${await gdelt.getAttribute("href")}`)
   await page.goto(base + "/stock/2317.TW", { waitUntil: "networkidle" })
   await page.getByText(/最近沒有找到鴻海的媒體報導/).waitFor()
 })
@@ -302,8 +325,13 @@ await check("上市股票名列外資持股前 20 名：日月光投控顯示外
   const foreign = page.getByRole("region", { name: "外資持股比" })
   await foreign.getByText(/名列證交所外資及陸資持股前 20 名第 12 名/).waitFor({ timeout: 8000 })
   if (!(await foreign.getByText("75.52%・前 20 名第 12 名").count())) throw new Error("top-20 rank missing in the header")
+  // 總覽：籌碼併進鍵值帶——「外資持股」一格（滑過有名次），格子下面一行寫明是前 20 名資料與名次
   await page.goto(base + "/stock/3711.TW", { waitUntil: "networkidle" })
-  await page.getByRole("region", { name: "籌碼" }).getByText(/外資持股是證交所公布的前 20 名資料（第 12 名）/).waitFor({ timeout: 8000 })
+  const band = page.getByRole("region", { name: "關鍵數據" })
+  await band.getByText(/外資持股是證交所前 20 名資料（第 12 名）/).waitFor({ timeout: 8000 })
+  const cell = band.locator("dl > div").filter({ has: page.getByRole("term").getByText("外資持股", { exact: true }) })
+  await cell.getByRole("definition").getByText("75.5%", { exact: true }).waitFor()
+  if ((await cell.getAttribute("title")) !== "證交所外資持股前 20 名第 12 名") throw new Error(`rank title ${await cell.getAttribute("title")}`)
 })
 await check("個股總覽：「相關股票」4 格連到個股頁（基準不寫持有本股）；「關於「台積電」」有維基百科節錄、官方資料、董事長與總經理", async () => {
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
@@ -326,26 +354,33 @@ await check("個股總覽：「相關股票」4 格連到個股頁（基準不�
   if (await page.getByRole("region", { name: "相關股票" }).count()) throw new Error("US stocks have no related row")
 })
 await check("ETF 淨值與折溢價：0050 同一天、有走勢與逐日數字；00679B 淨值晚一天寫出兩個日期；00878 資料累積中；估值分頁同一塊；股票沒有", async () => {
+  // 總覽：淨值與折溢價在鍵值格裡（同一天 11/12），格子下面接「折溢價走勢」（走勢、追蹤誤差說明、逐日數字）
   await page.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
-  const nav = page.getByRole("region", { name: "淨值與折溢價" })
-  await nav.getByText("淨值（11/12）").waitFor({ timeout: 8000 })
-  await nav.getByText(/^(溢價|折價) \d\.\d\d%$/).first().waitFor()
-  await nav.getByRole("img", { name: /^60 個有資料的交易日（\d+\/\d+–11\/12）的折溢價/ }).waitFor()
-  await nav.getByText("追蹤誤差不提供：標的指數的每日資料沒有開放授權。").waitFor()
-  await nav.getByText(/金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉/).waitFor()
-  await nav.getByText(/逐日數字（60 天）/).click()
-  await nav.getByRole("table").getByRole("rowheader", { name: "11/12" }).waitFor()
-  if (await nav.getByText(/[▲▼]/).count()) throw new Error("premium must not use price arrows")
+  const band = page.getByRole("region", { name: "關鍵數據" })
+  await band.getByRole("term").getByText("淨值（11/12）", { exact: true }).waitFor({ timeout: 8000 })
+  const premium = band.locator("dl > div").filter({ has: page.getByRole("term").getByText("折溢價（11/12）", { exact: true }) })
+  await premium.getByRole("definition").getByText(/^(溢價|折價) \d\.\d\d%$/).waitFor()
+  const trend = band.getByRole("region", { name: "折溢價走勢" })
+  await trend.getByRole("img", { name: /^60 個有資料的交易日（\d+\/\d+–11\/12）的折溢價/ }).waitFor()
+  if (await trend.getByText(/最新的淨值是/).count()) throw new Error("0050 NAV and close are the same day")
+  await trend.getByText("追蹤誤差不提供：標的指數的每日資料沒有開放授權。").waitFor()
+  await trend.getByText(/逐日數字（60 天）/).click()
+  await trend.getByRole("table").getByRole("rowheader", { name: "11/12" }).waitFor()
+  if (await band.getByText(/[▲▼]/).count()) throw new Error("premium must not use price arrows")
+  // 淨值的來源（金管會證期局）登記到頁尾的「資料來源與授權」
+  await page.getByRole("button", { name: "資料來源與授權" }).click()
+  await page.locator("footer").getByText(/金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉/).waitFor()
   await page.goto(base + "/stock/00679B.TWO", { waitUntil: "networkidle" })
-  const bond = page.getByRole("region", { name: "淨值與折溢價" })
+  const bond = page.getByRole("region", { name: "折溢價走勢" })
   await bond.getByText(/最新的淨值是 11\/11、收盤是 11\/12；折溢價用兩者都有的 11\/11 計算/).waitFor({ timeout: 8000 })
   await page.goto(base + "/stock/00878.TW", { waitUntil: "networkidle" })
-  await page.getByRole("region", { name: "淨值與折溢價" }).getByText("資料累積中：淨值自 2026-11-03 起存檔").waitFor({ timeout: 8000 })
+  await page.getByRole("region", { name: "折溢價走勢" }).getByText("資料累積中：淨值自 2026-11-03 起存檔").waitFor({ timeout: 8000 })
   await page.goto(base + "/stock/0050.TW?tab=valuation", { waitUntil: "networkidle" })
   await page.getByRole("region", { name: "淨值與折溢價" }).getByText("淨值（11/12）").waitFor({ timeout: 8000 })
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
   await page.getByText("參考價").first().waitFor({ timeout: 8000 })
-  if (await page.getByRole("region", { name: "淨值與折溢價" }).count()) throw new Error("stocks have no NAV section")
+  await page.getByRole("region", { name: "關鍵數據" }).getByText("近四季 EPS").waitFor({ timeout: 8000 })
+  if (await page.getByRole("region", { name: /淨值與折溢價|折溢價走勢/ }).count()) throw new Error("stocks have no NAV section")
 })
 await check("設定：新增定期定額（驗證 → 儲存）、暫停、修改、刪除（確認）", async () => {
   await page.goto(base + "/settings#recurring", { waitUntil: "networkidle" })
@@ -382,11 +417,24 @@ await check("紀錄：對話保留 30 天", async () => {
 })
 
 // ── 第四批：股利自動入帳 ─────────────────────────────────────
-await check("股利頁：台股股利標「自動」，有一行說明", async () => {
+await check("股利頁：台股股利標「自動」（滑過說明除息日自動入帳），美股股利沒有", async () => {
   await page.goto(base + "/?view=dividends", { waitUntil: "networkidle" })
-  await page.getByText("台股股利在除息日自動入帳，美股股利要自己記。").waitFor({ timeout: 8000 })
-  const tags = page.locator("#div-received").locator("xpath=ancestor::section[1]").getByText("自動", { exact: true })
+  // 頁面上那行說明拿掉了：改看每一列——自動入帳的都是台股、標籤滑過有說明；美股股利（要自己記）一筆都沒有「自動」
+  const received = page.getByRole("region", { name: "已入帳" })
+  await received.getByRole("listitem").first().waitFor({ timeout: 8000 })
+  const tags = received.getByText("自動", { exact: true })
   if ((await tags.count()) !== 3) throw new Error(`expected 3 自動 tags, got ${await tags.count()}`)
+  for (const tag of await tags.all()) {
+    if (!(await tag.getAttribute("title"))?.includes("除息日")) throw new Error(`自動 tag without explanation: ${await tag.getAttribute("title")}`)
+  }
+  const rows = received.getByRole("listitem")
+  const auto = rows.filter({ has: page.getByText("自動", { exact: true }) })
+  for (const href of await auto.getByRole("link").evaluateAll((els) => els.map((a) => a.getAttribute("href")))) {
+    if (!/\.TWO?$/.test(href ?? "")) throw new Error(`自動 on a non-Taiwan dividend ${href}`)
+  }
+  const us = rows.filter({ has: page.locator('a[href="/stock/AAPL"], a[href="/stock/VOO"], a[href="/stock/NVDA"]') })
+  if ((await us.count()) === 0) throw new Error("expected US dividends in the list")
+  if (await us.getByText(/^自動/).count()) throw new Error("US dividends must not be automatic")
 })
 await check("交易：編輯自動入帳的股利（說明）→ 儲存後「自動・已修改」；刪除自動那筆（確認框說明）後不再出現", async () => {
   await page.goto(base + "/?view=transactions", { waitUntil: "networkidle" })
@@ -457,6 +505,10 @@ await check("我的分享：關掉交易動態 → 動態裡自己的買賣立�
   await page.getByRole("tab", { name: "動態" }).click()
   await page.getByRole("list", { name: "動態" }).waitFor({ timeout: 8000 })
   if (await page.getByRole("list", { name: "動態" }).getByText(/示範使用者\s*買進/).count()) throw new Error("own trades still visible")
+  // 連續切兩個開關：兩筆設定照順序寫入，回到「我的分享」交易動態還是關的、金額還是開的（不會被先送的那筆蓋回去）
+  await page.getByRole("tab", { name: "我的分享" }).click()
+  if ((await page.getByRole("switch", { name: "交易動態" }).getAttribute("aria-checked")) !== "false") throw new Error("交易動態 switched back on")
+  if ((await page.getByRole("switch", { name: "金額與損益" }).getAttribute("aria-checked")) !== "true") throw new Error("金額與損益 lost")
 })
 await check("成員分享：什麼都沒開只有「加入了群組」（不說「還沒有資料」）；隱私模式遮住金額", async () => {
   await page.goto(base + "/groups/grp_family/members/usr_bro", { waitUntil: "networkidle" })

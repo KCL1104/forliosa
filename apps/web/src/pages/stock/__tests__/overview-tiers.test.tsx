@@ -136,12 +136,13 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     const footer = screen.getAllByRole("button", { name: /資料來源與授權/ })
     expect(footer).toHaveLength(1)
     fireEvent.click(footer[0]!)
-    expect(screen.getByText("臺灣證券交易所〈上市公司基本資料〉（2026）")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: /The GDELT Project/ })).toHaveAttribute("href", "https://www.gdeltproject.org/")
+    // 各區塊的來源是各自的查詢載入後才登記的（籌碼、月營收＋顯名聲明清單各自回來），每一筆都要等，不能假設已經到齊
+    expect(await screen.findByText("臺灣證券交易所〈上市公司基本資料〉（2026）", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByRole("link", { name: /The GDELT Project/ }, T)).toHaveAttribute("href", "https://www.gdeltproject.org/")
     // 鍵值帶顯示的籌碼與月營收也要顯名：融資融券、集保股權分散、月營收（shioaji-data）
     await screen.findByText("臺灣集中保管結算所〈集保戶股權分散表〉（2026）", undefined, T)
-    expect(screen.getByText("臺灣證券交易所〈集中市場融資融券餘額〉（2026）")).toBeInTheDocument()
-    expect(screen.getByText(/^永豐金證券 shioaji-data.*〈公司基本資料、每日收盤與市值、月營收、季報〉（2026）$/)).toBeInTheDocument()
+    expect(await screen.findByText("臺灣證券交易所〈集中市場融資融券餘額〉（2026）", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText(/^永豐金證券 shioaji-data.*〈公司基本資料、每日收盤與市值、月營收、季報〉（2026）$/, undefined, T)).toBeInTheDocument()
   })
 
   it("ETF：鍵值格只有 ETF 有的欄位（淨值、折溢價、殖利率…），沒有本益比、股價淨值比、EPS 這些「—」", async () => {
