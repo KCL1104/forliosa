@@ -119,7 +119,10 @@
 
 ## 10. 自架搜尋引擎與 GDELT 實測（2026-11-12）
 
-- **元搜尋（SearXNG、Whoogle）**：不自己收錄，只是自動查詢 Google／Bing，違反它們的條款且會被擋。不用。
+- **元搜尋（SearXNG、Whoogle）**：不自己收錄，只是自動查詢 Google／Bing 等搜尋引擎，違反它們的條款且會被擋。**產品負責人決定保留這個做法**（2026-11-12）：
+  新聞來源做成可替換的介面，SearXNG 是其中一個，設定 `NEWS_SEARXNG_URL`（自架的 SearXNG，開 JSON 輸出）才啟用，預設關閉。
+  啟用時：只取標題、網址、媒體、時間；每次查詢間隔至少數秒；上游引擎回 429 或驗證碼就停用一段時間，不換 IP、不偽裝；
+  SearXNG 端只開必要的新聞引擎。風險：自動查詢上游搜尋引擎違反它們的條款（契約風險，被封鎖後就失效），由營運者（產品負責人）承擔。
 - **自建爬蟲＋索引（YaCy、Nutch＋OpenSearch）**：等於自己爬媒體網站並存全文，就是 §1 排除的高風險做法。不用。
 - **GDELT DOC 2.0 API**（`api.gdeltproject.org/api/v2/doc/doc`，已加入環境允許清單）：GDELT 官方「unlimited and unrestricted use for any academic, commercial, or governmental use of any kind without fee」，要引用 GDELT 並連到 gdeltproject.org。我們只取標題、網址、媒體、時間，自己不爬任何網站。
   - 實測：`TSMC sourcecountry:taiwan`、最近 3 天 → 23 則，全部中文，來源有聯合、中央社、自由（含自由財經）、中時、ETtoday、三立、TVBS、新頭殼、蕃薯藤、美國之音中文台，最新一則距實際刊出約 15–30 分鐘。
