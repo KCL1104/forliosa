@@ -138,6 +138,49 @@ ANALYST_DISCLAIMER = "以下為媒體報導的第三方觀點，可能不完整�
 # Sent once when the model ended its turn without calling ``report_analyst_views``.
 ANALYST_NUDGE = "請用 report_analyst_views 回報整理結果；沒有符合條件的報導就給空清單。不要寫其他文字。"
 
+# -- News gap filling (forliosa.news.ai_search): the model only *selects* search results; titles, links and dates
+# shown come from the web_search result blocks, never from the model's text.
+NEWS_SYSTEM = """你是新聞篩選員，替 Forliosa 個股頁的「新聞報導」清單補缺。
+
+## 任務
+用 web_search 找這家公司最近 7 天的新聞報導（中文或英文媒體皆可），然後呼叫 report_news，列出搜尋結果中「主題就是這家公司」的報導網址，最多 10 則，新的優先。這個工具呼叫是你唯一的輸出。
+
+## 規則
+- 只列搜尋結果裡出現過的網址，逐字照抄，不要自己組網址。
+- 只列新聞報導：不要行情頁、股價頁、論壇、討論區、影音頻道、評等彙整網站、公司官網或交易所網站。
+- 只順帶提到這家公司的報導（大盤盤勢、別家公司的新聞）不要列。
+- 不要寫摘要、評論或任何其他文字；找不到就給空清單。"""  # noqa: E501
+NEWS_TOOL_NAME = "report_news"
+NEWS_TOOL: dict = {
+    "name": NEWS_TOOL_NAME,
+    "description": ("回報挑選出的新聞報導網址（每個都必須是這次搜尋結果中的網址，最多 10 則；"
+                    "找不到就給空清單）。這是唯一的輸出方式。"),
+    "strict": True,
+    "input_schema": {
+        "type": "object",
+        "properties": {"urls": {"type": "array", "items": {"type": "string"},
+                                "description": "搜尋結果中報導的網址（逐字）"}},
+        "required": ["urls"],
+        "additionalProperties": False,
+    },
+}
+NEWS_NUDGE = "請用 report_news 回報挑選出的網址；沒有符合條件的報導就給空清單。不要寫其他文字。"
+
+# 「關於」 description when the company has no zh.wikipedia article (decision 7). The facts come only from official
+# open data (t187ap03, monthly revenue, ESG product text); no person's name is ever passed in (decision 6).
+COMPANY_SYSTEM = """你是 Forliosa 的資料編輯，替個股頁的「關於」區寫公司簡介。
+- 只能使用使用者訊息裡列出的官方資料；沒列出的事（產品細節、客戶、市占、排名、競爭對手、前景、評價）一律不寫。
+- 用繁體中文（台灣用語）寫 2 到 3 句、共 120 字以內的完整句子；平實陳述，不誇大、不用形容詞堆疊。
+- 不寫任何人名，不寫投資建議、股價或漲跌，不加標題、條列或引號。
+- 數字照資料寫，可以用「約」；不要自己換算或推估。"""
+COMPANY_MAX_CHARS = 160
+
+
+def company_question(facts: dict[str, str]) -> str:
+    lines = "\n".join(f"- {k}：{v}" for k, v in facts.items() if v)
+    return f"官方資料：\n{lines}\n請依上面的資料寫 2 到 3 句公司簡介，只輸出簡介本文。"
+
+
 ROUTE_LABELS = {"ledger": "帳本首頁", "stock": "個股頁", "groups": "群組", "history": "對話紀錄", "other": "其他頁面"}
 _WEEKDAYS = "一二三四五六日"
 
@@ -190,3 +233,10 @@ def analyst_question(name: str, symbol: str, market: str, currency: str, today: 
     currency_label = {"TWD": "新台幣", "USD": "美元"}.get(currency, currency)
     return (f"股票：{name}（{symbol}，{market_label}，以{currency_label}交易）\n今天：{today}（台北）\n"
             f"請搜尋 {since} 之後的報導，整理機構的評等與目標價，然後呼叫 report_analyst_views。")
+
+
+def news_question(name: str, code: str, english: str | None, market: str, today: str, since: str) -> str:
+    market_label = {"TWSE": "上市", "TPEX": "上櫃", "US": "美股"}.get(market, market)
+    alias = f"，英文簡稱 {english}" if english else ""
+    return (f"公司：{name}（代號 {code}，{market_label}{alias}）\n今天：{today}（台北）\n"
+            f"請搜尋 {since} 之後這家公司的新聞報導，然後呼叫 report_news。")

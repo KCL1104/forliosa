@@ -1,0 +1,312 @@
+{
+ "entities": {
+  "Q713418": {
+   "type": "item",
+   "id": "Q713418",
+   "labels": {
+    "zh-hant": {
+     "language": "zh-hant",
+     "value": "台灣積體電路製造公司"
+    },
+    "en": {
+     "language": "en",
+     "value": "TSMC"
+    },
+    "zh": {
+     "language": "zh",
+     "value": "台灣積體電路製造公司"
+    },
+    "zh-tw": {
+     "language": "zh-tw",
+     "value": "台灣積體電路製造公司"
+    }
+   },
+   "aliases": {
+    "zh": [
+     {
+      "language": "zh",
+      "value": "台積電"
+     },
+     {
+      "language": "zh",
+      "value": "台灣積體電路製造"
+     },
+     {
+      "language": "zh",
+      "value": "台灣積體電路製造股份有限公司"
+     },
+     {
+      "language": "zh",
+      "value": "臺積電"
+     },
+     {
+      "language": "zh",
+      "value": "台灣積體電路公司"
+     },
+     {
+      "language": "zh",
+      "value": "臺灣積體電路製造公司"
+     },
+     {
+      "language": "zh",
+      "value": "台灣積體電路"
+     },
+     {
+      "language": "zh",
+      "value": "台湾积体电路制造"
+     },
+     {
+      "language": "zh",
+      "value": "台积电"
+     },
+     {
+      "language": "zh",
+      "value": "台積"
+     },
+     {
+      "language": "zh",
+      "value": "台積公司"
+     }
+    ],
+    "en": [
+     {
+      "language": "en",
+      "value": "Taiwan Semiconductor Co., Ltd."
+     },
+     {
+      "language": "en",
+      "value": "Táiwān Jītǐ Diànlù Zhìzào Gōngsī"
+     },
+     {
+      "language": "en",
+      "value": "Taiwan Semiconductor"
+     },
+     {
+      "language": "en",
+      "value": "Tsmc"
+     },
+     {
+      "language": "en",
+      "value": "TAIWAN SEMICONDUCTOR MANUFACTURING CO., LTD. (Hsinchu)"
+     }
+    ],
+    "zh-tw": [
+     {
+      "language": "zh-tw",
+      "value": "台灣積體電路製造股份有限公司"
+     },
+     {
+      "language": "zh-tw",
+      "value": "台積公司"
+     },
+     {
+      "language": "zh-tw",
+      "value": "台積"
+     },
+     {
+      "language": "zh-tw",
+      "value": "台積電"
+     },
+     {
+      "language": "zh-tw",
+      "value": "臺灣積體電路製造公司"
+     },
+     {
+      "language": "zh-tw",
+      "value": "臺積電"
+     }
+    ],
+    "zh-hant": [
+     {
+      "language": "zh-hant",
+      "value": "台灣積體電路製造股份有限公司"
+     },
+     {
+      "language": "zh-hant",
+      "value": "台積公司"
+     },
+     {
+      "language": "zh-hant",
+      "value": "台積"
+     },
+     {
+      "language": "zh-hant",
+      "value": "台積電"
+     },
+     {
+      "language": "zh-hant",
+      "value": "臺灣積體電路製造公司"
+     },
+     {
+      "language": "zh-hant",
+      "value": "臺積電"
+     }
+    ]
+   },
+   "claims": {
+    "P414": [
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P414",
+       "hash": "c5a10c8d1d209809e1ceb1c56a77a53b1f3c9892",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 13677,
+         "id": "Q13677"
+        },
+        "type": "wikibase-entityid"
+       },
+       "datatype": "wikibase-item"
+      },
+      "type": "statement",
+      "qualifiers": {
+       "P249": [
+        {
+         "snaktype": "value",
+         "property": "P249",
+         "hash": "1c3e5e5d0452a29b311a756f6f4da03c702f8304",
+         "datavalue": {
+          "value": "TSM",
+          "type": "string"
+         },
+         "datatype": "string"
+        }
+       ],
+       "P580": [
+        {
+         "snaktype": "value",
+         "property": "P580",
+         "hash": "73891b82cacb6a95a1668490568d9a4cf596808a",
+         "datavalue": {
+          "value": {
+           "time": "+1997-10-20T00:00:00Z",
+           "timezone": 0,
+           "before": 0,
+           "after": 0,
+           "precision": 11,
+           "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+          },
+          "type": "time"
+         },
+         "datatype": "time"
+        }
+       ]
+      },
+      "qualifiers-order": [
+       "P249",
+       "P580"
+      ],
+      "id": "Q713418$9546A032-3471-4A11-B00E-D4CF703A31DE",
+      "rank": "normal"
+     },
+     {
+      "mainsnak": {
+       "snaktype": "value",
+       "property": "P414",
+       "hash": "49a8cd152b1a588a64441b78b8d198eddb18d056",
+       "datavalue": {
+        "value": {
+         "entity-type": "item",
+         "numeric-id": 548621,
+         "id": "Q548621"
+        },
+        "type": "wikibase-entityid"
+       },
+       "datatype": "wikibase-item"
+      },
+      "type": "statement",
+      "qualifiers": {
+       "P580": [
+        {
+         "snaktype": "value",
+         "property": "P580",
+         "hash": "b294573c6d6259ac2fb4ea813dc0fb362dfafd2e",
+         "datavalue": {
+          "value": {
+           "time": "+1994-09-05T00:00:00Z",
+           "timezone": 0,
+           "before": 0,
+           "after": 0,
+           "precision": 11,
+           "calendarmodel": "http://www.wikidata.org/entity/Q1985727"
+          },
+          "type": "time"
+         },
+         "datatype": "time"
+        }
+       ],
+       "P249": [
+        {
+         "snaktype": "value",
+         "property": "P249",
+         "hash": "184bcb25e163bae00858a9d05600a187ab57f952",
+         "datavalue": {
+          "value": "2330",
+          "type": "string"
+         },
+         "datatype": "string"
+        }
+       ]
+      },
+      "qualifiers-order": [
+       "P580",
+       "P249"
+      ],
+      "id": "Q713418$e1354df9-4afe-1c33-f010-5a216eeb09fe",
+      "rank": "normal"
+     }
+    ]
+   },
+   "sitelinks": {
+    "zhwiki": {
+     "site": "zhwiki",
+     "title": "台積電",
+     "badges": []
+    }
+   }
+  },
+  "Q42260199": {
+   "type": "item",
+   "id": "Q42260199",
+   "labels": {
+    "en": {
+     "language": "en",
+     "value": "GlobalWafers"
+    },
+    "zh-tw": {
+     "language": "zh-tw",
+     "value": "環球晶圓"
+    },
+    "zh": {
+     "language": "zh",
+     "value": "環球晶圓"
+    }
+   },
+   "aliases": {
+    "en": [
+     {
+      "language": "en",
+      "value": "GlobalWafers Co. Ltd."
+     }
+    ],
+    "zh-tw": [
+     {
+      "language": "zh-tw",
+      "value": "環球晶圓股份有限公司"
+     }
+    ]
+   },
+   "claims": {},
+   "sitelinks": {
+    "zhwiki": {
+     "site": "zhwiki",
+     "title": "環球晶圓",
+     "badges": []
+    }
+   }
+  }
+ },
+ "success": 1
+}

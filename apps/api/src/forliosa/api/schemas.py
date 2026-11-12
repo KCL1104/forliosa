@@ -511,6 +511,15 @@ class MajorHolders(BaseModel):
     buckets: list[HolderBucket]
 
 
+class ForeignTop20(BaseModel):
+    """A listed stock in TWSE's 外資及陸資持股前 20 名 (the latest archived list): rank and foreign holding."""
+
+    as_of: date
+    rank: int
+    pct: float  # fraction of issued shares
+    limit_pct: float | None = None
+
+
 class Chips(BaseModel):
     symbol: str
     institutional: list[InstitutionalPoint]
@@ -519,6 +528,7 @@ class Chips(BaseModel):
     major_holders: MajorHolders | None
     sources: list[str]
     notes: list[str] = []
+    foreign_top20: ForeignTop20 | None = None  # listed (TWSE) stocks only
 
 
 class IncomeSeries(BaseModel):
@@ -589,12 +599,105 @@ class StockEvent(BaseModel):
     sources: list[str] = []
 
 
+class ClosePoint(BaseModel):
+    t: date
+    price: float | None
+
+
+class RelatedCard(BaseModel):
+    """One 「相關股票」 card (rules: docs/research/news-and-external-sources.md §8)."""
+
+    symbol: str
+    name: str
+    reason: Literal["benchmark", "constituent", "affiliate", "peer", "leader", "holding", "same_index", "same_type"]
+    reason_label: str
+    close: float | None
+    change_pct: float | None
+    as_of: date | None = None
+    sparkline: list[ClosePoint] = []
+    is_index: bool = False
+    notes: list[str] = []
+    is_demo: bool = False
+
+
+class Related(BaseModel):
+    symbol: str
+    items: list[RelatedCard]
+    sources: list[str]
+    notes: list[str] = []
+
+
+class CompanyDescriptionOut(BaseModel):
+    kind: Literal["wikipedia", "ai"]
+    text: str
+    label: str  # 「節錄」 | 「AI 依公開資料整理」
+    title: str | None = None
+    url: str | None = None
+    source: str | None = None  # 「維基百科」
+    license: str | None = None  # CC BY-SA 4.0
+    license_url: str | None = None
+    revision_id: int | None = None
+    updated_at: str | None = None
+
+
+class FormerName(BaseModel):
+    name: str
+    from_: str | None = Field(default=None, alias="from")
+    to: str | None = None
+
+    model_config = ConfigDict(populate_by_name=True)
+
+
+class FundFacts(BaseModel):
+    fund_type: str | None = None
+    index_name: str | None = None
+    custodian: str | None = None
+    units: int | None = None
+
+
+class CompanyAbout(BaseModel):
+    """「關於〈公司〉」: official facts (t187ap03 / SEC submissions / t187ap47) and the description."""
+
+    symbol: str
+    name: str
+    short_name: str
+    english_short_name: str | None = None
+    market: str
+    type: str
+    industry: str | None = None
+    incorporated: date | None = None
+    years_since_incorporation: int | None = None
+    listed_date: date | None = None
+    listing: str | None = None  # 上市 | 上櫃
+    hq: str | None = None
+    registered_in: str | None = None  # KY etc.: the registration country instead of an HQ city
+    website: str | None = None
+    paid_in_capital: int | None = None  # NT$
+    chairman: str | None = None  # 董事長, as published (shown with its source; never used by AI)
+    president: str | None = None  # 總經理, as published
+    auditor: str | None = None
+    transfer_agent: str | None = None
+    exchanges: list[str] = []  # US
+    fiscal_year_end: str | None = None  # US: "09-26"
+    former_names: list[FormerName] = []  # US
+    fund: FundFacts | None = None  # ETFs
+    description: CompanyDescriptionOut | None = None
+    data_date: date | None = None
+    sources: list[str] = []
+    notes: list[str] = []
+
+
 class NewsItem(BaseModel):
+    """An official announcement (``source: "公告"``) or a media headline (``category: "media"``: original title,
+    ``outlet``, time and the link to the original site; ``source`` names how it was found)."""
+
     published_at: str
     title: str
-    source: str  # 「公告」 for official announcements
+    source: str  # 「公告」; media: GDELT | AI 搜尋 | SearXNG | Yahoo股市 | FinMind
+    outlet: str | None = None  # media only: 聯合新聞網, 中央社 … (unknown outlets: their domain)
     url: str
     category: Literal["material_info", "exchange_news", "media"] = "media"
+    date_only: bool = False  # the source gave a date without a time (show the date, not「N 小時前」)
     sources: list[str] = []
 
 

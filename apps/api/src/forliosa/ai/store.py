@@ -34,7 +34,7 @@ from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, BrokerAccount
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
-FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest")
+FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news")  # news: system-paid (user_id NULL)
 TITLE_MAX = 40
 BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard token prices
 
@@ -42,7 +42,8 @@ BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard to
 def model_for(feature: str, settings: Settings) -> str:
     override = {"chat": settings.ai_model_chat, "why": settings.ai_model_why, "import": settings.ai_model_import,
                 "report": settings.ai_model_report, "analyst": settings.ai_model_analyst,
-                "group_digest": settings.ai_model_digest}.get(feature)
+                "group_digest": settings.ai_model_digest, "news": settings.ai_model_news,
+                "company": settings.ai_model_company}.get(feature)
     return (override or settings.ai_model).strip()
 
 

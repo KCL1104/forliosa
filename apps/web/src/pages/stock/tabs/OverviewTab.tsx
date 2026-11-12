@@ -4,18 +4,23 @@ import { appToday } from "@/api"
 import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, MonthlyRevenue, Position, Quote } from "@/api/types"
 import { Section } from "@/components/section"
+import { ErrorState } from "@/components/states"
 import { announcementHost, eventLabel, eventTitle, NEWS_CATEGORY_LABEL } from "@/lib/events"
+import { officialNews } from "@/lib/news"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { formatQuote } from "@/lib/tick"
+import { AboutCompany } from "../AboutCompany"
 import { AnalystViewsCard } from "../AnalystViews"
+import { NewsCoverage } from "../NewsCoverage"
+import { RelatedStocks } from "../RelatedStocks"
 import { KeyGrid, NotYet, Sources } from "./kit"
 import { useReadOnly, useWho } from "@/api/view-as"
 
 const BANDS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
 
-/** 總覽：關鍵數據、估值位置、月營收、籌碼摘要、法人觀點（收合）、接下來、公告、公司 */
+/** 總覽：關鍵數據、估值位置、月營收、籌碼摘要、法人觀點（收合）、接下來、相關股票、新聞報導、公告、關於〈公司〉 */
 export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
   const readOnly = useReadOnly()
   const overview = useOverview(inst.symbol)
@@ -61,8 +66,10 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
       {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
       {inst.type === "stock" && !readOnly && <AnalystViewsCard key={inst.symbol} inst={inst} />}
       <Upcoming inst={inst} position={position} />
-      <Announcements inst={inst} />
-      <Company inst={inst} sources={o?.sources ?? inst.data_sources} />
+      <RelatedStocks key={`related-${inst.symbol}`} inst={inst} />
+      <NewsCoverage key={`news-${inst.symbol}`} inst={inst} />
+      {!us && <Announcements inst={inst} />}
+      <AboutCompany key={`about-${inst.symbol}`} inst={inst} />
     </div>
   )
 }
@@ -193,9 +200,10 @@ function ChipsBrief({ inst }: { inst: InstrumentDetail }) {
   const big = bigs.length ? { pct: bigs.reduce((s, b) => s + b.pct, 0) } : undefined
   const lot = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatCompact(Math.abs(n), 1)} 張`
   if (listed) {
-    // 上市股票沒有逐檔三大法人與外資持股：只列融資融券與集保大戶，並說一句為什麼
+    // 上市股票沒有逐檔三大法人；外資持股只有證交所公布的前 20 名。只列融資融券、集保大戶（與前 20 名的外資持股），並說一句為什麼
     if (m.length === 0 && !big) return null
     const shortChange = change("short_balance")
+    const top = c.foreign_top20 ?? null
     return (
       <Section title="籌碼" titleId="ov-chips" aside="近 5 個交易日" action={<MoreLink symbol={symbol} tab="chips" />}>
         <KeyGrid
@@ -206,9 +214,14 @@ function ChipsBrief({ inst }: { inst: InstrumentDetail }) {
             { label: "融資增減", value: marginChange === null ? "—" : lot(marginChange) },
             { label: "融券增減", value: shortChange === null ? "—" : lot(shortChange) },
             { label: "千張大戶", value: big ? formatPercent(big.pct, { signed: false, decimals: 1 }) : "—" },
+            ...(top ? [{ label: "外資持股", value: formatPercent(top.pct, { signed: false, decimals: 1 }), title: `證交所外資持股前 20 名第 ${top.rank} 名` }] : []),
           ]}
         />
-        <p className="mt-3 text-md text-ink-2">上市{inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人與外資持股。</p>
+        <p className="mt-3 text-md text-ink-2">
+          {top
+            ? `外資持股是證交所公布的前 20 名資料（第 ${top.rank} 名）；上市股票不顯示逐檔三大法人。`
+            : `上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人；外資持股只有證交所前 20 名的股票才有。`}
+        </p>
       </Section>
     )
   }
@@ -277,32 +290,33 @@ function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Positi
 
 /**
  * 公告：該公司的重大訊息與證交所公告（官方資料，`source: "公告"`），連到原文。
- * 不是媒體新聞；只有 personal 模式明確開啟時才會混入媒體標題，並標「媒體（非商用）」。
+ * 媒體新聞（`category: "media"`）在上面的「新聞報導」，這裡不列。
  */
 function Announcements({ inst }: { inst: InstrumentDetail }) {
   const news = useNews(inst.symbol)
-  const rows = (news.data ?? []).slice(0, 4)
+  const rows = officialNews(news.data).slice(0, 4)
   if (news.isLoading) return <Skeleton className="h-28 w-full rounded-sm" />
   const sources = [...new Set(rows.flatMap((n) => n.sources ?? []))]
   return (
     <Section title="公告" titleId="ov-news" action={<MoreLink symbol={inst.symbol} tab="events" label="所有事件" />}>
-      {rows.length === 0 ? (
+      {news.isError && !news.data ? (
+        <ErrorState title="公告沒有載入" error={news.error} onRetry={() => void news.refetch()} />
+      ) : rows.length === 0 ? (
         <p className="text-md text-ink-2">最近 90 天沒有{inst.name}的重大訊息或證交所公告。</p>
       ) : (
         <ul className="-mt-3">
           {rows.map((n) => {
-            const media = n.category === "media"
             const kind = n.category ? NEWS_CATEGORY_LABEL[n.category] : "公告"
             return (
               <li key={`${n.published_at}-${n.title}`} className="border-b border-rule">
                 <a href={n.url} target="_blank" rel="noreferrer" className="group grid grid-cols-[1fr_auto] items-baseline gap-x-3 py-3 sm:grid-cols-[96px_1fr_auto]">
                   <span className="num text-md text-ink-2 max-sm:col-span-2 max-sm:row-start-2">
                     {formatDateShort(n.published_at.slice(0, 10), false)}
-                    <span className="sm:hidden">・{media ? `${n.source}（非商用）` : kind}</span>
+                    <span className="sm:hidden">・{kind}</span>
                   </span>
-                  <span className="min-w-0 group-hover:underline">{n.title}</span>
-                  <span className="flex shrink-0 items-center gap-1 text-sm text-ink-2 max-sm:row-start-1">
-                    <span className="max-sm:hidden">{media ? `${n.source}（非商用）` : kind}</span>
+                  <span className="min-w-0 group-hover:underline max-sm:col-start-1 max-sm:row-start-1">{n.title}</span>
+                  <span className="flex shrink-0 items-center gap-1 text-sm text-ink-2 max-sm:col-start-2 max-sm:row-start-1">
+                    <span className="max-sm:hidden">{kind}</span>
                     <ArrowUpRightIcon aria-hidden className="size-3.5" />
                   </span>
                   <span className="sr-only">（在{announcementHost(n.url)}查看，另開新視窗）</span>
@@ -314,35 +328,6 @@ function Announcements({ inst }: { inst: InstrumentDetail }) {
       )}
       <p className="mt-2 text-xs text-ink-2">官方公告的標題與連結；內容以公開資訊觀測站、證交所原文為準。</p>
       <Sources items={sources} className="mt-1" />
-    </Section>
-  )
-}
-
-function Company({ inst, sources }: { inst: InstrumentDetail; sources: string[] }) {
-  return (
-    <Section title="公司" titleId="ov-company">
-      {inst.summary && <p className="max-w-prose text-base">{inst.summary}</p>}
-      <dl className="mt-3 grid max-w-prose gap-1 text-md">
-        {inst.chain_stage && (
-          <div className="flex gap-3">
-            <dt className="w-20 shrink-0 text-ink-2">產業鏈</dt>
-            <dd>{inst.chain_stage}</dd>
-          </div>
-        )}
-        {inst.themes.length > 0 && (
-          <div className="flex gap-3">
-            <dt className="w-20 shrink-0 text-ink-2">題材</dt>
-            <dd>{inst.themes.join("・")}</dd>
-          </div>
-        )}
-        {inst.shares_outstanding && (
-          <div className="flex gap-3">
-            <dt className="w-20 shrink-0 text-ink-2">發行股數</dt>
-            <dd className="num">{formatNumber(Math.round(inst.shares_outstanding / 1000))} 張</dd>
-          </div>
-        )}
-      </dl>
-      <Sources items={sources} />
     </Section>
   )
 }

@@ -178,7 +178,12 @@ def test_indices_companies_dividends_and_exrights(engine):
         assert db.get(IndexDaily, ("櫃買報酬指數", date(2026, 11, 12))).close == D("624.57")
         tsmc = db.get(CompanyProfile, "2330.TW")
         assert tsmc.shares_outstanding == 25932370067 and tsmc.industry == "半導體業"
-        assert "魏哲家" not in json.dumps(tsmc.values, ensure_ascii=False)
+        # 「關於」 facts (decision 6): 董事長／總經理 as published; no spokespeople, CPAs, phones or the address
+        assert (tsmc.values["chairman"], tsmc.values["president"]) == ("魏哲家", "總裁: 魏哲家")
+        assert (tsmc.values["hq"], tsmc.values["website"], tsmc.values["auditor"], tsmc.values["transfer_agent"]) == (
+            "新竹科學園區", "https://www.tsmc.com", "勤業眾信聯合會計師事務所", "中國信託商業銀行 代理部")
+        stored = json.dumps(tsmc.values, ensure_ascii=False)
+        assert not any(x in stored for x in ("黃仁昭", "高孟華", "吳世宗", "陳彥君", "03-5636688", "力行六路"))
         assert db.get(CompanyProfile, "6488.TWO").listed_date == date(2015, 9, 25)
         tcc = db.get(DividendResolution, ("1101.TW", date(2025, 1, 1), 1))
         assert tcc.cash_capital_surplus == D("0.8") and tcc.cash_earnings == D(0)

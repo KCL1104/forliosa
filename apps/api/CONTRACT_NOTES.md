@@ -135,7 +135,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 | 示範資料 | **從不使用**（demo provider 只提供商品名稱清單）；資料不足時回空並在 `notes` 說明 | 補缺 |
 | 證交所網站（T86、MI_QFIIS…）、MIS、櫃買網站、MOPS 網站 | **不使用**（已移除；舊存檔的 `twse-web`／`twse-mis` 資料列也不讀） | **不使用** |
 | 盤中走勢 `/intraday` | `points: []`＋`notes` | 同左 |
-| 新聞 `/news` | 官方公告（重大訊息、證交所新聞） | 同左，FinMind 開啟時另加媒體標題（非商用） |
+| 新聞 `/news` | 官方公告（重大訊息、證交所新聞）＋新聞報導（GDELT 為主、AI 搜尋補缺；只有標題、媒體、時間、連結） | 同左，另加 Yahoo股市 RSS，FinMind 開啟時也加它的媒體標題（都是非商用） |
 | 上市股票三大法人、外資持股 | 不提供（證交所 OpenAPI 沒有個股資料），`chips.notes` 說明 | 同左（FinMind 開啟時也不向它要這兩個資料集，只要融資融券；回補也一樣：FinMind 是轉載證交所網站） |
 
 ### 每個回應的 `sources`
@@ -168,10 +168,10 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 |---|---|
 | `overview` | 多 `symbol`。`pe`／`pb`／`dividend_yield` 是證交所／櫃買公布值（存檔，personal 時 FinMind 補舊資料）；ETF 沒有公布殖利率時以近 12 個月現金股利 ÷ 現價計算。`eps_ttm` = shioaji-data 官方季報最近四季 EPS 合計（沒有季報時用 收盤價 ÷ 本益比）。`last_cash_dividend`／`ex_dividend_date` 是**最近一次（含已公告未除息）**的現金股利。`avg_volume_3m` 為近 3 個月日均量（股）。`status.attention` = 最近一個交易日或今天被列為注意股；`status.disposition` = 今天落在處置期間內 |
 | `intraday` | 多 `notes`、`is_demo`。**目前 `points` 一律是 `[]`**（沒有授權的盤中來源；MIS 已移除），`notes` 說明；`reference_price` 是當天的參考價；`is_partial` 台股為 `true`。日後接上授權來源時 `points[].volume` 是該分鐘的成交量（股） |
-| `chips` | 多 `symbol`、`notes`；`range` 可用 `1M`、`3M`、`6M`、`1Y`。法人單位張（股數 ÷ 1000，保留小數）；外資持股 `pct` 是比率（0.2949）。**上櫃**股票的法人與外資持股來自櫃買 OpenAPI（`tpex_3insti_daily_trading`、`tpex_3insti_qfii`，每日存檔）；**上市**股票任何模式都是空陣列（`notes` 一律有那句說明；`services/stock.py` 的 `LISTED_CHIPS_NOTE`），存檔裡已有的列（例如舊的 FinMind 回補）也不讀。`major_holders.buckets` 是集保 15 個持股分級（另有 `label`，例如「1,000 張以上」）；`pct` 是比率。集保只能下載當週，所以從開始存檔那週起才有資料 |
+| `chips` | 多 `symbol`、`notes`；`range` 可用 `1M`、`3M`、`6M`、`1Y`。法人單位張（股數 ÷ 1000，保留小數）；外資持股 `pct` 是比率（0.2949）。**上櫃**股票的法人與外資持股來自櫃買 OpenAPI（`tpex_3insti_daily_trading`、`tpex_3insti_qfii`，每日存檔）；**上市**股票任何模式都是空陣列（`notes` 一律有那句說明：不在外資持股前 20 名時是 `services/stock.py` 的 `LISTED_CHIPS_NOTE`，在最新一份前 20 名名單上時是不含外資持股那句的 `LISTED_INST_NOTE`＋`TOP20_NOTE`），存檔裡已有的列（例如舊的 FinMind 回補）也不讀。`major_holders.buckets` 是集保 15 個持股分級（另有 `label`，例如「1,000 張以上」）；`pct` 是比率。集保只能下載當週，所以從開始存檔那週起才有資料 |
 | `financials` | 多 `symbol`、`period`、`notes`。來源是 shioaji-data 官方季報（2023Q1 起，單季數字，千元）；若存檔中有更新一季的 OpenAPI 財報（`t187ap06` 是**年初至今累計數**），以「本季累計 − 上季累計」換成單季，現金流量為 `null`。`net_income` 是歸屬母公司業主淨利；`free_cash_flow` = 營業 + 投資活動現金流量（OpenAPI／shioaji-data 沒有資本支出科目）。`annual` 只列四季齊全的年度，EPS 用第四季的全年累計 EPS |
 | `events` | 每筆多 `sources`、`estimated`、`period`；由新到舊排序（含未來）。範圍：過去 365 天到未來 120 天；`earnings`／`revenue_release`／`investor_conference` 用**實際日期**（見「2026-11-12 第二批」），只有查不到時才用法定期限（季報 5/15、8/14、11/14、3/31；營收每月 10 日；`estimated: true`，前後 60–90 天）。`mine`：未來的除權息／發放 = 目前持有；過去的 = 該日有記股利交易（`amount_estimate` 為實際入帳金額）；其他事件 = 目前持有。除息金額未公告時 `detail` 為「金額尚未公告」 |
-| `news` | 每筆多 `sources`、`category`。**官方公告**：該公司的重大訊息與點名該公司的證交所新聞（最近 90 天，最多 30 筆），`source: "公告"`；FinMind 媒體標題只在 personal 明確開啟時附加（`category: "media"`） |
+| `news` | 每筆多 `sources`、`category`、`outlet`、`date_only`。**官方公告**：該公司的重大訊息與點名該公司的證交所新聞（最近 90 天，最多 30 筆），`source: "公告"`；之後是**新聞報導**（`category: "media"`，見「2026-11-12 新聞報導」） |
 | `position` | 多 `symbol`、`currency`、`as_of`、`sources`、`is_demo`。金額為台幣，`avg_cost` 為原幣。`realized_pnl` 含交易與減資退款；`dividends_received` 已扣二代健保。`markers` 依交易日排序；`stock_dividend` 的 `quantity` 是實際配發股數。**目前股數為 0 一律回 `null`**（即使有已實現損益，見待確認 11） |
 | `why` | 多 `symbol`、`sources`。規則：漲跌停 > 漲跌 ≥ 3%（對參考價）、量 ≥ 20 日均量 2 倍、除權息日、處置／注意、當天重大訊息主旨含「財務報告／財報／自結損益」或「營收」。`reasons[].kind` 為 `limit_up`、`limit_down`、`price_move`、`volume`、`ex_dividend`、`disposition`、`attention`、`earnings`、`revenue_release`。最新報價不是今天時文字用日期（「11/11 上漲 3.5%」）。`headline` = 名稱 + 前兩個理由 |
 | `watchlist` | 每筆多 `sparkline_interval`（目前一律 `"1d"`：最近 20 個收盤；`"1m"` 保留給日後的授權盤中來源）、`sources`、`is_demo`；`quote` 可能為 `null`。`sparkline[].t` 在 `1m` 是 `"09:01"`，在 `1d` 是日期。`POST` 新增回 201、已在清單回 200（冪等）；找不到商品 422 `unknown_symbol`；最多 200 檔。`DELETE` 不在清單回 404 |
@@ -280,7 +280,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 美股 | 沒有報價（`/quote` 404、`Holding.price: null` 以成本計值、`is_demo: false`）、績效空＋`notes` |
 | ~~USD/TWD 匯率~~ | **已有（2026-11-12）**：中央銀行〈銀行間新臺幣對美元收盤匯率〉（OGDL），任何模式都用；完全沒有存檔時才固定 31.5，績效 `notes` 說明（見「2026-11-12 匯率改用中央銀行開放資料」） |
 | 基準 `^TAIEXTR`／`^TPEXTR` | 2026-11-12 起由存檔提供（證交所 2026-11-02、櫃買 2026-11-02 起）；更早的日子沒有資料 |
-| 媒體新聞 | 沒有；`/news` 只有官方公告 |
+| ~~媒體新聞~~ | **已有（2026-11-12）**：GDELT（可商用、需引用）為主、AI 搜尋補缺，只有標題、媒體、時間、連結（見「2026-11-12 新聞報導」） |
 | shioaji-data AI 研究（簡介、產業鏈、題材） | `summary`／`chain_stage` 為 `null`、`themes: []` |
 
 `is_demo` 在 commercial 下永遠是 `false`。
@@ -650,6 +650,201 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 - 只有 USD/TWD。其他幣別（港股、日股）沒有可商用的開放來源，目前也沒有這類商品。
 - 交易日當天的市值在央行下午公布前用前一個營業日的匯率（約 16:00–17:00 之後的 21:40 存檔才更新）。
 
+## 2026-11-12 新聞報導（個股頁補強第 1、2 項）
+
+產品負責人決定（`PRODUCT.md`「相關新聞」「個股頁補強」1–2）：像 Google 財經／Goodinfo 的新聞列表——媒體**原標題＋媒體名稱＋時間＋原文連結**，
+不轉載內文、不放媒體照片，有下架處理。研究與法律基準：[`docs/research/news-and-external-sources.md`](../../docs/research/news-and-external-sources.md)。
+程式在 `src/forliosa/news/`；`/news` 的形狀見 [`docs/api-contract.md`](../../docs/api-contract.md)「新聞報導（2026-11-12）」。
+
+### 來源（可替換：`news/sources.py` 的 `NewsSource`）
+
+| 來源 | 什麼時候用 | 怎麼查 | 停止條件 |
+|---|---|---|---|
+| **GDELT DOC 2.0**（`api.gdeltproject.org/api/v2/doc/doc`，預設） | 每檔每次 worker 批次 | **英文**關鍵字：英文簡稱（`t187ap03_L`「英文簡稱」／`mopsfin_t187ap03_O` 的 `Symbol`，存在 `company_profiles`；沒有時用商品主檔的英文別名）＋代號，台股 `sourcecountry:taiwan`、美股 `sourcelang:english`（例：`(TSMC OR 2330) sourcecountry:taiwan`）。台股的英文簡稱是一般英文單字時（穩懋「WIN」、台達電「DELTA」；`news/normalize.py` 的 `COMMON_WORDS`）不放進查詢、只用代號（`3105 sourcecountry:taiwan`）：GDELT 比對機器翻譯後的全文、不分大小寫，這種字會讓 75 筆全被無關新聞佔滿；`mode=artlist`、`format=json`、`maxrecords=75`、`startdatetime` = 上次成功前 1 小時（最多 7 天） | 429／403、或 200 回「Please limit requests…」→ 這次批次不再問，整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（`news_fetch_state` 的 `symbol="*"`）；連線錯誤連 3 次 → 這次批次略過 |
+| **AI 網路搜尋**（`news/ai_search.py`） | 只在 GDELT 這 24 小時內有回應、且免費來源最近 7 天少於 `NEWS_AI_MIN_ITEMS`（3）則時；同一檔 `NEWS_AI_INTERVAL_HOURS`（24）內最多一次；每批最多 10 次 | `web_search`（最多 2 次，封鎖行情／論壇／交易所網站；**沒有** `web_fetch`）＋ strict 工具 `report_news`（只回網址清單）。**模型只負責挑選**：標題、網址、日期都取自 `web_search_result`（網址不在搜尋結果、行情頁、沒有日期的都丟掉） | 本月（UTC）`ai_usage.feature = "news"` 的估計費用 + US$0.05 超過 `NEWS_AI_BUDGET_USD`（30）就整月不跑；沒有金鑰、`AI_WEB_SEARCH=false`、`NEWS_AI_ENABLED=false` 也不跑 |
+| **SearXNG**（自架，JSON API） | 只有設定 `NEWS_SEARXNG_URL` 時（**預設關**） | `/search?q=<名稱> <代號>&format=json&categories=news&time_range=week`；只取 `title`、`url`、`publishedDate`（沒有日期的不收） | 間隔 ≥ `NEWS_SEARXNG_INTERVAL_SECONDS`（10）；429／403／503 或上游回 CAPTCHA／too many requests → 暫停 `NEWS_SEARXNG_BACKOFF_MINUTES`（120）分鐘起、每次加倍。不換 IP、不偽裝 |
+| **Yahoo股市 RSS** | 只有 `DATA_POLICY=personal`（條款限非商用；`NEWS_YAHOO_RSS=false` 可關） | `tw.stock.yahoo.com/rss?s=<代號>`。2026-11-12 實測這個參數回的是「最新新聞」頻道，所以靠下面的相關性篩選只留這檔的標題；原始媒體從描述開頭判斷（「MoneyDJ新聞」「【財訊快報／」「（中央社記者」），**描述本身不存** | 同上 |
+
+HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (portfolio tracker; news headline index)`），GDELT 每次間隔 ≥ `NEWS_GDELT_INTERVAL_SECONDS`（6，最少 5），
+連線中斷只重試一次，遇到拒絕不重試。白名單（`marketdata/http.py`）多了 GDELT 與 Yahoo股市 RSS 兩個網址；SearXNG 只對設定的那台開放（`HttpFetcher(extra_allowed=…)`）。
+**新聞網站本身從不抓取**（只連結）。
+
+### 正規化（`news/normalize.py`、`news/outlets.py`，對 2026-11-12 的真實回應核對過）
+
+- **空白**：GDELT 會在標點兩邊加空白（「台積電 ： AI需求」「 【 台股盤中 】 」「4 . 6萬」「8 ％！」「exit , says」「( NVDA )」），都去掉；
+  整個標題逐字加空白時才去掉漢字之間的空白——台灣標題常用一個空白分隔兩句（「…說明會 攜手培育…」），所以平常保留。
+- **尾巴**：由右往左去掉重複媒體名稱或泛用版名的部分（「| 財經 | 三立新聞網 SETN.COM」「- 自由財經」「| ETtoday財經雲」「- Reuters」）；
+  專欄名稱保留（「| 台股雜談」，和 Google 財經一樣）；剩下的標題少於 4 個字就不去。
+- **媒體名稱**：依網域的最長後綴（`money.udn.com` 經濟日報 先於 `udn.com` 聯合新聞網；`ltn.com.tw`／`ec.ltn.com.tw` 自由時報；`setn.com` 三立…），不認得的顯示網域。
+- **相關性**：標題要有公司簡稱（台積電）、代號（2330，不算「23301」「2330點」「2330元」「2026年」）或英文簡稱（TSMC，整個字；少於 3 個字母的不用）。
+  英文名稱照寫法比對（2026-11-12 審查後）：5 個字母以內的全大寫單字是縮寫，標題裡也要全大寫（「WIN Semiconductors」算，「WBC win」「Mekong delta」
+  「Delta Air Lines」不算）；其他單字是專有名詞，第一個字母要大寫、其餘不拘（「Nvidia」「NVIDIA」算，「apple harvest」不算）；多個字的名稱不分大小寫
+  （「Hon Hai」「apple inc.」）。仍會漏掉的：標題大寫的一般字（「Big Apple」），以及只寫「Delta Electronics」這種與官方英文簡稱寫法不同的英文標題。
+  2026-11-12 的台積電樣本 17 則留 13 則（「南華大學邀請台積公司…」「台股暴跌1165點…」等順帶提到的被濾掉）；NVIDIA 英文樣本 16 則留 10 則、去重後 6 則（同一則被 4 家電台轉載）。
+- **去重**：同一網址（去掉 www、預設埠、追蹤參數、結尾斜線）或幾乎相同的標題（相似度 ≥ 0.88）只留一則；原始媒體優先於轉載站（Yahoo、LINE TODAY、MSN、iHeart…），再來是先刊出的。
+- **時間**：GDELT 是 `seendate`（GDELT 看到的時間，通常晚刊出 15–30 分鐘）；AI 搜尋的 `page_age` 只有日期時 `date_only: true`。
+
+### 儲存（migration `0011`，接在 `0009` 後，整合時再接上 `0010`）
+
+| 資料表 | 內容 |
+|---|---|
+| `news_articles` | 每檔每個網址一列：`title`、`outlet`、`domain`、`url`、`published_at`、`date_only`、`source`。**只有中繼資料**：沒有任何欄位能放內文、描述或圖片。刊出後 `NEWS_RETENTION_DAYS`（30）天刪除（每次批次開始時清） |
+| `news_blocked_domains` | 下架封鎖清單（網域，含子網域）＋原因 |
+| `news_tracked_views` | 「最近看過」：只有代號與時間，**沒有使用者**；`/news` 每 10 分鐘最多寫一次 |
+| `news_fetch_state` | 每個來源×代號的最後嘗試／成功、結果與筆數；`symbol="*"` 是整個來源的暫停時間 |
+
+### Worker 與 CLI
+
+- `news_refresh`：每 `NEWS_REFRESH_MINUTES`（45）分鐘，追蹤的股票＝任何人帳本／持股快照／自選裡的（`archive.tracked_symbols`）＋最近 `NEWS_VIEW_DAYS`（3）天看過的，
+  最久沒更新的先跑，每批最多 `NEWS_MAX_SYMBOLS_PER_RUN`（150）檔，批次最長是間隔的 80%（不會卡住其他排程）。全體共用。
+- `uv run python -m forliosa.news refresh [--symbol 2330.TW] [--no-ai]`：立即更新。
+- **下架**：`uv run python -m forliosa.news block udn.com --reason "2026-11-20 來函要求下架"` 立刻刪除該網域（含子網域）已存的標題，之後不再存也不顯示；
+  `unblock`、`blocked` 列出清單；環境變數 `NEWS_BLOCKED_DOMAINS=a.com,b.tw` 也會隱藏（但不刪資料列）。
+
+### 環境變數
+
+`NEWS_ENABLED`（true）、`NEWS_REFRESH_MINUTES`（45）、`NEWS_RETENTION_DAYS`（30）、`NEWS_VIEW_DAYS`（3）、`NEWS_MAX_SYMBOLS_PER_RUN`（150）、
+`NEWS_GDELT_ENABLED`（true）、`NEWS_GDELT_INTERVAL_SECONDS`（6）、`NEWS_AI_ENABLED`（true）、`NEWS_AI_BUDGET_USD`（30）、`NEWS_AI_MIN_ITEMS`（3）、
+`NEWS_AI_INTERVAL_HOURS`（24）、`AI_MODEL_NEWS`（預設 `AI_MODEL`）、`NEWS_SEARXNG_URL`（空＝關）、`NEWS_SEARXNG_INTERVAL_SECONDS`（10）、
+`NEWS_SEARXNG_BACKOFF_MINUTES`（120）、`NEWS_YAHOO_RSS`（true，只在 personal 有效）、`NEWS_BLOCKED_DOMAINS`。
+
+### 授權與顯名
+
+- `datapolicy.DATASETS` 多 `gdelt/doc`（`license_status: "open"`：可商用、需引用 GDELT 並連到 gdeltproject.org）與 `yahoo-rss/stock`（新的 `non_commercial`：
+  commercial 下不顯示、也不列在 `/meta/attributions`，改在 `not_used` 說明）。每則新聞的 `sources` 是它的顯名聲明；前端在「新聞報導」下方引用 The GDELT Project。
+- AI 工具 `get_news` 與 `/news` 相同：先官方公告、再新聞報導（每則有 `category`、`outlet`、`source`、網址），另回所有項目去重後的 `sources`
+  （GDELT 的引用、公告的 OGDL 顯名），`note` 請模型提到標題時寫出媒體與連結、細節再用 `web_search`；工具說明不再寫「不含媒體」。
+- `_item()` 的 `commercial` 改成只有 `conditional` 資料集會因 `TAIFEX_CONDITIONAL_CONFIRMED` 變成可商用（以前非商用資料集也會被開關影響）。
+
+### 測試（不連網）
+
+`tests/news/`：`test_parsers.py`（GDELT ArtList、429 文字、空結果 `{}`、查詢字串；Yahoo RSS；SearXNG 與它的封鎖判斷；白名單）、
+`test_normalize.py`（空白、尾巴、媒體名稱、網址、相關性、去重、封鎖清單、整條管線）、`test_service.py`（預設只開 GDELT、批次與增量查詢、429 暫停與加倍、
+連續錯誤略過、追蹤清單、封鎖清單與 CLI、保存期限、AI 補缺只取搜尋結果、預算上限、沒有金鑰、`/news` 形狀、Yahoo 只在 personal、美股、顯名、
+AI 工具 `get_news` 帶媒體與來源、worker）；相關性另測一般英文單字的英文簡稱（WIN、DELTA、Apple）。
+fixture 是 2026-11-12 的真實回應裁短：`gdelt_tsmc_taiwan_live_20261112.json`（17 則）、`gdelt_nvda_english_live_20261112.json`（16 則）、
+`gdelt_gudeng_empty_live_20261112.json`（`{}`）、`gdelt_rate_limited_live_20261112.txt`、`yahoo_rss_2330_live_20261112.xml`（8 則，描述只留前 12 個字）。
+
+### 實測（2026-11-12）
+
+- 沙盒共用出口對 GDELT 常回 429（「Please limit requests to one every 5 seconds」）或中途斷線：退避 20 秒起、每次加長，約 20 分鐘內成功 2 次（NVIDIA 75 則、家登 0 則）。
+  正式環境是自己的出口 IP，每 6 秒一次應該沒問題；遇到 429 會自動暫停。
+- `(Gudeng OR 3680) sourcecountry:taiwan` 三天內 0 則：中小型股常常要靠 AI 補缺。
+
+### 待產品負責人確認
+
+1. **AI 補缺的頻率**：目前同一檔 24 小時最多一次、每批最多 10 次、每月 US$30 封頂（約 600–1,000 次搜尋）。追蹤的小型股多時，月中可能就用完；要不要改成只補「有人持有」的股票？
+2. **美股來源**：`sourcelang:english` 會收到很多地方報與轉載（印度、澳洲地方報）。要不要改成只收美國／英國主要媒體（例如加 `sourcecountry:us`），或只用 AI 補？
+3. **專欄名稱**：「| 台股雜談」這類專欄名稱目前保留（和 Google 財經一樣）。要不要也去掉？
+4. **Yahoo股市 RSS 的個股網址**：`?s=<代號>` 回的是全站最新新聞，只能靠標題篩選，命中率低。個股 RSS 的正確網址要在一般瀏覽器開 rss-index 產生一次確認。
+
+## 2026-11-12 相關股票、公司資料、外資持股前 20 名（個股頁補強第 4–8 項）
+
+產品負責人決定（`PRODUCT.md`「個股頁補強」4、6、7、8；第 5 項的授權詢問信稿在 `docs/outreach/`，第 9 項 ETF 淨值另案）。
+研究：[`docs/research/news-and-external-sources.md`](../../docs/research/news-and-external-sources.md) §8（相關股票）、§9（公司資料）。
+形狀見 [`docs/api-contract.md`](../../docs/api-contract.md)「相關股票、關於〈公司〉、上市股票外資持股前 20 名」。
+
+### 新的存檔（都是政府資料開放授權；欄位名稱在 `marketdata/company_data.py`，2026-11-12 真實回應核對）
+
+| 資料表 | 來源 | 群組／頻率 | 注意 |
+|---|---|---|---|
+| `board_links` | 證交所 `t187ap11_L`、櫃買 `mopsfin_t187ap11_O`〈董事、監察人持股餘額明細〉（資料年月約落後 6 週） | `monthly`（每月 10、25 日 10:20） | 只留**職稱含「本人」且姓名＝上市櫃公司全名**的列（公司擔任法人董事或大股東），比對用 `company_profiles` 的公司名稱（去空白、相容漢字正規化，其餘完全相同）。**自然人列在解析迴圈裡就跳過**：不存、不記 log、不計數；國發基金這類非上市櫃法人也不留；設質欄位不讀。一列＝(公司, 持有公司, 資料年月)＋職稱合併（「董事長、董事、大股東」）＋目前持股（公司的股數）。2026-11-12：1,653 列、560 家公司 |
+| `index_constituents` | 櫃買 `tpex50_constituents`〈富櫃五十指數成分股〉 | `tpex`（每天） | 每天一份 50 檔 |
+| `holder_counts_monthly` | 集保 `2-22`（上市）、`2-23`（上櫃）〈有價證券集中保管個別股票異動月分析表〉 | `monthly` | 集保股東戶數（ETF 受益人數）＋保管與發行千股數；只公布最新月份，所以每月存。同一檔可能出現兩次（006201），只留一列。讀取時上市、上櫃各用自己最新的月份（兩份公布日不同） |
+| `foreign_holding_top20` | 證交所 `/fund/MI_QFIIS_sort_20`〈集中市場外資及陸資持股前 20 名彙總表〉 | `twse` | **沒有日期欄位**：21:00 後的執行算當天（交易日）、09:00 前算前一個交易日、白天（14:40）略過——證交所沒說幾點更新，避免把昨天的名單蓋成今天。同一天重跑會刪掉掉出名單的股票。2026-11-12 的名單大多是 KY 股（最高 99.53%），一般權值股不在榜 |
+| `esg_product_output` | 證交所 `t187ap46_L_14`、櫃買 `t187ap46_O_14`〈ESG 資訊揭露－產品品質與安全〉的「依產品類別之產品產量」 | `monthly` | 只拿來給 AI 簡介當官方資料；N/A 不存 |
+| `company_descriptions` | 中文維基百科（經 Wikidata 找條目）或 AI | worker `company_refresh`（每小時 :35） | 見下面「公司簡介」 |
+| `sec_companies.profile` | SEC submissions | 跟著申報清單更新 | SIC 產業、營業地址的城市與州（外國公司給國家）、交易所、曾用名稱；街道地址、電話、EIN 不存 |
+
+`company_profiles.values` 多了 `hq`（縣市；地址本身不存）、`registered_in`（KY 等）、`website`（一律 https、主機小寫；`http//`、全形冒號也能解析）、
+`auditor`（事務所名稱，`html.unescape`：「冠恆&#32852;合」→「冠恆联合」照原字、相容漢字 U+F997 →「聯」）、`transfer_agent`（只有名稱）、
+**`chairman`、`president`（董事長、總經理照原文，例如台積電「總裁: 魏哲家」）**。發言人、代理發言人、簽證會計師姓名、電話、傳真、Email、統一編號都不讀。
+每天覆寫同一列，不留歷史。這兩個姓名**只**從 `GET /instruments/{symbol}/company` 出去：`forliosa.ai` 不引用 `services/company.py`，
+AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示）都不含姓名（`tests/company/test_company.py` 檢查），也不和董監持股、質押合併
+（`board_links` 只有公司對公司）。**商用前請律師確認**（個資法第 19 條「已合法公開」的範圍，研究 §9）。
+
+**總部縣市**：證交所的中文地址取開頭的縣市（去掉郵遞區號、「台灣」，「巿」當「市」）；「新竹科學園區」「新竹市科學工業園區」一律顯示「新竹科學園區」，
+其他科學園區照原文；「北市…」這種縮寫不猜。櫃買只有英文地址：只有出現**恰好一個**明確的縣市（New Taipei、Taipei City、Taoyuan、Hsinchu County…）
+或新竹科學園區時才給。後面接 Rd.／Road／St.／Ave.／Ln.／Alley 等的是路名、不算城市（「Keelung Rd., …, Taipei City」→ 台北市；
+「Ping-Tung Rd., Ping-Jen City, Taoyuan Hsien」→ 桃園市）；「Taipei」單獨出現（可能是舊台北縣）、「Hsinchu」「Chiayi」單獨出現（市或縣）時給 `null`，
+即使另有一個城市名（「Keelung Rd., Xinyi Dist., Taipei 110」不會變成基隆市）。
+2026-11-12：上市 1,099 家有 1,064 家有縣市；上櫃 897 家有 730 家。
+
+### 相關股票（`services/related.py`）
+
+- **基準卡**：上櫃且在最新一份富櫃五十成分股 → 006201「富櫃五十成分股（櫃買中心公布）」；其他 → 使用者偏好的比較基準（`preferences.benchmark`）
+  「你的比較基準」；基準是 `^TAIEXTR`／`^TPEXTR` 時是指數卡（`is_index`，存檔指數收盤），沒有存檔就不放。**從不寫「某 ETF 持有本股」**。
+- **關係企業**：`board_links` 的**每個資料集各自**最新資料年月（證交所 `t187ap11_L` 與櫃買 `mopsfin_t187ap11_O` 公布日不同，取全體最新會讓另一個市場的連結整批消失），
+  兩個方向都算（「台積電是其法人董事及大股東」「世界的大股東」），市值大的先；存託憑證（91）不放。`notes` 列出用到的資料年月（兩個月時「2026 年 9 月、2026 年 10 月」）。
+- **同業**：同產業別、市值（已發行股數 × 最新存檔收盤）對數距離最近；產業市值最大的不是本股時先放它（「半導體業市值最大」）。31 其他電子業改用電子類（24–31）
+  「電子類、市值相近」，20 其他業改用使用者自己的台股持股「你的持股、市值相近」；這兩類關係企業最多 2 張。
+- **組合**：基準 1 張 → 關係企業 1 張（雜項 2 張）→ 同業補滿 → 還不滿 4 張再補關係企業。組不出卡的候選（指數沒有存檔收盤、公司沒有任何收盤）跳過，
+  由同一類的下一個候選補上。卡片：名稱用官方簡稱（公司基本資料、基金簡稱），收盤與漲跌用報價
+  （除權息日用參考價算），`sparkline` 是最近約 35 天的存檔收盤。
+- **ETF 頁**：t187ap47_L 的追蹤指數＋基金類型相同（槓桿／反向型是另一類型，所以 0050 的同指數只有 006208），再補同類型、集保股東戶數最多的
+  （戶數用該市場資料集最新的月份）。
+  櫃買 ETF 沒有基金基本資料，目前只會拿到空的列（前端不顯示）。
+- 2026-11-12 模擬（測試用收盤）：2330 → 0050、創意、聯發科、日月光投控；5347 → 006201、台積電、環球晶…；2317 → 0050、鴻華先進、廣宇、電子類同業。
+
+### 公司簡介（`services/company.py`、`marketdata/wikimedia.py`）
+
+1. **找條目**：Wikidata `wbsearchentities`（zh-tw，簡稱與全名各一次）→ `wbgetentities`（claims、zhwiki sitelink、中文標籤與別名）→
+   先找 P414（交易所）＝證交所 Q548621／櫃買 Q5598539（美股：NYSE Q13677、Nasdaq Q82059）且 P249（代號）限定詞＝代號的項目；
+   沒有就找中文標籤或別名**完全等於**公司全名的項目（環球晶的項目沒有 P414，靠別名「環球晶圓股份有限公司」找到）。只認有 zh.wikipedia 條目的項目。
+2. **節錄**：`zh.wikipedia.org/api/rest_v1/page/summary/{title}`，`Accept-Language: zh-tw`（台灣字形）；在句號（。！？）處截斷，累積到 260 字為止（至少第一句）；
+   **文字不改寫**、不送進任何 AI；存條目標題、`revision_id`、Wikidata 編號。前端標「節錄」並連到條目（`zh.wikipedia.org/zh-tw/<標題>`）與 CC BY-SA 4.0。
+3. **AI 簡介**（沒有條目時）：一次非串流呼叫（`AI_MODEL_COMPANY`，預設 Haiku 等級），提示只有官方資料：簡稱、全名、產業別、成立年、掛牌年與市場、總部或註冊地、
+   實收資本額（「約 2,593 億元」）、最近月營收規模、ESG 產品類別文字；**不含董事長、總經理**。回覆超過 160 字、含網址或含公司負責人姓名就丟掉
+   （姓名先拆解：去掉「總裁: 」這類職稱前綴、依頓號／逗號拆成多人，有空白的名字連起來與分開都比對；少於 2 個字（拉丁字母 3 個）的部分不用）。
+   `facts_key`＝這些資料的 SHA-256：資料沒變不重寫。`company_descriptions.sources` 記下這些資料來自哪些資料集（公司基本資料、月營收、ESG），
+   `/company` 的 `sources` 會一併列出。回覆被丟掉或 API 錯誤時記下 `ai_failed_key`、`ai_failures`、`ai_attempted_at`：同一份資料 24 小時後才再試，
+   之後每次加倍（最多 30 天）；資料變了就立刻再試。系統付費（`ai_usage.feature = "company"`、`user_id` 空），每批最多 `COMPANY_AI_PER_RUN`（10）次
+   **呼叫**（被丟掉的回覆、錯誤都算）。
+4. **排程**：worker `company_refresh` 每小時，處理追蹤中的股票（帳本、持股、自選、`NEWS_VIEW_DAYS` 內看過的；`/company` 也會記錄「看過」），
+   沒查過的先、每批最多 `COMPANY_MAX_SYMBOLS_PER_RUN`（15）次維基查詢；維基每 `COMPANY_WIKI_REFRESH_DAYS`（30）天重查一次（條目消失就改回沒有）。
+   CLI：`uv run python -m forliosa.services.company refresh [2330.TW …]`。
+5. **禮貌**：User-Agent `Forliosa/1.0`，有 `WIKIMEDIA_CONTACT` 時加「(聯絡方式)」；**不用 `SEC_CONTACT_EMAIL`**。同一個程序一次只發一個 Wikimedia 請求
+   （全域鎖、每個主機間隔 1.5 秒），429／403 → 這批停止、6 小時內不再查，不換身分、不換 IP。白名單只多兩個網址：`www.wikidata.org/w/api.php`、
+   `zh.wikipedia.org/api/rest_v1/page/summary/`。
+
+### 環境變數
+
+`COMPANY_DESCRIPTIONS_ENABLED`（true）、`COMPANY_AI_ENABLED`（true）、`COMPANY_AI_PER_RUN`（10）、`COMPANY_MAX_SYMBOLS_PER_RUN`（15）、
+`COMPANY_WIKI_REFRESH_DAYS`（30）、`AI_MODEL_COMPANY`（預設 `AI_MODEL`）、`WIKIMEDIA_CONTACT`（選填）。
+
+### 授權與顯名
+
+`datapolicy.DATASETS` 多：`twse-openapi/foreign_top20`、`twse-openapi/board`、`tpex-openapi/board`、`tpex-openapi/tpex50`（data.gov.tw 20220）、
+`tdcc-opendata/holders_twse`（20603）、`tdcc-opendata/holders_tpex`（20605）、`twse-openapi/esg_products`、`tpex-openapi/esg_products`（以上 OGDL）、
+`wikipedia/zh`（`open`，CC BY-SA 4.0：「依 CC BY-SA 4.0 節錄（不改寫）」）、`wikidata/entities`（`open`，CC0）。`/meta/attributions.notice` 多一行維基百科。
+公司基本資料的 `used_for` 加上「關於」的欄位。
+
+### 測試（不連網）
+
+- `tests/archive/test_stock_page_jobs.py`：董監持股只留公司對公司（fixture 的自然人姓名已換成「自然人NN」，國發基金、華創車電不留，log 也沒有）、
+  集保 2-22／2-23 去重、前 20 名依執行時間定日期、富櫃五十、ESG、地址與網址規則、沒有公司基本資料時的錯誤、冪等。
+- `tests/company/`：`test_related.py`（台積電、世界、鴻海、指數基準、0050、美股、存託憑證、兩個資料集年月不同、組不出卡時由下一個補上）、
+  `test_company.py`（條目比對、節錄、User-Agent、維基→AI、facts_key 快取、含人名（含職稱前綴）的 AI 回覆丟棄、失敗後退避與每批呼叫上限、
+  AI 簡介的來源、429 暫停、`/company` 台股／KY／ETF／美股、AI 工具不含姓名、上市前 20 名（在榜時仍說明三大法人、掉出名單時沒有舊的持股比））。
+- 公司基本資料存檔失敗（資料庫鎖住、逾時）時，log 與 `JobResult` 只有驅動程式的錯誤類別與第一行：engine 設 `hide_parameters=True`，
+  `archive.safe_error` 也不留 Postgres 的 DETAIL（會重複整列資料，含董事長、總經理）。
+- fixture 是 2026-11-12 真實回應裁短：`twse_t187ap11_l`／`tpex_t187ap11_o`（29／16 列）、`*_t187ap03_*_related`（13／5 家）、`twse_t187ap47_l_related`、
+  `tpex_tpex50_constituents`、`twse_mi_qfiis_sort_20`、`*_t187ap46_*_14`、`tdcc_2-22`／`2-23`、`sec_submissions_tsm_meta`、AAPL submissions 補上地址與曾用名稱；
+  `tests/company/fixtures/` 的 Wikidata 搜尋（台積電、環球晶、家登＝沒有、櫃買中心）、項目（只留 P414）、台積電條目摘要（去掉圖片欄位）。
+
+### 實測（2026-11-12）
+
+- 沙盒共用出口對 Wikimedia 常回 429（「You are making too many requests」）：一次一個請求、間隔 8 秒、429 後等 2 分鐘，約 20 分鐘拿到 7 個回應；
+  `list=search` 的 `haswbstatement` 查詢一直 429（也不支援限定詞），所以改用 `wbsearchentities`＋`wbgetentities`。正式環境建議設定 `WIKIMEDIA_CONTACT`。
+- 環球晶的條目摘要四次都 429，沒有 fixture；測試裡家登（沒有 Wikidata 項目）走 AI 簡介。
+
+### 待產品負責人確認
+
+1. **董事長、總經理**：照決定顯示、標來源；正式收費前請律師確認（研究 §9）。要不要先只在登入後顯示（現在就是只有登入後才看得到）？
+2. **外資持股前 20 名的日期**：證交所沒說明更新時間，目前晚上 21:00 後的存檔算當天。若發現晚上還是前一天的名單，改成只在早上存（算前一個交易日）。
+3. **AI 簡介的範圍**：目前只寫追蹤中的股票（持有、自選、3 天內看過），每批最多 10 則。要不要讓沒有條目的股票第一次被看時就立刻產生（多一次 AI 呼叫、頁面稍後更新）？
+4. **ETF 頁的「相關股票」**：上櫃 ETF（006201 等）沒有基金基本資料，現在不顯示這一列。要不要改用「同類型、受益人數多」的上市 ETF 補？
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。
@@ -673,7 +868,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 13. ~~**上市股票三大法人**~~：已決定（產品負責人 2026-11-12）：不寄信給證交所、不買 Data E-Shop，上市股票的逐檔三大法人與外資持股**不顯示**
     （任何模式，含 FinMind：上市股票只向 FinMind 要融資融券，不下載法人與持股資料集；上櫃照常）。個股頁的空狀態可直接問 AI「最近外資對這檔的動向？」（建議問題 `foreign_flow`），AI 用網路搜尋新聞回答並附來源與日期；
     `web_fetch` 封鎖 `www.twse.com.tw`、`mis.twse.com.tw`。之後要用時：Data E-Shop「三大法人買賣超檔」或書面同意（詢問信草稿見 `docs/research/data-sources-licensing.md` §1.9）。
-14. **新聞來源**：目前只有官方公告（重大訊息、證交所新聞）。媒體新聞需要授權（中央社等，需詢價）。
+14. ~~**新聞來源**~~：已實作（2026-11-12）：GDELT 為主、AI 搜尋補缺、SearXNG 保留（預設關）、Yahoo股市 RSS 只在 personal；見「2026-11-12 新聞報導」與它的待確認事項。
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。
 16. ~~**財報公布日**~~：已實作（2026-11-12），實際日期來自重大訊息與月營收資料集；查不到才用法定期限（`estimated: true`）。
 17. ~~**美股基本面（SEC EDGAR）與匯率**~~：都已實作（2026-11-12）。美股財報與 8-K／10-Q／10-K 申報見「第四批」；USD/TWD 改用中央銀行

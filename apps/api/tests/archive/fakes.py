@@ -57,7 +57,17 @@ ROUTES = {
     "/mopsfin_t187ap06_O_bd": "tpex_t187ap06_o_bd_live_20261112.json",
     # 中央銀行 (cpx.cbc.gov.tw/api/OpenData): the live answer is the whole history since 2008; trimmed to 36 days
     "/FTDOpenData_Day": "cbc_ftd_day_live_20261112.json",
+    # Stock page 2026-11-12: foreign top 20, 富櫃五十, 董監事持股餘額明細 (natural persons' names replaced by
+    # 「自然人NN」 in the fixtures too), ESG product text
+    "/fund/MI_QFIIS_sort_20": "twse_mi_qfiis_sort_20_live_20261112.json",
+    "/tpex50_constituents": "tpex_tpex50_constituents_live_20261112.json",
+    "/opendata/t187ap11_L": "twse_t187ap11_l_live_20261112.json",
+    "/mopsfin_t187ap11_O": "tpex_t187ap11_o_live_20261112.json",
+    "/opendata/t187ap46_L_14": "twse_t187ap46_l_14_live_20261112.json",
+    "/t187ap46_O_14": "tpex_t187ap46_o_14_live_20261112.json",
 }
+TDCC_FILES = {"1-5": "tdcc_1-5_live_20261106.csv", "2-22": "tdcc_2-22_live_20261112.csv",
+              "2-23": "tdcc_2-23_live_20261112.csv"}
 
 # TAIFEX OpenAPI (fetched as bytes: JSON or CSV). DailyForeignExchangeRates is the CSV variant Cloudflare served.
 TAIFEX_ROUTES = {
@@ -106,7 +116,7 @@ class FakeFetcher:
     def get_bytes(self, url, params=None, headers=None):
         self.calls.append(url)
         if "tdcc" in url:
-            return (FIX / "tdcc_1-5_live_20261106.csv").read_bytes()
+            return (FIX / TDCC_FILES[(params or {}).get("id", "1-5")]).read_bytes()
         if "taifex" in url:
             for suffix, name in TAIFEX_ROUTES.items():
                 if url.endswith(suffix):

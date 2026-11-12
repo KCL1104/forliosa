@@ -1,0 +1,140 @@
+{
+ "searchinfo": {
+  "search": "台積電"
+ },
+ "search": [
+  {
+   "id": "Q713418",
+   "title": "Q713418",
+   "pageid": 670895,
+   "concepturi": "http://www.wikidata.org/entity/Q713418",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q713418",
+   "display": {
+    "label": {
+     "value": "台灣積體電路製造公司",
+     "language": "zh-tw"
+    },
+    "description": {
+     "value": "知名高科技企業、台灣的半導體晶片製造公司",
+     "language": "zh-tw"
+    }
+   },
+   "label": "台灣積體電路製造公司",
+   "description": "知名高科技企業、台灣的半導體晶片製造公司",
+   "match": {
+    "type": "alias",
+    "language": "zh-tw",
+    "text": "台積電"
+   },
+   "aliases": [
+    "台積電"
+   ]
+  },
+  {
+   "id": "Q109542563",
+   "title": "Q109542563",
+   "pageid": 104681249,
+   "concepturi": "http://www.wikidata.org/entity/Q109542563",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q109542563",
+   "display": {
+    "label": {
+     "value": "台積電高雄廠",
+     "language": "zh-tw"
+    },
+    "description": {
+     "value": "2021年11月公佈的台積電新的廠區",
+     "language": "zh-tw"
+    }
+   },
+   "label": "台積電高雄廠",
+   "description": "2021年11月公佈的台積電新的廠區",
+   "match": {
+    "type": "label",
+    "language": "zh-tw",
+    "text": "台積電高雄廠"
+   }
+  },
+  {
+   "id": "Q139695134",
+   "title": "Q139695134",
+   "pageid": 133151193,
+   "concepturi": "http://www.wikidata.org/entity/Q139695134",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q139695134",
+   "display": {
+    "label": {
+     "value": "台積心靈捕手",
+     "language": "zh-tw"
+    },
+    "description": {
+     "value": "台灣積體電路製造的企業形象歌曲",
+     "language": "zh-tw"
+    }
+   },
+   "label": "台積心靈捕手",
+   "description": "台灣積體電路製造的企業形象歌曲",
+   "match": {
+    "type": "alias",
+    "language": "zh-tw",
+    "text": "台積電之歌"
+   },
+   "aliases": [
+    "台積電之歌"
+   ]
+  },
+  {
+   "id": "Q135749439",
+   "title": "Q135749439",
+   "pageid": 129483531,
+   "concepturi": "http://www.wikidata.org/entity/Q135749439",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q135749439",
+   "display": {
+    "label": {
+     "value": "台積電青年學生文學獎歷屆得主與作品列表",
+     "language": "zh-tw"
+    },
+    "description": {
+     "value": "維基媒體列表",
+     "language": "zh-tw"
+    }
+   },
+   "label": "台積電青年學生文學獎歷屆得主與作品列表",
+   "description": "維基媒體列表",
+   "match": {
+    "type": "label",
+    "language": "zh-tw",
+    "text": "台積電青年學生文學獎歷屆得主與作品列表"
+   }
+  },
+  {
+   "id": "Q135749991",
+   "title": "Q135749991",
+   "pageid": 129484085,
+   "concepturi": "http://www.wikidata.org/entity/Q135749991",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q135749991",
+   "display": {
+    "label": {
+     "value": "台積電青年學生文學獎",
+     "language": "zh-tw"
+    },
+    "description": {
+     "value": "台積電文教基金會與聯合報副刊於2004年開始共同舉辦的文學獎",
+     "language": "zh-tw"
+    }
+   },
+   "label": "台積電青年學生文學獎",
+   "description": "台積電文教基金會與聯合報副刊於2004年開始共同舉辦的文學獎",
+   "match": {
+    "type": "label",
+    "language": "zh-tw",
+    "text": "台積電青年學生文學獎"
+   }
+  }
+ ],
+ "search-continue": 5,
+ "success": 1
+}

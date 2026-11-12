@@ -55,7 +55,7 @@ export type AiContext =
 
 const MAX = 3
 
-/** 上市股票沒有逐檔三大法人與外資持股（不顯示），外資動向改問 AI：上網搜尋新聞，附來源與日期 */
+/** 上市股票沒有逐檔三大法人、外資持股只有前 20 名（其他不顯示），外資動向改問 AI：上網搜尋新聞，附來源與日期 */
 export const FOREIGN_FLOW_QUESTION = "最近外資對這檔的動向？"
 export const isListedStock = (s: Pick<StockData, "market" | "type">) => s.market === "TWSE" && s.type === "stock"
 
@@ -298,7 +298,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "foreign_flow":
       // 本機規則版沒有網路搜尋：說明為什麼沒有數字、給現在看得到的資料（真實後端由 AI 搜尋新聞，附來源與日期）
       return {
-        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供，沒有免費、可商用的來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期；完整的 AI 回答開放後再問我，我不想給你猜的答案。`,
+        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供（外資持股只免費公布前 20 名），沒有免費、可商用的完整來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期；完整的 AI 回答開放後再問我，我不想給你猜的答案。`,
         links: [link("chips", "看融資融券"), link("events", "看公告")],
       }
     default:

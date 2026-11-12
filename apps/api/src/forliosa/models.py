@@ -535,8 +535,17 @@ class DividendResolution(Base):
 
 
 class CompanyProfile(Base):
-    """TWSE t187ap03_L / TPEx mopsfin_t187ap03_O 公司基本資料 (latest only). Company facts only: the
-    chairman's, managers', spokespeople's and CPAs' names and phone numbers are personal data, not stored."""
+    """TWSE t187ap03_L / TPEx mopsfin_t187ap03_O 公司基本資料 (latest only: every run overwrites the row, so no
+    history is kept).
+
+    ``values`` holds the company facts of the 「關於」 section (product owner 2026-11-12, decision 6): name, short and
+    English short name, ``hq`` (縣市 derived from the address; the address is not kept), ``registered_in`` (KY),
+    ``website``, ``auditor`` (firm), ``transfer_agent`` (name), paid-in capital, incorporation date — and the
+    ``chairman`` / ``president`` (董事長、總經理) exactly as published. Those two names are shown with their source
+    only on the stock page: they never go into AI prompts or AI tool outputs and are never joined with board holdings
+    or pledges (``board_links`` keeps company ↔ company rows only). Spokespeople, CPAs, phones, fax, e-mail and the
+    tax number are not stored. (Lawyer check before charging users: docs/research/news-and-external-sources.md §9.)
+    """
 
     __tablename__ = "company_profiles"
 
@@ -785,6 +794,9 @@ class SecCompany(Base):
     facts_fetched_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     filings_fetched_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     source: Mapped[str] = mapped_column(String(32), default="sec-edgar")
+    # Company facts from the submissions JSON (「關於」): {industry, sic, city, state, country, exchanges,
+    # former_names: [{name, from, to}]} — no people, phones or EIN.
+    profile: Mapped[dict | None] = mapped_column(JSON, nullable=True)
 
 
 class SecFiling(Base):
@@ -1016,3 +1028,166 @@ class TelegramLinkCode(Base):
     expires_at: Mapped[datetime] = mapped_column(TZDateTime)
     used_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+# -- News (個股頁「新聞報導」; forliosa.news) -------------------------------------------------------------------
+class NewsArticle(Base):
+    """One media headline about one symbol: **metadata only** — the headline, outlet, time and link. Never the
+    article text, a description / og:description or an image (docs/research/news-and-external-sources.md §1).
+    Deleted ``NEWS_RETENTION_DAYS`` (30) after publication."""
+
+    __tablename__ = "news_articles"
+    __table_args__ = (UniqueConstraint("symbol", "url_key", name="uq_news_articles_symbol_url"),
+                      Index("ix_news_articles_symbol_published", "symbol", "published_at"),
+                      Index("ix_news_articles_published", "published_at"))
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    symbol: Mapped[str] = mapped_column(String(20))
+    url_key: Mapped[str] = mapped_column(String(64))  # sha256 of the normalised URL
+    url: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(Text)  # normalised headline
+    outlet: Mapped[str] = mapped_column(String(100))  # 聯合新聞網; unknown outlets: their domain
+    domain: Mapped[str] = mapped_column(String(253))
+    published_at: Mapped[datetime] = mapped_column(TZDateTime)
+    date_only: Mapped[bool] = mapped_column(Boolean, default=False)  # the source gave a date without a time
+    source: Mapped[str] = mapped_column(String(16))  # gdelt | ai_search | searxng | yahoo_rss
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class NewsBlockedDomain(Base):
+    """Takedown blocklist (下架處理): an outlet that asked to be removed. Its headlines are deleted, never stored
+    again and never shown (subdomains included). ``python -m forliosa.news block|unblock|blocked``."""
+
+    __tablename__ = "news_blocked_domains"
+
+    domain: Mapped[str] = mapped_column(String(253), primary_key=True)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class NewsTrackedView(Base):
+    """When a symbol's news was last viewed: only the symbol and the time, never who viewed it. Symbols viewed in
+    the last ``NEWS_VIEW_DAYS`` days are refreshed by the news worker job."""
+
+    __tablename__ = "news_tracked_views"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_viewed_at: Mapped[datetime] = mapped_column(TZDateTime)
+
+
+class NewsFetchState(Base):
+    """Per source and symbol: the last attempt / success and its outcome. ``symbol = "*"`` is the source as a
+    whole (``backoff_until`` after a 429 or a block: the source is not asked again before then)."""
+
+    __tablename__ = "news_fetch_state"
+
+    source: Mapped[str] = mapped_column(String(16), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    last_success_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    last_status: Mapped[str] = mapped_column(String(24), default="")  # ok | empty | error | rate_limited | blocked
+    items: Mapped[int] = mapped_column(default=0)
+    failures: Mapped[int] = mapped_column(default=0)
+    backoff_until: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+# -- Stock page 2026-11-12 (decisions 4, 6, 7, 8): related stocks, company facts and description ------------------
+class BoardLink(Base):
+    """Company ↔ company relation from TWSE t187ap11_L / TPEx mopsfin_t187ap11_O 董監事持股餘額明細 (monthly):
+    ``holder_symbol`` (a listed / OTC company, matched by its exact full name) is a director (法人董事) or major
+    shareholder (大股東, > 10 %) of ``symbol``. Natural persons' rows are dropped while parsing: no person's name,
+    holding or pledge is ever stored. ``period`` is 資料年月 (about six weeks behind)."""
+
+    __tablename__ = "board_links"
+    __table_args__ = (Index("ix_board_links_holder", "holder_symbol", "period"),)
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    holder_symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    period: Mapped[str] = mapped_column(String(7), primary_key=True)  # "2026-09"
+    roles: Mapped[str] = mapped_column(String(100))  # 「董事長、董事、大股東」
+    shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # the holder company's current shares
+    data_date: Mapped[date] = mapped_column(Date)  # 出表日期
+    source: Mapped[str] = mapped_column(String(32))
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class IndexConstituent(Base):
+    """Published index constituent lists (TPEx tpex50_constituents 富櫃五十指數, daily)."""
+
+    __tablename__ = "index_constituents"
+
+    index_code: Mapped[str] = mapped_column(String(16), primary_key=True)  # "TPEX50"
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class HolderCountMonthly(Base):
+    """TDCC 2-22 (TWSE) / 2-23 (TPEx) 集保股東戶數 per stock and ETF, month end (only the latest month is published,
+    so it is archived monthly)."""
+
+    __tablename__ = "holder_counts_monthly"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    period: Mapped[str] = mapped_column(String(7), primary_key=True)  # "2026-10"
+    holders: Mapped[int] = mapped_column(BigInteger)
+    custody_k_shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # 本月底保管千股數
+    issued_k_shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # 發行千股數
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class ForeignHoldingTop20(Base):
+    """TWSE /fund/MI_QFIIS_sort_20 集中市場外資及陸資持股前 20 名 (daily; the only per-stock foreign holding TWSE
+    publishes as open data). The dataset has no date: rows are stamped with the trading day they belong to."""
+
+    __tablename__ = "foreign_holding_top20"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    rank: Mapped[int] = mapped_column()
+    pct: Mapped[Decimal] = mapped_column(Money)  # fraction of issued shares held by foreign investors
+    shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    issued_shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    available_pct: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    limit_pct: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class EsgProductOutput(Base):
+    """t187ap46_L_14 / t187ap46_O_14 ESG 揭露「依產品類別之產品產量」 (latest report year): one of the official facts
+    the AI-written company description may use when there is no Wikipedia article."""
+
+    __tablename__ = "esg_product_output"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    year: Mapped[int] = mapped_column()  # 報告年度 (Gregorian)
+    text: Mapped[str] = mapped_column(Text)
+    data_date: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class CompanyDescription(Base):
+    """The 「關於」 description (decision 7): a zh.wikipedia excerpt (``kind = "wikipedia"``, CC BY-SA 4.0: title,
+    link and revision kept, the text never rewritten by AI; refreshed monthly) or, without an article, an AI-written
+    2–3 sentence description from official facts only (``kind = "ai"``, regenerated only when ``facts_key`` — a hash
+    of those facts — changes; ``sources``: the datasets those facts came from). ``kind = "none"``: looked up, nothing
+    to show. A model reply that was refused (too long, a name, cut off) or an API error is remembered with the facts
+    it was for (``ai_failed_key``, ``ai_failures``, ``ai_attempted_at``): the same facts are retried only after a
+    back-off (24 h, doubling)."""
+
+    __tablename__ = "company_descriptions"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(12))  # wikipedia | ai | none
+    text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    title: Mapped[str | None] = mapped_column(String(300), nullable=True)  # Wikipedia article title
+    url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    revision_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    wikidata_id: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    facts_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    sources: Mapped[list | None] = mapped_column(JSON, nullable=True)  # dataset keys behind an AI description
+    ai_failed_key: Mapped[str | None] = mapped_column(String(64), nullable=True)  # facts of the last failed attempt
+    ai_failures: Mapped[int] = mapped_column(default=0, server_default="0")  # in a row, for ai_failed_key
+    ai_attempted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)  # last AI call
+    checked_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)  # last Wikipedia lookup
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)  # text last changed

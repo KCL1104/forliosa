@@ -97,6 +97,15 @@ ALLOWED_URL_PREFIXES = (
     "https://www.sec.gov/files/company_tickers.json",
     "https://data.sec.gov/api/xbrl/companyfacts/",
     "https://data.sec.gov/submissions/",
+    # News metadata (forliosa.news): the GDELT DOC 2.0 API (free, commercial use allowed with a citation) and, only
+    # under DATA_POLICY=personal, Yahoo股市's RSS feeds (non-commercial terms). A self-hosted SearXNG is allowed per
+    # fetcher (``extra_allowed``) when NEWS_SEARXNG_URL is set. News sites themselves are never fetched.
+    "https://api.gdeltproject.org/api/v2/doc/doc",
+    "https://tw.stock.yahoo.com/rss",
+    # 「關於」 description (forliosa.services.company): Wikidata's API (CC0; find the article by ticker) and the
+    # zh.wikipedia REST summary (CC BY-SA 4.0 excerpt, shown unchanged with attribution). Nothing else on Wikimedia.
+    "https://www.wikidata.org/w/api.php",
+    "https://zh.wikipedia.org/api/rest_v1/page/summary/",
 )
 
 
@@ -114,8 +123,10 @@ class HttpStatusError(ProviderUnavailable):
 
 class HttpFetcher:
     def __init__(self, timeout: float = 20.0, limiter: RateLimiter | None = None, retries: int = 2,
-                 client: httpx.Client | None = None, user_agent: str = USER_AGENT, backoff: float = 1.0):
+                 client: httpx.Client | None = None, user_agent: str = USER_AGENT, backoff: float = 1.0,
+                 extra_allowed: tuple[str, ...] = ()):
         self.limiter = limiter or DEFAULT_LIMITER
+        self.extra_allowed = tuple(extra_allowed)
         self.retries = retries
         self.backoff = backoff
         self.client = client or httpx.Client(
@@ -126,7 +137,7 @@ class HttpFetcher:
     def get_bytes(self, url: str, params: dict[str, Any] | None = None,
                   headers: dict[str, str] | None = None) -> bytes:
         host = urlparse(url).hostname or ""
-        if not url_allowed(url):
+        if not (url_allowed(url) or (self.extra_allowed and url.startswith(self.extra_allowed))):
             raise ProviderUnavailable(f"{url} 不在授權來源白名單（marketdata/http.py ALLOWED_URL_PREFIXES）")
         delay = self.backoff
         last_exc: Exception | None = None

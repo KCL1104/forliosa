@@ -10,6 +10,7 @@ import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { announcementHost, eventLabel, eventTitle, mergeAnnouncements, NEWS_CATEGORY_LABEL, type TimelineRow } from "@/lib/events"
 import { formatDateShort, formatDaysUntil, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
+import { officialNews } from "@/lib/news"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { Sources } from "./kit"
@@ -43,10 +44,11 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
       mine: true,
       amount_estimate: null,
     }))
-  const all: TimelineRow[] = [...mergeAnnouncements(events.data, news.data ?? []), ...trades].filter((e) => filter === "all" || e.mine)
+  // 時間軸只放官方公告；媒體新聞在總覽的「新聞報導」
+  const all: TimelineRow[] = [...mergeAnnouncements(events.data, officialNews(news.data)), ...trades].filter((e) => filter === "all" || e.mine)
   const future = all.filter((e) => e.date >= today).sort((a, b) => a.date.localeCompare(b.date))
   const past = all.filter((e) => e.date < today).sort((a, b) => b.date.localeCompare(a.date)).slice(0, 40)
-  const sources = [...new Set([...events.data, ...(news.data ?? [])].flatMap((e) => e.sources ?? []))]
+  const sources = [...new Set([...events.data, ...officialNews(news.data)].flatMap((e) => e.sources ?? []))]
 
   return (
     <div className="flex flex-col gap-10">

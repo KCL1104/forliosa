@@ -39,6 +39,8 @@ export const qk = {
   financials: (symbol: string, period: FinancialsPeriod) => ["financials", symbol, period] as const,
   events: (symbol: string) => ["events", symbol] as const,
   news: (symbol: string) => ["news", symbol] as const,
+  related: (symbol: string) => ["related", symbol] as const,
+  company: (symbol: string) => ["company", symbol] as const,
   position: (symbol: string) => ["portfolio", "position", symbol] as const,
   why: (symbol: string) => ["why", symbol] as const,
   watchlist: ["watchlist"] as const,
@@ -216,6 +218,14 @@ export function useEvents(symbol: string, enabled = true) {
 }
 export function useNews(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.news(symbol), queryFn: () => api.getNews(symbol), staleTime: 10 * 60_000 })
+}
+/** 相關股票：規則挑選，資料每天更新 */
+export function useRelated(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.related(symbol), queryFn: () => api.getRelated(symbol), staleTime: 30 * 60_000 })
+}
+/** 關於〈公司〉：公司基本資料每天覆寫、簡介每月更新 */
+export function useCompany(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.company(symbol), queryFn: () => api.getCompany(symbol), staleTime: 60 * 60_000 })
 }
 export function usePosition(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.position(symbol), queryFn: () => api.getPosition(symbol), staleTime: 30_000 })

@@ -7,13 +7,13 @@ with 「非商用」). Archive tables are read with the policy's source filter, 
 
 from __future__ import annotations
 
-import contextlib
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
@@ -25,6 +25,7 @@ from forliosa.marketdata.opendata import TDCC_LEVELS
 from forliosa.marketdata.service import MarketData
 from forliosa.models import (
     ForeignHoldingDaily,
+    ForeignHoldingTop20,
     InstitutionalDaily,
     MarginDaily,
     MarketEvent,
@@ -51,8 +52,12 @@ from forliosa.timeutil import (
 )
 
 CHIPS_RANGES = ("1M", "3M", "6M", "1Y")
-LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人與外資持股（證交所以付費商品提供），目前不提供；"
-                     "上櫃股票由櫃買中心 OpenAPI 每日存檔")
+LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
+                     "外資持股只公布持股比率前 20 名；上櫃股票由櫃買中心 OpenAPI 每日存檔")
+# A listed stock on the latest top-20 list: the same reason for the missing 三大法人, without the 外資持股 clause
+LISTED_INST_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
+                    "上櫃股票由櫃買中心 OpenAPI 每日存檔")
+TOP20_NOTE = "證交所只公布外資持股比率前 20 名，本股只有名列前 20 名的日子才有外資持股比"
 FINANCIAL_PERIODS = ("quarterly", "annual")
 EVENT_PAST_DAYS = 365
 EVENT_FUTURE_DAYS = 120
@@ -227,7 +232,7 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     info = require_instrument(md, symbol)
     sym = info.symbol
     empty = {"symbol": sym, "institutional": [], "margin": [], "foreign_holding_pct": [], "major_holders": None,
-             "sources": [], "notes": []}
+             "sources": [], "notes": [], "foreign_top20": None}
     if info.market == "US":
         return {**empty, "notes": ["美股沒有籌碼資料"]}
     today = today_taipei()
@@ -243,10 +248,16 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     listed = info.market == "TWSE"
     inst = {} if listed else {r.date: r for r in rows(InstitutionalDaily)}
     margin = {r.date: r for r in rows(MarginDaily)}
-    foreign = {} if listed else {r.date: r for r in rows(ForeignHoldingDaily)}
+    # Listed stocks: only the days the stock was in TWSE's 外資持股前 20 名 (MI_QFIIS_sort_20, decision 8), and only
+    # while it is on the latest list — a stock that dropped off gets the contract's empty series (its last
+    # in-list pct would read as today's holding)
+    foreign = {r.date: r for r in rows(ForeignHoldingTop20 if listed else ForeignHoldingDaily)}
+    top20 = _foreign_top20(db, md, sym) if listed else None
+    if listed and top20 is None:
+        foreign = {}
     sources = [*tagged([r.source for r in inst.values()], "institutional"),
                *tagged([r.source for r in margin.values()], "margin"),
-               *tagged([r.source for r in foreign.values()], "foreign_holding")]
+               *tagged([r.source for r in foreign.values()], "foreign_top20" if listed else "foreign_holding")]
     notes: list[str] = []
 
     expected = len(tw_trading_days(start, today)) * 0.8
@@ -264,8 +275,8 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
                     if r["date"] not in target and start <= r["date"] <= today:
                         target[r["date"]] = _Row(**r, source="finmind")
                         sources.append("finmind")
-    if listed:
-        notes.append(LISTED_CHIPS_NOTE)
+    if listed:  # why there are no 三大法人 always; the top-20 note on top of it while the stock is on the list
+        notes += [LISTED_INST_NOTE, TOP20_NOTE] if top20 else [LISTED_CHIPS_NOTE]
 
     def lots(shares: int | None) -> float | None:
         return ser.price(Decimal(shares) / 1000) if shares is not None else None
@@ -294,7 +305,21 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
         "major_holders": major,
         "sources": labels(sources),
         "notes": notes,
+        "foreign_top20": top20,
     }
+
+
+def _foreign_top20(db: Session, md: MarketData, sym: str) -> dict[str, Any] | None:
+    """The stock's place in the latest archived 外資持股前 20 名 list (``None`` when it is not on it)."""
+    clause = source_clause(ForeignHoldingTop20.source, md.policy)
+    latest = db.scalar(select(func.max(ForeignHoldingTop20.date)).where(clause))
+    if latest is None:
+        return None
+    row = db.scalar(select(ForeignHoldingTop20).where(clause, ForeignHoldingTop20.date == latest,
+                                                      ForeignHoldingTop20.symbol == sym))
+    if row is None:
+        return None
+    return {"as_of": row.date, "rank": row.rank, "pct": ser.ratio(row.pct), "limit_pct": ser.ratio(row.limit_pct)}
 
 
 class _Row:
@@ -686,40 +711,57 @@ def _published_at(r: MarketEvent) -> str:
 
 
 def news(db: Session, md: MarketData, symbol: str) -> list[dict[str, Any]]:
-    """Official announcement headlines (公告): the company's 重大訊息 and TWSE news that names it.
+    """Official announcements (公告) first, then media headlines (新聞報導).
 
-    Both are government open data (t187ap04_L / mopsfin_t187ap04_O, TWSE /news/newsList), archived daily.
-    Under an explicit personal opt-in with FinMind configured, FinMind media headlines are appended
-    (labelled 非商用).
+    * Official (``category: material_info | exchange_news``, ``source: "公告"``): the company's 重大訊息 and TWSE
+      news that names it — government open data (t187ap04_L / mopsfin_t187ap04_O, TWSE /news/newsList), archived
+      daily; the last 90 days, at most 30. Taiwan stocks only.
+    * Media (``category: "media"``): headlines collected by the news worker (:mod:`forliosa.news`) — the original
+      title, ``outlet`` (媒體名稱), ``published_at`` and the link to the original site, ``source`` naming how it was
+      found (GDELT, AI 搜尋, SearXNG, Yahoo股市; FinMind under an explicit personal opt-in). Metadata only.
+
+    Viewing a symbol's news records the symbol and time (no user) so the worker keeps it fresh for 3 days.
     """
+    from forliosa.news import service as news_service
+    from forliosa.news.normalize import Headline, clean_title
+
     info = require_instrument(md, symbol)
-    if info.market == "US":
-        return []
     sym = info.symbol
-    since = today_taipei() - timedelta(days=NEWS_DAYS)
-    company = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.type == "material_info",
-                                        MarketEvent.date >= since)
-    exchange = select(MarketEvent).where(
-        MarketEvent.type == "exchange_news", MarketEvent.date >= since,
-        or_(MarketEvent.symbol == sym,
-            and_(MarketEvent.symbol == MARKET_SYMBOL, MarketEvent.title.contains(info.name))))
-    rows = [*db.scalars(_filtered(company, MarketEvent, md)), *db.scalars(_filtered(exchange, MarketEvent, md))]
-    rows.sort(key=lambda r: (r.date, str((r.data or {}).get("time") or "")), reverse=True)
-    out = [{"published_at": _published_at(r), "title": r.title, "source": "公告",
-            "url": r.url or MOPS_MATERIAL_URL, "category": r.type, "sources": labels([_event_source(r)])}
-           for r in rows[:NEWS_LIMIT]]
-    fm = md.provider("finmind") if md.policy == "personal" else None
+    out: list[dict[str, Any]] = []
+    if info.market != "US":
+        since = today_taipei() - timedelta(days=NEWS_DAYS)
+        company = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.type == "material_info",
+                                            MarketEvent.date >= since)
+        exchange = select(MarketEvent).where(
+            MarketEvent.type == "exchange_news", MarketEvent.date >= since,
+            or_(MarketEvent.symbol == sym,
+                and_(MarketEvent.symbol == MARKET_SYMBOL, MarketEvent.title.contains(info.name))))
+        rows = [*db.scalars(_filtered(company, MarketEvent, md)), *db.scalars(_filtered(exchange, MarketEvent, md))]
+        rows.sort(key=lambda r: (r.date, str((r.data or {}).get("time") or "")), reverse=True)
+        out = [{"published_at": _published_at(r), "title": r.title, "source": "公告", "outlet": None,
+                "url": r.url or MOPS_MATERIAL_URL, "category": r.type, "date_only": False,
+                "sources": labels([_event_source(r)])}
+               for r in rows[:NEWS_LIMIT]]
+    extra: list[Headline] = []
+    fm = md.provider("finmind") if md.policy == "personal" and info.market != "US" else None
     if fm is not None:
         try:
             items = fm.news(sym)  # type: ignore[attr-defined]
-        except Exception:  # quota (402) or network: official announcements only
+        except Exception:  # quota (402) or network: the stored headlines only
             items = []
         for n in items[:NEWS_LIMIT]:
-            published = n["published_at"]
-            with contextlib.suppress(ValueError):
-                published = iso_taipei(datetime.fromisoformat(published).replace(tzinfo=TAIPEI))
-            out.append({"published_at": published, "title": n["title"], "source": n["source"], "url": n["url"],
-                        "category": "media", "sources": labels(["finmind"])})
+            try:
+                published = datetime.fromisoformat(n["published_at"]).replace(tzinfo=TAIPEI)
+            except ValueError:
+                continue
+            outlet = n["source"] or "FinMind"
+            extra.append(Headline(title=clean_title(n["title"], n["url"], outlet), url=n["url"], outlet=outlet[:100],
+                                  domain="", published_at=published, source="finmind"))
+    out += news_service.media_items(db, md, info, extra=extra)
+    try:
+        news_service.record_view(db, sym)
+    except SQLAlchemyError:  # never fail the page over the view note
+        db.rollback()
     return out
 
 

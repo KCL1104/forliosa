@@ -58,7 +58,7 @@ function ListedInstitutional({ inst, notes }: { inst: InstrumentDetail; notes: s
   const ask = useAskAi()
   const readOnly = useReadOnly()
   return (
-    <NotYet className="border-t-0 pt-0" title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人與外資持股`}>
+    <NotYet className="border-t-0 pt-0" title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人`}>
       {notes.map((n) => (
         <p key={n}>{n}</p>
       ))}
@@ -95,7 +95,9 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   const lastDay = (c.institutional.at(-1) ?? c.margin.at(-1))?.t
   // 上市股票的說明放在三大法人的空狀態裡，頁尾的資料來源就不再重複
   const listedNotes = listed ? (c.notes ?? []).filter((n) => n.includes("上市股票")) : []
-  const otherNotes = (c.notes ?? []).filter((n) => !listedNotes.includes(n))
+  const top20Notes = listed ? (c.notes ?? []).filter((n) => n.includes("前 20 名") && !listedNotes.includes(n)) : []
+  const otherNotes = (c.notes ?? []).filter((n) => !listedNotes.includes(n) && !top20Notes.includes(n))
+  const top = c.foreign_top20 ?? null
   return (
     <div className="flex flex-col gap-12">
       <div className="flex flex-wrap items-center gap-3">
@@ -187,9 +189,22 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
         <Section title="融券餘額" titleId="chips-short" aside={c.margin.length ? `${formatNumber(c.margin.at(-1)!.short_balance)} 張` : undefined}>
           <MiniLine data={c.margin.map((m) => ({ t: m.t, v: m.short_balance }))} color="var(--chart-blue)" label="融券餘額" fmt={(v) => `${formatNumber(v)} 張`} />
         </Section>
-        <Section title="外資持股比" titleId="chips-foreign" aside={c.foreign_holding_pct.length ? formatPercent(c.foreign_holding_pct.at(-1)!.pct, { signed: false }) : undefined}>
+        <Section
+          title="外資持股比"
+          titleId="chips-foreign"
+          aside={
+            // 上市股票只在最新一份前 20 名名單上才顯示（掉出名單時不拿以前在榜的持股比當現在的）
+            listed
+              ? top
+                ? `${formatPercent(top.pct, { signed: false })}・前 20 名第 ${top.rank} 名`
+                : undefined
+              : c.foreign_holding_pct.length
+                ? formatPercent(c.foreign_holding_pct.at(-1)!.pct, { signed: false })
+                : undefined
+          }
+        >
           {listed ? (
-            <p className="text-md text-ink-2">上市{inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔外資持股比，原因見上方三大法人。</p>
+            <ListedForeign inst={inst} chips={c} notes={top20Notes} />
           ) : (
             <MiniLine data={c.foreign_holding_pct.map((m) => ({ t: m.t, v: m.pct }))} color="var(--chart-mine)" label="外資持股比" fmt={(v) => formatPercent(v, { signed: false })} />
           )}
@@ -217,15 +232,45 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   )
 }
 
+/**
+ * 上市股票的外資持股比：證交所開放資料只有「外資及陸資持股前 20 名」（MI_QFIIS_sort_20）。
+ * 名列前 20 名時顯示持股比、名次與在榜日的走勢；其他上市股票說明為什麼沒有。
+ */
+function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: Chips; notes: string[] }) {
+  const top = chips.foreign_top20
+  if (!top) {
+    return (
+      <p className="text-md text-ink-2">
+        證交所只公布外資持股比率前 20 名，{inst.name}目前不在名單上，所以不顯示外資持股比。
+      </p>
+    )
+  }
+  return (
+    <>
+      {chips.foreign_holding_pct.length >= 2 ? (
+        <MiniLine data={chips.foreign_holding_pct.map((m) => ({ t: m.t, v: m.pct }))} color="var(--chart-mine)" label="外資持股比" fmt={(v) => formatPercent(v, { signed: false })} />
+      ) : (
+        <p className="num text-2xl font-medium">{formatPercent(top.pct, { signed: false })}</p>
+      )}
+      <p className="mt-2 text-md text-ink-2">
+        {formatDateShort(top.as_of)} 名列證交所外資及陸資持股前 20 名第 {top.rank} 名。{notes.map((n) => (n.endsWith("。") ? n : `${n}。`)).join("")}
+      </p>
+    </>
+  )
+}
+
 function MiniLine({ data, color, label, fmt }: { data: { t: string; v: number }[]; color: string; label: string; fmt: (v: number) => string }) {
   if (data.length < 2) return <p className="text-md text-ink-2">資料不足。</p>
+  // 比率的變化很小時（例如外資持股 75.2%–75.5%），刻度要有一位小數才不會重複
+  const values = data.map((d) => d.v)
+  const pctDecimals = Math.max(...values) - Math.min(...values) < 0.03 ? 1 : 0
   return (
     <div className="h-[140px] w-full">
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={data} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
           <CartesianGrid vertical={false} stroke={GRID_STROKE} />
           <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={48} tickFormatter={(t: string) => formatDateShort(t, false)} />
-          <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} domain={["auto", "auto"]} tickFormatter={(v: number) => (v < 1 ? formatPercent(v, { signed: false, decimals: 0 }) : formatCompact(v, 1))} />
+          <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} domain={["auto", "auto"]} tickFormatter={(v: number) => (v < 1 ? formatPercent(v, { signed: false, decimals: pctDecimals }) : formatCompact(v, 1))} />
           <Tooltip
             cursor={{ stroke: "var(--ink-2)", strokeWidth: 1 }}
             content={({ active, payload }) => {

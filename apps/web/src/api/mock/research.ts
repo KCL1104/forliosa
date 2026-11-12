@@ -21,8 +21,8 @@ import type {
   Why,
   WhyReason,
 } from "../types"
-import { secSourceOf, sourceOf } from "./attributions"
-import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
+import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
+import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE, TWSE_INST_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, FX_NOW, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, rng, tradingDays } from "./market"
@@ -151,6 +151,9 @@ function usMinuteLabels(): string[] {
 // ── chips（法人、融資融券、外資持股、千張大戶） ────────────
 const CHIPS_DAYS: Record<ChipsRange, number> = { "1M": 22, "3M": 63, "6M": 126, "1Y": 250 }
 
+/** 證交所 MI_QFIIS_sort_20（2026-11-12）裡的示範股票：名次、外資持股比與連續在榜的交易日數 */
+const TOP20: Record<string, { rank: number; pct: number; days: number }> = { "3711.TW": { rank: 12, pct: 0.7552, days: 9 } }
+
 export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", commercial = false): Chips {
   if (spec.market === "US") {
     return { institutional: [], margin: [], foreign_holding_pct: [], major_holders: null, sources: commercial ? [] : DEMO_SRC, is_demo: !commercial }
@@ -160,18 +163,26 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", c
     const kept = <T extends { t: string }>(rows: T[]) => rows.filter((r) => r.t >= ARCHIVE_START)
     const short = full.margin.some((r) => r.t < ARCHIVE_START)
     const listed = spec.market === "TWSE"
-    const notes = [...(listed ? [TWSE_CHIPS_NOTE] : []), ...(short ? [accumulatingNote()] : [])]
+    // 上市股票：只有名列證交所「外資及陸資持股前 20 名」的日子有外資持股比（示範：日月光投控第 12 名）
+    const top20 = listed ? TOP20[spec.symbol] : undefined
+    const wiggle = rng(`top20:${spec.symbol}`)
+    const top20Rows = top20
+      ? tradingDays(top20.days).map((t, i, all) => ({ t, pct: i === all.length - 1 ? top20.pct : round(top20.pct - (all.length - 1 - i) * 0.0004 + (wiggle() - 0.5) * 0.0012, 4) }))
+      : []
+    // 與後端相同：上市股票一律說明為什麼沒有三大法人；在榜時另加前 20 名的說明
+    const notes = [...(listed ? (top20 ? [TWSE_INST_NOTE, TOP20_NOTE] : [TWSE_CHIPS_NOTE]) : []), ...(short ? [accumulatingNote()] : [])]
     const src = listed
-      ? [sourceOf("twse-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
+      ? [sourceOf("twse-openapi/margin"), ...(top20 ? [sourceOf("twse-openapi/foreign_top20")] : []), sourceOf("tdcc-opendata/distribution")]
       : [sourceOf("tpex-openapi/institutional"), sourceOf("tpex-openapi/foreign_holding"), sourceOf("tpex-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
     return {
       institutional: listed ? [] : kept(full.institutional),
       margin: kept(full.margin),
-      foreign_holding_pct: listed ? [] : kept(full.foreign_holding_pct),
+      foreign_holding_pct: listed ? top20Rows : kept(full.foreign_holding_pct),
       major_holders: full.major_holders,
       sources: src,
       is_demo: false,
       notes,
+      foreign_top20: top20 ? { as_of: MOCK_TODAY, rank: top20.rank, pct: top20.pct, limit_pct: 1 } : null,
     }
   }
   const days = tradingDays(CHIPS_DAYS[range])
@@ -411,12 +422,65 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
   return out.sort((a, b) => b.date.localeCompare(a.date))
 }
 
-// ── news：官方公告（重大訊息、證交所新聞），personal 另加媒體標題（非商用） ─────────────
-const MEDIA: Record<string, [string, string, number][]> = {
+// ── news：官方公告（重大訊息、證交所新聞），再加新聞報導（媒體原標題＋媒體＋時間＋原文連結） ─────────────
+// 示範標題：虛構的媒體（名稱都有「示範」）、中性的標題、連到 example.com——不掛真實媒體的名字，
+// 也不寫人事、個資、訴訟這類敏感事件（真實的標題只會來自後端的新聞 worker）。
+// [標題, 媒體, 網址, 幾小時前, 收集方式, 只有日期]
+type MockMedia = [title: string, outlet: string, url: string, hoursAgo: number, source?: "GDELT" | "AI 搜尋" | "Yahoo股市", dateOnly?: boolean]
+const DEMO_NEWS_URL = "https://example.com/demo-news"
+const MEDIA: Record<string, MockMedia[]> = {
   "2330.TW": [
-    ["台積電先進封裝擴產，CoWoS 月產能明年再增五成", "鉅亨網", 2],
-    ["外資連四賣台積電，法人：短線調節不改長線趨勢", "經濟日報", 5],
+    ["台積電先進封裝產能擴充 示範新聞標題", "示範財經日報", `${DEMO_NEWS_URL}/2330-1`, 1],
+    ["台積電海外新廠進度說明 示範新聞標題", "示範新聞網", `${DEMO_NEWS_URL}/2330-2`, 2],
+    ["法人看半導體供應鏈 台積電列觀察名單（示範）", "示範商業時報", `${DEMO_NEWS_URL}/2330-3`, 3],
+    ["台積電月營收公布 市場關注年增率（示範）", "示範晚報", `${DEMO_NEWS_URL}/2330-4`, 5],
+    ["晶圓代工產業動態整理：台積電篇（示範）", "示範產業週刊", `${DEMO_NEWS_URL}/2330-5`, 6],
+    ["AI 伺服器需求與台積電資本支出（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2330-6`, 9],
+    ["台積電董事會例行會議 示範新聞標題", "示範財經日報", `${DEMO_NEWS_URL}/2330-7`, 20],
+    ["半導體設備交期與台積電供應鏈（示範）", "示範電子報", `${DEMO_NEWS_URL}/2330-8`, 26],
+    ["台積電先進製程時程整理（示範）", "示範科技新聞", `${DEMO_NEWS_URL}/2330-9`, 30],
+    ["台積電歐洲廠進度與車用晶片需求（示範）", "示範商業時報", `${DEMO_NEWS_URL}/2330-10`, 44],
+    ["TSMC capex outlook: a sample headline", "Demo Markets Daily", `${DEMO_NEWS_URL}/2330-11`, 52],
+    ["台積電 ADR 與台股期貨夜盤（示範）", "示範財經網", `${DEMO_NEWS_URL}/2330-12`, 70, "AI 搜尋", true],
   ],
+  "2454.TW": [
+    ["聯發科新晶片出貨展望（示範）", "示範財經日報", `${DEMO_NEWS_URL}/2454-1`, 4],
+    ["聯發科車用晶片布局整理（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2454-2`, 30],
+  ],
+  "6488.TWO": [
+    ["環球晶海外新廠進度（示範）", "示範商業時報", `${DEMO_NEWS_URL}/6488-1`, 7],
+    ["矽晶圓庫存與報價動態（示範）", "示範財經網", `${DEMO_NEWS_URL}/6488-2`, 50, "AI 搜尋", true],
+  ],
+  NVDA: [
+    ["Nvidia earnings preview: a sample headline", "Demo Markets Daily", `${DEMO_NEWS_URL}/nvda-1`, 2],
+    ["AI chip demand and Nvidia's data center sales (sample)", "Demo Tech Wire", `${DEMO_NEWS_URL}/nvda-2`, 6],
+    ["What analysts watch in Nvidia's guidance (sample)", "Demo Business Review", `${DEMO_NEWS_URL}/nvda-3`, 18],
+    ["輝達財報前 台廠供應鏈動態（示範）", "示範財經日報", `${DEMO_NEWS_URL}/nvda-4`, 28],
+  ],
+}
+/** personal 模式另有 Yahoo股市 RSS（條款限非商用）：保留「Yahoo股市」與原始媒體 */
+const MEDIA_PERSONAL: Record<string, MockMedia[]> = {
+  "2330.TW": [["台積電相關新聞（Yahoo股市 RSS 示範）", "示範財經網", `${DEMO_NEWS_URL}/yahoo-2330-1`, 4, "Yahoo股市"]],
+}
+
+const MEDIA_SOURCE: Record<string, string> = { GDELT: GDELT_ATTRIBUTION, "AI 搜尋": AI_SEARCH_ATTRIBUTION, Yahoo股市: YAHOO_RSS_ATTRIBUTION }
+
+function mediaOf(spec: MockInstrumentSpec, commercial: boolean): NewsItem[] {
+  const rows = [...(MEDIA[spec.symbol] ?? []), ...(commercial ? [] : (MEDIA_PERSONAL[spec.symbol] ?? []))]
+  return rows.map(([title, outlet, url, hoursAgo, source = "GDELT", dateOnly = false]) => {
+    // 和後端一樣用台北時間（+08:00）；只有日期的是當天 00:00
+    const local = new Date(Date.parse(MOCK_AS_OF) - hoursAgo * 3_600_000 + 8 * 3_600_000).toISOString().slice(0, 19)
+    return {
+      published_at: `${dateOnly ? `${local.slice(0, 10)}T00:00:00` : local}+08:00`,
+      title,
+      source,
+      outlet,
+      url,
+      category: "media" as const,
+      date_only: dateOnly,
+      sources: [MEDIA_SOURCE[source]!],
+    }
+  })
 }
 
 export function buildNews(spec: MockInstrumentSpec, commercial = false): NewsItem[] {
@@ -424,23 +488,18 @@ export function buildNews(spec: MockInstrumentSpec, commercial = false): NewsIte
     published_at: `${date}T${category === "material_info" ? `17:${String(30 - i * 7).padStart(2, "0")}:00` : "00:00:00"}+08:00`,
     title,
     source: "公告",
+    outlet: null,
     url: category === "material_info" ? MOPS_URL : TWSE_NEWS_URL,
     category,
+    date_only: false,
     sources: commercial
       ? [sourceOf(category === "material_info" ? `${tw(spec)}/material_info` : "twse-openapi/news")]
       : DEMO_SRC,
   }))
-  const media: NewsItem[] = commercial
-    ? []
-    : (MEDIA[spec.symbol] ?? []).map(([title, source, hoursAgo]) => ({
-        published_at: new Date(Date.parse(MOCK_AS_OF) - hoursAgo * 3_600_000 + 90 * 60_000).toISOString(),
-        title,
-        source,
-        url: `https://www.google.com/search?q=${encodeURIComponent(title)}`,
-        category: "media" as const,
-        sources: ["FinMind（非商用）"],
-      }))
-  return [...official, ...media].sort((a, b) => b.published_at.localeCompare(a.published_at))
+  official.sort((a, b) => b.published_at.localeCompare(a.published_at))
+  const media = mediaOf(spec, commercial).sort((a, b) => b.published_at.localeCompare(a.published_at))
+  // 與後端相同：先列官方公告，再列新聞報導
+  return [...official, ...media]
 }
 
 // ── position ─────────────────────────────────────────────

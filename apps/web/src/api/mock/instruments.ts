@@ -164,6 +164,42 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     price: 524.9, prev_close: 527.1, drift: 0.18, vol: 0.24, avg_volume: 20_000_000,
     eps_now: 14.1, eps_growth: 0.14, bvps_now: 46, per_multiples: [25, 29, 33, 37, 41], pbr_multiples: [9, 11, 13, 15, 17],
   },
+  // ── 「相關股票」會出現的商品（關係企業、同業、同指數 ETF） ─────────────
+  {
+    symbol: "3443.TW", code: "3443", name: "創意", market: "TWSE", type: "stock", currency: "TWD", industry: "半導體業",
+    summary: null, chain_stage: "IC 設計服務", themes: ["ASIC"], shares_outstanding: 134011911, market_cap: 262663345560, data_sources: TWSE_SRC,
+    price: 1960, prev_close: 1985, drift: 0.2, vol: 0.45, avg_volume: 1_400_000,
+  },
+  {
+    symbol: "3711.TW", code: "3711", name: "日月光投控", market: "TWSE", type: "stock", currency: "TWD", industry: "半導體業",
+    summary: null, chain_stage: "封裝測試", themes: ["先進封裝"], shares_outstanding: 4488089243, market_cap: 960451098002, data_sources: TWSE_SRC,
+    price: 214, prev_close: 211, drift: 0.12, vol: 0.3, avg_volume: 18_000_000,
+  },
+  {
+    symbol: "5483.TWO", code: "5483", name: "中美晶", market: "TPEX", type: "stock", currency: "TWD", industry: "半導體業",
+    summary: null, chain_stage: "矽晶圓", themes: ["矽晶圓"], shares_outstanding: 641221651, market_cap: 75664154818, data_sources: ["櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）"],
+    price: 118, prev_close: 120, drift: -0.05, vol: 0.35, avg_volume: 3_000_000,
+  },
+  {
+    symbol: "2258.TW", code: "2258", name: "鴻華先進-創", market: "TWSE", type: "stock", currency: "TWD", industry: "汽車工業",
+    summary: null, chain_stage: null, themes: ["電動車"], shares_outstanding: 1751267300, market_cap: 109454206250, data_sources: TWSE_SRC,
+    price: 62.5, prev_close: 61.8, drift: 0.05, vol: 0.4, avg_volume: 5_000_000,
+  },
+  {
+    symbol: "2328.TW", code: "2328", name: "廣宇", market: "TWSE", type: "stock", currency: "TWD", industry: "電子零組件業",
+    summary: null, chain_stage: null, themes: [], shares_outstanding: 518346282, market_cap: 21407701447, data_sources: TWSE_SRC,
+    price: 41.3, prev_close: 40.9, drift: 0.04, vol: 0.3, avg_volume: 2_000_000,
+  },
+  {
+    symbol: "006208.TW", code: "006208", name: "富邦台50", market: "TWSE", type: "etf", currency: "TWD", industry: "ETF",
+    summary: null, chain_stage: null, themes: ["市值型"], shares_outstanding: null, market_cap: null, data_sources: TWSE_SRC,
+    price: 139.2, prev_close: 138.4, drift: 0.14, vol: 0.19, avg_volume: 9_000_000,
+  },
+  {
+    symbol: "006201.TWO", code: "006201", name: "元大富櫃50", market: "TPEX", type: "etf", currency: "TWD", industry: "ETF",
+    summary: null, chain_stage: null, themes: ["中小型"], shares_outstanding: null, market_cap: null, data_sources: ["櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）"],
+    price: 34.85, prev_close: 35.1, drift: 0.08, vol: 0.22, avg_volume: 600_000,
+  },
 ]
 
 /** 壓力測試情境（?mock=stress）用：超長名稱、上千億市值、大幅下跌 */

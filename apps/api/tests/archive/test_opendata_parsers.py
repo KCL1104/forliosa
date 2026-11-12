@@ -133,10 +133,18 @@ def test_company_profiles_keep_company_facts_only():
     tsmc = twse["2330"]
     assert (tsmc["shares_outstanding"], tsmc["industry_code"], tsmc["industry"], tsmc["listed_date"]) == (
         25932370067, "24", "半導體業", date(1994, 9, 5))
-    assert tsmc["values"]["short_name"] == "台積電" and "魏哲家" not in str(tsmc["values"])  # no people's names
+    assert tsmc["values"]["short_name"] == "台積電" and tsmc["values"]["hq"] == "新竹科學園區"
+    # decision 6: 董事長／總經理 exactly as published; spokespeople, CPAs, phones are not read
+    assert (tsmc["values"]["chairman"], tsmc["values"]["president"]) == ("魏哲家", "總裁: 魏哲家")
+    assert not any(x in str(tsmc["values"]) for x in ("黃仁昭", "高孟華", "吳世宗", "陳彥君", "03-5636688"))
     tpex = {r["code"]: r for r in od.parse_company_profiles(load("tpex_t187ap03_o_live_20261112.json"), "TPEX")}
-    assert tpex["6488"]["shares_outstanding"] == 528113725 and tpex["6488"]["listed_date"] == date(2015, 9, 25)
-    assert "徐秀蘭" not in str(tpex["6488"]["values"])
+    gw = tpex["6488"]
+    assert gw["shares_outstanding"] == 528113725 and gw["listed_date"] == date(2015, 9, 25)
+    assert (gw["values"]["chairman"], gw["values"]["president"]) == ("徐秀蘭", "Mark England")
+    assert (gw["values"]["hq"], gw["values"]["website"]) == ("新竹科學園區", "https://www.sas-globalwafers.com")
+    assert not any(x in str(gw["values"]) for x in ("彭欣瑜", "吳俊源", "03-5772255", "Industrial East Road"))
+    # TPEx English addresses only when the city is certain: 家登 says "New Taipei County" -> 新北市
+    assert tpex["3680"]["values"]["hq"] == "新北市" and tpex["8390"]["values"]["hq"] is None  # "Hsinchu" alone
 
 
 def test_tpex_exright_official_reference():

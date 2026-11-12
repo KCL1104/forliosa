@@ -190,6 +190,8 @@ def refresh_filings(db: Session, client: Any, cik: int) -> int:
         cols["name"] = meta["name"]
     if meta["fiscal_year_end"]:
         cols["fiscal_year_end"] = meta["fiscal_year_end"]
+    if meta["profile"]:
+        cols["profile"] = meta["profile"]
     _company(db, cik, **cols)
     return n
 
