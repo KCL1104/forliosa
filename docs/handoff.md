@@ -116,7 +116,7 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 
 研究：`docs/research/news-and-external-sources.md`；細節：`apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」「2026-11-12 相關股票、公司資料、外資持股前 20 名」。
 
-- ✅ 1–2 新聞報導：GDELT 為主、AI 搜尋補缺（每月 US$30）、SearXNG 保留預設關、Yahoo股市 RSS 只在 personal；下架封鎖清單（`python -m forliosa.news block`）。
+- ✅ 1–2 新聞報導：GDELT 為主、AI 搜尋補缺（每月 US$30）、SearXNG 預設開（第三輪改）、Yahoo股市 RSS 只在 personal；下架封鎖清單（`python -m forliosa.news block`）。
 - ⏸ 3 財報狗式 AI 產業新聞摘要：之後再做。
 - ✅ 4 相關股票：`GET /instruments/{symbol}/related`，4 格（基準／富櫃五十成分股、關係企業、同業；ETF 頁同指數、同類型）；新存檔 `board_links`（董監持股只留公司對公司）、
   `index_constituents`、`holder_counts_monthly`（集保 2-22／2-23）；不寫「0050 持有本股」。

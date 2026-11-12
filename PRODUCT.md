@@ -54,7 +54,7 @@ Forliosa 是以台股為主的投資管理 web app，把三件事放在同一處
 - 顯示偏好：紅漲綠跌／綠漲紅跌、淺色／深色／跟隨系統、以張或以股顯示、隱私模式預設、成本法（移動平均／FIFO）、基準（預設 0050）。
 - 技術：Vite + React 19 + TypeScript、Tailwind v4、shadcn/ui（Base UI 版）、TanStack Router/Query；部署 Cloudflare Pages；後端 FastAPI（Railway）。
 - 授權：AGPL 專案（Shioaji Pro、Wealthfolio、Ghostfolio、AssetPilot）只參考，不複製程式碼。
-- **尚未決定**：AI 每人額度、是否商業化、投顧法規。
+- **尚未決定**：是否商業化、投顧法規。（AI 每人額度已決定：每天 50 題、每月 300 萬計費 token。）
 - **分享（M5）範圍（產品負責人 2026-11-12 決定）**：照 `docs/product-spec.md` §4.8 一次做完——授權唯讀查看（和群組一起做，共用「分享投影」）、親友群組（邀請連結、角色、每人每群組四個分享開關、排行榜、留言與表情、群組 AI 週報、推播到 Discord／Telegram 群組頻道）。
   - **登入**：加入 **Discord OAuth**（正式登入；開發登入保留給開發環境）。
   - **排行期間**：今日、本月、今年，另外顯示總報酬率（含股利）；可對照大盤與 0050。
