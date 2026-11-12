@@ -5,18 +5,25 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 * **Which symbols**: tracked ones — in any ledger, holdings snapshot or watchlist (``archive.tracked_symbols``),
   or viewed in the last ``NEWS_VIEW_DAYS`` days (``news_tracked_views``: symbol + time only, no user ids) — the
   stalest first, at most ``NEWS_MAX_SYMBOLS_PER_RUN``. Shared by everyone.
-* **Sources** (:mod:`forliosa.news.sources`): GDELT (default), SearXNG (only with ``NEWS_SEARXNG_URL``), Yahoo股市
-  RSS (only under ``DATA_POLICY=personal``). One request per symbol per source; the HTTP limiter spaces GDELT
-  requests ≥ ``NEWS_GDELT_INTERVAL_SECONDS`` (≥ 5 s). A 429 / block stops that source for the run and backs it off
-  (15 min, doubling to 4 h; ``news_fetch_state`` row ``symbol = "*"``); three failures in a row also stop it for the
-  run. Never another IP, never a disguised client.
-* **AI fallback** (:mod:`forliosa.news.ai_search`): only when GDELT answered for the symbol (or is off) and the
-  free sources hold fewer than ``NEWS_AI_MIN_ITEMS`` headlines from the last 7 days; once per
-  ``NEWS_AI_INTERVAL_HOURS`` per symbol, at most ``AI_MAX_PER_RUN`` per run, while the month's budget lasts.
+* **Sources** (:mod:`forliosa.news.sources`): GDELT, then our private SearXNG (:mod:`forliosa.news.searxng`, on by
+  default), then Yahoo股市 RSS (only under ``DATA_POLICY=personal``). One request per symbol per source; the HTTP
+  limiter spaces GDELT requests ≥ ``NEWS_GDELT_INTERVAL_SECONDS`` (≥ 5 s). A 429 / block stops that source for the
+  run and backs it off (15 min, doubling to 4 h; SearXNG from ``NEWS_SEARXNG_BACKOFF_MINUTES``; ``news_fetch_state``
+  row ``symbol = "*"``); an unreachable source (:class:`SourceDown`) is paused the same way from 15 min; three
+  errors in a row also stop a source for the run. Never another IP, never a disguised client.
+* **SearXNG** is skipped for a symbol asked within ``NEWS_SEARXNG_CACHE_MINUTES`` (60) and for one GDELT already
+  covers (≥ ``NEWS_SEARXNG_SKIP_GDELT_ITEMS`` (8) GDELT headlines from the last 24 h); its upstream engines are
+  booked one by one (rows ``symbol = "@<engine>"``): a refusing engine is left out of the next queries, every
+  engine paused pauses SearXNG (:func:`record_searxng_engines`).
+* **AI fallback** (:mod:`forliosa.news.ai_search`): only when GDELT and SearXNG answered for the symbol in the last
+  24 h (each one that is on and not paused) and the free sources together hold fewer than ``NEWS_AI_MIN_ITEMS``
+  headlines from the last 7 days; once per ``NEWS_AI_INTERVAL_HOURS`` per symbol, at most ``AI_MAX_PER_RUN`` per
+  run, while the month's budget lasts.
 * **Every headline** goes through :mod:`forliosa.news.normalize`: GDELT spacing removed, outlet / section suffix
   removed, the outlet named from its domain, kept only when the title names the company (Chinese short name,
-  code or English short name), never from a blocked domain, newer than the query window; stored once per
-  (symbol, normalised URL). Deleted ``NEWS_RETENTION_DAYS`` after publication.
+  code or English short name), never from a blocked domain or a search-engine redirect, newer than the query
+  window; stored once per (symbol, canonical URL: tracking parameters, ``www.`` / ``m.`` / AMP variants and
+  ``http`` vs ``https`` folded together). Deleted ``NEWS_RETENTION_DAYS`` after publication.
 
 Read (``GET /instruments/{symbol}/news``)
 ----------------------------------------
@@ -50,6 +57,7 @@ from forliosa.news.normalize import (
     clean_title,
     clean_url,
     dedupe,
+    is_amp_or_mobile,
     is_blocked,
     is_relevant,
     make_terms,
@@ -57,13 +65,14 @@ from forliosa.news.normalize import (
     url_key,
 )
 from forliosa.news.outlets import host_of, outlet_name
+from forliosa.news.searxng import SearxngSource, engine_refused
 from forliosa.news.sources import (
     GdeltSource,
     NewsSource,
     Query,
     RawItem,
-    SearxngSource,
     SourceBlocked,
+    SourceDown,
     YahooRssSource,
 )
 from forliosa.timeutil import iso_taipei, now_utc
@@ -78,8 +87,12 @@ MAX_FAILURES_PER_RUN = 3
 BACKOFF_START = timedelta(minutes=15)
 BACKOFF_MAX = timedelta(hours=4)
 VIEW_WRITE_EVERY = timedelta(minutes=10)
-GDELT_FRESH = timedelta(hours=24)  # the AI fallback needs a GDELT answer this recent
+GDELT_FRESH = timedelta(hours=24)  # the AI fallback needs a GDELT (and SearXNG) answer this recent
 SOURCE_WIDE = "*"
+# SearXNG's upstream engines: news_fetch_state rows (source "searxng", symbol "@<engine>").
+ENGINE_PREFIX = "@"
+ENGINE_BACKOFF_MAX = timedelta(hours=24)
+ENGINE_ERRORS_BEFORE_PAUSE = 3  # timeouts / errors in a row before an engine is paused (a refusal pauses at once)
 FREE_SOURCES = ("gdelt", "searxng", "yahoo_rss")
 # news_articles.source -> (label shown with the headline, attribution key for ``sources``)
 SOURCE_INFO: dict[str, tuple[str, str]] = {
@@ -209,11 +222,12 @@ def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Seque
 
 
 def store(db: Session, symbol: str, headlines: Iterable[Headline], now: datetime | None = None) -> int:
-    """Insert new headlines (one per symbol and normalised URL; an existing row is left as it is). Returns how
-    many rows were new."""
+    """Insert new headlines (one per symbol and canonical URL — the canonical page before an AMP / mobile variant;
+    an existing row is left as it is, so a story GDELT stored first stays GDELT's). Returns how many rows were
+    new."""
     rows = []
     seen: set[str] = set()
-    for h in headlines:
+    for h in sorted(headlines, key=lambda x: is_amp_or_mobile(x.url)):
         key = url_key(h.url)
         if key in seen:
             continue
@@ -290,9 +304,10 @@ def _state(db: Session, source: str, symbol: str) -> NewsFetchState:
     return row
 
 
-def backoff_until(failures: int, now: datetime, start: timedelta = BACKOFF_START) -> datetime:
-    """``start`` after the first refusal, doubling each time, at most ``BACKOFF_MAX`` (or ``start`` when longer)."""
-    return now + min(start * (2 ** max(failures - 1, 0)), max(BACKOFF_MAX, start))
+def backoff_until(failures: int, now: datetime, start: timedelta = BACKOFF_START,
+                  cap: timedelta = BACKOFF_MAX) -> datetime:
+    """``start`` after the first refusal, doubling each time, at most ``cap`` (or ``start`` when longer)."""
+    return now + min(start * (2 ** min(max(failures - 1, 0), 16)), max(cap, start))
 
 
 def backoff_start(source: str, settings: Settings) -> timedelta:
@@ -303,26 +318,32 @@ def backoff_start(source: str, settings: Settings) -> timedelta:
 
 
 def news_fetcher(settings: Settings) -> HttpFetcher:
-    """The HTTP client for news sources: an honest User-Agent, GDELT spaced ≥ 5 s, SearXNG and Yahoo spaced too,
-    one retry after a dropped connection (never after a refusal)."""
+    """The HTTP client for GDELT and Yahoo RSS: an honest User-Agent, GDELT spaced ≥ 5 s, Yahoo ≥ 3 s, one retry
+    after a dropped connection (never after a refusal). SearXNG has its own (:func:`searxng.searxng_fetcher`)."""
     per_host = {"gdeltproject.org": settings.news_gdelt_interval_seconds, "tw.stock.yahoo.com": 3.0}
-    extra: tuple[str, ...] = ()
-    if settings.news_searxng_url:
-        per_host[host_of(settings.news_searxng_url)] = settings.news_searxng_interval_seconds
-        extra = (settings.news_searxng_url.rstrip("/") + "/search",)
     return HttpFetcher(timeout=30.0, limiter=RateLimiter(per_host=per_host), retries=1, backoff=10.0,
-                       user_agent="forliosa/0.1 (portfolio tracker; news headline index)", extra_allowed=extra)
+                       user_agent="forliosa/0.1 (portfolio tracker; news headline index)")
+
+
+def searxng_source(settings: Settings) -> SearxngSource | None:
+    """Our private SearXNG (on by default; ``None`` when NEWS_SEARXNG_ENABLED=false or NEWS_SEARXNG_URL is empty)."""
+    url = settings.searxng_url
+    if not url:
+        return None
+    return SearxngSource(url, engines=settings.news_searxng_engines,
+                         interval=settings.news_searxng_interval_seconds,
+                         timeout=settings.news_searxng_timeout_seconds)
 
 
 def default_sources(settings: Settings, policy: Policy, fetcher: HttpFetcher | None = None) -> list[NewsSource]:
-    """GDELT (unless NEWS_GDELT_ENABLED=false), SearXNG (only with NEWS_SEARXNG_URL), Yahoo股市 RSS (only under
-    DATA_POLICY=personal)."""
+    """GDELT (unless NEWS_GDELT_ENABLED=false), SearXNG (on by default), Yahoo股市 RSS (only under
+    DATA_POLICY=personal). GDELT first: SearXNG is skipped for a symbol GDELT already covers well."""
     fetcher = fetcher or news_fetcher(settings)
     out: list[NewsSource] = []
     if settings.news_gdelt_enabled:
         out.append(GdeltSource(fetcher))
-    if settings.news_searxng_url:
-        out.append(SearxngSource(settings.news_searxng_url, fetcher))
+    if (searx := searxng_source(settings)) is not None:
+        out.append(searx)
     if policy == "personal" and settings.news_yahoo_rss:
         out.append(YahooRssSource(fetcher))
     return out
@@ -337,6 +358,8 @@ class RefreshReport:
     ai_searches: int = 0
     ai_skipped: str | None = None  # why the AI fallback did not run at all (budget, off, no keys)
     errors: int = 0
+    skipped: dict[str, int] = field(default_factory=dict)  # searxng_cache | searxng_gdelt -> symbols not asked
+    paused_engines: list[str] = field(default_factory=list)  # SearXNG upstream engines paused in this run
 
 
 AiFactory = Callable[[Session], Any]  # returns an object with ``run(q, now, blocked, record)`` or None
@@ -348,14 +371,84 @@ def _source_open(db: Session, source: str, now: datetime) -> bool:
 
 
 def _mark_blocked(db: Session, source: str, now: datetime, reason: str,
-                  start: timedelta = BACKOFF_START) -> None:
+                  start: timedelta = BACKOFF_START, *, status: str = "rate_limited",
+                  until: datetime | None = None) -> None:
+    """Pause a whole source: ``until`` when known, else ``start`` doubling with each failure in a row."""
     row = _state(db, source, SOURCE_WIDE)
     row.failures = (row.failures or 0) + 1
-    row.last_attempt_at, row.last_status = now, "rate_limited"
-    row.backoff_until = backoff_until(row.failures, now, start)
+    row.last_attempt_at, row.last_status = now, status
+    row.backoff_until = until if until is not None and until > now else backoff_until(row.failures, now, start)
     db.commit()
-    log.warning("news source %s refused (%s); not asked again before %s", source, reason[:120],
+    what = "is unreachable" if status == "unreachable" else "refused"
+    log.warning("news source %s %s (%s); not asked again before %s", source, what, reason[:160],
                 iso_taipei(row.backoff_until))
+
+
+# -- SearXNG's upstream engines ------------------------------------------------------------------------------
+def engine_state_key(engine: str) -> str:
+    """``news_fetch_state.symbol`` of one SearXNG engine: ``@bing news`` (at most 20 characters)."""
+    return (ENGINE_PREFIX + " ".join(engine.split()))[:20]
+
+
+def searxng_paused(db: Session, engines: Iterable[str], now: datetime) -> dict[str, datetime]:
+    """The configured engines that are paused now -> until when."""
+    keys = {engine_state_key(e): e for e in engines}
+    if not keys:
+        return {}
+    rows = db.scalars(select(NewsFetchState).where(NewsFetchState.source == "searxng",
+                                                   NewsFetchState.symbol.in_(list(keys))))
+    return {keys[r.symbol]: _aware(r.backoff_until) for r in rows
+            if r.backoff_until is not None and _aware(r.backoff_until) > now}
+
+
+def record_searxng_engines(db: Session, src: SearxngSource, now: datetime, settings: Settings) -> list[str]:
+    """Book what each engine did in the last answer: answered -> reset; refused (CAPTCHA, too many requests,
+    access denied) -> paused ``NEWS_SEARXNG_BACKOFF_MINUTES`` doubling up to 24 h; a timeout or another error ->
+    paused 15 minutes (doubling) after three in a row. Returns the engines paused now."""
+    ans = src.last
+    if ans is None:
+        return []
+    reasons = dict(ans.unresponsive)
+    paused: list[str] = []
+    for engine in dict.fromkeys([*src.last_asked, *reasons]):
+        row = _state(db, "searxng", engine_state_key(engine))
+        row.last_attempt_at = now
+        reason = reasons.get(engine)
+        if reason is None:
+            row.failures, row.backoff_until, row.last_status, row.last_success_at = 0, None, "ok", now
+            row.items = ans.per_engine.get(engine, 0)
+            continue
+        row.failures = (row.failures or 0) + 1
+        if engine_refused(reason):
+            row.last_status = "refused"
+            row.backoff_until = backoff_until(row.failures, now,
+                                              timedelta(minutes=settings.news_searxng_backoff_minutes),
+                                              cap=ENGINE_BACKOFF_MAX)
+        else:
+            row.last_status = "error"
+            if row.failures >= ENGINE_ERRORS_BEFORE_PAUSE:
+                row.backoff_until = backoff_until(row.failures - ENGINE_ERRORS_BEFORE_PAUSE + 1, now,
+                                                  BACKOFF_START, cap=BACKOFF_MAX)
+        if row.backoff_until is not None and _aware(row.backoff_until) > now:
+            paused.append(engine)
+            log.warning("SearXNG engine %s: %s; not asked again before %s", engine, reason[:80],
+                        iso_taipei(row.backoff_until))
+    db.commit()
+    return paused
+
+
+def _searxng_skip(db: Session, src: SearxngSource, symbol: str, now: datetime, settings: Settings,
+                  gdelt_on: bool) -> str | None:
+    """Why SearXNG is not asked for this symbol now: it answered within NEWS_SEARXNG_CACHE_MINUTES (that answer is
+    stored; a query that failed caches nothing — the source-wide pause paces those), or GDELT already holds
+    NEWS_SEARXNG_SKIP_GDELT_ITEMS headlines from the last 24 hours."""
+    st = db.get(NewsFetchState, ("searxng", symbol))
+    if st is not None and st.last_success_at is not None and \
+            now - _aware(st.last_success_at) < timedelta(minutes=settings.news_searxng_cache_minutes):
+        return "searxng_cache"
+    if gdelt_on and recent_count(db, symbol, now - GDELT_FRESH, ("gdelt",)) >= settings.news_searxng_skip_gdelt_items:
+        return "searxng_gdelt"
+    return None
 
 
 def _mark_open(db: Session, source: str, now: datetime) -> None:
@@ -365,10 +458,15 @@ def _mark_open(db: Session, source: str, now: datetime) -> None:
         db.commit()
 
 
-def recent_free_count(db: Session, symbol: str, now: datetime) -> int:
+def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str]) -> int:
     return db.scalar(select(func.count()).select_from(NewsArticle).where(
-        NewsArticle.symbol == symbol, NewsArticle.source.in_(FREE_SOURCES),
-        NewsArticle.published_at >= now - WINDOW)) or 0
+        NewsArticle.symbol == symbol, NewsArticle.source.in_(list(sources)),
+        NewsArticle.published_at >= since)) or 0
+
+
+def recent_free_count(db: Session, symbol: str, now: datetime) -> int:
+    """Headlines from the free sources (GDELT, SearXNG, Yahoo RSS) in the last 7 days."""
+    return recent_count(db, symbol, now - WINDOW, FREE_SOURCES)
 
 
 def default_ai(settings: Settings) -> AiFactory:
@@ -412,6 +510,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     blocked = blocked_domains(db, settings)
     open_sources = [s for s in sources if _source_open(db, s.key, now)]
     report.blocked_sources = [s.key for s in sources if s not in open_sources]
+    gdelt_on = any(s.key == "gdelt" for s in sources)
     failures: dict[str, int] = {}
     ai_runner: Any = None
     ai_checked = False
@@ -428,17 +527,37 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         for src in list(open_sources):
             if not src.supports(base):
                 continue
+            searx = src if isinstance(src, SearxngSource) else None
+            if searx is not None:
+                why = _searxng_skip(db, searx, info.symbol, now, settings, gdelt_on)
+                if why is not None:
+                    report.skipped[why] = report.skipped.get(why, 0) + 1
+                    continue
+                paused = searxng_paused(db, searx.engines, now)
+                searx.paused = frozenset(paused)
+                if searx.engines and not searx.active_engines():  # every engine paused: the source as a whole
+                    _mark_blocked(db, src.key, now, "every engine is paused", status="blocked",
+                                  until=min(paused.values()))
+                    open_sources.remove(src)
+                    report.blocked_sources.append(src.key)
+                    continue
             st = _state(db, src.key, info.symbol)
             since = max(now - WINDOW, _aware(st.last_success_at) - OVERLAP) if st.last_success_at else now - WINDOW
+            if searx is not None:  # not incremental: SearXNG is always asked for the week (time_range=week)
+                since = now - WINDOW
             q = replace(base, since=since)
             st.last_attempt_at = now
             report.fetched[src.key] = report.fetched.get(src.key, 0) + 1
             try:
                 raw = src.fetch(q)
-            except SourceBlocked as exc:
-                st.last_status = "blocked"
+            except (SourceBlocked, SourceDown) as exc:
+                down = isinstance(exc, SourceDown)
+                st.last_status = "unreachable" if down else "blocked"
                 db.commit()
-                _mark_blocked(db, src.key, now, str(exc), backoff_start(src.key, settings))
+                if searx is not None:
+                    report.paused_engines += record_searxng_engines(db, searx, now, settings)
+                _mark_blocked(db, src.key, now, str(exc), BACKOFF_START if down else backoff_start(src.key, settings),
+                              status="unreachable" if down else "rate_limited", until=getattr(exc, "until", None))
                 open_sources.remove(src)
                 report.blocked_sources.append(src.key)
                 continue
@@ -454,6 +573,8 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
                     open_sources.remove(src)
                 continue
             failures[src.key] = 0
+            if searx is not None:
+                report.paused_engines += record_searxng_engines(db, searx, now, settings)
             heads = to_headlines(raw, q, src.key, blocked)
             new = store(db, info.symbol, heads, now)
             report.stored += new
@@ -464,7 +585,8 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         # -- AI fallback --------------------------------------------------------------------------------
         if ai is None or report.ai_searches >= AI_MAX_PER_RUN:
             continue
-        if not _ai_due(db, settings, info.symbol, now, gdelt_on=any(s.key == "gdelt" for s in sources)):
+        if not _ai_due(db, settings, info.symbol, now, gdelt_on=gdelt_on,
+                       searxng_on=any(s.key == "searxng" for s in open_sources)):
             continue
         if not ai_search.budget_left(db, settings, now):
             report.ai_skipped = "budget"
@@ -498,17 +620,23 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         st = _state(db, "ai_search", info.symbol)
         st.last_success_at, st.last_status, st.items, st.failures = now, "ok" if heads else "empty", len(heads), 0
         db.commit()
-    log.info("news refresh: %d symbols, requests %s, %d new headlines, %d AI searches%s", report.symbols,
+    log.info("news refresh: %d symbols, requests %s, %d new headlines, %d AI searches%s%s%s", report.symbols,
              report.fetched, report.stored, report.ai_searches,
-             f", blocked {report.blocked_sources}" if report.blocked_sources else "")
+             f", skipped {report.skipped}" if report.skipped else "",
+             f", paused {report.blocked_sources}" if report.blocked_sources else "",
+             f", paused SearXNG engines {report.paused_engines}" if report.paused_engines else "")
     return report
 
 
-def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdelt_on: bool) -> bool:
-    """Fewer than NEWS_AI_MIN_ITEMS free headlines in 7 days, GDELT answered recently (when it is on), and no AI
-    search for this symbol in the last NEWS_AI_INTERVAL_HOURS."""
-    if gdelt_on:
-        g = db.get(NewsFetchState, ("gdelt", symbol))
+def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdelt_on: bool,
+            searxng_on: bool = False) -> bool:
+    """GDELT and SearXNG together hold fewer than NEWS_AI_MIN_ITEMS headlines from the last 7 days, each of them
+    answered for this symbol in the last 24 hours (GDELT when it is on; SearXNG while it is on and not paused — a
+    paused SearXNG does not hold the AI back), and no AI search for this symbol in the last NEWS_AI_INTERVAL_HOURS."""
+    for source, on in (("gdelt", gdelt_on), ("searxng", searxng_on)):
+        if not on:
+            continue
+        g = db.get(NewsFetchState, (source, symbol))
         if g is None or g.last_success_at is None or now - _aware(g.last_success_at) > GDELT_FRESH:
             return False
     if recent_free_count(db, symbol, now) >= settings.news_ai_min_items:

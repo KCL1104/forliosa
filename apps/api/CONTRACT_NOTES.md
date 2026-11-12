@@ -135,7 +135,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 | 示範資料 | **從不使用**（demo provider 只提供商品名稱清單）；資料不足時回空並在 `notes` 說明 | 補缺 |
 | 證交所網站（T86、MI_QFIIS…）、MIS、櫃買網站、MOPS 網站 | **不使用**（已移除；舊存檔的 `twse-web`／`twse-mis` 資料列也不讀） | **不使用** |
 | 盤中走勢 `/intraday` | `points: []`＋`notes` | 同左 |
-| 新聞 `/news` | 官方公告（重大訊息、證交所新聞）＋新聞報導（GDELT 為主、AI 搜尋補缺；只有標題、媒體、時間、連結） | 同左，另加 Yahoo股市 RSS，FinMind 開啟時也加它的媒體標題（都是非商用） |
+| 新聞 `/news` | 官方公告（重大訊息、證交所新聞）＋新聞報導（GDELT＋自架 SearXNG（預設開）、兩者不足才 AI 搜尋；只有標題、媒體、時間、連結） | 同左，另加 Yahoo股市 RSS，FinMind 開啟時也加它的媒體標題（都是非商用） |
 | 上市股票三大法人、外資持股 | 不提供（證交所 OpenAPI 沒有個股資料），`chips.notes` 說明 | 同左（FinMind 開啟時也不向它要這兩個資料集，只要融資融券；回補也一樣：FinMind 是轉載證交所網站） |
 
 ### 每個回應的 `sources`
@@ -280,7 +280,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 美股 | 沒有報價（`/quote` 404、`Holding.price: null` 以成本計值、`is_demo: false`）、績效空＋`notes` |
 | ~~USD/TWD 匯率~~ | **已有（2026-11-12）**：中央銀行〈銀行間新臺幣對美元收盤匯率〉（OGDL），任何模式都用；完全沒有存檔時才固定 31.5，績效 `notes` 說明（見「2026-11-12 匯率改用中央銀行開放資料」） |
 | 基準 `^TAIEXTR`／`^TPEXTR` | 2026-11-12 起由存檔提供（證交所 2026-11-02、櫃買 2026-11-02 起）；更早的日子沒有資料 |
-| ~~媒體新聞~~ | **已有（2026-11-12）**：GDELT（可商用、需引用）為主、AI 搜尋補缺，只有標題、媒體、時間、連結（見「2026-11-12 新聞報導」） |
+| ~~媒體新聞~~ | **已有（2026-11-12）**：GDELT（可商用、需引用）＋自架 SearXNG（預設開、只對內）、兩者不足才 AI 搜尋，只有標題、媒體、時間、連結（見「2026-11-12 新聞報導」） |
 | shioaji-data AI 研究（簡介、產業鏈、題材） | `summary`／`chain_stage` 為 `null`、`themes: []` |
 
 `is_demo` 在 commercial 下永遠是 `false`。
@@ -661,12 +661,14 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 來源 | 什麼時候用 | 怎麼查 | 停止條件 |
 |---|---|---|---|
 | **GDELT DOC 2.0**（`api.gdeltproject.org/api/v2/doc/doc`，預設） | 每檔每次 worker 批次 | **英文**關鍵字：英文簡稱（`t187ap03_L`「英文簡稱」／`mopsfin_t187ap03_O` 的 `Symbol`，存在 `company_profiles`；沒有時用商品主檔的英文別名）＋代號，台股 `sourcecountry:taiwan`、美股 `sourcelang:english`（例：`(TSMC OR 2330) sourcecountry:taiwan`）。台股的英文簡稱是一般英文單字時（穩懋「WIN」、台達電「DELTA」；`news/normalize.py` 的 `COMMON_WORDS`）不放進查詢、只用代號（`3105 sourcecountry:taiwan`）：GDELT 比對機器翻譯後的全文、不分大小寫，這種字會讓 75 筆全被無關新聞佔滿；`mode=artlist`、`format=json`、`maxrecords=75`、`startdatetime` = 上次成功前 1 小時（最多 7 天） | 429／403、或 200 回「Please limit requests…」→ 這次批次不再問，整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（`news_fetch_state` 的 `symbol="*"`）；連線錯誤連 3 次 → 這次批次略過 |
-| **AI 網路搜尋**（`news/ai_search.py`） | 只在 GDELT 這 24 小時內有回應、且免費來源最近 7 天少於 `NEWS_AI_MIN_ITEMS`（3）則時；同一檔 `NEWS_AI_INTERVAL_HOURS`（24）內最多一次；每批最多 10 次 | `web_search`（最多 2 次，封鎖行情／論壇／交易所網站；**沒有** `web_fetch`）＋ strict 工具 `report_news`（只回網址清單）。**模型只負責挑選**：標題、網址、日期都取自 `web_search_result`（網址不在搜尋結果、行情頁、沒有日期的都丟掉） | 本月（UTC）`ai_usage.feature = "news"` 的估計費用 + US$0.05 超過 `NEWS_AI_BUDGET_USD`（30）就整月不跑；沒有金鑰、`AI_WEB_SEARCH=false`、`NEWS_AI_ENABLED=false` 也不跑 |
-| **SearXNG**（自架，JSON API） | 只有設定 `NEWS_SEARXNG_URL` 時（**預設關**） | `/search?q=<名稱> <代號>&format=json&categories=news&time_range=week`；只取 `title`、`url`、`publishedDate`（沒有日期的不收） | 間隔 ≥ `NEWS_SEARXNG_INTERVAL_SECONDS`（10）；429／403／503 或上游回 CAPTCHA／too many requests → 暫停 `NEWS_SEARXNG_BACKOFF_MINUTES`（120）分鐘起、每次加倍。不換 IP、不偽裝 |
+| **AI 網路搜尋**（`news/ai_search.py`） | 只在 GDELT 與 SearXNG 這 24 小時內都對這檔有回應（關掉或暫停中的不算）、且兩者（加 personal 的 Yahoo RSS）最近 7 天合計少於 `NEWS_AI_MIN_ITEMS`（3）則時；同一檔 `NEWS_AI_INTERVAL_HOURS`（24）內最多一次；每批最多 10 次 | `web_search`（最多 2 次，封鎖行情／論壇／交易所網站；**沒有** `web_fetch`）＋ strict 工具 `report_news`（只回網址清單）。**模型只負責挑選**：標題、網址、日期都取自 `web_search_result`（網址不在搜尋結果、行情頁、沒有日期的都丟掉） | 本月（UTC）`ai_usage.feature = "news"` 的估計費用 + US$0.05 超過 `NEWS_AI_BUDGET_USD`（30）就整月不跑；沒有金鑰、`AI_WEB_SEARCH=false`、`NEWS_AI_ENABLED=false` 也不跑 |
+| **SearXNG**（`news/searxng.py`；自架、只對內，`deploy/searxng`） | **預設開啟**（2026-11-12 第三輪）。網址：`NEWS_SEARXNG_URL`，不設時 prod 是 `http://searxng.railway.internal:8080`、dev／test 是 `http://localhost:8080`；`NEWS_SEARXNG_ENABLED=false` 或 `NEWS_SEARXNG_URL=`（空字串）關掉。每檔在 GDELT 之後問；這檔 `NEWS_SEARXNG_CACHE_MINUTES`（60）內回應過、或 GDELT 已有 ≥ `NEWS_SEARXNG_SKIP_GDELT_ITEMS`（8）則 24 小時內的標題就不問 | 中文查詢：台股 `q=台積電 2330&language=zh-TW`，美股 `q=NVIDIA NVDA&language=en`（英文簡稱＋代號）；都加 `categories=news&time_range=week&format=json&safesearch=0`。有引擎暫停時改用 `engines=<其他引擎>`（同時送 `categories` 會把全部新聞引擎加回來）。只讀 `title`、`url`、時間（`publishedDate`；沒有時用 `pubdate`／`metadata` 裡的「3 小時前」「3 hours ago」「昨天」，以天計的只標日期）與 `engines`；`content`、縮圖不讀；沒有時間的不收；搜尋引擎轉址丟掉 | 一次只查一個、上一次查完到下一次開始 ≥ `NEWS_SEARXNG_INTERVAL_SECONDS`（10，最少 10）。**連不上**（拒絕連線、DNS、逾時、5xx、不是 JSON）→ 整個來源暫停 15 分鐘起、加倍到 4 小時（`last_status: "unreachable"`，不算錯誤）；我們自己的 SearXNG 回 403／429 → 暫停 `NEWS_SEARXNG_BACKOFF_MINUTES`（120）起。**上游引擎**（`unresponsive_engines`）：CAPTCHA／too many requests／access denied（含 `Suspended: …`）→ 那個引擎暫停 120 分鐘起、加倍到 24 小時；逾時等其他錯誤連 3 次 → 暫停 15 分鐘起；問的引擎全部失敗 → 整個 SearXNG 暫停；引擎全部暫停中 → SearXNG 暫停到最早恢復的那個。不換 IP、不用代理 |
 | **Yahoo股市 RSS** | 只有 `DATA_POLICY=personal`（條款限非商用；`NEWS_YAHOO_RSS=false` 可關） | `tw.stock.yahoo.com/rss?s=<代號>`。2026-11-12 實測這個參數回的是「最新新聞」頻道，所以靠下面的相關性篩選只留這檔的標題；原始媒體從描述開頭判斷（「MoneyDJ新聞」「【財訊快報／」「（中央社記者」），**描述本身不存** | 同上 |
 
 HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (portfolio tracker; news headline index)`），GDELT 每次間隔 ≥ `NEWS_GDELT_INTERVAL_SECONDS`（6，最少 5），
-連線中斷只重試一次，遇到拒絕不重試。白名單（`marketdata/http.py`）多了 GDELT 與 Yahoo股市 RSS 兩個網址；SearXNG 只對設定的那台開放（`HttpFetcher(extra_allowed=…)`）。
+連線中斷只重試一次，遇到拒絕不重試。白名單（`marketdata/http.py`）多了 GDELT 與 Yahoo股市 RSS 兩個網址；SearXNG 有自己的 client（`searxng.searxng_fetcher`：
+同樣的 User-Agent、只開放設定那台的 `/search` 與 `/healthz`、不重試、連線逾時 5 秒、整體 `NEWS_SEARXNG_TIMEOUT_SECONDS`（20）秒、不跟轉址）。
+SearXNG 對上游搜尋引擎送出的請求由 SearXNG 自己決定（瀏覽器樣式的 User-Agent 與連線特徵，這是 SearXNG 能運作的方式）；`deploy/searxng/settings.yml` 不設代理、`source_ips` 或 Tor。
 **新聞網站本身從不抓取**（只連結）。
 
 ### 正規化（`news/normalize.py`、`news/outlets.py`，對 2026-11-12 的真實回應核對過）
@@ -681,7 +683,14 @@ HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (port
   「Delta Air Lines」不算）；其他單字是專有名詞，第一個字母要大寫、其餘不拘（「Nvidia」「NVIDIA」算，「apple harvest」不算）；多個字的名稱不分大小寫
   （「Hon Hai」「apple inc.」）。仍會漏掉的：標題大寫的一般字（「Big Apple」），以及只寫「Delta Electronics」這種與官方英文簡稱寫法不同的英文標題。
   2026-11-12 的台積電樣本 17 則留 13 則（「南華大學邀請台積公司…」「台股暴跌1165點…」等順帶提到的被濾掉）；NVIDIA 英文樣本 16 則留 10 則、去重後 6 則（同一則被 4 家電台轉載）。
-- **去重**：同一網址（去掉 www、預設埠、追蹤參數、結尾斜線）或幾乎相同的標題（相似度 ≥ 0.88）只留一則；原始媒體優先於轉載站（Yahoo、LINE TODAY、MSN、iHeart…），再來是先刊出的。
+- **網址**（2026-11-12 SearXNG 預設開啟時加強，`normalize.normalize_url`／`clean_url`）：存的連結去掉追蹤參數（`utm_*`、`fbclid`、`gclid`、`msclkid`、`mc_cid`…）與預設埠，
+  AMP 快取（`*.cdn.ampproject.org/c/s/…`、`google.com/amp/s/…`）換成媒體自己的網址；比對用的鍵另外不分 http／https、`www.`／`m.`／`mobile.`／`amp.`、
+  `from`／`ref`／`cid`／`share` 這類來源參數、參數順序、結尾斜線、`/amp/` 路徑段、`.amp.html`、`?outputType=amp`——只做網址本身就能確定的改寫，
+  路徑不同的 AMP 版（`ettoday.net/amp/amp_news.php7?news_id=…`）靠標題去重。同一則同時有一般網頁與 AMP／手機版時留一般網頁。
+  **搜尋引擎轉址**（`news.google.com`、`google.*`、`bing.com`、`search.yahoo.com`、`duckduckgo.com`、`search.brave.com`、`qwant.com`、`startpage.com`、短網址 `t.co`、`bit.ly`…）
+  一律丟掉，**不解析**（解析等於去抓搜尋引擎或媒體網站）。
+- **去重**：同一網址（上面的比對鍵）或幾乎相同的標題（相似度 ≥ 0.88）只留一則；原始媒體優先於轉載站（Yahoo、LINE TODAY、MSN、iHeart…），一般網頁優先於 AMP／手機版，再來是先刊出的。
+  GDELT 與 SearXNG 找到同一則時，資料庫只有一列（先存的那個來源；每檔每個比對鍵一列）。
 - **時間**：GDELT 是 `seendate`（GDELT 看到的時間，通常晚刊出 15–30 分鐘）；AI 搜尋的 `page_age` 只有日期時 `date_only: true`。
 
 ### 儲存（migration `0011`，接在 `0009` 後，整合時再接上 `0010`）
@@ -691,13 +700,15 @@ HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (port
 | `news_articles` | 每檔每個網址一列：`title`、`outlet`、`domain`、`url`、`published_at`、`date_only`、`source`。**只有中繼資料**：沒有任何欄位能放內文、描述或圖片。刊出後 `NEWS_RETENTION_DAYS`（30）天刪除（每次批次開始時清） |
 | `news_blocked_domains` | 下架封鎖清單（網域，含子網域）＋原因 |
 | `news_tracked_views` | 「最近看過」：只有代號與時間，**沒有使用者**；`/news` 每 10 分鐘最多寫一次 |
-| `news_fetch_state` | 每個來源×代號的最後嘗試／成功、結果與筆數；`symbol="*"` 是整個來源的暫停時間 |
+| `news_fetch_state` | 每個來源×代號的最後嘗試／成功、結果與筆數；`symbol="*"` 是整個來源的暫停時間；SearXNG 另有 `symbol="@<引擎>"`（例如 `@bing news`）記每個上游引擎的結果、連續失敗與暫停時間（不用新 migration） |
 
 ### Worker 與 CLI
 
 - `news_refresh`：每 `NEWS_REFRESH_MINUTES`（45）分鐘，追蹤的股票＝任何人帳本／持股快照／自選裡的（`archive.tracked_symbols`）＋最近 `NEWS_VIEW_DAYS`（3）天看過的，
   最久沒更新的先跑，每批最多 `NEWS_MAX_SYMBOLS_PER_RUN`（150）檔，批次最長是間隔的 80%（不會卡住其他排程）。全體共用。
 - `uv run python -m forliosa.news refresh [--symbol 2330.TW] [--no-ai]`：立即更新。
+- `uv run python -m forliosa.news searxng-check "台積電" [--language en] [--url http://localhost:8080]`：SearXNG 健康檢查（`/healthz`）＋查一次新聞，
+  印出結果數、各引擎的結果數、沒有回應的引擎與原因（拒絕或暫時錯誤）。只印網址的 scheme、主機與埠（帳密會被去掉），不寫資料庫；回應正常時結束碼 0。
 - **下架**：`uv run python -m forliosa.news block udn.com --reason "2026-11-20 來函要求下架"` 立刻刪除該網域（含子網域）已存的標題，之後不再存也不顯示；
   `unblock`、`blocked` 列出清單；環境變數 `NEWS_BLOCKED_DOMAINS=a.com,b.tw` 也會隱藏（但不刪資料列）。
 
@@ -705,8 +716,10 @@ HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (port
 
 `NEWS_ENABLED`（true）、`NEWS_REFRESH_MINUTES`（45）、`NEWS_RETENTION_DAYS`（30）、`NEWS_VIEW_DAYS`（3）、`NEWS_MAX_SYMBOLS_PER_RUN`（150）、
 `NEWS_GDELT_ENABLED`（true）、`NEWS_GDELT_INTERVAL_SECONDS`（6）、`NEWS_AI_ENABLED`（true）、`NEWS_AI_BUDGET_USD`（30）、`NEWS_AI_MIN_ITEMS`（3）、
-`NEWS_AI_INTERVAL_HOURS`（24）、`AI_MODEL_NEWS`（預設 `AI_MODEL`）、`NEWS_SEARXNG_URL`（空＝關）、`NEWS_SEARXNG_INTERVAL_SECONDS`（10）、
-`NEWS_SEARXNG_BACKOFF_MINUTES`（120）、`NEWS_YAHOO_RSS`（true，只在 personal 有效）、`NEWS_BLOCKED_DOMAINS`。
+`NEWS_AI_INTERVAL_HOURS`（24）、`AI_MODEL_NEWS`（預設 `AI_MODEL`）、`NEWS_SEARXNG_ENABLED`（true）、`NEWS_SEARXNG_URL`（不設＝依 `FORLIOSA_ENV` 的預設；設成空字串＝關）、
+`NEWS_SEARXNG_ENGINES`（`bing news,duckduckgo news,brave.news`，要和 `deploy/searxng/settings.yml` 一致，有測試檢查）、`NEWS_SEARXNG_INTERVAL_SECONDS`（10，最少 10）、
+`NEWS_SEARXNG_CACHE_MINUTES`（60，最少 30）、`NEWS_SEARXNG_SKIP_GDELT_ITEMS`（8）、`NEWS_SEARXNG_BACKOFF_MINUTES`（120）、`NEWS_SEARXNG_TIMEOUT_SECONDS`（20）、
+`NEWS_YAHOO_RSS`（true，只在 personal 有效）、`NEWS_BLOCKED_DOMAINS`。`SEARXNG_SECRET` 只設在 searxng 服務上（api／worker 不用）。
 
 ### 授權與顯名
 
@@ -718,18 +731,33 @@ HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (port
 
 ### 測試（不連網）
 
-`tests/news/`：`test_parsers.py`（GDELT ArtList、429 文字、空結果 `{}`、查詢字串；Yahoo RSS；SearXNG 與它的封鎖判斷；白名單）、
-`test_normalize.py`（空白、尾巴、媒體名稱、網址、相關性、去重、封鎖清單、整條管線）、`test_service.py`（預設只開 GDELT、批次與增量查詢、429 暫停與加倍、
+`tests/news/`：`test_parsers.py`（GDELT ArtList、429 文字、空結果 `{}`、查詢字串；Yahoo RSS；白名單）、
+`test_normalize.py`（空白、尾巴、媒體名稱、網址與比對鍵（追蹤參數、http／https、www／m.／amp.、AMP 路徑與 AMP 快取）、搜尋引擎轉址丟掉、相關性、去重、封鎖清單、整條管線）、
+`test_searxng.py`（預設開啟與各環境的網址、關掉的方法、中文／英文查詢與暫停引擎時的 `engines=`、解析（時間、相對時間、轉址、沒有時間）、
+連不上／5xx／不是 JSON → `SourceDown`、403／429 → `SourceBlocked`、全部引擎失敗或拒絕、`/healthz`、間隔 10 秒與一次一個、`searxng-check` 輸出與不印帳密、
+`deploy/searxng` 的 settings.yml（引擎清單＝設定、只對內、JSON、不用代理）、Dockerfile 釘版本與 digest、compose 只綁 127.0.0.1）、
+`test_searxng_service.py`（連不上時暫停、GDELT 照常、`/news` 照常；全部引擎失敗；拒絕的引擎暫停並從下一次查詢拿掉、連 3 次逾時暫停；全部暫停時整個暫停到最早恢復；
+間隔與每檔 60 分鐘快取；GDELT 已有 8 則就略過；和 GDELT 合併：同一則只存一列、追蹤參數去掉、AMP 與手機版合併成一般網頁、轉址與無關的丟掉；美股英文查詢；
+AI 補缺依 GDELT＋SearXNG 合計、SearXNG 暫停時不擋 AI）、`test_service.py`（預設開 GDELT 與 SearXNG、批次與增量查詢、429 暫停與加倍、
 連續錯誤略過、追蹤清單、封鎖清單與 CLI、保存期限、AI 補缺只取搜尋結果、預算上限、沒有金鑰、`/news` 形狀、Yahoo 只在 personal、美股、顯名、
 AI 工具 `get_news` 帶媒體與來源、worker）；相關性另測一般英文單字的英文簡稱（WIN、DELTA、Apple）。
 fixture 是 2026-11-12 的真實回應裁短：`gdelt_tsmc_taiwan_live_20261112.json`（17 則）、`gdelt_nvda_english_live_20261112.json`（16 則）、
 `gdelt_gudeng_empty_live_20261112.json`（`{}`）、`gdelt_rate_limited_live_20261112.txt`、`yahoo_rss_2330_live_20261112.xml`（8 則，描述只留前 12 個字）。
+SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：照 SearXNG 2026.10.28 的 JSON 輸出格式（`searx/webutils.py` `get_json_response`、`MainResult.as_dict`）手寫，
+每個檔案的 `_comment` 都標 `SYNTHETIC`：`searxng_tsmc_zh_tw_synthetic.json`（12 則：重複 GDELT 的一則、Bing 只有相對時間、AMP 與一般網頁、手機版、兩個轉址、無關、沒時間、太舊）、
+`searxng_partial_synthetic.json`（Bing CAPTCHA、Brave 逾時）、`searxng_all_down_synthetic.json`、`searxng_all_refused_synthetic.json`、`searxng_nvda_en_synthetic.json`。
+所有 SearXNG 請求都走 `httpx.MockTransport`；`tests/conftest.py` 的 autouse fixture 讓其他請求一律連線失敗。
 
 ### 實測（2026-11-12）
 
 - 沙盒共用出口對 GDELT 常回 429（「Please limit requests to one every 5 seconds」）或中途斷線：退避 20 秒起、每次加長，約 20 分鐘內成功 2 次（NVIDIA 75 則、家登 0 則）。
   正式環境是自己的出口 IP，每 6 秒一次應該沒問題；遇到 429 會自動暫停。
 - `(Gudeng OR 3680) sourcecountry:taiwan` 三天內 0 則：中小型股常常要靠 AI 補缺。
+- **SearXNG 沒有實測**：沙盒連不到上游搜尋引擎、也沒有 Docker。只從 Docker Hub 確認了釘的 tag（`2026.10.28-c360868e5`，2026-10-28 發布）、
+  digest 與 image 設定（設定檔 `/etc/searxng/settings.yml`、聽 `[::]:8080`、`SEARXNG_SECRET` 會覆蓋 `server.secret_key`），並對照該版原始碼：
+  Bing News 的結果**沒有** `publishedDate`（只有 `metadata` 裡的相對時間）、DuckDuckGo News 用時間戳、Brave News 常常只有「N hours ago」；
+  DuckDuckGo News 與 Brave News 沒有宣告支援 `time_range`，SearXNG 會在有 `time_range` 時跳過它們，所以 `settings.yml` 對這兩個設 `time_range_support: true`（它們忽略時間範圍，worker 自己丟掉一週以前的）。
+  第一次部署後要跑 `searxng-check` 確認（`docs/deploy.md` 2.6 節）。
 
 ### 待產品負責人確認
 
@@ -737,6 +765,13 @@ fixture 是 2026-11-12 的真實回應裁短：`gdelt_tsmc_taiwan_live_20261112.
 2. **美股來源**：`sourcelang:english` 會收到很多地方報與轉載（印度、澳洲地方報）。要不要改成只收美國／英國主要媒體（例如加 `sourcecountry:us`），或只用 AI 補？
 3. **專欄名稱**：「| 台股雜談」這類專欄名稱目前保留（和 Google 財經一樣）。要不要也去掉？
 4. **Yahoo股市 RSS 的個股網址**：`?s=<代號>` 回的是全站最新新聞，只能靠標題篩選，命中率低。個股 RSS 的正確網址要在一般瀏覽器開 rss-index 產生一次確認。
+5. **SearXNG 對上游的請求像瀏覽器**（SearXNG 預設開啟後新增）：SearXNG 去問 Bing／DuckDuckGo／Brave 時，用的是瀏覽器樣式的 User-Agent 與連線特徵（SearXNG 本身的做法，
+   不這樣多數引擎不回答），和研究 §10 寫的「不偽裝」字面上衝突。我們自己的程式（worker → SearXNG）仍是誠實的 User-Agent、不換 IP、不用代理、被擋就停。
+   建議：A（接受，視為「自動查詢上游搜尋引擎」風險的一部分，寫進 §10）；B（在 image 裡把 SearXNG 的 User-Agent 換成誠實字串，預期多數引擎會直接拒絕，SearXNG 形同無效）。
+6. **引擎清單**：只開 Bing News、DuckDuckGo News、Brave News（都連到媒體原網址）。Google News 的連結是轉址（會被丟掉）、Reuters 等引擎是直接查新聞網站（不做），所以沒開。
+   上線後如果 SearXNG 幾乎都被擋，要不要加 Qwant News（沒有 zh-TW、常被 DataDome 擋）？建議：先不加，看一週的 `searxng-check` 與 worker 記錄再說。
+7. **每批上限**：追蹤 150 檔時，SearXNG 每檔間隔 10 秒、加上 GDELT，一批約 35 分鐘，可能碰到批次時限（間隔的 80%）而留到下一批。
+   建議：維持（最久沒更新的先跑；每檔 60 分鐘快取與「GDELT 已有 8 則就略過」會讓實際查詢少很多）；若記錄常出現 `time is up`，再把 `NEWS_REFRESH_MINUTES` 調成 60。
 
 ## 2026-11-12 相關股票、公司資料、外資持股前 20 名（個股頁補強第 4–8 項）
 
@@ -868,7 +903,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 13. ~~**上市股票三大法人**~~：已決定（產品負責人 2026-11-12）：不寄信給證交所、不買 Data E-Shop，上市股票的逐檔三大法人與外資持股**不顯示**
     （任何模式，含 FinMind：上市股票只向 FinMind 要融資融券，不下載法人與持股資料集；上櫃照常）。個股頁的空狀態可直接問 AI「最近外資對這檔的動向？」（建議問題 `foreign_flow`），AI 用網路搜尋新聞回答並附來源與日期；
     `web_fetch` 封鎖 `www.twse.com.tw`、`mis.twse.com.tw`。之後要用時：Data E-Shop「三大法人買賣超檔」或書面同意（詢問信草稿見 `docs/research/data-sources-licensing.md` §1.9）。
-14. ~~**新聞來源**~~：已實作（2026-11-12）：GDELT 為主、AI 搜尋補缺、SearXNG 保留（預設關）、Yahoo股市 RSS 只在 personal；見「2026-11-12 新聞報導」與它的待確認事項。
+14. ~~**新聞來源**~~：已實作（2026-11-12）：GDELT＋自架 SearXNG（第三輪改為預設開）、兩者不足才 AI 搜尋、Yahoo股市 RSS 只在 personal；見「2026-11-12 新聞報導」與它的待確認事項。
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。
 16. ~~**財報公布日**~~：已實作（2026-11-12），實際日期來自重大訊息與月營收資料集；查不到才用法定期限（`estimated: true`）。
 17. ~~**美股基本面（SEC EDGAR）與匯率**~~：都已實作（2026-11-12）。美股財報與 8-K／10-Q／10-K 申報見「第四批」；USD/TWD 改用中央銀行

@@ -1,0 +1,20 @@
+# Local development only: Forliosa's private SearXNG for the news worker (docs/deploy.md §2.6).
+#
+#   cp deploy/searxng/.env.example deploy/searxng/.env      # then fill in SEARXNG_SECRET (a long random string)
+#   docker compose -f deploy/searxng/docker-compose.yml up -d --build
+#   cd apps/api && uv run python -m forliosa.news searxng-check "台積電"
+#
+# The API and worker in development (FORLIOSA_ENV=dev) use http://localhost:8080 unless NEWS_SEARXNG_URL says
+# otherwise. The port is published on 127.0.0.1 only, so nothing outside this machine can reach the instance (its
+# limiter is off). Production runs the same image as a Railway service with private networking only.
+name: forliosa-searxng
+
+services:
+  searxng:
+    build: .
+    image: forliosa-searxng:local
+    restart: unless-stopped
+    environment:
+      SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in deploy/searxng/.env}
+    ports:
+      - "127.0.0.1:8080:8080"

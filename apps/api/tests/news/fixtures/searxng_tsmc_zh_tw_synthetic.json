@@ -1,0 +1,445 @@
+{
+ "_comment": "SYNTHETIC fixture (not a live response): built by hand from SearXNG's documented JSON output (searx/webutils.py get_json_response and result_types MainResult.as_dict, image 2026.10.28-c360868e5) for forliosa tests; titles, links and times are made up around the 2026-11-12 GDELT fixture.",
+ "query": "台積電 2330",
+ "results": [
+  {
+   "url": "http://www.cna.com.tw/news/afe/202611120132.aspx?utm_source=rss&utm_medium=news",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "http",
+    "www.cna.com.tw",
+    "/news/afe/202611120132.aspx",
+    "",
+    "utm_source=rss&utm_medium=news",
+    ""
+   ],
+   "template": "default.html",
+   "title": "部分員工資訊遭置外部網站 台積電：無證據顯示系統遭入侵 | 產經 | 中央社 CNA",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T06:40:00",
+   "pubdate": "2026-11-12 06:40:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news",
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1,
+    2
+   ],
+   "score": 4.0,
+   "category": "news"
+  },
+  {
+   "url": "https://money.udn.com/money/story/5612/9100001?fbclid=IwAR0Forliosa",
+   "engine": "bing news",
+   "parsed_url": [
+    "https",
+    "money.udn.com",
+    "/money/story/5612/9100001",
+    "",
+    "fbclid=IwAR0Forliosa",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電熊本二廠將導入3奈米 法人看好2330營運",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "3 小時前 | 經濟日報",
+   "priority": "",
+   "engines": [
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://news.cnyes.com/news/id/6200001",
+   "engine": "bing news",
+   "parsed_url": [
+    "https",
+    "news.cnyes.com",
+    "/news/id/6200001",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電(2330)外資連三買 股價站回季線",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "1 天前 | 鉅亨網",
+   "priority": "",
+   "engines": [
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    3
+   ],
+   "score": 0.5,
+   "category": "news"
+  },
+  {
+   "url": "https://www.cna.com.tw/amp/news/afe/202611120200.aspx",
+   "engine": "brave.news",
+   "parsed_url": [
+    "https",
+    "www.cna.com.tw",
+    "/amp/news/afe/202611120200.aspx",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電ADR大漲 台股期夜盤跟進",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "5 hours ago",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "brave.news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://www.cna.com.tw/news/afe/202611120200.aspx",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "www.cna.com.tw",
+    "/news/afe/202611120200.aspx",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電ADR大漲 台股期夜盤跟進 | 產經 | 中央社 CNA",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T05:50:00",
+   "pubdate": "2026-11-12 05:50:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    2
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://www.setn.com/News.aspx?NewsID=1937500",
+   "engine": "bing news",
+   "parsed_url": [
+    "https",
+    "www.setn.com",
+    "/News.aspx",
+    "",
+    "NewsID=1937500",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電先進封裝擴產 CoWoS月產能再增 | 財經 | 三立新聞網 SETN.COM",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "2 hours ago | 三立新聞網",
+   "priority": "",
+   "engines": [
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    4
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://m.setn.com/News.aspx?NewsID=1937500&utm_source=line&utm_medium=share",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "m.setn.com",
+    "/News.aspx",
+    "",
+    "NewsID=1937500&utm_source=line&utm_medium=share",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電先進封裝擴產 CoWoS月產能再增",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T08:30:00",
+   "pubdate": "2026-11-12 08:30:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    3
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://www.bing.com/news/apiclick.aspx?ref=FexRss&aid=&tid=0A1B2C&url=https%3a%2f%2fwww.setn.com%2fnews%2f1937999&c=1&mkt=zh-tw",
+   "engine": "bing news",
+   "parsed_url": [
+    "https",
+    "www.bing.com",
+    "/news/apiclick.aspx",
+    "",
+    "ref=FexRss&aid=&tid=0A1B2C&url=https%3a%2f%2fwww.setn.com%2fnews%2f1937999&c=1&mkt=zh-tw",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電法說會前瞻 三立新聞網",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "4 小時前 | 三立新聞網",
+   "priority": "",
+   "engines": [
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    5
+   ],
+   "score": 0.4,
+   "category": "news"
+  },
+  {
+   "url": "https://news.google.com/articles/CBMiK2h0dHBzOi8vd3d3LmV0dG9kYXkubmV0L25ld3MvMjAyNjExMTIvMS5odG3SAQA?oc=5",
+   "engine": "brave.news",
+   "parsed_url": [
+    "https",
+    "news.google.com",
+    "/articles/CBMiK2h0dHBzOi8vd3d3LmV0dG9kYXkubmV0L25ld3MvMjAyNjExMTIvMS5odG3SAQA",
+    "",
+    "oc=5",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電2奈米進度超前 - ETtoday",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "6 hours ago",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "brave.news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    2
+   ],
+   "score": 0.4,
+   "category": "news"
+  },
+  {
+   "url": "https://www.ettoday.net/news/20261112/3000001.htm",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "www.ettoday.net",
+    "/news/20261112/3000001.htm",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "聯發科天璣新晶片發表 手機品牌搶首發",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T05:00:00",
+   "pubdate": "2026-11-12 05:00:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    4
+   ],
+   "score": 0.3,
+   "category": "news"
+  },
+  {
+   "url": "https://www.ctee.com.tw/news/20261112700123-430101",
+   "engine": "bing news",
+   "parsed_url": [
+    "https",
+    "www.ctee.com.tw",
+    "/news/20261112700123-430101",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電股東會紀念品出爐",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    6
+   ],
+   "score": 0.3,
+   "category": "news"
+  },
+  {
+   "url": "https://www.chinatimes.com/realtimenews/20261101000123-260410",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "www.chinatimes.com",
+    "/realtimenews/20261101000123-260410",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電上月營收創高",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-01T02:00:00",
+   "pubdate": "2026-11-01 02:00:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    5
+   ],
+   "score": 0.2,
+   "category": "news"
+  }
+ ],
+ "answers": [],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": []
+}

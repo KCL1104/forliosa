@@ -1,0 +1,157 @@
+{
+ "_comment": "SYNTHETIC fixture (not a live response): built by hand from SearXNG's documented JSON output (searx/webutils.py get_json_response and result_types MainResult.as_dict, image 2026.10.28-c360868e5) for forliosa tests; titles, links and times are made up around the 2026-11-12 GDELT fixture.",
+ "query": "NVIDIA NVDA",
+ "results": [
+  {
+   "url": "https://www.reuters.com/technology/nvidia-supplier-outlook-2026-11-12/",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "www.reuters.com",
+    "/technology/nvidia-supplier-outlook-2026-11-12/",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "Nvidia suppliers flag strong AI server orders - Reuters",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T09:15:00+00:00",
+   "pubdate": "2026-11-12 09:15:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news",
+    "brave.news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1,
+    1
+   ],
+   "score": 3.0,
+   "category": "news"
+  },
+  {
+   "url": "https://finance.yahoo.com/news/nvidia-suppliers-flag-strong-ai-091500123.html",
+   "engine": "bing news",
+   "parsed_url": [
+    "https",
+    "finance.yahoo.com",
+    "/news/nvidia-suppliers-flag-strong-ai-091500123.html",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "Nvidia suppliers flag strong AI server orders",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "an hour ago | Reuters via Yahoo Finance",
+   "priority": "",
+   "engines": [
+    "bing news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://www-cnbc-com.cdn.ampproject.org/c/s/www.cnbc.com/amp/2026/11/12/nvidia-stock-moves.html",
+   "engine": "brave.news",
+   "parsed_url": [
+    "https",
+    "www-cnbc-com.cdn.ampproject.org",
+    "/c/s/www.cnbc.com/amp/2026/11/12/nvidia-stock-moves.html",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "Nvidia stock: what to watch before earnings",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": null,
+   "pubdate": "2 hours ago",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "brave.news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    2
+   ],
+   "score": 1.0,
+   "category": "news"
+  },
+  {
+   "url": "https://www.marketwatch.com/story/apple-and-the-dow-2026-11-12",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "www.marketwatch.com",
+    "/story/apple-and-the-dow-2026-11-12",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "Apple leads the Dow higher",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T08:00:00",
+   "pubdate": "2026-11-12 08:00:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    3
+   ],
+   "score": 0.5,
+   "category": "news"
+  }
+ ],
+ "answers": [],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": []
+}

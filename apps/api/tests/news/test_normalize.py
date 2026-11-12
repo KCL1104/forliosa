@@ -9,8 +9,10 @@ from forliosa.news.normalize import (
     clean_title,
     clean_url,
     dedupe,
+    is_amp_or_mobile,
     is_blocked,
     is_relevant,
+    is_search_redirect,
     make_terms,
     normalize_domain,
     normalize_url,
@@ -92,6 +94,60 @@ def test_urls_are_cleaned_and_keyed():
     assert a == normalize_url("http://udn.com/news/1") == "https://udn.com/news/1"
     assert url_key("https://udn.com/news/1?utm_medium=a") == url_key("https://www.udn.com/news/1/")
     assert normalize_url("https://x.tw/a?id=1") != normalize_url("https://x.tw/a?id=2")
+
+
+def test_canonical_urls_fold_tracking_scheme_mobile_and_amp_variants():
+    same = [
+        "https://www.cna.com.tw/news/afe/202611120200.aspx",
+        "http://www.cna.com.tw/news/afe/202611120200.aspx/",
+        "https://cna.com.tw/news/afe/202611120200.aspx?utm_source=line&utm_campaign=x&fbclid=IwAR0&gclid=1",
+        "https://www.cna.com.tw/amp/news/afe/202611120200.aspx",  # an /amp/ segment
+        "https://m.cna.com.tw/news/afe/202611120200.aspx#top",  # a mobile host
+        "https://www-cna-com-tw.cdn.ampproject.org/c/s/www.cna.com.tw/amp/news/afe/202611120200.aspx",  # AMP cache
+        "https://www.google.com/amp/s/www.cna.com.tw/amp/news/afe/202611120200.aspx",
+    ]
+    assert {normalize_url(u) for u in same} == {"https://cna.com.tw/news/afe/202611120200.aspx"}
+    assert normalize_url("https://udn.com/news/amp/story/7240/1") == normalize_url("https://udn.com/news/story/7240/1")
+    assert normalize_url("https://x.tw/a/story.amp.html") == normalize_url("https://x.tw/a/story.html")
+    assert normalize_url("https://x.tw/a?outputType=amp&id=1") == normalize_url("https://x.tw/a?id=1")
+    assert normalize_url("https://x.tw/a?b=2&a=1") == normalize_url("https://x.tw/a?a=1&b=2")  # order does not matter
+    # only what the URL itself makes unambiguous: a different path or id stays different
+    assert normalize_url("https://www.ettoday.net/amp/amp_news.php7?news_id=1") != \
+        normalize_url("https://www.ettoday.net/news/20261112/1.htm")
+    assert normalize_url("https://x.tw/a?outputType=json") != normalize_url("https://x.tw/a")
+    assert normalize_url("https://x.tw/ampere") == "https://x.tw/ampere" and normalize_url("https://m.tw/a") == \
+        "https://m.tw/a"
+    # the stored link: tracking parameters out, everything else as published
+    assert clean_url("https://money.udn.com/money/story/5612/1?fbclid=IwAR0&utm_source=x") == \
+        "https://money.udn.com/money/story/5612/1"
+    assert clean_url("https://news.ustv.com.tw/newsdetail/1?newsall=true&type=144&from=rss") == \
+        "https://news.ustv.com.tw/newsdetail/1?newsall=true&type=144&from=rss"
+    assert clean_url("https://www-cnbc-com.cdn.ampproject.org/c/s/www.cnbc.com/amp/2026/11/12/x.html") == \
+        "https://www.cnbc.com/amp/2026/11/12/x.html"
+    assert is_amp_or_mobile("https://m.setn.com/News.aspx?NewsID=1") and is_amp_or_mobile("https://x.tw/amp/1")
+    assert not is_amp_or_mobile("https://www.setn.com/News.aspx?NewsID=1")
+
+
+def test_search_engine_redirects_are_dropped_not_resolved():
+    redirects = [
+        "https://news.google.com/articles/CBMiK2h0dHBzOi8vd3d3LmV0dG9kYXkubmV0?oc=5",
+        "https://news.google.com/rss/articles/CBMi?oc=5",
+        "https://www.google.com/url?q=https://www.cna.com.tw/news/1&sa=U",
+        "https://www.bing.com/news/apiclick.aspx?ref=FexRss&url=https%3a%2f%2fwww.setn.com%2fnews%2f1",
+        "https://www.bing.com/ck/a?!&&p=abc&u=a1aHR0cHM6Ly93d3cuY25hLmNvbS50dw",
+        "https://r.search.yahoo.com/_ylt=A/RV=2/RE=1/RO=10/RU=https%3a%2f%2fwww.cna.com.tw%2f/RK=2/RS=x-",
+        "https://duckduckgo.com/l/?uddg=https%3A%2F%2Fwww.cna.com.tw%2Fnews%2F1",
+        "https://t.co/AbCdEf",
+    ]
+    for u in redirects:
+        assert is_search_redirect(u) and clean_url(u) is None, u
+    for u in ("https://www.cna.com.tw/news/afe/1.aspx", "https://tw.news.yahoo.com/x-1.html",
+              "https://finance.yahoo.com/news/x.html", "https://blog.google/technology/x/"):
+        assert not is_search_redirect(u) and clean_url(u) == u, u
+    raw = [RawItem("台積電法說會前瞻", redirects[3], FETCHED_AT - timedelta(hours=1)),
+           RawItem("台積電2奈米進度超前", redirects[0], FETCHED_AT - timedelta(hours=1))]
+    q = Query("2330.TW", "2330", "台積電", "TWSE", (), TSMC, FETCHED_AT - timedelta(days=1), FETCHED_AT)
+    assert to_headlines(raw, q, "searxng", []) == []
 
 
 def test_relevance_needs_the_name_code_or_english_short_name():

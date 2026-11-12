@@ -123,6 +123,19 @@
   新聞來源做成可替換的介面，SearXNG 是其中一個，部署時一起架只對內的 SearXNG（`NEWS_SEARXNG_URL`，開 JSON 輸出），預設開啟。
   啟用時：只取標題、網址、媒體、時間；每次查詢間隔至少數秒；上游引擎回 429 或驗證碼就停用一段時間，不換 IP、不偽裝；
   SearXNG 端只開必要的新聞引擎。風險：自動查詢上游搜尋引擎違反它們的條款（契約風險，被封鎖後就失效），由營運者（產品負責人）承擔。
+  - **實作（2026-11-12）**：`deploy/searxng`（官方 image 釘 `2026.10.28-c360868e5`＋digest、`settings.yml`、本機 compose、Railway 設定），程式在
+    `apps/api/src/forliosa/news/searxng.py`；部署見 `docs/deploy.md` 2.6 節，規則見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」。
+    - 只對內：Railway 私有網路 `searxng.railway.internal:8080`（不給公開網域）、本機只綁 `127.0.0.1`；所以 limiter 與 public instance 關閉、沒有圖片代理；
+      `secret_key` 來自 `SEARXNG_SECRET`（沒設就拒絕啟動）。
+    - 引擎：只留 Bing News、DuckDuckGo News、Brave News（都連到媒體原網址）。不開 Google News（連結是 `news.google.com` 轉址）、不開 Reuters／Wikinews 等直接查新聞網站的引擎；
+      一般、圖片、影片引擎全部移除（`use_default_settings` 的 `keep_only`）。
+    - 查詢：台股用中文「簡稱＋代號」（`台積電 2330`，`language=zh-TW`），美股用英文簡稱＋代號（`NVIDIA NVDA`，`language=en`），`categories=news`、`time_range=week`。
+    - 節制：一次只查一個、間隔至少 10 秒；同一檔 60 分鐘內回應過就不再查；GDELT 已有 8 則 24 小時內的標題就不查。
+    - 被擋就停：上游引擎回 CAPTCHA／too many requests／access denied 就暫停那個引擎（120 分鐘起、加倍到 24 小時），全部引擎都停或 SearXNG 連不上就暫停整個來源；
+      不換 IP、不用代理或 Tor。SearXNG 本身對上游送的是瀏覽器樣式的請求（它的運作方式）——和上面「不偽裝」的字面有出入，已列入待產品負責人確認。
+    - 合併：和 GDELT 用同一套網址比對（去掉追蹤參數、不分 http／https、www／m.／amp.、AMP 路徑），搜尋引擎轉址直接丟掉不解析；相關性篩選、媒體名稱、下架封鎖清單照舊；
+      GDELT＋SearXNG 最近 7 天合計少於 3 則才用 AI 搜尋。
+    - 沒有在沙盒實測（連不到上游搜尋引擎）；測試用照 SearXNG JSON 格式手寫的合成回應。
 - **自建爬蟲＋索引（YaCy、Nutch＋OpenSearch）**：等於自己爬媒體網站並存全文，就是 §1 排除的高風險做法。不用。
 - **GDELT DOC 2.0 API**（`api.gdeltproject.org/api/v2/doc/doc`，已加入環境允許清單）：GDELT 官方「unlimited and unrestricted use for any academic, commercial, or governmental use of any kind without fee」，要引用 GDELT 並連到 gdeltproject.org。我們只取標題、網址、媒體、時間，自己不爬任何網站。
   - 實測：`TSMC sourcecountry:taiwan`、最近 3 天 → 23 則，全部中文，來源有聯合、中央社、自由（含自由財經）、中時、ETtoday、三立、TVBS、新頭殼、蕃薯藤、美國之音中文台，最新一則距實際刊出約 15–30 分鐘。

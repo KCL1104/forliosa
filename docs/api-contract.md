@@ -449,11 +449,17 @@
 - **順序**：先官方公告（台股；最近 90 天、最多 30 則，新的在前），再新聞報導（最近 30 天、最多 40 則，新的在前）。美股只有新聞報導。
 - **新聞報導**（`category: "media"`）：`title` 是媒體原標題（去掉 GDELT 插入的空白與「| 財經」「- 自由財經」這類重複媒體或版名的尾巴）；
   `outlet` 是媒體名稱（依網域：udn.com 聯合新聞網、money.udn.com 經濟日報、cna.com.tw 中央社…；不認得的顯示網域）；
-  `url` 是原文連結；`source` 是怎麼找到的：`"GDELT"`、`"AI 搜尋"`、`"SearXNG"`、`"Yahoo股市"`（只有 `DATA_POLICY=personal`）、`"FinMind"`（personal 明確開啟）；
+  `url` 是原文連結（去掉 `utm_*`、`fbclid`、`gclid` 這類追蹤參數；AMP 快取連結換成媒體自己的網址）；`source` 是怎麼找到的：`"GDELT"`、
+  `"SearXNG"`（我們自架、只對內的元搜尋，**預設開啟**，2026-11-12 第三輪）、`"AI 搜尋"`（GDELT 與 SearXNG 最近 7 天合計少於 3 則才用）、
+  `"Yahoo股市"`（只有 `DATA_POLICY=personal`）、`"FinMind"`（personal 明確開啟）。`source: "SearXNG"` 的 `sources` 是
+  `["SearXNG 自架元搜尋（只取標題、媒體、時間與連結）"]`；同一則新聞 GDELT 與 SearXNG 都找到時只列一次（先存到的那個來源）；
   `date_only: true` 表示來源只給日期（顯示日期，不顯示「N 小時前」）。官方公告的 `outlet` 是 `null`、`date_only` 是 `false`。
-- **不提供**內文、摘要、og:description、圖片或縮圖；同一則（同網址或幾乎相同的標題）只列一次，原始媒體優先於轉載（Yahoo、LINE TODAY、MSN）。
+- **不提供**內文、摘要、og:description、圖片或縮圖；同一則（同網址或幾乎相同的標題）只列一次，原始媒體優先於轉載（Yahoo、LINE TODAY、MSN），
+  一般網頁優先於 AMP／手機版。「同網址」比對時不分 http／https、`www.`／`m.`／`amp.`、追蹤參數、結尾斜線與 AMP 路徑（`/amp/`、`.amp.html`）。
+  搜尋引擎的轉址連結（`news.google.com/articles/…`、`bing.com/news/apiclick.aspx…` 等）直接丟掉，不會去解析。
 - **前端**：個股頁總覽的「新聞報導」區（桌機兩欄、手機一欄，先列 8 則，「顯示更多」）：「媒體・N 小時前」，標題連到原文（新視窗，`rel="noopener noreferrer"`）；
-  有 `source: "GDELT"` 時，下方引用 The GDELT Project 並連到 https://www.gdeltproject.org/（使用條款要求）；`source: "Yahoo股市"` 要同時顯示「Yahoo股市」與原始媒體。
+  有 `source: "GDELT"` 時，下方引用 The GDELT Project 並連到 https://www.gdeltproject.org/（使用條款要求）；其他來源寫在同一行（「另有 SearXNG 元搜尋、AI 網路搜尋」）；
+  `source: "Yahoo股市"` 要同時顯示「Yahoo股市」與原始媒體。
   「公告」區與事件分頁只放官方公告（`category` 不是 `media`）。
 - `/meta/attributions` 多了 `gdelt/doc`（`license_status: "open"`，可商用、需引用），personal 另有 `yahoo-rss/stock`（`license_status: "non_commercial"`）；
   `notice` 多一行 GDELT 條款，commercial 的 `not_used` 多「新聞網站本身」與「Yahoo股市 RSS」兩行。

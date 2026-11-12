@@ -1,0 +1,56 @@
+{
+ "_comment": "SYNTHETIC fixture (not a live response): built by hand from SearXNG's documented JSON output (searx/webutils.py get_json_response and result_types MainResult.as_dict, image 2026.10.28-c360868e5) for forliosa tests; titles, links and times are made up around the 2026-11-12 GDELT fixture.",
+ "query": "台積電 2330",
+ "results": [
+  {
+   "url": "https://www.cna.com.tw/news/afe/202611120300.aspx",
+   "engine": "duckduckgo news",
+   "parsed_url": [
+    "https",
+    "www.cna.com.tw",
+    "/news/afe/202611120300.aspx",
+    "",
+    "",
+    ""
+   ],
+   "template": "default.html",
+   "title": "台積電美國廠進度超前 | 產經 | 中央社 CNA",
+   "content": "（內文摘要，不讀取）",
+   "img_src": "",
+   "iframe_src": "",
+   "audio_src": "",
+   "thumbnail": "",
+   "publishedDate": "2026-11-12T09:00:00",
+   "pubdate": "2026-11-12 09:00:00",
+   "length": null,
+   "views": "",
+   "author": "",
+   "metadata": "",
+   "priority": "",
+   "engines": [
+    "duckduckgo news"
+   ],
+   "open_group": false,
+   "close_group": false,
+   "positions": [
+    1
+   ],
+   "score": 1.0,
+   "category": "news"
+  }
+ ],
+ "answers": [],
+ "corrections": [],
+ "infoboxes": [],
+ "suggestions": [],
+ "unresponsive_engines": [
+  [
+   "bing news",
+   "Suspended: CAPTCHA"
+  ],
+  [
+   "brave.news",
+   "timeout"
+  ]
+ ]
+}

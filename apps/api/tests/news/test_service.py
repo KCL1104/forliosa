@@ -13,7 +13,8 @@ from forliosa.models import AiUsage, NewsArticle, NewsBlockedDomain, NewsFetchSt
 from forliosa.news import __main__ as cli
 from forliosa.news import service
 from forliosa.news.ai_search import RESERVE_USD, month_spend
-from forliosa.news.sources import GdeltSource, RawItem, SearxngSource, YahooRssSource, parse_gdelt
+from forliosa.news.searxng import SearxngSource
+from forliosa.news.sources import GdeltSource, RawItem, YahooRssSource, parse_gdelt
 from forliosa.timeutil import now_utc
 from tests.ai.fake_anthropic import server_tool_use, tool_use
 from tests.news.conftest import FETCHED_AT, FakeSource, fixture_bytes
@@ -32,28 +33,36 @@ def stored(db: Session, symbol: str = "2330.TW") -> list[NewsArticle]:
 
 
 # -- sources on / off -------------------------------------------------------------------------------------------
-def test_only_gdelt_is_on_by_default(settings):
+def test_gdelt_and_searxng_are_on_by_default(settings):
     srcs = service.default_sources(settings, "commercial")
-    assert [type(s) for s in srcs] == [GdeltSource]  # SearXNG off, Yahoo RSS off (commercial)
+    assert [type(s) for s in srcs] == [GdeltSource, SearxngSource]  # Yahoo RSS off (commercial)
+    assert srcs[1].base_url == "http://localhost:8080"  # FORLIOSA_ENV=test: the local compose service
+    assert srcs[1].engines == ("bing news", "duckduckgo news", "brave.news")
     personal = service.default_sources(settings, "personal")
-    assert [type(s) for s in personal] == [GdeltSource, YahooRssSource]  # Yahoo only under DATA_POLICY=personal
-    with_searx = service.default_sources(settings.model_copy(update={"news_searxng_url": "https://searx.example.org"}),
-                                         "commercial")
-    assert [type(s) for s in with_searx] == [GdeltSource, SearxngSource]
-    off = settings.model_copy(update={"news_gdelt_enabled": False, "news_yahoo_rss": False})
+    assert [type(s) for s in personal] == [GdeltSource, SearxngSource, YahooRssSource]  # Yahoo only under personal
+    prod = settings.model_copy(update={"forliosa_env": "prod"})
+    assert service.default_sources(prod, "commercial")[1].base_url == "http://searxng.railway.internal:8080"
+    for off in ({"news_searxng_enabled": False}, {"news_searxng_url": ""}):
+        assert [type(s) for s in service.default_sources(settings.model_copy(update=off), "commercial")] == \
+            [GdeltSource]
+    off = settings.model_copy(update={"news_gdelt_enabled": False, "news_yahoo_rss": False,
+                                      "news_searxng_enabled": False})
     assert service.default_sources(off, "personal") == []
-    assert settings.news_ai_budget_usd == 30.0 and settings.news_searxng_url is None
+    assert settings.news_ai_budget_usd == 30.0
 
 
-def test_news_fetcher_spaces_gdelt_and_allows_only_the_configured_searxng(settings):
-    f = service.news_fetcher(settings.model_copy(update={"news_searxng_url": "https://searx.example.org"}))
+def test_news_fetcher_spaces_gdelt_and_searxng_has_its_own_client(settings):
+    f = service.news_fetcher(settings)
     try:
         assert f.limiter.interval_for("api.gdeltproject.org") >= 5.0
-        assert f.limiter.interval_for("searx.example.org") >= 3.0
-        assert f.extra_allowed == ("https://searx.example.org/search",)
+        assert f.extra_allowed == ()  # SearXNG is not reachable through the shared fetcher
         assert "Mozilla" not in f.client.headers["User-Agent"]  # an honest client name
     finally:
         f.client.close()
+    searx = service.searxng_source(settings.model_copy(update={"news_searxng_url": "https://searx.example.org"}))
+    assert searx is not None and searx.gate.interval >= 10.0
+    assert searx.fetcher.extra_allowed == ("https://searx.example.org/search", "https://searx.example.org/healthz")
+    assert "Mozilla" not in searx.fetcher.client.headers["User-Agent"]
 
 
 # -- the batch ---------------------------------------------------------------------------------------------------

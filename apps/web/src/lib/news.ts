@@ -55,9 +55,9 @@ export function outletLabel(n: NewsItem): string {
   return outlet
 }
 
-/** 清單下方的來源說明：用到哪些收集方式（GDELT 必須引用） */
+/** 清單下方的來源說明：用到哪些收集方式（GDELT 必須引用）；依重要性：SearXNG（預設開啟）、AI 搜尋（兩者不足時才補）、非商用來源 */
 export function newsSourcesUsed(items: NewsItem[]): { gdelt: boolean; others: string[] } {
   const set = new Set(items.map((n) => n.source))
-  const others = ["AI 搜尋", "SearXNG", "Yahoo股市", "FinMind"].filter((s) => set.has(s))
+  const others = ["SearXNG", "AI 搜尋", "Yahoo股市", "FinMind"].filter((s) => set.has(s))
   return { gdelt: set.has("GDELT"), others }
 }
