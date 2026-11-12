@@ -32,7 +32,6 @@ export function useAiSuggestions(ctx: AiContext): Suggestion[] {
       : q.data.questions.map((x) => ({
           kind: x.kind as SuggestionKind,
           text: x.text,
-          lines: [x.lines[0] ?? x.text, x.lines[1] ?? ""],
           symbol: x.symbol ?? undefined,
         }))
   return [...offers, ...base].slice(0, 3)

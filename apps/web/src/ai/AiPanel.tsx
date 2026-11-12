@@ -90,7 +90,8 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         </IconButton>
       </header>
 
-      <div className={cn("min-h-0 overflow-y-auto overscroll-contain px-7 xl:pr-7 xl:pl-8", home ? "shrink" : "flex-1 pb-4")}>
+      {/* 首頁狀態留 6px 下內距：最後一個連結的焦點外框（外推 4px）不會被捲動區裁掉 */}
+      <div className={cn("min-h-0 overflow-y-auto overscroll-contain px-7 xl:pr-7 xl:pl-8", home ? "shrink pb-1.5" : "flex-1 pb-4")}>
         {view === "history" ? (
           <HistoryList compact onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
         ) : thread ? (
@@ -100,7 +101,7 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         )}
       </div>
 
-      <div className={cn("shrink-0 px-7 pb-5 xl:pr-7 xl:pl-8", home && "pt-4")}>
+      <div className={cn("shrink-0 px-7 pb-5 xl:pr-7 xl:pl-8", home && "pt-2.5")}>
         <Composer
           ref={composerRef}
           variant="panel"

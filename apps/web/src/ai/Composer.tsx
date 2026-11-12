@@ -1,5 +1,5 @@
 import { ArrowUpIcon, PlusIcon } from "lucide-react"
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react"
+import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { cn } from "@/lib/utils"
 import { useAi } from "./store"
@@ -24,6 +24,7 @@ interface Props {
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ onSubmit, onAttach, variant, placeholder, onDraftChange }, ref) {
   const [text, setText] = useState("")
   const area = useRef<HTMLTextAreaElement>(null)
+  const hintId = useId()
   const line = useRef<HTMLInputElement>(null)
   const seed = useAi((s) => s.composerSeed)
   useImperativeHandle(ref, () => ({ focus: () => (variant === "panel" ? area.current : line.current)?.focus() }), [variant])
@@ -128,13 +129,17 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
         rows={2}
         placeholder={placeholder}
         aria-label="提出問題或下指令"
+        aria-describedby={hintId}
         className="block h-[54px] w-full resize-none bg-transparent leading-relaxed text-ink outline-none placeholder:text-ink-2"
       />
       <div className="mt-1.5 flex items-center justify-between gap-2">
         {attach}
         <div className="flex items-center gap-3">
-          {/* 鍵盤提示只在輸入框有焦點時出現 */}
+          {/* 鍵盤提示只在輸入框有焦點時出現；螢幕閱讀器從 aria-describedby 讀到同一句（這裡 Enter 是送出，不是換行） */}
           <span aria-hidden className="hidden text-sm text-ink-2 xl:group-focus-within:inline">Enter 送出・Shift+Enter 換行</span>
+          <span id={hintId} className="sr-only">
+            Enter 送出，Shift+Enter 換行
+          </span>
           <button
             type="submit"
             aria-label="送出"

@@ -30,7 +30,10 @@ WEB = HERE.parent.parent
 OUT_FONTS = WEB / "src" / "assets" / "fonts" / "tw-kai"
 OUT_CSS = WEB / "src" / "styles" / "tw-kai.css"
 FAMILY = "TW-Kai"
-SIZE_ADJUST = 110
+# 楷體的字面比 Noto Sans TC 小，而且坐得低（字框 −0.2–0.8em；Noto Sans TC 是 −0.12–0.88em）。
+# 120% 時「永台國的價說」的墨跡上緣和 Noto Sans TC 同字等高（canvas 量測：Noto 0.85em、楷體 0.86em），
+# 同一行的數字（Noto Sans）不會顯得比漢字大；字距只要收一點點（.ai-voice −0.01em）。
+SIZE_ADJUST = 120
 
 # 標點與全形符號：AI 的話裡的「」，。、：；！？（）—…～ 也要是楷體
 PUNCT = list(range(0x3000, 0x3040)) + list(range(0xFE30, 0xFE50)) + list(range(0xFF01, 0xFF61)) + [0x2014, 0x2025, 0x2026, 0x2027]
@@ -135,7 +138,7 @@ def main() -> None:
             "  font-style: normal;",
             "  font-weight: 400;",
             "  font-display: swap;",
-            # 楷體的字面比 Noto Sans TC 小一圈；放大一點，和同一行的數字（Noto Sans）看起來一樣大
+            # 楷體的字面比 Noto Sans TC 小一圈；放大到和同一行的漢字、數字（Noto Sans）看起來一樣大
             f"  size-adjust: {SIZE_ADJUST}%;",
             f'  src: url("../assets/fonts/tw-kai/{path.name}") format("woff2");',
             f"  unicode-range: {compact(cps)};",

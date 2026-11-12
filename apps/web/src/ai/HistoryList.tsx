@@ -126,7 +126,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
 
       <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-base")}>AI 任務</H>
       {tasks.length === 0 ? (
-        <p className="py-4 text-md text-ink-2">排定的健檢、提醒與報告會出現在這裡（之後開放）。</p>
+        <p className="py-4 text-md text-ink-2">排定的健檢、提醒與報告會出現在這裡。</p>
       ) : (
         <ul>
           {tasks.map((t) => (

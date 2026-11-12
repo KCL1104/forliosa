@@ -1,5 +1,5 @@
 /**
- * 依頁面與資料自動出現的建議問題，以及 M4 之前的規則版回答。
+ * 依頁面與資料自動出現的建議問題，以及本機的規則版回答（mock、離線；墨色 Noto Sans，不是模型寫的）。
  * 全部是純函式：只用使用者自己的資料計算，不做投資判斷、不捏造分析。
  * 介面上不加「本頁建議」「依頁面推薦」這類說明字樣（PRODUCT.md）。
  */
@@ -77,14 +77,14 @@ export function isConcentrated(holdings: Holding[], summary?: PortfolioSummary):
 
 export function ledgerSuggestions({ holdings, summary }: LedgerData, today: string): Suggestion[] {
   if (holdings.length === 0) {
-    return [{ kind: "onboard", text: "怎麼用一句話記帳？", lines: ["怎麼用", "一句話記帳？"] }]
+    return [{ kind: "onboard", text: "怎麼用一句話記帳？" }]
   }
   const out: Suggestion[] = []
-  if (holdings.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: "今天誰拖累了我的報酬？", lines: ["今天", "誰拖累了我？"] })
-  else if (holdings.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: "今天誰幫我賺最多？", lines: ["今天", "誰幫我賺最多？"] })
+  if (holdings.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: "今天誰拖累了我的報酬？" })
+  else if (holdings.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: "今天誰幫我賺最多？" })
   const soon = (summary?.upcoming_dividends ?? []).filter((d) => daysBetween(today, d.ex_dividend_date) <= 31)
-  if (soon.length > 0) out.push({ kind: "dividends_next", text: "下個月我能領多少股利？", lines: ["下個月", "能領多少股利？"] })
-  if (isConcentrated(holdings, summary)) out.push({ kind: "concentration", text: "我的持股會不會太集中？", lines: ["我的持股", "會不會太集中？"] })
+  if (soon.length > 0) out.push({ kind: "dividends_next", text: "下個月我能領多少股利？" })
+  if (isConcentrated(holdings, summary)) out.push({ kind: "concentration", text: "我的持股會不會太集中？" })
   return out.slice(0, MAX)
 }
 
@@ -94,17 +94,17 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
   const held = !!s.position
   if (s.why?.show) {
     const d = direction(pct)
-    out.push({ kind: "why_move", symbol: s.symbol, text: `${s.name}今天為什麼${d === "down" ? "跌" : "漲"}？`, lines: ["今天", `為什麼${d === "down" ? "跌" : "漲"}？`] })
+    out.push({ kind: "why_move", symbol: s.symbol, text: `${s.name}今天為什麼${d === "down" ? "跌" : "漲"}？` })
   }
-  if (isListedStock(s)) out.push({ kind: "foreign_flow", symbol: s.symbol, text: FOREIGN_FLOW_QUESTION, lines: ["最近外資", "對這檔的動向？"] })
+  if (isListedStock(s)) out.push({ kind: "foreign_flow", symbol: s.symbol, text: FOREIGN_FLOW_QUESTION })
   if (held) {
     const next = s.position?.upcoming_dividend
-    if (next && daysBetween(today, next.ex_dividend_date) <= 31) out.push({ kind: "next_dividend", symbol: s.symbol, text: "這次除息我可以領多少？", lines: ["這次除息", "我可以領多少？"] })
-    if (s.type === "stock" && (s.overview?.eps_ttm ?? 0) > 0) out.push({ kind: "cost_on_river", symbol: s.symbol, text: "我的成本在河流圖哪裡？", lines: ["我的成本", "在河流圖哪裡？"] })
-    if (s.market !== "US") out.push({ kind: "add_one_lot", symbol: s.symbol, text: "加碼 1 張，均價會變多少？", lines: ["加碼 1 張", "均價會變多少？"] })
+    if (next && daysBetween(today, next.ex_dividend_date) <= 31) out.push({ kind: "next_dividend", symbol: s.symbol, text: "這次除息我可以領多少？" })
+    if (s.type === "stock" && (s.overview?.eps_ttm ?? 0) > 0) out.push({ kind: "cost_on_river", symbol: s.symbol, text: "我的成本在河流圖哪裡？" })
+    if (s.market !== "US") out.push({ kind: "add_one_lot", symbol: s.symbol, text: "加碼 1 張，均價會變多少？" })
   } else {
-    if (s.type === "stock" && (s.overview?.pe ?? null) !== null) out.push({ kind: "is_expensive", symbol: s.symbol, text: "現在的本益比算貴嗎？", lines: ["現在的本益比", "算貴嗎？"] })
-    if ((s.overview?.last_cash_dividend ?? 0) > 0) out.push({ kind: "if_hold_dividend", symbol: s.symbol, text: "持有 1 張一年能領多少股利？", lines: ["持有 1 張", "一年能領多少？"] })
+    if (s.type === "stock" && (s.overview?.pe ?? null) !== null) out.push({ kind: "is_expensive", symbol: s.symbol, text: "現在的本益比算貴嗎？" })
+    if ((s.overview?.last_cash_dividend ?? 0) > 0) out.push({ kind: "if_hold_dividend", symbol: s.symbol, text: "持有 1 張一年能領多少股利？" })
   }
   return out.slice(0, MAX)
 }
@@ -112,7 +112,7 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
 export function suggestionsFor(ctx: AiContext, today: string): Suggestion[] {
   if (ctx.route === "ledger") return ledgerSuggestions(ctx.ledger, today)
   if (ctx.route === "stock") return stockSuggestions(ctx.stock, today)
-  if (ctx.route === "groups") return [{ kind: "group_share", text: "群組會分享我的哪些資料？", lines: ["群組會分享", "我的哪些資料？"] }]
+  if (ctx.route === "groups") return [{ kind: "group_share", text: "群組會分享我的哪些資料？" }]
   return []
 }
 
@@ -140,9 +140,17 @@ export function classifyQuestion(text: string, ctx: AiContext): SuggestionKind |
 
 // ── 回答 ───────────────────────────────────────────────
 const money = (n: number, privacy: boolean, signed = false) => (privacy ? MASK : formatMoney(n, { signed }))
+/** 數字列（漲跌色）裡的百分比：▲4.83%／▼1.85% */
 const pctGlyph = (r: number | null | undefined) => {
   const d = direction(r)
   return `${directionGlyph(d)}${formatPercent(r === null || r === undefined ? r : Math.abs(r), { signed: false })}`
+}
+/** 句子裡的漲跌用字：「上漲 4.83%」「下跌 1.85%」「平盤」；▲▼ 與漲跌色只放在數字列 */
+const pctWords = (r: number | null | undefined) => {
+  if (r === null || r === undefined || Number.isNaN(r)) return "—"
+  const d = direction(r)
+  if (d === "flat") return "平盤"
+  return `${d === "up" ? "上漲" : "下跌"} ${formatPercent(Math.abs(r), { signed: false })}`
 }
 
 export interface AnswerInput {
@@ -175,8 +183,8 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
       if (movers.length === 0) return { text: kind === "drag" ? "今天沒有持股下跌。" : "今天沒有持股上漲。", asOf }
       const [first, second] = movers
       const text =
-        `今天${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${first!.name}（${pctGlyph(first!.day_change_pct)}）` +
-        (second ? `，其次是${second.name}（${pctGlyph(second.day_change_pct)}）。` : "。")
+        `今天${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${first!.name}（${pctWords(first!.day_change_pct)}）` +
+        (second ? `，其次是${second.name}（${pctWords(second.day_change_pct)}）。` : "。")
       return {
         text,
         rows: movers.map((h) => ({ label: h.name, value: money(h.day_change, privacy, true), tone: direction(h.day_change), hint: pctGlyph(h.day_change_pct) })),
@@ -202,7 +210,7 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
         text:
           `最大的一檔是${top.name}，佔 ${formatPercent(top.weight, { signed: false, decimals: 1 })}；前三大合計 ${formatPercent(top3, { signed: false, decimals: 1 })}` +
           (industry ? `；${industry.label}佔 ${formatPercent(industry.weight, { signed: false, decimals: 1 })}。` : "。") +
-          "多集中才算太多要看你的目標；完整的健檢在下一階段由 AI 提供。",
+          "多集中才算太多要看你的目標。",
         rows: [...holdings].sort((a, b) => b.weight - a.weight).slice(0, 3).map((h) => ({ label: h.name, value: formatPercent(h.weight, { signed: false, decimals: 1 }) })),
         asOf,
       }
@@ -223,10 +231,10 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
   switch (kind) {
     case "why_move": {
       if (!s.why?.show) {
-        return { text: `${s.name}今天的漲跌在平常的範圍內（${pctGlyph(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
+        return { text: `${s.name}今天的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
       }
       return {
-        text: `${s.name}今天${pctGlyph(s.quote?.change_pct)}。目前看得到的是：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
+        text: `${s.name}今天${pctWords(s.quote?.change_pct)}。目前看得到的是：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
         rows: s.why.reasons.map((r) => ({ label: r.text, value: "" })),
         links: [link("chips", listed ? "看籌碼" : "看法人買賣"), link("events", "看事件")],
         asOf: s.why.as_of ?? asOf,
@@ -298,7 +306,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "foreign_flow":
       // 本機規則版沒有網路搜尋：說明為什麼沒有數字、給現在看得到的資料（真實後端由 AI 搜尋新聞，附來源與日期）
       return {
-        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供（外資持股只免費公布前 20 名），沒有免費、可商用的完整來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期；完整的 AI 回答開放後再問我，我不想給你猜的答案。`,
+        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供（外資持股只免費公布前 20 名），沒有免費、可商用的完整來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期。`,
         links: [link("chips", "看融資融券"), link("events", "看公告")],
       }
     default:
@@ -334,7 +342,7 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
     if (links.length === 0) links.push({ label: "看持倉", to: "/" })
   }
   return {
-    text: "完整的 AI 回答在下一階段開放，我不想給你猜的答案。現在我能幫你記帳（例如「買 0050 2 張 52.4」），也能回答你持股的數字。這題可以先看這裡：",
+    text: "這題要查資料並附來源，這裡先不回答。現在可以記帳（例如「買 0050 2 張 52.4」），或問你持股的數字。這題可以先看這裡：",
     links: links.slice(0, 3),
   }
 }

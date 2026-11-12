@@ -123,7 +123,7 @@ export const useAi = create<AiState>()(
             .slice(0, 20),
         ),
       }),
-      // 每次打開 app 從問候與建議開始（舊對話留在「紀錄」）；有待簽名草稿的對話例外，直接回到它
+      // 每次打開 app 從建議開始（舊對話留在「紀錄」）；有待簽名草稿的對話例外，直接回到它
       onRehydrateStorage: () => (state) => {
         // 對話紀錄保留 30 天（與後端相同）
         if (state) state.threads = state.threads.filter((t) => Date.now() - Date.parse(t.updatedAt) <= RETENTION_MS)
@@ -150,4 +150,25 @@ export function useCurrentThread(): Thread | null {
 /** 待簽名的草稿數 */
 export function usePendingCount(): number {
   return useAi((s) => Object.values(s.drafts).filter((d) => d.status === "pending").length)
+}
+
+/** 最新一份待簽名的草稿（優先找還在紀錄裡的對話中的那份） */
+export function latestPendingDraftId(): string | null {
+  const s = useAi.getState()
+  const pending = Object.values(s.drafts)
+    .filter((d) => d.status === "pending")
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  const inThread = pending.find((d) => s.threads.some((t) => t.messages.some((m) => m.draftId === d.id || m.draftIds?.includes(d.id))))
+  return (inThread ?? pending[0])?.id ?? null
+}
+
+/** 打開草稿所在的對話，並把草稿標成焦點約 2.4 秒（草稿卡會捲進畫面、加上外框） */
+export function openDraft(id: string | null) {
+  const s = useAi.getState()
+  if (id && s.drafts[id]) {
+    const thread = s.threads.find((t) => t.messages.some((m) => m.draftId === id || m.draftIds?.includes(id)))
+    if (thread) s.openThread(thread.id)
+  }
+  s.focusDraft(id)
+  window.setTimeout(() => useAi.getState().focusDraft(null), 2400)
 }

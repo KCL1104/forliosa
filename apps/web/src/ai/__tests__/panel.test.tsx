@@ -1,11 +1,14 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
-import { beforeAll, describe, expect, it, vi } from "vitest"
+import { act, fireEvent, render, screen } from "@testing-library/react"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
+import { Composer } from "@/ai/Composer"
 import { Conversation } from "@/ai/Conversation"
+import { PanelHome } from "@/ai/Home"
 import { quickActions } from "@/ai/panel-helpers"
 import type { useAiRunner } from "@/ai/runner"
+import { useAi } from "@/ai/store"
 import type { AiContext, StockData } from "@/ai/suggestions"
-import type { Thread } from "@/ai/types"
+import type { Draft, Thread } from "@/ai/types"
 
 const stock = (p: Partial<StockData>): AiContext => ({
   route: "stock",
@@ -73,5 +76,90 @@ describe("對話的兩支筆：模型寫的字是紫色楷體，規則或範本�
     expect(screen.getByText("後端的回答。").closest("p")).toHaveClass("ai-voice")
     view({ id: "t3", title: "q", updatedAt: at, messages: [{ id: "a2", role: "ai", text: "本機的說明。", at }] })
     expect(screen.getByText("本機的說明。").closest("p")).not.toHaveClass("ai-voice")
+  })
+})
+
+describe("免責只跟著回答：草稿說明（照使用者的指令算的稅費）不加", () => {
+  const runner = { submit: async () => undefined } as unknown as ReturnType<typeof useAiRunner>
+  beforeAll(() => {
+    Element.prototype.scrollIntoView = vi.fn()
+  })
+  const at = "2026-11-12T13:41:00+08:00"
+  it("模型的回答、規則版回答各有一行免責；草稿說明沒有", () => {
+    render(
+      <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
+        <Conversation
+          thread={{
+            id: "t4",
+            title: "q",
+            updatedAt: at,
+            messages: [
+              { id: "a1", role: "ai", model: true, text: "台積電今天上漲。", disclaimer: "模型回答的免責。", at },
+              { id: "a2", role: "ai", answer: { text: "今天拖累最多的是環球晶。" }, disclaimer: "規則版回答的免責。", at },
+              { id: "a3", role: "ai", model: false, text: "我照你說的算好了稅費，簽名後才會入帳。", disclaimer: "草稿說明的免責。", at },
+            ],
+          }}
+          runner={runner}
+        />
+      </QueryClientProvider>,
+    )
+    expect(screen.getByText("模型回答的免責。")).toBeInTheDocument()
+    expect(screen.getByText("規則版回答的免責。")).toBeInTheDocument()
+    expect(screen.queryByText("草稿說明的免責。")).not.toBeInTheDocument()
+  })
+})
+
+describe("輸入框的鍵盤提示：畫面上只在有焦點時出現，螢幕閱讀器一直讀得到", () => {
+  it("textarea 用 aria-describedby 指到「Enter 送出，Shift+Enter 換行」", () => {
+    render(<Composer variant="panel" placeholder="提出問題" onSubmit={() => undefined} onAttach={() => undefined} />)
+    const box = screen.getByRole("textbox", { name: "提出問題或下指令" })
+    expect(box).toHaveAccessibleDescription("Enter 送出，Shift+Enter 換行")
+  })
+})
+
+describe("面板首頁：待簽名的草稿排在第一列", () => {
+  const at = "2026-11-12T13:41:00+08:00"
+  const draft = (id: string, createdAt: string): Draft => ({
+    id,
+    status: "pending",
+    input: { type: "buy" } as Draft["input"],
+    instrument: { symbol: "0050.TW", code: "0050", name: "元大台灣50", market: "TWSE", currency: "TWD" },
+    notes: [],
+    createdAt,
+  })
+  const runner = { ask: vi.fn(), action: vi.fn() } as unknown as ReturnType<typeof useAiRunner>
+  const suggestions = [
+    { kind: "drag" as const, text: "今天誰拖累了我的報酬？" },
+    { kind: "dividends_next" as const, text: "下個月我能領多少股利？" },
+    { kind: "concentration" as const, text: "我的持股會不會太集中？" },
+  ]
+  afterEach(() => {
+    vi.useRealTimers()
+    act(() => useAi.setState({ threads: [], drafts: {}, threadId: null, focusDraftId: null }))
+  })
+
+  it("沒有待簽名：只有建議（最多 3 列）", () => {
+    render(<PanelHome ctx={{ route: "ledger", ledger: { holdings: [] } }} runner={runner} suggestions={suggestions} size="panel" />)
+    expect(screen.getAllByRole("listitem").map((li) => li.textContent)).toEqual(suggestions.map((s) => s.text))
+  })
+
+  it("有待簽名：第一列「N 筆草稿等你簽名」，仍然最多 3 列；按下打開最新那份草稿所在的對話", () => {
+    vi.useFakeTimers()
+    act(() =>
+      useAi.setState({
+        drafts: { d_old: draft("d_old", "2026-11-12T09:00:00+08:00"), d_new: draft("d_new", "2026-11-12T10:00:00+08:00") },
+        threads: [
+          { id: "thr_old", title: "買 0050", updatedAt: at, messages: [{ id: "m1", role: "ai", draftId: "d_old", at }] },
+          { id: "thr_new", title: "買 0050", updatedAt: at, messages: [{ id: "m2", role: "ai", draftId: "d_new", at }] },
+        ],
+        threadId: null,
+      }),
+    )
+    render(<PanelHome ctx={{ route: "ledger", ledger: { holdings: [] } }} runner={runner} suggestions={suggestions} size="panel" />)
+    const rows = screen.getAllByRole("listitem").map((li) => li.textContent)
+    expect(rows).toEqual(["2 筆草稿等你簽名", "今天誰拖累了我的報酬？", "下個月我能領多少股利？"])
+    fireEvent.click(screen.getByRole("button", { name: "2 筆草稿等你簽名" }))
+    expect(useAi.getState().threadId).toBe("thr_new")
+    expect(useAi.getState().focusDraftId).toBe("d_new")
   })
 })

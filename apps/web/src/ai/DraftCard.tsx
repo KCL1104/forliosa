@@ -107,9 +107,16 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
           ) : (
             <>
               <Cell label="股數" value={privacy ? <Masked /> : input.quantity !== null ? `${formatNumber(input.quantity, 0)} 股` : "—"} />
+              {/* 和「2,000 股」同一套語法：值後面接單位（台股「52.40 元」、美股「182.30 美元」） */}
               <Cell
                 label={input.type === "stock_dividend" ? "每股配股（元）" : "成交價"}
-                value={input.price != null ? `${input.type === "stock_dividend" ? "" : "每股 "}${formatPrice(input.price, instrument.market)}` : "—"}
+                value={
+                  input.price == null
+                    ? "—"
+                    : input.type === "stock_dividend"
+                      ? formatPrice(input.price, instrument.market)
+                      : `${formatPrice(input.price, instrument.market)} ${currency === "USD" ? "美元" : "元"}`
+                }
                 right
               />
               <Cell label="手續費" value={preview ? money(preview.fee) : "…"} />

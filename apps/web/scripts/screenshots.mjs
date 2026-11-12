@@ -142,6 +142,35 @@ const modelAnswer = async (page, mobile) => {
   await page.getByText(/外資連續幾天買超/).first().waitFor({ timeout: 8000 })
 }
 
+/** 個股頁：按 AI 面板的建議「台積電今天為什麼漲？」→ 規則版回答（句子用字說漲跌、數字列、可以去的地方、墨色的追問連結） */
+const whyMove = async (page, mobile) => {
+  if (mobile) {
+    await page.getByRole("button", { name: /^問 AI/ }).click()
+    await page.waitForTimeout(400)
+  }
+  await page.getByRole("list", { name: "可以這樣問" }).getByRole("button", { name: /今天為什麼(漲|跌)/ }).click()
+  await page.getByRole("list", { name: "接著問" }).waitFor({ timeout: 8000 })
+}
+/** 草稿還沒簽名就開新對話：面板首頁的第一列是「1 筆草稿等你簽名」（手機從「紀錄」發起新對話） */
+const pendingHome = async (page, mobile) => {
+  await draft(page, mobile)
+  if (mobile) {
+    await page.getByRole("button", { name: "紀錄與 AI 任務" }).click()
+    await page.getByRole("button", { name: "發起新對話" }).click()
+  } else {
+    await page.getByRole("button", { name: "新對話" }).click()
+  }
+  await page.getByRole("button", { name: "1 筆草稿等你簽名" }).waitFor({ timeout: 8000 })
+}
+/** 手機搜尋股票：輸入「00」，符合的股票取代建議、列在輸入框上方（iOS 的鍵盤會蓋住輸入框下方） */
+const mobileSearch = async (page) => {
+  await page.getByRole("button", { name: /^問 AI/ }).click()
+  await page.waitForTimeout(400)
+  await page.getByLabel(/搜尋股票、提問/).fill("00")
+  await page.getByRole("list", { name: "股票搜尋結果" }).waitFor({ timeout: 8000 })
+  await page.waitForTimeout(300)
+}
+
 /** 股利自動入帳：改一筆自動入帳的股利（2454 10/8），交易列表同時看到「自動」與「自動・已修改」 */
 const autoEdited = async (page) => {
   await page.getByRole("button", { name: /^編輯 10\/8.*2454（自動）$/ }).click()
@@ -309,6 +338,9 @@ const SHOTS = [
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
   { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
   { name: "ai-model-answer", path: "/", ready: "text=總資產", action: modelAnswer },
+  { name: "stock-2330-why-answer", path: "/stock/2330.TW", ready: "text=參考價", action: whyMove },
+  { name: "ledger-pending-home", path: "/", ready: "text=總資產", action: pendingHome },
+  { name: "ai-search", path: "/", ready: "text=總資產", mobileOnly: true, action: mobileSearch },
   { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },
   // 新聞報導：媒體原標題＋媒體＋時間＋原文連結（GDELT＋SearXNG、兩者不足時 AI 搜尋補缺），沒有報導時的空狀態，美股英文媒體；資料來源頁的收集方式說明
   { name: "stock-2330-news", path: "/stock/2330.TW", ready: "text=參考價", action: toNews },

@@ -22,8 +22,6 @@ export type SuggestionKind =
 export interface Suggestion {
   kind: SuggestionKind
   text: string
-  /** 手機卡片用的兩行版本（第一行短） */
-  lines?: [string, string]
   symbol?: string
   /** 定期定額扣款日的草稿（`recurring_draft`）：計畫與原本的扣款日；`missed`＝最近 7 天漏記、補記 */
   recurring?: { planId: string; scheduledDate: string; date: string; name: string; missed?: boolean }

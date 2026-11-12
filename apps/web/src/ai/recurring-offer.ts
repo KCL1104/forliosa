@@ -66,7 +66,6 @@ export function recurringOffers(upcoming: UpcomingItem[], today: string, buysTod
       return {
         kind: "recurring_draft" as const,
         text: `記下今天的 ${code} 定期定額`,
-        lines: ["今天扣款", `記下 ${code} 定期定額`] as [string, string],
         symbol: u.symbol!,
         recurring: { planId: u.plan_id!, scheduledDate: u.scheduled_date ?? u.date, date: u.date, name: planName(u) },
       }
@@ -99,7 +98,6 @@ export function missedDebits(plans: RecurringPlan[], today: string, buys: Transa
       out.push({
         kind: "recurring_draft",
         text: `補記 ${monthDay(debit)} 的 ${code} 定期定額`,
-        lines: [`${monthDay(debit)} 扣款`, `補記 ${code} 定期定額`],
         symbol: p.symbol,
         recurring: { planId: p.id, scheduledDate: scheduled, date: debit, name: p.name, missed: true },
       })

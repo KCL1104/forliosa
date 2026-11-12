@@ -74,7 +74,10 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
               ) : null,
             )}
             {!m.streaming && m.citations && m.citations.length > 0 && <Citations items={m.citations} />}
-            {!m.streaming && (m.text || m.answer) && !m.error && <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? fallbackDisclaimer}</p>}
+            {/* 免責只跟著回答（模型的回答、規則版回答）；草稿前的說明是照使用者的指令算的稅費，不是建議，不加 */}
+            {!m.streaming && !m.error && (m.answer || (m.text && m.model !== false)) && (
+              <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? fallbackDisclaimer}</p>
+            )}
           </div>
         ),
       )}
@@ -228,7 +231,8 @@ function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runn
               {(r.value || r.hint) && (
                 <dd className={cn("num shrink-0 text-md", r.tone === "up" ? "text-rise" : r.tone === "down" ? "text-fall" : "text-ink")}>
                   {r.value}
-                  {r.hint && <span className="ml-2 text-sm text-ink-2">{r.hint}</span>}
+                  {/* 漲跌的百分比（▲▼）跟著漲跌色；其他補充（每股配息）是淡墨 */}
+                  {r.hint && <span className={cn("ml-2 text-sm", r.tone !== "up" && r.tone !== "down" && "text-ink-2")}>{r.hint}</span>}
                 </dd>
               )}
             </div>
