@@ -83,11 +83,32 @@ class Transaction(Base):
     currency: Mapped[str] = mapped_column(String(3), default="TWD")
     is_day_trade: Mapped[bool] = mapped_column(Boolean, default=False)
     note: Mapped[str] = mapped_column(Text, default="")
+    # manual | import | ai_draft (a signed AI / recurring-plan draft) | auto (booked by the dividend sync) |
+    # auto_edited (an automatic dividend the user edited; the sync never touches it again)
     source: Mapped[str] = mapped_column(String(16), default="manual")
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
 
     account: Mapped[BrokerAccount] = relationship(back_populates="transactions")
+
+
+class AutoDividendSkip(Base):
+    """An automatically booked dividend the user deleted or edited (``forliosa.services.auto_dividends``):
+    the sync never books (account, symbol, ex_date, kind) again. ``reason``: ``deleted`` | ``edited``."""
+
+    __tablename__ = "auto_dividend_skips"
+    __table_args__ = (
+        UniqueConstraint("account_id", "symbol", "ex_date", "kind", name="uq_auto_dividend_skip"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("broker_accounts.id", ondelete="CASCADE"), index=True)
+    symbol: Mapped[str] = mapped_column(String(20))
+    ex_date: Mapped[date] = mapped_column(Date)
+    kind: Mapped[str] = mapped_column(String(8))  # cash | stock
+    reason: Mapped[str] = mapped_column(String(16), default="deleted")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 
 class HoldingSnapshot(Base):

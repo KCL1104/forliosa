@@ -126,5 +126,5 @@ def update_transaction(txn_id: str, body: TransactionPatch, user: User = Depends
 
 @router.delete("/{txn_id}", status_code=204)
 def delete_transaction(txn_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
-    svc.delete(db, user, _owned(db, user, txn_id))
+    svc.delete(db, user, _owned(db, user, txn_id), get_market_data())
     return Response(status_code=204)

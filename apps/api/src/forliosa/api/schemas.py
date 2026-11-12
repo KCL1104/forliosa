@@ -278,7 +278,9 @@ class Transaction(BaseModel):
     currency: str
     is_day_trade: bool
     note: str
-    source: str
+    # manual | import | ai_draft | auto (booked by the automatic dividend sync) | auto_edited (an automatic
+    # dividend the user edited; never overwritten again)
+    source: Literal["manual", "import", "ai_draft", "auto", "auto_edited"]
     created_at: str
 
 

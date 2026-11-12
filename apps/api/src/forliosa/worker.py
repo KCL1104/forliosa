@@ -12,6 +12,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   run covers it (no early-morning job).
 * ``weekly_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable), TAIFEX final
   settlement prices and SSF / SSO lists, and the stale-endpoint check (twtazu_od, t187ap09_L).
+* ``auto_dividends`` — after each archive run with the ``twse`` / ``tpex`` groups (08:10 covers today's ex-dates):
+  ``forliosa.services.auto_dividends.sync_all_users`` books, corrects or removes automatic dividends.
 * ``ai_retention`` — every day 04:20: deletes AI threads, messages and drafts whose last activity is older than
   ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
 
@@ -155,6 +157,14 @@ class Worker:
             load_official_calendar(db)
         failed = [r.name for r in results if r.error]
         log.info("archive %s: %d datasets, %d failed %s", ",".join(groups), len(results), len(failed), failed or "")
+        if {"twse", "tpex"} & set(groups):  # ex-dividend notices are refreshed with these groups
+            await self.auto_dividends()
+
+    async def auto_dividends(self) -> None:
+        from forliosa.services.auto_dividends import sync_all_users
+
+        res = await asyncio.to_thread(sync_all_users, session_factory(), self.md)
+        log.info("automatic dividends: %d created, %d updated, %d deleted", res.created, res.updated, res.deleted)
 
     async def after_close_refresh(self) -> None:
         with session_factory()() as db:

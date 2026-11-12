@@ -26,6 +26,7 @@ from forliosa.domain.ledger import SECURITY_TYPES, LedgerError, TxnType, replay
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
 from forliosa.models import BrokerAccount, Transaction, User
+from forliosa.services import auto_dividends
 from forliosa.services.ledger_io import fee_schedule, instrument_ref, load_ledger_input, shares_held
 from forliosa.timeutil import now_utc
 
@@ -239,18 +240,33 @@ def validate_ledger(db: Session, user: User, account: BrokerAccount, candidate: 
         raise unprocessable(str(exc), code="ledger_inconsistent") from exc
 
 
+def _dividend_scope(t: Transaction | dict[str, Any]) -> list[tuple[str, str | None]]:
+    """(account, symbol) whose automatic dividends a change to this transaction can affect."""
+    get = t.get if isinstance(t, dict) else (lambda k: getattr(t, k))
+    symbol, kind = get("symbol"), get("type")
+    if not symbol or TxnType(kind) not in SECURITY_TYPES:
+        return []
+    return [(get("account_id"), symbol)]
+
+
 def create(db: Session, user: User, data: dict[str, Any], md: MarketData) -> Transaction:
     comp = compute(db, user, data, md)
     txn = Transaction(id=new_id("txn"), user_id=user.id, created_at=now_utc(), updated_at=now_utc(), **comp.values)
     account = _get_account(db, user, txn.account_id)
     validate_ledger(db, user, account, txn)
     db.add(txn)
+    auto_dividends.after_user_change(db, user, md, _dividend_scope(txn))
     db.commit()
     return txn
 
 
 def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md: MarketData) -> Transaction:
     data = {f: getattr(txn, f) for f in FIELDS}
+    old_scope = _dividend_scope(txn)
+    # Editing an automatic dividend turns it into the user's own version: the sync never touches it again.
+    edited_auto = auto_dividends.key_of(txn) if txn.source == auto_dividends.AUTO else None
+    if txn.source == auto_dividends.AUTO:
+        patch = {**patch, "source": auto_dividends.AUTO_EDITED}
     # Auto-calculated fields are recalculated unless explicitly given, when inputs change.
     inputs_changed = any(k in patch for k in ("quantity", "price", "amount", "type", "trade_date", "symbol",
                                               "account_id", "is_day_trade"))
@@ -272,12 +288,21 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
     for k, v in comp.values.items():
         setattr(txn, k, v)
     txn.updated_at = now_utc()
+    if edited_auto is not None:
+        auto_dividends.remember_skip(db, user, edited_auto, "edited")
+    auto_dividends.after_user_change(db, user, md, old_scope + _dividend_scope(txn))
     db.commit()
     return txn
 
 
-def delete(db: Session, user: User, txn: Transaction) -> None:
+def delete(db: Session, user: User, txn: Transaction, md: MarketData) -> None:
+    """Delete a transaction. Deleting an automatic dividend keeps a skip so the sync never books it again."""
     account = _get_account(db, user, txn.account_id)
     validate_ledger(db, user, account, None, remove_id=txn.id)
+    scope = _dividend_scope(txn)
+    auto_key = auto_dividends.key_of(txn) if txn.source == auto_dividends.AUTO else None
     db.delete(txn)
+    if auto_key is not None:
+        auto_dividends.remember_skip(db, user, auto_key, "deleted")
+    auto_dividends.after_user_change(db, user, md, scope)
     db.commit()

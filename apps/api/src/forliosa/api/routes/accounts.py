@@ -16,7 +16,8 @@ from forliosa.db import get_db
 from forliosa.domain.fees import COMMISSION_RATE, DEFAULT_MIN_FEE
 from forliosa.ids import new_id
 from forliosa.marketdata.service import get_market_data
-from forliosa.models import BrokerAccount, HoldingSnapshot, Transaction, User
+from forliosa.models import AutoDividendSkip, BrokerAccount, HoldingSnapshot, Transaction, User
+from forliosa.services import auto_dividends
 from forliosa.timeutil import iso_taipei
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -71,8 +72,12 @@ def update_account(account_id: str, body: AccountPatch, user: User = Depends(cur
         n = db.scalar(select(func.count()).select_from(Transaction).where(Transaction.account_id == acc.id))
         if n:
             raise ApiError(409, "conflict", "帳戶已有交易紀錄，不能變更幣別")
+    mode_changed = "tracking_mode" in changes and changes["tracking_mode"] != acc.tracking_mode
     for k, v in changes.items():
         setattr(acc, k, v.strip() if isinstance(v, str) and k in ("name", "broker") else v)
+    if mode_changed:  # holdings-only accounts book dividends only after the snapshot date
+        db.flush()
+        auto_dividends.after_user_change(db, user, get_market_data(), [(acc.id, None)], assume_consistent=False)
     db.commit()
     return account_out(acc)
 
@@ -82,6 +87,7 @@ def delete_account(account_id: str, user: User = Depends(current_user), db: Sess
     acc = get_owned_account(db, user, account_id)
     db.execute(delete(Transaction).where(Transaction.account_id == acc.id, Transaction.user_id == user.id))
     db.execute(delete(HoldingSnapshot).where(HoldingSnapshot.account_id == acc.id))
+    db.execute(delete(AutoDividendSkip).where(AutoDividendSkip.account_id == acc.id))
     db.delete(acc)
     db.commit()
     return Response(status_code=204)
@@ -125,5 +131,7 @@ def put_holdings_snapshot(account_id: str, body: HoldingsSnapshotIn, user: User 
         )
     db.execute(delete(HoldingSnapshot).where(HoldingSnapshot.account_id == acc.id))
     db.add_all(resolved.values())
+    db.flush()
+    auto_dividends.after_user_change(db, user, md, [(acc.id, None)], assume_consistent=False)
     db.commit()
     return _snapshot_out(acc.id, list(resolved.values()))
