@@ -10,7 +10,7 @@ from typing import Any
 
 from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
-from forliosa.datapolicy import labels
+from forliosa.datapolicy import label, labels, tagged
 from forliosa.marketdata.base import InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.service import MarketData
@@ -37,16 +37,26 @@ def require_instrument(md: MarketData, symbol: str) -> InstrumentInfo:
 
 
 def detail(md: MarketData, symbol: str) -> dict[str, Any]:
+    """Instrument detail. Under ``commercial`` shioaji-data's AI-written research (business summary, chain
+    stage, themes; licence 「待定」) is left out; the official fields (shares, market cap) stay."""
+    from forliosa.marketdata.shioaji_data import SOURCE_FINANCIALS, SOURCE_OFFICIAL, SOURCE_RESEARCH
+
     info = require_instrument(md, symbol)
     prof = md.profile(info.symbol)
+    # shioaji-data's summary / chain stage / themes (profile and instrument card alike) are the AI research
+    research_ok = md.policy == "personal"
+    card_ok = research_ok or info.source != "shioaji-data"
+    summary = (prof.summary if research_ok else None) or (info.summary if card_ok else None)
+    stage = (prof.chain_stage if research_ok else None) or (info.chain_stage if card_ok else None)
     return {
         **instrument_out(info),
-        "summary": prof.summary or info.summary,
-        "chain_stage": prof.chain_stage or info.chain_stage,
-        "themes": list(prof.themes),
+        "summary": summary,
+        "chain_stage": stage,
+        "themes": list(prof.themes) if research_ok else [],
         "shares_outstanding": prof.shares_outstanding,
         "market_cap": ser.money(prof.market_cap),
-        "data_sources": list(prof.data_sources),
+        "data_sources": [label("shioaji-data") if s in (SOURCE_OFFICIAL, SOURCE_FINANCIALS) else s
+                         for s in prof.data_sources if research_ok or s != SOURCE_RESEARCH],
         "is_demo": prof.is_demo,
     }
 
@@ -76,7 +86,7 @@ def quote_out(q: QuoteData) -> dict[str, Any]:
         "is_realtime": q.is_realtime,
         "is_demo": q.is_demo,
         "source": q.source,
-        "sources": labels([q.source]),
+        "sources": labels(tagged(q.source, "price")),
     }
 
 
@@ -99,7 +109,7 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
             for c in candles
         ],
         "is_demo": h.is_demo,
-        "sources": labels(h.source.split("+")) if h.source else [],
+        "sources": labels(tagged(h.source, "price")),
         "notes": notes,
     }
 
@@ -146,7 +156,7 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
     coverage = series_notes(md, info.symbol, start, hist.candles[0].t if hist.candles else None)
     if ratios:
         out = _valuation_from_ratios(info, hist.candles, ratios, start, five_y, hist.is_demo)
-        out["sources"] = labels([*hist.source.split("+"), *ratio_sources])
+        out["sources"] = labels([*tagged(hist.source, "price"), *tagged(ratio_sources, "valuation")])
         out["notes"] = [*coverage, *out["notes"]]
         return out
     fundamentals = md.valuation_inputs(info.symbol) if info.type == "stock" else None
@@ -224,8 +234,9 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
         },
         "notes": notes,
         "is_demo": is_demo,
-        "sources": labels([*hist.source.split("+"), *(["shioaji-data"] if fundamentals and not fundamentals.is_demo
-                                                       else []), *(["demo"] if is_demo else [])]),
+        "sources": labels([*tagged(hist.source, "price"),
+                           *(["shioaji-data"] if fundamentals and not fundamentals.is_demo else []),
+                           *(["demo"] if is_demo else [])]),
     }
 
 

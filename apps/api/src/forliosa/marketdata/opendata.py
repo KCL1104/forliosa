@@ -25,6 +25,9 @@ TWSE OpenAPI (``https://openapi.twse.com.tw/v1``; latest day only; dates ROC "11
 * ``/exchangeReport/TWT48U_ALL`` 除權除息預告 — parsed by :func:`forliosa.marketdata.twse.parse_twt48u_all`.
 * ``/opendata/t187ap05_L`` 每月營業收入彙總表 — 出表日期, 資料年月 ("11510"), 公司代號, 營業收入-當月營收 (thousand
   NT$), 營業收入-去年同月增減(%), 營業收入-上月比較增減(%). No filing date per company.
+* ``/news/newsList`` 證交所新聞 — Title, Url (a www.twse.com.tw content page; linked, never fetched), Date.
+* ``/opendata/t187ap47_L`` 基金基本資料彙總表 — 基金代號, 基金簡稱, 基金類型, 標的指數/追蹤指數名稱, 成立日期,
+  上市日期 ….
 * ``/holidaySchedule/holidaySchedule`` 市場開休市日期 — Name, Date, Weekday, Description; also lists trading-day
   markers (「…開始交易日」「…最後交易日」) and settlement-only days (「市場無交易，僅辦理結算交割作業」 = closed).
 * 重大訊息 符合條款 seen live: 第31款 = board approval of a financial report (說明 has 「財務報告或年度自結財務資訊
@@ -56,10 +59,8 @@ TPEx OpenAPI (``https://www.tpex.org.tw/openapi/v1``)
 TDCC open data ``https://opendata.tdcc.com.tw/getOD.ashx?id=1-5`` (CSV, current week only):
 資料日期, 證券代號 (space padded), 持股分級 (1–15, 16 = 差異數調整, 17 = 合計), 人數, 股數, 占集保庫存數比例%.
 
-TWSE website (not the OpenAPI; **personal policy only**, see CONTRACT_NOTES):
-* ``/rwd/zh/fund/T86?date=YYYYMMDD&selectType=ALLBUT0999&response=json`` 三大法人買賣超日報 — ``fields`` +
-  ``data`` arrays (2330 2026-11-11: 6,038,319 + 0 + 2,385,276 + 148,895 = 8,572,490 shares).
-* ``/rwd/zh/fund/MI_QFIIS?date=…`` 外資及陸資持股統計 — 全體外資及陸資持股比率 (percent number).
+The TWSE / TPEx **websites** (T86, MI_QFIIS, peQryDate …) are not used: their terms forbid automated
+downloads without written consent (docs/research/data-sources-licensing.md).
 """
 
 from __future__ import annotations
@@ -373,6 +374,52 @@ def parse_holidays(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+_NEWS_CODE = re.compile(r"(?:公司代號|股票代號|代號)\s*[：:]?\s*(\d{4,6}[A-Z]?)")
+
+
+def parse_twse_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """/news/newsList 證交所新聞 — Title, Url (www.twse.com.tw content page), Date (ROC). ``code`` is the company
+    code when the title names one (「台揚科技股份有限公司（台揚，公司代號：2314）…」), else ``None``."""
+    out = []
+    for r in rows:
+        title, url, d = _text(r.get("Title")), _text(r.get("Url")), parse_tw_date(r.get("Date"))
+        if not title or d is None:
+            continue
+        m = _NEWS_CODE.search(title)
+        out.append({"code": m.group(1) if m else None, "date": d, "title": title[:500],
+                    "url": url if url.startswith("https://") else None, "key": event_key("twse-news", url or title, d)})
+    return out
+
+
+_FUND_FIELDS = {
+    "short_name": "基金簡稱", "name": "基金中文名稱", "english_name": "基金英文名稱", "fund_type": "基金類型",
+    "index_name": "標的指數/追蹤指數名稱", "custom_index": "標的指數是否為客製化或需揭露相關資訊之指數",
+    "foreign_components": "是否包含國外成分股", "units": "發行單位數/轉換數", "custodian": "保管機構",
+    "agent": "總代理人",
+}
+
+
+def parse_fund_profiles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """t187ap47_L 基金基本資料彙總表 (keys verified live 2026-11-12): 出表日期, 基金代號, 基金簡稱, 基金類型,
+    標的指數/追蹤指數名稱, 成立日期, 上市日期, 發行單位數/轉換數, 保管機構 … People's names, phones and
+    addresses (基金經理人, 經理公司董事長／發言人…) are deliberately not kept."""
+    out = []
+    for raw in rows:
+        r = _strip_keys(raw)
+        code = _text(r.get("基金代號"))
+        d = parse_tw_date(r.get("出表日期"))
+        if not is_listed_code(code) or d is None:
+            continue
+        values: dict[str, Any] = {k: _text(r.get(src)) or None for k, src in _FUND_FIELDS.items()}
+        for k, src in (("established", "成立日期"), ("listed", "上市日期")):
+            day = parse_tw_date(r.get(src))
+            values[k] = day.isoformat() if day else None
+        units = parse_int(r.get("發行單位數/轉換數"))
+        values["units"] = units
+        out.append({"code": code, "date": d, "values": values})
+    return out
+
+
 # -- TPEx OpenAPI ----------------------------------------------------------------------------------
 def parse_tpex_reference(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """tpex_mainboard_daily_close_quotes -> next trading day's reference price and limits."""
@@ -497,55 +544,6 @@ def parse_tdcc_distribution(text: str) -> list[dict[str, Any]]:
         pct = parse_decimal(row[5])
         out.append({"code": code, "date": d, "level": level, "holders": parse_int(row[3]) or 0,
                     "shares": parse_int(row[4]) or 0, "pct": (pct / 100) if pct is not None else Decimal(0)})
-    return out
-
-
-# -- TWSE website (personal policy only) -----------------------------------------------------------
-def _table(payload: dict[str, Any]) -> tuple[date | None, list[str], list[list[Any]]]:
-    if not isinstance(payload, dict) or payload.get("stat") not in ("OK", "ok"):
-        return None, [], []
-    return parse_tw_date(payload.get("date")), [str(f).strip() for f in payload.get("fields") or []], \
-        list(payload.get("data") or [])
-
-
-def parse_t86(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    d, fields, data = _table(payload)
-    if d is None or not data:
-        return []
-    col = {name: i for i, name in enumerate(fields)}
-    foreign_ex, foreign_dealer = "外陸資買賣超股數(不含外資自營商)", "外資自營商買賣超股數"
-    need = ("證券代號", foreign_ex, foreign_dealer, "投信買賣超股數", "自營商買賣超股數", "三大法人買賣超股數")
-    if any(n not in col for n in need):
-        raise ValueError(f"T86 欄位改變：{fields}")
-    out = []
-    for row in data:
-        code = _text(row[col["證券代號"]])
-        if not is_listed_code(code):
-            continue
-        foreign = (parse_int(row[col[foreign_ex]]) or 0) + (parse_int(row[col[foreign_dealer]]) or 0)
-        trust = parse_int(row[col["投信買賣超股數"]]) or 0
-        dealer = parse_int(row[col["自營商買賣超股數"]]) or 0
-        total = parse_int(row[col["三大法人買賣超股數"]])
-        out.append({"code": code, "date": d, "foreign_net": foreign, "trust_net": trust, "dealer_net": dealer,
-                    "total_net": total if total is not None else foreign + trust + dealer})
-    return out
-
-
-def parse_mi_qfiis(payload: dict[str, Any]) -> list[dict[str, Any]]:
-    d, fields, data = _table(payload)
-    if d is None or not data:
-        return []
-    col = {name: i for i, name in enumerate(fields)}
-    if "證券代號" not in col or "全體外資及陸資持股比率" not in col:
-        raise ValueError(f"MI_QFIIS 欄位改變：{fields}")
-    out = []
-    for row in data:
-        code = _text(row[col["證券代號"]])
-        pct = parse_decimal(row[col["全體外資及陸資持股比率"]])
-        if not is_listed_code(code) or pct is None:
-            continue
-        shares = parse_int(row[col["全體外資及陸資持有股數"]]) if "全體外資及陸資持有股數" in col else None
-        out.append({"code": code, "date": d, "pct": pct / 100, "shares": shares})
     return out
 
 

@@ -17,6 +17,9 @@ const baseUrl = configured || (import.meta.env.MODE === "api" ? "/api/v1" : unde
 
 export const api: ForliosaApi = baseUrl ? createHttpAdapter(baseUrl) : createMockAdapter({ scenario: readMockScenario() })
 
+/** 真實後端的 base URL（mock 模式為 undefined）；AI 對話的 SSE 串流直接用它 */
+export const apiBaseUrl: string | undefined = baseUrl
+
 /**
  * 開發登入（`POST /auth/dev-login`，後端只在 FORLIOSA_ENV=dev 開放）：
  * - `auto`：開發模式連真實後端時，沒有 session 就自動以示範使用者登入

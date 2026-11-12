@@ -13,12 +13,12 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.api.errors import unprocessable
-from forliosa.datapolicy import allowed_sources, labels
+from forliosa.datapolicy import labels, source_clause, tagged
 from forliosa.marketdata.base import InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.opendata import TDCC_LEVELS
@@ -26,7 +26,6 @@ from forliosa.marketdata.service import MarketData
 from forliosa.models import (
     ForeignHoldingDaily,
     InstitutionalDaily,
-    IntradayPoint,
     MarginDaily,
     MarketEvent,
     ShareholdingDistribution,
@@ -44,7 +43,6 @@ from forliosa.services.portfolio import (
 )
 from forliosa.timeutil import (
     TAIPEI,
-    is_tw_market_open,
     iso_taipei,
     last_tw_trading_day,
     today_taipei,
@@ -64,8 +62,7 @@ REVENUE_WORDS = ("營收", "營業收入")
 
 
 def _filtered(stmt, model, md: MarketData):
-    allowed = allowed_sources(md.policy)
-    return stmt.where(model.source.in_(allowed)) if allowed is not None else stmt
+    return stmt.where(source_clause(model.source, md.policy))
 
 
 def _split(source: str) -> list[str]:
@@ -94,7 +91,7 @@ def trading_status(db: Session, md: MarketData, symbol: str, today: date | None 
         info = attention[-1].detail.strip()
         notes.append("列為注意股票" + (f"：{info[:80]}" if info else ""))
     status = {"attention": bool(attention), "disposition": bool(disposition), "note": "；".join(notes) or None}
-    return status, [r.source for r in attention + disposition]
+    return status, [f"{r.source}/{r.type}" for r in attention + disposition]
 
 
 # -- overview -------------------------------------------------------------------------------------------
@@ -108,7 +105,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     three_m = [c for c in hist.candles if c.t >= add_months(today, -3)]
     prof = md.profile(sym)
     price = q.price if q else (hist.candles[-1].c if hist.candles else None)
-    sources: list[str] = [*(_split(q.source) if q else []), *_split(hist.source)]
+    sources: list[str] = [*(tagged(q.source, "price") if q else []), *tagged(hist.source, "price")]
     is_demo = bool(q and q.is_demo) or hist.is_demo or prof.is_demo
 
     market_cap = prof.market_cap
@@ -121,7 +118,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
         if ratios:
             latest = ratios[max(ratios)]
             pe, pb, dy = latest.get("per"), latest.get("pbr"), latest.get("dividend_yield")
-            sources += rsrc
+            sources += tagged(rsrc, "valuation")
 
     eps_ttm = None
     if _is_tw_stock(info):
@@ -146,7 +143,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     last_div = max(cash_events, key=lambda e: e.ex_dividend_date) if cash_events else None
     if divs.value:
         is_demo |= divs.is_demo
-        sources += _split(divs.source)
+        sources += ["demo"] if divs.is_demo else tagged(divs.source, "ex_dividend")
     if dy is None and price:
         trailing = sum((e.cash_dividend for e in cash_events
                         if today - timedelta(days=365) < e.ex_dividend_date <= today), Decimal(0))
@@ -189,48 +186,24 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
 
 
 # -- intraday -------------------------------------------------------------------------------------------
-def intraday(db: Session, md: MarketData, symbol: str, tracked: set[str]) -> dict[str, Any]:
+INTRADAY_NOTE = "目前沒有授權的盤中行情來源（證交所即時／延遲行情需付費授權），不提供分時走勢"
+
+
+def intraday(md: MarketData, symbol: str) -> dict[str, Any]:
+    """No points in any mode until a licensed intraday source exists (MIS was removed, see CONTRACT_NOTES)."""
     info = require_instrument(md, symbol)
     sym = info.symbol
     q = md.quote(sym)
-    today = today_taipei()
-    notes: list[str] = []
-    points: list[dict[str, Any]] = []
-    sources: list[str] = []
-    day = q.trade_date if q and q.trade_date else last_tw_trading_day(today)
-    if info.market == "US":
-        notes.append("美股沒有盤中走勢資料")
-    elif md.policy == "commercial":
-        notes.append("商用模式沒有授權的盤中行情來源，不提供分時走勢")
-    elif sym not in tracked:
-        notes.append("只有持股與自選的股票會累積盤中走勢")
-    else:
-        latest = db.scalar(select(IntradayPoint.date).where(IntradayPoint.symbol == sym)
-                           .order_by(IntradayPoint.date.desc()).limit(1))
-        if latest is not None and (q is None or q.trade_date is None or latest >= q.trade_date):
-            day = latest
-        rows = list(db.scalars(select(IntradayPoint).where(IntradayPoint.symbol == sym, IntradayPoint.date == day)
-                               .order_by(IntradayPoint.t)))
-        prev_cum = 0
-        for r in rows:
-            vol = None
-            if r.cum_volume is not None:
-                vol = max(r.cum_volume - prev_cum, 0)
-                prev_cum = r.cum_volume
-            points.append({"t": r.t, "price": ser.price(r.price), "volume": vol})
-            sources.append(r.source)
-        if not rows:
-            notes.append("今天還沒有累積到盤中資料（背景工作每 60 秒記錄一次）")
-    is_partial = info.market != "US" and (not points or (day == today and is_tw_market_open()))
+    day = q.trade_date if q and q.trade_date else last_tw_trading_day(today_taipei())
     return {
         "symbol": sym,
         "date": day,
         "prev_close": ser.price(q.prev_close) if q else None,
         "reference_price": ser.price(change_base(q)) if q else None,
-        "points": points,
-        "is_partial": is_partial,
-        "notes": notes,
-        "sources": labels(sources),
+        "points": [],
+        "is_partial": info.market != "US",
+        "notes": ["美股沒有盤中走勢資料"] if info.market == "US" else [INTRADAY_NOTE],
+        "sources": [],
         "is_demo": False,
     }
 
@@ -255,7 +228,9 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     inst = {r.date: r for r in rows(InstitutionalDaily)}
     margin = {r.date: r for r in rows(MarginDaily)}
     foreign = {r.date: r for r in rows(ForeignHoldingDaily)}
-    sources = [r.source for r in (*inst.values(), *margin.values(), *foreign.values())]
+    sources = [*tagged([r.source for r in inst.values()], "institutional"),
+               *tagged([r.source for r in margin.values()], "margin"),
+               *tagged([r.source for r in foreign.values()], "foreign_holding")]
     notes: list[str] = []
 
     expected = len(tw_trading_days(start, today)) * 0.8
@@ -272,8 +247,9 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
                     if r["date"] not in target and start <= r["date"] <= today:
                         target[r["date"]] = _Row(**r, source="finmind")
                         sources.append("finmind")
-    if info.market == "TWSE" and md.policy == "commercial":
-        notes.append("上市股票的三大法人與外資持股沒有官方 OpenAPI 個股資料，商用模式不提供")
+    if info.market == "TWSE" and not inst and not foreign:
+        notes.append("證交所 OpenAPI 沒有上市股票的個股三大法人與外資持股（證交所以付費商品提供），目前不提供；"
+                     "上櫃股票由櫃買中心 OpenAPI 每日存檔")
 
     def lots(shares: int | None) -> float | None:
         return ser.price(Decimal(shares) / 1000) if shares is not None else None
@@ -290,7 +266,7 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
         major = {"as_of": tdcc_date, "buckets": [
             {"level": b.level, "label": TDCC_LEVELS.get(b.level, str(b.level)), "holders": b.holders,
              "shares": b.shares, "pct": ser.ratio(b.pct)} for b in buckets]}
-        sources += [b.source for b in buckets[:1]]
+        sources += tagged([b.source for b in buckets[:1]], "distribution")
     return {
         "symbol": sym,
         "institutional": [{"t": d, "foreign": lots(r.foreign_net), "trust": lots(r.trust_net),
@@ -399,7 +375,7 @@ def _add_archived_quarters(db: Session, md: MarketData, sym: str,
             row[item] = _dec(balance.get(_ARCHIVE_KEYS[item]))
         if any(v is not None for v in row.values()):
             table[period] = row
-            used.append(sources[period])
+            used.append(f"{sources[period]}/income")
     return used
 
 
@@ -481,6 +457,13 @@ def _annual(table: dict[str, dict[str, Decimal | None]]) -> dict[str, dict[str, 
 
 
 # -- events ---------------------------------------------------------------------------------------------
+_EVENT_KINDS = {"revenue_release": "revenue", "exchange_news": "news"}
+
+
+def _event_source(r: MarketEvent) -> str:
+    """An archived event row's dataset key, e.g. ``twse-openapi/material_info``."""
+    return f"{r.source}/{_EVENT_KINDS.get(r.type, r.type)}"
+
 def _held_quantity(state, sym: str) -> Decimal:
     row = next((r for r in state.rows if r.symbol == sym), None)
     return row.quantity if row else Decimal(0)
@@ -516,7 +499,7 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
                     "sources": labels(sources or [])})
 
     divs = md.dividends(sym)
-    div_sources = ["demo"] if divs.is_demo else _split(divs.source)
+    div_sources = ["demo"] if divs.is_demo else tagged(divs.source, "ex_dividend")
     ex_dates = set()
     for e in divs.value:
         parts = []
@@ -552,7 +535,7 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
     recent = qty > 0
     stmt = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.date >= lo, MarketEvent.date <= hi)
     for r in db.scalars(_filtered(stmt, MarketEvent, md).order_by(MarketEvent.date)):
-        if r.type == "ex_dividend" and r.date in ex_dates:
+        if (r.type == "ex_dividend" and r.date in ex_dates) or r.type == "exchange_news":
             continue
         if r.type == "revenue_release":  # first seen in the monthly revenue dataset (t187ap05)
             period = (r.data or {}).get("period")
@@ -566,16 +549,16 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
             if rel is not None and rel.kind == "investor_conference":
                 if lo <= rel.date <= hi:
                     add(rel.date, "investor_conference", r.title, r.detail[:600], r.url,
-                        mine=recent and rel.date >= today - timedelta(days=7), sources=[r.source])
+                        mine=recent and rel.date >= today - timedelta(days=7), sources=[_event_source(r)])
                 continue
             if rel is not None and rel.period:
                 release(rel.kind, rel.period, rel.date, r)
                 continue
             if rel is not None:  # a financial report whose period could not be read: still an actual date
-                add(r.date, rel.kind, r.title, r.detail[:600], r.url, mine=recent, sources=[r.source])
+                add(r.date, rel.kind, r.title, r.detail[:600], r.url, mine=recent, sources=[_event_source(r)])
                 continue
         add(r.date, r.type, r.title, r.detail[:600], r.url, mine=recent and r.date >= today - timedelta(days=7),
-            sources=[r.source])
+            sources=[_event_source(r)])
 
     for (kind, period), (d, r) in releases.items():
         if kind == "earnings":
@@ -584,7 +567,7 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
             month = int(period[5:])
             title = f"{month} 月營收公布"
             detail = r.detail if r.type == "revenue_release" else r.title
-        add(d, kind, title, detail[:600], r.url, mine=recent, sources=[r.source], period=period)
+        add(d, kind, title, detail[:600], r.url, mine=recent, sources=[_event_source(r)], period=period)
 
     if _is_tw_stock(info):  # legal deadlines only where no actual date is known
         dlo, dhi = today - timedelta(days=DEADLINE_PAST_DAYS), today + timedelta(days=DEADLINE_FUTURE_DAYS)
@@ -607,32 +590,66 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
                 if seen is not None:
                     detail = f"{seen.detail}；在開始存檔前已公布，實際日期不明，以法定期限顯示"
                 add(d, "revenue_release", f"{prev_m} 月營收公布期限（預估）", detail, mine=recent,
-                    sources=["rules", *([seen.source] if seen is not None else [])], estimated=True, period=period)
+                    sources=["rules", *([_event_source(seen)] if seen is not None else [])], estimated=True,
+                    period=period)
     if mine_only:
         out = [e for e in out if e["mine"]]
     out.sort(key=lambda e: (e["date"], e["type"]), reverse=True)
     return out
 
 
-# -- news -----------------------------------------------------------------------------------------------
-def news(md: MarketData, symbol: str) -> list[dict[str, Any]]:
-    info = require_instrument(md, symbol)
-    if md.policy != "personal" or info.market == "US":
-        return []  # headlines only come from FinMind (non-commercial)
-    fm = md.provider("finmind")
-    if fm is None:
-        return []
+# -- news (official announcements) ----------------------------------------------------------------------
+NEWS_DAYS = 90
+NEWS_LIMIT = 30
+MARKET_SYMBOL = "MARKET"  # exchange news not tied to one company
+# 公開資訊觀測站 重大訊息 query page (official; the OpenAPI rows carry no per-announcement link).
+MOPS_MATERIAL_URL = "https://mops.twse.com.tw/mops/#/web/t05st01"
+
+
+def _published_at(r: MarketEvent) -> str:
+    hhmmss = str((r.data or {}).get("time") or "").zfill(6)
     try:
-        items = fm.news(info.symbol)  # type: ignore[attr-defined]
-    except Exception:  # quota (402) or network: degrade to no news
+        at = datetime.combine(r.date, datetime.strptime(hhmmss, "%H%M%S").time(), TAIPEI)
+    except ValueError:
+        at = datetime.combine(r.date, datetime.min.time(), TAIPEI)
+    return iso_taipei(at)
+
+
+def news(db: Session, md: MarketData, symbol: str) -> list[dict[str, Any]]:
+    """Official announcement headlines (公告): the company's 重大訊息 and TWSE news that names it.
+
+    Both are government open data (t187ap04_L / mopsfin_t187ap04_O, TWSE /news/newsList), archived daily.
+    Under an explicit personal opt-in with FinMind configured, FinMind media headlines are appended
+    (labelled 非商用).
+    """
+    info = require_instrument(md, symbol)
+    if info.market == "US":
         return []
-    out = []
-    for n in items[:30]:
-        published = n["published_at"]
-        with contextlib.suppress(ValueError):
-            published = iso_taipei(datetime.fromisoformat(published).replace(tzinfo=TAIPEI))
-        out.append({"published_at": published, "title": n["title"], "source": n["source"], "url": n["url"],
-                    "sources": labels(["finmind"])})
+    sym = info.symbol
+    since = today_taipei() - timedelta(days=NEWS_DAYS)
+    company = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.type == "material_info",
+                                        MarketEvent.date >= since)
+    exchange = select(MarketEvent).where(
+        MarketEvent.type == "exchange_news", MarketEvent.date >= since,
+        or_(MarketEvent.symbol == sym,
+            and_(MarketEvent.symbol == MARKET_SYMBOL, MarketEvent.title.contains(info.name))))
+    rows = [*db.scalars(_filtered(company, MarketEvent, md)), *db.scalars(_filtered(exchange, MarketEvent, md))]
+    rows.sort(key=lambda r: (r.date, str((r.data or {}).get("time") or "")), reverse=True)
+    out = [{"published_at": _published_at(r), "title": r.title, "source": "公告",
+            "url": r.url or MOPS_MATERIAL_URL, "category": r.type, "sources": labels([_event_source(r)])}
+           for r in rows[:NEWS_LIMIT]]
+    fm = md.provider("finmind") if md.policy == "personal" else None
+    if fm is not None:
+        try:
+            items = fm.news(sym)  # type: ignore[attr-defined]
+        except Exception:  # quota (402) or network: official announcements only
+            items = []
+        for n in items[:NEWS_LIMIT]:
+            published = n["published_at"]
+            with contextlib.suppress(ValueError):
+                published = iso_taipei(datetime.fromisoformat(published).replace(tzinfo=TAIPEI))
+            out.append({"published_at": published, "title": n["title"], "source": n["source"], "url": n["url"],
+                        "category": "media", "sources": labels(["finmind"])})
     return out
 
 
@@ -673,7 +690,7 @@ def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, 
             "amount_estimate": ser.money(row.quantity * upcoming[0].cash_dividend * row.fx),
         } if upcoming else None,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else iso_taipei(state.as_of),
-        "sources": labels(["ledger", *(_split(q.source) if q else [])]),
+        "sources": labels(["ledger", *(tagged(q.source, "price") if q else [])]),
         "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
     }
 
@@ -728,7 +745,8 @@ def why(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
         lead = f"{info.name}{texts[0]}" if texts[0].startswith("今天") else f"{info.name} {texts[0]}"
         headline = "，".join([lead, *texts[1:2]])
     return {"symbol": sym, "show": bool(reasons), "headline": headline, "reasons": reasons,
-            "as_of": iso_taipei(q.as_of) if q.as_of else None, "sources": labels([*_split(q.source), "rules"])}
+            "as_of": iso_taipei(q.as_of) if q.as_of else None,
+            "sources": labels([*tagged(q.source, "price"), "rules"])}
 
 
 def why_reasons(db: Session, md: MarketData, info: InstrumentInfo, q: QuoteData, today: date) -> list[dict]:

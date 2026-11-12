@@ -22,6 +22,8 @@ ROUTES = {
     "/opendata/t187ap04_L": "twse_t187ap04_l_live_20261112.json",
     "/opendata/t187ap05_L": "twse_t187ap05_l_live_20261112.json",
     "/holidaySchedule/holidaySchedule": "twse_holiday_schedule_live_20261112.json",
+    "/news/newsList": "twse_news_list_live_20261112.json",
+    "/opendata/t187ap47_L": "twse_t187ap47_l_live_20261112.json",
     "/opendata/t187ap41_L": "twse_t187ap41_l_live_20261112.json",
     "/opendata/t187ap06_L_ci": "twse_t187ap06_l_ci_live_20261112.json",
     "/opendata/t187ap07_L_ci": "twse_t187ap07_l_ci_live_20261112.json",
@@ -39,8 +41,6 @@ ROUTES = {
     "/t187ap41_O": "tpex_t187ap41_o_live_20261112.json",
     "/mopsfin_t187ap06_O_ci": "tpex_t187ap06_o_ci_live_20261112.json",
     "/mopsfin_187ap17_O": "tpex_t187ap17_o_live_20261112.json",
-    "/fund/T86": "twse_web_t86_live_20261111.json",
-    "/fund/MI_QFIIS": "twse_web_mi_qfiis_live_20261111.json",
 }
 
 # Archive "now": 2026-11-12 10:00 Taipei (MI_MARGN then still holds 2026-11-11's balances).

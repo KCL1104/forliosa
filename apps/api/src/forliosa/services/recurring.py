@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.api.errors import ApiError, not_found, unprocessable
-from forliosa.datapolicy import labels
+from forliosa.datapolicy import labels, tagged
 from forliosa.ids import new_id
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.service import MarketData
@@ -66,7 +66,7 @@ def next_debit(plan: RecurringPlan, on_or_after: date) -> tuple[date, date] | No
 
 
 def calendar_source(d: date) -> str:
-    return "twse-openapi" if has_official_calendar(d.year) else "rules"
+    return "twse-openapi/calendar" if has_official_calendar(d.year) else "rules"
 
 
 # -- CRUD ------------------------------------------------------------------------------------------------
@@ -260,5 +260,5 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
                     "health_insurance": ser.money(preview.health_insurance),
                     "net_cash": ser.money(preview.net_cash), "rules": rules},
         "is_demo": is_demo,
-        "sources": labels(["ledger", calendar_source(debit), *((q.source.split("+")) if q is not None else [])]),
+        "sources": labels(["ledger", calendar_source(debit), *(tagged(q.source, "price") if q is not None else [])]),
     }

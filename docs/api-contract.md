@@ -313,3 +313,106 @@
 ### AI（M4 前為規則版，前端可先用）
 - 「買 0050 2 張 52.4」這類記帳指令：前端（或之後的 AI）解析後呼叫 `POST /transactions/preview` 取得草稿，使用者簽名確認後再 `POST /transactions`（帶 `source: "ai_draft"`）。
 - 建議問題、對話紀錄、AI 任務：M4 前由前端 mock，端點在 M4 定義。
+
+---
+
+### 第二批（2026-11-12）：出清紀錄、只用可商用資料、定期定額、實際公布日、資料授權
+細節與計算規則見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 第二批」。
+
+- **資料政策**：`DATA_POLICY` 預設 `commercial`，只用可合法商用的資料（證交所／櫃買 OpenAPI、集保開放資料、shioaji-data 官方檔、自建存檔），**從不回示範資料**；存檔不足時回空資料並在 `notes` 說「資料累積中：自 YYYY-MM-DD 起存檔」（`History.notes`、`Valuation.notes`、`Performance.notes`、`chips.notes`、`intraday.notes`）。`/intraday` 目前一律 `points: []`（沒有授權的盤中來源）。
+- **`sources` 是顯名聲明**：「提供機關〈資料集名稱〉（年份），依政府資料開放授權條款第 1 版」，前端必須顯示。
+
+| 方法 | 路徑 | 回傳 |
+|---|---|---|
+| GET | `/portfolio/closed?account_id=` | `[{symbol, name, account_id, currency, opened_at, closed_at, holding_days, total_bought_qty, total_sold_qty, cost_basis, realized_pnl, realized_pnl_pct, dividends_received, fees_and_taxes, sources}]`（一檔可有多個回合：0 股 → 持有 → 0 股；出清的股票不在 holdings） |
+| GET | `/instruments/{symbol}/position/history` | `{symbol, rounds: [同上], markers: [{date, type, quantity, price, amount, account_id}], sources}`；未持有也會回（`/instruments/{symbol}/history` 已是日線端點，所以放在 position 底下）。`/position` 未持有仍回 `null` |
+| GET | `/recurring?account_id=` | `[{id, account_id, symbol, name, amount, day_of_month: int[], start_date, end_date, active, note, next_date, created_at, updated_at}]` |
+| POST | `/recurring` | body `{account_id, symbol, amount (TWD 整數), day_of_month: 1–28 或陣列 [6, 16, 26], start_date?, end_date?, active?, note?}` → 201 |
+| GET／PATCH／DELETE | `/recurring/{id}` | PATCH 部分更新（`end_date: null` 清除）；DELETE 204 |
+| POST | `/recurring/{id}/draft?date=` | `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction: {account_id, symbol, type: "buy", trade_date, quantity, price, note, source: "ai_draft"}, preview: TradePreview, is_demo, sources}`；股數 = floor(金額 ÷ 最近收盤價)（含零股），手續費另計；**不建立交易**，使用者簽名後 `POST /transactions` |
+| GET | `/meta/attributions` | `{policy, notice: [授權條款第 2、3 點], datasets: [{key, agency, dataset, url, used_for, year, license, license_url, commercial, attribution}], not_used: [...]}`（不需登入） |
+
+- `/portfolio/upcoming` 的 `type: "recurring"`：扣款日遇非交易日順延（證交所休市日），多 `plan_id`、`account_id`、`scheduled_date`；`amount_estimate` 為扣款金額。
+- `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集第一次出現的日期），查不到才用法定期限並標 `estimated: true`。
+- `/instruments/{symbol}/news`：官方公告（重大訊息、證交所新聞），每筆多 `category: "material_info" | "exchange_news" | "media"`，官方公告的 `source` 是 `"公告"`。
+- `POST /transactions` 的 `source` 可為 `"ai_draft"`。
+
+## AI（M4）
+
+後端用 Anthropic Claude（預設 `claude-haiku-5-5`）＋我們自己的工具回答；細節與待決事項見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「AI（M4）」。
+規則：AI 只讀**目前登入者**自己的資料（工具由伺服器帶入使用者，模型無法指定別人）；數字只來自工具結果或附引用的網路來源；**AI 從不寫入帳本**，記帳一律先產生草稿，使用者簽名後前端才 `POST /transactions`（`source: "ai_draft"`）；回答最後一行附資料時間與「僅供參考，非投資建議。」；引用來源必須顯示給使用者。
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| POST | `/ai/chat` | SSE 串流（`text/event-stream`）。body `{"thread_id": "thr_…" \| null, "message": "買 0050 2 張 52.4", "page": {"route": "/stock/2330.TW", "symbol": "2330.TW" \| null}, "privacy": false}`；`thread_id` 省略＝開新對話 |
+| GET | `/ai/threads?limit=30&cursor=` | `{"items": [ThreadSummary], "next_cursor"}`，最近更新的在前 |
+| GET | `/ai/threads/{id}` | `ThreadDetail`（別人的對話回 404） |
+| DELETE | `/ai/threads/{id}` | 204；草稿保留 |
+| GET | `/ai/drafts?status=pending` | `DraftCard[]`；`status`：`pending`（預設）、`signed`、`discarded`、`all` |
+| PATCH | `/ai/drafts/{id}` | body `{"status": "signed", "transaction_id": "txn_…"}`、`{"status": "discarded"}`，或復原後 `{"status": "pending"}`；回 `DraftCard` |
+| GET | `/ai/suggestions?route=/stock/2330.TW&symbol=2330.TW` | `Suggestions`（規則產生，不呼叫模型） |
+| GET | `/ai/usage` | `Usage` |
+| GET | `/instruments/{symbol}/why` | 原有欄位＋`ai`、`citations`、`rule_headline`（見下方） |
+
+### `POST /ai/chat` 的事件
+
+每個事件是 `event: <名稱>` ＋ `data: <JSON>`。順序：`thread` 一定最先、`done` 一定最後；`error` 之後仍會送 `done`。
+
+| 事件 | data | 說明 |
+|---|---|---|
+| `thread` | `{"id": "thr_…", "title": "我有哪些持股？", "created": true}` | 新對話時 `created: true` |
+| `text` | `{"delta": "台積電今天"}` | 回答文字片段，依序串接；換到下一輪（查完工具）時會先送 `"\n\n"` |
+| `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」 |
+| `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字"}` | 網路來源引用（已去重），顯示在回答下方 |
+| `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |
+| `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
+| `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}}` | 這一輪所有模型呼叫的合計 |
+
+串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；429 `ai_daily_limit`（今天的提問數已達上限）／`ai_monthly_budget`（本月用量已達上限）；503 `ai_unavailable`（沒有設定 API 金鑰）。
+
+```json
+// DraftCard
+{
+  "id": "drf_01J…",
+  "status": "pending",               // "pending" | "signed" | "discarded"
+  "input": {"account_id": "acc_…", "symbol": "0050.TW", "type": "buy", "trade_date": "2026-11-12",
+            "quantity": 2000, "price": 52.4, "amount": null, "currency": "TWD", "is_day_trade": false,
+            "note": "", "source": "ai_draft"},        // 直接當 POST /transactions 的 body
+  "instrument": {"symbol": "0050.TW", "code": "0050", "name": "元大台灣50", "market": "TWSE", "currency": "TWD"},  // 現金類為 null
+  "preview": {"gross": 104800, "fee": 41, "tax": 0, "health_insurance": 0, "net_cash": -104841, "rules": ["…"]},
+  "notes": ["沒有寫價格，以 11/12 收盤價 52.35 估算，確認前請改成實際成交價"],
+  "account": {"id": "acc_…", "name": "永豐－一般"},
+  "transaction_id": null,            // 簽名後的交易 id
+  "created_at": "2026-11-12T14:05:00+08:00"
+}
+
+// ThreadSummary
+{"id": "thr_…", "title": "我有哪些持股？", "created_at": "…", "updated_at": "…", "message_count": 3, "preview": "最新回答的前 80 字"}
+
+// ThreadDetail（messages 依時間排序；一問一答）
+{"id": "thr_…", "title": "…", "model": "claude-haiku-5-5", "created_at": "…", "updated_at": "…",
+ "messages": [
+   {"id": "12", "turn_id": "trn_…", "role": "user", "text": "台積電今天為什麼漲？", "citations": [], "drafts": [], "tools": [], "error": null, "at": "…"},
+   {"id": "15", "turn_id": "trn_…", "role": "ai", "text": "…", "citations": [{"url", "title", "cited_text"}],
+    "drafts": [DraftCard], "tools": [{"name": "web_search", "label": "搜尋網路：台積電"}], "error": null, "at": "…"}
+ ]}
+
+// Suggestions（questions 最多 3 題；介面上不加「本頁建議」之類的說明字樣）
+{"route": "stock",                   // "ledger" | "stock" | "groups" | "history" | "other"
+ "symbol": "2330.TW",
+ "questions": [{"kind": "why_move", "text": "台積電今天為什麼漲？", "lines": ["今天", "為什麼漲？"], "symbol": "2330.TW"}],
+ "actions": [{"kind": "draft_transaction", "label": "記一筆 台積電", "prompt": "買 2330 ", "symbol": null, "count": null},
+             {"kind": "watchlist_add", "label": "加入自選", "prompt": null, "symbol": "2330.TW", "count": null},
+             {"kind": "review_drafts", "label": "確認 2 筆草稿", "prompt": null, "symbol": null, "count": 2}]}
+
+// Usage（上限為 null 表示不限制）
+{"date": "2026-11-12", "month": "2026-11", "messages_today": 3, "daily_message_limit": 50, "messages_remaining": 47,
+ "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
+ "model": "claude-haiku-5-5", "available": true}
+
+// /instruments/{symbol}/why 新增欄位
+{"…原有欄位": "…", "ai": true, "headline": "AI 寫的一句話（ai=false 時是規則句）",
+ "rule_headline": "台積電今天上漲 3.5%", "citations": [{"url", "title", "cited_text"}]}
+```
+
+`kind`（建議問題）：帳本 `onboard`、`drag`、`lift`、`dividends_next`、`concentration`；個股 `why_move`、`next_dividend`、`cost_on_river`、`add_one_lot`、`is_expensive`、`if_hold_dividend`；群組 `group_share`（與前端離線規則相同）。

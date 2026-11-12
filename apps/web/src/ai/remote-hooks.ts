@@ -1,0 +1,72 @@
+import { useQuery, useQueryClient } from "@tanstack/react-query"
+import { useRouterState } from "@tanstack/react-router"
+import { appToday } from "@/api"
+import { aiApi, aiRemote, threadFromServer } from "./remote"
+import { useAi } from "./store"
+import { suggestionsFor, type AiContext } from "./suggestions"
+import type { Suggestion, SuggestionKind } from "./types"
+
+export const aiKeys = {
+  suggestions: (route: string, symbol: string | null) => ["ai", "suggestions", route, symbol] as const,
+  usage: ["ai", "usage"] as const,
+  threads: ["ai", "threads"] as const,
+}
+
+/** 建議問題：連真實後端時用 `/ai/suggestions`（規則版，不呼叫模型），載入前與 mock 模式用本機規則 */
+export function useAiSuggestions(ctx: AiContext): Suggestion[] {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const symbol = ctx.route === "stock" ? ctx.stock.symbol : null
+  const q = useQuery({
+    enabled: aiRemote,
+    queryKey: aiKeys.suggestions(pathname, symbol),
+    queryFn: () => aiApi.getSuggestions(pathname, symbol),
+    staleTime: 60_000,
+  })
+  const local = suggestionsFor(ctx, appToday())
+  if (!aiRemote || !q.data) return local
+  return q.data.questions.slice(0, 3).map((x) => ({
+    kind: x.kind as SuggestionKind,
+    text: x.text,
+    lines: [x.lines[0] ?? x.text, x.lines[1] ?? ""],
+    symbol: x.symbol ?? undefined,
+  }))
+}
+
+/** 今天的提問數與本月用量（mock 模式為 undefined） */
+export function useAiUsage() {
+  return useQuery({ enabled: aiRemote, queryKey: aiKeys.usage, queryFn: () => aiApi.getUsage(), staleTime: 30_000 })
+}
+
+/** 輸入框下方的一行：剩不多時提醒，用完時說明 */
+export function usageNote(u: { messages_remaining: number | null; tokens_remaining: number | null } | undefined): string | null {
+  if (!u) return null
+  if (u.messages_remaining === 0 || u.tokens_remaining === 0) return "今天的提問額度用完了，明天再繼續。"
+  if (u.messages_remaining !== null && u.messages_remaining <= 5) return `今天還可以問 ${u.messages_remaining} 題。`
+  return null
+}
+
+export function useRemoteThreads() {
+  return useQuery({ enabled: aiRemote, queryKey: aiKeys.threads, queryFn: () => aiApi.listThreads(), staleTime: 15_000 })
+}
+
+/** 打開、刪除後端的對話 */
+export function useRemoteThreadActions() {
+  const qc = useQueryClient()
+  return {
+    async open(remoteId: string) {
+      const s = useAi.getState()
+      const local = s.threads.find((t) => t.remoteId === remoteId)
+      if (local) s.openThread(local.id)
+      const detail = await qc.fetchQuery({ queryKey: ["ai", "thread", remoteId], queryFn: () => aiApi.getThread(remoteId), staleTime: 0 })
+      const streaming = useAi.getState().threads.find((t) => t.remoteId === remoteId)?.messages.some((m) => m.streaming)
+      if (streaming) return // 正在回答中：不要用伺服器的舊版本蓋掉
+      const { thread, drafts } = threadFromServer(detail)
+      useAi.getState().loadThread(local ? { ...thread, id: local.id } : thread, drafts)
+    },
+    async remove(remoteId: string) {
+      await aiApi.deleteThread(remoteId)
+      useAi.getState().removeRemote(remoteId)
+      void qc.invalidateQueries({ queryKey: aiKeys.threads })
+    },
+  }
+}

@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from forliosa.config import Settings
-from forliosa.datapolicy import allowed, is_commercial_source, label, labels, provider_allowed
+from forliosa.datapolicy import allowed, attributions, is_commercial_source, label, labels, provider_allowed, tagged
 from forliosa.marketdata.archive_provider import ArchiveProvider
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, build_providers
@@ -21,7 +21,41 @@ def test_labels_mark_non_commercial_sources():
     assert labels(["twse-mis+shioaji-data", "shioaji-data"]) == [label("twse-mis"), label("shioaji-data")]
     assert is_commercial_source("twse-openapi") and not is_commercial_source("twse-openapi+finmind")
     assert allowed("finmind", "personal") and not allowed("finmind", "commercial")
-    assert not provider_allowed("twse_mis", "commercial") and provider_allowed("archive", "commercial")
+    # the TWSE website and MIS are never allowed, in any mode
+    assert not allowed("twse-web", "personal") and not allowed("twse-mis+shioaji-data", "personal")
+    assert not provider_allowed("finmind", "commercial") and provider_allowed("archive", "commercial")
+
+
+def test_attribution_names_agency_dataset_year_and_licence(monkeypatch):
+    import forliosa.timeutil as tu
+
+    monkeypatch.setattr(tu, "today_taipei", lambda: date(2026, 11, 12))
+    ogdl = "依政府資料開放授權條款第 1 版"
+    assert label("twse-openapi/valuation") == f"臺灣證券交易所〈上市個股日本益比、殖利率及股價淨值比〉（2026），{ogdl}"
+    assert labels(tagged("archive+tpex_openapi", "price")) == [
+        "Forliosa 自建存檔（證交所、櫃買中心開放資料）", f"證券櫃檯買賣中心〈上櫃股票行情〉（2026），{ogdl}"]
+    assert label("demo/price") == "示範資料（模擬）" and label("ledger") == "本系統帳本"
+    assert label("shioaji-data").startswith("永豐金證券 shioaji-data") and label("shioaji-data").endswith("第 1 版")
+    meta = attributions("commercial")
+    assert meta["notice"][1] == "政府資料開放授權條款：https://data.gov.tw/license"
+    keys = {d["key"] for d in meta["datasets"]}
+    assert {"tpex-openapi/institutional", "tpex-openapi/foreign_holding", "twse-openapi/news",
+            "twse-openapi/fund", "tdcc-opendata/distribution"} <= keys
+    assert all(d["commercial"] for d in meta["datasets"])
+    assert any(d["key"] == "finmind" and not d["commercial"] for d in attributions("personal")["datasets"])
+
+
+def test_fetcher_refuses_urls_outside_the_allowlist():
+    from forliosa.marketdata.base import ProviderUnavailable
+    from forliosa.marketdata.http import HttpFetcher, url_allowed
+
+    assert url_allowed("https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
+    assert url_allowed("https://www.tpex.org.tw/openapi/v1/tpex_3insti_qfii")
+    for url in ("https://www.twse.com.tw/rwd/zh/fund/T86", "https://mis.twse.com.tw/stock/api/getStockInfo.jsp",
+                "https://www.tpex.org.tw/www/zh-tw/afterTrading/peQryDate", "https://mops.twse.com.tw/mops/"):
+        assert not url_allowed(url)
+        with pytest.raises(ProviderUnavailable, match="白名單"):
+            HttpFetcher(retries=0).get_json(url)
 
 
 def test_commercial_policy_builds_no_non_commercial_provider():
@@ -29,8 +63,11 @@ def test_commercial_policy_builds_no_non_commercial_provider():
     names = [p.name for p in build_providers(Settings(data_policy="commercial", market_data_providers=every))]
     assert "finmind" not in names and "twse_mis" not in names
     assert names[:3] == ["archive", "twse_openapi", "tpex_openapi"]
+    # personal: FinMind only when listed explicitly; the MIS provider no longer exists in any mode
     personal = [p.name for p in build_providers(Settings(data_policy="personal", market_data_providers=every))]
-    assert "finmind" in personal and "twse_mis" in personal
+    assert "finmind" in personal and "twse_mis" not in personal
+    default = [p.name for p in build_providers(Settings(_env_file=None, data_policy="personal"))]
+    assert "finmind" not in default
     # MarketData drops non-commercial providers too (defence in depth)
     from forliosa.marketdata.finmind import FinMindProvider
 

@@ -25,6 +25,12 @@ interface AiState {
   deleteThread: (id: string) => void
   push: (message: Omit<Message, "id" | "at">, opts?: { title?: string }) => string
   patchMessage: (id: string, patch: Partial<Message>) => void
+  /** 串流中的 AI 訊息：用函式更新，避免競態 */
+  updateMessage: (id: string, fn: (m: Message) => Message) => void
+  setRemoteId: (threadId: string, remoteId: string) => void
+  /** 從後端載入的對話放進來（已存在同一個 remoteId 就取代）並打開 */
+  loadThread: (thread: Thread, drafts: Draft[]) => void
+  removeRemote: (remoteId: string) => void
   upsertDraft: (draft: Draft) => void
   patchDraft: (id: string, patch: Partial<Draft>) => void
   focusDraft: (id: string | null) => void
@@ -70,6 +76,28 @@ export const useAi = create<AiState>()(
         set((s) => ({
           threads: s.threads.map((t) => (t.messages.some((m) => m.id === id) ? { ...t, messages: t.messages.map((m) => (m.id === id ? { ...m, ...patch } : m)) } : t)),
         })),
+      updateMessage: (id, fn) =>
+        set((s) => ({
+          threads: s.threads.map((t) => (t.messages.some((m) => m.id === id) ? { ...t, messages: t.messages.map((m) => (m.id === id ? fn(m) : m)) } : t)),
+        })),
+      setRemoteId: (threadId, remoteId) =>
+        set((s) => ({ threads: s.threads.map((t) => (t.id === threadId ? { ...t, remoteId } : t)) })),
+      loadThread: (thread, drafts) =>
+        set((s) => {
+          const kept = s.threads.filter((t) => t.remoteId !== thread.remoteId)
+          const merged = { ...s.drafts }
+          for (const d of drafts) {
+            const local = merged[d.id]
+            // 本機剛簽名、還沒同步回來的狀態優先
+            merged[d.id] = local && local.status !== "loading" ? { ...d, ...local } : d
+          }
+          return { threads: [thread, ...kept].slice(0, 40), drafts: merged, threadId: thread.id }
+        }),
+      removeRemote: (remoteId) =>
+        set((s) => {
+          const gone = s.threads.find((t) => t.remoteId === remoteId)
+          return { threads: s.threads.filter((t) => t.remoteId !== remoteId), threadId: gone && s.threadId === gone.id ? null : s.threadId }
+        }),
       upsertDraft: (draft) => set((s) => ({ drafts: { ...s.drafts, [draft.id]: draft } })),
       patchDraft: (id, patch) =>
         set((s) => (s.drafts[id] ? { drafts: { ...s.drafts, [id]: { ...s.drafts[id]!, ...patch } } } : s)),
@@ -94,9 +122,13 @@ export const useAi = create<AiState>()(
       }),
       // 每次打開 app 從問候與建議開始（舊對話留在「紀錄」）；有待簽名草稿的對話例外，直接回到它
       onRehydrateStorage: () => (state) => {
+        // 關掉頁面時還在串流的回答：不會再有後續，標成已結束
+        if (state) state.threads = state.threads.map((t) => (t.messages.some((m) => m.streaming) ? { ...t, messages: t.messages.map((m) => ({ ...m, streaming: false })) } : t))
         if (!state?.threadId) return
         const thread = state.threads.find((t) => t.id === state.threadId)
-        const pending = thread?.messages.some((m) => m.draftId && state.drafts[m.draftId]?.status === "pending")
+        const pending = thread?.messages.some((m) =>
+          [m.draftId, ...(m.draftIds ?? [])].some((id) => id && state.drafts[id]?.status === "pending"),
+        )
         if (!pending) state.threadId = null
       },
     },

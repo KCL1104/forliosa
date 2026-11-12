@@ -10,10 +10,10 @@ from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.api.errors import ApiError, not_found, unprocessable
-from forliosa.datapolicy import labels
+from forliosa.datapolicy import labels, tagged
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
-from forliosa.models import IntradayPoint, User, WatchlistItem
+from forliosa.models import User, WatchlistItem
 from forliosa.services.instruments import quote_out
 from forliosa.timeutil import today_taipei
 
@@ -26,31 +26,25 @@ def _items(db: Session, user: User) -> list[WatchlistItem]:
                            .order_by(WatchlistItem.created_at, WatchlistItem.id)))
 
 
-def _sparkline(db: Session, md: MarketData, symbol: str, trade_date) -> tuple[list[dict], str, list[str]]:
-    """Intraday points of the latest session when the worker recorded them, else recent daily closes."""
-    if md.policy == "personal" and trade_date is not None:
-        rows = list(db.scalars(select(IntradayPoint).where(IntradayPoint.symbol == symbol,
-                                                           IntradayPoint.date == trade_date)
-                               .order_by(IntradayPoint.t)))
-        if len(rows) >= 2:
-            return [{"t": r.t, "price": ser.price(r.price)} for r in rows], "1m", [rows[0].source]
+def _sparkline(md: MarketData, symbol: str) -> tuple[list[dict], str, list[str]]:
+    """The last 20 daily closes (there is no licensed intraday source, so never minute points)."""
     today = today_taipei()
     h = md.history(symbol, today - timedelta(days=45), today)
     candles = h.candles[-SPARKLINE_DAYS:]
-    return [{"t": c.t.isoformat(), "price": ser.price(c.c)} for c in candles], "1d", h.source.split("+")
+    return [{"t": c.t.isoformat(), "price": ser.price(c.c)} for c in candles], "1d", tagged(h.source, "price")
 
 
 def item_out(db: Session, md: MarketData, symbol: str, quotes: dict) -> dict[str, Any]:
     info = md.instrument(symbol)
     q = quotes.get(symbol)
-    spark, interval, spark_sources = _sparkline(db, md, symbol, q.trade_date if q else None)
+    spark, interval, spark_sources = _sparkline(md, symbol)
     return {
         "symbol": symbol,
         "name": info.name if info else symbol,
         "quote": quote_out(q) if q else None,
         "sparkline": spark,
         "sparkline_interval": interval,
-        "sources": labels([*(q.source.split("+") if q else []), *spark_sources]),
+        "sources": labels([*(tagged(q.source, "price") if q else []), *spark_sources]),
         "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
     }
 

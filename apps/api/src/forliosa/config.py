@@ -32,12 +32,13 @@ class Settings(BaseSettings):
     # demo data. "personal" (explicit opt-in): every configured source may be used (FinMind, MIS and the
     # TWSE website are labelled 「非商用」 in responses) and demo data fills gaps.
     data_policy: Literal["personal", "commercial"] = "commercial"
-    # Highest priority first. twse_mis: intraday quotes (non-commercial); archive: our own daily archive
-    # (prices_daily …); twse_openapi / tpex_openapi: official latest-day data; shioaji_data:
-    # master/profile/revenue/statements; finmind: backfill (non-commercial); demo: synthetic fallback.
+    # Highest priority first. archive: our own daily archive of official open data (prices_daily …);
+    # twse_openapi / tpex_openapi: official latest-day data; shioaji_data: master/profile/revenue/statements;
+    # demo: synthetic data (answers only under DATA_POLICY=personal; under commercial it only names
+    # instruments). finmind is NOT in the default: it is a non-commercial source that is built only when
+    # DATA_POLICY=personal and it is listed here explicitly. The TWSE MIS provider was removed.
     market_data_providers: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["twse_mis", "archive", "twse_openapi", "tpex_openapi", "shioaji_data", "finmind",
-                                 "demo"]
+        default_factory=lambda: ["archive", "twse_openapi", "tpex_openapi", "shioaji_data", "demo"]
     )
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
     cache_dir: Path = Path("var/cache")
@@ -45,6 +46,41 @@ class Settings(BaseSettings):
     finmind_token: str | None = None
     stream_interval_seconds: float = 5.0
     demo_jitter: bool | None = None  # None -> on in dev
+
+    # -- AI (M4) ------------------------------------------------------------------------------------
+    # API keys are deliberately NOT settings fields (they would show up in Settings dumps): forliosa.ai.keypool
+    # reads CLAUDE_API_KEY_<n> (any letter case, e.g. Claude_API_KEY_1) and falls back to ANTHROPIC_API_KEY.
+    ai_model: str = "claude-haiku-5-5"
+    ai_model_chat: str | None = None
+    ai_model_why: str | None = None
+    ai_model_import: str | None = None
+    ai_model_report: str | None = None
+    ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    ai_effort_why: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    ai_max_tokens_chat: int = 8000
+    ai_max_tool_rounds: int = 8
+    ai_daily_message_limit: int = 50  # chat messages per user per Taipei day (0 = no limit)
+    ai_monthly_token_budget: int = 3_000_000  # billable tokens per user per Taipei month (0 = no limit)
+    ai_thread_max_context_tokens: int = 90_000  # keep prompts under the 100K-token price tier
+    ai_dev_dummy_key: bool = False  # send a placeholder key; a proxy injects the real one
+    ai_key_cooldown_seconds: float = 60.0
+    ai_request_timeout_seconds: float = 120.0
+    ai_web_search: bool = True
+    ai_web_search_max_uses: int = 3
+    ai_web_search_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)  # [] = any
+    ai_web_fetch: bool = True
+    ai_web_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["official"])
+    ai_web_dynamic_filtering: bool = False
+    ai_eager_tool_streaming: bool = False
+    ai_why_enabled: bool = False
+    ai_why_blocking: bool = False  # True: /why waits for the model; False: generate in the background
+
+    @field_validator("ai_web_search_allowed_domains", "ai_web_fetch_allowed_domains", mode="before")
+    @classmethod
+    def _split_ai_domains(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [s.strip().lower() for s in v.split(",") if s.strip()]
+        return v
 
     @field_validator("data_policy", mode="before")
     @classmethod

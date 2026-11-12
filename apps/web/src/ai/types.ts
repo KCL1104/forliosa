@@ -1,4 +1,5 @@
 import type { Market, TradePreview, TransactionInput } from "@/api/types"
+import type { ChatErrorInfo, Citation, ToolStep } from "./remote"
 
 /** 依頁面自動出現的建議問題（介面上不加說明字樣） */
 export type SuggestionKind =
@@ -71,6 +72,8 @@ export interface Draft {
   signedAt?: string
   error?: string
   createdAt: string
+  /** 後端 AI 產生的草稿（`/ai/drafts`），簽名、捨棄、復原時同步狀態 */
+  remote?: boolean
 }
 
 export interface Message {
@@ -79,11 +82,22 @@ export interface Message {
   text?: string
   answer?: Answer
   draftId?: string
+  /** 後端 AI 一次回答裡產生的草稿（可能不只一份） */
+  draftIds?: string[]
+  /** 回答引用的網路來源（必須顯示） */
+  citations?: Citation[]
+  /** 查資料的步驟（串流中顯示成一行進度） */
+  tools?: ToolStep[]
+  /** 還在串流 */
+  streaming?: boolean
+  error?: ChatErrorInfo
   at: string
 }
 
 export interface Thread {
   id: string
+  /** 後端的對話 id（`/ai/threads`）；接著問時帶上 */
+  remoteId?: string
   title: string
   updatedAt: string
   messages: Message[]

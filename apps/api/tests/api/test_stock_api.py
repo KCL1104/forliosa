@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 import copy
-from datetime import date, datetime, timedelta
+from datetime import date, timedelta
 from decimal import Decimal as D
 
 import pytest
 from sqlalchemy.orm import Session
 
 from forliosa.archive import Archiver
+from forliosa.marketdata.archive_provider import ArchiveProvider
 from forliosa.marketdata.base import BaseProvider, Candle, QuoteData
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
-from forliosa.models import IntradayPoint, MarketEvent
+from forliosa.models import InstitutionalDaily, MarketEvent, PriceDaily
 from forliosa.services import stock as stock_svc
-from forliosa.timeutil import TAIPEI, last_tw_trading_day, today_taipei
-from forliosa.worker import store_intraday_points
+from forliosa.timeutil import last_tw_trading_day, today_taipei
 from tests.archive.fakes import NOW, FakeFetcher, load
 
 API = "/api/v1"
@@ -114,10 +114,16 @@ def test_chips_from_archive(client, archived, frozen_today):
     assert c["major_holders"]["as_of"] == "2026-11-06"
     levels = c["major_holders"]["buckets"]
     assert [b["level"] for b in levels] == list(range(1, 16)) and levels[-1]["label"] == "1,000 張以上"
-    assert any("櫃檯買賣中心" in s for s in c["sources"]) and any("集中保管" in s for s in c["sources"])
+    # attribution: agency〈dataset〉(year), licence
+    assert any(s.startswith("證券櫃檯買賣中心〈上櫃股票三大法人買賣明細資訊〉（")
+               and s.endswith("依政府資料開放授權條款第 1 版") for s in c["sources"])
+    assert any(s.startswith("證券櫃檯買賣中心〈上櫃僑外資及陸資持股比例排行表〉") for s in c["sources"])
+    assert any(s.startswith("臺灣集中保管結算所〈集保戶股權分散表〉") for s in c["sources"])
     twse = client.get(f"{API}/instruments/2330/chips?range=1M").json()
-    assert twse["institutional"][-1]["total"] == 8572.49  # TWSE website T86 (personal policy)
-    assert any(s.endswith("（非商用）") for s in twse["sources"])
+    # TWSE publishes no per-stock institutional OpenAPI dataset; its website may not be scraped (any mode)
+    assert twse["institutional"] == [] and twse["foreign_holding_pct"] == [] and twse["notes"]
+    assert twse["margin"][-1]["margin_balance"] == 32523  # MI_MARGN is OpenAPI
+    assert not any(s.endswith("（非商用）") for s in twse["sources"])
     assert client.get(f"{API}/instruments/2330/chips?range=2W").status_code == 422
     assert client.get(f"{API}/instruments/AAPL/chips").json()["major_holders"] is None
 
@@ -201,50 +207,38 @@ def test_news_from_finmind_is_labelled_non_commercial(client, use_market):
     use_market(MarketData([FakeFinMind(), DemoProvider()], policy="personal"))
     n = client.get(f"{API}/instruments/2330/news").json()
     assert n == [{"published_at": "2026-11-11T08:30:00+08:00", "title": "台積電法說會", "source": "鉅亨網",
-                  "url": "https://news.cnyes.com/news/id/1", "sources": ["FinMind（非商用）"]}]
+                  "url": "https://news.cnyes.com/news/id/1", "category": "media", "sources": ["FinMind（非商用）"]}]
     use_market(MarketData([FakeFinMind(), DemoProvider()], policy="commercial"))
     assert client.get(f"{API}/instruments/2330/news").json() == []
 
 
-def test_commercial_policy_filters_archive_rows(client, archived, frozen_today, use_market):
-    use_market(MarketData([DemoProvider()], policy="commercial"))
-    twse = client.get(f"{API}/instruments/2330/chips?range=1M").json()
-    assert twse["institutional"] == [] and twse["foreign_holding_pct"] == []  # TWSE website rows are hidden
-    assert twse["margin"][-1]["margin_balance"] == 32523  # MI_MARGN is OpenAPI: allowed
-    assert not any(s.endswith("（非商用）") for s in twse["sources"])
-    assert twse["notes"]
+def test_unlicensed_archive_rows_are_never_served(client, archived, engine, frozen_today, use_market):
+    """Rows the old worker took from the TWSE website (twse-web) or MIS stay hidden under both policies."""
+    with Session(engine) as db:
+        db.add(InstitutionalDaily(symbol="2330.TW", date=date(2026, 11, 11), foreign_net=1, trust_net=2,
+                                  dealer_net=3, total_net=6, source="twse-web"))
+        db.add(PriceDaily(symbol="2330.TW", date=date(2026, 11, 10), close=D(2285), source="twse-mis+shioaji-data"))
+        db.commit()
+    for policy in ("personal", "commercial"):
+        use_market(MarketData([ArchiveProvider(policy, session_fn=lambda: Session(engine)), DemoProvider()],
+                              policy=policy))
+        assert client.get(f"{API}/instruments/2330/chips?range=1M").json()["institutional"] == []
+        candles = client.get(f"{API}/instruments/2330/history?range=1M").json()["candles"]
+        assert not any(c["t"] == "2026-11-10" and c["c"] == 2285.0 for c in candles), policy
     tpex = client.get(f"{API}/instruments/6488/chips?range=1M").json()
-    assert tpex["institutional"]  # TPEx OpenAPI publishes them
-    intraday = client.get(f"{API}/instruments/2330/intraday").json()
-    assert intraday["points"] == [] and "商用" in intraday["notes"][0]
+    assert tpex["institutional"]  # TPEx OpenAPI publishes them (commercial)
 
 
 # -- intraday ---------------------------------------------------------------------------------------------
-def test_intraday_points_only_for_tracked_symbols(client, engine, market):
-    today = today_taipei()
-    assert client.get(f"{API}/instruments/2330/intraday").json()["points"] == []  # not tracked
+def test_intraday_has_no_points_without_a_licensed_source(client):
     client.post(f"{API}/watchlist", json={"symbol": "2330"})
-    md = MarketData([DemoProvider()], policy="personal")
-    with Session(engine) as db:
-        for minute, price, vol in ((1, "2400", 1_000_000), (2, "2405", 1_600_000), (3, "2410", 2_000_000)):
-            at = datetime.combine(today, datetime.min.time(), TAIPEI).replace(hour=9, minute=minute)
-            q = QuoteData("2330.TW", price=D(price), volume=vol, as_of=at, trade_date=today, is_realtime=True,
-                          source="twse-mis")
-            assert store_intraday_points(db, md, {"2330.TW": q}, now=at) == 1
-        # demo / non-realtime quotes are never stored; commercial stores nothing
-        demo = QuoteData("2330.TW", price=D(1), trade_date=today, is_realtime=True, is_demo=True)
-        assert store_intraday_points(db, md, {"2330.TW": demo}) == 0
-        assert store_intraday_points(db, MarketData([DemoProvider()], policy="commercial"),
-                                     {"2330.TW": q}, now=at) == 0
-        assert db.query(IntradayPoint).count() == 3
     r = client.get(f"{API}/instruments/2330/intraday").json()
-    assert r["date"] == today.isoformat()
-    assert r["points"] == [{"t": "09:01", "price": 2400.0, "volume": 1000000},
-                           {"t": "09:02", "price": 2405.0, "volume": 600000},
-                           {"t": "09:03", "price": 2410.0, "volume": 400000}]
-    assert any("MIS" in s and s.endswith("（非商用）") for s in r["sources"])
+    assert r["points"] == [] and r["sources"] == [] and "沒有授權的盤中行情來源" in r["notes"][0]
+    assert r["reference_price"] is not None
+    us = client.get(f"{API}/instruments/AAPL/intraday").json()
+    assert us["points"] == [] and us["notes"] == ["美股沒有盤中走勢資料"]
     spark = next(w for w in client.get(f"{API}/watchlist").json() if w["symbol"] == "2330.TW")
-    assert spark["sparkline_interval"] in ("1m", "1d")
+    assert spark["sparkline_interval"] == "1d"
 
 
 # -- why ----------------------------------------------------------------------------------------------------
@@ -324,7 +318,8 @@ def test_why_endpoint(client):
     r = client.get(f"{API}/instruments/2330/why")
     assert r.status_code == 200
     w = r.json()
-    assert set(w) == {"symbol", "show", "headline", "reasons", "as_of", "sources"}
+    assert set(w) == {"symbol", "show", "headline", "reasons", "as_of", "sources",
+                      "ai", "citations", "rule_headline"}  # AI (M4) fields are additive
     assert w["show"] == bool(w["reasons"]) and (w["headline"] is None) == (not w["reasons"])
 
 

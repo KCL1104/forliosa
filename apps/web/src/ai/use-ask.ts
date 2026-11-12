@@ -30,7 +30,7 @@ export function useAskAi() {
       const s = useAi.getState()
       const draft = id ? s.drafts[id] : undefined
       if (draft) {
-        const thread = s.threads.find((t) => t.messages.some((m) => m.draftId === id))
+        const thread = s.threads.find((t) => t.messages.some((m) => m.draftId === id || m.draftIds?.includes(id!)))
         if (thread) s.openThread(thread.id)
       }
       s.focusDraft(id)

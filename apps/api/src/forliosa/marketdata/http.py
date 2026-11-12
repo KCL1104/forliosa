@@ -17,11 +17,8 @@ from forliosa.marketdata.base import ProviderUnavailable
 
 log = logging.getLogger(__name__)
 
-USER_AGENT = "forliosa/0.1 (portfolio tracker)"
-# MIS rejects non-browser clients; a generic browser UA (no personal details) is used there.
-BROWSER_USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36"
-)
+# An honest client name; never a browser disguise (see docs/research/data-sources-licensing.md §4.4).
+USER_AGENT = "forliosa/0.1 (portfolio tracker; Forliosa data archiver)"
 
 
 class RateLimiter:
@@ -57,14 +54,27 @@ class RateLimiter:
             return slept
 
 
-# TWSE (and MIS, which shares the firewall) ≥ 0.5 s between requests; TPEx and TDCC likewise. The TWSE
-# website (www.twse.com.tw, used only by the personal-policy archive) answers HTTP 307 when requests
-# come faster than about one every few seconds, so it gets 3 s. More specific hosts are listed first.
+# Polite intervals per host (docs/research/data-sources-licensing.md §4.4): TWSE ≥ 3 s, TPEx and TDCC ≥ 2 s.
 DEFAULT_LIMITER = RateLimiter(
     default_interval=0.0,
-    per_host={"www.twse.com.tw": 3.0, "twse.com.tw": 0.5, "tpex.org.tw": 0.5, "tdcc.com.tw": 0.5,
-              "finmindtrade.com": 0.25},
+    per_host={"twse.com.tw": 3.0, "tpex.org.tw": 2.0, "tdcc.com.tw": 2.0, "finmindtrade.com": 0.25},
 )
+
+# Source allowlist: the only URLs the server may fetch. Official open data published under the Open
+# Government Data License (TWSE / TPEx OpenAPI, TDCC open data), shioaji-data's official files, and FinMind
+# (only constructed under an explicit DATA_POLICY=personal opt-in). Website pages of TWSE / TPEx / MIS /
+# MOPS are deliberately absent: their terms forbid automated downloads without written consent.
+ALLOWED_URL_PREFIXES = (
+    "https://openapi.twse.com.tw/v1/",
+    "https://www.tpex.org.tw/openapi/",
+    "https://opendata.tdcc.com.tw/",
+    "https://raw.githubusercontent.com/Sinotrade/shioaji-data/",
+    "https://api.finmindtrade.com/",
+)
+
+
+def url_allowed(url: str) -> bool:
+    return url.startswith(ALLOWED_URL_PREFIXES)
 
 
 class HttpFetcher:
@@ -75,12 +85,14 @@ class HttpFetcher:
         self.backoff = backoff
         self.client = client or httpx.Client(
             timeout=timeout, headers={"User-Agent": user_agent, "Accept": "application/json"},
-            follow_redirects=True,
+            follow_redirects=False,  # a redirect (e.g. a WAF 307) is a refusal: stop, never chase it
         )
 
     def get_bytes(self, url: str, params: dict[str, Any] | None = None,
                   headers: dict[str, str] | None = None) -> bytes:
         host = urlparse(url).hostname or ""
+        if not url_allowed(url):
+            raise ProviderUnavailable(f"{url} 不在授權來源白名單（marketdata/http.py ALLOWED_URL_PREFIXES）")
         delay = self.backoff
         last_exc: Exception | None = None
         for attempt in range(self.retries + 1):
@@ -92,7 +104,7 @@ class HttpFetcher:
             else:
                 if resp.status_code == 200:
                     return resp.content
-                if resp.status_code in (402, 403, 404, 405, 407, 429, 451):
+                if resp.status_code in (402, 403, 404, 405, 407, 429, 451) or 300 <= resp.status_code < 400:
                     raise ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
                 last_exc = ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
             if attempt < self.retries:

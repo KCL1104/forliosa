@@ -535,8 +535,9 @@ class StockEvent(BaseModel):
 class NewsItem(BaseModel):
     published_at: str
     title: str
-    source: str
+    source: str  # 「公告」 for official announcements
     url: str
+    category: Literal["material_info", "exchange_news", "media"] = "media"
     sources: list[str] = []
 
 

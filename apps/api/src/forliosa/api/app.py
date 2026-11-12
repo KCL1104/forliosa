@@ -8,8 +8,9 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from forliosa.api.errors import install_error_handlers
-from forliosa.api.routes import accounts, market, portfolio, recurring, stock, transactions, users, watchlist
+from forliosa.api.routes import accounts, ai, market, portfolio, recurring, stock, transactions, users, watchlist
 from forliosa.config import DEFAULT_SESSION_SECRET, get_settings
+from forliosa.datapolicy import attributions
 from forliosa.marketdata.service import get_market_data
 
 API_PREFIX = "/api/v1"
@@ -50,7 +51,11 @@ def create_app() -> FastAPI:
         md = get_market_data()
         return {"status": "ok", "env": settings.forliosa_env, "data_policy": md.policy, "providers": md.status()}
 
-    for module in (users, accounts, market, stock, transactions, portfolio, watchlist, recurring):
+    @api.get("/meta/attributions", tags=["meta"], summary="資料來源與授權：每個資料集的顯名聲明（不需登入）")
+    def meta_attributions():
+        return attributions(get_market_data().policy)
+
+    for module in (users, accounts, market, stock, transactions, portfolio, watchlist, recurring, ai):
         api.include_router(module.router)
     app.include_router(api)
     return app

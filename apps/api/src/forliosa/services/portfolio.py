@@ -429,11 +429,10 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
 
         base = max((i for i, p in enumerate(points) if p.unpriced), default=-1) + 1
         if base >= ei:  # fewer than two fully priced closes: nothing honest to show yet
-            missing = sorted(points[ei].unpriced)
-            us = [m for m in missing if market_of_symbol(m) == "US"]
+            us = sorted({m for p in points for m in p.unpriced if market_of_symbol(m) == "US"})
             if us:
                 notes.append(f"{'、'.join(us)}：{US_NOTE}，含美股時無法計算績效")
-            if len(us) < len(missing) or not missing:
+            if len(points) < 2 or any(market_of_symbol(m) != "US" for p in points for m in p.unpriced):
                 notes.append(f"{accumulating_note(md)}；需要持股期間每天的收盤價才能計算績效")
             return {**empty, "notes": notes}
         lumped = inception < axis[0]  # transactions before the first archived day are all booked on it
@@ -531,7 +530,7 @@ def upcoming(state: PortfolioState, md: MarketData, days: int,
     ex-date already passed, a recorded cash-dividend transaction's amount is used when there is one.
     For a recurring debit it is the plan's amount (money going out).
     """
-    from forliosa.datapolicy import labels
+    from forliosa.datapolicy import labels, tagged
 
     if not 1 <= days <= UPCOMING_MAX_DAYS:
         raise unprocessable(f"days 必須介於 1 與 {UPCOMING_MAX_DAYS} 之間")
@@ -545,7 +544,7 @@ def upcoming(state: PortfolioState, md: MarketData, days: int,
     for r in state.rows:
         ans = md.dividends(r.symbol)
         name = r.info.name if r.info else r.symbol
-        sources = labels(["demo"] if ans.is_demo else ans.source.split("+"))
+        sources = labels(["demo"] if ans.is_demo else tagged(ans.source, "ex_dividend"))
         for ev in ans.value:
             ex, pay = ev.ex_dividend_date, ev.payment_date
             if ex and today <= ex <= horizon:

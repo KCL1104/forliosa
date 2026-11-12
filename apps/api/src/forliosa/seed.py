@@ -192,6 +192,10 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
     s.trade(user, tw, "sell", "2317.TW", 250, 1000, note="當沖賣出（證交稅減半）", day_trade=True)
     s.trade(user, tw, "sell", "2330.TW", 120, 200)
     s.trade(user, tw, "buy", "0050.TW", 90, 150, note="零股定期定額")
+    # a fully sold position: not a holding any more, kept as a closed round (出清紀錄, /portfolio/closed)
+    s.trade(user, tw, "buy", "2308.TW", 420, 1000, note="台達電")
+    s.trade(user, tw, "sell", "2308.TW", 330, 400, note="先賣一部分")
+    s.trade(user, tw, "sell", "2308.TW", 210, 600, note="全部賣出（出清）")
     s.add(user, account_id=tw.id, type="withdrawal", trade_date=today - timedelta(days=60), amount=Decimal(200_000),
           note="出金")
     s.add(user, account_id=tw.id, type="interest", trade_date=today - timedelta(days=45), amount=Decimal(12),
@@ -203,7 +207,7 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
         s.trade(user, tw, "buy", sym, (today - ex).days + 45, 10000, note="為了示範配股")
         s.dividends(user, tw, sym, since=ex - timedelta(days=1), until=ex)
     else:
-        log.warning("沒有找到真實的配股事件（FinMind 可能暫時無法使用），略過配股示範")
+        log.warning("沒有找到可用的真實配股事件（commercial 沒有股利歷史來源，或資料源暫時無法使用），略過配股示範")
 
     for sym in ("2330.TW", "0050.TW", "00878.TW", "2317.TW", "2454.TW", "6488.TWO"):
         s.splits(user, tw, sym, s.first_buy[sym])

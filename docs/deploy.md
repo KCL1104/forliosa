@@ -66,15 +66,15 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `SESSION_SECRET` | ✅ | 64 字以上的隨機字串 | `python -c "import secrets; print(secrets.token_urlsafe(48))"`；沒設會拒絕啟動。更換會讓所有人登出 |
 | `CORS_ORIGINS` | ✅ | `https://app.example.com` | 見第 1 節 |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |
-| `MARKET_DATA_PROVIDERS` | | `twse_mis,shioaji_data,finmind,demo` | 預設值；順序即備援順序 |
-| `FINMIND_TOKEN` | 建議 | FinMind 帳號的 token | 匿名額度很小且與同一個出口 IP 共用；免費版**不可商用** |
+| `DATA_POLICY` | | `commercial`（預設） | 只用可合法商用的政府開放資料與自己的存檔；**不要改成 `personal`**（見 `docs/research/data-sources-licensing.md`） |
+| `MARKET_DATA_PROVIDERS` | | 留空 | 用程式預設（開放資料與存檔）；商用模式下 FinMind、MIS 不會啟用 |
 | `CACHE_DIR` | | `var/cache`（預設，即 `/app/var/cache`） | 行情快取；建議掛 volume，見下方 |
 | `REDIS_URL` | | `${{Redis.REDIS_URL}}` | 目前未使用 |
 | `STREAM_INTERVAL_SECONDS` | | `5` | SSE 報價推送間隔 |
 | `RAILWAY_RUN_UID` | 掛 volume 時 | `0` | Railway 的 volume 由 root 擁有，而 image 以 uid 10001 執行，寫不進去；設 `0` 改以 root 執行 |
 
-**Volume（建議）**：Service → Volumes → 新增，Mount Path `/app/var`。行情快取（FinMind、shioaji-data 的回應）會
-留在 volume 上，重新部署不會重抓、不會耗掉 FinMind 額度。沒有 volume 也能運作：快取寫入失敗只會記一行警告，
+**Volume（建議）**：Service → Volumes → 新增，Mount Path `/app/var`。開放資料與 shioaji-data 的快取會
+留在 volume 上，重新部署不會重抓。沒有 volume 也能運作：快取寫入失敗只會記一行警告，
 每次部署後重新抓。Railway 的 volume 只能掛在一個服務上，api 與 worker 各自需要自己的 volume。
 
 ### 2.3 worker 服務
@@ -85,7 +85,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | Config File Path | `/apps/api/railway.worker.toml`（同一個 image，啟動指令 `python -m forliosa.worker`） |
 | Networking | 不需要網域 |
 
-環境變數：`FORLIOSA_ENV=prod`、`DATABASE_URL=${{Postgres.DATABASE_URL}}`、`MARKET_DATA_PROVIDERS`、`FINMIND_TOKEN`、
+環境變數：`FORLIOSA_ENV=prod`、`DATABASE_URL=${{Postgres.DATABASE_URL}}`、`DATA_POLICY=commercial`、
 （選用）`RAILWAY_RUN_UID=0` 與自己的 volume。worker 不處理 HTTP 請求，不需要 `SESSION_SECRET`、`CORS_ORIGINS`。
 資料表由 api 服務 migrate，worker 不跑 migration；第一次部署請先讓 api 啟動成功。
 
@@ -142,7 +142,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
        `providers` 裡各資料源的 `available`。
 3. [ ] 部署記錄裡看到 `alembic upgrade head` 執行完成（資料表已建立）。
 4. [ ] （選用）api 掛 volume `/app/var` 並設 `RAILWAY_RUN_UID=0`，重新部署後記錄中沒有 `cache write failed`。
-5. [ ] 設定 `FINMIND_TOKEN`（建議）。
+5. [ ] 確認 `DATA_POLICY` 是 `commercial`（預設），`GET /api/v1/meta/attributions` 列出資料來源與授權標示。
 6. [ ] Railway api 加 Custom Domain `api.example.com`，DNS 設 CNAME（DNS only），等憑證簽發完成。
 7. [ ] Cloudflare Pages：設定建置與 `NODE_VERSION`、`PNPM_VERSION`、`VITE_API_BASE_URL=https://api.example.com`，部署成功。
 8. [ ] Pages 加自訂網域 `app.example.com`。
@@ -159,10 +159,10 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | 項目 | 現況 | 上線前需要 |
 |---|---|---|
 | **登入** | 只有開發登入（`POST /auth/dev-login`，`FORLIOSA_ENV=dev` 才開放）；正式環境無法登入 | Email magic link 或 Google OAuth；帳號建立流程 |
-| **即時行情授權** | 盤中報價來自證交所 MIS 的**非官方**端點（偶爾 502、可能被封鎖） | 商業化前改用有授權的即時行情 |
-| **FinMind** | 日線、本益比、股利、匯率、加權報酬指數；免費版**不可商用**、匿名額度小 | 申請 token；商業化需 Sponsor Pro 或改用證交所／櫃買 OpenAPI（解析器已完成） |
-| **美股** | 全部是示範（模擬）資料，畫面會標「示範資料」 | 決定有授權的美股資料源（Yahoo 條款禁止轉發） |
-| **shioaji-data AI 研究資料** | 公司簡介、產業鏈、題材的授權「待定」，目前照樣顯示並標示來源 | 確認授權 |
+| **盤中行情** | 沒有授權來源，1 日走勢為空狀態（證交所網站與 MIS 依條款不得自動擷取） | 若需要：向證交所購買延遲行情（約每月 NT$30,000） |
+| **上市個股三大法人、外資持股** | 開放資料沒有逐檔資料；上櫃股票有 | 先寄信詢問證交所，再決定是否購買 Data E-Shop「三大法人買賣超檔」（約每月 NT$3,000） |
+| **美股** | 商用模式下沒有報價與績效（價格為空）；基本面可用 SEC EDGAR（需聯絡信箱） | 決定美股價格來源（使用者自備 Tiingo key 或購買商用授權） |
+| **shioaji-data AI 研究資料** | 公司簡介、產業鏈、題材的授權「待定」，商用模式下不顯示 | 確認授權 |
 | **多副本** | 報價快取在 API 程序記憶體；SSE 每個副本各自輪詢 | Redis 共用報價後才能開多個 api 副本 |
 | **CSRF** | 依賴 `SameSite=Lax`＋CORS 白名單（JSON 請求需預檢） | 正式登入時一併評估 CSRF token；同網域其他子網域也算同網站 |
 | **帳戶刪除 UI、只記持股快照輸入畫面** | API 已有，前端還沒有畫面 | 見 `apps/web/OPEN_QUESTIONS.md` |

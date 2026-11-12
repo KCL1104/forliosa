@@ -3,35 +3,39 @@
 Run once from the command line::
 
     uv run python -m forliosa.archive run                    # every job that applies to DATA_POLICY
-    uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | financials | tdcc | web
-    uv run python -m forliosa.archive backfill --days 90     # see "Backfill" below
+    uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | financials | tdcc
+    uv run python -m forliosa.archive backfill --days 90     # personal opt-in only, see "Backfill" below
 
 The worker runs the same jobs on a schedule (``forliosa.worker``). Every write is an upsert keyed on
 (symbol, date[, level]) or an announcement key, so running a job twice changes nothing.
 
 What is archived, and from where (field names: ``forliosa.marketdata.opendata``):
 
-==========================  ===================================================  ==========================
-table                       commercial-usable source                             personal-only extra
-==========================  ===================================================  ==========================
-prices_daily                TWSE STOCK_DAY_ALL, TPEx daily_close_quotes          FinMind TaiwanStockPrice
-valuation_daily             TWSE BWIBBU_ALL, TPEx peratio_analysis               FinMind TaiwanStockPER
-reference_prices            TWSE TWT84U, TPEx NextReferencePrice/NextLimit*      —
-margin_daily                TWSE MI_MARGN, TPEx margin_balance                   FinMind margin (backfill)
-institutional_daily         TPEx 3insti_daily_trading (no TWSE OpenAPI dataset)  TWSE website T86, FinMind
-foreign_holding_daily       TPEx 3insti_qfii (no per-stock TWSE OpenAPI dataset) TWSE website MI_QFIIS
-shareholding_distribution   TDCC open data 1-5 (weekly, current week only)       —
-market_events               TWT48U_ALL / exright_prepost (除權息), notice / warning
-                            (注意), punish / disposal (處置), t187ap04 (重大訊息),
-                            t187ap41 (股東會), t187ap05 (營收公布日: first seen)     —
-market_holidays             TWSE holidaySchedule (official calendar, current year)  —
-financial_reports           t187ap06 (income, YTD), t187ap07 (balance), t187ap17  —
-==========================  ===================================================  ==========================
+==========================  =========================================================
+table                       source (official open data, 政府資料開放授權條款第 1 版)
+==========================  =========================================================
+prices_daily                TWSE STOCK_DAY_ALL, TPEx daily_close_quotes
+valuation_daily             TWSE BWIBBU_ALL, TPEx peratio_analysis
+reference_prices            TWSE TWT84U, TPEx NextReferencePrice/NextLimit*
+margin_daily                TWSE MI_MARGN, TPEx margin_balance
+institutional_daily         TPEx 3insti_daily_trading (TWSE has no per-stock OpenAPI dataset)
+foreign_holding_daily       TPEx 3insti_qfii (TWSE has no per-stock OpenAPI dataset)
+shareholding_distribution   TDCC open data 1-5 (weekly, current week only)
+market_events               TWT48U_ALL / exright_prepost (除權息), notice / warning (注意),
+                            punish / disposal (處置), t187ap04 (重大訊息), t187ap41 (股東會),
+                            t187ap05 (營收公布日: first seen), TWSE news/newsList (證交所新聞)
+financial_reports           t187ap06 (income, YTD), t187ap07 (balance), t187ap17
+fund_profiles               TWSE t187ap47_L 基金基本資料彙總表 (ETF basics)
+market_holidays             TWSE holidaySchedule (official calendar, current year)
+==========================  =========================================================
 
-Backfill: there is no official per-stock history API, so under ``commercial`` the archive only grows
-from the day the worker starts. Under ``personal`` ``backfill`` fills the past from the TWSE website
-(T86, MI_QFIIS by date — whole market per request) and FinMind (per symbol, tiny anonymous quota:
-it stops at the first 402 and keeps what it has). Backfilled rows never overwrite official rows.
+Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi`` and ``opendata.tdcc.com.tw`` are fetched (see the
+allowlist in ``marketdata/http.py``). The TWSE / TPEx **websites** forbid automated downloads without
+written consent, so the former T86 / MI_QFIIS website jobs and the website backfill were removed
+(2026-11-12). There is no official per-stock history API: the archive only grows from the day the worker
+starts. ``backfill`` remains only for FinMind under an explicit ``DATA_POLICY=personal`` opt-in with
+``finmind`` listed in ``MARKET_DATA_PROVIDERS`` (non-commercial; never on by default). Backfilled rows
+never overwrite official rows, and commercial queries skip them.
 """
 
 from __future__ import annotations
@@ -57,6 +61,7 @@ from forliosa.marketdata.twse import parse_bwibbu_all, parse_stock_day_all
 from forliosa.models import (
     FinancialReport,
     ForeignHoldingDaily,
+    FundProfile,
     HoldingSnapshot,
     InstitutionalDaily,
     MarginDaily,
@@ -69,19 +74,18 @@ from forliosa.models import (
     ValuationDaily,
     WatchlistItem,
 )
-from forliosa.timeutil import TAIPEI, last_tw_trading_day, next_tw_trading_day, now_taipei, tw_trading_days
+from forliosa.timeutil import TAIPEI, last_tw_trading_day, next_tw_trading_day, now_taipei
 
 log = logging.getLogger("forliosa.archive")
 
 TWSE_OPENAPI = "https://openapi.twse.com.tw/v1"
 TPEX_OPENAPI = "https://www.tpex.org.tw/openapi/v1"
-TWSE_WEB = "https://www.twse.com.tw/rwd/zh"
 TDCC_URL = "https://opendata.tdcc.com.tw/getOD.ashx"
 INDUSTRIES = ("ci", "basi", "bd", "fh", "ins", "mim")
 # TWSE publishes the day's margin balances in the evening; before this time MI_MARGN is the previous day's.
 MARGIN_READY = time(21, 0)
 
-JOB_GROUPS = ("twse", "tpex", "financials", "tdcc", "web")
+JOB_GROUPS = ("twse", "tpex", "financials", "tdcc")
 
 
 def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
@@ -154,7 +158,7 @@ class Archiver:
     def _events(self, rows: list[dict[str, Any]], source: str) -> int:
         out = [{"key": r["key"], "symbol": tw_symbol(r["code"], r["market"]), "date": r["date"],
                 "end_date": r["end_date"], "type": r["type"], "title": r["title"][:500], "detail": r["detail"],
-                "url": None, "data": r["data"], "source": source} for r in rows]
+                "url": r.get("url"), "data": r["data"], "source": source} for r in rows]
         return upsert(self.db, MarketEvent, out, ["key"], ["end_date", "title", "detail", "data", "source"])
 
     # -- TWSE OpenAPI --------------------------------------------------------------------------
@@ -245,6 +249,20 @@ class Archiver:
                                  "first_seen": today.isoformat(), "backlog": not seen_before},
                         "source": source})
         return upsert(self.db, MarketEvent, out, ["key"], ())
+
+    def twse_news(self) -> int:
+        """證交所新聞 (market announcements); rows naming a company code are filed under that symbol."""
+        rows = [{"key": r["key"], "symbol": tw_symbol(r["code"], "TWSE") if r["code"] else "MARKET",
+                 "date": r["date"], "end_date": None, "type": "exchange_news", "title": r["title"], "detail": "",
+                 "url": r["url"], "data": {}, "source": "twse-openapi"}
+                for r in od.parse_twse_news(self._list(f"{TWSE_OPENAPI}/news/newsList"))]
+        return upsert(self.db, MarketEvent, rows, ["key"], ["title", "url"])
+
+    def twse_funds(self) -> int:
+        rows = [{"symbol": tw_symbol(r["code"], "TWSE"), "date": r["date"], "values": r["values"],
+                 "source": "twse-openapi", "fetched_at": datetime.now(TAIPEI)}
+                for r in od.parse_fund_profiles(self._list(f"{TWSE_OPENAPI}/opendata/t187ap47_L"))]
+        return upsert(self.db, FundProfile, rows, ["symbol"])
 
     def twse_revenue(self) -> int:
         rows = od.parse_monthly_revenue(self._list(f"{TWSE_OPENAPI}/opendata/t187ap05_L"), "TWSE")
@@ -345,20 +363,6 @@ class Archiver:
                 for r in parsed if not market or r["code"] in market]
         return upsert(self.db, ShareholdingDistribution, rows, ["symbol", "date", "level"])
 
-    # -- TWSE website (personal policy only) ----------------------------------------------------
-    def twse_web_day(self, d: date, only_missing: bool = False) -> int:
-        if self.policy != "personal":
-            return 0
-        ds = d.strftime("%Y%m%d")
-        params = {"date": ds, "selectType": "ALLBUT0999", "response": "json"}
-        inst = [{"symbol": tw_symbol(r["code"], "TWSE"), "date": r["date"], "foreign_net": r["foreign_net"],
-                 "trust_net": r["trust_net"], "dealer_net": r["dealer_net"], "total_net": r["total_net"],
-                 "source": "twse-web"} for r in od.parse_t86(self._json(f"{TWSE_WEB}/fund/T86", params))]
-        n = upsert(self.db, InstitutionalDaily, inst, ["symbol", "date"], () if only_missing else None)
-        qfii = [{"symbol": tw_symbol(r["code"], "TWSE"), "date": r["date"], "pct": r["pct"], "shares": r["shares"],
-                 "source": "twse-web"} for r in od.parse_mi_qfiis(self._json(f"{TWSE_WEB}/fund/MI_QFIIS", params))]
-        return n + upsert(self.db, ForeignHoldingDaily, qfii, ["symbol", "date"], () if only_missing else None)
-
     # -- entry points ----------------------------------------------------------------------------
     def run(self, only: Iterable[str] | None = None) -> list[JobResult]:
         groups = set(only or JOB_GROUPS)
@@ -366,6 +370,7 @@ class Archiver:
             for name, fn in (("twse prices", self.twse_prices), ("twse valuation", self.twse_valuation),
                              ("twse reference", self.twse_reference), ("twse margin", self.twse_margin),
                              ("twse events", self.twse_events), ("twse revenue", self.twse_revenue),
+                             ("twse news", self.twse_news), ("twse funds", self.twse_funds),
                              ("twse holidays", self.twse_holidays)):
                 self._run(name, fn)
         if "tpex" in groups:
@@ -377,25 +382,17 @@ class Archiver:
             self.financials()
         if "tdcc" in groups:
             self._run("tdcc distribution", self.tdcc)
-        if "web" in groups and self.policy == "personal":
-            now = self.now_fn().astimezone(TAIPEI)
-            d = last_tw_trading_day(now.date() if now.time() >= time(17, 0) else now.date() - timedelta(days=1))
-            self._run(f"twse web {d}", lambda: self.twse_web_day(d))
         return self.results
 
-    def backfill(self, days: int = 90, symbols: list[str] | None = None) -> list[JobResult]:
-        """Personal policy only: TWSE website history by date, then FinMind per symbol."""
-        if self.policy != "personal":
-            log.info("backfill: DATA_POLICY=commercial has no official history source; nothing to do")
+    def backfill(self, days: int = 90, symbols: list[str] | None = None,
+                 providers: Iterable[str] = ()) -> list[JobResult]:
+        """FinMind per symbol — only under an explicit personal opt-in (policy personal *and* ``finmind`` in
+        MARKET_DATA_PROVIDERS). There is no commercially usable history source to backfill from."""
+        if self.policy != "personal" or "finmind" not in {p.strip().lower() for p in providers}:
+            log.info("backfill: needs DATA_POLICY=personal and finmind in MARKET_DATA_PROVIDERS "
+                     "(non-commercial opt-in); nothing to do")
             return self.results
         today = self.now_fn().astimezone(TAIPEI).date()
-        have = set(self.db.scalars(select(InstitutionalDaily.date).where(InstitutionalDaily.source == "twse-web")
-                                   .distinct()))
-        have &= set(self.db.scalars(select(ForeignHoldingDaily.date).where(ForeignHoldingDaily.source == "twse-web")
-                                    .distinct()))
-        for d in tw_trading_days(today - timedelta(days=days), today - timedelta(days=1)):
-            if d not in have:
-                self._run(f"twse web {d}", lambda d=d: self.twse_web_day(d, only_missing=True))
         symbols = symbols if symbols is not None else tracked_symbols(self.db)
         start = today - timedelta(days=days)
         self._run("finmind chips", lambda: finmind_backfill(self.db, symbols, start))
@@ -442,7 +439,7 @@ def main(argv: list[str] | None = None) -> None:
     sub = parser.add_subparsers(dest="cmd", required=True)
     run_p = sub.add_parser("run", help="執行一次每日存檔")
     run_p.add_argument("--only", default="", help=f"逗號分隔：{','.join(JOB_GROUPS)}")
-    back_p = sub.add_parser("backfill", help="回補歷史（僅 DATA_POLICY=personal）")
+    back_p = sub.add_parser("backfill", help="FinMind 回補（非商用；僅 DATA_POLICY=personal 且明確列出 finmind）")
     back_p.add_argument("--days", type=int, default=90)
     back_p.add_argument("--symbols", default="", help="逗號分隔；預設為所有持股與自選")
     args = parser.parse_args(argv)
@@ -455,7 +452,7 @@ def main(argv: list[str] | None = None) -> None:
             results = arch.run(only)
         else:
             syms = [s.strip() for s in args.symbols.split(",") if s.strip()] or None
-            results = arch.backfill(args.days, syms)
+            results = arch.backfill(args.days, syms, settings.market_data_providers)
     for r in results:
         status = f"錯誤：{r.error}" if r.error else f"{r.rows} 筆"
         print(f"  {r.name:<28} {status}")

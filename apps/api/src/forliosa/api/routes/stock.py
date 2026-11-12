@@ -5,6 +5,8 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
+from forliosa.ai.schemas import AIWhy
+from forliosa.ai.why import enhance_why
 from forliosa.api.deps import current_user
 from forliosa.api.schemas import (
     Chips,
@@ -15,9 +17,7 @@ from forliosa.api.schemas import (
     Position,
     PositionHistory,
     StockEvent,
-    Why,
 )
-from forliosa.archive import tracked_symbols
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
@@ -31,9 +31,9 @@ def overview(symbol: str, _user: User = Depends(current_user), db: Session = Dep
     return svc.overview(db, get_market_data(), symbol)
 
 
-@router.get("/intraday", response_model=Intraday, summary="今日分時（只有持股與自選會累積）")
-def intraday(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return svc.intraday(db, get_market_data(), symbol, set(tracked_symbols(db)))
+@router.get("/intraday", response_model=Intraday, summary="今日分時（目前沒有授權的盤中來源：points 一律為空）")
+def intraday(symbol: str, _user: User = Depends(current_user)):
+    return svc.intraday(get_market_data(), symbol)
 
 
 @router.get("/chips", response_model=Chips, summary="籌碼：三大法人、融資融券、外資持股、集保大戶")
@@ -53,9 +53,9 @@ def events(symbol: str, mine: bool = Query(False), user: User = Depends(current_
     return svc.events(db, get_market_data(), user, symbol, mine)
 
 
-@router.get("/news", response_model=list[NewsItem], summary="新聞標題（只有標題、來源、連結）")
-def news(symbol: str, _user: User = Depends(current_user)):
-    return svc.news(get_market_data(), symbol)
+@router.get("/news", response_model=list[NewsItem], summary="公告：重大訊息與證交所新聞（官方開放資料，標題＋連結）")
+def news(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return svc.news(db, get_market_data(), symbol)
 
 
 @router.get("/position", response_model=Position | None, summary="我的部位（未持有回 null）")
@@ -69,6 +69,7 @@ def position_history(symbol: str, user: User = Depends(current_user), db: Sessio
     return svc.position_history(db, get_market_data(), user, symbol)
 
 
-@router.get("/why", response_model=Why, summary="為什麼漲跌（規則判斷，只在異常時 show=true）")
-def why(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return svc.why(db, get_market_data(), symbol)
+@router.get("/why", response_model=AIWhy, summary="為什麼漲跌（規則判斷，只在異常時 show=true；可選 AI 一句話）")
+def why(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    md = get_market_data()
+    return enhance_why(db, md, svc.why(db, md, symbol), user_id=user.id)

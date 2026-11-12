@@ -7,12 +7,15 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.archive import Archiver
+from forliosa.marketdata.http import url_allowed
 from forliosa.models import (
     FinancialReport,
     ForeignHoldingDaily,
+    FundProfile,
     InstitutionalDaily,
     MarginDaily,
     MarketEvent,
+    MarketHoliday,
     PriceDaily,
     ReferencePrice,
     ShareholdingDistribution,
@@ -50,7 +53,7 @@ def test_archive_run_is_idempotent(engine, market):
         assert db.get(ReferencePrice, ("3680.TWO", date(2026, 11, 12))).reference_price == D("425.5")
         assert db.get(MarginDaily, ("2330.TW", date(2026, 11, 11))).margin_balance == 32523  # stamped 11-11
         assert db.get(InstitutionalDaily, ("6488.TWO", date(2026, 11, 11))).total_net == 1302529
-        assert db.get(InstitutionalDaily, ("2330.TW", date(2026, 11, 11))).source == "twse-web"
+        assert db.get(InstitutionalDaily, ("2330.TW", date(2026, 11, 11))) is None  # TWSE website: never scraped
         assert db.get(ValuationDaily, ("6488.TWO", date(2026, 11, 11))).per == D("35.75")
         assert db.get(FinancialReport, ("6488.TWO", "2026Q3", "income_ytd")).values["eps"] == "15.00"
         assert db.get(ShareholdingDistribution, ("2330.TW", date(2026, 11, 6), 15)).holders == 1470
@@ -59,11 +62,25 @@ def test_archive_run_is_idempotent(engine, market):
         assert ex.date == date(2026, 12, 29) and ex.data["cash"] == "6.00000000"
 
 
-def test_commercial_policy_skips_the_twse_website(engine, market):
+def test_only_open_data_endpoints_are_fetched(engine, market):
+    fetcher = FakeFetcher()
     with Session(engine) as db:
-        results = run(db, "commercial")
-        assert not any("web" in r.name for r in results)
+        for policy in ("commercial", "personal"):
+            Archiver(db, fetcher, policy, now_fn=lambda: NOW).run()
+        assert fetcher.calls and all(url_allowed(u) for u in fetcher.calls)
+        assert not any("www.twse.com.tw" in u or "mis.twse" in u for u in fetcher.calls)
         assert db.scalar(select(func.count()).select_from(InstitutionalDaily)
                          .where(InstitutionalDaily.source == "twse-web")) == 0
-        # TPEx publishes per-stock institutional flows in its OpenAPI: archived under both policies.
+        # TPEx publishes per-stock institutional flows and foreign holdings in its OpenAPI.
         assert db.get(InstitutionalDaily, ("6488.TWO", date(2026, 11, 11))) is not None
+        assert db.get(ForeignHoldingDaily, ("6488.TWO", date(2026, 11, 11))).pct == D("0.2949")
+        # 證交所新聞: rows naming a company code are filed under it; ETF basics without people's names
+        delisting = db.scalar(select(MarketEvent).where(MarketEvent.type == "exchange_news",
+                                                        MarketEvent.symbol == "2314.TW").limit(1))
+        assert delisting is not None and delisting.url.startswith("https://www.twse.com.tw/zh/about/news/")
+        assert db.scalar(select(func.count()).select_from(MarketEvent).where(
+            MarketEvent.type == "exchange_news", MarketEvent.symbol == "MARKET")) >= 2
+        etf = db.get(FundProfile, "0050.TW")
+        assert etf.values["index_name"] == "臺灣50指數" and etf.values["listed"] == "2003-06-30"
+        assert etf.values["units"] == 25048000000 and "陳重銓" not in str(etf.values)
+        assert db.get(MarketHoliday, date(2026, 12, 25)).name == "行憲紀念日"

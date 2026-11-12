@@ -130,3 +130,28 @@ def test_seed_works_under_commercial(engine, client, commercial):
     upcoming = client.get(f"{API}/portfolio/upcoming?days=31").json()
     assert [i["symbol"] for i in upcoming if i["type"] == "recurring"] == ["0050.TW", "0050.TW"]
     assert date.fromisoformat(upcoming[0]["date"]) >= today_taipei()
+
+
+def test_ai_research_fields_are_hidden_under_commercial(client, market):
+    from forliosa.marketdata.base import BaseProvider, InstrumentProfile
+    from forliosa.marketdata.shioaji_data import SOURCE_OFFICIAL, SOURCE_RESEARCH
+
+    class Profiles(BaseProvider):
+        name = "shioaji_data"
+
+        def profile(self, symbol):
+            return InstrumentProfile(symbol, summary="AI 整理的業務簡介", chain_stage="晶圓製造", themes=("CoWoS",),
+                                     shares_outstanding=25932370067, data_sources=(SOURCE_OFFICIAL, SOURCE_RESEARCH))
+
+    try:
+        set_market_data(MarketData([Profiles(), DemoProvider()], policy="commercial"))
+        d = client.get(f"{API}/instruments/2330").json()
+        assert (d["summary"], d["chain_stage"], d["themes"]) == (None, None, [])
+        assert d["shares_outstanding"] == 25932370067 and len(d["data_sources"]) == 1
+        official = d["data_sources"][0]
+        assert official.startswith("永豐金證券 shioaji-data") and "政府資料開放授權條款第 1 版" in official
+        set_market_data(MarketData([Profiles(), DemoProvider()], policy="personal"))
+        d = client.get(f"{API}/instruments/2330").json()
+        assert d["summary"] == "AI 整理的業務簡介" and d["themes"] == ["CoWoS"]
+    finally:
+        set_market_data(market)

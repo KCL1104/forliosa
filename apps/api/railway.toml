@@ -11,3 +11,8 @@ healthcheckPath = "/api/v1/health"
 healthcheckTimeout = 120
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 5
+
+# Environment variables are set in the Railway service settings, not here. DATA_POLICY defaults to
+# `commercial` (only legally commercially usable open data, never demo data); do not set it to `personal`
+# on a deployment other people use. MARKET_DATA_PROVIDERS default: archive,twse_openapi,tpex_openapi,
+# shioaji_data,demo (no FinMind; the TWSE MIS provider no longer exists).

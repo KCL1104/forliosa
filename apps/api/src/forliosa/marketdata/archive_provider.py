@@ -19,7 +19,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from forliosa.datapolicy import Policy, allowed_sources
+from forliosa.datapolicy import Policy, source_clause
 from forliosa.marketdata.base import BaseProvider, Candle, DividendEvent, QuoteData, market_of_symbol
 from forliosa.timeutil import market_close_dt, today_taipei
 
@@ -50,8 +50,7 @@ class ArchiveProvider(BaseProvider):
         self._last_sources[(method, symbol)] = sorted({r.source for r in rows})
 
     def _filter(self, stmt, model):
-        allowed = allowed_sources(self.policy)
-        return stmt.where(model.source.in_(allowed)) if allowed is not None else stmt
+        return stmt.where(source_clause(model.source, self.policy))
 
     def first_date(self, symbol: str | None = None) -> date | None:
         """Earliest archived close (of ``symbol`` or of any symbol): where the archive's history begins."""

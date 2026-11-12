@@ -1,6 +1,6 @@
-"""「資料累積中」notes: under ``DATA_POLICY=commercial`` there is no demo data and no official per-stock
-history API, so series only exist from the day our archive started. Endpoints return what is real
-(possibly nothing) and say so in ``notes`` instead of filling the gap with synthetic data.
+"""「資料累積中」notes: there is no official per-stock history API, so real series only exist from the day
+our archive started. Under ``DATA_POLICY=commercial`` there is no demo data either: endpoints return what
+is real (possibly nothing) and say so in ``notes`` instead of filling the gap with synthetic data.
 """
 
 from __future__ import annotations
@@ -26,14 +26,13 @@ def covers(first: date | None, start: date) -> bool:
 
 
 def series_notes(md: MarketData, symbol: str, start: date, first: date | None) -> list[str]:
-    """Notes for a daily series of ``symbol`` requested from ``start`` whose first real point is ``first``.
+    """Notes for a daily series of ``symbol`` requested from ``start`` whose first point is ``first``.
 
-    Personal mode fills gaps with other sources and demo data, so it never needs a note.
+    Personal mode fills an *empty* series with demo data (which covers the range, so no note); a short real
+    series (the archive alone, FinMind being off by default) gets the same note in both modes.
     """
-    if md.policy != "commercial":
-        return []
-    if market_of_symbol(symbol) == "US":
-        return [US_NOTE]
     if covers(first, start):
         return []
+    if market_of_symbol(symbol) == "US" and md.policy == "commercial":
+        return [US_NOTE]
     return [accumulating_note(md, symbol)]

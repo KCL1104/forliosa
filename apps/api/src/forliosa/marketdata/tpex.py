@@ -6,10 +6,9 @@ Field names verified from twjackysu/TWSEMCPServer:
   "1150929"), ``SecuritiesCompanyCode``, ``CompanyName``, ``Close``, ``Change``, ``Open``, ``High``,
   ``Low``, ``Average``, ``TradingShares``, ``TransactionAmount``, ``TransactionNumber``
   (tests/contract/test_otc_api.py, tests/unit/test_free_sources_unit.py).
-* Website ``/www/zh-tw/afterTrading/peQryDate?response=json`` (P/E, yield, P/B; any date) —
-  ``tables[0].fields`` = 股票代號, 公司名稱, 本益比, 每股股利, 股利年度, 殖利率(%), 股價淨值比,
-  財報年/季 (from 2025-01-02); "N/A" when missing (sources/tpex/pe_qry_date.py). Live response
-  (2026-11-11): top-level ``date`` "20261111"; the table also carries ``date`` "115/11/11".
+
+Only the OpenAPI (``www.tpex.org.tw/openapi``) is used: the TPEx website terms (§5) forbid automated
+downloads from the website without consent, so the former ``peQryDate`` website call was removed.
 """
 
 from __future__ import annotations
@@ -32,7 +31,6 @@ from forliosa.marketdata.http import HttpFetcher
 from forliosa.timeutil import market_close_dt
 
 OPENAPI_BASE = "https://www.tpex.org.tw/openapi/v1"
-PE_QRY_URL = "https://www.tpex.org.tw/www/zh-tw/afterTrading/peQryDate"
 
 
 def parse_daily_close_quotes(rows: list[dict[str, Any]]) -> dict[str, QuoteData]:
@@ -51,31 +49,6 @@ def parse_daily_close_quotes(rows: list[dict[str, Any]]) -> dict[str, QuoteData]
             volume=parse_int(r.get("TradingShares")), as_of=market_close_dt(d), trade_date=d,
             source="tpex-openapi",
         )
-    return out
-
-
-def parse_pe_qry_date(payload: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    tables = payload.get("tables")
-    if not isinstance(tables, list):
-        raise ProviderUnavailable("TPEx peQryDate 回應沒有 tables")
-    if not tables or not tables[0].get("data"):
-        return {}
-    fields = [str(f).strip() for f in tables[0].get("fields") or []]
-    try:
-        col = {name: fields.index(name) for name in ("股票代號", "本益比", "殖利率(%)", "股價淨值比")}
-    except ValueError as exc:
-        raise ProviderUnavailable(f"TPEx peQryDate 欄位改變：{fields}") from exc
-    served = parse_tw_date(payload.get("date")) or parse_tw_date(tables[0].get("date"))
-    out = {}
-    for row in tables[0]["data"]:
-        code = str(row[col["股票代號"]]).strip()
-        dy = parse_decimal(row[col["殖利率(%)"]])
-        out[code] = {
-            "date": served,
-            "per": parse_decimal(row[col["本益比"]]),
-            "pbr": parse_decimal(row[col["股價淨值比"]]),
-            "dividend_yield": dy / 100 if dy is not None else None,
-        }
     return out
 
 
@@ -130,7 +103,3 @@ class TpexOpenApiProvider(BaseProvider):
                 if cash or ratio:
                     out[sym] = (cash, ratio)
         return out
-
-    def market_valuation_ratios(self) -> dict[str, dict[str, Any]]:
-        """Whole market, latest day (the archive stores it daily; not the per-symbol facade method)."""
-        return parse_pe_qry_date(self.fetcher.get_json(PE_QRY_URL, params={"response": "json"}))

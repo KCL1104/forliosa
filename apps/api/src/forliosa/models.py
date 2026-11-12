@@ -318,3 +318,116 @@ class RecurringPlan(Base):
     note: Mapped[str] = mapped_column(Text, default="")
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+# -- AI (M4): conversations, drafts, usage, shared "why" cache ----------------------------------------
+class AiThread(Base):
+    """One AI conversation. ``model`` is fixed when the thread starts (thinking blocks are bound to it)."""
+
+    __tablename__ = "ai_threads"
+    __table_args__ = (Index("ix_ai_threads_user_updated", "user_id", "updated_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    title: Mapped[str] = mapped_column(String(200), default="")
+    model: Mapped[str] = mapped_column(String(64))
+    context_tokens: Mapped[int] = mapped_column(BigInteger, default=0)  # prompt size of the latest call
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class AiMessage(Base):
+    """One Messages-API message of a thread, stored exactly as sent / received (content blocks incl. thinking
+    signatures and web-search ``encrypted_content``) so the conversation can be replayed append-only.
+    ``in_context = False`` rows (failed or refused turns) are shown in the history but never sent again."""
+
+    __tablename__ = "ai_messages"
+    __table_args__ = (
+        Index("ix_ai_messages_thread_seq", "thread_id", "seq"),
+        Index("ix_ai_messages_user_created", "user_id", "created_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    thread_id: Mapped[str] = mapped_column(ForeignKey("ai_threads.id", ondelete="CASCADE"))
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    turn_id: Mapped[str] = mapped_column(String(32))
+    seq: Mapped[int] = mapped_column()
+    role: Mapped[str] = mapped_column(String(16))  # user | assistant | system
+    content: Mapped[list | str] = mapped_column(JSON)
+    in_context: Mapped[bool] = mapped_column(Boolean, default=True)
+    is_user_input: Mapped[bool] = mapped_column(Boolean, default=False)
+    text: Mapped[str] = mapped_column(Text, default="")  # display text
+    meta: Mapped[dict] = mapped_column(JSON, default=dict)  # citations, drafts, tools, error
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class AiDraft(Base):
+    """A transaction drafted by the AI. Never written to the ledger by the AI: the user signs it in the UI,
+    which calls ``POST /transactions`` with ``source: "ai_draft"``."""
+
+    __tablename__ = "ai_drafts"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    thread_id: Mapped[str | None] = mapped_column(ForeignKey("ai_threads.id", ondelete="SET NULL"), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), default="pending")  # pending | signed | discarded
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)  # TransactionIn body
+    preview: Mapped[dict] = mapped_column(JSON, default=dict)  # TradePreview
+    instrument: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    notes: Mapped[list] = mapped_column(JSON, default=list)
+    transaction_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class AiUsage(Base):
+    """One model call: tokens, server-tool requests and the estimated cost (USD)."""
+
+    __tablename__ = "ai_usage"
+    __table_args__ = (Index("ix_ai_usage_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    thread_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    feature: Mapped[str] = mapped_column(String(16))  # chat | why | smoke
+    model: Mapped[str] = mapped_column(String(64))
+    key_index: Mapped[int | None] = mapped_column(nullable=True)
+    input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    output_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    cache_creation_input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    cache_read_input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
+    web_search_requests: Mapped[int] = mapped_column(default=0)
+    web_fetch_requests: Mapped[int] = mapped_column(default=0)
+    cost_usd: Mapped[Decimal] = mapped_column(Money, default=Decimal(0))
+    stop_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class AiWhyCache(Base):
+    """AI one-sentence "why did it move" per symbol per trading day, shared by every user."""
+
+    __tablename__ = "ai_why_cache"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # ok | empty | failed
+    text: Mapped[str] = mapped_column(Text, default="")
+    citations: Mapped[list] = mapped_column(JSON, default=list)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class FundProfile(Base):
+    """ETF / fund basics from TWSE t187ap47_L 基金基本資料彙總表 (stored now, exposed later).
+
+    Only fund facts are kept (type, tracked index, dates, units, custodian); the managers' and officers'
+    names, phone numbers and addresses in the dataset are personal data and are not stored.
+    """
+
+    __tablename__ = "fund_profiles"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    date: Mapped[date] = mapped_column(Date)  # 出表日期
+    values: Mapped[dict] = mapped_column(JSON, default=dict)
+    source: Mapped[str] = mapped_column(String(32))
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)

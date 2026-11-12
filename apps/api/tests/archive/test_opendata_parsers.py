@@ -77,16 +77,8 @@ def test_tdcc_distribution():
     assert total["shares"] == 25932370067
 
 
-def test_twse_website_t86_and_qfiis():
-    t86 = {r["code"]: r for r in od.parse_t86(load("twse_web_t86_live_20261111.json"))}
-    r = t86["2330"]
-    assert (r["foreign_net"], r["trust_net"], r["dealer_net"], r["total_net"]) == (6038319, 2385276, 148895, 8572490)
-    q = {r["code"]: r for r in od.parse_mi_qfiis(load("twse_web_mi_qfiis_live_20261111.json"))}
-    assert q["2330"]["pct"] == D("0.6812") and q["2330"]["date"] == date(2026, 11, 11)
-
-
 def test_finmind_chip_and_news_parsers():
-    # Live FinMind rows (2026-11-11/12); the institutional totals agree with TWSE T86 for 0050:
+    # Live FinMind rows (2026-11-11/12; FinMind is a non-commercial personal opt-in only):
     # 22,452,348 + 0 + 4,440,000 + 11,197,808 = 38,090,156 shares.
     inst = parse_institutional(load("finmind_institutional_0050_live_20261112.json")["data"])
     assert inst == [{"date": date(2026, 11, 11), "foreign_net": 22452348, "trust_net": 4440000,

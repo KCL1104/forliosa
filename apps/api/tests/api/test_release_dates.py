@@ -32,7 +32,7 @@ class Listed(BaseProvider):
     def instruments(self):
         return [InstrumentInfo(f"{c}.{'TWO' if m == 'TPEX' else 'TW'}", c, n, m, "stock", "TWD")
                 for c, n, m in (("2901", "欣欣", "TWSE"), ("2408", "南亞科", "TWSE"), ("5530", "龍巖", "TPEX"),
-                                ("4523", "永彰", "TPEX"), ("8924", "大田", "TPEX"))]
+                                ("4523", "永彰", "TPEX"), ("8924", "大田", "TPEX"), ("2314", "台揚", "TWSE"))]
 
 
 @pytest.fixture()
@@ -102,7 +102,8 @@ def test_events_use_actual_dates_and_label_deadlines_estimated(client, archived)
 
     conf = client.get(f"{API}/instruments/2901/events").json()
     talks = by_type(conf, "investor_conference")
-    assert [(e["date"], e["title"], e["estimated"]) for e in talks] == [("2026-11-23", "公告本公司召開法人說明會", False)]
+    assert [(e["date"], e["title"], e["estimated"]) for e in talks] == [
+        ("2026-11-23", "公告本公司召開法人說明會", False)]
     assert not by_type(conf, "material_info")
     daiwa = by_type(client.get(f"{API}/instruments/2408/events").json(), "investor_conference")
     assert [e["date"] for e in daiwa] == ["2026-11-12"]
@@ -152,3 +153,36 @@ def test_events_under_both_policies(client, archived, market):
     # but no demo dividends under commercial
     assert any(e["type"] == "ex_dividend" and "示範" in "".join(e["sources"]) for e in personal)
     assert not any("示範" in "".join(e["sources"]) for e in commercial)
+
+
+def test_news_are_official_announcements(client, archived, market):
+    news = client.get(f"{API}/instruments/2382/news").json()
+    # 廣達's three 重大訊息 of 2026-11-11, newest first, labelled 公告 with the dataset attribution
+    assert [n["published_at"] for n in news] == ["2026-11-11T15:15:02+08:00", "2026-11-11T14:43:45+08:00",
+                                                 "2026-11-11T14:42:33+08:00"]
+    assert news[-1]["title"] == "公告本公司董事會通過115年第三季財務報告"
+    assert all(n["source"] == "公告" and n["category"] == "material_info" for n in news)
+    assert all(n["url"].startswith("https://mops.twse.com.tw/") for n in news)
+    assert news[0]["sources"][0].startswith("臺灣證券交易所〈上市公司每日重大訊息〉（")
+    # 證交所新聞 naming the company code (台揚 2314): linked to the official page, never fetched
+    taiyang = client.get(f"{API}/instruments/2314/news").json()
+    assert {n["category"] for n in taiyang} == {"exchange_news"}
+    assert all(n["url"].startswith("https://www.twse.com.tw/zh/about/news/") for n in taiyang)
+    assert any("終止上市" in n["title"] for n in taiyang)
+    assert taiyang[0]["sources"][0].startswith("臺灣證券交易所〈證交所新聞〉（")
+    set_market_data(MarketData([Listed(), DemoProvider()], policy="commercial"))
+    assert client.get(f"{API}/instruments/2382/news").json() == news  # official data: same under commercial
+    assert client.get(f"{API}/instruments/AAPL/news").json() == []
+
+
+def test_meta_attributions_is_public(app):
+    from fastapi.testclient import TestClient
+
+    r = TestClient(app).get(f"{API}/meta/attributions")
+    assert r.status_code == 200
+    body = r.json()
+    assert body["policy"] in ("personal", "commercial") and "https://data.gov.tw/license" in body["notice"][1]
+    d = next(x for x in body["datasets"] if x["key"] == "twse-openapi/valuation")
+    assert d["agency"] == "臺灣證券交易所" and d["dataset"] == "上市個股日本益比、殖利率及股價淨值比"
+    assert d["attribution"].endswith("依政府資料開放授權條款第 1 版") and d["url"].startswith("https://openapi.twse")
+    assert any("MIS" in x for x in body["not_used"])

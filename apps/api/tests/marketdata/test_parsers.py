@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import date, datetime
+from datetime import date
 from decimal import Decimal as D
 from pathlib import Path
 
@@ -26,16 +26,13 @@ from forliosa.marketdata.shioaji_data import (
     parse_monthly_revenue,
     parse_quarter_fundamentals,
 )
-from forliosa.marketdata.tpex import parse_daily_close_quotes, parse_pe_qry_date
+from forliosa.marketdata.tpex import parse_daily_close_quotes
 from forliosa.marketdata.twse import (
-    mis_channel,
     parse_bwibbu_all,
     parse_holiday_schedule,
-    parse_mis,
     parse_stock_day_all,
     parse_twt48u_all,
 )
-from forliosa.timeutil import TAIPEI
 
 FIX = Path(__file__).parent / "fixtures"
 
@@ -52,41 +49,6 @@ def test_parse_helpers():
     assert parse_tw_date("115/11/11") == date(2026, 11, 11)
     assert parse_tw_date("20261111") == date(2026, 11, 11)
     assert parse_tw_date("2026-11-11") == date(2026, 11, 11)
-
-
-# -- TWSE MIS ------------------------------------------------------------------------------------
-def test_mis_live_response():
-    quotes = parse_mis(load("mis_live_20261111.json"))
-    assert set(quotes) == {"2330.TW", "6488.TWO", "0050.TW"}
-    q = quotes["2330.TW"]
-    assert (q.price, q.prev_close, q.open, q.high, q.low) == (D("2395"), D("2285"), D("2330"), D("2395"), D("2305"))
-    assert q.volume == 30370 * 1000  # MIS "v" is in lots
-    assert q.trade_date == date(2026, 11, 11)
-    assert q.as_of == datetime(2026, 11, 11, 13, 30, tzinfo=TAIPEI)
-    assert quotes["6488.TWO"].price == D("635") and quotes["6488.TWO"].prev_close == D("612")
-    assert quotes["0050.TW"].price == D("103.2")
-
-
-def test_mis_without_trade_and_placeholder_rows():
-    # twstock's recorded response: "z" is "-" (no trade at that snapshot), placeholder row with c=""
-    quotes = parse_mis(load("mis_twstock_mock.json"))
-    assert set(quotes) == {"2330.TW", "6488.TWO"}
-    q = quotes["2330.TW"]
-    assert q.price is None  # no z / pz: the facade falls back to another provider
-    assert q.prev_close == D("839") and q.volume == 23_350_000
-    assert quotes["6488.TWO"].price == D("945")
-
-
-def test_mis_reference_price_before_first_trade():
-    payload = {"msgArray": [{"c": "2330", "ex": "tse", "z": "-", "y": "2285.0000", "o": "-", "h": "-", "l": "-",
-                             "v": "-", "tlong": "1794358800000", "d": "20261112"}], "rtcode": "0000"}
-    q = parse_mis(payload)["2330.TW"]
-    assert q.price == D("2285") and q.prev_close == D("2285")
-
-
-def test_mis_channel():
-    assert mis_channel("2330.TW") == "tse_2330.tw"
-    assert mis_channel("6488.TWO") == "otc_6488.tw"
 
 
 # -- TWSE OpenAPI --------------------------------------------------------------------------------
@@ -124,15 +86,6 @@ def test_tpex_daily_close_live():
     q = quotes["6488.TWO"]
     assert (q.price, q.prev_close, q.volume) == (D("635.00"), D("612.00"), 11401175)
     assert q.trade_date == date(2026, 11, 11)
-
-
-def test_tpex_pe_qry_date_live():
-    ratios = parse_pe_qry_date(load("tpex_pe_qry_date_live.json"))
-    assert ratios["6488"] == {"date": date(2026, 11, 11), "per": D("35.75"), "pbr": D("2.30"),
-                              "dividend_yield": D("0.0121")}
-    assert ratios["1569"]["per"] is None  # "N/A"
-    with pytest.raises(ProviderUnavailable):
-        parse_pe_qry_date({"stat": "error"})
 
 
 # -- FinMind -------------------------------------------------------------------------------------

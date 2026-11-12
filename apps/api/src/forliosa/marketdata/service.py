@@ -112,7 +112,9 @@ class MarketData:
             backing_off = getattr(p, "backing_off", None)
             if callable(backing_off) and backing_off():
                 available = False  # answers from its disk cache only
-            out.append({"name": p.name, "is_demo": p.is_demo, "available": available})
+            # under commercial the demo provider only names instruments (catalog); it never serves data
+            out.append({"name": p.name, "is_demo": p.is_demo, "available": available,
+                        "serves_data": self.demo_data_allowed or not p.is_demo})
         return out
 
     def _real_anchor(self, symbol: str) -> tuple[date, Decimal] | None:
@@ -541,14 +543,13 @@ def build_providers(settings: Settings) -> list[BaseProvider]:
     from forliosa.marketdata.finmind import FinMindProvider
     from forliosa.marketdata.shioaji_data import ShioajiDataProvider
     from forliosa.marketdata.tpex import TpexOpenApiProvider
-    from forliosa.marketdata.twse import TwseMisProvider, TwseOpenApiProvider
+    from forliosa.marketdata.twse import TwseOpenApiProvider
 
     fetcher = HttpFetcher(timeout=settings.http_timeout_seconds, retries=1)
     factories: dict[str, Callable[[], BaseProvider]] = {
         "shioaji_data": lambda: ShioajiDataProvider(settings.shioaji_data_base_url, settings.cache_dir, fetcher),
         "twse_openapi": lambda: TwseOpenApiProvider(HttpFetcher(timeout=15, retries=1, backoff=0.5)),
         "tpex_openapi": lambda: TpexOpenApiProvider(HttpFetcher(timeout=15, retries=1, backoff=0.5)),
-        "twse_mis": lambda: TwseMisProvider(),
         "finmind": lambda: FinMindProvider(settings.finmind_token, HttpFetcher(timeout=20, retries=0),
                                            cache_dir=settings.cache_dir),
         "archive": lambda: ArchiveProvider(settings.data_policy),
@@ -559,7 +560,7 @@ def build_providers(settings: Settings) -> list[BaseProvider]:
         key = name.strip().lower()
         factory = factories.get(key)
         if factory is None:
-            log.warning("unknown market data provider %r ignored", name)
+            log.warning("unknown or removed market data provider %r ignored", name)
             continue
         if not provider_allowed(key, settings.data_policy):
             log.info("DATA_POLICY=%s: provider %s is not commercially usable, skipped", settings.data_policy, key)

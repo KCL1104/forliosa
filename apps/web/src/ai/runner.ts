@@ -2,11 +2,13 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
-import type { Instrument, TransactionInput } from "@/api/types"
+import { ApiError, type Instrument, type TransactionInput } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { parseIntent, sharesOf } from "./intent"
+import { aiApi, aiRemote, applyChatEvent, draftFromServer, streamChat, type AiUsage, type ChatEvent } from "./remote"
+import { aiKeys } from "./remote-hooks"
 import { newId, useAi } from "./store"
 import { answerFor, classifyQuestion, fallbackAnswer, type AiContext } from "./suggestions"
 import type { Answer, Draft, DraftInstrument, Suggestion } from "./types"
@@ -30,6 +32,8 @@ export function useAiRunner(ctx: AiContext) {
   const upsertDraft = useAi((s) => s.upsertDraft)
   const patchDraft = useAi((s) => s.patchDraft)
   const seedComposer = useAi((s) => s.seedComposer)
+  const updateMessage = useAi((s) => s.updateMessage)
+  const setRemoteId = useAi((s) => s.setRemoteId)
   const openTradeForm = useUi((s) => s.openTradeForm)
   const privacy = usePrefs((s) => s.privacyMode)
 
@@ -105,31 +109,106 @@ export function useAiRunner(ctx: AiContext) {
     return answerFor(kind, { ctx, privacy, today: appToday() })
   }
 
+  /** 真實後端：`POST /ai/chat` 串流。文字片段每 40ms 合併寫入一次，避免每個字都重繪與寫入 localStorage */
+  async function submitRemote(text: string) {
+    push({ role: "user", text }, { title: text })
+    const localThreadId = useAi.getState().threadId!
+    const remoteId = useAi.getState().threads.find((t) => t.id === localThreadId)?.remoteId ?? null
+    const aiId = push({ role: "ai", text: "", streaming: true })
+    let buffered = ""
+    let timer: ReturnType<typeof setTimeout> | null = null
+    const flush = () => {
+      if (timer !== null) clearTimeout(timer)
+      timer = null
+      if (!buffered) return
+      const delta = buffered
+      buffered = ""
+      updateMessage(aiId, (m) => ({ ...m, text: (m.text ?? "") + delta }))
+    }
+    const onEvent = (e: ChatEvent) => {
+      if (e.event === "text") {
+        buffered += e.data.delta
+        if (timer === null) timer = setTimeout(flush, 40)
+        return
+      }
+      flush()
+      if (e.event === "thread") {
+        setRemoteId(localThreadId, e.data.id)
+        return
+      }
+      if (e.event === "draft") upsertDraft(draftFromServer(e.data))
+      updateMessage(aiId, (m) => applyChatEvent(m, e))
+      if (e.event === "done") {
+        void qc.invalidateQueries({ queryKey: aiKeys.usage })
+        void qc.invalidateQueries({ queryKey: aiKeys.threads })
+      }
+    }
+    const symbol = ctx.route === "stock" ? ctx.stock.symbol : null
+    try {
+      await streamChat({ thread_id: remoteId, message: text, page: { route: window.location.pathname, symbol }, privacy }, onEvent)
+      flush()
+      updateMessage(aiId, (m) => ({ ...m, streaming: false }))
+    } catch (err) {
+      flush()
+      if (err instanceof ApiError && err.code === "ai_unavailable") {
+        // 後端沒有設定 AI：退回本機的規則版回答
+        updateMessage(aiId, (m) => ({ ...m, streaming: false }))
+        await answerLocally(text, aiId)
+        return
+      }
+      const error = err instanceof ApiError ? { code: err.code, message: err.message } : { code: "network", message: "連不上伺服器，請稍後再試。" }
+      updateMessage(aiId, (m) => ({ ...m, streaming: false, error }))
+      if (err instanceof ApiError && err.status === 429) void qc.invalidateQueries({ queryKey: aiKeys.usage })
+    }
+  }
+
   async function submit(raw: string) {
     const text = raw.trim()
     if (!text) return
+    const current = useAi.getState().threads.find((t) => t.id === useAi.getState().threadId)
+    if (current?.messages.some((m) => m.streaming)) {
+      toast("等這一則回答完再問下一題")
+      return
+    }
+    // 後端已經回報 AI 未設定（/ai/usage 的 available=false）時直接用本機規則
+    if (aiRemote && qc.getQueryData<AiUsage>(aiKeys.usage)?.available !== false) return submitRemote(text)
     push({ role: "user", text }, { title: text })
+    await answerLocally(text)
+  }
+
+  /** 本機規則版（mock 模式與後端沒有 AI 時）。`replaceId`：把回答寫進已經存在的 AI 訊息 */
+  async function answerLocally(text: string, replaceId?: string) {
+    const reply = (answer: Answer) => (replaceId ? updateMessage(replaceId, (m) => ({ ...m, answer })) : say(answer))
     try {
-      if (await draftFrom(text)) return
+      if (!replaceId && (await draftFrom(text))) return
       const intent = parseIntent(text, appToday())
       if (intent.kind === "lookup") {
         const inst = await resolveInstrument(intent.target)
         if (inst) {
-          say({ text: `${inst.name}（${inst.code}）在這裡。`, links: [{ label: `看${inst.name}`, to: "/stock/$symbol", params: { symbol: inst.symbol } }] })
+          reply({ text: `${inst.name}（${inst.code}）在這裡。`, links: [{ label: `看${inst.name}`, to: "/stock/$symbol", params: { symbol: inst.symbol } }] })
           return
         }
       }
       const kind = classifyQuestion(text, ctx)
       const a = kind ? answer(kind) : null
-      say(a ?? fallbackAnswer(text, ctx))
+      reply(a ?? fallbackAnswer(text, ctx))
     } catch (err) {
-      say({ text: `這次沒有處理好：${err instanceof Error ? err.message : "請再試一次"}。` })
+      reply({ text: `這次沒有處理好：${err instanceof Error ? err.message : "請再試一次"}。` })
     }
   }
 
   function ask(s: Suggestion) {
+    if (aiRemote) {
+      void submit(s.text)
+      return
+    }
     push({ role: "user", text: s.text }, { title: s.text })
     say(answer(s.kind) ?? fallbackAnswer(s.text, ctx))
+  }
+
+  /** 後端草稿的狀態同步（失敗不影響帳本：交易已經照使用者的簽名寫入或刪除） */
+  function syncDraft(id: string, body: Parameters<typeof aiApi.patchDraft>[1]) {
+    if (useAi.getState().drafts[id]?.remote) void aiApi.patchDraft(id, body).catch(() => undefined)
   }
 
   function action(kind: AiAction, opts: { code?: string } = {}) {
@@ -179,6 +258,7 @@ export function useAiRunner(ctx: AiContext) {
     try {
       const txn = await api.createTransaction({ ...d.input, source: "ai_draft" })
       patchDraft(id, { status: "signed", txnId: txn.id, signedAt: new Date().toISOString() })
+      syncDraft(id, { status: "signed", transaction_id: txn.id })
       void qc.invalidateQueries({ queryKey: ["portfolio"] })
       void qc.invalidateQueries({ queryKey: ["transactions"] })
       toast.success(`已入帳：${describe(d)}`, {
@@ -197,6 +277,7 @@ export function useAiRunner(ctx: AiContext) {
     try {
       await api.deleteTransaction(d.txnId)
       patchDraft(id, { status: "pending", txnId: undefined, signedAt: undefined })
+      syncDraft(id, { status: "pending" })
       void qc.invalidateQueries({ queryKey: ["portfolio"] })
       void qc.invalidateQueries({ queryKey: ["transactions"] })
       toast("已復原，草稿還在等你簽名")
@@ -215,6 +296,7 @@ export function useAiRunner(ctx: AiContext) {
 
   function discard(id: string) {
     patchDraft(id, { status: "discarded" })
+    syncDraft(id, { status: "discarded" })
   }
 
   return { submit, ask, action, sign, undo, revise, discard }
