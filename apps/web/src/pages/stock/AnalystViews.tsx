@@ -91,11 +91,11 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
           aria-expanded={open}
           aria-controls="ov-analyst-body"
           onClick={toggle}
-          className="flex min-h-11 w-full items-end gap-x-3 border-b border-rule pb-2 text-left"
+          className="group flex min-h-11 w-full items-end gap-x-3 border-b border-rule pb-2 text-left"
         >
           <span className="text-xl font-bold">法人觀點</span>
           <span className="pb-px text-sm font-normal text-ink-2">第三方意見</span>
-          <ChevronDownIcon aria-hidden className={cn("mb-1 ml-auto size-[18px] shrink-0 text-ink-2 transition-transform duration-200", open && "rotate-180")} />
+          <ChevronDownIcon aria-hidden className={cn("mb-1 ml-auto size-[18px] shrink-0 text-ink-2 transition-transform duration-200 group-hover:text-ink", open && "rotate-180")} />
         </button>
       </h2>
       {open && (
@@ -105,7 +105,11 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
           ) : (
             <>
               <p className="max-w-prose text-sm text-ink-2">{state.data?.disclaimer || ANALYST_DISCLAIMER_FALLBACK}</p>
-              <div className="mt-3" aria-live="polite">
+              {/* 只念一句狀態，不把整張表念出來 */}
+              <p role="status" className="sr-only">
+                {announce(state)}
+              </p>
+              <div className="mt-3">
                 <Body inst={inst} state={state} onSearch={av.search} onRetry={av.retry} />
               </div>
             </>
@@ -116,6 +120,21 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
   )
 }
 
+function announce(state: AnalystState): string {
+  switch (state.phase) {
+    case "searching":
+      return "正在搜尋近期的法人觀點"
+    case "ready":
+      return `找到 ${visibleViews(state.data?.items).length} 筆法人觀點`
+    case "empty":
+      return "近期查無法人報導"
+    case "unavailable":
+      return "法人觀點暫時查不到"
+    default:
+      return ""
+  }
+}
+
 function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; state: AnalystState; onSearch: () => void; onRetry: () => void }) {
   const notes = state.data?.notes
   switch (state.phase) {
@@ -123,7 +142,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
       return <SearchPrompt onSearch={onSearch} />
     case "searching":
       return (
-        <div role="status">
+        <div>
           <p className="ai-voice max-w-prose text-xl leading-snug">正在找近期媒體報導的法人觀點，找到的每一筆都會附上來源。</p>
           <p className="mt-2 flex min-h-6 items-center gap-2 text-sm text-ink-2">
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-ai motion-safe:animate-pulse" />
@@ -231,8 +250,8 @@ function ViewsTable({ items }: { items: AnalystView[] }) {
       <thead>
         <tr>
           <th scope="col" className={cn(th, "w-[76px] text-left")}>日期</th>
-          <th scope="col" className={cn(th, "w-[22%] text-left")}>機構</th>
-          <th scope="col" className={cn(th, "w-[22%] text-left")}>評等</th>
+          <th scope="col" className={cn(th, "w-[18%] text-left")}>機構</th>
+          <th scope="col" className={cn(th, "w-[19%] text-left")}>評等</th>
           <th scope="col" className={cn(th, "w-[128px] pr-6 text-right")}>目標價</th>
           <th scope="col" className={cn(th, "text-left")}>來源</th>
         </tr>

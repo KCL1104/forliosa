@@ -100,6 +100,9 @@ export function DataSourcesPage() {
             <p className="max-w-prose text-md text-ink-2">
               你的交易、持股與定期定額是你自己記下的帳（標示為「本系統帳本」）。走勢圖使用 TradingView Lightweight Charts™（Apache-2.0）；字型為 Noto Sans TC 與霞鶩文楷 TC（SIL Open Font License 1.1）。
             </p>
+            <p className="max-w-prose text-md text-ink-2">
+              個股頁的「法人觀點」不是授權的資料庫：有人按下查詢時，AI 才搜尋近期公開的媒體報導，列出機構、評等、目標價、日期與原文連結；同一檔當天共用一份，隔天刪除。這些是第三方意見，以原始報導為準，不是 Forliosa 的建議。
+            </p>
             {api.kind === "mock" && <p className="max-w-prose text-md text-ink-2">目前沒有連到後端：這一頁的清單與畫面上的數字由瀏覽器內的模擬資料產生。</p>}
           </section>
         </>

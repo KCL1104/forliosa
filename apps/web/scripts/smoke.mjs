@@ -1,6 +1,7 @@
 // 冒煙測試（新資訊架構，mock 模式）：node scripts/smoke.mjs [--base=http://localhost:5173]
 // 走過每個路由，確認關鍵文字出現、沒有 console 錯誤；也測試 AI 草稿→簽名入帳→復原、隱私模式、⌘K、手機的問 AI，
-// 以及第二批：出清紀錄、定期定額（設定與扣款日草稿）、公告、1 日走勢的授權說明、資料來源與授權、商用模式沒有示範標記。
+// 以及第二批：出清紀錄、定期定額（設定與扣款日草稿）、公告、1 日走勢的授權說明、資料來源與授權、商用模式沒有示範標記；
+// 第三批：法人觀點（展開 → 查詢 → 搜尋中 → 結果／查無／查不到）、持倉的定期定額標記、補記漏記的扣款、已出清依年份分組。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
 
@@ -163,10 +164,80 @@ await check("扣款日：AI 面板提出定期定額草稿，簽名入帳後不�
   await page.waitForTimeout(1000)
   if (await page.getByRole("button", { name: /記下今天的 00878 定期定額/ }).count()) throw new Error("still offered after signing")
 })
-await check("已出清：展開清單，點一列到個股頁「過去的持有」", async () => {
-  await page.getByRole("button", { name: /已出清/ }).click()
-  await page.getByRole("table", { name: "已出清" }).getByText("長榮").click()
+await check("補記：11/06 的 0050 扣款沒有記 → 草稿成交日 11/6 → 簽名入帳後不再提出", async () => {
+  await page.getByRole("button", { name: "補記 11/06 的 0050 定期定額" }).click()
+  await page.getByRole("heading", { name: /買進 元大台灣50/ }).waitFor({ timeout: 8000 })
+  await page.getByText(/成交日 11\/6/).last().waitFor()
+  await page.getByText(/11\/6 是元大台灣50定期定額的扣款日/).waitFor()
+  await page.getByRole("button", { name: "簽名：確認入帳" }).click()
+  await page.getByText(/已入帳：買進 元大台灣50/).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "新對話" }).click()
+  await page.waitForTimeout(1000)
+  if (await page.getByRole("button", { name: /補記 11\/06 的 0050/ }).count()) throw new Error("still offered after signing")
+})
+await check("已出清：依年份分組（新的在前、最近一年展開、有小計），展開 2025 點長榮到「過去的持有」", async () => {
+  await page.getByRole("button", { name: /^已出清/ }).click()
+  const table = page.getByRole("table", { name: "已出清" })
+  const years = await table.getByRole("button", { name: /^\d{4} 年/ }).allTextContents()
+  if (years.map((y) => y.slice(0, 4)).join(",") !== "2026,2025,2024") throw new Error(`years ${years.join("|")}`)
+  await table.getByText("中華電").waitFor()
+  if (await table.getByText("長榮").count()) throw new Error("2025 should start collapsed")
+  await table.getByText(/小計/).first().waitFor()
+  await table.getByRole("button", { name: /^2025 年/ }).click()
+  await table.getByText("長榮").click()
   await page.getByRole("heading", { name: "過去的持有" }).waitFor({ timeout: 8000 })
+})
+await check("持倉：有定期定額的股票有標記，按下到設定的那個計畫", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  const mark = page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額：每月 6 日 NT\$10,000/ })
+  await mark.hover()
+  await page.getByRole("tooltip").getByText("定期定額：每月 6 日 NT$10,000").waitFor({ timeout: 5000 })
+  await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額：每月 12、26 日/ }).waitFor()
+  if (await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: /定期定額/ }).count() !== 2) throw new Error("expected 2 markers")
+  await mark.click()
+  await page.waitForURL(/\/settings#plan-rcp_demo0050/)
+  await page.locator('#plan-rcp_demo0050[aria-current="true"]').waitFor({ timeout: 8000 })
+})
+await check("隱私模式：定期定額標記不露出金額", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
+  await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: "定期定額：每月 6 日 ••••（到設定查看）" }).waitFor()
+  await page.getByRole("button", { name: /隱私模式開啟中/ }).click()
+})
+await check("法人觀點：預設收合；2330 展開就有 3 筆（日期・機構・評等・目標價・來源）與免責", async () => {
+  await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+  const toggle = page.getByRole("button", { name: /法人觀點/ })
+  if ((await toggle.getAttribute("aria-expanded")) !== "false") throw new Error("should start collapsed")
+  await toggle.click()
+  const table = page.getByRole("table", { name: "法人觀點" })
+  await table.getByText("外資券商 A").waitFor({ timeout: 8000 })
+  if ((await table.locator("tbody tr").count()) !== 3) throw new Error("expected 3 rows")
+  await table.getByText("1,350 元").waitFor()
+  await page.getByText("非 Forliosa 建議").first().waitFor()
+  for (const banned of ["平均", "上漲空間", "建議買進"]) if (await page.locator("#ov-analyst-body").getByText(banned).count()) throw new Error(`found ${banned}`)
+})
+await check("法人觀點：2454 沒人查過 → 查詢 → 搜尋中（AI 的話）→ 1–2 筆", async () => {
+  await page.goto(base + "/stock/2454.TW", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: /法人觀點/ }).click()
+  await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
+  await page.getByText(/正在找近期媒體報導的法人觀點/).waitFor({ timeout: 5000 })
+  const rows = page.getByRole("table", { name: "法人觀點" }).locator("tbody tr")
+  await rows.first().waitFor({ timeout: 15000 })
+  const n = await rows.count()
+  if (n < 1 || n > 2) throw new Error(`rows ${n}`)
+})
+await check("法人觀點：2881 查完沒有報導、2409 查不到、ETF 沒有這一塊", async () => {
+  await page.goto(base + "/stock/2881.TW", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: /法人觀點/ }).click()
+  await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
+  await page.getByText("近期查無法人報導").waitFor({ timeout: 15000 })
+  await page.goto(base + "/stock/2409.TW", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: /法人觀點/ }).click()
+  await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
+  await page.getByText("法人觀點暫時查不到，稍後再打開看看。").waitFor({ timeout: 15000 })
+  await page.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
+  await page.getByText("近四季 EPS").waitFor()
+  if (await page.getByRole("button", { name: /法人觀點/ }).count()) throw new Error("ETF should not have 法人觀點")
 })
 await check("個股：1 日走勢說明需要授權，按「看 5 日走勢」切換", async () => {
   await page.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
@@ -222,6 +293,24 @@ await check("手機：問 AI 搜尋「台積」進入個股頁", async () => {
   await m.getByLabel(/搜尋股票、提問/).fill("台積")
   await m.getByRole("button", { name: /2330 台積電/ }).click()
   await m.waitForURL(/\/stock\/2330\.TW/)
+})
+await check("手機：持倉列有定期定額標記，按標記到設定、按列到個股頁", async () => {
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  const list = m.getByRole("list", { name: "持倉" })
+  await list.getByRole("link", { name: /定期定額：每月 6 日/ }).click()
+  await m.waitForURL(/\/settings#plan-rcp_demo0050/)
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  // 按在列的右半邊（現價），不是名稱
+  const row = list.locator("li").filter({ hasText: "元大台灣50" })
+  const box = await row.boundingBox()
+  await m.mouse.click(box.x + box.width - 30, box.y + box.height / 2)
+  await m.waitForURL(/\/stock\/0050\.TW/)
+})
+await check("手機：法人觀點三行列＋免責", async () => {
+  await m.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+  await m.getByRole("button", { name: /法人觀點/ }).click()
+  await m.getByRole("list", { name: "法人觀點" }).getByText("外資券商 A").waitFor({ timeout: 8000 })
+  await m.getByText("非 Forliosa 建議").first().waitFor()
 })
 await check("手機：底部分頁到紀錄", async () => {
   await m.getByRole("link", { name: "紀錄" }).click()

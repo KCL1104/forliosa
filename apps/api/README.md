@@ -13,7 +13,7 @@ cd apps/api
 uv sync                                   # 安裝相依套件（含 pytest、ruff）
 cp .env.example .env                      # 需要時再修改；預設用 SQLite（var/forliosa.db）
 uv run alembic upgrade head               # 建立資料表
-uv run python -m forliosa.archive run     # 建議：存一次官方開放資料（收盤、參考價、籌碼、事件、營收、季報、集保、休市日）
+uv run python -m forliosa.archive run     # 建議：存一次官方開放資料（收盤、參考價、籌碼、事件、營收、季報、指數、股利決議、公司資料、期交所、集保、休市日）
 uv run python -m forliosa.seed            # 建立示範使用者、兩年交易、一筆出清紀錄、定期定額與自選（會先自動 migrate）
 uv run uvicorn forliosa.main:app --reload --port 8000
 ```
@@ -56,7 +56,10 @@ uv run ruff check .      # lint
 - `tests/api/test_release_dates.py`：重大訊息／月營收資料集判斷實際財報、營收、法說會日期（2026-11-12 實際回應）。
 - `tests/api/test_commercial_policy.py`：commercial 不出現示範資料、「資料累積中」、AI 研究欄位隱藏、seed 可用。
 - `tests/marketdata/`：TWSE／TPEx OpenAPI 與 FinMind 解析器；fixture 是 2026-11-11 實際回應的精簡版；參考價與漲跌停。
-- `tests/archive/`：官方資料集解析器與存檔工作（冪等）；fixture 是 2026-11-12 實際回應的精簡版。
+- `tests/archive/`：官方資料集解析器與存檔工作（冪等）；fixture 是 2026-11-12 實際回應的精簡版。`test_taifex_parsers.py` 涵蓋期交所的
+  解析陷阱（JSON／CSV 兩種回應、`NULL`／`-`、西元日期、999912／666666、夜盤、中文商品名稱）；`test_open_data_jobs.py` 涵蓋指數、
+  股利決議、公司資料、除權息計算結果、期交所存檔（多日回應 upsert、保證金只在變動時新增、財報空白列不覆蓋）。
+- `tests/api/test_open_data_api.py`：`/derivatives/*`（含有條件授權的開關）、`^TAIEXTR` 基準、股利決議、官方股數市值、匯率開關、`/meta/attributions`。
 - `tests/domain/test_ticks.py`：升降單位、漲跌停、除權息參考價（以證交所、櫃買公布值驗證）。
 - `tests/api/`：所有端點、權限隔離（使用者只看得到自己的資料）、錯誤格式。
 - `tests/ai/`：以假的 Messages API（`tests/ai/fake_anthropic.py`，經由真正的 `anthropic` SDK）測 AI：SSE 事件、工具迴圈、
@@ -73,10 +76,10 @@ uv run python -m forliosa.worker
 
 | 時間 | 工作 |
 |---|---|
-| 08:10、14:40 | 存檔：證交所、櫃買 OpenAPI（收盤、本益比、參考價與漲跌停、融資融券、上櫃三大法人與外資持股、除權息預告、注意／處置、重大訊息、股東會、月營收、證交所新聞、ETF 基本資料、休市日） |
-| 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`） |
+| 08:10、14:40 | 存檔：證交所、櫃買 OpenAPI（收盤、本益比、參考價與漲跌停、融資融券、上櫃三大法人與外資持股、除權息預告、注意／處置、重大訊息、股東會、月營收、證交所新聞、ETF 基本資料、休市日、指數與報酬指數、上櫃除權息計算結果） |
+| 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`）、公司基本資料與股利決議（`t187ap03`、`t187ap45_L`），以及**期交所** OpenAPI（期貨／選擇權行情、三大法人、大額交易人、Put/Call 比、外幣參考匯率、保證金〔變動才存〕）。夜盤算在下一個交易日，所以不必清晨另跑 |
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
-| 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存） |
+| 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
@@ -87,12 +90,13 @@ uv run python -m forliosa.worker
 證交所／櫃買 OpenAPI 只提供最新一天，所以我們每天存檔，歷史從開始存檔那天累積：
 
 ```bash
-uv run python -m forliosa.archive run                      # 執行一次全部存檔（約 2 分鐘；證交所每 3 秒、櫃買與集保每 2 秒一次）
-uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、financials、tdcc
+uv run python -m forliosa.archive run                      # 執行一次全部存檔（約 4 分鐘；證交所每 3 秒、櫃買、集保與期交所每 2 秒一次）
+uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、companies、financials、taifex、tdcc、weekly
 ```
 
 只會連線到白名單內的網址（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`）：`openapi.twse.com.tw`、
-`www.tpex.org.tw/openapi`、`opendata.tdcc.com.tw`、shioaji-data 的 GitHub 檔案，以及 personal 明確開啟時的 FinMind。
+`www.tpex.org.tw/openapi`、`opendata.tdcc.com.tw`、`openapi.taifex.com.tw/v1`、shioaji-data 的 GitHub 檔案，以及 personal 明確開啟時的 FinMind。
+期交所的資料端點在 Cloudflare 後面，同一個端點可能回 JSON 也可能回 CSV（快取存什麼回什麼），解析器兩種都接受（`marketdata/taifex.py`）。
 User-Agent 誠實標示（不偽裝瀏覽器），遇到重新導向（例如證交所防火牆的 307）、403、429 就停，不重試到成功。
 **證交所／櫃買／MIS／公開資訊觀測站的網站一律不爬**（網站條款禁止未經同意以程式下載，見
 [`docs/research/data-sources-licensing.md`](../../docs/research/data-sources-licensing.md)）；原本的 T86、MI_QFIIS 網站回補與
@@ -161,11 +165,11 @@ src/forliosa/
   domain/        純計算，不碰資料庫與網路：fees.py（稅費）、ledger.py（帳本重播）、rounds.py（出清回合）、performance.py（績效）
   marketdata/    行情 provider：shioaji_data、twse（OpenAPI）、tpex（OpenAPI）、finmind（personal 明確開啟才用）、
                  archive_provider（自建存檔）、demo；
-                 opendata.py 是官方資料集解析器，service.py 負責備援順序、合併與參考價
+                 opendata.py 是證交所／櫃買／集保資料集解析器、taifex.py 是期交所解析器，service.py 負責備援順序、合併與參考價
   archive.py     官方開放資料每日存檔與回補（CLI：python -m forliosa.archive）
   datapolicy.py  DATA_POLICY、資料集清單與 sources 顯名聲明（GET /meta/attributions）
   market_calendar.py  把存檔的證交所休市日套用到交易日計算
-  services/      交易（自動稅費＋帳本驗證）、投資組合（含本週事項、出清紀錄）、個股資料、個股頁（stock.py）、自選、
+  services/      交易（自動稅費＋帳本驗證）、投資組合（含本週事項、出清紀錄）、個股資料、個股頁（stock.py）、期貨盤勢（derivatives.py）、自選、
                  定期定額（recurring.py）、重大訊息判讀（announcements.py）、「資料累積中」（coverage.py）
   api/           FastAPI 路由、schema、錯誤格式、session 驗證
   ai/            AI 助理：keypool（金鑰槽）、chat（工具迴圈與 SSE）、tools、prompts、scope（離題預先檢查）、grounding（無來源標記）、
@@ -192,8 +196,10 @@ src/forliosa/
 
 **`DATA_POLICY`**（預設 `commercial`）：
 
-- `commercial`（預設）：只用可合法商用的資料——政府開放資料（證交所／櫃買 OpenAPI、集保開放資料）、shioaji-data 官方檔，
-  以及由它們建立的自建存檔。**從不使用示範資料**：存檔還不夠時回空資料並在 `notes` 說明「資料累積中：自 YYYY-MM-DD 起存檔」。
+- `commercial`（預設）：只用可合法商用的資料——政府開放資料（證交所／櫃買／期交所 OpenAPI、集保開放資料）、shioaji-data 官方檔，
+  以及由它們建立的自建存檔。期交所資料集中**授權「有條件」**的（期貨／選擇權每日交易行情、每日外幣參考匯率、選擇權大額交易人、
+  最後結算價、保證金、股票期貨／選擇權標的：data.gov.tw 找不到對應的開放授權資料集）照常存檔，但**不顯示**，直到產品負責人取得
+  期交所書面確認並設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`；詢問信見 [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)）。**從不使用示範資料**：存檔還不夠時回空資料並在 `notes` 說明「資料累積中：自 YYYY-MM-DD 起存檔」。
   shioaji-data 由 AI 整理的公司簡介、產業鏈、題材（授權待定）不顯示。
 - `personal`：只給開發者本人明確開啟。示範資料補缺；把 `finmind` 加進 `MARKET_DATA_PROVIDERS` 才會用 FinMind
   （回應的 `sources` 以「（非商用）」結尾）。
@@ -210,7 +216,9 @@ src/forliosa/
 
 | 來源 | 用途 | 授權與限制 |
 |---|---|---|
-| 證交所／櫃買中心 OpenAPI | 收盤行情、本益比、參考價與漲跌停、融資融券、除權息預告、注意／處置、重大訊息、股東會、月營收、季報、休市日、證交所新聞、ETF 基本資料；櫃買另有個股三大法人與外資持股（都只有最新一天，每天存檔） | 政府資料開放授權條款第 1 版，可商用，**須顯名** |
+| 證交所／櫃買中心 OpenAPI | 收盤行情、本益比、參考價與漲跌停、融資融券、除權息預告、注意／處置、重大訊息、股東會、月營收、季報、休市日、證交所新聞、ETF 基本資料、**指數與報酬指數**（`MI_INDEX`、`MFI94U`、`tpex_index`、`tpex_reward_index` → 基準 `^TAIEXTR`、`^TPEXTR`）、**上市股利決議**（`t187ap45_L`：盈餘／法定公積／資本公積分列）、**公司基本資料**（`t187ap03_L`、`mopsfin_t187ap03_O`：已發行股數 → 市值、產業、上市日）、**上櫃除權息計算結果**（`tpex_exright_daily`：官方參考價）；櫃買另有個股三大法人與外資持股（都只有最新一天，每天存檔） | 政府資料開放授權條款第 1 版，可商用，**須顯名** |
+| 期交所 OpenAPI | 三大法人（5 個依日期資料集）、期貨大額交易人、臺指選擇權 Put/Call 比 → `/derivatives/overview`、AI 工具 `get_derivatives_overview` | 同上（data.gov.tw 11592–11600、11337／11338、11322） |
+| 期交所 OpenAPI（有條件） | 期貨／選擇權每日交易行情（含夜盤）、每日外幣參考匯率（USD/TWD）、選擇權大額交易人、最後結算價、保證金、股票期貨／選擇權標的 | 推定 OGDL，但 data.gov.tw 沒有個別資料集：**存檔但不顯示**，`TAIFEX_CONDITIONAL_CONFIRMED=true` 後才顯示 |
 | 集保開放資料 | 股權分散表（只有當週，每週存檔） | 同上 |
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
@@ -226,8 +234,10 @@ src/forliosa/
 | 開始存檔前的歷史（日線、本益比、法人、融資） | 只回已存檔的部分，`notes`「資料累積中：自 … 起存檔」 | 官方 OpenAPI 只給最新一天；網站回補要同意 |
 | 績效 `/portfolio/performance` | 持股期間沒有每天的真實收盤價時 `series: []`＋`notes`；之後從第一個完整存檔日開始計算 | 同上 |
 | 美股價格、美股績效 | `price: null`（以成本計值，`is_demo: false`）、績效空＋`notes` | 沒有可商用的美股行情來源（SEC EDGAR 基本面、匯率待產品負責人決定） |
-| USD/TWD 匯率 | 沒有來源時固定 31.5 | 央行／臺銀開放資料集待確認 |
-| 基準指數 `^TAIEXTR` | `benchmark.twr: null`＋`notes` | 只有 FinMind 有 |
+| USD/TWD 匯率 | 固定 31.5，績效 `notes` 說明 | 期交所〈每日外幣參考匯率〉已存檔，授權「有條件」：`TAIFEX_CONDITIONAL_CONFIRMED=true` 後自動改用；央行／臺銀未驗證 |
+| 期貨行情（台指期、夜盤） | `/derivatives/overview.futures: []`、`/derivatives/futures/{code}/history` 空＋`notes` | 同上（期交所〈期貨每日交易行情〉授權待確認） |
+| 基準指數 `^TAIEXTR`、`^TPEXTR` 的早期歷史 | 只有 2026-11-02 之後 | 報酬指數 OpenAPI 只給當月；更早要 FinMind（personal）或購買 |
+| 上櫃公司的股利決議 | 上櫃股票只有除權息預告後才出現在 `/dividends` | 櫃買 `mopsfin_t187ap39_O` 停在 2021-08 |
 | 媒體新聞 | `/news` 只有官方公告（重大訊息、證交所新聞，`source: "公告"`） | 媒體新聞需授權 |
 | 開始存檔前已公布的月營收日期 | 事件用法定期限，`estimated: true` | 只能從存檔第一次看到的日期判斷 |
 

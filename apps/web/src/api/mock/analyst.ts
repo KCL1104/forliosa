@@ -24,7 +24,7 @@ function view(symbol: string, p: Omit<AnalystView, "currency" | "url" | "source_
   return {
     ...rest,
     currency: spec.currency,
-    source_title: `示範報導：${p.institution}給${spec.name}「${p.rating_text}」評等`,
+    source_title: `示範報導：${p.institution} 給${spec.name}「${p.rating_text}」評等`,
     url: `https://example.com/news/${spec.code.toLowerCase()}-${n}`,
   }
 }

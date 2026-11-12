@@ -41,7 +41,7 @@
     "quantity_unit": "lot",         // "lot" 以張顯示（X 張＋Y 股）| "share" 以股顯示
     "privacy_mode": false,          // true 時前端遮蔽金額與股數
     "cost_method": "average",       // "average" 移動平均 | "fifo"
-    "benchmark": "0050.TW"          // 任何商品代號，或 "^TAIEXTR"（發行量加權股價報酬指數）
+    "benchmark": "0050.TW"          // 任何商品代號，或 "^TAIEXTR"（發行量加權股價報酬指數）、"^TPEXTR"（櫃買報酬指數）
   }
 }
 ```
@@ -148,8 +148,10 @@
 // MonthlyRevenue（單位：新台幣千元，與公開資訊觀測站一致）
 {"period": "2026-10", "revenue": 330000000, "yoy_pct": 0.21, "mom_pct": 0.05, "ytd": 3100000000, "ytd_yoy_pct": 0.32}
 
-// DividendRecord
-{"year": 2026, "period": "2026Q2", "cash_dividend": 5.0, "stock_dividend": 0, "ex_dividend_date": "2026-12-11", "payment_date": "2027-01-08"}
+// DividendRecord（2026-11-12 起多 status、progress、board_date、meeting_date、cash_sources、sources；見下方「第三批」）
+{"year": 2026, "period": "2026Q2", "cash_dividend": 5.0, "stock_dividend": 0, "ex_dividend_date": "2026-12-11", "payment_date": "2027-01-08",
+ "status": "announced", "progress": "董事會決議", "board_date": "2026-08-11", "meeting_date": null,
+ "cash_sources": {"earnings": 5.0, "legal_reserve": 0, "capital_surplus": 0}, "sources": ["臺灣證券交易所〈上市股票除權除息預告表〉（2026），依政府資料開放授權條款第 1 版"]}
 ```
 
 ## 交易
@@ -336,6 +338,30 @@
 - `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集第一次出現的日期），查不到才用法定期限並標 `estimated: true`。
 - `/instruments/{symbol}/news`：官方公告（重大訊息、證交所新聞），每筆多 `category: "material_info" | "exchange_news" | "media"`，官方公告的 `source` 是 `"公告"`。
 - `POST /transactions` 的 `source` 可為 `"ai_draft"`。
+
+### 第三批（2026-11-12）：開放資料 P0——期交所、報酬指數、股利決議、公司基本資料
+依 [`docs/research/open-data-inventory.md`](research/open-data-inventory.md)；細節、解析陷阱與存檔排程見
+[`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 第三批」。
+
+- **授權狀態**：每個資料集標 `ogdl` 或 `conditional`。期交所〈期貨每日交易行情〉〈選擇權每日交易行情〉〈每日外幣參考匯率〉〈選擇權大額交易人未沖銷部位資料〉
+  等在 data.gov.tw 找不到對應的開放授權資料集，標 `conditional`：**照常存檔，但 `DATA_POLICY=commercial` 下不顯示**，直到
+  `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`，產品負責人取得期交所書面確認後設定）。前端遇到未顯示的部分會拿到空陣列／`null`＋`notes`。
+
+| 方法 | 路徑 | 回傳 |
+|---|---|---|
+| GET | `/derivatives/overview` | `{as_of, futures: [{code, name, contract_month, regular: {open, high, low, close, change, change_pct, volume, settlement_price, open_interest}, after_hours: {open, high, low, close, change, change_pct, volume}}], put_call_ratio: {date, volume_ratio, oi_ratio, put_volume, call_volume, put_oi, call_oi, oi_ratio_prev} \| null, institutional: {TX: [Position], TXO: [Position＋calls/puts]}, large_traders: {TX: {contract, name, all_months, near_month} \| null, TXO: {contract, name, calls, puts} \| null}, served: {futures, options_large_traders}, notes, sources}`；`futures` 是 TX、MTX、TE、TF 的近月，`after_hours` 是同一交易日的夜盤（前一交易日 15:00 → 當日 05:00）；`Position` = `{investor: "dealers"\|"trust"\|"foreign", investor_name, oi_net, oi_net_change, oi_long, oi_short, oi_net_value_k, net_volume}`（口數；金額千元）；大額交易人區塊 = `{top5_buy, top5_sell, top10_buy, top10_sell, top5_net, top10_net, market_oi, specific: {top5_net, top10_net}}` |
+| GET | `/derivatives/futures/{code}/history?range=3M` | `{code, name, range, series: [{t, contract_month, open, high, low, close, change, change_pct, volume, settlement_price, open_interest, after_hours}], notes, sources}`；近月連續（到期換月時 `contract_month` 改變）；`range`：`1M`、`3M`、`6M`、`1Y`、`MAX` |
+
+- `/instruments/{symbol}/dividends`：`DividendRecord` 多 `status`（`"announced"` 有除權息日｜`"resolved"` 只有董事會／股東會決議）、`progress`、`board_date`、
+  `meeting_date`、`cash_sources: {earnings, legal_reserve, capital_surplus} | null`（資本公積發放的現金一般不屬股利所得）、`sources`。上市公司的決議來自證交所
+  〈上市公司股利分派情形〉；上櫃公司沒有開放來源（櫃買資料集 2021-08 停更），只有除權息預告。
+- `/instruments/{symbol}/events`：`type` 多 `dividend_resolution`（日期是董事會日）。
+- `/instruments/{symbol}/overview`、`/instruments/{symbol}`：多 `listed_date`；`market_cap`、`shares_outstanding` 改用證交所／櫃買〈公司基本資料〉的已發行普通股數（市值 = 股數 × 最新收盤）。
+- `/portfolio/performance`：`benchmark` 可用 `^TAIEXTR`（自建存檔：證交所 `MI_INDEX`／`MFI94U`）與 `^TPEXTR`（櫃買 `tpex_reward_index`），`benchmark.twr` 不再是 `null`（存檔自 2026-11-02 起）；有美股時 `notes` 說明 USD/TWD 的來源或固定 31.5。
+- `Quote.reference_price`／`limit_up`／`limit_down`：上櫃股票除權息日優先用櫃買〈上櫃股票除權除息計算結果表〉的官方值。
+- `/meta/attributions`：每筆多 `license_status`、`license_basis`、`served`、`last_updated`、`last_fetched`；最上層多 `taifex_conditional_confirmed`、
+  `conditional[]`（已存檔但未顯示的資料集與原因）、`stale[]`（停更端點與最後資料日期）。`datasets` 仍只列目前顯示的資料集。
+- AI：新工具 `get_derivatives_overview`（唯讀、沒有參數、不含使用者資料）。
 
 ## AI（M4）
 

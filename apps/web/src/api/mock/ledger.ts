@@ -95,9 +95,11 @@ export function seedTransactions(): Transaction[] {
   t.push(trade("sell", TW, "2603.TW", "2025-02-20", 1000))
   t.push(trade("buy", TW, "2317.TW", "2025-04-14", 1000))
   t.push(trade("sell", TW, "3008.TW", "2025-08-12", 100))
-  // 已出清依年份分組：2024（友達）、2025（長榮、大立光）、2026（中華電）
+  // 已出清依年份分組：2024（友達）、2025（長榮、大立光）、2026（中華電、群益台灣精選高息）
   t.push(trade("buy", TW, "2412.TW", "2026-01-12", 1000))
+  t.push(trade("buy", TW, "00919.TW", "2026-03-02", 3000))
   t.push(trade("sell", TW, "2412.TW", "2026-07-15", 1000))
+  t.push(trade("sell", TW, "00919.TW", "2026-09-21", 3000))
   t.push(cash("fee", US, "2025-12-31", 25, "年度帳戶管理費"))
 
   // 定期定額（與 recurring.ts 的示範計畫一致）：0050 每月 6 日 NT$10,000、00878 每月 12、26 日 NT$4,000（零股）。
