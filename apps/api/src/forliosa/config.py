@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     ai_web_search_max_uses: int = 3
     ai_web_search_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)  # [] = any
     ai_web_fetch: bool = True
-    ai_web_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["official"])
+    ai_web_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
     ai_web_dynamic_filtering: bool = False
     ai_eager_tool_streaming: bool = False
     ai_why_enabled: bool = True  # cached per symbol per trading day; rule text on any failure

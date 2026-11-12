@@ -89,7 +89,8 @@ def test_tool_loop_streams_events_and_builds_cached_request(client, pool, fake):
     assert search["type"] == "web_search_20260318" and search["user_location"]["country"] == "TW"
     assert search["user_location"]["timezone"] == "Asia/Taipei" and search["allowed_callers"] == ["direct"]
     fetch = next(t for t in first["tools"] if t["name"] == "web_fetch")
-    assert fetch["type"] == "web_fetch_20260318" and "twse.com.tw" in fetch["allowed_domains"]
+    # Owner decision 2026-11-12: web_fetch is not domain-restricted by default.
+    assert fetch["type"] == "web_fetch_20260318" and "allowed_domains" not in fetch
     # per-turn context is a system message after the user's message, never in the top-level system prompt
     assert first["messages"][0] == {"role": "user", "content": [{"type": "text", "text": "我有哪些持股？"}]}
     ctx = first["messages"][1]

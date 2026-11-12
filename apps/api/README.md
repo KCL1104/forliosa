@@ -137,7 +137,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `AI_MODEL` | `claude-haiku-5-5` | `AI_MODEL_CHAT`／`AI_MODEL_WHY` 可個別覆寫 |
 | `AI_DAILY_MESSAGE_LIMIT`、`AI_MONTHLY_TOKEN_BUDGET` | 50、3,000,000 | 每人每天提問數、每月計費 token（0＝不限） |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES`、`AI_WEB_SEARCH_ALLOWED_DOMAINS` | `true`、3、空 | 預設不限網域，由模型判斷何時搜尋、用哪些來源（只限財經資訊） |
-| `AI_WEB_FETCH_ALLOWED_DOMAINS` | `official` | 讀網頁全文只限官方網域；`*` 不限 |
+| `AI_WEB_FETCH_ALLOWED_DOMAINS` | （空，不限） | 產品負責人 2026-11-12 決定開放，由 AI 自行判斷；可設 `official` 只讀官方網域 |
 | `AI_WHY_ENABLED` | `true` | 個股頁「為什麼漲跌」的 AI 一句話（每檔每個交易日最多一次，失敗時用規則句） |
 | `AI_SCOPE_PRECHECK` | `true` | 明顯離題又沒有財經字詞的提問不呼叫模型，直接婉拒 |
 | `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天（0＝永久） |
