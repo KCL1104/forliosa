@@ -27,6 +27,20 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # None -> secure in prod
     cookie_domain: str | None = None
 
+    # -- login (M5): Discord OAuth -------------------------------------------------------------------
+    # All three must be set for "Sign in with Discord" (GET /auth/providers → discord: true). The client secret is a
+    # SecretStr: never shown in reprs or settings dumps, never logged. DISCORD_REDIRECT_URI is the callback on the API
+    # host (…/api/v1/auth/discord/callback) exactly as registered in the Discord Developer Portal.
+    discord_client_id: str | None = None
+    discord_client_secret: SecretStr | None = None
+    discord_redirect_uri: str | None = None
+    # The frontend's origin (https://app.example.com): OAuth redirects back to it and invite links point at it.
+    # Required in prod, where it must be one of CORS_ORIGINS and https.
+    frontend_url: str | None = None
+    # -- group channels (M5): Telegram bot for group push; without a token telegram_available is false --------
+    telegram_bot_token: SecretStr | None = None
+    telegram_bot_username: str | None = None
+
     # "commercial" (default): only legally commercially usable data — government open data (TWSE/TPEx
     # OpenAPI, TDCC open data, shioaji-data's official files) and our own archive built from them; never
     # demo data. "personal" (explicit opt-in): every configured source may be used (FinMind, MIS and the
@@ -71,6 +85,7 @@ class Settings(BaseSettings):
     ai_model_import: str | None = None
     ai_model_report: str | None = None
     ai_model_analyst: str | None = None
+    ai_model_digest: str | None = None  # group weekly digests (M5)
     ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_why: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_analyst: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
@@ -98,6 +113,9 @@ class Settings(BaseSettings):
     # symbol per trading day; off = POST answers "unavailable" without a model call.
     ai_analyst_enabled: bool = True
     ai_analyst_search_max_uses: int = 3
+    # Group weekly digests (M5): the worker asks for a group-level summary every Saturday 20:00 (Taipei) through the
+    # Message Batches API; off = digests keep their facts and are marked failed without a model call.
+    ai_digest_enabled: bool = True
     # Off-topic requests (coding, homework, role-play …) with no finance word are declined without a model call.
     ai_scope_precheck: bool = True
     # Threads, messages and drafts are deleted this many days after their last activity (0 = keep forever).
@@ -131,6 +149,26 @@ class Settings(BaseSettings):
         """Browsers send ``Origin: https://app.example.com`` (no path, no trailing slash)."""
         return list(dict.fromkeys(o.strip().rstrip("/") for o in v if o.strip()))
 
+    @field_validator("discord_client_id", "discord_redirect_uri", "frontend_url", "telegram_bot_username",
+                     mode="before")
+    @classmethod
+    def _blank_is_none(cls, v: object) -> object:
+        """An empty variable means "not set"; a trailing ``/`` on the frontend URL is dropped (it is an origin)."""
+        if isinstance(v, str):
+            v = v.strip()
+            return v or None
+        return v
+
+    @field_validator("frontend_url")
+    @classmethod
+    def _frontend_origin(cls, v: str | None) -> str | None:
+        return v.rstrip("/") if v else v
+
+    @field_validator("discord_client_secret", "telegram_bot_token", mode="before")
+    @classmethod
+    def _blank_secret(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
+
     @field_validator("cookie_domain", mode="before")
     @classmethod
     def _blank_cookie_domain(cls, v: object) -> object:
@@ -155,6 +193,28 @@ class Settings(BaseSettings):
     @property
     def secure_cookies(self) -> bool:
         return self.cookie_secure if self.cookie_secure is not None else self.forliosa_env == "prod"
+
+    @property
+    def discord_enabled(self) -> bool:
+        return bool(self.discord_client_id and self.discord_client_secret
+                    and self.discord_client_secret.get_secret_value() and self.discord_redirect_uri)
+
+    @property
+    def discord_partially_configured(self) -> bool:
+        parts = (self.discord_client_id, self.discord_client_secret, self.discord_redirect_uri)
+        return any(parts) and not self.discord_enabled
+
+    @property
+    def frontend_base(self) -> str:
+        """Where the browser is sent after login and what invite links point at (dev: the first CORS origin)."""
+        if self.frontend_url:
+            return self.frontend_url
+        return self.cors_origins[0] if self.cors_origins else "http://localhost:5173"
+
+    @property
+    def telegram_available(self) -> bool:
+        return bool(self.telegram_bot_token and self.telegram_bot_token.get_secret_value()
+                    and self.telegram_bot_username)
 
     @property
     def jitter_enabled(self) -> bool:

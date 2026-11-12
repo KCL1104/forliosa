@@ -26,7 +26,7 @@ def prod_app(monkeypatch, engine, market):
 
     def build(**env: str | None):
         values: dict[str, str | None] = {
-            "FORLIOSA_ENV": "prod", "SESSION_SECRET": SECRET, "CORS_ORIGINS": APP_ORIGIN,
+            "FORLIOSA_ENV": "prod", "SESSION_SECRET": SECRET, "CORS_ORIGINS": APP_ORIGIN, "FRONTEND_URL": APP_ORIGIN,
             "COOKIE_DOMAIN": ".example.com", "COOKIE_SECURE": None,
         }
         values.update(env)

@@ -101,6 +101,17 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 - ✅ 定期定額草稿帶上扣款日（2026-11-12，`wip/small`）：成交日 = 扣款日；扣款日已過（補記）用那天的收盤價，沒有那天的真實收盤價（personal 的示範 K 線不算）才用最近收盤價並在規則說明；mock 與 AI 文字同步；草稿是示範價格（`is_demo`）時 AI 的話與草稿說明改說「示範價格」。
 - 美股報價來源：SEC 做完後和產品負責人討論（免費且可商用的來源很少；初期不付費）。
 
+### 3.6 M5 分享（後端完成，2026-11-12，分支 `wip/m5-api`）
+
+- ✅ **第一批**：Discord 登入（OAuth state cookie、帳號對應、session 輪換）、`PATCH /me`、授權唯讀查看（路由白名單、帳戶範圍集中在
+  `services/scope.py`）、親友群組（角色、邀請、分享設定、排行、持股重疊、交易動態、留言、表情）、全站寫入的 `Origin` 檢查。
+- ✅ **第二批**：群組 AI 週報（週六 20:00、Message Batches＋一般呼叫備援、AI 只看到匿名代號與數字、不計入成員額度）、推播頻道（Discord
+  webhook 嚴格驗證＋測試訊息＋加密保存、Telegram 連結碼＋`getUpdates` 輪詢）、推播 outbox（15 分鐘延遲、送出前再檢查、重試 5 次、
+  自動停用）、`logredact` 遮掉 webhook 與 bot token。
+- 合約：`docs/api-contract.md`「分享（M5）」；實作細節與待確認事項：`apps/api/CONTRACT_NOTES.md`「分享（M5）第一批」「第二批」「分享（M5）待產品負責人確認」（8 項，都附建議）。
+- 部署：worker 現在需要和 api 相同的 `SESSION_SECRET`、只能一個副本；Telegram bot 設定見 `docs/deploy.md` 2.5。
+- **還沒做**：前端的週報列表、頻道設定（Discord 網址、Telegram 連結碼）與推播狀態；個人通知（§4.9 個人 Telegram／Discord）；排行快取。
+
 ## 4. 每次交付前的檢查
 
 ```bash
@@ -151,7 +162,8 @@ cd apps/web && pnpm typecheck && pnpm lint && pnpm test && pnpm build
 ## 7. 等產品負責人的事
 
 - ~~現金股利要算多細~~ **已決定：自動入帳（見 §3.0）**，資本公積排除保留。
-- 部署：網域、Cloudflare、Railway、Google OAuth、Telegram bot（見 `docs/questions-for-morning.md` A3、E1、E2）。
+- 部署：網域、Cloudflare、Railway、Discord 應用程式（登入，`docs/deploy.md` 2.4）、Telegram bot（群組推播，`docs/deploy.md` 2.5）。
+- M5 分享的待確認事項（`apps/api/CONTRACT_NOTES.md`「分享（M5）待產品負責人確認」，8 項都附建議）。
 - M3 對帳單匯入：需要各券商對帳單樣本（遮蔽個資）。
 - 美股報價來源（見 3.5）。
 - 寄信給證交所、期交所：目前決定**不寄**；草稿留在 `docs/research/data-sources-licensing.md` §1.9 與 `docs/outreach/taifex-licence-inquiry.md`，之後要用再拿出來。

@@ -25,6 +25,7 @@ from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import Transaction as TxnModel
 from forliosa.models import User
+from forliosa.services import scope
 from forliosa.services import transactions as svc
 from forliosa.timeutil import iso_taipei
 
@@ -63,7 +64,7 @@ def _decode_cursor(cursor: str) -> tuple[date, str]:
 
 def _owned(db: Session, user: User, txn_id: str) -> TxnModel:
     t = db.get(TxnModel, txn_id)
-    if t is None or t.user_id != user.id:
+    if t is None or t.user_id != user.id or not scope.account_visible(db, user.id, t.account_id):
         raise not_found("找不到交易")
     return t
 
@@ -81,6 +82,11 @@ def list_transactions(
     db: Session = Depends(get_db),
 ):
     q = select(TxnModel).where(TxnModel.user_id == user.id)
+    if scope.account_filter(db, user.id) is not None:  # read-only viewing: only the delegated accounts
+        visible = scope.account_ids(db, user.id)
+        if account_id and account_id not in visible:
+            raise not_found("找不到帳戶")
+        q = q.where(TxnModel.account_id.in_(visible))
     if account_id:
         q = q.where(TxnModel.account_id == account_id)
     if symbol:

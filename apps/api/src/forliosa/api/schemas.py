@@ -8,6 +8,8 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from forliosa.textsafe import has_control
+
 TxnTypeLiteral = Literal[
     "buy", "sell", "cash_dividend", "stock_dividend", "split", "capital_reduction",
     "deposit", "withdrawal", "fee", "tax", "interest",
@@ -41,12 +43,34 @@ class User(BaseModel):
     id: str
     email: str
     display_name: str
+    avatar_url: str | None = None
     preferences: Preferences
+
+
+class MePatch(StrictModel):
+    display_name: str = Field(description="1–30 字（去頭尾空白；不能有換行、Tab 等控制字元或看不見的格式字元）")
+
+    @field_validator("display_name")
+    @classmethod
+    def _strip(cls, v: str) -> str:
+        v = v.strip()
+        if not 1 <= len(v) <= 30:
+            raise ValueError("顯示名稱需為 1–30 字")
+        if has_control(v):
+            raise ValueError("顯示名稱不能有換行或控制字元")
+        return v
 
 
 class DevLoginIn(StrictModel):
     email: str = Field(min_length=3, max_length=320, pattern=r"^[^@\s]+@[^@\s]+$")
     display_name: str | None = Field(default=None, max_length=100)
+
+    @field_validator("display_name")
+    @classmethod
+    def _one_line(cls, v: str | None) -> str | None:
+        if v is not None and has_control(v):
+            raise ValueError("顯示名稱不能有換行或控制字元")
+        return v
 
 
 # -- accounts ---------------------------------------------------------------------------------

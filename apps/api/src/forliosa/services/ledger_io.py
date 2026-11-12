@@ -16,6 +16,7 @@ from forliosa.domain.ledger import CostMethod, LedgerTxn, OpeningPosition, TxnTy
 from forliosa.marketdata.base import InstrumentInfo, market_of_symbol
 from forliosa.marketdata.service import MarketData
 from forliosa.models import BrokerAccount, HoldingSnapshot, Transaction, User
+from forliosa.services.scope import account_filter
 from forliosa.timeutil import today_taipei
 
 DEFAULT_PREFERENCES = {
@@ -148,12 +149,17 @@ def to_ledger_txn(t: Transaction, fx: FxBook | None, seq: int = 0) -> LedgerTxn:
 
 def load_ledger_input(db: Session, user: User, account_id: str | None = None,
                       accounts: Iterable[BrokerAccount] | None = None) -> LedgerInput:
+    """``user``'s ledger (one account with ``account_id``). Under read-only viewing the request's view scope limits
+    it to the delegated accounts (``services.scope``): an account outside the scope is as if it did not exist."""
+    allowed = account_filter(db, user.id)
     if accounts is None:
         q = select(BrokerAccount).where(BrokerAccount.user_id == user.id)
         if account_id:
             q = q.where(BrokerAccount.id == account_id)
+        if allowed is not None:
+            q = q.where(BrokerAccount.id.in_(sorted(allowed)))
         accounts = list(db.scalars(q.order_by(BrokerAccount.created_at)))
-    accounts = list(accounts)
+    accounts = [a for a in accounts if allowed is None or a.id in allowed]
     ids = [a.id for a in accounts]
     if not ids:
         return LedgerInput([], [], [], CostMethod(preferences_of(user)["cost_method"]))

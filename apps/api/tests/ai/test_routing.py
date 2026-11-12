@@ -220,7 +220,8 @@ def test_admin_keys_hidden_in_prod_unless_listed(engine, market, monkeypatch):
     from forliosa.config import get_settings
     from tests.api.test_deploy_config import APP_ORIGIN, SECRET, _login
 
-    for k, v in {"FORLIOSA_ENV": "prod", "SESSION_SECRET": SECRET, "CORS_ORIGINS": APP_ORIGIN}.items():
+    for k, v in {"FORLIOSA_ENV": "prod", "SESSION_SECRET": SECRET, "CORS_ORIGINS": APP_ORIGIN,
+                 "FRONTEND_URL": APP_ORIGIN}.items():
         monkeypatch.setenv(k, v)
     get_settings.cache_clear()
     try:

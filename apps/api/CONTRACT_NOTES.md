@@ -115,7 +115,8 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 |---|---|---|
 | cookie | `HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=30 天` | `FORLIOSA_ENV=prod` 時自動 `Secure`（`COOKIE_SECURE` 可覆寫） |
 | `COOKIE_DOMAIN` | 選填，例如 `.example.com` | 不設＝只屬於 `api.example.com` 的 host-only cookie，這樣就能用；設了則子網域共用。空字串視為不設 |
-| `CORS_ORIGINS` | `https://app.example.com`（逗號分隔） | 結尾的 `/` 會自動去掉；正式環境不能是 `*`（會拒絕啟動），因為帶 cookie 的請求不能對所有網站開放 |
+| `CORS_ORIGINS` | `https://app.example.com`（逗號分隔） | 結尾的 `/` 會自動去掉；正式環境不能是 `*`（會拒絕啟動），因為帶 cookie 的請求不能對所有網站開放；也是 CSRF 檢查的允許清單（M5） |
+| `FRONTEND_URL` | `https://app.example.com` | M5 起正式環境必填：Discord 登入後導回、邀請連結用它；必須是 `CORS_ORIGINS` 之一、https |
 | 登出 | 刪除 cookie 時帶同樣的 `Domain`／`Secure` | 否則瀏覽器不會刪掉 |
 
 測試：`tests/api/test_deploy_config.py`。部署步驟見 [`docs/deploy.md`](../../docs/deploy.md)。
@@ -919,3 +920,279 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 10. **法人觀點的報導日期與 90 天**：顯示的是報導日期（搜尋結果核對），不是券商報告日期；超過 90 天的不列（研究稿建議 90 天）。
     台股常見「媒體報導晚券商報告幾天」，要不要改成標「舊資料」而不是不列？
 11. **法人觀點算一題**：和對話共用每天 50 題；失敗後 10 分鐘可重查，重查再算一題。
+
+## 2026-11-12 分享（M5）第一批：登入、授權唯讀查看、親友群組
+
+依 [`docs/api-contract.md`](../../docs/api-contract.md)「分享（M5）」實作。群組 AI 週報、頻道與推播在下面的「第二批」；它們用的資料表在
+同一個 migration `0010`（`group_digests`、`group_channels`、`notification_outbox`、`telegram_link_codes`），第二批沒有新的 migration。
+
+### 新增的欄位與合約沒寫的細節
+
+| 位置 | 實作 |
+|---|---|
+| `User` | 多 `avatar_url`（Discord 頭像，`https://cdn.discordapp.com/avatars/<id>/<hash>.png?size=128`，沒有頭像為 `null`） |
+| `GET /auth/discord/start` | Discord 沒設定時同樣 302 到 `{FRONTEND_URL}/login?error=oauth_disabled`；`next` 超過 2048 字回 422 |
+| `POST /delegations` | 對象不是同群組成員、或是自己：404（先判斷，再判斷已授權過的 409）。離開群組後既有授權照常有效，但不能再新增 |
+| `PATCH /delegations/{id}` | 被授權者呼叫回 403 `forbidden`；不相干的人 404 |
+| `Delegation.accounts` | `scope: "all"` 時列出授權者目前所有帳戶 |
+| `DelegationCandidate.delegation_id` | 沒授權過為 `null` |
+| `GroupSummary` | `GET /groups` 依我加入的順序；`latest_activity_at` = 目前**看得到的**動態（含成員加入）與看得到的對象上的留言中最新的時間（被關掉的分享不會讓它變動）；`latest_digest_at` = 最新 `ready` 週報的 `created_at` |
+| `InviteOut` | 多 `created_at`；`GET /groups/{id}/invites` 的項目沒有 `url` 這個鍵 |
+| `InvitePreview.inviter_display_name` | 建立邀請的人已離開群組時改顯示目前 owner 的名稱 |
+| `POST /invites/{token}/accept`、`PUT /groups/{id}/share` | `share` 的六個開關**全部必填**（少一個 422）：前端必須讓本人確認每一項。成功回 200 |
+| `LeaderboardEntry.rank` | 沒有名次時是 `null`（鍵存在）：排行關閉，或該成員這期沒有數字 |
+| `FeedItem`（`member_joined`） | 只有 `id`、`type`、`user_id`、`display_name`、`avatar_url`、`created_at`（= 加入時間）；不能留言或按表情 |
+| `FeedItem`（`trade`）`created_at` | 合併的交易裡最晚建立的那一筆的建立時間 |
+| `Comment` | 多 `avatar_url`（已離開、已刪除的帳號為 `null`） |
+| `PUT`／`DELETE /groups/{id}/reactions` | 回 200 `{"target", "reactions": [{"emoji", "count", "mine"}]}`（該對象目前的統計） |
+| 錯誤 | 群組角色不足 403 `forbidden`；owner 想離開 409 `conflict`（先轉移）；改 owner 的角色、轉移給自己 422；轉移或變更的對象不是成員 404 |
+
+### 登入（Discord OAuth）
+
+- `state`：32 bytes 隨機值；cookie 內容是 `base64url(JSON{s, n, e}).base64url(HMAC)`，`n` 是驗證過的 `next`、`e` 是到期時間（10 分鐘），
+  HMAC 金鑰由 `SESSION_SECRET` 以 HKDF 衍生（用途 `oauth-state`，和其他用途的金鑰互不通用）。callback 先驗簽章與到期，再以固定時間比對
+  `state`；不論成敗都刪除 cookie。
+- `next`「解碼一次」= 框架對 query string 的那一次解碼；之後不再解碼，所以 `next=%252F%252Fevil.com` 會因為不是 `/` 開頭而變成 `/`。
+- Discord 的 access token 只用來讀一次 `/users/@me`，之後立刻呼叫 Discord 撤銷（失敗也不影響登入）；token、授權碼、client secret 都不寫進
+  資料庫或 log。`user_identities` 只存 Discord id 與 Discord 回報的 email。
+- 帳號對應照合約。已連結的帳號每次登入：`user_identities.email` 照 Discord 回報的更新；`users.email` 只在 Discord 說已驗證、而且沒有被別的
+  帳號使用時才跟著換；頭像一律更新。新帳號的 `display_name` 取 global name，否則 username，截到 30 字。
+- 同一個 Discord 帳號同時第一次登入兩次（唯一鍵衝突）→ 後到的那次 `oauth_failed`。
+- `GET /auth/providers` 的 `discord` 是三個 `DISCORD_*` 環境變數都有值；`dev_login` 是 `FORLIOSA_ENV` 為 `dev`／`test`。
+- 正式環境啟動檢查（不印出任何值）：`SESSION_SECRET`、`CORS_ORIGINS` 不可為 `*`（原有）；`FRONTEND_URL` 必填、必須是 `CORS_ORIGINS` 之一、
+  兩者都是 https；三個 `DISCORD_*` 只設一部分 → 拒絕啟動；有設 Discord 時 `DISCORD_REDIRECT_URI` 必須是 https。開發環境沒設 `FRONTEND_URL`
+  時，登入後的導向與邀請連結用 `CORS_ORIGINS` 的第一個。
+- **Access log 去敏**：uvicorn 的 access log 會記錄完整網址，因此 `logredact.py` 把 `code`、`state` 參數與 `/invites/<token>` 換成 `***`
+  （`create_app` 時安裝）。
+
+### CSRF
+
+非 `GET`／`HEAD`／`OPTIONS` 的請求帶 `Origin` 時必須完全等於 `CORS_ORIGINS` 其中一個（不分大小寫、結尾 `/` 忽略），`Origin: null` 也拒絕；
+沒有 `Origin` 的請求（curl、伺服器之間）照常通過。**本機開發**：Vite 以 `/api` 代理轉發時瀏覽器仍會送 `Origin: http://localhost:<port>`，
+用 5173 以外的埠連真的後端時要把那個 origin 加進 `CORS_ORIGINS`，否則所有寫入（含開發登入）都是 403。
+
+### 唯讀查看（`X-Forliosa-View-As`）
+
+- `api/middleware.py` 的路由白名單（預設拒絕）。合約第 1 類的 `GET` 以授權者身分執行；第 2 類忽略標頭（另外也忽略 `/health`、`/meta/*`）；
+  其他一律拒絕：非 `GET` → `read_only`，其他 `GET`（包括 `/instruments/{symbol}/analyst-views`、`/recurring`、`/ai/*`、`/watchlist`、
+  `/groups/*`、`/delegations*`、`/invites/*`）→ `view_as_not_allowed`。被拒絕的請求不查授權是否有效；白名單內的讀取才查，失效一律
+  `delegation_revoked`。
+- **範圍集中在一處**（`services/scope.py`）：解析授權後把「授權者 id＋允許的帳戶」存在這個請求的資料庫 session 上；`load_ledger_input`
+  （摘要、持股、`allocation.by_account`、績效、出清、本週事項、部位、部位歷史、事件的 `mine`／`amount_estimate`）、`GET /accounts`、
+  `GET /accounts/{id}/holdings`、`/transactions`、定期定額（`upcoming` 的扣款）都經過它，所以授權者就像只有那些帳戶。範圍外的 `account_id`、
+  帳戶或交易 id → 404。`/transactions?account_id=` 只在查看模式下對範圍外帳戶回 404（自己查看時維持原本回空清單）。
+- 查看模式下同一個 session 拒絕任何寫入（`before_flush` 直接丟 403 `read_only`），所以即使某個讀取路徑想寫（例如股利同步），也寫不進去。
+- 成本法、基準用授權者的偏好（計算本來就以授權者身分）；顯示偏好由前端用查看者自己的 `GET /me`。
+
+### 分享投影（`services/sharing.py`）
+
+- 群組與授權讀別人的資料只經過這個模組：`enter_view_as`（授權）、`shared_portfolio`、`group_holdings`、`leaderboard`、`feed_items`、
+  `target_visible`。每次請求重新讀成員身分與分享設定。
+- 區塊內容：`returns` = `{day, month, year, total}`（`total` 與 `PortfolioSummary.total_return_pct` 同算法，含股利、依成員自己的成本法）；
+  `holdings` = `{symbol, name, weight}`（依權重由大到小）；`amounts` = `{market_value, day_change, total_pnl}`（2 位小數）。三個都沒開時
+  `SharedPortfolio` 只有 `user_id`、`display_name`、`avatar_url`（連 `is_demo` 都沒有）。
+- `GroupHoldings.industries`：開了持股的成員中，持有該產業任何一檔的人數（1 人也列；`common` 才限 2 人以上）。
+- 測試（`tests/api/test_m5_privacy.py`）跑過五個開關的 32 種組合：沒開的區塊鍵不存在；回應中沒有股數、成本、帳戶名稱或 id、備註、手續費、
+  交易 id；金額只在開了 `amounts` 的 `amounts` 區塊、價格只在開了 `trades`＋`trade_prices` 的動態裡。
+
+### 排行
+
+- `date`（最新收盤）：交易日 13:30 以後是今天，否則前一個交易日；若 `^TAIEXTR` 與 0050 的資料都還沒到那一天，用兩者中最新的日期。
+  `as_of` 是該日 13:30（台北）。
+- 期間起點：`day` = 前一個交易日、`month` = 上月最後一個交易日、`year` = 去年最後一個交易日（台股行事曆）。`DATA_POLICY=commercial` 時起點
+  早於存檔第一天就改成存檔第一天，`notes` 第一行說明「資料累積中：自 … 起存檔；期間從 … 收盤開始計算」。
+- 成員報酬：所有帳戶合併，從今年的起點收盤開始逐日模擬（`domain.performance.simulate`，與績效頁同一套 TWR 公式），起點之前的交易都在起點
+  當天入帳（起點當天的報酬不算）；期間內完全沒有投入的成員該期為 `null`。年度區間內任何一天有持股沒有收盤價 → 三個期間都是 `null`。
+  每次請求重算（目前沒有快取）。
+- 基準：`^TAIEXTR` 為指數收盤比；0050 為含息報酬（除息日再投入，同績效頁的基準算法）。沒有資料時 `return_pct` 為 `null`，commercial 下
+  `notes` 說明「基準 … 目前沒有可商用的資料」。
+- `sources` 只列「本系統帳本」與兩個基準的資料來源：**不列**成員持股的價格來源（否則來源清單會透露有人持有某類商品）。
+
+### 交易動態
+
+- 範圍：開了 `trades` 的成員、`manual`／`import`／`ai_draft` 的 `buy`／`sell`、`trade_date` 在「今天（台北）往前 90 天」到今天之間
+  （未來日期不列）。「只記持股」帳戶在快照日當天或之前的交易不列（帳本也不算它們）。
+- 合併鍵：成員×交易日×商品×買賣。`count` = 筆數；`price` = 以股數加權的平均成交價（4 位小數，不含費用）、`currency` = 交易幣別，只有開了
+  `trade_prices` 才有這兩個鍵。
+- `id`：`gfi_` + 以 `SESSION_SECRET` 衍生金鑰（用途 `feed-item-id`）對合併鍵做的 HMAC（26 字）。同一則在不同群組 id 相同，但留言與表情都
+  依群組分開存。
+- 分頁：依 (`trade_date`（加入動態用加入日）, `created_at`, `id`) 由新到舊；`cursor` 編碼最後一則的三個值。`user_id` 不是成員時回空清單
+  （和「沒有資料」一樣）。
+- **刪除**：一則動態的最後一筆交易被刪除、改到別的日期／商品／方向，或整個帳戶被刪除時，所有群組裡這則的留言與表情一起刪除。
+
+### 留言與表情
+
+- `target` 格式 `trade:<id>`、`digest:<id>`、`leaderboard:<YYYY-MM-DD>`；`digest` 必須是這個群組 `ready` 的週報；`leaderboard` 的日期必須在
+  群組建立日（台北）到今天之間。看不到、不存在、別的群組的一律 404「找不到討論對象」。刪除留言也要求對象目前看得到。
+- 作者已離開：`display_name`「已離開的成員」、`user_id`／`avatar_url` 為 `null`；作者帳號已刪除（`user_id` 被設為 null）：「已刪除的帳號」。
+  已離開成員按過的表情仍然計數。
+- `can_delete`：作者本人，或 owner／admin。
+
+### 群組與邀請
+
+- 邀請 token 32 bytes（256 bits），資料庫只存 SHA-256；網址 `{FRONTEND_URL}/invite/{token}`。接受時以條件式 UPDATE 計次，單次邀請同時被兩人
+  接受只有一人成功（另一人 410）。上限在接受時檢查：群組已有 50 人、或本人已在 20 個群組 → 409 `limit_reached`。
+- 管理員**移除**別人時撤回群組所有還有效的多次邀請；成員自己**離開**不會撤回。離開或被移除時分享設定刪除，重新加入時由邀請的 `share` 重新選，
+  並產生新的 `member_joined`。
+- `push_targets` 只列 `status = active` 的頻道；Telegram 的 `label` 用 `chat_title`。
+- 刪除群組時一併刪除留言、表情、邀請、週報、頻道、推播 outbox、Telegram 綁定碼、成員與分享設定。
+
+### 資料表（migration `0010`）
+
+`users.avatar_url`、`user_identities`、`delegations`、`delegation_accounts`、`groups`、`group_members`、`group_share_settings`（含 `trades_enabled_at`、
+`push_enabled_at`：開關**最近一次打開**的時間）、`group_invites`、`group_comments`、`group_reactions`、`group_digests`、`group_channels`、
+`notification_outbox`、`telegram_link_codes`。
+
+### 金鑰與加密（`crypto.py`）
+
+- 由 `SESSION_SECRET` 以 HKDF-SHA256 衍生：`oauth-state`（state 簽章）、`feed-item-id`（動態 id）、`channel-webhook`（Discord webhook 網址的
+  Fernet 加密，第二批使用）。
+- **更換 `SESSION_SECRET` 的後果**：所有人登出；已存的 webhook 網址解不開（owner 要重新設定頻道）；動態 id 全部改變，舊的交易動態留言找不到
+  對象（不再顯示）。
+- 邀請 token、Telegram 綁定碼只存 SHA-256（不需要金鑰）。
+
+## 2026-11-12 分享（M5）第二批：群組 AI 週報、推播頻道
+
+依 [`docs/api-contract.md`](../../docs/api-contract.md)「分享（M5）」→「群組 AI 週報」「推播」實作（後端；前端另做）。
+
+### 端點與合約沒寫的細節
+
+| 位置 | 實作 |
+|---|---|
+| `GET /groups/{id}/digests` | `limit` 1–52（預設 8）；依 `week_start`、`id` 新到舊；`cursor` 編碼最後一份的兩個值。`pending`／`failed` 也列出（`summary` 為空字串、`comment_count` 0、`reactions` 空）。`ready` 的 `summary` 也可能是空字串：寫進摘要的成員有人離開或關掉當時分享的項目（`notes` 多一則「寫這份 AI 摘要時用到的分享內容已有變動…，摘要不再顯示。」） |
+| `Digest` | 多 `notes`（例如 commercial 下「資料累積中：自 … 起存檔；本週從 … 收盤開始計算」）與 `is_demo` |
+| `Digest.facts` | `returns` 依加入順序；`common_holdings` 要兩人以上；`industries` 是持有該產業任何一檔的人數（1 人也列，同 `GroupHoldings`）；`trades_count` 是那一週 `trade_date` 在週一到週五、可出現在動態裡的買賣筆數（每筆交易算一筆，不是合併後的則數） |
+| `Channels` | 非 owner 的 `webhook_hint` 為 `null`；沒設定的頻道 `notify_*` 回 `true`（預設值） |
+| `PUT /groups/{id}/channels/discord` | `notify_trades`、`notify_digest` 可省略（預設 `true`）。重新設定（換網址）會取消還沒送出的推播，`configured_at` 重設。webhook id 和原本的不同（或解除後再設定、舊網址解不開）→ 其他成員的 `push` 改成關閉（設定的 owner 不變）。網址格式正確才計次：同一人或同一群組 10 分鐘內第 6 次 → 429 `rate_limited`（不送出；計數在 API 程序的記憶體裡，重啟歸零）；circuit breaker 開著時也是 429 `rate_limited` |
+| `PATCH /groups/{id}/channels/{kind}` | 回整個 `Channels`；`notify_trades` 由關到開時 `configured_at` 重設（關著那段時間的交易不補送） |
+| `DELETE /groups/{id}/channels/{kind}` | 204；Telegram 一併刪除還沒用的連結碼。資料列留著、`status = "removed"`（網址、chat id、`chat_title` 清掉），`Channels` 顯示為沒設定、`PATCH` 404；之後再設定算新的目的地 |
+| `POST /groups/{id}/channels/telegram/link` | 只有 owner（403 優先於 409）；沒設 bot → 409 `telegram_unavailable`。連結碼 12 字（`A–Z`、`2–9`，去掉 `0 O 1 I`；60 bits），只存 SHA-256，大小寫不拘；再產生一組會刪掉群組還沒用的舊碼 |
+| `kind` 不是 `discord`／`telegram` | 422 `validation_error` |
+
+### 推播（`services/notifications.py`、`services/pushers.py`、`services/channels.py`）
+
+- **排入 outbox**（worker `group_push` 每分鐘）：有 `active` 且 `notify_trades` 的頻道的群組，找「目前同時開著 `trades` 與 `push`」的成員、
+  可出現在動態裡的買賣（`manual`／`import`／`ai_draft`，只記持股帳戶快照日當天或之前的不算）、`trade_date` 在今天與前兩天（台北）、
+  `created_at` 晚於 `max(頻道 configured_at, push_enabled_at, trades_enabled_at)`。每筆交易每個頻道一列（`dedupe_key =
+  trade:<group>:<kind>:<transaction>`），`not_before = created_at + 15 分鐘`。
+- **送出前再檢查一次**：交易還在（刪除時 outbox 列跟著刪）、成員還在群組而且兩個開關還開著、交易建立時間仍晚於上面那個時間（關掉再打開
+  會把時間往後移，期間的交易就不送）、交易日還在三天內、頻道還是 `active`。不符合 → `cancelled`。
+- **合併**：同一輪到期、屬於同一則動態（成員×日期×商品×方向）的列送成一則訊息（`共 N 筆`）；之後才到期的同一則動態的交易另送一則。
+  價格是這幾筆的股數加權平均（不含費用、4 位小數），只有開了 `trade_prices` 才附。
+- **訊息內容**（純文字）：`小明 買進 台積電（2330）`／`11/12・共 2 筆・成交均價 605.00 TWD`／`— Forliosa 群組「家族投資」 <FRONTEND_URL>/groups`。
+  不含群組 id、股數、金額、帳戶、備註。沒有設定 `FRONTEND_URL`（正式環境）時不附連結。Telegram 訊息裡使用者取的名稱把 `@` 換成全形 `＠`
+  （純文字的 @名稱 在 Telegram 會提及別人）；Discord 一律帶 `allowed_mentions: {"parse": []}` 與 `flags: 4`（`SUPPRESS_EMBEDS`）。
+- **名稱進訊息前**（`pushers.user_text`；顯示名稱、群組名稱、商品名稱、AI 摘要、連結成功的回覆與 Discord 測試訊息裡的群組名稱）：先變成一行
+  （`textsafe.one_line`：換行、Tab 等控制字元換成空白，雙向文字控制、零寬空白等看不見的格式字元刪掉，U+200D 保留給組合 emoji）；Discord
+  再以反斜線跳脫 `` \ * _ ~ ` | [ ] ( ) < : ``（`:` 讓 `https\://…` 不變成連結），值開頭的 `# > - +` 與 `1.`／`1)` 也跳脫（標題、引用、清單）；
+  我們自己格式化的數字（報酬率、價格、筆數）不跳脫。輸入端：`PATCH /me`、開發登入的 `display_name`、`POST`／`PATCH /groups` 的 `name`
+  有這些字元就 422；Discord 的 global name 自動清掉。舊資料（檢查前存的名稱）在送出時一樣變成一行並跳脫。
+- **週報推播**：週報變成 `ready` 時排入（`dedupe_key = digest:<digest>:<kind>`）。內容只有「目前開著 `push`」的成員的數字
+  （`sharing.digest_facts_view(..., pushing_only=True)`：報酬要 `returns`＋`push`、共同持股只算 `holdings`＋`push` 的成員、交易筆數只算
+  `trades`＋`push`），加上兩個基準與群組頁連結。**AI 摘要**是用送給 AI 的那幾位成員的數字寫的（`facts.prompt_contributors`，見週報），
+  所以只有在每一位都還在群組、還開著 `push` 與當時分享的那幾項時才附上（合約沒寫，選較保守的做法；app 內用同一套規則、不要求 `push`）。
+  群組裡沒有人開 `push` 時不送。
+- **Discord circuit breaker**（`pushers.discord_breaker`，每個程序各一個）：Discord 會暫時封鎖 10 分鐘內有 10,000 次無效請求（401／403／
+  429）的 IP，而 Discord 登入也在同一台 API。webhook 請求在 10 分鐘內收到 500 次這類回應 → 10 分鐘內不再呼叫任何 webhook：
+  `send_discord` 回 `paused`（可重試、`retry_after` = 剩下的秒數），設定 webhook 回 429 `rate_limited`，推播延到暫停結束後重試。
+- **換目的地**：Discord 存的 webhook id 和新的不同（含舊網址解不開、解除後再設定）、Telegram 連到不同的 chat id（含解除後再連結）→
+  `group_share_settings.push` 對設定者以外的成員全部改成 `false`（`push_enabled_at` 不動；本人重新打開時才更新，之後的交易才推播）。同一個
+  webhook、同一個 chat 重新設定、超級群組遷移都不算。群組第一次設定某種頻道時不重設。
+- **重試**：最多 5 次；失敗後等 1、2、4、8 分鐘（Discord／Telegram 給的 `retry_after` 較長時用它），第 5 次失敗為 `failed`。可重試：429、5xx、
+  逾時、連線錯誤、Telegram 401（bot token 設錯是伺服器設定問題）。不重試：其他 4xx、3xx（不跟隨轉址）。
+- **停用頻道**：Discord 401／404 → `webhook_invalid`；webhook 解不開（`SESSION_SECRET` 換過）→ `webhook_unreadable`；Telegram 403 →
+  `bot_removed`、400「chat not found」→ `chat_not_found`；`my_chat_member` 顯示 bot 被移出（`left`／`kicked`）→ `bot_removed`。停用時
+  這個頻道其他還沒送出的列改成 `cancelled`；`push_targets` 不再列出它。owner 重新設定就恢復。
+- **Telegram 遷移**：送出時回 `parameters.migrate_to_chat_id`、或 `getUpdates` 收到含 `migrate_to_chat_id` 的訊息 → 頻道改用新的 chat id
+  （送出時立刻用新 id 再送一次）。
+- `last_error` 只存短標籤（`http_404`、`timeout`、`network`、`not_shared`、`channel_off` …），不存網址或對方回應的內容。
+
+### Telegram 連結（worker `telegram_poll`，每 20 秒）
+
+- `getUpdates`（`timeout=0`、`limit=100`、`allowed_updates=["message","my_chat_member"]`），沒有公開的 webhook 端點。`offset` 存在 worker
+  記憶體：重啟後 Telegram 會重送還沒確認的更新；超過 10 分鐘的 `/link` 訊息不處理也不回覆（不會在重啟後洗版）。
+- **防洗版**：任何人都能私訊 bot。每次輪詢一頁一頁讀到沒有積壓為止（最多 10 頁、8 秒；時間到就停，沒處理到的不確認、下次再讀）；`/link`
+  以外的訊息不做任何事；失敗的 `/link`（私訊、無效或過期的碼）每個聊天室每分鐘最多回一次、每次輪詢最多回 10 則，成功的連結一定回覆。
+  `telegram_poll` 在 worker 裡有自己的排程迴圈（`Job.background`）：慢的輪詢不會延後推播、週報與行情工作，其他工作跑很久（例如存檔）時
+  也照常每 20 秒輪詢。
+- `/link <碼>` 或 `/link@<bot> <碼>`（`@` 後面不是我們的 bot → 不理）；只接受 `group`／`supergroup`，私訊 bot 時回一句「請把我加進群組」、
+  不消耗連結碼。連結碼必須還沒用、沒過期，而且產生它的人**現在仍是 owner**（10 分鐘內轉移了擁有者 → 無效）。成功時以條件式 UPDATE
+  標記已使用（同一組碼只會成功一次），建立或改寫群組的 Telegram 頻道（`chat_title` 取群組標題），bot 回覆「已連結 Forliosa 群組「…」」；
+  無效時回「連結碼無效或已過期」。群組改名（`new_chat_title`）時更新 `chat_title`。
+- bot 建議保持 BotFather 的隱私模式（預設開）：群組裡只收到明確給它的指令，看不到其他聊天。這時沒加 `@bot` 的 `/link` 不一定收得到，
+  所以**前端顯示的指令用 `/link@<bot_username> <code>`**。
+
+### 群組 AI 週報（`services/digests.py`）
+
+- **何時**：worker `group_digests` 週六 20:00（台北）建立上週一到週五的週報（`weekend_evening`：週六晚上沒跑到時週日任何時間補做，週一起
+  不補）；`group_digest_poll` 每 5 分鐘送出還沒送的、收 Batches 結果、重試一般呼叫。同一群組同一週只有一份。
+- **facts**（`sharing.digest_week_facts`）：只用每位成員**當時**在這個群組開放的項目：`returns` → 週報酬（和排行同一套 TWR，起點為週一前最後
+  收盤、終點為那一週最後一個交易日收盤，commercial 下起點不早於存檔第一天）；`holdings` → 持有的代號清單（只存代號；名稱與產業另外存一份
+  `symbols` 對照）；`trades` → 那一週的買賣筆數。以 `user_id` 存在 `group_digests.facts`（JSON，`v: 1`），讀取時再依**目前**的成員身分與
+  開關過濾；當時沒開、之後才打開的人不會出現在舊週報。
+- **給 AI 的內容**（`anonymous_prompt`）：週期、交易日數、匿名代號（成員 A、B…，每次隨機排序，不跟加入順序對應）＋週報酬、兩個基準、
+  兩人以上共同持有的股票與人數、各產業持有人數、交易筆數。**不含**顯示名稱、user id、群組名稱、任何一個人的持股清單。重試（一般呼叫）時
+  依當下的成員與開關重新組（離開或關掉的人不再送給 AI）。
+- **摘要寫了誰**：每次組 prompt 都把用到的成員記在 `facts.prompt_contributors`（`{"returns": [user_id…], "holdings": […], "trades": […]}`，
+  跟 batch 或回答一起存）。讀取時（`sharing.digest_summary_visible`）只要其中有人已不是成員、或關掉了他當時貢獻的那一項，`summary` 就回
+  空字串並加一則 note；他重新打開時恢復。舊週報沒有這個欄位時，以 facts 裡每一列都算貢獻者（較嚴）。這樣摘要能顯示時，裡面每個數字都是
+  看的人此刻本來就看得到的（`facts` 同樣依目前設定過濾）。審查另外建議只給 AI 彙總值（漲跌人數、中位數），**沒有採用**：有了上面的
+  規則，摘要顯示時那些數字本來就看得到；而且兩人群組裡「中位數」加上自己的報酬就能算出對方的，彙總並不能防止反推。
+- **系統提示**：只寫群組整體、不寫成員代號、不猜身分、不評論個人、不給買賣／加減碼建議、不提目標價、不預測、只用提供的數字、繁體中文 2–4 句、
+  純文字。回答出現「成員 X」、「目標價」、「建議買／賣…」等字樣 → 不採用，`failed`（`error: rejected`）；`stop_reason` 不是正常結束或沒有
+  文字 → `failed`。摘要最多 400 字。
+- **呼叫**：一次 Message Batches（每份週報一個 request，`custom_id` = 週報 id）。batch 屬於建立它的 workspace，所以 `batch_id` 存
+  `<槽號>:<batch id>`，之後只用那個槽查詢與讀結果（`KeyPool.call(only=槽)`）。建立 batch 時遇到 404／403／400／422（端點不能用）→ 改用
+  一般 Messages 呼叫（這個錯誤不會讓金鑰槽被停用）；單筆 `errored`／`expired`／`canceled` → 那一份改用一般呼叫；一般呼叫遇到暫時性錯誤
+  （429、5xx、連線、所有槽冷卻中）→ `batch_id = "direct"`，下一輪再試。建立 26 小時後還沒完成 → 以一般呼叫再試一次，仍失敗就 `failed`。
+  沒有任何金鑰 → `failed`（`ai_unavailable`）；`AI_DIGEST_ENABLED=false` → `failed`（`ai_disabled`）。`failed` 的週報仍顯示 facts。
+- **用量**：每次呼叫一列 `ai_usage`，`feature = "group_digest"`、`user_id = null`（不計入任何成員的每日／每月額度）、`thread_id` = 週報 id；
+  Batches 結果的估計費用打五折。
+
+### 環境變數（第二批新增）
+
+| 變數 | 誰需要 | 說明 |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME` | api＋worker | 兩個都有才 `telegram_available: true`；token 只放環境變數，不寫進 log（`logredact` 會把 `/bot<token>/` 換成 `***`） |
+| `SESSION_SECRET` | api＋**worker**（同一個值） | worker 要用它解開 Discord webhook；`FORLIOSA_ENV=prod` 時 worker 沒設會拒絕啟動 |
+| `FRONTEND_URL` | api＋worker | worker 用在推播訊息的群組頁連結；正式環境沒設時訊息不附連結 |
+| `CLAUDE_API_KEY_<n>`／`ANTHROPIC_API_KEY` | worker | 群組週報 |
+| `AI_DIGEST_ENABLED` | worker | 預設 `true`；`false` 時週報只有 facts（標 `failed`） |
+| `AI_MODEL_DIGEST` | worker | 覆寫週報用的模型（預設同 `AI_MODEL`） |
+
+### 背景工作與保存期限
+
+| 工作 | 時間（台北） | 內容 |
+|---|---|---|
+| `group_push` | 每分鐘 | 排入交易推播、送出到期的列 |
+| `telegram_poll` | 每 20 秒（有設 bot 才做事） | `getUpdates`（自己的排程迴圈：不擋其他工作，也不被其他工作擋住） |
+| `group_digests` | 週六 20:00（週日補做） | 建立週報並送出 Batches |
+| `group_digest_poll` | 每 5 分鐘 | 收結果、退回一般呼叫、排入週報推播 |
+| `sharing_retention` | 每天 04:35 | 刪除：建立超過 30 天的 outbox 列（只用來避免三天內重送）、過期超過 1 天的 Telegram 連結碼、`week_start` 超過 26 週的週報（連同它的留言、表情與 outbox 列） |
+
+### 秘密不進 log
+
+- `logredact.install()`（api 與 worker 都會呼叫）除了 uvicorn，也掛在 `httpx`／`httpcore` logger 與 root logger 的每個 handler：Discord webhook
+  路徑（`/api/webhooks/***`）、Telegram `/bot***/`、bot token 形狀的字串，連 traceback 都會遮掉（httpx 在 INFO 會記下每個請求網址）。
+- `pushers` 不記網址、不記回應內容、不讓帶網址的例外往外丟（任何非 httpx 例外也只回 `error` 標籤）。webhook 網址驗證失敗的錯誤訊息不含網址。
+- 測試：`tests/conftest.py` 的 `no_push_network` 讓所有 Discord／Telegram 請求失敗，測試用 `tests/api/push_fake.py` 的假伺服器；
+  週報測試以假的 Messages／Batches 端點走真正的 SDK（`tests/api/test_m5_digest.py`）。
+
+### 分享（M5）待產品負責人確認
+
+1. **`FRONTEND_URL` 變成正式環境必填**：沒設定時 API 拒絕啟動。部署這一版之前要先在 Railway 的 api 服務設 `FRONTEND_URL=https://app.<網域>`。
+2. **更換 `SESSION_SECRET`** 會讓交易動態的舊留言找不到對象（見上）。建議先維持一把金鑰；之後若需要定期換 session 金鑰，再另外加一個專給分享用的金鑰。
+3. **群組建立者也有一則「加入」動態**（建立群組那一刻）。建議維持（實作最單純，也讓新群組的動態不是空的）。
+4. **排行每次請求重算**：成員多（接近 50 人）時可能要幾秒。建議第二批加「每個交易日收盤後算一次」的快取。（第二批沒有做：
+   先看實際群組大小再決定。）
+5. **週報推播的 AI 摘要**：只有寫進摘要的每一位成員都開著「推播」時才附上，否則只送開了推播的人的數字與連結。建議維持（摘要是用沒開推播的人的
+   數字寫的）；另一個選項是不論如何都附摘要（摘要只寫群組整體）。
+6. **週報保存 26 週**（連同留言）。建議維持；要更久可改成 52 週。
+7. **「交易日在 3 個日曆日內」解讀為今天與前兩天**（週五的交易週一才記，就不推播）。建議維持；若要寬一點可改成「今天往前 3 天」。
+8. **worker 現在需要 `SESSION_SECRET`（與 api 相同）**，正式環境沒設會拒絕啟動；部署 worker 時一起設（見 `docs/deploy.md` 2.3）。
+9. **換推播目的地時其他成員的「推播」自動關閉**（審查發現：成員看不出 Discord 推到哪個頻道，owner 換 webhook 後原本的同意會沿用）。已實作：
+   換成另一個 webhook（即使在同一個 Discord 頻道）、連到另一個 Telegram 聊天室、解除後再設定，都要成員重新打開；群組第一次設定不影響。
+   建議維持（保守、實作簡單）。另一個選項是設定時讀 webhook 的資料（名稱、頻道 id）顯示給成員，但只有 webhook 名稱可讀、而且由 owner 自己
+   取名，不能真的分辨是哪個伺服器。前端要在成員的「推播」開關旁說明「群組換推播頻道時會自動關閉」；目前沒有另外通知成員。
+10. **webhook 設定次數與 circuit breaker**：每人、每群組 10 分鐘 5 次；10 分鐘內 500 次無效回應就暫停 webhook 請求 10 分鐘。建議維持；
+    計數在記憶體裡，API 開多個程序時每個程序各算各的（目前 Railway 只有一個）。
