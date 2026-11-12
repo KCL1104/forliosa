@@ -188,7 +188,8 @@ def test_taifex_fx_is_gated_by_the_licence_setting(engine, archived, monkeypatch
     monkeypatch.setattr(get_settings(), "taifex_conditional_confirmed", True)
     fx = FxBook.load(md, date(2026, 11, 1), date(2026, 11, 11))
     assert not fx.fixed and fx.rate("USD", date(2026, 11, 11)) == D("32.86") and fx.source == "taifex-openapi"
-    assert fx_notes(fx, md) == ["USD/TWD 匯率：臺灣期貨交易所〈每日外幣參考匯率〉（2026），依政府資料開放授權條款第 1 版"]
+    assert fx_notes(fx, md) == [
+        "USD/TWD 匯率：臺灣期貨交易所〈每日外幣參考匯率〉（2026），依政府資料開放授權條款第 1 版"]
     personal = ArchiveProvider("personal", session_fn=lambda: Session(engine), taifex_confirmed=False)
     assert personal.fx_history("USDTWD", date(2026, 11, 1), date(2026, 11, 11))  # non-commercial use: served
 

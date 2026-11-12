@@ -86,7 +86,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
             {suggestions.length > 0 && (
               <ul className="no-scrollbar -mx-5 mt-10 flex snap-x snap-mandatory scroll-px-5 gap-2.5 overflow-x-auto overscroll-x-contain px-5" aria-label="可以這樣問">
                 {suggestions.map((s) => (
-                  <li key={`${s.kind}-${s.recurring?.planId ?? ""}`} className="snap-start">
+                  <li key={`${s.kind}-${s.recurring?.planId ?? ""}-${s.recurring?.date ?? ""}`} className="snap-start">
                     <button
                       type="button"
                       onClick={() => runner.ask(s)}

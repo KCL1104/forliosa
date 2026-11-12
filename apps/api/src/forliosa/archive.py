@@ -316,14 +316,18 @@ class Archiver:
                 "change_pct": r.get("change_pct"), "source": source} for r in rows]
         return upsert(self.db, IndexDaily, out, ["name", "date"], update)
 
-    def twse_indices(self) -> int:
-        """MI_INDEX (every index, the latest day) and MFI94U (this month of 發行量加權股價報酬指數): the first run
-        backfills the current month of the ^TAIEXTR benchmark; MI_INDEX's official change wins on conflicts."""
+    def twse_total_return(self) -> int:
+        """MFI94U (this month of 發行量加權股價報酬指數): the first run backfills the month of the ^TAIEXTR benchmark.
+        On conflicts only the close is updated (MI_INDEX's official change is kept)."""
         mfi = od.with_changes(od.parse_mfi94u(self._list(f"{TWSE_OPENAPI}/indicesReport/MFI94U")))
         n = self._indices(mfi, "TWSE", "twse-openapi", ["close", "source"])
         self._status("twse-openapi/total_return", max((r["date"] for r in mfi), default=None), len(mfi))
+        return n
+
+    def twse_indices(self) -> int:
+        """MI_INDEX: every index's close and change (the latest day), incl. 發行量加權股價報酬指數."""
         mi = od.parse_mi_index(self._list(f"{TWSE_OPENAPI}/exchangeReport/MI_INDEX"))
-        n += self._indices(mi, "TWSE", "twse-openapi")
+        n = self._indices(mi, "TWSE", "twse-openapi")
         self._status("twse-openapi/index", max((r["date"] for r in mi), default=None), len(mi))
         return n
 
@@ -611,7 +615,9 @@ class Archiver:
                              ("twse reference", self.twse_reference), ("twse margin", self.twse_margin),
                              ("twse events", self.twse_events), ("twse revenue", self.twse_revenue),
                              ("twse news", self.twse_news), ("twse funds", self.twse_funds),
-                             ("twse holidays", self.twse_holidays), ("twse indices", self.twse_indices)):
+                             ("twse holidays", self.twse_holidays),
+                             ("twse total return MFI94U", self.twse_total_return),
+                             ("twse indices MI_INDEX", self.twse_indices)):
                 self._run(name, fn)
         if "tpex" in groups:
             for name, fn in (("tpex prices", self.tpex_prices), ("tpex valuation", self.tpex_valuation),

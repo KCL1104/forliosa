@@ -179,7 +179,7 @@ function PanelHome({ ctx, runner, routeKind }: { ctx: AiContext; runner: ReturnT
       {suggestions.length > 0 && (
         <ul className="mt-6 grid gap-2.5">
           {suggestions.map((s) => (
-            <li key={`${s.kind}-${s.recurring?.planId ?? ""}`}>
+            <li key={`${s.kind}-${s.recurring?.planId ?? ""}-${s.recurring?.date ?? ""}`}>
               <SuggestionButton s={s} onAsk={() => runner.ask(s)} />
             </li>
           ))}

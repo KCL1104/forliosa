@@ -3,6 +3,9 @@
 1. A chat turn with tool use on the seeded demo user (``demo@forliosa.local``; seeded if missing).
 2. A question about 台積電 today that needs web search (citations printed).
 
+``--keys`` only sends one tiny request (``max_tokens=1``) through every key slot and prints each slot's workspace id,
+to check that ``CLAUDE_API_KEY_1..3`` really belong to three different workspaces (cost: a few millionths of a USD).
+
 Prints the streamed answer, tool steps, citations, grounding flags, token usage and the estimated cost of each
 turn, then the state of every key slot. Needs a key (``CLAUDE_API_KEY_<n>`` / ``ANTHROPIC_API_KEY``, or
 ``AI_DEV_DUMMY_KEY=1`` behind a key-injecting proxy). Exit code 2 when no key is configured, 1 when a turn
@@ -44,9 +47,38 @@ def _demo_user(db) -> User:
     return user
 
 
+def check_workspaces(pool, model: str) -> int:
+    """One minimal request per slot; prints the workspace id each key answers from. 1 when a slot failed."""
+    failed = False
+    seen: dict[str, list[int]] = {}
+    for slot in pool.slots:
+        try:
+            raw = slot.client.messages.with_raw_response.create(
+                model=model, max_tokens=1, messages=[{"role": "user", "content": "ping"}])
+        except Exception as exc:  # report every slot; errors never contain the key
+            failed = True
+            print(f"金鑰槽 #{slot.index}：失敗（{type(exc).__name__}：{getattr(exc, 'message', exc)}）")
+            continue
+        pool.observe(slot.index, raw.headers)
+        ws = slot.workspace_id or "?"
+        seen.setdefault(ws, []).append(slot.index)
+        tokens = slot.limits.get("input-tokens") or slot.limits.get("tokens")
+        limit = f"、每分鐘輸入 token 上限 {tokens.limit:,}" if tokens else ""
+        print(f"金鑰槽 #{slot.index}：正常、workspace {ws}{limit}")
+    shared = {ws: idx for ws, idx in seen.items() if len(idx) > 1}
+    if shared:
+        for ws, idx in shared.items():
+            names = "、".join(f"#{i}" for i in idx)
+            print(f"⚠ 金鑰槽 {names} 在同一個 workspace（{ws}），額度會共用")
+    elif seen and not failed:
+        print(f"✓ {len(seen)} 把金鑰分屬 {len(seen)} 個不同的 workspace")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Forliosa AI live smoke test (real API, small cost)")
     parser.add_argument("--only", type=int, choices=[1, 2], help="run only question 1 or 2")
+    parser.add_argument("--keys", action="store_true", help="only check which workspace each key slot belongs to")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     settings = get_settings()
@@ -58,6 +90,8 @@ def main(argv: list[str] | None = None) -> int:
     pool = build_pool()
     slot_names = ", ".join(f"#{s.index}" for s in pool.slots)
     print(f"金鑰槽：{slot_names}；模型：{settings.ai_model_chat or settings.ai_model}")
+    if args.keys:
+        return check_workspaces(pool, settings.ai_model)
     failed = False
     grand = CallUsage()
     grand_cost = 0.0

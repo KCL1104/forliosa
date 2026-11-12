@@ -1,18 +1,10 @@
 import { Link } from "@tanstack/react-router"
 import { CalendarSyncIcon } from "lucide-react"
-import { appToday } from "@/api"
-import { useRecurringPlans } from "@/api/queries"
 import type { RecurringPlan } from "@/api/types"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { activePlansBySymbol, recurringLabel } from "@/lib/ledger-display"
+import { recurringLabel } from "@/lib/ledger-display"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-
-/** 持倉列上要標記的定期定額（啟用中的計畫，依代號） */
-export function useActivePlans(): Map<string, RecurringPlan[]> {
-  const plans = useRecurringPlans()
-  return activePlansBySymbol(plans.data ?? [], appToday())
-}
 
 /**
  * 持倉名稱旁一個安靜的定期定額標記（淡墨日曆圖示）。滑過看「定期定額：每月 6、19 日 NT$5,000」，

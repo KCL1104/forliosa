@@ -117,7 +117,7 @@ def test_indices_companies_dividends_and_exrights(engine):
         tr = list(db.scalars(select(IndexDaily).where(IndexDaily.name == "發行量加權股價報酬指數")
                              .order_by(IndexDaily.date)))
         # MFI94U backfills the month (8 days); MI_INDEX adds the official change of the latest day
-        assert [r.date for r in tr][0] == date(2026, 11, 2) and len(tr) == 8
+        assert tr[0].date == date(2026, 11, 2) and len(tr) == 8
         assert (tr[-1].close, tr[-1].change) == (D("102340.20"), D("3573.19"))
         otc = db.get(IndexDaily, ("櫃買指數", date(2026, 11, 12)))
         assert (otc.open, otc.close) == (D("344.58"), D("335.73"))  # tpex_index's OHLC is not overwritten

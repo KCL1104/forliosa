@@ -69,7 +69,7 @@ export function RecurringPlans() {
           <h2 id="set-recurring" className="text-lg font-bold">
             定期定額
           </h2>
-          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日 AI 會照最近收盤價寫好草稿（漏記的扣款 7 天內也會提醒補記），你簽名才入帳。</p>
+          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日 AI 會照最近收盤價寫好草稿，漏記的在 7 天內提醒補記；你簽名才入帳。</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setEditing("new")} disabled={!accounts.data || twd.length === 0}>
           <PlusIcon />
@@ -101,7 +101,7 @@ export function RecurringPlans() {
                 key={p.id}
                 id={`plan-${p.id}`}
                 aria-current={hash === `plan-${p.id}` ? "true" : undefined}
-                className="flex scroll-mt-24 flex-col gap-2 px-4 py-4 aria-[current]:bg-hov sm:flex-row sm:items-start sm:gap-4 sm:px-5"
+                className="flex scroll-mt-24 flex-col gap-2 px-4 py-4 aria-[current=true]:bg-hov sm:flex-row sm:items-start sm:gap-4 sm:px-5"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">

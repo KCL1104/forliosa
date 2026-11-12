@@ -208,7 +208,11 @@ export function useAiRunner(ctx: AiContext) {
     }
   }
 
-  /** 定期定額扣款日：`POST /recurring/{id}/draft` 寫成草稿（不會建立交易），簽名後才 `POST /transactions` */
+  /**
+   * 定期定額：`POST /recurring/{id}/draft?date=<原本的扣款日>` 寫成草稿（不會建立交易），簽名後才 `POST /transactions`。
+   * 扣款日當天，或補記最近 7 天漏記的一次（`missed`）。後端依 `date` 順延到交易日並把成交日設成那天；
+   * 萬一回來的是別次扣款（後端沒有吃到 `date`），成交日改回這一次的扣款日。
+   */
   async function draftRecurring(s: Suggestion) {
     const r = s.recurring
     if (!r) return
@@ -216,20 +220,30 @@ export function useAiRunner(ctx: AiContext) {
     try {
       const d = await api.draftRecurring(r.planId, r.scheduledDate)
       const symbol = d.transaction.symbol
+      const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
+      const estimate = `${formatMoney(d.amount)} 以 ${formatDateShort(d.price_as_of, false)} 收盤價 ${formatPrice(d.transaction.price, marketOf(symbol))} 估算股數（含零股），手續費另計`
       const draft: Draft = {
         id: newId("dft"),
         status: "pending",
-        input: { ...d.transaction, amount: null },
+        input: { ...d.transaction, trade_date: tradeDate, amount: null },
         instrument: { symbol, code: codeOf(symbol), name: d.name, market: marketOf(symbol), currency: "TWD" },
         preview: d.preview,
         notes: [
-          `${formatMoney(d.amount)} 以 ${formatDateShort(d.price_as_of, false)} 收盤價 ${formatPrice(d.transaction.price, marketOf(symbol))} 估算股數（含零股），手續費另計；實際成交以券商對帳單為準，簽名前可以改。`,
+          r.missed
+            ? `${estimate}；這是 ${formatDateShort(tradeDate, false)} 的扣款，請照券商對帳單改成實際成交的股數和價格再簽名。`
+            : `${estimate}；實際成交以券商對帳單為準，簽名前可以改。`,
         ],
         createdAt: new Date().toISOString(),
         recurring: { planId: r.planId, date: r.date },
       }
       upsertDraft(draft)
-      push({ role: "ai", text: `今天是${d.name}定期定額的扣款日。\n我照最近收盤價算好股數和手續費，簽名後才會入帳。`, draftId: draft.id })
+      push({
+        role: "ai",
+        text: r.missed
+          ? `${formatDateShort(tradeDate, false)} 是${d.name}定期定額的扣款日，帳本裡還沒有這一筆。\n我先照最近收盤價算好股數和手續費，你照對帳單改好再簽名，簽了才會入帳。`
+          : `今天是${d.name}定期定額的扣款日。\n我照最近收盤價算好股數和手續費，簽名後才會入帳。`,
+        draftId: draft.id,
+      })
     } catch (err) {
       say({
         text: `這次的定期定額草稿沒有寫成：${err instanceof Error ? err.message : "請再試一次"}。`,

@@ -12,6 +12,8 @@
 
 ## 重要決定
 - 資料只用可合法商用的來源：`DATA_POLICY=commercial`（預設）；不得自動擷取證交所網站或 MIS。
+- 初期資料源不付費（不買 E-Shop 等付費資料）；缺的資料老實顯示空狀態。
+- 檢查三把 Claude key 是否分屬三個 workspace：`cd apps/api && uv run python -m forliosa.ai.smoke --keys`。
 - AI 用 Claude API，預設模型 Haiku 等級；key 放在環境變數 `Claude_API_KEY_1..3`（三個 workspace，對話黏著同一把 key）。
 - 在這個雲端沙盒跑 AI smoke test：`cd apps/api && uv run python -m forliosa.ai.smoke`（沙盒禁止 web fetch 工具時程式會自動移除該工具重試）。
 - 前端設計流程使用 Impeccable（`.claude/skills/impeccable`）。

@@ -23,7 +23,7 @@
 | `GET /stream/quotes` | `interval`（1–60 秒）、`once`（送一輪就結束，測試用） | |
 | 錯誤 | `error.details`（只有 `validation_error` 有） | 逐欄錯誤：`[{"field": "quantity", "message": "..."}]` |
 | `GET /portfolio/performance` | `range=1D`、`range=5D` | 短區間，以交易日計（見下方「績效計算的解讀」） |
-| `benchmark`（績效參數與 `Preferences.benchmark`） | `^TAIEXTR` | 臺灣證券交易所「發行量加權股價報酬指數」（含息），見下方 |
+| `benchmark`（績效參數與 `Preferences.benchmark`） | `^TAIEXTR`、`^TPEXTR` | 證交所「發行量加權股價報酬指數」、櫃買中心「櫃買報酬指數」（含息），見下方 |
 
 ## 欄位語意的解讀
 
@@ -92,11 +92,12 @@
 - **`1D` 與 `PortfolioSummary.day_change_pct` 不一定相同**：前者是台北交易日的收盤序列（美股以前一個美股收盤
   補值，匯率用當日匯率），後者是每檔報價的「昨收 → 現價」（美股是最近一個美股交易日）。持有美股時兩者會有小差異。
 - **基準**：可以是任何商品（`0050`、`006208.TW`、`VOO`…，含息報酬：除息日股利再投入、分割接續），或指數
-  `^TAIEXTR`（發行量加權股價報酬指數，證交所編製、已含息，所以直接用每日漲跌；資料來自 FinMind
-  `TaiwanStockTotalReturnIndex`，`data_id=TAIEX`，收盤後公布）。指數代號用 `^` 開頭，不會和台股代號或美股代號
-  衝突，也不會出現在搜尋結果。指數沒有資料時（例如 FinMind 暫時無法使用）`benchmark.twr` 與
-  `benchmark_index` 為 `null`，不會用示範資料代替。`PATCH /me/preferences` 也接受 `^TAIEXTR`（大小寫不拘、
-  可省略 `^`）。
+  `^TAIEXTR`（發行量加權股價報酬指數，證交所編製、已含息，所以直接用每日漲跌）與 `^TPEXTR`（櫃買報酬指數，上櫃持股用）。
+  **2026-11-12 起資料來自自建存檔**：證交所 OpenAPI `exchangeReport/MI_INDEX`（每天全部指數）與 `indicesReport/MFI94U`
+  （當月每日，第一次存檔回補本月）、櫃買 `tpex_reward_index`（當月每日），表 `index_daily`；personal 明確開啟 FinMind 時，
+  FinMind `TaiwanStockTotalReturnIndex`（`TAIEX`／`TPEx`）補存檔之前的日子。指數代號用 `^` 開頭，不會和台股代號或美股代號
+  衝突，也不會出現在搜尋結果。指數沒有資料時 `benchmark.twr` 與 `benchmark_index` 為 `null`，不會用示範資料代替。
+  `PATCH /me/preferences` 也接受 `^TAIEXTR`、`^TPEXTR`（大小寫不拘、可省略 `^`）。
 - **XIRR** 在短區間（例如 1M）會被年化放大，這是 XIRR 定義使然。
 - **日期軸**：任何持股有成交資料的日期（台股或美股）；當天沒有交易的市場以前一個收盤價補值。
 - **已實現損益**也包含：單獨記錄的手續費與稅（負值）、利息（正值）、減資退還股款超過成本的部分。
@@ -268,11 +269,11 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 盤中走勢 | `/intraday` 的 `points: []`＋`notes`（任何模式） |
 | 上市股票個股三大法人、外資持股 | `chips` 空陣列＋`notes`（任何模式；上櫃股票有） |
 | 開始存檔前的日線、本益比、籌碼 | 只回已存檔的部分＋`notes`「資料累積中：自 … 起存檔」；一點都沒有時是空陣列 |
-| 股利歷史 | `/dividends` 只有存檔的除權息預告（陣列型回應沒有 `notes`，可能是 `[]`） |
+| 股利歷史 | `/dividends` 只有存檔的除權息預告，加上證交所〈上市公司股利分派情形〉的董事會／股東會決議（2026-11-12 起，見「第三批」）；陣列型回應沒有 `notes`，可能是 `[]` |
 | 績效 | 持股期間沒有每天的真實收盤價時 `series: []`＋`notes`；存檔足夠後從第一個完整存檔日（當作基準收盤，`twr_index` 1.0）開始，`notes` 說明起點 |
 | 美股 | 沒有報價（`/quote` 404、`Holding.price: null` 以成本計值、`is_demo: false`）、績效空＋`notes` |
-| USD/TWD 匯率 | 沒有可商用來源時固定 31.5（待確認 17） |
-| 基準 `^TAIEXTR` | `benchmark.twr: null`＋`notes` |
+| USD/TWD 匯率 | 期交所〈每日外幣參考匯率〉已每日存檔，但授權「有條件」：`TAIFEX_CONDITIONAL_CONFIRMED=true` 前固定 31.5，績效 `notes` 說明（見「第三批」） |
+| 基準 `^TAIEXTR`／`^TPEXTR` | 2026-11-12 起由存檔提供（證交所 2026-11-02、櫃買 2026-11-02 起）；更早的日子沒有資料 |
 | 媒體新聞 | 沒有；`/news` 只有官方公告 |
 | shioaji-data AI 研究（簡介、產業鏈、題材） | `summary`／`chain_stage` 為 `null`、`themes: []` |
 
@@ -322,8 +323,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 14. **新聞來源**：目前只有官方公告（重大訊息、證交所新聞）。媒體新聞需要授權（中央社等，需詢價）。
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。
 16. ~~**財報公布日**~~：已實作（2026-11-12），實際日期來自重大訊息與月營收資料集；查不到才用法定期限（`estimated: true`）。
-17. **美股基本面（SEC EDGAR）與匯率（央行／臺銀開放資料）**：研究判定可商用，但**尚未加入**，等產品負責人決定
-    （EDGAR 需在 User-Agent 寫聯絡信箱；匯率資料集要先確認仍每日更新）。在那之前美股沒有價格、USD/TWD 沒有來源時固定 31.5。
+17. **美股基本面（SEC EDGAR）與匯率**：EDGAR 研究判定可商用，但**尚未加入**，等產品負責人決定（需在 User-Agent 寫聯絡信箱）。
+    匯率：2026-11-12 起存期交所〈每日外幣參考匯率〉，但要等期交所確認授權（「第三批」待確認 20）才使用；央行／臺銀未驗證，沒有加入。
+    在那之前 USD/TWD 固定 31.5。
 18. **月營收資料集是否逐日更新**：`t187ap05_L`／`mopsfin_t187ap05_O` 的「出表日期」在 2026-11-12 是 1151111（申報期限之後）。
     若它在每月 1–10 日逐日更新，「第一次看到的日期」就是實際公布日（誤差一天內）；若只在期限後產生一次，營收公布日會晚於實際。
     12 月初要觀察一次。
@@ -417,7 +419,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   所以單純的價格、持股句子不會被標。位置是 Unicode code point（中文都在 BMP，與 JS 字串索引相同；保險起見也附上句子本身）。
 - **免責聲明由畫面顯示（產品負責人決定）**：系統提示不再要求模型寫「僅供參考，非投資建議」，反而要求不要寫；固定文字
   「AI 回答僅供參考，非投資建議。」放在 `done.disclaimer` 與 `GET /ai/usage` 的 `disclaimer`。提到價格、報酬時模型仍會順帶寫資料時間。
-- **工具**：14 個 client tools，全部 `strict: true`、`additionalProperties: false`、沒有使用者 id 欄位（伺服器帶入登入者）；可選參數合計 15
+- **工具**：15 個 client tools（2026-11-12 加 `get_derivatives_overview`，見「第三批」），全部 `strict: true`、`additionalProperties: false`、沒有使用者 id 欄位（伺服器帶入登入者）；可選參數合計 15
   個（上限 24）。結果是精簡 JSON（例如 K 線只給統計與最多 30 個取樣點、籌碼只給最近 10 日與區間合計），保留 `as_of`、`is_demo`、`sources`。
   其他使用者的帳戶 id 會回錯誤，不會被當成篩選條件。伺服器工具：`web_search_20260318`（`user_location` 台北／TW、`max_uses` 3、預設不限網域）、
   `web_fetch_20260318`（只限官方網域、`max_uses` 2、`max_content_tokens` 8000、開啟引用）。
