@@ -1,18 +1,19 @@
 import { useMemo, useState } from "react"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { useValuation } from "@/api/queries"
-import type { InstrumentDetail, Valuation } from "@/api/types"
+import type { InstrumentDetail, Position, Valuation } from "@/api/types"
 import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
-import { DemoChop } from "@/components/chop"
-import { Panel } from "@/components/section"
+import { DemoTag, Section as Panel } from "@/components/section"
+import { usePrefs } from "@/stores/prefs"
+import { NotYet, TabLead } from "./kit"
 import { ChartSkeleton, EmptyState, ErrorState } from "@/components/states"
 import { buildRiver, invalidRuns, type Mode } from "@/lib/valuation"
 import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
 
 const BAND_VARS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
 
-export function ValuationTab({ instrument }: { instrument: InstrumentDetail }) {
+export function ValuationTab({ inst: instrument, position }: { inst: InstrumentDetail; position: Position | null }) {
   const valuation = useValuation(instrument.symbol)
   const [mode, setMode] = useState<Mode>("per")
 
@@ -34,13 +35,22 @@ export function ValuationTab({ instrument }: { instrument: InstrumentDetail }) {
           }
         />
         <YieldPanel valuation={v} />
+        {instrument.type === "etf" && (
+          <Panel title="折溢價" titleId="val-premium">
+            <NotYet title="折溢價資料來源還在確認">確認後這裡會畫出每天市價相對淨值的折價或溢價，以及過去一年的區間。</NotYet>
+          </Panel>
+        )}
         <Notes notes={v.notes} />
       </div>
     )
   }
   const activeMode: Mode = mode === "per" && !hasPer ? "pbr" : mode === "pbr" && !hasPbr ? "per" : mode
+  const pct = v.current.per_percentile_5y
   return (
-    <div className="flex flex-col gap-4">
+    <div className="flex flex-col gap-5">
+      <TabLead>
+        {v.current.per !== null && pct !== null ? `本益比 ${v.current.per.toFixed(1)} 倍，比過去 5 年 ${formatPercent(pct, { signed: false, decimals: 0 })} 的日子貴。` : null}
+      </TabLead>
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips
           label="估值方式"
@@ -51,10 +61,10 @@ export function ValuationTab({ instrument }: { instrument: InstrumentDetail }) {
             ...(hasPbr ? [{ value: "pbr" as const, label: "股價淨值比河流圖" }] : []),
           ]}
         />
-        <span className="text-sm text-muted-foreground">近 5 年・{cadenceLabel(v)}</span>
-        {v.is_demo && <DemoChop className="ml-auto" />}
+        <span className="text-sm text-ink-2">近 5 年・{cadenceLabel(v)}</span>
+        {v.is_demo && <DemoTag className="ml-auto" />}
       </div>
-      <RiverPanel valuation={v} mode={activeMode} instrument={instrument} />
+      <RiverPanel valuation={v} mode={activeMode} instrument={instrument} position={position} />
       <YieldPanel valuation={v} />
       <Notes notes={v.notes} />
     </div>
@@ -74,7 +84,7 @@ function cadenceLabel(v: Valuation): string {
 function Notes({ notes }: { notes: string[] }) {
   if (notes.length === 0) return null
   return (
-    <ul className="flex flex-col gap-1 text-xs text-muted-foreground">
+    <ul className="flex flex-col gap-1 text-xs text-ink-2">
       {notes.map((n) => (
         <li key={n}>・{n}</li>
       ))}
@@ -82,7 +92,8 @@ function Notes({ notes }: { notes: string[] }) {
   )
 }
 
-function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail }) {
+function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail; position: Position | null }) {
+  const privacy = usePrefs((s) => s.privacyMode)
   const multiples = mode === "per" ? valuation.per_multiples : valuation.pbr_multiples
   const rows = useMemo(() => buildRiver(valuation.series, multiples, mode), [valuation.series, multiples, mode])
   const runs = useMemo(() => invalidRuns(rows), [rows])
@@ -118,20 +129,20 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
   if (!placed && last) bandRows.push({ kind: "price", price: last.close })
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_300px]">
+    <div className="grid gap-10 xl:grid-cols-[minmax(0,1fr)_300px]">
       <Panel title={`${ratioLabel}河流圖`} titleId="river-title" bodyClassName="pt-1">
-        <p className="mb-2 max-w-prose text-sm text-muted-foreground">
+        <p className="mb-2 max-w-prose text-sm text-ink-2">
           每一條帶是「{baseLabel} × 倍數」換算出的股價。股價線落在越上面的帶，代表用{ratioLabel}來看越貴。
         </p>
         <Legend
           className="mb-1"
           items={[
-            { label: "收盤價", color: "var(--foreground)", shape: "line" },
+            { label: "收盤價", color: "var(--ink)", shape: "line" },
             ...multiples.map((m, i) => ({ label: `${m} 倍`, color: BAND_VARS[i] ?? BAND_VARS[4]! })),
           ]}
         />
         {runs.length > 0 && (
-          <p className="mb-1 rounded-md bg-muted px-3 py-2 text-sm">
+          <p className="mb-1 border-y border-dashed border-ctl py-2 text-sm">
             <span className="font-medium">{runs.map((r) => `${formatDate(r.from)}–${formatDate(r.to)}`).join("、")}</span>
             ：{baseLabel} ≤ 0，{ratioLabel}沒有意義，這段期間不畫區間。
           </p>
@@ -143,7 +154,7 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
               <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={56} tickFormatter={(t: string) => t.slice(0, 7).replace("-", "/")} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} tickFormatter={(n: number) => formatNumber(n)} domain={[0, "auto"]} />
               {runs.map((r) => (
-                <ReferenceArea key={r.from} x1={r.from} x2={r.to} fill="var(--muted)" fillOpacity={0.9} ifOverflow="extendDomain" />
+                <ReferenceArea key={r.from} x1={r.from} x2={r.to} fill="var(--hov)" fillOpacity={0.9} ifOverflow="extendDomain" />
               ))}
               {multiples.map((m, i) => (
                 <Area
@@ -153,14 +164,14 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
                   type="linear"
                   fill={BAND_VARS[i] ?? BAND_VARS[4]}
                   fillOpacity={1}
-                  stroke="var(--card)"
+                  stroke="var(--paper)"
                   strokeWidth={1}
                   isAnimationActive={false}
                   connectNulls={false}
                   activeDot={false}
                 />
               ))}
-              <Line dataKey="close" stroke="var(--foreground)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }} />
+              <Line dataKey="close" stroke="var(--ink)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--paper)", strokeWidth: 2 }} />
               <Tooltip
                 cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}
                 content={({ active, label }) => {
@@ -172,7 +183,7 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
                     <ChartTooltipBox
                       title={formatDate(r.t)}
                       rows={[
-                        { label: "收盤", value: formatPrice(r.close, market), color: "var(--foreground)", shape: "line" },
+                        { label: "收盤", value: formatPrice(r.close, market), color: "var(--ink)", shape: "line" },
                         { label: ratioLabel, value: r.ratio !== null ? `${r.ratio.toFixed(1)} 倍` : "不適用" },
                         { label: baseLabel, value: r.base !== null ? `${unit}${r.base.toFixed(2)}` : "—" },
                         ...(valid
@@ -191,46 +202,46 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
       <Panel title={`現在的${ratioLabel}`} titleId="river-now">
         {currentInvalid ? (
           <div className="flex flex-col gap-2">
-            <p className="text-2xl font-semibold">不適用</p>
-            <p className="text-md text-muted-foreground">
+            <p className="text-2xl font-medium">不適用</p>
+            <p className="text-md text-ink-2">
               {baseLabel}目前 ≤ 0（{last?.base !== null && last?.base !== undefined ? `${unit}${last.base.toFixed(2)}` : "無資料"}），{ratioLabel}沒有意義。可改看股價淨值比或殖利率。
             </p>
           </div>
         ) : (
           <div className="flex flex-col gap-4">
             <div>
-              <p className="hero-figure text-hero-sm font-semibold">
+              <p className="hero-figure text-4xl font-medium">
                 {currentRatio?.toFixed(1)}
-                <span className="ml-1 text-lg font-medium text-muted-foreground">倍</span>
+                <span className="ml-1 text-lg font-medium text-ink-2">倍</span>
               </p>
               {bracket && <p className="mt-2 text-md">{bracket}</p>}
               {mode === "per" && valuation.current.per_percentile_5y !== null && (
-                <p className="mt-1 text-md text-muted-foreground">
+                <p className="mt-1 text-md text-ink-2">
                   過去 5 年有 <span className="num font-medium text-foreground">{formatPercent(valuation.current.per_percentile_5y, { signed: false, decimals: 0 })}</span> 的時間本益比比現在低。
                 </p>
               )}
             </div>
             <dl className="flex flex-col gap-1 text-md">
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">{baseLabel}</dt>
+                <dt className="text-ink-2">{baseLabel}</dt>
                 <dd className="num">{unit}{last!.base!.toFixed(2)}</dd>
               </div>
               <div className="flex justify-between gap-3">
-                <dt className="text-muted-foreground">收盤價</dt>
+                <dt className="text-ink-2">收盤價</dt>
                 <dd className="num">{formatPrice(last!.close, market)}</dd>
               </div>
             </dl>
             <table className="w-full text-md">
-              <caption className="mb-1 text-left text-sm text-muted-foreground">各倍數對應的股價（今天）</caption>
+              <caption className="mb-1 text-left text-sm text-ink-2">各倍數對應的股價（今天）</caption>
               <tbody>
                 {bandRows.map((row) =>
                   row.kind === "price" ? (
-                    <tr key="price" className="border-b border-hairline bg-accent font-semibold text-accent-foreground">
+                    <tr key="price" className="border-b border-rule bg-hov font-bold text-ink">
                       <th scope="row" className="py-1.5 pl-2 text-left">現價</th>
                       <td className="num py-1.5 pr-2 text-right" colSpan={2}>{formatPrice(row.price, market)}</td>
                     </tr>
                   ) : (
-                    <tr key={row.m} className="border-b border-hairline last:border-0">
+                    <tr key={row.m} className="border-b border-rule last:border-0">
                       <th scope="row" className="py-1.5 pl-2 text-left font-normal">
                         <span className="inline-flex items-center gap-2">
                           <span aria-hidden className="size-2.5 rounded-[3px] ring-1 ring-border" style={{ background: BAND_VARS[row.idx] }} />
@@ -243,6 +254,12 @@ function RiverPanel({ valuation, mode, instrument }: { valuation: Valuation; mod
                 )}
               </tbody>
             </table>
+            {position && mode === "per" && last?.base && last.base > 0 && (
+              <p className="text-md">
+                <span className="text-ink-2">你的均價</span>{" "}
+                {privacy ? "••••" : `${formatPrice(position.avg_cost, market)}，約 ${(position.avg_cost / last.base).toFixed(1)} 倍`}
+              </p>
+            )}
           </div>
         )}
       </Panel>
@@ -260,10 +277,10 @@ function YieldPanel({ valuation }: { valuation: Valuation }) {
       aside={current !== null && <span className="num text-md">目前 {formatPercent(current, { signed: false })}</span>}
     >
       {data.length < 2 ? (
-        <p className="text-md text-muted-foreground">還沒有足夠的配息資料可以畫殖利率走勢。</p>
+        <p className="text-md text-ink-2">還沒有足夠的配息資料可以畫殖利率走勢。</p>
       ) : (
         <>
-          <p className="mb-2 text-sm text-muted-foreground">近 12 個月現金股利 ÷ 收盤價。</p>
+          <p className="mb-2 text-sm text-ink-2">近 12 個月現金股利 ÷ 收盤價。</p>
           <div className="h-[180px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
@@ -277,7 +294,7 @@ function YieldPanel({ valuation }: { valuation: Valuation }) {
                     return row ? <ChartTooltipBox title={formatDate(row.t)} rows={[{ label: "殖利率", value: formatPercent(row.y, { signed: false }) }]} /> : null
                   }}
                 />
-                <Line dataKey="y" stroke="var(--chart-1)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--card)", strokeWidth: 2 }} />
+                <Line dataKey="y" stroke="var(--chart-mine)" strokeWidth={2} dot={false} isAnimationActive={false} activeDot={{ r: 4, stroke: "var(--paper)", strokeWidth: 2 }} />
               </LineChart>
             </ResponsiveContainer>
           </div>

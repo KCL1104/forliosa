@@ -24,7 +24,7 @@ from forliosa.db import session_factory
 from forliosa.ids import new_id
 from forliosa.marketdata.base import Candle, market_of_symbol
 from forliosa.marketdata.service import MarketData, get_market_data
-from forliosa.models import BrokerAccount, User
+from forliosa.models import BrokerAccount, User, WatchlistItem
 from forliosa.services import transactions as txn_svc
 from forliosa.services.ledger_io import DEFAULT_PREFERENCES, load_ledger_input, shares_held
 from forliosa.timeutil import today_taipei
@@ -32,6 +32,7 @@ from forliosa.timeutil import today_taipei
 log = logging.getLogger("forliosa.seed")
 
 DEMO_EMAIL = "demo@forliosa.local"
+DEMO_WATCHLIST = ("2382.TW", "2308.TW", "2881.TW")  # 廣達、台達電、富邦金
 DEMO_NAME = "示範使用者"
 # Candidates for a real 配股 (stock dividend) event in the last two years (financials often pay one).
 STOCK_DIVIDEND_CANDIDATES = ("2884.TW", "5880.TW", "2892.TW", "2801.TW", "2887.TW", "2890.TW")
@@ -204,6 +205,13 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
     s.trade(user, us, "sell", "NVDA", 100, 10)
     for sym in ("AAPL", "VOO"):
         s.dividends(user, us, sym, since=today - timedelta(days=365))
+
+    # -- watchlist ---------------------------------------------------------------------------------
+    for sym in DEMO_WATCHLIST:
+        resolved = md.resolve(sym)
+        if resolved:
+            db.add(WatchlistItem(id=new_id("wl"), user_id=user.id, symbol=resolved))
+    db.commit()
 
     real = sorted({sym for sym in s.prices._candles if sym not in s.prices.demo_symbols})
     return {

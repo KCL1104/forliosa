@@ -23,7 +23,7 @@ export function ErrorState({
         : error.message
       : "可能是網路不穩或伺服器暫時沒有回應。"
   return (
-    <div role="alert" className={cn("flex flex-col items-start gap-3 rounded-xl border border-dashed p-5", className)}>
+    <div role="alert" className={cn("flex flex-col items-start gap-3 rounded-sm border border-dashed border-ctl p-5", className)}>
       <div>
         <p className="font-medium">{title}</p>
         <p className="text-md text-muted-foreground">{message}</p>
@@ -50,7 +50,7 @@ export function SkeletonLines({ rows = 3, className }: { rows?: number; classNam
 }
 
 export function ChartSkeleton({ height = 240, className }: { height?: number; className?: string }) {
-  return <Skeleton className={cn("w-full rounded-lg", className)} style={{ height }} aria-label="圖表載入中" />
+  return <Skeleton className={cn("w-full rounded-sm", className)} style={{ height }} aria-label="圖表載入中" />
 }
 
 /** 空狀態：說明這裡會出現什麼，並給一個下一步 */
@@ -66,7 +66,7 @@ export function EmptyState({
   className?: string
 }) {
   return (
-    <div className={cn("flex flex-col items-start gap-3 rounded-xl border border-dashed p-6", className)}>
+    <div className={cn("flex flex-col items-start gap-3 rounded-sm border border-dashed border-ctl p-6", className)}>
       <div className="flex flex-col gap-1">
         <p className="font-medium">{title}</p>
         {description && <p className="max-w-prose text-md text-muted-foreground">{description}</p>}

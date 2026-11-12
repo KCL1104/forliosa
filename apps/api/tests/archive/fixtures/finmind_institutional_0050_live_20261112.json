@@ -1,0 +1,41 @@
+{
+ "msg": "success",
+ "status": 200,
+ "data": [
+  {
+   "date": "2026-11-11",
+   "stock_id": "0050",
+   "buy": 40386235,
+   "name": "Foreign_Investor",
+   "sell": 17933887
+  },
+  {
+   "date": "2026-11-11",
+   "stock_id": "0050",
+   "buy": 0,
+   "name": "Foreign_Dealer_Self",
+   "sell": 0
+  },
+  {
+   "date": "2026-11-11",
+   "stock_id": "0050",
+   "buy": 4440000,
+   "name": "Investment_Trust",
+   "sell": 0
+  },
+  {
+   "date": "2026-11-11",
+   "stock_id": "0050",
+   "buy": 3303000,
+   "name": "Dealer_self",
+   "sell": 2185992
+  },
+  {
+   "date": "2026-11-11",
+   "stock_id": "0050",
+   "buy": 14248251,
+   "name": "Dealer_Hedging",
+   "sell": 4167451
+  }
+ ]
+}

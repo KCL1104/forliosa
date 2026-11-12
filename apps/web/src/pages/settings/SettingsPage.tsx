@@ -7,9 +7,8 @@ import type { Account } from "@/api/types"
 import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { BENCHMARK_OPTIONS } from "@/lib/labels"
-import { Chop, DemoChop, SoonChop } from "@/components/chop"
 import { RangeChips } from "@/components/charts/chart-kit"
-import { PageHeader } from "@/components/section"
+import { DemoTag, PageHeader } from "@/components/section"
 import { SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -25,7 +24,7 @@ export function SettingsPage() {
   const p = usePrefs()
   const setPref = usePrefSetter()
   return (
-    <div className="flex max-w-3xl flex-col gap-8">
+    <div className="mx-auto flex w-full max-w-[880px] flex-col gap-10 px-5 pt-2 pb-10 md:px-8 lg:pt-10">
       <PageHeader title="設定" description="顯示設定會立即套用，並同步到你的帳號。" />
 
       <Group title="顯示">
@@ -106,16 +105,16 @@ export function SettingsPage() {
       <Accounts />
 
       <Group title="之後會有的設定">
-        <Row label="AI 額度與用量" description="每日對話次數、每月深度報告次數。"><SoonChop milestone="M4" /></Row>
-        <Row label="通知" description="到價、漲跌幅、除權息提醒；Telegram 與 Discord。"><SoonChop milestone="M4" /></Row>
-        <Row label="資料匯出與刪除帳號" description="依個資法提供 CSV 匯出與刪除帳號。"><SoonChop milestone="M5" /></Row>
+        <Row label="AI 額度與用量" description="每日對話次數、每月深度報告次數。"><span className="text-sm text-ink-2">M4 開放</span></Row>
+        <Row label="通知" description="到價、漲跌幅、除權息提醒；Telegram 與 Discord。"><span className="text-sm text-ink-2">M4 開放</span></Row>
+        <Row label="資料匯出與刪除帳號" description="依個資法提供 CSV 匯出與刪除帳號。"><span className="text-sm text-ink-2">M5 開放</span></Row>
       </Group>
 
       <Group title="關於資料">
-        <div className="flex flex-col gap-2 px-4 py-4 text-md text-muted-foreground sm:px-5">
+        <div className="flex flex-col gap-2 px-4 py-4 text-md text-ink-2 sm:px-5">
           {api.kind === "mock" && (
             <p className="flex flex-wrap items-center gap-2">
-              <DemoChop /> 目前沒有連到後端，所有數字都是示範資料。設定 <code className="rounded bg-muted px-1 text-sm">VITE_API_BASE_URL</code> 後改用真實資料。
+              <DemoTag /> 目前沒有連到後端，所有數字都是示範資料。設定 <code className="rounded bg-hov px-1 text-sm">VITE_API_BASE_URL</code> 後改用真實資料。
             </p>
           )}
           <p>行情與公司資料來自臺灣證券交易所、櫃買中心 OpenAPI 與 shioaji-data（政府資料開放授權條款第 1 版）。盤中報價為延遲資料，僅供參考。</p>
@@ -130,18 +129,18 @@ function Group({ title, children }: { title: string; children: React.ReactNode }
   const id = `set-${title}`
   return (
     <section aria-labelledby={id} className="flex flex-col gap-2">
-      <h2 id={id} className="text-lg font-semibold">{title}</h2>
-      <div className="flex flex-col divide-y divide-hairline rounded-xl border bg-card">{children}</div>
+      <h2 id={id} className="border-b border-rule pb-2 text-lg font-bold">{title}</h2>
+      <div className="-mt-2 flex flex-col divide-y divide-rule border-b border-rule">{children}</div>
     </section>
   )
 }
 
 function Row({ label, description, htmlFor, children }: { label: string; description?: React.ReactNode; htmlFor?: string; children: React.ReactNode }) {
   return (
-    <div className="flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6 sm:px-5">
+    <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <div className="min-w-0">
         {htmlFor ? <label htmlFor={htmlFor} className="font-medium">{label}</label> : <p className="font-medium">{label}</p>}
-        {description && <div className="mt-0.5 text-md text-muted-foreground">{description}</div>}
+        {description && <div className="mt-0.5 text-md text-ink-2">{description}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -156,11 +155,11 @@ function Accounts() {
   const accounts = useAccounts()
   const [editing, setEditing] = useState<Account | null>(null)
   return (
-    <section aria-labelledby="set-accounts" className="flex flex-col gap-2">
+    <section id="accounts" aria-labelledby="set-accounts" className="flex scroll-mt-20 flex-col gap-2">
       <div className="flex flex-wrap items-end justify-between gap-2">
         <div>
-          <h2 id="set-accounts" className="text-lg font-semibold">券商帳戶</h2>
-          <p className="text-md text-muted-foreground">手續費折扣與最低手續費用來自動計算每筆交易的費用。</p>
+          <h2 id="set-accounts" className="text-lg font-bold">券商帳戶</h2>
+          <p className="text-md text-ink-2">手續費折扣與最低手續費用來自動計算每筆交易的費用。</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setEditing(NEW_ACCOUNT)}>
           <PlusIcon />
@@ -170,18 +169,18 @@ function Accounts() {
       {!accounts.data ? (
         <SkeletonLines rows={3} />
       ) : accounts.data.length === 0 ? (
-        <p className="rounded-xl border border-dashed p-5 text-md text-muted-foreground">還沒有帳戶。先新增一個，例如「永豐－一般」，記交易時才會自動算手續費。</p>
+        <p className="rounded-sm border border-dashed p-5 text-md text-ink-2">還沒有帳戶。先新增一個，例如「永豐－一般」，記交易時才會自動算手續費。</p>
       ) : (
-        <ul className="flex flex-col divide-y divide-hairline rounded-xl border bg-card">
+        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
           {accounts.data.map((a) => (
             <li key={a.id} className="flex items-start gap-4 px-4 py-4 sm:px-5">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{a.name}</span>
-                  <Chop tone="muted">{a.currency === "USD" ? "美元" : "新台幣"}</Chop>
-                  <Chop tone="muted">{a.tracking_mode === "transactions" ? "逐筆交易" : "只記持股"}</Chop>
+                  <span className="demo-tag text-ink-2">{a.currency === "USD" ? "美元" : "新台幣"}</span>
+                  <span className="demo-tag text-ink-2">{a.tracking_mode === "transactions" ? "逐筆交易" : "只記持股"}</span>
                 </div>
-                <dl className="num mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-sm text-muted-foreground">
+                <dl className="num mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-sm text-ink-2">
                   <div className="flex gap-1"><dt>券商</dt><dd className="text-foreground">{a.broker}</dd></div>
                   <div className="flex gap-1"><dt>手續費</dt><dd className="text-foreground">{(a.fee_rate * 100).toFixed(4).replace(/0+$/, "")}% × {discountText(a.fee_discount)}</dd></div>
                   <div className="flex gap-1"><dt>最低</dt><dd className="text-foreground">{formatMoney(a.min_fee, { currency: a.currency, decimals: 0 })}{a.currency === "TWD" && `（零股 ${formatMoney(a.min_fee_odd_lot, { decimals: 0 })}）`}</dd></div>
@@ -256,7 +255,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-lg font-semibold">{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
+          <DialogTitle className="text-lg font-bold">{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
           <DialogDescription>折扣用「幾折」輸入，例如 2.8 折就填 2.8；不知道的話先填 6，之後可以改。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">

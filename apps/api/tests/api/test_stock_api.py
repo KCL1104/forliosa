@@ -1,0 +1,369 @@
+"""Stock page, watchlist and upcoming endpoints (temp SQLite, demo prices, archive from live fixtures)."""
+
+from __future__ import annotations
+
+import copy
+from datetime import date, datetime, timedelta
+from decimal import Decimal as D
+
+import pytest
+from sqlalchemy.orm import Session
+
+from forliosa.archive import Archiver
+from forliosa.marketdata.base import BaseProvider, Candle, QuoteData
+from forliosa.marketdata.demo import DemoProvider
+from forliosa.marketdata.service import MarketData, set_market_data
+from forliosa.models import IntradayPoint, MarketEvent
+from forliosa.services import stock as stock_svc
+from forliosa.timeutil import TAIPEI, last_tw_trading_day, today_taipei
+from forliosa.worker import store_intraday_points
+from tests.archive.fakes import NOW, FakeFetcher, load
+
+API = "/api/v1"
+TODAY = date(2026, 11, 12)
+
+
+def make_account(client):
+    r = client.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD", "fee_discount": 0.28})
+    assert r.status_code == 201, r.text
+    return r.json()["id"]
+
+
+def add_txn(client, **body):
+    r = client.post(f"{API}/transactions", json=body)
+    assert r.status_code == 201, r.text
+    return r.json()
+
+
+def day(days_ago: int) -> str:
+    return last_tw_trading_day(today_taipei() - timedelta(days=days_ago)).isoformat()
+
+
+@pytest.fixture()
+def archived(engine, market):
+    with Session(engine) as db:
+        Archiver(db, FakeFetcher(), "personal", now_fn=lambda: NOW).run()
+    return engine
+
+
+@pytest.fixture()
+def frozen_today(monkeypatch):
+    """Archive fixtures are dated 2026-11-06…12; pin the stock service's "today" to 2026-11-12."""
+    monkeypatch.setattr(stock_svc, "today_taipei", lambda: TODAY)
+    return TODAY
+
+
+@pytest.fixture()
+def use_market(market):
+    def use(md: MarketData) -> MarketData:
+        set_market_data(md)
+        return md
+
+    yield use
+    set_market_data(market)
+
+
+# -- overview / position -------------------------------------------------------------------------------
+def test_overview_fields(client, market, archived):
+    with Session(archived) as db:
+        db.add(MarketEvent(key="t-disp", symbol="2330.TW", date=today_taipei() - timedelta(days=1),
+                           end_date=today_taipei() + timedelta(days=3), type="disposition",
+                           title="處置股票（第一次處置）", detail="", data={}, source="twse-openapi"))
+        db.commit()
+    r = client.get(f"{API}/instruments/2330/overview")
+    assert r.status_code == 200, r.text
+    o = r.json()
+    q = client.get(f"{API}/instruments/2330/quote").json()
+    assert o["reference_price"] == q["reference_price"] and o["limit_up"] == q["limit_up"]
+    assert o["low_52w"] <= o["high_52w"] and o["avg_volume_3m"] > 0 and o["eps_ttm"] > 0
+    assert o["status"]["disposition"] is True and "處置期間" in o["status"]["note"]
+    assert o["is_demo"] is True and any("示範" in s for s in o["sources"])
+    etf = client.get(f"{API}/instruments/0050/overview").json()
+    assert etf["eps_ttm"] is None and etf["dividend_yield"] is not None
+    assert client.get(f"{API}/instruments/ZZZZ/overview").status_code == 404
+
+
+def test_position_from_ledger(client, other_client):
+    acc = make_account(client)
+    add_txn(client, account_id=acc, symbol="2330.TW", type="buy", trade_date=day(200), quantity=2000, price=1000)
+    add_txn(client, account_id=acc, symbol="2330.TW", type="sell", trade_date=day(100), quantity=1000, price=1500)
+    add_txn(client, account_id=acc, symbol="2330.TW", type="cash_dividend", trade_date=day(50), price=5)
+    p = client.get(f"{API}/instruments/2330.TW/position").json()
+    assert p["quantity"] == 1000 and p["currency"] == "TWD"
+    # sold 1000 @ 1500: proceeds − fee − tax − cost of 1000 shares (incl. buy fee) > 0
+    assert p["realized_pnl"] > 400_000
+    assert p["dividends_received"] == 5000.0  # 1000 shares × 5, below the NT$20,000 NHI threshold
+    assert [m["type"] for m in p["markers"]] == ["buy", "sell", "dividend"]
+    assert p["markers"][0]["quantity"] == 2000 and p["markers"][0]["price"] == 1000
+    assert p["unrealized_pnl"] == pytest.approx(p["market_value"] - p["cost_basis"], abs=0.01)
+    assert "本系統帳本" in p["sources"]
+    # not held -> null; other users never see it
+    assert client.get(f"{API}/instruments/2317/position").json() is None
+    assert other_client.get(f"{API}/instruments/2330/position").json() is None
+
+
+# -- chips / financials / events / news --------------------------------------------------------------------
+def test_chips_from_archive(client, archived, frozen_today):
+    r = client.get(f"{API}/instruments/6488/chips?range=1M")
+    assert r.status_code == 200, r.text
+    c = r.json()
+    inst = c["institutional"][-1]
+    assert inst == {"t": "2026-11-11", "foreign": 1265.318, "trust": -405.182, "dealer": 442.393, "total": 1302.529}
+    assert c["margin"][-1] == {"t": "2026-11-11", "margin_balance": 9653, "short_balance": 195}
+    assert c["foreign_holding_pct"][-1] == {"t": "2026-11-11", "pct": 0.2949}
+    assert c["major_holders"]["as_of"] == "2026-11-06"
+    levels = c["major_holders"]["buckets"]
+    assert [b["level"] for b in levels] == list(range(1, 16)) and levels[-1]["label"] == "1,000 張以上"
+    assert any("櫃檯買賣中心" in s for s in c["sources"]) and any("集中保管" in s for s in c["sources"])
+    twse = client.get(f"{API}/instruments/2330/chips?range=1M").json()
+    assert twse["institutional"][-1]["total"] == 8572.49  # TWSE website T86 (personal policy)
+    assert any(s.endswith("（非商用）") for s in twse["sources"])
+    assert client.get(f"{API}/instruments/2330/chips?range=2W").status_code == 422
+    assert client.get(f"{API}/instruments/AAPL/chips").json()["major_holders"] is None
+
+
+class Statements(BaseProvider):
+    """Real shioaji-data statements for 6488, optionally cut before 2026Q3."""
+
+    name = "shioaji-data"
+
+    def __init__(self, drop_last: bool = False):
+        st = copy.deepcopy(load("shioaji_financials_6488_live_20261112.json")["statements"])
+        if drop_last:
+            st["periods"] = st["periods"][:-1]
+            for sec in ("income_quarter", "income_ytd", "balance", "cash_flow_quarter"):
+                st[sec] = {k: v[:-1] for k, v in st[sec].items()}
+        self.st = st
+
+    def statements(self, symbol):
+        return self.st if symbol == "6488.TWO" else None
+
+
+def test_financials_quarterly_and_annual(client, use_market):
+    use_market(MarketData([Statements(), DemoProvider()]))
+    f = client.get(f"{API}/instruments/6488/financials?period=quarterly").json()
+    assert f["periods"][-1] == "2026Q3" and len(f["periods"]) == 7
+    assert f["income"]["revenue"][-1] == 14870753 and f["income"]["eps"][-1] == 3.13
+    assert all(len(v) == len(f["periods"]) for g in ("income", "balance", "cashflow", "margins") for v in f[g].values())
+    ops, inv = f["cashflow"]["operating"][-1], f["cashflow"]["investing"][-1]
+    assert f["cashflow"]["free_cash_flow"][-1] == pytest.approx(ops + inv)
+    assert 0 < f["margins"]["gross"][-1] < 1
+    a = client.get(f"{API}/instruments/6488/financials?period=annual").json()
+    assert a["periods"] == ["2025"]  # 2026 has only three quarters
+    assert a["income"]["revenue"] == [15594522 + 16007909 + 14493434 + 14502073]
+    assert client.get(f"{API}/instruments/0050/financials").json()["periods"] == []
+    assert client.get(f"{API}/instruments/6488/financials?period=monthly").status_code == 422
+
+
+def test_financials_latest_quarter_from_archive_is_derived_from_ytd(client, archived, use_market):
+    use_market(MarketData([Statements(drop_last=True), DemoProvider()]))
+    f = client.get(f"{API}/instruments/6488/financials").json()
+    assert f["periods"][-1] == "2026Q3"
+    # OpenAPI 2026Q3 YTD 44,069,861 − shioaji 2026Q2 YTD 29,199,108 = 14,870,753
+    assert f["income"]["revenue"][-1] == 14870753
+    assert f["income"]["eps"][-1] == pytest.approx(15.0 - (3.97 + 7.9))
+    assert f["cashflow"]["operating"][-1] is None  # the OpenAPI has no cash-flow statement
+    assert any("櫃檯買賣中心" in s for s in f["sources"])
+
+
+def test_events(client, archived, frozen_today):
+    acc = make_account(client)
+    add_txn(client, account_id=acc, symbol="6488.TWO", type="buy", trade_date=day(30), quantity=1000, price=600)
+    ev = client.get(f"{API}/instruments/6488/events").json()
+    types = {e["type"] for e in ev}
+    assert {"ex_dividend", "shareholder_meeting", "earnings", "revenue_release"} <= types
+    meeting = next(e for e in ev if e["type"] == "shareholder_meeting" and e["date"] == "2026-12-21")
+    assert meeting["title"] == "股東臨時會"
+    dates = [e["date"] for e in ev]
+    assert dates == sorted(dates, reverse=True)
+    mine = client.get(f"{API}/instruments/6488/events?mine=true").json()
+    assert mine and all(e["mine"] for e in mine)
+    quanta = client.get(f"{API}/instruments/2382/events").json()
+    assert any(e["type"] == "material_info" and "財務報告" in e["title"] for e in quanta)
+
+
+def test_news_degrades_without_finmind(client):
+    assert client.get(f"{API}/instruments/2330/news").json() == []  # no FinMind provider configured
+
+
+def test_news_from_finmind_is_labelled_non_commercial(client, use_market):
+    class FakeFinMind(BaseProvider):
+        name = "finmind"
+
+        def news(self, symbol):
+            return [{"published_at": "2026-11-11 08:30:00", "title": "台積電法說會", "source": "鉅亨網",
+                     "url": "https://news.cnyes.com/news/id/1"}]
+
+    use_market(MarketData([FakeFinMind(), DemoProvider()]))
+    n = client.get(f"{API}/instruments/2330/news").json()
+    assert n == [{"published_at": "2026-11-11T08:30:00+08:00", "title": "台積電法說會", "source": "鉅亨網",
+                  "url": "https://news.cnyes.com/news/id/1", "sources": ["FinMind（非商用）"]}]
+    use_market(MarketData([FakeFinMind(), DemoProvider()], policy="commercial"))
+    assert client.get(f"{API}/instruments/2330/news").json() == []
+
+
+def test_commercial_policy_filters_archive_rows(client, archived, frozen_today, use_market):
+    use_market(MarketData([DemoProvider()], policy="commercial"))
+    twse = client.get(f"{API}/instruments/2330/chips?range=1M").json()
+    assert twse["institutional"] == [] and twse["foreign_holding_pct"] == []  # TWSE website rows are hidden
+    assert twse["margin"][-1]["margin_balance"] == 32523  # MI_MARGN is OpenAPI: allowed
+    assert not any(s.endswith("（非商用）") for s in twse["sources"])
+    assert twse["notes"]
+    tpex = client.get(f"{API}/instruments/6488/chips?range=1M").json()
+    assert tpex["institutional"]  # TPEx OpenAPI publishes them
+    intraday = client.get(f"{API}/instruments/2330/intraday").json()
+    assert intraday["points"] == [] and "商用" in intraday["notes"][0]
+
+
+# -- intraday ---------------------------------------------------------------------------------------------
+def test_intraday_points_only_for_tracked_symbols(client, engine, market):
+    today = today_taipei()
+    assert client.get(f"{API}/instruments/2330/intraday").json()["points"] == []  # not tracked
+    client.post(f"{API}/watchlist", json={"symbol": "2330"})
+    md = MarketData([DemoProvider()])
+    with Session(engine) as db:
+        for minute, price, vol in ((1, "2400", 1_000_000), (2, "2405", 1_600_000), (3, "2410", 2_000_000)):
+            at = datetime.combine(today, datetime.min.time(), TAIPEI).replace(hour=9, minute=minute)
+            q = QuoteData("2330.TW", price=D(price), volume=vol, as_of=at, trade_date=today, is_realtime=True,
+                          source="twse-mis")
+            assert store_intraday_points(db, md, {"2330.TW": q}, now=at) == 1
+        # demo / non-realtime quotes are never stored; commercial stores nothing
+        demo = QuoteData("2330.TW", price=D(1), trade_date=today, is_realtime=True, is_demo=True)
+        assert store_intraday_points(db, md, {"2330.TW": demo}) == 0
+        assert store_intraday_points(db, MarketData([DemoProvider()], policy="commercial"),
+                                     {"2330.TW": q}, now=at) == 0
+        assert db.query(IntradayPoint).count() == 3
+    r = client.get(f"{API}/instruments/2330/intraday").json()
+    assert r["date"] == today.isoformat()
+    assert r["points"] == [{"t": "09:01", "price": 2400.0, "volume": 1000000},
+                           {"t": "09:02", "price": 2405.0, "volume": 600000},
+                           {"t": "09:03", "price": 2410.0, "volume": 400000}]
+    assert any("MIS" in s and s.endswith("（非商用）") for s in r["sources"])
+    spark = next(w for w in client.get(f"{API}/watchlist").json() if w["symbol"] == "2330.TW")
+    assert spark["sparkline_interval"] in ("1m", "1d")
+
+
+# -- why ----------------------------------------------------------------------------------------------------
+class WhyQuotes(BaseProvider):
+    name = "fake"
+
+    def __init__(self, q: QuoteData, volume: int = 1_000_000):
+        self.q, self.volume = q, volume
+
+    def quotes(self, symbols):
+        return {self.q.symbol: self.q}
+
+    def history(self, symbol, start, end):
+        d, out = end - timedelta(days=40), []
+        while d < self.q.trade_date:
+            if d.weekday() < 5:
+                out.append(Candle(d, D(100), D(101), D(99), D(100), self.volume))
+            d += timedelta(days=1)
+        return out
+
+
+def why_for(engine, q: QuoteData, today: date = TODAY) -> list[dict]:
+    md = MarketData([WhyQuotes(q), DemoProvider()])
+    info = md.instrument(q.symbol)
+    fresh = md.quote(q.symbol)
+    with Session(engine) as db:
+        return stock_svc.why_reasons(db, md, info, fresh, today)
+
+
+def quote(price: str, prev: str = "100", volume: int = 1_000_000, **kw) -> QuoteData:
+    return QuoteData("2330.TW", price=D(price), prev_close=D(prev), open=D(prev), high=D(price), low=D(prev),
+                     volume=volume, trade_date=TODAY, source="fake", **kw)
+
+
+def test_why_rules(engine, market):
+    assert why_for(engine, quote("101")) == []  # +1 %: nothing unusual
+    assert why_for(engine, quote("103.5")) == [{"kind": "price_move", "text": "今天上漲 3.5%"}]
+    assert why_for(engine, quote("96.5"))[0]["text"] == "今天下跌 3.5%"
+    assert [r["kind"] for r in why_for(engine, quote("110"))] == ["limit_up"]  # 100 × 1.1 = 110 (tick 0.5)
+    assert [r["kind"] for r in why_for(engine, quote("90"))] == ["limit_down"]
+    vol = why_for(engine, quote("100.5", volume=2_500_000))
+    assert vol == [{"kind": "volume", "text": "成交量是 20 日均量的 2.5 倍"}]
+    assert why_for(engine, quote("100.5", volume=1_900_000)) == []
+    later = why_for(engine, quote("104"), today=TODAY + timedelta(days=3))
+    assert later[0]["text"] == "11/12 上漲 4.0%"
+
+
+def test_why_ex_dividend_day_is_not_a_drop(engine, market):
+    class ExDay(WhyQuotes):
+        def ex_rights_on(self, symbols, d):
+            return {"2330.TW": (D(5), D(0))}
+
+    md = MarketData([ExDay(quote("95.5", prev="100")), DemoProvider()])
+    q = md.quote("2330.TW")
+    assert q.reference_price == D(95)  # 100 − 5
+    with Session(engine) as db:
+        reasons = stock_svc.why_reasons(db, md, md.instrument("2330.TW"), q, TODAY)
+    # −4.5 % vs the previous close, but +0.5 % vs the reference price: only the ex-dividend reason
+    assert [r["kind"] for r in reasons] == ["ex_dividend"]
+    assert "參考價 95" in reasons[0]["text"]
+
+
+def test_why_status_and_announcements(engine, market):
+    with Session(engine) as db:
+        db.add_all([
+            MarketEvent(key="a", symbol="2330.TW", date=TODAY, type="attention", title="列為注意股票", detail="",
+                        data={}, source="twse-openapi"),
+            MarketEvent(key="m", symbol="2330.TW", date=TODAY, type="material_info",
+                        title="公告本公司董事會通過115年第三季合併財務報告", detail="", data={}, source="twse-openapi"),
+        ])
+        db.commit()
+    kinds = [r["kind"] for r in why_for(engine, quote("100.5"))]
+    assert kinds == ["attention", "earnings"]
+
+
+def test_why_endpoint(client):
+    r = client.get(f"{API}/instruments/2330/why")
+    assert r.status_code == 200
+    w = r.json()
+    assert set(w) == {"symbol", "show", "headline", "reasons", "as_of", "sources"}
+    assert w["show"] == bool(w["reasons"]) and (w["headline"] is None) == (not w["reasons"])
+
+
+# -- watchlist & upcoming ---------------------------------------------------------------------------------
+def test_watchlist_crud_and_isolation(client, other_client):
+    assert client.get(f"{API}/watchlist").json() == []
+    r = client.post(f"{API}/watchlist", json={"symbol": "2382"})
+    assert r.status_code == 201, r.text
+    item = r.json()
+    assert item["symbol"] == "2382.TW" and item["quote"]["symbol"] == "2382.TW"
+    assert item["sparkline"] and item["sparkline_interval"] == "1d"  # no intraday points: daily closes
+    assert client.post(f"{API}/watchlist", json={"symbol": "2382.TW"}).status_code == 200  # idempotent
+    client.post(f"{API}/watchlist", json={"symbol": "2308"})
+    assert [w["symbol"] for w in client.get(f"{API}/watchlist").json()] == ["2382.TW", "2308.TW"]
+    assert other_client.get(f"{API}/watchlist").json() == []
+    assert other_client.delete(f"{API}/watchlist/2382").status_code == 404
+    assert client.delete(f"{API}/watchlist/2382").status_code == 204
+    assert client.delete(f"{API}/watchlist/2382").status_code == 404
+    r = client.post(f"{API}/watchlist", json={"symbol": "ZZZZ"})
+    assert r.status_code == 422 and r.json()["error"]["code"] == "unknown_symbol"
+
+
+def test_portfolio_upcoming(client, market):
+    acc = make_account(client)
+    for sym in ("00878.TW", "0056.TW", "00919.TW"):
+        add_txn(client, account_id=acc, symbol=sym, type="buy", trade_date=day(30), quantity=1000, price=30)
+    items = client.get(f"{API}/portfolio/upcoming?days=90").json()
+    assert items, "quarterly ETFs always have an ex-date within 90 days"
+    today = today_taipei()
+    for it in items:
+        assert today <= date.fromisoformat(it["date"]) <= today + timedelta(days=90)
+        assert it["type"] in ("ex_dividend", "dividend_payment")
+        ev = next(e for e in market.dividends(it["symbol"]).value
+                  if it["date"] in (str(e.ex_dividend_date), str(e.payment_date)))
+        assert it["amount_estimate"] == pytest.approx(float(1000 * ev.cash_dividend), abs=0.01)
+    assert [i["date"] for i in items] == sorted(i["date"] for i in items)
+    week = client.get(f"{API}/portfolio/upcoming").json()
+    assert all(date.fromisoformat(i["date"]) <= today + timedelta(days=7) for i in week)
+    assert client.get(f"{API}/portfolio/upcoming?days=0").status_code == 422
+
+
+def test_quote_has_reference_and_sources(client):
+    q = client.get(f"{API}/instruments/2330/quote").json()
+    assert {"reference_price", "limit_up", "limit_down", "sources"} <= set(q)
+    assert q["change"] == pytest.approx(q["price"] - q["reference_price"], abs=1e-4)
+    assert client.get(f"{API}/instruments/2330/history?range=1M").json()["sources"] == ["示範資料（模擬）"]

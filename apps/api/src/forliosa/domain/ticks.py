@@ -10,8 +10,10 @@ limit-down price *up* to the tick of the price band the limit falls in, so the l
 30.15; and TPEx 6488 ref 635 → 698 / 572 (``tpex_mainboard_daily_close_quotes`` NextLimitUp/Down).
 
 The ex-rights / ex-dividend reference price is (previous close − cash dividend) ÷ (1 + stock dividend
-shares per share), rounded half-up to the tick. Official values (TWT84U, TPEx NextReferencePrice) win
-whenever the archive has them; this formula is the fallback.
+shares per share), rounded half-up to the tick; the limits are computed from the *unrounded* price.
+Checked against TPEx 3680 going ex on 2026-11-12: close 435.50, cash 9.9147456 → raw 425.585… →
+reference 425.50, limits 468.00 / 383.50 (from 425.50 they would be 468.00 / 383.00). Official values
+(TWT84U, TPEx NextReferencePrice) win whenever the archive has them; this formula is the fallback.
 """
 
 from __future__ import annotations
@@ -58,8 +60,18 @@ def price_limits(reference: Decimal, is_fund: bool = False, pct: Decimal = LIMIT
             round_to_tick(down, is_fund, ROUND_CEILING).normalize())
 
 
+def ex_rights_prices(prev_close: Decimal, cash: Decimal = Decimal(0), stock_per_share: Decimal = Decimal(0),
+                     is_fund: bool = False) -> tuple[Decimal, Decimal, Decimal]:
+    """(reference, limit_up, limit_down) on an ex-rights / ex-dividend day.
+
+    除權息參考價 = (昨收 − 現金股利) ÷ (1 + 無償配股率): the reference is that price rounded half-up to the
+    tick, the limits are ±10 % of the unrounded price rounded inward to the tick.
+    """
+    raw = (prev_close - cash) / (1 + stock_per_share)
+    up, down = price_limits(raw, is_fund)
+    return round_to_tick(raw, is_fund, ROUND_HALF_UP).normalize(), up, down
+
+
 def ex_rights_reference(prev_close: Decimal, cash: Decimal = Decimal(0), stock_per_share: Decimal = Decimal(0),
                         is_fund: bool = False) -> Decimal:
-    """除權息參考價 = (昨收 − 現金股利) ÷ (1 + 無償配股率), rounded half-up to the tick."""
-    raw = (prev_close - cash) / (1 + stock_per_share)
-    return round_to_tick(raw, is_fund, ROUND_HALF_UP).normalize()
+    return ex_rights_prices(prev_close, cash, stock_per_share, is_fund)[0]

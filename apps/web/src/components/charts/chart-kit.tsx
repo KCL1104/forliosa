@@ -12,7 +12,7 @@ export interface TooltipRow {
 /** 圖表提示框：文字用文字色，系列色只出現在旁邊的小記號 */
 export function ChartTooltipBox({ title, rows, className }: { title: React.ReactNode; rows: TooltipRow[]; className?: string }) {
   return (
-    <div className={cn("min-w-40 rounded-lg border bg-popover px-3 py-2 text-sm text-popover-foreground shadow-md", className)}>
+    <div className={cn("min-w-40 rounded-sm border border-rule bg-raised px-3 py-2 text-sm text-ink shadow-lift", className)}>
       <div className="mb-1 text-xs text-muted-foreground">{title}</div>
       <div className="flex flex-col gap-1">
         {rows.map((r) => (

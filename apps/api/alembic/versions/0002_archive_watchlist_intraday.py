@@ -12,7 +12,6 @@ from alembic import op
 
 import forliosa.db
 
-
 revision: str = '0002'
 down_revision: str | None = '0001'
 branch_labels: str | Sequence[str] | None = None

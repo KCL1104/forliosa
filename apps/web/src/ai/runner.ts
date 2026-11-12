@@ -14,7 +14,7 @@ import type { Answer, Draft, DraftInstrument, Suggestion } from "./types"
 /** 常用動作（依頁面）：記一筆交易、匯入對帳單、股利入帳… */
 export type AiAction = "trade" | "import" | "dividend" | "alert" | "checkup" | "form"
 
-const DRAFT_SAYS = "我照你說的算好了稅費，簽名後才會入帳。"
+const DRAFT_SAYS = "我照你說的算好了稅費，\n簽名後才會入帳。"
 
 function describe(d: Pick<Draft, "input" | "instrument">): string {
   const { input, instrument } = d

@@ -20,7 +20,7 @@ from typing import Any, TypeVar
 
 from forliosa.config import Settings
 from forliosa.datapolicy import Policy, provider_allowed
-from forliosa.domain.ticks import ex_rights_reference, is_fund_code, price_limits
+from forliosa.domain.ticks import ex_rights_prices, is_fund_code, price_limits
 from forliosa.marketdata.base import (
     BaseProvider,
     Candle,
@@ -308,7 +308,7 @@ class MarketData:
                     collected[c.t] = c
                     added = True
             if added:
-                names.append(p.name)
+                names.extend(_row_sources(p, "history", symbol))
                 is_demo |= p.is_demo
             if not getattr(p, "partial_history", False):
                 break
@@ -317,7 +317,7 @@ class MarketData:
         candles = [collected[d] for d in sorted(collected)]
         if not is_demo:
             candles = self._with_today(symbol, candles, end)
-        return HistoryResult(symbol, candles, is_demo, "+".join(names))
+        return HistoryResult(symbol, candles, is_demo, "+".join(dict.fromkeys(names)))
 
     def _with_today(self, symbol: str, candles: list[Candle], end: date) -> list[Candle]:
         """Daily sources publish after the close; append the latest day from a complete real quote."""
@@ -367,7 +367,7 @@ class MarketData:
             for d, v in value.items():
                 merged.setdefault(d, v)
             if len(merged) > before:
-                names.append(p.name)
+                names.extend(_row_sources(p, "valuation_ratios", symbol))
             if not getattr(p, "partial_history", False):
                 break
         return (merged or None), names
@@ -386,17 +386,18 @@ class MarketData:
             value = self._call(p, lambda p=p: p.dividends(symbol))
             if not value:
                 continue
-            names.append(p.name)
+            names.extend(_row_sources(p, "dividends", symbol))
             for e in value:
                 key = e.ex_dividend_date or (e.year, e.period)
                 cur = merged.get(key)
-                if cur is None:
-                    merged[key] = e
+                if cur is None or (not cur.cash_dividend and not cur.stock_dividend
+                                   and (e.cash_dividend or e.stock_dividend)):
+                    merged[key] = e if cur is None or e.payment_date else replace(e, payment_date=cur.payment_date)
                 elif cur.payment_date is None and e.payment_date is not None:
                     merged[key] = replace(cur, payment_date=e.payment_date, period=e.period, year=e.year)
         if merged:
             events = sorted(merged.values(), key=lambda e: e.ex_dividend_date or date.min, reverse=True)
-            return Answer(events, False, "+".join(names))
+            return Answer(events, False, "+".join(dict.fromkeys(names)))
         if self.demo is not None and self.demo in self._available():
             value = self._call(self.demo, lambda: self.demo.dividends(symbol))
             if value:
@@ -448,6 +449,19 @@ class MarketData:
         sources = [real.source] + ([demo.source] if used_demo and demo else [])
         return Answer(quarters, used_demo, "+".join(sources))
 
+    def statements(self, symbol: str) -> Answer[dict[str, Any]] | None:
+        for p in self._available():
+            fn = getattr(p, "statements", None)
+            if fn is None or p.is_demo:
+                continue
+            value = self._call(p, lambda fn=fn: fn(symbol))
+            if value:
+                return Answer(value, False, p.name)
+        return None
+
+    def provider(self, name: str) -> BaseProvider | None:
+        return next((p for p in self._available() if p.name == name), None)
+
     def fx_series(self, pair: str, start: date, end: date) -> tuple[dict[date, Decimal], bool]:
         ans = self._first("fx_history", pair, start, end)
         if ans is None:
@@ -473,6 +487,12 @@ def _merge_quotes(base: QuoteData, other: QuoteData) -> QuoteData:
     return base.merged_with(other)
 
 
+def _row_sources(provider: BaseProvider, method: str, symbol: str) -> list[str]:
+    """Source keys behind a provider's answer: the archive reports its rows' sources, others their name."""
+    fn = getattr(provider, "sources_for", None)
+    return (fn(method, symbol) or [provider.name]) if fn is not None else [provider.name]
+
+
 def _apply_reference(q: QuoteData, official: tuple | None, ex: tuple[Decimal, Decimal] | None) -> QuoteData:
     is_fund = is_fund_code(code_of_symbol(q.symbol))
     if official is not None:
@@ -481,10 +501,11 @@ def _apply_reference(q: QuoteData, official: tuple | None, ex: tuple[Decimal, De
     if q.prev_close is None:
         return q
     base = q.prev_close
+    computed = price_limits(base, is_fund)
     if ex is not None:
         cash, ratio = ex
-        base = ex_rights_reference(q.prev_close, cash, ratio, is_fund)
-    computed = price_limits(base, is_fund)
+        base, up, down = ex_rights_prices(q.prev_close, cash, ratio, is_fund)
+        computed = (up, down)
     published = (q.limit_up, q.limit_down)
     if published[0] is not None and published[1] is not None:
         if ex is not None and computed != published and price_limits(q.prev_close, is_fund) == published:
@@ -504,8 +525,8 @@ def build_providers(settings: Settings) -> list[BaseProvider]:
     fetcher = HttpFetcher(timeout=settings.http_timeout_seconds, retries=1)
     factories: dict[str, Callable[[], BaseProvider]] = {
         "shioaji_data": lambda: ShioajiDataProvider(settings.shioaji_data_base_url, settings.cache_dir, fetcher),
-        "twse_openapi": lambda: TwseOpenApiProvider(HttpFetcher(timeout=10, retries=0)),
-        "tpex_openapi": lambda: TpexOpenApiProvider(HttpFetcher(timeout=10, retries=0)),
+        "twse_openapi": lambda: TwseOpenApiProvider(HttpFetcher(timeout=15, retries=1, backoff=0.5)),
+        "tpex_openapi": lambda: TpexOpenApiProvider(HttpFetcher(timeout=15, retries=1, backoff=0.5)),
         "twse_mis": lambda: TwseMisProvider(),
         "finmind": lambda: FinMindProvider(settings.finmind_token, HttpFetcher(timeout=20, retries=0),
                                            cache_dir=settings.cache_dir),

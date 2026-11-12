@@ -11,7 +11,7 @@ import {
 } from "../types"
 import { computePreview } from "./fees"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
-import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, seedTransactions } from "./ledger"
+import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, valuationSeries } from "./market"
 import {
   buildChips,
@@ -203,9 +203,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getQuotes: (symbols) => wait(() => symbols.map((s) => quoteOf(spec(s)))),
     getHistory: (symbol, range) =>
       wait((): History => {
-        const s = spec(symbol)
+        // 指數（^TAIEXTR）：示範資料以 0050 的走勢代替
+        const s = symbol.startsWith("^") ? spec(mockBenchmark(symbol).proxy) : spec(symbol)
         const from = rangeFrom(range)
-        return { symbol: s.symbol, interval: "1d", candles: dailyCandles(s).filter((c) => c.t >= from), is_demo: true }
+        return { symbol: symbol.startsWith("^") ? symbol : s.symbol, interval: "1d", candles: dailyCandles(s).filter((c) => c.t >= from), is_demo: true }
       }),
     getValuation: (symbol, range = "5Y") =>
       wait(() => {

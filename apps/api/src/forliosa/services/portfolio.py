@@ -61,9 +61,10 @@ class HoldingRow:
     @property
     def day_change(self) -> Decimal:
         q = self.quote
-        if q is None or q.price is None or q.prev_close is None:
+        base = (q.reference_price if q.reference_price is not None else q.prev_close) if q else None
+        if q is None or q.price is None or base is None:
             return ZERO
-        return self.quantity * (q.price - q.prev_close) * self.fx
+        return self.quantity * (q.price - base) * self.fx
 
 
 @dataclass
@@ -434,3 +435,48 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "realized_by_year": [{"year": k, "amount": ser.money(v)} for k, v in sorted(by_year.items())],
         "is_demo": is_demo,
     }
+
+
+# -- upcoming (本週事項) ---------------------------------------------------------------------------
+UPCOMING_MAX_DAYS = 90
+
+
+def upcoming(state: PortfolioState, md: MarketData, days: int) -> list[dict[str, Any]]:
+    """Ex-dividend dates and dividend payments of current holdings in [today, today + days].
+
+    ``amount_estimate`` = shares held now × cash dividend per share (gross, TWD). For a payment whose
+    ex-date already passed, a recorded cash-dividend transaction's amount is used when there is one.
+    Recurring items (定期定額) need a recurring-plan model that does not exist yet: none are returned.
+    """
+    from forliosa.datapolicy import labels
+
+    if not 1 <= days <= UPCOMING_MAX_DAYS:
+        raise unprocessable(f"days 必須介於 1 與 {UPCOMING_MAX_DAYS} 之間")
+    today = today_taipei()
+    horizon = today + timedelta(days=days)
+    recorded: dict[tuple[str, date], Decimal] = defaultdict(Decimal)
+    for t in state.inp.effective_transactions():
+        if t.type == "cash_dividend" and t.symbol:
+            recorded[(t.symbol, t.trade_date)] += t.amount or ZERO
+    out = []
+    for r in state.rows:
+        ans = md.dividends(r.symbol)
+        name = r.info.name if r.info else r.symbol
+        sources = labels(["demo"] if ans.is_demo else ans.source.split("+"))
+        for ev in ans.value:
+            ex, pay = ev.ex_dividend_date, ev.payment_date
+            if ex and today <= ex <= horizon:
+                amount = r.quantity * ev.cash_dividend * r.fx if ev.cash_dividend else None
+                pending = "" if ev.cash_dividend or ev.stock_dividend else "（金額未公告）"
+                out.append({"date": ex, "type": "ex_dividend", "symbol": r.symbol,
+                            "title": f"{name} 除{'權' if ev.stock_dividend and not ev.cash_dividend else '息'}{pending}",
+                            "amount_estimate": ser.money(amount), "is_demo": ev.is_demo or ans.is_demo,
+                            "sources": sources})
+            if pay and today <= pay <= horizon and ev.cash_dividend > 0:
+                got = recorded.get((r.symbol, ex)) if ex else None
+                amount = got * r.fx if got else r.quantity * ev.cash_dividend * r.fx
+                out.append({"date": pay, "type": "dividend_payment", "symbol": r.symbol,
+                            "title": f"{name} 現金股利入帳", "amount_estimate": ser.money(amount),
+                            "is_demo": ev.is_demo or ans.is_demo, "sources": sources})
+    out.sort(key=lambda u: (u["date"], u["type"], u["symbol"]))
+    return out

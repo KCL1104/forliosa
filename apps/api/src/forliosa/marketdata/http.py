@@ -57,10 +57,13 @@ class RateLimiter:
             return slept
 
 
-# TWSE (and MIS, which shares the firewall) ≥ 0.5 s between requests; TPEx likewise.
+# TWSE (and MIS, which shares the firewall) ≥ 0.5 s between requests; TPEx and TDCC likewise. The TWSE
+# website (www.twse.com.tw, used only by the personal-policy archive) answers HTTP 307 when requests
+# come faster than about one every few seconds, so it gets 3 s. More specific hosts are listed first.
 DEFAULT_LIMITER = RateLimiter(
     default_interval=0.0,
-    per_host={"twse.com.tw": 0.5, "tpex.org.tw": 0.5, "finmindtrade.com": 0.25},
+    per_host={"www.twse.com.tw": 3.0, "twse.com.tw": 0.5, "tpex.org.tw": 0.5, "tdcc.com.tw": 0.5,
+              "finmindtrade.com": 0.25},
 )
 
 

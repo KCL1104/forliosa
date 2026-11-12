@@ -32,7 +32,7 @@ const FULL_WIDTH = /[！-～]/g
 export function normalize(input: string): string {
   return input
     .replace(FULL_WIDTH, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
-    .replace(/　/g, " ")
+    .replace(/\u3000/g, " ")
     .replace(/(\d),(?=\d{3}(?!\d))/g, "$1")
     .replace(/([一-鿿])(?=[0-9A-Za-z@$])/g, "$1 ")
     .replace(/([0-9A-Za-z])(?=[一-鿿])/g, "$1 ")

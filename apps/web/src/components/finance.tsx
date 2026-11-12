@@ -60,7 +60,8 @@ export function Pct({ value, className, glyph = true, decimals = 2 }: { value: n
   return (
     <span className={cn("num inline-flex items-baseline gap-0.5 whitespace-nowrap", toneClass(d), className)}>
       {glyph && d !== "flat" && <span aria-hidden className="text-[0.8em] leading-none">{directionGlyph(d)}</span>}
-      <span>{formatPercent(value, { decimals })}</span>
+      {/* 有 ▲▼ 時不再加正負號（台灣慣例：▲4.81%） */}
+      <span>{formatPercent(glyph && value !== null && value !== undefined ? Math.abs(value) : value, { decimals, signed: !glyph })}</span>
       {glyph && <span className="sr-only">{d === "up" ? "上漲" : d === "down" ? "下跌" : "持平"}</span>}
     </span>
   )

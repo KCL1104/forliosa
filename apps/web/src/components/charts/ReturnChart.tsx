@@ -40,8 +40,8 @@ export function ReturnChart({
         <ComposedChart data={rows} margin={{ top: 8, right: 4, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="mineFill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="var(--chart-1)" stopOpacity={0.16} />
-              <stop offset="100%" stopColor="var(--chart-1)" stopOpacity={0} />
+              <stop offset="0%" stopColor="var(--chart-mine)" stopOpacity={0.08} />
+              <stop offset="100%" stopColor="var(--chart-mine)" stopOpacity={0} />
             </linearGradient>
           </defs>
           <CartesianGrid vertical={false} stroke={GRID_STROKE} />
@@ -63,9 +63,9 @@ export function ReturnChart({
                 <ChartTooltipBox
                   title={formatDateShort(row.t)}
                   rows={[
-                    { label: "我的報酬", value: formatPercent(row.mine), color: "var(--chart-1)", shape: "line" },
+                    { label: "我的報酬", value: formatPercent(row.mine), color: "var(--chart-mine)", shape: "line" },
                     ...(showBenchmark && row.bench !== null
-                      ? [{ label: benchmarkName, value: formatPercent(row.bench), color: "var(--chart-2)", shape: "line" as const }]
+                      ? [{ label: benchmarkName, value: formatPercent(row.bench), color: "var(--chart-bench)", shape: "line" as const }]
                       : []),
                   ]}
                 />
@@ -75,21 +75,21 @@ export function ReturnChart({
           <Area
             type="monotone"
             dataKey="mine"
-            stroke="var(--chart-1)"
+            stroke="var(--chart-mine)"
             strokeWidth={2}
             fill="url(#mineFill)"
             isAnimationActive={false}
-            activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--card)" }}
+            activeDot={{ r: 4, strokeWidth: 2, stroke: "var(--paper)" }}
           />
           {showBenchmark && (
             <Line
               type="monotone"
               dataKey="bench"
-              stroke="var(--chart-2)"
+              stroke="var(--chart-bench)"
               strokeWidth={1.75}
               dot={false}
               isAnimationActive={false}
-              activeDot={{ r: 3.5, strokeWidth: 2, stroke: "var(--card)" }}
+              activeDot={{ r: 3.5, strokeWidth: 2, stroke: "var(--paper)" }}
             />
           )}
         </ComposedChart>

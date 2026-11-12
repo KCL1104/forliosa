@@ -6,7 +6,8 @@ import { appToday } from "@/api"
 import { useInstrumentSearch } from "@/api/queries"
 import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
-import { DISCLAIMER, MoreActions, useActions, useGreeting } from "./AiPanel"
+import { MoreActions } from "./AiPanel"
+import { DISCLAIMER, useActions, useGreeting } from "./panel-helpers"
 import { Composer } from "./Composer"
 import { useAiContext } from "./context"
 import { Conversation } from "./Conversation"
@@ -111,13 +112,13 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
               </ul>
             )}
             <h2 className="mt-11 text-[0.9375rem] font-bold text-ink-2">交給 AI</h2>
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-3 flex flex-wrap gap-x-2 gap-y-3">
               {actions.map((a) => (
-                <button key={a.key} type="button" onClick={() => runner.action(a.run, { code: a.code })} className="press h-11 rounded-full border border-ctl px-3.5 text-[0.9375rem] whitespace-nowrap active:bg-hov">
+                <button key={a.key} type="button" onClick={() => runner.action(a.run, { code: a.code })} className="press relative h-10 rounded-full border border-ctl px-3 text-md whitespace-nowrap before:absolute before:inset-x-0 before:-inset-y-0.5 active:bg-hov">
                   {a.label}
                 </button>
               ))}
-              <MoreActions runner={runner} code={ctx.route === "stock" ? ctx.stock.code : undefined} className="h-11 rounded-full px-3.5 [&_svg]:hidden" />
+              <MoreActions runner={runner} code={ctx.route === "stock" ? ctx.stock.code : undefined} className="relative h-10 rounded-full px-3 before:absolute before:inset-x-0 before:-inset-y-0.5 [&_svg]:hidden" />
             </div>
             <p className="mt-5 text-xs text-ink-2">{DISCLAIMER}</p>
           </div>

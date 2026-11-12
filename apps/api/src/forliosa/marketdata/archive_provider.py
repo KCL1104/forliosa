@@ -39,6 +39,15 @@ class ArchiveProvider(BaseProvider):
     def __init__(self, policy: Policy = "personal", session_fn: Callable[[], Session] = _default_session):
         self.policy = policy
         self.session_fn = session_fn
+        # (method, symbol) -> source keys of the rows the last answer used (twse-openapi, finmind …),
+        # so responses can list the real sources instead of "archive".
+        self._last_sources: dict[tuple[str, str], list[str]] = {}
+
+    def sources_for(self, method: str, symbol: str) -> list[str]:
+        return self._last_sources.get((method, symbol), [])
+
+    def _remember(self, method: str, symbol: str, rows: list[Any]) -> None:
+        self._last_sources[(method, symbol)] = sorted({r.source for r in rows})
 
     def _filter(self, stmt, model):
         allowed = allowed_sources(self.policy)
@@ -54,6 +63,7 @@ class ArchiveProvider(BaseProvider):
             stmt = select(PriceDaily).where(PriceDaily.symbol == symbol, PriceDaily.date >= start,
                                             PriceDaily.date <= end).order_by(PriceDaily.date)
             rows = list(db.scalars(self._filter(stmt, PriceDaily)))
+        self._remember("history", symbol, rows)
         out = []
         for r in rows:
             c = r.close
@@ -93,6 +103,7 @@ class ArchiveProvider(BaseProvider):
             stmt = select(ValuationDaily).where(ValuationDaily.symbol == symbol, ValuationDaily.date >= start,
                                                 ValuationDaily.date <= end)
             rows = list(db.scalars(self._filter(stmt, ValuationDaily)))
+        self._remember("valuation_ratios", symbol, rows)
         return {r.date: {"per": r.per, "pbr": r.pbr, "dividend_yield": r.dividend_yield} for r in rows} or None
 
     # -- reference prices and ex-rights ----------------------------------------------------------
@@ -129,11 +140,9 @@ class ArchiveProvider(BaseProvider):
         with self.session_fn() as db:
             stmt = select(MarketEvent).where(MarketEvent.symbol == symbol, MarketEvent.type == "ex_dividend")
             rows = list(db.scalars(self._filter(stmt, MarketEvent)))
-        out = []
-        for r in rows:
-            cash = Decimal(r.data.get("cash") or 0)
-            ratio = Decimal(r.data.get("stock_ratio") or 0)
-            if not cash and not ratio:
-                continue
-            out.append(DividendEvent(symbol, r.date.year, str(r.date.year), cash, ratio * 10, r.date, None))
+        self._remember("dividends", symbol, rows)
+        # Notices whose amount is not announced yet ("尚未公告", blank) are kept with zero amounts so the
+        # ex-date still shows up; the facade prefers another provider's amounts for the same ex-date.
+        out = [DividendEvent(symbol, r.date.year, str(r.date.year), Decimal(r.data.get("cash") or 0),
+                             Decimal(r.data.get("stock_ratio") or 0) * 10, r.date, None) for r in rows]
         return out or None

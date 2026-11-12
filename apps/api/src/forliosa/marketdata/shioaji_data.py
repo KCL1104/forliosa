@@ -319,6 +319,15 @@ class ShioajiDataProvider(BaseProvider):
         quarters = parse_quarter_fundamentals(doc)
         return ValuationInputs(symbol, tuple(quarters), is_demo=False, source="shioaji-data") if quarters else None
 
+    def statements(self, symbol: str) -> dict[str, Any] | None:
+        """Raw quarterly statements (``periods``, ``income_quarter``, ``income_ytd``, ``balance``,
+        ``cash_flow_quarter`` …; thousand NT$), official MOPS data under the open-data licence."""
+        if market_of_symbol(symbol) == "US":
+            return None
+        doc = self._financials(code_of_symbol(symbol))
+        st = doc.get("statements") if doc else None
+        return st if st and st.get("periods") else None
+
     def release_info(self) -> dict[str, Any]:
         m = self.manifest()
         return {"release_id": m.get("release_id"), "built_at": m.get("built_at"),

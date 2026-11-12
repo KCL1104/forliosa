@@ -54,3 +54,30 @@ export function marketOf(symbol: string): Market {
 export function codeOf(symbol: string): string {
   return symbol.replace(/\.(TW|TWO)$/i, "")
 }
+
+/**
+ * 報價的小數位數（依升降單位）：
+ * - 升降單位 ≥ 1（≥ 500 元的股票）→ 0 位：1,085、932
+ * - 升降單位 0.1／0.5 → 1 位，整數時不帶小數：236.5、398
+ * - 升降單位 0.01／0.05 → 2 位：22.40、52.35
+ * - 美股一律 2 位
+ */
+export function quoteDecimals(price: number, market: Market, type: InstrumentType = "stock"): number {
+  if (market === "US") return 2
+  const t = twTick(price, type)
+  if (t >= 1) return 0
+  if (t >= 0.1) return Number.isInteger(Math.round(price * 100) / 100) ? 0 : 1
+  return 2
+}
+
+export function formatQuote(price: number | null | undefined, market: Market, type: InstrumentType = "stock"): string {
+  if (price === null || price === undefined) return "—"
+  const d = quoteDecimals(price, market, type)
+  return new Intl.NumberFormat("zh-TW", { minimumFractionDigits: d, maximumFractionDigits: d }).format(price)
+}
+
+/** 漲跌點數：用現價的位數（▲50、▲5.5、▲0.55） */
+export function formatQuoteChange(change: number, price: number, market: Market, type: InstrumentType = "stock"): string {
+  const d = Math.max(quoteDecimals(price, market, type), Number.isInteger(Math.round(change * 100) / 100) ? 0 : 1)
+  return new Intl.NumberFormat("zh-TW", { minimumFractionDigits: d, maximumFractionDigits: d }).format(Math.abs(change))
+}

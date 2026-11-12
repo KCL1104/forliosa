@@ -16,7 +16,7 @@ import threading
 import zlib
 from collections import OrderedDict
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
@@ -292,14 +292,21 @@ class DemoProvider(BaseProvider):
         price = round_price(float(quote.price * (1 + drift)), quote.symbol)
         high = max(quote.high or price, price)
         low = min(quote.low or price, price)
-        return QuoteData(
-            symbol=quote.symbol, price=price, prev_close=quote.prev_close, open=quote.open, high=high, low=low,
-            volume=(quote.volume or 0) + rng.randint(0, 50) * 1000, as_of=self.today_fn(),
-            trade_date=quote.trade_date, is_realtime=True, is_demo=True, source=(quote.source or "demo") + "+jitter",
+        return replace(
+            quote, price=price, high=high, low=low, volume=(quote.volume or 0) + rng.randint(0, 50) * 1000,
+            as_of=self.today_fn(), is_realtime=True, is_demo=True, source=(quote.source or "demo") + "+jitter",
         )
 
     def dividends(self, symbol: str) -> list[DividendEvent]:
         return list(self._path(symbol).dividends)
+
+    def ex_rights_on(self, symbols: list[str], d: date) -> dict[str, tuple[Decimal, Decimal]]:
+        out = {}
+        for s in symbols:
+            for e in self._path(s).dividends:
+                if e.ex_dividend_date == d and (e.cash_dividend or e.stock_dividend):
+                    out[s] = (e.cash_dividend, e.stock_dividend / 10)
+        return out
 
     def corporate_events(self, symbol: str) -> list[CorporateEvent]:
         return list(self._path(symbol).events)

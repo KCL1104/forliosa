@@ -33,7 +33,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
         ) : (
           <div key={m.id} className="note-in mt-4 flex flex-col">
             <span className="sr-only">AI：</span>
-            {m.text && <p className={cn("ai-voice", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>{m.text}</p>}
+            {m.text && <p className={cn("ai-voice whitespace-pre-line", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>{m.text}</p>}
             {m.answer && <AnswerView answer={m.answer} runner={runner} size={size} onNavigate={onNavigate} />}
             {m.draftId && drafts[m.draftId] && (
               <DraftCard

@@ -1,10 +1,10 @@
 import { cn } from "@/lib/utils"
 
 /**
- * 區塊卡片：細線框、10px 圓角、無陰影。首頁用得較寬鬆，細節頁用 dense。
- * 不巢狀：卡片裡不再放卡片。
+ * 區塊（聯絡簿）：沒有卡片外框，只有標題下一條格線。格線就是結構。
+ * 標題上方留白比下方多。
  */
-export function Panel({
+export function Section({
   title,
   titleId,
   action,
@@ -12,9 +12,7 @@ export function Panel({
   className,
   bodyClassName,
   aside,
-  titleSize = "md",
 }: {
-  titleSize?: "md" | "lg"
   title?: React.ReactNode
   titleId?: string
   action?: React.ReactNode
@@ -24,19 +22,19 @@ export function Panel({
   bodyClassName?: string
 }) {
   return (
-    <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col rounded-xl border bg-card text-card-foreground", className)}>
+    <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col", className)}>
       {(title || action) && (
-        <header className="flex min-h-12 items-center gap-3 px-4 pt-3 sm:px-5">
+        <header className="flex min-h-11 flex-wrap items-end gap-x-3 gap-y-1 border-b border-rule pb-2">
           {title && (
-            <h2 id={titleId} className={cn("flex min-w-0 flex-1 items-center gap-2 font-semibold", titleSize === "lg" ? "text-xl" : "text-base")}>
+            <h2 id={titleId} className="flex min-w-0 items-baseline gap-2 text-lg font-bold">
               {title}
             </h2>
           )}
-          {aside}
+          {aside && <div className="text-sm text-ink-2">{aside}</div>}
           {action && <div className="ml-auto flex shrink-0 items-center gap-1">{action}</div>}
         </header>
       )}
-      <div className={cn("flex-1 px-4 pt-2 pb-4 sm:px-5", bodyClassName)}>{children}</div>
+      <div className={cn("pt-3", bodyClassName)}>{children}</div>
     </section>
   )
 }
@@ -56,13 +54,13 @@ export function PageHeader({
   className?: string
 }) {
   return (
-    <div className={cn("mb-5 flex flex-wrap items-end gap-x-6 gap-y-3", className)}>
+    <div className={cn("mb-6 flex flex-wrap items-end gap-x-6 gap-y-3", className)}>
       <div className="min-w-0 flex-1">
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-[-0.01em]">{title}</h1>
+        <div className="flex flex-wrap items-center gap-2.5">
+          <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{title}</h1>
           {meta}
         </div>
-        {description && <p className="mt-1 max-w-prose text-md text-muted-foreground">{description}</p>}
+        {description && <p className="mt-1.5 max-w-prose text-base text-ink-2">{description}</p>}
       </div>
       {actions && <div className="flex flex-wrap items-center gap-2">{actions}</div>}
     </div>
@@ -73,9 +71,18 @@ export function PageHeader({
 export function Stat({ label, value, sub, className }: { label: React.ReactNode; value: React.ReactNode; sub?: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex min-w-0 flex-col gap-0.5", className)}>
-      <dt className="text-sm text-muted-foreground">{label}</dt>
-      <dd className="text-lg font-semibold">{value}</dd>
-      {sub && <dd className="text-sm text-muted-foreground">{sub}</dd>}
+      <dt className="text-sm text-ink-2">{label}</dt>
+      <dd className="num text-xl font-medium">{value}</dd>
+      {sub && <dd className="text-sm text-ink-2">{sub}</dd>}
     </div>
+  )
+}
+
+/** 示範資料：細框小字（資料狀態，不是品牌） */
+export function DemoTag({ className, title }: { className?: string; title?: string }) {
+  return (
+    <span className={cn("demo-tag", className)} title={title ?? "這裡的數字是示範資料，不代表真實行情"}>
+      示範資料
+    </span>
   )
 }

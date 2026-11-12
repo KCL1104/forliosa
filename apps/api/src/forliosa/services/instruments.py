@@ -10,6 +10,7 @@ from typing import Any
 
 from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
+from forliosa.datapolicy import labels
 from forliosa.marketdata.base import InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.service import MarketData
@@ -49,14 +50,23 @@ def detail(md: MarketData, symbol: str) -> dict[str, Any]:
     }
 
 
+def change_base(q: QuoteData) -> Decimal | None:
+    """Taiwan change is measured from the reference price (平盤); on ex-rights days that is not the close."""
+    return q.reference_price if q.reference_price is not None else q.prev_close
+
+
 def quote_out(q: QuoteData) -> dict[str, Any]:
-    change = q.price - q.prev_close if q.price is not None and q.prev_close is not None else None
+    base = change_base(q)
+    change = q.price - base if q.price is not None and base is not None else None
     return {
         "symbol": q.symbol,
         "price": ser.price(q.price),
         "prev_close": ser.price(q.prev_close),
+        "reference_price": ser.price(q.reference_price),
+        "limit_up": ser.price(q.limit_up),
+        "limit_down": ser.price(q.limit_down),
         "change": ser.price(change),
-        "change_pct": ser.ratio(change / q.prev_close) if change is not None and q.prev_close else None,
+        "change_pct": ser.ratio(change / base) if change is not None and base else None,
         "open": ser.price(q.open),
         "high": ser.price(q.high),
         "low": ser.price(q.low),
@@ -65,6 +75,7 @@ def quote_out(q: QuoteData) -> dict[str, Any]:
         "is_realtime": q.is_realtime,
         "is_demo": q.is_demo,
         "source": q.source,
+        "sources": labels([q.source]),
     }
 
 
@@ -86,6 +97,7 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
             for c in candles
         ],
         "is_demo": h.is_demo,
+        "sources": labels(h.source.split("+")) if h.source else [],
     }
 
 
@@ -126,9 +138,12 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
     start = range_start(range_, today, date(1990, 1, 1))
     five_y = range_start("5Y", today, date(1990, 1, 1))
     hist = md.history(info.symbol, min(start, five_y), today)
-    ratios = md.valuation_ratios(info.symbol, min(start, five_y), today) if info.type == "stock" else None
+    ratios, ratio_sources = (md.valuation_ratios_with_source(info.symbol, min(start, five_y), today)
+                             if info.type == "stock" else (None, []))
     if ratios:
-        return _valuation_from_ratios(info, hist.candles, ratios, start, five_y, hist.is_demo)
+        out = _valuation_from_ratios(info, hist.candles, ratios, start, five_y, hist.is_demo)
+        out["sources"] = labels([*hist.source.split("+"), *ratio_sources])
+        return out
     fundamentals = md.valuation_inputs(info.symbol) if info.type == "stock" else None
     divs = md.dividends(info.symbol)
     notes: list[str] = []
@@ -204,6 +219,8 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
         },
         "notes": notes,
         "is_demo": is_demo,
+        "sources": labels([*hist.source.split("+"), *(["shioaji-data"] if fundamentals and not fundamentals.is_demo
+                                                       else []), *(["demo"] if is_demo else [])]),
     }
 
 
@@ -239,7 +256,7 @@ def _valuation_from_ratios(info: InstrumentInfo, candles: list, ratios: dict, st
             "t": c.t, "close": ser.price(c.c), "eps_ttm": ser.price(eps), "bvps": ser.price(bvps),
             "per": ser.price(per_v), "pbr": ser.price(pbr_v), "dividend_yield": ser.ratio(dy_v),
         })
-    notes = ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值（經 FinMind 取得）；EPS = 收盤價 ÷ 本益比"]
+    notes = ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值；EPS = 收盤價 ÷ 本益比"]
     per_vals = [p["per"] for p in series if p["per"] is not None]
     if not per_vals or no_eps_days:
         notes.append("期間內有近四季 EPS 小於或等於 0 的日子，本益比無意義，該段區間留白")

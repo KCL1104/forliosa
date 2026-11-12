@@ -1,7 +1,8 @@
 import { cn } from "@/lib/utils"
 
 /**
- * 分段選擇（Segmented）：區間、分類、設定值。role=radiogroup，鍵盤 Tab 可達、Enter／Space 選擇。
+ * 區間選擇（1日…全部、季／年…）：role=radiogroup，方向鍵切換。
+ * 選取＝墨色實底（和帳本分段同一套語言）。
  */
 export function RangeChips<T extends string>({
   value,
@@ -16,7 +17,6 @@ export function RangeChips<T extends string>({
   label: string
   className?: string
 }) {
-  // WAI-ARIA radiogroup：只有選取中的項目可 Tab，方向鍵切換
   const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
     const delta = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0
     if (!delta) return
@@ -24,10 +24,10 @@ export function RangeChips<T extends string>({
     const next = options[(i + delta + options.length) % options.length]!
     onChange(next.value)
     const group = e.currentTarget.parentElement
-    requestAnimationFrame(() => (group?.querySelector<HTMLButtonElement>('[aria-checked="true"]'))?.focus())
+    requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>('[aria-checked="true"]')?.focus())
   }
   return (
-    <div role="radiogroup" aria-label={label} className={cn("no-scrollbar -mx-1 flex items-center gap-0.5 overflow-x-auto px-1", className)}>
+    <div role="radiogroup" aria-label={label} className={cn("no-scrollbar -mx-1 flex items-center gap-0.5 overflow-x-auto px-1 py-0.5", className)}>
       {options.map((o, i) => {
         const active = o.value === value
         return (
@@ -40,11 +40,68 @@ export function RangeChips<T extends string>({
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
             className={cn(
-              "press h-8 shrink-0 rounded-md px-2.5 text-sm font-medium text-muted-foreground outline-offset-0 hover:bg-muted hover:text-foreground pointer-coarse:h-10",
-              active && "bg-accent text-accent-foreground ring-1 ring-primary/30 ring-inset hover:bg-accent",
+              "press h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:h-10",
+              active && "bg-act font-medium text-act-fg hover:bg-act hover:text-act-fg",
             )}
           >
             {o.label}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
+/**
+ * 分段（帳本：持倉・交易・股利・績效）：1px 鉛筆灰外框、選取＝墨色實底。
+ * role=tablist；方向鍵切換。
+ */
+export function Segmented<T extends string>({
+  value,
+  options,
+  onChange,
+  label,
+  className,
+  controls,
+}: {
+  value: T
+  options: readonly { value: T; label: string; count?: number | null }[]
+  onChange: (v: T) => void
+  label: string
+  className?: string
+  controls?: string
+}) {
+  const onKeyDown = (e: React.KeyboardEvent<HTMLButtonElement>, i: number) => {
+    const delta = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
+    if (!delta) return
+    e.preventDefault()
+    const next = options[(i + delta + options.length) % options.length]!
+    onChange(next.value)
+    const group = e.currentTarget.parentElement
+    requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
+  }
+  return (
+    <div role="tablist" aria-label={label} className={cn("flex gap-1 rounded-md border border-ctl p-1", className)}>
+      {options.map((o, i) => {
+        const active = o.value === value
+        return (
+          <button
+            key={o.value}
+            type="button"
+            role="tab"
+            id={`tab-${o.value}`}
+            aria-selected={active}
+            aria-controls={controls}
+            tabIndex={active ? 0 : -1}
+            onKeyDown={(e) => onKeyDown(e, i)}
+            onClick={() => onChange(o.value)}
+            className={cn(
+              "press relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 hover:bg-hov hover:text-ink max-lg:h-[38px] max-lg:flex-1 max-lg:px-2",
+              active && "bg-act font-medium text-act-fg hover:bg-act hover:text-act-fg",
+            )}
+          >
+            {o.label}
+            {o.count !== undefined && o.count !== null && <span className="num text-sm font-normal opacity-85 max-lg:hidden">{o.count}</span>}
           </button>
         )
       })}

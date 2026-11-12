@@ -27,6 +27,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "tpex-openapi": ("證券櫃檯買賣中心 OpenAPI（政府資料開放授權條款第 1 版）", True),
     "tdcc-opendata": ("臺灣集中保管結算所開放資料（政府資料開放授權條款第 1 版）", True),
     "shioaji-data": ("shioaji-data 官方資料（證交所、櫃買中心、公開資訊觀測站；政府資料開放授權條款第 1 版）", True),
+    "archive": ("Forliosa 自建存檔（證交所、櫃買中心開放資料）", True),
     "ledger": ("本系統帳本", True),
     "rules": ("Forliosa 規則計算", True),
     "demo": ("示範資料（模擬）", True),

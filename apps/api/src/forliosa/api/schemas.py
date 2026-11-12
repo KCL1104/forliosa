@@ -127,6 +127,9 @@ class Quote(BaseModel):
     symbol: str
     price: float
     prev_close: float | None
+    reference_price: float | None = None
+    limit_up: float | None = None
+    limit_down: float | None = None
     change: float | None
     change_pct: float | None
     open: float | None
@@ -137,6 +140,7 @@ class Quote(BaseModel):
     is_realtime: bool
     is_demo: bool
     source: str
+    sources: list[str] = []
 
 
 class CandleOut(BaseModel):
@@ -153,6 +157,7 @@ class History(BaseModel):
     interval: str
     candles: list[CandleOut]
     is_demo: bool
+    sources: list[str] = []
 
 
 class ValuationPoint(BaseModel):
@@ -180,6 +185,7 @@ class Valuation(BaseModel):
     current: ValuationCurrent
     notes: list[str] = []
     is_demo: bool
+    sources: list[str] = []
 
 
 class MonthlyRevenue(BaseModel):
@@ -375,3 +381,233 @@ class Performance(BaseModel):
     dividends_by_month: list[MonthAmount]
     realized_by_year: list[YearAmount]
     is_demo: bool
+
+
+# -- stock page (redesign 2026-11-12) ---------------------------------------------------------------
+class TradingStatus(BaseModel):
+    attention: bool
+    disposition: bool
+    note: str | None
+
+
+class Overview(BaseModel):
+    symbol: str
+    open: float | None
+    high: float | None
+    low: float | None
+    prev_close: float | None
+    reference_price: float | None
+    limit_up: float | None
+    limit_down: float | None
+    volume: int | None
+    avg_volume_3m: int | None
+    market_cap: float | None
+    pe: float | None
+    pb: float | None
+    dividend_yield: float | None
+    last_cash_dividend: float | None
+    ex_dividend_date: date | None
+    eps_ttm: float | None
+    high_52w: float | None
+    low_52w: float | None
+    shares_outstanding: int | None
+    status: TradingStatus
+    as_of: str | None
+    sources: list[str]
+    is_demo: bool
+
+
+class IntradayPointOut(BaseModel):
+    t: str
+    price: float
+    volume: int | None
+
+
+class Intraday(BaseModel):
+    symbol: str
+    date: date
+    prev_close: float | None
+    reference_price: float | None
+    points: list[IntradayPointOut]
+    is_partial: bool
+    notes: list[str] = []
+    sources: list[str]
+    is_demo: bool = False
+
+
+class InstitutionalPoint(BaseModel):
+    t: date
+    foreign: float | None
+    trust: float | None
+    dealer: float | None
+    total: float | None
+
+
+class MarginPoint(BaseModel):
+    t: date
+    margin_balance: int | None
+    short_balance: int | None
+
+
+class PctPoint(BaseModel):
+    t: date
+    pct: float | None
+
+
+class HolderBucket(BaseModel):
+    level: int
+    label: str
+    holders: int
+    shares: int
+    pct: float | None
+
+
+class MajorHolders(BaseModel):
+    as_of: date
+    buckets: list[HolderBucket]
+
+
+class Chips(BaseModel):
+    symbol: str
+    institutional: list[InstitutionalPoint]
+    margin: list[MarginPoint]
+    foreign_holding_pct: list[PctPoint]
+    major_holders: MajorHolders | None
+    sources: list[str]
+    notes: list[str] = []
+
+
+class IncomeSeries(BaseModel):
+    revenue: list[float | None]
+    gross_profit: list[float | None]
+    operating_income: list[float | None]
+    net_income: list[float | None]
+    eps: list[float | None]
+
+
+class BalanceSeries(BaseModel):
+    total_assets: list[float | None]
+    total_liabilities: list[float | None]
+    equity: list[float | None]
+
+
+class CashflowSeries(BaseModel):
+    operating: list[float | None]
+    investing: list[float | None]
+    financing: list[float | None]
+    free_cash_flow: list[float | None]
+
+
+class MarginSeries(BaseModel):
+    gross: list[float | None]
+    operating: list[float | None]
+    net: list[float | None]
+
+
+class Financials(BaseModel):
+    symbol: str
+    period: str
+    periods: list[str]
+    income: IncomeSeries
+    balance: BalanceSeries
+    cashflow: CashflowSeries
+    margins: MarginSeries
+    sources: list[str]
+    notes: list[str] = []
+
+
+class StockEvent(BaseModel):
+    date: date
+    type: Literal["ex_dividend", "dividend_payment", "earnings", "revenue_release", "material_info", "attention",
+                  "disposition", "shareholder_meeting"]
+    title: str
+    detail: str
+    url: str | None
+    mine: bool
+    amount_estimate: float | None
+    sources: list[str] = []
+
+
+class NewsItem(BaseModel):
+    published_at: str
+    title: str
+    source: str
+    url: str
+    sources: list[str] = []
+
+
+class PositionMarker(BaseModel):
+    date: date
+    type: Literal["buy", "sell", "dividend", "stock_dividend"]
+    quantity: float | None
+    price: float | None
+    amount: float | None
+
+
+class UpcomingDividendEstimate(BaseModel):
+    ex_dividend_date: date
+    amount_estimate: float | None
+
+
+class Position(BaseModel):
+    symbol: str
+    currency: str
+    quantity: float
+    avg_cost: float
+    cost_basis: float
+    market_value: float
+    unrealized_pnl: float
+    unrealized_pnl_pct: float | None
+    realized_pnl: float
+    dividends_received: float
+    day_change: float
+    markers: list[PositionMarker]
+    upcoming_dividend: UpcomingDividendEstimate | None
+    as_of: str
+    sources: list[str]
+    is_demo: bool
+
+
+class WhyReason(BaseModel):
+    kind: Literal["price_move", "volume", "limit_up", "limit_down", "attention", "disposition", "ex_dividend",
+                  "earnings", "revenue_release"]
+    text: str
+
+
+class Why(BaseModel):
+    symbol: str
+    show: bool
+    headline: str | None
+    reasons: list[WhyReason]
+    as_of: str | None
+    sources: list[str] = []
+
+
+# -- watchlist & upcoming -----------------------------------------------------------------------------
+class WatchlistIn(StrictModel):
+    symbol: str = Field(min_length=1, max_length=20)
+
+
+class SparkPoint(BaseModel):
+    t: str
+    price: float | None
+
+
+class WatchlistEntry(BaseModel):
+    symbol: str
+    name: str
+    quote: Quote | None
+    sparkline: list[SparkPoint]
+    sparkline_interval: Literal["1m", "1d"]
+    sources: list[str] = []
+    is_demo: bool = False
+
+
+class UpcomingItem(BaseModel):
+    date: date
+    type: Literal["ex_dividend", "dividend_payment", "recurring"]
+    symbol: str | None
+    title: str
+    amount_estimate: float | None
+    is_demo: bool = False
+    sources: list[str] = []

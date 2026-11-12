@@ -7,7 +7,6 @@ import { api } from "@/api"
 import { useAccounts, useCreateTransaction, useDeleteTransaction, useInstrumentSearch, useUpdateTransaction } from "@/api/queries"
 import type { Account, Instrument, TradePreview, Transaction, TransactionInput, TransactionType } from "@/api/types"
 import { useUi } from "@/app/ui-store"
-import { Chop } from "@/components/chop"
 import { RangeChips } from "@/components/charts/chart-kit"
 import { Link } from "@tanstack/react-router"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -246,7 +245,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
     return (
       <div className="flex flex-col gap-2 p-6 text-md">
         <p className="font-medium">還沒有券商帳戶</p>
-        <p className="text-muted-foreground">先新增一個帳戶（例如「永豐－一般」），手續費折扣才能算對。</p>
+        <p className="text-ink-2">先新增一個帳戶（例如「永豐－一般」），手續費折扣才能算對。</p>
         <Link to="/settings" onClick={onDone} className={cn(buttonVariants({ variant: "outline" }), "mt-2 self-start")}>
           到設定新增帳戶
         </Link>
@@ -355,11 +354,11 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
       <aside
         aria-label="稅費試算"
         aria-live="polite"
-        className={cn("flex flex-col gap-3 bg-muted/60 px-4 py-4 sm:px-6", layout === "split" ? "border-l" : "border-t")}
+        className={cn("flex flex-col gap-3 bg-hov/60 px-4 py-4 sm:px-6", layout === "split" ? "border-l" : "border-t")}
       >
         <div className="flex items-center gap-2">
           <h3 className="text-md font-semibold">稅費試算</h3>
-          <Chop tone="muted">預估</Chop>
+          <span className="demo-tag">預估</span>
         </div>
         <PreviewBody preview={preview.data} loading={preview.isFetching && !preview.data} ready={!!debounced} currency={account?.currency ?? "TWD"} type={type} />
         {layout === "split" && <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} className="mt-auto pt-2" />}
@@ -368,7 +367,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
         <div className="safe-bottom sticky bottom-0 z-10 border-t bg-popover px-4 pt-3 pb-3">
           {preview.data && (
             <p className="mb-2 flex items-baseline justify-between text-md">
-              <span className="text-muted-foreground">{preview.data.net_cash < 0 ? "應付" : "實收"}（預估）</span>
+              <span className="text-ink-2">{preview.data.net_cash < 0 ? "應付" : "實收"}（預估）</span>
               <span className="num font-semibold">{formatMoney(Math.abs(preview.data.net_cash), { currency: account?.currency ?? "TWD" })}</span>
             </p>
           )}
@@ -405,7 +404,7 @@ function formatNumberSafe(n: number | null) {
 }
 
 function PreviewBody({ preview, loading, ready, currency, type }: { preview?: TradePreview; loading: boolean; ready: boolean; currency: "TWD" | "USD"; type: TransactionType }) {
-  if (!ready) return <p className="text-md text-muted-foreground">填完數量與價格後，會自動試算手續費、證交稅與實際收付金額。</p>
+  if (!ready) return <p className="text-md text-ink-2">填完數量與價格後，會自動試算手續費、證交稅與實際收付金額。</p>
   if (loading || !preview) return <div className="flex flex-col gap-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /><Skeleton className="h-4 w-3/5" /></div>
   const rows: [string, number][] = [
     [type === "cash_dividend" ? "股利金額" : "成交金額", preview.gross],
@@ -418,7 +417,7 @@ function PreviewBody({ preview, loading, ready, currency, type }: { preview?: Tr
       <dl className="flex flex-col gap-1.5 text-md">
         {rows.map(([k, v]) => (
           <div key={k} className="flex items-baseline justify-between gap-3">
-            <dt className="text-muted-foreground">{k}</dt>
+            <dt className="text-ink-2">{k}</dt>
             <dd className="num">{formatMoney(v, { currency })}</dd>
           </div>
         ))}
@@ -428,7 +427,7 @@ function PreviewBody({ preview, loading, ready, currency, type }: { preview?: Tr
         </div>
       </dl>
       {preview.rules.length > 0 && (
-        <ul className="flex flex-col gap-0.5 text-sm text-muted-foreground">
+        <ul className="flex flex-col gap-0.5 text-sm text-ink-2">
           {preview.rules.map((r) => (
             <li key={r}>・{r}</li>
           ))}
@@ -438,14 +437,9 @@ function PreviewBody({ preview, loading, ready, currency, type }: { preview?: Tr
   )
 }
 
-/** Sonner 通知裡的「已入帳」章：儲存成功時蓋下 */
+/** Sonner 通知的第二行 */
 function StampLine() {
-  return (
-    <span className="mt-1 inline-flex items-center gap-2 text-sm">
-      <Chop press>已入帳</Chop>
-      <span className="text-muted-foreground">持股與績效已更新</span>
-    </span>
-  )
+  return <span className="text-sm text-ink-2">持股與績效已更新</span>
 }
 
 
@@ -459,7 +453,7 @@ function AccountSelect({ accounts, value, onChange }: { accounts: Account[]; val
         {accounts.map((a) => (
           <SelectItem key={a.id} value={a.id}>
             {a.name}
-            <span className="text-xs text-muted-foreground">{a.currency === "USD" ? "美元" : "新台幣"}</span>
+            <span className="text-xs text-ink-2">{a.currency === "USD" ? "美元" : "新台幣"}</span>
           </SelectItem>
         ))}
       </SelectContent>
@@ -475,7 +469,7 @@ function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; 
   const listId = useId()
   if (value) {
     return (
-      <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-card px-3">
+      <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-raised px-3">
         <span className="num font-semibold">{value.code}</span>
         <span className="min-w-0 flex-1 truncate">{value.name}</span>
         <Button type="button" variant="ghost" size="icon-sm" aria-label="改選其他股票" onClick={() => onChange(null)}>
@@ -496,7 +490,7 @@ function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; 
         aria-invalid={invalid}
         aria-controls={listId}
         className={cn(
-          "h-10 w-full rounded-md border border-input bg-card px-3 text-base outline-none placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-md pointer-coarse:text-base",
+          "h-10 w-full rounded-md border border-input bg-raised px-3 text-base outline-none placeholder:text-ink-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-md pointer-coarse:text-base",
           invalid && "border-destructive",
         )}
         autoComplete="off"
@@ -505,7 +499,7 @@ function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; 
       {q.trim() && (
         <CommandPrimitive.List id={listId} className="mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
           {!search.isFetching && results.length === 0 && (
-            <CommandPrimitive.Empty className="px-2 py-3 text-md text-muted-foreground">找不到「{q.trim()}」</CommandPrimitive.Empty>
+            <CommandPrimitive.Empty className="px-2 py-3 text-md text-ink-2">找不到「{q.trim()}」</CommandPrimitive.Empty>
           )}
           {results.map((i) => (
             <CommandPrimitive.Item
@@ -519,7 +513,7 @@ function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; 
             >
               <span className="num w-14 shrink-0 font-semibold">{i.code}</span>
               <span className="min-w-0 flex-1 truncate">{i.name}</span>
-              <span className="text-xs text-muted-foreground">{i.market === "US" ? "美股" : i.market === "TPEX" ? "上櫃" : "上市"}</span>
+              <span className="text-xs text-ink-2">{i.market === "US" ? "美股" : i.market === "TPEX" ? "上櫃" : "上市"}</span>
             </CommandPrimitive.Item>
           ))}
         </CommandPrimitive.List>

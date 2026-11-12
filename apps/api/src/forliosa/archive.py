@@ -340,6 +340,8 @@ class Archiver:
         today = self.now_fn().astimezone(TAIPEI).date()
         have = set(self.db.scalars(select(InstitutionalDaily.date).where(InstitutionalDaily.source == "twse-web")
                                    .distinct()))
+        have &= set(self.db.scalars(select(ForeignHoldingDaily.date).where(ForeignHoldingDaily.source == "twse-web")
+                                    .distinct()))
         for d in tw_trading_days(today - timedelta(days=days), today - timedelta(days=1)):
             if d not in have:
                 self._run(f"twse web {d}", lambda d=d: self.twse_web_day(d, only_missing=True))
