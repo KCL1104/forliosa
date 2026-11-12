@@ -10,6 +10,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { formatDateShort, formatMoney, formatPercent } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
+import { twOpenApi, useDatasetSources } from "../text"
 import { Fig, KeyGrid, TabLead } from "./kit"
 
 /** 股利：我的（已領、下次可領、二代健保；查看模式是「爸爸的股利」）＋歷年配息 */
@@ -18,6 +19,9 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
   const dividends = useDividends(inst.symbol)
   const privacy = usePrefs((s) => s.privacyMode)
   const today = appToday()
+  // 股利清單沒有自己的 sources：台股的除權除息預告表登記到頁尾
+  const tw = twOpenApi(inst.market)
+  useDatasetSources([!!dividends.data?.length && tw && `${tw}/ex_dividend`])
   if (dividends.isError) return <ErrorState error={dividends.error} onRetry={() => void dividends.refetch()} />
   if (!dividends.data) return <Skeleton className="h-80 w-full rounded-sm" />
   const rows = dividends.data

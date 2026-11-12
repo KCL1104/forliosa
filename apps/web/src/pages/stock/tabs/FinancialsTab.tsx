@@ -12,7 +12,7 @@ import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent
 import { cn } from "@/lib/utils"
 import { DataNotes } from "@/components/data-notes"
 import { useSourceNote } from "@/hooks/use-source-note"
-import { sourceNotes } from "../text"
+import { sourceNotes, useDatasetSources } from "../text"
 import { Fig, NotYet, TabLead } from "./kit"
 
 /**
@@ -47,6 +47,8 @@ function streak(rows: MonthlyRevenue[]): number {
 
 function Revenue({ symbol }: { symbol: string }) {
   const revenue = useRevenue(symbol)
+  // 月營收沒有自己的 sources：數字來自 shioaji-data 彙整的公開資訊觀測站資料，登記到頁尾
+  useDatasetSources([!!revenue.data?.length && "shioaji-data/official"])
   if (revenue.isError) return <ErrorState error={revenue.error} onRetry={() => void revenue.refetch()} />
   if (revenue.isLoading) return <Skeleton className="h-80 w-full rounded-sm" />
   const all = revenue.data ?? []

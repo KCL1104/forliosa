@@ -32,6 +32,15 @@ describe("籌碼分頁：上市股票的外資持股比", () => {
     const foreign = await screen.findByRole("region", { name: "外資持股比" }, { timeout: 3000 })
     expect(foreign.textContent).toContain("75.52%・前 20 名第 12 名")
     const inst = screen.getByRole("region", { name: "三大法人買賣超" })
-    expect(inst.textContent).toContain("以付費商品提供")
+    expect(inst.textContent).toContain("證交所的開放資料沒有逐檔三大法人")
+    // 後端的長說明（OpenAPI、付費商品、上櫃怎麼存檔）不照印
+    expect(document.body.textContent).not.toContain("上櫃股票由櫃買中心")
+  })
+  it("不在前 20 名：三大法人的空狀態只有一句，也說外資持股只有前 20 名", async () => {
+    const tsmc = await api.getInstrument("2330.TW")
+    withQueries(<ChipsTab inst={tsmc} />)
+    const inst = await screen.findByRole("region", { name: "三大法人買賣超" }, { timeout: 3000 })
+    expect(inst.textContent).toContain("證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。")
+    expect(document.body.textContent).not.toContain("OpenAPI")
   })
 })

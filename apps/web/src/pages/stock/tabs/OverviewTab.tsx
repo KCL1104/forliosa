@@ -18,8 +18,9 @@ import { AboutCompany } from "../AboutCompany"
 import { AnalystViewsCard } from "../AnalystViews"
 import { EtfNavSection } from "../EtfNavSection"
 import { NewsCoverage } from "../NewsCoverage"
+import { useWidth } from "../month-ticks"
 import { RelatedStocks } from "../RelatedStocks"
-import { sourceNotes } from "../text"
+import { anchorOf, beforeSpan, labelsCollide, sourceNotes, useDatasetSources, valuationSpan, withoutKind } from "../text"
 import { DateCell, Fig, KeyGrid, type KeyItem } from "./kit"
 
 /**
@@ -56,22 +57,42 @@ function KeyBand({ inst, quote, position }: { inst: InstrumentDetail; quote?: Qu
   const valuation = useValuation(inst.symbol)
   const revenue = useRevenue(inst.symbol)
   const chips = useChips(inst.symbol, "1M")
-  useSourceNote(sourceNotes(o?.sources))
 
   const showValuation = inst.type === "stock" && !us && !!valuation.data && valuation.data.per_multiples.length > 0
-  // 美股（商用模式沒有可商用的行情）：報價下方已經說明，格子只列有值的欄位，不排一整片「—」
-  const base = (etf ? etfItems(inst, o, quote) : stockItems(inst, o, quote, { peInStrip: showValuation })).filter((it) => !us || it.value !== "—")
+  const base = etf ? etfItems(inst, o, quote) : stockItems(inst, o, quote, { peInStrip: showValuation })
   const rev = !us && !etf ? revenueItems(revenue.data ?? []) : []
   const chip = !us && chips.data ? chipItems(inst, chips.data) : { items: [], note: null }
-  const cells = [...base, ...rev, ...chip.items]
+  // 只列有值的格子：資料源沒給的欄位不排一整片「—」（ETF 沒有本益比、有的股票沒有殖利率；美股沒有行情，報價下方已經說明）
+  const cells = [...base, ...rev, ...chip.items].filter((it) => it.value !== "—")
+
+  // 頁尾的資料來源：行情與估值（overview）、籌碼（融資融券、集保股權分散…）、月營收（shioaji-data 彙整的公開資訊觀測站資料）
+  useSourceNote(sourceNotes(o?.sources))
+  useSourceNote(sourceNotes(chip.items.length ? chips.data?.sources : null))
+  useDatasetSources([rev.length > 0 && "shioaji-data/official"])
 
   return (
-    <section id="ov-key" aria-label="關鍵數據">
-      {showValuation && <ValuationStrip inst={inst} valuation={valuation.data!} eps={o?.eps_ttm ?? null} position={position} />}
+    <section id="ov-key" aria-labelledby="ov-key-title">
+      <h2 id="ov-key-title" className="sr-only">
+        關鍵數據
+      </h2>
+      {showValuation && (
+        <ValuationStrip inst={inst} valuation={valuation.data!} overviewEps={o?.eps_ttm ?? null} overviewLoading={overview.isLoading} position={position} />
+      )}
       {overview.isLoading ? (
         <Skeleton className="h-56 w-full rounded-sm" />
+      ) : cells.length >= 3 ? (
+        <KeyGrid items={cells} />
       ) : (
-        cells.length > 0 && <KeyGrid items={cells} />
+        // 只剩一兩格（美股沒有行情時只有近四季 EPS）：寫成一行，不在 3 欄格線裡留一格孤零零的
+        cells.length > 0 && (
+          <p className="flex flex-wrap gap-x-6 gap-y-1 border-y border-rule py-3 text-base text-ink">
+            {cells.map((it) => (
+              <span key={it.label} title={it.title}>
+                <span className="text-md text-ink-2">{it.label}</span> <span className="num">{it.value}</span>
+              </span>
+            ))}
+          </p>
+        )
       )}
       {(o?.status.note || chip.note) && (
         <div className="mt-2 flex flex-col gap-0.5 text-sm">
@@ -88,8 +109,9 @@ const has = (n: number | null | undefined): n is number => n !== null && n !== u
 
 function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quote: Quote | undefined, { peInStrip }: { peInStrip: boolean }): KeyItem[] {
   const us = inst.market === "US"
-  const unit = us ? "US$" : ""
   const p = (n: number | null | undefined) => formatQuote(n, inst.market, inst.type)
+  // 每股金額：台股寫「元」，美股是 US$ 前綴
+  const money = (n: number) => (us ? `US$${n}` : `${n} 元`)
   // 參考價與漲跌停已經在報價下方；本益比在估值那一行（美股沒有那一行，留在格子裡）
   return [
     { label: "開盤", value: p(o?.open ?? quote?.open) },
@@ -97,43 +119,39 @@ function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, q
     { label: "最低", value: p(o?.low ?? quote?.low) },
     { label: "成交量", value: formatVolume(o?.volume ?? quote?.volume, inst.market, { compact: true }) },
     { label: "3 個月均量", value: formatVolume(o?.avg_volume_3m, inst.market, { compact: true }) },
-    { label: "市值", value: has(o?.market_cap) ? `${unit}${formatCompact(o.market_cap)}` : "—" },
+    { label: "市值", value: has(o?.market_cap) ? `${us ? "US$" : ""}${formatCompact(o.market_cap)}` : "—" },
     ...(peInStrip ? [] : [{ label: "本益比", value: has(o?.pe) ? `${o.pe.toFixed(1)} 倍` : "—" }]),
     { label: "股價淨值比", value: has(o?.pb) ? `${o.pb.toFixed(2)} 倍` : "—" },
     { label: "殖利率", value: has(o?.dividend_yield) ? formatPercent(o.dividend_yield, { signed: false }) : "—" },
-    { label: "近四季 EPS", value: has(o?.eps_ttm) ? `${unit}${o.eps_ttm}` : "—" },
+    { label: "近四季 EPS", value: has(o?.eps_ttm) ? money(o.eps_ttm) : "—" },
     { label: "52 週區間", value: has(o?.low_52w) && has(o?.high_52w) ? `${p(o.low_52w)}–${p(o.high_52w)}` : "—" },
-    { label: "最近現金股利", value: has(o?.last_cash_dividend) ? `${unit}${o.last_cash_dividend}` : "—" },
+    { label: "最近現金股利", value: has(o?.last_cash_dividend) ? money(o.last_cash_dividend) : "—" },
     { label: "除息日", value: o?.ex_dividend_date ? formatDateShort(o.ex_dividend_date) : "—" },
   ]
 }
 
 /**
  * ETF 的鍵值：只放 ETF 有的欄位（淨值、折溢價、殖利率、配息、成交量…），
- * 不列本益比、股價淨值比、EPS 這些股票才有的數字；資料源沒給市值時不列市值。
+ * 不列本益比、股價淨值比、EPS 這些股票才有的數字；沒有值的格子由呼叫端濾掉。
+ * 折溢價那格比較長（「溢價 0.14%」加日期），排在淨值、殖利率後面，手機上自己佔一列。
  */
 function etfItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quote: Quote | undefined): KeyItem[] {
   const p = (n: number | null | undefined) => formatQuote(n, inst.market, inst.type)
   const n = o?.etf_nav
   const md = (d: string | null) => (d ? `（${formatDateShort(d, false)}）` : "")
-  const nav: KeyItem[] =
-    n && n.nav !== null
-      ? [
-          { label: `淨值${md(n.nav_date)}`, value: formatNav(n.nav), title: n.fund_name ?? undefined },
-          { label: `折溢價${md(n.premium_date)}`, value: formatPremium(n.premium_pct) },
-        ]
-      : []
+  const nav = n && n.nav !== null ? n : null
   return [
-    ...nav,
+    ...(nav ? [{ label: `淨值${md(nav.nav_date)}`, value: formatNav(nav.nav), title: nav.fund_name ?? undefined }] : []),
     { label: "殖利率", value: has(o?.dividend_yield) ? formatPercent(o.dividend_yield, { signed: false }) : "—" },
+    ...(nav ? [{ label: `折溢價${md(nav.premium_date)}`, value: formatPremium(nav.premium_pct), wide: true }] : []),
     { label: "開盤", value: p(o?.open ?? quote?.open) },
     { label: "最高", value: p(o?.high ?? quote?.high) },
     { label: "最低", value: p(o?.low ?? quote?.low) },
     { label: "成交量", value: formatVolume(o?.volume ?? quote?.volume, inst.market, { compact: true }) },
     { label: "3 個月均量", value: formatVolume(o?.avg_volume_3m, inst.market, { compact: true }) },
-    ...(has(o?.market_cap) ? [{ label: "市值", value: formatCompact(o.market_cap) }] : []),
+    { label: "市值", value: has(o?.market_cap) ? formatCompact(o.market_cap) : "—" },
     { label: "52 週區間", value: has(o?.low_52w) && has(o?.high_52w) ? `${p(o.low_52w)}–${p(o.high_52w)}` : "—" },
-    { label: "最近配息", value: has(o?.last_cash_dividend) ? `${o.last_cash_dividend}` : "—" },
+    { label: "最近配息", value: has(o?.last_cash_dividend) ? `${o.last_cash_dividend} 元` : "—" },
     { label: "除息日", value: o?.ex_dividend_date ? formatDateShort(o.ex_dividend_date) : "—" },
   ]
 }
@@ -211,7 +229,7 @@ function chipItems(inst: InstrumentDetail, c: NonNullable<ReturnType<typeof useC
   }
 }
 
-/** 本益比在過去 5 年的位置：0／25／50／75／100 百分位的刻度，刻度下是那個百分位的本益比 */
+/** 本益比在這段期間的位置：0／25／50／75／100 百分位的刻度，刻度下是那個百分位的本益比 */
 const TICKS = [0, 0.25, 0.5, 0.75, 1] as const
 
 function quantile(sorted: number[], q: number): number {
@@ -219,64 +237,98 @@ function quantile(sorted: number[], q: number): number {
 }
 
 /**
- * 估值位置（只說一次）：「本益比 20.8 倍，比過去 5 年 96% 的日子貴。」＋整條寬的刻度尺。
+ * 估值位置（只說一次）：「本益比 20.8 倍，比 6/1 以來 96% 的日子貴。」＋整條寬的刻度尺。
+ * 期間照資料實際的長度寫（滿 5 年才寫「過去 5 年」；商用模式的存檔從 2026-06-01 才開始累積），不滿 5 年時尺下放「資料累積中」。
  * 尺是 1px 鉛筆灰線、五個刻度（百分位），現在＝墨色實心點＋標籤，你的成本＝空心點（隱私模式不畫）。
+ * 尺是 aria-hidden，成本與區間另外寫在句子裡給螢幕報讀器。
  * 位置的算法和後端相同：歷史本益比 ≤ 這個值的日子所佔比例。
  */
-function ValuationStrip({ inst, valuation: v, eps, position }: { inst: InstrumentDetail; valuation: Valuation; eps: number | null; position: Position | null }) {
+function ValuationStrip({
+  inst,
+  valuation: v,
+  overviewEps,
+  overviewLoading,
+  position,
+}: {
+  inst: InstrumentDetail
+  valuation: Valuation
+  overviewEps: number | null
+  overviewLoading: boolean
+  position: Position | null
+}) {
   const you = useWho("你")
   const privacy = usePrefs((s) => s.privacyMode)
   const pe = v.current.per
   const pct = v.current.per_percentile_5y
-  if (pe === null || !eps || eps <= 0) {
-    return (
-      <p className="border-t border-rule py-3 text-base text-ink">
-        近四季虧損，本益比沒有意義，改看
-        <Link to="/stock/$symbol" params={{ symbol: inst.symbol }} search={{ tab: "valuation" }} resetScroll={false} className="underline underline-offset-3 hover:decoration-2">
-          股價淨值比
-        </Link>
-        。
-      </p>
-    )
+  // 近四季 EPS：用估值序列自己的（和本益比同一天），沒有才用 overview 的；兩個查詢各自載入，不能拿「還沒載入」當虧損
+  const eps = v.series.at(-1)?.eps_ttm ?? overviewEps
+  if (pe === null) {
+    if (eps !== null && eps <= 0) {
+      return (
+        <p className="border-t border-rule py-3 text-base text-ink">
+          近四季虧損，本益比沒有意義，改看
+          <Link to="/stock/$symbol" params={{ symbol: inst.symbol }} search={{ tab: "valuation" }} resetScroll={false} className="underline decoration-ctl underline-offset-3 hover:decoration-ink">
+            股價淨值比
+          </Link>
+          。
+        </p>
+      )
+    }
+    return overviewLoading ? <Skeleton className="mb-4 h-6 w-72 max-w-full" /> : null
   }
+  const span = valuationSpan(v.series, appToday())
   const history = v.series.map((p) => p.per).filter((x): x is number => x !== null && x > 0).sort((a, b) => a - b)
-  const costPe = position && !privacy ? position.avg_cost / eps : null
+  const costPe = position && !privacy && eps !== null && eps > 0 ? position.avg_cost / eps : null
   const costPct = costPe !== null && history.length ? history.filter((x) => x <= costPe).length / history.length : null
-  // 成本比 5 年裡最便宜的那天還低（或比最貴的還高）時，點停在尺的端點，標籤要說清楚
+  // 成本比這段期間最便宜的那天還低（或比最貴的還高）時，點停在尺的端點，標籤要說清楚
   const costLabel =
-    costPe === null
+    costPe === null || history.length === 0
       ? null
       : costPe < history[0]!
-        ? `${you}的成本 ${costPe.toFixed(1)} 倍，低於 5 年最低`
+        ? `${you}的成本 ${costPe.toFixed(1)} 倍，低於${beforeSpan(span.label)}最低`
         : costPe > history.at(-1)!
-          ? `${you}的成本 ${costPe.toFixed(1)} 倍，高於 5 年最高`
+          ? `${you}的成本 ${costPe.toFixed(1)} 倍，高於${beforeSpan(span.label)}最高`
           : `${you}的成本 ${costPe.toFixed(1)} 倍`
   const scale = pct !== null && history.length >= 2
+  const ticks = scale ? TICKS.map((q) => quantile(history, q)) : []
+  const accumulating = span.full ? null : (v.notes.find((n) => n.startsWith("資料累積中")) ?? null)
   return (
     <div className="border-t border-rule pt-3 pb-4">
       <p className="text-base text-ink">
         本益比 <Fig>{pe.toFixed(1)}</Fig> 倍
         {pct !== null && (
           <>
-            ，比過去 5 年 <Fig>{formatPercent(pct, { signed: false, decimals: 0 })}</Fig> 的日子貴
+            ，比{beforeSpan(span.label)} <Fig>{formatPercent(pct, { signed: false, decimals: 0 })}</Fig> 的日子貴
           </>
         )}
         。
+        {scale && (
+          <span className="sr-only">
+            {span.label}最低 {ticks[0]!.toFixed(1)} 倍、最高 {ticks.at(-1)!.toFixed(1)} 倍。
+          </span>
+        )}
+        {costLabel && <span className="sr-only">{costLabel}。</span>}
       </p>
-      {scale && <PercentileScale now={pct} cost={costPct} costLabel={costLabel} ticks={TICKS.map((q) => quantile(history, q))} />}
+      {scale && <PercentileScale now={pct} cost={costPct} costLabel={costLabel} ticks={ticks} />}
+      {accumulating && <p className="mt-1 text-sm text-ink-2">{accumulating}</p>}
     </div>
   )
 }
 
-/** 位置在兩端時標籤往內對齊，不超出版面 */
-const anchor = (pos: number) => (pos < 0.08 ? "translate-x-0" : pos > 0.92 ? "-translate-x-full" : "-translate-x-1/2")
+/** 標籤在兩端時往內對齊，不超出版面 */
+const ANCHOR_CLASS = { 0: "translate-x-0", 0.5: "-translate-x-1/2", 1: "-translate-x-full" } as const
+const anchor = (pos: number) => ANCHOR_CLASS[anchorOf(pos)]
 
 function PercentileScale({ now, cost, costLabel, ticks }: { now: number; cost: number | null; costLabel: string | null; ticks: number[] }) {
-  // 兩個標籤太近時，成本的標籤放到刻度下面一行
-  const costBelow = cost !== null && Math.abs(cost - now) < 0.22
+  const [box, width] = useWidth<HTMLDivElement>()
+  // 成本的標籤會和「現在」疊在一起時，放到刻度下面一行：用尺的實際寬度換算兩個標籤的像素範圍
+  // （量到寬度之前——第一次繪製、測試環境——成本在區間外或兩點很近就先放第二行）
+  const outside = cost !== null && (cost <= 0 || cost >= 1)
+  const costBelow =
+    cost !== null && !!costLabel && (width > 0 ? labelsCollide({ pos: now, text: "現在" }, { pos: cost, text: costLabel }, width) : outside || Math.abs(cost - now) < 0.22)
   const left = (q: number) => `${q * 100}%`
   return (
-    <div aria-hidden className={cn("relative mt-2 select-none", costBelow ? "h-[84px]" : "h-[62px]")}>
+    <div ref={box} aria-hidden className={cn("relative mt-2 select-none", costBelow ? "h-[84px]" : "h-[62px]")}>
       {/* 標籤列 */}
       <span className={cn("absolute top-0 text-sm font-medium whitespace-nowrap text-ink", anchor(now))} style={{ left: left(now) }}>
         現在
@@ -315,8 +367,11 @@ function PercentileScale({ now, cost, costLabel, ticks }: { now: number; cost: n
 
 // ── 第二層：事件（接下來＋最近的公告） ───────────────────
 
+/** 官方公告：重大訊息、證交所公告；美股是 SEC 申報（8-K／10-Q／10-K） */
+const official = (e: TimelineRow) => e.type === "announcement" || e.type === "material_info" || e.type === "sec_filing"
+
 /**
- * 一張依日期排的表：最近 3 則官方公告（重大訊息、證交所公告，連到原文）在前，接下來的 4 件事在後。
+ * 一張依日期排的表：最近 3 則官方公告（重大訊息、證交所公告、SEC 申報，連到原文）在前，接下來的 4 件事在後。
  * 日期格是聯絡簿的日期格；右欄是相對天數，持有時除息列寫可領金額。
  */
 function Events({ inst, position, className }: { inst: InstrumentDetail; position: Position | null; className?: string }) {
@@ -326,7 +381,6 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
   const privacy = usePrefs((s) => s.privacyMode)
   const today = appToday()
   const rows = mergeAnnouncements(events.data ?? [], officialNews(news.data))
-  const official = (e: TimelineRow) => e.type === "announcement" || e.type === "material_info"
   const past = rows
     .filter((e) => e.date < today && official(e))
     .sort((a, b) => b.date.localeCompare(a.date))
@@ -345,7 +399,13 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
       titleId="ov-events"
       className={className}
       action={
-        <Link to="/stock/$symbol" params={{ symbol: inst.symbol }} search={{ tab: "events" }} resetScroll={false} className="inline-flex h-8 items-center rounded-sm px-1 text-sm text-ink-2 hover:text-ink hover:underline pointer-coarse:h-10">
+        <Link
+          to="/stock/$symbol"
+          params={{ symbol: inst.symbol }}
+          search={{ tab: "events" }}
+          resetScroll={false}
+          className="inline-flex h-8 items-center rounded-sm px-1 text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:h-10"
+        >
           所有事件
         </Link>
       }
@@ -356,7 +416,9 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
       ) : events.isError ? (
         <ErrorState className="mt-3" error={events.error} onRetry={() => void events.refetch()} />
       ) : shown.length === 0 ? (
-        <p className="pt-3 text-md text-ink-2">目前沒有已公告的除息、營收公布或法說會，最近 90 天也沒有官方公告。</p>
+        <p className="pt-3 text-md text-ink-2">
+          {inst.market === "US" ? "目前沒有已公告的除息，最近也沒有 SEC 申報。" : "目前沒有已公告的除息、營收公布或法說會，最近 90 天也沒有官方公告。"}
+        </p>
       ) : (
         <ol>
           {shown.map((e) => (
@@ -371,16 +433,18 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
 
 function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount: string | null }) {
   const announcement = e.type === "announcement" || e.type === "material_info"
-  const kind = announcement && e.category ? NEWS_CATEGORY_LABEL[e.category] : eventLabel(e)
+  const label = announcement && e.category ? NEWS_CATEGORY_LABEL[e.category] : eventLabel(e)
   const when = formatDaysUntil(e.date, today)
-  const title = eventTitle(e)
+  // 類別欄已經寫了「除息」，標題就不再重複（「除息 每股 5 元」→「每股 5 元」）；標題就是類別時寫說明，沒有說明就不寫類別
+  const { title, kind } = withoutKind(eventTitle(e), label, e.detail)
   return (
     <li className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]">
       <DateCell date={e.date} className="self-stretch py-3" />
       <span className="py-3 pl-3 text-md text-ink-2 max-sm:hidden">{kind}</span>
       <span className="min-w-0 py-3 pl-3 sm:pl-0">
         {e.url ? (
-          <a href={e.url} target="_blank" rel="noreferrer" className="underline-offset-3 hover:underline">
+          // 有原文的列：常駐的淡底線，和沒有連結的列分得出來
+          <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-rule underline-offset-3 hover:decoration-ink">
             {title}
             <span className="sr-only">（在{announcementHost(e.url)}查看，另開新視窗）</span>
           </a>
@@ -393,7 +457,8 @@ function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount:
           </span>
         )}
         <span className="mt-0.5 block text-sm text-ink-2 sm:hidden">
-          {kind}・{amount ? <span className="num text-ink">{amount}</span> : when}
+          {kind && `${kind}・`}
+          {amount ? <span className="num text-ink">{amount}</span> : when}
         </span>
       </span>
       <span className={cn("num py-3 pl-3 text-right whitespace-nowrap max-sm:hidden", amount ? "text-md text-ink" : "text-sm text-ink-2")}>{amount ?? when}</span>

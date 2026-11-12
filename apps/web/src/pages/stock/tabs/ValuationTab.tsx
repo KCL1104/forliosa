@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { appToday } from "@/api"
 import { useValuation } from "@/api/queries"
 import { useWho } from "@/api/view-as"
 import type { InstrumentDetail, Position, Valuation } from "@/api/types"
@@ -9,6 +10,7 @@ import { DemoTag, Section as Panel } from "@/components/section"
 import { usePrefs } from "@/stores/prefs"
 import { EtfNavSection } from "../EtfNavSection"
 import { MONTH_LABEL_WIDTH, monthTicks, useWidth } from "../month-ticks"
+import { beforeSpan, twOpenApi, useDatasetSources, valuationSpan } from "../text"
 import { Fig } from "./kit"
 import { ChartSkeleton, EmptyState, ErrorState } from "@/components/states"
 import { buildRiver, invalidRuns, type Mode } from "@/lib/valuation"
@@ -19,6 +21,10 @@ const BAND_VARS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--ban
 export function ValuationTab({ inst: instrument, position }: { inst: InstrumentDetail; position: Position | null }) {
   const valuation = useValuation(instrument.symbol)
   const [mode, setMode] = useState<Mode>("per")
+  // 估值序列沒有自己的 sources：收盤價與本益比、股價淨值比、殖利率的資料集（台股）登記到頁尾
+  const tw = twOpenApi(instrument.market)
+  const plotted = !!valuation.data?.series.length
+  useDatasetSources([plotted && tw && `${tw}/price`, plotted && tw && `${tw}/valuation`])
 
   if (valuation.isError) return <ErrorState error={valuation.error} onRetry={() => void valuation.refetch()} />
   if (!valuation.data) return <ChartSkeleton height={420} />
@@ -46,6 +52,8 @@ export function ValuationTab({ inst: instrument, position }: { inst: InstrumentD
     )
   }
   const activeMode: Mode = mode === "per" && !hasPer ? "pbr" : mode === "pbr" && !hasPbr ? "per" : mode
+  // 期間照資料實際的長度寫：商用模式的存檔從 2026-06-01 才開始累積，不能說成「近 5 年」
+  const span = valuationSpan(v.series, appToday())
   // 估值位置（百分位）只在右邊「現在的本益比」說一次
   return (
     <div className="flex flex-col gap-5">
@@ -59,10 +67,12 @@ export function ValuationTab({ inst: instrument, position }: { inst: InstrumentD
             ...(hasPbr ? [{ value: "pbr" as const, label: "股價淨值比河流圖" }] : []),
           ]}
         />
-        <span className="text-sm text-ink-2">近 5 年・{cadenceLabel(v)}</span>
+        <span className="text-sm text-ink-2">
+          {span.full ? "近 5 年" : span.label}・{cadenceLabel(v)}
+        </span>
         {v.is_demo && <DemoTag className="ml-auto" />}
       </div>
-      <RiverPanel valuation={v} mode={activeMode} instrument={instrument} position={position} />
+      <RiverPanel valuation={v} mode={activeMode} instrument={instrument} position={position} span={span.label} />
       <YieldPanel valuation={v} />
       <Notes notes={v.notes} />
     </div>
@@ -90,7 +100,7 @@ function Notes({ notes }: { notes: string[] }) {
   )
 }
 
-function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail; position: Position | null }) {
+function RiverPanel({ valuation, mode, instrument, position, span }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail; position: Position | null; span: string }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const you = useWho("你")
   const multiples = mode === "per" ? valuation.per_multiples : valuation.pbr_multiples
@@ -216,7 +226,7 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
               {bracket && <p className="mt-2 text-md text-ink">{bracket}</p>}
               {mode === "per" && valuation.current.per_percentile_5y !== null && (
                 <p className="mt-1 text-md text-ink">
-                  比過去 5 年 <Fig>{formatPercent(valuation.current.per_percentile_5y, { signed: false, decimals: 0 })}</Fig> 的日子貴。
+                  比{beforeSpan(span)} <Fig>{formatPercent(valuation.current.per_percentile_5y, { signed: false, decimals: 0 })}</Fig> 的日子貴。
                 </p>
               )}
             </div>

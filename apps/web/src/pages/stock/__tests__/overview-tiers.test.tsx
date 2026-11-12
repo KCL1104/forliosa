@@ -1,13 +1,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen, within } from "@testing-library/react"
-import { describe, expect, it } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { monthTicks } from "../month-ticks"
 import { OverviewTab } from "../tabs/OverviewTab"
 import { TabLead } from "../tabs/kit"
-import { sourceNotes, withFigures } from "../text"
+import { labelsCollide, sourceNotes, valuationSpan, withFigures, withoutKind } from "../text"
 
 /** 個股頁的樣子：區塊在 SourcesProvider 裡，頁尾一個「資料來源與授權」；Link 需要 router */
 function renderPage(ui: React.ReactNode) {
@@ -34,14 +34,18 @@ const T = { timeout: 8000 }
 
 // 整個總覽一次載入十幾個查詢：全部測試一起跑時比較慢，給長一點的時間
 describe("總覽的三層", { timeout: 20_000 }, () => {
+  afterEach(() => vi.restoreAllMocks())
   it("第一層：一條鍵值帶；估值位置只說一次，規則句是墨色 Noto Sans（不是紫色楷體），刻度尺不用 ▼△", async () => {
     const inst = await api.getInstrument("2330.TW")
     const position = await api.getPosition("2330.TW")
     renderPage(<OverviewTab inst={inst} position={position} />)
     const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
-    const sentence = await within(band).findByText(/比過去 5 年/, undefined, T)
+    // 商用模式的本益比存檔從 6/1 才開始（示範序列每週一點，第一點是 6/5）：期間照實際寫，不說「5 年」，尺下放「資料累積中」
+    const sentence = await within(band).findByText(/比 \d+\/\d+ 以來/, undefined, T)
     expect(sentence.closest(".ai-voice")).toBeNull()
     expect(sentence.className).toContain("text-ink")
+    expect(band.textContent).not.toContain("5 年")
+    expect(within(band).getByText(/^資料累積中/)).toBeInTheDocument()
     // 百分位只說一次（不在格子、刻度或別的句子重複）
     // 月營收與籌碼各自載入：兩個都出現了再檢查
     await within(band).findByText("10 月營收", undefined, T)
@@ -56,8 +60,25 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     expect(terms).not.toContain("參考價")
     expect(terms).not.toContain("漲停 / 跌停")
     expect(within(band).getByText(/^連 \d+ 個月$/)).toBeInTheDocument()
-    // 持有時：成本在尺上（隱私模式關閉）
-    expect(within(band).getByText(/^你的成本 \d+\.\d 倍/)).toBeInTheDocument()
+    // 每股金額有單位
+    const value = (term: string) => within(band).getByText(term).nextElementSibling?.textContent
+    expect(value("近四季 EPS")).toMatch(/^\d+(\.\d+)? 元$/)
+    expect(value("最近現金股利")).toMatch(/^\d+(\.\d+)? 元$/)
+    // 持有時：成本在尺上（隱私模式關閉）；尺是 aria-hidden，成本另外寫在句子裡給螢幕報讀器
+    const cost = within(band).getAllByText(/^你的成本 \d+\.\d 倍/)
+    expect(cost.some((n) => n.closest("[aria-hidden]"))).toBe(true)
+    expect(cost.some((n) => n.className.includes("sr-only") && !n.closest("[aria-hidden]"))).toBe(true)
+    expect(within(band).getByText(/^\d+\/\d+ 以來最低 \d+\.\d 倍、最高 \d+\.\d 倍。$/)).toHaveClass("sr-only")
+  })
+
+  it("第一層：本益比有值時，估值序列自己的 EPS 決定虧損與否（overview 沒有 EPS 也不會說成虧損）", async () => {
+    const inst = await api.getInstrument("2330.TW")
+    const real = await api.getOverview("2330.TW")
+    vi.spyOn(api, "getOverview").mockResolvedValue({ ...real, eps_ttm: null })
+    renderPage(<OverviewTab inst={inst} position={null} />)
+    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
+    await within(band).findByText(/比 \d+\/\d+ 以來/, undefined, T)
+    expect(band.textContent).not.toContain("虧損")
   })
 
   it("第二層：接下來與公告合併成一張依日期排的表，第一欄是聯絡簿的日期格", async () => {
@@ -79,6 +100,26 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     // 沒有另外的「接下來」「公告」兩個區塊
     expect(screen.queryByRole("region", { name: "接下來" })).toBeNull()
     expect(screen.queryByRole("region", { name: "公告" })).toBeNull()
+    // 標題不重複類別欄：「除息｜每股 5 元」，不是「除息｜除息 每股 5 元」
+    for (const r of rows) {
+      const [kind, title] = [r.children[1]!.textContent!, r.children[2]!.firstChild!.textContent!]
+      if (kind) expect(title.startsWith(kind)).toBe(false)
+    }
+  })
+
+  it("第二層（美股）：SEC 申報也是官方公告，10-K 在事件表裡；空狀態不寫台股的「90 天」", async () => {
+    const inst = await api.getInstrument("AAPL")
+    renderPage(<OverviewTab inst={inst} position={null} />)
+    const events = await screen.findByRole("region", { name: "事件" }, T)
+    const rows = await within(events).findAllByRole("listitem", undefined, T)
+    expect(rows.some((r) => r.textContent!.includes("10-K"))).toBe(true)
+    expect(events.textContent).not.toContain("90 天")
+    expect(events.textContent).not.toContain("目前沒有已公告")
+    // 第一層：美股沒有行情時只剩近四季 EPS，寫成一行，不畫只有一格的鍵值格
+    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
+    await within(band).findByText("近四季 EPS", undefined, T)
+    expect(within(band).queryAllByRole("term")).toHaveLength(0)
+    expect(band.textContent).toMatch(/近四季 EPS US\$\d/)
   })
 
   it("第三層與頁尾：新聞先 3 則；各區塊不寫授權段落，整頁只有一個「資料來源與授權」", async () => {
@@ -97,6 +138,10 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     fireEvent.click(footer[0]!)
     expect(screen.getByText("臺灣證券交易所〈上市公司基本資料〉（2026）")).toBeInTheDocument()
     expect(screen.getByRole("link", { name: /The GDELT Project/ })).toHaveAttribute("href", "https://www.gdeltproject.org/")
+    // 鍵值帶顯示的籌碼與月營收也要顯名：融資融券、集保股權分散、月營收（shioaji-data）
+    await screen.findByText("臺灣集中保管結算所〈集保戶股權分散表〉（2026）", undefined, T)
+    expect(screen.getByText("臺灣證券交易所〈集中市場融資融券餘額〉（2026）")).toBeInTheDocument()
+    expect(screen.getByText(/^永豐金證券 shioaji-data.*〈公司基本資料、每日收盤與市值、月營收、季報〉（2026）$/)).toBeInTheDocument()
   })
 
   it("ETF：鍵值格只有 ETF 有的欄位（淨值、折溢價、殖利率…），沒有本益比、股價淨值比、EPS 這些「—」", async () => {
@@ -105,11 +150,29 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
     await within(band).findByText("淨值（11/12）", undefined, T)
     const terms = within(band).getAllByRole("term").map((t) => t.textContent)
-    expect(terms.slice(0, 3)).toEqual(["淨值（11/12）", "折溢價（11/12）", "殖利率"])
+    // 折溢價那格比較長，排第三（手機上自己佔一列）
+    expect(terms.slice(0, 3)).toEqual(["淨值（11/12）", "殖利率", "折溢價（11/12）"])
+    expect(within(band).getByText("折溢價（11/12）").parentElement!.className).toContain("max-lg:col-span-2")
     for (const stockOnly of ["本益比", "股價淨值比", "近四季 EPS", "營收年增"]) expect(terms).not.toContain(stockOnly)
     expect(within(band).getAllByRole("definition").map((d) => d.textContent)).not.toContain("—")
-    // 折溢價走勢接在格子下面（標題安靜）
+    // 折溢價走勢接在格子下面（標題安靜，h3 接在鍵值帶的 h2 底下）
     expect(within(band).getByRole("region", { name: "折溢價走勢" })).toBeInTheDocument()
+    expect(within(band).getByRole("heading", { level: 2, name: "關鍵數據" })).toBeInTheDocument()
+  })
+
+  it("ETF（00679B）：沒有值的欄位不列，一格「—」都沒有", async () => {
+    const inst = await api.getInstrument("00679B.TWO")
+    renderPage(<OverviewTab inst={inst} position={null} />)
+    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
+    await within(band).findAllByRole("definition", undefined, T)
+    const values = within(band).getAllByRole("definition").map((d) => d.textContent)
+    expect(values.length).toBeGreaterThan(3)
+    expect(values).not.toContain("—")
+    // 沒有殖利率時，手機上佔滿一列的折溢價不在淨值旁邊留空洞：它前面的格子是偶數個
+    const cells = [...band.querySelectorAll("dl > div")]
+    const wide = cells.findIndex((c) => c.className.includes("max-lg:col-span-2"))
+    expect(wide).toBeGreaterThan(0)
+    expect(wide % 2).toBe(0)
   })
 })
 
@@ -121,10 +184,34 @@ describe("規則句與來源的小工具", () => {
     expect(p.className).toContain("text-ink")
   })
 
-  it("規則句（例如「為什麼」那一行）的數字標成 600，文字不變", () => {
-    const { container } = render(<p>{withFigures("成交量是近 20 日均量的 2.1 倍，漲 4.83%")}</p>)
-    expect(container.textContent).toBe("成交量是近 20 日均量的 2.1 倍，漲 4.83%")
-    expect([...container.querySelectorAll(".font-semibold")].map((n) => n.textContent)).toEqual(["20", "2.1 倍", "4.83%"])
+  it("規則句（例如「為什麼」那一行）只把帶單位的數字標成 600（期間參數、門檻不算），文字不變", () => {
+    const { container } = render(<p>{withFigures("成交量是近 20 日均量的 2.1 倍，漲 4.83%，超過 ±3%")}</p>)
+    expect(container.textContent).toBe("成交量是近 20 日均量的 2.1 倍，漲 4.83%，超過 ±3%")
+    expect([...container.querySelectorAll(".font-semibold")].map((n) => n.textContent)).toEqual(["2.1 倍", "4.83%"])
+  })
+
+  it("估值序列的期間：不滿 5 年寫實際起點（跨年寫年份），滿了才寫「過去 5 年」", () => {
+    expect(valuationSpan([{ t: "2026-06-01" }], "2026-11-12")).toEqual({ label: "6/1 以來", full: false })
+    expect(valuationSpan([{ t: "2025-06-02" }], "2026-11-12")).toEqual({ label: "2025/6/2 以來", full: false })
+    expect(valuationSpan([{ t: "2021-11-15" }], "2026-11-12")).toEqual({ label: "過去 5 年", full: true })
+  })
+
+  it("刻度尺的標籤：照尺的寬度換算像素範圍判斷會不會疊在一起", () => {
+    // 2317：現在在 54%、成本低於最低（在 0）。手機的尺約 353px，長標籤會撞到「現在」；桌面 1072px 不會
+    const now = { pos: 0.54, text: "現在" }
+    const cost = { pos: 0, text: "你的成本 10.1 倍，低於 6/1 以來最低" }
+    expect(labelsCollide(now, cost, 353)).toBe(true)
+    expect(labelsCollide(now, cost, 1072)).toBe(false)
+    // 短標籤、兩點離得遠：不撞
+    expect(labelsCollide({ pos: 0.9, text: "現在" }, { pos: 0.3, text: "你的成本 18.2 倍" }, 353)).toBe(false)
+  })
+
+  it("事件的標題不重複類別", () => {
+    expect(withoutKind("除息 每股 5 元", "除息", "2026Q2 現金股利")).toEqual({ title: "每股 5 元", kind: "除息" })
+    expect(withoutKind("2026Q3 法說會", "法說會", null)).toEqual({ title: "2026Q3", kind: "法說會" })
+    expect(withoutKind("股利發放", "股利發放", "2026Q2 現金股利入帳")).toEqual({ title: "2026Q2 現金股利入帳", kind: "股利發放" })
+    expect(withoutKind("股利發放", "股利發放", null)).toEqual({ title: "股利發放", kind: null })
+    expect(withoutKind("10-K 年度報告", "年報", null)).toEqual({ title: "10-K 年度報告", kind: "年報" })
   })
 
   it("後端的顯名聲明 → 頁尾的來源：網址拆成連結，文字不改寫", () => {

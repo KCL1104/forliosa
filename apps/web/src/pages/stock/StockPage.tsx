@@ -24,7 +24,7 @@ import { asOfLabel } from "@/lib/as-of"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
-import { sourceNotes, withFigures } from "./text"
+import { sourceNotes, twOpenApi, useDatasetSources, withFigures } from "./text"
 import { useReadOnly, useWho } from "@/api/view-as"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
@@ -217,6 +217,9 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
 }
 
 function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?: Quote; missing?: boolean }) {
+  // 報價下方的參考價、漲跌停每個分頁都看得到：資料集登記到頁尾（收盤價由走勢圖登記）
+  const tw = twOpenApi(inst.market)
+  useDatasetSources([!!quote && tw && `${tw}/reference`])
   if (missing && !quote) {
     // 沒有報價（商用模式的美股）：不放一個大大的「—」，直接說明
     return (
@@ -296,19 +299,21 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const text = modelWritten ? headline : withFigures(headline)
   const voice = modelWritten ? "ai-voice text-lg leading-snug" : "text-base text-ink"
   if (readOnly) return <p className={cn("mt-3 max-w-prose", voice)}>{text}</p>
-  // 最後一個字和 › 綁在一起，換行時 › 不會自己掉到下一行
-  const head = modelWritten ? headline.slice(0, -1) : withFigures(headline.slice(0, -1))
+  // 換行交給 text-wrap: balance（兩行一樣長，最後一行不會只剩「漲 ›」）；› 前面的 word joiner（U+2060）讓 › 不會自己掉到下一行。
+  // › 的顏色跟句子：規則句是淡墨，只有模型寫的紫色楷體句子才用紫色
   return (
     <button
       type="button"
       onClick={() => ask.submit(`${inst.name}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
-      className={cn("press mt-3 block max-w-prose text-left underline-offset-4 hover:underline", modelWritten ? "hover:decoration-ai-rule" : "hover:decoration-ctl", voice)}
+      className={cn(
+        "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline",
+        modelWritten ? "hover:decoration-ai-rule" : "hover:decoration-ctl",
+        voice,
+      )}
     >
-      {head}
-      <span className="whitespace-nowrap">
-        {headline.slice(-1)}
-        <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em] text-ai" />
-      </span>
+      {text}
+      {"⁠"}
+      <ChevronRightIcon aria-hidden className={cn("ml-0.5 inline size-[1em] align-[-0.125em]", modelWritten ? "text-ai" : "text-ink-2")} />
     </button>
   )
 }
@@ -327,7 +332,11 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
           過去的持有
         </h2>
         <p className="text-md text-ink">{rounds.length > 1 ? `出清過 ${rounds.length} 次` : "已全部賣出"}，不在持倉裡。</p>
-        <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className="ml-auto inline-flex h-9 items-center rounded-sm text-sm text-ink-2 hover:text-ink hover:underline pointer-coarse:h-11">
+        <Link
+          to="/"
+          search={{ view: "transactions", symbol: inst.symbol }}
+          className="ml-auto inline-flex h-9 items-center rounded-sm text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:h-11"
+        >
           在帳本中查看
         </Link>
       </div>

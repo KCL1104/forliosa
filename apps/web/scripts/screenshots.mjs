@@ -255,6 +255,11 @@ const SHOTS = [
   { name: "ledger-draft", path: "/", ready: "text=總資產", action: (page, mobile) => draft(page, mobile) },
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
+  // 總覽第一層（估值句、刻度尺、鍵值格）與第二層（事件表）；2317 持有中、成本在區間外、現在在中段（成本標籤要換到第二行）
+  { name: "stock-2330-key", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-key") },
+  { name: "stock-2317-key", path: "/stock/2317.TW", ready: "text=參考價", action: toSection("ov-key") },
+  { name: "stock-2330-events", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-events") },
+  { name: "stock-aapl-overview", path: "/stock/AAPL", ready: "text=關於「Apple」" },
   { name: "stock-2330-analyst", path: "/stock/2330.TW", ready: "text=參考價", action: analyst },
   { name: "stock-2454-analyst-searching", path: "/stock/2454.TW", ready: "text=參考價", action: analystSearch(/正在找近期媒體報導/) },
   { name: "stock-2881-analyst-empty", path: "/stock/2881.TW", ready: "text=參考價", action: analystSearch("近期查無法人報導") },

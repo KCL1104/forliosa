@@ -60,17 +60,16 @@ const isBig = (b: { level: string; label?: string }) => /^1,?000/.test(b.label ?
 const lots = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatNumber(Math.abs(n))}`
 
 /**
- * 上市股票的三大法人：沒有逐檔資料（證交所開放資料沒有，網站不能以程式下載），說明原因；
+ * 上市股票的三大法人：沒有逐檔資料（證交所開放資料沒有，網站不能以程式下載），一句話說明原因
+ * （後端的說明比較長、還講到上櫃怎麼存檔，這裡不照印）；名列外資持股前 20 名時，名次寫在「外資持股比」。
  * 個股可以直接問 AI 最近的外資動向（上網搜尋新聞，附來源與日期）。上櫃股票照常有櫃買的資料。
  */
-function ListedInstitutional({ inst, notes }: { inst: InstrumentDetail; notes: string[] }) {
+function ListedInstitutional({ inst, top20 }: { inst: InstrumentDetail; top20: boolean }) {
   const ask = useAskAi()
   const readOnly = useReadOnly()
   return (
     <NotYet className="border-t-0 pt-0" title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人`}>
-      {notes.map((n) => (
-        <p key={n}>{n}</p>
-      ))}
+      <p>{top20 ? "證交所的開放資料沒有逐檔三大法人。" : "證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。"}</p>
       {inst.type === "stock" && !readOnly && (
         <Button variant="outline" size="sm" className="mt-3" onClick={() => ask.submit(FOREIGN_FLOW_QUESTION)}>
           <MessageCircleQuestionIcon aria-hidden className="text-ai" />
@@ -103,7 +102,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   const recent = [...c.institutional].reverse().slice(0, 10)
   const sum = (k: "foreign" | "trust" | "dealer" | "total", n: number) => c.institutional.slice(-n).reduce((s, r) => s + r[k], 0)
   const lastDay = (c.institutional.at(-1) ?? c.margin.at(-1))?.t
-  // 上市股票的說明放在三大法人的空狀態裡，頁尾的資料來源就不再重複
+  // 上市股票的那句長說明在三大法人的空狀態裡縮成一句，下面的說明就不再列
   const listedNotes = listed ? (c.notes ?? []).filter((n) => n.includes("上市股票")) : []
   const top20Notes = listed ? (c.notes ?? []).filter((n) => n.includes("前 20 名") && !listedNotes.includes(n)) : []
   const otherNotes = (c.notes ?? []).filter((n) => !listedNotes.includes(n) && !top20Notes.includes(n))
@@ -121,7 +120,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
 
       {listed ? (
         <Section title="三大法人買賣超" titleId="chips-inst">
-          <ListedInstitutional inst={inst} notes={listedNotes} />
+          <ListedInstitutional inst={inst} top20={!!top} />
         </Section>
       ) : c.institutional.length === 0 ? (
         <NotYet title="三大法人資料累積中">{c.notes?.join(" ") ?? "法人買賣超在每天 20:00–21:00 更新。"}</NotYet>

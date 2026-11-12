@@ -13,7 +13,7 @@ import { officialNews } from "@/lib/news"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useSourceNote } from "@/hooks/use-source-note"
-import { sourceNotes } from "../text"
+import { sourceNotes, withoutKind } from "../text"
 import { DateCell } from "./kit"
 
 /**
@@ -78,16 +78,18 @@ function Timeline({ rows, today, privacy, who, empty, future }: { rows: Timeline
   return (
     <ol className="-mt-3">
       {rows.map((e, i) => {
-        const title = eventTitle(e)
+        // 標題不重複類別欄（「除息｜每股 5 元」）；標題就是類別時改寫說明，下面就不再重複說明
+        const { title, kind } = withoutKind(eventTitle(e), eventLabel(e), e.detail)
         const announcement = e.type === "announcement" || e.type === "material_info"
         const amount = e.amount_estimate !== null && e.mine ? `${who}可領約 ${privacy ? "••••" : formatMoney(e.amount_estimate)}` : null
         return (
           <li key={`${e.date}-${e.type}-${e.title}-${i}`} className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]">
             <DateCell date={e.date} className="row-span-3 self-stretch py-3 sm:row-span-1" />
-            <span className={cn("pt-3 pl-3 text-md sm:pb-3", e.mine ? "font-medium text-ink" : "text-ink-2")}>{eventLabel(e)}</span>
+            <span className={cn("pt-3 pl-3 text-md sm:pb-3", e.mine ? "font-medium text-ink" : "text-ink-2")}>{kind}</span>
             <span className="min-w-0 pl-3 max-sm:col-start-2 sm:py-3 sm:pl-0">
               {e.url ? (
-                <a href={e.url} target="_blank" rel="noreferrer" className="underline-offset-3 hover:underline">
+                // 有原文的列：常駐的淡底線，和沒有連結的列分得出來
+                <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-rule underline-offset-3 hover:decoration-ink">
                   {title}
                   <span className="sr-only">（在{announcementHost(e.url)}查看，另開新視窗）</span>
                 </a>
@@ -99,7 +101,7 @@ function Timeline({ rows, today, privacy, who, empty, future }: { rows: Timeline
                   預估
                 </span>
               )}
-              {(e.detail || (announcement && e.category)) && (
+              {((e.detail && e.detail !== title) || (announcement && e.category)) && (
                 <span className="block text-sm text-ink-2">
                   {announcement && e.category ? `${NEWS_CATEGORY_LABEL[e.category]}${e.url ? `・${announcementHost(e.url)}` : ""}` : e.detail}
                 </span>

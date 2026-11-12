@@ -224,10 +224,14 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const readout = hover ?? (isIntraday ? (points.length ? { t: points.at(-1)!.t, c: points.at(-1)!.price } : null) : last ? { ...last } : null)
   const loading = isIntraday ? intraday.isLoading : history.isLoading
   const empty = isIntraday ? !intraday.isLoading && points.length < 2 : !history.isLoading && candles.length < 2
+  // 沒有日線（不是盤中的空狀態）：工具列、讀數都沒有意義，只留空狀態（不是固定高度的圖框）
+  const blank = !isIntraday && empty && !history.isError
   const rangeReturn = !isIntraday && candles.length > 1 ? candles.at(-1)!.c / candles[0]!.c - 1 : null
 
   return (
     <section aria-label="走勢圖" className="mt-6">
+      {/* 沒有任何價格（美股商用模式、這段期間沒有成交）：不放工具列與讀數，只留空狀態 */}
+      {!blank && (
       <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
         <div role="radiogroup" aria-label="圖表類型" className="flex gap-0.5 rounded-sm border border-ctl p-0.5">
           {(["line", "candle"] as const).map((k) => (
@@ -295,7 +299,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           </button>
         </div>
       </div>
+      )}
 
+      {!blank && (
       <p className="num mt-2 flex min-h-5 flex-wrap gap-x-3 text-sm text-ink-2" aria-live="off">
         {readout && (
           <>
@@ -312,8 +318,15 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           </>
         )}
       </p>
+      )}
 
-      <div className={cn("relative mt-1 h-[240px] w-full transition-opacity lg:h-[320px]", (history.isPlaceholderData || compareHistory.isPlaceholderData) && "opacity-60")}>
+      <div
+        className={cn(
+          "relative w-full transition-opacity",
+          blank ? "" : "mt-1 h-[240px] lg:h-[320px]",
+          (history.isPlaceholderData || compareHistory.isPlaceholderData) && "opacity-60",
+        )}
+      >
         {(isIntraday ? intraday.isError : history.isError) ? (
           <ErrorState error={isIntraday ? intraday.error : history.error} onRetry={() => void (isIntraday ? intraday.refetch() : history.refetch())} />
         ) : loading ? (
@@ -329,6 +342,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
         )}
       </div>
 
+      {/* 連報價都沒有時（美股商用模式），換區間也不會有資料：區間也不放 */}
+      {!(blank && !quote) && (
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <RangeChips label="區間" value={range} options={RANGES} onChange={setRange} />
         <p className="ml-auto flex flex-wrap gap-x-3 text-sm text-ink-2">
@@ -338,6 +353,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           {!comparing && kind === "candle" && mas.length > 0 && <span>{mas.map((n) => `MA${n}`).join("・")}</span>}
         </p>
       </div>
+      )}
       <DataNotes
         notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), "價格為未還原收盤價。"] : []}
         className="mt-1"
@@ -348,9 +364,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
 
 /** 這段期間沒有日線：商用模式是存檔還在累積（或美股沒有可商用的來源），照後端的 notes 說明 */
 function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
-  if (notes.length === 0) return <p className="grid h-full place-items-center text-md text-ink-2">這段期間還沒有成交資料。</p>
+  if (notes.length === 0) return <p className="border-y border-dashed border-rule px-1 py-5 text-md text-ink-2">這段期間還沒有成交資料。</p>
   return (
-    <div className="flex h-full flex-col items-start justify-center gap-2 border-y border-dashed border-rule px-1">
+    <div className="flex flex-col items-start gap-2 border-y border-dashed border-rule px-1 py-5">
       <p className="font-medium">{us ? "美股走勢暫時沒有" : "走勢資料累積中"}</p>
       <DataNotes notes={notes} className="max-w-prose text-md" />
       {!us && <p className="max-w-prose text-md text-ink-2">官方開放資料只有當天的收盤，從開始存檔那天起每個交易日累積一點，滿兩天就會畫出走勢。</p>}

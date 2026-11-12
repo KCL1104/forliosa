@@ -100,7 +100,7 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
       {rows.length > 0 && (
         <dl className={cn("grid gap-x-8 sm:grid-cols-2", (d || summary) && "mt-4 border-t border-rule")}>
           {rows.map((r) => (
-            <div key={r.label} className="flex min-h-10 items-baseline justify-between gap-4 border-b border-rule py-2">
+            <div key={r.label} className="flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5">
               <dt className="shrink-0 text-md text-ink-2">{r.label}</dt>
               <dd className="min-w-0 text-right text-base break-words text-ink">{r.value}</dd>
             </div>
