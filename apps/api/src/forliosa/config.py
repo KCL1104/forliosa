@@ -43,7 +43,8 @@ class Settings(BaseSettings):
     # TAIFEX OpenAPI datasets the open-data inventory marks ``conditional`` (no matching data.gov.tw OGDL
     # dataset found: 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人 …) are archived but, under
     # DATA_POLICY=commercial, NOT shown to users until the owner has TAIFEX's written confirmation and sets
-    # this to true (see docs/outreach/taifex-licence-inquiry.md and datapolicy.dataset_served).
+    # this to true (see docs/outreach/taifex-licence-inquiry.md and datapolicy.dataset_served). It no longer affects
+    # USD/TWD: valuation uses the central bank's 銀行間新臺幣對美元收盤匯率 (OGDL) in every mode.
     taifex_conditional_confirmed: bool = False
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
     # SEC EDGAR (US fundamentals and filings). SEC requires a declared User-Agent with a contact e-mail:

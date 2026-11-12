@@ -89,6 +89,60 @@ def test_taifex_jobs_are_idempotent_and_backfill_multi_day_windows(engine):
         assert status["twse-openapi/breadth"] == date(2026, 6, 5) and status["twse-openapi/pledge"] == date(2026, 8, 19)
 
 
+def test_central_bank_fx_backfills_once_and_wins_over_taifex(engine):
+    def usd(db):
+        return {r.date: (r.rate, r.source) for r in db.scalars(select(FxRate).where(FxRate.pair == "USDTWD"))}
+
+    with Session(engine) as db:
+        run(db, ["taifex"])  # TAIFEX first: 27 USDTWD days (2026-10-01 … 11-11) with its own source key
+        assert {s for _r, s in usd(db).values()} == {"taifex-openapi"}
+        fetcher = FakeFetcher()
+        results = run(db, ["cbc"], fetcher)
+        assert [(r.name, r.rows, r.error) for r in results] == [("cbc fx FTDOpenData_Day", 36, None)]
+        assert fetcher.calls == ["https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day"]
+        rows = usd(db)
+        assert len(rows) == 36 and {s for _r, s in rows.values()} == {"cbc-opendata"}  # TAIFEX days taken over
+        assert rows[date(2008, 1, 2)] == (D("32.443"), "cbc-opendata")  # the whole history on the first run
+        assert rows[date(2026, 11, 12)] == (D("32.889"), "cbc-opendata")
+        status = db.get(DatasetStatus, "cbc-opendata/fx")
+        assert (status.data_date, status.rows) == (date(2026, 11, 12), 36)
+        # idempotent: nothing new, nothing written
+        assert [r.rows for r in run(db, ["cbc"])] == [0]
+        # TAIFEX never overwrites a central-bank day; its other pairs are archived as before
+        run(db, ["taifex"])
+        assert usd(db) == rows
+        assert db.get(FxRate, ("CNYTWD", date(2026, 11, 11))).source == "taifex-openapi"
+
+        def corrected(data):
+            out = [dict(r) for r in data]
+            out[-1]["NTD_USD"] = "32.9"
+            return [*out, {"日期": "20261113", "NTD_USD": "32.95"}]
+
+        assert [r.rows for r in run(db, ["cbc"], Patched({"/FTDOpenData_Day": corrected}))] == [2]
+        assert usd(db)[date(2026, 11, 12)] == (D("32.9"), "cbc-opendata") and len(usd(db)) == 37
+
+
+def test_central_bank_fx_failure_is_recorded(engine):
+    with Session(engine) as db:
+        results = run(db, ["cbc"], Patched({"/FTDOpenData_Day": lambda _data: [{"Date": "x"}]}))
+        assert results[0].error and "欄位不符" in results[0].error and results[0].rows == 0
+        assert count(db, FxRate) == 0
+
+
+def test_central_bank_fx_empty_answer_is_an_error_and_keeps_the_last_date(engine):
+    """The endpoint always answers the whole history since 2008: an empty array is an outage, not 0 new days."""
+    with Session(engine) as db:
+        run(db, ["cbc"])
+        before = db.get(DatasetStatus, "cbc-opendata/fx")
+        assert before.data_date == date(2026, 11, 12)
+        results = run(db, ["cbc"], Patched({"/FTDOpenData_Day": lambda _data: []}))
+        assert results[0].error and "空的" in results[0].error and results[0].rows == 0
+        db.expire_all()
+        status = db.get(DatasetStatus, "cbc-opendata/fx")
+        assert (status.data_date, status.rows) == (date(2026, 11, 12), 36)  # /meta/attributions keeps last_updated
+        assert count(db, FxRate) == 36
+
+
 def test_margins_are_stored_only_when_they_change(engine):
     with Session(engine) as db:
         run(db, ["taifex"])

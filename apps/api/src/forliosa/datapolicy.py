@@ -1,8 +1,9 @@
 """Data-source policy (``DATA_POLICY``), the source allowlist and the attribution text in ``sources``.
 
 * ``commercial`` (default): only legally commercially usable data — government open data (TWSE / TPEx
-  OpenAPI, TDCC open data, SEC EDGAR for US companies), shioaji-data's official files and our own archive built
-  from them. Never demo data: endpoints return empty data with a 「資料累積中」 note instead.
+  OpenAPI, TDCC open data, the central bank's 銀行間新臺幣對美元收盤匯率, SEC EDGAR for US companies),
+  shioaji-data's official files and our own archive built from them. Never demo data: endpoints return empty data
+  with a 「資料累積中」 note instead.
 * ``personal`` (explicit opt-in): demo data fills gaps, and FinMind can be enabled by listing it in
   ``MARKET_DATA_PROVIDERS``; its rows are labelled 「非商用」.
 * **Never, in any mode**: the TWSE / TPEx / MIS / MOPS *websites* (their terms forbid automated downloads
@@ -19,8 +20,8 @@ key gets its dataset through a *kind* — ``"twse-openapi/valuation"`` — see :
 Licence status (``Dataset.license_status``, from docs/research/open-data-inventory.md and its catalog):
 
 * ``ogdl`` — the agency publishes the dataset under the OGDL (TWSE swagger links data.gov.tw/license; TPEx,
-  TDCC and the TAIFEX institutional / large-trader / put-call datasets have matching data.gov.tw OGDL
-  datasets). Served normally, with attribution.
+  TDCC, the TAIFEX institutional / large-trader / put-call datasets and the central bank's 銀行間新臺幣對美元
+  收盤匯率 — data.gov.tw 7232 — have matching data.gov.tw OGDL datasets). Served normally, with attribution.
 * ``public`` — US government public data (SEC EDGAR): "All Government-created content on sec.gov and EDGAR
   public filing content are free to access and reuse" (SEC Webmaster FAQ). Served normally; the attribution names
   the agency and dataset with 「美國政府公開資料」 instead of the OGDL.
@@ -28,7 +29,8 @@ Licence status (``Dataset.license_status``, from docs/research/open-data-invento
   TAIFEX 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人, 最後結算價, 保證金, 股票期貨／選擇權標的.
   They are **archived**, but under ``commercial`` they are **not served** until the owner sets
   ``TAIFEX_CONDITIONAL_CONFIRMED=true`` after TAIFEX confirms in writing (:func:`dataset_served`). Under
-  ``personal`` (non-commercial, explicit opt-in) they are served.
+  ``personal`` (non-commercial, explicit opt-in) they are served. TAIFEX's 每日外幣參考匯率 is archived but no
+  longer used at all: USD/TWD comes from the central bank (product owner 2026-11-12).
 """
 
 from __future__ import annotations
@@ -49,6 +51,7 @@ TWSE = "臺灣證券交易所"
 TPEX = "證券櫃檯買賣中心"
 TDCC = "臺灣集中保管結算所"
 TAIFEX = "臺灣期貨交易所"
+CBC = "中央銀行"
 TWSE_API = "https://openapi.twse.com.tw/v1"
 MEETINGS = "公司召開股東常（臨時）會日期、地點及採用電子投票情形等資料彙總表"
 TPEX_API = "https://www.tpex.org.tw/openapi/v1"
@@ -58,6 +61,7 @@ SEC_LICENSE = "SEC 網站政策：sec.gov 的政府內容與 EDGAR 公開申報�
 SEC_LICENSE_URL = "https://www.sec.gov/about/webmaster-frequently-asked-questions"
 SEC_ATTRIBUTION = "美國政府公開資料"
 SEC_NOTICE = f"{SEC}：sec.gov 上的政府內容與 EDGAR 公開申報可自由存取與再利用（{SEC_LICENSE_URL}）"
+CBC_API = "https://cpx.cbc.gov.tw/api/OpenData"
 
 LicenseStatus = Literal["ogdl", "public", "conditional"]
 CONDITIONAL_NOTE = ("期交所 OpenAPI 的這個資料集在 data.gov.tw 沒有找到對應的政府資料開放授權條款資料集，"
@@ -180,7 +184,8 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
             f"{TAIFEX_API}/OpenInterestOfLargeTradersOptions", "選擇權前五／前十大交易人", "conditional",
             "data.gov.tw 11337／11338 是否涵蓋選擇權待核對"),
     Dataset("taifex-openapi/fx", TAIFEX, "每日外幣參考匯率", f"{TAIFEX_API}/DailyForeignExchangeRates",
-            "USD/TWD 等匯率（美股帳戶換算）", "conditional", "data.gov.tw 未找到個別資料集"),
+            "只存檔（USD/TWD 換算改用中央銀行〈銀行間新臺幣對美元收盤匯率〉）", "conditional",
+            "data.gov.tw 未找到個別資料集"),
     Dataset("taifex-openapi/final_settlement", TAIFEX, "最後結算價", f"{TAIFEX_API}/FinalSettlementPrice",
             "期貨、選擇權最後結算價", "conditional", "data.gov.tw 28825／30853 是否為同一資料待核對"),
     Dataset("taifex-openapi/margins_index", TAIFEX, "保證金一覽表-股價指數類",
@@ -205,6 +210,9 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("sec-edgar/tickers", SEC, "公司代號與 CIK 對照表（company_tickers.json）",
             "https://www.sec.gov/files/company_tickers.json", "美股代號對應 SEC 公司編號（CIK）",
             "public", "SEC Webmaster FAQ", SEC_LICENSE, SEC_LICENSE_URL, SEC_ATTRIBUTION),
+    # -- 中央銀行 (data.gov.tw 7232): the whole daily history since 2008 in one JSON array (marketdata/cbc.py).
+    Dataset("cbc-opendata/fx", CBC, "銀行間新臺幣對美元收盤匯率", f"{CBC_API}/FTDOpenData_Day",
+            "美股換算新台幣", basis="data.gov.tw 7232"),
     Dataset("shioaji-data/official",
             "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）",
             "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data",
@@ -218,6 +226,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "tdcc-opendata": (f"{TDCC}〈開放資料〉", True),
     "taifex-openapi": (f"{TAIFEX}〈OpenAPI 開放資料〉", True),
     "sec-edgar": (f"{SEC} EDGAR（{SEC_ATTRIBUTION}）", True),
+    "cbc-opendata": (f"{CBC}〈開放資料〉", True),
     "shioaji-data": ("", True),  # labelled through DATASETS["shioaji-data/official"]
     "archive": ("Forliosa 自建存檔（證交所、櫃買中心開放資料）", True),
     "ledger": ("本系統帳本", True),
@@ -286,7 +295,7 @@ def label(source: str) -> str:
         return attribution(ds)
     if key in _SOURCES:
         text, commercial = _SOURCES[key]
-        if commercial and key in ("twse-openapi", "tpex-openapi", "tdcc-opendata", "taifex-openapi"):
+        if commercial and key in ("twse-openapi", "tpex-openapi", "tdcc-opendata", "taifex-openapi", "cbc-opendata"):
             return f"{text}（{_year()}），依{OGDL}"
         return text
     return raw

@@ -34,6 +34,7 @@ from forliosa.models import (
 from forliosa.services.announcements import classify
 from forliosa.services.instruments import change_base, require_instrument
 from forliosa.services.portfolio import (
+    PortfolioState,
     add_months,
     closed_rounds,
     compute_state,
@@ -717,10 +718,13 @@ def news(db: Session, md: MarketData, symbol: str) -> list[dict[str, Any]]:
 
 
 # -- position -------------------------------------------------------------------------------------------
-def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, Any] | None:
+def position(db: Session, md: MarketData, user: User, symbol: str,
+             state: PortfolioState | None = None) -> dict[str, Any] | None:
+    """The user's open position in ``symbol`` (None when not held). Pass ``state`` to read the values from a
+    portfolio state the caller also uses (the AI tool takes its FX notes from ``state.fx``)."""
     info = require_instrument(md, symbol)
     sym = info.symbol
-    state = compute_state(db, user, md)
+    state = state or compute_state(db, user, md)
     row = next((r for r in state.rows if r.symbol == sym), None)
     if row is None or row.quantity <= 0:
         return None
@@ -753,7 +757,8 @@ def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, 
             "amount_estimate": ser.money(row.quantity * upcoming[0].cash_dividend * row.fx),
         } if upcoming else None,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else iso_taipei(state.as_of),
-        "sources": labels(["ledger", *(tagged(q.source, "price") if q else [])]),
+        "sources": labels(["ledger", *(tagged(q.source, "price") if q else []),
+                           *(tagged(state.fx.source, "fx") if row.currency != "TWD" else [])]),
         "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
     }
 

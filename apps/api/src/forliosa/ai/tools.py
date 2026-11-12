@@ -185,9 +185,10 @@ def get_portfolio_summary(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import portfolio as svc
 
     account_id = _own_account_id(ctx, args.get("account_id"))
-    s = svc.summary(svc.compute_state(ctx.db, ctx.user, ctx.md, account_id), ctx.md)
+    state = svc.compute_state(ctx.db, ctx.user, ctx.md, account_id)
+    s = svc.summary(state, ctx.md)
     alloc = s.get("allocation") or {}
-    return {
+    out = {
         **_pick(s, "as_of", "market_value", "cost_basis", "unrealized_pnl", "unrealized_pnl_pct", "realized_pnl",
                 "dividend_income", "total_pnl", "total_return_pct", "day_change", "day_change_pct", "is_demo"),
         "allocation": {k: [_pick(i, "label", "value", "weight") for i in (v or [])[:6]]
@@ -196,6 +197,9 @@ def get_portfolio_summary(ctx: ToolContext, args: dict[str, Any]) -> Any:
         "accounts": _account_list(ctx),
         "currency": "TWD",
     }
+    if fx := svc.fx_tool_notes(state.fx):
+        out["notes"] = fx
+    return out
 
 
 # Field names carry their currency so the model cannot mistake a TWD total for USD (seen in the live smoke test:
@@ -237,7 +241,8 @@ def get_holdings(ctx: ToolContext, args: dict[str, Any]) -> Any:
     return {"as_of": iso_taipei(state.as_of), "count": len(rows), "count_by_market": dict(by_market),
             "holdings": holdings,
             "notes": ["*_twd 欄位是新台幣（美股也已換算成新台幣）；*_native 欄位是該商品的原幣（見 currency）；"
-                      "quantity 為股數（1 張 = 1000 股）；has_quote 為 false 表示沒有報價，不要推測漲跌"]}
+                      "quantity 為股數（1 張 = 1000 股）；has_quote 為 false 表示沒有報價，不要推測漲跌",
+                      *svc.fx_tool_notes(state.fx)]}
 
 
 def get_transactions(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -444,18 +449,22 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import stock as svc
+    from forliosa.services.portfolio import compute_state, fx_tool_notes
 
     info = resolve_instrument(ctx.md, args["symbol"])
-    pos = svc.position(ctx.db, ctx.md, ctx.user, info.symbol)
+    state = compute_state(ctx.db, ctx.user, ctx.md)
+    pos = svc.position(ctx.db, ctx.md, ctx.user, info.symbol, state)
     if pos is None:
         return {"symbol": info.symbol, "name": info.name, "held": False,
                 "note": "目前沒有持有這檔；過去的交易可用 get_transactions 查詢"}
     markers = pos.get("markers") or []
+    notes = ["*_twd 欄位是新台幣；*_native 欄位是該商品的原幣（見 currency）；quantity 為股數；"
+             "recent_trades 的 price、amount 為原幣"]
+    if pos.get("currency", "TWD") != "TWD":
+        notes.extend(fx_tool_notes(state.fx))  # the same book that valued the position above
     return {"symbol": info.symbol, "name": info.name, "held": True,
             **_currency_named({k: v for k, v in pos.items() if k not in ("markers", "symbol", "sources")}),
-            "trades_count": len(markers), "recent_trades": markers[-10:],
-            "notes": ["*_twd 欄位是新台幣；*_native 欄位是該商品的原幣（見 currency）；quantity 為股數；"
-                      "recent_trades 的 price、amount 為原幣"]}
+            "trades_count": len(markers), "recent_trades": markers[-10:], "notes": notes}
 
 
 def search_instruments(ctx: ToolContext, args: dict[str, Any]) -> Any:

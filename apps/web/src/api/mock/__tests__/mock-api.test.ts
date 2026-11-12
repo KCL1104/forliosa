@@ -230,4 +230,15 @@ describe("資料來源與授權", () => {
     const p = await createMockAdapter({ latency: [0, 0], policy: "personal" }).getAttributions()
     expect(p.datasets.some((d) => !d.commercial)).toBe(true)
   })
+
+  it("美股的台幣金額附上中央銀行收盤匯率的顯名聲明", async () => {
+    const fx = "中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版"
+    const api = createMockAdapter({ latency: [0, 0] })
+    expect((await api.getAttributions()).datasets.map((d) => d.attribution)).toContain(fx)
+    const holdings = await api.getHoldings()
+    const us = holdings.find((h) => h.currency === "USD")!
+    expect((await api.getPosition(us.symbol))!.sources).toEqual(["本系統帳本", fx])
+    const tw = holdings.find((h) => h.currency === "TWD")!
+    expect((await api.getPosition(tw.symbol))!.sources).toEqual(["本系統帳本"])
+  })
 })

@@ -50,11 +50,13 @@ FX_FALLBACK = Decimal("31.5")
 
 
 class FxBook:
-    """TWD per unit of currency on a date (last known rate on or before the date).
+    """TWD per unit of currency on a date (last known rate on or before the date; before the series begins, its
+    first rate).
 
-    Source: TAIFEX 每日外幣參考匯率 from the archive when ``datapolicy.dataset_served("taifex-openapi/fx")`` allows
-    it (a ``conditional`` dataset: under commercial only with TAIFEX_CONDITIONAL_CONFIRMED=true), FinMind under a
-    personal opt-in, demo data under personal; otherwise the documented fixed fallback 31.5 (``fixed``).
+    Source: 中央銀行〈銀行間新臺幣對美元收盤匯率〉 from the archive (``fx_rates`` source ``cbc-opendata``, daily since
+    2008-01-02, OGDL), any policy. Only when the archive has none: FinMind under a personal opt-in, demo data under
+    personal; otherwise the documented fixed fallback 31.5 (``fixed``). TAIFEX 每日外幣參考匯率 is archived but
+    never used here.
     """
 
     def __init__(self, series: dict[date, Decimal] | None = None, is_demo: bool = False, source: str = ""):
@@ -90,6 +92,10 @@ class FxBook:
             return Decimal(1)
         self.used_usd = True
         return self._rates[-1] if self._rates else FX_FALLBACK
+
+    def latest_point(self) -> tuple[date, Decimal] | None:
+        """The newest (date, rate) of the series; None when the fixed 31.5 is used."""
+        return (self._dates[-1], self._rates[-1]) if self._dates else None
 
 
 @dataclass

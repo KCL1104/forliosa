@@ -6,10 +6,11 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   and writes the latest real closes of tracked symbols into ``prices_daily``.
 * ``daily_archive`` — 08:10 (today's reference prices, notices), 14:40 (closes, PER/PBR, events, indices) and
   21:40 (margin, institutional flows, financial statements, company profiles and dividend resolutions, and the
-  TAIFEX datasets: futures / options reports, 三大法人, large traders, put/call ratio, FX, margins when changed)
-  on trading days: ``forliosa.archive`` (official open data only; idempotent upserts). The official TWSE
-  calendar is reloaded after each run. TAIFEX books the night session to the next trading day, so one evening
-  run covers it (no early-morning job).
+  TAIFEX datasets: futures / options reports, 三大法人, large traders, put/call ratio, FX, margins when changed;
+  and group ``cbc``: the central bank's USD/TWD closing rate, published the same afternoon — the first run
+  backfills its whole history since 2008) on trading days: ``forliosa.archive`` (official open data only;
+  idempotent upserts). The official TWSE calendar is reloaded after each run. TAIFEX books the night session to
+  the next trading day, so one evening run covers it (no early-morning job).
 * ``weekly_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable), TAIFEX final
   settlement prices and SSF / SSO lists, and the stale-endpoint check (twtazu_od, t187ap09_L).
 * ``sec_archive`` — every day 07:50 Taipei (after the US close, when the day's 8-Ks and 10-Qs are in): SEC EDGAR
@@ -55,7 +56,7 @@ from forliosa.timeutil import TAIPEI, is_tw_trading_day, now_taipei
 log = logging.getLogger("forliosa.worker")
 
 # Archive groups per run (forliosa.archive.JOB_GROUPS).
-EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex"]
+EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex", "cbc"]
 WEEKLY_GROUPS = ["tdcc", "weekly"]
 SEC_GROUPS = ["sec"]
 

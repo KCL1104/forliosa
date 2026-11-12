@@ -21,6 +21,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import DATASETS, Policy, attribution, dataset_served, source_clause
+from forliosa.marketdata import cbc
 from forliosa.marketdata.base import (
     BaseProvider,
     Candle,
@@ -49,7 +50,7 @@ class ArchiveProvider(BaseProvider):
                  taifex_confirmed: bool | None = None):
         self.policy = policy
         self.session_fn = session_fn
-        # TAIFEX_CONDITIONAL_CONFIRMED (None: read the setting at call time); gates conditional datasets (FX).
+        # TAIFEX_CONDITIONAL_CONFIRMED (None: read the setting at call time) for ``served`` (conditional datasets).
         self.taifex_confirmed = taifex_confirmed
         # (method, symbol) -> source keys of the rows the last answer used (twse-openapi, finmind …),
         # so responses can list the real sources instead of "archive".
@@ -146,15 +147,22 @@ class ArchiveProvider(BaseProvider):
         return [(r.date, r.close) for r in rows] or None
 
     def fx_history(self, pair: str, start: date, end: date) -> dict[date, Decimal] | None:
-        """TAIFEX 每日外幣參考匯率 (``fx_rates``) — a ``conditional`` dataset: only when it may be served."""
+        """USD/TWD from 中央銀行〈銀行間新臺幣對美元收盤匯率〉 only (``fx_rates`` rows with source ``cbc-opendata``,
+        OGDL): the rows in [``start``, ``end``] plus the newest row before ``start``, so the first day has a rate
+        however long ago the series last moved. An archive that stopped (worker down, renamed fields) thus carries
+        its last rate forward for everyone instead of looking empty to a recent ``start`` (fixed 31.5). TAIFEX
+        每日外幣參考匯率 rows in the same table are archived but never used for valuation (product owner
+        2026-11-12)."""
         from forliosa.models import FxRate
 
-        if not self.served("taifex-openapi/fx"):
+        if pair != cbc.PAIR:
             return None
+        series = self._filter(select(FxRate).where(FxRate.pair == pair, FxRate.source == cbc.SOURCE), FxRate)
         with self.session_fn() as db:
-            stmt = select(FxRate).where(FxRate.pair == pair, FxRate.date >= start - timedelta(days=10),
-                                        FxRate.date <= end)
-            rows = list(db.scalars(self._filter(stmt, FxRate)))
+            rows = list(db.scalars(series.where(FxRate.date >= start, FxRate.date <= end).order_by(FxRate.date)))
+            before = db.scalar(series.where(FxRate.date < start).order_by(FxRate.date.desc()).limit(1))
+        if before is not None:
+            rows.insert(0, before)
         self._remember("fx_history", pair, rows)
         return {r.date: r.rate for r in rows} or None
 

@@ -495,7 +495,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         rate = xirr(xirr_flows(points, si, ei))
     if md.policy == "commercial" and not b_closes:
         notes.append(f"基準 {bench_name} 目前沒有可商用的資料")
-    notes.extend(fx_notes(fx, md))
+    notes.extend(fx_notes(fx))
     vol = annualized_volatility(active_returns)
     return {
         "range": range_,
@@ -518,22 +518,36 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     }
 
 
-FX_PENDING_NOTE = ("USD/TWD 以固定 31.5 換算：期交所〈每日外幣參考匯率〉已存檔，但商用授權待期交所確認，"
-                   "確認前不使用（TAIFEX_CONDITIONAL_CONFIRMED）")
-FX_MISSING_NOTE = "USD/TWD 以固定 31.5 換算（沒有可用的匯率資料）"
+FX_MISSING_NOTE = "USD/TWD 以固定 31.5 換算：還沒有中央銀行〈銀行間新臺幣對美元收盤匯率〉的存檔"
+FX_STALE_DAYS = 14  # longer than any Taiwan market closure (Lunar New Year), so only a stopped archive trips it
 
 
-def fx_notes(fx: FxBook, md: MarketData) -> list[str]:
-    """How USD amounts were converted: the TAIFEX reference rate (with its attribution) or the fixed 31.5."""
-    from forliosa.datapolicy import dataset_served, labels, tagged
+def fx_notes(fx: FxBook, today: date | None = None) -> list[str]:
+    """How USD amounts were converted: the central bank's closing rate (its attribution; FinMind / demo data only
+    under personal), or the fixed 31.5 when there is no series. A series whose newest rate is
+    :data:`FX_STALE_DAYS` or more days before ``today`` (「比今天早 14 天以上」) says so (later days reuse its last
+    rate)."""
+    from forliosa.datapolicy import labels, tagged
 
     if not fx.used_usd:
         return []
-    if fx.fixed:
-        return [FX_PENDING_NOTE if not dataset_served("taifex-openapi/fx", md.policy) else FX_MISSING_NOTE]
-    if "taifex-openapi" in fx.source:
-        return ["USD/TWD 匯率：" + "、".join(labels(tagged(fx.source, "fx")))]
-    return []
+    point = fx.latest_point()
+    if point is None:
+        return [FX_MISSING_NOTE]
+    notes = ["USD/TWD 匯率：" + "、".join(labels(tagged(fx.source, "fx")))] if fx.source else []
+    if point[0] <= (today or today_taipei()) - timedelta(days=FX_STALE_DAYS):
+        notes.append(f"USD/TWD 匯率只到 {point[0].isoformat()}（{point[1].normalize():f}），之後的日子沿用這個匯率")
+    return notes
+
+
+def fx_tool_notes(fx: FxBook, today: date | None = None) -> list[str]:
+    """For AI tool outputs: :func:`fx_notes` plus the rate behind today's TWD values of US holdings."""
+    notes = fx_notes(fx, today)
+    point = fx.latest_point()
+    if fx.used_usd and point is not None:
+        notes.append(f"美股市值以 {point[0].isoformat()} 的 USD/TWD {point[1].normalize():f} 換算成新台幣；"
+                     "成本、已實現損益與股利用各交易日的匯率")
+    return notes
 
 
 # -- upcoming (本週事項) ---------------------------------------------------------------------------

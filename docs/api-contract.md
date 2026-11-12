@@ -310,6 +310,7 @@
 ## 績效計算定義（後端實作依據）
 
 - 投資組合價值 `V_t`：當日收盤後所有持股市值（換算成台幣）；第一版不含現金部位。
+- 美股換算成台幣：USD/TWD 一律用中央銀行〈銀行間新臺幣對美元收盤匯率〉（當天或之前最近一個營業日的收盤匯率；見「匯率」）。成本、賣出、股利用各自交易日的匯率，市值用最新匯率。
 - 每日報酬：`r_t = (V_t + O_t) / (V_{t-1} + I_t) - 1`
   - `I_t`（流入，視為開盤前發生）：當日買進成本（含手續費）。
   - `O_t`（流出，視為收盤後發生）：當日賣出淨收入（扣手續費與證交稅）、收到的現金股利（扣二代健保）。
@@ -388,6 +389,7 @@
 - **授權狀態**：每個資料集標 `ogdl` 或 `conditional`。期交所〈期貨每日交易行情〉〈選擇權每日交易行情〉〈每日外幣參考匯率〉〈選擇權大額交易人未沖銷部位資料〉
   等在 data.gov.tw 找不到對應的開放授權資料集，標 `conditional`：**照常存檔，但 `DATA_POLICY=commercial` 下不顯示**，直到
   `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`，產品負責人取得期交所書面確認後設定）。前端遇到未顯示的部分會拿到空陣列／`null`＋`notes`。
+  〈每日外幣參考匯率〉只存檔、不再用來換算（USD/TWD 改用中央銀行，見「匯率」）。
 
 | 方法 | 路徑 | 回傳 |
 |---|---|---|
@@ -399,11 +401,27 @@
   〈上市公司股利分派情形〉；上櫃公司沒有開放來源（櫃買資料集 2021-08 停更），只有除權息預告。
 - `/instruments/{symbol}/events`：`type` 多 `dividend_resolution`（日期是董事會日）。
 - `/instruments/{symbol}/overview`、`/instruments/{symbol}`：多 `listed_date`；`market_cap`、`shares_outstanding` 改用證交所／櫃買〈公司基本資料〉的已發行普通股數（市值 = 股數 × 最新收盤）。
-- `/portfolio/performance`：`benchmark` 可用 `^TAIEXTR`（自建存檔：證交所 `MI_INDEX`／`MFI94U`）與 `^TPEXTR`（櫃買 `tpex_reward_index`），`benchmark.twr` 不再是 `null`（存檔自 2026-11-02 起）；有美股時 `notes` 說明 USD/TWD 的來源或固定 31.5。
+- `/portfolio/performance`：`benchmark` 可用 `^TAIEXTR`（自建存檔：證交所 `MI_INDEX`／`MFI94U`）與 `^TPEXTR`（櫃買 `tpex_reward_index`），`benchmark.twr` 不再是 `null`（存檔自 2026-11-02 起）；有美股時 `notes` 說明 USD/TWD 的來源（見「匯率」）。
 - `Quote.reference_price`／`limit_up`／`limit_down`：上櫃股票除權息日優先用櫃買〈上櫃股票除權除息計算結果表〉的官方值。
 - `/meta/attributions`：每筆多 `license_status`、`license_basis`、`served`、`last_updated`、`last_fetched`；最上層多 `taifex_conditional_confirmed`、
   `conditional[]`（已存檔但未顯示的資料集與原因）、`stale[]`（停更端點與最後資料日期）。`datasets` 仍只列目前顯示的資料集。
 - AI：新工具 `get_derivatives_overview`（唯讀、沒有參數、不含使用者資料）。
+
+### 匯率（2026-11-12）：中央銀行〈銀行間新臺幣對美元收盤匯率〉
+產品負責人決定（[`docs/handoff.md`](handoff.md) §3.3）；細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 匯率改用中央銀行開放資料」。
+沒有新端點，也沒有改欄位，只換了 USD/TWD 的來源與說明文字。
+
+- **來源**：中央銀行〈銀行間新臺幣對美元收盤匯率〉（data.gov.tw 7232，政府資料開放授權條款第 1 版），每個營業日下午公布，歷史從 2008-01-02 起，
+  自建存檔每天 21:40 更新。任何 `DATA_POLICY` 都用它；取代原本的固定 31.5 與期交所〈每日外幣參考匯率〉（兩者數字相同，但期交所的授權仍是「有條件」）。
+- **換算規則**：某天的匯率 = 當天或之前最近一個營業日的收盤匯率（假日沿用前一個營業日）；2008-01-02 以前的交易用 2008-01-02 的匯率。
+  只有在完全沒有存檔時才用固定 31.5，並在 `notes` 說明；存檔停更時沿用最後一筆匯率（加下面的停更說明），不會退回 31.5。
+- `Performance.notes`（有美股時）：「USD/TWD 匯率：中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版」；
+  沒有存檔時「USD/TWD 以固定 31.5 換算：還沒有中央銀行〈銀行間新臺幣對美元收盤匯率〉的存檔」；最新匯率比今天早 14 天以上（含 14 天）時再加
+  「USD/TWD 匯率只到 YYYY-MM-DD（匯率），之後的日子沿用這個匯率」。前端照原文顯示（`DataNotes`）。
+- `/instruments/{symbol}/position`：美股的 `sources` 多一筆上面的顯名聲明（台幣金額用到匯率）。
+- `/meta/attributions`：`datasets` 多 `cbc-opendata/fx`（`agency: "中央銀行"`、`license_status: "ogdl"`、`license_basis: "data.gov.tw 7232"`、
+  `last_updated` = 存檔最新的匯率日期）；期交所 `taifex-openapi/fx` 仍在 `conditional[]`，`used_for` 改為「只存檔」。
+- AI 工具 `get_portfolio_summary`、`get_holdings`、`get_position`（美股）的 `notes` 多匯率來源與「美股市值以 YYYY-MM-DD 的 USD/TWD X 換算成新台幣」。
 
 ## AI（M4）
 

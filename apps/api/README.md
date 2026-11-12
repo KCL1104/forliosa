@@ -77,7 +77,7 @@ uv run python -m forliosa.worker
 | 時間 | 工作 |
 |---|---|
 | 08:10、14:40 | 存檔：證交所、櫃買 OpenAPI（收盤、本益比、參考價與漲跌停、融資融券、上櫃三大法人與外資持股、除權息預告、注意／處置、重大訊息、股東會、月營收、證交所新聞、ETF 基本資料、休市日、指數與報酬指數、上櫃除權息計算結果） |
-| 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`）、公司基本資料與股利決議（`t187ap03`、`t187ap45_L`），以及**期交所** OpenAPI（期貨／選擇權行情、三大法人、大額交易人、Put/Call 比、外幣參考匯率、保證金〔變動才存〕）。夜盤算在下一個交易日，所以不必清晨另跑 |
+| 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`）、公司基本資料與股利決議（`t187ap03`、`t187ap45_L`），以及**期交所** OpenAPI（期貨／選擇權行情、三大法人、大額交易人、Put/Call 比、外幣參考匯率、保證金〔變動才存〕）與**中央銀行**〈銀行間新臺幣對美元收盤匯率〉（群組 `cbc`；第一次執行回補 2008 年起的全部歷史）。夜盤算在下一個交易日，所以不必清晨另跑 |
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
@@ -91,7 +91,7 @@ uv run python -m forliosa.worker
 
 ```bash
 uv run python -m forliosa.archive run                      # 執行一次全部存檔（約 4 分鐘；證交所每 3 秒、櫃買、集保與期交所每 2 秒一次）
-uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、companies、financials、taifex、tdcc、weekly
+uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、companies、financials、taifex、cbc、tdcc、weekly
 ```
 
 只會連線到白名單內的網址（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`）：`openapi.twse.com.tw`、
@@ -196,7 +196,7 @@ src/forliosa/
 
 **`DATA_POLICY`**（預設 `commercial`）：
 
-- `commercial`（預設）：只用可合法商用的資料——政府開放資料（證交所／櫃買／期交所 OpenAPI、集保開放資料）、shioaji-data 官方檔，
+- `commercial`（預設）：只用可合法商用的資料——政府開放資料（證交所／櫃買／期交所 OpenAPI、集保開放資料、中央銀行匯率）、shioaji-data 官方檔，
   以及由它們建立的自建存檔。期交所資料集中**授權「有條件」**的（期貨／選擇權每日交易行情、每日外幣參考匯率、選擇權大額交易人、
   最後結算價、保證金、股票期貨／選擇權標的：data.gov.tw 找不到對應的開放授權資料集）照常存檔，但**不顯示**，直到產品負責人取得
   期交所書面確認並設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`；詢問信見 [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)）。**從不使用示範資料**：存檔還不夠時回空資料並在 `notes` 說明「資料累積中：自 YYYY-MM-DD 起存檔」。
@@ -218,8 +218,9 @@ src/forliosa/
 |---|---|---|
 | 證交所／櫃買中心 OpenAPI | 收盤行情、本益比、參考價與漲跌停、融資融券、除權息預告、注意／處置、重大訊息、股東會、月營收、季報、休市日、證交所新聞、ETF 基本資料、**指數與報酬指數**（`MI_INDEX`、`MFI94U`、`tpex_index`、`tpex_reward_index` → 基準 `^TAIEXTR`、`^TPEXTR`）、**上市股利決議**（`t187ap45_L`：盈餘／法定公積／資本公積分列）、**公司基本資料**（`t187ap03_L`、`mopsfin_t187ap03_O`：已發行股數 → 市值、產業、上市日）、**上櫃除權息計算結果**（`tpex_exright_daily`：官方參考價）；櫃買另有個股三大法人與外資持股（都只有最新一天，每天存檔） | 政府資料開放授權條款第 1 版，可商用，**須顯名** |
 | 期交所 OpenAPI | 三大法人（5 個依日期資料集）、期貨大額交易人、臺指選擇權 Put/Call 比 → `/derivatives/overview`、AI 工具 `get_derivatives_overview` | 同上（data.gov.tw 11592–11600、11337／11338、11322） |
-| 期交所 OpenAPI（有條件） | 期貨／選擇權每日交易行情（含夜盤）、每日外幣參考匯率（USD/TWD）、選擇權大額交易人、最後結算價、保證金、股票期貨／選擇權標的 | 推定 OGDL，但 data.gov.tw 沒有個別資料集：**存檔但不顯示**，`TAIFEX_CONDITIONAL_CONFIRMED=true` 後才顯示 |
+| 期交所 OpenAPI（有條件） | 期貨／選擇權每日交易行情（含夜盤）、每日外幣參考匯率（只存檔：USD/TWD 改用中央銀行）、選擇權大額交易人、最後結算價、保證金、股票期貨／選擇權標的 | 推定 OGDL，但 data.gov.tw 沒有個別資料集：**存檔但不顯示**，`TAIFEX_CONDITIONAL_CONFIRMED=true` 後才顯示 |
 | 集保開放資料 | 股權分散表（只有當週，每週存檔） | 同上 |
+| 中央銀行開放資料（`cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day`） | 〈銀行間新臺幣對美元收盤匯率〉：USD/TWD（美股換算新台幣；2008-01-02 起每個營業日） | 同上（data.gov.tw 7232） |
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
 | 示範資料（demo） | personal 的缺資料備援；commercial 只提供商品名稱清單 | 模擬資料，`is_demo: true` |
@@ -233,8 +234,7 @@ src/forliosa/
 | 上市股票個股三大法人、外資持股 | `chips.institutional`／`foreign_holding_pct` 空＋`notes` | 證交所 OpenAPI 沒有；Data E-Shop 付費（約 NT$3,000／月起）或書面同意。上櫃股票有（櫃買 OpenAPI） |
 | 開始存檔前的歷史（日線、本益比、法人、融資） | 只回已存檔的部分，`notes`「資料累積中：自 … 起存檔」 | 官方 OpenAPI 只給最新一天；網站回補要同意 |
 | 績效 `/portfolio/performance` | 持股期間沒有每天的真實收盤價時 `series: []`＋`notes`；之後從第一個完整存檔日開始計算 | 同上 |
-| 美股價格、美股績效 | `price: null`（以成本計值，`is_demo: false`）、績效空＋`notes` | 沒有可商用的美股行情來源（SEC EDGAR 基本面、匯率待產品負責人決定） |
-| USD/TWD 匯率 | 固定 31.5，績效 `notes` 說明 | 期交所〈每日外幣參考匯率〉已存檔，授權「有條件」：`TAIFEX_CONDITIONAL_CONFIRMED=true` 後自動改用；央行／臺銀未驗證 |
+| 美股價格、美股績效 | `price: null`（以成本計值，`is_demo: false`）、績效空＋`notes` | 沒有可商用的美股行情來源（SEC EDGAR 基本面待實作） |
 | 期貨行情（台指期、夜盤） | `/derivatives/overview.futures: []`、`/derivatives/futures/{code}/history` 空＋`notes` | 同上（期交所〈期貨每日交易行情〉授權待確認） |
 | 基準指數 `^TAIEXTR`、`^TPEXTR` 的早期歷史 | 只有 2026-11-02 之後 | 報酬指數 OpenAPI 只給當月；更早要 FinMind（personal）或購買 |
 | 上櫃公司的股利決議 | 上櫃股票只有除權息預告後才出現在 `/dividends` | 櫃買 `mopsfin_t187ap39_O` 停在 2021-08 |

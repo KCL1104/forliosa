@@ -53,7 +53,8 @@ def test_evening_and_weekly_runs_include_the_new_groups():
     from forliosa.archive import JOB_GROUPS
     from forliosa.worker import EVENING_GROUPS, SEC_GROUPS, WEEKLY_GROUPS, Worker
 
-    assert {"taifex", "companies", "financials"} <= set(EVENING_GROUPS) and set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
+    assert {"taifex", "cbc", "companies", "financials"} <= set(EVENING_GROUPS)
+    assert set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
     assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) == set(JOB_GROUPS)
     # SEC EDGAR runs every day (US filings do not follow the Taiwan trading calendar), after the US close
     job = next(j for j in Worker(md=object()).jobs if j.name == "sec_archive")  # type: ignore[arg-type]

@@ -146,6 +146,19 @@ def test_conditional_taifex_datasets_are_gated_under_commercial():
     assert is_commercial_source("taifex-openapi")
 
 
+def test_central_bank_fx_is_open_data_with_its_attribution():
+    from forliosa.datapolicy import DATASETS, allowed_sources, attribution, dataset_served
+
+    ds = DATASETS["cbc-opendata/fx"]
+    assert (ds.agency, ds.title, ds.license_status, ds.basis) == (
+        "中央銀行", "銀行間新臺幣對美元收盤匯率", "ogdl", "data.gov.tw 7232")
+    assert attribution(ds, 2026) == "中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版"
+    assert label("cbc-opendata/fx") == attribution(ds)
+    assert label("cbc-opendata").startswith("中央銀行〈開放資料〉（")
+    assert is_commercial_source("cbc-opendata") and "cbc-opendata" in allowed_sources("commercial")
+    assert dataset_served("cbc-opendata/fx", "commercial", confirmed=False)
+
+
 def test_fetcher_allows_taifex_data_endpoints_only():
     from forliosa.marketdata.http import DEFAULT_LIMITER, url_allowed
 
