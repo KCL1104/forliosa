@@ -117,6 +117,70 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 
 測試：`tests/api/test_deploy_config.py`。部署步驟見 [`docs/deploy.md`](../../docs/deploy.md)。
 
+
+## 2026-11-12 重新設計：個股頁、自選、本週事項（資料來源政策）
+
+### 資料來源政策 `DATA_POLICY`
+
+| | `personal`（預設） | `commercial` |
+|---|---|---|
+| 可用來源 | 全部；FinMind、證交所 MIS、證交所網站（非 OpenAPI）在 `sources` 標「（非商用）」 | 只用政府開放資料：證交所／櫃買 OpenAPI、集保開放資料、shioaji-data 官方檔，以及由它們建立的自建存檔 |
+| 不建立的 provider | — | `twse_mis`、`finmind`（`MarketData` 也會再過濾一次） |
+| 存檔中來自 FinMind／證交所網站的資料列 | 可用 | 一律略過（`archive` 依 `source` 欄位過濾） |
+| 盤中走勢 `/intraday` | 持股與自選每 60 秒存一點（MIS） | `points: []`，`notes` 說明沒有授權的即時來源 |
+| 新聞 `/news` | FinMind 標題（每筆 `sources: ["FinMind（非商用）"]`） | `[]` |
+| 上市股票三大法人、外資持股 | 證交所網站 T86／MI_QFIIS（逐日全市場）＋ FinMind 回補 | 不提供（OpenAPI 沒有個股資料），`chips.notes` 說明 |
+
+兩種模式的主要路徑都是「官方開放資料＋自建存檔」，FinMind 只做回補與備援。
+
+### 每個回應的 `sources`
+
+- 物件型回應（`overview`、`intraday`、`chips`、`financials`、`position`、`why`、`Quote`、`History`、`Valuation`）多了
+  `sources: string[]`，是給使用者看的標示文字（例如「臺灣證券交易所 OpenAPI（政府資料開放授權條款第 1 版）」）。
+  非商用來源一律以「（非商用）」結尾。前端可以直接列出，不要自己翻譯。
+- **陣列型回應**（`events`、`news`、`watchlist`、`/portfolio/upcoming`）無法加最上層欄位，所以**逐筆**帶 `sources`
+  （與先前 `DividendRecord.is_demo` 的做法一致）。
+- `as_of` 只在有「報價時間」意義的回應出現（`overview`、`position`、`why`、`Quote`）；籌碼、財報、事件本身就是帶日期的資料。
+
+### 報價：參考價與漲跌停
+
+- `Quote`（以及 `/quotes`、SSE、`Holding` 的今日損益）新增 `reference_price`、`limit_up`、`limit_down`；
+  `change`／`change_pct` 一律對 `reference_price` 計算（沒有參考價時才用 `prev_close`）。除權息日 `prev_close` 仍是真正的昨收。
+- 參考價的來源順序：①存檔的官方值（證交所 `TWT84U` 的 TodayOpeningRefPrice／TodayLimitUp／TodayLimitDown；
+  櫃買 `tpex_mainboard_daily_close_quotes` 的 NextReferencePrice／NextLimitUp／NextLimitDown，套用到下一個交易日）
+  ②報價本身帶的交易所漲跌停（MIS `u`／`w`），並用它判斷 MIS 的 `y` 在除權息日是否已經是參考價，避免重複扣股利
+  ③計算：除權息參考價 =（昨收 − 現金股利）÷（1 + 無償配股率），四捨五入到升降單位；漲跌停為**未進位價格**的 ±10%，
+  漲停無條件捨去、跌停無條件進位到該價位的升降單位。
+- 已用真實資料驗證：2330（2395 → 2630／2160）、0050（103.20 → 113.50／92.90）、6488（635 → 698／572），以及
+  2026-11-12 除息的 3680（昨收 435.50、現金 9.9147456 → 參考價 425.50、漲跌停 468.00／383.50；若從 425.50 計算跌停會錯成 383.00）。
+- 美股：`reference_price = prev_close`，`limit_up`／`limit_down` 為 `null`。
+
+### 個股端點的解讀與新增欄位
+
+| 端點 | 與合約的差異（都是新增，不影響既有欄位） |
+|---|---|
+| `overview` | 多 `symbol`。`pe`／`pb`／`dividend_yield` 是證交所／櫃買公布值（存檔，personal 時 FinMind 補舊資料）；ETF 沒有公布殖利率時以近 12 個月現金股利 ÷ 現價計算。`eps_ttm` = shioaji-data 官方季報最近四季 EPS 合計（沒有季報時用 收盤價 ÷ 本益比）。`last_cash_dividend`／`ex_dividend_date` 是**最近一次（含已公告未除息）**的現金股利。`avg_volume_3m` 為近 3 個月日均量（股）。`status.attention` = 最近一個交易日或今天被列為注意股；`status.disposition` = 今天落在處置期間內 |
+| `intraday` | 多 `notes`、`is_demo`。`points[].volume` 是**該分鐘的成交量（股）**＝累計量相減；`reference_price` 是當天的參考價。只有任何使用者的持股或自選才會累積（worker 每 60 秒）；`is_partial` = 盤中或還沒有點 |
+| `chips` | 多 `symbol`、`notes`；`range` 可用 `1M`、`3M`、`6M`、`1Y`。法人單位張（股數 ÷ 1000，保留小數）；外資持股 `pct` 是比率（0.6812）。`major_holders.buckets` 是集保 15 個持股分級（另有 `label`，例如「1,000 張以上」）；`pct` 是比率。集保只能下載當週，所以從開始存檔那週起才有資料 |
+| `financials` | 多 `symbol`、`period`、`notes`。來源是 shioaji-data 官方季報（2023Q1 起，單季數字，千元）；若存檔中有更新一季的 OpenAPI 財報（`t187ap06` 是**年初至今累計數**），以「本季累計 − 上季累計」換成單季，現金流量為 `null`。`net_income` 是歸屬母公司業主淨利；`free_cash_flow` = 營業 + 投資活動現金流量（OpenAPI／shioaji-data 沒有資本支出科目）。`annual` 只列四季齊全的年度，EPS 用第四季的全年累計 EPS |
+| `events` | 每筆多 `sources`；由新到舊排序（含未來）。範圍：過去 365 天到未來 120 天；`earnings`／`revenue_release` 是**法定期限**（季報 5/15、8/14、11/14、3/31；營收每月 10 日），只列前後 60–90 天，`detail` 會說明。`mine`：未來的除權息／發放 = 目前持有；過去的 = 該日有記股利交易（`amount_estimate` 為實際入帳金額）；其他事件 = 目前持有。除息金額未公告時 `detail` 為「金額尚未公告」 |
+| `news` | 每筆多 `sources`。FinMind `TaiwanStockNews`（最近 3 天，1 小時快取，額度用完回 `[]`）；只回標題、來源、連結、時間 |
+| `position` | 多 `symbol`、`currency`、`as_of`、`sources`、`is_demo`。金額為台幣，`avg_cost` 為原幣。`realized_pnl` 含交易與減資退款；`dividends_received` 已扣二代健保。`markers` 依交易日排序；`stock_dividend` 的 `quantity` 是實際配發股數。**目前股數為 0 一律回 `null`**（即使有已實現損益，見待確認 11） |
+| `why` | 多 `symbol`、`sources`。規則：漲跌停 > 漲跌 ≥ 3%（對參考價）、量 ≥ 20 日均量 2 倍、除權息日、處置／注意、當天重大訊息主旨含「財務報告／財報／自結損益」或「營收」。`reasons[].kind` 為 `limit_up`、`limit_down`、`price_move`、`volume`、`ex_dividend`、`disposition`、`attention`、`earnings`、`revenue_release`。最新報價不是今天時文字用日期（「11/11 上漲 3.5%」）。`headline` = 名稱 + 前兩個理由 |
+| `watchlist` | 每筆多 `sparkline_interval`（`"1m"` 盤中點、`"1d"` 最近 20 個收盤）、`sources`、`is_demo`；`quote` 可能為 `null`。`sparkline[].t` 在 `1m` 是 `"09:01"`，在 `1d` 是日期。`POST` 新增回 201、已在清單回 200（冪等）；找不到商品 422 `unknown_symbol`；最多 200 檔。`DELETE` 不在清單回 404 |
+| `/portfolio/upcoming` | 多 `account_id` 參數，每筆多 `is_demo`、`sources`。`days` 1–90。`amount_estimate` = 目前股數 × 每股現金股利（台幣、未扣二代健保）；發放日已過除息日時，若已記股利交易就用交易金額；除息金額未公告時為 `null`、標題加「（金額未公告）」。**`recurring` 目前一律不會出現**：還沒有定期定額的資料模型 |
+
+### 存檔（`python -m forliosa.archive`）
+
+- 官方 OpenAPI 只給最新一天，所以 worker 每個交易日 08:10、14:40、21:40 存檔（冪等 upsert），週六 10:00 存集保。
+- 欄位名稱全部取自真實回應（`marketdata/opendata.py` 的說明，測試 fixture 是 2026-11-12 的精簡版）。幾個容易踩到的地方：
+  `t187ap04_L` 的鍵是 `"主旨 "`（尾端有空白）；`MI_MARGN` 沒有日期欄位，21:00 前視為前一個交易日的資料；
+  `t187ap06` 損益是累計數；櫃買法人鍵名含空白（`ForeignInvestorsInclude MainlandAreaInvestors-Difference`）；
+  `announcement/notice` 沒有資料時回一筆空白列。
+- **沒有官方個股歷史**：`commercial` 下存檔只能從開始那天累積。`personal` 可用 `backfill` 從證交所網站（T86、MI_QFIIS，每日全市場，
+  每 3 秒一次，太快會回 HTTP 307）與 FinMind（逐檔，額度用完就停）回補，回補資料不會覆蓋官方資料列。
+- 證交所 OpenAPI 主機偶爾 reset 連線，存檔與 API 端的 OpenAPI provider 都會重試一次。
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。
@@ -133,3 +197,12 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 8. **FinMind**：匿名額度很小且與同一 IP 共用；建議申請 token（非商用），商業化要升級 Sponsor Pro 或換來源。
 9. **MIS 非官方端點**：偶爾回 502，商業化前必須換成有授權的即時行情。
 10. **shioaji-data AI 研究資料**（簡介、產業鏈、題材）授權待定，目前照樣顯示並標示來源。
+11. **`position` 已出清的股票**：合約寫「未持有回 null」，所以股數 0 時回 `null`，個股頁就看不到這檔的已實現損益與買賣點。
+    要不要改成「從未交易過才回 null，出清後回 `quantity: 0` 的物件」？
+12. **commercial 模式的歷史資料**：日線、股利歷史、法人等只能從開始存檔那天累積；在累積足夠之前，日線與股利會退回示範資料
+    （`is_demo: true`）。是否接受，或在 commercial 下改為「資料不足」而不顯示示範資料？
+13. **上市股票三大法人**：證交所 OpenAPI 沒有個股資料（只有櫃買有），commercial 下上市股票的法人與外資持股是空的。
+    證交所網站 T86 是否適用政府資料開放授權需要向證交所確認。
+14. **新聞來源**：只有 FinMind（非商用）；commercial 下沒有新聞。要接有授權的新聞源嗎？
+15. **定期定額**：`/portfolio/upcoming` 的 `recurring` 需要定期定額計畫的資料模型（帳戶、標的、金額、扣款日）。
+16. **財報公布日**：`earnings`／`revenue_release` 事件用法定期限；實際公布日要從重大訊息（已存檔）或 MOPS 判斷，要做嗎？

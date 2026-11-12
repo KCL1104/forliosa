@@ -37,7 +37,7 @@ from forliosa.archive import Archiver, default_fetcher, tracked_symbols, upsert
 from forliosa.db import get_engine, session_factory
 from forliosa.marketdata.base import QuoteData
 from forliosa.marketdata.service import MarketData, get_market_data
-from forliosa.models import HoldingSnapshot, Instrument, IntradayPoint, PriceDaily, Transaction
+from forliosa.models import Instrument, IntradayPoint, PriceDaily
 from forliosa.timeutil import TAIPEI, is_tw_market_open, is_tw_trading_day, now_taipei
 
 log = logging.getLogger("forliosa.worker")
@@ -81,12 +81,6 @@ def weekly_at(weekday: int, at: time):
         return now >= slot and (last is None or last < slot)
 
     return due
-
-
-def held_symbols(db: Session) -> list[str]:
-    syms = set(db.scalars(select(Transaction.symbol).where(Transaction.symbol.is_not(None)).distinct()))
-    syms |= set(db.scalars(select(HoldingSnapshot.symbol).distinct()))
-    return sorted(s for s in syms if s)
 
 
 def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
@@ -179,7 +173,7 @@ class Worker:
     async def after_close_refresh(self) -> None:
         with session_factory()() as db:
             n_inst = await asyncio.to_thread(refresh_instruments, db, self.md)
-            symbols = held_symbols(db)
+            symbols = tracked_symbols(db)
             n_px = await asyncio.to_thread(upsert_closes, db, self.md, symbols) if symbols else 0
         log.info("after close: %d instruments, %d closes stored", n_inst, n_px)
 

@@ -281,6 +281,7 @@
 
 依 `PRODUCT.md`、`docs/research/stock-page-research.md` 與帳本方向合約（`apps/web/.impeccable/surfaces/src-pages-ledger-ledgerpage-tsx.md`）。
 資料來源政策：**優先可商用來源**（證交所／櫃買 OpenAPI 每日存檔、shioaji-data 官方資料）；FinMind、Yahoo、MIS 只作備援並在 `sources` 標示「非商用」。所有回應帶 `sources: string[]` 與 `as_of`。
+後端實作（2026-11-12）：陣列型回應（events、news、watchlist、upcoming）的 `sources` 放在**每一筆**；`as_of` 只在有報價時間意義的回應（overview、position、why、Quote）。`DATA_POLICY=commercial` 時新聞與盤中點為空。各端點的新增欄位（`notes`、`sparkline_interval`、`label` 等）與規則見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 重新設計」。
 
 ### 報價修正
 - `Quote` 新增 `reference_price`（參考價）、`limit_up`、`limit_down`。除權息日的 `change`／`change_pct` 以參考價計算（不是昨收）。

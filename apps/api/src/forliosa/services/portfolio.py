@@ -468,8 +468,8 @@ def upcoming(state: PortfolioState, md: MarketData, days: int) -> list[dict[str,
             if ex and today <= ex <= horizon:
                 amount = r.quantity * ev.cash_dividend * r.fx if ev.cash_dividend else None
                 pending = "" if ev.cash_dividend or ev.stock_dividend else "（金額未公告）"
-                out.append({"date": ex, "type": "ex_dividend", "symbol": r.symbol,
-                            "title": f"{name} 除{'權' if ev.stock_dividend and not ev.cash_dividend else '息'}{pending}",
+                kind = "權" if ev.stock_dividend and not ev.cash_dividend else "息"
+                out.append({"date": ex, "type": "ex_dividend", "symbol": r.symbol, "title": f"{name} 除{kind}{pending}",
                             "amount_estimate": ser.money(amount), "is_demo": ev.is_demo or ans.is_demo,
                             "sources": sources})
             if pay and today <= pay <= horizon and ev.cash_dividend > 0:
