@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
 @import "@fontsource-variable/noto-sans-tc/wght.css";
-@import "@fontsource/lxgw-wenkai-tc/400.css";
+@import "./tw-kai.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -233,7 +233,8 @@
   --radius-2xl: 16px;
 
   --font-sans: "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
-  --font-ai: "LXGW WenKai TC", "Kaiti TC", "BiauKai", "DFKai-SB", serif;
+  /* AI 的話：全字庫正楷體（教育部標準字形）；拉丁字母與數字不在切片裡，落到 Noto Sans TC */
+  --font-ai: "TW-Kai", "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", sans-serif;
 
   /* 固定字級（Operate）：12・13・14・15・17・20・24・32・40・64 */
   --text-xs: 0.75rem;

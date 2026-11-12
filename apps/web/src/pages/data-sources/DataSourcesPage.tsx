@@ -98,7 +98,7 @@ export function DataSourcesPage() {
               其他
             </h2>
             <p className="max-w-prose text-md text-ink-2">
-              你的交易、持股與定期定額是你自己記下的帳（標示為「本系統帳本」）。走勢圖使用 TradingView Lightweight Charts™（Apache-2.0）；字型為 Noto Sans TC 與霞鶩文楷 TC（SIL Open Font License 1.1）。
+              你的交易、持股與定期定額是你自己記下的帳（標示為「本系統帳本」）。走勢圖使用 TradingView Lightweight Charts™（Apache-2.0）；字型為 Noto Sans TC（SIL Open Font License 1.1）與數位發展部全字庫正楷體（擇用 SIL Open Font License 1.1）。
             </p>
             <p className="max-w-prose text-md text-ink-2">
               個股頁的「新聞報導」只列媒體的原標題、媒體名稱、時間與原文連結，不轉載內文或圖片。標題主要來自 The GDELT Project 的新聞索引，以及我們自己架設、只供系統內部使用的 SearXNG 元搜尋（只查新聞）；兩者合計太少時才用 AI 網路搜尋補充。SearXNG 會自動查詢 Bing、DuckDuckGo、Brave 等搜尋引擎，這些搜尋引擎的條款不允許自動查詢：這個風險由 Forliosa 的營運者承擔，被搜尋引擎擋下時就停止查詢，不會設法繞過。媒體要求下架時，我們會移除該媒體的標題。

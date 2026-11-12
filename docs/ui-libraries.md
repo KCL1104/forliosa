@@ -26,7 +26,7 @@
 | className | clsx、class-variance-authority、tailwind-merge | `cn()`、按鈕變體 | shadcn 內建 |
 | 動畫工具 | tw-animate-css | shadcn 元件的 data-open／closed 動畫 | shadcn v4 預設 |
 | 圖示 | lucide-react | 全站 | shadcn 預設圖示庫；全站統一 1.6px 線條（和決策稿一致） |
-| 字型 | `@fontsource-variable/noto-sans-tc`、`@fontsource/lxgw-wenkai-tc` 5.3 | 全站／只給 AI 的話 | Noto Sans TC（介面與數字）；霞鶩文楷 TC（AI 的聲音：問候、回答、為什麼、分頁第一行）。兩者都自架、依 unicode-range 分片載入，只下載用到的字；不用 Google Fonts。Source Sans 3 已移除 |
+| 字型 | `@fontsource-variable/noto-sans-tc` 5.3；全字庫正楷體（自架子集，`apps/web/scripts/tw-kai/build.py`） | 全站／只給 AI 寫的話 | Noto Sans TC（介面與數字）；全字庫正楷體 TW-Kai（數位發展部，教育部標準字形，擇用 SIL OFL 1.1；只給模型寫出來的話：回答、為什麼、法人觀點、群組週報）。楷體只切漢字與全形標點，數字與拉丁字母落到 Noto Sans TC。兩者都自架、依 unicode-range 分片載入，只下載用到的字；不用 Google Fonts。霞鶩文楷 TC 已移除（「為」等字是舊字形） |
 | 主題切換 | 自寫（`hooks/use-theme.ts`＋ `index.html` 內聯腳本） | 淺色／深色／跟隨系統 | pick-ui-library 建議 next-themes，但它是為 SSR 設計；Vite SPA 用一段內聯腳本即可避免閃爍，少一個依賴 |
 
 ## 參考但沒有採用的展示性元件
