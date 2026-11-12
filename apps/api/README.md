@@ -59,6 +59,9 @@ uv run ruff check .      # lint
 - `tests/archive/`：官方資料集解析器與存檔工作（冪等）；fixture 是 2026-11-12 實際回應的精簡版。
 - `tests/domain/test_ticks.py`：升降單位、漲跌停、除權息參考價（以證交所、櫃買公布值驗證）。
 - `tests/api/`：所有端點、權限隔離（使用者只看得到自己的資料）、錯誤格式。
+- `tests/ai/`：以假的 Messages API（`tests/ai/fake_anthropic.py`，經由真正的 `anthropic` SDK）測 AI：SSE 事件、工具迴圈、
+  金鑰槽的黏著／選槽／換槽與純文字摘要（`test_routing.py`）、範圍與婉拒（`test_scope.py`）、無來源標記（`test_grounding.py`）、
+  保存期限（`test_retention.py`）、為什麼漲跌。測試永遠不會用到真的金鑰。
 
 ### 背景工作
 
@@ -74,6 +77,7 @@ uv run python -m forliosa.worker
 | 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`） |
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存） |
+| 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
@@ -103,6 +107,53 @@ DATA_POLICY=personal MARKET_DATA_PROVIDERS=archive,twse_openapi,tpex_openapi,shi
 
 每張存檔表都有 `source` 欄位；回補資料不會覆蓋官方資料列，`commercial` 下查詢會略過非商用來源的資料列。
 
+## AI（M4）
+
+AI 助理用 Anthropic Claude（預設 `claude-haiku-5-5`）＋我們自己的工具；端點與事件見
+[`docs/api-contract.md`](../../docs/api-contract.md)「AI（M4）」，設計細節與實測費用見 [`CONTRACT_NOTES.md`](CONTRACT_NOTES.md)「AI（M4）」。
+
+```bash
+uv run python -m forliosa.ai.smoke                 # 用真的金鑰跑兩題（持股、台積電新聞），印出用量、費用與每個金鑰槽的狀態
+uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉多少；不加 --dry-run 就刪除
+```
+
+**金鑰與金鑰槽**：`CLAUDE_API_KEY_1`、`CLAUDE_API_KEY_2`、`CLAUDE_API_KEY_3`（大小寫不拘，例如 `Claude_API_KEY_1`；編號就是槽號），
+每把放在各自的 Anthropic workspace，各有自己的速率限制與花費上限。只有一把時也可以用 `ANTHROPIC_API_KEY`。金鑰只從環境變數或 `.env`
+讀取，不會進資料庫、日誌或任何回應（只看得到槽號 `#1`）。
+
+- 每段對話固定用同一個槽（提示快取、thinking 區塊、網路搜尋的加密內容都只在同一個 workspace 有效）；新對話與背景工作選「餘裕」最多的槽
+  （回應的 `anthropic-ratelimit-*` 標頭、本月估計花費與預算）。
+- 槽遇到 401／403 會停用到重啟，429／529／5xx 會冷卻，達到花費上限會停到下個月；對話釘住的槽在 `AI_KEY_STICKY_WAIT_SECONDS`（5 秒）內
+  恢復就等，否則換槽並以純文字摘要接續（不帶 thinking 與加密內容）。
+- `AI_KEY_<n>_MONTHLY_BUDGET_USD`（例如 `AI_KEY_1_MONTHLY_BUDGET_USD=50`）：第 n 槽每個 UTC 月的估計花費上限（不設＝不限）。
+  建議 Console 的 workspace 花費上限當硬上限，這裡設低一點，讓對話提早換到別的槽。
+- 狀態：`GET /api/v1/ai/admin/keys`（dev 模式所有登入者；正式環境只有 `AI_ADMIN_EMAILS` 列出的帳號），列出每槽的狀態、本月花費、預算、
+  速率標頭與被 API 拒絕而停用的伺服器工具。
+
+**其他設定**（完整表格見 CONTRACT_NOTES）：
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `AI_MODEL` | `claude-haiku-5-5` | `AI_MODEL_CHAT`／`AI_MODEL_WHY` 可個別覆寫 |
+| `AI_DAILY_MESSAGE_LIMIT`、`AI_MONTHLY_TOKEN_BUDGET` | 50、3,000,000 | 每人每天提問數、每月計費 token（0＝不限） |
+| `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES`、`AI_WEB_SEARCH_ALLOWED_DOMAINS` | `true`、3、空 | 預設不限網域，由模型判斷何時搜尋、用哪些來源（只限財經資訊） |
+| `AI_WEB_FETCH_ALLOWED_DOMAINS` | `official` | 讀網頁全文只限官方網域；`*` 不限 |
+| `AI_WHY_ENABLED` | `true` | 個股頁「為什麼漲跌」的 AI 一句話（每檔每個交易日最多一次，失敗時用規則句） |
+| `AI_SCOPE_PRECHECK` | `true` | 明顯離題又沒有財經字詞的提問不呼叫模型，直接婉拒 |
+| `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天（0＝永久） |
+| `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
+| `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |
+
+**範圍**：助理只協助投資理財、台股與美股、使用者自己的持股與交易，以及 Forliosa 的用法；寫程式、一般常識、作業、翻譯、寫作、角色扮演等要求，
+用一句繁體中文婉拒並把話題帶回投資。明顯的情況（例如「幫我寫 Python 爬蟲」）在伺服器端就婉拒、不花模型費用；只要提到任何財經字詞或股票代號就交給模型判斷。
+
+**有根據才寫**：數字與事實只能來自工具結果或附引用的網路來源；用了網路搜尋的回答中，沒有引用又像新聞敘述的句子會在 `grounding` 事件列出，
+前端標「無來源」。**免責聲明**「AI 回答僅供參考，非投資建議。」由前端固定顯示（`done.disclaimer`、`/ai/usage.disclaimer`），模型不寫。
+
+**保存期限**：對話與訊息（含網路搜尋的加密內容）、草稿在最後活動 30 天後由 worker 每天刪除；`ai_usage`（token、槽號、估計費用，不含內容）保留做帳。
+
+**AI 從不寫入帳本**：記帳一律先產生草稿，使用者在畫面上確認後前端才 `POST /transactions`（`source: "ai_draft"`）。
+
 ## 專案結構
 
 ```
@@ -117,6 +168,8 @@ src/forliosa/
   services/      交易（自動稅費＋帳本驗證）、投資組合（含本週事項、出清紀錄）、個股資料、個股頁（stock.py）、自選、
                  定期定額（recurring.py）、重大訊息判讀（announcements.py）、「資料累積中」（coverage.py）
   api/           FastAPI 路由、schema、錯誤格式、session 驗證
+  ai/            AI 助理：keypool（金鑰槽）、chat（工具迴圈與 SSE）、tools、prompts、scope（離題預先檢查）、grounding（無來源標記）、
+                 store（對話、草稿、用量）、retention（保存期限）、why、suggestions、smoke
   models.py      SQLAlchemy 資料表；alembic/ 為 migration
   seed.py        示範資料；worker.py 背景排程
 ```

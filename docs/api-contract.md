@@ -340,7 +340,7 @@
 ## AI（M4）
 
 後端用 Anthropic Claude（預設 `claude-haiku-5-5`）＋我們自己的工具回答；細節與待決事項見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「AI（M4）」。
-規則：AI 只讀**目前登入者**自己的資料（工具由伺服器帶入使用者，模型無法指定別人）；數字只來自工具結果或附引用的網路來源；**AI 從不寫入帳本**，記帳一律先產生草稿，使用者簽名後前端才 `POST /transactions`（`source: "ai_draft"`）；回答最後一行附資料時間與「僅供參考，非投資建議。」；引用來源必須顯示給使用者。
+規則：AI 只讀**目前登入者**自己的資料（工具由伺服器帶入使用者，模型無法指定別人）；只回答投資理財、台美股、使用者的持股與 Forliosa 用法，其他要求一句話婉拒；數字與事實只來自工具結果或附引用的網路來源；**AI 從不寫入帳本**，記帳一律先產生草稿，使用者簽名後前端才 `POST /transactions`（`source: "ai_draft"`）；**免責聲明由前端固定顯示**在每則 AI 回答下方（文字取 `done.disclaimer` 或 `GET /ai/usage` 的 `disclaimer`，模型不會自己寫）；引用來源必須顯示給使用者，`grounding` 標出的句子要標「無來源」。對話、訊息與草稿在最後活動 30 天後刪除（`AI_RETENTION_DAYS`）；用量紀錄保留但不含內容。
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
@@ -351,8 +351,9 @@
 | GET | `/ai/drafts?status=pending` | `DraftCard[]`；`status`：`pending`（預設）、`signed`、`discarded`、`all` |
 | PATCH | `/ai/drafts/{id}` | body `{"status": "signed", "transaction_id": "txn_…"}`、`{"status": "discarded"}`，或復原後 `{"status": "pending"}`；回 `DraftCard` |
 | GET | `/ai/suggestions?route=/stock/2330.TW&symbol=2330.TW` | `Suggestions`（規則產生，不呼叫模型） |
-| GET | `/ai/usage` | `Usage` |
-| GET | `/instruments/{symbol}/why` | 原有欄位＋`ai`、`citations`、`rule_headline`（見下方） |
+| GET | `/ai/usage` | `Usage`（含固定的 `disclaimer`） |
+| GET | `/ai/admin/keys` | `KeySlots`（API 金鑰槽狀態，不含金鑰；只在 `FORLIOSA_ENV=dev`／`test` 或 `AI_ADMIN_EMAILS` 列出的帳號，其他人 404） |
+| GET | `/instruments/{symbol}/why` | 原有欄位＋`ai`、`citations`、`rule_headline`（見下方；AI 句預設開啟） |
 
 ### `POST /ai/chat` 的事件
 
@@ -365,10 +366,13 @@
 | `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」 |
 | `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字"}` | 網路來源引用（已去重），顯示在回答下方 |
 | `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |
+| `grounding` | `{"items": [GroundingItem]}` | 只在這一輪用了 `web_search`／`web_fetch` 時、最後一個 `text` 之後送：沒有引用又像新聞敘述的句子，前端在該句標「無來源」（同一份也存在 `ThreadMessage.grounding`） |
 | `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
-| `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}}` | 這一輪所有模型呼叫的合計 |
+| `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 回答僅供參考，非投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
 
-串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；429 `ai_daily_limit`（今天的提問數已達上限）／`ai_monthly_budget`（本月用量已達上限）；503 `ai_unavailable`（沒有設定 API 金鑰）。
+串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；429 `ai_daily_limit`（今天的提問數已達上限，每天 50 題）／`ai_monthly_budget`（本月用量已達上限，每月 300 萬計費 token）；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完）。
+
+後端有多把 API 金鑰（各在自己的 workspace）：每段對話固定用同一把；那把不能用時自動換到別把，並以先前對話的純文字接續（前端不需要處理，`ThreadDetail` 不變）。
 
 ```json
 // DraftCard
@@ -394,8 +398,13 @@
  "messages": [
    {"id": "12", "turn_id": "trn_…", "role": "user", "text": "台積電今天為什麼漲？", "citations": [], "drafts": [], "tools": [], "error": null, "at": "…"},
    {"id": "15", "turn_id": "trn_…", "role": "ai", "text": "…", "citations": [{"url", "title", "cited_text"}],
-    "drafts": [DraftCard], "tools": [{"name": "web_search", "label": "搜尋網路：台積電"}], "error": null, "at": "…"}
+    "drafts": [DraftCard], "tools": [{"name": "web_search", "label": "搜尋網路：台積電"}],
+    "grounding": [GroundingItem], "error": null, "at": "…"}
  ]}
+
+// GroundingItem（start／end 是 text 裡的 Unicode code point 位置；text 是那一句本身）
+{"index": 2, "start": 22, "end": 49, "text": "董事會批准投資 Anthropic 與 OpenAI。", "reason": "uncited_news_claim",
+ "signals": ["verb:批准", "actor:董事會"]}
 
 // Suggestions（questions 最多 3 題；介面上不加「本頁建議」之類的說明字樣）
 {"route": "stock",                   // "ledger" | "stock" | "groups" | "history" | "other"
@@ -408,7 +417,19 @@
 // Usage（上限為 null 表示不限制）
 {"date": "2026-11-12", "month": "2026-11", "messages_today": 3, "daily_message_limit": 50, "messages_remaining": 47,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
- "model": "claude-haiku-5-5", "available": true}
+ "model": "claude-haiku-5-5", "available": true, "disclaimer": "AI 回答僅供參考，非投資建議。"}
+
+// KeySlots（GET /ai/admin/keys；slot = CLAUDE_API_KEY_<n> 的 n；不含金鑰）
+{"month": "2026-11",                  // UTC 月（預算以 UTC 月計）
+ "sticky_wait_seconds": 5.0,
+ "slots": [{"slot": 1, "configured": true,
+            "state": "ok",            // ok | cooling | disabled | exhausted | over_budget | not_configured
+            "retry_in_seconds": null, "workspace_id": "wrkspc_…", "month_cost_usd": 0.4211, "month_calls": 312,
+            "monthly_budget_usd": 50.0, "budget_remaining_usd": 49.5789, "headroom": 0.97,
+            "rate_limits": {"tokens": {"remaining": 970000, "limit": 1000000}}, "threads": 41, "failures": 0,
+            "last_error": null}],    // 例如 "429 rate_limit_error"
+ "server_tools": ["web_search_20260318", "web_fetch_20260318"],
+ "excluded_tools": [{"type": "web_fetch_20260318", "name": "web_fetch", "reason": "API 的錯誤訊息", "at": "…"}]}
 
 // /instruments/{symbol}/why 新增欄位
 {"…原有欄位": "…", "ai": true, "headline": "AI 寫的一句話（ai=false 時是規則句）",
