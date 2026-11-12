@@ -6,9 +6,9 @@
   the company's English short name (t187ap03 英文簡稱 / mopsfin ``Symbol``) and its code, ``sourcecountry:taiwan``
   for Taiwan stocks, ``sourcelang:english`` for US stocks. One IP may ask once every 5 s; a 429 stops the source
   (:class:`SourceBlocked`) and the caller backs off.
-* :class:`SearxngSource` — a self-hosted SearXNG's JSON API, only when ``NEWS_SEARXNG_URL`` is set (off by
-  default). A 429 / 403 or an upstream CAPTCHA / "too many requests" stops it for ``NEWS_SEARXNG_BACKOFF_MINUTES``;
-  never another IP, never a disguised client.
+* :class:`forliosa.news.searxng.SearxngSource` — our private SearXNG's JSON API, **on by default** (product owner
+  2026-11-12, third round): Chinese queries, news engines only, one query at a time, per-engine pauses; see that
+  module.
 * :class:`YahooRssSource` — Yahoo股市 RSS, only under ``DATA_POLICY=personal`` (its terms allow personal,
   non-commercial use only). The item description is read only to name the original outlet (「MoneyDJ新聞」
   「【財訊快報／…」「（中央社記者…」) and is never stored.
@@ -41,7 +41,18 @@ BLOCK_STATUSES = frozenset({403, 429, 451})
 
 
 class SourceBlocked(ProviderUnavailable):
-    """The source refused us (429, 403, a CAPTCHA, "please limit requests"): stop asking it for a while."""
+    """The source refused us (429, 403, a CAPTCHA, "please limit requests"): stop asking it for a while.
+
+    ``until`` (optional) is when it may be asked again, when the source knows (every SearXNG engine paused)."""
+
+    def __init__(self, message: str, until: datetime | None = None):
+        super().__init__(message)
+        self.until = until
+
+
+class SourceDown(ProviderUnavailable):
+    """The source is unreachable or unhealthy (connection refused, DNS, timeout, 5xx, every upstream engine down):
+    not a refusal, but asking again for every symbol would only fail again — pause it, try later."""
 
 
 @dataclass(frozen=True)
@@ -169,67 +180,6 @@ class GdeltSource:
                 raise SourceBlocked(f"GDELT HTTP {exc.status}") from exc
             raise
         return parse_gdelt(raw)
-
-
-# -- SearXNG -------------------------------------------------------------------------------------------------
-_BLOCK_WORDS = ("captcha", "too many requests", "access denied", "suspended", "blocked", "rate limit")
-
-
-def parse_searxng(data: dict[str, Any]) -> list[RawItem]:
-    """SearXNG ``/search?format=json`` -> raw items (``title``, ``url``, ``publishedDate``; ``content`` and
-    ``img_src`` are ignored). A result without a date is skipped (the list shows when it was published). An
-    upstream engine that answered with a CAPTCHA or "too many requests" blocks the source."""
-    reasons = [str(r[1] if isinstance(r, list | tuple) and len(r) > 1 else r).lower()
-               for r in data.get("unresponsive_engines") or []]
-    if any(w in r for r in reasons for w in _BLOCK_WORDS):
-        raise SourceBlocked("SearXNG upstream refused: " + "; ".join(reasons)[:200])
-    out: list[RawItem] = []
-    for r in data.get("results") or []:
-        if not isinstance(r, dict):
-            continue
-        title, url, published = str(r.get("title") or "").strip(), str(r.get("url") or "").strip(), None
-        value = r.get("publishedDate") or r.get("pubdate")
-        if isinstance(value, str) and value.strip():
-            try:
-                published = datetime.fromisoformat(value.strip().replace("Z", "+00:00"))
-            except ValueError:
-                published = None
-        if not title or not url or published is None:
-            continue
-        if published.tzinfo is None:
-            published = published.replace(tzinfo=UTC)
-        out.append(RawItem(title=title, url=url, published_at=published))
-    return out
-
-
-class SearxngSource:
-    key = "searxng"
-    label = "SearXNG"
-
-    def __init__(self, base_url: str, fetcher: HttpFetcher):
-        self.base_url = base_url.rstrip("/")
-        self.fetcher = fetcher
-
-    def supports(self, q: Query) -> bool:
-        return True
-
-    def params(self, q: Query) -> dict[str, Any]:
-        if q.taiwan:
-            return {"q": f"{q.name} {q.code}", "format": "json", "categories": "news", "time_range": "week",
-                    "language": "zh-TW", "safesearch": 0}
-        return {"q": f"{q.english[0] if q.english else q.name} {q.code} stock", "format": "json",
-                "categories": "news", "time_range": "week", "language": "en", "safesearch": 0}
-
-    def fetch(self, q: Query) -> list[RawItem]:
-        try:
-            data = self.fetcher.get_json(f"{self.base_url}/search", params=self.params(q))
-        except HttpStatusError as exc:
-            if exc.status in BLOCK_STATUSES or exc.status == 503:
-                raise SourceBlocked(f"SearXNG HTTP {exc.status}") from exc
-            raise
-        if not isinstance(data, dict):
-            raise ProviderUnavailable("SearXNG returned an unexpected shape")
-        return parse_searxng(data)
 
 
 # -- Yahoo股市 RSS (personal only) ----------------------------------------------------------------------------

@@ -11,6 +11,10 @@ from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 API_ROOT = Path(__file__).resolve().parents[2]  # apps/api
 DEFAULT_SESSION_SECRET = "dev-insecure-session-secret-change-me"
+# The private SearXNG (deploy/searxng): the Railway service named ``searxng`` / the local compose service.
+SEARXNG_URL_RAILWAY = "http://searxng.railway.internal:8080"
+SEARXNG_URL_LOCAL = "http://localhost:8080"
+DEFAULT_SEARXNG_ENGINES = ("bing news", "duckduckgo news", "brave.news")
 
 
 class Settings(BaseSettings):
@@ -141,11 +145,22 @@ class Settings(BaseSettings):
     news_ai_budget_usd: float = Field(default=30.0, ge=0)
     news_ai_min_items: int = Field(default=3, ge=1)
     news_ai_interval_hours: float = Field(default=24.0, ge=1)
-    # SearXNG (self-hosted metasearch, JSON API): off unless NEWS_SEARXNG_URL is set (product owner 2026-11-12).
-    # Querying upstream search engines automatically breaks their terms; the operator carries that risk.
+    # SearXNG (self-hosted metasearch, JSON API, deploy/searxng): ON by default (product owner 2026-11-12, third
+    # round), reachable only over private networking. Without NEWS_SEARXNG_URL the URL follows FORLIOSA_ENV: prod ->
+    # the Railway service ``searxng`` (http://searxng.railway.internal:8080), dev / test -> the local compose service
+    # (http://localhost:8080). NEWS_SEARXNG_ENABLED=false or an empty NEWS_SEARXNG_URL turns it off; an unreachable
+    # instance only pauses the source (forliosa.news.searxng). Querying upstream search engines automatically breaks
+    # their terms; the operator (product owner) carries that risk (docs/research/news-and-external-sources.md §10).
+    news_searxng_enabled: bool = True
     news_searxng_url: str | None = None
-    news_searxng_interval_seconds: float = Field(default=10.0, ge=3.0)
-    news_searxng_backoff_minutes: float = Field(default=120.0, ge=10.0)
+    # The news engines deploy/searxng/settings.yml enables (kept in step by a test); used to leave out a paused engine.
+    news_searxng_engines: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: list(DEFAULT_SEARXNG_ENGINES))
+    news_searxng_interval_seconds: float = Field(default=10.0, ge=10.0)  # one query at a time, ≥ 10 s apart
+    news_searxng_cache_minutes: float = Field(default=60.0, ge=30.0)  # per symbol: not asked again sooner
+    news_searxng_skip_gdelt_items: int = Field(default=8, ge=1)  # GDELT has this many from the last 24 h: skip
+    news_searxng_backoff_minutes: float = Field(default=120.0, ge=10.0)  # an engine that refused us (CAPTCHA, 429)
+    news_searxng_timeout_seconds: float = Field(default=20.0, ge=5.0, le=60.0)
     # Yahoo股市 per-stock RSS: its terms allow personal, non-commercial use only — used only under
     # DATA_POLICY=personal (this switch can turn it off there too).
     news_yahoo_rss: bool = True
@@ -176,8 +191,16 @@ class Settings(BaseSettings):
     @field_validator("news_searxng_url", mode="before")
     @classmethod
     def _blank_searxng(cls, v: object) -> object:
+        """Unset (None) -> the default for FORLIOSA_ENV (:attr:`searxng_url`); an empty value -> "" (off)."""
         if isinstance(v, str):
-            return v.strip().rstrip("/") or None
+            return v.strip().rstrip("/")
+        return v
+
+    @field_validator("news_searxng_engines", mode="before")
+    @classmethod
+    def _split_searxng_engines(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [" ".join(s.split()).lower() for s in v.split(",") if s.strip()]
         return v
 
     @field_validator("ai_web_search_allowed_domains", "ai_web_fetch_allowed_domains", "ai_admin_emails",
@@ -272,6 +295,16 @@ class Settings(BaseSettings):
     def telegram_available(self) -> bool:
         return bool(self.telegram_bot_token and self.telegram_bot_token.get_secret_value()
                     and self.telegram_bot_username)
+
+    @property
+    def searxng_url(self) -> str | None:
+        """The private SearXNG the news worker asks, or ``None`` when it is off (NEWS_SEARXNG_ENABLED=false or an
+        empty NEWS_SEARXNG_URL). Unset: the Railway service under ``prod``, the local compose service otherwise."""
+        if not self.news_searxng_enabled:
+            return None
+        if self.news_searxng_url is None:
+            return SEARXNG_URL_RAILWAY if self.forliosa_env == "prod" else SEARXNG_URL_LOCAL
+        return self.news_searxng_url or None
 
     @property
     def jitter_enabled(self) -> bool:

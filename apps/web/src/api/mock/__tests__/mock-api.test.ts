@@ -150,7 +150,9 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(official.every((n) => n.source === "公告" && (n.category === "material_info" || n.category === "exchange_news"))).toBe(true)
     expect(news.indexOf(media[0]!)).toBe(official.length)
     expect(media.length).toBeGreaterThan(8)
-    expect(media.every((n) => n.outlet && /^https:\/\//.test(n.url) && ["GDELT", "AI 搜尋"].includes(n.source))).toBe(true)
+    expect(media.every((n) => n.outlet && /^https:\/\//.test(n.url) && ["GDELT", "SearXNG", "AI 搜尋"].includes(n.source))).toBe(true)
+    // SearXNG（自架元搜尋）預設開啟：它找到的標題標「SearXNG」，顯名是後端 datapolicy 的 searxng
+    expect(media.some((n) => n.source === "SearXNG" && n.sources?.[0]?.startsWith("SearXNG 自架元搜尋"))).toBe(true)
     // 商用模式沒有 Yahoo股市 RSS（條款限非商用）
     expect(media.some((n) => n.source === "Yahoo股市")).toBe(false)
     expect(media.some((n) => n.source === "GDELT" && n.sources?.[0]?.includes("gdeltproject.org"))).toBe(true)

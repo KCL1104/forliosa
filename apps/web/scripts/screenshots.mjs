@@ -178,6 +178,13 @@ const toForeign = async (page, mobile) => {
   await toSection("chips-foreign")(page, mobile)
 }
 /** 資料來源頁的維基百科（「關於」簡介的授權） */
+/** 資料來源頁捲到「其他」（新聞報導的收集方式與 SearXNG 的風險說明、法人觀點） */
+const otherSources = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("ds-other")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
 const wikiSource = async (page) => {
   await page.evaluate(() => {
     const el = document.getElementById("ds-維基百科")
@@ -252,12 +259,13 @@ const SHOTS = [
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
   { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
   { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },
-  // 新聞報導：媒體原標題＋媒體＋時間＋原文連結（GDELT 為主、AI 搜尋補缺），沒有報導時的空狀態，美股英文媒體
+  // 新聞報導：媒體原標題＋媒體＋時間＋原文連結（GDELT＋SearXNG、兩者不足時 AI 搜尋補缺），沒有報導時的空狀態，美股英文媒體；資料來源頁的收集方式說明
   { name: "stock-2330-news", path: "/stock/2330.TW", ready: "text=參考價", action: toNews },
   { name: "stock-2330-news-more", path: "/stock/2330.TW", ready: "text=參考價", action: newsMore },
   { name: "stock-2317-news-empty", path: "/stock/2317.TW", ready: "text=參考價", action: toNews },
   { name: "stock-nvda-news", path: "/stock/NVDA", ready: "text=參考價", action: toNews },
   { name: "data-sources-gdelt", path: "/data-sources", ready: "text=GDELT DOC 2.0 新聞索引", action: gdeltSource },
+  { name: "data-sources-news", path: "/data-sources", ready: "text=GDELT DOC 2.0 新聞索引", action: otherSources },
   // 相關股票（基準／成分股、關係企業、同業；ETF 頁同指數）、關於〈公司〉（維基百科節錄／AI 簡介＋官方資料）、上市股票外資持股前 20 名
   { name: "stock-2330-related", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-related") },
   { name: "stock-6488-related", path: "/stock/6488.TWO", ready: "text=參考價", action: toSection("ov-related") },

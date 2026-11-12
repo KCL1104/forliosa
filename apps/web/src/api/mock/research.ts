@@ -21,7 +21,7 @@ import type {
   Why,
   WhyReason,
 } from "../types"
-import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
+import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, SEARXNG_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
 import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE, TWSE_INST_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
@@ -426,18 +426,18 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
 // 示範標題：虛構的媒體（名稱都有「示範」）、中性的標題、連到 example.com——不掛真實媒體的名字，
 // 也不寫人事、個資、訴訟這類敏感事件（真實的標題只會來自後端的新聞 worker）。
 // [標題, 媒體, 網址, 幾小時前, 收集方式, 只有日期]
-type MockMedia = [title: string, outlet: string, url: string, hoursAgo: number, source?: "GDELT" | "AI 搜尋" | "Yahoo股市", dateOnly?: boolean]
+type MockMedia = [title: string, outlet: string, url: string, hoursAgo: number, source?: "GDELT" | "SearXNG" | "AI 搜尋" | "Yahoo股市", dateOnly?: boolean]
 const DEMO_NEWS_URL = "https://example.com/demo-news"
 const MEDIA: Record<string, MockMedia[]> = {
   "2330.TW": [
     ["台積電先進封裝產能擴充 示範新聞標題", "示範財經日報", `${DEMO_NEWS_URL}/2330-1`, 1],
     ["台積電海外新廠進度說明 示範新聞標題", "示範新聞網", `${DEMO_NEWS_URL}/2330-2`, 2],
     ["法人看半導體供應鏈 台積電列觀察名單（示範）", "示範商業時報", `${DEMO_NEWS_URL}/2330-3`, 3],
-    ["台積電月營收公布 市場關注年增率（示範）", "示範晚報", `${DEMO_NEWS_URL}/2330-4`, 5],
+    ["台積電月營收公布 市場關注年增率（示範）", "示範晚報", `${DEMO_NEWS_URL}/2330-4`, 5, "SearXNG"],
     ["晶圓代工產業動態整理：台積電篇（示範）", "示範產業週刊", `${DEMO_NEWS_URL}/2330-5`, 6],
     ["AI 伺服器需求與台積電資本支出（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2330-6`, 9],
     ["台積電董事會例行會議 示範新聞標題", "示範財經日報", `${DEMO_NEWS_URL}/2330-7`, 20],
-    ["半導體設備交期與台積電供應鏈（示範）", "示範電子報", `${DEMO_NEWS_URL}/2330-8`, 26],
+    ["半導體設備交期與台積電供應鏈（示範）", "示範電子報", `${DEMO_NEWS_URL}/2330-8`, 26, "SearXNG"],
     ["台積電先進製程時程整理（示範）", "示範科技新聞", `${DEMO_NEWS_URL}/2330-9`, 30],
     ["台積電歐洲廠進度與車用晶片需求（示範）", "示範商業時報", `${DEMO_NEWS_URL}/2330-10`, 44],
     ["TSMC capex outlook: a sample headline", "Demo Markets Daily", `${DEMO_NEWS_URL}/2330-11`, 52],
@@ -445,7 +445,7 @@ const MEDIA: Record<string, MockMedia[]> = {
   ],
   "2454.TW": [
     ["聯發科新晶片出貨展望（示範）", "示範財經日報", `${DEMO_NEWS_URL}/2454-1`, 4],
-    ["聯發科車用晶片布局整理（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2454-2`, 30],
+    ["聯發科車用晶片布局整理（示範）", "示範新聞網", `${DEMO_NEWS_URL}/2454-2`, 30, "SearXNG"],
   ],
   "6488.TWO": [
     ["環球晶海外新廠進度（示範）", "示範商業時報", `${DEMO_NEWS_URL}/6488-1`, 7],
@@ -463,7 +463,7 @@ const MEDIA_PERSONAL: Record<string, MockMedia[]> = {
   "2330.TW": [["台積電相關新聞（Yahoo股市 RSS 示範）", "示範財經網", `${DEMO_NEWS_URL}/yahoo-2330-1`, 4, "Yahoo股市"]],
 }
 
-const MEDIA_SOURCE: Record<string, string> = { GDELT: GDELT_ATTRIBUTION, "AI 搜尋": AI_SEARCH_ATTRIBUTION, Yahoo股市: YAHOO_RSS_ATTRIBUTION }
+const MEDIA_SOURCE: Record<string, string> = { GDELT: GDELT_ATTRIBUTION, SearXNG: SEARXNG_ATTRIBUTION, "AI 搜尋": AI_SEARCH_ATTRIBUTION, Yahoo股市: YAHOO_RSS_ATTRIBUTION }
 
 function mediaOf(spec: MockInstrumentSpec, commercial: boolean): NewsItem[] {
   const rows = [...(MEDIA[spec.symbol] ?? []), ...(commercial ? [] : (MEDIA_PERSONAL[spec.symbol] ?? []))]

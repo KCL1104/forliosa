@@ -7,6 +7,7 @@ Forliosa 由兩部分組成：
 | 前端（靜態 SPA） | Cloudflare Pages | `apps/web`（Vite + React） | `https://app.example.com` |
 | 後端 API | Railway | `apps/api`（FastAPI，`Dockerfile`、`railway.toml`） | `https://api.example.com` |
 | 背景工作 | Railway | 同一個 image，`railway.worker.toml` | （沒有對外網址） |
+| 新聞元搜尋（SearXNG，只對內） | Railway | `deploy/searxng`（官方 image 釘版本＋我們的 `settings.yml`） | **沒有對外網址**：只走私有網路 `searxng.railway.internal:8080` |
 | 資料庫 | Railway PostgreSQL | | |
 | 快取／佇列 | Railway Redis（選用，目前程式還沒用到） | | |
 
@@ -33,9 +34,9 @@ Forliosa 由兩部分組成：
 這些設定有自動測試（`apps/api/tests/api/test_deploy_config.py`）：cookie 屬性、CORS 預檢、帶 cookie 的跨子網域請求、
 登出時刪除同網域的 cookie、`*` 與預設 `SESSION_SECRET` 會拒絕啟動。
 
-## 2. Railway：API、worker、PostgreSQL、Redis
+## 2. Railway：API、worker、SearXNG、PostgreSQL、Redis
 
-在同一個 Railway 專案裡建立四個服務，都連到這個 GitHub repo。
+在同一個 Railway 專案裡建立這些服務：PostgreSQL（與選用的 Redis）、api、worker、searxng（後三個都連到這個 GitHub repo）。
 
 ### 2.1 PostgreSQL（與選用的 Redis）
 
@@ -77,6 +78,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `CACHE_DIR` | | `var/cache`（預設，即 `/app/var/cache`） | 行情快取；建議掛 volume，見下方 |
 | `REDIS_URL` | | `${{Redis.REDIS_URL}}` | 目前未使用 |
 | `STREAM_INTERVAL_SECONDS` | | `5` | SSE 報價推送間隔 |
+| `NEWS_SEARXNG_URL` | | `http://searxng.railway.internal:8080` | 私有網路上的 SearXNG（2.6 節）；不設時 `FORLIOSA_ENV=prod` 就是這個值。也可寫 `http://${{searxng.RAILWAY_PRIVATE_DOMAIN}}:8080`。api 本身不查 SearXNG，設了是為了在 api 的 shell 也能跑 `searxng-check` |
 | `RAILWAY_RUN_UID` | 掛 volume 時 | `0` | Railway 的 volume 由 root 擁有，而 image 以 uid 10001 執行，寫不進去；設 `0` 改以 root 執行 |
 
 **Volume（建議）**：Service → Volumes → 新增，Mount Path `/app/var`。開放資料與 shioaji-data 的快取會
@@ -101,14 +103,15 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `FRONTEND_URL` | 建議 | 和 api 相同；推播訊息裡的群組頁連結用它（沒設就不附連結） |
 | `CLAUDE_API_KEY_1..3` | 週報用 | 群組 AI 週報（每週六 20:00）；沒設時週報只有數字、標成失敗。可用 `AI_DIGEST_ENABLED=false` 關掉 AI |
 | `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME` | Telegram 推播用 | 和 api 相同（見 2.5 節） |
+| `NEWS_SEARXNG_URL` | 建議 | `http://searxng.railway.internal:8080`（見 2.6 節）。新聞 worker 用它查 SearXNG；不設時 prod 預設就是這個值，服務名稱不是 `searxng` 時一定要設。設成空字串或 `NEWS_SEARXNG_ENABLED=false` 會關掉 SearXNG |
 | `DATA_POLICY` | | `commercial`（預設） |
 | `RAILWAY_RUN_UID` | 掛 volume 時 | `0`，搭配自己的 volume |
 
 worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料表由 api 服務 migrate，worker 不跑 migration；第一次部署請先讓 api 啟動成功。
 **worker 只能有一個副本**：Telegram 的 `getUpdates` 同時只能有一個程式在收，兩個副本會互相搶（也會重複送推播）。
 
-> 現況：worker 負責開放資料存檔、收盤價、股利自動入帳、AI 保存期限，以及**群組推播與群組 AI 週報**（M5）。要用群組的 Discord／Telegram
-> 推播或週報，就一定要部署 worker。
+> 現況：worker 負責開放資料存檔、收盤價、股利自動入帳、AI 保存期限、個股頁「新聞報導」（GDELT＋SearXNG，每 45 分鐘），以及**群組推播與群組 AI 週報**（M5）。
+> 要用群組的 Discord／Telegram 推播或週報，就一定要部署 worker。
 
 ### 2.4 Discord 登入（Discord Developer Portal）
 
@@ -147,6 +150,67 @@ worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料�
 4. Discord 群組頻道不需要設定伺服器：群主在 Discord 頻道設定 → 整合 → Webhook 建立後，把網址貼到 app（網址加密保存，畫面只顯示最後 4 碼）。
 
 推播規則（只送開了「推播」的成員、15 分鐘後才送、重試與自動停用）見 `docs/api-contract.md`「分享（M5）」→「推播」。
+
+### 2.6 SearXNG（新聞元搜尋，只對內）
+
+產品負責人決定（`PRODUCT.md`「相關新聞」第三輪）：個股頁「新聞報導」除了 GDELT，也用我們自己架的 SearXNG 以中文公司名查新聞，**預設開啟**。
+SearXNG 是元搜尋：它替我們去問 Bing News、DuckDuckGo News、Brave News（`deploy/searxng/settings.yml` 只開這三個新聞引擎）。
+
+> **風險（產品負責人已接受）**：自動查詢上游搜尋引擎違反它們的使用條款（契約風險；被封鎖後這個來源就失效）。
+> 我們的做法：只取標題、媒體、時間與連結；一次只查一個、間隔至少 10 秒；引擎回 CAPTCHA／429／拒絕存取就暫停它，全部引擎都停時整個 SearXNG 暫停；
+> 不換 IP、不用代理。研究與條件見 `docs/research/news-and-external-sources.md` §10。
+
+| 設定（Service → Settings） | 值 |
+|---|---|
+| 服務名稱 | `searxng`（私有網址就是 `searxng.railway.internal`；改名的話 api／worker 的 `NEWS_SEARXNG_URL` 要跟著改） |
+| Source | 這個 repo，分支 `main` |
+| Root Directory | `deploy/searxng` |
+| Config File Path | `/deploy/searxng/railway.toml`（Dockerfile；健康檢查 `/healthz`） |
+| Networking | **不要** Generate Domain、不要加 Custom Domain：只用 Private Networking。SearXNG 的 limiter 是關的，有公開網址就等於開放給任何人代查 |
+| Volumes | 不需要（不要掛在 `/etc/searxng`，會蓋掉 image 裡的 `settings.yml`） |
+| Replicas | 1 |
+
+環境變數（searxng 服務）：
+
+| 變數 | 必填 | 值 | 說明 |
+|---|---|---|---|
+| `SEARXNG_SECRET` | ✅ | 64 字以上的隨機字串 | `python -c "import secrets; print(secrets.token_urlsafe(48))"`；**機密**，只放在 Railway Variables。沒設的話 SearXNG 拒絕啟動（`settings.yml` 的 `secret_key` 只是佔位字）。api／worker 不需要它 |
+| `PORT` | ✅ | `8080` | Railway 的健康檢查打 `PORT` 這個埠；SearXNG 固定聽 `[::]:8080`（IPv6＋IPv4），**不讀** `$PORT`。沒設的話 Railway 可能注入別的埠，`/healthz` 打不到、部署一直不健康。不要改成別的值（api／worker 的 `NEWS_SEARXNG_URL` 用 8080） |
+
+不要設 `TZ`：SearXNG 回的發布時間沒有時區時，worker 當成 UTC（容器預設）。
+
+第一次部署（以及每次升級或改 `settings.yml` 後）看 searxng 服務的 Deploy Logs：要看到 granian 的啟動訊息、服務維持 Active，**沒有** `Traceback`、`KeyError` 或
+`Invalid settings.yml`。SearXNG 啟動失敗時 worker 只會把它當成連不上、默默暫停，不會有錯誤畫面，所以只能從這裡發現。
+（2026-11-12 審查找到一個這樣的錯誤：`keep_only` 拿掉了 `brave` 引擎，但 `brave.news` 預設共用它的連線設定，啟動時 `KeyError: 'brave'`；
+已在 `settings.yml` 的 `outgoing.networks` 補上 `brave: {}`，`apps/api/tests/news/test_searxng.py` 會對照釘住版本的預設引擎定義檢查。）
+
+api 與 worker 的 `NEWS_SEARXNG_URL` 設成 `http://searxng.railway.internal:8080`（見 2.2、2.3 節；`FORLIOSA_ENV=prod` 不設時預設就是這個）。
+SearXNG 連不上時（還沒部署、重啟中、私有網路沒開），worker 只會把它暫停 15 分鐘起、每次加倍到 4 小時，GDELT 與 AI 搜尋照常，使用者不會看到錯誤。
+
+部署後檢查（在 worker 或 api 服務的 shell，例如 `railway ssh`）：
+
+```
+python -m forliosa.news searxng-check "台積電"
+```
+
+會印出健康檢查、結果數、各引擎的結果數與沒有回應的引擎（只印 SearXNG 的網址主機與埠，不印任何密鑰，也不寫資料庫）。
+某個引擎顯示 `CAPTCHA`／`too many requests`／`access denied` 表示它擋了我們：worker 會自動暫停它，不要換 IP 或改 User-Agent 去繞。
+
+升級 SearXNG：`deploy/searxng/Dockerfile` 釘的是一個已發布兩週以上的 tag（目前 `2026.10.28-c360868e5`）與它的 digest；
+換新版時選一個至少兩週前發布的 tag、tag 與 digest 一起改、看一下該版 `searx/settings.yml` 有沒有改名的設定，
+把該版保留引擎（與它們 `network:` 指到的引擎）的預設定義抄進 `apps/api/tests/news/fixtures/searxng_default_engines_<tag>.yml`（測試會要求），
+部署後看 searxng 的記錄沒有 traceback，再跑一次 `searxng-check`。
+
+本機開發：`cp deploy/searxng/.env.example deploy/searxng/.env`、填 `SEARXNG_SECRET`，`docker compose -f deploy/searxng/docker-compose.yml up -d --build`
+（只綁 `127.0.0.1:8080`）；`docker compose -f deploy/searxng/docker-compose.yml logs searxng` 確認沒有 traceback；`FORLIOSA_ENV=dev` 的 API／worker 預設就用 `http://localhost:8080`。
+compose 把 repo 裡的 `deploy/searxng/settings.yml` 唯讀掛進容器：官方 image 對 `/etc/searxng` 宣告了 `VOLUME`，不這樣掛的話重建的容器會沿用舊的匿名 volume、
+繼續讀第一次建置時的 `settings.yml`。改了 `settings.yml` 之後 `docker compose -f deploy/searxng/docker-compose.yml restart searxng` 就會生效。
+
+> **沒有在這個雲端沙盒測過**：沙盒連不到上游搜尋引擎（Bing、DuckDuckGo、Brave），也沒有 Docker，所以 image 沒有實際建置、
+> 也沒有真的查過（只從 Docker Hub 確認了 tag、digest 與 image 設定：`/etc/searxng/settings.yml`、`[::]:8080`）；
+> 啟動時的設定合併與網路參照只對照了該版原始碼（沙盒不能執行 SearXNG）。
+> 程式的測試用依 SearXNG JSON 格式手寫的**合成**回應（`apps/api/tests/news/fixtures/searxng_*_synthetic.json`）。
+> 第一次部署後請跑上面的 `searxng-check`，確認三個引擎都有結果、`unresponsive_engines` 是空的。
 
 ## 3. Cloudflare Pages：前端
 
@@ -212,6 +276,10 @@ worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料�
         授權過程中的 `__Host-forliosa_oauth` 在回到前端後就被刪除。
 14. [ ] （選用）群組推播：建一個測試群組，貼上 Discord 測試頻道的 webhook（頻道收到「推播已連結」的測試訊息）；有設 Telegram bot 時照 2.5 節
         連結一個 Telegram 測試群組。開了「推播」與「交易動態」的成員記一筆今天的交易，約 15 分鐘後頻道收到訊息。
+15. [ ] SearXNG（第 2.6 節）：searxng 服務部署成功、**沒有**任何公開網域；`SEARXNG_SECRET` 與 `PORT=8080` 已設；Deploy Logs 沒有 `Traceback`／`KeyError`、
+        健康檢查通過；在 worker 的 shell 跑
+        `python -m forliosa.news searxng-check "台積電"`，健康檢查 OK、三個引擎都有結果。約 45 分鐘後 worker 記錄出現
+        `news refresh: … requests {'gdelt': …, 'searxng': …}`，個股頁「新聞報導」下方出現「另有 SearXNG 元搜尋」。
 
 ## 6. 還沒準備好上線的部分
 
@@ -226,5 +294,6 @@ worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料�
 | **CSRF** | `SameSite=Lax`＋CORS 白名單，另外所有寫入請求檢查 `Origin` 必須在 `CORS_ORIGINS` 內（M5） | 同網域其他子網域也算同網站：不要把不受信任的服務放在同一個網域底下 |
 | **群組週報與頻道推播** | 後端完成（M5 第二批）：worker 每分鐘推播、每週六 20:00 產生週報；前端的週報與頻道設定畫面還沒接 | 部署 worker（`SESSION_SECRET` 與 api 相同、單一副本、Claude 金鑰）；要用 Telegram 時建立 bot（2.5 節） |
 | **帳戶刪除 UI、只記持股快照輸入畫面** | API 已有，前端還沒有畫面 | 見 `apps/web/OPEN_QUESTIONS.md` |
+| **SearXNG 新聞元搜尋** | 預設開啟（2.6 節）；只用合成回應測過，沒有實際建置或查詢過 | 第一次部署後跑 `searxng-check`；SearXNG 送給上游搜尋引擎的是瀏覽器樣式的請求（SearXNG 本身的做法），要產品負責人確認可以接受（見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」待確認） |
 | **資料備份、監控** | 未設定 | Railway Postgres 備份、錯誤追蹤（例如 Sentry）、uptime 監控 |
 | **個資法** | 資料匯出／刪除帳號（M5） | 上線前的隱私權政策與服務條款 |

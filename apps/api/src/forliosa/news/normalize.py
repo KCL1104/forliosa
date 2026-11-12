@@ -48,7 +48,14 @@ SECTION_WORDS = frozenset({
     "economy", "stocks", "investing",
 })
 MAX_TITLE_CHARS = 300
-_TRACKING_PARAMS = re.compile(r"^(utm_|fbclid$|gclid$|ocid$|from$|ref$|cid$|share$)", re.IGNORECASE)
+# Query parameters that only record a click or a campaign: removed from the link we store and show.
+_TRACKING_PARAMS = re.compile(
+    r"^(utm_\w*|fbclid|gclid|gclsrc|dclid|gbraid|wbraid|msclkid|yclid|twclid|ttclid|li_fat_id|mc_cid|mc_eid|igshid|igsh"
+    r"|_ga|_gl|_hsenc|_hsmi|mkt_tok|ocid|cmpid|s_cid|ncid|spm|guccounter|guce_referrer|guce_referrer_sig"
+    r"|__twitter_impression|fb_action_ids|fb_action_types|fb_source|fb_ref)$", re.IGNORECASE)
+# Also left out when two links are compared, but kept in the stored link (a site may need them).
+_KEY_ONLY_PARAMS = re.compile(r"^(from|ref|ref_src|referrer|cid|share|amp|_amp|usqp|amp_js_v|amp_gsa)$", re.IGNORECASE)
+_AMP_VALUE_PARAMS = frozenset({"outputtype", "output"})  # ?outputType=amp, ?output=amp (only with the value amp)
 
 
 def collapse_spaces(text: str) -> str:
@@ -121,31 +128,147 @@ def clean_title(title: str, url: str = "", outlet: str | None = None) -> str:
 
 
 # -- URLs ---------------------------------------------------------------------------------------------------
+_MOBILE_HOST_PREFIXES = ("amp.", "m.", "mobile.")
+_AMP_FILE_SUFFIX = re.compile(r"\.amp(?=\.html?$|$)", re.IGNORECASE)  # story.amp.html -> story.html, story.amp
+# Search-engine and link-shortener hosts: a link there is a redirect (news.google.com/articles/…,
+# bing.com/news/apiclick.aspx?…, r.search.yahoo.com/…, duckduckgo.com/l/?uddg=…), never the publisher's page. Such
+# links are dropped, not resolved (resolving would mean fetching the search engine or the news site).
+_REDIRECT_HOSTS = (
+    "news.google.com", "news.url.google.com", "feedproxy.google.com", "bing.com", "search.yahoo.com",
+    "duckduckgo.com", "search.brave.com", "qwant.com", "startpage.com", "mojeek.com", "yandex.ru", "yandex.com",
+    "baidu.com", "sogou.com", "so.com", "t.co", "bit.ly", "ow.ly", "lnkd.in", "tinyurl.com", "goo.gl",
+    "l.facebook.com", "lm.facebook.com", "l.instagram.com", "out.reddit.com",
+)
+_GOOGLE_HOST = re.compile(r"(^|\.)google\.(com|com\.[a-z]{2}|co\.[a-z]{2}|[a-z]{2})$")
+# An AMP cache serves the publisher's own AMP page under its path: https://www-cna-com-tw.cdn.ampproject.org/c/s/
+# www.cna.com.tw/amp/news/… and https://www.google.com/amp/s/www.cna.com.tw/amp/news/… — unwrapped, not fetched.
+_AMP_CACHE_PATH = re.compile(r"^/(?P<s>s/)?(?P<rest>[a-z0-9.-]+\.[a-z]{2,}(?::\d+)?(?:/.*)?)$", re.IGNORECASE)
+
+
+def _host(parts) -> str:
+    try:
+        return (parts.hostname or "").lower().rstrip(".")
+    except ValueError:
+        return ""
+
+
+def unwrap_amp_cache(url: str) -> str:
+    """``https://<x>.cdn.ampproject.org/c/s/<host>/<path>`` and ``https://www.google.com/amp/s/<host>/<path>`` ->
+    ``https://<host>/<path>`` (the publisher's own page); other links unchanged."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return url
+    host = _host(parts)
+    path = parts.path
+    if host.endswith(".cdn.ampproject.org"):  # /c/s/<host>/…, /v/s/…, /wp/s/…: drop the content-type segment
+        head, _, tail = path.lstrip("/").partition("/")
+        if not head or not tail:
+            return url
+        path = "/" + tail
+    elif _GOOGLE_HOST.search(host) and path.lower().startswith("/amp/"):
+        path = path[len("/amp"):]
+    else:
+        return url
+    m = _AMP_CACHE_PATH.match(path)
+    if m is None:
+        return url
+    scheme = "https" if m.group("s") else "http"
+    target = f"{scheme}://{m.group('rest')}"
+    return target + (f"?{parts.query}" if parts.query else "")
+
+
+def is_search_redirect(url: str) -> bool:
+    """A link on a search engine or a link shortener (after AMP caches are unwrapped): a redirect, not an article."""
+    try:
+        host = _host(urlsplit(url.strip()))
+    except ValueError:
+        return False
+    host = host.removeprefix("www.")
+    if _GOOGLE_HOST.search(host):
+        return True
+    return any(host == d or host.endswith("." + d) for d in _REDIRECT_HOSTS)
+
+
+def _key_params(query: str) -> list[tuple[str, str]]:
+    out = []
+    for k, v in parse_qsl(query, keep_blank_values=True):
+        if _TRACKING_PARAMS.match(k) or _KEY_ONLY_PARAMS.match(k):
+            continue
+        if k.lower() in _AMP_VALUE_PARAMS and v.lower() == "amp":
+            continue
+        out.append((k, v))
+    return sorted(out)
+
+
+def _canonical_path(path: str) -> str:
+    """AMP variants that only need the URL itself: an ``amp`` path segment (``/amp/news/…``, ``/news/amp/story/…``,
+    ``…/amp``) and an ``.amp`` file suffix (``story.amp.html``)."""
+    segments = [s for s in unquote(path).split("/") if s.lower() != "amp"]
+    if segments:
+        segments[-1] = _AMP_FILE_SUFFIX.sub("", segments[-1])
+    return "/".join(segments).rstrip("/")
+
+
+def is_amp_or_mobile(url: str) -> bool:
+    """An AMP or mobile variant (``m.`` / ``amp.`` host, ``/amp/`` segment, ``.amp.html``, ``?outputType=amp``): when
+    it and the canonical page are both found, the canonical link is the one kept."""
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return False
+    host = _host(parts).removeprefix("www.")
+    if host.startswith(_MOBILE_HOST_PREFIXES) and host.count(".") >= 2:
+        return True
+    segments = [s for s in parts.path.split("/") if s]
+    if any(s.lower() == "amp" for s in segments) or (segments and _AMP_FILE_SUFFIX.search(segments[-1])):
+        return True
+    return any(k.lower() in ("amp", "_amp") or (k.lower() in _AMP_VALUE_PARAMS and v.lower() == "amp")
+               for k, v in parse_qsl(parts.query, keep_blank_values=True))
+
+
 def normalize_url(url: str) -> str:
-    """For de-duplication: https, no ``www.``, no default port, no fragment, no tracking parameters, no trailing
-    slash, percent-encoding decoded."""
+    """The key two links are compared by (de-duplication, ``url_key``): the publisher's page behind an AMP cache,
+    https, no ``www.`` / ``m.`` / ``mobile.`` / ``amp.`` host prefix, no default port, no fragment, no tracking or
+    referral parameters, the other parameters sorted, no AMP path segment or ``.amp`` suffix, no trailing slash,
+    percent-encoding decoded.
+
+    Only rewrites that the URL itself makes unambiguous are made: two links that differ in anything else (a desktop
+    and an AMP page with a different path, ``ettoday.net/amp/amp_news.php7?news_id=…``) stay different and are
+    matched by their titles instead (:func:`dedupe`)."""
+    url = unwrap_amp_cache(url)
     try:
         parts = urlsplit(url.strip())
     except ValueError:
         return url.strip()
-    host = (parts.hostname or "").lower().removeprefix("www.")
-    query = urlencode([(k, v) for k, v in parse_qsl(parts.query, keep_blank_values=True)
-                       if not _TRACKING_PARAMS.match(k)])
-    return urlunsplit(("https", host, unquote(parts.path).rstrip("/"), unquote(query), ""))
+    host = _host(parts).removeprefix("www.")
+    for prefix in _MOBILE_HOST_PREFIXES:
+        if host.startswith(prefix) and host.count(".") >= 2:
+            host = host[len(prefix):].removeprefix("www.")
+            break
+    query = urlencode(_key_params(parts.query))
+    return urlunsplit(("https", host, _canonical_path(parts.path), unquote(query), ""))
 
 
 def clean_url(url: str) -> str | None:
-    """The link we store and show: http(s) only, default ``:443`` / ``:80`` port removed. ``None`` otherwise."""
+    """The link we store and show: http(s) only, the publisher's page behind an AMP cache, tracking parameters
+    (``utm_*``, ``fbclid``, ``gclid`` …) and the default ``:443`` / ``:80`` port removed. ``None`` for anything
+    else and for a search-engine redirect (:func:`is_search_redirect`)."""
+    url = unwrap_amp_cache(url)
     try:
         parts = urlsplit(url.strip())
+        port = parts.port
     except ValueError:
         return None
-    if parts.scheme not in ("http", "https") or not parts.hostname:
+    if parts.scheme not in ("http", "https") or not parts.hostname or is_search_redirect(url):
         return None
     netloc = parts.netloc
-    if (parts.scheme, parts.port) in (("https", 443), ("http", 80)):
+    if (parts.scheme, port) in (("https", 443), ("http", 80)):
         netloc = netloc.rsplit(":", 1)[0]
-    return urlunsplit((parts.scheme, netloc, parts.path, parts.query, ""))
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    kept = [(k, v) for k, v in pairs if not _TRACKING_PARAMS.match(k)]
+    query = parts.query if len(kept) == len(pairs) else urlencode(kept)
+    return urlunsplit((parts.scheme, netloc, parts.path, query, ""))
 
 
 def url_key(url: str) -> str:
@@ -285,8 +408,9 @@ class Headline:
 
 def dedupe(items: Iterable[Headline]) -> list[Headline]:
     """One headline per story: the same URL (normalised) or a near-identical title. The original outlet wins over
-    an aggregator copy (Yahoo, LINE TODAY, MSN), then the earliest one. Returned newest first."""
-    ordered = sorted(items, key=lambda h: (is_aggregator(h.url), h.published_at))
+    an aggregator copy (Yahoo, LINE TODAY, MSN), the canonical page over an AMP / mobile variant, then the earliest
+    one. Returned newest first."""
+    ordered = sorted(items, key=lambda h: (is_aggregator(h.url), is_amp_or_mobile(h.url), h.published_at))
     kept: list[Headline] = []
     seen_urls: set[str] = set()
     for h in ordered:

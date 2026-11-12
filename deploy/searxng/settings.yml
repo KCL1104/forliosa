@@ -1,0 +1,103 @@
+# Forliosa's private SearXNG: the news worker's metasearch (apps/api forliosa.news.searxng; docs/deploy.md §2.6).
+#
+# Only our API and worker can reach it, over private networking (Railway: searxng.railway.internal:8080; local
+# development: 127.0.0.1:8080). Never give this service a public domain: the limiter and the public-instance
+# features are off because nothing outside our own network can send it a request.
+#
+# Only news engines that link to the publisher's own page are kept. Querying these search engines automatically
+# breaks their terms of service; the product owner accepted that risk (docs/research/news-and-external-sources.md
+# §10). No proxies, no source_ips, no Tor: every request leaves from this service's own address. An engine that
+# answers with a CAPTCHA, HTTP 429 or "access denied" is suspended by SearXNG (search.suspended_times below) and
+# paused by the worker too; nothing here tries to get around a block.
+#
+# Everything not set here is the pinned release's default (searx/settings.yml of the image in the Dockerfile).
+# Checked by apps/api/tests/news/test_searxng.py (engine list = Settings.news_searxng_engines, private, JSON on, every
+# `network:` reference of the kept engines resolves in the pinned release).
+
+use_default_settings:
+  engines:
+    # keep_only: every default engine that is not listed is removed — no general, image, video, map or music
+    # engine is loaded. Left out on purpose:
+    #   google news  — links are news.google.com redirects (the worker drops them instead of resolving them)
+    #   reuters, wikinews, tagesschau, … — these query a news site directly; we never automate access to news sites
+    #   qwant news   — no zh-TW market; yahoo news, startpage news, mojeek news — marked inactive upstream
+    keep_only:
+      - bing news
+      - duckduckgo news
+      - brave.news
+
+general:
+  debug: false
+  instance_name: "Forliosa news (private)"
+
+search:
+  safe_search: 0
+  autocomplete: ""
+  favicon_resolver: ""
+  default_lang: "zh-TW"
+  # JSON is what the worker reads; HTML only for a person checking the instance by hand.
+  formats:
+    - html
+    - json
+  # How long SearXNG itself stops asking an engine that refused it (seconds).
+  suspended_times:
+    SearxEngineAccessDenied: 86400
+    SearxEngineCaptcha: 86400
+    SearxEngineTooManyRequests: 3600
+    cf_SearxEngineCaptcha: 1296000
+    cf_SearxEngineAccessDenied: 86400
+    recaptcha_SearxEngineCaptcha: 604800
+
+server:
+  # Placeholder: the SEARXNG_SECRET environment variable (Railway variable / deploy/searxng/.env) replaces it at
+  # start-up, and SearXNG refuses to start while it is still "ultrasecretkey" — a missing secret stops the service.
+  secret_key: "ultrasecretkey"
+  limiter: false
+  public_instance: false
+  image_proxy: false
+  method: "GET"
+  base_url: false
+
+valkey:
+  url: false  # no limiter, so no Valkey / Redis
+
+ui:
+  # Nobody browses this instance. English keeps the reasons in "unresponsive_engines" ("CAPTCHA", "too many
+  # requests", "timeout") readable for the worker.
+  default_locale: "en"
+  query_in_title: false
+
+outgoing:
+  # Per engine request; the whole search waits at most max_request_timeout. The worker's client waits 20 s.
+  request_timeout: 4.0
+  max_request_timeout: 8.0
+  useragent_suffix: "forliosa-news (private instance)"
+  pool_connections: 20
+  pool_maxsize: 5
+  enable_http2: true
+  # Required, not a tuning knob: the release's default brave.news says `network: brave` (share the network of the
+  # engine named "brave"), and keep_only above removes that engine. Without a network called "brave" SearXNG stops at
+  # start-up (KeyError: 'brave' in searx/network/network.py initialize). An empty entry is the default network
+  # settings above — still no proxy and no other source address. Overriding `network` on brave.news under engines
+  # does not help: SearXNG merges a mapping into the string and keeps "brave". Checked by
+  # apps/api/tests/news/test_searxng.py against the release's defaults (tests/news/fixtures).
+  networks:
+    brave: {}
+
+# Replaces the default plugin list: only the tracker remover (strips utm_* and similar from result links).
+plugins:
+  searx.plugins.tracker_url_remover.SXNGPlugin:
+    active: true
+
+engines:
+  - name: bing news
+    disabled: false
+  # SearXNG skips an engine without time-range support when a search sets time_range (the worker always sends
+  # time_range=week). DuckDuckGo News and Brave News ignore the range; the worker drops anything older than a
+  # week itself, so they may take part.
+  - name: duckduckgo news
+    disabled: false
+    time_range_support: true
+  - name: brave.news
+    disabled: false
+    time_range_support: true

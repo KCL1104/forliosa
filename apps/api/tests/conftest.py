@@ -60,6 +60,24 @@ def no_discord_network():
 
 
 @pytest.fixture(autouse=True)
+def no_searxng_network():
+    """No test may reach a SearXNG instance (it is on by default): every SearXNG request fails unless a test
+    installs a mock transport with ``forliosa.news.searxng.set_transport``. Pacing gates start fresh."""
+    import httpx
+
+    from forliosa.news import searxng
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network disabled in tests", request=request)
+
+    searxng.set_transport(httpx.MockTransport(refuse))
+    searxng.reset_gates()
+    yield
+    searxng.set_transport(None)
+    searxng.reset_gates()
+
+
+@pytest.fixture(autouse=True)
 def no_push_network():
     """No test may reach a Discord webhook or the Telegram Bot API: every group-push request fails unless a test
     installs a mock transport with ``forliosa.services.pushers.set_transport``. Each test starts with a closed circuit

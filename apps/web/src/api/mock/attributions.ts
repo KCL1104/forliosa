@@ -83,6 +83,8 @@ const GDELT_TERMS_URL = "https://www.gdeltproject.org/about.html#termsofuse"
 export const GDELT_ATTRIBUTION = `The GDELT Project〈GDELT DOC 2.0 新聞索引〉（${YEAR}），依 GDELT 使用條款引用：https://www.gdeltproject.org/`
 export const YAHOO_RSS_ATTRIBUTION = `Yahoo股市〈個股新聞 RSS〉（${YEAR}），保留「Yahoo股市」與原始媒體標示（非商用）`
 export const AI_SEARCH_ATTRIBUTION = "AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）"
+/** 自架、只對內的 SearXNG 元搜尋（後端 datapolicy.py 的 searxng；預設開啟） */
+export const SEARXNG_ATTRIBUTION = "SearXNG 自架元搜尋（只取標題、媒體、時間與連結）"
 
 /** 「關於」的公司簡介：中文維基百科節錄（CC BY-SA 4.0）；Wikidata（CC0）只用來找條目 */
 const WIKIPEDIA_LICENSE = "創用 CC 姓名標示－相同方式分享 4.0 國際（CC BY-SA 4.0）"

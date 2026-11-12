@@ -1,0 +1,39 @@
+# NOT a response: an excerpt of SearXNG's default settings, copied verbatim from searx/settings.yml at commit
+# c360868e5b7c01e463a362a53518190d5a3b1097 — the release deploy/searxng/Dockerfile pins (image tag
+# 2026.10.28-c360868e5). Only the default definitions of the engines deploy/searxng/settings.yml keeps
+# (use_default_settings.engines.keep_only), plus "brave", the engine whose network brave.news refers to.
+# That release's default `outgoing:` section defines no `networks`.
+#
+# test_searxng.py merges our settings.yml into these definitions the way SearXNG does (keep_only, then the
+# `engines:` overrides) and checks that every `network: <name>` reference resolves. When the Dockerfile moves to
+# another tag, the test fails until this file is replaced by that release's definitions (and renamed to its tag).
+version: "2026.10.28-c360868e5"
+commit: c360868e5b7c01e463a362a53518190d5a3b1097
+
+engines:
+  - name: bing news
+    engine: bing_news
+    shortcut: bin
+    # base_url: https://cn.bing.com  # for instances hosted in China
+
+  - name: duckduckgo news
+    engine: duckduckgo_extra
+    categories: [news]
+    ddg_category: news
+    shortcut: ddn
+
+  - name: brave
+    engine: brave
+    shortcut: br
+    time_range_support: true
+    paging: true
+    categories: [general, web]
+    brave_category: search
+    # brave_spellcheck: true
+
+  - name: brave.news
+    engine: brave
+    network: brave
+    shortcut: brnews
+    categories: news
+    brave_category: news

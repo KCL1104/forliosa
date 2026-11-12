@@ -13,12 +13,10 @@ from forliosa.news.sources import (
     GdeltSource,
     Query,
     RawItem,
-    SearxngSource,
     SourceBlocked,
     YahooRssSource,
     gdelt_query,
     parse_gdelt,
-    parse_searxng,
     parse_yahoo_rss,
     yahoo_outlet,
 )
@@ -126,38 +124,7 @@ def test_yahoo_rss_source_is_taiwan_only_and_allowlisted():
         parse_yahoo_rss(b"<html>not rss")
 
 
-# -- SearXNG ----------------------------------------------------------------------------------------------------
-def test_searxng_parser_takes_title_link_and_date_only():
-    data = {"results": [
-        {"title": "台積電法說會釋利多", "url": "https://money.udn.com/money/story/5612/1", "content": "內文摘要…",
-         "img_src": "https://img/1.jpg", "publishedDate": "2026-11-12T08:00:00"},
-        {"title": "沒有日期的結果", "url": "https://x.tw/2", "publishedDate": None},
-        {"title": "台積電 ADR", "url": "https://www.reuters.com/a", "publishedDate": "2026-11-12T01:00:00+00:00"},
-    ], "unresponsive_engines": []}
-    items = parse_searxng(data)
-    assert [(i.title, i.published_at) for i in items] == [
-        ("台積電法說會釋利多", datetime(2026, 11, 12, 8, 0, tzinfo=UTC)),
-        ("台積電 ADR", datetime(2026, 11, 12, 1, 0, tzinfo=UTC))]
-    assert "內文" not in repr(items) and "img" not in repr(items)
-    with pytest.raises(SourceBlocked):
-        parse_searxng({"results": [], "unresponsive_engines": [["google news", "CAPTCHA"]]})
-    with pytest.raises(SourceBlocked):
-        parse_searxng({"results": [], "unresponsive_engines": [["bing news", "too many requests"]]})
-    assert parse_searxng({"results": [], "unresponsive_engines": [["duckduckgo", "timeout"]]}) == []
-
-
-def test_searxng_source_uses_only_the_configured_instance():
-    f = RecordingFetcher(b'{"results": []}')
-    src = SearxngSource("https://searx.example.org/", f)
-    assert src.fetch(query()) == []
-    url, params = f.calls[0]
-    assert url == "https://searx.example.org/search"
-    assert params["format"] == "json" and params["categories"] == "news" and params["q"] == "台積電 2330"
-    assert not url_allowed(url)  # only a fetcher built with extra_allowed may call it
-    with pytest.raises(SourceBlocked):
-        SearxngSource("https://searx.example.org", RecordingFetcher(status=429)).fetch(query())
-
-
+# -- allowlist ---------------------------------------------------------------------------------------------------
 def test_fetcher_allowlist_for_news():
     assert url_allowed("https://api.gdeltproject.org/api/v2/doc/doc")
     assert url_allowed("https://tw.stock.yahoo.com/rss")

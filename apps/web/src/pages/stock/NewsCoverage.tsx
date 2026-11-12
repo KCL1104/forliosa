@@ -11,7 +11,7 @@ import { GDELT_URL, mediaNews, NEWS_PAGE_SIZE, newsSourcesUsed, outletLabel, rel
 
 const OTHER_SOURCE_LABEL: Record<string, string> = {
   "AI 搜尋": "AI 網路搜尋",
-  SearXNG: "SearXNG",
+  SearXNG: "SearXNG 元搜尋",
   Yahoo股市: "Yahoo股市 RSS（非商用）",
   FinMind: "FinMind（非商用）",
 }

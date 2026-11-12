@@ -62,6 +62,7 @@ describe("總覽的「新聞報導」", () => {
     expect(all).toHaveLength(12)
     expect(within(section).queryByRole("button", { name: /顯示更多/ })).toBeNull()
     expect(section.textContent).toContain("AI 網路搜尋")
+    expect(section.textContent).toContain("另有 SearXNG 元搜尋")
   })
   it("請求失敗時顯示錯誤與重試，不說成「沒有報導」", async () => {
     const tsmc = await api.getInstrument("2330.TW")
