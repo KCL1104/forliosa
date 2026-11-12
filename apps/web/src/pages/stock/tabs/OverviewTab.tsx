@@ -21,7 +21,8 @@ import { NewsCoverage } from "../NewsCoverage"
 import { useWidth } from "../month-ticks"
 import { RelatedStocks } from "../RelatedStocks"
 import { anchorOf, beforeSpan, labelsCollide, sourceNotes, useDatasetSources, valuationSpan, withoutKind } from "../text"
-import { DateCell, Fig, KeyGrid, type KeyItem } from "./kit"
+import { DateCell } from "@/components/date-cell"
+import { Fig, KeyGrid, type KeyItem } from "./kit"
 
 /**
  * 總覽：三層。
@@ -439,7 +440,7 @@ function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount:
   const { title, kind } = withoutKind(eventTitle(e), label, e.detail)
   return (
     <li className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]">
-      <DateCell date={e.date} className="self-stretch py-3" />
+      <DateCell date={e.date} pad="py-3" inline />
       <span className="py-3 pl-3 text-md text-ink-2 max-sm:hidden">{kind}</span>
       <span className="min-w-0 py-3 pl-3 sm:pl-0">
         {e.url ? (

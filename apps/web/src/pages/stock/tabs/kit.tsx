@@ -1,4 +1,3 @@
-import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 /**
@@ -93,14 +92,3 @@ export function QuietSection({
   )
 }
 
-/** 聯絡簿的日期格：「12/10」墨色 500＋「（四）」12px 淡墨，右邊一條格線（`.date-cell`） */
-export function DateCell({ date, className }: { date: string; className?: string }) {
-  const full = formatDateShort(date)
-  const i = full.indexOf("（")
-  return (
-    <span className={cn("date-cell", className)}>
-      {i < 0 ? full : full.slice(0, i)}
-      {i >= 0 && <span className="weekday">{full.slice(i)}</span>}
-    </span>
-  )
-}

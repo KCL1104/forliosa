@@ -15,7 +15,7 @@ import { formatDateShort, formatDaysUntil, formatMoney, formatNumber } from "@/l
 import { codeOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly, useWho } from "@/api/view-as"
-import { DateCell } from "./date-cell"
+import { DateCell } from "@/components/date-cell"
 
 /** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {

@@ -2,6 +2,7 @@ import { HistoryList } from "@/ai/HistoryList"
 import { useAskAi } from "@/ai/use-ask"
 import { useReadOnly } from "@/api/view-as"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
+import { PageFrame } from "@/app/PageFrame"
 import { PageHeader } from "@/components/section"
 
 /**
@@ -17,9 +18,11 @@ export function HistoryPage() {
 function History() {
   const ask = useAskAi()
   return (
-    <div className="mx-auto w-full max-w-[760px] px-5 pt-2 pb-10 md:px-8 lg:pt-10">
-      <PageHeader title="紀錄" className="max-lg:sr-only" />
-      <HistoryList onOpen={ask.reveal} onReplay={(t) => ask.submit(t)} />
-    </div>
+    <PageFrame>
+      <div className="max-w-[760px]">
+        <PageHeader title="紀錄" className="max-lg:sr-only" />
+        <HistoryList onOpen={ask.reveal} onReplay={(t) => ask.submit(t)} />
+      </div>
+    </PageFrame>
   )
 }

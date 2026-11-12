@@ -14,7 +14,7 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { sourceNotes, withoutKind } from "../text"
-import { DateCell } from "./kit"
+import { DateCell } from "@/components/date-cell"
 
 /**
  * 事件：過去與接下來的時間軸。官方公告（重大訊息、證交所公告）也在這條軸上，標「公告」並連到原文；
@@ -84,7 +84,7 @@ function Timeline({ rows, today, privacy, who, empty, future }: { rows: Timeline
         const amount = e.amount_estimate !== null && e.mine ? `${who}可領約 ${privacy ? "••••" : formatMoney(e.amount_estimate)}` : null
         return (
           <li key={`${e.date}-${e.type}-${e.title}-${i}`} className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]">
-            <DateCell date={e.date} className="row-span-3 self-stretch py-3 sm:row-span-1" />
+            <DateCell date={e.date} pad="py-3" inline className="row-span-3 sm:row-span-1" />
             <span className={cn("pt-3 pl-3 text-md sm:pb-3", e.mine ? "font-medium text-ink" : "text-ink-2")}>{kind}</span>
             <span className="min-w-0 pl-3 max-sm:col-start-2 sm:py-3 sm:pl-0">
               {e.url ? (

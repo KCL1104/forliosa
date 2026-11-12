@@ -32,7 +32,7 @@ import { codeOf, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { GroupedVirtuoso } from "react-virtuoso"
 import { usePrefs } from "@/stores/prefs"
-import { DateCell } from "./date-cell"
+import { DateCell } from "@/components/date-cell"
 import { useReadOnly } from "@/api/view-as"
 
 type Period = "month" | "year" | "all"

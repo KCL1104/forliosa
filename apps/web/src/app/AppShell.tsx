@@ -1,5 +1,6 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router"
-import { EyeIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PenLineIcon, SearchIcon, UsersIcon } from "lucide-react"
+import { EyeIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, SearchIcon, UsersIcon } from "lucide-react"
+import { AskAiIcon } from "@/ai/ask-icon"
 import { useReadOnly, useViewingAs } from "@/api/view-as"
 import { AiPanel } from "@/ai/AiPanel"
 import { AiScreen } from "@/ai/AiScreen"
@@ -181,7 +182,7 @@ function Dock() {
             className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-sm font-bold text-ai shadow-lift"
           >
             {/* 和桌面 AI 面板的「問 AI」同一個圖示（紫色的筆） */}
-            <PenLineIcon aria-hidden className="size-[22px]" />
+            <AskAiIcon aria-hidden className="size-[22px]" />
             問 AI
             {pending > 0 && (
               <span className="num absolute -top-1.5 right-1 grid h-5 min-w-5 place-items-center rounded-full bg-ai px-1 text-xs font-medium text-raised">{pending}</span>

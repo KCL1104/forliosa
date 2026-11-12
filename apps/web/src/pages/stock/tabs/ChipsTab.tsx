@@ -1,4 +1,4 @@
-import { MessageCircleQuestionIcon } from "lucide-react"
+import { AskAiIcon } from "@/ai/ask-icon"
 import { useState } from "react"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { FOREIGN_FLOW_QUESTION } from "@/ai/suggestions"
@@ -72,7 +72,7 @@ function ListedInstitutional({ inst, top20 }: { inst: InstrumentDetail; top20: b
       <p>{top20 ? "證交所的開放資料沒有逐檔三大法人。" : "證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。"}</p>
       {inst.type === "stock" && !readOnly && (
         <Button variant="outline" size="sm" className="mt-3" onClick={() => ask.submit(FOREIGN_FLOW_QUESTION)}>
-          <MessageCircleQuestionIcon aria-hidden className="text-ai" />
+          <AskAiIcon aria-hidden className="text-ai" />
           {FOREIGN_FLOW_QUESTION}
         </Button>
       )}
