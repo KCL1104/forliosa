@@ -22,10 +22,12 @@ This module only fetches and parses (no database); ``forliosa.services.sec`` cac
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
+from fractions import Fraction
+from itertools import pairwise
 from typing import Any, Literal
 
 from forliosa.marketdata.http import HttpFetcher, HttpStatusError
@@ -140,7 +142,20 @@ UNIT = {"eps": "USD/shares", "diluted_shares": "shares"}
 # Periodic reports only (8-Ks, registration statements and proxies also carry XBRL facts).
 REPORT_FORMS = frozenset({"10-K", "10-Q", "10-K/A", "10-Q/A"})
 FACTS_YEARS = 12  # keep this many years of history
-FACTS_VERSION = 1
+# 2: ``splits`` (stock splits found in the filings) and comparatives' ``fy`` moved back to their own year.
+FACTS_VERSION = 2
+
+# Stock splits. After a split, later reports restate the periods they present (a 10-K its three years, a 10-Q the
+# same period a year earlier) on the new share basis; older periods are never restated, so the latest value of each
+# period is not on one basis. A period reported before and after the split shows the change: share counts grow by
+# the split ratio and EPS shrinks by it (``find_splits``).
+SPLIT_SHARE_TAGS = ("WeightedAverageNumberOfDilutedSharesOutstanding", "WeightedAverageNumberOfSharesOutstandingBasic",
+                    "WeightedAverageNumberOfShareOutstandingBasicAndDiluted")
+SPLIT_EPS_TAGS = ("EarningsPerShareDiluted", "EarningsPerShareBasic", "EarningsPerShareBasicAndDiluted")
+SPLIT_MIN = Fraction(6, 5)  # smaller changes (a 5 % stock dividend, a corrected count) are not treated as a split
+SPLIT_MAX = Fraction(500)  # a larger jump is a scale error in the XBRL, not a split
+SPLIT_EPS_MIN = 0.10  # EPS below this is too coarse (cents) to show a ratio
+PER_SHARE = frozenset({"eps", "diluted_shares"})  # line items on a share basis
 
 
 def _tags() -> list[str]:
@@ -154,26 +169,198 @@ def _unit_of(tag: str) -> str:
     return "USD"
 
 
-def trim_facts(raw: dict[str, Any], today: date) -> dict[str, Any]:
-    """companyfacts -> the stored subset: our tags, periodic reports only, one row per period.
+def _entries(gaap: dict[str, Any], tag: str, unit: str, since: str) -> list[dict[str, Any]]:
+    """A tag's facts from periodic reports, ending on or after ``since``, with a numeric value."""
+    out = []
+    for e in ((gaap.get(tag) or {}).get("units") or {}).get(unit) or []:
+        end, val = e.get("end"), e.get("val")
+        if e.get("form") in REPORT_FORMS and end and end >= since and isinstance(val, int | float):
+            out.append(e)
+    return out
 
-    Per period the **value** comes from the most recent filing (restatements win) and the **labels** (``fy``,
-    ``fp``) from the earliest one, i.e. the report in which the period was the current period. Rows are
+
+def _days(start: str, end: str) -> int | None:
+    try:
+        return (date.fromisoformat(end) - date.fromisoformat(start)).days
+    except (TypeError, ValueError):
+        return None
+
+
+def _report_ends(gaap: dict[str, Any], since: str) -> dict[str, str]:
+    """Accession -> the end of that report's own period: the latest end of any of its durations up to a year long
+    (its comparatives end a year or more earlier)."""
+    out: dict[str, str] = {}
+    for tag in _tags():
+        for e in _entries(gaap, tag, _unit_of(tag), since):
+            accn, start, end = e.get("accn"), e.get("start"), e["end"]
+            days = _days(start, end) if start else None
+            if accn and days is not None and 0 < days <= 380 and end > out.get(accn, ""):
+                out[accn] = end
+    return out
+
+
+def _own_fy(e: dict[str, Any], report_ends: dict[str, str]) -> Any:
+    """The fiscal year of the period itself. companyfacts labels every fact with its *filing's* ``fy``, so a
+    comparative (a year earlier in the same report) carries the next year's number: a company's first 10-K labels
+    its two earlier years with the report's own ``fy``. Durations are moved back by the whole years between their
+    end and the report's own period end."""
+    fy, start, accn = e.get("fy"), e.get("start"), e.get("accn")
+    if not isinstance(fy, int) or not start or accn not in report_ends:
+        return fy
+    try:
+        gap = (date.fromisoformat(report_ends[accn]) - date.fromisoformat(e["end"])).days
+    except ValueError:
+        return fy
+    return fy - max(0, round(gap / 365.25))
+
+
+def _snap(big: float, small: float, close: Callable[[Fraction], bool]) -> Fraction | None:
+    """The simplest ratio p/q (q ≤ 5) with ``big ≈ small × p/q``, when it is between ``SPLIT_MIN`` and ``SPLIT_MAX``."""
+    x = big / small
+    for q in range(1, 6):
+        f = Fraction(round(x * q), q)
+        if SPLIT_MIN <= f <= SPLIT_MAX and close(f):
+            return f
+    return None
+
+
+def _split_ratio(old: float, new: float, eps: bool) -> Fraction | None:
+    """Split ratio (new shares per old share) that turns ``old`` into ``new``: shares × ratio, EPS ÷ ratio."""
+    if not old or not new or (old > 0) != (new > 0):
+        return None
+    old, new = abs(old), abs(new)
+    if eps and min(old, new) < SPLIT_EPS_MIN:
+        return None
+    grown, base = (old, new) if eps else (new, old)  # grown ≈ base × ratio
+    big, small = max(grown, base), min(grown, base)
+
+    def close(f: Fraction) -> bool:
+        err = abs(big - small * float(f))
+        return err <= (0.005 * (1 + float(f)) + 1e-9 if eps else 0.01 * big)  # EPS is rounded to cents
+
+    f = _snap(big, small, close)
+    if f is None:
+        return None
+    return f if grown >= base else 1 / f
+
+
+@dataclass
+class _Split:
+    lo: str  # the split came after this filing …
+    hi: str  # … and by this one (the first filing known to use the new basis)
+    ratio: Fraction
+    shares: bool  # seen in share counts (else only in EPS)
+    periods: set[tuple[str | None, str]] = field(default_factory=set)
+
+
+Move = tuple[str, str, Fraction | None, tuple[str | None, str]]  # earlier filed, later filed, ratio, period
+
+
+def _moves(gaap: dict[str, Any], tags: Iterable[str], unit: str, since: str, eps: bool) -> list[Move]:
+    """Consecutive reports of the same period: ``ratio`` is the split ratio when the later report changed the value
+    by one, ``None`` when it kept the value (within 1 %); other changes are left out. An amendment is not taken as the
+    later report (it may repeat figures as originally filed)."""
+    out: list[Move] = []
+    for tag in tags:
+        history: dict[tuple[str | None, str], dict[str, tuple[float, bool]]] = {}
+        for e in _entries(gaap, tag, unit, since):
+            if e.get("filed"):
+                amended = str(e.get("form", "")).endswith("/A")
+                history.setdefault((e.get("start"), e["end"]), {})[str(e["filed"])] = (e["val"], amended)
+        for key, by_filed in history.items():
+            seq = sorted(by_filed.items())
+            for (a, (old, _)), (b, (new, amended)) in pairwise(seq):
+                if amended:
+                    continue
+                ratio = _split_ratio(old, new, eps)
+                if ratio is not None:
+                    out.append((a, b, ratio, key))
+                elif old and abs(new / old - 1) <= 0.01:
+                    out.append((a, b, None, key))
+    return out
+
+
+def _cluster(splits: list[_Split], moves: list[Move], shares: bool) -> None:
+    """Pin each split to a window, shortest windows first: a move inside one split's window narrows it, a move that
+    spans several known splits or disagrees with one adds nothing."""
+    for a, b, ratio, key in sorted(moves, key=lambda t: (_days(t[0], t[1]) or 0, t[1], t[0])):
+        if ratio is None:
+            continue
+        hits = [s for s in splits if max(s.lo, a) < min(s.hi, b)]
+        if not hits:
+            splits.append(_Split(a, b, ratio, shares, {key}))
+        elif len(hits) == 1 and hits[0].ratio == ratio:
+            s = hits[0]
+            s.lo, s.hi = max(s.lo, a), min(s.hi, b)
+            s.periods.add(key)
+
+
+def find_splits(raw: dict[str, Any], today: date) -> list[list[str]]:
+    """Stock splits in a company's facts: ``[[first filing on the new basis (ISO), ratio], …]`` oldest first; the
+    ratio is new shares per old share (``"10"``, ``"3/2"``, ``"1/8"`` for a reverse split).
+
+    Share counts decide (one period is enough). EPS fills in where share counts are missing (Alphabet tags its
+    pre-2022 counts per share class only): two periods have to agree, and an unchanged share count across the
+    window rules the split out (a restatement for other reasons can move EPS by a round ratio).
+    """
+    since = date(today.year - FACTS_YEARS - 3, 1, 1).isoformat()  # a 10-K restates three years
+    gaap = ((raw.get("facts") or {}).get("us-gaap") or {}) if isinstance(raw, dict) else {}
+    share_moves = _moves(gaap, SPLIT_SHARE_TAGS, "shares", since, eps=False)
+    splits: list[_Split] = []
+    _cluster(splits, share_moves, shares=True)
+    _cluster(splits, _moves(gaap, SPLIT_EPS_TAGS, "USD/shares", since, eps=True), shares=False)
+    steady = [(a, b) for a, b, ratio, _ in share_moves if ratio is None]
+
+    def real(s: _Split) -> bool:
+        if s.shares:
+            return True
+        return len(s.periods) >= 2 and not any(a <= s.lo and s.hi <= b for a, b in steady)
+
+    return [[s.hi, str(s.ratio)] for s in sorted(splits, key=lambda s: s.hi) if real(s)]
+
+
+def stock_splits(facts: dict[str, Any]) -> list[tuple[date, Fraction]]:
+    """The stored splits: ``(first filing date on the new basis, new shares per old share)``."""
+    out = []
+    for row in facts.get("splits") or []:
+        try:
+            out.append((date.fromisoformat(row[0]), Fraction(row[1])))
+        except (TypeError, ValueError, IndexError, ZeroDivisionError):
+            continue
+    return out
+
+
+def _split_factor(splits: list[tuple[date, Fraction]], filed: Any) -> Fraction:
+    """Splits after a report filed on ``filed``: its share counts × this, its EPS ÷ this, give today's basis."""
+    try:
+        when = date.fromisoformat(str(filed))
+    except ValueError:
+        return Fraction(1)
+    factor = Fraction(1)
+    for first_new, ratio in splits:
+        if when < first_new:
+            factor *= ratio
+    return factor
+
+
+def trim_facts(raw: dict[str, Any], today: date) -> dict[str, Any]:
+    """companyfacts -> the stored subset: our tags, periodic reports only, one row per period, and the splits.
+
+    Per period the **value** comes from the most recent filing (restatements win; ``summarize`` converts values a
+    later split did not restate) and the **labels** (``fy``, ``fp``) from the earliest one, i.e. the report in which
+    the period was the current period (a comparative's ``fy`` moved back to its own year). Rows are
     ``[start | None, end, value, fy, fp, filed]`` (dates ISO; ``start`` is None for balance-sheet instants).
     """
     since = date(today.year - FACTS_YEARS, 1, 1).isoformat()
     gaap = ((raw.get("facts") or {}).get("us-gaap") or {}) if isinstance(raw, dict) else {}
+    report_ends = _report_ends(gaap, since)
     tags: dict[str, dict[str, list[list[Any]]]] = {}
     for tag in _tags():
         unit = _unit_of(tag)
-        entries = ((gaap.get(tag) or {}).get("units") or {}).get(unit) or []
         latest: dict[tuple[str | None, str], dict[str, Any]] = {}
         first: dict[tuple[str | None, str], dict[str, Any]] = {}
-        for e in entries:
-            end, val = e.get("end"), e.get("val")
-            if e.get("form") not in REPORT_FORMS or not end or end < since or not isinstance(val, int | float):
-                continue
-            key = (e.get("start"), end)
+        for e in _entries(gaap, tag, unit, since):
+            key = (e.get("start"), e["end"])
             filed = str(e.get("filed") or "")
             cur = latest.get(key)
             if cur is None or filed > str(cur.get("filed") or "") or (
@@ -183,10 +370,10 @@ def trim_facts(raw: dict[str, Any], today: date) -> dict[str, Any]:
             if old is None or filed < str(old.get("filed") or ""):
                 first[key] = e
         if latest:
-            rows = [[k[0], k[1], latest[k]["val"], first[k].get("fy"), first[k].get("fp"),
+            rows = [[k[0], k[1], latest[k]["val"], _own_fy(first[k], report_ends), first[k].get("fp"),
                      latest[k].get("filed")] for k in sorted(latest, key=lambda k: (k[1], k[0] or ""))]
             tags[tag] = {unit: rows}
-    return {"v": FACTS_VERSION, "tags": tags}
+    return {"v": FACTS_VERSION, "tags": tags, "splits": find_splits(raw, today)}
 
 
 def shares_outstanding(raw: dict[str, Any]) -> tuple[int | None, date | None]:
@@ -224,8 +411,18 @@ class FiscalPeriod:
     derived: set[str] = field(default_factory=set)  # line items computed from year-to-date differences
 
 
+def _rebase(concept: str, val: Decimal, factor: Fraction) -> Decimal:
+    """A per-share figure from before a split, on today's share basis (EPS ÷ ratio, share count × ratio)."""
+    if factor == 1:
+        return val
+    if concept == "eps":
+        return val * factor.denominator / factor.numerator
+    return (val * factor.numerator / factor.denominator).quantize(Decimal(1))
+
+
 def _series(facts: dict[str, Any], concept: str) -> _Series:
     tags = facts.get("tags") or {}
+    splits = stock_splits(facts) if concept in PER_SHARE else []
     out = _Series()
     unit = UNIT.get(concept, "USD")
     for tag in CONCEPTS[concept]:
@@ -238,6 +435,8 @@ def _series(facts: dict[str, Any], concept: str) -> _Series:
                 continue
             key = (start, end)
             if key not in out.values:  # a higher-priority tag already reported this period
+                if splits:  # value filed before a later split: on the old share basis
+                    val = _rebase(concept, val, _split_factor(splits, row[5] if len(row) > 5 else None))
                 out.values[key] = val
                 out.labels[key] = (row[3] if isinstance(row[3], int) else None, row[4] if len(row) > 4 else None)
     return out
@@ -259,8 +458,8 @@ class _FiscalYear:
 
 
 def _fiscal_years(series: dict[str, _Series]) -> list[_FiscalYear]:
-    """Fiscal years from the 12-month durations. The name is the smallest ``fy`` any annual report gave the span:
-    a tag first used in a later 10-K reaches back with that later report's ``fy`` (comparatives)."""
+    """Fiscal years from the 12-month durations. The name is the smallest ``fy`` any annual report gave the span
+    (``trim_facts`` already moved comparatives back to their own year; facts stored before that did not)."""
     years: dict[tuple[date, date], int | None] = {}
     for concept, s in series.items():
         if concept in INSTANT or concept in ("eps", "diluted_shares"):
@@ -307,6 +506,9 @@ def summarize(facts: dict[str, Any], period: Literal["quarterly", "annual"]) -> 
     (10-Q cash flows are year-to-date; Q4 = fiscal year − nine months, since 10-Ks report the year only). Such
     values are listed in ``derived``. EPS for a derived quarter is an approximation (share counts change), and an
     average share count is never derived. Balance-sheet items are the instants at the period end.
+
+    EPS and average share counts are on today's share basis: a value filed before a split found in the filings
+    (``facts["splits"]``) is converted first, so a Q4 derived across a split subtracts like from like.
     """
     series = {c: _series(facts, c) for c in CONCEPTS}
     years = _fiscal_years(series)

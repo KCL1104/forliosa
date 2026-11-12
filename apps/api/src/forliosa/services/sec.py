@@ -20,6 +20,7 @@ import time
 from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+from fractions import Fraction
 from typing import Any, Literal
 
 from sqlalchemy import func, select
@@ -217,6 +218,15 @@ def _fetched(comp: SecCompany | None, need: Need) -> datetime | None:
     return comp.facts_fetched_at if need == "facts" else comp.filings_fetched_at
 
 
+def _outdated(comp: SecCompany | None, need: Need) -> bool:
+    """Facts trimmed by an older version (no split list, comparatives' ``fy`` not corrected): fetch again."""
+    return need == "facts" and comp is not None and (comp.facts or {}).get("v") != sec.FACTS_VERSION
+
+
+def _due(comp: SecCompany | None, need: Need, after: timedelta) -> bool:
+    return _is_stale(_fetched(comp, need), after) or _outdated(comp, need)
+
+
 def company_data(db: Session, symbol: str, need: Need) -> tuple[SecTicker | None, SecCompany | None, list[str]]:
     """Cached SEC data for ``symbol``, refreshed first when older than ``SEC_STALE_HOURS`` (and SEC is enabled)."""
     client = sec_client(on_demand=True)
@@ -228,7 +238,7 @@ def company_data(db: Session, symbol: str, need: Need) -> tuple[SecTicker | None
     cik, title = tick.cik, tick.title
     comp = db.get(SecCompany, cik)
     notes: list[str] = []
-    if not _is_stale(_fetched(comp, need), _stale_after()):
+    if not _due(comp, need, _stale_after()):
         return tick, comp, notes
     if client is None:
         fetched = _fetched(comp, need)
@@ -238,7 +248,7 @@ def company_data(db: Session, symbol: str, need: Need) -> tuple[SecTicker | None
     err = None
     with _lock(f"{need}:{cik}"):
         comp = db.get(SecCompany, cik, populate_existing=True)
-        if _is_stale(_fetched(comp, need), _stale_after()):  # another request may have refreshed it meanwhile
+        if _due(comp, need, _stale_after()):  # another request may have refreshed it meanwhile
             if need == "facts":
                 err = _attempt(f"facts:{cik}", lambda: refresh_facts(db, client, cik, title))
             else:
@@ -261,6 +271,22 @@ def _fye_note(periods: list[sec.FiscalPeriod]) -> str | None:
             return None
         return f"美股依公司會計年度標示：{y.label} 是 {y.start.isoformat()} 至 {y.end.isoformat()}"
     return f"美股依公司會計年度標示：{q.label} 是 {q.start.isoformat()} 至 {q.end.isoformat()} 的季度"
+
+
+def _split_words(ratio: Fraction) -> str:
+    if ratio > 1:
+        return f"{ratio.denominator} 股拆成 {ratio.numerator} 股"
+    return f"{ratio.denominator} 股合併為 {ratio.numerator} 股"
+
+
+def _splits_note(facts: dict[str, Any], periods: list[sec.FiscalPeriod]) -> str | None:
+    """Splits after the first period shown: EPS and share counts are all on today's basis (``sec.summarize``)."""
+    splits = [(d, r) for d, r in sec.stock_splits(facts) if periods and d > periods[0].end]
+    if not splits:
+        return None
+    parts = "、".join(f"{d.isoformat()} 起申報的財報反映 {_split_words(r)}" for d, r in splits)
+    return (f"EPS 與稀釋平均股數都以目前的股數為準：{parts}；"
+            "更早申報、後來沒有重編的數字已依分割比例換算")
 
 
 def financials(db: Session, info: InstrumentInfo, period: str, out: dict[str, Any]) -> dict[str, Any]:
@@ -315,6 +341,9 @@ def financials(db: Session, info: InstrumentInfo, period: str, out: dict[str, An
         out["notes"].append("10-Q 的現金流量是年初至今累計、10-K 只報全年：單季數字由累計數相減得出")
     if "eps" in derived:
         out["notes"].append("第四季（或只有累計數的季度）EPS 為累計 EPS 相減的近似值")
+    split_note = _splits_note(comp.facts, periods)
+    if split_note:
+        out["notes"].append(split_note)
     out["sources"] = labels(["sec-edgar/companyfacts"])
     return out
 
@@ -395,7 +424,7 @@ def sync_symbols(db: Session, client: Any, symbols: list[str],
             continue
         comp = db.get(SecCompany, tick.cik)
         try:
-            if comp is None or _is_stale(comp.facts_fetched_at, stale):
+            if comp is None or _due(comp, "facts", stale):
                 refresh_facts(db, client, tick.cik, tick.title)
                 counts["companies"] += 1
             if comp is None or _is_stale(comp.filings_fetched_at, stale):

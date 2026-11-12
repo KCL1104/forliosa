@@ -106,6 +106,15 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(filings.every((e) => e.url?.startsWith("https://www.sec.gov/Archives/edgar/data/320193/"))).toBe(true)
     expect((await api.getOverview("AAPL")).eps_ttm).toBe(8.98)
     expect((await api.getFinancials("VOO")).notes).toEqual(["ETF 沒有財務報表資料"])
+    // 股票分割：沒被重編的舊年度已換算成目前的股數（NVIDIA 2021 年 1 拆 4、2024 年 1 拆 10），不會出現 3.85 → 0.17
+    const nvda = await api.getFinancials("NVDA", "annual")
+    const shares = (nvda.shares?.diluted_average ?? []).filter((v): v is number => v !== null)
+    expect(shares.length).toBe(nvda.periods.length)
+    expect(Math.max(...shares) / Math.min(...shares)).toBeLessThan(1.1)
+    expect(nvda.income.eps[nvda.periods.indexOf("FY2022")]).toBe(0.385)
+    expect(nvda.notes?.some((n) => n.includes("2024-08-28 起申報的財報反映 1 股拆成 10 股"))).toBe(true)
+    // 美股沒有可商用的配息來源：股利是空的（畫面要說「沒有來源」，不是「沒有配過息」）
+    expect(await api.getDividends("VOO")).toEqual([])
   })
   it("盤中走勢一律沒有點，notes 說明沒有授權來源", async () => {
     const i = await api.getIntraday("2330.TW")

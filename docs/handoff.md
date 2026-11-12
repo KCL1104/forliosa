@@ -63,7 +63,7 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 
 ### 3.1 SEC EDGAR 美股基本面與申報
 
-> ✅ **已完成（2026-11-12，分支 `wip/sec`）**：美股個股的財報（companyfacts，美元、公司會計年度）與 8-K／10-Q／10-K 事件，快取在 `sec_*` 三張表（migration `0008`），worker 每天 07:50 更新、請求時超過 24 小時才重抓；前端財務與事件分頁、mock、截圖 `stock-aapl-*`。細節見 `apps/api/CONTRACT_NOTES.md`「第四批」。
+> ✅ **已完成（2026-11-12，分支 `wip/sec`）**：美股個股的財報（companyfacts，美元、公司會計年度）與 8-K／10-Q／10-K 事件，快取在 `sec_*` 三張表（migration `0008`），worker 每天 07:50 更新、請求時超過 24 小時才重抓；前端財務與事件分頁、mock、截圖 `stock-aapl-*`。審查後補上：股票分割換算（EPS、稀釋平均股數一律以目前股數為準，`facts.v` 升到 2、舊快取會重抓）、新上市公司比較數字的會計年度、AI `get_financials` 的股數與期別對齊、美股 ETF／股利分頁「沒有可商用配息來源」的空狀態。細節見 `apps/api/CONTRACT_NOTES.md`「第四批」（含已知限制：10-Q 報 TTM 的公司如 Amazon）。
 
 - User-Agent：`Forliosa/1.0 <SEC_CONTACT_EMAIL>`，**email 只從環境變數讀，不寫進程式碼、測試或文件**。請求 ≤ 10 次／秒。
 - 主機 `data.sec.gov`、`www.sec.gov` 已在環境允許清單；也要加進 `apps/api/src/forliosa/marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`，並在 `datapolicy.py` 的 `DATASETS` 登記（SEC 資料是美國政府公開資料）。

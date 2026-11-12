@@ -46,7 +46,7 @@
 | 範圍 | 狀態 | 檔案 |
 |---|---|---|
 | 資料層 | ✅ `Financials` 多 `currency`、`amount_unit`（台股 1000、美股 1）、`period_ends`、`shares`、`as_of`；事件類型多 `sec_filing`＋`form`。mock 的 AAPL、NVDA 用後端對 SEC 真實資料（2026-11-12）的輸出（`sec-data.ts`，不是模擬數字），兩種政策都一樣；總覽的近四季 EPS 也來自它；資料來源頁多三個 SEC 資料集（授權連結是 SEC 的網站政策） | `src/api/types.ts`、`mock/sec-data.ts`、`mock/research.ts`、`mock/attributions.ts` |
-| 財務分頁 | ✅ 美股個股不再是空狀態：季／年財報表格（美元、公司會計年度 `FY2026Q4`，表頭第二行「至 2026/09/26」），單位說明「美元；EPS 為稀釋每股盈餘」，首句「FY2026Q4 EPS 2.10 美元，比去年同季成長 14%」；說明（會計年度、單季推算方式）逐行列出、和資料來源分開；沒有月營收。美股 ETF：「ETF 沒有自己的財報」。SEC 未啟用或找不到公司：「目前沒有這家公司的 SEC 財報」＋後端 notes | `src/pages/stock/tabs/FinancialsTab.tsx` |
+| 財務分頁 | ✅ 美股個股不再是空狀態：季／年財報表格（美元、公司會計年度 `FY2026Q4`，表頭第二行「至 2026/09/26」），單位說明「美元；EPS 為稀釋每股盈餘」，首句「FY2026Q4 EPS 2.10 美元，比去年同季成長 14%」；說明（會計年度、單季推算方式、股票分割換算）逐行列出、和資料來源分開；沒有月營收。美股 ETF：「ETF 沒有自己的財報」＋「美股目前也沒有可商用的配息資料來源」（不再叫人去看股利分頁）；美股的股利分頁沒有資料時寫「美股目前沒有可商用的配息資料來源」，不說成「過去沒有配息紀錄」。SEC 未啟用或找不到公司：「目前沒有這家公司的 SEC 財報」＋後端 notes | `src/pages/stock/tabs/FinancialsTab.tsx` |
 | 事件分頁 | ✅ SEC 申報依表單標類型：10-K「年報」、10-Q「季報」、8-K「重大事件」（修正加「修正」），標題如「8-K 營運結果與財務狀況」，連到 sec.gov 原文（「在 SEC EDGAR 查看」）；持有時年報、季報算「我的」；美股的頁尾說明改成 SEC 版本 | `src/pages/stock/tabs/EventsTab.tsx`、`src/lib/events.ts`（`eventLabel`） |
 | 截圖 | ✅ `stock-aapl-financials-*`、`stock-aapl-events-*`（桌面／iPhone、淺／深） | `scripts/screenshots.mjs` |
 

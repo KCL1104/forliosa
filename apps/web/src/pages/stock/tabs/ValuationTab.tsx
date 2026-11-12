@@ -30,7 +30,9 @@ export function ValuationTab({ inst: instrument, position }: { inst: InstrumentD
           title={instrument.type === "etf" ? "ETF 沒有本益比與股價淨值比河流圖" : "這檔還沒有估值資料"}
           description={
             instrument.type === "etf"
-              ? "ETF 是一籃子股票，沒有自己的每股盈餘與淨值。可以改看下方的殖利率走勢，或到「股利」分頁看歷年配息。"
+              ? instrument.market === "US"
+                ? "ETF 是一籃子股票，沒有自己的每股盈餘與淨值；美股目前也沒有可商用的配息資料來源。"
+                : "ETF 是一籃子股票，沒有自己的每股盈餘與淨值。可以改看下方的殖利率走勢，或到「股利」分頁看歷年配息。"
               : "我們還沒有這檔的歷史每股盈餘與淨值資料。"
           }
         />

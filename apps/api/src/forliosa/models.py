@@ -747,7 +747,8 @@ class SecTicker(Base):
 class SecCompany(Base):
     """One SEC registrant: the trimmed XBRL company facts (only the us-gaap tags Forliosa shows, one value per
     period) and when its companyfacts / submissions were last fetched. ``facts`` is
-    ``{"v": 1, "tags": {tag: {unit: [[start, end, value, fy, fp, filed], …]}}}`` (see ``marketdata.sec``)."""
+    ``{"v": 2, "tags": {tag: {unit: [[start, end, value, fy, fp, filed], …]}}, "splits": [[first filed, ratio], …]}``
+    (see ``marketdata.sec``; facts of an older ``v`` are fetched again)."""
 
     __tablename__ = "sec_companies"
 

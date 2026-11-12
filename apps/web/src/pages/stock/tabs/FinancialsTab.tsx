@@ -21,7 +21,7 @@ export function FinancialsTab({ inst }: { inst: InstrumentDetail }) {
     if (inst.type === "etf") {
       return (
         <NotYet title="ETF 沒有自己的財報">
-          SEC 的 10-K／10-Q 是公司的財報；{inst.name}的持股與費用率要看發行商公告。現在可以看「股利」分頁的歷年配息。
+          SEC 的 10-K／10-Q 是公司的財報；{inst.name}的持股與費用率要看發行商公告。美股目前也沒有可商用的配息資料來源。
         </NotYet>
       )
     }

@@ -95,6 +95,159 @@ def test_annual_summary_and_january_fiscal_year_end():
     assert [p.label for p in nq][:2] == ["FY2027Q1", "FY2027Q2"] and nq[1].end == date(2026, 7, 26)
 
 
+def _fact(start, end, val, fy, fp, form, filed, accn):
+    """One companyfacts entry (``start`` None for an instant)."""
+    e = {"end": end, "val": val, "fy": fy, "fp": fp, "form": form, "filed": filed, "accn": accn}
+    return {**e, "start": start} if start else e
+
+
+def _raw(**tags):
+    """companyfacts with us-gaap ``tag=[entries]`` (unit from the tag: EPS USD/shares, counts shares, else USD)."""
+    def unit(tag):
+        return "USD/shares" if tag.startswith("EarningsPerShare") else "shares" if "Shares" in tag else "USD"
+    return {"cik": 1045810, "entityName": "Test Corp",
+            "facts": {"us-gaap": {t: {"units": {unit(t): rows}} for t, rows in tags.items()}}}
+
+
+# A calendar-year company splits 10-for-1 after its Q3 10-Q (EPS 5.00 a quarter) and before its 10-K: the 10-K
+# reports the year on the new basis (2.00) and restates the year before; the next Q1 10-Q restates last year's Q1.
+SPLIT_AFTER_Q3 = _raw(
+    EarningsPerShareDiluted=[
+        _fact("2024-01-01", "2024-12-31", 18.0, 2024, "FY", "10-K", "2025-02-20", "k24"),
+        _fact("2025-01-01", "2025-03-31", 5.0, 2025, "Q1", "10-Q", "2025-05-01", "q125"),
+        _fact("2025-04-01", "2025-06-30", 5.0, 2025, "Q2", "10-Q", "2025-08-01", "q225"),
+        _fact("2025-01-01", "2025-06-30", 10.0, 2025, "Q2", "10-Q", "2025-08-01", "q225"),
+        _fact("2025-07-01", "2025-09-30", 5.0, 2025, "Q3", "10-Q", "2025-11-01", "q325"),
+        _fact("2025-01-01", "2025-09-30", 15.0, 2025, "Q3", "10-Q", "2025-11-01", "q325"),
+        _fact("2025-01-01", "2025-12-31", 2.0, 2025, "FY", "10-K", "2026-02-20", "k25"),
+        _fact("2024-01-01", "2024-12-31", 1.8, 2025, "FY", "10-K", "2026-02-20", "k25"),
+        _fact("2026-01-01", "2026-03-31", 0.6, 2026, "Q1", "10-Q", "2026-05-01", "q126"),
+        _fact("2025-01-01", "2025-03-31", 0.5, 2026, "Q1", "10-Q", "2026-05-01", "q126"),
+    ],
+    Revenues=[
+        _fact("2024-01-01", "2024-12-31", 1800, 2024, "FY", "10-K", "2025-02-20", "k24"),
+        _fact("2025-01-01", "2025-03-31", 500, 2025, "Q1", "10-Q", "2025-05-01", "q125"),
+        _fact("2025-04-01", "2025-06-30", 500, 2025, "Q2", "10-Q", "2025-08-01", "q225"),
+        _fact("2025-07-01", "2025-09-30", 500, 2025, "Q3", "10-Q", "2025-11-01", "q325"),
+        _fact("2025-01-01", "2025-12-31", 2000, 2025, "FY", "10-K", "2026-02-20", "k25"),
+        _fact("2024-01-01", "2024-12-31", 1800, 2025, "FY", "10-K", "2026-02-20", "k25"),
+        _fact("2026-01-01", "2026-03-31", 600, 2026, "Q1", "10-Q", "2026-05-01", "q126"),
+        _fact("2025-01-01", "2025-03-31", 500, 2026, "Q1", "10-Q", "2026-05-01", "q126"),
+    ],
+)
+
+
+def test_a_split_between_the_q3_report_and_the_10k_keeps_eps_on_one_basis():
+    facts = sec.trim_facts(SPLIT_AFTER_Q3, TODAY)
+    # no share counts tagged: EPS finds it (two periods agree), pinned to the first report on the new basis
+    assert facts["splits"] == [["2026-02-20", "10"]]
+    qs = {p.label: p for p in sec.summarize(facts, "quarterly")}
+    assert [qs[f"FY2025Q{n}"].values["eps"] for n in (1, 2, 3)] == [D("0.5")] * 3
+    # Q4 = the 10-K year (new basis) − nine months (old basis, converted): not 2.00 − 15.00 = −13.00
+    assert qs["FY2025Q4"].values["eps"] == D("0.5") and "eps" in qs["FY2025Q4"].derived
+    assert qs["FY2026Q1"].values["eps"] == D("0.6")
+    years = {p.label: p.values["eps"] for p in sec.summarize(facts, "annual")}
+    assert years == {"FY2024": D("1.8"), "FY2025": D("2.0")}
+
+
+def test_split_overview_eps_ttm_and_note(client, clock):
+    """Through the API: the last four quarters add up on one basis, and the notes say what was converted."""
+    fake = FakeSecClient(facts={1045810: SPLIT_AFTER_Q3})
+    sec_svc.set_sec_client(fake)
+    f = client.get(f"{API}/instruments/NVDA/financials").json()
+    assert f["periods"] == ["FY2025Q1", "FY2025Q2", "FY2025Q3", "FY2025Q4", "FY2026Q1"]
+    assert f["income"]["eps"] == [0.5, 0.5, 0.5, 0.5, 0.6]
+    assert ("EPS 與稀釋平均股數都以目前的股數為準：2026-02-20 起申報的財報反映 1 股拆成 10 股；"
+            "更早申報、後來沒有重編的數字已依分割比例換算") in f["notes"]
+    ov = client.get(f"{API}/instruments/NVDA/overview").json()
+    assert ov["eps_ttm"] == 2.1  # 0.5 + 0.5 + 0.5 + 0.6, not 5 + 5 − 13 + 0.6
+
+
+def test_nvidia_splits_from_live_filings(client, fake):
+    """NVIDIA split 4-for-1 (2021) and 10-for-1 (2024); 10-Ks restate three years, so FY2019 was last reported on
+    the pre-2021 basis and FY2022 on the pre-2024 basis."""
+    facts = sec.trim_facts(load("sec_companyfacts_nvda_live_20261112.json"), TODAY)
+    assert facts["splits"] == [["2021-08-20", "4"], ["2024-08-28", "10"]]
+    years = {p.label: p for p in sec.summarize(facts, "annual")}
+    eps = {k: p.values["eps"] for k, p in years.items()}
+    assert eps["FY2019"] == D("6.63") / 40 and eps["FY2020"] == D("1.13") / 10 and eps["FY2022"] == D("3.85") / 10
+    assert eps["FY2023"] == D("0.17") and eps["FY2026"] == D("4.9")  # reported on today's basis
+    assert years["FY2019"].values["diluted_shares"] == 625_000_000 * 40
+    assert years["FY2022"].values["diluted_shares"] == 2_535_000_000 * 10
+    a = client.get(f"{API}/instruments/NVDA/financials?period=annual").json()
+    assert a["periods"][0] == "FY2017" and a["income"]["eps"][a["periods"].index("FY2022")] == 0.385
+    shares = [v for v in a["shares"]["diluted_average"] if v is not None]
+    assert max(shares) / min(shares) < 1.1  # one basis: no 10x or 40x jumps
+    assert any(n.startswith("EPS 與稀釋平均股數都以目前的股數為準：2021-08-20 起申報的財報反映 1 股拆成 4 股、"
+                            "2024-08-28 起申報的財報反映 1 股拆成 10 股") for n in a["notes"])
+    # Apple's quarters start after its 2020 split: nothing to say
+    q = client.get(f"{API}/instruments/AAPL/financials").json()
+    assert not any("分割" in n for n in q["notes"])
+
+
+def _shares(val_old, val_new, *, old_filed="2025-08-01", new_filed="2026-08-01", form="10-Q"):
+    """A quarter reported on ``old_filed`` and again a year later as the comparative."""
+    return [_fact("2025-04-01", "2025-06-30", val_old, 2025, "Q2", "10-Q", old_filed, "a"),
+            _fact("2025-04-01", "2025-06-30", val_new, 2026, "Q2", form, new_filed, "b")]
+
+
+def test_find_splits_reads_share_counts_first():
+    find = sec.find_splits
+    # one period of share counts is enough; a reverse split is a ratio below one
+    assert find(_raw(WeightedAverageNumberOfDilutedSharesOutstanding=_shares(100_000_000, 300_000_000)),
+                TODAY) == [["2026-08-01", "3"]]
+    assert find(_raw(WeightedAverageNumberOfSharesOutstandingBasic=_shares(800_000, 100_000)),
+                TODAY) == [["2026-08-01", "1/8"]]
+    assert find(_raw(WeightedAverageNumberOfDilutedSharesOutstanding=_shares(100, 150)), TODAY) == [
+        ["2026-08-01", "3/2"]]
+    # small changes, odd ratios and an amendment repeating the original figures are not splits
+    assert find(_raw(WeightedAverageNumberOfDilutedSharesOutstanding=_shares(100, 105)), TODAY) == []
+    assert find(_raw(WeightedAverageNumberOfDilutedSharesOutstanding=_shares(100, 137)), TODAY) == []
+    assert find(_raw(WeightedAverageNumberOfDilutedSharesOutstanding=_shares(300, 100, form="10-Q/A")), TODAY) == []
+    # EPS alone: one period could be a restatement for other reasons; two that agree are a split
+    eps_one = [_fact("2025-04-01", "2025-06-30", 2.0, 2025, "Q2", "10-Q", "2025-08-01", "a"),
+               _fact("2025-04-01", "2025-06-30", 1.0, 2026, "Q2", "10-Q", "2026-08-01", "b")]
+    eps_two = [*eps_one, _fact("2025-01-01", "2025-06-30", 4.0, 2025, "Q2", "10-Q", "2025-08-01", "a"),
+               _fact("2025-01-01", "2025-06-30", 2.0, 2026, "Q2", "10-Q", "2026-08-01", "b")]
+    assert find(_raw(EarningsPerShareDiluted=eps_one), TODAY) == []
+    assert find(_raw(EarningsPerShareDiluted=eps_two), TODAY) == [["2026-08-01", "2"]]
+    # … unless the share count did not move over the same window
+    steady = _shares(100_000_000, 100_000_000, old_filed="2025-05-01", new_filed="2026-09-01")
+    assert find(_raw(EarningsPerShareDiluted=eps_two, WeightedAverageNumberOfDilutedSharesOutstanding=steady),
+                TODAY) == []
+
+
+def test_first_10k_with_three_years_names_each_year_by_itself():
+    """A new registrant's first 10-K (FY2025) brings 2023 and 2024 along; companyfacts labels all three fy=2025."""
+    raw = _raw(Revenues=[
+        _fact("2023-01-01", "2023-12-31", 100, 2025, "FY", "10-K", "2026-03-01", "k25"),
+        _fact("2024-01-01", "2024-12-31", 200, 2025, "FY", "10-K", "2026-03-01", "k25"),
+        _fact("2025-01-01", "2025-12-31", 300, 2025, "FY", "10-K", "2026-03-01", "k25"),
+        _fact("2026-01-01", "2026-03-31", 90, 2026, "Q1", "10-Q", "2026-05-01", "q126"),
+        _fact("2025-01-01", "2025-03-31", 70, 2026, "Q1", "10-Q", "2026-05-01", "q126"),
+    ])
+    facts = sec.trim_facts(raw, TODAY)
+    rows = facts["tags"]["Revenues"]["USD"]
+    assert [(r[1], r[3]) for r in rows] == [("2023-12-31", 2023), ("2024-12-31", 2024), ("2025-03-31", 2025),
+                                            ("2025-12-31", 2025), ("2026-03-31", 2026)]
+    assert [p.label for p in sec.summarize(facts, "annual")] == ["FY2023", "FY2024", "FY2025"]
+    # the 10-Q's comparative quarter is Q1 of fiscal 2025 (not "FY2026Q1" next to a "FY2027Q1")
+    quarters = {p.label: p.values["revenue"] for p in sec.summarize(facts, "quarterly")}
+    assert quarters == {"FY2025Q1": 70, "FY2026Q1": 90}
+
+
+def test_facts_from_an_older_version_are_fetched_again(client, fake, engine):
+    client.get(f"{API}/instruments/AAPL/financials")
+    with Session(engine) as db:
+        comp = db.get(SecCompany, AAPL_CIK)
+        comp.facts = {**comp.facts, "v": 1}
+        db.commit()
+    client.get(f"{API}/instruments/AAPL/financials")
+    assert fake.calls.count(f"facts:{AAPL_CIK}") == 2
+    with Session(engine) as db:
+        assert db.get(SecCompany, AAPL_CIK).facts["v"] == sec.FACTS_VERSION
+
+
 def test_liabilities_fall_back_to_liabilities_and_equity_minus_equity():
     facts = {"v": 1, "tags": {
         "LiabilitiesAndStockholdersEquity": {"USD": [[None, "2026-06-30", 500, 2026, "FY", "2026-08-01"]]},
@@ -295,6 +448,14 @@ def test_ai_tools_read_us_financials_and_filings(client, fake, engine):
         fin = json.loads(execute(ctx, "get_financials", {"symbol": "AAPL", "period": "quarterly"}).content)
         assert fin["units"].startswith("金額單位美元") and "monthly_revenue_last_6" not in fin
         assert fin["periods"][-1] == "FY2026Q4" and fin["period_ends"][-1] == "2026-09-26"
+        # the per-period share counts are cut with the periods (8 for the model, more in the API)
+        api = client.get(f"{API}/instruments/AAPL/financials").json()
+        assert len(fin["periods"]) == 8 < len(api["periods"])
+        assert len(fin["shares"]["diluted_average"]) == len(fin["periods"])
+        first = api["periods"].index(fin["periods"][0])
+        assert fin["periods"][0] == "FY2025Q1"
+        assert fin["shares"]["diluted_average"] == api["shares"]["diluted_average"][first:]
+        assert fin["shares"]["diluted_average"][0] == 15150865000 and fin["shares"]["outstanding"] == 14532182000
         evs = json.loads(execute(ctx, "get_events", {"symbol": "AAPL", "mine_only": False}).content)
         assert any(e.get("form") == "10-K" for e in evs["recent"])
 

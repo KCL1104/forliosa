@@ -379,7 +379,9 @@ def get_financials(ctx: ToolContext, args: dict[str, Any]) -> Any:
     }
     if us:
         out["period_ends"] = (f.get("period_ends") or [])[cut:]
-        out["shares"] = f.get("shares")
+        shares = f.get("shares")
+        # diluted_average lines up with periods: cut it the same way (outstanding is one cover-page figure)
+        out["shares"] = {**shares, "diluted_average": (shares.get("diluted_average") or [])[cut:]} if shares else None
         out["as_of"] = f.get("as_of")
     else:
         out["monthly_revenue_last_6"] = revenue

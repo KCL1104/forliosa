@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from forliosa.marketdata.base import ProviderUnavailable
 from forliosa.timeutil import TAIPEI
@@ -111,7 +112,8 @@ class FakeFetcher:
         raise ProviderUnavailable(f"no fixture for {url}")
 
 
-# SEC EDGAR (trimmed live responses, 2026-11-12): AAPL companyfacts + submissions, NVDA companyfacts, a ticker subset.
+# SEC EDGAR (trimmed live responses, 2026-11-12): AAPL companyfacts + submissions, NVDA companyfacts (with the
+# EPS and share counts around its 2021 and 2024 stock splits), a ticker subset.
 SEC_FACTS = {320193: "sec_companyfacts_aapl_live_20261112.json", 1045810: "sec_companyfacts_nvda_live_20261112.json"}
 SEC_SUBMISSIONS = {320193: "sec_submissions_aapl_live_20261112.json"}
 
@@ -123,9 +125,10 @@ class FakeSecClient:
     Companies without a fixture answer like SEC's 404 (``None``).
     """
 
-    def __init__(self, fail: Exception | None = None):
+    def __init__(self, fail: Exception | None = None, facts: dict[int, Any] | None = None):
         self.calls: list[str] = []
         self.fail = fail
+        self.facts = facts or {}  # raw companyfacts by CIK, in place of the fixtures
 
     def _call(self, what: str) -> None:
         self.calls.append(what)
@@ -138,6 +141,8 @@ class FakeSecClient:
 
     def company_facts(self, cik: int):
         self._call(f"facts:{cik}")
+        if cik in self.facts:
+            return self.facts[cik]
         return load(SEC_FACTS[cik]) if cik in SEC_FACTS else None
 
     def submissions(self, cik: int):
