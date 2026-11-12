@@ -64,3 +64,17 @@ def test_evening_and_weekly_runs_include_the_new_groups():
 
     saturday = datetime(2026, 11, 14, 7, 55, tzinfo=TAIPEI)
     assert job.due(saturday, None) and not job.due(saturday.replace(hour=7, minute=40), None)
+
+
+def test_sharing_jobs_and_the_worker_secret_check():
+    import pytest
+
+    from forliosa.config import DEFAULT_SESSION_SECRET, Settings
+    from forliosa.worker import Worker, check_worker_settings
+
+    names = {j.name for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    assert {"group_push", "telegram_poll", "group_digests", "group_digest_poll", "sharing_retention"} <= names
+    with pytest.raises(RuntimeError, match="SESSION_SECRET"):
+        check_worker_settings(Settings(forliosa_env="prod", session_secret=DEFAULT_SESSION_SECRET))
+    check_worker_settings(Settings(forliosa_env="prod", session_secret="x" * 48))
+    check_worker_settings(Settings(forliosa_env="dev"))

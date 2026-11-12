@@ -60,6 +60,22 @@ def no_discord_network():
 
 
 @pytest.fixture(autouse=True)
+def no_push_network():
+    """No test may reach a Discord webhook or the Telegram Bot API: every group-push request fails unless a test
+    installs a mock transport with ``forliosa.services.pushers.set_transport``."""
+    import httpx
+
+    from forliosa.services import pushers
+
+    def refuse(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectError("network disabled in tests", request=request)
+
+    pushers.set_transport(httpx.MockTransport(refuse))
+    yield
+    pushers.set_transport(None)
+
+
+@pytest.fixture(autouse=True)
 def builtin_calendar():
     """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
     from forliosa.timeutil import set_official_holidays

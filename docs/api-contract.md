@@ -616,8 +616,8 @@
 
 ## 分享（M5）
 
-登入、授權唯讀查看、親友群組（2026-11-12 定案）。後端實作的解讀、新增欄位與目前還沒有的端點（週報、頻道）見
-[`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 分享（M5）」。
+登入、授權唯讀查看、親友群組、群組 AI 週報與頻道推播（2026-11-12 定案，後端全部已實作）。後端實作的解讀與新增欄位見
+[`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 分享（M5）第一批」（登入、授權、群組）與「第二批」（週報、頻道、推播）。
 
 產品負責人決定（`PRODUCT.md`「分享（M5）範圍」）：照 `docs/product-spec.md` §4.8 一次做完；正式登入用 **Discord OAuth**、開放任何人註冊；
 排行看今日、本月、今年，另外顯示總報酬率（含股利），可對照大盤與 0050；交易動態只顯示買賣哪一檔，可選擇附上價格，**沒有理由欄位**；
@@ -635,7 +635,8 @@
 - **CSRF**：非 `GET`／`HEAD`／`OPTIONS` 的請求若帶 `Origin`，必須在 `CORS_ORIGINS` 內，否則 403 `forbidden`（全站適用）。
 - **上限**：每個群組最多 50 位成員；每人最多加入 20 個群組（超過回 409 `limit_reached`）。
 - 錯誤代碼：`forbidden`、`not_found`、`read_only`、`view_as_not_allowed`、`delegation_revoked`、`already_member`、`invite_invalid`、
-  `limit_reached`、`webhook_failed`、`oauth_*`（見登入）；格式錯誤一律 422 `validation_error`。
+  `limit_reached`、`webhook_failed`、`telegram_unavailable`（409：伺服器沒有設定 Telegram bot）、`oauth_*`（見登入）；
+  格式錯誤一律 422 `validation_error`。
 
 ### 登入（Discord OAuth）與個人資料
 
@@ -730,14 +731,14 @@
 | DELETE | `/groups/{id}/comments/{comment_id}` | 作者或管理員 | 刪除留言 |
 | PUT | `/groups/{id}/reactions` | 成員 | `{"target", "emoji"}` 加表情（重複呼叫不重複計） |
 | DELETE | `/groups/{id}/reactions?target=&emoji=` | 成員 | 收回自己的表情 |
-| GET | `/groups/{id}/digests?limit=8&cursor=` | 成員 | 群組 AI 週報，新到舊，`{"items": Digest[], "next_cursor"}` |
-| GET | `/groups/{id}/channels` | 成員 | `Channels`（`webhook_hint` 只有 owner 看得到） |
-| PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades", "notify_digest"}`；儲存前送一則測試訊息，失敗 422 `webhook_failed` |
-| PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_digest"?}` |
-| DELETE | `/groups/{id}/channels/discord` | owner | 解除 |
-| POST | `/groups/{id}/channels/telegram/link` | owner | → `{"code", "bot_username", "expires_at"}`：把 bot 加進 Telegram 群組，在群組裡傳 `/link <code>`（10 分鐘內、一次性） |
-| PATCH | `/groups/{id}/channels/telegram` | owner | `{"notify_trades"?, "notify_digest"?}` |
-| DELETE | `/groups/{id}/channels/telegram` | owner | 解除 |
+| GET | `/groups/{id}/digests?limit=8&cursor=` | 成員 | 群組 AI 週報，新到舊（`limit` 1–52），`{"items": Digest[], "next_cursor"}` |
+| GET | `/groups/{id}/channels` | 成員 | `Channels`（`webhook_hint` 只有 owner 看得到，其他人為 `null`） |
+| PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades"?, "notify_digest"?}`（兩個開關預設 `true`）→ `Channels`；儲存前送一則測試訊息，失敗 422 `webhook_failed`；網址格式不符 422 `validation_error`（錯誤訊息不含網址） |
+| PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_digest"?}` → `Channels`；還沒設定 404 |
+| DELETE | `/groups/{id}/channels/discord` | owner | 解除（204；還沒送出的推播取消） |
+| POST | `/groups/{id}/channels/telegram/link` | owner | → `{"code", "bot_username", "expires_at"}`：把 bot 加進 Telegram 群組，在群組裡傳 `/link <code>`（10 分鐘內、一次性；再產生一組會讓舊的失效）；伺服器沒有 bot 時 409 `telegram_unavailable` |
+| PATCH | `/groups/{id}/channels/telegram` | owner | `{"notify_trades"?, "notify_digest"?}` → `Channels`；還沒連結 404 |
+| DELETE | `/groups/{id}/channels/telegram` | owner | 解除（204） |
 
 ```json
 // GroupSummary
@@ -825,19 +826,21 @@
 
 // Digest（群組 AI 週報）
 {
-  "id": "gdg_...", "status": "ready",          // "pending" | "ready" | "failed"
+  "id": "gdg_...", "status": "ready",          // "pending"（AI 還在寫）| "ready" | "failed"（AI 沒寫成；facts 照樣有）
   "week_start": "2026-11-09", "week_end": "2026-11-13",
-  "created_at": "2026-11-15T20:00:00+08:00",
-  "summary": "本週群組整體……",                 // AI 只寫群組整體，不點名個人，不給買賣建議或目標價
-  "facts": {                                   // 讀取時依「目前」的分享設定過濾
+  "created_at": "2026-11-14T20:00:00+08:00",
+  "summary": "本週群組整體……",                 // 只有 ready 才有內容；AI 只寫群組整體，不點名個人，不給買賣建議或目標價
+  "facts": {                                   // 讀取時依「目前」的成員身分與分享設定過濾
     "returns": [{"user_id": "usr_...", "display_name": "爸爸", "week_return_pct": 0.012}],
     "benchmarks": [{"symbol": "^TAIEXTR", "name": "發行量加權股價報酬指數", "week_return_pct": 0.008}],
     "common_holdings": [{"symbol": "2330.TW", "name": "台積電", "holder_count": 3}],
     "industries": [{"industry": "半導體業", "holder_count": 4}],
     "trades_count": 7                          // 只算開了 trades 的成員
   },
+  "notes": [],                                 // 例如「資料累積中：…」
   "disclaimer": "AI 分析僅供參考，不構成投資建議。",
-  "sources": ["…"], "comment_count": 0, "reactions": []
+  "sources": ["…"], "is_demo": false,
+  "comment_count": 0, "reactions": []          // 只有 ready 的週報能留言、按表情
 }
 
 // Channels
@@ -848,6 +851,8 @@
                "notify_trades": true, "notify_digest": true},
   "telegram_available": true            // 伺服器有設定 bot 時才為 true
 }
+// disabled_reason："webhook_invalid"（Discord 回 401／404）、"webhook_unreadable"（SESSION_SECRET 換過，解不開）、
+//                  "bot_removed"（bot 被移出 Telegram 群組）、"chat_not_found"；owner 重新設定即恢復
 ```
 
 **交易動態**
@@ -866,20 +871,26 @@
 **群組 AI 週報**
 
 - 一週 = 台北的週一到週五；`week_return_pct` = 週一前最後收盤到週五（或之前最後一個交易日）收盤。沒有交易日的週、開了 `returns` 的成員少於 2 位
-  的群組不產生。worker 每週六 20:00（台北）以 Message Batches API 送出，結果回來（`ready`）後才推播。
+  的群組不產生。worker 每週六 20:00（台北）以 Message Batches API 送出（週六晚上沒跑到時，週日補做），結果回來（`ready`）後才推播；
+  Batches 不能用或單筆失敗時改用一般呼叫。
 - `facts` 由伺服器從分享投影計算，以 `user_id` 儲存，讀取時依目前的成員身分與開關過濾（關掉或離開的人從過去的週報消失）。
-  AI 只拿到匿名代號（成員 A、B…）與數字，`summary` 只描述群組整體；顯示名稱不進 prompt。週報不計入成員的 AI 額度。
+  AI 只拿到匿名代號（成員 A、B…，每份週報隨機排序）與數字，`summary` 只描述群組整體；顯示名稱、群組名稱不進 prompt。
+  回答裡出現成員代號或目標價的不採用（`failed`）。週報不計入成員的 AI 額度。
+- 週報（連同留言、表情）保存 26 週。
 
 **推播**
 
-- 只推播 `push` 為 true 的成員所開放的內容：交易動態（`notify_trades`；`trades` 開啟、交易日在 3 個日曆日內、建立時間晚於頻道設定與他打開
-  `push`／`trades` 的時間；建立 15 分鐘後才送，期間刪除或關閉就不送；送出後的修改不重送；有開 `trade_prices` 才附價格）與週報
-  （`notify_digest`；只含 `push` 為 true 的成員的數字）。
+- 只推播 `push` 為 true 的成員所開放的內容：交易動態（`notify_trades`；`trades` 開啟、交易日在 3 個日曆日內（今天與前兩天，台北）、
+  建立時間晚於頻道設定與他打開 `push`／`trades` 的時間；建立 15 分鐘後才送，期間刪除或關閉就不送；送出後的修改不重送；有開 `trade_prices`
+  才附價格；同一則動態裡同時到期的交易合併成一則訊息）與週報（`notify_digest`；只含 `push` 為 true 的成員的數字；AI 摘要只在寫進摘要的
+  每一位成員都還開著 `push` 時才附上）。訊息只有顯示名稱、買賣、商品、日期、筆數（與價格），附群組頁連結但不含群組 id。
+- `notify_trades` 從關到開時，頻道的「設定時間」重設：關著那段時間的交易不會補送。
 - Discord：webhook 網址解析後主機必須是 `discord.com` 或 `discordapp.com`、沒有帳密與連接埠、路徑為 `/api/webhooks/{id}/{token}`；不跟隨轉址；
   加密儲存、不寫進 log、回應只給最後 4 碼。訊息帶 `allowed_mentions: {"parse": []}`（名稱與內容不能 @everyone）。404／401 → 頻道 `disabled`。
 - Telegram：worker 以 `getUpdates` 輪詢（不開公開的 webhook 端點），處理 `/link <code>` 與 `/link@<bot> <code>`；連結成功時 bot 回覆群組名稱，
   owner 在 app 裡看到 `chat_title` 確認。訊息不用 `parse_mode`。403（bot 被移出）→ `disabled`；`migrate_to_chat_id` 時更新 chat id。
 - 送出失敗會重試（最多 5 次、指數退避）。環境變數：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME`（沒設定時 `telegram_available: false`）。
-- 個人通知管道（§4.9 的個人 Telegram／Discord）不在這一批。
+- 個人通知管道（`docs/product-spec.md` §4.9 的個人 Telegram／Discord）不在 M5。
+- Telegram 的 bot 預設開著隱私模式（只收到明確給它的指令），前端顯示連結指令時用 `/link@<bot_username> <code>` 的形式最可靠。
 
 **帳號刪除**（之後提供刪除帳號時）：擁有的群組轉給最早的 admin，沒有就最早加入的成員，沒有成員就刪除群組；授權全部刪除；留言顯示「已刪除的帳號」。

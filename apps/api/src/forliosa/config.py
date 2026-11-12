@@ -85,6 +85,7 @@ class Settings(BaseSettings):
     ai_model_import: str | None = None
     ai_model_report: str | None = None
     ai_model_analyst: str | None = None
+    ai_model_digest: str | None = None  # group weekly digests (M5)
     ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_why: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_analyst: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
@@ -112,6 +113,9 @@ class Settings(BaseSettings):
     # symbol per trading day; off = POST answers "unavailable" without a model call.
     ai_analyst_enabled: bool = True
     ai_analyst_search_max_uses: int = 3
+    # Group weekly digests (M5): the worker asks for a group-level summary every Saturday 20:00 (Taipei) through the
+    # Message Batches API; off = digests keep their facts and are marked failed without a model call.
+    ai_digest_enabled: bool = True
     # Off-topic requests (coding, homework, role-play …) with no finance word are declined without a model call.
     ai_scope_precheck: bool = True
     # Threads, messages and drafts are deleted this many days after their last activity (0 = keep forever).

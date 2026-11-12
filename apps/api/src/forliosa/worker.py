@@ -22,13 +22,23 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
 * ``ai_analyst_purge`` — every hour at :05: deletes shared analyst views 24 hours after they were created
   (``forliosa.ai.analyst.purge_expired``; reads purge them too, so an expired entry is never shown).
+* ``group_push`` — every minute: queues group-channel pushes of trades and sends what is due
+  (``forliosa.services.notifications``: 15 minutes after a trade was created, re-checked against the share settings,
+  up to 5 attempts with exponential backoff).
+* ``telegram_poll`` — every 20 seconds while ``TELEGRAM_BOT_TOKEN`` / ``TELEGRAM_BOT_USERNAME`` are set: Telegram
+  ``getUpdates`` (``/link`` codes, supergroup migration, the bot being removed; there is no public webhook endpoint).
+* ``group_digests`` — Saturday 20:00 Taipei (catch-up until Sunday ends): the weekly AI digest of every group for the
+  week Monday–Friday that just ended, sent as one Message Batches request (``forliosa.services.digests``);
+  ``group_digest_poll`` (every 5 minutes) collects the results, falls back to normal calls, and queues the pushes.
+* ``sharing_retention`` — every day 04:35: finished push rows after 30 days, Telegram link codes a day after they
+  expired, digests 26 weeks after their week.
 
 There is no intraday polling: the former MIS job was removed (2026-11-12) because TWSE's website terms
 forbid automated downloads from mis.twse.com.tw and real-time / delayed quotes need a paid licence.
 ``/instruments/{symbol}/intraday`` returns no points until a licensed source is added.
 
-Later AI jobs (post-market reports, portfolio health checks, group weekly digests) will pick their API key slot
-with ``KeyPool.call`` (most headroom first), like the "why" sentence does.
+AI jobs pick their API key slot with ``KeyPool.call`` (most headroom first), like the "why" sentence does; a
+Message Batches batch stays on the slot (workspace) that created it.
 """
 
 from __future__ import annotations
@@ -46,7 +56,9 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
+from forliosa import logredact
 from forliosa.archive import Archiver, default_fetcher, tracked_symbols
+from forliosa.config import DEFAULT_SESSION_SECRET, Settings, get_settings
 from forliosa.db import get_engine, session_factory
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.service import MarketData, get_market_data
@@ -101,6 +113,18 @@ def weekly_at(weekday: int, at: time):
     return due
 
 
+def weekend_evening(at: time):
+    """Due once from Saturday ``at`` (Taipei) until Sunday ends — a worker down on Saturday evening catches up."""
+
+    def due(now: datetime, last: datetime | None) -> bool:
+        if now.weekday() not in (5, 6):
+            return False
+        slot = datetime.combine(now.date() - timedelta(days=now.weekday() - 5), at, TAIPEI)
+        return now >= slot and (last is None or last < slot)
+
+    return due
+
+
 def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
     """Store the latest *real* close of each symbol in prices_daily (demo prices are never stored)."""
     quotes = md.quotes(symbols, use_cache=False)
@@ -140,6 +164,9 @@ class Worker:
     def __init__(self, md: MarketData | None = None):
         self.md = md or get_market_data()
         self._stop = asyncio.Event()
+        from forliosa.services.channels import TelegramPoller
+
+        self.telegram = TelegramPoller()
         self.jobs = [
             Job("after_close_refresh", daily_at(time(14, 35), time(23, 45),
                                                 only_if=lambda n: is_tw_trading_day(n.date())),
@@ -154,6 +181,11 @@ class Worker:
             Job("sec_archive", daily_at(time(7, 50)), lambda: self.archive(SEC_GROUPS)),
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
             Job("ai_analyst_purge", daily_at(*(time(h, 5) for h in range(24))), self.ai_analyst_purge),
+            Job("group_push", every(60), self.group_push),
+            Job("telegram_poll", every(20), self.telegram_poll),
+            Job("group_digests", weekend_evening(time(20, 0)), self.group_digests),
+            Job("group_digest_poll", every(300), self.group_digest_poll),
+            Job("sharing_retention", daily_at(time(4, 35)), self.sharing_retention),
         ]
 
     async def archive(self, groups: list[str]) -> None:
@@ -201,6 +233,57 @@ class Worker:
         if n:
             log.info("analyst views: %d expired entries deleted", n)
 
+    async def group_push(self) -> None:
+        from forliosa.services import notifications
+
+        def run() -> tuple[int, int]:
+            with session_factory()() as db:
+                return notifications.enqueue_trades(db), notifications.send_due(db, self.md)
+
+        queued, handled = await asyncio.to_thread(run)
+        if queued or handled:
+            log.info("group push: %d queued, %d handled", queued, handled)
+
+    async def telegram_poll(self) -> None:
+        def run() -> int:
+            with session_factory()() as db:
+                return self.telegram.poll(db)
+
+        await asyncio.to_thread(run)
+
+    async def group_digests(self) -> None:
+        from forliosa.services import digests
+
+        def run() -> int:
+            with session_factory()() as db:
+                digests.create_week(db, self.md)
+                return digests.submit(db)
+
+        await asyncio.to_thread(run)
+
+    async def group_digest_poll(self) -> None:
+        from forliosa.services import digests
+
+        def run() -> int:
+            with session_factory()() as db:
+                digests.submit(db)
+                return digests.poll(db)
+
+        n = await asyncio.to_thread(run)
+        if n:
+            log.info("group digests: %d finished", n)
+
+    async def sharing_retention(self) -> None:
+        from forliosa.services import digests, notifications
+
+        def run() -> int:
+            with session_factory()() as db:
+                return notifications.purge_old(db) + digests.purge_old(db)
+
+        n = await asyncio.to_thread(run)
+        if n:
+            log.info("sharing retention: %d rows deleted", n)
+
     def stop(self) -> None:
         self._stop.set()
 
@@ -222,8 +305,17 @@ class Worker:
         log.info("worker stopped")
 
 
+def check_worker_settings(settings: Settings) -> None:
+    """Group push decrypts Discord webhooks with a key derived from SESSION_SECRET: in production the worker must have
+    the API's secret (with the default one every webhook would look undecryptable and its channel be disabled)."""
+    if settings.forliosa_env == "prod" and settings.session_secret == DEFAULT_SESSION_SECRET:
+        raise RuntimeError("SESSION_SECRET must be set on the worker too (the same value as the api service)")
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
+    logredact.install()  # webhook and bot-token URLs never reach the log
+    check_worker_settings(get_settings())
     worker = Worker()
     loop = asyncio.new_event_loop()
     for sig in (signal.SIGINT, signal.SIGTERM):

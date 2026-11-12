@@ -923,10 +923,8 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 ## 2026-11-12 分享（M5）第一批：登入、授權唯讀查看、親友群組
 
-依 [`docs/api-contract.md`](../../docs/api-contract.md)「分享（M5）」實作。**這一批還沒有**：群組 AI 週報（`GET /groups/{id}/digests`、
-worker 的 Message Batches）、頻道（`/groups/{id}/channels*`、推播 outbox、Telegram `getUpdates` 輪詢）。它們用的資料表已經在同一個
-migration `0010` 建好（`group_digests`、`group_channels`、`notification_outbox`、`telegram_link_codes`），`Group.push_targets` 已從
-`group_channels` 讀取（在頻道端點做好之前一律是空陣列）。
+依 [`docs/api-contract.md`](../../docs/api-contract.md)「分享（M5）」實作。群組 AI 週報、頻道與推播在下面的「第二批」；它們用的資料表在
+同一個 migration `0010`（`group_digests`、`group_channels`、`notification_outbox`、`telegram_link_codes`），第二批沒有新的 migration。
 
 ### 新增的欄位與合約沒寫的細節
 
@@ -1053,9 +1051,121 @@ migration `0010` 建好（`group_digests`、`group_channels`、`notification_out
   對象（不再顯示）。
 - 邀請 token、Telegram 綁定碼只存 SHA-256（不需要金鑰）。
 
+## 2026-11-12 分享（M5）第二批：群組 AI 週報、推播頻道
+
+依 [`docs/api-contract.md`](../../docs/api-contract.md)「分享（M5）」→「群組 AI 週報」「推播」實作（後端；前端另做）。
+
+### 端點與合約沒寫的細節
+
+| 位置 | 實作 |
+|---|---|
+| `GET /groups/{id}/digests` | `limit` 1–52（預設 8）；依 `week_start`、`id` 新到舊；`cursor` 編碼最後一份的兩個值。`pending`／`failed` 也列出（`summary` 為空字串、`comment_count` 0、`reactions` 空） |
+| `Digest` | 多 `notes`（例如 commercial 下「資料累積中：自 … 起存檔；本週從 … 收盤開始計算」）與 `is_demo` |
+| `Digest.facts` | `returns` 依加入順序；`common_holdings` 要兩人以上；`industries` 是持有該產業任何一檔的人數（1 人也列，同 `GroupHoldings`）；`trades_count` 是那一週 `trade_date` 在週一到週五、可出現在動態裡的買賣筆數（每筆交易算一筆，不是合併後的則數） |
+| `Channels` | 非 owner 的 `webhook_hint` 為 `null`；沒設定的頻道 `notify_*` 回 `true`（預設值） |
+| `PUT /groups/{id}/channels/discord` | `notify_trades`、`notify_digest` 可省略（預設 `true`）。重新設定（換網址）會取消還沒送出的推播，`configured_at` 重設 |
+| `PATCH /groups/{id}/channels/{kind}` | 回整個 `Channels`；`notify_trades` 由關到開時 `configured_at` 重設（關著那段時間的交易不補送） |
+| `DELETE /groups/{id}/channels/{kind}` | 204；Telegram 一併刪除還沒用的連結碼 |
+| `POST /groups/{id}/channels/telegram/link` | 只有 owner（403 優先於 409）；沒設 bot → 409 `telegram_unavailable`。連結碼 12 字（`A–Z`、`2–9`，去掉 `0 O 1 I`；60 bits），只存 SHA-256，大小寫不拘；再產生一組會刪掉群組還沒用的舊碼 |
+| `kind` 不是 `discord`／`telegram` | 422 `validation_error` |
+
+### 推播（`services/notifications.py`、`services/pushers.py`、`services/channels.py`）
+
+- **排入 outbox**（worker `group_push` 每分鐘）：有 `active` 且 `notify_trades` 的頻道的群組，找「目前同時開著 `trades` 與 `push`」的成員、
+  可出現在動態裡的買賣（`manual`／`import`／`ai_draft`，只記持股帳戶快照日當天或之前的不算）、`trade_date` 在今天與前兩天（台北）、
+  `created_at` 晚於 `max(頻道 configured_at, push_enabled_at, trades_enabled_at)`。每筆交易每個頻道一列（`dedupe_key =
+  trade:<group>:<kind>:<transaction>`），`not_before = created_at + 15 分鐘`。
+- **送出前再檢查一次**：交易還在（刪除時 outbox 列跟著刪）、成員還在群組而且兩個開關還開著、交易建立時間仍晚於上面那個時間（關掉再打開
+  會把時間往後移，期間的交易就不送）、交易日還在三天內、頻道還是 `active`。不符合 → `cancelled`。
+- **合併**：同一輪到期、屬於同一則動態（成員×日期×商品×方向）的列送成一則訊息（`共 N 筆`）；之後才到期的同一則動態的交易另送一則。
+  價格是這幾筆的股數加權平均（不含費用、4 位小數），只有開了 `trade_prices` 才附。
+- **訊息內容**（純文字）：`小明 買進 台積電（2330）`／`11/12・共 2 筆・成交均價 605.00 TWD`／`— Forliosa 群組「家族投資」 <FRONTEND_URL>/groups`。
+  不含群組 id、股數、金額、帳戶、備註。沒有設定 `FRONTEND_URL`（正式環境）時不附連結。Telegram 訊息裡使用者取的名稱把 `@` 換成全形 `＠`
+  （純文字的 @名稱 在 Telegram 會提及別人）；Discord 一律帶 `allowed_mentions: {"parse": []}`。
+- **週報推播**：週報變成 `ready` 時排入（`dedupe_key = digest:<digest>:<kind>`）。內容只有「目前開著 `push`」的成員的數字
+  （`sharing.digest_facts_view(..., pushing_only=True)`：報酬要 `returns`＋`push`、共同持股只算 `holdings`＋`push` 的成員、交易筆數只算
+  `trades`＋`push`），加上兩個基準與群組頁連結。**AI 摘要**是用所有分享報酬率（以及持股、交易）的成員的數字寫的，所以只有在每一位寫進
+  摘要的成員都還在群組、還開著 `push` 與當時分享的那幾項時才附上（合約沒寫，選較保守的做法）。群組裡沒有人開 `push` 時不送。
+- **重試**：最多 5 次；失敗後等 1、2、4、8 分鐘（Discord／Telegram 給的 `retry_after` 較長時用它），第 5 次失敗為 `failed`。可重試：429、5xx、
+  逾時、連線錯誤、Telegram 401（bot token 設錯是伺服器設定問題）。不重試：其他 4xx、3xx（不跟隨轉址）。
+- **停用頻道**：Discord 401／404 → `webhook_invalid`；webhook 解不開（`SESSION_SECRET` 換過）→ `webhook_unreadable`；Telegram 403 →
+  `bot_removed`、400「chat not found」→ `chat_not_found`；`my_chat_member` 顯示 bot 被移出（`left`／`kicked`）→ `bot_removed`。停用時
+  這個頻道其他還沒送出的列改成 `cancelled`；`push_targets` 不再列出它。owner 重新設定就恢復。
+- **Telegram 遷移**：送出時回 `parameters.migrate_to_chat_id`、或 `getUpdates` 收到含 `migrate_to_chat_id` 的訊息 → 頻道改用新的 chat id
+  （送出時立刻用新 id 再送一次）。
+- `last_error` 只存短標籤（`http_404`、`timeout`、`network`、`not_shared`、`channel_off` …），不存網址或對方回應的內容。
+
+### Telegram 連結（worker `telegram_poll`，每 20 秒）
+
+- `getUpdates`（`timeout=0`、`allowed_updates=["message","my_chat_member"]`），沒有公開的 webhook 端點。`offset` 存在 worker 記憶體：重啟後
+  Telegram 會重送還沒確認的更新；超過 10 分鐘的 `/link` 訊息不處理也不回覆（不會在重啟後洗版）。
+- `/link <碼>` 或 `/link@<bot> <碼>`（`@` 後面不是我們的 bot → 不理）；只接受 `group`／`supergroup`，私訊 bot 時回一句「請把我加進群組」、
+  不消耗連結碼。連結碼必須還沒用、沒過期，而且產生它的人**現在仍是 owner**（10 分鐘內轉移了擁有者 → 無效）。成功時以條件式 UPDATE
+  標記已使用（同一組碼只會成功一次），建立或改寫群組的 Telegram 頻道（`chat_title` 取群組標題），bot 回覆「已連結 Forliosa 群組「…」」；
+  無效時回「連結碼無效或已過期」。群組改名（`new_chat_title`）時更新 `chat_title`。
+- bot 建議保持 BotFather 的隱私模式（預設開）：群組裡只收到明確給它的指令，看不到其他聊天。這時沒加 `@bot` 的 `/link` 不一定收得到，
+  所以**前端顯示的指令用 `/link@<bot_username> <code>`**。
+
+### 群組 AI 週報（`services/digests.py`）
+
+- **何時**：worker `group_digests` 週六 20:00（台北）建立上週一到週五的週報（`weekend_evening`：週六晚上沒跑到時週日任何時間補做，週一起
+  不補）；`group_digest_poll` 每 5 分鐘送出還沒送的、收 Batches 結果、重試一般呼叫。同一群組同一週只有一份。
+- **facts**（`sharing.digest_week_facts`）：只用每位成員**當時**在這個群組開放的項目：`returns` → 週報酬（和排行同一套 TWR，起點為週一前最後
+  收盤、終點為那一週最後一個交易日收盤，commercial 下起點不早於存檔第一天）；`holdings` → 持有的代號清單（只存代號；名稱與產業另外存一份
+  `symbols` 對照）；`trades` → 那一週的買賣筆數。以 `user_id` 存在 `group_digests.facts`（JSON，`v: 1`），讀取時再依**目前**的成員身分與
+  開關過濾；當時沒開、之後才打開的人不會出現在舊週報。
+- **給 AI 的內容**（`anonymous_prompt`）：週期、交易日數、匿名代號（成員 A、B…，每次隨機排序，不跟加入順序對應）＋週報酬、兩個基準、
+  兩人以上共同持有的股票與人數、各產業持有人數、交易筆數。**不含**顯示名稱、user id、群組名稱、任何一個人的持股清單。重試（一般呼叫）時
+  依當下的成員與開關重新組（離開或關掉的人不再送給 AI）。
+- **系統提示**：只寫群組整體、不寫成員代號、不猜身分、不評論個人、不給買賣／加減碼建議、不提目標價、不預測、只用提供的數字、繁體中文 2–4 句、
+  純文字。回答出現「成員 X」、「目標價」、「建議買／賣…」等字樣 → 不採用，`failed`（`error: rejected`）；`stop_reason` 不是正常結束或沒有
+  文字 → `failed`。摘要最多 400 字。
+- **呼叫**：一次 Message Batches（每份週報一個 request，`custom_id` = 週報 id）。batch 屬於建立它的 workspace，所以 `batch_id` 存
+  `<槽號>:<batch id>`，之後只用那個槽查詢與讀結果（`KeyPool.call(only=槽)`）。建立 batch 時遇到 404／403／400／422（端點不能用）→ 改用
+  一般 Messages 呼叫（這個錯誤不會讓金鑰槽被停用）；單筆 `errored`／`expired`／`canceled` → 那一份改用一般呼叫；一般呼叫遇到暫時性錯誤
+  （429、5xx、連線、所有槽冷卻中）→ `batch_id = "direct"`，下一輪再試。建立 26 小時後還沒完成 → 以一般呼叫再試一次，仍失敗就 `failed`。
+  沒有任何金鑰 → `failed`（`ai_unavailable`）；`AI_DIGEST_ENABLED=false` → `failed`（`ai_disabled`）。`failed` 的週報仍顯示 facts。
+- **用量**：每次呼叫一列 `ai_usage`，`feature = "group_digest"`、`user_id = null`（不計入任何成員的每日／每月額度）、`thread_id` = 週報 id；
+  Batches 結果的估計費用打五折。
+
+### 環境變數（第二批新增）
+
+| 變數 | 誰需要 | 說明 |
+|---|---|---|
+| `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME` | api＋worker | 兩個都有才 `telegram_available: true`；token 只放環境變數，不寫進 log（`logredact` 會把 `/bot<token>/` 換成 `***`） |
+| `SESSION_SECRET` | api＋**worker**（同一個值） | worker 要用它解開 Discord webhook；`FORLIOSA_ENV=prod` 時 worker 沒設會拒絕啟動 |
+| `FRONTEND_URL` | api＋worker | worker 用在推播訊息的群組頁連結；正式環境沒設時訊息不附連結 |
+| `CLAUDE_API_KEY_<n>`／`ANTHROPIC_API_KEY` | worker | 群組週報 |
+| `AI_DIGEST_ENABLED` | worker | 預設 `true`；`false` 時週報只有 facts（標 `failed`） |
+| `AI_MODEL_DIGEST` | worker | 覆寫週報用的模型（預設同 `AI_MODEL`） |
+
+### 背景工作與保存期限
+
+| 工作 | 時間（台北） | 內容 |
+|---|---|---|
+| `group_push` | 每分鐘 | 排入交易推播、送出到期的列 |
+| `telegram_poll` | 每 20 秒（有設 bot 才做事） | `getUpdates` |
+| `group_digests` | 週六 20:00（週日補做） | 建立週報並送出 Batches |
+| `group_digest_poll` | 每 5 分鐘 | 收結果、退回一般呼叫、排入週報推播 |
+| `sharing_retention` | 每天 04:35 | 刪除：建立超過 30 天的 outbox 列（只用來避免三天內重送）、過期超過 1 天的 Telegram 連結碼、`week_start` 超過 26 週的週報（連同它的留言、表情與 outbox 列） |
+
+### 秘密不進 log
+
+- `logredact.install()`（api 與 worker 都會呼叫）除了 uvicorn，也掛在 `httpx`／`httpcore` logger 與 root logger 的每個 handler：Discord webhook
+  路徑（`/api/webhooks/***`）、Telegram `/bot***/`、bot token 形狀的字串，連 traceback 都會遮掉（httpx 在 INFO 會記下每個請求網址）。
+- `pushers` 不記網址、不記回應內容、不讓帶網址的例外往外丟（任何非 httpx 例外也只回 `error` 標籤）。webhook 網址驗證失敗的錯誤訊息不含網址。
+- 測試：`tests/conftest.py` 的 `no_push_network` 讓所有 Discord／Telegram 請求失敗，測試用 `tests/api/push_fake.py` 的假伺服器；
+  週報測試以假的 Messages／Batches 端點走真正的 SDK（`tests/api/test_m5_digest.py`）。
+
 ### 分享（M5）待產品負責人確認
 
 1. **`FRONTEND_URL` 變成正式環境必填**：沒設定時 API 拒絕啟動。部署這一版之前要先在 Railway 的 api 服務設 `FRONTEND_URL=https://app.<網域>`。
 2. **更換 `SESSION_SECRET`** 會讓交易動態的舊留言找不到對象（見上）。建議先維持一把金鑰；之後若需要定期換 session 金鑰，再另外加一個專給分享用的金鑰。
 3. **群組建立者也有一則「加入」動態**（建立群組那一刻）。建議維持（實作最單純，也讓新群組的動態不是空的）。
-4. **排行每次請求重算**：成員多（接近 50 人）時可能要幾秒。建議第二批加「每個交易日收盤後算一次」的快取。
+4. **排行每次請求重算**：成員多（接近 50 人）時可能要幾秒。建議第二批加「每個交易日收盤後算一次」的快取。（第二批沒有做：
+   先看實際群組大小再決定。）
+5. **週報推播的 AI 摘要**：只有寫進摘要的每一位成員都開著「推播」時才附上，否則只送開了推播的人的數字與連結。建議維持（摘要是用沒開推播的人的
+   數字寫的）；另一個選項是不論如何都附摘要（摘要只寫群組整體）。
+6. **週報保存 26 週**（連同留言）。建議維持；要更久可改成 52 週。
+7. **「交易日在 3 個日曆日內」解讀為今天與前兩天**（週五的交易週一才記，就不推播）。建議維持；若要寬一點可改成「今天往前 3 天」。
+8. **worker 現在需要 `SESSION_SECRET`（與 api 相同）**，正式環境沒設會拒絕啟動；部署 worker 時一起設（見 `docs/deploy.md` 2.3）。

@@ -307,3 +307,91 @@ class Reactions(BaseModel):
 class Providers(BaseModel):
     discord: bool
     dev_login: bool
+
+
+# -- weekly AI digest ----------------------------------------------------------------------------------------------
+class DigestReturn(BaseModel):
+    user_id: str
+    display_name: str
+    week_return_pct: float | None = None
+
+
+class DigestBenchmark(BaseModel):
+    symbol: str
+    name: str
+    week_return_pct: float | None = None
+
+
+class DigestFacts(BaseModel):
+    """Filtered on every read by the current memberships and share settings."""
+
+    returns: list[DigestReturn]
+    benchmarks: list[DigestBenchmark]
+    common_holdings: list[CommonHolding]
+    industries: list[IndustryOverlap]
+    trades_count: int
+
+
+class Digest(BaseModel):
+    id: str
+    status: Literal["pending", "ready", "failed"]
+    week_start: date
+    week_end: date
+    created_at: str
+    summary: str
+    facts: DigestFacts
+    notes: list[str]
+    disclaimer: str
+    sources: list[str]
+    is_demo: bool
+    comment_count: int
+    reactions: list[ReactionCount]
+
+
+class DigestPage(BaseModel):
+    items: list[Digest]
+    next_cursor: str | None = None
+
+
+# -- push channels ------------------------------------------------------------------------------------------------
+class DiscordIn(StrictModel):
+    """The webhook URL is checked strictly and tested before it is saved; it is never echoed back."""
+
+    webhook_url: str = Field(min_length=1, max_length=300)
+    notify_trades: bool = True
+    notify_digest: bool = True
+
+
+class ChannelPatch(StrictModel):
+    notify_trades: bool | None = None
+    notify_digest: bool | None = None
+
+
+class DiscordChannel(BaseModel):
+    configured: bool
+    status: Literal["active", "disabled"] | None = None
+    disabled_reason: str | None = None
+    webhook_hint: str | None = Field(default=None, description="只有擁有者看得到（…/最後 4 碼）")
+    notify_trades: bool
+    notify_digest: bool
+
+
+class TelegramChannel(BaseModel):
+    configured: bool
+    status: Literal["active", "disabled"] | None = None
+    disabled_reason: str | None = None
+    chat_title: str | None = None
+    notify_trades: bool
+    notify_digest: bool
+
+
+class Channels(BaseModel):
+    discord: DiscordChannel
+    telegram: TelegramChannel
+    telegram_available: bool
+
+
+class TelegramLink(BaseModel):
+    code: str
+    bot_username: str
+    expires_at: str

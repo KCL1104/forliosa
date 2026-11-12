@@ -34,13 +34,15 @@ from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, BrokerAccount
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
-FEATURES = ("chat", "why", "import", "report", "analyst")
+FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest")
 TITLE_MAX = 40
+BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard token prices
 
 
 def model_for(feature: str, settings: Settings) -> str:
     override = {"chat": settings.ai_model_chat, "why": settings.ai_model_why, "import": settings.ai_model_import,
-                "report": settings.ai_model_report, "analyst": settings.ai_model_analyst}.get(feature)
+                "report": settings.ai_model_report, "analyst": settings.ai_model_analyst,
+                "group_digest": settings.ai_model_digest}.get(feature)
     return (override or settings.ai_model).strip()
 
 
@@ -281,14 +283,18 @@ def update_draft(db: Session, user: User, draft_id: str, status: str, transactio
 
 # -- usage and quotas --------------------------------------------------------------------------------------
 def record_usage(db: Session, *, user_id: str | None, thread_id: str | None, feature: str, model: str,
-                 key_slot: int | None, usage: CallUsage, stop_reason: str | None) -> AiUsage:
-    """One row per model call: counts, slot and cost only — never message content."""
+                 key_slot: int | None, usage: CallUsage, stop_reason: str | None, batch: bool = False) -> AiUsage:
+    """One row per model call: counts, slot and cost only — never message content. ``batch``: a Message Batches
+    result (half price). ``user_id`` None: a system job, charged to nobody's quota (e.g. group digests)."""
+    cost = estimate_cost(model, usage)
+    if batch:
+        cost = (cost * BATCH_PRICE_FACTOR).quantize(Decimal("0.000001"))
     row = AiUsage(user_id=user_id, thread_id=thread_id, feature=feature, model=model, key_slot=key_slot,
                   input_tokens=usage.input_tokens, output_tokens=usage.output_tokens,
                   cache_creation_input_tokens=usage.cache_creation_input_tokens,
                   cache_read_input_tokens=usage.cache_read_input_tokens,
                   web_search_requests=usage.web_search_requests, web_fetch_requests=usage.web_fetch_requests,
-                  cost_usd=estimate_cost(model, usage), stop_reason=stop_reason, created_at=now_utc())
+                  cost_usd=cost, stop_reason=stop_reason, created_at=now_utc())
     db.add(row)
     db.commit()
     return row

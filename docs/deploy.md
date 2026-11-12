@@ -69,6 +69,8 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `DISCORD_CLIENT_ID` | 登入用 | Discord 應用程式的 Client ID | 見 2.4 節；三個 `DISCORD_*` 要一起設，只設一部分會拒絕啟動 |
 | `DISCORD_CLIENT_SECRET` | 登入用 | Discord 應用程式的 Client Secret | **機密**：只放在 Railway Variables，不要貼到聊天、issue 或程式碼；程式不會寫進 log |
 | `DISCORD_REDIRECT_URI` | 登入用 | `https://api.example.com/api/v1/auth/discord/callback` | 必須和 Developer Portal 的 Redirect 一字不差，https |
+| `TELEGRAM_BOT_TOKEN` | Telegram 推播用 | BotFather 給的 token | 見 2.5 節；**機密**，只放在 Railway Variables。api 用它判斷 `telegram_available`，worker 用它收發訊息 |
+| `TELEGRAM_BOT_USERNAME` | Telegram 推播用 | bot 的帳號（不含 `@`），例如 `ForliosaBot` | 兩個都設才會出現「連結 Telegram 群組」 |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |
 | `DATA_POLICY` | | `commercial`（預設） | 只用可合法商用的政府開放資料與自己的存檔；**不要改成 `personal`**（見 `docs/research/data-sources-licensing.md`） |
 | `MARKET_DATA_PROVIDERS` | | 留空 | 用程式預設（開放資料與存檔）；商用模式下 FinMind、MIS 不會啟用 |
@@ -89,13 +91,24 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | Config File Path | `/apps/api/railway.worker.toml`（同一個 image，啟動指令 `python -m forliosa.worker`） |
 | Networking | 不需要網域 |
 
-環境變數：`FORLIOSA_ENV=prod`、`DATABASE_URL=${{Postgres.DATABASE_URL}}`、`DATA_POLICY=commercial`、
-（選用）`RAILWAY_RUN_UID=0` 與自己的 volume。worker 不處理 HTTP 請求，不需要 `SESSION_SECRET`、`CORS_ORIGINS`。
-資料表由 api 服務 migrate，worker 不跑 migration；第一次部署請先讓 api 啟動成功。
+環境變數：
 
-> 現況：worker 會在交易日盤中輪詢持股報價、收盤後把真實收盤價寫進 `prices_daily`。但 API 目前**還不讀**
-> `prices_daily`，而且盤中報價快取在各自的程序記憶體（要等 Redis 版本才共用），所以 worker 現在可以先不部署；
-> 部署它的好處是開始累積每日收盤價存檔。
+| 變數 | 必填 | 說明 |
+|---|---|---|
+| `FORLIOSA_ENV` | ✅ | `prod` |
+| `DATABASE_URL` | ✅ | `${{Postgres.DATABASE_URL}}` |
+| `SESSION_SECRET` | ✅ | **和 api 服務同一個值**（建議用 Railway 的共用變數或 `${{api.SESSION_SECRET}}` 引用）。群組推播要用它解開加密保存的 Discord webhook；`FORLIOSA_ENV=prod` 沒設會拒絕啟動。值不同的話所有 Discord 頻道會被判定「解不開」而停用 |
+| `FRONTEND_URL` | 建議 | 和 api 相同；推播訊息裡的群組頁連結用它（沒設就不附連結） |
+| `CLAUDE_API_KEY_1..3` | 週報用 | 群組 AI 週報（每週六 20:00）；沒設時週報只有數字、標成失敗。可用 `AI_DIGEST_ENABLED=false` 關掉 AI |
+| `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME` | Telegram 推播用 | 和 api 相同（見 2.5 節） |
+| `DATA_POLICY` | | `commercial`（預設） |
+| `RAILWAY_RUN_UID` | 掛 volume 時 | `0`，搭配自己的 volume |
+
+worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料表由 api 服務 migrate，worker 不跑 migration；第一次部署請先讓 api 啟動成功。
+**worker 只能有一個副本**：Telegram 的 `getUpdates` 同時只能有一個程式在收，兩個副本會互相搶（也會重複送推播）。
+
+> 現況：worker 負責開放資料存檔、收盤價、股利自動入帳、AI 保存期限，以及**群組推播與群組 AI 週報**（M5）。要用群組的 Discord／Telegram
+> 推播或週報，就一定要部署 worker。
 
 ### 2.4 Discord 登入（Discord Developer Portal）
 
@@ -112,6 +125,28 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
    - `curl https://api.example.com/api/v1/auth/providers` 回 `{"discord": true, "dev_login": false}`。
    - 打開 `https://app.example.com/login` 按「以 Discord 登入」→ Discord 授權頁 → 回到前端，`GET /api/v1/me` 是 200。
 5. 登入規則（帳號對應、已驗證 email、失敗代碼 `oauth_*`）見 `docs/api-contract.md`「分享（M5）」→「登入」。
+
+### 2.5 Telegram bot（群組推播）
+
+群組可以把動態與週報推播到 Telegram 群組；這需要一個屬於 Forliosa 的 bot。不設定也可以，畫面上就不會出現 Telegram 選項。
+
+1. 在 Telegram 找 **@BotFather**，傳 `/newbot`：
+   - 名稱（顯示用）：`Forliosa`。
+   - 帳號（必須以 `bot` 結尾，例如 `ForliosaBot`）→ 這就是 `TELEGRAM_BOT_USERNAME`（不含 `@`）。
+   - BotFather 回覆的 token（`123456789:AA…`）→ `TELEGRAM_BOT_TOKEN`。**這是機密**：只貼到 Railway Variables，不要貼到聊天、issue 或程式碼；
+     外洩時對 BotFather 傳 `/revoke` 換一組，再更新 Railway（api 與 worker 兩個服務）。
+2. 建議的 BotFather 設定：
+   - `/setprivacy` → **Enable**（預設就是開）：bot 在群組裡只收到明確給它的指令（例如 `/link@ForliosaBot 連結碼`），看不到其他聊天內容。
+   - `/setjoingroups` → Enable（預設）：才能把 bot 加進群組。
+   - （選用）`/setcommands` → `link - 連結 Forliosa 群組`；`/setdescription` 寫一句用途說明。
+   - **不要**設定 webhook（`setWebhook`）：worker 用 `getUpdates` 輪詢，設了 webhook 會讓輪詢失敗。
+3. 把兩個變數設到 **api 與 worker** 兩個服務，重新部署。確認：
+   - 群組頁的推播設定出現 Telegram（`GET /api/v1/groups/{id}/channels` 的 `telegram_available` 是 `true`）。
+   - 群主按「連結 Telegram 群組」取得連結碼，把 bot 加進 Telegram 群組，在群組裡傳 `/link@ForliosaBot 連結碼`（10 分鐘內）；
+     bot 回覆「已連結 Forliosa 群組「…」」，app 裡顯示那個 Telegram 群組的名稱。
+4. Discord 群組頻道不需要設定伺服器：群主在 Discord 頻道設定 → 整合 → Webhook 建立後，把網址貼到 app（網址加密保存，畫面只顯示最後 4 碼）。
+
+推播規則（只送開了「推播」的成員、15 分鐘後才送、重試與自動停用）見 `docs/api-contract.md`「分享（M5）」→「推播」。
 
 ## 3. Cloudflare Pages：前端
 
@@ -171,9 +206,12 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
         `GET https://api.example.com/api/v1/me` 是 401、回應標頭有 `access-control-allow-origin: https://app.example.com`
         與 `access-control-allow-credentials: true`，沒有 CORS 錯誤。
 11. [ ] 直接開 `https://app.example.com/stock/2330.TW` 不是 404（`_redirects` 生效）。
-12. [ ] （選用）worker 服務部署，記錄中看到排程啟動。
+12. [ ] worker 服務部署（`SESSION_SECRET` 與 api 相同、只有一個副本），記錄中看到排程啟動（`worker started: …, group_push, telegram_poll,
+        group_digests, …`）。
 13. [ ] Discord 登入（第 2.4 節）：登入後 cookie 在 `Application → Cookies` 顯示 `forliosa_session` 有 `Secure`、`HttpOnly`、`SameSite=Lax`；
         授權過程中的 `__Host-forliosa_oauth` 在回到前端後就被刪除。
+14. [ ] （選用）群組推播：建一個測試群組，貼上 Discord 測試頻道的 webhook（頻道收到「推播已連結」的測試訊息）；有設 Telegram bot 時照 2.5 節
+        連結一個 Telegram 測試群組。開了「推播」與「交易動態」的成員記一筆今天的交易，約 15 分鐘後頻道收到訊息。
 
 ## 6. 還沒準備好上線的部分
 
@@ -186,7 +224,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | **shioaji-data AI 研究資料** | 公司簡介、產業鏈、題材的授權「待定」，商用模式下不顯示 | 確認授權 |
 | **多副本** | 報價快取在 API 程序記憶體；SSE 每個副本各自輪詢 | Redis 共用報價後才能開多個 api 副本 |
 | **CSRF** | `SameSite=Lax`＋CORS 白名單，另外所有寫入請求檢查 `Origin` 必須在 `CORS_ORIGINS` 內（M5） | 同網域其他子網域也算同網站：不要把不受信任的服務放在同一個網域底下 |
-| **群組週報與頻道推播** | 資料表已建立，端點與 worker 是 M5 第二批 | `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME`（第二批的部署說明會補上） |
+| **群組週報與頻道推播** | 後端完成（M5 第二批）：worker 每分鐘推播、每週六 20:00 產生週報；前端的週報與頻道設定畫面還沒接 | 部署 worker（`SESSION_SECRET` 與 api 相同、單一副本、Claude 金鑰）；要用 Telegram 時建立 bot（2.5 節） |
 | **帳戶刪除 UI、只記持股快照輸入畫面** | API 已有，前端還沒有畫面 | 見 `apps/web/OPEN_QUESTIONS.md` |
 | **資料備份、監控** | 未設定 | Railway Postgres 備份、錯誤追蹤（例如 Sentry）、uptime 監控 |
 | **個資法** | 資料匯出／刪除帳號（M5） | 上線前的隱私權政策與服務條款 |

@@ -81,6 +81,9 @@ uv run python -m forliosa.worker
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
+| 每分鐘、每 20 秒 | 群組推播：排入並送出到期的交易動態推播（Discord webhook／Telegram）；有設 Telegram bot 時以 `getUpdates` 處理 `/link` 連結 |
+| 週六 20:00（週日補做）、每 5 分鐘 | 群組 AI 週報：建立上週一到週五的週報並以 Message Batches 送出；收結果、推播 |
+| 每天 04:35 | 群組推播紀錄 30 天、Telegram 連結碼、26 週前的週報 |
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
@@ -145,6 +148,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `AI_WHY_ENABLED` | `true` | 個股頁「為什麼漲跌」的 AI 一句話（每檔每個交易日最多一次，失敗時用規則句） |
 | `AI_SCOPE_PRECHECK` | `true` | 明顯離題又沒有財經字詞的提問不呼叫模型，直接婉拒 |
 | `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天（0＝永久） |
+| `AI_DIGEST_ENABLED`、`AI_MODEL_DIGEST` | `true`、空 | 群組 AI 週報（worker 每週六 20:00，Message Batches；不計入任何成員的額度）；模型預設同 `AI_MODEL` |
 | `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
 | `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |
 
@@ -170,7 +174,9 @@ src/forliosa/
   datapolicy.py  DATA_POLICY、資料集清單與 sources 顯名聲明（GET /meta/attributions）
   market_calendar.py  把存檔的證交所休市日套用到交易日計算
   services/      交易（自動稅費＋帳本驗證）、投資組合（含本週事項、出清紀錄）、個股資料、個股頁（stock.py）、期貨盤勢（derivatives.py）、自選、
-                 定期定額（recurring.py）、重大訊息判讀（announcements.py）、「資料累積中」（coverage.py）
+                 定期定額（recurring.py）、重大訊息判讀（announcements.py）、「資料累積中」（coverage.py）；
+                 M5 分享：分享投影（sharing.py，讀別人資料的唯一入口）、群組（groups.py）、授權（delegations.py）、
+                 Discord 登入（discord_oauth.py）、群組週報（digests.py）、推播頻道（channels.py、notifications.py、pushers.py）
   api/           FastAPI 路由、schema、錯誤格式、session 驗證
   ai/            AI 助理：keypool（金鑰槽）、chat（工具迴圈與 SSE）、tools、prompts、scope（離題預先檢查）、grounding（無來源標記）、
                  store（對話、草稿、用量）、retention（保存期限）、why、suggestions、smoke
@@ -257,6 +263,8 @@ src/forliosa/
    給別人用的部署**不要**設成 `personal`）、`MARKET_DATA_PROVIDERS` 用預設即可；api 另需 `SESSION_SECRET`（必填，prod 沒設會拒絕啟動）、`CORS_ORIGINS`（前端網址，
    prod 不可為 `*`）、`FRONTEND_URL`（必填，前端網址，必須是 `CORS_ORIGINS` 之一）、`DISCORD_CLIENT_ID`／`DISCORD_CLIENT_SECRET`／
    `DISCORD_REDIRECT_URI`（Discord 登入，見 `docs/deploy.md` 2.4 節）、`COOKIE_DOMAIN`（選填，例如 `.example.com`；不設則是 host-only cookie）。
+   群組推播與週報在 worker：worker 另需和 api **相同**的 `SESSION_SECRET`（prod 沒設會拒絕啟動）、`FRONTEND_URL`、Claude 金鑰，
+   要用 Telegram 時 api 與 worker 都設 `TELEGRAM_BOT_TOKEN`／`TELEGRAM_BOT_USERNAME`（見 `docs/deploy.md` 2.5 節）；worker 只能一個副本。
 4. 建議為 api 與 worker 各自掛載 volume 到 `/app/var`（image 以非 root 執行，掛 volume 時設 `RAILWAY_RUN_UID=0`）。
 
 > 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，正式登入用 Discord（M5）：沒設三個 `DISCORD_*` 時正式環境沒有人能登入。

@@ -15,6 +15,12 @@ Group feed items are computed, not stored: a trade item is one member's buys (or
 day (``manual`` / ``import`` / ``ai_draft`` buy / sell rows only), its id a keyed hash of that key
 (:func:`feed_item_id`). Comments and reactions on a trade item are deleted with its last underlying transaction
 (:func:`purge_trade_threads`).
+
+Pushes to group channels (``services.notifications``) and the weekly AI digest (``services.digests``) read through
+here too: :func:`push_trade_candidates` / :func:`still_pushable` / :func:`push_trade_view` (only members who share both
+``trades`` and ``push``), :func:`digest_week_facts` (what each member shares, stored by user id) and
+:func:`digest_facts_view` (those facts filtered by the *current* memberships and toggles; ``pushing_only`` for what a
+channel may show).
 """
 
 from __future__ import annotations
@@ -173,13 +179,10 @@ def latest_close(md: MarketData, now: datetime | None = None) -> date:
     return min(clock, max(newest)) if newest else clock
 
 
-def period_window(md: MarketData, end: date | None = None) -> PeriodWindow:
-    end = end or latest_close(md)
-    starts = {
-        "day": last_tw_trading_day(end - timedelta(days=1)),
-        "month": last_tw_trading_day(end.replace(day=1) - timedelta(days=1)),
-        "year": last_tw_trading_day(date(end.year, 1, 1) - timedelta(days=1)),
-    }
+def window_for(md: MarketData, starts: dict[str, date], end: date) -> PeriodWindow:
+    """A window ending at the close of ``end``; under commercial a start before the first archived day is moved to
+    that day (the archive is the only price source)."""
+    starts = dict(starts)
     since = md.archive_since() if md.policy == "commercial" else None
     clipped = False
     if since is not None:
@@ -188,6 +191,15 @@ def period_window(md: MarketData, end: date | None = None) -> PeriodWindow:
                 starts[k] = min(since, end)
                 clipped = True
     return PeriodWindow(end, starts, clipped, since)
+
+
+def period_window(md: MarketData, end: date | None = None) -> PeriodWindow:
+    end = end or latest_close(md)
+    return window_for(md, {
+        "day": last_tw_trading_day(end - timedelta(days=1)),
+        "month": last_tw_trading_day(end.replace(day=1) - timedelta(days=1)),
+        "year": last_tw_trading_day(date(end.year, 1, 1) - timedelta(days=1)),
+    }, end)
 
 
 def _forward_filled(axis: list[date], closes: dict[date, Decimal]) -> dict[date, Decimal]:
@@ -227,10 +239,11 @@ def _window_return(daily: list[float], active: list[bool], axis: list[date], sta
 
 
 def member_period_returns(db: Session, md: MarketData, user: User, window: PeriodWindow) -> dict[str, float | None]:
-    """Day / month / year time-weighted returns of all of ``user``'s accounts combined (TWD, closes), from the
-    window's common start dates. A member who starts holding during a period counts from the first day with holdings.
-    Any holding without a close on any day of the window (e.g. US stocks under commercial) → every period None."""
-    none = dict.fromkeys(PERIODS)
+    """Time-weighted returns of all of ``user``'s accounts combined (TWD, closes) for every period of the window
+    (leaderboard: day / month / year; weekly digest: week), from the window's common start dates. A member who starts
+    holding during a period counts from the first day with holdings. Any holding without a close on any day of the
+    window (e.g. US stocks under commercial) → every period None."""
+    none = dict.fromkeys(window.starts)
     inp = load_ledger_input(db, user)
     if inp.first_date is None or inp.first_date > window.end:
         return none
@@ -249,7 +262,7 @@ def member_period_returns(db: Session, md: MarketData, user: User, window: Perio
         return none
     daily = [p.daily_return for p in points]
     active = [False] + [points[i - 1].value + points[i].inflow > 0 for i in range(1, len(points))]
-    return {k: _window_return(daily, active, axis, window.starts[k], window.end) for k in PERIODS}
+    return {k: _window_return(daily, active, axis, start, window.end) for k, start in window.starts.items()}
 
 
 @dataclass
@@ -287,12 +300,12 @@ def holdings_list(state: PortfolioState) -> list[dict[str, Any]]:
 class Projector:
     """Builds members' shared blocks for one request (each member's ledger is computed at most once)."""
 
-    def __init__(self, db: Session, md: MarketData):
+    def __init__(self, db: Session, md: MarketData, window: PeriodWindow | None = None):
         self.db = db
         self.md = md
         self._states: dict[str, PortfolioState] = {}
         self._returns: dict[str, dict[str, float | None]] = {}
-        self._window: PeriodWindow | None = None
+        self._window = window  # default: the leaderboard's day / month / year window
 
     @property
     def window(self) -> PeriodWindow:
@@ -397,10 +410,10 @@ def _benchmark_period_returns(md: MarketData, window: PeriodWindow) -> tuple[lis
                                   lambda d, splits=splits: splits.get(d, Decimal(1)))
         priced = [d in closes for d in axis]
         out: dict[str, float | None] = {}
-        for k in PERIODS:
-            s = bisect.bisect_right(axis, window.starts[k]) - 1
+        for k, start in window.starts.items():
+            s = bisect.bisect_right(axis, start) - 1
             ok = s >= 0 and priced[s] and priced[-1]
-            out[k] = _window_return(daily, [True] * len(axis), axis, window.starts[k], window.end) if ok else None
+            out[k] = _window_return(daily, [True] * len(axis), axis, start, window.end) if ok else None
         rows.append({"symbol": sym, "name": md.benchmark_name(sym), "_returns": out})
         if md.policy == "commercial" and not closes:
             notes.append(f"基準 {md.benchmark_name(sym)} 目前沒有可商用的資料")
@@ -462,6 +475,28 @@ def joined_item_id(group_id: str, user_id: str, joined_at: datetime) -> str:
     return "gfi_" + keyed_id("feed-item-id", f"joined|{group_id}|{user_id}|{joined_at.isoformat()}")
 
 
+def snapshot_cutoffs(db: Session, user_ids: Iterable[str]) -> dict[str, date]:
+    """Holdings-only accounts of these users → their snapshot date (like the ledger, transactions on or before it do
+    not count)."""
+    ids = sorted(set(user_ids))
+    if not ids:
+        return {}
+    return dict(db.execute(
+        select(HoldingSnapshot.account_id, func.max(HoldingSnapshot.as_of))
+        .join(BrokerAccount, BrokerAccount.id == HoldingSnapshot.account_id)
+        .where(HoldingSnapshot.user_id.in_(ids), BrokerAccount.tracking_mode == "holdings")
+        .group_by(HoldingSnapshot.account_id)).all())
+
+
+def feed_eligible(t: Transaction, cutoffs: dict[str, date]) -> bool:
+    """A transaction that can appear in a group feed (and so be pushed): a manual / imported / signed-draft buy or sell
+    with a symbol, not covered by a holdings-only account's snapshot."""
+    if t.type not in FEED_SIDES or t.source not in FEED_SOURCES or not t.symbol:
+        return False
+    as_of = cutoffs.get(t.account_id)
+    return as_of is None or t.trade_date > as_of
+
+
 def _feed_window(today: date | None = None) -> tuple[date, date]:
     today = today or today_taipei()
     return today - timedelta(days=FEED_DAYS), today
@@ -487,6 +522,12 @@ def _reaction_summary(db: Session, group_id: str, targets: list[str], me_id: str
     return counts, reactions
 
 
+def social_summary(db: Session, group_id: str, targets: list[str], me_id: str
+                   ) -> tuple[dict[str, int], dict[str, list[dict[str, Any]]]]:
+    """Comment counts and reaction tallies of these (visible) targets."""
+    return _reaction_summary(db, group_id, targets, me_id)
+
+
 def reactions_for(db: Session, group_id: str, target: str, me_id: str) -> list[dict[str, Any]]:
     return _reaction_summary(db, group_id, [target], me_id)[1].get(target, [])
 
@@ -503,16 +544,10 @@ def feed_items(db: Session, md: MarketData, group: Group, members: list[Member],
             Transaction.user_id.in_(sorted(sharing)), Transaction.type.in_(FEED_SIDES),
             Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
             Transaction.trade_date >= lo, Transaction.trade_date <= hi))
-        # Holdings-only accounts: like the ledger, transactions on or before the snapshot date do not count.
-        snapshot_as_of = dict(db.execute(
-            select(HoldingSnapshot.account_id, func.max(HoldingSnapshot.as_of))
-            .join(BrokerAccount, BrokerAccount.id == HoldingSnapshot.account_id)
-            .where(HoldingSnapshot.user_id.in_(sorted(sharing)), BrokerAccount.tracking_mode == "holdings")
-            .group_by(HoldingSnapshot.account_id)).all())
+        cutoffs = snapshot_cutoffs(db, sharing)
         merged: dict[tuple[str, date, str, str], dict[str, Any]] = {}
         for t in txns:
-            as_of = snapshot_as_of.get(t.account_id)
-            if as_of is not None and t.trade_date <= as_of:
+            if not feed_eligible(t, cutoffs):
                 continue
             key = (t.user_id, t.trade_date, t.symbol or "", t.type)
             cell = merged.setdefault(key, {"count": 0, "qty": ZERO, "value": ZERO, "currency": t.currency,
@@ -639,3 +674,163 @@ def purge_trade_threads(db: Session, user_id: str, keys: Iterable[TradeKey]) -> 
         target = f"trade:{feed_item_id(user_id, d, symbol, side)}"
         db.execute(delete(GroupComment).where(GroupComment.target == target))
         db.execute(delete(GroupReaction).where(GroupReaction.target == target))
+
+
+# -- push to group channels (``services.notifications``) ------------------------------------------------------
+PUSH_TRADE_DAYS = 3  # the trade date must be one of the last 3 calendar days (Taipei), today included
+PUSH_DELAY = timedelta(minutes=15)
+
+
+def push_start(member: Member, configured_at: datetime) -> datetime | None:
+    """Trades created after this moment may go to a channel configured at ``configured_at``: after the channel was set
+    up and after the member last turned on both ``push`` and ``trades``. None: the member does not push trades."""
+    s = member.share
+    if s is None or not (s.push and s.trades) or s.push_enabled_at is None or s.trades_enabled_at is None:
+        return None
+    return max(configured_at, s.push_enabled_at, s.trades_enabled_at)
+
+
+def push_trade_dates(now: datetime) -> tuple[date, date]:
+    today = now.astimezone(TAIPEI).date()
+    return today - timedelta(days=PUSH_TRADE_DAYS - 1), today
+
+
+def push_trade_candidates(db: Session, members: list[Member], now: datetime) -> list[tuple[Member, Transaction]]:
+    """Feed-eligible trades of the members who currently share both ``trades`` and ``push`` here, with a trade date in
+    the last 3 calendar days and created within that window."""
+    pushing = {m.user_id: m for m in members if m.shares("push") and m.shares("trades")}
+    if not pushing:
+        return []
+    lo, hi = push_trade_dates(now)
+    txns = db.scalars(select(Transaction).where(
+        Transaction.user_id.in_(sorted(pushing)), Transaction.type.in_(FEED_SIDES),
+        Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
+        Transaction.trade_date >= lo, Transaction.trade_date <= hi,
+        Transaction.created_at >= now - timedelta(days=PUSH_TRADE_DAYS + 1)).order_by(Transaction.created_at))
+    cutoffs = snapshot_cutoffs(db, pushing)
+    return [(pushing[t.user_id], t) for t in txns if feed_eligible(t, cutoffs)]
+
+
+def still_pushable(db: Session, member: Member, txn: Transaction, configured_at: datetime, now: datetime) -> bool:
+    """Re-checked right before sending: the member still pushes trades, the trade was created after the channel and
+    the toggles were (last) turned on, it is still a feed trade and its date is still in the 3-day window."""
+    start = push_start(member, configured_at)
+    lo, hi = push_trade_dates(now)
+    return (start is not None and txn.created_at > start and lo <= txn.trade_date <= hi
+            and feed_eligible(txn, snapshot_cutoffs(db, [member.user_id])))
+
+
+def push_trade_view(md: MarketData, member: Member, txns: list[Transaction]) -> dict[str, Any]:
+    """What a channel may show of one member's buys (or sells) of one symbol on one day: name, side, symbol, date and
+    count — plus the share-weighted average price only with ``trade_prices``. Never quantities, amounts, accounts,
+    notes or fees."""
+    first = txns[0]
+    info = md.instrument(first.symbol or "")
+    out: dict[str, Any] = {"display_name": member.user.display_name, "side": first.type, "symbol": first.symbol,
+                           "name": info.name if info else first.symbol, "trade_date": first.trade_date,
+                           "count": len(txns)}
+    qty = sum((t.quantity or ZERO for t in txns), ZERO)
+    if member.shares("trade_prices") and qty > 0:
+        out["price"] = ser.price(sum(((t.quantity or ZERO) * (t.price or ZERO) for t in txns), ZERO) / qty)
+        out["currency"] = first.currency
+    return out
+
+
+# -- weekly AI digest facts (``services.digests``) -----------------------------------------------------------------
+def digest_week_facts(db: Session, md: MarketData, members: list[Member], week_start: date,
+                      week_end: date) -> tuple[dict[str, Any], list[str]] | None:
+    """One group's week (Monday–Friday, Taipei), computed from the projection: week returns of the members who share
+    ``returns``, held symbols of those who share ``holdings``, trade counts of those who share ``trades``, and the
+    benchmarks' week returns. Stored **by user_id**; :func:`digest_facts_view` filters them by the current memberships
+    and toggles on every read. None when the week had no Taiwan trading day."""
+    days = tw_trading_days(week_start, week_end)
+    if not days:
+        return None
+    base = last_tw_trading_day(week_start - timedelta(days=1))
+    window = window_for(md, {"week": base}, days[-1])
+    proj = Projector(db, md, window)
+    returns, holdings, trades = [], [], []
+    symbols: dict[str, dict[str, Any]] = {}
+    is_demo = False
+    for m in members:
+        if m.shares("returns"):
+            returns.append({"user_id": m.user_id, "week_return_pct": pct(proj.period_returns(m.user)["week"])})
+            is_demo |= proj.is_demo(m.user)
+        if m.shares("holdings"):
+            hs = holdings_list(proj.state(m.user))
+            is_demo |= proj.is_demo(m.user)
+            holdings.append({"user_id": m.user_id, "symbols": [h["symbol"] for h in hs]})
+            for h in hs:
+                symbols[h["symbol"]] = {"name": h["name"], "industry": h["_industry"]}
+    sharing_trades = [m.user_id for m in members if m.shares("trades")]
+    if sharing_trades:
+        cutoffs = snapshot_cutoffs(db, sharing_trades)
+        counts: dict[str, int] = dict.fromkeys(sharing_trades, 0)
+        for t in db.scalars(select(Transaction).where(
+                Transaction.user_id.in_(sharing_trades), Transaction.type.in_(FEED_SIDES),
+                Transaction.source.in_(FEED_SOURCES), Transaction.trade_date >= week_start,
+                Transaction.trade_date <= week_end)):
+            if feed_eligible(t, cutoffs):
+                counts[t.user_id] += 1
+        trades = [{"user_id": uid, "count": counts[uid]} for uid in sharing_trades]
+    bench, sources, bench_demo, notes = _benchmark_period_returns(md, window)
+    if window.clipped and window.archive_since is not None:
+        notes.insert(0, f"資料累積中：自 {window.archive_since.isoformat()} 起存檔；"
+                        f"本週從 {window.starts['week'].isoformat()} 收盤開始計算")
+    facts = {
+        "v": 1, "base_date": window.starts["week"].isoformat(), "end_date": window.end.isoformat(),
+        "trading_days": len(days), "returns": returns, "holdings": holdings, "symbols": symbols, "trades": trades,
+        "benchmarks": [{"symbol": b["symbol"], "name": b["name"], "week_return_pct": pct(b["_returns"]["week"])}
+                       for b in bench],
+        "notes": notes, "is_demo": is_demo or bench_demo,
+    }
+    return facts, labels(["ledger", *sources])
+
+
+def _allowed(by_id: dict[str, Member], user_id: str, key: str, pushing_only: bool) -> Member | None:
+    m = by_id.get(user_id)
+    if m is None or not m.shares(key) or (pushing_only and not m.shares("push")):
+        return None
+    return m
+
+
+def digest_facts_view(facts: dict[str, Any], members: list[Member], pushing_only: bool = False) -> dict[str, Any]:
+    """A stored digest's facts as members see them **now**: only current members who still share the matching toggle
+    here (``pushing_only``: who also push — what a channel may show). Common holdings need two holders; industries
+    count holders of any of their symbols; ``trades_count`` adds up members who share trades."""
+    by_id = {m.user_id: m for m in members}
+    returns = []
+    for r in facts.get("returns", []):
+        m = _allowed(by_id, r["user_id"], "returns", pushing_only)
+        if m is not None:
+            returns.append({"user_id": m.user_id, "display_name": m.user.display_name,
+                            "week_return_pct": r["week_return_pct"]})
+    holders: dict[str, set[str]] = defaultdict(set)
+    industries: dict[str, set[str]] = defaultdict(set)
+    info = facts.get("symbols", {})
+    for h in facts.get("holdings", []):
+        if _allowed(by_id, h["user_id"], "holdings", pushing_only) is None:
+            continue
+        for sym in h["symbols"]:
+            holders[sym].add(h["user_id"])
+            ind = (info.get(sym) or {}).get("industry")
+            if ind:
+                industries[ind].add(h["user_id"])
+    common = [{"symbol": s, "name": (info.get(s) or {}).get("name") or s, "holder_count": len(u)}
+              for s, u in holders.items() if len(u) >= 2]
+    common.sort(key=lambda c: (-c["holder_count"], c["symbol"]))
+    inds = [{"industry": k, "holder_count": len(u)} for k, u in industries.items()]
+    inds.sort(key=lambda c: (-c["holder_count"], c["industry"]))
+    trades_count = sum(t["count"] for t in facts.get("trades", [])
+                       if _allowed(by_id, t["user_id"], "trades", pushing_only) is not None)
+    return {"returns": returns, "benchmarks": list(facts.get("benchmarks", [])), "common_holdings": common,
+            "industries": inds, "trades_count": trades_count}
+
+
+def digest_summary_pushable(facts: dict[str, Any], members: list[Member]) -> bool:
+    """The AI summary was written from every contributor's numbers, so a channel may show it only while each of them
+    is still a member who pushes and still shares what they contributed."""
+    by_id = {m.user_id: m for m in members}
+    parts = [("returns", facts.get("returns", [])), ("holdings", facts.get("holdings", [])),
+             ("trades", facts.get("trades", []))]
+    return all(_allowed(by_id, row["user_id"], key, True) is not None for key, rows in parts for row in rows)

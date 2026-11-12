@@ -1,7 +1,10 @@
 """Family groups (親友群組): groups, members, invites, share settings, leaderboard, holdings, feed, comments and
-reactions. Non-members get 404 everywhere; what members see of each other comes from ``services.sharing``."""
+reactions, weekly AI digests and push channels. Non-members get 404 everywhere; what members see of each other comes
+from ``services.sharing``."""
 
 from __future__ import annotations
+
+from typing import Literal
 
 from fastapi import APIRouter, Depends, Query, Request, Response
 from sqlalchemy.orm import Session
@@ -10,9 +13,13 @@ from forliosa.api.deps import session_user, signed_in_user
 from forliosa.api.schemas_sharing import (
     TARGET_PATTERN,
     AcceptIn,
+    ChannelPatch,
+    Channels,
     CommentIn,
     CommentOut,
     CommentPage,
+    DigestPage,
+    DiscordIn,
     EmojiLiteral,
     FeedPage,
     GroupHoldings,
@@ -29,13 +36,14 @@ from forliosa.api.schemas_sharing import (
     RoleIn,
     SharedPortfolio,
     ShareSettings,
+    TelegramLink,
     TransferIn,
 )
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
+from forliosa.services import channels, digests, sharing
 from forliosa.services import groups as svc
-from forliosa.services import sharing
 
 router = APIRouter(tags=["groups"])
 
@@ -212,3 +220,52 @@ def delete_reaction(group_id: str, target: str = Query(min_length=3, max_length=
                     db: Session = Depends(get_db)):
     g, m = svc.require_member(db, group_id, user)
     return svc.delete_reaction(db, get_market_data(), g, m, target, emoji)
+
+
+# -- weekly AI digests ---------------------------------------------------------------------------------------------
+@router.get("/groups/{group_id}/digests", response_model=DigestPage,
+            summary="群組 AI 週報（新到舊；facts 依目前的分享設定過濾）")
+def list_digests(group_id: str, limit: int = Query(8, ge=1, le=52), cursor: str | None = Query(None, max_length=300),
+                 user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
+    g, _ = svc.require_member(db, group_id, user)
+    return digests.digests_page(db, g, user.id, limit, cursor)
+
+
+# -- push channels ---------------------------------------------------------------------------------------------------
+@router.get("/groups/{group_id}/channels", response_model=Channels,
+            summary="推播頻道（每位成員都看得到；webhook_hint 只有擁有者看得到）")
+def get_channels(group_id: str, user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
+    g, m = svc.require_member(db, group_id, user)
+    return channels.channels_out(db, g, m)
+
+
+@router.put("/groups/{group_id}/channels/discord", response_model=Channels,
+            summary="設定 Discord webhook（擁有者；先送測試訊息，失敗 422 webhook_failed）")
+def put_discord(group_id: str, body: DiscordIn, user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
+    g, m = svc.require_member(db, group_id, user)
+    channels.put_discord(db, g, m, body.webhook_url, body.notify_trades, body.notify_digest)
+    return channels.channels_out(db, g, m)
+
+
+@router.patch("/groups/{group_id}/channels/{kind}", response_model=Channels, summary="推播項目開關（擁有者）")
+def patch_channel(group_id: str, kind: Literal["discord", "telegram"], body: ChannelPatch,
+                  user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
+    g, m = svc.require_member(db, group_id, user)
+    channels.patch_channel(db, g, m, kind, body.model_dump(exclude_unset=True, exclude_none=True))
+    return channels.channels_out(db, g, m)
+
+
+@router.delete("/groups/{group_id}/channels/{kind}", status_code=204, response_class=Response,
+               summary="解除推播頻道（擁有者）")
+def delete_channel(group_id: str, kind: Literal["discord", "telegram"], user: User = Depends(signed_in_user),
+                   db: Session = Depends(get_db)):
+    g, m = svc.require_member(db, group_id, user)
+    channels.delete_channel(db, g, m, kind)
+    return Response(status_code=204)
+
+
+@router.post("/groups/{group_id}/channels/telegram/link", response_model=TelegramLink,
+             summary="Telegram 連結碼（擁有者；10 分鐘、一次性）")
+def telegram_link(group_id: str, user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
+    g, m = svc.require_member(db, group_id, user)
+    return channels.create_link_code(db, g, m)
