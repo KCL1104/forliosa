@@ -31,6 +31,7 @@ from forliosa.marketdata.base import Candle, market_of_symbol
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, get_market_data
 from forliosa.models import BrokerAccount, RecurringPlan, User, WatchlistItem
+from forliosa.services import auto_dividends
 from forliosa.services import transactions as txn_svc
 from forliosa.services.ledger_io import DEFAULT_PREFERENCES, load_ledger_input, shares_held
 from forliosa.timeutil import today_taipei
@@ -113,12 +114,22 @@ class Seeder:
 
     def dividends(self, user: User, acc: BrokerAccount, symbol: str, since: date, until: date | None = None,
                   cash: bool = True, stock: bool = True) -> None:
-        """Record every dividend of ``symbol`` with an ex-date in (since, until] on its ex-date."""
+        """Record every dividend of ``symbol`` with an ex-date in (since, until] on its ex-date.
+
+        Synthetic dividends stop where the archive's real ex-dividend notices begin (less the 120-day window a
+        user record covers): from there the automatic dividend sync books the real ones, and a synthetic record
+        next to a real automatic one would count that dividend twice.
+        """
         ans = self.pmd.dividends(symbol)
         last_day = self.prices.candles(symbol)[-1].t if self.prices.candles(symbol) else self.today
+        real = [e.ex_dividend_date for e in auto_dividends.ex_dividend_events(self.md, symbol) or []
+                if e.ex_dividend_date and (e.cash_dividend > 0 or e.stock_dividend > 0)]
+        cutoff = min(real) - timedelta(days=auto_dividends.USER_RECORD_WINDOW_DAYS) if real else None
         for ev in sorted(ans.value, key=lambda e: e.ex_dividend_date or date.min):
             ex = ev.ex_dividend_date
             if ex is None or not (since < ex <= min(until or last_day, last_day)):
+                continue
+            if cutoff is not None and ex >= cutoff:
                 continue
             if self.held(user, acc, symbol, ex) <= 0:
                 continue

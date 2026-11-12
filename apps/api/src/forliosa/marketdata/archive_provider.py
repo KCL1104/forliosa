@@ -236,8 +236,10 @@ class ArchiveProvider(BaseProvider):
         out = []
         for r in rows:
             cash = Decimal(r.data.get("cash") or 0) or official_cash.get(r.date) or Decimal(0)
+            pending = r.data.get("cash") in (None, "") and not cash and "息" in (r.title or "")
             out.append(DividendEvent(symbol, r.date.year, str(r.date.year), cash,
-                                     Decimal(r.data.get("stock_ratio") or 0) * 10, r.date, None))
+                                     Decimal(r.data.get("stock_ratio") or 0) * 10, r.date, None,
+                                     amount_pending=pending))
         out.extend(resolution_event(symbol, r) for r in resolutions)
         return attach_resolutions(out) or None
 

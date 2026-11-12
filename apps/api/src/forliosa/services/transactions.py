@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -85,8 +85,12 @@ def capital_surplus_part(md: MarketData, symbol: str, trade_date: date, amount: 
 
 
 def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
-            exclude_txn_id: str | None = None) -> Computed:
-    """Normalize a transaction payload; auto-calculate fee, tax and NHI premium when omitted."""
+            exclude_txn_id: str | None = None, capital_surplus: Decimal | None = None) -> Computed:
+    """Normalize a transaction payload; auto-calculate fee, tax and NHI premium when omitted.
+
+    ``capital_surplus``: NT$ of a cash dividend paid from 資本公積 when the caller already knows it (the automatic
+    dividend sync); otherwise it is looked up from the official resolution.
+    """
     account = _get_account(db, user, data["account_id"])
     t = TxnType(data["type"])
     trade_date: date = data["trade_date"]
@@ -121,6 +125,16 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
         inp = load_ledger_input(db, user, accounts=[account])
         return shares_held(inp, account.id, symbol, trade_date, exclude_txn_id)
 
+    def held_for_dividend(kind: str, per_share: Decimal) -> Decimal:
+        """Shares entitled to a dividend recorded from its per-share amount: the holding at the close before the
+        ex-date this record belongs to (``auto_dividends.match_ex_event``) — not counting that ex-date's own
+        automatic rows, which this record replaces — else before the record's date."""
+        events = auto_dividends.ex_dividend_events(md, symbol) if symbol else None
+        ev = auto_dividends.match_ex_event(events or [], trade_date, kind, per_share)
+        before = ev.ex_dividend_date if ev is not None and ev.ex_dividend_date is not None else trade_date
+        inp = load_ledger_input(db, user, accounts=[account])
+        return shares_held(inp, account.id, symbol, before, exclude_txn_id)
+
     match t:
         case TxnType.BUY | TxnType.SELL:
             _require(qty is not None and qty > 0, "請輸入股數")
@@ -152,14 +166,16 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
             if amount is None:
                 _require(px is not None and px > 0, "請輸入每股現金股利或股利金額")
                 assert px is not None
-                shares = qty if qty else held()
+                shares = qty if qty else held_for_dividend("cash", px)
                 _require(shares > 0, "除息日前沒有持股，請直接輸入股利金額")
                 amount = dividend_cash_amount(shares, px, currency)
                 qty = shares
                 rules.append(f"股利 = {qty} 股 × {px} 元")
             fee = fee if fee is not None else ZERO
             surplus = ZERO
-            if nhi is None and ref.is_tw and currency == "TWD" and symbol:
+            if capital_surplus is not None:
+                surplus = min(capital_surplus, amount)
+            elif nhi is None and ref.is_tw and currency == "TWD" and symbol:
                 surplus = capital_surplus_part(md, symbol, trade_date, amount, qty, px)
             auto = preview_cash_dividend(amount, currency, ref, fee, capital_surplus=surplus)
             nhi = nhi if nhi is not None else auto.health_insurance
@@ -170,7 +186,7 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
             if not qty:
                 _require(px is not None and px > 0, "請輸入每股配股（元）或配發股數")
                 assert px is not None
-                shares = held()
+                shares = held_for_dividend("stock", px)
                 _require(shares > 0, "除權日前沒有持股，請直接輸入配發股數")
                 qty, cash = stock_dividend_shares(shares, px)
                 amount = amount if amount is not None else cash
@@ -228,15 +244,39 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
 
 
 def validate_ledger(db: Session, user: User, account: BrokerAccount, candidate: Transaction | None,
-                    remove_id: str | None = None) -> None:
-    """Replay the account strictly with the candidate applied; reject inconsistent books."""
+                    remove_id: str | None = None, md: MarketData | None = None,
+                    skip: auto_dividends.DividendKey | None = None) -> None:
+    """Replay the account strictly with the candidate applied; reject inconsistent books.
+
+    With ``md``, the books are checked as they will be after the automatic dividend sync: the touched symbols'
+    automatic rows are recomputed in memory first (a sell before an ex-date removes that ex-date's automatic stock
+    dividend instead of failing on it). The message says so when only the recomputed dividends break the books.
+    ``skip``: an automatic dividend this change deletes or edits (it will be skipped from now on).
+    """
     inp = load_ledger_input(db, user, accounts=[account])
+    removed = next((t for t in inp.transactions if t.id == remove_id), None) if remove_id else None
     inp.transactions = [t for t in inp.transactions if t.id not in (remove_id, candidate.id if candidate else None)]
     if candidate is not None:
         inp.transactions.append(candidate)
+    before: LedgerError | None = None
     try:
         replay(inp.ledger_txns(), inp.method, inp.openings(), strict=True)
     except LedgerError as exc:
+        before = exc
+    if md is None:
+        if before is not None:
+            raise unprocessable(str(before), code="ledger_inconsistent") from before
+        return
+    symbols = {t.symbol for t in (candidate, removed) if t is not None and t.symbol}
+    if skip is not None:
+        symbols.add(skip.symbol)
+    after = replace(inp, transactions=auto_dividends.with_recomputed(db, user, md, inp, account, symbols,
+                                                                     extra_skips=[skip] if skip else ()))
+    try:
+        replay(after.ledger_txns(), after.method, after.openings(), strict=True)
+    except LedgerError as exc:
+        if before is None:
+            raise auto_dividends.conflict_error(exc) from exc
         raise unprocessable(str(exc), code="ledger_inconsistent") from exc
 
 
@@ -253,7 +293,8 @@ def create(db: Session, user: User, data: dict[str, Any], md: MarketData) -> Tra
     comp = compute(db, user, data, md)
     txn = Transaction(id=new_id("txn"), user_id=user.id, created_at=now_utc(), updated_at=now_utc(), **comp.values)
     account = _get_account(db, user, txn.account_id)
-    validate_ledger(db, user, account, txn)
+    auto_dividends.lock_accounts(db, [account.id])
+    validate_ledger(db, user, account, txn, md=md)
     db.add(txn)
     auto_dividends.after_user_change(db, user, md, _dividend_scope(txn))
     db.commit()
@@ -281,10 +322,11 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
     comp = compute(db, user, data, md, exclude_txn_id=txn.id)
     old_account = _get_account(db, user, txn.account_id)
     new_account = _get_account(db, user, comp.values["account_id"])
+    auto_dividends.lock_accounts(db, [old_account.id, new_account.id])
     candidate = Transaction(id=txn.id, user_id=user.id, created_at=txn.created_at, **comp.values)
-    validate_ledger(db, user, new_account, candidate, remove_id=txn.id)
+    validate_ledger(db, user, new_account, candidate, remove_id=txn.id, md=md, skip=edited_auto)
     if old_account.id != new_account.id:
-        validate_ledger(db, user, old_account, None, remove_id=txn.id)
+        validate_ledger(db, user, old_account, None, remove_id=txn.id, md=md, skip=edited_auto)
     for k, v in comp.values.items():
         setattr(txn, k, v)
     txn.updated_at = now_utc()
@@ -298,9 +340,10 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
 def delete(db: Session, user: User, txn: Transaction, md: MarketData) -> None:
     """Delete a transaction. Deleting an automatic dividend keeps a skip so the sync never books it again."""
     account = _get_account(db, user, txn.account_id)
-    validate_ledger(db, user, account, None, remove_id=txn.id)
-    scope = _dividend_scope(txn)
+    auto_dividends.lock_accounts(db, [account.id])
     auto_key = auto_dividends.key_of(txn) if txn.source == auto_dividends.AUTO else None
+    validate_ledger(db, user, account, None, remove_id=txn.id, md=md, skip=auto_key)
+    scope = _dividend_scope(txn)
     db.delete(txn)
     if auto_key is not None:
         auto_dividends.remember_skip(db, user, auto_key, "deleted")

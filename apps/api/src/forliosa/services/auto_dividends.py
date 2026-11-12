@@ -36,7 +36,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from forliosa.api.errors import ApiError, unprocessable
-from forliosa.domain.fees import ZERO, stock_dividend_shares
+from forliosa.domain.fees import ZERO, stock_dividend_shares, truncate
 from forliosa.domain.ledger import LedgerError, LedgerTxn, TxnType, replay
 from forliosa.ids import new_id
 from forliosa.marketdata.base import DividendEvent, market_of_symbol
@@ -44,6 +44,9 @@ from forliosa.marketdata.service import MarketData
 from forliosa.models import AutoDividendSkip, BrokerAccount, Transaction, User
 from forliosa.services.ledger_io import LedgerInput, load_ledger_input
 from forliosa.timeutil import now_utc, today_taipei
+
+# Ex-dividend events by symbol for one sync run (None = unknown: the archive could not be read).
+EventCache = dict[str, "list[DividendEvent] | None"]
 
 log = logging.getLogger("forliosa.auto_dividends")
 
@@ -105,49 +108,81 @@ def is_tw(symbol: str | None) -> bool:
     return bool(symbol) and market_of_symbol(symbol or "") in TW_MARKETS
 
 
-def ex_dividend_events(md: MarketData, symbol: str) -> list[DividendEvent]:
-    """Real (never demo) dated dividend events of a Taiwan symbol with an announced amount, oldest first."""
+def _archive_provider(md: MarketData) -> Any | None:
+    return next((p for p in md.providers if p.name == "archive"), None)
+
+
+def ex_dividend_events(md: MarketData, symbol: str, cache: EventCache | None = None) -> list[DividendEvent] | None:
+    """Archived ex-dividend notices of a Taiwan symbol (TWT48U_ALL / tpex_exright_prepost), oldest first.
+
+    Read from the archive provider directly: it is the only source of past notices, never demo data, and bypasses
+    the facade's provider cooldown — a cooldown must not read as "no dividends". Notices whose amount is not
+    announced yet are included (``amount_pending``; they matter for matching the user's records) — callers that
+    book only use events with an amount. ``None`` = unknown (no archive configured, or reading it failed): the
+    caller then leaves existing automatic rows alone. ``[]`` = known: no notices.
+    """
     if not is_tw(symbol):
         return []
-    try:
-        answer = md.dividends(symbol)
-    except Exception:  # market data is best effort: no automatic rows rather than a failed request
-        log.warning("dividends for %s unavailable", symbol, exc_info=True)
-        return []
-    if answer.is_demo:
-        return []
-    events = [e for e in answer.value or [] if e.ex_dividend_date is not None
-              and (e.cash_dividend > 0 or e.stock_dividend > 0)]
-    return sorted(events, key=lambda e: e.ex_dividend_date or date.min)
+    if cache is not None and symbol in cache:
+        return cache[symbol]
+    provider = _archive_provider(md)
+    out: list[DividendEvent] | None
+    if provider is None:
+        out = None
+    else:
+        try:
+            events = provider.dividends(symbol) or []
+        except Exception:  # an unreadable archive is "unknown", never "no dividends"
+            log.warning("archived dividends for %s unavailable", symbol, exc_info=True)
+            events = None
+        out = None if events is None else sorted(
+            (e for e in events if e.ex_dividend_date is not None and not e.is_demo),
+            key=lambda e: e.ex_dividend_date or date.min)
+    if cache is not None:
+        cache[symbol] = out
+    return out
 
 
 def _per_share(e: DividendEvent, kind: str) -> Decimal:
     return e.cash_dividend if kind == "cash" else e.stock_dividend
 
 
-def covered_by_user(rows: Iterable[Transaction], events: list[DividendEvent]) -> set[tuple[date, str]]:
-    """(ex_date, kind) pairs the user's own dividend records stand for.
+def _is_candidate(e: DividendEvent, kind: str) -> bool:
+    """A notice a user's record of ``kind`` may stand for: one with an amount of that kind, or a cash notice whose
+    amount is not announced yet (so a record of that dividend is not taken for the previous one)."""
+    return e.ex_dividend_date is not None and (_per_share(e, kind) > 0 or (kind == "cash" and e.amount_pending))
 
-    A record dated ``d`` covers the latest ex-date ``e`` with ``e <= d <= e + USER_RECORD_WINDOW_DAYS`` among the
-    events with an amount of that kind — preferring the ex-dates whose per-share amount equals the record's price
-    — so quarterly payers (an April payment for the March ex-date, a July payment for the June one) stay apart.
+
+def match_ex_event(events: Iterable[DividendEvent], d: date, kind: str,
+                   per_share: Decimal | None = None) -> DividendEvent | None:
+    """The ex-dividend event a dividend record of ``kind`` dated ``d`` belongs to.
+
+    The latest ex-date ``e`` with ``e <= d <= e + USER_RECORD_WINDOW_DAYS`` — preferring ex-dates whose announced
+    per-share amount equals ``per_share`` — so quarterly payers (an April payment for the March ex-date, a July
+    payment for the June one) stay apart. None when no notice fits.
     """
+    window = timedelta(days=USER_RECORD_WINDOW_DAYS)
+    candidates = [e for e in events if _is_candidate(e, kind) and e.ex_dividend_date is not None
+                  and e.ex_dividend_date <= d <= e.ex_dividend_date + window]
+    if not candidates:
+        return None
+    if per_share:
+        same = [e for e in candidates if _per_share(e, kind) > 0
+                and abs(_per_share(e, kind) - per_share) <= PER_SHARE_TOLERANCE]
+        candidates = same or candidates
+    return max(candidates, key=lambda e: e.ex_dividend_date or date.min)
+
+
+def covered_by_user(rows: Iterable[Transaction], events: list[DividendEvent]) -> set[tuple[date, str]]:
+    """(ex_date, kind) pairs the user's own dividend records stand for (``match_ex_event`` per record)."""
     out: set[tuple[date, str]] = set()
     for t in rows:
         kind = TYPE_KIND.get(t.type)
         if kind is None:
             continue
-        window = timedelta(days=USER_RECORD_WINDOW_DAYS)
-        candidates = [e for e in events if _per_share(e, kind) > 0 and e.ex_dividend_date is not None
-                      and e.ex_dividend_date <= t.trade_date <= e.ex_dividend_date + window]
-        if not candidates:
-            continue
-        if t.price:
-            same = [e for e in candidates if abs(_per_share(e, kind) - t.price) <= PER_SHARE_TOLERANCE]
-            candidates = same or candidates
-        best = max(candidates, key=lambda e: e.ex_dividend_date or date.min)
-        assert best.ex_dividend_date is not None
-        out.add((best.ex_dividend_date, kind))
+        e = match_ex_event(events, t.trade_date, kind, t.price or None)
+        if e is not None and e.ex_dividend_date is not None:
+            out.add((e.ex_dividend_date, kind))
     return out
 
 
@@ -196,18 +231,34 @@ class _Holding:
         return replay(txns, self.inp.method, openings).ledger.held(self.account_id, self.symbol)
 
 
-def _desired_rows(db: Session, user: User, md: MarketData, account: BrokerAccount, symbol: str,
-                  inp: LedgerInput, all_txns: list[LedgerTxn], auto_ids: set[str], skips: set[tuple[date, str]],
-                  today: date) -> dict[DividendKey, dict[str, Any]]:
-    """Column values of every automatic row (account, symbol) should have now."""
+@dataclass
+class _Plan:
+    """What the automatic rows of one (account, symbol) should be.
+
+    ``desired``: rows that must exist with these values. ``keep``: existing rows to leave as they are because their
+    values could not be computed this time. ``unknown``: no dividend data at all (archive unreadable, instrument
+    unknown) — every existing row is left alone and nothing is added.
+    """
+
+    desired: dict[DividendKey, dict[str, Any]] = field(default_factory=dict)
+    keep: set[DividendKey] = field(default_factory=set)
+    unknown: bool = False
+
+
+def _plan(db: Session, user: User, md: MarketData, account: BrokerAccount, symbol: str, inp: LedgerInput,
+          all_txns: list[LedgerTxn], auto_ids: set[str], skips: set[tuple[date, str]], today: date,
+          cache: EventCache | None) -> _Plan:
+    """The automatic rows (account, symbol) should have now (see the module rules)."""
     from forliosa.services.transactions import compute
 
-    events = ex_dividend_events(md, symbol)
-    if not events:
-        return {}
+    events = ex_dividend_events(md, symbol, cache)
+    if events is None:
+        return _Plan(unknown=True)
+    if not any(_per_share(e, "cash") > 0 or _per_share(e, "stock") > 0 for e in events):
+        return _Plan()
     info = md.instrument(symbol)
     if info is None:
-        return {}
+        return _Plan(unknown=True)
     own = [t for t in inp.transactions if t.account_id == account.id and t.symbol == symbol
            and t.source in USER_SOURCES and t.type in TYPE_KIND]
     covered = covered_by_user(own, events)
@@ -215,11 +266,13 @@ def _desired_rows(db: Session, user: User, md: MarketData, account: BrokerAccoun
     holding = _Holding(inp, account.id, symbol,
                        [t for t in all_txns if t.account_id == account.id and t.symbol == symbol
                         and t.id not in auto_ids])
-    out: dict[DividendKey, dict[str, Any]] = {}
+    plan = _Plan()
     for n, e in enumerate(events):
         ex = e.ex_dividend_date
         assert ex is not None
         if ex > today or (as_of is not None and ex <= as_of):
+            continue
+        if _per_share(e, "cash") <= 0 and _per_share(e, "stock") <= 0:
             continue
         shares = holding.held_before(ex)
         if shares <= 0:
@@ -230,13 +283,16 @@ def _desired_rows(db: Session, user: User, md: MarketData, account: BrokerAccoun
                 continue
             key = DividendKey(account.id, symbol, ex, kind)
             if kind == "cash":
+                surplus = (truncate(shares * e.cash_sources[2])
+                           if e.cash_sources and e.cash_sources[2] > 0 else ZERO)
                 data = {"account_id": account.id, "symbol": symbol, "type": TxnType.CASH_DIVIDEND.value,
                         "trade_date": ex, "quantity": shares, "price": per_share,
                         "note": cash_note(shares, per_share, e.payment_date), "source": AUTO}
                 try:
-                    values = compute(db, user, data, md).values
+                    values = compute(db, user, data, md, capital_surplus=surplus).values
                 except ApiError as exc:
-                    log.warning("automatic cash dividend %s skipped: %s", key, exc.message)
+                    log.warning("automatic cash dividend %s not recomputed: %s", key, exc.message)
+                    plan.keep.add(key)
                     continue
                 if values["amount"] <= 0:
                     continue
@@ -255,22 +311,69 @@ def _desired_rows(db: Session, user: User, md: MarketData, account: BrokerAccoun
                     type=TxnType.STOCK_DIVIDEND, trade_date=ex, quantity=new_shares, price=per_share,
                     amount=cash, currency=info.currency, seq=10**9 + n,
                 ))
-            out[key] = values
-    return out
+            plan.desired[key] = values
+    return plan
 
 
 def _differs(row: Transaction, values: dict[str, Any]) -> bool:
     return any(getattr(row, k) != values[k] for k in COMPARED)
 
 
+@dataclass
+class _Scope:
+    """Everything one sync / validation pass needs about a set of accounts."""
+
+    inp: LedgerInput
+    all_txns: list[LedgerTxn]
+    skips: dict[tuple[str, str], set[tuple[date, str]]]
+    existing: dict[tuple[str, str], dict[DividendKey, list[Transaction]]]
+    stray: list[Transaction]  # automatic rows that are not dividends: never valid
+
+    def symbols(self, account_id: str, only: set[str] | None) -> list[str]:
+        syms = {t.symbol for t in self.inp.transactions if t.account_id == account_id and is_tw(t.symbol)}
+        syms |= {s.symbol for s in self.inp.snapshots if s.account_id == account_id and is_tw(s.symbol)}
+        return sorted(s for s in syms if s and (only is None or s in only))
+
+
+def _scope(db: Session, user: User, inp: LedgerInput) -> _Scope:
+    ids = [a.id for a in inp.accounts]
+    skips: dict[tuple[str, str], set[tuple[date, str]]] = defaultdict(set)
+    if ids:
+        for s in db.scalars(select(AutoDividendSkip).where(AutoDividendSkip.user_id == user.id,
+                                                           AutoDividendSkip.account_id.in_(ids))):
+            skips[(s.account_id, s.symbol)].add((s.ex_date, s.kind))
+    existing: dict[tuple[str, str], dict[DividendKey, list[Transaction]]] = defaultdict(lambda: defaultdict(list))
+    stray = []
+    for t in inp.transactions:
+        if t.source != AUTO:
+            continue
+        k = key_of(t)
+        if k is None:
+            stray.append(t)
+        else:
+            existing[(k.account_id, k.symbol)][k].append(t)
+    return _Scope(inp, inp.ledger_txns(), skips, existing, stray)
+
+
+def lock_accounts(db: Session, account_ids: Iterable[str]) -> None:
+    """Serialize writers of the same accounts (the worker's sync vs a user's change): row locks on PostgreSQL.
+    SQLite already serializes writes and has no ``FOR UPDATE`` (SQLAlchemy omits it there)."""
+    ids = sorted(set(account_ids))
+    if ids and db.get_bind().dialect.name == "postgresql":
+        db.execute(select(BrokerAccount.id).where(BrokerAccount.id.in_(ids)).with_for_update())
+
+
 def sync_auto_dividends(db: Session, user: User, md: MarketData, account_ids: Iterable[str] | None = None,
-                        symbols: Iterable[str | None] | None = None, today: date | None = None) -> SyncResult:
+                        symbols: Iterable[str | None] | None = None, today: date | None = None,
+                        cache: EventCache | None = None) -> SyncResult:
     """Add / update / delete the user's ``source="auto"`` dividend rows to match the rules (no commit).
 
     ``account_ids`` / ``symbols`` narrow the work to what a change can affect (``None`` = all); symbols outside
-    Taiwan are ignored. The caller commits (or rolls back) the session.
+    Taiwan are ignored. An existing row is only deleted when the dividend data is known and says it should not
+    exist; when the data cannot be read the rows stay as they are. The caller commits (or rolls back).
     """
     today = today or today_taipei()
+    cache = {} if cache is None else cache
     q = select(BrokerAccount).where(BrokerAccount.user_id == user.id)
     if account_ids is not None:
         ids = list(dict.fromkeys(account_ids))
@@ -278,36 +381,24 @@ def sync_auto_dividends(db: Session, user: User, md: MarketData, account_ids: It
             return SyncResult()
         q = q.where(BrokerAccount.id.in_(ids))
     accounts = list(db.scalars(q.order_by(BrokerAccount.created_at)))
-    only = None if symbols is None else {s for s in symbols if is_tw(s)}
+    only = None if symbols is None else {s for s in symbols if s and is_tw(s)}
     result = SyncResult()
     if not accounts or only == set():
         return result
-    inp = load_ledger_input(db, user, accounts=accounts)
-    all_txns = inp.ledger_txns()
-    skip_rows = db.scalars(select(AutoDividendSkip).where(AutoDividendSkip.user_id == user.id,
-                                                          AutoDividendSkip.account_id.in_([a.id for a in accounts])))
-    skips: dict[tuple[str, str], set[tuple[date, str]]] = defaultdict(set)
-    for s in skip_rows:
-        skips[(s.account_id, s.symbol)].add((s.ex_date, s.kind))
-    existing: dict[tuple[str, str], dict[DividendKey, list[Transaction]]] = defaultdict(lambda: defaultdict(list))
-    for t in inp.transactions:
-        k = key_of(t) if t.source == AUTO else None
-        if t.source == AUTO and k is None:  # an automatic row that is not a dividend: never valid
-            db.delete(t)
-            result.deleted += 1
-            result.accounts.add(t.account_id)
-            continue
-        if k is not None:
-            existing[(k.account_id, k.symbol)][k].append(t)
+    sc = _scope(db, user, load_ledger_input(db, user, accounts=accounts))
+    for t in sc.stray:
+        db.delete(t)
+        result.deleted += 1
+        result.accounts.add(t.account_id)
     for account in accounts:
-        held_symbols = {t.symbol for t in inp.transactions if t.account_id == account.id and is_tw(t.symbol)}
-        held_symbols |= {s.symbol for s in inp.snapshots if s.account_id == account.id and is_tw(s.symbol)}
-        for symbol in sorted(s for s in held_symbols if s and (only is None or s in only)):
-            auto_ids = {t.id for rows in existing[(account.id, symbol)].values() for t in rows}
-            desired = _desired_rows(db, user, md, account, symbol, inp, all_txns, auto_ids,
-                                    skips[(account.id, symbol)], today)
-            current = existing[(account.id, symbol)]
-            for key, values in desired.items():
+        for symbol in sc.symbols(account.id, only):
+            current = sc.existing[(account.id, symbol)]
+            auto_ids = {t.id for rows in current.values() for t in rows}
+            plan = _plan(db, user, md, account, symbol, sc.inp, sc.all_txns, auto_ids,
+                         sc.skips[(account.id, symbol)], today, cache)
+            if plan.unknown:
+                continue
+            for key, values in plan.desired.items():
                 rows = current.pop(key, [])
                 if rows:
                     row, extra = rows[0], rows[1:]
@@ -326,13 +417,46 @@ def sync_auto_dividends(db: Session, user: User, md: MarketData, account_ids: It
                                        updated_at=now_utc(), **values))
                     result.created += 1
                     result.accounts.add(account.id)
-            for rows in current.values():
-                for t in rows:
+            for key, rows in current.items():
+                for t in (rows[1:] if key in plan.keep else rows):
                     db.delete(t)
                     result.deleted += 1
                     result.accounts.add(account.id)
             current.clear()
     return result
+
+
+def with_recomputed(db: Session, user: User, md: MarketData, inp: LedgerInput, account: BrokerAccount,
+                    symbols: Iterable[str | None], today: date | None = None,
+                    extra_skips: Iterable[DividendKey] = ()) -> list[Transaction]:
+    """``inp.transactions`` with the automatic rows of (account, symbols) replaced, in memory, by what the sync
+    would write for this ledger — to validate a change against the books as they will be after the sync.
+    ``extra_skips``: automatic dividends the change itself deletes or edits."""
+    today = today or today_taipei()
+    only = {s for s in symbols if s and is_tw(s)}
+    if not only:
+        return list(inp.transactions)
+    sc = _scope(db, user, inp)
+    for k in extra_skips:
+        sc.skips[(k.account_id, k.symbol)].add((k.ex_date, k.kind))
+    replaced: set[str] = set()
+    added: list[Transaction] = []
+    cache: EventCache = {}
+    for symbol in sc.symbols(account.id, only):
+        current = sc.existing[(account.id, symbol)]
+        auto_ids = {t.id for rows in current.values() for t in rows}
+        plan = _plan(db, user, md, account, symbol, sc.inp, sc.all_txns, auto_ids,
+                     sc.skips[(account.id, symbol)], today, cache)
+        if plan.unknown:
+            continue
+        for key, rows in current.items():
+            for i, t in enumerate(rows):
+                if not (key in plan.keep and i == 0):
+                    replaced.add(t.id)
+        for n, values in enumerate(plan.desired.values()):
+            added.append(Transaction(id=f"auto-check-{symbol}-{n}", user_id=user.id, created_at=now_utc(),
+                                     updated_at=now_utc(), **values))
+    return [t for t in inp.transactions if t.id not in replaced] + added
 
 
 def ledger_error(db: Session, user: User, account: BrokerAccount) -> str | None:
@@ -347,20 +471,25 @@ def ledger_error(db: Session, user: User, account: BrokerAccount) -> str | None:
 
 def sync_checked(db: Session, user: User, md: MarketData, account: BrokerAccount,
                  symbols: Iterable[str | None] | None = None, assume_consistent: bool = False,
-                 today: date | None = None) -> SyncResult:
+                 today: date | None = None, cache: EventCache | None = None) -> SyncResult:
     """Sync one account; raise ``AutoDividendConflict`` when that turns consistent books inconsistent.
 
-    ``assume_consistent``: the caller already validated the books (a transaction change passed
-    ``validate_ledger``), so the "before" replay is skipped. Books that were already inconsistent are synced anyway.
+    ``assume_consistent``: the caller already validated the books as they will be after the sync
+    (``services.transactions.validate_ledger``), so the "before" replay is skipped. Books that were already
+    inconsistent are synced anyway.
     """
     before_ok = True if assume_consistent else ledger_error(db, user, account) is None
-    result = sync_auto_dividends(db, user, md, account_ids=[account.id], symbols=symbols, today=today)
+    result = sync_auto_dividends(db, user, md, account_ids=[account.id], symbols=symbols, today=today, cache=cache)
     if result.changed and before_ok:
         db.flush()
         err = ledger_error(db, user, account)
         if err is not None:
             raise AutoDividendConflict(err)
     return result
+
+
+def conflict_error(err: object) -> ApiError:
+    return unprocessable(f"自動入帳的股利依這筆變更重算後帳目不一致：{err}", code="ledger_inconsistent")
 
 
 def after_user_change(db: Session, user: User, md: MarketData, scopes: Iterable[tuple[str, str | None]],
@@ -380,6 +509,7 @@ def after_user_change(db: Session, user: User, md: MarketData, scopes: Iterable[
             cur.add(symbol)
             by_account[account_id] = cur
     total = SyncResult()
+    cache: EventCache = {}
     for account_id, syms in by_account.items():
         if syms is not None and not any(is_tw(s) for s in syms):
             continue
@@ -387,10 +517,10 @@ def after_user_change(db: Session, user: User, md: MarketData, scopes: Iterable[
         if account is None or account.user_id != user.id:
             continue
         try:
-            total.add(sync_checked(db, user, md, account, symbols=syms, assume_consistent=assume_consistent))
+            total.add(sync_checked(db, user, md, account, symbols=syms, assume_consistent=assume_consistent,
+                                   cache=cache))
         except AutoDividendConflict as exc:
-            raise unprocessable(f"自動入帳的股利依這筆變更重算後帳目不一致：{exc}",
-                                code="ledger_inconsistent") from exc
+            raise conflict_error(exc) from exc
     return total
 
 
@@ -407,9 +537,11 @@ def remember_skip(db: Session, user: User, key: DividendKey, reason: str) -> Non
 def sync_all_users(session_fn: Callable[[], Session], md: MarketData, today: date | None = None) -> SyncResult:
     """Worker entry point: sync every account of every user, one commit per account.
 
-    An account whose books the sync would make inconsistent is left as it was (logged).
+    The archive's notices are read once per symbol for the whole run. An account whose books the sync would make
+    inconsistent is left as it was (logged); so is every account when the archive cannot be read.
     """
     total = SyncResult()
+    cache: EventCache = {}
     with session_fn() as db:
         user_ids = list(db.scalars(select(User.id)))
     for uid in user_ids:
@@ -420,7 +552,9 @@ def sync_all_users(session_fn: Callable[[], Session], md: MarketData, today: dat
             accounts = list(db.scalars(select(BrokerAccount).where(BrokerAccount.user_id == uid)))
             for account in accounts:
                 try:
-                    total.add(sync_checked(db, user, md, account, today=today))
+                    lock_accounts(db, [account.id])
+                    db.expire_all()  # nothing pending here: re-read rows a concurrent request may have changed
+                    total.add(sync_checked(db, user, md, account, today=today, cache=cache))
                     db.commit()
                 except AutoDividendConflict as exc:
                     db.rollback()

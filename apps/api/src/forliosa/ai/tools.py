@@ -507,7 +507,7 @@ def draft_transaction(ctx: ToolContext, args: dict[str, Any]) -> Any:
     comp = txn_svc.compute(ctx.db, ctx.user, valid, ctx.md)
     candidate = TxnModel(id=new_id("txn"), user_id=ctx.user.id, created_at=now_utc(), updated_at=now_utc(),
                          **comp.values)
-    txn_svc.validate_ledger(ctx.db, ctx.user, account, candidate)  # raises ledger_inconsistent; never added
+    txn_svc.validate_ledger(ctx.db, ctx.user, account, candidate, md=ctx.md)  # raises ledger_inconsistent
     if candidate in ctx.db:  # pragma: no cover - defensive: the candidate must never reach the session
         ctx.db.expunge(candidate)
 

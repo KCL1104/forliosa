@@ -334,3 +334,109 @@ def test_other_users_are_untouched(client, other_client, notices):
     assert [r["quantity"] for r in autos(other_client, theirs["id"])] == [2000]
     auto = autos(client, mine["id"])[0]
     assert other_client.delete(f"{API}/transactions/{auto['id']}").status_code == 404
+
+
+# -- review regressions ----------------------------------------------------------------------------
+@pytest.mark.parametrize("change", ["sell_before", "delete_buy", "move_buy"])
+def test_changes_are_validated_after_the_resync(client, notices, change):
+    """A stale automatic stock dividend must not block a change that the re-sync makes consistent."""
+    notices("6488.TWO", date(2026, 6, 23), ratio="0.10000000")
+    acc = make_account(client)
+    b = buy(client, acc, "6488.TWO", "2026-05-04", 1000, "400")
+    assert [r["quantity"] for r in autos(client, acc["id"])] == [100]
+    if change == "sell_before":
+        sell(client, acc, "6488.TWO", "2026-06-10", 1000, "410")
+    elif change == "delete_buy":
+        assert client.delete(f"{API}/transactions/{b['id']}").status_code == 204
+    else:
+        r = client.patch(f"{API}/transactions/{b['id']}", json={"trade_date": "2026-06-24"})
+        assert r.status_code == 200, r.text
+    assert autos(client, acc["id"]) == []
+
+
+def test_deleting_a_manual_stock_dividend_lets_the_automatic_one_back(client, notices):
+    notices("6488.TWO", date(2026, 6, 23), ratio="0.10000000")
+    acc = make_account(client)
+    buy(client, acc, "6488.TWO", "2026-05-04", 1000, "400")
+    manual = add_txn(client, account_id=acc["id"], symbol="6488.TWO", type="stock_dividend",
+                     trade_date="2026-07-20", quantity=100)
+    assert autos(client, acc["id"]) == []
+    sell(client, acc, "6488.TWO", "2026-08-01", 1100, "420")
+    assert client.delete(f"{API}/transactions/{manual['id']}").status_code == 204
+    assert [r["quantity"] for r in autos(client, acc["id"])] == [100]
+
+
+def test_per_share_record_on_the_payment_date_uses_the_ex_date_holding(client, notices):
+    """Recording a dividend from its per-share amount after the ex-date does not count the automatic stock
+    dividend of that same ex-date (which it replaces), nor trades between the ex-date and the record."""
+    notices("6488.TWO", date(2026, 6, 23), cash="3.00000000", ratio="0.10000000")
+    acc = make_account(client)
+    buy(client, acc, "6488.TWO", "2026-05-04", 1000, "400")
+    buy(client, acc, "6488.TWO", "2026-07-01", 500, "400")  # after the ex-date: not entitled
+    stock = add_txn(client, account_id=acc["id"], symbol="6488.TWO", type="stock_dividend",
+                    trade_date="2026-07-20", price="1")
+    cash = add_txn(client, account_id=acc["id"], symbol="6488.TWO", type="cash_dividend",
+                   trade_date="2026-07-20", price="3")
+    assert (stock["quantity"], cash["quantity"], cash["amount"]) == (100, 1000, 3000)
+    assert autos(client, acc["id"]) == []
+    hold = client.get(f"{API}/portfolio/holdings").json()
+    assert hold[0]["quantity"] == 1600
+
+
+def test_unreadable_archive_keeps_the_automatic_rows(client, notices, engine, monkeypatch):
+    notices("2330.TW", date(2026, 6, 11), cash="5.00000000")
+    acc = make_account(client)
+    b = buy(client, acc, "2330.TW", "2026-05-04", 1000, "1000")
+    assert len(autos(client, acc["id"])) == 1
+    archive = next(p for p in notices.md.providers if p.name == "archive")
+
+    def broken(symbol):
+        raise RuntimeError("archive down")
+
+    monkeypatch.setattr(archive, "dividends", broken)
+    r = client.patch(f"{API}/transactions/{b['id']}", json={"note": "改備註"})
+    assert r.status_code == 200, r.text
+    assert sync_all_users(lambda: Session(engine), notices.md).changed is False
+    monkeypatch.undo()
+    assert [r["amount"] for r in autos(client, acc["id"])] == [5000]
+
+
+def test_record_of_an_unannounced_dividend_does_not_cover_the_previous_one(client, notices):
+    notices("00878.TW", date(2026, 8, 18), cash="0.40000000")
+    notices("00878.TW", date(2026, 10, 20))  # 金額尚未公告
+    acc = make_account(client)
+    buy(client, acc, "00878.TW", "2026-05-04", 10000, "22")
+    assert [r["trade_date"] for r in autos(client, acc["id"])] == ["2026-08-18"]
+    add_txn(client, account_id=acc["id"], symbol="00878.TW", type="cash_dividend", trade_date="2026-11-11",
+            amount=5000)  # the October dividend
+    assert [r["trade_date"] for r in autos(client, acc["id"])] == ["2026-08-18"]
+
+
+def test_withdrawn_future_notices_are_pruned_from_the_archive(engine):
+    from forliosa.archive import Archiver
+    from tests.archive.fakes import NOW, FakeFetcher
+
+    today = NOW.date()
+    with Session(engine) as db:
+        db.add(MarketEvent(key="old-key", symbol="2317.TW", date=today + timedelta(days=5), type="ex_dividend",
+                           title="除息", detail="", data={"cash": "5", "stock_ratio": None}, source="twse-openapi"))
+        db.add(MarketEvent(key="past-key", symbol="2317.TW", date=today - timedelta(days=5), type="ex_dividend",
+                           title="除息", detail="", data={"cash": "5", "stock_ratio": None}, source="twse-openapi"))
+        db.commit()
+        Archiver(db, FakeFetcher(), "commercial", now_fn=lambda: NOW).run(["twse"])
+        keys = {e.key for e in db.scalars(select(MarketEvent).where(MarketEvent.type == "ex_dividend",
+                                                                     MarketEvent.symbol == "2317.TW"))}
+    assert "old-key" not in keys and "past-key" in keys
+
+
+def test_seed_stops_synthetic_dividends_where_real_notices_begin(engine, notices):
+    from forliosa.seed import DEMO_EMAIL, seed
+
+    notices("2454.TW", date(2026, 7, 13), cash="25.00000000")
+    with Session(engine) as db:
+        seed(db, notices.md)
+        rows = list(db.scalars(select(Transaction).where(Transaction.symbol == "2454.TW",
+                                                          Transaction.type == "cash_dividend")))
+        assert DEMO_EMAIL
+    recent = [(t.trade_date, t.source) for t in rows if t.trade_date >= date(2026, 3, 15)]
+    assert recent == [(date(2026, 7, 13), "auto")], recent  # no synthetic 2026-07-09 record next to it

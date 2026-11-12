@@ -130,6 +130,8 @@ class DividendEvent:
     board_date: date | None = None
     meeting_date: date | None = None
     cash_sources: tuple[Decimal, Decimal, Decimal] | None = None  # (earnings, legal reserve, capital surplus) per share
+    # An ex-dividend notice whose cash amount is not announced yet (「尚未公告」, blank): amounts are 0 meanwhile.
+    amount_pending: bool = False
 
 
 @dataclass(frozen=True)

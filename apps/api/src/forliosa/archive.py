@@ -196,6 +196,26 @@ class Archiver:
         """A TAIFEX OpenAPI dataset (JSON or CSV: the Cloudflare cache serves either, see marketdata/taifex.py)."""
         return tf.decode_rows(self.fetcher.get_bytes(f"{TAIFEX_OPENAPI}/{path}"))
 
+    def _ex_dividend_notices(self, rows: list[dict[str, Any]], market: str, source: str) -> int:
+        """Upsert a full TWT48U_ALL / tpex_exright_prepost snapshot and drop the archived future notices of that
+        market it no longer lists (a moved or withdrawn ex-date: otherwise the old date would be booked as a second
+        dividend). Past and today's notices are kept; an empty snapshot prunes nothing."""
+        n = self._events(rows, source)
+        if not rows:
+            return n
+        today = self.now_fn().astimezone(TAIPEI).date()
+        listed = {r["key"] for r in rows}
+        suffix = ".TWO" if market == "TPEX" else ".TW"
+        stale = [e for e in self.db.scalars(select(MarketEvent).where(
+            MarketEvent.type == "ex_dividend", MarketEvent.source == source, MarketEvent.date > today))
+            if e.symbol.endswith(suffix) and e.key not in listed]
+        for e in stale:
+            self.db.delete(e)
+        if stale:
+            self.db.commit()
+            log.info("%s: %d withdrawn ex-dividend notices removed", source, len(stale))
+        return n
+
     def _events(self, rows: list[dict[str, Any]], source: str) -> int:
         out = [{"key": r["key"], "symbol": tw_symbol(r["code"], r["market"]), "date": r["date"],
                 "end_date": r["end_date"], "type": r["type"], "title": r["title"][:500], "detail": r["detail"],
@@ -242,8 +262,8 @@ class Archiver:
         return upsert(self.db, MarginDaily, rows, ["symbol", "date"])
 
     def twse_events(self) -> int:
-        n = self._events(od.parse_twt48u_events(self._list(f"{TWSE_OPENAPI}/exchangeReport/TWT48U_ALL")),
-                         "twse-openapi")
+        n = self._ex_dividend_notices(
+            od.parse_twt48u_events(self._list(f"{TWSE_OPENAPI}/exchangeReport/TWT48U_ALL")), "TWSE", "twse-openapi")
         n += self._events(od.parse_twse_notice(self._list(f"{TWSE_OPENAPI}/announcement/notice")), "twse-openapi")
         n += self._events(od.parse_twse_punish(self._list(f"{TWSE_OPENAPI}/announcement/punish")), "twse-openapi")
         n += self._events(od.parse_material_info(self._list(f"{TWSE_OPENAPI}/opendata/t187ap04_L"), "TWSE"),
@@ -435,8 +455,8 @@ class Archiver:
         return n + upsert(self.db, ForeignHoldingDaily, qfii, ["symbol", "date"])
 
     def tpex_events(self) -> int:
-        n = self._events(od.parse_tpex_exright_events(self._list(f"{TPEX_OPENAPI}/tpex_exright_prepost")),
-                         "tpex-openapi")
+        n = self._ex_dividend_notices(
+            od.parse_tpex_exright_events(self._list(f"{TPEX_OPENAPI}/tpex_exright_prepost")), "TPEX", "tpex-openapi")
         n += self._events(od.parse_tpex_warning(self._list(f"{TPEX_OPENAPI}/tpex_trading_warning_information")),
                           "tpex-openapi")
         n += self._events(od.parse_tpex_disposal(self._list(f"{TPEX_OPENAPI}/tpex_disposal_information")),
