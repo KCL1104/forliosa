@@ -6,7 +6,7 @@ import { appToday } from "@/api"
 import { listTransactionsUpTo, useHoldings, useSummary, useUpcoming } from "@/api/queries"
 import type { Transaction } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
-import { Masked } from "@/components/finance"
+import { Masked, SourceTag } from "@/components/finance"
 import { Section } from "@/components/section"
 import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
@@ -106,9 +106,10 @@ export function DividendsView() {
         ) : received.isLoading ? (
           <Skeleton className="h-40 w-full rounded-sm" />
         ) : byYear.length === 0 ? (
-          <p className="py-2 text-md text-ink-2">還沒有股利紀錄。領到時跟 AI 說「00878 配息 1,100」就能入帳。</p>
+          <p className="py-2 text-md text-ink-2">還沒有股利紀錄。台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。</p>
         ) : (
           <div className="-mt-3 flex flex-col">
+            <p className="pt-3 text-sm text-ink-2">台股股利在除息日自動入帳，美股股利要自己記。</p>
             {byYear.map(([year, rows]) => {
               const netOf = (c: "TWD" | "USD") => rows.filter((t) => t.currency === c).reduce((s, t) => s + t.amount - t.tax - t.health_insurance, 0)
               const twd = netOf("TWD")
@@ -133,7 +134,7 @@ export function DividendsView() {
                             </Link>
                           )}
                           <span className="ml-2 text-sm text-ink-2">{t.type === "stock_dividend" ? "股票股利" : t.price !== null ? `每股 ${t.price} 元` : "現金股利"}</span>
-                          {t.source === "ai_draft" && <span className="ml-2 font-ai text-sm text-ai">由 AI 建立</span>}
+                          <SourceTag source={t.source} className="ml-2" />
                         </span>
                         <span className="num hidden text-right text-sm text-ink-2 md:block">
                           {t.health_insurance > 0 ? <>健保 {privacy ? "••••" : formatNumber(t.health_insurance)}</> : t.tax > 0 ? <>預扣 {privacy ? "••••" : formatNumber(t.tax, t.currency === "USD" ? 2 : 0)}</> : ""}

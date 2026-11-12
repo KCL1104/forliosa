@@ -8,7 +8,7 @@ import { useAccounts, useDeleteTransaction } from "@/api/queries"
 import type { Account, Transaction, TransactionQuery, TransactionType } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { useUi } from "@/app/ui-store"
-import { Masked } from "@/components/finance"
+import { Masked, SourceTag } from "@/components/finance"
 import { RangeChips } from "@/components/segmented"
 import { EmptyState, ErrorState } from "@/components/states"
 import {
@@ -27,7 +27,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { formatDateShort, formatMoney, formatPrice, formatQuantity, MASK } from "@/lib/format"
-import { TYPE_LABEL } from "@/lib/labels"
+import { isAutoSource, SOURCE_TAG, TYPE_LABEL } from "@/lib/labels"
 import { codeOf, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { GroupedVirtuoso } from "react-virtuoso"
@@ -260,14 +260,15 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
   const costs = t.fee + t.tax + t.health_insurance
   const qtyText =
     t.type === "split" ? `1 股 → ${t.quantity} 股` : t.quantity !== null ? `${formatQuantity(t.quantity, unit, market)}${t.price !== null ? ` × ${formatPrice(t.price, market)}` : ""}` : ""
-  const byAi = t.source === "ai_draft"
+  const auto = t.source === "auto"
+  const tag = SOURCE_TAG[t.source]
 
   return (
     <>
       <div
         role="button"
         tabIndex={0}
-        aria-label={`編輯 ${formatDateShort(t.trade_date)} ${TYPE_LABEL[t.type]} ${t.symbol ? name : ""}`}
+        aria-label={`編輯 ${formatDateShort(t.trade_date)} ${TYPE_LABEL[t.type]} ${t.symbol ? name : ""}${tag ? `（${tag.label}）` : ""}`}
         onClick={() => openTradeForm({ edit: t })}
         onKeyDown={(e) => {
           if (e.target !== e.currentTarget) return
@@ -290,13 +291,13 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
             ) : (
               <span className="truncate text-ink-2">{t.note || "現金"}</span>
             )}
-            {t.source === "import" && <span className="demo-tag">匯入</span>}
-            {byAi && <span className="font-ai text-sm text-ai">由 AI 建立</span>}
+            <SourceTag source={t.source} />
           </span>
           <span className="num block truncate text-sm text-ink-2 lg:hidden">
             {formatDateShort(t.trade_date)}・{privacy ? MASK : qtyText}
           </span>
-          {t.note && t.symbol && <span className="hidden truncate text-sm text-ink-2 lg:block">{t.note}</span>}
+          {/* 自動入帳的備註寫著持有股數：隱私模式不顯示 */}
+          {t.note && t.symbol && !(privacy && isAutoSource(t.source)) && <span className="hidden truncate text-sm text-ink-2 lg:block">{t.note}</span>}
         </span>
         <span className="num hidden truncate text-right text-ink-2 lg:block">{privacy ? <Masked /> : qtyText}</span>
         <span className="num text-right font-medium">
@@ -327,7 +328,8 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
           <AlertDialogHeader>
             <AlertDialogTitle>刪除這筆交易？</AlertDialogTitle>
             <AlertDialogDescription>
-              {formatDateShort(t.trade_date)} {TYPE_LABEL[t.type]} {t.symbol ? name : ""}。刪除後持股、損益與績效會重新計算。
+              {formatDateShort(t.trade_date)} {TYPE_LABEL[t.type]} {t.symbol ? name : ""}。刪除後持股、損益與績效會重新計算
+              {auto ? "，這筆股利之後也不會再自動入帳。" : "。"}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

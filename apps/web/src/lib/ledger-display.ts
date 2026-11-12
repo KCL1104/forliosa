@@ -1,7 +1,7 @@
 /**
- * 帳本相關的顯示規則（純函式，元件與測試共用）：出清回合（依年份分組）、沒有報價的持股、本週事項的一句話、定期定額。
+ * 帳本相關的顯示規則（純函式，元件與測試共用）：出清回合（依年份分組）、沒有報價的持股、本週事項的一句話、定期定額、股利自動入帳。
  */
-import type { ClosedRound, Holding, RecurringPlan, UpcomingItem } from "@/api/types"
+import type { ClosedRound, Holding, RecurringPlan, Transaction, TransactionInput, UpcomingItem } from "@/api/types"
 import { formatDate, formatMoney } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
 
@@ -92,4 +92,37 @@ export function activePlansBySymbol(plans: RecurringPlan[], today: string): Map<
 /** 標記的說明：「定期定額：每月 6、19 日 NT$5,000」；隱私模式遮金額 */
 export function recurringLabel(plans: Pick<RecurringPlan, "day_of_month" | "amount">[], privacy: boolean): string {
   return `定期定額：${plans.map((p) => `${daysLabel(p.day_of_month)} ${privacy ? "••••" : formatMoney(p.amount)}`).join("；")}`
+}
+
+// ── 股利自動入帳（docs/handoff.md §3.0） ─────────────────────
+
+/** 使用者自己記的股利，日期在除息日起這麼多天內，就算是那一次的股利（與後端 USER_RECORD_WINDOW_DAYS 相同） */
+export const USER_RECORD_WINDOW_DAYS = 120
+
+/** 編輯表單上方的說明：編輯自動入帳的股利會變成自己的版本；改過的不會再被更新 */
+export function autoEditNotice(source: Transaction["source"]): string | null {
+  if (source === "auto") return "系統在除息日自動記下這筆股利。儲存變更後就是你自己的版本，系統不會再更新；刪除後也不會再自動入帳。"
+  if (source === "auto_edited") return "這筆自動入帳的股利你改過，系統不會再更新它。"
+  return null
+}
+
+/** 表單內容和原本的交易相同（沒改任何欄位）：自動入帳的那筆就不送出，免得變成「已修改」 */
+export function isUnchangedEdit(edit: Transaction, body: TransactionInput): boolean {
+  return (Object.keys(body) as (keyof TransactionInput)[]).every((k) => body[k] === undefined || body[k] === edit[k])
+}
+
+/**
+ * 使用者在 `date` 記一筆台股現金股利時，會取代的自動入帳那筆（同帳戶同商品、`date` 往前 120 天內最近的一筆 `auto`）。
+ * 後端的規則：自己記的同類股利優先，自動那筆會被移除，不會重複計算。
+ */
+export function replacedAutoDividend(rows: Transaction[], date: string): Transaction | null {
+  const from = shiftDays(date, -USER_RECORD_WINDOW_DAYS)
+  const hits = rows.filter((t) => t.source === "auto" && t.type === "cash_dividend" && t.trade_date >= from && t.trade_date <= date)
+  return hits.sort((a, b) => b.trade_date.localeCompare(a.trade_date))[0] ?? null
+}
+
+function shiftDays(day: string, n: number): string {
+  const d = new Date(`${day}T00:00:00Z`)
+  d.setUTCDate(d.getUTCDate() + n)
+  return d.toISOString().slice(0, 10)
 }

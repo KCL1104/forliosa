@@ -8,6 +8,7 @@ import type {
   PortfolioSummary,
   Transaction,
 } from "../types"
+import { syncAutoDividends } from "./auto-dividends"
 import { computePreview } from "./fees"
 import { findInstrument, type MockInstrumentSpec } from "./instruments"
 import {
@@ -72,7 +73,13 @@ function cash(type: Transaction["type"], account: Account, day: string, amount: 
   return makeTxn({ account_id: account.id, symbol: null, type, trade_date: nextWeekday(day), quantity: null, price: null, amount, fee: 0, tax: 0, health_insurance: 0, note })
 }
 
-/** 產生示範交易紀錄（由舊到新） */
+/**
+ * 示範情境：使用者自己記股利記到 8 月；之後的台股股利（2330 9/16、6488 9/22、2454 10/8 除息）由股利自動入帳記下。
+ * 美股沒有可商用的股利資料，一直是自己記。
+ */
+export const AUTO_BOOKING_FROM = "2026-09-01"
+
+/** 產生示範交易紀錄（由舊到新），含自動入帳的股利 */
 export function seedTransactions(): Transaction[] {
   seq = 0
   const t: Transaction[] = []
@@ -123,7 +130,8 @@ export function seedTransactions(): Transaction[] {
 
   t.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))
 
-  // 現金股利：依除息日持有股數產生
+  // 現金股利：使用者自己記的（發放日入帳、manual）。台股從 AUTO_BOOKING_FROM 起改由股利自動入帳記在除息日（source: auto），
+  // 之前自己記的維持手動（自己記的優先，自動入帳不會重複產生）
   const dividends: Transaction[] = []
   const held = new Set(t.filter((x) => x.symbol).map((x) => x.symbol!))
   for (const symbol of held) {
@@ -131,6 +139,7 @@ export function seedTransactions(): Transaction[] {
     const account = spec.market === "US" ? US : TW
     for (const rec of dividendRecords(spec)) {
       if (!rec.ex_dividend_date || !rec.payment_date || rec.payment_date > MOCK_TODAY || rec.cash_dividend <= 0) continue
+      if (spec.market !== "US" && rec.ex_dividend_date >= AUTO_BOOKING_FROM) continue
       const qty = quantityOn(t, symbol, addDays(rec.ex_dividend_date, -1))
       if (qty <= 0) continue
       const p = computePreview({ account_id: account.id, symbol, type: "cash_dividend", trade_date: rec.payment_date, quantity: qty, price: rec.cash_dividend }, account, spec)
@@ -140,9 +149,7 @@ export function seedTransactions(): Transaction[] {
       }))
     }
   }
-  const all = [...t, ...dividends]
-  all.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))
-  return all
+  return syncAutoDividends([...t, ...dividends], { accounts: ACCOUNTS, skips: new Set(), today: MOCK_TODAY })
 }
 
 function quantityOn(txns: Transaction[], symbol: string, day: string): number {

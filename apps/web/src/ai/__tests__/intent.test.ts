@@ -27,6 +27,8 @@ describe("記帳指令解析", () => {
   it("00878 配息 1,100 → 股利入帳", () => {
     expect(parseIntent("00878 配息 1,100", TODAY)).toEqual({ kind: "dividend", target: "00878", amount: 1100, date: null })
     expect(parseIntent("收到 2330 股利 7500 元", TODAY)).toMatchObject({ kind: "dividend", target: "2330", amount: 7500 })
+    // 「股利入帳」提問的美股範例（台股股利在除息日自動入帳）
+    expect(parseIntent("AAPL 配息 2.6", TODAY)).toEqual({ kind: "dividend", target: "AAPL", amount: 2.6, date: null })
   })
   it("問句不當成指令（即使提到股利或買）", () => {
     expect(parseIntent("下個月我能領多少股利？", TODAY)).toEqual({ kind: "question", text: "下個月我能領多少股利？" })

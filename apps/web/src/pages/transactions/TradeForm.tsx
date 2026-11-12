@@ -4,9 +4,10 @@ import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
 import { useAccounts, useCreateTransaction, useDeleteTransaction, useUpdateTransaction } from "@/api/queries"
-import type { Account, Instrument, TradePreview, Transaction, TransactionInput, TransactionType } from "@/api/types"
+import type { Account, Instrument, TradePreview, Transaction, TransactionInput, TransactionSource, TransactionType } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { RangeChips } from "@/components/charts/chart-kit"
+import { SourceTag } from "@/components/finance"
 import { Link } from "@tanstack/react-router"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -17,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { formatMoney, formatQuantity, todayInTaipei } from "@/lib/format"
 import { TYPE_LABEL } from "@/lib/labels"
+import { autoEditNotice, isUnchangedEdit } from "@/lib/ledger-display"
 import { cn } from "@/lib/utils"
 import { FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
@@ -182,6 +184,11 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
     setSubmitted(true)
     if (hasError || !body) return
     if (edit) {
+      // 自動入帳的股利沒改任何欄位：不送出，這筆維持「自動」（送出就會變成你自己的版本）
+      if (edit.source === "auto" && isUnchangedEdit(edit, body)) {
+        onDone()
+        return
+      }
       update.mutate(
         { id: edit.id, patch: body },
         {
@@ -223,7 +230,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
     remove.mutate(edit.id, {
       onSuccess: () => {
         toast("已刪除這筆交易", {
-          description: "持股與績效已重新計算。",
+          description: edit.source === "auto" ? "持股與績效已重新計算，這筆股利之後不會再自動入帳。" : "持股與績效已重新計算。",
           action: {
             label: "復原",
             onClick: () =>
@@ -257,6 +264,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
   return (
     <form onSubmit={submit} noValidate className={cn("grid", layout === "split" ? "grid-cols-[minmax(0,1fr)_260px]" : "grid-cols-1")}>
       <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
+        {edit && <AutoNotice source={edit.source} />}
         <Row label="類型">
           <RangeChips label="交易類型" value={f.mainType} options={MAIN_TYPES} onChange={(v) => set({ mainType: v })} />
           {f.mainType === "other" && (
@@ -434,6 +442,18 @@ function PreviewBody({ preview, loading, ready, currency, type }: { preview?: Tr
         </ul>
       )}
     </div>
+  )
+}
+
+/** 編輯自動入帳的股利：說明儲存與刪除之後會怎樣 */
+function AutoNotice({ source }: { source: TransactionSource }) {
+  const text = autoEditNotice(source)
+  if (!text) return null
+  return (
+    <p className="flex items-baseline gap-2 text-md text-ink-2">
+      <SourceTag source={source} className="shrink-0" />
+      <span>{text}</span>
+    </p>
   )
 }
 

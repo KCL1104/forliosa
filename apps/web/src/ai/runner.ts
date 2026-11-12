@@ -5,6 +5,7 @@ import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
 import { ApiError, type Instrument, type TransactionInput } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { formatDateShort, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
+import { replacedAutoDividend } from "@/lib/ledger-display"
 import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { parseIntent, sharesOf } from "./intent"
@@ -14,6 +15,13 @@ import { aiKeys } from "./remote-hooks"
 import { newId, useAi } from "./store"
 import { answerFor, classifyQuestion, fallbackAnswer, type AiContext } from "./suggestions"
 import type { Answer, Draft, DraftInstrument, Suggestion } from "./types"
+
+/** 「股利入帳」的提問：台股股利在除息日自動入帳，要記的是美股或更正金額 */
+export function dividendAsk(code?: string): string {
+  if (code && /^\d/.test(code)) return `${code} 的股利會在除息日自動入帳，不用另外記。金額和存摺不一樣的話，告訴我實際領到多少，例如「${code} 配息 1,100」。`
+  if (code) return `${code} 領了多少？例如「${code} 配息 2.6」。金額照存摺上的實際入帳數字就好。`
+  return "台股股利會在除息日自動入帳，不用另外記。美股股利告訴我哪一檔、領了多少，例如「AAPL 配息 2.6」；金額照存摺上的實際入帳數字就好。"
+}
 
 /** 常用動作（依頁面）：記一筆交易、匯入對帳單、股利入帳… */
 export type AiAction = "trade" | "import" | "dividend" | "alert" | "checkup" | "form"
@@ -99,6 +107,16 @@ export function useAiRunner(ctx: AiContext) {
     } else {
       input = { account_id: account.id, symbol: inst.symbol, type: "cash_dividend", trade_date: intent.date ?? today, quantity: null, price: null, amount: intent.amount }
       notes.push("參與分配的股數由除息日前的持股自動帶入。")
+      // 台股股利已在除息日自動入帳時：簽名後以使用者記的這筆為準（自動那筆會移除，不會重複）
+      if (!isUS) {
+        try {
+          const recent = await api.listTransactions({ account_id: account.id, symbol: inst.symbol, type: "cash_dividend", to: input.trade_date, limit: 20 })
+          const auto = replacedAutoDividend(recent.items, input.trade_date)
+          if (auto) notes.push(`${formatDateShort(auto.trade_date, false)} 除息的股利已經自動入帳；簽名後改以這筆為準，不會重複計算。`)
+        } catch {
+          // 查不到既有紀錄不影響草稿
+        }
+      }
     }
     const draft: Draft = { id: newId("dft"), status: "loading", input, instrument, notes, createdAt: new Date().toISOString() }
     upsertDraft(draft)
@@ -287,11 +305,12 @@ export function useAiRunner(ctx: AiContext) {
       case "dividend": {
         push({ role: "user", text: "股利入帳" }, { title: "股利入帳" })
         const upcoming = qc.getQueryData<{ type: string; symbol: string | null; title: string; amount_estimate: number | null; date: string }[]>(qk.upcoming(7)) ?? []
+        // 台股股利在除息日自動入帳：只提美股的入帳
         const follow = upcoming
-          .filter((u) => u.type === "dividend_payment" && u.symbol && u.amount_estimate)
+          .filter((u) => u.type === "dividend_payment" && u.symbol && u.amount_estimate && marketOf(u.symbol) === "US")
           .map((u) => `${u.title.split(" ")[0]} 配息 ${Math.round(u.amount_estimate!)}`)
         say({
-          text: `哪一檔、領了多少？例如「${opts.code ?? "00878"} 配息 1,100」。金額照存摺上的實際入帳數字就好。`,
+          text: dividendAsk(opts.code),
           followUps: follow.slice(0, 2),
         })
         seedComposer(opts.code ? `${opts.code} 配息 ` : "")

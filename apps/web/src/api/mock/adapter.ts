@@ -10,6 +10,7 @@ import {
   type User,
 } from "../types"
 import { createAnalystStore } from "./analyst"
+import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
@@ -94,6 +95,13 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     txns.sort((a, b) => a.trade_date.localeCompare(b.trade_date))
   }
   let nextId = 90000
+  // 股利自動入帳：使用者刪掉或改過的自動入帳股利（不再產生）、只記持股帳戶的快照日
+  const skips = new Set<string>()
+  const snapshotAsOf = new Map<string, string>()
+  /** 交易、快照、追蹤模式變更之後重算自動入帳的股利（後端在同一個請求裡做） */
+  const resync = () => {
+    txns = syncAutoDividends(txns, { accounts, skips, snapshotAsOf: (id) => snapshotAsOf.get(id), today: MOCK_TODAY })
+  }
   let watch: string[] = scenario === "empty" ? [] : ["2382.TW", "2308.TW", "2881.TW"]
   const recurring = createRecurringStore(scenario === "empty" ? [] : seedPlans(ACCOUNTS[0]!.id), () => accounts)
   const analyst = createAnalystStore({ delayMs: options.analystDelayMs })
@@ -193,12 +201,15 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         if (!found) throw new ApiError(404, "not_found", "找不到帳戶")
         const next = { ...found, ...patch }
         accounts = accounts.map((a) => (a.id === id ? next : a))
+        if (next.tracking_mode !== found.tracking_mode) resync()
         return next
       }),
     deleteAccount: (id) =>
       wait(() => {
         accounts = accounts.filter((a) => a.id !== id)
         txns = txns.filter((t) => t.account_id !== id)
+        for (const k of [...skips]) if (k.startsWith(`${id}|`)) skips.delete(k)
+        snapshotAsOf.delete(id)
       }),
     putHoldings: (id, body) =>
       wait(() => {
@@ -211,7 +222,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
             created_at: new Date().toISOString(),
           })
         }
+        snapshotAsOf.set(id, body.as_of)
         sortTxns()
+        resync()
       }),
 
     searchInstruments: (q) =>
@@ -368,6 +381,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       wait(() => {
         const account = accounts.find((a) => a.id === body.account_id)
         if (!account) throw new ApiError(422, "invalid_account", "請先選擇券商帳戶")
+        // 與後端相同：自動入帳只由系統產生
+        if ((body.source as string | undefined)?.startsWith("auto")) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：source")
         const s = body.symbol ? spec(body.symbol) : undefined
         const p = computePreview(body, account, s)
         const txn: Transaction = {
@@ -390,27 +405,42 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         }
         txns.push(txn)
         sortTxns()
+        resync()
         return txn
       }),
     updateTransaction: (id, patch) =>
       wait(() => {
-        const found = txns.find((t) => t.id === id)
+        const idx = txns.findIndex((t) => t.id === id)
+        const found = txns[idx]
         if (!found) throw new ApiError(404, "not_found", "找不到這筆交易")
-        Object.assign(found, { ...patch, source: found.source })
-        // 沒有手動覆寫稅費時，依新內容重新計算
-        if (patch.fee === undefined || patch.tax === undefined) {
-          const p = computePreview({ ...found, source: undefined }, accounts.find((a) => a.id === found.account_id), found.symbol ? findInstrument(found.symbol) : undefined)
-          if (patch.fee === undefined) found.fee = p.fee
-          if (patch.tax === undefined) found.tax = p.tax
-          found.health_insurance = p.health_insurance
-          found.amount = patch.amount ?? p.gross
+        if ((patch.source as string | undefined)?.startsWith("auto")) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：source")
+        // 改了自動入帳的股利：變成使用者的版本（auto_edited），這次股利之後不再自動產生
+        if (found.source === "auto") skips.add(skipKey(found))
+        // 換成新的物件（不原地修改）：React Query 才看得出資料變了
+        const next: Transaction = { ...found, ...(patch as Partial<Transaction>), source: found.source === "auto" ? "auto_edited" : found.source }
+        // 與後端相同：數量、價格、日期等輸入改了，沒有指定的手續費、稅、二代健保依新內容重算；買賣與現金股利改了數量或價格時金額也重算
+        const inputsChanged = (["quantity", "price", "amount", "type", "trade_date", "symbol", "account_id", "is_day_trade"] as const).some((k) => k in patch)
+        if (inputsChanged) {
+          const recomputeAmount = patch.amount == null && ["buy", "sell", "cash_dividend"].includes(next.type) && ("quantity" in patch || "price" in patch)
+          const p = computePreview(
+            { ...next, amount: recomputeAmount ? null : next.amount, fee: patch.fee ?? null, tax: patch.tax ?? null, health_insurance: patch.health_insurance ?? null, source: undefined },
+            accounts.find((a) => a.id === next.account_id),
+            next.symbol ? findInstrument(next.symbol) : undefined,
+          )
+          Object.assign(next, { amount: p.gross, fee: p.fee, tax: p.tax, health_insurance: p.health_insurance })
         }
+        txns[idx] = next
         sortTxns()
-        return { ...found }
+        resync()
+        return { ...next }
       }),
     deleteTransaction: (id) =>
       wait(() => {
+        const found = txns.find((t) => t.id === id)
+        // 刪掉自動入帳的股利：記一筆略過，之後不再產生
+        if (found?.source === "auto") skips.add(skipKey(found))
         txns = txns.filter((t) => t.id !== id)
+        resync()
       }),
     previewTransaction: (body) =>
       wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined)),

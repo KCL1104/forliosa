@@ -199,12 +199,25 @@ export interface Transaction {
   currency: Currency
   is_day_trade: boolean
   note: string
-  /** `ai_draft`：由 AI 草稿經使用者簽名確認後建立（介面標示「由 AI 建立」） */
+  /**
+   * `ai_draft`：由 AI 草稿經使用者簽名確認後建立（介面標示「由 AI 建立」）；
+   * `auto`：台股股利由系統在除息日自動入帳（介面標示「自動」）；`auto_edited`：使用者改過的自動入帳股利（「自動・已修改」）
+   */
   source: TransactionSource
   created_at: string
 }
 
-export type TransactionSource = "manual" | "import" | "ai_draft"
+/**
+ * 交易來源：
+ * - `manual`：使用者自己記的（表單）
+ * - `import`：匯入對帳單
+ * - `ai_draft`：AI 草稿經使用者簽名
+ * - `auto`：系統依除息（權）預告在除息（權）日自動記的台股現金股利或配股（股數＝除息日前一天收盤的持股）。
+ *   使用者自己記的同類股利優先：同帳戶同商品在除息日起 120 天內有自己記的，就不產生這筆
+ * - `auto_edited`：使用者改過的自動入帳股利；之後系統不會再更新它
+ * 刪除 `auto` 那筆後，同一次股利不會再自動入帳。用戶端不能建立 `auto`／`auto_edited`。
+ */
+export type TransactionSource = "manual" | "import" | "ai_draft" | "auto" | "auto_edited"
 
 export interface TransactionInput {
   account_id: string
@@ -220,7 +233,8 @@ export interface TransactionInput {
   currency?: Currency
   is_day_trade?: boolean
   note?: string
-  source?: Exclude<TransactionSource, "import">
+  /** 自動入帳（`auto`、`auto_edited`）只由後端產生，後端的 POST／PATCH 會拒絕 */
+  source?: Exclude<TransactionSource, "import" | "auto" | "auto_edited">
 }
 
 export interface TransactionQuery {

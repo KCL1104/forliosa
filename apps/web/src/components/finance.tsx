@@ -1,5 +1,5 @@
 import NumberFlow from "@number-flow/react"
-import type { Currency, Market, QuantityUnit } from "@/api/types"
+import type { Currency, Market, QuantityUnit, TransactionSource } from "@/api/types"
 import {
   direction,
   directionGlyph,
@@ -13,6 +13,7 @@ import {
   toneClass,
   type Direction,
 } from "@/lib/format"
+import { SOURCE_TAG } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 
@@ -156,6 +157,21 @@ export function FlowPct({ value, className }: { value: number | null; className?
         format={{ style: "percent", minimumFractionDigits: 2, maximumFractionDigits: 2 }}
       />
       <span className="sr-only">{d === "up" ? "上漲" : d === "down" ? "下跌" : "持平"}</span>
+    </span>
+  )
+}
+
+/**
+ * 交易來源標示：自動入帳（「自動」「自動・已修改」）與匯入是淡墨細框小字，可滑過看說明；
+ * AI 建立的是紫色文楷「由 AI 建立」；自己記的不標示。
+ */
+export function SourceTag({ source, className }: { source: TransactionSource; className?: string }) {
+  const tag = SOURCE_TAG[source]
+  if (!tag) return null
+  if (tag.ai) return <span className={cn("font-ai text-sm text-ai", className)}>{tag.label}</span>
+  return (
+    <span className={cn("demo-tag text-ink-2", className)} title={tag.title}>
+      {tag.label}
     </span>
   )
 }

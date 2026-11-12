@@ -1,4 +1,4 @@
-import type { Market, TransactionType } from "@/api/types"
+import type { Market, TransactionSource, TransactionType } from "@/api/types"
 
 /** 績效比較基準：設定與績效頁可選的項目（後端也接受任何商品代號） */
 export const BENCHMARK_OPTIONS: { value: string; label: string; description: string }[] = [
@@ -28,4 +28,21 @@ export const TYPE_LABEL: Record<TransactionType, string> = {
   fee: "手續費",
   tax: "稅",
   interest: "利息",
+}
+
+/**
+ * 交易來源的標示（`null` = 不標示）。`ai` 用紫色文楷（AI 唯一的識別），其他是淡墨細框小字。
+ * 自動入帳是系統依規則記的，不是 AI：不用紫色。
+ */
+export const SOURCE_TAG: Record<TransactionSource, { label: string; title?: string; ai?: boolean } | null> = {
+  manual: null,
+  import: { label: "匯入", title: "從對帳單匯入" },
+  ai_draft: { label: "由 AI 建立", ai: true },
+  auto: { label: "自動", title: "系統在除息日依前一天收盤的持股自動入帳" },
+  auto_edited: { label: "自動・已修改", title: "自動入帳後你改過，系統不會再更新這筆" },
+}
+
+/** 系統自動入帳的股利（含使用者改過的） */
+export function isAutoSource(source: TransactionSource): boolean {
+  return source === "auto" || source === "auto_edited"
 }

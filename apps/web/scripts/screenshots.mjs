@@ -90,6 +90,40 @@ const recurringDraft = async (page, mobile) => {
   await page.getByText("確認入帳").first().waitFor({ timeout: 8000 })
 }
 
+/** 股利自動入帳：改一筆自動入帳的股利（2454 10/8），交易列表同時看到「自動」與「自動・已修改」 */
+const autoEdited = async (page) => {
+  await page.getByRole("button", { name: /^編輯 10\/8.*2454（自動）$/ }).click()
+  // 等股票帶入表單（非同步）再改
+  await page.getByRole("dialog").getByText("聯發科").waitFor({ timeout: 8000 })
+  await page.locator("#trade-note").fill("零股，券商入帳 5,000")
+  await page.getByRole("button", { name: "儲存變更" }).click()
+  await page.getByText("自動・已修改").first().waitFor({ timeout: 8000 })
+  await page.getByText("已更新這筆交易").waitFor({ state: "hidden", timeout: 10000 })
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+  // 捲到改過的那一列：下面接著 9/22、9/16 的「自動」
+  await page.getByRole("button", { name: /^編輯 10\/8.*2454（自動・已修改）$/ }).evaluate((el) => {
+    window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 200 : 120), behavior: "instant" })
+  })
+}
+/** 股利頁：捲到「已入帳」 */
+const received = async (page, mobile) => {
+  await page.evaluate((m) => {
+    const el = document.getElementById("div-received")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (m ? 16 : 96), behavior: "instant" })
+  }, mobile)
+}
+/** 編輯自動入帳的股利（2330 9/16）：表單上方說明儲存與刪除之後會怎樣（列表是虛擬化的：手機要往下捲才會出現那一列） */
+const autoEdit = async (page) => {
+  const row = page.getByRole("button", { name: /^編輯 9\/16.*2330（自動）$/ })
+  for (let i = 0; i < 20 && !(await row.count()); i++) {
+    await page.evaluate(() => window.scrollBy(0, 400))
+    await page.waitForTimeout(150)
+  }
+  await row.click()
+  await page.getByText(/儲存變更後就是你自己的版本/).waitFor({ timeout: 8000 })
+  await page.getByRole("dialog").getByText("台積電").waitFor({ timeout: 8000 })
+}
+
 /** 每個畫面：路徑、就緒條件、截圖前要做的動作 */
 const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
@@ -106,6 +140,9 @@ const SHOTS = [
   { name: "settings-recurring", path: "/settings", ready: "text=新增定期定額", action: recurring },
   { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
   { name: "history", path: "/history", ready: "text=發起新對話" },
+  { name: "ledger-auto-dividends-transactions", path: "/?view=transactions", ready: "text=月", action: autoEdited },
+  { name: "ledger-auto-dividends-dividends", path: "/?view=dividends", ready: "text=已入帳", action: received },
+  { name: "ledger-auto-dividends-edit", path: "/?view=transactions", ready: "text=月", action: autoEdit },
   { name: "ai", path: "/", ready: "text=總資產", mobileOnly: true, action: async (page) => {
     await page.getByRole("button", { name: /^問 AI/ }).click()
     await page.waitForTimeout(500)
