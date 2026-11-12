@@ -90,7 +90,27 @@ cd apps/web && pnpm typecheck && pnpm lint && pnpm test && pnpm build
 
 ## 5. 本 session 結束時的狀態
 
-（等最後一批完成後補上）
+最後 commit：見 `git log`（分支 `claude/cool-hawking-7oze7g`）。驗證結果：
+
+- 後端：pytest 全部通過（約 360 個；`-q` 設定不印總數，看 exit code 0）、ruff 乾淨、Alembic 單一 head `0006`。
+- 前端：typecheck、lint（0 warning）、145 個測試、build 全部通過；smoke 22 個路由＋28 個流程通過；Impeccable detector 0 個問題。
+- 截圖：`docs/screenshots/v2/`（58 張，含 `stock-2330-analyst-*`、`ledger-recurring-marks-*`、`ledger-closed-*`）。
+
+### 最後一批的重點
+
+- **期交所**：`GET /derivatives/overview`、`GET /derivatives/futures/{code}/history?range=`、AI 工具 `get_derivatives_overview`。有條件資料集（期貨／選擇權日行情、匯率、最後結算價、保證金、股票期貨／選擇權標的、選擇權大額交易人）照常存檔但不顯示（`TAIFEX_CONDITIONAL_CONFIRMED=false`）。注意：同一端點可能回 JSON 或 CSV（Cloudflare 快取不看 `Accept`），解析器兩種都收。
+- **報酬指數**：`^TAIEXTR`（MI_INDEX／MFI94U）、新增 `^TPEXTR`。`MFI94U` 曾回 307，已和 MI_INDEX 拆成獨立工作。
+- **股利決議**（t187ap45_L）：`/dividends` 與事件類型 `dividend_resolution`，現金依盈餘／法定公積／資本公積分列（`cash_sources`）。上櫃沒有決議資料（`mopsfin_t187ap39_O` 停在 2021-08）。
+- **公司基本資料**：已發行股數、市值、上市日用官方資料；不存個人姓名電話。
+- **二代健保**：記現金股利且沒手動填二代健保時，依官方決議排除資本公積部分（`services/transactions.py` 的 `capital_surplus_part`）。**產品負責人之後質疑是否需要這麼細**，見 §7 第一項。
+- **前端**：法人觀點卡片（mock：`src/api/mock/analyst.ts`；邏輯 `src/lib/analyst-views.ts`；UI `src/pages/stock/AnalystViews.tsx`；只對股票顯示、不對 ETF）、定期定額標記、7 天內漏扣款的補記草稿、已出清依年份分組。
+- **`smoke --keys`**：見 §1。
+
+### 子代理留下的開放問題（可自行判斷或併入下一輪討論）
+
+- `apps/api/CONTRACT_NOTES.md` 待確認 20、22：有條件資料集；舊股利決議沒對上除權息日時顯示 `resolved`、除權息日空白（可考慮只顯示最近 N 天）。`FinalSettlementPrice` 已停更（最後 2025-12-05）。
+- `apps/web/OPEN_QUESTIONS.md` 25–30：補記規則細節；後端補記草稿用最新收盤價而非扣款日收盤價（建議日期在過去時用扣款日收盤）；法人觀點只對股票；輪詢 2.5 秒／90 秒逾時要依實際生成時間調；空狀態要不要加動作；超過 90 天的報導要不要標「舊資料」。
+- `DESIGN.md` 尚未記錄法人觀點區塊、定期定額標記、已出清依年份分組：之後跑一次 `/impeccable document`。
 
 ## 6. 規則與禁止事項
 
@@ -103,6 +123,7 @@ cd apps/web && pnpm typecheck && pnpm lint && pnpm test && pnpm build
 
 ## 7. 等產品負責人的事
 
+- **現金股利要算多細（2026-11-12 討論中）**：產品負責人覺得「應該不用特別計算現金股利」。選項：A（建議）以實收金額為準，系統只預填「持股 × 每股股利」減一般 2.11% 估計，資本公積特例撤掉；B 完全不試算，只問實收金額；C 維持現在（含資本公積排除）。決定後照做；選 A 或 B 時撤掉 `capital_surplus_part` 與相關測試，並更新 `CONTRACT_NOTES.md` 待確認 21 與 `docs/product-spec.md`。
 - 部署：網域、Cloudflare、Railway、Google OAuth、Telegram bot（見 `docs/questions-for-morning.md` A3、E1、E2）。
 - M3 對帳單匯入：需要各券商對帳單樣本（遮蔽個資）。
 - 美股報價來源（見 3.5）。
