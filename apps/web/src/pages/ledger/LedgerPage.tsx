@@ -4,7 +4,7 @@ import { CalendarDaysIcon, ChevronDownIcon, ChevronRightIcon, PenLineIcon } from
 import { lazy, Suspense, useState } from "react"
 import { api } from "@/api"
 import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
-import type { PortfolioSummary, UpcomingItem } from "@/api/types"
+import type { PortfolioSummary } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { useAi, usePendingCount } from "@/ai/store"
 import { Masked } from "@/components/finance"
@@ -24,7 +24,7 @@ import { useLedgerPrefs } from "./ledger-prefs"
 import { useLedgerCounts } from "./use-ledger-counts"
 import { asOfLabel } from "@/lib/as-of"
 import { SourcesFooter } from "@/components/data-notes"
-import { codeOf } from "@/lib/tick"
+import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -259,22 +259,6 @@ function HeroSkeleton() {
       <Skeleton className="h-5 w-96 max-w-full" />
     </div>
   )
-}
-
-/** 本週事項的一句話。定期定額的標題本身含金額（後端），所以由欄位組成，隱私模式才不會露出金額 */
-export function upcomingText(u: UpcomingItem, privacy: boolean): string {
-  const amount = u.amount_estimate
-  if (u.type === "recurring") {
-    const what = `${u.symbol ? codeOf(u.symbol) : ""} 定期定額${u.scheduled_date && u.scheduled_date !== u.date ? "（遇休市順延）" : ""}`.trim()
-    return amount === null ? what : `${what}・${privacy ? "••••" : formatMoney(amount)}`
-  }
-  if (amount === null) return u.title
-  if (privacy) return `${u.title}・預估 ••••`
-  return `${u.title}・預估 ${formatMoney(amount, { signed: true })}`
-}
-
-function upcomingShort(u: UpcomingItem): string {
-  return u.type === "recurring" ? `${u.symbol ? codeOf(u.symbol) : ""} 定期定額`.trim() : u.title
 }
 
 /** 本週 N 件事：除息、股利入帳、定期定額（規則計算，不是 AI 簡報） */

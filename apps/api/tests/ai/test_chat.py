@@ -27,8 +27,9 @@ EVENT_KEYS = {
     "tool": {"id", "name", "status", "label"},
     "citation": {"url", "title", "cited_text"},
     "draft": {"id", "status", "input", "instrument", "preview", "notes", "account", "transaction_id", "created_at"},
+    "grounding": {"items"},
     "error": {"code", "message"},
-    "done": {"thread_id", "turn_id", "model", "stop_reason", "usage"},
+    "done": {"thread_id", "turn_id", "model", "stop_reason", "usage", "disclaimer"},
 }
 USAGE_KEYS = {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens",
               "web_search_requests", "web_fetch_requests"}
@@ -41,7 +42,9 @@ def check_shapes(events):
         assert set(data) == EVENT_KEYS[name], (name, data)
     done = events[-1][1]
     assert set(done["usage"]) == USAGE_KEYS
-    assert "key_index" not in json.dumps(events)
+    assert done["disclaimer"] == "AI 回答僅供參考，非投資建議。"
+    dumped = json.dumps(events, ensure_ascii=False)
+    assert "key_index" not in dumped and "key_slot" not in dumped and "sk-test" not in dumped
 
 
 def names(events):
@@ -57,7 +60,7 @@ def test_tool_loop_streams_events_and_builds_cached_request(client, pool, fake):
     buy(client, acc, "2330", 1000, 600)
     fake.reply(thinking("sig-1"), text("我查一下。"), tool_use("toolu_1", "get_holdings", {}), stop_reason="tool_use",
                usage={"input_tokens": 50, "cache_creation_input_tokens": 3000, "output_tokens": 40})
-    fake.reply(text("你持有台積電 1 張。\n僅供參考，非投資建議。"),
+    fake.reply(text("你持有台積電 1 張。"),
                usage={"input_tokens": 80, "cache_read_input_tokens": 3000, "output_tokens": 30})
     status, events = chat(client, "我有哪些持股？", page={"route": "/stock/2330.TW", "symbol": "2330"})
     assert status == 200
@@ -66,7 +69,7 @@ def test_tool_loop_streams_events_and_builds_cached_request(client, pool, fake):
     tools = [d for n, d in events if n == "tool"]
     assert [(t["name"], t["status"]) for t in tools] == [("get_holdings", "running"), ("get_holdings", "done")]
     assert tools[0]["label"] == "查看持股"
-    assert text_of(events) == "我查一下。\n\n你持有台積電 1 張。\n僅供參考，非投資建議。"
+    assert text_of(events) == "我查一下。\n\n你持有台積電 1 張。"
     done = events[-1][1]
     assert done["usage"]["input_tokens"] == 130 and done["usage"]["cache_read_input_tokens"] == 3000
     assert done["model"] == "claude-haiku-5-5" and done["stop_reason"] == "end_turn"
@@ -151,7 +154,7 @@ def test_second_turn_replays_history_append_only(client, pool, fake, engine):
 def test_refusal_is_reported_and_dropped_from_context(client, pool, fake):
     fake.reply(text("這個"), stop_reason="refusal", stop_details={"type": "refusal", "category": "cyber",
                                                                   "explanation": None})
-    _status, events = chat(client, "教我寫惡意程式")
+    _status, events = chat(client, "台積電被駭的攻擊手法細節？")  # reaches the model (no off-topic pre-check)
     check_shapes(events)
     err = next(d for n, d in events if n == "error")
     assert err["code"] == "refusal" and "沒辦法回答" in err["message"]

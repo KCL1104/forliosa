@@ -7,7 +7,7 @@ import { useInstrument, useOverview, usePosition, usePositionHistory, useQuote, 
 import type { ClosedRound, InstrumentDetail, Position, Quote } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
 import { SourcesFooter } from "@/components/data-notes"
-import { holdingPeriod } from "@/pages/ledger/ClosedRounds"
+import { holdingPeriod } from "@/lib/ledger-display"
 import { useAskAi } from "@/ai/use-ask"
 import { DemoTag } from "@/components/section"
 import { ErrorState } from "@/components/states"

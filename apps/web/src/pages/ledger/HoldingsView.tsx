@@ -14,6 +14,7 @@ import { direction, formatMoney, formatPercent, formatPrice, formatQuantity, ton
 import { codeOf, formatQuote, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
+import { unpricedHoldings } from "@/lib/ledger-display"
 import { ClosedRounds } from "./ClosedRounds"
 import { COLUMN_LABEL, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
 
@@ -71,11 +72,6 @@ export function HoldingsView() {
       <ClosedRounds />
     </>
   )
-}
-
-/** 沒有報價的持股（商用模式的美股）：以成本計值，現價與漲跌顯示「—」，並說明原因 */
-export function unpricedHoldings(rows: Pick<Holding, "name" | "price" | "market">[]) {
-  return rows.filter((h) => h.price === null)
 }
 
 function UnpricedNote({ rows }: { rows: Holding[] }) {

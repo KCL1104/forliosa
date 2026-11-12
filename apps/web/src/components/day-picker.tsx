@@ -1,11 +1,5 @@
 import { cn } from "@/lib/utils"
 
-/** 每月扣款日的說明文字：[6, 19] →「每月 6、19 日」 */
-export function daysLabel(days: number[]): string {
-  const sorted = [...days].sort((a, b) => a - b)
-  return sorted.length === 0 ? "還沒選扣款日" : `每月 ${sorted.join("、")} 日`
-}
-
 /**
  * 每月扣款日（1–28，可複選）：7 欄的日期格，選取＝墨色實底（和區間、分段同一套語言）。
  * 一個 role=group，每格是 aria-pressed 的按鈕；方向鍵在格子之間移動。只到 28 日，因為每個月都有。

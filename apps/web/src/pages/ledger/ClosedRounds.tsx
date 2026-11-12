@@ -4,27 +4,12 @@ import { useAccounts, useClosedPositions } from "@/api/queries"
 import type { Account, ClosedRound } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
 import { ErrorState } from "@/components/states"
-import { direction, formatDate, formatMoney, toneClass } from "@/lib/format"
+import { direction, formatMoney, toneClass } from "@/lib/format"
+import { closedTotals, holdingPeriod } from "@/lib/ledger-display"
 import { codeOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useLedgerPrefs } from "./ledger-prefs"
-
-/** 持有期間：「2024/01/10 – 2025/02/20」與「407 天」（當沖的回合是「當天出清」） */
-export function holdingPeriod(r: Pick<ClosedRound, "opened_at" | "closed_at" | "holding_days">): { range: string; days: string } {
-  return {
-    range: r.opened_at === r.closed_at ? formatDate(r.opened_at) : `${formatDate(r.opened_at)} – ${formatDate(r.closed_at)}`,
-    days: r.holding_days === 0 ? "當天出清" : `持有 ${r.holding_days.toLocaleString("zh-TW")} 天`,
-  }
-}
-
-/** 已出清的回合合計（已實現損益只加總，報酬率不加總） */
-export function closedTotals(rounds: ClosedRound[]) {
-  return {
-    symbols: new Set(rounds.map((r) => r.symbol)).size,
-    realized: rounds.reduce((s, r) => s + r.realized_pnl, 0),
-  }
-}
 
 /**
  * 已出清：持倉底下一個安靜、預設收合的區塊。出清的股票不在持股裡，回合紀錄留在這裡。

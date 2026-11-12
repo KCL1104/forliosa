@@ -40,7 +40,15 @@ def answer(fake, sentence="法說會上調全年營收展望，激勵股價上�
     fake.reply(*blocks, text(sentence, cites), usage={"server_tool_use": {"web_search_requests": 1}})
 
 
-def test_disabled_by_default_makes_no_call(client, pool, fake, rule_why):
+def test_enabled_by_default(monkeypatch):
+    from forliosa.config import Settings
+
+    monkeypatch.delenv("AI_WHY_ENABLED", raising=False)
+    assert Settings(_env_file=None).ai_why_enabled is True
+
+
+def test_disabled_makes_no_call(client, pool, fake, rule_why, ai_env):
+    ai_env(AI_WHY_ENABLED=0)
     w = client.get(f"{API}/instruments/2330/why").json()
     assert w["ai"] is False and w["headline"] == RULE["headline"] and w["citations"] == []
     assert fake.requests == []

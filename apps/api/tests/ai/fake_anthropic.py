@@ -1,9 +1,10 @@
 """A scripted fake of the Messages API behind the real ``anthropic`` SDK (httpx2 ``MockTransport``).
 
 Each request pops the next scripted reply: a message (streamed as real SSE events when the request has
-``stream: true``, JSON otherwise) or an HTTP error. Requests are recorded with the API key that sent them, so
-tests can check key rotation, the exact request body (tools, cache_control, replayed history) and that no
-network is used.
+``stream: true``, JSON otherwise) or an HTTP error, optionally with response headers (``anthropic-ratelimit-*``,
+``retry-after``, ``anthropic-workspace-id``) and an ``error.details.error_code``. Requests are recorded with the
+API key that sent them, so tests can check key routing, the exact request body (tools, cache_control, replayed
+history) and that no network is used.
 """
 
 from __future__ import annotations
@@ -59,6 +60,8 @@ class Reply:
     fail_after_text: bool = False  # stream some text, then an SSE error event (mid-stream failure)
     stop_details: dict | None = None
     error_message: str = "scripted error"
+    error_code: str | None = None
+    headers: dict[str, str] = field(default_factory=dict)
 
 
 def _sse(event: dict) -> str:
@@ -129,8 +132,10 @@ class FakeAnthropic:
         self.script.append(Reply(list(blocks), stop_reason, **kw))
         return self
 
-    def error(self, status: int, error_type: str, message: str = "scripted error") -> FakeAnthropic:
-        self.script.append(Reply(status=status, error_type=error_type, error_message=message))
+    def error(self, status: int, error_type: str, message: str = "scripted error", *, code: str | None = None,
+              headers: dict[str, str] | None = None) -> FakeAnthropic:
+        self.script.append(Reply(status=status, error_type=error_type, error_message=message, error_code=code,
+                                 headers=headers or {}))
         return self
 
     # transport
@@ -143,13 +148,15 @@ class FakeAnthropic:
                                                                           "message": "fake: no scripted reply"}})
         reply = self.script.popleft()
         if reply.status != 200:
-            return httpx2.Response(reply.status, json={"type": "error", "error": {"type": reply.error_type,
-                                                                                  "message": reply.error_message}})
+            error: dict[str, Any] = {"type": reply.error_type, "message": reply.error_message}
+            if reply.error_code:
+                error["details"] = {"error_code": reply.error_code}
+            return httpx2.Response(reply.status, headers=reply.headers, json={"type": "error", "error": error})
         model = body.get("model", MODEL)
         if body.get("stream"):
-            return httpx2.Response(200, headers={"content-type": "text/event-stream"},
+            return httpx2.Response(200, headers={"content-type": "text/event-stream", **reply.headers},
                                    content=stream_body(reply, model))
-        return httpx2.Response(200, json=json_body(reply, model))
+        return httpx2.Response(200, headers=reply.headers, json=json_body(reply, model))
 
     def client(self, key: str) -> anthropic.Anthropic:
         return anthropic.Anthropic(api_key=key, max_retries=0,
@@ -158,3 +165,9 @@ class FakeAnthropic:
     @property
     def keys_used(self) -> list[str]:
         return [r["key"] for r in self.requests]
+
+
+def rate_limit_headers(remaining: int, limit: int, reset: str = "2099-01-01T00:00:00Z",
+                       kind: str = "tokens") -> dict[str, str]:
+    return {f"anthropic-ratelimit-{kind}-remaining": str(remaining), f"anthropic-ratelimit-{kind}-limit": str(limit),
+            f"anthropic-ratelimit-{kind}-reset": reset}

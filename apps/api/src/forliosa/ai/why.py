@@ -4,23 +4,30 @@ Only when the rules already say ``show`` (a real anomaly). The model searches th
 writes one cited zh-TW sentence; the result is cached per symbol per trading day in ``ai_why_cache`` and shared
 by every user. Any failure, an answer without citations, or ``NONE`` falls back to the rule template. By default
 the sentence is generated in a background thread (the first request returns the rule template right away);
-``AI_WHY_BLOCKING=1`` waits for it instead.
+``AI_WHY_BLOCKING=1`` waits for it instead. On by default (``AI_WHY_ENABLED``).
+
+Key slot: the slot with the most headroom (``KeyPool.call`` with this month's per-slot costs); a ``pause_turn``
+continuation stays on the slot that started it (its server-tool state belongs to that workspace). Rate-limit
+headers are read through ``with_raw_response``. Without a usable ``web_search`` tool (turned off, or refused by
+the API) no model call is made.
 """
 
 from __future__ import annotations
 
 import logging
 import threading
+from collections.abc import Callable
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import anthropic
 from sqlalchemy.orm import Session
 
 from forliosa.ai import store
 from forliosa.ai.keypool import KeyPool, get_key_pool
 from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import WHY_SYSTEM, why_question
-from forliosa.ai.tools import server_tools
+from forliosa.ai.tools import exclude_tool, rejected_tool, server_tools
 from forliosa.config import Settings, get_settings
 from forliosa.db import session_factory
 from forliosa.marketdata.service import MarketData
@@ -62,7 +69,7 @@ def enhance_why(db: Session, md: MarketData, result: dict[str, Any], user_id: st
     (``headline`` replaced by the AI sentence when one is cached)."""
     settings = settings or get_settings()
     out = {**result, "ai": False, "citations": [], "rule_headline": result.get("headline")}
-    if not settings.ai_why_enabled or not result.get("show"):
+    if not settings.ai_why_enabled or not result.get("show") or not server_tools(settings, fetch=False):
         return out
     try:
         pool = pool or get_key_pool()
@@ -129,11 +136,19 @@ def generate(db: Session, md: MarketData, result: dict[str, Any], day: date, poo
               "output_config": {"effort": settings.ai_effort_why}}
     status, text, cites = "failed", "", []
     content: list[Any] = []
+    slot: int | None = None
+
+    def ask(m: list[dict[str, Any]]) -> Callable[[Any], Any]:
+        return lambda client: client.messages.with_raw_response.create(messages=m, **params)
+
     try:
         for _ in range(MAX_CONTINUATIONS):
-            msg, key_index = pool.call(lambda c, m=messages: c.messages.create(messages=m, **params))
+            raw, slot = pool.call(ask(messages), costs=store.slot_month_costs(db) if slot is None else None,
+                                  only=slot)
+            pool.observe(slot, raw.headers)
+            msg = raw.parse()
             store.record_usage(db, user_id=user_id, thread_id=None, feature="why", model=msg.model or model,
-                               key_index=key_index, usage=CallUsage.from_sdk(msg.usage), stop_reason=msg.stop_reason)
+                               key_slot=slot, usage=CallUsage.from_sdk(msg.usage), stop_reason=msg.stop_reason)
             content.extend(msg.content)
             if msg.stop_reason != "pause_turn":
                 break
@@ -146,7 +161,11 @@ def generate(db: Session, md: MarketData, result: dict[str, Any], day: date, poo
             else:
                 status = "ok"
                 text = " ".join(text.split())[:MAX_SENTENCE_CHARS]
-    except Exception:
+    except Exception as exc:
+        if isinstance(exc, anthropic.BadRequestError):
+            tool = rejected_tool(str(exc.api_message or exc), params["tools"])
+            if tool is not None:  # e.g. web search not allowed here: later calls skip the model (see enhance_why)
+                exclude_tool(tool, str(exc.api_message or exc))
         log.exception("AI why generation for %s failed", sym)
         db.rollback()
     row = db.get(AiWhyCache, (sym, day))

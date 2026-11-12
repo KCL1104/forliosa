@@ -8,12 +8,15 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   21:40 (margin, institutional flows, financial statements) on trading days: ``forliosa.archive``
   (official open data only; idempotent upserts). The official TWSE calendar is reloaded after each run.
 * ``weekly_tdcc_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable).
+* ``ai_retention`` — every day 04:20: deletes AI threads, messages and drafts whose last activity is older than
+  ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
 
 There is no intraday polling: the former MIS job was removed (2026-11-12) because TWSE's website terms
 forbid automated downloads from mis.twse.com.tw and real-time / delayed quotes need a paid licence.
 ``/instruments/{symbol}/intraday`` returns no points until a licensed source is added.
 
-AI jobs (post-market reports, portfolio health checks, group weekly digests) arrive in M4.
+Later AI jobs (post-market reports, portfolio health checks, group weekly digests) will pick their API key slot
+with ``KeyPool.call`` (most headroom first), like the "why" sentence does.
 """
 
 from __future__ import annotations
@@ -131,6 +134,7 @@ class Worker:
             Job("daily_archive_evening", daily_at(time(21, 40), only_if=lambda n: is_tw_trading_day(n.date())),
                 lambda: self.archive(["twse", "tpex", "financials"])),
             Job("weekly_tdcc_archive", weekly_at(5, time(10, 0)), self.weekly_tdcc_archive),
+            Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
         ]
 
     async def archive(self, groups: list[str]) -> None:
@@ -153,6 +157,11 @@ class Worker:
 
     async def weekly_tdcc_archive(self) -> None:
         await self.archive(["tdcc"])
+
+    async def ai_retention(self) -> None:
+        from forliosa.ai import retention
+
+        await asyncio.to_thread(retention.run)
 
     def stop(self) -> None:
         self._stop.set()

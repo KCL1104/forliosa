@@ -107,14 +107,14 @@ def recap_messages(db: Session, thread: AiThread) -> list[dict[str, Any]]:
             turn["answer"], turn["citations"] = r.text, meta.get("citations") or []
     out: list[dict[str, Any]] = []
     for turn in turns.values():
-        if not turn["user"].strip():
+        if not turn["user"] and not turn["answer"]:
             continue
         answer = turn["answer"].strip() or "（已回覆）"
         links = list(dict.fromkeys(f"・{c.get('title') or c['url']}：{c['url']}" for c in turn["citations"]
                                    if c.get("url")))
         if links:
             answer += "\n\n來源：\n" + "\n".join(links)
-        out.append({"role": "user", "content": [{"type": "text", "text": turn["user"]}]})
+        out.append({"role": "user", "content": [{"type": "text", "text": turn["user"].strip() or "…"}]})
         out.append({"role": "assistant", "content": [{"type": "text", "text": answer}]})
     return out
 
@@ -146,14 +146,14 @@ def save_turn(db: Session, thread: AiThread, user: User, turn_id: str, messages:
     base = (db.scalar(select(func.max(AiMessage.seq)).where(AiMessage.thread_id == thread.id)) or 0) + 1
     now = now_utc()
     rows: list[AiMessage] = []
-    if recap:
+    if recap is not None:
+        thread.context_from_seq = base  # replay starts at the recap (or at this turn when there is nothing to recap)
         recap_turn = new_id("rcp")
         for m in recap:
             rows.append(AiMessage(thread_id=thread.id, user_id=user.id, turn_id=recap_turn, seq=base, role=m["role"],
                                   content=m["content"], in_context=True, is_user_input=False, text="",
                                   meta={"recap": True}, created_at=now))
             base += 1
-        thread.context_from_seq = rows[0].seq
     if key_slot is not None:
         thread.key_slot = key_slot
     turn_rows: list[AiMessage] = []

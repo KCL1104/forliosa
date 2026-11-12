@@ -75,6 +75,18 @@ class ToolStep(BaseModel):
     label: str
 
 
+class GroundingItem(BaseModel):
+    """An uncited sentence that reads like a news claim, in an answer that used web search / fetch. ``start`` /
+    ``end`` are Unicode code-point offsets into the answer text; ``text`` is the sentence itself."""
+
+    index: int
+    start: int
+    end: int
+    text: str
+    reason: Literal["uncited_news_claim"]
+    signals: list[str] = []
+
+
 class ChatError(BaseModel):
     code: str
     message: str
@@ -88,6 +100,7 @@ class ThreadMessage(BaseModel):
     citations: list[Citation] = []
     drafts: list[DraftCard] = []
     tools: list[ToolStep] = []
+    grounding: list[GroundingItem] = []
     error: ChatError | None = None
     at: str
 
@@ -140,6 +153,46 @@ class Usage(BaseModel):
     cost_usd_month: float
     model: str
     available: bool
+    disclaimer: str = Field(description="固定顯示在每則 AI 回答下方的一行字（模型不會自己寫免責聲明）")
+
+
+class RateLimitOut(BaseModel):
+    remaining: int
+    limit: int
+
+
+class KeySlotStatus(BaseModel):
+    """One API key slot (``CLAUDE_API_KEY_<n>``). Never contains the key."""
+
+    slot: int
+    configured: bool
+    state: Literal["ok", "cooling", "disabled", "exhausted", "over_budget", "not_configured"]
+    retry_in_seconds: int | None
+    workspace_id: str | None
+    month_cost_usd: float
+    month_calls: int
+    monthly_budget_usd: float | None
+    budget_remaining_usd: float | None
+    headroom: float | None
+    rate_limits: dict[str, RateLimitOut]
+    threads: int
+    failures: int
+    last_error: str | None
+
+
+class ExcludedTool(BaseModel):
+    type: str
+    name: str | None
+    reason: str
+    at: str
+
+
+class KeySlotsOut(BaseModel):
+    month: str = Field(description="UTC 月份（金鑰槽的預算以 UTC 月計）")
+    sticky_wait_seconds: float
+    slots: list[KeySlotStatus]
+    server_tools: list[str] = Field(description="目前會送出的伺服器工具 type")
+    excluded_tools: list[ExcludedTool] = Field(description="被 API 拒絕而在這個程序裡停用的伺服器工具")
 
 
 class AIWhy(Why):

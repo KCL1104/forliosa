@@ -35,6 +35,7 @@ otherwise picks the best other slot (the caller then continues the thread from a
 
 from __future__ import annotations
 
+import contextlib
 import logging
 import math
 import os
@@ -385,10 +386,8 @@ class KeyPool:
                 reset = RATE_LIMIT_DEFAULT_RESET
                 raw = headers.get(f"anthropic-ratelimit-{kind}-reset")
                 if raw:
-                    try:
+                    with contextlib.suppress(TypeError, ValueError):
                         reset = max(0.0, (datetime.fromisoformat(raw) - wall).total_seconds())
-                    except (TypeError, ValueError):
-                        pass
                 slot.limits[kind] = RateLimit(remaining, limit, now + reset)
 
     def mark_failure(self, slot: KeySlot, exc: BaseException) -> Failure | None:

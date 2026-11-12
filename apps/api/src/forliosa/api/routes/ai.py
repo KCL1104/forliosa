@@ -1,4 +1,4 @@
-"""AI (M4): streaming chat (SSE), threads, drafts, suggestions and usage."""
+"""AI (M4): streaming chat (SSE), threads, drafts, suggestions, usage and the key-slot status."""
 
 from __future__ import annotations
 
@@ -16,14 +16,16 @@ from forliosa.ai.schemas import (
     ChatIn,
     DraftCard,
     DraftPatch,
+    KeySlotsOut,
     Suggestions,
     ThreadDetail,
     ThreadPage,
     Usage,
 )
 from forliosa.ai.suggestions import suggestions as build_suggestions
+from forliosa.ai.tools import excluded_tools, server_tools
 from forliosa.api.deps import current_user
-from forliosa.api.errors import ApiError
+from forliosa.api.errors import ApiError, not_found
 from forliosa.config import get_settings
 from forliosa.db import get_db, session_factory
 from forliosa.marketdata.service import get_market_data
@@ -39,7 +41,8 @@ def sse(event: str, data: dict) -> str:
 
 
 CHAT_DOC = {200: {"content": {"text/event-stream": {}},
-                  "description": "事件：thread、text、tool、citation、draft、error、done（見 docs/api-contract.md）"}}
+                  "description": "事件：thread、text、tool、citation、draft、grounding、error、done"
+                                 "（見 docs/api-contract.md）"}}
 
 
 @router.post("/chat", summary="AI 對話（SSE 串流）", response_class=StreamingResponse, responses=CHAT_DOC)
@@ -48,6 +51,8 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     pool = get_key_pool()
     if not pool.available:
         raise ApiError(503, "ai_unavailable", "AI 功能尚未設定（沒有可用的 API 金鑰）")
+    if not pool.ranked(store.slot_month_costs(db)):
+        raise ApiError(503, "ai_unavailable", "AI 服務暫時無法使用（API 額度已用完），請稍後再試。")
     store.check_quota(db, user, settings)
     if body.thread_id:
         thread = store.owned_thread(db, user, body.thread_id)
@@ -102,6 +107,22 @@ def get_suggestions(route: str = Query("/", max_length=200), symbol: str | None 
     return build_suggestions(db, user, get_market_data(), route, symbol)
 
 
-@router.get("/usage", response_model=Usage, summary="今天的提問數、本月 token 用量與上限")
+@router.get("/usage", response_model=Usage, summary="今天的提問數、本月 token 用量與上限、固定的免責聲明")
 def get_usage(user: User = Depends(current_user), db: Session = Depends(get_db)):
-    return store.usage_summary(db, user, get_settings(), get_key_pool().available)
+    pool = get_key_pool()
+    available = pool.available and bool(pool.ranked(store.slot_month_costs(db)))
+    return store.usage_summary(db, user, get_settings(), available)
+
+
+@router.get("/admin/keys", response_model=KeySlotsOut,
+            summary="API 金鑰槽狀態（不含金鑰；FORLIOSA_ENV=dev/test 或 AI_ADMIN_EMAILS）")
+def admin_keys(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    settings = get_settings()
+    if not (settings.is_dev or (user.email or "").lower() in settings.ai_admin_emails):
+        raise not_found("找不到這個頁面")
+    costs, calls = store.slot_month_usage(db)
+    return {"month": store.utc_month_start().strftime("%Y-%m"),
+            "sticky_wait_seconds": settings.ai_key_sticky_wait_seconds,
+            "slots": get_key_pool().status(costs, calls, store.slot_thread_counts(db)),
+            "server_tools": [t["type"] for t in server_tools(settings)],
+            "excluded_tools": excluded_tools()}

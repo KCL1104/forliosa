@@ -18,6 +18,20 @@ from forliosa.marketdata.service import MarketData, set_market_data
 
 
 @pytest.fixture(autouse=True)
+def no_real_ai_keys():
+    """No test may reach the real Claude API (the "why" sentence is on by default): an empty key pool unless a
+    test installs fake clients, and every server tool enabled again."""
+    from forliosa.ai.keypool import KeyPool, set_key_pool
+    from forliosa.ai.tools import reset_excluded_tools
+
+    set_key_pool(KeyPool([]))
+    reset_excluded_tools()
+    yield
+    set_key_pool(None)
+    reset_excluded_tools()
+
+
+@pytest.fixture(autouse=True)
 def builtin_calendar():
     """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
     from forliosa.timeutil import set_official_holidays

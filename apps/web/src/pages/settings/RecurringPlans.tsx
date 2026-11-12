@@ -5,7 +5,8 @@ import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { useAccounts, useCreateRecurring, useDeleteRecurring, useQuote, useRecurringPlans, useUpdateRecurring } from "@/api/queries"
 import type { Account, Instrument, RecurringPlan, RecurringPlanInput } from "@/api/types"
-import { DayOfMonthPicker, daysLabel } from "@/components/day-picker"
+import { DayOfMonthPicker } from "@/components/day-picker"
+import { daysLabel, planStatus } from "@/lib/ledger-display"
 import { FormField as Field } from "@/components/form-field"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { SymbolPicker } from "@/components/symbol-picker"
@@ -28,13 +29,6 @@ import { formatDate, formatDateShort, formatMoney, formatQuantity } from "@/lib/
 import { codeOf, formatQuote } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-
-/** 計畫的狀態：啟用中（有下一次扣款）、已停用、已結束 */
-export function planStatus(p: Pick<RecurringPlan, "active" | "end_date" | "next_date">, today: string): "active" | "paused" | "ended" {
-  if (p.end_date && p.end_date < today) return "ended"
-  if (!p.active) return "paused"
-  return p.next_date ? "active" : "ended"
-}
 
 /**
  * 定期定額：設定頁的一個區塊（頭像選單、帳本的定期定額扣款都連到這裡 `#recurring`）。
