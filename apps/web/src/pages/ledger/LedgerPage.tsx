@@ -23,6 +23,8 @@ import { HoldingsView } from "./HoldingsView"
 import { useLedgerPrefs } from "./ledger-prefs"
 import { useLedgerCounts } from "./use-ledger-counts"
 import { asOfLabel } from "@/lib/as-of"
+import { SourcesFooter } from "@/components/data-notes"
+import { codeOf } from "@/lib/tick"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -106,6 +108,7 @@ export function LedgerPage() {
           </Suspense>
         )}
       </div>
+      <SourcesFooter />
     </div>
   )
 }
@@ -258,12 +261,20 @@ function HeroSkeleton() {
   )
 }
 
-function upcomingText(u: UpcomingItem, privacy: boolean): string {
+/** 本週事項的一句話。定期定額的標題本身含金額（後端），所以由欄位組成，隱私模式才不會露出金額 */
+export function upcomingText(u: UpcomingItem, privacy: boolean): string {
   const amount = u.amount_estimate
+  if (u.type === "recurring") {
+    const what = `${u.symbol ? codeOf(u.symbol) : ""} 定期定額${u.scheduled_date && u.scheduled_date !== u.date ? "（遇休市順延）" : ""}`.trim()
+    return amount === null ? what : `${what}・${privacy ? "••••" : formatMoney(amount)}`
+  }
   if (amount === null) return u.title
   if (privacy) return `${u.title}・預估 ••••`
-  if (u.type === "recurring") return `${u.title}・${formatMoney(amount)}`
   return `${u.title}・預估 ${formatMoney(amount, { signed: true })}`
+}
+
+function upcomingShort(u: UpcomingItem): string {
+  return u.type === "recurring" ? `${u.symbol ? codeOf(u.symbol) : ""} 定期定額`.trim() : u.title
 }
 
 /** 本週 N 件事：除息、股利入帳、定期定額（規則計算，不是 AI 簡報） */
@@ -291,7 +302,7 @@ function WeekLine() {
             {formatDateShort(first.date)}
           </time>
           <span className="max-lg:hidden">{upcomingText(first, privacy)}</span>
-          <span className="lg:hidden">{first.title}</span>
+          <span className="lg:hidden">{upcomingShort(first)}</span>
         </span>
       ) : (
         <span className="text-ink-2">接下來 7 天沒有除息、入帳或定期定額</span>

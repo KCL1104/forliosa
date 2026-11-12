@@ -1,5 +1,6 @@
 import { createHttpAdapter } from "./http"
 import { createMockAdapter, readMockScenario } from "./mock/adapter"
+import { readMockPolicy } from "./mock/commercial"
 import { MOCK_TODAY } from "./mock/market"
 import { todayInTaipei } from "@/lib/format"
 import type { ForliosaApi } from "./types"
@@ -9,13 +10,14 @@ import type { ForliosaApi } from "./types"
  * - 設定 `VITE_API_BASE_URL` → 連真實後端（FastAPI，cookie session）。正式環境填 `https://api.<網域>`。
  * - `pnpm dev:api`（vite --mode api）且沒有設定 → 同源 `/api/v1`，由 Vite dev proxy 轉給
  *   http://localhost:8000，cookie 是同源的，不需要 CORS。
- * - 其他情況 → 使用記憶體中的 mock adapter（全部標示 is_demo）
+ * - 其他情況 → 使用記憶體中的 mock adapter：預設模擬商用模式（和後端 `DATA_POLICY=commercial` 一樣沒有示範標記、
+ *   存檔不足處回空＋notes）；`?policy=personal` 改回全部標示 is_demo 的示範資料
  * 頁面只透過 `api`（或 `./queries` 的 hooks）取資料，不直接 fetch。
  */
 const configured = import.meta.env.VITE_API_BASE_URL?.trim()
 const baseUrl = configured || (import.meta.env.MODE === "api" ? "/api/v1" : undefined)
 
-export const api: ForliosaApi = baseUrl ? createHttpAdapter(baseUrl) : createMockAdapter({ scenario: readMockScenario() })
+export const api: ForliosaApi = baseUrl ? createHttpAdapter(baseUrl) : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy() })
 
 /** 真實後端的 base URL（mock 模式為 undefined）；AI 對話的 SSE 串流直接用它 */
 export const apiBaseUrl: string | undefined = baseUrl

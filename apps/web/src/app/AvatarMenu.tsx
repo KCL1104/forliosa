@@ -1,5 +1,5 @@
 import { useNavigate } from "@tanstack/react-router"
-import { LogOutIcon, SettingsIcon, WalletIcon } from "lucide-react"
+import { CalendarSyncIcon, LogOutIcon, ScrollTextIcon, SettingsIcon, WalletIcon } from "lucide-react"
 import { api } from "@/api"
 import { useMe } from "@/api/queries"
 import {
@@ -17,7 +17,7 @@ import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { usePrefs } from "@/stores/prefs"
 import type { ColorConvention, ThemePreference } from "@/api/types"
 
-/** 頭像選單：設定、帳戶、外觀（主題與漲跌顏色）、登出 */
+/** 頭像選單：設定、帳戶、定期定額、資料來源與授權、外觀（主題與漲跌顏色）、登出 */
 export function AvatarMenu() {
   const me = useMe()
   const navigate = useNavigate()
@@ -55,6 +55,14 @@ export function AvatarMenu() {
         <DropdownMenuItem onClick={() => void navigate({ to: "/settings", hash: "accounts" })}>
           <WalletIcon aria-hidden />
           帳戶
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void navigate({ to: "/settings", hash: "recurring" })}>
+          <CalendarSyncIcon aria-hidden />
+          定期定額
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={() => void navigate({ to: "/data-sources" })}>
+          <ScrollTextIcon aria-hidden />
+          資料來源與授權
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>

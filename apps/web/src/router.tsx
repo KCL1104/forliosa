@@ -52,6 +52,12 @@ const historyRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/history/HistoryPage"), "HistoryPage"),
 })
 
+const dataSourcesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/data-sources",
+  component: lazyRouteComponent(() => import("@/pages/data-sources/DataSourcesPage"), "DataSourcesPage"),
+})
+
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
@@ -74,6 +80,7 @@ const routeTree = rootRoute.addChildren([
   groupsRoute,
   historyRoute,
   settingsRoute,
+  dataSourcesRoute,
   legacy("/holdings", "/"),
   legacy("/transactions", "/", { view: "transactions" }),
   legacy("/performance", "/", { view: "performance" }),

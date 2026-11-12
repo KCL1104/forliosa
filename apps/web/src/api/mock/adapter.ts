@@ -9,10 +9,14 @@ import {
   type Transaction,
   type User,
 } from "../types"
+import { buildAttributions, sourceOf } from "./attributions"
+import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
 import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, valuationSeries } from "./market"
+import { createRecurringStore, seedPlans } from "./recurring"
+import { closedRounds, positionHistory } from "./rounds"
 import {
   buildChips,
   buildEvents,
@@ -63,12 +67,16 @@ const DEFAULT_PREFS: Preferences = {
 
 export interface MockOptions {
   scenario?: MockScenario
+  /** 資料政策（預設 commercial，和後端一樣）：commercial 沒有示範標記，存檔不足處回空＋notes */
+  policy?: MockPolicy
   /** 模擬網路延遲（毫秒）；測試時設 0 */
   latency?: [number, number]
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const scenario = options.scenario ?? "default"
+  const commercial = (options.policy ?? "commercial") === "commercial"
+  const demo = !commercial
   const [minLatency, maxLatency] = options.latency ?? [120, 320]
 
   let user: User = { id: "usr_01JDEMO", email: "demo@forliosa.local", display_name: "示範使用者", preferences: { ...DEFAULT_PREFS } }
@@ -84,6 +92,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   }
   let nextId = 90000
   let watch: string[] = scenario === "empty" ? [] : ["2382.TW", "2308.TW", "2881.TW"]
+  const recurring = createRecurringStore(scenario === "empty" ? [] : seedPlans(ACCOUNTS[0]!.id), () => accounts)
 
   const wait = <T>(value: T | (() => T)): Promise<T> =>
     new Promise((resolve, reject) => {
@@ -107,6 +116,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     symbol: s.symbol, code: s.code, name: s.name, market: s.market, type: s.type, currency: s.currency, industry: s.industry,
   })
   const quoteOf = (s: MockInstrumentSpec): Quote => {
+    if (commercial && s.market === "US") throw new ApiError(404, "not_found", "目前沒有報價")
     const last = dailyCandles(s).at(-1)!
     const ref = referencePrice(s)
     const limits = limitsOf(s)
@@ -116,13 +126,33 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       change_pct: Math.round((s.price / ref - 1) * 10000) / 10000,
       open: last.o, high: last.h, low: last.l, volume: last.v,
       as_of: s.market === "US" ? "2026-11-12T05:00:00+08:00" : MOCK_AS_OF,
-      is_realtime: false, is_demo: true, source: "demo",
+      is_realtime: false, is_demo: demo, source: commercial ? (s.market === "TPEX" ? "tpex-openapi" : "twse-openapi") : "demo",
       reference_price: ref,
       limit_up: limits?.up ?? null,
       limit_down: limits?.down ?? null,
     }
   }
   const tracked = (symbol: string) => watch.includes(symbol) || buildHoldings(txns).some((h) => h.symbol === symbol)
+  const holdingsNow = (accountId?: string) => buildHoldings(txns, accountId, commercial)
+  /** 商用模式：回應裡最早的資料不早於存檔起點；區間更早時加上「資料累積中」 */
+  const clip = <T extends { t: string }>(rows: T[], from: string): { rows: T[]; notes: string[] } =>
+    commercial && from < ARCHIVE_START ? { rows: rows.filter((r) => r.t >= ARCHIVE_START), notes: [accumulatingNote()] } : { rows, notes: [] }
+  /** 商用模式的績效：含美股（沒有可商用的價格）就算不出來，其餘從存檔起點開始 */
+  const commercialPerformance = (range: Parameters<typeof buildPerformance>[1], accountId: string | undefined, benchmark: string) => {
+    const usHeld = [...new Set(txns.filter((t) => t.symbol && t.currency === "USD" && (!accountId || t.account_id === accountId)).map((t) => t.symbol!))].sort()
+    const empty = buildPerformance([], range, accountId, benchmark, { isDemo: false })
+    if (usHeld.length > 0) {
+      return {
+        ...empty, start_date: null, end_date: null, series: [],
+        notes: [`${usHeld.join("、")}：${US_NOTE}，含美股時無法計算績效`, `${accumulatingNote()}；需要持股期間每天的收盤價才能計算績效`],
+      }
+    }
+    const full = buildPerformance(txns, range, accountId, benchmark, { isDemo: false })
+    if (!full.start_date || full.start_date >= ARCHIVE_START) return { ...full, notes: [] }
+    const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart: ARCHIVE_START })
+    const bench = benchmark === "^TAIEXTR" ? { benchmark: clipped.benchmark ? { ...clipped.benchmark, twr: null } : null, series: clipped.series.map((p) => ({ ...p, benchmark_index: null })) } : {}
+    return { ...clipped, ...bench, notes: [`${accumulatingNote()}；績效從 ${clipped.start_date} 收盤開始計算`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }
+  }
   const sortTxns = () =>
     txns.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))
 
@@ -193,6 +223,15 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getInstrument: (symbol) =>
       wait(() => {
         const s = spec(symbol)
+        // 商用模式不提供 shioaji-data 的 AI 研究欄位（簡介、產業鏈、題材；授權待定），美股只有商品清單
+        if (commercial) {
+          const us = s.market === "US"
+          return {
+            ...strip(s), summary: null, chain_stage: null, themes: [],
+            shares_outstanding: us ? null : s.shares_outstanding, market_cap: us ? null : s.market_cap,
+            data_sources: us ? ["內建商品清單"] : [sourceOf("shioaji-data/official")], is_demo: false,
+          }
+        }
         return {
           ...strip(s), summary: s.summary, chain_stage: s.chain_stage, themes: s.themes,
           shares_outstanding: s.shares_outstanding, market_cap: s.market_cap, data_sources: s.data_sources,
@@ -200,18 +239,27 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         }
       }),
     getQuote: (symbol) => wait(() => quoteOf(spec(symbol))),
-    getQuotes: (symbols) => wait(() => symbols.map((s) => quoteOf(spec(s)))),
+    // 批次報價：沒有報價的代號（商用模式的美股）直接略過
+    getQuotes: (symbols) => wait(() => symbols.map((x) => spec(x)).filter((x) => !(commercial && x.market === "US")).map(quoteOf)),
     getHistory: (symbol, range) =>
       wait((): History => {
+        if (commercial && symbol.startsWith("^")) return { symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [INDEX_NOTE] }
         // 指數（^TAIEXTR）：示範資料以 0050 的走勢代替
         const s = symbol.startsWith("^") ? spec(mockBenchmark(symbol).proxy) : spec(symbol)
+        if (commercial && s.market === "US") return { symbol: s.symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [US_NOTE] }
         const from = rangeFrom(range)
-        return { symbol: symbol.startsWith("^") ? symbol : s.symbol, interval: "1d", candles: dailyCandles(s).filter((c) => c.t >= from), is_demo: true }
+        const { rows, notes } = clip(dailyCandles(s).filter((c) => c.t >= from), from)
+        return {
+          symbol: symbol.startsWith("^") ? symbol : s.symbol, interval: "1d", candles: rows, is_demo: demo,
+          sources: commercial ? [sourceOf(`${s.market === "TPEX" ? "tpex" : "twse"}-openapi/price`)] : [], notes,
+        }
       }),
     getValuation: (symbol, range = "5Y") =>
       wait(() => {
         const s = spec(symbol)
-        const series = valuationSeries(s, range === "MAX" ? 6 : 5)
+        const from = addDays(MOCK_TODAY, -Math.round((range === "MAX" ? 6 : 5) * 365.25))
+        const clipped = clip(valuationSeries(s, range === "MAX" ? 6 : 5), from)
+        const series = commercial && s.market === "US" ? [] : clipped.rows
         const last = series.at(-1)
         const pers = series.map((p) => p.per).filter((x): x is number => x !== null)
         const currentPer = last?.per ?? null
@@ -229,30 +277,50 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
                 ? null
                 : Math.round((pers.filter((p) => p <= currentPer).length / pers.length) * 100) / 100,
           },
-          notes: s.type === "etf" ? ["ETF 沒有每股盈餘與淨值，不提供本益比與股價淨值比區間"] : ["示範資料：EPS、淨值與倍數皆為模擬"],
-          is_demo: true,
+          notes: commercial
+            ? s.market === "US"
+              ? [US_NOTE]
+              : [...clipped.notes, ...(s.type === "etf" ? ["ETF 沒有每股盈餘與淨值，不提供本益比與股價淨值比區間"] : ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值；EPS = 收盤價 ÷ 本益比"])]
+            : s.type === "etf" ? ["ETF 沒有每股盈餘與淨值，不提供本益比與股價淨值比區間"] : ["示範資料：EPS、淨值與倍數皆為模擬"],
+          is_demo: demo,
         }
       }),
     getRevenue: (symbol) => wait(() => monthlyRevenue(spec(symbol))),
-    getDividends: (symbol) => wait(() => dividendRecords(spec(symbol))),
-    getOverview: (symbol) => wait(() => buildOverview(spec(symbol))),
-    getIntraday: (symbol) => wait(() => buildIntraday(spec(symbol), tracked(spec(symbol).symbol))),
-    getChips: (symbol, range = "3M") => wait(() => buildChips(spec(symbol), range)),
-    getFinancials: (symbol, period = "quarterly") => wait(() => buildFinancials(spec(symbol), period)),
+    // 商用模式的股利歷史只有存檔以來的除權息預告
+    getDividends: (symbol) =>
+      wait(() => {
+        const rows = dividendRecords(spec(symbol)).map((d) => ({ ...d, is_demo: demo }))
+        if (!commercial) return rows
+        return spec(symbol).market === "US" ? [] : rows.filter((d) => (d.ex_dividend_date ?? "") >= ARCHIVE_START)
+      }),
+    getOverview: (symbol) => wait(() => buildOverview(spec(symbol), commercial)),
+    getIntraday: (symbol) => wait(() => buildIntraday(spec(symbol), tracked(spec(symbol).symbol), commercial)),
+    getChips: (symbol, range = "3M") => wait(() => buildChips(spec(symbol), range, commercial)),
+    getFinancials: (symbol, period = "quarterly") => wait(() => buildFinancials(spec(symbol), period, commercial)),
     getEvents: (symbol, mine = false) =>
       wait(() => {
         const s = spec(symbol)
-        const all = buildEvents(s, buildHoldings(txns).find((h) => h.symbol === s.symbol))
+        const all = buildEvents(s, holdingsNow().find((h) => h.symbol === s.symbol), commercial)
         return mine ? all.filter((e) => e.mine) : all
       }),
-    getNews: (symbol) => wait(() => buildNews(spec(symbol))),
-    getPosition: (symbol) => wait(() => buildPosition(spec(symbol), txns)),
+    getNews: (symbol) => wait(() => buildNews(spec(symbol), commercial)),
+    getPosition: (symbol) => wait(() => buildPosition(spec(symbol), txns, commercial)),
+    getPositionHistory: (symbol) => wait(() => positionHistory(txns, spec(symbol).symbol)),
     getWhy: (symbol) => wait(() => buildWhy(spec(symbol))),
 
     getWatchlist: () =>
       wait(() =>
         watch.map((symbol) => {
           const s = spec(symbol)
+          if (commercial) {
+            // 沒有盤中來源：迷你走勢是最近 20 個收盤（sparkline_interval = 1d）
+            const us = s.market === "US"
+            return {
+              symbol: s.symbol, name: s.name, quote: us ? null : quoteOf(s),
+              sparkline: us ? [] : dailyCandles(s).slice(-20).map((c) => ({ t: c.t, price: c.c })),
+              sparkline_interval: "1d" as const, sources: us ? [] : [sourceOf(`${s.market === "TPEX" ? "tpex" : "twse"}-openapi/price`)], is_demo: false,
+            }
+          }
           const intraday = buildIntraday(s, true)
           const step = Math.max(1, Math.floor(intraday.points.length / 48))
           return {
@@ -260,6 +328,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
             name: s.name,
             quote: quoteOf(s),
             sparkline: intraday.points.filter((_, i) => i % step === 0 || i === intraday.points.length - 1).map((p) => ({ t: p.t, price: p.price })),
+            sparkline_interval: "1m" as const,
+            is_demo: true,
           }
         }),
       ),
@@ -339,10 +409,23 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     previewTransaction: (body) =>
       wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined)),
 
-    getPortfolioSummary: (accountId) => wait(() => buildSummary(txns, accountId)),
-    getHoldings: (accountId) => wait(() => buildHoldings(txns, accountId)),
-    getUpcoming: (days = 7) => wait(() => buildUpcoming(buildHoldings(txns), findInstrument, days)),
+    getPortfolioSummary: (accountId) => wait(() => buildSummary(txns, accountId, commercial)),
+    getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
+    getUpcoming: (days = 7) => wait(() => buildUpcoming(holdingsNow(), findInstrument, days, recurring.upcoming(MOCK_TODAY, addDays(MOCK_TODAY, days)), commercial)),
     getPerformance: ({ range, account_id, benchmark }) =>
-      wait(() => buildPerformance(txns, range, account_id, benchmark ?? user.preferences.benchmark)),
+      wait(() =>
+        commercial
+          ? commercialPerformance(range, account_id, benchmark ?? user.preferences.benchmark)
+          : buildPerformance(txns, range, account_id, benchmark ?? user.preferences.benchmark),
+      ),
+    getClosedPositions: (accountId) => wait(() => closedRounds(txns, { accountId })),
+
+    listRecurring: (accountId) => wait(() => recurring.list(accountId)),
+    createRecurring: (body) => wait(() => recurring.create(body)),
+    updateRecurring: (id, patch) => wait(() => recurring.update(id, patch)),
+    deleteRecurring: (id) => wait(() => recurring.remove(id)),
+    draftRecurring: (id, date) => wait(() => recurring.draft(id, date)),
+
+    getAttributions: () => wait(() => buildAttributions(commercial ? "commercial" : "personal")),
   }
 }

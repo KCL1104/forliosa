@@ -21,6 +21,9 @@ interface LedgerPrefs {
   columns: HoldingColumn[]
   showTrend: boolean
   pinned: string[]
+  /** 持倉底下的「已出清」是否展開 */
+  showClosed: boolean
+  setShowClosed: (v: boolean) => void
   setColumns: (c: HoldingColumn[]) => void
   toggleColumn: (c: HoldingColumn) => void
   setShowTrend: (v: boolean) => void
@@ -34,6 +37,8 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       columns: DEFAULT_COLUMNS,
       showTrend: true,
       pinned: [],
+      showClosed: false,
+      setShowClosed: (showClosed) => set({ showClosed }),
       setColumns: (columns) => set({ columns }),
       toggleColumn: (c) =>
         set((s) => {
@@ -46,6 +51,6 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       togglePin: (symbol) => set((s) => ({ pinned: s.pinned.includes(symbol) ? s.pinned.filter((x) => x !== symbol) : [...s.pinned, symbol] })),
       reset: () => set({ columns: DEFAULT_COLUMNS, showTrend: true, pinned: [] }),
     }),
-    { name: "forliosa:ledger", version: 1, storage: createJSONStorage(() => localStorage) },
+    { name: "forliosa:ledger", version: 1, partialize: ({ columns, showTrend, pinned, showClosed }) => ({ columns, showTrend, pinned, showClosed }), storage: createJSONStorage(() => localStorage) },
   ),
 )

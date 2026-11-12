@@ -15,7 +15,7 @@ import { formatDateShort, formatDaysUntil, formatMoney, formatNumber } from "@/l
 import { codeOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 
-/** 股利：接下來（除息、入帳、定期定額）＋已入帳（依年份，已扣二代健保） */
+/** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {
   const ask = useAskAi()
   const summary = useSummary()
@@ -64,7 +64,7 @@ export function DividendsView() {
         {upcoming.isLoading || summary.isLoading ? (
           <Skeleton className="h-24 w-full rounded-sm" />
         ) : soon.length === 0 ? (
-          <p className="py-2 text-md text-ink-2">接下來 60 天你的持股沒有除息，也沒有待入帳的股利。</p>
+          <p className="py-2 text-md text-ink-2">接下來 60 天你的持股沒有除息、待入帳的股利，也沒有定期定額扣款。</p>
         ) : (
           <ul className="-mt-3">
             {soon.map((u) => (
@@ -79,7 +79,16 @@ export function DividendsView() {
                       {nameOf.get(u.symbol) ?? codeOf(u.symbol)}
                     </Link>
                   ) : null}
-                  <span className="ml-2 text-ink-2">{u.type === "ex_dividend" ? "除息" : u.type === "dividend_payment" ? "股利入帳" : "定期定額扣款"}</span>
+                  {u.type === "recurring" ? (
+                    <Link to="/settings" hash="recurring" className="ml-2 text-ink-2 underline-offset-3 hover:text-ink hover:underline">
+                      定期定額扣款
+                    </Link>
+                  ) : (
+                    <span className="ml-2 text-ink-2">{u.type === "ex_dividend" ? "除息" : "股利入帳"}</span>
+                  )}
+                  {"scheduled_date" in u && u.scheduled_date && u.scheduled_date !== u.date && (
+                    <span className="block text-sm text-ink-2">原訂 {formatDateShort(u.scheduled_date, false)}，遇休市順延</span>
+                  )}
                 </span>
                 <span className="num text-right">
                   {u.amount_estimate === null ? "—" : u.type === "recurring" ? money(u.amount_estimate) : money(u.amount_estimate, true)}

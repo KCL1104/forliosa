@@ -17,6 +17,16 @@ export function addDays(d: string, n: number): string {
   x.setUTCDate(x.getUTCDate() + n)
   return fmtDay(x)
 }
+/** 兩個日期相差的日曆天數 */
+export function daysBetweenIso(from: string, to: string): number {
+  return Math.round((parseDay(to).getTime() - parseDay(from).getTime()) / 86400000)
+}
+/** 下一個交易日（含當天；示範資料只排除週末） */
+export function nextTradingDay(d: string): string {
+  let day = d
+  while ([0, 6].includes(parseDay(day).getUTCDay())) day = addDays(day, 1)
+  return day
+}
 function isWeekday(d: Date) {
   const w = d.getUTCDay()
   return w !== 0 && w !== 6
@@ -336,8 +346,14 @@ const DIVIDENDS: Record<string, Div[]> = {
   ],
   "0056.TW": [["2026Q3", 0.866, 0, "2026-11-20", "2026-12-15"]],
   "2412.TW": [["2025", 4.98, 0, "2026-07-16", "2026-08-12"]],
-  "2603.TW": [["2025", 10.0, 0, "2026-06-25", "2026-07-20"]],
-  "3008.TW": [["2025", 70.0, 0, "2026-06-30", "2026-07-25"]],
+  "2603.TW": [
+    ["2025", 10.0, 0, "2026-06-25", "2026-07-20"],
+    ["2024", 7.0, 0, "2024-06-27", "2024-07-19"],
+  ],
+  "3008.TW": [
+    ["2025", 70.0, 0, "2026-06-30", "2026-07-25"],
+    ["2024", 60.0, 0, "2024-06-28", "2024-07-24"],
+  ],
   "00919.TW": [["2026Q3", 0.54, 0, "2026-12-16", "2027-01-14"]],
 }
 

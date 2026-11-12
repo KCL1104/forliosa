@@ -10,6 +10,8 @@ import { ReturnChart } from "@/components/charts/ReturnChart"
 import { Pct } from "@/components/finance"
 import { DemoTag, Section as Panel } from "@/components/section"
 import { ChartSkeleton, ErrorState } from "@/components/states"
+import { DataNotes } from "@/components/data-notes"
+import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -77,12 +79,10 @@ export function PerformanceView() {
           <ChartSkeleton height={300} />
         </>
       ) : p.series.length < 2 ? (
-        <div className="border-y border-rule py-6">
-          <p className="font-medium">資料還不夠計算績效</p>
-          <p className="text-md text-ink-2">至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。</p>
-        </div>
+        <NotEnough p={p} account={account} accounts={accounts.data ?? []} onAccount={setAccount} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
+          <DataNotes notes={p.notes} />
           <Metrics p={p} />
           <Panel title="與基準比較" titleId="cmp-title">
             <Legend
@@ -103,6 +103,35 @@ export function PerformanceView() {
             <RealizedByYear p={p} />
           </div>
           <Definitions />
+        </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * 算不出績效時：照後端的 notes 說明為什麼（商用模式：存檔不足、美股沒有可商用的價格），
+ * 並給一個現在能做的事——只看新台幣帳戶（不含美股）。
+ */
+function NotEnough({ p, account, accounts, onAccount }: { p: Performance; account?: string; accounts: { id: string; name: string; currency: string }[]; onAccount: (id: string) => void }) {
+  const notes = p.notes ?? []
+  const hasUs = notes.some((n) => n.includes("美股"))
+  const tw = accounts.filter((a) => a.currency === "TWD")
+  return (
+    <div className="border-y border-rule py-6">
+      <p className="font-medium">{notes.length ? "績效還算不出來" : "資料還不夠計算績效"}</p>
+      {notes.length ? (
+        <DataNotes notes={notes} className="mt-1 max-w-prose text-md" />
+      ) : (
+        <p className="text-md text-ink-2">至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。</p>
+      )}
+      {hasUs && !account && tw.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {tw.map((a) => (
+            <Button key={a.id} variant="outline" size="sm" onClick={() => onAccount(a.id)}>
+              只看「{a.name}」
+            </Button>
+          ))}
         </div>
       )}
     </div>

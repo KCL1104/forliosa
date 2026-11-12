@@ -3,8 +3,11 @@ import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, PlusIcon, StarIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import { ApiError } from "@/api"
-import { useInstrument, useOverview, usePosition, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
-import type { InstrumentDetail, Position, Quote } from "@/api/types"
+import { useInstrument, useOverview, usePosition, usePositionHistory, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
+import type { ClosedRound, InstrumentDetail, Position, Quote } from "@/api/types"
+import { Masked, Pct } from "@/components/finance"
+import { SourcesFooter } from "@/components/data-notes"
+import { holdingPeriod } from "@/pages/ledger/ClosedRounds"
 import { useAskAi } from "@/ai/use-ask"
 import { DemoTag } from "@/components/section"
 import { ErrorState } from "@/components/states"
@@ -47,6 +50,9 @@ export function StockPage() {
   const instrument = useInstrument(symbol)
   const quote = useQuote(symbol)
   const position = usePosition(symbol)
+  // 交易歷史：出清的回合與所有買賣點（未持有也會回）——圖上的 B／S／D 與「過去的持有」都用它
+  const history = usePositionHistory(symbol)
+  const rounds = history.data?.rounds ?? []
 
   if (instrument.isError) {
     const notFound = instrument.error instanceof ApiError && instrument.error.status === 404
@@ -76,8 +82,12 @@ export function StockPage() {
           <Breadcrumb inst={inst} held={!!position.data} />
           <QuoteHeader inst={inst} quote={quote.data} />
           <WhyLine inst={inst} />
-          {position.data && <PositionBlock inst={inst} position={position.data} />}
-          <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} />
+          {position.data ? (
+            <PositionBlock inst={inst} position={position.data} rounds={rounds} />
+          ) : (
+            rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
+          )}
+          <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} markers={history.data?.markers} />
         </>
       )}
 
@@ -124,10 +134,11 @@ export function StockPage() {
             {tab === "financials" && <FinancialsTab inst={inst} />}
             {tab === "chips" && <ChipsTab inst={inst} />}
             {tab === "dividends" && <DividendsTab inst={inst} quote={quote.data} position={position.data ?? null} />}
-            {tab === "events" && <EventsTab inst={inst} position={position.data ?? null} />}
+            {tab === "events" && <EventsTab inst={inst} position={position.data ?? null} markers={history.data?.markers ?? position.data?.markers ?? []} />}
           </Suspense>
         )}
       </div>
+      <SourcesFooter />
     </div>
   )
 }
@@ -260,8 +271,54 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   )
 }
 
+/**
+ * 過去的持有：現在沒有持股、但曾經買過（已出清）。每個回合一列：持有期間、已實現損益、領過股利、手續費與稅。
+ * 隱私模式遮蔽金額，保留百分比與日期。
+ */
+function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedRound[] }) {
+  const privacy = usePrefs((s) => s.privacyMode)
+  const money = (n: number, signed = false) => (privacy ? <Masked /> : formatMoney(n, { signed }))
+  return (
+    <section aria-labelledby="past-title" className="mt-5 border-y border-rule">
+      <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 pt-2.5">
+        <h2 id="past-title" className="text-base font-bold">
+          過去的持有
+        </h2>
+        <p className="text-sm text-ink-2">{rounds.length > 1 ? `出清過 ${rounds.length} 次` : "已全部賣出"}，不在持倉裡。</p>
+        <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className="ml-auto inline-flex h-9 items-center gap-0.5 rounded-sm text-sm text-ink-2 hover:text-ink pointer-coarse:h-11">
+          在帳本中查看
+          <ChevronRightIcon aria-hidden className="size-4" />
+        </Link>
+      </div>
+      <ul>
+        {rounds.map((r) => {
+          const period = holdingPeriod(r)
+          return (
+            <li key={`${r.account_id}-${r.opened_at}`} className="border-t border-rule py-2.5 first:border-t-0">
+              <dl className="num flex flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
+                <Item label="持有期間" value={<>{period.range}<span className="ml-1.5 text-md font-normal text-ink-2">{period.days}</span></>} />
+                <Item
+                  label="已實現"
+                  value={
+                    <span className="inline-flex items-baseline gap-1.5">
+                      <span className={toneClass(direction(r.realized_pnl))}>{money(r.realized_pnl, true)}</span>
+                      <Pct value={r.realized_pnl_pct} className="text-md" />
+                    </span>
+                  }
+                />
+                <Item label="領過股利" value={r.dividends_received ? money(r.dividends_received) : "—"} />
+                <Item label="手續費與稅" value={money(r.fees_and_taxes)} />
+              </dl>
+            </li>
+          )
+        })}
+      </ul>
+    </section>
+  )
+}
+
 /** 我的部位：兩行（股數、均價、未實現、今日、已領股利）＋展開 */
-function PositionBlock({ inst, position: p }: { inst: InstrumentDetail; position: Position }) {
+function PositionBlock({ inst, position: p, rounds }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[] }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
@@ -312,6 +369,18 @@ function PositionBlock({ inst, position: p }: { inst: InstrumentDetail; position
             <Item label="市值" value={money(p.market_value)} />
             <Item label="成本" value={money(p.cost_basis)} />
             <Item label="已實現" value={<span className={toneClass(direction(p.realized_pnl))}>{money(p.realized_pnl, true)}</span>} />
+            {rounds.length > 0 && (
+              <Item
+                className="col-span-2"
+                label="之前出清過"
+                value={
+                  <>
+                    {rounds.length} 次・已實現{" "}
+                    <span className={toneClass(direction(rounds.reduce((x, r) => x + r.realized_pnl, 0)))}>{money(rounds.reduce((x, r) => x + r.realized_pnl, 0), true)}</span>
+                  </>
+                }
+              />
+            )}
             <Item
               label="下次除息"
               value={p.upcoming_dividend ? `${formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}・約 ${money(p.upcoming_dividend.amount_estimate)}` : "未公告"}

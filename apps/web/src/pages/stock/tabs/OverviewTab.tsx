@@ -1,9 +1,10 @@
 import { Link } from "@tanstack/react-router"
 import { ArrowUpRightIcon, ChevronRightIcon } from "lucide-react"
-import { api, appToday } from "@/api"
+import { appToday } from "@/api"
 import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, MonthlyRevenue, Position, Quote } from "@/api/types"
-import { DemoTag, Section } from "@/components/section"
+import { Section } from "@/components/section"
+import { announcementHost, EVENT_LABEL, eventTitle, NEWS_CATEGORY_LABEL } from "@/lib/events"
 import { Skeleton } from "@/components/ui/skeleton"
 import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
@@ -55,7 +56,7 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
         {!us && <ChipsBrief symbol={inst.symbol} />}
       </div>
       <Upcoming inst={inst} position={position} />
-      <News symbol={inst.symbol} />
+      <Announcements inst={inst} />
       <Company inst={inst} sources={o?.sources ?? inst.data_sources} />
     </div>
   )
@@ -202,17 +203,6 @@ function ChipsBrief({ symbol }: { symbol: string }) {
   )
 }
 
-const EVENT_LABEL: Record<string, string> = {
-  ex_dividend: "除息",
-  dividend_payment: "股利發放",
-  earnings: "法說會",
-  revenue_release: "營收公布",
-  material_info: "重大訊息",
-  attention: "注意股",
-  disposition: "處置",
-  shareholder_meeting: "股東會",
-}
-
 function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Position | null }) {
   const events = useEvents(inst.symbol)
   const privacy = usePrefs((s) => s.privacyMode)
@@ -232,7 +222,14 @@ function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Positi
                 <span className="block text-xs text-ink-2 sm:hidden">{formatDaysUntil(e.date, today)}</span>
               </span>
               <span className="text-md text-ink-2 max-sm:hidden">{EVENT_LABEL[e.type] ?? e.type}</span>
-              <span className="min-w-0">{e.title}</span>
+              <span className="min-w-0">
+                {eventTitle(e)}
+                {e.estimated && (
+                  <span className="demo-tag ml-2 align-[0.1em]" title="還沒看到實際公布日，先以法定期限顯示">
+                    預估
+                  </span>
+                )}
+              </span>
               <span className="num text-right text-md">
                 {e.amount_estimate !== null && position ? (
                   <>你可領約 {privacy ? "••••" : formatMoney(e.amount_estimate)}</>
@@ -248,39 +245,45 @@ function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Positi
   )
 }
 
-function timeAgo(iso: string): string {
-  const h = Math.max(0, Math.round((Date.now() - Date.parse(iso)) / 3_600_000))
-  if (h < 1) return "剛剛"
-  if (h < 24) return `${h} 小時前`
-  const d = Math.round(h / 24)
-  return d < 30 ? `${d} 天前` : formatDateShort(iso.slice(0, 10), false)
-}
-
-function News({ symbol }: { symbol: string }) {
-  const news = useNews(symbol)
-  const rows = (news.data ?? []).slice(0, 3)
+/**
+ * 公告：該公司的重大訊息與證交所公告（官方資料，`source: "公告"`），連到原文。
+ * 不是媒體新聞；只有 personal 模式明確開啟時才會混入媒體標題，並標「媒體（非商用）」。
+ */
+function Announcements({ inst }: { inst: InstrumentDetail }) {
+  const news = useNews(inst.symbol)
+  const rows = (news.data ?? []).slice(0, 4)
   if (news.isLoading) return <Skeleton className="h-28 w-full rounded-sm" />
+  const sources = [...new Set(rows.flatMap((n) => n.sources ?? []))]
   return (
-    <Section title="新聞" titleId="ov-news" action={api.kind === "mock" ? <DemoTag title="示範標題，不是真實新聞" /> : undefined}>
+    <Section title="公告" titleId="ov-news" action={<MoreLink symbol={inst.symbol} tab="events" label="所有事件" />}>
       {rows.length === 0 ? (
-        <p className="text-md text-ink-2">目前沒有可顯示的新聞（只使用可合法轉載的來源）。</p>
+        <p className="text-md text-ink-2">最近 90 天沒有{inst.name}的重大訊息或證交所公告。</p>
       ) : (
         <ul className="-mt-3">
-          {rows.map((n) => (
-            <li key={n.url} className="border-b border-rule">
-              <a href={n.url} target="_blank" rel="noreferrer" className="group flex items-baseline gap-3 py-3">
-                <span className="min-w-0 flex-1 group-hover:underline">{n.title}</span>
-                <span className="shrink-0 text-sm text-ink-2">
-                  {n.source}・{timeAgo(n.published_at)}
-                </span>
-                <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0 self-center text-ink-2" />
-                <span className="sr-only">（另開新視窗）</span>
-              </a>
-            </li>
-          ))}
+          {rows.map((n) => {
+            const media = n.category === "media"
+            const kind = n.category ? NEWS_CATEGORY_LABEL[n.category] : "公告"
+            return (
+              <li key={`${n.published_at}-${n.title}`} className="border-b border-rule">
+                <a href={n.url} target="_blank" rel="noreferrer" className="group grid grid-cols-[1fr_auto] items-baseline gap-x-3 py-3 sm:grid-cols-[96px_1fr_auto]">
+                  <span className="num text-md text-ink-2 max-sm:col-span-2 max-sm:row-start-2">
+                    {formatDateShort(n.published_at.slice(0, 10), false)}
+                    <span className="sm:hidden">・{media ? `${n.source}（非商用）` : kind}</span>
+                  </span>
+                  <span className="min-w-0 group-hover:underline">{n.title}</span>
+                  <span className="flex shrink-0 items-center gap-1 text-sm text-ink-2 max-sm:row-start-1">
+                    <span className="max-sm:hidden">{media ? `${n.source}（非商用）` : kind}</span>
+                    <ArrowUpRightIcon aria-hidden className="size-3.5" />
+                  </span>
+                  <span className="sr-only">（在{announcementHost(n.url)}查看，另開新視窗）</span>
+                </a>
+              </li>
+            )
+          })}
         </ul>
       )}
-      <p className="mt-2 text-xs text-ink-2">只列標題、來源與連結；內容以原文為準。</p>
+      <p className="mt-2 text-xs text-ink-2">官方公告的標題與連結；內容以公開資訊觀測站、證交所原文為準。</p>
+      <Sources items={sources} className="mt-1" />
     </Section>
   )
 }

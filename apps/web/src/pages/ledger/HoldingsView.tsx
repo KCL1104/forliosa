@@ -14,6 +14,7 @@ import { direction, formatMoney, formatPercent, formatPrice, formatQuantity, ton
 import { codeOf, formatQuote, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
+import { ClosedRounds } from "./ClosedRounds"
 import { COLUMN_LABEL, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
@@ -55,13 +56,36 @@ export function HoldingsView() {
 
   if (holdings.isError) return <ErrorState error={holdings.error} onRetry={() => void holdings.refetch()} />
   if (holdings.isLoading) return <RowsSkeleton />
-  if (rows.length === 0) return <EmptyLedger />
+  if (rows.length === 0) return (
+    <>
+      <EmptyLedger />
+      <ClosedRounds />
+    </>
+  )
 
   return (
     <>
       <HoldingsTable rows={rows} sort={sort} onSort={setSort} pinned={pinned} />
       <HoldingsList rows={rows} pinned={pinned} />
+      <UnpricedNote rows={rows} />
+      <ClosedRounds />
     </>
+  )
+}
+
+/** 沒有報價的持股（商用模式的美股）：以成本計值，現價與漲跌顯示「—」，並說明原因 */
+export function unpricedHoldings(rows: Pick<Holding, "name" | "price" | "market">[]) {
+  return rows.filter((h) => h.price === null)
+}
+
+function UnpricedNote({ rows }: { rows: Holding[] }) {
+  const list = unpricedHoldings(rows)
+  if (list.length === 0) return null
+  const us = list.every((h) => h.market === "US")
+  return (
+    <p className="mt-2.5 max-w-prose text-sm text-ink-2">
+      {us ? "美股目前沒有可商用的報價來源（需要授權的行情）" : "目前沒有報價"}：{list.map((h) => h.name).join("、")}以成本計值，現價與漲跌顯示「—」。
+    </p>
   )
 }
 
@@ -184,25 +208,31 @@ function QtyText({ h }: { h: Holding }) {
   return privacy ? <Masked /> : <>{formatQuantity(h.quantity, unit, h.market)}</>
 }
 
+const Dash = () => <span className="text-ink-2" title="沒有報價">—</span>
+
 function Cell({ c, h, maxWeight }: { c: HoldingColumn; h: Holding; maxWeight: number }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const money = (n: number, signed = false) => (privacy ? <Masked /> : formatMoney(n, { signed, bare: true }))
+  // 沒有報價（商用模式的美股）：今日與未實現不是真的 0，顯示「—」
+  const unpriced = h.price === null
   switch (c) {
     case "price":
-      return (
+      return unpriced ? (
+        <Dash />
+      ) : (
         <>
           {h.currency === "USD" && <span className="mr-0.5 text-sm text-ink-2">US$</span>}
           {formatQuote(h.price, h.market, h.type)}
         </>
       )
     case "day_pct":
-      return <Pct value={h.day_change_pct} />
+      return unpriced ? <Dash /> : <Pct value={h.day_change_pct} />
     case "day_change":
-      return <span className={toneClass(direction(h.day_change))}>{money(h.day_change, true)}</span>
+      return unpriced ? <Dash /> : <span className={toneClass(direction(h.day_change))}>{money(h.day_change, true)}</span>
     case "value":
       return (
         <span className="flex flex-col items-end">
-          <span className="leading-tight">{money(h.market_value)}</span>
+          <span className="leading-tight" title={unpriced ? "沒有報價，以成本計值" : undefined}>{money(h.market_value)}</span>
           <span className="mt-0.5 grid grid-cols-[48px_48px] items-center justify-end text-sm leading-tight text-ink-2">
             <span aria-hidden className="relative block h-[3px] w-12 bg-rule">
               <span className="absolute inset-y-0 left-0 bg-ink" style={{ width: `${(h.weight / maxWeight) * 100}%` }} />
@@ -214,9 +244,9 @@ function Cell({ c, h, maxWeight }: { c: HoldingColumn; h: Holding; maxWeight: nu
     case "avg_cost":
       return <>{privacy ? <Masked /> : formatPrice(h.avg_cost, h.market)}</>
     case "unrealized":
-      return <span className={toneClass(direction(h.unrealized_pnl))}>{money(h.unrealized_pnl, true)}</span>
+      return unpriced ? <Dash /> : <span className={toneClass(direction(h.unrealized_pnl))}>{money(h.unrealized_pnl, true)}</span>
     case "unrealized_pct":
-      return <Pct value={h.unrealized_pnl_pct} />
+      return unpriced ? <Dash /> : <Pct value={h.unrealized_pnl_pct} />
   }
 }
 
@@ -297,14 +327,13 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
                 {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
               </span>
               <span className="num text-right text-lg leading-6">
-                {h.currency === "USD" && "US$"}
-                {formatQuote(h.price, h.market, h.type)}
+                {h.price === null ? <Dash /> : <>{h.currency === "USD" && "US$"}{formatQuote(h.price, h.market, h.type)}</>}
               </span>
               <span className="num text-sm leading-5 text-ink-2">
                 {h.code} ・ <QtyText h={h} />
               </span>
               <span className="text-right text-base leading-5">
-                <Pct value={h.day_change_pct} />
+                {h.price === null ? <Dash /> : <Pct value={h.day_change_pct} />}
               </span>
             </Link>
           </li>

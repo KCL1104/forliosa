@@ -95,19 +95,16 @@ export function seedTransactions(): Transaction[] {
   t.push(trade("sell", TW, "3008.TW", "2025-08-12", 100))
   t.push(cash("fee", US, "2025-12-31", 25, "年度帳戶管理費"))
 
-  // 定期定額：0050 每月 6 日 NT$10,000、00878 每月 26 日 NT$8,000（零股）
+  // 定期定額（與 recurring.ts 的示範計畫一致）：0050 每月 6 日 NT$10,000、00878 每月 12、26 日 NT$4,000（零股）。
+  // 今天的扣款還沒入帳：AI 面板會在扣款日提出草稿，簽名後才記下
   for (let y = 2024; y <= 2026; y++) {
     for (let m = 1; m <= 12; m++) {
       const mm = String(m).padStart(2, "0")
-      const d1 = `${y}-${mm}-06`
-      const d2 = `${y}-${mm}-26`
-      if (d1 <= MOCK_TODAY) {
-        const p = closeOn(findInstrument("0050.TW")!, nextWeekday(d1))
-        t.push(trade("buy", TW, "0050.TW", d1, Math.floor(10000 / p), undefined, "定期定額"))
-      }
-      if (d2 <= MOCK_TODAY) {
-        const p = closeOn(findInstrument("00878.TW")!, nextWeekday(d2))
-        t.push(trade("buy", TW, "00878.TW", d2, Math.floor(8000 / p), undefined, "定期定額"))
+      for (const [symbol, day, amount] of [["0050.TW", "06", 10_000], ["00878.TW", "12", 4_000], ["00878.TW", "26", 4_000]] as const) {
+        const d = `${y}-${mm}-${day}`
+        if (nextWeekday(d) >= MOCK_TODAY) continue
+        const p = closeOn(findInstrument(symbol)!, nextWeekday(d))
+        t.push(trade("buy", TW, symbol, d, Math.floor(amount / p), undefined, "定期定額"))
       }
       if ([3, 6, 9, 12].includes(m) && `${y}-${mm}-21` <= MOCK_TODAY) {
         t.push(cash("interest", TW, `${y}-${mm}-21`, 18 + ((y * 7 + m * 3) % 40), "交割戶利息"))
@@ -231,12 +228,25 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
 const r2 = (n: number) => Math.round(n * 100) / 100
 const r4 = (n: number) => Math.round(n * 10000) / 10000
 
-export function buildHoldings(txns: Transaction[], accountId?: string): Holding[] {
+/**
+ * 持股。`commercial`：美股沒有可商用的報價——`price: null`、以成本計值、今日與未實現為 0（與後端相同），
+ * 也不標示示範資料。
+ */
+export function buildHoldings(txns: Transaction[], accountId?: string, commercial = false): Holding[] {
   const state = replay(txns, MOCK_TODAY, accountId)
   const rows: Holding[] = []
   for (const pos of state.positions.values()) {
     if (pos.qty <= 0.0001) continue
     const spec = findInstrument(pos.symbol)!
+    if (commercial && spec.market === "US") {
+      rows.push({
+        symbol: spec.symbol, code: spec.code, name: spec.name, market: spec.market, type: spec.type,
+        currency: spec.currency, industry: spec.industry, quantity: pos.qty, avg_cost: r4(pos.cost / pos.qty),
+        cost_basis: r2(pos.costTwd), price: null, prev_close: null, market_value: r2(pos.costTwd), day_change: 0,
+        day_change_pct: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0, weight: 0, account_ids: [...pos.accounts], is_demo: false,
+      })
+      continue
+    }
     const fx = spec.currency === "USD" ? FX_NOW : 1
     const mv = pos.qty * spec.price * fx
     const day = pos.qty * (spec.price - spec.prev_close) * fx
@@ -255,7 +265,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string): Holding[
       unrealized_pnl_pct: r4(mv / pos.costTwd - 1),
       weight: 0,
       account_ids: [...pos.accounts],
-      is_demo: true,
+      is_demo: !commercial,
     })
   }
   const total = rows.reduce((s, h) => s + h.market_value, 0)
@@ -276,8 +286,8 @@ function groupBy(holdings: Holding[], key: (h: Holding) => string, label: (k: st
     .sort((a, b) => b.value - a.value)
 }
 
-export function buildSummary(txns: Transaction[], accountId?: string): PortfolioSummary {
-  const holdings = buildHoldings(txns, accountId)
+export function buildSummary(txns: Transaction[], accountId?: string, commercial = false): PortfolioSummary {
+  const holdings = buildHoldings(txns, accountId, commercial)
   const state = replay(txns, MOCK_TODAY, accountId)
   const mv = holdings.reduce((s, h) => s + h.market_value, 0)
   const cost = holdings.reduce((s, h) => s + h.cost_basis, 0)
@@ -285,6 +295,7 @@ export function buildSummary(txns: Transaction[], accountId?: string): Portfolio
   const unrealized = mv - cost
   const total = unrealized + state.realizedTwd + state.dividendsTwd
   const upcoming = holdings
+    .filter((h) => !commercial || h.market !== "US")
     .flatMap((h) => {
       const spec = findInstrument(h.symbol)!
       return dividendRecords(spec)
@@ -318,7 +329,7 @@ export function buildSummary(txns: Transaction[], accountId?: string): Portfolio
       by_type: groupBy(holdings, (h) => h.type, (k) => TYPE_LABEL[k] ?? k),
     },
     upcoming_dividends: upcoming,
-    is_demo: true,
+    is_demo: !commercial,
   }
 }
 
@@ -446,18 +457,26 @@ function xirr(flows: { t: string; amount: number }[]): number | null {
   return Number.isFinite(rate) ? rate : null
 }
 
-export function buildPerformance(txns: Transaction[], range: PerformanceRange, accountId?: string, benchmark?: string): Performance {
+export interface PerformanceOptions {
+  /** 商用模式：存檔從這天開始，區間更早時從這天收盤開始計算（當作基準收盤） */
+  minStart?: string
+  isDemo?: boolean
+}
+
+export function buildPerformance(txns: Transaction[], range: PerformanceRange, accountId?: string, benchmark?: string, opts: PerformanceOptions = {}): Performance {
+  const isDemo = opts.isDemo ?? true
   const bench = mockBenchmark(benchmark)
   const all = dailyRows(txns, accountId, bench.symbol)
   // 1D／5D：最後 N 個交易日的報酬，序列第一點是基準收盤（與後端相同）
   const days = range === "1D" ? 1 : range === "5D" ? 5 : null
-  const rows = days !== null ? all.slice(-(days + 1)) : all.filter((x) => x.t >= rangeStart(range as Exclude<PerformanceRange, "1D" | "5D">))
+  let rows = days !== null ? all.slice(-(days + 1)) : all.filter((x) => x.t >= rangeStart(range as Exclude<PerformanceRange, "1D" | "5D">))
+  if (opts.minStart) rows = rows.filter((x) => x.t >= opts.minStart!)
   const benchSpec = { symbol: bench.symbol, name: bench.name }
   if (rows.length < 2) {
     return {
       range, start_date: rows[0]?.t ?? MOCK_TODAY, end_date: MOCK_TODAY, twr: null, xirr: null, max_drawdown: null, volatility: null,
       benchmark: { symbol: benchSpec.symbol, name: benchSpec.name, twr: null }, series: rows.map(stripRow),
-      dividends_by_month: [], realized_by_year: [], is_demo: true,
+      dividends_by_month: [], realized_by_year: [], is_demo: isDemo,
     }
   }
   const base = rows[0]!.twr_index
@@ -520,7 +539,7 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     series,
     dividends_by_month: [...dividends.entries()].sort().map(([month, amount]) => ({ month, amount: r2(amount) })),
     realized_by_year: [...realized.entries()].sort((a, b) => a[0] - b[0]).map(([year, amount]) => ({ year, amount: r2(amount) })),
-    is_demo: true,
+    is_demo: isDemo,
   }
 }
 

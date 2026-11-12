@@ -15,7 +15,8 @@ import {
 import { ChevronDownIcon, StarIcon } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useHistory, useIntraday, useToggleWatch, useWatchlist } from "@/api/queries"
-import type { HistoryRange, InstrumentDetail, Position, Quote } from "@/api/types"
+import type { HistoryRange, InstrumentDetail, Position, PositionMarker, Quote } from "@/api/types"
+import { DataNotes } from "@/components/data-notes"
 import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
@@ -69,10 +70,10 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
 
 /**
  * 走勢圖：工具列（類型・比較・指標・重要時刻）＋區間。
- * 持有時：均價虛線、買進 B／賣出 S／股利 D 標記；隱私模式全部隱藏。
- * 1 日線只有持股與觀察清單有（輪詢累積的盤中點）。
+ * 買進 B／賣出 S／股利 D 標記來自交易歷史（`position/history`，出清後也有）；持有時另有均價虛線。隱私模式全部隱藏。
+ * 1 日線需要授權的盤中行情：商用模式沒有點，顯示說明（後端的 notes）。存檔不足時圖下照實寫出 notes。
  */
-export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
+export function PriceChart({ inst, quote, position, markers }: { inst: InstrumentDetail; quote?: Quote; position: Position | null; markers?: PositionMarker[] }) {
   const [rangeChoice, setRange] = useState<ChartRange | null>(null)
   const range: ChartRange = rangeChoice ?? (position ? "6M" : "1M")
   const [kind, setKind] = useState<"line" | "candle">("line")
@@ -93,7 +94,9 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
   const candles = useMemo(() => history.data?.candles ?? [], [history.data])
   const momentList = useMemo(() => (isIntraday ? [] : importantMoments(candles)), [candles, isIntraday])
   const comparing = compare !== "none" && !isIntraday && !!compareHistory.data && compareHistory.data.symbol !== inst.symbol
-  const showMine = !!position && !privacy
+  const marks = markers ?? position?.markers ?? []
+  const showMine = (!!position || marks.length > 0) && !privacy
+  const showAvg = !!position && !privacy
   const points = intraday.data?.points ?? []
 
   useEffect(() => {
@@ -128,7 +131,7 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
       const us = inst.market === "US"
       line.setData(points.map((p) => ({ time: minuteTime(intraday.data!.date, p.t, us), value: p.price })))
       line.createPriceLine({ price: ref, color: ink2, lineWidth: 1, lineStyle: LineStyle.Dashed, axisLabelVisible: true, title: "參考價" })
-      if (showMine) line.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價" })
+      if (showAvg) line.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價" })
       chart.timeScale().fitContent()
       const byTime = new Map(points.map((p) => [minuteTime(intraday.data!.date, p.t, us), p]))
       chart.subscribeCrosshairMove((e) => {
@@ -141,7 +144,7 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
     // 持有時把均價納入縱軸範圍，均價線才看得到
     const autoscaleInfoProvider = (original: () => { priceRange: { minValue: number; maxValue: number } } | null) => {
       const r = original()
-      if (!r || !showMine || comparing) return r
+      if (!r || !showAvg || comparing) return r
       const avg = position!.avg_cost
       return { ...r, priceRange: { minValue: Math.min(r.priceRange.minValue, avg), maxValue: Math.max(r.priceRange.maxValue, avg) } }
     }
@@ -174,14 +177,14 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
     const times = candles.map((c) => c.t)
     const snapTo = (d: string) => times.find((t) => t >= d)
     if (showMine) {
-      for (const m of position!.markers) {
+      for (const m of marks) {
         const t = snapTo(m.date)
         if (!t || m.date < times[0]!) continue
         if (m.type === "buy") markers.push({ time: dayTime(t), position: "belowBar", color: ink, shape: "arrowUp", text: "B" })
         else if (m.type === "sell") markers.push({ time: dayTime(t), position: "aboveBar", color: ink, shape: "arrowDown", text: "S" })
         else markers.push({ time: dayTime(t), position: "aboveBar", color: ink2, shape: "circle", text: "D", size: 0.6 })
       }
-      if (!comparing) main.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價" })
+      if (showAvg && !comparing) main.createPriceLine({ price: position!.avg_cost, color: ink, lineWidth: 1, lineStyle: LineStyle.SparseDotted, axisLabelVisible: true, title: "均價" })
     }
     if (moments) {
       for (const m of momentList) markers.push({ time: dayTime(m.t), position: m.ret >= 0 ? "aboveBar" : "belowBar", color: cssVarColor("--chart-ochre"), shape: "circle", size: 0, text: "◆" })
@@ -199,7 +202,7 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
     return () => chart.remove()
     // 依資料、主題、慣例與選項重建（圖表庫不吃 CSS 變數）
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [history.data, compareHistory.data, intraday.data, kind, comparing, mas, volume, moments, showMine, theme, convention, isIntraday, inst.market])
+  }, [history.data, compareHistory.data, intraday.data, kind, comparing, mas, volume, moments, showMine, showAvg, marks, theme, convention, isIntraday, inst.market])
 
   const last = candles.at(-1)
   const readout = hover ?? (isIntraday ? (points.length ? { t: points.at(-1)!.t, c: points.at(-1)!.price } : null) : last ? { ...last } : null)
@@ -297,7 +300,11 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
         ) : loading ? (
           <Skeleton className="h-full w-full rounded-sm" />
         ) : empty ? (
-          isIntraday ? <NoIntraday inst={inst} quote={quote} notes={intraday.data?.notes ?? []} /> : <p className="grid h-full place-items-center text-md text-ink-2">這段期間還沒有成交資料。</p>
+          isIntraday ? (
+            <NoIntraday inst={inst} quote={quote} notes={intraday.data?.notes ?? []} onFiveDays={() => setRange("5D")} />
+          ) : (
+            <NoHistory notes={history.data?.notes ?? []} us={inst.market === "US"} />
+          )
         ) : (
           <div ref={box} className="absolute inset-0" role="img" aria-label={`${inst.name}走勢圖，${RANGES.find((r) => r.value === range)?.label}${rangeReturn !== null ? `，區間 ${formatPercent(rangeReturn)}` : ""}`} />
         )}
@@ -306,32 +313,49 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <RangeChips label="區間" value={range} options={RANGES} onChange={setRange} />
         <p className="ml-auto flex flex-wrap gap-x-3 text-xs text-ink-2">
-          {showMine && !isIntraday && <span>B 買進・S 賣出・D 股利・┈ 均價</span>}
+          {showMine && !isIntraday && <span>B 買進・S 賣出・D 股利{showAvg && "・┈ 均價"}</span>}
           {moments && !isIntraday && momentList.length > 0 && <span>◆ 單日漲跌 ≥ 3%</span>}
           {comparing && <span>- - {COMPARES.find((c) => c.value === compare)?.label}</span>}
           {!comparing && kind === "candle" && mas.length > 0 && <span>{mas.map((n) => `MA${n}`).join("・")}</span>}
         </p>
       </div>
+      {!isIntraday && !empty && <DataNotes notes={[...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])]} className="mt-1 text-xs" />}
       <p className="mt-1 text-xs text-ink-2">價格為未還原收盤價。圖表由 TradingView Lightweight Charts™ 繪製。</p>
     </section>
   )
 }
 
-function NoIntraday({ inst, quote, notes }: { inst: InstrumentDetail; quote?: Quote; notes: string[] }) {
+/** 這段期間沒有日線：商用模式是存檔還在累積（或美股沒有可商用的來源），照後端的 notes 說明 */
+function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
+  if (notes.length === 0) return <p className="grid h-full place-items-center text-md text-ink-2">這段期間還沒有成交資料。</p>
+  return (
+    <div className="flex h-full flex-col items-start justify-center gap-2 border-y border-dashed border-rule px-1">
+      <p className="font-medium">{us ? "美股走勢暫時沒有" : "走勢資料累積中"}</p>
+      <DataNotes notes={notes} className="max-w-prose text-md" />
+      {!us && <p className="max-w-prose text-md text-ink-2">官方開放資料只提供當天的收盤，所以從開始存檔那天起每個交易日累積一點；累積兩天以上就會畫出走勢。</p>}
+    </div>
+  )
+}
+
+function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail; quote?: Quote; notes: string[]; onFiveDays: () => void }) {
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
   if (notes.length > 0) {
-    // 後端說明為什麼沒有（例如只用可商用來源時沒有授權的盤中資料）：照實顯示
+    // 後端說明為什麼沒有（只用可商用來源時沒有授權的盤中資料）：照實顯示，並給一個現在能看的
     return (
       <div className="flex h-full flex-col items-start justify-center gap-2 border-y border-dashed border-rule px-1">
-        <p className="font-medium">今天的 1 日走勢暫時沒有</p>
-        {notes.map((n) => (
-          <p key={n} className="max-w-prose text-md text-ink-2">
-            {n}
+        <p className="font-medium">盤中走勢需要授權行情，目前提供收盤後資料</p>
+        <DataNotes notes={notes} className="max-w-prose text-md" />
+        {quote && (
+          <p className="num text-md text-ink-2">
+            最近收盤 {formatQuote(quote.price, inst.market, inst.type)}
+            {quote.as_of && `（${formatDate(quote.as_of.slice(0, 10))}）`}
           </p>
-        ))}
-        <p className="text-md text-ink-2">可以先看 5 日或 1 月。{quote && ` 目前 ${formatPrice(quote.price, inst.market)}。`}</p>
+        )}
+        <Button variant="outline" size="sm" className="mt-1" onClick={onFiveDays}>
+          看 5 日走勢
+        </Button>
       </div>
     )
   }

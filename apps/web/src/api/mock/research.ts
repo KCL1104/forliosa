@@ -21,11 +21,14 @@ import type {
   Why,
   WhyReason,
 } from "../types"
+import { sourceOf } from "./attributions"
+import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, FX_NOW, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, rng, tradingDays } from "./market"
 
 const DEMO_SRC = ["示範資料（模擬數字，不代表真實行情）"]
+const tw = (spec: MockInstrumentSpec) => (spec.market === "TPEX" ? "tpex-openapi" : "twse-openapi")
 const round = (n: number, d = 2) => Math.round(n * 10 ** d) / 10 ** d
 
 export function referencePrice(spec: MockInstrumentSpec): number {
@@ -37,7 +40,16 @@ export function limitsOf(spec: MockInstrumentSpec) {
 }
 
 // ── overview ─────────────────────────────────────────────
-export function buildOverview(spec: MockInstrumentSpec): InstrumentOverview {
+export function buildOverview(spec: MockInstrumentSpec, commercial = false): InstrumentOverview {
+  if (commercial && spec.market === "US") {
+    // 美股沒有可商用的行情來源：所有欄位 null（與後端相同）
+    return {
+      symbol: spec.symbol, open: null, high: null, low: null, prev_close: null, reference_price: null, limit_up: null, limit_down: null,
+      volume: null, avg_volume_3m: null, market_cap: null, pe: null, pb: null, dividend_yield: null, last_cash_dividend: null,
+      ex_dividend_date: null, eps_ttm: null, high_52w: null, low_52w: null, shares_outstanding: null,
+      status: { attention: false, disposition: false, note: null }, as_of: null, sources: ["內建商品清單"], is_demo: false,
+    }
+  }
   const candles = dailyCandles(spec)
   const last = candles.at(-1)!
   const year = candles.slice(-250)
@@ -70,11 +82,11 @@ export function buildOverview(spec: MockInstrumentSpec): InstrumentOverview {
     status: {
       attention: spec.symbol === "6488.TWO",
       disposition: false,
-      note: spec.symbol === "6488.TWO" ? "近 6 日累積跌幅過大，列為注意股票（示範）" : null,
+      note: spec.symbol === "6488.TWO" ? "近 6 日累積跌幅過大，列為注意股票" : null,
     },
     as_of: spec.market === "US" ? "2026-11-12T05:00:00+08:00" : MOCK_AS_OF,
-    sources: spec.data_sources,
-    is_demo: true,
+    sources: commercial ? [sourceOf(`${tw(spec)}/price`), sourceOf(`${tw(spec)}/valuation`), sourceOf(`${tw(spec)}/reference`)] : spec.data_sources,
+    is_demo: !commercial,
   }
 }
 
@@ -85,7 +97,7 @@ function minuteLabels(): string[] {
   return out
 }
 
-export function buildIntraday(spec: MockInstrumentSpec, tracked: boolean): Intraday {
+export function buildIntraday(spec: MockInstrumentSpec, tracked: boolean, commercial = false): Intraday {
   const base: Intraday = {
     symbol: spec.symbol,
     date: MOCK_TODAY,
@@ -93,9 +105,11 @@ export function buildIntraday(spec: MockInstrumentSpec, tracked: boolean): Intra
     reference_price: referencePrice(spec),
     points: [],
     is_partial: false,
-    sources: DEMO_SRC,
-    is_demo: true,
+    sources: commercial ? [] : DEMO_SRC,
+    is_demo: !commercial,
   }
+  // 商用模式：沒有授權的盤中來源，一律沒有點（任何模式的後端都是這樣；personal 的 mock 保留示範走勢給開發用）
+  if (commercial) return { ...base, is_partial: true, notes: [INTRADAY_NOTE] }
   if (!tracked) return base
   const labels = spec.market === "US" ? usMinuteLabels() : minuteLabels()
   const r = rng(`intraday:${spec.symbol}:${MOCK_TODAY}`)
@@ -134,9 +148,28 @@ function usMinuteLabels(): string[] {
 // ── chips（法人、融資融券、外資持股、千張大戶） ────────────
 const CHIPS_DAYS: Record<ChipsRange, number> = { "1M": 22, "3M": 63, "6M": 126, "1Y": 250 }
 
-export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M"): Chips {
+export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", commercial = false): Chips {
   if (spec.market === "US") {
-    return { institutional: [], margin: [], foreign_holding_pct: [], major_holders: null, sources: DEMO_SRC, is_demo: true }
+    return { institutional: [], margin: [], foreign_holding_pct: [], major_holders: null, sources: commercial ? [] : DEMO_SRC, is_demo: !commercial }
+  }
+  if (commercial) {
+    const full = buildChips(spec, range)
+    const kept = <T extends { t: string }>(rows: T[]) => rows.filter((r) => r.t >= ARCHIVE_START)
+    const short = full.margin.some((r) => r.t < ARCHIVE_START)
+    const listed = spec.market === "TWSE"
+    const notes = [...(listed ? [TWSE_CHIPS_NOTE] : []), ...(short ? [accumulatingNote()] : [])]
+    const src = listed
+      ? [sourceOf("twse-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
+      : [sourceOf("tpex-openapi/institutional"), sourceOf("tpex-openapi/foreign_holding"), sourceOf("tpex-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
+    return {
+      institutional: listed ? [] : kept(full.institutional),
+      margin: kept(full.margin),
+      foreign_holding_pct: listed ? [] : kept(full.foreign_holding_pct),
+      major_holders: full.major_holders,
+      sources: src,
+      is_demo: false,
+      notes,
+    }
   }
   const days = tradingDays(CHIPS_DAYS[range])
   const r = rng(`chips:${spec.symbol}`)
@@ -189,7 +222,11 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M"): 
 }
 
 // ── financials（季報／年報） ─────────────────────────────
-export function buildFinancials(spec: MockInstrumentSpec, period: FinancialsPeriod = "quarterly"): Financials {
+export function buildFinancials(spec: MockInstrumentSpec, period: FinancialsPeriod = "quarterly", commercial = false): Financials {
+  if (commercial) {
+    const f = buildFinancials(spec, period)
+    return { ...f, is_demo: false, sources: f.periods.length ? [sourceOf("shioaji-data/official")] : [] }
+  }
   const empty: Financials = {
     periods: [],
     income: { revenue: [], gross_profit: [], operating_income: [], net_income: [], eps: [] },
@@ -253,10 +290,30 @@ export function buildFinancials(spec: MockInstrumentSpec, period: FinancialsPeri
 }
 
 // ── events ───────────────────────────────────────────────
-export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefined): InstrumentEvent[] {
+/** 官方公告（示範標題）：重大訊息與證交所新聞。事件的 material_info 和 /news 的重大訊息是同一則（與後端相同） */
+const ANNOUNCEMENTS: Record<string, [date: string, category: "material_info" | "exchange_news", title: string][]> = {
+  "2330.TW": [
+    ["2026-11-11", "material_info", "代子公司 TSMC Arizona 公告取得機器設備"],
+    ["2026-10-30", "material_info", "公告本公司董事會決議資本預算案"],
+    ["2026-10-21", "exchange_news", "臺灣證券交易所公告 115 年第 4 季臺灣 50 指數成分股定期審核結果"],
+  ],
+  "6488.TWO": [["2026-11-12", "exchange_news", "證券櫃檯買賣中心公告：環球晶（6488）列為注意股票"]],
+}
+
+function announcementsOf(spec: MockInstrumentSpec) {
+  if (spec.market === "US") return []
+  return ANNOUNCEMENTS[spec.symbol] ?? [["2026-11-05", "material_info", `${spec.name}公告董事會重要決議`] as const]
+}
+
+const MOPS_URL = "https://mops.twse.com.tw/mops/#/web/t05st01"
+const TWSE_NEWS_URL = "https://www.twse.com.tw/zh/news/newsList.html"
+
+export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefined, commercial = false): InstrumentEvent[] {
   const out: InstrumentEvent[] = []
   const qty = holding?.quantity ?? 0
   const fx = spec.currency === "USD" ? FX_NOW : 1
+  const src = commercial ? [sourceOf(`${tw(spec)}/ex_dividend`)] : DEMO_SRC
+  if (commercial && spec.market === "US") return []
   for (const d of dividendRecords(spec)) {
     if (d.ex_dividend_date && d.cash_dividend > 0) {
       const future = d.ex_dividend_date >= MOCK_TODAY
@@ -268,55 +325,90 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
         url: null,
         mine: qty > 0 && future,
         amount_estimate: qty > 0 && future ? round(d.cash_dividend * qty * fx, 0) : null,
+        estimated: false,
+        period: d.period,
+        sources: src,
       })
     }
     if (d.payment_date && d.cash_dividend > 0) {
-      out.push({ date: d.payment_date, type: "dividend_payment", title: "股利發放", detail: `${d.period} 現金股利入帳`, url: null, mine: false, amount_estimate: null })
+      out.push({ date: d.payment_date, type: "dividend_payment", title: "股利發放", detail: `${d.period} 現金股利入帳`, url: null, mine: false, amount_estimate: null, estimated: false, period: d.period, sources: src })
     }
   }
   if (spec.market !== "US" && spec.type !== "etf") {
-    for (const m of ["2026-08", "2026-09", "2026-10", "2026-11", "2026-12"]) {
-      const date = `${m}-10`
-      const prev = Number(m.slice(5)) - 1
-      out.push({ date, type: "revenue_release", title: `公布 ${prev} 月營收`, detail: null, url: "https://mops.twse.com.tw/", mine: false, amount_estimate: null })
+    const mops = commercial ? [sourceOf(`${tw(spec)}/material_info`)] : DEMO_SRC
+    const rule = ["Forliosa 規則計算"]
+    const revenue = monthlyRevenue(spec)
+    // 月營收：已公布的用實際日期（月營收資料集第一次出現的日期），還沒公布的用法定期限（每月 10 日，預估）
+    for (const [date, period, actual] of [
+      ["2026-08-07", "2026-07", true], ["2026-09-09", "2026-08", true], ["2026-10-08", "2026-09", true], ["2026-11-07", "2026-10", true],
+      ["2026-12-10", "2026-11", false], ["2027-01-10", "2026-12", false],
+    ] as const) {
+      const m = Number(period.slice(5))
+      const rev = revenue.find((r) => r.period === period)
+      out.push({
+        date, type: "revenue_release", period, url: actual ? MOPS_URL : null, mine: qty > 0, amount_estimate: null, estimated: !actual,
+        title: actual ? `公布 ${m} 月營收` : `${m} 月營收公布期限（預估）`,
+        detail: actual && rev ? `${m} 月營收 ${new Intl.NumberFormat("zh-TW").format(rev.revenue)} 千元，年增 ${rev.yoy_pct === null ? "—" : `${(rev.yoy_pct * 100).toFixed(1)}%`}` : actual ? null : "尚未偵測到實際公布日：每月 10 日前公布上個月營收（法定期限）",
+        sources: actual ? mops : rule,
+      })
     }
-    for (const [date, q] of [["2026-01-15", "2025Q4"], ["2026-04-16", "2026Q1"], ["2026-07-16", "2026Q2"], ["2026-10-15", "2026Q3"], ["2027-01-14", "2026Q4"]] as const) {
-      out.push({ date, type: "earnings", title: `${q} 法說會`, detail: "法說會簡報與影音（公開資訊觀測站）", url: "https://mops.twse.com.tw/", mine: false, amount_estimate: null })
+    // 財報：董事會通過財報的重大訊息日期；還沒公布的季報用法定期限
+    for (const [date, period, actual] of [["2026-05-14", "2026Q1", true], ["2026-08-13", "2026Q2", true], ["2026-11-11", "2026Q3", true]] as const) {
+      out.push({
+        date, type: "earnings", period, url: actual ? MOPS_URL : null, mine: qty > 0, amount_estimate: null, estimated: !actual,
+        title: `${period} 財報`, detail: "董事會通過財務報告（重大訊息）", sources: mops,
+      })
     }
-    out.push({ date: "2026-06-03", type: "shareholder_meeting", title: "股東常會", detail: null, url: null, mine: false, amount_estimate: null })
-    out.push({ date: "2026-08-12", type: "material_info", title: "董事會決議季配息", detail: "重大訊息（示範）", url: "https://mops.twse.com.tw/", mine: false, amount_estimate: null })
+    // 法說會：重大訊息第 12 款，日期是開會當天
+    for (const [date, period] of [["2026-07-16", "2026Q2"], ["2026-10-16", "2026Q3"], ["2027-01-15", "2026Q4"]] as const) {
+      out.push({ date, type: "investor_conference", period, url: MOPS_URL, mine: qty > 0, amount_estimate: null, estimated: false, title: `${period} 法說會`, detail: "法人說明會（簡報與影音見公開資訊觀測站）", sources: mops })
+    }
+    out.push({ date: "2026-06-03", type: "shareholder_meeting", title: "股東常會", detail: null, url: null, mine: false, amount_estimate: null, estimated: false, period: null, sources: mops })
+    for (const [date, category, title] of announcementsOf(spec)) {
+      if (category === "material_info") out.push({ date, type: "material_info", title, detail: null, url: null, mine: false, amount_estimate: null, estimated: false, period: null, sources: mops })
+    }
   }
   if (spec.symbol === "6488.TWO") {
-    out.push({ date: MOCK_TODAY, type: "attention", title: "列為注意股票", detail: "近 6 日累積跌幅過大（示範）", url: null, mine: qty > 0, amount_estimate: null })
+    out.push({ date: MOCK_TODAY, type: "attention", title: "列為注意股票", detail: "近 6 日累積跌幅過大", url: null, mine: qty > 0, amount_estimate: null, estimated: false, period: null, sources: commercial ? [sourceOf("tpex-openapi/attention")] : DEMO_SRC })
   }
   return out.sort((a, b) => b.date.localeCompare(a.date))
 }
 
-// ── news（只有標題、來源、連結） ─────────────────────────
-const NEWS: Record<string, [string, string, number][]> = {
+// ── news：官方公告（重大訊息、證交所新聞），personal 另加媒體標題（非商用） ─────────────
+const MEDIA: Record<string, [string, string, number][]> = {
   "2330.TW": [
     ["台積電先進封裝擴產，CoWoS 月產能明年再增五成", "鉅亨網", 2],
     ["外資連四賣台積電，法人：短線調節不改長線趨勢", "經濟日報", 5],
-    ["台積電 10 月營收年增 21%，創同期新高", "工商時報", 30],
-    ["半導體設備交期縮短，晶圓代工資本支出維持高檔", "MoneyDJ", 50],
   ],
-  "0050.TW": [["元大台灣50 規模創新高，受益人數持續成長", "經濟日報", 8]],
-  "00878.TW": [["國泰永續高股息 11 月除息，預估配發 0.55 元", "鉅亨網", 20]],
 }
 
-export function buildNews(spec: MockInstrumentSpec): NewsItem[] {
-  const rows = NEWS[spec.symbol] ?? [[`${spec.name}公布最新營運概況`, "鉅亨網", 26]]
-  return rows.map(([title, source, hoursAgo]) => ({
-    published_at: new Date(Date.parse(MOCK_AS_OF) - hoursAgo * 3_600_000 + 90 * 60_000).toISOString(),
+export function buildNews(spec: MockInstrumentSpec, commercial = false): NewsItem[] {
+  const official: NewsItem[] = announcementsOf(spec).map(([date, category, title], i) => ({
+    published_at: `${date}T${category === "material_info" ? `17:${String(30 - i * 7).padStart(2, "0")}:00` : "00:00:00"}+08:00`,
     title,
-    source,
-    url: `https://www.google.com/search?q=${encodeURIComponent(title)}`,
+    source: "公告",
+    url: category === "material_info" ? MOPS_URL : TWSE_NEWS_URL,
+    category,
+    sources: commercial
+      ? [sourceOf(category === "material_info" ? `${tw(spec)}/material_info` : "twse-openapi/news")]
+      : DEMO_SRC,
   }))
+  const media: NewsItem[] = commercial
+    ? []
+    : (MEDIA[spec.symbol] ?? []).map(([title, source, hoursAgo]) => ({
+        published_at: new Date(Date.parse(MOCK_AS_OF) - hoursAgo * 3_600_000 + 90 * 60_000).toISOString(),
+        title,
+        source,
+        url: `https://www.google.com/search?q=${encodeURIComponent(title)}`,
+        category: "media" as const,
+        sources: ["FinMind（非商用）"],
+      }))
+  return [...official, ...media].sort((a, b) => b.published_at.localeCompare(a.published_at))
 }
 
 // ── position ─────────────────────────────────────────────
-export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[]): Position | null {
-  const holding = buildHoldings(txns).find((h) => h.symbol === spec.symbol)
+export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[], commercial = false): Position | null {
+  const holding = buildHoldings(txns, undefined, commercial).find((h) => h.symbol === spec.symbol)
   if (!holding) return null
   const mine = txns.filter((t) => t.symbol === spec.symbol)
   const state = replay(mine)
@@ -344,7 +436,11 @@ export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[]): Po
     dividends_received: round(state.dividendsTwd),
     day_change: holding.day_change,
     markers,
-    upcoming_dividend: next ? { ex_dividend_date: next.ex_dividend_date!, amount_estimate: round(next.cash_dividend * holding.quantity * fx, 0) } : null,
+    upcoming_dividend: next && !(commercial && spec.market === "US") ? { ex_dividend_date: next.ex_dividend_date!, amount_estimate: round(next.cash_dividend * holding.quantity * fx, 0) } : null,
+    currency: spec.currency,
+    as_of: MOCK_AS_OF,
+    sources: ["本系統帳本"],
+    is_demo: !commercial,
   }
 }
 
@@ -358,51 +454,46 @@ export function buildWhy(spec: MockInstrumentSpec): Why {
   const pct = spec.price / ref - 1
   const reasons: WhyReason[] = []
   const pctText = `${pct > 0 ? "▲" : "▼"}${Math.abs(pct * 100).toFixed(2)}%`
-  if (Math.abs(pct) >= 0.03) reasons.push({ kind: "move", text: `今天${pct > 0 ? "上漲" : "下跌"} ${pctText}，超過 ±3%` })
+  if (Math.abs(pct) >= 0.03) reasons.push({ kind: "price_move", text: `今天${pct > 0 ? "上漲" : "下跌"} ${pctText}，超過 ±3%` })
   const volRatio = last.v / avgVol
   if (volRatio >= 2 || (spec.symbol === "2330.TW" && Math.abs(pct) >= 0.03)) {
     reasons.push({ kind: "volume", text: `成交量是近 20 日均量的 ${Math.max(volRatio, 2.1).toFixed(1)} 倍` })
   }
   const limits = limitsOf(spec)
-  if (limits && spec.price >= limits.up) reasons.push({ kind: "limit", text: "收在漲停" })
-  if (limits && spec.price <= limits.down) reasons.push({ kind: "limit", text: "收在跌停" })
+  if (limits && spec.price >= limits.up) reasons.push({ kind: "limit_up", text: "收在漲停" })
+  if (limits && spec.price <= limits.down) reasons.push({ kind: "limit_down", text: "收在跌停" })
   if (spec.symbol === "6488.TWO") reasons.push({ kind: "attention", text: "今天列為注意股票（近 6 日累積跌幅過大）" })
   if (spec.symbol === "2330.TW" && reasons.length > 0) reasons.push({ kind: "sector", text: "半導體類股同步上漲，投信連 5 天買超" })
   const show = reasons.some((x) => x.kind !== "sector")
   return {
     show,
-    headline: show ? reasons.filter((x) => x.kind !== "move").map((x) => x.text).slice(0, 2).join("，") || reasons[0]!.text : null,
+    headline: show ? reasons.filter((x) => x.kind !== "price_move").map((x) => x.text).slice(0, 2).join("，") || reasons[0]!.text : null,
     reasons: show ? reasons : [],
     as_of: MOCK_AS_OF,
   }
 }
 
 // ── 本週事項 ─────────────────────────────────────────────
-export function buildUpcoming(holdings: Holding[], specOf: (s: string) => MockInstrumentSpec | undefined, days = 7): UpcomingItem[] {
+/** 除息、股利入帳（持股）＋定期定額扣款（由計畫算出，見 recurring.ts） */
+export function buildUpcoming(holdings: Holding[], specOf: (s: string) => MockInstrumentSpec | undefined, days = 7, recurring: UpcomingItem[] = [], commercial = false): UpcomingItem[] {
   const end = addDays(MOCK_TODAY, days)
   const out: UpcomingItem[] = []
   for (const h of holdings) {
     const spec = specOf(h.symbol)
     if (!spec) continue
+    if (commercial && spec.market === "US") continue
     const fx = h.currency === "USD" ? FX_NOW : 1
+    const src = commercial ? [sourceOf(`${tw(spec)}/ex_dividend`)] : DEMO_SRC
     for (const d of dividendRecords(spec)) {
       if (d.cash_dividend <= 0) continue
       if (d.ex_dividend_date && d.ex_dividend_date >= MOCK_TODAY && d.ex_dividend_date <= end) {
-        out.push({ date: d.ex_dividend_date, type: "ex_dividend", symbol: h.symbol, title: `${h.code} 除息`, amount_estimate: round(d.cash_dividend * h.quantity * fx, 0) })
+        out.push({ date: d.ex_dividend_date, type: "ex_dividend", symbol: h.symbol, title: `${h.code} 除息`, amount_estimate: round(d.cash_dividend * h.quantity * fx, 0), is_demo: !commercial, sources: src })
       }
       if (d.payment_date && d.payment_date > MOCK_TODAY && d.payment_date <= end && d.ex_dividend_date && d.ex_dividend_date < MOCK_TODAY) {
-        out.push({ date: d.payment_date, type: "dividend_payment", title: `${h.code} 股利入帳`, symbol: h.symbol, amount_estimate: round(d.cash_dividend * h.quantity * fx * (h.currency === "USD" ? 0.7 : 1), 0) })
+        out.push({ date: d.payment_date, type: "dividend_payment", title: `${h.code} 股利入帳`, symbol: h.symbol, amount_estimate: round(d.cash_dividend * h.quantity * fx * (h.currency === "USD" ? 0.7 : 1), 0), is_demo: !commercial, sources: src })
       }
     }
   }
-  // 定期定額（示範：0050 每月 6 日、00878 每月 26 日）
-  for (const [symbol, code, day, amount] of [["0050.TW", "0050", 6, 10_000], ["00878.TW", "00878", 26, 8_000]] as const) {
-    for (const month of [MOCK_TODAY.slice(0, 7), addDays(`${MOCK_TODAY.slice(0, 7)}-28`, 5).slice(0, 7)]) {
-      const date = `${month}-${String(day).padStart(2, "0")}`
-      if (date > MOCK_TODAY && date <= end && holdings.some((h) => h.symbol === symbol)) {
-        out.push({ date, type: "recurring", symbol, title: `${code} 定期定額扣款`, amount_estimate: amount })
-      }
-    }
-  }
+  out.push(...recurring.filter((r) => r.date >= MOCK_TODAY && r.date <= end))
   return out.sort((a, b) => a.date.localeCompare(b.date))
 }

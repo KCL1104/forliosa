@@ -322,16 +322,22 @@ class RecurringPlan(Base):
 
 # -- AI (M4): conversations, drafts, usage, shared "why" cache ----------------------------------------
 class AiThread(Base):
-    """One AI conversation. ``model`` is fixed when the thread starts (thinking blocks are bound to it)."""
+    """One AI conversation. ``model`` is fixed when the thread starts (thinking blocks are bound to it), and so is
+    ``key_slot`` (the API key slot, i.e. workspace, every turn uses: prompt caches, thinking blocks and web-search
+    ``encrypted_content`` belong to it; the key itself is never stored). When the thread moves to another slot,
+    the history is continued from plain-text recap messages starting at ``context_from_seq``."""
 
     __tablename__ = "ai_threads"
-    __table_args__ = (Index("ix_ai_threads_user_updated", "user_id", "updated_at"),)
+    __table_args__ = (Index("ix_ai_threads_user_updated", "user_id", "updated_at"),
+                      Index("ix_ai_threads_updated", "updated_at"))
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(200), default="")
     model: Mapped[str] = mapped_column(String(64))
     context_tokens: Mapped[int] = mapped_column(BigInteger, default=0)  # prompt size of the latest call
+    key_slot: Mapped[int | None] = mapped_column(nullable=True)  # None: not pinned yet (new or pre-0005 thread)
+    context_from_seq: Mapped[int] = mapped_column(default=0, server_default="0")  # replay ai_messages.seq >= this
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
@@ -366,6 +372,7 @@ class AiDraft(Base):
     which calls ``POST /transactions`` with ``source: "ai_draft"``."""
 
     __tablename__ = "ai_drafts"
+    __table_args__ = (Index("ix_ai_drafts_updated", "updated_at"),)
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
@@ -381,17 +388,19 @@ class AiDraft(Base):
 
 
 class AiUsage(Base):
-    """One model call: tokens, server-tool requests and the estimated cost (USD)."""
+    """One model call: tokens, server-tool requests, the key slot and the estimated cost (USD). Kept for
+    accounting after the thread is deleted (retention); never holds message content."""
 
     __tablename__ = "ai_usage"
-    __table_args__ = (Index("ix_ai_usage_user_created", "user_id", "created_at"),)
+    __table_args__ = (Index("ix_ai_usage_user_created", "user_id", "created_at"),
+                      Index("ix_ai_usage_slot_created", "key_slot", "created_at"))
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     thread_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     feature: Mapped[str] = mapped_column(String(16))  # chat | why | smoke
     model: Mapped[str] = mapped_column(String(64))
-    key_index: Mapped[int | None] = mapped_column(nullable=True)
+    key_slot: Mapped[int | None] = mapped_column(nullable=True)  # n of CLAUDE_API_KEY_<n> (0 = ANTHROPIC_API_KEY)
     input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
     output_tokens: Mapped[int] = mapped_column(BigInteger, default=0)
     cache_creation_input_tokens: Mapped[int] = mapped_column(BigInteger, default=0)

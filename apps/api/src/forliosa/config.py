@@ -49,7 +49,8 @@ class Settings(BaseSettings):
 
     # -- AI (M4) ------------------------------------------------------------------------------------
     # API keys are deliberately NOT settings fields (they would show up in Settings dumps): forliosa.ai.keypool
-    # reads CLAUDE_API_KEY_<n> (any letter case, e.g. Claude_API_KEY_1) and falls back to ANTHROPIC_API_KEY.
+    # reads CLAUDE_API_KEY_<n> (any letter case, e.g. Claude_API_KEY_1; slot n, one workspace per key) and
+    # falls back to ANTHROPIC_API_KEY (slot 0), plus the optional per-slot AI_KEY_<n>_MONTHLY_BUDGET_USD.
     ai_model: str = "claude-haiku-5-5"
     ai_model_chat: str | None = None
     ai_model_why: str | None = None
@@ -64,6 +65,9 @@ class Settings(BaseSettings):
     ai_thread_max_context_tokens: int = 90_000  # keep prompts under the 100K-token price tier
     ai_dev_dummy_key: bool = False  # send a placeholder key; a proxy injects the real one
     ai_key_cooldown_seconds: float = 60.0
+    # A thread stays on its key slot while the slot recovers within this many seconds; otherwise it moves to the
+    # slot with the most headroom and continues from a plain-text recap.
+    ai_key_sticky_wait_seconds: float = 5.0
     ai_request_timeout_seconds: float = 120.0
     ai_web_search: bool = True
     ai_web_search_max_uses: int = 3
@@ -72,10 +76,17 @@ class Settings(BaseSettings):
     ai_web_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["official"])
     ai_web_dynamic_filtering: bool = False
     ai_eager_tool_streaming: bool = False
-    ai_why_enabled: bool = False
+    ai_why_enabled: bool = True  # cached per symbol per trading day; rule text on any failure
     ai_why_blocking: bool = False  # True: /why waits for the model; False: generate in the background
+    # Off-topic requests (coding, homework, role-play …) with no finance word are declined without a model call.
+    ai_scope_precheck: bool = True
+    # Threads, messages and drafts are deleted this many days after their last activity (0 = keep forever).
+    ai_retention_days: int = 30
+    # Who may read GET /ai/admin/keys outside FORLIOSA_ENV=dev/test (comma-separated emails).
+    ai_admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
-    @field_validator("ai_web_search_allowed_domains", "ai_web_fetch_allowed_domains", mode="before")
+    @field_validator("ai_web_search_allowed_domains", "ai_web_fetch_allowed_domains", "ai_admin_emails",
+                     mode="before")
     @classmethod
     def _split_ai_domains(cls, v: object) -> object:
         if isinstance(v, str):
