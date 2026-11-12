@@ -188,7 +188,7 @@ await check("上市股票的籌碼：三大法人與外資持股是空狀態，A
   const asks = page.getByRole("button", { name: "最近外資對這檔的動向？" })
   if ((await asks.count()) !== 2) throw new Error(`expected the panel chip and the empty-state button, got ${await asks.count()}`)
   await page.locator("main").getByRole("button", { name: "最近外資對這檔的動向？" }).click()
-  await page.getByText(/逐檔三大法人買賣超與外資持股比沒有可商用的資料/).waitFor({ timeout: 8000 })
+  await page.getByText(/逐檔三大法人買賣超與外資持股比，證交所以付費商品提供/).waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "新對話" }).click()
   await page.goto(base + "/stock/6488.TWO?tab=chips", { waitUntil: "networkidle" })
   await page.getByRole("heading", { name: "三大法人買賣超" }).waitFor({ timeout: 8000 })

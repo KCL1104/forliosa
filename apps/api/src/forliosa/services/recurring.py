@@ -6,9 +6,9 @@
 * Plans never create transactions. ``draft`` returns a ``/transactions/preview``-style draft for one debit:
   the trade date is the debit day; shares = floor(amount ÷ close) (odd lots included) and the account's
   commission on top. The close is **the debit day's own close** when the debit day is already past (a missed
-  debit recorded later), else the latest close; a past day without an archived close falls back to the latest
-  close and says so in the rules. The frontend shows it as an AI draft the user signs, then posts
-  ``transaction`` to ``POST /transactions``.
+  debit recorded later), else the latest close; a past day without a real close (demo candles never count)
+  falls back to the latest close and says so in the rules. The frontend shows it as an AI draft the user
+  signs, then posts ``transaction`` to ``POST /transactions``.
 """
 
 from __future__ import annotations
@@ -214,12 +214,18 @@ def last_close(md: MarketData, symbol: str) -> tuple[Decimal, date, Any] | None:
     return None
 
 
-def close_on(md: MarketData, symbol: str, day: date) -> tuple[Decimal, bool, str] | None:
-    """That trading day's own close (price, is_demo, source), or None when it is not available."""
+def close_on(md: MarketData, symbol: str, day: date) -> tuple[Decimal, str] | None:
+    """That trading day's own real close (price, source), or None when no real source has it.
+
+    Demo candles never count: under ``personal`` the facade answers a one-day range with synthetic data whenever
+    no real source has that day (e.g. a young archive), and that must not pass as the debit day's close; the
+    draft then falls back to the latest close and says so."""
     h = md.history(symbol, day, day)
+    if h.is_demo:
+        return None
     for c in h.candles:
         if c.t == day and c.c is not None and c.c > 0:
-            return c.c, h.is_demo, h.source
+            return c.c, h.source
     return None
 
 
@@ -241,7 +247,7 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
     is_demo = False
     same_day = close_on(md, plan.symbol, debit) if debit < today else None
     if same_day is not None:
-        price, is_demo, src = same_day
+        price, src = same_day
         price_date = debit
         price_sources = tagged(src, "price")
     else:

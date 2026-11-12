@@ -229,7 +229,8 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
         return list(db.scalars(_filtered(stmt, model, md).order_by(model.date)))
 
     # Listed (TWSE) stocks: no per-stock 三大法人 / 外資持股 in any mode (owner, 2026-11-12) — TWSE's OpenAPI has no
-    # such dataset and its website may not be downloaded by program; FinMind only mirrors that website.
+    # such dataset and its website may not be downloaded by program; FinMind only mirrors that website, so those
+    # datasets are not even requested from it (margin only).
     listed = info.market == "TWSE"
     inst = {} if listed else {r.date: r for r in rows(InstitutionalDaily)}
     margin = {r.date: r for r in rows(MarginDaily)}
@@ -244,7 +245,7 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     wanted = (("margin", margin),) if listed else (("institutional", inst), ("margin", margin), ("foreign", foreign))
     if fm is not None and min(len(target) for _, target in wanted) < expected:
         try:
-            extra = fm.chips(sym, start)  # type: ignore[attr-defined]
+            extra = fm.chips(sym, start, datasets=[key for key, _ in wanted])  # type: ignore[attr-defined]
         except Exception:  # FinMind quota or network: serve what the archive has
             extra = None
             notes.append("FinMind 暫時無法使用，只顯示已存檔的資料")

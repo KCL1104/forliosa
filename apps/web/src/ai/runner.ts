@@ -2,7 +2,7 @@ import { useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
-import { ApiError, type Instrument, type TransactionInput } from "@/api/types"
+import { ApiError, type Instrument, type RecurringDraft, type TransactionInput } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { formatDateShort, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
 import { replacedAutoDividend } from "@/lib/ledger-display"
@@ -34,6 +34,34 @@ function describe(d: Pick<Draft, "input" | "instrument">): string {
   const verb = input.type === "sell" ? "賣出" : "買進"
   const qty = input.quantity !== null ? formatQuantity(input.quantity, "lot", instrument.market) : ""
   return `${verb} ${instrument.name} ${qty}`
+}
+
+/**
+ * 定期定額草稿的說明文字（`POST /recurring/{id}/draft` 的回應）。
+ * 補記時後端用扣款日當天的收盤價，沒有那天的真實收盤價就改用最近收盤價；`is_demo` 的價格（personal 模式
+ * 沒有真實報價時）一定要講明是示範價格，不能說成「收盤價」。
+ */
+export function recurringDraftCopy(
+  d: RecurringDraft,
+  r: NonNullable<Suggestion["recurring"]>,
+): { tradeDate: string; notes: string[]; text: string } {
+  const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
+  const price = formatPrice(d.transaction.price, marketOf(d.transaction.symbol))
+  const asOf = formatDateShort(d.price_as_of, false)
+  const estimate = d.is_demo
+    ? `${formatMoney(d.amount)} 以示範價格 ${price} 估算股數（不是真實行情，含零股），手續費另計`
+    : `${formatMoney(d.amount)} 以 ${asOf} 收盤價 ${price} 估算股數（含零股），手續費另計`
+  const notes = [
+    r.missed
+      ? `${estimate}；這是 ${formatDateShort(tradeDate, false)} 的扣款，請照券商對帳單改成實際成交的股數和價格再簽名。`
+      : `${estimate}；實際成交以券商對帳單為準，簽名前可以改。`,
+  ]
+  // 補記時用的是扣款日當天的收盤價嗎（後端沒有那天的真實收盤價會改用最近收盤價）
+  const closeWord = d.is_demo ? "示範價格" : d.price_as_of === tradeDate ? "那天的收盤價" : "最近收盤價"
+  const text = r.missed
+    ? `${formatDateShort(tradeDate, false)} 是${d.name}定期定額的扣款日，帳本裡還沒有這一筆。\n我先照${closeWord}算好股數和手續費，你照對帳單改好再簽名，簽了才會入帳。`
+    : `今天是${d.name}定期定額的扣款日。\n我照${d.is_demo ? "示範價格" : "最近收盤價"}算好股數和手續費，簽名後才會入帳。`
+  return { tradeDate, notes, text }
 }
 
 export function useAiRunner(ctx: AiContext) {
@@ -239,32 +267,19 @@ export function useAiRunner(ctx: AiContext) {
     try {
       const d = await api.draftRecurring(r.planId, r.scheduledDate)
       const symbol = d.transaction.symbol
-      const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
-      const estimate = `${formatMoney(d.amount)} 以 ${formatDateShort(d.price_as_of, false)} 收盤價 ${formatPrice(d.transaction.price, marketOf(symbol))} 估算股數（含零股），手續費另計`
-      // 補記時用的是扣款日當天的收盤價嗎（後端沒有那天的收盤價會改用最近收盤價）
-      const closeWord = d.price_as_of === tradeDate ? "那天的收盤價" : "最近收盤價"
+      const copy = recurringDraftCopy(d, r)
       const draft: Draft = {
         id: newId("dft"),
         status: "pending",
-        input: { ...d.transaction, trade_date: tradeDate, amount: null },
+        input: { ...d.transaction, trade_date: copy.tradeDate, amount: null },
         instrument: { symbol, code: codeOf(symbol), name: d.name, market: marketOf(symbol), currency: "TWD" },
         preview: d.preview,
-        notes: [
-          r.missed
-            ? `${estimate}；這是 ${formatDateShort(tradeDate, false)} 的扣款，請照券商對帳單改成實際成交的股數和價格再簽名。`
-            : `${estimate}；實際成交以券商對帳單為準，簽名前可以改。`,
-        ],
+        notes: copy.notes,
         createdAt: new Date().toISOString(),
         recurring: { planId: r.planId, date: r.date },
       }
       upsertDraft(draft)
-      push({
-        role: "ai",
-        text: r.missed
-          ? `${formatDateShort(tradeDate, false)} 是${d.name}定期定額的扣款日，帳本裡還沒有這一筆。\n我先照${closeWord}算好股數和手續費，你照對帳單改好再簽名，簽了才會入帳。`
-          : `今天是${d.name}定期定額的扣款日。\n我照最近收盤價算好股數和手續費，簽名後才會入帳。`,
-        draftId: draft.id,
-      })
+      push({ role: "ai", text: copy.text, draftId: draft.id })
     } catch (err) {
       say({
         text: `這次的定期定額草稿沒有寫成：${err instanceof Error ? err.message : "請再試一次"}。`,

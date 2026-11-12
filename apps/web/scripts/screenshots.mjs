@@ -128,7 +128,7 @@ const autoEdit = async (page) => {
 const foreignAsk = async (page, mobile) => {
   await toTabs(page)
   await page.locator("main").getByRole("button", { name: "最近外資對這檔的動向？" }).click()
-  await page.getByText(/逐檔三大法人買賣超與外資持股比沒有可商用的資料/).first().waitFor({ timeout: 8000 })
+  await page.getByText(/逐檔三大法人買賣超與外資持股比，證交所以付費商品提供/).first().waitFor({ timeout: 8000 })
   // 桌面：頁面停在分頁（只捲面板），空狀態和回答同時出現；手機是全螢幕的問 AI
   if (mobile) await page.waitForTimeout(400)
 }

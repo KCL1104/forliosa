@@ -243,6 +243,29 @@ def test_past_debit_is_priced_at_that_days_close(client, calendar, market, monke
         set_market_data(market)
 
 
+def test_past_debit_never_takes_a_demo_close_under_personal(client, calendar, close_52_4, monkeypatch):
+    """personal + demo provider, and no real close archived for the debit day (a young archive or a missed
+    archive run): the facade would answer that one-day range with a synthetic candle. The draft must not price
+    the debit with it; it falls back to the real latest close and says so."""
+    freeze(monkeypatch, date(2026, 11, 12))
+    acc = make_account(client)
+    pid = client.post(f"{API}/recurring", json={"account_id": acc, "symbol": "0050", "amount": 5000,
+                                                "day_of_month": [6], "start_date": "2026-01-01"}).json()["id"]
+    md = MarketData([FixedClose(), DemoProvider()], policy="personal")
+    assert md.history("0050.TW", date(2026, 11, 6), date(2026, 11, 6)).is_demo  # the trap: a synthetic 11/6
+    assert rec.close_on(md, "0050.TW", date(2026, 11, 6)) is None
+    d = client.post(f"{API}/recurring/{pid}/draft", params={"date": "2026-11-06"}).json()
+    # floor(5,000 ÷ 52.4) = 95 shares at the real latest close, not floor(5,000 ÷ synthetic close)
+    assert (d["transaction"]["trade_date"], d["price_as_of"], d["is_demo"]) == ("2026-11-06", "2026-11-11", False)
+    assert (d["transaction"]["price"], d["transaction"]["quantity"]) == (52.4, 95)
+    assert "沒有 11/6 的收盤價，改用最近收盤價（11/11）估算，請照對帳單修改" in d["preview"]["rules"]
+    # a real archived close for the day still wins under personal
+    set_market_data(MarketData([DayCloses(), DemoProvider()], policy="personal"))
+    d = client.post(f"{API}/recurring/{pid}/draft", params={"date": "2026-11-06"}).json()
+    assert (d["price_as_of"], d["transaction"]["price"], d["transaction"]["quantity"], d["is_demo"]) == (
+        "2026-11-06", 50.0, 100, False)
+
+
 def test_draft_without_a_close_under_commercial(client, market):
     set_market_data(MarketData([DemoProvider()], policy="commercial"))
     try:

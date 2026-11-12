@@ -298,7 +298,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "foreign_flow":
       // 本機規則版沒有網路搜尋：說明為什麼沒有數字、給現在看得到的資料（真實後端由 AI 搜尋新聞，附來源與日期）
       return {
-        text: `上市股票的逐檔三大法人買賣超與外資持股比沒有可商用的資料，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期；完整的 AI 回答開放後再問我，我不想給你猜的答案。`,
+        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供，沒有免費、可商用的來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期；完整的 AI 回答開放後再問我，我不想給你猜的答案。`,
         links: [link("chips", "看融資融券"), link("events", "看公告")],
       }
     default:

@@ -685,7 +685,8 @@ class Archiver:
 
 def finmind_backfill(db: Session, symbols: list[str], start: date) -> int:
     """FinMind (personal only): margin, institutional, foreign holding, PER — only where nothing is archived.
-    Listed (TWSE) stocks get margin only: their per-stock 三大法人 / 外資持股 are never shown (``services.stock``)."""
+    Listed (TWSE) stocks get margin only: their per-stock 三大法人 / 外資持股 are never shown (``services.stock``),
+    so those datasets are not requested (each dataset is one request against FinMind's small quota)."""
     from forliosa.config import get_settings
     from forliosa.marketdata.finmind import FinMindProvider
 
@@ -695,17 +696,17 @@ def finmind_backfill(db: Session, symbols: list[str], start: date) -> int:
     for sym in symbols:
         if sym.endswith((".TW", ".TWO")) is False:
             continue
+        listed = market_of_symbol(sym) == "TWSE"
+        targets = ((MarginDaily, "margin"),) if listed else (
+            (MarginDaily, "margin"), (InstitutionalDaily, "institutional"), (ForeignHoldingDaily, "foreign"))
         try:
-            chips = fm.chips(sym, start)
+            chips = fm.chips(sym, start, datasets=[key for _, key in targets])
         except ProviderUnavailable as exc:
             log.warning("finmind backfill stopped at %s: %s", sym, exc)
             break
-        n += upsert(db, MarginDaily, [{**r, "symbol": sym, "source": "finmind"} for r in chips["margin"]],
-                    ["symbol", "date"], ())
-        if market_of_symbol(sym) != "TWSE":
-            for model, key in ((InstitutionalDaily, "institutional"), (ForeignHoldingDaily, "foreign")):
-                n += upsert(db, model, [{**r, "symbol": sym, "source": "finmind"} for r in chips[key]],
-                            ["symbol", "date"], ())
+        for model, key in targets:
+            n += upsert(db, model, [{**r, "symbol": sym, "source": "finmind"} for r in chips[key]],
+                        ["symbol", "date"], ())
         _time.sleep(0.3)
     return n
 

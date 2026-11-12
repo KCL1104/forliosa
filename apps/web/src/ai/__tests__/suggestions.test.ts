@@ -69,6 +69,9 @@ describe("個股頁的建議問題", () => {
     expect(classifyQuestion("外資最近在賣嗎", tpex)).toBeNull()
     const a = answerFor("foreign_flow", { ctx, privacy: false, today: TODAY })!
     expect(a.text).toContain("不顯示")
+    // 和籌碼分頁空狀態（後端 notes）的說法一致：證交所以付費商品提供，不是「沒有可商用的資料」
+    expect(a.text).toContain("證交所以付費商品提供")
+    expect(a.text).not.toContain("沒有可商用的資料")
     expect(a.text).not.toMatch(/\d+ 張/)
     expect(a.links!.map((l) => l.search)).toEqual([{ tab: "chips" }, { tab: "events" }])
   })

@@ -135,7 +135,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 | 證交所網站（T86、MI_QFIIS…）、MIS、櫃買網站、MOPS 網站 | **不使用**（已移除；舊存檔的 `twse-web`／`twse-mis` 資料列也不讀） | **不使用** |
 | 盤中走勢 `/intraday` | `points: []`＋`notes` | 同左 |
 | 新聞 `/news` | 官方公告（重大訊息、證交所新聞） | 同左，FinMind 開啟時另加媒體標題（非商用） |
-| 上市股票三大法人、外資持股 | 不提供（證交所 OpenAPI 沒有個股資料），`chips.notes` 說明 | 同左（FinMind 開啟時也不顯示、回補也不寫：FinMind 是轉載證交所網站） |
+| 上市股票三大法人、外資持股 | 不提供（證交所 OpenAPI 沒有個股資料），`chips.notes` 說明 | 同左（FinMind 開啟時也不向它要這兩個資料集，只要融資融券；回補也一樣：FinMind 是轉載證交所網站） |
 
 ### 每個回應的 `sources`
 
@@ -250,7 +250,8 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   也遵守 `account_id` 篩選。
 - **草稿**：成交日 = 扣款日；股數 = floor(金額 ÷ 收盤價)（含零股），手續費依帳戶設定另計（零股最低 1 元）、買進免稅。收盤價：扣款日已經過去
   （`?date=` 補記）用扣款日當天的收盤價（`md.history(symbol, 扣款日, 扣款日)`，`price_as_of` = 扣款日）；今天或之後用最近收盤價
-  （盤中是前一天收盤）；過去的扣款日沒有收盤價時用最近收盤價，`preview.rules` 第二行說明。回應
+  （盤中是前一天收盤）；過去的扣款日沒有**真實**收盤價時用最近收盤價，`preview.rules` 第二行說明（personal 模式下示範 K 線
+  不算那天的收盤價：存檔缺那天時 `md.history` 會用示範資料補，`close_on` 不收）。回應
   `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction, preview: TradePreview, is_demo, sources}`，`transaction`
   可以直接 `POST /transactions`（`source: "ai_draft"`）。沒有收盤價 422 `no_price`（commercial 不會用示範價格）；金額不足一股
   422 `amount_too_small`；計畫沒有下一次扣款 409。
@@ -519,7 +520,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
     `GET /portfolio/closed` 與 `GET /instruments/{symbol}/position/history` 提供。
 12. ~~**commercial 模式的歷史資料**~~：已決定（2026-11-12）：commercial 從不使用示範資料，存檔不足時回空並在 `notes` 說「資料累積中」。
 13. ~~**上市股票三大法人**~~：已決定（產品負責人 2026-11-12）：不寄信給證交所、不買 Data E-Shop，上市股票的逐檔三大法人與外資持股**不顯示**
-    （任何模式，含 FinMind；上櫃照常）。個股頁的空狀態可直接問 AI「最近外資對這檔的動向？」（建議問題 `foreign_flow`），AI 用網路搜尋新聞回答並附來源與日期；
+    （任何模式，含 FinMind：上市股票只向 FinMind 要融資融券，不下載法人與持股資料集；上櫃照常）。個股頁的空狀態可直接問 AI「最近外資對這檔的動向？」（建議問題 `foreign_flow`），AI 用網路搜尋新聞回答並附來源與日期；
     `web_fetch` 封鎖 `www.twse.com.tw`、`mis.twse.com.tw`。之後要用時：Data E-Shop「三大法人買賣超檔」或書面同意（詢問信草稿見 `docs/research/data-sources-licensing.md` §1.9）。
 14. **新聞來源**：目前只有官方公告（重大訊息、證交所新聞）。媒體新聞需要授權（中央社等，需詢價）。
 15. ~~**定期定額**~~：已實作（2026-11-12）。待確認：扣款金額是否含手續費（目前股數 = floor(金額 ÷ 收盤價)，手續費另計）。

@@ -61,6 +61,7 @@
 | AI 面板 | ✅ 對話捲到底只捲面板的捲動區，從頁面按「問 AI」時頁面不再跳回頂端 | `src/ai/Conversation.tsx` |
 | 定期定額 | ✅ 補記過去的扣款：mock 用扣款日當天的收盤價（`price_as_of` = 扣款日）；AI 的話「我先照那天的收盤價算好股數」；設定頁說明改寫 | `src/api/mock/recurring.ts`、`src/ai/runner.ts`、`src/pages/settings/RecurringPlans.tsx` |
 | mock | ✅ 上市股票任何模式都沒有法人與外資持股；2330 的為什麼漲拿掉「投信連 5 天買超」 | `src/api/mock/research.ts` |
+| 審查修正 | ✅ 本機規則版的外資動向回答改說「證交所以付費商品提供，沒有免費、可商用的來源」，和籌碼分頁空狀態（後端 notes）一致；定期定額草稿的說明抽成 `recurringDraftCopy`，草稿是示範價格（`is_demo`）時 AI 的話與草稿說明都說「示範價格」，不說成收盤價 | `src/ai/suggestions.ts`、`src/ai/runner.ts` |
 
 ## 驗證
 
@@ -68,6 +69,7 @@
 - Playwright 冒煙（`node scripts/smoke.mjs`，mock 模式）：22 個路由＋30 個流程全部通過（第四批新增：股利頁的「自動」與說明；編輯自動那筆 → 「自動・已修改」、刪除自動那筆後不再出現）；第三批新增：補記 11/06 的 0050（草稿成交日 11/6 → 簽名 → 不再提出）、已出清年份（2026／2025／2024、最近一年展開、小計）、持倉標記（說明、到設定的那個計畫、隱私模式遮金額）、法人觀點（預設收合、2330 三筆＋免責、2454 查詢 → 搜尋中 → 結果、2881 查無、2409 查不到、ETF 沒有）、手機的標記與整列點擊、手機法人觀點。
 - 截圖（`pnpm screenshots`）：`docs/screenshots/v2/`，58 張全部重拍（mock 資料有變）；新增 `stock-2330-analyst-*`、`ledger-recurring-marks-*`，`ledger-closed-*` 改成年份分組。第四批新增 12 張 `ledger-auto-dividends-{transactions,dividends,edit}-{desktop,iphone}-{light,dark}`（只拍新的：其他畫面的數字沒變，交易列表的股利改在除息日、多了「自動」）。
 - 第五批：`pnpm test` 13 檔 168 項（新增外資動向的建議與回答、上市股票的 mock 籌碼、補記用扣款日收盤價）；冒煙 22 個路由＋31 個流程全部通過（新增上市／上櫃籌碼與問 AI 外資動向、補記說「那天的收盤價」；設定頁修改計畫前先等商品帶入，避免機器忙時按太快）；截圖新增 `stock-2330-foreign-ask-*`、`stock-6488-chips-*`，重拍 `stock-2330-chips-*`、`stock-2330-overview-*`；detector 原始碼與 2330／6488 籌碼網址 0 項。
+- 第五批審查修正：`pnpm test` 14 檔 171 項（新增 `recurring-draft.test.ts`：那天的收盤價／最近收盤價／示範價格三種說法；外資動向回答和空狀態說法一致）；冒煙全部通過（外資動向的等待字串跟著改）；重拍 `stock-2330-foreign-ask-*` 4 張。
 - Impeccable detector：原始碼 0 項；即時網址（帳本、2330、2454、NVDA、設定、資料來源；1440 與 390）0 項；展開後的狀態以 `--cdp` 掃（法人觀點 ready／none／searching／empty、已出清年份；1440 與 390）修正前 1 項（搜尋中的脈動紫點）→ 0 項。
 - 寬度檢查：390、820、1024、1280、1440、1920 都沒有水平捲動。
 

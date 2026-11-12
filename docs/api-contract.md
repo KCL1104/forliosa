@@ -373,7 +373,7 @@
 | GET | `/recurring?account_id=` | `[{id, account_id, symbol, name, amount, day_of_month: int[], start_date, end_date, active, note, next_date, created_at, updated_at}]` |
 | POST | `/recurring` | body `{account_id, symbol, amount (TWD 整數), day_of_month: 1–28 或陣列 [6, 16, 26], start_date?, end_date?, active?, note?}` → 201 |
 | GET／PATCH／DELETE | `/recurring/{id}` | PATCH 部分更新（`end_date: null` 清除）；DELETE 204 |
-| POST | `/recurring/{id}/draft?date=` | `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction: {account_id, symbol, type: "buy", trade_date, quantity, price, note, source: "ai_draft"}, preview: TradePreview, is_demo, sources}`；`trade_date` = 扣款日（`date`，遇休市順延）；股數 = floor(金額 ÷ 收盤價)（含零股），手續費另計。**收盤價**：扣款日已經過去（補記）用**扣款日當天**的收盤價（`price_as_of` = 扣款日）；今天或之後的扣款用最近收盤價；過去的扣款日沒有存檔的收盤價時改用最近收盤價，並在 `preview.rules` 說明「沒有 11/5 的收盤價，改用最近收盤價（11/11）估算，請照對帳單修改」。**不建立交易**，使用者簽名後 `POST /transactions` |
+| POST | `/recurring/{id}/draft?date=` | `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction: {account_id, symbol, type: "buy", trade_date, quantity, price, note, source: "ai_draft"}, preview: TradePreview, is_demo, sources}`；`trade_date` = 扣款日（`date`，遇休市順延）；股數 = floor(金額 ÷ 收盤價)（含零股），手續費另計。**收盤價**：扣款日已經過去（補記）用**扣款日當天**的收盤價（`price_as_of` = 扣款日）；今天或之後的扣款用最近收盤價；過去的扣款日沒有真實的收盤價（示範資料不算）時改用最近收盤價，並在 `preview.rules` 說明「沒有 11/5 的收盤價，改用最近收盤價（11/11）估算，請照對帳單修改」。**不建立交易**，使用者簽名後 `POST /transactions` |
 | GET | `/meta/attributions` | `{policy, notice: [授權條款第 2、3 點], datasets: [{key, agency, dataset, url, used_for, year, license, license_url, commercial, attribution}], not_used: [...]}`（不需登入） |
 
 - `/portfolio/upcoming` 的 `type: "recurring"`：扣款日遇非交易日順延（證交所休市日），多 `plan_id`、`account_id`、`scheduled_date`；`amount_estimate` 為扣款金額。
