@@ -297,7 +297,7 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
         ) : loading ? (
           <Skeleton className="h-full w-full rounded-sm" />
         ) : empty ? (
-          isIntraday ? <NoIntraday inst={inst} quote={quote} /> : <p className="grid h-full place-items-center text-md text-ink-2">這段期間還沒有成交資料。</p>
+          isIntraday ? <NoIntraday inst={inst} quote={quote} notes={intraday.data?.notes ?? []} /> : <p className="grid h-full place-items-center text-md text-ink-2">這段期間還沒有成交資料。</p>
         ) : (
           <div ref={box} className="absolute inset-0" role="img" aria-label={`${inst.name}走勢圖，${RANGES.find((r) => r.value === range)?.label}${rangeReturn !== null ? `，區間 ${formatPercent(rangeReturn)}` : ""}`} />
         )}
@@ -317,10 +317,24 @@ export function PriceChart({ inst, quote, position }: { inst: InstrumentDetail; 
   )
 }
 
-function NoIntraday({ inst, quote }: { inst: InstrumentDetail; quote?: Quote }) {
+function NoIntraday({ inst, quote, notes }: { inst: InstrumentDetail; quote?: Quote; notes: string[] }) {
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
+  if (notes.length > 0) {
+    // 後端說明為什麼沒有（例如只用可商用來源時沒有授權的盤中資料）：照實顯示
+    return (
+      <div className="flex h-full flex-col items-start justify-center gap-2 border-y border-dashed border-rule px-1">
+        <p className="font-medium">今天的 1 日走勢暫時沒有</p>
+        {notes.map((n) => (
+          <p key={n} className="max-w-prose text-md text-ink-2">
+            {n}
+          </p>
+        ))}
+        <p className="text-md text-ink-2">可以先看 5 日或 1 月。{quote && ` 目前 ${formatPrice(quote.price, inst.market)}。`}</p>
+      </div>
+    )
+  }
   return (
     <div className="flex h-full flex-col items-start justify-center gap-3 border-y border-dashed border-rule px-1">
       <p className="font-medium">1 日走勢只有持股與觀察清單會記錄</p>

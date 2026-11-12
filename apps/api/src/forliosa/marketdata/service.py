@@ -58,7 +58,11 @@ class Answer[T]:
 
 
 class MarketData:
-    def __init__(self, providers: list[BaseProvider], jitter: bool = False, policy: Policy = "personal"):
+    """Under ``commercial`` the demo provider only contributes the static instrument master (names and
+    codes): it never answers quotes, history, dividends, fundamentals or FX, so no synthetic number is
+    ever served. Endpoints then return empty data with a 「資料累積中」 note instead."""
+
+    def __init__(self, providers: list[BaseProvider], jitter: bool = False, policy: Policy = "commercial"):
         self.policy: Policy = policy
         self.providers = [p for p in providers if provider_allowed(p.name, policy)]
         self.demo: DemoProvider | None = next((p for p in self.providers if isinstance(p, DemoProvider)), None)
@@ -73,9 +77,15 @@ class MarketData:
         self._quote_cache: dict[str, tuple[float, QuoteData]] = {}
 
     # -- provider plumbing -----------------------------------------------------------------------
-    def _available(self) -> list[BaseProvider]:
+    @property
+    def demo_data_allowed(self) -> bool:
+        return self.policy == "personal"
+
+    def _available(self, include_demo: bool | None = None) -> list[BaseProvider]:
+        """Providers not cooling down. Demo providers only answer data calls under ``personal``."""
         now = time.monotonic()
-        return [p for p in self.providers if self._down_until.get(p.name, 0) <= now]
+        demo_ok = self.demo_data_allowed if include_demo is None else include_demo
+        return [p for p in self.providers if self._down_until.get(p.name, 0) <= now and (demo_ok or not p.is_demo)]
 
     def _call(self, provider: BaseProvider, fn: Callable[[], T]) -> T | None:
         try:
@@ -124,7 +134,7 @@ class MarketData:
             if self._master is not None and time.monotonic() - self._master_at < MASTER_TTL_SECONDS:
                 return self._master
         merged: dict[str, InstrumentInfo] = {}
-        for p in self._available():
+        for p in self._available(include_demo=True):  # the built-in catalog is reference data, not prices
             items = self._call(p, p.instruments)
             for info in items or []:
                 merged.setdefault(info.symbol, info)
@@ -461,6 +471,17 @@ class MarketData:
 
     def provider(self, name: str) -> BaseProvider | None:
         return next((p for p in self._available() if p.name == name), None)
+
+    def archive_since(self, symbol: str | None = None) -> date | None:
+        """First archived trading day (of ``symbol``, else of any symbol) usable under the policy."""
+        archive = next((p for p in self.providers if p.name == "archive"), None)
+        fn = getattr(archive, "first_date", None)
+        if fn is None:
+            return None
+        try:
+            return (fn(symbol) if symbol else None) or fn(None)
+        except Exception:  # the archive is optional (e.g. no database yet)
+            return None
 
     def fx_series(self, pair: str, start: date, end: date) -> tuple[dict[date, Decimal], bool]:
         ans = self._first("fx_history", pair, start, end)

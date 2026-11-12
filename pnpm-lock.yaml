@@ -16,9 +16,6 @@ importers:
       '@fontsource-variable/noto-sans-tc':
         specifier: ^5.3.1
         version: 5.3.1
-      '@fontsource-variable/source-sans-3':
-        specifier: ^5.3.1
-        version: 5.3.1
       '@fontsource/lxgw-wenkai-tc':
         specifier: 5.3.1
         version: 5.3.1
@@ -318,9 +315,6 @@ packages:
 
   '@fontsource-variable/noto-sans-tc@5.3.1':
     resolution: {integrity: sha512-gueh+AySNkihE+HvizXLHltxt5/xVFSvw6ISnKTlpb/lG5QQm6u/KwuempTJ/jDYMST3xwiERYTTyseoJ/Kxew==}
-
-  '@fontsource-variable/source-sans-3@5.3.1':
-    resolution: {integrity: sha512-u0p5Z/PM2e1uxYOMiodLM6NVzxHwULcB6Oi7QSr2WU/sdoLBFP/BeOZ3YYHeJ6rHsjPZA1nZweZVaV7sf2MAyQ==}
 
   '@fontsource/lxgw-wenkai-tc@5.3.1':
     resolution: {integrity: sha512-oulAMD2B40s+em16ZgcawwoVcBLBackzByuNzOg6D99J4G5Jjf6QyDvQFHWt3lIy3GgzQGGiU9mjIUvx5k7r4A==}
@@ -2235,8 +2229,6 @@ snapshots:
   '@floating-ui/utils@0.2.12': {}
 
   '@fontsource-variable/noto-sans-tc@5.3.1': {}
-
-  '@fontsource-variable/source-sans-3@5.3.1': {}
 
   '@fontsource/lxgw-wenkai-tc@5.3.1': {}
 

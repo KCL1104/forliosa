@@ -16,7 +16,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import Policy, allowed_sources
@@ -36,7 +36,7 @@ class ArchiveProvider(BaseProvider):
     partial_history = True
     cooldown_seconds = 30
 
-    def __init__(self, policy: Policy = "personal", session_fn: Callable[[], Session] = _default_session):
+    def __init__(self, policy: Policy = "commercial", session_fn: Callable[[], Session] = _default_session):
         self.policy = policy
         self.session_fn = session_fn
         # (method, symbol) -> source keys of the rows the last answer used (twse-openapi, finmind …),
@@ -52,6 +52,16 @@ class ArchiveProvider(BaseProvider):
     def _filter(self, stmt, model):
         allowed = allowed_sources(self.policy)
         return stmt.where(model.source.in_(allowed)) if allowed is not None else stmt
+
+    def first_date(self, symbol: str | None = None) -> date | None:
+        """Earliest archived close (of ``symbol`` or of any symbol): where the archive's history begins."""
+        from forliosa.models import PriceDaily
+
+        with self.session_fn() as db:
+            stmt = select(func.min(PriceDaily.date))
+            if symbol:
+                stmt = stmt.where(PriceDaily.symbol == symbol)
+            return db.scalar(self._filter(stmt, PriceDaily))
 
     # -- prices ------------------------------------------------------------------------------------
     def history(self, symbol: str, start: date, end: date) -> list[Candle] | None:

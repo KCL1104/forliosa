@@ -41,6 +41,7 @@ class SeriesPoint:
     daily_return: float  # r_t
     dividends: Decimal  # net cash dividends received on t (TWD), part of O_t
     realized: Decimal  # realized P&L booked on t (TWD)
+    unpriced: tuple[str, ...] = ()  # held symbols without a market price on t (valued at trade price / cost)
 
 
 @dataclass
@@ -101,12 +102,14 @@ def simulate(
         inflow = flows.inflow + opening_inflow
 
         value = ZERO
+        unpriced: set[str] = set()
         for pos in ledger.positions.values():
             qty = pos.quantity
             if qty <= 0:
                 continue
             px = price_fn(pos.symbol, d)
             if px is None:
+                unpriced.add(pos.symbol)
                 px = last_trade_price.get(pos.symbol, pos.avg_cost)
             value += qty * px * fx_fn(pos.currency, d)
 
@@ -116,7 +119,8 @@ def simulate(
 
         net_invested += inflow - flows.sell_proceeds
         r = daily_return(v_prev, value, inflow, flows.outflow)
-        points.append(SeriesPoint(d, value, inflow, flows.outflow, net_invested, r, dividends, realized))
+        points.append(SeriesPoint(d, value, inflow, flows.outflow, net_invested, r, dividends, realized,
+                                  tuple(sorted(unpriced))))
         v_prev = value
     return Simulation(points, ledger)
 

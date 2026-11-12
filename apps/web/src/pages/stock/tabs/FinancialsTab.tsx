@@ -144,7 +144,7 @@ function Statements({ symbol }: { symbol: string }) {
       ) : !f ? (
         <Skeleton className="h-72 w-full rounded-sm" />
       ) : f.periods.length === 0 ? (
-        <NotYet title="還沒有財報資料" />
+        <NotYet title="財報資料累積中">{f.notes?.join(" ")}</NotYet>
       ) : (
         <>
           <TabLead>
@@ -187,7 +187,7 @@ function Statements({ symbol }: { symbol: string }) {
           </div>
           <div className="mt-2 flex flex-wrap items-center gap-3">
             {f.is_demo && <DemoTag />}
-            <Sources className="mt-0" items={f.sources} />
+            <Sources className="mt-0" items={[...(f.notes ?? []), ...f.sources]} />
           </div>
           <p className="mt-1 text-xs text-ink-2">法說會簡報與影音請見「事件」分頁的連結；不提供分析師預估。</p>
         </>

@@ -27,10 +27,11 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # None -> secure in prod
     cookie_domain: str | None = None
 
-    # "personal": every configured source may be used (FinMind, MIS and the TWSE website are labelled
-    # 「非商用」 in responses). "commercial": only government open data (TWSE/TPEx OpenAPI, TDCC open
-    # data, shioaji-data's official files) and our own archive built from them.
-    data_policy: Literal["personal", "commercial"] = "personal"
+    # "commercial" (default): only legally commercially usable data — government open data (TWSE/TPEx
+    # OpenAPI, TDCC open data, shioaji-data's official files) and our own archive built from them; never
+    # demo data. "personal" (explicit opt-in): every configured source may be used (FinMind, MIS and the
+    # TWSE website are labelled 「非商用」 in responses) and demo data fills gaps.
+    data_policy: Literal["personal", "commercial"] = "commercial"
     # Highest priority first. twse_mis: intraday quotes (non-commercial); archive: our own daily archive
     # (prices_daily …); twse_openapi / tpex_openapi: official latest-day data; shioaji_data:
     # master/profile/revenue/statements; finmind: backfill (non-commercial); demo: synthetic fallback.

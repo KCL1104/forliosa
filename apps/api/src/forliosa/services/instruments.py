@@ -14,6 +14,7 @@ from forliosa.datapolicy import labels
 from forliosa.marketdata.base import InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.service import MarketData
+from forliosa.services.coverage import series_notes
 from forliosa.services.portfolio import range_start
 from forliosa.timeutil import iso_taipei, today_taipei
 
@@ -87,6 +88,7 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
     start = range_start(range_, today, date(1990, 1, 1))
     h = md.history(info.symbol, start, today)
     candles = h.candles
+    notes = series_notes(md, info.symbol, start, candles[0].t if candles else None)
     if range_ == "5D":
         candles = candles[-5:]
     return {
@@ -98,6 +100,7 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
         ],
         "is_demo": h.is_demo,
         "sources": labels(h.source.split("+")) if h.source else [],
+        "notes": notes,
     }
 
 
@@ -140,13 +143,15 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
     hist = md.history(info.symbol, min(start, five_y), today)
     ratios, ratio_sources = (md.valuation_ratios_with_source(info.symbol, min(start, five_y), today)
                              if info.type == "stock" else (None, []))
+    coverage = series_notes(md, info.symbol, start, hist.candles[0].t if hist.candles else None)
     if ratios:
         out = _valuation_from_ratios(info, hist.candles, ratios, start, five_y, hist.is_demo)
         out["sources"] = labels([*hist.source.split("+"), *ratio_sources])
+        out["notes"] = [*coverage, *out["notes"]]
         return out
     fundamentals = md.valuation_inputs(info.symbol) if info.type == "stock" else None
     divs = md.dividends(info.symbol)
-    notes: list[str] = []
+    notes: list[str] = list(coverage)
     is_demo = hist.is_demo or divs.is_demo
 
     quarters = fundamentals.value if fundamentals else []

@@ -93,7 +93,7 @@ function SignInRequired({ onDevLogin, pending, error }: { onDevLogin: (email: st
       </div>
       {DEV_LOGIN.form && (
         <form
-          className="flex flex-col gap-3 rounded-xl border bg-card p-4"
+          className="flex flex-col gap-3 rounded-sm border border-rule bg-raised p-4"
           onSubmit={(e) => {
             e.preventDefault()
             if (email.trim()) onDevLogin(email.trim())

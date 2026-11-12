@@ -263,7 +263,7 @@ function News({ symbol }: { symbol: string }) {
   return (
     <Section title="新聞" titleId="ov-news" action={api.kind === "mock" ? <DemoTag title="示範標題，不是真實新聞" /> : undefined}>
       {rows.length === 0 ? (
-        <p className="text-md text-ink-2">最近沒有相關新聞。</p>
+        <p className="text-md text-ink-2">目前沒有可顯示的新聞（只使用可合法轉載的來源）。</p>
       ) : (
         <ul className="-mt-3">
           {rows.map((n) => (

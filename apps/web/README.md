@@ -28,7 +28,7 @@ pnpm dev:api            # 或在 repo 根目錄 pnpm dev:web:api
 
 ### 只用 mock 示範資料
 
-`pnpm dev` 且沒有設定 `VITE_API_BASE_URL` 時，前端使用瀏覽器內的 **mock adapter**（`src/api/mock/`）：資料依 `docs/api-contract.md` 的格式產生、彼此一致（持股、損益、股利、績效都由同一份示範交易紀錄算出），而且全部帶 `is_demo: true`，畫面上會出現「示範資料」章。
+`pnpm dev` 且沒有設定 `VITE_API_BASE_URL` 時，前端使用瀏覽器內的 **mock adapter**（`src/api/mock/`）：資料依 `docs/api-contract.md` 的格式產生、彼此一致（持股、損益、股利、績效都由同一份示範交易紀錄算出），而且全部帶 `is_demo: true`，畫面上會出現「示範資料」標記。
 
 示範情境可以用網址切換（記在 sessionStorage）：
 
@@ -49,7 +49,7 @@ pnpm dev:api            # 或在 repo 根目錄 pnpm dev:web:api
 | `pnpm lint` | ESLint |
 | `pnpm test` | Vitest 單元測試（格式化、張／股、萬／億、漲跌慣例、隱私遮罩、河流圖、稅費、元件） |
 | `pnpm smoke` | Playwright 冒煙測試（需先 `pnpm dev`）：走過所有路由、記一筆交易、隱私模式、⌘K |
-| `pnpm screenshots` | 產生 `docs/screenshots/` 的截圖（mock 資料；桌面 1440×900 @2x 與 iPhone 15，淺色／深色） |
+| `pnpm screenshots` | 產生 `docs/screenshots/v2/` 的截圖（mock 資料；帳本、AI 草稿、交易、個股總覽／估值／籌碼、紀錄、手機問 AI；桌面 1440×900 @2x 與 iPhone 15，淺色／深色） |
 | `pnpm screenshots:real` | 產生 `docs/screenshots/real/` 的截圖（真實後端；需先啟動後端與 `pnpm dev:api`） |
 | `pnpm design:detect` | Impeccable 偵測器掃描 `src/` |
 
@@ -86,12 +86,13 @@ Playwright 使用環境裡預先安裝的版本（`/opt/node-tools/node_modules/
 ```
 src/
   api/            型別（types.ts）、HTTP adapter、mock adapter、TanStack Query hooks
-  app/            外殼：側欄、頂部列、手機底部分頁、⌘K 搜尋、偏好同步
-  components/     領域元件（金額、漲跌、張股、章、Panel、圖表工具）
+  ai/             AI（M4 前的規則版）：記帳指令解析、依頁面的建議問題與回答、草稿與簽名入帳、桌面面板、手機全螢幕
+  app/            外殼：頂部列、手機標題列與浮動分頁、頭像選單、⌘K 搜尋、偏好同步
+  components/     領域元件（金額、漲跌、張股、格線區塊、示範資料、迷你走勢、分段、圖表工具）
   components/ui/  shadcn/ui（style base-nova、Base UI primitives），已依設計系統改寫
-  lib/            格式化（format.ts）、標籤、估值／K 線／配置的純函式
-  pages/          各頁面
-  stores/         zustand：顯示偏好、自選
+  lib/            格式化（format.ts）、升降單位與漲跌停（tick.ts）、標籤、估值／圖表的純函式
+  pages/          帳本（ledger：持倉・交易・股利・績效）、個股頁（stock：六個分頁）、群組、紀錄、設定
+  stores/         zustand：顯示偏好
   styles/         globals.css（設計 token）
 ```
 
@@ -99,6 +100,6 @@ src/
 
 ## 授權聲明
 
-- K 線圖使用 [TradingView Lightweight Charts™](https://github.com/tradingview/lightweight-charts)（Apache-2.0），圖上保留 TradingView 標誌，K 線分頁附文字說明。
+- 走勢圖使用 [TradingView Lightweight Charts™](https://github.com/tradingview/lightweight-charts)（Apache-2.0），圖下方附文字標示。
 - `src/components/ui/` 改寫自 [shadcn/ui](https://github.com/shadcn-ui/ui)（MIT）；`globals.css` 的 data-* custom variants 取自 shadcn/ui 的 `tailwind.css`（MIT）。
-- 字型：Source Sans 3、Noto Sans TC（SIL Open Font License 1.1），以 @fontsource 自架。
+- 字型：Noto Sans TC、霞鶩文楷 TC（LXGW WenKai TC）（皆為 SIL Open Font License 1.1），以 @fontsource 自架。

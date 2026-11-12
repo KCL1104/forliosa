@@ -158,6 +158,7 @@ class History(BaseModel):
     candles: list[CandleOut]
     is_demo: bool
     sources: list[str] = []
+    notes: list[str] = []
 
 
 class ValuationPoint(BaseModel):
@@ -381,6 +382,7 @@ class Performance(BaseModel):
     dividends_by_month: list[MonthAmount]
     realized_by_year: list[YearAmount]
     is_demo: bool
+    notes: list[str] = []
 
 
 # -- stock page (redesign 2026-11-12) ---------------------------------------------------------------

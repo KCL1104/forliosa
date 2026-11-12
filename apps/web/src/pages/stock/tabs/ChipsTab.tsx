@@ -55,18 +55,27 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   if (chips.isError) return <ErrorState error={chips.error} onRetry={() => void chips.refetch()} />
   if (!chips.data) return <Skeleton className="h-96 w-full rounded-sm" />
   const c = chips.data
-  if (c.institutional.length === 0) return <NotYet title="還沒有籌碼資料">法人與融資融券在每天 20:00–21:00 更新。</NotYet>
+  if (c.institutional.length === 0 && c.margin.length === 0 && !c.major_holders) {
+    return (
+      <NotYet title="籌碼資料累積中">
+        {c.notes?.length ? c.notes.map((n) => <p key={n}>{n}</p>) : "法人與融資融券在每天 20:00–21:00 更新。"}
+      </NotYet>
+    )
+  }
   const recent = [...c.institutional].reverse().slice(0, 10)
   const sum = (k: "foreign" | "trust" | "dealer" | "total", n: number) => c.institutional.slice(-n).reduce((s, r) => s + r[k], 0)
   return (
     <div className="flex flex-col gap-12">
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips label="籌碼區間" value={range} options={RANGES} onChange={setRange} />
-        <span className="text-sm text-ink-2">資料至 {formatDate(c.institutional.at(-1)!.t)}・單位：張</span>
+        <span className="text-sm text-ink-2">{c.institutional.length ? `資料至 ${formatDate(c.institutional.at(-1)!.t)}・` : ""}單位：張</span>
         {c.is_demo && <DemoTag className="ml-auto" />}
       </div>
       <TabLead className="-mt-6 mb-0">{lead(c)}</TabLead>
 
+      {c.institutional.length === 0 ? (
+        <NotYet title="三大法人資料累積中">{c.notes?.join(" ") ?? "法人買賣超在每天 20:00–21:00 更新。"}</NotYet>
+      ) : (
       <Section title="三大法人買賣超" titleId="chips-inst" aside="每日合計">
         <div className="h-[200px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -133,6 +142,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           </table>
         </div>
       </Section>
+      )}
 
       <div className="grid gap-12 lg:grid-cols-2">
         <Section title="融資餘額" titleId="chips-margin" aside={c.margin.length ? `${formatNumber(c.margin.at(-1)!.margin_balance)} 張` : undefined}>

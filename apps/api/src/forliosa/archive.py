@@ -123,7 +123,7 @@ class JobResult:
 class Archiver:
     db: Session
     fetcher: HttpFetcher
-    policy: Policy = "personal"
+    policy: Policy = "commercial"
     now_fn: Callable[[], datetime] = now_taipei
     results: list[JobResult] = field(default_factory=list)
 
