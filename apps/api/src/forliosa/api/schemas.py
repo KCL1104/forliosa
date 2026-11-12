@@ -520,13 +520,15 @@ class Financials(BaseModel):
 
 class StockEvent(BaseModel):
     date: date
-    type: Literal["ex_dividend", "dividend_payment", "earnings", "revenue_release", "material_info", "attention",
-                  "disposition", "shareholder_meeting"]
+    type: Literal["ex_dividend", "dividend_payment", "earnings", "revenue_release", "investor_conference",
+                  "material_info", "attention", "disposition", "shareholder_meeting"]
     title: str
     detail: str
     url: str | None
     mine: bool
     amount_estimate: float | None
+    estimated: bool = False  # true only for a legal-deadline fallback (no actual date known yet)
+    period: str | None = None  # earnings "2026Q3", revenue_release "2026-10"
     sources: list[str] = []
 
 

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from datetime import UTC, date, datetime, time, timedelta
 from functools import lru_cache
 from zoneinfo import ZoneInfo
@@ -11,9 +12,10 @@ MARKET_OPEN = time(9, 0)
 MARKET_CLOSE = time(13, 30)
 
 # TWSE market holidays (weekdays only) — a best-effort list reconstructed from the yearly holiday
-# rules (observed-day shifts included); 2027 is an estimate. TODO(M2+): load TWSE's official
-# holiday schedule (OpenAPI /holidaySchedule/holidaySchedule) in the worker. Only used for
-# calendars and demo data, never for money math.
+# rules (observed-day shifts included); 2027 is an estimate. For every year present in the archived
+# official schedule (OpenAPI /holidaySchedule/holidaySchedule → ``market_holidays``, loaded with
+# :func:`set_official_holidays` by ``forliosa.calendar``) the official list replaces this one.
+# Only used for calendars, schedules and demo data, never for money math.
 _TW_HOLIDAYS: frozenset[date] = frozenset(
     date.fromisoformat(s)
     for s in [
@@ -53,8 +55,31 @@ def today_taipei() -> date:
     return now_taipei().date()
 
 
+# year -> official closed weekdays (TWSE holidaySchedule); years not present use _TW_HOLIDAYS
+_OFFICIAL_HOLIDAYS: dict[int, frozenset[date]] = {}
+
+
+def set_official_holidays(closed: Iterable[date], years: Iterable[int]) -> None:
+    """Use the exchange's published closures for ``years`` (an empty ``years`` restores the built-in list)."""
+    global _OFFICIAL_HOLIDAYS
+    by_year: dict[int, set[date]] = {y: set() for y in years}
+    for d in closed:
+        if d.year in by_year:
+            by_year[d.year].add(d)
+    new = {y: frozenset(v) for y, v in by_year.items()}
+    if new != _OFFICIAL_HOLIDAYS:
+        _OFFICIAL_HOLIDAYS = new
+        _tw_days.cache_clear()
+
+
+def has_official_calendar(year: int) -> bool:
+    return year in _OFFICIAL_HOLIDAYS
+
+
 def is_tw_trading_day(d: date) -> bool:
-    return d.weekday() < 5 and d not in _TW_HOLIDAYS
+    if d.weekday() >= 5:
+        return False
+    return d not in _OFFICIAL_HOLIDAYS.get(d.year, _TW_HOLIDAYS)
 
 
 def is_us_trading_day(d: date) -> bool:

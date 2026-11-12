@@ -32,6 +32,7 @@ from forliosa.models import (
     ShareholdingDistribution,
     User,
 )
+from forliosa.services.announcements import classify
 from forliosa.services.instruments import change_base, require_instrument
 from forliosa.services.portfolio import (
     add_months,
@@ -486,6 +487,14 @@ def _held_quantity(state, sym: str) -> Decimal:
 
 
 def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool = False) -> list[dict[str, Any]]:
+    """Dated events of ``symbol``, newest first (future included).
+
+    ``earnings`` / ``revenue_release`` / ``investor_conference`` dates are **actual** dates read from the
+    archive: 重大訊息 (board approval of a financial report, 法人說明會, monthly revenue announcements; see
+    :mod:`forliosa.services.announcements`) and the first day a company's month appeared in the monthly
+    revenue datasets (t187ap05). Only when no actual date is known is the legal deadline shown, with
+    ``estimated: true``.
+    """
     info = require_instrument(md, symbol)
     sym = info.symbol
     today = today_taipei()
@@ -500,9 +509,11 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
     out: list[dict[str, Any]] = []
 
     def add(d: date, type_: str, title: str, detail: str = "", url: str | None = None, mine: bool = False,
-            amount: Decimal | None = None, sources: list[str] | None = None) -> None:
+            amount: Decimal | None = None, sources: list[str] | None = None, estimated: bool = False,
+            period: str | None = None) -> None:
         out.append({"date": d, "type": type_, "title": title, "detail": detail, "url": url, "mine": mine,
-                    "amount_estimate": ser.money(amount), "sources": labels(sources or [])})
+                    "amount_estimate": ser.money(amount), "estimated": estimated, "period": period,
+                    "sources": labels(sources or [])})
 
     divs = md.dividends(sym)
     div_sources = ["demo"] if divs.is_demo else _split(divs.source)
@@ -529,27 +540,74 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
                 amount = recorded
             add(d, type_, f"{title}（{e.period}）", detail, mine=mine, amount=amount, sources=div_sources)
 
+    # Actual release dates: (kind, period) -> earliest (date, row)
+    releases: dict[tuple[str, str], tuple[date, MarketEvent]] = {}
+    backlog_revenue: dict[str, MarketEvent] = {}
+
+    def release(kind: str, period: str, d: date, row: MarketEvent) -> None:
+        cur = releases.get((kind, period))
+        if cur is None or d < cur[0]:
+            releases[(kind, period)] = (d, row)
+
+    recent = qty > 0
     stmt = select(MarketEvent).where(MarketEvent.symbol == sym, MarketEvent.date >= lo, MarketEvent.date <= hi)
     for r in db.scalars(_filtered(stmt, MarketEvent, md).order_by(MarketEvent.date)):
         if r.type == "ex_dividend" and r.date in ex_dates:
             continue
-        add(r.date, r.type, r.title, r.detail[:600], r.url, mine=qty > 0 and r.date >= today - timedelta(days=7),
+        if r.type == "revenue_release":  # first seen in the monthly revenue dataset (t187ap05)
+            period = (r.data or {}).get("period")
+            if period and (r.data or {}).get("backlog"):
+                backlog_revenue[period] = r
+            elif period:
+                release("revenue_release", period, r.date, r)
+            continue
+        if r.type == "material_info":
+            rel = classify(r.title, r.detail, r.data, r.date)
+            if rel is not None and rel.kind == "investor_conference":
+                if lo <= rel.date <= hi:
+                    add(rel.date, "investor_conference", r.title, r.detail[:600], r.url,
+                        mine=recent and rel.date >= today - timedelta(days=7), sources=[r.source])
+                continue
+            if rel is not None and rel.period:
+                release(rel.kind, rel.period, rel.date, r)
+                continue
+            if rel is not None:  # a financial report whose period could not be read: still an actual date
+                add(r.date, rel.kind, r.title, r.detail[:600], r.url, mine=recent, sources=[r.source])
+                continue
+        add(r.date, r.type, r.title, r.detail[:600], r.url, mine=recent and r.date >= today - timedelta(days=7),
             sources=[r.source])
 
-    if _is_tw_stock(info):
+    for (kind, period), (d, r) in releases.items():
+        if kind == "earnings":
+            title, detail = f"{period} 財報公布", r.title
+        else:
+            month = int(period[5:])
+            title = f"{month} 月營收公布"
+            detail = r.detail if r.type == "revenue_release" else r.title
+        add(d, kind, title, detail[:600], r.url, mine=recent, sources=[r.source], period=period)
+
+    if _is_tw_stock(info):  # legal deadlines only where no actual date is known
         dlo, dhi = today - timedelta(days=DEADLINE_PAST_DAYS), today + timedelta(days=DEADLINE_FUTURE_DAYS)
         for y in (today.year - 1, today.year, today.year + 1):
             for q in (1, 2, 3, 4):
-                d = report_publication_date(f"{y}Q{q}")
-                if dlo <= d <= dhi:
-                    add(d, "earnings", f"{y}Q{q} 財報公布期限",
-                        "上市櫃公司季報的法定公布期限（實際公布日以公司公告為準）", mine=qty > 0, sources=["rules"])
+                period = f"{y}Q{q}"
+                d = report_publication_date(period)
+                if dlo <= d <= dhi and ("earnings", period) not in releases:
+                    add(d, "earnings", f"{period} 財報公布期限（預估）",
+                        "尚未偵測到實際公布日：以上市櫃公司季報的法定公布期限顯示（實際日期以公司公告為準）",
+                        mine=recent, sources=["rules"], estimated=True, period=period)
             for m in range(1, 13):
                 d = date(y, m, 10)
-                if dlo <= d <= dhi:
-                    prev_m = 12 if m == 1 else m - 1
-                    add(d, "revenue_release", f"{prev_m} 月營收公布期限", "每月 10 日前公布上個月營收",
-                        mine=qty > 0, sources=["rules"])
+                prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
+                period = f"{prev_y}-{prev_m:02d}"
+                if not dlo <= d <= dhi or ("revenue_release", period) in releases:
+                    continue
+                detail = "尚未偵測到實際公布日：每月 10 日前公布上個月營收（法定期限）"
+                seen = backlog_revenue.get(period)
+                if seen is not None:
+                    detail = f"{seen.detail}；在開始存檔前已公布，實際日期不明，以法定期限顯示"
+                add(d, "revenue_release", f"{prev_m} 月營收公布期限（預估）", detail, mine=recent,
+                    sources=["rules", *([seen.source] if seen is not None else [])], estimated=True, period=period)
     if mine_only:
         out = [e for e in out if e["mine"]]
     out.sort(key=lambda e: (e["date"], e["type"]), reverse=True)

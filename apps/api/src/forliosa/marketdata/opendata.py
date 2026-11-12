@@ -23,6 +23,13 @@ TWSE OpenAPI (``https://openapi.twse.com.tw/v1``; latest day only; dates ROC "11
 * ``/opendata/t187ap17_L`` 營益分析 — 毛利率(%)(營業毛利)/(營業收入), 營業利益率(%)…, 稅後純益率(%)….
 * ``/opendata/t187ap41_L`` 股東會 — 公司代號, 股東常(臨時)會, 開會日期, 開會地點.
 * ``/exchangeReport/TWT48U_ALL`` 除權除息預告 — parsed by :func:`forliosa.marketdata.twse.parse_twt48u_all`.
+* ``/opendata/t187ap05_L`` 每月營業收入彙總表 — 出表日期, 資料年月 ("11510"), 公司代號, 營業收入-當月營收 (thousand
+  NT$), 營業收入-去年同月增減(%), 營業收入-上月比較增減(%). No filing date per company.
+* ``/holidaySchedule/holidaySchedule`` 市場開休市日期 — Name, Date, Weekday, Description; also lists trading-day
+  markers (「…開始交易日」「…最後交易日」) and settlement-only days (「市場無交易，僅辦理結算交割作業」 = closed).
+* 重大訊息 符合條款 seen live: 第31款 = board approval of a financial report (說明 has 「財務報告或年度自結財務資訊
+  報導期間 起訖日期: 115/01/01~115/09/30」), 第12款 = 法人說明會 (事實發生日 = the conference date; 說明 has
+  「召開法人說明會之日期：115/11/23」), 第51款／第53款 = monthly revenue announcements and corrections.
 
 TPEx OpenAPI (``https://www.tpex.org.tw/openapi/v1``)
 * ``tpex_mainboard_daily_close_quotes`` — also NextReferencePrice, NextLimitUp, NextLimitDown (for the
@@ -40,7 +47,8 @@ TPEx OpenAPI (``https://www.tpex.org.tw/openapi/v1``)
 * ``tpex_trading_warning_information`` (注意) — Date, SecuritiesCompanyCode, TradingInformation.
 * ``tpex_disposal_information`` (處置) — Date, DispositionPeriod ("1151112~1151118"), DispositionReasons,
   DisposalCondition.
-* ``mopsfin_t187ap04_O`` 重大訊息 — 發言日期, SecuritiesCompanyCode, 主旨, 說明.
+* ``mopsfin_t187ap04_O`` 重大訊息 — 發言日期, SecuritiesCompanyCode, 主旨, 符合條款, 事實發生日, 說明.
+* ``mopsfin_t187ap05_O`` 每月營業收入彙總表 — the same Chinese keys as ``t187ap05_L``.
 * ``mopsfin_t187ap06_O_*`` (Year, Season, SecuritiesCompanyCode + the same Chinese line items),
   ``mopsfin_t187ap07_O_*`` (公司代號 …), ``mopsfin_187ap17_O`` (Year, 季別, 毛利率, 營業利益率, 稅後純益率),
   ``t187ap41_O`` (公司代號, 開會日期).
@@ -177,10 +185,34 @@ def parse_material_info(rows: list[dict[str, Any]], market: str) -> list[dict[st
         title = _text(r.get("主旨")).replace("\n", "")
         if not code or d is None or not title:
             continue
+        fact = parse_tw_date(r.get("事實發生日"))
         out.append({"code": code, "market": market, "date": d, "end_date": None, "type": "material_info",
                     "title": title, "detail": _text(r.get("說明"))[:2000],
-                    "data": {"time": _text(r.get("發言時間")), "clause": _text(r.get("符合條款"))},
+                    "data": {"time": _text(r.get("發言時間")), "clause": _text(r.get("符合條款")),
+                             "fact_date": fact.isoformat() if fact else None},
                     "key": event_key("material", market, code, d, _text(r.get("發言時間")), title)})
+    return out
+
+
+def parse_monthly_revenue(rows: list[dict[str, Any]], market: str) -> list[dict[str, Any]]:
+    """t187ap05_L / mopsfin_t187ap05_O 每月營業收入彙總表 -> [{code, market, period, published, revenue, …}].
+
+    Keys (live 2026-11-12): 出表日期 ("1151111"), 資料年月 ("11510" = 2026-10), 公司代號, 營業收入-當月營收
+    (thousand NT$), 營業收入-上月比較增減(%), 營業收入-去年同月增減(%). There is no per-company filing date:
+    the archive records the day a (company, month) row first appears (see ``Archiver._revenue``).
+    """
+    out = []
+    for raw in rows:
+        r = _strip_keys(raw)
+        code = _text(r.get("公司代號") or r.get("SecuritiesCompanyCode"))
+        m = re.fullmatch(r"(\d{2,3})(\d{2})", _text(r.get("資料年月")))
+        if not is_listed_code(code) or not m or not 1 <= int(m.group(2)) <= 12:
+            continue
+        out.append({"code": code, "market": market, "period": f"{int(m.group(1)) + 1911}-{int(m.group(2)):02d}",
+                    "published": parse_tw_date(r.get("出表日期")),
+                    "revenue": parse_int(r.get("營業收入-當月營收")),
+                    "yoy_pct": _pct(r.get("營業收入-去年同月增減(%)")),
+                    "mom_pct": _pct(r.get("營業收入-上月比較增減(%)"))})
     return out
 
 
@@ -317,6 +349,27 @@ def parse_profit_analysis(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
         out.append({"code": code, "period": period, "kind": "margins",
                     "values": {"gross": col("毛利率"), "operating": col("營業利益率"), "net": col("稅後純益率")}})
+    return out
+
+
+_TRADING_MARKERS = ("開始交易", "最後交易")
+
+
+def parse_holidays(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """holidaySchedule (Name, Date, Weekday, Description) -> [{date, name, description, is_trading_day}].
+
+    The schedule mixes closures with trading-day markers: 「國曆新年開始交易日」「農曆春節前最後交易日」 are
+    trading days; 「市場無交易，僅辦理結算交割作業」 is a closure (settlement only, no trading).
+    """
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("Date"))
+        name = _text(r.get("Name"))
+        if d is None or not name:
+            continue
+        description = re.sub(r"<[^>]+>", "", _text(r.get("Description"))).strip()
+        out.append({"date": d, "name": name[:100], "description": description,
+                    "is_trading_day": any(m in name for m in _TRADING_MARKERS)})
     return out
 
 

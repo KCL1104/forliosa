@@ -281,3 +281,40 @@ class WatchlistItem(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
     symbol: Mapped[str] = mapped_column(String(20))
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class MarketHoliday(Base):
+    """TWSE holidaySchedule (official market calendar of the current year, archived by forliosa.archive).
+
+    The schedule also lists trading-day markers (「國曆新年開始交易日」「農曆春節前最後交易日」): those rows
+    have ``is_trading_day = True``. Years present here replace the built-in holiday list in ``timeutil``.
+    """
+
+    __tablename__ = "market_holidays"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    name: Mapped[str] = mapped_column(String(100))
+    description: Mapped[str] = mapped_column(Text, default="")
+    is_trading_day: Mapped[bool] = mapped_column(Boolean, default=False)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class RecurringPlan(Base):
+    """定期定額: buy ``amount`` TWD of ``symbol`` on each of ``days_of_month`` (1–28; the debit moves to the
+    next trading day). Plans never create transactions by themselves: ``POST /recurring/{id}/draft`` returns
+    a draft the user signs."""
+
+    __tablename__ = "recurring_plans"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    account_id: Mapped[str] = mapped_column(ForeignKey("broker_accounts.id", ondelete="CASCADE"), index=True)
+    symbol: Mapped[str] = mapped_column(String(20))
+    amount: Mapped[Decimal] = mapped_column(Money)  # TWD per debit
+    days_of_month: Mapped[list] = mapped_column(JSON, default=list)  # sorted ints 1–28
+    start_date: Mapped[date] = mapped_column(Date)
+    end_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)

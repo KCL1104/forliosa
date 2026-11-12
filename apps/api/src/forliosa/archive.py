@@ -23,7 +23,8 @@ foreign_holding_daily       TPEx 3insti_qfii (no per-stock TWSE OpenAPI dataset)
 shareholding_distribution   TDCC open data 1-5 (weekly, current week only)       —
 market_events               TWT48U_ALL / exright_prepost (除權息), notice / warning
                             (注意), punish / disposal (處置), t187ap04 (重大訊息),
-                            t187ap41 (股東會)                                       —
+                            t187ap41 (股東會), t187ap05 (營收公布日: first seen)     —
+market_holidays             TWSE holidaySchedule (official calendar, current year)  —
 financial_reports           t187ap06 (income, YTD), t187ap07 (balance), t187ap17  —
 ==========================  ===================================================  ==========================
 
@@ -60,6 +61,7 @@ from forliosa.models import (
     InstitutionalDaily,
     MarginDaily,
     MarketEvent,
+    MarketHoliday,
     PriceDaily,
     ReferencePrice,
     ShareholdingDistribution,
@@ -205,7 +207,54 @@ class Archiver:
                           "twse-openapi")
         return n
 
+    def twse_holidays(self) -> int:
+        """Official market calendar (current year); trading-day markers are kept with is_trading_day."""
+        rows = [{**r, "source": "twse-openapi"}
+                for r in od.parse_holidays(self._list(f"{TWSE_OPENAPI}/holidaySchedule/holidaySchedule"))]
+        n = upsert(self.db, MarketHoliday, rows, ["date"])
+        from forliosa.market_calendar import load_official_calendar
+
+        load_official_calendar(self.db)
+        return n
+
+    def _revenue(self, rows: list[dict[str, Any]], source: str) -> int:
+        """Monthly revenue release dates: the day a (company, month) row first appears in the dataset.
+
+        Rows already present on the very first run of a dataset (nothing archived from it before) were
+        filed before archiving started, so their date is unknown: they are stored with ``backlog: true`` and
+        the events endpoint shows the legal deadline (``estimated: true``) for them instead. Later rows keep
+        their first-seen date (``ON CONFLICT DO NOTHING``): the publisher's 出表日期 when it is not in the
+        future, else the archive date.
+        """
+        today = self.now_fn().astimezone(TAIPEI).date()
+        seen_before = self.db.scalar(select(MarketEvent.id).where(
+            MarketEvent.type == "revenue_release", MarketEvent.source == source).limit(1)) is not None
+        out = []
+        for r in rows:
+            first = r["published"] if r["published"] is not None and r["published"] <= today else today
+            month = int(r["period"][5:])
+            detail = f"{month} 月營收 {r['revenue']:,} 千元" if r["revenue"] is not None else f"{month} 月營收"
+            if r["yoy_pct"] is not None:
+                detail += f"，年增 {r['yoy_pct'] * 100:.1f}%"
+            out.append({"key": od.event_key("revenue", r["market"], r["code"], r["period"]),
+                        "symbol": tw_symbol(r["code"], r["market"]), "date": first, "end_date": None,
+                        "type": "revenue_release", "title": f"{month} 月營收公布", "detail": detail, "url": None,
+                        "data": {"period": r["period"], "revenue": r["revenue"],
+                                 "yoy_pct": str(r["yoy_pct"]) if r["yoy_pct"] is not None else None,
+                                 "mom_pct": str(r["mom_pct"]) if r["mom_pct"] is not None else None,
+                                 "first_seen": today.isoformat(), "backlog": not seen_before},
+                        "source": source})
+        return upsert(self.db, MarketEvent, out, ["key"], ())
+
+    def twse_revenue(self) -> int:
+        rows = od.parse_monthly_revenue(self._list(f"{TWSE_OPENAPI}/opendata/t187ap05_L"), "TWSE")
+        return self._revenue(rows, "twse-openapi")
+
     # -- TPEx OpenAPI --------------------------------------------------------------------------
+    def tpex_revenue(self) -> int:
+        rows = od.parse_monthly_revenue(self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap05_O"), "TPEX")
+        return self._revenue(rows, "tpex-openapi")
+
     def tpex_prices(self) -> int:
         from forliosa.marketdata.tpex import parse_daily_close_quotes
 
@@ -316,11 +365,13 @@ class Archiver:
         if "twse" in groups:
             for name, fn in (("twse prices", self.twse_prices), ("twse valuation", self.twse_valuation),
                              ("twse reference", self.twse_reference), ("twse margin", self.twse_margin),
-                             ("twse events", self.twse_events)):
+                             ("twse events", self.twse_events), ("twse revenue", self.twse_revenue),
+                             ("twse holidays", self.twse_holidays)):
                 self._run(name, fn)
         if "tpex" in groups:
             for name, fn in (("tpex prices", self.tpex_prices), ("tpex valuation", self.tpex_valuation),
-                             ("tpex chips", self.tpex_chips), ("tpex events", self.tpex_events)):
+                             ("tpex chips", self.tpex_chips), ("tpex events", self.tpex_events),
+                             ("tpex revenue", self.tpex_revenue)):
                 self._run(name, fn)
         if "financials" in groups:
             self.financials()
