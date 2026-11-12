@@ -4,7 +4,8 @@ import { api, appToday } from "@/api"
 import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
 import { ApiError, type Instrument, type TransactionInput } from "@/api/types"
 import { useUi } from "@/app/ui-store"
-import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
+import { formatDateShort, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
+import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { parseIntent, sharesOf } from "./intent"
 import { aiApi, aiRemote, applyChatEvent, draftFromServer, streamChat, type AiUsage, type ChatEvent } from "./remote"
@@ -197,7 +198,41 @@ export function useAiRunner(ctx: AiContext) {
     }
   }
 
+  /** 定期定額扣款日：`POST /recurring/{id}/draft` 寫成草稿（不會建立交易），簽名後才 `POST /transactions` */
+  async function draftRecurring(s: Suggestion) {
+    const r = s.recurring
+    if (!r) return
+    push({ role: "user", text: s.text }, { title: s.text })
+    try {
+      const d = await api.draftRecurring(r.planId, r.scheduledDate)
+      const symbol = d.transaction.symbol
+      const draft: Draft = {
+        id: newId("dft"),
+        status: "pending",
+        input: { ...d.transaction, amount: null },
+        instrument: { symbol, code: codeOf(symbol), name: d.name, market: marketOf(symbol), currency: "TWD" },
+        preview: d.preview,
+        notes: [
+          `${formatMoney(d.amount)} 以 ${formatDateShort(d.price_as_of, false)} 收盤價 ${formatPrice(d.transaction.price, marketOf(symbol))} 估算股數（含零股），手續費另計；實際成交以券商對帳單為準，簽名前可以改。`,
+        ],
+        createdAt: new Date().toISOString(),
+        recurring: { planId: r.planId, date: r.date },
+      }
+      upsertDraft(draft)
+      push({ role: "ai", text: `今天是${d.name}定期定額的扣款日。\n我照最近收盤價算好股數和手續費，簽名後才會入帳。`, draftId: draft.id })
+    } catch (err) {
+      say({
+        text: `這次的定期定額草稿沒有寫成：${err instanceof Error ? err.message : "請再試一次"}。`,
+        links: [{ label: "查看定期定額", to: "/settings" }],
+      })
+    }
+  }
+
   function ask(s: Suggestion) {
+    if (s.kind === "recurring_draft") {
+      void draftRecurring(s)
+      return
+    }
     if (aiRemote) {
       void submit(s.text)
       return

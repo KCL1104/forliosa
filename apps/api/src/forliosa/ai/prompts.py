@@ -55,9 +55,9 @@ WHY_SYSTEM = """你是台股新聞編輯。任務：用一句繁體中文（45 �
 
 # Shown by the UI under every AI answer (``done`` event, ``GET /ai/usage``); the model is told not to write one.
 DISCLAIMER = "AI 回答僅供參考，非投資建議。"
-# Appended to the page context of the turn that moves a thread to another key slot (see ``chat``).
-MOVED_NOTE = ("- 對話已換到另一個服務通道：先前的對話只保留文字（沒有工具結果與網路搜尋內容），"
-              "需要數字或最新資訊時請重新查詢")
+# Appended to the page context of a turn that continues the thread from a plain-text recap (``chat``): after a
+# move to another key slot (workspace), or when replayed thinking blocks were rejected.
+MOVED_NOTE = "- 先前的對話只保留文字（沒有工具結果與網路搜尋內容），需要數字或最新資訊時請重新查詢"
 # The fixed one-sentence decline of the scope pre-check (``scope``).
 OFF_TOPIC_REPLY = "這超出我能協助的範圍，我只處理投資理財、台美股與你的持股；要不要看看今天的持股表現？"
 

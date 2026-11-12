@@ -2,6 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { useRouterState } from "@tanstack/react-router"
 import { appToday } from "@/api"
 import { aiApi, aiRemote, threadFromServer } from "./remote"
+import { useRecurringOffers } from "./recurring-offer"
 import { useAi } from "./store"
 import { suggestionsFor, type AiContext } from "./suggestions"
 import type { Suggestion, SuggestionKind } from "./types"
@@ -22,14 +23,19 @@ export function useAiSuggestions(ctx: AiContext): Suggestion[] {
     queryFn: () => aiApi.getSuggestions(pathname, symbol),
     staleTime: 60_000,
   })
+  // 扣款日當天的定期定額草稿排在最前面（帳本，或該檔的個股頁）
+  const offers = useRecurringOffers().filter((o) => ctx.route === "ledger" || (ctx.route === "stock" && o.symbol === ctx.stock.symbol))
   const local = suggestionsFor(ctx, appToday())
-  if (!aiRemote || !q.data) return local
-  return q.data.questions.slice(0, 3).map((x) => ({
-    kind: x.kind as SuggestionKind,
-    text: x.text,
-    lines: [x.lines[0] ?? x.text, x.lines[1] ?? ""],
-    symbol: x.symbol ?? undefined,
-  }))
+  const base: Suggestion[] =
+    !aiRemote || !q.data
+      ? local
+      : q.data.questions.map((x) => ({
+          kind: x.kind as SuggestionKind,
+          text: x.text,
+          lines: [x.lines[0] ?? x.text, x.lines[1] ?? ""],
+          symbol: x.symbol ?? undefined,
+        }))
+  return [...offers, ...base].slice(0, 3)
 }
 
 /** 今天的提問數與本月用量（mock 模式為 undefined） */
