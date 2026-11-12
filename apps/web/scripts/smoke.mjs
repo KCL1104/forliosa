@@ -1,5 +1,7 @@
 // 冒煙測試（新資訊架構，mock 模式）：node scripts/smoke.mjs [--base=http://localhost:5173]
-// 走過每個路由，確認關鍵文字出現、沒有 console 錯誤；也測試 AI 草稿→簽名入帳→復原、隱私模式、⌘K、手機的問 AI。
+// 走過每個路由，確認關鍵文字出現、沒有 console 錯誤；也測試 AI 草稿→簽名入帳→復原、隱私模式、⌘K、手機的問 AI，
+// 以及第二批：出清紀錄、定期定額（設定與扣款日草稿）、公告、1 日走勢的授權說明、資料來源與授權、商用模式沒有示範標記。
+// mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
 
 const require = createRequire(import.meta.url)
@@ -15,12 +17,16 @@ const ROUTES = [
   ["/", "總資產"],
   ["/?view=transactions", "數量 × 價格"],
   ["/?view=dividends", "已入帳"],
-  ["/?view=performance", "最大回撤"],
+  ["/?view=performance", "績效還算不出來"],
   ["/stock/2330.TW", "近四季 EPS"],
   ["/stock/2330.TW?tab=valuation", "各倍數對應的股價"],
-  ["/stock/2409.TW?tab=valuation", "本益比沒有意義"],
-  ["/stock/2330.TW?tab=financials", "營業利益率"],
-  ["/stock/2330.TW?tab=chips", "三大法人買賣超"],
+  // 友達虧損的年份在商用模式的存檔起點之前：用示範資料（personal）看「本益比沒有意義」
+  ["/stock/2409.TW?tab=valuation&policy=personal", "本益比沒有意義"],
+  ["/stock/2330.TW?tab=financials&policy=commercial", "營業利益率"],
+  ["/stock/2330.TW?tab=chips", "三大法人資料累積中"],
+  ["/stock/6488.TWO?tab=chips", "三大法人買賣超"],
+  ["/stock/2603.TW", "過去的持有"],
+  ["/data-sources", "上市個股日成交資訊"],
   ["/stock/2330.TW?tab=dividends", "配息紀錄"],
   ["/stock/2330.TW?tab=events", "法說會"],
   ["/stock/0050.TW?tab=financials", "成分股資料來源還在確認"],
@@ -47,6 +53,7 @@ const check = async (name, fn) => {
   } catch (e) {
     failed++
     console.error("✗", name, "—", e.message.split("\n")[0])
+    if (process.env.SMOKE_SHOTS) await page.screenshot({ path: `${process.env.SMOKE_SHOTS}/smoke-fail-${failed}.png` }).catch(() => {})
   }
 }
 
@@ -128,6 +135,81 @@ await check("頭像選單切換深色", async () => {
   await page.getByRole("button", { name: /帳號選單/ }).click()
   await page.getByRole("menuitemradio", { name: /深色/ }).click()
   await page.waitForFunction(() => document.documentElement.classList.contains("dark"))
+})
+
+// ── 第二批（2026-11-12）────────────────────────────────────────
+await check("商用模式：帳本、個股、績效都沒有「示範資料」標記", async () => {
+  await page.evaluate(() => document.documentElement.classList.remove("dark"))
+  for (const path of ["/", "/stock/2330.TW", "/?view=performance"]) {
+    await page.goto(base + path, { waitUntil: "networkidle" })
+    await page.waitForTimeout(400)
+    if (await page.getByText("示範資料", { exact: true }).count()) throw new Error(`示範資料 on ${path}`)
+  }
+})
+await check("績效：含美股算不出來 → 只看台幣帳戶就有績效與「資料累積中」", async () => {
+  await page.getByRole("button", { name: /只看「永豐/ }).click()
+  await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
+  await page.getByText(/資料累積中：自 .* 起存檔/).first().waitFor()
+})
+await check("扣款日：AI 面板提出定期定額草稿，簽名入帳後不再提出", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  // 前面的股利草稿還在等簽名時，面板會停在那段對話：開新對話回到建議
+  await page.getByRole("button", { name: "新對話" }).click()
+  await page.getByRole("button", { name: /記下今天的 00878 定期定額/ }).click()
+  await page.getByRole("heading", { name: /買進 國泰永續高股息/ }).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "簽名：確認入帳" }).click()
+  await page.getByText(/已入帳：買進 國泰永續高股息/).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "新對話" }).click()
+  await page.waitForTimeout(1000)
+  if (await page.getByRole("button", { name: /記下今天的 00878 定期定額/ }).count()) throw new Error("still offered after signing")
+})
+await check("已出清：展開清單，點一列到個股頁「過去的持有」", async () => {
+  await page.getByRole("button", { name: /已出清/ }).click()
+  await page.getByRole("table", { name: "已出清" }).getByText("長榮").click()
+  await page.getByRole("heading", { name: "過去的持有" }).waitFor({ timeout: 8000 })
+})
+await check("個股：1 日走勢說明需要授權，按「看 5 日走勢」切換", async () => {
+  await page.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
+  await page.getByRole("radio", { name: "1日" }).click()
+  await page.getByText("盤中走勢需要授權行情，目前提供收盤後資料").waitFor()
+  await page.getByRole("button", { name: "看 5 日走勢" }).click()
+  await page.getByRole("radio", { name: "5日", checked: true }).waitFor()
+})
+await check("個股總覽：「公告」（官方），沒有「新聞」", async () => {
+  await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+  await page.getByRole("heading", { name: "公告" }).waitFor()
+  if (await page.getByRole("heading", { name: "新聞" }).count()) throw new Error("新聞 heading still present")
+})
+await check("設定：新增定期定額（驗證 → 儲存）、暫停、修改、刪除（確認）", async () => {
+  await page.goto(base + "/settings#recurring", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "新增定期定額" }).click()
+  await page.getByRole("button", { name: "新增計畫" }).click()
+  await page.getByText("至少選一個扣款日").waitFor()
+  await page.getByRole("dialog").getByLabel("股票或 ETF").fill("0056")
+  await page.getByRole("option", { name: /0056/ }).click()
+  await page.getByLabel("每次扣款（新台幣）").fill("3000")
+  await page.getByRole("button", { name: "5 日", exact: true }).click()
+  await page.getByRole("button", { name: "20 日", exact: true }).click()
+  await page.getByRole("button", { name: "新增計畫" }).click()
+  await page.getByText("每月 5、20 日・NT$3,000").waitFor({ timeout: 8000 })
+  await page.getByRole("switch", { name: /暫停「元大高股息」/ }).click()
+  await page.getByText("已暫停").first().waitFor()
+  await page.getByRole("button", { name: "修改「元大高股息」定期定額" }).click()
+  await page.getByLabel("每次扣款（新台幣）").fill("5000")
+  await page.getByRole("button", { name: "儲存" }).click()
+  await page.getByText("每月 5、20 日・NT$5,000").waitFor()
+  await page.getByRole("button", { name: "刪除「元大高股息」定期定額" }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "刪除計畫" }).click()
+  await page.getByText(/已刪除「元大高股息」/).waitFor()
+})
+await check("頭像選單：資料來源與授權（完整顯名聲明）", async () => {
+  await page.getByRole("button", { name: /帳號選單/ }).click()
+  await page.getByRole("menuitem", { name: "資料來源與授權" }).click()
+  await page.getByText("臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版").waitFor()
+})
+await check("紀錄：對話保留 30 天", async () => {
+  await page.goto(base + "/history", { waitUntil: "networkidle" })
+  await page.getByText("對話紀錄保留 30 天。").first().waitFor()
 })
 
 // 手機：浮動分頁＋問 AI 全螢幕（搜尋住在這裡）

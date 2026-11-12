@@ -1,5 +1,6 @@
 // 截圖：node scripts/screenshots.mjs [輸出資料夾] [--base=http://localhost:5173] [--real] [--only=ledger,stock-2330-overview]
 // 新資訊架構（聯絡簿）預設輸出到 docs/screenshots/v2/：桌面 1440×900 @2x 與 iPhone 15，淺色與深色。
+// mock 預設模擬商用模式（DATA_POLICY=commercial：沒有示範標記、存檔不足處寫「資料累積中」）。
 // 需要先啟動 dev server（pnpm dev）。使用預先安裝的 Playwright，不執行 playwright install。
 // --real：真實後端的截圖（先啟動 apps/api 與 pnpm dev:api），只拍淺色、輸出到 docs/screenshots/real/。
 import { mkdirSync } from "node:fs"
@@ -41,6 +42,32 @@ const draft = async (page, mobile) => {
   if (mobile) await page.getByLabel(/搜尋股票、提問/).blur()
 }
 
+/** 已出清：展開持倉底下的區塊，捲到它的標題 */
+const closed = async (page) => {
+  await page.getByRole("button", { name: /已出清/ }).click()
+  await page.locator("#closed-list").waitFor()
+  await page.evaluate(() => {
+    const el = document.getElementById("closed-title")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 340 : 260), behavior: "instant" })
+  })
+}
+/** 設定 → 定期定額 */
+const recurring = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("recurring")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
+/** 扣款日：AI 面板提出定期定額草稿（示範資料的 11/12 是 00878 的扣款日） */
+const recurringDraft = async (page, mobile) => {
+  if (mobile) {
+    await page.getByRole("button", { name: /^問 AI/ }).click()
+    await page.waitForTimeout(400)
+  }
+  await page.getByRole("button", { name: /記下.*00878 定期定額/ }).click()
+  await page.getByText("確認入帳").first().waitFor({ timeout: 8000 })
+}
+
 /** 每個畫面：路徑、就緒條件、截圖前要做的動作 */
 const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
@@ -48,7 +75,12 @@ const SHOTS = [
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
   { name: "stock-2330-valuation", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: toTabs },
-  { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=三大法人買賣超", action: toTabs },
+  { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=三大法人資料累積中", action: toTabs },
+  { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
+  { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
+  { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },
+  { name: "settings-recurring", path: "/settings", ready: "text=新增定期定額", action: recurring },
+  { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
   { name: "history", path: "/history", ready: "text=發起新對話" },
   { name: "ai", path: "/", ready: "text=總資產", mobileOnly: true, action: async (page) => {
     await page.getByRole("button", { name: /^問 AI/ }).click()

@@ -90,8 +90,8 @@ export function RecurringPlans() {
           {plans.data.map((p) => {
             const status = planStatus(p, today)
             return (
-              <li key={p.id} className="grid grid-cols-[1fr_auto] items-start gap-x-4 gap-y-3 px-4 py-4 sm:px-5">
-                <div className="min-w-0">
+              <li key={p.id} className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-start sm:gap-4 sm:px-5">
+                <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <Link to="/stock/$symbol" params={{ symbol: p.symbol }} className="font-medium hover:underline">
                       {p.name}
@@ -104,22 +104,28 @@ export function RecurringPlans() {
                     <span className="text-ink-2">・{nameOf(p.account_id)}</span>
                   </p>
                   <p className="num mt-0.5 text-sm text-ink-2">
-                    {status === "active" && p.next_date ? `下次扣款 ${formatDateShort(p.next_date)}` : status === "paused" ? "暫停中，不會提出草稿" : "沒有下一次扣款"}
+                    {status === "active" && p.next_date
+                      ? `下次扣款 ${formatDateShort(p.next_date)}${p.day_of_month.includes(Number(p.next_date.slice(8, 10))) ? "" : "（遇休市順延）"}`
+                      : status === "paused"
+                        ? "暫停中，不會提出草稿"
+                        : "沒有下一次扣款"}
                     ・自 {formatDate(p.start_date)} 起{p.end_date && `，到 ${formatDate(p.end_date)}`}
                   </p>
                   {p.note && <p className="mt-0.5 text-sm text-ink-2">{p.note}</p>}
                 </div>
-                <div className="flex items-center gap-1">
-                  <Switch
-                    checked={p.active}
-                    disabled={update.isPending || status === "ended"}
-                    onCheckedChange={(v) => setActive(p, v)}
-                    aria-label={p.active ? `暫停「${p.name}」定期定額` : `恢復「${p.name}」定期定額`}
-                    className="mr-2"
-                  />
+                <div className="flex items-center gap-1 max-sm:-ml-1">
+                  <label className="mr-2 inline-flex min-h-10 cursor-pointer items-center gap-2 px-1 text-sm text-ink-2">
+                    啟用
+                    <Switch
+                      checked={p.active}
+                      disabled={update.isPending || status === "ended"}
+                      onCheckedChange={(v) => setActive(p, v)}
+                      aria-label={p.active ? `暫停「${p.name}」定期定額` : `恢復「${p.name}」定期定額`}
+                    />
+                  </label>
                   <Button variant="ghost" size="sm" onClick={() => setEditing(p)} aria-label={`修改「${p.name}」定期定額`}>
                     <PencilIcon />
-                    <span className="max-sm:hidden">修改</span>
+                    修改
                   </Button>
                   <Button variant="ghost" size="icon-sm" onClick={() => setDeleting(p)} aria-label={`刪除「${p.name}」定期定額`}>
                     <Trash2Icon />

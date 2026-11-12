@@ -4,7 +4,7 @@ import { useAccounts, useClosedPositions } from "@/api/queries"
 import type { Account, ClosedRound } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
 import { ErrorState } from "@/components/states"
-import { direction, formatMoney, toneClass } from "@/lib/format"
+import { direction, directionGlyph, formatMoney, toneClass } from "@/lib/format"
 import { closedTotals, holdingPeriod } from "@/lib/ledger-display"
 import { codeOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
@@ -43,7 +43,11 @@ export function ClosedRounds() {
           </span>
           <span className="num ml-auto text-sm font-normal text-ink-2">
             已實現
-            <span className={cn("ml-1.5", toneClass(d))}>{privacy ? <Masked /> : formatMoney(totals.realized, { signed: true })}</span>
+            <span className={cn("ml-1.5", toneClass(d))}>
+              {d !== "flat" && <span aria-hidden className="mr-0.5 text-[0.8em]">{directionGlyph(d)}</span>}
+              {privacy ? <Masked /> : formatMoney(totals.realized, { signed: true })}
+              <span className="sr-only">{d === "up" ? "獲利" : d === "down" ? "虧損" : ""}</span>
+            </span>
           </span>
           <ChevronDownIcon aria-hidden className={cn("mb-0.5 size-[18px] shrink-0 text-ink-2 transition-transform duration-200", open && "rotate-180")} />
         </button>

@@ -18,6 +18,7 @@ export function DataSourcesPage() {
     for (const d of a?.datasets ?? []) map.set(d.agency, [...(map.get(d.agency) ?? []), d])
     return [...map.entries()]
   }, [a])
+  const mainLicense = a?.datasets.find((d) => d.commercial)?.license_url
 
   return (
     <div className="mx-auto flex w-full max-w-[880px] flex-col gap-10 px-5 pt-2 pb-10 md:px-8 lg:pt-10">
@@ -60,11 +61,14 @@ export function DataSourcesPage() {
                           <ArrowUpRightIcon aria-hidden className="size-3.5" />
                           <span className="sr-only">（另開新視窗）</span>
                         </a>
-                        <a href={d.license_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline-offset-3 hover:text-ink hover:underline">
-                          {d.license}
-                          <ArrowUpRightIcon aria-hidden className="size-3.5" />
-                          <span className="sr-only">（另開新視窗）</span>
-                        </a>
+                        {/* 政府資料開放授權條款已列在最上面；授權不同的資料集（例如非商用來源）才逐筆連結 */}
+                        {d.license_url !== mainLicense && (
+                          <a href={d.license_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline-offset-3 hover:text-ink hover:underline">
+                            {d.license}
+                            <ArrowUpRightIcon aria-hidden className="size-3.5" />
+                            <span className="sr-only">（另開新視窗）</span>
+                          </a>
+                        )}
                         {!d.commercial && <span className="text-ink">非商用</span>}
                       </p>
                     </div>
