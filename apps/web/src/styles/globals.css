@@ -1,7 +1,7 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-@import "@fontsource-variable/source-sans-3/wght.css";
 @import "@fontsource-variable/noto-sans-tc/wght.css";
+@import "@fontsource/lxgw-wenkai-tc/400.css";
 
 @custom-variant dark (&:where(.dark, .dark *));
 
@@ -66,119 +66,106 @@
 }
 
 /*
- * Forliosa 設計 token（世界觀：印鑑與印台）。說明見 /DESIGN.md。
- * 青田石的冷灰底、墨色側欄、藍色印台的「印泥藍」做操作色；
- * 朱泥紅只用在品牌章；紅綠只用於漲跌（依 data-convention 對應）。
+ * Forliosa 設計 token —— 世界觀：學校聯絡簿。說明見 /DESIGN.md。
+ * 淺色是紙白、深色是夜間筆記本；1px 藍灰格線就是結構（表格不包卡片）；
+ * 藍黑原子筆墨是文字與動作；紫色只屬於 AI（老師的筆）；紅綠只表示價格漲跌。
  */
 :root {
-  --background: oklch(0.972 0.005 195);
-  --foreground: oklch(0.23 0.025 262);
-  --card: oklch(0.996 0.002 195);
-  --card-foreground: oklch(0.23 0.025 262);
-  --popover: oklch(0.996 0.002 195);
-  --popover-foreground: oklch(0.23 0.025 262);
-  --muted: oklch(0.945 0.007 205);
-  --muted-foreground: oklch(0.47 0.018 255);
-  --border: oklch(0.885 0.009 215);
-  --hairline: oklch(0.92 0.007 215);
-  --input: oklch(0.83 0.012 225);
-  --ring: oklch(0.52 0.14 258);
-  --primary: oklch(0.44 0.135 259);
-  --primary-foreground: oklch(0.985 0.005 250);
-  --secondary: oklch(0.935 0.012 240);
-  --secondary-foreground: oklch(0.23 0.025 262);
-  --accent: oklch(0.935 0.022 255);
-  --accent-foreground: oklch(0.32 0.09 259);
-  --destructive: oklch(0.5 0.17 30);
-  --destructive-foreground: oklch(0.985 0.005 250);
+  /* 紙與墨 */
+  --paper: #fbfbf8;
+  --raised: #ffffff;
+  --rule: #d6dee8;
+  --ink: #1f2a44;
+  --ink-2: #5b6478;
+  --ctl: #838ca0;
+  --hov: #f2f4f8;
+  --sel: rgb(31 42 68 / 0.08);
+  --lift: rgb(15 23 48 / 0.1);
+  --act: #1f2a44;
+  --act-fg: #fbfbf8;
+  --act-hover: #0f1730;
 
-  /* 側欄：靛青墨 */
-  --rail: oklch(0.255 0.05 263);
-  --rail-foreground: oklch(0.94 0.012 250);
-  --rail-muted: oklch(0.76 0.035 255);
-  --rail-active: oklch(0.345 0.07 262);
-  --rail-border: oklch(0.32 0.05 263);
+  /* AI：老師的筆（紫） */
+  --ai: #5b3fa0;
+  --ai-wash: #f5f2fb;
+  --ai-rule: #a896d6;
 
-  /* 朱泥（品牌章專用） */
-  --seal: oklch(0.565 0.19 33);
-  --seal-foreground: oklch(0.985 0.01 60);
+  /* 價格：紅與綠（依 data-convention 對應漲跌） */
+  --red: #c42b2b;
+  --green: #12773e;
 
-  /* 漲跌原色 */
-  --red: oklch(0.545 0.205 26);
-  --green: oklch(0.5 0.13 152);
-  --amber: oklch(0.62 0.13 75);
+  /* 圖表：我的＝墨、基準＝鉛筆灰、分類第二色＝藍筆、第三色＝螢光赭 */
+  --chart-mine: var(--ink);
+  --chart-bench: #8a93a6;
+  --chart-blue: #3b6bb5;
+  --chart-ochre: #a87a26;
+  --chart-grid: #e6ebf1;
 
-  /* 圖表系列（已用 dataviz validate_palette 驗證）：1 我的／印泥藍、2 基準與「其他」石灰、3–6 配置圖分類色 */
-  --chart-1: oklch(0.494 0.141 258.8);
-  --chart-2: oklch(0.66 0.02 230);
-  --chart-3: oklch(0.659 0.136 68.8);
-  --chart-4: oklch(0.624 0.105 194.9);
-  --chart-5: oklch(0.546 0.175 285.2);
-  --chart-6: oklch(0.621 0.163 346.6);
-  --chart-7: oklch(0.5 0.05 30);
-  --chart-grid: oklch(0.9 0.008 215);
+  /* 估值河流圖：單一色相（藍灰）5 階，便宜→昂貴，不用紅綠 */
+  --band-1: #eef2f7;
+  --band-2: #dfe6ef;
+  --band-3: #cbd6e4;
+  --band-4: #b2c1d6;
+  --band-5: #95a8c3;
 
-  /* 估值河流圖：便宜→昂貴，單一色相（不用紅綠，避免與漲跌混淆） */
-  --band-1: oklch(0.955 0.02 245);
-  --band-2: oklch(0.905 0.04 250);
-  --band-3: oklch(0.85 0.06 254);
-  --band-4: oklch(0.79 0.08 257);
-  --band-5: oklch(0.72 0.1 259);
-
-  --scrim: oklch(0.2 0.03 262 / 0.4);
-  --radius: 0.625rem;
+  /* shadcn／Base UI 元件對應 */
+  --background: var(--paper);
+  --foreground: var(--ink);
+  --card: var(--raised);
+  --card-foreground: var(--ink);
+  --popover: var(--raised);
+  --popover-foreground: var(--ink);
+  --muted: var(--hov);
+  --muted-foreground: var(--ink-2);
+  --border: var(--rule);
+  --input: var(--ctl);
+  --ring: var(--ink);
+  --primary: var(--act);
+  --primary-foreground: var(--act-fg);
+  --secondary: var(--hov);
+  --secondary-foreground: var(--ink);
+  --accent: var(--hov);
+  --accent-foreground: var(--ink);
+  /* 刪除不用紅色（紅色在本產品代表「漲」）：用墨色，靠文字說清楚 */
+  --destructive: var(--ink);
+  --destructive-foreground: var(--paper);
+  --scrim: rgb(15 23 48 / 0.32);
   color-scheme: light;
 }
 
 .dark {
-  --background: oklch(0.175 0.014 258);
-  --foreground: oklch(0.935 0.008 250);
-  --card: oklch(0.212 0.016 258);
-  --card-foreground: oklch(0.935 0.008 250);
-  --popover: oklch(0.235 0.018 258);
-  --popover-foreground: oklch(0.935 0.008 250);
-  --muted: oklch(0.25 0.016 258);
-  --muted-foreground: oklch(0.73 0.016 250);
-  --border: oklch(0.31 0.016 258);
-  --hairline: oklch(0.27 0.015 258);
-  --input: oklch(0.4 0.02 258);
-  --ring: oklch(0.72 0.115 256);
-  --primary: oklch(0.74 0.11 256);
-  --primary-foreground: oklch(0.2 0.04 260);
-  --secondary: oklch(0.27 0.02 258);
-  --secondary-foreground: oklch(0.935 0.008 250);
-  --accent: oklch(0.29 0.04 258);
-  --accent-foreground: oklch(0.9 0.04 255);
-  --destructive: oklch(0.66 0.17 28);
-  --destructive-foreground: oklch(0.18 0.02 30);
+  --paper: #14171f;
+  --raised: #1b2029;
+  --rule: #2a3140;
+  --ink: #e6e9f0;
+  --ink-2: #97a0b4;
+  --ctl: #5e6880;
+  --hov: #1f2531;
+  --sel: rgb(230 233 240 / 0.1);
+  --lift: rgb(0 0 0 / 0.45);
+  --act: #e6e9f0;
+  --act-fg: #14171f;
+  --act-hover: #ffffff;
 
-  --rail: oklch(0.145 0.03 263);
-  --rail-foreground: oklch(0.93 0.012 250);
-  --rail-muted: oklch(0.74 0.03 255);
-  --rail-active: oklch(0.255 0.055 262);
-  --rail-border: oklch(0.22 0.03 263);
+  --ai: #a996f0;
+  --ai-wash: #1d1a2c;
+  --ai-rule: #5f4f9a;
 
-  --seal: oklch(0.62 0.18 33);
+  --red: #ff6b6b;
+  --green: #4cc38a;
 
-  --red: oklch(0.7 0.18 25);
-  --green: oklch(0.74 0.15 152);
-  --amber: oklch(0.78 0.12 78);
+  --chart-bench: #7a8399;
+  --chart-blue: #7fa6e0;
+  --chart-ochre: #d2a75a;
+  --chart-grid: #232a37;
 
-  --chart-1: oklch(0.669 0.141 257.9);
-  --chart-2: oklch(0.6 0.02 240);
-  --chart-3: oklch(0.66 0.13 72);
-  --chart-4: oklch(0.66 0.104 191.7);
-  --chart-5: oklch(0.658 0.148 288.4);
-  --chart-6: oklch(0.664 0.158 351);
-  --chart-7: oklch(0.62 0.06 30);
-  --chart-grid: oklch(0.28 0.014 258);
+  --band-1: #1c2330;
+  --band-2: #232c3c;
+  --band-3: #2c3849;
+  --band-4: #364559;
+  --band-5: #42536b;
 
-  --band-1: oklch(0.29 0.035 255);
-  --band-2: oklch(0.31 0.05 256);
-  --band-3: oklch(0.37 0.07 257);
-  --band-4: oklch(0.43 0.09 258);
-  --band-5: oklch(0.5 0.11 259);
-  --scrim: oklch(0.08 0.02 262 / 0.6);
+  --scrim: rgb(0 0 0 / 0.55);
   color-scheme: dark;
 }
 
@@ -194,6 +181,28 @@
 }
 
 @theme inline {
+  --color-paper: var(--paper);
+  --color-raised: var(--raised);
+  --color-rule: var(--rule);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ctl: var(--ctl);
+  --color-hov: var(--hov);
+  --color-sel: var(--sel);
+  --color-act: var(--act);
+  --color-act-fg: var(--act-fg);
+  --color-act-hover: var(--act-hover);
+  --color-ai: var(--ai);
+  --color-ai-wash: var(--ai-wash);
+  --color-ai-rule: var(--ai-rule);
+  --color-rise: var(--rise);
+  --color-fall: var(--fall);
+  --color-chart-mine: var(--chart-mine);
+  --color-chart-bench: var(--chart-bench);
+  --color-chart-blue: var(--chart-blue);
+  --color-chart-ochre: var(--chart-ochre);
+  --color-chart-grid: var(--chart-grid);
+
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -203,7 +212,6 @@
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
   --color-border: var(--border);
-  --color-hairline: var(--hairline);
   --color-input: var(--input);
   --color-ring: var(--ring);
   --color-primary: var(--primary);
@@ -214,104 +222,118 @@
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
-  --color-rail: var(--rail);
-  --color-rail-foreground: var(--rail-foreground);
-  --color-rail-muted: var(--rail-muted);
-  --color-rail-active: var(--rail-active);
-  --color-rail-border: var(--rail-border);
   --color-scrim: var(--scrim);
-  --color-seal: var(--seal);
-  --color-seal-foreground: var(--seal-foreground);
-  --color-rise: var(--rise);
-  --color-fall: var(--fall);
-  --color-amber: var(--amber);
-  --color-chart-1: var(--chart-1);
-  --color-chart-2: var(--chart-2);
-  --color-chart-3: var(--chart-3);
-  --color-chart-4: var(--chart-4);
-  --color-chart-5: var(--chart-5);
-  --color-chart-6: var(--chart-6);
-  --color-chart-grid: var(--chart-grid);
 
+  /* 方肩：控制項 4px、分段外框與建議卡 6px、手機卡片 12px；示範資料標記 2px；簽名格 0 */
+  --radius-xs: 2px;
   --radius-sm: 4px;
   --radius-md: 6px;
   --radius-lg: 8px;
-  --radius-xl: var(--radius);
-  --radius-2xl: 14px;
+  --radius-xl: 12px;
+  --radius-2xl: 16px;
 
-  --font-sans: "Source Sans 3 Variable", "Noto Sans TC Variable", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-sans: "Noto Sans TC Variable", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+  --font-ai: "LXGW WenKai TC", "Kaiti TC", "BiauKai", "DFKai-SB", serif;
 
-  /* 固定 rem 字級（Operate：不用流體字級），比例約 1.2 */
+  /* 固定字級（Operate）：12・13・14・15・17・20・24・32・40・64 */
   --text-xs: 0.75rem;
   --text-xs--line-height: 1.1rem;
   --text-sm: 0.8125rem;
   --text-sm--line-height: 1.25rem;
   --text-md: 0.875rem;
   --text-md--line-height: 1.35rem;
-  --text-base: 1rem;
-  --text-base--line-height: 1.6rem;
-  --text-lg: 1.125rem;
-  --text-lg--line-height: 1.6rem;
-  --text-xl: 1.375rem;
-  --text-xl--line-height: 1.8rem;
-  --text-2xl: 1.75rem;
-  --text-2xl--line-height: 2.2rem;
-  --text-hero: 3rem;
-  --text-hero--line-height: 1;
-  --text-hero-sm: 2.25rem;
-  --text-hero-sm--line-height: 1;
+  --text-base: 0.9375rem;
+  --text-base--line-height: 1.5rem;
+  --text-lg: 1.0625rem;
+  --text-lg--line-height: 1.5rem;
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.75rem;
+  --text-2xl: 1.5rem;
+  --text-2xl--line-height: 2.1rem;
+  --text-3xl: 2rem;
+  --text-3xl--line-height: 2.5rem;
+  --text-4xl: 2.5rem;
+  --text-4xl--line-height: 3rem;
+  --text-big: 4rem;
+  --text-big--line-height: 1.05;
+
+  --shadow-lift: 0 6px 18px var(--lift), 0 1px 2px var(--lift);
 
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
-
-  --animate-stamp: stamp 180ms var(--ease-out);
 }
 
-@keyframes stamp {
+/* 簽名：墨水由左往右寫出 */
+@keyframes sign-write {
   from {
-    transform: scale(1.12);
-    opacity: 0;
+    clip-path: inset(0 100% 0 0);
   }
   to {
-    transform: scale(1);
+    clip-path: inset(0 0 0 0);
+  }
+}
+/* 新的對話或草稿：從已可見的狀態輕輕落下 */
+@keyframes note-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
     opacity: 1;
+    transform: translateY(0);
   }
 }
 
 @layer base {
   * {
-    border-color: var(--border);
+    border-color: var(--rule);
   }
   html {
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
     overscroll-behavior: none;
-    scrollbar-gutter: stable;
-    background: var(--background);
+    background: var(--paper);
   }
   body {
     min-height: 100dvh;
-    background: var(--background);
-    color: var(--foreground);
+    background: var(--paper);
+    color: var(--ink);
     font-family: var(--font-sans);
     font-size: 1rem;
-    line-height: 1.6;
-    /* 全站等寬數字：金額、股數、日期都對齊 */
+    line-height: 1.5;
+    /* 全站等寬數字：金額、股數、日期直向對齊 */
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
     -webkit-font-smoothing: antialiased;
     text-rendering: optimizeLegibility;
   }
+  @media (min-width: 1024px) {
+    body {
+      font-size: var(--text-base);
+    }
+  }
   ::selection {
-    background: color-mix(in oklch, var(--primary) 22%, transparent);
-    color: inherit;
+    background: var(--rule);
+    color: var(--ink);
   }
   input,
   textarea,
   select {
-    font-size: 16px;
-    caret-color: var(--primary);
+    caret-color: var(--ink);
+  }
+  /* 觸控裝置一律 16px，避免 iOS 放大頁面 */
+  @media (pointer: coarse) {
+    input,
+    textarea,
+    select {
+      font-size: 16px;
+    }
+  }
+  input::placeholder,
+  textarea::placeholder {
+    color: var(--ink-2);
+    opacity: 1;
   }
   button,
   a,
@@ -324,10 +346,14 @@
   [role="tab"] {
     -webkit-user-select: none;
     user-select: none;
+    -webkit-touch-callout: none;
   }
   :focus-visible {
-    outline: 2px solid var(--ring);
+    outline: 2px solid var(--ink);
     outline-offset: 2px;
+  }
+  a {
+    text-underline-offset: 3px;
   }
   h1,
   h2,
@@ -337,9 +363,9 @@
   p {
     text-wrap: pretty;
   }
-  /* 捲軸跟著主題 */
+  /* 捲軸是一條格線 */
   * {
-    scrollbar-color: color-mix(in oklch, var(--muted-foreground) 35%, transparent) transparent;
+    scrollbar-color: var(--rule) transparent;
     scrollbar-width: thin;
   }
   @media (prefers-reduced-motion: reduce) {
@@ -353,65 +379,122 @@
 }
 
 @layer components {
-  /* 「章」：資料狀態標記（示範資料、預估、即將推出…） */
-  .chop {
-    display: inline-flex;
-    align-items: center;
-    gap: 0.25rem;
-    border: 1.5px solid currentColor;
-    border-radius: 3px;
-    padding: 0 0.35rem;
-    height: 1.375rem;
-    font-size: var(--text-xs);
-    line-height: 1;
-    font-weight: 600;
-    letter-spacing: 0.06em;
-    white-space: nowrap;
-    color: var(--primary);
-  }
-  .chop-press {
-    animation: var(--animate-stamp);
-  }
   /* 數字：表格與金額 */
   .num {
     font-variant-numeric: tabular-nums;
     font-feature-settings: "tnum" 1, "lnum" 1;
-    letter-spacing: -0.005em;
   }
-  .press {
-    transition: transform 140ms var(--ease-out), background-color 140ms ease, color 140ms ease;
+  /* 獨立的大數字用比例數字 */
+  .hero-figure {
+    font-variant-numeric: proportional-nums lining-nums;
+    font-feature-settings: "pnum" 1, "lnum" 1;
   }
-  .press:active {
+
+  /* AI 的話：老師的筆——紫色文楷 */
+  .ai-voice {
+    font-family: var(--font-ai);
+    color: var(--ai);
+    font-weight: 400;
+  }
+
+  /* 示範資料：細框小字，資料狀態而不是品牌 */
+  .demo-tag {
+    display: inline-flex;
+    align-items: center;
+    height: 20px;
+    padding: 0 5px;
+    border: 1px solid var(--ctl);
+    border-radius: var(--radius-xs);
+    font-size: var(--text-xs);
+    line-height: 1;
+    color: var(--ink);
+    white-space: nowrap;
+  }
+
+  /* 格線列：整列可點、hover 是淡墨底 */
+  .ruled-row {
+    border-bottom: 1px solid var(--rule);
+    transition: background-color 120ms ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .ruled-row:hover {
+      background: var(--hov);
+    }
+  }
+  .ruled-row:active {
+    background: var(--hov);
+  }
+
+  /* 控制項：方肩、1px 灰框 */
+  .ctl {
+    border: 1px solid var(--ctl);
+    border-radius: var(--radius-sm);
+    background: transparent;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
+  }
+  @media (hover: hover) and (pointer: fine) {
+    .ctl:hover {
+      background: var(--hov);
+    }
+  }
+
+  /* 簽名格：方形、雙框線（家長簽名欄） */
+  .sign-box {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    width: 76px;
+    height: 60px;
+    border-radius: 0;
+    background: var(--act);
+    color: var(--act-fg);
+    font-size: var(--text-md);
+    font-weight: 700;
+    transition: background-color 120ms ease, transform 140ms var(--ease-out);
+  }
+  .sign-box::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid currentColor;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .sign-box:hover {
+    background: var(--act-hover);
+  }
+  .sign-box:active {
     transform: scale(0.97);
   }
+  .sign-box[data-signed] {
+    background: transparent;
+    color: var(--ink);
+    border: 1px solid var(--ink);
+  }
+  .sign-box[data-signed]::after {
+    border-color: var(--ink);
+    opacity: 0.25;
+  }
+  .sign-write {
+    animation: sign-write 380ms var(--ease-out) both;
+  }
+  .note-in {
+    animation: note-in 220ms var(--ease-out) both;
+  }
+
   .safe-bottom {
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
   .safe-top {
     padding-top: env(safe-area-inset-top, 0px);
   }
-}
-
-/* 大數字用比例數字（dataviz：tabular 只用在需要直向對齊的地方） */
-.hero-figure {
-  font-variant-numeric: proportional-nums;
-  font-feature-settings: "pnum" 1, "lnum" 1;
-}
-
-@layer components {
-  /* 清單列連結（首頁各卡片、更多頁）：整列可點、按下回饋 */
-  .row-link {
-    margin-inline: -0.5rem;
-    border-radius: var(--radius-md);
-    padding-inline: 0.5rem;
-    transition: transform 140ms var(--ease-out), background-color 140ms ease;
+  .press {
+    transition: transform 140ms var(--ease-out), background-color 120ms ease, color 120ms ease, border-color 120ms ease;
   }
-  .row-link:active {
-    transform: scale(0.985);
-  }
-  @media (hover: hover) and (pointer: fine) {
-    .row-link:hover {
-      background: var(--muted);
-    }
+  .press:active {
+    transform: scale(0.97);
   }
 }

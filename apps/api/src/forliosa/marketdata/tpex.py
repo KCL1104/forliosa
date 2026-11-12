@@ -15,6 +15,7 @@ Field names verified from twjackysu/TWSEMCPServer:
 from __future__ import annotations
 
 import time
+from decimal import Decimal
 from typing import Any
 
 from forliosa.marketdata.base import (
@@ -91,7 +92,9 @@ class TpexOpenApiProvider(BaseProvider):
         hit = self._cache.get("daily")
         if hit and time.monotonic() - hit[0] < self.CACHE_SECONDS:
             return hit[1]
-        rows = self.fetcher.get_json(f"{OPENAPI_BASE}/tpex_mainboard_daily_close_quotes")
+        # tpex_mainboard_quotes (≈ 0.4 MB, stocks only) has the same keys as
+        # tpex_mainboard_daily_close_quotes (≈ 5 MB incl. warrants, archived by forliosa.archive).
+        rows = self.fetcher.get_json(f"{OPENAPI_BASE}/tpex_mainboard_quotes")
         if not isinstance(rows, list):
             raise ProviderUnavailable("TPEx daily close quotes 格式不符")
         parsed = parse_daily_close_quotes(rows)
@@ -105,5 +108,29 @@ class TpexOpenApiProvider(BaseProvider):
         daily = self._daily()
         return {s: daily[s] for s in wanted if s in daily}
 
-    def valuation_ratios(self) -> dict[str, dict[str, Any]]:
+    def ex_rights_on(self, symbols: list[str], d) -> dict[str, tuple[Decimal, Decimal]]:
+        """tpex_exright_prepost: ExRrightsExDividendDate, CashDividend ("尚未公告" when unknown), StockDividendRatio."""
+        wanted = {s for s in symbols if market_of_symbol(s) == "TPEX"}
+        if not wanted:
+            return {}
+        hit = self._cache.get("exright")
+        if hit and time.monotonic() - hit[0] < self.CACHE_SECONDS:
+            rows = hit[1]
+        else:
+            rows = self.fetcher.get_json(f"{OPENAPI_BASE}/tpex_exright_prepost")
+            if not isinstance(rows, list):
+                raise ProviderUnavailable("TPEx exright_prepost 格式不符")
+            self._cache["exright"] = (time.monotonic(), rows)
+        out = {}
+        for r in rows:
+            sym = tw_symbol(str(r.get("SecuritiesCompanyCode") or "").strip(), "TPEX")
+            if sym in wanted and parse_tw_date(r.get("ExRrightsExDividendDate")) == d:
+                cash = parse_decimal(r.get("CashDividend")) or Decimal(0)
+                ratio = parse_decimal(r.get("StockDividendRatio")) or Decimal(0)
+                if cash or ratio:
+                    out[sym] = (cash, ratio)
+        return out
+
+    def market_valuation_ratios(self) -> dict[str, dict[str, Any]]:
+        """Whole market, latest day (the archive stores it daily; not the per-symbol facade method)."""
         return parse_pe_qry_date(self.fetcher.get_json(PE_QRY_URL, params={"response": "json"}))

@@ -19,6 +19,9 @@ importers:
       '@fontsource-variable/source-sans-3':
         specifier: ^5.3.1
         version: 5.3.1
+      '@fontsource/lxgw-wenkai-tc':
+        specifier: 5.3.1
+        version: 5.3.1
       '@number-flow/react':
         specifier: ^0.6.2
         version: 0.6.2(react-dom@19.3.1(react@19.3.1))(react@19.3.1)
@@ -318,6 +321,9 @@ packages:
 
   '@fontsource-variable/source-sans-3@5.3.1':
     resolution: {integrity: sha512-u0p5Z/PM2e1uxYOMiodLM6NVzxHwULcB6Oi7QSr2WU/sdoLBFP/BeOZ3YYHeJ6rHsjPZA1nZweZVaV7sf2MAyQ==}
+
+  '@fontsource/lxgw-wenkai-tc@5.3.1':
+    resolution: {integrity: sha512-oulAMD2B40s+em16ZgcawwoVcBLBackzByuNzOg6D99J4G5Jjf6QyDvQFHWt3lIy3GgzQGGiU9mjIUvx5k7r4A==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2231,6 +2237,8 @@ snapshots:
   '@fontsource-variable/noto-sans-tc@5.3.1': {}
 
   '@fontsource-variable/source-sans-3@5.3.1': {}
+
+  '@fontsource/lxgw-wenkai-tc@5.3.1': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

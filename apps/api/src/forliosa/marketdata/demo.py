@@ -21,6 +21,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from zoneinfo import ZoneInfo
 
+from forliosa.domain.ticks import tick_size
 from forliosa.marketdata.base import (
     BaseProvider,
     Candle,
@@ -61,20 +62,8 @@ def stable_seed(text: str) -> int:
 
 
 def tw_tick(price: Decimal, is_etf: bool) -> Decimal:
-    """Taiwan tick size (升降單位)."""
-    if is_etf:
-        return Decimal("0.01") if price < 50 else Decimal("0.05")
-    if price < 10:
-        return Decimal("0.01")
-    if price < 50:
-        return Decimal("0.05")
-    if price < 100:
-        return Decimal("0.1")
-    if price < 500:
-        return Decimal("0.5")
-    if price < 1000:
-        return Decimal("1")
-    return Decimal("5")
+    """Taiwan tick size (升降單位); see :mod:`forliosa.domain.ticks`."""
+    return tick_size(price, is_etf)
 
 
 def round_price(value: float, symbol: str) -> Decimal:

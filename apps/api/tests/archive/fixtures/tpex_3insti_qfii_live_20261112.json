@@ -1,0 +1,41 @@
+[
+ {
+  "Date": "1151111",
+  "Rank": "54",
+  "SecuritiesCompanyCode": "3680",
+  "CompanyName": "家登",
+  "NumberOfSharesIssued": "96041481",
+  "AvailableSharesForOC/FIToInvest": "65989598",
+  "CurrentlySharesOC/FIHeld": "30051883",
+  "PercentageOfAvailableInvestmentForOC/FI": "68.71%",
+  "PercentageOfSharesOC/FMIHeld": "31.29%",
+  "UpperLimitOfRegulatedInvestment": "100%",
+  "Note": ""
+ },
+ {
+  "Date": "1151111",
+  "Rank": "64",
+  "SecuritiesCompanyCode": "6488",
+  "CompanyName": "環球晶",
+  "NumberOfSharesIssued": "528113725",
+  "AvailableSharesForOC/FIToInvest": "372348412",
+  "CurrentlySharesOC/FIHeld": "155765313",
+  "PercentageOfAvailableInvestmentForOC/FI": "70.51%",
+  "PercentageOfSharesOC/FMIHeld": "29.49%",
+  "UpperLimitOfRegulatedInvestment": "100%",
+  "Note": ""
+ },
+ {
+  "Date": "1151111",
+  "Rank": "260",
+  "SecuritiesCompanyCode": "8390",
+  "CompanyName": "金益鼎",
+  "NumberOfSharesIssued": "96116128",
+  "AvailableSharesForOC/FIToInvest": "86905639",
+  "CurrentlySharesOC/FIHeld": "9210489",
+  "PercentageOfAvailableInvestmentForOC/FI": "90.42%",
+  "PercentageOfSharesOC/FMIHeld": "9.58%",
+  "UpperLimitOfRegulatedInvestment": "100%",
+  "Note": ""
+ }
+]

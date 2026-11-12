@@ -13,6 +13,19 @@ import { computePreview } from "./fees"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
 import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, seedTransactions } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, valuationSeries } from "./market"
+import {
+  buildChips,
+  buildEvents,
+  buildFinancials,
+  buildIntraday,
+  buildNews,
+  buildOverview,
+  buildPosition,
+  buildUpcoming,
+  buildWhy,
+  limitsOf,
+  referencePrice,
+} from "./research"
 
 /**
  * 示範情境：
@@ -70,6 +83,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     txns.sort((a, b) => a.trade_date.localeCompare(b.trade_date))
   }
   let nextId = 90000
+  let watch: string[] = scenario === "empty" ? [] : ["2382.TW", "2308.TW", "2881.TW"]
 
   const wait = <T>(value: T | (() => T)): Promise<T> =>
     new Promise((resolve, reject) => {
@@ -94,15 +108,21 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   })
   const quoteOf = (s: MockInstrumentSpec): Quote => {
     const last = dailyCandles(s).at(-1)!
+    const ref = referencePrice(s)
+    const limits = limitsOf(s)
     return {
       symbol: s.symbol, price: s.price, prev_close: s.prev_close,
-      change: Math.round((s.price - s.prev_close) * 100) / 100,
-      change_pct: Math.round((s.price / s.prev_close - 1) * 10000) / 10000,
+      change: Math.round((s.price - ref) * 100) / 100,
+      change_pct: Math.round((s.price / ref - 1) * 10000) / 10000,
       open: last.o, high: last.h, low: last.l, volume: last.v,
-      as_of: s.market === "US" ? "2026-11-11T05:00:00+08:00" : MOCK_AS_OF,
+      as_of: s.market === "US" ? "2026-11-12T05:00:00+08:00" : MOCK_AS_OF,
       is_realtime: false, is_demo: true, source: "demo",
+      reference_price: ref,
+      limit_up: limits?.up ?? null,
+      limit_down: limits?.down ?? null,
     }
   }
+  const tracked = (symbol: string) => watch.includes(symbol) || buildHoldings(txns).some((h) => h.symbol === symbol)
   const sortTxns = () =>
     txns.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))
 
@@ -214,6 +234,43 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       }),
     getRevenue: (symbol) => wait(() => monthlyRevenue(spec(symbol))),
     getDividends: (symbol) => wait(() => dividendRecords(spec(symbol))),
+    getOverview: (symbol) => wait(() => buildOverview(spec(symbol))),
+    getIntraday: (symbol) => wait(() => buildIntraday(spec(symbol), tracked(spec(symbol).symbol))),
+    getChips: (symbol, range = "3M") => wait(() => buildChips(spec(symbol), range)),
+    getFinancials: (symbol, period = "quarterly") => wait(() => buildFinancials(spec(symbol), period)),
+    getEvents: (symbol, mine = false) =>
+      wait(() => {
+        const s = spec(symbol)
+        const all = buildEvents(s, buildHoldings(txns).find((h) => h.symbol === s.symbol))
+        return mine ? all.filter((e) => e.mine) : all
+      }),
+    getNews: (symbol) => wait(() => buildNews(spec(symbol))),
+    getPosition: (symbol) => wait(() => buildPosition(spec(symbol), txns)),
+    getWhy: (symbol) => wait(() => buildWhy(spec(symbol))),
+
+    getWatchlist: () =>
+      wait(() =>
+        watch.map((symbol) => {
+          const s = spec(symbol)
+          const intraday = buildIntraday(s, true)
+          const step = Math.max(1, Math.floor(intraday.points.length / 48))
+          return {
+            symbol: s.symbol,
+            name: s.name,
+            quote: quoteOf(s),
+            sparkline: intraday.points.filter((_, i) => i % step === 0 || i === intraday.points.length - 1).map((p) => ({ t: p.t, price: p.price })),
+          }
+        }),
+      ),
+    addWatch: (symbol) =>
+      wait(() => {
+        const s = spec(symbol)
+        if (!watch.includes(s.symbol)) watch = [...watch, s.symbol]
+      }),
+    removeWatch: (symbol) =>
+      wait(() => {
+        watch = watch.filter((x) => x !== spec(symbol).symbol)
+      }),
 
     listTransactions: (query) =>
       wait(() => {
@@ -251,7 +308,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           currency: account.currency,
           is_day_trade: body.is_day_trade ?? false,
           note: body.note ?? "",
-          source: "manual",
+          source: body.source ?? "manual",
           created_at: new Date().toISOString(),
         }
         txns.push(txn)
@@ -262,10 +319,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       wait(() => {
         const found = txns.find((t) => t.id === id)
         if (!found) throw new ApiError(404, "not_found", "找不到這筆交易")
-        Object.assign(found, patch)
+        Object.assign(found, { ...patch, source: found.source })
         // 沒有手動覆寫稅費時，依新內容重新計算
         if (patch.fee === undefined || patch.tax === undefined) {
-          const p = computePreview({ ...found }, accounts.find((a) => a.id === found.account_id), found.symbol ? findInstrument(found.symbol) : undefined)
+          const p = computePreview({ ...found, source: undefined }, accounts.find((a) => a.id === found.account_id), found.symbol ? findInstrument(found.symbol) : undefined)
           if (patch.fee === undefined) found.fee = p.fee
           if (patch.tax === undefined) found.tax = p.tax
           found.health_insurance = p.health_insurance
@@ -283,6 +340,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
     getPortfolioSummary: (accountId) => wait(() => buildSummary(txns, accountId)),
     getHoldings: (accountId) => wait(() => buildHoldings(txns, accountId)),
+    getUpcoming: (days = 7) => wait(() => buildUpcoming(buildHoldings(txns), findInstrument, days)),
     getPerformance: ({ range, account_id, benchmark }) =>
       wait(() => buildPerformance(txns, range, account_id, benchmark ?? user.preferences.benchmark)),
   }

@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { Command as CommandPrimitive } from "cmdk"
-import { CornerDownLeftIcon, EyeOffIcon, PlusIcon, SearchIcon } from "lucide-react"
+import { CornerDownLeftIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PlusIcon, SearchIcon, SettingsIcon, UsersIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useInstrumentSearch } from "@/api/queries"
 import type { Instrument } from "@/api/types"
@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/compone
 import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-import { NAV_AI, NAV_DATA, NAV_MAIN } from "./nav"
 import { useUi } from "./ui-store"
 
 
@@ -54,7 +53,7 @@ export function CommandSearch() {
   }
 
   const results = search.data ?? []
-  const pages = [...NAV_MAIN, ...NAV_AI, ...NAV_DATA].filter((p) => !q || p.label.includes(q.trim()))
+  const pages = PAGES.filter((p) => !q || p.label.includes(q.trim()))
   // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用
   const values = [
     ...results.map((i) => i.symbol),
@@ -124,7 +123,6 @@ export function CommandSearch() {
                   <CommandPrimitive.Item key={p.to} value={`page:${p.to}`} onSelect={() => go(p.to)} className={itemClass}>
                     <p.icon className="size-4 text-muted-foreground" aria-hidden />
                     <span className="flex-1">{p.label}</span>
-                    {p.milestone && <span className="text-xs text-muted-foreground">{p.milestone} 推出</span>}
                   </CommandPrimitive.Item>
                 ))}
               </CommandPrimitive.Group>
@@ -143,11 +141,18 @@ export function CommandSearch() {
   )
 }
 
+const PAGES = [
+  { to: "/", label: "帳本", icon: NotebookTextIcon },
+  { to: "/groups", label: "群組", icon: UsersIcon },
+  { to: "/history", label: "紀錄", icon: HistoryIcon },
+  { to: "/settings", label: "設定", icon: SettingsIcon },
+] as const
+
 const groupClass = cn(
   "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
 )
 const itemClass =
-  "flex min-h-11 cursor-pointer items-center gap-3 rounded-md px-2.5 text-base outline-none data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
+  "flex min-h-11 cursor-pointer items-center gap-3 rounded-sm px-2.5 text-base outline-none data-[selected=true]:bg-hov data-[selected=true]:text-ink"
 
 function isTyping(target: EventTarget | null) {
   const el = target as HTMLElement | null

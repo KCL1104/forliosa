@@ -29,7 +29,7 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     summary: "全球最大的專業積體電路製造服務（晶圓代工）公司，先進製程與先進封裝（CoWoS、SoIC）為主要成長動能。",
     chain_stage: "晶圓製造", themes: ["CoWoS", "AI 伺服器", "先進製程", "蘋果概念"],
     shares_outstanding: 25932666666, market_cap: 28137000000000, data_sources: TWSE_SRC,
-    price: 1085, prev_close: 1070, drift: 0.19, vol: 0.27, avg_volume: 30_000_000,
+    price: 1085, prev_close: 1035, drift: 0.19, vol: 0.27, avg_volume: 30_000_000,
     eps_now: 52.3, eps_growth: 0.24, bvps_now: 190.1, per_multiples: [12, 16, 20, 24, 28], pbr_multiples: [3, 4, 5, 6, 7],
     revenue_base: 330_000_000, revenue_growth: 0.31,
   },
@@ -90,6 +90,29 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     price: 634.2, prev_close: 631.9, drift: 0.13, vol: 0.17, avg_volume: 6_000_000,
   },
   // ── 不在持股中、但可以搜尋的商品 ───────────────────────────
+  {
+    symbol: "2382.TW", code: "2382", name: "廣達", market: "TWSE", type: "stock", currency: "TWD", industry: "電腦及週邊設備業",
+    summary: "全球主要筆記型電腦代工廠，AI 伺服器與雲端資料中心為主要成長動能。",
+    chain_stage: "系統組裝", themes: ["AI 伺服器", "筆電"], shares_outstanding: 3863000000, market_cap: 1207187500000, data_sources: TWSE_SRC,
+    price: 312.5, prev_close: 310, drift: 0.2, vol: 0.34, avg_volume: 14_000_000,
+    eps_now: 18.4, eps_growth: 0.2, bvps_now: 78.2, per_multiples: [10, 13, 16, 19, 22], pbr_multiples: [2, 2.5, 3, 3.5, 4],
+    revenue_base: 150_000_000, revenue_growth: 0.22,
+  },
+  {
+    symbol: "2308.TW", code: "2308", name: "台達電", market: "TWSE", type: "stock", currency: "TWD", industry: "電子零組件業",
+    summary: "電源管理與散熱解決方案大廠，資料中心電源、電動車零組件與自動化為主要業務。",
+    chain_stage: "電源與散熱", themes: ["AI 伺服器", "電源", "電動車"], shares_outstanding: 2597000000, market_cap: 2635955000000, data_sources: TWSE_SRC,
+    price: 1015, prev_close: 1020, drift: 0.24, vol: 0.3, avg_volume: 6_500_000,
+    eps_now: 21.6, eps_growth: 0.18, bvps_now: 118, per_multiples: [20, 26, 32, 38, 44], pbr_multiples: [4, 5, 6, 7, 8],
+    revenue_base: 48_000_000, revenue_growth: 0.15,
+  },
+  {
+    symbol: "2881.TW", code: "2881", name: "富邦金", market: "TWSE", type: "stock", currency: "TWD", industry: "金融保險業",
+    summary: "台灣主要金融控股公司，旗下有富邦人壽、台北富邦銀行、富邦證券等。",
+    chain_stage: "金融控股", themes: ["金融", "壽險"], shares_outstanding: 13700000000, market_cap: 1227520000000, data_sources: TWSE_SRC,
+    price: 89.6, prev_close: 89.3, drift: 0.1, vol: 0.22, avg_volume: 18_000_000,
+    eps_now: 9.8, eps_growth: 0.05, bvps_now: 78.5, per_multiples: [6, 8, 10, 12, 14], pbr_multiples: [0.8, 1, 1.2, 1.4, 1.6],
+  },
   {
     symbol: "2409.TW", code: "2409", name: "友達", market: "TWSE", type: "stock", currency: "TWD", industry: "光電業",
     summary: "面板製造廠，近年轉型智慧移動、智慧零售等解決方案。面板景氣循環明顯，曾出現連續虧損。",

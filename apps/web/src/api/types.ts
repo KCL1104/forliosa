@@ -95,6 +95,11 @@ export interface Quote {
   is_realtime: boolean
   is_demo: boolean
   source: string
+  /** 參考價（平盤價）：除權息日 `change`／`change_pct` 以它計算，不是昨收 */
+  reference_price?: number | null
+  /** 漲停／跌停價（美股沒有，為 null） */
+  limit_up?: number | null
+  limit_down?: number | null
 }
 
 export type HistoryRange = "5D" | "1M" | "6M" | "YTD" | "1Y" | "5Y" | "MAX"
@@ -191,9 +196,12 @@ export interface Transaction {
   currency: Currency
   is_day_trade: boolean
   note: string
-  source: "manual" | "import"
+  /** `ai_draft`：由 AI 草稿經使用者簽名確認後建立（介面標示「由 AI 建立」） */
+  source: TransactionSource
   created_at: string
 }
+
+export type TransactionSource = "manual" | "import" | "ai_draft"
 
 export interface TransactionInput {
   account_id: string
@@ -209,6 +217,7 @@ export interface TransactionInput {
   currency?: Currency
   is_day_trade?: boolean
   note?: string
+  source?: Exclude<TransactionSource, "import">
 }
 
 export interface TransactionQuery {
@@ -327,6 +336,174 @@ export interface Performance {
   is_demo: boolean
 }
 
+
+// ── 重新設計新增（2026-11-12）：個股頁、帳本、自選 ───────────────
+export interface InstrumentStatus {
+  /** 注意股票 */
+  attention: boolean
+  /** 處置股票 */
+  disposition: boolean
+  note: string | null
+}
+
+/** `GET /instruments/{symbol}/overview`：欄位缺資料時為 null */
+export interface InstrumentOverview {
+  open: number | null
+  high: number | null
+  low: number | null
+  prev_close: number | null
+  reference_price: number | null
+  limit_up: number | null
+  limit_down: number | null
+  /** 股數 */
+  volume: number | null
+  avg_volume_3m: number | null
+  market_cap: number | null
+  pe: number | null
+  pb: number | null
+  dividend_yield: number | null
+  last_cash_dividend: number | null
+  ex_dividend_date: string | null
+  eps_ttm: number | null
+  high_52w: number | null
+  low_52w: number | null
+  shares_outstanding: number | null
+  status: InstrumentStatus
+  as_of: string | null
+  sources: string[]
+  is_demo: boolean
+}
+
+export interface IntradayPoint {
+  /** 台北時間「09:01」 */
+  t: string
+  price: number
+  volume: number
+}
+
+/** `GET /instruments/{symbol}/intraday`：只有持股與自選會累積盤中點，其他回 `points: []` */
+export interface Intraday {
+  symbol: string
+  date: string
+  prev_close: number | null
+  reference_price: number | null
+  points: IntradayPoint[]
+  is_partial: boolean
+  sources: string[]
+  is_demo?: boolean
+}
+
+export type ChipsRange = "1M" | "3M" | "6M" | "1Y"
+
+/** 籌碼：法人與融資融券單位都是「張」 */
+export interface Chips {
+  institutional: { t: string; foreign: number; trust: number; dealer: number; total: number }[]
+  margin: { t: string; margin_balance: number; short_balance: number }[]
+  foreign_holding_pct: { t: string; pct: number }[]
+  major_holders: { as_of: string; buckets: { level: string; holders: number; shares: number; pct: number }[] } | null
+  sources: string[]
+  is_demo?: boolean
+}
+
+export type FinancialsPeriod = "quarterly" | "annual"
+type Col = (number | null)[]
+
+/** 財務報表：每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元 */
+export interface Financials {
+  periods: string[]
+  income: { revenue: Col; gross_profit: Col; operating_income: Col; net_income: Col; eps: Col }
+  balance: { total_assets: Col; total_liabilities: Col; equity: Col }
+  cashflow: { operating: Col; investing: Col; financing: Col; free_cash_flow: Col }
+  margins: { gross: Col; operating: Col; net: Col }
+  sources: string[]
+  is_demo?: boolean
+}
+
+export type InstrumentEventType =
+  | "ex_dividend"
+  | "dividend_payment"
+  | "earnings"
+  | "revenue_release"
+  | "material_info"
+  | "attention"
+  | "disposition"
+  | "shareholder_meeting"
+
+export interface InstrumentEvent {
+  date: string
+  type: InstrumentEventType
+  title: string
+  detail: string | null
+  url: string | null
+  mine: boolean
+  amount_estimate: number | null
+}
+
+/** 新聞：只有標題、來源、連結 */
+export interface NewsItem {
+  published_at: string
+  title: string
+  source: string
+  url: string
+}
+
+export type PositionMarkerType = "buy" | "sell" | "dividend" | "stock_dividend"
+
+export interface PositionMarker {
+  date: string
+  type: PositionMarkerType
+  quantity: number | null
+  price: number | null
+  amount: number | null
+}
+
+/** `GET /instruments/{symbol}/position`：未持有回 null */
+export interface Position {
+  quantity: number
+  avg_cost: number
+  cost_basis: number
+  market_value: number
+  unrealized_pnl: number
+  unrealized_pnl_pct: number | null
+  realized_pnl: number
+  dividends_received: number
+  day_change: number
+  markers: PositionMarker[]
+  upcoming_dividend: { ex_dividend_date: string; amount_estimate: number } | null
+}
+
+export interface WhyReason {
+  /** move、volume、limit、attention、disposition、ex_dividend、earnings、high_52w、low_52w… */
+  kind: string
+  text: string
+}
+
+/** 「為什麼漲跌」：規則判斷，只在異常時 `show: true` */
+export interface Why {
+  show: boolean
+  headline: string | null
+  reasons: WhyReason[]
+  as_of: string | null
+}
+
+export interface WatchItem {
+  symbol: string
+  name: string
+  quote: Quote
+  sparkline: { t: string; price: number }[]
+}
+
+export type UpcomingType = "ex_dividend" | "dividend_payment" | "recurring"
+
+/** 「本週事項」：除息、股利入帳、定期定額（規則計算） */
+export interface UpcomingItem {
+  date: string
+  type: UpcomingType
+  symbol: string | null
+  title: string
+  amount_estimate: number | null
+}
+
 // ── 錯誤 ──────────────────────────────────────────────────
 export interface ApiErrorBody {
   error: { code: string; message: string }
@@ -366,6 +543,18 @@ export interface ForliosaApi {
   getValuation(symbol: string, range?: "5Y" | "MAX"): Promise<Valuation>
   getRevenue(symbol: string): Promise<MonthlyRevenue[]>
   getDividends(symbol: string): Promise<DividendRecord[]>
+  getOverview(symbol: string): Promise<InstrumentOverview>
+  getIntraday(symbol: string): Promise<Intraday>
+  getChips(symbol: string, range?: ChipsRange): Promise<Chips>
+  getFinancials(symbol: string, period?: FinancialsPeriod): Promise<Financials>
+  getEvents(symbol: string, mine?: boolean): Promise<InstrumentEvent[]>
+  getNews(symbol: string): Promise<NewsItem[]>
+  getPosition(symbol: string): Promise<Position | null>
+  getWhy(symbol: string): Promise<Why>
+  // 自選
+  getWatchlist(): Promise<WatchItem[]>
+  addWatch(symbol: string): Promise<void>
+  removeWatch(symbol: string): Promise<void>
   // 交易
   listTransactions(query: TransactionQuery): Promise<Page<Transaction>>
   createTransaction(body: TransactionInput): Promise<Transaction>
@@ -375,6 +564,7 @@ export interface ForliosaApi {
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>
+  getUpcoming(days?: number): Promise<UpcomingItem[]>
   getPerformance(params: {
     range: PerformanceRange
     benchmark?: string

@@ -1,0 +1,50 @@
+[
+ {
+  "Date": "1151111",
+  "Code": "1538",
+  "Name": "正峰",
+  "PEratio": "",
+  "DividendYield": "",
+  "PBratio": "1.99"
+ },
+ {
+  "Date": "1151111",
+  "Code": "2308",
+  "Name": "台達電",
+  "PEratio": "38.89",
+  "DividendYield": "0.90",
+  "PBratio": "10.57"
+ },
+ {
+  "Date": "1151111",
+  "Code": "2317",
+  "Name": "鴻海",
+  "PEratio": "15.95",
+  "DividendYield": "2.96",
+  "PBratio": "1.78"
+ },
+ {
+  "Date": "1151111",
+  "Code": "2330",
+  "Name": "台積電",
+  "PEratio": "27.76",
+  "DividendYield": "0.92",
+  "PBratio": "9.66"
+ },
+ {
+  "Date": "1151111",
+  "Code": "2382",
+  "Name": "廣達",
+  "PEratio": "12.16",
+  "DividendYield": "5.23",
+  "PBratio": "3.55"
+ },
+ {
+  "Date": "1151111",
+  "Code": "2881",
+  "Name": "富邦金",
+  "PEratio": "14.91",
+  "DividendYield": "2.66",
+  "PBratio": "1.96"
+ }
+]

@@ -21,11 +21,17 @@ function Toaster(props: ToasterProps) {
           "--normal-bg": "var(--popover)",
           "--normal-text": "var(--popover-foreground)",
           "--normal-border": "var(--border)",
-          "--border-radius": "var(--radius)",
+          "--border-radius": "6px",
           "--width": "min(360px, calc(100vw - 32px))",
         } as React.CSSProperties
       }
-      toastOptions={{ classNames: { toast: "font-sans text-md shadow-lg" } }}
+      toastOptions={{
+        classNames: {
+          toast: "font-sans text-md shadow-lift",
+          description: "text-ink-2!",
+          actionButton: "bg-act! text-act-fg! rounded-sm! h-8! px-3! text-sm! font-medium!",
+        },
+      }}
       {...props}
     />
   )

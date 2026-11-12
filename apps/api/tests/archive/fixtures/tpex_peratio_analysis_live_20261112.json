@@ -1,0 +1,29 @@
+[
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "3680",
+  "CompanyName": "家登",
+  "PriceEarningRatio": "29.29",
+  "DividendPerShare": "6.89733964",
+  "YieldRatio": "1.58",
+  "PriceBookRatio": "3.22"
+ },
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "6488",
+  "CompanyName": "環球晶",
+  "PriceEarningRatio": "35.75",
+  "DividendPerShare": "7.70000000",
+  "YieldRatio": "1.21",
+  "PriceBookRatio": "2.30"
+ },
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "8390",
+  "CompanyName": "金益鼎",
+  "PriceEarningRatio": "8.74",
+  "DividendPerShare": "3.80000000",
+  "YieldRatio": "4.82",
+  "PriceBookRatio": "2.01"
+ }
+]

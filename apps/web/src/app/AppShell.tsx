@@ -1,223 +1,172 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router"
-import { EyeIcon, EyeOffIcon, MonitorIcon, MoonIcon, PlusIcon, SearchIcon, SunIcon } from "lucide-react"
-import { api } from "@/api"
-import { useMe } from "@/api/queries"
+import { EyeIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PenToolIcon, SearchIcon, UsersIcon } from "lucide-react"
+import { AiPanel } from "@/ai/AiPanel"
+import { AiScreen } from "@/ai/AiScreen"
+import { useAi, usePendingCount } from "@/ai/store"
 import { Wordmark } from "@/components/brand"
-import { DemoChop } from "@/components/chop"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuLabel,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Kbd } from "@/components/ui/kbd"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
-import { usePrefs } from "@/stores/prefs"
-import type { ThemePreference } from "@/api/types"
-import { CommandSearch } from "./CommandSearch"
-import { isActivePath, MOBILE_TABS, NAV_AI, NAV_DATA, NAV_MAIN, type NavItem } from "./nav"
 import { TradeFormHost } from "@/pages/transactions/TradeForm"
+import { usePrefs } from "@/stores/prefs"
+import { AvatarMenu } from "./AvatarMenu"
+import { CommandSearch } from "./CommandSearch"
 import { useUi } from "./ui-store"
 
-const isDemo = api.kind === "mock"
-
+/**
+ * 外殼（聯絡簿）：
+ * - 桌面：頂部列（字標、帳本／群組、搜尋股票 ⌘K、隱私、頭像）＋主欄＋右側 AI 面板
+ * - 手機：標題列（字標、隱私、頭像）＋浮動膠囊分頁「帳本｜群組｜紀錄」＋獨立的紫色「問 AI」
+ */
 export function AppShell() {
+  const isDesktop = useIsDesktop()
   return (
-    <div className="min-h-dvh lg:grid lg:grid-cols-[232px_minmax(0,1fr)]">
-      <Sidebar />
-      <div className="flex min-w-0 flex-col">
-        <TopBar />
-        <main
-          id="main"
-          className="mx-auto w-full max-w-[1280px] flex-1 px-4 pt-5 pb-[calc(88px+env(safe-area-inset-bottom,0px))] sm:px-6 lg:px-8 lg:pt-6 lg:pb-16"
-        >
+    <div className="min-h-dvh bg-paper">
+      <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-sm focus:bg-act focus:px-3 focus:py-2 focus:text-act-fg">
+        跳到主要內容
+      </a>
+      {isDesktop ? <TopBar /> : <MobileHeader />}
+      <div className={cn(isDesktop && "flex items-start")}>
+        <main id="main" tabIndex={-1} className={cn("min-w-0 flex-1 outline-none", !isDesktop && "pb-[calc(env(safe-area-inset-bottom,0px)+104px)]")}>
           <Outlet />
         </main>
+        {isDesktop && <AiPanel />}
       </div>
-      <MobileTabBar />
+      {!isDesktop && <Dock />}
+      {!isDesktop && <AiScreen />}
       <CommandSearch />
       <TradeFormHost />
     </div>
   )
 }
 
-function usePathname() {
-  return useRouterState({ select: (s) => s.location.pathname })
-}
+const NAV = [
+  { to: "/", label: "帳本", match: (p: string) => p === "/" || p.startsWith("/stock") },
+  { to: "/groups", label: "群組", match: (p: string) => p.startsWith("/groups") },
+] as const
 
-function Sidebar() {
-  const pathname = usePathname()
-  const me = useMe()
+function PrivacyButton({ size = "desktop" }: { size?: "desktop" | "mobile" }) {
+  const privacy = usePrefs((s) => s.privacyMode)
+  const toggle = usePrefs((s) => s.togglePrivacy)
   return (
-    <div className="hidden bg-rail lg:block">
-    <aside className="sticky top-0 flex h-dvh flex-col bg-rail text-rail-foreground" aria-label="主要導覽">
-      <div className="flex h-16 items-center px-5">
-        <Link to="/" className="rounded-md outline-offset-4" aria-label="Forliosa 首頁">
-          <Wordmark />
-        </Link>
-      </div>
-      <nav className="flex flex-1 flex-col gap-5 overflow-y-auto px-3 pt-2 pb-4">
-        <NavGroup items={NAV_MAIN} pathname={pathname} />
-        <NavGroup items={NAV_AI} pathname={pathname} />
-        <NavGroup items={NAV_DATA} pathname={pathname} />
-      </nav>
-      <div className="flex items-center justify-between gap-2 border-t border-rail-border px-5 py-4 text-sm">
-        <span className="min-w-0 truncate text-rail-muted">{me.data?.display_name ?? "　"}</span>
-        {isDemo && <DemoChop tone="rail" />}
-      </div>
-    </aside>
-    </div>
-  )
-}
-
-function NavGroup({ items, pathname }: { items: NavItem[]; pathname: string }) {
-  return (
-    <ul className="flex flex-col gap-0.5">
-      {items.map((item) => {
-        const active = isActivePath(pathname, item.to)
-        return (
-          <li key={item.to}>
-            <Link
-              to={item.to}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "press flex h-10 items-center gap-3 rounded-md px-3 text-md text-rail-muted outline-offset-[-2px] hover:bg-rail-active/60 hover:text-rail-foreground",
-                active && "bg-rail-active font-medium text-rail-foreground",
-              )}
-            >
-              <item.icon className="size-[18px] shrink-0" aria-hidden />
-              <span className="flex-1">{item.label}</span>
-              {item.milestone && <span className="text-xs text-rail-muted">{item.milestone}</span>}
-            </Link>
-          </li>
-        )
-      })}
-    </ul>
+    <button
+      type="button"
+      aria-pressed={privacy}
+      aria-label={privacy ? "隱私模式開啟中：顯示金額" : "隱私模式：遮蔽金額"}
+      title={privacy ? "顯示金額" : "遮蔽金額（截圖用）"}
+      onClick={toggle}
+      className={cn(
+        "press grid place-items-center text-ink-2 hover:text-ink aria-pressed:text-ink",
+        size === "desktop" ? "size-10 rounded-sm border border-transparent hover:border-rule aria-pressed:border-rule" : "size-11 rounded-full active:bg-hov",
+      )}
+    >
+      {privacy ? <EyeOffIcon aria-hidden className={size === "desktop" ? "size-[18px]" : "size-[22px]"} /> : <EyeIcon aria-hidden className={size === "desktop" ? "size-[18px]" : "size-[22px]"} />}
+    </button>
   )
 }
 
 function TopBar() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
   const setSearchOpen = useUi((s) => s.setSearchOpen)
-  const openTradeForm = useUi((s) => s.openTradeForm)
   return (
-    <header className="safe-top sticky top-0 z-30 border-b border-hairline bg-background">
-      <div className="mx-auto flex h-14 w-full max-w-[1280px] items-center gap-2 px-4 sm:px-6 lg:h-16 lg:px-8">
-        <Link to="/" className="mr-1 rounded-md lg:hidden" aria-label="Forliosa 首頁">
-          <Wordmark />
-        </Link>
-        <button
-          type="button"
-          onClick={() => setSearchOpen(true)}
-          className="press hidden h-10 w-full max-w-md items-center gap-2.5 rounded-md border border-input bg-card px-3 text-left text-md text-muted-foreground hover:border-ring/60 md:flex"
-        >
-          <SearchIcon className="size-4 shrink-0" aria-hidden />
-          <span className="flex-1 truncate">搜尋股票代號或名稱</span>
-          <Kbd>⌘K</Kbd>
-        </button>
-        <div className="flex-1 md:hidden" />
-        <div className="ml-auto flex items-center gap-1.5">
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSearchOpen(true)} aria-label="搜尋股票">
-            <SearchIcon />
-          </Button>
-          <PrivacyToggle />
-          <ThemeMenu />
-          <Button className="ml-1 hidden sm:inline-flex" onClick={() => openTradeForm()}>
-            <PlusIcon />
-            記一筆
-          </Button>
-        </div>
+    <header className="sticky top-0 z-30 flex h-16 items-center border-b border-rule bg-paper pr-7 pl-14">
+      <Link to="/" aria-label="Forliosa 帳本" className="mr-8 rounded-sm">
+        <Wordmark />
+      </Link>
+      <nav aria-label="主要" className="flex self-stretch">
+        {NAV.map((n) => {
+          const active = n.match(pathname)
+          return (
+            <Link
+              key={n.to}
+              to={n.to}
+              aria-current={active ? "page" : undefined}
+              className={cn(
+                "-mb-px flex items-center border-b-2 px-3.5 text-base transition-colors",
+                active ? "border-ink font-bold text-ink" : "border-transparent text-ink-2 hover:text-ink",
+              )}
+            >
+              {n.label}
+            </Link>
+          )
+        })}
+      </nav>
+      <button
+        type="button"
+        onClick={() => setSearchOpen(true)}
+        className="ml-12 flex h-10 w-[360px] items-center gap-2.5 rounded-sm border border-ctl bg-raised pr-2 pl-3 text-left text-ink-2 hover:border-ink-2"
+        aria-label="搜尋股票（⌘K）"
+      >
+        <SearchIcon aria-hidden className="size-[18px]" />
+        <span className="flex-1">搜尋股票</span>
+        <Kbd>⌘K</Kbd>
+      </button>
+      <div className="ml-auto flex items-center gap-3">
+        <PrivacyButton />
+        <AvatarMenu />
       </div>
     </header>
   )
 }
 
-function PrivacyToggle() {
-  const privacy = usePrefs((s) => s.privacyMode)
-  const toggle = usePrefs((s) => s.togglePrivacy)
+function MobileHeader() {
   return (
-    <Tooltip>
-      <TooltipTrigger
-        render={
-          <Button
-            variant={privacy ? "secondary" : "ghost"}
-            size="icon"
-            onClick={toggle}
-            aria-pressed={privacy}
-            aria-label={privacy ? "關閉隱私模式（顯示金額）" : "開啟隱私模式（遮蔽金額與股數）"}
-          >
-            {privacy ? <EyeOffIcon /> : <EyeIcon />}
-          </Button>
-        }
-      />
-      <TooltipContent>{privacy ? "隱私模式開啟中：金額與股數已遮蔽" : "隱私模式：一鍵遮蔽金額與股數"}</TooltipContent>
-    </Tooltip>
+    <header className="flex h-[60px] items-center pt-[env(safe-area-inset-top,0px)] pr-2.5 pl-5" style={{ boxSizing: "content-box" }}>
+      <Link to="/" aria-label="Forliosa 帳本" className="mr-auto rounded-sm">
+        <Wordmark className="text-[1.375rem]" />
+      </Link>
+      <PrivacyButton size="mobile" />
+      <AvatarMenu />
+    </header>
   )
 }
 
-const THEME_OPTIONS: { value: ThemePreference; label: string; icon: typeof SunIcon }[] = [
-  { value: "light", label: "淺色", icon: SunIcon },
-  { value: "dark", label: "深色", icon: MoonIcon },
-  { value: "system", label: "跟隨系統", icon: MonitorIcon },
-]
+const TABS = [
+  { to: "/", label: "帳本", icon: NotebookTextIcon, match: (p: string) => p === "/" || p.startsWith("/stock") },
+  { to: "/groups", label: "群組", icon: UsersIcon, match: (p: string) => p.startsWith("/groups") },
+  { to: "/history", label: "紀錄", icon: HistoryIcon, match: (p: string) => p.startsWith("/history") },
+] as const
 
-function ThemeMenu() {
-  const theme = usePrefs((s) => s.theme)
-  const set = usePrefs((s) => s.set)
-  const Current = THEME_OPTIONS.find((o) => o.value === theme)?.icon ?? MonitorIcon
+/** 浮動膠囊分頁＋獨立的「問 AI」 */
+function Dock() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const setOpen = useAi((s) => s.setMobileOpen)
+  const pending = usePendingCount()
   return (
-    <DropdownMenu>
-      <DropdownMenuTrigger render={<Button variant="ghost" size="icon" aria-label="切換主題" />}>
-        <Current />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-40">
-        <DropdownMenuLabel>主題</DropdownMenuLabel>
-        <DropdownMenuRadioGroup value={theme} onValueChange={(v) => set({ theme: v as ThemePreference })}>
-          {THEME_OPTIONS.map((o) => (
-            <DropdownMenuRadioItem key={o.value} value={o.value}>
-              <o.icon className="size-4 text-muted-foreground" aria-hidden />
-              {o.label}
-            </DropdownMenuRadioItem>
-          ))}
-        </DropdownMenuRadioGroup>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-function MobileTabBar() {
-  const pathname = usePathname()
-  return (
-    <nav
-      aria-label="主要分頁"
-      className="safe-bottom fixed inset-x-0 bottom-0 z-30 border-t border-hairline bg-card lg:hidden"
-    >
-      <ul className="mx-auto grid max-w-lg grid-cols-5">
-        {MOBILE_TABS.map((tab) => {
-          const active =
-            isActivePath(pathname, tab.to) ||
-            (tab.to === "/more" && ["/transactions", "/performance", "/reports", "/groups", "/import", "/settings"].some((p) => isActivePath(pathname, p))) ||
-            (tab.to === "/holdings" && pathname.startsWith("/stock/"))
-          return (
-            <li key={tab.to}>
+    <>
+      <div aria-hidden className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-[calc(env(safe-area-inset-bottom,0px)+108px)] bg-gradient-to-b from-transparent to-paper to-25%" />
+      <div className="fixed inset-x-4 bottom-[calc(env(safe-area-inset-bottom,0px)+6px)] z-30 flex h-16 gap-2">
+        <nav aria-label="主要" className="flex flex-1 rounded-full border border-rule bg-raised shadow-lift">
+          {TABS.map((t) => {
+            const active = t.match(pathname)
+            return (
               <Link
-                to={tab.to}
+                key={t.to}
+                to={t.to}
                 aria-current={active ? "page" : undefined}
-                className={cn(
-                  "press flex h-[60px] flex-col items-center justify-center gap-1 text-xs text-muted-foreground",
-                  active && "font-medium text-primary",
-                )}
+                className={cn("press flex flex-1 flex-col items-center justify-center gap-0.5 text-xs", active ? "font-bold text-ink" : "text-ink-2")}
               >
-                <tab.icon className="size-[22px]" strokeWidth={active ? 2.2 : 1.8} aria-hidden />
-                {tab.label}
+                <span className={cn("grid h-7 w-[52px] place-items-center rounded-full", active && "bg-sel")}>
+                  <t.icon aria-hidden className="size-[22px]" />
+                </span>
+                {t.label}
               </Link>
-            </li>
-          )
-        })}
-      </ul>
-    </nav>
+            )
+          })}
+        </nav>
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : "問 AI"}
+          className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-[0.8125rem] font-bold text-ai shadow-lift"
+        >
+          <PenToolIcon aria-hidden className="size-[22px]" />
+          問 AI
+          {pending > 0 && (
+            <span className="num absolute -top-1.5 right-1 grid h-5 min-w-5 place-items-center rounded-full bg-ai px-1 text-xs font-medium text-raised">{pending}</span>
+          )}
+        </button>
+      </div>
+    </>
   )
 }

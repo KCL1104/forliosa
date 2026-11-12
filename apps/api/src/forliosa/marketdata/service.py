@@ -19,6 +19,8 @@ from decimal import Decimal
 from typing import Any, TypeVar
 
 from forliosa.config import Settings
+from forliosa.datapolicy import Policy, provider_allowed
+from forliosa.domain.ticks import ex_rights_reference, is_fund_code, price_limits
 from forliosa.marketdata.base import (
     BaseProvider,
     Candle,
@@ -56,9 +58,10 @@ class Answer[T]:
 
 
 class MarketData:
-    def __init__(self, providers: list[BaseProvider], jitter: bool = False):
-        self.providers = providers
-        self.demo: DemoProvider | None = next((p for p in providers if isinstance(p, DemoProvider)), None)
+    def __init__(self, providers: list[BaseProvider], jitter: bool = False, policy: Policy = "personal"):
+        self.policy: Policy = policy
+        self.providers = [p for p in providers if provider_allowed(p.name, policy)]
+        self.demo: DemoProvider | None = next((p for p in self.providers if isinstance(p, DemoProvider)), None)
         if self.demo is not None:
             self.demo.anchor_fn = self._real_anchor
         self.jitter = jitter
@@ -214,22 +217,66 @@ class MarketData:
         if pending:
             partial: dict[str, QuoteData] = {}
             for p in self._available():
-                need = [s for s in pending if s not in partial or partial[s].missing()]
+                need = [s for s in pending if s not in partial or partial[s].missing()
+                        or (not p.is_demo and partial[s].is_demo)]
                 if not need:
                     break
                 got = self._call(p, lambda p=p, need=need: p.quotes(need)) or {}
                 for s, q in got.items():
-                    if s in partial:
-                        partial[s] = _merge_quotes(partial[s], q)
-                    elif q.price is not None:
+                    if q.price is None:
+                        continue
+                    cur = partial.get(s)
+                    if cur is None:
                         partial[s] = q
+                    elif not p.is_demo and q.trade_date and cur.trade_date and q.trade_date > cur.trade_date:
+                        partial[s] = _merge_quotes(q, cur)  # a newer real session wins (e.g. archive is a day old)
+                    else:
+                        partial[s] = _merge_quotes(cur, q)
+            final: dict[str, QuoteData] = {}
             for s, q in partial.items():
-                if q.price is None:
-                    continue
                 if q.as_of is None and q.trade_date is not None:
                     q = replace(q, as_of=market_close_dt(q.trade_date))
+                final[s] = q
+            for s, q in self._with_references(final).items():
                 self._quote_cache[s] = (now, q)
                 out[s] = q
+        return out
+
+    # -- reference price (平盤) and limits ---------------------------------------------------------
+    def _provider_map(self, method: str, symbols: list[str], d: date) -> dict[str, Any]:
+        out: dict[str, Any] = {}
+        for p in self._available():
+            fn = getattr(p, method, None)
+            if fn is None:
+                continue
+            need = [s for s in symbols if s not in out]
+            if not need:
+                break
+            got = self._call(p, lambda fn=fn, need=need: fn(need, d)) or {}
+            for s, v in got.items():
+                out.setdefault(s, v)
+        return out
+
+    def _with_references(self, quotes: dict[str, QuoteData]) -> dict[str, QuoteData]:
+        """Attach reference price and limits; on ex-rights days the reference is not the previous close.
+
+        Order: official archive (TWT84U / TPEx NextReferencePrice) → exchange limits on the quote (MIS
+        u / w) checked against the ex-rights reference → computed: (prev close − cash) ÷ (1 + stock ratio)
+        rounded to the tick, limits ±10 % rounded inward to the tick.
+        """
+        by_day: dict[date, list[str]] = {}
+        for s, q in quotes.items():
+            if market_of_symbol(s) != "US" and q.trade_date is not None:
+                by_day.setdefault(q.trade_date, []).append(s)
+        out = dict(quotes)
+        for s, q in quotes.items():
+            if market_of_symbol(s) == "US":
+                out[s] = replace(q, reference_price=q.prev_close, limit_up=None, limit_down=None)
+        for d, syms in by_day.items():
+            official = self._provider_map("reference_prices", syms, d)
+            ex = self._provider_map("ex_rights_on", [s for s in syms if s not in official], d)
+            for s in syms:
+                out[s] = _apply_reference(quotes[s], official.get(s), ex.get(s))
         return out
 
     def quote(self, symbol: str) -> QuoteData | None:
@@ -244,13 +291,33 @@ class MarketData:
 
     # -- history & corporate data ------------------------------------------------------------------
     def history(self, symbol: str, start: date, end: date) -> HistoryResult:
-        ans = self._first("history", symbol, start, end)
-        if ans is None:
+        """Daily candles. A partial provider (our archive) answers first; the next real provider fills
+        the days it lacks. Demo data is only used when no real provider has anything."""
+        collected: dict[date, Candle] = {}
+        names: list[str] = []
+        is_demo = False
+        for p in self._available():
+            if p.is_demo and collected:
+                break
+            value = self._call(p, lambda p=p: p.history(symbol, start, end))
+            if not value:
+                continue
+            added = False
+            for c in value:
+                if c.t not in collected:
+                    collected[c.t] = c
+                    added = True
+            if added:
+                names.append(p.name)
+                is_demo |= p.is_demo
+            if not getattr(p, "partial_history", False):
+                break
+        if not collected:
             return HistoryResult(symbol, [], False, "")
-        candles = list(ans.value)
-        if not ans.is_demo:
+        candles = [collected[d] for d in sorted(collected)]
+        if not is_demo:
             candles = self._with_today(symbol, candles, end)
-        return HistoryResult(symbol, candles, ans.is_demo, ans.source)
+        return HistoryResult(symbol, candles, is_demo, "+".join(names))
 
     def _with_today(self, symbol: str, candles: list[Candle], end: date) -> list[Candle]:
         """Daily sources publish after the close; append the latest day from a complete real quote."""
@@ -282,25 +349,59 @@ class MarketData:
         return HistoryResult(symbol, [], False, "")
 
     def valuation_ratios(self, symbol: str, start: date, end: date) -> dict[date, dict] | None:
-        """Real daily PER / PBR / dividend yield when a provider publishes them (FinMind)."""
+        """Real daily PER / PBR / dividend yield as published (archive first, FinMind fills older days)."""
+        return self.valuation_ratios_with_source(symbol, start, end)[0]
+
+    def valuation_ratios_with_source(self, symbol: str, start: date, end: date) -> tuple[dict[date, dict] | None,
+                                                                                         list[str]]:
+        merged: dict[date, dict] = {}
+        names: list[str] = []
         for p in self._available():
             fn = getattr(p, "valuation_ratios", None)
             if fn is None or p.is_demo:
                 continue
             value = self._call(p, lambda fn=fn: fn(symbol, start, end))
-            if value:
-                return value
-        return None
+            if not value:
+                continue
+            before = len(merged)
+            for d, v in value.items():
+                merged.setdefault(d, v)
+            if len(merged) > before:
+                names.append(p.name)
+            if not getattr(p, "partial_history", False):
+                break
+        return (merged or None), names
 
     def closes(self, symbol: str, start: date, end: date) -> tuple[dict[date, Decimal], bool]:
         h = self.history(symbol, start, end)
         return {c.t: c.c for c in h.candles}, h.is_demo
 
     def dividends(self, symbol: str) -> Answer[list[DividendEvent]]:
-        ans = self._first("dividends", symbol)
-        if ans is None:
-            return Answer([], False, "")
-        return ans
+        """Dividends merged from every real provider (by ex-date); demo only when none has any."""
+        merged: dict[Any, DividendEvent] = {}
+        names: list[str] = []
+        for p in self._available():
+            if p.is_demo:
+                continue
+            value = self._call(p, lambda p=p: p.dividends(symbol))
+            if not value:
+                continue
+            names.append(p.name)
+            for e in value:
+                key = e.ex_dividend_date or (e.year, e.period)
+                cur = merged.get(key)
+                if cur is None:
+                    merged[key] = e
+                elif cur.payment_date is None and e.payment_date is not None:
+                    merged[key] = replace(cur, payment_date=e.payment_date, period=e.period, year=e.year)
+        if merged:
+            events = sorted(merged.values(), key=lambda e: e.ex_dividend_date or date.min, reverse=True)
+            return Answer(events, False, "+".join(names))
+        if self.demo is not None and self.demo in self._available():
+            value = self._call(self.demo, lambda: self.demo.dividends(symbol))
+            if value:
+                return Answer(list(value), True, self.demo.name)
+        return Answer([], False, "")
 
     def corporate_events(self, symbol: str) -> list[CorporateEvent]:
         """Known real splits (reference data) plus any a real provider reports."""
@@ -372,7 +473,29 @@ def _merge_quotes(base: QuoteData, other: QuoteData) -> QuoteData:
     return base.merged_with(other)
 
 
+def _apply_reference(q: QuoteData, official: tuple | None, ex: tuple[Decimal, Decimal] | None) -> QuoteData:
+    is_fund = is_fund_code(code_of_symbol(q.symbol))
+    if official is not None:
+        ref, up, down, _source = official
+        return replace(q, reference_price=ref, limit_up=up, limit_down=down)
+    if q.prev_close is None:
+        return q
+    base = q.prev_close
+    if ex is not None:
+        cash, ratio = ex
+        base = ex_rights_reference(q.prev_close, cash, ratio, is_fund)
+    computed = price_limits(base, is_fund)
+    published = (q.limit_up, q.limit_down)
+    if published[0] is not None and published[1] is not None:
+        if ex is not None and computed != published and price_limits(q.prev_close, is_fund) == published:
+            # The quote's "previous close" already is the ex-rights reference price (MIS y on an ex-date).
+            return replace(q, reference_price=q.prev_close)
+        return replace(q, reference_price=base)
+    return replace(q, reference_price=base, limit_up=computed[0], limit_down=computed[1])
+
+
 def build_providers(settings: Settings) -> list[BaseProvider]:
+    from forliosa.marketdata.archive_provider import ArchiveProvider
     from forliosa.marketdata.finmind import FinMindProvider
     from forliosa.marketdata.shioaji_data import ShioajiDataProvider
     from forliosa.marketdata.tpex import TpexOpenApiProvider
@@ -386,13 +509,18 @@ def build_providers(settings: Settings) -> list[BaseProvider]:
         "twse_mis": lambda: TwseMisProvider(),
         "finmind": lambda: FinMindProvider(settings.finmind_token, HttpFetcher(timeout=20, retries=0),
                                            cache_dir=settings.cache_dir),
+        "archive": lambda: ArchiveProvider(settings.data_policy),
         "demo": lambda: DemoProvider(),
     }
     providers: list[BaseProvider] = []
     for name in settings.market_data_providers:
-        factory = factories.get(name.strip().lower())
+        key = name.strip().lower()
+        factory = factories.get(key)
         if factory is None:
             log.warning("unknown market data provider %r ignored", name)
+            continue
+        if not provider_allowed(key, settings.data_policy):
+            log.info("DATA_POLICY=%s: provider %s is not commercially usable, skipped", settings.data_policy, key)
             continue
         providers.append(factory())
     return providers
@@ -407,7 +535,7 @@ def get_market_data() -> MarketData:
         from forliosa.config import get_settings
 
         settings = get_settings()
-        _market = MarketData(build_providers(settings), jitter=settings.jitter_enabled)
+        _market = MarketData(build_providers(settings), jitter=settings.jitter_enabled, policy=settings.data_policy)
     return _market
 
 

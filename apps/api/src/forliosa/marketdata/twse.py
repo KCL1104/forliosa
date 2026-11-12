@@ -150,6 +150,11 @@ def parse_mis(payload: dict[str, Any]) -> dict[str, QuoteData]:
             symbol=symbol,
             price=price,
             prev_close=prev_close,
+            # u / w: the day's limit-up / limit-down published by the exchange (2330 on 2026-11-11:
+            # y 2285 -> u 2510, w 2060). Kept so the facade can tell whether y is already the
+            # ex-dividend reference price (see MarketData._reference).
+            limit_up=parse_decimal(item.get("u")),
+            limit_down=parse_decimal(item.get("w")),
             open=parse_decimal(item.get("o")),
             high=high,
             low=low,
@@ -188,7 +193,8 @@ class TwseOpenApiProvider(BaseProvider):
         all_quotes = parse_stock_day_all(self._get("/exchangeReport/STOCK_DAY_ALL"))
         return {s: all_quotes[s] for s in wanted if s in all_quotes}
 
-    def valuation_ratios(self) -> dict[str, dict[str, Any]]:
+    def market_valuation_ratios(self) -> dict[str, dict[str, Any]]:
+        """Whole market, latest day (the archive stores it daily; not the per-symbol facade method)."""
         return parse_bwibbu_all(self._get("/exchangeReport/BWIBBU_ALL"))
 
     def dividends(self, symbol: str) -> list[DividendEvent] | None:
@@ -196,6 +202,21 @@ class TwseOpenApiProvider(BaseProvider):
             return None
         events = parse_twt48u_all(self._get("/exchangeReport/TWT48U_ALL"))
         return [e for e in events if e.symbol == symbol]
+
+    def ex_rights_on(self, symbols: list[str], d: date) -> dict[str, tuple[Decimal, Decimal]]:
+        """Cash dividend and stock shares per share for symbols going ex on ``d`` (TWT48U_ALL)."""
+        wanted = {s for s in symbols if market_of_symbol(s) == "TWSE"}
+        if not wanted:
+            return {}
+        out = {}
+        for r in self._get("/exchangeReport/TWT48U_ALL"):
+            sym = tw_symbol(str(r.get("Code") or "").strip(), "TWSE")
+            if sym in wanted and parse_tw_date(r.get("Date")) == d:
+                cash = parse_decimal(r.get("CashDividend")) or Decimal(0)
+                ratio = parse_decimal(r.get("StockDividendRatio")) or Decimal(0)
+                if cash or ratio:
+                    out[sym] = (cash, ratio)
+        return out
 
     def holidays(self) -> list[tuple[date, str]]:
         return parse_holiday_schedule(self._get("/holidaySchedule/holidaySchedule"))

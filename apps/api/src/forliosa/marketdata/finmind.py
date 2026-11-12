@@ -309,6 +309,13 @@ class FinMindProvider(BaseProvider):
         series = parse_index(self._rows("TaiwanStockTotalReturnIndex", index_id, HISTORY_START, TTL_PRICES))
         return [(d, v) for d, v in series if start <= d <= end] or None
 
+    def chips(self, symbol: str, start: date) -> dict[str, list[dict[str, Any]]]:
+        """Institutional net (shares), margin balances (lots), foreign holding (fraction) since ``start``."""
+        return _chips(self, symbol, start)
+
+    def news(self, symbol: str, days: int = 3) -> list[dict[str, Any]]:
+        return _news(self, symbol, days)
+
     def fx_history(self, pair: str, start: date, end: date) -> dict[date, Decimal] | None:
         if pair != "USDTWD":
             return None
@@ -317,3 +324,101 @@ class FinMindProvider(BaseProvider):
             return None
         lo = start - timedelta(days=10)
         return {d: v for d, v in series.items() if lo <= d <= end}
+
+
+# -- chips & news (personal policy only; columns from FinMind's dataset reference, llms-full.txt) ----
+TTL_NEWS = 3600
+# FinMind TaiwanStockInstitutionalInvestorsBuySell ``name`` values -> our three groups.
+_INSTITUTION_GROUP = {
+    "Foreign_Investor": "foreign_net", "Foreign_Dealer_Self": "foreign_net",
+    "Investment_Trust": "trust_net",
+    "Dealer": "dealer_net", "Dealer_self": "dealer_net", "Dealer_Hedging": "dealer_net",
+}
+
+
+def parse_institutional(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Long format (date, stock_id, name, buy, sell) -> daily net shares per group."""
+    by_day: dict[date, dict[str, int]] = {}
+    for r in rows:
+        d = parse_tw_date(r.get("date"))
+        group = _INSTITUTION_GROUP.get(str(r.get("name") or ""))
+        if d is None or group is None:
+            continue
+        net = (parse_int(r.get("buy")) or 0) - (parse_int(r.get("sell")) or 0)
+        day = by_day.setdefault(d, {"foreign_net": 0, "trust_net": 0, "dealer_net": 0})
+        day[group] += net
+    return [{"date": d, **v, "total_net": sum(v.values())} for d, v in sorted(by_day.items())]
+
+
+def parse_margin(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("date"))
+        if d is None:
+            continue
+        out.append({"date": d, "margin_balance": parse_int(r.get("MarginPurchaseTodayBalance")),
+                    "short_balance": parse_int(r.get("ShortSaleTodayBalance")),
+                    "margin_limit": parse_int(r.get("MarginPurchaseLimit"))})
+    return out
+
+
+def parse_shareholding(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("date"))
+        pct = parse_decimal(r.get("ForeignInvestmentSharesRatio"))
+        if d is None or pct is None:
+            continue
+        out.append({"date": d, "pct": pct / 100, "shares": parse_int(r.get("ForeignInvestmentShares"))})
+    return out
+
+
+def parse_news(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """TaiwanStockNews: date ("2026-11-11 08:30:00"), title, source, link (description is not exposed)."""
+    out = []
+    for r in rows:
+        title = str(r.get("title") or "").strip()
+        link = str(r.get("link") or "").strip()
+        if not title or not link.startswith(("http://", "https://")):
+            continue
+        out.append({"published_at": str(r.get("date") or "").strip(), "title": title,
+                    "source": str(r.get("source") or "").strip(), "url": link})
+    return out
+
+
+def _chips(self: FinMindProvider, symbol: str, start: date) -> dict[str, list[dict[str, Any]]]:
+    if market_of_symbol(symbol) == "US":
+        return {"institutional": [], "margin": [], "foreign": []}
+    code = code_of_symbol(symbol)
+    # A fixed start per year keeps the cache key stable (the anonymous quota is tiny).
+    base = date(min(start.year, self.today_fn().year - 1), 1, 1)
+
+    def rows(dataset: str) -> list[dict[str, Any]]:
+        return [r for r in self._rows(dataset, code, base, TTL_PRICES)
+                if (parse_tw_date(r.get("date")) or date.min) >= start]
+
+    return {
+        "institutional": parse_institutional(rows("TaiwanStockInstitutionalInvestorsBuySell")),
+        "margin": parse_margin(rows("TaiwanStockMarginPurchaseShortSale")),
+        "foreign": parse_shareholding(rows("TaiwanStockShareholding")),
+    }
+
+
+def _news(self: FinMindProvider, symbol: str, days: int = 3) -> list[dict[str, Any]]:
+    """Headlines of the last ``days`` calendar days (TaiwanStockNews serves one day per request)."""
+    if market_of_symbol(symbol) == "US":
+        return []
+    code = code_of_symbol(symbol)
+    today = self.today_fn()
+    out: list[dict[str, Any]] = []
+    for i in range(days):
+        out.extend(parse_news(self._rows("TaiwanStockNews", code, today - timedelta(days=i), TTL_NEWS)))
+    seen: set[str] = set()
+    unique = []
+    for n in sorted(out, key=lambda n: n["published_at"], reverse=True):
+        if n["url"] not in seen:
+            seen.add(n["url"])
+            unique.append(n)
+    return unique
+
+

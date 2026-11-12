@@ -27,10 +27,16 @@ class Settings(BaseSettings):
     cookie_secure: bool | None = None  # None -> secure in prod
     cookie_domain: str | None = None
 
-    # Highest priority first. twse_mis: real quotes; shioaji_data: master/profile/revenue/EPS;
-    # finmind: real daily history, PER/PBR, dividends, USD/TWD; demo: synthetic fallback.
+    # "personal": every configured source may be used (FinMind, MIS and the TWSE website are labelled
+    # 「非商用」 in responses). "commercial": only government open data (TWSE/TPEx OpenAPI, TDCC open
+    # data, shioaji-data's official files) and our own archive built from them.
+    data_policy: Literal["personal", "commercial"] = "personal"
+    # Highest priority first. twse_mis: intraday quotes (non-commercial); archive: our own daily archive
+    # (prices_daily …); twse_openapi / tpex_openapi: official latest-day data; shioaji_data:
+    # master/profile/revenue/statements; finmind: backfill (non-commercial); demo: synthetic fallback.
     market_data_providers: Annotated[list[str], NoDecode] = Field(
-        default_factory=lambda: ["twse_mis", "shioaji_data", "finmind", "demo"]
+        default_factory=lambda: ["twse_mis", "archive", "twse_openapi", "tpex_openapi", "shioaji_data", "finmind",
+                                 "demo"]
     )
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
     cache_dir: Path = Path("var/cache")
@@ -38,6 +44,11 @@ class Settings(BaseSettings):
     finmind_token: str | None = None
     stream_interval_seconds: float = 5.0
     demo_jitter: bool | None = None  # None -> on in dev
+
+    @field_validator("data_policy", mode="before")
+    @classmethod
+    def _lower_policy(cls, v: object) -> object:
+        return v.strip().lower() if isinstance(v, str) else v
 
     @field_validator("cors_origins", "market_data_providers", mode="before")
     @classmethod

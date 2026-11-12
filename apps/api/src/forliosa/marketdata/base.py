@@ -75,6 +75,11 @@ class QuoteData:
     is_realtime: bool = False
     is_demo: bool = False
     source: str = ""
+    # Reference price (平盤／開盤競價基準) and daily limits for ``trade_date``; filled by the facade
+    # (official archive → exchange-published limits → computed from the previous close).
+    reference_price: Decimal | None = None
+    limit_up: Decimal | None = None
+    limit_down: Decimal | None = None
 
     _MERGEABLE = ("price", "prev_close", "open", "high", "low", "volume")
 

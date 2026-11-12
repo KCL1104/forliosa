@@ -2,7 +2,7 @@ import type { Candle, DividendRecord, MonthlyRevenue, ValuationPoint } from "../
 import { NEGATIVE_EPS_WINDOWS, type MockInstrumentSpec } from "./instruments"
 
 /** 示範資料的「今天」（台北時區）。固定日期讓截圖與測試穩定。 */
-export const MOCK_TODAY = "2026-11-11"
+export const MOCK_TODAY = "2026-11-12"
 export const MOCK_AS_OF = `${MOCK_TODAY}T13:30:00+08:00`
 
 // ── 日期工具（以 UTC 日期字串運算，避免時區偏移） ─────────────

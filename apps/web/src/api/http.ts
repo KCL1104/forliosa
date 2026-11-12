@@ -23,6 +23,16 @@ import {
   type TransactionQuery,
   type User,
   type Valuation,
+  type Chips,
+  type Financials,
+  type InstrumentEvent,
+  type InstrumentOverview,
+  type Intraday,
+  type NewsItem,
+  type Position,
+  type UpcomingItem,
+  type WatchItem,
+  type Why,
 } from "./types"
 
 type Query = Record<string, string | number | null | undefined>
@@ -97,6 +107,20 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getValuation: (symbol, range = "5Y") => request<Valuation>("GET", `/instruments/${enc(symbol)}/valuation`, { query: { range } }),
     getRevenue: (symbol) => request<MonthlyRevenue[]>("GET", `/instruments/${enc(symbol)}/revenue`),
     getDividends: (symbol) => request<DividendRecord[]>("GET", `/instruments/${enc(symbol)}/dividends`),
+    getOverview: (symbol) => request<InstrumentOverview>("GET", `/instruments/${enc(symbol)}/overview`),
+    getIntraday: (symbol) => request<Intraday>("GET", `/instruments/${enc(symbol)}/intraday`),
+    getChips: (symbol, range = "3M") => request<Chips>("GET", `/instruments/${enc(symbol)}/chips`, { query: { range } }),
+    getFinancials: (symbol, period = "quarterly") =>
+      request<Financials>("GET", `/instruments/${enc(symbol)}/financials`, { query: { period } }),
+    getEvents: (symbol, mine = false) =>
+      request<InstrumentEvent[]>("GET", `/instruments/${enc(symbol)}/events`, { query: { mine: String(mine) } }),
+    getNews: (symbol) => request<NewsItem[]>("GET", `/instruments/${enc(symbol)}/news`),
+    getPosition: (symbol) => request<Position | null>("GET", `/instruments/${enc(symbol)}/position`),
+    getWhy: (symbol) => request<Why>("GET", `/instruments/${enc(symbol)}/why`),
+
+    getWatchlist: () => request<WatchItem[]>("GET", "/watchlist"),
+    addWatch: (symbol) => request<void>("POST", "/watchlist", { body: { symbol } }),
+    removeWatch: (symbol) => request<void>("DELETE", `/watchlist/${enc(symbol)}`),
 
     listTransactions: (query: TransactionQuery) =>
       request<Page<Transaction>>("GET", "/transactions", { query: query as Query }),
@@ -108,6 +132,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getPortfolioSummary: (accountId) =>
       request<PortfolioSummary>("GET", "/portfolio/summary", { query: { account_id: accountId } }),
     getHoldings: (accountId) => request<Holding[]>("GET", "/portfolio/holdings", { query: { account_id: accountId } }),
+    getUpcoming: (days = 7) => request<UpcomingItem[]>("GET", "/portfolio/upcoming", { query: { days } }),
     getPerformance: (params) => request<Performance>("GET", "/portfolio/performance", { query: params }),
   }
 }

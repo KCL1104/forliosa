@@ -2,26 +2,34 @@ import { Button as ButtonPrimitive } from "@base-ui/react/button"
 import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "@/lib/utils"
 
+/**
+ * 按鈕（聯絡簿）：方肩 4px。
+ * - default：藍黑墨底（主要動作，一個畫面最多一個）
+ * - outline：1px 鉛筆灰框（次要動作）
+ * - ghost：透明（工具列圖示）
+ * - ai：紫色虛線（只屬於 AI 的動作，例如「待簽名」）
+ */
 const buttonVariants = cva(
-  "focus-visible:border-ring focus-visible:ring-ring/50 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 aria-invalid:border-destructive dark:aria-invalid:border-destructive/50 rounded-md border border-transparent bg-clip-padding text-md font-medium press focus-visible:ring-3 aria-invalid:ring-3 [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap outline-none select-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+  "rounded-sm border border-transparent bg-clip-padding text-md font-medium press [&_svg:not([class*='size-'])]:size-4 group/button inline-flex shrink-0 items-center justify-center whitespace-nowrap outline-none select-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-ink [&_svg]:pointer-events-none [&_svg]:shrink-0",
   {
     variants: {
       variant: {
-        default: "bg-primary text-primary-foreground hover:bg-primary/88",
-        outline: "border-border bg-background hover:bg-muted hover:text-foreground dark:bg-input/30 dark:border-input dark:hover:bg-input/50 aria-expanded:bg-muted aria-expanded:text-foreground",
-        secondary: "bg-secondary text-secondary-foreground hover:bg-[color-mix(in_oklch,var(--secondary),var(--foreground)_5%)] aria-expanded:bg-secondary aria-expanded:text-secondary-foreground",
-        ghost: "hover:bg-muted hover:text-foreground dark:hover:bg-muted/50 aria-expanded:bg-muted aria-expanded:text-foreground",
-        destructive: "bg-destructive/10 hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:focus-visible:ring-destructive/40 dark:bg-destructive/20 text-destructive focus-visible:border-destructive/40 dark:hover:bg-destructive/30",
-        link: "text-primary underline-offset-4 hover:underline",
+        default: "bg-act text-act-fg hover:bg-act-hover",
+        outline: "border-ctl bg-transparent text-ink hover:bg-hov aria-expanded:bg-hov",
+        secondary: "bg-hov text-ink hover:bg-sel aria-expanded:bg-sel",
+        ghost: "text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink",
+        destructive: "bg-act text-act-fg hover:bg-act-hover",
+        ai: "border-dashed border-ai-rule bg-ai-wash text-ai hover:border-ai focus-visible:outline-ai",
+        link: "h-auto px-0 text-ink underline underline-offset-3 hover:text-ink-2",
       },
       size: {
-        default: "h-9 gap-1.5 px-3 pointer-coarse:h-11 has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        xs: "h-6 gap-1 rounded-[min(var(--radius-md),10px)] px-2 text-xs in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3",
-        sm: "h-8 gap-1 rounded-md px-2.5 text-sm pointer-coarse:h-10 in-data-[slot=button-group]:rounded-lg has-data-[icon=inline-end]:pr-1.5 has-data-[icon=inline-start]:pl-1.5 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: "h-11 gap-2 px-4 text-base has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2",
-        icon: "size-9 pointer-coarse:size-11",
-        "icon-xs": "size-6 rounded-[min(var(--radius-md),10px)] in-data-[slot=button-group]:rounded-lg [&_svg:not([class*='size-'])]:size-3",
-        "icon-sm": "size-8 rounded-md pointer-coarse:size-10 in-data-[slot=button-group]:rounded-lg",
+        default: "h-10 gap-2 px-3 pointer-coarse:h-11",
+        xs: "h-7 gap-1 px-2 text-xs [&_svg:not([class*='size-'])]:size-3",
+        sm: "h-8 gap-1.5 px-2.5 text-sm pointer-coarse:h-10 [&_svg:not([class*='size-'])]:size-3.5",
+        lg: "h-11 gap-2 px-4 text-base",
+        icon: "size-10 pointer-coarse:size-11",
+        "icon-xs": "size-7 [&_svg:not([class*='size-'])]:size-3.5",
+        "icon-sm": "size-9 pointer-coarse:size-11",
         "icon-lg": "size-11",
       },
     },

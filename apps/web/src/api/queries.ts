@@ -6,6 +6,8 @@ import {
 } from "./types"
 import type {
   AccountInput,
+  ChipsRange,
+  FinancialsPeriod,
   HistoryRange,
   PerformanceRange,
   Preferences,
@@ -28,6 +30,16 @@ export const qk = {
   dividends: (symbol: string) => ["dividends", symbol] as const,
   search: (q: string) => ["search", q] as const,
   transactions: (query: TransactionQuery) => ["transactions", query] as const,
+  overview: (symbol: string) => ["overview", symbol] as const,
+  intraday: (symbol: string) => ["intraday", symbol] as const,
+  chips: (symbol: string, range: ChipsRange) => ["chips", symbol, range] as const,
+  financials: (symbol: string, period: FinancialsPeriod) => ["financials", symbol, period] as const,
+  events: (symbol: string) => ["events", symbol] as const,
+  news: (symbol: string) => ["news", symbol] as const,
+  position: (symbol: string) => ["portfolio", "position", symbol] as const,
+  why: (symbol: string) => ["why", symbol] as const,
+  watchlist: ["watchlist"] as const,
+  upcoming: (days: number) => ["portfolio", "upcoming", days] as const,
 }
 
 let devAutoLoginTried = false
@@ -79,23 +91,23 @@ export function usePerformance(range: PerformanceRange, accountId?: string, benc
     staleTime: 60_000,
   })
 }
-export function useInstrument(symbol: string) {
-  return useQuery({ queryKey: qk.instrument(symbol), queryFn: () => api.getInstrument(symbol), staleTime: 10 * 60_000, retry: (n, e) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2 })
+export function useInstrument(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.instrument(symbol), queryFn: () => api.getInstrument(symbol), staleTime: 10 * 60_000, retry: (n, e) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2 })
 }
-export function useQuote(symbol: string) {
-  return useQuery({ queryKey: qk.quote(symbol), queryFn: () => api.getQuote(symbol), staleTime: 15_000, refetchInterval: 60_000 })
+export function useQuote(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.quote(symbol), queryFn: () => api.getQuote(symbol), staleTime: 15_000, refetchInterval: 60_000 })
 }
 export function useHistory(symbol: string, range: HistoryRange) {
   return useQuery({ queryKey: qk.history(symbol, range), queryFn: () => api.getHistory(symbol, range), placeholderData: keepPreviousData, staleTime: 5 * 60_000 })
 }
-export function useValuation(symbol: string) {
-  return useQuery({ queryKey: qk.valuation(symbol), queryFn: () => api.getValuation(symbol, "5Y"), staleTime: 30 * 60_000 })
+export function useValuation(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.valuation(symbol), queryFn: () => api.getValuation(symbol, "5Y"), staleTime: 30 * 60_000 })
 }
-export function useRevenue(symbol: string) {
-  return useQuery({ queryKey: qk.revenue(symbol), queryFn: () => api.getRevenue(symbol), staleTime: 30 * 60_000 })
+export function useRevenue(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.revenue(symbol), queryFn: () => api.getRevenue(symbol), staleTime: 30 * 60_000 })
 }
-export function useDividends(symbol: string) {
-  return useQuery({ queryKey: qk.dividends(symbol), queryFn: () => api.getDividends(symbol), staleTime: 30 * 60_000 })
+export function useDividends(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.dividends(symbol), queryFn: () => api.getDividends(symbol), staleTime: 30 * 60_000 })
 }
 export function useInstrumentSearch(q: string) {
   const query = q.trim()
@@ -153,6 +165,50 @@ export function useUpdateAccount() {
     mutationFn: ({ id, patch }: { id: string; patch: Partial<AccountInput> }) => api.updateAccount(id, patch),
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: qk.accounts })
+    },
+  })
+}
+
+// ── 重新設計新增（2026-11-12） ─────────────────────────────
+const notFound = (n: number, e: unknown) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2
+
+export function useOverview(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.overview(symbol), queryFn: () => api.getOverview(symbol), staleTime: 60_000, refetchInterval: 60_000, retry: notFound })
+}
+/** 盤中走勢：持股與自選每 30–60 秒輪詢 */
+export function useIntraday(symbol: string, enabled = true) {
+  return useQuery({ queryKey: qk.intraday(symbol), queryFn: () => api.getIntraday(symbol), staleTime: 30_000, refetchInterval: 60_000, enabled })
+}
+export function useChips(symbol: string, range: ChipsRange = "3M") {
+  return useQuery({ queryKey: qk.chips(symbol, range), queryFn: () => api.getChips(symbol, range), staleTime: 30 * 60_000, placeholderData: keepPreviousData })
+}
+export function useFinancials(symbol: string, period: FinancialsPeriod = "quarterly") {
+  return useQuery({ queryKey: qk.financials(symbol, period), queryFn: () => api.getFinancials(symbol, period), staleTime: 60 * 60_000, placeholderData: keepPreviousData })
+}
+export function useEvents(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.events(symbol), queryFn: () => api.getEvents(symbol, false), staleTime: 30 * 60_000 })
+}
+export function useNews(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.news(symbol), queryFn: () => api.getNews(symbol), staleTime: 10 * 60_000 })
+}
+export function usePosition(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.position(symbol), queryFn: () => api.getPosition(symbol), staleTime: 30_000 })
+}
+export function useWhy(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.why(symbol), queryFn: () => api.getWhy(symbol), staleTime: 60_000, refetchInterval: 120_000 })
+}
+export function useWatchlist() {
+  return useQuery({ queryKey: qk.watchlist, queryFn: () => api.getWatchlist(), staleTime: 30_000, refetchInterval: 60_000 })
+}
+export function useUpcoming(days = 7) {
+  return useQuery({ queryKey: qk.upcoming(days), queryFn: () => api.getUpcoming(days), staleTime: 10 * 60_000 })
+}
+export function useToggleWatch() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ symbol, on }: { symbol: string; on: boolean }) => (on ? api.addWatch(symbol) : api.removeWatch(symbol)),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.watchlist })
     },
   })
 }

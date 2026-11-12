@@ -1,0 +1,18 @@
+[
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "1569",
+  "CompanyName": "濱川",
+  "TradingInformation": "最近六十個營業日(含當日)起迄兩個營業日之最後成交價漲幅達148.21%(第二款)",
+  "ClosePrice": "104.50",
+  "PriceEarningRatio": "N/A"
+ },
+ {
+  "Date": "1151111",
+  "SecuritiesCompanyCode": "1815",
+  "CompanyName": "富喬",
+  "TradingInformation": "最近六個營業日(含當日)之累積週轉率為124.39%，當日週轉率達19.9%(第十款)",
+  "ClosePrice": "140.50",
+  "PriceEarningRatio": "40.72"
+ }
+]

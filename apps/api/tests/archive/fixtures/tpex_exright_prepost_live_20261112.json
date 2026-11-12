@@ -1,0 +1,58 @@
+[
+ {
+  "ExRrightsExDividendDate": "1151111",
+  "SecuritiesCompanyCode": "8390",
+  "CompanyName": "金益鼎",
+  "ExRrightsExDividend": "除權",
+  "StockDividendRatio": "0.00000000",
+  "SubscriptionRatioToNewSharesIssued": "0.08323265",
+  "SubscriptionPricePerShare": "62.00",
+  "CashDividend": "0.00000000",
+  "AllocatedForPublicUnderwriting": "800000",
+  "SubscribedByEmployees": "1200000",
+  "SubscribedByExistingShareholders": "6000000",
+  "SubscribedProRataInThousandShares": "62.42448718"
+ },
+ {
+  "ExRrightsExDividendDate": "1151112",
+  "SecuritiesCompanyCode": "3680",
+  "CompanyName": "家登",
+  "ExRrightsExDividend": "除息",
+  "StockDividendRatio": "0.00000000",
+  "SubscriptionRatioToNewSharesIssued": "0.00000000",
+  "SubscriptionPricePerShare": "0.00",
+  "CashDividend": "9.91474560",
+  "AllocatedForPublicUnderwriting": "0",
+  "SubscribedByEmployees": "0",
+  "SubscribedByExistingShareholders": "0",
+  "SubscribedProRataInThousandShares": "0.00000000"
+ },
+ {
+  "ExRrightsExDividendDate": "1151229",
+  "SecuritiesCompanyCode": "6488",
+  "CompanyName": "環球晶",
+  "ExRrightsExDividend": "除息",
+  "StockDividendRatio": "0.00000000",
+  "SubscriptionRatioToNewSharesIssued": "0.00000000",
+  "SubscriptionPricePerShare": "0.00",
+  "CashDividend": "6.00000000",
+  "AllocatedForPublicUnderwriting": "0",
+  "SubscribedByEmployees": "0",
+  "SubscribedByExistingShareholders": "0",
+  "SubscribedProRataInThousandShares": "0.00000000"
+ },
+ {
+  "ExRrightsExDividendDate": "1151116",
+  "SecuritiesCompanyCode": "00844B",
+  "CompanyName": "台新15年IG金融債",
+  "ExRrightsExDividend": "除息",
+  "StockDividendRatio": "0.00000000",
+  "SubscriptionRatioToNewSharesIssued": "0.00000000",
+  "SubscriptionPricePerShare": "0.00",
+  "CashDividend": "尚未公告",
+  "AllocatedForPublicUnderwriting": "0",
+  "SubscribedByEmployees": "0",
+  "SubscribedByExistingShareholders": "0",
+  "SubscribedProRataInThousandShares": "0.00000000"
+ }
+]
