@@ -274,3 +274,41 @@
 - XIRR：投資人觀點的現金流（買進為負、賣出與股利為正，期末市值為正），以年化內部報酬率求解。
 - 最大回撤：以 `twr_index` 計算。
 - 價格一律用**未還原**收盤價；股利以交易記錄，避免重複計算。
+
+---
+
+## 重新設計新增（2026-11-12）：個股頁、帳本、自選、AI 草稿
+
+依 `PRODUCT.md`、`docs/research/stock-page-research.md` 與帳本方向合約（`apps/web/.impeccable/surfaces/src-pages-ledger-ledgerpage-tsx.md`）。
+資料來源政策：**優先可商用來源**（證交所／櫃買 OpenAPI 每日存檔、shioaji-data 官方資料）；FinMind、Yahoo、MIS 只作備援並在 `sources` 標示「非商用」。所有回應帶 `sources: string[]` 與 `as_of`。
+
+### 報價修正
+- `Quote` 新增 `reference_price`（參考價）、`limit_up`、`limit_down`。除權息日的 `change`／`change_pct` 以參考價計算（不是昨收）。
+
+### 個股
+| 方法 | 路徑 | 回傳 |
+|---|---|---|
+| GET | `/instruments/{symbol}/overview` | `{open, high, low, prev_close, reference_price, limit_up, limit_down, volume, avg_volume_3m, market_cap, pe, pb, dividend_yield, last_cash_dividend, ex_dividend_date, eps_ttm, high_52w, low_52w, shares_outstanding, status: {attention, disposition, note}, as_of, sources, is_demo}`；欄位缺資料時為 `null` |
+| GET | `/instruments/{symbol}/intraday` | `{symbol, date, prev_close, reference_price, points: [{t: "09:01", price, volume}], is_partial, sources}`；只有持股與自選會累積盤中點（每 30–60 秒輪詢），其他回 `points: []` |
+| GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}` |
+| GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元 |
+| GET | `/instruments/{symbol}/events?mine=false` | `[{date, type, title, detail, url, mine, amount_estimate}]`；`type`：`ex_dividend`、`dividend_payment`、`earnings`、`revenue_release`、`material_info`、`attention`、`disposition`、`shareholder_meeting` |
+| GET | `/instruments/{symbol}/news` | `[{published_at, title, source, url}]`（只有標題、來源、連結） |
+| GET | `/instruments/{symbol}/position` | 未持有回 `null`；否則 `{quantity, avg_cost, cost_basis, market_value, unrealized_pnl, unrealized_pnl_pct, realized_pnl, dividends_received, day_change, markers: [{date, type: "buy"\|"sell"\|"dividend"\|"stock_dividend", quantity, price, amount}], upcoming_dividend: {ex_dividend_date, amount_estimate} \| null}` |
+| GET | `/instruments/{symbol}/why` | `{show, headline, reasons: [{kind, text}], as_of}`；規則判斷（漲跌 ±3%、成交量 2 倍、漲跌停、注意／處置、除權息日、財報日），M4 前用模板句，之後由 AI 改寫 |
+
+### 自選
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/watchlist` | `[{symbol, name, quote: Quote, sparkline: [{t, price}]}]`（盤中點；收盤後為當日） |
+| POST | `/watchlist` | body `{symbol}` |
+| DELETE | `/watchlist/{symbol}` | |
+
+### 帳本
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/portfolio/upcoming?days=7` | `[{date, type: "ex_dividend"\|"dividend_payment"\|"recurring", symbol, title, amount_estimate}]`（「本週事項」） |
+
+### AI（M4 前為規則版，前端可先用）
+- 「買 0050 2 張 52.4」這類記帳指令：前端（或之後的 AI）解析後呼叫 `POST /transactions/preview` 取得草稿，使用者簽名確認後再 `POST /transactions`（帶 `source: "ai_draft"`）。
+- 建議問題、對話紀錄、AI 任務：M4 前由前端 mock，端點在 M4 定義。
