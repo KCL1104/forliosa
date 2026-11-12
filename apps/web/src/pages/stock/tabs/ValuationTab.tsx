@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { appToday } from "@/api"
 import { useValuation } from "@/api/queries"
 import { useWho } from "@/api/view-as"
 import type { InstrumentDetail, Position, Valuation } from "@/api/types"
@@ -8,7 +9,9 @@ import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { DemoTag, Section as Panel } from "@/components/section"
 import { usePrefs } from "@/stores/prefs"
 import { EtfNavSection } from "../EtfNavSection"
-import { TabLead } from "./kit"
+import { MONTH_LABEL_WIDTH, monthTicks, useWidth } from "../month-ticks"
+import { beforeSpan, twOpenApi, useDatasetSources, valuationSpan } from "../text"
+import { Fig } from "./kit"
 import { ChartSkeleton, EmptyState, ErrorState } from "@/components/states"
 import { buildRiver, invalidRuns, type Mode } from "@/lib/valuation"
 import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
@@ -18,6 +21,10 @@ const BAND_VARS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--ban
 export function ValuationTab({ inst: instrument, position }: { inst: InstrumentDetail; position: Position | null }) {
   const valuation = useValuation(instrument.symbol)
   const [mode, setMode] = useState<Mode>("per")
+  // 估值序列沒有自己的 sources：收盤價與本益比、股價淨值比、殖利率的資料集（台股）登記到頁尾
+  const tw = twOpenApi(instrument.market)
+  const plotted = !!valuation.data?.series.length
+  useDatasetSources([plotted && tw && `${tw}/price`, plotted && tw && `${tw}/valuation`])
 
   if (valuation.isError) return <ErrorState error={valuation.error} onRetry={() => void valuation.refetch()} />
   if (!valuation.data) return <ChartSkeleton height={420} />
@@ -45,12 +52,11 @@ export function ValuationTab({ inst: instrument, position }: { inst: InstrumentD
     )
   }
   const activeMode: Mode = mode === "per" && !hasPer ? "pbr" : mode === "pbr" && !hasPbr ? "per" : mode
-  const pct = v.current.per_percentile_5y
+  // 期間照資料實際的長度寫：商用模式的存檔從 2026-06-01 才開始累積，不能說成「近 5 年」
+  const span = valuationSpan(v.series, appToday())
+  // 估值位置（百分位）只在右邊「現在的本益比」說一次
   return (
     <div className="flex flex-col gap-5">
-      <TabLead>
-        {v.current.per !== null && pct !== null ? `本益比 ${v.current.per.toFixed(1)} 倍，比過去 5 年 ${formatPercent(pct, { signed: false, decimals: 0 })} 的日子貴。` : null}
-      </TabLead>
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips
           label="估值方式"
@@ -61,10 +67,12 @@ export function ValuationTab({ inst: instrument, position }: { inst: InstrumentD
             ...(hasPbr ? [{ value: "pbr" as const, label: "股價淨值比河流圖" }] : []),
           ]}
         />
-        <span className="text-sm text-ink-2">近 5 年・{cadenceLabel(v)}</span>
+        <span className="text-sm text-ink-2">
+          {span.full ? "近 5 年" : span.label}・{cadenceLabel(v)}
+        </span>
         {v.is_demo && <DemoTag className="ml-auto" />}
       </div>
-      <RiverPanel valuation={v} mode={activeMode} instrument={instrument} position={position} />
+      <RiverPanel valuation={v} mode={activeMode} instrument={instrument} position={position} span={span.label} />
       <YieldPanel valuation={v} />
       <Notes notes={v.notes} />
     </div>
@@ -80,19 +88,19 @@ function cadenceLabel(v: Valuation): string {
   return days > 4 ? "每週" : "每個交易日"
 }
 
-/** 後端的說明（資料來源、EPS ≤ 0 留白等）：來源必須標示 */
+/** 後端的說明（數字的算法、EPS ≤ 0 留白、資料累積中等）：照原文放在圖表下面 */
 function Notes({ notes }: { notes: string[] }) {
   if (notes.length === 0) return null
   return (
-    <ul className="flex flex-col gap-1 text-xs text-ink-2">
+    <ul className="flex flex-col gap-0.5 text-sm text-ink-2">
       {notes.map((n) => (
-        <li key={n}>・{n}</li>
+        <li key={n}>{n}</li>
       ))}
     </ul>
   )
 }
 
-function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail; position: Position | null }) {
+function RiverPanel({ valuation, mode, instrument, position, span }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail; position: Position | null; span: string }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const you = useWho("你")
   const multiples = mode === "per" ? valuation.per_multiples : valuation.pbr_multiples
@@ -107,6 +115,8 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
   const currentRatio = mode === "per" ? valuation.current.per : valuation.current.pbr
   const currentInvalid = !last || last.base === null || last.base <= 0
   const chartData = rows.map((r) => ({ t: r.t, close: r.close, ...Object.fromEntries(r.bands.map((b, i) => [`b${i}`, b])) }))
+  const [box, width] = useWidth<HTMLDivElement>()
+  const axis = monthTicks(rows.map((r) => r.t), Math.floor((width - 56) / MONTH_LABEL_WIDTH))
 
   // 目前所在區間
   const bracket = (() => {
@@ -132,9 +142,7 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
   return (
     <div className="grid gap-10 xl:grid-cols-[minmax(0,1fr)_300px]">
       <Panel title={`${ratioLabel}河流圖`} titleId="river-title" bodyClassName="pt-1">
-        <p className="mb-2 max-w-prose text-sm text-ink-2">
-          每一條帶是「{baseLabel} × 倍數」換算出的股價。股價線落在越上面的帶，代表用{ratioLabel}來看越貴。
-        </p>
+        <p className="mb-2 max-w-prose text-sm text-ink-2">每條帶是「{baseLabel} × 倍數」的股價；收盤價落在越上面的帶越貴。</p>
         <Legend
           className="mb-1"
           items={[
@@ -148,11 +156,11 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
             ：{baseLabel} ≤ 0，{ratioLabel}沒有意義，這段期間不畫區間。
           </p>
         )}
-        <div className="h-[340px] w-full sm:h-[380px]">
+        <div ref={box} className="h-[340px] w-full sm:h-[380px]">
           <ResponsiveContainer width="100%" height="100%">
             <ComposedChart data={chartData} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-              <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={56} tickFormatter={(t: string) => t.slice(0, 7).replace("-", "/")} />
+              <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} ticks={axis.ticks} interval={0} tickFormatter={axis.format} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} tickFormatter={(n: number) => formatNumber(n)} domain={[0, "auto"]} />
               {runs.map((r) => (
                 <ReferenceArea key={r.from} x1={r.from} x2={r.to} fill="var(--hov)" fillOpacity={0.9} ifOverflow="extendDomain" />
@@ -215,10 +223,10 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
                 {currentRatio?.toFixed(1)}
                 <span className="ml-1 text-lg font-medium text-ink-2">倍</span>
               </p>
-              {bracket && <p className="mt-2 text-md">{bracket}</p>}
+              {bracket && <p className="mt-2 text-md text-ink">{bracket}</p>}
               {mode === "per" && valuation.current.per_percentile_5y !== null && (
-                <p className="mt-1 text-md text-ink-2">
-                  過去 5 年有 <span className="num font-medium text-foreground">{formatPercent(valuation.current.per_percentile_5y, { signed: false, decimals: 0 })}</span> 的時間本益比比現在低。
+                <p className="mt-1 text-md text-ink">
+                  比{beforeSpan(span)} <Fig>{formatPercent(valuation.current.per_percentile_5y, { signed: false, decimals: 0 })}</Fig> 的日子貴。
                 </p>
               )}
             </div>
@@ -237,7 +245,7 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
               <tbody>
                 {bandRows.map((row) =>
                   row.kind === "price" ? (
-                    <tr key="price" className="border-b border-rule bg-hov font-bold text-ink">
+                    <tr key="price" aria-current="true" className="sel-row border-b border-rule font-bold text-ink">
                       <th scope="row" className="py-1.5 pl-2 text-left">現價</th>
                       <td className="num py-1.5 pr-2 text-right" colSpan={2}>{formatPrice(row.price, market)}</td>
                     </tr>
@@ -245,7 +253,7 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
                     <tr key={row.m} className="border-b border-rule last:border-0">
                       <th scope="row" className="py-1.5 pl-2 text-left font-normal">
                         <span className="inline-flex items-center gap-2">
-                          <span aria-hidden className="size-2.5 rounded-[3px] ring-1 ring-border" style={{ background: BAND_VARS[row.idx] }} />
+                          <span aria-hidden className="size-2.5 rounded-xs ring-1 ring-border" style={{ background: BAND_VARS[row.idx] }} />
                           {row.m} 倍
                         </span>
                       </th>
@@ -256,7 +264,7 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
               </tbody>
             </table>
             {position && mode === "per" && last?.base && last.base > 0 && (
-              <p className="text-md">
+              <p className="text-md text-ink">
                 <span className="text-ink-2">{you}的均價</span>{" "}
                 {privacy ? "••••" : `${formatPrice(position.avg_cost, market)}，約 ${(position.avg_cost / last.base).toFixed(1)} 倍`}
               </p>
@@ -271,22 +279,24 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
 function YieldPanel({ valuation }: { valuation: Valuation }) {
   const data = valuation.series.filter((p) => p.dividend_yield !== null).map((p) => ({ t: p.t, y: p.dividend_yield! }))
   const current = valuation.current.dividend_yield
+  const [box, width] = useWidth<HTMLDivElement>()
+  const axis = monthTicks(data.map((d) => d.t), Math.floor((width - 48) / MONTH_LABEL_WIDTH))
   return (
     <Panel
       title="殖利率走勢"
       titleId="yield-title"
-      aside={current !== null && <span className="num text-md">目前 {formatPercent(current, { signed: false })}</span>}
+      aside={current !== null && <span className="num text-md text-ink"><span className="text-ink-2">目前</span> {formatPercent(current, { signed: false })}</span>}
     >
       {data.length < 2 ? (
         <p className="text-md text-ink-2">還沒有足夠的配息資料可以畫殖利率走勢。</p>
       ) : (
         <>
           <p className="mb-2 text-sm text-ink-2">近 12 個月現金股利 ÷ 收盤價。</p>
-          <div className="h-[180px] w-full">
+          <div ref={box} className="h-[180px] w-full">
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
                 <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-                <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={56} tickFormatter={(t: string) => t.slice(0, 7).replace("-", "/")} />
+                <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} ticks={axis.ticks} interval={0} tickFormatter={axis.format} />
                 <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={48} tickFormatter={(n: number) => formatPercent(n, { signed: false, decimals: 1 })} />
                 <Tooltip
                   cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}

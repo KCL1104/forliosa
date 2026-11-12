@@ -1,14 +1,37 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import type { NewsItem } from "@/api/types"
+import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { mediaNews, officialNews, outletLabel, relativeTime } from "@/lib/news"
 import { NewsCoverage } from "../NewsCoverage"
 
 function withQueries(ui: React.ReactNode) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+}
+
+/** 個股頁的樣子：區塊在 SourcesProvider 裡，頁尾一個「資料來源與授權」（頁尾的連結需要 router） */
+function withSourcesFooter(ui: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const router = createRouter({
+    routeTree: createRootRoute({
+      component: () => (
+        <SourcesProvider>
+          {ui}
+          <SourcesFooter />
+        </SourcesProvider>
+      ),
+    }),
+    history: createMemoryHistory({ initialEntries: ["/"] }),
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  )
 }
 
 const NOW = new Date("2026-11-12T13:30:00+08:00")
@@ -41,12 +64,12 @@ describe("新聞報導的顯示規則", () => {
 })
 
 describe("總覽的「新聞報導」", () => {
-  it("媒體・時間＋原標題連到原文（另開新視窗、noopener）；8 則後「顯示更多」；引用 GDELT", async () => {
+  it("媒體・時間＋原標題連到原文（另開新視窗、noopener）；先 3 則，「看更多」每次加 8 則；收集方式與 GDELT 引用在頁尾", async () => {
     const tsmc = await api.getInstrument("2330.TW")
-    withQueries(<NewsCoverage inst={tsmc} />)
+    withSourcesFooter(<NewsCoverage inst={tsmc} />)
     const section = await screen.findByRole("region", { name: "新聞報導" }, { timeout: 3000 })
-    const links = within(section).getAllByRole("link").filter((a) => !a.getAttribute("href")?.includes("gdeltproject"))
-    expect(links).toHaveLength(8)
+    const links = within(section).getAllByRole("link")
+    expect(links).toHaveLength(3)
     for (const a of links) {
       expect(a).toHaveAttribute("target", "_blank")
       expect(a.getAttribute("rel")).toContain("noopener")
@@ -55,14 +78,20 @@ describe("總覽的「新聞報導」", () => {
     expect(section.querySelector("img")).toBeNull()
     expect(within(section).getAllByText("示範財經日報").length).toBeGreaterThan(0)
     expect(within(section).getByText("1 小時前")).toBeInTheDocument()
-    const gdelt = within(section).getByRole("link", { name: /The GDELT Project/ })
+    // 區塊裡沒有說明段落與來源句
+    expect(section.textContent).not.toMatch(/新聞索引|內容以各媒體原文為準|SearXNG/)
+    fireEvent.click(within(section).getByRole("button", { name: /看更多/ }))
+    expect(within(section).getAllByRole("link")).toHaveLength(11)
+    fireEvent.click(within(section).getByRole("button", { name: /看更多/ }))
+    expect(within(section).getAllByRole("link")).toHaveLength(12)
+    expect(within(section).queryByRole("button", { name: /看更多/ })).toBeNull()
+    // 頁尾：GDELT（使用條款要求連回 gdeltproject.org）、SearXNG 與 AI 網路搜尋
+    fireEvent.click(screen.getByRole("button", { name: /資料來源與授權/ }))
+    const gdelt = screen.getByRole("link", { name: /The GDELT Project/ })
     expect(gdelt).toHaveAttribute("href", "https://www.gdeltproject.org/")
-    fireEvent.click(within(section).getByRole("button", { name: /顯示更多/ }))
-    const all = within(section).getAllByRole("link").filter((a) => !a.getAttribute("href")?.includes("gdeltproject"))
-    expect(all).toHaveLength(12)
-    expect(within(section).queryByRole("button", { name: /顯示更多/ })).toBeNull()
-    expect(section.textContent).toContain("AI 網路搜尋")
-    expect(section.textContent).toContain("另有 SearXNG 元搜尋")
+    expect(screen.getByText("GDELT 使用條款引用")).toBeInTheDocument()
+    expect(screen.getByText(/^AI 網路搜尋補充/)).toBeInTheDocument()
+    expect(screen.getByText(/^SearXNG 自架元搜尋/)).toBeInTheDocument()
   })
   it("請求失敗時顯示錯誤與重試，不說成「沒有報導」", async () => {
     const tsmc = await api.getInstrument("2330.TW")

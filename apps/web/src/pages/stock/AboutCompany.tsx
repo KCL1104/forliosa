@@ -1,12 +1,12 @@
-import { ArrowUpRightIcon } from "lucide-react"
 import { useCompany } from "@/api/queries"
 import type { CompanyAbout, InstrumentDetail } from "@/api/types"
-import { Section } from "@/components/section"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useSourceNote } from "@/hooks/use-source-note"
 import { displayHost, fiscalYearEnd, formatCapital } from "@/lib/company"
 import { formatDate, formatNumber } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { Sources } from "./tabs/kit"
+import { QuietSection } from "./tabs/kit"
+import { sourceNotes } from "./text"
 
 type Row = { label: string; value: React.ReactNode }
 
@@ -38,9 +38,8 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
   add(
     "網站",
     c.website ? (
-      <a href={c.website} target="_blank" rel="noopener noreferrer" className="inline-flex items-center gap-0.5 break-all underline-offset-3 hover:underline">
+      <a href={c.website} target="_blank" rel="noopener noreferrer" className="break-all underline underline-offset-3 hover:decoration-2">
         {displayHost(c.website)}
-        <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0 text-ink-2" />
         <span className="sr-only">（另開新視窗）</span>
       </a>
     ) : null,
@@ -58,14 +57,16 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
 
 /**
  * 關於〈公司〉（Google 財經的「資料」＋「關於」）：
- * - 簡介：中文維基百科節錄（原文、不改寫，標「節錄」並連到條目與 CC BY-SA 4.0），沒有條目時是 AI 依官方資料寫的 2–3 句（紫色文楷、標「AI 依公開資料整理」）。
- * - 兩欄格線：產業別、成立日期（成立 N 年）、上市／上櫃日期、總部、網站、實收資本額、董事長、總經理、簽證會計師事務所、股務代理。
- * - 下方標資料來源與資料日期。董事長、總經理照〈公司基本資料〉原文。
+ * - 簡介：中文維基百科節錄（原文、不改寫，標「節錄」並連到條目與 CC BY-SA 4.0——授權要求標在內容旁），
+ *   沒有條目時是 AI 依官方資料寫的 2–3 句（模型寫的字：紫色楷體、標「AI 依公開資料整理」）。
+ * - 緊湊的兩欄鍵值格：產業別、成立日期（成立 N 年）、上市／上櫃日期、總部、網站、實收資本額、董事長、總經理…
+ * - 資料日期留在格子下面；資料來源登記到頁尾。
  */
 export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
   const company = useCompany(inst.symbol)
-  if (company.isLoading) return <Skeleton className="h-64 w-full rounded-sm" />
   const c = company.data
+  useSourceNote(sourceNotes(c?.sources.length ? c.sources : inst.data_sources))
+  if (company.isLoading) return <Skeleton className="h-48 w-full rounded-sm" />
   const name = c?.short_name || inst.name
   const rows = c ? aboutRows(c, inst) : []
   const d = c?.description ?? null
@@ -73,11 +74,11 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
   const summary = d ? null : inst.summary
   if (!c && !summary) return null
   return (
-    <Section title={`關於「${name}」`} titleId="ov-company">
+    <QuietSection title={`關於「${name}」`} titleId="ov-company">
       {d && (
-        <div className="max-w-prose">
-          <p className={cn("text-base leading-relaxed", d.kind === "ai" && "ai-voice text-lg leading-snug")}>{d.text}</p>
-          <p className="mt-2 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-ink-2">
+        <div className="max-w-prose pt-2">
+          <p className={cn("text-base leading-relaxed text-ink", d.kind === "ai" && "ai-voice text-lg leading-snug")}>{d.text}</p>
+          <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-2">
             <span className="demo-tag">{d.label}</span>
             {d.kind === "wikipedia" && d.url ? (
               <>
@@ -95,24 +96,25 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
           </p>
         </div>
       )}
-      {summary && <p className="max-w-prose text-base">{summary}</p>}
+      {summary && <p className="max-w-prose pt-2 text-base">{summary}</p>}
       {rows.length > 0 && (
-        <dl className={cn("grid gap-x-10 border-t border-rule sm:grid-cols-2", (d || summary) && "mt-5")}>
+        <dl className={cn("grid gap-x-8 sm:grid-cols-2", (d || summary) && "mt-4 border-t border-rule")}>
           {rows.map((r) => (
             <div key={r.label} className="flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5">
               <dt className="shrink-0 text-md text-ink-2">{r.label}</dt>
-              <dd className="min-w-0 text-right text-base break-words">{r.value}</dd>
+              <dd className="min-w-0 text-right text-base break-words text-ink">{r.value}</dd>
             </div>
           ))}
         </dl>
       )}
-      {(c?.notes ?? []).map((n) => (
-        <p key={n} className="mt-3 text-md text-ink-2">
-          {n}
-        </p>
-      ))}
-      <Sources items={c?.sources.length ? c.sources : inst.data_sources} className={c?.data_date ? "mb-0" : undefined} />
-      {c?.data_date && <p className="mt-1 text-xs text-ink-2">資料日期：{formatDate(c.data_date)}</p>}
-    </Section>
+      {((c?.notes ?? []).length > 0 || c?.data_date) && (
+        <div className="mt-2 flex flex-col gap-0.5 text-sm text-ink-2">
+          {(c?.notes ?? []).map((n) => (
+            <p key={n}>{n}</p>
+          ))}
+          {c?.data_date && <p className="num">資料日期：{formatDate(c.data_date)}</p>}
+        </div>
+      )}
+    </QuietSection>
   )
 }
