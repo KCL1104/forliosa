@@ -29,7 +29,11 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
     : -((last?.draftIds?.length ?? 0) + (last?.citations?.length ?? 0))
 
   useEffect(() => {
-    endRef.current?.scrollIntoView({ block: "end" })
+    // 只捲面板自己的捲動區：scrollIntoView 也會捲整頁（從個股頁的分頁按「問 AI」時，頁面會跳回頂端）
+    const end = endRef.current
+    const box = end?.closest<HTMLElement>(".overflow-y-auto")
+    if (box) box.scrollTop = box.scrollHeight
+    else end?.scrollIntoView({ block: "end" })
   }, [count, growth])
 
   return (

@@ -4,8 +4,11 @@
   19, or 6/16/26). When the day is not a trading day the debit moves to the **next trading day**, using
   TWSE's official holiday schedule when it is archived (``forliosa.market_calendar``), else the built-in list.
 * Plans never create transactions. ``draft`` returns a ``/transactions/preview``-style draft for one debit:
-  shares = floor(amount ÷ last close) (odd lots included) and the account's commission on top; the
-  frontend shows it as an AI draft the user signs, then posts ``transaction`` to ``POST /transactions``.
+  the trade date is the debit day; shares = floor(amount ÷ close) (odd lots included) and the account's
+  commission on top. The close is **the debit day's own close** when the debit day is already past (a missed
+  debit recorded later), else the latest close; a past day without an archived close falls back to the latest
+  close and says so in the rules. The frontend shows it as an AI draft the user signs, then posts
+  ``transaction`` to ``POST /transactions``.
 """
 
 from __future__ import annotations
@@ -211,21 +214,47 @@ def last_close(md: MarketData, symbol: str) -> tuple[Decimal, date, Any] | None:
     return None
 
 
+def close_on(md: MarketData, symbol: str, day: date) -> tuple[Decimal, bool, str] | None:
+    """That trading day's own close (price, is_demo, source), or None when it is not available."""
+    h = md.history(symbol, day, day)
+    for c in h.candles:
+        if c.t == day and c.c is not None and c.c > 0:
+            return c.c, h.is_demo, h.source
+    return None
+
+
 def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date | None = None) -> dict[str, Any]:
     from forliosa.services import transactions as txn_svc
 
     load_official_calendar(db)
+    today = today_taipei()
     if on is None:
-        nxt = next_debit(plan, today_taipei())
+        nxt = next_debit(plan, today)
         if nxt is None:
             raise ApiError(409, "conflict", "這個計畫沒有下一次扣款（已停用或已結束）")
         scheduled, debit = nxt
     else:
         scheduled, debit = on, next_tw_trading_day(on)
-    found = last_close(md, plan.symbol)
-    if found is None:
-        raise unprocessable(f"目前沒有 {plan.symbol} 的收盤價，無法估算股數", code="no_price")
-    price, price_date, q = found
+    # A past debit (recorded later) is priced at that day's own close; today's or a future one at the latest close.
+    price_rules: list[str] = []
+    price_sources: list[str] = []
+    is_demo = False
+    same_day = close_on(md, plan.symbol, debit) if debit < today else None
+    if same_day is not None:
+        price, is_demo, src = same_day
+        price_date = debit
+        price_sources = tagged(src, "price")
+    else:
+        found = last_close(md, plan.symbol)
+        if found is None:
+            raise unprocessable(f"目前沒有 {plan.symbol} 的收盤價，無法估算股數", code="no_price")
+        price, price_date, q = found
+        if q is not None:
+            is_demo = bool(q.is_demo)
+            price_sources = tagged(q.source, "price")
+        if debit < today and price_date != debit:
+            price_rules.append(f"沒有 {debit.month}/{debit.day} 的收盤價，改用最近收盤價"
+                               f"（{price_date.month}/{price_date.day}）估算，請照對帳單修改")
     if price <= 0:
         raise unprocessable(f"目前沒有 {plan.symbol} 的收盤價，無法估算股數", code="no_price")
     shares = (plan.amount / price).to_integral_value(rounding=ROUND_FLOOR)
@@ -241,11 +270,10 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
     preview = txn_svc.compute(db, user, body, md).preview
     lot = "零股" if shares < 1000 else ("整張" if shares % 1000 == 0 else "整張＋零股")
     rules = [f"股數 = floor(NT${plan.amount:,.0f} ÷ 收盤價 {price.normalize():f}"
-             f"（{price_date.month}/{price_date.day}）) = {shares} 股（{lot}）",
+             f"（{price_date.month}/{price_date.day}）) = {shares} 股（{lot}）", *price_rules,
              "手續費另計，不從定期定額金額扣除", *preview.rules]
     if scheduled != debit:
         rules.insert(0, f"扣款日 {scheduled.month}/{scheduled.day} 不是交易日，順延到 {debit.month}/{debit.day}")
-    is_demo = bool(q.is_demo) if q is not None else False
     return {
         "plan_id": plan.id,
         "scheduled_date": scheduled,
@@ -260,5 +288,5 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
                     "health_insurance": ser.money(preview.health_insurance),
                     "net_cash": ser.money(preview.net_cash), "rules": rules},
         "is_demo": is_demo,
-        "sources": labels(["ledger", calendar_source(debit), *(tagged(q.source, "price") if q is not None else [])]),
+        "sources": labels(["ledger", calendar_source(debit), *price_sources]),
     }

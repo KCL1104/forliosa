@@ -1,11 +1,15 @@
+import { MessageCircleQuestionIcon } from "lucide-react"
 import { useState } from "react"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { FOREIGN_FLOW_QUESTION } from "@/ai/suggestions"
+import { useAskAi } from "@/ai/use-ask"
 import { useChips } from "@/api/queries"
 import type { Chips, ChipsRange, InstrumentDetail } from "@/api/types"
 import { ChartTooltipBox, Legend } from "@/components/charts/chart-kit"
 import { DemoTag, Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent } from "@/lib/format"
@@ -45,10 +49,32 @@ const isBig = (b: { level: string; label?: string }) => /^1,?000/.test(b.label ?
 
 const lots = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatNumber(Math.abs(n))}`
 
+/**
+ * 上市股票的三大法人：沒有逐檔資料（證交所開放資料沒有，網站不能以程式下載），說明原因；
+ * 個股可以直接問 AI 最近的外資動向（上網搜尋新聞，附來源與日期）。上櫃股票照常有櫃買的資料。
+ */
+function ListedInstitutional({ inst, notes }: { inst: InstrumentDetail; notes: string[] }) {
+  const ask = useAskAi()
+  return (
+    <NotYet className="border-t-0 pt-0" title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人與外資持股`}>
+      {notes.map((n) => (
+        <p key={n}>{n}</p>
+      ))}
+      {inst.type === "stock" && (
+        <Button variant="outline" size="sm" className="mt-3" onClick={() => ask.submit(FOREIGN_FLOW_QUESTION)}>
+          <MessageCircleQuestionIcon aria-hidden className="text-ai" />
+          {FOREIGN_FLOW_QUESTION}
+        </Button>
+      )}
+    </NotYet>
+  )
+}
+
 /** 籌碼：三大法人、融資融券、外資持股比、千張大戶（單位：張） */
 export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   const [range, setRange] = useState<ChipsRange>("3M")
   const chips = useChips(inst.symbol, range)
+  const listed = inst.market === "TWSE"
   if (inst.market === "US") {
     return <NotYet title="美股沒有台股的法人與融資融券資料">美股的機構持股（13F）一季公布一次，之後再評估是否加入。</NotYet>
   }
@@ -64,16 +90,24 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   }
   const recent = [...c.institutional].reverse().slice(0, 10)
   const sum = (k: "foreign" | "trust" | "dealer" | "total", n: number) => c.institutional.slice(-n).reduce((s, r) => s + r[k], 0)
+  const lastDay = (c.institutional.at(-1) ?? c.margin.at(-1))?.t
+  // 上市股票的說明放在三大法人的空狀態裡，頁尾的資料來源就不再重複
+  const listedNotes = listed ? (c.notes ?? []).filter((n) => n.includes("上市股票")) : []
+  const otherNotes = (c.notes ?? []).filter((n) => !listedNotes.includes(n))
   return (
     <div className="flex flex-col gap-12">
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips label="籌碼區間" value={range} options={RANGES} onChange={setRange} />
-        <span className="text-sm text-ink-2">{c.institutional.length ? `資料至 ${formatDate(c.institutional.at(-1)!.t)}・` : ""}單位：張</span>
+        <span className="text-sm text-ink-2">{lastDay ? `資料至 ${formatDate(lastDay)}・` : ""}單位：張</span>
         {c.is_demo && <DemoTag className="ml-auto" />}
       </div>
       <TabLead className="-mt-6 mb-0">{lead(c)}</TabLead>
 
-      {c.institutional.length === 0 ? (
+      {listed ? (
+        <Section title="三大法人買賣超" titleId="chips-inst">
+          <ListedInstitutional inst={inst} notes={listedNotes} />
+        </Section>
+      ) : c.institutional.length === 0 ? (
         <NotYet title="三大法人資料累積中">{c.notes?.join(" ") ?? "法人買賣超在每天 20:00–21:00 更新。"}</NotYet>
       ) : (
       <Section title="三大法人買賣超" titleId="chips-inst" aside="每日合計">
@@ -152,7 +186,11 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           <MiniLine data={c.margin.map((m) => ({ t: m.t, v: m.short_balance }))} color="var(--chart-blue)" label="融券餘額" fmt={(v) => `${formatNumber(v)} 張`} />
         </Section>
         <Section title="外資持股比" titleId="chips-foreign" aside={c.foreign_holding_pct.length ? formatPercent(c.foreign_holding_pct.at(-1)!.pct, { signed: false }) : undefined}>
-          <MiniLine data={c.foreign_holding_pct.map((m) => ({ t: m.t, v: m.pct }))} color="var(--chart-mine)" label="外資持股比" fmt={(v) => formatPercent(v, { signed: false })} />
+          {listed ? (
+            <p className="text-md text-ink-2">上市{inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔外資持股比，原因見上方三大法人。</p>
+          ) : (
+            <MiniLine data={c.foreign_holding_pct.map((m) => ({ t: m.t, v: m.pct }))} color="var(--chart-mine)" label="外資持股比" fmt={(v) => formatPercent(v, { signed: false })} />
+          )}
         </Section>
         <Section title="股權分散" titleId="chips-holders" aside={c.major_holders ? `集保 ${formatDateShort(c.major_holders.as_of)}` : undefined}>
           {!c.major_holders ? (
@@ -172,7 +210,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           )}
         </Section>
       </div>
-      <Sources items={[...(c.notes ?? []), ...c.sources]} />
+      <Sources items={[...otherNotes, ...c.sources]} />
     </div>
   )
 }

@@ -15,6 +15,7 @@ export type SuggestionKind =
   | "add_one_lot"
   | "is_expensive"
   | "if_hold_dividend"
+  | "foreign_flow"
   | "group_share"
   | "recurring_draft"
 

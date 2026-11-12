@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 
 from forliosa.archive import Archiver
 from forliosa.market_calendar import load_official_calendar
-from forliosa.marketdata.base import BaseProvider, QuoteData
+from forliosa.marketdata.base import BaseProvider, Candle, QuoteData
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
 from forliosa.models import MarketHoliday, RecurringPlan
@@ -201,6 +201,46 @@ def test_draft_estimates_odd_lot_shares_and_fee(client, calendar, close_52_4, mo
     assert r.status_code == 422 and r.json()["error"]["code"] == "amount_too_small"
     client.patch(f"{API}/recurring/{pid}", json={"active": False})
     assert client.post(f"{API}/recurring/{pid}/draft").status_code == 409
+
+
+class DayCloses(FixedClose):
+    """Latest close 52.4 (11/11) and an archived close of 50 on 11/6 only; no demo data (commercial)."""
+
+    name = "twse-openapi"
+
+    def history(self, symbol, start, end):
+        day = date(2026, 11, 6)
+        if symbol != "0050.TW" or not start <= day <= end:
+            return None
+        return [Candle(day, D("50.5"), D("50.8"), D("49.9"), D(50), 12_000_000)]
+
+
+def test_past_debit_is_priced_at_that_days_close(client, calendar, market, monkeypatch):
+    set_market_data(MarketData([DayCloses(), DemoProvider()], policy="commercial"))
+    try:
+        freeze(monkeypatch, date(2026, 11, 12))
+        acc = make_account(client)
+        pid = client.post(f"{API}/recurring", json={"account_id": acc, "symbol": "0050", "amount": 5000,
+                                                    "day_of_month": [5, 6, 12],
+                                                    "start_date": "2026-01-01"}).json()["id"]
+        # a missed debit (11/6, Friday): trade date and price are that day's — floor(5,000 ÷ 50) = 100 shares
+        d = client.post(f"{API}/recurring/{pid}/draft", params={"date": "2026-11-06"}).json()
+        assert (d["date"], d["price_as_of"], d["is_demo"]) == ("2026-11-06", "2026-11-06", False)
+        assert (d["transaction"]["trade_date"], d["transaction"]["price"], d["transaction"]["quantity"]) == (
+            "2026-11-06", 50.0, 100)
+        assert d["preview"]["rules"][0].startswith("股數 = floor(NT$5,000 ÷ 收盤價 50（11/6）) = 100 股")
+        assert not any("改用最近收盤價" in r for r in d["preview"]["rules"])
+        # a past day without an archived close falls back to the latest close and says so
+        d = client.post(f"{API}/recurring/{pid}/draft", params={"date": "2026-11-05"}).json()
+        assert (d["transaction"]["trade_date"], d["price_as_of"], d["transaction"]["price"]) == (
+            "2026-11-05", "2026-11-11", 52.4)
+        assert "沒有 11/5 的收盤價，改用最近收盤價（11/11）估算，請照對帳單修改" in d["preview"]["rules"]
+        # today's debit uses the latest close (the day's own close is not final yet)
+        d = client.post(f"{API}/recurring/{pid}/draft", params={"date": "2026-11-12"}).json()
+        assert (d["transaction"]["trade_date"], d["price_as_of"]) == ("2026-11-12", "2026-11-11")
+        assert not any("改用最近收盤價" in r for r in d["preview"]["rules"])
+    finally:
+        set_market_data(market)
 
 
 def test_draft_without_a_close_under_commercial(client, market):

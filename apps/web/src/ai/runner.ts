@@ -228,7 +228,8 @@ export function useAiRunner(ctx: AiContext) {
 
   /**
    * 定期定額：`POST /recurring/{id}/draft?date=<原本的扣款日>` 寫成草稿（不會建立交易），簽名後才 `POST /transactions`。
-   * 扣款日當天，或補記最近 7 天漏記的一次（`missed`）。後端依 `date` 順延到交易日並把成交日設成那天；
+   * 扣款日當天，或補記最近 7 天漏記的一次（`missed`）。後端依 `date` 順延到交易日並把成交日設成那天，
+   * 扣款日已經過去時用那天的收盤價（`price_as_of` = 扣款日）；沒有那天的收盤價才用最近收盤價。
    * 萬一回來的是別次扣款（後端沒有吃到 `date`），成交日改回這一次的扣款日。
    */
   async function draftRecurring(s: Suggestion) {
@@ -240,6 +241,8 @@ export function useAiRunner(ctx: AiContext) {
       const symbol = d.transaction.symbol
       const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
       const estimate = `${formatMoney(d.amount)} 以 ${formatDateShort(d.price_as_of, false)} 收盤價 ${formatPrice(d.transaction.price, marketOf(symbol))} 估算股數（含零股），手續費另計`
+      // 補記時用的是扣款日當天的收盤價嗎（後端沒有那天的收盤價會改用最近收盤價）
+      const closeWord = d.price_as_of === tradeDate ? "那天的收盤價" : "最近收盤價"
       const draft: Draft = {
         id: newId("dft"),
         status: "pending",
@@ -258,7 +261,7 @@ export function useAiRunner(ctx: AiContext) {
       push({
         role: "ai",
         text: r.missed
-          ? `${formatDateShort(tradeDate, false)} 是${d.name}定期定額的扣款日，帳本裡還沒有這一筆。\n我先照最近收盤價算好股數和手續費，你照對帳單改好再簽名，簽了才會入帳。`
+          ? `${formatDateShort(tradeDate, false)} 是${d.name}定期定額的扣款日，帳本裡還沒有這一筆。\n我先照${closeWord}算好股數和手續費，你照對帳單改好再簽名，簽了才會入帳。`
           : `今天是${d.name}定期定額的扣款日。\n我照最近收盤價算好股數和手續費，簽名後才會入帳。`,
         draftId: draft.id,
       })

@@ -174,7 +174,7 @@ Forliosa 是一個**以台股為主的投資管理 web app**，結合三件事�
 | 總覽 | 關鍵數字、公司小卡（業務簡介、產業鏈位置、題材） | shioaji-data |
 | K 線 | 日／週／月 K、均線、成交量、常用指標 | 日線資料庫 |
 | **估值** | 本益比河流圖、股價淨值比河流圖、殖利率走勢（對標 Yahoo 股市「價值評估」頁）；EPS ≤ 0 時本益比區間留白並說明原因 | TWSE `BWIBBU`、TPEx 本益比、FinMind `TaiwanStockPER` |
-| 籌碼 | 三大法人買賣超、融資融券、集保股權分散 | TWSE、TPEx、TDCC、FinMind |
+| 籌碼 | 三大法人買賣超與外資持股（**只有上櫃**；上市股票不顯示逐檔數字，空狀態說明原因，可直接問 AI「最近外資對這檔的動向？」，AI 上網搜尋新聞並附來源與日期）、融資融券、集保股權分散 | TPEx OpenAPI（法人、外資持股）、TWSE／TPEx OpenAPI（融資融券）、TDCC |
 | 財務 | 月營收（年增、月增）、季 EPS、毛利率、三大報表重點 | shioaji-data（月營收 2023-10 起、季報 2023Q1 起），更早的歷史用 FinMind |
 | 股利 | 歷年現金與股票股利、殖利率、填息天數 | TWSE 除權息資料、FinMind |
 | 新聞 | 個股相關新聞 | FinMind `TaiwanStockNews` |

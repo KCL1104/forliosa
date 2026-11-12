@@ -84,3 +84,27 @@ def test_only_open_data_endpoints_are_fetched(engine, market):
         assert etf.values["index_name"] == "臺灣50指數" and etf.values["listed"] == "2003-06-30"
         assert etf.values["units"] == 25048000000 and "陳重銓" not in str(etf.values)
         assert db.get(MarketHoliday, date(2026, 12, 25)).name == "行憲紀念日"
+
+
+def test_finmind_backfill_skips_listed_institutional_flows(engine, monkeypatch):
+    """Personal opt-in only. Listed (TWSE) stocks get margin only: their 三大法人／外資持股 are never shown."""
+    import forliosa.archive as archive_mod
+    import forliosa.marketdata.finmind as finmind_mod
+
+    class FakeFinMind:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def chips(self, symbol, start):
+            row = {"date": date(2026, 11, 11)}
+            return {"institutional": [{**row, "foreign_net": 1, "trust_net": 2, "dealer_net": 3, "total_net": 6}],
+                    "margin": [{**row, "margin_balance": 10, "short_balance": 2}],
+                    "foreign": [{**row, "pct": D("0.5")}]}
+
+    monkeypatch.setattr(finmind_mod, "FinMindProvider", FakeFinMind)
+    monkeypatch.setattr(archive_mod._time, "sleep", lambda s: None)
+    with Session(engine) as db:
+        archive_mod.finmind_backfill(db, ["2330.TW", "6488.TWO", "AAPL"], date(2026, 11, 1))
+        assert db.scalars(select(MarginDaily.symbol).order_by(MarginDaily.symbol)).all() == ["2330.TW", "6488.TWO"]
+        assert db.scalars(select(InstitutionalDaily.symbol)).all() == ["6488.TWO"]
+        assert db.scalars(select(ForeignHoldingDaily.symbol)).all() == ["6488.TWO"]

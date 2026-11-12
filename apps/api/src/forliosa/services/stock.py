@@ -50,6 +50,8 @@ from forliosa.timeutil import (
 )
 
 CHIPS_RANGES = ("1M", "3M", "6M", "1Y")
+LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人與外資持股（證交所以付費商品提供），目前不提供；"
+                     "上櫃股票由櫃買中心 OpenAPI 每日存檔")
 FINANCIAL_PERIODS = ("quarterly", "annual")
 EVENT_PAST_DAYS = 365
 EVENT_FUTURE_DAYS = 120
@@ -226,9 +228,12 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
         stmt = select(model).where(model.symbol == sym, model.date >= start, model.date <= today)
         return list(db.scalars(_filtered(stmt, model, md).order_by(model.date)))
 
-    inst = {r.date: r for r in rows(InstitutionalDaily)}
+    # Listed (TWSE) stocks: no per-stock 三大法人 / 外資持股 in any mode (owner, 2026-11-12) — TWSE's OpenAPI has no
+    # such dataset and its website may not be downloaded by program; FinMind only mirrors that website.
+    listed = info.market == "TWSE"
+    inst = {} if listed else {r.date: r for r in rows(InstitutionalDaily)}
     margin = {r.date: r for r in rows(MarginDaily)}
-    foreign = {r.date: r for r in rows(ForeignHoldingDaily)}
+    foreign = {} if listed else {r.date: r for r in rows(ForeignHoldingDaily)}
     sources = [*tagged([r.source for r in inst.values()], "institutional"),
                *tagged([r.source for r in margin.values()], "margin"),
                *tagged([r.source for r in foreign.values()], "foreign_holding")]
@@ -236,21 +241,21 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
 
     expected = len(tw_trading_days(start, today)) * 0.8
     fm = md.provider("finmind") if md.policy == "personal" else None
-    if fm is not None and min(len(inst), len(margin), len(foreign)) < expected:
+    wanted = (("margin", margin),) if listed else (("institutional", inst), ("margin", margin), ("foreign", foreign))
+    if fm is not None and min(len(target) for _, target in wanted) < expected:
         try:
             extra = fm.chips(sym, start)  # type: ignore[attr-defined]
         except Exception:  # FinMind quota or network: serve what the archive has
             extra = None
             notes.append("FinMind 暫時無法使用，只顯示已存檔的資料")
         if extra:
-            for key, target in (("institutional", inst), ("margin", margin), ("foreign", foreign)):
+            for key, target in wanted:
                 for r in extra[key]:
                     if r["date"] not in target and start <= r["date"] <= today:
                         target[r["date"]] = _Row(**r, source="finmind")
                         sources.append("finmind")
-    if info.market == "TWSE" and not inst and not foreign:
-        notes.append("證交所 OpenAPI 沒有上市股票的個股三大法人與外資持股（證交所以付費商品提供），目前不提供；"
-                     "上櫃股票由櫃買中心 OpenAPI 每日存檔")
+    if listed:
+        notes.append(LISTED_CHIPS_NOTE)
 
     def lots(shares: int | None) -> float | None:
         return ser.price(Decimal(shares) / 1000) if shares is not None else None

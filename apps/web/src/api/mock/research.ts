@@ -196,6 +196,8 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", c
     pct = Math.min(0.95, Math.max(0.02, pct + (r() - 0.52) * 0.002))
     return { t, pct: round(pct, 4) }
   })
+  // 上市股票任何模式都沒有逐檔三大法人與外資持股（產品負責人 2026-11-12；後端 services/stock.py 同規則）
+  const listed = spec.market === "TWSE"
   const big = spec.type === "etf" ? 0.32 : spec.symbol === "2330.TW" ? 0.761 : 0.45 + r() * 0.25
   const rest = 1 - big
   const buckets = [
@@ -209,15 +211,16 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", c
   const shares = spec.shares_outstanding ?? 1_000_000_000
   const holders = [920_000, 380_000, 42_000, 3_100, 640, 1_380]
   return {
-    institutional,
+    institutional: listed ? [] : institutional,
     margin: marginRows,
-    foreign_holding_pct: foreignPct,
+    foreign_holding_pct: listed ? [] : foreignPct,
     major_holders: {
       as_of: "2026-11-06",
       buckets: buckets.map((b, i) => ({ level: b.level, holders: Math.round(holders[i]! * (shares / 25_932_666_666) ** 0.5), shares: Math.round(shares * b.pct), pct: round(b.pct, 4) })),
     },
-    sources: ["臺灣證券交易所 OpenAPI（三大法人、融資融券）", "集保結算所（股權分散表，每週）", ...DEMO_SRC],
+    sources: [listed ? "臺灣證券交易所 OpenAPI（融資融券）" : "證券櫃檯買賣中心 OpenAPI（三大法人、融資融券、外資持股）", "集保結算所（股權分散表，每週）", ...DEMO_SRC],
     is_demo: true,
+    ...(listed ? { notes: [TWSE_CHIPS_NOTE] } : {}),
   }
 }
 
@@ -463,7 +466,7 @@ export function buildWhy(spec: MockInstrumentSpec): Why {
   if (limits && spec.price >= limits.up) reasons.push({ kind: "limit_up", text: "收在漲停" })
   if (limits && spec.price <= limits.down) reasons.push({ kind: "limit_down", text: "收在跌停" })
   if (spec.symbol === "6488.TWO") reasons.push({ kind: "attention", text: "今天列為注意股票（近 6 日累積跌幅過大）" })
-  if (spec.symbol === "2330.TW" && reasons.length > 0) reasons.push({ kind: "sector", text: "半導體類股同步上漲，投信連 5 天買超" })
+  if (spec.symbol === "2330.TW" && reasons.length > 0) reasons.push({ kind: "sector", text: "半導體類股同步上漲" })
   const show = reasons.some((x) => x.kind !== "sector")
   return {
     show,

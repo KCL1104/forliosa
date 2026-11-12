@@ -229,6 +229,40 @@ def test_unlicensed_archive_rows_are_never_served(client, archived, engine, froz
     assert tpex["institutional"]  # TPEx OpenAPI publishes them (commercial)
 
 
+def test_listed_stocks_never_show_institutional_flows(client, archived, engine, frozen_today, use_market):
+    """Owner decision 2026-11-12: no per-stock 三大法人 / 外資持股 for TWSE-listed stocks in any mode — not from
+    FinMind (personal), not from rows already in the archive; margin and TDCC still show."""
+    from forliosa.models import ForeignHoldingDaily
+
+    with Session(engine) as db:
+        db.add(InstitutionalDaily(symbol="2330.TW", date=date(2026, 11, 10), foreign_net=1000, trust_net=2000,
+                                  dealer_net=3000, total_net=6000, source="finmind"))
+        db.add(ForeignHoldingDaily(symbol="2330.TW", date=date(2026, 11, 10), pct=D("0.72"), source="finmind"))
+        db.commit()
+
+    calls: list[str] = []
+
+    class FakeFinMind(BaseProvider):
+        name = "finmind"
+
+        def chips(self, symbol, start):
+            calls.append(symbol)
+            row = {"date": date(2026, 11, 11)}
+            return {"institutional": [{**row, "foreign_net": 1, "trust_net": 2, "dealer_net": 3, "total_net": 6}],
+                    "margin": [{**row, "margin_balance": 1, "short_balance": 2}], "foreign": [{**row, "pct": D("0.7")}]}
+
+    use_market(MarketData([FakeFinMind(), ArchiveProvider("personal", session_fn=lambda: Session(engine)),
+                           DemoProvider()], policy="personal"))
+    c = client.get(f"{API}/instruments/2330/chips?range=1M").json()
+    assert c["institutional"] == [] and c["foreign_holding_pct"] == []
+    assert c["notes"] == [stock_svc.LISTED_CHIPS_NOTE]
+    assert calls == ["2330.TW"] and c["margin"] and c["major_holders"] is not None
+    assert not any("三大法人" in s or "持股比例" in s for s in c["sources"])
+    # TPEx stocks keep the TPEx OpenAPI rows
+    tpex = client.get(f"{API}/instruments/6488/chips?range=1M").json()
+    assert tpex["institutional"] and tpex["foreign_holding_pct"] and stock_svc.LISTED_CHIPS_NOTE not in tpex["notes"]
+
+
 # -- intraday ---------------------------------------------------------------------------------------------
 def test_intraday_has_no_points_without_a_licensed_source(client):
     client.post(f"{API}/watchlist", json={"symbol": "2330"})

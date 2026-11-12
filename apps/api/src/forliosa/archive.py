@@ -68,7 +68,7 @@ from sqlalchemy.orm import Session
 from forliosa.datapolicy import Policy
 from forliosa.marketdata import opendata as od
 from forliosa.marketdata import taifex as tf
-from forliosa.marketdata.base import ProviderUnavailable, tw_symbol
+from forliosa.marketdata.base import ProviderUnavailable, market_of_symbol, tw_symbol
 from forliosa.marketdata.http import HttpFetcher
 from forliosa.marketdata.twse import parse_bwibbu_all, parse_stock_day_all
 from forliosa.models import (
@@ -684,7 +684,8 @@ class Archiver:
 
 
 def finmind_backfill(db: Session, symbols: list[str], start: date) -> int:
-    """FinMind (personal only): margin, institutional, foreign holding, PER — only where nothing is archived."""
+    """FinMind (personal only): margin, institutional, foreign holding, PER — only where nothing is archived.
+    Listed (TWSE) stocks get margin only: their per-stock 三大法人 / 外資持股 are never shown (``services.stock``)."""
     from forliosa.config import get_settings
     from forliosa.marketdata.finmind import FinMindProvider
 
@@ -701,10 +702,10 @@ def finmind_backfill(db: Session, symbols: list[str], start: date) -> int:
             break
         n += upsert(db, MarginDaily, [{**r, "symbol": sym, "source": "finmind"} for r in chips["margin"]],
                     ["symbol", "date"], ())
-        n += upsert(db, InstitutionalDaily, [{**r, "symbol": sym, "source": "finmind"} for r in chips["institutional"]],
-                    ["symbol", "date"], ())
-        n += upsert(db, ForeignHoldingDaily, [{**r, "symbol": sym, "source": "finmind"} for r in chips["foreign"]],
-                    ["symbol", "date"], ())
+        if market_of_symbol(sym) != "TWSE":
+            for model, key in ((InstitutionalDaily, "institutional"), (ForeignHoldingDaily, "foreign")):
+                n += upsert(db, model, [{**r, "symbol": sym, "source": "finmind"} for r in chips[key]],
+                            ["symbol", "date"], ())
         _time.sleep(0.3)
     return n
 

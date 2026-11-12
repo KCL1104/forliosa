@@ -335,7 +335,7 @@
 |---|---|---|
 | GET | `/instruments/{symbol}/overview` | `{open, high, low, prev_close, reference_price, limit_up, limit_down, volume, avg_volume_3m, market_cap, pe, pb, dividend_yield, last_cash_dividend, ex_dividend_date, eps_ttm, high_52w, low_52w, shares_outstanding, status: {attention, disposition, note}, as_of, sources, is_demo}`；欄位缺資料時為 `null` |
 | GET | `/instruments/{symbol}/intraday` | `{symbol, date, prev_close, reference_price, points: [{t: "09:01", price, volume}], is_partial, sources}`；只有持股與自選會累積盤中點（每 30–60 秒輪詢），其他回 `points: []` |
-| GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}` |
+| GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}`；**上市（TWSE）股票的 `institutional`、`foreign_holding_pct` 任何模式都是 `[]`**，`notes` 說明原因（產品負責人 2026-11-12：不寄信給證交所、不買 Data E-Shop；上櫃照常用櫃買 OpenAPI）；融資融券與集保照常 |
 | GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元 |
 | GET | `/instruments/{symbol}/events?mine=false` | `[{date, type, title, detail, url, mine, amount_estimate}]`；`type`：`ex_dividend`、`dividend_payment`、`earnings`、`revenue_release`、`material_info`、`attention`、`disposition`、`shareholder_meeting` |
 | GET | `/instruments/{symbol}/news` | `[{published_at, title, source, url}]`（只有標題、來源、連結） |
@@ -373,7 +373,7 @@
 | GET | `/recurring?account_id=` | `[{id, account_id, symbol, name, amount, day_of_month: int[], start_date, end_date, active, note, next_date, created_at, updated_at}]` |
 | POST | `/recurring` | body `{account_id, symbol, amount (TWD 整數), day_of_month: 1–28 或陣列 [6, 16, 26], start_date?, end_date?, active?, note?}` → 201 |
 | GET／PATCH／DELETE | `/recurring/{id}` | PATCH 部分更新（`end_date: null` 清除）；DELETE 204 |
-| POST | `/recurring/{id}/draft?date=` | `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction: {account_id, symbol, type: "buy", trade_date, quantity, price, note, source: "ai_draft"}, preview: TradePreview, is_demo, sources}`；股數 = floor(金額 ÷ 最近收盤價)（含零股），手續費另計；**不建立交易**，使用者簽名後 `POST /transactions` |
+| POST | `/recurring/{id}/draft?date=` | `{plan_id, scheduled_date, date, name, amount, price_as_of, transaction: {account_id, symbol, type: "buy", trade_date, quantity, price, note, source: "ai_draft"}, preview: TradePreview, is_demo, sources}`；`trade_date` = 扣款日（`date`，遇休市順延）；股數 = floor(金額 ÷ 收盤價)（含零股），手續費另計。**收盤價**：扣款日已經過去（補記）用**扣款日當天**的收盤價（`price_as_of` = 扣款日）；今天或之後的扣款用最近收盤價；過去的扣款日沒有存檔的收盤價時改用最近收盤價，並在 `preview.rules` 說明「沒有 11/5 的收盤價，改用最近收盤價（11/11）估算，請照對帳單修改」。**不建立交易**，使用者簽名後 `POST /transactions` |
 | GET | `/meta/attributions` | `{policy, notice: [授權條款第 2、3 點], datasets: [{key, agency, dataset, url, used_for, year, license, license_url, commercial, attribution}], not_used: [...]}`（不需登入） |
 
 - `/portfolio/upcoming` 的 `type: "recurring"`：扣款日遇非交易日順延（證交所休市日），多 `plan_id`、`account_id`、`scheduled_date`；`amount_estimate` 為扣款金額。
@@ -504,7 +504,10 @@
  "rule_headline": "台積電今天上漲 3.5%", "citations": [{"url", "title", "cited_text"}]}
 ```
 
-`kind`（建議問題）：帳本 `onboard`、`drag`、`lift`、`dividends_next`、`concentration`；個股 `why_move`、`next_dividend`、`cost_on_river`、`add_one_lot`、`is_expensive`、`if_hold_dividend`；群組 `group_share`（與前端離線規則相同）。
+`kind`（建議問題）：帳本 `onboard`、`drag`、`lift`、`dividends_next`、`concentration`；個股 `why_move`、`foreign_flow`、`next_dividend`、`cost_on_river`、`add_one_lot`、`is_expensive`、`if_hold_dividend`；群組 `group_share`（與前端離線規則相同）。
+
+- `foreign_flow`「最近外資對這檔的動向？」（`lines: ["最近外資", "對這檔的動向？"]`）：只在**上市個股**（TWSE、`type: "stock"`）出現，排在 `why_move` 之後。上市股票沒有逐檔三大法人與外資持股，AI 用 `web_search` 找最近的新聞與公開資訊回答，每一點附來源與日期（系統提示與 `get_chips` 的說明都這樣要求）；上櫃股票的法人資料在籌碼分頁，不出這題。
+- 伺服器工具 `web_fetch` 一律帶 `blocked_domains: ["www.twse.com.tw", "mis.twse.com.tw"]`（不自動擷取證交所網站與 MIS；`web_search` 的結果不受影響）。API 的 `allowed_domains` 與 `blocked_domains` 只能二選一：設定了 `AI_WEB_FETCH_ALLOWED_DOMAINS` 時改成從允許清單拿掉這兩個主機，涵蓋它們的上層網域（`twse.com.tw`）換成 `openapi.twse.com.tw`；清單只剩被封鎖的主機時不提供 `web_fetch`。
 
 ### 法人觀點與美股基本面（2026-11-12 新增，待後端實作）
 
