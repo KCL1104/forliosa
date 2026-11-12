@@ -440,3 +440,272 @@ class FundProfile(Base):
     values: Mapped[dict] = mapped_column(JSON, default=dict)
     source: Mapped[str] = mapped_column(String(32))
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+# -- open-data additions (2026-11-12, docs/research/open-data-inventory.md) ------------------------------
+class IndexDaily(Base):
+    """Index closes: TWSE MI_INDEX (all indices incl. 發行量加權股價報酬指數) and MFI94U (current month),
+    TPEx tpex_index (OHLC) and tpex_reward_index (櫃買指數, 櫃買報酬指數). Keyed by the published index name."""
+
+    __tablename__ = "index_daily"
+
+    name: Mapped[str] = mapped_column(String(100), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    market: Mapped[str] = mapped_column(String(8))  # TWSE | TPEX
+    open: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    high: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    low: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    close: Mapped[Decimal] = mapped_column(Money)
+    change: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    change_pct: Mapped[Decimal | None] = mapped_column(Money, nullable=True)  # fraction
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class DividendResolution(Base):
+    """TWSE t187ap45_L 上市公司股利分派情形: dividends resolved by the board / confirmed by the shareholders'
+    meeting, with the cash split by source (earnings, legal reserve, capital surplus). NT$ per share."""
+
+    __tablename__ = "dividend_resolutions"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    period_start: Mapped[date] = mapped_column(Date, primary_key=True)  # 股利所屬期間 start
+    seq: Mapped[int] = mapped_column(primary_key=True)  # 期別
+    period_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    dividend_year: Mapped[int] = mapped_column()  # 股利年度 (Gregorian)
+    period: Mapped[str] = mapped_column(String(8))  # "2026Q3" | "2026H1" | "2025"
+    progress: Mapped[str] = mapped_column(String(80))  # 決議（擬議）進度
+    board_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    meeting_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    cash_earnings: Mapped[Decimal] = mapped_column(Money)
+    cash_legal_reserve: Mapped[Decimal] = mapped_column(Money)
+    cash_capital_surplus: Mapped[Decimal] = mapped_column(Money)
+    stock_earnings: Mapped[Decimal] = mapped_column(Money)
+    stock_legal_reserve: Mapped[Decimal] = mapped_column(Money)
+    stock_capital_surplus: Mapped[Decimal] = mapped_column(Money)
+    cash_total: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # NT$
+    stock_total_shares: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    published: Mapped[date] = mapped_column(Date)  # 出表日期
+    source: Mapped[str] = mapped_column(String(32))
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class CompanyProfile(Base):
+    """TWSE t187ap03_L / TPEx mopsfin_t187ap03_O 公司基本資料 (latest only). Company facts only: the
+    chairman's, managers', spokespeople's and CPAs' names and phone numbers are personal data, not stored."""
+
+    __tablename__ = "company_profiles"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    date: Mapped[date] = mapped_column(Date)  # 出表日期
+    industry_code: Mapped[str | None] = mapped_column(String(4), nullable=True)
+    industry: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    listed_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    shares_outstanding: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # issued common shares
+    values: Mapped[dict] = mapped_column(JSON, default=dict)
+    source: Mapped[str] = mapped_column(String(32))
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class ExRightsResult(Base):
+    """TPEx tpex_exright_daily 除權除息計算結果: the official reference price and limits on an ex-date."""
+
+    __tablename__ = "ex_rights_results"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)  # ex-date (the day the reference applies to)
+    kind: Mapped[str] = mapped_column(String(8))  # 除權 | 除息 | 除權息
+    prev_close: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    ex_quote: Mapped[Decimal | None] = mapped_column(Money, nullable=True)  # theoretical, unrounded
+    reference_price: Mapped[Decimal] = mapped_column(Money)  # 開始交易基準價
+    limit_up: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    limit_down: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    cash_dividend: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    stock_dividend: Mapped[Decimal | None] = mapped_column(Money, nullable=True)  # 權值
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class DatasetStatus(Base):
+    """Newest data date the archive saw per dataset (``datapolicy`` keys): ``/meta/attributions`` shows it."""
+
+    __tablename__ = "dataset_status"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    data_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rows: Mapped[int] = mapped_column(default=0)
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+# -- TAIFEX OpenAPI (open-data-inventory §12; dates are Gregorian YYYYMMDD upstream) ------------------------
+class TaifexFuturesDaily(Base):
+    """DailyMarketReportFut. ``session`` 'regular' (一般) or 'after_hours' (盤後): the after-hours row dated D
+    is the night session that opened at 15:00 on the previous trading day and closed at 05:00 on D."""
+
+    __tablename__ = "taifex_futures_daily"
+    __table_args__ = (Index("ix_taifex_futures_contract_date", "contract", "trade_date"),)
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    session: Mapped[str] = mapped_column(String(12), primary_key=True)
+    contract: Mapped[str] = mapped_column(String(12), primary_key=True)
+    contract_month: Mapped[str] = mapped_column(String(24), primary_key=True)  # 202611, 202611W2, 202611/202612
+    open: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    high: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    low: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    last: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    change: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    change_pct: Mapped[Decimal | None] = mapped_column(Money, nullable=True)  # fraction
+    volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    settlement_price: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    open_interest: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    best_bid: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    best_ask: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    hist_high: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    hist_low: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    halted: Mapped[str] = mapped_column(String(16), default="")
+    spread_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexOptionsDaily(Base):
+    """DailyMarketReportOpt: index options (TXO, TEO, TFO) in full, other contracts' two nearest expiries."""
+
+    __tablename__ = "taifex_options_daily"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    session: Mapped[str] = mapped_column(String(12), primary_key=True)
+    contract: Mapped[str] = mapped_column(String(12), primary_key=True)
+    contract_month: Mapped[str] = mapped_column(String(24), primary_key=True)
+    strike: Mapped[Decimal] = mapped_column(Money, primary_key=True)
+    call_put: Mapped[str] = mapped_column(String(1), primary_key=True)  # C | P
+    open: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    high: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    low: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    close: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    settlement_price: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    open_interest: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    best_bid: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    best_ask: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexInstitutional(Base):
+    """三大法人 by the date. ``scope``: all (總表) | fut_opt (期貨／選擇權二類; contract_name 期貨 or 選擇權) |
+    futures | options (各契約) | calls_puts (買賣權分計, call_put C/P). Values in thousand NT$ (總表 is published
+    in millions and converted); volumes and open interest in contracts (口)."""
+
+    __tablename__ = "taifex_institutional"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    scope: Mapped[str] = mapped_column(String(12), primary_key=True)
+    contract_name: Mapped[str] = mapped_column(String(40), primary_key=True)
+    call_put: Mapped[str] = mapped_column(String(1), primary_key=True)  # "" | C | P
+    investor: Mapped[str] = mapped_column(String(12), primary_key=True)  # 自營商 | 投信 | 外資及陸資
+    contract_code: Mapped[str | None] = mapped_column(String(12), nullable=True)  # TX, TXO … (contract map)
+    long_vol: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    long_value_k: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    short_vol: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    short_value_k: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    net_vol: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    net_value_k: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_long: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_long_value_k: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_short: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_short_value_k: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_net: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_net_value_k: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexLargeTraders(Base):
+    """OpenInterestOfLargeTraders{Futures,Options}. ``settlement_month`` keeps the published value: 999912 =
+    all months combined, 666666 = weekly contracts combined. ``trader_type`` 0 = all large traders, 1 = of
+    which specific legal entities (特定法人)."""
+
+    __tablename__ = "taifex_large_traders"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), primary_key=True)  # futures | options
+    contract: Mapped[str] = mapped_column(String(12), primary_key=True)
+    call_put: Mapped[str] = mapped_column(String(1), primary_key=True)  # "" | C | P
+    settlement_month: Mapped[str] = mapped_column(String(12), primary_key=True)
+    trader_type: Mapped[int] = mapped_column(primary_key=True)
+    contract_name: Mapped[str] = mapped_column(String(60), default="")
+    top5_buy: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    top5_sell: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    top10_buy: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    top10_sell: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    market_oi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexPutCallRatio(Base):
+    """PutCallRatio (the response carries about a month of days: upserted)."""
+
+    __tablename__ = "taifex_put_call_ratio"
+
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    put_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    call_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    volume_ratio: Mapped[Decimal | None] = mapped_column(Money, nullable=True)  # fraction (1.0708 = 107.08%)
+    put_oi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    call_oi: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    oi_ratio: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexContractMap(Base):
+    """Chinese product names (三大法人, 保證金, 大額交易人) -> contract codes (行情): 臺股期貨 -> TX."""
+
+    __tablename__ = "taifex_contract_map"
+
+    name_zh: Mapped[str] = mapped_column(String(60), primary_key=True)
+    contract_code: Mapped[str | None] = mapped_column(String(12), nullable=True)  # None: an aggregate (股票期貨)
+    kind: Mapped[str] = mapped_column(String(8))  # futures | options
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexFinalSettlement(Base):
+    """FinalSettlementPrice (weekly upsert; ``contract`` as published, e.g. "TX/MTX/TMF")."""
+
+    __tablename__ = "taifex_final_settlement"
+
+    contract: Mapped[str] = mapped_column(String(24), primary_key=True)
+    delivery_month: Mapped[str] = mapped_column(String(12), primary_key=True)
+    settlement_day: Mapped[date] = mapped_column(Date)
+    contract_name: Mapped[str] = mapped_column(String(80), default="")
+    price: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexMargin(Base):
+    """保證金一覽表 (index / stock / ETF). A row is added only when a contract's margins change; ``date`` is the
+    published Date of the first response that carried the new values."""
+
+    __tablename__ = "taifex_margins"
+
+    kind: Mapped[str] = mapped_column(String(8), primary_key=True)  # index | stock | etf
+    contract: Mapped[str] = mapped_column(String(60), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80), default="")
+    underlying_code: Mapped[str | None] = mapped_column(String(12), nullable=True)
+    group_level: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    is_rate: Mapped[bool] = mapped_column(Boolean, default=False)  # stock futures: fractions of contract value
+    clearing: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    maintenance: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    initial: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))
+
+
+class TaifexUnderlying(Base):
+    """SSFLists / SSOLists: which stocks and ETFs have single-stock futures / options (weekly)."""
+
+    __tablename__ = "taifex_underlyings"
+
+    kind: Mapped[str] = mapped_column(String(4), primary_key=True)  # SSF | SSO
+    contract: Mapped[str] = mapped_column(String(12), primary_key=True)
+    stock_code: Mapped[str] = mapped_column(String(12), index=True)
+    stock_name: Mapped[str] = mapped_column(String(60), default="")
+    type: Mapped[str] = mapped_column(String(40), default="")
+    first_seen: Mapped[date] = mapped_column(Date)
+    last_seen: Mapped[date] = mapped_column(Date)
+    source: Mapped[str] = mapped_column(String(32))

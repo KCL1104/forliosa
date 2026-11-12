@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     market_data_providers: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["archive", "twse_openapi", "tpex_openapi", "shioaji_data", "demo"]
     )
+    # TAIFEX OpenAPI datasets the open-data inventory marks ``conditional`` (no matching data.gov.tw OGDL
+    # dataset found: 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人 …) are archived but, under
+    # DATA_POLICY=commercial, NOT shown to users until the owner has TAIFEX's written confirmation and sets
+    # this to true (see docs/outreach/taifex-licence-inquiry.md and datapolicy.dataset_served).
+    taifex_conditional_confirmed: bool = False
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
     cache_dir: Path = Path("var/cache")
     http_timeout_seconds: float = 20.0

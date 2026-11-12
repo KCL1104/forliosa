@@ -59,6 +59,8 @@ class InstrumentProfile:
     market_cap: Decimal | None = None
     data_sources: tuple[str, ...] = ()
     is_demo: bool = False
+    industry: str | None = None
+    listed_date: date | None = None
 
 
 @dataclass
@@ -123,6 +125,11 @@ class DividendEvent:
     ex_dividend_date: date | None
     payment_date: date | None
     is_demo: bool = False
+    # Board / AGM resolution (TWSE t187ap45_L); None for a notice-only event.
+    progress: str | None = None  # 決議（擬議）進度, e.g. 董事會決議, 股東會確認
+    board_date: date | None = None
+    meeting_date: date | None = None
+    cash_sources: tuple[Decimal, Decimal, Decimal] | None = None  # (earnings, legal reserve, capital surplus) per share
 
 
 @dataclass(frozen=True)

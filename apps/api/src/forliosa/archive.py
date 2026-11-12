@@ -3,7 +3,8 @@
 Run once from the command line::
 
     uv run python -m forliosa.archive run                    # every job that applies to DATA_POLICY
-    uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | financials | tdcc
+    uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | companies | financials | taifex |
+                                                             # tdcc | weekly
     uv run python -m forliosa.archive backfill --days 90     # personal opt-in only, see "Backfill" below
 
 The worker runs the same jobs on a schedule (``forliosa.worker``). Every write is an upsert keyed on
@@ -24,18 +25,29 @@ shareholding_distribution   TDCC open data 1-5 (weekly, current week only)
 market_events               TWT48U_ALL / exright_prepost (除權息), notice / warning (注意),
                             punish / disposal (處置), t187ap04 (重大訊息), t187ap41 (股東會),
                             t187ap05 (營收公布日: first seen), TWSE news/newsList (證交所新聞)
-financial_reports           t187ap06 (income, YTD), t187ap07 (balance), t187ap17
+financial_reports           t187ap06 (income, YTD), t187ap07 (balance), t187ap17; blank rows are skipped and
+                            a null value never overwrites an archived one
 fund_profiles               TWSE t187ap47_L 基金基本資料彙總表 (ETF basics)
 market_holidays             TWSE holidaySchedule (official calendar, current year)
+index_daily                 TWSE MI_INDEX (all indices, daily) + MFI94U (current month of 發行量加權股價報酬指數),
+                            TPEx tpex_index + tpex_reward_index (current month): benchmarks ^TAIEXTR / ^TPEXTR
+dividend_resolutions        TWSE t187ap45_L 股利分派情形 (board / AGM resolutions; TPEx mopsfin_t187ap39_O is dead
+                            since 2021-08, so TPEx dividends only come from the ex-dividend notices)
+company_profiles            TWSE t187ap03_L, TPEx mopsfin_t187ap03_O (issued shares, industry, listing date)
+ex_rights_results           TPEx tpex_exright_daily (official reference price and limits on ex-dates)
+taifex_*                    TAIFEX OpenAPI (group ``taifex``, daily 21:40; ``weekly``: final settlement prices,
+fx_rates                    SSF/SSO lists). DailyForeignExchangeRates -> fx_rates (USDTWD …, multi-day upsert)
+dataset_status              newest data date per dataset (shown in /meta/attributions; ``weekly`` also checks the
+                            stale endpoints twtazu_od and t187ap09_L)
 ==========================  =========================================================
 
-Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi`` and ``opendata.tdcc.com.tw`` are fetched (see the
-allowlist in ``marketdata/http.py``). The TWSE / TPEx **websites** forbid automated downloads without
-written consent, so the former T86 / MI_QFIIS website jobs and the website backfill were removed
-(2026-11-12). There is no official per-stock history API: the archive only grows from the day the worker
-starts. ``backfill`` remains only for FinMind under an explicit ``DATA_POLICY=personal`` opt-in with
-``finmind`` listed in ``MARKET_DATA_PROVIDERS`` (non-commercial; never on by default). Backfilled rows
-never overwrite official rows, and commercial queries skip them.
+Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw`` and
+``openapi.taifex.com.tw/v1`` are fetched (see the allowlist in ``marketdata/http.py``). The TWSE / TPEx / TAIFEX
+**websites** forbid automated downloads without written consent, so the former T86 / MI_QFIIS website jobs and
+the website backfill were removed (2026-11-12). There is no official per-stock history API: the archive only
+grows from the day the worker starts. ``backfill`` remains only for FinMind under an explicit
+``DATA_POLICY=personal`` opt-in with ``finmind`` listed in ``MARKET_DATA_PROVIDERS`` (non-commercial; never on by
+default). Backfilled rows never overwrite official rows, and commercial queries skip them.
 """
 
 from __future__ import annotations
@@ -55,14 +67,21 @@ from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import Policy
 from forliosa.marketdata import opendata as od
+from forliosa.marketdata import taifex as tf
 from forliosa.marketdata.base import ProviderUnavailable, tw_symbol
 from forliosa.marketdata.http import HttpFetcher
 from forliosa.marketdata.twse import parse_bwibbu_all, parse_stock_day_all
 from forliosa.models import (
+    CompanyProfile,
+    DatasetStatus,
+    DividendResolution,
+    ExRightsResult,
     FinancialReport,
     ForeignHoldingDaily,
     FundProfile,
+    FxRate,
     HoldingSnapshot,
+    IndexDaily,
     InstitutionalDaily,
     MarginDaily,
     MarketEvent,
@@ -70,6 +89,15 @@ from forliosa.models import (
     PriceDaily,
     ReferencePrice,
     ShareholdingDistribution,
+    TaifexContractMap,
+    TaifexFinalSettlement,
+    TaifexFuturesDaily,
+    TaifexInstitutional,
+    TaifexLargeTraders,
+    TaifexMargin,
+    TaifexOptionsDaily,
+    TaifexPutCallRatio,
+    TaifexUnderlying,
     Transaction,
     ValuationDaily,
     WatchlistItem,
@@ -81,11 +109,15 @@ log = logging.getLogger("forliosa.archive")
 TWSE_OPENAPI = "https://openapi.twse.com.tw/v1"
 TPEX_OPENAPI = "https://www.tpex.org.tw/openapi/v1"
 TDCC_URL = "https://opendata.tdcc.com.tw/getOD.ashx"
+TAIFEX_OPENAPI = tf.TAIFEX_OPENAPI
 INDUSTRIES = ("ci", "basi", "bd", "fh", "ins", "mim")
 # TWSE publishes the day's margin balances in the evening; before this time MI_MARGN is the previous day's.
 MARGIN_READY = time(21, 0)
 
-JOB_GROUPS = ("twse", "tpex", "financials", "tdcc")
+# twse / tpex: latest-day datasets (08:10, 14:40, 21:40); companies: slow-changing large files (21:40);
+# taifex: TAIFEX daily datasets (21:40); weekly (Saturday): TAIFEX final settlement + SSF/SSO lists, and the
+# stale-endpoint check.
+JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "tdcc", "weekly")
 
 
 def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
@@ -154,6 +186,15 @@ class Archiver:
         log.info("archive %s: %d rows", name, n)
         self.results.append(JobResult(name, n))
         return n
+
+    def _status(self, key: str, data_date: date | None, rows: int) -> None:
+        """Remember the newest data date seen for dataset ``key`` (``/meta/attributions`` shows it)."""
+        upsert(self.db, DatasetStatus, [{"key": key, "data_date": data_date, "rows": rows,
+                                         "fetched_at": datetime.now(TAIPEI)}], ["key"])
+
+    def _taifex(self, path: str) -> list[dict[str, Any]]:
+        """A TAIFEX OpenAPI dataset (JSON or CSV: the Cloudflare cache serves either, see marketdata/taifex.py)."""
+        return tf.decode_rows(self.fetcher.get_bytes(f"{TAIFEX_OPENAPI}/{path}"))
 
     def _events(self, rows: list[dict[str, Any]], source: str) -> int:
         out = [{"key": r["key"], "symbol": tw_symbol(r["code"], r["market"]), "date": r["date"],
@@ -268,7 +309,87 @@ class Archiver:
         rows = od.parse_monthly_revenue(self._list(f"{TWSE_OPENAPI}/opendata/t187ap05_L"), "TWSE")
         return self._revenue(rows, "twse-openapi")
 
+    def _indices(self, rows: list[dict[str, Any]], market: str, source: str,
+                 update: Iterable[str] | None = None) -> int:
+        out = [{"name": r["name"], "date": r["date"], "market": market, "open": r.get("open"), "high": r.get("high"),
+                "low": r.get("low"), "close": r["close"], "change": r.get("change"),
+                "change_pct": r.get("change_pct"), "source": source} for r in rows]
+        return upsert(self.db, IndexDaily, out, ["name", "date"], update)
+
+    def twse_indices(self) -> int:
+        """MI_INDEX (every index, the latest day) and MFI94U (this month of 發行量加權股價報酬指數): the first run
+        backfills the current month of the ^TAIEXTR benchmark; MI_INDEX's official change wins on conflicts."""
+        mfi = od.with_changes(od.parse_mfi94u(self._list(f"{TWSE_OPENAPI}/indicesReport/MFI94U")))
+        n = self._indices(mfi, "TWSE", "twse-openapi", ["close", "source"])
+        self._status("twse-openapi/total_return", max((r["date"] for r in mfi), default=None), len(mfi))
+        mi = od.parse_mi_index(self._list(f"{TWSE_OPENAPI}/exchangeReport/MI_INDEX"))
+        n += self._indices(mi, "TWSE", "twse-openapi")
+        self._status("twse-openapi/index", max((r["date"] for r in mi), default=None), len(mi))
+        return n
+
+    def twse_dividends(self) -> int:
+        """t187ap45_L 股利分派情形: board / AGM resolutions with the cash split by source."""
+        now = datetime.now(TAIPEI)
+        rows = [{**{k: v for k, v in r.items() if k != "code"}, "symbol": tw_symbol(r["code"], "TWSE"),
+                 "source": "twse-openapi", "fetched_at": now}
+                for r in od.parse_dividend_resolutions(self._list(f"{TWSE_OPENAPI}/opendata/t187ap45_L"))]
+        n = upsert(self.db, DividendResolution, rows, ["symbol", "period_start", "seq"])
+        self._status("twse-openapi/dividend_resolution", max((r["published"] for r in rows), default=None), n)
+        return n
+
+    def _companies(self, rows: list[dict[str, Any]], market: str, source: str, key: str) -> int:
+        now = datetime.now(TAIPEI)
+        out = [{"symbol": tw_symbol(r["code"], market), "date": r["date"], "industry_code": r["industry_code"],
+                "industry": r["industry"], "listed_date": r["listed_date"],
+                "shares_outstanding": r["shares_outstanding"], "values": r["values"], "source": source,
+                "fetched_at": now} for r in rows]
+        n = upsert(self.db, CompanyProfile, out, ["symbol"])
+        self._status(key, max((r["date"] for r in out), default=None), n)
+        return n
+
+    def twse_companies(self) -> int:
+        rows = od.parse_company_profiles(self._list(f"{TWSE_OPENAPI}/opendata/t187ap03_L"), "TWSE")
+        return self._companies(rows, "TWSE", "twse-openapi", "twse-openapi/company")
+
+    def tpex_companies(self) -> int:
+        rows = od.parse_company_profiles(self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap03_O"), "TPEX")
+        return self._companies(rows, "TPEX", "tpex-openapi", "tpex-openapi/company")
+
+    def stale_check(self) -> int:
+        """Endpoints that stopped updating (not used, tiny): record their newest 出表日期 for /meta/attributions."""
+        n = 0
+        for key, path in (("twse-openapi/breadth", "opendata/twtazu_od"),
+                          ("twse-openapi/pledge", "opendata/t187ap09_L")):
+            rows = self._list(f"{TWSE_OPENAPI}/{path}")
+            self._status(key, od.report_date(rows, "出表日期"), len(rows))
+            n += 1
+        return n
+
     # -- TPEx OpenAPI --------------------------------------------------------------------------
+    def tpex_indices(self) -> int:
+        """tpex_index (櫃買指數 OHLC, this month) and tpex_reward_index (櫃買報酬指數 = ^TPEXTR, this month)."""
+        idx = od.with_changes(od.parse_tpex_index(self._list(f"{TPEX_OPENAPI}/tpex_index")))
+        n = self._indices(idx, "TPEX", "tpex-openapi")
+        self._status("tpex-openapi/index", max((r["date"] for r in idx), default=None), len(idx))
+        reward = od.parse_tpex_reward_index(self._list(f"{TPEX_OPENAPI}/tpex_reward_index"))
+        tr = od.with_changes([r for r in reward if r["name"] == od.TPEX_TR])
+        n += self._indices(tr, "TPEX", "tpex-openapi", ["close", "source"])
+        # 櫃買指數 closes only fill days tpex_index did not have (it carries the OHLC)
+        n += self._indices([r for r in reward if r["name"] == od.TPEX_INDEX], "TPEX", "tpex-openapi", ())
+        self._status("tpex-openapi/total_return", max((r["date"] for r in tr), default=None), len(tr))
+        return n
+
+    def tpex_exright(self) -> int:
+        """tpex_exright_daily: the official reference price and limits of today's ex-rights / ex-dividend stocks."""
+        rows = [{"symbol": tw_symbol(r["code"], "TPEX"), "date": r["date"], "kind": r["kind"],
+                 "prev_close": r["prev_close"], "ex_quote": r["ex_quote"], "reference_price": r["reference_price"],
+                 "limit_up": r["limit_up"], "limit_down": r["limit_down"], "cash_dividend": r["cash_dividend"],
+                 "stock_dividend": r["stock_dividend"], "source": "tpex-openapi"}
+                for r in od.parse_tpex_exright_daily(self._list(f"{TPEX_OPENAPI}/tpex_exright_daily"))]
+        n = upsert(self.db, ExRightsResult, rows, ["symbol", "date"])
+        self._status("tpex-openapi/exright", max((r["date"] for r in rows), default=None), n)
+        return n
+
     def tpex_revenue(self) -> int:
         rows = od.parse_monthly_revenue(self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap05_O"), "TPEX")
         return self._revenue(rows, "tpex-openapi")
@@ -324,8 +445,22 @@ class Archiver:
 
     # -- financial statements (latest quarter) --------------------------------------------------
     def _reports(self, rows: list[dict[str, Any]], market: str, source: str) -> int:
+        """Upsert statements; a value the new response leaves blank never erases an archived one.
+
+        (Industries without TPEx companies return a single blank row: ``parse_statements`` skips it, so the job
+        stores nothing and reports 0 rows instead of failing.)
+        """
         out = [{"symbol": tw_symbol(r["code"], market), "period": r["period"], "kind": r["kind"],
                 "values": r["values"], "source": source, "fetched_at": datetime.now(TAIPEI)} for r in rows]
+        if not out:
+            return 0
+        symbols = {r["symbol"] for r in out}
+        existing = {(f.symbol, f.period, f.kind): f.values for f in self.db.scalars(
+            select(FinancialReport).where(FinancialReport.symbol.in_(symbols)))}
+        for r in out:
+            old = existing.get((r["symbol"], r["period"], r["kind"]))
+            if old:
+                r["values"] = {**old, **{k: v for k, v in r["values"].items() if v is not None}}
         return upsert(self.db, FinancialReport, out, ["symbol", "period", "kind"], ["values", "source", "fetched_at"])
 
     def financials(self) -> int:
@@ -343,6 +478,111 @@ class Archiver:
             self._list(f"{TWSE_OPENAPI}/opendata/t187ap17_L")), "TWSE", "twse-openapi"))
         n += self._run("tpex 187ap17_O", lambda: self._reports(od.parse_profit_analysis(
             self._list(f"{TPEX_OPENAPI}/mopsfin_187ap17_O")), "TPEX", "tpex-openapi"))
+        return n
+
+    # -- TAIFEX OpenAPI (daily 21:40; open-data-inventory §12) -----------------------------------
+    def taifex_futures(self) -> int:
+        rows = [{**r, "source": tf.SOURCE} for r in tf.parse_futures_daily(self._taifex("DailyMarketReportFut"))]
+        n = upsert(self.db, TaifexFuturesDaily, rows, ["trade_date", "session", "contract", "contract_month"])
+        self._status("taifex-openapi/futures_daily", tf.latest_date(rows, "trade_date"), n)
+        return n
+
+    def taifex_options(self) -> int:
+        rows = [{**r, "source": tf.SOURCE} for r in tf.parse_options_daily(self._taifex("DailyMarketReportOpt"))]
+        n = upsert(self.db, TaifexOptionsDaily, rows,
+                   ["trade_date", "session", "contract", "contract_month", "strike", "call_put"])
+        self._status("taifex-openapi/options_daily", tf.latest_date(rows, "trade_date"), n)
+        return n
+
+    def taifex_institutional(self) -> int:
+        n = 0
+        for key, path, parse in (
+            ("institutional_general", "MarketDataOfMajorInstitutionalTradersGeneralBytheDate",
+             tf.parse_institutional_general),
+            ("institutional_fut_opt", "MarketDataOfMajorInstitutionalTradersDividedByFuturesAndOptionsBytheDate",
+             tf.parse_institutional_fut_opt),
+            ("institutional_futures", "MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate",
+             lambda rows: tf.parse_institutional_contracts(rows, "futures")),
+            ("institutional_options", "MarketDataOfMajorInstitutionalTradersDetailsOfOptionsContractsBytheDate",
+             lambda rows: tf.parse_institutional_contracts(rows, "options")),
+            ("institutional_calls_puts", "MarketDataOfMajorInstitutionalTradersDetailsOfCallsAndPutsBytheDate",
+             lambda rows: tf.parse_institutional_contracts(rows, "calls_puts")),
+        ):
+            rows = [{**r, "source": tf.SOURCE} for r in parse(self._taifex(path))]
+            m = upsert(self.db, TaifexInstitutional, rows,
+                       ["trade_date", "scope", "contract_name", "call_put", "investor"])
+            self._status(f"taifex-openapi/{key}", tf.latest_date(rows, "trade_date"), m)
+            n += m
+        return n
+
+    def taifex_large_traders(self) -> int:
+        n = 0
+        for kind, path in (("futures", "OpenInterestOfLargeTradersFutures"),
+                           ("options", "OpenInterestOfLargeTradersOptions")):
+            rows = [{**r, "source": tf.SOURCE} for r in tf.parse_large_traders(self._taifex(path), kind)]
+            m = upsert(self.db, TaifexLargeTraders, rows,
+                       ["trade_date", "kind", "contract", "call_put", "settlement_month", "trader_type"])
+            self._status(f"taifex-openapi/large_traders_{kind}", tf.latest_date(rows, "trade_date"), m)
+            if kind == "futures":
+                n += upsert(self.db, TaifexContractMap, tf.contract_map_rows(large_traders=rows), ["name_zh"])
+            n += m
+        return n
+
+    def taifex_put_call(self) -> int:
+        """PutCallRatio carries about a month of days: upserted, so the first run backfills a month."""
+        rows = [{**r, "source": tf.SOURCE} for r in tf.parse_put_call_ratio(self._taifex("PutCallRatio"))]
+        n = upsert(self.db, TaifexPutCallRatio, rows, ["trade_date"])
+        self._status("taifex-openapi/put_call_ratio", tf.latest_date(rows, "trade_date"), n)
+        return n
+
+    def taifex_fx(self) -> int:
+        """DailyForeignExchangeRates (about six weeks per response) -> fx_rates (pair USDTWD …), upserted.
+        Archived under every policy; served only when datapolicy.dataset_served("taifex-openapi/fx") allows."""
+        rows = [{**r, "source": tf.SOURCE} for r in tf.parse_fx(self._taifex("DailyForeignExchangeRates"))]
+        n = upsert(self.db, FxRate, rows, ["pair", "date"])
+        self._status("taifex-openapi/fx", tf.latest_date(rows, "date"), n)
+        return n
+
+    def taifex_margins(self) -> int:
+        """保證金一覽表: a row only when a contract's margins differ from the last archived ones."""
+        n = 0
+        for kind, key, path in (("index", "margins_index", "IndexFuturesAndOptionsMargining"),
+                                ("stock", "margins_stock", "SingleStockFuturesMargining"),
+                                ("etf", "margins_etf", "SingleStockFuturesETFMargining")):
+            parsed = tf.parse_margins(self._taifex(path), kind)
+            latest: dict[str, TaifexMargin] = {}
+            for m in self.db.scalars(select(TaifexMargin).where(TaifexMargin.kind == kind)
+                                     .order_by(TaifexMargin.date)):
+                latest[m.contract] = m
+            changed = []
+            for r in parsed:
+                old = latest.get(r["contract"])
+                if old is not None and (old.clearing, old.maintenance, old.initial, old.group_level) == (
+                        r["clearing"], r["maintenance"], r["initial"], r["group_level"]):
+                    continue
+                changed.append({**r, "source": tf.SOURCE})
+            n += upsert(self.db, TaifexMargin, changed, ["kind", "contract", "date"])
+            self._status(f"taifex-openapi/{key}", tf.latest_date(parsed, "date"), len(parsed))
+            if kind == "stock":
+                upsert(self.db, TaifexContractMap, tf.contract_map_rows(margins=parsed), ["name_zh"])
+        return n
+
+    def taifex_final_settlement(self) -> int:
+        rows = [{**r, "source": tf.SOURCE} for r in tf.parse_final_settlement(self._taifex("FinalSettlementPrice"))]
+        n = upsert(self.db, TaifexFinalSettlement, rows, ["contract", "delivery_month"])
+        self._status("taifex-openapi/final_settlement", tf.latest_date(rows, "settlement_day"), n)
+        return n
+
+    def taifex_underlyings(self) -> int:
+        today = self.now_fn().astimezone(TAIPEI).date()
+        n = 0
+        for kind, key, path in (("SSF", "ssf_list", "SSFLists"), ("SSO", "sso_list", "SSOLists")):
+            rows = [{**r, "first_seen": today, "last_seen": today, "source": tf.SOURCE}
+                    for r in tf.parse_underlyings(self._taifex(path), kind)]
+            m = upsert(self.db, TaifexUnderlying, rows, ["kind", "contract"],
+                       ["stock_code", "stock_name", "type", "last_seen", "source"])
+            self._status(f"taifex-openapi/{key}", today if rows else None, m)
+            n += m
         return n
 
     # -- TDCC (weekly) ---------------------------------------------------------------------------
@@ -371,17 +611,35 @@ class Archiver:
                              ("twse reference", self.twse_reference), ("twse margin", self.twse_margin),
                              ("twse events", self.twse_events), ("twse revenue", self.twse_revenue),
                              ("twse news", self.twse_news), ("twse funds", self.twse_funds),
-                             ("twse holidays", self.twse_holidays)):
+                             ("twse holidays", self.twse_holidays), ("twse indices", self.twse_indices)):
                 self._run(name, fn)
         if "tpex" in groups:
             for name, fn in (("tpex prices", self.tpex_prices), ("tpex valuation", self.tpex_valuation),
                              ("tpex chips", self.tpex_chips), ("tpex events", self.tpex_events),
-                             ("tpex revenue", self.tpex_revenue)):
+                             ("tpex revenue", self.tpex_revenue), ("tpex indices", self.tpex_indices),
+                             ("tpex exright", self.tpex_exright)):
+                self._run(name, fn)
+        if "companies" in groups:
+            for name, fn in (("twse dividends t187ap45_L", self.twse_dividends),
+                             ("twse companies t187ap03_L", self.twse_companies),
+                             ("tpex companies t187ap03_O", self.tpex_companies)):
                 self._run(name, fn)
         if "financials" in groups:
             self.financials()
+        if "taifex" in groups:
+            for name, fn in (("taifex futures", self.taifex_futures), ("taifex options", self.taifex_options),
+                             ("taifex institutional", self.taifex_institutional),
+                             ("taifex large traders", self.taifex_large_traders),
+                             ("taifex put/call", self.taifex_put_call), ("taifex fx", self.taifex_fx),
+                             ("taifex margins", self.taifex_margins)):
+                self._run(name, fn)
         if "tdcc" in groups:
             self._run("tdcc distribution", self.tdcc)
+        if "weekly" in groups:
+            for name, fn in (("taifex final settlement", self.taifex_final_settlement),
+                             ("taifex SSF/SSO lists", self.taifex_underlyings),
+                             ("stale endpoints check", self.stale_check)):
+                self._run(name, fn)
         return self.results
 
     def backfill(self, days: int = 90, symbols: list[str] | None = None,
@@ -435,7 +693,7 @@ def main(argv: list[str] | None = None) -> None:
     from forliosa.config import get_settings
     from forliosa.db import session_factory
 
-    parser = argparse.ArgumentParser(description="官方開放資料存檔（證交所、櫃買中心、集保）")
+    parser = argparse.ArgumentParser(description="官方開放資料存檔（證交所、櫃買中心、期交所、集保）")
     sub = parser.add_subparsers(dest="cmd", required=True)
     run_p = sub.add_parser("run", help="執行一次每日存檔")
     run_p.add_argument("--only", default="", help=f"逗號分隔：{','.join(JOB_GROUPS)}")

@@ -46,27 +46,42 @@ def instrument_ref(info: InstrumentInfo | None, symbol: str | None = None) -> In
     return InstrumentRef(sym.split(".")[0], market_of_symbol(sym), None)
 
 
-class FxBook:
-    """TWD per unit of currency on a date (last known rate on or before the date)."""
+FX_FALLBACK = Decimal("31.5")
 
-    def __init__(self, series: dict[date, Decimal] | None = None, is_demo: bool = False):
+
+class FxBook:
+    """TWD per unit of currency on a date (last known rate on or before the date).
+
+    Source: TAIFEX 每日外幣參考匯率 from the archive when ``datapolicy.dataset_served("taifex-openapi/fx")`` allows
+    it (a ``conditional`` dataset: under commercial only with TAIFEX_CONDITIONAL_CONFIRMED=true), FinMind under a
+    personal opt-in, demo data under personal; otherwise the documented fixed fallback 31.5 (``fixed``).
+    """
+
+    def __init__(self, series: dict[date, Decimal] | None = None, is_demo: bool = False, source: str = ""):
         items = sorted((series or {}).items())
         self._dates = [d for d, _ in items]
         self._rates = [r for _, r in items]
         self.is_demo = is_demo
+        self.source = source
         self.used_usd = False
 
     @classmethod
     def load(cls, md: MarketData, start: date, end: date | None = None) -> FxBook:
-        series, is_demo = md.fx_series("USDTWD", start - timedelta(days=14), end or today_taipei())
-        return cls(series, is_demo)
+        series, is_demo, source = md.fx_series_with_source("USDTWD", start - timedelta(days=14),
+                                                           end or today_taipei())
+        return cls(series, is_demo, source)
+
+    @property
+    def fixed(self) -> bool:
+        """True when no FX series is available and the fixed 31.5 is used."""
+        return not self._dates
 
     def rate(self, currency: str, d: date) -> Decimal:
         if currency == "TWD":
             return Decimal(1)
         self.used_usd = True
         if not self._dates:
-            return Decimal("31.5")  # documented fallback when no FX source is configured
+            return FX_FALLBACK  # documented fallback when no FX source is available
         i = bisect.bisect_right(self._dates, d) - 1
         return self._rates[max(i, 0)]
 
@@ -74,7 +89,7 @@ class FxBook:
         if currency == "TWD":
             return Decimal(1)
         self.used_usd = True
-        return self._rates[-1] if self._rates else Decimal("31.5")
+        return self._rates[-1] if self._rates else FX_FALLBACK
 
 
 @dataclass

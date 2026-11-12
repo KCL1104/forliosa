@@ -30,6 +30,18 @@ TWSE OpenAPI (``https://openapi.twse.com.tw/v1``; latest day only; dates ROC "11
   上市日期 ….
 * ``/holidaySchedule/holidaySchedule`` 市場開休市日期 — Name, Date, Weekday, Description; also lists trading-day
   markers (「…開始交易日」「…最後交易日」) and settlement-only days (「市場無交易，僅辦理結算交割作業」 = closed).
+* ``/exchangeReport/MI_INDEX`` 每日收盤行情-大盤統計資訊 — 日期, 指數 (267 names incl. 發行量加權股價報酬指數),
+  收盤指數, 漲跌 (+/-), 漲跌點數 (unsigned, "1,545.23"), 漲跌百分比 (signed), 特殊處理註記. Latest day only.
+* ``/indicesReport/MFI94U`` 發行量加權股價報酬指數 — Date (ROC), TAIEXTotalReturnIndex; the whole current month
+  (2026-11-11: 102,340.20, the same as MI_INDEX's 發行量加權股價報酬指數).
+* ``/opendata/t187ap45_L`` 上市公司股利分派情形 — 出表日期, 公司代號, 決議（擬議）進度, 股利年度, 股利所屬年(季)度
+  (年度／上半年／下半年／第1季…), 股利所屬期間 ("1150701~1150930"), 期別, 董事會（擬議）股利分派日, 股東會日期,
+  股東配發-盈餘分配之現金股利(元/股), 股東配發-法定盈餘公積發放之現金(元/股), 股東配發-資本公積發放之現金(元/股),
+  股東配發-股東配發之現金(股利)總金額(元), 股東配發-盈餘轉增資配股(元/股), …法定盈餘公積轉增資配股, …資本公積轉增資配股,
+  股東配發-股東配股總股數(股). No ex-date (that comes later in TWT48U_ALL).
+* ``/opendata/t187ap03_L`` 上市公司基本資料 — 出表日期, 公司代號, 公司名稱, 公司簡稱, 產業別 (code "24"), 成立日期,
+  上市日期 (Gregorian "19940905"), 普通股每股面額, 實收資本額, 特別股, 已發行普通股數或TDR原股發行股數, 英文簡稱, 網址 …
+  plus people's names and phones (董事長, 發言人, 簽證會計師 …), which are not kept.
 * 重大訊息 符合條款 seen live: 第31款 = board approval of a financial report (說明 has 「財務報告或年度自結財務資訊
   報導期間 起訖日期: 115/01/01~115/09/30」), 第12款 = 法人說明會 (事實發生日 = the conference date; 說明 has
   「召開法人說明會之日期：115/11/23」), 第51款／第53款 = monthly revenue announcements and corrections.
@@ -52,9 +64,19 @@ TPEx OpenAPI (``https://www.tpex.org.tw/openapi/v1``)
   DisposalCondition.
 * ``mopsfin_t187ap04_O`` 重大訊息 — 發言日期, SecuritiesCompanyCode, 主旨, 符合條款, 事實發生日, 說明.
 * ``mopsfin_t187ap05_O`` 每月營業收入彙總表 — the same Chinese keys as ``t187ap05_L``.
+* ``mopsfin_t187ap03_O`` 上櫃股票基本資料 — Date, SecuritiesCompanyCode, CompanyName, CompanyAbbreviation,
+  SecuritiesIndustryCode, DateOfIncorporation, DateOfListing, Paidin.Capital.NTDollars, IssueShares, Symbol,
+  WebAddress …
+* ``tpex_exright_daily`` 除權除息計算結果 — Date (= the ex-date), ClosePriceBeforeExRightsDiviend, ExRightsDiviendQuote
+  (unrounded), OpeningReferencePrice (the official reference, 3680 2026-11-12: 435.50 -> 425.50), LimitUp, LimitDown,
+  CashDivdend (sic), StockDividend (權值), ExRightsDiviend (除權／除息).
+* ``tpex_index`` 櫃買指數 (Gregorian Date "20261102", Open, High, Low, Close, Change) and ``tpex_reward_index``
+  (ROC Date, TPExIndex, TPExTotalReturnIndex): the current month.
 * ``mopsfin_t187ap06_O_*`` (Year, Season, SecuritiesCompanyCode + the same Chinese line items),
   ``mopsfin_t187ap07_O_*`` (公司代號 …), ``mopsfin_187ap17_O`` (Year, 季別, 毛利率, 營業利益率, 稅後純益率),
-  ``t187ap41_O`` (公司代號, 開會日期).
+  ``t187ap41_O`` (公司代號, 開會日期). Industries without TPEx companies (``07_O_ins``, ``07_O_mim`` …) return one
+  blank row (empty code and year, 出表日期 1100616): it is skipped and never overwrites archived statements. The
+  securities-firm variant (``06_O_bd``) spells some items differently (收益, 營業利益, 淨利（損）歸屬於母公司業主).
 
 TDCC open data ``https://opendata.tdcc.com.tw/getOD.ashx?id=1-5`` (CSV, current week only):
 資料日期, 證券代號 (space padded), 持股分級 (1–15, 16 = 差異數調整, 17 = 合計), 人數, 股數, 占集保庫存數比例%.
@@ -276,12 +298,12 @@ def _ex_event(code: str, market: str, d: date, kind: str, cash: Decimal | None, 
 
 
 _INCOME_FIELDS = {
-    "revenue": ("營業收入", "淨收益", "收益合計", "收入"),
+    "revenue": ("營業收入", "淨收益", "收益合計", "收入", "收益"),
     "gross_profit": ("營業毛利（毛損）淨額", "營業毛利（毛損）"),
-    "operating_income": ("營業利益（損失）",),
+    "operating_income": ("營業利益（損失）", "營業利益"),
     "pretax_income": ("稅前淨利（淨損）", "繼續營業單位稅前損益", "繼續營業單位稅前淨利（淨損）"),
     "net_income": ("本期淨利（淨損）", "本期稅後淨利（淨損）"),
-    "net_income_parent": ("淨利（淨損）歸屬於母公司業主",),
+    "net_income_parent": ("淨利（淨損）歸屬於母公司業主", "淨利（損）歸屬於母公司業主"),
     "eps": ("基本每股盈餘（元）",),
 }
 _BALANCE_FIELDS = {
@@ -523,6 +545,205 @@ def parse_tpex_disposal(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "data": {"reason": _text(r.get("DispositionReasons")), "announced": d.isoformat()},
                     "key": event_key("tpex-disposition", code, d, start)})
     return out
+
+
+def parse_tpex_exright_daily(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """tpex_exright_daily 除權除息計算結果 -> [{code, date, kind, prev_close, ex_quote, reference_price, limits, …}]."""
+    out = []
+    for r in rows:
+        code, d = _text(r.get("SecuritiesCompanyCode")), parse_tw_date(r.get("Date"))
+        ref = _positive(r.get("OpeningReferencePrice"))
+        if not is_listed_code(code) or d is None or ref is None:
+            continue
+        cash = parse_decimal(r.get("CashDivdend") or r.get("CashDividend"))
+        out.append({"code": code, "date": d, "kind": _text(r.get("ExRightsDiviend"))[:8],
+                    "prev_close": _positive(r.get("ClosePriceBeforeExRightsDiviend")),
+                    "ex_quote": _positive(r.get("ExRightsDiviendQuote")), "reference_price": ref,
+                    "limit_up": _positive(r.get("LimitUp")), "limit_down": _positive(r.get("LimitDown")),
+                    "cash_dividend": cash, "stock_dividend": parse_decimal(r.get("StockDividend"))})
+    return out
+
+
+# -- indices ---------------------------------------------------------------------------------------
+TAIEX_TR = "發行量加權股價報酬指數"
+TPEX_INDEX = "櫃買指數"
+TPEX_TR = "櫃買報酬指數"
+
+
+def parse_mi_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """MI_INDEX -> [{name, date, close, change, change_pct}] (漲跌點數 is unsigned; the sign is in 漲跌)."""
+    out = []
+    for r in rows:
+        name, d = _text(r.get("指數")), parse_tw_date(r.get("日期"))
+        close = _positive(r.get("收盤指數"))
+        if not name or d is None or close is None:
+            continue
+        points = parse_decimal(r.get("漲跌點數"))
+        if points is not None and _text(r.get("漲跌")) == "-":
+            points = -abs(points)
+        change_pct = _pct(r.get("漲跌百分比")) if parse_decimal(r.get("漲跌百分比")) is not None else None
+        out.append({"name": name[:100], "date": d, "close": close, "change": points, "change_pct": change_pct})
+    return out
+
+
+def parse_mfi94u(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """MFI94U (the current month of 發行量加權股價報酬指數) -> [{name, date, close}]."""
+    out = []
+    for r in rows:
+        d, close = parse_tw_date(r.get("Date")), _positive(r.get("TAIEXTotalReturnIndex"))
+        if d is not None and close is not None:
+            out.append({"name": TAIEX_TR, "date": d, "close": close})
+    return out
+
+
+def parse_tpex_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """tpex_index (the current month of 櫃買指數 OHLC) -> [{name, date, open, high, low, close, change}]."""
+    out = []
+    for r in rows:
+        d, close = parse_tw_date(r.get("Date")), _positive(r.get("Close"))
+        if d is None or close is None:
+            continue
+        out.append({"name": TPEX_INDEX, "date": d, "open": _positive(r.get("Open")), "high": _positive(r.get("High")),
+                    "low": _positive(r.get("Low")), "close": close, "change": parse_decimal(r.get("Change"))})
+    return out
+
+
+def parse_tpex_reward_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """tpex_reward_index -> 櫃買報酬指數 rows (and 櫃買指數 closes) [{name, date, close}]."""
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("Date"))
+        if d is None:
+            continue
+        for name, key in ((TPEX_TR, "TPExTotalReturnIndex"), (TPEX_INDEX, "TPExIndex")):
+            close = _positive(r.get(key))
+            if close is not None:
+                out.append({"name": name, "date": d, "close": close})
+    return out
+
+
+def with_changes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Fill ``change`` / ``change_pct`` from the previous row of the same index (multi-day responses)."""
+    out, prev = [], {}
+    for r in sorted(rows, key=lambda x: (x["name"], x["date"])):
+        p = prev.get(r["name"])
+        r = dict(r)
+        if p is not None:
+            if r.get("change") is None:
+                r["change"] = r["close"] - p
+            if r.get("change_pct") is None and p:
+                r["change_pct"] = ((r["close"] - p) / p).quantize(Decimal("0.00000001"))
+        prev[r["name"]] = r["close"]
+        out.append(r)
+    return out
+
+
+# -- dividends resolved (t187ap45_L) ---------------------------------------------------------------
+_HALF = {"上半年": "H1", "下半年": "H2"}
+
+
+def _dividend_period(kind: str, year: int, start: date | None) -> str:
+    """股利所屬年(季)度 -> "2026Q3" / "2026H1" / "2025" (年度)."""
+    m = re.search(r"第\s*([1-4])\s*季", kind)
+    if m:
+        return f"{year}Q{m.group(1)}"
+    if kind in _HALF:
+        return f"{year}{_HALF[kind]}"
+    if start is not None and kind != "年度" and start.month > 1:
+        return f"{year}Q{(start.month - 1) // 3 + 1}"
+    return str(year)
+
+
+def parse_dividend_resolutions(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """t187ap45_L 上市公司股利分派情形 -> one row per (company, 股利所屬期間, 期別). NT$ per share, Decimal."""
+    out = []
+    for raw in rows:
+        r = _strip_keys(raw)
+        code = _text(r.get("公司代號"))
+        year = parse_int(r.get("股利年度"))
+        published = parse_tw_date(r.get("出表日期"))
+        start, end = _roc_range(r.get("股利所屬期間"))
+        if not is_listed_code(code) or not year or published is None:
+            continue
+        year += 1911
+        start = start or date(year, 1, 1)
+        kind = _text(r.get("股利所屬年(季)度"))
+
+        def dec(key: str, r=r) -> Decimal:
+            return parse_decimal(r.get(key)) or Decimal(0)
+
+        out.append({
+            "code": code, "period_start": start, "period_end": end, "seq": parse_int(r.get("期別")) or 1,
+            "dividend_year": year, "period": _dividend_period(kind, year, start),
+            "progress": re.sub(r"<[^>]+>", "", _text(r.get("決議（擬議）進度")))[:80],
+            "board_date": parse_tw_date(r.get("董事會（擬議）股利分派日")),
+            "meeting_date": parse_tw_date(r.get("股東會日期")),
+            "cash_earnings": dec("股東配發-盈餘分配之現金股利(元/股)"),
+            "cash_legal_reserve": dec("股東配發-法定盈餘公積發放之現金(元/股)"),
+            "cash_capital_surplus": dec("股東配發-資本公積發放之現金(元/股)"),
+            "stock_earnings": dec("股東配發-盈餘轉增資配股(元/股)"),
+            "stock_legal_reserve": dec("股東配發-法定盈餘公積轉增資配股(元/股)"),
+            "stock_capital_surplus": dec("股東配發-資本公積轉增資配股(元/股)"),
+            "cash_total": parse_int(r.get("股東配發-股東配發之現金(股利)總金額(元)")),
+            "stock_total_shares": parse_int(r.get("股東配發-股東配股總股數(股)")),
+            "published": published,
+        })
+    return out
+
+
+# -- company profiles (t187ap03_L, mopsfin_t187ap03_O) ---------------------------------------------
+# 產業別 codes of the TWSE / TPEx industry classification (the datasets publish the code only).
+INDUSTRY_CODES = {
+    "01": "水泥工業", "02": "食品工業", "03": "塑膠工業", "04": "紡織纖維", "05": "電機機械", "06": "電器電纜",
+    "08": "玻璃陶瓷", "09": "造紙工業", "10": "鋼鐵工業", "11": "橡膠工業", "12": "汽車工業", "14": "建材營造業",
+    "15": "航運業", "16": "觀光餐旅", "17": "金融保險業", "18": "貿易百貨業", "19": "綜合", "20": "其他業",
+    "21": "化學工業", "22": "生技醫療業", "23": "油電燃氣業", "24": "半導體業", "25": "電腦及週邊設備業",
+    "26": "光電業", "27": "通信網路業", "28": "電子零組件業", "29": "電子通路業", "30": "資訊服務業",
+    "31": "其他電子業", "32": "文化創意業", "33": "農業科技業", "34": "電子商務", "35": "綠能環保",
+    "36": "數位雲端", "37": "運動休閒", "38": "居家生活", "80": "管理股票", "91": "存託憑證",
+}
+_PROFILE_KEYS = {  # ours -> (TWSE key, TPEx key)
+    "name": ("公司名稱", "CompanyName"), "short_name": ("公司簡稱", "CompanyAbbreviation"),
+    "english_short_name": ("英文簡稱", "Symbol"), "website": ("網址", "WebAddress"),
+    "par_value": ("普通股每股面額", "ParValueOfCommonStock"),
+    "foreign_registration": ("外國企業註冊地國", "Registration"),
+}
+
+
+def parse_company_profiles(rows: list[dict[str, Any]], market: str) -> list[dict[str, Any]]:
+    """t187ap03_L (``market`` TWSE) / mopsfin_t187ap03_O (TPEX) -> company facts (no people's names / phones)."""
+    tpex = market == "TPEX"
+    out = []
+    for raw in rows:
+        r = _strip_keys(raw)
+        code = _text(r.get("SecuritiesCompanyCode" if tpex else "公司代號"))
+        d = parse_tw_date(r.get("Date" if tpex else "出表日期"))
+        if not is_listed_code(code) or d is None:
+            continue
+        ind = _text(r.get("SecuritiesIndustryCode" if tpex else "產業別"))
+        values: dict[str, Any] = {k: (_text(r.get(keys[1] if tpex else keys[0])).replace("\u3000", " ").strip() or None)
+                                  for k, keys in _PROFILE_KEYS.items()}
+        if values["foreign_registration"] in ("－", "-"):
+            values["foreign_registration"] = None
+        if values["par_value"]:
+            values["par_value"] = re.sub(r"\s+", "", values["par_value"])
+        incorporated = parse_tw_date(r.get("DateOfIncorporation" if tpex else "成立日期"))
+        values["incorporated"] = incorporated.isoformat() if incorporated else None
+        values["paid_in_capital"] = parse_int(r.get("Paidin.Capital.NTDollars" if tpex else "實收資本額"))
+        values["preferred_shares"] = parse_int(r.get("PreferredStock.shares" if tpex else "特別股"))
+        values["private_shares"] = parse_int(r.get("PrivateStock.shares" if tpex else "私募股數"))
+        shares = parse_int(r.get("IssueShares" if tpex else "已發行普通股數或TDR原股發行股數"))
+        out.append({"code": code, "date": d, "industry_code": ind[:4] or None, "industry": INDUSTRY_CODES.get(ind),
+                    "listed_date": parse_tw_date(r.get("DateOfListing" if tpex else "上市日期")),
+                    "shares_outstanding": shares if shares and shares > 0 else None, "values": values})
+    return out
+
+
+def report_date(rows: list[dict[str, Any]], *keys: str) -> date | None:
+    """Newest 出表日期 / Date in a dataset (stale-endpoint checks)."""
+    dates = [parse_tw_date(_strip_keys(r).get(k)) for r in rows for k in keys]
+    found = [d for d in dates if d is not None]
+    return max(found) if found else None
 
 
 # -- TDCC ------------------------------------------------------------------------------------------

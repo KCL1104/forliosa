@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Callable
+from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -19,8 +20,16 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from forliosa.datapolicy import Policy, source_clause
-from forliosa.marketdata.base import BaseProvider, Candle, DividendEvent, QuoteData, market_of_symbol
+from forliosa.datapolicy import DATASETS, Policy, attribution, dataset_served, source_clause
+from forliosa.marketdata.base import (
+    BaseProvider,
+    Candle,
+    DividendEvent,
+    InstrumentProfile,
+    QuoteData,
+    market_of_symbol,
+)
+from forliosa.marketdata.indices import index_by_data_id
 from forliosa.timeutil import market_close_dt, today_taipei
 
 
@@ -36,9 +45,12 @@ class ArchiveProvider(BaseProvider):
     partial_history = True
     cooldown_seconds = 30
 
-    def __init__(self, policy: Policy = "commercial", session_fn: Callable[[], Session] = _default_session):
+    def __init__(self, policy: Policy = "commercial", session_fn: Callable[[], Session] = _default_session,
+                 taifex_confirmed: bool | None = None):
         self.policy = policy
         self.session_fn = session_fn
+        # TAIFEX_CONDITIONAL_CONFIRMED (None: read the setting at call time); gates conditional datasets (FX).
+        self.taifex_confirmed = taifex_confirmed
         # (method, symbol) -> source keys of the rows the last answer used (twse-openapi, finmind …),
         # so responses can list the real sources instead of "archive".
         self._last_sources: dict[tuple[str, str], list[str]] = {}
@@ -51,6 +63,9 @@ class ArchiveProvider(BaseProvider):
 
     def _filter(self, stmt, model):
         return stmt.where(source_clause(model.source, self.policy))
+
+    def served(self, key: str) -> bool:
+        return dataset_served(key, self.policy, self.taifex_confirmed)
 
     def first_date(self, symbol: str | None = None) -> date | None:
         """Earliest archived close (of ``symbol`` or of any symbol): where the archive's history begins."""
@@ -115,15 +130,70 @@ class ArchiveProvider(BaseProvider):
         self._remember("valuation_ratios", symbol, rows)
         return {r.date: {"per": r.per, "pbr": r.pbr, "dividend_yield": r.dividend_yield} for r in rows} or None
 
+    # -- indices and FX ----------------------------------------------------------------------------
+    def index_history(self, data_id: str, start: date, end: date) -> list[tuple[date, Decimal]] | None:
+        """Archived closes of a benchmark index (``index_daily``; data_id as in ``marketdata.indices``)."""
+        from forliosa.models import IndexDaily
+
+        idx = index_by_data_id(data_id)
+        if idx is None:
+            return None
+        with self.session_fn() as db:
+            stmt = select(IndexDaily).where(IndexDaily.name == idx.archive_name, IndexDaily.date >= start,
+                                            IndexDaily.date <= end).order_by(IndexDaily.date)
+            rows = list(db.scalars(self._filter(stmt, IndexDaily)))
+        self._remember("index_history", data_id, rows)
+        return [(r.date, r.close) for r in rows] or None
+
+    def fx_history(self, pair: str, start: date, end: date) -> dict[date, Decimal] | None:
+        """TAIFEX 每日外幣參考匯率 (``fx_rates``) — a ``conditional`` dataset: only when it may be served."""
+        from forliosa.models import FxRate
+
+        if not self.served("taifex-openapi/fx"):
+            return None
+        with self.session_fn() as db:
+            stmt = select(FxRate).where(FxRate.pair == pair, FxRate.date >= start - timedelta(days=10),
+                                        FxRate.date <= end)
+            rows = list(db.scalars(self._filter(stmt, FxRate)))
+        self._remember("fx_history", pair, rows)
+        return {r.date: r.rate for r in rows} or None
+
+    # -- company profile ---------------------------------------------------------------------------
+    def profile(self, symbol: str) -> InstrumentProfile | None:
+        """Issued shares, market cap (shares × latest archived close), industry, listing date (t187ap03)."""
+        from forliosa.models import CompanyProfile
+
+        if market_of_symbol(symbol) == "US":
+            return None
+        with self.session_fn() as db:
+            row = db.scalar(self._filter(select(CompanyProfile).where(CompanyProfile.symbol == symbol),
+                                         CompanyProfile))
+        if row is None:
+            return None
+        latest = self.latest_close(symbol) if row.shares_outstanding else None
+        market_cap = Decimal(row.shares_outstanding) * latest[1] if latest and row.shares_outstanding else None
+        key = f"{row.source}/company"
+        ds = DATASETS.get(key)
+        return InstrumentProfile(symbol=symbol, shares_outstanding=row.shares_outstanding, market_cap=market_cap,
+                                 data_sources=(attribution(ds),) if ds else (), industry=row.industry,
+                                 listed_date=row.listed_date)
+
     # -- reference prices and ex-rights ----------------------------------------------------------
     def reference_prices(self, symbols: list[str], d: date) -> dict[str, tuple[Decimal, Decimal | None,
                                                                               Decimal | None, str]]:
-        from forliosa.models import ReferencePrice
+        """Official reference price and limits for ``d``: TPEx's ex-rights computation (tpex_exright_daily) on
+        ex-dates first, then TWSE TWT84U / TPEx NextReferencePrice."""
+        from forliosa.models import ExRightsResult, ReferencePrice
 
         with self.session_fn() as db:
+            ex = list(db.scalars(self._filter(select(ExRightsResult).where(
+                ExRightsResult.symbol.in_(symbols), ExRightsResult.date == d), ExRightsResult)))
             stmt = select(ReferencePrice).where(ReferencePrice.symbol.in_(symbols), ReferencePrice.date == d)
             rows = list(db.scalars(self._filter(stmt, ReferencePrice)))
-        return {r.symbol: (r.reference_price, r.limit_up, r.limit_down, r.source) for r in rows}
+        out = {r.symbol: (r.reference_price, r.limit_up, r.limit_down, r.source) for r in rows}
+        for r in ex:
+            out[r.symbol] = (r.reference_price, r.limit_up, r.limit_down, r.source)
+        return out
 
     def ex_rights_on(self, symbols: list[str], d: date) -> dict[str, tuple[Decimal, Decimal]]:
         from forliosa.models import MarketEvent
@@ -141,17 +211,69 @@ class ArchiveProvider(BaseProvider):
         return out
 
     def dividends(self, symbol: str) -> list[DividendEvent] | None:
-        """Announced ex-dividend dates from the archived notices (TWT48U_ALL, tpex_exright_prepost)."""
-        from forliosa.models import MarketEvent
+        """Ex-dividend notices (TWT48U_ALL, tpex_exright_prepost; a missing TPEx amount is filled from the official
+        ex-rights computation) plus the board / AGM resolutions of TWSE t187ap45_L.
+
+        A resolution is attached to the notice it belongs to (ex-date after the board date, same cash per share);
+        resolutions without a notice yet are returned with ``ex_dividend_date=None``. TPEx has no resolution
+        dataset (mopsfin_t187ap39_O stopped in 2021-08), so TPEx dividends only appear once the notice is out.
+        """
+        from forliosa.models import DividendResolution, ExRightsResult, MarketEvent
 
         if market_of_symbol(symbol) == "US":
             return None
         with self.session_fn() as db:
             stmt = select(MarketEvent).where(MarketEvent.symbol == symbol, MarketEvent.type == "ex_dividend")
             rows = list(db.scalars(self._filter(stmt, MarketEvent)))
-        self._remember("dividends", symbol, rows)
+            ex_rows = list(db.scalars(self._filter(select(ExRightsResult).where(ExRightsResult.symbol == symbol),
+                                                   ExRightsResult)))
+            resolutions = list(db.scalars(self._filter(
+                select(DividendResolution).where(DividendResolution.symbol == symbol), DividendResolution)))
+        self._remember("dividends", symbol, rows + ex_rows + resolutions)
+        official_cash = {r.date: r.cash_dividend for r in ex_rows if r.cash_dividend}
         # Notices whose amount is not announced yet ("尚未公告", blank) are kept with zero amounts so the
         # ex-date still shows up; the facade prefers another provider's amounts for the same ex-date.
-        out = [DividendEvent(symbol, r.date.year, str(r.date.year), Decimal(r.data.get("cash") or 0),
-                             Decimal(r.data.get("stock_ratio") or 0) * 10, r.date, None) for r in rows]
-        return out or None
+        out = []
+        for r in rows:
+            cash = Decimal(r.data.get("cash") or 0) or official_cash.get(r.date) or Decimal(0)
+            out.append(DividendEvent(symbol, r.date.year, str(r.date.year), cash,
+                                     Decimal(r.data.get("stock_ratio") or 0) * 10, r.date, None))
+        out.extend(resolution_event(symbol, r) for r in resolutions)
+        return attach_resolutions(out) or None
+
+
+def resolution_event(symbol: str, r: Any) -> DividendEvent:
+    cash = r.cash_earnings + r.cash_legal_reserve + r.cash_capital_surplus
+    stock = r.stock_earnings + r.stock_legal_reserve + r.stock_capital_surplus
+    return DividendEvent(symbol, r.dividend_year, r.period, cash, stock, None, None, progress=r.progress,
+                         board_date=r.board_date, meeting_date=r.meeting_date,
+                         cash_sources=(r.cash_earnings, r.cash_legal_reserve, r.cash_capital_surplus))
+
+
+def attach_resolutions(events: list[DividendEvent]) -> list[DividendEvent]:
+    """Merge each resolution (no ex-date) into the ex-dividend event it belongs to: the earliest unmatched
+    ex-date after the board date with the same cash per share (±0.001) and stock dividend. Unmatched
+    resolutions stay as they are (ex-date not announced yet, or it was before archiving started)."""
+    dated = sorted((e for e in events if e.ex_dividend_date is not None), key=lambda e: e.ex_dividend_date)
+    pending = sorted((e for e in events if e.ex_dividend_date is None and e.board_date is not None),
+                     key=lambda e: e.board_date)
+    others = [e for e in events if e.ex_dividend_date is None and e.board_date is None]
+    used: set[int] = set()
+    left = []
+    for res in pending:
+        match = None
+        for i, e in enumerate(dated):
+            if i in used or e.ex_dividend_date <= res.board_date or e.progress is not None:
+                continue
+            if abs(e.cash_dividend - res.cash_dividend) <= Decimal("0.001") and (
+                    abs(e.stock_dividend - res.stock_dividend) <= Decimal("0.001")):
+                match = i
+                break
+        if match is None:
+            left.append(res)
+            continue
+        used.add(match)
+        e = dated[match]
+        dated[match] = replace(e, year=res.year, period=res.period, progress=res.progress, board_date=res.board_date,
+                               meeting_date=res.meeting_date, cash_sources=res.cash_sources)
+    return [*dated, *left, *others]

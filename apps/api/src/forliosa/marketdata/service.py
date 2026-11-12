@@ -203,12 +203,17 @@ class MarketData:
         return [info for _, info in scored[:limit]]
 
     def profile(self, symbol: str) -> InstrumentProfile:
+        """Merged across real providers, highest priority first: the archive's official company data (issued
+        shares, market cap, industry, listing date from t187ap03) wins; shioaji-data fills the rest."""
+        merged: InstrumentProfile | None = None
         for p in self._available():
             if p.is_demo:
                 continue
             prof = self._call(p, lambda p=p: p.profile(symbol))
             if prof is not None:
-                return prof
+                merged = prof if merged is None else _merge_profiles(merged, prof)
+        if merged is not None:
+            return merged
         info = self.instrument(symbol)
         return InstrumentProfile(
             symbol=symbol, summary=info.summary if info else None, chain_stage=info.chain_stage if info else None,
@@ -351,14 +356,23 @@ class MarketData:
         idx = INDICES.get(symbol)
         if idx is None:
             return HistoryResult(symbol, [], False, "")
+        collected: dict[date, Decimal] = {}
+        names: list[str] = []
         for p in self._available():
             fn = getattr(p, "index_history", None)
             if fn is None or p.is_demo:
                 continue
             value = self._call(p, lambda fn=fn: fn(idx.data_id, start, end))
             if value:
-                return HistoryResult(symbol, [Candle(d, v, v, v, v, 0) for d, v in value], False, p.name)
-        return HistoryResult(symbol, [], False, "")
+                before = len(collected)
+                for d, v in value:
+                    collected.setdefault(d, v)
+                if len(collected) > before:
+                    names.extend(_row_sources(p, "index_history", idx.data_id))
+            if value and not getattr(p, "partial_history", False):
+                break  # the archive only grows from its first day: a full provider (FinMind) fills older days
+        candles = [Candle(d, v, v, v, v, 0) for d, v in sorted(collected.items())]
+        return HistoryResult(symbol, candles, False, "+".join(dict.fromkeys(names)))
 
     def valuation_ratios(self, symbol: str, start: date, end: date) -> dict[date, dict] | None:
         """Real daily PER / PBR / dividend yield as published (archive first, FinMind fills older days)."""
@@ -408,7 +422,9 @@ class MarketData:
                 elif cur.payment_date is None and e.payment_date is not None:
                     merged[key] = replace(cur, payment_date=e.payment_date, period=e.period, year=e.year)
         if merged:
-            events = sorted(merged.values(), key=lambda e: e.ex_dividend_date or date.min, reverse=True)
+            from forliosa.marketdata.archive_provider import attach_resolutions
+
+            events = sorted(attach_resolutions(list(merged.values())), key=dividend_sort_key, reverse=True)
             return Answer(events, False, "+".join(dict.fromkeys(names)))
         if self.demo is not None and self.demo in self._available():
             value = self._call(self.demo, lambda: self.demo.dividends(symbol))
@@ -486,10 +502,39 @@ class MarketData:
             return None
 
     def fx_series(self, pair: str, start: date, end: date) -> tuple[dict[date, Decimal], bool]:
-        ans = self._first("fx_history", pair, start, end)
-        if ans is None:
-            return {}, False
-        return dict(ans.value), ans.is_demo
+        series, is_demo, _source = self.fx_series_with_source(pair, start, end)
+        return series, is_demo
+
+    def fx_series_with_source(self, pair: str, start: date, end: date) -> tuple[dict[date, Decimal], bool, str]:
+        """FX series and the source keys behind it (archive: ``taifex-openapi``; empty when none answered)."""
+        for p in self._available():
+            value = self._call(p, lambda p=p: p.fx_history(pair, start, end))
+            if value:
+                return dict(value), p.is_demo, "+".join(_row_sources(p, "fx_history", pair))
+        return {}, False, ""
+
+
+def dividend_sort_key(e: DividendEvent) -> date:
+    """Newest first by ex-date; a resolution without an ex-date sorts by its board date."""
+    return e.ex_dividend_date or e.board_date or date.min
+
+
+def _merge_profiles(a: InstrumentProfile, b: InstrumentProfile) -> InstrumentProfile:
+    """Fill ``a``'s gaps from the lower-priority ``b``. A market cap is only borrowed together with the share
+    count it was computed from (never mix the archive's official shares with another source's market cap)."""
+    updates: dict[str, Any] = {}
+    for f in ("summary", "chain_stage", "industry", "listed_date"):
+        if getattr(a, f) is None and getattr(b, f) is not None:
+            updates[f] = getattr(b, f)
+    if not a.themes and b.themes:
+        updates["themes"] = b.themes
+    if a.shares_outstanding is None and b.shares_outstanding is not None:
+        updates["shares_outstanding"], updates["market_cap"] = b.shares_outstanding, b.market_cap
+    elif a.market_cap is None and a.shares_outstanding is None:
+        updates["market_cap"] = b.market_cap
+    updates["data_sources"] = tuple(dict.fromkeys((*a.data_sources, *b.data_sources)))
+    updates["is_demo"] = a.is_demo or b.is_demo
+    return replace(a, **updates)
 
 
 def _previous_session(symbol: str, d: date) -> date:
@@ -552,7 +597,8 @@ def build_providers(settings: Settings) -> list[BaseProvider]:
         "tpex_openapi": lambda: TpexOpenApiProvider(HttpFetcher(timeout=15, retries=1, backoff=0.5)),
         "finmind": lambda: FinMindProvider(settings.finmind_token, HttpFetcher(timeout=20, retries=0),
                                            cache_dir=settings.cache_dir),
-        "archive": lambda: ArchiveProvider(settings.data_policy),
+        "archive": lambda: ArchiveProvider(settings.data_policy,
+                                           taifex_confirmed=settings.taifex_conditional_confirmed),
         "demo": lambda: DemoProvider(),
     }
     providers: list[BaseProvider] = []
