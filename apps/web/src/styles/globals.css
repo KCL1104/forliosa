@@ -471,6 +471,8 @@
     font-family: var(--font-ai);
     color: var(--ai);
     font-weight: 400;
+    /* 楷體的字身比字框小（加上 size-adjust 110%），預設字距看起來鬆；收 0.04em，數字（Noto Sans）仍然清楚 */
+    letter-spacing: -0.04em;
   }
 
   /* 示範資料：細框小字，資料狀態而不是品牌 */

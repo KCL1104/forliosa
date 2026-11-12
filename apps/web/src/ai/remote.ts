@@ -300,6 +300,7 @@ export function threadFromServer(t: ThreadDetail): { thread: Thread; drafts: Dra
       id: `srv_${m.id}`,
       role: "ai",
       text: m.text,
+      model: true,
       citations: m.citations,
       tools: m.tools,
       error: m.error ?? undefined,

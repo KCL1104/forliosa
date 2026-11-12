@@ -18,7 +18,7 @@ function History() {
   const ask = useAskAi()
   return (
     <div className="mx-auto w-full max-w-[760px] px-5 pt-2 pb-10 md:px-8 lg:pt-10">
-      <PageHeader title="紀錄" description="問過的問題、AI 寫的草稿，和排定的 AI 任務。" className="max-lg:sr-only" />
+      <PageHeader title="紀錄" className="max-lg:sr-only" />
       <HistoryList onOpen={ask.reveal} onReplay={(t) => ask.submit(t)} />
     </div>
   )

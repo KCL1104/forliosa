@@ -122,7 +122,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
         </ul>
       )}
 
-      <p className="mt-2 text-xs text-ink-2">對話紀錄保留 30 天。</p>
+      <p className="mt-2 text-sm text-ink-2">對話紀錄保留 30 天。</p>
 
       <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-base")}>AI 任務</H>
       {tasks.length === 0 ? (
@@ -152,7 +152,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
           ))}
         </ul>
       )}
-      {api.kind === "mock" && <p className="mt-3 text-xs text-ink-2">AI 任務是示範資料；排程在 M4 開放。</p>}
+      {api.kind === "mock" && <p className="mt-3 text-sm text-ink-2">AI 任務是示範資料，排程還沒開放。</p>}
     </div>
   )
 }

@@ -59,16 +59,16 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
             type="button"
             aria-label="附件與其他記帳方式"
             className={cn(
-              "press grid shrink-0 place-items-center text-ink-2 hover:text-ink",
-              variant === "panel" ? "size-9 rounded-sm border border-rule hover:bg-hov" : "size-11 rounded-full text-ai",
+              "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink",
+              variant === "panel" ? "size-9" : "size-11",
             )}
           />
         }
       >
-        <PlusIcon aria-hidden className={variant === "panel" ? "size-[18px]" : "size-[22px]"} />
+        <PlusIcon aria-hidden className={variant === "panel" ? "size-[18px]" : "size-5"} />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" side="top" className="w-56">
-        <DropdownMenuItem onClick={() => onAttach("import")}>匯入對帳單（M3）</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => onAttach("import")}>匯入對帳單</DropdownMenuItem>
         <DropdownMenuItem onClick={() => onAttach("form")}>改用表單記一筆</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
@@ -77,7 +77,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   if (variant === "screen") {
     return (
       <form
-        className="flex h-14 items-center gap-1 rounded-full border border-ai-rule bg-ai-wash pr-1.5 pl-1.5 focus-within:outline-2 focus-within:outline-offset-1 focus-within:outline-ai"
+        className="flex h-14 items-center gap-1.5 rounded-md border border-act bg-raised px-1.5 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink"
         onSubmit={(e) => {
           e.preventDefault()
           send()
@@ -92,13 +92,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
           aria-label="搜尋股票、提問，或直接說：買 0050 2 張 52.4"
           enterKeyHint="send"
           autoComplete="off"
-          className="h-full min-w-0 flex-1 bg-transparent text-lg text-ink caret-ai outline-none placeholder:text-ink-2"
+          className="h-full min-w-0 flex-1 bg-transparent px-1 text-lg text-ink outline-none placeholder:text-ink-2"
         />
         <button
           type="submit"
           aria-label="送出"
           aria-disabled={empty}
-          className={cn("press grid size-11 shrink-0 place-items-center rounded-full", empty ? "bg-rule text-ink-2" : "bg-ai text-raised")}
+          className={cn("press grid size-11 shrink-0 place-items-center rounded-sm", empty ? "bg-rule text-ink-2" : "bg-act text-act-fg")}
         >
           <ArrowUpIcon aria-hidden className="size-5" />
         </button>
@@ -108,7 +108,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
 
   return (
     <form
-      className="rounded-md border border-act bg-raised px-3.5 pt-3 pb-2.5 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink"
+      className="group rounded-md border border-act bg-raised px-3.5 pt-3 pb-2.5 focus-within:outline-2 focus-within:outline-offset-2 focus-within:outline-ink"
       onSubmit={(e) => {
         e.preventDefault()
         send()
@@ -130,17 +130,20 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
         aria-label="提出問題或下指令"
         className="block h-[54px] w-full resize-none bg-transparent leading-relaxed text-ink outline-none placeholder:text-ink-2"
       />
-      <div className="mt-1.5 flex items-center gap-1">
+      <div className="mt-1.5 flex items-center justify-between gap-2">
         {attach}
-        <span className="ml-auto mr-2 hidden text-xs text-ink-2 xl:inline">Enter 送出・Shift+Enter 換行</span>
-        <button
-          type="submit"
-          aria-label="送出"
-          disabled={empty}
-          className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-rule disabled:text-ink-2"
-        >
-          <ArrowUpIcon aria-hidden className="size-[18px]" />
-        </button>
+        <div className="flex items-center gap-3">
+          {/* 鍵盤提示只在輸入框有焦點時出現 */}
+          <span aria-hidden className="hidden text-sm text-ink-2 xl:group-focus-within:inline">Enter 送出・Shift+Enter 換行</span>
+          <button
+            type="submit"
+            aria-label="送出"
+            disabled={empty}
+            className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-rule disabled:text-ink-2"
+          >
+            <ArrowUpIcon aria-hidden className="size-[18px]" />
+          </button>
+        </div>
       </div>
     </form>
   )

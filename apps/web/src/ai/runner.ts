@@ -148,7 +148,7 @@ export function useAiRunner(ctx: AiContext) {
     }
     const draft: Draft = { id: newId("dft"), status: "loading", input, instrument, notes, createdAt: new Date().toISOString() }
     upsertDraft(draft)
-    push({ role: "ai", text: intent.kind === "dividend" ? "我照你說的整理好了，簽名後才會入帳。" : DRAFT_SAYS, draftId: draft.id })
+    push({ role: "ai", text: intent.kind === "dividend" ? "我照你說的整理好了，簽名後才會入帳。" : DRAFT_SAYS, model: false, draftId: draft.id })
     await preview(draft.id, input)
     return true
   }
@@ -162,7 +162,7 @@ export function useAiRunner(ctx: AiContext) {
     push({ role: "user", text }, { title: text })
     const localThreadId = useAi.getState().threadId!
     const remoteId = useAi.getState().threads.find((t) => t.id === localThreadId)?.remoteId ?? null
-    const aiId = push({ role: "ai", text: "", streaming: true })
+    const aiId = push({ role: "ai", text: "", model: true, streaming: true })
     let buffered = ""
     let timer: ReturnType<typeof setTimeout> | null = null
     const flush = () => {
@@ -279,7 +279,7 @@ export function useAiRunner(ctx: AiContext) {
         recurring: { planId: r.planId, date: r.date },
       }
       upsertDraft(draft)
-      push({ role: "ai", text: copy.text, draftId: draft.id })
+      push({ role: "ai", text: copy.text, model: false, draftId: draft.id })
     } catch (err) {
       say({
         text: `這次的定期定額草稿沒有寫成：${err instanceof Error ? err.message : "請再試一次"}。`,
@@ -318,7 +318,7 @@ export function useAiRunner(ctx: AiContext) {
         return
       case "import":
         push({ role: "user", text: "匯入對帳單" }, { title: "匯入對帳單" })
-        say({ text: "匯入對帳單在下一階段（M3）開放。現在可以把對帳單上的每一筆說給我，例如「買 2330 1 張 1085」，我會一筆一筆寫成草稿。" })
+        say({ text: "匯入對帳單在下一階段開放。現在可以把對帳單上的每一筆說給我，例如「買 2330 1 張 1085」，我會一筆一筆寫成草稿。" })
         return
       case "dividend": {
         push({ role: "user", text: "股利入帳" }, { title: "股利入帳" })
@@ -336,11 +336,11 @@ export function useAiRunner(ctx: AiContext) {
       }
       case "alert":
         push({ role: "user", text: "設定到價提醒" }, { title: "設定到價提醒" })
-        say({ text: "到價提醒在下一階段（M4）開放，會和盤後報告一起推播。現在可以先把它加入觀察，帳本上會看到今天的走勢。" })
+        say({ text: "到價提醒在下一階段開放，會和盤後報告一起推播。現在可以先把它加入觀察，帳本上會看到今天的走勢。" })
         return
       case "checkup":
         push({ role: "user", text: "排定持倉健檢" }, { title: "排定持倉健檢" })
-        say({ text: "定期健檢在下一階段（M4）開放。排好之後會出現在「紀錄」裡的 AI 任務。" })
+        say({ text: "定期健檢在下一階段開放。排好之後會出現在「紀錄」裡的 AI 任務。" })
         return
       case "form":
         openTradeForm(opts.code ? { symbol: opts.code } : undefined)
