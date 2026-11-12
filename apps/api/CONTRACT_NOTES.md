@@ -64,7 +64,8 @@
 - **自動計算**：`fee`、`tax`、`health_insurance` 省略時自動計算；`PATCH` 改了數量、價格、日期、商品、
   類型或當沖註記時，沒有一併給的稅費會重新計算。
 - **帳本一致性**：新增、修改、刪除交易後會重播該帳戶；會造成「賣超過持股」的操作回 422，
-  `error.code = "ledger_inconsistent"`。商品代號找不到回 422 `unknown_symbol`。
+  `error.code = "ledger_inconsistent"`。商品代號找不到回 422 `unknown_symbol`。自動入帳的股利重算後造成的不一致也回
+  422 `ledger_inconsistent`（見「2026-11-12 股利自動入帳」）。
 - **商品代號**：路徑與參數可以用 `2330`、`2330.tw`、`2330.TW`，回應一律是標準格式 `2330.TW`。
 - **美股帳戶預設手續費**：`currency = "USD"` 且沒給 `fee_rate`、`min_fee` 時預設為 0（台幣帳戶預設 0.1425%、
   最低 20 元、零股最低 1 元）。
@@ -79,7 +80,8 @@
   一拆四）會接續，不會變成 −75%。
 - **`net_invested`** = 累計買進成本（含手續費）− 累計賣出淨收入 − 減資退還股款；現金股利不扣。
 - **現金股利以交易日期為準計入 `O_t`**。價格用未還原收盤價，除息日股價會下跌；如果股利記在發放日，
-  除息日到發放日之間的 TWR 會短暫偏低，發放日再補回。示範資料把股利記在除息日（見待決事項）。
+  除息日到發放日之間的 TWR 會短暫偏低，發放日再補回。示範資料把股利記在除息日（見待決事項）；台股自動入帳的股利
+  也記在除息日（見「2026-11-12 股利自動入帳」），只有使用者自己記在發放日的紀錄仍有這個現象。
 - **只記持股帳戶**：快照日以當天收盤市值作為期初投入（`I_t`），從那天開始追蹤報酬；
   損益則用使用者輸入的均價。快照日（含）之前的交易不計入。
 - **區間**：`start_date` 是區間內第一個有持股的交易日（不會早於第一筆交易）；`ALL` 從第一筆交易開始。
@@ -172,7 +174,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 | `position` | 多 `symbol`、`currency`、`as_of`、`sources`、`is_demo`。金額為台幣，`avg_cost` 為原幣。`realized_pnl` 含交易與減資退款；`dividends_received` 已扣二代健保。`markers` 依交易日排序；`stock_dividend` 的 `quantity` 是實際配發股數。**目前股數為 0 一律回 `null`**（即使有已實現損益，見待確認 11） |
 | `why` | 多 `symbol`、`sources`。規則：漲跌停 > 漲跌 ≥ 3%（對參考價）、量 ≥ 20 日均量 2 倍、除權息日、處置／注意、當天重大訊息主旨含「財務報告／財報／自結損益」或「營收」。`reasons[].kind` 為 `limit_up`、`limit_down`、`price_move`、`volume`、`ex_dividend`、`disposition`、`attention`、`earnings`、`revenue_release`。最新報價不是今天時文字用日期（「11/11 上漲 3.5%」）。`headline` = 名稱 + 前兩個理由 |
 | `watchlist` | 每筆多 `sparkline_interval`（目前一律 `"1d"`：最近 20 個收盤；`"1m"` 保留給日後的授權盤中來源）、`sources`、`is_demo`；`quote` 可能為 `null`。`sparkline[].t` 在 `1m` 是 `"09:01"`，在 `1d` 是日期。`POST` 新增回 201、已在清單回 200（冪等）；找不到商品 422 `unknown_symbol`；最多 200 檔。`DELETE` 不在清單回 404 |
-| `/portfolio/upcoming` | 多 `account_id` 參數，每筆多 `is_demo`、`sources`。`days` 1–90。`amount_estimate` = 目前股數 × 每股現金股利（台幣、未扣二代健保）；發放日已過除息日時，若已記股利交易就用交易金額；除息金額未公告時為 `null`、標題加「（金額未公告）」。`recurring`（定期定額扣款）見「2026-11-12 第二批」 |
+| `/portfolio/upcoming` | 多 `account_id` 參數，每筆多 `is_demo`、`sources`。`days` 1–90。`amount_estimate` = 目前股數 × 每股現金股利（台幣、未扣二代健保）；發放日已過除息日時，若除息日當天已記現金股利交易（自動入帳的股利就是這一筆）就用交易金額；除息金額未公告時為 `null`、標題加「（金額未公告）」。`recurring`（定期定額扣款）見「2026-11-12 第二批」 |
 
 ### 存檔（`python -m forliosa.archive`）
 
@@ -417,6 +419,70 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 - 股利決議早於存檔的除權息日不知道：這類決議 `ex_dividend_date: null`。
 - 產業別代碼對照是證交所產業分類的標準代碼（資料集本身只給代碼），新增產業時要更新。
 
+## 2026-11-12 股利自動入帳
+
+產品負責人 2026-11-12 決定（[`docs/handoff.md`](../../docs/handoff.md) §3.0）；對外行為見 [`docs/api-contract.md`](../../docs/api-contract.md)「股利自動入帳」。
+程式在 `services/auto_dividends.py`（`sync_auto_dividends`、`covered_by_user`、`sync_checked`、`after_user_change`、`remember_skip`、`sync_all_users`），
+掛在 `services/transactions.py`（create／update／delete）、`api/routes/accounts.py`、`worker.py`；資料表 `auto_dividend_skips`（migration `0007_auto_dividend_skips`；
+`transactions.source` 本來就是 `String(16)`，`auto`／`auto_edited` 不需要改欄位）；測試 `tests/api/test_auto_dividends.py`。
+
+### 同步
+
+`sync_auto_dividends(db, user, md, account_ids, symbols)` 重算「現在應該有的」自動股利，與現有 `source="auto"` 的列比對後新增、更新、刪除；
+不 commit，由呼叫端 commit 或 rollback。`sync_checked` 包一層嚴格重播：同步前帳目一致、同步後不一致時丟 `AutoDividendConflict`。
+
+| 觸發 | 範圍 | 會讓帳目不一致時 |
+|---|---|---|
+| `POST`／`PATCH`／`DELETE /transactions` | 該筆交易的帳戶＋商品（修改時新舊兩組都算）；只有證券類交易、且是台股代號才同步，現金類交易不觸發 | 交易本身先過 `validate_ledger`；重算後重播失敗 → 422 `ledger_inconsistent`，訊息「自動入帳的股利依這筆變更重算後帳目不一致：<重播錯誤>」，整個請求不寫入 |
+| `PUT /accounts/{id}/holdings` | 整個帳戶 | 同上；但原本帳目就不一致時照樣同步、不擋 |
+| `PATCH /accounts/{id}`，且 `tracking_mode` 真的改變 | 整個帳戶 | 同上 |
+| worker：每次存檔的群組含 `twse` 或 `tpex` 之後（交易日 08:10、14:40、21:40） | 所有使用者的所有帳戶，每個帳戶各自 commit | 該帳戶 rollback、維持原狀並記 warning；其他錯誤記 exception；其他帳戶照常 |
+
+- 08:10 那次在開盤前就記上當天除息的股利（除權息預告隨 `twse`／`tpex` 群組存檔）。預告金額更正、補上發放日後，下一次同步會更新同一列
+  （比較 `type`、`trade_date`、`quantity`、`price`、`amount`、`fee`、`tax`、`health_insurance`、`currency`、`is_day_trade`、`note`）；沒有變化就不寫（冪等）。
+- 同步只動 `source="auto"` 的列。同一個鍵（帳戶、商品、除息日、類型）多出來的列、以及 `auto` 但不是股利類型的列（不應該存在）都會刪掉。
+- `DELETE /accounts/{id}` 連同交易（含自動股利）、快照與該帳戶的略過紀錄一起刪除（外鍵也是 `ON DELETE CASCADE`）。
+
+### 計算
+
+- **事件**：`MarketData.dividends`（`ex_dividend_events`）中台股（`TWSE`／`TPEX`）、非示範資料、有除息日、且現金或配股大於 0 的事件。
+  取資料時發生例外記 warning，這一檔當作沒有事件；示範資料一律不用。
+- **股數**：該帳戶該檔**不含自動列**的帳本，加上這次同步已決定的較早自動配股，重播到除息日前一天（`trade_date < ex_date`；快照期初也只算
+  `as_of < ex_date` 的）。大於 0 才記。
+- **只記持股帳戶**：除息日 ≤ 最新快照日的不記（快照股數已反映之前的股利）；換了較新的快照，快照日（含）之前的自動列會被移除。
+- **日期**：除息日 > 今天（台北）不記；除息日當天就記。
+- **現金股利**：走 `services/transactions.compute()`（`quantity` = 股數、`price` = 每股現金、`trade_date` = 除息日），所以金額元以下捨去，
+  二代健保由 `compute()` 估算，包括依股利決議排除資本公積（待確認 21；付款日就是除息日，對上的就是同一次除息）。捨去後金額為 0
+  （例如 1 股 × 0.5 元）不記；`compute()` 拒絕時記 warning、這一筆跳過。
+- **配股**：`stock_dividend_shares(股數, 每股配股元)`，不足一股以面額 10 元折付現金（元以下捨去）；`fee`、`tax`、`health_insurance` 都是 0
+  （與手動記配股相同）。同一除權息日的現金與配股各一列；配到的股數參與之後的除息。
+- **備註**：`cash_note`／`stock_note`，例如「除息前一日持有 10,000 股 × 每股現金股利 2 元；發放日 2026-07-10」、
+  「除權前一日持有 1,234 股 × 每股配股 0.5 元（每股面額 10 元）= 配發 61 股，不足一股折付現金 7 元」。
+
+### 使用者自己的紀錄（`covered_by_user`）
+
+- 只看同帳戶、同商品、`source` 是 `manual`／`import`／`ai_draft` 的 `cash_dividend`／`stock_dividend`。`auto_edited` 不算（它靠略過紀錄擋住）。
+- 日期 `d` 的紀錄，對到該類金額大於 0、且 `e ≤ d ≤ e + 120 天`（`USER_RECORD_WINDOW_DAYS`）的除息日 `e` 中**最近**的一個；紀錄有 `price`（每股金額）時，
+  優先金額相同（±0.001）的除息日。所以季配息（3 月除息 4 月發放、6 月除息 7 月發放）各自對上，一筆不會抵兩次。日期早於除息日的紀錄不抵任何一次。
+- 被抵掉的除息日不產生自動列，已有的刪除；使用者刪掉自己的紀錄後，同一次同步就會補回自動列。
+
+### 略過紀錄 `auto_dividend_skips`
+
+- 欄位 `user_id`、`account_id`、`symbol`、`ex_date`、`kind`（`cash`／`stock`）、`reason`、`created_at`；`(account_id, symbol, ex_date, kind)` 唯一。
+- `reason`：`deleted`（`DELETE` 一筆 `auto`）、`edited`（`PATCH` 一筆 `auto`，該列同時改成 `auto_edited`）。鍵是修改**前**的帳戶、商品、日期與類型，
+  所以把自動列改到別的日期，原本那次也不會再產生；之後刪掉 `auto_edited` 不另外記（`edited` 已經擋住）。
+- 目前沒有端點列出或清除略過紀錄（見待確認 23）。
+
+### 資料涵蓋範圍
+
+- `TWT48U_ALL`（上市）與 `tpex_exright_prepost`（上櫃）是**預告表**，只列即將除權息的；過去的除息日只留在自建存檔（`market_events`，
+  `type = "ex_dividend"`）。所以 commercial 下自動入帳只涵蓋**開始存檔之後**的除息日，更早的股利仍要使用者手動記（或匯入）。
+  personal 明確開啟 FinMind 時，`MarketData.dividends` 也合併 FinMind `TaiwanStockDividend` 的歷史（非商用），較早的除息日也會自動入帳。
+- 上櫃預告金額「尚未公告」時，用〈上櫃股票除權除息計算結果表〉的現金股利補上（見「第三批」）；仍沒有金額就等公告後的那次同步。
+- **配股率的單位是假設**：`StockDividendRatio`（無償配股率）當作「每 1 股配幾股」，每股配股（元）= 比率 × 10（`marketdata/twse.py` 的
+  `parse_twt48u_all` 有註記；存檔的上市、上櫃預告都這樣換算）。還沒有用真實的配股預告驗證過；若單位不同，自動配股的股數會錯，
+  第一次遇到真實配股時要核對。
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。
@@ -425,7 +491,8 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 2. **二代健保的進位**：目前元以下四捨五入。另外 ETF 收益分配只有「股利所得」部分要扣，資本利得、
    收益平準金部分不用扣；目前以整筆金額判斷。
 3. **美股股利預扣 30%**：目前自動帶入；若台美租稅協定生效或券商有不同處理，要再調整。
-4. **股利入帳日**：要不要在交易加上 `ex_dividend_date` 欄位（記發放日、用除息日算 TWR）？
+4. ~~**股利入帳日**~~：已由股利自動入帳處理（2026-11-12）：台股股利自動記在除息日（見「2026-11-12 股利自動入帳」），沒有另加
+   `ex_dividend_date` 欄位。使用者自己記在發放日的紀錄，除息日到發放日之間的 TWR 仍會短暫偏低；美股股利仍手動記。
 5. **FIFO 下的配股與分割**：目前按比例分攤到每一個批次（成本不變、每股成本下降）。
 6. **正式登入**：`FORLIOSA_ENV=prod` 時開發登入關閉，而 Email／Google 登入不在這次範圍，
    正式環境暫時無法登入。前端在 401 時顯示說明（開發模式會自動以示範使用者開發登入）。
@@ -458,9 +525,11 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
     依官方股利決議（`cash_sources`）把資本公積發放的部分排除：付款日對上 120 天內最近的除息日（有填每股股利時只對同金額的除息日），
     有股數就用「股數 × 每股資本公積」（元以下捨去），否則依比例；排除後的股利所得未達 2 萬就不扣，達到就以股利所得 × 2.11% 計。
     試算 `rules` 會列出「其中資本公積發放 X 元一般不屬股利所得，不計入」。對不上決議（上櫃沒有決議資料、存檔前的舊股利）時照整筆計算。
-    已記的交易不會自動重算。
+    已記的交易不會自動重算（自動入帳的股利例外：每次同步都依最新的預告與決議重算，見「2026-11-12 股利自動入帳」）。
 22. **股利決議沒有對上除權息預告時**：目前顯示 `status: "resolved"`、`ex_dividend_date: null`，包括「其實已在存檔前除權息」的舊決議
     （例如台積電 2025Q4）。若前端覺得混淆，可以只顯示董事會日期在最近 N 天內的決議，請決定 N。
+23. **刪除或改過的自動股利沒辦法恢復**：刪除（或修改）一筆自動入帳的股利後，略過紀錄永久保留，目前沒有端點列出或清除；使用者只能自己新增一筆。
+    建議：先維持現狀，等有人反映再加 `GET /auto-dividend-skips` 與 `DELETE /auto-dividend-skips/{id}`（刪掉後下一次同步就補回），前端放在帳戶設定裡。
 
 ## AI（M4，2026-11-12）
 
