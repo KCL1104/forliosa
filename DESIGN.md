@@ -1,257 +1,332 @@
 ---
 name: Forliosa
-description: 以台股為主的投資管理——首頁簡潔、細節頁密集；資料狀態「蓋章為憑」。
+description: 以台股為主的持倉帳本——像聯絡簿一樣一行一行排好的帳，旁邊坐著先寫草稿、等你簽名的 AI。
 colors:
-  ground-stone: "oklch(0.972 0.005 195)"
-  surface-card: "oklch(0.996 0.002 195)"
-  ink: "oklch(0.23 0.025 262)"
-  ink-muted: "oklch(0.47 0.018 255)"
-  hairline: "oklch(0.92 0.007 215)"
-  border: "oklch(0.885 0.009 215)"
-  muted: "oklch(0.945 0.007 205)"
-  stamp-blue: "oklch(0.44 0.135 259)"
-  stamp-blue-tint: "oklch(0.935 0.022 255)"
-  rail-indigo: "oklch(0.255 0.05 263)"
-  rail-active: "oklch(0.345 0.07 262)"
-  seal-vermilion: "oklch(0.565 0.19 33)"
-  price-red: "oklch(0.545 0.205 26)"
-  price-green: "oklch(0.5 0.13 152)"
-  amber: "oklch(0.62 0.13 75)"
-  destructive: "oklch(0.5 0.17 30)"
-  chart-mine: "oklch(0.494 0.141 258.8)"
-  chart-benchmark: "oklch(0.66 0.02 230)"
-  chart-ochre: "oklch(0.659 0.136 68.8)"
-  chart-teal: "oklch(0.624 0.105 194.9)"
-  chart-violet: "oklch(0.546 0.175 285.2)"
-  chart-magenta: "oklch(0.621 0.163 346.6)"
-  band-1: "oklch(0.955 0.02 245)"
-  band-5: "oklch(0.72 0.1 259)"
-  dark-ground: "oklch(0.175 0.014 258)"
-  dark-card: "oklch(0.212 0.016 258)"
-  dark-ink: "oklch(0.935 0.008 250)"
-  dark-stamp-blue: "oklch(0.74 0.11 256)"
-  dark-rail: "oklch(0.145 0.03 263)"
+  paper: "#fbfbf8"
+  raised: "#ffffff"
+  rule: "#d6dee8"
+  ink: "#1f2a44"
+  ink-2: "#5b6478"
+  ctl: "#838ca0"
+  hov: "#f2f4f8"
+  act-hover: "#0f1730"
+  ai: "#5b3fa0"
+  ai-wash: "#f5f2fb"
+  ai-rule: "#a896d6"
+  price-red: "#c42b2b"
+  price-green: "#12773e"
+  chart-bench: "#8a93a6"
+  chart-blue: "#3b6bb5"
+  chart-ochre: "#a87a26"
+  chart-grid: "#e6ebf1"
+  band-cheap: "#eef2f7"
+  band-dear: "#95a8c3"
+  night-paper: "#14171f"
+  night-raised: "#1b2029"
+  night-rule: "#2a3140"
+  night-ink: "#e6e9f0"
+  night-ink-2: "#97a0b4"
+  night-ctl: "#5e6880"
+  night-ai: "#a996f0"
+  night-ai-wash: "#1d1a2c"
+  night-ai-rule: "#5f4f9a"
+  night-price-red: "#ff6b6b"
+  night-price-green: "#4cc38a"
 typography:
-  hero:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, PingFang TC, Microsoft JhengHei, sans-serif"
-    fontSize: "3rem"
-    fontWeight: 600
-    lineHeight: 1
+  total:
+    fontFamily: "Noto Sans TC Variable, PingFang TC, Microsoft JhengHei, sans-serif"
+    fontSize: "4rem"
+    fontWeight: 500
+    lineHeight: 1.05
     letterSpacing: "-0.02em"
+  quote:
+    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontSize: "3rem"
+    fontWeight: 500
+    lineHeight: 1.15
+    letterSpacing: "-0.015em"
+  total-mobile:
+    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontSize: "2.5rem"
+    fontWeight: 500
+    lineHeight: 1.2
+    letterSpacing: "-0.015em"
   page-title:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
-    fontSize: "1.75rem"
-    fontWeight: 600
+    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontSize: "2rem"
+    fontWeight: 700
     lineHeight: 1.25
     letterSpacing: "-0.01em"
-  figure:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
+  mobile-title:
+    fontFamily: "Noto Sans TC Variable, sans-serif"
     fontSize: "1.375rem"
-    fontWeight: 600
+    fontWeight: 700
     lineHeight: 1.3
   section-title:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
-    fontSize: "1rem"
-    fontWeight: 600
-    lineHeight: 1.6
+    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontSize: "1.25rem"
+    fontWeight: 700
+    lineHeight: 1.4
+  row-name:
+    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontSize: "1.0625rem"
+    fontWeight: 500
+    lineHeight: 1.35
   body:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
+    fontFamily: "Noto Sans TC Variable, sans-serif"
+    fontSize: "0.9375rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  body-mobile:
+    fontFamily: "Noto Sans TC Variable, sans-serif"
     fontSize: "1rem"
     fontWeight: 400
-    lineHeight: 1.6
+    lineHeight: 1.5
   dense:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
+    fontFamily: "Noto Sans TC Variable, sans-serif"
     fontSize: "0.875rem"
     fontWeight: 400
-    lineHeight: 1.55
+    lineHeight: 1.5
   meta:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
+    fontFamily: "Noto Sans TC Variable, sans-serif"
     fontSize: "0.8125rem"
     fontWeight: 400
-    lineHeight: 1.55
-  chop:
-    fontFamily: "Source Sans 3 Variable, Noto Sans TC Variable, sans-serif"
+    lineHeight: 1.5
+  micro:
+    fontFamily: "Noto Sans TC Variable, sans-serif"
     fontSize: "0.75rem"
-    fontWeight: 600
-    lineHeight: 1
-    letterSpacing: "0.06em"
+    fontWeight: 400
+    lineHeight: 1.45
+  ai-greeting:
+    fontFamily: "LXGW WenKai TC, Kaiti TC, BiauKai, serif"
+    fontSize: "1.5rem"
+    fontWeight: 400
+    lineHeight: 1.4
+  ai-voice:
+    fontFamily: "LXGW WenKai TC, Kaiti TC, BiauKai, serif"
+    fontSize: "1.25rem"
+    fontWeight: 400
+    lineHeight: 1.5
+  ai-greeting-mobile:
+    fontFamily: "LXGW WenKai TC, Kaiti TC, BiauKai, serif"
+    fontSize: "2rem"
+    fontWeight: 400
+    lineHeight: 1.3
 rounded:
-  chop: "3px"
-  sm: "4px"
-  md: "6px"
-  lg: "8px"
-  xl: "10px"
+  tag: "2px"
+  control: "4px"
+  group: "6px"
+  card-mobile: "12px"
+  pill: "9999px"
+  sign: "0px"
 spacing:
-  gutter-mobile: "16px"
-  gutter-desktop: "32px"
-  panel-x: "20px"
+  gutter-mobile: "20px"
+  gutter-tablet: "32px"
+  gutter-desktop: "56px"
+  ai-panel: "400px"
+  row: "60px"
+  row-mobile: "72px"
+  section: "40px"
   stack: "16px"
-  section: "24px"
 components:
   button-primary:
-    backgroundColor: "{colors.stamp-blue}"
-    textColor: "{colors.surface-card}"
-    rounded: "{rounded.md}"
-    height: "36px"
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.control}"
+    height: "40px"
     padding: "0 12px"
+  button-primary-hover:
+    backgroundColor: "{colors.act-hover}"
   button-outline:
-    backgroundColor: "{colors.ground-stone}"
+    backgroundColor: "{colors.paper}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-    height: "36px"
+    rounded: "{rounded.control}"
+    height: "40px"
+    padding: "0 12px"
   segmented-active:
-    backgroundColor: "{colors.stamp-blue-tint}"
-    textColor: "{colors.stamp-blue}"
-    rounded: "{rounded.md}"
-    height: "32px"
-  chop:
-    textColor: "{colors.stamp-blue}"
-    rounded: "{rounded.chop}"
-    typography: "{typography.chop}"
-    height: "22px"
-    padding: "0 5.6px"
-  panel:
-    backgroundColor: "{colors.surface-card}"
-    rounded: "{rounded.xl}"
-    padding: "12px 20px 16px"
-  input:
-    backgroundColor: "{colors.surface-card}"
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.control}"
+    height: "34px"
+    padding: "0 16px"
+  suggestion-card:
+    backgroundColor: "{colors.raised}"
     textColor: "{colors.ink}"
-    rounded: "{rounded.md}"
-    height: "40px"
-  nav-rail-item-active:
-    backgroundColor: "{colors.rail-active}"
-    textColor: "{colors.surface-card}"
-    rounded: "{rounded.md}"
-    height: "40px"
+    rounded: "{rounded.group}"
+    height: "52px"
+    padding: "0 14px 0 16px"
+  composer:
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.ink}"
+    rounded: "{rounded.group}"
+    padding: "12px 10px 10px 14px"
+  draft-card:
+    backgroundColor: "{colors.ai-wash}"
+    textColor: "{colors.ai}"
+    rounded: "{rounded.sign}"
+  sign-box:
+    backgroundColor: "{colors.ink}"
+    textColor: "{colors.paper}"
+    rounded: "{rounded.sign}"
+    width: "76px"
+    height: "60px"
+  demo-tag:
+    textColor: "{colors.ink}"
+    rounded: "{rounded.tag}"
+    typography: "{typography.micro}"
+    height: "20px"
+    padding: "0 5px"
+  dock-tabs:
+    backgroundColor: "{colors.raised}"
+    textColor: "{colors.ink-2}"
+    rounded: "{rounded.pill}"
+    height: "64px"
+  ask-ai:
+    backgroundColor: "{colors.ai-wash}"
+    textColor: "{colors.ai}"
+    rounded: "{rounded.pill}"
+    width: "86px"
+    height: "64px"
 ---
 
 # Design System: Forliosa
 
-> 由 `/impeccable document` 從已建成的程式碼記錄（`apps/web/src/styles/globals.css`、`apps/web/src/components/`）。權威來源是程式碼；這份文件描述它。
-> 方向來源：`apps/web/.impeccable/surfaces/src-pages-home-homepage-tsx.md` 的 Direction contract（印鑑與朱泥，seed:bf59ff6fbd34ea97）。concept-seed 第一次因 impeccable.style 被封鎖而降級；網路開通後以同一 seed 重擲取得 6 個 challengers，沒有一個在兩軸都勝出，因此保留指定方向並加入 6 條 RAISE（見該檔）。
+> 由 `/impeccable document`（降級的 documenter 流程，前端子代理執行）從 2026-11-12 重新建成的程式碼記錄；取代舊的「印鑑與朱泥」世界。權威來源是程式碼：token 在 `apps/web/src/styles/globals.css`，世界元件在 `apps/web/src/components/`（Section、DemoTag、Sparkline、Segmented）與 `apps/web/src/ai/`（AI 面板、草稿卡、簽名格）。
+> 方向來源：`apps/web/.impeccable/surfaces/src-pages-ledger-ledgerpage-tsx.md` 的 Direction contract（聯絡簿，seed:634d2915cfbf2a24），決策稿在 `.impeccable/mocks/decision/r4-*`。
 
 ## Overview
 
-**North star：蓋章為憑（The Bank-Counter Seal）。** Forliosa 借用台灣銀行臨櫃的印鑑與印台：存摺上蓋過章的那一行才算數。介面把這個儀式用在**資料狀態**——示範資料、預估、已入帳、即將推出、M4 推出——一律以方形「章」標示；儲存交易時，通知裡的「已入帳」章會「蓋下」。
+**Creative North Star: "家長簽名的聯絡簿（The Signed Contact Book）"**
 
-這是 Operate 介面：使用者先要知道東西在哪，才注意到世界觀。世界只提供四樣東西：**字型、色盤、密度、一個招牌動作（章）**。導覽、表格、按鈕、對話框都是標準元件（shadcn/ui + Base UI）。
+帳本就是首頁。介面借用台灣學生每天帶回家的聯絡簿：淺色是紙白、深色是夜間筆記本；1px 藍灰格線就是結構，表格不包卡片；文字與動作用藍黑原子筆的墨色寫。AI 是另一支筆——老師的紫色筆，取代紅筆，因為紅色在這個產品代表「漲」。AI 說的話用文楷，看起來像手寫在簿子上的評語。AI 做的每件事都先寫成草稿（紫色虛線），使用者在方形「簽名｜確認入帳」格按下才生效；簽名後格子裡留下使用者的字。
 
-混合密度（產品負責人指定）：首頁像 Google Finance——大數字、留白、少量卡片；持股、個股、交易、績效像 Yahoo 股市與 Shioaji Pro——表格與圖表為主，細線分隔、緊湊間距（RAISE：日本高密度網站的密度勇氣）。
+這是 Operate 介面：導覽、表格、分段、選單都是使用者早就會用的標準元件。世界只提供四樣東西：**字型**（Noto Sans TC＋只給 AI 的文楷）、**色盤**（紙、格線、藍黑墨、紫、價格紅綠）、**密度**（Google Finance 的留白主數字＋一行一格的帳）、**一個招牌動作**（簽名格）。
 
-**Key characteristics**
-- 青田石冷灰底＋靛青墨色側欄（兩種主題都是深色側欄）。
-- 印泥藍是唯一的操作色；朱泥紅只在品牌章；紅綠只表示漲跌。
-- 全站等寬數字，大數字改用比例數字。
-- 細線（hairline）而非陰影區隔；卡片不巢狀。
+**Key Characteristics:**
+- 紙白（深色：夜間筆記本）的底，1px 藍灰格線分隔每一行，沒有卡片包表格。
+- 藍黑墨是唯一的操作色：主要按鈕、選取中的分段、焦點框。
+- 紫色只屬於 AI：問候、建議問題的圖示、回答、草稿卡、「待簽名」、「問 AI」按鈕。
+- 紅綠只表示價格的漲跌，永遠配 ▲▼。
+- 全站等寬數字；報價依升降單位決定小數位。
 
 ## Colors
 
-色彩策略：**Restrained＋專責**。中性色取自印章石（青田石）與墨，一個操作色（印泥藍），其餘顏色各有唯一的工作（RAISE：機場黃色導視的「顏色專責」紀律）。
+色彩策略：**Restrained，兩支筆**。中性色是紙與格線，操作是藍黑墨，AI 是紫，價格是紅綠；每個顏色只有一個工作。
 
 ### Primary
-- **印泥藍 Stamp Blue**（`oklch(0.44 0.135 259)`；深色 `oklch(0.74 0.11 256)`）：主要按鈕、選取狀態、焦點環、「章」的線條、圖表裡「我的」系列。藍色印台是銀行與郵局日期章的顏色。
-- **印泥藍淡色**（`oklch(0.935 0.022 255)`）：選取中的分段按鈕、hover 列。
+- **藍黑墨 Ink**（淺色 `ink`、深色 `night-ink`）：所有文字、主要按鈕底、選取中的分段、焦點框、圖表上「我的」線、均價線。按下時更深（`act-hover`）。
+- **淡墨 Ink 2**（`ink-2`、`night-ink-2`）：標籤、日期、單位、次要說明。對比 5.7:1（淺）／6.8:1（深）。
+
+### Secondary
+- **老師的紫 AI**（`ai`、`night-ai`）：AI 的字、圖示與草稿卡的數字。**紫色淡底**（`ai-wash`）是草稿卡與「問 AI」按鈕的底；**紫色虛線**（`ai-rule`）是草稿卡與「待簽名」的框。
+
+### Tertiary
+- **價格紅綠**（`price-red`／`price-green`，深色 `night-price-*`）：只用在價格、漲跌幅與由價格直接造成的損益（今日損益、未實現）。依 `<html data-convention>` 對應到漲／跌：預設 `tw` 紅漲綠跌，可切換 `us` 綠漲紅跌。
 
 ### Neutral
-- **青田石底 Stone Ground**（`oklch(0.972 0.005 195)`）：頁面底色，冷灰帶一點綠青。
-- **卡面 Surface**（`oklch(0.996 0.002 195)`）：Panel、表格、輸入框。
-- **墨 Ink**（`oklch(0.23 0.025 262)`）與 **淡墨**（`oklch(0.47 0.018 255)`，對比 6.7:1）。
-- **靛青墨側欄 Rail**（`oklch(0.255 0.05 263)`；深色 `oklch(0.145 0.03 263)`）：桌面左側欄，主題無關。
-- **細線 Hairline**（`oklch(0.92 0.007 215)`）：列與列之間；**Border**（`oklch(0.885 0.009 215)`）：Panel 外框。
-
-### Semantic
-- **漲 / 跌**：`--rise`／`--fall` 依 `<html data-convention>` 對應到紅（`oklch(0.545 0.205 26)`）或綠（`oklch(0.5 0.13 152)`）。預設 `tw` 紅漲綠跌，可切換 `us`。對比皆 ≥ 4.6:1。
-- **朱泥 Seal Vermilion**（`oklch(0.565 0.19 33)`）：**只**用在品牌章。
-- **琥珀**：自選星號（圖形，非文字）。**Destructive**：刪除確認。
+- **紙白 Paper**（`paper`）／**夜間筆記本**（`night-paper`）：頁面底色。
+- **白紙 Raised**（`raised`、`night-raised`）：建議卡、輸入框、手機總資產卡、浮動分頁。
+- **格線 Rule**（`rule`、`night-rule`）：列與列、區塊標題底線、AI 面板左側的雙線。
+- **鉛筆灰 Ctl**（`ctl`、`night-ctl`）：控制項的 1px 外框（分段、輸出按鈕、輸入框），對比 3.2:1。
+- **淡墨底 Hov**（`hov`）：hover 列、次要圓形按鈕底。
 
 ### Data visualization
-- 分類色（配置圓環，固定順序，不依排名重新上色）：印泥藍 → 赭黃 → 青綠 → 紫 → 洋紅 → 石灰（第 6 塊固定是「其他」）。已用 dataviz `validate_palette.js` 驗證：淺色與深色都通過亮度帶、彩度下限、相鄰 CVD 與一般視覺下限、對比 3:1。
-- 「我的」＝印泥藍實線＋8% 漸層填色；「基準」＝石灰細線。
-- 估值河流圖：單一色相 5 階色帶 `--band-1…5`（便宜→昂貴），**不用紅綠**避免與漲跌混淆（RAISE：暗房曝光紀錄的固定階數）。
+- 「我的」＝墨色實線；「基準／比較」＝鉛筆灰（`chart-bench`）虛線；均線 MA5／20／60 ＝赭（`chart-ochre`）／藍筆（`chart-blue`）／鉛筆灰。
+- 估值河流圖：單一藍灰色相 5 階（`band-cheap` → `band-dear`），便宜到昂貴，不用紅綠。
+- 法人買賣超：買超墨色、賣超鉛筆灰，靠零軸位置與正負號辨識（不是價格，所以不用紅綠）。
+- 成交量柱用 30% 的漲跌色（它跟著當天價格方向）。
 
 ### Named Rules
-**The One Job Rule.** 每個顏色只有一個工作。印泥藍不拿來表示「好」，紅色不拿來當品牌，綠色不拿來表示「成功」。
-**The Glyph Pair Rule.** 漲跌顏色一定配 ▲▼（以及螢幕閱讀器的「上漲／下跌」），色弱也能分辨；平盤用淡墨、不加符號。
+**The Two Pens Rule.** 墨色是使用者的筆，紫色是 AI 的筆。紫色出現的地方一定是 AI 說的話或 AI 做的事；AI 以外的東西不准用紫色。
+**The Price-Only Red Rule.** 紅綠只給價格與由價格造成的損益，並且一定配 ▲▼（與螢幕閱讀器的「上漲／下跌」）。營收年增、法人買賣超、刪除按鈕都不用紅綠。
+**The Rule-Is-Structure Rule.** 結構用 1px 格線表達：列底線、區塊標題底線、鍵值格的格線。表格不包卡片，卡片不巢狀。
 
 ## Typography
 
-**字型**：Source Sans 3（拉丁字母與數字，含 `tnum`）＋ Noto Sans TC（思源黑體）。兩者同一設計血統——思源黑體的拉丁部分就是從 Source Sans 衍生——所以混排時字重與字高一致。兩者都以 `@fontsource-variable` 自架（Noto Sans TC 依 unicode-range 切成約 100 個子集，只載入用到的字）。
+**字型**：Noto Sans TC Variable（介面、數字，以 `@fontsource-variable/noto-sans-tc` 自架，依 unicode-range 只載入用到的字）；LXGW WenKai TC（文楷，只給 AI 的話，以 `@fontsource/lxgw-wenkai-tc` 自架，同樣依 unicode-range 子集載入）。
 
-**Character**：一個家族撐起所有角色（Operate：不用 display face）。層級靠字重、色調與細線，不靠更多字級（RAISE：航空時刻表的單一字級紀律）。
+**Character**：一個無襯線家族撐起整個帳本；文楷是唯一的第二個聲音，而且只屬於 AI。層級靠字級、字重與格線，不靠顏色。
 
-### Hierarchy（固定 rem，比例約 1.2）
-- **Hero**（600，2.25rem 手機／3rem 桌面，比例數字）：總資產、個股現價、目前本益比。
-- **Page title**（600，1.75rem）：每頁一個 h1。
-- **Figure**（600，1.375rem）：今日損益、指標格。
-- **Section title**（600，1rem）：Panel 標題。
-- **Body**（400，1rem／1.6）：說明文字，行長 ≤ 65ch（`max-w-prose`）。
-- **Dense**（400，0.875rem）：表格、清單、表單。
-- **Meta**（400，0.8125rem）：日期、代號、補充說明。
-- **Chop**（600，0.75rem，字距 0.06em）：章內文字。
+### Hierarchy
+- **Total**（500，64px／手機 40px，比例數字）：總資產。前面的「NT$」用 24px 淡墨。
+- **Quote**（500，48px／手機 40px）：個股現價（NumberFlow）。
+- **Page title**（700，32px／手機 24px）：個股名稱、設定、群組。
+- **Section title**（700，20px）：區塊標題，底下一條格線。
+- **Row name**（500，17px）：持倉表與清單的名稱；數字欄同為 17px。
+- **Body**（400，15px 桌面／16px 手機，行高 1.5）。
+- **Dense**（14px）：明細、圖例、按鈕。**Meta**（13px，淡墨）：表頭、代號・股數、日期。**Micro**（12px）：免責、資料來源、示範資料。
+- **AI greeting**（文楷 400，24px；手機 32px）與 **AI voice**（文楷 400，20px）：問候、回答、「為什麼」那一行、分頁第一行。
 
 ### Named Rules
-**The Tabular Ledger Rule.** `body` 全站 `font-variant-numeric: tabular-nums`，金額、股數、日期在表格裡直向對齊；只有獨立的大數字（`.hero-figure`）改用比例數字。負號一律用 U+2212「−」。
-**The 16px Input Rule.** 輸入框在觸控裝置一律 16px（避免 iOS 放大頁面）。
+**The Tabular Ledger Rule.** `body` 全站 `tabular-nums`；只有獨立的大數字（總資產、現價）用比例數字。負號一律 U+2212「−」。
+**The Tick Decimal Rule.** 報價的小數位依台股升降單位：≥ 500 元 0 位（1,085）、0.1／0.5 檔 1 位且整數不帶小數（236.5、398）、0.01／0.05 檔 2 位（22.40）、美股 2 位。漲跌點數跟著現價的位數。
+**The 16px Input Rule.** 觸控裝置上輸入框一律 16px 以上（手機「搜尋或提問」17px），避免 iOS 放大頁面。
 
 ## Layout
 
-- **Shell**：桌面 ≥ 1024px：232px 靛青側欄＋sticky 頂部列（⌘K 搜尋、隱私、主題、記一筆）＋內容最大寬 1280px、左右 32px。手機：精簡頂部列（品牌章、搜尋、隱私、主題）＋底部五分頁（總覽、持股、自選、AI、更多），內容左右 16px，底部預留 `88px + safe-area`。
-- **首頁**：Hero 兩欄（總資產與損益｜今天誰影響最大）→ 2/3 報酬走勢＋1/3 AI 今日重點 → 配置／除權息／前五大持股三欄。
-- **細節頁**：頁首（標題＋一句說明＋動作）→ 一列篩選（帳戶 select＋分段按鈕）→ 資料。篩選永遠在它影響的資料上方一列（dataviz）。
-- **響應式是結構性的**：表格在 < 768px 收合成卡片；個股分頁列水平捲動；交易表單桌面 Dialog（左右兩欄：欄位｜稅費試算），手機 Vaul 抽屜（上下堆疊）。
-- 間距節奏：4 的倍數；Panel 內 20px、Panel 間 16px、區塊間 24px；標題上方空間大於下方。
+- **桌面（≥ 1024px）**：頂部列 64px（字標、帳本／群組、搜尋股票 ⌘K、隱私、頭像），左側主欄最大 1180px、左右 56px（1280 以下 32px），右側 AI 面板 400px（1024–1279 為 340px），sticky 在頂部列下、可收合成 56px 的窄欄並記住狀態。主欄隨視窗捲動。
+- **手機（< 1024px）**：標題列 60px（字標、隱私、頭像），內容左右 20px；底部浮動膠囊分頁「帳本｜群組｜紀錄」（64px，最大寬 520px）＋獨立的紫色「問 AI」（86×64px），下方預留 104px＋safe area，背後一段紙色漸層讓內容淡出。
+- **帳本**：主數字列（左：總資產、今日、總損益；右：近 1 個月走勢）→ 一行「本週 N 件事」（上下格線）→ 分段「持倉・交易・股利・績效」＋待簽名＋自訂 → 內容。持倉表 5 欄、列高 60px（手機兩行列 72px）；觀察區是同一張表的第二個 tbody。
+- **個股頁**：麵包屑 → 名稱 → 現價與漲跌 → 時間、參考價、漲跌停 → 「為什麼」一行（只在異常時）→ 我的部位（上下格線）→ 走勢圖（工具列、240／320px、區間）→ sticky 分頁列「總覽・估值・財務・籌碼・股利・事件」→ 分頁內容。
+- **節奏**：4 的倍數；區塊之間 40px，標題上方留白大於下方。鍵值格 3 欄（手機 2 欄），每格 44px 以上。
 
 ## Elevation & Depth
 
-平面系統。層級用**底色差＋細線**表達：青田石底 → 卡面 → muted 區塊（例如稅費試算欄）。陰影只出現在浮起來的東西：tooltip／popover／toast（`shadow-md`），對話框用墨色 40% 遮罩，**不用 backdrop blur**（shadcn nova 預設的玻璃效果已移除）。
+平的。層級用紙色差（紙白 → 白紙）＋格線表達。陰影只出現在浮起來的東西：手機浮動分頁與「問 AI」、選單、popover、toast，共用一種柔和投影（0 6px 18px ＋ 0 1px 2px，墨色 10%）。對話框用墨色 32% 遮罩，不用背景模糊。
 
 ## Shapes
 
-- 方肩小圓角：控制項 6px、Panel 10px、章 3px。像印章的方肩，不是藥丸。
-- 唯一的圓：圖表資料點、甜甜圈、開關。
+- 方肩：控制項 4px、分段外框與建議卡 6px、示範資料標記 2px。
+- 手機才有的圓：總資產卡與建議卡 12px、浮動分頁與「問 AI」、手機輸入框與動作膠囊（全圓）。
+- 簽名格與草稿卡是直角（0px）——表單上的方格，不是按鈕。
 
 ## Components
 
-所有基礎元件來自 shadcn/ui（style `base-nova`、Base UI primitives），依本系統改寫：見 `apps/web/src/components/ui/`。
-
-### Chop 章（招牌元件）
-`apps/web/src/components/chop.tsx`、`.chop`：1.5px 印泥藍線框、3px 圓角、12px 600 字、字距 0.06em、高 22px。語氣：`ink`（資料狀態）、`muted`（類型、里程碑）、`rail`（側欄）。`press` 變體播放「蓋章」：scale 1.12→1＋淡入，180ms `--ease-out`；只在儲存交易成功時出現（toast 的「已入帳」）。
-用途：示範資料（可滑過說明）、預估（稅費試算）、即將除息、交易類型、M2–M5 推出。**不**用在一般標籤或裝飾。
+基礎元件來自 shadcn/ui（Base UI 版），依本系統改寫：`apps/web/src/components/ui/`。
 
 ### Buttons
-Primary＝印泥藍底白字；Outline＝卡面底＋邊框；Ghost＝透明、hover muted。高 36px（觸控 44px）、6px 圓角、`:active` scale 0.97。
+- **Primary**：墨色底、紙色字、4px、高 40px（觸控 44px），按下 scale 0.97。一個畫面最多一個。
+- **Outline**：透明底＋1px 鉛筆灰框，hover 淡墨底。工具列與次要動作。
+- **AI**：紫色淡底＋紫色虛線（「待簽名 N 筆」）。
 
-### Segmented（分段按鈕）
-`components/segmented.tsx`：區間（1D…全部）、分類、設定值。role=radiogroup；選取＝印泥藍淡底＋內框線。
+### Chips
+- **區間選擇**（1日 5日 1月 6月 今年 1年 5年 全部）：文字按鈕，選取＝墨色實底；role=radiogroup、方向鍵切換。
+- **分段**（持倉・交易・股利・績效）：1px 鉛筆灰外框 6px、內距 4px，選取＝墨色實底；role=tablist。
+- **示範資料**：1px 鉛筆灰細框、12px、2px 圓角，可滑過看說明。
 
-### Panel
-`components/section.tsx`：卡面＋外框、10px 圓角、標題列 48px。不巢狀。
+### Cards / Containers
+- 沒有一般卡片。唯一的容器是：建議卡（白紙＋格線框，52px 高，右側紫色問號圖示）、手機總資產卡、草稿卡。
 
 ### Inputs / Fields
-`components/form-field.tsx`：標籤在上、右側提示（例如「= 1,000 股」）、錯誤以 role=alert 讀出。輸入框高 40px、卡面底、焦點 3px 印泥藍環。
+- **輸入框（桌面 AI）**：白紙底、1px 墨色框、6px；兩行文字區＋「＋」（附件與表單）＋送出（墨色方鈕）。焦點 2px 墨色外框。
+- **輸入框（手機「搜尋或提問」）**：56px 全圓、紫色淡底＋紫色細框；輸入代號或名稱時上方即時列出股票。
 
 ### Navigation
-桌面側欄：40px 列、選取＝`rail-active` 底＋白字；尚未推出的項目右側小字標 M2–M5。手機底部分頁：60px 高、選取＝印泥藍＋粗線圖示。
+- 桌面：頂部列文字分頁，選取＝粗體＋2px 墨色底線。搜尋框是一個 360px 的按鈕，打開 ⌘K（cmdk）。
+- 手機：浮動膠囊分頁，選取＝粗體＋圖示後面 52×28 的淡墨圓底。
 
-### Data display
-- `Money`／`Pct`／`Quantity`／`FlowMoney`（`components/finance.tsx`）：處理隱私模式（固定寬度「••••」）、萬／億縮寫（`title` 給完整數字）、漲跌色＋▲▼。
-- 表格：表頭 13px 淡墨、可排序欄有 `aria-sort`、整列可點（Enter 可進入）、第一欄 sticky。
-- 清單列連結 `.row-link`：整列可點、hover muted、按下 scale 0.985。
+### 簽名格 Sign Box（招牌元件）
+`apps/web/src/ai/DraftCard.tsx`：76×60px 直角方格、墨色底、內縮 3px 的細框（像表單上的簽名欄），上一行 12px「簽名」、下一行 14px 粗體「確認入帳」。按下後呼叫 `POST /transactions`（`source: "ai_draft"`），格子變成透明底＋墨色框，裡面以文楷寫出使用者名字的第一個字（墨水由左往右寫出，380ms ease-out），下面一行入帳時間；Sonner 通知附「復原」。
+
+### 草稿卡 Draft Card
+紫色淡底＋紫色虛線（簽名後變實線）：標題「買進 元大台灣50 0050」、成交日與帳戶、2×2 鍵值格（股數、成交價、手續費、證交稅；股利為總額、二代健保、預扣稅、手續費）、合計（20px 粗體紫）、說明行（沒寫價格／單位、賣超持股）、「怎麼算的 ⌄」（稅費規則）、修改（原地改股數、價格、日期、帳戶）、簽名格。
+
+### AI 面板 AI Panel
+頭部「問 AI」＋新對話・紀錄・收合；首頁狀態：一行文楷問候、最多 3 個依頁面與資料自動出現的建議問題（不加任何說明字樣）、常用動作（記一筆交易・匯入對帳單・股利入帳・更多）；對話狀態：使用者的話靠右（白紙小框）、AI 的話紫色文楷、草稿卡跟在後面；底部輸入框＋一行免責。
 
 ## Do's and Don'ts
 
 ### Do:
-- **Do** 用章標示資料狀態（示範、預估、即將推出），並讓章可以被說明（tooltip）。
-- **Do** 漲跌一律 `--rise`／`--fall`＋▲▼；圖表的系列色用印泥藍／石灰，不用紅綠。
-- **Do** 隱私模式下遮蔽金額與股數，保留百分比；圖表的金額軸整張隱藏並說明原因。
-- **Do** 在空間不足處用萬／億，在明細處用完整數字。
-- **Do** 每個空狀態說明「這裡會出現什麼」並給一個現在能做的動作。
+- **Do** 讓 AI 的每個動作先成為草稿（紫色虛線），使用者簽名才生效，事後可以復原並標示「由 AI 建立」。
+- **Do** 漲跌一律 `--rise`／`--fall`＋▲▼，報價依升降單位決定小數位。
+- **Do** 隱私模式遮蔽金額與股數、隱藏圖上的均價線與買賣點，保留百分比。
+- **Do** 「為什麼」那一行、分頁第一行只在有值得說的事時出現；沒有就不顯示。
+- **Do** 每個空狀態說明為什麼沒有、什麼時候會有，並給一個現在能做的動作。
 
 ### Don't:
-- **Don't** 把朱泥紅用在品牌章以外的地方（紅色在本產品代表「漲」）。
-- **Don't** 用雙 Y 軸；營收與年增率拆成兩張圖。
-- **Don't** 用玻璃模糊、漸層文字、發光數字、紫色漸層卡片。
-- **Don't** 在標題上加 eyebrow／kicker 小標。
-- **Don't** 用陰影區隔一般卡片；用細線。
-- **Don't** 讓 AI 示意內容出現投資結論；示意只能用使用者自己的資料計算，並附免責聲明。
+- **Don't** 在 AI 以外的地方用紫色，也不要在價格以外的地方用紅綠（營收、法人、刪除都不行）。
+- **Don't** 在介面上寫「本頁建議」「依頁面推薦」「AI 摘要」這類說明 AI 機制的字樣；紫色文楷就是唯一的 AI 識別。
+- **Don't** 放 AI 今日簡報、AI 旁註或市場總覽首頁。
+- **Don't** 用卡片包表格、巢狀卡片、陰影區隔一般區塊；用格線。
+- **Don't** 用印章、朱泥、徽記或任何仿實物質感（舊世界已移除）。
+- **Don't** 在標題上加 eyebrow／kicker 小標，也不要用 Unicode 符號代替圖示（▲▼ 是資料符號，不是圖示）。

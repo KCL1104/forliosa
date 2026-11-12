@@ -5,6 +5,8 @@ primary_target: "src/pages/transactions/TransactionsPage.tsx"
 related_targets: []
 ---
 
+> **已被取代（2026-11-12）**：交易紀錄併入帳本的「交易」分段（`src/pages/ledger/TransactionsView.tsx`）；記帳的主要入口改為 AI 草稿＋簽名，表單是備援。本檔只是歷史紀錄。
+
 # Surface: 交易 `/transactions`
 
 `/impeccable shape 交易` 的產出（無人可回答，假設標示〔推論〕）。繼承 shell 視覺世界。

@@ -5,6 +5,8 @@ primary_target: "src/pages/performance/PerformancePage.tsx"
 related_targets: []
 ---
 
+> **已被取代（2026-11-12）**：績效併入帳本的「績效」分段（`src/pages/ledger/PerformanceView.tsx`），世界觀依 `src-pages-ledger-ledgerpage-tsx.md`。本檔只是歷史紀錄。
+
 # Surface: 績效 `/performance`
 
 `/impeccable shape 績效` 的產出（無人可回答，假設標示〔推論〕）。繼承 shell 視覺世界。

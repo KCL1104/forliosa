@@ -5,6 +5,8 @@ primary_target: "src/pages/holdings/HoldingsPage.tsx"
 related_targets: []
 ---
 
+> **已被取代（2026-11-12）**：持股頁併入帳本的「持倉」分段（`src/pages/ledger/HoldingsView.tsx`），世界觀依 `src-pages-ledger-ledgerpage-tsx.md`。本檔只是歷史紀錄。
+
 # Surface: 持股 `/holdings`
 
 `/impeccable shape 持股` 的產出（無人可回答，假設標示〔推論〕）。繼承 shell 的視覺世界（見 home 的 Direction contract），不另立新世界。

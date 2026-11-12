@@ -5,6 +5,8 @@ primary_target: "src/pages/stock/StockPage.tsx"
 related_targets: []
 ---
 
+> **更新（2026-11-12）**：個股頁已依 `docs/research/stock-page-research.md` 第 5 節與產品負責人決定重建（六個分頁：總覽・估值・財務・籌碼・股利・事件；拿掉「我的交易」分頁，改為價格下的部位區塊與圖上標記；1 日線只給持股與自選）。世界觀依 `src-pages-ledger-ledgerpage-tsx.md`（聯絡簿）；本檔以下關於舊世界（章、印泥藍、K 線分頁）的內容已不適用。
+
 # Surface: 個股頁 `/stock/:symbol`
 
 `/impeccable shape 個股頁` 的產出（無人可回答，假設標示〔推論〕）。繼承 shell 視覺世界。

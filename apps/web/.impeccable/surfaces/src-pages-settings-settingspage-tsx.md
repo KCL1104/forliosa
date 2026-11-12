@@ -5,6 +5,8 @@ primary_target: "src/pages/settings/SettingsPage.tsx"
 related_targets: ["src/pages/placeholders/ComingSoonPages.tsx"]
 ---
 
+> **更新（2026-11-12）**：設定頁沿用原本的功能，視覺改為聯絡簿世界（格線分組、墨色選取）；從頭像選單進入（設定・帳戶・外觀）。
+
 # Surface: 設定 `/settings` 與規劃中頁面
 
 `/impeccable shape 設定` 的產出（無人可回答，假設標示〔推論〕）。繼承 shell 視覺世界。

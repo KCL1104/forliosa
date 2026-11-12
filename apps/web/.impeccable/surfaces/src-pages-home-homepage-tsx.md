@@ -5,6 +5,8 @@ primary_target: "src/pages/home/HomePage.tsx"
 related_targets: ["src/app/AppShell.tsx"]
 ---
 
+> **已被取代（2026-11-12）**：首頁改為帳本（`src/pages/ledger/LedgerPage.tsx`），方向合約見 `src-pages-ledger-ledgerpage-tsx.md`（聯絡簿）。本檔的「印鑑與朱泥」方向與內容只是歷史紀錄，不再適用。
+
 # Surface: App shell + 總覽（首頁）
 
 `/impeccable shape 總覽` 的產出（無人可回答：子代理依需求文件推論，假設標示〔推論〕）。

@@ -1,115 +1,559 @@
 {
   "schemaVersion": 2,
-  "generatedAt": "2026-11-11T16:16:56.487300+00:00",
+  "generatedAt": "2026-11-12T04:40:34.571057+00:00",
   "title": "Design System: Forliosa",
   "extensions": {
     "colorMeta": {
-      "stamp-blue": {
+      "paper": {
+        "role": "neutral",
+        "displayName": "紙白",
+        "canonical": "oklch(98.7% 0.004 106.5)",
+        "tonalRamp": [
+          "#121211",
+          "#292927",
+          "#424241",
+          "#636361",
+          "#868684",
+          "#ababa9",
+          "#d1d1cf",
+          "#eeeeed"
+        ]
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "白紙",
+        "canonical": "oklch(100.0% 0.000 89.9)",
+        "tonalRamp": [
+          "#121212",
+          "#292929",
+          "#424242",
+          "#636363",
+          "#868686",
+          "#ababab",
+          "#d1d1d1",
+          "#eeeeee"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "格線",
+        "canonical": "oklch(89.7% 0.016 253.9)",
+        "tonalRamp": [
+          "#0f1215",
+          "#25292e",
+          "#3e4349",
+          "#5d646c",
+          "#80878f",
+          "#a6abb3",
+          "#cdd1d7",
+          "#ebeff4"
+        ]
+      },
+      "ink": {
         "role": "primary",
-        "displayName": "印泥藍 Stamp Blue",
-        "canonical": "oklch(0.44 0.135 259)",
+        "displayName": "藍黑墨",
+        "canonical": "oklch(28.8% 0.050 265.9)",
         "tonalRamp": [
-          "oklch(0.22 0.07 259)",
-          "oklch(0.32 0.1 259)",
-          "oklch(0.44 0.135 259)",
-          "oklch(0.55 0.13 258)",
-          "oklch(0.66 0.11 257)",
-          "oklch(0.77 0.08 256)",
-          "oklch(0.87 0.045 255)",
-          "oklch(0.95 0.02 255)"
+          "#0c111d",
+          "#212939",
+          "#384258",
+          "#57637f",
+          "#7986a3",
+          "#9fabc4",
+          "#c8d1e6",
+          "#e7efff"
         ]
       },
-      "ground-stone": {
-        "role": "neutral",
-        "displayName": "青田石 Stone Ground",
-        "canonical": "oklch(0.972 0.005 195)",
+      "ink-2": {
+        "role": "primary",
+        "displayName": "淡墨",
+        "canonical": "oklch(50.3% 0.034 266.1)",
         "tonalRamp": [
-          "oklch(0.2 0.01 200)",
-          "oklch(0.32 0.01 200)",
-          "oklch(0.45 0.01 200)",
-          "oklch(0.58 0.01 200)",
-          "oklch(0.7 0.008 200)",
-          "oklch(0.82 0.007 200)",
-          "oklch(0.91 0.006 198)",
-          "oklch(0.972 0.005 195)"
+          "#0e111a",
+          "#242934",
+          "#3c4251",
+          "#5b6376",
+          "#7d8699",
+          "#a3abbc",
+          "#cbd1df",
+          "#e9effa"
         ]
       },
-      "rail-indigo": {
+      "ctl": {
         "role": "neutral",
-        "displayName": "靛青墨 Rail Indigo",
-        "canonical": "oklch(0.255 0.05 263)"
+        "displayName": "鉛筆灰",
+        "canonical": "oklch(64.0% 0.032 266.2)",
+        "tonalRamp": [
+          "#0e1119",
+          "#242933",
+          "#3c4250",
+          "#5b6375",
+          "#7e8698",
+          "#a4abbb",
+          "#cbd1de",
+          "#eaeef9"
+        ]
       },
-      "seal-vermilion": {
-        "role": "tertiary",
-        "displayName": "朱泥 Seal Vermilion（品牌章專用）",
-        "canonical": "oklch(0.565 0.19 33)"
+      "hov": {
+        "role": "neutral",
+        "displayName": "淡墨底",
+        "canonical": "oklch(96.7% 0.006 264.5)",
+        "tonalRamp": [
+          "#111213",
+          "#28292b",
+          "#414245",
+          "#626366",
+          "#848689",
+          "#a9abae",
+          "#d0d1d3",
+          "#edeef0"
+        ]
+      },
+      "act-hover": {
+        "role": "primary",
+        "displayName": "深墨（按下）",
+        "canonical": "oklch(21.2% 0.051 268.5)",
+        "tonalRamp": [
+          "#0d111e",
+          "#22283a",
+          "#394258",
+          "#58637f",
+          "#7a86a3",
+          "#a0aac4",
+          "#c8d1e6",
+          "#e7eeff"
+        ]
+      },
+      "ai": {
+        "role": "secondary",
+        "displayName": "老師的紫",
+        "canonical": "oklch(45.2% 0.150 292.7)",
+        "tonalRamp": [
+          "#140631",
+          "#2c1b54",
+          "#46327a",
+          "#6850ab",
+          "#8a74d1",
+          "#ad9dec",
+          "#d2c6ff",
+          "#efe6ff"
+        ]
+      },
+      "ai-wash": {
+        "role": "secondary",
+        "displayName": "紫色淡底",
+        "canonical": "oklch(96.6% 0.012 301.3)",
+        "tonalRamp": [
+          "#121114",
+          "#29282c",
+          "#434147",
+          "#646269",
+          "#87858c",
+          "#aca9b0",
+          "#d2d0d5",
+          "#efeef2"
+        ]
+      },
+      "ai-rule": {
+        "role": "secondary",
+        "displayName": "紫色虛線",
+        "canonical": "oklch(71.2% 0.094 296.9)",
+        "tonalRamp": [
+          "#140c24",
+          "#2c2243",
+          "#473965",
+          "#68588f",
+          "#8b7bb4",
+          "#afa2d3",
+          "#d4caf2",
+          "#f1e9ff"
+        ]
       },
       "price-red": {
-        "role": "semantic",
-        "displayName": "漲（台灣慣例）",
-        "canonical": "oklch(0.545 0.205 26)"
+        "role": "tertiary",
+        "displayName": "價格紅",
+        "canonical": "oklch(53.8% 0.189 26.4)",
+        "tonalRamp": [
+          "#320000",
+          "#570001",
+          "#7f0910",
+          "#b22525",
+          "#db524b",
+          "#f8847a",
+          "#ffb3a9",
+          "#ffd7ce"
+        ]
       },
       "price-green": {
-        "role": "semantic",
-        "displayName": "跌（台灣慣例）",
-        "canonical": "oklch(0.5 0.13 152)"
+        "role": "tertiary",
+        "displayName": "價格綠",
+        "canonical": "oklch(50.1% 0.125 152.2)",
+        "tonalRamp": [
+          "#001903",
+          "#003413",
+          "#035027",
+          "#1e7640",
+          "#4a9a64",
+          "#7cbc8e",
+          "#ace0b9",
+          "#d1fbdb"
+        ]
+      },
+      "chart-bench": {
+        "role": "data",
+        "displayName": "基準・鉛筆灰",
+        "canonical": "oklch(66.2% 0.030 265.3)",
+        "tonalRamp": [
+          "#0e1219",
+          "#242933",
+          "#3c424f",
+          "#5b6374",
+          "#7e8697",
+          "#a4abba",
+          "#cbd1dd",
+          "#eaeff9"
+        ]
+      },
+      "chart-blue": {
+        "role": "data",
+        "displayName": "藍筆（MA20）",
+        "canonical": "oklch(53.1% 0.128 258.8)",
+        "tonalRamp": [
+          "#000f2f",
+          "#0b2751",
+          "#1e4177",
+          "#3662a6",
+          "#5a86cc",
+          "#85ace8",
+          "#b3d3ff",
+          "#d5f0ff"
+        ]
+      },
+      "chart-ochre": {
+        "role": "data",
+        "displayName": "赭（MA5、重要時刻）",
+        "canonical": "oklch(61.1% 0.112 78.2)",
+        "tonalRamp": [
+          "#1f0c00",
+          "#3c2300",
+          "#5b3b00",
+          "#845a00",
+          "#a87e36",
+          "#c8a56c",
+          "#eacc9f",
+          "#ffebc6"
+        ]
+      },
+      "chart-grid": {
+        "role": "data",
+        "displayName": "圖表格線",
+        "canonical": "oklch(93.8% 0.010 252.8)",
+        "tonalRamp": [
+          "#101214",
+          "#27292c",
+          "#404346",
+          "#606468",
+          "#82878b",
+          "#a8abaf",
+          "#ced1d5",
+          "#eceff2"
+        ]
+      },
+      "band-cheap": {
+        "role": "data",
+        "displayName": "河流圖・便宜",
+        "canonical": "oklch(96.0% 0.008 253.9)",
+        "tonalRamp": [
+          "#101213",
+          "#27292b",
+          "#404346",
+          "#606467",
+          "#83868a",
+          "#a8abaf",
+          "#cfd1d4",
+          "#edeff1"
+        ]
+      },
+      "band-dear": {
+        "role": "data",
+        "displayName": "河流圖・昂貴",
+        "canonical": "oklch(72.6% 0.045 257.1)",
+        "tonalRamp": [
+          "#0b121c",
+          "#202937",
+          "#374355",
+          "#54647b",
+          "#77879f",
+          "#9eacc1",
+          "#c6d2e3",
+          "#e5effe"
+        ]
+      },
+      "night-paper": {
+        "role": "neutral",
+        "displayName": "夜間・紙白",
+        "canonical": "oklch(20.5% 0.017 268.8)",
+        "tonalRamp": [
+          "#101116",
+          "#27292e",
+          "#3f424a",
+          "#5f636c",
+          "#828690",
+          "#a7abb3",
+          "#ced1d8",
+          "#eceef4"
+        ]
+      },
+      "night-raised": {
+        "role": "neutral",
+        "displayName": "夜間・白紙",
+        "canonical": "oklch(24.3% 0.019 262.1)",
+        "tonalRamp": [
+          "#0f1216",
+          "#26292f",
+          "#3e434a",
+          "#5e636e",
+          "#818691",
+          "#a6abb4",
+          "#cdd1d9",
+          "#ebeff5"
+        ]
+      },
+      "night-rule": {
+        "role": "neutral",
+        "displayName": "夜間・格線",
+        "canonical": "oklch(31.3% 0.029 265.2)",
+        "tonalRamp": [
+          "#0e1218",
+          "#242932",
+          "#3d424f",
+          "#5c6373",
+          "#7e8697",
+          "#a4abb9",
+          "#cbd1dd",
+          "#eaeff8"
+        ]
+      },
+      "night-ink": {
+        "role": "primary",
+        "displayName": "夜間・藍黑墨",
+        "canonical": "oklch(93.4% 0.010 267.4)",
+        "tonalRamp": [
+          "#101214",
+          "#27292c",
+          "#404247",
+          "#616369",
+          "#84868c",
+          "#a9abb0",
+          "#cfd1d5",
+          "#edeef2"
+        ]
+      },
+      "night-ink-2": {
+        "role": "primary",
+        "displayName": "夜間・淡墨",
+        "canonical": "oklch(70.5% 0.031 266.3)",
+        "tonalRamp": [
+          "#0e1119",
+          "#242933",
+          "#3c4250",
+          "#5c6374",
+          "#7e8698",
+          "#a4abba",
+          "#cbd1de",
+          "#eaeef9"
+        ]
+      },
+      "night-ctl": {
+        "role": "neutral",
+        "displayName": "夜間・鉛筆灰",
+        "canonical": "oklch(51.8% 0.040 267.3)",
+        "tonalRamp": [
+          "#0d111b",
+          "#232936",
+          "#3b4253",
+          "#5a6379",
+          "#7c869d",
+          "#a2abbf",
+          "#cad1e1",
+          "#e9eefc"
+        ]
+      },
+      "night-ai": {
+        "role": "secondary",
+        "displayName": "夜間・老師的紫",
+        "canonical": "oklch(72.5% 0.129 292.6)",
+        "tonalRamp": [
+          "#14092c",
+          "#2b1e4e",
+          "#453673",
+          "#6654a1",
+          "#8978c7",
+          "#ac9fe4",
+          "#d2c8ff",
+          "#efe7ff"
+        ]
+      },
+      "night-ai-wash": {
+        "role": "secondary",
+        "displayName": "夜間・紫色淡底",
+        "canonical": "oklch(23.0% 0.035 291.1)",
+        "tonalRamp": [
+          "#111019",
+          "#292733",
+          "#424050",
+          "#636075",
+          "#868398",
+          "#aaa8bb",
+          "#d1cfde",
+          "#eeedf9"
+        ]
+      },
+      "night-ai-rule": {
+        "role": "secondary",
+        "displayName": "夜間・紫色虛線",
+        "canonical": "oklch(48.0% 0.118 291.1)",
+        "tonalRamp": [
+          "#130a2a",
+          "#2a204b",
+          "#43386f",
+          "#64569d",
+          "#877ac2",
+          "#aba1df",
+          "#d1c9fd",
+          "#eee8ff"
+        ]
+      },
+      "night-price-red": {
+        "role": "tertiary",
+        "displayName": "夜間・價格紅",
+        "canonical": "oklch(71.2% 0.181 22.8)",
+        "tonalRamp": [
+          "#300000",
+          "#550009",
+          "#7d0f1b",
+          "#af2a32",
+          "#d75556",
+          "#f58582",
+          "#ffb4af",
+          "#ffd8d3"
+        ]
+      },
+      "night-price-green": {
+        "role": "tertiary",
+        "displayName": "夜間・價格綠",
+        "canonical": "oklch(73.5% 0.136 159.3)",
+        "tonalRamp": [
+          "#001a05",
+          "#003518",
+          "#00522d",
+          "#007848",
+          "#2f9c6b",
+          "#6dbf93",
+          "#a2e2be",
+          "#c9fddf"
+        ]
       }
     },
     "typographyMeta": {
-      "hero": {
-        "displayName": "Hero figure",
-        "purpose": "總資產、現價、目前本益比；比例數字。"
+      "total": {
+        "displayName": "總資產",
+        "purpose": "帳本主數字，比例數字。"
+      },
+      "quote": {
+        "displayName": "現價",
+        "purpose": "個股頁現價（NumberFlow）。"
+      },
+      "total-mobile": {
+        "displayName": "總資產（手機）",
+        "purpose": "手機總資產卡、個股現價。"
+      },
+      "page-title": {
+        "displayName": "頁標題",
+        "purpose": "個股名稱、設定、群組。"
+      },
+      "mobile-title": {
+        "displayName": "手機標題",
+        "purpose": "手機字標與全螢幕標題。"
+      },
+      "section-title": {
+        "displayName": "區塊標題",
+        "purpose": "底下一條格線。"
+      },
+      "row-name": {
+        "displayName": "列名稱",
+        "purpose": "持倉表名稱與數字。"
+      },
+      "body": {
+        "displayName": "內文",
+        "purpose": "桌面 15px。"
+      },
+      "body-mobile": {
+        "displayName": "內文（手機）",
+        "purpose": "手機 16px。"
       },
       "dense": {
-        "displayName": "Dense",
-        "purpose": "表格、清單、表單；等寬數字。"
+        "displayName": "密集",
+        "purpose": "明細、按鈕、圖例。"
       },
-      "chop": {
-        "displayName": "Chop",
-        "purpose": "章內文字：資料狀態。"
+      "meta": {
+        "displayName": "補充",
+        "purpose": "表頭、代號・股數、日期。"
+      },
+      "micro": {
+        "displayName": "微字",
+        "purpose": "免責、資料來源、示範資料。"
+      },
+      "ai-greeting": {
+        "displayName": "AI 問候",
+        "purpose": "文楷，只給 AI。"
+      },
+      "ai-voice": {
+        "displayName": "AI 的話",
+        "purpose": "文楷，回答、為什麼、分頁第一行。"
+      },
+      "ai-greeting-mobile": {
+        "displayName": "AI 問候（手機）",
+        "purpose": "問 AI 全螢幕的大字問候。"
       }
     },
     "shadows": [
       {
-        "name": "float",
-        "value": "0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1)",
-        "purpose": "只用在 tooltip、popover、toast 這些浮起的元素。"
+        "name": "lift",
+        "value": "0 6px 18px rgb(15 23 48 / 0.10), 0 1px 2px rgb(15 23 48 / 0.10)",
+        "purpose": "只給浮起來的東西：手機浮動分頁、問 AI、選單、popover、toast。"
       }
     ],
     "motion": [
       {
         "name": "ease-out",
         "value": "cubic-bezier(0.23, 1, 0.32, 1)",
-        "purpose": "進場、按下回饋、蓋章。"
+        "purpose": "按下回饋、簽名墨水、對話與草稿落下。"
       },
       {
         "name": "ease-drawer",
         "value": "cubic-bezier(0.32, 0.72, 0, 1)",
-        "purpose": "手機抽屜（Vaul）。"
+        "purpose": "手機「問 AI」全螢幕進出（300ms）。"
       },
       {
-        "name": "stamp",
-        "value": "180ms ease-out scale(1.12→1) + opacity",
-        "purpose": "儲存交易成功時「已入帳」章蓋下。"
+        "name": "sign-write",
+        "value": "380ms ease-out clip-path inset(0 100% 0 0) → inset(0)",
+        "purpose": "簽名後使用者的字由左往右寫出（招牌動作，只此一處）。"
       },
       {
-        "name": "press",
-        "value": "140ms ease-out scale(0.97)",
-        "purpose": "按鈕與列的按下回饋。"
+        "name": "note-in",
+        "value": "220ms ease-out opacity 0→1, translateY 6px→0",
+        "purpose": "新的對話、草稿、展開的明細。"
       }
     ],
     "breakpoints": [
       {
-        "name": "sm",
-        "value": "640px"
-      },
-      {
         "name": "md",
-        "value": "768px（表格↔卡片）"
+        "value": "768px"
       },
       {
         "name": "lg",
-        "value": "1024px（側欄、Dialog↔Drawer）"
+        "value": "1024px"
       },
       {
         "name": "xl",
@@ -119,92 +563,126 @@
   },
   "components": [
     {
-      "name": "Chop 章",
-      "kind": "chip",
-      "refersTo": "chop",
-      "description": "資料狀態標記：示範資料、預估、即將推出、已入帳。",
-      "html": "<span class=\"ds-chop\">示範資料</span> <span class=\"ds-chop ds-chop-muted\">M4 推出</span>",
-      "css": ".ds-chop{display:inline-flex;align-items:center;height:22px;padding:0 5.6px;border:1.5px solid currentColor;border-radius:3px;font-size:12px;font-weight:600;letter-spacing:.06em;line-height:1;color:var(--primary,oklch(0.44 0.135 259));white-space:nowrap}.ds-chop-muted{color:var(--muted-foreground,oklch(0.47 0.018 255))}"
-    },
-    {
       "name": "Primary Button",
       "kind": "button",
       "refersTo": "button-primary",
-      "description": "主要動作：記一筆、儲存。",
-      "html": "<button class=\"ds-btn\">＋ 記一筆</button>",
-      "css": ".ds-btn{height:36px;padding:0 12px;border:0;border-radius:6px;background:var(--primary,oklch(0.44 0.135 259));color:#fff;font-size:14px;font-weight:500;transition:transform 140ms cubic-bezier(.23,1,.32,1),background-color 140ms}.ds-btn:hover{background:color-mix(in oklch,var(--primary,oklch(0.44 0.135 259)) 88%,transparent)}.ds-btn:active{transform:scale(.97)}.ds-btn:focus-visible{outline:2px solid var(--ring,oklch(0.52 0.14 258));outline-offset:2px}"
+      "description": "藍黑墨底的主要動作，一個畫面最多一個。",
+      "html": "<button class=\"ds-btn-primary\">記一筆</button>",
+      "css": ".ds-btn-primary{background:var(--act,#1f2a44);color:var(--act-fg,#fbfbf8);border:1px solid transparent;border-radius:4px;height:40px;padding:0 12px;font:500 14px/1 'Noto Sans TC Variable',sans-serif;cursor:pointer;transition:background-color .12s,transform .14s cubic-bezier(.23,1,.32,1)}.ds-btn-primary:hover{background:var(--act-hover,#0f1730)}.ds-btn-primary:active{transform:scale(.97)}.ds-btn-primary:focus-visible{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}"
+    },
+    {
+      "name": "Outline Button",
+      "kind": "button",
+      "refersTo": "button-outline",
+      "description": "1px 鉛筆灰框的次要動作。",
+      "html": "<button class=\"ds-btn-outline\">修改</button>",
+      "css": ".ds-btn-outline{background:transparent;color:var(--ink,#1f2a44);border:1px solid var(--ctl,#838ca0);border-radius:4px;height:40px;padding:0 12px;font:500 14px/1 'Noto Sans TC Variable',sans-serif;cursor:pointer;transition:background-color .12s}.ds-btn-outline:hover{background:var(--hov,#f2f4f8)}.ds-btn-outline:focus-visible{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}"
     },
     {
       "name": "Segmented",
-      "kind": "custom",
-      "refersTo": "segmented-active",
-      "description": "區間與分類切換。",
-      "html": "<div class=\"ds-seg\" role=\"radiogroup\"><button role=\"radio\" aria-checked=\"false\">1M</button><button role=\"radio\" aria-checked=\"true\">1Y</button><button role=\"radio\" aria-checked=\"false\">全部</button></div>",
-      "css": ".ds-seg{display:flex;gap:2px}.ds-seg button{height:32px;padding:0 10px;border:0;border-radius:6px;background:transparent;color:oklch(0.47 0.018 255);font-size:13px;font-weight:500}.ds-seg button:hover{background:oklch(0.945 0.007 205);color:oklch(0.23 0.025 262)}.ds-seg button[aria-checked=true]{background:oklch(0.935 0.022 255);color:oklch(0.32 0.09 259);box-shadow:inset 0 0 0 1px color-mix(in oklch,oklch(0.44 0.135 259) 30%,transparent)}"
-    },
-    {
-      "name": "Panel",
-      "kind": "card",
-      "refersTo": "panel",
-      "description": "資料區塊：細線外框、10px 圓角、不巢狀。",
-      "html": "<section class=\"ds-panel\"><h2>即將除權息</h2><p>11/18 國泰永續高股息　每股 0.55 元</p></section>",
-      "css": ".ds-panel{background:oklch(0.996 0.002 195);border:1px solid oklch(0.885 0.009 215);border-radius:10px;padding:12px 20px 16px}.ds-panel h2{margin:0 0 8px;font-size:16px;font-weight:600}.ds-panel p{margin:0;font-size:14px;font-variant-numeric:tabular-nums}"
-    },
-    {
-      "name": "Price change",
-      "kind": "custom",
-      "refersTo": "price-red",
-      "description": "漲跌：顏色＋▲▼（紅漲綠跌，可切換）。",
-      "html": "<span class=\"ds-up\">▲ +1.40%</span> <span class=\"ds-down\">▼ −1.85%</span>",
-      "css": ".ds-up{color:oklch(0.545 0.205 26);font-variant-numeric:tabular-nums}.ds-down{color:oklch(0.5 0.13 152);font-variant-numeric:tabular-nums}"
-    },
-    {
-      "name": "Rail nav item",
       "kind": "nav",
-      "refersTo": "nav-rail-item-active",
-      "description": "桌面靛青側欄的導覽列。",
-      "html": "<nav class=\"ds-rail\"><a aria-current=\"page\">總覽</a><a>持股</a><a>AI 助理 <small>M4</small></a></nav>",
-      "css": ".ds-rail{background:oklch(0.255 0.05 263);padding:8px;width:220px;display:flex;flex-direction:column;gap:2px}.ds-rail a{display:flex;justify-content:space-between;height:40px;align-items:center;padding:0 12px;border-radius:6px;color:oklch(0.76 0.035 255);font-size:14px}.ds-rail a:hover{background:color-mix(in oklch,oklch(0.345 0.07 262) 60%,transparent);color:#fff}.ds-rail a[aria-current=page]{background:oklch(0.345 0.07 262);color:oklch(0.94 0.012 250);font-weight:500}.ds-rail small{font-size:12px;opacity:.8}"
+      "refersTo": "segmented-active",
+      "description": "帳本分段：持倉・交易・股利・績效；選取＝墨色實底。",
+      "html": "<div class=\"ds-seg\" role=\"tablist\"><button role=\"tab\" aria-selected=\"true\">持倉 <span>9</span></button><button role=\"tab\" aria-selected=\"false\">交易 <span>144</span></button><button role=\"tab\" aria-selected=\"false\">股利</button><button role=\"tab\" aria-selected=\"false\">績效</button></div>",
+      "css": ".ds-seg{display:inline-flex;gap:4px;padding:4px;border:1px solid var(--ctl,#838ca0);border-radius:6px}.ds-seg button{height:34px;padding:0 16px;border:0;border-radius:4px;background:none;color:var(--ink-2,#5b6478);font:400 15px 'Noto Sans TC Variable',sans-serif;cursor:pointer}.ds-seg button span{font-size:13px;opacity:.85}.ds-seg button:hover{background:var(--hov,#f2f4f8);color:var(--ink,#1f2a44)}.ds-seg button[aria-selected=true]{background:var(--act,#1f2a44);color:var(--act-fg,#fbfbf8);font-weight:500}.ds-seg button:focus-visible{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}"
+    },
+    {
+      "name": "Suggestion Card",
+      "kind": "chip",
+      "refersTo": "suggestion-card",
+      "description": "依頁面與資料自動出現的建議問題（不加說明字樣）。",
+      "html": "<button class=\"ds-suggest\">今天誰拖累了我的報酬？<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M7.9 20A9 9 0 1 0 4 16.1L2 22z\"/><path d=\"M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01\"/></svg></button>",
+      "css": ".ds-suggest{display:flex;align-items:center;justify-content:space-between;gap:12px;width:340px;height:52px;padding:0 14px 0 16px;background:var(--raised,#fff);color:var(--ink,#1f2a44);border:1px solid var(--rule,#d6dee8);border-radius:6px;font:400 15px 'Noto Sans TC Variable',sans-serif;text-align:left;cursor:pointer}.ds-suggest svg{color:var(--ai,#5b3fa0);flex:none}.ds-suggest:hover{border-color:var(--ctl,#838ca0)}.ds-suggest:focus-visible{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}"
+    },
+    {
+      "name": "Draft Card with Sign Box",
+      "kind": "custom",
+      "refersTo": "draft-card",
+      "description": "AI 草稿（紫色虛線、尚未生效）與方形「簽名｜確認入帳」格。",
+      "html": "<article class=\"ds-draft\"><h3>買進 元大台灣50 <small>0050</small></h3><p>成交日 11/12（四）</p><dl><div><dt>股數</dt><dd>2,000 股</dd></div><div><dt>成交價</dt><dd>@52.40</dd></div><div><dt>手續費</dt><dd>41</dd></div><div><dt>證交稅</dt><dd>0</dd></div><div class=\"sum\"><dt>合計</dt><dd>NT$104,841</dd></div></dl><footer><a>怎麼算的 ⌄</a><button class=\"ds-btn-outline\">修改</button><button class=\"ds-sign\"><small>簽名</small>確認入帳</button></footer></article>",
+      "css": ".ds-draft{width:340px;border:1px dashed var(--ai-rule,#a896d6);background:var(--ai-wash,#f5f2fb);font-family:'Noto Sans TC Variable',sans-serif}.ds-draft h3{margin:0;padding:14px 16px 0;font-size:17px;color:var(--ai,#5b3fa0)}.ds-draft h3 small{font-size:13px;font-weight:400}.ds-draft p{margin:0;padding:2px 16px 12px;font-size:13px;color:var(--ink-2,#5b6478);border-bottom:1px solid var(--rule,#d6dee8)}.ds-draft dl{display:grid;grid-template-columns:1fr 1fr;margin:0}.ds-draft dl div{display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--rule,#d6dee8)}.ds-draft dl div:nth-child(odd):not(.sum){border-right:1px solid var(--rule,#d6dee8)}.ds-draft dt{font-size:13px;color:var(--ink-2,#5b6478)}.ds-draft dd{margin:0;font-weight:500;color:var(--ai,#5b3fa0)}.ds-draft .sum{grid-column:1/3}.ds-draft .sum dt{font-weight:700;color:var(--ink,#1f2a44)}.ds-draft .sum dd{font-size:20px;font-weight:700}.ds-draft footer{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 16px}.ds-draft footer a{margin-right:auto;font-size:13px;color:var(--ai,#5b3fa0);text-decoration:underline}.ds-draft .ds-btn-outline{height:36px;padding:0 10px;border:1px solid var(--ctl,#838ca0);border-radius:4px;background:none}.ds-sign{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:76px;height:60px;border:0;border-radius:0;background:var(--act,#1f2a44);color:var(--act-fg,#fbfbf8);font-weight:700;font-size:14px;cursor:pointer}.ds-sign::after{content:'';position:absolute;inset:3px;border:1px solid currentColor;opacity:.4}.ds-sign small{font-size:12px;font-weight:400}.ds-sign:hover{background:var(--act-hover,#0f1730)}.ds-sign:active{transform:scale(.97)}.ds-sign:focus-visible{outline:2px solid var(--ai,#5b3fa0);outline-offset:2px}"
+    },
+    {
+      "name": "AI Composer",
+      "kind": "input",
+      "refersTo": "composer",
+      "description": "AI 的主要入口：提問、記帳指令、（手機）搜尋。",
+      "html": "<form class=\"ds-composer\"><textarea placeholder=\"提出問題，或直接說：買 0050 2 張 52.4\"></textarea><div><button type=\"button\" class=\"plus\">+</button><button class=\"go\">↑</button></div></form>",
+      "css": ".ds-composer{width:340px;padding:12px 10px 10px 14px;border:1px solid var(--act,#1f2a44);border-radius:6px;background:var(--raised,#fff)}.ds-composer:focus-within{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}.ds-composer textarea{display:block;width:100%;height:54px;border:0;outline:0;resize:none;background:none;font:400 15px/1.6 'Noto Sans TC Variable',sans-serif;color:var(--ink,#1f2a44)}.ds-composer textarea::placeholder{color:var(--ink-2,#5b6478)}.ds-composer div{display:flex;justify-content:space-between;margin-top:6px}.ds-composer .plus{width:36px;height:36px;border:1px solid var(--rule,#d6dee8);border-radius:4px;background:none;color:var(--ink-2,#5b6478)}.ds-composer .go{width:36px;height:36px;border:0;border-radius:4px;background:var(--act,#1f2a44);color:var(--act-fg,#fbfbf8)}"
+    },
+    {
+      "name": "Demo Tag",
+      "kind": "chip",
+      "refersTo": "demo-tag",
+      "description": "示範資料：資料狀態，不是品牌。",
+      "html": "<span class=\"ds-demo\">示範資料</span>",
+      "css": ".ds-demo{display:inline-flex;align-items:center;height:20px;padding:0 5px;border:1px solid var(--ctl,#838ca0);border-radius:2px;font:400 12px/1 'Noto Sans TC Variable',sans-serif;color:var(--ink,#1f2a44)}"
+    },
+    {
+      "name": "Mobile Dock",
+      "kind": "nav",
+      "refersTo": "dock-tabs",
+      "description": "浮動膠囊分頁「帳本｜群組｜紀錄」＋獨立的紫色「問 AI」。",
+      "html": "<div class=\"ds-dock\"><nav><a aria-current=\"page\"><i></i>帳本</a><a><i></i>群組</a><a><i></i>紀錄</a></nav><button>問 AI</button></div>",
+      "css": ".ds-dock{display:flex;gap:8px;width:358px;height:64px;font-family:'Noto Sans TC Variable',sans-serif}.ds-dock nav{flex:1;display:flex;border:1px solid var(--rule,#d6dee8);border-radius:32px;background:var(--raised,#fff);box-shadow:0 6px 18px rgb(15 23 48/.1),0 1px 2px rgb(15 23 48/.1)}.ds-dock a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;color:var(--ink-2,#5b6478)}.ds-dock a i{width:52px;height:28px;border-radius:14px}.ds-dock a[aria-current] {color:var(--ink,#1f2a44);font-weight:700}.ds-dock a[aria-current] i{background:rgb(31 42 68/.08)}.ds-dock button{width:86px;border:1px solid var(--ai-rule,#a896d6);border-radius:32px;background:var(--ai-wash,#f5f2fb);color:var(--ai,#5b3fa0);font-weight:700;font-size:13px;box-shadow:0 6px 18px rgb(15 23 48/.1)}"
     }
   ],
   "narrative": {
-    "northStar": "蓋章為憑（The Bank-Counter Seal）",
-    "overview": "Forliosa 借用台灣銀行臨櫃的印鑑與印台：資料狀態以方形章標示。Operate 介面，世界只提供字型、色盤、密度與章這個招牌動作；導覽與控制項都是標準元件。首頁簡潔、細節頁密集。",
+    "northStar": "家長簽名的聯絡簿（The Signed Contact Book）",
+    "overview": "帳本就是首頁。介面借用台灣學生每天帶回家的聯絡簿：淺色是紙白、深色是夜間筆記本；1px 藍灰格線就是結構，表格不包卡片；文字與動作用藍黑原子筆的墨色寫。AI 是另一支筆——老師的紫色筆，取代紅筆，因為紅色在這個產品代表「漲」。AI 說的話用文楷，看起來像手寫在簿子上的評語。AI 做的每件事都先寫成草稿（紫色虛線），使用者在方形「簽名｜確認入帳」格按下才生效；簽名後格子裡留下使用者的字。\n\n這是 Operate 介面：導覽、表格、分段、選單都是使用者早就會用的標準元件。世界只提供四樣東西：**字型**（Noto Sans TC＋只給 AI 的文楷）、**色盤**（紙、格線、藍黑墨、紫、價格紅綠）、**密度**（Google Finance 的留白主數字＋一行一格的帳）、**一個招牌動作**（簽名格）。",
     "keyCharacteristics": [
-      "青田石冷灰底＋靛青墨側欄",
-      "印泥藍是唯一操作色",
-      "朱泥只在品牌章",
-      "紅綠只表示漲跌並配 ▲▼",
-      "全站等寬數字，大數字用比例數字",
-      "細線而非陰影"
+      "紙白（深色：夜間筆記本）的底，1px 藍灰格線分隔每一行，沒有卡片包表格。",
+      "藍黑墨是唯一的操作色：主要按鈕、選取中的分段、焦點框。",
+      "紫色只屬於 AI：問候、建議問題的圖示、回答、草稿卡、「待簽名」、「問 AI」按鈕。",
+      "紅綠只表示價格的漲跌，永遠配 ▲▼。",
+      "全站等寬數字；報價依升降單位決定小數位。"
     ],
     "rules": [
       {
-        "name": "The One Job Rule",
-        "body": "每個顏色只有一個工作。",
+        "name": "The Two Pens Rule",
+        "body": "墨色是使用者的筆，紫色是 AI 的筆。紫色出現的地方一定是 AI 說的話或 AI 做的事；AI 以外的東西不准用紫色。",
         "section": "colors"
       },
       {
-        "name": "The Glyph Pair Rule",
-        "body": "漲跌顏色一定配 ▲▼。",
+        "name": "The Price-Only Red Rule",
+        "body": "紅綠只給價格與由價格造成的損益，並且一定配 ▲▼（與螢幕閱讀器的「上漲／下跌」）。營收年增、法人買賣超、刪除按鈕都不用紅綠。",
+        "section": "colors"
+      },
+      {
+        "name": "The Rule-Is-Structure Rule",
+        "body": "結構用 1px 格線表達：列底線、區塊標題底線、鍵值格的格線。表格不包卡片，卡片不巢狀。",
         "section": "colors"
       },
       {
         "name": "The Tabular Ledger Rule",
-        "body": "全站等寬數字；獨立大數字用比例數字；負號用 U+2212。",
+        "body": "body 全站 tabular-nums；只有獨立的大數字（總資產、現價）用比例數字。負號一律 U+2212「−」。",
+        "section": "typography"
+      },
+      {
+        "name": "The Tick Decimal Rule",
+        "body": "報價的小數位依台股升降單位：≥ 500 元 0 位（1,085）、0.1／0.5 檔 1 位且整數不帶小數（236.5、398）、0.01／0.05 檔 2 位（22.40）、美股 2 位。漲跌點數跟著現價的位數。",
+        "section": "typography"
+      },
+      {
+        "name": "The 16px Input Rule",
+        "body": "觸控裝置上輸入框一律 16px 以上（手機「搜尋或提問」17px），避免 iOS 放大頁面。",
         "section": "typography"
       }
     ],
     "dos": [
-      "用章標示資料狀態",
-      "隱私模式遮蔽金額與股數、保留百分比",
-      "空狀態給一個現在能做的動作"
+      "**Do** 讓 AI 的每個動作先成為草稿（紫色虛線），使用者簽名才生效，事後可以復原並標示「由 AI 建立」。",
+      "**Do** 漲跌一律 `--rise`／`--fall`＋▲▼，報價依升降單位決定小數位。",
+      "**Do** 隱私模式遮蔽金額與股數、隱藏圖上的均價線與買賣點，保留百分比。",
+      "**Do** 「為什麼」那一行、分頁第一行只在有值得說的事時出現；沒有就不顯示。",
+      "**Do** 每個空狀態說明為什麼沒有、什麼時候會有，並給一個現在能做的動作。"
     ],
     "donts": [
-      "朱泥紅不出現在品牌章以外",
-      "不用雙 Y 軸",
-      "不用玻璃模糊與漸層文字",
-      "不加 eyebrow 小標"
+      "**Don't** 在 AI 以外的地方用紫色，也不要在價格以外的地方用紅綠（營收、法人、刪除都不行）。",
+      "**Don't** 在介面上寫「本頁建議」「依頁面推薦」「AI 摘要」這類說明 AI 機制的字樣；紫色文楷就是唯一的 AI 識別。",
+      "**Don't** 放 AI 今日簡報、AI 旁註或市場總覽首頁。",
+      "**Don't** 用卡片包表格、巢狀卡片、陰影區隔一般區塊；用格線。",
+      "**Don't** 用印章、朱泥、徽記或任何仿實物質感（舊世界已移除）。",
+      "**Don't** 在標題上加 eyebrow／kicker 小標，也不要用 Unicode 符號代替圖示（▲▼ 是資料符號，不是圖示）。"
     ]
   }
 }
