@@ -92,7 +92,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
           aria-label="搜尋股票、提問，或直接說：買 0050 2 張 52.4"
           enterKeyHint="send"
           autoComplete="off"
-          className="h-full min-w-0 flex-1 bg-transparent text-[17px] text-ink caret-ai outline-none placeholder:text-ink-2"
+          className="h-full min-w-0 flex-1 bg-transparent text-lg text-ink caret-ai outline-none placeholder:text-ink-2"
         />
         <button
           type="submit"

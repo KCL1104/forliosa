@@ -242,7 +242,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
       ) : (
         items!.map((w) => {
           const market = marketOf(w.symbol)
-          const d = direction(w.quote.change_pct)
+          const d = direction(w.quote?.change_pct ?? null)
           return (
             <tr key={w.symbol} className="ruled-row cursor-pointer" onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol: w.symbol } })}>
               <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
@@ -253,7 +253,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                   </Link>
                   <Sparkline
                     values={w.sparkline.map((p) => p.price)}
-                    baseline={w.quote.reference_price ?? w.quote.prev_close}
+                    baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)}
                     tone={d}
                     label={`${w.name}今日走勢：${d === "up" ? "上漲" : d === "down" ? "下跌" : "平盤"}`}
                   />
@@ -264,10 +264,10 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                   {c === "price" ? (
                     <>
                       {market === "US" && <span className="mr-0.5 text-sm text-ink-2">US$</span>}
-                      {formatQuote(w.quote.price, market)}
+                      {formatQuote(w.quote?.price, market)}
                     </>
                   ) : c === "day_pct" ? (
-                    <Pct value={w.quote.change_pct} />
+                    <Pct value={w.quote?.change_pct ?? null} />
                   ) : null}
                 </td>
               ))}
@@ -292,27 +292,27 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
         {rows.map((h) => (
           <li key={h.symbol}>
             <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="ruled-row grid h-[72px] grid-cols-[1fr_auto] content-center gap-y-0.5">
-              <span className="flex items-center gap-1.5 truncate text-[1.0625rem] leading-6 font-medium">
+              <span className="flex items-center gap-1.5 truncate text-lg leading-6 font-medium">
                 {h.name}
                 {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
               </span>
-              <span className="num text-right text-[1.0625rem] leading-6">
+              <span className="num text-right text-lg leading-6">
                 {h.currency === "USD" && "US$"}
                 {formatQuote(h.price, h.market, h.type)}
               </span>
               <span className="num text-sm leading-5 text-ink-2">
                 {h.code} ・ <QtyText h={h} />
               </span>
-              <span className="text-right text-[0.9375rem] leading-5">
+              <span className="text-right text-base leading-5">
                 <Pct value={h.day_change_pct} />
               </span>
             </Link>
           </li>
         ))}
       </ul>
-      <h2 className="mt-9 flex h-11 items-end gap-2 border-b border-rule pb-2 text-[1.0625rem] font-bold">
+      <h2 className="mt-9 flex h-11 items-end gap-2 border-b border-rule pb-2 text-lg font-bold">
         觀察 <span className="num text-sm font-normal text-ink-2">{watch.data?.length ?? 0} 檔</span>
-        {watch.data?.some((w) => w.quote.is_demo) && <DemoTag className="mb-0.5 ml-auto" />}
+        {watch.data?.some((w) => w.quote?.is_demo ?? w.is_demo) && <DemoTag className="mb-0.5 ml-auto" />}
       </h2>
       {(watch.data ?? []).length === 0 && !watch.isLoading ? (
         <p className="py-4 text-md text-ink-2">還沒有觀察的股票。在個股頁按「加入觀察」，這裡會列出今天的走勢。</p>
@@ -329,22 +329,22 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
 
 function WatchRowMobile({ w }: { w: WatchItem }) {
   const market = marketOf(w.symbol)
-  const d = direction(w.quote.change_pct)
+  const d = direction(w.quote?.change_pct ?? null)
   // 自選本身就帶盤中點；沒有時改抓 intraday
   const fallback = useIntraday(w.symbol, w.sparkline.length < 2)
   const values = w.sparkline.length >= 2 ? w.sparkline.map((p) => p.price) : (fallback.data?.points ?? []).map((p) => p.price)
   return (
     <li>
       <Link to="/stock/$symbol" params={{ symbol: w.symbol }} className="ruled-row grid h-[72px] grid-cols-[1fr_76px_96px] content-center gap-x-3 gap-y-0.5">
-        <span className="truncate text-[1.0625rem] leading-6 font-medium">{w.name}</span>
-        <Sparkline className="col-start-2 row-span-2 row-start-1 self-center" width={76} height={32} values={values} baseline={w.quote.reference_price ?? w.quote.prev_close} tone={d} label={`${w.name}今日走勢`} />
-        <span className="num col-start-3 row-start-1 text-right text-[1.0625rem] leading-6">
+        <span className="truncate text-lg leading-6 font-medium">{w.name}</span>
+        <Sparkline className="col-start-2 row-span-2 row-start-1 self-center" width={76} height={32} values={values} baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)} tone={d} label={`${w.name}今日走勢`} />
+        <span className="num col-start-3 row-start-1 text-right text-lg leading-6">
           {market === "US" && "US$"}
-          {formatQuote(w.quote.price, market)}
+          {formatQuote(w.quote?.price, market)}
         </span>
         <span className="num col-start-1 row-start-2 text-sm leading-5 text-ink-2">{codeOf(w.symbol)}</span>
-        <span className="col-start-3 row-start-2 text-right text-[0.9375rem] leading-5">
-          <Pct value={w.quote.change_pct} />
+        <span className="col-start-3 row-start-2 text-right text-base leading-5">
+          <Pct value={w.quote?.change_pct ?? null} />
         </span>
       </Link>
     </li>

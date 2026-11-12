@@ -36,7 +36,7 @@ export function AvatarMenu() {
           />
         }
       >
-        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-act text-[0.9375rem] font-medium text-act-fg">
+        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-act text-base font-medium text-act-fg">
           {name.slice(0, 1)}
         </span>
       </DropdownMenuTrigger>

@@ -30,6 +30,8 @@ const TASKS: Task[] = [
 ]
 
 export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; onOpen?: () => void; onReplay: (text: string) => void }) {
+  // 面板裡已有 h2（問 AI／紀錄），清單標題用 h3；整頁時用 h2
+  const H = compact ? "h3" : "h2"
   const threads = useAi((s) => s.threads)
   const openThread = useAi((s) => s.openThread)
   const newThread = useAi((s) => s.newThread)
@@ -52,7 +54,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
     onOpen?.()
   }
 
-  const row = cn("ruled-row flex min-h-[60px] items-center gap-2", compact ? "text-base" : "text-[1.0625rem]")
+  const row = cn("ruled-row flex min-h-[60px] items-center gap-2", compact ? "text-base" : "text-lg")
 
   return (
     <div className="flex flex-col">
@@ -68,7 +70,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
         發起新對話
       </button>
 
-      <h3 className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-6 text-sm" : "mt-9 text-[0.9375rem]")}>對話</h3>
+      <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-6 text-sm" : "mt-9 text-base")}>對話</H>
       {all.length === 0 ? (
         <p className="py-4 text-md text-ink-2">還沒有對話。問過的問題和 AI 寫的草稿會留在這裡。</p>
       ) : (
@@ -92,7 +94,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
         </ul>
       )}
 
-      <h3 className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-[0.9375rem]")}>AI 任務</h3>
+      <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-base")}>AI 任務</H>
       {tasks.length === 0 ? (
         <p className="py-4 text-md text-ink-2">排定的健檢、提醒與報告會出現在這裡（M4 開放）。</p>
       ) : (

@@ -80,7 +80,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
         ) : (
           <div className="flex flex-col">
             <p className="ai-voice mt-7">
-              <span className="block text-[2.125rem] leading-tight">{hello}</span>
+              <span className="block text-3xl leading-tight">{hello}</span>
               <span className="mt-2 block text-2xl leading-snug">{ctx.route === "stock" ? line : "帳本、個股、群組的事都可以問我。"}</span>
             </p>
             {suggestions.length > 0 && (
@@ -111,7 +111,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
                 ))}
               </ul>
             )}
-            <h2 className="mt-11 text-[0.9375rem] font-bold text-ink-2">交給 AI</h2>
+            <h2 className="mt-11 text-base font-bold text-ink-2">交給 AI</h2>
             <div className="mt-3 flex flex-wrap gap-x-2 gap-y-3">
               {actions.map((a) => (
                 <button key={a.key} type="button" onClick={() => runner.action(a.run, { code: a.code })} className="press relative h-10 rounded-full border border-ctl px-3 text-md whitespace-nowrap before:absolute before:inset-x-0 before:-inset-y-0.5 active:bg-hov">

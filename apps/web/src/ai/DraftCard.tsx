@@ -93,7 +93,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
           )}
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-4 py-3">
             <dt className="font-bold text-ink">{isDividend ? "實拿" : input.type === "sell" ? "實收" : "合計"}</dt>
-            <dd className="num text-[1.3125rem] font-bold text-ai" aria-live="polite">
+            <dd className="num text-xl font-bold text-ai" aria-live="polite">
               {status === "loading" || total === null ? (
                 <span className="text-base font-normal text-ink-2">計算中…</span>
               ) : privacy ? (
@@ -182,14 +182,14 @@ function SignBox({ signed, signature, disabled, onSign, signedAt }: { signed: bo
     const time = signedAt ? new Date(signedAt).toLocaleTimeString("zh-TW", { hour: "2-digit", minute: "2-digit", hour12: false, timeZone: "Asia/Taipei" }) : ""
     return (
       <span className="sign-box" data-signed role="img" aria-label={`已簽名入帳 ${time}`}>
-        <span className="sign-write font-ai text-[1.75rem] leading-none text-ink">{signature}</span>
-        <small className="num text-[0.6875rem] font-normal text-ink-2">{time} 入帳</small>
+        <span className="sign-write font-ai text-2xl leading-none text-ink">{signature}</span>
+        <small className="num text-xs font-normal text-ink-2">{time} 入帳</small>
       </span>
     )
   }
   return (
     <button type="button" className="sign-box disabled:opacity-50" aria-label="簽名：確認入帳" disabled={disabled} onClick={onSign}>
-      <small className="text-[0.6875rem] font-normal opacity-85">簽名</small>
+      <small className="text-xs font-normal opacity-85">簽名</small>
       確認入帳
     </button>
   )

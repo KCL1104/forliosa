@@ -181,7 +181,8 @@ function ChipsBrief({ symbol }: { symbol: string }) {
   const sum = (k: "foreign" | "trust" | "dealer") => last5.reduce((s, r) => s + r[k], 0)
   const m = c.margin
   const marginChange = m.length > 5 ? m.at(-1)!.margin_balance - m.at(-6)!.margin_balance : null
-  const big = c.major_holders?.buckets.find((b) => b.level.startsWith("1,000"))
+  const bigs = (c.major_holders?.buckets ?? []).filter((b) => /^1,?000/.test(b.label ?? b.level) && /以上/.test(b.label ?? b.level))
+  const big = bigs.length ? { pct: bigs.reduce((s, b) => s + b.pct, 0) } : undefined
   const lot = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatCompact(Math.abs(n), 1)} 張`
   return (
     <Section title="籌碼" titleId="ov-chips" aside="近 5 個交易日" action={<MoreLink symbol={symbol} tab="chips" />}>

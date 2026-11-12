@@ -26,7 +26,7 @@ export function Section({
       {(title || action) && (
         <header className="flex min-h-11 flex-wrap items-end gap-x-3 gap-y-1 border-b border-rule pb-2">
           {title && (
-            <h2 id={titleId} className="flex min-w-0 items-baseline gap-2 text-lg font-bold">
+            <h2 id={titleId} className="flex min-w-0 items-baseline gap-2 text-xl font-bold">
               {title}
             </h2>
           )}

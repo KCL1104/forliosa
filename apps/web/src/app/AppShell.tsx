@@ -158,7 +158,7 @@ function Dock() {
           type="button"
           onClick={() => setOpen(true)}
           aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : "問 AI"}
-          className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-[0.8125rem] font-bold text-ai shadow-lift"
+          className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-sm font-bold text-ai shadow-lift"
         >
           <PenToolIcon aria-hidden className="size-[22px]" />
           問 AI

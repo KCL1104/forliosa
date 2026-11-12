@@ -40,6 +40,9 @@ function lead(c: Chips): string | null {
   return parts.length ? `${parts.join("，")}。` : null
 }
 
+/** 千張大戶（1,000 張以上）分級 */
+const isBig = (b: { level: string; label?: string }) => /^1,?000/.test(b.label ?? b.level) && /以上/.test(b.label ?? b.level)
+
 const lots = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatNumber(Math.abs(n))}`
 
 /** 籌碼：三大法人、融資融券、外資持股比、千張大戶（單位：張） */
@@ -148,9 +151,9 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
             <ul className="-mt-3">
               {c.major_holders.buckets.map((b) => (
                 <li key={b.level} className="grid grid-cols-[96px_1fr_64px] items-center gap-3 border-b border-rule py-2 text-md">
-                  <span className={b.level.startsWith("1,000") ? "font-medium" : "text-ink-2"}>{b.level}</span>
+                  <span className={isBig(b) ? "font-medium" : "text-ink-2"}>{b.label ?? b.level}</span>
                   <span aria-hidden className="relative h-2 bg-hov">
-                    <span className="absolute inset-y-0 left-0" style={{ width: `${b.pct * 100}%`, background: b.level.startsWith("1,000") ? "var(--ink)" : "var(--band-4)" }} />
+                    <span className="absolute inset-y-0 left-0" style={{ width: `${b.pct * 100}%`, background: isBig(b) ? "var(--ink)" : "var(--band-4)" }} />
                   </span>
                   <span className="num text-right">{formatPercent(b.pct, { signed: false, decimals: 1 })}</span>
                 </li>
@@ -159,7 +162,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
           )}
         </Section>
       </div>
-      <Sources items={c.sources} />
+      <Sources items={[...(c.notes ?? []), ...c.sources]} />
     </div>
   )
 }

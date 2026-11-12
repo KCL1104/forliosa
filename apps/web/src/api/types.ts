@@ -372,6 +372,7 @@ export interface InstrumentOverview {
   as_of: string | null
   sources: string[]
   is_demo: boolean
+  symbol?: string
 }
 
 export interface IntradayPoint {
@@ -391,6 +392,8 @@ export interface Intraday {
   is_partial: boolean
   sources: string[]
   is_demo?: boolean
+  /** 例如「商用模式沒有授權的即時來源」（CONTRACT_NOTES） */
+  notes?: string[]
 }
 
 export type ChipsRange = "1M" | "3M" | "6M" | "1Y"
@@ -400,9 +403,11 @@ export interface Chips {
   institutional: { t: string; foreign: number; trust: number; dealer: number; total: number }[]
   margin: { t: string; margin_balance: number; short_balance: number }[]
   foreign_holding_pct: { t: string; pct: number }[]
-  major_holders: { as_of: string; buckets: { level: string; holders: number; shares: number; pct: number }[] } | null
+  /** 集保股權分散：後端提供 15 個分級，另有 `label`（例如「1,000 張以上」） */
+  major_holders: { as_of: string; buckets: { level: string; label?: string; holders: number; shares: number; pct: number }[] } | null
   sources: string[]
   is_demo?: boolean
+  notes?: string[]
 }
 
 export type FinancialsPeriod = "quarterly" | "annual"
@@ -417,6 +422,7 @@ export interface Financials {
   margins: { gross: Col; operating: Col; net: Col }
   sources: string[]
   is_demo?: boolean
+  notes?: string[]
 }
 
 export type InstrumentEventType =
@@ -437,6 +443,7 @@ export interface InstrumentEvent {
   url: string | null
   mine: boolean
   amount_estimate: number | null
+  sources?: string[]
 }
 
 /** 新聞：只有標題、來源、連結 */
@@ -445,6 +452,7 @@ export interface NewsItem {
   title: string
   source: string
   url: string
+  sources?: string[]
 }
 
 export type PositionMarkerType = "buy" | "sell" | "dividend" | "stock_dividend"
@@ -470,6 +478,10 @@ export interface Position {
   day_change: number
   markers: PositionMarker[]
   upcoming_dividend: { ex_dividend_date: string; amount_estimate: number } | null
+  currency?: Currency
+  as_of?: string | null
+  sources?: string[]
+  is_demo?: boolean
 }
 
 export interface WhyReason {
@@ -484,13 +496,19 @@ export interface Why {
   headline: string | null
   reasons: WhyReason[]
   as_of: string | null
+  sources?: string[]
 }
 
 export interface WatchItem {
   symbol: string
   name: string
-  quote: Quote
+  /** 資料源沒有報價時為 null */
+  quote: Quote | null
+  /** `1m`：盤中點（t 為 09:01）；`1d`：最近 20 個收盤（t 為日期） */
   sparkline: { t: string; price: number }[]
+  sparkline_interval?: "1m" | "1d"
+  sources?: string[]
+  is_demo?: boolean
 }
 
 export type UpcomingType = "ex_dividend" | "dividend_payment" | "recurring"
@@ -502,6 +520,8 @@ export interface UpcomingItem {
   symbol: string | null
   title: string
   amount_estimate: number | null
+  sources?: string[]
+  is_demo?: boolean
 }
 
 // ── 錯誤 ──────────────────────────────────────────────────

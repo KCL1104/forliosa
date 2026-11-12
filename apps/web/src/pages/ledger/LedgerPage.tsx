@@ -87,7 +87,7 @@ export function LedgerPage() {
         <button
           type="button"
           onClick={() => ask.showDraft(Object.values(useAi.getState().drafts).find((d) => d.status === "pending")?.id ?? null)}
-          className="press mt-3 flex h-11 w-full items-center gap-2 rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-[0.9375rem] font-medium text-ai lg:hidden"
+          className="press mt-3 flex h-11 w-full items-center gap-2 rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-base font-medium text-ai lg:hidden"
         >
           <PenLineIcon aria-hidden className="size-4" />
           待簽名 {pending} 筆
@@ -202,12 +202,12 @@ function HeroMobile({ summary }: { summary?: PortfolioSummary }) {
     <section aria-label="總資產" className="mt-3 rounded-xl border border-rule bg-raised py-[18px] pr-3 pl-5">
       <div className="grid grid-cols-[1fr_auto] items-center">
         <div className="min-w-0">
-          <p className="flex flex-wrap items-center gap-2 text-[0.9375rem] text-ink-2">
+          <p className="flex flex-wrap items-center gap-2 text-base text-ink-2">
             總資產・{asOf}
             {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
           </p>
           <BigTotal value={summary.market_value} size="mobile" />
-          <p className="mt-1.5 text-[1.0625rem] font-medium">
+          <p className="mt-1.5 text-lg font-medium">
             <Delta amount={summary.day_change} pct={summary.day_change_pct} className="flex-row-reverse" />
             <span className="ml-2 font-normal text-ink-2">今天</span>
           </p>
@@ -227,7 +227,7 @@ function HeroMobile({ summary }: { summary?: PortfolioSummary }) {
         <div id="hero-more" className="note-in mt-4 flex items-end justify-between gap-4 border-t border-rule pt-3.5">
           <dl>
             <dt className="text-sm text-ink-2">總損益（含股利）</dt>
-            <dd className="mt-0.5 text-[1.0625rem] font-medium">
+            <dd className="mt-0.5 text-lg font-medium">
               <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
             </dd>
           </dl>
@@ -277,7 +277,7 @@ function WeekLine() {
     <Link
       to="/"
       search={{ view: "dividends" }}
-      className="mt-2 flex min-h-12 items-center gap-2 py-2 text-[0.9375rem] text-ink hover:bg-hov lg:mt-9 lg:min-h-[52px] lg:border-y lg:border-rule lg:pr-2 lg:pl-0.5 lg:text-base"
+      className="mt-2 flex min-h-12 items-center gap-2 py-2 text-base text-ink hover:bg-hov lg:mt-9 lg:min-h-[52px] lg:border-y lg:border-rule lg:pr-2 lg:pl-0.5 lg:text-base"
       aria-label={first ? `本週 ${items.length} 件事，查看全部` : "接下來 7 天沒有除息或入帳，查看股利"}
     >
       <CalendarDaysIcon aria-hidden className="hidden size-[18px] text-ink-2 lg:block" />
