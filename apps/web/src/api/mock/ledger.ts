@@ -439,7 +439,7 @@ function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW
 }
 
 /** 1D／5D 以交易日計（見 rangeRows），這裡只處理日曆區間 */
-function rangeStart(range: Exclude<PerformanceRange, "1D" | "5D">): string {
+function rangeStart(range: Exclude<PerformanceRange, "1D" | "5D" | "MTD">): string {
   switch (range) {
     case "1M": return addDays(MOCK_TODAY, -31)
     case "3M": return addDays(MOCK_TODAY, -92)
@@ -485,7 +485,15 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
   const all = dailyRows(txns, accountId, bench.symbol)
   // 1D／5D：最後 N 個交易日的報酬，序列第一點是基準收盤（與後端相同）
   const days = range === "1D" ? 1 : range === "5D" ? 5 : null
-  let rows = days !== null ? all.slice(-(days + 1)) : all.filter((x) => x.t >= rangeStart(range as Exclude<PerformanceRange, "1D" | "5D">))
+  // MTD：上月最後一個收盤是基準點（與後端相同）
+  const monthStart = `${MOCK_TODAY.slice(0, 7)}-01`
+  const mtdFrom = all.filter((x) => x.t < monthStart).at(-1)?.t ?? monthStart
+  let rows =
+    days !== null
+      ? all.slice(-(days + 1))
+      : range === "MTD"
+        ? all.filter((x) => x.t >= mtdFrom)
+        : all.filter((x) => x.t >= rangeStart(range as Exclude<PerformanceRange, "1D" | "5D" | "MTD">))
   if (opts.minStart) rows = rows.filter((x) => x.t >= opts.minStart!)
   const benchSpec = { symbol: bench.symbol, name: bench.name }
   if (rows.length < 2) {

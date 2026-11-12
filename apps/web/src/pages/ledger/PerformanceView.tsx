@@ -18,6 +18,7 @@ import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/
 import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
+import { useReadOnly } from "@/api/view-as"
 
 const RANGES: { value: PerformanceRange; label: string }[] = [
   { value: "1D", label: "1日" },
@@ -34,7 +35,10 @@ export function PerformanceView() {
   const [range, setRange] = useState<PerformanceRange>("1Y")
   const [account, setAccount] = useState<string | undefined>()
   const accounts = useAccounts()
-  const benchmark = usePrefs((s) => s.benchmark)
+  // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
+  const readOnly = useReadOnly()
+  const prefBenchmark = usePrefs((s) => s.benchmark)
+  const benchmark = readOnly ? undefined : prefBenchmark
   const setPref = usePrefSetter()
   const perf = usePerformance(range, account, benchmark)
   const holdings = useHoldings(account)
@@ -65,7 +69,7 @@ export function PerformanceView() {
         </Select>
         <span className="inline-flex items-center gap-2 text-sm text-ink-2">
           比較基準
-          <BenchmarkSelect size="sm" value={benchmark} onChange={(v) => setPref({ benchmark: v })} />
+          {!readOnly && <BenchmarkSelect size="sm" value={prefBenchmark} onChange={(v) => setPref({ benchmark: v })} />}
         </span>
       </div>
 

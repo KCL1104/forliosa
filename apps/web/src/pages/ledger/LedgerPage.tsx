@@ -25,6 +25,7 @@ import { useLedgerCounts } from "./use-ledger-counts"
 import { asOfLabel } from "@/lib/as-of"
 import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
+import { useReadOnly } from "@/api/view-as"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -40,6 +41,8 @@ export function LedgerPage() {
   const pending = usePendingCount()
   const ask = useAskAi()
   const isDesktop = useIsDesktop()
+  // 查看別人的資產（唯讀）：沒有待簽名的草稿（那是自己的 AI）
+  const readOnly = useReadOnly()
 
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
 
@@ -69,7 +72,7 @@ export function LedgerPage() {
             { value: "performance", label: "績效" },
           ]}
         />
-        {pending > 0 && (
+        {pending > 0 && !readOnly && (
           <button
             type="button"
             onClick={() => {
@@ -85,7 +88,7 @@ export function LedgerPage() {
         )}
         {view === "holdings" && <CustomizeButton className="ml-auto max-lg:hidden" />}
       </div>
-      {pending > 0 && (
+      {pending > 0 && !readOnly && (
         <button
           type="button"
           onClick={() => ask.showDraft(Object.values(useAi.getState().drafts).find((d) => d.status === "pending")?.id ?? null)}

@@ -4,6 +4,8 @@
 // 第三批：法人觀點（展開 → 查詢 → 搜尋中 → 結果／查無／查不到）、持倉的定期定額標記、補記漏記的扣款、已出清依年份分組。
 // 第四批：股利自動入帳（交易與股利頁的「自動」、編輯後「自動・已修改」、刪除後不再出現）。
 // 第五批：上市股票不顯示逐檔三大法人（空狀態＋問 AI 外資動向，上櫃照常）、補記定期定額用扣款日的收盤價。
+// M5 分享：群組（建立、邀請連結、排行與討論串、動態與表情、我的分享、成員分享、頻道）、邀請（沒登入 → 登入 → 選分享 → 加入）、
+// 授權查看（授權給別人、查看別人的唯讀模式、授權失效自動退出）、登入頁的錯誤說明。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
 
@@ -35,7 +37,16 @@ const ROUTES = [
   ["/stock/0050.TW?tab=financials", "成分股資料來源還在確認"],
   ["/stock/NVDA?tab=chips", "美股沒有台股的法人"],
   ["/stock/NOPE.TW", "找不到"],
-  ["/groups", "群組在 M5 開放"],
+  ["/groups", "家族投資"],
+  ["/groups/grp_family", "元大台灣50"],
+  ["/groups/grp_family?tab=feed", "加入了群組"],
+  ["/groups/grp_family?tab=holdings", "共同持股"],
+  ["/groups/grp_family?tab=digests", "AI 分析僅供參考，不構成投資建議。"],
+  ["/groups/grp_family?tab=members", "邀請連結"],
+  ["/groups/grp_friends?tab=channels", "已停用"],
+  ["/groups/grp_club", "找不到這個群組"],
+  ["/invite/club-2026", "分享什麼"],
+  ["/invite/club-expired", "這個邀請已經失效"],
   ["/history", "發起新對話"],
   ["/settings", "券商帳戶"],
   ["/transactions", "數量 × 價格"],
@@ -329,6 +340,155 @@ await check("交易：編輯自動入帳的股利（說明）→ 儲存後「自
   if (await page.getByRole("button", { name: /6488（自動）$/ }).count()) throw new Error("deleted automatic dividend came back")
 })
 
+// ── M5 分享：群組、邀請、授權查看 ─────────────────────────────
+await check("群組：建立群組 → 產生邀請連結（只顯示一次）", async () => {
+  await page.goto(base + "/groups", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "建立群組" }).first().click()
+  await page.getByLabel("群組名稱").fill("冒煙測試群")
+  await page.getByRole("button", { name: "建立", exact: true }).click()
+  await page.getByRole("heading", { name: "冒煙測試群", exact: true }).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "產生邀請連結" }).click()
+  const url = await page.getByRole("textbox", { name: "邀請連結" }).inputValue()
+  if (!/\/invite\//.test(url)) throw new Error(`unexpected invite url ${url}`)
+  await page.getByText("可以多人使用").or(page.getByText("單次使用")).first().waitFor()
+})
+await check("排行：沒開報酬率的人不出現、沒有「未分享」；本月顯示期間起點", async () => {
+  await page.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
+  const table = page.getByRole("table", { name: "今日排行" })
+  await table.getByText("爸爸").waitFor({ timeout: 8000 })
+  if (await table.getByText("阿弟").count()) throw new Error("member without returns shown")
+  if ((await page.content()).includes("未分享")) throw new Error("未分享 rendered")
+  await page.getByRole("radio", { name: "本月" }).click()
+  await page.getByText(/10\/30 收盤/).first().waitFor({ timeout: 8000 })
+})
+await check("排行的討論串：留言 → 出現 → 刪除", async () => {
+  await page.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
+  const thread = page.getByRole("region", { name: /的討論$/ })
+  await thread.getByText("今天大家都紅的 🎉").waitFor({ timeout: 8000 })
+  await thread.getByLabel("留言", { exact: true }).fill("冒煙測試留言")
+  await thread.getByRole("button", { name: "送出" }).click()
+  await thread.getByText("冒煙測試留言").waitFor({ timeout: 8000 })
+  const row = thread.getByRole("listitem").filter({ hasText: "冒煙測試留言" })
+  await row.getByRole("button", { name: "刪除這則留言" }).click()
+  await row.getByRole("button", { name: "刪除", exact: true }).click()
+  await page.getByText("已刪除留言").waitFor({ timeout: 8000 })
+})
+await check("動態：按表情（計數加一）；成交價只在對方開了才有；合併筆數", async () => {
+  await page.goto(base + "/groups/grp_family?tab=feed", { waitUntil: "networkidle" })
+  const dad = page.getByRole("listitem").filter({ hasText: /爸爸\s*買進\s*台積電/ }).first()
+  await dad.getByText("成交價").waitFor({ timeout: 8000 })
+  await dad.getByRole("button", { name: /^讚 2/ }).click()
+  await dad.getByRole("button", { name: /^讚 3，你按過/ }).waitFor({ timeout: 8000 })
+  await page.getByRole("listitem").filter({ hasText: /爸爸\s*買進\s*元大台灣50/ }).first().getByText(/2 筆/).waitFor()
+  const sis = page.getByRole("listitem").filter({ hasText: /姊姊\s*買進\s*國泰永續高股息/ }).first()
+  if (await sis.getByText("成交價").count()) throw new Error("price shown without trade_prices")
+})
+await check("我的分享：關掉交易動態 → 動態裡自己的買賣立刻消失；持股＋金額提示可推算股數", async () => {
+  await page.goto(base + "/groups/grp_family?tab=share", { waitUntil: "networkidle" })
+  await page.getByRole("switch", { name: "金額與損益" }).click()
+  await page.getByText(/可以推算你大約持有幾股/).waitFor({ timeout: 8000 })
+  await page.getByRole("switch", { name: "交易動態" }).click()
+  await page.waitForTimeout(600)
+  await page.getByRole("tab", { name: "動態" }).click()
+  await page.getByRole("list", { name: "動態" }).waitFor({ timeout: 8000 })
+  if (await page.getByRole("list", { name: "動態" }).getByText(/示範使用者\s*買進/).count()) throw new Error("own trades still visible")
+})
+await check("成員分享：什麼都沒開是「還沒有資料」；隱私模式遮住金額", async () => {
+  await page.goto(base + "/groups/grp_family/members/usr_bro", { waitUntil: "networkidle" })
+  await page.getByText("還沒有資料。").waitFor({ timeout: 8000 })
+  await page.goto(base + "/groups/grp_family/members/usr_dad", { waitUntil: "networkidle" })
+  await page.getByText("總損益").waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
+  await page.getByLabel("已隱藏").first().waitFor()
+  await page.getByRole("button", { name: /隱私模式開啟中/ }).click()
+})
+await check("頻道：webhook 網址不對 → 說明；測試訊息失敗 → 說明；Telegram 連結碼 → 已連結", async () => {
+  await page.goto(base + "/groups/grp_family?tab=channels", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "換一個 webhook" }).click()
+  await page.getByLabel("Webhook 網址").fill("https://example.com/hook")
+  await page.getByRole("button", { name: "儲存並送測試訊息" }).click()
+  await page.getByText(/請貼上 Discord 頻道設定/).waitFor()
+  await page.getByLabel("Webhook 網址").fill("https://discord.com/api/webhooks/123/fail-token")
+  await page.getByRole("button", { name: "儲存並送測試訊息" }).click()
+  await page.getByText(/測試訊息送不出去/).waitFor({ timeout: 8000 })
+  await page.getByRole("button", { name: "產生連結碼" }).click()
+  await page.getByText(/\/link \d{6}/).waitFor({ timeout: 8000 })
+  await page.getByText("已連結：").waitFor({ timeout: 15000 })
+})
+await check("授權查看：授權給姊姊（指定帳戶）→ 列出 → 撤銷", async () => {
+  await page.goto(base + "/settings#delegations", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "授權給…" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByText("姊姊").click()
+  await dialog.getByRole("radio", { name: "指定帳戶" }).click()
+  await dialog.getByText("永豐－一般").click()
+  await dialog.getByRole("button", { name: "授權", exact: true }).click()
+  await page.getByText("已授權姊姊查看").waitFor({ timeout: 8000 })
+  const row = page.getByRole("listitem").filter({ hasText: "姊姊" }).filter({ hasText: "永豐－一般" })
+  await row.getByRole("button", { name: "撤銷" }).click()
+  await page.getByRole("alertdialog").getByRole("button", { name: "撤銷" }).click()
+  await page.getByText("已撤銷姊姊的授權").waitFor({ timeout: 8000 })
+})
+await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／加入觀察／AI 面板、群組與設定擋住 → 結束查看", async () => {
+  await page.goto(base + "/settings", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "查看爸爸的資產" }).click()
+  await page.getByText("正在查看 爸爸 的資產（唯讀）").waitFor({ timeout: 8000 })
+  await page.getByText("總資產").first().waitFor({ timeout: 8000 })
+  if (await page.getByRole("complementary", { name: "問 AI" }).count()) throw new Error("AI panel visible in view-as")
+  if (await page.getByText("觀察", { exact: true }).count()) throw new Error("watchlist visible in view-as")
+  await page.getByRole("tab", { name: /交易/ }).click()
+  await page.getByText("數量 × 價格").waitFor({ timeout: 8000 })
+  if (await page.getByRole("button", { name: "記一筆" }).count()) throw new Error("記一筆 visible in view-as")
+  await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+  await page.getByText("參考價").first().waitFor({ timeout: 8000 })
+  if (await page.getByRole("button", { name: /記一筆|加入觀察/ }).count()) throw new Error("write actions on stock page in view-as")
+  await page.goto(base + "/groups", { waitUntil: "networkidle" })
+  await page.getByText(/結束查看後才能使用/).waitFor({ timeout: 8000 })
+  await page.getByRole("region", { name: "查看模式" }).getByRole("button", { name: "結束查看" }).click()
+  await page.getByText("已回到你的帳本").waitFor({ timeout: 8000 })
+  if (await page.getByText("正在查看 爸爸 的資產（唯讀）").count()) throw new Error("banner still visible")
+})
+await check("授權查看：授權失效（403 delegation_revoked）→ 自動退出、回到自己的帳本", async () => {
+  await page.goto(base + "/settings", { waitUntil: "networkidle" })
+  await page.evaluate(() =>
+    sessionStorage.setItem(
+      "forliosa:view-as",
+      JSON.stringify({ state: { target: { delegation_id: "dlg_gone", owner: { user_id: "usr_x", display_name: "某人", avatar_url: null }, scope: "all", accounts: [] } }, version: 1 }),
+    ),
+  )
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  await page.getByText(/授權已經撤銷，已回到你的帳本/).waitFor({ timeout: 8000 })
+  await page.getByText("總資產").first().waitFor({ timeout: 8000 })
+  if (await page.getByRole("region", { name: "查看模式" }).count()) throw new Error("still in view-as")
+})
+
+// 邀請（還沒登入）：預覽 → 登入（回到邀請）→ 選分享 → 加入
+const ictx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+const ip = await ictx.newPage()
+ip.on("pageerror", (e) => errors.push(`invite pageerror ${e.message}`))
+await check("邀請：沒登入看得到預覽 → 登入後回到邀請 → 預設只開報酬率 → 加入群組", async () => {
+  await ip.goto(base + "/invite/club-2026?auth=signed-out", { waitUntil: "networkidle" })
+  await ip.getByRole("heading", { name: "投資讀書會", exact: true }).waitFor({ timeout: 8000 })
+  await ip.getByRole("link", { name: /登入後加入/ }).click()
+  await ip.waitForURL(/\/login\?next=%2Finvite%2Fclub-2026/)
+  await ip.getByRole("button", { name: "用 Discord 登入" }).click()
+  await ip.waitForURL(/\/invite\/club-2026/)
+  await ip.getByText(/你要在「投資讀書會」分享什麼/).waitFor({ timeout: 8000 })
+  const on = await ip.getByRole("switch", { name: "報酬率" }).getAttribute("aria-checked")
+  const off = await ip.getByRole("switch", { name: "交易動態" }).getAttribute("aria-checked")
+  if (on !== "true" || off !== "false") throw new Error("defaults are not returns-only")
+  await ip.getByRole("switch", { name: "交易動態" }).click()
+  await ip.getByText(/最近 90 天的買賣也會出現在動態裡/).first().waitFor()
+  await ip.getByRole("button", { name: "加入群組" }).click()
+  await ip.waitForURL(/\/groups\/grp_club/, { timeout: 8000 })
+  await ip.getByRole("heading", { name: "投資讀書會", exact: true }).waitFor({ timeout: 8000 })
+})
+await check("登入頁：Discord 錯誤代碼的說明", async () => {
+  await ip.goto(base + "/login?error=oauth_email_conflict", { waitUntil: "networkidle" })
+  await ip.getByText(/這個 Email 已經連結到另一個 Discord 帳號/).waitFor({ timeout: 8000 })
+})
+await ictx.close()
+
 // 手機：浮動分頁＋問 AI 全螢幕（搜尋住在這裡）
 const mctx = await browser.newContext({ ...pw.devices["iPhone 15"], locale: "zh-TW", timezoneId: "Asia/Taipei" })
 const m = await mctx.newPage()
@@ -358,6 +518,23 @@ await check("手機：法人觀點三行列＋免責", async () => {
   await m.getByRole("button", { name: /法人觀點/ }).click()
   await m.getByRole("list", { name: "法人觀點" }).getByText("外資券商 A", { exact: true }).waitFor({ timeout: 8000 })
   await m.getByText("非 Forliosa 建議").first().waitFor()
+})
+await check("手機：查看爸爸時「問 AI」換成「結束查看」", async () => {
+  await m.goto(base + "/settings", { waitUntil: "networkidle" })
+  await m.getByRole("button", { name: "查看爸爸的資產" }).click()
+  await m.getByText("正在查看 爸爸 的資產（唯讀）").waitFor({ timeout: 8000 })
+  if (await m.getByRole("button", { name: /^問 AI/ }).count()) throw new Error("ask AI visible in view-as")
+  await m.getByRole("button", { name: /結束查看$/ }).click()
+  await m.getByRole("button", { name: /^問 AI/ }).waitFor({ timeout: 8000 })
+})
+await check("手機：群組分頁列可以橫向捲動，直接打開「成員」時捲到那個分頁", async () => {
+  await m.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
+  await m.getByText("邀請連結").first().waitFor({ timeout: 8000 })
+  const visible = await m.getByRole("tab", { name: "成員" }).evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    return r.left >= 0 && r.right <= window.innerWidth
+  })
+  if (!visible) throw new Error("active tab not scrolled into view")
 })
 await check("手機：底部分頁到紀錄", async () => {
   await m.getByRole("link", { name: "紀錄" }).click()

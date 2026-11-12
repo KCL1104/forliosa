@@ -1,5 +1,5 @@
 import { createHttpAdapter } from "./http"
-import { createMockAdapter, readMockScenario } from "./mock/adapter"
+import { createMockAdapter, readMockScenario, readMockSignedIn } from "./mock/adapter"
 import { readMockPolicy } from "./mock/commercial"
 import { MOCK_TODAY } from "./mock/market"
 import { todayInTaipei } from "@/lib/format"
@@ -17,7 +17,7 @@ import type { ForliosaApi } from "./types"
 const configured = import.meta.env.VITE_API_BASE_URL?.trim()
 const baseUrl = configured || (import.meta.env.MODE === "api" ? "/api/v1" : undefined)
 
-export const api: ForliosaApi = baseUrl ? createHttpAdapter(baseUrl) : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy() })
+export const api: ForliosaApi = baseUrl ? createHttpAdapter(baseUrl) : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn() })
 
 /** 真實後端的 base URL（mock 模式為 undefined）；AI 對話的 SSE 串流直接用它 */
 export const apiBaseUrl: string | undefined = baseUrl

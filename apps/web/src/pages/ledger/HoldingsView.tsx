@@ -19,6 +19,7 @@ import { ClosedRounds } from "./ClosedRounds"
 import { RecurringMark } from "./RecurringMark"
 import { useActivePlans } from "./use-active-plans"
 import { COLUMN_LABEL, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
+import { useReadOnly } from "@/api/view-as"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
 
@@ -89,6 +90,8 @@ function UnpricedNote({ rows }: { rows: Holding[] }) {
 
 function EmptyLedger() {
   const ask = useAskAi()
+  const readOnly = useReadOnly()
+  if (readOnly) return <p className="border-y border-rule py-8 text-ink-2">目前沒有持股。</p>
   return (
     <div className="border-y border-rule py-8">
       <p className="text-lg font-medium">帳本還是空的</p>
@@ -141,6 +144,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   const columns = useLedgerPrefs((s) => s.columns)
   const navigate = useNavigate()
   const watch = useWatchlist()
+  const readOnly = useReadOnly()
   const maxWeight = Math.max(...rows.map((h) => h.weight), 0.0001)
   const header = (c: HoldingColumn) => {
     const key = SORTABLE[c]
@@ -198,7 +202,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
           </tr>
         ))}
       </tbody>
-      <WatchBody items={watch.data} columns={columns.length} loading={watch.isLoading} />
+      {!readOnly && <WatchBody items={watch.data} columns={columns.length} loading={watch.isLoading} />}
     </table>
   )
 }
@@ -313,6 +317,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
 /** 手機：兩行列 */
 function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
   const watch = useWatchlist()
+  const readOnly = useReadOnly()
   const plans = useActivePlans()
   return (
     <div className="md:hidden">
@@ -347,6 +352,8 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
           </li>
         ))}
       </ul>
+      {!readOnly && (
+        <>
       <h2 className="mt-9 flex h-11 items-end gap-2 border-b border-rule pb-2 text-lg font-bold">
         觀察 <span className="num text-sm font-normal text-ink-2">{watch.data?.length ?? 0} 檔</span>
         {watch.data?.some((w) => w.quote?.is_demo ?? w.is_demo) && <DemoTag className="mb-0.5 ml-auto" />}
@@ -359,6 +366,8 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
             <WatchRowMobile key={w.symbol} w={w} />
           ))}
         </ul>
+      )}
+        </>
       )}
     </div>
   )

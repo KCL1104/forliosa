@@ -1,6 +1,6 @@
-import { createRootRouteWithContext, createRoute, createRouter, lazyRouteComponent, redirect } from "@tanstack/react-router"
+import { createRootRouteWithContext, createRoute, createRouter, lazyRouteComponent, redirect, type RouterHistory } from "@tanstack/react-router"
 import type { QueryClient } from "@tanstack/react-query"
-import { AppShell } from "@/app/AppShell"
+import { RootLayout } from "@/app/RootLayout"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 import { LedgerPage } from "@/pages/ledger/LedgerPage"
 
@@ -16,8 +16,21 @@ export interface LedgerSearch {
   symbol?: string
 }
 
+/** 群組頁的分頁：排行・動態・持股・週報・我的分享・成員・頻道 */
+export const GROUP_TABS = ["ranking", "feed", "holdings", "digests", "share", "members", "channels"] as const
+export type GroupTab = (typeof GROUP_TABS)[number]
+export interface GroupSearch {
+  tab?: GroupTab
+  /** 動態：只看一位成員 */
+  member?: string
+}
+export interface LoginSearch {
+  next?: string
+  error?: string
+}
+
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
-  component: AppShell,
+  component: RootLayout,
   notFoundComponent: NotFoundPage,
 })
 
@@ -44,6 +57,38 @@ const groupsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups",
   component: lazyRouteComponent(() => import("@/pages/groups/GroupsPage"), "GroupsPage"),
+})
+
+const groupRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId",
+  validateSearch: (s: Record<string, unknown>): GroupSearch => ({
+    tab: GROUP_TABS.includes(s.tab as GroupTab) && s.tab !== "ranking" ? (s.tab as GroupTab) : undefined,
+    member: typeof s.member === "string" && s.member ? s.member : undefined,
+  }),
+  component: lazyRouteComponent(() => import("@/pages/groups/GroupPage"), "GroupPage"),
+})
+
+const memberRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/groups/$groupId/members/$userId",
+  component: lazyRouteComponent(() => import("@/pages/groups/MemberPage"), "MemberPage"),
+})
+
+const loginRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/login",
+  validateSearch: (s: Record<string, unknown>): LoginSearch => ({
+    next: typeof s.next === "string" && s.next ? s.next : undefined,
+    error: typeof s.error === "string" && s.error ? s.error : undefined,
+  }),
+  component: lazyRouteComponent(() => import("@/pages/auth/LoginPage"), "LoginPage"),
+})
+
+const inviteRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/invite/$token",
+  component: lazyRouteComponent(() => import("@/pages/groups/InvitePage"), "InvitePage"),
 })
 
 const historyRoute = createRoute({
@@ -78,6 +123,10 @@ const routeTree = rootRoute.addChildren([
   ledgerRoute,
   stockRoute,
   groupsRoute,
+  groupRoute,
+  memberRoute,
+  loginRoute,
+  inviteRoute,
   historyRoute,
   settingsRoute,
   dataSourcesRoute,
@@ -91,9 +140,11 @@ const routeTree = rootRoute.addChildren([
   legacy("/more", "/settings"),
 ])
 
-export function createAppRouter(queryClient: QueryClient) {
+/** `history`：測試用記憶體歷史（預設是瀏覽器網址） */
+export function createAppRouter(queryClient: QueryClient, history?: RouterHistory) {
   return createRouter({
     routeTree,
+    history,
     context: { queryClient },
     defaultPreload: "intent",
     scrollRestoration: true,

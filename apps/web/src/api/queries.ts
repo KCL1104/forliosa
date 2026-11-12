@@ -16,6 +16,7 @@ import type {
   TransactionInput,
   TransactionQuery,
 } from "./types"
+import { useReadOnly } from "@/api/view-as"
 
 export const qk = {
   me: ["me"] as const,
@@ -222,8 +223,10 @@ export function usePosition(symbol: string, enabled = true) {
 export function useWhy(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.why(symbol), queryFn: () => api.getWhy(symbol), staleTime: 60_000, refetchInterval: 120_000 })
 }
+/** 自選：查看別人的資產時不讀（不在授權查看的白名單） */
 export function useWatchlist() {
-  return useQuery({ queryKey: qk.watchlist, queryFn: () => api.getWatchlist(), staleTime: 30_000, refetchInterval: 60_000 })
+  const readOnly = useReadOnly()
+  return useQuery({ enabled: !readOnly, queryKey: qk.watchlist, queryFn: () => api.getWatchlist(), staleTime: 30_000, refetchInterval: 60_000 })
 }
 export function useUpcoming(days = 7) {
   return useQuery({ queryKey: qk.upcoming(days), queryFn: () => api.getUpcoming(days), staleTime: 10 * 60_000 })
@@ -246,8 +249,10 @@ export function useClosedPositions(accountId?: string) {
 export function usePositionHistory(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.positionHistory(symbol), queryFn: () => api.getPositionHistory(symbol), staleTime: 60_000, retry: notFound })
 }
+/** 定期定額：查看別人的資產時不讀（不在授權查看的白名單） */
 export function useRecurringPlans() {
-  return useQuery({ queryKey: qk.recurring, queryFn: () => api.listRecurring(), staleTime: 60_000 })
+  const readOnly = useReadOnly()
+  return useQuery({ enabled: !readOnly, queryKey: qk.recurring, queryFn: () => api.listRecurring(), staleTime: 60_000 })
 }
 function useInvalidateRecurring() {
   const qc = useQueryClient()

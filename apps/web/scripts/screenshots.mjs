@@ -151,6 +151,46 @@ const foreignAsk = async (page, mobile) => {
   if (mobile) await page.waitForTimeout(400)
 }
 
+// ── M5 分享 ─────────────────────────────────────────────
+/** 邀請：打開交易動態（同時看到「最近 90 天」的說明，附上成交價變成可以打開） */
+const m5InviteTrades = async (page) => {
+  await page.getByRole("switch", { name: "交易動態" }).click()
+  await page.getByText(/最近 90 天的買賣也會出現在動態裡/).first().waitFor()
+}
+/** 動態：展開爸爸今天買台積電的留言 */
+const m5FeedThread = async (page) => {
+  const row = page.getByRole("listitem").filter({ hasText: "又加碼" }).or(page.getByRole("listitem").filter({ hasText: "台積電" }).filter({ hasText: "爸爸" })).first()
+  await row.getByRole("button", { name: /留言/ }).click()
+  await page.getByText("又加碼台積電了！").waitFor({ timeout: 8000 })
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+}
+/** 我的分享：打開「金額與損益」（持股也開著）→ 旁邊提示可以推算股數 */
+const m5ShareAmounts = async (page) => {
+  await page.getByRole("switch", { name: "金額與損益" }).click()
+  await page.getByText(/可以推算你大約持有幾股/).waitFor({ timeout: 8000 })
+}
+const m5Privacy = async (page) => {
+  await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
+  await page.getByLabel("已隱藏").first().waitFor()
+}
+const m5Delegations = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("delegations")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
+/** 授權查看：設定 → 爸爸授權給我的「查看」→ 帳本（唯讀橫幅） */
+const m5ViewAs = async (page) => {
+  await page.getByRole("button", { name: "查看爸爸的資產" }).click()
+  await page.getByText("正在查看 爸爸 的資產（唯讀）").first().waitFor({ timeout: 8000 })
+  await page.getByText("總資產").first().waitFor({ timeout: 8000 })
+}
+const m5ViewAsStock = async (page) => {
+  await m5ViewAs(page)
+  await page.goto(page.url().replace(/\/(\?.*)?$/, "/stock/2330.TW"), { waitUntil: "networkidle" })
+  await page.getByText("參考價").first().waitFor({ timeout: 8000 })
+}
+
 /** 每個畫面：路徑、就緒條件、截圖前要做的動作 */
 const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
@@ -183,6 +223,27 @@ const SHOTS = [
     await page.getByRole("button", { name: /^問 AI/ }).click()
     await page.waitForTimeout(500)
   } },
+  // ── M5 分享：登入、邀請、群組（排行・動態・持股・週報・我的分享・成員・頻道）、成員分享、授權查看 ──
+  // mock：`?auth=signed-out` 模擬還沒登入；家族投資（我是擁有者）、大學同學（我是成員、不排名次）、投資讀書會（邀請 club-2026）
+  { name: "m5-login", path: "/login?auth=signed-out", ready: "text=用 Discord 登入" },
+  { name: "m5-login-error", path: "/login?auth=signed-out&error=oauth_email_unverified", ready: "text=還沒有驗證" },
+  { name: "m5-invite-signed-out", path: "/invite/club-2026?auth=signed-out", ready: "text=登入後加入" },
+  { name: "m5-invite", path: "/invite/club-2026", ready: "text=分享什麼", action: m5InviteTrades },
+  { name: "m5-groups", path: "/groups", ready: "text=大學同學" },
+  { name: "m5-group-ranking", path: "/groups/grp_family", ready: "text=元大台灣50" },
+  { name: "m5-group-ranking-unranked", path: "/groups/grp_friends", ready: "text=依加入順序列出" },
+  { name: "m5-group-feed", path: "/groups/grp_family?tab=feed", ready: "text=加入了群組", action: m5FeedThread },
+  { name: "m5-group-holdings", path: "/groups/grp_family?tab=holdings", ready: "text=成員持股" },
+  { name: "m5-group-digests", path: "/groups/grp_family?tab=digests", ready: "text=本週報酬" },
+  { name: "m5-group-share", path: "/groups/grp_family?tab=share", ready: "text=附上成交價", action: m5ShareAmounts },
+  { name: "m5-group-members", path: "/groups/grp_family?tab=members", ready: "text=邀請連結" },
+  { name: "m5-group-channels", path: "/groups/grp_family?tab=channels", ready: "text=Webhook 網址結尾" },
+  { name: "m5-member", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益" },
+  { name: "m5-member-privacy", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益", action: m5Privacy },
+  { name: "m5-member-empty", path: "/groups/grp_family/members/usr_bro", ready: "text=還沒有資料" },
+  { name: "m5-settings-delegations", path: "/settings", ready: "text=授權給你的人", action: m5Delegations },
+  { name: "m5-view-as", path: "/settings", ready: "text=授權給你的人", action: m5ViewAs },
+  { name: "m5-view-as-stock", path: "/settings", ready: "text=授權給你的人", action: m5ViewAsStock },
 ]
 const REAL_SHOTS = SHOTS.filter((s) => !s.action)
 

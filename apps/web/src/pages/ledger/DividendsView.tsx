@@ -14,10 +14,12 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { formatDateShort, formatDaysUntil, formatMoney, formatNumber } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
+import { useReadOnly } from "@/api/view-as"
 
 /** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {
   const ask = useAskAi()
+  const readOnly = useReadOnly()
   const summary = useSummary()
   const upcoming = useUpcoming(30)
   const holdings = useHoldings()
@@ -55,10 +57,12 @@ export function DividendsView() {
         title="接下來"
         titleId="div-next"
         action={
-          <Button variant="outline" size="sm" onClick={() => ask.action("dividend")}>
-            <CoinsIcon />
-            股利入帳
-          </Button>
+          readOnly ? undefined : (
+            <Button variant="outline" size="sm" onClick={() => ask.action("dividend")}>
+              <CoinsIcon />
+              股利入帳
+            </Button>
+          )
         }
       >
         {upcoming.isLoading || summary.isLoading ? (

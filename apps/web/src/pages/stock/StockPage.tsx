@@ -22,6 +22,7 @@ import { usePrefs } from "@/stores/prefs"
 import { asOfLabel } from "@/lib/as-of"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
+import { useReadOnly } from "@/api/view-as"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
 const FinancialsTab = lazy(() => import("./tabs/FinancialsTab").then((m) => ({ default: m.FinancialsTab })))
@@ -91,7 +92,7 @@ export function StockPage() {
         </>
       )}
 
-      <div className="sticky top-0 z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 lg:top-16 xl:-mx-14 xl:px-14">
+      <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
         <div role="tablist" aria-label="個股資料" className="no-scrollbar flex gap-1 overflow-x-auto">
           {TABS.map((t) => {
             const active = t.value === tab
@@ -159,6 +160,8 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const ask = useAskAi()
+  // 查看別人的資產（唯讀）：不提供加入觀察、記一筆
+  const readOnly = useReadOnly()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
   const status = overview.data?.status
   return (
@@ -183,7 +186,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         </span>
       )}
       {inst.is_demo && <DemoTag className="max-sm:hidden" />}
-      <span className="ml-auto flex items-center gap-2">
+      {!readOnly && <span className="ml-auto flex items-center gap-2">
         {!held && (
           <Button
             variant="outline"
@@ -200,7 +203,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
           <PlusIcon />
           記一筆
         </Button>
-      </span>
+      </span>}
     </nav>
   )
 }
@@ -268,8 +271,10 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
   const quote = useQuote(inst.symbol)
   const ask = useAskAi()
+  const readOnly = useReadOnly()
   if (!why.data?.show || !why.data.headline) return null
   const d = direction(quote.data?.change_pct)
+  if (readOnly) return <p className="ai-voice mt-3 max-w-full text-lg leading-snug lg:text-xl">{why.data.headline}</p>
   return (
     <button
       type="button"
@@ -333,6 +338,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
+  const readOnly = useReadOnly()
   const [open, setOpen] = useState(false)
   const money = (n: number, signed = false) => formatMoney(n, { signed })
   if (privacy) {
@@ -420,9 +426,11 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
                 在帳本中查看
                 <ChevronRightIcon aria-hidden />
               </Link>
-              <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
-                記一筆
-              </Button>
+              {!readOnly && (
+                <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
+                  記一筆
+                </Button>
+              )}
             </div>
           </div>
         </div>

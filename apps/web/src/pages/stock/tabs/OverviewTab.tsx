@@ -11,11 +11,13 @@ import { usePrefs } from "@/stores/prefs"
 import { formatQuote } from "@/lib/tick"
 import { AnalystViewsCard } from "../AnalystViews"
 import { KeyGrid, NotYet, Sources } from "./kit"
+import { useReadOnly } from "@/api/view-as"
 
 const BANDS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
 
 /** 總覽：關鍵數據、估值位置、月營收、籌碼摘要、法人觀點（收合）、接下來、公告、公司 */
 export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
+  const readOnly = useReadOnly()
   const overview = useOverview(inst.symbol)
   const o = overview.data
   const us = inst.market === "US"
@@ -57,7 +59,7 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
         {!us && <ChipsBrief inst={inst} />}
       </div>
       {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
-      {inst.type === "stock" && <AnalystViewsCard key={inst.symbol} inst={inst} />}
+      {inst.type === "stock" && !readOnly && <AnalystViewsCard key={inst.symbol} inst={inst} />}
       <Upcoming inst={inst} position={position} />
       <Announcements inst={inst} />
       <Company inst={inst} sources={o?.sources ?? inst.data_sources} />
