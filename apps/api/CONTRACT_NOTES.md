@@ -465,8 +465,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 ## AI（M4，2026-11-12）
 
 程式在 `src/forliosa/ai/`（`keypool`、`tools`、`prompts`、`chat`、`store`、`scope`、`grounding`、`retention`、`suggestions`、
-`why`、`smoke`）與 `api/routes/ai.py`；資料表 `ai_threads`、`ai_messages`、`ai_drafts`、`ai_usage`、`ai_why_cache`
-（migration `0004_ai_threads_usage`；金鑰槽與保存期限的欄位、索引在 `0005_ai_key_slots_retention`）。合約見
+`why`、`analyst`、`smoke`）與 `api/routes/ai.py`；資料表 `ai_threads`、`ai_messages`、`ai_drafts`、`ai_usage`、`ai_why_cache`
+（migration `0004_ai_threads_usage`；金鑰槽與保存期限的欄位、索引在 `0005_ai_key_slots_retention`）、`ai_analyst_views`
+（`0009_ai_analyst_views`，見下方「法人觀點」）。合約見
 [`docs/api-contract.md`](../../docs/api-contract.md)「AI（M4）」。
 
 ### 設定（環境變數）
@@ -478,8 +479,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | `AI_KEY_STICKY_WAIT_SECONDS` | 5 | 對話釘住的槽在這幾秒內會恢復（例如 `retry-after: 2`）就等它；更久就搬到別槽 |
 | `AI_KEY_COOLDOWN_SECONDS`、`AI_REQUEST_TIMEOUT_SECONDS` | 60、120 | 沒有 `retry-after` 時的冷卻秒數（視為「猜測」，全部槽都在冷卻時仍可試一次） |
 | `AI_DEV_DUMMY_KEY` | `false` | 沒有金鑰時送一個占位字串，給會自動注入真金鑰的 proxy 用 |
-| `AI_MODEL` | `claude-haiku-5-5` | 產品負責人指定；`AI_MODEL_CHAT`／`AI_MODEL_WHY`／`AI_MODEL_IMPORT`／`AI_MODEL_REPORT` 可個別覆寫 |
+| `AI_MODEL` | `claude-haiku-5-5` | 產品負責人指定；`AI_MODEL_CHAT`／`AI_MODEL_WHY`／`AI_MODEL_IMPORT`／`AI_MODEL_REPORT`／`AI_MODEL_ANALYST` 可個別覆寫 |
 | `AI_EFFORT_CHAT`、`AI_EFFORT_WHY` | `low` | `output_config.effort`（Haiku 5.5 預設 medium，這裡明確設 low） |
+| `AI_EFFORT_ANALYST` | `medium` | 法人觀點的 effort（要照多條規則逐筆整理，用 Haiku 5.5 的預設 medium；實測約 17 秒） |
 | `AI_MAX_TOKENS_CHAT`、`AI_MAX_TOOL_ROUNDS` | 8000、8 | 每次呼叫的輸出上限、每輪最多幾次模型呼叫 |
 | `AI_DAILY_MESSAGE_LIMIT` | 50 | 每人每天（台北日）提問數，0＝不限（產品負責人確認） |
 | `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
@@ -490,6 +492,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | `AI_WEB_DYNAMIC_FILTERING` | `false` | `true` 時用網頁工具的動態過濾（code execution）；預設直接呼叫，延遲較低、可零資料保留 |
 | `AI_EAGER_TOOL_STREAMING` | `false` | 工具參數很短（幾十個 token），伺服器端驗證比提早串流划算；要時可打開 |
 | `AI_WHY_ENABLED`、`AI_WHY_BLOCKING` | `true`、`false` | 見下方「為什麼漲跌」（預設開啟，產品負責人決定） |
+| `AI_ANALYST_ENABLED`、`AI_ANALYST_SEARCH_MAX_USES` | `true`、3 | 見下方「法人觀點」；關閉時 POST 回 `unavailable`（不呼叫模型、不計費） |
 | `AI_SCOPE_PRECHECK` | `true` | 明顯離題（寫程式、作業、角色扮演、寫詩、翻譯）又沒有任何財經字詞的提問，不呼叫模型直接婉拒 |
 | `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天；0＝永久保存 |
 | `AI_ADMIN_EMAILS` | 空 | `FORLIOSA_ENV=prod` 時可以看 `GET /ai/admin/keys` 的帳號（逗號分隔）；dev／test 時所有登入者都可看 |
@@ -570,7 +573,43 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   預設在背景執行緒產生（第一次回規則句，之後回 AI 句）；`AI_WHY_BLOCKING=1` 則同步等待。任何錯誤都回規則句。用餘裕最多的金鑰槽。
 - **建議問題** `GET /ai/suggestions`：規則與前端離線版相同（`apps/web/src/ai/suggestions.ts`），不呼叫模型。
 - **Live smoke**：`uv run python -m forliosa.ai.smoke`（需要金鑰；沒有示範使用者會先 seed）：一題用工具的持股問題、一題需要網路搜尋的
-  台積電問題，印出用量、估計費用、「無來源」標記與每個金鑰槽的狀態。
+  台積電問題，印出用量、估計費用、「無來源」標記與每個金鑰槽的狀態。`--analyst 2330.TW NVDA`（最多 2 檔）只跑法人觀點的生成
+  （不寫資料庫），印出搜尋關鍵字、每個搜尋結果的 `page_age`、thinking 摘要、模型回報的原始內容、留下與刪掉的項目（附原因）、秒數與費用。
+
+### 法人觀點（`GET/POST /instruments/{symbol}/analyst-views`，`ai/analyst.py`，2026-11-12）
+
+規則來自 `PRODUCT.md` 與 `docs/research/analyst-ratings.md`：只引用第三方已公開的評等與目標價、每筆附來源與日期；AI 自己不給目標價；
+不算平均、上漲空間，不排名，不寫買賣提示；標示為第三方觀點。
+
+- **獨立的提示**（`prompts.ANALYST_SYSTEM`）：只允許「引用」報導裡寫明的機構評等與目標價。聊天提示的「也不給目標價」**沒有改**。
+  模型唯一的輸出是 strict client tool `report_analyst_views`（機構、動作、評等原文、目標價、幣別、報導日期、網址；最多 8 筆候選），
+  所以回應裡沒有任何模型自己寫的句子；畫面只顯示經過核對的欄位與固定的免責文字。
+- **工具**：只有 `web_search`（`max_uses` 3、台北位置，評等彙整站 TipRanks、MarketBeat、StockAnalysis、TradingView、Goodinfo、
+  玩股網、CMoney 用 `blocked_domains` 擋掉；有設 `AI_WEB_SEARCH_ALLOWED_DOMAINS` 時改用那份允許清單，API 只能二選一）。**不用 `web_fetch`**，
+  所以不會讀取 www.twse.com.tw／mis.twse.com.tw。API 拒絕某個伺服器工具時和對話一樣把它停用（這個程序內），該次回 `unavailable`。
+- **核對（grounding，`analyst.verify`）**：一筆只有在下列都成立時才列出——
+  1. 網址是這次生成中模型實際拿到的 `web_search_result` 之一（比對時忽略 http/https、`www.`、結尾斜線、`#…`、百分比編碼）；
+     顯示的網址與標題用**搜尋結果自己的**，不用模型寫的。
+  2. 不是評等彙整站或報價頁（上面的網域，加上 Yahoo 股市／Yahoo Finance 的 `/quote`、鉅亨的 `/twstock`）。
+  3. 報導日期能從該搜尋結果的網址（`/2026/11/10/`、`20261110…`）或 `page_age`（ISO、`November 10, 2026`、`2026年11月10日`、
+     `3 days ago`）讀出；**顯示的日期是這個核對過的報導日期**，不是模型寫的日期。不晚於明天、不早於 90 天前。
+  4. 有具名機構（「法人」「外資」「分析師」「Analysts」這類泛稱不列），評等原文（30 字內）或目標價（正數）至少一項；
+     目標價的幣別必須是這檔股票的交易幣別（例如台積電 ADR 的美元目標價不會列在 2330.TW）。
+  核對後依報導日期新到舊、同一家機構只留最新一筆，最多 5 筆。數字照報導原文傳遞，不換算、不平均、不比較。
+  模型回報空清單、但搜尋結果裡的報導標題明顯有評等／目標價（目標價、評等、price target、upgrade…）時，不宣稱「查無」，改成 `unavailable`。
+  `report_analyst_views` 的清單或每一筆若被送成 JSON 字串，也會用 `json.loads` 解開（不用字串比對）。
+- **共用與刪除**：`ai_analyst_views` 以「代號＋台股交易日」（台北今天；非交易日用最近一個交易日）為鍵，全體使用者共用；
+  `expires_at` = 建立後 24 小時，每次讀取先刪掉過期的列，worker 每小時 :05 也刪一次（`ai_analyst_purge`）。只存一份核對過的項目，
+  不累積歷史、不做統計。
+- **狀態**：POST 建立 `pending` 列（主鍵衝突＝別人剛建立，直接共用）後在背景執行緒生成，回應立刻回 `pending`；完成後 `ready`
+  （`as_of` 是完成時間）或 `unavailable`。`pending` 超過 5 分鐘（程序中斷）讀取時改成 `unavailable`。`unavailable` 的 `notes` 寫
+  「HH:MM 之後可以再查一次。」；10 分鐘內 POST 直接回它（不重查、不計費），之後 GET 回 `none`、POST 重新生成。
+  模型只回文字時補一次提醒（同一金鑰槽，搜尋結果原樣送回）；`pause_turn` 續傳也留在同一槽；拒答、`max_tokens`、仍沒有回報 → `unavailable`。
+- **計費**：觸發的人算一題（開始時寫一列 0 token 的 `ai_usage`，`feature = "analyst"`、`thread_id` = 這次生成的 id，`stop_reason = "started"`；
+  `messages_today` = 對話提問數＋今天觸發的生成數），之後每次模型呼叫一列，token 計入他的每月額度。讀共用結果的人不計。
+  POST 先檢查金鑰（503 `ai_unavailable`）與額度（429），已有的 `pending`／`ready` 不檢查也不計。
+- **只有個股**：ETF（`type != "stock"`）回 422 `analyst_views_stocks_only`，不呼叫模型；前端本來就只對個股顯示。
+- **模型與時間**：`AI_MODEL_ANALYST`（預設 `AI_MODEL`，Haiku 5.5）、`AI_EFFORT_ANALYST=medium`、非串流、`max_tokens` 6000。
 
 ### 實測費用（產品負責人 2026-11-12 live smoke，`claude-haiku-5-5`）
 
@@ -578,6 +617,18 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 |---|---:|---:|---:|---:|---:|
 | 1. 我目前有哪些持股？（工具） | 4 | 9,511 | 7,837 | 878 | 約 US$0.00171 |
 | 2. 台積電今天的新聞（1 次網路搜尋） | 4 | 7,980 | 15,500 | 1,542 | 約 US$0.01192（其中約 US$0.01 是搜尋費） |
+
+法人觀點（2026-11-12，`smoke --analyst`，2 次 live 生成，皆 2330.TW；美股沒有實測）：
+
+| 次 | 設定 | 搜尋 | 呼叫 | 秒數 | 輸入 | 輸出 | 估計費用 | 結果 |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| 1 | effort low、第一版提示 | 2 | 1 | 12.7 | 22,305 | 1,298 | US$0.02288 | `ready`、0 筆：模型回報空清單 |
+| 2 | effort medium、改過的提示、擋彙整站 | 2 | 1 | 17.3 | 25,115 | 2,875 | US$0.02395 | `ready`、0 筆：thinking 摘要列出伯恩斯坦 3,828 元、小摩 3,300 元、Aletheia 5,000 元、匯豐、美銀、大摩等候選，但回報的清單仍是空的 |
+
+兩次的搜尋結果都很好（工商時報、經濟日報、自由財經、科技新報等，`page_age` 幾乎都有，例如「3 days ago」）。第 2 次的 thinking
+明確挑出候選卻回報空清單，可能是清單被送成 JSON 字串（之前的程式只收真正的陣列）或模型在工具呼叫時清空；之後已加上：JSON 字串也解開、
+smoke 印出回報的原始內容，以及「空清單但標題明顯有評等 → `unavailable`，不宣稱查無」。**還需要一次 live 驗證**（任務限制本次最多 2 次）：
+`uv run python -m forliosa.ai.smoke --analyst 2330.TW NVDA`（約 US$0.05、40 秒）。
 
 提示快取有效（第二次呼叫起大部分是快取讀取）。同一次 smoke 發現兩件事，已處理：預設設定下兩題都在送出前被 400 拒絕
 （「…not allowed to use tool web_fetch_20260318」）→ 上面的「被拒絕的伺服器工具」；搜尋題的回答出現沒有引用的「董事會批准投資 Anthropic／OpenAI」
@@ -595,3 +646,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 7. **每槽預算是估計值**：依 `ai/pricing.py` 的價目估算，與實際帳單可能有出入；建議 Console 的 workspace 花費上限設為真正的硬上限，
    `AI_KEY_<n>_MONTHLY_BUDGET_USD` 設低一點作為提早換槽的門檻。
 8. **「無來源」標記是啟發式**：可能漏標（沒有典型動詞的敘述）或誤標（用工具資料寫的公告句子）；需要看實際對話調整字詞。
+9. **法人觀點還沒在 live 看到項目**（見上方實測）：下一個有金鑰的 session 先跑一次 `smoke --analyst 2330.TW NVDA` 看回報的原始內容。
+10. **法人觀點的報導日期與 90 天**：顯示的是報導日期（搜尋結果核對），不是券商報告日期；超過 90 天的不列（研究稿建議 90 天）。
+    台股常見「媒體報導晚券商報告幾天」，要不要改成標「舊資料」而不是不列？
+11. **法人觀點算一題**：和對話共用每天 50 題；失敗後 10 分鐘可重查，重查再算一題。

@@ -34,13 +34,13 @@ from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, BrokerAccount
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
-FEATURES = ("chat", "why", "import", "report")
+FEATURES = ("chat", "why", "import", "report", "analyst")
 TITLE_MAX = 40
 
 
 def model_for(feature: str, settings: Settings) -> str:
     override = {"chat": settings.ai_model_chat, "why": settings.ai_model_why, "import": settings.ai_model_import,
-                "report": settings.ai_model_report}.get(feature)
+                "report": settings.ai_model_report, "analyst": settings.ai_model_analyst}.get(feature)
     return (override or settings.ai_model).strip()
 
 
@@ -315,9 +315,14 @@ def slot_thread_counts(db: Session) -> dict[int, int]:
 
 
 def messages_today(db: Session, user: User, now: datetime | None = None) -> int:
-    return db.scalar(select(func.count()).select_from(AiMessage).where(
-        AiMessage.user_id == user.id, AiMessage.is_user_input.is_(True),
-        AiMessage.created_at >= day_start(now))) or 0
+    """Questions asked today (Taipei): chat messages plus analyst-view searches this user triggered (each search
+    counts as one question; its calls share one ``ai_usage.thread_id``, see ``analyst``)."""
+    since = day_start(now)
+    chat = db.scalar(select(func.count()).select_from(AiMessage).where(
+        AiMessage.user_id == user.id, AiMessage.is_user_input.is_(True), AiMessage.created_at >= since)) or 0
+    analyst = db.scalar(select(func.count(func.distinct(AiUsage.thread_id))).where(
+        AiUsage.user_id == user.id, AiUsage.feature == "analyst", AiUsage.created_at >= since)) or 0
+    return chat + analyst
 
 
 def month_usage(db: Session, user: User, now: datetime | None = None) -> tuple[int, Decimal]:

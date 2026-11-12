@@ -447,6 +447,27 @@ class AiWhyCache(Base):
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 
+class AiAnalystViews(Base):
+    """Third-party ratings / target prices found by AI web search (``forliosa.ai.analyst``): one shared entry per
+    symbol per Taiwan trading day, deleted ``expires_at`` (24 h after creation). Only the verified items of one
+    answer are kept — no history, no aggregates."""
+
+    __tablename__ = "ai_analyst_views"
+    __table_args__ = (Index("ix_ai_analyst_views_expires", "expires_at"),)
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    trading_day: Mapped[date] = mapped_column(Date, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # pending | ready | unavailable
+    items: Mapped[list] = mapped_column(JSON, default=list)
+    notes: Mapped[list] = mapped_column(JSON, default=list)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    generation_id: Mapped[str] = mapped_column(String(32))  # ai_usage.thread_id of this generation's calls
+    requested_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    expires_at: Mapped[datetime] = mapped_column(TZDateTime)
+
+
 class FundProfile(Base):
     """ETF / fund basics from TWSE t187ap47_L 基金基本資料彙總表 (stored now, exposed later).
 

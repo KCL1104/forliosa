@@ -16,6 +16,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   ``forliosa.services.auto_dividends.sync_all_users`` books, corrects or removes automatic dividends.
 * ``ai_retention`` — every day 04:20: deletes AI threads, messages and drafts whose last activity is older than
   ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
+* ``ai_analyst_purge`` — every hour at :05: deletes shared analyst views 24 hours after they were created
+  (``forliosa.ai.analyst.purge_expired``; reads purge them too, so an expired entry is never shown).
 
 There is no intraday polling: the former MIS job was removed (2026-11-12) because TWSE's website terms
 forbid automated downloads from mis.twse.com.tw and real-time / delayed quotes need a paid licence.
@@ -145,6 +147,7 @@ class Worker:
                 lambda: self.archive(EVENING_GROUPS)),
             Job("weekly_archive", weekly_at(5, time(10, 0)), self.weekly_archive),
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
+            Job("ai_analyst_purge", daily_at(*(time(h, 5) for h in range(24))), self.ai_analyst_purge),
         ]
 
     async def archive(self, groups: list[str]) -> None:
@@ -180,6 +183,17 @@ class Worker:
         from forliosa.ai import retention
 
         await asyncio.to_thread(retention.run)
+
+    async def ai_analyst_purge(self) -> None:
+        from forliosa.ai.analyst import purge_expired
+
+        def run() -> int:
+            with session_factory()() as db:
+                return purge_expired(db)
+
+        n = await asyncio.to_thread(run)
+        if n:
+            log.info("analyst views: %d expired entries deleted", n)
 
     def stop(self) -> None:
         self._stop.set()

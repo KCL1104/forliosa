@@ -1,11 +1,12 @@
-"""Stock page endpoints: overview, intraday, chips, financials, events, news, position, why."""
+"""Stock page endpoints: overview, intraday, chips, financials, events, news, position, why, analyst views."""
 
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 
-from forliosa.ai.schemas import AIWhy
+from forliosa.ai import analyst
+from forliosa.ai.schemas import AIWhy, AnalystViews
 from forliosa.ai.why import enhance_why
 from forliosa.api.deps import current_user
 from forliosa.api.schemas import (
@@ -73,3 +74,18 @@ def position_history(symbol: str, user: User = Depends(current_user), db: Sessio
 def why(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     md = get_market_data()
     return enhance_why(db, md, svc.why(db, md, symbol), user_id=user.id)
+
+
+@router.get("/analyst-views", response_model=AnalystViews,
+            summary="法人觀點：今天的共用結果（第三方已公開的評等與目標價）；沒有時 status=none")
+def analyst_views(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return analyst.read(db, get_market_data(), symbol)
+
+
+@router.post("/analyst-views", response_model=AnalystViews,
+             summary="法人觀點：觸發 AI 網路搜尋（同一檔同一交易日全體共用；計入觸發者的 AI 額度）")
+def request_analyst_views(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    out, job = analyst.request(db, user, get_market_data(), symbol)
+    if job is not None:
+        analyst.spawn(job, f"ai-analyst-{out['symbol']}")
+    return out

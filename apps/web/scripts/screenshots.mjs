@@ -51,15 +51,25 @@ const closed = async (page) => {
     if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 340 : 90), behavior: "instant" })
   })
 }
+/** 法人觀點：捲到區塊標題（桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列） */
+const toAnalyst = async (page, mobile) => {
+  await page.evaluate((m) => {
+    const el = document.getElementById("ov-analyst-title")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
+  }, mobile)
+}
 /** 法人觀點：展開總覽的收合區塊（2330 今天已經有人查過，直接有 3 筆），捲到它的標題 */
 const analyst = async (page, mobile) => {
   await page.getByRole("button", { name: /法人觀點/ }).click()
   await page.locator("#ov-analyst-body").getByText(/查詢時間/).waitFor({ timeout: 8000 })
-  await page.evaluate((m) => {
-    const el = document.getElementById("ov-analyst-title")
-    // 桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
-  }, mobile)
+  await toAnalyst(page, mobile)
+}
+/** 法人觀點的其他狀態：展開 → 按「查詢近期法人觀點」→ 等到指定文字（搜尋中／查無報導／查不到） */
+const analystSearch = (text) => async (page, mobile) => {
+  await page.getByRole("button", { name: /法人觀點/ }).click()
+  await page.getByRole("button", { name: "查詢近期法人觀點" }).click()
+  await page.locator("#ov-analyst-body").getByText(text).first().waitFor({ timeout: 8000 })
+  await toAnalyst(page, mobile)
 }
 /** 持倉的定期定額標記：桌面滑過 0050 的標記看說明；手機捲到持倉清單 */
 const recurringMarks = async (page, mobile) => {
@@ -97,6 +107,9 @@ const SHOTS = [
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
   { name: "stock-2330-analyst", path: "/stock/2330.TW", ready: "text=參考價", action: analyst },
+  { name: "stock-2454-analyst-searching", path: "/stock/2454.TW", ready: "text=參考價", action: analystSearch(/正在找近期媒體報導/) },
+  { name: "stock-2881-analyst-empty", path: "/stock/2881.TW", ready: "text=參考價", action: analystSearch("近期查無法人報導") },
+  { name: "stock-2409-analyst-unavailable", path: "/stock/2409.TW", ready: "text=參考價", action: analystSearch(/法人觀點暫時查不到/) },
   { name: "ledger-recurring-marks", path: "/", ready: "text=總資產", action: recurringMarks },
   { name: "stock-2330-valuation", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: toTabs },
   { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=三大法人資料累積中", action: toTabs },

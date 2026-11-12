@@ -651,22 +651,23 @@ export interface Attributions {
 
 // ── 法人觀點（2026-11-12，api-contract「法人觀點與美股基本面」）──────────
 /**
- * `none`：今天還沒有人查過；`pending`：AI 正在搜尋（POST 之後，或別人剛觸發）；
- * `ready`：有結果（`items` 可能是空的＝近期查無報導）；`unavailable`：這次查不到（AI 暫停、搜尋失敗）。
+ * `none`：今天還沒有人查過（或上次查不到、已過 10 分鐘可以再查）；`pending`：AI 正在搜尋（POST 之後，或別人剛觸發）；
+ * `ready`：有結果（`items` 可能是空的＝近期查無報導）；`unavailable`：這次查不到（AI 暫停、搜尋失敗；`notes` 寫幾點後可再查）。
+ * 只有個股：ETF 回 422 `analyst_views_stocks_only`（前端不對 ETF 顯示這一塊）。
  */
 export type AnalystViewsStatus = "none" | "pending" | "ready" | "unavailable"
 
-/** 一筆第三方觀點：照原文列出，不換算、不評論；沒有日期或來源的項目後端不會列 */
+/** 一筆第三方觀點：照原文列出，不換算、不評論；網址必定是這次搜尋結果中的一篇，日期由搜尋結果核對，核對不到的後端不列 */
 export interface AnalystView {
   /** 機構名稱（照報導原文） */
   institution: string
-  /** 調升／調降／維持／首評（照報導原文） */
+  /** 調升／調降／維持／首評；報導沒寫為空字串 */
   action: string
-  /** 評等原文，例如「加碼」「優於大盤」「Overweight」 */
-  rating_text: string
+  /** 評等原文，例如「加碼」「優於大盤」「Overweight」；報導沒寫為 null */
+  rating_text: string | null
   target_price: number | null
   currency: Currency
-  /** 報告或報導日期 */
+  /** 報導日期（由搜尋結果的網址或頁面日期核對） */
   date: string
   source_title: string
   url: string

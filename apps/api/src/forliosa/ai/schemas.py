@@ -202,3 +202,28 @@ class AIWhy(Why):
     ai: bool = False
     citations: list[Citation] = Field(default_factory=list)
     rule_headline: str | None = None
+
+
+class AnalystView(BaseModel):
+    """One third-party rating / target price, quoted as published (never converted, averaged or compared)."""
+
+    institution: str = Field(description="機構名稱（照報導原文）")
+    action: str = Field(description="調升／調降／維持／首評；報導沒寫為空字串")
+    rating_text: str | None = Field(description="評等原文，例如「加碼」「Overweight」；報導沒寫為 null")
+    target_price: float | None = Field(description="報導明寫的目標價（這檔股票的交易幣別）；沒寫為 null")
+    currency: Literal["TWD", "USD"]
+    date: str = Field(description="報導發布日期（由搜尋結果的網址或頁面日期核對）")
+    source_title: str = Field(description="搜尋結果中那篇報導的標題")
+    url: str = Field(description="那篇報導的網址（必定是這次搜尋結果中的一筆）")
+
+
+class AnalystViews(BaseModel):
+    """``GET/POST /instruments/{symbol}/analyst-views``: one shared entry per symbol per Taiwan trading day."""
+
+    status: Literal["none", "pending", "ready", "unavailable"]
+    symbol: str
+    as_of: str | None = Field(default=None, description="查詢完成時間（ready 才有）")
+    expires_at: str | None = Field(default=None, description="這份共用結果被刪除的時間（建立後 24 小時）")
+    items: list[AnalystView] = Field(default_factory=list, description="最多 5 筆，報導日期新到舊")
+    disclaimer: str
+    notes: list[str] = Field(default_factory=list)

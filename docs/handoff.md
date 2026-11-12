@@ -70,6 +70,8 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 
 ### 3.2 法人觀點後端（`/instruments/{symbol}/analyst-views`）
 
+- [x] **已完成（2026-11-12，分支 `wip/analyst`）**：`ai/analyst.py`、遷移 `0009`、獨立提示＋strict 工具、網址與報導日期核對、共用 24 小時、計入觸發者額度、ETF 回 422；2 次 live（2330.TW）搜尋正常但回報 0 筆，已加防護，**需再跑一次 `smoke --analyst 2330.TW NVDA` 確認**（見 `apps/api/CONTRACT_NOTES.md`「實測費用」）。
+
 - 合約已定：`docs/api-contract.md`「法人觀點與美股基本面」段。GET 讀當日共用快取；POST 觸發 AI 網路搜尋；同一檔同一交易日全體共用、24 小時後刪除、計入觸發者額度；最多 5 筆、依日期新到舊、沒有日期或來源的不列。
 - 規則（`PRODUCT.md`、`docs/research/analyst-ratings.md`）：只引用第三方已公開的評級與目標價；AI 自己不給目標價；不算平均、上漲空間、不排名、不寫買賣提示；標示第三方觀點、非 Forliosa 建議。
 - `apps/api/src/forliosa/ai/prompts.py` 的聊天提示有「也不給目標價」：法人觀點用**獨立的提示**，只允許「引用第三方已公開目標價並附來源與日期」，聊天提示維持不給目標價。
