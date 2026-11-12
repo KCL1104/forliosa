@@ -240,7 +240,7 @@ const SHOTS = [
   { name: "m5-group-channels", path: "/groups/grp_family?tab=channels", ready: "text=Webhook 網址結尾" },
   { name: "m5-member", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益" },
   { name: "m5-member-privacy", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益", action: m5Privacy },
-  { name: "m5-member-empty", path: "/groups/grp_family/members/usr_bro", ready: "text=還沒有資料" },
+  { name: "m5-member-empty", path: "/groups/grp_family/members/usr_bro", ready: "text=加入了群組" },
   { name: "m5-settings-delegations", path: "/settings", ready: "text=授權給你的人", action: m5Delegations },
   { name: "m5-view-as", path: "/settings", ready: "text=授權給你的人", action: m5ViewAs },
   { name: "m5-view-as-stock", path: "/settings", ready: "text=授權給你的人", action: m5ViewAsStock },

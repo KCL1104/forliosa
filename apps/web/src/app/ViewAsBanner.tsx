@@ -2,18 +2,27 @@ import { EyeIcon } from "lucide-react"
 import { useViewingAs } from "@/api/view-as"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
-import { scopeText, useViewAsControls } from "./view-as"
+import { scopeText, useSyncViewAsTarget, useViewAsControls } from "./view-as"
+
+/** 手機橫幅的高度（兩行：名稱＋範圍）；AppShell 把頁面裡 sticky 分頁列排在它下面 */
+export const MOBILE_BANNER_HEIGHT = "3.75rem"
 
 /**
  * 查看別人的資產時，頂部一條墨色的橫幅：「正在查看 ○○ 的資產（唯讀）」＋範圍＋結束查看。
- * 桌面放在頂部列下面（一起 sticky），手機黏在畫面頂端。
+ * 桌面放在頂部列下面（一起 sticky），手機黏在畫面頂端（`sticky`，往下捲也一直看得到是誰的帳本）。
+ * 範圍跟著授權者目前的設定（useSyncViewAsTarget），不是進入時的快照。
  */
 export function ViewAsBanner({ className }: { className?: string }) {
   const target = useViewingAs()
   const { exit } = useViewAsControls()
+  useSyncViewAsTarget()
   if (!target) return null
   return (
-    <div role="region" aria-label="查看模式" className={cn("flex min-h-11 items-center gap-3 bg-act px-5 py-2 text-act-fg lg:h-10 lg:py-0 lg:pr-7 lg:pl-14", className)}>
+    <div
+      role="region"
+      aria-label="查看模式"
+      className={cn("flex h-15 items-center gap-3 bg-act px-5 py-2 text-act-fg lg:h-10 lg:py-0 lg:pr-7 lg:pl-14", className)}
+    >
       <EyeIcon aria-hidden className="size-[18px] shrink-0" />
       <p className="min-w-0 flex-1 truncate text-base">
         <b className="font-medium">正在查看 {target.owner.display_name} 的資產（唯讀）</b>

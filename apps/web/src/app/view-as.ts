@@ -1,7 +1,10 @@
-import { useQueryClient, type Query, type QueryClient } from "@tanstack/react-query"
+import { useQuery, useQueryClient, type Query, type QueryClient } from "@tanstack/react-query"
 import { useNavigate } from "@tanstack/react-router"
+import { useEffect } from "react"
 import { toast } from "sonner"
-import { targetOf, useViewAs, type ViewAsTarget } from "@/api/view-as"
+import { api } from "@/api"
+import { sk } from "@/api/sharing-queries"
+import { sameTarget, targetOf, useViewAs, useViewingAs, type ViewAsTarget } from "@/api/view-as"
 import { ApiError, type Delegation } from "@/api/types"
 import { useUi } from "./ui-store"
 
@@ -53,4 +56,27 @@ export function useViewAsControls() {
       toast("已回到你的帳本")
     },
   }
+}
+
+/**
+ * 查看中：進入時存的是授權的快照，授權者之後可能改了範圍、刪了帳戶或改了名稱（伺服器的投影立即跟著變）。
+ * 以查看者自己的身分讀 `GET /delegations`（不帶標頭，見 sendsViewAs），每分鐘一次，內容變了就更新橫幅。
+ * 找不到這份授權（撤銷）時不在這裡處理：下一個帳本請求會收到 403 `delegation_revoked` 並退出查看模式。
+ */
+export function useSyncViewAsTarget() {
+  const target = useViewingAs()
+  const delegations = useQuery({
+    enabled: target !== null,
+    queryKey: sk.delegations,
+    queryFn: () => api.listDelegations(),
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+  })
+  useEffect(() => {
+    if (!target || !delegations.data) return
+    const current = delegations.data.received.find((d) => d.id === target.delegation_id)
+    if (!current) return
+    const next = targetOf(current)
+    if (!sameTarget(next, target)) useViewAs.getState().set(next)
+  }, [target, delegations.data])
 }

@@ -22,7 +22,7 @@ import { usePrefs } from "@/stores/prefs"
 import { asOfLabel } from "@/lib/as-of"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
-import { useReadOnly } from "@/api/view-as"
+import { useReadOnly, useWho } from "@/api/view-as"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
 const FinancialsTab = lazy(() => import("./tabs/FinancialsTab").then((m) => ({ default: m.FinancialsTab })))
@@ -339,18 +339,19 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
   const readOnly = useReadOnly()
+  const me = useWho("我")
   const [open, setOpen] = useState(false)
   const money = (n: number, signed = false) => formatMoney(n, { signed })
   if (privacy) {
     return (
-      <section aria-label="我的部位" className="mt-5 flex min-h-12 items-center border-y border-rule text-md text-ink-2">
+      <section aria-label={`${me}的部位`} className="mt-5 flex min-h-12 items-center border-y border-rule text-md text-ink-2">
         持有中・隱私模式開啟，部位與圖上的均價、買賣點已隱藏。
       </section>
     )
   }
   const recent = [...p.markers].filter((m) => m.type === "buy" || m.type === "sell").sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3)
   return (
-    <section aria-label="我的部位" className="mt-5 border-y border-rule">
+    <section aria-label={`${me}的部位`} className="mt-5 border-y border-rule">
       <div className="flex items-center gap-3 py-2.5">
         <dl className="num flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
           <Item label="持有" value={formatQuantity(p.quantity, unit, inst.market)} />

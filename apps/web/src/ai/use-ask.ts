@@ -1,7 +1,19 @@
+import { toast } from "sonner"
+import { viewAsId } from "@/api/view-as"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { useAiContext } from "./context"
 import { useAiRunner, type AiAction } from "./runner"
 import { useAi } from "./store"
+
+/**
+ * 查看別人的資產時不用 AI（AI 面板沒有掛載，AI 也不讀被查看者的資料）。畫面上的 AI 動作都已隱藏，
+ * 這裡是最後一道：萬一漏了，不在背景替查看者建立對話，只說明一句。
+ */
+function aiBlocked(): boolean {
+  if (!viewAsId()) return false
+  toast("查看別人的資產時不能使用 AI，結束查看後再問")
+  return true
+}
 
 /**
  * 從頁面把事情交給 AI：桌面確保右側面板打開、手機打開全螢幕的「問 AI」，再執行動作或送出一句話。
@@ -17,10 +29,12 @@ export function useAskAi() {
   }
   return {
     action: (kind: AiAction, opts?: { code?: string }) => {
+      if (aiBlocked()) return
       if (kind !== "form") reveal()
       runner.action(kind, opts)
     },
     submit: (text: string) => {
+      if (aiBlocked()) return
       reveal()
       void runner.submit(text)
     },

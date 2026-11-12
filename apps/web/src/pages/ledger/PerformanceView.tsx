@@ -18,7 +18,7 @@ import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/
 import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-import { useReadOnly } from "@/api/view-as"
+import { useReadOnly, useWho } from "@/api/view-as"
 
 const RANGES: { value: PerformanceRange; label: string }[] = [
   { value: "1D", label: "1日" },
@@ -37,6 +37,7 @@ export function PerformanceView() {
   const accounts = useAccounts()
   // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
   const readOnly = useReadOnly()
+  const me = useWho("我")
   const prefBenchmark = usePrefs((s) => s.benchmark)
   const benchmark = readOnly ? undefined : prefBenchmark
   const setPref = usePrefSetter()
@@ -92,14 +93,14 @@ export function PerformanceView() {
             <Legend
               className="mb-2"
               items={[
-                { label: "我的（時間加權）", color: "var(--chart-mine)", shape: "line", value: <span className={toneClass(direction(p.twr))}>{formatPercent(p.twr)}</span> },
+                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <span className={toneClass(direction(p.twr))}>{formatPercent(p.twr)}</span> },
                 { label: p.benchmark?.name ?? "基準", color: "var(--chart-bench)", shape: "line", value: formatPercent(p.benchmark?.twr) },
               ]}
             />
             {p.benchmark && p.benchmark.twr === null && (
               <p className="mb-2 text-sm text-ink-2">「{p.benchmark.name}」這段期間沒有資料，暫時無法比較。</p>
             )}
-            <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} height={300} />
+            <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} mineLabel={`${me}的報酬`} height={300} />
           </Panel>
           <ValuePanel p={p} />
           <div className="grid gap-10 xl:grid-cols-2">
@@ -143,6 +144,7 @@ function NotEnough({ p, account, accounts, onAccount }: { p: Performance; accoun
 }
 
 function Metrics({ p }: { p: Performance }) {
+  const you = useWho("你")
   const excess = p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
   const items: { label: string; help: string; value: React.ReactNode; sub?: React.ReactNode }[] = [
     {
@@ -157,7 +159,7 @@ function Metrics({ p }: { p: Performance }) {
     },
     {
       label: "年化 XIRR",
-      help: "把每一筆投入與取回的時間點算進去，反映你實際賺了多少（年化）。",
+      help: `把每一筆投入與取回的時間點算進去，反映${you}實際賺了多少（年化）。`,
       value: p.xirr === null ? <span className="text-ink-2">—</span> : <Pct value={p.xirr} />,
       sub: p.xirr === null ? (p.range === "1D" || p.range === "5D" ? "5 天以內不年化" : "期間太短或現金流不足，無法計算") : "金額加權",
     },

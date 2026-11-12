@@ -90,7 +90,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     if (opts.body !== undefined) headers["Content-Type"] = "application/json"
     // 授權查看：查看中每個請求都帶上授權 id（查看者自己的端點除外，見 view-as.ts）
     const viewAs = viewAsId()
-    if (viewAs && sendsViewAs(path)) headers[VIEW_AS_HEADER] = viewAs
+    if (viewAs && sendsViewAs(path, method)) headers[VIEW_AS_HEADER] = viewAs
     const res = await fetch(`${prefix}${path}${toQueryString(opts.query)}`, {
       method,
       credentials: "include",

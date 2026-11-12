@@ -393,9 +393,10 @@ await check("我的分享：關掉交易動態 → 動態裡自己的買賣立�
   await page.getByRole("list", { name: "動態" }).waitFor({ timeout: 8000 })
   if (await page.getByRole("list", { name: "動態" }).getByText(/示範使用者\s*買進/).count()) throw new Error("own trades still visible")
 })
-await check("成員分享：什麼都沒開是「還沒有資料」；隱私模式遮住金額", async () => {
+await check("成員分享：什麼都沒開只有「加入了群組」（不說「還沒有資料」）；隱私模式遮住金額", async () => {
   await page.goto(base + "/groups/grp_family/members/usr_bro", { waitUntil: "networkidle" })
-  await page.getByText("還沒有資料。").waitFor({ timeout: 8000 })
+  await page.getByText("加入了群組").waitFor({ timeout: 8000 })
+  if (await page.getByText("還沒有資料。").count()) throw new Error("「還沒有資料」 shown next to the feed")
   await page.goto(base + "/groups/grp_family/members/usr_dad", { waitUntil: "networkidle" })
   await page.getByText("總損益").waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
@@ -429,7 +430,7 @@ await check("授權查看：授權給姊姊（指定帳戶）→ 列出 → 撤�
   await page.getByRole("alertdialog").getByRole("button", { name: "撤銷" }).click()
   await page.getByText("已撤銷姊姊的授權").waitFor({ timeout: 8000 })
 })
-await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／加入觀察／AI 面板、群組與設定擋住 → 結束查看", async () => {
+await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／加入觀察／AI 面板、稱呼是爸爸、群組與紀錄擋住 → 結束查看", async () => {
   await page.goto(base + "/settings", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "查看爸爸的資產" }).click()
   await page.getByText("正在查看 爸爸 的資產（唯讀）").waitFor({ timeout: 8000 })
@@ -442,8 +443,14 @@ await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／�
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
   await page.getByText("參考價").first().waitFor({ timeout: 8000 })
   if (await page.getByRole("button", { name: /記一筆|加入觀察/ }).count()) throw new Error("write actions on stock page in view-as")
+  await page.goto(base + "/stock/2330.TW?tab=events", { waitUntil: "networkidle" })
+  await page.getByRole("radio", { name: "只看爸爸的" }).waitFor({ timeout: 8000 })
+  if (await page.getByText(/只看我的|你可領/).count()) throw new Error("「我／你」 wording in view-as")
   await page.goto(base + "/groups", { waitUntil: "networkidle" })
   await page.getByText(/結束查看後才能使用/).waitFor({ timeout: 8000 })
+  await page.goto(base + "/history", { waitUntil: "networkidle" })
+  await page.getByText(/這裡是你自己的紀錄，結束查看後才能使用/).waitFor({ timeout: 8000 })
+  if (await page.getByText("發起新對話").count()) throw new Error("AI history usable in view-as")
   await page.getByRole("region", { name: "查看模式" }).getByRole("button", { name: "結束查看" }).click()
   await page.getByText("已回到你的帳本").waitFor({ timeout: 8000 })
   if (await page.getByText("正在查看 爸爸 的資產（唯讀）").count()) throw new Error("banner still visible")
@@ -519,11 +526,22 @@ await check("手機：法人觀點三行列＋免責", async () => {
   await m.getByRole("list", { name: "法人觀點" }).getByText("外資券商 A", { exact: true }).waitFor({ timeout: 8000 })
   await m.getByText("非 Forliosa 建議").first().waitFor()
 })
-await check("手機：查看爸爸時「問 AI」換成「結束查看」", async () => {
+await check("手機：查看爸爸時「問 AI」換成「結束查看」；橫幅往下捲也在頂端，個股分頁列排在它下面", async () => {
   await m.goto(base + "/settings", { waitUntil: "networkidle" })
   await m.getByRole("button", { name: "查看爸爸的資產" }).click()
   await m.getByText("正在查看 爸爸 的資產（唯讀）").waitFor({ timeout: 8000 })
   if (await m.getByRole("button", { name: /^問 AI/ }).count()) throw new Error("ask AI visible in view-as")
+  await m.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+  await m.getByText("參考價").first().waitFor({ timeout: 8000 })
+  await m.evaluate(() => window.scrollTo({ top: document.body.scrollHeight, behavior: "instant" }))
+  await m.waitForTimeout(300)
+  const layout = await m.evaluate(() => {
+    const banner = document.querySelector('[aria-label="查看模式"]').getBoundingClientRect()
+    const tabs = document.querySelector('[aria-label="個股資料"]')?.closest(".sticky")?.getBoundingClientRect()
+    return { bannerTop: banner.top, bannerBottom: banner.bottom, tabsTop: tabs?.top ?? null }
+  })
+  if (Math.abs(layout.bannerTop) > 1) throw new Error(`banner scrolled away (top ${layout.bannerTop})`)
+  if (layout.tabsTop === null || Math.abs(layout.tabsTop - layout.bannerBottom) > 1) throw new Error(`tab bar not under the banner (${JSON.stringify(layout)})`)
   await m.getByRole("button", { name: /結束查看$/ }).click()
   await m.getByRole("button", { name: /^問 AI/ }).waitFor({ timeout: 8000 })
 })

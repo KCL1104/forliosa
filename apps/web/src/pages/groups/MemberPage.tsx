@@ -65,7 +65,10 @@ function Member() {
 export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortfolio; groupId: string; role?: string; isMe: boolean }) {
   const feed = useFeed(groupId, p.user_id)
   const items = feed.data?.pages.flatMap((x) => x.items) ?? []
-  const nothing = !p.returns && !p.amounts && !p.holdings
+  const sections = !!p.returns || !!p.amounts || !!p.holdings
+  // 「還沒有資料」只在真的什麼都沒有時：沒有任何區塊，動態也載入完而且是空的（「加入了群組」每個人都看得到，也算）
+  const feedLoading = feed.isPending
+  const nothing = !sections && !feedLoading && items.length === 0
   return (
     <>
       <header className="mt-1 flex items-center gap-4">
@@ -90,6 +93,7 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
       )}
 
       <div className="mt-8 flex flex-col gap-10">
+        {!sections && feedLoading && <SkeletonLines rows={3} />}
         {nothing && <p className="border-y border-rule py-6 text-ink-2">還沒有資料。</p>}
         {p.returns && (
           <Section title="報酬率" titleId="mp-returns">

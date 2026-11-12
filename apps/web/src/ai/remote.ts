@@ -5,6 +5,7 @@
  */
 import { api, apiBaseUrl } from "@/api"
 import { ApiError, type Currency, type Market, type TradePreview, type TransactionInput } from "@/api/types"
+import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "@/api/view-as"
 import { parseGrounding, type UngroundedPassage } from "./answer-text"
 import type { Draft, DraftInstrument, Message, Thread } from "./types"
 
@@ -143,11 +144,21 @@ async function toApiError(res: Response): Promise<ApiError> {
   return new ApiError(res.status, code, message)
 }
 
+/**
+ * 授權查看：AI 的請求也和 API client 一樣帶上 `X-Forliosa-View-As`。畫面在查看模式不提供 AI，
+ * 萬一漏擋了，伺服器的白名單回 403 `view_as_not_allowed`，不會以查看者自己的身分寫進他的 AI 紀錄。
+ */
+function withViewAs(path: string, method: string, headers: Record<string, string>): Record<string, string> {
+  const viewAs = viewAsId()
+  return viewAs && sendsViewAs(path, method) ? { ...headers, [VIEW_AS_HEADER]: viewAs } : headers
+}
+
 async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }
   const res = await fetch(`${prefix()}${path}`, {
     method,
     credentials: "include",
-    headers: body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+    headers: withViewAs(path.split("?")[0]!, method, headers),
     body: body === undefined ? undefined : JSON.stringify(body),
   })
   if (!res.ok) throw await toApiError(res)
@@ -203,7 +214,7 @@ export async function streamChat(body: ChatBody, onEvent: (e: ChatEvent) => void
   const res = await fetch(`${prefix()}/ai/chat`, {
     method: "POST",
     credentials: "include",
-    headers: { Accept: "text/event-stream", "Content-Type": "application/json" },
+    headers: withViewAs("/ai/chat", "POST", { Accept: "text/event-stream", "Content-Type": "application/json" }),
     body: JSON.stringify(body),
     signal,
   })

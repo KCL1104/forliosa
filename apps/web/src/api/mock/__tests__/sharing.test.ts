@@ -221,6 +221,9 @@ describe("授權查看", () => {
     expect(await codeOf(api.listRecurring())).toBe("403 view_as_not_allowed")
     expect(await codeOf(api.getQuote("2330.TW"))).toBe("ok")
     expect((await api.getMe()).display_name).toBe("示範使用者")
+    // 自己收到的授權（不帶標頭，橫幅用來更新範圍）照常讀；改授權仍是 read_only
+    expect((await api.listDelegations()).received.map((d) => d.id)).toEqual(["dlg_dad"])
+    expect(await codeOf(api.deleteDelegation("dlg_dad"))).toBe("403 read_only")
   })
 
   it("授權不存在或被撤銷：一律 403 delegation_revoked（行情照常）", async () => {

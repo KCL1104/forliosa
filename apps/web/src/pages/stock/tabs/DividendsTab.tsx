@@ -1,6 +1,7 @@
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { appToday } from "@/api"
 import { useDividends } from "@/api/queries"
+import { useWho } from "@/api/view-as"
 import type { InstrumentDetail, Position, Quote } from "@/api/types"
 import { ChartTooltipBox } from "@/components/charts/chart-kit"
 import { DemoTag, Section } from "@/components/section"
@@ -11,8 +12,9 @@ import { formatDateShort, formatMoney, formatPercent } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { KeyGrid, TabLead } from "./kit"
 
-/** 股利：我的（已領、下次可領、二代健保）＋歷年配息 */
+/** 股利：我的（已領、下次可領、二代健保；查看模式是「爸爸的股利」）＋歷年配息 */
 export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
+  const me = useWho("我")
   const dividends = useDividends(inst.symbol)
   const privacy = usePrefs((s) => s.privacyMode)
   const today = appToday()
@@ -59,7 +61,7 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
         />
       </div>
 
-      <Section title={position ? "我的股利" : "如果持有"} titleId="div-mine">
+      <Section title={position ? `${me}的股利` : "如果持有"} titleId="div-mine">
         {position ? (
           <KeyGrid
             items={[

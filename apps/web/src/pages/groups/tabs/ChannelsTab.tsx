@@ -22,7 +22,8 @@ export function ChannelsTab({ group }: { group: Group }) {
   if (channels.isError) return <ErrorState error={channels.error} onRetry={() => void channels.refetch()} />
   if (!channels.data) return <SkeletonLines rows={6} />
   const c = channels.data
-  const linked = linking && c.telegram.configured
+  // 這次連結完成＝頻道變成使用中（不能用 configured：停用的頻道也是 configured，重新連結時碼會被藏起來）
+  const linked = !!linking && c.telegram.status === "active"
   return (
     <div className="flex max-w-2xl flex-col gap-12">
       <p className="text-md text-ink-2">

@@ -1,8 +1,9 @@
 import { QueryClient } from "@tanstack/react-query"
 import { afterEach, describe, expect, it, vi } from "vitest"
+import { aiApi, streamChat } from "@/ai/remote"
 import { createHttpAdapter } from "@/api/http"
 import { ApiError } from "@/api/types"
-import { sendsViewAs, useViewAs, VIEW_AS_HEADER } from "@/api/view-as"
+import { sameTarget, sendsViewAs, useViewAs, VIEW_AS_HEADER } from "@/api/view-as"
 import { exitOnRevoked, scopeText, switchViewAs } from "@/app/view-as"
 import { safeNext } from "@/lib/next-path"
 import { oauthErrorText } from "@/lib/oauth-errors"
@@ -52,8 +53,40 @@ describe("查看模式：API client 帶上 X-Forliosa-View-As", () => {
   })
 
   it("哪些路徑是查看者自己的", () => {
-    expect(["/me", "/me/preferences", "/auth/providers", "/auth/discord/start"].map(sendsViewAs)).toEqual([false, false, false, false])
-    expect(["/portfolio/summary", "/groups", "/watchlist", "/meta/attributions", "/mexico"].map(sendsViewAs)).toEqual([true, true, true, true, true])
+    expect(["/me", "/me/preferences", "/auth/providers", "/auth/discord/start"].map((p) => sendsViewAs(p))).toEqual([false, false, false, false])
+    expect(["/portfolio/summary", "/groups", "/watchlist", "/meta/attributions", "/mexico"].map((p) => sendsViewAs(p))).toEqual([true, true, true, true, true])
+    // 讀自己收到的授權（更新橫幅的範圍）不帶；授權的寫入照樣帶（伺服器回 read_only）
+    expect(sendsViewAs("/delegations", "GET")).toBe(false)
+    expect(["POST", "PATCH", "DELETE"].map((m) => sendsViewAs(m === "POST" ? "/delegations" : "/delegations/dlg_1", m))).toEqual([true, true, true])
+    expect(sendsViewAs("/delegations/candidates", "GET")).toBe(true)
+  })
+
+  it("查看中讀 GET /delegations 不帶標頭，改授權仍帶", async () => {
+    const calls = captureFetch()
+    const api = createHttpAdapter("https://api.example.test")
+    useViewAs.getState().set(dad)
+    await api.listDelegations()
+    await api.deleteDelegation("dlg_dad")
+    expect(calls.map((c) => [c.method, c.headers[VIEW_AS_HEADER]])).toEqual([
+      ["GET", undefined],
+      ["DELETE", "dlg_dad"],
+    ])
+  })
+
+  it("AI 的請求（對話紀錄、刪除、SSE 對話）查看中也帶標頭，讓伺服器的白名單擋下", async () => {
+    const calls = captureFetch()
+    useViewAs.getState().set(dad)
+    await aiApi.listThreads()
+    await aiApi.deleteThread("thr_1")
+    await streamChat({ thread_id: null, message: "我的持股會不會太集中？", page: { route: "/history", symbol: null }, privacy: false }, () => {})
+    useViewAs.getState().set(null)
+    await aiApi.listThreads()
+    expect(calls.map((c) => [c.method, c.url.replace(/^.*\/api\/v1/, ""), c.headers[VIEW_AS_HEADER]])).toEqual([
+      ["GET", "/ai/threads?limit=50", "dlg_dad"],
+      ["DELETE", "/ai/threads/thr_1", "dlg_dad"],
+      ["POST", "/ai/chat", "dlg_dad"],
+      ["GET", "/ai/threads?limit=50", undefined],
+    ])
   })
 })
 
@@ -89,6 +122,14 @@ describe("查看模式：切換與退出", () => {
   it("範圍文字", () => {
     expect(scopeText(dad)).toBe("元大－爸爸")
     expect(scopeText({ scope: "all", accounts: [] })).toBe("全部帳戶")
+  })
+
+  it("查看對象是否改了（範圍、帳戶、名稱）", () => {
+    expect(sameTarget(dad, { ...dad, accounts: [...dad.accounts] })).toBe(true)
+    expect(sameTarget(dad, { ...dad, scope: "all" })).toBe(false)
+    expect(sameTarget(dad, { ...dad, accounts: [] })).toBe(false)
+    expect(sameTarget(dad, { ...dad, accounts: [{ id: "acc_1", name: "元大－老爸" }] })).toBe(false)
+    expect(sameTarget(dad, { ...dad, owner: { ...dad.owner, display_name: "老爸" } })).toBe(false)
   })
 })
 

@@ -154,6 +154,9 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
               </Button>
             }
           />
+        ) : readOnly ? (
+          // 查看模式：唯讀，沒有記帳動作也沒有 AI
+          <EmptyState title="沒有交易紀錄" />
         ) : (
           <EmptyState
             title="還沒有交易紀錄"

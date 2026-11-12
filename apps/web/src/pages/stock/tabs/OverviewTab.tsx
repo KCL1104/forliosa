@@ -11,7 +11,7 @@ import { usePrefs } from "@/stores/prefs"
 import { formatQuote } from "@/lib/tick"
 import { AnalystViewsCard } from "../AnalystViews"
 import { KeyGrid, NotYet, Sources } from "./kit"
-import { useReadOnly } from "@/api/view-as"
+import { useReadOnly, useWho } from "@/api/view-as"
 
 const BANDS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
 
@@ -76,8 +76,9 @@ function bandIndex(ratio: number, multiples: number[]): number {
   return Math.min(multiples.length, multiples.length - 0.5 + (ratio - multiples.at(-1)!) / multiples.at(-1)!)
 }
 
-/** 估值位置：一句話＋便宜→昂貴的色階條，標出「現在」與「你的成本」 */
+/** 估值位置：一句話＋便宜→昂貴的色階條，標出「現在」與「你的成本」（查看模式是「爸爸的成本」） */
 function ValuationSpot({ inst, position }: { inst: InstrumentDetail; position: Position | null }) {
+  const you = useWho("你")
   const valuation = useValuation(inst.symbol)
   const overview = useOverview(inst.symbol)
   const privacy = usePrefs((s) => s.privacyMode)
@@ -103,7 +104,7 @@ function ValuationSpot({ inst, position }: { inst: InstrumentDetail; position: P
       <p className="ai-voice text-xl leading-snug">
         本益比 {pe.toFixed(1)} 倍，在 {bracket}的帶
         {v.current.per_percentile_5y !== null && `；過去 5 年有 ${formatPercent(v.current.per_percentile_5y, { signed: false, decimals: 0 })} 的日子比現在便宜`}
-        {costPe !== null && !privacy && `。你的成本約 ${costPe.toFixed(1)} 倍`}。
+        {costPe !== null && !privacy && `。${you}的成本約 ${costPe.toFixed(1)} 倍`}。
       </p>
       <div className="mt-4 max-w-xl">
         <div className="relative pt-6 pb-6">
@@ -117,7 +118,7 @@ function ValuationSpot({ inst, position }: { inst: InstrumentDetail; position: P
           </span>
           {costPos !== null && !privacy && (
             <span className="absolute bottom-0 -translate-x-1/2 text-xs whitespace-nowrap text-ink-2" style={{ left: `${costPos}%` }}>
-              △ 你的成本
+              △ {you}的成本
             </span>
           )}
         </div>
@@ -232,6 +233,7 @@ function ChipsBrief({ inst }: { inst: InstrumentDetail }) {
 }
 
 function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Position | null }) {
+  const you = useWho("你")
   const events = useEvents(inst.symbol)
   const privacy = usePrefs((s) => s.privacyMode)
   const today = appToday()
@@ -260,7 +262,7 @@ function Upcoming({ inst, position }: { inst: InstrumentDetail; position: Positi
               </span>
               <span className="num text-right text-md">
                 {e.amount_estimate !== null && position ? (
-                  <>你可領約 {privacy ? "••••" : formatMoney(e.amount_estimate)}</>
+                  <>{you}可領約 {privacy ? "••••" : formatMoney(e.amount_estimate)}</>
                 ) : (
                   <span className="text-ink-2 max-sm:hidden">{formatDaysUntil(e.date, today)}</span>
                 )}

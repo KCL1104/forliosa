@@ -634,8 +634,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
 // ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
 type MethodName = Exclude<keyof ForliosaApi, "kind">
-/** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入 */
-const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl"])
+/** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
+const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations"])
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",

@@ -2,14 +2,15 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, beforeAll, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
-import type { Group } from "@/api/types"
+import type { Channels, Group } from "@/api/types"
 import { createAppRouter } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { DEFAULT_SHARE } from "../labels"
 import { SharedPortfolioView } from "../MemberPage"
 import { ShareToggles } from "../ShareToggles"
+import { ChannelsTab } from "../tabs/ChannelsTab"
 import { FeedTab } from "../tabs/FeedTab"
 import { RankingTab } from "../tabs/RankingTab"
 
@@ -27,6 +28,7 @@ beforeAll(() => {
 })
 afterEach(() => {
   cleanup()
+  vi.restoreAllMocks()
   usePrefs.setState({ privacyMode: false })
 })
 
@@ -109,13 +111,21 @@ describe("群組畫面不透露誰沒分享", () => {
     await waitFor(() => expect(within(dadToday).getByLabelText("已隱藏")).toBeInTheDocument())
   })
 
-  it("成員分享：沒開放的區塊不出現；什麼都沒有是「還沒有資料」", async () => {
+  it("成員分享：沒開放的區塊不出現；只有動態時不說「還沒有資料」；真的什麼都沒有才說", async () => {
     const bro = await api.getSharedPortfolio("grp_family", "usr_bro")
     renderInRouter(<SharedPortfolioView p={bro} groupId="grp_family" isMe={false} />)
-    expect(await screen.findByText("還沒有資料。", undefined, T)).toBeInTheDocument()
+    // 阿弟什麼都沒開：只有每個人都看得到的「加入了群組」
+    const feed = await screen.findByRole("heading", { name: "動態" }, T)
+    expect(feed.closest("section")!.textContent).toContain("加入了群組")
+    expect(screen.queryByText("還沒有資料。")).toBeNull()
     expect(screen.queryByRole("heading", { name: "報酬率" })).toBeNull()
     expect(screen.queryByRole("heading", { name: "金額" })).toBeNull()
     expect(document.body.textContent).not.toContain("未分享")
+    cleanup()
+    // 沒有任何區塊、也沒有動態（例如建立群組的人什麼都沒開）
+    renderInRouter(<SharedPortfolioView p={{ ...bro, user_id: "usr_nobody" }} groupId="grp_family" isMe={false} />)
+    expect(await screen.findByText("還沒有資料。", undefined, T)).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "動態" })).toBeNull()
     cleanup()
     const mom = await api.getSharedPortfolio("grp_family", "usr_mom")
     renderInRouter(<SharedPortfolioView p={mom} groupId="grp_family" isMe={false} />)
@@ -181,4 +191,29 @@ describe("邀請：加入前先選分享", () => {
     renderApp("/invite/nope")
     expect(await screen.findByRole("heading", { name: "找不到這個邀請連結" }, T)).toBeInTheDocument()
   })
+})
+
+describe("頻道：Telegram 停用後重新連結", () => {
+  const disabled: Channels = {
+    discord: { configured: false, status: null, disabled_reason: null, webhook_hint: null, notify_trades: true, notify_digest: true },
+    telegram: { configured: true, status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", chat_title: "家族投資群", notify_trades: true, notify_digest: true },
+    telegram_available: true,
+  }
+  const active: Channels = { ...disabled, telegram: { ...disabled.telegram, status: "active", disabled_reason: null, chat_title: "家族投資群" } }
+
+  it("產生連結碼後看得到碼，不會先說「連結完成」；頻道變成使用中才完成", async () => {
+    const family = await api.getGroup("grp_family")
+    const channels = vi.spyOn(api, "getChannels").mockResolvedValue(disabled)
+    vi.spyOn(api, "linkTelegram").mockResolvedValue({ code: "654321", bot_username: "forliosa_bot", expires_at: "2026-11-12T21:10:00+08:00" })
+    const user = userEvent.setup()
+    renderInRouter(<ChannelsTab group={{ ...family, my_role: "owner" }} />)
+    await user.click(await screen.findByRole("button", { name: "產生連結碼" }, T))
+    expect(await screen.findByText("/link 654321", undefined, T)).toBeInTheDocument()
+    expect(screen.queryByText("連結完成")).toBeNull()
+    // owner 在 Telegram 群組傳了 /link：下一次輪詢看到使用中
+    channels.mockResolvedValue(active)
+    expect(await screen.findByText("連結完成", undefined, { timeout: 6000 })).toBeInTheDocument()
+    expect(screen.queryByText("/link 654321")).toBeNull()
+    expect(screen.queryByRole("button", { name: "產生連結碼" })).toBeNull()
+  }, 10_000)
 })

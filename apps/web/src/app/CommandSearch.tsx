@@ -57,10 +57,11 @@ export function CommandSearch() {
 
   const results = search.data ?? []
   const pages = PAGES.filter((p) => !q || p.label.includes(q.trim()))
-  // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用
+  // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用。
+  // 和下面渲染的條件一致（查看模式沒有「記一筆交易」），否則會選到不存在的項目
   const values = [
     ...results.map((i) => i.symbol),
-    ...(q.trim() ? [] : ["new-trade", "privacy"]),
+    ...(q.trim() ? [] : [...(readOnly ? [] : ["new-trade"]), "privacy"]),
     ...pages.map((p) => `page:${p.to}`),
   ]
   const selected = values.includes(active) ? active : (values[0] ?? "")
