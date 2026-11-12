@@ -198,17 +198,46 @@ def get_portfolio_summary(ctx: ToolContext, args: dict[str, Any]) -> Any:
     }
 
 
+# Field names carry their currency so the model cannot mistake a TWD total for USD (seen in the live smoke test:
+# a US holding's TWD cost read back as "美元"): *_twd = 新台幣, *_native = the instrument's own currency.
+_TWD_FIELDS = ("cost_basis", "market_value", "day_change", "unrealized_pnl", "realized_pnl", "dividends_received")
+_NATIVE_FIELDS = ("avg_cost", "price", "prev_close")
+_MARKET_LABEL = {"TWSE": "台股", "TPEX": "台股", "US": "美股"}
+
+
+def _currency_named(row: dict[str, Any]) -> dict[str, Any]:
+    out = {}
+    for k, v in row.items():
+        if k in _TWD_FIELDS:
+            out[f"{k}_twd"] = v
+        elif k in _NATIVE_FIELDS:
+            out[f"{k}_native"] = v
+        else:
+            out[k] = v
+    return out
+
+
 def get_holdings(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from collections import Counter
+
     from forliosa.services import portfolio as svc
 
     account_id = _own_account_id(ctx, args.get("account_id"))
     state = svc.compute_state(ctx.db, ctx.user, ctx.md, account_id)
     rows = svc.holdings(state)
-    keys = ("symbol", "name", "type", "industry", "currency", "quantity", "avg_cost", "cost_basis", "price",
-            "prev_close", "market_value", "day_change", "day_change_pct", "unrealized_pnl", "unrealized_pnl_pct",
-            "weight", "is_demo")
-    return {"as_of": iso_taipei(state.as_of), "count": len(rows), "holdings": [_pick(h, *keys) for h in rows],
-            "notes": ["金額為新台幣；avg_cost、price 為原幣；quantity 為股數（1 張 = 1000 股）"]}
+    keys = ("symbol", "name", "type", "industry", "market", "currency", "quantity", "avg_cost", "cost_basis",
+            "price", "prev_close", "market_value", "day_change", "day_change_pct", "unrealized_pnl",
+            "unrealized_pnl_pct", "weight", "is_demo")
+    by_market = Counter(_MARKET_LABEL.get(h.get("market") or "", "其他") for h in rows)
+    holdings = []
+    for h in rows:
+        row = _currency_named(_pick(h, *keys))
+        row["has_quote"] = h.get("price") is not None
+        holdings.append(row)
+    return {"as_of": iso_taipei(state.as_of), "count": len(rows), "count_by_market": dict(by_market),
+            "holdings": holdings,
+            "notes": ["*_twd 欄位是新台幣（美股也已換算成新台幣）；*_native 欄位是該商品的原幣（見 currency）；"
+                      "quantity 為股數（1 張 = 1000 股）；has_quote 為 false 表示沒有報價，不要推測漲跌"]}
 
 
 def get_transactions(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -412,9 +441,10 @@ def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
                 "note": "目前沒有持有這檔；過去的交易可用 get_transactions 查詢"}
     markers = pos.get("markers") or []
     return {"symbol": info.symbol, "name": info.name, "held": True,
-            **{k: v for k, v in pos.items() if k not in ("markers", "symbol", "sources")},
+            **_currency_named({k: v for k, v in pos.items() if k not in ("markers", "symbol", "sources")}),
             "trades_count": len(markers), "recent_trades": markers[-10:],
-            "notes": ["金額為新台幣；avg_cost 為原幣；quantity 為股數"]}
+            "notes": ["*_twd 欄位是新台幣；*_native 欄位是該商品的原幣（見 currency）；quantity 為股數；"
+                      "recent_trades 的 price、amount 為原幣"]}
 
 
 def search_instruments(ctx: ToolContext, args: dict[str, Any]) -> Any:

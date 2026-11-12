@@ -229,3 +229,14 @@ def test_derivatives_tool_is_read_only_and_respects_the_licence_gate(two_users, 
     finally:
         ctx.md.policy = "personal"
     assert txn_count(db) == before
+
+
+def test_holding_fields_name_their_currency(two_users):
+    _db, ctx, *_ = two_users
+    _, holdings = run(ctx, "get_holdings")
+    h = holdings["holdings"][0]
+    assert {"cost_basis_twd", "market_value_twd", "avg_cost_native", "price_native", "has_quote"} <= set(h)
+    assert "cost_basis" not in h and "price" not in h
+    assert holdings["count_by_market"] == {"台股": 1}
+    _, pos = run(ctx, "get_position", symbol="2330")
+    assert "cost_basis_twd" in pos and "avg_cost_native" in pos and "cost_basis" not in pos
