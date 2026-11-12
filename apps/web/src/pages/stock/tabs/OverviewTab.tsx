@@ -13,9 +13,10 @@ import { usePrefs } from "@/stores/prefs"
 import { formatQuote } from "@/lib/tick"
 import { AboutCompany } from "../AboutCompany"
 import { AnalystViewsCard } from "../AnalystViews"
+import { EtfNavSection } from "../EtfNavSection"
 import { NewsCoverage } from "../NewsCoverage"
 import { RelatedStocks } from "../RelatedStocks"
-import { KeyGrid, NotYet, Sources } from "./kit"
+import { KeyGrid, Sources } from "./kit"
 import { useReadOnly, useWho } from "@/api/view-as"
 
 const BANDS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--band-4)", "var(--band-5)"]
@@ -52,13 +53,7 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
         {o?.status.note && <p className="mt-2 text-md text-ink">{o.status.note}</p>}
       </section>
       {inst.type === "stock" && !us && <ValuationSpot inst={inst} position={position} />}
-      {inst.type === "etf" && !us && (
-        <Section title="折溢價" titleId="ov-premium">
-          <NotYet title="折溢價與追蹤誤差的資料來源還在確認">
-            確認後這裡會顯示今天的市價與淨值差距、過去一年的折溢價區間。現在可以看「股利」分頁的歷年配息。
-          </NotYet>
-        </Section>
-      )}
+      {inst.type === "etf" && !us && <EtfNavSection inst={inst} />}
       <div className="grid gap-10 lg:grid-cols-2">
         {!us && inst.type === "stock" && <RevenueBrief symbol={inst.symbol} />}
         {!us && <ChipsBrief inst={inst} />}

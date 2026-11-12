@@ -1191,3 +1191,23 @@ class CompanyDescription(Base):
     ai_attempted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)  # last AI call
     checked_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)  # last Wikipedia lookup
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)  # text last changed
+
+
+# -- ETF NAV 2026-11-12 (decision 9) ---------------------------------------------------------------------------------
+class EtfNav(Base):
+    """Daily NAV of listed / OTC ETFs from 金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉 (data.gov.tw 11109,
+    OGDL; ``forliosa.marketdata.fund_nav``). The file only holds each fund's latest NAV, so history grows from the day
+    archiving starts. Only rows whose 受益憑證代號 is the trading code of an ETF we know (an archived official close or
+    the instrument master) are kept; other funds are skipped. ``date`` is the NAV's own date (overseas funds: often the
+    previous business day). The premium / discount is computed on read against the archived close of the same day."""
+
+    __tablename__ = "etf_navs"
+    __table_args__ = (Index("ix_etf_navs_date", "date"),)
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    nav: Mapped[Decimal] = mapped_column(Money)
+    currency: Mapped[str | None] = mapped_column(String(3), nullable=True)
+    fund_name: Mapped[str] = mapped_column(String(200))  # 基金名稱 as published (e.g. 元大台灣卓越50基金)
+    source: Mapped[str] = mapped_column(String(32))
+    fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)

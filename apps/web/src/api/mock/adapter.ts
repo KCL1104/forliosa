@@ -408,8 +408,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           notes: commercial
             ? s.market === "US"
               ? [US_NOTE]
-              : [...clipped.notes, ...(s.type === "etf" ? ["ETF 沒有每股盈餘與淨值，不提供本益比與股價淨值比區間"] : ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值；EPS = 收盤價 ÷ 本益比"])]
-            : s.type === "etf" ? ["ETF 沒有每股盈餘與淨值，不提供本益比與股價淨值比區間"] : ["示範資料：EPS、淨值與倍數皆為模擬"],
+              : [...clipped.notes, ...(s.type === "etf" ? ["ETF 沒有每股盈餘與每股帳面淨值，不提供本益比與股價淨值比區間"] : ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值；EPS = 收盤價 ÷ 本益比"])]
+            : s.type === "etf" ? ["ETF 沒有每股盈餘與每股帳面淨值，不提供本益比與股價淨值比區間"] : ["示範資料：EPS、淨值與倍數皆為模擬"],
           is_demo: demo,
         }
       }),

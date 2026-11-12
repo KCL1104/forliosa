@@ -166,7 +166,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 
 | 端點 | 與合約的差異（都是新增，不影響既有欄位） |
 |---|---|
-| `overview` | 多 `symbol`。`pe`／`pb`／`dividend_yield` 是證交所／櫃買公布值（存檔，personal 時 FinMind 補舊資料）；ETF 沒有公布殖利率時以近 12 個月現金股利 ÷ 現價計算。`eps_ttm` = shioaji-data 官方季報最近四季 EPS 合計（沒有季報時用 收盤價 ÷ 本益比）。`last_cash_dividend`／`ex_dividend_date` 是**最近一次（含已公告未除息）**的現金股利。`avg_volume_3m` 為近 3 個月日均量（股）。`status.attention` = 最近一個交易日或今天被列為注意股；`status.disposition` = 今天落在處置期間內 |
+| `overview` | 多 `symbol`。`pe`／`pb`／`dividend_yield` 是證交所／櫃買公布值（存檔，personal 時 FinMind 補舊資料）；ETF 沒有公布殖利率時以近 12 個月現金股利 ÷ 現價計算。`eps_ttm` = shioaji-data 官方季報最近四季 EPS 合計（沒有季報時用 收盤價 ÷ 本益比）。`last_cash_dividend`／`ex_dividend_date` 是**最近一次（含已公告未除息）**的現金股利。`avg_volume_3m` 為近 3 個月日均量（股）。`status.attention` = 最近一個交易日或今天被列為注意股；`status.disposition` = 今天落在處置期間內。台股 ETF 多 `etf_nav`（淨值與同一天的折溢價，見「2026-11-12 ETF 淨值與折溢價」） |
 | `intraday` | 多 `notes`、`is_demo`。**目前 `points` 一律是 `[]`**（沒有授權的盤中來源；MIS 已移除），`notes` 說明；`reference_price` 是當天的參考價；`is_partial` 台股為 `true`。日後接上授權來源時 `points[].volume` 是該分鐘的成交量（股） |
 | `chips` | 多 `symbol`、`notes`；`range` 可用 `1M`、`3M`、`6M`、`1Y`。法人單位張（股數 ÷ 1000，保留小數）；外資持股 `pct` 是比率（0.2949）。**上櫃**股票的法人與外資持股來自櫃買 OpenAPI（`tpex_3insti_daily_trading`、`tpex_3insti_qfii`，每日存檔）；**上市**股票任何模式都是空陣列（`notes` 一律有那句說明：不在外資持股前 20 名時是 `services/stock.py` 的 `LISTED_CHIPS_NOTE`，在最新一份前 20 名名單上時是不含外資持股那句的 `LISTED_INST_NOTE`＋`TOP20_NOTE`），存檔裡已有的列（例如舊的 FinMind 回補）也不讀。`major_holders.buckets` 是集保 15 個持股分級（另有 `label`，例如「1,000 張以上」）；`pct` 是比率。集保只能下載當週，所以從開始存檔那週起才有資料 |
 | `financials` | 多 `symbol`、`period`、`notes`。來源是 shioaji-data 官方季報（2023Q1 起，單季數字，千元）；若存檔中有更新一季的 OpenAPI 財報（`t187ap06` 是**年初至今累計數**），以「本季累計 − 上季累計」換成單季，現金流量為 `null`。`net_income` 是歸屬母公司業主淨利；`free_cash_flow` = 營業 + 投資活動現金流量（OpenAPI／shioaji-data 沒有資本支出科目）。`annual` 只列四季齊全的年度，EPS 用第四季的全年累計 EPS |
@@ -740,7 +740,7 @@ fixture 是 2026-11-12 的真實回應裁短：`gdelt_tsmc_taiwan_live_20261112.
 
 ## 2026-11-12 相關股票、公司資料、外資持股前 20 名（個股頁補強第 4–8 項）
 
-產品負責人決定（`PRODUCT.md`「個股頁補強」4、6、7、8；第 5 項的授權詢問信稿在 `docs/outreach/`，第 9 項 ETF 淨值另案）。
+產品負責人決定（`PRODUCT.md`「個股頁補強」4、6、7、8；第 5 項的授權詢問信稿在 `docs/outreach/`，第 9 項 ETF 淨值見下方「2026-11-12 ETF 淨值與折溢價」）。
 研究：[`docs/research/news-and-external-sources.md`](../../docs/research/news-and-external-sources.md) §8（相關股票）、§9（公司資料）。
 形狀見 [`docs/api-contract.md`](../../docs/api-contract.md)「相關股票、關於〈公司〉、上市股票外資持股前 20 名」。
 
@@ -844,6 +844,66 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 2. **外資持股前 20 名的日期**：證交所沒說明更新時間，目前晚上 21:00 後的存檔算當天。若發現晚上還是前一天的名單，改成只在早上存（算前一個交易日）。
 3. **AI 簡介的範圍**：目前只寫追蹤中的股票（持有、自選、3 天內看過），每批最多 10 則。要不要讓沒有條目的股票第一次被看時就立刻產生（多一次 AI 呼叫、頁面稍後更新）？
 4. **ETF 頁的「相關股票」**：上櫃 ETF（006201 等）沒有基金基本資料，現在不顯示這一列。要不要改用「同類型、受益人數多」的上市 ETF 補？
+
+## 2026-11-12 ETF 淨值與折溢價（個股頁補強第 9 項）
+
+產品負責人決定（`PRODUCT.md`「個股頁補強」9：驗證 data.gov.tw 11109，有 ETF 淨值就做盤後折溢價）。驗證紀錄：
+[`docs/research/news-and-external-sources.md`](../../docs/research/news-and-external-sources.md) §11；形狀見
+[`docs/api-contract.md`](../../docs/api-contract.md)「ETF 淨值與折溢價（2026-11-12）」。migration `0012`（接在 `0011` 後）。
+
+### 來源（2026-11-12 實測）
+
+| 項目 | 內容 |
+|---|---|
+| 資料集 | data.gov.tw 11109〈證券投資信託基金每日淨值〉，**提供機關「金融監督管理委員會證券期貨局」**（data.gov.tw 資料集頁面的「提供機關」欄與 schema.org `creator`，2026-11-12 讀取），授權「政府資料開放授權條款-第1版」，更新頻率每 1 日；聯絡人是投信投顧公會 |
+| 端點 | `GET https://www.sitca.org.tw/MemberK0000/F/03/nav.csv`（資料集唯一的資源連結）：`application/octet-stream`、UTF-8 BOM、CRLF、沒有引號，約 500 KB、3,676 列 |
+| 欄位 | 日期（西元 `YYYYMMDD`）、會員代號、公司名稱、基金統編、基金代號、基金名稱、基金淨值、漲跌、漲跌幅、類型代號、幣別、**受益憑證代號** |
+| 內容 | **每檔基金（級別）只有最新一筆淨值**，沒有歷史。海外標的的列是前一個營業日（當天 3,183 列是 11/11、493 列是 11/12；00679B、00720B 是 11/11）。淨值 `-` 的列 172 筆（都不是 ETF） |
+| ETF | 受益憑證代號就是交易代號（`00` + 2–4 位數字 + 可選字母）：244 列、沒有重複、全是新臺幣。0050 101.04、006208 231.48、0056 52.22、00878 32.93、00919 30.94、00981A 24.12、00996A 11.25、006201 35.82、00679B 26.4989（11/11） |
+| 涵蓋 | 和當晚兩個交易所的收盤檔比對：上市 246 個 `00` 代號有 214 個在檔、上櫃 118 個只有 27 個。不在檔的：期貨信託 ETF（`…U`，例如 00635U）、外幣交易線（`…K`）、**多數上櫃債券 ETF**（00687B、00694B、00695B…；00679B、00720B 在） |
+| 更新時間 | 研究時看到 20:19 更新；同一晚 22:01（Last-Modified）又更新一次 |
+| 白名單 | `marketdata/http.py` 只加這一個檔案的完整網址（投信投顧公會網站其他頁面不在內），`sitca.org.tw` 每 2 秒最多一次；誠實的 User-Agent，403／429／轉址不重試 |
+| 顯名 | `datapolicy.DATASETS["sfb-opendata/nav"]`：「金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（2026），依政府資料開放授權條款第 1 版」，`license_status: ogdl`、`basis: data.gov.tw 11109`；來源鍵 `sfb-opendata` |
+
+### 存檔（`archive.py`：`Archiver.etf_navs`，群組 `nav`）
+
+- 解析在 `marketdata/fund_nav.py`（`parse_nav_csv`）：只留受益憑證代號符合 ETF 代號、日期與淨值（> 0）都有的列；同一代號出現兩次留日期新的。
+  **欄位改名、空檔、整份沒有任何 ETF 列都記錯誤**，不寫 0 筆了事，`dataset_status["sfb-opendata/nav"]` 也不動。
+- **只存我們認得的 ETF**：代號在最近 30 天有證交所／櫃買 OpenAPI 的存檔收盤（`prices_daily` 的 `twse-openapi`／`tpex-openapi`，後綴決定 `.TW`／`.TWO`），
+  或在商品主檔且 `type == "etf"`。其他基金（`T0102Y` 這類）、FinMind 或示範資料的收盤都不算。
+- 資料表 `etf_navs`：(symbol, date) 主鍵、`nav`、`currency`、`fund_name`（基金名稱原文）、`source`、`fetched_at`。冪等 upsert；同一天的淨值更正會覆蓋。
+- 排程：交易日 21:40（`EVENING_GROUPS`，排在價格存檔之後）＋ **08:10 再讀一次**（`MORNING_GROUPS`）：檔案只有最新一筆，21:40 之後才公布的淨值若不再讀，
+  隔天晚上就被新的一天蓋掉。手動：`uv run python -m forliosa.archive run --only nav`。
+- 2026-11-12 當晚證交所 `STOCK_DAY_ALL` 到 22:15 仍是 11/11 的收盤（櫃買的收盤檔已是 11/12），所以上市 ETF 的當天折溢價常在隔天 08:10 收盤存檔後才算得出來。
+
+### 折溢價（`services/etf_nav.py`，`GET /instruments/{symbol}/overview` 的 `etf_nav`）
+
+- 折溢價 = 收盤 ÷ 淨值 − 1（比率，6 位小數），**只用同一天**：讀最新淨值往前 120 天的淨值與官方收盤，取兩者都有的日期；`premium_date` 是其中最新的一天。
+  最新淨值日與最新收盤日不同時兩個都回傳（`nav_date`、`close_date`），前端寫出兩個日期與計算用的那一天。從不用示範資料或報價。
+- `history`：同一天的點，最多 60 點（`HISTORY_POINTS`），由舊到新；`history_start` 是這檔第一筆淨值存檔日；不到 20 點（`MIN_POINTS`）時 `notes` 有「資料累積中：淨值自 … 起存檔」。
+- `notes` 的其他固定文字：還沒有任何淨值存檔「資料累積中：ETF 淨值每個交易日晚上存檔」；有存檔但沒有這檔「〈證券投資信託基金每日淨值〉沒有這檔 ETF 的淨值」；
+  有淨值但沒有同一天的收盤「還沒有同一天的收盤價與淨值，不計算折溢價」。
+- `sources`：淨值的顯名＋用到的收盤資料集（證交所〈上市個股日成交資訊〉或櫃買〈上櫃股票行情〉）；有淨值時 `overview.sources` 也加淨值的顯名。
+- 只有台股 ETF（`type == "etf"`、非美股）有這個物件；股票、美股是 `null`。
+- **追蹤誤差不做**：要用標的指數的每日報酬，指數（臺灣50 等）沒有開放授權。前端直接寫「追蹤誤差不提供：標的指數的每日資料沒有開放授權。」
+- AI 工具 `get_stock_overview`：`overview` 不再重複 `etf_nav`，另給精簡的 `etf_nav`（最新數字、`history_range` 的最高最低與日期、最近 10 點、`note` 要求只用同一天並說出日期、說明沒有追蹤誤差）；工具說明加上 ETF 淨值與折溢價。
+
+### 測試（不連網）
+
+- `tests/archive/test_etf_nav_jobs.py`：真實檔的形狀（BOM、CRLF、13 個 ETF 列、`-`、前一個營業日、四位小數）、壞列與壞檔（欄位改名、空檔、沒有 ETF）、白名單只有這個檔案與顯名、
+  只存認得的 ETF（主檔＋有 OpenAPI 收盤的上櫃 ETF，FinMind 收盤不算）、冪等、更正覆蓋、新的一天加一列、改名與 429 記錯誤且只請求一次、`dataset_status` 不動、全組執行時價格先於淨值。
+- `tests/api/test_etf_nav_api.py`：同一天、日期不同時用最近的共同日、沒有共同日（示範收盤不算）、資料集沒有這檔／還沒有存檔、股票與美股為 `null`、60 點上限、AI 工具、`/meta/attributions`。
+- fixture `sitca_nav_live_20261112.csv` 是 2026-11-12 真實檔裁成 18 列（13 個 ETF＋一般基金、美元級別、淨值 `-`、ETF 連結基金），保留 BOM 與 CRLF。
+
+### 已知限制
+
+- 檔案只有最新一筆：worker 停了的日子補不回來（沒有可商用的歷史淨值來源），走勢會有缺口。
+- 商品主檔目前只有 7 檔內建的台股 ETF（shioaji-data 的商品卡不含 ETF），00679B、00981A 等的淨值會存檔（有 OpenAPI 收盤），但搜尋不到、個股頁打不開（見待確認）。
+
+### 待產品負責人確認
+
+1. **商品主檔補上全部 ETF**：用證交所／櫃買收盤檔裡的名稱（政府資料開放授權）把 `00` 開頭的代號加進商品主檔，00679B、00981A 等才搜尋得到、有淨值與折溢價。建議做（另案，小改動）。
+2. **不在 11109 的 ETF**（期貨信託 ETF、多數上櫃債券 ETF）：目前顯示「〈證券投資信託基金每日淨值〉沒有這檔 ETF 的淨值」。期貨信託基金的淨值可能在期貨公會或期交所，授權未查。建議先維持空狀態。
 
 ## 待產品負責人確認
 

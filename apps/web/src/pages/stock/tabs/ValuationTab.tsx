@@ -7,7 +7,8 @@ import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-k
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { DemoTag, Section as Panel } from "@/components/section"
 import { usePrefs } from "@/stores/prefs"
-import { NotYet, TabLead } from "./kit"
+import { EtfNavSection } from "../EtfNavSection"
+import { TabLead } from "./kit"
 import { ChartSkeleton, EmptyState, ErrorState } from "@/components/states"
 import { buildRiver, invalidRuns, type Mode } from "@/lib/valuation"
 import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
@@ -32,17 +33,13 @@ export function ValuationTab({ inst: instrument, position }: { inst: InstrumentD
           description={
             instrument.type === "etf"
               ? instrument.market === "US"
-                ? "ETF 是一籃子股票，沒有自己的每股盈餘與淨值；美股目前也沒有可商用的配息資料來源。"
-                : "ETF 是一籃子股票，沒有自己的每股盈餘與淨值。可以改看下方的殖利率走勢，或到「股利」分頁看歷年配息。"
+                ? "ETF 是一籃子股票，沒有自己的每股盈餘與帳面淨值；美股目前也沒有可商用的配息資料來源。"
+                : "ETF 是一籃子股票，沒有自己的每股盈餘與帳面淨值。可以改看下方的淨值與折溢價、殖利率走勢，或到「股利」分頁看歷年配息。"
               : "我們還沒有這檔的歷史每股盈餘與淨值資料。"
           }
         />
+        {instrument.type === "etf" && instrument.market !== "US" && <EtfNavSection inst={instrument} titleId="val-premium" />}
         <YieldPanel valuation={v} />
-        {instrument.type === "etf" && (
-          <Panel title="折溢價" titleId="val-premium">
-            <NotYet title="折溢價資料來源還在確認">確認後這裡會畫出每天市價相對淨值的折價或溢價，以及過去一年的區間。</NotYet>
-          </Panel>
-        )}
         <Notes notes={v.notes} />
       </div>
     )

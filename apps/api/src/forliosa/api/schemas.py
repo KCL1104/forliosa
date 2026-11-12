@@ -433,6 +433,32 @@ class TradingStatus(BaseModel):
     note: str | None
 
 
+class NavPoint(BaseModel):
+    """One day with both an archived official close and a NAV."""
+
+    t: date
+    nav: float
+    close: float
+    premium_pct: float  # close ÷ NAV − 1 (fraction; negative = 折價)
+
+
+class EtfNavOut(BaseModel):
+    """ETF NAV (證券期貨局〈證券投資信託基金每日淨值〉) and the after-close premium / discount on the same date."""
+
+    nav: float | None  # latest archived NAV
+    nav_date: date | None
+    currency: str | None
+    fund_name: str | None  # 基金名稱 as published
+    close: float | None  # latest archived official close
+    close_date: date | None
+    premium_pct: float | None  # on premium_date: the newest date with both a close and a NAV
+    premium_date: date | None
+    history: list[NavPoint]  # same-day points, oldest first (at most 60)
+    history_start: date | None  # first archived NAV of this ETF
+    notes: list[str]
+    sources: list[str]
+
+
 class Overview(BaseModel):
     symbol: str
     open: float | None
@@ -456,6 +482,7 @@ class Overview(BaseModel):
     shares_outstanding: int | None
     listed_date: date | None = None
     status: TradingStatus
+    etf_nav: EtfNavOut | None = None  # Taiwan ETFs only
     as_of: str | None
     sources: list[str]
     is_demo: bool

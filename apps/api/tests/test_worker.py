@@ -53,7 +53,11 @@ def test_evening_and_weekly_runs_include_the_new_groups():
     from forliosa.archive import JOB_GROUPS
     from forliosa.worker import EVENING_GROUPS, MONTHLY_GROUPS, SEC_GROUPS, WEEKLY_GROUPS, Worker
 
-    assert {"taifex", "cbc", "companies", "financials"} <= set(EVENING_GROUPS)
+    assert {"taifex", "cbc", "companies", "financials", "nav"} <= set(EVENING_GROUPS)
+    # the NAV file only holds each fund's latest NAV: the 08:10 run reads it again for NAVs posted after 21:40
+    from forliosa.worker import MORNING_GROUPS
+
+    assert MORNING_GROUPS == ["twse", "tpex", "nav"]
     assert set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
     assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) | set(MONTHLY_GROUPS) == set(JOB_GROUPS)
     # SEC EDGAR runs every day (US filings do not follow the Taiwan trading calendar), after the US close

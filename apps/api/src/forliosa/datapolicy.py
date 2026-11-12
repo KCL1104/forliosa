@@ -1,7 +1,8 @@
 """Data-source policy (``DATA_POLICY``), the source allowlist and the attribution text in ``sources``.
 
 * ``commercial`` (default): only legally commercially usable data — government open data (TWSE / TPEx
-  OpenAPI, TDCC open data, the central bank's 銀行間新臺幣對美元收盤匯率, SEC EDGAR for US companies),
+  OpenAPI, TDCC open data, the central bank's 銀行間新臺幣對美元收盤匯率, 證券期貨局's 證券投資信託基金每日淨值,
+  SEC EDGAR for US companies),
   shioaji-data's official files and our own archive built from them. Never demo data: endpoints return empty data
   with a 「資料累積中」 note instead.
 * ``personal`` (explicit opt-in): demo data fills gaps, and FinMind can be enabled by listing it in
@@ -20,8 +21,9 @@ key gets its dataset through a *kind* — ``"twse-openapi/valuation"`` — see :
 Licence status (``Dataset.license_status``, from docs/research/open-data-inventory.md and its catalog):
 
 * ``ogdl`` — the agency publishes the dataset under the OGDL (TWSE swagger links data.gov.tw/license; TPEx,
-  TDCC, the TAIFEX institutional / large-trader / put-call datasets and the central bank's 銀行間新臺幣對美元
-  收盤匯率 — data.gov.tw 7232 — have matching data.gov.tw OGDL datasets). Served normally, with attribution.
+  TDCC, the TAIFEX institutional / large-trader / put-call datasets, the central bank's 銀行間新臺幣對美元
+  收盤匯率 — data.gov.tw 7232 — and 金融監督管理委員會證券期貨局's 證券投資信託基金每日淨值 — data.gov.tw 11109, the CSV
+  hosted by SITCA — have matching data.gov.tw OGDL datasets). Served normally, with attribution.
 * ``public`` — US government public data (SEC EDGAR): "All Government-created content on sec.gov and EDGAR
   public filing content are free to access and reuse" (SEC Webmaster FAQ). Served normally; the attribution names
   the agency and dataset with 「美國政府公開資料」 instead of the OGDL.
@@ -61,6 +63,7 @@ TPEX = "證券櫃檯買賣中心"
 TDCC = "臺灣集中保管結算所"
 TAIFEX = "臺灣期貨交易所"
 CBC = "中央銀行"
+SFB = "金融監督管理委員會證券期貨局"  # data.gov.tw 11109 提供機關 (checked 2026-11-12)
 TWSE_API = "https://openapi.twse.com.tw/v1"
 MEETINGS = "公司召開股東常（臨時）會日期、地點及採用電子投票情形等資料彙總表"
 TPEX_API = "https://www.tpex.org.tw/openapi/v1"
@@ -252,6 +255,9 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     # -- 中央銀行 (data.gov.tw 7232): the whole daily history since 2008 in one JSON array (marketdata/cbc.py).
     Dataset("cbc-opendata/fx", CBC, "銀行間新臺幣對美元收盤匯率", f"{CBC_API}/FTDOpenData_Day",
             "美股換算新台幣", basis="data.gov.tw 7232"),
+    # -- 證券期貨局 (data.gov.tw 11109): the latest NAV of every fund, one CSV hosted by SITCA (marketdata/fund_nav.py).
+    Dataset("sfb-opendata/nav", SFB, "證券投資信託基金每日淨值", "https://www.sitca.org.tw/MemberK0000/F/03/nav.csv",
+            "ETF 淨值、盤後折溢價（同一天的收盤價 ÷ 淨值 − 1）", basis="data.gov.tw 11109"),
     # -- News headlines (forliosa.news): title, outlet, time and link only — never text, descriptions or images.
     Dataset("gdelt/doc", GDELT, "GDELT DOC 2.0 新聞索引", "https://api.gdeltproject.org/api/v2/doc/doc",
             "個股頁「新聞報導」：媒體標題、媒體名稱、時間與原文連結", "open",
@@ -284,6 +290,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "taifex-openapi": (f"{TAIFEX}〈OpenAPI 開放資料〉", True),
     "sec-edgar": (f"{SEC} EDGAR（{SEC_ATTRIBUTION}）", True),
     "cbc-opendata": (f"{CBC}〈開放資料〉", True),
+    "sfb-opendata": (f"{SFB}〈開放資料〉", True),
     "shioaji-data": ("", True),  # labelled through DATASETS["shioaji-data/official"]
     "archive": ("Forliosa 自建存檔（證交所、櫃買中心開放資料）", True),
     "ledger": ("本系統帳本", True),
@@ -363,7 +370,8 @@ def label(source: str) -> str:
         return attribution(ds)
     if key in _SOURCES:
         text, commercial = _SOURCES[key]
-        if commercial and key in ("twse-openapi", "tpex-openapi", "tdcc-opendata", "taifex-openapi", "cbc-opendata"):
+        if commercial and key in ("twse-openapi", "tpex-openapi", "tdcc-opendata", "taifex-openapi", "cbc-opendata",
+                                  "sfb-opendata"):
             return f"{text}（{_year()}），依{OGDL}"
         return text
     return raw

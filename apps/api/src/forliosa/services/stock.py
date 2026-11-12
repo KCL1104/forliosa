@@ -21,6 +21,7 @@ from forliosa.api.errors import unprocessable
 from forliosa.datapolicy import labels, source_clause, tagged
 from forliosa.marketdata.base import InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
+from forliosa.marketdata.fund_nav import NAV_DATASET
 from forliosa.marketdata.opendata import TDCC_LEVELS
 from forliosa.marketdata.service import MarketData
 from forliosa.models import (
@@ -32,6 +33,7 @@ from forliosa.models import (
     ShareholdingDistribution,
     User,
 )
+from forliosa.services import etf_nav as etf_nav_svc
 from forliosa.services.announcements import classify
 from forliosa.services.instruments import change_base, require_instrument
 from forliosa.services.portfolio import (
@@ -167,6 +169,9 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
 
     status, status_sources = trading_status(db, md, sym, today)
     sources += status_sources
+    nav_block = etf_nav_svc.etf_nav(db, info)  # ETF: NAV and premium / discount on the same date (None for stocks)
+    if nav_block and nav_block["nav"] is not None:
+        sources.append(NAV_DATASET)
     for s in prof.data_sources:
         if s.startswith("shioaji-data"):
             if "AI" not in s:
@@ -196,6 +201,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
         "shares_outstanding": shares_outstanding,
         "listed_date": prof.listed_date,
         "status": status,
+        "etf_nav": nav_block,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else None,
         "sources": labels(sources),
         "is_demo": is_demo,

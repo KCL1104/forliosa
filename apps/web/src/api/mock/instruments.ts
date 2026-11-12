@@ -200,6 +200,12 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     summary: null, chain_stage: null, themes: ["中小型"], shares_outstanding: null, market_cap: null, data_sources: ["櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）"],
     price: 34.85, prev_close: 35.1, drift: 0.08, vol: 0.22, avg_volume: 600_000,
   },
+  // 上櫃債券 ETF：淨值是前一個營業日的（海外標的），示範「淨值日期與收盤日期不同」
+  {
+    symbol: "00679B.TWO", code: "00679B", name: "元大美債20年", market: "TPEX", type: "etf", currency: "TWD", industry: "ETF",
+    summary: null, chain_stage: null, themes: ["債券", "美債"], shares_outstanding: null, market_cap: null, data_sources: ["櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）"],
+    price: 26.61, prev_close: 26.55, drift: 0.01, vol: 0.12, avg_volume: 9_000_000,
+  },
 ]
 
 /** 壓力測試情境（?mock=stress）用：超長名稱、上千億市值、大幅下跌 */

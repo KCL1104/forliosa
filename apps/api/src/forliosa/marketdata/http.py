@@ -67,14 +67,14 @@ class RateLimiter:
 
 
 # Polite intervals per host (docs/research/data-sources-licensing.md §4.4, open-data-inventory.md §12.2):
-# TWSE ≥ 3 s, TPEx, TDCC, TAIFEX and the central bank ≥ 2 s. SEC EDGAR allows 10 requests / s per requester
-# across all of sec.gov; one process stays at ≤ 4 / s (0.25 s), so the API server and the worker together stay
-# under 10 / s.
+# TWSE ≥ 3 s, TPEx, TDCC, TAIFEX, the central bank and SITCA (the fund NAV file) ≥ 2 s. SEC EDGAR allows 10
+# requests / s per requester across all of sec.gov; one process stays at ≤ 4 / s (0.25 s), so the API server and the
+# worker together stay under 10 / s.
 SEC_INTERVAL_SECONDS = 0.25
 DEFAULT_LIMITER = RateLimiter(
     default_interval=0.0,
     per_host={"twse.com.tw": 3.0, "tpex.org.tw": 2.0, "tdcc.com.tw": 2.0, "taifex.com.tw": 2.0,
-              "cbc.gov.tw": 2.0, "finmindtrade.com": 0.25, "sec.gov": SEC_INTERVAL_SECONDS},
+              "cbc.gov.tw": 2.0, "sitca.org.tw": 2.0, "finmindtrade.com": 0.25, "sec.gov": SEC_INTERVAL_SECONDS},
 )
 
 # Source allowlist: the only URLs the server may fetch. Official open data published under the Open
@@ -92,6 +92,9 @@ ALLOWED_URL_PREFIXES = (
     "https://opendata.tdcc.com.tw/",
     "https://openapi.taifex.com.tw/v1/",
     "https://cpx.cbc.gov.tw/api/OpenData/",
+    # 金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉(data.gov.tw 11109, OGDL): the dataset's one resource is
+    # this CSV hosted by SITCA (投信投顧公會). Only the file itself — nothing else on www.sitca.org.tw is fetched.
+    "https://www.sitca.org.tw/MemberK0000/F/03/nav.csv",
     "https://raw.githubusercontent.com/Sinotrade/shioaji-data/",
     "https://api.finmindtrade.com/",
     "https://www.sec.gov/files/company_tickers.json",
