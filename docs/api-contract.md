@@ -160,8 +160,8 @@
 |---|---|---|
 | GET | `/transactions?account_id=&symbol=&type=&from=&to=&limit=&cursor=` | 分頁，由新到舊 |
 | POST | `/transactions` | 建立；`fee`、`tax`、`health_insurance` 未提供時自動計算 |
-| PATCH | `/transactions/{id}` | 更新 |
-| DELETE | `/transactions/{id}` | 刪除 |
+| PATCH | `/transactions/{id}` | 更新（自動入帳的股利改過後變成 `auto_edited`，見下方「股利自動入帳」） |
+| DELETE | `/transactions/{id}` | 刪除（自動入帳的股利刪除後不會再自動產生） |
 | POST | `/transactions/preview` | 預估稅費，body 同建立，回傳 `TradePreview` |
 
 ```json
@@ -183,13 +183,53 @@
   "currency": "TWD",
   "is_day_trade": false,
   "note": "",
-  "source": "manual",             // "manual" | "import"
+  "source": "manual",             // "manual" | "import" | "ai_draft" | "auto" | "auto_edited"（見下方「股利自動入帳」）
   "created_at": "2026-11-10T14:00:00+08:00"
 }
 
 // TradePreview
 {"gross": 1070000, "fee": 426, "tax": 0, "health_insurance": 0, "net_cash": -1070426, "rules": ["手續費 0.1425% × 2.8 折", "證交稅：買進免稅"]}
 ```
+
+### 股利自動入帳（2026-11-12）
+
+產品負責人決定：Forliosa 看不到銀行，不記股利的話，除息日的股價下跌就會變成帳上的虧損，所以台股的現金股利與配股由系統**依規則自動記成交易**
+（不是 AI，也不需要使用者確認）。同步時機、略過紀錄、資料涵蓋範圍等實作細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 股利自動入帳」。
+
+`Transaction.source`：
+
+| 值 | 意義 |
+|---|---|
+| `manual` | 使用者手動輸入 |
+| `import` | 對帳單匯入 |
+| `ai_draft` | AI 或定期定額草稿，使用者簽名後建立 |
+| `auto` | 系統自動入帳的股利（只會是 `cash_dividend` 或 `stock_dividend`）；之後會隨持股與除權息預告自動更新或移除 |
+| `auto_edited` | 使用者改過的自動股利；之後系統不再更新、移除它 |
+
+- **對象**：台股上市、上櫃的現金股利與配股，依證交所／櫃買的除權除息預告。金額為 0 或尚未公告的不記（公告後補上）；除息（權）日還沒到的不記
+  （當天起才記）；示範資料從不入帳。美股沒有可商用的股利資料，仍由使用者手動記。
+- **日期與股數**：`trade_date` 是除息（權）日，所以除息日的股價下跌與股利同一天抵銷；`quantity` 是除息（權）日**前一天收盤**時該帳戶的持股
+  （含之前配發的股數）：除息日當天才買的不算，當天賣出的仍算。「只記持股」帳戶只記快照日之後的除息日。
+- **金額**：與手動記一筆股利的計算相同。現金股利：`price` = 每股現金股利，`amount` = 股數 × 每股（台幣元以下捨去），`health_insurance` 自動估算
+  （資本公積發放的部分排除）。配股：`quantity` = 配發股數，`price` = 每股配股（元），`amount` = 不足一股以面額折付的現金。`note` 寫出算法，發放日
+  已公告時附上，例如「除息前一日持有 10,000 股 × 每股現金股利 2 元；發放日 2026-07-10」。
+- **使用者自己記的優先**：同帳戶、同商品已有 `manual`／`import`／`ai_draft` 的同類股利（現金對現金、配股對配股），日期在除息（權）日當天到
+  120 天內，就不產生自動那一筆（已產生的會移除）。一筆紀錄只抵一次除息：對到期間內最近的除息日，有填每股金額（`price`）時優先對同金額的那次；
+  日期早於除息日的紀錄不算。刪掉自己的紀錄後，自動那筆會回來。
+- **修改**：`PATCH` 一筆 `auto` 交易（改任何欄位）後，回應的 `source` 是 `auto_edited`（body 裡的 `source` 不採用）；之後同步不會覆蓋或移除它，
+  也不會為同一次除息再產生一筆。
+- **刪除**：`DELETE` 一筆 `auto` 交易照常回 204；之後同一帳戶、同一商品、同一除息（權）日的同類股利**不再自動產生**（刪掉 `auto_edited` 也一樣）。
+  目前沒有端點可以列出或恢復；要記回來就自己新增一筆。
+- **不能自己建立自動交易**：`POST /transactions`、`PATCH /transactions/{id}` 的 `source` 只接受 `manual`、`import`、`ai_draft`；帶 `auto` 或
+  `auto_edited` 回 422 `validation_error`。
+- **重算**：交易新增、修改、刪除，`PUT /accounts/{id}/holdings`，改 `tracking_mode`，以及每天存檔之後，自動股利會依最新的持股與預告新增、更新或移除
+  （例如回頭補一筆除息前的買進，股數就跟著變；預告金額更正，金額就跟著變）。重算若會讓原本一致的帳目變得不一致（例如補記一筆除息前的賣出讓
+  自動配股變少，但配到的股數之後已經賣掉），整個請求回 422 `ledger_inconsistent`，`message` 以「自動入帳的股利依這筆變更重算後帳目不一致：」開頭，
+  **什麼都不會寫入**。
+- **其他端點直接使用這些交易，沒有另外的計算**：帳本（`/portfolio/summary` 的 `dividend_income`、`holdings`、`position`）、績效、出清回合
+  （`/portfolio/closed`、`position/history`）、個股事件（過去的除息事件因此標 `mine`）都把它們當一般股利交易。`/portfolio/upcoming` 的
+  `dividend_payment` 在除息日已記有現金股利交易時用那筆的金額（自動入帳的股利就記在除息日）。
+- **前端**：`auto` 的交易標「自動」；編輯、刪除前說明後果（改過就變成使用者自己的版本、刪除後不會再自動產生）。
 
 ## 投資組合
 
