@@ -30,11 +30,23 @@
 | 資料來源與授權 | ✅ `/data-sources`：授權條款固定文字、每個資料集的完整顯名聲明（不改寫）、沒有使用的來源；頭像選單與帳本、個股頁頁尾連結 | `src/pages/data-sources/DataSourcesPage.tsx` |
 | AI | ✅ 每則回答下方固定免責（`done.disclaimer` → `/ai/usage.disclaimer` → 常數「AI 回答僅供參考，非投資建議。」），模型最後一行若寫了同樣的話就不重複；`grounding` 事件（與 `ThreadMessage.grounding`）標「無來源」（淡墨細框，按下展開「這段沒有附來源，請自行查證。」）；503 `ai_unavailable` 顯示「AI 暫時無法使用」（記帳指令仍在本機寫成草稿）；紀錄「對話紀錄保留 30 天」（本機紀錄也只留 30 天） | `src/ai/answer-text.ts`、`Conversation.tsx`、`remote.ts`、`runner.ts`、`HistoryList.tsx` |
 
+## 第三批（2026-11-12）：法人觀點、定期定額標記與補記、已出清依年份
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ 型別＋HTTP＋mock：`GET/POST /instruments/{symbol}/analyst-views`（`none`／`pending`／`ready`／`unavailable`，最多 5 筆、免責文字）；mock：2330 直接 3 筆、其他 none → POST → pending → 約 2.6 秒後 ready 1–2 筆、2881 查無報導、2409 查不到；機構與連結是版面示意（「外資券商 A」、example.com） | `src/api/types.ts`、`http.ts`、`mock/analyst.ts` |
+| 法人觀點 | ✅ 個股頁總覽、月營收／籌碼之後一個預設收合的格線區塊（和「已出清」同一種，不是卡片）：展開才 GET；`none` 給「查詢近期法人觀點」（紫色查詢圖示）→ POST → 搜尋中（文楷「正在找近期媒體報導的法人觀點…」＋一行「搜尋網路：…」）→ 每 2.5 秒輪詢、90 秒逾時；結果是桌面格線表（日期・機構・評等原文・目標價・來源連結）／手機三行列；免責文字永遠在清單上方；查無報導、查不到、AI 暫停（503）、端點還沒有（404）都是安靜的說明；額度剩 5 題內提示「查詢算一題」。不算平均、上漲空間，不排名、不寫買賣提示，評等不上色；隱私模式不影響。只有個股（ETF 沒有） | `src/pages/stock/AnalystViews.tsx`、`src/lib/analyst-views.ts`（reducer） |
+| 定期定額標記 | ✅ 持倉桌面表與手機列：有啟用中計畫的股票名稱旁一個淡墨日曆圖示（可點範圍 44px），滑過「定期定額：每月 6 日 NT$10,000」（隱私模式遮金額），按下到 `/settings#plan-<id>`（捲到那一列、淡墨底標示）。手機列改成「名稱連結的 ::after 蓋滿整列」，標記才能是另一個連結 | `src/pages/ledger/RecurringMark.tsx`、`use-active-plans.ts`、`HoldingsView.tsx`、`settings/RecurringPlans.tsx` |
+| 補記扣款 | ✅ 最近 7 天漏記的扣款（同帳戶同一檔在扣款日之後、下一次扣款之前沒有買進，也沒寫過草稿）→ AI 面板「補記 11/06 的 0050 定期定額」（最舊在前、最多 3 筆，今天的仍在最前）→ `POST /recurring/{id}/draft?date=`（後端支援 `date`）→ 草稿成交日是那天、說明請照對帳單改 → 簽名才入帳 | `src/ai/recurring-offer.ts`、`runner.ts` |
+| 已出清依年份 | ✅ 依 `closed_at` 年份分組、新的在前，每年可收合（最近一年預設展開），年份列有已實現小計（▲▼）；桌面每年一個 tbody、小計對齊「已實現損益」欄；手機每年一個 h3＋清單 | `src/pages/ledger/ClosedRounds.tsx`、`src/lib/ledger-display.ts` |
+| 資料來源頁 | ✅ 說明法人觀點不是授權資料庫（有人查詢時 AI 搜尋公開報導、當天共用、隔天刪除） | `src/pages/data-sources/DataSourcesPage.tsx` |
+
 ## 驗證
 
-- `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（7 檔 86 項：指令解析、建議規則與回答、升降單位與漲跌停顯示、格式化、mock 新端點形狀、元件）、`pnpm build` 全部通過。
-- Playwright 冒煙（`node scripts/smoke.mjs`，mock 模式）：19 個路由＋11 個流程（建議問題回答、AI 草稿→待簽名→簽名入帳→復原、股利指令、自由提問、表單備援、隱私、⌘K、面板收合記憶、深色、手機問 AI 搜尋、手機分頁）全部通過。
-- 截圖（`pnpm screenshots`）：`docs/screenshots/v2/`，30 張（桌面 1440×900 @2x 與 iPhone 15，淺色／深色）：帳本、帳本＋AI 草稿、交易、個股 2330 總覽／估值／籌碼、紀錄、手機問 AI。
+- `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（11 檔 145 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記）、`pnpm build` 全部通過。
+- Playwright 冒煙（`node scripts/smoke.mjs`，mock 模式）：22 個路由＋28 個流程全部通過；第三批新增：補記 11/06 的 0050（草稿成交日 11/6 → 簽名 → 不再提出）、已出清年份（2026／2025／2024、最近一年展開、小計）、持倉標記（說明、到設定的那個計畫、隱私模式遮金額）、法人觀點（預設收合、2330 三筆＋免責、2454 查詢 → 搜尋中 → 結果、2881 查無、2409 查不到、ETF 沒有）、手機的標記與整列點擊、手機法人觀點。
+- 截圖（`pnpm screenshots`）：`docs/screenshots/v2/`，58 張全部重拍（mock 資料有變）；新增 `stock-2330-analyst-*`、`ledger-recurring-marks-*`，`ledger-closed-*` 改成年份分組。
+- Impeccable detector：原始碼 0 項；即時網址（帳本、2330、2454、NVDA、設定、資料來源；1440 與 390）0 項；展開後的狀態以 `--cdp` 掃（法人觀點 ready／none／searching／empty、已出清年份；1440 與 390）修正前 1 項（搜尋中的脈動紫點）→ 0 項。
 - 寬度檢查：390、820、1024、1280、1440、1920 都沒有水平捲動。
 
 ## Impeccable 流程與產出位置
@@ -47,6 +59,7 @@
 | critique ×2 | `/.impeccable/critique/2026-11-12T04-37-08Z__*.md`（helper 寫入）；追蹤副本 `/.impeccable/reports/critique/` |
 | audit | `/.impeccable/reports/audit/2026-11-12T04-40Z__apps-web.md`（這版 CLI 沒有 audit-storage，手動存放）：17/20 |
 | detect | 原始碼 0 項（重寫 DESIGN.md 後）；11 個桌面網址＋8 個手機網址 0 項（修正前 2 項：標題跳級、字級層級太平） |
+| critique（第三批，法人觀點） | `/.impeccable/critique/2026-11-12T07-59-24Z__apps-web-src-pages-stock-analystviews-tsx.md`（helper 寫入，31/40；子代理沒有再派子代理的工具，single-context 降級並標示）；追蹤副本 `/.impeccable/reports/critique/`；P1 四項已修正（螢幕閱讀器只念一句狀態、脈動紫點改靜止、欄寬與觸控高度、mock 標題空格），P2 兩項列在 OPEN_QUESTIONS 27–28 |
 | finish review | `/.impeccable/reports/finish/2026-11-12__ledger-and-stock.md`：以 degraded/finish-reviewer.md 在同一上下文執行（子代理無法再派子代理，已揭露）；review 回 `fix`（新聞示範標記、› 字元當圖示），修正後 verdict pass 回 `ship`（只涵蓋這兩項） |
 | document（documenter 降級流程） | `/DESIGN.md`＋`/.impeccable/design.json` 從建成的程式碼重寫（產品負責人指示直接覆寫） |
 | review captures | `/.impeccable/review/desktop.png`、`mobile.png` |

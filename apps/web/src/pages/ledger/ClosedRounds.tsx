@@ -226,7 +226,8 @@ function ClosedList({ years, isOpen, onToggle, accounts, multiAccount }: YearPro
                         <span className="text-right text-base leading-5">
                           <Pct value={r.realized_pnl_pct} />
                         </span>
-                        <span className="num col-span-2 mt-0.5 text-sm leading-5 text-ink-2">
+                        {/* 三段各自不換行，段與段之間可以換行（「・」前面不能斷行，所以用 flex-wrap） */}
+                        <span className="num col-span-2 mt-0.5 flex flex-wrap text-sm leading-5 text-ink-2">
                           <span className="whitespace-nowrap">{period.range}</span>
                           <span className="whitespace-nowrap">・股利 {r.dividends_received ? money(r.dividends_received) : "—"}</span>
                           <span className="whitespace-nowrap">・手續費與稅 {money(r.fees_and_taxes)}</span>
