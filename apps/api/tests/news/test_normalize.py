@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from forliosa.news.normalize import (
     Headline,
@@ -24,6 +24,7 @@ from forliosa.news.normalize import (
 from forliosa.news.outlets import is_aggregator, outlet_name
 from forliosa.news.service import to_headlines
 from forliosa.news.sources import Query, RawItem, parse_gdelt
+from forliosa.timeutil import TAIPEI
 from tests.news.conftest import FETCHED_AT, fixture_bytes
 
 TSMC = make_terms("台積電", "2330", ["TSMC"])
@@ -263,3 +264,18 @@ def test_window_and_future_items_are_dropped():
            RawItem("台積電今天", "https://udn.com/3", FETCHED_AT - timedelta(hours=1))]
     assert [x.title for x in to_headlines(raw, q, "gdelt", [])] == ["台積電今天"]
     assert datetime(2026, 1, 1, tzinfo=UTC) < FETCHED_AT
+
+
+def test_date_only_items_get_one_day_of_grace_not_an_open_window():
+    """A date-only item is its day's Taipei midnight: kept while its day reaches into the window, not older."""
+    q = Query("2330.TW", "2330", "台積電", "TWSE", (), TSMC, FETCHED_AT - timedelta(days=7), FETCHED_AT)
+
+    def day(n: int) -> datetime:  # Taipei midnight n days before FETCHED_AT (18:45 Taipei)
+        d = (FETCHED_AT - timedelta(days=n)).astimezone(TAIPEI).date()
+        return datetime.combine(d, time(0, 0), TAIPEI).astimezone(UTC)
+
+    raw = [RawItem("台積電七天前", "https://udn.com/7", day(7), date_only=True),  # its day overlaps the window
+           RawItem("台積電八天前", "https://udn.com/8", day(8), date_only=True),
+           RawItem("台積電三週前", "https://udn.com/21", day(21), date_only=True),
+           RawItem("台積電昨天", "https://udn.com/1", day(1), date_only=True)]
+    assert [x.title for x in to_headlines(raw, q, "searxng", [])] == ["台積電七天前", "台積電昨天"]

@@ -81,6 +81,7 @@ log = logging.getLogger(__name__)
 
 WINDOW = timedelta(days=7)  # how far back a source is asked, and the AI fallback's count window
 OVERLAP = timedelta(hours=1)  # re-ask an hour before the last success (GDELT indexes with a delay)
+DATE_ONLY_GRACE = timedelta(days=1)  # a date-only headline (its day's midnight) may start this much before the window
 MEDIA_LIMIT = 40
 AI_MAX_PER_RUN = 10
 MAX_FAILURES_PER_RUN = 3
@@ -214,7 +215,9 @@ def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Seque
             continue
         if published > q.until + timedelta(minutes=30):
             continue
-        if published < q.since and not it.date_only:
+        # A date-only item is that day's Taipei midnight: kept while any part of its day is inside the window (one
+        # day of grace, as ai_search.select_items), dropped once the whole day is older (「10 天前」).
+        if published < q.since - (DATE_ONLY_GRACE if it.date_only else timedelta(0)):
             continue
         out.append(Headline(title=title, url=url, outlet=outlet[:100], domain=(it.domain or host)[:253],
                             published_at=min(published, q.until), source=source, date_only=it.date_only))
@@ -222,9 +225,10 @@ def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Seque
 
 
 def store(db: Session, symbol: str, headlines: Iterable[Headline], now: datetime | None = None) -> int:
-    """Insert new headlines (one per symbol and canonical URL — the canonical page before an AMP / mobile variant;
-    an existing row is left as it is, so a story GDELT stored first stays GDELT's). Returns how many rows were
-    new."""
+    """Insert new headlines (one per symbol and canonical URL). The canonical page beats an AMP / mobile variant,
+    in one batch and across runs: a stored AMP / mobile link is switched to the canonical page's link (``url``,
+    ``outlet``, ``domain``) when a later batch finds that page (:func:`_prefer_canonical`). Otherwise an existing
+    row is left as it is, so a story GDELT stored first stays GDELT's. Returns how many rows were new."""
     rows = []
     seen: set[str] = set()
     for h in sorted(headlines, key=lambda x: is_amp_or_mobile(x.url)):
@@ -237,12 +241,28 @@ def store(db: Session, symbol: str, headlines: Iterable[Headline], now: datetime
                      "source": h.source, "fetched_at": now or now_utc()})
     if not rows:
         return 0
+    _prefer_canonical(db, symbol, rows)
     insert = pg_insert if db.get_bind().dialect.name == "postgresql" else sqlite_insert
     before = db.scalar(select(func.count()).select_from(NewsArticle).where(NewsArticle.symbol == symbol)) or 0
     db.execute(insert(NewsArticle).values(rows).on_conflict_do_nothing(index_elements=["symbol", "url_key"]))
     db.commit()
     after = db.scalar(select(func.count()).select_from(NewsArticle).where(NewsArticle.symbol == symbol)) or 0
     return after - before
+
+
+def _prefer_canonical(db: Session, symbol: str, rows: list[dict[str, Any]]) -> None:
+    """Stored rows of this batch's URL keys whose link is an AMP / mobile variant (``m.udn.com/…``) take the
+    canonical link this batch found (``udn.com/…``): url, outlet and domain only — the source that found the story
+    first, its title and its time stay. Committed with the insert that follows."""
+    canonical = {r["url_key"]: r for r in rows if not is_amp_or_mobile(r["url"])}
+    if not canonical:
+        return
+    stored = db.scalars(select(NewsArticle).where(NewsArticle.symbol == symbol,
+                                                  NewsArticle.url_key.in_(list(canonical))))
+    for art in stored:
+        if is_amp_or_mobile(art.url):
+            new = canonical[art.url_key]
+            art.url, art.outlet, art.domain = new["url"], new["outlet"], new["domain"]
 
 
 def purge(db: Session, settings: Settings | None = None, now: datetime | None = None) -> int:

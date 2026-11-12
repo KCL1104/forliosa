@@ -175,9 +175,14 @@ SearXNG 是元搜尋：它替我們去問 Bing News、DuckDuckGo News、Brave Ne
 | 變數 | 必填 | 值 | 說明 |
 |---|---|---|---|
 | `SEARXNG_SECRET` | ✅ | 64 字以上的隨機字串 | `python -c "import secrets; print(secrets.token_urlsafe(48))"`；**機密**，只放在 Railway Variables。沒設的話 SearXNG 拒絕啟動（`settings.yml` 的 `secret_key` 只是佔位字）。api／worker 不需要它 |
-| `PORT` | 建議 | `8080` | 告訴 Railway 健康檢查與私有網路用哪個埠；image 本來就聽 `[::]:8080`（IPv6＋IPv4） |
+| `PORT` | ✅ | `8080` | Railway 的健康檢查打 `PORT` 這個埠；SearXNG 固定聽 `[::]:8080`（IPv6＋IPv4），**不讀** `$PORT`。沒設的話 Railway 可能注入別的埠，`/healthz` 打不到、部署一直不健康。不要改成別的值（api／worker 的 `NEWS_SEARXNG_URL` 用 8080） |
 
 不要設 `TZ`：SearXNG 回的發布時間沒有時區時，worker 當成 UTC（容器預設）。
+
+第一次部署（以及每次升級或改 `settings.yml` 後）看 searxng 服務的 Deploy Logs：要看到 granian 的啟動訊息、服務維持 Active，**沒有** `Traceback`、`KeyError` 或
+`Invalid settings.yml`。SearXNG 啟動失敗時 worker 只會把它當成連不上、默默暫停，不會有錯誤畫面，所以只能從這裡發現。
+（2026-11-12 審查找到一個這樣的錯誤：`keep_only` 拿掉了 `brave` 引擎，但 `brave.news` 預設共用它的連線設定，啟動時 `KeyError: 'brave'`；
+已在 `settings.yml` 的 `outgoing.networks` 補上 `brave: {}`，`apps/api/tests/news/test_searxng.py` 會對照釘住版本的預設引擎定義檢查。）
 
 api 與 worker 的 `NEWS_SEARXNG_URL` 設成 `http://searxng.railway.internal:8080`（見 2.2、2.3 節；`FORLIOSA_ENV=prod` 不設時預設就是這個）。
 SearXNG 連不上時（還沒部署、重啟中、私有網路沒開），worker 只會把它暫停 15 分鐘起、每次加倍到 4 小時，GDELT 與 AI 搜尋照常，使用者不會看到錯誤。
@@ -192,13 +197,18 @@ python -m forliosa.news searxng-check "台積電"
 某個引擎顯示 `CAPTCHA`／`too many requests`／`access denied` 表示它擋了我們：worker 會自動暫停它，不要換 IP 或改 User-Agent 去繞。
 
 升級 SearXNG：`deploy/searxng/Dockerfile` 釘的是一個已發布兩週以上的 tag（目前 `2026.10.28-c360868e5`）與它的 digest；
-換新版時選一個至少兩週前發布的 tag、tag 與 digest 一起改、看一下該版 `searx/settings.yml` 有沒有改名的設定，再跑一次 `searxng-check`。
+換新版時選一個至少兩週前發布的 tag、tag 與 digest 一起改、看一下該版 `searx/settings.yml` 有沒有改名的設定，
+把該版保留引擎（與它們 `network:` 指到的引擎）的預設定義抄進 `apps/api/tests/news/fixtures/searxng_default_engines_<tag>.yml`（測試會要求），
+部署後看 searxng 的記錄沒有 traceback，再跑一次 `searxng-check`。
 
 本機開發：`cp deploy/searxng/.env.example deploy/searxng/.env`、填 `SEARXNG_SECRET`，`docker compose -f deploy/searxng/docker-compose.yml up -d --build`
-（只綁 `127.0.0.1:8080`）；`FORLIOSA_ENV=dev` 的 API／worker 預設就用 `http://localhost:8080`。
+（只綁 `127.0.0.1:8080`）；`docker compose -f deploy/searxng/docker-compose.yml logs searxng` 確認沒有 traceback；`FORLIOSA_ENV=dev` 的 API／worker 預設就用 `http://localhost:8080`。
+compose 把 repo 裡的 `deploy/searxng/settings.yml` 唯讀掛進容器：官方 image 對 `/etc/searxng` 宣告了 `VOLUME`，不這樣掛的話重建的容器會沿用舊的匿名 volume、
+繼續讀第一次建置時的 `settings.yml`。改了 `settings.yml` 之後 `docker compose -f deploy/searxng/docker-compose.yml restart searxng` 就會生效。
 
 > **沒有在這個雲端沙盒測過**：沙盒連不到上游搜尋引擎（Bing、DuckDuckGo、Brave），也沒有 Docker，所以 image 沒有實際建置、
-> 也沒有真的查過（只從 Docker Hub 確認了 tag、digest 與 image 設定：`/etc/searxng/settings.yml`、`[::]:8080`）。
+> 也沒有真的查過（只從 Docker Hub 確認了 tag、digest 與 image 設定：`/etc/searxng/settings.yml`、`[::]:8080`）；
+> 啟動時的設定合併與網路參照只對照了該版原始碼（沙盒不能執行 SearXNG）。
 > 程式的測試用依 SearXNG JSON 格式手寫的**合成**回應（`apps/api/tests/news/fixtures/searxng_*_synthetic.json`）。
 > 第一次部署後請跑上面的 `searxng-check`，確認三個引擎都有結果、`unresponsive_engines` 是空的。
 
@@ -266,7 +276,8 @@ python -m forliosa.news searxng-check "台積電"
         授權過程中的 `__Host-forliosa_oauth` 在回到前端後就被刪除。
 14. [ ] （選用）群組推播：建一個測試群組，貼上 Discord 測試頻道的 webhook（頻道收到「推播已連結」的測試訊息）；有設 Telegram bot 時照 2.5 節
         連結一個 Telegram 測試群組。開了「推播」與「交易動態」的成員記一筆今天的交易，約 15 分鐘後頻道收到訊息。
-15. [ ] SearXNG（第 2.6 節）：searxng 服務部署成功、**沒有**任何公開網域；`SEARXNG_SECRET` 已設；在 worker 的 shell 跑
+15. [ ] SearXNG（第 2.6 節）：searxng 服務部署成功、**沒有**任何公開網域；`SEARXNG_SECRET` 與 `PORT=8080` 已設；Deploy Logs 沒有 `Traceback`／`KeyError`、
+        健康檢查通過；在 worker 的 shell 跑
         `python -m forliosa.news searxng-check "台積電"`，健康檢查 OK、三個引擎都有結果。約 45 分鐘後 worker 記錄出現
         `news refresh: … requests {'gdelt': …, 'searxng': …}`，個股頁「新聞報導」下方出現「另有 SearXNG 元搜尋」。
 

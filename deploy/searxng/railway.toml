@@ -1,7 +1,10 @@
 # Railway config-as-code for the **searxng** service (Forliosa's private SearXNG; docs/deploy.md §2.6).
 # Service settings: Root Directory = deploy/searxng, Config File Path = /deploy/searxng/railway.toml.
 # Networking: private only — never generate a public domain. The api and worker services reach it at
-# http://searxng.railway.internal:8080 (their NEWS_SEARXNG_URL). Variables: SEARXNG_SECRET (random), PORT=8080.
+# http://searxng.railway.internal:8080 (their NEWS_SEARXNG_URL).
+# Variables: SEARXNG_SECRET (random) and PORT=8080 (required: SearXNG always listens on 8080 and never reads $PORT,
+# while Railway's health check calls the port in PORT; left unset, Railway may inject another port and /healthz is
+# never answered).
 [build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"

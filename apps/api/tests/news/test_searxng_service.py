@@ -207,6 +207,29 @@ def test_merged_with_gdelt_canonical_urls_and_no_redirects(engine, client, comme
     assert len({n["url"] for n in media}) == len(media)
 
 
+def test_results_older_than_the_week_are_not_stored(engine, commercial_md, settings, fake_searx, clock):
+    """Brave News and DuckDuckGo News ignore time_range=week: weeks-old stories come back with ages such as
+    「3 weeks ago」 or 「2 週前」 (only a week count, the day unknown) or 「10 天前」, and are not stored."""
+    def result(n: int, engine: str, **when: str) -> dict[str, Any]:
+        return {"title": f"台積電 2330 新聞 {n}", "url": f"https://www.cna.com.tw/news/afe/20261100{n:04d}.aspx",
+                "engines": [engine], "publishedDate": None, **when}
+
+    fake_searx.answers = [{"results": [
+        result(1, "brave.news", pubdate="3 weeks ago"),
+        result(2, "bing news", metadata="2 週前 | 中央社"),
+        result(3, "duckduckgo news", pubdate="a week ago"),
+        result(4, "bing news", metadata="10 天前 | 中央社"),
+        result(5, "brave.news", publishedDate="2026-10-22T08:00:00"),  # an exact time three weeks back
+        result(6, "brave.news", pubdate="6 days ago"),  # inside the week: kept, as a date
+        result(7, "bing news", metadata="2 小時前 | 中央社"),
+    ], "unresponsive_engines": []}]
+    with Session(engine) as db:
+        rep = run(db, commercial_md, settings, [FakeSource(items={}), make_searx(clock)], ["2330.TW"])
+        got = {r.title: r for r in rows(db, source="searxng")}
+        assert sorted(got) == ["台積電 2330 新聞 6", "台積電 2330 新聞 7"] and rep.stored == 2
+        assert got["台積電 2330 新聞 6"].date_only and not got["台積電 2330 新聞 7"].date_only
+
+
 def test_us_stocks_are_asked_in_english(engine, commercial_md, settings, fake_searx, clock):
     fake_searx.answers = [searx_fixture("searxng_nvda_en_synthetic.json")]
     with Session(engine) as db:

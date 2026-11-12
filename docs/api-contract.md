@@ -455,7 +455,7 @@
   `["SearXNG 自架元搜尋（只取標題、媒體、時間與連結）"]`；同一則新聞 GDELT 與 SearXNG 都找到時只列一次（先存到的那個來源）；
   `date_only: true` 表示來源只給日期（顯示日期，不顯示「N 小時前」）。官方公告的 `outlet` 是 `null`、`date_only` 是 `false`。
 - **不提供**內文、摘要、og:description、圖片或縮圖；同一則（同網址或幾乎相同的標題）只列一次，原始媒體優先於轉載（Yahoo、LINE TODAY、MSN），
-  一般網頁優先於 AMP／手機版。「同網址」比對時不分 http／https、`www.`／`m.`／`amp.`、追蹤參數、結尾斜線與 AMP 路徑（`/amp/`、`.amp.html`）。
+  一般網頁優先於 AMP／手機版（先存到手機版、之後才找到一般網頁時，連結會換成一般網頁）。「同網址」比對時不分 http／https、`www.`／`m.`／`amp.`、追蹤參數、結尾斜線與 AMP 路徑（`/amp/`、`.amp.html`）。
   搜尋引擎的轉址連結（`news.google.com/articles/…`、`bing.com/news/apiclick.aspx…` 等）直接丟掉，不會去解析。
 - **前端**：個股頁總覽的「新聞報導」區（桌機兩欄、手機一欄，先列 8 則，「顯示更多」）：「媒體・N 小時前」，標題連到原文（新視窗，`rel="noopener noreferrer"`）；
   有 `source: "GDELT"` 時，下方引用 The GDELT Project 並連到 https://www.gdeltproject.org/（使用條款要求）；其他來源寫在同一行（「另有 SearXNG 元搜尋、AI 網路搜尋」）；

@@ -6,6 +6,7 @@ No test reaches a SearXNG instance or a search engine: every request goes throug
 
 from __future__ import annotations
 
+import copy
 import threading
 import time
 from datetime import UTC, datetime, timedelta
@@ -29,7 +30,7 @@ from forliosa.news.searxng import (
 )
 from forliosa.news.sources import Query, RawItem, SourceBlocked, SourceDown
 from forliosa.timeutil import TAIPEI
-from tests.news.conftest import ENGINES, FETCHED_AT, SEARX_URL, make_searx, searx_fixture
+from tests.news.conftest import ENGINES, FETCHED_AT, FIXTURES, SEARX_URL, make_searx, searx_fixture
 
 NOW = FETCHED_AT
 REPO = Path(__file__).resolve().parents[4]
@@ -125,6 +126,12 @@ def test_relative_ages():
     assert relative_age("yesterday") == relative_age("昨天") == (timedelta(days=1), True)
     for text in ("TVBS", "24/7 Wall St.", "2026", "經濟日報", "", "5m views"):
         assert relative_age(text) is None, text
+    # weeks, months, years: older than time_range=week and not datable to the day -> not a usable time
+    for text in ("3 weeks ago", "a week ago", "1w", "2 wks", "2 週前", "3 周前", "1 星期前", "經濟日報 2 週前",
+                 "1 month ago", "1mo", "2 個月前", "a year ago"):
+        assert relative_age(text) is None, text
+    assert published_time({"pubdate": "3 weeks ago"}, NOW) is None
+    assert published_time({"metadata": "2 週前 | 中央社"}, NOW) is None
     # an ISO time wins; nothing usable -> None
     assert published_time({"publishedDate": "2026-11-12T08:00:00+08:00"}, NOW) == (
         datetime(2026, 11, 12, 0, 0, tzinfo=UTC), False)
@@ -284,11 +291,71 @@ def test_settings_yml_is_private_json_news_only_and_matches_the_engine_list():
     assert cfg["valkey"]["url"] is False
 
 
-def test_dockerfile_pins_a_release_and_compose_stays_on_localhost():
+def pinned_image() -> tuple[str, str, str]:
+    """(image, tag, digest) of the ``FROM`` line in deploy/searxng/Dockerfile."""
     dockerfile = (DEPLOY / "Dockerfile").read_text(encoding="utf-8")
     base = next(line.split()[1] for line in dockerfile.splitlines() if line.startswith("FROM "))
     name, _, digest = base.partition("@")
     image, _, tag = name.partition(":")
+    return image, tag, digest
+
+
+def _update_dict(default: dict, user: dict) -> dict:
+    """searx/settings_loader.py ``update_dict``: how SearXNG merges an ``engines:`` entry into the default one (a
+    mapping merged into a string leaves the string)."""
+    for k, v in user.items():
+        default[k] = _update_dict(default.get(k, {}), v) if isinstance(v, dict) else v
+    return default
+
+
+def unresolved_networks(cfg: dict, defaults: list[dict]) -> list[str]:
+    """The ``network: <name>`` references SearXNG cannot resolve after merging ``cfg`` into the release's default
+    engines (searx/settings_loader.py ``update_settings``: keep_only, then the ``engines:`` overrides) —
+    searx/network/network.py ``initialize`` raises ``KeyError`` for each and the instance never starts. A name
+    resolves to ``ipv4`` / ``ipv6``, an ``outgoing.networks`` entry, or a loaded engine with its own network."""
+    keep = cfg["use_default_settings"]["engines"]["keep_only"]
+    engines = [copy.deepcopy(e) for e in defaults if e["name"] in keep]
+    by_name = {e["name"]: e for e in engines}
+    for user in cfg.get("engines") or []:
+        if user["name"] in by_name:
+            _update_dict(by_name[user["name"]], user)
+        else:
+            engines.append(user)
+    networks = {"ipv4", "ipv6", *((cfg.get("outgoing") or {}).get("networks") or {})}
+    networks |= {e["name"] for e in engines if not isinstance(e.get("network"), str)}
+    return [f"{e['name']} -> {e['network']}" for e in engines
+            if isinstance(e.get("network"), str) and e["network"] not in networks]
+
+
+def test_settings_yml_starts_with_the_pinned_release_engine_networks():
+    """brave.news shares the network of the engine "brave" (``network: brave``), which keep_only removes: without
+    ``outgoing.networks.brave`` SearXNG stopped at start-up with ``KeyError: 'brave'``."""
+    yaml = pytest.importorskip("yaml")
+    cfg = yaml.safe_load((DEPLOY / "settings.yml").read_text(encoding="utf-8"))
+    _, tag, _ = pinned_image()
+    excerpt = FIXTURES / f"searxng_default_engines_{tag}.yml"
+    assert excerpt.exists(), (f"the Dockerfile pins {tag}: copy that release's default definitions of the kept "
+                              f"engines (searx/settings.yml) into {excerpt.name}")
+    release = yaml.safe_load(excerpt.read_text(encoding="utf-8"))
+    assert release["version"] == tag and tag.endswith("-" + release["commit"][:9])
+    defaults = release["engines"]
+    keep = cfg["use_default_settings"]["engines"]["keep_only"]
+    assert set(keep) <= {e["name"] for e in defaults}  # every kept engine is in the excerpt
+    assert unresolved_networks(cfg, defaults) == []
+    # the start-up failure this guards against
+    without = copy.deepcopy(cfg)
+    del without["outgoing"]["networks"]
+    assert unresolved_networks(without, defaults) == ["brave.news -> brave"]
+    # overriding the reference under engines: does not replace the string
+    without["engines"] = [*without["engines"], {"name": "brave.news", "network": {}}]
+    assert unresolved_networks(without, defaults) == ["brave.news -> brave"]
+    # the network entry adds nothing: no proxy, no other source address
+    assert cfg["outgoing"]["networks"] == {"brave": {}}
+
+
+def test_dockerfile_pins_a_release_and_compose_stays_on_localhost():
+    dockerfile = (DEPLOY / "Dockerfile").read_text(encoding="utf-8")
+    image, tag, digest = pinned_image()
     assert image == "docker.io/searxng/searxng" and tag and tag != "latest" and digest.startswith("sha256:")
     released = datetime.strptime(tag.split("-")[0], "%Y.%m.%d").replace(tzinfo=UTC)
     assert released <= datetime(2026, 11, 12, tzinfo=UTC) - timedelta(days=14)  # ≥ 2 weeks old when pinned
@@ -297,3 +364,15 @@ def test_dockerfile_pins_a_release_and_compose_stays_on_localhost():
     assert '"127.0.0.1:8080:8080"' in compose and "0.0.0.0" not in compose and "SEARXNG_SECRET" in compose
     railway = (DEPLOY / "railway.toml").read_text(encoding="utf-8")
     assert 'healthcheckPath = "/healthz"' in railway
+    # SearXNG listens on 8080 whatever $PORT says: the service's PORT variable must be 8080 for the health check
+    assert "PORT=8080 (required" in railway
+
+
+def test_compose_reads_the_settings_yml_in_the_repo_after_every_edit():
+    """The image declares /etc/searxng a VOLUME: without a bind mount, a recreated container got the previous one's
+    anonymous volume and kept reading the settings.yml of the first build."""
+    yaml = pytest.importorskip("yaml")
+    compose = yaml.safe_load((DEPLOY / "docker-compose.yml").read_text(encoding="utf-8"))
+    service = compose["services"]["searxng"]
+    assert "./settings.yml:/etc/searxng/settings.yml:ro" in service["volumes"]
+    assert service["ports"] == ["127.0.0.1:8080:8080"]

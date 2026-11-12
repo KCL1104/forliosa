@@ -16,7 +16,9 @@ Answer (:func:`parse_searxng`)
     Only ``title``, ``url``, the publication time and the engine names are read — never ``content``, thumbnails or
     images. The time is ``publishedDate`` (ISO; a time without an offset is UTC, the container's clock); without it
     a relative age in ``pubdate`` / ``metadata`` (「3 hours ago」「3 小時前」「昨天」; days give a date only); a result
-    with neither is skipped. A search-engine redirect (``news.google.com/articles/…``,
+    with neither is skipped. An age in weeks (「2 weeks ago」「3 週前」) is not a usable time: it only says the result
+    is more than a week old — outside ``time_range=week``, which Brave News and DuckDuckGo News ignore — and its day
+    could be six days off, so such a result is skipped too. A search-engine redirect (``news.google.com/articles/…``,
     ``bing.com/news/apiclick.aspx``) is dropped, not resolved; an AMP-cache link is unwrapped
     (:mod:`forliosa.news.normalize`). The caller applies the relevance filter, outlet names, the takedown blocklist
     and de-duplication with GDELT, as for every source.
@@ -77,18 +79,21 @@ def engine_refused(reason: str) -> bool:
 # -- publication time -------------------------------------------------------------------------------------------
 _UNITS = {"s": 1, "sec": 1, "secs": 1, "second": 1, "seconds": 1, "m": 60, "min": 60, "mins": 60, "minute": 60,
           "minutes": 60, "h": 3600, "hr": 3600, "hrs": 3600, "hour": 3600, "hours": 3600, "d": 86400, "day": 86400,
-          "days": 86400, "w": 604800, "wk": 604800, "wks": 604800, "week": 604800, "weeks": 604800,
-          "秒": 1, "分": 60, "分鐘": 60, "分钟": 60, "小時": 3600, "小时": 3600, "天": 86400, "日": 86400,
-          "週": 604800, "周": 604800, "星期": 604800}
+          "days": 86400, "秒": 1, "分": 60, "分鐘": 60, "分钟": 60, "小時": 3600, "小时": 3600, "天": 86400,
+          "日": 86400}
+# No weeks (「2 weeks ago」「3 週前」), months or years: such an age is more than the one-week query window
+# (time_range=week, which Brave News and DuckDuckGo News ignore) and too coarse to date the result to the day —
+# relative_age gives None and the result is skipped as undated.
 _REL_EN = re.compile(r"^(?P<n>\d+|an?|one)\s*(?P<u>[a-z]+)\.?(?:\s+ago)?$", re.IGNORECASE)
-_ZH_UNIT = "(?P<u>秒|分鐘|分钟|分|小時|小时|天|日|週|周|星期)"
+_ZH_UNIT = "(?P<u>秒|分鐘|分钟|分|小時|小时|天|日)"
 _REL_ZH_ALONE = re.compile(rf"^(?P<n>\d+)\s*{_ZH_UNIT}\s*前?$")  # the whole part: 「3小時」「3 小時前」
 _REL_ZH = re.compile(rf"(?P<n>\d+)\s*{_ZH_UNIT}\s*前")  # inside a longer part: 「經濟日報 3 小時前」
 _YESTERDAY = re.compile(r"^(yesterday|昨天|昨日)$", re.IGNORECASE)
 
 
 def relative_age(text: str) -> tuple[timedelta, bool] | None:
-    """「3 hours ago」「3h」「an hour ago」「3 小時前」「昨天」 -> (age, only the day is known). ``None`` otherwise."""
+    """「3 hours ago」「3h」「an hour ago」「3 小時前」「昨天」 -> (age, only the day is known). ``None`` otherwise,
+    also for an age in weeks, months or years (「2 weeks ago」「3 週前」: older than the query window)."""
     t = " ".join((text or "").split())
     if not t:
         return None
@@ -152,7 +157,7 @@ class SearxngAnswer:
     results: int = 0  # results in the answer (before anything was dropped)
     per_engine: Counter[str] = field(default_factory=Counter)  # a result two engines found counts for both
     unresponsive: list[tuple[str, str]] = field(default_factory=list)  # (engine, reason) as SearXNG reported it
-    no_date: int = 0
+    no_date: int = 0  # no time, or only an age in weeks (older than the window, day unknown)
     redirects: int = 0
 
     @property

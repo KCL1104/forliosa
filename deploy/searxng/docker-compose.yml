@@ -2,7 +2,11 @@
 #
 #   cp deploy/searxng/.env.example deploy/searxng/.env      # then fill in SEARXNG_SECRET (a long random string)
 #   docker compose -f deploy/searxng/docker-compose.yml up -d --build
+#   docker compose -f deploy/searxng/docker-compose.yml logs searxng   # no Traceback / KeyError; it stays "Up"
 #   cd apps/api && uv run python -m forliosa.news searxng-check "台積電"
+#
+# After editing settings.yml: `docker compose -f deploy/searxng/docker-compose.yml restart searxng` (the bind mount
+# below means the container always reads the file in this directory).
 #
 # The API and worker in development (FORLIOSA_ENV=dev) use http://localhost:8080 unless NEWS_SEARXNG_URL says
 # otherwise. The port is published on 127.0.0.1 only, so nothing outside this machine can reach the instance (its
@@ -18,3 +22,8 @@ services:
       SEARXNG_SECRET: ${SEARXNG_SECRET:?set SEARXNG_SECRET in deploy/searxng/.env}
     ports:
       - "127.0.0.1:8080:8080"
+    volumes:
+      # The official image declares /etc/searxng a VOLUME: Compose would hand the previous container's anonymous
+      # volume, and with it the settings.yml copied at the first build, to every recreated container. Mounting the
+      # file (read-only) makes this directory's settings.yml the one SearXNG reads, after every edit.
+      - ./settings.yml:/etc/searxng/settings.yml:ro

@@ -201,6 +201,43 @@ def test_retention_deletes_old_headlines(engine, settings):
         assert [r.title for r in stored(db)] == ["台積電新聞"]
 
 
+def test_a_stored_mobile_or_amp_link_gives_way_to_the_canonical_page_found_later(engine):
+    """SearXNG finds the m. / AMP copy first (GDELT indexes 15–30 minutes late); GDELT's canonical link of the same
+    story, found in a later run, replaces the link — the row stays one, SearXNG's, with its title and time."""
+    h = service.Headline
+    with Session(engine) as db:
+        assert service.store(db, "2330.TW", [
+            h("台積電法說會釋利多", "https://m.udn.com/news/story/7240/9000001", "聯合新聞網", "m.udn.com",
+              NOW - timedelta(hours=2), "searxng"),
+            h("台積電先進封裝擴產", "https://www.cna.com.tw/amp/news/afe/202611120200.aspx", "中央社", "cna.com.tw",
+              NOW - timedelta(hours=3), "searxng", date_only=True),
+            h("台積電股東會", "https://www.setn.com/News.aspx?NewsID=1", "三立", "setn.com", NOW - timedelta(hours=4),
+              "searxng")], NOW) == 3
+        later = NOW + timedelta(minutes=45)
+        assert service.store(db, "2330.TW", [
+            h("台積電法說會釋利多 | 聯合新聞網", "https://udn.com/news/story/7240/9000001", "聯合新聞網", "udn.com",
+              NOW - timedelta(hours=1), "gdelt"),
+            h("台積電先進封裝擴產", "https://www.cna.com.tw/news/afe/202611120200.aspx", "中央社", "cna.com.tw",
+              NOW - timedelta(hours=3), "gdelt"),
+            # canonical vs canonical (http, a tracking parameter): the stored link stays
+            h("台積電股東會", "http://www.setn.com/News.aspx?NewsID=1&utm_source=x", "三立", "setn.com",
+              NOW - timedelta(hours=4), "gdelt")], later) == 0
+        by_title = {r.title: r for r in stored(db)}
+        assert len(by_title) == 3
+        udn = by_title["台積電法說會釋利多"]
+        assert udn.url == "https://udn.com/news/story/7240/9000001" and udn.domain == "udn.com"
+        assert udn.source == "searxng" and udn.published_at.replace(tzinfo=UTC) == NOW - timedelta(hours=2)
+        cna = by_title["台積電先進封裝擴產"]
+        assert cna.url == "https://www.cna.com.tw/news/afe/202611120200.aspx" and cna.date_only
+        assert by_title["台積電股東會"].url == "https://www.setn.com/News.aspx?NewsID=1"
+        # the mobile copy found again later does not take the row back
+        assert service.store(db, "2330.TW", [
+            h("台積電法說會釋利多", "https://m.udn.com/news/story/7240/9000001", "聯合新聞網", "m.udn.com",
+              NOW - timedelta(hours=2), "searxng")], later) == 0
+        db.expire_all()
+        assert stored(db)[0].url == "https://udn.com/news/story/7240/9000001"
+
+
 # -- AI fallback --------------------------------------------------------------------------------------------------
 def ai_answer(fake, results: list[tuple[str, str, str | None]], urls: list[str]) -> None:
     fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台積電 新聞"}),

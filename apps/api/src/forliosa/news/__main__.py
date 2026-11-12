@@ -57,7 +57,7 @@ def searxng_check(query: str, *, language: str, url: str | None, time_range: str
     except SourceDown as exc:
         print(f"SearXNG 沒有回應：{exc}")
         return 1
-    print(f"結果 {ans.results} 則：可用 {len(ans.items)} 則、沒有時間 {ans.no_date} 則、"
+    print(f"結果 {ans.results} 則：可用 {len(ans.items)} 則、沒有可用時間 {ans.no_date} 則、"
           f"搜尋引擎轉址 {ans.redirects} 則（略過）")
     width = max([len(e) for e in (*ans.per_engine, *source.engines, *(e for e, _ in ans.unresponsive))] + [6])
     print("各引擎結果數：")

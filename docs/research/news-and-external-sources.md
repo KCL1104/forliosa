@@ -128,13 +128,15 @@
     - 只對內：Railway 私有網路 `searxng.railway.internal:8080`（不給公開網域）、本機只綁 `127.0.0.1`；所以 limiter 與 public instance 關閉、沒有圖片代理；
       `secret_key` 來自 `SEARXNG_SECRET`（沒設就拒絕啟動）。
     - 引擎：只留 Bing News、DuckDuckGo News、Brave News（都連到媒體原網址）。不開 Google News（連結是 `news.google.com` 轉址）、不開 Reuters／Wikinews 等直接查新聞網站的引擎；
-      一般、圖片、影片引擎全部移除（`use_default_settings` 的 `keep_only`）。
+      一般、圖片、影片引擎全部移除（`use_default_settings` 的 `keep_only`）。Brave News 預設共用 `brave` 引擎的連線設定（`network: brave`），
+      移除 `brave` 後要在 `outgoing.networks` 補一個空的 `brave`，否則 SearXNG 啟動就 `KeyError`（2026-11-12 審查找到、已修，測試對照該版預設定義）。
     - 查詢：台股用中文「簡稱＋代號」（`台積電 2330`，`language=zh-TW`），美股用英文簡稱＋代號（`NVIDIA NVDA`，`language=en`），`categories=news`、`time_range=week`。
     - 節制：一次只查一個、間隔至少 10 秒；同一檔 60 分鐘內回應過就不再查；GDELT 已有 8 則 24 小時內的標題就不查。
     - 被擋就停：上游引擎回 CAPTCHA／too many requests／access denied 就暫停那個引擎（120 分鐘起、加倍到 24 小時），全部引擎都停或 SearXNG 連不上就暫停整個來源；
       不換 IP、不用代理或 Tor。SearXNG 本身對上游送的是瀏覽器樣式的請求（它的運作方式）——和上面「不偽裝」的字面有出入，已列入待產品負責人確認。
     - 合併：和 GDELT 用同一套網址比對（去掉追蹤參數、不分 http／https、www／m.／amp.、AMP 路徑），搜尋引擎轉址直接丟掉不解析；相關性篩選、媒體名稱、下架封鎖清單照舊；
-      GDELT＋SearXNG 最近 7 天合計少於 3 則才用 AI 搜尋。
+      GDELT＋SearXNG 最近 7 天合計少於 3 則才用 AI 搜尋。Brave News、DuckDuckGo News 不理 `time_range=week`：以週以上計的相對時間（「3 weeks ago」「2 週前」）不收，
+      只有日期的超過查詢窗一天就丟。先存到手機版／AMP 版、之後才找到一般網頁時，連結換成一般網頁。
     - 沒有在沙盒實測（連不到上游搜尋引擎）；測試用照 SearXNG JSON 格式手寫的合成回應。
 - **自建爬蟲＋索引（YaCy、Nutch＋OpenSearch）**：等於自己爬媒體網站並存全文，就是 §1 排除的高風險做法。不用。
 - **GDELT DOC 2.0 API**（`api.gdeltproject.org/api/v2/doc/doc`，已加入環境允許清單）：GDELT 官方「unlimited and unrestricted use for any academic, commercial, or governmental use of any kind without fee」，要引用 GDELT 並連到 gdeltproject.org。我們只取標題、網址、媒體、時間，自己不爬任何網站。
