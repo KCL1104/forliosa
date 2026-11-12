@@ -6,8 +6,8 @@ import { appToday } from "@/api"
 import { useInstrumentSearch } from "@/api/queries"
 import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
-import { MoreActions } from "./AiPanel"
-import { DISCLAIMER, useActions, useGreeting } from "./panel-helpers"
+import { FooterNote, MoreActions } from "./AiPanel"
+import { useActions, useGreeting } from "./panel-helpers"
 import { Composer } from "./Composer"
 import { useAiContext } from "./context"
 import { Conversation } from "./Conversation"
@@ -15,7 +15,7 @@ import { HistoryList } from "./HistoryList"
 import { parseIntent } from "./intent"
 import { useAiRunner } from "./runner"
 import { useAi, useCurrentThread } from "./store"
-import { suggestionsFor } from "./suggestions"
+import { useAiSuggestions } from "./remote-hooks"
 
 /**
  * 手機的「問 AI」：全螢幕。大字問候、橫滑的建議卡、交給 AI 的動作、底部「搜尋或提問」。
@@ -42,7 +42,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
   const runner = useAiRunner(ctx)
   const thread = useCurrentThread()
   const { hello, line } = useGreeting(ctx)
-  const suggestions = suggestionsFor(ctx, appToday())
+  const suggestions = useAiSuggestions(ctx)
   const actions = useActions(ctx)
   const [view, setView] = useState<"chat" | "history">("chat")
   const [typing, setTyping] = useState("")
@@ -120,7 +120,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
               ))}
               <MoreActions runner={runner} code={ctx.route === "stock" ? ctx.stock.code : undefined} className="relative h-10 rounded-full px-3 before:absolute before:inset-x-0 before:-inset-y-0.5 [&_svg]:hidden" />
             </div>
-            <p className="mt-5 text-xs text-ink-2">{DISCLAIMER}</p>
+            <FooterNote className="mt-5" />
           </div>
         )}
       </div>

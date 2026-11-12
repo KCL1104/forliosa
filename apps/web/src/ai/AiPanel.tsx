@@ -11,7 +11,6 @@ import {
   XIcon,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { appToday } from "@/api"
 import { useToggleWatch, useUpcoming, useWatchlist } from "@/api/queries"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
@@ -24,7 +23,8 @@ import { Conversation } from "./Conversation"
 import { HistoryList } from "./HistoryList"
 import { useAiRunner } from "./runner"
 import { useAi, useCurrentThread, usePendingCount } from "./store"
-import { suggestionsFor, type AiContext } from "./suggestions"
+import { useAiSuggestions, useAiUsage, usageNote } from "./remote-hooks"
+import type { AiContext } from "./suggestions"
 import type { Suggestion } from "./types"
 
 /** 桌面右側 AI 面板（約 400px，可收合，記得開合狀態） */
@@ -123,9 +123,20 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
           }}
           onAttach={(k) => runner.action(k)}
         />
-        <p className="mt-2.5 text-xs text-ink-2">{DISCLAIMER}</p>
+        <FooterNote />
       </div>
     </aside>
+  )
+}
+
+/** 免責聲明；提問額度快用完時多一句 */
+export function FooterNote({ className }: { className?: string }) {
+  const note = usageNote(useAiUsage().data)
+  return (
+    <p className={cn("mt-2.5 text-xs text-ink-2", className)}>
+      {DISCLAIMER}
+      {note && <span className="ml-1 text-ink">{note}</span>}
+    </p>
   )
 }
 
@@ -152,7 +163,7 @@ function IconButton({ label, onClick, children, pressed }: { label: string; onCl
 
 function PanelHome({ ctx, runner, routeKind }: { ctx: AiContext; runner: ReturnType<typeof useAiRunner>; routeKind: string }) {
   const { hello, line } = useGreeting(ctx)
-  const suggestions = suggestionsFor(ctx, appToday())
+  const suggestions = useAiSuggestions(ctx)
   const actions = useActions(ctx)
   return (
     <div className="flex flex-col">
