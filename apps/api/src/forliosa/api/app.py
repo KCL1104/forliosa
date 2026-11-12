@@ -8,12 +8,39 @@ from fastapi import APIRouter, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from forliosa.api.errors import install_error_handlers
-from forliosa.api.routes import accounts, ai, market, portfolio, recurring, stock, transactions, users, watchlist
+from forliosa.api.routes import (
+    accounts,
+    ai,
+    derivatives,
+    market,
+    portfolio,
+    recurring,
+    stock,
+    transactions,
+    users,
+    watchlist,
+)
 from forliosa.config import DEFAULT_SESSION_SECRET, get_settings
 from forliosa.datapolicy import attributions
 from forliosa.marketdata.service import get_market_data
 
 API_PREFIX = "/api/v1"
+
+
+def dataset_status() -> dict[str, dict]:
+    """``dataset_status`` rows (newest data date per dataset) for ``/meta/attributions``; empty without a DB."""
+    from forliosa.db import session_factory
+    from forliosa.models import DatasetStatus
+    from forliosa.timeutil import iso_taipei
+
+    try:
+        with session_factory()() as db:
+            return {r.key: {"data_date": r.data_date.isoformat() if r.data_date else None,
+                            "fetched_at": iso_taipei(r.fetched_at) if r.fetched_at else None}
+                    for r in db.query(DatasetStatus).all()}
+    except Exception:  # an old database without the table: attributions still work
+        logging.getLogger(__name__).warning("dataset_status unavailable", exc_info=True)
+        return {}
 
 
 def create_app() -> FastAPI:
@@ -53,9 +80,9 @@ def create_app() -> FastAPI:
 
     @api.get("/meta/attributions", tags=["meta"], summary="資料來源與授權：每個資料集的顯名聲明（不需登入）")
     def meta_attributions():
-        return attributions(get_market_data().policy)
+        return attributions(get_market_data().policy, settings.taifex_conditional_confirmed, dataset_status())
 
-    for module in (users, accounts, market, stock, transactions, portfolio, watchlist, recurring, ai):
+    for module in (users, accounts, market, stock, derivatives, transactions, portfolio, watchlist, recurring, ai):
         api.include_router(module.router)
     app.include_router(api)
     return app

@@ -560,6 +560,25 @@ _ACCOUNT = {"type": "string", "description": "Optional broker account id (from g
                                              "omit for all accounts"}
 
 
+def get_derivatives_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Read-only market-wide futures context (no user data): the same payload as ``GET /derivatives/overview``,
+    trimmed. Parts whose TAIFEX licence is still conditional are empty and explained in ``notes``."""
+    from forliosa.services import derivatives as svc
+
+    ov = svc.overview(ctx.db, ctx.md)
+    return {
+        "as_of": ov["as_of"],
+        "futures": ov["futures"],
+        "put_call_ratio": ov["put_call_ratio"],
+        "institutional": {k: [{x: v for x, v in row.items() if x != "investor_name"} for row in rows]
+                          for k, rows in ov["institutional"].items()},
+        "large_traders": ov["large_traders"],
+        "units": "口數＝契約數；value_k＝新台幣千元；ratio 為分數（0.6517＝65.17%）",
+        "notes": ov["notes"],
+        "sources": ov["sources"],
+    }
+
+
 def _sym_label(prefix: str, suffix: str = "") -> Callable[[dict[str, Any]], str]:
     return lambda a: f"{prefix}{(a.get('symbol') or '').upper()}{suffix}"
 
@@ -639,6 +658,13 @@ TOOLS: list[ToolSpec] = sorted([
              "realized P&L, dividends received, today's change, the next dividend estimate and recent trades. Call "
              "this whenever the user asks about 'my' shares, cost or profit in a specific stock.",
              {"symbol": _SYMBOL}, ("symbol",), get_position, _sym_label("查看我的 ", " 部位")),
+    ToolSpec("get_derivatives_overview",
+             "Market-wide Taiwan futures context from TAIFEX open data (read-only, no user data): TX/MTX/TE/TF "
+             "near-month futures incl. the night session (only when licensed), the TAIEX options put/call ratio, net "
+             "open interest of foreign investors, investment trusts and dealers in TX and TXO (calls/puts), and the "
+             "large traders' top-5/top-10 net positions. Call this for questions about 台指期, 夜盤, 外資期貨未平倉, "
+             "籌碼 of the whole market or Put/Call.",
+             {}, (), get_derivatives_overview, lambda a: "查看期貨盤勢"),
     ToolSpec("search_instruments",
              "Find Taiwan or US stocks/ETFs by code or (partial) Chinese/English name. Call this when the user names "
              "a company you cannot map to a code with certainty.",

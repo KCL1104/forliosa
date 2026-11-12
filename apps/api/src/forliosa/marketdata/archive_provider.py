@@ -250,30 +250,34 @@ def resolution_event(symbol: str, r: Any) -> DividendEvent:
                          cash_sources=(r.cash_earnings, r.cash_legal_reserve, r.cash_capital_surplus))
 
 
+# A board resolution's ex-date follows within this many days (TSMC quarterly ≈ 4 months; annual dividends are
+# resolved in Feb–Mar and go ex in Jul–Aug). Older resolutions are not matched to a notice.
+RESOLUTION_WINDOW_DAYS = 200
+
+
 def attach_resolutions(events: list[DividendEvent]) -> list[DividendEvent]:
-    """Merge each resolution (no ex-date) into the ex-dividend event it belongs to: the earliest unmatched
-    ex-date after the board date with the same cash per share (±0.001) and stock dividend. Unmatched
-    resolutions stay as they are (ex-date not announced yet, or it was before archiving started)."""
+    """Merge each resolution (no ex-date) into the ex-dividend event it belongs to.
+
+    Notices are taken in ex-date order; each gets the earliest unmatched resolution resolved before its ex-date
+    (within ``RESOLUTION_WINDOW_DAYS``) with the same cash per share (±0.001) and stock dividend — dividends are
+    paid in the order they were resolved, which keeps equal quarterly amounts (TSMC 2026Q1 = 2026Q2 = 7.0) apart.
+    Unmatched resolutions stay as they are (ex-date not announced yet, or it was before archiving started).
+    """
     dated = sorted((e for e in events if e.ex_dividend_date is not None), key=lambda e: e.ex_dividend_date)
     pending = sorted((e for e in events if e.ex_dividend_date is None and e.board_date is not None),
                      key=lambda e: e.board_date)
     others = [e for e in events if e.ex_dividend_date is None and e.board_date is None]
-    used: set[int] = set()
-    left = []
-    for res in pending:
-        match = None
-        for i, e in enumerate(dated):
-            if i in used or e.ex_dividend_date <= res.board_date or e.progress is not None:
-                continue
-            if abs(e.cash_dividend - res.cash_dividend) <= Decimal("0.001") and (
-                    abs(e.stock_dividend - res.stock_dividend) <= Decimal("0.001")):
-                match = i
-                break
-        if match is None:
-            left.append(res)
+    tol = Decimal("0.001")
+    for i, e in enumerate(dated):
+        if e.progress is not None:
             continue
-        used.add(match)
-        e = dated[match]
-        dated[match] = replace(e, year=res.year, period=res.period, progress=res.progress, board_date=res.board_date,
-                               meeting_date=res.meeting_date, cash_sources=res.cash_sources)
-    return [*dated, *left, *others]
+        for res in pending:
+            if not res.board_date < e.ex_dividend_date <= res.board_date + timedelta(days=RESOLUTION_WINDOW_DAYS):
+                continue
+            if abs(e.cash_dividend - res.cash_dividend) <= tol and abs(e.stock_dividend - res.stock_dividend) <= tol:
+                dated[i] = replace(e, year=res.year, period=res.period, progress=res.progress,
+                                   board_date=res.board_date, meeting_date=res.meeting_date,
+                                   cash_sources=res.cash_sources)
+                pending.remove(res)
+                break
+    return [*dated, *pending, *others]

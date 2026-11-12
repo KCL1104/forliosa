@@ -119,6 +119,7 @@ class InstrumentDetail(Instrument):
     themes: list[str]
     shares_outstanding: int | None
     market_cap: float | None
+    listed_date: date | None = None  # 上市／上櫃日期 (t187ap03_L / mopsfin_t187ap03_O)
     data_sources: list[str]
     is_demo: bool
 
@@ -198,6 +199,14 @@ class MonthlyRevenue(BaseModel):
     ytd_yoy_pct: float | None
 
 
+class CashSources(BaseModel):
+    """Cash per share by source (TWSE t187ap45_L): earnings, legal reserve, capital surplus."""
+
+    earnings: float | None
+    legal_reserve: float | None
+    capital_surplus: float | None
+
+
 class DividendRecord(BaseModel):
     year: int
     period: str
@@ -206,6 +215,12 @@ class DividendRecord(BaseModel):
     ex_dividend_date: date | None
     payment_date: date | None
     is_demo: bool = False
+    status: Literal["announced", "resolved"] = "announced"  # resolved: board / AGM resolution, no ex-date yet
+    progress: str | None = None  # 決議（擬議）進度
+    board_date: date | None = None
+    meeting_date: date | None = None
+    cash_sources: CashSources | None = None
+    sources: list[str] = []
 
 
 # -- transactions -------------------------------------------------------------------------------
@@ -413,6 +428,7 @@ class Overview(BaseModel):
     high_52w: float | None
     low_52w: float | None
     shares_outstanding: int | None
+    listed_date: date | None = None
     status: TradingStatus
     as_of: str | None
     sources: list[str]
@@ -520,8 +536,8 @@ class Financials(BaseModel):
 
 class StockEvent(BaseModel):
     date: date
-    type: Literal["ex_dividend", "dividend_payment", "earnings", "revenue_release", "investor_conference",
-                  "material_info", "attention", "disposition", "shareholder_meeting"]
+    type: Literal["ex_dividend", "dividend_payment", "dividend_resolution", "earnings", "revenue_release",
+                  "investor_conference", "material_info", "attention", "disposition", "shareholder_meeting"]
     title: str
     detail: str
     url: str | None
@@ -735,3 +751,136 @@ class RecurringDraft(BaseModel):
     preview: TradePreview
     is_demo: bool
     sources: list[str] = []
+
+
+# -- derivatives (TAIFEX OpenAPI archive, 2026-11-12) -------------------------------------------------------
+class FuturesSession(BaseModel):
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    change: float | None
+    change_pct: float | None
+    volume: int | None
+    settlement_price: float | None = None  # regular session only
+    open_interest: int | None = None  # regular session only
+
+
+class FuturesQuote(BaseModel):
+    code: str
+    name: str
+    contract_month: str
+    regular: FuturesSession | None
+    after_hours: FuturesSession | None  # the night session booked to the same trading day
+
+
+class PutCallRatioOut(BaseModel):
+    date: date
+    volume_ratio: float | None  # fraction: 1.0708 = 107.08%
+    oi_ratio: float | None
+    put_volume: int | None
+    call_volume: int | None
+    put_oi: int | None
+    call_oi: int | None
+    oi_ratio_prev: float | None
+
+
+class InstitutionalSide(BaseModel):
+    oi_net: int | None
+    oi_net_change: int | None
+    oi_net_value_k: int | None
+    net_volume: int | None
+
+
+class InstitutionalPosition(BaseModel):
+    investor: Literal["dealers", "trust", "foreign"]
+    investor_name: str
+    oi_net: int | None  # contracts (口); + long, − short
+    oi_net_change: int | None  # vs the previous archived trading day
+    oi_long: int | None
+    oi_short: int | None
+    oi_net_value_k: int | None  # thousand NT$
+    net_volume: int | None  # today's net traded contracts
+    calls: InstitutionalSide | None = None  # TXO only
+    puts: InstitutionalSide | None = None
+
+
+class InstitutionalOut(BaseModel):
+    TX: list[InstitutionalPosition]
+    TXO: list[InstitutionalPosition]
+
+
+class TraderSpecific(BaseModel):
+    top5_net: int | None
+    top10_net: int | None
+
+
+class TraderBlock(BaseModel):
+    top5_buy: int | None
+    top5_sell: int | None
+    top10_buy: int | None
+    top10_sell: int | None
+    top5_net: int | None
+    top10_net: int | None
+    market_oi: int | None
+    specific: TraderSpecific | None  # 特定法人 (TypeOfTraders 1) among the large traders
+    contract_month: str | None = None
+
+
+class FuturesLargeTraders(BaseModel):
+    contract: str
+    name: str
+    all_months: TraderBlock | None
+    near_month: TraderBlock | None
+
+
+class OptionsLargeTraders(BaseModel):
+    contract: str
+    name: str
+    calls: TraderBlock | None
+    puts: TraderBlock | None
+
+
+class LargeTradersOut(BaseModel):
+    TX: FuturesLargeTraders | None
+    TXO: OptionsLargeTraders | None
+
+
+class DerivativesServed(BaseModel):
+    futures: bool
+    options_large_traders: bool
+
+
+class DerivativesOverview(BaseModel):
+    as_of: date | None
+    futures: list[FuturesQuote]
+    put_call_ratio: PutCallRatioOut | None
+    institutional: InstitutionalOut
+    large_traders: LargeTradersOut
+    served: DerivativesServed
+    notes: list[str]
+    sources: list[str]
+
+
+class FuturesHistoryPoint(BaseModel):
+    t: date
+    contract_month: str
+    open: float | None
+    high: float | None
+    low: float | None
+    close: float | None
+    change: float | None
+    change_pct: float | None
+    volume: int | None
+    settlement_price: float | None
+    open_interest: int | None
+    after_hours: FuturesSession | None
+
+
+class FuturesHistory(BaseModel):
+    code: str
+    name: str
+    range: str
+    series: list[FuturesHistoryPoint]
+    notes: list[str]
+    sources: list[str]

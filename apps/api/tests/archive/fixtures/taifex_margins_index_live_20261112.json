@@ -1,0 +1,8 @@
+[
+{"Contract": "臺股期貨", "ClearingMargin": "519000", "MaintenanceMargin": "538000", "InitialMargin": "701000", "Date": "20261111"},
+{"Contract": "小型臺指", "ClearingMargin": "129750", "MaintenanceMargin": "134500", "InitialMargin": "175250", "Date": "20261111"},
+{"Contract": "客製化小型臺指期貨", "ClearingMargin": "129750", "MaintenanceMargin": "134500", "InitialMargin": "175250", "Date": "20261111"},
+{"Contract": "微型臺指期貨", "ClearingMargin": "25950", "MaintenanceMargin": "26900", "InitialMargin": "35050", "Date": "20261111"},
+{"Contract": "臺指選擇權風險保證金(A)值", "ClearingMargin": "138000", "MaintenanceMargin": "143000", "InitialMargin": "187000", "Date": "20261111"},
+{"Contract": "臺指選擇權風險保證金(B)值", "ClearingMargin": "69000", "MaintenanceMargin": "72000", "InitialMargin": "94000", "Date": "20261111"}
+]

@@ -178,6 +178,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
         "high_52w": ser.price(max(c.h for c in year)) if year else None,
         "low_52w": ser.price(min(c.l for c in year)) if year else None,
         "shares_outstanding": prof.shares_outstanding,
+        "listed_date": prof.listed_date,
         "status": status,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else None,
         "sources": labels(sources),
@@ -464,6 +465,34 @@ def _event_source(r: MarketEvent) -> str:
     """An archived event row's dataset key, e.g. ``twse-openapi/material_info``."""
     return f"{r.source}/{_EVENT_KINDS.get(r.type, r.type)}"
 
+def _resolution_title(e) -> str:
+    progress = e.progress or ""
+    if "擬議" in progress and "決議" not in progress:
+        return "董事會擬議股利"
+    return "股東會確認股利" if "股東會確認" in progress and "董事會" not in progress else "董事會決議股利"
+
+
+def resolution_detail(e) -> str:
+    """「現金股利 0.8 元（資本公積 0.8 元）…」 for a t187ap45_L resolution."""
+    parts = []
+    if e.cash_dividend:
+        names = ("盈餘", "法定盈餘公積", "資本公積")
+        split = [f"{n} {v.normalize():f} 元" for n, v in zip(names, e.cash_sources or (), strict=False) if v]
+        parts.append(f"現金股利 {e.cash_dividend.normalize():f} 元" + (f"（{'、'.join(split)}）" if split else ""))
+    if e.stock_dividend:
+        parts.append(f"股票股利 {e.stock_dividend.normalize():f} 元")
+    detail = "、".join(parts) or "不配發股利"
+    if e.cash_sources and e.cash_sources[2]:
+        detail += "；資本公積發放的現金一般不屬股利所得、不扣二代健保（依公司公告的來源為準）"
+    if e.progress:
+        detail += f"。進度：{e.progress}"
+    if e.meeting_date:
+        detail += f"，股東會 {e.meeting_date:%Y-%m-%d}"
+    if e.ex_dividend_date is None:
+        detail += "；除權息日尚未公告"
+    return detail
+
+
 def _held_quantity(state, sym: str) -> Decimal:
     row = next((r for r in state.rows if r.symbol == sym), None)
     return row.quantity if row else Decimal(0)
@@ -508,6 +537,9 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
         if e.stock_dividend:
             parts.append(f"股票股利 {e.stock_dividend.normalize():f} 元")
         detail = "、".join(parts) or "金額尚未公告"
+        if e.board_date is not None and lo <= e.board_date <= hi and not divs.is_demo:
+            add(e.board_date, "dividend_resolution", f"{_resolution_title(e)}（{e.period}）",
+                resolution_detail(e), mine=qty > 0, sources=["twse-openapi/dividend_resolution"])
         for d, type_, title in ((e.ex_dividend_date, "ex_dividend", "除權息" if e.stock_dividend else "除息"),
                                 (e.payment_date, "dividend_payment", "現金股利發放")):
             if d is None or not lo <= d <= hi or (type_ == "dividend_payment" and not e.cash_dividend):

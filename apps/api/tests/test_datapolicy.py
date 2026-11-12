@@ -127,3 +127,29 @@ def test_unannounced_ex_date_is_kept_and_real_amounts_win(engine):
 
     both = MarketData([archive, Announced(), DemoProvider()], policy="personal").dividends("00878.TW")
     assert [(e.cash_dividend, e.payment_date) for e in both.value] == [(D("0.4"), date(2026, 12, 12))]
+
+
+def test_conditional_taifex_datasets_are_gated_under_commercial():
+    from forliosa.datapolicy import DATASETS, dataset_served
+
+    conditional = {k for k, d in DATASETS.items() if d.license_status == "conditional"}
+    assert {"taifex-openapi/futures_daily", "taifex-openapi/options_daily", "taifex-openapi/fx",
+            "taifex-openapi/large_traders_options"} <= conditional
+    assert all(k.startswith("taifex-openapi/") for k in conditional)
+    for key in conditional:
+        assert not dataset_served(key, "commercial", confirmed=False)
+        assert dataset_served(key, "commercial", confirmed=True)
+        assert dataset_served(key, "personal", confirmed=False)
+    for key in ("taifex-openapi/put_call_ratio", "taifex-openapi/institutional_futures", "twse-openapi/index"):
+        assert dataset_served(key, "commercial", confirmed=False)
+    assert label("taifex-openapi/fx").startswith("臺灣期貨交易所〈每日外幣參考匯率〉（")
+    assert is_commercial_source("taifex-openapi")
+
+
+def test_fetcher_allows_taifex_data_endpoints_only():
+    from forliosa.marketdata.http import DEFAULT_LIMITER, url_allowed
+
+    assert url_allowed("https://openapi.taifex.com.tw/v1/PutCallRatio")
+    assert not url_allowed("https://openapi.taifex.com.tw/swagger.json")
+    assert not url_allowed("https://www.taifex.com.tw/cht/3/futDailyMarketReport")
+    assert DEFAULT_LIMITER.interval_for("openapi.taifex.com.tw") == 2.0

@@ -1,0 +1,8 @@
+[
+{"TheFinalSettlementDay": "20251205", "DeliveryMonth": "202512F1", "Contract": "TXO", "ContractName": "臺指選擇權", "TheFinalSettlementPrice": "27892"},
+{"TheFinalSettlementDay": "20251203", "DeliveryMonth": "202512W1", "Contract": "TX/MTX/TMF", "ContractName": "臺股期貨/小型臺指期貨/微型臺指期貨", "TheFinalSettlementPrice": "27749"},
+{"TheFinalSettlementDay": "20251203", "DeliveryMonth": "202512W1", "Contract": "TXO", "ContractName": "臺指選擇權", "TheFinalSettlementPrice": "27749"},
+{"TheFinalSettlementDay": "20251128", "DeliveryMonth": "202511F4", "Contract": "TXO", "ContractName": "臺指選擇權", "TheFinalSettlementPrice": "27789"},
+{"TheFinalSettlementDay": "20251126", "DeliveryMonth": "202511W4", "Contract": "TX/MTX/TMF", "ContractName": "臺股期貨/小型臺指期貨/微型臺指期貨", "TheFinalSettlementPrice": "27283"},
+{"TheFinalSettlementDay": "20251126", "DeliveryMonth": "202511W4", "Contract": "TXO", "ContractName": "臺指選擇權", "TheFinalSettlementPrice": "27283"}
+]

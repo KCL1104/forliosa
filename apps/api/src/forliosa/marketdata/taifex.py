@@ -205,8 +205,9 @@ def parse_futures_daily(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
 def parse_options_daily(rows: list[dict[str, Any]], nearest: int = 2) -> list[dict[str, Any]]:
     """DailyMarketReportOpt -> rows of ``taifex_options_daily``.
 
-    TXO / TEO / TFO are kept in full; other contracts (stock and ETF options) only for their ``nearest``
-    expiries of the day (about 14,000 rows a day otherwise, 3.5 million a year).
+    TXO / TEO / TFO are kept in full; other contracts (stock and ETF options) only for their ``nearest`` expiry
+    months of the day, weeklies of those months included (about 14,000 rows a day otherwise, 3.5 million a
+    year). CDO 2026-11-11 had 202611, 202611W2, 202611W4, 202612, 202703: the first four are kept.
     """
     parsed = []
     months: dict[str, set[str]] = defaultdict(set)
@@ -229,8 +230,8 @@ def parse_options_daily(rows: list[dict[str, Any]], nearest: int = 2) -> list[di
             "open_interest": integer(r.get("OpenInterest", "未沖銷契約量")),
             "best_bid": num(r.get("BestBid", "最後最佳買價")), "best_ask": num(r.get("BestAsk", "最後最佳賣價")),
         })
-    keep = {c: set(sorted(ms, key=month_sort_key)[:nearest]) for c, ms in months.items()}
-    return [p for p in parsed if p["contract"] in INDEX_OPTIONS or p["contract_month"] in keep[p["contract"]]]
+    keep = {c: set(sorted({m[:6] for m in ms})[:nearest]) for c, ms in months.items()}
+    return [p for p in parsed if p["contract"] in INDEX_OPTIONS or p["contract_month"][:6] in keep[p["contract"]]]
 
 
 # -- 三大法人 ----------------------------------------------------------------------------------------------

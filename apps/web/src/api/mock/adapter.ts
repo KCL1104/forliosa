@@ -9,6 +9,7 @@ import {
   type Transaction,
   type User,
 } from "../types"
+import { createAnalystStore } from "./analyst"
 import { buildAttributions, sourceOf } from "./attributions"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
@@ -71,6 +72,8 @@ export interface MockOptions {
   policy?: MockPolicy
   /** 模擬網路延遲（毫秒）；測試時設 0 */
   latency?: [number, number]
+  /** 法人觀點：POST 之後多久變成 ready（毫秒）；測試時設 0 */
+  analystDelayMs?: number
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
@@ -93,6 +96,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   let nextId = 90000
   let watch: string[] = scenario === "empty" ? [] : ["2382.TW", "2308.TW", "2881.TW"]
   const recurring = createRecurringStore(scenario === "empty" ? [] : seedPlans(ACCOUNTS[0]!.id), () => accounts)
+  const analyst = createAnalystStore({ delayMs: options.analystDelayMs })
 
   const wait = <T>(value: T | (() => T)): Promise<T> =>
     new Promise((resolve, reject) => {
@@ -429,5 +433,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     draftRecurring: (id, date) => wait(() => recurring.draft(id, date)),
 
     getAttributions: () => wait(() => buildAttributions(commercial ? "commercial" : "personal")),
+
+    getAnalystViews: (symbol) => wait(() => analyst.get(spec(symbol).symbol)),
+    requestAnalystViews: (symbol) => wait(() => analyst.request(spec(symbol).symbol)),
   }
 }

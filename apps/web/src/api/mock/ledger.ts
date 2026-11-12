@@ -82,6 +82,7 @@ export function seedTransactions(): Transaction[] {
   t.push(trade("buy", US, "AAPL", "2023-06-01", 10))
   t.push(trade("buy", US, "NVDA", "2023-09-12", 4, Math.round(closeOn(findInstrument("NVDA")!, "2023-09-12") * 1000) / 100, "分割前買進"))
   t.push(trade("buy", TW, "2603.TW", "2024-01-10", 1000))
+  t.push(trade("buy", TW, "2409.TW", "2024-02-15", 2000))
   t.push(trade("buy", US, "VOO", "2024-02-01", 10))
   t.push(trade("buy", TW, "2317.TW", "2024-03-11", 1000))
   t.push(trade("buy", US, "AAPL", "2024-04-22", 5))
@@ -89,20 +90,26 @@ export function seedTransactions(): Transaction[] {
   t.push(trade("buy", TW, "6488.TWO", "2024-05-20", 1000))
   t.push(makeTxn({ account_id: US.id, symbol: "NVDA", type: "split", trade_date: "2024-06-10", quantity: 10, price: null, amount: 0, fee: 0, tax: 0, health_insurance: 0, note: "1 股分割為 10 股" }))
   t.push(trade("buy", TW, "2330.TW", "2024-08-06", 500))
+  t.push(trade("sell", TW, "2409.TW", "2024-09-10", 2000))
   t.push(trade("buy", TW, "2454.TW", "2024-10-21", 200, undefined, "零股"))
   t.push(trade("sell", TW, "2603.TW", "2025-02-20", 1000))
   t.push(trade("buy", TW, "2317.TW", "2025-04-14", 1000))
   t.push(trade("sell", TW, "3008.TW", "2025-08-12", 100))
+  // 已出清依年份分組：2024（友達）、2025（長榮、大立光）、2026（中華電）
+  t.push(trade("buy", TW, "2412.TW", "2026-01-12", 1000))
+  t.push(trade("sell", TW, "2412.TW", "2026-07-15", 1000))
   t.push(cash("fee", US, "2025-12-31", 25, "年度帳戶管理費"))
 
   // 定期定額（與 recurring.ts 的示範計畫一致）：0050 每月 6 日 NT$10,000、00878 每月 12、26 日 NT$4,000（零股）。
-  // 今天的扣款還沒入帳：AI 面板會在扣款日提出草稿，簽名後才記下
+  // 今天的扣款還沒入帳：AI 面板會在扣款日提出草稿，簽名後才記下；最近 7 天漏記的扣款會提出補記
   for (let y = 2024; y <= 2026; y++) {
     for (let m = 1; m <= 12; m++) {
       const mm = String(m).padStart(2, "0")
       for (const [symbol, day, amount] of [["0050.TW", "06", 10_000], ["00878.TW", "12", 4_000], ["00878.TW", "26", 4_000]] as const) {
         const d = `${y}-${mm}-${day}`
         if (nextWeekday(d) >= MOCK_TODAY) continue
+        // 11/06 的 0050 扣款沒有記：AI 面板會提出「補記 11/06 的 0050 定期定額」
+        if (symbol === "0050.TW" && d === "2026-11-06") continue
         const p = closeOn(findInstrument(symbol)!, nextWeekday(d))
         t.push(trade("buy", TW, symbol, d, Math.floor(amount / p), undefined, "定期定額"))
       }

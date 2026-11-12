@@ -1,0 +1,16 @@
+[
+{"Date": "20261111", "Contract": "CD", "ContractName": "台積電期貨", "SettlementMonth": "202611", "TypeOfTraders": "0", "Top5Buy": "6491", "Top5Sell": "9298", "Top10Buy": "9198", "Top10Sell": "11874", "OIOfMarket": "15786"},
+{"Date": "20261111", "Contract": "CD", "ContractName": "台積電期貨", "SettlementMonth": "202611", "TypeOfTraders": "1", "Top5Buy": "4564", "Top5Sell": "9298", "Top10Buy": "7031", "Top10Sell": "11874", "OIOfMarket": "15786"},
+{"Date": "20261111", "Contract": "CD", "ContractName": "台積電期貨", "SettlementMonth": "999912", "TypeOfTraders": "0", "Top5Buy": "15673", "Top5Sell": "12698", "Top10Buy": "18694", "Top10Sell": "19588", "OIOfMarket": "31546"},
+{"Date": "20261111", "Contract": "CD", "ContractName": "台積電期貨", "SettlementMonth": "999912", "TypeOfTraders": "1", "Top5Buy": "13746", "Top5Sell": "12698", "Top10Buy": "16417", "Top10Sell": "19588", "OIOfMarket": "31546"},
+{"Date": "20261111", "Contract": "TE", "ContractName": "電子期貨", "SettlementMonth": "202611", "TypeOfTraders": "0", "Top5Buy": "217", "Top5Sell": "281", "Top10Buy": "270", "Top10Sell": "333", "OIOfMarket": "388"},
+{"Date": "20261111", "Contract": "TE", "ContractName": "電子期貨", "SettlementMonth": "202611", "TypeOfTraders": "1", "Top5Buy": "142", "Top5Sell": "281", "Top10Buy": "176", "Top10Sell": "314", "OIOfMarket": "388"},
+{"Date": "20261111", "Contract": "TE", "ContractName": "電子期貨", "SettlementMonth": "999912", "TypeOfTraders": "0", "Top5Buy": "217", "Top5Sell": "281", "Top10Buy": "270", "Top10Sell": "339", "OIOfMarket": "405"},
+{"Date": "20261111", "Contract": "TE", "ContractName": "電子期貨", "SettlementMonth": "999912", "TypeOfTraders": "1", "Top5Buy": "142", "Top5Sell": "281", "Top10Buy": "176", "Top10Sell": "327", "OIOfMarket": "405"},
+{"Date": "20261111", "Contract": "TX", "ContractName": "臺股期貨(TX+MTX/4)", "SettlementMonth": "202611", "TypeOfTraders": "0", "Top5Buy": "95208", "Top5Sell": "58768", "Top10Buy": "105198", "Top10Sell": "85450", "OIOfMarket": "130006"},
+{"Date": "20261111", "Contract": "TX", "ContractName": "臺股期貨(TX+MTX/4)", "SettlementMonth": "666666", "TypeOfTraders": "0", "Top5Buy": "15", "Top5Sell": "15", "Top10Buy": "15", "Top10Sell": "15", "OIOfMarket": "15"},
+{"Date": "20261111", "Contract": "TX", "ContractName": "臺股期貨(TX+MTX/4)", "SettlementMonth": "666666", "TypeOfTraders": "1", "Top5Buy": "0", "Top5Sell": "0", "Top10Buy": "0", "Top10Sell": "0", "OIOfMarket": "15"},
+{"Date": "20261111", "Contract": "TX", "ContractName": "臺股期貨(TX+MTX/4)", "SettlementMonth": "202611", "TypeOfTraders": "1", "Top5Buy": "95208", "Top5Sell": "58768", "Top10Buy": "103046", "Top10Sell": "85450", "OIOfMarket": "130006"},
+{"Date": "20261111", "Contract": "TX", "ContractName": "臺股期貨(TX+MTX/4)", "SettlementMonth": "999912", "TypeOfTraders": "0", "Top5Buy": "97108", "Top5Sell": "64796", "Top10Buy": "107422", "Top10Sell": "92654", "OIOfMarket": "142413"},
+{"Date": "20261111", "Contract": "TX", "ContractName": "臺股期貨(TX+MTX/4)", "SettlementMonth": "999912", "TypeOfTraders": "1", "Top5Buy": "97108", "Top5Sell": "64796", "Top10Buy": "105270", "Top10Sell": "92654", "OIOfMarket": "142413"}
+]

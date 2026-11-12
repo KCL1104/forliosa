@@ -11,9 +11,9 @@ from typing import Any
 from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.datapolicy import label, labels, tagged
-from forliosa.marketdata.base import InstrumentInfo, QuoteData
+from forliosa.marketdata.base import DividendEvent, InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
-from forliosa.marketdata.service import MarketData
+from forliosa.marketdata.service import MarketData, dividend_sort_key
 from forliosa.services.coverage import series_notes
 from forliosa.services.portfolio import range_start
 from forliosa.timeutil import iso_taipei, today_taipei
@@ -50,11 +50,13 @@ def detail(md: MarketData, symbol: str) -> dict[str, Any]:
     stage = (prof.chain_stage if research_ok else None) or (info.chain_stage if card_ok else None)
     return {
         **instrument_out(info),
+        "industry": info.industry or prof.industry,
         "summary": summary,
         "chain_stage": stage,
         "themes": list(prof.themes) if research_ok else [],
         "shares_outstanding": prof.shares_outstanding,
         "market_cap": ser.money(prof.market_cap),
+        "listed_date": prof.listed_date,
         "data_sources": [label("shioaji-data") if s in (SOURCE_OFFICIAL, SOURCE_FINANCIALS) else s
                          for s in prof.data_sources if research_ok or s != SOURCE_RESEARCH],
         "is_demo": prof.is_demo,
@@ -309,13 +311,39 @@ def revenue(md: MarketData, symbol: str) -> list[dict[str, Any]]:
     ]
 
 
+def dividend_sources(ans_source: str, e: DividendEvent, is_demo: bool) -> list[str]:
+    """Dataset keys behind one dividend: the ex-dividend notice and / or the board resolution (t187ap45_L)."""
+    if is_demo:
+        return ["demo"]
+    keys = tagged(ans_source, "ex_dividend") if e.ex_dividend_date is not None else []
+    if e.progress is not None:
+        keys.append("twse-openapi/dividend_resolution")
+    return keys
+
+
+def dividend_status(e: DividendEvent) -> str:
+    """``announced`` (an ex-dividend date is published) or ``resolved`` (board / AGM resolution only)."""
+    return "announced" if e.ex_dividend_date is not None else "resolved"
+
+
 def dividends(md: MarketData, symbol: str) -> list[dict[str, Any]]:
+    """Ex-dividend notices plus TWSE board / AGM resolutions (t187ap45_L) not yet in a notice. A resolution's
+    ``ex_dividend_date`` is null until the notice appears (or when it went ex before archiving started);
+    ``cash_sources`` splits the cash by source — 資本公積 cash is generally not dividend income."""
     info = require_instrument(md, symbol)
     ans = md.dividends(info.symbol)
-    events = sorted(ans.value, key=lambda e: e.ex_dividend_date or date.min, reverse=True)
-    return [
-        {"year": e.year, "period": e.period, "cash_dividend": ser.price(e.cash_dividend),
-         "stock_dividend": ser.price(e.stock_dividend), "ex_dividend_date": e.ex_dividend_date,
-         "payment_date": e.payment_date, "is_demo": e.is_demo or ans.is_demo}
-        for e in events
-    ]
+    events = sorted(ans.value, key=dividend_sort_key, reverse=True)
+    out = []
+    for e in events:
+        is_demo = e.is_demo or ans.is_demo
+        cs = e.cash_sources
+        out.append({
+            "year": e.year, "period": e.period, "cash_dividend": ser.price(e.cash_dividend),
+            "stock_dividend": ser.price(e.stock_dividend), "ex_dividend_date": e.ex_dividend_date,
+            "payment_date": e.payment_date, "is_demo": is_demo, "status": dividend_status(e),
+            "progress": e.progress, "board_date": e.board_date, "meeting_date": e.meeting_date,
+            "cash_sources": ({"earnings": ser.price(cs[0]), "legal_reserve": ser.price(cs[1]),
+                              "capital_surplus": ser.price(cs[2])} if cs else None),
+            "sources": labels(dividend_sources(ans.source, e, is_demo)),
+        })
+    return out

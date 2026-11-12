@@ -47,3 +47,11 @@ def test_upsert_closes_stores_only_real_prices(engine):
         assert [(r.symbol, r.date, r.close) for r in rows] == [("2330.TW", date(2026, 11, 11), D("2395"))]
         assert refresh_instruments(db, md) > 10
         assert db.get(Instrument, "0050.TW").name == "元大台灣50"
+
+
+def test_evening_and_weekly_runs_include_the_new_groups():
+    from forliosa.archive import JOB_GROUPS
+    from forliosa.worker import EVENING_GROUPS, WEEKLY_GROUPS
+
+    assert {"taifex", "companies", "financials"} <= set(EVENING_GROUPS) and set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
+    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) == set(JOB_GROUPS)

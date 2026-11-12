@@ -60,7 +60,10 @@ def test_schemas_are_strict_and_within_limits():
     names = {t.name for t in TOOLS}
     assert names == {"get_portfolio_summary", "get_holdings", "get_transactions", "get_upcoming",
                      "get_stock_overview", "get_stock_history", "get_valuation", "get_chips", "get_financials",
-                     "get_events", "get_news", "get_position", "search_instruments", "draft_transaction"}
+                     "get_events", "get_news", "get_position", "search_instruments", "draft_transaction",
+                     "get_derivatives_overview"}
+    deriv = next(d for d in defs if d["name"] == "get_derivatives_overview")
+    assert deriv["input_schema"] == {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
     st = server_tools(s)
     assert [t["name"] for t in st] == ["web_search", "web_fetch"]
     assert st[1]["citations"] == {"enabled": True}
@@ -198,3 +201,31 @@ def test_drafts_are_private(client, other_client, pool, fake):
     r = client.patch(f"{API}/ai/drafts/{draft_id}", json={"status": "signed", "transaction_id": txn["id"]})
     assert r.status_code == 404  # cannot attach someone else's transaction
     assert client.patch(f"{API}/ai/drafts/{draft_id}", json={"status": "discarded"}).json()["status"] == "discarded"
+
+
+def test_derivatives_tool_is_read_only_and_respects_the_licence_gate(two_users, engine):
+    from datetime import date
+    from decimal import Decimal as D
+
+    from forliosa.models import TaifexFuturesDaily, TaifexPutCallRatio
+
+    db, ctx, *_ = two_users
+    db.add_all([
+        TaifexFuturesDaily(trade_date=date(2026, 11, 11), session="regular", contract="TX", contract_month="202611",
+                           last=D("44091"), change=D("1445"), source="taifex-openapi"),
+        TaifexPutCallRatio(trade_date=date(2026, 11, 11), put_oi=57877, call_oi=88811, oi_ratio=D("0.6517"),
+                           source="taifex-openapi"),
+    ])
+    db.commit()
+    before = txn_count(db)
+    ctx.md.policy = "commercial"
+    try:
+        out, res = run(ctx, "get_derivatives_overview")
+        assert not out.is_error and res["futures"] == [] and res["put_call_ratio"]["oi_ratio"] == 0.6517
+        assert any("授權" in n for n in res["notes"]) and res["sources"]
+        ctx.md.policy = "personal"  # non-commercial opt-in: conditional datasets are served
+        _, res = run(ctx, "get_derivatives_overview")
+        assert res["futures"][0]["code"] == "TX" and res["futures"][0]["regular"]["close"] == 44091.0
+    finally:
+        ctx.md.policy = "personal"
+    assert txn_count(db) == before

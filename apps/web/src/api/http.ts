@@ -38,6 +38,7 @@ import {
   type PositionHistory,
   type RecurringDraft,
   type RecurringPlan,
+  type AnalystViews,
 } from "./types"
 
 type Query = Record<string, string | number | null | undefined>
@@ -150,5 +151,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     draftRecurring: (id, date) => request<RecurringDraft>("POST", `/recurring/${enc(id)}/draft`, { query: { date } }),
 
     getAttributions: () => request<Attributions>("GET", "/meta/attributions"),
+
+    getAnalystViews: (symbol) => request<AnalystViews>("GET", `/instruments/${enc(symbol)}/analyst-views`),
+    requestAnalystViews: (symbol) => request<AnalystViews>("POST", `/instruments/${enc(symbol)}/analyst-views`),
   }
 }

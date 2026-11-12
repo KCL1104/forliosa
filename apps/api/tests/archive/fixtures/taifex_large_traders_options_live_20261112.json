@@ -1,0 +1,14 @@
+[
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "買權", "SettlementMonth": "202611", "TypeOfTraders": "0", "Top5Buy": "19537", "Top5Sell": "24113", "Top10Buy": "23549", "Top10Sell": "28526", "OIOfMarket": "42339"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "買權", "SettlementMonth": "666666", "TypeOfTraders": "0", "Top5Buy": "14787", "Top5Sell": "18334", "Top10Buy": "16483", "Top10Sell": "19250", "OIOfMarket": "21788"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "買權", "SettlementMonth": "666666", "TypeOfTraders": "1", "Top5Buy": "0", "Top5Sell": "7947", "Top10Buy": "1040", "Top10Sell": "8298", "OIOfMarket": "21788"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "買權", "SettlementMonth": "202611", "TypeOfTraders": "1", "Top5Buy": "4279", "Top5Sell": "3890", "Top10Buy": "5867", "Top10Sell": "6584", "OIOfMarket": "42339"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "買權", "SettlementMonth": "999912", "TypeOfTraders": "0", "Top5Buy": "38323", "Top5Sell": "47118", "Top10Buy": "49911", "Top10Sell": "59422", "OIOfMarket": "88811"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "買權", "SettlementMonth": "999912", "TypeOfTraders": "1", "Top5Buy": "7545", "Top5Sell": "15148", "Top10Buy": "14968", "Top10Sell": "22277", "OIOfMarket": "88811"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "賣權", "SettlementMonth": "202611", "TypeOfTraders": "0", "Top5Buy": "11427", "Top5Sell": "12666", "Top10Buy": "14352", "Top10Sell": "16859", "OIOfMarket": "27294"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "賣權", "SettlementMonth": "666666", "TypeOfTraders": "0", "Top5Buy": "8764", "Top5Sell": "5475", "Top10Buy": "10132", "Top10Sell": "6525", "OIOfMarket": "14894"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "賣權", "SettlementMonth": "666666", "TypeOfTraders": "1", "Top5Buy": "0", "Top5Sell": "0", "Top10Buy": "571", "Top10Sell": "394", "OIOfMarket": "14894"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "賣權", "SettlementMonth": "202611", "TypeOfTraders": "1", "Top5Buy": "2695", "Top5Sell": "5372", "Top10Buy": "4172", "Top10Sell": "8226", "OIOfMarket": "27294"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "賣權", "SettlementMonth": "999912", "TypeOfTraders": "0", "Top5Buy": "25257", "Top5Sell": "23856", "Top10Buy": "30829", "Top10Sell": "30408", "OIOfMarket": "57877"},
+{"Date": "20261111", "Contract": "TXO", "ContractName": "臺指", "CallPut": "賣權", "SettlementMonth": "999912", "TypeOfTraders": "1", "Top5Buy": "5481", "Top5Sell": "9337", "Top10Buy": "9179", "Top10Sell": "14677", "OIOfMarket": "57877"}
+]

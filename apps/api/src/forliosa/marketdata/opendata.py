@@ -627,7 +627,7 @@ def with_changes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     out, prev = [], {}
     for r in sorted(rows, key=lambda x: (x["name"], x["date"])):
         p = prev.get(r["name"])
-        r = dict(r)
+        r = {"change": None, "change_pct": None, **r}
         if p is not None:
             if r.get("change") is None:
                 r["change"] = r["close"] - p

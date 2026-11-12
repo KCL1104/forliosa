@@ -91,3 +91,70 @@ def test_finmind_chip_and_news_parsers():
     assert news[0] == {"published_at": "2026-11-11 00:34:44", "title": "台積電(2330) 個股概覽 | 個股 - 股市 - CMoney",
                        "source": "CMoney", "url": "https://www.cmoney.tw/finance/2330/f00025"}
     assert parse_news([{"date": "2026-11-11", "title": "no link", "link": ""}]) == []
+
+
+def test_mi_index_and_mfi94u_total_return_agree():
+    idx = {r["name"]: r for r in od.parse_mi_index(load("twse_mi_index_live_20261112.json"))}
+    tr = idx[od.TAIEX_TR]
+    assert (tr["date"], tr["close"], tr["change"], tr["change_pct"]) == (
+        date(2026, 11, 11), D("102340.20"), D("3573.19"), D("0.0362"))
+    assert idx["觀光餐旅類指數"]["change"] == D("-0.81")  # 漲跌點數 is unsigned; the sign is in 漲跌
+    mfi = od.with_changes(od.parse_mfi94u(load("twse_mfi94u_live_20261112.json")))
+    assert len(mfi) == 8 and mfi[0]["date"] == date(2026, 11, 2) and mfi[0]["change"] is None
+    assert mfi[-1]["close"] == tr["close"] and mfi[-1]["change"] == D("102340.20") - D("98767.01")
+
+
+def test_tpex_indices_mixed_date_formats():
+    idx = od.parse_tpex_index(load("tpex_index_live_20261112.json"))  # Gregorian 20261102
+    reward = od.parse_tpex_reward_index(load("tpex_reward_index_live_20261112.json"))  # ROC 1151102
+    assert idx[-1]["date"] == date(2026, 11, 12) and idx[-1]["close"] == D("335.73")
+    tr = {r["date"]: r["close"] for r in reward if r["name"] == od.TPEX_TR}
+    plain = {r["date"]: r["close"] for r in reward if r["name"] == od.TPEX_INDEX}
+    assert tr[date(2026, 11, 12)] == D("624.57") and plain[date(2026, 11, 12)] == idx[-1]["close"]
+
+
+def test_dividend_resolutions_split_cash_by_source():
+    rows = od.parse_dividend_resolutions(load("twse_t187ap45_l_live_20261112.json"))
+    tcc = next(r for r in rows if r["code"] == "1101")
+    # 台泥 FY2025: no dividend from earnings; NT$0.8 per share from capital surplus, confirmed by the AGM
+    assert (tcc["period"], tcc["progress"], tcc["cash_earnings"], tcc["cash_capital_surplus"]) == (
+        "2025", "股東會確認", D(0), D("0.80000000"))
+    assert (tcc["board_date"], tcc["meeting_date"]) == (date(2026, 3, 11), date(2026, 5, 22))
+    tsmc = {r["period"]: r for r in rows if r["code"] == "2330"}
+    assert set(tsmc) == {"2025Q4", "2026Q1", "2026Q2", "2026Q3"}
+    assert tsmc["2026Q3"]["cash_earnings"] == D("9.00000000") and tsmc["2026Q3"]["board_date"] == date(2026, 11, 10)
+    assert tsmc["2026Q3"]["period_start"] == date(2026, 7, 1) and tsmc["2026Q3"]["meeting_date"] is None
+    halves = {r["period"] for r in rows if r["code"] == "2382"}
+    assert halves == {"2025H2", "2026H1"}  # 股利所屬年(季)度 上半年／下半年
+
+
+def test_company_profiles_keep_company_facts_only():
+    twse = {r["code"]: r for r in od.parse_company_profiles(load("twse_t187ap03_l_live_20261112.json"), "TWSE")}
+    tsmc = twse["2330"]
+    assert (tsmc["shares_outstanding"], tsmc["industry_code"], tsmc["industry"], tsmc["listed_date"]) == (
+        25932370067, "24", "半導體業", date(1994, 9, 5))
+    assert tsmc["values"]["short_name"] == "台積電" and "魏哲家" not in str(tsmc["values"])  # no people's names
+    tpex = {r["code"]: r for r in od.parse_company_profiles(load("tpex_t187ap03_o_live_20261112.json"), "TPEX")}
+    assert tpex["6488"]["shares_outstanding"] == 528113725 and tpex["6488"]["listed_date"] == date(2015, 9, 25)
+    assert "徐秀蘭" not in str(tpex["6488"]["values"])
+
+
+def test_tpex_exright_official_reference():
+    r = od.parse_tpex_exright_daily(load("tpex_exright_daily_live_20261112.json"))[0]
+    assert (r["code"], r["date"], r["prev_close"], r["reference_price"], r["limit_up"], r["limit_down"]) == (
+        "3680", date(2026, 11, 12), D("435.50"), D("425.50"), D("468.00"), D("383.50"))
+    assert r["ex_quote"] == D("425.59") and r["cash_dividend"] == D("9.91474560")
+
+
+def test_blank_industry_rows_and_securities_firm_spellings():
+    assert od.parse_statements(load("tpex_t187ap07_o_ins_live_20261112.json"), "balance") == []
+    assert od.parse_statements(load("tpex_t187ap07_o_mim_live_20261112.json"), "balance") == []
+    bd = od.parse_statements(load("tpex_t187ap06_o_bd_live_20261112.json"), "income_ytd")[0]
+    # 收益 / 營業利益 / 淨利（損）歸屬於母公司業主 (the securities-firm variant's spellings)
+    assert (bd["values"]["revenue"], bd["values"]["operating_income"], bd["values"]["net_income_parent"]) == (
+        "8046885.00", "3913370.00", "4120123.00")
+
+
+def test_stale_endpoint_report_dates():
+    assert od.report_date(load("twse_twtazu_od_live_20261112.json"), "出表日期") == date(2026, 6, 5)
+    assert od.report_date(load("twse_t187ap09_l_live_20261112.json"), "出表日期") == date(2026, 8, 19)

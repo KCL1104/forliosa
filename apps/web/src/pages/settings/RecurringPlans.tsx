@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useRouterState } from "@tanstack/react-router"
 import { PencilIcon, PlusIcon, Trash2Icon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 
 /**
- * 定期定額：設定頁的一個區塊（頭像選單、帳本的定期定額扣款都連到這裡 `#recurring`）。
+ * 定期定額：設定頁的一個區塊（頭像選單、帳本的定期定額扣款都連到這裡 `#recurring`；持倉的定期定額標記連到 `#plan-<id>`）。
  * 列出計畫（每月幾日、金額、帳戶、下一次扣款）、新增／修改（對話框）、刪除（確認）、啟用開關。
  * 扣款日當天 AI 面板會提出交易草稿，使用者簽名後才入帳。
  */
@@ -45,6 +45,13 @@ export function RecurringPlans() {
   const today = appToday()
   const twd = (accounts.data ?? []).filter((a) => a.currency === "TWD")
   const nameOf = (id: string) => accounts.data?.find((a) => a.id === id)?.name ?? ""
+  // 從持倉的定期定額標記進來（#plan-…）：計畫載入後捲到那一列並標示
+  const hash = useRouterState({ select: (s) => s.location.hash })
+  const ready = !!plans.data && !!accounts.data
+  useEffect(() => {
+    if (!ready || !hash.startsWith("plan-")) return
+    document.getElementById(hash)?.scrollIntoView({ block: "center" })
+  }, [ready, hash])
 
   const setActive = (p: RecurringPlan, active: boolean) =>
     update.mutate(
@@ -62,7 +69,7 @@ export function RecurringPlans() {
           <h2 id="set-recurring" className="text-lg font-bold">
             定期定額
           </h2>
-          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日當天 AI 會照最近收盤價寫好草稿，你簽名才入帳。</p>
+          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日 AI 會照最近收盤價寫好草稿（漏記的扣款 7 天內也會提醒補記），你簽名才入帳。</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setEditing("new")} disabled={!accounts.data || twd.length === 0}>
           <PlusIcon />
@@ -90,7 +97,12 @@ export function RecurringPlans() {
           {plans.data.map((p) => {
             const status = planStatus(p, today)
             return (
-              <li key={p.id} className="flex flex-col gap-2 px-4 py-4 sm:flex-row sm:items-start sm:gap-4 sm:px-5">
+              <li
+                key={p.id}
+                id={`plan-${p.id}`}
+                aria-current={hash === `plan-${p.id}` ? "true" : undefined}
+                className="flex scroll-mt-24 flex-col gap-2 px-4 py-4 aria-[current]:bg-hov sm:flex-row sm:items-start sm:gap-4 sm:px-5"
+              >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
                     <Link to="/stock/$symbol" params={{ symbol: p.symbol }} className="font-medium hover:underline">

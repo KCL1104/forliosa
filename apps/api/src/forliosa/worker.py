@@ -4,10 +4,14 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 
 * ``after_close_refresh`` — 14:35 and 23:45 Taipei on trading days: refreshes the instrument master
   and writes the latest real closes of tracked symbols into ``prices_daily``.
-* ``daily_archive`` — 08:10 (today's reference prices, notices), 14:40 (closes, PER/PBR, events) and
-  21:40 (margin, institutional flows, financial statements) on trading days: ``forliosa.archive``
-  (official open data only; idempotent upserts). The official TWSE calendar is reloaded after each run.
-* ``weekly_tdcc_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable).
+* ``daily_archive`` — 08:10 (today's reference prices, notices), 14:40 (closes, PER/PBR, events, indices) and
+  21:40 (margin, institutional flows, financial statements, company profiles and dividend resolutions, and the
+  TAIFEX datasets: futures / options reports, 三大法人, large traders, put/call ratio, FX, margins when changed)
+  on trading days: ``forliosa.archive`` (official open data only; idempotent upserts). The official TWSE
+  calendar is reloaded after each run. TAIFEX books the night session to the next trading day, so one evening
+  run covers it (no early-morning job).
+* ``weekly_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable), TAIFEX final
+  settlement prices and SSF / SSO lists, and the stale-endpoint check (twtazu_od, t187ap09_L).
 * ``ai_retention`` — every day 04:20: deletes AI threads, messages and drafts whose last activity is older than
   ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
 
@@ -42,6 +46,10 @@ from forliosa.models import Instrument, PriceDaily
 from forliosa.timeutil import TAIPEI, is_tw_trading_day, now_taipei
 
 log = logging.getLogger("forliosa.worker")
+
+# Archive groups per run (forliosa.archive.JOB_GROUPS).
+EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex"]
+WEEKLY_GROUPS = ["tdcc", "weekly"]
 
 
 @dataclass
@@ -132,8 +140,8 @@ class Worker:
             Job("daily_archive_close", daily_at(time(14, 40), only_if=lambda n: is_tw_trading_day(n.date())),
                 lambda: self.archive(["twse", "tpex"])),
             Job("daily_archive_evening", daily_at(time(21, 40), only_if=lambda n: is_tw_trading_day(n.date())),
-                lambda: self.archive(["twse", "tpex", "financials"])),
-            Job("weekly_tdcc_archive", weekly_at(5, time(10, 0)), self.weekly_tdcc_archive),
+                lambda: self.archive(EVENING_GROUPS)),
+            Job("weekly_archive", weekly_at(5, time(10, 0)), self.weekly_archive),
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
         ]
 
@@ -155,8 +163,8 @@ class Worker:
             n_px = await asyncio.to_thread(upsert_closes, db, self.md, symbols) if symbols else 0
         log.info("after close: %d instruments, %d closes stored", n_inst, n_px)
 
-    async def weekly_tdcc_archive(self) -> None:
-        await self.archive(["tdcc"])
+    async def weekly_archive(self) -> None:
+        await self.archive(WEEKLY_GROUPS)
 
     async def ai_retention(self) -> None:
         from forliosa.ai import retention

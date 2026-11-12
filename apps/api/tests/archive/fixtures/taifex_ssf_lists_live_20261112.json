@@ -1,0 +1,6 @@
+[
+{"Contract": "CAF", "UnderlyingStock": "南亞塑膠工業股份有限公司", "StockCode": "1303", "StockName": "南亞", "Type": "上市普通股標的證券"},
+{"Contract": "CDF", "UnderlyingStock": "台灣積體電路製造股份有限公司", "StockCode": "2330", "StockName": "台積電", "Type": "上市普通股標的證券"},
+{"Contract": "NYF", "UnderlyingStock": "元大台灣卓越50證券投資信託基金", "StockCode": "0050", "StockName": "元大台灣50ETF", "Type": "上市ETF標的證券"},
+{"Contract": "QFF", "UnderlyingStock": "台灣積體電路製造股份有限公司", "StockCode": "2330", "StockName": "台積電", "Type": "上市普通股標的證券"}
+]

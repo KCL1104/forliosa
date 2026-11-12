@@ -1,5 +1,5 @@
 /**
- * 帳本相關的顯示規則（純函式，元件與測試共用）：出清回合、沒有報價的持股、本週事項的一句話、定期定額。
+ * 帳本相關的顯示規則（純函式，元件與測試共用）：出清回合（依年份分組）、沒有報價的持股、本週事項的一句話、定期定額。
  */
 import type { ClosedRound, Holding, RecurringPlan, UpcomingItem } from "@/api/types"
 import { formatDate, formatMoney } from "@/lib/format"
@@ -19,6 +19,30 @@ export function closedTotals(rounds: ClosedRound[]) {
     symbols: new Set(rounds.map((r) => r.symbol)).size,
     realized: rounds.reduce((s, r) => s + r.realized_pnl, 0),
   }
+}
+
+export interface ClosedYear {
+  /** 出清的年份（`closed_at` 的西元年） */
+  year: string
+  rounds: ClosedRound[]
+  /** 這一年出清的回合已實現損益合計 */
+  realized: number
+  symbols: number
+}
+
+/** 已出清依出清年份分組：新的年份在前，年內依出清日新到舊 */
+export function closedByYear(rounds: ClosedRound[]): ClosedYear[] {
+  const by = new Map<string, ClosedRound[]>()
+  for (const r of rounds) {
+    const y = r.closed_at.slice(0, 4)
+    by.set(y, [...(by.get(y) ?? []), r])
+  }
+  return [...by.entries()]
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([year, list]) => {
+      const sorted = [...list].sort((a, b) => b.closed_at.localeCompare(a.closed_at) || a.symbol.localeCompare(b.symbol))
+      return { year, rounds: sorted, ...closedTotals(sorted) }
+    })
 }
 
 /** 沒有報價的持股（商用模式的美股）：以成本計值，現價與漲跌顯示「—」 */
@@ -53,4 +77,19 @@ export function planStatus(p: Pick<RecurringPlan, "active" | "end_date" | "next_
 export function daysLabel(days: number[]): string {
   const sorted = [...days].sort((a, b) => a - b)
   return sorted.length === 0 ? "還沒選扣款日" : `每月 ${sorted.join("、")} 日`
+}
+
+/** 持倉上的定期定額標記：只算啟用中的計畫，依代號分組（同一檔可以有多個帳戶的計畫） */
+export function activePlansBySymbol(plans: RecurringPlan[], today: string): Map<string, RecurringPlan[]> {
+  const out = new Map<string, RecurringPlan[]>()
+  for (const p of plans) {
+    if (planStatus(p, today) !== "active") continue
+    out.set(p.symbol, [...(out.get(p.symbol) ?? []), p])
+  }
+  return out
+}
+
+/** 標記的說明：「定期定額：每月 6、19 日 NT$5,000」；隱私模式遮金額 */
+export function recurringLabel(plans: Pick<RecurringPlan, "day_of_month" | "amount">[], privacy: boolean): string {
+  return `定期定額：${plans.map((p) => `${daysLabel(p.day_of_month)} ${privacy ? "••••" : formatMoney(p.amount)}`).join("；")}`
 }

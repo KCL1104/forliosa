@@ -41,6 +41,44 @@ ROUTES = {
     "/t187ap41_O": "tpex_t187ap41_o_live_20261112.json",
     "/mopsfin_t187ap06_O_ci": "tpex_t187ap06_o_ci_live_20261112.json",
     "/mopsfin_187ap17_O": "tpex_t187ap17_o_live_20261112.json",
+    "/exchangeReport/MI_INDEX": "twse_mi_index_live_20261112.json",
+    "/indicesReport/MFI94U": "twse_mfi94u_live_20261112.json",
+    "/opendata/t187ap45_L": "twse_t187ap45_l_live_20261112.json",
+    "/opendata/t187ap03_L": "twse_t187ap03_l_live_20261112.json",
+    "/opendata/twtazu_od": "twse_twtazu_od_live_20261112.json",
+    "/opendata/t187ap09_L": "twse_t187ap09_l_live_20261112.json",
+    "/tpex_exright_daily": "tpex_exright_daily_live_20261112.json",
+    "/tpex_index": "tpex_index_live_20261112.json",
+    "/tpex_reward_index": "tpex_reward_index_live_20261112.json",
+    "/mopsfin_t187ap03_O": "tpex_t187ap03_o_live_20261112.json",
+    "/mopsfin_t187ap07_O_ins": "tpex_t187ap07_o_ins_live_20261112.json",
+    "/mopsfin_t187ap07_O_mim": "tpex_t187ap07_o_mim_live_20261112.json",
+    "/mopsfin_t187ap06_O_bd": "tpex_t187ap06_o_bd_live_20261112.json",
+}
+
+# TAIFEX OpenAPI (fetched as bytes: JSON or CSV). DailyForeignExchangeRates is the CSV variant Cloudflare served.
+TAIFEX_ROUTES = {
+    "/DailyMarketReportFut": "taifex_daily_market_report_fut_live_20261112.json",
+    "/DailyMarketReportOpt": "taifex_daily_market_report_opt_live_20261112.json",
+    "/MarketDataOfMajorInstitutionalTradersGeneralBytheDate": "taifex_institutional_general_live_20261112.json",
+    "/MarketDataOfMajorInstitutionalTradersDividedByFuturesAndOptionsBytheDate":
+        "taifex_institutional_fut_opt_live_20261112.json",
+    "/MarketDataOfMajorInstitutionalTradersDetailsOfFuturesContractsBytheDate":
+        "taifex_institutional_futures_live_20261112.json",
+    "/MarketDataOfMajorInstitutionalTradersDetailsOfOptionsContractsBytheDate":
+        "taifex_institutional_options_live_20261112.json",
+    "/MarketDataOfMajorInstitutionalTradersDetailsOfCallsAndPutsBytheDate":
+        "taifex_institutional_calls_puts_live_20261112.json",
+    "/OpenInterestOfLargeTradersFutures": "taifex_large_traders_futures_live_20261112.json",
+    "/OpenInterestOfLargeTradersOptions": "taifex_large_traders_options_live_20261112.json",
+    "/PutCallRatio": "taifex_put_call_ratio_live_20261112.json",
+    "/DailyForeignExchangeRates": "taifex_fx_rates_live_20261112.csv",
+    "/FinalSettlementPrice": "taifex_final_settlement_live_20261112.json",
+    "/IndexFuturesAndOptionsMargining": "taifex_margins_index_live_20261112.json",
+    "/SingleStockFuturesMargining": "taifex_margins_stock_live_20261112.json",
+    "/SingleStockFuturesETFMargining": "taifex_margins_etf_live_20261112.json",
+    "/SSFLists": "taifex_ssf_lists_live_20261112.json",
+    "/SSOLists": "taifex_sso_lists_live_20261112.json",
 }
 
 # Archive "now": 2026-11-12 10:00 Taipei (MI_MARGN then still holds 2026-11-11's balances).
@@ -66,4 +104,8 @@ class FakeFetcher:
         self.calls.append(url)
         if "tdcc" in url:
             return (FIX / "tdcc_1-5_live_20261106.csv").read_bytes()
+        if "taifex" in url:
+            for suffix, name in TAIFEX_ROUTES.items():
+                if url.endswith(suffix):
+                    return (FIX / name).read_bytes()
         raise ProviderUnavailable(f"no fixture for {url}")

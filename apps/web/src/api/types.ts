@@ -649,6 +649,41 @@ export interface Attributions {
   not_used: string[]
 }
 
+// ── 法人觀點（2026-11-12，api-contract「法人觀點與美股基本面」）──────────
+/**
+ * `none`：今天還沒有人查過；`pending`：AI 正在搜尋（POST 之後，或別人剛觸發）；
+ * `ready`：有結果（`items` 可能是空的＝近期查無報導）；`unavailable`：這次查不到（AI 暫停、搜尋失敗）。
+ */
+export type AnalystViewsStatus = "none" | "pending" | "ready" | "unavailable"
+
+/** 一筆第三方觀點：照原文列出，不換算、不評論；沒有日期或來源的項目後端不會列 */
+export interface AnalystView {
+  /** 機構名稱（照報導原文） */
+  institution: string
+  /** 調升／調降／維持／首評（照報導原文） */
+  action: string
+  /** 評等原文，例如「加碼」「優於大盤」「Overweight」 */
+  rating_text: string
+  target_price: number | null
+  currency: Currency
+  /** 報告或報導日期 */
+  date: string
+  source_title: string
+  url: string
+}
+
+/** `GET/POST /instruments/{symbol}/analyst-views`：同一檔同一交易日全體共用，24 小時後刪除；最多 5 筆，新到舊 */
+export interface AnalystViews {
+  status: AnalystViewsStatus
+  symbol?: string
+  as_of?: string | null
+  expires_at?: string | null
+  items?: AnalystView[]
+  /** 固定顯示的免責文字（後端提供；沒有時前端用常數） */
+  disclaimer?: string
+  notes?: string[]
+}
+
 // ── 錯誤 ──────────────────────────────────────────────────
 export interface ApiErrorBody {
   error: { code: string; message: string }
@@ -725,4 +760,7 @@ export interface ForliosaApi {
   draftRecurring(id: string, date?: string): Promise<RecurringDraft>
   // 資料來源與授權（不需登入）
   getAttributions(): Promise<Attributions>
+  // 法人觀點：GET 讀當日共用快取；POST 觸發 AI 網路搜尋（計入觸發者的 AI 額度）
+  getAnalystViews(symbol: string): Promise<AnalystViews>
+  requestAnalystViews(symbol: string): Promise<AnalystViews>
 }

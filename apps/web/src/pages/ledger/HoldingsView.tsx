@@ -16,6 +16,7 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { unpricedHoldings } from "@/lib/ledger-display"
 import { ClosedRounds } from "./ClosedRounds"
+import { RecurringMark, useActivePlans } from "./RecurringMark"
 import { COLUMN_LABEL, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
@@ -161,6 +162,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
     )
   }
   const go = (symbol: string) => void navigate({ to: "/stock/$symbol", params: { symbol } })
+  const plans = useActivePlans()
   return (
     <table className="w-full border-collapse max-md:hidden" aria-label="持倉">
       <thead>
@@ -175,15 +177,17 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
         {rows.map((h) => (
           <tr key={h.symbol} className="ruled-row cursor-pointer" onClick={() => go(h.symbol)}>
             <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
-              <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="group block rounded-sm" onClick={(e) => e.stopPropagation()}>
-                <span className="flex items-center gap-1.5 text-lg leading-snug font-medium group-hover:underline">
+              {/* 名稱是連到個股頁的連結；定期定額標記是另一個連結（到設定），所以不包在一起 */}
+              <span className="flex items-center gap-1.5 text-lg leading-snug font-medium">
+                <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="rounded-sm hover:underline" onClick={(e) => e.stopPropagation()}>
                   {h.name}
-                  {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 fill-ink-2 text-ink-2" />}
-                </span>
-                <span className="num block text-sm text-ink-2">
-                  {h.code} ・ <QtyText h={h} />
-                </span>
-              </Link>
+                </Link>
+                {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 fill-ink-2 text-ink-2" />}
+                {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="-my-1" />}
+              </span>
+              <span className="num block text-sm text-ink-2">
+                {h.code} ・ <QtyText h={h} />
+              </span>
             </th>
             {columns.map((c) => (
               <td key={c} className="num text-right text-lg whitespace-nowrap">
@@ -308,6 +312,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
 /** 手機：兩行列 */
 function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
   const watch = useWatchlist()
+  const plans = useActivePlans()
   return (
     <div className="md:hidden">
       <div className="flex h-11 items-end justify-between border-b border-rule pb-2 text-sm text-ink-2">
@@ -316,22 +321,28 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
       </div>
       <ul aria-label="持倉">
         {rows.map((h) => (
-          <li key={h.symbol}>
-            <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="ruled-row grid h-[72px] grid-cols-[1fr_auto] content-center gap-y-0.5">
-              <span className="flex items-center gap-1.5 truncate text-lg leading-6 font-medium">
+          // 整列可點（名稱連結的 ::after 蓋滿整列）；定期定額標記浮在上面，是另一個連結
+          <li key={h.symbol} className="ruled-row relative grid h-[72px] grid-cols-[1fr_auto] content-center gap-y-0.5">
+            <span className="flex min-w-0 items-center gap-1.5 text-lg leading-6 font-medium">
+              <Link
+                to="/stock/$symbol"
+                params={{ symbol: h.symbol }}
+                className="truncate after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ink"
+              >
                 {h.name}
-                {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
-              </span>
-              <span className="num text-right text-lg leading-6">
-                {h.price === null ? <Dash /> : <>{h.currency === "USD" && "US$"}{formatQuote(h.price, h.market, h.type)}</>}
-              </span>
-              <span className="num text-sm leading-5 text-ink-2">
-                {h.code} ・ <QtyText h={h} />
-              </span>
-              <span className="text-right text-base leading-5">
-                {h.price === null ? <Dash /> : <Pct value={h.day_change_pct} />}
-              </span>
-            </Link>
+              </Link>
+              {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
+              {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="z-10" />}
+            </span>
+            <span className="num text-right text-lg leading-6">
+              {h.price === null ? <Dash /> : <>{h.currency === "USD" && "US$"}{formatQuote(h.price, h.market, h.type)}</>}
+            </span>
+            <span className="num text-sm leading-5 text-ink-2">
+              {h.code} ・ <QtyText h={h} />
+            </span>
+            <span className="text-right text-base leading-5">
+              {h.price === null ? <Dash /> : <Pct value={h.day_change_pct} />}
+            </span>
           </li>
         ))}
       </ul>
