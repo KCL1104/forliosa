@@ -17,6 +17,19 @@
 | 資料層 | ✅ 新端點的型別、HTTP adapter、mock：overview、intraday、chips、financials、events、news、position、why、watchlist（get/post/delete）、portfolio/upcoming、Quote 的 reference_price／limit_up／limit_down、Transaction.source `ai_draft`；並依後端 CONTRACT_NOTES 的新增欄位（watchlist `quote: null`、`sparkline_interval`、集保 `label`、`notes`、`sources`）調整 | `src/api/` |
 | 舊網址 | ✅ `/holdings`、`/transactions`、`/performance`、`/watchlist`、`/ai`、`/reports`、`/import`、`/more` 導到新的位置 | `src/router.tsx` |
 
+## 第二批（2026-11-12）：出清紀錄、定期定額、公告、只用可商用資料、資料授權、AI 免責與無來源
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ 型別＋HTTP＋mock：`/portfolio/closed`、`/instruments/{symbol}/position/history`（注意路徑，`/history` 是日線）、`/recurring`（GET/POST/PATCH/DELETE、`/{id}/draft`）、`/meta/attributions`；`History`／`Performance.notes`、事件 `estimated`／`period`／`investor_conference`、公告 `category`、本週事項 `plan_id`／`scheduled_date`；交易清單依後端上限每頁 200 筆分頁（先前 `limit=500` 會 422） | `src/api/` |
+| mock 商用模式 | ✅ 預設模擬 `DATA_POLICY=commercial`：沒有示範標記、存檔自 2026-06-01 起（更早的日線、估值、籌碼、績效回空＋「資料累積中」）、盤中沒有點、上市股票沒有個股法人、美股沒有報價（以成本計值）、含美股時績效算不出來；`?policy=personal` 回到舊的示範資料 | `src/api/mock/commercial.ts`、`adapter.ts`、`research.ts`、`ledger.ts` |
+| 已出清 | ✅ 帳本「持倉」底下的收合區塊（桌面格線表、手機三行列）；個股頁未持有時「過去的持有」；圖上的 B/S/D 與事件「只看我的」改用交易歷史（出清後也有） | `src/pages/ledger/ClosedRounds.tsx`、`src/pages/stock/StockPage.tsx` |
+| 定期定額 | ✅ 設定頁「定期定額」（頭像選單、股利分頁的扣款列都連到這裡）：列表、新增／修改（帳戶、股票搜尋、金額、1–28 日複選、開始／結束、啟用、備註）、暫停開關、刪除確認；本週事項與股利分頁列出扣款（遇休市順延會說明）；扣款日 AI 面板提出「記下今天的 XXXX 定期定額」→ `POST /recurring/{id}/draft` → 草稿卡 → 簽名才入帳 | `src/pages/settings/RecurringPlans.tsx`、`src/components/day-picker.tsx`、`src/ai/recurring-offer.ts` |
+| 公告與事件 | ✅ 總覽「新聞」改為「公告」（重大訊息・證交所公告，連到原文）；事件分頁把公告併入時間軸（同一則重大訊息去重）、「預估」標記、財報／營收／法說會分開 | `src/lib/events.ts`、`src/pages/stock/tabs/` |
+| 商用模式的空狀態 | ✅ 1 日走勢「盤中走勢需要授權行情，目前提供收盤後資料」＋後端 notes＋「看 5 日走勢」；日線與績效的 notes 放在圖旁；績效算不出來時說明原因並可「只看台幣帳戶」；美股持股現價「—」與說明；美股個股頁不放大大的「—」 | `src/pages/stock/PriceChart.tsx`、`src/pages/ledger/PerformanceView.tsx`、`HoldingsView.tsx` |
+| 資料來源與授權 | ✅ `/data-sources`：授權條款固定文字、每個資料集的完整顯名聲明（不改寫）、沒有使用的來源；頭像選單與帳本、個股頁頁尾連結 | `src/pages/data-sources/DataSourcesPage.tsx` |
+| AI | ✅ 每則回答下方固定免責（`done.disclaimer` → `/ai/usage.disclaimer` → 常數「AI 回答僅供參考，非投資建議。」），模型最後一行若寫了同樣的話就不重複；`grounding` 事件（與 `ThreadMessage.grounding`）標「無來源」（淡墨細框，按下展開「這段沒有附來源，請自行查證。」）；503 `ai_unavailable` 顯示「AI 暫時無法使用」（記帳指令仍在本機寫成草稿）；紀錄「對話紀錄保留 30 天」（本機紀錄也只留 30 天） | `src/ai/answer-text.ts`、`Conversation.tsx`、`remote.ts`、`runner.ts`、`HistoryList.tsx` |
+
 ## 驗證
 
 - `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（7 檔 86 項：指令解析、建議規則與回答、升降單位與漲跌停顯示、格式化、mock 新端點形狀、元件）、`pnpm build` 全部通過。
@@ -54,9 +67,9 @@ Emil Kowalski skills：`mobile-native`（theme-color 改成紙色、hover 一律
 ## 還沒做／待確認
 
 1. AI 任務、對話紀錄目前存在這台瀏覽器（示範的任務是 mock）；M4 定義端點後改由後端同步。
-2. 「本週 N 件事」的定期定額：後端說明 `recurring` 目前不會出現（沒有資料模型），mock 有示範。
+2. ~~「本週 N 件事」的定期定額~~：後端已有 `/recurring`，本週事項列出每一次扣款。
 3. ETF 折溢價、成分股，美股財報與籌碼：設計過的空狀態，等資料來源（研究稿 Q10、Q11）。
 4. 比較線「加權報酬指數」需要後端的 `/instruments/^TAIEXTR/history`；mock 以 0050 代替。真實後端沒有時圖會停留在不比較。
 5. 漲跌停與參考價以後端為準；前端只在報價沒有帶時才自行計算（`lib/tick.ts`）。
-6. 產品負責人決定預設 `DATA_POLICY=commercial`：盤中走勢、新聞、上市股票的法人可能是空的並帶 `notes`；前端照實顯示「資料累積中」與後端的說明（1 日線、籌碼、財報），不用示範資料充數。mock 仍是示範資料（開發用）。
+6. 產品負責人決定預設 `DATA_POLICY=commercial`：盤中走勢、媒體新聞、上市股票的法人、美股報價是空的並帶 `notes`；前端照實顯示。mock 預設也模擬商用模式（`?policy=personal` 看舊的示範資料）。
 7. 真實手機實測（mobile-native 的 tap delay、鍵盤、safe area）還沒做，只用 Playwright 的 iPhone 15 模擬。

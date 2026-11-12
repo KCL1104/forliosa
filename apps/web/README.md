@@ -28,7 +28,9 @@ pnpm dev:api            # 或在 repo 根目錄 pnpm dev:web:api
 
 ### 只用 mock 示範資料
 
-`pnpm dev` 且沒有設定 `VITE_API_BASE_URL` 時，前端使用瀏覽器內的 **mock adapter**（`src/api/mock/`）：資料依 `docs/api-contract.md` 的格式產生、彼此一致（持股、損益、股利、績效都由同一份示範交易紀錄算出），而且全部帶 `is_demo: true`，畫面上會出現「示範資料」標記。
+`pnpm dev` 且沒有設定 `VITE_API_BASE_URL` 時，前端使用瀏覽器內的 **mock adapter**（`src/api/mock/`）：資料依 `docs/api-contract.md` 的格式產生、彼此一致（持股、損益、股利、績效、出清紀錄都由同一份示範交易紀錄算出）。
+
+mock 預設模擬後端的 `DATA_POLICY=commercial`（只用可商用資料）：沒有「示範資料」標記；自建存檔假設從 2026-06-01 開始，更早的日線、估值、籌碼、績效回空資料＋「資料累積中」；盤中走勢沒有點、上市股票沒有個股法人、美股沒有報價（以成本計值）、含美股時績效算不出來。網址加 `?policy=personal` 改回舊的示範資料（全部帶 `is_demo: true`，記在 sessionStorage；`?policy=commercial` 切回）。示範的「今天」是 2026-11-12，正好是 00878 定期定額的扣款日。
 
 示範情境可以用網址切換（記在 sessionStorage）：
 
@@ -37,6 +39,7 @@ pnpm dev:api            # 或在 repo 根目錄 pnpm dev:web:api
 | `/?mock=default` | 一般示範資料（9 檔持股、兩個帳戶） |
 | `/?mock=empty` | 首次使用：沒有帳戶、沒有交易 |
 | `/?mock=stress` | 壓力測試：超長股名、上千億金額、大幅虧損 |
+| `/?policy=personal` | 舊的示範資料（`is_demo: true`、有盤中走勢與媒體新聞） |
 
 ## 指令
 
@@ -48,8 +51,8 @@ pnpm dev:api            # 或在 repo 根目錄 pnpm dev:web:api
 | `pnpm typecheck` | 只做型別檢查 |
 | `pnpm lint` | ESLint |
 | `pnpm test` | Vitest 單元測試（格式化、張／股、萬／億、漲跌慣例、隱私遮罩、河流圖、稅費、元件） |
-| `pnpm smoke` | Playwright 冒煙測試（需先 `pnpm dev`）：走過所有路由、記一筆交易、隱私模式、⌘K |
-| `pnpm screenshots` | 產生 `docs/screenshots/v2/` 的截圖（mock 資料；帳本、AI 草稿、交易、個股總覽／估值／籌碼、紀錄、手機問 AI；桌面 1440×900 @2x 與 iPhone 15，淺色／深色） |
+| `pnpm smoke` | Playwright 冒煙測試（需先 `pnpm dev`）：走過所有路由、記一筆交易、隱私模式、⌘K、出清紀錄、定期定額（設定與扣款日草稿）、公告、資料來源與授權 |
+| `pnpm screenshots` | 產生 `docs/screenshots/v2/` 的截圖（mock 商用模式；帳本、AI 草稿、交易、已出清、定期定額草稿、個股總覽／估值／籌碼、過去的持有、設定的定期定額、資料來源與授權、紀錄、手機問 AI；桌面 1440×900 @2x 與 iPhone 15，淺色／深色，共 50 張） |
 | `pnpm screenshots:real` | 產生 `docs/screenshots/real/` 的截圖（真實後端；需先啟動後端與 `pnpm dev:api`） |
 | `pnpm design:detect` | Impeccable 偵測器掃描 `src/` |
 
