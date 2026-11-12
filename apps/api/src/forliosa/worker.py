@@ -8,7 +8,9 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   21:40 (margin, institutional flows, financial statements, company profiles and dividend resolutions, and the
   TAIFEX datasets: futures / options reports, 三大法人, large traders, put/call ratio, FX, margins when changed;
   and group ``cbc``: the central bank's USD/TWD closing rate, published the same afternoon — the first run
-  backfills its whole history since 2008) on trading days: ``forliosa.archive`` (official open data only;
+  backfills its whole history since 2008; and group ``nav``: the ETF NAVs of 證券期貨局's 證券投資信託基金每日淨值,
+  published around 20:20 — the 08:10 run fetches the file again for NAVs posted after 21:40, since it only ever
+  holds the latest NAV) on trading days: ``forliosa.archive`` (official open data only;
   idempotent upserts). The official TWSE calendar is reloaded after each run. TAIFEX books the night session to
   the next trading day, so one evening run covers it (no early-morning job).
 * ``weekly_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable), TAIFEX final
@@ -80,7 +82,10 @@ from forliosa.timeutil import TAIPEI, is_tw_trading_day, now_taipei
 log = logging.getLogger("forliosa.worker")
 
 # Archive groups per run (forliosa.archive.JOB_GROUPS).
-EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex", "cbc"]
+EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex", "cbc", "nav"]
+# 08:10: today's reference prices and notices, plus a second look at the NAV file (it only holds the latest NAV of each
+# fund, so one posted after the 21:40 run would otherwise be lost when the next evening's file replaces it).
+MORNING_GROUPS = ["twse", "tpex", "nav"]
 WEEKLY_GROUPS = ["tdcc", "weekly"]
 MONTHLY_GROUPS = ["monthly"]
 MONTHLY_DAYS = (10, 25)
@@ -187,7 +192,7 @@ class Worker:
                                                 only_if=lambda n: is_tw_trading_day(n.date())),
                 self.after_close_refresh),
             Job("daily_archive_morning", daily_at(time(8, 10), only_if=lambda n: is_tw_trading_day(n.date())),
-                lambda: self.archive(["twse", "tpex"])),
+                lambda: self.archive(MORNING_GROUPS)),
             Job("daily_archive_close", daily_at(time(14, 40), only_if=lambda n: is_tw_trading_day(n.date())),
                 lambda: self.archive(["twse", "tpex"])),
             Job("daily_archive_evening", daily_at(time(21, 40), only_if=lambda n: is_tw_trading_day(n.date())),

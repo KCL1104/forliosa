@@ -126,7 +126,7 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 - ✅ 7 公司簡介：中文維基百科節錄（Wikidata 找條目、CC BY-SA 4.0、不改寫、每月更新），沒有條目時 AI 依官方資料寫 2–3 句（worker `company_refresh` 每小時）。
   正式環境建議設定 `WIKIMEDIA_CONTACT`（Wikimedia 的 User-Agent 聯絡方式；不要填 SEC 的信箱）。
 - ✅ 8 上市股票外資持股：證交所 OpenAPI `MI_QFIIS_sort_20` 每天存檔，名列前 20 名的股票在籌碼分頁與總覽顯示持股比與名次，其他維持空狀態。
-- ⏳ 9 ETF 淨值／折溢價：另案（等主機核准與驗證後做）。
+- ✅ 9 ETF 淨值／折溢價：data.gov.tw 11109 驗證含上市櫃 ETF，worker 存檔淨值、總覽與估值分頁顯示同一天的盤後折溢價（`apps/api/CONTRACT_NOTES.md`「2026-11-12 ETF 淨值與折溢價」）。
 - ⏸ 10 美股報價：維持空狀態。
 - 新的存檔群組 `monthly`（每月 10、25 日 10:20）；第一次部署後可手動跑 `uv run python -m forliosa.archive run --only companies,monthly`。
 

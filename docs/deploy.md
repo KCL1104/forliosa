@@ -110,7 +110,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料表由 api 服務 migrate，worker 不跑 migration；第一次部署請先讓 api 啟動成功。
 **worker 只能有一個副本**：Telegram 的 `getUpdates` 同時只能有一個程式在收，兩個副本會互相搶（也會重複送推播）。
 
-> 現況：worker 負責開放資料存檔、收盤價、股利自動入帳、AI 保存期限、個股頁「新聞報導」（GDELT＋SearXNG，每 45 分鐘），以及**群組推播與群組 AI 週報**（M5）。
+> 現況：worker 負責開放資料存檔（含證期局〈證券投資信託基金每日淨值〉的 ETF 淨值，交易日 21:40 與 08:10；只下載 `www.sitca.org.tw` 上那一個 CSV）、收盤價、股利自動入帳、AI 保存期限、個股頁「新聞報導」（GDELT＋SearXNG，每 45 分鐘），以及**群組推播與群組 AI 週報**（M5）。
 > 要用群組的 Discord／Telegram 推播或週報，就一定要部署 worker。
 
 ### 2.4 Discord 登入（Discord Developer Portal）

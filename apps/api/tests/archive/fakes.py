@@ -68,6 +68,8 @@ ROUTES = {
 }
 TDCC_FILES = {"1-5": "tdcc_1-5_live_20261106.csv", "2-22": "tdcc_2-22_live_20261112.csv",
               "2-23": "tdcc_2-23_live_20261112.csv"}
+NAV_URL = "https://www.sitca.org.tw/MemberK0000/F/03/nav.csv"
+NAV_FIXTURE = "sitca_nav_live_20261112.csv"
 
 # TAIFEX OpenAPI (fetched as bytes: JSON or CSV). DailyForeignExchangeRates is the CSV variant Cloudflare served.
 TAIFEX_ROUTES = {
@@ -115,6 +117,8 @@ class FakeFetcher:
 
     def get_bytes(self, url, params=None, headers=None):
         self.calls.append(url)
+        if url == NAV_URL:  # 證券期貨局〈證券投資信託基金每日淨值〉: the CSV on www.sitca.org.tw (trimmed to 18 rows)
+            return (FIX / NAV_FIXTURE).read_bytes()
         if "tdcc" in url:
             return (FIX / TDCC_FILES[(params or {}).get("id", "1-5")]).read_bytes()
         if "taifex" in url:

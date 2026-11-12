@@ -4,7 +4,7 @@ Run once from the command line::
 
     uv run python -m forliosa.archive run                    # every job that applies to DATA_POLICY
     uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | companies | financials | taifex |
-                                                             # cbc | tdcc | weekly | monthly | sec
+                                                             # cbc | nav | tdcc | weekly | monthly | sec
     uv run python -m forliosa.archive backfill --days 90     # personal opt-in only, see "Backfill" below
 
 The worker runs the same jobs on a schedule (``forliosa.worker``). Every write is an upsert keyed on
@@ -55,10 +55,14 @@ board_links                 TWSE t187ap11_L / TPEx mopsfin_t187ap11_O 董監事�
                             while parsing and never stored or logged
 holder_counts_monthly       TDCC 2-22 / 2-23 集保股東戶數 (group ``monthly``; latest month only)
 esg_product_output          t187ap46_L_14 / t187ap46_O_14 ESG「依產品類別之產品產量」 (group ``monthly``)
+etf_navs                    金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉 (data.gov.tw 11109; the CSV on
+                            www.sitca.org.tw; group ``nav``: 21:40 and the 08:10 catch-up). Only ETFs: rows whose
+                            受益憑證代號 is a ``00…`` code with an archived official close or in the instrument master
 ==========================  =========================================================
 
 Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw``, ``openapi.taifex.com.tw/v1``,
-``cpx.cbc.gov.tw/api/OpenData`` and the three SEC EDGAR JSON datasets are fetched (see the allowlist in
+``cpx.cbc.gov.tw/api/OpenData``, the one NAV file on ``www.sitca.org.tw`` and the three SEC EDGAR JSON datasets are
+fetched (see the allowlist in
 ``marketdata/http.py``). The TWSE / TPEx / TAIFEX
 **websites** forbid automated downloads without written consent, so the former T86 / MI_QFIIS website jobs and
 the website backfill were removed (2026-11-12). There is no official per-stock history API: the archive only
@@ -86,6 +90,7 @@ from sqlalchemy.orm import Session
 from forliosa.datapolicy import Policy
 from forliosa.marketdata import cbc
 from forliosa.marketdata import company_data as cd
+from forliosa.marketdata import fund_nav as fnav
 from forliosa.marketdata import opendata as od
 from forliosa.marketdata import taifex as tf
 from forliosa.marketdata.base import ProviderUnavailable, market_of_symbol, tw_symbol
@@ -97,6 +102,7 @@ from forliosa.models import (
     DatasetStatus,
     DividendResolution,
     EsgProductOutput,
+    EtfNav,
     ExRightsResult,
     FinancialReport,
     ForeignHoldingDaily,
@@ -143,8 +149,10 @@ MARGIN_READY = time(21, 0)
 # taifex: TAIFEX daily datasets (21:40); cbc: the central bank's USD/TWD closing rate (21:40; published the same
 # afternoon); weekly (Saturday): TAIFEX final settlement + SSF/SSO lists, and the stale-endpoint check;
 # sec (07:50 daily): SEC EDGAR facts and filings of tracked US stocks; monthly (10th and 25th): 董監事持股餘額明細
-# (company ↔ company links), TDCC 集保股東戶數 and the ESG product-category text.
-JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "tdcc", "weekly", "monthly", "sec")
+# (company ↔ company links), TDCC 集保股東戶數 and the ESG product-category text; nav (21:40, and 08:10 to catch NAVs
+# published after the evening run): 證券期貨局's 證券投資信託基金每日淨值 of listed / OTC ETFs.
+JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "nav", "tdcc", "weekly", "monthly", "sec")
+OFFICIAL_CLOSE_SOURCES = ("twse-openapi", "tpex-openapi")  # prices_daily rows from the exchanges' OpenAPIs
 TPEX50 = "TPEX50"
 SEC_DISABLED = "sec edgar（未設定 SEC_CONTACT_EMAIL，略過）"
 
@@ -715,6 +723,44 @@ class Archiver:
             n += m
         return n
 
+    # -- 證券期貨局〈證券投資信託基金每日淨值〉 (ETF NAV) --------------------------------------------------
+    def _etf_symbols(self) -> dict[str, str]:
+        """ETF trading code -> symbol: ``00…`` codes with an official close archived in the last 30 days (their
+        suffix says TWSE or TPEx), then the instrument master's Taiwan ETFs."""
+        today = self.now_fn().astimezone(TAIPEI).date()
+        out: dict[str, str] = {}
+        for sym in self.db.scalars(select(PriceDaily.symbol).where(
+                PriceDaily.date >= today - timedelta(days=30),
+                PriceDaily.source.in_(OFFICIAL_CLOSE_SOURCES)).distinct()):
+            code = sym.split(".")[0]
+            if fnav.is_etf_code(code):
+                out.setdefault(code.upper(), sym)
+        try:
+            from forliosa.marketdata.service import get_market_data
+
+            for info in get_market_data().master().values():
+                if info.market in ("TWSE", "TPEX") and info.type == "etf":
+                    out.setdefault(info.code.upper(), info.symbol)
+        except Exception:  # pragma: no cover - the master is best effort here (as in tdcc())
+            pass
+        return out
+
+    def etf_navs(self) -> int:
+        """〈證券投資信託基金每日淨值〉 -> etf_navs (ETFs only; idempotent upsert on (symbol, date)).
+
+        The file holds each fund's latest NAV only (overseas funds: the previous business day), so a day missed is
+        gone: the job runs at 21:40 and again at 08:10. A renamed column or a file without ETF rows raises before
+        anything is written, so ``dataset_status`` keeps the last good date."""
+        rows = fnav.parse_nav_csv(self.fetcher.get_bytes(fnav.NAV_URL, headers={"Accept": "text/csv, */*;q=0.1"}))
+        symbols = self._etf_symbols()
+        now = datetime.now(TAIPEI)
+        out = [{"symbol": symbols[r["code"]], "date": r["date"], "nav": r["nav"], "currency": r["currency"],
+                "fund_name": r["fund_name"], "source": fnav.SOURCE, "fetched_at": now}
+               for r in rows if r["code"] in symbols]
+        n = upsert(self.db, EtfNav, out, ["symbol", "date"])
+        self._status(fnav.NAV_DATASET, max(r["date"] for r in rows), n)
+        return n
+
     # -- TDCC (weekly) ---------------------------------------------------------------------------
     def tdcc(self) -> int:
         raw = self.fetcher.get_bytes(TDCC_URL, params={"id": "1-5"}).decode("utf-8-sig", errors="replace")
@@ -838,6 +884,8 @@ class Archiver:
                 self._run(name, fn)
         if "cbc" in groups:
             self._run("cbc fx FTDOpenData_Day", self.cbc_fx)
+        if "nav" in groups:
+            self._run("sfb etf nav 11109", self.etf_navs)
         if "tdcc" in groups:
             self._run("tdcc distribution", self.tdcc)
         if "weekly" in groups:
@@ -915,7 +963,7 @@ def main(argv: list[str] | None = None) -> None:
     from forliosa.db import session_factory
 
     parser = argparse.ArgumentParser(
-        description="官方開放資料存檔（證交所、櫃買中心、期交所、中央銀行、集保、SEC EDGAR）")
+        description="官方開放資料存檔（證交所、櫃買中心、期交所、中央銀行、證期局基金淨值、集保、SEC EDGAR）")
     sub = parser.add_subparsers(dest="cmd", required=True)
     run_p = sub.add_parser("run", help="執行一次每日存檔")
     run_p.add_argument("--only", default="", help=f"逗號分隔：{','.join(JOB_GROUPS)}")

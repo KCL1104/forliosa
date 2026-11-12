@@ -341,7 +341,7 @@
 ### 個股
 | 方法 | 路徑 | 回傳 |
 |---|---|---|
-| GET | `/instruments/{symbol}/overview` | `{open, high, low, prev_close, reference_price, limit_up, limit_down, volume, avg_volume_3m, market_cap, pe, pb, dividend_yield, last_cash_dividend, ex_dividend_date, eps_ttm, high_52w, low_52w, shares_outstanding, status: {attention, disposition, note}, as_of, sources, is_demo}`；欄位缺資料時為 `null` |
+| GET | `/instruments/{symbol}/overview` | `{open, high, low, prev_close, reference_price, limit_up, limit_down, volume, avg_volume_3m, market_cap, pe, pb, dividend_yield, last_cash_dividend, ex_dividend_date, eps_ttm, high_52w, low_52w, shares_outstanding, status: {attention, disposition, note}, as_of, sources, is_demo}`；欄位缺資料時為 `null`。台股 ETF 另有 `etf_nav`（淨值與同一天的折溢價，見下方「ETF 淨值與折溢價」） |
 | GET | `/instruments/{symbol}/intraday` | `{symbol, date, prev_close, reference_price, points: [{t: "09:01", price, volume}], is_partial, sources}`；只有持股與自選會累積盤中點（每 30–60 秒輪詢），其他回 `points: []` |
 | GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}`；**上市（TWSE）股票的 `institutional` 任何模式都是 `[]`**；`foreign_holding_pct` 只在名列證交所外資持股前 20 名時有值（多 `foreign_top20`，見「相關股票、關於〈公司〉、上市股票外資持股前 20 名」），其他為 `[]`，`notes` 說明原因（產品負責人 2026-11-12：不寄信給證交所、不買 Data E-Shop；上櫃照常用櫃買 OpenAPI）；融資融券與集保照常 |
 | GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元（美股：美元、公司會計年度，見「美股基本面（SEC EDGAR）」） |
@@ -517,6 +517,40 @@
 - `/meta/attributions`：多 `twse-openapi/foreign_top20`、`twse-openapi/board`、`tpex-openapi/board`、`tpex-openapi/tpex50`、`tdcc-opendata/holders_twse`、
   `tdcc-opendata/holders_tpex`、`twse-openapi/esg_products`、`tpex-openapi/esg_products`、`wikipedia/zh`（`license_status: "open"`，CC BY-SA 4.0）、
   `wikidata/entities`（CC0）；`notice` 多一行維基百科授權。
+
+### ETF 淨值與折溢價（2026-11-12）
+產品負責人決定（`PRODUCT.md`「個股頁補強」第 9 項；驗證見 [`docs/research/news-and-external-sources.md`](research/news-and-external-sources.md) §11）。
+細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 ETF 淨值與折溢價」。沒有新端點：`GET /instruments/{symbol}/overview` 多 `etf_nav`。
+
+- **來源**：金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（data.gov.tw 11109，政府資料開放授權條款第 1 版；檔案放在投信投顧公會
+  `www.sitca.org.tw`），worker 每個交易日 21:40 存檔、08:10 再讀一次；只存「受益憑證代號」是上市櫃 ETF 交易代號的列。收盤價是證交所／櫃買 OpenAPI 的存檔，**從不用示範資料**。
+- **折溢價 = 收盤價 ÷ 淨值 − 1，只用同一天**：`premium_date` 是收盤價與淨值都有的最近一天。海外標的的淨值常是前一個營業日的，證交所的收盤檔晚上也可能還是前一天，
+  所以最新淨值日（`nav_date`）與最新收盤日（`close_date`）可能不同，兩個都回傳；沒有同一天的資料時 `premium_pct` 為 `null`。
+- **歷史**：從開始存檔那天累積（`history_start`），`history` 最多 60 點、由舊到新；不到 20 點時 `notes` 有「資料累積中：淨值自 YYYY-MM-DD 起存檔」，前端滿 20 點才畫走勢。
+  `history` 只收同一天有收盤也有淨值的日子，**不一定是連續的交易日**：`history_missing` 列出第一點到最後一點之間沒有資料的交易日（worker 停機等存檔缺口，
+  依證交所休市日判斷；檔案只有最新一天，補不回來），前端在那裡把線斷開，標題寫「N 個有資料的交易日（M/D–M/D）」，有缺口時加「中間 K 個交易日沒有資料」。
+- **追蹤誤差不提供**：要用標的指數的每日資料，指數沒有開放授權。
+- `sources`：區塊裡每個數字的資料集：淨值的顯名，加上收盤價的證交所〈上市個股日成交資訊〉或櫃買〈上櫃股票行情〉（只要回傳了 `close` 就列，沒有同一天的配對時也是）。
+- 股票、美股的 `etf_nav` 是 `null`；台股 ETF 一定是物件。**沒有淨值時所有數字欄位都是 `null`（`close`／`close_date` 也是，報價看 overview 本身）**、
+  `history`／`history_missing`／`sources` 是 `[]`、`notes` 說明。有淨值時 `close`／`close_date` 是最近一筆存檔的官方收盤（可能和 `nav_date` 不同天）。
+
+```json
+// overview.etf_nav（00679B：淨值是前一個營業日的；淨值與 11/12 收盤是 2026-11-12 的真實值，11/11 的收盤 26.58 是示意）
+{"nav": 26.4989, "nav_date": "2026-11-11", "currency": "TWD", "fund_name": "元大美國政府20年期(以上)債券基金",
+ "close": 26.61, "close_date": "2026-11-12", "premium_pct": 0.003061, "premium_date": "2026-11-11",
+ "history": [{"t": "2026-11-11", "nav": 26.4989, "close": 26.58, "premium_pct": 0.003061}],
+ "history_start": "2026-11-11", "history_missing": [], "notes": ["資料累積中：淨值自 2026-11-11 起存檔"],
+ "sources": ["金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（2026），依政府資料開放授權條款第 1 版",
+             "證券櫃檯買賣中心〈上櫃股票行情〉（2026），依政府資料開放授權條款第 1 版"]}
+```
+
+- `notes` 的固定文字：「資料累積中：ETF 淨值每個交易日晚上存檔」（還沒有任何淨值存檔）、「〈證券投資信託基金每日淨值〉沒有這檔 ETF 的淨值」（期貨信託 ETF、外幣交易線、
+  多數上櫃債券 ETF 不在這份資料）、「還沒有同一天的收盤價與淨值，不計算折溢價」、「資料累積中：淨值自 YYYY-MM-DD 起存檔」。
+- 有淨值時 `overview.sources` 也多一行上面的顯名聲明；`/meta/attributions` 多 `sfb-opendata/nav`（`license_status: "ogdl"`、`license_basis: "data.gov.tw 11109"`）。
+- 前端：總覽與估值分頁的「淨值與折溢價」：淨值、收盤、折溢價（各自的日期）、日期不同時一句說明、滿 20 點的走勢（0 軸是「淨值」）與區間、「逐日數字」、
+  追蹤誤差那一句、顯名聲明。折溢價不是價格漲跌：用墨色與「溢價／折價」文字，不用紅綠、不加 ▲▼。
+- AI：`get_stock_overview` 對台股 ETF 多 `etf_nav`（最新數字、`history_range` 區間〔`points` 有資料的天數、`from`／`to`、`missing_trading_days` 缺口天數、最高最低〕、
+  最近 10 點與「只用同一天、說出日期、點數不是交易日數、沒有追蹤誤差」的 `note`）。
 
 ## AI（M4）
 

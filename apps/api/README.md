@@ -13,7 +13,7 @@ cd apps/api
 uv sync                                   # 安裝相依套件（含 pytest、ruff）
 cp .env.example .env                      # 需要時再修改；預設用 SQLite（var/forliosa.db）
 uv run alembic upgrade head               # 建立資料表
-uv run python -m forliosa.archive run     # 建議：存一次官方開放資料（收盤、參考價、籌碼、事件、營收、季報、指數、股利決議、公司資料、期交所、集保、休市日）
+uv run python -m forliosa.archive run     # 建議：存一次官方開放資料（收盤、參考價、籌碼、事件、營收、季報、指數、股利決議、公司資料、期交所、集保、休市日、ETF 淨值）
 uv run python -m forliosa.seed            # 建立示範使用者、兩年交易、一筆出清紀錄、定期定額與自選（會先自動 migrate）
 uv run uvicorn forliosa.main:app --reload --port 8000
 ```
@@ -76,8 +76,8 @@ uv run python -m forliosa.worker
 
 | 時間 | 工作 |
 |---|---|
-| 08:10、14:40 | 存檔：證交所、櫃買 OpenAPI（收盤、本益比、參考價與漲跌停、融資融券、上櫃三大法人與外資持股、除權息預告、注意／處置、重大訊息、股東會、月營收、證交所新聞、ETF 基本資料、休市日、指數與報酬指數、上櫃除權息計算結果、富櫃五十成分股；08:10 與 21:40 另存證交所外資持股前 20 名 `MI_QFIIS_sort_20`，白天略過，因為它沒有日期欄位） |
-| 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`）、公司基本資料與股利決議（`t187ap03`、`t187ap45_L`），以及**期交所** OpenAPI（期貨／選擇權行情、三大法人、大額交易人、Put/Call 比、外幣參考匯率、保證金〔變動才存〕）與**中央銀行**〈銀行間新臺幣對美元收盤匯率〉（群組 `cbc`；第一次執行回補 2008 年起的全部歷史）。夜盤算在下一個交易日，所以不必清晨另跑 |
+| 08:10、14:40 | 存檔：證交所、櫃買 OpenAPI（收盤、本益比、參考價與漲跌停、融資融券、上櫃三大法人與外資持股、除權息預告、注意／處置、重大訊息、股東會、月營收、證交所新聞、ETF 基本資料、休市日、指數與報酬指數、上櫃除權息計算結果、富櫃五十成分股；08:10 與 21:40 另存證交所外資持股前 20 名 `MI_QFIIS_sort_20`，白天略過，因為它沒有日期欄位）；08:10 另讀一次**證期局 ETF 淨值**（群組 `nav`：檔案只有最新一筆，21:40 之後才公布的淨值靠這次補上） |
+| 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`）、公司基本資料與股利決議（`t187ap03`、`t187ap45_L`），以及**期交所** OpenAPI（期貨／選擇權行情、三大法人、大額交易人、Put/Call 比、外幣參考匯率、保證金〔變動才存〕）、**中央銀行**〈銀行間新臺幣對美元收盤匯率〉（群組 `cbc`；第一次執行回補 2008 年起的全部歷史）與**證期局 ETF 淨值**〈證券投資信託基金每日淨值〉（群組 `nav`，排在收盤存檔之後；只存上市櫃 ETF 的列）。夜盤算在下一個交易日，所以不必清晨另跑 |
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
@@ -98,11 +98,12 @@ uv run python -m forliosa.worker
 
 ```bash
 uv run python -m forliosa.archive run                      # 執行一次全部存檔（約 4 分鐘；證交所每 3 秒、櫃買、集保與期交所每 2 秒一次）
-uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、companies、financials、taifex、cbc、tdcc、weekly
+uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、companies、financials、taifex、cbc、nav、tdcc、weekly、monthly、sec
 ```
 
 只會連線到白名單內的網址（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`）：`openapi.twse.com.tw`、
-`www.tpex.org.tw/openapi`、`opendata.tdcc.com.tw`、`openapi.taifex.com.tw/v1`、shioaji-data 的 GitHub 檔案，以及 personal 明確開啟時的 FinMind。
+`www.tpex.org.tw/openapi`、`opendata.tdcc.com.tw`、`openapi.taifex.com.tw/v1`、投信投顧公會主機上的證期局淨值檔
+（只有 `www.sitca.org.tw/MemberK0000/F/03/nav.csv` 這一個檔案，網站其他頁面不在內）、shioaji-data 的 GitHub 檔案，以及 personal 明確開啟時的 FinMind。
 期交所的資料端點在 Cloudflare 後面，同一個端點可能回 JSON 也可能回 CSV（快取存什麼回什麼），解析器兩種都接受（`marketdata/taifex.py`）。
 User-Agent 誠實標示（不偽裝瀏覽器），遇到重新導向（例如證交所防火牆的 307）、403、429 就停，不重試到成功。
 **證交所／櫃買／MIS／公開資訊觀測站的網站一律不爬**（網站條款禁止未經同意以程式下載，見
@@ -231,6 +232,7 @@ src/forliosa/
 | 期交所 OpenAPI（有條件） | 期貨／選擇權每日交易行情（含夜盤）、每日外幣參考匯率（只存檔：USD/TWD 改用中央銀行）、選擇權大額交易人、最後結算價、保證金、股票期貨／選擇權標的 | 推定 OGDL，但 data.gov.tw 沒有個別資料集：**存檔但不顯示**，`TAIFEX_CONDITIONAL_CONFIRMED=true` 後才顯示 |
 | 集保開放資料 | 股權分散表（只有當週，每週存檔） | 同上 |
 | 中央銀行開放資料（`cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day`） | 〈銀行間新臺幣對美元收盤匯率〉：USD/TWD（美股換算新台幣；2008-01-02 起每個營業日） | 同上（data.gov.tw 7232） |
+| 金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（`www.sitca.org.tw/MemberK0000/F/03/nav.csv`，檔案放在投信投顧公會主機；只抓這一個檔案、每 2 秒最多一次） | ETF 淨值與盤後折溢價（個股頁「淨值與折溢價」、AI `get_stock_overview`）；檔案只有每檔最新一筆，每天存檔累積 | 政府資料開放授權條款第 1 版（data.gov.tw 11109），須顯名 |
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
 | GDELT DOC 2.0（`api.gdeltproject.org`） | 個股頁「新聞報導」：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |

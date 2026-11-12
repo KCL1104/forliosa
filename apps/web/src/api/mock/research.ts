@@ -22,6 +22,7 @@ import type {
   WhyReason,
 } from "../types"
 import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, SEARXNG_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
+import { buildEtfNav, NAV_SOURCE_KEY } from "./etf-nav"
 import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE, TWSE_INST_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
@@ -49,7 +50,7 @@ export function buildOverview(spec: MockInstrumentSpec, commercial = false): Ins
       symbol: spec.symbol, open: null, high: null, low: null, prev_close: null, reference_price: null, limit_up: null, limit_down: null,
       volume: null, avg_volume_3m: null, market_cap: null, pe: null, pb: null, dividend_yield: null, last_cash_dividend: null,
       ex_dividend_date: null, eps_ttm: sec?.eps_ttm ?? null, high_52w: null, low_52w: null, shares_outstanding: sec?.shares_outstanding ?? null,
-      status: { attention: false, disposition: false, note: null }, as_of: null,
+      status: { attention: false, disposition: false, note: null }, etf_nav: null, as_of: null,
       sources: ["內建商品清單", ...(sec ? [secSourceOf("sec-edgar/companyfacts")] : [])], is_demo: false,
     }
   }
@@ -62,6 +63,7 @@ export function buildOverview(spec: MockInstrumentSpec, commercial = false): Ins
   const latest = divs[0]
   const limits = limitsOf(spec)
   const fx = 1
+  const etfNav = buildEtfNav(spec)
   return {
     open: last.o,
     high: last.h,
@@ -87,8 +89,11 @@ export function buildOverview(spec: MockInstrumentSpec, commercial = false): Ins
       disposition: false,
       note: spec.symbol === "6488.TWO" ? "近 6 日累積跌幅過大，列為注意股票" : null,
     },
+    etf_nav: etfNav,
     as_of: spec.market === "US" ? "2026-11-12T05:00:00+08:00" : MOCK_AS_OF,
-    sources: commercial ? [sourceOf(`${tw(spec)}/price`), sourceOf(`${tw(spec)}/valuation`), sourceOf(`${tw(spec)}/reference`)] : spec.data_sources,
+    sources: commercial
+      ? [sourceOf(`${tw(spec)}/price`), sourceOf(`${tw(spec)}/valuation`), sourceOf(`${tw(spec)}/reference`), ...(etfNav?.nav ? [sourceOf(NAV_SOURCE_KEY)] : [])]
+      : spec.data_sources,
     is_demo: !commercial,
   }
 }

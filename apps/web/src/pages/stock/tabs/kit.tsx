@@ -6,12 +6,12 @@ export function TabLead({ children, className }: { children?: React.ReactNode; c
   return <p className={cn("ai-voice mb-5 text-xl leading-snug", className)}>{children}</p>
 }
 
-/** 鍵值格：格線分隔，3 欄（手機 2 欄），數字等寬靠右 */
-export function KeyGrid({ items, className, cols = 3 }: { items: { label: string; value: React.ReactNode; title?: string }[]; className?: string; cols?: 2 | 3 }) {
+/** 鍵值格：格線分隔，3 欄（手機 2 欄），數字等寬靠右；`wide` 的格子在手機佔滿一列（值比較長時） */
+export function KeyGrid({ items, className, cols = 3 }: { items: { label: string; value: React.ReactNode; title?: string; wide?: boolean }[]; className?: string; cols?: 2 | 3 }) {
   return (
     <dl className={cn("grid grid-cols-2 gap-x-8 border-t border-rule", cols === 3 && "lg:grid-cols-3", className)}>
       {items.map((it) => (
-        <div key={it.label} className="flex min-h-11 items-baseline justify-between gap-3 border-b border-rule py-2.5" title={it.title}>
+        <div key={it.label} className={cn("flex min-h-11 items-baseline justify-between gap-3 border-b border-rule py-2.5", it.wide && "max-lg:col-span-2")} title={it.title}>
           <dt className="text-md whitespace-nowrap text-ink-2">{it.label}</dt>
           <dd className="num text-right text-base">{it.value}</dd>
         </div>

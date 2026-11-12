@@ -317,10 +317,37 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
         "themes": detail.get("themes") or [],
         "quote": _pick(instr.quote_out(q), "price", "prev_close", "reference_price", "change", "change_pct",
                        "volume", "as_of", "is_realtime", "is_demo") if q is not None else None,
-        "overview": {k: v for k, v in ov.items() if k not in ("symbol", "sources")},
+        "overview": {k: v for k, v in ov.items() if k not in ("symbol", "sources", "etf_nav")},
+        **({"etf_nav": _etf_nav_for_ai(ov["etf_nav"])} if ov.get("etf_nav") else {}),
         "recent_dividends": divs,
         "sources": list(dict.fromkeys([*ov.get("sources", []), *div_sources])),
     }
+
+
+ETF_NAV_AI_NOTE = ("premium_pct = close ÷ NAV − 1 on premium_date only (the newest date with both an official close "
+                   "and a NAV; never mix dates). Positive = 溢價 (trading above NAV), negative = 折價. Say the date. "
+                   "history_range.points counts days that have both, not trading days: say the from–to dates, and "
+                   "missing_trading_days are archive gaps in between. "
+                   "There is no tracking error: the index's daily data has no open licence.")
+
+
+def _etf_nav_for_ai(block: dict[str, Any]) -> dict[str, Any]:
+    """The overview's ``etf_nav`` for the model: the latest values, the range of the archived history and its last
+    10 points (the page draws up to 60). ``points`` counts days with data, not trading days: archive gaps inside
+    ``from``–``to`` are counted in ``missing_trading_days``."""
+    hist = block.get("history") or []
+    out = {k: block.get(k) for k in ("nav", "nav_date", "currency", "close", "close_date", "premium_pct",
+                                     "premium_date", "history_start", "notes")}
+    if hist:
+        lo = min(hist, key=lambda p: p["premium_pct"])
+        hi = max(hist, key=lambda p: p["premium_pct"])
+        out["history_range"] = {"points": len(hist), "from": hist[0]["t"], "to": hist[-1]["t"],
+                                "missing_trading_days": len(block.get("history_missing") or []),
+                                "min": {"t": lo["t"], "premium_pct": lo["premium_pct"]},
+                                "max": {"t": hi["t"], "premium_pct": hi["premium_pct"]}}
+        out["recent"] = hist[-10:]
+    out["note"] = ETF_NAV_AI_NOTE
+    return out
 
 
 HISTORY_RANGE_CHOICES = ["5D", "1M", "6M", "YTD", "1Y", "5Y"]
@@ -681,8 +708,9 @@ TOOLS: list[ToolSpec] = sorted([
     ToolSpec("get_stock_overview",
              "Key data for one stock or ETF: name, industry, latest quote (price, change vs reference price, volume), "
              "open/high/low, limit up/down, P/E, P/B, dividend yield, EPS (TTM), 52-week range, market cap, "
-             "attention/disposition status and recent dividends. Call this first for any question about a "
-             "specific stock's price or basic data.",
+             "attention/disposition status and recent dividends; for Taiwan ETFs also the NAV (淨值) with its date and "
+             "the after-close premium/discount (折溢價) vs NAV on the same date. Call this first for any question "
+             "about a specific stock's price or basic data, or an ETF's NAV or premium/discount.",
              {"symbol": _SYMBOL}, ("symbol",), get_stock_overview, _sym_label("查看 ", " 關鍵數據")),
     ToolSpec("get_stock_history",
              "Daily price history of a stock over a range: start/end close, % change, high/low with dates, average "

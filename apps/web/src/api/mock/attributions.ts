@@ -54,6 +54,7 @@ const ROWS: Row[] = [
   ["tdcc-opendata/holders_twse", "臺灣集中保管結算所", "有價證券集中保管個別股票異動月分析表－上市證券", "https://opendata.tdcc.com.tw/getOD.ashx?id=2-22", "相關股票：ETF 受益人數（集保股東戶數）"],
   ["tdcc-opendata/holders_tpex", "臺灣集中保管結算所", "有價證券集中保管個別股票異動月分析表－上櫃證券", "https://opendata.tdcc.com.tw/getOD.ashx?id=2-23", "相關股票：ETF 受益人數（集保股東戶數）"],
   ["cbc-opendata/fx", "中央銀行", "銀行間新臺幣對美元收盤匯率", "https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day", "美股換算新台幣"],
+  ["sfb-opendata/nav", "金融監督管理委員會證券期貨局", "證券投資信託基金每日淨值", "https://www.sitca.org.tw/MemberK0000/F/03/nav.csv", "ETF 淨值、盤後折溢價（同一天的收盤價 ÷ 淨值 − 1）"],
   ["shioaji-data/official", "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）", "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data", "商品主檔、月營收、季報、市值"],
 ]
 

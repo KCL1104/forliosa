@@ -265,7 +265,7 @@
 | 中央銀行 | [7232 銀行間新臺幣對美元收盤匯率](https://data.gov.tw/dataset/7232) | 台北外匯經紀公司資料；`https://cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day`（JSON：`日期` 西元 YYYYMMDD、`NTD_USD` 字串；一次回 2008-01-02 起全部 4,686 天）、`FTDOpenData_Month`（`西元年月`）、`FTDOpenData_Year`（鍵 `西元年`，實測回的是月資料）【事實：2026-11-12】 | **每營業日**，當天下午公布（2026-11-12 的 32.889 在 17:12 已有；metadata 寫「每1年」不準） | OGDL | **已採用（2026-11-12）**：USD/TWD 唯一換算來源（群組 `cbc`，21:40）；與期交所 USD/NTD 逐日相同 |
 | 中央銀行 | [統計資料庫 API](https://cpx.cbc.gov.tw/Data/ExportToAPIInfo) | API-JSON；匯率、利率、貨幣 | 依項目 | 未確認 | 總經 P2 |
 | 臺灣銀行 | 牌告匯率 | data.gov.tw 只有「一般外匯收費標準」（24936）與年度即期收盤匯率（NCHC 105011），**沒有每日牌告**；網站 CSV 條款未找到 | — | 未確認 | skip |
-| 金管會證期局 | [11109 證券投資信託基金每日淨值](https://data.gov.tw/dataset/11109) | 日期、公司、基金代號、基金名稱、**淨值**、漲跌、類型、幣別、受益憑證代號 | 每日 | OGDL | **ETF 折溢價 P1**（要先確認是否含 ETF、下載網址） |
+| 金管會證期局 | [11109 證券投資信託基金每日淨值](https://data.gov.tw/dataset/11109) | 日期、公司、基金代號、基金名稱、**淨值**、漲跌、類型、幣別、受益憑證代號 | 每日 | OGDL | **ETF 折溢價**：2026-11-12 驗證含上市櫃 ETF、已實作（`news-and-external-sources.md` §11） |
 | 金管會證期局（來源投信投顧公會） | 43476 境內基金基本資料、21404 ISIN／短線交易／月報網址 | 境內基金資料 | 不定期 | OGDL（NCHC 鏡像顯示無資料檔） | P2 |
 | 金管會 | [統計資料平台 OpenAPI](https://stat.fsc.gov.tw/api/swagger/openapi.json)（26798 備註） | 證期局、銀行局、保險局統計 | 依資料集 | 推定 OGDL | P2 |
 | 國家發展委員會 | [6099 景氣指標及燈號](https://data.gov.tw/dataset/6099)、[31564 景氣指標月刊](https://data.gov.tw/dataset/31564) | 領先／同時／落後指標、燈號、綜合分數 | 每月 | OGDL | 總經、AI context P1 |

@@ -192,6 +192,14 @@ const wikiSource = async (page) => {
   })
 }
 
+/** 資料來源頁的證期局（ETF 淨值的授權） */
+const navSource = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("ds-金融監督管理委員會證券期貨局")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
+
 /** 上市股票的籌碼：按空狀態裡的「最近外資對這檔的動向？」交給 AI（mock 是本機規則版的說明） */
 const foreignAsk = async (page, mobile) => {
   await toTabs(page)
@@ -275,6 +283,11 @@ const SHOTS = [
   { name: "stock-aapl-about", path: "/stock/AAPL", ready: "text=參考價", action: toSection("ov-company") },
   { name: "stock-3711-chips", path: "/stock/3711.TW?tab=chips", ready: "text=前 20 名第 12 名", action: toForeign },
   { name: "data-sources-wikipedia", path: "/data-sources", ready: "text=中文維基百科條目（開頭節錄）", action: wikiSource },
+  // ETF 淨值與折溢價（證期局〈證券投資信託基金每日淨值〉＋同一天的收盤）：0050 有走勢、00878 資料累積中、00679B 淨值晚一天
+  { name: "stock-0050-nav", path: "/stock/0050.TW", ready: "text=參考價", action: toSection("ov-premium") },
+  { name: "stock-00878-nav", path: "/stock/00878.TW", ready: "text=參考價", action: toSection("ov-premium") },
+  { name: "stock-00679b-nav", path: "/stock/00679B.TWO", ready: "text=參考價", action: toSection("ov-premium") },
+  { name: "data-sources-nav", path: "/data-sources", ready: "text=證券投資信託基金每日淨值", action: navSource },
   // 美股：SEC EDGAR 的季報（美元、公司會計年度）與 8-K／10-Q／10-K 申報
   { name: "stock-aapl-financials", path: "/stock/AAPL?tab=financials", ready: "text=FY2026Q4", action: toTabs },
   { name: "stock-aapl-events", path: "/stock/AAPL?tab=events", ready: "text=10-K 年度報告", action: toTabs },
