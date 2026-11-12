@@ -52,4 +52,33 @@ describe("usePutShare：照按的順序一次送一筆", () => {
     expect(server).toEqual(tradesOff)
     expect(invalidate).toHaveBeenCalledWith({ queryKey: sk.group(GROUP.id) })
   })
+
+  it("第一筆失敗、第二筆還在排隊：不還原到第一次點之前；最後依伺服器重抓", async () => {
+    const sent: ShareSettings[] = []
+    const settle: ((ok: boolean) => void)[] = []
+    vi.spyOn(api, "putShare").mockImplementation((_id, share) => {
+      sent.push(share)
+      return new Promise((resolve, reject) => settle.push((ok) => (ok ? resolve(share) : reject(new Error("network")))))
+    })
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } })
+    qc.setQueryData(sk.group(GROUP.id), GROUP)
+    const invalidate = vi.spyOn(qc, "invalidateQueries")
+    const { result } = renderHook(() => usePutShare(GROUP.id), {
+      wrapper: ({ children }) => <QueryClientProvider client={qc}>{children}</QueryClientProvider>,
+    })
+    const amountsOn = { ...START, amounts: true }
+    const tradesOff = { ...amountsOn, trades: false }
+    act(() => result.current.mutate(amountsOn))
+    act(() => result.current.mutate(tradesOff))
+    await waitFor(() => expect(sent).toEqual([amountsOn]))
+
+    act(() => settle.shift()!(false))
+    await waitFor(() => expect(sent).toEqual([amountsOn, tradesOff]))
+    // 交易動態不會跳回開著
+    expect(qc.getQueryData<Group>(sk.group(GROUP.id))?.my_share).toEqual(tradesOff)
+    expect(invalidate).not.toHaveBeenCalled()
+
+    act(() => settle.shift()!(true))
+    await waitFor(() => expect(invalidate).toHaveBeenCalledTimes(1))
+  })
 })

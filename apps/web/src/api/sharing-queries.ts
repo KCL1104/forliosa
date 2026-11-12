@@ -193,8 +193,10 @@ export function usePutShare(id: string) {
       qc.setQueryData<Group>(sk.group(id), (g) => (g ? { ...g, my_share: share } : g))
       return { before }
     },
+    // 失敗時還原；但後面還有排隊的寫入（每筆都是完整的六個開關）就不還原，
+    // 否則會跳回第一次點之前的狀態，而排隊那筆照樣寫進伺服器。最後一筆結束後 onSettled 會重抓伺服器的真實狀態。
     onError: (_e, _s, ctx) => {
-      if (ctx?.before) qc.setQueryData(sk.group(id), ctx.before)
+      if (ctx?.before && qc.isMutating({ mutationKey: key }) <= 1) qc.setQueryData(sk.group(id), ctx.before)
     },
     // 還有排在後面的分享設定時先不重抓：伺服器還沒寫入下一筆，重抓會讓開關跳回舊的狀態；最後一筆完成才整組重抓
     onSettled: () => {

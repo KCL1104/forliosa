@@ -309,7 +309,7 @@ await check("個股總覽：「新聞報導」（媒體原標題＋媒體＋時�
   await news.getByRole("listitem").first().getByText("示範財經日報", { exact: true }).waitFor()
   await news.getByRole("listitem").first().locator("time").getByText("1 小時前").waitFor()
   if (await news.locator("img").count()) throw new Error("news must not show images")
-  if (await news.getByRole("link", { name: /（在(公開資訊觀測站|證交所)查看/ }).count()) throw new Error("official announcement in 新聞報導")
+  if (await news.locator('a[href*="mops.twse.com.tw"], a[href*="www.twse.com.tw"]').count()) throw new Error("official announcement in 新聞報導")
   await news.getByRole("button", { name: "看更多" }).click()
   if ((await headlines.count()) <= 3) throw new Error("看更多 did not add headlines")
   // GDELT 的使用條款要求引用並連回 gdeltproject.org：在頁尾的「資料來源與授權」

@@ -727,7 +727,7 @@ SearXNG 對上游搜尋引擎送出的請求由 SearXNG 自己決定（瀏覽器
 ### 授權與顯名
 
 - `datapolicy.DATASETS` 多 `gdelt/doc`（`license_status: "open"`：可商用、需引用 GDELT 並連到 gdeltproject.org）與 `yahoo-rss/stock`（新的 `non_commercial`：
-  commercial 下不顯示、也不列在 `/meta/attributions`，改在 `not_used` 說明）。每則新聞的 `sources` 是它的顯名聲明；前端在「新聞報導」下方引用 The GDELT Project。
+  commercial 下不顯示、也不列在 `/meta/attributions`，改在 `not_used` 說明）。每則新聞的 `sources` 是它的顯名聲明；前端在頁尾的「資料來源與授權」引用 The GDELT Project（連到 gdeltproject.org）。
 - AI 工具 `get_news` 與 `/news` 相同：先官方公告、再新聞報導（每則有 `category`、`outlet`、`source`、網址），另回所有項目去重後的 `sources`
   （GDELT 的引用、公告的 OGDL 顯名），`note` 請模型提到標題時寫出媒體與連結、細節再用 `web_search`；工具說明不再寫「不含媒體」。
 - `_item()` 的 `commercial` 改成只有 `conditional` 資料集會因 `TAIFEX_CONDITIONAL_CONFIRMED` 變成可商用（以前非商用資料集也會被開關影響）。

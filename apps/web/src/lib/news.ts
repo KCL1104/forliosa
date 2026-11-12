@@ -3,7 +3,7 @@
  * - `/news` 同時有官方公告與新聞報導；`category: "media"` 是新聞報導，其他是公告
  * - 每則顯示「媒體・N 小時前」，再來是原標題（連到原文、另開新視窗）；不放圖片、不放內文
  * - Yahoo股市 RSS 的標題要保留「Yahoo股市」與原始媒體（條款要求）
- * - 用到 GDELT 時，清單下方要引用 GDELT（使用條款要求連回 gdeltproject.org）
+ * - 用到 GDELT 時，頁尾的「資料來源與授權」要引用 GDELT（使用條款要求連回 gdeltproject.org）
  */
 import type { NewsItem } from "@/api/types"
 import { formatDateShort } from "@/lib/format"
