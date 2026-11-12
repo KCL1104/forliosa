@@ -60,7 +60,7 @@ def test_official_archive_reference_wins(engine, market):
 
 
 def test_normal_day_reference_is_previous_close_and_us_has_no_limits():
-    md = MarketData([DemoProvider()])
+    md = MarketData([DemoProvider()], policy="personal")
     q = md.quote("2330.TW")
     assert q.reference_price == q.prev_close and q.limit_up is not None and q.limit_up > q.prev_close
     us = md.quote("AAPL")

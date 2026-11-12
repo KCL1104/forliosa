@@ -426,7 +426,7 @@ def test_total_return_index_benchmark(client, seeded, market):
     assert p["benchmark"] == {"symbol": "^TAIEXTR", "name": "發行量加權股價報酬指數", "twr": None}
     assert all(pt["benchmark_index"] is None for pt in p["series"])
 
-    set_market_data(MarketData([FakeIndexProvider(), DemoProvider()]))
+    set_market_data(MarketData([FakeIndexProvider(), DemoProvider()], policy="personal"))
     try:
         p = client.get(f"{API}/portfolio/performance", params={"range": "5D", "benchmark": "^TAIEXTR"}).json()
         tw_days = sum(1 for pt in p["series"][1:] if is_tw_trading_day(date.fromisoformat(pt["t"])))

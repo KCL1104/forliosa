@@ -140,7 +140,7 @@ class Statements(BaseProvider):
 
 
 def test_financials_quarterly_and_annual(client, use_market):
-    use_market(MarketData([Statements(), DemoProvider()]))
+    use_market(MarketData([Statements(), DemoProvider()], policy="personal"))
     f = client.get(f"{API}/instruments/6488/financials?period=quarterly").json()
     assert f["periods"][-1] == "2026Q3" and len(f["periods"]) == 7
     assert f["income"]["revenue"][-1] == 14870753 and f["income"]["eps"][-1] == 3.13
@@ -156,7 +156,7 @@ def test_financials_quarterly_and_annual(client, use_market):
 
 
 def test_financials_latest_quarter_from_archive_is_derived_from_ytd(client, archived, use_market):
-    use_market(MarketData([Statements(drop_last=True), DemoProvider()]))
+    use_market(MarketData([Statements(drop_last=True), DemoProvider()], policy="personal"))
     f = client.get(f"{API}/instruments/6488/financials").json()
     assert f["periods"][-1] == "2026Q3"
     # OpenAPI 2026Q3 YTD 44,069,861 − shioaji 2026Q2 YTD 29,199,108 = 14,870,753
@@ -194,7 +194,7 @@ def test_news_from_finmind_is_labelled_non_commercial(client, use_market):
             return [{"published_at": "2026-11-11 08:30:00", "title": "台積電法說會", "source": "鉅亨網",
                      "url": "https://news.cnyes.com/news/id/1"}]
 
-    use_market(MarketData([FakeFinMind(), DemoProvider()]))
+    use_market(MarketData([FakeFinMind(), DemoProvider()], policy="personal"))
     n = client.get(f"{API}/instruments/2330/news").json()
     assert n == [{"published_at": "2026-11-11T08:30:00+08:00", "title": "台積電法說會", "source": "鉅亨網",
                   "url": "https://news.cnyes.com/news/id/1", "sources": ["FinMind（非商用）"]}]
@@ -220,7 +220,7 @@ def test_intraday_points_only_for_tracked_symbols(client, engine, market):
     today = today_taipei()
     assert client.get(f"{API}/instruments/2330/intraday").json()["points"] == []  # not tracked
     client.post(f"{API}/watchlist", json={"symbol": "2330"})
-    md = MarketData([DemoProvider()])
+    md = MarketData([DemoProvider()], policy="personal")
     with Session(engine) as db:
         for minute, price, vol in ((1, "2400", 1_000_000), (2, "2405", 1_600_000), (3, "2410", 2_000_000)):
             at = datetime.combine(today, datetime.min.time(), TAIPEI).replace(hour=9, minute=minute)
@@ -263,7 +263,7 @@ class WhyQuotes(BaseProvider):
 
 
 def why_for(engine, q: QuoteData, today: date = TODAY) -> list[dict]:
-    md = MarketData([WhyQuotes(q), DemoProvider()])
+    md = MarketData([WhyQuotes(q), DemoProvider()], policy="personal")
     info = md.instrument(q.symbol)
     fresh = md.quote(q.symbol)
     with Session(engine) as db:
@@ -293,7 +293,7 @@ def test_why_ex_dividend_day_is_not_a_drop(engine, market):
         def ex_rights_on(self, symbols, d):
             return {"2330.TW": (D(5), D(0))}
 
-    md = MarketData([ExDay(quote("95.5", prev="100")), DemoProvider()])
+    md = MarketData([ExDay(quote("95.5", prev="100")), DemoProvider()], policy="personal")
     q = md.quote("2330.TW")
     assert q.reference_price == D(95)  # 100 − 5
     with Session(engine) as db:

@@ -55,7 +55,7 @@ def test_quota_error_starts_a_backoff_that_serves_cached_rows_without_requests(p
 
 def test_facade_keeps_answering_from_the_finmind_cache_after_a_quota_error(provider):
     p, fetcher, _, symbol = provider
-    md = MarketData([p, DemoProvider()])
+    md = MarketData([p, DemoProvider()], policy="personal")
     md.monthly_revenue(symbol)  # FinMind 402 -> the demo provider answers instead
     h = md.history(symbol, date(2000, 1, 1), date(2100, 1, 1))
     assert h.source == "finmind" and h.is_demo is False and h.candles

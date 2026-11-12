@@ -51,7 +51,7 @@ def item_out(db: Session, md: MarketData, symbol: str, quotes: dict) -> dict[str
         "sparkline": spark,
         "sparkline_interval": interval,
         "sources": labels([*(q.source.split("+") if q else []), *spark_sources]),
-        "is_demo": bool(q.is_demo) if q else True,
+        "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
     }
 
 

@@ -19,7 +19,7 @@ from forliosa.marketdata.service import MarketData, set_market_data
 
 @pytest.fixture(scope="session")
 def market() -> MarketData:
-    md = MarketData([DemoProvider()])
+    md = MarketData([DemoProvider()], policy="personal")  # offline demo data (explicit opt-in)
     set_market_data(md)
     return md
 

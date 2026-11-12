@@ -262,6 +262,23 @@ class DayFlows:
 
 
 @dataclass(frozen=True)
+class TrailEntry:
+    """One booking that touched a (account, symbol) position, in the order the ledger applied it.
+
+    ``txn`` is ``None`` for a holdings-only opening snapshot. ``before`` / ``after`` are the share counts
+    around the booking, so a round (0 → >0 → 0) can be read off the trail.
+    """
+
+    account_id: str
+    symbol: str
+    trade_date: date
+    before: Decimal
+    after: Decimal
+    txn: LedgerTxn | None = None
+    opening: OpeningPosition | None = None
+
+
+@dataclass(frozen=True)
 class EffectiveTxn:
     """What the ledger actually booked for a transaction (e.g. computed 配股 shares)."""
 
@@ -282,6 +299,7 @@ class Ledger:
         self.cash: dict[tuple[str, str], Decimal] = {}
         self.warnings: list[str] = []
         self.effective: dict[str, EffectiveTxn] = {}
+        self.trail: list[TrailEntry] = []
 
     # -- helpers -----------------------------------------------------------------------------
     def position(self, account_id: str, symbol: str, currency: str) -> Position:
@@ -312,8 +330,10 @@ class Ledger:
     def open(self, op: OpeningPosition) -> Decimal:
         """Book a holdings snapshot as an opening position; returns its cost in TWD."""
         pos = self.position(op.account_id, op.symbol, op.currency)
+        before = pos.quantity
         cost = op.quantity * op.avg_cost
         pos.add(Lot(op.quantity, cost, cost * op.fx_rate, op.as_of))
+        self.trail.append(TrailEntry(op.account_id, op.symbol, op.as_of, before, pos.quantity, opening=op))
         return cost * op.fx_rate
 
     def apply_day(self, txns: Iterable[LedgerTxn]) -> DayFlows:
@@ -321,9 +341,12 @@ class Ledger:
         flows = DayFlows()
         touched: set[tuple[str, str]] = set()
         for t in sorted(txns, key=LedgerTxn.sort_key):
+            before = self.held(t.account_id, t.symbol) if t.symbol else ZERO
             self._apply(t, flows)
             if t.symbol:
                 touched.add((t.account_id, t.symbol))
+                self.trail.append(TrailEntry(t.account_id, t.symbol, t.trade_date, before,
+                                             self.held(t.account_id, t.symbol), txn=t))
         for key in touched:
             pos = self.positions.get(key)
             if pos:

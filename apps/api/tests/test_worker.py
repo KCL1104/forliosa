@@ -39,7 +39,7 @@ class FakeReal(BaseProvider):
 
 
 def test_upsert_closes_stores_only_real_prices(engine):
-    md = MarketData([FakeReal(), DemoProvider()])
+    md = MarketData([FakeReal(), DemoProvider()], policy="personal")
     with Session(engine) as db:
         assert upsert_closes(db, md, ["2330.TW", "AAPL"]) == 1  # AAPL is demo-only: not stored
         assert upsert_closes(db, md, ["2330.TW"]) == 1  # idempotent upsert

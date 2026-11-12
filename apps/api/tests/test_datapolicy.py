@@ -64,7 +64,7 @@ def test_history_merges_partial_archive_with_the_next_real_provider(engine):
     class Older(DemoProvider):
         name, is_demo = "older", False
 
-    md = MarketData([ArchiveProvider("personal", session_fn=lambda: Session(engine)), Older()])
+    md = MarketData([ArchiveProvider("personal", session_fn=lambda: Session(engine)), Older()], policy="personal")
     h = md.history("2330.TW", date(2026, 10, 1), date(2026, 11, 11))
     assert h.source == "twse-openapi+older" and not h.is_demo  # the archived rows' own source
     assert h.candles[-1].c == D(2395) and len(h.candles) > 20
@@ -79,7 +79,7 @@ def test_unannounced_ex_date_is_kept_and_real_amounts_win(engine):
                            detail="金額尚未公告", data={"cash": None, "stock_ratio": None}, source="twse-openapi"))
         db.commit()
     archive = ArchiveProvider("personal", session_fn=lambda: Session(engine))
-    only = MarketData([archive, DemoProvider()]).dividends("00878.TW")
+    only = MarketData([archive, DemoProvider()], policy="personal").dividends("00878.TW")
     assert [(e.ex_dividend_date, e.cash_dividend) for e in only.value] == [(date(2026, 11, 17), D(0))]
 
     class Announced(BaseProvider):
@@ -88,5 +88,5 @@ def test_unannounced_ex_date_is_kept_and_real_amounts_win(engine):
         def dividends(self, symbol):
             return [DividendEvent(symbol, 2026, "2026Q3", D("0.4"), D(0), date(2026, 11, 17), date(2026, 12, 12))]
 
-    both = MarketData([archive, Announced(), DemoProvider()]).dividends("00878.TW")
+    both = MarketData([archive, Announced(), DemoProvider()], policy="personal").dividends("00878.TW")
     assert [(e.cash_dividend, e.payment_date) for e in both.value] == [(D("0.4"), date(2026, 12, 12))]

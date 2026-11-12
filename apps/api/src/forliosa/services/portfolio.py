@@ -75,6 +75,7 @@ class PortfolioState:
     fx: FxBook
     is_demo: bool
     as_of: datetime
+    demo_data_allowed: bool = True  # personal: a holding without a quote is flagged is_demo (valued at cost)
 
 
 def _info(md: MarketData, symbol: str) -> InstrumentInfo | None:
@@ -109,8 +110,8 @@ def compute_state(db: Session, user: User, md: MarketData, account_id: str | Non
             is_demo |= row.quote.is_demo
             if row.quote.as_of:
                 as_of_candidates.append(row.quote.as_of)
-        else:
-            is_demo = True  # valued at cost: not a real price
+        elif md.demo_data_allowed:
+            is_demo = True  # valued at cost: not a real price (commercial: price is null, nothing synthetic)
         for pos in led.open_positions():
             if pos.symbol == sym:
                 px = row.price if row.price is not None else pos.avg_cost
@@ -119,7 +120,7 @@ def compute_state(db: Session, user: User, md: MarketData, account_id: str | Non
         is_demo = True
     rows = sorted(grouped.values(), key=lambda r: r.market_value, reverse=True)
     as_of = max(as_of_candidates) if as_of_candidates else now_taipei()
-    return PortfolioState(inp, led, rows, fx, is_demo, as_of)
+    return PortfolioState(inp, led, rows, fx, is_demo, as_of, md.demo_data_allowed)
 
 
 def holdings(state: PortfolioState) -> list[dict[str, Any]]:
@@ -151,7 +152,7 @@ def holdings(state: PortfolioState) -> list[dict[str, Any]]:
             "unrealized_pnl_pct": ser.ratio(unreal / r.cost_twd) if r.cost_twd else None,
             "weight": ser.ratio(mv / total) if total else 0.0,
             "account_ids": sorted(set(r.account_ids)),
-            "is_demo": bool(q.is_demo) if q else True,
+            "is_demo": bool(q.is_demo) if q else state.demo_data_allowed,
         })
     return out
 
@@ -310,7 +311,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "range": range_, "start_date": None, "end_date": None, "twr": None, "xirr": None, "max_drawdown": None,
         "volatility": None,
         "benchmark": {"symbol": bench_symbol, "name": bench_name, "twr": None},
-        "series": [], "dividends_by_month": [], "realized_by_year": [], "is_demo": False,
+        "series": [], "dividends_by_month": [], "realized_by_year": [], "is_demo": False, "notes": [],
     }
     if inception is None or inception > today:
         return empty
@@ -368,6 +369,27 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         si = next((i for i, p in enumerate(points) if p.t >= nominal), ei)
         si = max(si, first_active)
         based = False
+
+    # Commercial policy: no demo prices. Only days on which every held position has a real close are
+    # valued; a window reaching further back starts (as a base close, like 1D/5D) at the first such day.
+    notes: list[str] = []
+    clipped = False
+    if md.policy == "commercial":
+        from forliosa.services.coverage import US_NOTE, accumulating_note
+
+        base = max((i for i, p in enumerate(points) if p.unpriced), default=-1) + 1
+        if base >= ei:  # fewer than two fully priced closes: nothing honest to show yet
+            missing = sorted(points[ei].unpriced)
+            us = [m for m in missing if market_of_symbol(m) == "US"]
+            if us:
+                notes.append(f"{'、'.join(us)}：{US_NOTE}，含美股時無法計算績效")
+            if len(us) < len(missing) or not missing:
+                notes.append(f"{accumulating_note(md)}；需要持股期間每天的收盤價才能計算績效")
+            return {**empty, "notes": notes}
+        lumped = inception < axis[0]  # transactions before the first archived day are all booked on it
+        if si < base or (lumped and si == 0 and not based):
+            si, based, clipped = base, True, True
+            notes.append(f"{accumulating_note(md)}；績效從 {points[si].t.isoformat()} 收盤開始計算")
     window = points[si:ei + 1]
     returns = [p.daily_return for p in window]
     if based:
@@ -414,8 +436,16 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         if p.realized:
             by_year[p.t.year] += p.realized
 
-    # Annualizing one to five days of cash flows is meaningless: no XIRR for the short ranges.
-    rate = None if days is not None else xirr(xirr_flows(points, si, ei))
+    # Annualizing one to five days of cash flows is meaningless: no XIRR for the short ranges. A clipped
+    # window opens with the base day's market value as the initial investment.
+    if days is not None:
+        rate = None
+    elif clipped:
+        rate = xirr(xirr_flows(points, si + 1, ei)) if si < ei else None
+    else:
+        rate = xirr(xirr_flows(points, si, ei))
+    if md.policy == "commercial" and not b_closes:
+        notes.append(f"基準 {bench_name} 目前沒有可商用的資料")
     vol = annualized_volatility(active_returns)
     return {
         "range": range_,
@@ -434,6 +464,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "dividends_by_month": [{"month": k, "amount": ser.money(v)} for k, v in sorted(by_month.items())],
         "realized_by_year": [{"year": k, "amount": ser.money(v)} for k, v in sorted(by_year.items())],
         "is_demo": is_demo,
+        "notes": notes,
     }
 
 

@@ -619,7 +619,7 @@ def position(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, 
         } if upcoming else None,
         "as_of": iso_taipei(q.as_of) if q and q.as_of else iso_taipei(state.as_of),
         "sources": labels(["ledger", *(_split(q.source) if q else [])]),
-        "is_demo": bool(q.is_demo) if q else True,
+        "is_demo": bool(q.is_demo) if q else md.demo_data_allowed,
     }
 
 

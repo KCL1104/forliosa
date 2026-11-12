@@ -58,4 +58,5 @@ Emil Kowalski skills：`mobile-native`（theme-color 改成紙色、hover 一律
 3. ETF 折溢價、成分股，美股財報與籌碼：設計過的空狀態，等資料來源（研究稿 Q10、Q11）。
 4. 比較線「加權報酬指數」需要後端的 `/instruments/^TAIEXTR/history`；mock 以 0050 代替。真實後端沒有時圖會停留在不比較。
 5. 漲跌停與參考價以後端為準；前端只在報價沒有帶時才自行計算（`lib/tick.ts`）。
-6. 真實手機實測（mobile-native 的 tap delay、鍵盤、safe area）還沒做，只用 Playwright 的 iPhone 15 模擬。
+6. 產品負責人決定預設 `DATA_POLICY=commercial`：盤中走勢、新聞、上市股票的法人可能是空的並帶 `notes`；前端照實顯示「資料累積中」與後端的說明（1 日線、籌碼、財報），不用示範資料充數。mock 仍是示範資料（開發用）。
+7. 真實手機實測（mobile-native 的 tap delay、鍵盤、safe area）還沒做，只用 Playwright 的 iPhone 15 模擬。
