@@ -8,6 +8,7 @@ import { formatDateShort, formatMoney, formatPrice, formatQuantity } from "@/lib
 import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { parseIntent, sharesOf } from "./intent"
+import { AI_UNAVAILABLE } from "./answer-text"
 import { aiApi, aiRemote, applyChatEvent, draftFromServer, streamChat, type AiUsage, type ChatEvent } from "./remote"
 import { aiKeys } from "./remote-hooks"
 import { newId, useAi } from "./store"
@@ -152,9 +153,10 @@ export function useAiRunner(ctx: AiContext) {
     } catch (err) {
       flush()
       if (err instanceof ApiError && err.code === "ai_unavailable") {
-        // 後端沒有設定 AI：退回本機的規則版回答
-        updateMessage(aiId, (m) => ({ ...m, streaming: false }))
-        await answerLocally(text, aiId)
+        // 所有金鑰都不能用（或沒有設定）：安靜說明；記帳指令不需要模型，照樣寫成草稿
+        updateMessage(aiId, (m) => ({ ...m, streaming: false, error: { code: "ai_unavailable", message: AI_UNAVAILABLE } }))
+        void qc.invalidateQueries({ queryKey: aiKeys.usage })
+        await draftFrom(text)
         return
       }
       const error = err instanceof ApiError ? { code: err.code, message: err.message } : { code: "network", message: "連不上伺服器，請稍後再試。" }
@@ -171,8 +173,16 @@ export function useAiRunner(ctx: AiContext) {
       toast("等這一則回答完再問下一題")
       return
     }
-    // 後端已經回報 AI 未設定（/ai/usage 的 available=false）時直接用本機規則
-    if (aiRemote && qc.getQueryData<AiUsage>(aiKeys.usage)?.available !== false) return submitRemote(text)
+    if (aiRemote) {
+      // 後端已經回報 AI 無法使用（/ai/usage 的 available=false）：不送出，說明一句；記帳指令照樣寫成草稿
+      if (qc.getQueryData<AiUsage>(aiKeys.usage)?.available === false) {
+        push({ role: "user", text }, { title: text })
+        push({ role: "ai", error: { code: "ai_unavailable", message: AI_UNAVAILABLE } })
+        await draftFrom(text)
+        return
+      }
+      return submitRemote(text)
+    }
     push({ role: "user", text }, { title: text })
     await answerLocally(text)
   }

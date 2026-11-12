@@ -62,6 +62,16 @@ describe("無來源段落", () => {
 })
 
 describe("串流 reducer：grounding 與 done.disclaimer", () => {
+  it("off_topic（離題婉拒）照一般回答顯示：沒有來源、沒有無來源標記", () => {
+    const usage = { input_tokens: 0, output_tokens: 0, cache_creation_input_tokens: 0, cache_read_input_tokens: 0, web_search_requests: 0, web_fetch_requests: 0 }
+    let m: Message = { id: "m2", role: "ai", text: "", streaming: true, at: "2026-11-12T13:40:00+08:00" }
+    m = applyChatEvent(m, { event: "text", data: { delta: "這個我幫不上忙；想聊你的持股或台股都可以。" } })
+    m = applyChatEvent(m, { event: "done", data: { thread_id: "t", turn_id: "u", model: "m", stop_reason: "off_topic", usage, disclaimer: "AI 回答僅供參考，非投資建議。" } })
+    expect(m).toMatchObject({ streaming: false, disclaimer: "AI 回答僅供參考，非投資建議。", text: "這個我幫不上忙；想聊你的持股或台股都可以。" })
+    expect(m.citations).toBeUndefined()
+    expect(m.ungrounded).toBeUndefined()
+    expect(m.error).toBeUndefined()
+  })
   const base: Message = { id: "m1", role: "ai", text: "外資連四天賣超。", streaming: true, at: "2026-11-12T13:40:00+08:00" }
   it("grounding 累加段落並去重", () => {
     const once = applyChatEvent(base, { event: "grounding", data: { items: [{ text: "外資連四天賣超。", reason: "沒有引用" }] } })

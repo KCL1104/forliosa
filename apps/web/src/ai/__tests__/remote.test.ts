@@ -94,5 +94,7 @@ describe("usageNote", () => {
     expect(usageNote({ messages_remaining: 3, tokens_remaining: 1e6 })).toBe("今天還可以問 3 題。")
     expect(usageNote({ messages_remaining: 0, tokens_remaining: 1e6 })).toContain("用完")
     expect(usageNote({ messages_remaining: null, tokens_remaining: null })).toBeNull()
+    // 所有金鑰都不能用（503 ai_unavailable）：安靜的一句，不是錯誤畫面
+    expect(usageNote({ messages_remaining: 40, tokens_remaining: 1e6, available: false })).toContain("AI 暫時無法使用")
   })
 })
