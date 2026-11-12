@@ -260,7 +260,14 @@ def test_liabilities_fall_back_to_liabilities_and_equity_minus_equity():
 
 def test_submissions_keep_8k_10q_10k_with_titles_and_links():
     meta, rows = sec.parse_submissions(load("sec_submissions_aapl_live_20261112.json"))
+    profile = meta.pop("profile")
     assert meta == {"name": "Apple Inc.", "fiscal_year_end": "0926"}
+    # 「關於」 facts: industry, HQ city / state, exchanges, former names (no street address, phone or EIN)
+    assert (profile["industry"], profile["city"], profile["state"], profile["country"], profile["exchanges"]) == (
+        "Electronic Computers", "CUPERTINO", "CA", "United States", ["Nasdaq"])
+    assert profile["former_names"][1] == {"name": "APPLE COMPUTER INC", "from": "1994-01-26", "to": "2007-01-04"}
+    tsm = sec.parse_profile(load("sec_submissions_tsm_meta_live_20261112.json"))
+    assert (tsm["city"], tsm["state"], tsm["country"], tsm["exchanges"]) == ("HSINCHU", None, "Taiwan", ["NYSE", "OTC"])
     assert rows and {r["form"] for r in rows} <= set(sec.FILING_FORMS)
     assert {"10-K", "10-Q", "8-K", "8-K/A"} <= {r["form"] for r in rows}
     ten_k = next(r for r in rows if r["form"] == "10-K")

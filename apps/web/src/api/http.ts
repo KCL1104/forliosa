@@ -39,6 +39,8 @@ import {
   type RecurringDraft,
   type RecurringPlan,
   type AnalystViews,
+  type CompanyAbout,
+  type RelatedStocks,
 } from "./types"
 
 type Query = Record<string, string | number | null | undefined>
@@ -121,6 +123,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getEvents: (symbol, mine = false) =>
       request<InstrumentEvent[]>("GET", `/instruments/${enc(symbol)}/events`, { query: { mine: String(mine) } }),
     getNews: (symbol) => request<NewsItem[]>("GET", `/instruments/${enc(symbol)}/news`),
+    getRelated: (symbol) => request<RelatedStocks>("GET", `/instruments/${enc(symbol)}/related`),
+    getCompany: (symbol) => request<CompanyAbout>("GET", `/instruments/${enc(symbol)}/company`),
     getPosition: (symbol) => request<Position | null>("GET", `/instruments/${enc(symbol)}/position`),
     // 注意路徑：`/instruments/{symbol}/history` 是日線，交易歷史在 position 底下
     getPositionHistory: (symbol) => request<PositionHistory>("GET", `/instruments/${enc(symbol)}/position/history`),

@@ -12,7 +12,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
@@ -25,6 +25,7 @@ from forliosa.marketdata.opendata import TDCC_LEVELS
 from forliosa.marketdata.service import MarketData
 from forliosa.models import (
     ForeignHoldingDaily,
+    ForeignHoldingTop20,
     InstitutionalDaily,
     MarginDaily,
     MarketEvent,
@@ -51,8 +52,9 @@ from forliosa.timeutil import (
 )
 
 CHIPS_RANGES = ("1M", "3M", "6M", "1Y")
-LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人與外資持股（證交所以付費商品提供），目前不提供；"
-                     "上櫃股票由櫃買中心 OpenAPI 每日存檔")
+LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
+                     "外資持股只公布持股比率前 20 名；上櫃股票由櫃買中心 OpenAPI 每日存檔")
+TOP20_NOTE = "證交所只公布外資持股比率前 20 名，本股只有名列前 20 名的日子才有外資持股比"
 FINANCIAL_PERIODS = ("quarterly", "annual")
 EVENT_PAST_DAYS = 365
 EVENT_FUTURE_DAYS = 120
@@ -227,7 +229,7 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     info = require_instrument(md, symbol)
     sym = info.symbol
     empty = {"symbol": sym, "institutional": [], "margin": [], "foreign_holding_pct": [], "major_holders": None,
-             "sources": [], "notes": []}
+             "sources": [], "notes": [], "foreign_top20": None}
     if info.market == "US":
         return {**empty, "notes": ["美股沒有籌碼資料"]}
     today = today_taipei()
@@ -243,10 +245,12 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
     listed = info.market == "TWSE"
     inst = {} if listed else {r.date: r for r in rows(InstitutionalDaily)}
     margin = {r.date: r for r in rows(MarginDaily)}
-    foreign = {} if listed else {r.date: r for r in rows(ForeignHoldingDaily)}
+    # Listed stocks: only the days the stock was in TWSE's 外資持股前 20 名 (MI_QFIIS_sort_20, decision 8)
+    foreign = {r.date: r for r in rows(ForeignHoldingTop20 if listed else ForeignHoldingDaily)}
+    top20 = _foreign_top20(db, md, sym) if listed else None
     sources = [*tagged([r.source for r in inst.values()], "institutional"),
                *tagged([r.source for r in margin.values()], "margin"),
-               *tagged([r.source for r in foreign.values()], "foreign_holding")]
+               *tagged([r.source for r in foreign.values()], "foreign_top20" if listed else "foreign_holding")]
     notes: list[str] = []
 
     expected = len(tw_trading_days(start, today)) * 0.8
@@ -265,7 +269,7 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
                         target[r["date"]] = _Row(**r, source="finmind")
                         sources.append("finmind")
     if listed:
-        notes.append(LISTED_CHIPS_NOTE)
+        notes.append(TOP20_NOTE if foreign or top20 else LISTED_CHIPS_NOTE)
 
     def lots(shares: int | None) -> float | None:
         return ser.price(Decimal(shares) / 1000) if shares is not None else None
@@ -294,7 +298,21 @@ def chips(db: Session, md: MarketData, symbol: str, range_: str) -> dict[str, An
         "major_holders": major,
         "sources": labels(sources),
         "notes": notes,
+        "foreign_top20": top20,
     }
+
+
+def _foreign_top20(db: Session, md: MarketData, sym: str) -> dict[str, Any] | None:
+    """The stock's place in the latest archived 外資持股前 20 名 list (``None`` when it is not on it)."""
+    clause = source_clause(ForeignHoldingTop20.source, md.policy)
+    latest = db.scalar(select(func.max(ForeignHoldingTop20.date)).where(clause))
+    if latest is None:
+        return None
+    row = db.scalar(select(ForeignHoldingTop20).where(clause, ForeignHoldingTop20.date == latest,
+                                                      ForeignHoldingTop20.symbol == sym))
+    if row is None:
+        return None
+    return {"as_of": row.date, "rank": row.rank, "pct": ser.ratio(row.pct), "limit_pct": ser.ratio(row.limit_pct)}
 
 
 class _Row:

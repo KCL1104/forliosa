@@ -22,7 +22,7 @@ import type {
   WhyReason,
 } from "../types"
 import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
-import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
+import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, FX_NOW, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, rng, tradingDays } from "./market"
@@ -151,6 +151,9 @@ function usMinuteLabels(): string[] {
 // ── chips（法人、融資融券、外資持股、千張大戶） ────────────
 const CHIPS_DAYS: Record<ChipsRange, number> = { "1M": 22, "3M": 63, "6M": 126, "1Y": 250 }
 
+/** 證交所 MI_QFIIS_sort_20（2026-11-12）裡的示範股票：名次、外資持股比與連續在榜的交易日數 */
+const TOP20: Record<string, { rank: number; pct: number; days: number }> = { "3711.TW": { rank: 12, pct: 0.7552, days: 9 } }
+
 export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", commercial = false): Chips {
   if (spec.market === "US") {
     return { institutional: [], margin: [], foreign_holding_pct: [], major_holders: null, sources: commercial ? [] : DEMO_SRC, is_demo: !commercial }
@@ -160,18 +163,25 @@ export function buildChips(spec: MockInstrumentSpec, range: ChipsRange = "3M", c
     const kept = <T extends { t: string }>(rows: T[]) => rows.filter((r) => r.t >= ARCHIVE_START)
     const short = full.margin.some((r) => r.t < ARCHIVE_START)
     const listed = spec.market === "TWSE"
-    const notes = [...(listed ? [TWSE_CHIPS_NOTE] : []), ...(short ? [accumulatingNote()] : [])]
+    // 上市股票：只有名列證交所「外資及陸資持股前 20 名」的日子有外資持股比（示範：日月光投控第 12 名）
+    const top20 = listed ? TOP20[spec.symbol] : undefined
+    const wiggle = rng(`top20:${spec.symbol}`)
+    const top20Rows = top20
+      ? tradingDays(top20.days).map((t, i, all) => ({ t, pct: i === all.length - 1 ? top20.pct : round(top20.pct - (all.length - 1 - i) * 0.0004 + (wiggle() - 0.5) * 0.0012, 4) }))
+      : []
+    const notes = [...(listed ? [top20 ? TOP20_NOTE : TWSE_CHIPS_NOTE] : []), ...(short ? [accumulatingNote()] : [])]
     const src = listed
-      ? [sourceOf("twse-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
+      ? [sourceOf("twse-openapi/margin"), ...(top20 ? [sourceOf("twse-openapi/foreign_top20")] : []), sourceOf("tdcc-opendata/distribution")]
       : [sourceOf("tpex-openapi/institutional"), sourceOf("tpex-openapi/foreign_holding"), sourceOf("tpex-openapi/margin"), sourceOf("tdcc-opendata/distribution")]
     return {
       institutional: listed ? [] : kept(full.institutional),
       margin: kept(full.margin),
-      foreign_holding_pct: listed ? [] : kept(full.foreign_holding_pct),
+      foreign_holding_pct: listed ? top20Rows : kept(full.foreign_holding_pct),
       major_holders: full.major_holders,
       sources: src,
       is_demo: false,
       notes,
+      foreign_top20: top20 ? { as_of: MOCK_TODAY, rank: top20.rank, pct: top20.pct, limit_pct: 1 } : null,
     }
   }
   const days = tradingDays(CHIPS_DAYS[range])

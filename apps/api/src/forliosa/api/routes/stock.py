@@ -1,4 +1,5 @@
-"""Stock page endpoints: overview, intraday, chips, financials, events, news, position, why, analyst views."""
+"""Stock page endpoints: overview, intraday, chips, financials, events, news, related, company, position, why,
+analyst views."""
 
 from __future__ import annotations
 
@@ -11,17 +12,21 @@ from forliosa.ai.why import enhance_why
 from forliosa.api.deps import current_user
 from forliosa.api.schemas import (
     Chips,
+    CompanyAbout,
     Financials,
     Intraday,
     NewsItem,
     Overview,
     Position,
     PositionHistory,
+    Related,
     StockEvent,
 )
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
+from forliosa.services import company as company_svc
+from forliosa.services import related as related_svc
 from forliosa.services import stock as svc
 
 router = APIRouter(prefix="/instruments/{symbol}", tags=["stock"])
@@ -58,6 +63,18 @@ def events(symbol: str, mine: bool = Query(False), user: User = Depends(current_
             summary="公告（重大訊息、證交所新聞）＋新聞報導（媒體原標題、媒體名稱、時間、原文連結）")
 def news(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
     return svc.news(db, get_market_data(), symbol)
+
+
+@router.get("/related", response_model=Related,
+            summary="相關股票：ETF／基準、關係企業、同業（最多 4 張卡，規則挑選，只用政府開放資料）")
+def related(symbol: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return related_svc.related(db, get_market_data(), user, symbol)
+
+
+@router.get("/company", response_model=CompanyAbout,
+            summary="關於〈公司〉：官方公司資料（含董事長、總經理原文）與簡介（維基百科節錄或 AI 依公開資料整理）")
+def company(symbol: str, _user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return company_svc.about(db, get_market_data(), symbol)
 
 
 @router.get("/position", response_model=Position | None, summary="我的部位（未持有回 null）")

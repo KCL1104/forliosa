@@ -1,0 +1,38 @@
+{
+ "type": "standard",
+ "title": "台積電",
+ "displaytitle": "<span lang=\"zh-Hant-TW\" dir=\"ltr\"><span class=\"mw-page-title-main\">台積電</span></span>",
+ "namespace": {
+  "id": 0,
+  "text": ""
+ },
+ "wikibase_item": "Q713418",
+ "titles": {
+  "canonical": "台積電",
+  "normalized": "台積電",
+  "display": "<span lang=\"zh-Hant-TW\" dir=\"ltr\"><span class=\"mw-page-title-main\">台積電</span></span>"
+ },
+ "pageid": 74265,
+ "lang": "zh",
+ "dir": "ltr",
+ "revision": "95542651",
+ "tid": "4e1e81b0-de53-11f1-8616-9ca30729a379",
+ "timestamp": "2026-11-12T04:39:10Z",
+ "description": "知名高科技企業、台灣的半導體晶片製造公司",
+ "description_source": "central",
+ "content_urls": {
+  "desktop": {
+   "page": "https://zh.wikipedia.org/wiki/%E5%8F%B0%E7%A9%8D%E9%9B%BB",
+   "revisions": "https://zh.wikipedia.org/wiki/%E5%8F%B0%E7%A9%8D%E9%9B%BB?action=history",
+   "edit": "https://zh.wikipedia.org/wiki/%E5%8F%B0%E7%A9%8D%E9%9B%BB?action=edit",
+   "talk": "https://zh.wikipedia.org/wiki/Talk:%E5%8F%B0%E7%A9%8D%E9%9B%BB"
+  },
+  "mobile": {
+   "page": "https://zh.wikipedia.org/wiki/%E5%8F%B0%E7%A9%8D%E9%9B%BB",
+   "revisions": "https://zh.wikipedia.org/wiki/Special:History/%E5%8F%B0%E7%A9%8D%E9%9B%BB",
+   "edit": "https://zh.wikipedia.org/wiki/%E5%8F%B0%E7%A9%8D%E9%9B%BB?action=edit",
+   "talk": "https://zh.wikipedia.org/wiki/Talk:%E5%8F%B0%E7%A9%8D%E9%9B%BB"
+  }
+ },
+ "extract": "台灣積體電路製造，簡稱台積電、TSMC，與旗下子公司合稱台積電集團，是臺灣一家專注於半導體晶片製造的高科技跨國企業，總部位於新竹科學園區，近年市值穩居全球前十大企業，也是全球最領先的半導體晶片製造商。台積電開創了專業積體電路製造服務 商業模式，只為客戶製造晶片，不設計、生產或銷售自有品牌的半導體產品，以確保不與客戶競爭；此一模式也促成了全球無廠IC設計產業的興起。\n"
+}

@@ -160,6 +160,43 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(c.notes?.[0]).toContain("上市股票")
     expect((await api.getChips("6488.TWO", "1M")).institutional.length).toBeGreaterThan(0)
   })
+  it("上市股票：名列外資持股前 20 名才有外資持股比（名次＋說明）", async () => {
+    const ase = await api.getChips("3711.TW", "1M")
+    expect(ase.foreign_top20).toEqual({ as_of: "2026-11-12", rank: 12, pct: 0.7552, limit_pct: 1 })
+    expect(ase.foreign_holding_pct.at(-1)?.pct).toBe(0.7552)
+    expect(ase.notes?.[0]).toContain("前 20 名")
+    expect(ase.sources.join("")).toContain("外資及陸資持股前20名彙總表")
+    const tsmc = await api.getChips("2330.TW", "1M")
+    expect(tsmc.foreign_top20).toBeNull()
+    expect(tsmc.foreign_holding_pct).toEqual([])
+  })
+  it("相關股票：基準不寫「持有本股」、關係企業、同業；ETF 頁同指數；美股沒有", async () => {
+    const r = await api.getRelated("2330.TW")
+    expect(r.items.map((c) => [c.symbol, c.reason])).toEqual([
+      ["0050.TW", "benchmark"], ["3443.TW", "affiliate"], ["2454.TW", "peer"], ["3711.TW", "peer"],
+    ])
+    expect(r.items[0]!.reason_label).toBe("你的比較基準")
+    expect(r.items.every((c) => !c.reason_label.includes("持有本股") && c.sparkline.length >= 15)).toBe(true)
+    expect(r.notes).toEqual(["關係企業依董監事持股餘額明細（2026 年 9 月）"])
+    const gw = await api.getRelated("6488.TWO")
+    expect(gw.items[0]).toMatchObject({ symbol: "006201.TWO", reason: "constituent", reason_label: "富櫃五十成分股（櫃買中心公布）" })
+    expect(gw.items[1]).toMatchObject({ symbol: "5483.TWO", reason: "affiliate", reason_label: "環球晶的法人董事及大股東" })
+    const hon = await api.getRelated("2317.TW")
+    expect(hon.items.filter((c) => c.reason === "affiliate").map((c) => c.symbol).sort()).toEqual(["2258.TW", "2328.TW"])
+    const etf = await api.getRelated("0050.TW")
+    expect(etf.items.map((c) => [c.symbol, c.reason])[0]).toEqual(["006208.TW", "same_index"])
+    expect((await api.getRelated("AAPL")).items).toEqual([])
+  })
+  it("關於〈公司〉：官方資料（董事長、總經理照原文）、維基百科節錄或 AI 簡介", async () => {
+    const c = await api.getCompany("2330.TW")
+    expect([c.chairman, c.president, c.hq, c.website, c.years_since_incorporation]).toEqual(["魏哲家", "總裁: 魏哲家", "新竹科學園區", "https://www.tsmc.com", 39])
+    expect(c.description).toMatchObject({ kind: "wikipedia", label: "節錄", license: "CC BY-SA 4.0" })
+    expect(c.sources.join("")).toContain("CC BY-SA 4.0")
+    const gw = await api.getCompany("6488.TWO")
+    expect(gw.description).toMatchObject({ kind: "ai", label: "AI 依公開資料整理" })
+    expect(gw.description!.text).not.toContain(gw.chairman!)
+    expect((await api.getCompany("AAPL")).hq).toBe("Cupertino, CA")
+  })
   it("事件：法說會、預估（法定期限）與期間", async () => {
     const ev = await api.getEvents("2330.TW")
     expect(ev.some((e) => e.type === "investor_conference")).toBe(true)
@@ -247,8 +284,13 @@ describe("資料來源與授權", () => {
     expect(a.datasets.length).toBeGreaterThan(20)
     for (const d of a.datasets) {
       // 政府資料開放授權條款：「依…第 1 版」；SEC EDGAR 是美國政府公開資料（授權連結另列）
-      // GDELT（新聞報導）：使用條款要求引用並連回 gdeltproject.org
-      const tail = d.key.startsWith("sec-edgar/") ? "美國政府公開資料" : d.key === "gdelt/doc" ? "依 GDELT 使用條款引用：https://www.gdeltproject.org/" : `依${d.license}`
+      // GDELT（新聞報導）：使用條款要求引用並連回 gdeltproject.org；維基百科 CC BY-SA 4.0 節錄、Wikidata CC0
+      const special: Record<string, string> = {
+        "gdelt/doc": "依 GDELT 使用條款引用：https://www.gdeltproject.org/",
+        "wikipedia/zh": "依 CC BY-SA 4.0 節錄（不改寫）",
+        "wikidata/entities": "CC0 1.0（公眾領域）",
+      }
+      const tail = d.key.startsWith("sec-edgar/") ? "美國政府公開資料" : special[d.key] ?? `依${d.license}`
       expect(d.attribution).toBe(`${d.agency}〈${d.dataset}〉（${d.year}），${tail}`)
     }
     expect(a.datasets.filter((d) => d.key.startsWith("sec-edgar/")).map((d) => d.license_url)).toEqual(Array(3).fill("https://www.sec.gov/about/webmaster-frequently-asked-questions"))

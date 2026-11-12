@@ -731,6 +731,101 @@ fixture 是 2026-11-12 的真實回應裁短：`gdelt_tsmc_taiwan_live_20261112.
 3. **專欄名稱**：「| 台股雜談」這類專欄名稱目前保留（和 Google 財經一樣）。要不要也去掉？
 4. **Yahoo股市 RSS 的個股網址**：`?s=<代號>` 回的是全站最新新聞，只能靠標題篩選，命中率低。個股 RSS 的正確網址要在一般瀏覽器開 rss-index 產生一次確認。
 
+## 2026-11-12 相關股票、公司資料、外資持股前 20 名（個股頁補強第 4–8 項）
+
+產品負責人決定（`PRODUCT.md`「個股頁補強」4、6、7、8；第 5 項的授權詢問信稿在 `docs/outreach/`，第 9 項 ETF 淨值另案）。
+研究：[`docs/research/news-and-external-sources.md`](../../docs/research/news-and-external-sources.md) §8（相關股票）、§9（公司資料）。
+形狀見 [`docs/api-contract.md`](../../docs/api-contract.md)「相關股票、關於〈公司〉、上市股票外資持股前 20 名」。
+
+### 新的存檔（都是政府資料開放授權；欄位名稱在 `marketdata/company_data.py`，2026-11-12 真實回應核對）
+
+| 資料表 | 來源 | 群組／頻率 | 注意 |
+|---|---|---|---|
+| `board_links` | 證交所 `t187ap11_L`、櫃買 `mopsfin_t187ap11_O`〈董事、監察人持股餘額明細〉（資料年月約落後 6 週） | `monthly`（每月 10、25 日 10:20） | 只留**職稱含「本人」且姓名＝上市櫃公司全名**的列（公司擔任法人董事或大股東），比對用 `company_profiles` 的公司名稱（去空白、相容漢字正規化，其餘完全相同）。**自然人列在解析迴圈裡就跳過**：不存、不記 log、不計數；國發基金這類非上市櫃法人也不留；設質欄位不讀。一列＝(公司, 持有公司, 資料年月)＋職稱合併（「董事長、董事、大股東」）＋目前持股（公司的股數）。2026-11-12：1,653 列、560 家公司 |
+| `index_constituents` | 櫃買 `tpex50_constituents`〈富櫃五十指數成分股〉 | `tpex`（每天） | 每天一份 50 檔 |
+| `holder_counts_monthly` | 集保 `2-22`（上市）、`2-23`（上櫃）〈有價證券集中保管個別股票異動月分析表〉 | `monthly` | 集保股東戶數（ETF 受益人數）＋保管與發行千股數；只公布最新月份，所以每月存。同一檔可能出現兩次（006201），只留一列 |
+| `foreign_holding_top20` | 證交所 `/fund/MI_QFIIS_sort_20`〈集中市場外資及陸資持股前 20 名彙總表〉 | `twse` | **沒有日期欄位**：21:00 後的執行算當天（交易日）、09:00 前算前一個交易日、白天（14:40）略過——證交所沒說幾點更新，避免把昨天的名單蓋成今天。同一天重跑會刪掉掉出名單的股票。2026-11-12 的名單大多是 KY 股（最高 99.53%），一般權值股不在榜 |
+| `esg_product_output` | 證交所 `t187ap46_L_14`、櫃買 `t187ap46_O_14`〈ESG 資訊揭露－產品品質與安全〉的「依產品類別之產品產量」 | `monthly` | 只拿來給 AI 簡介當官方資料；N/A 不存 |
+| `company_descriptions` | 中文維基百科（經 Wikidata 找條目）或 AI | worker `company_refresh`（每小時 :35） | 見下面「公司簡介」 |
+| `sec_companies.profile` | SEC submissions | 跟著申報清單更新 | SIC 產業、營業地址的城市與州（外國公司給國家）、交易所、曾用名稱；街道地址、電話、EIN 不存 |
+
+`company_profiles.values` 多了 `hq`（縣市；地址本身不存）、`registered_in`（KY 等）、`website`（一律 https、主機小寫；`http//`、全形冒號也能解析）、
+`auditor`（事務所名稱，`html.unescape`：「冠恆&#32852;合」→「冠恆联合」照原字、相容漢字 U+F997 →「聯」）、`transfer_agent`（只有名稱）、
+**`chairman`、`president`（董事長、總經理照原文，例如台積電「總裁: 魏哲家」）**。發言人、代理發言人、簽證會計師姓名、電話、傳真、Email、統一編號都不讀。
+每天覆寫同一列，不留歷史。這兩個姓名**只**從 `GET /instruments/{symbol}/company` 出去：`forliosa.ai` 不引用 `services/company.py`，
+AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示）都不含姓名（`tests/company/test_company.py` 檢查），也不和董監持股、質押合併
+（`board_links` 只有公司對公司）。**商用前請律師確認**（個資法第 19 條「已合法公開」的範圍，研究 §9）。
+
+**總部縣市**：證交所的中文地址取開頭的縣市（去掉郵遞區號、「台灣」，「巿」當「市」）；「新竹科學園區」「新竹市科學工業園區」一律顯示「新竹科學園區」，
+其他科學園區照原文；「北市…」這種縮寫不猜。櫃買只有英文地址：只有出現**恰好一個**明確的縣市（New Taipei、Taipei City、Taoyuan、Hsinchu County…）
+或新竹科學園區時才給，「Taipei」單獨出現（可能是舊台北縣）、「Hsinchu」單獨出現（市或縣）、路名撞城市名（Keelung Rd.、Ping-Tung Rd.）都給 `null`。
+2026-11-12：上市 1,099 家有 1,064 家有縣市；上櫃 897 家有 730 家。
+
+### 相關股票（`services/related.py`）
+
+- **基準卡**：上櫃且在最新一份富櫃五十成分股 → 006201「富櫃五十成分股（櫃買中心公布）」；其他 → 使用者偏好的比較基準（`preferences.benchmark`）
+  「你的比較基準」；基準是 `^TAIEXTR`／`^TPEXTR` 時是指數卡（`is_index`，存檔指數收盤），沒有存檔就不放。**從不寫「某 ETF 持有本股」**。
+- **關係企業**：最新資料年月的 `board_links`，兩個方向都算（「台積電是其法人董事及大股東」「世界的大股東」），市值大的先；存託憑證（91）不放。
+- **同業**：同產業別、市值（已發行股數 × 最新存檔收盤）對數距離最近；產業市值最大的不是本股時先放它（「半導體業市值最大」）。31 其他電子業改用電子類（24–31）
+  「電子類、市值相近」，20 其他業改用使用者自己的台股持股「你的持股、市值相近」；這兩類關係企業最多 2 張。
+- **組合**：基準 1 張 → 關係企業 1 張（雜項 2 張）→ 同業補滿 → 還不滿 4 張再補關係企業。卡片：名稱用官方簡稱（公司基本資料、基金簡稱），收盤與漲跌用報價
+  （除權息日用參考價算），`sparkline` 是最近約 35 天的存檔收盤。
+- **ETF 頁**：t187ap47_L 的追蹤指數＋基金類型相同（槓桿／反向型是另一類型，所以 0050 的同指數只有 006208），再補同類型、集保股東戶數最多的。
+  櫃買 ETF 沒有基金基本資料，目前只會拿到空的列（前端不顯示）。
+- 2026-11-12 模擬（測試用收盤）：2330 → 0050、創意、聯發科、日月光投控；5347 → 006201、台積電、環球晶…；2317 → 0050、鴻華先進、廣宇、電子類同業。
+
+### 公司簡介（`services/company.py`、`marketdata/wikimedia.py`）
+
+1. **找條目**：Wikidata `wbsearchentities`（zh-tw，簡稱與全名各一次）→ `wbgetentities`（claims、zhwiki sitelink、中文標籤與別名）→
+   先找 P414（交易所）＝證交所 Q548621／櫃買 Q5598539（美股：NYSE Q13677、Nasdaq Q82059）且 P249（代號）限定詞＝代號的項目；
+   沒有就找中文標籤或別名**完全等於**公司全名的項目（環球晶的項目沒有 P414，靠別名「環球晶圓股份有限公司」找到）。只認有 zh.wikipedia 條目的項目。
+2. **節錄**：`zh.wikipedia.org/api/rest_v1/page/summary/{title}`，`Accept-Language: zh-tw`（台灣字形）；在句號（。！？）處截斷，累積到 260 字為止（至少第一句）；
+   **文字不改寫**、不送進任何 AI；存條目標題、`revision_id`、Wikidata 編號。前端標「節錄」並連到條目（`zh.wikipedia.org/zh-tw/<標題>`）與 CC BY-SA 4.0。
+3. **AI 簡介**（沒有條目時）：一次非串流呼叫（`AI_MODEL_COMPANY`，預設 Haiku 等級），提示只有官方資料：簡稱、全名、產業別、成立年、掛牌年與市場、總部或註冊地、
+   實收資本額（「約 2,593 億元」）、最近月營收規模、ESG 產品類別文字；**不含董事長、總經理**。回覆超過 160 字、含網址或含公司負責人姓名就丟掉。
+   `facts_key`＝這些資料的 SHA-256：資料沒變不重寫。系統付費（`ai_usage.feature = "company"`、`user_id` 空），每批最多 `COMPANY_AI_PER_RUN`（10）次。
+4. **排程**：worker `company_refresh` 每小時，處理追蹤中的股票（帳本、持股、自選、`NEWS_VIEW_DAYS` 內看過的；`/company` 也會記錄「看過」），
+   沒查過的先、每批最多 `COMPANY_MAX_SYMBOLS_PER_RUN`（15）次維基查詢；維基每 `COMPANY_WIKI_REFRESH_DAYS`（30）天重查一次（條目消失就改回沒有）。
+   CLI：`uv run python -m forliosa.services.company refresh [2330.TW …]`。
+5. **禮貌**：User-Agent `Forliosa/1.0`，有 `WIKIMEDIA_CONTACT` 時加「(聯絡方式)」；**不用 `SEC_CONTACT_EMAIL`**。同一個程序一次只發一個 Wikimedia 請求
+   （全域鎖、每個主機間隔 1.5 秒），429／403 → 這批停止、6 小時內不再查，不換身分、不換 IP。白名單只多兩個網址：`www.wikidata.org/w/api.php`、
+   `zh.wikipedia.org/api/rest_v1/page/summary/`。
+
+### 環境變數
+
+`COMPANY_DESCRIPTIONS_ENABLED`（true）、`COMPANY_AI_ENABLED`（true）、`COMPANY_AI_PER_RUN`（10）、`COMPANY_MAX_SYMBOLS_PER_RUN`（15）、
+`COMPANY_WIKI_REFRESH_DAYS`（30）、`AI_MODEL_COMPANY`（預設 `AI_MODEL`）、`WIKIMEDIA_CONTACT`（選填）。
+
+### 授權與顯名
+
+`datapolicy.DATASETS` 多：`twse-openapi/foreign_top20`、`twse-openapi/board`、`tpex-openapi/board`、`tpex-openapi/tpex50`（data.gov.tw 20220）、
+`tdcc-opendata/holders_twse`（20603）、`tdcc-opendata/holders_tpex`（20605）、`twse-openapi/esg_products`、`tpex-openapi/esg_products`（以上 OGDL）、
+`wikipedia/zh`（`open`，CC BY-SA 4.0：「依 CC BY-SA 4.0 節錄（不改寫）」）、`wikidata/entities`（`open`，CC0）。`/meta/attributions.notice` 多一行維基百科。
+公司基本資料的 `used_for` 加上「關於」的欄位。
+
+### 測試（不連網）
+
+- `tests/archive/test_stock_page_jobs.py`：董監持股只留公司對公司（fixture 的自然人姓名已換成「自然人NN」，國發基金、華創車電不留，log 也沒有）、
+  集保 2-22／2-23 去重、前 20 名依執行時間定日期、富櫃五十、ESG、地址與網址規則、沒有公司基本資料時的錯誤、冪等。
+- `tests/company/`：`test_related.py`（台積電、世界、鴻海、指數基準、0050、美股、存託憑證）、`test_company.py`（條目比對、節錄、User-Agent、
+  維基→AI、facts_key 快取、含人名的 AI 回覆丟棄、429 暫停、`/company` 台股／KY／ETF／美股、AI 工具不含姓名、上市前 20 名）。
+- fixture 是 2026-11-12 真實回應裁短：`twse_t187ap11_l`／`tpex_t187ap11_o`（29／16 列）、`*_t187ap03_*_related`（13／5 家）、`twse_t187ap47_l_related`、
+  `tpex_tpex50_constituents`、`twse_mi_qfiis_sort_20`、`*_t187ap46_*_14`、`tdcc_2-22`／`2-23`、`sec_submissions_tsm_meta`、AAPL submissions 補上地址與曾用名稱；
+  `tests/company/fixtures/` 的 Wikidata 搜尋（台積電、環球晶、家登＝沒有、櫃買中心）、項目（只留 P414）、台積電條目摘要（去掉圖片欄位）。
+
+### 實測（2026-11-12）
+
+- 沙盒共用出口對 Wikimedia 常回 429（「You are making too many requests」）：一次一個請求、間隔 8 秒、429 後等 2 分鐘，約 20 分鐘拿到 7 個回應；
+  `list=search` 的 `haswbstatement` 查詢一直 429（也不支援限定詞），所以改用 `wbsearchentities`＋`wbgetentities`。正式環境建議設定 `WIKIMEDIA_CONTACT`。
+- 環球晶的條目摘要四次都 429，沒有 fixture；測試裡家登（沒有 Wikidata 項目）走 AI 簡介。
+
+### 待產品負責人確認
+
+1. **董事長、總經理**：照決定顯示、標來源；正式收費前請律師確認（研究 §9）。要不要先只在登入後顯示（現在就是只有登入後才看得到）？
+2. **外資持股前 20 名的日期**：證交所沒說明更新時間，目前晚上 21:00 後的存檔算當天。若發現晚上還是前一天的名單，改成只在早上存（算前一個交易日）。
+3. **AI 簡介的範圍**：目前只寫追蹤中的股票（持有、自選、3 天內看過），每批最多 10 則。要不要讓沒有條目的股票第一次被看時就立刻產生（多一次 AI 呼叫、頁面稍後更新）？
+4. **ETF 頁的「相關股票」**：上櫃 ETF（006201 等）沒有基金基本資料，現在不顯示這一列。要不要改用「同類型、受益人數多」的上市 ETF 補？
+
 ## 待產品負責人確認
 
 1. **手續費捨去的順序**：目前是 `floor(成交金額 × 0.1425% × 折扣)`，低於最低手續費以最低計。

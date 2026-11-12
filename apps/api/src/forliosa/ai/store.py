@@ -41,7 +41,7 @@ TITLE_MAX = 40
 def model_for(feature: str, settings: Settings) -> str:
     override = {"chat": settings.ai_model_chat, "why": settings.ai_model_why, "import": settings.ai_model_import,
                 "report": settings.ai_model_report, "analyst": settings.ai_model_analyst,
-                "news": settings.ai_model_news}.get(feature)
+                "news": settings.ai_model_news, "company": settings.ai_model_company}.get(feature)
     return (override or settings.ai_model).strip()
 
 

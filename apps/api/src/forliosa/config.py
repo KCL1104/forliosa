@@ -135,6 +135,19 @@ class Settings(BaseSettings):
     # that ``python -m forliosa.news block <domain>`` maintains.
     news_blocked_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
 
+    # -- 「關於」 description (decision 7): a zh.wikipedia excerpt (CC BY-SA 4.0) or, without an article, an AI-written
+    # 2–3 sentence description from official facts (feature "company", system-paid, at most COMPANY_AI_PER_RUN per
+    # run). The worker refreshes tracked / recently viewed symbols: Wikipedia monthly, AI only when the facts change.
+    company_descriptions_enabled: bool = True
+    company_ai_enabled: bool = True
+    company_ai_per_run: int = Field(default=10, ge=0)
+    company_max_symbols_per_run: int = Field(default=15, ge=1)
+    company_wiki_refresh_days: int = Field(default=30, ge=7)
+    ai_model_company: str | None = None
+    # Optional contact appended to the Wikimedia User-Agent ("Forliosa/1.0 (<contact>)"), per Wikimedia's
+    # User-Agent policy. Its own variable: SEC_CONTACT_EMAIL is only ever sent to SEC.
+    wikimedia_contact: str | None = None
+
     @field_validator("news_blocked_domains", mode="before")
     @classmethod
     def _split_news_domains(cls, v: object) -> object:

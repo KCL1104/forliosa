@@ -1,0 +1,36 @@
+{
+ "searchinfo": {
+  "search": "環球晶圓股份有限公司"
+ },
+ "search": [
+  {
+   "id": "Q42260199",
+   "title": "Q42260199",
+   "pageid": 43543770,
+   "concepturi": "http://www.wikidata.org/entity/Q42260199",
+   "repository": "wikidata",
+   "url": "//www.wikidata.org/wiki/Q42260199",
+   "display": {
+    "label": {
+     "value": "環球晶圓",
+     "language": "zh-tw"
+    },
+    "description": {
+     "value": "環球晶圓股份有限公司的前身為中美矽晶製品股份有限公司的半導體事業處",
+     "language": "zh-tw"
+    }
+   },
+   "label": "環球晶圓",
+   "description": "環球晶圓股份有限公司的前身為中美矽晶製品股份有限公司的半導體事業處",
+   "match": {
+    "type": "alias",
+    "language": "zh-tw",
+    "text": "環球晶圓股份有限公司"
+   },
+   "aliases": [
+    "環球晶圓股份有限公司"
+   ]
+  }
+ ],
+ "success": 1
+}

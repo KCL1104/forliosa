@@ -336,7 +336,7 @@
 |---|---|---|
 | GET | `/instruments/{symbol}/overview` | `{open, high, low, prev_close, reference_price, limit_up, limit_down, volume, avg_volume_3m, market_cap, pe, pb, dividend_yield, last_cash_dividend, ex_dividend_date, eps_ttm, high_52w, low_52w, shares_outstanding, status: {attention, disposition, note}, as_of, sources, is_demo}`；欄位缺資料時為 `null` |
 | GET | `/instruments/{symbol}/intraday` | `{symbol, date, prev_close, reference_price, points: [{t: "09:01", price, volume}], is_partial, sources}`；只有持股與自選會累積盤中點（每 30–60 秒輪詢），其他回 `points: []` |
-| GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}`；**上市（TWSE）股票的 `institutional`、`foreign_holding_pct` 任何模式都是 `[]`**，`notes` 說明原因（產品負責人 2026-11-12：不寄信給證交所、不買 Data E-Shop；上櫃照常用櫃買 OpenAPI）；融資融券與集保照常 |
+| GET | `/instruments/{symbol}/chips?range=3M` | `{institutional: [{t, foreign, trust, dealer, total}]（單位：張）, margin: [{t, margin_balance, short_balance}]（張）, foreign_holding_pct: [{t, pct}], major_holders: {as_of, buckets: [{level, holders, shares, pct}]} \| null, sources}`；**上市（TWSE）股票的 `institutional` 任何模式都是 `[]`**；`foreign_holding_pct` 只在名列證交所外資持股前 20 名時有值（多 `foreign_top20`，見「相關股票、關於〈公司〉、上市股票外資持股前 20 名」），其他為 `[]`，`notes` 說明原因（產品負責人 2026-11-12：不寄信給證交所、不買 Data E-Shop；上櫃照常用櫃買 OpenAPI）；融資融券與集保照常 |
 | GET | `/instruments/{symbol}/financials?period=quarterly\|annual` | `{periods: ["2026Q2", …], income: {revenue, gross_profit, operating_income, net_income, eps}, balance: {total_assets, total_liabilities, equity}, cashflow: {operating, investing, financing, free_cash_flow}, margins: {gross, operating, net}, sources}`；每個欄位是與 `periods` 等長的陣列，金額單位新台幣千元（美股：美元、公司會計年度，見「美股基本面（SEC EDGAR）」） |
 | GET | `/instruments/{symbol}/events?mine=false` | `[{date, type, title, detail, url, mine, amount_estimate}]`；`type`：`ex_dividend`、`dividend_payment`、`earnings`、`revenue_release`、`material_info`、`attention`、`disposition`、`shareholder_meeting`；美股另有 `sec_filing`（`form`：8-K／10-Q／10-K） |
 | GET | `/instruments/{symbol}/news` | `[{published_at, title, source, outlet, url, category, date_only, sources}]`：官方公告在前、新聞報導在後（只有標題、媒體、時間、連結；見「新聞報導」） |
@@ -450,6 +450,58 @@
   「公告」區與事件分頁只放官方公告（`category` 不是 `media`）。
 - `/meta/attributions` 多了 `gdelt/doc`（`license_status: "open"`，可商用、需引用），personal 另有 `yahoo-rss/stock`（`license_status: "non_commercial"`）；
   `notice` 多一行 GDELT 條款，commercial 的 `not_used` 多「新聞網站本身」與「Yahoo股市 RSS」兩行。
+
+### 相關股票、關於〈公司〉、上市股票外資持股前 20 名（2026-11-12）
+產品負責人決定（`PRODUCT.md`「個股頁補強」第 4、6、7、8 項；規則 [`docs/research/news-and-external-sources.md`](research/news-and-external-sources.md) §8、§9）。
+細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-12 相關股票、公司資料、外資持股前 20 名」。
+
+| 方法 | 路徑 | 回傳 |
+|---|---|---|
+| GET | `/instruments/{symbol}/related` | `{symbol, items: [RelatedCard]（最多 4 張）, sources, notes}`；美股 `items: []`＋`notes` |
+| GET | `/instruments/{symbol}/company` | `CompanyAbout`（台股：證交所／櫃買〈公司基本資料〉；美股：SEC submissions；ETF：〈基金基本資料彙總表〉）＋`description` |
+
+```json
+// RelatedCard
+{"symbol": "3443.TW", "name": "創意", "reason": "affiliate", "reason_label": "台積電是其法人董事及大股東",
+ "close": 1960.0, "change_pct": -0.0126, "as_of": "2026-11-11",
+ "sparkline": [{"t": "2026-10-14", "price": 1890.0}], "is_index": false, "notes": [], "is_demo": false}
+
+// CompanyAbout（台股）
+{"symbol": "2330.TW", "name": "台灣積體電路製造股份有限公司", "short_name": "台積電", "english_short_name": "TSMC",
+ "market": "TWSE", "type": "stock", "industry": "半導體業", "incorporated": "1987-02-21", "years_since_incorporation": 39,
+ "listed_date": "1994-09-05", "listing": "上市", "hq": "新竹科學園區", "registered_in": null, "website": "https://www.tsmc.com",
+ "paid_in_capital": 259323700670, "chairman": "魏哲家", "president": "總裁: 魏哲家", "auditor": "勤業眾信聯合會計師事務所",
+ "transfer_agent": "中國信託商業銀行 代理部", "exchanges": [], "fiscal_year_end": null, "former_names": [], "fund": null,
+ "description": {"kind": "wikipedia", "text": "台灣積體電路製造，簡稱台積電……", "label": "節錄", "title": "台積電",
+                 "url": "https://zh.wikipedia.org/zh-tw/%E5%8F%B0%E7%A9%8D%E9%9B%BB", "source": "維基百科",
+                 "license": "CC BY-SA 4.0", "license_url": "https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hant",
+                 "revision_id": 95542651, "updated_at": "2026-11-12T14:35:00+08:00"},
+ "data_date": "2026-11-11", "sources": ["臺灣證券交易所〈上市公司基本資料〉（2026），依政府資料開放授權條款第 1 版", "…"], "notes": []}
+```
+
+- **相關股票**（只用政府開放資料，規則挑選，不用 AI、不用別人的觀察清單）：
+  - `reason`：`benchmark`（使用者的比較基準，`reason_label`「你的比較基準」；基準是指數時 `is_index: true`、「你的比較基準（指數）」，不能點）、
+    `constituent`（上櫃且為富櫃五十成分股 → 006201「富櫃五十成分股（櫃買中心公布）」）、`affiliate`（董監事持股餘額明細：上市櫃公司擔任法人董事或大股東，
+    「台積電是其法人董事及大股東」「世界的大股東」）、`leader`（同產業市值最大）、`peer`（同產業、市值最接近；其他電子業改用電子類「電子類、市值相近」）、
+    `holding`（其他業：使用者自己的持股「你的持股、市值相近」）、`same_index`／`same_type`（ETF 頁：追蹤同一指數、同類型受益人數多）。
+  - **不寫「某 ETF 持有本股」**：臺灣50 等成分股清單沒有開放授權（授權詢問信稿：`docs/outreach/etf-holdings-inquiry.md`）。存託憑證（91）不出現。
+  - 順序：基準／成分股、關係企業（1 張；雜項產業 2 張）、同業補滿；`sparkline` 是存檔收盤（約 1 個月）；`notes` 有關係企業時寫資料年月。
+  - 前端：總覽「相關股票」列（桌機一列 4 格、手機橫向捲動），**少於 2 張就不顯示**。
+- **關於〈公司〉**：產業別、成立日期（`years_since_incorporation`＝「成立 N 年」）、上市／上櫃日期、總部（`hq`：從中文地址取縣市，「新竹科學園區」照原文；
+  櫃買只有英文地址，對照確定才給，否則 `null`；KY 等外國企業給 `registered_in` 註冊地、`hq` 為 `null`）、網站（https）、實收資本額（元）、
+  **董事長、總經理（照官方原文，例如「總裁: 魏哲家」）**、簽證會計師事務所、股務代理（只有名稱）、英文簡稱；`data_date` 是出表日期。
+  董事長、總經理每天覆寫、不留歷史，只出現在這個端點：不進 AI 提示或 AI 工具輸出，也不和董監持股、質押合併。
+  美股：`industry`（SIC）、`hq`（「Cupertino, CA」；外國公司「Hsinchu, Taiwan」）、`exchanges`、`fiscal_year_end`（「09-26」）、`former_names`。
+  ETF：`fund: {fund_type, index_name, custodian, units}`、成立與上市日期。
+- **`description`**：`kind: "wikipedia"`＝中文維基百科條目開頭節錄（zh-tw 字形、在句號處截斷、**原文不改寫**），前端標「節錄」並連到條目與 CC BY-SA 4.0；
+  `kind: "ai"`＝沒有條目時 AI 只依官方資料（產業、成立與上市日期、總部、實收資本額、最近月營收規模、ESG 產品類別）寫的 2–3 句，`label`「AI 依公開資料整理」，
+  不含人名；沒有時 `null`。簡介由 worker 每小時處理追蹤中的股票（維基百科每月更新一次，AI 只在官方資料變動時重寫），第一次看的股票稍後才有。
+- **上市股票外資持股**：`GET /instruments/{symbol}/chips` 多 `foreign_top20: {as_of, rank, pct, limit_pct} | null`。上市股票名列證交所
+  〈集中市場外資及陸資持股前 20 名彙總表〉（`MI_QFIIS_sort_20`）時，`foreign_holding_pct` 是在榜那些天的持股比、`notes` 說明「證交所只公布前 20 名」；
+  不在榜時維持空陣列＋說明。上市股票的 `institutional` 仍然一律是空的。前端：籌碼分頁「外資持股比」與總覽籌碼小卡的「外資持股」。
+- `/meta/attributions`：多 `twse-openapi/foreign_top20`、`twse-openapi/board`、`tpex-openapi/board`、`tpex-openapi/tpex50`、`tdcc-opendata/holders_twse`、
+  `tdcc-opendata/holders_tpex`、`twse-openapi/esg_products`、`tpex-openapi/esg_products`、`wikipedia/zh`（`license_status: "open"`，CC BY-SA 4.0）、
+  `wikidata/entities`（CC0）；`notice` 多一行維基百科授權。
 
 ## AI（M4）
 

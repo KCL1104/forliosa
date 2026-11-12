@@ -12,6 +12,7 @@ import {
 import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
+import { buildCompany, buildRelated } from "./company"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
@@ -321,6 +322,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         return mine ? all.filter((e) => e.mine) : all
       }),
     getNews: (symbol) => wait(() => buildNews(spec(symbol), commercial)),
+    getRelated: (symbol) => wait(() => buildRelated(spec(symbol), user.preferences.benchmark)),
+    getCompany: (symbol) => wait(() => buildCompany(spec(symbol))),
     getPosition: (symbol) => wait(() => buildPosition(spec(symbol), txns, commercial)),
     getPositionHistory: (symbol) => wait(() => positionHistory(txns, spec(symbol).symbol)),
     getWhy: (symbol) => wait(() => buildWhy(spec(symbol))),

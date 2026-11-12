@@ -28,6 +28,9 @@ Licence status (``Dataset.license_status``, from docs/research/open-data-invento
 * ``open`` — a free licence that allows commercial use with a citation: the GDELT Project ("unlimited and
   unrestricted use for any academic, commercial, or governmental use of any kind without fee", citing GDELT and
   linking gdeltproject.org). Used for the 「新聞報導」 headlines (title, outlet, time, link only).
+  Also Wikipedia (CC BY-SA 4.0: the 「關於」 excerpt is shown unchanged with the article link and the licence; an
+  adaptation would have to be shared alike, so the text is never rewritten) and Wikidata (CC0, used only to find
+  the article).
 * ``non_commercial`` — usable only under ``DATA_POLICY=personal``: Yahoo股市's RSS (personal, non-commercial use;
   keep 「Yahoo股市」 and the original outlet). Never served, and left out of the attribution list, under
   ``commercial``.
@@ -74,6 +77,11 @@ GDELT_TERMS_URL = "https://www.gdeltproject.org/about.html#termsofuse"
 GDELT_NOTICE = ("The GDELT Project：資料集可「unlimited and unrestricted use for any academic, commercial, or "
                 f"governmental use of any kind without fee」，需引用 GDELT 並連到 {GDELT_SITE}（{GDELT_TERMS_URL}）")
 YAHOO_RSS_TERMS_URL = "https://tw.stock.yahoo.com/rss-index"
+WIKIPEDIA_LICENSE = "創用 CC 姓名標示－相同方式分享 4.0 國際（CC BY-SA 4.0）"
+WIKIPEDIA_LICENSE_URL = "https://creativecommons.org/licenses/by-sa/4.0/deed.zh-hant"
+WIKIPEDIA_NOTICE = ("維基百科：條目文字依 CC BY-SA 4.0 授權；個股頁「關於」只節錄條目開頭、不改寫，並標示「節錄」、"
+                    f"連到原條目與授權條款（{WIKIPEDIA_LICENSE_URL}）")
+WIKIDATA_LICENSE_URL = "https://creativecommons.org/publicdomain/zero/1.0/deed.zh-hant"
 
 LicenseStatus = Literal["ogdl", "public", "open", "conditional", "non_commercial"]
 CONDITIONAL_NOTE = ("期交所 OpenAPI 的這個資料集在 data.gov.tw 沒有找到對應的政府資料開放授權條款資料集，"
@@ -122,7 +130,14 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("twse-openapi/calendar", TWSE, "有價證券集中交易市場開（休）市日期",
             f"{TWSE_API}/holidaySchedule/holidaySchedule", "交易日、定期定額扣款日順延"),
     Dataset("twse-openapi/news", TWSE, "證交所新聞", f"{TWSE_API}/news/newsList", "公告"),
-    Dataset("twse-openapi/fund", TWSE, "基金基本資料彙總表", f"{TWSE_API}/opendata/t187ap47_L", "ETF 基本資料"),
+    Dataset("twse-openapi/fund", TWSE, "基金基本資料彙總表", f"{TWSE_API}/opendata/t187ap47_L",
+            "ETF 基本資料、相關股票（追蹤同一指數、同類型 ETF）"),
+    Dataset("twse-openapi/foreign_top20", TWSE, "集中市場外資及陸資持股前20名彙總表",
+            f"{TWSE_API}/fund/MI_QFIIS_sort_20", "上市股票的外資持股比（只有名列前 20 名的股票）"),
+    Dataset("twse-openapi/board", TWSE, "上市公司董事、監察人持股餘額明細資料", f"{TWSE_API}/opendata/t187ap11_L",
+            "相關股票：關係企業（只用上市櫃公司擔任法人董事或大股東的列，不存個人資料）"),
+    Dataset("twse-openapi/esg_products", TWSE, "上市公司企業ESG資訊揭露彙總資料-產品品質與安全",
+            f"{TWSE_API}/opendata/t187ap46_L_14", "AI 公司簡介的官方資料（依產品類別之產品產量）"),
     Dataset("tpex-openapi/price", TPEX, "上櫃股票行情", f"{TPEX_API}/tpex_mainboard_daily_close_quotes",
             "收盤價、日線、成交量"),
     Dataset("tpex-openapi/valuation", TPEX, "上櫃股票個股本益比、殖利率、股價淨值比",
@@ -156,9 +171,15 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("twse-openapi/dividend_resolution", TWSE, "上市公司股利分派情形", f"{TWSE_API}/opendata/t187ap45_L",
             "董事會／股東會決議的股利（盈餘、法定盈餘公積、資本公積分列）"),
     Dataset("twse-openapi/company", TWSE, "上市公司基本資料", f"{TWSE_API}/opendata/t187ap03_L",
-            "已發行股數、市值、產業別、上市日期"),
+            "已發行股數、市值、產業別、上市日期；「關於」：總部縣市、網站、實收資本額、董事長、總經理、簽證會計師事務所、股務代理"),
     Dataset("tpex-openapi/company", TPEX, "上櫃股票基本資料", f"{TPEX_API}/mopsfin_t187ap03_O",
-            "已發行股數、市值、產業別、上櫃日期"),
+            "已發行股數、市值、產業別、上櫃日期；「關於」：總部縣市、網站、實收資本額、董事長、總經理、簽證會計師事務所、股務代理"),
+    Dataset("tpex-openapi/tpex50", TPEX, "富櫃五十指數成分股", f"{TPEX_API}/tpex50_constituents",
+            "相關股票：上櫃股票是否為富櫃五十成分股", basis="data.gov.tw 20220"),
+    Dataset("tpex-openapi/board", TPEX, "上櫃公司董事、監察人持股餘額明細資料", f"{TPEX_API}/mopsfin_t187ap11_O",
+            "相關股票：關係企業（只用上市櫃公司擔任法人董事或大股東的列，不存個人資料）"),
+    Dataset("tpex-openapi/esg_products", TPEX, "上櫃公司企業ESG資訊揭露彙總資料-產品品質與安全",
+            f"{TPEX_API}/t187ap46_O_14", "AI 公司簡介的官方資料（依產品類別之產品產量）"),
     Dataset("tpex-openapi/exright", TPEX, "上櫃股票除權除息計算結果表", f"{TPEX_API}/tpex_exright_daily",
             "除權息日的官方參考價、漲跌停"),
     Dataset("tpex-openapi/index", TPEX, "櫃買指數歷史資料", f"{TPEX_API}/tpex_index", "櫃買指數"),
@@ -166,6 +187,12 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
             "績效基準 ^TPEXTR（櫃買報酬指數）"),
     Dataset("tdcc-opendata/distribution", TDCC, "集保戶股權分散表", "https://opendata.tdcc.com.tw/getOD.ashx?id=1-5",
             "大戶持股分級"),
+    Dataset("tdcc-opendata/holders_twse", TDCC, "有價證券集中保管個別股票異動月分析表－上市證券",
+            "https://opendata.tdcc.com.tw/getOD.ashx?id=2-22", "相關股票：ETF 受益人數（集保股東戶數）",
+            basis="data.gov.tw 20603"),
+    Dataset("tdcc-opendata/holders_tpex", TDCC, "有價證券集中保管個別股票異動月分析表－上櫃證券",
+            "https://opendata.tdcc.com.tw/getOD.ashx?id=2-23", "相關股票：ETF 受益人數（集保股東戶數）",
+            basis="data.gov.tw 20605"),
     # -- TAIFEX OpenAPI (open-data-inventory §12). OGDL where a data.gov.tw dataset was found (search
     # summaries), otherwise conditional: archived, served under commercial only after TAIFEX confirms.
     Dataset("taifex-openapi/institutional_general", TAIFEX, "三大法人-總表-依日期",
@@ -235,6 +262,14 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
             "RSS 使用條款：個人和非營利組織可以在非商業用途內免費使用，須保留「Yahoo股市」與原始媒體標示",
             "Yahoo股市 RSS 使用條款（限個人、非商業用途）", YAHOO_RSS_TERMS_URL,
             "保留「Yahoo股市」與原始媒體標示" + NON_COMMERCIAL_SUFFIX),
+    # -- 「關於」 description (services.company): a zh.wikipedia excerpt, unchanged; Wikidata finds the article.
+    Dataset("wikipedia/zh", "維基百科", "中文維基百科條目（開頭節錄）", "https://zh.wikipedia.org/",
+            "個股頁「關於」公司簡介（節錄、不改寫，附條目連結）", "open",
+            "CC BY-SA 4.0：標示條目與授權、連到原條目；不改寫（改作須以相同方式分享）",
+            WIKIPEDIA_LICENSE, WIKIPEDIA_LICENSE_URL, "依 CC BY-SA 4.0 節錄（不改寫）"),
+    Dataset("wikidata/entities", "Wikidata", "Wikidata 項目（股票代號、交易所、條目連結）", "https://www.wikidata.org/",
+            "找出公司對應的中文維基百科條目", "open", "CC0 1.0（公眾領域貢獻宣告）",
+            "CC0 1.0 公眾領域貢獻宣告", WIKIDATA_LICENSE_URL, "CC0 1.0（公眾領域）"),
     Dataset("shioaji-data/official",
             "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）",
             "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data",
@@ -261,6 +296,8 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "ai-search": ("AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）", True),
     "searxng": ("SearXNG 自架元搜尋（只取標題、媒體、時間與連結）", True),
     "yahoo-rss": ("", False),
+    "wikipedia": ("", True),  # labelled through DATASETS["wikipedia/zh"]
+    "wikidata": ("", True),
     # Removed sources whose rows may still be in an old archive: never served in any mode.
     "twse-mis": ("證交所 MIS 盤中行情・已停用" + NON_COMMERCIAL_SUFFIX, False),
     "twse-web": ("證交所網站資料・已停用" + NON_COMMERCIAL_SUFFIX, False),
@@ -310,7 +347,8 @@ def attribution(ds: Dataset, year: int | None = None) -> str:
     return f"{ds.agency}〈{ds.title}〉（{year or _year()}），{ds.attribution_tail}"
 
 
-_DEFAULT_DATASET = {"shioaji-data": "shioaji-data/official", "gdelt": "gdelt/doc", "yahoo-rss": "yahoo-rss/stock"}
+_DEFAULT_DATASET = {"shioaji-data": "shioaji-data/official", "gdelt": "gdelt/doc", "yahoo-rss": "yahoo-rss/stock",
+                    "wikipedia": "wikipedia/zh", "wikidata": "wikidata/entities"}
 
 
 def label(source: str) -> str:
@@ -453,7 +491,7 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     return {
         "policy": policy,
         "taifex_conditional_confirmed": confirmed,
-        "notice": [f"{OGDL_NOTICE}", f"政府資料開放授權條款：{OGDL_URL}", SEC_NOTICE, GDELT_NOTICE],
+        "notice": [f"{OGDL_NOTICE}", f"政府資料開放授權條款：{OGDL_URL}", SEC_NOTICE, GDELT_NOTICE, WIKIPEDIA_NOTICE],
         "datasets": items,
         "conditional": pending,
         "stale": stale,

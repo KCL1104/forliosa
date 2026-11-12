@@ -164,6 +164,27 @@ const gdeltSource = async (page) => {
   })
 }
 
+/** 捲到總覽的某個區塊標題（桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列） */
+const toSection = (id) => async (page, mobile) => {
+  await page.locator(`#${id}`).waitFor({ timeout: 8000 })
+  await page.evaluate(([el, m]) => {
+    const node = document.getElementById(el)
+    if (node) window.scrollTo({ top: node.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
+  }, [id, mobile])
+}
+/** 籌碼分頁捲到「外資持股比」 */
+const toForeign = async (page, mobile) => {
+  await toTabs(page)
+  await toSection("chips-foreign")(page, mobile)
+}
+/** 資料來源頁的維基百科（「關於」簡介的授權） */
+const wikiSource = async (page) => {
+  await page.evaluate(() => {
+    const el = document.getElementById("ds-維基百科")
+    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
+  })
+}
+
 /** 上市股票的籌碼：按空狀態裡的「最近外資對這檔的動向？」交給 AI（mock 是本機規則版的說明） */
 const foreignAsk = async (page, mobile) => {
   await toTabs(page)
@@ -185,9 +206,9 @@ const SHOTS = [
   { name: "stock-2409-analyst-unavailable", path: "/stock/2409.TW", ready: "text=參考價", action: analystSearch(/法人觀點暫時查不到/) },
   { name: "ledger-recurring-marks", path: "/", ready: "text=總資產", action: recurringMarks },
   { name: "stock-2330-valuation", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: toTabs },
-  { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人與外資持股", action: toTabs },
+  { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人", action: toTabs },
   { name: "stock-6488-chips", path: "/stock/6488.TWO?tab=chips", ready: "text=三大法人買賣超", action: toTabs },
-  { name: "stock-2330-foreign-ask", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人與外資持股", action: foreignAsk },
+  { name: "stock-2330-foreign-ask", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人", action: foreignAsk },
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
   { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
   { name: "stock-2603-past", path: "/stock/2603.TW", ready: "text=過去的持有" },
@@ -197,6 +218,15 @@ const SHOTS = [
   { name: "stock-2317-news-empty", path: "/stock/2317.TW", ready: "text=參考價", action: toNews },
   { name: "stock-nvda-news", path: "/stock/NVDA", ready: "text=參考價", action: toNews },
   { name: "data-sources-gdelt", path: "/data-sources", ready: "text=GDELT DOC 2.0 新聞索引", action: gdeltSource },
+  // 相關股票（基準／成分股、關係企業、同業；ETF 頁同指數）、關於〈公司〉（維基百科節錄／AI 簡介＋官方資料）、上市股票外資持股前 20 名
+  { name: "stock-2330-related", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-related") },
+  { name: "stock-6488-related", path: "/stock/6488.TWO", ready: "text=參考價", action: toSection("ov-related") },
+  { name: "stock-0050-related", path: "/stock/0050.TW", ready: "text=參考價", action: toSection("ov-related") },
+  { name: "stock-2330-about", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-company") },
+  { name: "stock-6488-about", path: "/stock/6488.TWO", ready: "text=參考價", action: toSection("ov-company") },
+  { name: "stock-aapl-about", path: "/stock/AAPL", ready: "text=參考價", action: toSection("ov-company") },
+  { name: "stock-3711-chips", path: "/stock/3711.TW?tab=chips", ready: "text=前 20 名第 12 名", action: toForeign },
+  { name: "data-sources-wikipedia", path: "/data-sources", ready: "text=中文維基百科條目（開頭節錄）", action: wikiSource },
   // 美股：SEC EDGAR 的季報（美元、公司會計年度）與 8-K／10-Q／10-K 申報
   { name: "stock-aapl-financials", path: "/stock/AAPL?tab=financials", ready: "text=FY2026Q4", action: toTabs },
   { name: "stock-aapl-events", path: "/stock/AAPL?tab=events", ready: "text=10-K 年度報告", action: toTabs },

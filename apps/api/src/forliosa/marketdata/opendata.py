@@ -40,8 +40,10 @@ TWSE OpenAPI (``https://openapi.twse.com.tw/v1``; latest day only; dates ROC "11
   股東配發-股東配發之現金(股利)總金額(元), 股東配發-盈餘轉增資配股(元/股), …法定盈餘公積轉增資配股, …資本公積轉增資配股,
   股東配發-股東配股總股數(股). No ex-date (that comes later in TWT48U_ALL).
 * ``/opendata/t187ap03_L`` 上市公司基本資料 — 出表日期, 公司代號, 公司名稱, 公司簡稱, 產業別 (code "24"), 成立日期,
-  上市日期 (Gregorian "19940905"), 普通股每股面額, 實收資本額, 特別股, 已發行普通股數或TDR原股發行股數, 英文簡稱, 網址 …
-  plus people's names and phones (董事長, 發言人, 簽證會計師 …), which are not kept.
+  上市日期 (Gregorian "19940905"), 普通股每股面額, 實收資本額, 特別股, 已發行普通股數或TDR原股發行股數, 英文簡稱, 網址,
+  住址, 簽證會計師事務所, 股票過戶機構, 董事長, 總經理 … Kept since 2026-11-12 (decision 6): the 縣市 of 住址, the firm
+  names, 董事長 and 總經理 as published (overwritten daily, no history). Not read: 發言人, 代理發言人, 簽證會計師 names,
+  phones, fax, e-mail, 營利事業統一編號.
 * 重大訊息 符合條款 seen live: 第31款 = board approval of a financial report (說明 has 「財務報告或年度自結財務資訊
   報導期間 起訖日期: 115/01/01~115/09/30」), 第12款 = 法人說明會 (事實發生日 = the conference date; 說明 has
   「召開法人說明會之日期：115/11/23」), 第51款／第53款 = monthly revenue announcements and corrections.
@@ -704,14 +706,22 @@ INDUSTRY_CODES = {
 }
 _PROFILE_KEYS = {  # ours -> (TWSE key, TPEx key)
     "name": ("公司名稱", "CompanyName"), "short_name": ("公司簡稱", "CompanyAbbreviation"),
-    "english_short_name": ("英文簡稱", "Symbol"), "website": ("網址", "WebAddress"),
+    "english_short_name": ("英文簡稱", "Symbol"),
     "par_value": ("普通股每股面額", "ParValueOfCommonStock"),
     "foreign_registration": ("外國企業註冊地國", "Registration"),
 }
 
 
 def parse_company_profiles(rows: list[dict[str, Any]], market: str) -> list[dict[str, Any]]:
-    """t187ap03_L (``market`` TWSE) / mopsfin_t187ap03_O (TPEX) -> company facts (no people's names / phones)."""
+    """t187ap03_L (``market`` TWSE) / mopsfin_t187ap03_O (TPEX) -> company facts.
+
+    ``values`` also holds the 「關於」 facts (product owner 2026-11-12, decision 6): ``hq`` (縣市 from the address,
+    see :func:`company_data.hq_from_address`; the address itself is not kept), ``registered_in`` (KY etc.),
+    ``website`` (https), ``auditor`` (簽證會計師事務所, firm only), ``transfer_agent`` (股務代理, name only) and
+    ``chairman`` / ``president`` (董事長、總經理 exactly as published). No other person (spokespeople, CPAs), phone,
+    fax, e-mail or tax number is read."""
+    from forliosa.marketdata import company_data as cd
+
     tpex = market == "TPEX"
     out = []
     for raw in rows:
@@ -732,6 +742,13 @@ def parse_company_profiles(rows: list[dict[str, Any]], market: str) -> list[dict
         values["paid_in_capital"] = parse_int(r.get("Paidin.Capital.NTDollars" if tpex else "實收資本額"))
         values["preferred_shares"] = parse_int(r.get("PreferredStock.shares" if tpex else "特別股"))
         values["private_shares"] = parse_int(r.get("PrivateStock.shares" if tpex else "私募股數"))
+        values["registered_in"] = cd.registration_country(values["foreign_registration"])
+        values["hq"] = cd.hq_from_address(r.get("Address" if tpex else "住址"), market)
+        values["website"] = cd.clean_website(r.get("WebAddress" if tpex else "網址"))
+        values["auditor"] = cd.clean_name(r.get("AccountingFirm" if tpex else "簽證會計師事務所"))
+        values["transfer_agent"] = cd.clean_name(r.get("StockTransferAgent" if tpex else "股票過戶機構"))
+        values["chairman"] = _text(r.get("Chairman" if tpex else "董事長")) or None
+        values["president"] = _text(r.get("GeneralManager" if tpex else "總經理")) or None
         shares = parse_int(r.get("IssueShares" if tpex else "已發行普通股數或TDR原股發行股數"))
         out.append({"code": code, "date": d, "industry_code": ind[:4] or None, "industry": INDUSTRY_CODES.get(ind),
                     "listed_date": parse_tw_date(r.get("DateOfListing" if tpex else "上市日期")),

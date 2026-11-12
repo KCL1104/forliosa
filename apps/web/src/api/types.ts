@@ -427,6 +427,8 @@ export interface Chips {
   sources: string[]
   is_demo?: boolean
   notes?: string[]
+  /** 上市股票：名列證交所「外資及陸資持股前 20 名」時的名次與持股比（最新一次存檔）；不在名單上是 null */
+  foreign_top20?: { as_of: string; rank: number; pct: number; limit_pct?: number | null } | null
 }
 
 export type FinancialsPeriod = "quarterly" | "annual"
@@ -504,6 +506,86 @@ export interface NewsItem {
   /** 來源只給日期沒有時間：顯示日期，不顯示「N 小時前」 */
   date_only?: boolean
   sources?: string[]
+}
+
+/**
+ * 相關股票（產品負責人 2026-11-12 第 4 項）：最多 4 張卡，依規則從政府開放資料挑選。
+ * `reason`：benchmark＝使用者的比較基準（不是「某 ETF 持有本股」）、constituent＝富櫃五十成分股、affiliate＝關係企業（法人董事／大股東）、
+ * peer／leader／holding＝同業、same_index／same_type＝ETF 頁的同指數／同類型。`reason_label` 直接顯示。
+ */
+export type RelatedReason = "benchmark" | "constituent" | "affiliate" | "peer" | "leader" | "holding" | "same_index" | "same_type"
+
+export interface RelatedCard {
+  symbol: string
+  name: string
+  reason: RelatedReason
+  reason_label: string
+  close: number | null
+  change_pct: number | null
+  as_of?: string | null
+  /** 存檔的收盤價（約一個月） */
+  sparkline: { t: string; price: number | null }[]
+  /** 指數卡（比較基準是指數時）：不能點進個股頁 */
+  is_index?: boolean
+  notes?: string[]
+  is_demo?: boolean
+}
+
+export interface RelatedStocks {
+  symbol: string
+  items: RelatedCard[]
+  sources: string[]
+  notes?: string[]
+}
+
+/** 公司簡介：維基百科節錄（CC BY-SA 4.0，不改寫）或 AI 依官方資料寫的 2–3 句 */
+export interface CompanyDescription {
+  kind: "wikipedia" | "ai"
+  text: string
+  /** 「節錄」｜「AI 依公開資料整理」 */
+  label: string
+  title?: string | null
+  url?: string | null
+  source?: string | null
+  license?: string | null
+  license_url?: string | null
+  revision_id?: number | null
+  updated_at?: string | null
+}
+
+/** 關於〈公司〉：證交所／櫃買〈公司基本資料〉（董事長、總經理照原文）、美股 SEC、ETF 基金基本資料 */
+export interface CompanyAbout {
+  symbol: string
+  name: string
+  short_name: string
+  english_short_name?: string | null
+  market: Market
+  type: InstrumentType
+  industry?: string | null
+  incorporated?: string | null
+  years_since_incorporation?: number | null
+  listed_date?: string | null
+  /** 上市｜上櫃 */
+  listing?: string | null
+  hq?: string | null
+  /** KY 等外國企業：註冊地（取代總部） */
+  registered_in?: string | null
+  website?: string | null
+  /** 新台幣元 */
+  paid_in_capital?: number | null
+  chairman?: string | null
+  president?: string | null
+  auditor?: string | null
+  transfer_agent?: string | null
+  exchanges?: string[]
+  /** 美股會計年度結束日「09-26」 */
+  fiscal_year_end?: string | null
+  former_names?: { name: string; from?: string | null; to?: string | null }[]
+  fund?: { fund_type?: string | null; index_name?: string | null; custodian?: string | null; units?: number | null } | null
+  description: CompanyDescription | null
+  data_date?: string | null
+  sources: string[]
+  notes?: string[]
 }
 
 export type PositionMarkerType = "buy" | "sell" | "dividend" | "stock_dividend"
@@ -768,6 +850,8 @@ export interface ForliosaApi {
   getFinancials(symbol: string, period?: FinancialsPeriod): Promise<Financials>
   getEvents(symbol: string, mine?: boolean): Promise<InstrumentEvent[]>
   getNews(symbol: string): Promise<NewsItem[]>
+  getRelated(symbol: string): Promise<RelatedStocks>
+  getCompany(symbol: string): Promise<CompanyAbout>
   getPosition(symbol: string): Promise<Position | null>
   getPositionHistory(symbol: string): Promise<PositionHistory>
   getWhy(symbol: string): Promise<Why>

@@ -51,11 +51,11 @@ def test_upsert_closes_stores_only_real_prices(engine):
 
 def test_evening_and_weekly_runs_include_the_new_groups():
     from forliosa.archive import JOB_GROUPS
-    from forliosa.worker import EVENING_GROUPS, SEC_GROUPS, WEEKLY_GROUPS, Worker
+    from forliosa.worker import EVENING_GROUPS, MONTHLY_GROUPS, SEC_GROUPS, WEEKLY_GROUPS, Worker
 
     assert {"taifex", "cbc", "companies", "financials"} <= set(EVENING_GROUPS)
     assert set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
-    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) == set(JOB_GROUPS)
+    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) | set(MONTHLY_GROUPS) == set(JOB_GROUPS)
     # SEC EDGAR runs every day (US filings do not follow the Taiwan trading calendar), after the US close
     job = next(j for j in Worker(md=object()).jobs if j.name == "sec_archive")  # type: ignore[arg-type]
     from datetime import datetime
@@ -64,3 +64,17 @@ def test_evening_and_weekly_runs_include_the_new_groups():
 
     saturday = datetime(2026, 11, 14, 7, 55, tzinfo=TAIPEI)
     assert job.due(saturday, None) and not job.due(saturday.replace(hour=7, minute=40), None)
+
+
+def test_monthly_archive_and_company_refresh_schedule():
+    from datetime import datetime
+
+    from forliosa.timeutil import TAIPEI
+    from forliosa.worker import Worker
+
+    jobs = {j.name: j for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    monthly = jobs["monthly_archive"]
+    assert monthly.due(datetime(2026, 11, 25, 10, 30, tzinfo=TAIPEI), None)
+    assert not monthly.due(datetime(2026, 11, 24, 10, 30, tzinfo=TAIPEI), None)
+    company = jobs["company_refresh"]
+    assert company.due(datetime(2026, 11, 12, 13, 36, tzinfo=TAIPEI), None)

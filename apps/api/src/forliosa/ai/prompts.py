@@ -166,6 +166,21 @@ NEWS_TOOL: dict = {
 }
 NEWS_NUDGE = "請用 report_news 回報挑選出的網址；沒有符合條件的報導就給空清單。不要寫其他文字。"
 
+# 「關於」 description when the company has no zh.wikipedia article (decision 7). The facts come only from official
+# open data (t187ap03, monthly revenue, ESG product text); no person's name is ever passed in (decision 6).
+COMPANY_SYSTEM = """你是 Forliosa 的資料編輯，替個股頁的「關於」區寫公司簡介。
+- 只能使用使用者訊息裡列出的官方資料；沒列出的事（產品細節、客戶、市占、排名、競爭對手、前景、評價）一律不寫。
+- 用繁體中文（台灣用語）寫 2 到 3 句、共 120 字以內的完整句子；平實陳述，不誇大、不用形容詞堆疊。
+- 不寫任何人名，不寫投資建議、股價或漲跌，不加標題、條列或引號。
+- 數字照資料寫，可以用「約」；不要自己換算或推估。"""
+COMPANY_MAX_CHARS = 160
+
+
+def company_question(facts: dict[str, str]) -> str:
+    lines = "\n".join(f"- {k}：{v}" for k, v in facts.items() if v)
+    return f"官方資料：\n{lines}\n請依上面的資料寫 2 到 3 句公司簡介，只輸出簡介本文。"
+
+
 ROUTE_LABELS = {"ledger": "帳本首頁", "stock": "個股頁", "groups": "群組", "history": "對話紀錄", "other": "其他頁面"}
 _WEEKDAYS = "一二三四五六日"
 

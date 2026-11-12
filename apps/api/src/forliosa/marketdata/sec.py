@@ -581,10 +581,37 @@ def summarize(facts: dict[str, Any], period: Literal["quarterly", "annual"]) -> 
 FILING_FORMS = ("10-K", "10-Q", "8-K", "10-K/A", "10-Q/A", "8-K/A")
 
 
+def _clean(value: Any, n: int = 120) -> str | None:
+    s = " ".join(str(value or "").split())
+    return s[:n] or None
+
+
+def parse_profile(raw: dict[str, Any]) -> dict[str, Any]:
+    """Company facts for the 「關於」 section from the submissions JSON: SIC industry, the business address's city
+    and state (or country), exchanges and former names. People, phones, the EIN and street addresses are not read."""
+    addr = ((raw.get("addresses") or {}).get("business") or {}) if isinstance(raw, dict) else {}
+    foreign = bool(addr.get("isForeignLocation"))
+    former = []
+    for f in raw.get("formerNames") or []:
+        if isinstance(f, dict) and _clean(f.get("name")):
+            former.append({"name": _clean(f.get("name"), 200), "from": str(f.get("from") or "")[:10] or None,
+                           "to": str(f.get("to") or "")[:10] or None})
+    state = None if foreign else _clean(addr.get("stateOrCountry"), 8)
+    domestic = not foreign and bool(state)
+    return {
+        "industry": _clean(raw.get("sicDescription")), "sic": _clean(raw.get("sic"), 8),
+        "city": _clean(addr.get("city"), 60), "state": state,
+        "country": _clean(addr.get("country"), 60) if foreign else ("United States" if domestic else None),
+        "exchanges": [str(x) for x in (raw.get("exchanges") or []) if x][:4],
+        "former_names": former[:10],
+    }
+
+
 def parse_submissions(raw: dict[str, Any], since: date | None = None) -> tuple[dict[str, Any], list[dict[str, Any]]]:
-    """-> (company meta ``{name, fiscal_year_end}``, 8-K / 10-Q / 10-K filings from ``filings.recent``)."""
+    """-> (company meta ``{name, fiscal_year_end, profile}``, 8-K / 10-Q / 10-K filings from ``filings.recent``)."""
     meta = {"name": str(raw.get("name") or "")[:200],
-            "fiscal_year_end": (str(raw.get("fiscalYearEnd") or "")[:4] or None)}
+            "fiscal_year_end": (str(raw.get("fiscalYearEnd") or "")[:4] or None),
+            "profile": parse_profile(raw) if isinstance(raw, dict) else None}
     recent = ((raw.get("filings") or {}).get("recent") or {}) if isinstance(raw, dict) else {}
     forms = recent.get("form") or []
 

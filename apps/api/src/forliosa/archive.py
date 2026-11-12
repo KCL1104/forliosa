@@ -4,7 +4,7 @@ Run once from the command line::
 
     uv run python -m forliosa.archive run                    # every job that applies to DATA_POLICY
     uv run python -m forliosa.archive run --only twse,tpex   # twse | tpex | companies | financials | taifex |
-                                                             # cbc | tdcc | weekly | sec
+                                                             # cbc | tdcc | weekly | monthly | sec
     uv run python -m forliosa.archive backfill --days 90     # personal opt-in only, see "Backfill" below
 
 The worker runs the same jobs on a schedule (``forliosa.worker``). Every write is an upsert keyed on
@@ -46,6 +46,15 @@ dataset_status              newest data date per dataset (shown in /meta/attribu
 sec_tickers, sec_companies, SEC EDGAR (group ``sec``, daily 07:50, US government public data): the ticker -> CIK
 sec_filings                 map, trimmed XBRL company facts and 8-K / 10-Q / 10-K filings of every tracked US
                             stock (``forliosa.services.sec``; needs SEC_CONTACT_EMAIL, skipped without it)
+foreign_holding_top20       TWSE /fund/MI_QFIIS_sort_20 外資及陸資持股前 20 名 (group ``twse``; no date field: stamped
+                            like MI_MARGN — the evening run is today's, the morning run the previous trading day's;
+                            the 14:40 run skips it)
+index_constituents          TPEx tpex50_constituents 富櫃五十指數成分股 (group ``tpex``, daily)
+board_links                 TWSE t187ap11_L / TPEx mopsfin_t187ap11_O 董監事持股餘額明細 (group ``monthly``): only
+                            company ↔ company rows (a listed company as 法人董事 / 大股東); natural persons are dropped
+                            while parsing and never stored or logged
+holder_counts_monthly       TDCC 2-22 / 2-23 集保股東戶數 (group ``monthly``; latest month only)
+esg_product_output          t187ap46_L_14 / t187ap46_O_14 ESG「依產品類別之產品產量」 (group ``monthly``)
 ==========================  =========================================================
 
 Only ``openapi.twse.com.tw``, ``www.tpex.org.tw/openapi``, ``opendata.tdcc.com.tw``, ``openapi.taifex.com.tw/v1``,
@@ -75,21 +84,27 @@ from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import Policy
 from forliosa.marketdata import cbc
+from forliosa.marketdata import company_data as cd
 from forliosa.marketdata import opendata as od
 from forliosa.marketdata import taifex as tf
 from forliosa.marketdata.base import ProviderUnavailable, market_of_symbol, tw_symbol
 from forliosa.marketdata.http import HttpFetcher
 from forliosa.marketdata.twse import parse_bwibbu_all, parse_stock_day_all
 from forliosa.models import (
+    BoardLink,
     CompanyProfile,
     DatasetStatus,
     DividendResolution,
+    EsgProductOutput,
     ExRightsResult,
     FinancialReport,
     ForeignHoldingDaily,
+    ForeignHoldingTop20,
     FundProfile,
     FxRate,
+    HolderCountMonthly,
     HoldingSnapshot,
+    IndexConstituent,
     IndexDaily,
     InstitutionalDaily,
     MarginDaily,
@@ -126,8 +141,10 @@ MARGIN_READY = time(21, 0)
 # twse / tpex: latest-day datasets (08:10, 14:40, 21:40); companies: slow-changing large files (21:40);
 # taifex: TAIFEX daily datasets (21:40); cbc: the central bank's USD/TWD closing rate (21:40; published the same
 # afternoon); weekly (Saturday): TAIFEX final settlement + SSF/SSO lists, and the stale-endpoint check;
-# sec (07:50 daily): SEC EDGAR facts and filings of tracked US stocks.
-JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "tdcc", "weekly", "sec")
+# sec (07:50 daily): SEC EDGAR facts and filings of tracked US stocks; monthly (10th and 25th): 董監事持股餘額明細
+# (company ↔ company links), TDCC 集保股東戶數 and the ESG product-category text.
+JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "tdcc", "weekly", "monthly", "sec")
+TPEX50 = "TPEX50"
 SEC_DISABLED = "sec edgar（未設定 SEC_CONTACT_EMAIL，略過）"
 
 
@@ -404,7 +421,48 @@ class Archiver:
             n += 1
         return n
 
+    def foreign_top20_date(self) -> date | None:
+        """MI_QFIIS_sort_20 has no date field: after 21:00 it is today's (on a trading day), before 09:00 the previous
+        trading day's; in between it is ambiguous (TWSE does not document when it updates), so it is skipped."""
+        now = self.now_fn().astimezone(TAIPEI)
+        if now.time() >= MARGIN_READY:
+            d = last_tw_trading_day(now.date())
+            return d if d == now.date() else None
+        if now.time() < time(9, 0):
+            return last_tw_trading_day(now.date() - timedelta(days=1))
+        return None
+
+    def twse_foreign_top20(self) -> int:
+        """外資及陸資持股前 20 名: the only per-stock foreign holding of listed stocks TWSE publishes as open data."""
+        d = self.foreign_top20_date()
+        if d is None:
+            return 0
+        rows = [{"date": d, "symbol": tw_symbol(r["code"], "TWSE"), "rank": r["rank"], "pct": r["pct"],
+                 "shares": r["shares"], "issued_shares": r["issued_shares"], "available_pct": r["available_pct"],
+                 "limit_pct": r["limit_pct"], "source": "twse-openapi"}
+                for r in cd.parse_qfii_top20(self._list(f"{TWSE_OPENAPI}/fund/MI_QFIIS_sort_20"))]
+        if not rows:
+            return 0
+        n = upsert(self.db, ForeignHoldingTop20, rows, ["date", "symbol"])
+        # a stock that left the list since an earlier stamp of the same day is removed (the list is the top 20)
+        listed = {r["symbol"] for r in rows}
+        for old in self.db.scalars(select(ForeignHoldingTop20).where(ForeignHoldingTop20.date == d)):
+            if old.symbol not in listed:
+                self.db.delete(old)
+        self.db.commit()
+        self._status("twse-openapi/foreign_top20", d, n)
+        return n
+
     # -- TPEx OpenAPI --------------------------------------------------------------------------
+    def tpex_constituents(self) -> int:
+        """富櫃五十指數成分股 (today's list; one row per day and constituent)."""
+        rows = [{"index_code": TPEX50, "date": r["date"], "symbol": tw_symbol(r["code"], "TPEX"),
+                 "source": "tpex-openapi"}
+                for r in cd.parse_tpex50_constituents(self._list(f"{TPEX_OPENAPI}/tpex50_constituents"))]
+        n = upsert(self.db, IndexConstituent, rows, ["index_code", "date", "symbol"])
+        self._status("tpex-openapi/tpex50", max((r["date"] for r in rows), default=None), n)
+        return n
+
     def tpex_indices(self) -> int:
         """tpex_index (櫃買指數 OHLC, this month) and tpex_reward_index (櫃買報酬指數 = ^TPEXTR, this month)."""
         idx = od.with_changes(od.parse_tpex_index(self._list(f"{TPEX_OPENAPI}/tpex_index")))
@@ -659,6 +717,61 @@ class Archiver:
                 for r in parsed if not market or r["code"] in market]
         return upsert(self.db, ShareholdingDistribution, rows, ["symbol", "date", "level"])
 
+    # -- monthly: company ↔ company links, 集保股東戶數, ESG product text ------------------------------
+    def _company_names(self) -> dict[str, tuple[str, str]]:
+        """Full names of every archived listed / OTC company -> (code, market) (from company_profiles)."""
+        out: dict[str, tuple[str, str]] = {}
+        for p in self.db.scalars(select(CompanyProfile)):
+            name = (p.values or {}).get("name")
+            if name:
+                out[cd.company_name_key(name)] = (p.symbol.split(".")[0], market_of_symbol(p.symbol))
+        if not out:
+            raise ProviderUnavailable("公司基本資料尚未存檔（先執行 companies）")
+        return out
+
+    def _board_links(self, path: str, market: str, source: str, key: str) -> int:
+        links = cd.parse_board_links(self._list(path), self._company_names())
+        now = datetime.now(TAIPEI)
+        rows = [{"symbol": tw_symbol(r["code"], market),
+                 "holder_symbol": tw_symbol(r["holder_code"], r["holder_market"]), "period": r["period"],
+                 "roles": r["roles"], "shares": r["shares"], "data_date": r["data_date"], "source": source,
+                 "fetched_at": now} for r in links]
+        n = upsert(self.db, BoardLink, rows, ["symbol", "holder_symbol", "period"])
+        self._status(key, max((r["data_date"] for r in rows), default=None), n)
+        return n
+
+    def twse_board_links(self) -> int:
+        return self._board_links(f"{TWSE_OPENAPI}/opendata/t187ap11_L", "TWSE", "twse-openapi", "twse-openapi/board")
+
+    def tpex_board_links(self) -> int:
+        return self._board_links(f"{TPEX_OPENAPI}/mopsfin_t187ap11_O", "TPEX", "tpex-openapi", "tpex-openapi/board")
+
+    def tdcc_holders(self) -> int:
+        """TDCC 2-22 (上市) and 2-23 (上櫃) 集保股東戶數 (the latest month; monthly history accumulates here)."""
+        n = 0
+        for dataset, market in (("2-22", "TWSE"), ("2-23", "TPEX")):
+            raw = self.fetcher.get_bytes(TDCC_URL, params={"id": dataset}).decode("utf-8-sig", errors="replace")
+            rows = [{"symbol": tw_symbol(r["code"], market), "period": r["period"], "holders": r["holders"],
+                     "custody_k_shares": r["custody_k_shares"], "issued_k_shares": r["issued_k_shares"],
+                     "source": "tdcc-opendata"} for r in cd.parse_tdcc_holders(raw)]
+            m = upsert(self.db, HolderCountMonthly, rows, ["symbol", "period"])
+            latest = max((r["period"] for r in rows), default=None)
+            self._status(f"tdcc-opendata/holders_{'twse' if market == 'TWSE' else 'tpex'}",
+                         date.fromisoformat(f"{latest}-01") if latest else None, m)
+            n += m
+        return n
+
+    def esg_products(self) -> int:
+        """ESG「依產品類別之產品產量」 (one report year per response; the row per company is replaced)."""
+        now_rows: list[dict[str, Any]] = []
+        for path, market, source in ((f"{TWSE_OPENAPI}/opendata/t187ap46_L_14", "TWSE", "twse-openapi"),
+                                     (f"{TPEX_OPENAPI}/t187ap46_O_14", "TPEX", "tpex-openapi")):
+            now_rows += [{"symbol": tw_symbol(r["code"], market), "year": r["year"], "text": r["text"],
+                          "data_date": r["date"], "source": source} for r in cd.parse_esg_products(self._list(path))]
+        n = upsert(self.db, EsgProductOutput, now_rows, ["symbol"])
+        self._status("twse-openapi/esg_products", max((r["data_date"] for r in now_rows), default=None), n)
+        return n
+
     # -- SEC EDGAR (US stocks) -------------------------------------------------------------------
     def sec_edgar(self, client: Any) -> int:
         """Ticker map, company facts and filings of every tracked US stock (forliosa.services.sec). A refusal from
@@ -682,6 +795,7 @@ class Archiver:
                              ("twse events", self.twse_events), ("twse revenue", self.twse_revenue),
                              ("twse news", self.twse_news), ("twse funds", self.twse_funds),
                              ("twse holidays", self.twse_holidays),
+                             ("twse foreign top 20 MI_QFIIS_sort_20", self.twse_foreign_top20),
                              ("twse total return MFI94U", self.twse_total_return),
                              ("twse indices MI_INDEX", self.twse_indices)):
                 self._run(name, fn)
@@ -689,7 +803,8 @@ class Archiver:
             for name, fn in (("tpex prices", self.tpex_prices), ("tpex valuation", self.tpex_valuation),
                              ("tpex chips", self.tpex_chips), ("tpex events", self.tpex_events),
                              ("tpex revenue", self.tpex_revenue), ("tpex indices", self.tpex_indices),
-                             ("tpex exright", self.tpex_exright)):
+                             ("tpex exright", self.tpex_exright),
+                             ("tpex tpex50_constituents", self.tpex_constituents)):
                 self._run(name, fn)
         if "companies" in groups:
             for name, fn in (("twse dividends t187ap45_L", self.twse_dividends),
@@ -713,6 +828,12 @@ class Archiver:
             for name, fn in (("taifex final settlement", self.taifex_final_settlement),
                              ("taifex SSF/SSO lists", self.taifex_underlyings),
                              ("stale endpoints check", self.stale_check)):
+                self._run(name, fn)
+        if "monthly" in groups:
+            for name, fn in (("twse board links t187ap11_L", self.twse_board_links),
+                             ("tpex board links t187ap11_O", self.tpex_board_links),
+                             ("tdcc holders 2-22/2-23", self.tdcc_holders),
+                             ("esg products t187ap46_14", self.esg_products)):
                 self._run(name, fn)
         if "sec" in groups:
             from forliosa.services import sec as sec_svc

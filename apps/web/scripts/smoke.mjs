@@ -26,7 +26,8 @@ const ROUTES = [
   // 友達虧損的年份在商用模式的存檔起點之前：用示範資料（personal）看「本益比沒有意義」
   ["/stock/2409.TW?tab=valuation&policy=personal", "本益比沒有意義"],
   ["/stock/2330.TW?tab=financials&policy=commercial", "營業利益率"],
-  ["/stock/2330.TW?tab=chips", "上市股票不顯示逐檔三大法人與外資持股"],
+  ["/stock/2330.TW?tab=chips", "上市股票不顯示逐檔三大法人"],
+  ["/stock/3711.TW?tab=chips", "前 20 名第 12 名"],
   ["/stock/6488.TWO?tab=chips", "三大法人買賣超"],
   ["/stock/2603.TW", "過去的持有"],
   ["/data-sources", "上市個股日成交資訊"],
@@ -180,10 +181,10 @@ await check("補記：11/06 的 0050 扣款沒有記 → 草稿成交日 11/6 �
   await page.waitForTimeout(1000)
   if (await page.getByRole("button", { name: /補記 11\/06 的 0050/ }).count()) throw new Error("still offered after signing")
 })
-await check("上市股票的籌碼：三大法人與外資持股是空狀態，AI 面板與空狀態都能問外資動向；上櫃照常", async () => {
+await check("上市股票的籌碼：三大法人是空狀態、外資持股只有前 20 名，AI 面板與空狀態都能問外資動向；上櫃照常", async () => {
   await page.goto(base + "/stock/2330.TW?tab=chips", { waitUntil: "networkidle" })
-  await page.getByText("上市股票不顯示逐檔三大法人與外資持股").waitFor({ timeout: 8000 })
-  await page.getByText("上市股票不顯示逐檔外資持股比").waitFor()
+  await page.getByText("上市股票不顯示逐檔三大法人").waitFor({ timeout: 8000 })
+  await page.getByText(/證交所只公布外資持股比率前 20 名，台積電目前不在名單上/).waitFor()
   if (await page.getByText("資料不足。").count()) throw new Error("foreign holding should explain, not say 資料不足")
   const asks = page.getByRole("button", { name: "最近外資對這檔的動向？" })
   if ((await asks.count()) !== 2) throw new Error(`expected the panel chip and the empty-state button, got ${await asks.count()}`)
@@ -284,6 +285,34 @@ await check("個股總覽：「新聞報導」（媒體原標題＋媒體＋時�
   if (await official.getByText("經濟日報").count()) throw new Error("media headline in 公告")
   await page.goto(base + "/stock/2317.TW", { waitUntil: "networkidle" })
   await page.getByText(/最近沒有找到鴻海的媒體報導/).waitFor()
+})
+await check("上市股票名列外資持股前 20 名：日月光投控顯示外資持股比、名次與說明（籌碼分頁與總覽）", async () => {
+  await page.goto(base + "/stock/3711.TW?tab=chips", { waitUntil: "networkidle" })
+  const foreign = page.getByRole("region", { name: "外資持股比" })
+  await foreign.getByText(/名列證交所外資及陸資持股前 20 名第 12 名/).waitFor({ timeout: 8000 })
+  if (!(await foreign.getByText("75.52%・前 20 名第 12 名").count())) throw new Error("top-20 rank missing in the header")
+  await page.goto(base + "/stock/3711.TW", { waitUntil: "networkidle" })
+  await page.getByRole("region", { name: "籌碼" }).getByText(/外資持股是證交所公布的前 20 名資料（第 12 名）/).waitFor({ timeout: 8000 })
+})
+await check("個股總覽：「相關股票」4 格連到個股頁（基準不寫持有本股）；「關於「台積電」」有維基百科節錄、官方資料、董事長與總經理", async () => {
+  await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+  const related = page.getByRole("region", { name: "相關股票" })
+  await related.waitFor({ timeout: 8000 })
+  const cells = related.getByRole("listitem")
+  if ((await cells.count()) !== 4) throw new Error(`expected 4 related cells, got ${await cells.count()}`)
+  if ((await cells.first().getByRole("link").getAttribute("href")) !== "/stock/0050.TW") throw new Error("benchmark cell link")
+  if (await related.getByText(/持有本股/).count()) throw new Error("benchmark must not claim holdings")
+  const about = page.getByRole("region", { name: "關於「台積電」" })
+  await about.getByText("節錄", { exact: true }).waitFor()
+  await about.getByRole("link", { name: /維基百科「台積電」條目/ }).waitFor()
+  await about.getByRole("link", { name: /CC BY-SA 4.0/ }).waitFor()
+  await about.getByText("總裁: 魏哲家").waitFor()
+  await about.getByText(/資料日期：2026\/11\/11/).waitFor()
+  await cells.nth(1).getByRole("link").click()
+  await page.getByRole("heading", { name: /創意/ }).first().waitFor({ timeout: 8000 })
+  await page.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
+  await page.getByRole("region", { name: "新聞報導" }).waitFor({ timeout: 8000 })
+  if (await page.getByRole("region", { name: "相關股票" }).count()) throw new Error("US stocks have no related row")
 })
 await check("設定：新增定期定額（驗證 → 儲存）、暫停、修改、刪除（確認）", async () => {
   await page.goto(base + "/settings#recurring", { waitUntil: "networkidle" })

@@ -102,6 +102,10 @@ ALLOWED_URL_PREFIXES = (
     # fetcher (``extra_allowed``) when NEWS_SEARXNG_URL is set. News sites themselves are never fetched.
     "https://api.gdeltproject.org/api/v2/doc/doc",
     "https://tw.stock.yahoo.com/rss",
+    # 「關於」 description (forliosa.services.company): Wikidata's API (CC0; find the article by ticker) and the
+    # zh.wikipedia REST summary (CC BY-SA 4.0 excerpt, shown unchanged with attribution). Nothing else on Wikimedia.
+    "https://www.wikidata.org/w/api.php",
+    "https://zh.wikipedia.org/api/rest_v1/page/summary/",
 )
 
 

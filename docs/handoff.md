@@ -101,6 +101,24 @@ cd apps/api && uv run python -m forliosa.ai.smoke
 - ✅ 定期定額草稿帶上扣款日（2026-11-12，`wip/small`）：成交日 = 扣款日；扣款日已過（補記）用那天的收盤價，沒有那天的真實收盤價（personal 的示範 K 線不算）才用最近收盤價並在規則說明；mock 與 AI 文字同步；草稿是示範價格（`is_demo`）時 AI 的話與草稿說明改說「示範價格」。
 - 美股報價來源：SEC 做完後和產品負責人討論（免費且可商用的來源很少；初期不付費）。
 
+### 3.6 個股頁補強（產品負責人 2026-11-12，十項全照建議；分支 `wip/stock`）
+
+研究：`docs/research/news-and-external-sources.md`；細節：`apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」「2026-11-12 相關股票、公司資料、外資持股前 20 名」。
+
+- ✅ 1–2 新聞報導：GDELT 為主、AI 搜尋補缺（每月 US$30）、SearXNG 保留預設關、Yahoo股市 RSS 只在 personal；下架封鎖清單（`python -m forliosa.news block`）。
+- ⏸ 3 財報狗式 AI 產業新聞摘要：之後再做。
+- ✅ 4 相關股票：`GET /instruments/{symbol}/related`，4 格（基準／富櫃五十成分股、關係企業、同業；ETF 頁同指數、同類型）；新存檔 `board_links`（董監持股只留公司對公司）、
+  `index_constituents`、`holder_counts_monthly`（集保 2-22／2-23）；不寫「0050 持有本股」。
+- ✅ 5 授權詢問信稿（**草稿，尚未寄出**）：`docs/outreach/tpex-value-chain-inquiry.md`、`shioaji-data-relations-inquiry.md`、`etf-holdings-inquiry.md`。寄不寄由產品負責人決定。
+- ✅ 6 公司資料：`GET /instruments/{symbol}/company`，董事長、總經理照原文（每天覆寫、不留歷史、不進 AI、標來源）、總部縣市、網站、簽證會計師事務所、股務代理；美股 SEC 產業／總部／交易所／會計年度／曾用名稱。
+  **商用前請律師確認**。
+- ✅ 7 公司簡介：中文維基百科節錄（Wikidata 找條目、CC BY-SA 4.0、不改寫、每月更新），沒有條目時 AI 依官方資料寫 2–3 句（worker `company_refresh` 每小時）。
+  正式環境建議設定 `WIKIMEDIA_CONTACT`（Wikimedia 的 User-Agent 聯絡方式；不要填 SEC 的信箱）。
+- ✅ 8 上市股票外資持股：證交所 OpenAPI `MI_QFIIS_sort_20` 每天存檔，名列前 20 名的股票在籌碼分頁與總覽顯示持股比與名次，其他維持空狀態。
+- ⏳ 9 ETF 淨值／折溢價：另案（等主機核准與驗證後做）。
+- ⏸ 10 美股報價：維持空狀態。
+- 新的存檔群組 `monthly`（每月 10、25 日 10:20）；第一次部署後可手動跑 `uv run python -m forliosa.archive run --only companies,monthly`。
+
 ## 4. 每次交付前的檢查
 
 ```bash

@@ -1,0 +1,48 @@
+{
+ "cik": "0001046179",
+ "entityType": "other",
+ "sic": "3674",
+ "sicDescription": "Semiconductors & Related Devices",
+ "name": "TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD",
+ "tickers": [
+  "TSM",
+  "TSMWF"
+ ],
+ "exchanges": [
+  "NYSE",
+  "OTC"
+ ],
+ "fiscalYearEnd": "1231",
+ "category": "Large accelerated filer",
+ "addresses": {
+  "mailing": {
+   "city": "HSINCHU",
+   "stateOrCountry": null,
+   "stateOrCountryDescription": null,
+   "isForeignLocation": 1,
+   "foreignStateTerritory": null,
+   "country": "Taiwan",
+   "countryCode": "F5"
+  },
+  "business": {
+   "city": "HSINCHU",
+   "stateOrCountry": null,
+   "stateOrCountryDescription": null,
+   "isForeignLocation": 1,
+   "foreignStateTerritory": null,
+   "country": "Taiwan",
+   "countryCode": "F5"
+  }
+ },
+ "formerNames": [],
+ "filings": {
+  "recent": {
+   "accessionNumber": [],
+   "filingDate": [],
+   "reportDate": [],
+   "form": [],
+   "items": [],
+   "primaryDocument": []
+  }
+ }
+}

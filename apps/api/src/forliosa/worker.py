@@ -27,6 +27,12 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   web search fills gaps within the monthly budget; headlines older than 30 days are deleted
   (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only.
 
+* ``company_refresh`` — every hour at :35: the 「關於」 description of tracked symbols (``forliosa.services.company``):
+  a zh.wikipedia excerpt found through Wikidata (one request at a time, monthly per company, paused 6 h after a 429),
+  else an AI description from official facts (only when the facts changed).
+* ``monthly_archive`` — the 10th and the 25th at 10:20: 董監事持股餘額明細 (company ↔ company links), TDCC 集保股東
+  戶數 (2-22 / 2-23) and the ESG product text (archive group ``monthly``).
+
 There is no intraday polling: the former MIS job was removed (2026-11-12) because TWSE's website terms
 forbid automated downloads from mis.twse.com.tw and real-time / delayed quotes need a paid licence.
 ``/instruments/{symbol}/intraday`` returns no points until a licensed source is added.
@@ -63,6 +69,8 @@ log = logging.getLogger("forliosa.worker")
 # Archive groups per run (forliosa.archive.JOB_GROUPS).
 EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex", "cbc"]
 WEEKLY_GROUPS = ["tdcc", "weekly"]
+MONTHLY_GROUPS = ["monthly"]
+MONTHLY_DAYS = (10, 25)
 SEC_GROUPS = ["sec"]
 
 
@@ -159,10 +167,14 @@ class Worker:
             Job("sec_archive", daily_at(time(7, 50)), lambda: self.archive(SEC_GROUPS)),
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
             Job("ai_analyst_purge", daily_at(*(time(h, 5) for h in range(24))), self.ai_analyst_purge),
+            Job("monthly_archive", daily_at(time(10, 20), only_if=lambda n: n.day in MONTHLY_DAYS),
+                lambda: self.archive(MONTHLY_GROUPS)),
         ]
         settings = get_settings()
         if settings.news_enabled:
             self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh))
+        if settings.company_descriptions_enabled:
+            self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh))
 
     async def archive(self, groups: list[str]) -> None:
         def run() -> list:
@@ -216,6 +228,15 @@ class Worker:
             with session_factory()() as db:
                 # A batch never holds the scheduler for longer than the refresh interval.
                 return refresh(db, self.md, deadline_seconds=get_settings().news_refresh_minutes * 60 * 0.8)
+
+        await asyncio.to_thread(run)
+
+    async def company_refresh(self) -> None:
+        from forliosa.services.company import refresh
+
+        def run():
+            with session_factory()() as db:
+                return refresh(db, self.md)
 
         await asyncio.to_thread(run)
 
