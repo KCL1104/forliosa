@@ -19,11 +19,14 @@ export function ReturnChart({
   series,
   showBenchmark,
   benchmarkName,
+  mineLabel = "我的報酬",
   height = 240,
 }: {
   series: PerformancePoint[]
   showBenchmark: boolean
   benchmarkName: string
+  /** 提示框裡自己那條線的名稱（查看別人的資產時是「爸爸的報酬」） */
+  mineLabel?: string
   height?: number
 }) {
   const rows: Row[] = series.map((p) => ({
@@ -63,7 +66,7 @@ export function ReturnChart({
                 <ChartTooltipBox
                   title={formatDateShort(row.t)}
                   rows={[
-                    { label: "我的報酬", value: formatPercent(row.mine), color: "var(--chart-mine)", shape: "line" },
+                    { label: mineLabel, value: formatPercent(row.mine), color: "var(--chart-mine)", shape: "line" },
                     ...(showBenchmark && row.bench !== null
                       ? [{ label: benchmarkName, value: formatPercent(row.bench), color: "var(--chart-bench)", shape: "line" as const }]
                       : []),

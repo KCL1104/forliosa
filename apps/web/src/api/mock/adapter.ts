@@ -9,6 +9,7 @@ import {
   type Transaction,
   type User,
 } from "../types"
+import { viewAsId } from "../view-as"
 import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
@@ -18,6 +19,8 @@ import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec
 import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, valuationSeries } from "./market"
 import { createRecurringStore, seedPlans } from "./recurring"
+import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
+import { createSharingStore, type MemberSource } from "./sharing"
 import { closedRounds, positionHistory } from "./rounds"
 import {
   buildChips,
@@ -58,6 +61,22 @@ export function readMockScenario(): MockScenario {
   return "default"
 }
 
+/**
+ * mock 的登入狀態：網址 `?auth=signed-out` 模擬還沒登入（看登入頁與邀請預覽），
+ * 「用 Discord 登入」回到 `next` 時帶 `?auth=signed-in`。記在 sessionStorage。
+ */
+export function readMockSignedIn(): boolean {
+  if (typeof window === "undefined") return true
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("auth")
+    if (fromUrl === "signed-out") window.sessionStorage.setItem("forliosa:mock-auth", "signed-out")
+    if (fromUrl === "signed-in") window.sessionStorage.removeItem("forliosa:mock-auth")
+    return window.sessionStorage.getItem("forliosa:mock-auth") !== "signed-out"
+  } catch {
+    return true
+  }
+}
+
 const DEFAULT_PREFS: Preferences = {
   color_convention: "tw",
   theme: "system",
@@ -75,6 +94,8 @@ export interface MockOptions {
   latency?: [number, number]
   /** 法人觀點：POST 之後多久變成 ready（毫秒）；測試時設 0 */
   analystDelayMs?: number
+  /** 是否已登入（預設 true；`?auth=signed-out` 模擬還沒登入） */
+  signedIn?: boolean
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
@@ -83,7 +104,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const demo = !commercial
   const [minLatency, maxLatency] = options.latency ?? [120, 320]
 
-  let user: User = { id: "usr_01JDEMO", email: "demo@forliosa.local", display_name: "示範使用者", preferences: { ...DEFAULT_PREFS } }
+  let user: User = { id: "usr_01JDEMO", email: "demo@forliosa.local", display_name: "示範使用者", avatar_url: null, preferences: { ...DEFAULT_PREFS } }
+  let signedIn = options.signedIn ?? true
   let accounts: Account[] = scenario === "empty" ? [] : ACCOUNTS.map((a) => ({ ...a }))
   let txns: Transaction[] = scenario === "empty" ? [] : seedTransactions()
   if (scenario === "stress") {
@@ -105,6 +127,84 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   let watch: string[] = scenario === "empty" ? [] : ["2382.TW", "2308.TW", "2881.TW"]
   const recurring = createRecurringStore(scenario === "empty" ? [] : seedPlans(ACCOUNTS[0]!.id), () => accounts)
   const analyst = createAnalystStore({ delayMs: options.analystDelayMs })
+
+  // ── 分享（M5）：爸爸的帳本（授權查看、他在群組的分享都從這裡算）與我的分享內容 ──
+  const dadTxns = seedDadTransactions()
+  const memo = <T,>(fn: () => T) => {
+    let v: T | undefined
+    return () => (v ??= fn())
+  }
+  /** 只記 manual／import／ai_draft 的買賣（股利、自動入帳、快照不列） */
+  const rawTrades = (list: Transaction[]): RawTrade[] =>
+    list
+      .filter((t) => (t.type === "buy" || t.type === "sell") && t.symbol && ["manual", "import", "ai_draft"].includes(t.source) && t.note !== "持股快照")
+      .map((t) => ({ txn_id: t.id, side: t.type as "buy" | "sell", symbol: t.symbol!, trade_date: t.trade_date, quantity: t.quantity ?? 0, price: t.price ?? 0, currency: t.currency, created_at: t.created_at }))
+  const periodReturns = (list: Transaction[]) => {
+    const summary = buildSummary(list, undefined, commercial)
+    const holdings = buildHoldings(list, undefined, commercial)
+    // 有任何持股沒有收盤價（商用模式的美股）時，所有期間都是 null（不說明原因）
+    if (commercial && holdings.some((h) => h.price === null)) return { day: null, month: null, year: null, total: summary.total_return_pct }
+    const opts = { isDemo: !commercial, ...(commercial ? { minStart: ARCHIVE_START } : {}) }
+    return {
+      day: summary.day_change_pct,
+      month: buildPerformance(list, "MTD", undefined, "0050.TW", opts).twr,
+      year: buildPerformance(list, "YTD", undefined, "0050.TW", opts).twr,
+      total: summary.total_return_pct,
+    }
+  }
+  const sharedHoldings = (list: Transaction[]) =>
+    buildHoldings(list, undefined, commercial)
+      .filter((h) => h.weight > 0)
+      .sort((a, b) => b.weight - a.weight)
+      .map((h) => ({ symbol: h.symbol, name: h.name, weight: h.weight }))
+  const sharedAmounts = (list: Transaction[]) => {
+    const s = buildSummary(list, undefined, commercial)
+    return { market_value: s.market_value, day_change: s.day_change, total_pnl: s.total_pnl }
+  }
+  const dadReturns = memo(() => periodReturns(dadTxns))
+  const dad: MemberSource = {
+    returns: dadReturns,
+    holdings: memo(() => sharedHoldings(dadTxns)),
+    amounts: memo(() => sharedAmounts(dadTxns)),
+    trades: memo(() => rawTrades(dadTxns)),
+    week: (w) => ({ "2026-11-02": 0.0121, "2026-10-26": 0.0058 })[w] ?? null,
+  }
+  const mine: MemberSource = {
+    returns: () => periodReturns(txns),
+    holdings: () => sharedHoldings(txns),
+    amounts: () => sharedAmounts(txns),
+    trades: () => rawTrades(txns),
+    // 商用模式：我有美股、沒有收盤價，週報酬算不出來
+    week: (w) => (commercial ? null : ({ "2026-11-02": 0.0097, "2026-10-26": 0.0043 })[w] ?? null),
+  }
+  const sharing = createSharingStore(
+    {
+      me: () => ({ user_id: user.id, display_name: user.display_name, avatar_url: user.avatar_url ?? null }),
+      signedIn: () => signedIn,
+      commercial,
+      myAccounts: () => accounts,
+      mine,
+      dad,
+      dadAccounts: DAD_ACCOUNTS,
+      origin: () => (typeof window === "undefined" ? "http://localhost:5173" : window.location.origin),
+    },
+    scenario,
+  )
+
+  /**
+   * 這次請求讀的是誰的帳本：平常是我；查看模式是授權者，而且只有授權範圍內的帳戶
+   * （伺服器的分享投影；`account_id` 超出範圍回 404）。
+   */
+  const ledger = (accountId?: string | null): { accounts: Account[]; txns: Transaction[]; viewing: boolean } => {
+    const viewAs = viewAsId()
+    if (!viewAs) return { accounts, txns, viewing: false }
+    const { owner, accountIds } = sharing.viewAsOwner(viewAs)
+    const ownerAccounts = owner.user_id === "usr_dad" ? DAD_ACCOUNTS : []
+    const scoped = ownerAccounts.filter((a) => accountIds === "all" || accountIds.includes(a.id))
+    if (accountId && !scoped.some((a) => a.id === accountId)) throw new ApiError(404, "not_found", "找不到帳戶")
+    const ids = new Set(scoped.map((a) => a.id))
+    return { accounts: scoped, txns: (owner.user_id === "usr_dad" ? dadTxns : []).filter((t) => ids.has(t.account_id)), viewing: true }
+  }
 
   const wait = <T>(value: T | (() => T)): Promise<T> =>
     new Promise((resolve, reject) => {
@@ -145,12 +245,12 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     }
   }
   const tracked = (symbol: string) => watch.includes(symbol) || buildHoldings(txns).some((h) => h.symbol === symbol)
-  const holdingsNow = (accountId?: string) => buildHoldings(txns, accountId, commercial)
+  const holdingsNow = (accountId?: string) => buildHoldings(ledger(accountId).txns, accountId, commercial)
   /** 商用模式：回應裡最早的資料不早於存檔起點；區間更早時加上「資料累積中」 */
   const clip = <T extends { t: string }>(rows: T[], from: string): { rows: T[]; notes: string[] } =>
     commercial && from < ARCHIVE_START ? { rows: rows.filter((r) => r.t >= ARCHIVE_START), notes: [accumulatingNote()] } : { rows, notes: [] }
   /** 商用模式的績效：含美股（沒有可商用的價格）就算不出來，其餘從存檔起點開始 */
-  const commercialPerformance = (range: Parameters<typeof buildPerformance>[1], accountId: string | undefined, benchmark: string) => {
+  const commercialPerformance = (txns: Transaction[], range: Parameters<typeof buildPerformance>[1], accountId: string | undefined, benchmark: string) => {
     const usHeld = [...new Set(txns.filter((t) => t.symbol && t.currency === "USD" && (!accountId || t.account_id === accountId)).map((t) => t.symbol!))].sort()
     const empty = buildPerformance([], range, accountId, benchmark, { isDemo: false })
     if (usHeld.length > 0) {
@@ -180,15 +280,25 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     }
   }
 
-  return {
+  const base: ForliosaApi = {
     kind: "mock",
     devLogin: (body) =>
-      wait(() => (user = { ...user, email: body.email, display_name: body.display_name ?? body.email.split("@")[0]! })),
-    logout: () => wait(undefined),
-    getMe: () => wait(() => user),
+      wait(() => {
+        signedIn = true
+        return (user = { ...user, email: body.email, display_name: body.display_name ?? body.email.split("@")[0]! })
+      }),
+    logout: () =>
+      wait(() => {
+        signedIn = false
+      }),
+    getMe: () =>
+      wait(() => {
+        if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
+        return user
+      }),
     updatePreferences: (patch) => wait(() => (user = { ...user, preferences: { ...user.preferences, ...patch } })),
 
-    listAccounts: () => wait(() => accounts),
+    listAccounts: () => wait(() => ledger().accounts),
     createAccount: (body) =>
       wait(() => {
         const acc: Account = { ...body, id: `acc_${++nextId}`, created_at: new Date().toISOString() }
@@ -321,8 +431,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         return mine ? all.filter((e) => e.mine) : all
       }),
     getNews: (symbol) => wait(() => buildNews(spec(symbol), commercial)),
-    getPosition: (symbol) => wait(() => buildPosition(spec(symbol), txns, commercial)),
-    getPositionHistory: (symbol) => wait(() => positionHistory(txns, spec(symbol).symbol)),
+    getPosition: (symbol) => wait(() => buildPosition(spec(symbol), ledger().txns, commercial)),
+    getPositionHistory: (symbol) => wait(() => positionHistory(ledger().txns, spec(symbol).symbol)),
     getWhy: (symbol) => wait(() => buildWhy(spec(symbol))),
 
     getWatchlist: () =>
@@ -364,7 +474,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       wait(() => {
         // 與後端相同：每頁最多 200 筆
         if ((query.limit ?? 50) > 200) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：筆數")
-        const filtered = txns
+        const filtered = ledger(query.account_id).txns
           .filter((t) => !query.account_id || t.account_id === query.account_id)
           .filter((t) => !query.symbol || t.symbol === query.symbol)
           .filter((t) => !query.type || t.type === query.type)
@@ -445,16 +555,19 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     previewTransaction: (body) =>
       wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined)),
 
-    getPortfolioSummary: (accountId) => wait(() => buildSummary(txns, accountId, commercial)),
+    getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
-    getUpcoming: (days = 7) => wait(() => buildUpcoming(holdingsNow(), findInstrument, days, recurring.upcoming(MOCK_TODAY, addDays(MOCK_TODAY, days)), commercial)),
+    // 查看模式：授權者沒有定期定額（示範），本週事項只有除息與入帳
+    getUpcoming: (days = 7) =>
+      wait(() => buildUpcoming(holdingsNow(), findInstrument, days, ledger().viewing ? [] : recurring.upcoming(MOCK_TODAY, addDays(MOCK_TODAY, days)), commercial)),
     getPerformance: ({ range, account_id, benchmark }) =>
-      wait(() =>
-        commercial
-          ? commercialPerformance(range, account_id, benchmark ?? user.preferences.benchmark)
-          : buildPerformance(txns, range, account_id, benchmark ?? user.preferences.benchmark),
-      ),
-    getClosedPositions: (accountId) => wait(() => closedRounds(txns, { accountId })),
+      wait(() => {
+        const l = ledger(account_id)
+        // 查看模式的基準用授權者的（示範：0050）
+        const bench = benchmark ?? (l.viewing ? "0050.TW" : user.preferences.benchmark)
+        return commercial ? commercialPerformance(l.txns, range, account_id, bench) : buildPerformance(l.txns, range, account_id, bench)
+      }),
+    getClosedPositions: (accountId) => wait(() => closedRounds(ledger(accountId).txns, { accountId })),
 
     listRecurring: (accountId) => wait(() => recurring.list(accountId)),
     createRecurring: (body) => wait(() => recurring.create(body)),
@@ -466,5 +579,96 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
     getAnalystViews: (symbol) => wait(() => analyst.get(spec(symbol).symbol)),
     requestAnalystViews: (symbol) => wait(() => analyst.request(spec(symbol).symbol)),
+
+    // ── 分享（M5） ──
+    getAuthProviders: () => wait(() => ({ discord: true, dev_login: false })),
+    // 沒有真的 Discord：整頁回到 next，帶 `auth=signed-in` 當作登入成功
+    discordLoginUrl: (next) => `${next}${next.includes("?") ? "&" : "?"}auth=signed-in`,
+    updateMe: (patch) =>
+      wait(() => {
+        const name = (patch.display_name ?? "").trim()
+        if (name.length < 1 || name.length > 30) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：display_name")
+        return (user = { ...user, display_name: name })
+      }),
+    listDelegations: () => wait(() => sharing.listDelegations()),
+    listDelegationCandidates: () => wait(() => sharing.listDelegationCandidates()),
+    createDelegation: (body) => wait(() => sharing.createDelegation(body)),
+    updateDelegation: (id, patch) => wait(() => sharing.updateDelegation(id, patch)),
+    deleteDelegation: (id) => wait(() => sharing.deleteDelegation(id)),
+    listGroups: () => wait(() => sharing.listGroups()),
+    createGroup: (body) => wait(() => sharing.createGroup(body)),
+    getGroup: (id) => wait(() => sharing.getGroup(id)),
+    updateGroup: (id, patch) => wait(() => sharing.updateGroup(id, patch)),
+    deleteGroup: (id) => wait(() => sharing.deleteGroup(id)),
+    transferGroup: (id, userId) => wait(() => sharing.transferGroup(id, userId)),
+    setMemberRole: (id, userId, role) => wait(() => sharing.setMemberRole(id, userId, role)),
+    removeMember: (id, userId) => wait(() => sharing.removeMember(id, userId)),
+    createInvite: (id, body) => wait(() => sharing.createInvite(id, body)),
+    listInvites: (id) => wait(() => sharing.listInvites(id)),
+    revokeInvite: (id, inviteId) => wait(() => sharing.revokeInvite(id, inviteId)),
+    getInvite: (token) => wait(() => sharing.getInvite(token)),
+    acceptInvite: (token, share) => wait(() => sharing.acceptInvite(token, share)),
+    getShare: (id) => wait(() => sharing.getShare(id)),
+    putShare: (id, share) => wait(() => sharing.putShare(id, share)),
+    getLeaderboard: (id, period) => wait(() => sharing.getLeaderboard(id, period)),
+    getGroupHoldings: (id) => wait(() => sharing.getGroupHoldings(id)),
+    getSharedPortfolio: (id, userId) => wait(() => sharing.getSharedPortfolio(id, userId)),
+    getFeed: (id, query) => wait(() => sharing.getFeed(id, query)),
+    listComments: (id, target, query) => wait(() => sharing.listComments(id, target, query)),
+    createComment: (id, body) => wait(() => sharing.createComment(id, body)),
+    deleteComment: (id, commentId) => wait(() => sharing.deleteComment(id, commentId)),
+    addReaction: (id, body) => wait(() => sharing.addReaction(id, body)),
+    removeReaction: (id, target, emoji) => wait(() => sharing.removeReaction(id, target, emoji)),
+    listDigests: (id, query) => wait(() => sharing.listDigests(id, query)),
+    getChannels: (id) => wait(() => sharing.getChannels(id)),
+    putDiscord: (id, body) => wait(() => sharing.putDiscord(id, body)),
+    patchDiscord: (id, patch) => wait(() => sharing.patchDiscord(id, patch)),
+    deleteDiscord: (id) => wait(() => sharing.deleteDiscord(id)),
+    linkTelegram: (id) => wait(() => sharing.linkTelegram(id)),
+    patchTelegram: (id, patch) => wait(() => sharing.patchTelegram(id, patch)),
+    deleteTelegram: (id) => wait(() => sharing.deleteTelegram(id)),
   }
+
+  return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)
+}
+
+// ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
+type MethodName = Exclude<keyof ForliosaApi, "kind">
+/** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
+const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations"])
+/** 不讀使用者資料的端點：忽略標頭 */
+const IGNORES_VIEW_AS = new Set<MethodName>([
+  "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",
+  "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions",
+])
+/** 以授權者身分回應的唯讀端點 */
+export const VIEW_AS_READS = new Set<MethodName>([
+  "listAccounts", "getPortfolioSummary", "getHoldings", "getPerformance", "getClosedPositions", "getUpcoming", "listTransactions",
+  "getPosition", "getPositionHistory", "getEvents",
+])
+/** 非 GET 的方法（查看模式一律 read_only） */
+const WRITES = new Set<MethodName>([
+  "createAccount", "updateAccount", "deleteAccount", "putHoldings", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
+  "deleteTransaction", "previewTransaction", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
+  "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
+  "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
+  "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
+])
+
+function guardViewAs(base: ForliosaApi, validate: (id: string) => unknown, wait: <T>(value: T | (() => T)) => Promise<T>): ForliosaApi {
+  const out: Record<string, unknown> = { ...base }
+  for (const key of Object.keys(base) as (keyof ForliosaApi)[]) {
+    if (key === "kind" || VIEWER_OWN.has(key) || IGNORES_VIEW_AS.has(key)) continue
+    const fn = base[key] as (...args: unknown[]) => Promise<unknown>
+    out[key] = (...args: unknown[]) => {
+      const id = viewAsId()
+      if (!id) return fn(...args)
+      return wait(() => {
+        validate(id) // 授權不存在、已撤銷、或被授權者不是我：403 delegation_revoked
+        if (WRITES.has(key)) throw new ApiError(403, "read_only", "正在以唯讀身分查看，不能修改")
+        if (!VIEW_AS_READS.has(key)) throw new ApiError(403, "view_as_not_allowed", "查看別人的資產時不能使用這個功能")
+      }).then(() => fn(...args))
+    }
+  }
+  return out as unknown as ForliosaApi
 }

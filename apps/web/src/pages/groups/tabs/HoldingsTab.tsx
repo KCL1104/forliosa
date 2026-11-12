@@ -1,0 +1,88 @@
+import { Link } from "@tanstack/react-router"
+import { useGroupHoldings } from "@/api/sharing-queries"
+import type { Group, SharedHolding } from "@/api/types"
+import { UserAvatar } from "@/components/avatar"
+import { DemoTag, Section } from "@/components/section"
+import { ErrorState, SkeletonLines } from "@/components/states"
+import { formatPercent } from "@/lib/format"
+import { codeOf } from "@/lib/tick"
+
+/** 持股：共同持股（兩人以上）、產業、每位分享了持股的成員的權重（沒有股數與金額） */
+export function HoldingsTab({ group }: { group: Group }) {
+  const data = useGroupHoldings(group.id)
+  if (data.isError) return <ErrorState error={data.error} onRetry={() => void data.refetch()} />
+  if (!data.data) return <SkeletonLines rows={6} />
+  const h = data.data
+  if (h.members.length === 0) return <p className="border-y border-rule py-6 text-ink-2">還沒有資料。</p>
+  return (
+    <div className="flex flex-col gap-10">
+      <div className="grid gap-10 md:grid-cols-2">
+        <Section title="共同持股" titleId="gh-common" aside={h.is_demo ? <DemoTag /> : undefined}>
+          {h.common.length === 0 ? (
+            <p className="text-md text-ink-2">還沒有兩人以上都持有的股票。</p>
+          ) : (
+            <ul className="-mt-3">
+              {h.common.map((c) => (
+                <li key={c.symbol} className="flex h-12 items-center justify-between gap-3 border-b border-rule">
+                  <Link to="/stock/$symbol" params={{ symbol: c.symbol }} className="min-w-0 truncate hover:underline">
+                    <span className="font-medium">{c.name}</span>
+                    <span className="num ml-1.5 text-sm text-ink-2">{codeOf(c.symbol)}</span>
+                  </Link>
+                  <span className="num shrink-0 text-base">{c.holder_count} 人</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+        <Section title="產業" titleId="gh-industries">
+          {h.industries.length === 0 ? (
+            <p className="text-md text-ink-2">還沒有資料。</p>
+          ) : (
+            <ul className="-mt-3">
+              {h.industries.map((i) => (
+                <li key={i.industry} className="flex h-12 items-center justify-between gap-3 border-b border-rule">
+                  <span className="truncate">{i.industry}</span>
+                  <span className="num shrink-0 text-base">{i.holder_count} 人</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+      </div>
+      <Section title="成員持股" titleId="gh-members" aside="權重，不含股數與金額">
+        <div className="grid gap-x-10 gap-y-8 md:grid-cols-2">
+          {h.members.map((m) => (
+            <section key={m.user_id} aria-label={`${m.display_name}的持股`}>
+              <Link to="/groups/$groupId/members/$userId" params={{ groupId: group.id, userId: m.user_id }} className="flex items-center gap-2 hover:underline">
+                <UserAvatar name={m.display_name} url={m.avatar_url} size="sm" />
+                <span className="text-lg font-medium">{m.display_name}</span>
+              </Link>
+              <WeightList holdings={m.holdings} className="mt-2" />
+            </section>
+          ))}
+        </div>
+      </Section>
+    </div>
+  )
+}
+
+/** 權重清單：名稱、代號、細長的墨色比例條、百分比 */
+export function WeightList({ holdings, className }: { holdings: SharedHolding[]; className?: string }) {
+  const max = Math.max(...holdings.map((x) => x.weight), 0.0001)
+  return (
+    <ul className={className}>
+      {holdings.map((x) => (
+        <li key={x.symbol} className="grid h-11 grid-cols-[minmax(0,1fr)_88px_56px] items-center gap-3 border-b border-rule">
+          <Link to="/stock/$symbol" params={{ symbol: x.symbol }} className="min-w-0 truncate hover:underline">
+            {x.name}
+            <span className="num ml-1.5 text-sm text-ink-2">{codeOf(x.symbol)}</span>
+          </Link>
+          <span aria-hidden className="h-1.5 rounded-full bg-hov">
+            <span className="block h-full rounded-full bg-ink-2" style={{ width: `${Math.max(4, (x.weight / max) * 100)}%` }} />
+          </span>
+          <span className="num text-right">{formatPercent(x.weight, { decimals: 0, signed: false })}</span>
+        </li>
+      ))}
+    </ul>
+  )
+}

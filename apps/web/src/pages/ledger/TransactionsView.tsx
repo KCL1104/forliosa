@@ -32,6 +32,7 @@ import { codeOf, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { GroupedVirtuoso } from "react-virtuoso"
 import { usePrefs } from "@/stores/prefs"
+import { useReadOnly } from "@/api/view-as"
 
 type Period = "month" | "year" | "all"
 const PERIODS: { value: Period; label: string }[] = [
@@ -59,6 +60,7 @@ const GRID = "lg:grid-cols-[88px_76px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr
 
 /** 交易：由新到舊、月份分組、虛擬化無限載入；點一筆可以編輯 */
 export function TransactionsView({ symbol }: { symbol?: string }) {
+  const readOnly = useReadOnly()
   const accounts = useAccounts()
   const ask = useAskAi()
   const isDesktop = useIsDesktop()
@@ -111,10 +113,12 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
             <XIcon aria-hidden className="size-3.5" />
           </button>
         )}
-        <Button size="sm" variant="outline" className="ml-auto" onClick={() => ask.action("trade")}>
-          <PlusIcon />
-          記一筆
-        </Button>
+        {!readOnly && (
+          <Button size="sm" variant="outline" className="ml-auto" onClick={() => ask.action("trade")}>
+            <PlusIcon />
+            記一筆
+          </Button>
+        )}
       </div>
       {!isDesktop && (
         <Drawer open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -150,6 +154,9 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
               </Button>
             }
           />
+        ) : readOnly ? (
+          // 查看模式：唯讀，沒有記帳動作也沒有 AI
+          <EmptyState title="沒有交易紀錄" />
         ) : (
           <EmptyState
             title="還沒有交易紀錄"
@@ -253,6 +260,8 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
   const remove = useDeleteTransaction()
   const openTradeForm = useUi((s) => s.openTradeForm)
   const [confirm, setConfirm] = useState(false)
+  // 查看別人的資產（唯讀）：列不能點開編輯，也沒有刪除
+  const readOnly = useReadOnly()
   const market = t.symbol ? marketOf(t.symbol) : t.currency === "USD" ? "US" : "TWSE"
   const name = t.symbol ? codeOf(t.symbol) : "現金"
   const sign = cashSign(t)
@@ -266,18 +275,18 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
   return (
     <>
       <div
-        role="button"
-        tabIndex={0}
-        aria-label={`編輯 ${formatDateShort(t.trade_date)} ${TYPE_LABEL[t.type]} ${t.symbol ? name : ""}${tag ? `（${tag.label}）` : ""}`}
-        onClick={() => openTradeForm({ edit: t })}
+        role={readOnly ? undefined : "button"}
+        tabIndex={readOnly ? undefined : 0}
+        aria-label={readOnly ? undefined : `編輯 ${formatDateShort(t.trade_date)} ${TYPE_LABEL[t.type]} ${t.symbol ? name : ""}${tag ? `（${tag.label}）` : ""}`}
+        onClick={() => !readOnly && openTradeForm({ edit: t })}
         onKeyDown={(e) => {
-          if (e.target !== e.currentTarget) return
+          if (readOnly || e.target !== e.currentTarget) return
           if (e.key === "Enter" || e.key === " ") {
             e.preventDefault()
             openTradeForm({ edit: t })
           }
         }}
-        className={cn("ruled-row group grid min-h-14 cursor-pointer grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-2.5 text-base focus-visible:outline-offset-[-2px]", GRID)}
+        className={cn("ruled-row group grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-2.5 text-base focus-visible:outline-offset-[-2px]", !readOnly && "cursor-pointer", GRID)}
       >
         <span className="num hidden text-ink-2 lg:block">{formatDateShort(t.trade_date)}</span>
         <span className={cn("hidden lg:block", t.type === "buy" || t.type === "sell" ? "font-medium" : "text-ink-2")}>{TYPE_LABEL[t.type]}</span>
@@ -309,7 +318,7 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
           {account?.name}
         </span>
         <span className="hidden justify-end lg:flex">
-          <Button
+          {!readOnly && <Button
             variant="ghost"
             size="icon-sm"
             className="opacity-0 group-hover:opacity-100 focus-visible:opacity-100"
@@ -320,7 +329,7 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
             }}
           >
             <Trash2Icon />
-          </Button>
+          </Button>}
         </span>
       </div>
       <AlertDialog open={confirm} onOpenChange={setConfirm}>

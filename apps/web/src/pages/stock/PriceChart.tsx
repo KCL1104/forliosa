@@ -38,6 +38,7 @@ import { formatQuote } from "@/lib/tick"
 import { dayTime, importantMoments, movingAverage } from "@/lib/chart-math"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
+import { useReadOnly } from "@/api/view-as"
 
 export type ChartRange = "1D" | HistoryRange
 const RANGES: { value: ChartRange; label: string }[] = [
@@ -341,6 +342,7 @@ function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
+  const readOnly = useReadOnly()
   if (notes.length > 0) {
     // 後端說明為什麼沒有（只用可商用來源時沒有授權的盤中資料）：照實顯示，並給一個現在能看的
     return (
@@ -368,7 +370,7 @@ function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail
           : `加入觀察後，盤中每分鐘會記下${inst.name}的價格。現在可以先看 5 日或 1 月。`}
         {quote && ` 目前 ${formatPrice(quote.price, inst.market)}。`}
       </p>
-      {!watching && (
+      {!watching && !readOnly && (
         <Button variant="outline" size="sm" disabled={toggle.isPending} onClick={() => toggle.mutate({ symbol: inst.symbol, on: true })}>
           <StarIcon />
           加入觀察

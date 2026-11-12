@@ -9,6 +9,7 @@ import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useUi } from "./ui-store"
+import { useReadOnly } from "@/api/view-as"
 
 
 /**
@@ -19,6 +20,8 @@ export function CommandSearch() {
   const open = useUi((s) => s.searchOpen)
   const setOpen = useUi((s) => s.setSearchOpen)
   const openTradeForm = useUi((s) => s.openTradeForm)
+  // 查看別人的資產時是唯讀：不提供記帳
+  const readOnly = useReadOnly()
   const togglePrivacy = usePrefs((s) => s.togglePrivacy)
   const navigate = useNavigate()
   const [q, setQ] = useState("")
@@ -54,10 +57,11 @@ export function CommandSearch() {
 
   const results = search.data ?? []
   const pages = PAGES.filter((p) => !q || p.label.includes(q.trim()))
-  // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用
+  // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用。
+  // 和下面渲染的條件一致（查看模式沒有「記一筆交易」），否則會選到不存在的項目
   const values = [
     ...results.map((i) => i.symbol),
-    ...(q.trim() ? [] : ["new-trade", "privacy"]),
+    ...(q.trim() ? [] : [...(readOnly ? [] : ["new-trade"]), "privacy"]),
     ...pages.map((p) => `page:${p.to}`),
   ]
   const selected = values.includes(active) ? active : (values[0] ?? "")
@@ -107,10 +111,12 @@ export function CommandSearch() {
             )}
             {!q.trim() && (
               <CommandPrimitive.Group heading="常用動作" className={groupClass}>
-                <CommandPrimitive.Item value="new-trade" onSelect={() => { close(); openTradeForm() }} className={itemClass}>
-                  <PlusIcon className="size-4 text-muted-foreground" aria-hidden />
-                  <span className="flex-1">記一筆交易</span>
-                </CommandPrimitive.Item>
+                {!readOnly && (
+                  <CommandPrimitive.Item value="new-trade" onSelect={() => { close(); openTradeForm() }} className={itemClass}>
+                    <PlusIcon className="size-4 text-muted-foreground" aria-hidden />
+                    <span className="flex-1">記一筆交易</span>
+                  </CommandPrimitive.Item>
+                )}
                 <CommandPrimitive.Item value="privacy" onSelect={() => { togglePrivacy(); close() }} className={itemClass}>
                   <EyeOffIcon className="size-4 text-muted-foreground" aria-hidden />
                   <span className="flex-1">切換隱私模式</span>

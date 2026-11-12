@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { useValuation } from "@/api/queries"
+import { useWho } from "@/api/view-as"
 import type { InstrumentDetail, Position, Valuation } from "@/api/types"
 import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
@@ -96,6 +97,7 @@ function Notes({ notes }: { notes: string[] }) {
 
 function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valuation; mode: Mode; instrument: InstrumentDetail; position: Position | null }) {
   const privacy = usePrefs((s) => s.privacyMode)
+  const you = useWho("你")
   const multiples = mode === "per" ? valuation.per_multiples : valuation.pbr_multiples
   const rows = useMemo(() => buildRiver(valuation.series, multiples, mode), [valuation.series, multiples, mode])
   const runs = useMemo(() => invalidRuns(rows), [rows])
@@ -258,7 +260,7 @@ function RiverPanel({ valuation, mode, instrument, position }: { valuation: Valu
             </table>
             {position && mode === "per" && last?.base && last.base > 0 && (
               <p className="text-md">
-                <span className="text-ink-2">你的均價</span>{" "}
+                <span className="text-ink-2">{you}的均價</span>{" "}
                 {privacy ? "••••" : `${formatPrice(position.avg_cost, market)}，約 ${(position.avg_cost / last.base).toFixed(1)} 倍`}
               </p>
             )}

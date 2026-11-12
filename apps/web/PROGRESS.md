@@ -73,6 +73,23 @@
 | mock | ✅ 上市股票任何模式都沒有法人與外資持股；2330 的為什麼漲拿掉「投信連 5 天買超」 | `src/api/mock/research.ts` |
 | 審查修正 | ✅ 本機規則版的外資動向回答改說「證交所以付費商品提供，沒有免費、可商用的來源」，和籌碼分頁空狀態（後端 notes）一致；定期定額草稿的說明抽成 `recurringDraftCopy`，草稿是示範價格（`is_demo`）時 AI 的話與草稿說明都說「示範價格」，不說成收盤價 | `src/ai/suggestions.ts`、`src/ai/runner.ts` |
 
+## 第七批（2026-11-12）：M5 分享——登入、授權唯讀查看、親友群組（`docs/m5-sharing-contract.md`）
+
+前端照合約做完（後端另一批）；合約沒寫到的地方選最保護隱私的做法，決定與要確認的事在 `OPEN_QUESTIONS.md` 40–56。
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ 全部 M5 型別（分享投影的欄位一律選用：沒開放的鍵不存在）與 40 個端點的 HTTP adapter（含 Discord 登入網址）；`PerformanceRange` 加 `MTD`；`User.avatar_url`；查看模式時每個請求帶 `X-Forliosa-View-As`（`/me`、`/me/preferences`、`/auth/*`、`GET /delegations` 除外）；React Query hooks 都放在 `["groups", id, …]` 底下，任何改動整組重抓（投影由伺服器每次重新套用） | `src/api/types.ts`、`http.ts`、`view-as.ts`、`sharing-queries.ts` |
+| mock | ✅ 每個 M5 端點，規則和合約一樣：每次讀取依目前的開關重新投影、沒開放的鍵不存在、沒開的人不在排行／動態／持股、看不到的留言對象 404、非成員 404、權限不足 403、上限 50／20、六個表情、webhook 網址檢查與 `webhook_failed`、Telegram 連結碼（約 6 秒後當作已連結）、移除成員撤回多人邀請、擁有者要先轉移才能離開。授權查看用和後端相同的路由白名單（白名單 GET 以授權者、只算範圍內帳戶；寫入 `read_only`；其他 `view_as_not_allowed`；失效 `delegation_revoked`；行情忽略標頭）。爸爸有一本完整帳本，查看、動態、分享都從它算；`?auth=signed-out` 模擬沒登入 | `src/api/mock/sharing.ts`、`members.ts`、`adapter.ts` |
+| 登入 | ✅ `/login`：「用 Discord 登入」（整頁導到 `/auth/discord/start?next=`）、六種 `oauth_*` 錯誤說明、開發登入表單（`dev_login` 或開發建置）；沒有 session 時導到 `/login?next=<原網址>`，`next` 用和後端同一條規則檢查；開發模式照舊自動開發登入。登入頁與邀請頁不包外殼 | `src/pages/auth/LoginPage.tsx`、`src/app/AuthGate.tsx`、`RootLayout.tsx`、`src/lib/next-path.ts`、`oauth-errors.ts` |
+| 設定 | ✅ 個人資料（顯示名稱，`PATCH /me`）；授權查看：授權給同群組的人（全部帳戶／指定帳戶）、修改範圍、撤銷；授權給我的人「查看」與「移除」 | `src/pages/settings/Profile.tsx`、`Delegations.tsx` |
+| 查看模式 | ✅ 墨色橫幅「正在查看 ○○ 的資產（唯讀）」＋範圍＋結束查看（桌面在頂部列下一起 sticky，手機的「問 AI」換成「結束查看」）；隱藏 AI 面板與所有 AI 入口、記一筆、股利入帳、交易編輯刪除、待簽名、觀察、定期定額標記、加入觀察、法人觀點；群組／紀錄／設定顯示「結束查看後才能使用」；基準用授權者的；進出時丟掉使用者資料的快取；403 `delegation_revoked` 自動退出並通知 | `src/app/ViewAsBanner.tsx`、`view-as.ts`、`AppShell.tsx`、帳本與個股頁 |
+| 群組列表 | ✅ 我的群組（角色、人數、不排名次、最近動態、最近週報）＋建立群組；保留可貼到 LINE 的百分比分享卡（今日・本月（MTD）・總報酬） | `src/pages/groups/GroupsPage.tsx` |
+| 邀請 | ✅ `/invite/:token`：沒登入也能預覽 → 登入後回來；加入前先選六個開關（預設只開報酬率），交易動態旁明講最近 90 天；404／410 分開說明 | `src/pages/groups/InvitePage.tsx`、`ShareToggles.tsx` |
+| 群組頁 | ✅ sticky 分頁：排行（今日・本月・今年、名次或依加入順序、總報酬不排名、加權報酬指數與 0050 對照、期間起點、只對自己說明「—」、當天排行的討論串）・動態（合併筆數、成交價只在對方開了才有並受隱私模式遮蔽、加入了群組、六個表情、留言串）・持股（共同持股、產業、每人權重）・週報（AI 摘要紫色文楷、數字、免責、表情與留言）・我的分享（六個開關，持股＋金額提示可推算股數、附上成交價要先開交易動態、列出推播頻道）・成員（角色、轉移、移出、離開、邀請連結管理、改名、排名開關、刪除群組）・頻道（Discord webhook、Telegram 連結碼、通知開關、停用狀態；非擁有者唯讀）。成員詳細頁只顯示存在的區塊，沒有就是「還沒有資料」 | `src/pages/groups/GroupPage.tsx`、`MemberPage.tsx`、`Discussion.tsx`、`tabs/` |
+| AI | ✅ 群組頁的建議問題「群組會分享我的哪些資料？」改成說明現在的規則 | `src/ai/suggestions.ts` |
+| 審查修正 | ✅ Telegram 停用後重新連結：依頻道變成使用中判斷完成，連結碼照常顯示；查看模式擋下「紀錄」頁，AI 請求也帶 `X-Forliosa-View-As`（伺服器白名單是最後一道），`useAskAi` 查看中不送出；帳本與個股頁的「你／我」查看中換成授權者名稱；手機橫幅 sticky、`--sticky-top` 排在橫幅下；⌘K 查看中的預設選取對得上看得到的項目；交易的空狀態與「接下來」的定期定額扣款在查看中不給寫入或設定頁的入口；成員詳細頁有動態時不說「還沒有資料」；橫幅範圍以 `GET /delegations`（不帶標頭）每分鐘更新 | `ChannelsTab.tsx`、`HistoryPage.tsx`、`src/ai/remote.ts`、`use-ask.ts`、`src/api/view-as.ts`、`src/app/view-as.ts`、`ViewAsBanner.tsx`、`AppShell.tsx`、`CommandSearch.tsx`、帳本與個股頁、`MemberPage.tsx`、`src/app/__tests__/view-as-ui.test.tsx` |
+
 ## 驗證
 
 - `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（13 檔 166 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記；第四批新增：來源標示、編輯說明與「沒改不送出」、AI 會取代的自動入帳、mock 股利自動入帳的同步規則）、`pnpm build` 全部通過。
@@ -82,6 +99,14 @@
 - 第五批審查修正：`pnpm test` 14 檔 171 項（新增 `recurring-draft.test.ts`：那天的收盤價／最近收盤價／示範價格三種說法；外資動向回答和空狀態說法一致）；冒煙全部通過（外資動向的等待字串跟著改）；重拍 `stock-2330-foreign-ask-*` 4 張。
 - Impeccable detector：原始碼 0 項；即時網址（帳本、2330、2454、NVDA、設定、資料來源；1440 與 390）0 項；展開後的狀態以 `--cdp` 掃（法人觀點 ready／none／searching／empty、已出清年份；1440 與 390）修正前 1 項（搜尋中的脈動紫點）→ 0 項。
 - 寬度檢查：390、820、1024、1280、1440、1920 都沒有水平捲動。
+- 第七批（M5）：見下方「M5 驗證」。
+
+### M5 驗證
+
+- `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm build` 通過；`pnpm test` 18 檔 216 項（新增 `api/mock/__tests__/sharing.test.ts` 22 項：排行／成員分享／動態的投影與鍵不存在、看不到的留言對象 404、非成員 404、權限 403、webhook、邀請 401／409／410／404、授權查看白名單與 `delegation_revoked`；`api/__tests__/view-as.test.ts` 8 項：查看標頭帶與不帶、切換時丟快取、撤銷自動退出、`next` 規則、`oauth_*` 說明；`pages/groups/__tests__/m5-ui.test.tsx` 9 項：分享開關、排行／動態／成員分享不顯示「未分享」與沒開放的區塊、成交價隱私遮蔽、邀請流程）。
+- 冒煙（`node scripts/smoke.mjs`）：32 個路由＋44 個檢查全部通過，新增 10 個路由與 14 個流程（建立群組與邀請連結、排行與討論串、表情與成交價、關掉交易動態後消失、成員分享與隱私模式、頻道、授權給別人、查看模式、授權失效自動退出、沒登入的邀請流程、登入錯誤說明、手機的結束查看與分頁捲動）。
+- 截圖：`docs/screenshots/v2/m5-*-{desktop,iphone}-{light,dark}.png` 19 個畫面 76 張。
+- Impeccable detector：原始碼 0 項；即時網址（群組列表、家族投資七個分頁、大學同學、成員詳細、邀請、登入、設定；1280 與 390）0 項。
 
 ## Impeccable 流程與產出位置
 

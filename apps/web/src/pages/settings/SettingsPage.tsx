@@ -11,6 +11,10 @@ import { RangeChips } from "@/components/charts/chart-kit"
 import { PageHeader } from "@/components/section"
 import { Link } from "@tanstack/react-router"
 import { RecurringPlans } from "./RecurringPlans"
+import { Delegations } from "./Delegations"
+import { Profile } from "./Profile"
+import { useReadOnly } from "@/api/view-as"
+import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -23,11 +27,20 @@ import { FormField as Field } from "@/components/form-field"
 
 
 export function SettingsPage() {
+  // 查看別人的資產時，帳戶與定期定額會是對方的：結束查看後才能用（外觀與漲跌顏色在頭像選單）
+  const readOnly = useReadOnly()
+  if (readOnly) return <ViewAsBlocked title="設定" />
+  return <Settings />
+}
+
+function Settings() {
   const p = usePrefs()
   const setPref = usePrefSetter()
   return (
     <div className="mx-auto flex w-full max-w-[880px] flex-col gap-10 px-5 pt-2 pb-10 md:px-8 lg:pt-10">
       <PageHeader title="設定" description="顯示設定會立即套用，並同步到你的帳號。" />
+
+      <Profile />
 
       <Group title="顯示">
         <Row
@@ -108,10 +121,12 @@ export function SettingsPage() {
 
       <RecurringPlans />
 
+      <Delegations />
+
       <Group title="之後會有的設定">
         <Row label="AI 額度與用量" description="每日對話次數、每月深度報告次數。"><span className="text-sm text-ink-2">M4 開放</span></Row>
         <Row label="通知" description="到價、漲跌幅、除權息提醒；Telegram 與 Discord。"><span className="text-sm text-ink-2">M4 開放</span></Row>
-        <Row label="資料匯出與刪除帳號" description="依個資法提供 CSV 匯出與刪除帳號。"><span className="text-sm text-ink-2">M5 開放</span></Row>
+        <Row label="資料匯出與刪除帳號" description="依個資法提供 CSV 匯出與刪除帳號。"><span className="text-sm text-ink-2">之後開放</span></Row>
       </Group>
 
       <Group title="關於資料">

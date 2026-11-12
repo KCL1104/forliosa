@@ -1,5 +1,6 @@
 import { Link, Outlet, useRouterState } from "@tanstack/react-router"
 import { EyeIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PenToolIcon, SearchIcon, UsersIcon } from "lucide-react"
+import { useReadOnly, useViewingAs } from "@/api/view-as"
 import { AiPanel } from "@/ai/AiPanel"
 import { AiScreen } from "@/ai/AiScreen"
 import { useAi, usePendingCount } from "@/ai/store"
@@ -12,28 +13,36 @@ import { usePrefs } from "@/stores/prefs"
 import { AvatarMenu } from "./AvatarMenu"
 import { CommandSearch } from "./CommandSearch"
 import { useUi } from "./ui-store"
+import { useViewAsControls } from "./view-as"
+import { MOBILE_BANNER_HEIGHT, ViewAsBanner } from "./ViewAsBanner"
 
 /**
  * 外殼（聯絡簿）：
  * - 桌面：頂部列（字標、帳本／群組、搜尋股票 ⌘K、隱私、頭像）＋主欄＋右側 AI 面板
  * - 手機：標題列（字標、隱私、頭像）＋浮動膠囊分頁「帳本｜群組｜紀錄」＋獨立的紫色「問 AI」
+ * - 查看別人的資產（唯讀）：頂部「正在查看 ○○ 的資產（唯讀）」橫幅；AI 面板、全域 AI 輸入與「問 AI」都不出現，
+ *   手機的「問 AI」位置換成「結束查看」，橫幅黏在畫面頂端。
+ *   `--sticky-top` 是頁面裡 sticky 分頁列的位置：桌面是頂部列（＋橫幅）的高度，手機查看中是橫幅的高度。
  */
 export function AppShell() {
   const isDesktop = useIsDesktop()
+  const readOnly = useReadOnly()
+  const stickyTop = isDesktop ? (readOnly ? "6.5rem" : "4rem") : readOnly ? MOBILE_BANNER_HEIGHT : "0px"
   return (
-    <div className="min-h-dvh bg-paper">
+    <div className="min-h-dvh bg-paper" style={{ "--sticky-top": stickyTop } as React.CSSProperties}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-sm focus:bg-act focus:px-3 focus:py-2 focus:text-act-fg">
         跳到主要內容
       </a>
       {isDesktop ? <TopBar /> : <MobileHeader />}
+      {!isDesktop && <ViewAsBanner className="sticky top-0 z-30" />}
       <div className={cn(isDesktop && "flex items-start")}>
         <main id="main" tabIndex={-1} className={cn("min-w-0 flex-1 outline-none", !isDesktop && "pb-[calc(env(safe-area-inset-bottom,0px)+104px)]")}>
           <Outlet />
         </main>
-        {isDesktop && <AiPanel />}
+        {isDesktop && !readOnly && <AiPanel />}
       </div>
       {!isDesktop && <Dock />}
-      {!isDesktop && <AiScreen />}
+      {!isDesktop && !readOnly && <AiScreen />}
       <CommandSearch />
       <TradeFormHost />
     </div>
@@ -69,43 +78,46 @@ function TopBar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const setSearchOpen = useUi((s) => s.setSearchOpen)
   return (
-    <header className="sticky top-0 z-30 flex h-16 items-center border-b border-rule bg-paper pr-7 pl-14">
-      <Link to="/" aria-label="Forliosa 帳本" className="mr-8 rounded-sm">
-        <Wordmark />
-      </Link>
-      <nav aria-label="主要" className="flex self-stretch">
-        {NAV.map((n) => {
-          const active = n.match(pathname)
-          return (
-            <Link
-              key={n.to}
-              to={n.to}
-              aria-current={active ? "page" : undefined}
-              className={cn(
-                "-mb-px flex items-center border-b-2 px-3.5 text-base transition-colors",
-                active ? "border-ink font-bold text-ink" : "border-transparent text-ink-2 hover:text-ink",
-              )}
-            >
-              {n.label}
-            </Link>
-          )
-        })}
-      </nav>
-      <button
-        type="button"
-        onClick={() => setSearchOpen(true)}
-        className="ml-12 flex h-10 w-[360px] items-center gap-2.5 rounded-sm border border-ctl bg-raised pr-2 pl-3 text-left text-ink-2 hover:border-ink-2"
-        aria-label="搜尋股票（⌘K）"
-      >
-        <SearchIcon aria-hidden className="size-[18px]" />
-        <span className="flex-1">搜尋股票</span>
-        <Kbd>⌘K</Kbd>
-      </button>
-      <div className="ml-auto flex items-center gap-3">
-        <PrivacyButton />
-        <AvatarMenu />
-      </div>
-    </header>
+    <div className="sticky top-0 z-30">
+      <header className="flex h-16 items-center border-b border-rule bg-paper pr-7 pl-14">
+        <Link to="/" aria-label="Forliosa 帳本" className="mr-8 rounded-sm">
+          <Wordmark />
+        </Link>
+        <nav aria-label="主要" className="flex self-stretch">
+          {NAV.map((n) => {
+            const active = n.match(pathname)
+            return (
+              <Link
+                key={n.to}
+                to={n.to}
+                aria-current={active ? "page" : undefined}
+                className={cn(
+                  "-mb-px flex items-center border-b-2 px-3.5 text-base transition-colors",
+                  active ? "border-ink font-bold text-ink" : "border-transparent text-ink-2 hover:text-ink",
+                )}
+              >
+                {n.label}
+              </Link>
+            )
+          })}
+        </nav>
+        <button
+          type="button"
+          onClick={() => setSearchOpen(true)}
+          className="ml-12 flex h-10 w-[360px] items-center gap-2.5 rounded-sm border border-ctl bg-raised pr-2 pl-3 text-left text-ink-2 hover:border-ink-2"
+          aria-label="搜尋股票（⌘K）"
+        >
+          <SearchIcon aria-hidden className="size-[18px]" />
+          <span className="flex-1">搜尋股票</span>
+          <Kbd>⌘K</Kbd>
+        </button>
+        <div className="ml-auto flex items-center gap-3">
+          <PrivacyButton />
+          <AvatarMenu />
+        </div>
+      </header>
+      <ViewAsBanner />
+    </div>
   )
 }
 
@@ -132,6 +144,8 @@ function Dock() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const setOpen = useAi((s) => s.setMobileOpen)
   const pending = usePendingCount()
+  const viewing = useViewingAs()
+  const { exit } = useViewAsControls()
   return (
     <>
       <div aria-hidden className="pointer-events-none fixed inset-x-0 bottom-0 z-20 h-[calc(env(safe-area-inset-bottom,0px)+108px)] bg-gradient-to-b from-transparent to-paper to-25%" />
@@ -154,18 +168,30 @@ function Dock() {
             )
           })}
         </nav>
-        <button
-          type="button"
-          onClick={() => setOpen(true)}
-          aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : "問 AI"}
-          className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-sm font-bold text-ai shadow-lift"
-        >
-          <PenToolIcon aria-hidden className="size-[22px]" />
-          問 AI
-          {pending > 0 && (
-            <span className="num absolute -top-1.5 right-1 grid h-5 min-w-5 place-items-center rounded-full bg-ai px-1 text-xs font-medium text-raised">{pending}</span>
-          )}
-        </button>
+        {viewing ? (
+          <button
+            type="button"
+            onClick={exit}
+            aria-label={`正在查看${viewing.owner.display_name}的資產（唯讀），結束查看`}
+            className="press flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ink bg-act text-sm font-bold text-act-fg shadow-lift"
+          >
+            <EyeOffIcon aria-hidden className="size-[22px]" />
+            結束查看
+          </button>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setOpen(true)}
+            aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : "問 AI"}
+            className="press relative flex w-[86px] flex-col items-center justify-center gap-0.5 rounded-full border border-ai-rule bg-ai-wash text-sm font-bold text-ai shadow-lift"
+          >
+            <PenToolIcon aria-hidden className="size-[22px]" />
+            問 AI
+            {pending > 0 && (
+              <span className="num absolute -top-1.5 right-1 grid h-5 min-w-5 place-items-center rounded-full bg-ai px-1 text-xs font-medium text-raised">{pending}</span>
+            )}
+          </button>
+        )}
       </div>
     </>
   )

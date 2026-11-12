@@ -21,7 +21,10 @@ export interface Preferences {
 export interface User {
   id: string
   email: string
+  /** 群組裡顯示的就是這個名稱（`PATCH /me`，1–30 字） */
   display_name: string
+  /** Discord 頭像網址（M5）；開發登入或沒有頭像時為 null／不存在 */
+  avatar_url?: string | null
   preferences: Preferences
 }
 
@@ -326,8 +329,8 @@ export interface Holding {
   is_demo: boolean
 }
 
-/** 1D／5D 以交易日計，第一個點是基準收盤（twr_index = 1.0） */
-export type PerformanceRange = "1D" | "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "ALL"
+/** 1D／5D 以交易日計，第一個點是基準收盤（twr_index = 1.0）；MTD = 上月最後收盤起（M5，分享卡的「本月」） */
+export type PerformanceRange = "1D" | "5D" | "1M" | "MTD" | "3M" | "6M" | "YTD" | "1Y" | "ALL"
 
 export interface PerformancePoint {
   t: string
@@ -715,6 +718,304 @@ export interface AnalystViews {
   notes?: string[]
 }
 
+// ── 分享（M5，docs/m5-sharing-contract.md）─────────────────────
+// 分享投影：沒開放的欄位「鍵不存在」（不是 null 也不是 0）。型別一律寫成選用欄位，前端只顯示存在的部分，
+// 不拿成員名單去比對排行或動態，也不顯示「某某沒分享」。
+
+/** `GET /auth/providers`（不需登入） */
+export interface AuthProviders {
+  discord: boolean
+  dev_login: boolean
+}
+
+/** Discord 登入失敗時 callback 導回 `/login?error=<code>` */
+export type OAuthErrorCode =
+  | "oauth_disabled"
+  | "oauth_denied"
+  | "oauth_state"
+  | "oauth_email_unverified"
+  | "oauth_email_conflict"
+  | "oauth_failed"
+
+export interface UserRef {
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+}
+
+export type DelegationScope = "all" | "accounts"
+
+export interface Delegation {
+  id: string
+  owner: UserRef
+  viewer: UserRef
+  /** `all` 也包含之後新增的帳戶 */
+  scope: DelegationScope
+  /** 授權範圍內的帳戶；帳戶刪除後自動移出 */
+  accounts: { id: string; name: string }[]
+  created_at: string
+}
+
+export interface DelegationList {
+  /** 我授權給別人的 */
+  granted: Delegation[]
+  /** 別人授權給我的 */
+  received: Delegation[]
+}
+
+/** 可以授權的人：和我同群組的成員（已授權的也列，帶 delegation_id） */
+export interface DelegationCandidate extends UserRef {
+  delegation_id?: string | null
+}
+
+export interface DelegationInput {
+  viewer_user_id: string
+  scope: DelegationScope
+  account_ids: string[]
+}
+
+export type GroupRole = "owner" | "admin" | "member"
+
+export interface GroupSummary {
+  id: string
+  name: string
+  my_role: GroupRole
+  member_count: number
+  ranking_enabled: boolean
+  latest_activity_at: string | null
+  latest_digest_at: string | null
+}
+
+export interface GroupMember extends UserRef {
+  role: GroupRole
+  joined_at: string
+  is_me: boolean
+}
+
+/** 我在一個群組的分享設定（預設只開 returns；接受邀請時由本人確認） */
+export interface ShareSettings {
+  /** 報酬率（只有 %）：今日、本月、今年、總報酬率 */
+  returns: boolean
+  /** 持股名稱與權重（不含股數、金額） */
+  holdings: boolean
+  /** 實際金額與損益：市值、今日損益、總損益 */
+  amounts: boolean
+  /** 交易動態：買進／賣出哪一檔（打開時也顯示最近 90 天） */
+  trades: boolean
+  /** 交易動態附上成交價（trades 關閉時保存但無作用） */
+  trade_prices: boolean
+  /** 把我開放的內容送到群組的 Discord／Telegram 頻道 */
+  push: boolean
+}
+
+export interface PushTarget {
+  kind: "discord" | "telegram"
+  label: string
+}
+
+export interface Group {
+  id: string
+  name: string
+  my_role: GroupRole
+  ranking_enabled: boolean
+  created_at: string
+  members: GroupMember[]
+  my_share: ShareSettings
+  /** 群組推播到哪些頻道（每位成員都看得到） */
+  push_targets: PushTarget[]
+}
+
+export type LeaderboardPeriod = "day" | "month" | "year"
+
+export interface LeaderboardEntry extends UserRef {
+  /** 期間報酬；有持股沒有收盤價時為 null（排在最後、沒有 rank） */
+  return_pct: number | null
+  /** 總報酬率（含股利）：每筆都附上、不排名、沒有基準 */
+  total_return_pct: number | null
+  /** 排行關閉（ranked: false）或期間報酬為 null 時沒有 */
+  rank?: number | null
+  is_me: boolean
+}
+
+export interface BenchmarkReturn {
+  symbol: string
+  name: string
+  return_pct: number | null
+}
+
+export interface Leaderboard {
+  period: LeaderboardPeriod
+  /** 最新收盤的交易日；也是當天排行討論串的對象 `leaderboard:<date>` */
+  date: string
+  /** 期間起點（所有成員與基準共用） */
+  start_date: string
+  as_of: string
+  /** owner 關掉排行時為 false：沒有 rank，依加入順序 */
+  ranked: boolean
+  entries: LeaderboardEntry[]
+  benchmarks: BenchmarkReturn[]
+  notes: string[]
+  sources: string[]
+  is_demo: boolean
+}
+
+export interface SharedHolding {
+  symbol: string
+  name: string
+  weight: number
+}
+
+export interface GroupHoldings {
+  /** 只有開了 holdings 的成員 */
+  members: (UserRef & { holdings: SharedHolding[] })[]
+  /** 兩人以上持有，依人數排序 */
+  common: { symbol: string; name: string; holder_count: number }[]
+  industries: { industry: string; holder_count: number }[]
+  is_demo: boolean
+}
+
+/** 一位成員分享給這個群組的內容：只出現對方開放的區塊（沒開放的鍵不存在） */
+export interface SharedPortfolio extends UserRef {
+  returns?: { day: number | null; month: number | null; year: number | null; total: number | null }
+  holdings?: SharedHolding[]
+  amounts?: { market_value: number; day_change: number; total_pnl: number }
+  is_demo: boolean
+}
+
+export const REACTION_EMOJIS = ["👍", "🎉", "🔥", "😮", "😢", "👀"] as const
+export type ReactionEmoji = (typeof REACTION_EMOJIS)[number]
+
+export interface Reaction {
+  emoji: ReactionEmoji
+  count: number
+  mine: boolean
+}
+
+export interface FeedItem {
+  id: string
+  type: "trade" | "member_joined"
+  user_id: string
+  display_name: string
+  avatar_url: string | null
+  /** 以下只有 type = trade 才有 */
+  side?: "buy" | "sell"
+  symbol?: string
+  name?: string
+  trade_date?: string
+  /** 同一人同一天同一檔同方向的交易合併成一則 */
+  count?: number
+  /** 只有對方開了 trade_prices 才有這兩個鍵：交易幣別的成交價（多筆合併時為加權平均），不含費用 */
+  price?: number
+  currency?: Currency
+  created_at: string
+  comment_count: number
+  reactions: Reaction[]
+}
+
+export interface Paged<T> {
+  items: T[]
+  next_cursor: string | null
+}
+
+/** 留言對象：`trade:<feed_item_id>`、`digest:<digest_id>`、`leaderboard:<YYYY-MM-DD>` */
+export type CommentTarget = string
+
+export interface Comment {
+  id: string
+  target: CommentTarget
+  /** 已離開群組的成員：null（display_name 為「已離開的成員」） */
+  user_id: string | null
+  display_name: string
+  body: string
+  created_at: string
+  can_delete: boolean
+}
+
+export interface DigestFacts {
+  returns: { user_id: string; display_name: string; week_return_pct: number | null }[]
+  benchmarks: { symbol: string; name: string; week_return_pct: number | null }[]
+  common_holdings: { symbol: string; name: string; holder_count: number }[]
+  industries: { industry: string; holder_count: number }[]
+  /** 只算開了 trades 的成員 */
+  trades_count: number
+}
+
+export interface Digest {
+  id: string
+  status: "pending" | "ready" | "failed"
+  week_start: string
+  week_end: string
+  created_at: string
+  /** AI 只寫群組整體，不點名個人，不給買賣建議或目標價 */
+  summary: string | null
+  facts: DigestFacts | null
+  disclaimer: string
+  sources: string[]
+  comment_count: number
+  reactions: Reaction[]
+}
+
+export type ChannelStatus = "active" | "disabled"
+
+export interface DiscordChannel {
+  configured: boolean
+  status: ChannelStatus | null
+  disabled_reason: string | null
+  /** 只有 owner 看得到（webhook 網址最後 4 碼） */
+  webhook_hint?: string | null
+  notify_trades: boolean
+  notify_digest: boolean
+}
+
+export interface TelegramChannel {
+  configured: boolean
+  status: ChannelStatus | null
+  disabled_reason: string | null
+  chat_title: string | null
+  notify_trades: boolean
+  notify_digest: boolean
+}
+
+export interface Channels {
+  discord: DiscordChannel
+  telegram: TelegramChannel
+  /** 伺服器有設定 bot 時才為 true */
+  telegram_available: boolean
+}
+
+export interface ChannelNotify {
+  notify_trades?: boolean
+  notify_digest?: boolean
+}
+
+export interface TelegramLinkCode {
+  code: string
+  bot_username: string
+  expires_at: string
+}
+
+export interface GroupInvite {
+  id: string
+  /** 只在建立時回傳 */
+  url?: string
+  expires_at: string
+  multi_use: boolean
+  uses: number
+}
+
+export interface InviteInput {
+  expires: "24h" | "7d"
+  multi_use: boolean
+}
+
+/** `GET /invites/{token}`（不需登入） */
+export interface InvitePreview {
+  group_name: string
+  inviter_display_name: string
+  /** member：已登入且已是成員 */
+  status: "valid" | "member"
+}
+
 // ── 錯誤 ──────────────────────────────────────────────────
 export interface ApiErrorBody {
   error: { code: string; message: string }
@@ -794,4 +1095,49 @@ export interface ForliosaApi {
   // 法人觀點：GET 讀當日共用快取；POST 觸發 AI 網路搜尋（計入觸發者的 AI 額度）
   getAnalystViews(symbol: string): Promise<AnalystViews>
   requestAnalystViews(symbol: string): Promise<AnalystViews>
+  // ── 分享（M5） ──
+  // 登入（Discord OAuth）與個人資料
+  getAuthProviders(): Promise<AuthProviders>
+  /** 開始 Discord 登入的網址（整頁導過去；成功後回到 `next`） */
+  discordLoginUrl(next: string): string
+  updateMe(patch: { display_name: string }): Promise<User>
+  // 授權唯讀查看
+  listDelegations(): Promise<DelegationList>
+  listDelegationCandidates(): Promise<DelegationCandidate[]>
+  createDelegation(body: DelegationInput): Promise<Delegation>
+  updateDelegation(id: string, patch: Pick<DelegationInput, "scope" | "account_ids">): Promise<Delegation>
+  deleteDelegation(id: string): Promise<void>
+  // 群組
+  listGroups(): Promise<GroupSummary[]>
+  createGroup(body: { name: string }): Promise<Group>
+  getGroup(id: string): Promise<Group>
+  updateGroup(id: string, patch: { name?: string; ranking_enabled?: boolean }): Promise<Group>
+  deleteGroup(id: string): Promise<void>
+  transferGroup(id: string, userId: string): Promise<unknown>
+  setMemberRole(id: string, userId: string, role: "admin" | "member"): Promise<unknown>
+  removeMember(id: string, userId: string): Promise<void>
+  createInvite(id: string, body: InviteInput): Promise<GroupInvite>
+  listInvites(id: string): Promise<GroupInvite[]>
+  revokeInvite(id: string, inviteId: string): Promise<void>
+  getInvite(token: string): Promise<InvitePreview>
+  acceptInvite(token: string, share: ShareSettings): Promise<Group>
+  getShare(id: string): Promise<ShareSettings>
+  putShare(id: string, share: ShareSettings): Promise<unknown>
+  getLeaderboard(id: string, period: LeaderboardPeriod): Promise<Leaderboard>
+  getGroupHoldings(id: string): Promise<GroupHoldings>
+  getSharedPortfolio(id: string, userId: string): Promise<SharedPortfolio>
+  getFeed(id: string, query?: { limit?: number; cursor?: string | null; user_id?: string }): Promise<Paged<FeedItem>>
+  listComments(id: string, target: CommentTarget, query?: { limit?: number; cursor?: string | null }): Promise<Paged<Comment>>
+  createComment(id: string, body: { target: CommentTarget; body: string }): Promise<Comment>
+  deleteComment(id: string, commentId: string): Promise<void>
+  addReaction(id: string, body: { target: CommentTarget; emoji: ReactionEmoji }): Promise<void>
+  removeReaction(id: string, target: CommentTarget, emoji: ReactionEmoji): Promise<void>
+  listDigests(id: string, query?: { limit?: number; cursor?: string | null }): Promise<Paged<Digest>>
+  getChannels(id: string): Promise<Channels>
+  putDiscord(id: string, body: { webhook_url: string } & Required<ChannelNotify>): Promise<unknown>
+  patchDiscord(id: string, patch: ChannelNotify): Promise<unknown>
+  deleteDiscord(id: string): Promise<void>
+  linkTelegram(id: string): Promise<TelegramLinkCode>
+  patchTelegram(id: string, patch: ChannelNotify): Promise<unknown>
+  deleteTelegram(id: string): Promise<void>
 }

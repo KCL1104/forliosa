@@ -40,6 +40,27 @@ import {
   type RecurringPlan,
   type AnalystViews,
 } from "./types"
+import type {
+  AuthProviders,
+  Channels,
+  Comment,
+  Delegation,
+  DelegationCandidate,
+  DelegationList,
+  Digest,
+  FeedItem,
+  Group,
+  GroupHoldings,
+  GroupInvite,
+  GroupSummary,
+  InvitePreview,
+  Leaderboard,
+  Paged,
+  ShareSettings,
+  SharedPortfolio,
+  TelegramLinkCode,
+} from "./types"
+import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
 
 type Query = Record<string, string | number | null | undefined>
 
@@ -65,10 +86,15 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
   const prefix = root.endsWith("/api/v1") ? root : `${root}/api/v1`
 
   async function request<T>(method: string, path: string, opts: { query?: Query; body?: unknown } = {}): Promise<T> {
+    const headers: Record<string, string> = { Accept: "application/json" }
+    if (opts.body !== undefined) headers["Content-Type"] = "application/json"
+    // 授權查看：查看中每個請求都帶上授權 id（查看者自己的端點除外，見 view-as.ts）
+    const viewAs = viewAsId()
+    if (viewAs && sendsViewAs(path, method)) headers[VIEW_AS_HEADER] = viewAs
     const res = await fetch(`${prefix}${path}${toQueryString(opts.query)}`, {
       method,
       credentials: "include",
-      headers: opts.body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" },
+      headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
     })
     if (!res.ok) {
@@ -154,5 +180,50 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
 
     getAnalystViews: (symbol) => request<AnalystViews>("GET", `/instruments/${enc(symbol)}/analyst-views`),
     requestAnalystViews: (symbol) => request<AnalystViews>("POST", `/instruments/${enc(symbol)}/analyst-views`),
+
+    // ── 分享（M5） ──
+    getAuthProviders: () => request<AuthProviders>("GET", "/auth/providers"),
+    // 整頁導到 API 主機：302 到 Discord，callback 成功後回到 `{FRONTEND_URL}{next}`
+    discordLoginUrl: (next) => `${prefix}/auth/discord/start${toQueryString({ next })}`,
+    updateMe: (patch) => request<User>("PATCH", "/me", { body: patch }),
+
+    listDelegations: () => request<DelegationList>("GET", "/delegations"),
+    listDelegationCandidates: () => request<DelegationCandidate[]>("GET", "/delegations/candidates"),
+    createDelegation: (body) => request<Delegation>("POST", "/delegations", { body }),
+    updateDelegation: (id, patch) => request<Delegation>("PATCH", `/delegations/${enc(id)}`, { body: patch }),
+    deleteDelegation: (id) => request<void>("DELETE", `/delegations/${enc(id)}`),
+
+    listGroups: () => request<GroupSummary[]>("GET", "/groups"),
+    createGroup: (body) => request<Group>("POST", "/groups", { body }),
+    getGroup: (id) => request<Group>("GET", `/groups/${enc(id)}`),
+    updateGroup: (id, patch) => request<Group>("PATCH", `/groups/${enc(id)}`, { body: patch }),
+    deleteGroup: (id) => request<void>("DELETE", `/groups/${enc(id)}`),
+    transferGroup: (id, userId) => request<unknown>("POST", `/groups/${enc(id)}/transfer`, { body: { user_id: userId } }),
+    setMemberRole: (id, userId, role) => request<unknown>("PATCH", `/groups/${enc(id)}/members/${enc(userId)}`, { body: { role } }),
+    removeMember: (id, userId) => request<void>("DELETE", `/groups/${enc(id)}/members/${enc(userId)}`),
+    createInvite: (id, body) => request<GroupInvite>("POST", `/groups/${enc(id)}/invites`, { body }),
+    listInvites: (id) => request<GroupInvite[]>("GET", `/groups/${enc(id)}/invites`),
+    revokeInvite: (id, inviteId) => request<void>("DELETE", `/groups/${enc(id)}/invites/${enc(inviteId)}`),
+    getInvite: (token) => request<InvitePreview>("GET", `/invites/${enc(token)}`),
+    acceptInvite: (token, share) => request<Group>("POST", `/invites/${enc(token)}/accept`, { body: { share } }),
+    getShare: (id) => request<ShareSettings>("GET", `/groups/${enc(id)}/share`),
+    putShare: (id, share) => request<unknown>("PUT", `/groups/${enc(id)}/share`, { body: share }),
+    getLeaderboard: (id, period) => request<Leaderboard>("GET", `/groups/${enc(id)}/leaderboard`, { query: { period } }),
+    getGroupHoldings: (id) => request<GroupHoldings>("GET", `/groups/${enc(id)}/holdings`),
+    getSharedPortfolio: (id, userId) => request<SharedPortfolio>("GET", `/groups/${enc(id)}/members/${enc(userId)}/shared`),
+    getFeed: (id, query = {}) => request<Paged<FeedItem>>("GET", `/groups/${enc(id)}/feed`, { query }),
+    listComments: (id, target, query = {}) => request<Paged<Comment>>("GET", `/groups/${enc(id)}/comments`, { query: { target, ...query } }),
+    createComment: (id, body) => request<Comment>("POST", `/groups/${enc(id)}/comments`, { body }),
+    deleteComment: (id, commentId) => request<void>("DELETE", `/groups/${enc(id)}/comments/${enc(commentId)}`),
+    addReaction: (id, body) => request<void>("PUT", `/groups/${enc(id)}/reactions`, { body }),
+    removeReaction: (id, target, emoji) => request<void>("DELETE", `/groups/${enc(id)}/reactions`, { query: { target, emoji } }),
+    listDigests: (id, query = {}) => request<Paged<Digest>>("GET", `/groups/${enc(id)}/digests`, { query }),
+    getChannels: (id) => request<Channels>("GET", `/groups/${enc(id)}/channels`),
+    putDiscord: (id, body) => request<unknown>("PUT", `/groups/${enc(id)}/channels/discord`, { body }),
+    patchDiscord: (id, patch) => request<unknown>("PATCH", `/groups/${enc(id)}/channels/discord`, { body: patch }),
+    deleteDiscord: (id) => request<void>("DELETE", `/groups/${enc(id)}/channels/discord`),
+    linkTelegram: (id) => request<TelegramLinkCode>("POST", `/groups/${enc(id)}/channels/telegram/link`),
+    patchTelegram: (id, patch) => request<unknown>("PATCH", `/groups/${enc(id)}/channels/telegram`, { body: patch }),
+    deleteTelegram: (id) => request<void>("DELETE", `/groups/${enc(id)}/channels/telegram`),
   }
 }

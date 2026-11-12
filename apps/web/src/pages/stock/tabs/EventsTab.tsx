@@ -2,6 +2,7 @@ import { ArrowUpRightIcon } from "lucide-react"
 import { useState } from "react"
 import { appToday } from "@/api"
 import { useEvents, useNews } from "@/api/queries"
+import { useWho } from "@/api/view-as"
 import type { InstrumentDetail, Position, PositionMarker } from "@/api/types"
 import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
@@ -15,10 +16,13 @@ import { Sources } from "./kit"
 
 /**
  * 事件：過去與接下來的時間軸。官方公告（重大訊息、證交所公告）也在這條軸上，標「公告」並連到原文；
- * 法定期限的備援日期標「預估」。「只看我的」包含我的交易（含已出清的）與我可領的股利。
+ * 法定期限的備援日期標「預估」。「只看我的」包含我的交易（含已出清的）與我可領的股利
+ * （查看別人的資產時寫「只看爸爸的」「爸爸可領約」，不讓查看者誤以為是自己的）。
  * 美股：SEC 的 10-K 年報、10-Q 季報、8-K 重大事件，連到 sec.gov 原文。
  */
 export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail; position: Position | null; markers?: PositionMarker[] }) {
+  const me = useWho("我")
+  const you = useWho("你")
   const events = useEvents(inst.symbol)
   const news = useNews(inst.symbol)
   const privacy = usePrefs((s) => s.privacyMode)
@@ -52,14 +56,14 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
         onChange={setFilter}
         options={[
           { value: "all", label: "全部" },
-          { value: "mine", label: "只看我的" },
+          { value: "mine", label: `只看${me}的` },
         ]}
       />
       <Section title="接下來" titleId="ev-next">
-        <Timeline rows={future} today={today} privacy={privacy} empty="目前沒有已公告的事件。" future />
+        <Timeline rows={future} today={today} privacy={privacy} who={you} empty="目前沒有已公告的事件。" future />
       </Section>
       <Section title="過去" titleId="ev-past">
-        <Timeline rows={past} today={today} privacy={privacy} empty={filter === "mine" ? "沒有你的交易或股利紀錄。" : "沒有過去的事件。"} />
+        <Timeline rows={past} today={today} privacy={privacy} who={you} empty={filter === "mine" ? `沒有${you}的交易或股利紀錄。` : "沒有過去的事件。"} />
         <p className="mt-3 text-xs text-ink-2">
           {inst.market === "US"
             ? "美股的申報來自 SEC EDGAR，內容以 sec.gov 原文為準；8-K「營運結果與財務狀況」通常是財報新聞稿。"
@@ -71,7 +75,8 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
   )
 }
 
-function Timeline({ rows, today, privacy, empty, future }: { rows: TimelineRow[]; today: string; privacy: boolean; empty: string; future?: boolean }) {
+/** `who`：可領股利的主人（「你」，查看模式是授權者的名稱） */
+function Timeline({ rows, today, privacy, who, empty, future }: { rows: TimelineRow[]; today: string; privacy: boolean; who: string; empty: string; future?: boolean }) {
   if (rows.length === 0) return <p className="text-md text-ink-2">{empty}</p>
   return (
     <ol className="-mt-3">
@@ -107,7 +112,7 @@ function Timeline({ rows, today, privacy, empty, future }: { rows: TimelineRow[]
               )}
             </span>
             <span className="num text-right text-md max-sm:col-start-2 max-sm:text-left">
-              {e.amount_estimate !== null && e.mine ? <>你可領約 {privacy ? "••••" : formatMoney(e.amount_estimate)}</> : null}
+              {e.amount_estimate !== null && e.mine ? <>{who}可領約 {privacy ? "••••" : formatMoney(e.amount_estimate)}</> : null}
             </span>
           </li>
         )

@@ -4,18 +4,23 @@ import { StrictMode } from "react"
 import { createRoot } from "react-dom/client"
 import { ApiError } from "@/api/types"
 import { qk } from "@/api/queries"
-import { AuthGate } from "@/app/AuthGate"
 import { PrefsBridge } from "@/app/PrefsBridge"
+import { exitOnRevoked } from "@/app/view-as"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createAppRouter } from "@/router"
 import "@/styles/globals.css"
 
-/** Session 過期或被登出：任何 401 都把 `me` 重設，AuthGate 會回到登入畫面 */
+/**
+ * - Session 過期或被登出：任何 401 都把 `me` 重設，登入閘門（AuthGate）會導到登入頁。
+ * - 查看別人的資產時授權被撤銷（403 `delegation_revoked`）：退出查看模式、回到自己的帳本。
+ */
 function onApiError(err: unknown, key?: readonly unknown[]) {
-  if (err instanceof ApiError && err.status === 401 && key?.[0] !== qk.me[0]) {
+  if (!(err instanceof ApiError)) return
+  if (err.status === 401 && key?.[0] !== qk.me[0]) {
     void queryClient.resetQueries({ queryKey: qk.me })
   }
+  exitOnRevoked(err, queryClient, () => void router.navigate({ to: "/" }))
 }
 
 const queryClient = new QueryClient({
@@ -36,9 +41,7 @@ createRoot(document.getElementById("root")!).render(
     <QueryClientProvider client={queryClient}>
       <TooltipProvider delay={300}>
         <PrefsBridge />
-        <AuthGate>
-          <RouterProvider router={router} />
-        </AuthGate>
+        <RouterProvider router={router} />
         <Toaster position="top-center" offset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }} />
       </TooltipProvider>
     </QueryClientProvider>

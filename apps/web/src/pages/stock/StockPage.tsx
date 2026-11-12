@@ -22,6 +22,7 @@ import { usePrefs } from "@/stores/prefs"
 import { asOfLabel } from "@/lib/as-of"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
+import { useReadOnly, useWho } from "@/api/view-as"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
 const FinancialsTab = lazy(() => import("./tabs/FinancialsTab").then((m) => ({ default: m.FinancialsTab })))
@@ -91,7 +92,7 @@ export function StockPage() {
         </>
       )}
 
-      <div className="sticky top-0 z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 lg:top-16 xl:-mx-14 xl:px-14">
+      <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
         <div role="tablist" aria-label="個股資料" className="no-scrollbar flex gap-1 overflow-x-auto">
           {TABS.map((t) => {
             const active = t.value === tab
@@ -159,6 +160,8 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const ask = useAskAi()
+  // 查看別人的資產（唯讀）：不提供加入觀察、記一筆
+  const readOnly = useReadOnly()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
   const status = overview.data?.status
   return (
@@ -183,7 +186,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         </span>
       )}
       {inst.is_demo && <DemoTag className="max-sm:hidden" />}
-      <span className="ml-auto flex items-center gap-2">
+      {!readOnly && <span className="ml-auto flex items-center gap-2">
         {!held && (
           <Button
             variant="outline"
@@ -200,7 +203,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
           <PlusIcon />
           記一筆
         </Button>
-      </span>
+      </span>}
     </nav>
   )
 }
@@ -268,8 +271,10 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
   const quote = useQuote(inst.symbol)
   const ask = useAskAi()
+  const readOnly = useReadOnly()
   if (!why.data?.show || !why.data.headline) return null
   const d = direction(quote.data?.change_pct)
+  if (readOnly) return <p className="ai-voice mt-3 max-w-full text-lg leading-snug lg:text-xl">{why.data.headline}</p>
   return (
     <button
       type="button"
@@ -333,18 +338,20 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
+  const readOnly = useReadOnly()
+  const me = useWho("我")
   const [open, setOpen] = useState(false)
   const money = (n: number, signed = false) => formatMoney(n, { signed })
   if (privacy) {
     return (
-      <section aria-label="我的部位" className="mt-5 flex min-h-12 items-center border-y border-rule text-md text-ink-2">
+      <section aria-label={`${me}的部位`} className="mt-5 flex min-h-12 items-center border-y border-rule text-md text-ink-2">
         持有中・隱私模式開啟，部位與圖上的均價、買賣點已隱藏。
       </section>
     )
   }
   const recent = [...p.markers].filter((m) => m.type === "buy" || m.type === "sell").sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3)
   return (
-    <section aria-label="我的部位" className="mt-5 border-y border-rule">
+    <section aria-label={`${me}的部位`} className="mt-5 border-y border-rule">
       <div className="flex items-center gap-3 py-2.5">
         <dl className="num flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
           <Item label="持有" value={formatQuantity(p.quantity, unit, inst.market)} />
@@ -420,9 +427,11 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
                 在帳本中查看
                 <ChevronRightIcon aria-hidden />
               </Link>
-              <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
-                記一筆
-              </Button>
+              {!readOnly && (
+                <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
+                  記一筆
+                </Button>
+              )}
             </div>
           </div>
         </div>

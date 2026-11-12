@@ -161,8 +161,8 @@ export function answerFor(kind: SuggestionKind, { ctx, privacy, today, asOf }: A
 
 function groupAnswer(): Answer {
   return {
-    text: "群組還在準備中。開放後預設只分享報酬率百分比，不分享金額與股數；每一項都要你自己打開才會分享。",
-    links: [{ label: "看群組的規劃", to: "/groups" }],
+    text: "每個群組各自決定：預設只分享報酬率的百分比；持股權重、金額、交易動態（可以再附上成交價）與推播都要你自己打開，隨時可以在群組的「我的分享」關掉，關掉後其他人馬上看不到。",
+    links: [{ label: "到群組", to: "/groups" }],
   }
 }
 

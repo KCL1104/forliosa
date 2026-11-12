@@ -14,10 +14,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { formatDateShort, formatDaysUntil, formatMoney, formatNumber } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
+import { useReadOnly, useWho } from "@/api/view-as"
 
 /** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {
   const ask = useAskAi()
+  const readOnly = useReadOnly()
+  const you = useWho("你")
   const summary = useSummary()
   const upcoming = useUpcoming(30)
   const holdings = useHoldings()
@@ -55,16 +58,18 @@ export function DividendsView() {
         title="接下來"
         titleId="div-next"
         action={
-          <Button variant="outline" size="sm" onClick={() => ask.action("dividend")}>
-            <CoinsIcon />
-            股利入帳
-          </Button>
+          readOnly ? undefined : (
+            <Button variant="outline" size="sm" onClick={() => ask.action("dividend")}>
+              <CoinsIcon />
+              股利入帳
+            </Button>
+          )
         }
       >
         {upcoming.isLoading || summary.isLoading ? (
           <Skeleton className="h-24 w-full rounded-sm" />
         ) : soon.length === 0 ? (
-          <p className="py-2 text-md text-ink-2">接下來 60 天你的持股沒有除息、待入帳的股利，也沒有定期定額扣款。</p>
+          <p className="py-2 text-md text-ink-2">接下來 60 天{you}的持股沒有除息、待入帳的股利，也沒有定期定額扣款。</p>
         ) : (
           <ul className="-mt-3">
             {soon.map((u) => (
@@ -79,7 +84,10 @@ export function DividendsView() {
                       {nameOf.get(u.symbol) ?? codeOf(u.symbol)}
                     </Link>
                   ) : null}
-                  {u.type === "recurring" ? (
+                  {u.type === "recurring" && readOnly ? (
+                    // 查看模式：設定頁是查看者自己的（被擋下），不連過去
+                    <span className="ml-2 text-ink-2">定期定額扣款</span>
+                  ) : u.type === "recurring" ? (
                     <Link to="/settings" hash="recurring" className="ml-2 text-ink-2 underline-offset-3 hover:text-ink hover:underline">
                       定期定額扣款
                     </Link>
@@ -106,7 +114,9 @@ export function DividendsView() {
         ) : received.isLoading ? (
           <Skeleton className="h-40 w-full rounded-sm" />
         ) : byYear.length === 0 ? (
-          <p className="py-2 text-md text-ink-2">還沒有股利紀錄。台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。</p>
+          <p className="py-2 text-md text-ink-2">
+            {readOnly ? "還沒有股利紀錄。" : "還沒有股利紀錄。台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。"}
+          </p>
         ) : (
           <div className="-mt-3 flex flex-col">
             <p className="pt-3 text-sm text-ink-2">台股股利在除息日自動入帳，美股股利要自己記。</p>

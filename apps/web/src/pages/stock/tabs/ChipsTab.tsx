@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
 import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent } from "@/lib/format"
 import { NotYet, Sources, TabLead } from "./kit"
+import { useReadOnly } from "@/api/view-as"
 
 const RANGES: { value: ChipsRange; label: string }[] = [
   { value: "1M", label: "1月" },
@@ -55,12 +56,13 @@ const lots = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatNumber(M
  */
 function ListedInstitutional({ inst, notes }: { inst: InstrumentDetail; notes: string[] }) {
   const ask = useAskAi()
+  const readOnly = useReadOnly()
   return (
     <NotYet className="border-t-0 pt-0" title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人與外資持股`}>
       {notes.map((n) => (
         <p key={n}>{n}</p>
       ))}
-      {inst.type === "stock" && (
+      {inst.type === "stock" && !readOnly && (
         <Button variant="outline" size="sm" className="mt-3" onClick={() => ask.submit(FOREIGN_FLOW_QUESTION)}>
           <MessageCircleQuestionIcon aria-hidden className="text-ai" />
           {FOREIGN_FLOW_QUESTION}
