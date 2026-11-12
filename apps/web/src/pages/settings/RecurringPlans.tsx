@@ -25,6 +25,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatDate, formatDateShort, formatMoney, formatQuantity } from "@/lib/format"
 import { codeOf, formatQuote } from "@/lib/tick"
 import { cn } from "@/lib/utils"
@@ -65,12 +66,9 @@ export function RecurringPlans() {
   return (
     <section id="recurring" aria-labelledby="set-recurring" className="flex scroll-mt-20 flex-col gap-2">
       <div className="flex flex-wrap items-end justify-between gap-2">
-        <div className="min-w-0">
-          <h2 id="set-recurring" className="text-lg font-bold">
-            定期定額
-          </h2>
-          <p className="max-w-prose text-md text-ink-2">每月固定日子扣款買進，遇休市順延到下一個交易日。扣款日 AI 會照最近收盤價寫好草稿，漏記的在 7 天內提醒補記（照那天的收盤價）；你簽名才入帳。</p>
-        </div>
+        <h2 id="set-recurring" className="text-lg font-bold">
+          定期定額
+        </h2>
         <Button variant="outline" size="sm" onClick={() => setEditing("new")} disabled={!accounts.data || twd.length === 0}>
           <PlusIcon />
           新增定期定額
@@ -101,7 +99,8 @@ export function RecurringPlans() {
                 key={p.id}
                 id={`plan-${p.id}`}
                 aria-current={hash === `plan-${p.id}` ? "true" : undefined}
-                className="flex scroll-mt-24 flex-col gap-2 px-4 py-4 aria-[current=true]:bg-hov sm:flex-row sm:items-start sm:gap-4 sm:px-5"
+                // 和其他設定列同一個左緣；從持倉標記進來的那一列（選取語法 (c)）才內縮，讓字不貼著 2px 的墨線
+                className="sel-row flex scroll-mt-24 flex-col gap-2 py-4 aria-[current=true]:px-3 sm:flex-row sm:items-start sm:gap-4"
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
@@ -139,9 +138,13 @@ export function RecurringPlans() {
                     <PencilIcon />
                     修改
                   </Button>
-                  <Button variant="ghost" size="icon-sm" onClick={() => setDeleting(p)} aria-label={`刪除「${p.name}」定期定額`}>
-                    <Trash2Icon />
-                  </Button>
+                  {/* 刪除前先確認（DeletePlan）；只有圖示，所以滑過有說明 */}
+                  <Tooltip>
+                    <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={() => setDeleting(p)} aria-label={`刪除「${p.name}」定期定額`} />}>
+                      <Trash2Icon />
+                    </TooltipTrigger>
+                    <TooltipContent>刪除計畫</TooltipContent>
+                  </Tooltip>
                 </div>
               </li>
             )
@@ -292,7 +295,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button onClick={save} disabled={pending}>
+          <Button variant="sign" onClick={save} disabled={pending}>
             {pending ? "儲存中…" : plan ? "儲存" : "新增計畫"}
           </Button>
         </DialogFooter>

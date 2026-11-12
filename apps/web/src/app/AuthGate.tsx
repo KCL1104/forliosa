@@ -55,7 +55,7 @@ export function BackendUnreachable({ error, onRetry }: { error: unknown; onRetry
       <div role="alert" className="flex flex-col gap-3">
         <h1 className="text-2xl font-semibold tracking-[-0.01em]">連不上伺服器</h1>
         <p className="text-muted-foreground">
-          {error instanceof ApiError ? error.message : "可能是網路不穩，或後端還沒啟動。"}
+          {error instanceof ApiError ? error.message : "可能是網路不穩，或伺服器暫時沒有回應。"}
           {import.meta.env.DEV && "開發時請先在 apps/api 執行 uv run uvicorn forliosa.main:app --port 8000。"}
         </p>
         <Button variant="outline" className="self-start" onClick={onRetry}>

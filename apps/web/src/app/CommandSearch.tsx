@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { Command as CommandPrimitive } from "cmdk"
-import { CornerDownLeftIcon, EyeOffIcon, HistoryIcon, NotebookTextIcon, PlusIcon, SearchIcon, SettingsIcon, UsersIcon } from "lucide-react"
+import { EyeOffIcon, HistoryIcon, NotebookTextIcon, PlusIcon, SearchIcon, SettingsIcon, UsersIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useInstrumentSearch } from "@/api/queries"
 import type { Instrument } from "@/api/types"
@@ -87,7 +87,7 @@ export function CommandSearch() {
               autoCorrect="off"
               spellCheck={false}
             />
-            {search.isFetching && <span className="text-xs text-muted-foreground">搜尋中…</span>}
+            {search.isFetching && <span className="shrink-0 text-sm text-muted-foreground">搜尋中…</span>}
           </div>
           <CommandPrimitive.List className="max-h-[min(60vh,420px)] scroll-py-2 overflow-y-auto overscroll-contain p-2">
             {q.trim() && !search.isFetching && results.length === 0 && (
@@ -101,7 +101,7 @@ export function CommandSearch() {
                   <CommandPrimitive.Item key={i.symbol} value={i.symbol} onSelect={() => goStock(i)} className={itemClass}>
                     <span className="num w-16 shrink-0 text-md font-semibold">{i.code}</span>
                     <span className="min-w-0 flex-1 truncate">{i.name}</span>
-                    <span className="shrink-0 text-xs text-muted-foreground">
+                    <span className="shrink-0 text-sm text-muted-foreground">
                       {MARKET_LABEL[i.market]}
                       {i.type === "etf" ? "・ETF" : i.industry ? `・${i.industry}` : ""}
                     </span>
@@ -134,13 +134,6 @@ export function CommandSearch() {
               </CommandPrimitive.Group>
             )}
           </CommandPrimitive.List>
-          <div className="hidden items-center gap-4 border-t px-4 py-2 text-xs text-muted-foreground sm:flex">
-            <span className="inline-flex items-center gap-1">
-              <CornerDownLeftIcon className="size-3.5" aria-hidden /> 開啟
-            </span>
-            <span>↑↓ 選擇</span>
-            <span>Esc 關閉</span>
-          </div>
         </CommandPrimitive>
       </DialogContent>
     </Dialog>
@@ -155,7 +148,7 @@ const PAGES = [
 ] as const
 
 const groupClass = cn(
-  "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-xs [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
+  "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-sm [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
 )
 const itemClass =
   "flex min-h-11 cursor-pointer items-center gap-3 rounded-sm px-2.5 text-base outline-none data-[selected=true]:bg-hov data-[selected=true]:text-ink"

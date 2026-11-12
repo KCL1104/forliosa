@@ -135,7 +135,7 @@ function ChooseAndJoin({ token, groupName }: { token: string; groupName: string 
         </p>
       )}
       <div className="flex flex-wrap gap-2">
-        <Button size="lg" onClick={join} disabled={accept.isPending}>
+        <Button size="lg" variant="sign" onClick={join} disabled={accept.isPending}>
           {accept.isPending ? "加入中…" : "加入群組"}
         </Button>
         <Link to="/" className={buttonVariants({ size: "lg", variant: "ghost" })}>

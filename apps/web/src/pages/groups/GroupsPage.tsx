@@ -7,6 +7,7 @@ import { usePerformance, useSummary } from "@/api/queries"
 import { useCreateGroup, useGroups } from "@/api/sharing-queries"
 import { ApiError, type GroupSummary } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageHeader, Section } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
@@ -28,10 +29,9 @@ function Groups() {
   const groups = useGroups()
   const [creating, setCreating] = useState(false)
   return (
-    <div className="mx-auto w-full max-w-[880px] px-5 pt-2 pb-10 md:px-8 lg:pt-10">
+    <PageFrame>
       <PageHeader
         title="群組"
-        description="和家人朋友比較報酬，每個群組各自決定分享什麼。"
         actions={
           <Button onClick={() => setCreating(true)}>
             <PlusIcon />
@@ -61,7 +61,7 @@ function Groups() {
       )}
       {creating && <CreateGroupDialog onClose={() => setCreating(false)} />}
       <ShareCard />
-    </div>
+    </PageFrame>
   )
 }
 
@@ -138,8 +138,8 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>
-          <Button type="submit" form="create-group" disabled={create.isPending}>
-            {create.isPending ? "建立中…" : "建立"}
+          <Button type="submit" variant="sign" form="create-group" disabled={create.isPending}>
+            {create.isPending ? "建立中…" : "建立群組"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -157,10 +157,11 @@ function ShareCard() {
   const line = s
     ? `我今天 ${glyphPct(s.day_change_pct)}，本月 ${month === undefined || month === null ? "—" : glyphPct(month)}，總報酬 ${glyphPct(s.total_return_pct)}（Forliosa ${formatDateShort(today, false)}）`
     : ""
-  const cells: { label: string; value: number | null | undefined }[] = [
-    { label: "今日", value: s?.day_change_pct },
-    { label: "本月", value: month },
-    { label: "總報酬（含股利）", value: s?.total_return_pct },
+  const cells: { label: React.ReactNode; key: string; value: number | null | undefined }[] = [
+    { key: "day", label: "今日", value: s?.day_change_pct },
+    { key: "month", label: "本月", value: month },
+    // 手機三欄放不下括號：只寫「總報酬」（和手機排行的表頭一樣）
+    { key: "total", label: <>總報酬<span className="max-sm:hidden">（含股利）</span></>, value: s?.total_return_pct },
   ]
   return (
     <Section title="分享卡" titleId="g-card" aside="只有百分比，沒有金額" className="mt-12">
@@ -171,7 +172,7 @@ function ShareCard() {
         </div>
         <dl className="grid grid-cols-3">
           {cells.map((c, i) => (
-            <div key={c.label} className={cn("px-3 py-4 sm:px-4", i > 0 && "border-l border-rule")}>
+            <div key={c.key} className={cn("px-3 py-4 sm:px-4", i > 0 && "border-l border-rule")}>
               <dt className="text-sm text-ink-2">{c.label}</dt>
               <dd className={cn("num mt-1 text-xl font-medium sm:text-2xl", toneClass(direction(c.value)))}>{c.value === undefined || c.value === null ? "—" : glyphPct(c.value)}</dd>
             </div>

@@ -27,11 +27,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatDateShort, formatDateTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { ROLE_LABEL } from "../labels"
 
 type Confirm =
@@ -279,26 +280,32 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
   const isOwner = group.my_role === "owner"
   const trimmed = name.trim()
   const bad = trimmed.length < 1 || trimmed.length > 40
+  const dirty = trimmed !== group.name
   return (
     <Section title="群組設定" titleId="gm-settings">
       <div className="flex flex-col divide-y divide-rule border-b border-rule">
         <form
-          className="flex flex-col gap-2 py-4 sm:flex-row sm:items-end sm:gap-3"
+          className="grid gap-x-3 gap-y-1.5 py-4 sm:grid-cols-[minmax(0,1fr)_auto]"
           onSubmit={(e) => {
             e.preventDefault()
-            if (bad || trimmed === group.name) return
+            if (bad || !dirty) return
             update.mutate({ name: trimmed }, { onSuccess: () => toast.success("已更新群組名稱"), onError: (err) => toast.error("名稱沒有更新", { description: errText(err) }) })
           }}
         >
-          <div className="flex flex-1 flex-col gap-1.5">
-            <label htmlFor="group-rename" className="text-sm font-medium">
-              群組名稱
-            </label>
-            <Input id="group-rename" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-invalid={bad} />
-          </div>
-          <Button type="submit" variant="outline" disabled={bad || trimmed === group.name || update.isPending}>
-            儲存
-          </Button>
+          <label htmlFor="group-rename" className="text-sm font-medium">
+            群組名稱
+          </label>
+          <Input id="group-rename" value={name} maxLength={40} onChange={(e) => setName(e.target.value)} aria-invalid={bad} className="pointer-coarse:h-11 sm:col-start-1 sm:row-start-2" />
+          {/* 簽名格只在改了名稱時出現；沒改時桌面留同寬的看不見位置（輸入框不跳動），手機不放 */}
+          {dirty ? (
+            <Button type="submit" variant="sign" className="mt-2.5 justify-self-start sm:col-start-2 sm:row-start-2 sm:mt-0" disabled={bad || update.isPending}>
+              儲存
+            </Button>
+          ) : (
+            <span aria-hidden className={cn(buttonVariants({ variant: "sign" }), "invisible hidden sm:col-start-2 sm:row-start-2 sm:inline-flex")}>
+              儲存
+            </span>
+          )}
         </form>
         <div className="flex items-start justify-between gap-6 py-4">
           <div>

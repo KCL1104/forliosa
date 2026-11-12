@@ -3,6 +3,7 @@ import { useMemo } from "react"
 import { api } from "@/api"
 import { useAttributions } from "@/api/queries"
 import type { AttributionDataset } from "@/api/types"
+import { PageFrame } from "@/app/PageFrame"
 import { PageHeader } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 
@@ -21,7 +22,9 @@ export function DataSourcesPage() {
   const mainLicense = a?.datasets.find((d) => d.commercial)?.license_url
 
   return (
-    <div className="mx-auto flex w-full max-w-[880px] flex-col gap-10 px-5 pt-2 pb-10 md:px-8 lg:pt-10">
+    // 左緣和帳本相同；這一頁是長文，閱讀寬度限制在 816px（原本的版心）
+    <PageFrame>
+      <div className="flex max-w-[816px] flex-col gap-10">
       <PageHeader
         title="資料來源與授權"
         description="行情、匯率、公司資料與公告只用可合法商用的政府開放資料，以及我們從這些資料自建的每日存檔。下面是每個資料集的顯名聲明。"
@@ -37,7 +40,8 @@ export function DataSourcesPage() {
               授權條款
             </h2>
             {a.notice.map((n) => (
-              <p key={n} className="max-w-prose text-md">
+              // 長網址不能撐寬頁面：任何地方都可以斷行
+              <p key={n} className="max-w-prose text-md [overflow-wrap:anywhere]">
                 <Linkified text={n} />
               </p>
             ))}
@@ -106,22 +110,24 @@ export function DataSourcesPage() {
             <p className="max-w-prose text-md text-ink-2">
               個股頁的「法人觀點」不是授權的資料庫：有人按下查詢時，AI 才搜尋近期公開的媒體報導，列出機構、評等、目標價、日期與原文連結；同一檔當天共用一份，隔天刪除。這些是第三方意見，以原始報導為準，不是 Forliosa 的建議。
             </p>
-            {api.kind === "mock" && <p className="max-w-prose text-md text-ink-2">目前沒有連到後端：這一頁的清單與畫面上的數字由瀏覽器內的模擬資料產生。</p>}
+            {api.kind === "mock" && <p className="max-w-prose text-md text-ink-2">目前沒有連到伺服器：這一頁的清單與畫面上的數字由瀏覽器內的模擬資料產生。</p>}
           </section>
         </>
       )}
-    </div>
+      </div>
+    </PageFrame>
   )
 }
 
-/** 授權條款文字裡的網址變成連結 */
+/** 授權條款文字裡的網址變成連結（網址在全形標點前結束，例如「（https://…）」的右括號不算網址） */
+const URL_RE = /(https?:\/\/[^\s（）「」『』〈〉，。；、]+)/
 function Linkified({ text }: { text: string }) {
-  const parts = text.split(/(https?:\/\/\S+)/)
+  const parts = text.split(URL_RE)
   return (
     <>
       {parts.map((p, i) =>
         /^https?:\/\//.test(p) ? (
-          <a key={i} href={p} target="_blank" rel="noreferrer" className="underline underline-offset-3">
+          <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all underline underline-offset-3">
             {p}
           </a>
         ) : (

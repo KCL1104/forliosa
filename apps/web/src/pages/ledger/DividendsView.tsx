@@ -15,6 +15,7 @@ import { formatDateShort, formatDaysUntil, formatMoney, formatNumber } from "@/l
 import { codeOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly, useWho } from "@/api/view-as"
+import { DateCell } from "./date-cell"
 
 /** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {
@@ -71,29 +72,37 @@ export function DividendsView() {
         ) : soon.length === 0 ? (
           <p className="py-2 text-md text-ink-2">接下來 60 天{you}的持股沒有除息、待入帳的股利，也沒有定期定額扣款。</p>
         ) : (
-          <ul className="-mt-3">
+          <div className="-mt-3">
+            <div aria-hidden className="form-head grid h-10 grid-cols-[88px_1fr_auto] items-end gap-3 pb-2 md:grid-cols-[120px_1fr_auto]">
+              <span>日期</span>
+              <span>項目</span>
+              <span className="text-right">金額</span>
+            </div>
+            <ul>
             {soon.map((u) => (
-              <li key={`${u.date}-${u.type}-${u.title}`} className="grid grid-cols-[88px_1fr_auto] items-baseline gap-3 border-b border-rule py-3 md:grid-cols-[120px_1fr_auto]">
-                <span className="num text-ink">
-                  {formatDateShort(u.date)}
-                  <span className="block text-sm text-ink-2">{formatDaysUntil(u.date, today)}</span>
-                </span>
+              <li key={`${u.date}-${u.type}-${u.title}`} className="grid grid-cols-[88px_1fr_auto] items-center gap-3 border-b border-rule py-3 md:grid-cols-[120px_1fr_auto]">
+                <DateCell date={u.date} pad="-my-3 py-3" inline>
+                  <span className="mt-0.5 text-sm font-normal text-ink-2">{formatDaysUntil(u.date, today)}</span>
+                </DateCell>
                 <span className="min-w-0">
-                  {u.symbol ? (
-                    <Link to="/stock/$symbol" params={{ symbol: u.symbol }} className="font-medium hover:underline">
-                      {nameOf.get(u.symbol) ?? codeOf(u.symbol)}
-                    </Link>
-                  ) : null}
-                  {u.type === "recurring" && readOnly ? (
-                    // 查看模式：設定頁是查看者自己的（被擋下），不連過去
-                    <span className="ml-2 text-ink-2">定期定額扣款</span>
-                  ) : u.type === "recurring" ? (
-                    <Link to="/settings" hash="recurring" className="ml-2 text-ink-2 underline-offset-3 hover:text-ink hover:underline">
-                      定期定額扣款
-                    </Link>
-                  ) : (
-                    <span className="ml-2 text-ink-2">{u.type === "ex_dividend" ? "除息" : "股利入帳"}</span>
-                  )}
+                  {/* 名稱與類型：放不下時類型整個換到下一行（靠左，不縮排） */}
+                  <span className="flex flex-wrap items-baseline gap-x-2">
+                    {u.symbol ? (
+                      <Link to="/stock/$symbol" params={{ symbol: u.symbol }} className="font-medium hover:underline">
+                        {nameOf.get(u.symbol) ?? codeOf(u.symbol)}
+                      </Link>
+                    ) : null}
+                    {u.type === "recurring" && readOnly ? (
+                      // 查看模式：設定頁是查看者自己的（被擋下），不連過去
+                      <span className="whitespace-nowrap text-ink-2">定期定額扣款</span>
+                    ) : u.type === "recurring" ? (
+                      <Link to="/settings" hash="recurring" className="whitespace-nowrap text-ink-2 underline-offset-3 hover:text-ink hover:underline">
+                        定期定額扣款
+                      </Link>
+                    ) : (
+                      <span className="whitespace-nowrap text-ink-2">{u.type === "ex_dividend" ? "除息" : "股利入帳"}</span>
+                    )}
+                  </span>
                   {"scheduled_date" in u && u.scheduled_date && u.scheduled_date !== u.date && (
                     <span className="block text-sm text-ink-2">原訂 {formatDateShort(u.scheduled_date, false)}，遇休市順延</span>
                   )}
@@ -104,7 +113,8 @@ export function DividendsView() {
                 </span>
               </li>
             ))}
-          </ul>
+            </ul>
+          </div>
         )}
       </Section>
 
@@ -118,25 +128,31 @@ export function DividendsView() {
             {readOnly ? "還沒有股利紀錄。" : "還沒有股利紀錄。台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。"}
           </p>
         ) : (
-          <div className="-mt-3 flex flex-col">
-            <p className="pt-3 text-sm text-ink-2">台股股利在除息日自動入帳，美股股利要自己記。</p>
+          // 每一年是一張印好的表：年份與合計 → 表頭（雙線）→ 一列一筆
+          <div className="flex flex-col gap-8">
             {byYear.map(([year, rows]) => {
               const netOf = (c: "TWD" | "USD") => rows.filter((t) => t.currency === c).reduce((s, t) => s + t.amount - t.tax - t.health_insurance, 0)
               const twd = netOf("TWD")
               const usd = netOf("USD")
               return (
-                <section key={year} aria-label={`${year} 年`} className="mt-3">
-                  <h3 className="flex items-baseline justify-between border-b border-rule pt-3 pb-2 text-base font-bold">
+                <section key={year} aria-label={`${year} 年`}>
+                  <h3 className="flex flex-wrap items-baseline justify-between gap-x-3 pt-1 text-base font-bold">
                     {year} 年
                     <span className="num text-md font-normal text-ink-2">
                       合計 {money(Math.round(twd))}
                       {usd > 0 && <> ・ {privacy ? "••••" : formatMoney(usd, { currency: "USD" })}</>}
                     </span>
                   </h3>
+                  <div aria-hidden className="form-head grid h-9 grid-cols-[88px_1fr_auto] items-end gap-3 pb-2 md:grid-cols-[120px_1fr_auto_auto]">
+                    <span>日期</span>
+                    <span>股票</span>
+                    <span className="hidden text-right md:block">健保・預扣</span>
+                    <span className="text-right">實收</span>
+                  </div>
                   <ul>
                     {rows.map((t) => (
-                      <li key={t.id} className="grid grid-cols-[88px_1fr_auto] items-baseline gap-3 border-b border-rule py-2.5 md:grid-cols-[120px_1fr_auto_auto]">
-                        <span className="num text-ink-2">{formatDateShort(t.trade_date)}</span>
+                      <li key={t.id} className="grid grid-cols-[88px_1fr_auto] items-center gap-3 border-b border-rule py-2.5 md:grid-cols-[120px_1fr_auto_auto]">
+                        <DateCell date={t.trade_date} inline />
                         {/* 名稱太長時截斷名稱與每股金額，來源標示一定看得到 */}
                         <span className="flex min-w-0 items-baseline">
                           <span className="min-w-0 truncate">

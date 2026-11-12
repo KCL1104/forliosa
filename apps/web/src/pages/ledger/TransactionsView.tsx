@@ -32,6 +32,7 @@ import { codeOf, marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { GroupedVirtuoso } from "react-virtuoso"
 import { usePrefs } from "@/stores/prefs"
+import { DateCell } from "./date-cell"
 import { useReadOnly } from "@/api/view-as"
 
 type Period = "month" | "year" | "all"
@@ -56,7 +57,8 @@ function periodRange(p: Period, today: string): Pick<TransactionQuery, "from" | 
   return { from: d.toISOString().slice(0, 10) }
 }
 
-const GRID = "lg:grid-cols-[88px_76px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_40px]"
+// 第一欄是聯絡簿的日期格（日期＋星期，右邊一條格線）；手機也有（日期與星期上下兩行）
+const GRID = "lg:grid-cols-[96px_64px_minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.9fr)_40px]"
 
 /** 交易：由新到舊、月份分組、虛擬化無限載入；點一筆可以編輯 */
 export function TransactionsView({ symbol }: { symbol?: string }) {
@@ -106,8 +108,10 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
           <button
             type="button"
             onClick={() => void navigate({ to: "/", search: { view: "transactions" }, replace: true })}
-            className="press inline-flex h-8 items-center gap-1.5 rounded-sm border border-ink px-2.5 text-sm pointer-coarse:h-10"
-            aria-label={`取消只看 ${codeOf(symbol)}`}
+            // 篩選中＝選取語法 (b)；再按一次（或按 ×）取消
+            aria-pressed="true"
+            title="取消篩選"
+            className="press sel-chip inline-flex h-8 items-center gap-1.5 rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-10"
           >
             只看 {codeOf(symbol)}
             <XIcon aria-hidden className="size-3.5" />
@@ -160,13 +164,13 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
         ) : (
           <EmptyState
             title="還沒有交易紀錄"
-            description="跟 AI 說一句「買 0050 2 張 52.4」就能記下第一筆；之後匯入對帳單（M3）也會出現在這裡。"
+            description="跟 AI 說一句「買 0050 2 張 52.4」就能記下第一筆。"
             action={<Button onClick={() => ask.action("trade")}>記第一筆交易</Button>}
           />
         )
       ) : (
         <div>
-          <div className={cn("hidden h-10 items-end gap-3 border-b border-rule pb-2 text-sm text-ink-2 lg:grid", GRID)}>
+          <div className={cn("form-head hidden h-10 items-end gap-3 pb-2 lg:grid", GRID)}>
             <span>日期</span>
             <span>類型</span>
             <span>商品</span>
@@ -286,9 +290,9 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
             openTradeForm({ edit: t })
           }
         }}
-        className={cn("ruled-row group grid min-h-14 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-2.5 text-base focus-visible:outline-offset-[-2px]", !readOnly && "cursor-pointer", GRID)}
+        className={cn("ruled-row group grid min-h-14 grid-cols-[3.25rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-0.5 py-2.5 text-base focus-visible:outline-offset-[-2px]", !readOnly && "cursor-pointer", GRID)}
       >
-        <span className="num hidden text-ink-2 lg:block">{formatDateShort(t.trade_date)}</span>
+        <DateCell date={t.trade_date} />
         <span className={cn("hidden lg:block", t.type === "buy" || t.type === "sell" ? "font-medium" : "text-ink-2")}>{TYPE_LABEL[t.type]}</span>
         <span className="min-w-0">
           <span className="flex items-center gap-2">
@@ -302,9 +306,7 @@ function TxnRow({ txn: t, account }: { txn: Transaction; account?: Account }) {
             )}
             <SourceTag source={t.source} />
           </span>
-          <span className="num block truncate text-sm text-ink-2 lg:hidden">
-            {formatDateShort(t.trade_date)}・{privacy ? MASK : qtyText}
-          </span>
+          {qtyText && <span className="num block truncate text-sm text-ink-2 lg:hidden">{privacy ? MASK : qtyText}</span>}
           {/* 自動入帳的備註寫著持有股數：隱私模式不顯示 */}
           {t.note && t.symbol && !(privacy && isAutoSource(t.source)) && <span className="hidden truncate text-sm text-ink-2 lg:block">{t.note}</span>}
         </span>

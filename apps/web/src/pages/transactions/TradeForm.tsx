@@ -393,7 +393,7 @@ function Actions({ edit, busy, onCancel, onDelete, className }: { edit: boolean;
         <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
           取消
         </Button>
-        <Button type="submit" className="flex-1" disabled={busy}>
+        <Button type="submit" variant="sign" className="flex-1" disabled={busy}>
           {busy ? "儲存中…" : edit ? "儲存變更" : "儲存"}
         </Button>
       </div>

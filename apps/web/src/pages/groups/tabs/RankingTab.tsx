@@ -8,6 +8,7 @@ import { Pct } from "@/components/finance"
 import { DemoTag, Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
 import { ErrorState, SkeletonLines } from "@/components/states"
+import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { CommentThread } from "../Discussion"
@@ -20,7 +21,8 @@ const PERIODS: { value: LeaderboardPeriod; label: string }[] = [
 ]
 
 /**
- * 排行：今日・本月・今年（可對照加權報酬指數與 0050），另一欄總報酬（含股利）不排名。
+ * 排行：今日・本月・今年（可對照加權報酬指數與 0050）。總報酬（含股利）是主數字（最右欄、較大較粗），
+ * 期間報酬是一般字級的一欄；名次依期間報酬排，總報酬不排名。
  * 只列出伺服器回來的人（沒開報酬率的人不在裡面，也不標「未分享」）；期間報酬算不出來是「—」，不說原因。
  * 下面是當天排行的討論串。
  */
@@ -28,6 +30,8 @@ export function RankingTab({ group }: { group: Group }) {
   const [period, setPeriod] = useState<LeaderboardPeriod>("day")
   const board = useLeaderboard(group.id, period)
   const b = board.data
+  // 資料來源放到頁尾（一頁一次），不在排行下面逐條列出
+  useSourceNote(b?.sources)
   return (
     <div className="flex flex-col gap-10">
       <section aria-labelledby="rank-title" className="flex flex-col gap-3">
@@ -60,13 +64,6 @@ export function RankingTab({ group }: { group: Group }) {
             )}
             <MyNullNote entries={b.entries} />
             <DataNotes notes={b.notes} />
-            {b.sources.length > 0 && (
-              <ul className="flex flex-col gap-0.5 text-xs text-ink-2">
-                {b.sources.map((s) => (
-                  <li key={s}>{s}</li>
-                ))}
-              </ul>
-            )}
           </>
         )}
       </section>
@@ -101,20 +98,20 @@ function BoardTable({ board, groupId }: { board: Leaderboard; groupId: string })
   const label = PERIOD_LABEL[board.period]
   return (
     <table className="w-full border-collapse max-md:hidden" aria-label={`${label}排行`}>
-      <thead>
-        <tr className="text-sm text-ink-2">
+      <thead className="form-head">
+        <tr>
           {board.ranked && (
-            <th scope="col" className="h-10 w-16 border-b border-rule text-left font-normal">
+            <th scope="col" className="h-10 w-16 text-left">
               名次
             </th>
           )}
-          <th scope="col" className="h-10 border-b border-rule text-left font-normal">
+          <th scope="col" className="h-10 text-left">
             成員
           </th>
-          <th scope="col" className="h-10 w-40 border-b border-rule text-right font-normal">
+          <th scope="col" className="h-10 w-40 text-right">
             {label}報酬
           </th>
-          <th scope="col" className="h-10 w-48 border-b border-rule text-right font-normal">
+          <th scope="col" className="h-10 w-48 text-right">
             總報酬（含股利）<span className="sr-only">，不排名</span>
           </th>
         </tr>
@@ -126,10 +123,10 @@ function BoardTable({ board, groupId }: { board: Leaderboard; groupId: string })
             <th scope="row" className="pr-3 text-left font-normal">
               <MemberName e={e} groupId={groupId} />
             </th>
-            <td className="text-right text-lg">
+            <td className="text-right text-base">
               <Ret value={e.return_pct} />
             </td>
-            <td className="text-right text-base text-ink-2">
+            <td className="text-right text-xl font-semibold">
               <Ret value={e.total_return_pct} />
             </td>
           </tr>
@@ -145,7 +142,7 @@ function BoardTable({ board, groupId }: { board: Leaderboard; groupId: string })
           {board.benchmarks.map((x) => (
             <tr key={x.symbol} className="h-12 border-b border-rule">
               {board.ranked && <td />}
-              <th scope="row" className="text-left text-base font-normal text-ink-2">
+              <th scope="row" className="text-left text-base font-normal">
                 {x.name}
               </th>
               <td className="text-right text-base">
@@ -160,33 +157,55 @@ function BoardTable({ board, groupId }: { board: Leaderboard; groupId: string })
   )
 }
 
+/**
+ * 手機排行的欄：名次・成員・期間報酬・總報酬。數字欄有最小寬、放不下時再長（三位數的報酬不會超出右緣）；
+ * 表頭、每一列與對照都是同一個 grid 的 subgrid，所以欄寬變了也一起對齊。
+ */
+const MOBILE_COLS = (ranked: boolean) =>
+  ranked ? "grid-cols-[1.75rem_minmax(0,1fr)_minmax(4.75rem,auto)_minmax(5.25rem,auto)]" : "grid-cols-[minmax(0,1fr)_minmax(4.75rem,auto)_minmax(5.25rem,auto)]"
+const SUB = "col-span-full grid grid-cols-subgrid"
+
 function BoardList({ board, groupId }: { board: Leaderboard; groupId: string }) {
   const label = PERIOD_LABEL[board.period]
   return (
-    <div className="md:hidden">
-      <ol aria-label={`${label}排行`} className="border-t border-rule">
+    <div className={cn("grid gap-x-3 md:hidden", MOBILE_COLS(board.ranked))}>
+      {/* 印好的表頭；總報酬（含股利）是主數字，在最右邊 */}
+      <div aria-hidden className={cn("form-head h-10 items-end pb-2", SUB)}>
+        {board.ranked && <span className="text-center">名次</span>}
+        <span>成員</span>
+        <span className="text-right">{label}</span>
+        <span className="text-right">總報酬</span>
+      </div>
+      <ol aria-label={`${label}排行`} className={SUB}>
         {board.entries.map((e) => (
-          <li
-            key={e.user_id}
-            className={cn("grid min-h-[72px] items-center gap-x-3 border-b border-rule py-2", board.ranked ? "grid-cols-[auto_minmax(0,1fr)_auto]" : "grid-cols-[minmax(0,1fr)_auto]", e.is_me && "bg-hov")}
-          >
-            {board.ranked && <span className="num w-6 text-center text-lg font-medium">{e.rank ?? ""}</span>}
+          <li key={e.user_id} className={cn("min-h-16 items-center border-b border-rule py-2", SUB, e.is_me && "bg-hov")}>
+            {board.ranked && <span className="num text-center text-lg font-medium">{e.rank ?? ""}</span>}
             <span className="min-w-0">
               <MemberName e={e} groupId={groupId} />
-              <span className="mt-0.5 flex items-baseline gap-1.5 pl-[38px] text-sm text-ink-2">
-                總報酬 <Ret value={e.total_return_pct} />
-              </span>
             </span>
-            <Ret value={e.return_pct} className="text-lg" />
+            <span className="text-right text-base">
+              <span className="sr-only">{label}報酬</span>
+              <Ret value={e.return_pct} />
+            </span>
+            <span className="text-right text-lg font-semibold">
+              <span className="sr-only">總報酬（含股利）</span>
+              <Ret value={e.total_return_pct} />
+            </span>
           </li>
         ))}
       </ol>
       {board.benchmarks.length > 0 && (
-        <ul aria-label="對照" className="mt-4">
+        <ul aria-label="對照" className={cn("mt-4", SUB)}>
           {board.benchmarks.map((x) => (
-            <li key={x.symbol} className="flex h-11 items-center justify-between border-b border-rule text-base">
-              <span className="text-ink-2">{x.name}</span>
-              <Ret value={x.return_pct} />
+            // 對照只有期間報酬：對齊上面的期間欄，總報酬欄留空
+            <li key={x.symbol} className={cn("h-11 items-center border-b border-rule text-base", SUB)}>
+              {board.ranked && <span />}
+              <span className="truncate">{x.name}</span>
+              <span className="text-right">
+                <span className="sr-only">{label}報酬</span>
+                <Ret value={x.return_pct} />
+              </span>
+              <span />
             </li>
           ))}
         </ul>

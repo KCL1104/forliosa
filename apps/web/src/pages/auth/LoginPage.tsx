@@ -38,7 +38,7 @@ export function LoginPage() {
         <p className="text-ink-2">{next.startsWith("/invite/") ? "登入後回到邀請，選好要分享什麼再加入群組。" : "第一次用 Discord 登入時會自動建立帳號。"}</p>
       </div>
       {error && (
-        <p role="alert" className="border-l-2 border-ink py-1 pl-3 text-base">
+        <p role="alert" className="border-y border-rule py-2.5 text-base">
           {error}
         </p>
       )}
@@ -76,7 +76,7 @@ function BackendUnreachableInline({ error, onRetry }: { error: unknown; onRetry:
     <div role="alert" className="flex flex-col items-start gap-3">
       <div>
         <p className="font-medium">連不上伺服器</p>
-        <p className="text-md text-ink-2">{error instanceof ApiError ? error.message : "可能是網路不穩，或後端還沒啟動。"}</p>
+        <p className="text-md text-ink-2">{error instanceof ApiError ? error.message : "可能是網路不穩，或伺服器暫時沒有回應。"}</p>
       </div>
       <Button variant="outline" onClick={onRetry}>
         <RotateCcwIcon />
@@ -112,12 +112,12 @@ function DevLoginForm({ next }: { next: string }) {
         <label htmlFor="dev-login-email" className="text-md font-medium">
           開發登入
         </label>
-        <p className="text-sm text-ink-2">只在後端 FORLIOSA_ENV=dev 時可用；示範使用者是 demo@forliosa.local。</p>
+        <p className="text-sm text-ink-2">只在開發環境可用；示範使用者是 demo@forliosa.local。</p>
       </div>
       <Input id="dev-login-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       {devLogin.error && (
         <p role="alert" className="text-sm text-destructive">
-          {missing ? "這個後端沒有開放開發登入（FORLIOSA_ENV 不是 dev）。" : devLogin.error.message}
+          {missing ? "這個伺服器沒有開放開發登入。" : devLogin.error.message}
         </p>
       )}
       <Button type="submit" variant="outline" className="self-start" disabled={devLogin.isPending}>

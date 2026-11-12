@@ -4,6 +4,7 @@ import type { Digest, Group } from "@/api/types"
 import { Pct } from "@/components/finance"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
+import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort, formatDateTime } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
 import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
@@ -46,6 +47,8 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
   const titleId = `digest-${d.id}`
   const threadId = `thread-${d.id}`
   const f = d.facts
+  // 資料來源放到頁尾（一頁一次）
+  useSourceNote(d.sources)
   return (
     <article aria-labelledby={titleId} className="flex flex-col gap-4">
       <header className="flex flex-wrap items-end gap-x-3 gap-y-1 border-b border-rule pb-2">
@@ -107,18 +110,11 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
         </>
       )}
       <p className="text-xs text-ink-2">{d.disclaimer || FALLBACK_DISCLAIMER}</p>
-      {d.sources.length > 0 && (
-        <ul className="-mt-3 flex flex-col gap-0.5 text-xs text-ink-2">
-          {d.sources.map((s) => (
-            <li key={s}>{s}</li>
-          ))}
-        </ul>
-      )}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
         <Reactions groupId={groupId} target={`digest:${d.id}`} reactions={d.reactions} />
         <CommentsToggle count={d.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />
       </div>
-      {open && <CommentThread id={threadId} groupId={groupId} target={`digest:${d.id}`} className="border-l-2 border-rule pl-3" />}
+      {open && <CommentThread id={threadId} groupId={groupId} target={`digest:${d.id}`} className="border-l border-rule pl-3" />}
     </article>
   )
 }

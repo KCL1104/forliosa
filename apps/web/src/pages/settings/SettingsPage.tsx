@@ -1,20 +1,19 @@
 import { PencilIcon, PlusIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
-import { api } from "@/api"
 import { useAccounts, useCreateAccount, useUpdateAccount } from "@/api/queries"
 import type { Account } from "@/api/types"
 import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
-import { BENCHMARK_OPTIONS } from "@/lib/labels"
 import { RangeChips } from "@/components/charts/chart-kit"
 import { PageHeader } from "@/components/section"
-import { Link } from "@tanstack/react-router"
 import { RecurringPlans } from "./RecurringPlans"
 import { Delegations } from "./Delegations"
 import { Profile } from "./Profile"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
+import { SourcesFooter } from "@/components/sources"
 import { SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -24,6 +23,7 @@ import { formatMoney } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
+import { Pct } from "@/components/finance"
 
 
 export function SettingsPage() {
@@ -37,8 +37,10 @@ function Settings() {
   const p = usePrefs()
   const setPref = usePrefSetter()
   return (
-    <div className="mx-auto flex w-full max-w-[880px] flex-col gap-10 px-5 pt-2 pb-10 md:px-8 lg:pt-10">
-      <PageHeader title="設定" description="顯示設定會立即套用，並同步到你的帳號。" />
+    // 左緣和帳本相同；設定是一欄表單，寬度限制在 816px（標籤和開關不會離太遠）
+    <PageFrame>
+      <div className="flex max-w-[816px] flex-col gap-10">
+      <PageHeader title="設定" className="mb-0" />
 
       <Profile />
 
@@ -46,10 +48,11 @@ function Settings() {
         <Row
           label="漲跌顏色"
           description={
+            // 預覽和全站的漲跌幅寫法相同：▲▼ 跟著數字，不再加正負號
             <span className="inline-flex flex-wrap items-center gap-3">
-              預覽：
-              <span className="num text-rise">▲ +1.23%</span>
-              <span className="num text-fall">▼ −0.85%</span>
+              預覽
+              <Pct value={0.0123} />
+              <Pct value={-0.0085} />
             </span>
           }
         >
@@ -63,7 +66,7 @@ function Settings() {
             ]}
           />
         </Row>
-        <Row label="主題" description="跟隨系統會依手機或電腦的深色模式切換。">
+        <Row label="主題">
           <RangeChips
             label="主題"
             value={p.theme}
@@ -75,7 +78,7 @@ function Settings() {
             ]}
           />
         </Row>
-        <Row label="股數顯示" description={p.quantityUnit === "lot" ? "例如「1 張 500 股」（1 張 = 1,000 股）" : "例如「1,500 股」"}>
+        <Row label="股數顯示">
           <RangeChips
             label="股數顯示"
             value={p.quantityUnit}
@@ -86,7 +89,7 @@ function Settings() {
             ]}
           />
         </Row>
-        <Row label="大數字縮寫" description="空間不夠時以萬、億顯示（例如 NT$328.45 萬）；明細頁仍顯示完整數字。" htmlFor="compact">
+        <Row label="大數字縮寫" htmlFor="compact">
           <Switch id="compact" checked={p.compactNumbers} onCheckedChange={(v) => setPref({ compactNumbers: v })} />
         </Row>
       </Group>
@@ -98,7 +101,7 @@ function Settings() {
       </Group>
 
       <Group title="計算">
-        <Row label="成本計算方式" description="台灣券商多用移動平均；FIFO 會讓先買的先賣出。改變後已實現損益會重新計算。">
+        <Row label="成本計算方式" description="改了會重新計算已實現損益。">
           <RangeChips
             label="成本計算方式"
             value={p.costMethod}
@@ -109,10 +112,7 @@ function Settings() {
             ]}
           />
         </Row>
-        <Row
-          label="績效比較基準"
-          description={BENCHMARK_OPTIONS.find((o) => o.value === p.benchmark)?.description ?? "報酬含息，可直接和你的時間加權報酬比較。"}
-        >
+        <Row label="績效比較基準">
           <BenchmarkSelect value={p.benchmark} onChange={(v) => setPref({ benchmark: v })} />
         </Row>
       </Group>
@@ -122,31 +122,10 @@ function Settings() {
       <RecurringPlans />
 
       <Delegations />
-
-      <Group title="之後會有的設定">
-        <Row label="AI 額度與用量" description="每日對話次數、每月深度報告次數。"><span className="text-sm text-ink-2">M4 開放</span></Row>
-        <Row label="通知" description="到價、漲跌幅、除權息提醒；Telegram 與 Discord。"><span className="text-sm text-ink-2">M4 開放</span></Row>
-        <Row label="資料匯出與刪除帳號" description="依個資法提供 CSV 匯出與刪除帳號。"><span className="text-sm text-ink-2">之後開放</span></Row>
-      </Group>
-
-      <Group title="關於資料">
-        <div className="flex flex-col gap-2 px-4 py-4 text-md text-ink-2 sm:px-5">
-          {api.kind === "mock" && (
-            <p>
-              目前沒有連到後端：數字由瀏覽器內的模擬資料產生，畫面模擬只用可商用資料的模式（網址加 <code className="rounded bg-hov px-1 text-sm">?policy=personal</code> 改看示範資料）。設定{" "}
-              <code className="rounded bg-hov px-1 text-sm">VITE_API_BASE_URL</code> 後改用真實資料。
-            </p>
-          )}
-          <p>行情、公司資料與公告只用可合法商用的政府開放資料（證交所、櫃買中心、集保結算所）與從它們自建的每日存檔；存檔還不夠的地方會寫「資料累積中」，不用示範資料充數。盤中走勢需要付費授權，目前提供收盤後資料。</p>
-          <p>
-            <Link to="/data-sources" className="text-ink underline underline-offset-3">
-              資料來源與授權
-            </Link>
-            ：每個資料集的顯名聲明。
-          </p>
-        </div>
-      </Group>
-    </div>
+      </div>
+      {/* 資料來源：一頁一個頁尾（設定頁沒有自己的資料，就是連到完整顯名聲明） */}
+      <SourcesFooter className="max-w-[816px]" />
+    </PageFrame>
   )
 }
 
@@ -182,10 +161,7 @@ function Accounts() {
   return (
     <section id="accounts" aria-labelledby="set-accounts" className="flex scroll-mt-20 flex-col gap-2">
       <div className="flex flex-wrap items-end justify-between gap-2">
-        <div>
-          <h2 id="set-accounts" className="text-lg font-bold">券商帳戶</h2>
-          <p className="text-md text-ink-2">手續費折扣與最低手續費用來自動計算每筆交易的費用。</p>
-        </div>
+        <h2 id="set-accounts" className="text-lg font-bold">券商帳戶</h2>
         <Button variant="outline" size="sm" onClick={() => setEditing(NEW_ACCOUNT)}>
           <PlusIcon />
           新增帳戶
@@ -198,7 +174,7 @@ function Accounts() {
       ) : (
         <ul className="flex flex-col divide-y divide-rule border-y border-rule">
           {accounts.data.map((a) => (
-            <li key={a.id} className="flex items-start gap-4 px-4 py-4 sm:px-5">
+            <li key={a.id} className="flex items-start gap-4 py-4">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{a.name}</span>
@@ -312,7 +288,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
         </div>
         <DialogFooter className={cn("gap-2")}>
           <Button variant="outline" onClick={onClose}>取消</Button>
-          <Button onClick={save} disabled={pending}>{pending ? "儲存中…" : isNew ? "新增帳戶" : "儲存"}</Button>
+          <Button variant="sign" onClick={save} disabled={pending}>{pending ? "儲存中…" : isNew ? "新增帳戶" : "儲存"}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

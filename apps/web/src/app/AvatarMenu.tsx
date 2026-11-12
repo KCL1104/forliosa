@@ -36,7 +36,7 @@ export function AvatarMenu() {
           />
         }
       >
-        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-act text-base font-medium text-act-fg">
+        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-sel text-base font-medium text-ink">
           {name.slice(0, 1)}
         </span>
       </DropdownMenuTrigger>
@@ -44,7 +44,7 @@ export function AvatarMenu() {
         <DropdownMenuGroup>
           <DropdownMenuLabel className="flex flex-col gap-0.5 py-2">
             <span className="text-md font-medium text-ink">{name}</span>
-            <span className="truncate text-xs font-normal text-ink-2">{me.data?.email}</span>
+            <span className="truncate text-sm font-normal text-ink-2">{me.data?.email}</span>
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
@@ -66,7 +66,7 @@ export function AvatarMenu() {
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuLabel className="text-xs text-ink-2">外觀</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-sm text-ink-2">外觀</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setPref({ theme: v as ThemePreference })}>
             <DropdownMenuRadioItem value="light">淺色（紙白）</DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="dark">深色（夜間筆記本）</DropdownMenuRadioItem>
@@ -75,7 +75,7 @@ export function AvatarMenu() {
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
-          <DropdownMenuLabel className="text-xs text-ink-2">漲跌顏色</DropdownMenuLabel>
+          <DropdownMenuLabel className="text-sm text-ink-2">漲跌顏色</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={convention} onValueChange={(v) => setPref({ colorConvention: v as ColorConvention })}>
             <DropdownMenuRadioItem value="tw">
               紅漲綠跌 <span className="text-[var(--red)]">▲</span>

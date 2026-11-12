@@ -3,6 +3,7 @@ import { ArrowLeftIcon } from "lucide-react"
 import { useFeed, useGroup, useSharedPortfolio } from "@/api/sharing-queries"
 import { ApiError, type SharedPortfolio } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
+import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { UserAvatar } from "@/components/avatar"
 import { Money, Pct } from "@/components/finance"
@@ -30,7 +31,7 @@ function Member() {
   const member = group.data?.members.find((m) => m.user_id === userId)
   const missing = (shared.error instanceof ApiError && shared.error.status === 404) || (group.error instanceof ApiError && group.error.status === 404)
   return (
-    <div className="mx-auto w-full max-w-[880px] px-5 pt-2 pb-10 md:px-8 lg:pt-6">
+    <PageFrame className="lg:pt-6">
       <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
         <Link
           to="/groups/$groupId"
@@ -57,7 +58,7 @@ function Member() {
       ) : (
         <SharedPortfolioView p={shared.data} groupId={groupId} role={member ? ROLE_LABEL[member.role] : undefined} isMe={member?.is_me ?? false} />
       )}
-    </div>
+    </PageFrame>
   )
 }
 
@@ -139,7 +140,8 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
           </Section>
         )}
         {p.holdings && (
-          <Section title="持股" titleId="mp-holdings" aside="權重，不含股數與金額">
+          // 權重清單最寬 720px：標題的格線跟著清單一樣寬
+          <Section title="持股" titleId="mp-holdings" aside="權重，不含股數與金額" className="max-w-[720px]">
             {p.holdings.length === 0 ? <p className="text-md text-ink-2">目前沒有持股。</p> : <WeightList holdings={p.holdings} className="-mt-3" />}
           </Section>
         )}

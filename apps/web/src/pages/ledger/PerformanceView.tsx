@@ -47,12 +47,6 @@ export function PerformanceView() {
 
   return (
     <div className="flex flex-col gap-5">
-      <p className="flex flex-wrap items-center gap-2 text-sm text-ink-2">
-        {p?.start_date && p.end_date
-          ? `${formatDate(p.start_date)} – ${formatDate(p.end_date)}。價格用未還原收盤價，股利另以交易紀錄計入。`
-          : "時間加權報酬、XIRR、回撤與基準比較。"}
-        {p?.is_demo && <DemoTag title={holdings.data?.some((h) => h.is_demo) ? "含示範資料" : undefined} />}
-      </p>
       <div className="flex flex-wrap items-center gap-3">
         <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />
         <Select
@@ -72,6 +66,13 @@ export function PerformanceView() {
           比較基準
           {!readOnly && <BenchmarkSelect size="sm" value={prefBenchmark} onChange={(v) => setPref({ benchmark: v })} />}
         </span>
+        {/* 期間（計算方式在最下面的「計算方式」） */}
+        {(p?.start_date && p.end_date) || p?.is_demo ? (
+          <p className="num flex items-center gap-2 text-sm text-ink-2 lg:ml-auto">
+            {p.start_date && p.end_date && `${formatDate(p.start_date)} – ${formatDate(p.end_date)}`}
+            {p.is_demo && <DemoTag title={holdings.data?.some((h) => h.is_demo) ? "含示範資料" : undefined} />}
+          </p>
+        ) : null}
       </div>
 
       {perf.isError ? (
@@ -93,7 +94,7 @@ export function PerformanceView() {
             <Legend
               className="mb-2"
               items={[
-                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <span className={toneClass(direction(p.twr))}>{formatPercent(p.twr)}</span> },
+                { label: `${me}的（時間加權）`, color: "var(--chart-mine)", shape: "line", value: <Pct value={p.twr} /> },
                 { label: p.benchmark?.name ?? "基準", color: "var(--chart-bench)", shape: "line", value: formatPercent(p.benchmark?.twr) },
               ]}
             />
@@ -152,8 +153,9 @@ function Metrics({ p }: { p: Performance }) {
       help: "排除資金進出的影響，用來比較「選股與操作能力」。",
       value: <Pct value={p.twr} />,
       sub: excess !== null && (
+        // 和基準的差距不是價格漲跌：不用紅綠，用「多／少」說方向
         <span>
-          比 {p.benchmark?.name} <span className={toneClass(direction(excess))}>{excess >= 0 ? "多" : "少"} {formatPercent(Math.abs(excess), { signed: false })}</span>
+          比 {p.benchmark?.name} {excess >= 0 ? "多" : "少"} <span className="num font-medium text-ink">{formatPercent(Math.abs(excess), { signed: false })}</span>
         </span>
       ),
     },
@@ -323,7 +325,10 @@ function RealizedByYear({ p }: { p: Performance }) {
         {p.realized_by_year.map((r) => (
           <li key={r.year} className="num">
             <span className="text-ink-2">{r.year}：</span>
-            <span className={toneClass(direction(r.amount))}>{privacy ? MASK : `${direction(r.amount) === "up" ? "▲" : direction(r.amount) === "down" ? "▼" : ""}${formatMoney(r.amount, { signed: true })}`}</span>
+            <span className={toneClass(direction(r.amount))}>
+              {privacy ? MASK : formatMoney(r.amount, { signed: true })}
+              <span className="sr-only">{direction(r.amount) === "up" ? "獲利" : direction(r.amount) === "down" ? "虧損" : ""}</span>
+            </span>
           </li>
         ))}
       </ul>
@@ -336,6 +341,7 @@ function Definitions() {
     <details className="group border-y border-rule py-3">
       <summary className="cursor-pointer text-md font-medium marker:text-ink-2">計算方式</summary>
       <div className="mt-3 flex max-w-prose flex-col gap-2 text-md text-ink-2">
+        <p>價格用未還原收盤價；股利另以交易紀錄計入。</p>
         <p>投資組合價值是每天收盤後所有持股的市值（美股依中央銀行公布的當日新臺幣對美元收盤匯率換算成新台幣），第一版不含現金部位。</p>
         <p>每日報酬 = （當日市值 + 當日流出）÷（前一日市值 + 當日流入）− 1。買進成本（含手續費）視為開盤前流入；賣出淨收入與現金股利（扣二代健保）視為收盤後流出。</p>
         <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率；最大回撤以 TWR 指數計算。</p>
