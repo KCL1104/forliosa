@@ -73,6 +73,8 @@ Forliosa 是以台股為主的投資管理 web app，把三件事放在同一處
   - **首頁可自訂**：可選欄位、隱藏圖表、釘選持股（取代「簡易版／專業版」）。
   - 群組：預設只分享百分比、群主可關排行、不顯示「某某沒分享」、提供可貼到 LINE 的百分比分享卡。
   - 研究依據：`docs/research/ui-redesign-research-2.md`。
+- **AI 不說明自己（產品負責人 2026-11-12）**：建議問題、動作、摘要都是依目前頁面自動偵測後直接出現；介面上不放「本頁建議」「依頁面推薦」這類說明機制的字樣。
+- **個股頁**：要有 Google Finance 等級的資訊覆蓋度（總覽、收益、財務、事件、關鍵數據、新聞、「為什麼漲跌」），再加上台股特有資料（法人、融資融券、月營收、除權息、估值河流圖）；研究見 `docs/research/stock-page-research.md`。
 - **深淺色**：兩種都做；產品負責人平常用深色模式。
 - **個股頁**：重點一頁（報價、AI 摘要、估值位置、月營收、我的部位）＋進階分頁。
 - 參考函式庫（產品負責人指定）：shadcn/ui、Base UI、Radix、Sonner、Vaul、cmdk、NumberFlow；展示性元件參考 Beautiful UI、RareUI、Magic UI、Aceternity UI、21st.dev（只用在展示性畫面，需通過 critique）。
