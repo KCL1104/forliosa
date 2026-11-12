@@ -340,7 +340,7 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
     const revenue = monthlyRevenue(spec)
     // 月營收：已公布的用實際日期（月營收資料集第一次出現的日期），還沒公布的用法定期限（每月 10 日，預估）
     for (const [date, period, actual] of [
-      ["2026-08-07", "2026-07", true], ["2026-09-09", "2026-08", true], ["2026-10-08", "2026-09", true], ["2026-11-07", "2026-10", true],
+      ["2026-08-07", "2026-07", true], ["2026-09-09", "2026-08", true], ["2026-10-08", "2026-09", true], ["2026-11-06", "2026-10", true],
       ["2026-12-10", "2026-11", false], ["2027-01-10", "2026-12", false],
     ] as const) {
       const m = Number(period.slice(5))

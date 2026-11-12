@@ -3,9 +3,10 @@
 1. A chat turn with tool use on the seeded demo user (``demo@forliosa.local``; seeded if missing).
 2. A question about 台積電 today that needs web search (citations printed).
 
-Prints the streamed answer, tool steps, citations, token usage and the estimated cost of each turn. Needs a key
-(``CLAUDE_API_KEY_<n>`` / ``ANTHROPIC_API_KEY``, or ``AI_DEV_DUMMY_KEY=1`` behind a key-injecting proxy). Exit
-code 2 when no key is configured, 1 when a turn failed. Never prints keys.
+Prints the streamed answer, tool steps, citations, grounding flags, token usage and the estimated cost of each
+turn, then the state of every key slot. Needs a key (``CLAUDE_API_KEY_<n>`` / ``ANTHROPIC_API_KEY``, or
+``AI_DEV_DUMMY_KEY=1`` behind a key-injecting proxy). Exit code 2 when no key is configured, 1 when a turn
+failed. Never prints keys (only slot numbers).
 """
 
 from __future__ import annotations
@@ -55,7 +56,8 @@ def main(argv: list[str] | None = None) -> int:
               "AI_DEV_DUMMY_KEY=1。smoke test 沒有執行。")
         return 2
     pool = build_pool()
-    print(f"金鑰數：{pool.size}；模型：{settings.ai_model_chat or settings.ai_model}")
+    slot_names = ", ".join(f"#{s.index}" for s in pool.slots)
+    print(f"金鑰槽：{slot_names}；模型：{settings.ai_model_chat or settings.ai_model}")
     failed = False
     grand = CallUsage()
     grand_cost = 0.0
@@ -78,6 +80,9 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"\n  ↳ 來源：{data['title']} {data['url']}", flush=True)
                 elif name == "draft":
                     print(f"\n  ✎ 草稿 {data['id']}", flush=True)
+                elif name == "grounding":
+                    for item in data["items"]:
+                        print(f"\n  ⚠ 無來源：{item['text']}", flush=True)
                 elif name == "error":
                     failed = failed or data["code"] not in ("truncated",)
                     print(f"\n  ✗ {data['code']}：{data['message']}", flush=True)
@@ -93,6 +98,18 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\n合計：輸入 {grand.input_tokens}、快取寫入 {grand.cache_creation_input_tokens}、快取讀取 "
           f"{grand.cache_read_input_tokens}、輸出 {grand.output_tokens}、搜尋 {grand.web_search_requests} 次；"
           f"估計 US${grand_cost:.5f}")
+    with session_factory()() as db:
+        from forliosa.ai import store
+        from forliosa.ai.tools import excluded_tools
+
+        costs, calls = store.slot_month_usage(db)
+        for row in pool.status(costs, calls, store.slot_thread_counts(db)):
+            if row["configured"]:
+                print(f"金鑰槽 #{row['slot']}：{row['state']}、本月 US${row['month_cost_usd']:.4f}"
+                      f"（{row['month_calls']} 次）、workspace {row['workspace_id'] or '?'}、"
+                      f"headroom {row['headroom']}")
+        for tool in excluded_tools():
+            print(f"停用的伺服器工具：{tool['type']}（{tool['reason']}）")
     return 1 if failed else 0
 
 

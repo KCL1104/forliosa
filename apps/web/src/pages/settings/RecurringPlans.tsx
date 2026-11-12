@@ -225,8 +225,8 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
           <DialogDescription>股數 = 扣款金額 ÷ 最近收盤價（無條件捨去，含零股），手續費另計。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4">
-          <Field label="股票或 ETF" htmlFor="rcp-symbol" error={touched ? errors.symbol : null}>
-            <SymbolPicker id="rcp-symbol" value={symbol} onChange={setSymbol} invalid={touched && !!errors.symbol} accept={(i) => i.market !== "US"} rejectReason="美股不支援" />
+          <Field label="股票或 ETF" error={touched ? errors.symbol : null}>
+            <SymbolPicker label="股票或 ETF" value={symbol} onChange={setSymbol} invalid={touched && !!errors.symbol} accept={(i) => i.market !== "US"} rejectReason="美股不支援" />
           </Field>
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="扣款帳戶" error={touched ? errors.account : null}>

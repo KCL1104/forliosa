@@ -332,49 +332,94 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 ## AI（M4，2026-11-12）
 
-程式在 `src/forliosa/ai/`（`keypool`、`tools`、`prompts`、`chat`、`store`、`suggestions`、`why`、`smoke`）與 `api/routes/ai.py`；
-資料表 `ai_threads`、`ai_messages`、`ai_drafts`、`ai_usage`、`ai_why_cache`（migration `0004_ai_threads_usage`）。合約見
+程式在 `src/forliosa/ai/`（`keypool`、`tools`、`prompts`、`chat`、`store`、`scope`、`grounding`、`retention`、`suggestions`、
+`why`、`smoke`）與 `api/routes/ai.py`；資料表 `ai_threads`、`ai_messages`、`ai_drafts`、`ai_usage`、`ai_why_cache`
+（migration `0004_ai_threads_usage`；金鑰槽與保存期限的欄位、索引在 `0005_ai_key_slots_retention`）。合約見
 [`docs/api-contract.md`](../../docs/api-contract.md)「AI（M4）」。
 
 ### 設定（環境變數）
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
-| `CLAUDE_API_KEY_1`、`_2`、`_3`…（大小寫不拘，例如 `Claude_API_KEY_1`） | — | API 金鑰，依編號排序；都沒有時用 `ANTHROPIC_API_KEY`。也會讀工作目錄的 `.env`（環境變數優先）。日誌只記金鑰編號（`#1`），不記金鑰 |
+| `CLAUDE_API_KEY_1`、`_2`、`_3`…（大小寫不拘，例如 `Claude_API_KEY_1`） | — | API 金鑰；**編號就是金鑰槽（slot）**，每把放在各自的 workspace（各有自己的速率限制與花費上限）。都沒有時用 `ANTHROPIC_API_KEY`（slot 0）。也會讀工作目錄的 `.env`（環境變數優先）。日誌與回應只出現槽號（`#1`），從不出現金鑰 |
+| `AI_KEY_<n>_MONTHLY_BUDGET_USD`（大小寫不拘） | 空（不限） | 第 n 槽每月（**UTC 月**，與 Anthropic 帳單同）估計花費上限；達到後該槽不再使用，釘在它上面的對話搬到別槽。估計值來自 `ai_usage.cost_usd`（`ai/pricing.py`），建議設得比 Console 的 workspace 花費上限低一點。0／空白＝不限 |
+| `AI_KEY_STICKY_WAIT_SECONDS` | 5 | 對話釘住的槽在這幾秒內會恢復（例如 `retry-after: 2`）就等它；更久就搬到別槽 |
+| `AI_KEY_COOLDOWN_SECONDS`、`AI_REQUEST_TIMEOUT_SECONDS` | 60、120 | 沒有 `retry-after` 時的冷卻秒數（視為「猜測」，全部槽都在冷卻時仍可試一次） |
 | `AI_DEV_DUMMY_KEY` | `false` | 沒有金鑰時送一個占位字串，給會自動注入真金鑰的 proxy 用 |
 | `AI_MODEL` | `claude-haiku-5-5` | 產品負責人指定；`AI_MODEL_CHAT`／`AI_MODEL_WHY`／`AI_MODEL_IMPORT`／`AI_MODEL_REPORT` 可個別覆寫 |
 | `AI_EFFORT_CHAT`、`AI_EFFORT_WHY` | `low` | `output_config.effort`（Haiku 5.5 預設 medium，這裡明確設 low） |
 | `AI_MAX_TOKENS_CHAT`、`AI_MAX_TOOL_ROUNDS` | 8000、8 | 每次呼叫的輸出上限、每輪最多幾次模型呼叫 |
-| `AI_DAILY_MESSAGE_LIMIT` | 50 | 每人每天（台北日）提問數，0＝不限 |
-| `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下） |
+| `AI_DAILY_MESSAGE_LIMIT` | 50 | 每人每天（台北日）提問數，0＝不限（產品負責人確認） |
+| `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
 | `AI_THREAD_MAX_CONTEXT_TOKENS` | 90,000 | 一段對話的提示超過這個大小就要求開新對話（Haiku 5.5 提示超過 10 萬 token 價格變 5 倍） |
-| `AI_KEY_COOLDOWN_SECONDS`、`AI_REQUEST_TIMEOUT_SECONDS` | 60、120 | |
-| `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、3 | |
-| `AI_WEB_SEARCH_ALLOWED_DOMAINS` | 空（不限） | 逗號分隔；`recommended`＝內建的台灣財經媒體＋官方網域清單，`official`＝只有官方 |
+| `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、3 | 每輪最多 3 次搜尋 |
+| `AI_WEB_SEARCH_ALLOWED_DOMAINS` | 空（**不限網域**，產品負責人決定） | 逗號分隔；`recommended`＝內建的台灣財經媒體＋官方網域清單，`official`＝只有官方。預設由模型自己判斷何時搜尋、用哪些來源（只限財經資訊，見「範圍」） |
 | `AI_WEB_FETCH`、`AI_WEB_FETCH_ALLOWED_DOMAINS` | `true`、`official` | 只讀官方網域（證交所、櫃買、集保、期交所、金管會、央行、主計總處…）；`*` 不限 |
 | `AI_WEB_DYNAMIC_FILTERING` | `false` | `true` 時用網頁工具的動態過濾（code execution）；預設直接呼叫，延遲較低、可零資料保留 |
 | `AI_EAGER_TOOL_STREAMING` | `false` | 工具參數很短（幾十個 token），伺服器端驗證比提早串流划算；要時可打開 |
-| `AI_WHY_ENABLED`、`AI_WHY_BLOCKING` | `false`、`false` | 見下方「為什麼漲跌」 |
+| `AI_WHY_ENABLED`、`AI_WHY_BLOCKING` | `true`、`false` | 見下方「為什麼漲跌」（預設開啟，產品負責人決定） |
+| `AI_SCOPE_PRECHECK` | `true` | 明顯離題（寫程式、作業、角色扮演、寫詩、翻譯）又沒有任何財經字詞的提問，不呼叫模型直接婉拒 |
+| `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天；0＝永久保存 |
+| `AI_ADMIN_EMAILS` | 空 | `FORLIOSA_ENV=prod` 時可以看 `GET /ai/admin/keys` 的帳號（逗號分隔）；dev／test 時所有登入者都可看 |
 
 ### 實作上的決定
 
 - **SDK**：`anthropic` 2.8（送 API 版本 `2026-10-21`：不能帶 `temperature`／`top_p`／`top_k`；金鑰以 `Authorization: Bearer` 送出）。
-  每把金鑰一個重複使用的 client，SDK 自己的重試關掉（`max_retries=0`），由 `KeyPool` 換下一把：每個對話請求（一輪）從下一把開始（輪替），
-  同一輪裡的後續呼叫留在同一把（提示快取以 workspace 為單位、thinking 區塊綁定帳號；金鑰最好放在同一個 workspace）；
-  429／529／`overloaded_error`／5xx → 該金鑰冷卻（有 `retry-after` 就照它），401 → 停用到重啟；只有一把金鑰時暫停 1 秒重試一次。
-  **串流已經送出文字後**才失敗的請求不重試（`error: ai_busy`），避免重複的文字。
+  每把金鑰一個重複使用的 client，SDK 自己的重試關掉（`max_retries=0`），重試與換槽由 `keypool` 負責。
+- **金鑰槽（三把金鑰在三個 workspace，各有額度）**：
+  - **黏著**：每段對話在第一次成功的呼叫時釘在一個槽（`ai_threads.key_slot`，只存槽號，從不存金鑰）；之後每一輪、每一次呼叫都走同一槽，
+    所以提示快取（以 workspace 為單位）、thinking 區塊（只在產生它的帳號有效）與網路搜尋的 `encrypted_content`（必須原封不動送回同一個帳號）都有效。
+  - **選槽**：新對話與背景工作（為什麼漲跌、之後的批次）選「餘裕」最多的槽：最近一次回應的 `anthropic-ratelimit-{requests,tokens,input-tokens,output-tokens}-{remaining,limit,reset}`
+    標頭（名稱已對照 platform.claude.com 的 rate-limits 文件）算出 remaining÷limit 的最小值，再與 `1 − 本月估計花費 ÷ 預算` 取小，
+    以 0.1 為一級比較；同級時選本月花費最少的槽，再來是這個程序分配較少的槽、槽號小的。`anthropic-workspace-id` 標頭也記下來（只顯示在管理狀態）。
+  - **跳過的槽**：401／403 → 停用到重啟；429／529／5xx／`overloaded_error` → 冷卻（有 `retry-after` 照它，否則 `AI_KEY_COOLDOWN_SECONDS`）；
+    速率標頭 remaining 為 0 → 冷卻到 reset；429 且 `error.details.error_code = enforced_spend_limit_reached`（組織花費上限）→ 到下個月 1 日 00:00 UTC；
+    400「You have reached your specified (workspace) API usage limits」（Console 設的花費上限）→ 到訊息寫的時間（讀不到就下個月）；
+    402 `billing_error` → 一小時後再試；本月估計花費 ≥ `AI_KEY_<n>_MONTHLY_BUDGET_USD` → 本月不用。
+  - **對話中途換槽**：釘住的槽停用、用完額度或冷卻超過 `AI_KEY_STICKY_WAIT_SECONDS`（5 秒內恢復就等）時，這一輪**在第一次模型呼叫之前／失敗時**
+    換到餘裕最多的槽，並改用**純文字摘要**接續：每一輪成功的對話變成一則 user（提問）＋一則 assistant（回答文字，引用改成「・標題：網址」純連結），
+    丟掉 thinking、工具呼叫與結果、伺服器工具區塊與加密內容（依 skill 的說明：thinking 區塊在別的帳號會被丟掉、加密的搜尋內容只能原樣送回同一帳號）；
+    這一輪的頁面情境多一行「先前的對話只保留文字…需要數字請重新查詢」。在新槽第一次成功後，摘要存成隱藏的 `ai_messages`（`meta.recap`），
+    `ai_threads.context_from_seq` 指向它、`key_slot` 改成新槽；之後的回合原樣重播「摘要＋新回合」（只追加，新槽的快取有效）。
+    已經查過工具的一輪不會中途換槽（工具結果與 thinking 屬於原槽）：在原槽重試一次，再失敗就 `error: ai_busy`，下一輪再換。
+    0005 之前建立的對話（`key_slot` 是 null）第一次被使用時也用摘要接續。
+  - 所有槽都停用／用完額度時 `POST /ai/chat` 回 503 `ai_unavailable`，`/ai/usage` 的 `available` 為 false；都在冷卻時送 `error: ai_busy`。
+  - 槽的冷卻、速率標頭與停用狀態存在各程序的記憶體（api 與 worker 各自一份）；每月花費從 `ai_usage.key_slot` 加總，所有程序共用。
+  - **`GET /ai/admin/keys`**（dev／test 或 `AI_ADMIN_EMAILS`；其他人 404）：每槽的 `configured`、`state`（`ok`、`cooling`、`disabled`、
+    `exhausted`、`over_budget`、`not_configured`）、`retry_in_seconds`、`workspace_id`、本月花費與次數、預算與剩餘、`headroom`、最近的速率標頭、
+    釘在該槽的對話數、最後一個錯誤（狀態碼＋類型，不含訊息內容），以及目前會送出的伺服器工具與被停用的工具。從不包含金鑰。
+- **被拒絕的伺服器工具**：API 回 400 且訊息寫出某個伺服器工具的 `type`（例如「Requests sent from a sandbox with restricted network access are not
+  allowed to use tool web_fetch_20260318」；或寫出名稱，例如「web search is not enabled」）並說它不被允許／不支援／未啟用時，把那個工具拿掉重送
+  一次，並在這個程序裡記住（只記一次 warning；理由列在 `/ai/admin/keys.excluded_tools`）。為什麼漲跌沒有可用的 `web_search` 時不呼叫模型。
+  工具清單改變會讓舊對話裡的 thinking 區塊失效：若 API 因此回 400（「Invalid `signature` in `thinking` block … bound to a different
+  conversation」），同一槽改用純文字摘要接續一次（同上）。
 - **手寫工具迴圈**（不用 SDK beta tool runner）：每一輪都要把文字、引用、伺服器工具進度與草稿即時轉成 SSE，失敗時在送出任何位元組前
-  換金鑰，並把 API 回傳的內容區塊原封不動存起來。依 skill 的規則：附上完整 `response.content`；每個 `tool_use` 都在同一則 user 訊息
-  回 `tool_result`（失敗用 `is_error`）；`pause_turn` 直接重送不加訊息；`refusal` 與 `max_tokens` 的那一輪不執行工具。
+  換槽，並把 API 回傳的內容區塊原封不動存起來。依 skill 的規則：附上完整 `response.content`；每個 `tool_use` 都在同一則 user 訊息
+  回 `tool_result`（失敗用 `is_error`）；`pause_turn` 直接重送不加訊息（為什麼漲跌的續傳也留在同一槽）；`refusal` 與 `max_tokens` 的那一輪不執行工具。
+  **串流已經送出文字後**才失敗的請求不重試（`error: ai_busy`），避免重複的文字。
 - **對話只追加、不改寫**（Haiku 5.5 的 thinking 區塊綁定之前的所有內容，改到前文會 400；也讓提示快取有效）：系統提示固定不變（不含日期、
   頁面、使用者）；每輪變動的「頁面情境」（台北時間、市場狀態、頁面與代號、隱私模式）是接在使用者訊息後的 `role: "system"` 訊息
   （模型不支援時自動改成 user 訊息裡的 `<system-reminder>`）。thinking 簽章、`web_search_tool_result.encrypted_content`、
   `citations[].encrypted_index` 原樣存回。失敗或被拒答的一輪保留在紀錄裡顯示，但標成 `in_context = false`，之後不再送給模型。
   每段對話的模型在開始時固定（`ai_threads.model`），換 `AI_MODEL` 只影響新對話。
 - **提示快取**：系統提示最後一個區塊放一個 `cache_control`（工具在它前面，一起快取），再加最上層的自動快取給對話尾端。工具依名稱排序。
+- **範圍（產品負責人決定）**：只協助投資理財、台美股、使用者自己的持股與 Forliosa 的用法。系統提示要求其他要求（寫程式、一般常識、作業、
+  翻譯、寫作、角色扮演、閒聊）用一句繁體中文婉拒並帶回投資，且「規則適用整段對話」（使用者堅持或說有人同意例外也一樣）。
+  `ai/scope.py` 另有保守的預先檢查：只有同時符合離題樣式（程式、作業、角色扮演、寫詩、翻譯）**且**完全沒有財經字詞（股、價、投資、ETF、
+  台積、四到六位數代號…，刻意放寬）時才不呼叫模型，直接回固定的一句話（`done.stop_reason: "off_topic"`；算一則提問；不進模型上下文）。
+  一般常識等其他離題問題交給模型判斷。
+- **網路搜尋**：預設不限網域；系統提示請模型自己判斷何時搜尋、用哪些來源，但只搜尋與問題相關的財經資訊，優先第一手來源與信譽良好的財經媒體、
+  避開論壇與內容農場；並依 skill 對 Haiku 5.5 的建議提醒今天的日期在頁面情境裡、會變動的資訊要先搜尋。`max_uses` 維持 3（為什麼漲跌也是 3）。
+- **有根據才寫（grounding）**：系統提示要求每個事實都來自工具結果或有引用的網路來源；找不到來源就不寫或標「未經查證」，不把沒有引用的新聞事件
+  寫成事實，寧可少寫幾點。伺服器端另有檢查（`ai/grounding.py`）：一輪用到 `web_search`／`web_fetch` 時，把回答切成句子，與「有引用的文字區塊」
+  都不重疊、又像新聞敘述（強動詞：宣布、批准、核准、決議、收購、簽署、入股…；或弱動詞：通過、發布、投資、降息…加上日期或主體：董事會、公司、央行、
+  英文名稱、「」）的句子列在 `grounding` 事件，也存在該則回答（`ThreadMessage.grounding`），讓前端標「無來源」。工具給的數字本來就沒有引用，
+  所以單純的價格、持股句子不會被標。位置是 Unicode code point（中文都在 BMP，與 JS 字串索引相同；保險起見也附上句子本身）。
+- **免責聲明由畫面顯示（產品負責人決定）**：系統提示不再要求模型寫「僅供參考，非投資建議」，反而要求不要寫；固定文字
+  「AI 回答僅供參考，非投資建議。」放在 `done.disclaimer` 與 `GET /ai/usage` 的 `disclaimer`。提到價格、報酬時模型仍會順帶寫資料時間。
 - **工具**：14 個 client tools，全部 `strict: true`、`additionalProperties: false`、沒有使用者 id 欄位（伺服器帶入登入者）；可選參數合計 15
   個（上限 24）。結果是精簡 JSON（例如 K 線只給統計與最多 30 個取樣點、籌碼只給最近 10 日與區間合計），保留 `as_of`、`is_demo`、`sources`。
-  其他使用者的帳戶 id 會回錯誤，不會被當成篩選條件。伺服器工具：`web_search_20260318`（`user_location` 台北／TW、`max_uses` 3）、
+  其他使用者的帳戶 id 會回錯誤，不會被當成篩選條件。伺服器工具：`web_search_20260318`（`user_location` 台北／TW、`max_uses` 3、預設不限網域）、
   `web_fetch_20260318`（只限官方網域、`max_uses` 2、`max_content_tokens` 8000、開啟引用）。
 - **草稿**：`draft_transaction` 跑和 `POST /transactions/preview` 相同的稅費計算，再用帳本嚴格重播檢查（例如賣超過持股 → 工具錯誤，
   不產生草稿），通過才存 `ai_drafts`（`pending`）並送 `draft` 事件。**不會寫入 `transactions`**。沒給價格時用最近收盤價估算並寫在 `notes`；
@@ -382,19 +427,39 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   （`signed` ＋ `transaction_id`），只接受自己的交易。
 - **拒答**：Haiku 5.5 沒有伺服器端備援模型；`stop_reason: "refusal"` 時送 `error: refusal`（請使用者換個問法），該輪不留在上下文。
 - **額度**：每天提問數＝當天的使用者訊息數；每月 token＝`input + 快取寫入 + output + ceil(快取讀取 ÷ 10)`（快取讀取約十分之一價）。
-  「為什麼漲跌」的共用快取不算在觸發者頭上。`ai_usage` 每次模型呼叫一列：token、搜尋次數、估計費用（`ai/pricing.py`，
-  Haiku 5.5 US$0.10／0.50 每百萬 token，提示超過 10 萬 token 為 0.50／2.50；快取讀 0.1 倍、寫 1.25 倍；搜尋 US$10／千次）。
-- **為什麼漲跌**（`AI_WHY_ENABLED=1`）：只在規則判斷 `show: true` 時才問模型（`web_search`、一句話、45 字內、必須有引用，否則
+  「為什麼漲跌」的共用快取不算在觸發者頭上。`ai_usage` 每次模型呼叫一列：token、搜尋次數、金鑰槽、估計費用（`ai/pricing.py`，
+  Haiku 5.5 US$0.10／0.50 每百萬 token，提示超過 10 萬 token 為 0.50／2.50；快取讀 0.1 倍、寫 1.25 倍；搜尋 US$10／千次），**不含訊息內容**。
+- **保存期限 30 天（產品負責人決定）**：worker 每天 04:20（台北）執行，也可手動
+  `uv run python -m forliosa.ai.retention [--days N] [--dry-run]`。刪除最後活動（`updated_at`）超過 `AI_RETENTION_DAYS` 天的 `ai_threads`
+  與它全部的 `ai_messages`（含加密的搜尋內容、摘要、顯示用文字），以及 `updated_at` 超過期限的 `ai_drafts`（已簽名、已捨棄，和從沒簽名而過期的
+  待確認草稿；已簽名草稿建立的交易仍在帳本）。舊對話裡較新的草稿保留（`thread_id` 改成 null）。`ai_usage` 保留做帳（沒有內容），`ai_why_cache` 是共用資料也保留。
+- **為什麼漲跌**（預設開啟）：只在規則判斷 `show: true` 時才問模型（`web_search`、一句話、45 字內、必須有引用，否則
   `NONE`）。結果依「代號＋交易日」存 `ai_why_cache`，所有使用者共用；失敗 30 分鐘後才重試，找不到原因（`empty`）當天不再問。
-  預設在背景執行緒產生（第一次回規則句，之後回 AI 句）；`AI_WHY_BLOCKING=1` 則同步等待。任何錯誤都回規則句。
+  預設在背景執行緒產生（第一次回規則句，之後回 AI 句）；`AI_WHY_BLOCKING=1` 則同步等待。任何錯誤都回規則句。用餘裕最多的金鑰槽。
 - **建議問題** `GET /ai/suggestions`：規則與前端離線版相同（`apps/web/src/ai/suggestions.ts`），不呼叫模型。
 - **Live smoke**：`uv run python -m forliosa.ai.smoke`（需要金鑰；沒有示範使用者會先 seed）：一題用工具的持股問題、一題需要網路搜尋的
-  台積電問題，印出用量與估計費用。
+  台積電問題，印出用量、估計費用、「無來源」標記與每個金鑰槽的狀態。
+
+### 實測費用（產品負責人 2026-11-12 live smoke，`claude-haiku-5-5`）
+
+| 題目 | 輸入 | 快取寫入 | 快取讀取 | 輸出 | 估計費用 |
+|---|---:|---:|---:|---:|---:|
+| 1. 我目前有哪些持股？（工具） | 4 | 9,511 | 7,837 | 878 | 約 US$0.00171 |
+| 2. 台積電今天的新聞（1 次網路搜尋） | 4 | 7,980 | 15,500 | 1,542 | 約 US$0.01192（其中約 US$0.01 是搜尋費） |
+
+提示快取有效（第二次呼叫起大部分是快取讀取）。同一次 smoke 發現兩件事，已處理：預設設定下兩題都在送出前被 400 拒絕
+（「…not allowed to use tool web_fetch_20260318」）→ 上面的「被拒絕的伺服器工具」；搜尋題的回答出現沒有引用的「董事會批准投資 Anthropic／OpenAI」
+→ 上面的「有根據才寫」。
 
 ### AI 待產品負責人確認
 
-1. **額度數字**：每天 50 題、每月 300 萬計費 token（Haiku 5.5 約 US$0.3–1.5）是暫定值。
-2. **網路搜尋來源**：預設不限網域（`AI_WEB_SEARCH_ALLOWED_DOMAINS` 空）；要不要預設只用 `recommended` 清單？清單內容也要確認。
-3. **「為什麼漲跌」AI 句**預設關閉（`AI_WHY_ENABLED=false`）；開啟後每檔每天最多一次搜尋（約 US$0.01＋token）。
-4. **對話保存期限**：目前永久保存（含網路搜尋的加密內容）；要不要定期刪除舊對話？
-5. **AI 回答的免責聲明**由模型在最後一行寫；要不要改由前端固定顯示，避免模型漏寫？
+1. ~~額度數字~~：已確認（2026-11-12）每天 50 題、每月 300 萬計費 token。
+2. ~~網路搜尋來源~~：已決定不限網域、由模型判斷（只限財經資訊）。待確認：`web_fetch` 仍只限官方網域（讀全文較貴、轉載風險較高），要不要也放寬？
+3. ~~為什麼漲跌 AI 句~~：已決定預設開啟。
+4. ~~對話保存期限~~：已決定 30 天。待確認：要不要在設定頁讓使用者自己刪除全部 AI 對話（目前只能一段一段刪）？
+5. ~~免責聲明~~：已決定由前端固定顯示（`done.disclaimer`／`/ai/usage.disclaimer`），前端需要改為顯示這行字。
+6. **金鑰槽的 workspace 驗證**：目前假設三把金鑰各在不同 workspace（換槽一律用摘要）。`/ai/admin/keys` 會顯示每槽回報的 `workspace_id`，
+   請確認三個值不同；若某兩把其實在同一個 workspace，之後可以讓它們之間換槽時不用摘要（目前沒做）。
+7. **每槽預算是估計值**：依 `ai/pricing.py` 的價目估算，與實際帳單可能有出入；建議 Console 的 workspace 花費上限設為真正的硬上限，
+   `AI_KEY_<n>_MONTHLY_BUDGET_USD` 設低一點作為提早換槽的門檻。
+8. **「無來源」標記是啟發式**：可能漏標（沒有典型動詞的敘述）或誤標（用工具資料寫的公告句子）；需要看實際對話調整字詞。

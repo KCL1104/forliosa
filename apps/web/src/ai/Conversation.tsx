@@ -71,7 +71,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
  * AI 的話（紫色文楷）。後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
  * 後面接一個安靜的「無來源」小標記（淡墨，不用紅色）；按下展開說明。
  */
-function AiText({ text, ungrounded, size }: { text: string; ungrounded?: UngroundedPassage[]; size: "panel" | "screen" }) {
+export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: UngroundedPassage[]; size: "panel" | "screen" }) {
   const segments = splitUngrounded(text, ungrounded)
   return (
     <p className={cn("ai-voice whitespace-pre-line", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>

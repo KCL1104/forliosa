@@ -17,14 +17,15 @@ export function SymbolPicker({
   invalid,
   accept,
   rejectReason,
-  id,
+  label = "搜尋股票",
 }: {
   value: Instrument | null
   onChange: (i: Instrument | null) => void
   invalid?: boolean
   accept?: (i: Instrument) => boolean
   rejectReason?: string
-  id?: string
+  /** 輸入框的無障礙名稱（cmdk 自己產生 id 與 label，外面的 htmlFor 對不上，所以名稱從這裡給） */
+  label?: string
 }) {
   const [q, setQ] = useState("")
   const [active, setActive] = useState("")
@@ -46,9 +47,8 @@ export function SymbolPicker({
   // 非同步結果：選取不在清單裡時改選第一個可選的，打字後直接按 Enter 就能選
   const selected = selectable.some((i) => i.symbol === active) ? active : (selectable[0]?.symbol ?? "")
   return (
-    <CommandPrimitive shouldFilter={false} value={selected} onValueChange={setActive} label="搜尋股票" className="relative">
+    <CommandPrimitive shouldFilter={false} value={selected} onValueChange={setActive} label={label} className="relative">
       <CommandPrimitive.Input
-        id={id}
         value={q}
         onValueChange={setQ}
         placeholder="代號或名稱，例如 2330、台積"

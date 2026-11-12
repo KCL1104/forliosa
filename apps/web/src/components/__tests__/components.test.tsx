@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { fireEvent, render, screen } from "@testing-library/react"
 import { act } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import { DemoTag } from "@/components/section"
@@ -6,6 +6,9 @@ import { Segmented } from "@/components/segmented"
 import { Sparkline } from "@/components/sparkline"
 import { FlowPct, Money, Pct, Price, PriceChange, Quantity } from "@/components/finance"
 import { MASK } from "@/lib/format"
+import { DayOfMonthPicker } from "@/components/day-picker"
+import { DataNotes } from "@/components/data-notes"
+import { AiText } from "@/ai/Conversation"
 import { usePrefs } from "@/stores/prefs"
 
 beforeEach(() => {
@@ -92,5 +95,43 @@ describe("可為 null 的欄位（CONTRACT_NOTES）", () => {
     expect(container.textContent).toBe("—")
     expect(render(<Price value={null} market="TWSE" />).container.textContent).toBe("—")
     expect(render(<FlowPct value={null} />).container.textContent).toBe("—")
+  })
+})
+
+describe("<DayOfMonthPicker>（定期定額扣款日）", () => {
+  it("1–28 日可複選，按下切換並排序；選取有 aria-pressed", () => {
+    let days = [19]
+    const { rerender } = render(<DayOfMonthPicker value={days} onChange={(d) => (days = d)} />)
+    expect(screen.getByRole("group", { name: "每月扣款日" }).querySelectorAll("button")).toHaveLength(28)
+    expect(screen.getByRole("button", { name: "19 日" })).toHaveAttribute("aria-pressed", "true")
+    fireEvent.click(screen.getByRole("button", { name: "6 日" }))
+    expect(days).toEqual([6, 19])
+    rerender(<DayOfMonthPicker value={days} onChange={(d) => (days = d)} />)
+    fireEvent.click(screen.getByRole("button", { name: "19 日" }))
+    expect(days).toEqual([6])
+    expect(screen.queryByRole("button", { name: "29 日" })).toBeNull()
+  })
+})
+
+describe("<DataNotes>", () => {
+  it("照後端原文顯示、去重；沒有就不出現", () => {
+    render(<DataNotes notes={["資料累積中：自 2026-11-11 起存檔", "資料累積中：自 2026-11-11 起存檔"]} />)
+    expect(screen.getAllByText("資料累積中：自 2026-11-11 起存檔")).toHaveLength(1)
+    expect(render(<DataNotes notes={[]} />).container.innerHTML).toBe("")
+  })
+})
+
+describe("<AiText> 無來源標記", () => {
+  it("段落後面一個安靜的「無來源」，按下展開「請自行查證」", () => {
+    render(<AiText text="台積電今天上漲。外資連四天賣超。" ungrounded={[{ text: "外資連四天賣超。", reason: "沒有引用來源" }]} size="panel" />)
+    const mark = screen.getByRole("button", { name: "無來源" })
+    expect(mark).toHaveAttribute("aria-expanded", "false")
+    expect(mark.className).not.toMatch(/rise|fall|red/)
+    fireEvent.click(mark)
+    expect(screen.getByRole("note")).toHaveTextContent("這段沒有附來源，請自行查證。沒有引用來源")
+  })
+  it("沒有 grounding 時就是一般的 AI 文字", () => {
+    render(<AiText text="你好。" size="panel" />)
+    expect(screen.queryByRole("button", { name: "無來源" })).toBeNull()
   })
 })

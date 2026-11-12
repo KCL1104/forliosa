@@ -120,3 +120,39 @@ def test_background_mode_returns_rules_then_ai(client, pool, fake, rule_why, ai_
     monkeypatch.setattr(why_mod, "_start_background", lambda *a, **k: started.append(a[1]["symbol"]))
     w = client.get(f"{API}/instruments/2330/why").json()
     assert w["ai"] is False and started == ["2330.TW"]
+
+
+def test_background_job_takes_the_slot_with_most_headroom(client, pool, fake, rule_why, ai_env, engine):
+    from decimal import Decimal
+
+    from tests.ai.conftest import KEYS
+
+    ai_env(AI_WHY_ENABLED=1, AI_WHY_BLOCKING=1)
+    with Session(engine) as db:  # slot 1 already spent more this month
+        db.add(AiUsage(feature="chat", model="claude-haiku-5-5", key_slot=1, cost_usd=Decimal("0.4"),
+                       created_at=now_utc()))
+        db.commit()
+    fake.reply(server_tool_use("srvtoolu_p", "web_search", {"query": "台積電"}), stop_reason="pause_turn")
+    answer(fake)
+    assert client.get(f"{API}/instruments/2330/why").json()["ai"] is True
+    # the pause_turn continuation stays in the workspace that started it
+    assert fake.keys_used == [KEYS[1], KEYS[1]]
+    assert fake.requests[1]["body"]["messages"][-1]["content"][0]["type"] == "server_tool_use"
+    with Session(engine) as db:
+        assert [u.key_slot for u in db.query(AiUsage).filter(AiUsage.feature == "why")] == [2, 2]
+
+
+def test_refused_web_search_stops_model_calls(client, pool, fake, rule_why, ai_env, engine):
+    from forliosa.ai.tools import excluded_tools
+
+    ai_env(AI_WHY_ENABLED=1, AI_WHY_BLOCKING=1)
+    fake.error(400, "invalid_request_error", "Requests sent from a sandbox with restricted network access are not "
+                                             "allowed to use tool web_search_20260318")
+    assert client.get(f"{API}/instruments/2330/why").json()["ai"] is False
+    assert [t["type"] for t in excluded_tools()] == ["web_search_20260318"]
+    with Session(engine) as db:
+        row = db.get(AiWhyCache, ("2330.TW", DAY))
+        row.created_at = now_utc() - timedelta(hours=1)  # due for a retry …
+        db.commit()
+    assert client.get(f"{API}/instruments/2330/why").json()["ai"] is False
+    assert len(fake.requests) == 1  # … but without a search tool there is nothing to ask

@@ -79,8 +79,8 @@ function UnpricedNote({ rows }: { rows: Holding[] }) {
   if (list.length === 0) return null
   const us = list.every((h) => h.market === "US")
   return (
-    <p className="mt-2.5 max-w-prose text-sm text-ink-2">
-      {us ? "美股目前沒有可商用的報價來源（需要授權的行情）" : "目前沒有報價"}：{list.map((h) => h.name).join("、")}以成本計值，現價與漲跌顯示「—」。
+    <p className="mt-2.5 text-sm text-ink-2">
+      {us ? "美股目前沒有可商用的報價來源（需要授權的行情）" : "目前沒有報價"}，{list.map((h) => h.name).join("、")} 以成本計值，現價與漲跌顯示「—」。
     </p>
   )
 }
