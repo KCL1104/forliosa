@@ -5,6 +5,7 @@
  */
 import { api, apiBaseUrl } from "@/api"
 import { ApiError, type Currency, type Market, type TradePreview, type TransactionInput } from "@/api/types"
+import { parseGrounding, type UngroundedPassage } from "./answer-text"
 import type { Draft, DraftInstrument, Message, Thread } from "./types"
 
 export const aiRemote = api.kind === "http" && !!apiBaseUrl
@@ -55,7 +56,9 @@ export type ChatEvent =
   | { event: "citation"; data: Citation }
   | { event: "draft"; data: ServerDraft }
   | { event: "error"; data: ChatErrorInfo }
-  | { event: "done"; data: { thread_id: string; turn_id: string; model: string; stop_reason: string | null; usage: ChatUsage } }
+  /** 沒有附來源的段落（後端尚未定稿：容錯接受 `{items: [{text, reason, start?, end?}]}`） */
+  | { event: "grounding"; data: unknown }
+  | { event: "done"; data: { thread_id: string; turn_id: string; model: string; stop_reason: string | null; usage: ChatUsage; disclaimer?: string | null } }
 
 export interface ChatBody {
   thread_id: string | null
@@ -82,6 +85,9 @@ interface ThreadMessage {
   drafts: ServerDraft[]
   tools: ToolStep[]
   error: ChatErrorInfo | null
+  /** 選填：後端開始保存時才有 */
+  disclaimer?: string | null
+  grounding?: unknown
   at: string
 }
 
@@ -259,8 +265,14 @@ export function applyChatEvent(m: Message, e: ChatEvent): Message {
     case "error":
       // 拒答：這一輪已經串流出來的字不算數，只留下說明
       return e.data.code === "refusal" ? { ...m, text: "", error: e.data } : { ...m, error: e.data }
+    case "grounding": {
+      const items = parseGrounding(e.data)
+      if (items.length === 0) return m
+      const seen = new Set((m.ungrounded ?? []).map((u) => u.text))
+      return { ...m, ungrounded: [...(m.ungrounded ?? []), ...items.filter((u: UngroundedPassage) => !seen.has(u.text))] }
+    }
     case "done":
-      return { ...m, streaming: false }
+      return { ...m, streaming: false, ...(e.data.disclaimer ? { disclaimer: e.data.disclaimer } : {}) }
     default:
       return m
   }
@@ -279,6 +291,8 @@ export function threadFromServer(t: ThreadDetail): { thread: Thread; drafts: Dra
       tools: m.tools,
       error: m.error ?? undefined,
       draftIds: m.drafts.map((d) => d.id),
+      ...(m.disclaimer ? { disclaimer: m.disclaimer } : {}),
+      ...(m.grounding ? { ungrounded: parseGrounding(m.grounding) } : {}),
       at: m.at,
     }
   })

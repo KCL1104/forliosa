@@ -37,6 +37,9 @@ interface AiState {
   seedComposer: (text: string) => void
 }
 
+/** 對話紀錄保留 30 天 */
+export const RETENTION_MS = 30 * 86_400_000
+
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
 const now = () => new Date().toISOString()
 
@@ -122,6 +125,8 @@ export const useAi = create<AiState>()(
       }),
       // 每次打開 app 從問候與建議開始（舊對話留在「紀錄」）；有待簽名草稿的對話例外，直接回到它
       onRehydrateStorage: () => (state) => {
+        // 對話紀錄保留 30 天（與後端相同）
+        if (state) state.threads = state.threads.filter((t) => Date.now() - Date.parse(t.updatedAt) <= RETENTION_MS)
         // 關掉頁面時還在串流的回答：不會再有後續，標成已結束
         if (state) state.threads = state.threads.map((t) => (t.messages.some((m) => m.streaming) ? { ...t, messages: t.messages.map((m) => ({ ...m, streaming: false })) } : t))
         if (!state?.threadId) return

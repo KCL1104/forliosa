@@ -27,10 +27,8 @@ interface Task {
   next: string
   paused?: boolean
 }
-const TASKS: Task[] = [
-  { id: "task_checkup", title: "每週五盤後持倉健檢", next: "下次 11/13（五）14:30" },
-  { id: "task_0050", title: "0050 定期定額提醒", next: "下次 11/19（四）扣款前一天" },
-]
+// 定期定額不是 AI 任務：計畫在設定頁管理，扣款日 AI 面板會提出草稿
+const TASKS: Task[] = [{ id: "task_checkup", title: "每週五盤後持倉健檢", next: "下次 11/13（五）14:30" }]
 
 export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; onOpen?: () => void; onReplay: (text: string) => void }) {
   // 面板裡已有 h2（問 AI／紀錄），清單標題用 h3；整頁時用 h2
@@ -123,6 +121,8 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
           ))}
         </ul>
       )}
+
+      <p className="mt-2 text-xs text-ink-2">對話紀錄保留 30 天。</p>
 
       <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-base")}>AI 任務</H>
       {tasks.length === 0 ? (

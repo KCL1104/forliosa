@@ -3,7 +3,7 @@ import { useMe } from "@/api/queries"
 import type { AiAction } from "./runner"
 import type { AiContext } from "./suggestions"
 
-export const DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
+export { DISCLAIMER } from "./answer-text"
 
 /** 問候：一行，名字太長時省略 */
 export function useGreeting(ctx: AiContext): { hello: string; line: string } {

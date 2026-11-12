@@ -9,13 +9,18 @@ injected server-side: no schema has a user id, and every query goes through serv
 ``POST /transactions/preview``, checks the ledger stays consistent, and stores a pending ``AiDraft``. The
 user signs it in the UI, which then calls ``POST /transactions`` with ``source: "ai_draft"``.
 
-Server tools (``web_search``, ``web_fetch``) run on Anthropic's side; ``server_tools()`` builds them.
+Server tools (``web_search``, ``web_fetch``) run on Anthropic's side; ``server_tools()`` builds them. A server
+tool the API refuses (a 400 that names its ``type`` and says it is not allowed / supported / enabled, e.g.
+"Requests sent from a sandbox with restricted network access are not allowed to use tool web_fetch_20260318")
+is excluded for the rest of the process (``exclude_tool``); the request is retried once without it.
 """
 
 from __future__ import annotations
 
 import json
 import logging
+import re
+import threading
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
@@ -55,6 +60,10 @@ RECOMMENDED_NEWS_DOMAINS = [*OFFICIAL_DOMAINS, "cna.com.tw", "money.udn.com", "c
                             "digitimes.com.tw", "reuters.com", "bloomberg.com"]
 USER_LOCATION = {"type": "approximate", "city": "Taipei", "region": "Taiwan", "country": "TW",
                  "timezone": "Asia/Taipei"}
+_REJECTED_HINT = re.compile(r"not (?:be )?(?:allowed|supported|enabled|available|permitted)|unsupported|disabled|"
+                            r"does not support|do not support|cannot use|can't use", re.IGNORECASE)
+_excluded: dict[str, dict[str, Any]] = {}  # server tool type -> {type, name, reason, at}
+_excluded_lock = threading.Lock()
 
 
 class ToolError(Exception):
@@ -622,7 +631,8 @@ TOOLS: list[ToolSpec] = sorted([
              ("symbol", "mine_only"), get_events, _sym_label("查看 ", " 事件")),
     ToolSpec("get_news",
              "Recent official announcement headlines for a Taiwan stock (company material information and exchange "
-             "news: title, source, link). Media news is not included; use web_search for news coverage.",
+             "news: title, source, link). Media coverage is not included: search the web for it when the "
+             "question needs recent news about the company.",
              {"symbol": _SYMBOL}, ("symbol",), get_news, _sym_label("查看 ", " 新聞")),
     ToolSpec("get_position",
              "The user's own position in one stock: shares, average cost, cost basis, market value, unrealized and "
@@ -686,7 +696,50 @@ def server_tools(settings: Settings, *, fetch: bool = True, max_uses: int | None
         if allowed and "*" not in allowed:
             fetch_tool["allowed_domains"] = allowed
         tools.append(fetch_tool)
-    return tools
+    with _excluded_lock:
+        return [t for t in tools if t["type"] not in _excluded]
+
+
+# -- server tools the API refuses ------------------------------------------------------------------------------
+def rejected_tool(message: str | None, tools: list[dict[str, Any]]) -> dict[str, Any] | None:
+    """The server tool a 400 message says is not allowed / supported / enabled: matched by its ``type`` string
+    (``web_fetch_20260318``), else by its name (``web_fetch`` or "web fetch"). Client tools are never matched."""
+    text = message or ""
+    if not _REJECTED_HINT.search(text):
+        return None
+    server = [t for t in tools if isinstance(t.get("type"), str) and "input_schema" not in t]
+    for t in server:
+        if t["type"] in text:
+            return t
+    lowered = text.lower()
+    for t in server:
+        name = str(t.get("name") or "")
+        if name and (name in lowered or name.replace("_", " ") in lowered):
+            return t
+    return None
+
+
+def exclude_tool(tool: dict[str, Any], reason: str) -> bool:
+    """Leave this server tool out of every later request of this process. True the first time (log once)."""
+    with _excluded_lock:
+        if tool["type"] in _excluded:
+            return False
+        _excluded[tool["type"]] = {"type": tool["type"], "name": tool.get("name"), "reason": (reason or "")[:300],
+                                   "at": iso_taipei(now_utc())}
+    log.warning("AI server tool %s refused by the API (%s); left out for the rest of this process",
+                tool["type"], (reason or "")[:300])
+    return True
+
+
+def excluded_tools() -> list[dict[str, Any]]:
+    with _excluded_lock:
+        return [dict(v) for v in _excluded.values()]
+
+
+def reset_excluded_tools() -> None:
+    """Tests (and a restart) start with every configured tool again."""
+    with _excluded_lock:
+        _excluded.clear()
 
 
 def tool_label(name: str, args: dict[str, Any] | None) -> str:

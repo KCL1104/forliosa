@@ -8,7 +8,9 @@ import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { BENCHMARK_OPTIONS } from "@/lib/labels"
 import { RangeChips } from "@/components/charts/chart-kit"
-import { DemoTag, PageHeader } from "@/components/section"
+import { PageHeader } from "@/components/section"
+import { Link } from "@tanstack/react-router"
+import { RecurringPlans } from "./RecurringPlans"
 import { SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -104,6 +106,8 @@ export function SettingsPage() {
 
       <Accounts />
 
+      <RecurringPlans />
+
       <Group title="之後會有的設定">
         <Row label="AI 額度與用量" description="每日對話次數、每月深度報告次數。"><span className="text-sm text-ink-2">M4 開放</span></Row>
         <Row label="通知" description="到價、漲跌幅、除權息提醒；Telegram 與 Discord。"><span className="text-sm text-ink-2">M4 開放</span></Row>
@@ -113,12 +117,18 @@ export function SettingsPage() {
       <Group title="關於資料">
         <div className="flex flex-col gap-2 px-4 py-4 text-md text-ink-2 sm:px-5">
           {api.kind === "mock" && (
-            <p className="flex flex-wrap items-center gap-2">
-              <DemoTag /> 目前沒有連到後端，所有數字都是示範資料。設定 <code className="rounded bg-hov px-1 text-sm">VITE_API_BASE_URL</code> 後改用真實資料。
+            <p>
+              目前沒有連到後端：數字由瀏覽器內的模擬資料產生，畫面模擬只用可商用資料的模式（網址加 <code className="rounded bg-hov px-1 text-sm">?policy=personal</code> 改看示範資料）。設定{" "}
+              <code className="rounded bg-hov px-1 text-sm">VITE_API_BASE_URL</code> 後改用真實資料。
             </p>
           )}
-          <p>行情與公司資料來自臺灣證券交易所、櫃買中心 OpenAPI 與 shioaji-data（政府資料開放授權條款第 1 版）。盤中報價為延遲資料，僅供參考。</p>
-          <p>K 線圖使用 TradingView Lightweight Charts™（Apache-2.0）。</p>
+          <p>行情、公司資料與公告只用可合法商用的政府開放資料（證交所、櫃買中心、集保結算所）與從它們自建的每日存檔；存檔還不夠的地方會寫「資料累積中」，不用示範資料充數。盤中走勢需要付費授權，目前提供收盤後資料。</p>
+          <p>
+            <Link to="/data-sources" className="text-ink underline underline-offset-3">
+              資料來源與授權
+            </Link>
+            ：每個資料集的顯名聲明。
+          </p>
         </div>
       </Group>
     </div>

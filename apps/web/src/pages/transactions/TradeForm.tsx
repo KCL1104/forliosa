@@ -1,10 +1,9 @@
 import { useQuery } from "@tanstack/react-query"
-import { Command as CommandPrimitive } from "cmdk"
-import { Trash2Icon, XIcon } from "lucide-react"
-import { useEffect, useId, useMemo, useState } from "react"
+import { Trash2Icon } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
-import { useAccounts, useCreateTransaction, useDeleteTransaction, useInstrumentSearch, useUpdateTransaction } from "@/api/queries"
+import { useAccounts, useCreateTransaction, useDeleteTransaction, useUpdateTransaction } from "@/api/queries"
 import type { Account, Instrument, TradePreview, Transaction, TransactionInput, TransactionType } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { RangeChips } from "@/components/charts/chart-kit"
@@ -20,6 +19,7 @@ import { formatMoney, formatQuantity, todayInTaipei } from "@/lib/format"
 import { TYPE_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { FormField as Row } from "@/components/form-field"
+import { SymbolPicker } from "@/components/symbol-picker"
 import { usePrefs } from "@/stores/prefs"
 
 
@@ -458,66 +458,5 @@ function AccountSelect({ accounts, value, onChange }: { accounts: Account[]; val
         ))}
       </SelectContent>
     </Select>
-  )
-}
-
-/** 代號搜尋（cmdk，支援中文股名） */
-function SymbolPicker({ value, onChange, invalid }: { value: Instrument | null; onChange: (i: Instrument | null) => void; invalid?: boolean }) {
-  const [q, setQ] = useState("")
-  const [active, setActive] = useState("")
-  const search = useInstrumentSearch(q)
-  const listId = useId()
-  if (value) {
-    return (
-      <div className="flex h-10 items-center gap-2 rounded-md border border-input bg-raised px-3">
-        <span className="num font-semibold">{value.code}</span>
-        <span className="min-w-0 flex-1 truncate">{value.name}</span>
-        <Button type="button" variant="ghost" size="icon-sm" aria-label="改選其他股票" onClick={() => onChange(null)}>
-          <XIcon />
-        </Button>
-      </div>
-    )
-  }
-  const results = search.data ?? []
-  // 非同步結果：選取不在清單裡時改選第一項，打字後直接按 Enter 就能選
-  const selected = results.some((i) => i.symbol === active) ? active : (results[0]?.symbol ?? "")
-  return (
-    <CommandPrimitive shouldFilter={false} value={selected} onValueChange={setActive} label="搜尋股票" className="relative">
-      <CommandPrimitive.Input
-        value={q}
-        onValueChange={setQ}
-        placeholder="代號或名稱，例如 2330、台積"
-        aria-invalid={invalid}
-        aria-controls={listId}
-        className={cn(
-          "h-10 w-full rounded-md border border-input bg-raised px-3 text-base outline-none placeholder:text-ink-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-md pointer-coarse:text-base",
-          invalid && "border-destructive",
-        )}
-        autoComplete="off"
-        enterKeyHint="search"
-      />
-      {q.trim() && (
-        <CommandPrimitive.List id={listId} className="mt-1 max-h-56 overflow-y-auto rounded-md border bg-popover p-1 shadow-md">
-          {!search.isFetching && results.length === 0 && (
-            <CommandPrimitive.Empty className="px-2 py-3 text-md text-ink-2">找不到「{q.trim()}」</CommandPrimitive.Empty>
-          )}
-          {results.map((i) => (
-            <CommandPrimitive.Item
-              key={i.symbol}
-              value={i.symbol}
-              onSelect={() => {
-                onChange(i)
-                setQ("")
-              }}
-              className="flex min-h-10 cursor-pointer items-center gap-3 rounded-sm px-2 text-md data-[selected=true]:bg-accent data-[selected=true]:text-accent-foreground"
-            >
-              <span className="num w-14 shrink-0 font-semibold">{i.code}</span>
-              <span className="min-w-0 flex-1 truncate">{i.name}</span>
-              <span className="text-xs text-ink-2">{i.market === "US" ? "美股" : i.market === "TPEX" ? "上櫃" : "上市"}</span>
-            </CommandPrimitive.Item>
-          ))}
-        </CommandPrimitive.List>
-      )}
-    </CommandPrimitive>
   )
 }

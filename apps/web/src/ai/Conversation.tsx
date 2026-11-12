@@ -1,9 +1,10 @@
 import { Link } from "@tanstack/react-router"
 import { ArrowUpRightIcon, CircleAlertIcon, CornerDownRightIcon } from "lucide-react"
-import { useEffect, useRef } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useUi } from "@/app/ui-store"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { DISCLAIMER, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
 import { DraftCard } from "./DraftCard"
 import type { Citation } from "./remote"
 import type { useAiRunner } from "./runner"
@@ -39,7 +40,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
         ) : (
           <div key={m.id} className="note-in mt-4 flex flex-col" aria-busy={m.streaming || undefined}>
             <span className="sr-only">AI：</span>
-            {m.text && <p className={cn("ai-voice whitespace-pre-line", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>{m.text}</p>}
+            {m.text && <AiText text={stripDisclaimer(m.text, m.disclaimer ?? DISCLAIMER)} ungrounded={m.ungrounded} size={size} />}
             {m.streaming && <StreamingLine message={m} />}
             {m.answer && <AnswerView answer={m.answer} runner={runner} size={size} onNavigate={onNavigate} />}
             {m.error && <ErrorNote code={m.error.code} message={m.error.message} size={size} />}
@@ -57,11 +58,59 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
               ) : null,
             )}
             {!m.streaming && m.citations && m.citations.length > 0 && <Citations items={m.citations} />}
+            {!m.streaming && (m.text || m.answer) && !m.error && <p className="mt-2.5 text-xs text-ink-2">{m.disclaimer ?? DISCLAIMER}</p>}
           </div>
         ),
       )}
       <div ref={endRef} />
     </div>
+  )
+}
+
+/**
+ * AI 的話（紫色文楷）。後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
+ * 後面接一個安靜的「無來源」小標記（淡墨，不用紅色）；按下展開說明。
+ */
+function AiText({ text, ungrounded, size }: { text: string; ungrounded?: UngroundedPassage[]; size: "panel" | "screen" }) {
+  const segments = splitUngrounded(text, ungrounded)
+  return (
+    <p className={cn("ai-voice whitespace-pre-line", size === "screen" ? "text-[1.375rem] leading-normal" : "text-xl leading-normal")}>
+      {segments.map((seg, i) =>
+        seg.ungrounded ? (
+          <span key={i}>
+            <span className="underline decoration-ctl decoration-dotted decoration-1 underline-offset-[5px]">{seg.text}</span>
+            <UngroundedMark passage={seg.ungrounded} />
+          </span>
+        ) : (
+          <span key={i}>{seg.text}</span>
+        ),
+      )}
+    </p>
+  )
+}
+
+function UngroundedMark({ passage }: { passage: UngroundedPassage }) {
+  const [open, setOpen] = useState(false)
+  const note = "這段沒有附來源，請自行查證。"
+  const reason = passage.reason && passage.reason.trim() !== note ? passage.reason.trim() : ""
+  return (
+    <>
+      <button
+        type="button"
+        aria-expanded={open}
+        title={reason ? `${note}${reason}` : note}
+        onClick={() => setOpen(!open)}
+        className="mx-1 inline-flex h-5 translate-y-[-0.15em] items-center rounded-xs border border-ctl px-1.5 align-middle font-sans text-xs leading-none text-ink-2 hover:text-ink pointer-coarse:h-6"
+      >
+        無來源
+      </button>
+      {open && (
+        <span role="note" className="my-1 block font-sans text-sm leading-snug text-ink-2">
+          {note}
+          {reason && <span className="ml-1">{reason}</span>}
+        </span>
+      )}
+    </>
   )
 }
 

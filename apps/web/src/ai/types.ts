@@ -1,4 +1,5 @@
 import type { Market, TradePreview, TransactionInput } from "@/api/types"
+import type { UngroundedPassage } from "./answer-text"
 import type { ChatErrorInfo, Citation, ToolStep } from "./remote"
 
 /** 依頁面自動出現的建議問題（介面上不加說明字樣） */
@@ -15,6 +16,7 @@ export type SuggestionKind =
   | "is_expensive"
   | "if_hold_dividend"
   | "group_share"
+  | "recurring_draft"
 
 export interface Suggestion {
   kind: SuggestionKind
@@ -22,6 +24,8 @@ export interface Suggestion {
   /** 手機卡片用的兩行版本（第一行短） */
   lines?: [string, string]
   symbol?: string
+  /** 定期定額扣款日的草稿（`recurring_draft`）：計畫與原本的扣款日 */
+  recurring?: { planId: string; scheduledDate: string; date: string; name: string }
 }
 
 export interface AnswerRow {
@@ -74,6 +78,8 @@ export interface Draft {
   createdAt: string
   /** 後端 AI 產生的草稿（`/ai/drafts`），簽名、捨棄、復原時同步狀態 */
   remote?: boolean
+  /** 定期定額扣款的草稿（`POST /recurring/{id}/draft`）：同一個計畫同一天只提一次 */
+  recurring?: { planId: string; date: string }
 }
 
 export interface Message {
@@ -91,6 +97,10 @@ export interface Message {
   /** 還在串流 */
   streaming?: boolean
   error?: ChatErrorInfo
+  /** 固定顯示在回答下方的免責聲明（後端 `done.disclaimer`；沒有時用常數） */
+  disclaimer?: string
+  /** 像事實陳述、卻沒有附來源的段落（後端 `grounding` 事件）：畫面在段落後面加「無來源」 */
+  ungrounded?: UngroundedPassage[]
   at: string
 }
 
