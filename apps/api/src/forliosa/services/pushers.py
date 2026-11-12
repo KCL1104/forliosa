@@ -7,27 +7,49 @@ to store in ``notification_outbox.last_error``); and ``logredact`` scrubs both k
 
 * Discord: the webhook URL must parse to host ``discord.com`` or ``discordapp.com`` with no user info and no port, path
   ``/api/webhooks/{id}/{token}``, no query or fragment (:func:`parse_webhook_url`). Every message carries
-  ``allowed_mentions: {"parse": []}`` (names and text can never ping @everyone, roles or users). 401 / 404 → the
-  channel is disabled (``webhook_invalid``).
+  ``allowed_mentions: {"parse": []}`` (names and text can never ping @everyone, roles or users) and the
+  ``SUPPRESS_EMBEDS`` flag (no link previews, as on Telegram). 401 / 404 → the channel is disabled
+  (``webhook_invalid``).
 * Telegram: plain text (no ``parse_mode``), link previews off. 403 → disabled (``bot_removed``), 400 "chat not found" →
   disabled (``chat_not_found``), ``parameters.migrate_to_chat_id`` → the caller moves the channel to the new chat id.
 * 429 (with ``retry_after``), 5xx, timeouts and network errors are retryable; other failures are not.
+* **Every value a user chose** (display names, group names) and every other dynamic value goes into a message through
+  :func:`user_text`: one line (``textsafe.one_line``), on Discord with its markdown escaped, on Telegram with a
+  full-width ＠ (a plain-text @name would mention someone).
+* **Circuit breaker** (process-wide): Discord temporarily bans an IP address that makes 10,000 invalid requests (401 /
+  403 / 429) in 10 minutes, and Discord login runs on the same API server. Once webhook requests got
+  :data:`BREAKER_THRESHOLD` such answers within 10 minutes, no webhook request is made for 10 minutes
+  (``paused``, retryable with ``retry_after``).
 
 Tests replace the transport (:func:`set_transport`); the default test fixture refuses every request.
 """
 
 from __future__ import annotations
 
+import logging
 import re
+import threading
+import time
+from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 from urllib.parse import urlsplit
 
 import httpx
 
+from forliosa.textsafe import discord_escape, one_line
+
+log = logging.getLogger("forliosa.pushers")
+
 DISCORD_HOSTS = ("discord.com", "discordapp.com")
 WEBHOOK_PATH = re.compile(r"^/api/webhooks/(\d{15,25})/([A-Za-z0-9_\-]{30,100})$")
 DISCORD_MAX_CHARS = 2000
+SUPPRESS_EMBEDS = 1 << 2
+DISCORD_INVALID = (401, 403, 429)  # what Discord counts towards its IP ban
+BREAKER_THRESHOLD = 500  # a twentieth of Discord's 10,000 per 10 minutes
+BREAKER_WINDOW_SECONDS = 600.0
+BREAKER_PAUSE_SECONDS = 600.0
 TELEGRAM_API = "https://api.telegram.org"
 TELEGRAM_MAX_CHARS = 4096
 TIMEOUT_SECONDS = 10.0
@@ -40,6 +62,50 @@ def set_transport(transport: httpx.BaseTransport | None) -> None:
     """Tests: route every Discord webhook / Telegram request through ``transport`` (e.g. ``httpx.MockTransport``)."""
     global _transport
     _transport = transport
+
+
+class Breaker:
+    """Counts Discord's invalid answers (401 / 403 / 429) in a sliding window; past the threshold, pauses."""
+
+    def __init__(self, clock: Callable[[], float] = time.monotonic) -> None:
+        self.clock = clock
+        self._hits: deque[float] = deque()
+        self._open_until = 0.0
+        self._lock = threading.Lock()
+
+    def remaining(self) -> float:
+        """Seconds until webhook requests may be made again (0: they may)."""
+        with self._lock:
+            return max(0.0, self._open_until - self.clock())
+
+    def record(self) -> None:
+        with self._lock:
+            now = self.clock()
+            self._hits.append(now)
+            while self._hits and self._hits[0] <= now - BREAKER_WINDOW_SECONDS:
+                self._hits.popleft()
+            if len(self._hits) >= BREAKER_THRESHOLD and self._open_until <= now:
+                self._open_until = now + BREAKER_PAUSE_SECONDS
+                self._hits.clear()
+                log.warning("discord webhooks: %d invalid answers within %d minutes, pausing webhook requests "
+                            "for %d minutes", BREAKER_THRESHOLD, BREAKER_WINDOW_SECONDS // 60,
+                            BREAKER_PAUSE_SECONDS // 60)
+
+
+discord_breaker = Breaker()
+
+
+def reset_state() -> None:
+    """Tests: a fresh circuit breaker."""
+    global discord_breaker
+    discord_breaker = Breaker()
+
+
+def user_text(text: str, kind: str) -> str:
+    """A dynamic value (above all a user-chosen name) for a ``kind`` message: one line; Discord markdown escaped;
+    on Telegram ``@`` as a full-width ＠."""
+    line = one_line(text)
+    return discord_escape(line) if kind == "discord" else line.replace("@", "＠")
 
 
 @dataclass(frozen=True)
@@ -112,12 +178,22 @@ def webhook_hint(url: str) -> str:
     return url.rsplit("/", 1)[-1][-4:]
 
 
+def webhook_id(url: str) -> str:
+    """The webhook's id (the number before the token) of a canonical webhook URL."""
+    return url.rsplit("/", 2)[-2]
+
+
 def send_discord(url: str, content: str) -> SendResult:
-    payload = {"content": content[:DISCORD_MAX_CHARS], "allowed_mentions": {"parse": []}}
+    wait = discord_breaker.remaining()
+    if wait > 0:
+        return SendResult(False, "paused", retry=True, retry_after=wait)
+    payload = {"content": content[:DISCORD_MAX_CHARS], "allowed_mentions": {"parse": []}, "flags": SUPPRESS_EMBEDS}
     r = _post(url, payload)
     if isinstance(r, SendResult):
         return r
     code = r.status_code
+    if code in DISCORD_INVALID:
+        discord_breaker.record()
     if 200 <= code < 300:
         return SendResult(True)
     if code in (401, 404):
@@ -161,8 +237,12 @@ def send_telegram(token: str, chat_id: int, text: str) -> SendResult:
                                                 "link_preview_options": {"is_disabled": True}})
 
 
+TELEGRAM_UPDATES_LIMIT = 100  # the most getUpdates returns at once
+
+
 def telegram_updates(token: str, offset: int | None) -> SendResult:
-    payload: dict[str, Any] = {"timeout": 0, "allowed_updates": ["message", "my_chat_member"]}
+    payload: dict[str, Any] = {"timeout": 0, "limit": TELEGRAM_UPDATES_LIMIT,
+                               "allowed_updates": ["message", "my_chat_member"]}
     if offset is not None:
         payload["offset"] = offset
     return telegram_call(token, "getUpdates", payload)

@@ -1059,13 +1059,13 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 | 位置 | 實作 |
 |---|---|
-| `GET /groups/{id}/digests` | `limit` 1–52（預設 8）；依 `week_start`、`id` 新到舊；`cursor` 編碼最後一份的兩個值。`pending`／`failed` 也列出（`summary` 為空字串、`comment_count` 0、`reactions` 空） |
+| `GET /groups/{id}/digests` | `limit` 1–52（預設 8）；依 `week_start`、`id` 新到舊；`cursor` 編碼最後一份的兩個值。`pending`／`failed` 也列出（`summary` 為空字串、`comment_count` 0、`reactions` 空）。`ready` 的 `summary` 也可能是空字串：寫進摘要的成員有人離開或關掉當時分享的項目（`notes` 多一則「寫這份 AI 摘要時用到的分享內容已有變動…，摘要不再顯示。」） |
 | `Digest` | 多 `notes`（例如 commercial 下「資料累積中：自 … 起存檔；本週從 … 收盤開始計算」）與 `is_demo` |
 | `Digest.facts` | `returns` 依加入順序；`common_holdings` 要兩人以上；`industries` 是持有該產業任何一檔的人數（1 人也列，同 `GroupHoldings`）；`trades_count` 是那一週 `trade_date` 在週一到週五、可出現在動態裡的買賣筆數（每筆交易算一筆，不是合併後的則數） |
 | `Channels` | 非 owner 的 `webhook_hint` 為 `null`；沒設定的頻道 `notify_*` 回 `true`（預設值） |
-| `PUT /groups/{id}/channels/discord` | `notify_trades`、`notify_digest` 可省略（預設 `true`）。重新設定（換網址）會取消還沒送出的推播，`configured_at` 重設 |
+| `PUT /groups/{id}/channels/discord` | `notify_trades`、`notify_digest` 可省略（預設 `true`）。重新設定（換網址）會取消還沒送出的推播，`configured_at` 重設。webhook id 和原本的不同（或解除後再設定、舊網址解不開）→ 其他成員的 `push` 改成關閉（設定的 owner 不變）。網址格式正確才計次：同一人或同一群組 10 分鐘內第 6 次 → 429 `rate_limited`（不送出；計數在 API 程序的記憶體裡，重啟歸零）；circuit breaker 開著時也是 429 `rate_limited` |
 | `PATCH /groups/{id}/channels/{kind}` | 回整個 `Channels`；`notify_trades` 由關到開時 `configured_at` 重設（關著那段時間的交易不補送） |
-| `DELETE /groups/{id}/channels/{kind}` | 204；Telegram 一併刪除還沒用的連結碼 |
+| `DELETE /groups/{id}/channels/{kind}` | 204；Telegram 一併刪除還沒用的連結碼。資料列留著、`status = "removed"`（網址、chat id、`chat_title` 清掉），`Channels` 顯示為沒設定、`PATCH` 404；之後再設定算新的目的地 |
 | `POST /groups/{id}/channels/telegram/link` | 只有 owner（403 優先於 409）；沒設 bot → 409 `telegram_unavailable`。連結碼 12 字（`A–Z`、`2–9`，去掉 `0 O 1 I`；60 bits），只存 SHA-256，大小寫不拘；再產生一組會刪掉群組還沒用的舊碼 |
 | `kind` 不是 `discord`／`telegram` | 422 `validation_error` |
 
@@ -1081,11 +1081,23 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   價格是這幾筆的股數加權平均（不含費用、4 位小數），只有開了 `trade_prices` 才附。
 - **訊息內容**（純文字）：`小明 買進 台積電（2330）`／`11/12・共 2 筆・成交均價 605.00 TWD`／`— Forliosa 群組「家族投資」 <FRONTEND_URL>/groups`。
   不含群組 id、股數、金額、帳戶、備註。沒有設定 `FRONTEND_URL`（正式環境）時不附連結。Telegram 訊息裡使用者取的名稱把 `@` 換成全形 `＠`
-  （純文字的 @名稱 在 Telegram 會提及別人）；Discord 一律帶 `allowed_mentions: {"parse": []}`。
+  （純文字的 @名稱 在 Telegram 會提及別人）；Discord 一律帶 `allowed_mentions: {"parse": []}` 與 `flags: 4`（`SUPPRESS_EMBEDS`）。
+- **名稱進訊息前**（`pushers.user_text`；顯示名稱、群組名稱、商品名稱、AI 摘要、連結成功的回覆與 Discord 測試訊息裡的群組名稱）：先變成一行
+  （`textsafe.one_line`：換行、Tab 等控制字元換成空白，雙向文字控制、零寬空白等看不見的格式字元刪掉，U+200D 保留給組合 emoji）；Discord
+  再以反斜線跳脫 `` \ * _ ~ ` | [ ] ( ) < : ``（`:` 讓 `https\://…` 不變成連結），值開頭的 `# > - +` 與 `1.`／`1)` 也跳脫（標題、引用、清單）；
+  我們自己格式化的數字（報酬率、價格、筆數）不跳脫。輸入端：`PATCH /me`、開發登入的 `display_name`、`POST`／`PATCH /groups` 的 `name`
+  有這些字元就 422；Discord 的 global name 自動清掉。舊資料（檢查前存的名稱）在送出時一樣變成一行並跳脫。
 - **週報推播**：週報變成 `ready` 時排入（`dedupe_key = digest:<digest>:<kind>`）。內容只有「目前開著 `push`」的成員的數字
   （`sharing.digest_facts_view(..., pushing_only=True)`：報酬要 `returns`＋`push`、共同持股只算 `holdings`＋`push` 的成員、交易筆數只算
-  `trades`＋`push`），加上兩個基準與群組頁連結。**AI 摘要**是用所有分享報酬率（以及持股、交易）的成員的數字寫的，所以只有在每一位寫進
-  摘要的成員都還在群組、還開著 `push` 與當時分享的那幾項時才附上（合約沒寫，選較保守的做法）。群組裡沒有人開 `push` 時不送。
+  `trades`＋`push`），加上兩個基準與群組頁連結。**AI 摘要**是用送給 AI 的那幾位成員的數字寫的（`facts.prompt_contributors`，見週報），
+  所以只有在每一位都還在群組、還開著 `push` 與當時分享的那幾項時才附上（合約沒寫，選較保守的做法；app 內用同一套規則、不要求 `push`）。
+  群組裡沒有人開 `push` 時不送。
+- **Discord circuit breaker**（`pushers.discord_breaker`，每個程序各一個）：Discord 會暫時封鎖 10 分鐘內有 10,000 次無效請求（401／403／
+  429）的 IP，而 Discord 登入也在同一台 API。webhook 請求在 10 分鐘內收到 500 次這類回應 → 10 分鐘內不再呼叫任何 webhook：
+  `send_discord` 回 `paused`（可重試、`retry_after` = 剩下的秒數），設定 webhook 回 429 `rate_limited`，推播延到暫停結束後重試。
+- **換目的地**：Discord 存的 webhook id 和新的不同（含舊網址解不開、解除後再設定）、Telegram 連到不同的 chat id（含解除後再連結）→
+  `group_share_settings.push` 對設定者以外的成員全部改成 `false`（`push_enabled_at` 不動；本人重新打開時才更新，之後的交易才推播）。同一個
+  webhook、同一個 chat 重新設定、超級群組遷移都不算。群組第一次設定某種頻道時不重設。
 - **重試**：最多 5 次；失敗後等 1、2、4、8 分鐘（Discord／Telegram 給的 `retry_after` 較長時用它），第 5 次失敗為 `failed`。可重試：429、5xx、
   逾時、連線錯誤、Telegram 401（bot token 設錯是伺服器設定問題）。不重試：其他 4xx、3xx（不跟隨轉址）。
 - **停用頻道**：Discord 401／404 → `webhook_invalid`；webhook 解不開（`SESSION_SECRET` 換過）→ `webhook_unreadable`；Telegram 403 →
@@ -1097,8 +1109,12 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 ### Telegram 連結（worker `telegram_poll`，每 20 秒）
 
-- `getUpdates`（`timeout=0`、`allowed_updates=["message","my_chat_member"]`），沒有公開的 webhook 端點。`offset` 存在 worker 記憶體：重啟後
-  Telegram 會重送還沒確認的更新；超過 10 分鐘的 `/link` 訊息不處理也不回覆（不會在重啟後洗版）。
+- `getUpdates`（`timeout=0`、`limit=100`、`allowed_updates=["message","my_chat_member"]`），沒有公開的 webhook 端點。`offset` 存在 worker
+  記憶體：重啟後 Telegram 會重送還沒確認的更新；超過 10 分鐘的 `/link` 訊息不處理也不回覆（不會在重啟後洗版）。
+- **防洗版**：任何人都能私訊 bot。每次輪詢一頁一頁讀到沒有積壓為止（最多 10 頁、8 秒；時間到就停，沒處理到的不確認、下次再讀）；`/link`
+  以外的訊息不做任何事；失敗的 `/link`（私訊、無效或過期的碼）每個聊天室每分鐘最多回一次、每次輪詢最多回 10 則，成功的連結一定回覆。
+  `telegram_poll` 在 worker 裡有自己的排程迴圈（`Job.background`）：慢的輪詢不會延後推播、週報與行情工作，其他工作跑很久（例如存檔）時
+  也照常每 20 秒輪詢。
 - `/link <碼>` 或 `/link@<bot> <碼>`（`@` 後面不是我們的 bot → 不理）；只接受 `group`／`supergroup`，私訊 bot 時回一句「請把我加進群組」、
   不消耗連結碼。連結碼必須還沒用、沒過期，而且產生它的人**現在仍是 owner**（10 分鐘內轉移了擁有者 → 無效）。成功時以條件式 UPDATE
   標記已使用（同一組碼只會成功一次），建立或改寫群組的 Telegram 頻道（`chat_title` 取群組標題），bot 回覆「已連結 Forliosa 群組「…」」；
@@ -1117,6 +1133,11 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 - **給 AI 的內容**（`anonymous_prompt`）：週期、交易日數、匿名代號（成員 A、B…，每次隨機排序，不跟加入順序對應）＋週報酬、兩個基準、
   兩人以上共同持有的股票與人數、各產業持有人數、交易筆數。**不含**顯示名稱、user id、群組名稱、任何一個人的持股清單。重試（一般呼叫）時
   依當下的成員與開關重新組（離開或關掉的人不再送給 AI）。
+- **摘要寫了誰**：每次組 prompt 都把用到的成員記在 `facts.prompt_contributors`（`{"returns": [user_id…], "holdings": […], "trades": […]}`，
+  跟 batch 或回答一起存）。讀取時（`sharing.digest_summary_visible`）只要其中有人已不是成員、或關掉了他當時貢獻的那一項，`summary` 就回
+  空字串並加一則 note；他重新打開時恢復。舊週報沒有這個欄位時，以 facts 裡每一列都算貢獻者（較嚴）。這樣摘要能顯示時，裡面每個數字都是
+  看的人此刻本來就看得到的（`facts` 同樣依目前設定過濾）。審查另外建議只給 AI 彙總值（漲跌人數、中位數），**沒有採用**：有了上面的
+  規則，摘要顯示時那些數字本來就看得到；而且兩人群組裡「中位數」加上自己的報酬就能算出對方的，彙總並不能防止反推。
 - **系統提示**：只寫群組整體、不寫成員代號、不猜身分、不評論個人、不給買賣／加減碼建議、不提目標價、不預測、只用提供的數字、繁體中文 2–4 句、
   純文字。回答出現「成員 X」、「目標價」、「建議買／賣…」等字樣 → 不採用，`failed`（`error: rejected`）；`stop_reason` 不是正常結束或沒有
   文字 → `failed`。摘要最多 400 字。
@@ -1144,7 +1165,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 工作 | 時間（台北） | 內容 |
 |---|---|---|
 | `group_push` | 每分鐘 | 排入交易推播、送出到期的列 |
-| `telegram_poll` | 每 20 秒（有設 bot 才做事） | `getUpdates` |
+| `telegram_poll` | 每 20 秒（有設 bot 才做事） | `getUpdates`（自己的排程迴圈：不擋其他工作，也不被其他工作擋住） |
 | `group_digests` | 週六 20:00（週日補做） | 建立週報並送出 Batches |
 | `group_digest_poll` | 每 5 分鐘 | 收結果、退回一般呼叫、排入週報推播 |
 | `sharing_retention` | 每天 04:35 | 刪除：建立超過 30 天的 outbox 列（只用來避免三天內重送）、過期超過 1 天的 Telegram 連結碼、`week_start` 超過 26 週的週報（連同它的留言、表情與 outbox 列） |
@@ -1169,3 +1190,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 6. **週報保存 26 週**（連同留言）。建議維持；要更久可改成 52 週。
 7. **「交易日在 3 個日曆日內」解讀為今天與前兩天**（週五的交易週一才記，就不推播）。建議維持；若要寬一點可改成「今天往前 3 天」。
 8. **worker 現在需要 `SESSION_SECRET`（與 api 相同）**，正式環境沒設會拒絕啟動；部署 worker 時一起設（見 `docs/deploy.md` 2.3）。
+9. **換推播目的地時其他成員的「推播」自動關閉**（審查發現：成員看不出 Discord 推到哪個頻道，owner 換 webhook 後原本的同意會沿用）。已實作：
+   換成另一個 webhook（即使在同一個 Discord 頻道）、連到另一個 Telegram 聊天室、解除後再設定，都要成員重新打開；群組第一次設定不影響。
+   建議維持（保守、實作簡單）。另一個選項是設定時讀 webhook 的資料（名稱、頻道 id）顯示給成員，但只有 webhook 名稱可讀、而且由 owner 自己
+   取名，不能真的分辨是哪個伺服器。前端要在成員的「推播」開關旁說明「群組換推播頻道時會自動關閉」；目前沒有另外通知成員。
+10. **webhook 設定次數與 circuit breaker**：每人、每群組 10 分鐘 5 次；10 分鐘內 500 次無效回應就暫停 webhook 請求 10 分鐘。建議維持；
+    計數在記憶體裡，API 開多個程序時每個程序各算各的（目前 Railway 只有一個）。

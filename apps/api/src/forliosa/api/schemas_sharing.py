@@ -12,12 +12,21 @@ from typing import Annotated, Literal
 from pydantic import BaseModel, Field, field_validator
 
 from forliosa.api.schemas import StrictModel
+from forliosa.textsafe import has_control
 
 
 def _trimmed(v: str, lo: int, hi: int, what: str) -> str:
     v = v.strip()
     if not lo <= len(v) <= hi:
         raise ValueError(f"{what}需為 {lo}–{hi} 字")
+    return v
+
+
+def _name(v: str, lo: int, hi: int, what: str) -> str:
+    """A name other people see (and that goes into pushed messages): one visible line (``textsafe.has_control``)."""
+    v = _trimmed(v, lo, hi, what)
+    if has_control(v):
+        raise ValueError(f"{what}不能有換行或控制字元")
     return v
 
 
@@ -80,7 +89,7 @@ class GroupIn(StrictModel):
     @field_validator("name")
     @classmethod
     def _name(cls, v: str) -> str:
-        return _trimmed(v, 1, 40, "群組名稱")
+        return _name(v, 1, 40, "群組名稱")
 
 
 class GroupPatch(StrictModel):
@@ -90,7 +99,7 @@ class GroupPatch(StrictModel):
     @field_validator("name")
     @classmethod
     def _name(cls, v: str | None) -> str | None:
-        return None if v is None else _trimmed(v, 1, 40, "群組名稱")
+        return None if v is None else _name(v, 1, 40, "群組名稱")
 
 
 class TransferIn(StrictModel):

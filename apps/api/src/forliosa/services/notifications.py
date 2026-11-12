@@ -13,6 +13,10 @@ day, symbol, side) go out as one message; the price (share-weighted average, no 
 who push (:func:`sharing.digest_facts_view` with ``pushing_only``); the summary itself only while every member whose
 numbers went into it still pushes (:func:`sharing.digest_summary_pushable`).
 
+**Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
+:func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,
+a masked link or other formatting to a message.
+
 **Delivery**: up to 5 attempts with exponential backoff (1, 2, 4, 8 minutes, or Discord's / Telegram's
 ``retry_after`` when longer); 401 / 404 from a Discord webhook, 403 or "chat not found" from Telegram → the channel is
 disabled (``disabled_reason``) and its pending rows dropped. Errors are stored as short labels, never URLs.
@@ -102,7 +106,7 @@ def enqueue_digest(db: Session, digest: GroupDigest, now: datetime | None = None
     return added
 
 
-# -- message text (plain text: no Markdown on Discord's side is needed, no parse_mode on Telegram) ----------------
+# -- message text (plain text: Discord markdown escaped in every dynamic value, no parse_mode on Telegram) --------
 def _pct(value: float | None) -> str:
     return "—" if value is None else f"{value * 100:+.2f}%"
 
@@ -122,10 +126,10 @@ def _link(settings: Settings) -> str | None:
     return None
 
 
-def _name(text: str, kind: str) -> str:
-    """User-chosen names: on Telegram a full-width ＠ (a plain-text @name would mention someone); Discord messages
-    already carry ``allowed_mentions: {"parse": []}``."""
-    return text.replace("@", "＠") if kind == "telegram" else text
+def _t(text: Any, kind: str) -> str:
+    """Names and other text from users or data sources (not the numbers formatted here): one line, Discord markdown
+    escaped, Telegram ＠."""
+    return pushers.user_text(str(text), kind)
 
 
 def trade_text(group: Group, view: dict[str, Any], kind: str, settings: Settings) -> str:
@@ -136,26 +140,27 @@ def trade_text(group: Group, view: dict[str, Any], kind: str, settings: Settings
     if "price" in view and view["price"] is not None:
         line2.append(f"成交均價 {_price(view['price'])} {view['currency']}")
     return "\n".join([
-        f"{_name(view['display_name'], kind)} {SIDE_LABEL.get(view['side'], view['side'])} "
-        f"{view['name']}（{_code(view['symbol'])}）",
+        f"{_t(view['display_name'], kind)} {SIDE_LABEL.get(view['side'], view['side'])} "
+        f"{_t(view['name'], kind)}（{_t(_code(view['symbol']), kind)}）",
         "・".join(line2),
-        " ".join(x for x in (f"— Forliosa 群組「{_name(group.name, kind)}」", _link(settings)) if x),
+        " ".join(x for x in (f"— Forliosa 群組「{_t(group.name, kind)}」", _link(settings)) if x),
     ])
 
 
 def digest_text(group: Group, digest: GroupDigest, view: dict[str, Any], summary: str | None, kind: str,
                 settings: Settings) -> str:
     ws, we = digest.week_start, digest.week_end
-    lines = [f"Forliosa 群組「{_name(group.name, kind)}」週報（{ws.month}/{ws.day}–{we.month}/{we.day}）"]
+    lines = [f"Forliosa 群組「{_t(group.name, kind)}」週報（{ws.month}/{ws.day}–{we.month}/{we.day}）"]
     if summary:
-        lines.append(summary)
+        lines.append(_t(summary, kind))
     if view["returns"]:
-        lines.append("本週報酬：" + "、".join(f"{_name(r['display_name'], kind)} {_pct(r['week_return_pct'])}"
+        lines.append("本週報酬：" + "、".join(f"{_t(r['display_name'], kind)} {_pct(r['week_return_pct'])}"
                                          for r in view["returns"]))
     if view["benchmarks"]:
-        lines.append("對照：" + "、".join(f"{b['name']} {_pct(b['week_return_pct'])}" for b in view["benchmarks"]))
+        lines.append("對照：" + "、".join(f"{_t(b['name'], kind)} {_pct(b['week_return_pct'])}"
+                                       for b in view["benchmarks"]))
     if view["common_holdings"]:
-        lines.append("共同持股：" + "、".join(f"{c['name']}（{c['holder_count']} 人）"
+        lines.append("共同持股：" + "、".join(f"{_t(c['name'], kind)}（{c['holder_count']} 人）"
                                          for c in view["common_holdings"][:5]))
     if view["trades_count"]:
         lines.append(f"本週交易動態：{view['trades_count']} 筆")

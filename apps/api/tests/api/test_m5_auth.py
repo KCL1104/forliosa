@@ -202,6 +202,15 @@ def test_global_name_falls_back_to_username(discord_app, fake):
     assert me["display_name"] == "x" * 30 and me["avatar_url"] is None
 
 
+def test_discord_global_name_becomes_one_line(discord_app, fake):
+    fake.profile = {**fake.profile, "global_name": "明\n[群組頁](https://ev.il/g)\u202e\u200b"}
+    client = TestClient(discord_app())
+    state, _ = start(client)
+    callback(client, state)
+    assert client.get(f"{API}/me").json()["display_name"] == "明 [群組頁](https://ev.il/g)"  # escaped when pushed
+    assert discord_oauth.DiscordProfile("1", "user", "\u200b\n", None, None, True).display_name == "Discord 使用者"
+
+
 def test_links_existing_account_by_verified_email(discord_app, fake):
     app = discord_app()
     dev = TestClient(app)
@@ -342,9 +351,13 @@ def test_patch_me_display_name(client):
     assert r.status_code == 200 and r.json()["display_name"] == "小明"
     assert client.get(f"{API}/me").json()["display_name"] == "小明"
     assert "avatar_url" in client.get(f"{API}/me").json()
-    for bad in ("", "   ", "x" * 31):
+    for bad in ("", "   ", "x" * 31, "明\n[群組頁](https://ev.il/g)", "小\t明", "小\u202e明", "小\u200b明", "a\u2028b"):
         r = client.patch(f"{API}/me", json={"display_name": bad})
         assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
+    family = "\U0001F468\u200d\U0001F469\u200d\U0001F467 王家"  # emoji joined by ZERO WIDTH JOINER are fine
+    assert client.patch(f"{API}/me", json={"display_name": family}).json()["display_name"] == family
+    r = client.post(f"{API}/auth/dev-login", json={"email": "z@x.tw", "display_name": "a\nb"})
+    assert r.status_code == 422
     assert client.patch(f"{API}/me", json={"display_name": "a", "email": "x@y.z"}).status_code == 422
 
 

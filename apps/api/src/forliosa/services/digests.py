@@ -5,6 +5,10 @@
   ``returns`` get no digest. One digest per group and week (``uq_group_digest_week``).
 * **Facts**: computed by the server from the sharing projection (``sharing.digest_week_facts``), stored by user_id
   and filtered by the *current* memberships and toggles on every read (:func:`digest_out`).
+* **Summary on read**: the AI summary was written from the numbers of the members whose facts went into the prompt
+  (recorded as ``facts["prompt_contributors"]`` whenever the prompt is built), so it is shown only while every one of
+  them is still a member who shares what they contributed (``sharing.digest_summary_visible``); otherwise ``summary``
+  is empty and a note says it is no longer shown — the same rule as for channels, without the ``push`` requirement.
 * **Model input**: only anonymous labels (成員 A, B … in a random order per digest) and numbers — no display names,
   user ids, group name or per-member holdings (only symbols held by two or more and industry counts). The summary is
   group-level, in Traditional Chinese, with no names, labels, buy / sell advice or target prices; an answer that names
@@ -55,6 +59,7 @@ MAX_SUMMARY_CHARS = 400
 DIRECT = "direct"
 DISCLAIMER = notifications.DISCLAIMER
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+SUMMARY_WITHDRAWN = "寫這份 AI 摘要時用到的分享內容已有變動（有成員調整了分享設定或離開群組），摘要不再顯示。"
 # A summary that names a member label or talks about target prices / advice is not shown.
 FORBIDDEN = re.compile(r"成員\s*[A-Z]|目標價|建議(?:買|賣|加碼|減碼|進場|出場)|(?:買進|賣出|加碼|減碼)建議")
 
@@ -148,7 +153,12 @@ def request_params(prompt: str, model: str) -> dict[str, Any]:
 
 
 def _params(db: Session, d: GroupDigest) -> dict[str, Any]:
-    return request_params(anonymous_prompt(d, sharing.members_of(db, d.group_id)), d.model)
+    """The request for ``d``, recording whose facts it uses (saved with the batch or with the answer)."""
+    members = sharing.members_of(db, d.group_id)
+    facts = dict(d.facts or {})
+    facts["prompt_contributors"] = sharing.digest_prompt_contributors(facts, members)
+    d.facts = facts
+    return request_params(anonymous_prompt(d, members), d.model)
 
 
 # -- results ----------------------------------------------------------------------------------------------------
@@ -327,10 +337,14 @@ def digest_out(d: GroupDigest, members: list[sharing.Member], counts: dict[str, 
     facts = d.facts or {}
     target = f"digest:{d.id}"
     ready = d.status == "ready"
+    show_summary = ready and sharing.digest_summary_visible(facts, members)
+    notes = list(facts.get("notes", []))
+    if ready and not show_summary:
+        notes.append(SUMMARY_WITHDRAWN)
     return {
         "id": d.id, "status": d.status, "week_start": d.week_start, "week_end": d.week_end,
-        "created_at": iso_taipei(d.created_at), "summary": d.summary if ready else "",
-        "facts": sharing.digest_facts_view(facts, members), "notes": list(facts.get("notes", [])),
+        "created_at": iso_taipei(d.created_at), "summary": d.summary if show_summary else "",
+        "facts": sharing.digest_facts_view(facts, members), "notes": notes,
         "disclaimer": DISCLAIMER, "sources": list(d.sources or []), "is_demo": bool(facts.get("is_demo")),
         "comment_count": counts.get(target, 0) if ready else 0, "reactions": reactions.get(target, []) if ready else [],
     }
@@ -341,7 +355,8 @@ def _cursor(d: GroupDigest) -> str:
 
 
 def digests_page(db: Session, group: Group, me_id: str, limit: int, cursor: str | None) -> dict[str, Any]:
-    """The group's digests, newest week first; facts filtered by the current memberships and toggles."""
+    """The group's digests, newest week first; facts (and whether the summary is shown) by the current memberships and
+    toggles."""
     q = select(GroupDigest).where(GroupDigest.group_id == group.id)
     if cursor:
         try:

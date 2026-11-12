@@ -78,3 +78,51 @@ def test_sharing_jobs_and_the_worker_secret_check():
         check_worker_settings(Settings(forliosa_env="prod", session_secret=DEFAULT_SESSION_SECRET))
     check_worker_settings(Settings(forliosa_env="prod", session_secret="x" * 48))
     check_worker_settings(Settings(forliosa_env="dev"))
+
+
+def test_a_background_job_never_holds_up_the_others(monkeypatch):
+    """telegram_poll runs in its own loop: a slow job in the main loop (an archive run) does not keep it waiting, and
+    a slow poll (a flood of messages) would not delay the main loop either."""
+    import asyncio
+
+    import forliosa.worker as worker_mod
+    from forliosa.worker import Job, Worker
+
+    class NoCalendar:
+        def __enter__(self):
+            return None
+
+        def __exit__(self, *_exc):
+            return False
+
+    monkeypatch.setattr(worker_mod, "session_factory", lambda: NoCalendar)
+    monkeypatch.setattr(worker_mod, "load_official_calendar", lambda _db: None)
+
+    async def scenario() -> tuple[int, int]:
+        polls = 0
+        release = asyncio.Event()
+
+        async def slow() -> None:  # a long job in the main loop
+            await release.wait()
+
+        async def poll() -> None:
+            nonlocal polls
+            polls += 1
+
+        worker = Worker(md=object())  # type: ignore[arg-type]
+        always = lambda _now, _last: True  # noqa: E731
+        worker.jobs = [Job("slow", always, slow), Job("poll", always, poll, background=True)]
+        running = asyncio.create_task(worker.run(tick_seconds=0.01))
+        for _ in range(200):
+            await asyncio.sleep(0.01)
+            if polls >= 3:
+                break
+        during = polls  # polled again and again while the slow job was still running
+        worker.stop()
+        release.set()
+        await asyncio.wait_for(running, timeout=2)
+        return during, polls
+
+    during, _total = asyncio.run(scenario())
+    assert during >= 3
+    assert next(j for j in Worker(md=object()).jobs if j.name == "telegram_poll").background  # type: ignore[arg-type]

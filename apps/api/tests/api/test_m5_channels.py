@@ -15,9 +15,9 @@ from forliosa.crypto import decrypt_secret, token_hash
 from forliosa.db import session_factory
 from forliosa.logredact import RedactingFilter, redact_url
 from forliosa.models import GroupChannel, TelegramLinkCode
-from forliosa.services import channels
+from forliosa.services import channels, pushers
 from forliosa.timeutil import now_utc
-from tests.api.m5 import API, SHARE_DEFAULT, join, login, make_group
+from tests.api.m5 import API, SHARE_ALL, SHARE_DEFAULT, join, login, make_group, set_share
 from tests.api.push_fake import BOT_TOKEN, BOT_USERNAME, TOKEN, WEBHOOK, PushFake, tg_message
 
 
@@ -150,6 +150,88 @@ def test_patch_and_delete_discord(client, fake):
     assert client.get(f"{API}/groups/{g['id']}").json()["push_targets"] == []
 
 
+class Clock:
+    def __init__(self, t: float = 1000.0) -> None:
+        self.t = t
+
+    def __call__(self) -> float:
+        return self.t
+
+
+def test_webhook_setup_is_rate_limited_per_user_and_group(app, client, fake):
+    clock = Clock()
+    channels.webhook_setups.clock = clock
+    g = make_group(client)
+    fake.discord_script.extend([401, 401])  # failed attempts count too
+    codes = [put_discord(client, g["id"]).status_code for _ in range(5)]
+    assert codes == [422, 422, 200, 200, 200]
+    r = put_discord(client, g["id"])
+    assert r.status_code == 429 and r.json()["error"]["code"] == "rate_limited"
+    assert len(fake.discord) == 5  # the sixth attempt never reached Discord
+    other = make_group(client, "另一群")
+    assert put_discord(client, other["id"]).status_code == 429  # the same user
+    assert put_discord(client, g["id"], url="https://discord.com/api/webhooks/x/y").status_code == 422  # not counted
+    stranger = login(app, "s@x.tw", "路人")
+    assert put_discord(stranger, make_group(stranger, "他的群")["id"]).status_code == 200  # someone else
+    clock.t += channels.SETUP_WINDOW_SECONDS + 1
+    assert put_discord(client, g["id"]).status_code == 200
+
+
+def test_sliding_limit_counts_every_key():
+    clock = Clock()
+    lim = channels.SlidingLimit(2, 60, clock)
+    assert lim.hit(["user:a", "group:g"]) and lim.hit(["user:b", "group:g"])
+    assert not lim.hit(["user:c", "group:g"])  # the group is at its limit …
+    assert lim.hit(["user:c", "group:h"])  # … the user is not, and the refused attempt was not counted
+    clock.t += 61
+    assert lim.hit(["user:a", "group:g"])
+
+
+def test_circuit_breaker_stops_webhook_requests_after_many_invalid_answers(app, client, fake, monkeypatch):
+    clock = Clock()
+    pushers.discord_breaker.clock = clock
+    monkeypatch.setattr(pushers, "BREAKER_THRESHOLD", 3)
+    fake.discord_status = 401
+    for _ in range(3):
+        assert pushers.send_discord(WEBHOOK, "x").error == "http_401"
+    paused = pushers.send_discord(WEBHOOK, "x")
+    assert paused.error == "paused" and paused.retry and paused.retry_after == pushers.BREAKER_PAUSE_SECONDS
+    assert len(fake.discord) == 3
+    g = make_group(client)
+    r = put_discord(client, g["id"])
+    assert r.status_code == 429 and r.json()["error"]["code"] == "rate_limited"
+    assert len(fake.discord) == 3 and channel_row(g["id"], "discord") is None
+    clock.t += pushers.BREAKER_PAUSE_SECONDS
+    fake.discord_status = 204
+    assert put_discord(client, g["id"]).status_code == 200
+
+
+def test_a_new_destination_turns_the_other_members_push_off(app, client, fake):
+    g = make_group(client)
+    b = login(app, "b@x.tw", "小明")
+    join(client, b, g["id"], SHARE_ALL)
+    set_share(client, g["id"], returns=True, push=True)
+    share = lambda c: c.get(f"{API}/groups/{g['id']}/share").json()["push"]  # noqa: E731
+    other = WEBHOOK.replace("123456789012345678", "987654321098765432")
+
+    assert put_discord(client, g["id"]).status_code == 200  # the group's first destination: consent stands
+    assert share(b) is True
+    assert put_discord(client, g["id"], notify_digest=False).status_code == 200  # the same webhook again
+    assert share(b) is True
+    assert put_discord(client, g["id"], url=other).status_code == 200  # somewhere else
+    assert share(b) is False and share(client) is True  # the owner who set it keeps theirs
+    set_share(b, g["id"], **SHARE_ALL)  # 小明 agrees to the new target
+    assert client.delete(f"{API}/groups/{g['id']}/channels/discord").status_code == 204
+    assert share(b) is True
+    row = channel_row(g["id"], "discord")
+    assert row.status == "removed" and row.webhook_encrypted is None and row.webhook_hint is None
+    seen = client.get(f"{API}/groups/{g['id']}/channels").json()["discord"]
+    assert seen["configured"] is False and seen["status"] is None and seen["webhook_hint"] is None
+    assert client.patch(f"{API}/groups/{g['id']}/channels/discord", json={"notify_trades": False}).status_code == 404
+    assert put_discord(client, g["id"], url=other).status_code == 200  # set up again after removal: new
+    assert share(b) is False
+
+
 def test_webhook_secret_never_reaches_the_logs(client, fake, caplog):
     caplog.set_level(logging.DEBUG)
     g = make_group(client)
@@ -270,6 +352,67 @@ def test_link_code_of_a_former_owner_is_refused(app, client, fake, telegram_env)
     assert client.post(f"{API}/groups/{g['id']}/transfer", json={"user_id": me}).status_code == 200
     poll(fake, tg_message(1, -1001, f"/link {code}"))
     assert channel_row(g["id"], "telegram") is None
+
+
+def test_relinking_another_chat_turns_the_other_members_push_off(app, client, fake, telegram_env):
+    g = make_group(client)
+    b = login(app, "b@x.tw", "小明")
+    join(client, b, g["id"], SHARE_ALL)
+    share = lambda: b.get(f"{API}/groups/{g['id']}/share").json()["push"]  # noqa: E731
+    poll(fake, tg_message(1, -1001, f"/link {link_code(client, g['id'])['code']}"))
+    assert share() is True  # the first chat
+    poll(fake, tg_message(2, -1001, f"/link {link_code(client, g['id'])['code']}"))
+    assert share() is True  # the same chat again
+    poll(fake, tg_message(3, -1001, "", migrate_to_chat_id=-1002))
+    assert share() is True  # the same chat, now a supergroup
+    poll(fake, tg_message(4, -2002, f"/link {link_code(client, g['id'])['code']}", title="公開投資討論"))
+    assert share() is False
+    assert client.get(f"{API}/groups/{g['id']}").json()["push_targets"] == [{"kind": "telegram",
+                                                                            "label": "公開投資討論"}]
+    set_share(b, g["id"], **SHARE_ALL)
+    assert client.delete(f"{API}/groups/{g['id']}/channels/telegram").status_code == 204
+    assert client.get(f"{API}/groups/{g['id']}/channels").json()["telegram"]["configured"] is False
+    poll(fake, tg_message(5, -2002, f"/link {link_code(client, g['id'])['code']}"))
+    assert share() is False  # set up again after removal
+    ch = channel_row(g["id"], "telegram")
+    assert ch.status == "active" and ch.notify_trades and ch.notify_digest
+
+
+def test_poller_drains_the_backlog_and_throttles_answers(client, fake, telegram_env):
+    g = make_group(client)
+    code = link_code(client, g["id"])["code"]
+    flood = [tg_message(i, 5000 + i, "/link nope", chat_type="private") for i in range(1, 251)]
+    flood += [tg_message(251, 6000, "hello there", chat_type="private")]  # not /link: nothing to do
+    flood += [tg_message(252, -1001, f"/link@{BOT_USERNAME} {code}")]
+    fake.updates = flood
+    poller = channels.TelegramPoller()
+    with session_factory()() as db:
+        assert poller.poll(db) == 252
+    assert poller.offset == 253
+    assert len(fake.telegram("getUpdates")) == 3  # 100 + 100 + 52
+    assert channel_row(g["id"], "telegram").telegram_chat_id == -1001  # the real /link was not lost
+    replies = fake.telegram()
+    assert len(replies) == channels.MAX_REPLIES_PER_POLL + 1 and "已連結" in replies[-1].body["text"]
+
+    fake.sent.clear()
+    fake.updates = [tg_message(300 + i, -7000, "/link bad") for i in range(5)]  # one chat, five tries
+    with session_factory()() as db:
+        poller.poll(db)
+    assert len(fake.telegram()) == 1  # one answer per chat per minute
+
+
+def test_poller_stops_at_its_time_budget_and_resumes(client, fake, telegram_env):
+    class Ticking(Clock):
+        def __call__(self) -> float:
+            self.t += 1.0  # every look at the clock costs a second
+            return self.t
+
+    poller = channels.TelegramPoller(clock=Ticking())
+    fake.updates = [tg_message(i, -1, "hello") for i in range(1, 31)]
+    with session_factory()() as db:
+        first = poller.poll(db)
+        assert 0 < first < 30 and poller.offset == first + 1
+        assert first + poller.poll(db) + poller.poll(db) + poller.poll(db) == 30
 
 
 def test_poller_keeps_the_offset_and_never_logs_the_token(client, fake, telegram_env, caplog):

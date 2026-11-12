@@ -36,7 +36,7 @@ def trio(app, client, other_client):
 
 
 def test_create_get_list_patch_delete(client, other_client):
-    for bad in ("", "   ", "x" * 41):
+    for bad in ("", "   ", "x" * 41, "家」\n[重新登入 Forliosa](https://ev.il)", "家\r族", "家\u202e族"):
         r = client.post(f"{API}/groups", json={"name": bad})
         assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
     g = make_group(client, "  家族投資  ")
@@ -47,6 +47,7 @@ def test_create_get_list_patch_delete(client, other_client):
     lst = client.get(f"{API}/groups").json()
     assert [(x["id"], x["member_count"], x["my_role"]) for x in lst] == [(g["id"], 1, "owner")]
     assert lst[0]["latest_activity_at"] is not None and lst[0]["latest_digest_at"] is None
+    assert client.patch(f"{API}/groups/{g['id']}", json={"name": "新\n名字"}).status_code == 422
     r = client.patch(f"{API}/groups/{g['id']}", json={"name": "新名字", "ranking_enabled": False})
     assert r.status_code == 200 and r.json()["name"] == "新名字" and r.json()["ranking_enabled"] is False
     assert other_client.get(f"{API}/groups").json() == []

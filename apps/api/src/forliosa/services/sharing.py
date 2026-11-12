@@ -20,7 +20,8 @@ Pushes to group channels (``services.notifications``) and the weekly AI digest (
 here too: :func:`push_trade_candidates` / :func:`still_pushable` / :func:`push_trade_view` (only members who share both
 ``trades`` and ``push``), :func:`digest_week_facts` (what each member shares, stored by user id) and
 :func:`digest_facts_view` (those facts filtered by the *current* memberships and toggles; ``pushing_only`` for what a
-channel may show).
+channel may show) and :func:`digest_summary_visible` (the AI summary only while everyone it was written from still
+shares what they contributed).
 """
 
 from __future__ import annotations
@@ -827,10 +828,31 @@ def digest_facts_view(facts: dict[str, Any], members: list[Member], pushing_only
             "industries": inds, "trades_count": trades_count}
 
 
-def digest_summary_pushable(facts: dict[str, Any], members: list[Member]) -> bool:
-    """The AI summary was written from every contributor's numbers, so a channel may show it only while each of them
-    is still a member who pushes and still shares what they contributed."""
+DIGEST_PARTS = ("returns", "holdings", "trades")
+
+
+def digest_prompt_contributors(facts: dict[str, Any], members: list[Member]) -> dict[str, list[str]]:
+    """Whose stored facts a prompt built now uses, per toggle: the rows :func:`digest_facts_view` keeps. Recorded on
+    the digest (``facts["prompt_contributors"]``) every time its prompt is built for a model call."""
     by_id = {m.user_id: m for m in members}
-    parts = [("returns", facts.get("returns", [])), ("holdings", facts.get("holdings", [])),
-             ("trades", facts.get("trades", []))]
-    return all(_allowed(by_id, row["user_id"], key, True) is not None for key, rows in parts for row in rows)
+    return {key: [row["user_id"] for row in facts.get(key, [])
+                  if _allowed(by_id, row["user_id"], key, False) is not None] for key in DIGEST_PARTS}
+
+
+def digest_summary_visible(facts: dict[str, Any], members: list[Member], pushing_only: bool = False) -> bool:
+    """The AI summary was written from its contributors' numbers (it may describe the range of returns, common
+    holdings, how often people traded), so it may be shown only while each of them is still a member who shares the
+    toggle they contributed under — in the app and, with ``pushing_only``, in a channel (they must also push).
+    Contributors: ``facts["prompt_contributors"]``; every stored row when it is missing. Otherwise a member who leaves
+    or turns a toggle off would still be readable in "returns between −1.20% and +3.40%"."""
+    by_id = {m.user_id: m for m in members}
+    contributors = facts.get("prompt_contributors")
+    if not isinstance(contributors, dict):
+        contributors = {key: [row["user_id"] for row in facts.get(key, [])] for key in DIGEST_PARTS}
+    return all(_allowed(by_id, uid, key, pushing_only) is not None
+               for key in DIGEST_PARTS for uid in contributors.get(key, []))
+
+
+def digest_summary_pushable(facts: dict[str, Any], members: list[Member]) -> bool:
+    """:func:`digest_summary_visible` for a channel: every contributor must also push."""
+    return digest_summary_visible(facts, members, pushing_only=True)

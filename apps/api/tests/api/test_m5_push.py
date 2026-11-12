@@ -228,6 +228,48 @@ def test_telegram_plain_text_migration_and_removal(app, client, fake, market, te
     assert ch["status"] == "disabled" and ch["disabled_reason"] == "bot_removed"
 
 
+def _legacy_names(group_id: str, user_email: str, display_name: str, group_name: str) -> None:
+    """Names saved before they had to be one line (the API refuses these now)."""
+    from forliosa.models import Group, User
+
+    with session_factory()() as db:
+        db.scalar(select(User).where(User.email == user_email)).display_name = display_name
+        db.get(Group, group_id).name = group_name
+        db.commit()
+
+
+def test_names_cannot_add_lines_links_or_markdown_to_a_discord_message(app, client, fake, market):
+    g, b = setup_group(app, client, fake)
+    _legacy_names(g["id"], "b@x.tw", "明\n[群組頁](https://ev.il/g)\u202e", "家」\n[重新登入 Forliosa](https://ev.il)")
+    trade(b, account(b)["id"], "2330", "buy", today_taipei(), 1000, 600)
+    run(market)
+    run(market, now_utc() + LATER)
+    body = fake.discord[0].body
+    text = body["content"]
+    lines = text.split("\n")
+    assert len(lines) == 3, text  # name, date line, group line: nothing added
+    assert lines[0].startswith("明 \\[群組頁\\]\\(https\\://ev.il/g\\) 買進 ")
+    assert "[群組頁](" not in text and "](https://" not in text and "https://ev.il" not in text
+    assert "「家」 \\[重新登入 Forliosa\\]\\(https\\://ev.il\\)」" in lines[2]
+    assert "\u202e" not in text
+    assert body["allowed_mentions"] == {"parse": []} and body["flags"] == 4  # SUPPRESS_EMBEDS: no link previews
+
+
+def test_names_are_one_line_on_telegram_too(app, client, fake, market, telegram_env):
+    g = make_group(client)
+    b = login(app, "b@x.tw", "小明")
+    join(client, b, g["id"], SHARE_ALL)
+    add_telegram(g["id"])
+    _legacy_names(g["id"], "b@x.tw", "爸爸 賣出 台積電（2330）\n@everyone", "家族\r\n投資")
+    trade(b, account(b)["id"], "2317", "buy", today_taipei(), 1000, 100)
+    run(market)
+    run(market, now_utc() + LATER)
+    text = fake.telegram()[-1].body["text"]
+    lines = text.split("\n")
+    assert len(lines) == 3 and lines[0].startswith("爸爸 賣出 台積電（2330） ＠everyone 買進 ")
+    assert "群組「家族 投資」" in lines[2] and "parse_mode" not in fake.telegram()[-1].body
+
+
 def test_channel_without_notify_trades_gets_nothing(app, client, fake, market):
     g, b = setup_group(app, client, fake)
     client.patch(f"{API}/groups/{g['id']}/channels/discord", json={"notify_trades": False})

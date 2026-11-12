@@ -22,6 +22,7 @@ from forliosa.worker import weekend_evening
 from tests.api.m5 import (
     API,
     SHARE_ALL,
+    SHARE_DEFAULT,
     SHARE_NONE,
     account,
     join,
@@ -225,7 +226,8 @@ def test_falls_back_to_a_normal_call_without_batches(family, market):
     fake = FakeClaude(batches=False)
     pool = run_ai(fake, family["sat"])
     assert [p for m, p, _ in fake.requests if m == "POST"] == ["/v1/messages/batches", "/v1/messages"]
-    assert digest_row(d.id).status == "ready"
+    row = digest_row(d.id)
+    assert row.status == "ready" and len(row.facts["prompt_contributors"]["returns"]) == 3
     assert not pool.slots[0].disabled  # a refused batches endpoint does not disable the key
 
 
@@ -304,6 +306,92 @@ def test_reading_filters_by_current_settings_and_paginates(family, market):
     assert [x["display_name"] for x in facts["returns"]] == ["示範使用者"]
     assert facts["common_holdings"] == [] and facts["trades_count"] == 0
     assert b.get(f"{API}/groups/{g['id']}/digests").status_code == 404
+
+
+def test_the_prompt_records_whose_facts_it_used(family, market):
+    """Only members who still shared when the prompt was built count: 小華 turned trades off before the call, so his
+    later toggling does not hide the summary."""
+    g, c, ids = family["g"], family["c"], family["ids"]
+    [d] = create(market, family["sat"])
+    set_share(c, g["id"], returns=True)  # trades off before the model call
+    fake = FakeClaude()
+    run_ai(fake, family["sat"])
+    [prompt] = fake.prompts
+    assert "本週買賣筆數（只算有分享交易動態的成員）：1" in prompt
+    row = digest_row(d.id)
+    assert row.facts["prompt_contributors"] == {"returns": [ids["a"], ids["b"], ids["c"]],
+                                                "holdings": [ids["a"], ids["b"]], "trades": [ids["b"]]}
+    item = family["a"].get(f"{API}/groups/{g['id']}/digests").json()["items"][0]
+    assert item["summary"] == SUMMARY and digests.SUMMARY_WITHDRAWN not in item["notes"]
+    set_share(c, g["id"], returns=True, trades=True)
+    set_share(c, g["id"], returns=True)
+    assert family["a"].get(f"{API}/groups/{g['id']}/digests").json()["items"][0]["summary"] == SUMMARY
+
+
+def test_summary_is_withdrawn_when_a_contributor_stops_sharing_or_leaves(app, client, market):
+    """Two members share returns; the summary states the range of the two numbers. Once one of them turns returns off
+    (or leaves), the summary is no longer shown — to anyone, newcomers included."""
+    a = client
+    g = make_group(a)
+    b = login(app, "b@x.tw", "小明")
+    join(a, b, g["id"], SHARE_DEFAULT)
+    before = trading_day(40)
+    trade(a, account(a)["id"], "2330", "buy", before, 1000, 500)
+    trade(b, account(b)["id"], "2317", "buy", before, 1000, 100)
+    sat = last_saturday()
+    [d] = create(market, sat)
+    lo, hi = sorted(r["week_return_pct"] or 0 for r in d.facts["returns"])
+    summary = f"本週兩位成員的報酬介於 {lo * 100:+.2f}% 到 {hi * 100:+.2f}% 之間，整體與大盤接近。"
+    run_ai(FakeClaude(summary=summary), sat)
+    url = f"{API}/groups/{g['id']}/digests"
+    item = a.get(url).json()["items"][0]
+    assert item["status"] == "ready" and item["summary"] == summary
+    assert digests.SUMMARY_WITHDRAWN not in item["notes"]
+
+    set_share(b, g["id"])  # 小明 turns returns off
+    item = a.get(url).json()["items"][0]
+    assert item["status"] == "ready" and item["summary"] == "" and digests.SUMMARY_WITHDRAWN in item["notes"]
+    assert [r["display_name"] for r in item["facts"]["returns"]] == ["示範使用者"]
+    assert b.get(url).json()["items"][0]["summary"] == ""
+    set_share(b, g["id"], returns=True)  # shared again: the summary only holds numbers everyone sees again
+    assert a.get(url).json()["items"][0]["summary"] == summary
+
+    assert b.delete(f"{API}/groups/{g['id']}/members/{me_id(b)}").status_code == 204  # 小明 leaves
+    assert a.get(url).json()["items"][0]["summary"] == ""
+    c = login(app, "c@x.tw", "小華")
+    join(a, c, g["id"], SHARE_NONE)  # joins later
+    item = c.get(url).json()["items"][0]
+    assert item["summary"] == "" and summary not in json.dumps(item, ensure_ascii=False)
+
+
+def test_summary_is_withdrawn_when_a_holdings_contributor_turns_holdings_off(family, market):
+    g, a, b = family["g"], family["a"], family["b"]
+    create(market, family["sat"])
+    run_ai(FakeClaude(), family["sat"])
+    url = f"{API}/groups/{g['id']}/digests"
+    assert b.get(url).json()["items"][0]["summary"] == SUMMARY
+    set_share(a, g["id"], returns=True)  # 示範使用者 keeps returns, turns holdings off
+    assert b.get(url).json()["items"][0]["summary"] == ""
+
+
+def test_a_digest_without_recorded_contributors_counts_every_stored_row(app, client, market):
+    g = make_group(client)
+    x = login(app, "x@x.tw", "阿姨")
+    join(client, x, g["id"], SHARE_DEFAULT)
+    owner_id, x_id = me_id(client), me_id(x)
+    facts = {"v": 1, "trading_days": 5, "holdings": [], "symbols": {}, "trades": [], "benchmarks": [], "notes": [],
+             "returns": [{"user_id": owner_id, "week_return_pct": 0.034}, {"user_id": x_id, "week_return_pct": -0.012}],
+             "is_demo": False}
+    with session_factory()() as db:
+        db.add(GroupDigest(id="gdg_legacy", group_id=g["id"], week_start=date(2026, 11, 2), week_end=date(2026, 11, 6),
+                           status="ready", summary="兩位成員一漲一跌，報酬介於 -1.20% 到 +3.40%。", facts=facts,
+                           sources=[], model="m", created_at=now_utc()))
+        db.commit()
+    url = f"{API}/groups/{g['id']}/digests"
+    assert "-1.20%" in client.get(url).json()["items"][0]["summary"]
+    assert x.delete(f"{API}/groups/{g['id']}/members/{x_id}").status_code == 204
+    item = client.get(url).json()["items"][0]
+    assert [r["user_id"] for r in item["facts"]["returns"]] == [owner_id] and item["summary"] == ""
 
 
 def test_digest_push_only_shows_members_who_push(family, market):

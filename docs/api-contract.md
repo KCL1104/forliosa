@@ -635,8 +635,10 @@
 - **CSRF**：非 `GET`／`HEAD`／`OPTIONS` 的請求若帶 `Origin`，必須在 `CORS_ORIGINS` 內，否則 403 `forbidden`（全站適用）。
 - **上限**：每個群組最多 50 位成員；每人最多加入 20 個群組（超過回 409 `limit_reached`）。
 - 錯誤代碼：`forbidden`、`not_found`、`read_only`、`view_as_not_allowed`、`delegation_revoked`、`already_member`、`invite_invalid`、
-  `limit_reached`、`webhook_failed`、`telegram_unavailable`（409：伺服器沒有設定 Telegram bot）、`oauth_*`（見登入）；
-  格式錯誤一律 422 `validation_error`。
+  `limit_reached`、`webhook_failed`、`telegram_unavailable`（409：伺服器沒有設定 Telegram bot）、`rate_limited`（429：設定 Discord
+  webhook 太頻繁，或伺服器暫停呼叫 Discord）、`oauth_*`（見登入）；格式錯誤一律 422 `validation_error`。
+- **名稱只能是一行**：顯示名稱與群組名稱不能有換行、Tab 等控制字元，也不能有看不見的格式字元（雙向文字控制、零寬空白、BOM 等；
+  組合 emoji 用的 U+200D 可以），否則 422 `validation_error`。Discord 登入取得的名稱會自動去掉這些字元。
 
 ### 登入（Discord OAuth）與個人資料
 
@@ -645,7 +647,7 @@
 | GET | `/auth/providers` | 不需登入：`{"discord": true, "dev_login": false}`（`discord` 依環境變數是否齊全） |
 | GET | `/auth/discord/start?next=/invite/abc` | 302 到 Discord 授權頁（scope `identify email`、`prompt=none` 不帶） |
 | GET | `/auth/discord/callback?code=&state=` | 驗證 state、換 token、讀 `/users/@me`；成功建立 session（輪換 session id）後 302 到 `{FRONTEND_URL}{next}`；失敗 302 到 `{FRONTEND_URL}/login?error=<code>` |
-| PATCH | `/me` | `{"display_name"}`（1–30 字，去頭尾空白）→ `User`。群組裡顯示的就是這個名稱 |
+| PATCH | `/me` | `{"display_name"}`（1–30 字，去頭尾空白，只能一行：見共通規則）→ `User`。群組裡顯示的就是這個名稱 |
 
 - **state**：隨機值＋`next`，以 `SESSION_SECRET` 做 HMAC 簽章，存在 10 分鐘的 cookie（正式環境 `__Host-forliosa_oauth`：
   `Secure; HttpOnly; SameSite=Lax; Path=/; Max-Age=600`；開發環境不加 `__Host-` 前綴、不加 `Secure`）。callback 以固定時間比對，
@@ -708,7 +710,7 @@
 | 方法 | 路徑 | 權限 | 說明 |
 |---|---|---|---|
 | GET | `/groups` | 登入 | `GroupSummary[]`（我加入的群組） |
-| POST | `/groups` | 登入 | `{"name"}`（1–40 字）→ `Group`；建立者為 owner，分享設定為預設值 |
+| POST | `/groups` | 登入 | `{"name"}`（1–40 字，只能一行）→ `Group`；建立者為 owner，分享設定為預設值 |
 | GET | `/groups/{id}` | 成員 | `Group` |
 | PATCH | `/groups/{id}` | 管理員；`ranking_enabled` 只限 owner | `{"name"?, "ranking_enabled"?}` |
 | DELETE | `/groups/{id}` | owner | 刪除群組（含留言、週報、頻道設定） |
@@ -733,9 +735,9 @@
 | DELETE | `/groups/{id}/reactions?target=&emoji=` | 成員 | 收回自己的表情 |
 | GET | `/groups/{id}/digests?limit=8&cursor=` | 成員 | 群組 AI 週報，新到舊（`limit` 1–52），`{"items": Digest[], "next_cursor"}` |
 | GET | `/groups/{id}/channels` | 成員 | `Channels`（`webhook_hint` 只有 owner 看得到，其他人為 `null`） |
-| PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades"?, "notify_digest"?}`（兩個開關預設 `true`）→ `Channels`；儲存前送一則測試訊息，失敗 422 `webhook_failed`；網址格式不符 422 `validation_error`（錯誤訊息不含網址） |
+| PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades"?, "notify_digest"?}`（兩個開關預設 `true`）→ `Channels`；儲存前送一則測試訊息，失敗 422 `webhook_failed`；網址格式不符 422 `validation_error`（錯誤訊息不含網址）；同一人或同一群組 10 分鐘內超過 5 次 → 429 `rate_limited`（不送出）；換成另一個 webhook 時，其他成員的 `push` 自動關閉（見推播） |
 | PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_digest"?}` → `Channels`；還沒設定 404 |
-| DELETE | `/groups/{id}/channels/discord` | owner | 解除（204；還沒送出的推播取消） |
+| DELETE | `/groups/{id}/channels/discord` | owner | 解除（204；還沒送出的推播取消；之後再設定算新的目的地） |
 | POST | `/groups/{id}/channels/telegram/link` | owner | → `{"code", "bot_username", "expires_at"}`：把 bot 加進 Telegram 群組，在群組裡傳 `/link <code>`（10 分鐘內、一次性；再產生一組會讓舊的失效）；伺服器沒有 bot 時 409 `telegram_unavailable` |
 | PATCH | `/groups/{id}/channels/telegram` | owner | `{"notify_trades"?, "notify_digest"?}` → `Channels`；還沒連結 404 |
 | DELETE | `/groups/{id}/channels/telegram` | owner | 解除（204） |
@@ -829,7 +831,8 @@
   "id": "gdg_...", "status": "ready",          // "pending"（AI 還在寫）| "ready" | "failed"（AI 沒寫成；facts 照樣有）
   "week_start": "2026-11-09", "week_end": "2026-11-13",
   "created_at": "2026-11-14T20:00:00+08:00",
-  "summary": "本週群組整體……",                 // 只有 ready 才有內容；AI 只寫群組整體，不點名個人，不給買賣建議或目標價
+  "summary": "本週群組整體……",                 // 只有 ready 才有內容；AI 只寫群組整體，不點名個人，不給買賣建議或目標價；
+                                               // 寫進摘要的成員有人離開或關掉當時分享的項目時為 ""（見群組 AI 週報）
   "facts": {                                   // 讀取時依「目前」的成員身分與分享設定過濾
     "returns": [{"user_id": "usr_...", "display_name": "爸爸", "week_return_pct": 0.012}],
     "benchmarks": [{"symbol": "^TAIEXTR", "name": "發行量加權股價報酬指數", "week_return_pct": 0.008}],
@@ -837,7 +840,7 @@
     "industries": [{"industry": "半導體業", "holder_count": 4}],
     "trades_count": 7                          // 只算開了 trades 的成員
   },
-  "notes": [],                                 // 例如「資料累積中：…」
+  "notes": [],                                 // 例如「資料累積中：…」；摘要不再顯示時加一則說明
   "disclaimer": "AI 分析僅供參考，不構成投資建議。",
   "sources": ["…"], "is_demo": false,
   "comment_count": 0, "reactions": []          // 只有 ready 的週報能留言、按表情
@@ -876,6 +879,9 @@
 - `facts` 由伺服器從分享投影計算，以 `user_id` 儲存，讀取時依目前的成員身分與開關過濾（關掉或離開的人從過去的週報消失）。
   AI 只拿到匿名代號（成員 A、B…，每份週報隨機排序）與數字，`summary` 只描述群組整體；顯示名稱、群組名稱不進 prompt。
   回答裡出現成員代號或目標價的不採用（`failed`）。週報不計入成員的 AI 額度。
+- **`summary` 也依目前的設定顯示**：摘要是用送給 AI 的那幾位成員的數字寫的（例如報酬分布的範圍），所以只有在他們**每一位**都還在群組、
+  還開著當時分享的那一項（報酬率、持股、交易動態）時才顯示；否則 `summary` 為空字串，`notes` 加一則「摘要不再顯示」的說明
+  （狀態仍是 `ready`，facts、留言、表情照常）。他重新打開那一項時摘要恢復。推播用同一套規則，另外要求每一位都開著 `push`。
 - 週報（連同留言、表情）保存 26 週。
 
 **推播**
@@ -884,11 +890,22 @@
   建立時間晚於頻道設定與他打開 `push`／`trades` 的時間；建立 15 分鐘後才送，期間刪除或關閉就不送；送出後的修改不重送；有開 `trade_prices`
   才附價格；同一則動態裡同時到期的交易合併成一則訊息）與週報（`notify_digest`；只含 `push` 為 true 的成員的數字；AI 摘要只在寫進摘要的
   每一位成員都還開著 `push` 時才附上）。訊息只有顯示名稱、買賣、商品、日期、筆數（與價格），附群組頁連結但不含群組 id。
+- **訊息裡的名稱**（顯示名稱、群組名稱、商品名稱、AI 摘要）一律先變成一行（去掉換行與控制字元），Discord 再把 Markdown 符號加上反斜線
+  （名稱不能變成連結、標題、引用、劇透或程式碼），Telegram 把 `@` 換成全形 `＠`。Discord 訊息另外帶 `flags: 4`（`SUPPRESS_EMBEDS`，
+  不產生連結預覽）。
+- **換推播目的地要重新同意**：owner 把頻道指到別的地方（Discord 換成另一個 webhook——即使在同一個頻道；Telegram 連到另一個聊天室；
+  或解除後再設定）時，**其他成員**的 `push` 自動關閉，要本人看過 `push_targets` 後重新打開；設定的 owner 自己的開關不變。同一個 webhook
+  或同一個聊天室重新設定、Telegram 升級成超級群組，不算換目的地。群組第一次設定頻道時不影響已開的 `push`。
 - `notify_trades` 從關到開時，頻道的「設定時間」重設：關著那段時間的交易不會補送。
 - Discord：webhook 網址解析後主機必須是 `discord.com` 或 `discordapp.com`、沒有帳密與連接埠、路徑為 `/api/webhooks/{id}/{token}`；不跟隨轉址；
   加密儲存、不寫進 log、回應只給最後 4 碼。訊息帶 `allowed_mentions: {"parse": []}`（名稱與內容不能 @everyone）。404／401 → 頻道 `disabled`。
+  設定 webhook 每次都會真的打到 Discord，所以每人、每群組 10 分鐘最多 5 次（429 `rate_limited`）；Discord 會暫時封鎖 10 分鐘內有 1 萬次
+  401／403／429 的 IP（Discord 登入也在同一台 API），伺服器在 10 分鐘內收到 500 次這類回應時，暫停所有 webhook 請求 10 分鐘（設定回 429
+  `rate_limited`，推播延後重試）。
 - Telegram：worker 以 `getUpdates` 輪詢（不開公開的 webhook 端點），處理 `/link <code>` 與 `/link@<bot> <code>`；連結成功時 bot 回覆群組名稱，
   owner 在 app 裡看到 `chat_title` 確認。訊息不用 `parse_mode`。403（bot 被移出）→ `disabled`；`migrate_to_chat_id` 時更新 chat id。
+  任何人都能傳訊息給 bot，所以輪詢在時間預算內把積壓的更新讀完、`/link` 以外的訊息不做任何事、失敗的 `/link`（私訊、無效的碼）
+  每個聊天室每分鐘最多回一次，而且輪詢在 worker 裡獨立執行，不會拖慢其他工作。
 - 送出失敗會重試（最多 5 次、指數退避）。環境變數：`TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME`（沒設定時 `telegram_available: false`）。
 - 個人通知管道（`docs/product-spec.md` §4.9 的個人 Telegram／Discord）不在 M5。
 - Telegram 的 bot 預設開著隱私模式（只收到明確給它的指令），前端顯示連結指令時用 `/link@<bot_username> <code>` 的形式最可靠。

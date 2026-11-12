@@ -27,6 +27,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   up to 5 attempts with exponential backoff).
 * ``telegram_poll`` — every 20 seconds while ``TELEGRAM_BOT_TOKEN`` / ``TELEGRAM_BOT_USERNAME`` are set: Telegram
   ``getUpdates`` (``/link`` codes, supergroup migration, the bot being removed; there is no public webhook endpoint).
+  It runs in its own loop (``Job.background``): anyone can message the bot, so a flood of messages must not delay
+  the other jobs, and a long archive run must not leave ``/link`` codes waiting until they expire.
 * ``group_digests`` — Saturday 20:00 Taipei (catch-up until Sunday ends): the weekly AI digest of every group for the
   week Monday–Friday that just ended, sent as one Message Batches request (``forliosa.services.digests``);
   ``group_digest_poll`` (every 5 minutes) collects the results, falls back to normal calls, and queues the pushes.
@@ -79,6 +81,7 @@ class Job:
     due: Callable[[datetime, datetime | None], bool]
     run: Callable[[], Awaitable[None]]
     last_run: datetime | None = field(default=None)
+    background: bool = False  # its own loop: never holds up the other jobs, and they never hold it up
 
 
 def every(seconds: int, only_if: Callable[[datetime], bool] = lambda _now: True):
@@ -182,7 +185,7 @@ class Worker:
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
             Job("ai_analyst_purge", daily_at(*(time(h, 5) for h in range(24))), self.ai_analyst_purge),
             Job("group_push", every(60), self.group_push),
-            Job("telegram_poll", every(20), self.telegram_poll),
+            Job("telegram_poll", every(20), self.telegram_poll, background=True),
             Job("group_digests", weekend_evening(time(20, 0)), self.group_digests),
             Job("group_digest_poll", every(300), self.group_digest_poll),
             Job("sharing_retention", daily_at(time(4, 35)), self.sharing_retention),
@@ -287,21 +290,36 @@ class Worker:
     def stop(self) -> None:
         self._stop.set()
 
+    @staticmethod
+    async def _run_job(job: Job) -> None:
+        try:
+            await job.run()
+        except Exception:  # keep the scheduler alive
+            log.exception("job %s failed", job.name)
+
+    async def _wait(self, seconds: float) -> None:
+        with contextlib.suppress(TimeoutError):
+            await asyncio.wait_for(self._stop.wait(), timeout=seconds)
+
+    async def _loop(self, jobs: list[Job], tick_seconds: float) -> None:
+        """Run the due ``jobs`` one after another, every ``tick_seconds``, until stopped."""
+        while not self._stop.is_set():
+            now = now_taipei()
+            for job in jobs:
+                if job.due(now, job.last_run):
+                    job.last_run = now
+                    await self._run_job(job)
+            await self._wait(tick_seconds)
+
     async def run(self, tick_seconds: float = 20.0) -> None:
+        """The scheduled jobs in one loop; each ``background`` job in a loop of its own (jobs run in threads, so the
+        loops really run side by side)."""
         log.info("worker started: %s", ", ".join(j.name for j in self.jobs))
         with session_factory()() as db:
             load_official_calendar(db)
-        while not self._stop.is_set():
-            now = now_taipei()
-            for job in self.jobs:
-                if job.due(now, job.last_run):
-                    job.last_run = now
-                    try:
-                        await job.run()
-                    except Exception:  # keep the scheduler alive
-                        log.exception("job %s failed", job.name)
-            with contextlib.suppress(TimeoutError):
-                await asyncio.wait_for(self._stop.wait(), timeout=tick_seconds)
+        side = [asyncio.create_task(self._loop([j], tick_seconds), name=j.name) for j in self.jobs if j.background]
+        await self._loop([j for j in self.jobs if not j.background], tick_seconds)
+        await asyncio.gather(*side, return_exceptions=True)
         log.info("worker stopped")
 
 

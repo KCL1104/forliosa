@@ -959,7 +959,8 @@ class GroupDigest(Base):
 class GroupChannel(Base):
     """A group's push channel (``kind`` discord | telegram; one each). The Discord webhook URL is stored encrypted
     (``crypto.encrypt_secret``); responses only show ``webhook_hint`` (its last 4 characters). ``status`` active |
-    disabled (``disabled_reason``). ``configured_at``: trades created before it are never pushed."""
+    disabled (``disabled_reason``) | removed (the owner removed it: no URL or chat id; the row stays so a later set-up
+    counts as a new destination). ``configured_at``: trades created before it are never pushed."""
 
     __tablename__ = "group_channels"
 

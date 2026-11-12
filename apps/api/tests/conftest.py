@@ -62,17 +62,22 @@ def no_discord_network():
 @pytest.fixture(autouse=True)
 def no_push_network():
     """No test may reach a Discord webhook or the Telegram Bot API: every group-push request fails unless a test
-    installs a mock transport with ``forliosa.services.pushers.set_transport``."""
+    installs a mock transport with ``forliosa.services.pushers.set_transport``. Each test starts with a closed circuit
+    breaker and no webhook set-up attempts counted."""
     import httpx
 
-    from forliosa.services import pushers
+    from forliosa.services import channels, pushers
 
     def refuse(request: httpx.Request) -> httpx.Response:
         raise httpx.ConnectError("network disabled in tests", request=request)
 
     pushers.set_transport(httpx.MockTransport(refuse))
+    pushers.reset_state()
+    channels.reset_state()
     yield
     pushers.set_transport(None)
+    pushers.reset_state()
+    channels.reset_state()
 
 
 @pytest.fixture(autouse=True)

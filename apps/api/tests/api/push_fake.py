@@ -1,7 +1,9 @@
 """A scripted fake of Discord webhooks and the Telegram Bot API (``httpx.MockTransport``) for the M5 push tests.
 
 Requests are recorded (URL, JSON body); Discord answers ``discord_status`` (or the next scripted status), Telegram
-answers the next scripted reply for a method (``ok`` by default; ``getUpdates`` returns the queued updates once).
+answers the next scripted reply for a method (``ok`` by default). ``getUpdates`` behaves like Telegram's: updates with
+an id below ``offset`` are confirmed (dropped), and at most ``limit`` of the rest are returned (they stay queued until
+a later ``offset`` confirms them).
 """
 
 from __future__ import annotations
@@ -55,8 +57,10 @@ class PushFake:
                 status, reply = script.popleft()
                 return httpx.Response(status, json=reply)
             if method == "getUpdates":
-                updates, self.updates = self.updates, []
-                return httpx.Response(200, json={"ok": True, "result": updates})
+                offset = body.get("offset")
+                if offset is not None:
+                    self.updates = [u for u in self.updates if u.get("update_id", 0) >= offset]
+                return httpx.Response(200, json={"ok": True, "result": self.updates[:body.get("limit", 100)]})
             return httpx.Response(200, json={"ok": True, "result": {"message_id": len(self.sent)}})
         return httpx.Response(599)
 

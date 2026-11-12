@@ -7,8 +7,9 @@
   stored or logged, nor is the client secret, the authorization code or the state.
 * Account mapping: by Discord id first. Otherwise an existing account that has **no** Discord id yet is linked by a
   **verified** e-mail; that e-mail already linked to another Discord id → ``oauth_email_conflict``. Otherwise a new
-  account (display name = Discord global name, else username). Creating or linking requires a verified e-mail
-  (``oauth_email_unverified``). Every login refreshes the e-mail (verified, not used by another account) and avatar.
+  account (display name = Discord global name, else username, as one line without control characters). Creating or
+  linking requires a verified e-mail (``oauth_email_unverified``). Every login refreshes the e-mail (verified, not
+  used by another account) and avatar.
 
 Tests replace the HTTP transport (:func:`set_transport`); no test reaches discord.com.
 """
@@ -32,6 +33,7 @@ from forliosa.crypto import b64url, b64url_decode, random_token, sign, verify
 from forliosa.ids import new_id
 from forliosa.models import User, UserIdentity
 from forliosa.services.ledger_io import DEFAULT_PREFERENCES
+from forliosa.textsafe import one_line
 from forliosa.timeutil import now_utc
 
 log = logging.getLogger("forliosa.oauth")
@@ -124,8 +126,10 @@ class DiscordProfile:
 
     @property
     def display_name(self) -> str:
-        name = (self.global_name or self.username or "").strip()
-        return name[:DISPLAY_NAME_MAX] or "Discord 使用者"
+        """Discord's global name (else the username) as one line (``textsafe.one_line``: no line breaks, control or
+        invisible format characters), at most 30 characters."""
+        name = one_line(self.global_name or self.username or "")
+        return name[:DISPLAY_NAME_MAX].strip() or "Discord 使用者"
 
 
 def _client() -> httpx.Client:
