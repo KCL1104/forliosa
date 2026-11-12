@@ -11,6 +11,7 @@ import type {
   HistoryRange,
   PerformanceRange,
   Preferences,
+  RecurringPlanInput,
   TransactionInput,
   TransactionQuery,
 } from "./types"
@@ -40,6 +41,11 @@ export const qk = {
   why: (symbol: string) => ["why", symbol] as const,
   watchlist: ["watchlist"] as const,
   upcoming: (days: number) => ["portfolio", "upcoming", days] as const,
+  // 放在 portfolio 底下：交易改了就跟著重新計算
+  closed: (accountId?: string) => ["portfolio", "closed", accountId ?? "all"] as const,
+  positionHistory: (symbol: string) => ["portfolio", "position-history", symbol] as const,
+  recurring: ["recurring"] as const,
+  attributions: ["meta", "attributions"] as const,
 }
 
 let devAutoLoginTried = false
@@ -211,4 +217,42 @@ export function useToggleWatch() {
       void qc.invalidateQueries({ queryKey: qk.watchlist })
     },
   })
+}
+
+// ── 第二批（2026-11-12）：出清紀錄、定期定額、資料授權 ─────────────
+export function useClosedPositions(accountId?: string) {
+  return useQuery({ queryKey: qk.closed(accountId), queryFn: () => api.getClosedPositions(accountId), staleTime: 60_000 })
+}
+/** 交易歷史（出清的回合與所有買賣點）；未持有也會回 */
+export function usePositionHistory(symbol: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.positionHistory(symbol), queryFn: () => api.getPositionHistory(symbol), staleTime: 60_000, retry: notFound })
+}
+export function useRecurringPlans() {
+  return useQuery({ queryKey: qk.recurring, queryFn: () => api.listRecurring(), staleTime: 60_000 })
+}
+function useInvalidateRecurring() {
+  const qc = useQueryClient()
+  return () => {
+    void qc.invalidateQueries({ queryKey: qk.recurring })
+    // 本週事項列出每一次扣款
+    void qc.invalidateQueries({ queryKey: ["portfolio", "upcoming"] })
+  }
+}
+export function useCreateRecurring() {
+  const invalidate = useInvalidateRecurring()
+  return useMutation({ mutationFn: (body: RecurringPlanInput) => api.createRecurring(body), onSuccess: invalidate })
+}
+export function useUpdateRecurring() {
+  const invalidate = useInvalidateRecurring()
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: Partial<RecurringPlanInput> }) => api.updateRecurring(id, patch),
+    onSuccess: invalidate,
+  })
+}
+export function useDeleteRecurring() {
+  const invalidate = useInvalidateRecurring()
+  return useMutation({ mutationFn: (id: string) => api.deleteRecurring(id), onSuccess: invalidate })
+}
+export function useAttributions() {
+  return useQuery({ queryKey: qk.attributions, queryFn: () => api.getAttributions(), staleTime: 60 * 60_000 })
 }

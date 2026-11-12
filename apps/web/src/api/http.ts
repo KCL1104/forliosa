@@ -33,6 +33,11 @@ import {
   type UpcomingItem,
   type WatchItem,
   type Why,
+  type Attributions,
+  type ClosedRound,
+  type PositionHistory,
+  type RecurringDraft,
+  type RecurringPlan,
 } from "./types"
 
 type Query = Record<string, string | number | null | undefined>
@@ -116,6 +121,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
       request<InstrumentEvent[]>("GET", `/instruments/${enc(symbol)}/events`, { query: { mine: String(mine) } }),
     getNews: (symbol) => request<NewsItem[]>("GET", `/instruments/${enc(symbol)}/news`),
     getPosition: (symbol) => request<Position | null>("GET", `/instruments/${enc(symbol)}/position`),
+    // 注意路徑：`/instruments/{symbol}/history` 是日線，交易歷史在 position 底下
+    getPositionHistory: (symbol) => request<PositionHistory>("GET", `/instruments/${enc(symbol)}/position/history`),
     getWhy: (symbol) => request<Why>("GET", `/instruments/${enc(symbol)}/why`),
 
     getWatchlist: () => request<WatchItem[]>("GET", "/watchlist"),
@@ -134,5 +141,14 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getHoldings: (accountId) => request<Holding[]>("GET", "/portfolio/holdings", { query: { account_id: accountId } }),
     getUpcoming: (days = 7) => request<UpcomingItem[]>("GET", "/portfolio/upcoming", { query: { days } }),
     getPerformance: (params) => request<Performance>("GET", "/portfolio/performance", { query: params }),
+    getClosedPositions: (accountId) => request<ClosedRound[]>("GET", "/portfolio/closed", { query: { account_id: accountId } }),
+
+    listRecurring: (accountId) => request<RecurringPlan[]>("GET", "/recurring", { query: { account_id: accountId } }),
+    createRecurring: (body) => request<RecurringPlan>("POST", "/recurring", { body }),
+    updateRecurring: (id, patch) => request<RecurringPlan>("PATCH", `/recurring/${enc(id)}`, { body: patch }),
+    deleteRecurring: (id) => request<void>("DELETE", `/recurring/${enc(id)}`),
+    draftRecurring: (id, date) => request<RecurringDraft>("POST", `/recurring/${enc(id)}/draft`, { query: { date } }),
+
+    getAttributions: () => request<Attributions>("GET", "/meta/attributions"),
   }
 }

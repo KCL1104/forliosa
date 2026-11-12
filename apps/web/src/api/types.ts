@@ -118,6 +118,9 @@ export interface History {
   interval: string
   candles: Candle[]
   is_demo: boolean
+  sources?: string[]
+  /** 商用模式存檔不足時的說明，例如「資料累積中：自 2026-11-11 起存檔」 */
+  notes?: string[]
 }
 
 export interface ValuationPoint {
@@ -334,6 +337,8 @@ export interface Performance {
   dividends_by_month: { month: string; amount: number }[]
   realized_by_year: { year: number; amount: number }[]
   is_demo: boolean
+  /** 「資料累積中：自 … 起存檔」、「美股目前沒有可商用的行情來源…」 */
+  notes?: string[]
 }
 
 
@@ -430,6 +435,7 @@ export type InstrumentEventType =
   | "dividend_payment"
   | "earnings"
   | "revenue_release"
+  | "investor_conference"
   | "material_info"
   | "attention"
   | "disposition"
@@ -444,14 +450,21 @@ export interface InstrumentEvent {
   mine: boolean
   amount_estimate: number | null
   sources?: string[]
+  /** 只有法定期限的備援是 true（實際日期還不知道）：介面標「預估」 */
+  estimated?: boolean
+  /** 財報「2026Q3」、營收「2026-10」 */
+  period?: string | null
 }
 
-/** 新聞：只有標題、來源、連結 */
+export type NewsCategory = "material_info" | "exchange_news" | "media"
+
+/** 公告：官方的重大訊息與證交所新聞（`source: "公告"`）；媒體標題只在 personal 明確開啟時出現 */
 export interface NewsItem {
   published_at: string
   title: string
   source: string
   url: string
+  category?: NewsCategory
   sources?: string[]
 }
 
@@ -463,6 +476,8 @@ export interface PositionMarker {
   quantity: number | null
   price: number | null
   amount: number | null
+  /** `position/history` 的標記帶帳戶 */
+  account_id?: string
 }
 
 /** `GET /instruments/{symbol}/position`：未持有回 null */
@@ -522,6 +537,116 @@ export interface UpcomingItem {
   amount_estimate: number | null
   sources?: string[]
   is_demo?: boolean
+  /** 定期定額：計畫 id、帳戶、計畫原本的日子（`date` 是遇休市順延後的扣款日） */
+  plan_id?: string | null
+  account_id?: string | null
+  scheduled_date?: string | null
+}
+
+// ── 第二批（2026-11-12）：出清紀錄、定期定額、資料授權 ───────────
+/** 出清回合：某帳戶某檔從 0 股 → 持有 → 回到 0 股；金額為台幣 */
+export interface ClosedRound {
+  symbol: string
+  name: string
+  account_id: string
+  currency: Currency
+  opened_at: string
+  closed_at: string
+  /** 日曆天數 */
+  holding_days: number
+  total_bought_qty: number
+  total_sold_qty: number
+  cost_basis: number
+  realized_pnl: number
+  realized_pnl_pct: number | null
+  /** 已扣二代健保 */
+  dividends_received: number
+  fees_and_taxes: number
+  sources?: string[]
+}
+
+/** `GET /instruments/{symbol}/position/history`：未持有也會回（從未交易時兩個陣列都是空的） */
+export interface PositionHistory {
+  symbol: string
+  rounds: ClosedRound[]
+  markers: PositionMarker[]
+  sources?: string[]
+}
+
+/** 定期定額計畫 */
+export interface RecurringPlan {
+  id: string
+  account_id: string
+  symbol: string
+  name: string
+  /** 每次扣款的新台幣整數元 */
+  amount: number
+  /** 每月扣款日 1–28，排序過 */
+  day_of_month: number[]
+  start_date: string
+  end_date: string | null
+  active: boolean
+  note: string
+  /** 今天（含）之後的下一次扣款日；停用或已結束為 null */
+  next_date: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface RecurringPlanInput {
+  account_id: string
+  symbol: string
+  amount: number
+  day_of_month: number[]
+  start_date?: string
+  end_date?: string | null
+  active?: boolean
+  note?: string
+}
+
+/** 一次扣款的交易草稿：**不會建立交易**，使用者簽名後才 `POST /transactions` */
+export interface RecurringDraft {
+  plan_id: string
+  scheduled_date: string
+  date: string
+  name: string
+  amount: number
+  price_as_of: string
+  transaction: {
+    account_id: string
+    symbol: string
+    type: "buy"
+    trade_date: string
+    quantity: number
+    price: number
+    note: string
+    source: "ai_draft"
+  }
+  preview: TradePreview
+  is_demo: boolean
+  sources?: string[]
+}
+
+/** `GET /meta/attributions`：每個資料集的顯名聲明（授權條款規定必須顯示） */
+export interface AttributionDataset {
+  key: string
+  agency: string
+  dataset: string
+  url: string
+  used_for: string
+  year: number
+  license: string
+  license_url: string
+  commercial: boolean
+  /** 完整顯名聲明：「提供機關〈資料集名稱〉（年份），依政府資料開放授權條款第 1 版」 */
+  attribution: string
+}
+
+export interface Attributions {
+  policy: "commercial" | "personal"
+  notice: string[]
+  datasets: AttributionDataset[]
+  not_used: string[]
 }
 
 // ── 錯誤 ──────────────────────────────────────────────────
@@ -570,6 +695,7 @@ export interface ForliosaApi {
   getEvents(symbol: string, mine?: boolean): Promise<InstrumentEvent[]>
   getNews(symbol: string): Promise<NewsItem[]>
   getPosition(symbol: string): Promise<Position | null>
+  getPositionHistory(symbol: string): Promise<PositionHistory>
   getWhy(symbol: string): Promise<Why>
   // 自選
   getWatchlist(): Promise<WatchItem[]>
@@ -585,9 +711,18 @@ export interface ForliosaApi {
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>
   getUpcoming(days?: number): Promise<UpcomingItem[]>
+  getClosedPositions(accountId?: string): Promise<ClosedRound[]>
   getPerformance(params: {
     range: PerformanceRange
     benchmark?: string
     account_id?: string
   }): Promise<Performance>
+  // 定期定額
+  listRecurring(accountId?: string): Promise<RecurringPlan[]>
+  createRecurring(body: RecurringPlanInput): Promise<RecurringPlan>
+  updateRecurring(id: string, patch: Partial<RecurringPlanInput>): Promise<RecurringPlan>
+  deleteRecurring(id: string): Promise<void>
+  draftRecurring(id: string, date?: string): Promise<RecurringDraft>
+  // 資料來源與授權（不需登入）
+  getAttributions(): Promise<Attributions>
 }
