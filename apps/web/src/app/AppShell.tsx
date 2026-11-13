@@ -26,7 +26,7 @@ import { MOBILE_BANNER_HEIGHT, ViewAsBanner } from "./ViewAsBanner"
  *   AI 沒什麼可說的頁面（群組、討論、設定、紀錄、資料來源——`nav.ts` 的 `QUIET_ROUTES`）面板預設收成 56px 的窄欄，
  *   帳本與個股頁照記住的開合；面板收著時主欄的左緣不動（`--panel-slack`，見 `.page-frame`），換頁時內容不左右跳。
  * - 手機：標題列（字標、搜尋、隱私、頭像）＋底部列（簿子的下緣：平的、滿版、上緣印刷雙線）——
- *   文字分頁「帳本｜群組｜討論」＋右邊一格石墨灰的「問 AI」（和簽名格同一種方格）；AI 對話紀錄從「問 AI」畫面的時鐘進去
+ *   文字分頁「帳本｜市場｜群組｜討論」＋右邊一格石墨灰的「問 AI」（和簽名格同一種方格）；AI 對話紀錄從「問 AI」畫面的時鐘進去
  * - 查看別人的資產（唯讀）：頂部「正在查看 ○○ 的資產（唯讀）」橫幅；AI 面板、全域 AI 輸入與「問 AI」都不出現，
  *   手機的「問 AI」那一格換成墨色的「結束查看」，橫幅黏在畫面頂端。
  * - `aria-current="page"` 只在導覽上（頂部列、底部列）；字標是一般連結（PlainLink）。
@@ -170,8 +170,9 @@ function Dock() {
   return (
     <div className="dock">
       {/* 和頁面同一個版心：分頁從內容的左緣開始，「問 AI」格的右緣對齊內容的右緣（20px；768 以上 32px） */}
-      <div className="mx-auto flex h-(--dock-h) max-w-[1180px] items-center gap-3 px-5 md:px-8">
-        <nav aria-label="主要" className="-ml-4 flex flex-1 self-stretch">
+      {/* 四個分頁＋「問 AI」在 320px 也要放得下：390px 以下分頁的左右內距縮一級，360px 以下字也小一級（16px） */}
+      <div className="mx-auto flex h-(--dock-h) max-w-[1180px] items-center gap-2 px-5 min-[360px]:gap-3 md:px-8">
+        <nav aria-label="主要" className="-ml-2 flex flex-1 self-stretch min-[360px]:-ml-3 min-[390px]:-ml-4">
           {DOCK_TABS.map((t) => {
             const active = t.match(pathname)
             return (
@@ -179,7 +180,7 @@ function Dock() {
                 key={t.to}
                 to={t.to}
                 aria-current={active ? "page" : undefined}
-                className="relative flex items-stretch px-4 text-lg text-ink-2 focus-visible:-outline-offset-2 active:bg-hov"
+                className="relative flex items-stretch px-2 text-[1rem] whitespace-nowrap text-ink-2 focus-visible:-outline-offset-2 active:bg-hov min-[360px]:px-3 min-[360px]:text-lg min-[390px]:px-4"
               >
                 <span data-active={active ? "" : undefined} className="sel-tab-top flex items-center pb-0.5">
                   {t.label}

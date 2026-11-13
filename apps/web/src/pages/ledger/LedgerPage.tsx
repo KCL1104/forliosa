@@ -108,7 +108,7 @@ export function LedgerPage() {
             待簽名 {pending} 筆
           </button>
         )}
-        {/* 手動記一筆：直接開表單（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」 */}
+        {/* 手動記一筆：直接開輸入框（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」 */}
         {!readOnly && (
           <>
             <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => ask.action("form")}>

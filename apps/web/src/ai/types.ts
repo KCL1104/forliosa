@@ -1,6 +1,6 @@
 import type { Market, TradePreview, TransactionInput } from "@/api/types"
 import type { UngroundedPassage } from "./answer-text"
-import type { ChatErrorInfo, Citation, ToolStep } from "./remote"
+import type { AiChart, ChatErrorInfo, Citation, ToolStep } from "./remote"
 
 /** 依頁面自動出現的建議問題（介面上不加說明字樣） */
 export type SuggestionKind =
@@ -94,6 +94,8 @@ export interface Message {
   draftId?: string
   /** 後端 AI 一次回答裡產生的草稿（可能不只一份） */
   draftIds?: string[]
+  /** 這一則回答畫的圖（`draw_chart`；mock 模式由本機規則用示範資料畫） */
+  charts?: AiChart[]
   /** 回答引用的網路來源（必須顯示） */
   citations?: Citation[]
   /** 查資料的步驟（串流中顯示成一行進度） */

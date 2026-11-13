@@ -21,6 +21,7 @@ import { autoEditNotice, isUnchangedEdit } from "@/lib/ledger-display"
 import { cn } from "@/lib/utils"
 import { FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
+import { QuickAdd } from "./QuickAdd"
 import { usePrefs } from "@/stores/prefs"
 
 
@@ -34,26 +35,37 @@ const MAIN_TYPES: { value: MainType; label: string }[] = [
 const OTHER_TYPES: TransactionType[] = ["stock_dividend", "split", "capital_reduction", "deposit", "withdrawal", "fee", "tax", "interest"]
 const CASH_TYPES: TransactionType[] = ["deposit", "withdrawal", "fee", "tax", "interest"]
 
-/** 掛在 AppShell：依裝置用 Dialog（桌面）或 Vaul Drawer（手機） */
+/**
+ * 掛在 AppShell：依裝置用 Dialog（桌面）或 Vaul Drawer（手機）。
+ * 預設是簡單的買進輸入（`QuickAdd`）；編輯一筆交易、或從那裡按「賣出、股利或其他」，才是完整表單。
+ */
 export function TradeFormHost() {
-  const { open, symbol, edit } = useUi((s) => s.tradeForm)
+  const { open, symbol, edit, full } = useUi((s) => s.tradeForm)
+  const openTradeForm = useUi((s) => s.openTradeForm)
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
-  const title = edit ? "編輯交易" : "記一筆交易"
-  // 畫面上不寫副標（試算區自己會說要填什麼）；給螢幕報讀器一句
-  const description = "填數量與價格，試算手續費與稅，再儲存。"
-  const formKey = edit?.id ?? "new"
+  const quick = !edit && !full
+  const title = edit ? "編輯交易" : quick ? "記一筆" : "記一筆交易"
+  // 畫面上不寫副標；給螢幕報讀器一句
+  const description = quick ? "選一檔股票，填股數、買進日期與價格。" : "填數量與價格，試算手續費與稅，再儲存。"
+  const formKey = edit?.id ?? (quick ? "quick" : "new")
+  const body = (layout: "split" | "stack") =>
+    quick ? (
+      <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code) => openTradeForm({ symbol: code ?? symbol, full: true })} />
+    ) : (
+      <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout={layout} />
+    )
 
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && close()}>
-        {/* 兩欄的表單自己排內距（右欄的試算滿到邊緣）：標題的印刷線和表單同寬，說明在線的下面 */}
-        <DialogContent className="max-h-[calc(100dvh-4rem)] gap-0 overflow-y-auto p-0 sm:max-w-[760px]">
+        {/* 完整表單兩欄、自己排內距（右欄的試算滿到邊緣）；簡單輸入只有一欄，窄一點 */}
+        <DialogContent className={cn("max-h-[calc(100dvh-4rem)] gap-0 overflow-y-auto p-0", quick ? "sm:max-w-[600px]" : "sm:max-w-[760px]")}>
           <DialogHeader className="px-6 pt-5 pb-4">
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription className="sr-only">{description}</DialogDescription>
           </DialogHeader>
-          {open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="split" />}
+          {open && body("split")}
         </DialogContent>
       </Dialog>
     )
@@ -65,7 +77,7 @@ export function TradeFormHost() {
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription className="sr-only">{description}</DrawerDescription>
         </DrawerHeader>
-        <div className="overflow-y-auto overscroll-contain">{open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="stack" />}</div>
+        <div className="overflow-y-auto overscroll-contain">{open && body("stack")}</div>
       </DrawerContent>
     </Drawer>
   )
@@ -494,12 +506,12 @@ function AutoNotice({ source }: { source: TransactionSource }) {
 }
 
 /** Sonner 通知的第二行 */
-function StampLine() {
+export function StampLine() {
   return <span className="text-sm text-ink-2">持股與績效已更新</span>
 }
 
 
-function AccountSelect({ accounts, value, onChange }: { accounts: Account[]; value: string; onChange: (id: string) => void }) {
+export function AccountSelect({ accounts, value, onChange }: { accounts: Account[]; value: string; onChange: (id: string) => void }) {
   return (
     <Select value={value} onValueChange={(v) => onChange(v as string)} items={accounts.map((a) => ({ value: a.id, label: a.name }))}>
       <SelectTrigger className="w-full" aria-label="券商帳戶">

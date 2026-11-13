@@ -2,6 +2,7 @@
 
 1. A chat turn with tool use on the seeded demo user (``demo@forliosa.local``; seeded if missing).
 2. A question about 台積電 today that needs web search (citations printed).
+3. A comparison that should call ``draw_chart`` (the card's title and how many points each line has are printed).
 
 ``--ask "台積電的技術面怎麼樣？" --symbol 2330.TW`` runs that one question instead (on that stock's page when
 ``--symbol`` is given), e.g. to watch a turn that calls ``get_technicals``.
@@ -39,6 +40,7 @@ from forliosa.models import User
 QUESTIONS = [
     ("我目前有哪些持股？今天哪一檔漲跌最多？", "/", None),
     ("台積電今天有什麼新聞？股價為什麼這樣動？", "/stock/2330.TW", "2330.TW"),
+    ("比較台積電和鴻海這半年的走勢，畫一張圖。", "/", None),
 ]
 
 
@@ -142,7 +144,7 @@ def check_analyst(pool, settings, symbols: list[str]) -> int:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Forliosa AI live smoke test (real API, small cost)")
-    parser.add_argument("--only", type=int, choices=[1, 2], help="run only question 1 or 2")
+    parser.add_argument("--only", type=int, choices=[1, 2, 3], help="run only question 1, 2 or 3")
     parser.add_argument("--ask", metavar="QUESTION", help="run only this question instead of the two built-in ones")
     parser.add_argument("--symbol", help="with --ask: ask on this stock's page, e.g. 2330.TW")
     parser.add_argument("--keys", action="store_true", help="only check which workspace each key slot belongs to")
@@ -186,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"\n  ↳ 來源：{data['title']} {data['url']}", flush=True)
                 elif name == "draft":
                     print(f"\n  ✎ 草稿 {data['id']}", flush=True)
+                elif name == "chart":
+                    lines = "、".join(f"{s['name']} {len(s['points'])} 點" for s in data["series"])
+                    print(f"\n  ▦ 圖卡 {data['kind']}：{data['title']}（{lines}）", flush=True)
                 elif name == "grounding":
                     for item in data["items"]:
                         print(f"\n  ⚠ 無來源：{item['text']}", flush=True)

@@ -2,12 +2,13 @@ import { useRouterState } from "@tanstack/react-router"
 
 /**
  * 外殼的導覽設定：桌面頂部列、手機底部列、AI 面板預設收成窄欄的頁面，都只在這裡改。
+ * 目的地：帳本・市場・群組・討論（市場是收盤後的市場資訊頁，產品負責人 2026-11-13）。
  * 新增一個目的地（例如 `/discussions`）：`NavItem["to"]` 加上那個路徑，在 `NAV_ITEMS`／`DOCK_TABS` 各加（或換掉）一行，
  * 需要 AI 面板預設收合的話，再在 `QUIET_ROUTES` 加一行。`AppShell` 的頂部列與底部列只照這裡畫，不用改。
  */
 export interface NavItem {
   /** 路由的路徑（要是 router.tsx 裡有的路由，`<Link to>` 才過得了型別檢查） */
-  to: "/" | "/groups" | "/discussions"
+  to: "/" | "/market" | "/groups" | "/discussions"
   label: string
   /** 這個網址算不算在這個目的地裡（決定 `aria-current="page"`） */
   match: (pathname: string) => boolean
@@ -16,17 +17,18 @@ export interface NavItem {
 const under = (prefix: string) => (pathname: string) => pathname === prefix || pathname.startsWith(`${prefix}/`)
 
 const LEDGER: NavItem = { to: "/", label: "帳本", match: (p) => p === "/" || under("/stock")(p) }
+const MARKET: NavItem = { to: "/market", label: "市場", match: under("/market") }
 const GROUPS: NavItem = { to: "/groups", label: "群組", match: under("/groups") }
 const DISCUSSIONS: NavItem = { to: "/discussions", label: "討論", match: under("/discussions") }
 
 /** 桌面頂部列的文字分頁 */
-export const NAV_ITEMS: readonly NavItem[] = [LEDGER, GROUPS, DISCUSSIONS]
+export const NAV_ITEMS: readonly NavItem[] = [LEDGER, MARKET, GROUPS, DISCUSSIONS]
 
 /**
  * 手機底部列的文字分頁（右邊另外有一格「問 AI」）。AI 對話紀錄（`/history`）不在這裡：
  * 從「問 AI」畫面的時鐘進去（產品負責人 2026-11-13）。
  */
-export const DOCK_TABS: readonly NavItem[] = [LEDGER, GROUPS, DISCUSSIONS]
+export const DOCK_TABS: readonly NavItem[] = [LEDGER, MARKET, GROUPS, DISCUSSIONS]
 
 /**
  * 頭像選單裡的頁面（設定、資料來源與授權、站方管理）：桌面在這些頁面時，頭像下面畫導覽的那條線（選取語法 (a)），

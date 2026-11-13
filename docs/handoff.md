@@ -24,7 +24,7 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 2026-11-13 新增（合約在 `docs/api-contract.md` 最後兩節）：
 
 - **討論串（前後端都完成並合併）**：公開（不用登入就能讀）或群組限定的主題與回覆、表情、公開暱稱、檢舉、站方管理（`ADMIN_EMAILS`，頁面 `/admin/discussions`）。
-  頁面：`/discussions`、`/discussions/new`、`/discussions/$topicId`，個股頁與群組頁各有「討論」分頁；手機底部列是「帳本・群組・討論＋問 AI」。
+  頁面：`/discussions`、`/discussions/new`、`/discussions/$topicId`，個股頁與群組頁各有「討論」分頁；手機底部列是「帳本・市場・群組・討論＋問 AI」。
   前後端實測腳本：`apps/web/scripts/e2e-discussions.mjs`（檔頭有啟動方式；2026-11-13 在 SQLite 上全部通過）。mock 的情境參數見 `apps/web/README.md`（`?discuss=`、`?auth=signed-out`、`?market=`）。
   還沒做：回覆只能由舊到新翻頁（長主題要按「看更多回覆」才到最新，建議之後後端加 `order=desc`）；公開頁沒有加「不讓搜尋引擎收錄」的標記（N-4）。
 - **收盤價的標示**：產品負責人決定**不做盤中即時報價**（調查：`docs/research/quote-refresh-terms.md`——現有來源只有收盤後資料，合法的盤中報價都要付費）。

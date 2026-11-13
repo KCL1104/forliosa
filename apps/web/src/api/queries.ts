@@ -51,6 +51,7 @@ export const qk = {
   recurring: ["recurring"] as const,
   attributions: ["meta", "attributions"] as const,
   marketStatus: ["meta", "market-status"] as const,
+  marketOverview: ["market", "overview"] as const,
 }
 
 /** 後端每頁最多 200 筆：依 cursor 一頁一頁讀，最多讀到 `max` 筆（回傳是否還有更多） */
@@ -309,6 +310,11 @@ export function useAttributions() {
  * 台股現在是不是盤中、今天是不是交易日：大約每分鐘問一次（開盤、收盤的那一刻不用重新整理也會換）。
  * 只用來決定價格旁要不要加一行說明；載入失敗就當作沒有說明，不重試、不報錯。
  */
+/** 市場頁：收盤後的資料，一天只變幾次；AI 整理產生後下一次重新整理就看得到 */
+export function useMarketOverview() {
+  return useQuery({ queryKey: qk.marketOverview, queryFn: () => api.getMarketOverview(), staleTime: 60_000, refetchInterval: 5 * 60_000 })
+}
+
 export function useMarketStatus() {
   return useQuery({ queryKey: qk.marketStatus, queryFn: () => api.getMarketStatus(), staleTime: 30_000, refetchInterval: 60_000, retry: false })
 }

@@ -7,7 +7,7 @@
 // M5 分享：群組（建立、邀請連結、排行與討論串、動態與表情、我的分享、成員分享、頻道）、邀請（沒登入 → 登入 → 選分享 → 加入）、
 // 授權查看（授權給別人、查看別人的唯讀模式、授權失效自動退出）、登入頁的錯誤說明。
 // 討論串（2026-11-13）：沒登入讀公開清單與主題、選公開暱稱 → 發主題 → 回覆（頻率限制）→ 表情 → 檢舉 → 站方管理隱藏、
-// 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・群組・討論）與從「問 AI」的時鐘到紀錄。
+// 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・市場・群組・討論）與從「問 AI」的時鐘到紀錄。
 // mock 的狀態在記憶體裡：同一個流程用站內導覽（不重新載入），重新載入就回到示範資料。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
@@ -20,7 +20,7 @@ try {
   pw = require("/opt/node-tools/node_modules/playwright")
 }
 const base = (process.argv.find((a) => a.startsWith("--base="))?.slice(7) ?? "http://localhost:5173").replace(/\/$/, "")
-// 開發時只跑名稱含某段字的檢查：--only=討論（有些檢查接著上一個檢查的畫面，交付前要整份跑過）
+// 開發時只跑名稱含某段字的檢查：--only=討論；好幾段用「|」隔開：--only="AI 圖卡|商用模式"（有些檢查接著上一個檢查的畫面，交付前要整份跑過）
 const onlyCheck = process.argv.find((a) => a.startsWith("--only="))?.slice(7)
 
 const ROUTES = [
@@ -43,6 +43,7 @@ const ROUTES = [
   ["/stock/0050.TW?tab=financials", "收益分配"],
   ["/stock/NVDA?tab=chips", "美股沒有法人與融資融券資料"],
   ["/stock/NOPE.TW", "找不到"],
+  ["/market", "收盤重點"],
   ["/groups", "家族投資"],
   ["/groups/grp_family", "元大台灣50"],
   ["/groups/grp_family?tab=feed", "加入了群組"],
@@ -78,7 +79,7 @@ page.on("console", (m) => m.type() === "error" && errors.push(`${page.url()} ${m
 page.on("pageerror", (e) => errors.push(`${page.url()} pageerror ${e.message}`))
 let failed = 0
 const check = async (name, fn) => {
-  if (onlyCheck && !name.includes(onlyCheck)) return
+  if (onlyCheck && !onlyCheck.split("|").some((part) => name.includes(part))) return
   try {
     await fn()
     console.log("✓", name)
@@ -135,22 +136,59 @@ await check("自由提問：誠實說明現在答不了（不猜、不承諾時�
   if ((await path.getAttribute("href")) !== "/") throw new Error(`manual path ${await path.getAttribute("href")}`)
 })
 
-await check("帳本工具列的「記一筆」：直接開表單（不經過 AI 面板）；勾「存檔後再記一筆」存檔後表單留著", async () => {
+await check("AI 圖卡：比較 2330 和 2317 → 兩條線（分類色、線尾代號、圖例與說明）、方向鍵看讀數、不超出面板；畫月營收 → 柱狀", async () => {
+  // 單獨跑這一項（--only）時前面沒有開過頁面
+  if (!(await page.getByLabel("提出問題或下指令").count())) await page.goto(base + "/", { waitUntil: "networkidle" })
+  const box = page.getByLabel("提出問題或下指令")
+  const panel = page.getByRole("complementary", { name: "問 AI" })
+  await box.fill("比較 2330 和 2317")
+  await box.press("Enter")
+  const fig = panel.getByRole("figure", { name: /台積電、鴻海 漲跌幅/ })
+  await fig.waitFor({ timeout: 8000 })
+  const strokes = await fig.locator('svg path[stroke-width="2"]').evaluateAll((els) => els.map((e) => e.getAttribute("stroke")))
+  if (strokes.join() !== "var(--series-1),var(--series-2)") throw new Error(`series colours: ${strokes}`)
+  // 分類色不是漲跌的紅綠，兩條線的顏色也不一樣
+  const painted = await fig.locator('svg path[stroke-width="2"]').evaluateAll((els) => els.map((e) => getComputedStyle(e).stroke))
+  const price = await page.evaluate(() => ["--rise", "--fall"].map((v) => { const d = document.createElement("i"); d.style.color = `var(${v})`; document.body.append(d); const c = getComputedStyle(d).color; d.remove(); return c }))
+  if (painted[0] === painted[1] || painted.some((c) => price.includes(c) || c === "none")) throw new Error(`series paint: ${painted}`)
+  for (const code of ["2330", "2317"]) if (!(await fig.getByText(code, { exact: true }).count())) throw new Error(`no end label ${code}`)
+  if (!(await fig.getByText("漲跌幅只算價格變動，不含股利").count())) throw new Error("the note is missing")
+  if (!(await fig.getByText(/^資料來源：/).count())) throw new Error("the sources line is missing")
+  const [pb, fb, sb] = [await panel.boundingBox(), await fig.boundingBox(), await fig.locator("svg").boundingBox()]
+  if (fb.x + fb.width > pb.x + pb.width + 0.5 || sb.x + sb.width > fb.x + fb.width + 0.5 || sb.x < fb.x - 0.5) throw new Error("the chart overflows the panel")
+  await fig.getByRole("group").focus()
+  await page.keyboard.press("ArrowLeft")
+  const live = fig.locator("[aria-live]")
+  if (!/^\d{4}\/\d{2}\/\d{2}：台積電 .+%、鴻海 .+%$/.test(await live.innerText())) throw new Error(`readout: ${await live.innerText()}`)
+  await page.keyboard.press("Escape")
+  if ((await live.innerText()) !== "") throw new Error("Escape should close the readout")
+  await box.fill("畫台積電的月營收")
+  await box.press("Enter")
+  const bars = panel.getByRole("figure", { name: "台積電 月營收" })
+  await bars.waitFor({ timeout: 8000 })
+  if ((await bars.locator("svg g[fill] > path").count()) < 12) throw new Error("the revenue bars are missing")
+  if (await bars.locator('svg path[stroke-width="2"]').count()) throw new Error("one series of monthly revenue should be bars, not a line")
+})
+
+await check("帳本工具列的「記一筆」：直接開輸入框（不經過 AI 面板）；選一檔、填兩筆買進 → 新增", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "記一筆", exact: true }).click()
   const dialog = page.getByRole("dialog")
-  await dialog.getByRole("heading", { name: "記一筆交易" }).waitFor()
+  await dialog.getByRole("heading", { name: "記一筆", exact: true }).waitFor()
   if (await page.getByText(/買賣了什麼/).count()) throw new Error("the toolbar button went through the AI panel")
+  if (await dialog.getByText("稅費試算").count()) throw new Error("the simple entry shows the fee estimate")
   await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2317")
   await page.getByRole("option", { name: /2317/ }).first().click()
-  await page.locator("#trade-qty").fill("1")
-  await page.locator("#trade-price").fill("230")
-  await dialog.getByRole("checkbox", { name: "存檔後再記一筆" }).check()
-  await page.getByRole("button", { name: "儲存", exact: true }).click()
-  await page.getByText(/已記錄：買進 鴻海/).waitFor({ timeout: 8000 })
-  await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").waitFor({ timeout: 4000 })
-  if ((await page.locator("#trade-qty").inputValue()) !== "") throw new Error("quantity not cleared for the next entry")
-  await page.keyboard.press("Escape")
+  const qty = dialog.locator("#lot-qty-0")
+  const inLots = (await qty.getAttribute("aria-label")) === "張數"
+  await qty.fill(inLots ? "1" : "1000")
+  await dialog.locator("#lot-price-0").fill("230")
+  await dialog.getByRole("button", { name: "再加一筆買進" }).click()
+  await dialog.getByRole("textbox", { name: /第 2 筆的(張數|股數)/ }).fill(inLots ? "2" : "2000")
+  await dialog.getByRole("textbox", { name: "第 2 筆的買進價格" }).fill("228")
+  await dialog.getByRole("button", { name: "新增", exact: true }).click()
+  await page.getByText(/已記錄：買進 鴻海 3 張（2 筆）/).waitFor({ timeout: 8000 })
+  await dialog.waitFor({ state: "detached", timeout: 4000 })
 })
 
 await check("帳本的欄位選單：勾選格排成兩欄，文字是橫的（不會被擠成一個字寬）", async () => {
@@ -169,6 +207,9 @@ await check("手動記帳表單（備援路徑）：試算稅費並儲存", asyn
   await page.goto(base + "/", { waitUntil: "networkidle" })
   // 「＋」直接打開表單（只有一件事，不做成選單）
   await page.getByRole("button", { name: "用表單記一筆" }).click()
+  // 預設是簡單的買進輸入；賣出、股利與稅費試算在完整表單裡
+  await page.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).click()
+  await page.getByRole("dialog").getByRole("heading", { name: "記一筆交易" }).waitFor()
   await page.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2454")
   await page.getByRole("option", { name: /2454/ }).first().click()
   await page.locator("#trade-qty").fill("1")
@@ -971,7 +1012,7 @@ await check("AI 面板：安靜的頁面（群組、討論、設定、紀錄、�
   if (Math.abs(groups.left - ledger.left) > 1) throw new Error(`content left edge jumped between ledger and groups: ${JSON.stringify({ ledger, groups })}`)
   // 討論也是安靜的頁面（AI 不讀討論）：頂部列的第三個分頁，窄欄、左緣不動
   const topNav = await rp.getByRole("navigation", { name: "主要" }).getByRole("link").allTextContents()
-  if (topNav.join("・") !== "帳本・群組・討論") throw new Error(`top nav: ${topNav.join("・")}`)
+  if (topNav.join("・") !== "帳本・市場・群組・討論") throw new Error(`top nav: ${topNav.join("・")}`)
   await rp.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "討論" }).click()
   await rp.getByRole("heading", { level: 1, name: "討論" }).waitFor({ timeout: 8000 })
   await rp.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
@@ -1252,7 +1293,7 @@ await check("手機：底部列是平的、滿版、貼齊畫面底部（沒有�
   if (bar.radius !== "0px" || bar.shadow !== "none" || bar.bg !== "none" || bar.edge !== "1px") throw new Error(`bar is not flat and ruled: ${JSON.stringify(bar)}`)
   // 「問 AI」平常只有框線：框線是往內畫的 1px（inset），不是浮起來的陰影
   if (bar.askRadius !== "0px" || !(bar.askShadow === "none" || /inset/.test(bar.askShadow)) || !bar.askInside || bar.askH < 44 || bar.askW < 44) throw new Error(`問 AI is not a square box inside the bar: ${JSON.stringify(bar)}`)
-  if (bar.tabs.map((t) => t.text).join("・") !== "帳本・群組・討論") throw new Error(`tabs: ${JSON.stringify(bar.tabs)}`)
+  if (bar.tabs.map((t) => t.text).join("・") !== "帳本・市場・群組・討論") throw new Error(`tabs: ${JSON.stringify(bar.tabs)}`)
   if (bar.tabs.some((t) => t.h < 44 || t.icon)) throw new Error(`tabs must be text, ≥ 44px: ${JSON.stringify(bar.tabs)}`)
   if (bar.tabs.filter((t) => t.current === "page").map((t) => t.text).join() !== "帳本") throw new Error(`current tab: ${JSON.stringify(bar.tabs)}`)
   // 捲到最底：頁面最後的內容在底部列上面（下方留的是底部列的實際高度）
@@ -1552,6 +1593,73 @@ await check("手機：底部列的分頁從內容的左緣開始（第一個字�
   if (Math.abs(first.lineW - first.textW) > 1 || first.line !== "2px" || /rgba\(0, 0, 0, 0\)/.test(first.lineColor)) throw new Error(`the indicator is not a 2px line as wide as the label: ${JSON.stringify(first)}`)
   if (bar.tabs.some((t) => t.hitW < 44 || t.hitH < 44)) throw new Error(`tab targets: ${JSON.stringify(bar.tabs)}`)
   if (Math.abs(bar.vw - bar.askRight - bar.gutter) > 0.5) throw new Error(`問 AI is not on the right gutter: ${JSON.stringify(bar)}`)
+})
+// ── 市場頁（`/market`）：收盤後的指數、AI 收盤重點、類股、排行、重大訊息 ──
+await check("市場頁（桌面）：導覽標「市場」、指數帶日期、AI 收盤重點是鉛筆字並附來源、排行連到個股頁、重大訊息可展開；沒有橫向溢出", async () => {
+  await page.goto(base + "/market", { waitUntil: "networkidle" })
+  await page.getByRole("heading", { level: 1, name: "市場" }).waitFor({ timeout: 8000 })
+  if ((await page.title()) !== "市場｜Forliosa") throw new Error(`title: ${await page.title()}`)
+  const nav = page.getByRole("navigation", { name: "主要" })
+  if ((await nav.getByRole("link", { name: "市場" }).getAttribute("aria-current")) !== "page") throw new Error("市場 is not marked current")
+  const cells = await page.getByRole("list", { name: "指數與匯率" }).getByRole("listitem").allInnerTexts()
+  if (cells.length < 3 || !/加權指數/.test(cells[0]) || !/\d{1,2}\/\d{1,2}/.test(cells[0]) || !/%/.test(cells[0])) throw new Error(`index cells: ${JSON.stringify(cells)}`)
+  if (await page.getByText(/即時|盤中報價/).count()) throw new Error("the market page must not claim live data")
+  const summary = page.locator("section", { has: page.getByRole("heading", { name: "收盤重點" }) })
+  const voice = await summary.locator(".ai-voice").evaluateAll((els) => els.map((el) => ({ font: getComputedStyle(el).fontFamily, size: parseFloat(getComputedStyle(el).fontSize) })))
+  if (voice.length < 3 || voice.some((v) => !/Kai|楷/i.test(v.font) || v.size < 17)) throw new Error(`summary is not in the AI voice: ${JSON.stringify(voice)}`)
+  const sources = await summary.getByRole("link").evaluateAll((els) => els.map((a) => ({ target: a.target, rel: a.rel, href: a.href })))
+  if (sources.length < 3 || sources.some((a) => a.target !== "_blank" || !/noopener/.test(a.rel) || !/^https:/.test(a.href))) throw new Error(`summary sources: ${JSON.stringify(sources)}`)
+  const sectors = page.locator("section", { has: page.getByRole("heading", { name: "類股" }) })
+  const pcts = await sectors.locator("li:not([aria-hidden])").evaluateAll((els) => els.filter((li) => li.getBoundingClientRect().height > 0).map((li) => { const m = li.textContent.match(/([\d.]+)%/); return (li.textContent.includes("▼") ? -1 : 1) * parseFloat(m[1]) }))
+  if (pcts.length < 20 || pcts.some((v, i) => i > 0 && v > pcts[i - 1] + 1e-9)) throw new Error(`sectors are not sorted high to low: ${JSON.stringify(pcts)}`)
+  const movers = page.locator("section", { has: page.getByRole("heading", { name: "排行" }) })
+  const lists = await movers.getByRole("list").evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().height > 0).length)
+  if (lists !== 3) throw new Error(`desktop shows ${lists} ranking lists, want 3 side by side`)
+  if (await movers.getByText(/元大台灣50|國泰永續高股息/).count()) throw new Error("ETFs are ranked")
+  const ann = page.locator("section", { has: page.getByRole("heading", { name: "重大訊息" }) })
+  const before = await ann.getByRole("link").count()
+  await ann.getByRole("button", { name: /^再看 \d+ 則$/ }).click()
+  if ((await ann.getByRole("link").count()) <= before) throw new Error("「再看」did not show more announcements")
+  const flow = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
+  if (flow.sw > flow.cw) throw new Error(`horizontal overflow: ${JSON.stringify(flow)}`)
+  await movers.getByRole("link", { name: /台積電/ }).first().click()
+  await page.waitForURL(/\/stock\/2330\.TW/, { timeout: 8000 })
+})
+await check("市場頁（手機）：四個分頁＋「問 AI」在 393px 與 320px 都放得下、每個可按範圍 ≥ 44px；類股先列頭尾、排行一次一張；不橫向溢出", async () => {
+  for (const [name, options] of [["iPhone 15", pw.devices["iPhone 15"]], ["320px", { viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }]]) {
+    const c = await browser.newContext({ ...options, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+    const p = await c.newPage()
+    try {
+      await p.goto(base + "/market", { waitUntil: "networkidle" })
+      await p.getByRole("heading", { name: "收盤重點" }).waitFor({ timeout: 8000 })
+      const bar = await p.evaluate(() => {
+        const nav = document.querySelector('.dock nav[aria-label="主要"]')
+        const ask = document.querySelector(".dock .ask-box").getBoundingClientRect()
+        const tabs = [...nav.querySelectorAll("a")].map((a) => { const r = a.getBoundingClientRect(); return { text: a.textContent.trim(), left: r.left, right: r.right, w: r.width, h: r.height, lines: (() => { const range = document.createRange(); range.selectNodeContents(a.querySelector("span")); return Math.round(range.getBoundingClientRect().height / parseFloat(getComputedStyle(a).lineHeight)) })(), current: a.getAttribute("aria-current") } })
+        return { tabs, askLeft: ask.left, askRight: ask.right, vw: innerWidth, sw: document.documentElement.scrollWidth }
+      })
+      if (bar.tabs.map((t) => t.text).join("・") !== "帳本・市場・群組・討論") throw new Error(`${name} tabs: ${JSON.stringify(bar.tabs)}`)
+      if (bar.tabs.some((t) => t.w < 44 || t.h < 44 || t.lines > 1)) throw new Error(`${name} tab targets: ${JSON.stringify(bar.tabs)}`)
+      if (bar.tabs.at(-1).right > bar.askLeft + 0.5 || bar.askRight > bar.vw || bar.sw > bar.vw) throw new Error(`${name}: the bottom bar does not fit: ${JSON.stringify(bar)}`)
+      if (bar.tabs.filter((t) => t.current === "page").map((t) => t.text).join() !== "市場") throw new Error(`${name} current tab: ${JSON.stringify(bar.tabs)}`)
+      const sectors = p.locator("section", { has: p.getByRole("heading", { name: "類股" }) })
+      const visible = () => sectors.locator("li:not([aria-hidden])").evaluateAll((els) => els.filter((li) => li.getBoundingClientRect().height > 0).length)
+      if ((await visible()) !== 10) throw new Error(`${name}: collapsed sectors show ${await visible()} rows, want 10`)
+      await sectors.getByRole("button", { name: /^全部 \d+ 個類股$/ }).click()
+      if ((await visible()) < 20) throw new Error(`${name}: 「全部」did not list every sector`)
+      const movers = p.locator("section", { has: p.getByRole("heading", { name: "排行" }) })
+      const shown = () => movers.getByRole("list").evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().height > 0).length)
+      if ((await shown()) !== 1) throw new Error(`${name}: ${await shown()} ranking lists are visible, want one at a time`)
+      await movers.getByRole("radio", { name: "成交量" }).click()
+      await movers.getByText(/張$/).first().waitFor({ timeout: 4000 })
+      const small = await p.evaluate(() => [...document.querySelectorAll("#main a, #main button")].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.height < 44 || r.width < 44) }).map((el) => `${el.textContent.trim().slice(0, 12)} ${Math.round(el.getBoundingClientRect().width)}×${Math.round(el.getBoundingClientRect().height)}`))
+      if (small.length) throw new Error(`${name}: touch targets under 44px: ${small.join("、")}`)
+      const flow = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
+      if (flow.sw > flow.cw) throw new Error(`${name}: horizontal overflow ${JSON.stringify(flow)}`)
+    } finally {
+      await c.close()
+    }
+  }
 })
 await check("手機：動態、成員、設定、紀錄、帳本的控制項可按範圍都 ≥ 44×44；表情是 4px 方肩的小格、留言框沒有拖曳把手", async () => {
   for (const [path, ready] of [

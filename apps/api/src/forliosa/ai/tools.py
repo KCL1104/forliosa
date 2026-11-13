@@ -83,6 +83,7 @@ class ToolContext:
     md: MarketData
     thread_id: str | None = None
     drafts: list[dict[str, Any]] = field(default_factory=list)  # draft cards created during this turn
+    charts: list[dict[str, Any]] = field(default_factory=list)  # chart cards drawn during this turn
 
 
 @dataclass
@@ -90,6 +91,7 @@ class ToolOutcome:
     content: str
     is_error: bool = False
     draft: dict[str, Any] | None = None
+    chart: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -617,6 +619,32 @@ def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
             "trades_count": len(markers), "recent_trades": markers[-10:], "notes": notes}
 
 
+def get_related_stocks(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """The stock page's 相關股票 row without its sparklines: who to look at when the stock itself has no news."""
+    from forliosa.services import related as svc
+
+    info = resolve_instrument(ctx.md, args["symbol"])
+    r = svc.related(ctx.db, ctx.md, ctx.user, info.symbol)
+    return {"symbol": info.symbol, "name": info.name, "industry": info.industry,
+            "related": [_pick(i, "symbol", "name", "reason_label", "close", "change_pct", "as_of", "is_index",
+                              "is_demo") for i in r["items"]],
+            "units": "close 是最新的官方收盤價（as_of 是日期），不是今天的即時價；change_pct 為分數",
+            "notes": r["notes"], "sources": r["sources"]}
+
+
+def draw_chart(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Draws one chart card from server-side data (``charts``); the model never supplies a data point."""
+    from forliosa.ai import charts
+
+    try:
+        out = charts.draw(ctx.db, ctx.md, ctx.user, resolve_instrument, args, len(ctx.charts))
+    except charts.ChartError as exc:
+        raise ToolError(str(exc)) from exc
+    if out["card"] is not None:
+        ctx.charts.append(out["card"])
+    return out["result"]
+
+
 def search_instruments(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import instruments as instr
 
@@ -782,6 +810,12 @@ def get_derivatives_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     }
 
 
+_CHART_KINDS = ["price", "compare", "revenue", "eps", "performance"]  # = charts.KINDS (imported lazily there)
+_CHART_RANGES = ["1M", "3M", "6M", "YTD", "1Y", "5Y"]  # = charts.RANGES
+_CHART_LABELS = {"price": "畫收盤走勢", "compare": "畫漲跌幅比較", "revenue": "畫月營收", "eps": "畫每季 EPS",
+                 "performance": "畫我的報酬率"}
+
+
 def _sym_label(prefix: str, suffix: str = "") -> Callable[[dict[str, Any]], str]:
     return lambda a: f"{prefix}{(a.get('symbol') or '').upper()}{suffix}"
 
@@ -895,6 +929,27 @@ TOOLS: list[ToolSpec] = sorted([
              "large traders' top-5/top-10 net positions. Call this for questions about 台指期, 夜盤, 外資期貨未平倉, "
              "籌碼 of the whole market or Put/Call.",
              {}, (), get_derivatives_overview, lambda a: "查看期貨盤勢"),
+    ToolSpec("get_related_stocks",
+             "Stocks related to one Taiwan stock or ETF: its benchmark, affiliates and same-industry peers, each "
+             "with the latest official close and its date (not today's live price). Call this when the stock itself "
+             "has no citable news or price for today and you need to know which related stocks, industry or index "
+             "to search the web for, or when the user asks about peers.",
+             {"symbol": _SYMBOL}, ("symbol",), get_related_stocks, _sym_label("查看 ", " 的相關股票")),
+    ToolSpec("draw_chart",
+             "Draw ONE chart card in the app from server-side data; you choose what to draw, never the numbers. "
+             "kind: price = daily closes of one symbol; compare = % change of 2-5 symbols from their first common "
+             "day; revenue = monthly revenue (last 24 months) of 1-5 Taiwan stocks; eps = quarterly EPS (last 8 "
+             "quarters) of 1-5 stocks; performance = the user's own time-weighted return vs a benchmark (symbols "
+             "empty, or one symbol to use as the benchmark). range applies to price, compare and performance. Call "
+             "this when the user asks for a chart or to compare trends over time. Returns each line's first/last "
+             "value, change, high and low, plus notes; status no_data means nothing was drawn.",
+             {"kind": {"type": "string", "enum": _CHART_KINDS},
+              "symbols": {"type": "array", "items": {"type": "string"},
+                          "description": "Codes or names, e.g. [\"2330\", \"2317\"]; [] for performance with "
+                                         "the user's default benchmark"},
+              "range": {"type": "string", "enum": _CHART_RANGES,
+                        "description": "Ignored by revenue and eps (pass 1Y)"}},
+             ("kind", "symbols", "range"), draw_chart, lambda a: _CHART_LABELS.get(a.get("kind"), "畫圖")),
     ToolSpec("search_instruments",
              "Find Taiwan or US stocks/ETFs by code or (partial) Chinese/English name. Call this when the user names "
              "a company you cannot map to a code with certainty.",
@@ -1050,6 +1105,7 @@ def execute(ctx: ToolContext, name: str, args: Any) -> ToolOutcome:
         parts += [f"缺少 {', '.join(missing)}"] if missing else []
         return ToolOutcome("參數不正確：" + "；".join(parts), is_error=True)
     drafts_before = len(ctx.drafts)
+    charts_before = len(ctx.charts)
     try:
         result = spec.handler(ctx, args)
     except ToolError as exc:
@@ -1063,4 +1119,5 @@ def execute(ctx: ToolContext, name: str, args: Any) -> ToolOutcome:
         log.exception("AI tool %s failed", name)
         return ToolOutcome("這項資料暫時查不到（系統錯誤），請改用其他方式回答或告訴使用者稍後再試", is_error=True)
     draft = ctx.drafts[-1] if len(ctx.drafts) > drafts_before else None
-    return ToolOutcome(dump(result), draft=draft)
+    chart = ctx.charts[-1] if len(ctx.charts) > charts_before else None
+    return ToolOutcome(dump(result), draft=draft, chart=chart)

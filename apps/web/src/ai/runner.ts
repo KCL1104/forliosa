@@ -9,6 +9,7 @@ import { formatDateShort, formatMoney, formatPrice, formatQuantity } from "@/lib
 import { replacedAutoDividend } from "@/lib/ledger-display"
 import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
+import { buildLocalChart, parseChartIntent } from "./chart-intent"
 import { parseIntent, sharesOf } from "./intent"
 import { AI_UNAVAILABLE } from "./answer-text"
 import { aiApi, aiRemote, applyChatEvent, draftFromServer, streamChat, type AiUsage, type ChatEvent } from "./remote"
@@ -152,6 +153,15 @@ export function useAiRunner(ctx: AiContext) {
     return true
   }
 
+  /** 本機規則版的畫圖：「畫 0050 的走勢」「比較 2330 和 2317」→ 用 API 的資料組一張圖卡 */
+  async function chartFrom(text: string): Promise<boolean> {
+    const intent = parseChartIntent(text)
+    if (!intent) return false
+    const built = await buildLocalChart(intent, { api, resolve: resolveInstrument, today: appToday(), newId })
+    push({ role: "ai", text: built.text, model: false, ...(built.chart ? { charts: [built.chart] } : {}) })
+    return true
+  }
+
   function answer(kind: Suggestion["kind"]): Answer | null {
     return answerFor(kind, { ctx, privacy, today: appToday() })
   }
@@ -237,6 +247,7 @@ export function useAiRunner(ctx: AiContext) {
     const reply = (answer: Answer) => (replaceId ? updateMessage(replaceId, (m) => ({ ...m, answer })) : say(answer))
     try {
       if (!replaceId && (await draftFrom(text))) return
+      if (!replaceId && (await chartFrom(text))) return
       const intent = parseIntent(text, appToday())
       if (intent.kind === "lookup") {
         const inst = await resolveInstrument(intent.target)

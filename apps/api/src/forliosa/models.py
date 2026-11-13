@@ -159,6 +159,9 @@ class PriceDaily(Base):
     """Unadjusted daily candles written by the worker (real sources only)."""
 
     __tablename__ = "prices_daily"
+    # The market page ranks every symbol of one day (``services.market_overview``): the primary key starts with the
+    # symbol, so a day's rows need their own index.
+    __table_args__ = (Index("ix_prices_daily_date", "date"),)
 
     symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
     date: Mapped[date] = mapped_column(Date, primary_key=True)
@@ -494,6 +497,21 @@ class AiAnalystViews(Base):
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     expires_at: Mapped[datetime] = mapped_column(TZDateTime)
+
+
+class AiMarketSummary(Base):
+    """The market page's AI summary of one Taiwan trading day (``forliosa.ai.market_summary``): one shared entry per
+    day — a headline and a few points, each with the search results it cites. Only verified points are kept."""
+
+    __tablename__ = "ai_market_summary"
+
+    trading_day: Mapped[date] = mapped_column(Date, primary_key=True)
+    status: Mapped[str] = mapped_column(String(16))  # pending | ok | empty | failed
+    headline: Mapped[str] = mapped_column(Text, default="")
+    points: Mapped[list] = mapped_column(JSON, default=list)  # [{"text", "sources": [{"url", "title", "outlet"}]}]
+    model: Mapped[str] = mapped_column(String(64), default="")
+    attempts: Mapped[int] = mapped_column(default=0)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 
 class FundProfile(Base):

@@ -129,13 +129,14 @@ class TurnDisplay:
     text: str = ""
     citations: list[dict[str, Any]] = field(default_factory=list)
     draft_ids: list[str] = field(default_factory=list)
+    charts: list[dict[str, Any]] = field(default_factory=list)  # chart cards (``charts``), kept with their points
     tools: list[dict[str, Any]] = field(default_factory=list)
     grounding: list[dict[str, Any]] = field(default_factory=list)
     error: dict[str, Any] | None = None
     stop_reason: str | None = None
 
     def meta(self) -> dict[str, Any]:
-        return {"display": True, "citations": self.citations, "drafts": self.draft_ids,
+        return {"display": True, "citations": self.citations, "drafts": self.draft_ids, "charts": self.charts,
                 "tools": [{"name": t["name"], "label": t["label"]} for t in self.tools],
                 "grounding": self.grounding, "error": self.error, "stop_reason": self.stop_reason}
 
@@ -233,6 +234,7 @@ def thread_detail(db: Session, user: User, thread_id: str) -> dict[str, Any]:
                      for d in meta.get("drafts", []) if d in drafts]
             messages.append({"id": str(r.id), "turn_id": r.turn_id, "role": "ai", "text": r.text,
                              "citations": meta.get("citations", []), "drafts": cards,
+                             "charts": meta.get("charts", []),
                              "tools": meta.get("tools", []), "grounding": meta.get("grounding", []),
                              "error": meta.get("error"), "at": iso_taipei(r.created_at)})
     return {"id": t.id, "title": t.title, "model": t.model, "created_at": iso_taipei(t.created_at),

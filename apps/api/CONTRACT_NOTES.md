@@ -1850,7 +1850,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 - **寫入**（`history_backfill.py`、`marketdata/yahoo_history.py`、worker 的 `price_backfill`）：每檔一個請求（`query1.finance.yahoo.com/v8/finance/chart/<代號>`，這個網址只在這支抓取器的白名單裡），寫進 `prices_daily`，`source = 'yahoo-history'`。
   - 只寫**這檔第一筆官方收盤價以前**的日子：官方的列不會被蓋掉，今天還沒收盤的那一根不會存。
-  - 存之前先核對：兩邊都有的日子（不含今天），Yahoo 的收盤價和官方收盤價相差超過 0.6% 就整檔不存（`mismatch`）；沒有可核對的日子先不存（`no_overlap`，3 天後再問）。
+  - 存之前先核對：兩邊都有的日子（不含今天），Yahoo 的收盤價和官方收盤價相差超過 0.6% 就整檔不存（`mismatch`）；沒有可核對的日子先不存（`no_overlap`，12 小時後再問）。Yahoo 上櫃商品（`.TWO`）最新一天的收盤價會晚幾個小時才出現（只有開高低）：那一天改用「官方收盤價落在它的高低區間裡」核對，那一根不會存。第一次上線（2026-11-13 16:22 UTC）沒處理這件事，第一批 241 檔裡 77 檔上櫃 ETF 被略過；修正後只試過一次而沒存成的代號會再問一次（`RECHECK_BEFORE`）。沒存成的原因寫在 worker 的記錄裡。
   - HTTP 429：等 60 秒再問同一檔，再不行等 180 秒，第三次還是 429 就結束這一批；403、轉址等拒絕直接結束。下一批最少等 30 分鐘、最多 6 小時。不偽裝瀏覽器、不換位址。
   - 進度記在 `price_backfill`（alembic 0015）：`done`、`not_found`、`mismatch` 不再問。
 - **讀取**：`MarketData.history(symbol, start, end, backfill=True)` 才會讀到這些列（`datapolicy.source_clause(..., backfill=True)`，而且開關要開著）。
@@ -1860,3 +1860,112 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **`GET /meta/attributions`**：開關開著時 `datasets` 多一筆 `key: "yahoo-history"`（`commercial: false`、`license_status: "non_commercial"`），資料來源頁會列出來並標「非商用」。
 - 成交量：Yahoo 的單位也是股，但不含盤後與零股，比官方少幾個百分點到一成多（2330 在 2026-11-12：Yahoo 29,205,152，官方 34,359,285）；開高低收和官方完全相同。
 - `python -m forliosa.history_backfill status｜run｜drop`：看進度、手動跑、整批刪除。
+
+## 2026-11-13 AI 圖卡（`draw_chart`）、相關股票工具、查不到當天價格時的規則
+
+產品負責人的兩個回饋：問台積電時 AI 只回「目前我沒有查到台積電今天的股價」；助理不會畫圖做比較。
+
+### 查不到當天的價格（`ai/prompts.py`，`CHAT_SYSTEM`「技術分析與盤中價格」）
+
+原因是官方收盤價在收盤後的晚上才公布，工具最新的收盤是前一個交易日。原本的規則只寫「盤中」；現在涵蓋三種情況：
+盤中、已收盤但今天的收盤價還沒公布、休市日而上一個交易日的收盤價還沒有。處理順序：
+
+1. 先寫最新的官方收盤價與日期，並說明更新的收盤價還沒公布。
+2. 使用者給了價格就照原規則（`get_technicals` 的 `price_source: "user"`）；沒給就用 `web_search` 找可引用的價格**與這一檔今天的消息**。
+3. 這一檔找不到可引用的價格、也沒有今天的消息：用新工具 `get_related_stocks` 查同產業與相關個股，再搜尋今天的類股表現、相關個股的消息、加權指數的漲跌（大型權值股可看前一晚 ADR）。每一點附來源與時間，並說清楚這是相關資訊、不是這一檔的報價。
+4. 都找不到才說今天還沒有可引用的資訊，並請使用者輸入現在看到的價格。
+
+「不可以只回一句『查不到今天的股價』就結束」寫進提示；仍然不可猜測或估計價格。
+
+### `get_related_stocks`（`ai/tools.py`）
+
+包 `services.related.related`（個股頁的「相關股票」）：`{symbol, name, industry, related: [{symbol, name, reason_label, close, change_pct, as_of, is_index, is_demo}], units, notes, sources}`，不含走勢小圖。`close` 是最新的官方收盤價（`as_of` 是日期），`units` 寫明不是今天的即時價。美股回空清單與「美股沒有相關股票資料」。
+
+### `draw_chart`（`ai/charts.py`；`ai/tools.py` 只註冊）
+
+設計原則：**模型只決定畫什麼，每個點都是伺服器讀的資料**。輸入 `{kind, symbols, range}` 三個都必填（strict schema 沒有新增選填參數）：
+
+| kind | symbols | 資料 | 單位（`unit`）／橫軸（`x`） |
+|---|---|---|---|
+| `price` | 剛好 1 檔 | `md.history` 的收盤價（未還原） | `price`（`currency` 是原幣）／`date` |
+| `compare` | 2–5 檔 | 同上，換算成漲跌幅：從**所有線都有收盤價的第一天**起算，那天是 0 | `pct`／`date` |
+| `revenue` | 1–5 檔台股個股 | `md.monthly_revenue`，近 24 個月 | `amount_k`（新台幣千元）／`month` |
+| `eps` | 1–5 檔個股（同一幣別） | `services.stock.financials(…, "quarterly")` 的 EPS，近 8 季 | `eps`／`quarter` |
+| `performance` | 空清單，或 1 檔當基準 | `services.portfolio.performance` 的 `twr_index − 1` 與 `benchmark_index − 1` | `pct`／`date` |
+
+- `range`：`1M`、`3M`、`6M`、`YTD`、`1Y`、`5Y`；`revenue`、`eps` 不看它（卡片的 `range` 是 null）；`performance` 的 `5Y` 是 `ALL`。
+- `compare` 用每天的報酬連乘，遇到分割或減資（`md.corporate_events`）那一天乘上調整係數（分割：新股數／舊股數；減資：1 − 減資比例），所以 1 拆 4 不會畫成 −75%，並加一句說明「○○ YYYY/MM/DD 股票分割，漲跌幅已調整」。`price` 不調整（和個股頁一樣是當時的價格），在分割日加說明。
+- 漲跌幅只算價格變動、不含股利（`notes` 固定有這一句）；`price` 固定有「收盤價沒有還原權息，除權息日會有缺口」。
+- 取樣：一張卡片所有線合計最多 480 個點（每條線 `max(40, 480 ÷ 線數)`），平均取樣、頭尾都留；五年的日線不會被截斷，也不會讓 SSE 與對話紀錄太大。
+- 畫不出來（收盤價不到兩天、沒有月營收、沒有 EPS、帳本不到兩個交易日、含美股的績效算不出來…）：**不送卡片**，工具回 `{"status": "no_data", "notes": [...]}`，模型照 `notes` 說缺什麼。`compare` 只剩一條線可畫也算畫不出來。
+- 參數不對是 `is_error`（zh-TW 訊息）：`price` 給了兩檔、`compare` 只有一檔、超過 5 檔、台股和美股的 EPS 放在一起、找不到商品。一則回答最多 3 張（`charts.MAX_PER_TURN`），提示寫「一個問題最多畫兩張」。
+- 回給模型的是摘要（每條線的點數、起訖日與值、最高、最低、`price` 的漲跌幅、`notes`、`sources`），不是點；所以結果很小（實測約 700–900 字元）。
+- 隱私：`performance` 只有百分比，卡片與工具結果都沒有市值、成本、股數（測試檢查）；其他四種是公開的市場資料。隱私模式不需要另外遮蔽。
+
+### SSE 與保存
+
+- 新事件 `chart`（`ChartCard`，見 docs/api-contract.md）：在那個工具的 `tool … done` 之後送。
+- 卡片連同點存在這一輪 display 訊息的 `meta.charts`（`store.TurnDisplay.charts`），`GET /ai/threads/{id}` 的 `ThreadMessage.charts` 原樣回傳，所以重新打開對話時圖還在，而且是**當時畫的那張**（不重算）。沒有新表、沒有 migration。對話刪除或過了保存期限就一起消失。
+- 換金鑰時的純文字接續（`recap_messages`）不帶圖卡：模型只看得到先前的文字。
+
+### 系統提示新增「## 圖表」
+
+什麼時候畫（使用者要求畫圖、比較幾檔的走勢、看一段時間的趨勢；一般問答不主動畫）；數字全部由工具讀取、模型不能提供或修改任何一個點；畫好後文字只講重點、不逐點列數字；`no_data` 時直接說缺什麼資料。「畫面只顯示純文字」那一條補上「要畫圖只能呼叫 draw_chart，不要用文字或符號拼出圖表」。
+
+### 測試與實測
+
+- `tests/ai/test_chart_tool.py`（12 個，不連網）：五種 kind、存檔不足的說明、畫不出來不送卡片、共同起算日、分割調整、參數檢查與每則 3 張的上限、取樣、績效圖沒有金額、`get_related_stocks`、`chart` 事件與對話紀錄、提示內容。
+- `python -m forliosa.ai.smoke --only 3`（新增第三題「比較台積電和鴻海這半年的走勢，畫一張圖。」）：2026-11-14 實測 `claude-haiku-5-5` 會呼叫 `draw_chart`（`compare`、兩檔、`6M`），有資料時送出卡片並用一兩句話說明；沒有資料時說明缺資料、沒有卡片。估計每題約 US$0.002。
+- 查不到當天價格的規則：用暫存資料庫（收盤價到 11/12）在休市日實測，模型先寫 11/12 的官方收盤價，再搜尋 11/13 的報導並附來源與時間，沒有只回「查不到」。盤中與「已收盤、尚未公布」兩種情況沙盒的時鐘測不到，只有提示內容的測試。
+
+### 待產品負責人確認
+
+- 圖卡的資料來源那一行（政府資料開放授權的顯名聲明）每張圖都會出現，字很長；要不要改成只寫機關名稱、完整聲明留在「資料來源與授權」頁，需要先確認授權條款允不允許。
+- 「我的報酬率」圖在帳本含美股時畫不出來（和績效頁同一個原因：美股沒有報價）。
+
+## 2026-11-13 市場頁（`GET /market/overview`）與 AI 收盤重點
+
+產品負責人看了 Google 財經的首頁後要的資訊頁；決定登入後另開一頁「市場」，首頁仍是帳本。合約見 `docs/api-contract.md`〈市場頁〉。
+
+### 每一塊用到的資料（`services/market_overview.py`）
+
+| 區塊 | 資料表 | 來源 | 說明 |
+|---|---|---|---|
+| 加權指數、櫃買指數 | `index_daily` | 證交所 MI_INDEX、櫃買 `tpex_index`／`tpex_reward_index` | 指數名稱「發行量加權股價指數」「櫃買指數」；最近 21 列算漲跌與走勢小圖。證交所漲跌百分比沒有正負號，正負號取自漲跌點數（`_signed_pct`） |
+| 台指期近月 | `taifex_futures_daily` | 期交所 | 沿用 `services.derivatives`；資料集授權待確認，`TAIFEX_CONDITIONAL_CONFIRMED=true` 才提供 |
+| 美元兌新台幣 | `fx_rates`（`USDTWD`） | 中央銀行 | 漲跌＝和前一筆相減 |
+| 類股 | `index_daily` | 證交所 MI_INDEX | 名稱以「類指數」結尾、不含「報酬」；四個舊的合併類（機電、塑膠化工、水泥窯製、化學生技醫療）成員各自有列，不列 |
+| 排行 | `prices_daily`、`reference_prices`、`dataset_status` | 證交所 STOCK_DAY_ALL、櫃買 `tpex_mainboard_daily_close_quotes` | 見下 |
+| 重大訊息 | `market_events`（`type = material_info`） | 證交所 t187ap04_L、櫃買 mopsfin_t187ap04_O | 最新一天；發言時間有的沒有補零（`92005`），`_clock` 統一成 `09:20` 再排序 |
+| AI 收盤重點 | `ai_market_summary` | `forliosa.ai.market_summary` | 見下 |
+
+### 排行
+
+- 排行的日期＝`dataset_status` 裡 `twse-openapi/price` 與 `tpex-openapi/price` 兩個日期較早的那個（兩邊都公布了才換日）；沒有這兩列時用 `prices_daily` 最新的官方日期。
+- 只讀官方列：一律經過 `datapolicy.source_clause(PriceDaily.source, policy)`，歷史回補（`yahoo-history`，分割後換算、非官方）不會被當成排行日，也不會被當成前一天的收盤價（`tests/api/test_market_overview.py::test_backfilled_history_is_never_ranked`）。
+- 基準價：`reference_prices` 當天那一列（除權息日是除權息參考價），沒有才用前一個官方交易日的收盤價；沒有基準價、成交量 0、漲跌超過 ±11% 的不列。
+- 只列普通股（代號四碼、不是 `00` 開頭）。名稱用 `md.instrument()`。
+- 兩天全市場約 4,800 列，結果依（日期、政策）留在記憶體，換日才重算。`prices_daily` 的主鍵是（symbol, date），所以加了 `ix_prices_daily_date`（alembic 0016）；回補五年日線之後這張表約 280 萬列，沒有這個索引就是整表掃描。本機用 2026-11-12 的真實資料：第一次算 0.45 秒，之後整個回應約 20 毫秒。
+
+### AI 收盤重點（`ai/market_summary.py`，資料表 `ai_market_summary`，alembic 0016）
+
+- 每個交易日一則、全站共用，`ai_usage.feature = "market_summary"`、`user_id` 是 NULL（不算任何人的額度）。
+- 什麼時候產生：worker 的 `market_summary` 在交易日 15:05、18:05、22:05 各問一次；收盤後第一次有人開市場頁、當天還沒有時也會在背景產生一次（那次回應沒有 `summary`，下一次才有）。成功就不再產生；失敗或沒通過檢查的 45 分鐘後才重試，一天最多 4 次。
+- 「當天」＝最近一個已經收盤的交易日（交易日 14:00 以後是今天，否則往前找）。頁面顯示最近 5 天內最新的一則，並標日期。
+- 模型只能用 `report_market_summary`（strict）回報 `{headline, points: [{text, urls}]}`；`web_search` 最多 4 次、不用 `web_fetch`。使用者訊息帶官方的加權、櫃買收盤數字（存檔已經有的話），標題的點數只能用這些。
+- 伺服器檢查（`verify`）：每一點只留「網址是模型實際收到的搜尋結果」而且「日期不早於那個交易日」的來源；至少一個來源的日期（`page_age` 或網址裡的日期）落在交易日到之後三天內，這一點才留。留下不到 2 點 → `empty`，整塊不顯示。標題的漲跌方向和官方的加權指數相反時只丟掉標題。
+- 開關：`AI_MARKET_SUMMARY_ENABLED`（預設開）；沒有金鑰或 `AI_WEB_SEARCH=false` 時不呼叫模型。
+- 花費（`claude-haiku-5-5`，2026-11-13 實測一次）：2 次搜尋、輸入 18,704、輸出 3,320 token，US$0.024；上限 4 次搜尋，一個交易日約 US$0.05 以內。
+- 實測（2026-11-13 16:15，官方的加權指數還沒公布）：`ok`，4 點、各附一則報導（ETtoday、華視轉中央社、風傳媒），標題用了官方的櫃買指數數字。
+
+### 其他
+
+- `ViewAsMiddleware`：`/market/overview` 加進不讀個人資料的清單（查看別人的資產時照常可看）。
+- 設定：`config.py` 加了一個 `ai_market_summary_enabled`。
+- 測試：`tests/api/test_market_overview.py`（9）、`tests/ai/test_market_summary.py`（15），都不連網。
+
+### 待產品負責人確認
+
+1. 重大訊息一天有幾百則（2026-11-12 是 770 則），現在只列最新的 30 則。要不要改成「只列我的持股與觀察清單的」？
+2. 類股要不要保留「電子工業」（它是半導體、電腦及週邊等八個電子類的合計，新聞常講的「電子類股」）？現在保留，只拿掉四個舊的合併類。
+3. AI 收盤重點的來源日期檢查偏嚴（至少一則報導看得出日期）；如果常常整塊不出現，可以放寬成「沒有日期的報導也算」。

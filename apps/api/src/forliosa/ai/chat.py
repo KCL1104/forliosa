@@ -1,7 +1,8 @@
 """The chat turn behind ``POST /ai/chat``: a streaming tool loop that yields SSE events.
 
 Why a manual loop rather than the SDK's beta tool runner: every turn must stream text to the browser, forward
-citations and server-tool progress as they happen, emit a ``draft`` event when ``draft_transaction`` runs,
+citations and server-tool progress as they happen, emit a ``draft`` event when ``draft_transaction`` runs and a
+``chart`` event when ``draw_chart`` drew one,
 retry a request on another key slot when it fails *before* anything was streamed, and persist the exact
 content blocks for append-only replay. The loop follows the skill's manual-loop rules: append the full
 ``response.content``; answer every ``tool_use`` with a matching ``tool_result`` in one user message
@@ -30,6 +31,7 @@ Events (``event: <name>`` / ``data: <json>``):
 * ``tool``      ``{id, name, status: running|done|error, label}``
 * ``citation``  ``{url, title, cited_text}``
 * ``draft``     the draft card (see ``tools.draft_card``)
+* ``chart``     a chart card drawn by ``draw_chart`` (see ``charts``): every series with its points
 * ``grounding`` ``{items: [{index, start, end, text, reason, signals}]}`` – uncited news-like sentences of a
   turn that used web search / fetch (``grounding``)
 * ``error``     ``{code, message}``
@@ -465,6 +467,9 @@ class ChatTurn:
                     if outcome.draft is not None:
                         state.display.draft_ids.append(outcome.draft["id"])
                         yield "draft", outcome.draft
+                    if outcome.chart is not None:
+                        state.display.charts.append(outcome.chart)
+                        yield "chart", outcome.chart
                     result: dict[str, Any] = {"type": "tool_result", "tool_use_id": tu.id, "content": outcome.content}
                     if outcome.is_error:
                         result["is_error"] = True

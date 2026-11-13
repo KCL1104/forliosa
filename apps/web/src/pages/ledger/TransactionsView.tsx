@@ -172,7 +172,7 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
           <EmptyState
             className={LAST}
             title="還沒有交易紀錄"
-            description="填表單記第一筆，或跟 AI 說一句「買 0050 2 張 52.4」。"
+            description="自己填第一筆，或跟 AI 說一句「買 0050 2 張 52.4」。"
             action={
               <Button variant="outline" onClick={() => ask.action("form")}>
                 記第一筆交易

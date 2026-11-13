@@ -50,12 +50,30 @@ export interface ServerDraft {
   created_at: string
 }
 
+/** `draw_chart` 畫出來的圖卡（SSE `chart` 事件、對話紀錄的 `charts`）：每個點都是伺服器讀的資料，不是模型寫的 */
+export interface AiChart {
+  id: string
+  kind: "price" | "compare" | "revenue" | "eps" | "performance"
+  title: string
+  /** price＝收盤價（原幣）；pct＝分數（0.0123＝1.23%）；amount_k＝新台幣千元；eps＝每股盈餘（元） */
+  unit: "price" | "pct" | "amount_k" | "eps"
+  currency: string | null
+  /** 橫軸：日期 YYYY-MM-DD、月份 YYYY-MM、季別 2026Q3 */
+  x: "date" | "month" | "quarter"
+  range: string | null
+  series: { name: string; symbol: string | null; points: { t: string; v: number }[] }[]
+  notes: string[]
+  sources: string[]
+  is_demo: boolean
+}
+
 export type ChatEvent =
   | { event: "thread"; data: { id: string; title: string; created: boolean } }
   | { event: "text"; data: { delta: string } }
   | { event: "tool"; data: Required<Pick<ToolStep, "id" | "status">> & ToolStep }
   | { event: "citation"; data: Citation }
   | { event: "draft"; data: ServerDraft }
+  | { event: "chart"; data: AiChart }
   | { event: "error"; data: ChatErrorInfo }
   /** 沒有附來源的段落（後端尚未定稿：容錯接受 `{items: [{text, reason, start?, end?}]}`） */
   | { event: "grounding"; data: unknown }
@@ -84,6 +102,8 @@ interface ThreadMessage {
   text: string
   citations: Citation[]
   drafts: ServerDraft[]
+  /** 選填：舊版後端沒有 */
+  charts?: AiChart[]
   tools: ToolStep[]
   error: ChatErrorInfo | null
   /** 選填：後端開始保存時才有 */
@@ -256,6 +276,18 @@ export function draftFromServer(d: ServerDraft): Draft {
   }
 }
 
+/** 形狀不對的圖卡不畫（後端改版、事件壞掉時不讓整段對話壞掉） */
+export function isChart(c: unknown): c is AiChart {
+  const x = c as Partial<AiChart> | null
+  return (
+    !!x &&
+    typeof x.id === "string" &&
+    typeof x.title === "string" &&
+    Array.isArray(x.series) &&
+    x.series.every((s) => !!s && typeof s.name === "string" && Array.isArray(s.points) && s.points.every((p) => !!p && typeof p.t === "string" && Number.isFinite(p.v)))
+  )
+}
+
 /** 套用一個串流事件到正在寫的 AI 訊息（純函式，方便測試） */
 export function applyChatEvent(m: Message, e: ChatEvent): Message {
   switch (e.event) {
@@ -275,6 +307,8 @@ export function applyChatEvent(m: Message, e: ChatEvent): Message {
     }
     case "draft":
       return m.draftIds?.includes(e.data.id) ? m : { ...m, draftIds: [...(m.draftIds ?? []), e.data.id] }
+    case "chart":
+      return !isChart(e.data) || m.charts?.some((c) => c.id === e.data.id) ? m : { ...m, charts: [...(m.charts ?? []), e.data] }
     case "error":
       // 拒答：這一輪已經串流出來的字不算數，只留下說明
       return e.data.code === "refusal" ? { ...m, text: "", error: e.data } : { ...m, error: e.data }
@@ -305,6 +339,7 @@ export function threadFromServer(t: ThreadDetail): { thread: Thread; drafts: Dra
       tools: m.tools,
       error: m.error ?? undefined,
       draftIds: m.drafts.map((d) => d.id),
+      ...(m.charts?.some(isChart) ? { charts: m.charts.filter(isChart) } : {}),
       ...(m.disclaimer ? { disclaimer: m.disclaimer } : {}),
       ...(m.grounding ? { ungrounded: parseGrounding(m.grounding) } : {}),
       at: m.at,

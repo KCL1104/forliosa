@@ -34,6 +34,7 @@ import {
   type WatchItem,
   type Why,
   type Attributions,
+  type MarketOverview,
   type MarketStatus,
   type ClosedRound,
   type PositionHistory,
@@ -193,6 +194,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
 
     getAttributions: () => request<Attributions>("GET", "/meta/attributions"),
     getMarketStatus: () => request<MarketStatus>("GET", "/meta/market-status"),
+    getMarketOverview: () => request<MarketOverview>("GET", "/market/overview"),
 
     getAnalystViews: (symbol) => request<AnalystViews>("GET", `/instruments/${enc(symbol)}/analyst-views`),
     requestAnalystViews: (symbol) => request<AnalystViews>("POST", `/instruments/${enc(symbol)}/analyst-views`),

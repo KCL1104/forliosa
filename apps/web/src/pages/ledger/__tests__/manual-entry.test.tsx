@@ -9,8 +9,9 @@ import { useUi } from "@/app/ui-store"
 import { createAppRouter } from "@/router"
 
 /**
- * 手動記帳的入口（產品負責人 2026-11-13：「應該要有手動匯入的功能，只有 AI 匯入不太對」）：
- * 帳本的分段旁邊有「記一筆」，直接開表單（不經過 AI 面板）；表單可以勾「存檔後再記一筆」連續補好幾筆。
+ * 手動記帳（產品負責人 2026-11-13、11-14）：帳本的分段旁邊有「記一筆」，直接開輸入框（不經過 AI 面板）。
+ * 輸入方式照 Google 財經：選一檔 → 股數、買進日期、買進價格，可以「再加一筆買進」；沒有稅費試算。
+ * 賣出、股利與其他類型按下面的連結開完整表單；完整表單可以勾「存檔後再記一筆」。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -57,9 +58,63 @@ describe("帳本的「記一筆」", () => {
     expect(useUi.getState().tradeForm.open).toBe(false)
     await userEvent.click(buttons[0]!)
     expect(useUi.getState().tradeForm.open).toBe(true)
-    expect(await screen.findByRole("heading", { name: "記一筆交易" }, T)).toBeInTheDocument()
+    const dialog = await screen.findByRole("dialog", {}, T)
+    expect(within(dialog).getByRole("heading", { name: "記一筆" })).toBeInTheDocument()
     // AI 面板沒有被叫出來問「買賣了什麼？」
     expect(screen.queryByText(/買賣了什麼/)).toBeNull()
+    // 簡單的輸入：沒有類型、備註、稅費試算
+    expect(within(dialog).queryByText("稅費試算")).toBeNull()
+    expect(within(dialog).queryByRole("group", { name: "交易類型" })).toBeNull()
+    expect(within(dialog).getByRole("textbox", { name: "買進價格" })).toBeInTheDocument()
+  })
+
+  it("選一檔、填兩筆買進 → 新增：記成兩筆買進，對話框關閉", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    useUi.getState().openTradeForm({ symbol: "2330" })
+    const dialog = await screen.findByRole("dialog", {}, T)
+    const form = within(dialog)
+    await waitFor(() => expect(form.getByText("台積電")).toBeInTheDocument(), T)
+    const before = (await api.listTransactions({ limit: 200 })).items.length
+    // 沒填就按新增：說哪一格要填，不送出
+    await userEvent.click(form.getByRole("button", { name: "新增" }))
+    expect(form.getByText("請輸入股數")).toBeInTheDocument()
+    expect(form.getByText("請輸入價格")).toBeInTheDocument()
+
+    const first = dialog.querySelector<HTMLInputElement>("#lot-qty-0")!
+    await userEvent.type(first, first.getAttribute("aria-label") === "張數" ? "1" : "1000")
+    fireEvent.change(dialog.querySelector("#lot-date-0")!, { target: { value: "2024-03-05" } })
+    await userEvent.type(dialog.querySelector("#lot-price-0")!, "700")
+    await userEvent.click(form.getByRole("button", { name: "再加一筆買進" }))
+    const second = await form.findByRole("textbox", { name: /第 2 筆的(張數|股數)/ })
+    // 新的一筆沿用上一筆的日期
+    expect((form.getByLabelText("第 2 筆的買進日期") as HTMLInputElement).value).toBe("2024-03-05")
+    await userEvent.type(second, second.getAttribute("aria-label")!.endsWith("張數") ? "2" : "2000")
+    fireEvent.change(form.getByLabelText("第 2 筆的買進日期"), { target: { value: "2024-04-10" } })
+    await userEvent.type(form.getByRole("textbox", { name: "第 2 筆的買進價格" }), "760")
+    await userEvent.click(form.getByRole("button", { name: "新增" }))
+
+    await waitFor(() => expect(useUi.getState().tradeForm.open).toBe(false), T)
+    const after = (await api.listTransactions({ limit: 200 })).items
+    expect(after.length).toBe(before + 2)
+    const added = after.filter((t) => t.symbol === "2330.TW" && (t.trade_date === "2024-03-05" || t.trade_date === "2024-04-10"))
+    expect(added.map((t) => [t.trade_date, t.type, t.quantity, t.price]).sort()).toEqual([
+      ["2024-03-05", "buy", 1000, 700],
+      ["2024-04-10", "buy", 2000, 760],
+    ])
+  })
+
+  it("「賣出、股利或其他」開完整表單，選好的股票留著", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    useUi.getState().openTradeForm({ symbol: "2330" })
+    const dialog = await screen.findByRole("dialog", {}, T)
+    await waitFor(() => expect(within(dialog).getByText("台積電")).toBeInTheDocument(), T)
+    await userEvent.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
+    const full = await screen.findByRole("dialog", {}, T)
+    expect(await within(full).findByRole("heading", { name: "記一筆交易" }, T)).toBeInTheDocument()
+    expect(within(full).getByText("稅費試算")).toBeInTheDocument()
+    await waitFor(() => expect(within(full).getByText("台積電")).toBeInTheDocument(), T)
   })
 
   it("交易分段不再另外放一顆「記一筆」（工具列那一顆每個分段都在）", async () => {
@@ -72,11 +127,11 @@ describe("帳本的「記一筆」", () => {
   })
 })
 
-describe("表單：存檔後再記一筆", () => {
+describe("完整表單：存檔後再記一筆", () => {
   it("勾了之後存檔，表單留著：帳戶、類型、日期不動，股票、數量、價格清空", async () => {
     renderApp("/")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)
-    useUi.getState().openTradeForm({ symbol: "2330" })
+    useUi.getState().openTradeForm({ symbol: "2330", full: true })
     const dialog = await screen.findByRole("dialog", {}, T)
     const form = within(dialog)
     await waitFor(() => expect(form.getByText("台積電")).toBeInTheDocument(), T)

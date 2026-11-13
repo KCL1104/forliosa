@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     # symbol per trading day; off = POST answers "unavailable" without a model call.
     ai_analyst_enabled: bool = True
     ai_analyst_search_max_uses: int = 3
+    # Market page (/market/overview): one shared AI summary per trading day (``forliosa.ai.market_summary``);
+    # off = no model call and the page shows no summary.
+    ai_market_summary_enabled: bool = True
     # Group weekly digests (M5): the worker asks for a group-level summary every Saturday 20:00 (Taipei) through the
     # Message Batches API; off = digests keep their facts and are marked failed without a model call.
     ai_digest_enabled: bool = True

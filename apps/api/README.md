@@ -153,6 +153,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `AI_WHY_ENABLED` | `true` | 個股頁「為什麼漲跌」的 AI 一句話（每檔每個交易日最多一次，失敗時用規則句） |
 | `AI_SCOPE_PRECHECK` | `true` | 明顯離題又沒有財經字詞的提問不呼叫模型，直接婉拒 |
 | `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天（0＝永久） |
+| `AI_MARKET_SUMMARY_ENABLED` | `true` | 市場頁的 AI 收盤重點：每個交易日一則、全站共用（worker 15:05、18:05、22:05；收盤後第一次開頁面也會觸發）；不計入任何人的額度 |
 | `AI_DIGEST_ENABLED`、`AI_MODEL_DIGEST` | `true`、空 | 群組 AI 週報（worker 每週六 20:00，Message Batches；不計入任何成員的額度）；模型預設同 `AI_MODEL` |
 | `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
 | `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |

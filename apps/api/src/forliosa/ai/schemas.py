@@ -70,6 +70,34 @@ class DraftCard(BaseModel):
     created_at: str
 
 
+class ChartPoint(BaseModel):
+    t: str = Field(description="日期 YYYY-MM-DD、月份 YYYY-MM 或季別 2026Q3（見 ChartCard.x）")
+    v: float
+
+
+class ChartSeries(BaseModel):
+    name: str
+    symbol: str | None = Field(description="商品代號；「我的報酬率」這條線是 null")
+    points: list[ChartPoint]
+
+
+class ChartCard(BaseModel):
+    """``draw_chart`` 畫出來的圖卡（SSE ``chart`` 事件、對話紀錄的 ``charts``）。數字全部由伺服器讀取。"""
+
+    id: str
+    kind: Literal["price", "compare", "revenue", "eps", "performance"]
+    title: str
+    unit: Literal["price", "pct", "amount_k", "eps"] = Field(
+        description="price＝收盤價（原幣）；pct＝分數（0.0123＝1.23%）；amount_k＝新台幣千元；eps＝每股盈餘（元）")
+    currency: str | None = None
+    x: Literal["date", "month", "quarter"]
+    range: str | None = None
+    series: list[ChartSeries]
+    notes: list[str] = []
+    sources: list[str] = []
+    is_demo: bool = False
+
+
 class ToolStep(BaseModel):
     name: str
     label: str
@@ -99,6 +127,7 @@ class ThreadMessage(BaseModel):
     text: str
     citations: list[Citation] = []
     drafts: list[DraftCard] = []
+    charts: list[ChartCard] = []
     tools: list[ToolStep] = []
     grounding: list[GroundingItem] = []
     error: ChatError | None = None

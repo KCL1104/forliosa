@@ -1092,3 +1092,96 @@ class MarketSession(BaseModel):
 
 class MarketStatus(BaseModel):
     tw: MarketSession
+
+
+# -- market page (GET /market/overview) ---------------------------------------------------------------------
+class MarketSparkPoint(BaseModel):
+    t: date
+    v: float | None
+
+
+class MarketIndex(BaseModel):
+    key: str  # taiex | tpex | tx | usdtwd
+    name: str
+    unit: str  # 點 | 元
+    value: float | None
+    change: float | None
+    change_pct: float | None  # fraction
+    date: date  # the day this value is of (each item has its own)
+    sparkline: list[MarketSparkPoint]  # up to 20 closes, oldest first; fewer than 2 = nothing to draw
+
+
+class MarketSummarySource(BaseModel):
+    url: str
+    title: str
+    outlet: str
+
+
+class MarketSummaryPoint(BaseModel):
+    text: str
+    sources: list[MarketSummarySource]
+
+
+class MarketSummary(BaseModel):
+    date: date  # the trading day it describes
+    headline: str | None
+    points: list[MarketSummaryPoint]
+
+
+class MarketSector(BaseModel):
+    name: str  # 半導體
+    index_name: str  # 半導體類指數
+    close: float | None
+    change_pct: float  # fraction
+
+
+class MarketSectors(BaseModel):
+    date: date
+    items: list[MarketSector]
+
+
+class MarketMover(BaseModel):
+    symbol: str
+    code: str
+    name: str
+    market: str
+    close: float | None
+    change: float | None
+    change_pct: float | None  # fraction, from the day's official reference price (else the previous close)
+    volume: int | None  # shares
+
+
+class MarketMovers(BaseModel):
+    date: date  # the latest day both exchanges have published
+    prev_date: date | None
+    count: int  # common stocks ranked
+    gainers: list[MarketMover]
+    losers: list[MarketMover]
+    volume: list[MarketMover]
+
+
+class MarketAnnouncement(BaseModel):
+    symbol: str
+    code: str
+    name: str
+    title: str
+    time: str | None  # "17:30" (Taipei)
+    url: str | None
+
+
+class MarketAnnouncements(BaseModel):
+    date: date
+    total: int
+    items: list[MarketAnnouncement]  # latest first, at most 30
+
+
+class MarketOverview(BaseModel):
+    as_of: date | None
+    indices: list[MarketIndex]
+    summary: MarketSummary | None  # the shared AI summary of the latest finished session, when there is one
+    sectors: MarketSectors | None
+    movers: MarketMovers | None
+    announcements: MarketAnnouncements | None
+    is_demo: bool
+    notes: list[str]
+    sources: list[str]

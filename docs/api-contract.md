@@ -581,6 +581,7 @@
 | `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」 |
 | `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字"}` | 網路來源引用（已去重），顯示在回答下方 |
 | `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |
+| `chart` | `ChartCard` | `draw_chart` 畫出來的圖卡（一則回答最多 3 張）：每條線的點都在裡面，前端照著畫；資料不足沒有畫時不送這個事件（同一份也存在 `ThreadMessage.charts`） |
 | `grounding` | `{"items": [GroundingItem]}` | 只在這一輪用了 `web_search`／`web_fetch` 時、最後一個 `text` 之後送：沒有引用又像新聞敘述的句子，前端在該句標「無來源」（同一份也存在 `ThreadMessage.grounding`） |
 | `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
 | `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 回答僅供參考，非投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
@@ -613,9 +614,22 @@
  "messages": [
    {"id": "12", "turn_id": "trn_…", "role": "user", "text": "台積電今天為什麼漲？", "citations": [], "drafts": [], "tools": [], "error": null, "at": "…"},
    {"id": "15", "turn_id": "trn_…", "role": "ai", "text": "…", "citations": [{"url", "title", "cited_text"}],
-    "drafts": [DraftCard], "tools": [{"name": "web_search", "label": "搜尋網路：台積電"}],
+    "drafts": [DraftCard], "charts": [ChartCard], "tools": [{"name": "web_search", "label": "搜尋網路：台積電"}],
     "grounding": [GroundingItem], "error": null, "at": "…"}
  ]}
+
+// ChartCard（draw_chart；數字全部由伺服器讀取，模型只決定畫什麼）
+{"id": "cht_…", "kind": "compare",            // price | compare | revenue | eps | performance
+ "title": "台積電、鴻海 漲跌幅（近 6 個月）",
+ "unit": "pct",                               // price＝收盤價（原幣，見 currency）｜pct＝分數（0.0123＝1.23%）｜amount_k＝新台幣千元｜eps＝每股盈餘（元）
+ "currency": null,                            // price、eps、revenue 才有（"TWD" | "USD"）
+ "x": "date",                                 // date（t＝YYYY-MM-DD）｜month（YYYY-MM）｜quarter（2026Q3；美股是 FY2026Q1）
+ "range": "6M",                               // 1M | 3M | 6M | YTD | 1Y | 5Y；revenue、eps 是 null
+ "series": [{"name": "台積電", "symbol": "2330.TW", "points": [{"t": "2026-05-13", "v": 0.0}, {"t": "2026-05-14", "v": 0.0123}]},
+            {"name": "鴻海", "symbol": "2317.TW", "points": [{"t": "2026-05-13", "v": 0.0}]}],  // 「我的報酬率」的 symbol 是 null
+ "notes": ["漲跌幅只算價格變動，不含股利"],   // 照原文顯示：資料從哪一天開始、哪一檔沒有畫、分割已調整…
+ "sources": ["臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版"],
+ "is_demo": false}
 
 // GroundingItem（start／end 是 text 裡的 Unicode code point 位置；text 是那一句本身）
 {"index": 2, "start": 22, "end": 49, "text": "董事會批准投資 Anthropic 與 OpenAI。", "reason": "uncited_news_claim",
@@ -654,6 +668,8 @@
 `kind`（建議問題）：帳本 `onboard`、`drag`、`lift`、`dividends_next`、`concentration`；個股 `why_move`、`foreign_flow`、`next_dividend`、`cost_on_river`、`add_one_lot`、`is_expensive`、`if_hold_dividend`；群組 `group_share`（與前端離線規則相同）。
 
 - `foreign_flow`「最近外資對這檔的動向？」（`lines: ["最近外資", "對這檔的動向？"]`）：只在**上市個股**（TWSE、`type: "stock"`）出現，排在 `why_move` 之後。上市股票沒有逐檔三大法人與外資持股，AI 用 `web_search` 找最近的新聞與公開資訊回答，每一點附來源與日期（系統提示與 `get_chips` 的說明都這樣要求）；上櫃股票的法人資料在籌碼分頁，不出這題。
+- **圖卡（2026-11-13）**：使用者要求畫圖或比較走勢時，模型呼叫 `draw_chart`（`kind`＋`symbols`（最多 5 檔）＋`range`）。`price` 一檔的收盤價；`compare` 2–5 檔的漲跌幅（從共同的第一天起算，分割與減資已調整，不含股利）；`revenue` 月營收（近 24 個月）；`eps` 每季每股盈餘（近 8 季，台股和美股不放在同一張）；`performance` 使用者自己的時間加權報酬率和基準（只有百分比，任何模式都沒有金額、成本、股數）。每張圖所有線合計最多 480 個點（長的區間平均取樣，頭尾都留）。資料畫不出來（收盤價不到兩天、沒有營收…）時工具回 `status: "no_data"` 與原因，不送 `chart`。前端：日期軸畫折線；月份／季別的柱子總數 ≤ 24 畫柱狀、再多改畫折線；一個縱軸；兩條線以上有圖例，線尾標代號。
+- 新工具 `get_related_stocks`（個股頁「相關股票」那一列，不含走勢小圖）：模型查不到某一檔當天的消息時，用它找同產業與相關個股，再搜尋類股與大盤的消息。
 - 伺服器工具 `web_fetch` 一律帶 `blocked_domains: ["www.twse.com.tw", "mis.twse.com.tw"]`（不自動擷取證交所網站與 MIS；`web_search` 的結果不受影響）。API 的 `allowed_domains` 與 `blocked_domains` 只能二選一：設定了 `AI_WEB_FETCH_ALLOWED_DOMAINS` 時改成從允許清單拿掉這兩個主機，涵蓋它們的上層網域（`twse.com.tw`）換成 `openapi.twse.com.tw`；清單只剩被封鎖的主機時不提供 `web_fetch`。
 
 ### 法人觀點與美股基本面（2026-11-12 新增；法人觀點待後端實作，美股基本面已實作）
@@ -1103,6 +1119,43 @@
   - 資料來源頁固定一段：沒有盤中即時報價、價格是收盤後公布的收盤價、要看盤中請到證交所「基本市況報導」、合法取得盤中報價需要付費授權。
 - **後端：收盤價公布偵測**。證交所與櫃買的收盤檔公布時間不固定（觀察到晚上到隔天清晨）。交易日 13:35 起到隔天 08:30，每 15 分鐘用很小的請求
   （條件式請求或只看檔頭）檢查上市、上櫃的收盤檔有沒有換成當天的；一換就抓進來並更新報價，兩個市場都拿到後停止。照既有的每主機頻率限制，不碰證交所網站與 MIS。
+
+## 市場頁（2026-11-13）
+
+登入後的「市場」頁（`/market`；首頁仍是帳本）。只有**收盤後的官方資料**：沒有盤中、沒有海外指數、美股與加密貨幣。每一塊自己帶日期（上市、上櫃、期貨、匯率公布的時間不同）；沒有的區塊是 `null`／空陣列，不補假資料。
+
+| 方法 | 路徑 | 回應 |
+|---|---|---|
+| GET | `/market/overview` | 見下方（要登入；不讀個人資料，授權查看時照常回應） |
+
+```jsonc
+{
+  "as_of": "2026-11-12",                       // 指數與排行裡最新的日期；什麼都沒有時 null
+  "indices": [                                 // 依序：加權指數、櫃買指數、台指期近月（授權開了才有）、美元兌新台幣
+    { "key": "taiex", "name": "加權指數", "unit": "點", "value": 27270.34, "change": 318.55, "change_pct": 0.0118,
+      "date": "2026-11-12",                    // 這一項自己的日期
+      "sparkline": [{ "t": "2026-10-16", "v": 26120.5 }] }  // 最多 20 個收盤，舊到新；不到 2 點前端不畫
+  ],
+  "summary": {                                 // 全站共用的 AI 收盤重點；沒有時 null
+    "date": "2026-11-12", "headline": "加權指數收漲 1.18%，半導體類股領漲",   // headline 可能是 null
+    "points": [{ "text": "…", "sources": [{ "url": "https://…", "title": "報導標題", "outlet": "中央社" }] }]
+  },
+  "sectors": { "date": "2026-11-12", "items": [{ "name": "半導體", "index_name": "半導體類指數", "close": 912.3, "change_pct": 0.0312 }] },  // 由高到低
+  "movers": {
+    "date": "2026-11-12", "prev_date": "2026-11-11", "count": 1088,           // 上市與上櫃都已公布的最新一天；列入排行的普通股檔數
+    "gainers": [{ "symbol": "2330.TW", "code": "2330", "name": "台積電", "market": "TWSE", "close": 1085, "change": 50, "change_pct": 0.0483, "volume": 30000000 }],
+    "losers": [], "volume": []                                                 // 各最多 10 檔；volume 的單位是股
+  },
+  "announcements": { "date": "2026-11-12", "total": 770,                       // 最新一天的重大訊息；total 是當天全部
+    "items": [{ "symbol": "2330.TW", "code": "2330", "name": "台積電", "title": "…", "time": "17:30", "url": null }] },  // 新的在前，最多 30 則
+  "is_demo": false, "notes": [], "sources": ["臺灣證券交易所〈…〉（2026），依政府資料開放授權條款第 1 版"]
+}
+```
+
+- **排行只列普通股**（四碼、不是 00 開頭）：ETF、特別股、權證不列。漲跌幅以當天的官方參考價為準（除權息日），沒有參考價才用前一個交易日的收盤價；超過 ±11% 的不列（不是漲跌幅限制內的變動）。
+- **排行的日期**是上市與上櫃**都**已公布收盤價的最新一天（兩邊公布的時間不同，只排一半的市場會誤導）。
+- **AI 收盤重點**：每個交易日一則、所有人看到同一則，不計入任何人的 AI 額度。每一點的 `sources` 都是模型實際收到的搜尋結果，而且至少一則的日期是那個交易日（或之後三天內）；通過檢查的不到兩點就整塊不提供。沒有金鑰、關掉網路搜尋或 `AI_MARKET_SUMMARY_ENABLED=false` 時一律 `null`。
+- 台指期近月是期交所「授權待確認」的資料集：`TAIFEX_CONDITIONAL_CONFIRMED=true` 才會出現在 `indices`。
 
 ## 討論串（2026-11-13）
 

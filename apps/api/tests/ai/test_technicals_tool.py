@@ -267,7 +267,12 @@ def test_system_prompt_has_the_technical_and_intraday_price_rules():
         "price_source 填 user", "回答時稱為「你提供的價格」", "不是查證過的資料",
         "price_source 填 web", "price_time 填來源寫的時間", "一定要引用那個來源", "這個價格可能已經過時",
         "不可稱為「即時」或官方報價", "不要用 web_fetch 讀證交所網站或 MIS",
-        "找不到可靠的價格：直接說查不到，用最新收盤價分析，並請使用者輸入現在看到的價格",
+        "當天的收盤價在收盤後的晚上才公布", "寫「已收盤」但今天的收盤價還沒公布",
+        "或寫「休市日」而上一個交易日的收盤價還沒有", "並說明更新的收盤價還沒公布",
+        "不可以只回一句「查不到今天的股價」就結束", "以及這一檔今天的消息",
+        "用 get_related_stocks 查同產業與相關的個股", "今天的類股表現、相關個股的消息與加權指數的漲跌",
+        "前一晚 ADR 的表現", "這是相關資訊，不是這一檔的報價",
+        "直接說今天還沒有可引用的資訊，用最新收盤價分析，並請使用者輸入現在看到的價格",
         "絕對不要猜測、估計或憑記憶寫現在的價格", "兩部分要分開說明",
         "或使用者在對話中自己提供的數字（要標明是使用者提供的）",
     ):
@@ -277,4 +282,4 @@ def test_system_prompt_has_the_technical_and_intraday_price_rules():
                    "網路搜尋不是行情來源：股價、成交量、財報數字以工具資料為準", "只寫有根據的事實"):
         assert phrase in CHAT_SYSTEM, phrase
     assert CHAT_SYSTEM.index("## 資料從哪裡來") < CHAT_SYSTEM.index("## 技術分析與盤中價格") \
-        < CHAT_SYSTEM.index("## 記帳一律先起草")
+        < CHAT_SYSTEM.index("## 圖表") < CHAT_SYSTEM.index("## 記帳一律先起草")

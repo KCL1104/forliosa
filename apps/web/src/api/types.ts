@@ -1332,6 +1332,86 @@ export class ApiError extends Error {
  * `GET /meta/market-status`：台股今天是不是交易日、現在是不是盤中（不讀使用者資料，不用登入）。
  * 沒有盤中即時報價：這個狀態只用來決定價格旁要不要加一行「盤中不更新」「今天的收盤價還沒公布」。
  */
+/**
+ * 市場頁（`GET /market/overview`）：都是收盤後的官方資料，沒有盤中、沒有海外指數。
+ * 每個指數有自己的日期（上市、上櫃、期貨、匯率公布的時間不同）。
+ */
+export interface MarketIndex {
+  key: "taiex" | "tpex" | "tx" | "usdtwd"
+  name: string
+  /** 點｜元 */
+  unit: string
+  value: number | null
+  change: number | null
+  /** 分數（0.0123＝1.23%） */
+  change_pct: number | null
+  date: string
+  /** 最多 20 個收盤，舊到新；不到 2 點就不畫 */
+  sparkline: { t: string; v: number | null }[]
+}
+export interface MarketSummarySource {
+  url: string
+  title: string
+  outlet: string
+}
+/** 每個交易日一則、全站共用的 AI 收盤整理：每一點都附它依據的報導 */
+export interface MarketSummary {
+  date: string
+  headline: string | null
+  points: { text: string; sources: MarketSummarySource[] }[]
+}
+export interface MarketSector {
+  /** 半導體 */
+  name: string
+  /** 半導體類指數 */
+  index_name: string
+  close: number | null
+  change_pct: number
+}
+export interface MarketMover {
+  symbol: string
+  code: string
+  name: string
+  market: Market
+  close: number | null
+  change: number | null
+  /** 以當天的官方參考價為準（沒有就用前一天收盤） */
+  change_pct: number | null
+  /** 股 */
+  volume: number | null
+}
+export interface MarketMovers {
+  /** 上市與上櫃都已公布的最新一天 */
+  date: string
+  prev_date: string | null
+  /** 列入排行的普通股檔數 */
+  count: number
+  gainers: MarketMover[]
+  losers: MarketMover[]
+  volume: MarketMover[]
+}
+export interface MarketAnnouncement {
+  symbol: string
+  code: string
+  name: string
+  title: string
+  /** 「17:30」（台北） */
+  time: string | null
+  url: string | null
+}
+export interface MarketOverview {
+  as_of: string | null
+  indices: MarketIndex[]
+  summary: MarketSummary | null
+  sectors: { date: string; items: MarketSector[] } | null
+  movers: MarketMovers | null
+  /** 最新一天的重大訊息：新的在前，最多 30 則；`total` 是當天全部的則數 */
+  announcements: { date: string; total: number; items: MarketAnnouncement[] } | null
+  is_demo: boolean
+  notes: string[]
+  sources: string[]
+}
+
 export interface MarketStatus {
   tw: {
     /** 台北時間的今天（YYYY-MM-DD） */
@@ -1416,6 +1496,8 @@ export interface ForliosaApi {
   // 資料來源與授權（不需登入）
   getAttributions(): Promise<Attributions>
   getMarketStatus(): Promise<MarketStatus>
+  // 市場頁：指數、AI 收盤整理、類股、排行、重大訊息（收盤後的官方資料）
+  getMarketOverview(): Promise<MarketOverview>
   // 法人觀點：GET 讀當日共用快取；POST 觸發 AI 網路搜尋（計入觸發者的 AI 額度）
   getAnalystViews(symbol: string): Promise<AnalystViews>
   requestAnalystViews(symbol: string): Promise<AnalystViews>

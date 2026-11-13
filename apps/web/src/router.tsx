@@ -101,6 +101,13 @@ const stockRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/stock/StockPage"), "StockPage"),
 })
 
+// 市場：收盤後的指數、類股、排行與重大訊息（登入後；首頁仍是帳本）
+const marketRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/market",
+  component: lazyRouteComponent(() => import("@/pages/market/MarketPage"), "MarketPage"),
+})
+
 const groupsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/groups",
@@ -211,6 +218,7 @@ const privacyRoute = createRoute({
 const routeTree = rootRoute.addChildren([
   ledgerRoute,
   stockRoute,
+  marketRoute,
   groupsRoute,
   groupRoute,
   memberRoute,

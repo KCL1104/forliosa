@@ -20,6 +20,7 @@ from forliosa.api.routes import (
     discussions,
     groups,
     market,
+    market_page,
     portfolio,
     recurring,
     stock,
@@ -121,8 +122,8 @@ def create_app() -> FastAPI:
     def meta_market_status(db: Session = Depends(get_db)):
         return market_status(db)
 
-    for module in (users, auth, accounts, market, stock, derivatives, transactions, portfolio, watchlist, recurring,
-                   ai, delegations, groups, discussions):
+    for module in (users, auth, accounts, market, market_page, stock, derivatives, transactions, portfolio, watchlist,
+                   recurring, ai, delegations, groups, discussions):
         api.include_router(module.router)
     api.include_router(discussions.admin_router)
     app.include_router(api)

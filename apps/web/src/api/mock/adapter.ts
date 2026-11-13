@@ -15,6 +15,7 @@ import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
 import { mockMarketNow, mockMarketStatus, mockToday, type MockMarket } from "./market-status"
+import { buildMarketOverview } from "./market-overview"
 import { buildCompany, buildRelated } from "./company"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, ymd, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
@@ -700,6 +701,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
     getAttributions: () => wait(() => buildAttributions(commercial ? "commercial" : "personal")),
     getMarketStatus: () => wait(() => mockMarketStatus(options.market ?? "closed")),
+    getMarketOverview: () => wait(() => buildMarketOverview(demo, mockToday())),
 
     getAnalystViews: (symbol) => wait(() => analyst.get(spec(symbol).symbol)),
     requestAnalystViews: (symbol) => wait(() => analyst.request(spec(symbol).symbol)),
@@ -792,7 +794,7 @@ const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "exportMe
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",
-  "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions", "getMarketStatus",
+  "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions", "getMarketStatus", "getMarketOverview",
   // 討論串的讀取一律以登入者本人回答（前端在查看模式擋下討論頁）
   "listTopics", "getTopic", "listReplies",
 ])

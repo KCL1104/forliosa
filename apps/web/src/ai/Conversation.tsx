@@ -6,6 +6,7 @@ import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { cleanAnswer, DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
 import { useAiUsage } from "./remote-hooks"
+import { ChartCard } from "./ChartCard"
 import { DraftCard } from "./DraftCard"
 import { textLink } from "./Home"
 import { kaiSize } from "./kai-size"
@@ -19,7 +20,7 @@ type Runner = ReturnType<typeof useAiRunner>
 
 /**
  * 對話：使用者的話靠右（格線小框、墨色）；模型寫的話是石墨灰楷體，本機規則或範本寫的句子是墨色 Noto Sans；
- * 草稿卡跟在後面，引用的網路來源是回答下方的「出處」註腳。免責聲明一段對話只出現一次，在最新一則回答下方。
+ * 助理畫的圖（`ChartCard`）和草稿卡跟在後面，引用的網路來源是回答下方的「出處」註腳。免責聲明一段對話只出現一次，在最新一則回答下方。
  */
 export function Conversation({ thread, runner, size = "panel", onNavigate }: { thread: Thread; runner: Runner; size?: "panel" | "screen"; onNavigate?: () => void }) {
   const drafts = useAi((s) => s.drafts)
@@ -31,8 +32,8 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   const last = thread.messages[count - 1]
   // 串流時跟著新的字往下捲（每多約一行才捲一次）；草稿卡與來源出現時也捲
   const growth = last?.streaming
-    ? Math.floor((last.text?.length ?? 0) / 40) + (last.tools?.length ?? 0) * 100 + (last.draftIds?.length ?? 0) * 1000
-    : -((last?.draftIds?.length ?? 0) + (last?.citations?.length ?? 0))
+    ? Math.floor((last.text?.length ?? 0) / 40) + (last.tools?.length ?? 0) * 100 + ((last.draftIds?.length ?? 0) + (last.charts?.length ?? 0)) * 1000
+    : -((last?.draftIds?.length ?? 0) + (last?.charts?.length ?? 0) + (last?.citations?.length ?? 0))
   // 免責只跟著回答（模型的回答、規則版回答），而且一段對話只出現一次：在最新一則回答下方；那則還在寫時先不出現。
   // 草稿前的說明是照使用者的指令算的稅費，不是建議，不算回答。
   const latestAnswer = thread.messages.findLastIndex((m) => m.role === "ai" && !m.error && (m.streaming || !!m.answer || (!!m.text && m.model !== false)))
@@ -86,6 +87,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
             {m.streaming && <StreamingLine message={m} />}
             {m.answer && <AnswerView answer={m.answer} runner={runner} size={size} onNavigate={onNavigate} />}
             {m.error && <ErrorNote code={m.error.code} message={m.error.message} size={size} />}
+            {m.charts?.map((c) => <ChartCard key={c.id} chart={c} />)}
             {[m.draftId, ...(m.draftIds ?? [])].map((id) =>
               id && drafts[id] ? (
                 <DraftCard

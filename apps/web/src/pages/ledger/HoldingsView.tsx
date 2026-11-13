@@ -93,11 +93,11 @@ function EmptyLedger() {
   const ask = useAskAi()
   const readOnly = useReadOnly()
   if (readOnly) return <EmptyState title="目前沒有持股" />
-  // 空狀態兩條路：填表單，或跟 AI 說一句
+  // 空狀態兩條路：自己填，或跟 AI 說一句
   return (
     <EmptyState
       title="帳本還是空的"
-      description="填表單記第一筆，或跟 AI 說一句。"
+      description="自己填第一筆，或跟 AI 說一句。"
       action={
         <div className="flex flex-wrap gap-2.5">
           <Button onClick={() => ask.action("form")}>記第一筆</Button>

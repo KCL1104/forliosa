@@ -981,13 +981,13 @@ describe("查看別人的資產：討論擋下（和群組一樣）", () => {
   })
 })
 
-describe("手機：底部列是 帳本・群組・討論；AI 對話紀錄從「問 AI」的時鐘進去", () => {
+describe("手機：底部列是 帳本・市場・群組・討論；AI 對話紀錄從「問 AI」的時鐘進去", () => {
   it("討論分頁在討論的每一頁都是選取的；「問 AI」裡的時鐘到紀錄頁（標題看得到）", async () => {
     const user = userEvent.setup()
     mount(named)
     const router = renderApp("/discussions/top_p_etf")
     const nav = await screen.findByRole("navigation", { name: "主要" }, T)
-    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual(["帳本", "群組", "討論"])
+    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual(["帳本", "市場", "群組", "討論"])
     expect(within(nav).getByRole("link", { name: "討論" })).toHaveAttribute("aria-current", "page")
     expect(within(nav).getByRole("link", { name: "討論" })).toHaveAttribute("href", "/discussions")
     expect(within(nav).queryByRole("link", { name: "紀錄" })).toBeNull()
@@ -1001,12 +1001,12 @@ describe("手機：底部列是 帳本・群組・討論；AI 對話紀錄從「
     expect(await screen.findByRole("button", { name: "發起新對話" }, T)).toBeInTheDocument()
   })
 
-  it("桌面：頂部列是 帳本・群組・討論", async () => {
+  it("桌面：頂部列是 帳本・市場・群組・討論", async () => {
     desktop = true
     mount()
     renderApp("/discussions")
     const nav = await screen.findByRole("navigation", { name: "主要" }, T)
-    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual(["帳本", "群組", "討論"])
+    expect(within(nav).getAllByRole("link").map((l) => l.textContent)).toEqual(["帳本", "市場", "群組", "討論"])
     expect(within(nav).getByRole("link", { name: "討論" })).toHaveAttribute("aria-current", "page")
     expect(within(nav).getByRole("link", { name: "帳本" })).not.toHaveAttribute("aria-current")
   })
