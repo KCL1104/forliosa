@@ -182,8 +182,13 @@ await check("每日收盤簡報：設定打開 → 面板最上面一塊、問 A
   // 站內換頁（重新載入會讓示範資料回到預設）
   await page.getByRole("link", { name: "Forliosa 帳本" }).first().click()
   const panel = page.getByRole("complementary", { name: "問 AI" })
+  // 簡報在面板的首頁：前面的檢查可能留著一段對話
+  await panel.getByRole("button", { name: "新對話" }).click()
   await panel.getByText("收盤簡報", { exact: true }).waitFor({ timeout: 8000 })
-  if (!(await page.locator("[data-briefing-dot]").count())) throw new Error("no unread dot for a new briefing")
+  // 未讀圓點：一打開簡報就開始算「看過了」，所以只確認這一則原本是沒看過的（標題前的圓點出現過）
+  await page.locator("[data-briefing-dot]").first().waitFor({ state: "attached", timeout: 2000 }).catch(() => {
+    throw new Error("no unread dot for a new briefing")
+  })
   await panel.getByText(/AI 依這些報導整理/).waitFor()
   await page.waitForFunction(() => !document.querySelector("[data-briefing-dot]"), null, { timeout: 6000 })
   // 站內換到紀錄頁（⌘K 的頁面清單）
