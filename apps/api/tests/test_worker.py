@@ -131,6 +131,34 @@ def test_a_background_job_never_holds_up_the_others(monkeypatch):
     assert during >= 3
     assert next(j for j in Worker(md=object()).jobs if j.name == "telegram_poll").background  # type: ignore[arg-type]
 
+def test_expired_login_sessions_are_purged_daily(engine):
+    import asyncio
+    from datetime import timedelta
+
+    from forliosa.models import User, UserSession
+    from forliosa.timeutil import now_utc
+    from forliosa.worker import Worker
+
+    worker = Worker(md=object())  # type: ignore[arg-type]
+    job = next(j for j in worker.jobs if j.name == "session_purge")
+    assert job.due(tp(2026, 11, 14, 4, 55), None)  # every day, weekends included
+    assert not job.due(tp(2026, 11, 14, 4, 40), None)
+    assert not job.due(tp(2026, 11, 14, 5, 15), tp(2026, 11, 14, 4, 55))  # once a day
+    now = now_utc()
+    with Session(engine) as db:
+        db.add(User(id="usr_1", email="a@example.com", display_name="A"))
+        db.add_all([UserSession(id="expired", user_id="usr_1", expires_at=now - timedelta(seconds=1)),
+                    UserSession(id="long-gone", user_id="usr_1", expires_at=now - timedelta(days=40)),
+                    UserSession(id="valid", user_id="usr_1", expires_at=now + timedelta(days=1))])
+        db.commit()
+    asyncio.run(job.run())
+    with Session(engine) as db:
+        assert [s.id for s in db.scalars(select(UserSession))] == ["valid"]
+    asyncio.run(job.run())  # nothing left to delete: still fine
+    with Session(engine) as db:
+        assert db.get(UserSession, "valid") is not None and db.get(User, "usr_1") is not None
+
+
 def test_monthly_archive_and_company_refresh_schedule():
     from datetime import datetime
 

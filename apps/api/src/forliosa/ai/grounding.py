@@ -8,7 +8,10 @@ that overlaps no cited text block and reads like a factual news claim is listed 
 "Reads like a news claim" is a heuristic: a strong news verb (宣布, 批准, 收購, 簽署 …), or a weaker one (通過,
 發布, 投資, 降息 …) together with a date or a named actor (董事會, 公司, 央行, a Latin-script name such as
 OpenAI, a 「quoted」 name). Numbers that came from our own tools carry no citation by design, so plain price /
-holding sentences are never flagged. Offsets are Unicode code-point offsets into the answer text.
+holding sentences are never flagged. The same goes for technical-analysis sentences (``get_technicals``): an
+indicator's abbreviation (MA20, KD, RSI, MACD …) is not a named actor, and the weaker verbs do not count where
+they describe our own price data (「收盤價還沒公布」, 「黃金交叉成立」, 「向上通過」). Offsets are Unicode code-point
+offsets into the answer text.
 """
 
 from __future__ import annotations
@@ -23,8 +26,13 @@ _WEAK = re.compile(r"通過|發布|發表|推出|公告|公布|增資|減資|上
                    r"合作|結盟|invest|launch|sign", re.IGNORECASE)
 _DATE = re.compile(r"\d{1,4}\s*[/年月-]\s*\d{1,2}|\d{1,2}\s*月\s*\d{1,2}\s*日|昨天|今天|今日|昨日|上週|本週|"
                    r"上個月|本月|日前|近日|稍早|(?<!\d)(?:19|20)\d{2}(?!\d)")
+_INDICATOR = r"(?:MA|EMA|SMA|RSI|KD|MACD|DIF|OSC|RSV|BIAS|Bollinger)\d*(?![A-Za-z])"
 _ACTOR = re.compile(r"董事會|股東會|公司|集團|政府|主管機關|金管會|央行|聯準會|法院|交易所|執行長|董事長|"
-                    r"(?<![A-Za-z0-9])[A-Z][A-Za-z0-9&.\-]+|「[^」]{1,30}」")
+                    rf"(?<![A-Za-z0-9])(?!{_INDICATOR})[A-Z][A-Za-z0-9&.\-]+|「[^」]{{1,30}}」")
+# Weak verbs used about our own price data, not about an event: removed before looking for a weak verb.
+_DATA_PHRASE = re.compile(r"收盤價[^，。；,;]{0,8}(?:公布|公告)|(?:公布|公告)的?(?:官方)?收盤價|"
+                          r"(?:交叉|訊號|型態)[^，。；,;]{0,8}成立|成立[^，。；,;]{0,4}(?:交叉|訊號)|"
+                          r"(?:向上|向下|往上|往下)通過")
 _SENTENCE = re.compile(r"[^。！？!?；;\n]+[。！？!?；;]*")
 
 REASON = "uncited_news_claim"
@@ -60,7 +68,7 @@ def check(text: str, segments: list[Segment]) -> list[dict[str, Any]]:
         if any(ca < b and a < cb for ca, cb in cited):
             continue
         sentence = text[a:b]
-        strong, weak = _STRONG.search(sentence), _WEAK.search(sentence)
+        strong, weak = _STRONG.search(sentence), _WEAK.search(_DATA_PHRASE.sub("", sentence))
         date, actor = _DATE.search(sentence), _ACTOR.search(sentence)
         if not (strong or (weak and (date or actor))):
             continue

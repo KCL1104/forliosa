@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import math
 import re
 import threading
 from collections.abc import Callable
@@ -39,7 +40,7 @@ from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiDraft, BrokerAccount, User
 from forliosa.models import Transaction as TxnModel
-from forliosa.timeutil import iso_taipei, now_utc, today_taipei
+from forliosa.timeutil import is_tw_trading_day, iso_taipei, last_tw_trading_day, now_utc, today_taipei
 
 log = logging.getLogger(__name__)
 
@@ -374,6 +375,116 @@ def get_stock_history(ctx: ToolContext, args: dict[str, Any]) -> Any:
     return {"symbol": info.symbol, "name": info.name, "range": args["range"], "stats": stats,
             "closes": [{"t": c["t"], "c": c["c"]} for c in _sample(candles, 30)],
             "is_demo": h.get("is_demo"), "sources": h.get("sources"), "notes": h.get("notes") or []}
+
+
+# -- technical analysis -----------------------------------------------------------------------------------
+# A provisional price further than this from the latest close is outside the ±10 % daily limit of Taiwan stocks and
+# ETFs (the margin covers tick rounding): a typo or the wrong stock rather than a price.
+PROVISIONAL_LIMIT = 0.105
+TECHNICALS_MAX_BARS = 500  # two years of daily bars: every indicator has settled long before
+PRICE_SOURCE_LABELS = {"user": "你提供的價格", "web": "網路來源報導的價格"}
+TECHNICALS_UNITS = ("價格是未還原權息的原始價（除權息日會有缺口）；*_pct、percent_b、bandwidth 為分數"
+                    "（0.0123＝1.23%）；ratio_prev5／ratio_prev20＝最新成交量 ÷ 前 5／20 日均量（量比）；"
+                    "成交量單位為股；RSI、K、D 介於 0 到 100；events 是最近 10 個交易日發生的事實，不是買賣建議")
+PROVISIONAL_CAVEAT = ("不是官方報價，也不是即時報價：把這個價格暫時當成 {day} 的收盤價算出來的結果，"
+                      "盤中還會變動，收盤後以官方收盤價為準")
+
+
+def _sessions_between(after: date, upto: date) -> int:
+    """Taiwan trading days after ``after`` up to and including ``upto``."""
+    count, d = 0, after + timedelta(days=1)
+    while d <= upto:
+        count += is_tw_trading_day(d)
+        d += timedelta(days=1)
+    return count
+
+
+def _plain(x: float) -> str:
+    """1085.0 → "1085", 52.40 → "52.4"."""
+    return f"{x:.4f}".rstrip("0").rstrip(".")
+
+
+def _provisional_block(info: InstrumentInfo, bars: list[Any], ex_dates: list[date], price: float, source: str,
+                       price_time: str | None, notes: list[str]) -> dict[str, Any] | None:
+    """The indicators with ``price`` as a stand-in bar for the trading day that has no official close yet, or
+    ``None`` (and a note) when there is no such day. A price outside the daily limit is a ``ToolError``."""
+    from forliosa.domain import technicals as ta
+
+    last = bars[-1]
+    if info.market not in ("TWSE", "TPEX"):
+        notes.append("暫定價只支援台股與台股 ETF，沒有使用提供的價格")
+        return None
+    day = last_tw_trading_day(today_taipei())
+    if day <= last.t:
+        notes.append(f"{last.t.isoformat()} 的官方收盤價已經有了（{_plain(last.c)}），"
+                     f"沒有使用提供的價格 {_plain(price)}")
+        return None
+    sessions = _sessions_between(last.t, day)
+    ex_days = [d for d in ex_dates if last.t < d <= day]
+    move = price / last.c - 1
+    if ex_days:
+        # the reference price of an ex-dividend day is below the previous close: the limit cannot be checked from it
+        notes.append(f"{ex_days[-1].isoformat()} 是除權息日：與前一個收盤價的差距含除權息的影響，沒有做漲跌幅檢查")
+    elif not (1 - PROVISIONAL_LIMIT) ** sessions <= 1 + move <= (1 + PROVISIONAL_LIMIT) ** sessions:
+        raise ToolError(
+            f"價格 {_plain(price)} 和{info.name}（{info.symbol}）最近的收盤價 {_plain(last.c)}"
+            f"（{last.t.isoformat()}）相差 {move:+.1%}，超出台股單日漲跌幅限制（10%），很可能是價格打錯或不是這一檔。"
+            "沒有計算；請向使用者確認價格與股票後再試，不要自行修改價格")
+    if sessions > 1:
+        notes.append(f"存檔的最新收盤是 {last.t.isoformat()}，到 {day.isoformat()} 之間還有 {sessions - 1} 個交易日"
+                     "沒有資料，暫定價的指標可能失真")
+    block = ta.analyze([*bars, ta.Bar(t=day, c=price, o=price, h=price, l=price)], provisional=True)
+    block.pop("close")
+    events = block.pop("events")
+    return {"official": False, "price": price, "price_source": source,
+            "price_label": PRICE_SOURCE_LABELS[source], "price_time": price_time or "未提供",
+            "caveat": PROVISIONAL_CAVEAT.format(day=day.isoformat()), **block,
+            "events_if_closed_at_price": events}
+
+
+def get_technicals(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Technical indicators from the archived daily closes (``domain.technicals``), and — with a price the user
+    stated or the model found in a cited web source — the same indicators with that price as a stand-in for the
+    day that has not closed. Never fetches a quote: the only prices are the archive's and the one passed in."""
+    from forliosa.domain import technicals as ta
+    from forliosa.services import instruments as instr
+
+    info = resolve_instrument(ctx.md, args["symbol"])
+    price, source = args.get("price"), args.get("price_source")
+    if price is not None:
+        if isinstance(price, bool) or not isinstance(price, int | float) or not math.isfinite(price) or price <= 0:
+            raise ToolError("price 必須是大於 0 的數字；沒有確定的價格就不要傳 price")
+        if source not in PRICE_SOURCE_LABELS:
+            raise ToolError("有 price 時必須說明來源：price_source 填 user（使用者在對話中提供）"
+                            "或 web（有引用來源的網路資料）")
+    h = instr.history(ctx.md, info.symbol, "5Y")
+    bars = [ta.Bar(t=c["t"], c=c["c"], o=c["o"], h=c["h"], l=c["l"], v=c["v"])
+            for c in h["candles"] if c["c"] is not None][-TECHNICALS_MAX_BARS:]
+    notes: list[str] = list(h.get("notes") or [])
+    out: dict[str, Any] = {"symbol": info.symbol, "name": info.name, "currency": info.currency}
+    if not bars:
+        out["as_of_close"] = None
+        if not notes:
+            notes.append("目前沒有這檔的日線資料，無法計算技術指標")
+        if price is not None:
+            notes.append("沒有收盤資料可以接續，沒有使用提供的價格")
+    else:
+        # demo bars (personal mode) are not anybody's official close; ``is_demo`` below says so as well
+        out["as_of_close"] = {"official": not h.get("is_demo"), **ta.analyze(bars)}
+        ex_dates = sorted({d["ex_dividend_date"] for d in instr.dividends(ctx.md, info.symbol)
+                           if d.get("ex_dividend_date")})
+        window = bars[-max(ta.RANGE_PERIODS):]
+        if ex := [d for d in ex_dates if window[0].t <= d <= window[-1].t]:
+            days = "、".join(d.isoformat() for d in ex[-4:])
+            notes.append(f"近 {len(window)} 個交易日內的除權息日：{days}；價格未還原，當天的缺口與跨過那天的均線、"
+                         "指標都含除權息的影響")
+        if price is not None:
+            time_text = str(args.get("price_time") or "").strip()[:80] or None
+            block = _provisional_block(info, bars, ex_dates, float(price), source, time_text, notes)
+            if block is not None:
+                out["with_provisional_price"] = block
+    return {**out, "units": TECHNICALS_UNITS, "notes": notes, "sources": h.get("sources"),
+            "is_demo": h.get("is_demo")}
 
 
 def get_valuation(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -717,6 +828,26 @@ TOOLS: list[ToolSpec] = sorted([
              "volume and up to 30 sampled closes. Call this for questions about trends or performance over time.",
              {"symbol": _SYMBOL, "range": {"type": "string", "enum": HISTORY_RANGE_CHOICES}},
              ("symbol", "range"), get_stock_history, _sym_label("查看 ", " 走勢")),
+    ToolSpec("get_technicals",
+             "Technical indicators of one stock or ETF, computed from archived daily closes (unadjusted prices): "
+             "moving averages 5/10/20/60/120/240 with bias (乖離率), RSI(14), KD(9,3,3), MACD(12,26,9), Bollinger "
+             "bands, volume ratio (量比), 20/60-day high and low, up/down streak, and dated facts of the last 10 "
+             "trading days (MA and KD crosses, MACD histogram turns, closes outside the bands, new highs/lows). "
+             "Call this for any technical-analysis question (技術面, 均線, KD, RSI, MACD, 布林通道, 支撐壓力, "
+             "黃金交叉, 型態). as_of_close is the latest official close. Pass price only for a current price the "
+             "user stated in the conversation (price_source user) or one you found in a citable public web source "
+             "(price_source web); the result then adds with_provisional_price: the same indicators as if the day "
+             "closed at that price, which is not an official or real-time quote. Never pass a guessed or "
+             "remembered price.",
+             {"symbol": _SYMBOL,
+              "price": {"type": "number", "description": "Optional current price per share, only from the user's "
+                                                         "message or a cited web source"},
+              "price_source": {"type": "string", "enum": ["user", "web"],
+                               "description": "Required with price: user = the user stated it, web = found in a "
+                                              "cited web source"},
+              "price_time": {"type": "string", "description": "Optional, with price: when that price was seen, "
+                                                              "e.g. 11/13 10:42, or the source's own wording"}},
+             ("symbol",), get_technicals, _sym_label("計算 ", " 的技術指標")),
     ToolSpec("get_valuation",
              "Valuation of a stock: current P/E, P/B, dividend yield, P/E percentile over 5 years, P/E range and the "
              "multiples used by the P/E river chart, plus the last 12 monthly points. Call this for questions about "
