@@ -256,8 +256,10 @@ def _can_delete(viewer: Viewer, topic: DiscussionTopic, author_id: str | None) -
     return viewer.is_author(author_id) or manages
 
 
-def _can_report(viewer: Viewer, topic: DiscussionTopic, author_id: str | None) -> bool:
-    return topic.scope == "public" and viewer.user is not None and not viewer.is_author(author_id)
+def _can_report(viewer: Viewer, topic: DiscussionTopic, author_id: str | None, status: str) -> bool:
+    """Public content of someone else that is still visible (hidden content has already been handled)."""
+    return (topic.scope == "public" and status == "visible" and viewer.user is not None
+            and not viewer.is_author(author_id))
 
 
 def _body_for(viewer: Viewer, topic: DiscussionTopic, status: str, author_id: str | None, body: str) -> str | None:
@@ -354,7 +356,7 @@ def topic_out(db: Session, md: MarketData, viewer: Viewer, topic: DiscussionTopi
         "body": _body_for(viewer, topic, topic.status, topic.user_id, topic.body),
         "reactions": _reactions(db, "topic", [topic.id], viewer.user_id).get(topic.id, []),
         "can_delete": _can_delete(viewer, topic, topic.user_id),
-        "can_report": _can_report(viewer, topic, topic.user_id),
+        "can_report": _can_report(viewer, topic, topic.user_id, topic.status),
         "can_reply": viewer.user is not None and topic.status == "visible",
     }
     if topic.status == "hidden" and out["body"] is None:
@@ -371,7 +373,7 @@ def _reply_out(viewer: Viewer, refs: _Refs, topic: DiscussionTopic, reply: Discu
         "author": _author(viewer, refs, topic, reply.user_id), "created_at": iso_utc(reply.created_at),
         "status": reply.status, "reactions": reactions, "mine": viewer.is_author(reply.user_id),
         "can_delete": _can_delete(viewer, topic, reply.user_id),
-        "can_report": _can_report(viewer, topic, reply.user_id),
+        "can_report": _can_report(viewer, topic, reply.user_id, reply.status),
     }
 
 

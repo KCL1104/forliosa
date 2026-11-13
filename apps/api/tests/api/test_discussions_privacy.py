@@ -281,6 +281,7 @@ def test_hidden_topic_is_unlisted_and_opens_without_its_body(client, other_clien
     for c in (anon, other_client):
         detail = c.get(f"{TOPICS_URL}/{t['id']}").json()
         assert detail["status"] == "hidden" and detail["body"] is None and detail["can_reply"] is False
+        assert detail["can_report"] is False  # already handled by the site: nothing left to report
         # the title can be the harmful part: others get a placeholder and no stock tags
         assert detail["title"] == "（已被站方隱藏的主題）" and detail["symbols"] == []
         dumped = json.dumps(detail, ensure_ascii=False)

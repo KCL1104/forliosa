@@ -7,7 +7,7 @@
 
 1. `CLAUDE.md`：溝通規則（**回覆產品負責人一律用繁體中文**）、專案位置、重要決定。
 2. `PRODUCT.md`：產品真相與產品負責人的所有決定。
-3. `docs/pending-decisions.md`：**還在等產品負責人決定的事**（56 項＋2026-11-13 新增的 N-1～N-10；每項附建議，小問題可整組回「照建議」）。新的待決定事項加在這裡，不要再散在各文件。
+3. `docs/pending-decisions.md`：**還在等產品負責人決定的事**（56 項＋2026-11-13 新增的 N-1～N-13；每項附建議，小問題可整組回「照建議」）。新的待決定事項加在這裡，不要再散在各文件。
 4. `docs/api-contract.md`：前後端合約；`apps/api/CONTRACT_NOTES.md`：後端實作差異與環境變數。
 5. `DESIGN.md`：聯絡簿視覺系統（兩輪潤飾後的現況，見 §2）。前端改 UI 用 Impeccable skill（`.claude/skills/impeccable`），改之前先讀 `reference/craft-floor.md`。
 6. 研究：`docs/research/`（資料授權、開放資料盤點、新聞與外部來源、Claude Platform、個股頁、重新設計）。
@@ -23,7 +23,10 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 
 2026-11-13 新增（合約在 `docs/api-contract.md` 最後兩節）：
 
-- **討論串**：公開（不用登入就能讀）或群組限定的主題與回覆、表情、公開暱稱、檢舉、站方管理（`ADMIN_EMAILS`）。後端完成（`0013_discussions`）；前端在這個 session 進行中（合併後看 `git log` 與 `DESIGN.md` 的「討論」一節；沒合併的話，工作在分支 `wip/f-discussions`，任務說明在 `PRODUCT.md`「討論與彈幕」與合約）。
+- **討論串（前後端都完成並合併）**：公開（不用登入就能讀）或群組限定的主題與回覆、表情、公開暱稱、檢舉、站方管理（`ADMIN_EMAILS`，頁面 `/admin/discussions`）。
+  頁面：`/discussions`、`/discussions/new`、`/discussions/$topicId`，個股頁與群組頁各有「討論」分頁；手機底部列是「帳本・群組・討論＋問 AI」。
+  前後端實測腳本：`apps/web/scripts/e2e-discussions.mjs`（檔頭有啟動方式；2026-11-13 在 SQLite 上全部通過）。mock 的情境參數見 `apps/web/README.md`（`?discuss=`、`?auth=signed-out`、`?market=`）。
+  還沒做：回覆只能由舊到新翻頁（長主題要按「看更多回覆」才到最新，建議之後後端加 `order=desc`）；公開頁沒有加「不讓搜尋引擎收錄」的標記（N-4）。
 - **收盤價的標示**：產品負責人決定**不做盤中即時報價**（調查：`docs/research/quote-refresh-terms.md`——現有來源只有收盤後資料，合法的盤中報價都要付費）。
   個股頁與帳本標「收盤價・日期」，盤中與「當天收盤價還沒公布」時各多一行說明；`GET /meta/market-status`；worker 的 `close_watch` 每 15 分鐘檢查收盤檔有沒有公布。
 - **線圖彈幕與指數頁：暫緩**（設計保留在合約的「暫緩」小節，不要實作，除非產品負責人說要做）。
@@ -63,7 +66,7 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 ## 3. 接下來可以做
 
 1. 產品負責人回覆 `docs/pending-decisions.md` 之後照決定實作。影響最大的五件：美股價格來源、「只記持股」帳戶的輸入畫面、券商對帳單樣本（M3 匯入）、部署前要建立的帳號（Discord 應用程式等，`docs/deploy.md`）、隱私權政策與服務條款。
-2. 前端討論串做完後，建議再跑一次 Impeccable 評分（上次 31/40），確認新頁面沒有把 AI 感帶回來。
+2. 討論串的頁面還沒有經過 Impeccable 評分（上次全站 31/40，在討論串之前）：建議跑一次，確認新頁面沒有把 AI 感帶回來。
 3. 財報狗式的 AI 產業新聞摘要（產品負責人說之後再做）。
 4. `.impeccable/design.json` 與 4 份過時的 surface brief 可以跑一次 `/impeccable doctor` 整理（子代理回報 `CONTEXT_STALE`，沒有處理）。
 
