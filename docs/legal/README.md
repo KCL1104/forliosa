@@ -44,7 +44,7 @@
 > **2026-11-13 更新（產品負責人：都照建議）**：第 2、7、8、9、10、11、12、13、14 項已照下表的建議填進兩份草稿（通訊地址不公開、最低年齡 18、用登記的 Email 確認本人、不收費、外洩時寄信並公告、重大變更 14 天前在 app 內公告、收費前另行公告並取得同意、申訴 14 天內回覆、終止服務 30 天前公告）。
 > 還沒填的：第 1 項生效日期（開放註冊當天）、第 5 項（備份：Railway 目前的方案不能開，等產品負責人決定做法；第 3、4 項已在 2026-11-13 部署後填好）、第 6 項（要先讀 AI 服務供應商公布的條款）、第 15 項責任上限與第 16 項管轄法院（產品負責人與律師決定）。
 > **2026-11-13 已完成**（兩份草稿已照實際的做法改寫：隱私 §10、條款 §6.5、§12）：自助刪除帳號、匯出我的資料、`/terms` 與 `/privacy` 頁面、登入頁的同意文字與同意版本紀錄（`TERMS_VERSION`，定稿那天才設）、條款更新時登入後的一行通知、登出時清掉瀏覽器裡的 AI 對話。另外新增一項要律師看的：帳號刪除時若公開發言正在停權，會保留一筆不可逆的識別雜湊（隱私 §10.3）。
-> **要先處理、否則草稿有一句不實**：正式環境的網頁目前被 Cloudflare 自動插入了 Web Analytics 的程式（`static.cloudflareinsights.com/beacon.min.js`，2026-11-13 實測），但隱私權政策開頭與 §2 寫「沒有任何第三方的流量分析或追蹤程式、沒有外部腳本」。要在 Cloudflare 後台把 Web Analytics 關掉（建議），或把那兩句改成照實揭露。API token 找不到這個開關，要產品負責人在後台處理。
+> **Cloudflare Web Analytics（2026-11-14 已處理）**：正式環境的網頁被 Cloudflare 自動插入了 Web Analytics 的程式（`static.cloudflareinsights.com/beacon.min.js`）。產品負責人決定不關、改成在隱私權政策照實揭露：開頭的重點、§2.6（新增一項「流量統計」）、§2.7、§4.1 的 Cloudflare 那一列、§8 都改了。寫進去的事實：不設 Cookie、不用 localStorage 是 2026-11-14 用瀏覽器實測的；送出哪些欄位、不辨識個人是照 Cloudflare 自己的說明，政策裡留了一個【待確認】。要請律師看的一點：頁面網址會送給 Cloudflare，而邀請連結的網址裡有邀請碼。日後如果關掉 Web Analytics，這幾處要改回來。
 > 原本的決定：自助刪除帳號、匯出我的資料、`/terms` 與 `/privacy` 頁面、登入頁的同意文字與同意版本紀錄（合約：`docs/api-contract.md`「帳號：匯出資料、刪除帳號、條款版本」）。做完後 (c) 的對應項目要更新。
 
 ### 還要填的【待填】（原本 16 種；已填的在表裡劃掉。兩份草稿裡的字樣和下表完全相同，可以直接搜尋）
@@ -118,7 +118,7 @@
 | P13 | §2.6、§9 | 登入狀態：伺服器只存 Cookie 的雜湊、帳號與到期時間 | `api/api/deps.py:23-37`；`api/models.py:44-50` |
 | P14 | §2.6 | 存取紀錄含 IP、時間、路徑、結果；敏感參數遮蔽；不寫入資料庫 | `apps/api/Dockerfile:34`（uvicorn 預設開啟 access log，加 `--proxy-headers`）；`api/logredact.py:18-30`、`:61-65`；`docs/deploy.md:59`。**這是依 uvicorn 的預設行為推論的，沒有在正式環境實際看過 log，部署後請確認** |
 | P15 | §2.6、§7 | 只記「哪檔股票最近被看過」與時間，不記是誰；30 天後刪除 | `api/models.py:1073-1080`；`api/news/service.py:145-156`、`:274-275`；`api/config.py:142` |
-| P16 | 重點、§2.7 | 沒有第三方分析、追蹤、廣告程式，沒有外部字型或腳本 | `apps/web/index.html`（只有本地 script）；`apps/web/package.json`（`dependencies` 沒有分析套件，字型是內含的 `@fontsource-variable/noto-sans-tc`）；2026-11-13 在 `apps/web/src`、`index.html`、`public` 搜尋 `gtag、google-analytics、googletagmanager、sentry、posthog、plausible、mixpanel、amplitude、hotjar、clarity、umami、sendBeacon、fonts.googleapis、serviceWorker` 都沒有結果 |
+| P16 | 重點、§2.6、§2.7 | 沒有廣告與跨網站追蹤的程式，沒有外部字型；外部腳本只有 Cloudflare Web Analytics（Cloudflare 在送出網頁時自動插入，不在原始碼裡；2026-11-14 用瀏覽器看正式站：載入 `static.cloudflareinsights.com/beacon.min.js`，沒有設 Cookie、沒有寫 localStorage） | `apps/web/index.html`（只有本地 script）；`apps/web/package.json`（`dependencies` 沒有分析套件，字型是內含的 `@fontsource-variable/noto-sans-tc`）；2026-11-13 在 `apps/web/src`、`index.html`、`public` 搜尋 `gtag、google-analytics、googletagmanager、sentry、posthog、plausible、mixpanel、amplitude、hotjar、clarity、umami、sendBeacon、fonts.googleapis、serviceWorker` 都沒有結果 |
 | P17 | §2.7、§5.4 | AI 搜尋用固定的「台北」當大約位置 | `api/ai/tools.py:61-62`、`:822-824` |
 | P18 | §3 | AI 每人每天、每月上限 | `api/config.py:98-99`；`api/ai/store.py:346-352` |
 | P19 | §3 | 不寄行銷信（實際上沒有任何寄信功能） | `apps/api/pyproject.toml:7-19`；在 `apps/api/src` 搜尋 `smtplib、sendgrid、mailgun、send_mail、send_email` 沒有結果 |
