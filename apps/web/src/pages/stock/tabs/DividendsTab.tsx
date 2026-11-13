@@ -8,10 +8,10 @@ import { DemoTag, Section } from "@/components/section"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE } from "@/lib/chart"
-import { formatDateShort, formatMoney, formatPercent } from "@/lib/format"
+import { formatDateShort, formatMoney, formatPercent, formatPerShare } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { twOpenApi, useDatasetSources } from "../text"
-import { Fig, KeyGrid, TabLead } from "./kit"
+import { Fig, KeyGrid, NotYet, TabLead } from "./kit"
 
 /** 股利：我的（已領、下次可領、二代健保；查看模式是「爸爸的股利」）＋歷年配息 */
 export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
@@ -37,14 +37,16 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
   const freq = rows.filter((d) => d.ex_dividend_date && d.ex_dividend_date > yearAgo && d.ex_dividend_date <= today).length
   const yieldNow = quote && ttm > 0 ? ttm / quote.price : null
   const money = (n: number) => (privacy ? "••••" : formatMoney(n, { currency: "TWD" }))
+  // 每股股利：照公告的位數（5 元、0.415 元、US$0.26），和總覽、事件同一個寫法
+  const perShare = (n: number) => formatPerShare(n, inst.market, { dividend: true })
   const lot = us ? 1 : 1000
 
   if (rows.length === 0) {
     // 美股沒有可商用的配息來源（後端與商用 mock 都回空陣列）：不能說成「沒有配過息」
-    return (
-      <p className="border-y border-rule py-6 text-md text-ink-2">
-        {us ? `美股目前沒有可商用的配息資料來源，這裡還不能顯示${inst.name}的配息。` : `${inst.name}過去沒有配息紀錄。`}
-      </p>
+    return us ? (
+      <NotYet title="還不能顯示配息">美股目前沒有可商用的配息資料來源，這裡還不能顯示{inst.name}的配息。</NotYet>
+    ) : (
+      <NotYet title="沒有配息紀錄">{inst.name}過去沒有配息紀錄。</NotYet>
     )
   }
   return (
@@ -53,22 +55,22 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
         <TabLead>
           {next ? (
             <>
-              {formatDateShort(next.ex_dividend_date!)} 除息，每股 <Fig>{unit}{next.cash_dividend}</Fig> 元。
+              {formatDateShort(next.ex_dividend_date!)} 除息，每股 <Fig>{perShare(next.cash_dividend)}</Fig>。
             </>
           ) : ttm > 0 ? (
             <>
-              過去一年每股共配 <Fig>{unit}{Math.round(ttm * 100) / 100}</Fig> 元。
+              過去一年每股共配 <Fig>{perShare(Math.round(ttm * 1000) / 1000)}</Fig>。
             </>
           ) : null}
         </TabLead>
         <KeyGrid
           items={[
-            { label: "近一年現金股利", value: ttm > 0 ? `${unit}${Math.round(ttm * 1000) / 1000}` : "—" },
+            { label: "近一年現金股利", value: ttm > 0 ? perShare(Math.round(ttm * 1000) / 1000) : "—" },
             { label: "殖利率（近一年）", value: yieldNow !== null ? formatPercent(yieldNow, { signed: false }) : "—" },
             { label: "配息頻率", value: freq >= 4 ? "季配" : freq === 2 ? "半年配" : freq === 1 ? "年配" : freq > 0 ? `一年 ${freq} 次` : "—" },
             { label: "下次除息", value: next ? formatDateShort(next.ex_dividend_date!) : "未公告" },
             { label: "下次發放", value: next?.payment_date ? formatDateShort(next.payment_date) : "—" },
-            { label: "最近一期", value: rows[0] ? `${rows[0].period}・${unit}${rows[0].cash_dividend}` : "—" },
+            { label: "最近一期", value: rows[0] ? `${rows[0].period}・${perShare(rows[0].cash_dividend)}` : "—" },
           ]}
         />
       </div>

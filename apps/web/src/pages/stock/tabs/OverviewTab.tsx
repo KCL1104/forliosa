@@ -9,9 +9,8 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatNav, formatPremium } from "@/lib/etf-nav"
 import { announcementHost, eventLabel, eventTitle, mergeAnnouncements, NEWS_CATEGORY_LABEL, type TimelineRow } from "@/lib/events"
-import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatRevenueThousands, formatVolume } from "@/lib/format"
+import { formatCompact, formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPercent, formatPerShare, formatPrice, formatRevenueThousands, formatVolume } from "@/lib/format"
 import { officialNews } from "@/lib/news"
-import { formatQuote } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { AboutCompany } from "../AboutCompany"
@@ -22,7 +21,7 @@ import { useWidth } from "../month-ticks"
 import { RelatedStocks } from "../RelatedStocks"
 import { anchorOf, beforeSpan, labelsCollide, sourceNotes, useDatasetSources, valuationSpan, withoutKind } from "../text"
 import { DateCell } from "@/components/date-cell"
-import { Fig, KeyGrid, type KeyItem } from "./kit"
+import { Fig, KeyGrid, NotYet, type KeyItem } from "./kit"
 
 /**
  * 總覽：三層。
@@ -110,9 +109,10 @@ const has = (n: number | null | undefined): n is number => n !== null && n !== u
 
 function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quote: Quote | undefined, { peInStrip }: { peInStrip: boolean }): KeyItem[] {
   const us = inst.market === "US"
-  const p = (n: number | null | undefined) => formatQuote(n, inst.market, inst.type)
-  // 每股金額：台股寫「元」，美股是 US$ 前綴
-  const money = (n: number) => (us ? `US$${n}` : `${n} 元`)
+  const p = (n: number | null | undefined) => formatPrice(n, inst.market, inst.type)
+  // 每股金額：台股寫「元」，美股是 US$ 前綴；EPS 到分（和估值分頁同一個格式），股利照公告的位數
+  const eps = (n: number) => formatPerShare(n, inst.market)
+  const dividend = (n: number) => formatPerShare(n, inst.market, { dividend: true })
   // 參考價與漲跌停已經在報價下方；本益比在估值那一行（美股沒有那一行，留在格子裡）
   return [
     { label: "開盤", value: p(o?.open ?? quote?.open) },
@@ -124,9 +124,9 @@ function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, q
     ...(peInStrip ? [] : [{ label: "本益比", value: has(o?.pe) ? `${o.pe.toFixed(1)} 倍` : "—" }]),
     { label: "股價淨值比", value: has(o?.pb) ? `${o.pb.toFixed(2)} 倍` : "—" },
     { label: "殖利率", value: has(o?.dividend_yield) ? formatPercent(o.dividend_yield, { signed: false }) : "—" },
-    { label: "近四季 EPS", value: has(o?.eps_ttm) ? money(o.eps_ttm) : "—" },
+    { label: "近四季 EPS", value: has(o?.eps_ttm) ? eps(o.eps_ttm) : "—" },
     { label: "52 週區間", value: has(o?.low_52w) && has(o?.high_52w) ? `${p(o.low_52w)}–${p(o.high_52w)}` : "—" },
-    { label: "最近現金股利", value: has(o?.last_cash_dividend) ? money(o.last_cash_dividend) : "—" },
+    { label: "最近現金股利", value: has(o?.last_cash_dividend) ? dividend(o.last_cash_dividend) : "—" },
     { label: "除息日", value: o?.ex_dividend_date ? formatDateShort(o.ex_dividend_date) : "—" },
   ]
 }
@@ -137,7 +137,7 @@ function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, q
  * 折溢價那格比較長（「溢價 0.14%」加日期），排在淨值、殖利率後面，手機上自己佔一列。
  */
 function etfItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quote: Quote | undefined): KeyItem[] {
-  const p = (n: number | null | undefined) => formatQuote(n, inst.market, inst.type)
+  const p = (n: number | null | undefined) => formatPrice(n, inst.market, inst.type)
   const n = o?.etf_nav
   const md = (d: string | null) => (d ? `（${formatDateShort(d, false)}）` : "")
   const nav = n && n.nav !== null ? n : null
@@ -152,7 +152,7 @@ function etfItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quo
     { label: "3 個月均量", value: formatVolume(o?.avg_volume_3m, inst.market, { compact: true }) },
     { label: "市值", value: has(o?.market_cap) ? formatCompact(o.market_cap) : "—" },
     { label: "52 週區間", value: has(o?.low_52w) && has(o?.high_52w) ? `${p(o.low_52w)}–${p(o.high_52w)}` : "—" },
-    { label: "最近配息", value: has(o?.last_cash_dividend) ? `${o.last_cash_dividend} 元` : "—" },
+    { label: "最近配息", value: has(o?.last_cash_dividend) ? formatPerShare(o.last_cash_dividend, inst.market, { dividend: true }) : "—" },
     { label: "除息日", value: o?.ex_dividend_date ? formatDateShort(o.ex_dividend_date) : "—" },
   ]
 }
@@ -405,7 +405,7 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
           params={{ symbol: inst.symbol }}
           search={{ tab: "events" }}
           resetScroll={false}
-          className="inline-flex h-8 items-center rounded-sm px-1 text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:h-10"
+          className="inline-flex h-8 items-center rounded-sm px-1 text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:h-11"
         >
           所有事件
         </Link>
@@ -417,9 +417,9 @@ function Events({ inst, position, className }: { inst: InstrumentDetail; positio
       ) : events.isError ? (
         <ErrorState className="mt-3" error={events.error} onRetry={() => void events.refetch()} />
       ) : shown.length === 0 ? (
-        <p className="pt-3 text-md text-ink-2">
-          {inst.market === "US" ? "目前沒有已公告的除息，最近也沒有 SEC 申報。" : "目前沒有已公告的除息、營收公布或法說會，最近 90 天也沒有官方公告。"}
-        </p>
+        <NotYet className="border-t-0" title="目前沒有事件">
+          {inst.market === "US" ? "沒有已公告的除息，最近也沒有 SEC 申報。" : "沒有已公告的除息、營收公布或法說會，最近 90 天也沒有官方公告。"}
+        </NotYet>
       ) : (
         <ol>
           {shown.map((e) => (
@@ -439,13 +439,13 @@ function EventRow({ e, today, amount }: { e: TimelineRow; today: string; amount:
   // 類別欄已經寫了「除息」，標題就不再重複（「除息 每股 5 元」→「每股 5 元」）；標題就是類別時寫說明，沒有說明就不寫類別
   const { title, kind } = withoutKind(eventTitle(e), label, e.detail)
   return (
-    <li className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]">
+    <li className={cn("grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]", e.url && "relative hover:bg-hov")}>
       <DateCell date={e.date} pad="py-3" inline />
       <span className="py-3 pl-3 text-md text-ink-2 max-sm:hidden">{kind}</span>
       <span className="min-w-0 py-3 pl-3 sm:pl-0">
         {e.url ? (
-          // 有原文的列：常駐的淡底線，和沒有連結的列分得出來
-          <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-rule underline-offset-3 hover:decoration-ink">
+          // 有原文的列：常駐的底線；連結撐滿整列（手機上整列都按得到，不只是字）
+          <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-ctl underline-offset-3 after:absolute after:inset-0 hover:decoration-ink">
             {title}
             <span className="sr-only">（在{announcementHost(e.url)}查看，另開新視窗）</span>
           </a>

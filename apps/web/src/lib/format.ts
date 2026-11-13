@@ -5,7 +5,8 @@
  * - 數量：1 張 = 1,000 股
  * - 日期：Asia/Taipei
  */
-import type { ColorConvention, Currency, Market, QuantityUnit } from "@/api/types"
+import type { ColorConvention, Currency, InstrumentType, Market, QuantityUnit } from "@/api/types"
+import { quoteDecimals } from "@/lib/tick"
 
 export const MINUS = "−"
 export const MASK = "••••"
@@ -114,12 +115,44 @@ export function formatPercent(r: number | null | undefined, opts: PercentOptions
   return `${sign}${group(Math.abs(pct), decimals)}%`
 }
 
-/** 價格：美股 2 位小數；台股依價位最多 2 位小數 */
-export function formatPrice(p: number | null | undefined, market: Market = "TWSE"): string {
-  if (p === null || p === undefined) return "—"
+/**
+ * 價格的唯一格式（現價、成交價、均價、圖表讀數、相關股票）——The Tick Decimal Rule：
+ * - 美股一律 2 位。
+ * - 台股依升降單位（`quoteDecimals`）：1,085、236.5、398、22.40；ETF 50 元以上是 0.05 檔，2 位（52.40）。
+ * - 不在升降單位上的價位（均價這類算出來的數字）不藏精度：補到看得出差異為止，最多 2 位（692.61、612.5）。
+ * - 呼叫端沒給 `type`（不知道是股票還是 ETF）時：500 元以下用 2 位（股票 0.1／0.5 檔和 ETF 0.05 檔都能照實顯示），
+ *   500 元以上用 0 位；同樣不藏精度。知道 `type` 的地方都要傳，才會是 214 而不是 214.00。
+ */
+export function formatPrice(p: number | null | undefined, market: Market = "TWSE", type?: InstrumentType): string {
+  if (p === null || p === undefined || Number.isNaN(p)) return "—"
   if (market === "US") return formatNumber(p, 2)
-  const decimals = Number.isInteger(p) && p >= 1000 ? 0 : 2
+  const abs = Math.abs(p)
+  let decimals = type ? quoteDecimals(abs, market, type) : abs >= 500 ? 0 : 2
+  // 價格最多到分（0.01）：四捨五入到 2 位後，位數不夠表達這個值就往上補
+  const cents = Math.round(abs * 100) / 100
+  while (decimals < 2 && Math.abs(cents - Math.round(cents * 10 ** decimals) / 10 ** decimals) > 1e-9) decimals++
   return formatNumber(p, decimals)
+}
+
+/**
+ * 換算出來的價位（河流圖各倍數的股價、指數點位）：是估計值，四捨五入到報價的位數（Tick Decimal Rule），
+ * 不像均價那樣補位數：836.8 → 837、287.3、5.04。
+ */
+export function formatPriceLevel(p: number, market: Market = "TWSE", type: InstrumentType = "stock"): string {
+  if (market === "US") return formatNumber(p, 2)
+  return formatNumber(p, quoteDecimals(Math.abs(p), market, type))
+}
+
+/**
+ * 每股金額（近四季 EPS、每股淨值）：財報到分，固定 2 位；台股值後面接「元」，美股前綴 US$。
+ * 52.30 元、−1.25 元、US$8.98。股利每股金額用 `{ dividend: true }`：照公告的位數、最多 3 位、不補 0（5 元、0.415 元）。
+ */
+export function formatPerShare(n: number, market: Market, opts: { dividend?: boolean } = {}): string {
+  const abs = opts.dividend
+    ? new Intl.NumberFormat("zh-TW", { maximumFractionDigits: 3 }).format(Math.abs(n))
+    : group(Math.abs(n), 2)
+  const sign = n < 0 && Math.abs(n) >= (opts.dividend ? 0.0005 : 0.005) ? MINUS : ""
+  return market === "US" ? `${sign}US$${abs}` : `${sign}${abs} 元`
 }
 
 /**
@@ -214,10 +247,4 @@ export function formatDaysUntil(target: string, today: string): string {
 /** 月營收（千元）→ 億元字串 */
 export function formatRevenueThousands(v: number): string {
   return formatCompact(v * 1000)
-}
-
-/** 換算出的價位（河流圖倍數價）：≥1000 取整數、≥100 一位小數、其餘兩位 */
-export function formatPriceLevel(p: number, market: Market = "TWSE"): string {
-  if (market === "US") return formatNumber(p, 2)
-  return formatNumber(p, p >= 1000 ? 0 : p >= 100 ? 1 : 2)
 }

@@ -382,6 +382,57 @@ await check("ETF 淨值與折溢價：0050 同一天、有走勢與逐日數字�
   await page.getByRole("region", { name: "關鍵數據" }).getByText("近四季 EPS").waitFor({ timeout: 8000 })
   if (await page.getByRole("region", { name: /淨值與折溢價|折溢價走勢/ }).count()) throw new Error("stocks have no NAV section")
 })
+await check("個股（第二輪）：美股沒有報價只在價格那一格說一次、沒有走勢圖與殖利率；麵包屑不寫英文產業；術語說明收在「怎麼看」；報價小數位依升降單位；空狀態不用虛線", async () => {
+  await page.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
+  await page.getByRole("heading", { level: 1, name: "Apple" }).waitFor({ timeout: 8000 })
+  await page.getByText("沒有報價", { exact: true }).waitFor({ timeout: 8000 })
+  await page.getByRole("region", { name: "關於「Apple」" }).waitFor({ timeout: 8000 })
+  const main = page.locator("main")
+  const said = await main.evaluate((el) => (el.textContent.match(/沒有可商用的(報價|行情)來源/g) ?? []).length)
+  if (said !== 1) throw new Error(`the no-quote reason should appear once on the overview, got ${said}`)
+  if (await page.getByRole("region", { name: "走勢圖" }).count()) throw new Error("no price chart without a quote")
+  const crumb = await page.getByRole("navigation", { name: "位置" }).textContent()
+  if (/Consumer Electronics|[A-Za-z]{4,} [A-Za-z]{4,}/.test(crumb.replace("AAPL", ""))) throw new Error(`breadcrumb shows an English industry: ${crumb}`)
+  const position = await page.getByRole("region", { name: /的部位$/ }).textContent()
+  if (!/US\$143\.41/.test(position) || /未實現/.test(position)) throw new Error(`US position: cost in US$, no unrealized without a quote: ${position}`)
+  await page.goto(base + "/stock/AAPL?tab=valuation", { waitUntil: "networkidle" })
+  await page.getByText("沒有報價，算不出估值").waitFor({ timeout: 8000 })
+  if (await page.getByRole("region", { name: "殖利率走勢" }).count()) throw new Error("yield trend is price-derived")
+  const again = await main.evaluate((el) => (el.textContent.match(/沒有可商用的(報價|行情)來源/g) ?? []).length)
+  if (again !== 1) throw new Error(`the no-quote reason should appear once on valuation, got ${again}`)
+  // 估值：「每條帶是…」「近 12 個月現金股利 ÷ 收盤價」預設收著，按「怎麼看」才出現
+  await page.goto(base + "/stock/2330.TW?tab=valuation", { waitUntil: "networkidle" })
+  const river = page.getByRole("region", { name: "本益比河流圖" })
+  await river.waitFor({ timeout: 8000 })
+  if (await river.getByText(/每條帶是/).isVisible()) throw new Error("river explainer should start collapsed")
+  if (await page.getByText(/近 12 個月現金股利 ÷ 收盤價/).isVisible()) throw new Error("yield explainer should start collapsed")
+  const howTo = river.getByRole("button", { name: /^怎麼看/ })
+  if ((await howTo.getAttribute("aria-expanded")) !== "false") throw new Error("怎麼看 should be collapsed")
+  await howTo.click()
+  await river.getByText(/每條帶是/).waitFor()
+  if ((await howTo.getAttribute("aria-expanded")) !== "true") throw new Error("怎麼看 should expand")
+  // 河流圖的倍數價、近四季 EPS 和總覽同一個寫法（52.30 元），倍數價依升降單位（837，不是 836.8）
+  const now = page.getByRole("region", { name: "現在的本益比" })
+  await now.getByText(/^\d+\.\d\d 元$/).first().waitFor()
+  if (await now.getByText(/NT\$\d/).count()) throw new Error("per-share amounts use 元, not NT$")
+  // 相關股票：台股價格依升降單位，不會是 214.00 這種補零
+  await page.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
+  const related = page.getByRole("region", { name: "相關股票" })
+  await related.waitFor({ timeout: 8000 })
+  const prices = await related.locator(".num").allTextContents()
+  const padded = prices.filter((t) => /^\d[\d,]*\.00$/.test(t.trim()) && Number(t.replace(/,/g, "")) >= 50)
+  if (padded.length) throw new Error(`stock prices padded with .00: ${padded.join(", ")}`)
+  // 空狀態一種樣子：個股頁沒有虛線（虛線只給 AI 草稿）
+  for (const path of ["/stock/AAPL?tab=valuation", "/stock/0050.TW?tab=valuation", "/stock/2330.TW?tab=chips", "/stock/0050.TW"]) {
+    await page.goto(base + path, { waitUntil: "networkidle" })
+    await page.locator("#stock-tabpanel").waitFor({ timeout: 8000 })
+    await page.waitForTimeout(300)
+    const dashed = await page.locator("main").evaluate((el) =>
+      [...el.querySelectorAll("*")].filter((n) => ["borderTopStyle", "borderBottomStyle", "borderLeftStyle"].some((k) => getComputedStyle(n)[k] === "dashed")).length,
+    )
+    if (dashed) throw new Error(`${path}: ${dashed} dashed borders outside AI drafts`)
+  }
+})
 await check("設定：新增定期定額（驗證 → 儲存）、暫停、修改、刪除（確認）", async () => {
   await page.goto(base + "/settings#recurring", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "新增定期定額" }).click()

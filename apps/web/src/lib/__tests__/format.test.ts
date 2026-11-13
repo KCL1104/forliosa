@@ -11,6 +11,7 @@ import {
   formatMoney,
   formatMoneyCompact,
   formatPercent,
+  formatPerShare,
   formatPrice,
   formatPriceLevel,
   formatQuantity,
@@ -90,16 +91,43 @@ describe("百分比", () => {
 })
 
 describe("價格", () => {
-  it("台股：千元以上整數價不帶小數", () => {
-    expect(formatPrice(1085)).toBe("1,085")
-    expect(formatPrice(22.86)).toBe("22.86")
-    expect(formatPrice(612.5)).toBe("612.50")
+  it("台股依升降單位決定小數位（和報價同一套）", () => {
+    expect(formatPrice(1085, "TWSE", "stock")).toBe("1,085")
+    expect(formatPrice(214, "TWSE", "stock")).toBe("214")
+    expect(formatPrice(236.5, "TWSE", "stock")).toBe("236.5")
+    expect(formatPrice(22.86, "TWSE", "stock")).toBe("22.86")
+    expect(formatPrice(22.4, "TPEX", "stock")).toBe("22.40")
+    expect(formatPrice(52.4, "TWSE", "etf")).toBe("52.40")
     expect(formatPrice(268.42, "US")).toBe("268.42")
+    expect(formatPrice(null)).toBe("—")
   })
-  it("河流圖價位", () => {
+  it("不在升降單位上的價位（均價）不藏精度，最多 2 位", () => {
+    expect(formatPrice(692.61, "TWSE", "stock")).toBe("692.61")
+    expect(formatPrice(612.5, "TWSE", "stock")).toBe("612.5")
+    expect(formatPrice(236.47, "TWSE", "stock")).toBe("236.47")
+    expect(formatPrice(1051.234, "TWSE", "stock")).toBe("1,051.23")
+  })
+  it("不知道是股票還是 ETF 時：500 元以下 2 位、以上 0 位", () => {
+    expect(formatPrice(1085)).toBe("1,085")
+    expect(formatPrice(52.4)).toBe("52.40")
+    expect(formatPrice(214)).toBe("214.00")
+    expect(formatPrice(612.5)).toBe("612.5")
+    expect(formatPrice(22.86)).toBe("22.86")
+  })
+  it("河流圖價位：估計值，四捨五入到報價的位數", () => {
     expect(formatPriceLevel(1500.8)).toBe("1,501")
-    expect(formatPriceLevel(857.6)).toBe("857.6")
+    expect(formatPriceLevel(857.6)).toBe("858")
+    expect(formatPriceLevel(287.3)).toBe("287.3")
     expect(formatPriceLevel(5.04)).toBe("5.04")
+    expect(formatPriceLevel(62.37, "TWSE", "etf")).toBe("62.37")
+    expect(formatPriceLevel(212.333, "US")).toBe("212.33")
+  })
+  it("每股金額（EPS、每股淨值）：固定 2 位、台股接「元」、美股 US$", () => {
+    expect(formatPerShare(52.3, "TWSE")).toBe("52.30 元")
+    expect(formatPerShare(-1.25, "TPEX")).toBe(`${MINUS}1.25 元`)
+    expect(formatPerShare(8.98, "US")).toBe("US$8.98")
+    expect(formatPerShare(5, "TWSE", { dividend: true })).toBe("5 元")
+    expect(formatPerShare(0.415, "TWSE", { dividend: true })).toBe("0.415 元")
   })
 })
 

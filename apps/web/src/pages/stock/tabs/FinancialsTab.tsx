@@ -8,7 +8,7 @@ import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
-import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent, formatRevenueThousands } from "@/lib/format"
+import { formatCompact, formatDate, formatDateShort, formatNumber, formatPercent, formatPerShare, formatRevenueThousands } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { DataNotes } from "@/components/data-notes"
 import { useSourceNote } from "@/hooks/use-source-note"
@@ -146,7 +146,7 @@ function Statements({ symbol }: { symbol: string }) {
   const usd = f?.currency === "USD"
   const unit = f?.amount_unit ?? 1000
   const fmt = (v: number | null, kind: "money" | "pct" | "eps") =>
-    v === null ? "—" : kind === "money" ? formatCompact(v * unit, 0) : kind === "pct" ? formatPercent(v, { signed: false, decimals: 1 }) : v.toFixed(2)
+    v === null ? "—" : kind === "money" ? formatCompact(v * unit, 0) : kind === "pct" ? formatPercent(v, { signed: false, decimals: 1 }) : formatNumber(v, 2)
   // 對去年同季（季報）或前一年（年報）
   const lag = period === "quarterly" ? 4 : 1
   const shown = f ? f.periods.slice(-(period === "quarterly" ? 4 : 5)) : []
@@ -173,7 +173,7 @@ function Statements({ symbol }: { symbol: string }) {
           <TabLead>
             {epsNow !== null && epsPrev !== null && epsPrev > 0 ? (
               <>
-                {f.periods[lastIdx]} EPS <Fig>{epsNow.toFixed(2)}</Fig> {usd ? "美元" : "元"}，{period === "quarterly" ? "比去年同季" : "比前一年"}
+                {f.periods[lastIdx]} EPS <Fig>{formatPerShare(epsNow, usd ? "US" : "TWSE")}</Fig>，{period === "quarterly" ? "比去年同季" : "比前一年"}
                 {epsNow >= epsPrev ? "成長" : "減少"} <Fig>{formatPercent(Math.abs(epsNow / epsPrev - 1), { signed: false, decimals: 0 })}</Fig>。
               </>
             ) : null}
