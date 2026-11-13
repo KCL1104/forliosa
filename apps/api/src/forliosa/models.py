@@ -39,6 +39,10 @@ class User(Base):
     public_name: Mapped[str | None] = mapped_column(String(40), nullable=True)
     public_name_key: Mapped[str | None] = mapped_column(String(400), nullable=True, unique=True, index=True)
     public_name_changed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    # The version of the terms of service / privacy policy (``TERMS_VERSION``) this user last agreed to, and when:
+    # recorded when the account is created and on ``POST /me/terms-accept``. NULL: created before versions existed.
+    terms_version_accepted: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    terms_accepted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
 
 
 class UserSession(Base):
@@ -1332,4 +1336,19 @@ class DiscussionPostLog(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
     scope: Mapped[str] = mapped_column(String(8))
     kind: Mapped[str] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class DiscussionSuspensionCarryover(Base):
+    """A public-posting suspension that outlives its account. When a user deletes their account while suspended, the
+    suspension row goes with the account; this row keeps only ``identity_hash`` — a keyed hash (HMAC-SHA256 with
+    ``SESSION_SECRET``) of the login identity (``discord:<Discord user id>``), not reversible to the person — and
+    until when. If the same Discord account registers again before ``until``, the suspension is applied to the new
+    account and this row is removed (``services.account``)."""
+
+    __tablename__ = "discussion_suspension_carryovers"
+
+    identity_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    until: Mapped[datetime] = mapped_column(TZDateTime)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)

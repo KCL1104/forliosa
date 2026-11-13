@@ -132,6 +132,10 @@ class Settings(BaseSettings):
     # They moderate *public* discussion content through /admin/discussions/* (reports, hide / unhide, public posting
     # suspensions); everyone else gets 404 there. They never see group content. Empty = no site admin.
     admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # The current version of the terms of service and privacy policy (e.g. "2026-11-13"; docs/legal). Recorded on
+    # each account at sign-up; when it changes, GET /me shows a different ``terms_version_current`` and the app asks
+    # the user to acknowledge it (POST /me/terms-accept). Unset: versions are not tracked.
+    terms_version: str | None = None
 
     # -- News (個股頁「新聞報導」, forliosa.news): metadata only — headline, outlet, time, link ------------------
     # The worker refreshes the tracked symbols (held, watched, or viewed in the last NEWS_VIEW_DAYS days) every
@@ -235,7 +239,7 @@ class Settings(BaseSettings):
         return list(dict.fromkeys(o.strip().rstrip("/") for o in v if o.strip()))
 
     @field_validator("discord_client_id", "discord_redirect_uri", "frontend_url", "telegram_bot_username",
-                     mode="before")
+                     "terms_version", mode="before")
     @classmethod
     def _blank_is_none(cls, v: object) -> object:
         """An empty variable means "not set"; a trailing ``/`` on the frontend URL is dropped (it is an origin)."""

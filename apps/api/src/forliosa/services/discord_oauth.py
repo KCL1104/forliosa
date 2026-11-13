@@ -208,10 +208,15 @@ def sign_in(db: Session, profile: DiscordProfile) -> User:
             raise OAuthError("oauth_email_conflict")
         user.avatar_url = profile.avatar_url
     else:
+        from forliosa.services import account  # imported here: account imports the services this module is used by
+
         user = User(id=new_id("usr"), email=profile.email, display_name=profile.display_name,
                     avatar_url=profile.avatar_url, preferences=dict(DEFAULT_PREFERENCES), created_at=now)
+        account.record_terms_at_signup(user, now)
         db.add(user)
         db.flush()
+        # Deleting an account does not lift a public-posting suspension: it continues on the new account.
+        account.apply_carried_suspension(db, user, PROVIDER, profile.id, now)
     db.add(UserIdentity(id=new_id("uid"), user_id=user.id, provider=PROVIDER, subject=profile.id,
                         email=profile.email, created_at=now, last_login_at=now))
     db.commit()

@@ -108,6 +108,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `TELEGRAM_BOT_TOKEN` | Telegram 推播用 | BotFather 給的 token | 見 2.5 節；**機密**，只放在 Railway Variables。api 用它判斷 `telegram_available`，worker 用它收發訊息 |
 | `TELEGRAM_BOT_USERNAME` | Telegram 推播用 | bot 的帳號（不含 `@`），例如 `ForliosaBot` | 兩個都設才會出現「連結 Telegram 群組」 |
 | `ADMIN_EMAILS` | 公開討論管理用 | `you@example.com,other@example.com` | 站方管理員：逗號分隔的 email，不分大小寫，和登入帳號的 email（Discord 已驗證的信箱）比對。管理員可以看公開討論的檢舉、隱藏內容、暫停某人的公開發言（`/api/v1/admin/discussions/*`）；其他人呼叫一律 404。不設就沒有人能處理檢舉。管理員看不到群組內容。改了要重新部署才生效 |
+| `TERMS_VERSION` | 條款定稿後 | 例如 `2026-11-13` | 服務條款與隱私權政策目前的版本（建議用生效日期）。設了之後：新帳號建立時記下這個版本；版本改了，舊帳號登入後會看到一行「服務條款與隱私權政策已更新」要按「知道了」。不設就不追蹤版本。兩份文件還是草稿時先不要設 |
 | `CLAUDE_API_KEY_1`、`_2`、`_3` | AI 用 | Claude API 金鑰（三把，分屬三個 workspace） | **機密**：只放在 Railway Variables。「問 AI」、為什麼、法人觀點都在 api 服務執行，沒設時這些功能顯示「AI 暫時無法使用」。worker 也要設同樣三把（群組週報、新聞補缺、公司簡介）。建議同時在 Anthropic Console 替每個 workspace 設每月花費上限 |
 | `SEC_CONTACT_EMAIL` | 美股基本面用 | 一個聯絡用 email | 只放在對 SEC EDGAR 請求的 User-Agent（SEC 要求自動化存取要留聯絡方式）；沒設時不抓美股基本面與申報。api 與 worker 都要設 |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |

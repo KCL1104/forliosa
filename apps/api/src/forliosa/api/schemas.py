@@ -50,6 +50,18 @@ class User(BaseModel):
     public_name: str | None = None
     is_admin: bool = False
     public_posting_suspended_until: str | None = None
+    # Terms of service / privacy policy: the version this user agreed to and the current one (TERMS_VERSION; null
+    # when versions are not tracked). Different → the app asks the user to acknowledge (POST /me/terms-accept).
+    terms_version_accepted: str | None = None
+    terms_version_current: str | None = None
+
+
+class AccountDeleteIn(StrictModel):
+    confirm: str = Field(max_length=40, description="必須是「刪除我的帳號」")
+
+
+class TermsAcceptIn(StrictModel):
+    version: str = Field(min_length=1, max_length=32, description="GET /me 的 terms_version_current")
 
 
 class MePatch(StrictModel):

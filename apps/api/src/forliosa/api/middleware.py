@@ -51,6 +51,7 @@ VIEW_AS_IGNORED_PATHS = (
     "/meta/{seg}",
     "/auth/providers",
     "/me",
+    "/me/export",  # always the signed-in person's own data
     "/instruments/search",
     "/instruments/{seg}",
     "/instruments/{seg}/quote",

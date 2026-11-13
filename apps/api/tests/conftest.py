@@ -7,6 +7,19 @@ import os
 os.environ.setdefault("FORLIOSA_ENV", "test")
 os.environ.setdefault("MARKET_DATA_PROVIDERS", "demo")
 os.environ.setdefault("DEMO_JITTER", "false")
+# The machine running the tests may carry deployment settings (a cloud session's environment has the Discord client
+# secret and the Telegram bot token): the tests decide these themselves, so whatever is set outside is dropped.
+os.environ.pop("DISCORD_CLIENT_ID", None)
+os.environ.pop("DISCORD_CLIENT_SECRET", None)
+os.environ.pop("DISCORD_REDIRECT_URI", None)
+os.environ.pop("TELEGRAM_BOT_TOKEN", None)
+os.environ.pop("TELEGRAM_BOT_USERNAME", None)
+os.environ.pop("TERMS_VERSION", None)
+os.environ.pop("ADMIN_EMAILS", None)
+os.environ.pop("FRONTEND_URL", None)
+os.environ.pop("CORS_ORIGINS", None)
+os.environ.pop("COOKIE_DOMAIN", None)
+os.environ.pop("SESSION_SECRET", None)
 
 import pytest
 from fastapi.testclient import TestClient

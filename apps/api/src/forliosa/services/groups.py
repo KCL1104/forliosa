@@ -150,8 +150,9 @@ def update_group(db: Session, group: Group, m: GroupMember, changes: dict[str, A
     db.commit()
 
 
-def delete_group(db: Session, group: Group, m: GroupMember) -> None:
-    require_role(m, ("owner",), "只有擁有者可以刪除群組")
+def purge(db: Session, group: Group) -> None:
+    """The group with everything in it: discussions, comments, reactions, invites, channels, digests, share settings
+    and memberships (no commit, no permission check: ``delete_group`` and account deletion call it)."""
     from forliosa.services import discussions  # imported here: discussions imports this module
 
     discussions.purge_group(db, group.id)  # the group's topics with their replies, reactions and tags
@@ -160,6 +161,11 @@ def delete_group(db: Session, group: Group, m: GroupMember) -> None:
         db.execute(delete(model).where(model.group_id == group.id))
     db.execute(delete(GroupMember).where(GroupMember.group_id == group.id))
     db.delete(group)
+
+
+def delete_group(db: Session, group: Group, m: GroupMember) -> None:
+    require_role(m, ("owner",), "只有擁有者可以刪除群組")
+    purge(db, group)
     db.commit()
 
 
