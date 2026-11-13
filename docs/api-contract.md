@@ -1032,7 +1032,48 @@
 - 個人通知管道（`docs/product-spec.md` §4.9 的個人 Telegram／Discord）不在 M5。
 - Telegram 的 bot 預設開著隱私模式（只收到明確給它的指令），前端顯示連結指令時用 `/link@<bot_username> <code>` 的形式最可靠。
 
-**帳號刪除**（之後提供刪除帳號時）：擁有的群組轉給最早的 admin，沒有就最早加入的成員，沒有成員就刪除群組；授權全部刪除；留言顯示「已刪除的帳號」。
+**帳號刪除**：見「帳號：匯出資料、刪除帳號、條款版本」。擁有的群組轉給最早的 admin，沒有就最早加入的成員，沒有成員就刪除群組；授權全部刪除；留言顯示「已刪除的帳號」。
+
+## 帳號：匯出資料、刪除帳號、條款版本（2026-11-13）
+
+產品負責人決定：開放註冊前要有「匯出我的資料」與「自助刪除帳號」；登入頁要連到服務條款與隱私權政策，並記錄使用者同意的版本。文件草稿在 `docs/legal/`。
+
+- 這一節的端點一律以**登入者本人**為準，查看別人資產（`X-Forliosa-View-As`）時回 403 `read_only`（刪除、同意條款）或忽略標頭（匯出只匯出本人的）。
+
+### 匯出我的資料
+
+- `GET /me/export` → `application/json`，`Content-Disposition: attachment; filename="forliosa-export-<YYYYMMDD>.json"`。每人每小時最多 5 次（429 `rate_limited`，帶 `retry_after_seconds`）。
+- 內容只有這個帳號自己的資料，一個 JSON 物件：
+  ```jsonc
+  { "exported_at": "2026-11-13T08:00:00Z", "format_version": 1,
+    "profile": { /* 顯示名稱、email、公開暱稱、偏好設定、建立時間、同意的條款版本 */ },
+    "accounts": [...], "transactions": [...], "recurring_plans": [...], "watchlist": [...],
+    "auto_dividend_skips": [...],
+    "ai": { "threads": [ /* 還在保存期內的對話與訊息 */ ], "drafts": [...] },
+    "groups": [ /* 我加入的群組：名稱、角色、我的分享設定 */ ],
+    "group_comments": [ /* 我寫的留言 */ ], "group_reactions": [...],
+    "delegations": { "given": [...], "received": [...] },
+    "discussions": { "topics": [...], "replies": [...], "reactions": [...] } }
+  ```
+- 不含：別人的資料（群組其他成員的內容、別人授權給我的帳本內容）、行情資料、機密（session、群組頻道的 webhook 網址與 Telegram 連結碼）、站方的檢舉與停權紀錄。金額與股數照帳本原樣（不受隱私模式影響）。
+
+### 刪除帳號
+
+- `DELETE /me`，body `{"confirm": "刪除我的帳號"}`（字串不符 → 422）→ 204，並清除 session cookie。不能復原。
+- 刪除的：個人資料（email、顯示名稱、頭像、公開暱稱、偏好）、所有登入 session、券商帳戶與全部交易、定期定額、觀察清單、股利自動入帳的略過紀錄、AI 對話與草稿、
+  群組成員身分與分享設定、我給別人與別人給我的授權、我按的表情、我送出的檢舉。
+- 留下的（作者變成「已刪除的帳號」，查不回本人）：我在群組寫的留言、公開與群組的討論主題與回覆。AI 用量紀錄只留沒有內容的計數（做帳用），不再連到這個人。
+- 我擁有的群組：轉給最早的 admin，沒有就轉給最早加入的成員，沒有其他成員就刪除群組（連同它的內容）。
+- 正在停權公開發言的帳號刪除後，停權紀錄保留一個不可逆的識別雜湊（Discord 帳號），同一個 Discord 帳號重新註冊時停權仍然有效（到期為止）。
+- 刪除在一個資料庫交易裡完成；失敗就整個不做（500），不會刪一半。
+
+### 條款版本
+
+- 伺服器設定 `TERMS_VERSION`（例如 `2026-11-13`；沒設定＝不啟用這一段）。帳號建立時記錄當時的版本與時間。
+- `GET /me` 多 `terms_version_accepted: string | null`、`terms_version_current: string | null`。兩者不同時，前端在登入後顯示一行「服務條款與隱私權政策已更新」＋連結＋「知道了」。
+- `POST /me/terms-accept` `{"version": "<terms_version_current>"}` → `User`（版本不是目前的 → 409 `terms_version_mismatch`）。
+- 前端頁面：`/terms`、`/privacy`（不用登入就能讀；內容來自 `docs/legal/` 的兩份文件；文件裡還有【待填】時頁面頂端標示「草稿」）。登入頁寫「登入即表示你同意〈服務條款〉與〈隱私權政策〉」並連過去；
+  未登入的公開頁頁尾、設定頁也有連結。
 
 ## 收盤價的標示與盤中狀態（2026-11-13）
 
