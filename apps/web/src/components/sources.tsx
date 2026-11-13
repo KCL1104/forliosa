@@ -26,8 +26,8 @@ export function SourcesFooter({ className }: { className?: string }) {
 
   if (notes.length === 0) {
     return (
-      <p className={cn("mt-12 border-t border-rule pt-3 text-sm", className)}>
-        <Link to="/data-sources" className="text-ink-2 underline-offset-3 hover:text-ink hover:underline">
+      <p className={cn("mt-12 border-t border-rule text-sm", className)}>
+        <Link to="/data-sources" className="inline-flex min-h-11 items-center text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink">
           資料來源與授權
         </Link>
       </p>
@@ -54,7 +54,7 @@ export function SourcesFooter({ className }: { className?: string }) {
               {rows.map((n) => (
                 <li key={sourceKey(n)} className="border-b border-rule py-2 text-md last:border-b-0">
                   {n.href ? (
-                    <a href={n.href} target="_blank" rel="noreferrer" className="underline-offset-3 hover:underline">
+                    <a href={n.href} target="_blank" rel="noreferrer" className="underline decoration-ctl underline-offset-3 hover:decoration-ink">
                       {n.name}
                       <span className="sr-only">（另開新視窗）</span>
                     </a>
