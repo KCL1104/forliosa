@@ -42,7 +42,9 @@ fx_rates (USDTWD)           中央銀行 FTDOpenData_Day 銀行間新臺幣對�
                             is the whole history since 2008, so the first run backfills it; later runs write only
                             new or changed days). Source ``cbc-opendata``: the only USD/TWD series used for valuation
 dataset_status              newest data date per dataset (shown in /meta/attributions; ``weekly`` also checks the
-                            stale endpoints twtazu_od and t187ap09_L)
+                            stale endpoints twtazu_od and t187ap09_L). ``twse-openapi/price`` / ``tpex-openapi/price``
+                            hold the newest trading day whose closes are stored: the worker's close watch (see
+                            "close publication" at the end of this module) reads them to know a day is in
 sec_tickers, sec_companies, SEC EDGAR (group ``sec``, daily 07:50, US government public data): the ticker -> CIK
 sec_filings                 map, trimmed XBRL company facts and 8-K / 10-Q / 10-K filings of every tracked US
                             stock (``forliosa.services.sec``; needs SEC_CONTACT_EMAIL, skipped without it)
@@ -75,6 +77,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import re
 import time as _time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -93,7 +96,7 @@ from forliosa.marketdata import company_data as cd
 from forliosa.marketdata import fund_nav as fnav
 from forliosa.marketdata import opendata as od
 from forliosa.marketdata import taifex as tf
-from forliosa.marketdata.base import ProviderUnavailable, market_of_symbol, tw_symbol
+from forliosa.marketdata.base import ProviderUnavailable, market_of_symbol, parse_tw_date, tw_symbol
 from forliosa.marketdata.http import HttpFetcher
 from forliosa.marketdata.twse import parse_bwibbu_all, parse_stock_day_all
 from forliosa.models import (
@@ -133,7 +136,7 @@ from forliosa.models import (
     ValuationDaily,
     WatchlistItem,
 )
-from forliosa.timeutil import TAIPEI, last_tw_trading_day, next_tw_trading_day, now_taipei
+from forliosa.timeutil import TAIPEI, is_tw_trading_day, last_tw_trading_day, next_tw_trading_day, now_taipei
 
 log = logging.getLogger("forliosa.archive")
 
@@ -248,6 +251,18 @@ class Archiver:
         upsert(self.db, DatasetStatus, [{"key": key, "data_date": data_date, "rows": rows,
                                          "fetched_at": datetime.now(TAIPEI)}], ["key"])
 
+    def _close_status(self, key: str, rows: list[dict[str, Any]]) -> None:
+        """The newest trading day whose official closes are stored (``dataset_status`` key ``…/price``): shown in
+        ``/meta/attributions``, and what the worker's close watch reads to know that a day is in
+        (:func:`close_archived`). It never moves back: a stale copy of the file (the datasets sit behind CDNs) must
+        not make a stored day look missing."""
+        newest = max((r["date"] for r in rows), default=None)
+        if newest is None:
+            return
+        stored = self.db.scalar(select(DatasetStatus.data_date).where(DatasetStatus.key == key))
+        if stored is None or stored <= newest:
+            self._status(key, newest, len(rows))
+
     def _taifex(self, path: str) -> list[dict[str, Any]]:
         """A TAIFEX OpenAPI dataset (JSON or CSV: the Cloudflare cache serves either, see marketdata/taifex.py)."""
         return tf.decode_rows(self.fetcher.get_bytes(f"{TAIFEX_OPENAPI}/{path}"))
@@ -284,7 +299,9 @@ class Archiver:
         rows = [{"symbol": s, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low, "close": q.price,
                  "volume": q.volume, "source": "twse-openapi"}
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
-        return upsert(self.db, PriceDaily, rows, ["symbol", "date"])
+        n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
+        self._close_status("twse-openapi/price", rows)
+        return n
 
     def twse_valuation(self) -> int:
         ratios = parse_bwibbu_all(self._list(f"{TWSE_OPENAPI}/exchangeReport/BWIBBU_ALL"))
@@ -524,6 +541,7 @@ class Archiver:
                  "volume": q.volume, "source": "tpex-openapi"}
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
+        self._close_status("tpex-openapi/price", rows)
         refs = [{"symbol": tw_symbol(r["code"], "TPEX"),
                  "date": next_tw_trading_day(r["last_trading_day"] + timedelta(days=1)),
                  "reference_price": r["reference_price"], "limit_up": r["limit_up"], "limit_down": r["limit_down"],
@@ -956,6 +974,85 @@ def default_fetcher() -> HttpFetcher:
     # Large files (TWT84U ≈ 12 MB, TPEx close quotes ≈ 5 MB); openapi.twse.com.tw resets connections
     # now and then, so retry. Requests to the same host stay ≥ 0.5 s apart (shared limiter).
     return HttpFetcher(timeout=90, retries=2, backoff=2.0)
+
+
+# -- close publication (worker job ``close_watch``) ------------------------------------------------------------------
+# The exchanges publish a trading day's closing prices at no fixed time: observed between the late evening and the
+# next early morning (TWSE STOCK_DAY_ALL after 22:15, by 05:20; TPEx around 23:30 — docs/research/
+# quote-refresh-terms.md §3). From 13:35 on a trading day until 08:30 the next morning the worker therefore asks every
+# 15 minutes whether each exchange's close dataset has turned to that day, and archives the market once when it has.
+@dataclass(frozen=True)
+class CloseDataset:
+    market: str  # TWSE | TPEX
+    group: str  # the archive group whose price job stores the dataset (``Archiver.run([group])``)
+    url: str  # the file that price job downloads
+    status_key: str  # dataset_status row holding the newest stored day (``Archiver._close_status``)
+
+
+CLOSE_DATASETS = (
+    CloseDataset("TWSE", "twse", f"{TWSE_OPENAPI}/exchangeReport/STOCK_DAY_ALL", "twse-openapi/price"),
+    CloseDataset("TPEX", "tpex", f"{TPEX_OPENAPI}/tpex_mainboard_daily_close_quotes", "tpex-openapi/price"),
+)
+CLOSE_WATCH_FROM = time(13, 35)  # Taipei, on a trading day
+CLOSE_WATCH_UNTIL = time(8, 30)  # the next morning (whatever day that is)
+CLOSE_WATCH_SECONDS = 15 * 60
+CLOSE_PROBE_BYTES = 1024  # both files start with their first row, whose first field is the date
+_FIRST_DATE = re.compile(rb'"Date"\s*:\s*"([0-9/\-]{7,10})"')
+
+
+def close_watch_day(now: datetime) -> date | None:
+    """The trading day whose closing prices are awaited at ``now``: today from 13:35 Taipei when today is a trading
+    day, or yesterday until 08:30 when yesterday was one. ``None`` at any other time — so never on the afternoon or
+    night of a non-trading day, and never between 08:30 and 13:35."""
+    at = now.astimezone(TAIPEI)
+    today = at.date()
+    if at.time() >= CLOSE_WATCH_FROM:
+        return today if is_tw_trading_day(today) else None
+    if at.time() < CLOSE_WATCH_UNTIL:
+        yesterday = today - timedelta(days=1)
+        return yesterday if is_tw_trading_day(yesterday) else None
+    return None
+
+
+def close_archived(db: Session, dataset: CloseDataset, day: date) -> bool:
+    """Are the official closes of ``day`` stored for this market? Read from the database alone (the status row the
+    price job writes with the rows), so the answer survives a restart and is the same whoever stored them — the
+    close watch or a scheduled archive run."""
+    stored = db.scalar(select(DatasetStatus.data_date).where(DatasetStatus.key == dataset.status_key))
+    return stored is not None and stored >= day
+
+
+def first_data_date(head: bytes) -> date | None:
+    """The date of the first row in the first bytes of a close dataset (ROC ``1151113`` or Gregorian)."""
+    found = _FIRST_DATE.search(head)
+    return parse_tw_date(found.group(1).decode("ascii")) if found else None
+
+
+class ClosePublication:
+    """Which trading day an exchange's close dataset carries right now, asked with the smallest request the hosts
+    support (``HttpFetcher.probe``): a conditional request for the first kilobyte. Both OpenAPI hosts answer 304
+    while the file is unchanged and 206 with the first row once it is replaced (checked 2026-11-13).
+
+    The validators and the date of the version last seen are kept in memory only to make the next request a 304.
+    Nothing is decided from them: after a restart the first check simply reads the first kilobyte again."""
+
+    def __init__(self, fetcher: HttpFetcher):
+        self.fetcher = fetcher
+        self._seen: dict[str, tuple[str | None, str | None, date]] = {}  # market -> (ETag, Last-Modified, date)
+
+    def data_date(self, dataset: CloseDataset) -> date | None:
+        """The trading day of the dataset now, or ``None`` when its first row could not be read."""
+        etag, modified, known = self._seen.get(dataset.market, (None, None, None))
+        probe = self.fetcher.probe(dataset.url, etag=etag, last_modified=modified, first_bytes=CLOSE_PROBE_BYTES)
+        if not probe.changed and known is not None:
+            return known
+        found = first_data_date(probe.head)
+        if found is None:
+            self._seen.pop(dataset.market, None)
+            log.warning("close watch: no date in the first bytes of %s", dataset.url)
+            return None
+        self._seen[dataset.market] = (probe.etag, probe.last_modified, found)
+        return found
 
 
 def main(argv: list[str] | None = None) -> None:

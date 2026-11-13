@@ -25,12 +25,18 @@ _DEFAULT_MESSAGES = {
 
 
 class ApiError(Exception):
-    def __init__(self, status: int, code: str, message: str, details: Any = None):
+    """``extra``: more fields of the error object, next to ``code`` and ``message`` (``retry_after_seconds``,
+    ``until`` …); ``headers``: response headers (``Retry-After``)."""
+
+    def __init__(self, status: int, code: str, message: str, details: Any = None,
+                 extra: dict[str, Any] | None = None, headers: dict[str, str] | None = None):
         super().__init__(message)
         self.status = status
         self.code = code
         self.message = message
         self.details = details
+        self.extra = extra
+        self.headers = headers
 
 
 def not_found(message: str = "找不到資源") -> ApiError:
@@ -41,8 +47,8 @@ def unprocessable(message: str, code: str = "validation_error", details: Any = N
     return ApiError(422, code, message, details)
 
 
-def error_body(code: str, message: str, details: Any = None) -> dict[str, Any]:
-    err: dict[str, Any] = {"code": code, "message": message}
+def error_body(code: str, message: str, details: Any = None, extra: dict[str, Any] | None = None) -> dict[str, Any]:
+    err: dict[str, Any] = {**(extra or {}), "code": code, "message": message}
     if details is not None:
         err["details"] = details
     return {"error": err}
@@ -59,7 +65,8 @@ _FIELD_LABELS = {
 def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(ApiError)
     async def _api_error(_req: Request, exc: ApiError):
-        return JSONResponse(error_body(exc.code, exc.message, exc.details), status_code=exc.status)
+        return JSONResponse(error_body(exc.code, exc.message, exc.details, exc.extra), status_code=exc.status,
+                            headers=exc.headers)
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_req: Request, exc: StarletteHTTPException):

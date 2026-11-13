@@ -7,6 +7,7 @@
   read endpoints in :data:`VIEW_AS_READ` are served as the delegation's owner (``scope["state"]["view_as"]``, resolved
   and checked by ``api.deps.current_user``); endpoints that read no user data (:data:`VIEW_AS_IGNORED`) ignore the
   header; every other request is refused: writes with 403 ``read_only``, other reads with 403 ``view_as_not_allowed``.
+  The discussion reads are among the ignored ones: discussions always act as the signed-in viewer themselves.
 """
 
 from __future__ import annotations
@@ -67,6 +68,11 @@ VIEW_AS_IGNORED_PATHS = (
     "/stream/quotes",
     "/derivatives/{seg}",
     "/derivatives/futures/{seg}/history",
+    # Discussions never act as the delegation's owner: reads answer as the signed-in viewer (writes stay refused).
+    "/users/me",
+    "/discussions/topics",
+    "/discussions/topics/{seg}",
+    "/discussions/topics/{seg}/replies",
 )
 
 

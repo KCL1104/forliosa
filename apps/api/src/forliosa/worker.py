@@ -4,6 +4,13 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 
 * ``after_close_refresh`` — 14:35 and 23:45 Taipei on trading days: refreshes the instrument master
   and writes the latest real closes of tracked symbols into ``prices_daily``.
+* ``close_watch`` — on a trading day from 13:35 Taipei until 08:30 the next morning, every 15 minutes: the
+  exchanges publish the day's closing prices at no fixed time (observed: late evening to early morning), so the worker
+  asks each exchange's close dataset — a conditional request for its first kilobyte, 304 while unchanged — whether it
+  has turned to that day. When one has, that market's archive group runs once (closes, PER/PBR, notices, automatic
+  dividends) followed by ``after_close_refresh``. A market whose day is stored is not asked again; "stored" is read
+  from ``dataset_status`` (``…/price``), so a restart neither repeats nor forgets anything, and a scheduled run that
+  got there first counts too. Nothing is asked on a non-trading day or between 08:30 and 13:35.
 * ``daily_archive`` — 08:10 (today's reference prices, notices), 14:40 (closes, PER/PBR, events, indices) and
   21:40 (margin, institutional flows, financial statements, company profiles and dividend resolutions, and the
   TAIFEX datasets: futures / options reports, 三大法人, large traders, put/call ratio, FX, margins when changed;
@@ -71,10 +78,21 @@ from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
 from forliosa import logredact
-from forliosa.archive import Archiver, default_fetcher, tracked_symbols
+from forliosa.archive import (
+    CLOSE_DATASETS,
+    CLOSE_WATCH_SECONDS,
+    Archiver,
+    ClosePublication,
+    close_archived,
+    close_watch_day,
+    default_fetcher,
+    tracked_symbols,
+)
 from forliosa.config import DEFAULT_SESSION_SECRET, Settings, get_settings
 from forliosa.db import get_engine, session_factory
 from forliosa.market_calendar import load_official_calendar
+from forliosa.marketdata.base import ProviderUnavailable
+from forliosa.marketdata.http import HttpFetcher
 from forliosa.marketdata.service import MarketData, get_market_data
 from forliosa.models import Instrument, PriceDaily
 from forliosa.timeutil import TAIPEI, is_tw_trading_day, now_taipei
@@ -181,8 +199,12 @@ def refresh_instruments(db: Session, md: MarketData) -> int:
 
 
 class Worker:
-    def __init__(self, md: MarketData | None = None):
+    def __init__(self, md: MarketData | None = None, now_fn: Callable[[], datetime] = now_taipei,
+                 fetcher_fn: Callable[[], HttpFetcher] = default_fetcher):
         self.md = md or get_market_data()
+        self.now_fn = now_fn  # the clock of the archive runs and the close watch (tests inject one)
+        self.fetcher_fn = fetcher_fn  # the HTTP client of the archive runs and the close watch
+        self._close_publication: ClosePublication | None = None
         self._stop = asyncio.Event()
         from forliosa.services.channels import TelegramPoller
 
@@ -191,6 +213,8 @@ class Worker:
             Job("after_close_refresh", daily_at(time(14, 35), time(23, 45),
                                                 only_if=lambda n: is_tw_trading_day(n.date())),
                 self.after_close_refresh),
+            Job("close_watch", every(CLOSE_WATCH_SECONDS, only_if=lambda n: close_watch_day(n) is not None),
+                self.close_watch),
             Job("daily_archive_morning", daily_at(time(8, 10), only_if=lambda n: is_tw_trading_day(n.date())),
                 lambda: self.archive(MORNING_GROUPS)),
             Job("daily_archive_close", daily_at(time(14, 40), only_if=lambda n: is_tw_trading_day(n.date())),
@@ -218,7 +242,7 @@ class Worker:
     async def archive(self, groups: list[str]) -> None:
         def run() -> list:
             with session_factory()() as db:
-                return Archiver(db, default_fetcher(), self.md.policy).run(groups)
+                return Archiver(db, self.fetcher_fn(), self.md.policy, now_fn=self.now_fn).run(groups)
 
         results = await asyncio.to_thread(run)
         with session_factory()() as db:
@@ -240,6 +264,35 @@ class Worker:
             symbols = tracked_symbols(db)
             n_px = await asyncio.to_thread(upsert_closes, db, self.md, symbols) if symbols else 0
         log.info("after close: %d instruments, %d closes stored", n_inst, n_px)
+
+    async def close_watch(self) -> None:
+        """One check of the close watch (see the module docstring). Whether a market still has to be asked is read
+        from the database every time; the only thing kept in memory is the validators that make the next request a
+        304. A market that cannot be reached is simply asked again at the next check."""
+        day = close_watch_day(self.now_fn())
+        if day is None:
+            return
+
+        def waiting() -> list:
+            with session_factory()() as db:
+                return [d for d in CLOSE_DATASETS if not close_archived(db, d, day)]
+
+        if self._close_publication is None:
+            self._close_publication = ClosePublication(self.fetcher_fn())
+        refreshed = False
+        for dataset in await asyncio.to_thread(waiting):
+            try:
+                published = await asyncio.to_thread(self._close_publication.data_date, dataset)
+            except ProviderUnavailable as exc:
+                log.warning("close watch: %s not checked: %s", dataset.market, exc)
+                continue
+            if published is None or published < day:
+                continue
+            log.info("close watch: %s has published the closes of %s", dataset.market, day)
+            await self.archive([dataset.group])
+            refreshed = True
+        if refreshed:
+            await self.after_close_refresh()
 
     async def weekly_archive(self) -> None:
         await self.archive(WEEKLY_GROUPS)

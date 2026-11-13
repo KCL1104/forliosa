@@ -128,6 +128,11 @@ class Settings(BaseSettings):
     ai_admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
     ai_model_news: str | None = None
 
+    # -- discussions: site admins (ADMIN_EMAILS, comma-separated emails, case-insensitive) ------------------------
+    # They moderate *public* discussion content through /admin/discussions/* (reports, hide / unhide, public posting
+    # suspensions); everyone else gets 404 there. They never see group content. Empty = no site admin.
+    admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
+
     # -- News (個股頁「新聞報導」, forliosa.news): metadata only — headline, outlet, time, link ------------------
     # The worker refreshes the tracked symbols (held, watched, or viewed in the last NEWS_VIEW_DAYS days) every
     # NEWS_REFRESH_MINUTES with GDELT DOC 2.0 (free, commercial use allowed with a citation to gdeltproject.org).
@@ -204,7 +209,7 @@ class Settings(BaseSettings):
         return v
 
     @field_validator("ai_web_search_allowed_domains", "ai_web_fetch_allowed_domains", "ai_admin_emails",
-                     mode="before")
+                     "admin_emails", mode="before")
     @classmethod
     def _split_ai_domains(cls, v: object) -> object:
         if isinstance(v, str):

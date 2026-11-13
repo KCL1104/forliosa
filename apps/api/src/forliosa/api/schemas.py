@@ -45,6 +45,11 @@ class User(BaseModel):
     display_name: str
     avatar_url: str | None = None
     preferences: Preferences
+    # Discussions: the nickname on public posts, site admin (ADMIN_EMAILS), and until when public posting is
+    # suspended (ISO time in UTC; permanent = "9999-12-31T00:00:00Z").
+    public_name: str | None = None
+    is_admin: bool = False
+    public_posting_suspended_until: str | None = None
 
 
 class MePatch(StrictModel):
@@ -1056,3 +1061,16 @@ class FuturesHistory(BaseModel):
     series: list[FuturesHistoryPoint]
     notes: list[str]
     sources: list[str]
+
+
+# -- market status (GET /meta/market-status) ----------------------------------------------------------------
+class MarketSession(BaseModel):
+    date: str  # today in Taipei, YYYY-MM-DD
+    is_trading_day: bool  # official calendar
+    is_open: bool  # a trading day, 09:00 up to (not including) 13:30 Taipei
+    open: str  # "09:00"
+    close: str  # "13:30"
+
+
+class MarketStatus(BaseModel):
+    tw: MarketSession

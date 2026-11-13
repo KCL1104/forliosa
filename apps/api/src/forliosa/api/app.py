@@ -4,8 +4,9 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, FastAPI
+from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy.orm import Session
 
 from forliosa import logredact
 from forliosa.api.errors import install_error_handlers
@@ -16,6 +17,7 @@ from forliosa.api.routes import (
     auth,
     delegations,
     derivatives,
+    discussions,
     groups,
     market,
     portfolio,
@@ -25,8 +27,11 @@ from forliosa.api.routes import (
     users,
     watchlist,
 )
+from forliosa.api.schemas import MarketStatus
 from forliosa.config import DEFAULT_SESSION_SECRET, get_settings
 from forliosa.datapolicy import attributions
+from forliosa.db import get_db
+from forliosa.market_calendar import market_status
 from forliosa.marketdata.service import get_market_data
 
 API_PREFIX = "/api/v1"
@@ -106,8 +111,14 @@ def create_app() -> FastAPI:
     def meta_attributions():
         return attributions(get_market_data().policy, settings.taifex_conditional_confirmed, dataset_status())
 
+    @api.get("/meta/market-status", response_model=MarketStatus, tags=["meta"],
+             summary="台股現在是不是盤中（依官方行事曆；交易日 09:00–13:30 台北時間；不需登入）")
+    def meta_market_status(db: Session = Depends(get_db)):
+        return market_status(db)
+
     for module in (users, auth, accounts, market, stock, derivatives, transactions, portfolio, watchlist, recurring,
-                   ai, delegations, groups):
+                   ai, delegations, groups, discussions):
         api.include_router(module.router)
+    api.include_router(discussions.admin_router)
     app.include_router(api)
     return app

@@ -9,19 +9,23 @@ from sqlalchemy.orm import Session
 from forliosa.api.deps import create_session, current_user, destroy_session, signed_in_user
 from forliosa.api.errors import ApiError
 from forliosa.api.schemas import DevLoginIn, MePatch, PreferencesPatch, User
+from forliosa.api.schemas_discussions import PublicNameIn
 from forliosa.config import get_settings
 from forliosa.db import get_db
 from forliosa.ids import new_id
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User as UserModel
+from forliosa.services import discussions
 from forliosa.services.ledger_io import DEFAULT_PREFERENCES, preferences_of
 
 router = APIRouter(tags=["auth"])
 
 
-def user_out(user: UserModel) -> dict:
+def user_out(db: Session, user: UserModel) -> dict:
+    """The signed-in user's own profile, with their public name, whether they are a site admin and until when their
+    public posting is suspended (``services.discussions``). Only ever returned to the user themselves."""
     return {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url,
-            "preferences": preferences_of(user)}
+            "preferences": preferences_of(user), **discussions.me_fields(db, user)}
 
 
 @router.post("/auth/dev-login", response_model=User, summary="開發用登入（僅 FORLIOSA_ENV=dev）")
@@ -39,7 +43,7 @@ def dev_login(body: DevLoginIn, response: Response, db: Session = Depends(get_db
         user.display_name = body.display_name
         db.commit()
     create_session(db, user, response)
-    return user_out(user)
+    return user_out(db, user)
 
 
 @router.post("/auth/logout", status_code=204, summary="登出")
@@ -50,15 +54,24 @@ def logout(request: Request, response: Response, db: Session = Depends(get_db)):
 
 
 @router.get("/me", response_model=User, tags=["me"])
-def me(user: UserModel = Depends(current_user)):
-    return user_out(user)
+@router.get("/users/me", response_model=User, tags=["me"], summary="同 GET /me")
+def me(user: UserModel = Depends(current_user), db: Session = Depends(get_db)):
+    return user_out(db, user)
 
 
 @router.patch("/me", response_model=User, tags=["me"], summary="修改顯示名稱（群組裡顯示的就是這個名稱）")
 def patch_me(body: MePatch, user: UserModel = Depends(signed_in_user), db: Session = Depends(get_db)):
     user.display_name = body.display_name
     db.commit()
-    return user_out(user)
+    return user_out(db, user)
+
+
+@router.put("/users/me/public-name", response_model=User, tags=["me"],
+            summary="設定或更改公開暱稱（公開討論用；不分大小寫與全半形唯一；7 天內只能改一次）")
+@router.put("/me/public-name", response_model=User, include_in_schema=False)
+def put_public_name(body: PublicNameIn, user: UserModel = Depends(signed_in_user), db: Session = Depends(get_db)):
+    discussions.set_public_name(db, user, body.public_name)
+    return user_out(db, user)
 
 
 @router.patch("/me/preferences", response_model=User, tags=["me"])
@@ -73,4 +86,4 @@ def patch_preferences(body: PreferencesPatch, user: UserModel = Depends(current_
     user = db.merge(user)
     user.preferences = {**preferences_of(user), **changes}
     db.commit()
-    return user_out(user)
+    return user_out(db, user)

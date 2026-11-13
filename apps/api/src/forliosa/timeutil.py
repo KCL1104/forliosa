@@ -120,10 +120,18 @@ def market_close_dt(d: date) -> datetime:
 
 
 def is_tw_market_open(at: datetime | None = None) -> bool:
+    """A trading day from 09:00 up to, not including, 13:30 Taipei: at 13:30:00 the session has closed."""
     at = (at or now_taipei()).astimezone(TAIPEI)
-    return is_tw_trading_day(at.date()) and MARKET_OPEN <= at.time() <= MARKET_CLOSE
+    return is_tw_trading_day(at.date()) and MARKET_OPEN <= at.time() < MARKET_CLOSE
 
 
 def iso_taipei(dt: datetime) -> str:
     """ISO 8601 with +08:00 offset, second precision."""
     return dt.astimezone(TAIPEI).isoformat(timespec="seconds")
+
+
+def iso_utc(dt: datetime) -> str:
+    """ISO 8601 in UTC with a ``Z`` suffix, second precision (``2026-11-13T02:10:00Z``)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")

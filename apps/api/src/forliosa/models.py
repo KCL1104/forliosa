@@ -33,6 +33,12 @@ class User(Base):
     avatar_url: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Discord avatar (M5)
     preferences: Mapped[dict] = mapped_column(JSON, default=dict)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    # Public discussions: the nickname shown on public posts (never the display name or avatar). ``public_name_key``
+    # is its NFKC + casefold form (``textsafe.name_key``), unique so names differing only in case or width collide.
+    # ``public_name_changed_at``: when it was last chosen or changed (it can be changed again 7 days later).
+    public_name: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    public_name_key: Mapped[str | None] = mapped_column(String(400), nullable=True, unique=True, index=True)
+    public_name_changed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
 
 
 class UserSession(Base):
@@ -1211,3 +1217,119 @@ class EtfNav(Base):
     fund_name: Mapped[str] = mapped_column(String(200))  # 基金名稱 as published (e.g. 元大台灣卓越50基金)
     source: Mapped[str] = mapped_column(String(32))
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+# -- discussion threads (docs/api-contract.md 「討論串…」; services/discussions.py) --------------------------------
+class DiscussionTopic(Base):
+    """A topic. ``scope`` public (everyone, read without login) | group (``group_id``; members only). ``user_id`` is
+    null once the author's account is deleted (the content stays). ``status`` visible | hidden (site admins hide
+    public content; they never see group content). ``last_activity_at``: the newest reply, else ``created_at``."""
+
+    __tablename__ = "discussion_topics"
+    __table_args__ = (
+        Index("ix_discussion_topics_scope_activity", "scope", "last_activity_at", "id"),
+        Index("ix_discussion_topics_scope_created", "scope", "created_at", "id"),
+        Index("ix_discussion_topics_group_activity", "group_id", "last_activity_at", "id"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    scope: Mapped[str] = mapped_column(String(8))
+    group_id: Mapped[str | None] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), nullable=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+                                                index=True)
+    title: Mapped[str] = mapped_column(String(200))
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(8), default="visible")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    last_activity_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class DiscussionTopicSymbol(Base):
+    """The instruments a topic is tagged with (at most 5; ``position`` keeps the author's order)."""
+
+    __tablename__ = "discussion_topic_symbols"
+
+    topic_id: Mapped[str] = mapped_column(ForeignKey("discussion_topics.id", ondelete="CASCADE"), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True, index=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class DiscussionReply(Base):
+    """A reply (one level). ``user_id`` is null once the author's account is deleted."""
+
+    __tablename__ = "discussion_replies"
+    __table_args__ = (Index("ix_discussion_replies_topic", "topic_id", "created_at", "id"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    topic_id: Mapped[str] = mapped_column(ForeignKey("discussion_topics.id", ondelete="CASCADE"))
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True,
+                                                index=True)
+    body: Mapped[str] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(8), default="visible")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class DiscussionReaction(Base):
+    """An emoji on a topic or a reply (``target_kind`` topic | reply). ``topic_id`` is the topic the target belongs
+    to, so everything goes with the topic."""
+
+    __tablename__ = "discussion_reactions"
+
+    target_kind: Mapped[str] = mapped_column(String(8), primary_key=True)
+    target_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True, index=True)
+    emoji: Mapped[str] = mapped_column(String(16), primary_key=True)
+    topic_id: Mapped[str] = mapped_column(ForeignKey("discussion_topics.id", ondelete="CASCADE"), index=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class DiscussionReport(Base):
+    """A report of public content: one per reporter per target. ``status`` open | resolved (hidden or dismissed by a
+    site admin). ``reporter_id`` is null once the reporter's account is deleted (the report still counts)."""
+
+    __tablename__ = "discussion_reports"
+    __table_args__ = (
+        UniqueConstraint("target_kind", "target_id", "reporter_id", name="uq_discussion_report_reporter"),
+        Index("ix_discussion_reports_status", "status", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    target_kind: Mapped[str] = mapped_column(String(8))
+    target_id: Mapped[str] = mapped_column(String(32))
+    topic_id: Mapped[str] = mapped_column(ForeignKey("discussion_topics.id", ondelete="CASCADE"), index=True)
+    reporter_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    reason: Mapped[str] = mapped_column(String(16))
+    note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    status: Mapped[str] = mapped_column(String(8), default="open")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    resolved_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class DiscussionSuspension(Base):
+    """A user's public posting is suspended until ``until`` (permanent: 9999-12-31T00:00:00Z) unless lifted. Group
+    posting is not affected. At most one active row per user (a new suspension replaces the active one)."""
+
+    __tablename__ = "discussion_suspensions"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    until: Mapped[datetime] = mapped_column(TZDateTime)
+    reason: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    lifted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class DiscussionPostLog(Base):
+    """One row per topic or reply a user posted (``kind`` topic | reply, ``scope`` public | group) — no content. The
+    posting rate limits are counted from these rows, so deleting a post does not give its slot back; a user's rows
+    older than the longest window (one day) are removed the next time they post."""
+
+    __tablename__ = "discussion_post_log"
+    __table_args__ = (Index("ix_discussion_post_log_user", "user_id", "created_at"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    scope: Mapped[str] = mapped_column(String(8))
+    kind: Mapped[str] = mapped_column(String(8))
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
