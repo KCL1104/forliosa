@@ -1377,9 +1377,9 @@ export interface BriefingMover {
 
 export interface BriefingUpcoming {
   date: string
-  /** ex_dividend、dividend_payment、recurring */
-  type: string
+  type: UpcomingType
   symbol: string | null
+  /** 定期定額的標題本身含金額；畫面由欄位組（`upcomingText`），隱私模式才不會露出金額 */
   title: string
   amount_estimate: number | null
 }

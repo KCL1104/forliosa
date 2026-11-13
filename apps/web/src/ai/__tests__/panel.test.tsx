@@ -192,7 +192,7 @@ describe("模型回答的排版：漢字片段收字距，數字和單位連成�
 
 describe("輸入框的鍵盤提示：畫面上只在有焦點時出現，螢幕閱讀器一直讀得到", () => {
   it("textarea 用 aria-describedby 指到「Enter 送出，Shift+Enter 換行」", () => {
-    render(<Composer variant="panel" placeholder="提出問題" onSubmit={() => undefined} onForm={() => undefined} />)
+    withQuery(<Composer variant="panel" placeholder="提出問題" onSubmit={() => undefined} onForm={() => undefined} />)
     const box = screen.getByRole("textbox", { name: "提出問題或下指令" })
     expect(box).toHaveAccessibleDescription("Enter 送出，Shift+Enter 換行")
   })

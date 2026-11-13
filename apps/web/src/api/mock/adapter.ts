@@ -15,6 +15,7 @@ import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
 import { mockMarketNow, mockMarketStatus, mockToday, type MockMarket } from "./market-status"
+import { buildFacts as buildBriefingFacts, createMockBriefings } from "./briefings"
 import { buildMarketOverview } from "./market-overview"
 import { buildCompany, buildRelated } from "./company"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, ymd, type MockPolicy } from "./commercial"
@@ -123,6 +124,7 @@ const DEFAULT_PREFS: Preferences = {
   privacy_mode: false,
   cost_method: "average",
   benchmark: "0050.TW",
+  daily_briefing: false,
 }
 
 export interface MockOptions {
@@ -324,6 +326,18 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   }
   const tracked = (symbol: string) => watch.includes(symbol) || buildHoldings(txns).some((h) => h.symbol === symbol)
   const holdingsNow = (accountId?: string) => buildHoldings(ledger(accountId).txns, accountId, commercial)
+  // 每日收盤簡報：只讀自己的帳本（不跟著查看模式），事實和帳本頁、本週事項是同一組數字
+  const briefings = createMockBriefings(MOCK_TODAY, () => {
+    const mine = buildHoldings(txns, undefined, commercial)
+    const watched = watch.map((symbol) => {
+      const w = spec(symbol)
+      return { symbol: w.symbol, code: w.code, name: w.name, market: w.market, type: w.type, quote: commercial && w.market === "US" ? null : quoteOf(w) }
+    })
+    return buildBriefingFacts(
+      buildSummary(txns, undefined, commercial), mine, watched,
+      buildUpcoming(mine, findInstrument, 7, recurring.upcoming(today, addDays(today, 7)), commercial, today), demo,
+    )
+  })
   /** 商用模式：回應裡最早的資料不早於存檔起點；區間更早時加上「資料累積中」 */
   const clip = <T extends { t: string }>(rows: T[], from: string): { rows: T[]; notes: string[] } =>
     commercial && from < ARCHIVE_START ? { rows: rows.filter((r) => r.t >= ARCHIVE_START), notes: [accumulatingNote()] } : { rows, notes: [] }
@@ -703,6 +717,14 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getMarketStatus: () => wait(() => mockMarketStatus(options.market ?? "closed")),
     getMarketOverview: () => wait(() => buildMarketOverview(demo, mockToday())),
 
+    // 每日收盤簡報：打開開關的人才有；事實從示範帳本算，和帳本頁同一組數字
+    getLatestBriefing: () => wait(() => (user.preferences.daily_briefing ? briefings.latest() : null)),
+    listBriefings: (limit) => wait(() => (user.preferences.daily_briefing ? briefings.list(limit) : [])),
+    markBriefingRead: (id) =>
+      wait(() => {
+        if (!briefings.markRead(id)) throw new ApiError(404, "not_found", "找不到這則簡報")
+      }),
+
     getAnalystViews: (symbol) => wait(() => analyst.get(spec(symbol).symbol)),
     requestAnalystViews: (symbol) => wait(() => analyst.request(spec(symbol).symbol)),
 
@@ -790,7 +812,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 // ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
 type MethodName = Exclude<keyof ForliosaApi, "kind">
 /** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
-const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "exportMe", "deleteMe", "acceptTerms", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "googleLoginUrl", "listDelegations", "setPublicName"])
+const VIEWER_OWN = new Set<MethodName>(["getLatestBriefing", "listBriefings", "markBriefingRead", "devLogin", "logout", "getMe", "exportMe", "deleteMe", "acceptTerms", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "googleLoginUrl", "listDelegations", "setPublicName"])
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",

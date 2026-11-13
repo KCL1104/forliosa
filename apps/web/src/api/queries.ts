@@ -193,7 +193,11 @@ export function useUpdatePreferences() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: (patch: Partial<Preferences>) => api.updatePreferences(patch),
-    onSuccess: (user) => qc.setQueryData(qk.me, user),
+    onSuccess: (user, patch) => {
+      qc.setQueryData(qk.me, user)
+      // 開關「每日收盤簡報」：有沒有簡報跟著變
+      if (patch.daily_briefing !== undefined) void qc.invalidateQueries({ queryKey: ["ai", "briefings"] })
+    },
   })
 }
 export function useCreateAccount() {

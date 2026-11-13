@@ -559,7 +559,7 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| POST | `/ai/chat` | SSE 串流（`text/event-stream`）。body `{"thread_id": "thr_…" \| null, "message": "買 0050 2 張 52.4", "page": {"route": "/stock/2330.TW", "symbol": "2330.TW" \| null}, "privacy": false}`；`thread_id` 省略＝開新對話 |
+| POST | `/ai/chat` | SSE 串流（`text/event-stream`）。body `{"thread_id": "thr_…" \| null, "message": "買 0050 2 張 52.4", "page": {"route": "/stock/2330.TW", "symbol": "2330.TW" \| null}, "privacy": false}`；`thread_id` 省略＝開新對話。選填 `"mode": "deep"`＝**深度搜尋**：這一題多查幾輪網路資料（`web_search` 上限從 3 次提高到 12 次）、寫成一份整理（兩三句結論、最多 8 點、最多 3 個短標題，仍是純文字），算 `Usage.deep_search_cost` 題（預設 5）；只對這一題有效 |
 | GET | `/ai/threads?limit=30&cursor=` | `{"items": [ThreadSummary], "next_cursor"}`，最近更新的在前 |
 | GET | `/ai/threads/{id}` | `ThreadDetail`（別人的對話回 404） |
 | DELETE | `/ai/threads/{id}` | 204；草稿保留 |
@@ -567,6 +567,9 @@
 | PATCH | `/ai/drafts/{id}` | body `{"status": "signed", "transaction_id": "txn_…"}`、`{"status": "discarded"}`，或復原後 `{"status": "pending"}`；回 `DraftCard` |
 | GET | `/ai/suggestions?route=/stock/2330.TW&symbol=2330.TW` | `Suggestions`（規則產生，不呼叫模型） |
 | GET | `/ai/usage` | `Usage`（含固定的 `disclaimer`） |
+| GET | `/ai/briefings/latest` | 每日收盤簡報：最新的一則 `Briefing`，沒有時 `null`（沒打開「每日收盤簡報」的人永遠是 `null`）。查看別人的資產時不提供 |
+| GET | `/ai/briefings?limit=14` | 最近的簡報 `Briefing[]`（新的在前，最多 30 則） |
+| POST | `/ai/briefings/{id}/read` | 標示看過（204）；別人的或不存在的 404 |
 | GET | `/ai/admin/keys` | `KeySlots`（API 金鑰槽狀態，不含金鑰；只在 `FORLIOSA_ENV=dev`／`test` 或 `AI_ADMIN_EMAILS` 列出的帳號，其他人 404） |
 | GET | `/instruments/{symbol}/why` | 原有欄位＋`ai`、`citations`、`rule_headline`（見下方；AI 句預設開啟） |
 
@@ -586,7 +589,7 @@
 | `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
 | `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 回答僅供參考，非投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
 
-串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；429 `ai_daily_limit`（今天的提問數已達上限，每天 50 題）／`ai_monthly_budget`（本月用量已達上限，每月 300 萬計費 token）；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完）。
+串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；429 `ai_daily_limit`（今天的提問數已達上限，每天 50 題；深度搜尋而今天剩下的題數不夠時也是這個代碼，訊息是「今天還剩 3 題，深度搜尋一次要 5 題。」，錯誤物件多 `remaining`、`cost`）／`ai_monthly_budget`（本月用量已達上限，每月 300 萬計費 token）；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完；`mode: "deep"` 而這個環境沒開網路搜尋時也是）。
 
 後端有多把 API 金鑰（各在自己的 workspace）：每段對話固定用同一把；那把不能用時自動換到別把，並以先前對話的純文字接續（前端不需要處理，`ThreadDetail` 不變）。
 
@@ -609,7 +612,7 @@
 // ThreadSummary
 {"id": "thr_…", "title": "我有哪些持股？", "created_at": "…", "updated_at": "…", "message_count": 3, "preview": "最新回答的前 80 字"}
 
-// ThreadDetail（messages 依時間排序；一問一答）
+// ThreadDetail（messages 依時間排序；一問一答）。使用者的那一則有 `mode`：`"deep"`＝那一題是深度搜尋，其餘是 null
 {"id": "thr_…", "title": "…", "model": "claude-haiku-5-5", "created_at": "…", "updated_at": "…",
  "messages": [
    {"id": "12", "turn_id": "trn_…", "role": "user", "text": "台積電今天為什麼漲？", "citations": [], "drafts": [], "tools": [], "error": null, "at": "…"},
@@ -644,9 +647,10 @@
              {"kind": "review_drafts", "label": "確認 2 筆草稿", "prompt": null, "symbol": null, "count": 2}]}
 
 // Usage（上限為 null 表示不限制；messages_today 含今天觸發的法人觀點查詢，每次算一題）
+// deep_search_cost：深度搜尋一次算幾題（null＝這個環境沒有深度搜尋，前端不放切換鈕）；深度搜尋的那一題在 messages_today 裡算這麼多題
 {"date": "2026-11-12", "month": "2026-11", "messages_today": 3, "daily_message_limit": 50, "messages_remaining": 47,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
- "model": "claude-haiku-5-5", "available": true, "disclaimer": "AI 回答僅供參考，非投資建議。"}
+ "model": "claude-haiku-5-5", "available": true, "deep_search_cost": 5, "disclaimer": "AI 回答僅供參考，非投資建議。"}
 
 // KeySlots（GET /ai/admin/keys；slot = CLAUDE_API_KEY_<n> 的 n；不含金鑰）
 {"month": "2026-11",                  // UTC 月（預算以 UTC 月計）
@@ -1286,3 +1290,28 @@
   沒有成交量、基本面、估值、籌碼、股利、新聞、法人觀點、相關股票（這些端點對指數回 404 `not_found` 或空清單，前端不顯示那些分頁）。
 - 指數不能交易、不能加進持倉；可以加進觀察、可以當討論主題的標記、可以有線圖留言。
 - 顯名聲明沿用 MI_INDEX／tpex_index 的資料集（`sources`）。
+
+### 每日收盤簡報（2026-11-14）
+
+開關是偏好 `daily_briefing`（`PATCH /me/preferences`，預設 `false`）。worker 在收盤資料存好之後，替打開的人每個交易日寫一則；`AI_DAILY_BRIEFING_ENABLED=false` 整個停掉。
+
+```json
+// Briefing
+{
+  "id": "brf_…",
+  "date": "2026-11-12",              // 說的是哪一個交易日
+  "created_at": "2026-11-12T22:20:31+08:00",
+  "read": false,
+  "facts": {                          // 規則算的，不經過模型；只用官方收盤價
+    "market_value": 3707922, "day_change": 78015, "day_change_pct": 0.0215,
+    "holdings": 9, "unpriced": 3,     // unpriced：沒有收盤價的持股（例如美股），不在當日的數字裡
+    "gainers": [{"symbol": "2330.TW", "name": "台積電", "close": 1085, "change_pct": 0.0483}],
+    "losers": [ … ], "watchlist": [ … ],   // 漲跌最多的持股各 2 檔；觀察清單裡漲跌 3% 以上的最多 3 檔
+    "upcoming": [{"date": "2026-11-18", "type": "ex_dividend", "symbol": "00878.TW", "title": "00878 除息", "amount_estimate": 7293}],
+    "is_demo": false
+  },
+  "points": [                         // AI 依報導補的，最多 3 點，可以是空的；格式同市場頁的收盤重點
+    {"text": "…", "sources": [{"url": "https://…", "title": "…", "outlet": "…"}]}
+  ]
+}
+```

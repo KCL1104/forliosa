@@ -43,7 +43,8 @@ def test_dev_login_sets_httponly_cookie_and_me(client):
     assert me["display_name"] == "示範使用者"
     assert me["id"].startswith("usr_")
     assert me["preferences"] == {"color_convention": "tw", "theme": "system", "quantity_unit": "lot",
-                                 "privacy_mode": False, "cost_method": "average", "benchmark": "0050.TW"}
+                                 "privacy_mode": False, "cost_method": "average", "benchmark": "0050.TW",
+                                 "daily_briefing": False}
 
 
 def test_cookie_attributes(app):

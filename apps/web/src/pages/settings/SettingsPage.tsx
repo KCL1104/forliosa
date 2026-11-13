@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { toast } from "sonner"
-import { useAccounts, useCreateAccount, useUpdateAccount } from "@/api/queries"
+import { useAccounts, useCreateAccount, useMe, useUpdateAccount, useUpdatePreferences } from "@/api/queries"
 import type { Account } from "@/api/types"
 import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
@@ -119,6 +119,8 @@ function Settings() {
         </Row>
       </Group>
 
+      <DailyBriefing />
+
       <Accounts />
 
       <RecurringPlans />
@@ -130,6 +132,33 @@ function Settings() {
       {/* 資料來源：一頁一個頁尾（設定頁沒有自己的資料，就是連到完整顯名聲明） */}
       <SourcesFooter className="max-w-measure" />
     </PageFrame>
+  )
+}
+
+/**
+ * AI：每日收盤簡報的開關（預設關）。偏好存在伺服器上（worker 依它決定要不要寫），所以直接讀寫 `/me` 的偏好，
+ * 不經過本機的顯示設定。
+ */
+function DailyBriefing() {
+  const me = useMe()
+  const update = useUpdatePreferences()
+  const on = me.data?.preferences.daily_briefing ?? false
+  return (
+    <Group title="AI">
+      <Row label="每日收盤簡報" description="收盤價公布後，依你的持股與觀察清單寫一則，放在「問 AI」裡。" htmlFor="daily-briefing">
+        <Switch
+          id="daily-briefing"
+          checked={on}
+          disabled={!me.data || update.isPending}
+          onCheckedChange={(v) =>
+            update.mutate(
+              { daily_briefing: v },
+              { onError: (err) => toast.error("設定沒有存到伺服器", { description: err instanceof Error ? err.message : "請檢查網路後再試一次。" }) },
+            )
+          }
+        />
+      </Row>
+    </Group>
   )
 }
 

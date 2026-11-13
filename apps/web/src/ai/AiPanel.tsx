@@ -8,9 +8,11 @@ import { Composer, type ComposerHandle } from "./Composer"
 import { useAiContext, useRouteKind } from "./context"
 import { Conversation } from "./Conversation"
 import { HistoryList } from "./HistoryList"
+import { BriefingDot } from "./Briefing"
 import { PanelHome } from "./Home"
 import { composerPlaceholder } from "./panel-helpers"
 import { useAiRunner } from "./runner"
+import { useBriefingUnread } from "./use-briefing-unread"
 import { useAi, useCurrentThread, usePendingCount } from "./store"
 import { useAiSuggestions, useAiUsage, usageNote } from "./remote-hooks"
 
@@ -19,6 +21,7 @@ import { useAiSuggestions, useAiUsage, usageNote } from "./remote-hooks"
  * 帳本與個股頁照記住的狀態，AI 沒什麼可說的頁面預設是窄欄。
  */
 export function AiPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
+  const briefingUnread = useBriefingUnread()
   const pending = usePendingCount()
   const composer = useRef<ComposerHandle>(null)
   const setOpen = useRef(onOpenChange)
@@ -48,13 +51,15 @@ export function AiPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (
               <button
                 type="button"
                 onClick={() => onOpenChange(true)}
-                aria-label={pending > 0 ? `展開 AI 面板（待簽名 ${pending} 筆）` : "展開 AI 面板"}
+                aria-label={pending > 0 ? `展開 AI 面板（待簽名 ${pending} 筆）` : briefingUnread ? "展開 AI 面板（有新的收盤簡報）" : "展開 AI 面板"}
                 className="press relative grid size-10 place-items-center rounded-sm text-ai hover:bg-ai-wash pointer-coarse:size-11"
               />
             }
           >
             <AskAiIcon aria-hidden className="size-5" />
             {pending > 0 && <span className="num absolute -top-1 -right-1 grid h-5 min-w-5 place-items-center rounded-full border border-dashed border-ai-rule bg-ai-wash px-1 text-xs text-ai">{pending}</span>}
+            {/* 還沒看過的收盤簡報：一個小圓點（有待簽名的筆數時讓給筆數） */}
+            {pending === 0 && briefingUnread && <BriefingDot className="absolute top-1 right-1" />}
           </TooltipTrigger>
           <TooltipContent side="left">展開問 AI（⌘J）</TooltipContent>
         </Tooltip>
@@ -65,6 +70,7 @@ export function AiPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (
 }
 
 function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<ComposerHandle | null>; onCollapse: () => void }) {
+  const briefingUnread = useBriefingUnread()
   const ctx = useAiContext()
   const runner = useAiRunner(ctx)
   const thread = useCurrentThread()
@@ -140,6 +146,13 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         <h2 className="mr-auto flex items-center gap-2 text-base font-bold">
           <AskAiIcon aria-hidden className="size-[18px] text-ai" />
           {view === "history" ? "紀錄" : "問 AI"}
+          {/* 面板開著但簡報不在畫面上（正在對話、看紀錄）時，標題旁邊一個小圓點 */}
+          {briefingUnread && (view === "history" || !!thread) && (
+            <>
+              <BriefingDot />
+              <span className="sr-only">有新的收盤簡報</span>
+            </>
+          )}
         </h2>
         <IconButton label="新對話" onClick={() => { newThread(); setView("chat") }}>
           <SquarePenIcon aria-hidden className="size-[18px]" />

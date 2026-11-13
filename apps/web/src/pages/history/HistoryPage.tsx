@@ -1,3 +1,4 @@
+import { BriefingHistory } from "@/ai/Briefing"
 import { HistoryList } from "@/ai/HistoryList"
 import { useAskAi } from "@/ai/use-ask"
 import { useReadOnly } from "@/api/view-as"
@@ -26,6 +27,10 @@ function History() {
       <div className="max-w-measure">
         <PageHeader title="紀錄" />
         <HistoryList onOpen={ask.reveal} onReplay={(t) => ask.submit(t)} />
+        {/* 之前的收盤簡報（打開過「每日收盤簡報」才有；保留 30 天） */}
+        <div className="mt-10">
+          <BriefingHistory />
+        </div>
       </div>
     </PageFrame>
   )

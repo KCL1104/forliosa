@@ -9,6 +9,8 @@ import { Wordmark } from "@/components/brand"
 import { Kbd } from "@/components/ui/kbd"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
+import { BriefingDot } from "@/ai/Briefing"
+import { useBriefingUnread } from "@/ai/use-briefing-unread"
 import { ReduceHost } from "@/pages/transactions/ReduceDialog"
 import { TradeFormHost } from "@/pages/transactions/TradeForm"
 import { usePrefs } from "@/stores/prefs"
@@ -165,6 +167,7 @@ function Dock() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const setOpen = useAi((s) => s.setMobileOpen)
   const pending = usePendingCount()
+  const briefingUnread = useBriefingUnread()
   const viewing = useViewingAs()
   const { exit } = useViewAsControls()
   // 帳本頁自己有「待簽名 N 筆」那一條（LedgerPage），格子裡不再寫一次筆數
@@ -204,10 +207,12 @@ function Dock() {
           <button
             type="button"
             onClick={() => setOpen(true)}
-            aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : "問 AI"}
+            aria-label={pending > 0 ? `問 AI（待簽名 ${pending} 筆）` : briefingUnread ? "問 AI（有新的收盤簡報）" : "問 AI"}
             data-pending={pending > 0 ? "" : undefined}
-            className="ask-box h-12 w-[5.25rem] text-base"
+            className="ask-box relative h-12 w-[5.25rem] text-base"
           >
+            {/* 還沒看過的收盤簡報：右上角一個小圓點（不是數字） */}
+            {briefingUnread && <BriefingDot className="absolute top-1.5 right-1.5" />}
             {/* 和簽名格一樣兩行：上面一行小字（有待簽名的草稿、而且這一頁沒有另外寫筆數時才有），下面一行粗體 */}
             {countInBox && <span className="num text-xs leading-none font-normal">待簽名 {pending} 筆</span>}
             <span className={countInBox ? "text-md leading-tight" : undefined}>問 AI</span>

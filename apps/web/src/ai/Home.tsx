@@ -1,5 +1,6 @@
 import { Fragment } from "react"
 import { cn } from "@/lib/utils"
+import { BriefingBlock } from "./Briefing"
 import { ThreadRows } from "./HistoryList"
 import { bleed, bleedPad, quickActions } from "./panel-helpers"
 import type { useAiRunner } from "./runner"
@@ -26,6 +27,7 @@ const RECENT = 3
  * 手機全螢幕：輸入框固定在畫面底部（拇指按得到），這一塊貼在它正上方。
  * - 最多 3 列一行一格的格線列：正在發生的事排前面——待簽名的草稿、扣款日的定期定額或補記——接著是依頁面與資料出現的建議。
  * - 一行依頁面出現的文字連結（帳本：記一筆交易・股利入帳）。
+ * - 最上面：打開了「每日收盤簡報」的人，最新的一則（`Briefing.tsx`；還沒看過時展開，看過收成一列）。
  * - 沒有建議也沒有動作的頁面（設定、資料來源、紀錄）：最近 3 段對話（標題＋相對時間），按下接著那段對話。
  *   桌面的紀錄頁不列（`hideRecent`）：那一頁本身就是完整的對話清單，旁邊的面板不重複一次。
  */
@@ -60,6 +62,8 @@ export function PanelHome({
 
   return (
     <div className="flex flex-col">
+      {/* 每日收盤簡報（打開了才有）：最新的一則排在最上面；下面的建議列自己有上緣的格線 */}
+      <BriefingBlock size={size} />
       {rows.length > 0 && (
         <ul aria-label="可以這樣問" className={cn("border-t border-rule", bleed[size])}>
           {rows.map((r) => (
