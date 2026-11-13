@@ -177,8 +177,9 @@ describe("服務條款與隱私權政策的頁面", () => {
     expect(screen.getByRole("note")).toHaveTextContent("草稿：這份文件還在審閱，有些項目還沒填，尚未生效。")
     // 給審閱者的那段引言不在頁面上
     expect(screen.queryByText(/供產品負責人與律師審閱/)).toBeNull()
-    expect(screen.getByRole("link", { name: "Forliosa 討論" })).toBeInTheDocument()
-    expect(screen.queryByRole("navigation", { name: "主要" })).toBeNull()
+    // 沒登入的外殼：字標連到首頁（介紹頁），導覽只有「討論」
+    expect(screen.getByRole("link", { name: "Forliosa 首頁" })).toHaveAttribute("href", "/")
+    expect(within(screen.getByRole("navigation", { name: "主要" })).getAllByRole("link").map((a) => a.textContent)).toEqual(["討論"])
     const other = within(screen.getByRole("article")).getByRole("link", { name: "服務條款" })
     expect(other).toHaveAttribute("href", "/terms")
     cleanup()
@@ -187,7 +188,7 @@ describe("服務條款與隱私權政策的頁面", () => {
     expect(await screen.findByRole("heading", { level: 1, name: /服務條款/ }, T)).toBeInTheDocument()
     expect(within(screen.getByRole("article")).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
     // 登入後是一般的外殼
-    expect(screen.getByRole("navigation", { name: "主要" })).toBeInTheDocument()
+    expect(within(screen.getByRole("navigation", { name: "主要" })).getByRole("link", { name: "帳本" })).toBeInTheDocument()
   })
 
   it("分頁標題是文件名稱；有目錄（每一節一個頁內連結）；〈隱私權政策〉第 N 節連到那一頁的那一節；草稿日期不顯示", async () => {
@@ -251,7 +252,7 @@ describe("服務條款與隱私權政策的頁面", () => {
     mount({ signedIn: false })
     renderApp("/discussions")
     await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
-    const about = screen.getByText(/Forliosa 是以台股為主/).closest("p")!.parentElement!
+    const about = screen.getByText(/Forliosa 是股票帳本/).closest("p")!.parentElement!
     expect(within(about).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(about).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
   })

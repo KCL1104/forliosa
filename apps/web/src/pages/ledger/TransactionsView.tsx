@@ -129,11 +129,6 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
             <XIcon aria-hidden className="size-3.5" />
           </button>
         )}
-        {!readOnly && (
-          <Button size="sm" variant="outline" className="ml-auto pointer-coarse:h-11" onClick={() => ask.action("trade")}>
-            記一筆
-          </Button>
-        )}
       </div>
       {!isDesktop && (
         <Drawer open={sheetOpen} onOpenChange={setSheetOpen}>
@@ -177,9 +172,9 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
           <EmptyState
             className={LAST}
             title="還沒有交易紀錄"
-            description="跟 AI 說一句「買 0050 2 張 52.4」就能記下第一筆。"
+            description="填表單記第一筆，或跟 AI 說一句「買 0050 2 張 52.4」。"
             action={
-              <Button variant="outline" onClick={() => ask.action("trade")}>
+              <Button variant="outline" onClick={() => ask.action("form")}>
                 記第一筆交易
               </Button>
             }

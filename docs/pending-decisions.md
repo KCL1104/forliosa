@@ -294,4 +294,5 @@
 | L-6 | ~~資料來源頁的風險句~~ | **已完成（2026-11-13）：照建議**——頁面只寫做法（「SearXNG 被搜尋引擎擋下時就停止查詢，不會設法繞過」），「搜尋引擎的條款不允許自動查詢、風險由營運者承擔」留在內部文件（`docs/research/news-and-external-sources.md` §10、本文件 1-3），請律師看過再決定要不要公開。 | `apps/web/src/pages/data-sources/DataSourcesPage.tsx` |
 | L-7 | ~~條款更新那一行的生效日與摘要~~ | **已完成（2026-11-13）：照建議**——設 `TERMS_EFFECTIVE_DATE`、`TERMS_SUMMARY` 之後，那一行寫「12/1 起適用新版服務條款與隱私權政策：〈摘要〉。」條款定稿、設 `TERMS_VERSION` 時一起設。 | `apps/web/src/lib/terms-notice.ts` |
 | L-8 | ~~停權原因~~ | **已完成（2026-11-13）：照建議**——被暫停的人看得到管理員填的原因；管理員的對話框註明「對方會看到這句話」。 | `apps/web/src/pages/discussions/labels.ts` |
+| L-10 | ~~歷史日線~~ | **已決定（2026-11-13）：用 Yahoo Finance 回補五年**（你說「不是即時的就沒差」；Claude 的說明：條款上歷史資料一樣不能轉載，實際風險是被擋或被要求下架）。做法：這批資料單獨標記，只給走勢圖、技術指標、走勢小圖用，帳本的市值與績效不用；資料來源頁照實列出；被擋就停。**之後要處理**：要不要寄信問證交所歷史資料的價格與授權（買到就把 Yahoo 的整批換掉）。 | `apps/api/src/forliosa/history_backfill.py`、`docs/deploy.md` |
 | L-9 | Google 登入已經做好（2026-11-13）。`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET` 你已經填在 Railway；`GOOGLE_REDIRECT_URI` 由 Claude 設定。Google Cloud Console 那邊要確認：重新導向 URI 一字不差、應用程式已「發布」（不是測試中）。 | 用你的 Google 帳號在 `https://forliosa.trade` 登入一次確認 | `docs/deploy.md` 2.4.1 |

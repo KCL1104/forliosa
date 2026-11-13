@@ -62,24 +62,40 @@ class ArchiveProvider(BaseProvider):
     def _remember(self, method: str, symbol: str, rows: list[Any]) -> None:
         self._last_sources[(method, symbol)] = sorted({r.source for r in rows})
 
-    def _filter(self, stmt, model):
-        return stmt.where(source_clause(model.source, self.policy))
+    def _filter(self, stmt, model, backfill: bool = False):
+        return stmt.where(source_clause(model.source, self.policy, backfill))
 
     def served(self, key: str) -> bool:
         return dataset_served(key, self.policy, self.taifex_confirmed)
 
-    def first_date(self, symbol: str | None = None) -> date | None:
-        """Earliest archived close (of ``symbol`` or of any symbol): where the archive's history begins."""
+    def first_date(self, symbol: str | None = None, backfill: bool = False) -> date | None:
+        """Earliest archived close (of ``symbol`` or of any symbol): where the archive's history begins.
+        ``backfill=True`` counts the history backfill's days too (charts)."""
         from forliosa.models import PriceDaily
 
         with self.session_fn() as db:
             stmt = select(func.min(PriceDaily.date))
             if symbol:
                 stmt = stmt.where(PriceDaily.symbol == symbol)
-            return db.scalar(self._filter(stmt, PriceDaily))
+            return db.scalar(self._filter(stmt, PriceDaily, backfill))
+
+    def backfill_until(self, symbol: str) -> date | None:
+        """The last day of ``symbol`` that comes from the history backfill (``None``: none is used)."""
+        from forliosa.datapolicy import HISTORY_SOURCE, history_backfill_enabled
+        from forliosa.models import PriceDaily
+
+        if not history_backfill_enabled():
+            return None
+        with self.session_fn() as db:
+            return db.scalar(select(func.max(PriceDaily.date)).where(PriceDaily.symbol == symbol,
+                                                                     PriceDaily.source == HISTORY_SOURCE))
 
     # -- prices ------------------------------------------------------------------------------------
-    def history(self, symbol: str, start: date, end: date) -> list[Candle] | None:
+    # ``backfill``: chart-like callers may also read the history backfill's days (split-adjusted, not official);
+    # everything that values a ledger leaves it off.
+    accepts_backfill = True
+
+    def history(self, symbol: str, start: date, end: date, backfill: bool = False) -> list[Candle] | None:
         from forliosa.models import PriceDaily
 
         if market_of_symbol(symbol) == "US":
@@ -87,7 +103,7 @@ class ArchiveProvider(BaseProvider):
         with self.session_fn() as db:
             stmt = select(PriceDaily).where(PriceDaily.symbol == symbol, PriceDaily.date >= start,
                                             PriceDaily.date <= end).order_by(PriceDaily.date)
-            rows = list(db.scalars(self._filter(stmt, PriceDaily)))
+            rows = list(db.scalars(self._filter(stmt, PriceDaily, backfill)))
         self._remember("history", symbol, rows)
         out = []
         for r in rows:

@@ -268,7 +268,7 @@ def _card(md: MarketData, c: Candidate, quotes: dict, today: date) -> tuple[dict
     name = c.name or (info.name if info else None)
     if name is None:
         return None
-    h = md.history(c.symbol, start, today)
+    h = md.history(c.symbol, start, today, backfill=True)
     q = quotes.get(c.symbol)
     base = change_base(q) if q else None
     price = q.price if q and q.price is not None else (h.candles[-1].c if h.candles else None)

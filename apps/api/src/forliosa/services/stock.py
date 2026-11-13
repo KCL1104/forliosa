@@ -108,7 +108,8 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     sym = info.symbol
     today = today_taipei()
     q = md.quote(sym)
-    hist = md.history(sym, today - timedelta(days=400), today)
+    # 52-week range and 3-month volume describe the chart, not a ledger: the history backfill's days count
+    hist = md.history(sym, today - timedelta(days=400), today, backfill=True)
     year = [c for c in hist.candles if c.t > today - timedelta(days=365)]
     three_m = [c for c in hist.candles if c.t >= add_months(today, -3)]
     prof = md.profile(sym)
@@ -886,7 +887,7 @@ def why_reasons(db: Session, md: MarketData, info: InstrumentInfo, q: QuoteData,
         if abs(pct) >= WHY_MOVE_PCT:
             word = "上漲" if pct > 0 else "下跌"
             reasons.append({"kind": "price_move", "text": f"{when}{word} {abs(pct) * 100:.1f}%"})
-    hist = md.history(sym, day - timedelta(days=45), day)
+    hist = md.history(sym, day - timedelta(days=45), day, backfill=True)
     past = [c for c in hist.candles if c.t < day][-20:]
     if q.volume and len(past) >= 10:
         avg = Decimal(sum(c.v for c in past)) / len(past)

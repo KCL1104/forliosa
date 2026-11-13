@@ -170,6 +170,21 @@ class PriceDaily(Base):
     source: Mapped[str] = mapped_column(String(32))
 
 
+class PriceBackfill(Base):
+    """One row per symbol the history backfill has asked its source about (``forliosa.history_backfill``): what
+    came back, so a finished or unknown symbol is never requested again."""
+
+    __tablename__ = "price_backfill"
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    source: Mapped[str] = mapped_column(String(32))
+    status: Mapped[str] = mapped_column(String(16))  # done | not_found | mismatch | no_overlap | error
+    first_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    rows: Mapped[int] = mapped_column(default=0)
+    attempts: Mapped[int] = mapped_column(default=0)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
 class FxRate(Base):
     __tablename__ = "fx_rates"
 

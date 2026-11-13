@@ -1,5 +1,6 @@
 import NumberFlow from "@number-flow/react"
 import { useNavigate, useSearch } from "@tanstack/react-router"
+import { PlusIcon } from "lucide-react"
 import { lazy, Suspense, useEffect } from "react"
 import { api } from "@/api"
 import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
@@ -12,6 +13,7 @@ import { DemoTag } from "@/components/section"
 import { Segmented } from "@/components/segmented"
 import { Sparkline } from "@/components/sparkline"
 import { ErrorState } from "@/components/states"
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, directionGlyph, formatMoney, formatPercent, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -106,7 +108,23 @@ export function LedgerPage() {
             待簽名 {pending} 筆
           </button>
         )}
-        {view === "holdings" && <CustomizeButton className="ml-auto max-lg:hidden" />}
+        {/* 手動記一筆：直接開表單（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」 */}
+        {!readOnly && (
+          <>
+            <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => ask.action("form")}>
+              記一筆
+            </Button>
+            <button
+              type="button"
+              aria-label="記一筆"
+              onClick={() => ask.action("form")}
+              className="press grid w-11 shrink-0 place-items-center self-stretch rounded-sm border border-ctl text-ink hover:bg-hov lg:hidden"
+            >
+              <PlusIcon aria-hidden className="size-5" />
+            </button>
+          </>
+        )}
+        {view === "holdings" && <CustomizeButton className={cn("max-lg:hidden", readOnly && "ml-auto")} />}
       </div>
       {pending > 0 && !readOnly && (
         <button

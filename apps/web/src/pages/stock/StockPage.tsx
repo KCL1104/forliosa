@@ -222,7 +222,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
             {watching ? "觀察中" : "加入觀察"}
           </Button>
         )}
-        <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("trade", { code: inst.code })}>
+        <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("form", { code: inst.code })}>
           記一筆
         </Button>
       </span>}
@@ -514,7 +514,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
                 在帳本中查看
               </Link>
               {!readOnly && (
-                <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("trade", { code: inst.code })}>
+                <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("form", { code: inst.code })}>
                   記一筆
                 </Button>
               )}

@@ -135,6 +135,36 @@ await check("自由提問：誠實說明現在答不了（不猜、不承諾時�
   if ((await path.getAttribute("href")) !== "/") throw new Error(`manual path ${await path.getAttribute("href")}`)
 })
 
+await check("帳本工具列的「記一筆」：直接開表單（不經過 AI 面板）；勾「存檔後再記一筆」存檔後表單留著", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "記一筆", exact: true }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("heading", { name: "記一筆交易" }).waitFor()
+  if (await page.getByText(/買賣了什麼/).count()) throw new Error("the toolbar button went through the AI panel")
+  await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2317")
+  await page.getByRole("option", { name: /2317/ }).first().click()
+  await page.locator("#trade-qty").fill("1")
+  await page.locator("#trade-price").fill("230")
+  await dialog.getByRole("checkbox", { name: "存檔後再記一筆" }).check()
+  await page.getByRole("button", { name: "儲存", exact: true }).click()
+  await page.getByText(/已記錄：買進 鴻海/).waitFor({ timeout: 8000 })
+  await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").waitFor({ timeout: 4000 })
+  if ((await page.locator("#trade-qty").inputValue()) !== "") throw new Error("quantity not cleared for the next entry")
+  await page.keyboard.press("Escape")
+})
+
+await check("帳本的欄位選單：勾選格排成兩欄，文字是橫的（不會被擠成一個字寬）", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "自訂欄位與顯示" }).click()
+  const group = page.getByRole("group", { name: "欄位" })
+  await group.waitFor()
+  const sizes = await group.locator("label").evaluateAll((els) => els.map((e) => { const r = e.getBoundingClientRect(); return [Math.round(r.width), Math.round(r.height)] }))
+  if (sizes.length < 6) throw new Error(`only ${sizes.length} column options`)
+  const bad = sizes.filter(([w, h]) => w < 90 || h > 48)
+  if (bad.length) throw new Error(`column labels squeezed: ${JSON.stringify(sizes)}`)
+  await page.keyboard.press("Escape")
+})
+
 await check("手動記帳表單（備援路徑）：試算稅費並儲存", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   // 「＋」直接打開表單（只有一件事，不做成選單）
@@ -1721,22 +1751,24 @@ const DESKTOP = { viewport: { width: 1440, height: 900 } }
 const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
 const overflowX = (p) => p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
-await check("討論（沒登入）：公開清單與主題不用登入就能讀，外殼只有字標與「登入」；群組主題看不到；「登入後發言」→ 登入 → 回到這個主題、可以回覆", async () => {
+await check("討論（沒登入）：公開清單與主題不用登入就能讀，外殼只有字標（連到首頁）、「討論」與「登入」；群組主題看不到；「登入後發言」→ 登入 → 回到這個主題、可以回覆", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/discussions?auth=signed-out", { waitUntil: "networkidle" })
     await p.getByRole("heading", { level: 1, name: "討論" }).waitFor({ timeout: 8000 })
     await p.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
     if (!/\/discussions$/.test(new URL(p.url()).pathname)) throw new Error(`redirected to ${p.url()}`)
     const shell = await p.evaluate(() => ({
-      nav: !!document.querySelector('nav[aria-label="主要"]'),
+      // 外殼的導覽只有「討論」一項（選取中）；字標連到首頁（沒登入是介紹頁）
+      nav: [...document.querySelectorAll('nav[aria-label="主要"] a')].map((a) => `${a.getAttribute("href")}:${a.getAttribute("aria-current") ?? ""}`).join(","),
+      wordmark: document.querySelector('a[aria-label="Forliosa 首頁"]').getAttribute("href"),
       dock: !!document.querySelector(".dock"),
       panel: !!document.querySelector("aside"),
-      ledgerLinks: [...document.querySelectorAll("a")].map((a) => a.getAttribute("href")).filter((h) => h === "/" || /^\/(stock|groups|settings|history|admin)/.test(h ?? "")),
+      ledgerLinks: [...document.querySelectorAll("a:not([aria-label='Forliosa 首頁'])")].map((a) => a.getAttribute("href")).filter((h) => h === "/" || /^\/(stock|groups|settings|history|admin)/.test(h ?? "")),
       rows: document.querySelectorAll('ul[aria-label="主題"] > li').length,
-      wordmarkLeft: Math.round(document.querySelector('a[aria-label="Forliosa 討論"]').getBoundingClientRect().left),
+      wordmarkLeft: Math.round(document.querySelector('a[aria-label="Forliosa 首頁"]').getBoundingClientRect().left),
       titleLeft: Math.round(document.querySelector("#main h1").getBoundingClientRect().left),
     }))
-    if (shell.nav || shell.dock || shell.panel || shell.ledgerLinks.length) throw new Error(`signed-out shell is not minimal: ${JSON.stringify(shell)}`)
+    if (shell.nav !== "/discussions:page" || shell.wordmark !== "/" || shell.dock || shell.panel || shell.ledgerLinks.length) throw new Error(`signed-out shell is not minimal: ${JSON.stringify(shell)}`)
     if (shell.rows !== 8) throw new Error(`expected the 8 public topics, got ${shell.rows}`)
     if (shell.wordmarkLeft !== shell.titleLeft) throw new Error(`wordmark and content are not on one left edge: ${JSON.stringify(shell)}`)
     if (await p.getByText("我把聯發科的交易補記好了").count()) throw new Error("a group topic is listed for a signed-out visitor")
@@ -1752,7 +1784,7 @@ await check("討論（沒登入）：公開清單與主題不用登入就能讀�
     }))
     if (Math.abs(edges.login - edges.list) > 1) throw new Error(`登入 is not on the content's right edge: ${JSON.stringify(edges)}`)
     // 免責旁邊一行：Forliosa 是什麼＋「登入」
-    const about = p.locator("main p", { hasText: "Forliosa 是以台股為主的持倉帳本" })
+    const about = p.locator("main p", { hasText: "Forliosa 是股票帳本" })
     await about.waitFor({ timeout: 8000 })
     // 連結在句子下面自己一列（「登入」「服務條款」「隱私權政策」），不夾在句子裡
     const aboutLinks = about.locator("xpath=following-sibling::p[1]")
@@ -1765,7 +1797,7 @@ await check("討論（沒登入）：公開清單與主題不用登入就能讀�
     await p.getByText("這則內容已被站方隱藏。", { exact: true }).waitFor()
     if (await p.getByText(/保證獲利/).count()) throw new Error("hidden reply body leaked to a visitor")
     if (await p.getByRole("button", { name: /加表情|^檢舉|^刪除|更多動作/ }).count()) throw new Error("write actions shown to a signed-out visitor")
-    await p.locator("main p", { hasText: "Forliosa 是以台股為主的持倉帳本" }).locator("xpath=following-sibling::p[1]").getByRole("link", { name: "登入", exact: true }).waitFor()
+    await p.locator("main p", { hasText: "Forliosa 是股票帳本" }).locator("xpath=following-sibling::p[1]").getByRole("link", { name: "登入", exact: true }).waitFor()
     if (await p.getByRole("textbox").count()) throw new Error("a composer is shown to a signed-out visitor")
     if (await p.locator("main").getByRole("link", { name: /台積電 2330/ }).count()) throw new Error("stock tags are links for a signed-out visitor")
     await p.getByText(DISCLAIMER).waitFor()
@@ -2022,13 +2054,87 @@ await check("分頁標題：每一頁自己的名字在前、站名在後（個�
     await toast.waitFor({ state: "detached", timeout: 3000 })
   })
 })
+await check("首頁（沒登入）：是簡短的介紹頁，不是登入頁——一句話、三個標「示範資料」的畫面（帳本・個股・記一筆）、頁尾條款；「登入」→ 登入頁 → 帳本；其他頁面照舊導到登入頁", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/?auth=signed-out", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "股票帳本" }).waitFor({ timeout: 8000 })
+    // 沒登入的狀態記在 sessionStorage：再開一次乾淨的網址（「登入」才不會帶著 ?auth=…）
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "股票帳本" }).waitFor({ timeout: 8000 })
+    if (new URL(p.url()).pathname !== "/") throw new Error(`the home page redirected to ${p.url()}`)
+    if ((await p.title()) !== "Forliosa") throw new Error(`home page title: ${await p.title()}`)
+    if (await p.getByRole("button", { name: /^用 (Google|Discord) 登入$/ }).count()) throw new Error("the sign-in buttons are on the home page")
+    const home = await p.evaluate(() => {
+      const figs = [...document.querySelectorAll("#main figure")]
+      const caps = figs.map((f) => f.querySelector("figcaption").getBoundingClientRect())
+      return {
+        h1: document.querySelectorAll("h1").length,
+        titles: figs.map((f) => f.querySelector("h2")?.textContent.trim()).join("|"),
+        tags: figs.map((f) => f.querySelectorAll("figcaption .demo-tag").length).join(""),
+        described: figs.every((f) => (f.querySelector("figcaption .sr-only")?.textContent ?? "").startsWith("示範畫面")),
+        // 示範畫面裡沒有可以按、可以 Tab 到的東西，也不讀給螢幕報讀器
+        hidden: figs.every((f) => f.querySelector(":scope > [aria-hidden='true']")),
+        controls: document.querySelectorAll("#main figure a, #main figure button, #main figure input, #main figure [tabindex]").length,
+        // 三個標題坐在同一條印刷線上：同一個高度、欄與欄之間沒有縫
+        tops: [...new Set(caps.map((r) => Math.round(r.bottom)))].length,
+        seams: caps.slice(1).map((r, i) => Math.round(r.left - caps[i].right)).join(","),
+        // 三欄的內容一樣寬
+        widths: [...new Set(figs.map((f) => Math.round(f.querySelector(":scope > [aria-hidden]").firstElementChild.getBoundingClientRect().width)))].length,
+        nav: [...document.querySelectorAll('header nav[aria-label="主要"] a')].map((a) => `${a.textContent.trim()}:${a.getAttribute("href")}:${a.getAttribute("aria-current") ?? ""}`).join(","),
+        wordmark: document.querySelector('a[aria-label="Forliosa 首頁"]')?.getAttribute("href"),
+        login: [...document.querySelectorAll("a[href^='/login']")].map((a) => `${a.textContent.trim()}:${a.getAttribute("href")}:${getComputedStyle(a).backgroundColor !== "rgba(0, 0, 0, 0)"}`).join(","),
+        footer: [...document.querySelectorAll("#main footer a")].map((a) => `${a.textContent.trim()}:${a.getAttribute("href")}`).join(","),
+        shell: document.querySelectorAll(".dock, aside").length,
+        paragraphs: [...document.querySelectorAll("#main > div > p")].length,
+        wide: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+    if (home.h1 !== 1 || home.titles !== "帳本|個股|記一筆" || home.tags !== "111" || !home.described || !home.hidden || home.controls) throw new Error(`home specimens: ${JSON.stringify(home)}`)
+    if (home.tops !== 1 || home.seams !== "0,0" || home.widths !== 1) throw new Error(`the three specimens are not one ruled sheet: ${JSON.stringify(home)}`)
+    // 頁首：字標、討論、登入（這一頁唯一的動作：墨色的主要按鈕，只有一顆）；頁尾只有兩份條款；沒有其他說明的段落
+    if (home.wordmark !== "/" || home.nav !== "討論:/discussions:" || home.login !== "登入:/login:true" || home.footer !== "服務條款:/terms,隱私權政策:/privacy" || home.shell || home.paragraphs || home.wide > 0) throw new Error(`home page chrome: ${JSON.stringify(home)}`)
+    // 「登入」→ 登入頁（沒有 next）→ 登入後是帳本
+    await p.getByRole("banner").getByRole("link", { name: "登入", exact: true }).click()
+    await p.waitForURL(/\/login$/, { timeout: 8000 })
+    await p.getByRole("button", { name: "用 Google 登入" }).click()
+    await p.getByText("總資產").first().waitFor({ timeout: 8000 })
+    if (new URL(p.url()).pathname !== "/" || (await p.getByRole("heading", { level: 1, name: "股票帳本" }).count())) throw new Error("signing in from the home page does not land on the ledger")
+    if ((await p.title()) !== "帳本｜Forliosa") throw new Error(`ledger title after sign-in: ${await p.title()}`)
+  })
+  // 其他要登入的頁面照舊：導到登入頁，帶著原本的網址
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/settings?auth=signed-out", { waitUntil: "networkidle" })
+    await p.waitForURL(/\/login\?next=%2Fsettings/, { timeout: 8000 })
+    // 帶著參數的首頁（舊網址 /transactions 會導到這裡）：也是介紹頁，「登入」帶著原本的網址
+    await p.goto(base + "/?view=transactions", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "股票帳本" }).waitFor({ timeout: 8000 })
+    const href = await p.getByRole("banner").getByRole("link", { name: "登入", exact: true }).getAttribute("href")
+    if (!/^\/login\?next=%2F%3Fview%3Dtransactions$/.test(href ?? "")) throw new Error(`登入 on /?view=transactions does not carry the page: ${href}`)
+  })
+  // 手機：一欄直排、不橫向捲動、可按的東西都 ≥ 44px；頁首跟著捲動，捲到最底「登入」還按得到
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    await p.goto(base + "/?auth=signed-out", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "股票帳本" }).waitFor({ timeout: 8000 })
+    const wide = await overflowX(p)
+    if (wide > 0) throw new Error(`the home page scrolls sideways by ${wide}px`)
+    const small = await smallTargets(p)
+    if (small.length) throw new Error(`home page: ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
+    const stacked = await p.evaluate(() => [...document.querySelectorAll("#main figure")].map((f) => Math.round(f.getBoundingClientRect().left)))
+    if (new Set(stacked).size !== 1) throw new Error(`the specimens are not stacked in one column on a phone: ${stacked}`)
+    await p.evaluate(() => window.scrollTo(0, document.documentElement.scrollHeight))
+    await p.waitForTimeout(200)
+    const login = await p.getByRole("banner").getByRole("link", { name: "登入", exact: true }).boundingBox()
+    if (!login || login.y < 0 || login.y > 60) throw new Error(`登入 is not reachable after scrolling to the bottom: ${JSON.stringify(login)}`)
+  })
+})
 await check("帳號：條款頁不用登入就能讀（草稿標示、一行不超過 40 個字、表格不撐寬頁面）；登入頁寫明同意；設定頁可以匯出與刪除帳號；條款更新時有一行", async () => {
   // 沒登入：兩份文件都讀得到，是精簡的外殼
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/privacy?auth=signed-out", { waitUntil: "networkidle" })
     await p.getByRole("heading", { level: 1, name: /隱私權政策/ }).waitFor({ timeout: 8000 })
     if (!/\/privacy$/.test(new URL(p.url()).pathname)) throw new Error(`redirected to ${p.url()}`)
-    if (await p.locator('nav[aria-label="主要"]').count()) throw new Error("the signed-in shell is shown on a public legal page")
+    if (await p.locator('nav[aria-label="主要"] a[href="/groups"], .dock, aside').count()) throw new Error("the signed-in shell is shown on a public legal page")
+    if ((await p.locator('a[aria-label="Forliosa 首頁"]').getAttribute("href")) !== "/") throw new Error("the wordmark of the public shell does not link to the home page")
     await p.getByRole("note").filter({ hasText: "草稿" }).waitFor({ timeout: 5000 })
     if (await p.getByText(/供產品負責人與律師審閱/).count()) throw new Error("the reviewers' note is shown to visitors")
     const doc = await p.evaluate(() => {

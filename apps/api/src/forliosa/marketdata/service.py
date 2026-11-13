@@ -312,16 +312,22 @@ class MarketData:
         return quotes
 
     # -- history & corporate data ------------------------------------------------------------------
-    def history(self, symbol: str, start: date, end: date) -> HistoryResult:
+    def history(self, symbol: str, start: date, end: date, backfill: bool = False) -> HistoryResult:
         """Daily candles. A partial provider (our archive) answers first; the next real provider fills
-        the days it lacks. Demo data is only used when no real provider has anything."""
+        the days it lacks. Demo data is only used when no real provider has anything.
+
+        ``backfill=True`` — charts, technical indicators and sparklines only — also reads the days the history
+        backfill stored (``PRICE_HISTORY_SOURCE``): they are split-adjusted and not official, so a caller that values
+        holdings (portfolio, groups, recurring plans, position history) must leave it off."""
         collected: dict[date, Candle] = {}
         names: list[str] = []
         is_demo = False
         for p in self._available():
             if p.is_demo and collected:
                 break
-            value = self._call(p, lambda p=p: p.history(symbol, start, end))
+            wants = backfill and getattr(p, "accepts_backfill", False)
+            value = self._call(p, lambda p=p, wants=wants: (p.history(symbol, start, end, backfill=True) if wants
+                                                             else p.history(symbol, start, end)))
             if not value:
                 continue
             added = False
@@ -494,6 +500,17 @@ class MarketData:
 
     def provider(self, name: str) -> BaseProvider | None:
         return next((p for p in self._available() if p.name == name), None)
+
+    def backfill_until(self, symbol: str) -> date | None:
+        """The last day of ``symbol`` taken from the history backfill, if charts use any."""
+        archive = next((p for p in self.providers if p.name == "archive"), None)
+        fn = getattr(archive, "backfill_until", None)
+        if fn is None:
+            return None
+        try:
+            return fn(symbol)
+        except Exception:  # the archive is optional (e.g. no database yet)
+            return None
 
     def archive_since(self, symbol: str | None = None) -> date | None:
         """First archived trading day (of ``symbol``, else of any symbol) usable under the policy."""

@@ -12,6 +12,7 @@
 
 ## 重要決定
 - 資料只用可合法商用的來源：`DATA_POLICY=commercial`（預設）；不得自動擷取證交所網站或 MIS。
+- **唯一的例外（產品負責人 2026-11-13 決定，知道授權風險）**：存檔開始以前的五年日線用 Yahoo Finance 回補（`PRICE_HISTORY_SOURCE=yahoo`，只在正式環境的 Railway 變數打開）。這批資料只給走勢圖、技術指標、走勢小圖用，帳本的市值與績效不用；被擋（403、轉址）就停，不偽裝瀏覽器、不換位址。狀態：`cd apps/api && uv run python -m forliosa.history_backfill status`；整批刪除：`… history_backfill drop`。
 - 初期資料源不付費（不買 E-Shop 等付費資料）；缺的資料老實顯示空狀態。
 - 檢查三把 Claude key 是否分屬三個 workspace：`cd apps/api && uv run python -m forliosa.ai.smoke --keys`。
 - AI 用 Claude API，預設模型 Haiku 等級；key 放在環境變數 `Claude_API_KEY_1..3`（三個 workspace，對話黏著同一把 key）。

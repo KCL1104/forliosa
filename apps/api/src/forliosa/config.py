@@ -67,6 +67,14 @@ class Settings(BaseSettings):
     market_data_providers: Annotated[list[str], NoDecode] = Field(
         default_factory=lambda: ["archive", "twse_openapi", "tpex_openapi", "shioaji_data", "demo"]
     )
+    # Daily candles from before our own archive began (product owner, 2026-11-13: fill five years from Yahoo
+    # Finance, knowing its terms do not license redistribution). "" (default): nothing is fetched and no such row is
+    # ever read. "yahoo": the worker backfills ``prices_daily`` once (``forliosa.history_backfill``, source
+    # ``yahoo-history``) and charts, technical indicators and sparklines may read those rows; ledger valuation and
+    # performance never do (Yahoo's prices are split-adjusted). ``python -m forliosa.history_backfill drop``
+    # deletes every such row.
+    price_history_source: Literal["", "yahoo"] = ""
+    price_history_years: int = Field(default=5, ge=1, le=10)
     # TAIFEX OpenAPI datasets the open-data inventory marks ``conditional`` (no matching data.gov.tw OGDL
     # dataset found: 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人 …) are archived but, under
     # DATA_POLICY=commercial, NOT shown to users until the owner has TAIFEX's written confirmation and sets

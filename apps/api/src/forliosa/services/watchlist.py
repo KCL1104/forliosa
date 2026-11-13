@@ -29,7 +29,7 @@ def _items(db: Session, user: User) -> list[WatchlistItem]:
 def _sparkline(md: MarketData, symbol: str) -> tuple[list[dict], str, list[str]]:
     """The last 20 daily closes (there is no licensed intraday source, so never minute points)."""
     today = today_taipei()
-    h = md.history(symbol, today - timedelta(days=45), today)
+    h = md.history(symbol, today - timedelta(days=45), today, backfill=True)
     candles = h.candles[-SPARKLINE_DAYS:]
     return [{"t": c.t.isoformat(), "price": ser.price(c.c)} for c in candles], "1d", tagged(h.source, "price")
 

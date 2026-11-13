@@ -1843,3 +1843,20 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 **停權原因**：`GET /me` 多 `public_posting_suspended_reason`，403 `posting_suspended` 多 `reason`——站方管理員在停權對話框填的「原因（選填）」會給被停權的人看（對話框裡已註明「對方會看到這句話」）。沿用到新帳號的停權也帶著原因。
 
+
+## 2026-11-13 歷史日線回補（`PRICE_HISTORY_SOURCE=yahoo`）
+
+產品負責人決定：存檔開始（2026-11-12）以前的五年日線用 Yahoo Finance 回補。它不是授權來源（Yahoo 的條款不允許轉載），所以做成明確的開關，資料單獨標記、可以整批刪除。預設（沒設）什麼都不抓、不讀。
+
+- **寫入**（`history_backfill.py`、`marketdata/yahoo_history.py`、worker 的 `price_backfill`）：每檔一個請求（`query1.finance.yahoo.com/v8/finance/chart/<代號>`，這個網址只在這支抓取器的白名單裡），寫進 `prices_daily`，`source = 'yahoo-history'`。
+  - 只寫**這檔第一筆官方收盤價以前**的日子：官方的列不會被蓋掉，今天還沒收盤的那一根不會存。
+  - 存之前先核對：兩邊都有的日子（不含今天），Yahoo 的收盤價和官方收盤價相差超過 0.6% 就整檔不存（`mismatch`）；沒有可核對的日子先不存（`no_overlap`，3 天後再問）。
+  - HTTP 429：等 60 秒再問同一檔，再不行等 180 秒，第三次還是 429 就結束這一批；403、轉址等拒絕直接結束。下一批最少等 30 分鐘、最多 6 小時。不偽裝瀏覽器、不換位址。
+  - 進度記在 `price_backfill`（alembic 0015）：`done`、`not_found`、`mismatch` 不再問。
+- **讀取**：`MarketData.history(symbol, start, end, backfill=True)` 才會讀到這些列（`datapolicy.source_clause(..., backfill=True)`，而且開關要開著）。
+  - 讀的：`GET /instruments/{symbol}/history`、個股頁關鍵數據的 52 週高低與 3 個月均量、「為什麼漲跌」的 20 日均量、觀察清單與相關股票的走勢小圖、AI 的 `get_stock_history`／`get_technicals`。
+  - **不讀的**：帳本市值與績效（`services/portfolio.py`）、群組排行（`services/sharing.py`）、定期定額的扣款價（`services/recurring.py`）、估值走勢。原因：Yahoo 的開高低收已經照股票分割換算（0050 在 2025 年分割前的價格是當時成交價的四分之一），而且不回傳分割紀錄，還原不回去；拿來乘上當時的股數會算錯。
+- **`History` 回應**：`sources` 多一項「Yahoo Finance（歷史日線，非官方資料）」；`notes` 多一句「2026/11/11 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算」。序列比要求的區間短時，第一句是「資料從 YYYY/MM/DD 開始」（這檔在 Yahoo 的第一天）。
+- **`GET /meta/attributions`**：開關開著時 `datasets` 多一筆 `key: "yahoo-history"`（`commercial: false`、`license_status: "non_commercial"`），資料來源頁會列出來並標「非商用」。
+- 成交量：Yahoo 的單位也是股，但不含盤後與零股，比官方少幾個百分點到一成多（2330 在 2026-11-12：Yahoo 29,205,152，官方 34,359,285）；開高低收和官方完全相同。
+- `python -m forliosa.history_backfill status｜run｜drop`：看進度、手動跑、整批刪除。

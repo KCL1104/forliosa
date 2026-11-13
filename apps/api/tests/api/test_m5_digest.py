@@ -124,6 +124,12 @@ def at_saturday_evening(sat: date) -> datetime:
     return datetime.combine(sat, time(20, 0), TAIPEI)
 
 
+def due_time(sat: date) -> datetime:
+    """A clock at which the digest written on ``sat`` evening is due. The real clock alone is earlier than that on a
+    Saturday before 20:00 Taipei (``last_saturday`` is then today), which left the push unsent."""
+    return max(now_utc(), at_saturday_evening(sat) + timedelta(minutes=10))
+
+
 @pytest.fixture()
 def family(app, client):
     """Owner 示範使用者 (returns + holdings), 小明 (everything, pushes), 小華 (returns + trades)."""
@@ -401,7 +407,7 @@ def test_digest_push_only_shows_members_who_push(family, market):
     assert len(create(market, family["sat"])) == 1
     run_ai(FakeClaude(), family["sat"])
     with session_factory()() as db:
-        notifications.send_due(db, market, now=now_utc())
+        notifications.send_due(db, market, now=due_time(family["sat"]))
     text = fake.discord[-1].body["content"]
     assert "週報" in text and "小明" in text
     assert "示範使用者" not in text and "小華" not in text
@@ -419,7 +425,7 @@ def test_digest_push_includes_the_summary_when_everyone_pushes(family, market):
     create(market, family["sat"])
     run_ai(FakeClaude(), family["sat"])
     with session_factory()() as db:
-        notifications.send_due(db, market, now=now_utc())
+        notifications.send_due(db, market, now=due_time(family["sat"]))
     text = fake.discord[-1].body["content"]
     assert SUMMARY in text and "台積電（2 人）" in text and "AI 分析僅供參考" in text
     assert all(n in text for n in ("示範使用者", "小明", "小華"))

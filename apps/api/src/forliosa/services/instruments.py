@@ -98,9 +98,9 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
     info = require_instrument(md, symbol)
     today = today_taipei()
     start = range_start(range_, today, date(1990, 1, 1))
-    h = md.history(info.symbol, start, today)
+    h = md.history(info.symbol, start, today, backfill=True)  # a chart: may show the history backfill's days
     candles = h.candles
-    notes = series_notes(md, info.symbol, start, candles[0].t if candles else None)
+    notes = series_notes(md, info.symbol, start, candles[0].t if candles else None, backfill=True)
     if range_ == "5D":
         candles = candles[-5:]
     return {

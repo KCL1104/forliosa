@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
 import { useAccounts, useCreateTransaction, useDeleteTransaction, useUpdateTransaction } from "@/api/queries"
@@ -128,6 +128,13 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
   const remove = useDeleteTransaction()
   const [f, setF] = useState<FormState>(() => initialState(edit, unitPref))
   const [submitted, setSubmitted] = useState(false)
+  // 連續記好幾筆（把現有的持股一筆一筆補進來）：存檔後表單留著，帳戶、類型、日期不動，其餘清空
+  const [again, setAgain] = useState(false)
+  const [round, setRound] = useState(0)
+  const formRef = useRef<HTMLFormElement>(null)
+  useEffect(() => {
+    if (round > 0) formRef.current?.querySelector<HTMLInputElement>("[cmdk-input]")?.focus()
+  }, [round])
   const set = (patch: Partial<FormState>) => setF((s) => ({ ...s, ...patch }))
 
   // 預先帶入的代號（帳戶未選時預設第一個）
@@ -219,6 +226,12 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
               ),
           },
         })
+        if (again) {
+          setF((s) => ({ ...s, symbol: null, qtyText: "", priceText: "", amountText: "", dayTrade: false, note: "" }))
+          setSubmitted(false)
+          setRound((n) => n + 1)
+          return
+        }
         onDone()
       },
       onError: (err) => toast.error("儲存失敗，表單內容仍保留", { description: err instanceof Error ? err.message : undefined }),
@@ -263,7 +276,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
   const unitHint = !isUS && (type === "buy" || type === "sell") && shares ? formatQuantity(shares, "lot", "TWSE") : null
 
   return (
-    <form onSubmit={submit} noValidate className={cn("grid", layout === "split" ? "grid-cols-[minmax(0,1fr)_260px]" : "grid-cols-1")}>
+    <form ref={formRef} onSubmit={submit} noValidate className={cn("grid", layout === "split" ? "grid-cols-[minmax(0,1fr)_260px]" : "grid-cols-1")}>
       <div className="flex flex-col gap-4 px-4 py-4 sm:px-6">
         {edit && <AutoNotice source={edit.source} />}
         <Row label="類型">
@@ -370,7 +383,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
           <span className="demo-tag">預估</span>
         </div>
         <PreviewBody preview={preview.data} loading={preview.isFetching && !preview.data} ready={!!debounced} currency={account?.currency ?? "TWD"} type={type} />
-        {layout === "split" && <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} className="mt-auto pt-2" />}
+        {layout === "split" && <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} again={again} onAgain={setAgain} className="mt-auto pt-2" />}
       </aside>
       {layout === "stack" && (
         <div className="safe-bottom sticky bottom-0 z-10 border-t bg-popover px-4 pt-3 pb-3">
@@ -380,16 +393,38 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
               <span className="num font-semibold">{formatMoney(Math.abs(preview.data.net_cash), { currency: account?.currency ?? "TWD" })}</span>
             </p>
           )}
-          <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} />
+          <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} again={again} onAgain={setAgain} />
         </div>
       )}
     </form>
   )
 }
 
-function Actions({ edit, busy, onCancel, onDelete, className }: { edit: boolean; busy: boolean; onCancel: () => void; onDelete: () => void; className?: string }) {
+function Actions({
+  edit,
+  busy,
+  onCancel,
+  onDelete,
+  again,
+  onAgain,
+  className,
+}: {
+  edit: boolean
+  busy: boolean
+  onCancel: () => void
+  onDelete: () => void
+  again: boolean
+  onAgain: (on: boolean) => void
+  className?: string
+}) {
   return (
     <div className={cn("flex flex-col gap-2", className)}>
+      {!edit && (
+        <label className="flex min-h-9 items-center gap-2 text-md pointer-coarse:min-h-11">
+          <input type="checkbox" className="size-4 shrink-0 accent-[var(--ink)]" checked={again} onChange={(e) => onAgain(e.target.checked)} />
+          存檔後再記一筆
+        </label>
+      )}
       <div className="flex gap-2">
         <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>
           取消

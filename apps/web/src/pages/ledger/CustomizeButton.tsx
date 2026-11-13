@@ -31,19 +31,20 @@ export function CustomizeButton({ className }: { className?: string }) {
         <SlidersHorizontalIcon aria-hidden className="size-[18px]" />
       </PopoverTrigger>
       <PopoverContent align="end" className="w-80 gap-0 p-0">
-        <fieldset className="border-b border-rule px-4 py-3">
-          <legend className="float-left mb-2 w-full text-sm font-bold text-ink">欄位</legend>
+        {/* 不用 fieldset＋浮動的 legend：浮動佔滿整列時，後面的格線會被擠到右邊只剩一個字寬 */}
+        <div role="group" aria-labelledby="ledger-columns-title" className="border-b border-rule px-4 py-3">
+          <p id="ledger-columns-title" className="mb-2 text-sm font-bold text-ink">欄位</p>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             {ALL_COLUMNS.map((c) => (
-              <label key={c} className={cn("flex min-h-9 items-center gap-2 text-md pointer-coarse:min-h-11", c === "price" && "text-ink-2")}>
-                <input type="checkbox" className="size-4 accent-[var(--ink)]" checked={columns.includes(c)} disabled={c === "price"} onChange={() => toggleColumn(c)} />
+              <label key={c} className={cn("flex min-h-9 min-w-0 items-center gap-2 text-md pointer-coarse:min-h-11", c === "price" && "text-ink-2")}>
+                <input type="checkbox" className="size-4 shrink-0 accent-[var(--ink)]" checked={columns.includes(c)} disabled={c === "price"} onChange={() => toggleColumn(c)} />
                 {label(c)}
               </label>
             ))}
           </div>
-        </fieldset>
+        </div>
         <label className="flex min-h-12 items-center gap-2 border-b border-rule px-4 text-md">
-          <input type="checkbox" className="size-4 accent-[var(--ink)]" checked={showTrend} onChange={(e) => setShowTrend(e.target.checked)} />
+          <input type="checkbox" className="size-4 shrink-0 accent-[var(--ink)]" checked={showTrend} onChange={(e) => setShowTrend(e.target.checked)} />
           顯示總資產走勢圖
         </label>
         <div className="px-4 py-3">

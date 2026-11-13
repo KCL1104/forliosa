@@ -298,6 +298,9 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "demo": ("示範資料（模擬）", True),
     "finmind": ("FinMind" + NON_COMMERCIAL_SUFFIX, False),
     "yahoo": ("Yahoo Finance" + NON_COMMERCIAL_SUFFIX, False),
+    # Daily candles from before the archive began: an explicit owner opt-in (PRICE_HISTORY_SOURCE=yahoo), read only by
+    # charts — see :func:`history_backfill_enabled`.
+    "yahoo-history": ("Yahoo Finance（歷史日線，非官方資料）", False),
     # News headline sources (forliosa.news; labelled through DATASETS where a dataset exists).
     "gdelt": ("", True),
     "ai-search": ("AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）", True),
@@ -319,6 +322,19 @@ _ALIASES = {"twse_openapi": "twse-openapi", "tpex_openapi": "tpex-openapi", "shi
 def _key(part: str) -> str:
     part = part.strip().lower().split("/", 1)[0]
     return _ALIASES.get(part, part)
+
+
+HISTORY_SOURCE = "yahoo-history"
+HISTORY_LICENSE_URL = "https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html"
+
+
+def history_backfill_enabled() -> bool:
+    """PRICE_HISTORY_SOURCE=yahoo: the product owner's decision (2026-11-13) to fill the years before our archive
+    with Yahoo Finance's daily candles. Not a licensed source — the rows keep their own key so they can be removed in
+    one statement, and only chart-like reads ask for them (``backfill=True``)."""
+    from forliosa.config import get_settings
+
+    return get_settings().price_history_source == "yahoo"
 
 
 def is_commercial_source(source: str) -> bool:
@@ -387,22 +403,31 @@ def labels(sources: Iterable[str]) -> list[str]:
     return list(dict.fromkeys(out))
 
 
-def allowed_sources(policy: Policy) -> list[str]:
-    """Archive ``source`` values a query may use (exact keys; composite worker rows are matched by parts)."""
-    return [k for k, (_, ok) in _SOURCES.items() if k not in NEVER_ALLOWED and (ok or policy == "personal")]
+def allowed_sources(policy: Policy, backfill: bool = False) -> list[str]:
+    """Archive ``source`` values a query may use (exact keys; composite worker rows are matched by parts).
+
+    ``backfill=True`` (charts only) adds the history backfill's key when the owner has switched it on."""
+    keys = [k for k, (_, ok) in _SOURCES.items()
+            if k not in NEVER_ALLOWED and k != HISTORY_SOURCE and (ok or policy == "personal")]
+    if backfill and history_backfill_enabled():
+        keys.append(HISTORY_SOURCE)
+    return keys
 
 
-def source_clause(column, policy: Policy):
+def source_clause(column, policy: Policy, backfill: bool = False):
     """SQL filter for an archive table's ``source`` column under ``policy``.
 
     Commercial: only commercially usable keys. Personal: anything except the never-allowed sources (rows
-    written by the old worker can be composite, e.g. ``twse-mis+shioaji-data``).
+    written by the old worker can be composite, e.g. ``twse-mis+shioaji-data``). The history backfill's rows
+    (``yahoo-history``) are left out in both modes unless the caller asks for them with ``backfill=True`` and the
+    owner has switched the backfill on: they are split-adjusted, so nothing that values a ledger may read them.
     """
     from sqlalchemy import and_, not_
 
     if policy == "commercial":
-        return column.in_(allowed_sources(policy))
-    return and_(*[not_(column.contains(k)) for k in sorted(NEVER_ALLOWED)])
+        return column.in_(allowed_sources(policy, backfill))
+    never = {*NEVER_ALLOWED} if backfill and history_backfill_enabled() else {*NEVER_ALLOWED, HISTORY_SOURCE}
+    return and_(*[not_(column.contains(k)) for k in sorted(never)])
 
 
 @dataclass(frozen=True)
@@ -490,6 +515,16 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
                       "year": year, "license": "FinMind 使用條款（非商用）", "license_url": "https://finmind.github.io/Disclaimer/",
                       "license_status": "non_commercial", "license_basis": None, "commercial": False, "served": True,
                       "last_updated": None, "last_fetched": None, "attribution": label("finmind")})
+    if history_backfill_enabled():
+        hist = (status or {}).get(f"{HISTORY_SOURCE}/price") or {}
+        items.append({
+            "key": HISTORY_SOURCE, "agency": "Yahoo Finance", "dataset": "個股與 ETF 的歷史日線",
+            "url": "https://finance.yahoo.com/",
+            "used_for": "走勢圖、技術指標與走勢小圖裡，Forliosa 開始每天存檔以前的日線",
+            "year": year, "license": "Yahoo 服務條款（非官方資料，沒有轉載授權）",
+            "license_url": HISTORY_LICENSE_URL, "license_status": "non_commercial", "license_basis": None,
+            "commercial": False, "served": True, "last_updated": hist.get("data_date"),
+            "last_fetched": hist.get("fetched_at"), "attribution": label(HISTORY_SOURCE)})
     stale = []
     for s in STALE_DATASETS:
         st = status.get(s.key) or {}

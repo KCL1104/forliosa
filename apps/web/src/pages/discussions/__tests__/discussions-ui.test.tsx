@@ -94,23 +94,26 @@ const hrefs = () => [...document.querySelectorAll("a")].map((a) => a.getAttribut
 /** 主題列那一行 meta 的每一項（照順序） */
 const metaItems = (row: Element) => [...row.querySelector(".meta-line > div")!.children].map((el) => el.textContent)
 
-describe("沒登入：公開討論在精簡的外殼裡（字標＋登入）", () => {
+describe("沒登入：公開討論在精簡的外殼裡（字標、討論、登入）", () => {
   it("清單：只有公開的主題、沒有篩選、沒有 AI／底部列／連到帳本的東西；/me 只問一次", async () => {
     mount({ signedIn: false })
     renderApp("/discussions")
     expect(await screen.findByRole("heading", { level: 1, name: "討論" }, T)).toBeInTheDocument()
     await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
-    // 外殼：字標連到討論、「登入」帶著回來的網址
-    expect(screen.getByRole("link", { name: "Forliosa 討論" })).toHaveAttribute("href", "/discussions")
+    // 外殼：字標連到首頁（沒登入是介紹頁）、導覽只有「討論」（選取中）、「登入」帶著回來的網址
+    expect(screen.getByRole("link", { name: "Forliosa 首頁" })).toHaveAttribute("href", "/")
     expect(within(screen.getByRole("banner")).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions")
     // 「登入」和字標在內容的欄寬裡（不是掛在整個版心的最右邊）
-    expect(screen.getByRole("link", { name: "Forliosa 討論" }).parentElement!.className).toMatch(/\bmax-w-measure\b/)
-    expect(screen.queryByRole("navigation", { name: "主要" })).toBeNull()
+    expect(screen.getByRole("link", { name: "Forliosa 首頁" }).parentElement!.className).toMatch(/\bmax-w-measure\b/)
+    const publicNav = within(screen.getByRole("navigation", { name: "主要" })).getAllByRole("link")
+    expect(publicNav.map((a) => `${a.textContent}:${a.getAttribute("href")}:${a.getAttribute("aria-current")}`)).toEqual(["討論:/discussions:page"])
     expect(screen.queryByRole("button", { name: /問 AI/ })).toBeNull()
     expect(screen.queryByRole("button", { name: /帳號選單/ })).toBeNull()
     expect(screen.queryByRole("button", { name: /搜尋股票/ })).toBeNull()
     expect(document.querySelector(".dock")).toBeNull()
-    expect(hrefs().filter((h) => h === "/" || /^\/(stock|groups|settings|history|admin)/.test(h))).toEqual([])
+    // 連到「/」的只有字標（沒登入時那裡是介紹頁，不是帳本）
+    expect([...document.querySelectorAll('a[href="/"]')].map((a) => a.getAttribute("aria-label"))).toEqual(["Forliosa 首頁"])
+    expect(hrefs().filter((h) => /^\/(stock|groups|settings|history|admin)/.test(h))).toEqual([])
     // 內容：八則公開主題，沒有群組的；標記的股票是純文字
     expect(topicTitles()).toHaveLength(8)
     expect(screen.queryByText("我把聯發科的交易補記好了")).toBeNull()
@@ -154,7 +157,8 @@ describe("沒登入：公開討論在精簡的外殼裡（字標＋登入）", (
     expect(within(screen.getByText(ABOUT_FORLIOSA).parentElement!).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions%2Ftop_p_tsmc")
     // 沒登入：沒有「更多動作」（刪除、檢舉都要登入）
     expect(screen.queryByRole("button", { name: /更多動作/ })).toBeNull()
-    expect(screen.queryByRole("navigation", { name: "主要" })).toBeNull()
+    // 主題頁也在「討論」底下：外殼的導覽只有它，選取中
+    expect(within(screen.getByRole("navigation", { name: "主要" })).getAllByRole("link").map((a) => `${a.textContent}:${a.getAttribute("aria-current")}`)).toEqual(["討論:page"])
     expect(api.getMe).toHaveBeenCalledTimes(1)
   })
 

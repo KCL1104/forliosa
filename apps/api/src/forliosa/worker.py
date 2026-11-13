@@ -56,6 +56,11 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``monthly_archive`` — the 10th and the 25th at 10:20: 董監事持股餘額明細 (company ↔ company links), TDCC 集保股東
   戶數 (2-22 / 2-23) and the ESG product text (archive group ``monthly``).
 
+* ``price_backfill`` — only with PRICE_HISTORY_SOURCE=yahoo, in a loop of its own: every 10 minutes one batch of
+  the history backfill (``forliosa.history_backfill``: five years of daily candles before our archive began, per
+  symbol, held and watched symbols first) until every symbol has been asked once, then one look a day. A refusal
+  from the source ends the batch and the next try waits 30 minutes, doubling up to 6 hours.
+
 There is no intraday polling: the former MIS job was removed (2026-11-12) because TWSE's website terms
 forbid automated downloads from mis.twse.com.tw and real-time / delayed quotes need a paid licence.
 ``/instruments/{symbol}/intraday`` returns no points until a licensed source is added.
@@ -106,6 +111,8 @@ EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex", "cbc", "n
 # 08:10: today's reference prices and notices, plus a second look at the NAV file (it only holds the latest NAV of each
 # fund, so one posted after the 21:40 run would otherwise be lost when the next evening's file replaces it).
 MORNING_GROUPS = ["twse", "tpex", "nav"]
+PRICE_BACKFILL_SECONDS = 600
+PRICE_BACKFILL_REFUSED_SECONDS = 1800
 WEEKLY_GROUPS = ["tdcc", "weekly"]
 MONTHLY_GROUPS = ["monthly"]
 MONTHLY_DAYS = (10, 25)
@@ -241,6 +248,13 @@ class Worker:
             self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh))
         if settings.company_descriptions_enabled:
             self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh))
+        # History backfill (PRICE_HISTORY_SOURCE=yahoo): its own loop, a batch every 10 minutes until every symbol
+        # has been asked once; then one look a day for newly listed symbols.
+        self._backfill_wait_until: datetime | None = None
+        self._backfill_refusals = 0
+        if settings.price_history_source == "yahoo":
+            self.jobs.append(Job("price_backfill", every(PRICE_BACKFILL_SECONDS), self.price_backfill,
+                                 background=True))
 
     async def archive(self, groups: list[str]) -> None:
         def run() -> list:
@@ -387,6 +401,34 @@ class Worker:
                 return refresh(db, self.md, deadline_seconds=get_settings().news_refresh_minutes * 60 * 0.8)
 
         await asyncio.to_thread(run)
+
+    async def price_backfill(self) -> None:
+        """One batch of the history backfill. A refusal from the source ends the batch; the next try waits 30
+        minutes, doubling up to 6 hours — the same client, never a workaround."""
+        from forliosa import history_backfill as hb
+        from forliosa.marketdata import yahoo_history
+
+        now = self.now_fn()
+        if self._backfill_wait_until is not None and now < self._backfill_wait_until:
+            return
+        years = get_settings().price_history_years
+
+        def run():
+            with session_factory()() as db:
+                return hb.run_batch(db, yahoo_history.fetcher(), years,
+                                    deadline_seconds=PRICE_BACKFILL_SECONDS * 0.8)
+
+        res = await asyncio.to_thread(run)
+        if res.blocked:
+            self._backfill_refusals += 1
+            wait = min(PRICE_BACKFILL_REFUSED_SECONDS * 2 ** (self._backfill_refusals - 1), 6 * 3600)
+            self._backfill_wait_until = now + timedelta(seconds=wait)
+        else:
+            self._backfill_refusals = 0
+            self._backfill_wait_until = now + timedelta(days=1) if res.remaining <= 0 else None
+        if res.asked or res.blocked:
+            log.info("price backfill: asked %d symbols, stored %d (%d rows), %d left%s", res.asked, res.stored,
+                     res.rows, res.remaining, "; the source refused, waiting" if res.blocked else "")
 
     async def company_refresh(self) -> None:
         from forliosa.services.company import refresh

@@ -93,15 +93,18 @@ function EmptyLedger() {
   const ask = useAskAi()
   const readOnly = useReadOnly()
   if (readOnly) return <EmptyState title="目前沒有持股" />
-  // 空狀態只給一個動作：交給 AI 記第一筆。表單在「交易」分段的「記一筆」與 AI 輸入框的「＋」裡
+  // 空狀態兩條路：填表單，或跟 AI 說一句
   return (
     <EmptyState
       title="帳本還是空的"
-      description="跟 AI 說一句，記下第一筆。"
+      description="填表單記第一筆，或跟 AI 說一句。"
       action={
-        <Button variant="outline" onClick={() => ask.submit("買 0050 2 張 52.4")}>
-          試試「買 0050 2 張 52.4」
-        </Button>
+        <div className="flex flex-wrap gap-2.5">
+          <Button onClick={() => ask.action("form")}>記第一筆</Button>
+          <Button variant="outline" onClick={() => ask.submit("買 0050 2 張 52.4")}>
+            試試「買 0050 2 張 52.4」
+          </Button>
+        </div>
       }
     />
   )

@@ -38,14 +38,25 @@ def covers(first: date | None, start: date) -> bool:
     return first is not None and first <= next_tw_trading_day(start) + timedelta(days=COVERAGE_GRACE_DAYS)
 
 
-def series_notes(md: MarketData, symbol: str, start: date, first: date | None) -> list[str]:
+def backfill_note(until: date) -> str:
+    """Charts that include the history backfill say so: which days, whose data, and that splits are folded in."""
+    return f"{ymd(until)} 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算"
+
+
+def series_notes(md: MarketData, symbol: str, start: date, first: date | None,
+                 backfill: bool = False) -> list[str]:
     """Notes for a daily series of ``symbol`` requested from ``start`` whose first point is ``first``.
 
     Personal mode fills an *empty* series with demo data (which covers the range, so no note); a short real
-    series (the archive alone, FinMind being off by default) gets the same note in both modes.
+    series (the archive alone, FinMind being off by default) gets the same note in both modes. ``backfill``: the
+    series was read with the history backfill, so it starts at its own first day and names that source.
     """
+    notes: list[str] = []
+    until = md.backfill_until(symbol) if backfill and first is not None else None
+    if until is not None and first <= until:
+        notes.append(backfill_note(until))
     if covers(first, start):
-        return []
+        return notes
     if market_of_symbol(symbol) == "US" and md.policy == "commercial":
         return [US_NOTE]
-    return [accumulating_note(md, symbol)]
+    return [since_note(first) if until is not None and first <= until else accumulating_note(md, symbol), *notes]

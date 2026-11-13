@@ -27,6 +27,14 @@ export function isPublicPath(path: string): boolean {
 }
 
 /**
+ * 首頁（`/`）：登入後是帳本；沒登入是介紹頁（`pages/home/HomePage.tsx`），不導到登入頁。
+ * `/?view=transactions` 這種帶參數的也算（路徑一樣）：沒登入時同樣是介紹頁，「登入」會帶著原本的網址。
+ */
+export function isHomePath(path: string): boolean {
+  return path === "/"
+}
+
+/**
  * 不用登入就能讀的頁面：公開討論的清單（`/discussions`）與主題頁（`/discussions/<id>`）、服務條款（`/terms`）與隱私權政策（`/privacy`）。
  * 沒登入時用精簡的外殼（字標＋登入）顯示，登入後是一般的外殼。開新主題（`/discussions/new`）要登入。
  */

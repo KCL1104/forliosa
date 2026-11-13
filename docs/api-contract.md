@@ -87,7 +87,7 @@
 | GET | `/instruments/{symbol}` | `InstrumentDetail` |
 | GET | `/instruments/{symbol}/quote` | `Quote` |
 | GET | `/quotes?symbols=2330.TW,0050.TW` | `Quote[]`（批次） |
-| GET | `/instruments/{symbol}/history?range=1M` | `range`：`5D`、`1M`、`6M`、`YTD`、`1Y`、`5Y`、`MAX`；回傳 `History` |
+| GET | `/instruments/{symbol}/history?range=1M` | `range`：`5D`、`1M`、`6M`、`YTD`、`1Y`、`5Y`、`MAX`；回傳 `History`。正式環境開了歷史回補（`PRICE_HISTORY_SOURCE=yahoo`）時，存檔開始以前的日線來自 Yahoo Finance：`sources` 會列出，`notes` 有一句說明哪一天以前是它的資料（`apps/api/CONTRACT_NOTES.md`「歷史日線回補」） |
 | GET | `/instruments/{symbol}/valuation?range=5Y` | `Valuation`（本益比、股價淨值比河流圖用） |
 | GET | `/instruments/{symbol}/revenue` | `MonthlyRevenue[]`（由舊到新） |
 | GET | `/instruments/{symbol}/dividends` | `DividendRecord[]`（由新到舊） |
