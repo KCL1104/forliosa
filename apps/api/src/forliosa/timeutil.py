@@ -120,8 +120,9 @@ def market_close_dt(d: date) -> datetime:
 
 
 def is_tw_market_open(at: datetime | None = None) -> bool:
+    """A trading day from 09:00 up to, not including, 13:30 Taipei: at 13:30:00 the session has closed."""
     at = (at or now_taipei()).astimezone(TAIPEI)
-    return is_tw_trading_day(at.date()) and MARKET_OPEN <= at.time() <= MARKET_CLOSE
+    return is_tw_trading_day(at.date()) and MARKET_OPEN <= at.time() < MARKET_CLOSE
 
 
 def iso_taipei(dt: datetime) -> str:

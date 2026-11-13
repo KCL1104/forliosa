@@ -250,9 +250,14 @@ class MarketData:
                     else:
                         partial[s] = _merge_quotes(cur, q)
             final: dict[str, QuoteData] = {}
+            # Commercial mode only has after-close data: whatever a provider reports, a Taiwan quote's time is the
+            # close of the session its price belongs to, and no quote is real-time.
+            closes_only = self.policy == "commercial"
             for s, q in partial.items():
-                if q.as_of is None and q.trade_date is not None:
+                if q.trade_date is not None and (q.as_of is None or (closes_only and market_of_symbol(s) != "US")):
                     q = replace(q, as_of=market_close_dt(q.trade_date))
+                if closes_only and q.is_realtime:
+                    q = replace(q, is_realtime=False)
                 final[s] = q
             for s, q in self._with_references(final).items():
                 self._quote_cache[s] = (now, q)

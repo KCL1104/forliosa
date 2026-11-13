@@ -1061,3 +1061,16 @@ class FuturesHistory(BaseModel):
     series: list[FuturesHistoryPoint]
     notes: list[str]
     sources: list[str]
+
+
+# -- market status (GET /meta/market-status) ----------------------------------------------------------------
+class MarketSession(BaseModel):
+    date: str  # today in Taipei, YYYY-MM-DD
+    is_trading_day: bool  # official calendar
+    is_open: bool  # a trading day, 09:00 up to (not including) 13:30 Taipei
+    open: str  # "09:00"
+    close: str  # "13:30"
+
+
+class MarketStatus(BaseModel):
+    tw: MarketSession

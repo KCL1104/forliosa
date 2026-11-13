@@ -10,14 +10,47 @@ start and after each archive run.
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
+from datetime import datetime
+from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from forliosa.models import MarketHoliday
-from forliosa.timeutil import set_official_holidays
+from forliosa.timeutil import (
+    MARKET_CLOSE,
+    MARKET_OPEN,
+    TAIPEI,
+    is_tw_market_open,
+    is_tw_trading_day,
+    now_taipei,
+    set_official_holidays,
+)
 
 log = logging.getLogger(__name__)
+
+_clock: Callable[[], datetime] = now_taipei
+
+
+def set_clock(clock: Callable[[], datetime] | None) -> None:
+    """Tests: replace the clock behind :func:`market_status` (``None`` restores the real one)."""
+    global _clock
+    _clock = clock or now_taipei
+
+
+def market_status(db: Session, now: datetime | None = None) -> dict[str, Any]:
+    """``GET /meta/market-status``: is the Taiwan market in session right now? No user data.
+
+    ``is_trading_day`` follows the official calendar (reloaded here: one small query); ``is_open`` is a trading day
+    from 09:00 up to, not including, 13:30 Taipei. Prices are never real-time (there is no licensed intraday
+    source): the frontend uses this to say whether the close it shows is "today's, not out yet" or simply the latest.
+    """
+    load_official_calendar(db)
+    at = (now or _clock()).astimezone(TAIPEI)
+    return {"tw": {"date": at.date().isoformat(), "is_trading_day": is_tw_trading_day(at.date()),
+                   "is_open": is_tw_market_open(at), "open": MARKET_OPEN.strftime("%H:%M"),
+                   "close": MARKET_CLOSE.strftime("%H:%M")}}
 
 
 def load_official_calendar(db: Session) -> int:

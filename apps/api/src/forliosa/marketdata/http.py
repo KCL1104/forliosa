@@ -7,6 +7,7 @@ import json
 import logging
 import threading
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
@@ -124,6 +125,23 @@ class HttpStatusError(ProviderUnavailable):
         self.status = status
 
 
+@dataclass(frozen=True)
+class Probe:
+    """The answer to :meth:`HttpFetcher.probe`. ``status`` 304: the file is the version seen before (no ``head``);
+    206: ``head`` is the first bytes of the current version; 200: the host ignored ``Range`` and started sending the
+    whole file — only its first bytes were read. ``etag`` / ``last_modified``: the validators of the current
+    version, to send with the next probe."""
+
+    status: int
+    head: bytes
+    etag: str | None
+    last_modified: str | None
+
+    @property
+    def changed(self) -> bool:
+        return self.status != 304
+
+
 class HttpFetcher:
     def __init__(self, timeout: float = 20.0, limiter: RateLimiter | None = None, retries: int = 2,
                  client: httpx.Client | None = None, user_agent: str = USER_AGENT, backoff: float = 1.0,
@@ -137,11 +155,58 @@ class HttpFetcher:
             follow_redirects=False,  # a redirect (e.g. a WAF 307) is a refusal: stop, never chase it
         )
 
+    def _require_allowed(self, url: str) -> None:
+        if not (url_allowed(url) or (self.extra_allowed and url.startswith(self.extra_allowed))):
+            raise ProviderUnavailable(f"{url} 不在授權來源白名單（marketdata/http.py ALLOWED_URL_PREFIXES）")
+
+    def probe(self, url: str, etag: str | None = None, last_modified: str | None = None,
+              first_bytes: int = 1024) -> Probe:
+        """Ask whether ``url`` changed with the smallest request the host supports: a conditional request
+        (``If-None-Match`` / ``If-Modified-Since`` with the validators of the version seen before) for only the
+        first ``first_bytes`` (``Range``). 304 → nothing changed; 206 → the head of the current version; a host that
+        ignores ``Range`` answers 200 and the download is dropped after the first bytes (one normal request). Same
+        allow-list, per-host interval and retries as :meth:`get_bytes`. ``Accept-Encoding: identity``: a byte range
+        of a compressed body could not be read, and the validators stay those of one representation."""
+        host = urlparse(url).hostname or ""
+        self._require_allowed(url)
+        headers = {"Accept-Encoding": "identity", "Range": f"bytes=0-{first_bytes - 1}"}
+        if etag:
+            headers["If-None-Match"] = etag
+        if last_modified:
+            headers["If-Modified-Since"] = last_modified
+        delay = self.backoff
+        last_exc: Exception | None = None
+        for attempt in range(self.retries + 1):
+            self.limiter.wait(host)
+            try:
+                with self.client.stream("GET", url, headers=headers) as resp:
+                    status = resp.status_code
+                    if status == 304:
+                        return Probe(304, b"", resp.headers.get("etag") or etag,
+                                     resp.headers.get("last-modified") or last_modified)
+                    if status in (200, 206):
+                        head = b""
+                        for chunk in resp.iter_bytes():
+                            head += chunk
+                            if len(head) >= first_bytes:
+                                break  # leaving the block closes the connection: the rest is never downloaded
+                        return Probe(status, head[:first_bytes], resp.headers.get("etag"),
+                                     resp.headers.get("last-modified"))
+            except httpx.HTTPError as exc:
+                last_exc = exc
+            else:
+                if status in (402, 403, 404, 405, 407, 429, 451) or 300 <= status < 400:
+                    raise HttpStatusError(f"{host} 回應 HTTP {status}", status)
+                last_exc = ProviderUnavailable(f"{host} 回應 HTTP {status}")
+            if attempt < self.retries:
+                time.sleep(delay)
+                delay *= 2
+        raise ProviderUnavailable(f"無法連線 {host}：{last_exc}")
+
     def get_bytes(self, url: str, params: dict[str, Any] | None = None,
                   headers: dict[str, str] | None = None) -> bytes:
         host = urlparse(url).hostname or ""
-        if not (url_allowed(url) or (self.extra_allowed and url.startswith(self.extra_allowed))):
-            raise ProviderUnavailable(f"{url} 不在授權來源白名單（marketdata/http.py ALLOWED_URL_PREFIXES）")
+        self._require_allowed(url)
         delay = self.backoff
         last_exc: Exception | None = None
         for attempt in range(self.retries + 1):

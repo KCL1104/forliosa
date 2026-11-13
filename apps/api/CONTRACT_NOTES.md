@@ -180,6 +180,7 @@ Public Suffix List），瀏覽器不會送出 cookie，登入後也會一直 401
 ### 存檔（`python -m forliosa.archive`）
 
 - 官方 OpenAPI 只給最新一天，所以 worker 每個交易日 08:10、14:40、21:40 存檔（冪等 upsert），週六 10:00 存集保。
+  收盤價另外有「公布偵測」（`close_watch`，2026-11-13 加的，見文末「盤中狀態與收盤價公布偵測」）。
 - 欄位名稱全部取自真實回應（`marketdata/opendata.py` 的說明，測試 fixture 是 2026-11-12 的精簡版）。幾個容易踩到的地方：
   `t187ap04_L` 的鍵是 `"主旨 "`（尾端有空白）；`MI_MARGN` 沒有日期欄位，21:00 前視為前一個交易日的資料；
   `t187ap06` 損益是累計數；櫃買法人鍵名含空白（`ForeignInvestorsInclude MainlandAreaInvestors-Difference`）；
@@ -1585,3 +1586,57 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 3. **作者在自己的清單裡看不到被隱藏的主題**（合約：隱藏的不出現在清單）。建議之後讓 `mine=true` 列出自己被隱藏的主題並標示 `status: "hidden"`。
 4. **頻率限制用滾動 24 小時／60 分鐘**。建議維持（比「每天午夜歸零」難鑽漏洞）。
 5. **檢舉本身沒有頻率限制**（每人對每則只算一次）。之後若有人大量亂檢舉再加。
+
+## 2026-11-13 盤中狀態與收盤價公布偵測
+
+實作合約「收盤價的標示與盤中狀態」的後端部分：`GET /meta/market-status`、報價的 `as_of`／`is_realtime`、worker 的收盤價公布偵測。
+沒有新的資料表，也沒有新的環境變數。
+
+### `GET /meta/market-status`（`market_calendar.market_status`）
+
+- 不用登入、不讀使用者資料；帶 `X-Forliosa-View-As` 也照常回（`/meta/*` 本來就忽略標頭）。
+- `is_trading_day` 用官方行事曆：每次請求重讀一次存檔的 `market_holidays`（一個小查詢）；那一年沒有官方資料時用內建清單。
+- `is_open`：交易日 09:00（含）到 13:30（**不含**）。剛好 13:30:00 回 `false`——和前端「已過 13:30」的狀態接得上。
+  `timeutil.is_tw_market_open` 也一併改成不含 13:30（原本只差在 13:30:00 整那一瞬間；AI 的頁面情境文字用它）。
+- `date` 是台北時間的今天；`open`／`close` 固定 `"09:00"`、`"13:30"`。時鐘可用 `market_calendar.set_clock` 換掉（測試用）。
+
+### 報價的 `as_of` 與 `is_realtime`
+
+- 檢查結果：所有真實來源（存檔、證交所／櫃買 OpenAPI、shioaji-data）本來就把 `as_of` 設成資料列日期的 13:30（+08:00）、`is_realtime` 是 `false`；
+  `is_realtime: true` 只會出現在 personal 模式的示範資料抖動。
+- 另外在 `MarketData.quotes` 加了一道保證：`DATA_POLICY=commercial` 時，不論來源回什麼，台股報價的 `as_of` 一律是 `trade_date` 的收盤時間、
+  `is_realtime` 一律 `false`（之後接新來源也不會破壞合約）。`/quotes`、`/instruments/{symbol}/quote`、`/stream/quotes`、自選都經過這裡。
+
+### 收盤價公布偵測（worker 的 `close_watch`，`archive.py`：`close_watch_day`、`ClosePublication`、`close_archived`）
+
+- **時間**：交易日 13:35 起到隔天 08:30（不管隔天是不是交易日），每 15 分鐘一次；非交易日的下午與晚上、每天 08:30–13:35 都不做。
+  交易日同樣依官方行事曆。
+- **問法**：對兩個收盤檔——證交所 `openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL`、櫃買
+  `www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes`（就是存檔本來在抓的那兩個檔）——各送一個**條件式請求，而且只要前 1,024 位元組**
+  （`If-None-Match`／`If-Modified-Since`＋`Range: bytes=0-1023`，`Accept-Encoding: identity`；`HttpFetcher.probe`）。
+  檔案沒換：304、沒有內容。檔案換了：206，回前 1 KB，第一列的 `Date` 就是資料日期。
+  2026-11-13 12:35（台北）實測兩台主機都支援：`If-None-Match` 與 `If-Modified-Since` 都回 304、`Range` 回 206、也都有 `ETag`／`Last-Modified`。
+  主機若哪天不理會條件或 `Range`，就自動變成「每次檢查一個一般請求」（只讀前 1 KB 就關閉連線），邏輯不變。
+- **頻率**：和其他請求共用同一個每主機間隔（`twse.com.tw` ≥ 3 秒、`tpex.org.tw` ≥ 2 秒）與白名單（`ALLOWED_URL_PREFIXES`）；
+  不碰證交所網站與 MIS。一個市場一天最多 76 次檢查，幾乎都是 304。
+- **公布之後**：那個市場的存檔群組（`twse` 或 `tpex`）跑一次——和排程跑的是同一個 `Worker.archive`，所以收盤價、本益比、公告、參考價、指數、
+  股利自動入帳都一起更新——接著跑一次 `after_close_refresh`（商品主檔、持股與自選的收盤）。API 端的報價快取 30 秒，之後畫面就是新的收盤價；
+  估值、持股市值、今日損益都是讀取時計算，不需要另外重算。
+- **只做一次、重啟不受影響**：某個市場「當天進來了沒」只看資料庫：`dataset_status` 的 `twse-openapi/price`／`tpex-openapi/price`
+  （存收盤價時一起寫，值是已存檔的最新交易日，**只會往前不會倒退**——CDN 偶爾回舊檔時不會讓已存的日子看起來不見）。
+  進來了就不再問那個市場；兩個市場都進來就完全停止。排程的存檔先拿到也算。記憶體裡只留上次的 `ETag`／`Last-Modified`（讓下一次是 304），
+  重啟後第一次檢查重新讀前 1 KB，不會重抓整個檔，也不會重跑已完成的市場。
+- **失敗**：連不上、被拒絕 → 記一行警告，下一次檢查再問；另一個市場照常。偵測到公布但存檔失敗（檔案抓不下來）→ 下一次檢查會再跑一次存檔
+  （仍是 304，但資料庫還沒有那一天）。到 08:30 都沒公布 → 停止，等當天 08:10／21:40 的排程。
+- **原有排程都保留**（08:10、14:40、21:40 存檔；14:35、23:45 `after_close_refresh`）：它們還負責群組裡其他資料集，也是偵測沒涵蓋到時的保底。
+- 附帶：`/meta/attributions` 的 `twse-openapi/price`、`tpex-openapi/price` 現在有 `last_updated`（原本是 `null`）。
+- 測試（不連網）：`tests/test_close_watch.py`（假時鐘＋`httpx.MockTransport`：22:30 公布、隔天 04:00 公布、一直沒公布、一早一晚、中途重啟、
+  存檔失敗重試、排程先拿到、主機不支援條件式請求、主機連不上、非交易日與官方休市日）、`tests/marketdata/test_http_probe.py`、
+  `tests/marketdata/test_quote_time.py`、`tests/api/test_market_status.py`。
+
+### 待產品負責人確認
+
+1. **14:35 的 `after_close_refresh` 與 14:40 的存檔現在大多拿不到當天收盤**（交易所晚上到清晨才公布，只觀察過一天）。這一版都保留；
+   建議上線觀察一兩週 worker 記錄裡 `close watch: … has published` 的時間，再決定要不要拿掉 14:35／23:45 那兩次。
+2. **公布之後跑的是整個市場群組**（上市 12 個存檔工作、上櫃 8 個，每個工作 1–5 個請求），不是只抓收盤檔。好處是本益比、參考價、公告同時更新，
+   代價是每個市場每天多一輪請求（都受每主機間隔限制）。建議維持。
