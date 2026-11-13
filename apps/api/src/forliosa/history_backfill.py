@@ -6,8 +6,9 @@ are recorded in PRODUCT.md and docs/research/data-sources-licensing.md. Rules th
 
 * rows go to ``prices_daily`` under ``source = "yahoo-history"`` and only for days **before the symbol's first
   official close** — an official row is never replaced and today's unfinished bar is never stored;
-* a symbol is stored only when Yahoo's close agrees with our official close on a day both have (a wrong ticker or a
-  rescaled series is dropped);
+* a symbol is stored only when Yahoo agrees with our official close on a day both have — its close within 0.6 %, or,
+  where its close is still missing, the official close inside its high–low range (a wrong ticker or a rescaled
+  series is dropped);
 * HTTP 429 means "slower": the same symbol is asked again after a minute, then after three; a third 429 in a row,
   or a refusal (403, a redirect …), ends the run. It is tried again later with the same honest client — never
   worked around (no browser disguise, no other address);
@@ -28,7 +29,7 @@ import logging
 import time as _time
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from sqlalchemy import delete, func, select
@@ -48,7 +49,10 @@ STATUS_KEY = f"{HISTORY_SOURCE}/price"
 # Yahoo's close and the official close of the same day must agree within this (rounding only).
 MATCH_TOLERANCE = Decimal("0.006")
 FINAL = ("done", "not_found", "mismatch")
-RETRY_AFTER = timedelta(days=3)  # no_overlap (e.g. a halted stock) and errors are asked again later
+RETRY_AFTER = timedelta(hours=12)  # no_overlap (e.g. a halted stock) and errors are asked again later
+# A symbol whose only try was before this moment and did not end in ``done`` is asked once more (its second try):
+# the first production run (2026-11-13 16:22 UTC on) dropped every TPEx symbol whose newest bar had no close yet.
+RECHECK_BEFORE = datetime(2026, 11, 14, 12, 0, tzinfo=UTC)
 MAX_ATTEMPTS = 5
 REFUSALS = (401, 402, 403, 405, 407, 429, 451)
 RATE_LIMIT_WAITS = (60.0, 180.0)  # seconds before asking the same symbol again after a 429
@@ -78,7 +82,8 @@ def pending(db: Session, now: datetime | None = None) -> list[str]:
     todo = []
     for sym in firsts:
         r = seen.get(sym)
-        if r is None or (r.status not in FINAL and r.attempts < MAX_ATTEMPTS and now - r.updated_at >= RETRY_AFTER):
+        if r is None or (r.status != "done" and r.attempts <= 1 and r.updated_at < RECHECK_BEFORE) or (
+                r.status not in FINAL and r.attempts < MAX_ATTEMPTS and now - r.updated_at >= RETRY_AFTER):
             todo.append(sym)
     tracked = set(tracked_symbols(db))
     return sorted(todo, key=lambda s: (s not in tracked, s))
@@ -93,6 +98,16 @@ def _record(db: Session, symbol: str, status: str, first: date | None = None, ro
     row.attempts = (row.attempts or 0) + 1
     row.updated_at = now_utc()
     db.commit()
+
+
+def agrees(bar: yahoo_history.Bar, official_close: Decimal) -> bool:
+    """Does the source's bar describe the same instrument and price scale as our official close of that day? Its
+    close within the tolerance; or, while its close is still missing, the official close inside its range."""
+    if bar.close is not None:
+        return abs(bar.close - official_close) / official_close <= MATCH_TOLERANCE
+    if bar.low is None or bar.high is None:
+        return False
+    return bar.low * (1 - MATCH_TOLERANCE) <= official_close <= bar.high * (1 + MATCH_TOLERANCE)
 
 
 def backfill_symbol(db: Session, http: HttpFetcher, symbol: str, first_official: date, years: int) -> tuple[str, int]:
@@ -112,21 +127,28 @@ def backfill_symbol(db: Session, http: HttpFetcher, symbol: str, first_official:
         _record(db, symbol, "error")
         return "error", 0
     if not bars:
+        log.info("history backfill %s: the source has no bars", symbol)
         _record(db, symbol, "not_found")
         return "not_found", 0
     by_day = {b.date: b for b in bars}
     official = dict(db.execute(select(PriceDaily.date, PriceDaily.close).where(
         PriceDaily.symbol == symbol, PriceDaily.source != HISTORY_SOURCE, PriceDaily.date.in_(list(by_day)))).all())
     # Today's bar can still be moving: it is no evidence either way.
-    overlap = [(by_day[d].close, c) for d, c in official.items() if d < today and c]
+    overlap = [(by_day[d], c) for d, c in sorted(official.items()) if d < today and c]
     if not overlap:
+        log.info("history backfill %s: no day to compare with (official %s, source ends %s)", symbol,
+                 first_official, bars[-1].date)
         _record(db, symbol, "no_overlap")
         return "no_overlap", 0
-    if any(abs(mine - theirs) / theirs > MATCH_TOLERANCE for mine, theirs in overlap):
-        _record(db, symbol, "mismatch")
-        return "mismatch", 0
+    for bar, theirs in overlap:
+        if not agrees(bar, theirs):
+            log.info("history backfill %s: mismatch on %s — source close %s (range %s–%s), official %s", symbol,
+                     bar.date, bar.close, bar.low, bar.high, theirs)
+            _record(db, symbol, "mismatch")
+            return "mismatch", 0
     rows = [{"symbol": symbol, "date": b.date, "open": b.open, "high": b.high, "low": b.low, "close": b.close,
-             "volume": b.volume, "source": HISTORY_SOURCE} for b in bars if b.date < first_official]
+             "volume": b.volume, "source": HISTORY_SOURCE}
+            for b in bars if b.date < first_official and b.close is not None]
     n = upsert(db, PriceDaily, rows, ["symbol", "date"], ())  # never replaces an existing row
     _record(db, symbol, "done", rows[0]["date"] if rows else None, n)
     return "done", n

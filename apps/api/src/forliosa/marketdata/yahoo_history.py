@@ -11,7 +11,10 @@ What the endpoint returns (checked 2026-11-13 with 2330.TW, 0050.TW and 6488.TWO
   price it traded at) and *not* dividend-adjusted; no split list is returned for Taiwan symbols, so the original
   prices cannot be rebuilt. That is why only chart-like reads use these rows;
 * the newest bar can be today's unfinished session — the backfill keeps nothing from the first official day on;
-* a bar of a day without trades has ``null`` values.
+* a bar of a day without trades has ``null`` values;
+* the newest bar of TPEx symbols (``.TWO``) can have its open, high and low but a ``null`` close for hours after the
+  session ended (00679B.TWO on 2026-11-13, read at 00:40 the next day). Such a bar is never stored, but its range is
+  still evidence that the ticker is the right one (``history_backfill``).
 
 The request uses our normal honest User-Agent — never a browser disguise. Yahoo limits requests per address and
 answers 429 now and then even at this pace (seen 2026-11-13); the backfill then waits and asks again, and stops when
@@ -41,7 +44,7 @@ class Bar:
     open: Decimal | None
     high: Decimal | None
     low: Decimal | None
-    close: Decimal
+    close: Decimal | None  # missing on the newest day of some symbols for hours after the close (see module docstring)
     volume: int | None
 
 
@@ -67,7 +70,8 @@ def _dec(value: Any) -> Decimal | None:
 
 
 def parse_chart(doc: Any) -> list[Bar]:
-    """The ``chart.result[0]`` of a response as bars in date order. Days without a close are left out."""
+    """The ``chart.result[0]`` of a response as bars in date order. A day with neither a close nor a high–low range is
+    left out; one with a range but no close is kept with ``close=None``."""
     try:
         result = doc["chart"]["result"][0]
     except (KeyError, IndexError, TypeError) as exc:
@@ -79,12 +83,12 @@ def parse_chart(doc: Any) -> list[Bar]:
     bars: dict[date, Bar] = {}
     for i, ts in enumerate(stamps):
         close = _dec(cols["close"][i] if i < len(cols["close"]) else None)
-        if close is None:
+        o, h, lo = (_dec(cols[k][i] if i < len(cols[k]) else None) for k in ("open", "high", "low"))
+        if close is None and (h is None or lo is None):
             continue
         day = datetime.fromtimestamp(int(ts) + offset, UTC).date()
         vol = cols["volume"][i] if i < len(cols["volume"]) else None
-        bars[day] = Bar(day, *(_dec(cols[k][i] if i < len(cols[k]) else None) for k in ("open", "high", "low")),
-                        close, int(vol) if isinstance(vol, (int, float)) and vol >= 0 else None)
+        bars[day] = Bar(day, o, h, lo, close, int(vol) if isinstance(vol, (int, float)) and vol >= 0 else None)
     return [bars[d] for d in sorted(bars)]
 
 

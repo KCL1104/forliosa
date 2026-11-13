@@ -54,6 +54,12 @@ def opted_in(monkeypatch):
     get_settings.cache_clear()
 
 
+@pytest.fixture(autouse=True)
+def recheck_over(monkeypatch):
+    """The one-off second try (``RECHECK_BEFORE``) is tested on its own; elsewhere a failed symbol stays failed."""
+    monkeypatch.setattr(hb, "RECHECK_BEFORE", datetime(2020, 1, 1, tzinfo=TAIPEI))
+
+
 @pytest.fixture()
 def clock(monkeypatch):
     monkeypatch.setattr(hb, "now_taipei", lambda: datetime(2026, 11, 13, 22, 0, tzinfo=TAIPEI))
@@ -120,10 +126,51 @@ def test_backfill_needs_an_official_day_to_compare_with(db, clock):
     official(db, "0050.TW", date(2026, 11, 13), "102.50")  # only today: its bar may still be moving
     res = hb.run_batch(db, FakeYahoo(), years=5)
     assert res.stored == 0 and db.get(PriceBackfill, "0050.TW").status == "no_overlap"
-    # asked again only after a few days
+    # asked again only after half a day
     assert hb.pending(db) == []
     later = db.get(PriceBackfill, "0050.TW").updated_at + hb.RETRY_AFTER + timedelta(minutes=1)
     assert hb.pending(db, now=later) == ["0050.TW"]
+
+
+def test_a_newest_bar_without_a_close_is_checked_by_its_range_and_never_stored(db, monkeypatch):
+    """TPEx symbols: for hours after the session the source's newest bar has open, high and low but no close."""
+    monkeypatch.setattr(hb, "now_taipei", lambda: datetime(2026, 11, 14, 0, 40, tzinfo=TAIPEI))
+    doc = json.loads((FIX / CHARTS["6488.TWO"]).read_text(encoding="utf-8"))
+    doc["chart"]["result"][0]["indicators"]["quote"][0]["close"][-1] = None  # 11/13: range 623–658, no close
+    bars = yahoo_history.parse_chart(doc)
+    assert bars[-1].date == date(2026, 11, 13) and bars[-1].close is None and bars[-1].high == Decimal("658")
+
+    class NoClose(FakeYahoo):
+        def get_json(self, url, params=None, headers=None):
+            self.asked.append(url.rsplit("/", 1)[1])
+            return doc
+
+    official(db, "6488.TWO", date(2026, 11, 13), "630", source="tpex-openapi")  # inside the range
+    res = hb.run_batch(db, NoClose(), years=5)
+    assert (res.stored, db.get(PriceBackfill, "6488.TWO").status) == (1, "done")
+    stored = {r.date: r for r in db.scalars(select(PriceDaily).where(PriceDaily.source == HISTORY_SOURCE))}
+    assert date(2026, 11, 12) in stored and date(2026, 11, 13) not in stored and date(2025, 8, 1) not in stored
+
+    official(db, "0050.TW", date(2026, 11, 13), "410")  # far outside 0050's range that day: not the same series
+    doc0 = json.loads((FIX / CHARTS["0050.TW"]).read_text(encoding="utf-8"))
+    doc0["chart"]["result"][0]["indicators"]["quote"][0]["close"][-1] = None
+
+    class NoClose0(FakeYahoo):
+        def get_json(self, url, params=None, headers=None):
+            return doc0
+
+    hb.run_batch(db, NoClose0(), years=5, symbols=["0050.TW"])
+    assert db.get(PriceBackfill, "0050.TW").status == "mismatch"
+
+
+def test_first_tries_that_failed_before_the_fix_are_asked_once_more(db, clock, monkeypatch):
+    official(db, "0050.TW", date(2026, 11, 12), "403.80")
+    hb.run_batch(db, FakeYahoo(), years=5)
+    assert db.get(PriceBackfill, "0050.TW").status == "mismatch"
+    monkeypatch.setattr(hb, "RECHECK_BEFORE", hb.now_utc() + timedelta(hours=1))
+    assert hb.pending(db) == ["0050.TW"]  # its only try was before the fix
+    hb.run_batch(db, FakeYahoo(), years=5)
+    assert db.get(PriceBackfill, "0050.TW").attempts == 2 and hb.pending(db) == []  # asked once more, not for ever
 
 
 def test_unknown_symbol_is_final_and_a_refusal_stops_the_run(db, clock):
