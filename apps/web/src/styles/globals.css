@@ -178,12 +178,16 @@
   --chart-ochre: #a87a26;
   --chart-grid: #e6ebf1;
 
-  /* 估值河流圖：單一色相（藍灰）5 階，便宜→昂貴，不用紅綠 */
-  --band-1: #eef2f7;
-  --band-2: #dfe6ef;
-  --band-3: #cbd6e4;
-  --band-4: #b2c1d6;
-  --band-5: #95a8c3;
+  /*
+   * 估值河流圖：單一色相（藍灰）5 階，便宜→昂貴，不用紅綠。和深色一樣是等比的階：
+   * 最便宜的一階對紙 1.32:1、相鄰兩階都 ≥ 1.31:1（對紙 1.32／1.74／2.31／3.03／4.01）；
+   * 舊的 #eef2f7 對紙只有 1.08:1、前三階相差 1.12–1.17，最下面兩條帶等於看不見。
+   */
+  --band-1: #d4ddea;
+  --band-2: #b3c2d8;
+  --band-3: #95a9c6;
+  --band-4: #7a93b6;
+  --band-5: #627ea6;
 
   /* shadcn／Base UI 元件對應 */
   --background: var(--paper);
@@ -610,6 +614,18 @@
     mask-image: linear-gradient(to right, transparent, var(--ink) var(--fade-start), var(--ink) calc(100% - var(--fade-end)), transparent);
   }
 
+  /*
+   * 每一頁的版心（app/PageFrame.tsx）：最大寬 1180px、置中。
+   * 桌面的 AI 面板收成窄欄時，主欄多出 --panel-slack（AppShell 設定：面板寬 − 窄欄寬）：
+   * 置中照「面板開著時的主欄寬」算，所以左緣不動、只有右邊變寬——帳本（面板開著）和群組（窄欄）之間換頁，
+   * 標題與第一行字不會左右跳。沒有面板時 --panel-slack 是 0，就是一般的置中。
+   */
+  .page-frame {
+    width: 100%;
+    max-width: 1180px;
+    margin-inline: max(0px, calc((100% - var(--panel-slack, 0px) - 1180px) / 2)) auto;
+  }
+
   /* 控制項：方肩、1px 灰框 */
   .ctl {
     border: 1px solid var(--ctl);
@@ -698,6 +714,8 @@
   /*
    * 「問 AI」格：和簽名格同一種方格（直角、內縮 3px 的細框），用老師的紫色。
    * 簽名格是使用者的墨色（你簽名），這一格是 AI 的紫色（交給老師）。
+   * 淺色：AI 紫的實心格（紙上蓋的一格）。深色：平常只有紫色淡底＋1px 紫色框線＋紫色字——夜裡整頁最亮的一塊
+   * 不該是「問 AI」；有草稿在等簽名時（data-pending）才變成實心，和簽名格一樣亮。
    */
   .ask-box {
     position: relative;
@@ -710,7 +728,10 @@
     background: var(--ai);
     color: var(--paper);
     font-weight: 700;
-    transition: transform 140ms var(--ease-out);
+    transition:
+      transform 140ms var(--ease-out),
+      background-color 120ms ease,
+      color 120ms ease;
   }
   .ask-box::after {
     content: "";
@@ -722,6 +743,15 @@
   }
   .ask-box:active {
     transform: scale(0.97);
+  }
+  .dark .ask-box:not([data-pending]) {
+    background: var(--ai-wash);
+    color: var(--ai);
+    box-shadow: inset 0 0 0 1px var(--ai-rule);
+  }
+  .dark .ask-box:not([data-pending])::after {
+    border-color: var(--ai-rule);
+    opacity: 0.55;
   }
 
   .safe-bottom {

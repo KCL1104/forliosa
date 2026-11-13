@@ -1,10 +1,12 @@
 import { useNavigate } from "@tanstack/react-router"
 import { Command as CommandPrimitive } from "cmdk"
-import { SearchIcon } from "lucide-react"
+import { SearchIcon, XIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useInstrumentSearch } from "@/api/queries"
 import type { Instrument } from "@/api/types"
-import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
+import { useIsDesktop } from "@/hooks/use-media-query"
+import { useVisualViewport } from "@/hooks/use-visual-viewport"
 import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
@@ -16,6 +18,10 @@ import { useReadOnly } from "@/api/view-as"
  * ⌘K 全域搜尋（cmdk）：代號或中文股名搜尋商品，也能跳頁與執行常用動作。
  * 清單是文字列：動作與頁面前面不放裝飾圖示（只有輸入框的放大鏡，那是「這裡可以搜尋」）。
  * 依 emil-design-eng：每天用上百次的面板不做開關動畫。
+ *
+ * 手機（< 1024px，標題列的放大鏡打開）：同一個搜尋，換成滿版的一頁——輸入框在最上面（和標題列同高），
+ * 結果往下排、自己捲動。高度跟著看得到的畫面（visual viewport）：螢幕鍵盤打開時，清單的最後一列停在鍵盤上面，
+ * 不會被蓋住。右上角是關閉鈕。
  */
 export function CommandSearch() {
   const open = useUi((s) => s.searchOpen)
@@ -28,6 +34,8 @@ export function CommandSearch() {
   const [q, setQ] = useState("")
   const [active, setActive] = useState("")
   const search = useInstrumentSearch(q)
+  const sheet = !useIsDesktop()
+  const viewport = useVisualViewport()
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -71,35 +79,46 @@ export function CommandSearch() {
     <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>
       <DialogContent
         showCloseButton={false}
-        className="top-[12vh] max-w-[calc(100%-2rem)] translate-y-0 gap-0 overflow-hidden p-0 duration-0 data-closed:animate-none data-open:animate-none sm:max-w-xl"
+        className={cn(
+          "gap-0 overflow-hidden p-0 duration-0 data-closed:animate-none data-open:animate-none",
+          sheet
+            ? "top-0 left-0 flex h-dvh max-w-none translate-x-0 translate-y-0 flex-col rounded-none bg-paper ring-0 sm:max-w-none"
+            : "top-[12vh] max-w-[calc(100%-2rem)] translate-y-0 sm:max-w-xl",
+        )}
+        style={sheet && viewport ? { height: viewport.height, top: viewport.top } : undefined}
       >
         <DialogTitle className="sr-only">搜尋股票與功能</DialogTitle>
         <DialogDescription className="sr-only">輸入股票代號或中文名稱，例如 2330 或 台積</DialogDescription>
-        <CommandPrimitive shouldFilter={false} loop value={selected} onValueChange={setActive} className="flex flex-col" label="搜尋股票與功能">
-          <div className="flex items-center gap-2.5 border-b px-4">
-            <SearchIcon className="size-4.5 shrink-0 text-muted-foreground" aria-hidden />
+        <CommandPrimitive shouldFilter={false} loop value={selected} onValueChange={setActive} className={cn("flex flex-col", sheet && "min-h-0 flex-1")} label="搜尋股票與功能">
+          <div className={cn("flex shrink-0 items-center border-b", sheet ? "gap-1 pt-[env(safe-area-inset-top,0px)] pr-3 pl-5" : "gap-2.5 px-4")}>
+            <SearchIcon className={cn("shrink-0 text-muted-foreground", sheet ? "size-5" : "size-4.5")} aria-hidden />
             <CommandPrimitive.Input
               value={q}
               onValueChange={setQ}
-              placeholder="輸入代號或名稱，例如 2330、台積、0050"
-              className="h-13 w-full bg-transparent text-base outline-none placeholder:text-muted-foreground"
+              placeholder={sheet ? "代號或名稱，例如 2330、台積" : "輸入代號或名稱，例如 2330、台積、0050"}
+              className={cn("w-full min-w-0 bg-transparent outline-none placeholder:text-muted-foreground", sheet ? "h-[60px] pl-2 text-lg" : "h-13 text-base")}
               enterKeyHint="search"
               autoComplete="off"
               autoCorrect="off"
               spellCheck={false}
             />
             {search.isFetching && <span className="shrink-0 text-sm text-muted-foreground">搜尋中…</span>}
+            {sheet && (
+              <DialogClose aria-label="關閉搜尋" className="press sel-chip grid size-11 shrink-0 place-items-center rounded-sm text-ink-2">
+                <XIcon aria-hidden className="size-[22px]" />
+              </DialogClose>
+            )}
           </div>
-          <CommandPrimitive.List className="max-h-[min(60vh,420px)] scroll-py-2 overflow-y-auto overscroll-contain p-2">
+          <CommandPrimitive.List className={cn("scroll-py-2 overflow-y-auto overscroll-contain", sheet ? "min-h-0 flex-1 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))]" : "max-h-[min(60vh,420px)] p-2")}>
             {q.trim() && !search.isFetching && results.length === 0 && (
-              <CommandPrimitive.Empty className="px-3 py-8 text-center text-md text-muted-foreground">
+              <CommandPrimitive.Empty className={cn("py-8 text-md text-muted-foreground", sheet ? "px-5" : "px-3 text-center")}>
                 找不到「{q.trim()}」。試試股票代號（2330）、中文簡稱（台積）或美股代號（AAPL）。
               </CommandPrimitive.Empty>
             )}
             {results.length > 0 && (
-              <CommandPrimitive.Group heading="股票與 ETF" className={groupClass}>
+              <CommandPrimitive.Group heading="股票與 ETF" className={cn(groupClass, sheet && groupSheet)}>
                 {results.map((i) => (
-                  <CommandPrimitive.Item key={i.symbol} value={i.symbol} onSelect={() => goStock(i)} className={itemClass}>
+                  <CommandPrimitive.Item key={i.symbol} value={i.symbol} onSelect={() => goStock(i)} className={cn(itemClass, sheet && itemSheet)}>
                     <span className="num w-16 shrink-0 text-md font-semibold">{i.code}</span>
                     <span className="min-w-0 flex-1 truncate">{i.name}</span>
                     <span className="shrink-0 text-sm text-muted-foreground">
@@ -111,21 +130,21 @@ export function CommandSearch() {
               </CommandPrimitive.Group>
             )}
             {!q.trim() && (
-              <CommandPrimitive.Group heading="常用動作" className={groupClass}>
+              <CommandPrimitive.Group heading="常用動作" className={cn(groupClass, sheet && groupSheet)}>
                 {!readOnly && (
-                  <CommandPrimitive.Item value="new-trade" onSelect={() => { close(); openTradeForm() }} className={itemClass}>
+                  <CommandPrimitive.Item value="new-trade" onSelect={() => { close(); openTradeForm() }} className={cn(itemClass, sheet && itemSheet)}>
                     <span className="flex-1">記一筆交易</span>
                   </CommandPrimitive.Item>
                 )}
-                <CommandPrimitive.Item value="privacy" onSelect={() => { togglePrivacy(); close() }} className={itemClass}>
+                <CommandPrimitive.Item value="privacy" onSelect={() => { togglePrivacy(); close() }} className={cn(itemClass, sheet && itemSheet)}>
                   <span className="flex-1">切換隱私模式</span>
                 </CommandPrimitive.Item>
               </CommandPrimitive.Group>
             )}
             {pages.length > 0 && (
-              <CommandPrimitive.Group heading="前往頁面" className={groupClass}>
+              <CommandPrimitive.Group heading="前往頁面" className={cn(groupClass, sheet && groupSheet)}>
                 {pages.map((p) => (
-                  <CommandPrimitive.Item key={p.to} value={`page:${p.to}`} onSelect={() => go(p.to)} className={itemClass}>
+                  <CommandPrimitive.Item key={p.to} value={`page:${p.to}`} onSelect={() => go(p.to)} className={cn(itemClass, sheet && itemSheet)}>
                     <span className="flex-1">{p.label}</span>
                   </CommandPrimitive.Item>
                 ))}
@@ -150,6 +169,12 @@ const groupClass = cn(
 )
 const itemClass =
   "flex min-h-11 cursor-pointer items-center gap-3 rounded-sm px-2.5 text-base outline-none data-[selected=true]:bg-hov data-[selected=true]:text-ink"
+/**
+ * 手機：一行一格的格線列（和「問 AI」裡的搜尋結果同一套）——48px 高、17px、左右延伸到畫面邊緣、列與列之間 1px 格線；
+ * 選取中的那一列（鍵盤的 Enter 會去的那一筆）是滿版的淡墨底，沒有圓角
+ */
+const itemSheet = "min-h-12 rounded-none border-b border-rule px-5 text-lg"
+const groupSheet = "[&_[cmdk-group-heading]]:border-b [&_[cmdk-group-heading]]:border-rule [&_[cmdk-group-heading]]:px-5 [&_[cmdk-group-heading]]:pt-4 [&_[cmdk-group-heading]]:pb-2 [&_[cmdk-group-heading]]:font-normal"
 
 function isTyping(target: EventTarget | null) {
   const el = target as HTMLElement | null

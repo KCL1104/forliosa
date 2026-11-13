@@ -166,7 +166,25 @@ const openAi = async (page, mobile) => {
   if (mobile) {
     await page.getByRole("button", { name: /^問 AI/ }).click()
     await page.waitForTimeout(500)
+    return
   }
+  // 桌面：AI 沒什麼可說的頁面（設定、群組、紀錄…）面板預設是窄欄，先展開
+  const expand = page.getByRole("button", { name: /^展開 AI 面板/ })
+  if (await expand.count()) {
+    await expand.click()
+    await page.getByRole("complementary", { name: "問 AI" }).waitFor({ timeout: 8000 })
+  }
+}
+/** 手機標題列的放大鏡：滿版的搜尋（輸入框在最上面）；`text` 有值時輸入並等結果 */
+const headerSearch = (text) => async (page) => {
+  await page.getByRole("button", { name: "搜尋股票", exact: true }).click()
+  const dialog = page.getByRole("dialog", { name: "搜尋股票與功能" })
+  await dialog.waitFor({ timeout: 8000 })
+  if (text) {
+    await dialog.getByRole("combobox").fill(text)
+    await dialog.getByRole("option").first().waitFor({ timeout: 8000 })
+  }
+  await page.waitForTimeout(300)
 }
 const aaplRiver = async (page, mobile) => {
   await openAi(page, mobile)
@@ -260,12 +278,22 @@ const autoEdit = async (page) => {
   await page.getByRole("dialog").getByText("台積電").waitFor({ timeout: 8000 })
 }
 
-/** 資料來源：捲到「中央銀行」那一段（USD/TWD 匯率） */
-const fxSource = async (page) => {
-  await page.evaluate(() => {
-    const el = document.getElementById("ds-中央銀行")
+/** 資料來源：展開某個提供機關的資料集（預設收著，只列名稱），捲到那一段 */
+const agencySource = (agency) => async (page) => {
+  const toggle = page.locator(`[id="ds-${agency}"] button`)
+  await toggle.waitFor({ timeout: 8000 })
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") await toggle.click()
+  await page.evaluate((id) => {
+    const el = document.getElementById(id)
     if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
-  })
+  }, `ds-${agency}`)
+}
+/** 資料來源：「中央銀行」那一段（USD/TWD 匯率） */
+const fxSource = agencySource("中央銀行")
+/** 資料來源：全部展開（每個資料集的完整顯名聲明） */
+const allSources = async (page) => {
+  await page.getByRole("button", { name: "全部展開" }).click()
+  await page.getByRole("button", { name: "全部收合" }).waitFor({ timeout: 8000 })
 }
 
 /** 新聞報導：捲到總覽的「新聞報導」標題（桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列） */
@@ -283,12 +311,7 @@ const newsMore = async (page, mobile) => {
   await toNews(page, mobile)
 }
 /** 資料來源頁的 GDELT（新聞報導的授權） */
-const gdeltSource = async (page) => {
-  await page.evaluate(() => {
-    const el = document.getElementById("ds-The GDELT Project")
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
-  })
-}
+const gdeltSource = (page) => agencySource("The GDELT Project")(page)
 
 /** 捲到總覽的某個區塊標題（桌面：頂部列 64＋sticky 分頁列 48；手機：sticky 分頁列） */
 const toSection = (id) => async (page, mobile) => {
@@ -316,20 +339,10 @@ const otherSources = async (page) => {
     if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
   })
 }
-const wikiSource = async (page) => {
-  await page.evaluate(() => {
-    const el = document.getElementById("ds-維基百科")
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
-  })
-}
+const wikiSource = (page) => agencySource("維基百科")(page)
 
 /** 資料來源頁的證期局（ETF 淨值的授權） */
-const navSource = async (page) => {
-  await page.evaluate(() => {
-    const el = document.getElementById("ds-金融監督管理委員會證券期貨局")
-    if (el) window.scrollTo({ top: el.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 88 : 16), behavior: "instant" })
-  })
-}
+const navSource = (page) => agencySource("金融監督管理委員會證券期貨局")(page)
 
 /** 上市股票的籌碼：按空狀態裡的「最近外資對這檔的動向？」交給 AI（mock 是本機規則版的說明） */
 const foreignAsk = async (page, mobile) => {
@@ -415,7 +428,17 @@ const SHOTS = [
   // 手機底部列的其他狀態：待簽名、捲到最底（最後一行沒有被底部列蓋住）
   { name: "shell-dock-pending", path: "/", ready: "text=總資產", mobileOnly: true, action: pendingDock },
   { name: "shell-dock-bottom", path: "/stock/2330.TW", ready: "text=參考價", mobileOnly: true, action: toBottom },
+  // 第三輪：手機標題列的搜尋（滿版）、桌面 AI 面板在安靜的頁面預設是窄欄（展開後照常）
+  { name: "shell-search", path: "/", ready: "text=總資產", mobileOnly: true, action: headerSearch("台積") },
+  { name: "shell-search-empty", path: "/", ready: "text=總資產", mobileOnly: true, action: headerSearch("") },
+  { name: "shell-panel-quiet", path: "/groups", ready: "text=大學同學", desktopOnly: true },
+  { name: "shell-panel-quiet-open", path: "/groups", ready: "text=大學同學", desktopOnly: true, action: openAi },
+  { name: "history-panel-open", path: "/history", ready: "text=發起新對話", desktopOnly: true, action: openAi },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
+  // 沒有盤中即時報價：價格標「收盤價・日期」；盤中、收盤後今天的還沒公布時多一行（mock 用 ?market=open|pending 模擬）
+  { name: "stock-2330-market-open", path: "/stock/2330.TW?market=open", ready: "text=盤中不更新" },
+  { name: "stock-2330-market-pending", path: "/stock/2330.TW?market=pending", ready: "text=今天的收盤價還沒公布" },
+  { name: "ledger-market-open", path: "/?market=open", ready: "text=盤中不更新" },
   // 總覽第一層（估值句、刻度尺、鍵值格）與第二層（事件表）；2317 持有中、成本在區間外、現在在中段（成本標籤要換到第二行）
   { name: "stock-2330-key", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-key") },
   { name: "stock-2317-key", path: "/stock/2317.TW", ready: "text=參考價", action: toSection("ov-key") },
@@ -475,6 +498,7 @@ const SHOTS = [
   { name: "settings-recurring", path: "/settings", ready: "text=新增定期定額", action: recurring },
   { name: "settings-profile-edited", path: "/settings", ready: "text=新增定期定額", action: editField("顯示名稱", "示範使用者二") },
   { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
+  { name: "data-sources-expanded", path: "/data-sources", ready: "text=上市個股日成交資訊", action: allSources },
   { name: "data-sources-fx", path: "/data-sources", ready: "text=銀行間新臺幣對美元收盤匯率", action: fxSource },
   { name: "history", path: "/history", ready: "text=發起新對話" },
   { name: "ledger-auto-dividends-transactions", path: "/?view=transactions", ready: "text=月", action: autoEdited },
@@ -528,6 +552,7 @@ for (const variant of VARIANTS) {
     for (const shot of real ? REAL_SHOTS : SHOTS) {
       if (only && !only.includes(shot.name)) continue
       if (shot.mobileOnly && variant.id !== "iphone") continue
+      if (shot.desktopOnly && variant.id !== "desktop") continue
       // 每張截圖用全新的瀏覽器狀態（AI 對話與草稿存在 localStorage）
       const context = await browser.newContext({ ...variant.ctx, colorScheme: scheme, reducedMotion: "reduce", locale: "zh-TW", timezoneId: "Asia/Taipei" })
       const page = await context.newPage()

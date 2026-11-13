@@ -14,19 +14,24 @@ import { useAiRunner } from "./runner"
 import { useAi, useCurrentThread, usePendingCount } from "./store"
 import { useAiSuggestions, useAiUsage, usageNote } from "./remote-hooks"
 
-/** 桌面右側 AI 面板（約 400px，可收合，記得開合狀態） */
-export function AiPanel() {
-  const open = useAi((s) => s.panelOpen)
-  const setOpen = useAi((s) => s.setPanelOpen)
+/**
+ * 桌面右側 AI 面板（約 400px，可收合成 56px 的窄欄）。開合由 `AppShell` 決定（`useAiPanelOpen`）：
+ * 帳本與個股頁照記住的狀態，AI 沒什麼可說的頁面預設是窄欄。
+ */
+export function AiPanel({ open, onOpenChange }: { open: boolean; onOpenChange: (open: boolean) => void }) {
   const pending = usePendingCount()
   const composer = useRef<ComposerHandle>(null)
+  const setOpen = useRef(onOpenChange)
+  useEffect(() => {
+    setOpen.current = onOpenChange
+  })
 
   // ⌘J：打開面板並聚焦輸入框
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if ((e.key === "j" || e.key === "J") && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
-        useAi.getState().setPanelOpen(true)
+        setOpen.current(true)
         requestAnimationFrame(() => composer.current?.focus())
       }
     }
@@ -36,13 +41,13 @@ export function AiPanel() {
 
   if (!open) {
     return (
-      <aside aria-label="問 AI（已收合）" className="sticky top-16 flex h-[calc(100dvh-4rem)] w-14 flex-col items-center gap-2 border-l border-rule pt-4">
+      <aside aria-label="問 AI（已收合）" className="sticky top-16 flex h-[calc(100dvh-4rem)] w-14 shrink-0 flex-col items-center gap-2 border-l border-rule pt-4">
         <Tooltip>
           <TooltipTrigger
             render={
               <button
                 type="button"
-                onClick={() => setOpen(true)}
+                onClick={() => onOpenChange(true)}
                 aria-label={pending > 0 ? `展開 AI 面板（待簽名 ${pending} 筆）` : "展開 AI 面板"}
                 className="press relative grid size-10 place-items-center rounded-sm text-ai hover:bg-ai-wash pointer-coarse:size-11"
               />
@@ -56,7 +61,7 @@ export function AiPanel() {
       </aside>
     )
   }
-  return <PanelBody composerRef={composer} onCollapse={() => setOpen(false)} />
+  return <PanelBody composerRef={composer} onCollapse={() => onOpenChange(false)} />
 }
 
 function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<ComposerHandle | null>; onCollapse: () => void }) {
@@ -108,6 +113,8 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
                 suggestions={suggestions}
                 size="panel"
                 onShowHistory={route.kind === "history" ? undefined : () => setView("history")}
+                // 紀錄頁本身就是完整的對話清單：旁邊的面板不再列「最近的對話」
+                hideRecent={route.kind === "history"}
               />
             )}
           </div>

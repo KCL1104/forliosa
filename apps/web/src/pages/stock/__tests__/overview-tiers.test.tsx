@@ -115,11 +115,19 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     expect(rows.some((r) => r.textContent!.includes("10-K"))).toBe(true)
     expect(events.textContent).not.toContain("90 天")
     expect(events.textContent).not.toContain("目前沒有已公告")
-    // 第一層：美股沒有行情時只剩近四季 EPS，寫成一行，不畫只有一格的鍵值格
-    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
-    await within(band).findByText("近四季 EPS", undefined, T)
-    expect(within(band).queryAllByRole("term")).toHaveLength(0)
-    expect(band.textContent).toMatch(/近四季 EPS US\$\d/)
+    // 第一層：美股沒有行情時只剩近四季 EPS——不畫只有一格的鍵值格，也不在分頁列下面單獨留一條兩條線夾著的細帶：
+    // 併進「關於」的鍵值格（排在會計年度結束後面、曾用名稱前面），數字還在、寫法一樣（US$）
+    const about = await screen.findByRole("region", { name: "關於「Apple」" }, T)
+    const eps = await within(about).findByText("近四季 EPS", undefined, T)
+    expect(eps.tagName).toBe("DT")
+    expect(eps.parentElement!.textContent).toMatch(/^近四季 EPSUS\$\d+\.\d\d$/)
+    const terms = within(about).getAllByRole("term").map((t) => t.textContent)
+    expect(terms.indexOf("近四季 EPS")).toBe(terms.indexOf("會計年度結束") + 1)
+    expect(terms.indexOf("曾用名稱")).toBe(terms.indexOf("近四季 EPS") + 1)
+    // 六格：兩欄排滿，沒有落單的一格
+    expect(terms).toHaveLength(6)
+    expect(screen.queryByRole("region", { name: "關鍵數據" })).toBeNull()
+    expect(document.body.textContent!.match(/近四季 EPS/g)).toHaveLength(1)
   })
 
   it("第三層與頁尾：新聞先 3 則；各區塊不寫授權段落，整頁只有一個「資料來源與授權」", async () => {

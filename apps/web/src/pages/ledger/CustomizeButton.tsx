@@ -2,7 +2,8 @@ import { PinIcon, SlidersHorizontalIcon } from "lucide-react"
 import { useHoldings } from "@/api/queries"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
-import { ALL_COLUMNS, COLUMN_LABEL, useLedgerPrefs } from "./ledger-prefs"
+import { ALL_COLUMNS, useLedgerPrefs } from "./ledger-prefs"
+import { useColumnLabel } from "./use-column-label"
 
 /** 自訂：選欄位、隱藏走勢圖、釘選持股（存在這台瀏覽器） */
 export function CustomizeButton({ className }: { className?: string }) {
@@ -14,6 +15,7 @@ export function CustomizeButton({ className }: { className?: string }) {
   const togglePin = useLedgerPrefs((s) => s.togglePin)
   const reset = useLedgerPrefs((s) => s.reset)
   const holdings = useHoldings()
+  const label = useColumnLabel()
   return (
     <Popover>
       <PopoverTrigger
@@ -35,7 +37,7 @@ export function CustomizeButton({ className }: { className?: string }) {
             {ALL_COLUMNS.map((c) => (
               <label key={c} className={cn("flex min-h-9 items-center gap-2 text-md pointer-coarse:min-h-11", c === "price" && "text-ink-2")}>
                 <input type="checkbox" className="size-4 accent-[var(--ink)]" checked={columns.includes(c)} disabled={c === "price"} onChange={() => toggleColumn(c)} />
-                {COLUMN_LABEL[c]}
+                {label(c)}
               </label>
             ))}
           </div>

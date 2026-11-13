@@ -153,7 +153,7 @@ function RiverPanel({
     return `介於 ${multiples[idx - 1]} 倍與 ${multiples[idx]} 倍之間`
   })()
   const bandPrices = lastValid ? multiples.map((m, idx) => ({ kind: "band" as const, m, idx, price: lastValid.base! * m })) : []
-  // 由貴到便宜排列，並把「現價」插在對應位置
+  // 由貴到便宜排列，並把「收盤價」插在對應位置
   const bandRows: ({ kind: "band"; m: number; idx: number; price: number } | { kind: "price"; price: number })[] = []
   let placed = false
   for (const b of [...bandPrices].reverse()) {
@@ -281,7 +281,7 @@ function RiverPanel({
                 {bandRows.map((row) =>
                   row.kind === "price" ? (
                     <tr key="price" aria-current="true" className="sel-row border-b border-rule font-bold text-ink">
-                      <th scope="row" className="py-1.5 pl-2 text-left">現價</th>
+                      <th scope="row" className="py-1.5 pl-2 text-left">收盤價</th>
                       <td className="num py-1.5 pr-2 text-right" colSpan={2}>{formatPrice(row.price, market, type)}</td>
                     </tr>
                   ) : (

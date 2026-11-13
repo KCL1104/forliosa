@@ -4,11 +4,14 @@ import type { Draft, Message, Thread } from "./types"
 
 /**
  * AI 面板的狀態：對話、草稿、面板開合。
- * - 桌面面板的開合要記住（使用者偏好，存在這台瀏覽器）
+ * - 桌面面板的開合要記住（使用者偏好，存在這台瀏覽器）：帳本與個股頁是 `panelOpen`（預設開）；
+ *   AI 沒什麼可說的頁面（群組、設定、紀錄、資料來源，見 app/nav.ts）預設收成窄欄，使用者在那裡自己打開的話
+ *   另外記在 `quietPanelOpen`（只記到關掉這個分頁為止，不存檔：下次打開還是預設的窄欄）
  * - 對話紀錄與待簽名草稿也存在這台瀏覽器；M4 之後改由後端同步
  */
 interface AiState {
   panelOpen: boolean
+  quietPanelOpen: boolean
   mobileOpen: boolean
   threadId: string | null
   threads: Thread[]
@@ -18,7 +21,8 @@ interface AiState {
   /** 輸入框要預填的文字（例如點了「記一筆交易」） */
   composerSeed: { text: string; nonce: number } | null
 
-  setPanelOpen: (open: boolean) => void
+  /** `quiet`：現在是不是安靜的頁面（開合分開記） */
+  setPanelOpen: (open: boolean, quiet?: boolean) => void
   setMobileOpen: (open: boolean) => void
   newThread: () => void
   openThread: (id: string) => void
@@ -54,6 +58,7 @@ export const useAi = create<AiState>()(
   persist(
     (set, get) => ({
       panelOpen: true,
+      quietPanelOpen: false,
       mobileOpen: false,
       threadId: null,
       threads: [],
@@ -61,7 +66,7 @@ export const useAi = create<AiState>()(
       focusDraftId: null,
       composerSeed: null,
 
-      setPanelOpen: (panelOpen) => set({ panelOpen }),
+      setPanelOpen: (open, quiet) => set(quiet ? { quietPanelOpen: open } : { panelOpen: open }),
       setMobileOpen: (mobileOpen) => set({ mobileOpen }),
       newThread: () => set({ threadId: null }),
       openThread: (id) => set({ threadId: id }),
@@ -166,6 +171,11 @@ export function useCurrentThread(): Thread | null {
 /** 待簽名的草稿數 */
 export function usePendingCount(): number {
   return useAi((s) => Object.values(s.drafts).filter((d) => d.status === "pending").length)
+}
+
+/** 面板裡有事：開著一段對話，或有草稿在等簽名（換頁時面板不因此收起來） */
+export function usePanelBusy(): boolean {
+  return useAi((s) => s.threadId !== null || Object.values(s.drafts).some((d) => d.status === "pending"))
 }
 
 /** 最新一份待簽名的草稿（優先找還在紀錄裡的對話中的那份） */

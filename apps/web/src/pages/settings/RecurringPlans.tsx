@@ -1,5 +1,4 @@
 import { Link, useRouterState } from "@tanstack/react-router"
-import { Trash2Icon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
@@ -8,6 +7,7 @@ import type { Account, Instrument, RecurringPlan, RecurringPlanInput } from "@/a
 import { DayOfMonthPicker } from "@/components/day-picker"
 import { daysLabel, planStatus } from "@/lib/ledger-display"
 import { FormField as Field } from "@/components/form-field"
+import { Section } from "@/components/section"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { SymbolPicker } from "@/components/symbol-picker"
@@ -26,7 +26,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatDate, formatDateShort, formatMoney, formatQuantity } from "@/lib/format"
 import { codeOf, formatQuote } from "@/lib/tick"
 import { cn } from "@/lib/utils"
@@ -38,6 +37,7 @@ const TOUCH_FIELDS = "pointer-coarse:[&_input]:h-11 pointer-coarse:[&_[data-slot
 /**
  * 定期定額：設定頁的一個區塊（頭像選單、帳本的定期定額扣款都連到這裡 `#recurring`；持倉的定期定額標記連到 `#plan-<id>`）。
  * 列出計畫（每月幾日、金額、帳戶、下一次扣款）、新增／修改（對話框）、刪除（確認）、啟用開關。
+ * 列上的動作和設定頁其他清單同一套：改內容的是文字動作（「修改」），這一列最重的動作（「刪除」）是外框按鈕；沒有只有圖示的按鈕。
  * 扣款日當天 AI 面板會提出交易草稿，使用者簽名後才入帳。
  */
 export function RecurringPlans() {
@@ -68,23 +68,27 @@ export function RecurringPlans() {
     )
 
   return (
-    <section id="recurring" aria-labelledby="set-recurring" className="flex scroll-mt-20 flex-col gap-2">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <h2 id="set-recurring" className="text-lg font-bold">
-          定期定額
-        </h2>
+    <Section
+      id="recurring"
+      title="定期定額"
+      titleId="set-recurring"
+      className="scroll-mt-20"
+      bodyClassName="pt-0"
+      action={
         <Button variant="outline" size="sm" onClick={() => setEditing("new")} disabled={!accounts.data || twd.length === 0}>
           新增定期定額
         </Button>
-      </div>
+      }
+    >
       {plans.isError ? (
-        <ErrorState error={plans.error} onRetry={() => void plans.refetch()} />
+        <ErrorState flush error={plans.error} onRetry={() => void plans.refetch()} />
       ) : !plans.data || !accounts.data ? (
-        <SkeletonLines rows={3} />
+        <SkeletonLines rows={3} className="pt-3" />
       ) : twd.length === 0 ? (
-        <EmptyState title="還沒有新台幣帳戶" description="定期定額要從新台幣帳戶扣款。先在上面的「券商帳戶」新增一個，例如「永豐・一般」。" />
+        <EmptyState flush title="還沒有新台幣帳戶" description="定期定額要從新台幣帳戶扣款。先在上面的「券商帳戶」新增一個，例如「永豐・一般」。" />
       ) : plans.data.length === 0 ? (
         <EmptyState
+          flush
           title="還沒有定期定額"
           description="設定後，本週事項會列出每一次扣款，扣款日 AI 會先寫好交易草稿。"
           action={
@@ -94,7 +98,8 @@ export function RecurringPlans() {
           }
         />
       ) : (
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+        // 標題的印刷線就是清單上面那條線
+        <ul className="flex flex-col divide-y divide-rule border-b border-rule">
           {plans.data.map((p) => {
             const status = planStatus(p, today)
             return (
@@ -113,7 +118,8 @@ export function RecurringPlans() {
                     <span className="num text-sm text-ink-2">{codeOf(p.symbol)}</span>
                     {status !== "active" && <span className="demo-tag text-ink-2">{status === "paused" ? "已暫停" : "已結束"}</span>}
                   </div>
-                  <p className="num mt-1 text-md">
+                  {/* 觸控時這一行不接收點按：上面名稱連結往下的可按範圍（合計 44px）落在這裡 */}
+                  <p className="num mt-1 text-md pointer-coarse:pointer-events-none">
                     {daysLabel(p.day_of_month)}・{privacy ? "••••" : formatMoney(p.amount)}
                     <span className="text-ink-2">・{nameOf(p.account_id)}</span>
                   </p>
@@ -127,8 +133,8 @@ export function RecurringPlans() {
                   </p>
                   {p.note && <p className="mt-0.5 text-sm text-ink-2">{p.note}</p>}
                 </div>
-                <div className="flex items-center gap-1 max-sm:-ml-1">
-                  <label className="mr-3 inline-flex min-h-10 cursor-pointer items-center gap-2 px-1 text-sm text-ink-2 pointer-coarse:min-h-11">
+                <div className="flex items-center gap-3 max-sm:-ml-1">
+                  <label className="mr-1 inline-flex min-h-10 cursor-pointer items-center gap-2 px-1 text-sm text-ink-2 pointer-coarse:min-h-11">
                     啟用
                     <Switch
                       checked={p.active}
@@ -137,16 +143,13 @@ export function RecurringPlans() {
                       aria-label={p.active ? `暫停「${p.name}」定期定額` : `恢復「${p.name}」定期定額`}
                     />
                   </label>
-                  <button type="button" onClick={() => setEditing(p)} aria-label={`修改「${p.name}」定期定額`} className={cn(textAction, "mr-1")}>
+                  <button type="button" onClick={() => setEditing(p)} aria-label={`修改「${p.name}」定期定額`} className={textAction}>
                     修改
                   </button>
-                  {/* 刪除前先確認（DeletePlan）；只有圖示，所以滑過有說明 */}
-                  <Tooltip>
-                    <TooltipTrigger render={<Button variant="ghost" size="icon-sm" onClick={() => setDeleting(p)} aria-label={`刪除「${p.name}」定期定額`} />}>
-                      <Trash2Icon />
-                    </TooltipTrigger>
-                    <TooltipContent>刪除計畫</TooltipContent>
-                  </Tooltip>
+                  {/* 刪除前先確認（DeletePlan）。和授權的「撤銷」同一種外框按鈕，不是只有圖示的垃圾桶 */}
+                  <Button variant="outline" size="sm" onClick={() => setDeleting(p)} aria-label={`刪除「${p.name}」定期定額`}>
+                    刪除
+                  </Button>
                 </div>
               </li>
             )
@@ -155,7 +158,7 @@ export function RecurringPlans() {
       )}
       {editing && <PlanDialog key={editing === "new" ? "new" : editing.id} plan={editing === "new" ? null : editing} accounts={twd} onClose={() => setEditing(null)} />}
       <DeletePlan plan={deleting} onClose={() => setDeleting(null)} />
-    </section>
+    </Section>
   )
 }
 

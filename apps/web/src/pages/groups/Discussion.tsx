@@ -13,11 +13,12 @@ import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { EMOJI_LABEL } from "./labels"
 
-/** 每一則動態都會重複的動作（加表情、留言）：文字動作的安靜版——淡墨字＋常駐底線，滑過或展開時變墨色 */
+/** 每一則動態都會重複的動作（加表情、留言）：文字動作的安靜版——淡墨字＋常駐底線，滑過或展開時變墨色（觸控時的可按範圍見 textAction） */
 const QUIET_ACTION = "text-sm text-ink-2 hover:text-ink aria-expanded:text-ink aria-expanded:decoration-ink"
 
 /**
- * 表情：已經有人按的表情（數字；自己按過的用選取語法 (b)），旁邊的「加表情」打開六個固定的表情。
+ * 表情：已經有人按的表情是方肩的小格（4px、1px 格線框、表情＋數字——和系統裡其他選項同一種方格，不是膠囊）；
+ * 自己按過的用選取語法 (b)。旁邊的「加表情」打開六個固定的表情。
  * 按下立即反映，伺服器回來後以伺服器的計數為準。
  */
 export function Reactions({ groupId, target, reactions, className }: { groupId: string; target: CommentTarget; reactions: Reaction[]; className?: string }) {
@@ -49,18 +50,18 @@ export function Reactions({ groupId, target, reactions, className }: { groupId: 
   return (
     <div className={cn("flex flex-wrap items-center gap-x-1.5", className)}>
       {shown.map((r) => (
-        // 觸控時按鈕本身 44px 高，看得到的小框在裡面（選取語法 (b) 跟著 data-pressed）
+        // 觸控時按鈕本身 44px 高、至少 44px 寬，看得到的小格在裡面（選取語法 (b) 跟著 data-pressed）
         <button
           key={r.emoji}
           type="button"
           aria-pressed={r.mine}
           aria-label={`${EMOJI_LABEL[r.emoji]} ${r.count}${r.mine ? "，你按過" : ""}`}
           onClick={() => press(r.emoji)}
-          className="press inline-flex items-center rounded-full pointer-coarse:min-h-11"
+          className="press inline-flex items-center justify-center rounded-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
         >
           <span
             data-pressed={r.mine ? "" : undefined}
-            className="sel-chip inline-flex h-7 items-center gap-1 rounded-full border border-rule px-2 text-sm text-ink-2 data-pressed:border-transparent pointer-coarse:h-8 pointer-coarse:px-2.5"
+            className="sel-chip inline-flex h-7 items-center gap-1 rounded-sm border border-rule px-2 text-sm text-ink-2 data-pressed:border-transparent pointer-coarse:h-8 pointer-coarse:px-2.5"
           >
             <span aria-hidden>{r.emoji}</span>
             <span className="num">{r.count}</span>
@@ -233,7 +234,8 @@ function CommentComposer({ groupId, target }: { groupId: string; target: Comment
             submit()
           }
         }}
-        className="min-h-10 rounded-sm border-ctl bg-raised py-2 text-base md:text-base pointer-coarse:min-h-11 pointer-coarse:py-2.5"
+        // 跟著內容自己長高（field-sizing-content），不需要右下角的原生拖曳把手
+        className="min-h-10 resize-none rounded-sm border-ctl bg-raised py-2 text-base md:text-base pointer-coarse:min-h-11 pointer-coarse:py-2.5"
       />
       <Button type="submit" variant="outline" disabled={!text || create.isPending}>
         送出

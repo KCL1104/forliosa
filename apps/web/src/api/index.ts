@@ -1,6 +1,7 @@
 import { createHttpAdapter } from "./http"
 import { createMockAdapter, readMockScenario, readMockSignedIn } from "./mock/adapter"
 import { readMockPolicy } from "./mock/commercial"
+import { mockMarketNow, readMockMarket } from "./mock/market-status"
 import { MOCK_AS_OF, MOCK_TODAY } from "./mock/market"
 import { todayInTaipei } from "@/lib/format"
 import type { ForliosaApi } from "./types"
@@ -17,7 +18,11 @@ import type { ForliosaApi } from "./types"
 const configured = import.meta.env.VITE_API_BASE_URL?.trim()
 const baseUrl = configured || (import.meta.env.MODE === "api" ? "/api/v1" : undefined)
 
-export const api: ForliosaApi = baseUrl ? createHttpAdapter(baseUrl) : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn() })
+const mockMarket = baseUrl ? undefined : readMockMarket()
+
+export const api: ForliosaApi = baseUrl
+  ? createHttpAdapter(baseUrl)
+  : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn(), market: mockMarket })
 
 /** 真實後端的 base URL（mock 模式為 undefined）；AI 對話的 SSE 串流直接用它 */
 export const apiBaseUrl: string | undefined = baseUrl
@@ -42,6 +47,14 @@ export function appToday(): string {
 /** 「現在」：示範資料固定在 MOCK_AS_OF（「N 小時前」在截圖與測試中穩定），真實後端用目前時間 */
 export function appNow(): Date {
   return api.kind === "mock" ? new Date(MOCK_AS_OF) : new Date()
+}
+
+/**
+ * 判斷「盤中／收盤後還沒公布」用的現在時間：真實後端是目前時間；示範資料跟著 `?market=` 的情境
+ * （預設是 MOCK_AS_OF；`open` 是隔天早上、`pending` 是隔天下午），和 mock 的 `GET /meta/market-status` 一致。
+ */
+export function marketNow(): Date {
+  return mockMarket ? mockMarketNow(mockMarket) : new Date()
 }
 
 export * from "./types"

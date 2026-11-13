@@ -1,4 +1,6 @@
 import { useState } from "react"
+import { kaiSize } from "@/ai/kai-size"
+import { KaiText } from "@/ai/kai-text"
 import { useDigests } from "@/api/sharing-queries"
 import type { Digest, Group } from "@/api/types"
 import { Pct } from "@/components/finance"
@@ -7,12 +9,14 @@ import { Button } from "@/components/ui/button"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort, formatDateTime } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
+import { cn } from "@/lib/utils"
 import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
 
 const FALLBACK_DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 
 /**
- * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（紫色文楷）＋伺服器算的數字（依目前的分享設定過濾）＋免責。
+ * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（紫色楷體，和對話裡的回答同一套排版：`.ai-voice`＋`KaiText`）
+ * ＋伺服器算的數字（依目前的分享設定過濾）＋免責。
  * 每一份都可以按表情、留言。
  */
 export function DigestsTab({ group }: { group: Group }) {
@@ -58,7 +62,11 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
         <p className="text-ink-2">這週的週報沒有產生成功。</p>
       ) : (
         <>
-          {d.summary && <p className="font-ai max-w-prose text-lg leading-relaxed text-ai lg:text-xl">{d.summary}</p>}
+          {d.summary && (
+            <p className={cn("ai-voice max-w-prose", kaiSize.page)}>
+              <KaiText text={d.summary} />
+            </p>
+          )}
           {f && (
             <div className="grid gap-x-10 gap-y-6 md:grid-cols-2">
               {f.returns.length > 0 && (

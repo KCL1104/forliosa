@@ -18,7 +18,8 @@ import { unpricedHoldings } from "@/lib/ledger-display"
 import { ClosedRounds } from "./ClosedRounds"
 import { RecurringMark } from "./RecurringMark"
 import { useActivePlans } from "./use-active-plans"
-import { COLUMN_LABEL, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
+import { useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
+import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
@@ -146,6 +147,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   const watch = useWatchlist()
   const readOnly = useReadOnly()
   const maxWeight = Math.max(...rows.map((h) => h.weight), 0.0001)
+  const label = useColumnLabel()
   const header = (c: HoldingColumn) => {
     const key = SORTABLE[c]
     const active = key && sort.key === key
@@ -157,12 +159,12 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
             onClick={() => onSort({ key, dir: active && sort.dir === "desc" ? "asc" : "desc" })}
             className={cn("-mr-1 inline-flex h-8 items-center gap-0.5 rounded-sm px-1 hover:text-ink pointer-coarse:h-11", active && "text-ink")}
           >
-            {COLUMN_LABEL[c]}
+            {label(c)}
             {/* 排序方向用箭頭（▲▼ 是價格漲跌的符號，不拿來表示排序） */}
             {active && (sort.dir === "desc" ? <ArrowDownIcon aria-hidden className="size-3.5" /> : <ArrowUpIcon aria-hidden className="size-3.5" />)}
           </button>
         ) : (
-          COLUMN_LABEL[c]
+          label(c)
         )}
       </th>
     )
@@ -325,11 +327,14 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
   const watch = useWatchlist()
   const readOnly = useReadOnly()
   const plans = useActivePlans()
+  const label = useColumnLabel()
   return (
     <div className="md:hidden">
       <div className="form-head flex h-11 items-end justify-between pb-2">
         <span>持有 {rows.length} 檔</span>
-        <span>現價・今日漲跌</span>
+        <span className="num">
+          {label("price")}・{label("day_pct")}
+        </span>
       </div>
       <ul aria-label="持倉">
         {rows.map((h) => (

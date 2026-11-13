@@ -41,7 +41,7 @@ export function RangeChips<T extends string>({
             tabIndex={active || (!options.some((x) => x.value === value) && i === 0) ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
-            className="press sel-chip h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-11 pointer-coarse:px-3"
+            className="press sel-chip h-8 shrink-0 rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-11 pointer-coarse:min-w-11 pointer-coarse:px-3"
           >
             {o.label}
           </button>

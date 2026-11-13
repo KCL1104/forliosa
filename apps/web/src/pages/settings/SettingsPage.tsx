@@ -5,7 +5,7 @@ import type { Account } from "@/api/types"
 import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { RangeChips } from "@/components/charts/chart-kit"
-import { PageHeader } from "@/components/section"
+import { PageHeader, Section } from "@/components/section"
 import { RecurringPlans } from "./RecurringPlans"
 import { Delegations } from "./Delegations"
 import { Profile } from "./Profile"
@@ -129,13 +129,12 @@ function Settings() {
   )
 }
 
+/** 設定的一組：區塊標題（和其他頁面同一級：20px、底下一條印刷線）＋一列一列的格線 */
 function Group({ title, children }: { title: string; children: React.ReactNode }) {
-  const id = `set-${title}`
   return (
-    <section aria-labelledby={id} className="flex flex-col gap-2">
-      <h2 id={id} className="border-b border-rule pb-2 text-lg font-bold">{title}</h2>
-      <div className="-mt-2 flex flex-col divide-y divide-rule border-b border-rule">{children}</div>
-    </section>
+    <Section title={title} titleId={`set-${title}`} bodyClassName="pt-0">
+      <div className="flex flex-col divide-y divide-rule border-b border-rule">{children}</div>
+    </Section>
   )
 }
 
@@ -159,19 +158,25 @@ function Accounts() {
   const accounts = useAccounts()
   const [editing, setEditing] = useState<Account | null>(null)
   return (
-    <section id="accounts" aria-labelledby="set-accounts" className="flex scroll-mt-20 flex-col gap-2">
-      <div className="flex flex-wrap items-end justify-between gap-2">
-        <h2 id="set-accounts" className="text-lg font-bold">券商帳戶</h2>
+    <Section
+      id="accounts"
+      title="券商帳戶"
+      titleId="set-accounts"
+      className="scroll-mt-20"
+      bodyClassName="pt-0"
+      action={
         <Button variant="outline" size="sm" onClick={() => setEditing(NEW_ACCOUNT)}>
           新增帳戶
         </Button>
-      </div>
+      }
+    >
       {!accounts.data ? (
-        <SkeletonLines rows={3} />
+        <SkeletonLines rows={3} className="pt-3" />
       ) : accounts.data.length === 0 ? (
-        <EmptyState title="還沒有帳戶" description="先新增一個，例如「永豐・一般」，記交易時才會自動算手續費。" />
+        <EmptyState flush title="還沒有帳戶" description="先新增一個，例如「永豐・一般」，記交易時才會自動算手續費。" />
       ) : (
-        <ul className="flex flex-col divide-y divide-rule border-y border-rule">
+        // 標題的印刷線就是清單上面那條線
+        <ul className="flex flex-col divide-y divide-rule border-b border-rule">
           {accounts.data.map((a) => (
             <li key={a.id} className="flex items-start gap-4 py-4">
               <div className="min-w-0 flex-1">
@@ -194,7 +199,7 @@ function Accounts() {
         </ul>
       )}
       {editing && <AccountDialog key={editing.id || "new"} account={editing} onClose={() => setEditing(null)} />}
-    </section>
+    </Section>
   )
 }
 

@@ -8,6 +8,7 @@ import { DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type Ung
 import { useAiUsage } from "./remote-hooks"
 import { DraftCard } from "./DraftCard"
 import { textLink } from "./Home"
+import { kaiSize } from "./kai-size"
 import { KaiText } from "./kai-text"
 import type { Citation } from "./remote"
 import type { useAiRunner } from "./runner"
@@ -108,8 +109,8 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   )
 }
 
-/** 模型寫的字：楷體約 17px（手機 18px）、行高 1.8，長回答在 400px 的面板裡也讀得下去 */
-const modelSize = { panel: "text-lg leading-[1.8]", screen: "text-[1.125rem] leading-[1.8]" } as const
+/** 模型寫的字：楷體約 17px（手機 18px）、行高 1.8，長回答在 400px 的面板裡也讀得下去（大小全站一套，見 kai-text.tsx） */
+const modelSize = kaiSize
 /** 規則或範本寫的句子：墨色 Noto Sans，和介面的內文同一級 */
 const ruleSize = { panel: "text-base leading-relaxed", screen: "text-[1rem] leading-relaxed" } as const
 

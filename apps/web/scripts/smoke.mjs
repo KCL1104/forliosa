@@ -357,10 +357,14 @@ await check("法人觀點：2881 查完沒有報導、2409 查不到、ETF 沒�
   if (await page.getByRole("region", { name: "關鍵數據" }).getByText("近四季 EPS").count()) throw new Error("ETF key band lists EPS")
   if (await page.getByRole("button", { name: /法人觀點/ }).count()) throw new Error("ETF should not have 法人觀點")
 })
-await check("個股：1 日走勢說明需要授權，按「看 5 日走勢」切換", async () => {
+await check("個股：1 日走勢說明沒有盤中走勢（價格是收盤後公布的收盤價、需要授權），按「看 5 日走勢」切換", async () => {
   await page.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
   await page.getByRole("radio", { name: "1日" }).click()
-  await page.getByText("盤中走勢需要授權行情，目前提供收盤後資料").waitFor()
+  await page.getByText("沒有盤中走勢：價格是收盤後公布的收盤價").waitFor()
+  const chart = page.getByRole("region", { name: "走勢圖" })
+  // 後端的說明（需要授權）照原文；不承諾「加入觀察就會記錄盤中走勢」
+  await chart.getByText(/需付費授權/).waitFor()
+  if (await chart.getByText(/每分鐘|加入觀察後/).count()) throw new Error("the 1-day empty state promises intraday data")
   await page.getByRole("button", { name: "看 5 日走勢" }).click()
   await page.getByRole("radio", { name: "5日", checked: true }).waitFor()
 })
@@ -537,6 +541,12 @@ await check("設定：新增定期定額（驗證 → 儲存）、暫停、修�
 await check("頭像選單：資料來源與授權（完整顯名聲明）", async () => {
   await page.getByRole("button", { name: /帳號選單/ }).click()
   await page.getByRole("menuitem", { name: "資料來源與授權" }).click()
+  // 資料集依提供機關收合：收著列名稱，展開是每個資料集的完整顯名聲明
+  const twse = page.getByRole("button", { name: /^臺灣證券交易所/ })
+  await twse.waitFor({ timeout: 8000 })
+  if ((await twse.getAttribute("aria-expanded")) !== "false") throw new Error("dataset groups should start collapsed")
+  await page.getByText(/上市個股日成交資訊、上市個股日本益比/).waitFor()
+  await twse.click()
   await page.getByText("臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版").waitFor()
 })
 await check("紀錄：對話保留 30 天", async () => {
@@ -553,9 +563,15 @@ await check("紀錄：刪除對話有「復原」（Sonner 通知），復原後
   await main.getByRole("button", { name }).waitFor({ timeout: 5000 })
   if (await main.getByText("AI 任務").count()) throw new Error("demo AI tasks must not show")
 })
-await check("AI 面板：設定頁沒有建議 → 輸入框上方列最近 3 段對話、提示字不是交易例子；開始對話後輸入框不跳，免責只出現一次", async () => {
+await check("AI 面板：設定頁（展開後）沒有建議 → 輸入框上方列最近 3 段對話、提示字不是交易例子；開始對話後輸入框不跳，免責只出現一次", async () => {
   await page.goto(base + "/settings", { waitUntil: "networkidle" })
+  // 設定是 AI 沒什麼可說的頁面：面板預設收成窄欄，要用才展開。
+  // （前面的檢查留下待簽名的草稿時面板本來就開著——有草稿等簽名就不收；「預設是窄欄」在第三輪的檢查用乾淨的分頁驗證）
+  await page.getByText("券商帳戶").first().waitFor({ timeout: 8000 })
+  const expand = page.getByRole("button", { name: /^展開 AI 面板/ })
+  if (await expand.count()) await expand.click()
   const panel = page.getByRole("complementary", { name: "問 AI" })
+  await panel.waitFor({ timeout: 8000 })
   const box = panel.getByLabel("提出問題或下指令")
   const placeholder = (await box.getAttribute("placeholder")) ?? ""
   if (/買|張/.test(placeholder)) throw new Error(`settings placeholder suggests a trade: ${placeholder}`)
@@ -733,9 +749,9 @@ await check("群組、設定、資料來源：空狀態沒有虛線；有字的�
     const dashed = await dashedIn(page.locator("main"))
     if (dashed) throw new Error(`${path ?? "new group digests"}: ${dashed} dashed borders outside AI drafts`)
   }
-  // 資料來源頁：標題和「授權條款」之間沒有副標
+  // 資料來源頁：標題和第一個區塊（報價）之間沒有副標
   const subtitle = await page.getByRole("heading", { level: 1, name: "資料來源與授權" }).evaluate((h) => {
-    const next = document.getElementById("ds-license")
+    const next = document.querySelector("main h2")
     const between = [...document.querySelectorAll("main p")].filter((p) => h.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING && p.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING)
     return between.map((p) => p.textContent).join(" | ")
   })
@@ -857,6 +873,230 @@ await check("授權查看：授權失效（403 delegation_revoked）→ 自動�
   await page.getByText("總資產").first().waitFor({ timeout: 8000 })
   if (await page.getByRole("region", { name: "查看模式" }).count()) throw new Error("still in view-as")
 })
+
+// ── 第三輪設計修飾：桌面 ───────────────────────────────────────
+// 另開一個乾淨的分頁：前面的檢查留下待簽名的草稿與對話，面板在安靜的頁面會因此開著
+const rctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+const rp = await rctx.newPage()
+rp.on("console", (m) => m.type() === "error" && errors.push(`${rp.url()} ${m.text()}`))
+rp.on("pageerror", (e) => errors.push(`${rp.url()} pageerror ${e.message}`))
+await check("AI 面板：安靜的頁面（群組、設定、紀錄、資料來源）預設是窄欄，帳本與個股頁照記住的狀態；換頁時內容的左緣不動", async () => {
+  await rp.goto(base + "/", { waitUntil: "networkidle" })
+  await rp.evaluate(() => document.documentElement.classList.remove("dark"))
+  await rp.getByRole("complementary", { name: "問 AI", exact: true }).waitFor({ timeout: 8000 })
+  await rp.getByText("總資產").first().waitFor({ timeout: 8000 })
+  const edge = () => rp.evaluate(() => {
+    const main = document.getElementById("main")
+    const first = main.querySelector("h1:not(.sr-only), p, nav")
+    return { left: Math.round(first.getBoundingClientRect().left), mainW: Math.round(main.getBoundingClientRect().width), railW: Math.round(document.querySelector("aside")?.getBoundingClientRect().width ?? 0) }
+  })
+  const ledger = await edge()
+  // 用頂部列的導覽換頁（不重新載入）：群組是窄欄，主欄變寬，但第一行字的左緣和帳本一樣
+  await rp.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "群組" }).click()
+  await rp.getByRole("heading", { level: 1, name: "群組" }).waitFor({ timeout: 8000 })
+  await rp.getByRole("button", { name: "展開 AI 面板" }).waitFor({ timeout: 8000 })
+  if (await rp.getByRole("complementary", { name: "問 AI", exact: true }).count()) throw new Error("panel open on a quiet page by default")
+  const groups = await edge()
+  if (groups.railW !== 56) throw new Error(`rail is ${groups.railW}px`)
+  if (groups.mainW <= ledger.mainW) throw new Error(`main column did not widen: ${JSON.stringify({ ledger, groups })}`)
+  if (Math.abs(groups.left - ledger.left) > 1) throw new Error(`content left edge jumped between ledger and groups: ${JSON.stringify({ ledger, groups })}`)
+  // 主欄的寬度沒有轉場（不會邊換頁邊滑動）
+  const moving = await rp.evaluate(() => [document.getElementById("main"), document.querySelector("aside")].map((el) => getComputedStyle(el).transitionDuration))
+  if (moving.some((d) => d !== "0s")) throw new Error(`main/aside animate: ${moving.join(", ")}`)
+  // 在安靜的頁面打開：換到別的安靜頁面也開著；回帳本照帳本的狀態
+  await rp.getByRole("button", { name: "展開 AI 面板" }).click()
+  await rp.getByRole("complementary", { name: "問 AI", exact: true }).waitFor({ timeout: 8000 })
+  await rp.getByRole("link", { name: /家族投資/ }).first().click()
+  await rp.getByRole("heading", { level: 1, name: "家族投資" }).waitFor({ timeout: 8000 })
+  if (!(await rp.getByRole("complementary", { name: "問 AI", exact: true }).count())) throw new Error("panel collapsed again on the next quiet page")
+  await rp.getByRole("button", { name: "收合 AI 面板" }).click()
+  await rp.getByRole("button", { name: "展開 AI 面板" }).waitFor({ timeout: 8000 })
+  await rp.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "帳本" }).click()
+  await rp.getByRole("complementary", { name: "問 AI", exact: true }).waitFor({ timeout: 8000 })
+})
+await check("AI 面板：開著一段對話時換到安靜的頁面不收起來；紀錄頁的面板不重複列對話；設定頁的頭像有導覽的線", async () => {
+  await rp.goto(base + "/", { waitUntil: "networkidle" })
+  const panel = rp.getByRole("complementary", { name: "問 AI", exact: true })
+  await panel.getByRole("button", { name: "今天誰拖累了我的報酬？" }).click()
+  await panel.getByText(/今天拖累最多的是/).waitFor({ timeout: 8000 })
+  await rp.getByRole("button", { name: /帳號選單/ }).click()
+  await rp.getByRole("menuitem", { name: "設定", exact: true }).click()
+  await rp.getByRole("heading", { level: 1, name: "設定" }).waitFor({ timeout: 8000 })
+  if (!(await panel.count())) throw new Error("panel collapsed while a conversation is open")
+  await panel.getByText(/今天拖累最多的是/).waitFor()
+  // 設定頁沒有自己的導覽分頁：頭像下面是導覽的那條線（2px 墨色），「帳本／群組」都沒有標
+  const mark = await rp.getByRole("button", { name: /帳號選單/ }).evaluate((el) => ({ active: el.hasAttribute("data-active"), line: getComputedStyle(el).borderBottomWidth, color: getComputedStyle(el).borderBottomColor, ink: getComputedStyle(document.documentElement).getPropertyValue("--ink").trim() }))
+  if (!mark.active || mark.line !== "2px" || /rgba\(0, 0, 0, 0\)/.test(mark.color)) throw new Error(`avatar is not marked on /settings: ${JSON.stringify(mark)}`)
+  if (await rp.locator('header nav [aria-current="page"]').count()) throw new Error("a nav tab is marked on /settings")
+  await panel.getByRole("button", { name: "新對話" }).click()
+  // 紀錄頁（用 ⌘K 換頁，不重新載入）：面板開著，但不列「最近的對話」——頁面本身就是清單
+  await rp.keyboard.press("Control+k")
+  await rp.getByRole("option", { name: "紀錄" }).click()
+  await rp.getByRole("button", { name: "發起新對話" }).waitFor({ timeout: 8000 })
+  await rp.locator("main").getByRole("list", { name: "對話" }).waitFor({ timeout: 8000 })
+  if (!(await panel.count())) throw new Error("panel should still be open (opened on a quiet page)")
+  if (await panel.getByRole("list", { name: "最近的對話" }).count()) throw new Error("the panel repeats the conversations the history page lists")
+  if (await rp.getByRole("button", { name: /帳號選單/ }).evaluate((el) => el.hasAttribute("data-active"))) throw new Error("avatar marked on /history")
+  // 紀錄和設定、資料來源同一個欄寬（816px）
+  const measure = async (path, ready) => {
+    await rp.goto(base + path, { waitUntil: "networkidle" })
+    await rp.getByText(ready).first().waitFor({ timeout: 8000 })
+    return rp.evaluate(() => Math.round(document.querySelector("main [class*='max-w-[816px]']")?.getBoundingClientRect().width ?? 0))
+  }
+  const widths = [await measure("/history", "發起新對話"), await measure("/settings", "券商帳戶"), await measure("/data-sources", "授權條款")]
+  if (new Set(widths).size !== 1 || widths[0] !== 816) throw new Error(`content measures differ: ${widths.join(" / ")}`)
+})
+await check("楷體只有一種排法：群組週報、AI 公司簡介和對話裡的回答同一個字級與字距（漢字 −0.06em、數字不拆行）", async () => {
+  const voice = async (path, ready) => {
+    await rp.goto(base + path, { waitUntil: "networkidle" })
+    await rp.getByText(ready).first().waitFor({ timeout: 8000 })
+    await rp.waitForTimeout(300)
+    return rp.locator("main .ai-voice").first().evaluate((el) => {
+      const c = getComputedStyle(el)
+      const han = el.querySelector(".kai-han")
+      const num = el.querySelector(".kai-num")
+      return { family: c.fontFamily.split(",")[0].replace(/["']/g, "").trim(), size: c.fontSize, lh: (parseFloat(c.lineHeight) / parseFloat(c.fontSize)).toFixed(1), han: han ? (parseFloat(getComputedStyle(han).letterSpacing) / parseFloat(c.fontSize)).toFixed(2) : null, numWrap: num ? getComputedStyle(num).whiteSpace : null }
+    })
+  }
+  const digest = await voice("/groups/grp_family?tab=digests", "本週報酬")
+  const about = await voice("/stock/6488.TWO", "AI 依公開資料整理")
+  for (const [name, v] of [["digest", digest], ["about", about]]) {
+    if (v.family !== "TW-Kai" || v.size !== "17px" || v.lh !== "1.8" || v.han !== "-0.06") throw new Error(`${name} kai differs from answers: ${JSON.stringify(v)}`)
+  }
+  if (digest.numWrap !== "nowrap") throw new Error(`digest numbers can split from their unit: ${JSON.stringify(digest)}`)
+})
+await check("設定：列上的動作一套語法（文字動作＋一顆外框按鈕，沒有只有圖示的按鈕）；設定與資料來源的區塊標題 20px", async () => {
+  await rp.goto(base + "/settings", { waitUntil: "networkidle" })
+  const plans = rp.getByRole("region", { name: "定期定額" })
+  const remove = plans.getByRole("button", { name: "刪除「元大台灣50」定期定額" })
+  await remove.waitFor({ timeout: 8000 })
+  const look = await remove.evaluate((el) => ({ text: el.textContent.trim(), icon: !!el.querySelector("svg"), border: getComputedStyle(el).borderTopWidth }))
+  if (look.text !== "刪除" || look.icon || look.border !== "1px") throw new Error(`plan delete is not a labelled outline button: ${JSON.stringify(look)}`)
+  const iconOnly = await rp.locator("main").evaluate((el) => [...el.querySelectorAll("button")].filter((b) => b.querySelector("svg") && !b.textContent.trim() && b.getAttribute("role") !== "switch").map((b) => b.getAttribute("aria-label")))
+  if (iconOnly.length) throw new Error(`icon-only buttons on settings: ${iconOnly.join(", ")}`)
+  const view = await rp.getByRole("button", { name: "查看爸爸的資產" }).evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, border: getComputedStyle(el).borderTopWidth }))
+  if (view.bg !== "rgba(0, 0, 0, 0)" || view.border !== "1px") throw new Error(`查看 should be an outline button: ${JSON.stringify(view)}`)
+  const sizes = async () => rp.locator("main h2").evaluateAll((els) => els.filter((h) => h.getBoundingClientRect().width > 1).map((h) => `${h.textContent.trim().slice(0, 6)}:${getComputedStyle(h).fontSize}`))
+  const settings = await sizes()
+  await rp.goto(base + "/data-sources", { waitUntil: "networkidle" })
+  await rp.getByText("授權條款").first().waitFor({ timeout: 8000 })
+  const sources = await sizes()
+  const off = [...settings, ...sources].filter((s) => !s.endsWith(":20px"))
+  if (settings.length < 7 || sources.length < 4 || off.length) throw new Error(`section titles are not all 20px: ${off.join(", ") || `${settings.length}/${sources.length} titles`}`)
+})
+await check("估值河流圖（淺色）：5 階是等比的，最便宜的一階對紙、相鄰兩階都 ≥ 1.3:1", async () => {
+  await rp.goto(base + "/stock/2330.TW?tab=valuation", { waitUntil: "networkidle" })
+  await rp.evaluate(() => document.documentElement.classList.remove("dark"))
+  await rp.getByRole("region", { name: "本益比河流圖" }).waitFor({ timeout: 8000 })
+  const ramp = await rp.evaluate(() => {
+    const read = (name) => {
+      const d = document.createElement("div")
+      d.style.color = `var(${name})`
+      document.body.appendChild(d)
+      const c = getComputedStyle(d).color.match(/\d+/g).slice(0, 3).map(Number)
+      d.remove()
+      const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4 }
+      return 0.2126 * f(c[0]) + 0.7152 * f(c[1]) + 0.0722 * f(c[2])
+    }
+    const lum = ["--paper", "--band-1", "--band-2", "--band-3", "--band-4", "--band-5"].map(read)
+    return lum.slice(1).map((l, i) => +((lum[i] + 0.05) / (l + 0.05)).toFixed(2))
+  })
+  if (ramp.some((r) => r < 1.3)) throw new Error(`light river ramp steps: ${ramp.join(", ")}`)
+  if (Math.max(...ramp) - Math.min(...ramp) > 0.06) throw new Error(`light river ramp is uneven: ${ramp.join(", ")}`)
+})
+await check("美股總覽：沒有分頁列下面那條只有「近四季 EPS」的細帶，併進「關於」的鍵值格", async () => {
+  await rp.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
+  const about = rp.getByRole("region", { name: "關於「Apple」" })
+  await about.getByRole("term").getByText("近四季 EPS", { exact: true }).waitFor({ timeout: 8000 })
+  if (await rp.getByRole("region", { name: "關鍵數據" }).count()) throw new Error("the lone key strip is still there")
+  if ((await rp.locator("main").getByText("近四季 EPS").count()) !== 1) throw new Error("EPS should appear once")
+  const cells = await about.locator("dl > div").evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().width)))
+  if (cells.length !== 6 || new Set(cells).size !== 1) throw new Error(`About grid should be 6 even cells: ${cells.join(", ")}`)
+  // 事件是第一塊：緊接在分頁列下面
+  const gap = await rp.evaluate(() => document.getElementById("ov-events").getBoundingClientRect().top - document.getElementById("stock-tabpanel").getBoundingClientRect().top)
+  if (gap > 48) throw new Error(`events start ${gap}px below the tab bar`)
+})
+await check("資料來源：固定一段說明沒有盤中即時報價；資料集的連結文字是資料集名稱（沒有「資料集網址」）；全部展開後每一筆顯名聲明都在", async () => {
+  await rp.goto(base + "/data-sources", { waitUntil: "networkidle" })
+  const quotes = rp.getByRole("region", { name: "報價" })
+  await quotes.getByText(/Forliosa 沒有盤中即時報價。畫面上的股價都是收盤價/).waitFor({ timeout: 8000 })
+  await quotes.getByText(/通常在當天晚上到隔天清晨之間/).waitFor()
+  await quotes.getByText(/要合法取得盤中報價需要付費授權，目前沒有購買/).waitFor()
+  const mis = quotes.getByRole("link", { name: /基本市況報導/ })
+  if ((await mis.getAttribute("target")) !== "_blank" || !/noopener/.test((await mis.getAttribute("rel")) ?? "") || !/^https:\/\/mis\.twse\.com\.tw\//.test((await mis.getAttribute("href")) ?? "")) throw new Error("基本市況報導 link attributes")
+  if (await rp.getByText("資料集網址").count()) throw new Error("generic 資料集網址 links are back")
+  await rp.getByRole("button", { name: "全部展開" }).click()
+  await rp.getByRole("button", { name: "全部收合" }).waitFor()
+  const rows = await rp.locator('main section[aria-labelledby="ds-datasets"] ul:not([hidden]) > li').count()
+  const count = Number(((await rp.getByText(/個提供機關・\d+ 個資料集/).textContent()) ?? "").match(/・(\d+) 個資料集/)?.[1])
+  if (!count || rows !== count) throw new Error(`expanded rows ${rows} ≠ datasets ${count}`)
+  await rp.getByText("中央銀行〈銀行間新臺幣對美元收盤匯率〉（2026），依政府資料開放授權條款第 1 版").waitFor()
+  // 連結的文字是資料集的名稱：幾乎每一個都不一樣（同一個資料集用在兩處的只有一兩筆）
+  const links = await rp.locator('main section[aria-labelledby="ds-datasets"] ul:not([hidden]) > li p:first-child a').evaluateAll((els) => els.map((a) => a.textContent.trim()))
+  if (links.length < count || links.some((t) => !t)) throw new Error(`dataset links: ${links.length} for ${count} datasets`)
+  if (new Set(links).size < links.length - 3) throw new Error(`dataset links repeat one label: ${links.length - new Set(links).size} duplicates`)
+})
+await rctx.close()
+
+// 沒有盤中即時報價：價格標「收盤價・日期」，盤中、收盤後今天的還沒公布時多一行（mock 的 ?market= 旗標；另開一個分頁，不影響其他檢查）
+const kctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+const kp = await kctx.newPage()
+kp.on("pageerror", (e) => errors.push(`market pageerror ${e.message}`))
+kp.on("console", (m) => m.type() === "error" && errors.push(`${kp.url()} ${m.text()}`))
+await check("收盤價的標示（預設：最新的收盤價已經進來）：個股頁只標「收盤價・11/12（四）」沒有說明；帳本「11/12 收盤」「今日」", async () => {
+  await kp.goto(base + "/stock/2330.TW?market=closed", { waitUntil: "networkidle" })
+  const head = kp.locator("main header").first()
+  await head.getByText("收盤價", { exact: true }).waitFor({ timeout: 8000 })
+  if (!((await head.textContent()) ?? "").includes("收盤價・11/12（四）")) throw new Error(`price label: ${await head.textContent()}`)
+  if (await kp.getByText(/盤中不更新|還沒公布/).count()) throw new Error("note shown although the latest close is in")
+  if (await kp.getByRole("link", { name: /到證交所看即時報價/ }).count()) throw new Error("TWSE link shown although the latest close is in")
+  if (/延遲|盤中・/.test((await kp.locator("main").textContent()) ?? "")) throw new Error("the page suggests delayed or intraday quotes")
+  await kp.goto(base + "/", { waitUntil: "networkidle" })
+  await kp.getByText("11/12 收盤", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.locator("main dt").getByText("今日", { exact: true }).waitFor()
+  const table = kp.getByRole("table", { name: "持倉" })
+  await table.getByRole("columnheader", { name: "今日漲跌" }).waitFor({ timeout: 8000 })
+  await table.getByRole("columnheader", { name: "今日損益" }).waitFor()
+  await table.getByRole("columnheader", { name: "收盤價" }).waitFor()
+})
+await check("收盤價的標示（盤中）：個股頁一行「盤中不更新…」＋到證交所的連結（另開新視窗）；帳本「11/12 收盤・盤中不更新」，「今日」換成「11/12」", async () => {
+  await kp.goto(base + "/stock/2330.TW?market=open", { waitUntil: "networkidle" })
+  await kp.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+  const link = kp.getByRole("link", { name: /^到證交所看即時報價/ })
+  const attrs = { href: await link.getAttribute("href"), target: await link.getAttribute("target"), rel: await link.getAttribute("rel") }
+  if (attrs.href !== "https://mis.twse.com.tw/stock/fibest.jsp?stock=2330" || attrs.target !== "_blank" || attrs.rel !== "noopener noreferrer") throw new Error(`TWSE link: ${JSON.stringify(attrs)}`)
+  if (!(await link.locator("svg").count())) throw new Error("external link without ↗")
+  if (!((await kp.locator("main header").first().textContent()) ?? "").includes("收盤價・11/12（四）")) throw new Error("price label missing")
+  // 這一行只在價格旁出現一次，其他地方不重複
+  if ((await kp.getByText(/盤中不更新/).count()) !== 1) throw new Error("the note is repeated")
+  // 上櫃 ETF、上櫃股票也一樣；美股維持「沒有報價」
+  await kp.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
+  await kp.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
+  await kp.getByText("沒有報價", { exact: true }).waitFor({ timeout: 8000 })
+  if (await kp.getByText(/盤中不更新/).count()) throw new Error("US stock shows the Taiwan market note")
+  await kp.goto(base + "/", { waitUntil: "networkidle" })
+  await kp.getByText("11/12 收盤・盤中不更新", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.locator("main dt").getByText("11/12", { exact: true }).waitFor()
+  if (await kp.locator("main dt").getByText("今日", { exact: true }).count()) throw new Error("hero still says 今日 for yesterday's close")
+  const table = kp.getByRole("table", { name: "持倉" })
+  await table.getByRole("columnheader", { name: "11/12 漲跌" }).waitFor({ timeout: 8000 })
+  await table.getByRole("columnheader", { name: "11/12 損益" }).waitFor()
+  if (await table.getByRole("columnheader", { name: /今日/ }).count()) throw new Error("holdings header still says 今日")
+})
+await check("收盤價的標示（收盤後、今天的還沒公布）：一行說明、沒有連結；帳本「11/12 收盤・今天的還沒公布」；切回預設後說明消失", async () => {
+  await kp.goto(base + "/stock/2330.TW?market=pending", { waitUntil: "networkidle" })
+  await kp.getByText("今天的收盤價還沒公布，這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+  if (await kp.getByRole("link", { name: /到證交所看即時報價/ }).count()) throw new Error("TWSE link shown after the close")
+  await kp.goto(base + "/", { waitUntil: "networkidle" })
+  await kp.getByText("11/12 收盤・今天的還沒公布", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.getByRole("table", { name: "持倉" }).getByRole("columnheader", { name: "11/12 漲跌" }).waitFor({ timeout: 8000 })
+  await kp.goto(base + "/stock/2330.TW?market=closed", { waitUntil: "networkidle" })
+  await kp.getByText("參考價").first().waitFor({ timeout: 8000 })
+  await kp.waitForTimeout(400)
+  if (await kp.getByText(/盤中不更新|還沒公布/).count()) throw new Error("note still shown after switching back")
+})
+await kctx.close()
 
 // 邀請（還沒登入）：預覽 → 登入（回到邀請）→ 選分享 → 加入
 const ictx = await browser.newContext({ viewport: { width: 1280, height: 900 }, locale: "zh-TW", timezoneId: "Asia/Taipei" })
@@ -1074,6 +1314,259 @@ await check("手機：問 AI 頂端的三個圖示鈕（新對話・紀錄・關
 await check("手機：底部分頁到紀錄", async () => {
   await m.getByRole("link", { name: "紀錄" }).click()
   await m.getByText("發起新對話").waitFor()
+})
+
+// ── 第三輪設計修飾：手機 ───────────────────────────────────────
+/** 觸控目標普查：每個看得到、按得到的控制項，實際可按的範圍（用 elementFromPoint 量）寬和高都要 ≥ 44px */
+const smallTargets = (p) =>
+  p.evaluate(() => {
+    const sel = 'a[href], button, [role=button], [role=tab], [role=switch], [role=radio], input:not([type=hidden]), select, textarea, summary'
+    const out = []
+    for (const el of document.querySelectorAll(sel)) {
+      const r0 = el.getBoundingClientRect()
+      if (r0.width < 2 || r0.height < 2) continue
+      const cs = getComputedStyle(el)
+      if (cs.visibility === "hidden" || cs.pointerEvents === "none" || el.disabled) continue
+      el.scrollIntoView({ block: "center", inline: "nearest" })
+      const r = el.getBoundingClientRect()
+      const cx = Math.min(Math.max(r.left + r.width / 2, 1), innerWidth - 2)
+      const cy = r.top + r.height / 2
+      const hit = (x, y) => {
+        const e = document.elementFromPoint(x, y)
+        if (!e) return false
+        if (e === el || el.contains(e)) return true
+        const l = e.closest("label")
+        return !!(l && (l.control === el || l.contains(el)))
+      }
+      // 換行成兩行的連結：外框的中心點不在連結上，量不出來（每一行各自夠高），略過
+      if (!hit(cx, cy)) continue
+      let up = 0, down = 0, left = 0, right = 0
+      while (up < 60 && hit(cx, cy - up - 1)) up++
+      while (down < 60 && hit(cx, cy + down + 1)) down++
+      while (left < 60 && hit(cx - left - 1, cy)) left++
+      while (right < 60 && hit(cx + right + 1, cy)) right++
+      const w = left + right + 1, h = up + down + 1
+      if (w < 44 || h < 44) out.push(`${(el.getAttribute("aria-label") || el.textContent || "").replace(/\s+/g, " ").trim().slice(0, 16)} ${w}×${h}`)
+    }
+    window.scrollTo(0, 0)
+    return out
+  })
+await check("手機：標題列的放大鏡（44px）打開滿版的搜尋——輸入框在最上面、結果是格線列；搜尋「台積」進入個股頁", async () => {
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  const open = m.getByRole("button", { name: "搜尋股票", exact: true })
+  const size = await open.boundingBox()
+  if (size.width < 44 || size.height < 44) throw new Error(`search button ${size.width}×${size.height}`)
+  await open.click()
+  const dialog = m.getByRole("dialog", { name: "搜尋股票與功能" })
+  await dialog.waitFor({ timeout: 8000 })
+  const sheet = await dialog.evaluate((el) => {
+    const r = el.getBoundingClientRect()
+    const input = el.querySelector("input").getBoundingClientRect()
+    const c = getComputedStyle(el)
+    return { top: r.top, left: r.left, w: r.width, h: r.height, vw: innerWidth, vh: window.visualViewport?.height ?? innerHeight, radius: c.borderRadius, inputTop: input.top, inputH: input.height, focused: document.activeElement === el.querySelector("input"), fontSize: parseFloat(getComputedStyle(el.querySelector("input")).fontSize) }
+  })
+  if (sheet.top !== 0 || sheet.left !== 0 || sheet.w !== sheet.vw || Math.abs(sheet.h - sheet.vh) > 1 || sheet.radius !== "0px") throw new Error(`search is not a full-height sheet: ${JSON.stringify(sheet)}`)
+  // 輸入框在最上面（螢幕鍵盤蓋住的是下半部）、已經有焦點、16px 以上（iOS 不放大頁面）
+  if (sheet.inputTop > 20 || sheet.inputH < 44 || !sheet.focused || sheet.fontSize < 16) throw new Error(`search input: ${JSON.stringify(sheet)}`)
+  await dialog.getByRole("combobox").fill("台積")
+  const hit = dialog.getByRole("option", { name: /2330/ })
+  await hit.waitFor({ timeout: 8000 })
+  const row = await hit.evaluate((el) => ({ h: el.getBoundingClientRect().height, w: el.getBoundingClientRect().width, radius: getComputedStyle(el).borderRadius, rule: getComputedStyle(el).borderBottomWidth }))
+  if (row.h < 44 || row.w !== sheet.vw || row.radius !== "0px" || row.rule !== "1px") throw new Error(`search result is not a full-bleed ruled row: ${JSON.stringify(row)}`)
+  await hit.click()
+  await m.waitForURL(/\/stock\/2330\.TW/)
+  if (await m.getByRole("dialog", { name: "搜尋股票與功能" }).count()) throw new Error("search sheet still open after picking a result")
+  // 關閉鈕
+  await m.getByRole("button", { name: "搜尋股票", exact: true }).click()
+  await m.getByRole("dialog", { name: "搜尋股票與功能" }).getByRole("button", { name: "關閉搜尋" }).click()
+  await m.getByRole("dialog", { name: "搜尋股票與功能" }).waitFor({ state: "detached", timeout: 5000 })
+})
+await check("手機：底部列的分頁從內容的左緣開始（第一個字和它上面的線都在 20px），每個分頁的可按範圍 ≥ 44×44", async () => {
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  await m.getByText("總資產").first().waitFor({ timeout: 8000 })
+  const bar = await m.evaluate(() => {
+    const nav = document.querySelector('.dock nav[aria-label="主要"]')
+    const gutter = document.querySelector("#main p, #main h1:not(.sr-only)").getBoundingClientRect().left
+    const tabs = [...nav.querySelectorAll("a")].map((a) => {
+      const label = a.querySelector("span")
+      const l = label.getBoundingClientRect()
+      const r = a.getBoundingClientRect()
+      const range = document.createRange()
+      range.selectNodeContents(label)
+      const text = range.getBoundingClientRect()
+      return { text: a.textContent, hitW: r.width, hitH: r.height, labelLeft: text.left, lineLeft: l.left, lineW: l.width, textW: text.width, line: getComputedStyle(label).borderTopWidth, lineColor: getComputedStyle(label).borderTopColor, current: a.getAttribute("aria-current") }
+    })
+    const ask = document.querySelector(".dock .ask-box").getBoundingClientRect()
+    return { gutter, tabs, askRight: ask.right, vw: innerWidth }
+  })
+  const first = bar.tabs[0]
+  if (Math.abs(first.labelLeft - bar.gutter) > 0.5 || Math.abs(first.lineLeft - bar.gutter) > 0.5) throw new Error(`first tab is not on the content gutter: ${JSON.stringify(bar)}`)
+  if (Math.abs(first.lineW - first.textW) > 1 || first.line !== "2px" || /rgba\(0, 0, 0, 0\)/.test(first.lineColor)) throw new Error(`the indicator is not a 2px line as wide as the label: ${JSON.stringify(first)}`)
+  if (bar.tabs.some((t) => t.hitW < 44 || t.hitH < 44)) throw new Error(`tab targets: ${JSON.stringify(bar.tabs)}`)
+  if (Math.abs(bar.vw - bar.askRight - bar.gutter) > 0.5) throw new Error(`問 AI is not on the right gutter: ${JSON.stringify(bar)}`)
+})
+await check("手機：動態、成員、設定、紀錄、帳本的控制項可按範圍都 ≥ 44×44；表情是 4px 方肩的小格、留言框沒有拖曳把手", async () => {
+  for (const [path, ready] of [
+    ["/groups/grp_family?tab=feed", "加入了群組"],
+    ["/groups/grp_family?tab=digests", "本週報酬"],
+    ["/groups/grp_family/members/usr_dad", "總損益"],
+    ["/settings", "授權給你的人"],
+    ["/history", "發起新對話"],
+    ["/", "總資產"],
+    ["/?view=dividends", "已入帳"],
+    ["/stock/2330.TW", "參考價"],
+  ]) {
+    await m.goto(base + path, { waitUntil: "networkidle" })
+    await m.getByText(ready).first().waitFor({ timeout: 8000 })
+    await m.waitForTimeout(500)
+    const small = await smallTargets(m)
+    if (small.length) throw new Error(`${path}: ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
+  }
+  await m.goto(base + "/groups/grp_family?tab=feed", { waitUntil: "networkidle" })
+  const dad = m.getByRole("listitem").filter({ hasText: /爸爸\s*買進\s*台積電/ }).first()
+  const chip = await dad.getByRole("button", { name: /^讚 \d/ }).evaluate((el) => {
+    const box = el.querySelector("span")
+    const c = getComputedStyle(box)
+    return { radius: c.borderTopLeftRadius, border: c.borderTopWidth, h: box.getBoundingClientRect().height }
+  })
+  if (chip.radius !== "4px" || chip.border !== "1px") throw new Error(`reaction chip is not a square 4px chip: ${JSON.stringify(chip)}`)
+  const pills = await m.locator("main").evaluate((el) => [...el.querySelectorAll("button, button *")].filter((n) => parseFloat(getComputedStyle(n).borderTopLeftRadius) > 8 && n.getBoundingClientRect().width > 0).length)
+  if (pills) throw new Error(`${pills} pill-shaped controls in the feed`)
+  await dad.getByRole("button", { name: /^留言/ }).click()
+  const grip = await dad.getByRole("textbox", { name: "留言", exact: true }).evaluate((el) => getComputedStyle(el).resize)
+  if (grip !== "none") throw new Error(`comment box resize: ${grip}`)
+})
+await check("手機：股利列的每股金額都看得到（不被截斷成「每股 …」）；長名稱時金額換到下一行", async () => {
+  await m.goto(base + "/?view=dividends", { waitUntil: "networkidle" })
+  const received = m.locator("section", { has: m.locator("#div-received") })
+  await received.getByText(/^每股 /).first().waitFor({ timeout: 8000 })
+  const amounts = await received.getByText(/^每股 /).evaluateAll((els) =>
+    els.map((el) => {
+      const r = el.getBoundingClientRect()
+      const row = el.closest("li").getBoundingClientRect()
+      const clipper = el.closest(".truncate")
+      return { text: el.textContent, clipped: !!clipper || el.scrollWidth > el.clientWidth + 1, inside: r.left >= row.left - 0.5 && r.right <= row.right + 0.5, lines: Math.round(r.height / parseFloat(getComputedStyle(el).lineHeight)) }
+    }),
+  )
+  if (amounts.length < 8) throw new Error(`expected the received rows, got ${amounts.length}`)
+  const bad = amounts.filter((a) => a.clipped || !a.inside || a.lines !== 1)
+  if (bad.length) throw new Error(`per-share amounts clipped: ${JSON.stringify(bad.slice(0, 3))}`)
+  if (await m.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) throw new Error("dividends page scrolls sideways")
+})
+await check("手機：鍵值格每一列都排滿（沒有落單的半列）；資料來源頁收合後不到原本的一半長、長網址不撐寬頁面", async () => {
+  for (const sym of ["2330.TW", "0050.TW", "6488.TWO", "2317.TW", "AAPL"]) {
+    await m.goto(base + `/stock/${sym}`, { waitUntil: "networkidle" })
+    await m.getByRole("region", { name: /^關於/ }).waitFor({ timeout: 8000 })
+    await m.waitForTimeout(400)
+    const half = await m.evaluate(() =>
+      [...document.querySelectorAll("main dl")].filter((el) => getComputedStyle(el).display === "grid" && el.children.length >= 2).flatMap((el) => {
+        const W = el.getBoundingClientRect().width
+        const rows = new Map()
+        for (const c of el.children) {
+          const r = c.getBoundingClientRect()
+          if (!r.width) continue
+          const k = Math.round(r.top)
+          rows.set(k, (rows.get(k) ?? 0) + r.width)
+        }
+        return [...rows.values()].filter((w) => w < W * 0.8).map((w) => `${Math.round(w)}/${Math.round(W)}`)
+      }),
+    )
+    if (half.length) throw new Error(`${sym}: half rows in a key grid: ${half.join(", ")}`)
+  }
+  await m.goto(base + "/data-sources", { waitUntil: "networkidle" })
+  await m.getByText("授權條款").first().waitFor({ timeout: 8000 })
+  const page1 = await m.evaluate(() => ({ h: document.documentElement.scrollHeight, overflow: document.documentElement.scrollWidth - document.documentElement.clientWidth, generic: document.body.textContent.includes("資料集網址") }))
+  if (page1.h > 5200 || page1.overflow > 0 || page1.generic) throw new Error(`data-sources on a phone: ${JSON.stringify(page1)}`)
+  // 網址只在分隔符號後面斷行：每一行都以 / . - ? & = # _ 結尾（最後一行除外）
+  const breaks = await m.locator('main section[aria-labelledby="ds-license"] a').evaluateAll((links) =>
+    links.flatMap((a) => {
+      const range = document.createRange()
+      const lines = []
+      const walker = document.createTreeWalker(a, NodeFilter.SHOW_TEXT)
+      let node, lastTop = null, cur = ""
+      while ((node = walker.nextNode())) {
+        if (node.parentElement.classList.contains("sr-only")) continue
+        for (let i = 0; i < node.length; i++) {
+          range.setStart(node, i)
+          range.setEnd(node, i + 1)
+          const top = Math.round(range.getBoundingClientRect().top)
+          if (lastTop !== null && top > lastTop + 4) { lines.push(cur); cur = "" }
+          cur += node.data[i]
+          lastTop = top
+        }
+      }
+      return lines
+    }),
+  )
+  const midWord = breaks.filter((line) => !/[/.\-?&=#_]$/.test(line))
+  if (midWord.length) throw new Error(`URLs break mid-word: ${midWord.join(" | ")}`)
+})
+await check("手機：帳本主數字旁的時間一行放得下（盤中的寫法最長）；「今日」換成日期後表頭也是一行", async () => {
+  const mk = await browser.newContext({ ...pw.devices["iPhone 15"], locale: "zh-TW", timezoneId: "Asia/Taipei" })
+  try {
+    const p = await mk.newPage()
+    await p.goto(base + "/?market=pending", { waitUntil: "networkidle" })
+    const asOf = p.getByText("11/12 收盤・今天的還沒公布", { exact: true })
+    await asOf.waitFor({ timeout: 8000 })
+    const line = await asOf.evaluate((el) => {
+      const label = el.parentElement
+      const r = el.getBoundingClientRect()
+      const first = label.firstElementChild.getBoundingClientRect()
+      return { sameLine: Math.abs((r.top + r.bottom) / 2 - (first.top + first.bottom) / 2) < 6, right: r.right, vw: innerWidth }
+    })
+    if (!line.sameLine || line.right > line.vw - 19) throw new Error(`hero as-of wraps or overflows on a phone: ${JSON.stringify(line)}`)
+    const head = p.getByText("收盤價・11/12 漲跌", { exact: true })
+    await head.waitFor({ timeout: 8000 })
+    if ((await head.evaluate((el) => el.getBoundingClientRect().height)) > 24) throw new Error("holdings header wraps")
+    await p.goto(base + "/stock/2330.TW?market=open", { waitUntil: "networkidle" })
+    await p.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+    const link = p.getByRole("link", { name: /^到證交所看即時報價/ })
+    if ((await link.boundingBox()).height < 44) throw new Error("TWSE link under 44px on touch")
+    if (await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) throw new Error("stock page scrolls sideways with the market note")
+  } finally {
+    await mk.close()
+  }
+})
+await check("手機（深色）：「問 AI」平常是紫色淡底＋框線＋紫色字，有草稿等簽名才是實心；帳本頁的筆數只寫一次", async () => {
+  const dk = await browser.newContext({ ...pw.devices["iPhone 15"], colorScheme: "dark", locale: "zh-TW", timezoneId: "Asia/Taipei" })
+  try {
+    const p = await dk.newPage()
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    await p.getByText("總資產").first().waitFor({ timeout: 8000 })
+    const look = (name) =>
+      p.getByRole("button", { name }).evaluate((el) => {
+        const c = getComputedStyle(el)
+        const v = (n) => { const d = document.createElement("div"); d.style.color = `var(${n})`; document.body.appendChild(d); const out = getComputedStyle(d).color; d.remove(); return out }
+        return { bg: c.backgroundColor, color: c.color, frame: c.boxShadow, inner: getComputedStyle(el, "::after").borderTopWidth, text: el.textContent.trim(), ai: v("--ai"), wash: v("--ai-wash"), rule: v("--ai-rule"), paper: v("--paper"), dark: document.documentElement.classList.contains("dark") }
+      })
+    const rest = await look("問 AI")
+    if (!rest.dark) throw new Error("not in dark mode")
+    if (rest.bg !== rest.wash || rest.color !== rest.ai || !rest.frame.includes(rest.rule) || rest.inner !== "1px") throw new Error(`dark resting 問 AI is not the outlined box: ${JSON.stringify(rest)}`)
+    // 寫一份草稿（不簽名），關掉問 AI
+    await p.getByRole("button", { name: "問 AI", exact: true }).click()
+    const box = p.getByLabel(/搜尋股票、提問/)
+    await box.fill("買 0050 2 張 52.4")
+    await box.press("Enter")
+    await p.getByText(/NT\$104,841/).first().waitFor({ timeout: 8000 })
+    await p.getByRole("dialog").getByRole("button", { name: "關閉" }).click()
+    const pending = await look("問 AI（待簽名 1 筆）")
+    if (pending.bg !== pending.ai || pending.color !== pending.paper) throw new Error(`pending 問 AI is not the solid block: ${JSON.stringify(pending)}`)
+    // 帳本頁：筆數寫在分段下面那一條，格子裡只有「問 AI」
+    if (pending.text !== "問 AI") throw new Error(`the box repeats the count on the ledger: ${pending.text}`)
+    const strips = await p.locator("main").getByText(/待簽名 1 筆/).evaluateAll((els) => els.filter((el) => el.getBoundingClientRect().width > 0).length)
+    if (strips !== 1) throw new Error(`expected one visible 待簽名 on the ledger, got ${strips}`)
+    // 其他頁面沒有那一條：格子裡寫筆數
+    await p.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "群組" }).click()
+    await p.getByRole("heading", { level: 1, name: "群組" }).waitFor({ timeout: 8000 })
+    const elsewhere = await look("問 AI（待簽名 1 筆）")
+    if (!/待簽名 1 筆/.test(elsewhere.text) || elsewhere.bg !== elsewhere.ai) throw new Error(`the box should carry the count off the ledger: ${JSON.stringify(elsewhere)}`)
+  } finally {
+    await dk.close()
+  }
+  // 淺色：一直是實心的紫色格
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  const light = await m.getByRole("button", { name: /^問 AI/ }).evaluate((el) => ({ bg: getComputedStyle(el).backgroundColor, dark: document.documentElement.classList.contains("dark") }))
+  if (light.dark || /rgba\(0, 0, 0, 0\)/.test(light.bg) || light.bg === "rgb(245, 242, 251)") throw new Error(`light 問 AI should stay solid: ${JSON.stringify(light)}`)
 })
 
 await browser.close()

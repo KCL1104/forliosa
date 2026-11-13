@@ -3,7 +3,7 @@ import { kaiRuns } from "./answer-text"
 
 /**
  * 模型寫的字（放在 `.ai-voice` 裡）：漢字的片段收字距（`.kai-han`），數字和單位連成一段、不在行尾拆開（`.kai-num`）。
- * 其他頁面的模型文字（個股的「為什麼」、公司簡介、群組週報）也可以用它。
+ * 對話裡的回答、個股的「為什麼」、公司簡介、群組週報都用它——楷體全站只有這一種排法。
  */
 export function KaiText({ text }: { text: string }) {
   return (

@@ -1,5 +1,6 @@
 import { toast } from "sonner"
 import { viewAsId } from "@/api/view-as"
+import { useQuietRoute } from "@/app/nav"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { useAiContext } from "./context"
 import { useAiRunner, type AiAction } from "./runner"
@@ -22,9 +23,11 @@ export function useAskAi() {
   const ctx = useAiContext()
   const runner = useAiRunner(ctx)
   const isDesktop = useIsDesktop()
+  // 面板的開合在安靜的頁面（群組、設定、紀錄…）另外記：從這些頁面交給 AI 時，打開的是那一邊
+  const quiet = useQuietRoute()
   const reveal = () => {
     const s = useAi.getState()
-    if (isDesktop) s.setPanelOpen(true)
+    if (isDesktop) s.setPanelOpen(true, quiet)
     else s.setMobileOpen(true)
   }
   return {
