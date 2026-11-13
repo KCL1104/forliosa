@@ -16,6 +16,41 @@ Forliosa 由兩部分組成：
 > 正式登入用 **Discord**（M5）：要先在 Discord Developer Portal 建立應用程式（第 2.4 節），把三個 `DISCORD_*` 變數與 `FRONTEND_URL`
 > 設到 api 服務上。沒設 Discord 時 API 仍可啟動，但沒有人能登入（`FORLIOSA_ENV=prod` 時開發登入是關閉的）；`FRONTEND_URL` 則是必填。
 
+## 0. 目前的正式環境（2026-11-13 建立，尚未對外公開）
+
+| 部分 | 實際狀態 |
+|---|---|
+| 前端 | Cloudflare Pages 專案 `forliosa`（直接上傳型），自訂網域 **`https://forliosa.trade`**（不是 `app.` 子網域）。由 GitHub Actions 部署：`.github/workflows/deploy-web.yml`，`main` 有前端變更時建置並上傳 |
+| API | Railway 專案 `forliosa`、環境 `production`、服務 `api`，**`https://api.forliosa.trade`**，新加坡（`asia-southeast1-eqsg3a`） |
+| worker | 服務 `worker`，新加坡，一個副本，沒有網域 |
+| 新聞元搜尋 | 服務 **`searxng-news`**（不是 `searxng`），新加坡，沒有公開網域；api 與 worker 的 `NEWS_SEARXNG_URL=http://searxng-news.railway.internal:8080` |
+| 資料庫 | 服務 `Postgres`（官方 image＋volume），新加坡。**沒有備份**：Railway 的備份與排程只給 Pro 方案（2026-11-13 API 回覆），見第 6 節 |
+| DNS（Cloudflare） | 根網域 CNAME → `forliosa.pages.dev`（Proxied）；`api` CNAME → Railway 給的目標（DNS only）；`_railway-verify.api` TXT |
+| 信箱 | Cloudflare Email Routing：`support@forliosa.trade` 轉寄到產品負責人的信箱 |
+
+和下面各節寫法不同的地方（下面是通用步驟，這裡是實際做法）：
+
+- **設定直接寫在服務上，不用設定檔**。Railway 的 API 現在拒絕指定 `railway.toml`（回覆「Config as Code is deprecated」），
+  所以 api 與 worker 的 Root Directory（`apps/api`）、Dockerfile 路徑、健康檢查（`/api/v1/health`，120 秒）、重啟策略、
+  worker 的啟動指令（`python -m forliosa.worker`）、Watch Paths（`apps/api/**`）都是直接設在服務上。
+  repo 裡的 `apps/api/railway.toml`、`railway.worker.toml` 留作對照，改它們**不會**改到線上設定。
+- **區域要用環境修補設定**。用 API 建服務時指定的區域會被忽略（會落在美西）；要用 `environmentPatchCommit` 把
+  `services.<id>.deploy.multiRegionConfig` 設成 `{"us-west2": null, "asia-southeast1-eqsg3a": {"numReplicas": 1}}`。
+  資料庫要照這個順序建：先設區域 → 建 volume → 設變數 → 指定 image → 部署；順序錯了 volume 會建在美西。
+- **引用其他服務的變數會記住服務本身**。`${{Postgres.DATABASE_URL}}` 設好之後如果把 `Postgres` 服務刪掉重建，
+  引用會變成空字串（Alembic 報 `Could not parse SQLAlchemy URL`）；要重新設一次。
+- **前端不能從開發沙盒直接上傳**。wrangler 上傳檔案那一步用的是另一個短期憑證，沙盒的代理會把它換掉；所以只走 GitHub Actions
+  （repo secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`）。
+- api 的三個 `DISCORD_*` 要在 Railway 的 Raw Editor **一次貼上**再部署；只設一部分 API 會拒絕啟動（舊的部署會繼續服務，但新版本上不去）。
+- 專案裡還有產品負責人先前建立的 `SearXNG`（第三方範本，有公開網址，美西）與 `Redis`（美西），程式都沒有使用；
+  另有兩個重建資料庫時留下、沒有掛載的 volume。等產品負責人確認後刪除。
+
+2026-11-13 的驗證結果：api 部署記錄有 `Context impl PostgresqlImpl` 與 0001→0013 全部遷移；
+`GET /api/v1/health` 200（`env: prod`、`data_policy: commercial`）；`https://forliosa.trade` 來源的 CORS 預檢通過；
+未登入時 `/me` 401、公開討論清單 200；`/auth/providers` 回 `{"discord": false, "dev_login": false}`（Discord 變數還沒設）；
+worker 記錄有 `worker started: …` 與 `close watch: TPEX has published the closes of 2026-11-13`。
+第 5 節清單裡還沒做的：7、8 的前端第一次部署（等 repo secrets）、10、11、13（等 Discord 變數）、14、15 的 `searxng-check`。
+
 ## 1. 網域與 cookie：一定要在同一個網站底下
 
 登入狀態是 API 設定的 httpOnly cookie（`forliosa_session`，`SameSite=Lax`）。瀏覽器只會在**同一個網站**
@@ -50,7 +85,7 @@ Forliosa 由兩部分組成：
 |---|---|
 | Source | 這個 repo，分支 `main` |
 | Root Directory | `apps/api` |
-| Config File Path（Config-as-code） | `/apps/api/railway.toml` |
+| Config File Path（Config-as-code） | `/apps/api/railway.toml`（2026-11 起 Railway 的 API 不再接受設定檔，改成把下面幾項直接設在服務上，見第 0 節） |
 | Builder | Dockerfile（`railway.toml` 已指定 `apps/api/Dockerfile`） |
 | Healthcheck Path | `/api/v1/health`（`railway.toml` 已設定，逾時 120 秒） |
 | Networking | Generate Domain（先測試用），再加 Custom Domain `api.example.com` |
@@ -218,6 +253,8 @@ compose 把 repo 裡的 `deploy/searxng/settings.yml` 唯讀掛進容器：官�
 
 ## 3. Cloudflare Pages：前端
 
+> 實際環境用的是 GitHub Actions 上傳（`.github/workflows/deploy-web.yml`，見第 0 節），不是下面的 Git 整合；兩種做法擇一即可。
+
 **Workers & Pages → Create → Pages → Connect to Git**，選這個 repo。這是 pnpm workspace（lockfile 在 repo 根目錄），
 所以 Root directory 用 repo 根目錄，Pages 才會偵測到 `pnpm-lock.yaml` 並用 pnpm 安裝相依套件。
 
@@ -299,5 +336,5 @@ compose 把 repo 裡的 `deploy/searxng/settings.yml` 唯讀掛進容器：官�
 | **群組週報與頻道推播** | 後端完成（M5 第二批）：worker 每分鐘推播、每週六 20:00 產生週報；前端的週報與頻道設定畫面還沒接 | 部署 worker（`SESSION_SECRET` 與 api 相同、單一副本、Claude 金鑰）；要用 Telegram 時建立 bot（2.5 節） |
 | **帳戶刪除 UI、只記持股快照輸入畫面** | API 已有，前端還沒有畫面 | 見 `apps/web/OPEN_QUESTIONS.md` |
 | **SearXNG 新聞元搜尋** | 預設開啟（2.6 節）；只用合成回應測過，沒有實際建置或查詢過 | 第一次部署後跑 `searxng-check`；SearXNG 送給上游搜尋引擎的是瀏覽器樣式的請求（SearXNG 本身的做法），要產品負責人確認可以接受（見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」待確認） |
-| **資料備份、監控** | 未設定 | Railway Postgres 備份、錯誤追蹤（例如 Sentry）、uptime 監控 |
+| **資料備份、監控** | 未設定。Railway 的 volume 備份只給 Pro 方案（目前的方案不能開） | 正式開放前擇一：升級 Railway Pro 用內建備份，或加一個每天 `pg_dump` 到 Cloudflare R2 的工作；錯誤追蹤（例如 Sentry）、uptime 監控 |
 | **個資法** | 資料匯出／刪除帳號（M5） | 上線前的隱私權政策與服務條款 |
