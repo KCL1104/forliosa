@@ -20,16 +20,14 @@ const stock = (p: Partial<StockData>): AiContext => ({
 })
 
 describe("面板的常用動作：一行文字連結，只放這一頁真的能做的事", () => {
-  it("帳本：記一筆交易・股利入帳（匯入對帳單還沒有，不放入口）", () => {
-    expect(quickActions({ route: "ledger", ledger: { holdings: [] } }).map((a) => a.label)).toEqual(["記一筆交易", "股利入帳"])
+  it("帳本：沒有常用動作（「記一筆」在工具列，台股股利自動入帳）", () => {
+    expect(quickActions({ route: "ledger", ledger: { holdings: [] } })).toEqual([])
   })
-  it("個股頁：記一筆這一檔（台股用名稱、美股用代號），有持股才有股利入帳；不放還沒開放的到價提醒", () => {
-    const held = quickActions(stock({ position: { quantity: 1500 } as StockData["position"] }))
-    expect(held.map((a) => [a.label, a.run, a.code])).toEqual([
-      ["記一筆台積電", "trade", "2330"],
-      ["股利入帳", "dividend", "2330"],
-    ])
-    expect(quickActions(stock({ symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", position: null })).map((a) => a.label)).toEqual(["記一筆 AAPL"])
+  it("個股頁：只有持有美股時有「股利入帳」（美股股利沒有來源）；「記一筆」在標題列，不放第二條", () => {
+    expect(quickActions(stock({ position: { quantity: 1500 } as StockData["position"] }))).toEqual([])
+    expect(quickActions(stock({ symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", position: null }))).toEqual([])
+    const us = quickActions(stock({ symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", position: { quantity: 40 } as StockData["position"] }))
+    expect(us.map((a) => [a.label, a.run, a.code])).toEqual([["股利入帳", "dividend", "AAPL"]])
   })
   it("群組與其他頁（設定、資料來源、紀錄）：沒有常用動作", () => {
     expect(quickActions({ route: "groups" })).toEqual([])
@@ -252,7 +250,7 @@ describe("沒有建議的頁面（設定、資料來源、紀錄）：輸入框�
     act(() => useAi.setState({ threads: [], drafts: {}, threadId: null, hiddenThreadIds: [] }))
   })
 
-  it("依更新時間列出最近 3 段（含 mock 的示範紀錄），有「全部紀錄」；按下打開那段對話", () => {
+  it("依更新時間列出最近 3 段（含 mock 的示範紀錄），有「全部對話」；按下打開那段對話", () => {
     act(() => useAi.setState({ threads: [t("thr_a", "我自己問過的問題", new Date().toISOString())], threadId: null }))
     const showHistory = vi.fn()
     withQuery(<PanelHome ctx={{ route: "other" }} runner={runner} suggestions={[]} size="panel" onShowHistory={showHistory} />)
@@ -262,7 +260,7 @@ describe("沒有建議的頁面（設定、資料來源、紀錄）：輸入框�
     expect(rows[0]!.textContent).toMatch(/^我自己問過的問題剛剛$/)
     fireEvent.click(within(rows[0]!).getByRole("button", { name: "我自己問過的問題" }))
     expect(useAi.getState().threadId).toBe("thr_a")
-    fireEvent.click(screen.getByRole("button", { name: "全部紀錄" }))
+    fireEvent.click(screen.getByRole("button", { name: "全部對話" }))
     expect(showHistory).toHaveBeenCalled()
   })
 

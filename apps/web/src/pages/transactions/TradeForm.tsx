@@ -51,7 +51,7 @@ export function TradeFormHost() {
   const formKey = edit?.id ?? (quick ? "quick" : sell ? "sell" : "new")
   const body = (layout: "split" | "stack") =>
     quick ? (
-      <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code) => openTradeForm({ symbol: code ?? symbol, full: true })} />
+      <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code) => openTradeForm({ symbol: code ?? symbol, full: true })} sheet={layout === "stack"} />
     ) : (
       <TradeForm key={formKey} initialSymbol={symbol} edit={edit} sell={sell} onDone={close} layout={layout} />
     )
@@ -72,7 +72,7 @@ export function TradeFormHost() {
   }
   return (
     <Drawer open={open} onOpenChange={(o) => !o && close()} repositionInputs={false}>
-      <DrawerContent className="max-h-[92dvh]">
+      <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[92dvh]">
         <DrawerHeader className="pb-2">
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription className="sr-only">{description}</DrawerDescription>

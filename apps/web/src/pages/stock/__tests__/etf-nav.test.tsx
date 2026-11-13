@@ -37,7 +37,7 @@ function withSourcesFooter(ui: React.ReactNode) {
     </QueryClientProvider>,
   )
 }
-const TRACKING = "沒有追蹤誤差（指數的每日資料沒有開放）。"
+const TRACKING = "沒有追蹤誤差。"
 
 async function section(symbol: string) {
   const inst = await api.getInstrument(symbol)

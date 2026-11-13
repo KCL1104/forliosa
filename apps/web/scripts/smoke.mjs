@@ -27,7 +27,7 @@ const ROUTES = [
   ["/", "總資產"],
   ["/?view=transactions", "稅費"],
   ["/?view=dividends", "已入帳"],
-  ["/?view=performance", "績效還算不出來"],
+  ["/?view=performance", "美股沒有報價，含美股的帳戶算不出績效"],
   ["/stock/2330.TW", "近四季 EPS"],
   ["/stock/2330.TW?tab=valuation", "各倍數對應的股價"],
   // 友達虧損的年份在商用模式的存檔起點之前：用示範資料（personal）看「本益比沒有意義」
@@ -170,7 +170,7 @@ await check("AI 圖卡：比較 2330 和 2317 → 兩條線（分類色、線尾
   if (await bars.locator('svg path[stroke-width="2"]').count()) throw new Error("one series of monthly revenue should be bars, not a line")
 })
 
-await check("每日收盤簡報：設定打開 → 面板最上面一塊、問 AI 旁有未讀圓點 → 看過圓點消失；紀錄頁有「之前的簡報」", async () => {
+await check("每日收盤簡報：設定打開 → 面板最上面一塊、問 AI 旁有未讀圓點 → 看過圓點消失；對話紀錄頁有「收盤簡報」段落", async () => {
   await page.goto(base + "/settings", { waitUntil: "networkidle" })
   const sw = page.getByRole("switch", { name: /每日收盤簡報/ })
   await sw.evaluate((el) => el.scrollIntoView({ block: "center" }))
@@ -193,21 +193,21 @@ await check("每日收盤簡報：設定打開 → 面板最上面一塊、問 A
   await page.waitForFunction(() => !document.querySelector("[data-briefing-dot]"), null, { timeout: 6000 })
   // 站內換到紀錄頁（⌘K 的頁面清單）
   await page.getByRole("button", { name: /搜尋股票/ }).first().click()
-  await page.keyboard.type("紀錄")
-  await page.getByRole("option", { name: /^紀錄/ }).first().click()
+  await page.keyboard.type("對話紀錄")
+  await page.getByRole("option", { name: /^對話紀錄/ }).first().click()
   await page.waitForURL(/\/history/)
-  await page.getByText("之前的簡報").first().waitFor({ timeout: 8000 })
+  await page.getByRole("heading", { name: "收盤簡報" }).first().waitFor({ timeout: 8000 })
 })
 
-await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 下面一句「算 5 題」→ 送出後那一題標「深度搜尋」、回一份有短標題與來源的整理、切換鈕彈回來", async () => {
+await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 下面一句「用掉 5 題」→ 送出後那一題標「深度搜尋」、回一份有短標題與來源的整理、切換鈕彈回來", async () => {
   if (!(await page.getByLabel("提出問題或下指令").count())) await page.goto(base + "/", { waitUntil: "networkidle" })
   const panel = page.getByRole("complementary", { name: "問 AI" })
   const toggle = panel.getByRole("button", { name: "深度搜尋", exact: true })
   if ((await toggle.getAttribute("aria-pressed")) !== "false") throw new Error("the toggle should start off")
   if (await toggle.locator("svg").count()) throw new Error("the toggle has an icon")
-  if (await panel.getByText(/算 5 題/).count()) throw new Error("the hint shows while the toggle is off")
+  if (await panel.getByText(/用掉 5 題/).count()) throw new Error("the hint shows while the toggle is off")
   await toggle.click()
-  const hint = panel.getByText("多查幾輪資料，寫成一份整理。算 5 題。")
+  const hint = panel.getByText("多查幾輪資料，寫成一份整理，用掉 5 題。")
   await hint.waitFor()
   const hintSize = await hint.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
   if (hintSize < 15) throw new Error(`the hint is ${hintSize}px (a sentence to read is 15px)`)
@@ -228,7 +228,7 @@ await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 
   if (/\*\*|^#/m.test(report)) throw new Error("the report contains Markdown")
   if (!(await panel.getByText("出處", { exact: true }).count())) throw new Error("the report has no sources")
   if ((await toggle.getAttribute("aria-pressed")) !== "false") throw new Error("the toggle should switch itself off after sending")
-  if (await panel.getByText(/算 5 題/).count()) throw new Error("the hint stays after sending")
+  if (await panel.getByText(/用掉 5 題/).count()) throw new Error("the hint stays after sending")
 })
 
 await check("帳本工具列的「記一筆」：直接開輸入框（不經過 AI 面板）；選一檔、填兩筆買進 → 新增", async () => {
@@ -405,9 +405,14 @@ await check("商用模式：帳本、個股、績效都沒有「示範資料」�
     if (await page.getByText("示範資料", { exact: true }).count()) throw new Error(`示範資料 on ${path}`)
   }
 })
-await check("績效：含美股算不出來（只留帳戶選單、原因說一次、一個動作）→ 只看台幣帳戶就有區間、基準、績效與「績效從 … 開始算」", async () => {
-  // 算不出來、換區間或基準也沒有用：不放那兩個控制項，只留帳戶；原因在這一頁只說一次，沒有夾在兩條線中間的空白
-  await page.getByText("績效還算不出來").waitFor({ timeout: 8000 })
+await check("績效：含美股時一打開自動只算新台幣帳戶；選「全部帳戶」才是空狀態（只留帳戶選單、原因說一次、一個動作）→ 只看台幣帳戶就有區間、基準、績效與「績效從 … 開始算」", async () => {
+  // 一打開：自動只算新台幣帳戶，上面一行說明（不是空白）
+  await page.getByText(/^只算「.+」。美股沒有報價，含美股的帳戶算不出績效。$/).waitFor({ timeout: 8000 })
+  await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
+  // 自己選「全部帳戶」：算不出來、換區間或基準也沒有用，不放那兩個控制項，只留帳戶；原因在這一頁只說一次
+  await page.getByRole("combobox", { name: "帳戶" }).click()
+  await page.getByRole("option", { name: "全部帳戶" }).click()
+  await page.getByText("算不出績效", { exact: true }).waitFor({ timeout: 8000 })
   if (await page.getByRole("radiogroup", { name: "績效區間" }).count()) throw new Error("range chips shown while nothing can be computed")
   if (await page.getByRole("combobox", { name: "績效比較基準" }).count()) throw new Error("benchmark select shown while nothing can be computed")
   await page.getByRole("combobox", { name: "帳戶" }).waitFor()
@@ -617,7 +622,7 @@ await check("ETF 淨值與折溢價：0050 同一天、有走勢與逐日數字�
   const trend = band.getByRole("region", { name: "折溢價走勢" })
   await trend.getByRole("img", { name: /^60 個有資料的交易日（\d+\/\d+–11\/12）的折溢價/ }).waitFor()
   if (await trend.getByText(/最新的淨值是/).count()) throw new Error("0050 NAV and close are the same day")
-  await trend.getByText("沒有追蹤誤差（指數的每日資料沒有開放）。").waitFor()
+  await trend.getByText("沒有追蹤誤差。").waitFor()
   await trend.getByText(/逐日數字（60 天）/).click()
   await trend.getByRole("table").getByRole("rowheader", { name: "11/12" }).waitFor()
   if (await band.getByText(/[▲▼]/).count()) throw new Error("premium must not use price arrows")
@@ -1137,7 +1142,7 @@ await check("AI 面板：開著一段對話時換到安靜的頁面不收起來�
   await panel.getByRole("button", { name: "新對話" }).click()
   // 紀錄頁（用 ⌘K 換頁，不重新載入）：面板開著，但不列「最近的對話」——頁面本身就是清單
   await rp.keyboard.press("Control+k")
-  await rp.getByRole("option", { name: "紀錄" }).click()
+  await rp.getByRole("option", { name: "對話紀錄" }).click()
   await rp.getByRole("button", { name: "發起新對話" }).waitFor({ timeout: 8000 })
   await rp.locator("main").getByRole("list", { name: "對話" }).waitFor({ timeout: 8000 })
   if (!(await panel.count())) throw new Error("panel should still be open (opened on a quiet page)")
@@ -1559,7 +1564,7 @@ await check("手機：問 AI 頂端的三個圖示鈕（新對話・紀錄・關
   await m.goto(base + "/", { waitUntil: "networkidle" })
   await m.getByRole("button", { name: /^問 AI/ }).click()
   const dialog = m.getByRole("dialog")
-  const buttons = [dialog.getByRole("button", { name: "新對話" }), dialog.getByRole("button", { name: "紀錄", exact: true }), dialog.getByRole("button", { name: "關閉" })]
+  const buttons = [dialog.getByRole("button", { name: "新對話" }), dialog.getByRole("button", { name: "對話紀錄", exact: true }), dialog.getByRole("button", { name: "關閉" })]
   const looks = await Promise.all(
     buttons.map((b) => b.evaluate((el) => { const c = getComputedStyle(el); return [c.width, c.height, c.borderRadius, c.backgroundColor, c.color].join(" ") })),
   )
@@ -1569,14 +1574,14 @@ await check("手機：問 AI 頂端的三個圖示鈕（新對話・紀錄・關
 })
 await check("手機：AI 對話紀錄從「問 AI」的時鐘進去（底部列沒有「紀錄」分頁）→ 紀錄頁有看得到的標題；底部的「討論」到討論清單", async () => {
   await m.goto(base + "/", { waitUntil: "networkidle" })
-  if (await m.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "紀錄" }).count()) throw new Error("the bottom bar still has a 紀錄 tab")
+  if (await m.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "對話紀錄" }).count()) throw new Error("the bottom bar still has a 對話紀錄 tab")
   await m.getByRole("button", { name: /^問 AI/ }).click()
-  await m.getByRole("dialog").getByRole("button", { name: "紀錄", exact: true }).click()
+  await m.getByRole("dialog").getByRole("button", { name: "對話紀錄", exact: true }).click()
   await m.waitForURL(/\/history$/, { timeout: 8000 })
   await m.getByText("發起新對話").waitFor({ timeout: 8000 })
   await m.getByRole("dialog").waitFor({ state: "detached", timeout: 5000 })
   // 沒有分頁告訴你這是哪一頁：標題在手機也看得到
-  const title = await m.getByRole("heading", { level: 1, name: "紀錄" }).boundingBox()
+  const title = await m.getByRole("heading", { level: 1, name: "對話紀錄" }).boundingBox()
   if (!title || title.height < 20 || title.width < 20) throw new Error(`the history page has no visible title on mobile: ${JSON.stringify(title)}`)
   // 從紀錄挑一段對話：回到「問 AI」
   await m.getByRole("list", { name: "對話" }).getByRole("button").first().click()
@@ -2221,7 +2226,7 @@ await check("分頁標題：每一頁自己的名字在前、站名在後（個�
       ["/discussions", "討論｜Forliosa"],
       ["/discussions/top_p_tsmc", "台積電法說會前，大家怎麼配置？｜Forliosa"],
       ["/settings", "設定｜Forliosa"],
-      ["/history", "紀錄｜Forliosa"],
+      ["/history", "對話紀錄｜Forliosa"],
       ["/data-sources", "資料來源與授權｜Forliosa"],
       ["/terms", "服務條款｜Forliosa"],
       ["/no-such-page", "找不到這個頁面｜Forliosa"],
@@ -2246,7 +2251,7 @@ await check("分頁標題：每一頁自己的名字在前、站名在後（個�
     await toast.waitFor({ state: "detached", timeout: 3000 })
   })
 })
-await check("首頁（沒登入）：是簡短的介紹頁，不是登入頁——一句話、三個標「示範資料」的畫面（帳本・個股・記一筆）、頁尾條款；「登入」→ 登入頁 → 帳本；其他頁面照舊導到登入頁", async () => {
+await check("首頁（沒登入）：是簡短的介紹頁，不是登入頁——一句話、三個標「示範資料」的畫面（帳本・個股・問 AI）、頁尾條款；「登入」→ 登入頁 → 帳本；其他頁面照舊導到登入頁", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/?auth=signed-out", { waitUntil: "networkidle" })
     await p.getByRole("heading", { level: 1, name: "股票帳本" }).waitFor({ timeout: 8000 })
@@ -2281,7 +2286,7 @@ await check("首頁（沒登入）：是簡短的介紹頁，不是登入頁—�
         wide: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       }
     })
-    if (home.h1 !== 1 || home.titles !== "帳本|個股|記一筆" || home.tags !== "111" || !home.described || !home.hidden || home.controls) throw new Error(`home specimens: ${JSON.stringify(home)}`)
+    if (home.h1 !== 1 || home.titles !== "帳本|個股|問 AI" || home.tags !== "111" || !home.described || !home.hidden || home.controls) throw new Error(`home specimens: ${JSON.stringify(home)}`)
     if (home.tops !== 1 || home.seams !== "0,0" || home.widths !== 1) throw new Error(`the three specimens are not one ruled sheet: ${JSON.stringify(home)}`)
     // 頁首：字標、討論、登入（這一頁唯一的動作：墨色的主要按鈕，只有一顆）；頁尾只有兩份條款；沒有其他說明的段落
     if (home.wordmark !== "/" || home.nav !== "討論:/discussions:" || home.login !== "登入:/login:true" || home.footer !== "服務條款:/terms,隱私權政策:/privacy" || home.shell || home.paragraphs || home.wide > 0) throw new Error(`home page chrome: ${JSON.stringify(home)}`)

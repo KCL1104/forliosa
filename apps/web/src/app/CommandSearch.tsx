@@ -162,7 +162,7 @@ const PAGES = [
   { to: "/market", label: "市場" },
   { to: "/groups", label: "群組" },
   { to: "/discussions", label: "討論" },
-  { to: "/history", label: "紀錄" },
+  { to: "/history", label: "對話紀錄" },
   { to: "/settings", label: "設定" },
 ] as const
 

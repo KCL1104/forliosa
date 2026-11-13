@@ -55,7 +55,7 @@ describe("條款文件的節", () => {
 
 describe("Forliosa 是什麼的那一句", () => {
   it("只說事實：沒有破折號、沒有冒號後面的功能清單", () => {
-    expect(ABOUT_FORLIOSA).toBe("Forliosa 是股票帳本，可以記買賣、看績效、查個股、問 AI，也能和親友開群組。")
+    expect(ABOUT_FORLIOSA).toBe("Forliosa 是股票帳本。")
     expect(ABOUT_FORLIOSA).not.toMatch(/[—：]/)
   })
 })

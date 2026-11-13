@@ -32,7 +32,8 @@ function IndexCell({ index: i, first, four, position }: { index: MarketIndex; fi
     <li
       className={cn(
         // 窄：兩行列（名稱・日期｜小圖｜數值・漲跌）
-        "grid min-h-[72px] grid-cols-[minmax(0,1fr)_76px_auto] content-center items-center gap-x-3 border-b border-rule py-2",
+        // 第三欄固定寬（不跟著數字長短變）：每一列的小圖對在同一條直線上。很窄的手機（< 368px）漲跌點數本來就不顯示，第三欄照內容寬
+        "grid min-h-[72px] grid-cols-[minmax(0,1fr)_76px_auto] content-center items-center gap-x-3 border-b border-rule py-2 min-[23rem]:grid-cols-[minmax(0,1fr)_76px_8.5rem]",
         // 寬：一格（名稱、數值、漲跌；小圖在右邊），格與格之間一條直線
         "@2xl:block @2xl:min-h-0 @2xl:border-b-0 @2xl:py-4 @2xl:pr-5",
         !first && "@2xl:border-l @2xl:border-rule @2xl:pl-5",

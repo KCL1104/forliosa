@@ -97,7 +97,7 @@ function Settings() {
       </Group>
 
       <Group title="隱私">
-        <Row label="開啟時預設隱私模式" description="遮蔽金額與股數，百分比照常顯示。標題列的眼睛可以切換。" htmlFor="privacy-default">
+        <Row label="開啟時預設隱私模式" description="遮蔽金額與股數，百分比照常顯示。" htmlFor="privacy-default">
           <Switch id="privacy-default" checked={p.privacyDefault} onCheckedChange={(v) => setPref({ privacyDefault: v })} />
         </Row>
       </Group>
@@ -145,7 +145,7 @@ function DailyBriefing() {
   const on = me.data?.preferences.daily_briefing ?? false
   return (
     <Group title="AI">
-      <Row label="每日收盤簡報" description="收盤價公布後，依你的持股與觀察清單寫一則，放在「問 AI」裡。" htmlFor="daily-briefing">
+      <Row label="每日收盤簡報" description="收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。" htmlFor="daily-briefing">
         <Switch
           id="daily-briefing"
           checked={on}

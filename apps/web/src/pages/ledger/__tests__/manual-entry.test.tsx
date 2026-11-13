@@ -199,6 +199,24 @@ describe("減少持股（賣出不用開表單）", () => {
     expect(await within(full).findByRole("radio", { name: "賣出" }, T)).toBeChecked()
   })
 
+  it("持股有零股（1 張 500 股）：改收股數，「全部」填 1500；欄位下面寫換算", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    const held = (await api.getHoldings()).find((h) => h.symbol === "2330.TW")!
+    expect(held.quantity % 1000).not.toBe(0)
+    useUi.getState().openReduce("2330.TW")
+    const dialog = await screen.findByRole("dialog", {}, T)
+    await within(dialog).findByText(/記成賣出。$/, {}, T)
+    expect(dialog.querySelector('label[for="reduce-qty"]')!.textContent).toBe("賣出的股數")
+    await userEvent.click(within(dialog).getByRole("button", { name: "全部" }))
+    expect((dialog.querySelector("#reduce-qty") as HTMLInputElement).value).toBe(String(held.quantity))
+    expect(within(dialog).getByText(/^\d+ 張( \d+ 股)?$/)).toBeInTheDocument()
+    await userEvent.clear(dialog.querySelector("#reduce-qty")!)
+    await userEvent.type(dialog.querySelector("#reduce-qty")!, String(held.quantity + 1))
+    await userEvent.click(within(dialog).getByRole("button", { name: "賣出" }))
+    expect(within(dialog).getByText(`最多 ${new Intl.NumberFormat("zh-TW").format(held.quantity)} 股`)).toBeInTheDocument()
+  })
+
   it("持倉的每一列有動作選單：加碼、減少持股、全部賣出", async () => {
     renderApp("/")
     const table = await screen.findByRole("table", { name: "持倉" }, T)

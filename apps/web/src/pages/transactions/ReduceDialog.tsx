@@ -45,7 +45,7 @@ export function ReduceHost() {
   }
   return (
     <Drawer open={open} onOpenChange={(o) => !o && close()} repositionInputs={false}>
-      <DrawerContent className="max-h-[92dvh]">
+      <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[92dvh]">
         <DrawerHeader className="pb-2">
           <DrawerTitle>{TITLE}</DrawerTitle>
           <DrawerDescription className="sr-only">{DESCRIPTION}</DrawerDescription>
@@ -81,7 +81,8 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
   })
   const held = accountIds.length > 1 ? perAccount.data : holding?.quantity
   const isUS = holding?.market === "US"
-  const inLots = unitPref === "lot" && !isUS
+  // 以張填：偏好是張、而且持股剛好是整張。有零股（例如 1 張 500 股）就改收股數，「全部」填的是 1500 而不是 1.5
+  const inLots = unitPref === "lot" && !isUS && (held == null || held % 1000 === 0)
   // 還沒動過輸入框（null）時：「全部賣出」先填成全部（換帳戶時跟著換），否則是空的
   const [typed, setTyped] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
@@ -115,10 +116,19 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
     return q === null ? null : inLots ? q * 1000 : q
   })()
   const price = quote.data?.price ?? null
-  const error =
-    !shares || shares <= 0 ? "請輸入股數" : !isUS && !Number.isInteger(shares) ? "台股股數必須是整數" : shares > held ? `最多 ${formatQuantity(held, unitPref, holding.market)}` : null
-  const allText = formatQuantity(held, unitPref, holding.market)
   const qtyLabel = inLots ? "張數" : "股數"
+  const allText = formatQuantity(held, unitPref, holding.market)
+  const heldInField = `${new Intl.NumberFormat("zh-TW").format(inLots ? held / 1000 : held)} ${inLots ? "張" : "股"}`
+  const error =
+    !shares || shares <= 0
+      ? `請輸入${qtyLabel}`
+      : !isUS && !Number.isInteger(shares)
+        ? "台股股數必須是整數"
+        : shares > held
+          ? `最多 ${heldInField}`
+          : null
+  // 欄位下面的換算：填的是張就寫股數、填的是股就寫成幾張幾股（和「記一筆」一樣）
+  const converted = !shares || shares <= 0 || isUS ? null : inLots ? `${new Intl.NumberFormat("zh-TW").format(shares)} 股` : shares >= 1000 ? formatQuantity(shares, "lot", holding.market) : null
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -178,7 +188,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
             全部
           </Button>
         </div>
-        {submitted && error && <FieldError>{error}</FieldError>}
+        {submitted && error ? <FieldError>{error}</FieldError> : converted ? <p className="num text-sm text-ink-2">{converted}</p> : null}
       </div>
       {quote.isLoading ? (
         <Skeleton className="h-6 w-56 rounded-sm" />

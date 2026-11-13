@@ -90,7 +90,7 @@ describe("沒登入的首頁：簡短的介紹頁", () => {
     expect(screen.getByRole("link", { name: "Forliosa 首頁" }).parentElement!.className).not.toMatch(/\bmax-w-measure\b/)
     // 三個示範畫面：標題、每個都標「示範資料」、給螢幕報讀器的一句說明；畫面本身是 aria-hidden，裡面沒有可以按的東西
     const figures = screen.getAllByRole("figure")
-    expect(figures.map((f) => within(f).getByRole("heading", { level: 2 }).textContent)).toEqual(["帳本", "個股", "記一筆"])
+    expect(figures.map((f) => within(f).getByRole("heading", { level: 2 }).textContent)).toEqual(["帳本", "個股", "問 AI"])
     for (const f of figures) {
       expect(within(f).getAllByText("示範資料")).toHaveLength(1)
       expect(f.querySelector("figcaption .sr-only")!.textContent).toMatch(/^示範畫面：/)

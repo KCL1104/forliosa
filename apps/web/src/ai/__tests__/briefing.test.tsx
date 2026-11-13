@@ -74,6 +74,19 @@ const wrap = (ui: React.ReactNode) =>
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>{ui}</QueryClientProvider>)
 
 describe("面板首頁的收盤簡報", () => {
+  it("在帳本旁邊（besideLedger）：總資產、當日、這一週左邊都看得到，不再列一次；漲跌最多與 AI 補充照常", async () => {
+    vi.spyOn(api, "getLatestBriefing").mockResolvedValue(briefing())
+    vi.spyOn(api, "markBriefingRead").mockResolvedValue(undefined)
+    wrap(<BriefingBlock size="panel" besideLedger />)
+    const block = await screen.findByRole("region", { name: "收盤簡報" }, T)
+    await within(block).findByText("台積電公布上月營收，年增兩成。", {}, T)
+    expect(within(block).queryByText("NT$3,707,922")).toBeNull()
+    expect(within(block).queryByText("當日")).toBeNull()
+    expect(within(block).queryByText("這一週")).toBeNull()
+    expect(within(block).queryByText(/沒有收盤價/)).toBeNull()
+    expect(within(block).getByText("漲最多")).toBeInTheDocument()
+  })
+
   it("還沒看過：展開著，有小圓點；事實是印刷的字、AI 補的是鉛筆並列出報導", async () => {
     vi.spyOn(api, "getLatestBriefing").mockResolvedValue(briefing())
     vi.spyOn(api, "markBriefingRead").mockResolvedValue(undefined)
@@ -91,7 +104,7 @@ describe("面板首頁的收盤簡報", () => {
     expect(within(block).getByText("長榮").textContent).toContain("4.12%")
     expect(within(block).getByText("00878 定期定額・NT$4,000")).toBeInTheDocument()
     expect(within(block).getByText("00878 除息")).toBeInTheDocument()
-    expect(within(block).getByText("3 檔沒有收盤價，不在今日的數字裡。")).toBeInTheDocument()
+    expect(within(block).getByText("3 檔沒有收盤價，不算在當日。")).toBeInTheDocument()
     // 事實不是楷體；AI 的那一點才是
     expect(within(block).getByText("NT$3,707,922").closest(".ai-voice")).toBeNull()
     expect(within(block).getByText("台積電公布上月營收，年增兩成。").closest("p")).toHaveClass("ai-voice")
@@ -196,12 +209,12 @@ describe("還沒看過的小圓點", () => {
   })
 })
 
-describe("紀錄頁的「之前的簡報」", () => {
+describe("對話紀錄頁的「收盤簡報」", () => {
   it("一列一則（日期、當日損益），按一下展開內容；再按收起來", async () => {
     const older = briefing({ id: "brf_0", date: "2026-11-11", read: true, points: [] })
     vi.spyOn(api, "listBriefings").mockResolvedValue([briefing(), { ...older, facts: { ...older.facts, day_change: -31_206, day_change_pct: -0.0086 } }])
     wrap(<BriefingHistory />)
-    expect(await screen.findByRole("heading", { name: "之前的簡報" }, T)).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { name: "收盤簡報" }, T)).toBeInTheDocument()
     const rows = screen.getAllByRole("button", { expanded: false })
     expect(rows).toHaveLength(2)
     expect(rows[0]!.textContent).toContain("11/12")
@@ -241,7 +254,7 @@ describe("設定：每日收盤簡報的開關（預設關）", () => {
     renderApp("/settings")
     const sw = await screen.findByRole("switch", { name: "每日收盤簡報" }, T)
     expect(sw).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByText("收盤價公布後，依你的持股與觀察清單寫一則，放在「問 AI」裡。")).toBeInTheDocument()
+    expect(screen.getByText("收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。")).toBeInTheDocument()
     expect(await api.getLatestBriefing()).toBeNull()
     expect(await api.listBriefings()).toEqual([])
     expect(screen.getByRole("button", { name: "問 AI" }).querySelector("[data-briefing-dot]")).toBeNull()

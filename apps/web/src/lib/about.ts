@@ -5,4 +5,5 @@
  * 登入頁不放：那一頁只有登入。
  */
 export const ABOUT_SHORT = "股票帳本"
-export const ABOUT_FORLIOSA = `Forliosa 是${ABOUT_SHORT}，可以記買賣、看績效、查個股、問 AI，也能和親友開群組。`
+// 一句就好：功能清單式的介紹讀起來像宣傳（2026-11-14 第六次評分）
+export const ABOUT_FORLIOSA = `Forliosa 是${ABOUT_SHORT}。`

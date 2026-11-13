@@ -184,10 +184,26 @@ describe("帳本主數字與分段", () => {
 })
 
 describe("績效算不出來（示範帳本含美股）", () => {
-  it("只留帳戶選單與一段說明，沒有區間與比較基準；選了新台幣帳戶，控制項才出現", async () => {
+  it("一打開不是空白：自動只算新台幣帳戶，上面一行說明；帳戶選單選回「全部帳戶」才是空狀態", async () => {
     const user = userEvent.setup()
     renderInRouter(<PerformanceView />)
-    expect(await screen.findByText("績效還算不出來", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText(/^只算「.+」。美股沒有報價，含美股的帳戶算不出績效。$/, undefined, T)).toBeInTheDocument()
+    expect(await screen.findByRole("radiogroup", { name: "績效區間" }, T)).toBeInTheDocument()
+    expect(screen.queryByText("算不出績效")).toBeNull()
+    await user.click(screen.getByRole("combobox", { name: "帳戶" }))
+    await user.click(await screen.findByRole("option", { name: "全部帳戶" }, T))
+    expect(await screen.findByText("算不出績效", undefined, T)).toBeInTheDocument()
+    // 自己選了「全部帳戶」就照他的意思，不再自動換
+    expect(screen.queryByText(/^只算「/)).toBeNull()
+  })
+
+  it("選了全部帳戶：只留帳戶選單與一段說明，沒有區間與比較基準；按「只看」新台幣帳戶，控制項才出現", async () => {
+    const user = userEvent.setup()
+    renderInRouter(<PerformanceView />)
+    await screen.findByText(/^只算「/, undefined, T)
+    await user.click(screen.getByRole("combobox", { name: "帳戶" }))
+    await user.click(await screen.findByRole("option", { name: "全部帳戶" }, T))
+    expect(await screen.findByText("算不出績效", undefined, T)).toBeInTheDocument()
     expect(screen.queryByRole("radiogroup", { name: "績效區間" })).toBeNull()
     expect(screen.queryByRole("combobox", { name: "績效比較基準" })).toBeNull()
     expect(screen.getByRole("combobox", { name: "帳戶" })).toBeInTheDocument()

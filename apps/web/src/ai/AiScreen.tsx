@@ -105,7 +105,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
         <button type="button" aria-label="新對話" onClick={() => newThread()} className={iconButton}>
           <SquarePenIcon aria-hidden className="size-[22px]" />
         </button>
-        <button type="button" aria-label="紀錄" title="對話紀錄" onClick={showHistory} className={iconButton}>
+        <button type="button" aria-label="對話紀錄" title="對話紀錄" onClick={showHistory} className={iconButton}>
           <HistoryIcon aria-hidden className="size-[22px]" />
         </button>
         <DialogPrimitive.Close aria-label="關閉" className={iconButton}>

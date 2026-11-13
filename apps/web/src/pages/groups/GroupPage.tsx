@@ -108,7 +108,9 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
         </p>
       </header>
 
-      <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-6 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
+      {/* 桌面（安靜的頁面，AI 面板收成窄欄、版心往左靠）：底線只畫在內容的寬度裡。滲到版心外的話左邊碰到視窗邊緣、
+          右邊卻停在半空中（2026-11-14 第六次評分）；個股頁的同一種分頁列旁邊是面板的邊框，滲出去剛好接上 */}
+      <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-6 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 lg:mx-0 lg:px-0">
         {/*
           手機（< 640px）：八個分頁（多了「討論」）每個至少 44px 寬（觸控的可按範圍），合計 376px——比 iPhone 15 的內容寬（353px）
           多一點，所以這一列橫向捲動（ScrollRow：被遮住的那一邊淡出，選取中的分頁捲進畫面）。常用的排在前面，

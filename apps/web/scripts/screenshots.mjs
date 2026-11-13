@@ -154,7 +154,7 @@ const seedModelThread = async (page, mobile, twoTurns) => {
     await page.getByRole("button", { name: /^問 AI/ }).click()
     await page.waitForTimeout(400)
   }
-  await page.getByRole("button", { name: "紀錄", exact: true }).click()
+  await page.getByRole("button", { name: "對話紀錄", exact: true }).click()
   await page.getByRole("button", { name: /^台積電今天對我的帳本影響多大？/ }).first().click()
   await page.getByText(twoTurns ? /我不替你決定買賣/ : /外資連續幾天買超/).first().waitFor({ timeout: 8000 })
 }
@@ -213,7 +213,7 @@ const whyMove = async (page, mobile) => {
 const pendingHome = async (page, mobile) => {
   await draft(page, mobile)
   if (mobile) {
-    await page.getByRole("button", { name: "紀錄", exact: true }).click()
+    await page.getByRole("button", { name: "對話紀錄", exact: true }).click()
     await page.getByRole("button", { name: "發起新對話" }).click()
   } else {
     await page.getByRole("button", { name: "新對話" }).click()
@@ -226,10 +226,11 @@ const pendingDock = async (page) => {
   await page.getByRole("dialog").getByRole("button", { name: "關閉" }).click()
   await page.getByRole("button", { name: "問 AI（待簽名 1 筆）" }).waitFor({ timeout: 8000 })
 }
-/** 績效：含美股算不出來 → 只看新台幣帳戶，才有區間、比較基準與圖表 */
-const performanceTwd = async (page) => {
-  await page.getByRole("button", { name: /只看「永豐/ }).click()
-  await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
+/** 績效：含美股時自己選「全部帳戶」→ 空狀態（只留帳戶選單） */
+const performanceAll = async (page) => {
+  await page.getByRole("combobox", { name: "帳戶" }).click()
+  await page.getByRole("option", { name: "全部帳戶" }).click()
+  await page.getByText("算不出績效", { exact: true }).waitFor({ timeout: 8000 })
 }
 /** 捲到頁面最底：內容的最後一行在底部列上面，沒有被蓋住 */
 const toBottom = async (page) => {
@@ -485,9 +486,9 @@ const SHOTS = [
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
   { name: "ledger-transactions-symbol", path: "/?view=transactions&symbol=2330.TW", ready: "text=只看 2330" },
   { name: "ledger-dividends", path: "/?view=dividends", ready: "text=已入帳" },
-  // 績效：示範帳本含美股（沒有可商用的價格）→ 一開始是空狀態（只留帳戶選單）；只看新台幣帳戶才有區間、基準與圖表
-  { name: "performance-empty", path: "/?view=performance", ready: "text=績效還算不出來" },
-  { name: "ledger-performance", path: "/?view=performance", ready: "text=績效還算不出來", action: performanceTwd },
+  // 績效：示範帳本含美股（沒有可商用的價格）→ 一打開自動只算新台幣帳戶；自己選「全部帳戶」才是空狀態
+  { name: "ledger-performance", path: "/?view=performance", ready: "text=最大回撤" },
+  { name: "performance-empty", path: "/?view=performance", ready: "text=最大回撤", action: performanceAll },
   // 手機底部列的其他狀態：待簽名、捲到最底（最後一行沒有被底部列蓋住）
   { name: "shell-dock-pending", path: "/", ready: "text=總資產", mobileOnly: true, action: pendingDock },
   { name: "shell-dock-bottom", path: "/stock/2330.TW", ready: "text=參考價", mobileOnly: true, action: toBottom },

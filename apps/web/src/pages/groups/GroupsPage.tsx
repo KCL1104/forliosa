@@ -146,12 +146,15 @@ function ShareCard() {
   const s = summary.data
   const month = mtd.data ? mtd.data.twr : undefined
   const today = appToday()
+  // 本月算不出來（含美股）時，分享文字與卡片都不提本月：沒有的值不寫進句子（不出現「本月 —」）
+  const monthKnown = month !== null && month !== undefined
+  const noMonth = month === null
   const line = s
-    ? `我今天 ${glyphPct(s.day_change_pct)}，本月 ${month === undefined || month === null ? "—" : glyphPct(month)}，總報酬 ${glyphPct(s.total_return_pct)}（Forliosa ${formatDateShort(today, false)}）`
+    ? `我今天 ${glyphPct(s.day_change_pct)}，${monthKnown ? `本月 ${glyphPct(month)}，` : ""}總報酬 ${glyphPct(s.total_return_pct)}（Forliosa ${formatDateShort(today, false)}）`
     : ""
   const cells: { label: React.ReactNode; key: string; value: number | null | undefined }[] = [
     { key: "day", label: "今日", value: s?.day_change_pct },
-    { key: "month", label: "本月", value: month },
+    ...(noMonth ? [] : [{ key: "month", label: "本月", value: month }]),
     // 手機三欄放不下括號：只寫「總報酬」（和手機排行的表頭一樣）
     { key: "total", label: <>總報酬<span className="max-sm:hidden">（含股利）</span></>, value: s?.total_return_pct },
   ]
@@ -162,7 +165,7 @@ function ShareCard() {
           <span className="text-lg font-bold">Forliosa</span>
           <span className="num text-sm text-ink-2">{formatDateShort(today)}</span>
         </div>
-        <dl className="grid grid-cols-3">
+        <dl className={cn("grid", noMonth ? "grid-cols-2" : "grid-cols-3")}>
           {cells.map((c, i) => (
             <div key={c.key} className={cn("px-3 py-4 sm:px-4", i > 0 && "border-l border-rule")}>
               <dt className="text-sm text-ink-2">{c.label}</dt>
@@ -172,7 +175,7 @@ function ShareCard() {
         </dl>
       </figure>
       {/* 後端的說明自己就有冒號（「AAPL、NVDA、VOO：美股目前沒有…」），前面用一句話接，不再疊一個冒號 */}
-      {month === null && mtd.data?.notes?.[0] && <p className="mt-2 max-w-md text-base text-ink">本月算不出來。{withPeriod(mtd.data.notes[0])}</p>}
+      {noMonth && <p className="mt-2 max-w-md text-base text-ink">{monthMissing(mtd.data?.notes ?? [])}</p>}
       <Button
         variant="outline"
         className="mt-4"
@@ -194,6 +197,17 @@ function ShareCard() {
 function glyphPct(r: number | null): string {
   const d = direction(r)
   return `${directionGlyph(d)}${formatPercent(r === null ? null : Math.abs(r), { signed: false, decimals: Math.abs(r ?? 0) >= 0.1 ? 1 : 2 })}`
+}
+
+/**
+ * 本月算不出來的原因，一句話：含美股時「AAPL、NVDA、VOO 沒有報價，本月算不出來。」；其他原因照後端的說明。
+ * （後端那句是「AAPL、NVDA、VOO：美股沒有報價，含美股的績效算不出來」——接在「本月算不出來」後面就講了兩次）
+ */
+function monthMissing(notes: string[]): string {
+  const us = notes.find((n) => n.includes("美股"))
+  const symbols = us?.split("：")[0]
+  if (us && symbols && symbols !== us) return `${symbols} 沒有報價，本月算不出來。`
+  return notes[0] ? `本月算不出來。${withPeriod(notes[0])}` : "本月算不出來。"
 }
 
 /** 後端的說明沒有句點時補上（接在另一句後面） */

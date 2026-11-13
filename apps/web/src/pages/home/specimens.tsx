@@ -3,7 +3,7 @@ import { direction, directionGlyph, formatMoney, formatNumber, formatPercent, fo
 import { cn } from "@/lib/utils"
 
 /**
- * 介紹頁的三個示範畫面：帳本、個股頁、記一筆。用示範資料、照產品自己的樣子畫（手機版的排法、同一套字級、格線、
+ * 介紹頁的三個示範畫面：帳本、個股頁、問 AI。用示範資料、照產品自己的樣子畫（手機版的排法、同一套字級、格線、
  * 漲跌色與草稿卡的樣式），不是截圖——所以跟著淺色／深色，也不會糊。數字和 mock 的示範帳本相同。
  * - 畫面上沒有日期（寫死的日期過幾個月會像壞掉的資料）。
  * - 沒有可以按的東西：按鈕都畫成 `<span>`，整塊不接收滑鼠（`pointer-events-none`），也不在 Tab 順序裡。
@@ -28,7 +28,7 @@ function Delta({ amount, pct }: { amount: number; pct: number }) {
 const TOTAL = 3_707_922
 const DAY = { amount: 78_015, pct: 0.0215 }
 const PNL = { amount: 1_005_572, pct: 0.354 }
-// 九檔裡的三檔：台積電是「個股」那一欄的那一檔，0050 是「記一筆」買的那一檔，再一檔下跌的（漲跌兩種顏色都看得到）
+// 九檔裡的三檔：台積電是「個股」那一欄的那一檔，0050 是「問 AI」那一欄買的那一檔，再一檔下跌的（漲跌兩種顏色都看得到）
 const HOLDINGS: { name: string; code: string; qty: string; price: string; pct: number }[] = [
   { name: "台積電", code: "2330", qty: "1 張 500 股", price: "1,085", pct: 0.0483 },
   { name: "元大台灣50", code: "0050", qty: "5 張 779 股", price: "72.40", pct: 0.0077 },
@@ -189,8 +189,8 @@ function Item({ label, value }: { label: string; value: React.ReactNode }) {
   )
 }
 
-// -- 記一筆 -------------------------------------------------------------------------------------------
-/** 記一筆：使用者打的一句話 → 算好稅費的草稿卡（石墨灰虛線）→ 簽名格 */
+// -- 問 AI -------------------------------------------------------------------------------------------
+/** 問 AI：使用者打的一句話 → 算好稅費的草稿卡（石墨灰虛線）→ 簽名格 */
 export function DraftSpecimen() {
   return (
     <div className="flex flex-1 flex-col">

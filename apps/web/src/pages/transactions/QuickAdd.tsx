@@ -33,7 +33,7 @@ const num = (s: string): number | null => {
   return s.trim() === "" || Number.isNaN(n) ? null : n
 }
 
-export function QuickAdd({ initialSymbol, onDone, onFull }: { initialSymbol?: string; onDone: () => void; onFull: (symbol?: string) => void }) {
+export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { initialSymbol?: string; onDone: () => void; onFull: (symbol?: string) => void; sheet?: boolean }) {
   const accounts = useAccounts()
   const remove = useDeleteTransaction()
   const unitPref = usePrefs((s) => s.quantityUnit)
@@ -127,7 +127,7 @@ export function QuickAdd({ initialSymbol, onDone, onFull }: { initialSymbol?: st
 
   const qtyLabel = inLots ? "張數" : "股數"
   return (
-    <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className="flex flex-col gap-4 px-4 pb-4 sm:px-6 sm:pb-6">
+    <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className={cn("flex flex-col gap-4 px-4 sm:px-6", sheet ? "pb-0" : "pb-4 sm:pb-6")}>
       {(accounts.data?.length ?? 0) > 1 && (
         <Row label="帳戶" className="sm:max-w-xs">
           <AccountSelect accounts={accounts.data ?? []} value={account?.id ?? ""} onChange={setAccountId} />
@@ -213,7 +213,8 @@ export function QuickAdd({ initialSymbol, onDone, onFull }: { initialSymbol?: st
         </button>
       )}
 
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-3 pt-1">
+      {/* 手機抽屜：動作列貼在捲動區的底部（一條格線，不加陰影），再加幾筆也看得到「新增」 */}
+      <div className={cn("flex flex-wrap items-center gap-x-4 gap-y-3 pt-1", sheet && "safe-bottom sticky bottom-0 z-10 -mx-4 border-t border-rule bg-popover px-4 py-3 sm:-mx-6 sm:px-6")}>
         <button
           type="button"
           onClick={() => onFull(symbol?.code)}

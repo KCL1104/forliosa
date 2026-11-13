@@ -186,6 +186,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const ask = useAskAi()
+  const openReduce = useUi((s) => s.openReduce)
   // 查看別人的資產（唯讀）：不提供加入觀察、記一筆
   const readOnly = useReadOnly()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
@@ -226,6 +227,12 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("form", { code: inst.code })}>
           記一筆
         </Button>
+        {/* 有持股時：賣出也在這裡（手機上不用先展開部位明細、往下捲；2026-11-14 第六次評分） */}
+        {held && (
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => openReduce(inst.symbol)}>
+            減少持股
+          </Button>
+        )}
       </span>}
     </nav>
   )
@@ -417,7 +424,6 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
 
 /** 我的部位：兩行（股數、均價、未實現、今日、已領股利）＋展開 */
 function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
-  const openReduce = useUi((s) => s.openReduce)
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
@@ -472,7 +478,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
       </div>
       {open && (
         <div id="position-more" className="note-in grid gap-x-10 gap-y-4 border-t border-rule py-4 md:grid-cols-2">
-          <dl className="num grid grid-cols-2 gap-x-6 gap-y-2 text-md">
+          <dl className="num grid grid-cols-[repeat(2,minmax(0,1fr))] gap-x-6 gap-y-2 text-md">
             {priced && <Item className="sm:hidden" label={day} value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
             <Item className="sm:hidden" label="已領股利" value={money(p.dividends_received)} />
             <Item label={priced ? "市值" : "市值（以成本計）"} value={money(p.market_value)} />
@@ -482,7 +488,17 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
             <Item
               className={priced ? undefined : "max-sm:col-span-2"}
               label="下次除息"
-              value={p.upcoming_dividend ? `${formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}・約 ${money(p.upcoming_dividend.amount_estimate)}` : "未公告"}
+              // 窄的手機上在「・」的地方換行（日期、金額各自不斷開），不撐寬頁面
+              value={
+                p.upcoming_dividend ? (
+                  <>
+                    <span className="whitespace-nowrap">{formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}</span>・<wbr />
+                    <span className="whitespace-nowrap">約 {money(p.upcoming_dividend.amount_estimate)}</span>
+                  </>
+                ) : (
+                  "未公告"
+                )
+              }
             />
             {rounds.length > 0 && (
               <Item
@@ -520,11 +536,6 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
                   記一筆
                 </Button>
               )}
-              {!readOnly && p.quantity > 0 && (
-                <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => openReduce(inst.symbol)}>
-                  減少持股
-                </Button>
-              )}
             </div>
           </div>
         </div>
@@ -535,9 +546,9 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
 
 function Item({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
   return (
-    <div className={cn("flex items-baseline gap-2 whitespace-nowrap", className)}>
-      <dt className="text-sm text-ink-2">{label}</dt>
-      <dd className="font-medium">{value}</dd>
+    <div className={cn("flex min-w-0 items-baseline gap-2", className)}>
+      <dt className="shrink-0 text-sm whitespace-nowrap text-ink-2">{label}</dt>
+      <dd className="min-w-0 font-medium">{value}</dd>
     </div>
   )
 }

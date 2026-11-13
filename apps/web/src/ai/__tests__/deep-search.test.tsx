@@ -37,17 +37,17 @@ describe("輸入框的「深度搜尋」", () => {
     const toggle = screen.getByRole("button", { name: "深度搜尋" })
     expect(toggle).toHaveAttribute("aria-pressed", "false")
     expect(toggle.querySelector("svg")).toBeNull()
-    expect(screen.queryByText(/算 5 題/)).toBeNull()
+    expect(screen.queryByText(/用掉 5 題/)).toBeNull()
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-pressed", "true")
     expect(useAi.getState().deepNext).toBe(true)
-    const hint = screen.getByText("多查幾輪資料，寫成一份整理。算 5 題。")
+    const hint = screen.getByText("多查幾輪資料，寫成一份整理，用掉 5 題。")
     expect(hint).toHaveClass("text-base", "text-ink")
     // 畫面上的鍵盤提示縮成「Enter 送出」（旁邊放不下整句）；螢幕閱讀器讀到的還是完整的一句
     expect(screen.getByText("Enter 送出")).toHaveAttribute("aria-hidden", "true")
     expect(screen.getByRole("textbox", { name: "提出問題或下指令" })).toHaveAccessibleDescription("Enter 送出，Shift+Enter 換行")
     fireEvent.click(toggle)
-    expect(screen.queryByText(/算 5 題/)).toBeNull()
+    expect(screen.queryByText(/用掉 5 題/)).toBeNull()
   })
 
   it("手機的一行輸入框：切換鈕在輸入框下面，44px 高", () => {
@@ -56,7 +56,7 @@ describe("輸入框的「深度搜尋」", () => {
     expect(toggle).toHaveClass("h-11")
     expect(toggle.closest("form")).toBeNull()
     fireEvent.click(toggle)
-    expect(screen.getByText("多查幾輪資料，寫成一份整理。算 5 題。")).toBeInTheDocument()
+    expect(screen.getByText("多查幾輪資料，寫成一份整理，用掉 5 題。")).toBeInTheDocument()
   })
 
   it("一次算幾題聽後端的；後端說沒有深度搜尋（null）時不放切換鈕", () => {
@@ -64,7 +64,7 @@ describe("輸入框的「深度搜尋」", () => {
     expect(deepSearchCost({})).toBe(5)
     expect(deepSearchCost({ deep_search_cost: 3 })).toBe(3)
     expect(deepSearchCost({ deep_search_cost: null })).toBeNull()
-    expect(deepSearchHint(3)).toBe("多查幾輪資料，寫成一份整理。算 3 題。")
+    expect(deepSearchHint(3)).toBe("多查幾輪資料，寫成一份整理，用掉 3 題。")
   })
 })
 

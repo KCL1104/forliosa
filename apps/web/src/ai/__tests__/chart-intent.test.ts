@@ -82,7 +82,7 @@ describe("buildLocalChart：用 API 的資料組出和後端同樣形狀的圖�
     expect(out.chart).toMatchObject({ id: "cht_test", kind: "price", unit: "price", currency: "TWD", x: "date", title: "台積電 收盤價（近 6 個月）", is_demo: false })
     expect(out.chart!.series).toEqual([{ name: "台積電", symbol: "2330.TW", points: [{ t: "2026-10-01", v: 100 }, { t: "2026-10-02", v: 110 }, { t: "2026-10-03", v: 121 }] }])
     expect(out.chart!.notes).toContain("收盤價沒有還原權息，除權息日會有缺口")
-    expect(out.text).toBe("台積電近 6 個月的收盤走勢畫好了。")
+    expect(out.text).toMatch(/^近 6 個月台積電 [+−]?[\d,.]+%。$/)
   })
 
   it("比較：從共同的第一天起算，都從 0 開始；資料不足的那一檔說明沒有畫", async () => {

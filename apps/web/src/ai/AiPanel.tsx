@@ -145,7 +145,7 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
       <header className="flex h-14 shrink-0 items-center gap-0.5 border-b border-rule pr-4 pl-7 xl:pl-8">
         <h2 className="mr-auto flex items-center gap-2 text-base font-bold">
           <AskAiIcon aria-hidden className="size-[18px] text-ai" />
-          {view === "history" ? "紀錄" : "問 AI"}
+          {view === "history" ? "對話紀錄" : "問 AI"}
           {/* 面板開著但簡報不在畫面上（正在對話、看紀錄）時，標題旁邊一個小圓點 */}
           {briefingUnread && (view === "history" || !!thread) && (
             <>
@@ -157,7 +157,7 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         <IconButton label="新對話" onClick={() => { newThread(); setView("chat") }}>
           <SquarePenIcon aria-hidden className="size-[18px]" />
         </IconButton>
-        <IconButton label="紀錄" pressed={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")}>
+        <IconButton label="對話紀錄" pressed={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")}>
           <HistoryIcon aria-hidden className="size-[18px]" />
         </IconButton>
         <IconButton label="收合 AI 面板" onClick={onCollapse}>

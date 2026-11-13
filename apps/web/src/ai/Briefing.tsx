@@ -17,7 +17,7 @@ import { bleed, bleedPad } from "./panel-helpers"
  * 每日收盤簡報（產品負責人 2026-11-14：固定的一種排程工作，預設關，在設定打開）。
  * 一則有兩部分：規則算出來的事實（總資產、今日損益、漲跌最多的持股、觀察清單裡動得多的、這一週的事項）是印刷的字；
  * AI 依報導補的幾點是鉛筆（石墨灰楷體，和對話裡的回答、市場頁的收盤重點同一套排法），每一點下面列出依據的報導。
- * 這個檔案有三個出口：面板首頁最上面的那一塊、紀錄頁的「之前的簡報」、還沒看過時的小圓點（要不要顯示看 `use-briefing-unread.ts`）。
+ * 這個檔案有三個出口：面板首頁最上面的那一塊、對話紀錄頁的「收盤簡報」、還沒看過時的小圓點（要不要顯示看 `use-briefing-unread.ts`）。
  */
 
 /** 未讀的小圓點（不是數字徽章）：放在「問 AI」的按鈕與面板標題旁邊 */
@@ -27,8 +27,11 @@ export function BriefingDot({ className }: { className?: string }) {
 
 const MARK_READ_AFTER_MS = 1200
 
-/** 面板首頁最上面：最新的一則。還沒看過時展開著；看過之後收成一列，按一下再展開 */
-export function BriefingBlock({ size }: { size: "panel" | "screen" }) {
+/**
+ * 面板首頁最上面：最新的一則。還沒看過時展開著；看過之後收成一列，按一下再展開。
+ * `besideLedger`：桌面面板在帳本旁邊時，總資產、當日與這一週左邊都看得到，不再列一次（2026-11-14 第六次評分）
+ */
+export function BriefingBlock({ size, besideLedger = false }: { size: "panel" | "screen"; besideLedger?: boolean }) {
   const readOnly = useReadOnly()
   const latest = useLatestBriefing(!readOnly)
   const mark = useMarkBriefingRead()
@@ -69,20 +72,20 @@ export function BriefingBlock({ size }: { size: "panel" | "screen" }) {
         </button>
       </h3>
       <div id={bodyId} hidden={!open}>
-        <BriefingBody briefing={briefing} size={size} />
+        <BriefingBody briefing={briefing} size={size} omitLedger={besideLedger} />
       </div>
     </section>
   )
 }
 
 /** 一則簡報的內容：事實（印刷）＋AI 補充（鉛筆） */
-export function BriefingBody({ briefing, size }: { briefing: Briefing; size: "panel" | "screen" | "page" }) {
+export function BriefingBody({ briefing, size, omitLedger = false }: { briefing: Briefing; size: "panel" | "screen" | "page"; omitLedger?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const f = briefing.facts
   return (
     <div className="flex flex-col">
       <dl className="grid grid-cols-[4.75rem_minmax(0,1fr)] gap-x-3 text-base">
-        {f.holdings > 0 && (
+        {f.holdings > 0 && !omitLedger && (
           <>
             <Fact label="總資產">{privacy ? <Masked /> : <span className="num">{formatMoney(f.market_value)}</span>}</Fact>
             <Fact label="當日">
@@ -108,7 +111,7 @@ export function BriefingBody({ briefing, size }: { briefing: Briefing; size: "pa
             <Movers items={f.watchlist} />
           </Fact>
         )}
-        {f.upcoming.length > 0 && (
+        {f.upcoming.length > 0 && !omitLedger && (
           <Fact label="這一週">
             <ul className="flex flex-col gap-0.5">
               {f.upcoming.map((u, i) => (
@@ -121,7 +124,7 @@ export function BriefingBody({ briefing, size }: { briefing: Briefing; size: "pa
           </Fact>
         )}
       </dl>
-      {f.unpriced > 0 && <p className="mt-2 text-sm text-ink-2">{f.unpriced} 檔沒有收盤價，不在今日的數字裡。</p>}
+      {f.unpriced > 0 && !omitLedger && <p className="mt-2 text-sm text-ink-2">{f.unpriced} 檔沒有收盤價，不算在當日。</p>}
       {briefing.points.length > 0 && (
         <>
           <ul className="mt-1">
@@ -201,7 +204,7 @@ function hostOf(url: string): string {
   }
 }
 
-/** 紀錄頁的「之前的簡報」：最近 14 則，一列一則（日期、當天的損益），按一下展開。沒有簡報就整段不出現 */
+/** 對話紀錄頁的「收盤簡報」：最近 14 則，一列一則（日期、當天的損益），按一下展開。沒有簡報就整段不出現 */
 export function BriefingHistory() {
   const list = useBriefings()
   const privacy = usePrefs((s) => s.privacyMode)
@@ -209,7 +212,7 @@ export function BriefingHistory() {
   const items = list.data ?? []
   if (items.length === 0) return null
   return (
-    <Section title="之前的簡報" titleId="briefing-history" bodyClassName="pt-0">
+    <Section title="收盤簡報" titleId="briefing-history" bodyClassName="pt-0">
       <ul className="border-b border-rule">
         {items.map((b) => {
           const open = openId === b.id

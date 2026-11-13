@@ -17,7 +17,7 @@ export function deepSearchCost(usage: Pick<AiUsage, "deep_search_cost"> | undefi
 
 /** 切換鈕開著時輸入框下面的那一句（15px 墨色） */
 export function deepSearchHint(cost: number): string {
-  return `多查幾輪資料，寫成一份整理。算 ${cost} 題。`
+  return `多查幾輪資料，寫成一份整理，用掉 ${cost} 題。`
 }
 
 /** 問句裡不是名稱的字 */

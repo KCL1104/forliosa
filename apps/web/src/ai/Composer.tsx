@@ -130,7 +130,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
         </form>
         {/* 手機的一行輸入框放不下這顆鈕：放在輸入框下面一列，開著時那句話接在右邊（放不下就換行） */}
         {deepToggle && (
-          <div className="mt-1 flex flex-wrap items-center gap-x-2.5">
+          // 切換鈕的字對齊內容的左緣（鈕本身有 10px 內距，往左拉回去）
+          <div className="mt-1 -ml-2.5 flex flex-wrap items-center gap-x-2.5">
             {deepToggle}
             {deepHint}
           </div>

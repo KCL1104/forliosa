@@ -29,7 +29,8 @@ export function dividendAsk(code?: string): string {
 /** 常用動作（依頁面）：記一筆交易、股利入帳… */
 export type AiAction = "trade" | "dividend" | "alert" | "checkup" | "form"
 
-const DRAFT_SAYS = "照你說的算好了稅費，你看一下。"
+// 卡片上只列合計（不逐項列稅費，產品負責人 2026-11-14），所以只說合計含了什麼
+const DRAFT_SAYS = "合計已含手續費與稅。"
 
 function describe(d: Pick<Draft, "input" | "instrument">): string {
   const { input, instrument } = d

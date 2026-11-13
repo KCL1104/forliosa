@@ -11,24 +11,14 @@ export interface QuickAction {
 }
 
 /**
- * 依頁面出現的常用動作（一行文字連結）：只放這一頁真的能做的事。
- * 帳本：記一筆交易・股利入帳（匯入對帳單還沒有，不放入口）；個股頁：記一筆這一檔（有持股時加股利入帳）；
- * 群組、設定、資料來源、紀錄：沒有。
+ * 依頁面出現的常用動作（一行文字連結）：只放頁面上沒有、而且這一頁真的能做的事。
+ * 「記一筆」在帳本的工具列與個股頁的標題列都有（直接開輸入框），面板不再放第二條會先開一段對話的路；
+ * 台股的股利在除息日自動入帳（產品負責人 2026-11-14：只需要記買進）。剩下的只有：持有美股的個股頁「股利入帳」
+ * （美股股利沒有來源，要自己記）。其他頁面：沒有。
  */
 export function quickActions(ctx: AiContext): QuickAction[] {
-  if (ctx.route === "ledger") {
-    return [
-      { key: "trade", label: "記一筆交易", run: "trade" },
-      { key: "dividend", label: "股利入帳", run: "dividend" },
-    ]
-  }
-  if (ctx.route === "stock") {
-    const s = ctx.stock
-    // 台股的名稱短（台積電、元大台灣50）；美股名稱長，用代號
-    const short = s.market === "US" ? s.code : s.name
-    const out: QuickAction[] = [{ key: "trade", label: `記一筆${s.market === "US" ? " " : ""}${short}`, run: "trade", code: s.code }]
-    if (s.position) out.push({ key: "dividend", label: "股利入帳", run: "dividend", code: s.code })
-    return out
+  if (ctx.route === "stock" && ctx.stock.market === "US" && ctx.stock.position) {
+    return [{ key: "dividend", label: "股利入帳", run: "dividend", code: ctx.stock.code }]
   }
   return []
 }

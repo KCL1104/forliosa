@@ -31,9 +31,16 @@ const RANGES: { value: PerformanceRange; label: string }[] = [
   { value: "ALL", label: "全部" },
 ]
 
+/** 算不出來、而且換區間或基準也沒有用：含美股（美股沒有可商用的價格） */
+function isBlocked(p: Performance | undefined, isError: boolean): boolean {
+  return !!p && !isError && p.series.length < 2 && (p.notes ?? []).some((n) => n.includes("美股"))
+}
+
 export function PerformanceView() {
   const [range, setRange] = useState<PerformanceRange>("1Y")
+  // undefined＝全部帳戶。chosen：使用者自己在選單選過（選過「全部帳戶」就照他的意思顯示空狀態）
   const [account, setAccount] = useState<string | undefined>()
+  const [chosen, setChosen] = useState(false)
   const accounts = useAccounts()
   // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
   const readOnly = useReadOnly()
@@ -41,20 +48,30 @@ export function PerformanceView() {
   const prefBenchmark = usePrefs((s) => s.benchmark)
   const benchmark = readOnly ? undefined : prefBenchmark
   const setPref = usePrefSetter()
-  const perf = usePerformance(range, account, benchmark)
-  const holdings = useHoldings(account)
+  const accountOptions = accounts.data ?? []
+  // 全部帳戶含美股就算不出績效（美股沒有報價）。還沒選過帳戶時，自動只看第一個新台幣帳戶、上面一行說明，
+  // 而不是一打開就是空白（產品負責人自己有複委託帳戶，每天都會看到；2026-11-14 設計評分）
+  const perfAll = usePerformance(range, account, benchmark)
+  const tw = accountOptions.find((a) => a.currency === "TWD")
+  const autoAccount = !chosen && account === undefined && isBlocked(perfAll.data, perfAll.isError) && tw ? tw.id : undefined
+  const effective = autoAccount ?? account
+  const perf = usePerformance(range, effective, benchmark)
+  const holdings = useHoldings(effective)
   const p = perf.data
   // 算不出來、而且換區間或基準也沒有用（含美股：沒有可商用的價格）：區間與比較基準不放，只留帳戶——那是唯一有用的控制項
-  const blocked = !!p && !perf.isError && p.series.length < 2 && (p.notes ?? []).some((n) => n.includes("美股"))
-  const accountOptions = accounts.data ?? []
+  const blocked = isBlocked(p, perf.isError)
+  const pick = (id: string | undefined) => {
+    setChosen(true)
+    setAccount(id)
+  }
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
         {!blocked && <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />}
         <Select
-          value={account ?? "all"}
-          onValueChange={(v) => setAccount(v === "all" ? undefined : (v as string))}
+          value={effective ?? "all"}
+          onValueChange={(v) => pick(v === "all" ? undefined : (v as string))}
           items={[{ value: "all", label: "全部帳戶" }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]}
         >
           <SelectTrigger size="sm" className="min-w-36 pointer-coarse:data-[size=sm]:h-11" aria-label="帳戶">
@@ -91,9 +108,10 @@ export function PerformanceView() {
           <ChartSkeleton height={300} />
         </>
       ) : p.series.length < 2 ? (
-        <NotEnough p={p} account={account} accounts={accountOptions} onAccount={setAccount} />
+        <NotEnough p={p} account={effective} accounts={accountOptions} onAccount={pick} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
+          {autoAccount && tw && <p className="text-base text-ink">只算「{tw.name}」。美股沒有報價，含美股的帳戶算不出績效。</p>}
           <DataNotes notes={p.notes} />
           <Metrics p={p} />
           <Panel title="與基準比較" titleId="cmp-title">
@@ -134,7 +152,7 @@ function NotEnough({ p, account, accounts, onAccount }: { p: Performance; accoun
     <EmptyState
       // 這個分段的最後一塊：下面那條線是頁尾（資料來源）的上緣格線，不重複畫、不夾一段空白
       className="border-b-0 pb-0"
-      title={notes.length ? "績效還算不出來" : "資料還不夠計算績效"}
+      title={notes.length ? "算不出績效" : "資料還不夠計算績效"}
       description={
         // 後端的原文，一則一行（放在空狀態的說明段落裡，所以用 span 不用清單）
         notes.length

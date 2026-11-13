@@ -12,7 +12,7 @@ import { formatDate, formatDateShort, formatPercent, formatPrice } from "@/lib/f
 import { KeyGrid, NotYet } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
-const TRACKING_ERROR = "沒有追蹤誤差（指數的每日資料沒有開放）。"
+const TRACKING_ERROR = "沒有追蹤誤差。"
 const md = (d: string) => formatDateShort(d, false)
 
 /**

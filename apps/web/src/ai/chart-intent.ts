@@ -1,5 +1,6 @@
 import { readMockPolicy } from "@/api/mock/commercial"
 import type { ForliosaApi, HistoryRange, Instrument, PerformanceRange } from "@/api/types"
+import { formatPercent, formatRevenueThousands } from "@/lib/format"
 import { normalize } from "./intent"
 import type { AiChart } from "./remote"
 
@@ -126,7 +127,7 @@ export async function buildLocalChart(
     const title = series.length > 1 ? `我的報酬率與${perf.benchmark!.name}（${label}）` : `我的報酬率（${label}）`
     return done(
       { kind: "performance", title, unit: "pct", currency: null, x: "date", range: intent.range, series, notes: [...(perf.notes ?? []), "報酬率是時間加權報酬率；基準含股利"], sources: ["帳本紀錄"], is_demo: perf.is_demo },
-      `${label}的報酬率畫好了。`,
+      `${label}${series.map((s) => `${s.name === "我的報酬率" ? "我的報酬率" : s.name} ${formatPercent(s.points.at(-1)!.v)}`).join("、")}。`,
     )
   }
 
@@ -146,7 +147,7 @@ export async function buildLocalChart(
     if (c.points.length < 2) return { chart: null, text: c.notes[0] ? `${inst.name}：${c.notes[0]}，畫不出走勢。` : `${inst.name}的收盤價不到兩天，畫不出走勢。` }
     return done(
       { kind: "price", title: `${inst.name} 收盤價（${label}）`, unit: "price", currency: inst.currency, x: "date", range: intent.range, series: [{ name: inst.name, symbol: inst.symbol, points: c.points }], notes: [...notes, ...c.notes, "收盤價沒有還原權息，除權息日會有缺口"], sources: c.sources, is_demo: c.isDemo },
-      `${inst.name}${label}的收盤走勢畫好了。`,
+      `${label}${inst.name} ${formatPercent(c.points.at(-1)!.v / c.points[0]!.v - 1)}。`,
     )
   }
 
@@ -174,7 +175,7 @@ export async function buildLocalChart(
     })
     return done(
       { kind: "compare", title: `${names(series)} 漲跌幅（${label}）`, unit: "pct", currency: null, x: "date", range: intent.range, series, notes: [...notes, "漲跌幅只算價格變動，不含股利"], sources, is_demo: isDemo },
-      `${names(series)}${label}的漲跌幅畫好了。`,
+      `${label}${series.map((s) => `${s.name} ${formatPercent(s.points.at(-1)!.v)}`).join("、")}。`,
     )
   }
 
@@ -212,6 +213,18 @@ export async function buildLocalChart(
       // mock 的商用模式模擬真實資料（畫面上不標「示範資料」）；個人模式才標
       is_demo: api.kind === "mock" && readMockPolicy() === "personal",
     },
-    `${names(series)}的${revenue ? "月營收" : "每季每股盈餘"}畫好了。`,
+    // 一句事實（最新一期），不是「畫好了」這種流程話：圖卡的標題已經說了畫的是什麼
+    series
+      .map((s) => {
+        const last = s.points.at(-1)!
+        return revenue ? `${s.name} ${periodLabel(String(last.t))}營收 ${formatRevenueThousands(last.v)} 元` : `${s.name} ${last.t} 每股盈餘 ${last.v.toFixed(2)} 元`
+      })
+      .join("、") + "。",
   )
+}
+
+/** 月營收的期別：「2026-10」→「10 月」 */
+function periodLabel(period: string): string {
+  const m = /^\d{4}-(\d{2})/.exec(period)
+  return m ? `${Number(m[1])} 月` : period
 }
