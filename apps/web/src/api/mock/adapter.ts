@@ -92,7 +92,7 @@ export function readMockTerms(): MockOptions["terms"] {
     const fromUrl = new URLSearchParams(window.location.search).get("terms")
     if (fromUrl === "default") window.sessionStorage.removeItem("forliosa:mock-terms")
     else if (fromUrl === "updated") window.sessionStorage.setItem("forliosa:mock-terms", fromUrl)
-    return window.sessionStorage.getItem("forliosa:mock-terms") === "updated" ? { current: "2026-12-01", accepted: "2026-11-13" } : undefined
+    return window.sessionStorage.getItem("forliosa:mock-terms") === "updated" ? { current: "2026-12-01", accepted: "2026-11-13", effectiveDate: "2026-12-01", summary: "新增匯出資料與刪除帳號的說明" } : undefined
   } catch {
     return undefined
   }
@@ -144,7 +144,7 @@ export interface MockOptions {
    * 條款版本（預設：沒有啟用，兩個欄位都是 null）。`current`：後端的 TERMS_VERSION；`accepted`：這個帳號同意過的版本。
    * 兩個不同時登入後會看到「服務條款與隱私權政策已更新」。
    */
-  terms?: { current: string; accepted?: string | null }
+  terms?: { current: string; accepted?: string | null; effectiveDate?: string | null; summary?: string | null }
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
@@ -157,6 +157,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     id: "usr_01JDEMO", email: "demo@forliosa.local", display_name: "示範使用者", avatar_url: null, preferences: { ...DEFAULT_PREFS },
     terms_version_accepted: options.terms ? (options.terms.accepted ?? null) : null,
     terms_version_current: options.terms?.current ?? null,
+    terms_effective_date: options.terms?.effectiveDate ?? null,
+    terms_summary: options.terms?.summary ?? null,
   }
   /** 匯出的次數（每小時 5 次；mock 不算時間，第 6 次起擋下） */
   let exports = 0
@@ -703,9 +705,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     requestAnalystViews: (symbol) => wait(() => analyst.request(spec(symbol).symbol)),
 
     // ── 分享（M5） ──
-    getAuthProviders: () => wait(() => ({ discord: true, dev_login: false })),
+    getAuthProviders: () => wait(() => ({ discord: true, google: true, dev_login: false })),
     // 沒有真的 Discord：整頁回到 next，帶 `auth=signed-in` 當作登入成功
     discordLoginUrl: (next) => `${next}${next.includes("?") ? "&" : "?"}auth=signed-in`,
+    googleLoginUrl: (next) => `${next}${next.includes("?") ? "&" : "?"}auth=signed-in`,
     updateMe: (patch) =>
       wait(() => {
         const name = (patch.display_name ?? "").trim()
@@ -785,7 +788,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 // ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
 type MethodName = Exclude<keyof ForliosaApi, "kind">
 /** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
-const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "exportMe", "deleteMe", "acceptTerms", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations", "setPublicName"])
+const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "exportMe", "deleteMe", "acceptTerms", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "googleLoginUrl", "listDelegations", "setPublicName"])
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",

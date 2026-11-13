@@ -123,7 +123,7 @@ function PublicNameForm({ user }: { user: User }) {
         </div>
         <SaveSlot dirty={dirty} disabled={form.pending || !form.trimmed} pending={form.pending} />
       </div>
-      {until && <p className="mt-2 border-y border-rule py-2.5 text-md text-ink">{suspendedText(until)}</p>}
+      {until && <p className="mt-2 border-y border-rule py-2.5 text-md text-ink">{suspendedText(until, user.public_posting_suspended_reason)}</p>}
     </form>
   )
 }

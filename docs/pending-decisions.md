@@ -286,12 +286,12 @@
 
 | # | 問題 | 選項 → 建議 | 出處 |
 |---|---|---|---|
-| L-1 | 資料庫備份：Railway 的自動備份只有 Pro 方案（每月 US$20 起）才有，現在是 Hobby，沒有備份。 | A. 等真的開放給別人用再處理；B. 升級 Railway Pro；C. 每天用 worker 把資料庫匯出到 Cloudflare R2（要寫程式，R2 有免費額度） → **A**（現在只有你自己的資料；開放前做 C） | `docs/deploy.md` 第 0 節 |
-| L-2 | Cloudflare 自動在網頁插入 Web Analytics（流量統計）的程式，隱私權政策寫的是「沒有追蹤」。 | A. 你到 Cloudflare 後台把 Web Analytics 關掉（Workers & Pages → forliosa → Metrics／Settings）；B. 留著，改隱私權政策的說法 → **A** | `docs/legal/README.md` |
-| L-3 | Railway 專案裡你之前自己建的 `SearXNG`、`Redis` 兩個舊服務和兩個沒掛上的 volume 沒有在用。 | A. 刪掉；B. 留著 → **A**（要你確認我才刪） | `docs/deploy.md` 第 0 節 |
+| L-1 | ~~資料庫備份~~ | **已決定（2026-11-13）：照建議**——現在不做；開放給別人用之前，做「每天用 worker 把資料庫匯出到 Cloudflare R2」。 | `docs/deploy.md` 第 0 節 |
+| L-2 | Cloudflare 自動在網頁插入 Web Analytics（流量統計）的程式，隱私權政策寫的是「沒有追蹤」。 | **已決定：你到 Cloudflare 後台把 Web Analytics 關掉**（Workers & Pages → forliosa → Metrics／Settings）。**還沒做**：2026-11-13 晚上實測網頁仍會載入 `static.cloudflareinsights.com/beacon.min.js`。 | `docs/legal/README.md` |
+| L-3 | ~~Railway 的舊服務~~ | **已完成（2026-11-13）**：刪除了舊的 `SearXNG`、`Redis` 兩個服務與三個沒在用的 volume（兩個沒掛上的 postgres volume、Redis 的 volume）。刪除前確認過 api、worker、Postgres、searxng-news 沒有任何變數參照它們。volume 在 Railway 是「待刪除」狀態，保留到 2026-11-15 才真的清掉（這之前可以在 Railway 後台還原）；兩個服務是立刻刪除的。 | `docs/deploy.md` 第 0 節 |
 | L-4 | 請用 Discord 在 `https://forliosa.trade` 登入一次，確認正式環境的登入流程。 | — | — |
 | L-5 | 法律文件還沒填的：管轄法院、責任上限金額、Anthropic 的資料保存期間、備份保存期間、生效日期；另有 13 處【待確認】要請律師看。這一輪只改了寫法（用詞和介面一致、登出那一句照產品實際行為改），沒有改實質內容。 | 你給管轄法院與責任上限 → 我填進去 → 律師看 → 設定 `TERMS_VERSION` 才生效 | `docs/legal/` |
-| L-6 | 資料來源頁現在公開寫「這些搜尋引擎的條款不允許自動查詢；這個風險由 Forliosa 的營運者承擔」。要不要留在公開頁面？ | A. 頁面只寫做法（「我們自架 SearXNG 查新聞標題，被擋下就停止」），風險那兩句留在內部文件，律師看過再決定；B. 照現在全部公開；C. 頁面不提 SearXNG → **A** | `apps/web/src/pages/data-sources/DataSourcesPage.tsx` |
-| L-7 | 條款更新時，登入後最上面那一行現在只寫「服務條款與隱私權政策已更新。」；服務條款第 13 條承諾生效前 14 天公告。 | A. 後端多給「生效日」和一句「變更摘要」，那一行寫「M/D 起適用新版：〈摘要〉」；B. 只加生效日；C. 維持 → **A**（條款正式生效前做完即可） | `apps/web/src/app/TermsNotice.tsx` |
-| L-8 | 公開發言被站方暫停時，本人只看到暫停到什麼時候，看不到原因（管理員有填）。 | A. 顯示管理員填的原因；B. 維持 → **A** | `apps/web/src/pages/discussions/labels.ts` |
-
+| L-6 | ~~資料來源頁的風險句~~ | **已完成（2026-11-13）：照建議**——頁面只寫做法（「SearXNG 被搜尋引擎擋下時就停止查詢，不會設法繞過」），「搜尋引擎的條款不允許自動查詢、風險由營運者承擔」留在內部文件（`docs/research/news-and-external-sources.md` §10、本文件 1-3），請律師看過再決定要不要公開。 | `apps/web/src/pages/data-sources/DataSourcesPage.tsx` |
+| L-7 | ~~條款更新那一行的生效日與摘要~~ | **已完成（2026-11-13）：照建議**——設 `TERMS_EFFECTIVE_DATE`、`TERMS_SUMMARY` 之後，那一行寫「12/1 起適用新版服務條款與隱私權政策：〈摘要〉。」條款定稿、設 `TERMS_VERSION` 時一起設。 | `apps/web/src/lib/terms-notice.ts` |
+| L-8 | ~~停權原因~~ | **已完成（2026-11-13）：照建議**——被暫停的人看得到管理員填的原因；管理員的對話框註明「對方會看到這句話」。 | `apps/web/src/pages/discussions/labels.ts` |
+| L-9 | Google 登入已經做好（2026-11-13）。`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET` 你已經填在 Railway；`GOOGLE_REDIRECT_URI` 由 Claude 設定。Google Cloud Console 那邊要確認：重新導向 URI 一字不差、應用程式已「發布」（不是測試中）。 | 用你的 Google 帳號在 `https://forliosa.trade` 登入一次確認 | `docs/deploy.md` 2.4.1 |

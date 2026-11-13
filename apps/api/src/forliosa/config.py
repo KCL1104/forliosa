@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import date
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
@@ -38,6 +39,14 @@ class Settings(BaseSettings):
     discord_client_id: str | None = None
     discord_client_secret: SecretStr | None = None
     discord_redirect_uri: str | None = None
+    # -- login: Google OAuth (OpenID Connect) ---------------------------------------------------------
+    # All three must be set for "Sign in with Google" (GET /auth/providers → google: true). GOOGLE_REDIRECT_URI is the
+    # callback on the API host (…/api/v1/auth/google/callback) exactly as registered in Google Cloud Console; https in
+    # production. A half-set or non-https configuration does not stop the API (Google is optional): the provider
+    # stays off and a warning is logged at startup.
+    google_client_id: str | None = None
+    google_client_secret: SecretStr | None = None
+    google_redirect_uri: str | None = None
     # The frontend's origin (https://app.example.com): OAuth redirects back to it and invite links point at it.
     # Required in prod, where it must be one of CORS_ORIGINS and https.
     frontend_url: str | None = None
@@ -136,6 +145,10 @@ class Settings(BaseSettings):
     # each account at sign-up; when it changes, GET /me shows a different ``terms_version_current`` and the app asks
     # the user to acknowledge it (POST /me/terms-accept). Unset: versions are not tracked.
     terms_version: str | None = None
+    # Shown with that request: the day the current version takes effect (YYYY-MM-DD; the terms promise 14 days'
+    # notice) and one sentence saying what changed. Both optional; ignored while TERMS_VERSION is unset.
+    terms_effective_date: date | None = None
+    terms_summary: str | None = None
 
     # -- News (個股頁「新聞報導」, forliosa.news): metadata only — headline, outlet, time, link ------------------
     # The worker refreshes the tracked symbols (held, watched, or viewed in the last NEWS_VIEW_DAYS days) every
@@ -238,8 +251,9 @@ class Settings(BaseSettings):
         """Browsers send ``Origin: https://app.example.com`` (no path, no trailing slash)."""
         return list(dict.fromkeys(o.strip().rstrip("/") for o in v if o.strip()))
 
-    @field_validator("discord_client_id", "discord_redirect_uri", "frontend_url", "telegram_bot_username",
-                     "terms_version", mode="before")
+    @field_validator("discord_client_id", "discord_redirect_uri", "google_client_id", "google_redirect_uri",
+                     "frontend_url", "telegram_bot_username", "terms_version", "terms_effective_date",
+                     "terms_summary", mode="before")
     @classmethod
     def _blank_is_none(cls, v: object) -> object:
         """An empty variable means "not set"; a trailing ``/`` on the frontend URL is dropped (it is an origin)."""
@@ -253,7 +267,7 @@ class Settings(BaseSettings):
     def _frontend_origin(cls, v: str | None) -> str | None:
         return v.rstrip("/") if v else v
 
-    @field_validator("discord_client_secret", "telegram_bot_token", mode="before")
+    @field_validator("discord_client_secret", "google_client_secret", "telegram_bot_token", mode="before")
     @classmethod
     def _blank_secret(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
@@ -292,6 +306,19 @@ class Settings(BaseSettings):
     def discord_partially_configured(self) -> bool:
         parts = (self.discord_client_id, self.discord_client_secret, self.discord_redirect_uri)
         return any(parts) and not self.discord_enabled
+
+    @property
+    def google_enabled(self) -> bool:
+        ok = bool(self.google_client_id and self.google_client_secret
+                  and self.google_client_secret.get_secret_value() and self.google_redirect_uri)
+        # Production: the callback must be https (Google refuses anything else for a public client anyway).
+        return ok and (self.forliosa_env != "prod" or (self.google_redirect_uri or "").startswith("https://"))
+
+    @property
+    def google_misconfigured(self) -> bool:
+        """Some GOOGLE_* variables are set but the provider is off (one missing, or a non-https callback in prod)."""
+        parts = (self.google_client_id, self.google_client_secret, self.google_redirect_uri)
+        return any(parts) and not self.google_enabled
 
     @property
     def frontend_base(self) -> str:

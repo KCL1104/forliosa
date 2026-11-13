@@ -126,7 +126,7 @@ function DeleteAccountDialog({ onClose }: { onClose: () => void }) {
         >
           <DialogHeader>
             <DialogTitle>刪除帳號？</DialogTitle>
-            <DialogDescription>刪除之後不能復原，同一個 Discord 帳號再登入會是全新的帳號。</DialogDescription>
+            <DialogDescription>刪除之後不能復原，同一個 Google 或 Discord 帳號再登入會是全新的帳號。</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3 text-md">
             <div>

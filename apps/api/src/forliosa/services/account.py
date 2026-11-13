@@ -63,11 +63,13 @@ from forliosa.models import (
 )
 from forliosa.services import discussions, groups
 from forliosa.services.ledger_io import preferences_of
+from forliosa.textsafe import one_line
 from forliosa.timeutil import iso_utc, now_utc
 
 EXPORT_FORMAT_VERSION = 1
 DELETE_CONFIRMATION = "刪除我的帳號"
 EXPORT_LIMIT = 5  # exports per user per rolling hour
+TERMS_SUMMARY_MAX = 120  # the one sentence shown with a terms update
 EXPORT_WINDOW_SECONDS = 3600.0
 
 # Export rate limit: in this process's memory (the API runs as one replica; a restart resets it — it only keeps a
@@ -185,8 +187,16 @@ def export_user(db: Session, user: User) -> dict[str, Any]:
 
 # -- terms -----------------------------------------------------------------------------------------------------------
 def terms_fields(user: User) -> dict[str, Any]:
+    """The version this user agreed to, the current one, and — for the notice shown when they differ — the day the
+    current version takes effect and one sentence saying what changed (both optional, operator-set)."""
+    settings = get_settings()
+    tracked = settings.terms_version is not None
     return {"terms_version_accepted": user.terms_version_accepted,
-            "terms_version_current": get_settings().terms_version}
+            "terms_version_current": settings.terms_version,
+            "terms_effective_date": settings.terms_effective_date.isoformat()
+            if tracked and settings.terms_effective_date else None,
+            "terms_summary": one_line(settings.terms_summary)[:TERMS_SUMMARY_MAX] or None
+            if tracked and settings.terms_summary else None}
 
 
 def record_terms_at_signup(user: User, at: datetime | None = None) -> None:
@@ -208,8 +218,9 @@ def accept_terms(db: Session, user: User, version: str) -> None:
 
 # -- suspension carry-over -------------------------------------------------------------------------------------------
 def identity_hash(provider: str, subject: str) -> str:
-    """Keyed hash of a login identity: the same Discord account gives the same value, and the value cannot be turned
-    back into the Discord id without ``SESSION_SECRET``."""
+    """Keyed hash of a login identity (``discord`` / ``google`` + the provider's account id, or ``email`` + the
+    verified e-mail): the same account gives the same value, and the value cannot be turned back into the id or the
+    e-mail without ``SESSION_SECRET``."""
     key = get_settings().session_secret.encode()
     return hmac.new(key, f"suspension-carryover:{provider}:{subject}".encode(), hashlib.sha256).hexdigest()
 
@@ -218,8 +229,13 @@ def _carry_suspension(db: Session, user: User, now: datetime) -> None:
     suspension = discussions.active_suspension(db, user.id, now)
     if suspension is None:
         return
-    for ident in db.scalars(select(UserIdentity).where(UserIdentity.user_id == user.id)):
-        key = identity_hash(ident.provider, ident.subject)
+    # Every way this person can come back: each linked login, and the e-mail (an account deleted with only a Discord
+    # login must not shed its suspension by registering again through Google with the same e-mail).
+    keys = [identity_hash(i.provider, i.subject)
+            for i in db.scalars(select(UserIdentity).where(UserIdentity.user_id == user.id))]
+    if user.email:
+        keys.append(identity_hash("email", user.email.strip().lower()))
+    for key in dict.fromkeys(keys):
         row = db.get(DiscussionSuspensionCarryover, key)
         if row is None:
             db.add(DiscussionSuspensionCarryover(identity_hash=key, until=suspension.until, reason=suspension.reason,
@@ -237,12 +253,18 @@ def apply_carried_suspension(db: Session, user: User, provider: str, subject: st
     account of the same identity continues on the new one. Expired carry-overs are removed."""
     now = now or now_utc()
     db.execute(delete(DiscussionSuspensionCarryover).where(DiscussionSuspensionCarryover.until <= now))
-    row = db.get(DiscussionSuspensionCarryover, identity_hash(provider, subject))
-    if row is None or _aware(row.until) <= now:
+    keys = [identity_hash(provider, subject)]
+    if user.email:
+        keys.append(identity_hash("email", user.email.strip().lower()))
+    rows = [r for r in (db.get(DiscussionSuspensionCarryover, k) for k in keys)
+            if r is not None and _aware(r.until) > now]
+    if not rows:
         return
-    db.add(DiscussionSuspension(id=new_id("sus"), user_id=user.id, until=row.until, reason=row.reason,
+    longest = max(rows, key=lambda r: _aware(r.until))
+    db.add(DiscussionSuspension(id=new_id("sus"), user_id=user.id, until=longest.until, reason=longest.reason,
                                 created_by=None, created_at=now))
-    db.delete(row)
+    for r in rows:
+        db.delete(r)
 
 
 # -- delete ----------------------------------------------------------------------------------------------------------

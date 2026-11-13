@@ -281,7 +281,11 @@ function ConfirmDialog({ confirm, onClose }: { confirm: Confirm; onClose: () => 
               <label htmlFor={`${id}-reason`} className="text-sm font-medium">
                 原因（選填）
               </label>
-              <Input id={`${id}-reason`} value={reason} maxLength={REPORT_NOTE_MAX} autoComplete="off" onChange={(e) => setReason(e.target.value)} />
+              <Input id={`${id}-reason`} value={reason} maxLength={REPORT_NOTE_MAX} autoComplete="off" aria-describedby={`${id}-reason-help`} onChange={(e) => setReason(e.target.value)} />
+              {/* 原因會給被暫停的人看：提醒管理員照這個前提寫 */}
+              <p id={`${id}-reason-help`} className="text-sm text-ink-2">
+                對方會看到這句話。
+              </p>
             </div>
           </div>
         )}

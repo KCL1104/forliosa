@@ -762,13 +762,15 @@
 - **名稱只能是一行**：顯示名稱與群組名稱不能有換行、Tab 等控制字元，也不能有看不見的格式字元（雙向文字控制、零寬空白、BOM 等；
   組合 emoji 用的 U+200D 可以），否則 422 `validation_error`。Discord 登入取得的名稱會自動去掉這些字元。
 
-### 登入（Discord OAuth）與個人資料
+### 登入（Discord、Google OAuth）與個人資料
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/auth/providers` | 不需登入：`{"discord": true, "dev_login": false}`（`discord` 依環境變數是否齊全） |
+| GET | `/auth/providers` | 不需登入：`{"discord": true, "google": true, "dev_login": false}`（`discord`、`google` 依各自的環境變數是否齊全） |
 | GET | `/auth/discord/start?next=/invite/abc` | 302 到 Discord 授權頁（scope `identify email`、`prompt=none` 不帶） |
 | GET | `/auth/discord/callback?code=&state=` | 驗證 state、換 token、讀 `/users/@me`；成功建立 session（輪換 session id）後 302 到 `{FRONTEND_URL}{next}`；失敗 302 到 `{FRONTEND_URL}/login?error=<code>` |
+| GET | `/auth/google/start?next=/invite/abc` | 302 到 Google 授權頁（scope `openid email profile`、`prompt=select_account`） |
+| GET | `/auth/google/callback?code=&state=` | 同 Discord 的 callback：驗證 state、換 token、讀 userinfo（`sub`、`email`、`email_verified`、`name`、`picture`）；成功或失敗的導向相同 |
 | PATCH | `/me` | `{"display_name"}`（1–30 字，去頭尾空白，只能一行：見共通規則）→ `User`。群組裡顯示的就是這個名稱 |
 
 - **state**：隨機值＋`next`，以 `SESSION_SECRET` 做 HMAC 簽章，存在 10 分鐘的 cookie（正式環境 `__Host-forliosa_oauth`：
@@ -782,6 +784,8 @@
 - 失敗代碼：`oauth_disabled`、`oauth_denied`（使用者按取消）、`oauth_state`、`oauth_email_unverified`、`oauth_email_conflict`、`oauth_failed`。
 - 環境變數：`DISCORD_CLIENT_ID`、`DISCORD_CLIENT_SECRET`、`DISCORD_REDIRECT_URI`（API 主機上的 callback 網址，與 Discord Developer Portal 設定一致）、
   `FRONTEND_URL`。`FORLIOSA_ENV=prod` 啟動時檢查：`FRONTEND_URL` 在 `CORS_ORIGINS` 裡、兩者與 `DISCORD_REDIRECT_URI` 都是 https，否則拒絕啟動。
+- **Google 登入（2026-11-13）**：和 Discord 同一套規則。帳號對應以 Google 的 `sub` 找；找不到時，既有帳號**還沒連結任何 Google 帳號**才以**已驗證**的 email 連結——所以同一個人今天用 Discord、明天用 Google（同一個 email）登入，是同一個帳號（`user_identities` 一人每種登入方式各一筆）。那個 email 已連結到別的 Google 帳號 → `oauth_email_conflict`。新帳號的 `display_name` 取 Google 帳號的名稱，`avatar_url` 是 Google 的頭像網址（每次登入更新成這次登入那一家的頭像）。不儲存 Google 的 access token、id token（讀完 userinfo 就撤銷）。state 簽章裡帶著是哪一家：Discord 發的 state 不能拿到 Google 的 callback 用，反之亦然。
+  環境變數 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`、`GOOGLE_REDIRECT_URI`（`…/api/v1/auth/google/callback`，正式環境 https）。Google 是選用的：三個沒設齊或正式環境的 callback 不是 https 時，`google` 是 false、啟動時記一行警告，**不會**拒絕啟動。
 - `POST /auth/dev-login` 照舊只在開發環境啟用。開放任何 Discord 帳號註冊；每人的 AI 額度照現有限制。
 - `User` 新增 `avatar_url`（Discord 頭像網址，可為 `null`）。
 
@@ -1070,7 +1074,8 @@
 ### 條款版本
 
 - 伺服器設定 `TERMS_VERSION`（例如 `2026-11-13`；沒設定＝不啟用這一段）。帳號建立時記錄當時的版本與時間。
-- `GET /me` 多 `terms_version_accepted: string | null`、`terms_version_current: string | null`。兩者不同時，前端在登入後顯示一行「服務條款與隱私權政策已更新」＋連結＋「知道了」。
+- `GET /me` 多 `terms_version_accepted: string | null`、`terms_version_current: string | null`。兩者不同時，前端在登入後顯示一行說明＋連結＋「知道了」。
+- 那一行寫什麼（2026-11-13）：`GET /me` 另有 `terms_effective_date: "YYYY-MM-DD" | null`（`TERMS_EFFECTIVE_DATE`，新版從哪一天生效）與 `terms_summary: string | null`（`TERMS_SUMMARY`，改了什麼的一句話，一行、最多 120 字）；沒啟用版本時兩個都是 null。前端：生效日還沒到「12/1 起適用新版服務條款與隱私權政策：〈摘要〉。」；到了或過了「服務條款與隱私權政策在 12/1 更新：〈摘要〉。」；都沒填「服務條款與隱私權政策已更新。」
 - `POST /me/terms-accept` `{"version": "<terms_version_current>"}` → `User`（版本不是目前的 → 409 `terms_version_mismatch`）。
 - 前端頁面：`/terms`、`/privacy`（不用登入就能讀；內容來自 `docs/legal/` 的兩份文件；文件裡還有【待填】時頁面頂端標示「草稿」）。登入頁寫「登入即表示你同意〈服務條款〉與〈隱私權政策〉」並連過去；
   未登入的公開頁頁尾、設定頁也有連結。
@@ -1118,7 +1123,7 @@
 - **公開暱稱**：`users.public_name`，2–20 字、一行（規則同顯示名稱，另外不能只有空白、前後空白去掉）、不分大小寫與全半形唯一（409 `public_name_taken`）；
   不能是保留字（`forliosa`、`官方`、`管理員`、`站方`、`admin`、`system`，不分大小寫，含這些字也不行）。第一次設定不算；之後每改一次要等 7 天才能再改（409 `public_name_cooldown`，帶 `retry_after_days`）——打錯字可以馬上改一次。
   沒設定就發公開內容 → 409 `public_name_required`。改名後舊貼文顯示新暱稱。
-  - `GET /users/me` 多 `public_name: string | null`、`is_admin: boolean`、`public_posting_suspended_until: string | null`（ISO 時間；永久為 `"9999-12-31T00:00:00Z"`）。
+  - `GET /users/me` 多 `public_name: string | null`、`is_admin: boolean`、`public_posting_suspended_until: string | null`（ISO 時間；永久為 `"9999-12-31T00:00:00Z"`）、`public_posting_suspended_reason: string | null`（站方暫停時寫的原因，只有本人看得到；沒寫是 null。403 `posting_suspended` 的錯誤也多帶 `reason`）。
   - `PUT /users/me/public-name` `{"public_name"}` → `User`。
 - **內文**：純文字。主題內文 1–5000 字、回覆 1–2000 字，可換行（CRLF 轉 LF、連續空行最多 2 個、去掉行尾空白）；標題 1–80 字、一行；
   控制字元與看不見的格式字元（同名稱規則，換行除外）→ 422。不支援 Markdown、圖片；前端把 `http(s)://` 網址變成連結

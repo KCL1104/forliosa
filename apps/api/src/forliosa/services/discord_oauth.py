@@ -5,7 +5,8 @@
   without ``Secure`` in development). The callback compares in constant time and always deletes the cookie.
 * Discord's access token is used once to read ``/users/@me`` and then revoked (best effort); no Discord token is ever
   stored or logged, nor is the client secret, the authorization code or the state.
-* Account mapping: by Discord id first. Otherwise an existing account that has **no** Discord id yet is linked by a
+* Account mapping (:func:`sign_in`, shared with ``google_oauth``): by Discord id first. Otherwise an existing
+  account that has **no** Discord id yet is linked by a
   **verified** e-mail; that e-mail already linked to another Discord id → ``oauth_email_conflict``. Otherwise a new
   account (display name = Discord global name, else username, as one line without control characters). Creating or
   linking requires a verified e-mail (``oauth_email_unverified``). Every login refreshes the e-mail (verified, not
@@ -22,6 +23,7 @@ import logging
 import re
 import time
 from dataclasses import dataclass
+from typing import Protocol
 from urllib.parse import urlencode
 
 import httpx
@@ -77,16 +79,17 @@ def state_cookie_name(settings: Settings) -> str:
     return "__Host-forliosa_oauth" if settings.secure_cookies else "forliosa_oauth"
 
 
-def make_state(next_path: str) -> tuple[str, str]:
-    """(state for Discord, signed cookie value)."""
+def make_state(next_path: str, provider: str = PROVIDER) -> tuple[str, str]:
+    """(state for the provider, signed cookie value). The provider is part of the signed payload: a state issued for
+    one provider is not accepted by another provider's callback."""
     nonce = random_token(32)
-    payload = b64url(json.dumps({"s": nonce, "n": next_path, "e": int(time.time()) + STATE_TTL_SECONDS},
-                                separators=(",", ":")).encode())
+    payload = b64url(json.dumps({"s": nonce, "n": next_path, "e": int(time.time()) + STATE_TTL_SECONDS,
+                                 "p": provider}, separators=(",", ":")).encode())
     return nonce, f"{payload}.{b64url(sign('oauth-state', payload.encode()))}"
 
 
-def check_state(cookie: str | None, state: str | None) -> str:
-    """The ``next`` path of a valid state; raises ``oauth_state`` otherwise."""
+def check_state(cookie: str | None, state: str | None, provider: str = PROVIDER) -> str:
+    """The ``next`` path of a valid state issued for ``provider``; raises ``oauth_state`` otherwise."""
     if not cookie or not state or "." not in cookie:
         raise OAuthError("oauth_state")
     payload, _, sig = cookie.partition(".")
@@ -98,6 +101,8 @@ def check_state(cookie: str | None, state: str | None) -> str:
     if not isinstance(data, dict) or not isinstance(data.get("s"), str) or not isinstance(data.get("e"), int):
         raise OAuthError("oauth_state")
     if not hmac.compare_digest(data["s"].encode(), state.encode()) or data["e"] < int(time.time()):
+        raise OAuthError("oauth_state")
+    if data.get("p", PROVIDER) != provider:
         raise OAuthError("oauth_state")
     return safe_next(data.get("n") if isinstance(data.get("n"), str) else None)
 
@@ -179,10 +184,27 @@ def fetch_profile(settings: Settings, code: str) -> DiscordProfile:
 
 
 # -- account mapping -------------------------------------------------------------------------------------------------
-def sign_in(db: Session, profile: DiscordProfile) -> User:
-    """The account for this Discord profile (found, linked or created); commits."""
+class LoginProfile(Protocol):
+    """What account mapping needs from a provider's profile (``DiscordProfile``, ``google_oauth.GoogleProfile``)."""
+
+    id: str
+    email: str | None
+    verified: bool
+
+    @property
+    def avatar_url(self) -> str | None: ...
+
+    @property
+    def display_name(self) -> str: ...
+
+
+def sign_in(db: Session, profile: LoginProfile, provider: str = PROVIDER) -> User:
+    """The account for this provider profile (found, linked or created); commits. The same rules for every provider:
+    by the provider's id first; otherwise an existing account that has no identity of this provider is linked by a
+    **verified** e-mail — so the same person signing in with Discord one day and Google the next (same e-mail) gets
+    the same account."""
     now = now_utc()
-    ident = db.scalar(select(UserIdentity).where(UserIdentity.provider == PROVIDER,
+    ident = db.scalar(select(UserIdentity).where(UserIdentity.provider == provider,
                                                  UserIdentity.subject == profile.id))
     if ident is not None:
         user = db.get(User, ident.user_id)
@@ -203,7 +225,7 @@ def sign_in(db: Session, profile: DiscordProfile) -> User:
     user = db.scalar(select(User).where(User.email == profile.email))
     if user is not None:
         linked = db.scalar(select(UserIdentity).where(UserIdentity.user_id == user.id,
-                                                      UserIdentity.provider == PROVIDER))
+                                                      UserIdentity.provider == provider))
         if linked is not None:
             raise OAuthError("oauth_email_conflict")
         user.avatar_url = profile.avatar_url
@@ -216,8 +238,8 @@ def sign_in(db: Session, profile: DiscordProfile) -> User:
         db.add(user)
         db.flush()
         # Deleting an account does not lift a public-posting suspension: it continues on the new account.
-        account.apply_carried_suspension(db, user, PROVIDER, profile.id, now)
-    db.add(UserIdentity(id=new_id("uid"), user_id=user.id, provider=PROVIDER, subject=profile.id,
+        account.apply_carried_suspension(db, user, provider, profile.id, now)
+    db.add(UserIdentity(id=new_id("uid"), user_id=user.id, provider=provider, subject=profile.id,
                         email=profile.email, created_at=now, last_login_at=now))
     db.commit()
     return user

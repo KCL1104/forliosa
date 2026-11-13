@@ -50,10 +50,16 @@ class User(BaseModel):
     public_name: str | None = None
     is_admin: bool = False
     public_posting_suspended_until: str | None = None
+    # What the site admin wrote when suspending (shown to this user only; null when nothing was written).
+    public_posting_suspended_reason: str | None = None
     # Terms of service / privacy policy: the version this user agreed to and the current one (TERMS_VERSION; null
     # when versions are not tracked). Different → the app asks the user to acknowledge (POST /me/terms-accept).
     terms_version_accepted: str | None = None
     terms_version_current: str | None = None
+    # For the notice shown when the two differ: the day the current version takes effect (YYYY-MM-DD) and one
+    # sentence saying what changed (TERMS_EFFECTIVE_DATE, TERMS_SUMMARY; both optional).
+    terms_effective_date: str | None = None
+    terms_summary: str | None = None
 
 
 class AccountDeleteIn(StrictModel):

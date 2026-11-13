@@ -49,9 +49,13 @@ export function retryText(seconds: number): string {
   return `約 ${Math.ceil(seconds / 3600)} 小時後`
 }
 
-/** 公開發言被站方暫停時的一句話（`until` 是 UTC 的 ISO 時間；永久是 `PERMANENT_UNTIL`） */
-export function suspendedText(until: string | null | undefined): string {
-  const tail = "群組裡的發言不受影響。"
+/**
+ * 公開發言被站方暫停時的一句話（`until` 是 UTC 的 ISO 時間；永久是 `PERMANENT_UNTIL`）。
+ * 站方有寫原因就一起說（`reason`，只有本人看得到）：只知道被停、不知道為什麼，下次還是會犯同樣的事。
+ */
+export function suspendedText(until: string | null | undefined, reason?: string | null): string {
+  const why = reason?.trim().replace(/[。.!！\s]+$/, "")
+  const tail = `${why ? `原因：${why}。` : ""}群組裡的發言不受影響。`
   if (!until) return `你的公開發言已被站方暫停。${tail}`
   if (until === PERMANENT_UNTIL || until.startsWith("9999")) return `你的公開發言已被站方永久暫停。${tail}`
   return `你的公開發言已被站方暫停到 ${postedAt(until)}。${tail}`
@@ -78,7 +82,7 @@ export function postErrorText(err: unknown, what: "主題" | "回覆"): string {
       return seconds === null ? "發言太頻繁，請稍後再送出。內容還在。" : `發言太頻繁，${retryText(seconds)}可以再送出。內容還在。`
     }
     case "posting_suspended":
-      return suspendedText(str(err.extra.until))
+      return suspendedText(str(err.extra.until), str(err.extra.reason))
     case "public_name_required":
       return "發公開內容前要先選一個公開暱稱。"
     case "topic_hidden":

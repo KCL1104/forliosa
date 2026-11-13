@@ -114,12 +114,12 @@ def all_rows_text() -> str:
 # -- providers -----------------------------------------------------------------------------------------------
 def test_providers_without_discord(app):
     r = TestClient(app).get(f"{API}/auth/providers")
-    assert r.status_code == 200 and r.json() == {"discord": False, "dev_login": True}
+    assert r.status_code == 200 and r.json() == {"discord": False, "google": False, "dev_login": True}
 
 
 def test_providers_with_discord_and_start_redirect(discord_app):
     client = TestClient(discord_app())
-    assert client.get(f"{API}/auth/providers").json() == {"discord": True, "dev_login": True}
+    assert client.get(f"{API}/auth/providers").json() == {"discord": True, "google": False, "dev_login": True}
     state, r = start(client)
     url = urlparse(r.headers["location"])
     assert f"{url.scheme}://{url.netloc}{url.path}" == "https://discord.com/oauth2/authorize"
@@ -405,7 +405,7 @@ def test_prod_starts_with_discord_configured(discord_app):
                       FRONTEND_URL="https://app.example.com/", DISCORD_REDIRECT_URI="https://api.example.com/api/v1/"
                       "auth/discord/callback")
     client = TestClient(app, base_url="https://api.example.com")
-    assert client.get(f"{API}/auth/providers").json() == {"discord": True, "dev_login": False}
+    assert client.get(f"{API}/auth/providers").json() == {"discord": True, "google": False, "dev_login": False}
     _, r = start(client)
     assert r.headers["set-cookie"].startswith("__Host-forliosa_oauth=")
     assert repr(get_settings().discord_client_secret) == "SecretStr('**********')"
@@ -416,6 +416,8 @@ def test_access_log_redacts_codes_and_invite_tokens():
 
     assert redact_url("/api/v1/auth/discord/callback?code=abc&state=def") == \
         "/api/v1/auth/discord/callback?code=***&state=***"
+    assert redact_url("/api/v1/auth/google/callback?code=4/abc-xyz&state=def&scope=email") == \
+        "/api/v1/auth/google/callback?code=***&state=***&scope=email"
     assert redact_url("/api/v1/invites/tok_123/accept") == "/api/v1/invites/***/accept"
     rec = logging.LogRecord("uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
                             ("1.2.3.4", "GET", "/api/v1/invites/secret-token", "1.1", 200), None)

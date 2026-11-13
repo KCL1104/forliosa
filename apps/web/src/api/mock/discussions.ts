@@ -342,7 +342,7 @@ export function createDiscussionStore(deps: DiscussionDeps, scenario: "default" 
       [["rep_f_meet_1", PEOPLE.yun.user_id, "2026-11-08 19:30", "可以，我來訂位。"]])
   }
   if (options.suspended) {
-    suspensions.push({ id: "sus_me", user_id: meId(), until: Date.parse(MOCK_AS_OF) + 7 * 86_400_000, reason: null, created_at: Date.parse(MOCK_AS_OF), lifted: false })
+    suspensions.push({ id: "sus_me", user_id: meId(), until: Date.parse(MOCK_AS_OF) + 7 * 86_400_000, reason: "重複張貼同樣的內容", created_at: Date.parse(MOCK_AS_OF), lifted: false })
   }
 
   // ── 誰在看 ──
@@ -467,7 +467,7 @@ export function createDiscussionStore(deps: DiscussionDeps, scenario: "default" 
   const guardPost = (userId: string, scope: DiscussionScope, kind: "topic" | "reply", now: number) => {
     if (scope === "public") {
       const s = activeSuspension(userId, now)
-      if (s) throw new ApiError(403, "posting_suspended", "你的公開發言已被站方暫停", { until: iso(s.until) })
+      if (s) throw new ApiError(403, "posting_suspended", "你的公開發言已被站方暫停", { until: iso(s.until), reason: s.reason ?? null })
       if (!publicNameOf(userId)) throw new ApiError(409, "public_name_required", "發公開內容前要先設定公開暱稱")
     }
     checkRate(userId, scope, kind, now)
@@ -490,9 +490,9 @@ export function createDiscussionStore(deps: DiscussionDeps, scenario: "default" 
 
   return {
     // ── 個人資料多出來的三個欄位、公開暱稱 ──
-    meFields(): { public_name: string | null; is_admin: boolean; public_posting_suspended_until: string | null } {
+    meFields(): { public_name: string | null; is_admin: boolean; public_posting_suspended_until: string | null; public_posting_suspended_reason: string | null } {
       const s = activeSuspension(meId())
-      return { public_name: myPublicName, is_admin: admin, public_posting_suspended_until: s ? iso(s.until) : null }
+      return { public_name: myPublicName, is_admin: admin, public_posting_suspended_until: s ? iso(s.until) : null, public_posting_suspended_reason: s?.reason ?? null }
     },
     setPublicName(raw: string): void {
       requireUser()

@@ -301,7 +301,7 @@ describe("公開暱稱：還沒有的時候，回覆框換成選暱稱的一欄�
     vi.restoreAllMocks()
     mount({ discussion: { publicName: "示範小資", suspended: true } })
     renderApp("/settings")
-    expect(await screen.findByText("你的公開發言已被站方暫停到 11/19（四）13:30。群組裡的發言不受影響。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("你的公開發言已被站方暫停到 11/19（四）13:30。原因：重複張貼同樣的內容。群組裡的發言不受影響。", undefined, T)).toBeInTheDocument()
   })
 })
 
@@ -341,7 +341,7 @@ describe("回覆", () => {
     const user = userEvent.setup()
     mount({ discussion: { publicName: "示範小資", suspended: true } })
     renderApp("/discussions/top_p_etf")
-    expect(await screen.findByText("你的公開發言已被站方暫停到 11/19（四）13:30。群組裡的發言不受影響。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("你的公開發言已被站方暫停到 11/19（四）13:30。原因：重複張貼同樣的內容。群組裡的發言不受影響。", undefined, T)).toBeInTheDocument()
     expect(screen.queryByRole("textbox")).toBeNull()
     cleanup()
     renderApp("/discussions/top_g_dca")
@@ -731,6 +731,12 @@ describe("錯誤訊息：說哪裡不對、什麼時候可以再試", () => {
     expect(retryText(86_100)).toBe("約 24 小時後")
     expect(suspendedText("9999-12-31T00:00:00Z")).toBe("你的公開發言已被站方永久暫停。群組裡的發言不受影響。")
     expect(suspendedText(null)).toBe("你的公開發言已被站方暫停。群組裡的發言不受影響。")
+    // 站方有寫原因就一起說（句尾的標點不重複）
+    expect(suspendedText("2026-11-20T04:00:00Z", "洗版。")).toBe("你的公開發言已被站方暫停到 11/20（五）12:00。原因：洗版。群組裡的發言不受影響。")
+    expect(suspendedText("9999-12-31T00:00:00Z", "  ")).toBe("你的公開發言已被站方永久暫停。群組裡的發言不受影響。")
+    expect(postErrorText(new ApiError(403, "posting_suspended", "x", { until: "2026-11-20T04:00:00Z", reason: "洗版" }), "回覆")).toBe(
+      "你的公開發言已被站方暫停到 11/20（五）12:00。原因：洗版。群組裡的發言不受影響。",
+    )
     expect(postErrorText(new ApiError(429, "rate_limited", "x", { retry_after_seconds: 8 }), "回覆")).toBe("發言太頻繁，8 秒後可以再送出。內容還在。")
     expect(postErrorText(new ApiError(429, "rate_limited", "x"), "回覆")).toBe("發言太頻繁，請稍後再送出。內容還在。")
     expect(postErrorText(new ApiError(409, "public_name_required", "x"), "主題")).toBe("發公開內容前要先選一個公開暱稱。")

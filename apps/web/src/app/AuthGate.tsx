@@ -36,28 +36,12 @@ export function AuthGate({ children, signedOut }: { children: React.ReactNode; s
   return <BootScreen />
 }
 
-/**
- * 還沒進到 App 的畫面（登入、載入中、連不上）：字標＋一欄內容，垂直置中。
- * `aside`（登入頁的示範畫面）：桌面排在右邊，中間一條和 AI 面板同一種的直雙線；手機接在內容下面。
- */
-export function AuthFrame({ children, aside }: { children: React.ReactNode; aside?: React.ReactNode }) {
-  if (!aside) {
-    return (
-      <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-10">
-        <Wordmark />
-        {children}
-      </main>
-    )
-  }
+/** 還沒進到 App 的畫面（登入、載入中、連不上）：字標＋一欄內容，垂直置中 */
+export function AuthFrame({ children }: { children: React.ReactNode }) {
   return (
-    <main className="mx-auto grid min-h-dvh w-full max-w-md content-center gap-x-16 gap-y-12 px-5 py-10 lg:max-w-[64rem] lg:grid-cols-[minmax(0,23rem)_minmax(0,1fr)] lg:items-center lg:px-8">
-      <div className="flex min-w-0 flex-col gap-6">
-        <Wordmark />
-        {children}
-      </div>
-      <div className="relative min-w-0 max-lg:border-t max-lg:border-rule max-lg:pt-8 lg:py-4 lg:pl-16 lg:before:pointer-events-none lg:before:absolute lg:before:inset-y-0 lg:before:left-0 lg:before:w-1 lg:before:border-x lg:before:border-rule">
-        {aside}
-      </div>
+    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-10">
+      <Wordmark />
+      {children}
     </main>
   )
 }

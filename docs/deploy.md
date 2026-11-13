@@ -13,7 +13,7 @@ Forliosa 由兩部分組成：
 
 以下用 `example.com` 代表你的網域，請換成實際的網域。
 
-> 正式登入用 **Discord**（M5）：要先在 Discord Developer Portal 建立應用程式（第 2.4 節），把三個 `DISCORD_*` 變數與 `FRONTEND_URL`
+> 正式登入用 **Discord** 與 **Google**（Google 是選用的，第 2.4.1 節）。Discord：要先在 Discord Developer Portal 建立應用程式（第 2.4 節），把三個 `DISCORD_*` 變數與 `FRONTEND_URL`
 > 設到 api 服務上。沒設 Discord 時 API 仍可啟動，但沒有人能登入（`FORLIOSA_ENV=prod` 時開發登入是關閉的）；`FRONTEND_URL` 則是必填。
 
 ## 0. 目前的正式環境（2026-11-13 建立，尚未對外公開）
@@ -42,8 +42,10 @@ Forliosa 由兩部分組成：
 - **前端不能從開發沙盒直接上傳**。wrangler 上傳檔案那一步用的是另一個短期憑證，沙盒的代理會把它換掉；所以只走 GitHub Actions
   （repo secrets：`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID`）。
 - api 的三個 `DISCORD_*` 要在 Railway 的 Raw Editor **一次貼上**再部署；只設一部分 API 會拒絕啟動（舊的部署會繼續服務，但新版本上不去）。
-- 專案裡還有產品負責人先前建立的 `SearXNG`（第三方範本，有公開網址，美西）與 `Redis`（美西），程式都沒有使用；
-  另有兩個重建資料庫時留下、沒有掛載的 volume。等產品負責人確認後刪除。
+- 產品負責人先前建立的 `SearXNG`（第三方範本，有公開網址）與 `Redis`、兩個重建資料庫時留下的 volume、Redis 的 volume，
+  程式都沒有使用，2026-11-13 經產品負責人確認後已刪除。專案裡現在只有 `Postgres`、`api`、`worker`、`searxng-news` 四個服務。
+- **Google 登入**（2026-11-13 加上）：api 服務有 `GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`（產品負責人填的）與
+  `GOOGLE_REDIRECT_URI=https://api.forliosa.trade/api/v1/auth/google/callback`。三個沒設齊時 Google 登入只是不出現，不會拒絕啟動。
 
 2026-11-13 的驗證結果：api 部署記錄有 `Context impl PostgresqlImpl` 與 0001→0013 全部遷移；
 `GET /api/v1/health` 200（`env: prod`、`data_policy: commercial`）；`https://forliosa.trade` 來源的 CORS 預檢通過；
@@ -105,10 +107,15 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `DISCORD_CLIENT_ID` | 登入用 | Discord 應用程式的 Client ID | 見 2.4 節；三個 `DISCORD_*` 要一起設，只設一部分會拒絕啟動 |
 | `DISCORD_CLIENT_SECRET` | 登入用 | Discord 應用程式的 Client Secret | **機密**：只放在 Railway Variables，不要貼到聊天、issue 或程式碼；程式不會寫進 log |
 | `DISCORD_REDIRECT_URI` | 登入用 | `https://api.example.com/api/v1/auth/discord/callback` | 必須和 Developer Portal 的 Redirect 一字不差，https |
+| `GOOGLE_CLIENT_ID` | Google 登入用（選用） | Google Cloud 的 OAuth 用戶端 ID（`….apps.googleusercontent.com`） | 見 2.4.1 節。三個 `GOOGLE_*` 沒設齊時 Google 登入不出現（啟動時記一行警告），**不會**拒絕啟動 |
+| `GOOGLE_CLIENT_SECRET` | Google 登入用（選用） | OAuth 用戶端密鑰（`GOCSPX-…`） | **機密**：只放在 Railway Variables；建立用戶端時只顯示一次 |
+| `GOOGLE_REDIRECT_URI` | Google 登入用（選用） | `https://api.example.com/api/v1/auth/google/callback` | 必須和 Google Cloud Console「已授權的重新導向 URI」一字不差，https |
 | `TELEGRAM_BOT_TOKEN` | Telegram 推播用 | BotFather 給的 token | 見 2.5 節；**機密**，只放在 Railway Variables。api 用它判斷 `telegram_available`，worker 用它收發訊息 |
 | `TELEGRAM_BOT_USERNAME` | Telegram 推播用 | bot 的帳號（不含 `@`），例如 `ForliosaBot` | 兩個都設才會出現「連結 Telegram 群組」 |
 | `ADMIN_EMAILS` | 公開討論管理用 | `you@example.com,other@example.com` | 站方管理員：逗號分隔的 email，不分大小寫，和登入帳號的 email（Discord 已驗證的信箱）比對。管理員可以看公開討論的檢舉、隱藏內容、暫停某人的公開發言（`/api/v1/admin/discussions/*`）；其他人呼叫一律 404。不設就沒有人能處理檢舉。管理員看不到群組內容。改了要重新部署才生效 |
 | `TERMS_VERSION` | 條款定稿後 | 例如 `2026-11-13` | 服務條款與隱私權政策目前的版本（建議用生效日期）。設了之後：新帳號建立時記下這個版本；版本改了，舊帳號登入後會看到一行「服務條款與隱私權政策已更新」要按「知道了」。不設就不追蹤版本。兩份文件還是草稿時先不要設 |
+| `TERMS_EFFECTIVE_DATE` | 選用 | `2026-12-01` | 新版條款從哪一天生效。設了之後，條款更新的那一行寫「12/1 起適用新版服務條款與隱私權政策」（服務條款承諾生效前 14 天公告）。沒設 `TERMS_VERSION` 時不看這個 |
+| `TERMS_SUMMARY` | 選用 | `新增匯出資料與刪除帳號的說明` | 改了什麼的一句話（一行，最多 120 字），接在那一行後面 |
 | `CLAUDE_API_KEY_1`、`_2`、`_3` | AI 用 | Claude API 金鑰（三把，分屬三個 workspace） | **機密**：只放在 Railway Variables。「問 AI」、為什麼、法人觀點都在 api 服務執行，沒設時這些功能顯示「AI 暫時無法使用」。worker 也要設同樣三把（群組週報、新聞補缺、公司簡介）。建議同時在 Anthropic Console 替每個 workspace 設每月花費上限 |
 | `SEC_CONTACT_EMAIL` | 美股基本面用 | 一個聯絡用 email | 只放在對 SEC EDGAR 請求的 User-Agent（SEC 要求自動化存取要留聯絡方式）；沒設時不抓美股基本面與申報。api 與 worker 都要設 |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |
@@ -165,9 +172,23 @@ worker 不處理 HTTP 請求，不需要 `CORS_ORIGINS`、`DISCORD_*`。資料�
    - 不需要 bot、不需要 OAuth2 URL Generator：登入只用 `identify` 與 `email` 兩個 scope，由 API 自己組授權網址。
 3. （選用）**General Information** 上傳圖示、填隱私權政策與服務條款網址（公開給其他人用之前建議補上）。
 4. Railway api 服務設好 `FRONTEND_URL`、三個 `DISCORD_*` 後重新部署，確認：
-   - `curl https://api.example.com/api/v1/auth/providers` 回 `{"discord": true, "dev_login": false}`。
+   - `curl https://api.example.com/api/v1/auth/providers` 回 `{"discord": true, "google": false, "dev_login": false}`（設了 Google 之後 `google` 是 `true`）。
    - 打開 `https://app.example.com/login` 按「以 Discord 登入」→ Discord 授權頁 → 回到前端，`GET /api/v1/me` 是 200。
 5. 登入規則（帳號對應、已驗證 email、失敗代碼 `oauth_*`）見 `docs/api-contract.md`「分享（M5）」→「登入」。
+
+### 2.4.1 Google 登入（Google Cloud Console）
+
+選用。設好之後登入頁多一顆「用 Google 登入」；同一個已驗證的 Email 用 Google 或 Discord 登入是同一個帳號。
+
+1. <https://console.cloud.google.com/> 建立專案（名稱 `forliosa`）。
+2. 「API 和服務」→「OAuth 同意畫面」（新版叫 Google Auth Platform）→ 開始：應用程式名稱 `Forliosa`、支援電子郵件、目標對象選「外部」。
+3. 「品牌」：首頁 `https://app.example.com`、隱私權政策 `…/privacy`、服務條款 `…/terms`、已授權網域填前端的網域。
+4. 「資料存取」：加入 `openid`、`userinfo.email`、`userinfo.profile` 三個範圍（都不是敏感範圍，不用送審）。
+5. 「用戶端」→ 建立用戶端 → 網頁應用程式 → 「已授權的重新導向 URI」填 `https://api.example.com/api/v1/auth/google/callback`（「已授權的 JavaScript 來源」不用填）。
+   用戶端 ID → `GOOGLE_CLIENT_ID`；用戶端密鑰（只顯示一次）→ `GOOGLE_CLIENT_SECRET`；同一個 callback 網址 → `GOOGLE_REDIRECT_URI`。
+6. 「目標對象」→ 發布應用程式（預設「測試中」只有手動加的測試使用者能登入）。
+7. 確認：`curl https://api.example.com/api/v1/auth/providers` 的 `google` 是 `true`；登入頁按「用 Google 登入」→ Google 的帳號選擇畫面 → 回到前端。
+   Google 顯示「redirect_uri_mismatch」＝第 5 步的網址和 `GOOGLE_REDIRECT_URI` 不一樣；「存取權遭封鎖：這個應用程式尚未完成驗證／僅限測試使用者」＝第 6 步還沒發布。
 
 ### 2.5 Telegram bot（群組推播）
 

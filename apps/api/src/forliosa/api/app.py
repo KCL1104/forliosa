@@ -78,6 +78,11 @@ def create_app() -> FastAPI:
         check_production_settings(settings)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     logredact.install()  # OAuth codes and invite tokens in URLs never reach the access log
+    if settings.google_misconfigured:
+        # Google is optional: a half-set configuration must not take the API down (names only, no values).
+        logging.getLogger(__name__).warning(
+            "Google login is off: GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET and GOOGLE_REDIRECT_URI must all be set"
+            " (and the redirect URI must be https in production)")
     if settings.forliosa_env == "prod" and not settings.secure_cookies:
         logging.getLogger(__name__).warning("COOKIE_SECURE=false in production: the session cookie is sent over HTTP")
     app = FastAPI(

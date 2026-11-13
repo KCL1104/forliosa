@@ -201,6 +201,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getAuthProviders: () => request<AuthProviders>("GET", "/auth/providers"),
     // 整頁導到 API 主機：302 到 Discord，callback 成功後回到 `{FRONTEND_URL}{next}`
     discordLoginUrl: (next) => `${prefix}/auth/discord/start${toQueryString({ next })}`,
+    googleLoginUrl: (next) => `${prefix}/auth/google/start${toQueryString({ next })}`,
     updateMe: (patch) => request<User>("PATCH", "/me", { body: patch }),
 
     listDelegations: () => request<DelegationList>("GET", "/delegations"),

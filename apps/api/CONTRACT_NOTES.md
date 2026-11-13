@@ -1828,3 +1828,18 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 前端用 `lib/data-notes.ts` 的 `isCoverageNote` 判斷「資料從哪天開始」這一類的說明（舊的「資料累積中」也認得，前後端分開部署時不會漏掉）。
 - AI 的提示（`ai/prompts.py`）：工具的 `notes` 會說資料從哪一天開始、缺什麼，模型照實轉述。
 
+## 2026-11-13 Google 登入、條款更新的生效日與摘要、停權原因
+
+**Google 登入**（`services/google_oauth.py`、`api/routes/auth.py`；合約「登入（Discord、Google OAuth）與個人資料」）
+
+- 端點取自 Google 的 discovery document（`accounts.google.com/.well-known/openid-configuration`）：授權 `accounts.google.com/o/oauth2/v2/auth`、token `oauth2.googleapis.com/token`、userinfo `openidconnect.googleapis.com/v1/userinfo`、撤銷 `oauth2.googleapis.com/revoke`。授權碼流程，不用 PKCE、不驗 id token（個人資料是用 access token 在 TLS 上向 userinfo 讀的）。
+- 帳號對應是共用的 `discord_oauth.sign_in(db, profile, provider)`：`user_identities` 一人每種登入方式各一筆（`uq_user_identity_user_provider`），同一個已驗證 email 連到同一個帳號。兩種登入都連結的帳號，`avatar_url` 是最後一次登入那一家的頭像。
+- state 的簽章內容多一個 `p`（哪一家）；沒有 `p` 的舊 cookie 當成 Discord（部署當下還在登入流程中的人不受影響）。
+- 設定：`GOOGLE_CLIENT_ID`、`GOOGLE_CLIENT_SECRET`（SecretStr）、`GOOGLE_REDIRECT_URI`。`Settings.google_enabled`：三個都有，而且正式環境的 callback 是 https。`google_misconfigured`（設了一部分或不是 https）只記警告、不拒絕啟動——Discord 的三個變數設不齊會拒絕啟動，那條規則上線當天讓 API 起不來過一次；Google 是後加的選用登入，不該因為填到一半就讓整站停擺。
+- **停權沿用**（`services/account.py`）：刪除帳號時，除了每一個登入帳號的雜湊，也留一筆 `email` 的雜湊（`identity_hash("email", <小寫 email>)`）；建立新帳號時兩種都查，取期限最長的一筆套用，查到的都刪掉。原因：只有 Discord 登入的帳號被停權後刪除，再用同一個 email 的 Google 帳號註冊，原本查不到。隱私權政策 10.3 的說法跟著改了。
+- 測試：`tests/api/test_google_auth.py`（Google 的 HTTP 用 `google_oauth.set_transport` 假造）。
+
+**條款更新的那一行**：`TERMS_EFFECTIVE_DATE`（日期）與 `TERMS_SUMMARY`（一句話，`one_line` 後截到 120 字）→ `GET /me` 的 `terms_effective_date`、`terms_summary`；`TERMS_VERSION` 沒設時兩個都是 null。兩個都還沒在正式環境設定（條款還是草稿）。
+
+**停權原因**：`GET /me` 多 `public_posting_suspended_reason`，403 `posting_suspended` 多 `reason`——站方管理員在停權對話框填的「原因（選填）」會給被停權的人看（對話框裡已註明「對方會看到這句話」）。沿用到新帳號的停權也帶著原因。
+

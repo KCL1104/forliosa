@@ -194,7 +194,7 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
         )}
       </fieldset>
 
-      {until && <p className="max-w-prose border-y border-rule py-2.5 text-md text-ink">{suspendedText(until)}</p>}
+      {until && <p className="max-w-prose border-y border-rule py-2.5 text-md text-ink">{suspendedText(until, user?.public_posting_suspended_reason)}</p>}
       {needsName && <PublicNamePrompt />}
 
       <form

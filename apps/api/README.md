@@ -181,7 +181,7 @@ src/forliosa/
   services/      交易（自動稅費＋帳本驗證）、投資組合（含本週事項、出清紀錄）、個股資料、個股頁（stock.py）、期貨盤勢（derivatives.py）、自選、
                  定期定額（recurring.py）、重大訊息判讀（announcements.py）、「資料累積中」（coverage.py）；
                  M5 分享：分享投影（sharing.py，讀別人資料的唯一入口）、群組（groups.py）、授權（delegations.py）、
-                 Discord 登入（discord_oauth.py）、群組週報（digests.py）、推播頻道（channels.py、notifications.py、pushers.py）
+                 Discord 與 Google 登入（discord_oauth.py、google_oauth.py）、群組週報（digests.py）、推播頻道（channels.py、notifications.py、pushers.py）
   api/           FastAPI 路由、schema、錯誤格式、session 驗證
   ai/            AI 助理：keypool（金鑰槽）、chat（工具迴圈與 SSE）、tools、prompts、scope（離題預先檢查）、grounding（無來源標記）、
                  store（對話、草稿、用量）、retention（保存期限）、why、suggestions、smoke
@@ -277,7 +277,7 @@ src/forliosa/
    要用 Telegram 時 api 與 worker 都設 `TELEGRAM_BOT_TOKEN`／`TELEGRAM_BOT_USERNAME`（見 `docs/deploy.md` 2.5 節）；worker 只能一個副本。
 4. 建議為 api 與 worker 各自掛載 volume 到 `/app/var`（image 以非 root 執行，掛 volume 時設 `RAILWAY_RUN_UID=0`）。
 
-> 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，正式登入用 Discord（M5）：沒設三個 `DISCORD_*` 時正式環境沒有人能登入。
+> 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，正式登入用 Discord（M5）與 Google（選用，`GOOGLE_*`，見 `docs/deploy.md` 2.4.1 節）：沒設三個 `DISCORD_*` 時正式環境沒有人能登入。
 
 ## 已知限制
 

@@ -14,6 +14,7 @@ import { replyDraftKey } from "@/lib/drafts"
 import { hardNavigate } from "@/lib/hard-nav"
 import { claimLocalUserData, clearLocalUserData } from "@/lib/local-data"
 import { isPublicReadPath } from "@/lib/next-path"
+import { termsNoticeText } from "@/lib/terms-notice"
 import { isDraft, stripReviewNote } from "@/pages/legal/legal-text"
 import { createAppRouter } from "@/router"
 
@@ -208,12 +209,13 @@ describe("服務條款與隱私權政策的頁面", () => {
     mount({ signedIn: false })
     renderApp("/login")
     const consent = (await screen.findByText(/登入即表示你同意/, undefined, T)).closest("p")!
-    // 從連結進來的人不知道這是什麼：一句話說 Forliosa 是什麼，旁邊是用示範資料畫的帳本（標示示範資料；假數字不讀給報讀器）
+    // 只有登入的那一塊：一句話說 Forliosa 是什麼、兩種登入方式（一樣重的外框按鈕，Google 在前）、沒有示範畫面
     expect(screen.getByText("Forliosa 是以台股為主的持倉帳本，可以看績效、查個股、問 AI，也能和親友開群組。")).toHaveClass("text-base", "text-ink")
-    const specimen = screen.getByRole("figure")
-    expect(specimen).toHaveTextContent("示範畫面：登入後的帳本。")
-    expect(within(specimen).getByText("示範資料")).toBeInTheDocument()
-    expect(within(specimen).getByText("台積電").closest("[aria-hidden]")).not.toBeNull()
+    expect(screen.queryByRole("figure")).toBeNull()
+    const buttons = await screen.findAllByRole("button", { name: /登入$/ }, T)
+    expect(buttons.map((b) => b.textContent)).toEqual(["用 Google 登入", "用 Discord 登入"])
+    for (const b of buttons) expect(b.className).toMatch(/border-ctl/)
+    expect(screen.getByText(/第一次登入會自動建立帳號。兩種方式用同一個 Email，會是同一個帳號。/)).toBeInTheDocument()
     await waitFor(() => expect(document.title).toBe("登入｜Forliosa"))
     expect(within(consent).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(consent).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
@@ -223,6 +225,25 @@ describe("服務條款與隱私權政策的頁面", () => {
     expect(await screen.findByText("你的帳號已經刪除。", undefined, T)).toHaveAttribute("role", "status")
   })
 
+  it("登入頁：只開一種登入方式時是墨色的主要按鈕；按下整頁導到那一家的登入網址", async () => {
+    mount({ signedIn: false })
+    vi.mocked(api.getAuthProviders).mockResolvedValue({ discord: false, google: true, dev_login: false })
+    const assign = vi.fn()
+    vi.stubGlobal("location", { ...window.location, assign })
+    try {
+      const user = userEvent.setup()
+      renderApp("/login?next=%2Fgroups")
+      const only = await screen.findByRole("button", { name: "用 Google 登入" }, T)
+      expect(screen.queryByRole("button", { name: "用 Discord 登入" })).toBeNull()
+      expect(only.className).toMatch(/bg-act/)
+      expect(screen.getByText("第一次登入會自動建立帳號。")).toBeInTheDocument()
+      await user.click(only)
+      expect(assign).toHaveBeenCalledWith(api.googleLoginUrl("/groups"))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("沒登入的公開討論頁尾：Forliosa 是什麼那一行後面有兩份文件的連結", async () => {
     mount({ signedIn: false })
     renderApp("/discussions")
@@ -230,6 +251,18 @@ describe("服務條款與隱私權政策的頁面", () => {
     const about = screen.getByText(/Forliosa 是以台股為主/).closest("p")!.parentElement!
     expect(within(about).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(about).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
+  })
+})
+
+describe("條款更新那一行的句子", () => {
+  it("有生效日與摘要就寫出來；生效日過了換一種說法；不是今年寫年份；都沒有就是原本那一句", () => {
+    const today = "2026-11-13"
+    expect(termsNoticeText("2026-12-01", "新增匯出資料的說明。", today)).toBe("12/1 起適用新版服務條款與隱私權政策：新增匯出資料的說明。")
+    expect(termsNoticeText("2026-12-01", null, today)).toBe("12/1 起適用新版服務條款與隱私權政策。")
+    expect(termsNoticeText("2026-11-01", "改了管轄法院", today)).toBe("服務條款與隱私權政策在 11/1 更新：改了管轄法院。")
+    expect(termsNoticeText("2027-01-15", null, today)).toBe("2027/01/15 起適用新版服務條款與隱私權政策。")
+    expect(termsNoticeText(null, "新增匯出資料的說明", today)).toBe("服務條款與隱私權政策已更新：新增匯出資料的說明。")
+    expect(termsNoticeText(null, null, today)).toBe("服務條款與隱私權政策已更新。")
   })
 })
 

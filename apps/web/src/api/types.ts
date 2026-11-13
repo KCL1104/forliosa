@@ -36,8 +36,13 @@ export interface User {
    */
   terms_version_accepted?: string | null
   terms_version_current?: string | null
+  /** 條款更新那一行用：新版從哪一天生效（YYYY-MM-DD）、改了什麼的一句話；站方沒填是 null */
+  terms_effective_date?: string | null
+  terms_summary?: string | null
   /** 公開發言停權到什麼時候（UTC、`Z` 結尾；永久是 `PERMANENT_UNTIL`）；沒有停權是 null */
   public_posting_suspended_until?: string | null
+  /** 站方暫停時寫的原因（只有本人看得到；沒寫是 null） */
+  public_posting_suspended_reason?: string | null
 }
 
 export interface DevLoginBody {
@@ -863,6 +868,8 @@ export interface AnalystViews {
 /** `GET /auth/providers`（不需登入） */
 export interface AuthProviders {
   discord: boolean
+  /** Google 登入有沒有開（舊版後端沒有這個欄位：當成沒開） */
+  google?: boolean
   dev_login: boolean
 }
 
@@ -1417,6 +1424,8 @@ export interface ForliosaApi {
   getAuthProviders(): Promise<AuthProviders>
   /** 開始 Discord 登入的網址（整頁導過去；成功後回到 `next`） */
   discordLoginUrl(next: string): string
+  /** `GET /auth/google/start?next=`：瀏覽器直接導過去（不是 fetch） */
+  googleLoginUrl(next: string): string
   updateMe(patch: { display_name: string }): Promise<User>
   // 授權唯讀查看
   listDelegations(): Promise<DelegationList>

@@ -139,7 +139,9 @@ def active_suspension(db: Session, user_id: str, at: datetime | None = None) -> 
 def me_fields(db: Session, user: User) -> dict[str, Any]:
     suspension = active_suspension(db, user.id)
     return {"public_name": user.public_name, "is_admin": is_site_admin(user),
-            "public_posting_suspended_until": iso_utc(suspension.until) if suspension else None}
+            "public_posting_suspended_until": iso_utc(suspension.until) if suspension else None,
+            # The person is told why (what the admin wrote), not only until when.
+            "public_posting_suspended_reason": (suspension.reason or None) if suspension else None}
 
 
 def set_public_name(db: Session, user: User, name: str) -> None:
@@ -200,7 +202,7 @@ def _guard_post(db: Session, user: User, scope: str, kind: str, at: datetime) ->
         suspension = active_suspension(db, user.id, at)
         if suspension is not None:
             raise ApiError(403, "posting_suspended", "你的公開發言已被站方暫停",
-                           extra={"until": iso_utc(suspension.until)})
+                           extra={"until": iso_utc(suspension.until), "reason": suspension.reason or None})
         if not user.public_name:
             raise ApiError(409, "public_name_required", "發公開內容前要先設定公開暱稱")
     _check_rate(db, user.id, scope, kind, at)

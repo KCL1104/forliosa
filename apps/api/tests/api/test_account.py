@@ -275,9 +275,11 @@ def test_deleting_the_account_does_not_lift_a_public_posting_suspension(discord_
     assert delete_me(user).status_code == 204
     with Session(engine) as db:
         rows = db.scalars(select(models.DiscussionSuspensionCarryover)).all()
-        assert len(rows) == 1 and len(rows[0].identity_hash) == 64
-        stored = json.dumps([rows[0].identity_hash, rows[0].reason], ensure_ascii=False)
-        assert papa.profile["id"] not in stored and "papa" not in stored.lower()  # not the Discord id or name
+        # one keyed hash per way back in: the Discord login and the e-mail (so another provider with the same
+        # e-mail does not shed the suspension; tests/api/test_google_auth.py)
+        assert len(rows) == 2 and all(len(r.identity_hash) == 64 for r in rows)
+        stored = json.dumps([[r.identity_hash, r.reason] for r in rows], ensure_ascii=False)
+        assert papa.profile["id"] not in stored and "papa" not in stored.lower()  # not the id, name or e-mail
         assert db.scalar(select(func.count()).select_from(models.DiscussionSuspension)) == 0
 
     # the same Discord account registers again: a new account, still suspended until the same time
@@ -305,8 +307,8 @@ def test_an_expired_carried_suspension_is_dropped(discord_app, engine, clock):
     assert admin.post(f"{ADMIN_URL}/suspensions", json={"target": f"topic:{topic['id']}", "days": 1}).status_code == 201
     assert delete_me(user).status_code == 204
     with Session(engine) as db:
-        row = db.scalars(select(models.DiscussionSuspensionCarryover)).one()
-        row.until = row.created_at - timedelta(days=1)  # it has run out by the time they come back
+        for row in db.scalars(select(models.DiscussionSuspensionCarryover)):
+            row.until = row.created_at - timedelta(days=1)  # it has run out by the time they come back
         db.commit()
     again = discord_login(discord_app, papa)
     assert again.get(f"{API}/users/me").json()["public_posting_suspended_until"] is None
@@ -347,6 +349,29 @@ def test_new_accounts_record_the_current_version_and_older_accounts_acknowledge_
         me = c.get(f"{API}/me").json()
         assert me["terms_version_accepted"] == "2026-11-13" and me["terms_version_current"] == "2027-01-01"
     assert TestClient(app).post(f"{API}/me/terms-accept", json={"version": "2027-01-01"}).status_code == 401
+
+
+def test_terms_notice_carries_the_effective_date_and_a_summary_when_set(client, monkeypatch):
+    from datetime import date
+
+    settings = get_settings()
+    # ignored while versions are not tracked
+    monkeypatch.setattr(settings, "terms_effective_date", date(2026, 12, 1))
+    monkeypatch.setattr(settings, "terms_summary", "新增匯出資料的說明")
+    me = client.get(f"{API}/me").json()
+    assert me["terms_effective_date"] is None and me["terms_summary"] is None
+    monkeypatch.setattr(settings, "terms_version", "2026-12-01")
+    me = client.get(f"{API}/me").json()
+    assert me["terms_effective_date"] == "2026-12-01" and me["terms_summary"] == "新增匯出資料的說明"
+    # one line, bounded; both are optional
+    monkeypatch.setattr(settings, "terms_summary", "第一行\n第二行" + "字" * 300)
+    summary = client.get(f"{API}/me").json()["terms_summary"]
+    assert "\n" not in summary and len(summary) <= 120
+    monkeypatch.setattr(settings, "terms_effective_date", None)
+    monkeypatch.setattr(settings, "terms_summary", None)
+    me = client.get(f"{API}/me").json()
+    assert me["terms_version_current"] == "2026-12-01" and me["terms_effective_date"] is None
+    assert me["terms_summary"] is None
 
 
 def test_terms_accept_is_refused_while_viewing_someone_else(client, other_client, monkeypatch):

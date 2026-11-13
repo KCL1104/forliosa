@@ -63,7 +63,7 @@ export function ReplyComposer({ topic, onPosted, className }: { topic: Topic; /*
   if (topic.status === "hidden" || !topic.can_reply) return <p className={cn("text-base text-ink", className)}>這個主題已被站方隱藏，不能再回覆。</p>
   if (topic.scope === "public") {
     const until = suspendedUntil(user)
-    if (until) return <p className={cn("max-w-prose text-md text-ink", className)}>{suspendedText(until)}</p>
+    if (until) return <p className={cn("max-w-prose text-md text-ink", className)}>{suspendedText(until, user?.public_posting_suspended_reason)}</p>
     if (!user.public_name) return <PublicNamePrompt className={className} />
   }
   // 一個主題（一個人）一個回覆框：從一個主題直接跳到另一個時整個重建，框裡的字與草稿不會串到別的主題

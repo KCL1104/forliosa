@@ -1181,9 +1181,11 @@ await check("邀請：沒登入看得到預覽 → 登入後回到邀請 → 預
   await ip.waitForURL(/\/groups\/grp_club/, { timeout: 8000 })
   await ip.getByRole("heading", { name: "投資讀書會", exact: true }).waitFor({ timeout: 8000 })
 })
-await check("登入頁：Discord 錯誤代碼的說明", async () => {
+await check("登入頁：登入失敗的錯誤代碼有說明（不分 Google、Discord）", async () => {
   await ip.goto(base + "/login?error=oauth_email_conflict", { waitUntil: "networkidle" })
-  await ip.getByText(/這個 Email 已經連結到另一個 Discord 帳號/).waitFor({ timeout: 8000 })
+  await ip.getByRole("alert").filter({ hasText: "這個 Email 已經連結到另一個登入帳號，請用原本那個帳號登入。" }).waitFor({ timeout: 8000 })
+  await ip.goto(base + "/login?error=oauth_denied", { waitUntil: "networkidle" })
+  await ip.getByRole("alert").filter({ hasText: "你按了取消，所以沒有登入。" }).waitFor({ timeout: 8000 })
 })
 await ictx.close()
 
@@ -2051,18 +2053,16 @@ await check("帳號：條款頁不用登入就能讀（草稿標示、一行不�
     await p.locator("article").getByRole("link", { name: "〈隱私權政策〉第 6 節" }).click()
     await p.getByRole("heading", { level: 1, name: /隱私權政策/ }).waitFor({ timeout: 8000 })
     await p.waitForFunction(() => { const h = document.getElementById("sec-6"); const y = h?.getBoundingClientRect().top ?? 9999; return y >= 0 && y < 200 }, null, { timeout: 5000 })
-    // 登入頁：一句話說這是什麼＋示範資料畫的帳本；同意文字連到兩份文件；分頁標題
+    // 登入頁：只有登入的那一塊——一句話說這是什麼、Google 與 Discord 兩顆一樣重的按鈕（有商標）、沒有示範畫面；分頁標題
     await p.goto(base + "/login", { waitUntil: "networkidle" })
     await p.getByText("Forliosa 是以台股為主的持倉帳本，可以看績效、查個股、問 AI，也能和親友開群組。").waitFor({ timeout: 8000 })
     if ((await p.title()) !== "登入｜Forliosa") throw new Error(`login page title: ${await p.title()}`)
-    const specimen = p.getByRole("figure")
-    await specimen.getByText("示範資料", { exact: true }).waitFor()
-    const side = await p.evaluate(() => {
-      const fig = document.querySelector("figure").getBoundingClientRect(), btn = [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Discord")).getBoundingClientRect()
-      return { figLeft: fig.left, btnRight: btn.right, links: document.querySelector("figure").querySelectorAll("a, button").length }
-    })
-    if (side.figLeft < side.btnRight) throw new Error(`desktop login: the specimen should sit to the right of the sign-in column: ${JSON.stringify(side)}`)
-    if (side.links) throw new Error("the specimen has clickable things in it")
+    if (await p.locator("figure").count()) throw new Error("the ledger specimen is back on the login page")
+    const signIn = await p.getByRole("button", { name: /^用 (Google|Discord) 登入$/ }).evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); const c = getComputedStyle(el); return { text: el.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height), bg: c.backgroundColor, mark: !!el.querySelector("svg") } }))
+    if (signIn.map((b) => b.text).join("|") !== "用 Google 登入|用 Discord 登入") throw new Error(`login buttons: ${JSON.stringify(signIn)}`)
+    if (signIn[0].w !== signIn[1].w || signIn[0].bg !== signIn[1].bg || !signIn.every((b) => b.mark && b.h >= 44)) throw new Error(`the two sign-in buttons should look the same: ${JSON.stringify(signIn)}`)
+    const column = await p.locator("main").evaluate((el) => Math.round(el.getBoundingClientRect().width))
+    if (column > 460) throw new Error(`the login page should be one narrow column, main is ${column}px wide`)
     await p.goto(base + "/login", { waitUntil: "networkidle" })
     const consent = p.locator("p", { hasText: "登入即表示你同意" })
     await consent.waitFor({ timeout: 8000 })
@@ -2097,12 +2097,13 @@ await check("帳號：條款頁不用登入就能讀（草稿標示、一行不�
     await row.click()
     await p.waitForFunction(() => { const h = document.getElementById("sec-8"); const y = h?.getBoundingClientRect().top ?? 9999; return y >= 0 && y < 260 }, null, { timeout: 5000 })
   })
-  // 手機的登入頁：登入在上面、示範畫面接在下面；通知在底部列的上方
+  // 手機的登入頁：兩顆登入按鈕都在第一個畫面裡，不用捲
   await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
     await p.goto(base + "/login?auth=signed-out", { waitUntil: "networkidle" })
     await p.getByRole("button", { name: "用 Discord 登入" }).waitFor({ timeout: 8000 })
-    const order = await p.evaluate(() => ({ btn: [...document.querySelectorAll("button")].find((b) => b.textContent.includes("Discord")).getBoundingClientRect().bottom, fig: document.querySelector("figure").getBoundingClientRect().top, vh: innerHeight, wide: document.documentElement.scrollWidth - document.documentElement.clientWidth }))
-    if (order.fig < order.btn || order.btn > order.vh || order.wide > 0) throw new Error(`phone login layout: ${JSON.stringify(order)}`)
+    await p.getByRole("button", { name: "用 Google 登入" }).waitFor()
+    const fits = await p.evaluate(() => ({ lastButton: Math.max(...[...document.querySelectorAll("button")].filter((b) => /登入$/.test(b.textContent.trim())).map((b) => b.getBoundingClientRect().bottom)), consent: [...document.querySelectorAll("p")].find((el) => el.textContent.includes("登入即表示你同意")).getBoundingClientRect().bottom, vh: innerHeight, wide: document.documentElement.scrollWidth - document.documentElement.clientWidth, scrolls: document.documentElement.scrollHeight > innerHeight + 1 }))
+    if (fits.lastButton > fits.vh || fits.consent > fits.vh || fits.wide > 0 || fits.scrolls) throw new Error(`phone login should fit one screen: ${JSON.stringify(fits)}`)
   })
   // 登入後：設定頁的「帳號與資料」
   await fresh(DESKTOP, async (p) => {
@@ -2134,13 +2135,14 @@ await check("帳號：條款頁不用登入就能讀（草稿標示、一行不�
   // 條款更新：一行說明，按「知道了」之後消失、換頁也不再出現
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/settings?terms=updated", { waitUntil: "networkidle" })
-    const notice = p.getByRole("status").filter({ hasText: "服務條款與隱私權政策已更新" })
+    // 站方有填生效日與變更摘要：那一行寫哪一天起適用、改了什麼
+    const notice = p.getByRole("status").filter({ hasText: "12/1 起適用新版服務條款與隱私權政策：新增匯出資料與刪除帳號的說明。" })
     await notice.waitFor({ timeout: 8000 })
     await notice.getByRole("button", { name: "知道了" }).click()
     await notice.waitFor({ state: "detached", timeout: 8000 })
     await p.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "帳本" }).click()
     await p.getByText("總資產").first().waitFor({ timeout: 8000 })
-    if (await p.getByText("服務條款與隱私權政策已更新").count()) throw new Error("the terms notice came back after acknowledging")
+    if (await p.getByText(/新版服務條款與隱私權政策|服務條款與隱私權政策已更新/).count()) throw new Error("the terms notice came back after acknowledging")
   })
 })
 
@@ -2228,9 +2230,9 @@ await check("討論（入口與設定）：個股的「討論」分頁（開新�
     await p.getByText("公開暱稱 7 天內只能改一次，7 天後可以再改。").waitFor({ timeout: 8000 })
     // 停權：設定與回覆區都寫到什麼時候；群組照常
     await p.goto(base + "/settings?discuss=suspended", { waitUntil: "networkidle" })
-    await p.getByText("你的公開發言已被站方暫停到 11/19（四）13:30。群組裡的發言不受影響。").waitFor({ timeout: 8000 })
+    await p.getByText("你的公開發言已被站方暫停到 11/19（四）13:30。原因：重複張貼同樣的內容。群組裡的發言不受影響。").waitFor({ timeout: 8000 })
     await p.goto(base + "/discussions/top_p_etf", { waitUntil: "networkidle" })
-    await p.getByText("你的公開發言已被站方暫停到 11/19（四）13:30。群組裡的發言不受影響。").waitFor({ timeout: 8000 })
+    await p.getByText("你的公開發言已被站方暫停到 11/19（四）13:30。原因：重複張貼同樣的內容。群組裡的發言不受影響。").waitFor({ timeout: 8000 })
     if (await p.getByRole("textbox", { name: "回覆內容" }).count()) throw new Error("composer shown while suspended")
     await p.goto(base + "/discussions/top_g_dca", { waitUntil: "networkidle" })
     await p.getByRole("textbox", { name: "回覆內容" }).waitFor({ timeout: 8000 })

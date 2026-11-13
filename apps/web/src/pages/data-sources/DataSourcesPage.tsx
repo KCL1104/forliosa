@@ -122,7 +122,7 @@ export function DataSourcesPage() {
                 你的交易、持股與定期定額是你自己記的帳（來源標示為「帳本紀錄」）。走勢圖使用 TradingView Lightweight Charts™（Apache-2.0）；字型為 Noto Sans TC（SIL Open Font License 1.1）與數位發展部全字庫正楷體（擇用 SIL Open Font License 1.1）。
               </p>
               <p className="max-w-prose text-base">
-                個股頁的「新聞報導」只列原標題、媒體名稱、時間與原文連結，不轉載內文或圖片。標題來自 The GDELT Project 的新聞索引和我們自架的 SearXNG（只查新聞），兩者太少時用 AI 搜尋補。SearXNG 會自動查詢 Bing、DuckDuckGo、Brave 等搜尋引擎，這些搜尋引擎的條款不允許自動查詢；這個風險由 Forliosa 的營運者承擔，被擋下時就停止查詢，不會設法繞過。媒體要求下架時，我們會移除該媒體的標題。
+                個股頁的「新聞報導」只列原標題、媒體名稱、時間與原文連結，不轉載內文或圖片。標題來自 The GDELT Project 的新聞索引和我們自架的 SearXNG（只查新聞），兩者太少時用 AI 搜尋補。SearXNG 被搜尋引擎擋下時就停止查詢，不會設法繞過。媒體要求下架時，我們會移除該媒體的標題。
               </p>
               <p className="max-w-prose text-base">
                 個股頁的「法人觀點」來自媒體報導：有人按查詢時，AI 搜尋近期的公開報導，列出機構、評等、目標價、日期與原文連結。同一檔當天共用一份，隔天刪除。這些是第三方意見，以原始報導為準，不是 Forliosa 的建議。

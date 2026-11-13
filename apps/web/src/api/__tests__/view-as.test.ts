@@ -47,9 +47,10 @@ describe("查看模式：API client 帶上 X-Forliosa-View-As", () => {
     expect(calls.every((c) => c.url.startsWith("https://api.example.test/api/v1/"))).toBe(true)
   })
 
-  it("Discord 登入是整頁導到 API 主機，帶上 next", () => {
+  it("Discord、Google 登入是整頁導到 API 主機，帶上 next", () => {
     const api = createHttpAdapter("https://api.example.test")
     expect(api.discordLoginUrl("/invite/abc")).toBe("https://api.example.test/api/v1/auth/discord/start?next=%2Finvite%2Fabc")
+    expect(api.googleLoginUrl("/invite/abc")).toBe("https://api.example.test/api/v1/auth/google/start?next=%2Finvite%2Fabc")
   })
 
   it("哪些路徑是查看者自己的", () => {
