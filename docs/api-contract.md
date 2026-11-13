@@ -1033,3 +1033,113 @@
 - Telegram 的 bot 預設開著隱私模式（只收到明確給它的指令），前端顯示連結指令時用 `/link@<bot_username> <code>` 的形式最可靠。
 
 **帳號刪除**（之後提供刪除帳號時）：擁有的群組轉給最早的 admin，沒有就最早加入的成員，沒有成員就刪除群組；授權全部刪除；留言顯示「已刪除的帳號」。
+
+## 討論串、線圖留言（彈幕）與指數頁（2026-11-13）
+
+產品負責人的決定見 `PRODUCT.md`「討論與彈幕」。三樣東西共用：**範圍**（公開／群組）、**公開暱稱**、**檢舉與站方管理**、**發言頻率限制**。
+
+### 共通規則
+
+- **範圍 `scope`**：`"public"`（所有人）或 `"group"`（某個群組的成員；帶 `group_id`）。群組範圍的內容：不是成員一律 404 `not_found`（和 M5 相同）；
+  離開群組後看不到，自己發過的留在群組裡。
+- **誰能讀**：公開的**討論主題與回覆不用登入就能讀**（`GET`，沒有 session 時 `mine`／`can_*` 都是 `false`、`my_reactions` 為空）。
+  其餘（發言、表情、檢舉、線圖留言、群組範圍、`scope=all`）都要登入，否則 401。
+- **誰能寫**：登入的使用者本人。查看別人資產（`X-Forliosa-View-As`）時這一節的端點**一律以登入者本人**為準，不受查看模式影響；前端在查看模式擋下討論頁（和群組一樣）。
+- **作者 `Author`**：
+  - 公開範圍：`{"name": "公開暱稱", "is_you": false}`。**不含** `user_id`、顯示名稱、頭像、email（測試要逐項證明）。
+  - 群組範圍：`{"name": "顯示名稱", "is_you": false, "user_id": "usr_…", "avatar_url": null}`（和群組動態相同）。
+  - 帳號刪除後 `name: null`（前端顯示「已刪除的帳號」）；內容保留。
+- **公開暱稱**：`users.public_name`，2–20 字、一行（規則同顯示名稱，另外不能只有空白、前後空白去掉）、不分大小寫與全半形唯一（409 `public_name_taken`）；
+  不能是保留字（`forliosa`、`官方`、`管理員`、`站方`、`admin`、`system`，不分大小寫，含這些字也不行）。7 天內只能改一次（409 `public_name_cooldown`，帶 `retry_after_days`）。
+  沒設定就發公開內容 → 409 `public_name_required`。改名後舊貼文顯示新暱稱。
+  - `GET /users/me` 多 `public_name: string | null`、`is_admin: boolean`、`public_posting_suspended_until: string | null`（ISO 時間；永久為 `"9999-12-31T00:00:00Z"`）。
+  - `PUT /users/me/public-name` `{"public_name"}` → `User`。
+- **內文**：純文字。主題內文 1–5000 字、回覆 1–2000 字，可換行（CRLF 轉 LF、連續空行最多 2 個、去掉行尾空白）；標題 1–80 字、一行；
+  控制字元與看不見的格式字元（同名稱規則，換行除外）→ 422。不支援 Markdown、圖片；前端把 `http(s)://` 網址變成連結
+  （`target="_blank" rel="nofollow ugc noopener noreferrer"`）。
+- **狀態 `status`**：`"visible"`｜`"hidden"`（站方隱藏）。隱藏的主題不出現在清單；直接打開回 `body: null`、`status: "hidden"`（作者本人與站方管理員仍拿得到 `body`）。
+  隱藏的回覆留在原位、`body: null`。隱藏的線圖留言不回傳。
+- **刪除**：作者可刪自己的；群組範圍另外允許群組 owner／admin。刪主題連同回覆、表情、檢舉一起刪。站方管理員不刪公開內容，只隱藏。
+- **表情**：和群組相同的六個（👍🎉🔥😮😢👀）；`reactions: [{"emoji","count","mine"}]`。只給主題與回覆，線圖留言沒有表情。
+- **頻率限制**（每位使用者；超過回 429 `rate_limited`，帶 `retry_after_seconds`）：
+  - 公開：主題 5 則／天；回覆 30 則／小時；線圖留言 1 則／10 秒且 60 則／天；任兩則公開發言至少間隔 10 秒。
+  - 群組：主題 20 則／天；回覆 120 則／小時；線圖留言 1 則／3 秒且 300 則／天。
+- **公開發言停權**：停權中發公開內容 → 403 `posting_suspended`（帶 `until`）；群組發言不受影響。
+- **AI 不讀這些內容**：AI 工具不讀討論、不讀線圖留言，也不替使用者發言。
+- 錯誤代碼新增：`public_name_required`、`public_name_taken`、`public_name_cooldown`、`posting_suspended`、`rate_limited`（429）。
+
+### 討論主題與回覆
+
+| 方法 | 路徑 | 誰 | 說明 |
+|---|---|---|---|
+| GET | `/discussions/topics?scope=public\|group\|all&group_id=&symbol=&mine=&sort=active\|new&limit=30&cursor=` | 公開：任何人；其餘登入 | `{"items": TopicSummary[], "next_cursor"}`。`scope=all`＝公開＋我所有群組的；`symbol` 只列標記那檔的；`mine=true` 只列我發的；`sort=active`（預設，依最後回覆時間）或 `new` |
+| POST | `/discussions/topics` | 登入 | `{"scope", "group_id"?, "title", "body", "symbols"?: string[]}`（最多 5 檔，必須是商品主檔裡的代號，含指數）→ `Topic`（201） |
+| GET | `/discussions/topics/{id}` | 同清單 | `Topic` |
+| DELETE | `/discussions/topics/{id}` | 作者；群組 owner／admin | 204 |
+| GET | `/discussions/topics/{id}/replies?limit=50&cursor=` | 同清單 | 舊到新，`{"items": Reply[], "next_cursor"}` |
+| POST | `/discussions/topics/{id}/replies` | 登入（看得到這個主題） | `{"body"}` → `Reply`（201）。隱藏的主題不能回覆（409 `topic_hidden`） |
+| DELETE | `/discussions/replies/{id}` | 作者；群組 owner／admin | 204 |
+| PUT | `/discussions/reactions` | 登入 | `{"target": "topic:<id>"\|"reply:<id>", "emoji"}`（重複呼叫不重複計）→ 204 |
+| DELETE | `/discussions/reactions?target=&emoji=` | 登入 | 收回自己的表情 → 204 |
+
+```jsonc
+// TopicSummary
+{
+  "id": "top_…", "scope": "public", "group": null,            // 群組範圍：{"id": "grp_…", "name": "家族投資"}
+  "title": "0050 要不要改買 006208？", "excerpt": "內文前 120 字（去掉換行）",
+  "symbols": [{"symbol": "0050.TW", "code": "0050", "name": "元大台灣50"}],
+  "author": {"name": "阿土伯", "is_you": false},
+  "created_at": "2026-11-13T02:10:00Z", "last_activity_at": "2026-11-13T04:31:00Z",
+  "reply_count": 12, "status": "visible", "mine": false
+}
+// Topic = TopicSummary（沒有 excerpt）＋
+{ "body": "…", "reactions": [{"emoji": "👍", "count": 3, "mine": true}], "can_delete": false, "can_report": true, "can_reply": true }
+// Reply
+{ "id": "rep_…", "topic_id": "top_…", "body": "…", "author": {…}, "created_at": "…", "status": "visible",
+  "reactions": [], "mine": false, "can_delete": false, "can_report": true }
+```
+
+- `can_report`：公開範圍、登入、不是自己的內容才是 `true`。群組範圍沒有檢舉（由群組管理員刪除；站方看不到群組內容）。
+
+### 線圖留言（彈幕）
+
+每一檔商品（股票、ETF、指數）一個房間，鍵是 `symbol`。一則是一句 1–30 字、一行、**不能含網址**（`http`、`www.`、`://` → 422）的短句，沒有標題、不能回覆、沒有表情。全部要登入。
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/chart-comments?symbol=&scope=groups\|all&after=&before=&limit=` | `{"items": ChartComment[], "cursor", "poll_after_seconds": 3}`。`scope=groups`＝我所有群組的；`all`＝再加公開的。三種用法：① 不帶 `after`／`before`：最近 30 天內最新的 `limit`（預設 20、最多 50）則，**舊到新**（打開線圖時飛一輪）；② `after=<cursor>`：這之後新發的（輪詢，沒有新的就回空陣列與同一個 `cursor`）；③ `before=<id>`：更舊的（線圖下方清單「看更多」，新到舊，不限 30 天） |
+| POST | `/chart-comments` | `{"symbol", "body", "scope": "public"\|"group", "group_id"?}` → `ChartComment`（201） |
+| DELETE | `/chart-comments/{id}` | 作者；群組 owner／admin → 204 |
+
+```jsonc
+// ChartComment
+{ "id": "cc_…", "symbol": "2330.TW", "body": "法說會前先抱著", "scope": "group", "group": {"id": "grp_…", "name": "家族投資"},
+  "author": {"name": "爸爸", "is_you": false, "user_id": "usr_…", "avatar_url": null},
+  "created_at": "2026-11-13T04:31:02Z", "mine": false, "can_delete": false, "can_report": false }
+```
+
+- **即時**：第一版用輪詢——前端在線圖看得見、分頁在前景、彈幕開著時，每 `poll_after_seconds` 秒帶 `after` 問一次；之後流量大了再換 SSE，不改資料格式。
+- `cursor` 是不透明字串（依建立時間＋id），前端原樣帶回。
+
+### 檢舉與站方管理（只管公開內容）
+
+| 方法 | 路徑 | 誰 | 說明 |
+|---|---|---|---|
+| POST | `/discussions/reports` | 登入 | `{"target": "topic:<id>"\|"reply:<id>"\|"chart_comment:<id>", "reason": "spam"\|"solicitation"\|"abuse"\|"other", "note"?: ≤300 字}` → 204。同一人對同一則重複檢舉只算一次；不能檢舉自己的、不能檢舉群組範圍的（422） |
+| GET | `/admin/discussions/reports?status=open\|resolved&limit=30&cursor=` | 站方管理員 | 依對象彙整：`{"items": [{"target", "kind", "excerpt", "author_name", "symbol"?, "topic_id"?, "report_count", "reasons": {"spam": 2, …}, "notes": string[], "first_reported_at", "status", "hidden": bool}], "next_cursor"}` |
+| POST | `/admin/discussions/moderation` | 站方管理員 | `{"target", "action": "hide"\|"unhide"\|"dismiss"}`：`hide` 隱藏並把檢舉標為已處理；`dismiss` 不隱藏、標為已處理 → 204 |
+| GET | `/admin/discussions/suspensions` | 站方管理員 | 目前停權中的：`[{"id", "public_name", "until", "reason", "created_at"}]` |
+| POST | `/admin/discussions/suspensions` | 站方管理員 | `{"target": 某一則公開內容, "days": 1\|7\|30\|null（永久）, "reason"?}` 停權那則內容的作者 → 201 |
+| DELETE | `/admin/discussions/suspensions/{id}` | 站方管理員 | 解除 → 204 |
+
+- 站方管理員：環境變數 `ADMIN_EMAILS`（逗號分隔的 email，不分大小寫）。不是管理員呼叫 `/admin/*` → 404 `not_found`。
+- 管理端點不回傳 email、`user_id`；用「某一則內容」指定作者。
+- 每個公開討論頁與線圖留言清單底部，前端固定一行：「使用者言論，不代表本站立場，也不是投資建議。」
+
+### 指數頁
+
+- 商品主檔多兩檔 `type: "index"`：`^TAIEX`（發行量加權股價指數，`market: "TWSE"`）、`^TPEX`（櫃買指數，`market: "TPEx"`）；搜尋找得到（「大盤」「加權」「櫃買」也找得到）。
+- `GET /instruments/{symbol}` 與 `GET /instruments/{symbol}/prices?range=` 對指數可用：收盤、漲跌點數與幅度、日線（來自已存檔的 MI_INDEX／tpex_index；存檔不足時照常回 `notes`「資料累積中…」）。
+  沒有成交量、基本面、估值、籌碼、股利、新聞、法人觀點、相關股票（這些端點對指數回 404 `not_found` 或空清單，前端不顯示那些分頁）。
+- 指數不能交易、不能加進持倉；可以加進觀察、可以當討論主題的標記、可以有線圖留言。
+- 顯名聲明沿用 MI_INDEX／tpex_index 的資料集（`sources`）。
