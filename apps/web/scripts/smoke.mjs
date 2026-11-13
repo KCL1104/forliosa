@@ -450,7 +450,7 @@ await check("補記：11/06 的 0050 扣款沒有記 → 草稿成交日 11/6 �
   await page.getByText(/成交日 11\/6/).last().waitFor()
   await page.getByText(/11\/6 是元大台灣50 定期定額的扣款日，帳本裡還沒有這一筆。/).waitFor()
   // 扣款日已經過去：用那天（11/6）的收盤價，不是最近收盤價（怎麼估的寫在草稿卡的說明行，訊息裡不再說一次）
-  await page.getByText(/以 11\/6 收盤價/).last().waitFor()
+  await page.getByText(/股數用 11\/6 收盤價/).last().waitFor()
   await page.getByRole("button", { name: "簽名：確認入帳" }).click()
   await page.getByText(/已入帳：買進 元大台灣50/).waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "新對話" }).click()
