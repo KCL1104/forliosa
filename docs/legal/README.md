@@ -27,7 +27,7 @@
 | 聯絡信箱 | support@forliosa.trade（個資請求、一般聯絡；草稿也把它當作申訴與權利人通知的信箱） | 隱私 §1、§10.2、§15；條款前言、§6.4、§6.5、§6.7、§11.4、§15 |
 | 網站 | <https://forliosa.trade>（API：`https://api.forliosa.trade`） | 隱私 §1、條款前言 |
 
-### 還要填的【待填】（共 17 個，兩份草稿裡的字樣和下表完全相同，可以直接搜尋）
+### 還要填的【待填】（16 種、共 19 處；兩份草稿裡的字樣和下表完全相同，可以直接搜尋）
 
 | # | 空格 | 檔案 | 要決定什麼 | 建議 |
 |---|---|---|---|---|
@@ -48,7 +48,7 @@
 | 15 | 【待填：責任上限金額】 | 條款 §12.3 | 賠償上限 | 由律師決定；常見寫法是「你在過去 12 個月付給我們的費用，或新臺幣○○元，取較高者」 |
 | 16 | 【待填：第一審管轄法院】 | 條款 §14 | 合意管轄 | 你住所地的地方法院（例如臺灣○○地方法院）；請律師確認對消費者的效力 |
 
-（第 11 項在兩份文件各出現一次，所以是 16 種空格、17 處。）
+（第 1、7、11 項在兩份文件各出現一次，所以是 16 種空格、19 處。）
 
 ### 草稿裡的【待確認】（共 9 種）
 
@@ -108,13 +108,13 @@
 | P23 | §4.1 | 對外查詢市場資料與新聞時只有股票代號與公司名稱；對象是有人持有、觀察或最近看過的股票；SearXNG 自架、只對內 | `api/config.py:136-168`；`PRODUCT.md:94-96`；`api/news/service.py:145-165`；`docs/deploy.md:10`、`:158-173`；`web/src/pages/data-sources/DataSourcesPage.tsx:123` |
 | P24 | §4.3 | 站方管理員只處理公開內容，看不到 Email、帳號編號、群組內容 | `api/services/discussions.py:108-117`、`:590-599`、`:601-650`；`docs/api-contract.md:1141-1153` |
 | P25 | §4.3 | 資料庫內容除 webhook 網址外沒有另外加密 | `api/crypto.py`（只有 `channel-webhook` 一種加密用途）；`api/models.py`（其餘欄位為一般型別）。`docs/product-spec.md:422` 寫的「資料庫加密、後台存取留稽核紀錄」**沒有實作** |
-| P26 | §5.1 | AI 請求的內容：問題、對話歷史、頁面情境、工具查到的本人帳本資料 | `api/ai/chat.py:163-172`（`params`：只有 system、tools、messages，沒有使用者識別欄位）、`:380-383`；`api/ai/prompts.py:202-221`；`api/ai/tools.py:160-167`、`:189-297`、`:489-507`；`api/models.py:375-378`；`apps/api/CONTRACT_NOTES.md:1086-1090` |
-| P27 | §5.2 | 不送出顯示名稱、Email、Discord 編號、帳號編號、IP；AI 只讀本人資料、不讀討論 | `api/ai/prompts.py:1-7`、`:15-50`（系統提示固定，不含使用者資訊）；`apps/api/CONTRACT_NOTES.md:1105`；`docs/api-contract.md:558`、`:826`、`:1093`；`api/services/discussions.py:13` |
+| P26 | §5.1 | AI 請求的內容：問題、對話歷史、頁面情境、工具查到的本人帳本資料 | `api/ai/chat.py:163-172`（`params`：只有 system、tools、messages，沒有使用者識別欄位）、`:380-383`；`api/ai/prompts.py:202-221`；`api/ai/tools.py:160-167`、`:189-297`、`:489-507`；`api/models.py:375-378`；`apps/api/CONTRACT_NOTES.md:1087-1091` |
+| P27 | §5.2 | 不送出顯示名稱、Email、Discord 編號、帳號編號、IP；AI 只讀本人資料、不讀討論 | `api/ai/prompts.py:1-7`、`:15-50`（系統提示固定，不含使用者資訊）；`apps/api/CONTRACT_NOTES.md:1107`（工具沒有使用者 id 欄位）；`docs/api-contract.md:558`、`:826`、`:1093`；`api/services/discussions.py:13` |
 | P28 | 重點、§5.3 | 隱私模式只要求 AI 不寫出絕對數字，資料照樣送出 | `api/ai/prompts.py:50`、`:213`；`api/ai/tools.py`（工具不看隱私模式） |
 | P29 | §5.4 | 網路搜尋與讀取網頁由 AI 服務供應商執行，關鍵字由 AI 決定 | `api/ai/tools.py:816-846`；`api/ai/prompts.py:30-32`；`api/config.py:107-112` |
 | P30 | §5.5 | 群組週報只送匿名代號與數字；為什麼漲跌、法人觀點、新聞補充、公司簡介只送股票資訊 | `api/services/digests.py:66-74`、`:128-149`；`docs/api-contract.md:1001-1003`；`api/ai/prompts.py:179-181`、`:224-242` |
 | P31 | §5.6 | AI 不寫入帳本，只產生草稿 | `api/models.py:400-402`；`docs/api-contract.md:558` |
-| P32 | §5.7、§7 | AI 對話、訊息、草稿最後活動後 30 天刪除；可逐段刪除；用量紀錄保留；瀏覽器端也留 30 天 | `api/ai/retention.py:43-66`；`api/config.py:126`；`api/worker.py:226`；`api/api/routes/ai.py:86`；`api/models.py:420-429`；`web/src/ai/store.ts:53-54`、`:132-150` |
+| P32 | §5.7、§7 | AI 對話、訊息、草稿最後活動後 30 天刪除；可逐段刪除；用量紀錄保留；瀏覽器端也留 30 天 | `api/ai/retention.py:43-66`；`api/config.py:126`；`api/worker.py:226`；`api/api/routes/ai.py:86`；`api/models.py:420-429`；`web/src/ai/store.ts:52`、`:132-150` |
 | P33 | §6.1 | 分享開關與預設值、關掉立即生效、不標示誰沒分享、可推算股數、留言顯示「已離開的成員」、加入動態、邀請預覽、授權候選名單 | `api/services/sharing.py:79-88`；`api/models.py:890-911`；`docs/api-contract.md:750-755`、`:882-890`、`:983-988`；`api/services/groups.py:288-299`；`api/services/delegations.py:55-62` |
 | P34 | §6.2 | 推播內容、本人要開、換頻道自動關閉 | `docs/api-contract.md:1009-1020`；`api/services/notifications.py:135-173`；`api/services/channels.py:124-130` |
 | P35 | §6.3 | 授權查看看得到與看不到的範圍；不會因離開群組自動撤銷 | `api/api/middleware.py`（`VIEW_AS_READ_PATHS`、`ViewAsMiddleware.classify`）；`docs/api-contract.md:812-826` |
@@ -150,10 +150,10 @@
 | T16 | §6.7 | 媒體可要求移除標題 | `api/models.py:1062-1069`；`PRODUCT.md:94` |
 | T17 | §7 | 預設只分享報酬率、推播要本人開、換頻道自動關閉、擁有者要先轉移、邀請期限、授權不自動撤銷、人數上限 | `api/services/sharing.py:79-80`；`api/services/groups.py:40-42`；`docs/api-contract.md:755`、`:758`、`:812`、`:841-846`、`:1018-1020` |
 | T18 | §8.1 | AI 只處理投資相關問題 | `api/ai/prompts.py:17-21`；`api/ai/scope.py:50` |
-| T19 | §8.2 | 列出引用來源、標示無來源（可能漏標誤標）、固定聲明 | `api/ai/grounding.py`；`api/ai/prompts.py:60`；`apps/api/CONTRACT_NOTES.md:1095-1103`、`:1222` |
+| T19 | §8.2 | 列出引用來源、標示無來源（可能漏標誤標）、固定聲明 | `api/ai/grounding.py`；`api/ai/prompts.py:60`；`apps/api/CONTRACT_NOTES.md:1100-1105`、`:1226` |
 | T20 | §8.3 | AI 只產生草稿，確認後才寫入；沒寫價格時用收盤價估算 | `api/ai/tools.py:524-636`；`api/ai/prompts.py:36-40`；`PRODUCT.md:84` |
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
-| T22 | §8.5 | 每天 50 則、每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一則；對話太長要開新對話 | `api/config.py:98-100`；`api/ai/store.py:329-352`；`docs/api-contract.md:586`、`:588`、`:632`；`apps/api/CONTRACT_NOTES.md:1228` |
+| T22 | §8.5 | 每天 50 則、每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一則；對話太長要開新對話 | `api/config.py:98-100`；`api/ai/store.py:329-352`；`docs/api-contract.md:586`、`:588`、`:632`；`apps/api/CONTRACT_NOTES.md:1232` |
 | T23 | §9 | 資料來源與授權 | `api/datapolicy.py:54-92`、`:468-515`；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
 | T24 | §11.5 | 產品內建的處置只有隱藏與暫停公開發言 | `api/models.py:27-41`（`User` 沒有停用欄位）；`api/services/discussions.py` |
 
