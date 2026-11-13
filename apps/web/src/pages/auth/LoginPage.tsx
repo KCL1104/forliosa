@@ -16,16 +16,15 @@ import { safeNext } from "@/lib/next-path"
 import { oauthErrorText } from "@/lib/oauth-errors"
 import type { LoginSearch } from "@/router"
 import { PlainLink } from "@/app/links"
-import { ABOUT_FORLIOSA } from "@/lib/about"
 import { FieldError } from "@/components/form-field"
 import { textAction } from "@/components/text-action"
 import { cn } from "@/lib/utils"
 import { usePageTitle } from "@/app/page-title"
 
 /**
- * 登入：只有登入的那一塊（產品負責人 2026-11-13：示範帳本的畫面拿掉，太突兀）——字標、一句話說這是什麼、
- * 用 Google 或 Discord 登入（第一次登入就建立帳號；同一個已驗證的 Email 是同一個帳號）、同意條款的一行。
- * 開發環境另有開發登入。
+ * 登入：只有登入（產品負責人 2026-11-13：不要示範畫面，也不要說明的句子）——字標、「登入」、登入按鈕（Google、Discord），全部置中。
+ * 唯一留下的一行字是「登入即表示你同意 服務條款 與 隱私權政策」：條款是靠這一行成立的，不能拿掉。
+ * 第一次登入就建立帳號；同一個已驗證的 Email 是同一個帳號（不寫在畫面上）。開發環境另有開發登入。
  */
 export function LoginPage() {
   const search = useSearch({ from: "/login" }) as LoginSearch
@@ -50,19 +49,15 @@ export function LoginPage() {
   ]
 
   return (
-    <AuthFrame>
-      <div className="flex flex-col gap-2.5">
-        <h1 className="text-2xl font-bold tracking-[-0.01em]">登入</h1>
-        {/* 從連結進來的人不知道這是什麼：一句話說 Forliosa 是什麼（事實，不是宣傳句） */}
-        <p className="text-base text-ink">{ABOUT_FORLIOSA}</p>
-      </div>
+    <AuthFrame center>
+      <h1 className="text-2xl font-bold tracking-[-0.01em]">登入</h1>
       {error && (
-        <p role="alert" className="border-y border-rule py-2.5 text-base">
+        <p role="alert" className="w-full border-y border-rule py-2.5 text-base">
           {error}
         </p>
       )}
       {search.deleted && !error && (
-        <p role="status" className="border-y border-rule py-2.5 text-base">
+        <p role="status" className="w-full border-y border-rule py-2.5 text-base">
           你的帳號已經刪除。
         </p>
       )}
@@ -71,8 +66,8 @@ export function LoginPage() {
       ) : !providers.data ? (
         <Skeleton className="h-11 w-full" />
       ) : (
-        <div className="flex flex-col gap-4">
-          {methods.length > 0 && (
+        <div className="flex w-full flex-col gap-4">
+          {methods.length > 0 ? (
             <div className="flex flex-col gap-2.5">
               {methods.map((m) => (
                 // 只有一種登入方式時是墨色的主要按鈕；兩種並列時一樣重（外框），不替使用者挑
@@ -92,12 +87,6 @@ export function LoginPage() {
                 </Button>
               ))}
             </div>
-          )}
-          {methods.length > 0 ? (
-            <p className="text-base text-ink">
-              {next.startsWith("/invite/") ? "第一次登入會自動建立帳號，登入後回到邀請。" : "第一次登入會自動建立帳號。"}
-              {methods.length > 1 && "兩種方式用同一個 Email，會是同一個帳號。"}
-            </p>
           ) : (
             <p className="text-base text-ink">沒有開放登入。</p>
           )}
@@ -136,7 +125,7 @@ function DevLoginForm({ next }: { next: string }) {
   const missing = devLogin.error instanceof ApiError && devLogin.error.status === 404
   return (
     <form
-      className="flex flex-col gap-3 border-t border-rule pt-4"
+      className="flex flex-col gap-3 border-t border-rule pt-4 text-left"
       onSubmit={(e) => {
         e.preventDefault()
         if (email.trim()) devLogin.mutate(email.trim())

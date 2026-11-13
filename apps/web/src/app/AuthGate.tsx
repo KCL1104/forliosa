@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { claimLocalUserData } from "@/lib/local-data"
 import { safeNext } from "@/lib/next-path"
+import { cn } from "@/lib/utils"
 
 /**
  * 登入閘門：先確認 `GET /me`，有 session 才渲染 App（其他請求不會先吃到一堆 401）。
@@ -36,10 +37,13 @@ export function AuthGate({ children, signedOut }: { children: React.ReactNode; s
   return <BootScreen />
 }
 
-/** 還沒進到 App 的畫面（登入、載入中、連不上）：字標＋一欄內容，垂直置中 */
-export function AuthFrame({ children }: { children: React.ReactNode }) {
+/**
+ * 還沒進到 App 的畫面（登入、載入中、連不上）：字標＋一欄內容，垂直置中。
+ * `center`（登入頁）：內容也水平置中、欄窄一點（384px）——畫面上只有字標、標題和登入按鈕。
+ */
+export function AuthFrame({ children, center }: { children: React.ReactNode; center?: boolean }) {
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-md flex-col justify-center gap-6 px-5 py-10">
+    <main className={cn("mx-auto flex min-h-dvh w-full flex-col justify-center gap-6 px-5 py-10", center ? "max-w-sm items-center text-center" : "max-w-md")}>
       <Wordmark />
       {children}
     </main>

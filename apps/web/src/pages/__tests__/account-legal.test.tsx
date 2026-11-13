@@ -209,13 +209,17 @@ describe("服務條款與隱私權政策的頁面", () => {
     mount({ signedIn: false })
     renderApp("/login")
     const consent = (await screen.findByText(/登入即表示你同意/, undefined, T)).closest("p")!
-    // 只有登入的那一塊：一句話說 Forliosa 是什麼、兩種登入方式（一樣重的外框按鈕，Google 在前）、沒有示範畫面
-    expect(screen.getByText("Forliosa 是以台股為主的持倉帳本，可以看績效、查個股、問 AI，也能和親友開群組。")).toHaveClass("text-base", "text-ink")
-    expect(screen.queryByRole("figure")).toBeNull()
+    // 只有登入：字標、「登入」、兩種登入方式（一樣重的外框按鈕，Google 在前），全部置中；沒有說明的句子、沒有示範畫面。
+    // 唯一的一行字是同意條款（條款靠它成立）
     const buttons = await screen.findAllByRole("button", { name: /登入$/ }, T)
     expect(buttons.map((b) => b.textContent)).toEqual(["用 Google 登入", "用 Discord 登入"])
     for (const b of buttons) expect(b.className).toMatch(/border-ctl/)
-    expect(screen.getByText(/第一次登入會自動建立帳號。兩種方式用同一個 Email，會是同一個帳號。/)).toBeInTheDocument()
+    const main = screen.getByRole("main")
+    expect(main).toHaveClass("items-center", "text-center")
+    expect(screen.queryByRole("figure")).toBeNull()
+    expect(main.querySelectorAll("p")).toHaveLength(1)
+    expect(main.querySelector("p")).toBe(consent)
+    expect(main.textContent).toBe("Forliosa登入用 Google 登入用 Discord 登入登入即表示你同意服務條款與隱私權政策。")
     await waitFor(() => expect(document.title).toBe("登入｜Forliosa"))
     expect(within(consent).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(consent).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
@@ -236,7 +240,6 @@ describe("服務條款與隱私權政策的頁面", () => {
       const only = await screen.findByRole("button", { name: "用 Google 登入" }, T)
       expect(screen.queryByRole("button", { name: "用 Discord 登入" })).toBeNull()
       expect(only.className).toMatch(/bg-act/)
-      expect(screen.getByText("第一次登入會自動建立帳號。")).toBeInTheDocument()
       await user.click(only)
       expect(assign).toHaveBeenCalledWith(api.googleLoginUrl("/groups"))
     } finally {

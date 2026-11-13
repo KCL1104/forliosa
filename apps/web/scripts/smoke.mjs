@@ -2053,16 +2053,27 @@ await check("帳號：條款頁不用登入就能讀（草稿標示、一行不�
     await p.locator("article").getByRole("link", { name: "〈隱私權政策〉第 6 節" }).click()
     await p.getByRole("heading", { level: 1, name: /隱私權政策/ }).waitFor({ timeout: 8000 })
     await p.waitForFunction(() => { const h = document.getElementById("sec-6"); const y = h?.getBoundingClientRect().top ?? 9999; return y >= 0 && y < 200 }, null, { timeout: 5000 })
-    // 登入頁：只有登入的那一塊——一句話說這是什麼、Google 與 Discord 兩顆一樣重的按鈕（有商標）、沒有示範畫面；分頁標題
+    // 登入頁：只有登入——字標、「登入」、Google 與 Discord 兩顆一樣重的按鈕（有商標），全部置中；沒有說明的句子、沒有示範畫面；分頁標題
     await p.goto(base + "/login", { waitUntil: "networkidle" })
-    await p.getByText("Forliosa 是以台股為主的持倉帳本，可以看績效、查個股、問 AI，也能和親友開群組。").waitFor({ timeout: 8000 })
+    await p.getByRole("button", { name: "用 Google 登入" }).waitFor({ timeout: 8000 })
     if ((await p.title()) !== "登入｜Forliosa") throw new Error(`login page title: ${await p.title()}`)
     if (await p.locator("figure").count()) throw new Error("the ledger specimen is back on the login page")
     const signIn = await p.getByRole("button", { name: /^用 (Google|Discord) 登入$/ }).evaluateAll((els) => els.map((el) => { const r = el.getBoundingClientRect(); const c = getComputedStyle(el); return { text: el.textContent.trim(), w: Math.round(r.width), h: Math.round(r.height), bg: c.backgroundColor, mark: !!el.querySelector("svg") } }))
     if (signIn.map((b) => b.text).join("|") !== "用 Google 登入|用 Discord 登入") throw new Error(`login buttons: ${JSON.stringify(signIn)}`)
     if (signIn[0].w !== signIn[1].w || signIn[0].bg !== signIn[1].bg || !signIn.every((b) => b.mark && b.h >= 44)) throw new Error(`the two sign-in buttons should look the same: ${JSON.stringify(signIn)}`)
-    const column = await p.locator("main").evaluate((el) => Math.round(el.getBoundingClientRect().width))
-    if (column > 460) throw new Error(`the login page should be one narrow column, main is ${column}px wide`)
+    const page1 = await p.locator("main").evaluate((el) => {
+      const mid = (x) => { const r = x.getBoundingClientRect(); return Math.round(r.left + r.width / 2) }
+      const centre = Math.round(innerWidth / 2)
+      return {
+        width: Math.round(el.getBoundingClientRect().width), centre,
+        off: [el.querySelector("span"), el.querySelector("h1"), ...el.querySelectorAll("button"), el.querySelector("p")].map((x) => Math.abs(mid(x) - centre)),
+        paragraphs: [...el.querySelectorAll("p")].map((x) => x.textContent.trim()),
+      }
+    })
+    if (page1.width > 400) throw new Error(`the login page should be one narrow column, main is ${page1.width}px wide`)
+    if (page1.off.some((d) => d > 2)) throw new Error(`the login page is not centred: ${JSON.stringify(page1)}`)
+    // 畫面上唯一的一行字是同意條款
+    if (page1.paragraphs.length !== 1 || !page1.paragraphs[0].startsWith("登入即表示你同意")) throw new Error(`extra sentences on the login page: ${JSON.stringify(page1.paragraphs)}`)
     await p.goto(base + "/login", { waitUntil: "networkidle" })
     const consent = p.locator("p", { hasText: "登入即表示你同意" })
     await consent.waitFor({ timeout: 8000 })
