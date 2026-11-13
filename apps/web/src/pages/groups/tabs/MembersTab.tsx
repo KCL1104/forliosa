@@ -178,7 +178,7 @@ function ConfirmDialog({ group, confirm, onClose }: { group: Group; confirm: Con
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={pending} onClick={run}>
+          <AlertDialogAction disabled={pending} onClick={run}>
             {copy.action}
           </AlertDialogAction>
         </AlertDialogFooter>

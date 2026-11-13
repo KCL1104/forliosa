@@ -21,7 +21,7 @@ import { formatQuoteChange, limitPrices, limitState, quoteDecimals } from "@/lib
 import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
 import { usePrefs } from "@/stores/prefs"
-import { asOfLabel, closeDay, twseLiveQuoteUrl } from "@/lib/as-of"
+import { asOfLabel, closeDay, twseLiveQuoteUrl, withDayWord } from "@/lib/as-of"
 import { useClose } from "@/hooks/use-close"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { PriceChart } from "./PriceChart"
@@ -137,7 +137,8 @@ function StockPageInner() {
                   requestAnimationFrame(() => document.getElementById(`stock-tab-${next.value}`)?.focus())
                 }}
                 onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: t.value === "overview" ? undefined : t.value }, replace: true, resetScroll: false })}
-                className="sel-tab -mb-px flex h-12 shrink-0 items-center px-3 text-base text-ink-2"
+                // 和群組頁同一種分頁：手機上每個至少 44px 寬、平分整列，七個分頁在 393px 的螢幕上全部看得到（更窄才捲動）
+                className="sel-tab -mb-px flex h-12 min-w-11 shrink-0 items-center justify-center px-1 text-base text-ink-2 max-sm:grow sm:px-3"
               >
                 {t.label}
               </button>
@@ -274,6 +275,8 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
             </>
           )}
         </p>
+        {/* 收盤價不是今天的（盤中、今天的還沒公布、假日）：寫明這是哪一天的漲跌，和帳本同一種寫法（「11/12 漲跌」） */}
+        {tw && change !== null && close.day !== "今日" && <p className="num text-sm text-ink-2">{withDayWord("今日漲跌", close.day)}</p>}
         {atLimit && <span className={cn("demo-tag font-medium", atLimit === "up" ? "border-rise text-rise" : "border-fall text-fall")}>{atLimit === "up" ? "漲停" : "跌停"}</span>}
       </div>
       <p className="num mt-1 flex flex-wrap gap-x-4 text-sm text-ink-2">
@@ -298,9 +301,11 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
       </p>
       {close.note && (
         // 只在需要時出現的一行：盤中（附證交所的連結——只是連結，本站不擷取那個網站）、收盤後今天的收盤價還沒公布
-        <p className="mt-1 flex flex-wrap items-center gap-x-3 text-sm text-ink-2">
-          <span className="num">{close.note}</span>
+        <p className="mt-1 flex flex-wrap items-center text-sm text-ink-2">
+          <span>{close.note}</span>
           {close.state === "open" && (
+            <>
+              <span aria-hidden>・</span>
             <a
               href={twseLiveQuoteUrl(inst.code, inst.market === "TPEX" ? "TPEX" : "TWSE")}
               target="_blank"
@@ -311,6 +316,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
               <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0" />
               <span className="sr-only">（另開新視窗）</span>
             </a>
+            </>
           )}
         </p>
       )}
@@ -344,7 +350,8 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
       type="button"
       onClick={() => ask.submit(`${inst.name}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
       className={cn(
-        "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline",
+        // 觸控時可按範圍上下各多 10px（合計 44px 以上）：看不見的 ::before，字的位置不動
+        "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-2.5 pointer-coarse:before:content-['']",
         modelWritten ? "hover:decoration-ai-rule" : "hover:decoration-ctl",
         voice,
       )}
@@ -467,6 +474,12 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
             <Item label={priced ? "市值" : "市值（以成本計）"} value={money(p.market_value)} />
             <Item label="成本" value={money(p.cost_basis)} />
             <Item label="已實現" value={<span className={toneClass(direction(p.realized_pnl))}>{money(p.realized_pnl, true)}</span>} />
+            {/* 兩欄的格子不留落單的半格：手機上沒有報價時前面是五格，「下次除息」撐滿那一列；「之前出清過」本來就佔一整列，放最後 */}
+            <Item
+              className={priced ? undefined : "max-sm:col-span-2"}
+              label="下次除息"
+              value={p.upcoming_dividend ? `${formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}・約 ${money(p.upcoming_dividend.amount_estimate)}` : "未公告"}
+            />
             {rounds.length > 0 && (
               <Item
                 className="col-span-2"
@@ -479,10 +492,6 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
                 }
               />
             )}
-            <Item
-              label="下次除息"
-              value={p.upcoming_dividend ? `${formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}・約 ${money(p.upcoming_dividend.amount_estimate)}` : "未公告"}
-            />
           </dl>
           <div>
             <p className="text-sm text-ink-2">最近的交易</p>

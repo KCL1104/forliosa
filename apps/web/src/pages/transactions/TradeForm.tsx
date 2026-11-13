@@ -46,10 +46,11 @@ export function TradeFormHost() {
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && close()}>
+        {/* 兩欄的表單自己排內距（右欄的試算滿到邊緣）：標題的印刷線和表單同寬，說明在線的下面 */}
         <DialogContent className="max-h-[calc(100dvh-4rem)] gap-0 overflow-y-auto p-0 sm:max-w-[760px]">
-          <DialogHeader className="border-b px-6 pt-5 pb-4">
-            <DialogTitle className="text-lg font-semibold">{title}</DialogTitle>
-            <DialogDescription className="text-md">{description}</DialogDescription>
+          <DialogHeader className="px-6 pt-5 pb-4">
+            <DialogTitle>{title}</DialogTitle>
+            <DialogDescription>{description}</DialogDescription>
           </DialogHeader>
           {open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="split" />}
         </DialogContent>
@@ -59,9 +60,9 @@ export function TradeFormHost() {
   return (
     <Drawer open={open} onOpenChange={(o) => !o && close()} repositionInputs={false}>
       <DrawerContent className="max-h-[92dvh]">
-        <DrawerHeader className="pb-2 text-left">
-          <DrawerTitle className="text-lg font-semibold">{title}</DrawerTitle>
-          <DrawerDescription className="text-md">{description}</DrawerDescription>
+        <DrawerHeader className="pb-2">
+          <DrawerTitle>{title}</DrawerTitle>
+          <DrawerDescription>{description}</DrawerDescription>
         </DrawerHeader>
         <div className="overflow-y-auto overscroll-contain">{open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="stack" />}</div>
       </DrawerContent>

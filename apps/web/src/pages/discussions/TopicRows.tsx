@@ -1,20 +1,55 @@
-import { Link } from "@tanstack/react-router"
+import { Link, useRouterState } from "@tanstack/react-router"
 import { Fragment } from "react"
 import { useTopics, type TopicListFilter } from "@/api/discussion-queries"
+import { useViewer } from "@/api/queries"
+import { usePendingDeletes } from "@/lib/delete-later"
 import type { TopicSummary, TopicSymbol } from "@/api/types"
+import type { TopicSearch } from "@/router"
 import { PlainLink } from "@/app/links"
 import { DateCell } from "@/components/date-cell"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
+import { safeNext } from "@/lib/next-path"
 import { cn } from "@/lib/utils"
-import { authorName, clockTime, DISCLAIMER, taipeiDay } from "./labels"
+import { ABOUT_FORLIOSA, authorName, clockTime, DISCLAIMER, taipeiDay } from "./labels"
+import { topicSearchFrom, type Origin } from "./origin"
 
-/** 日期格那一欄：手機是窄的三行（日期／星期／時間，和交易列表同寬），標題才有地方寫；桌面一行日期＋一行時間 */
-const DATE_COL = "w-[3.25rem] shrink-0 lg:w-[6.5rem]"
+/** 日期格那一欄：手機是窄的三行（日期／星期／時間，和交易列表同寬），標題才有地方寫；桌面一行日期＋一行時間。主題頁用同一欄 */
+export const DATE_COL = "w-[3.25rem] shrink-0 lg:w-[6.5rem]"
 
-/** 每個公開討論頁底部固定的一行（12px 淡墨） */
+/**
+ * 一行用「・」隔開的 meta（作者・N 則回覆・標記的股票・群組）。每一項是一個不拆開的單位，放不下就整項換到下一行；
+ * 「・」畫在每一項的前面、第一項的那一個被裁掉——所以換行之後行首、行尾都不會掛著一個「・」（`.meta-line`，globals.css）。
+ */
+export function MetaLine({ className, children }: { className?: string; children: React.ReactNode }) {
+  return (
+    <div className={cn("meta-line", className)}>
+      <div>{children}</div>
+    </div>
+  )
+}
+
+/**
+ * 每個公開討論頁底部固定的一行（12px 淡墨）。沒登入的訪客在它下面多一行：Forliosa 是什麼＋「登入」
+ * （登入後回到現在這一頁）——不然從搜尋或別人貼的連結進來的人，整頁沒有一句話說這是什麼地方。
+ */
 export function Disclaimer({ className }: { className?: string }) {
-  return <p className={cn("text-xs text-ink-2", className)}>{DISCLAIMER}</p>
+  const { signedIn } = useViewer()
+  const next = safeNext(useRouterState({ select: (s) => s.location.href }))
+  return (
+    <div className={className}>
+      <p className="text-xs text-ink-2">{DISCLAIMER}</p>
+      {!signedIn && (
+        <p className="mt-1 text-sm text-ink-2">
+          {ABOUT_FORLIOSA}
+          <Link to="/login" search={next === "/" ? {} : { next }} className={cn(textAction, "ml-2 text-sm")}>
+            登入
+          </Link>
+        </p>
+      )}
+    </div>
+  )
 }
 
 /**
@@ -63,6 +98,7 @@ export function StockTags({ symbols, linked, touch, className }: { symbols: Topi
  */
 export function TopicRows({
   filter,
+  origin,
   enabled = true,
   signedIn,
   showGroup = true,
@@ -70,6 +106,8 @@ export function TopicRows({
   className,
 }: {
   filter: TopicListFilter
+  /** 這份清單在哪裡（討論清單、群組或個股的「討論」分頁）：打開的主題用它回到這裡 */
+  origin: Origin
   enabled?: boolean
   /** 沒登入：標記的股票是純文字（個股頁要登入） */
   signedIn: boolean
@@ -79,8 +117,11 @@ export function TopicRows({
   className?: string
 }) {
   const topics = useTopics(filter, enabled)
-  const items = topics.data?.pages.flatMap((p) => p.items) ?? []
+  // 剛按了刪除、通知還沒結束的主題：先從清單拿掉（按「復原」就回來）
+  const pending = usePendingDeletes((s) => s.keys)
+  const items = (topics.data?.pages.flatMap((p) => p.items) ?? []).filter((t) => !pending.has(`topic:${t.id}`))
   const byNew = filter.sort === "new"
+  const search = topicSearchFrom(origin)
   return (
     <div className={cn("flex flex-col", className)}>
       {topics.isError ? (
@@ -97,7 +138,7 @@ export function TopicRows({
           </div>
           <ul aria-label="主題">
             {items.map((t) => (
-              <TopicRow key={t.id} t={t} byNew={byNew} linked={signedIn} showGroup={showGroup} />
+              <TopicRow key={t.id} t={t} byNew={byNew} linked={signedIn} showGroup={showGroup} search={search} />
             ))}
           </ul>
           {topics.hasNextPage && (
@@ -112,7 +153,7 @@ export function TopicRows({
   )
 }
 
-function TopicRow({ t, byNew, linked, showGroup }: { t: TopicSummary; byNew: boolean; linked: boolean; showGroup: boolean }) {
+function TopicRow({ t, byNew, linked, showGroup, search }: { t: TopicSummary; byNew: boolean; linked: boolean; showGroup: boolean; search: TopicSearch }) {
   const when = byNew ? t.created_at : t.last_activity_at
   return (
     <li className="ruled-row relative flex min-h-[72px] items-center gap-3 py-3">
@@ -126,28 +167,24 @@ function TopicRow({ t, byNew, linked, showGroup }: { t: TopicSummary; byNew: boo
         <PlainLink
           to="/discussions/$topicId"
           params={{ topicId: t.id }}
+          search={search}
           className="block rounded-xs text-lg font-medium text-ink after:absolute after:inset-0 focus-visible:-outline-offset-2"
         >
-          <span className="line-clamp-3 break-words">{t.title}</span>
+          <span className="line-clamp-3 [text-wrap:pretty] break-words">{t.title}</span>
         </PlainLink>
-        <p className="mt-0.5 text-sm break-words text-ink-2">
-          {authorName(t.author)}
-          {t.author.is_you && <span className="text-ink">（你）</span>}
-          {"・"}
+        <MetaLine className="mt-0.5 text-sm text-ink-2">
+          <span>
+            {authorName(t.author)}
+            {t.author.is_you && <span className="text-ink [font-feature-settings:'halt'_1]">（你）</span>}
+          </span>
           <span className="num">{t.reply_count > 0 ? `${t.reply_count} 則回覆` : "還沒有回覆"}</span>
           {t.symbols.length > 0 && (
-            <>
-              {"・"}
+            <span>
               <StockTags symbols={t.symbols} linked={linked} touch="row" />
-            </>
+            </span>
           )}
-          {showGroup && t.group && (
-            <>
-              {"・"}
-              <span className="inline-block">{t.group.name}</span>
-            </>
-          )}
-        </p>
+          {showGroup && t.group && <span>{t.group.name}</span>}
+        </MetaLine>
       </div>
     </li>
   )

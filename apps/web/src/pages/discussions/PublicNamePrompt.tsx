@@ -1,5 +1,6 @@
 import { useId } from "react"
 import { PUBLIC_NAME_MAX, type User } from "@/api/types"
+import { FieldError } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -43,11 +44,7 @@ export function PublicNamePrompt({ onDone, className }: { onDone?: (user: User) 
           {form.pending ? "儲存中…" : "用這個暱稱"}
         </Button>
       </div>
-      {form.error && (
-        <p id={`${id}-error`} role="alert" className="text-sm text-destructive">
-          {form.error}
-        </p>
-      )}
+      {form.error && <FieldError id={`${id}-error`}>{form.error}</FieldError>}
     </form>
   )
 }

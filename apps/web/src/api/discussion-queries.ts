@@ -1,4 +1,5 @@
 import { keepPreviousData, useInfiniteQuery, useMutation, useQuery, useQueryClient, type InfiniteData } from "@tanstack/react-query"
+import { deleteLater } from "@/lib/delete-later"
 import { api } from "./index"
 import { qk } from "./queries"
 import {
@@ -20,7 +21,7 @@ import {
 /**
  * 討論串的查詢與動作（docs/api-contract.md「討論串（2026-11-13）」）。全部放在 `["discussions", …]` 底下：
  * 發言、刪除、隱藏、改公開暱稱之後整組重新抓，作者名稱、回覆數與 `can_*` 都以伺服器為準。
- * 表情是例外：按下立刻反映（樂觀更新），失敗時還原。
+ * 表情是例外：按下立刻反映（樂觀更新），失敗時還原。刪除也是：畫面先拿掉、可以復原，通知結束才送出。
  */
 export interface TopicListFilter {
   scope: TopicListScope
@@ -88,16 +89,6 @@ export function useCreateTopic() {
     },
   })
 }
-export function useDeleteTopic() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (id: string) => api.deleteTopic(id),
-    onSuccess: (_, id) => {
-      qc.removeQueries({ queryKey: dk.topic(id) })
-      void qc.invalidateQueries({ queryKey: dk.lists })
-    },
-  })
-}
 export function useCreateReply(topicId: string) {
   const qc = useQueryClient()
   return useMutation({
@@ -108,15 +99,36 @@ export function useCreateReply(topicId: string) {
     },
   })
 }
-export function useDeleteReply(topicId: string) {
+
+/**
+ * 刪除回覆、刪除主題：可以復原（`lib/delete-later.ts`）——畫面上立刻拿掉、通知附「復原」，通知結束才送出 `DELETE`；
+ * 頁面先被關掉或藏起來就當下送出（keepalive）。失敗時放回原位並通知。
+ * 刪掉之後：回覆 → 重新讀這個主題（回覆數、最後回覆時間）與清單；主題 → 丟掉它的快取、重新讀清單。
+ */
+export function useDeleteWithUndo() {
   const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (replyId: string) => api.deleteReply(replyId),
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: dk.topic(topicId) })
-      void qc.invalidateQueries({ queryKey: dk.lists })
-    },
-  })
+  return {
+    reply: (topicId: string, replyId: string) =>
+      deleteLater({
+        key: `reply:${replyId}`,
+        title: "已刪除回覆",
+        failed: "回覆沒有刪除，已經放回原位",
+        send: (opts) => api.deleteReply(replyId, opts),
+        onDeleted: () => Promise.all([qc.invalidateQueries({ queryKey: dk.topic(topicId) }), qc.invalidateQueries({ queryKey: dk.lists })]),
+      }),
+    topic: (topic: Pick<Topic, "id" | "reply_count">) =>
+      deleteLater({
+        key: `topic:${topic.id}`,
+        title: "已刪除主題",
+        description: topic.reply_count > 0 ? `底下的 ${topic.reply_count} 則回覆也一起刪除。` : undefined,
+        failed: "主題沒有刪除，已經放回原位",
+        send: (opts) => api.deleteTopic(topic.id, opts),
+        onDeleted: () => {
+          qc.removeQueries({ queryKey: dk.topic(topic.id) })
+          return qc.invalidateQueries({ queryKey: dk.lists })
+        },
+      }),
+  }
 }
 
 // ── 表情（樂觀更新） ───────────────────────────────────────

@@ -89,7 +89,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
   const root = baseUrl.replace(/\/+$/, "")
   const prefix = root.endsWith("/api/v1") ? root : `${root}/api/v1`
 
-  async function request<T>(method: string, path: string, opts: { query?: Query; body?: unknown } = {}): Promise<T> {
+  async function request<T>(method: string, path: string, opts: { query?: Query; body?: unknown; keepalive?: boolean } = {}): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" }
     if (opts.body !== undefined) headers["Content-Type"] = "application/json"
     // 授權查看：查看中每個請求都帶上授權 id（查看者自己的端點除外，見 view-as.ts）
@@ -100,6 +100,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
       credentials: "include",
       headers,
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+      // 頁面卸載時送出的請求（延後的刪除）：瀏覽器在頁面關掉後照樣送完
+      ...(opts.keepalive ? { keepalive: true } : {}),
     })
     if (!res.ok) {
       let code = `http_${res.status}`
@@ -243,10 +245,10 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
       request<Paged<TopicSummary>>("GET", "/discussions/topics", { query: { ...query, mine: query.mine ? "true" : undefined } }),
     createTopic: (body) => request<Topic>("POST", "/discussions/topics", { body }),
     getTopic: (id) => request<Topic>("GET", `/discussions/topics/${enc(id)}`),
-    deleteTopic: (id) => request<void>("DELETE", `/discussions/topics/${enc(id)}`),
+    deleteTopic: (id, opts) => request<void>("DELETE", `/discussions/topics/${enc(id)}`, { keepalive: opts?.keepalive }),
     listReplies: (topicId, query = {}) => request<Paged<Reply>>("GET", `/discussions/topics/${enc(topicId)}/replies`, { query }),
     createReply: (topicId, body) => request<Reply>("POST", `/discussions/topics/${enc(topicId)}/replies`, { body }),
-    deleteReply: (id) => request<void>("DELETE", `/discussions/replies/${enc(id)}`),
+    deleteReply: (id, opts) => request<void>("DELETE", `/discussions/replies/${enc(id)}`, { keepalive: opts?.keepalive }),
     addDiscussionReaction: (body) => request<void>("PUT", "/discussions/reactions", { body }),
     removeDiscussionReaction: (target, emoji) => request<void>("DELETE", "/discussions/reactions", { query: { target, emoji } }),
     reportDiscussion: (body) => request<void>("POST", "/discussions/reports", { body }),

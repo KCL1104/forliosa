@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { FieldError } from "@/components/form-field"
 
 const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請檢查網路後再試一次。")
 
@@ -176,9 +177,7 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
           Discord 頻道設定 → 整合 → Webhook → 複製網址。網址只用來送訊息，存起來後不會再顯示。
         </p>
         {error && (
-          <p role="alert" className="text-sm text-destructive">
-            {error}
-          </p>
+          <FieldError>{error}</FieldError>
         )}
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-2">

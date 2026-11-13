@@ -10,6 +10,7 @@ import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
 import { suspendedText, suspendedUntil } from "@/pages/discussions/labels"
 import { usePublicNameForm } from "@/pages/discussions/use-public-name-form"
+import { FieldError } from "@/components/form-field"
 
 /**
  * 個人資料：顯示名稱（群組裡大家看到的名字，1–30 字；頭像來自 Discord）與公開暱稱（公開討論用的名字，2–20 字）。
@@ -107,9 +108,7 @@ function PublicNameForm({ user }: { user: User }) {
         />
         <div className="flex flex-col gap-1 sm:col-start-1 sm:row-start-3">
           {form.error && (
-            <p id="public-name-error" role="alert" className="text-sm text-destructive">
-              {form.error}
-            </p>
+            <FieldError id="public-name-error">{form.error}</FieldError>
           )}
           <p id="public-name-help" className="text-sm text-ink-2">
             公開討論裡大家看到的是這個名字，群組裡仍用顯示名稱。2 到 20 個字；{current ? "改了之後 7 天內不能再改。" : "選好之後，每 7 天可以改一次。"}

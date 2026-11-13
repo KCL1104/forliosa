@@ -175,15 +175,25 @@ describe("設定：列上的動作一套語法、區塊標題和其他頁面同�
     }
   })
 
-  it("授權查看：修改範圍／移除是文字動作，撤銷／查看是外框按鈕（一列最多一顆，沒有墨色實心的主要按鈕）", async () => {
+  it("授權查看：修改範圍是文字動作；撤銷／移除（拿掉這一列）和查看是外框按鈕，沒有墨色實心的主要按鈕", async () => {
     renderApp("/settings")
     const section = await screen.findByRole("region", { name: "授權查看" }, T)
     const view = await within(section).findByRole("button", { name: "查看爸爸的資產" }, T)
     expect(view.className).toMatch(/\bborder-ctl\b/)
     expect(view.className).not.toMatch(/\bbg-act\b/)
     const row = view.closest("li")!
-    expect(within(row).getByRole("button", { name: "移除" }).className).toContain("underline")
-    expect(within(row).getAllByRole("button").filter((b) => /\bborder-ctl\b/.test(b.className))).toHaveLength(1)
+    // 「移除」和「撤銷」「刪除」同一種寫法：列尾的外框按鈕（不是只有底線的文字連結）
+    const remove = within(row).getByRole("button", { name: "移除爸爸給你的授權" })
+    expect(remove).toHaveTextContent("移除")
+    expect(remove.className).toMatch(/\bborder-ctl\b/)
+    expect(remove.className).not.toContain("underline")
+    const buttons = within(row).getAllByRole("button")
+    expect(buttons.at(-1)).toBe(remove)
+    expect(buttons.filter((b) => /\bbg-act\b/.test(b.className))).toHaveLength(0)
+    // 你授權的人那一列：「修改範圍」是文字動作、「撤銷」是列尾的外框按鈕
+    const revoke = within(section).getAllByRole("button", { name: "撤銷" })[0]!
+    expect(revoke.className).toMatch(/\bborder-ctl\b/)
+    expect(within(revoke.closest("li")!).getByRole("button", { name: "修改範圍" }).className).toContain("underline")
   })
 })
 
@@ -304,12 +314,17 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
   it("盤中：一行「盤中不更新…」＋到證交所的連結（另開新視窗，只是連結）；帳本的「今日」換成日期", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ is_open: true }))
     renderApp("/stock/2330.TW")
-    expect(await screen.findByText("盤中不更新：這是 11/12（四）的收盤價。", undefined, T)).toBeInTheDocument()
-    const link = screen.getByRole("link", { name: /^到證交所看即時報價/ })
+    // 一行：「盤中不更新・到證交所看即時報價 ↗」，不重複收盤價的日期
+    const note = (await screen.findByText("盤中不更新", undefined, T)).closest("p")!
+    expect(note.textContent).toMatch(/^盤中不更新・到證交所看即時報價/)
+    expect(note.textContent).not.toMatch(/11\/12/)
+    const link = within(note).getByRole("link", { name: /^到證交所看即時報價/ })
     expect(link).toHaveAttribute("href", "https://mis.twse.com.tw/stock/detail-item?id=tse_2330.tw&ex=tse&lang=zhHant")
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(document.getElementById("main")!.textContent).toContain("收盤價・11/12（四）")
+    // 大字旁的漲跌是 11/12 那天的，不是今天的：和帳本一樣標日期
+    expect(screen.getByText("11/12 漲跌")).toBeInTheDocument()
     cleanup()
     renderApp("/")
     expect(await screen.findByText("11/12 收盤・盤中不更新", undefined, T)).toBeInTheDocument()
@@ -324,8 +339,9 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({}))
     vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-13T15:10:00+08:00"))
     renderApp("/stock/2330.TW")
-    expect(await screen.findByText("今天的收盤價還沒公布，這是 11/12（四）的收盤價。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("今天的收盤價還沒公布", undefined, T)).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: /到證交所看即時報價/ })).toBeNull()
+    expect(screen.getByText("11/12 漲跌")).toBeInTheDocument()
     cleanup()
     renderApp("/")
     expect(await screen.findByText("11/12 收盤・今天的還沒公布", undefined, T)).toBeInTheDocument()

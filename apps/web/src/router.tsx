@@ -35,11 +35,23 @@ export interface DiscussionsSearch {
   /** 預設依最後回覆排序；`new` 依發表時間 */
   sort?: "new"
 }
-/** 開新主題：預先選好發到哪裡（`scope`、`group_id`）與標記的股票（`symbol`） */
-export interface NewTopicSearch {
-  scope?: "public" | "group"
-  group_id?: string
+/**
+ * 從哪裡來的（主題頁與開新主題的麵包屑、「取消」回到那裡）：
+ * - 沒有 `from`：討論清單——`scope`／`group_id`／`sort` 是清單當時的篩選與排序，回去時還在
+ * - `from=group`：那個群組的「討論」分頁（主題頁：主題自己所屬的群組；開新主題：`group_id`）
+ * - `from=stock`：那檔股票的「討論」分頁（`symbol`）
+ */
+export type DiscussionFrom = "group" | "stock"
+/** 主題頁：只帶「從哪裡來的」 */
+export interface TopicSearch extends DiscussionsSearch {
+  from?: DiscussionFrom
+  /** `from=stock` 時是那一檔 */
   symbol?: string
+}
+/** 開新主題：預先選好發到哪裡（`scope`、`group_id`）與標記的股票（`symbol`）；`from`、`sort` 是從哪裡來的 */
+export interface NewTopicSearch extends DiscussionsSearch {
+  symbol?: string
+  from?: DiscussionFrom
 }
 /** 站方管理：預設是待處理的檢舉；`status=resolved` 是已處理 */
 export interface AdminDiscussionsSearch {
@@ -51,6 +63,16 @@ const scopeSearch = (s: Record<string, unknown>): { scope?: "public" | "group"; 
   const group = text(s.group_id)
   if (s.scope === "group" && group) return { scope: "group", group_id: group }
   return { scope: s.scope === "public" ? "public" : undefined, group_id: undefined }
+}
+const listSearch = (s: Record<string, unknown>): DiscussionsSearch => ({ ...scopeSearch(s), sort: s.sort === "new" ? "new" : undefined })
+const fromSearch = (s: Record<string, unknown>): DiscussionFrom | undefined => (s.from === "group" || s.from === "stock" ? s.from : undefined)
+/** 主題頁的網址參數：`from=group`、`from=stock&symbol=`，否則是清單的篩選與排序 */
+const topicSearch = (s: Record<string, unknown>): TopicSearch => {
+  const from = fromSearch(s)
+  const symbol = text(s.symbol)
+  if (from === "group") return { from }
+  if (from === "stock" && symbol) return { from, symbol }
+  return listSearch(s)
 }
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -124,20 +146,21 @@ const historyRoute = createRoute({
 const discussionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/discussions",
-  validateSearch: (s: Record<string, unknown>): DiscussionsSearch => ({ ...scopeSearch(s), sort: s.sort === "new" ? "new" : undefined }),
+  validateSearch: listSearch,
   component: lazyRouteComponent(() => import("@/pages/discussions/DiscussionsPage"), "DiscussionsPage"),
 })
 
 const newTopicRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/discussions/new",
-  validateSearch: (s: Record<string, unknown>): NewTopicSearch => ({ ...scopeSearch(s), symbol: text(s.symbol) }),
+  validateSearch: (s: Record<string, unknown>): NewTopicSearch => ({ ...listSearch(s), symbol: text(s.symbol), from: fromSearch(s) }),
   component: lazyRouteComponent(() => import("@/pages/discussions/NewTopicPage"), "NewTopicPage"),
 })
 
 const topicRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/discussions/$topicId",
+  validateSearch: topicSearch,
   component: lazyRouteComponent(() => import("@/pages/discussions/TopicPage"), "TopicPage"),
 })
 

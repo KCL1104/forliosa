@@ -72,7 +72,7 @@ function Admin() {
   const items = reports.data?.pages.flatMap((p) => p.items) ?? []
   return (
     <PageFrame>
-      <div className="flex max-w-[816px] flex-col gap-10">
+      <div className="flex max-w-measure flex-col gap-10">
         <PageHeader title="站方管理" className="mb-0" />
 
         <Section
@@ -285,7 +285,7 @@ function ConfirmDialog({ confirm, onClose }: { confirm: Confirm; onClose: () => 
         )}
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" disabled={pending} onClick={run}>
+          <AlertDialogAction disabled={pending} onClick={run}>
             {action}
           </AlertDialogAction>
         </AlertDialogFooter>

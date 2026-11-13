@@ -56,11 +56,13 @@ export function closeLabel(asOf: string | null | undefined): string {
   return day ? `收盤價・${day}` : "收盤價"
 }
 
-/** 價格下面那一行說明（`settled` 沒有）：盤中不更新／今天的收盤價還沒公布 */
+/**
+ * 價格下面那一行說明（`settled` 沒有）：「盤中不更新」／「今天的收盤價還沒公布」。
+ * 不重複日期——上面一行已經寫了「收盤價・11/12（四）」；漲跌旁另外標那是哪一天的漲跌（`dayWord`）。
+ */
 export function closeNote(state: CloseState, asOf: string | null | undefined): string | null {
-  const day = dayText(asOf)
-  if (!day || state === "settled") return null
-  return state === "open" ? `盤中不更新：這是 ${day}的收盤價。` : `今天的收盤價還沒公布，這是 ${day}的收盤價。`
+  if (!closeDay(asOf) || state === "settled") return null
+  return state === "open" ? "盤中不更新" : "今天的收盤價還沒公布"
 }
 
 /** 帳本主數字旁的時間：「11/12 收盤・盤中不更新」「11/12 收盤・今天的還沒公布」「11/13 收盤」 */

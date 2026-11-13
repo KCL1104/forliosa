@@ -14,6 +14,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { safeNext } from "@/lib/next-path"
 import { oauthErrorText } from "@/lib/oauth-errors"
 import type { LoginSearch } from "@/router"
+import { FieldError } from "@/components/form-field"
 
 /** 登入：用 Discord 登入（第一次登入就建立帳號）；開發環境另有開發登入 */
 export function LoginPage() {
@@ -100,9 +101,7 @@ function DevLoginForm({ next }: { next: string }) {
       </div>
       <Input id="dev-login-email" className="pointer-coarse:h-11" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       {devLogin.error && (
-        <p role="alert" className="text-sm text-destructive">
-          {missing ? "這個伺服器沒有開放開發登入。" : devLogin.error.message}
-        </p>
+        <FieldError>{missing ? "這個伺服器沒有開放開發登入。" : devLogin.error.message}</FieldError>
       )}
       <Button type="submit" variant="outline" className="self-start" disabled={devLogin.isPending}>
         {devLogin.isPending ? "登入中…" : "以這個 Email 登入"}

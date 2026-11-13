@@ -176,7 +176,6 @@ function DeletePlan({ plan, onClose }: { plan: RecurringPlan | null; onClose: ()
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
           <AlertDialogAction
-            variant="destructive"
             onClick={() => {
               if (!plan) return
               const name = plan.name
@@ -247,7 +246,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">{plan ? "修改定期定額" : "新增定期定額"}</DialogTitle>
+          <DialogTitle>{plan ? "修改定期定額" : "新增定期定額"}</DialogTitle>
           <DialogDescription>股數 = 扣款金額 ÷ 收盤價（無條件捨去，含零股），手續費另計；補記過去的扣款用那天的收盤價。</DialogDescription>
         </DialogHeader>
         <div className={cn("grid gap-4", TOUCH_FIELDS)}>
@@ -296,7 +295,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
             <Switch checked={active} onCheckedChange={setActive} />
           </label>
         </div>
-        <DialogFooter className={cn("gap-2")}>
+        <DialogFooter>
           <Button variant="outline" onClick={onClose}>
             取消
           </Button>

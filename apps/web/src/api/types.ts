@@ -1449,11 +1449,12 @@ export interface ForliosaApi {
   listTopics(query?: TopicQuery): Promise<Paged<TopicSummary>>
   createTopic(body: TopicInput): Promise<Topic>
   getTopic(id: string): Promise<Topic>
-  deleteTopic(id: string): Promise<void>
+  /** `keepalive`：頁面要關掉或藏起來時送出的刪除（延後刪除的通知還沒結束），請求在頁面卸載後照樣送完 */
+  deleteTopic(id: string, opts?: { keepalive?: boolean }): Promise<void>
   /** 舊到新 */
   listReplies(topicId: string, query?: { limit?: number; cursor?: string | null }): Promise<Paged<Reply>>
   createReply(topicId: string, body: { body: string }): Promise<Reply>
-  deleteReply(id: string): Promise<void>
+  deleteReply(id: string, opts?: { keepalive?: boolean }): Promise<void>
   /** 204：沒有內容，前端自己更新或重新讀取 */
   addDiscussionReaction(body: { target: DiscussionTarget; emoji: ReactionEmoji }): Promise<void>
   removeDiscussionReaction(target: DiscussionTarget, emoji: ReactionEmoji): Promise<void>

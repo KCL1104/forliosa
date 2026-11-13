@@ -577,8 +577,16 @@ export function buildWhy(spec: MockInstrumentSpec): Why {
 
 // ── 本週事項 ─────────────────────────────────────────────
 /** 除息、股利入帳（持股）＋定期定額扣款（由計畫算出，見 recurring.ts） */
-export function buildUpcoming(holdings: Holding[], specOf: (s: string) => MockInstrumentSpec | undefined, days = 7, recurring: UpcomingItem[] = [], commercial = false): UpcomingItem[] {
-  const end = addDays(MOCK_TODAY, days)
+export function buildUpcoming(
+  holdings: Holding[],
+  specOf: (s: string) => MockInstrumentSpec | undefined,
+  days = 7,
+  recurring: UpcomingItem[] = [],
+  commercial = false,
+  /** 從哪一天起算（示範的「今天」；`?market=open|pending` 是下一個交易日） */
+  today = MOCK_TODAY,
+): UpcomingItem[] {
+  const end = addDays(today, days)
   const out: UpcomingItem[] = []
   for (const h of holdings) {
     const spec = specOf(h.symbol)
@@ -588,14 +596,14 @@ export function buildUpcoming(holdings: Holding[], specOf: (s: string) => MockIn
     const src = commercial ? [sourceOf(`${tw(spec)}/ex_dividend`)] : DEMO_SRC
     for (const d of dividendRecords(spec)) {
       if (d.cash_dividend <= 0) continue
-      if (d.ex_dividend_date && d.ex_dividend_date >= MOCK_TODAY && d.ex_dividend_date <= end) {
+      if (d.ex_dividend_date && d.ex_dividend_date >= today && d.ex_dividend_date <= end) {
         out.push({ date: d.ex_dividend_date, type: "ex_dividend", symbol: h.symbol, title: `${h.code} 除息`, amount_estimate: round(d.cash_dividend * h.quantity * fx, 0), is_demo: !commercial, sources: src })
       }
-      if (d.payment_date && d.payment_date > MOCK_TODAY && d.payment_date <= end && d.ex_dividend_date && d.ex_dividend_date < MOCK_TODAY) {
+      if (d.payment_date && d.payment_date > today && d.payment_date <= end && d.ex_dividend_date && d.ex_dividend_date < today) {
         out.push({ date: d.payment_date, type: "dividend_payment", title: `${h.code} 股利入帳`, symbol: h.symbol, amount_estimate: round(d.cash_dividend * h.quantity * fx * (h.currency === "USD" ? 0.7 : 1), 0), is_demo: !commercial, sources: src })
       }
     }
   }
-  out.push(...recurring.filter((r) => r.date >= MOCK_TODAY && r.date <= end))
+  out.push(...recurring.filter((r) => r.date >= today && r.date <= end))
   return out.sort((a, b) => a.date.localeCompare(b.date))
 }

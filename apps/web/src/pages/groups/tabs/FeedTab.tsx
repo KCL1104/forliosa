@@ -119,14 +119,21 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
 function TradeLine({ item, name }: { item: FeedItem; name: React.ReactNode }) {
   const symbol = item.symbol ?? ""
   return (
-    <p className="min-w-0 text-base">
-      {name}
-      {name && " "}
-      <span className="font-medium">{item.side === "sell" ? "賣出" : "買進"}</span>{" "}
-      <Link to="/stock/$symbol" params={{ symbol }} className={cn("underline decoration-ctl decoration-1 underline-offset-4 hover:decoration-ink", INLINE_TOUCH)}>
-        {/* 名稱和代號之間是空白字元（不是 margin），底線才連成一條 */}
-        {item.name} <span className="num text-ink-2">{codeOf(symbol)}</span>
-      </Link>
+    /*
+     * 「誰 買進 哪一檔」：三個不拆開的單位排成一行，放不下時整個單位換到下一行（股票名稱不從中間斷開）。
+     * 觸控時換了行的兩行之間多 24px：名字和股票的連結各有上下 12px 的可按範圍，疊在相鄰的兩行會互相蓋住；
+     * 只有一行時（絕大多數）沒有這段間距。連結包在 span 裡維持行內元素（上下內距不改變行高）。
+     */
+    <p className="flex min-w-0 flex-wrap items-baseline gap-x-1 text-base pointer-coarse:gap-y-6">
+      {name && <span>{name}</span>}
+      <span className="font-medium">{item.side === "sell" ? "賣出" : "買進"}</span>
+      {/* 名稱比一行還長時才在裡面斷行：先在名稱和代號之間的空白（keep-all），再不行才在字中間（overflow-wrap） */}
+      <span className="min-w-0 [overflow-wrap:anywhere]">
+        <Link to="/stock/$symbol" params={{ symbol }} className={cn("[word-break:keep-all] underline decoration-ctl decoration-1 underline-offset-4 hover:decoration-ink", INLINE_TOUCH)}>
+          {/* 名稱和代號之間是空白字元（不是 margin），底線才連成一條 */}
+          {item.name} <span className="num text-ink-2">{codeOf(symbol)}</span>
+        </Link>
+      </span>
     </p>
   )
 }

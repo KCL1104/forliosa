@@ -44,6 +44,7 @@ import { PEOPLE } from "./members"
  *   → 頻率（429 rate_limited，帶 retry_after_seconds）。
  * - 頻率用滾動的 24 小時／60 分鐘；任兩則公開發言至少間隔 10 秒；刪掉發言不還額度。
  * - 隱藏：主題不出現在任何清單，直接打開是 body null＋佔位標題（作者與站方管理員拿得到原文）；回覆留在原位、body null。
+ *   被隱藏的內容 `can_report` 一律是 false（站方已經處理過）。
  * - 時間是 UTC、`Z` 結尾、到秒。
  * 線圖留言（彈幕）與指數頁暫緩，這裡沒有。
  */
@@ -393,7 +394,9 @@ export function createDiscussionStore(deps: DiscussionDeps, scenario: "default" 
     const manages = t.scope === "group" && MANAGERS.includes(v.roles.get(t.group_id ?? "") as GroupRole)
     return (authorId !== null && authorId === v.id) || manages
   }
-  const canReport = (v: Viewer, t: MockTopic, authorId: string | null) => t.scope === "public" && v.id !== null && authorId !== v.id
+  /** 別人的、還看得到的公開內容才能檢舉：被站方隱藏的已經處理過了（和後端 `_can_report` 相同） */
+  const canReport = (v: Viewer, t: MockTopic, authorId: string | null, status: DiscussionStatus) =>
+    t.scope === "public" && status === "visible" && v.id !== null && authorId !== v.id
   const bodyFor = (v: Viewer, t: MockTopic, status: DiscussionStatus, authorId: string | null, body: string) =>
     status !== "hidden" || (authorId !== null && authorId === v.id) || (v.admin && t.scope === "public") ? body : null
 
@@ -433,7 +436,7 @@ export function createDiscussionStore(deps: DiscussionDeps, scenario: "default" 
       body: bodyFor(v, t, t.status, t.user_id, t.body),
       reactions: reactionsOf(`topic:${t.id}`, v.id),
       can_delete: canDelete(v, t, t.user_id),
-      can_report: canReport(v, t, t.user_id),
+      can_report: canReport(v, t, t.user_id, t.status),
       can_reply: v.id !== null && t.status === "visible",
     }
     // 隱藏的主題：標題本身可能就是有害的部分（廣告、帶單），其他人拿到佔位標題、沒有標記
@@ -443,7 +446,7 @@ export function createDiscussionStore(deps: DiscussionDeps, scenario: "default" 
   const replyOut = (v: Viewer, t: MockTopic, r: MockReply): Reply => ({
     id: r.id, topic_id: r.topic_id, body: bodyFor(v, t, r.status, r.user_id, r.body), author: authorOut(v, t, r.user_id), created_at: iso(r.created_at),
     status: r.status, reactions: reactionsOf(`reply:${r.id}`, v.id), mine: r.user_id !== null && r.user_id === v.id,
-    can_delete: canDelete(v, t, r.user_id), can_report: canReport(v, t, r.user_id),
+    can_delete: canDelete(v, t, r.user_id), can_report: canReport(v, t, r.user_id, r.status),
   })
 
   // ── 發言前的檢查：停權 → 公開暱稱 → 頻率 ──

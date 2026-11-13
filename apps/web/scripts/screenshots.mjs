@@ -420,10 +420,35 @@ const m5ViewAsStock = async (page) => {
 const discussBottom = async (page) => {
   await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }))
 }
-/** 討論：打開第一個「檢舉」（檢舉對話框） */
+/** 討論：打開第一則回覆的「更多動作」（刪除、檢舉收在裡面） */
+const discussMenu = async (page) => {
+  await page.getByRole("button", { name: /回覆的更多動作$/ }).first().click()
+  await page.getByRole("menu").waitFor({ timeout: 8000 })
+}
+/** 討論：從「更多動作」打開檢舉對話框 */
 const discussReport = async (page) => {
-  await page.getByRole("button", { name: /^檢舉/ }).first().click()
+  await discussMenu(page)
+  await page.getByRole("menuitem", { name: "檢舉…" }).click()
   await page.getByRole("dialog").getByText("廣告或洗版").waitFor({ timeout: 8000 })
+}
+/** 討論：刪除一則回覆（立刻從畫面拿掉，通知附「復原」） */
+const discussUndo = async (page) => {
+  await discussMenu(page)
+  await page.getByRole("menuitem", { name: "刪除" }).click()
+  await page.getByText("已刪除回覆").waitFor({ timeout: 8000 })
+}
+/** 討論：回覆框打到一半、重新整理（還原的草稿＋「清除草稿」） */
+const discussReplyDraft = async (page) => {
+  await page.getByLabel("回覆內容").fill("我是每個月固定扣，法說會前後都不動。\n\n不過單一個股超過三成的話，會把新的錢先放到別的地方。")
+  await page.reload({ waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "清除草稿" }).waitFor({ timeout: 8000 })
+  await discussBottom(page)
+}
+/** 開新主題：填到一半、重新整理（還原的草稿＋「清除草稿」） */
+const discussNewDraft = async (page) => {
+  await discussNewFilled(page)
+  await page.reload({ waitUntil: "networkidle" })
+  await page.getByText("這是上次還沒發表的內容。").waitFor({ timeout: 8000 })
 }
 /** 開新主題：什麼都沒填就按「發表」（就地的錯誤） */
 const discussNewErrors = async (page) => {
@@ -588,6 +613,15 @@ const SHOTS = [
   { name: "discuss-topic-group", path: "/discussions/top_g_dca", ready: "text=我明天去問營業員怎麼設定" },
   { name: "discuss-topic-missing", path: "/discussions/top_nope", ready: "text=找不到這個主題" },
   { name: "discuss-report", path: "/discussions/top_p_tsmc?discuss=named", ready: "text=比重超過自己睡得著的程度就調", action: discussReport },
+  { name: "discuss-topic-menu", path: "/discussions/top_p_tsmc?discuss=named", ready: "text=比重超過自己睡得著的程度就調", action: discussMenu },
+  { name: "discuss-topic-undo", path: "/discussions/top_g_dca", ready: "text=我明天去問營業員怎麼設定", action: discussUndo },
+  { name: "discuss-topic-draft", path: "/discussions/top_p_tsmc?discuss=named", ready: "text=比重超過自己睡得著的程度就調", action: discussReplyDraft },
+  { name: "discuss-topic-from-group", path: "/discussions/top_g_dca?from=group", ready: "text=我明天去問營業員怎麼設定" },
+  { name: "discuss-topic-from-stock", path: "/discussions/top_p_tsmc?from=stock&symbol=2330.TW", ready: "text=比重超過自己睡得著的程度就調" },
+  { name: "discuss-topic-member-hidden", path: "/discussions/top_p_tsmc?discuss=member", ready: "text=比重超過自己睡得著的程度就調" },
+  { name: "discuss-list-signed-out-bottom", path: "/discussions?auth=signed-out", ready: "text=台積電法說會前", action: discussBottom },
+  { name: "discuss-new-draft", path: "/discussions/new?discuss=named&scope=public&symbol=2330.TW", ready: "text=發到哪裡", action: discussNewDraft },
+  { name: "discuss-new-from-stock", path: "/discussions/new?discuss=named&symbol=2330.TW&from=stock", ready: "text=發到哪裡" },
   { name: "discuss-new", path: "/discussions/new?discuss=named&scope=public&symbol=2330.TW", ready: "text=發到哪裡", action: discussNewFilled },
   { name: "discuss-new-choose", path: "/discussions/new", ready: "text=發到哪裡" },
   { name: "discuss-new-errors", path: "/discussions/new", ready: "text=發到哪裡", action: discussNewErrors },

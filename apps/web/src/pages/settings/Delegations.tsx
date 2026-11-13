@@ -24,6 +24,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { FieldError } from "@/components/form-field"
 
 const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請檢查網路後再試一次。")
 
@@ -31,7 +32,8 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
  * 授權查看（一對一、唯讀）：
  * - 我授權的人：只能選同群組的成員；範圍是全部帳戶或指定帳戶；隨時修改或撤銷（立即生效）
  * - 授權給我的人：按「查看」進入唯讀的查看模式；也可以自己移除
- * 列上的動作全設定頁同一套：改內容或次要的是文字動作（修改範圍、移除），這一列最重的動作是外框按鈕（撤銷、查看）。
+ * 列上的動作全設定頁同一套：改內容的是文字動作（修改範圍）；拿掉這一列的（撤銷、移除，和定期定額的刪除一樣）是列尾的外框按鈕；
+ * 「查看」每一列都有一顆，也是外框按鈕。
  */
 export function Delegations() {
   const list = useDelegations()
@@ -86,12 +88,13 @@ export function Delegations() {
               <ul className="border-t border-rule">
                 {list.data.received.map((d) => (
                   <Row key={d.id} who={d.owner} d={d}>
-                    <button type="button" onClick={() => setRemoving({ d, mine: false })} className={cn(textAction, "mr-2")}>
-                      移除
-                    </button>
                     {/* 每一列都有一顆，所以是外框按鈕（一個畫面最多一顆墨色實心的主要按鈕） */}
                     <Button variant="outline" size="sm" onClick={() => enter(d)} aria-label={`查看${d.owner.display_name}的資產`}>
                       查看
+                    </Button>
+                    {/* 拿掉這一列的動作和「撤銷」「刪除」同一種寫法：列尾的外框按鈕（先確認） */}
+                    <Button variant="outline" size="sm" onClick={() => setRemoving({ d, mine: false })} aria-label={`移除${d.owner.display_name}給你的授權`}>
+                      移除
                     </Button>
                   </Row>
                 ))}
@@ -152,7 +155,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">{editing ? `${editing.viewer.display_name}可以查看的範圍` : "授權查看"}</DialogTitle>
+          <DialogTitle>{editing ? `${editing.viewer.display_name}可以查看的範圍` : "授權查看"}</DialogTitle>
           <DialogDescription>對方只能看，不能記帳或修改；AI 也不會讀你的資料給他。隨時可以撤銷。</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-5">
@@ -227,9 +230,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
             )}
           </div>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
+            <FieldError>{error}</FieldError>
           )}
         </div>
         <DialogFooter>
@@ -260,7 +261,6 @@ function RemoveDialog({ d, mine, onClose }: { d: Delegation; mine: boolean; onCl
         <AlertDialogFooter>
           <AlertDialogCancel>取消</AlertDialogCancel>
           <AlertDialogAction
-            variant="destructive"
             disabled={del.isPending}
             onClick={() =>
               del.mutate(d.id, {

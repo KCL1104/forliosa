@@ -20,7 +20,6 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatMoney } from "@/lib/format"
-import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
 import { Pct } from "@/components/finance"
@@ -39,7 +38,7 @@ function Settings() {
   return (
     // 左緣和帳本相同；設定是一欄表單，寬度限制在 816px（標籤和開關不會離太遠）
     <PageFrame>
-      <div className="flex max-w-[816px] flex-col gap-10">
+      <div className="flex max-w-measure flex-col gap-10">
       <PageHeader title="設定" className="mb-0" />
 
       <Profile />
@@ -124,7 +123,7 @@ function Settings() {
       <Delegations />
       </div>
       {/* 資料來源：一頁一個頁尾（設定頁沒有自己的資料，就是連到完整顯名聲明） */}
-      <SourcesFooter className="max-w-[816px]" />
+      <SourcesFooter className="max-w-measure" />
     </PageFrame>
   )
 }
@@ -259,7 +258,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
+          <DialogTitle>{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
           <DialogDescription>折扣用「幾折」輸入，例如 2.8 折就填 2.8；不知道的話先填 6，之後可以改。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 pointer-coarse:[&_input]:h-11">
@@ -289,7 +288,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
             <Field label="零股最低" htmlFor="acc-odd"><Input id="acc-odd" inputMode="decimal" value={minOdd} onChange={(e) => setMinOdd(e.target.value)} /></Field>
           </div>
         </div>
-        <DialogFooter className={cn("gap-2")}>
+        <DialogFooter>
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button variant="sign" onClick={save} disabled={pending}>{pending ? "儲存中…" : isNew ? "新增帳戶" : "儲存"}</Button>
         </DialogFooter>

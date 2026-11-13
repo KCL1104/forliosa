@@ -56,7 +56,7 @@ function Discussions() {
   return (
     <PageFrame>
       {/* 和設定、紀錄同一個欄寬（816px）：一行標題不會拉到 1,000px 寬 */}
-      <div className="max-w-[816px]">
+      <div className="max-w-measure">
         <PageHeader
           title="討論"
           className="mb-4"
@@ -64,7 +64,8 @@ function Discussions() {
             signedIn ? (
               <Link
                 to="/discussions/new"
-                search={filter.scope === "group" ? { scope: "group", group_id: filter.groupId } : filter.scope === "public" ? { scope: "public" } : {}}
+                // 發到哪裡跟著目前的篩選；排序一起帶著，「取消」回來時清單還是原來的樣子
+                search={filter.scope === "group" ? { scope: "group", group_id: filter.groupId, sort: sortParam } : filter.scope === "public" ? { scope: "public", sort: sortParam } : { sort: sortParam }}
                 className={buttonVariants()}
               >
                 開新主題
@@ -97,6 +98,7 @@ function Discussions() {
         </div>
         <TopicRows
           filter={filter}
+          origin={{ kind: "list", search: { scope: search.scope, group_id: search.group_id, sort: sortParam } }}
           signedIn={signedIn}
           empty={
             filter.scope === "group"

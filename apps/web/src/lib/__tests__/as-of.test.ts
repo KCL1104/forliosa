@@ -72,8 +72,9 @@ describe("closeState：盤中／收盤後還沒公布／其他", () => {
 describe("標示的文字", () => {
   it("價格：「收盤價・11/12（四）」；說明照合約的字", () => {
     expect(closeLabel(THU_CLOSE)).toBe("收盤價・11/12（四）")
-    expect(closeNote("open", THU_CLOSE)).toBe("盤中不更新：這是 11/12（四）的收盤價。")
-    expect(closeNote("pending", THU_CLOSE)).toBe("今天的收盤價還沒公布，這是 11/12（四）的收盤價。")
+    // 說明只有一句，不重複日期（上面一行已經寫了「收盤價・11/12（四）」）
+    expect(closeNote("open", THU_CLOSE)).toBe("盤中不更新")
+    expect(closeNote("pending", THU_CLOSE)).toBe("今天的收盤價還沒公布")
     expect(closeNote("settled", THU_CLOSE)).toBeNull()
     expect(closeLabel(null)).toBe("收盤價")
     expect(closeNote("open", null)).toBeNull()

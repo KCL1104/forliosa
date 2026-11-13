@@ -12,6 +12,7 @@ import { ErrorState, SkeletonLines } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { DEFAULT_SHARE } from "./labels"
 import { ShareToggles } from "./ShareToggles"
+import { FieldError } from "@/components/form-field"
 
 /**
  * 邀請連結 `/invite/:token`：不需登入就能預覽（群組名稱、誰邀請的）。
@@ -128,9 +129,7 @@ function ChooseAndJoin({ token, groupName }: { token: string; groupName: string 
       </div>
       <ShareToggles value={share} onChange={setShare} idPrefix="invite" />
       {error && (
-        <p role="alert" className="text-base text-destructive">
-          {error}
-        </p>
+        <FieldError className="text-base">{error}</FieldError>
       )}
       <div className="flex flex-wrap gap-2">
         <Button size="lg" variant="sign" onClick={join} disabled={accept.isPending}>

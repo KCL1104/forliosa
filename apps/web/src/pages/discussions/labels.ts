@@ -5,6 +5,11 @@ import { formatDateShort, todayInTaipei, TZ } from "@/lib/format"
 /** 每個公開討論頁底部固定的一行（合約） */
 export const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
 
+/**
+ * 沒登入的訪客在免責那一行旁邊看到的一句：Forliosa 是什麼（照 PRODUCT.md 的產品說明寫，只說事實，不是宣傳句），後面接「登入」。
+ */
+export const ABOUT_FORLIOSA = "Forliosa 是以台股為主的投資管理工具：持倉帳本與績效、個股資訊、AI 分析，另有親友群組。"
+
 /** 被站方隱藏的內容（主題的內文、回覆） */
 export const HIDDEN_NOTE = "這則內容已被站方隱藏。"
 /** 作者本人（與站方管理員）仍拿得到原文：說明下面的字只有自己看得到 */

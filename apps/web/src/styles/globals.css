@@ -364,6 +364,12 @@
 
   --shadow-lift: 0 6px 18px var(--lift), 0 1px 2px var(--lift);
 
+  /*
+   * 欄寬（`max-w-measure`，816px）：表單與長文的頁面在版心裡自己限寬——設定、資料來源、紀錄、站方管理，
+   * 以及討論的清單、主題頁與開新主題的表單，都是這一個欄寬、一條右緣。表格與分頁裡的清單用整個版心。
+   */
+  --container-measure: 51rem;
+
   --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
   --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
   --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
@@ -589,6 +595,36 @@
   .date-cell .weekday {
     font-size: var(--text-xs);
     font-weight: 400;
+    color: var(--ink-2);
+  }
+
+  /*
+   * 一行用「・」隔開的 meta（討論清單的每一列、主題頁的作者那一行）。每一項整個換行；「・」畫在每一項前面，
+   * 每一行第一項的那一個落在外層的左緣外面、被裁掉——換行之後行首、行尾都不會掛著一個「・」。
+   * 只裁左右（overflow-x: clip），上下不裁：連結的 focus 外框不會被切掉。
+   */
+  .meta-line {
+    overflow-x: clip;
+  }
+  .meta-line > div {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-inline-start: -1em;
+  }
+  .meta-line > div > * {
+    min-width: 0;
+    padding-inline-start: 1em;
+    overflow-wrap: anywhere;
+  }
+  /* 「・」放在這一項自己的左內距裡（負邊距拉回去，不佔寬度）。不用定位：整列是一個連結（標題連結的 ::after 蓋滿整列），
+     定位過的東西會浮到那層上面、把點按擋掉。朗讀時不唸分隔符號（替代文字是空的；不支援這個寫法的瀏覽器用上一行）。 */
+  .meta-line > div > *::before {
+    content: "・";
+    content: "・" / "";
+    display: inline-block;
+    width: 1em;
+    margin-inline-start: -1em;
     color: var(--ink-2);
   }
 

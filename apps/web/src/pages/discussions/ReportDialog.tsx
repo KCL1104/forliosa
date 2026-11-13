@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Textarea } from "@/components/ui/textarea"
 import { bodyProblem, charCount } from "@/lib/discussion-text"
 import { REASON_LABEL, reportErrorText } from "./labels"
+import { FieldError } from "@/components/form-field"
 
 /**
  * 檢舉一則公開內容（`POST /discussions/reports`）。獨立的元件：只需要合約的 `target` 字串
@@ -41,7 +42,7 @@ export function ReportDialog({ target, what = "內容", onClose }: { target: Dis
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">檢舉這則{what}</DialogTitle>
+          <DialogTitle>檢舉這則{what}</DialogTitle>
           <DialogDescription>送出後由站方管理員查看。</DialogDescription>
         </DialogHeader>
         <form
@@ -91,9 +92,7 @@ export function ReportDialog({ target, what = "內容", onClose }: { target: Dis
             />
           </div>
           {error && (
-            <p role="alert" className="text-sm text-destructive">
-              {error}
-            </p>
+            <FieldError>{error}</FieldError>
           )}
         </form>
         <DialogFooter>

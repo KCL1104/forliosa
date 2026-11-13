@@ -138,8 +138,8 @@ export function TransactionsView({ symbol }: { symbol?: string }) {
       {!isDesktop && (
         <Drawer open={sheetOpen} onOpenChange={setSheetOpen}>
           <DrawerContent>
-            <DrawerHeader className="text-left">
-              <DrawerTitle className="text-lg font-bold">篩選交易</DrawerTitle>
+            <DrawerHeader>
+              <DrawerTitle>篩選交易</DrawerTitle>
             </DrawerHeader>
             <div className="flex flex-col gap-4 px-4">{filterControls}</div>
             <DrawerFooter className="safe-bottom flex-row">
@@ -408,7 +408,6 @@ function TxnRow({ txn: t, account, name }: { txn: Transaction; account?: Account
           <AlertDialogFooter>
             <AlertDialogCancel>取消</AlertDialogCancel>
             <AlertDialogAction
-              variant="destructive"
               onClick={() => {
                 setConfirm(false)
                 remove.mutate(t.id, {

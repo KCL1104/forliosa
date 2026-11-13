@@ -21,7 +21,7 @@ function History() {
   return (
     <PageFrame>
       {/* 和設定、資料來源同一個欄寬（816px） */}
-      <div className="max-w-[816px]">
+      <div className="max-w-measure">
         <PageHeader title="紀錄" />
         <HistoryList onOpen={ask.reveal} onReplay={(t) => ask.submit(t)} />
       </div>

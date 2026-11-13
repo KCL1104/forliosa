@@ -1,8 +1,7 @@
 import { createHttpAdapter } from "./http"
 import { createMockAdapter, readMockDiscussion, readMockScenario, readMockSignedIn } from "./mock/adapter"
 import { readMockPolicy } from "./mock/commercial"
-import { mockMarketNow, readMockMarket } from "./mock/market-status"
-import { MOCK_AS_OF, MOCK_TODAY } from "./mock/market"
+import { mockMarketNow, mockToday, readMockMarket } from "./mock/market-status"
 import { todayInTaipei } from "@/lib/format"
 import type { ForliosaApi } from "./types"
 
@@ -39,22 +38,25 @@ export const DEV_LOGIN = {
   email: import.meta.env.VITE_DEV_LOGIN_EMAIL?.trim() || "demo@forliosa.local",
 } as const
 
-/** 「今天」：示範資料固定在 MOCK_TODAY（截圖與測試穩定），真實後端用台北時區的今天 */
+/**
+ * 「今天」：示範資料固定在 MOCK_TODAY（截圖與測試穩定），真實後端用台北時區的今天。
+ * 示範資料的 `?market=open|pending` 是最後一個收盤日的下一個交易日（和 mock 的 `GET /meta/market-status` 同一天）。
+ */
 export function appToday(): string {
-  return api.kind === "mock" ? MOCK_TODAY : todayInTaipei()
-}
-
-/** 「現在」：示範資料固定在 MOCK_AS_OF（「N 小時前」在截圖與測試中穩定），真實後端用目前時間 */
-export function appNow(): Date {
-  return api.kind === "mock" ? new Date(MOCK_AS_OF) : new Date()
+  return api.kind === "mock" ? mockToday(mockMarket) : todayInTaipei()
 }
 
 /**
- * 判斷「盤中／收盤後還沒公布」用的現在時間：真實後端是目前時間；示範資料跟著 `?market=` 的情境
- * （預設是 MOCK_AS_OF；`open` 是隔天早上、`pending` 是隔天下午），和 mock 的 `GET /meta/market-status` 一致。
+ * 「現在」：示範資料固定在 MOCK_AS_OF（「N 小時前」在截圖與測試中穩定），真實後端用目前時間。
+ * 示範資料跟著 `?market=` 的情境（`open` 是下一個交易日早上、`pending` 是那天下午）。
  */
+export function appNow(): Date {
+  return api.kind === "mock" ? mockMarketNow(mockMarket) : new Date()
+}
+
+/** 判斷「盤中／收盤後還沒公布」用的現在時間：和 `appNow` 同一個時鐘（示範資料與 mock 的 `GET /meta/market-status` 一致） */
 export function marketNow(): Date {
-  return mockMarket ? mockMarketNow(mockMarket) : new Date()
+  return appNow()
 }
 
 export * from "./types"

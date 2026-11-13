@@ -17,6 +17,7 @@ import { Input } from "@/components/ui/input"
 import { direction, directionGlyph, formatDateShort, formatDateTime, formatPercent, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { ROLE_LABEL } from "./labels"
+import { FieldError } from "@/components/form-field"
 
 /** 群組：我加入的群組＋建立群組；下面是可以貼到 LINE 的百分比分享卡 */
 export function GroupsPage() {
@@ -104,7 +105,7 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle className="text-lg font-bold">建立群組</DialogTitle>
+          <DialogTitle>建立群組</DialogTitle>
           <DialogDescription>建立後產生邀請連結傳給家人朋友。每個人加入前會自己選要分享什麼。</DialogDescription>
         </DialogHeader>
         <form
@@ -120,9 +121,7 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
           </label>
           <Input id="group-name" className="pointer-coarse:h-11" value={name} maxLength={40} autoFocus placeholder="例如：家族投資" aria-invalid={touched && bad} onChange={(e) => setName(e.target.value)} />
           {touched && bad && (
-            <p role="alert" className="text-sm text-destructive">
-              請填 1 到 40 個字
-            </p>
+            <FieldError>請填 1 到 40 個字</FieldError>
           )}
         </form>
         <DialogFooter>

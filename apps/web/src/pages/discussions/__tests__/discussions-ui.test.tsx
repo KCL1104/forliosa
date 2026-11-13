@@ -9,8 +9,11 @@ import { toggleReaction } from "@/api/discussion-queries"
 import { createMockAdapter, type MockOptions } from "@/api/mock/adapter"
 import { ApiError, type ForliosaApi, type Reaction } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
+import { Toaster } from "@/components/ui/sonner"
+import { newTopicDraftKey, replyDraftKey } from "@/lib/drafts"
 import { createAppRouter } from "@/router"
-import { DISCLAIMER, postErrorText, publicNameErrorText, reportErrorText, retryText, suspendedText } from "../labels"
+import { toast } from "sonner"
+import { ABOUT_FORLIOSA, DISCLAIMER, postErrorText, publicNameErrorText, reportErrorText, retryText, suspendedText } from "../labels"
 import { PublicNamePrompt } from "../PublicNamePrompt"
 import { ReportDialog } from "../ReportDialog"
 
@@ -31,6 +34,9 @@ beforeAll(() => {
     disconnect() {}
   } as unknown as typeof ResizeObserver
   Element.prototype.scrollIntoView ??= () => {}
+  // 通知（sonner）按下去時會呼叫，jsdom 沒有
+  Element.prototype.setPointerCapture ??= () => {}
+  Element.prototype.releasePointerCapture ??= () => {}
   window.matchMedia = ((query: string) => ({
     matches: desktop && /min-width:\s*1024px/.test(query), media: query, onchange: null, addListener: () => {}, removeListener: () => {},
     addEventListener: () => {}, removeEventListener: () => {}, dispatchEvent: () => false,
@@ -39,7 +45,12 @@ beforeAll(() => {
 const resetAi = () => useAi.setState({ panelOpen: true, quietPanelOpen: false, mobileOpen: false, threadId: null, threads: [], drafts: {}, focusDraftId: null })
 beforeEach(() => act(resetAi))
 afterEach(() => {
+  // 還在等的刪除通知收掉（延後的刪除會在這裡送出，打到這個測試的 mock adapter），草稿清掉：下一個測試從乾淨的狀態開始
+  act(() => {
+    toast.dismiss()
+  })
   cleanup()
+  window.sessionStorage.clear()
   vi.restoreAllMocks()
   act(() => {
     resetAi()
@@ -69,6 +80,7 @@ function renderApp(path: string) {
   render(
     <QueryClientProvider client={qc}>
       <RouterProvider router={router} />
+      <Toaster />
     </QueryClientProvider>,
   )
   return router
@@ -79,6 +91,8 @@ function renderAlone(ui: React.ReactNode) {
 }
 const topicTitles = () => [...screen.getByRole("list", { name: "主題" }).children].map((li) => li.querySelector("a")!.textContent)
 const hrefs = () => [...document.querySelectorAll("a")].map((a) => a.getAttribute("href") ?? "")
+/** 主題列那一行 meta 的每一項（照順序） */
+const metaItems = (row: Element) => [...row.querySelector(".meta-line > div")!.children].map((el) => el.textContent)
 
 describe("沒登入：公開討論在精簡的外殼裡（字標＋登入）", () => {
   it("清單：只有公開的主題、沒有篩選、沒有 AI／底部列／連到帳本的東西；/me 只問一次", async () => {
@@ -88,7 +102,9 @@ describe("沒登入：公開討論在精簡的外殼裡（字標＋登入）", (
     await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
     // 外殼：字標連到討論、「登入」帶著回來的網址
     expect(screen.getByRole("link", { name: "Forliosa 討論" })).toHaveAttribute("href", "/discussions")
-    expect(screen.getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions")
+    expect(within(screen.getByRole("banner")).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions")
+    // 「登入」和字標在內容的欄寬裡（不是掛在整個版心的最右邊）
+    expect(screen.getByRole("link", { name: "Forliosa 討論" }).parentElement!.className).toMatch(/\bmax-w-measure\b/)
     expect(screen.queryByRole("navigation", { name: "主要" })).toBeNull()
     expect(screen.queryByRole("button", { name: /問 AI/ })).toBeNull()
     expect(screen.queryByRole("button", { name: /帳號選單/ })).toBeNull()
@@ -104,6 +120,10 @@ describe("沒登入：公開討論在精簡的外殼裡（字標＋登入）", (
     expect(screen.getByRole("link", { name: "登入後發言" })).toHaveAttribute("href", "/login?next=%2Fdiscussions%2Fnew")
     expect(screen.queryByRole("link", { name: "開新主題" })).toBeNull()
     expect(screen.getByText(DISCLAIMER)).toBeInTheDocument()
+    // 免責旁邊一行：Forliosa 是什麼＋「登入」（登入後回到這一頁）
+    const about = screen.getByText(ABOUT_FORLIOSA, { exact: false })
+    expect(about.parentElement).toBe(screen.getByText(DISCLAIMER).parentElement)
+    expect(within(about).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions")
     // 沒登入時不問要登入的端點（不會 401、不會把整頁重新載入）
     expect(api.listGroups).not.toHaveBeenCalled()
     expect(vi.mocked(api.listTopics).mock.calls.every(([q]) => q?.scope === "public")).toBe(true)
@@ -129,6 +149,9 @@ describe("沒登入：公開討論在精簡的外殼裡（字標＋登入）", (
     expect(screen.getByText("台積電", { exact: false, selector: "span" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "登入後發言" })).toHaveAttribute("href", "/login?next=%2Fdiscussions%2Ftop_p_tsmc")
     expect(screen.getByText(DISCLAIMER)).toBeInTheDocument()
+    expect(within(screen.getByText(ABOUT_FORLIOSA, { exact: false })).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions%2Ftop_p_tsmc")
+    // 沒登入：沒有「更多動作」（刪除、檢舉都要登入）
+    expect(screen.queryByRole("button", { name: /更多動作/ })).toBeNull()
     expect(screen.queryByRole("navigation", { name: "主要" })).toBeNull()
     expect(api.getMe).toHaveBeenCalledTimes(1)
   })
@@ -159,7 +182,8 @@ describe("清單：篩選（全部｜公開｜我的群組）與排序", () => {
     expect(topicTitles()).toHaveLength(12)
     // 群組範圍的主題寫群組名稱與「（你）」；標記的股票是連到個股頁的連結
     const mine = screen.getByText("我把聯發科的交易補記好了").closest("li")!
-    expect(mine).toHaveTextContent("示範使用者（你）・1 則回覆・聯發科 2454・家族投資")
+    // 一行 meta：作者・回覆數・標記的股票・群組（「・」是畫出來的分隔，每一項整個換行，行首行尾不會掛著一個「・」）
+    expect(metaItems(mine)).toEqual(["示範使用者（你）", "1 則回覆", "聯發科 2454", "家族投資"])
     expect(within(mine).getByRole("link", { name: "聯發科 2454" })).toHaveAttribute("href", "/stock/2454.TW")
     expect(within(mine).getByRole("link", { name: "我把聯發科的交易補記好了" })).toHaveAttribute("href", "/discussions/top_g_fix")
     expect(screen.getByRole("link", { name: "開新主題" })).toHaveAttribute("href", "/discussions/new")
@@ -290,8 +314,12 @@ describe("回覆", () => {
     const replies = screen.getByRole("list", { name: "回覆" })
     const posted = (await within(replies).findByText("我也是新的錢改買。", undefined, T)).closest("li")!
     expect(posted).toHaveTextContent("示範小資（你）")
-    expect(within(posted).getByRole("button", { name: "刪除示範小資的回覆" })).toBeInTheDocument()
-    expect(within(posted).queryByRole("button", { name: /^檢舉/ })).toBeNull()
+    // 自己的回覆：「更多動作」裡只有「刪除」，沒有「檢舉」
+    await user.click(within(posted).getByRole("button", { name: "示範小資的回覆的更多動作" }))
+    expect(await screen.findByRole("menuitem", { name: "刪除" }, T)).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /檢舉/ })).toBeNull()
+    await user.keyboard("{Escape}")
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull(), T)
     await waitFor(() => expect(box).toHaveValue(""), T)
     expect(await screen.findByText("5 則", undefined, T)).toBeInTheDocument()
 
@@ -354,21 +382,96 @@ describe("回覆", () => {
     expect(hidden).toHaveTextContent(/保證獲利/)
   })
 
-  it("刪除自己的主題：先確認（說會一起刪掉幾則回覆）→ 刪掉、回到清單", async () => {
+  it("刪除自己的主題：立刻從畫面拿掉、回到清單，通知說會一起刪掉幾則回覆並附「復原」；復原就什麼都沒送出", async () => {
     const user = userEvent.setup()
     const { adapter } = mount()
     const router = renderApp("/discussions/top_g_fix")
-    await user.click(await screen.findByRole("button", { name: "刪除主題" }, T))
-    const dialog = await screen.findByRole("alertdialog", undefined, T)
-    expect(dialog).toHaveTextContent("刪除這個主題？")
-    expect(dialog).toHaveTextContent("主題和底下的 1 則回覆會一起刪除，不能復原。")
-    await user.click(within(dialog).getByRole("button", { name: "取消" }))
-    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull(), T)
-    expect(api.deleteTopic).not.toHaveBeenCalled()
-    await user.click(screen.getByRole("button", { name: "刪除主題" }))
-    await user.click(within(await screen.findByRole("alertdialog", undefined, T)).getByRole("button", { name: "刪除" }))
+    await user.click(await screen.findByRole("button", { name: "主題的更多動作" }, T))
+    await user.click(await screen.findByRole("menuitem", { name: "刪除" }, T))
+    // 沒有確認框：回到清單，那一列已經不在；通知可以復原
+    expect(screen.queryByRole("alertdialog")).toBeNull()
     await waitFor(() => expect(router.state.location.pathname).toBe("/discussions"), T)
+    await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
+    expect(screen.queryByText("我把聯發科的交易補記好了")).toBeNull()
+    expect(await screen.findByText("已刪除主題", undefined, T)).toBeInTheDocument()
+    expect(screen.getByText("底下的 1 則回覆也一起刪除。")).toBeInTheDocument()
+    expect(api.deleteTopic).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "復原" }))
+    expect(await screen.findByText("我把聯發科的交易補記好了", undefined, T)).toBeInTheDocument()
+    act(() => {
+      toast.dismiss()
+    })
+    expect(api.deleteTopic).not.toHaveBeenCalled()
+    await expect(adapter.getTopic("top_g_fix")).resolves.toMatchObject({ id: "top_g_fix" })
+  })
+
+  it("刪除自己的主題：通知結束才真的送出刪除", async () => {
+    const user = userEvent.setup()
+    const { adapter } = mount()
+    const router = renderApp("/discussions/top_g_fix")
+    await user.click(await screen.findByRole("button", { name: "主題的更多動作" }, T))
+    await user.click(await screen.findByRole("menuitem", { name: "刪除" }, T))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/discussions"), T)
+    expect(await screen.findByText("已刪除主題", undefined, T)).toBeInTheDocument()
+    expect(api.deleteTopic).not.toHaveBeenCalled()
+    // 通知結束（這裡直接收掉，等於逾時）
+    act(() => {
+      toast.dismiss()
+    })
+    await waitFor(() => expect(api.deleteTopic).toHaveBeenCalledWith("top_g_fix", { keepalive: false }), T)
     await expect(adapter.getTopic("top_g_fix")).rejects.toMatchObject({ status: 404 })
+    await waitFor(() => expect(screen.queryByText("我把聯發科的交易補記好了")).toBeNull(), T)
+  })
+
+  it("刪除回覆：那一則立刻不見、回覆數少一；「復原」放回原位；通知結束才送出；失敗時放回原位並說沒有刪除", async () => {
+    const user = userEvent.setup()
+    const { adapter } = mount(named)
+    renderApp("/discussions/top_p_etf")
+    const box = await screen.findByRole("textbox", { name: "回覆內容" }, T)
+    await user.type(box, "這一則等一下要刪")
+    await user.click(screen.getByRole("button", { name: "回覆" }))
+    const replies = screen.getByRole("list", { name: "回覆" })
+    const mine = () => within(replies).queryByText("這一則等一下要刪")
+    await waitFor(() => expect(mine()).not.toBeNull(), T)
+    expect(await screen.findByText("5 則", undefined, T)).toBeInTheDocument()
+    const remove = async () => {
+      await user.click(within(mine()!.closest("li")!).getByRole("button", { name: "示範小資的回覆的更多動作" }))
+      await user.click(await screen.findByRole("menuitem", { name: "刪除" }, T))
+    }
+    // 復原
+    await remove()
+    await waitFor(() => expect(mine()).toBeNull(), T)
+    expect(screen.getByText("4 則")).toBeInTheDocument()
+    expect(await screen.findByText("已刪除回覆", undefined, T)).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "復原" }))
+    await waitFor(() => expect(mine()).not.toBeNull(), T)
+    expect(screen.getByText("5 則")).toBeInTheDocument()
+    expect(api.deleteReply).not.toHaveBeenCalled()
+    act(() => {
+      toast.dismiss()
+    })
+    // 送出失敗：放回原位、通知說沒有刪除
+    vi.mocked(api.deleteReply).mockRejectedValueOnce(new ApiError(500, "internal", "伺服器錯誤"))
+    await remove()
+    await waitFor(() => expect(mine()).toBeNull(), T)
+    act(() => {
+      toast.dismiss()
+    })
+    expect(await screen.findByText("回覆沒有刪除，已經放回原位", undefined, T)).toBeInTheDocument()
+    await waitFor(() => expect(mine()).not.toBeNull(), T)
+    act(() => {
+      toast.dismiss()
+    })
+    // 通知結束：真的刪除
+    await remove()
+    await waitFor(() => expect(mine()).toBeNull(), T)
+    act(() => {
+      toast.dismiss()
+    })
+    await waitFor(() => expect(api.deleteReply).toHaveBeenCalledTimes(2), T)
+    await waitFor(async () => expect((await adapter.getTopic("top_p_etf")).reply_count).toBe(4), T)
+    expect(mine()).toBeNull()
+    expect(await screen.findByText("4 則", undefined, T)).toBeInTheDocument()
   })
 })
 
@@ -429,7 +532,10 @@ describe("檢舉", () => {
     const user = userEvent.setup()
     mount(named)
     renderApp("/discussions/top_p_etf")
-    await user.click(await screen.findByRole("button", { name: "檢舉定期定額派的回覆" }, T))
+    // 別人的回覆：「更多動作」裡只有「檢舉…」（沒有「刪除」）
+    await user.click(await screen.findByRole("button", { name: "定期定額派的回覆的更多動作" }, T))
+    expect(screen.queryByRole("menuitem", { name: "刪除" })).toBeNull()
+    await user.click(await screen.findByRole("menuitem", { name: "檢舉…" }, T))
     const dialog = await screen.findByRole("dialog", undefined, T)
     expect(within(dialog).getByRole("heading", { name: "檢舉這則回覆" })).toBeInTheDocument()
     expect(within(dialog).getAllByRole("radio").map((el) => el.closest("label")!.textContent)).toEqual(["廣告或洗版", "招攬或帶單", "辱罵或騷擾", "其他"])
@@ -442,7 +548,9 @@ describe("檢舉", () => {
     await waitFor(() => expect(api.reportDiscussion).toHaveBeenCalledWith({ target: "reply:rep_p_etf_1", reason: "solicitation", note: "一直貼一樣的話" }), T)
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), T)
     // 主題本身也可以檢舉（別人的）
-    expect(screen.getByRole("button", { name: "檢舉主題" })).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "主題的更多動作" }))
+    await user.click(await screen.findByRole("menuitem", { name: "檢舉…" }, T))
+    expect(within(await screen.findByRole("dialog", undefined, T)).getByRole("heading", { name: "檢舉這則主題" })).toBeInTheDocument()
   })
 
   it("獨立的元件：只要一個 target；沒有補充說明就不送 note；伺服器的頻率限制就地說明", async () => {
@@ -638,9 +746,12 @@ describe("個股與群組的「討論」分頁", () => {
     expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["排行", "動態", "討論", "持股", "週報", "分享", "成員", "頻道"])
     await screen.findByText("我把聯發科的交易補記好了", undefined, T)
     expect(topicTitles()).toHaveLength(3)
-    expect(screen.getByText("我把聯發科的交易補記好了").closest("li")).toHaveTextContent("示範使用者（你）・1 則回覆・聯發科 2454")
+    expect(metaItems(screen.getByText("我把聯發科的交易補記好了").closest("li")!)).toEqual(["示範使用者（你）", "1 則回覆", "聯發科 2454"])
     expect(screen.getByText("我把聯發科的交易補記好了").closest("li")).not.toHaveTextContent("家族投資")
-    expect(screen.getByRole("link", { name: "開新主題" })).toHaveAttribute("href", "/discussions/new?scope=group&group_id=grp_family")
+    // 「開新主題」預先選好這個群組，並記著是從群組的分頁來的（取消、發表之後回到這裡）
+    expect(screen.getByRole("link", { name: "開新主題" })).toHaveAttribute("href", "/discussions/new?scope=group&group_id=grp_family&from=group")
+    // 從這裡打開的主題也記著來源
+    expect(screen.getByRole("link", { name: "我把聯發科的交易補記好了" })).toHaveAttribute("href", "/discussions/top_g_fix?from=group")
     expect(api.listTopics).toHaveBeenCalledWith(expect.objectContaining({ scope: "group", group_id: "grp_family" }))
   })
 
@@ -651,11 +762,182 @@ describe("個股與群組的「討論」分頁", () => {
     await screen.findByText("0050 要不要改買 006208？", undefined, T)
     expect(topicTitles().sort()).toEqual(["0050 要不要改買 006208？", "台積電法說會前，大家怎麼配置？", "這個月的定期定額，大家扣了嗎？", "高股息 ETF 要不要全部換成市值型？"].sort())
     expect(screen.getByText("這個月的定期定額，大家扣了嗎？").closest("li")).toHaveTextContent("家族投資")
-    expect(screen.getByRole("link", { name: "開新主題" })).toHaveAttribute("href", "/discussions/new?symbol=0050.TW")
+    expect(screen.getByRole("link", { name: "開新主題" })).toHaveAttribute("href", "/discussions/new?symbol=0050.TW&from=stock")
+    expect(screen.getByRole("link", { name: "0050 要不要改買 006208？" })).toHaveAttribute("href", "/discussions/top_p_etf?from=stock&symbol=0050.TW")
     expect(api.listTopics).toHaveBeenCalledWith(expect.objectContaining({ scope: "all", symbol: "0050.TW" }))
     cleanup()
     renderApp("/stock/2317.TW?tab=discussions")
     expect(await screen.findByText("還沒有人討論鴻海", undefined, T)).toBeInTheDocument()
+  })
+})
+
+describe("還沒送出的字：離開再回來還在（這個分頁）", () => {
+  it("回覆框：打到一半按「改」去設定，回來還在，旁邊有「清除草稿」；別的主題的框是空的；送出成功才清掉", async () => {
+    const user = userEvent.setup()
+    mount(named)
+    const router = renderApp("/discussions/top_p_etf")
+    const key = replyDraftKey("usr_01JDEMO", "top_p_etf")
+    await user.type(await screen.findByRole("textbox", { name: "回覆內容" }, T), "寫到一半的回覆")
+    expect(JSON.parse(window.sessionStorage.getItem(key)!)).toBe("寫到一半的回覆")
+    // 這次打的字：沒有「清除草稿」
+    expect(screen.queryByRole("button", { name: "清除草稿" })).toBeNull()
+    await user.click(screen.getByRole("link", { name: "改" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/settings"), T)
+    // 別的主題：自己的一份，空的
+    await act(() => router.navigate({ to: "/discussions/$topicId", params: { topicId: "top_p_us" } }))
+    expect(await screen.findByRole("textbox", { name: "回覆內容" }, T)).toHaveValue("")
+    // 回到原來的主題：字還在，可以清除
+    await act(() => router.navigate({ to: "/discussions/$topicId", params: { topicId: "top_p_etf" } }))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "回覆內容" })).toHaveValue("寫到一半的回覆"), T)
+    await user.click(screen.getByRole("button", { name: "清除草稿" }))
+    expect(screen.getByRole("textbox", { name: "回覆內容" })).toHaveValue("")
+    expect(window.sessionStorage.getItem(key)).toBeNull()
+    expect(screen.queryByRole("button", { name: "清除草稿" })).toBeNull()
+    // 送出成功：草稿清掉
+    await user.type(screen.getByRole("textbox", { name: "回覆內容" }), "這次送出去")
+    expect(window.sessionStorage.getItem(key)).not.toBeNull()
+    await user.click(screen.getByRole("button", { name: "回覆" }))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "回覆內容" })).toHaveValue(""), T)
+    expect(window.sessionStorage.getItem(key)).toBeNull()
+  }, 20_000)
+
+  it("開新主題：按「取消」回到清單，再進來標題、內文、發到哪裡、標記都還在，上面有「清除草稿」；發表成功才清掉", async () => {
+    const user = userEvent.setup()
+    mount(named)
+    const router = renderApp("/discussions/new")
+    const key = newTopicDraftKey("usr_01JDEMO")
+    await user.click(await screen.findByRole("radio", { name: /大學同學/ }, T))
+    // 只選了發到哪裡：不算草稿
+    expect(window.sessionStorage.getItem(key)).toBeNull()
+    await user.type(screen.getByRole("textbox", { name: "標題" }), "年底對帳")
+    await user.type(screen.getByRole("textbox", { name: "內文" }), "大家把交易補齊")
+    expect(screen.queryByText("這是上次還沒發表的內容。")).toBeNull()
+    // 取消：是連回清單的連結（不標 aria-current），字留著
+    const cancel = screen.getByRole("link", { name: "取消" })
+    expect(cancel).toHaveAttribute("href", "/discussions")
+    expect(cancel).not.toHaveAttribute("aria-current")
+    await user.click(cancel)
+    await waitFor(() => expect(router.state.location.pathname).toBe("/discussions"), T)
+    expect(JSON.parse(window.sessionStorage.getItem(key)!)).toMatchObject({ dest: "group:grp_friends", title: "年底對帳", body: "大家把交易補齊" })
+    await act(() => router.navigate({ to: "/discussions/new" }))
+    await waitFor(() => expect(screen.getByRole("textbox", { name: "標題" })).toHaveValue("年底對帳"), T)
+    expect(screen.getByRole("textbox", { name: "內文" })).toHaveValue("大家把交易補齊")
+    expect(screen.getByRole("radio", { name: /大學同學/ })).toBeChecked()
+    expect(screen.getByText("這是上次還沒發表的內容。")).toBeInTheDocument()
+    // 清除草稿：表單回到空白
+    await user.click(screen.getByRole("button", { name: "清除草稿" }))
+    expect(screen.getByRole("textbox", { name: "標題" })).toHaveValue("")
+    expect(screen.getByRole("textbox", { name: "內文" })).toHaveValue("")
+    expect(screen.getAllByRole("radio").filter((el) => (el as HTMLInputElement).checked)).toEqual([])
+    expect(window.sessionStorage.getItem(key)).toBeNull()
+    expect(screen.queryByText("這是上次還沒發表的內容。")).toBeNull()
+    // 發表成功：草稿清掉
+    await user.click(screen.getByRole("radio", { name: /大學同學/ }))
+    await user.type(screen.getByRole("textbox", { name: "標題" }), "重新寫一次")
+    await user.type(screen.getByRole("textbox", { name: "內文" }), "內文")
+    expect(window.sessionStorage.getItem(key)).not.toBeNull()
+    await user.click(screen.getByRole("button", { name: "發表" }))
+    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/discussions\/top_\d+$/), T)
+    expect(window.sessionStorage.getItem(key)).toBeNull()
+  }, 20_000)
+})
+
+describe("從哪裡來的，就回到哪裡", () => {
+  const back = () => within(screen.getByRole("navigation", { name: "位置" })).getByRole("link")
+
+  it("從群組的「討論」分頁打開的主題：「← 群組名」回到那個分頁；作者那一行的群組名也是連結（都不標 aria-current）", async () => {
+    mount()
+    renderApp("/discussions/top_g_fix?from=group")
+    await screen.findByRole("heading", { level: 1, name: "我把聯發科的交易補記好了" }, T)
+    expect(back()).toHaveTextContent("家族投資")
+    expect(back()).toHaveAttribute("href", "/groups/grp_family?tab=discussions")
+    expect(back()).not.toHaveAttribute("aria-current")
+    const group = within(screen.getByRole("article")).getByRole("link", { name: "家族投資" })
+    expect(group).toHaveAttribute("href", "/groups/grp_family?tab=discussions")
+    expect(group).not.toHaveAttribute("aria-current")
+  })
+
+  it("從個股的「討論」分頁打開的：「← 股票名」；從清單打開的：「← 討論」，篩選與排序還在；對不起來的來源回到清單", async () => {
+    mount()
+    renderApp("/discussions/top_p_etf?from=stock&symbol=0050.TW")
+    await screen.findByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }, T)
+    expect(back()).toHaveTextContent("元大台灣50")
+    expect(back()).toHaveAttribute("href", "/stock/0050.TW?tab=discussions")
+    cleanup()
+    renderApp("/discussions/top_p_etf?scope=public&sort=new")
+    await screen.findByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }, T)
+    expect(back()).toHaveTextContent("討論")
+    expect(back()).toHaveAttribute("href", "/discussions?scope=public&sort=new")
+    cleanup()
+    // 這個主題沒有標記鴻海；公開的主題也沒有群組可以回
+    renderApp("/discussions/top_p_etf?from=stock&symbol=2317.TW")
+    await screen.findByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }, T)
+    expect(back()).toHaveAttribute("href", "/discussions")
+    cleanup()
+    renderApp("/discussions/top_p_etf?from=group")
+    await screen.findByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }, T)
+    expect(back()).toHaveAttribute("href", "/discussions")
+  })
+
+  it("刪除從群組分頁打開的主題：回到那個群組的「討論」分頁", async () => {
+    const user = userEvent.setup()
+    mount()
+    const router = renderApp("/discussions/top_g_fix?from=group")
+    await user.click(await screen.findByRole("button", { name: "主題的更多動作" }, T))
+    await user.click(await screen.findByRole("menuitem", { name: "刪除" }, T))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/groups/grp_family"), T)
+    expect(router.state.location.search).toMatchObject({ tab: "discussions" })
+    expect(await screen.findByText("已刪除主題", undefined, T)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("list", { name: "主題" })).toBeInTheDocument(), T)
+    expect(screen.queryByText("我把聯發科的交易補記好了")).toBeNull()
+    await user.click(screen.getByRole("button", { name: "復原" }))
+    expect(await screen.findByText("我把聯發科的交易補記好了", undefined, T)).toBeInTheDocument()
+  })
+
+  it("開新主題：麵包屑與「取消」回到來的地方；發表之後新主題也記著來源", async () => {
+    const user = userEvent.setup()
+    mount()
+    const router = renderApp("/discussions/new?scope=group&group_id=grp_family&from=group")
+    await screen.findByRole("radio", { name: /家族投資/ }, T)
+    expect(back()).toHaveTextContent("家族投資")
+    expect(back()).toHaveAttribute("href", "/groups/grp_family?tab=discussions")
+    expect(screen.getByRole("link", { name: "取消" })).toHaveAttribute("href", "/groups/grp_family?tab=discussions")
+    await user.type(screen.getByRole("textbox", { name: "標題" }), "標題")
+    await user.type(screen.getByRole("textbox", { name: "內文" }), "內文")
+    await user.click(screen.getByRole("button", { name: "發表" }))
+    await waitFor(() => expect(router.state.location.pathname).toMatch(/^\/discussions\/top_\d+$/), T)
+    expect(router.state.location.search).toEqual({ from: "group" })
+    await screen.findByRole("heading", { level: 1, name: "標題" }, T)
+    expect(back()).toHaveAttribute("href", "/groups/grp_family?tab=discussions")
+    cleanup()
+    window.sessionStorage.clear()
+    renderApp("/discussions/new?symbol=0050.TW&from=stock")
+    await screen.findByRole("list", { name: "已標記的股票" }, T)
+    expect(back()).toHaveTextContent("元大台灣50")
+    expect(screen.getByRole("link", { name: "取消" })).toHaveAttribute("href", "/stock/0050.TW?tab=discussions")
+    cleanup()
+    renderApp("/discussions/new?scope=public&sort=new")
+    await screen.findByRole("radio", { name: /公開/ }, T)
+    expect(back()).toHaveAttribute("href", "/discussions?scope=public&sort=new")
+  })
+})
+
+describe("被站方隱藏的內容", () => {
+  it("其他人（不是作者、不是站方）：只有一行說明，不能加表情、沒有「更多動作」（不能檢舉）", async () => {
+    const { adapter } = mount({ discussion: { publicName: "示範小資", admin: false } })
+    renderApp("/discussions/top_p_tsmc")
+    const replies = await screen.findByRole("list", { name: "回覆" }, T)
+    const hidden = within(replies).getByText("這則內容已被站方隱藏。").closest("li")!
+    expect(hidden).not.toHaveTextContent(/保證獲利/)
+    expect(within(hidden).queryByRole("button", { name: "加表情" })).toBeNull()
+    expect(within(hidden).queryByRole("button", { name: /更多動作/ })).toBeNull()
+    // 旁邊沒被隱藏的回覆照常可以加表情、檢舉
+    const visible = within(replies).getByText("比重超過自己睡得著的程度就調，不用等法說會。").closest("li")!
+    expect(within(visible).getByRole("button", { name: "加表情" })).toBeInTheDocument()
+    expect(within(visible).getByRole("button", { name: "阿土伯的回覆的更多動作" })).toBeInTheDocument()
+    // 示範資料和後端一樣：被隱藏的內容 can_report 是 false
+    const page = await adapter.listReplies("top_p_tsmc")
+    expect(page.items.find((r) => r.status === "hidden")).toMatchObject({ body: null, can_report: false })
   })
 })
 

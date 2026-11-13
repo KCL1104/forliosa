@@ -13,7 +13,7 @@ import { viewAsId } from "../view-as"
 import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
-import { mockMarketStatus, type MockMarket } from "./market-status"
+import { mockMarketNow, mockMarketStatus, mockToday, type MockMarket } from "./market-status"
 import { buildCompany, buildRelated } from "./company"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
@@ -221,6 +221,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     scenario,
   )
 
+  /** 示範的「今天」：平常是最後一個收盤日；`?market=open|pending` 是它的下一個交易日（本週事項從這一天起算） */
+  const today = mockToday(options.market)
+
   // ── 討論串：時間從示範資料的「現在」起算，加上開啟後實際經過的時間（10 秒間隔、7 天冷卻都照真的時間） ──
   const clock = options.clock ?? Date.now
   const clockStart = clock()
@@ -230,7 +233,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       signedIn: () => signedIn,
       myGroupRoles: () => sharing.myGroupRoles(),
       groupRoster: (id) => sharing.groupRoster(id),
-      now: () => Date.parse(MOCK_AS_OF) + (clock() - clockStart),
+      now: () => mockMarketNow(options.market).getTime() + (clock() - clockStart),
     },
     scenario,
     options.discussion,
@@ -613,7 +616,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
     // 查看模式：授權者沒有定期定額（示範），本週事項只有除息與入帳
     getUpcoming: (days = 7) =>
-      wait(() => buildUpcoming(holdingsNow(), findInstrument, days, ledger().viewing ? [] : recurring.upcoming(MOCK_TODAY, addDays(MOCK_TODAY, days)), commercial)),
+      wait(() => buildUpcoming(holdingsNow(), findInstrument, days, ledger().viewing ? [] : recurring.upcoming(today, addDays(today, days)), commercial, today)),
     getPerformance: ({ range, account_id, benchmark }) =>
       wait(() => {
         const l = ledger(account_id)

@@ -1,14 +1,13 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
-import { ArrowLeftIcon, XIcon } from "lucide-react"
-import { useId, useState } from "react"
+import { useNavigate, useSearch } from "@tanstack/react-router"
+import { XIcon } from "lucide-react"
+import { useEffect, useId, useState } from "react"
 import { toast } from "sonner"
 import { useCreateTopic } from "@/api/discussion-queries"
 import { qk, useInstrument, useMe } from "@/api/queries"
 import { useGroups } from "@/api/sharing-queries"
-import { ApiError, TOPIC_BODY_MAX, TOPIC_SYMBOLS_MAX, TOPIC_TITLE_MAX, type GroupSummary, type Instrument, type User } from "@/api/types"
+import { ApiError, TOPIC_BODY_MAX, TOPIC_SYMBOLS_MAX, TOPIC_TITLE_MAX, type GroupSummary, type User } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
-import { PlainLink } from "@/app/links"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { SkeletonLines } from "@/components/states"
@@ -16,9 +15,15 @@ import { SymbolPicker } from "@/components/symbol-picker"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
+import { FieldError } from "@/components/form-field"
+import { textAction } from "@/components/text-action"
 import { bodyProblem, charCount, titleProblem } from "@/lib/discussion-text"
+import { clearDraft, hasTopicContent, newTopicDraftKey, parseNewTopicDraft, readDraft, writeDraft, type DraftTag, type NewTopicDraft } from "@/lib/drafts"
+import { cn } from "@/lib/utils"
 import type { NewTopicSearch } from "@/router"
 import { postErrorText, suspendedText, suspendedUntil } from "./labels"
+import { newTopicOrigin, topicSearchFrom, type Origin } from "./origin"
+import { BackLink, OriginLink } from "./OriginLink"
 import { PublicNamePrompt } from "./PublicNamePrompt"
 import { PostingAs } from "./ReplyComposer"
 
@@ -29,6 +34,8 @@ type Destination = "public" | `group:${string}`
  * 網址可以預先選好：`?scope=public`、`?scope=group&group_id=…`（從清單的篩選、群組的討論分頁來）、`?symbol=…`（從個股的討論分頁來）。
  * 沒有預先選、而且有群組可以選時，不替使用者決定（公開或只給群組看是要緊的選擇）；沒有群組就只有公開。
  * 錯誤就地說明：哪一欄不對、公開發言被暫停到什麼時候、發言太頻繁要等多久。
+ * 還沒發出去的字邊打邊存（這個分頁，`lib/drafts.ts`）：按「改」去設定、按「取消」或上一頁再回來都還在，發表成功才清掉；
+ * 還原的時候表單上面有一行說明與「清除草稿」。麵包屑與「取消」回到來的地方（清單、群組或個股的「討論」分頁）。
  */
 export function NewTopicPage() {
   const readOnly = useReadOnly()
@@ -37,47 +44,76 @@ export function NewTopicPage() {
 }
 
 function NewTopic() {
+  const search = useSearch({ from: "/discussions/new" }) as NewTopicSearch
   const me = useMe()
   const groups = useGroups()
+  // 從個股頁來的那一檔：麵包屑的名稱與預先標記都用它
+  const stock = useInstrument(search.symbol ?? "", !!search.symbol)
+  const origin = newTopicOrigin(search, groups.data, { data: stock.data, settled: !search.symbol || !stock.isPending })
   return (
     <PageFrame className="lg:pt-6">
-      <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
-        <PlainLink to="/discussions" className="-ml-1 inline-flex h-9 items-center gap-1 rounded-sm px-1 text-ink hover:bg-hov pointer-coarse:h-11">
-          <ArrowLeftIcon aria-hidden className="size-4" />
-          討論
-        </PlainLink>
-      </nav>
-      <div className="max-w-[42rem]">
+      {/* 和設定同一個欄寬（816px）：表單、清單、主題頁同一個右緣 */}
+      <div className="max-w-measure">
+        <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
+          {origin && <BackLink origin={origin} />}
+        </nav>
         <h1 className="mt-1 text-2xl font-bold tracking-[-0.01em] lg:text-3xl">開新主題</h1>
         {/* 群組清單回來之前不知道有哪些地方可以發：先放骨架，不讓選項跳動 */}
-        {me.data && groups.data ? <TopicForm user={me.data} groups={groups.data} /> : <SkeletonLines rows={6} className="mt-6" />}
+        {me.data && groups.data && origin ? <TopicForm user={me.data} groups={groups.data} origin={origin} /> : <SkeletonLines rows={6} className="mt-6" />}
       </div>
     </PageFrame>
   )
 }
 
-function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
+const asTag = ({ symbol, code, name }: DraftTag): DraftTag => ({ symbol, code, name })
+
+function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[]; origin: Origin }) {
   const search = useSearch({ from: "/discussions/new" }) as NewTopicSearch
   const navigate = useNavigate()
   const qc = useQueryClient()
   const create = useCreateTopic()
   const id = useId()
+  const draftKey = newTopicDraftKey(user.id)
+  // 上次沒發出去的內容（這個分頁）：只在進來的那一刻讀一次
+  const [saved] = useState(() => readDraft(draftKey, parseNewTopicDraft))
   const preset: Destination | null =
     search.scope === "group" && groups.some((g) => g.id === search.group_id) ? `group:${search.group_id!}` : search.scope === "public" || groups.length === 0 ? "public" : null
-  const [dest, setDest] = useState<Destination | null>(preset)
-  const [title, setTitle] = useState("")
-  const [body, setBody] = useState("")
-  const [picked, setPicked] = useState<Instrument[]>([])
+  // 網址預先選好的優先（那是這次進來的入口）；沒有的話用草稿裡選的（群組還在才算）
+  const savedDest: Destination | null =
+    saved?.dest === "public" ? "public" : saved?.dest && groups.some((g) => `group:${g.id}` === saved.dest) ? (saved.dest as Destination) : null
+  const [dest, setDest] = useState<Destination | null>(preset ?? savedDest)
+  const [title, setTitle] = useState(saved?.title ?? "")
+  const [body, setBody] = useState(saved?.body ?? "")
+  const [picked, setPicked] = useState<DraftTag[]>(saved?.tags ?? [])
   const [errors, setErrors] = useState<{ dest?: string; title?: string; body?: string; form?: string }>({})
+  // 表單裡是還原的草稿（不是這次打的）：上面顯示一行說明與「清除草稿」，一動表單就收起來
+  const [restored, setRestored] = useState(saved !== null)
 
   // 從個股頁來：預先標記那一檔（查得到才有；使用者可以移除）
   const presetSymbol = useInstrument(search.symbol ?? "", !!search.symbol)
-  const [presetRemoved, setPresetRemoved] = useState(false)
-  const presetTag = !presetRemoved && search.symbol ? presetSymbol.data : undefined
-  const tags: Instrument[] = (presetTag ? [presetTag, ...picked.filter((t) => t.symbol !== presetTag.symbol)] : picked).slice(0, TOPIC_SYMBOLS_MAX)
+  const [presetRemoved, setPresetRemoved] = useState(!!search.symbol && saved?.removedPreset === search.symbol)
+  const presetTag = !presetRemoved && search.symbol && presetSymbol.data ? asTag(presetSymbol.data) : undefined
+  const tags: DraftTag[] = (presetTag ? [presetTag, ...picked.filter((t) => t.symbol !== presetTag.symbol)] : picked).slice(0, TOPIC_SYMBOLS_MAX)
   const removeTag = (symbol: string) => {
     if (presetTag?.symbol === symbol) setPresetRemoved(true)
     setPicked((list) => list.filter((x) => x.symbol !== symbol))
+    setRestored(false)
+  }
+
+  // 邊打邊存：只有自己加的標記算內容（從個股頁預先標記的那一檔不算——什麼都沒寫就離開，不留草稿）
+  const draft: NewTopicDraft = { dest, title, body, tags: picked, removedPreset: presetRemoved ? (search.symbol ?? null) : null }
+  const draftJson = JSON.stringify(hasTopicContent(draft) ? draft : null)
+  useEffect(() => {
+    writeDraft(draftKey, JSON.parse(draftJson))
+  }, [draftKey, draftJson])
+  const clearAll = () => {
+    setDest(preset)
+    setTitle("")
+    setBody("")
+    setPicked([])
+    setPresetRemoved(false)
+    setErrors({})
+    setRestored(false)
   }
 
   const group = dest?.startsWith("group:") ? groups.find((g) => `group:${g.id}` === dest) : undefined
@@ -103,8 +139,10 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
       { scope: isPublic ? "public" : "group", ...(group ? { group_id: group.id } : {}), title: title.trim(), body, symbols: tags.map((t) => t.symbol) },
       {
         onSuccess: (topic) => {
+          clearDraft(draftKey)
           toast.success("已發表")
-          void navigate({ to: "/discussions/$topicId", params: { topicId: topic.id } })
+          // 新主題的「← 回去」也是回到來的地方
+          void navigate({ to: "/discussions/$topicId", params: { topicId: topic.id }, search: topicSearchFrom(origin) })
         },
         onError: (err) => {
           setErrors({ form: postErrorText(err, "主題") })
@@ -117,11 +155,20 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
   const clear = (key: keyof typeof errors) => setErrors((e) => (e[key] || e.form ? { ...e, [key]: undefined, form: undefined } : e))
   const pick = (d: Destination) => {
     setDest(d)
+    setRestored(false)
     clear("dest")
   }
 
   return (
     <div className="mt-6 flex flex-col gap-6">
+      {restored && (
+        <p className="-mb-2 flex flex-wrap items-center gap-x-3 text-md text-ink">
+          這是上次還沒發表的內容。
+          <button type="button" onClick={clearAll} className={cn(textAction, "text-ink-2 hover:text-ink")}>
+            清除草稿
+          </button>
+        </p>
+      )}
       {/* 發到哪裡：在表單外面（下面選公開暱稱的那一欄是另一個表單，表單不能包表單） */}
       <fieldset aria-describedby={errors.dest ? `${id}-dest-error` : undefined}>
         <legend className="mb-1.5 text-sm font-medium">發到哪裡</legend>
@@ -139,9 +186,9 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
           ))}
         </ul>
         {errors.dest && (
-          <p id={`${id}-dest-error`} role="alert" className="mt-1.5 text-sm text-destructive">
+          <FieldError id={`${id}-dest-error`} className="mt-1.5">
             {errors.dest}
-          </p>
+          </FieldError>
         )}
       </fieldset>
 
@@ -166,6 +213,7 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
             aria-describedby={errors.title ? `${id}-title-error` : undefined}
             onChange={(e) => {
               setTitle(e.target.value)
+              setRestored(false)
               clear("title")
             }}
           />
@@ -179,6 +227,7 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
             aria-describedby={errors.body ? `${id}-body-error` : `${id}-body-help`}
             onChange={(e) => {
               setBody(e.target.value)
+              setRestored(false)
               clear("body")
             }}
             // 跟著內容自己長高（field-sizing-content），不需要右下角的原生拖曳把手
@@ -219,7 +268,11 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
             <SymbolPicker
               label="標記股票"
               value={null}
-              onChange={(i) => i && setPicked((list) => (list.some((x) => x.symbol === i.symbol) ? list : [...list, i]))}
+              onChange={(i) => {
+                if (!i) return
+                setPicked((list) => (list.some((x) => x.symbol === i.symbol) ? list : [...list, asTag(i)]))
+                setRestored(false)
+              }}
               accept={(i) => !tags.some((x) => x.symbol === i.symbol)}
               rejectReason="已標記"
             />
@@ -238,9 +291,10 @@ function TopicForm({ user, groups }: { user: User; groups: GroupSummary[] }) {
           <Button type="submit" variant="sign" disabled={create.isPending}>
             {create.isPending ? "發表中…" : "發表"}
           </Button>
-          <Link to="/discussions" className={buttonVariants({ variant: "outline" })}>
+          {/* 取消：回到來的地方；打到一半的字留著（回來時還在） */}
+          <OriginLink origin={origin} className={buttonVariants({ variant: "outline" })}>
             取消
-          </Link>
+          </OriginLink>
           {dest && !needsName && !until && <PostingAs user={user} scope={isPublic ? "public" : "group"} groupName={group?.name} />}
         </div>
       </form>
@@ -275,9 +329,7 @@ function Field({ label, htmlFor, hint, error, errorId, children }: { label: stri
       </div>
       {children}
       {error && (
-        <p id={errorId} role="alert" className="text-sm text-destructive">
-          {error}
-        </p>
+        <FieldError id={errorId}>{error}</FieldError>
       )}
     </div>
   )

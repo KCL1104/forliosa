@@ -47,7 +47,7 @@ export function DataSourcesPage() {
   return (
     // 左緣和帳本相同；這一頁是長文，閱讀寬度限制在 816px（原本的版心）
     <PageFrame>
-      <div className="flex max-w-[816px] flex-col gap-10">
+      <div className="flex max-w-measure flex-col gap-10">
         {/* 頁面標題下面不放副標；「只用哪些資料」這句是內容，放在授權條款的第一段 */}
         <PageHeader title="資料來源與授權" className="mb-0" />
         {q.isError ? (

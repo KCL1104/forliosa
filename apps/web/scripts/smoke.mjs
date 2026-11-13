@@ -968,7 +968,7 @@ await check("AI 面板：開著一段對話時換到安靜的頁面不收起來�
   const measure = async (path, ready) => {
     await rp.goto(base + path, { waitUntil: "networkidle" })
     await rp.getByText(ready).first().waitFor({ timeout: 8000 })
-    return rp.evaluate(() => Math.round(document.querySelector("main [class*='max-w-[816px]']")?.getBoundingClientRect().width ?? 0))
+    return rp.evaluate(() => Math.round(document.querySelector("main [class*='max-w-measure']")?.getBoundingClientRect().width ?? 0))
   }
   const widths = [await measure("/history", "發起新對話"), await measure("/settings", "券商帳戶"), await measure("/data-sources", "授權條款")]
   if (new Set(widths).size !== 1 || widths[0] !== 816) throw new Error(`content measures differ: ${widths.join(" / ")}`)
@@ -1088,7 +1088,15 @@ await check("收盤價的標示（預設：最新的收盤價已經進來）：�
 })
 await check("收盤價的標示（盤中）：個股頁一行「盤中不更新…」＋到證交所的連結（另開新視窗）；帳本「11/12 收盤・盤中不更新」，「今日」換成「11/12」", async () => {
   await kp.goto(base + "/stock/2330.TW?market=open", { waitUntil: "networkidle" })
-  await kp.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+  // 一行「盤中不更新・到證交所看即時報價 ↗」：不重複上一行已經寫的日期，而且真的排在同一行
+  const note = kp.locator("main header p", { hasText: "盤中不更新" })
+  await note.waitFor({ timeout: 8000 })
+  const noteText = ((await note.textContent()) ?? "").replace(/\s+/g, "")
+  if (!/^盤中不更新・到證交所看即時報價/.test(noteText) || /11\/12/.test(noteText)) throw new Error(`market note: ${noteText}`)
+  const noteBox = await note.evaluate((el) => ({ h: el.getBoundingClientRect().height, lh: parseFloat(getComputedStyle(el).lineHeight) }))
+  if (noteBox.h > noteBox.lh * 1.5) throw new Error(`the market note wraps to more than one line: ${JSON.stringify(noteBox)}`)
+  // 大字旁的漲跌是 11/12 那天的：和帳本一樣標日期
+  await kp.locator("main header").getByText("11/12 漲跌", { exact: true }).waitFor({ timeout: 8000 })
   const link = kp.getByRole("link", { name: /^到證交所看即時報價/ })
   const attrs = { href: await link.getAttribute("href"), target: await link.getAttribute("target"), rel: await link.getAttribute("rel") }
   if (attrs.href !== "https://mis.twse.com.tw/stock/detail-item?id=tse_2330.tw&ex=tse&lang=zhHant" || attrs.target !== "_blank" || attrs.rel !== "noopener noreferrer") throw new Error(`TWSE link: ${JSON.stringify(attrs)}`)
@@ -1098,7 +1106,9 @@ await check("收盤價的標示（盤中）：個股頁一行「盤中不更新�
   if ((await kp.getByText(/盤中不更新/).count()) !== 1) throw new Error("the note is repeated")
   // 上櫃 ETF、上櫃股票也一樣；美股維持「沒有報價」
   await kp.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
-  await kp.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.locator("main header p", { hasText: "盤中不更新" }).waitFor({ timeout: 8000 })
+  const otc = await kp.getByRole("link", { name: /^到證交所看即時報價/ }).getAttribute("href")
+  if (otc !== "https://mis.twse.com.tw/stock/detail-item?id=otc_6488.tw&ex=otc&lang=zhHant") throw new Error(`TPEx link: ${otc}`)
   await kp.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
   await kp.getByText("沒有報價", { exact: true }).waitFor({ timeout: 8000 })
   if (await kp.getByText(/盤中不更新/).count()) throw new Error("US stock shows the Taiwan market note")
@@ -1113,7 +1123,8 @@ await check("收盤價的標示（盤中）：個股頁一行「盤中不更新�
 })
 await check("收盤價的標示（收盤後、今天的還沒公布）：一行說明、沒有連結；帳本「11/12 收盤・今天的還沒公布」；切回預設後說明消失", async () => {
   await kp.goto(base + "/stock/2330.TW?market=pending", { waitUntil: "networkidle" })
-  await kp.getByText("今天的收盤價還沒公布，這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.getByText("今天的收盤價還沒公布", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.locator("main header").getByText("11/12 漲跌", { exact: true }).waitFor({ timeout: 8000 })
   if (await kp.getByRole("link", { name: /到證交所看即時報價/ }).count()) throw new Error("TWSE link shown after the close")
   await kp.goto(base + "/", { waitUntil: "networkidle" })
   await kp.getByText("11/12 收盤・今天的還沒公布", { exact: true }).waitFor({ timeout: 8000 })
@@ -1599,9 +1610,14 @@ await check("手機：帳本主數字旁的時間一行放得下（盤中的寫�
     await head.waitFor({ timeout: 8000 })
     if ((await head.evaluate((el) => el.getBoundingClientRect().height)) > 24) throw new Error("holdings header wraps")
     await p.goto(base + "/stock/2330.TW?market=open", { waitUntil: "networkidle" })
-    await p.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
+    // 手機上也是一行：「盤中不更新・到證交所看即時報價 ↗」（連結觸控時 44px 高，所以量的是字有沒有換行）
+    const note = p.locator("main header p", { hasText: "盤中不更新" })
+    await note.waitFor({ timeout: 8000 })
     const link = p.getByRole("link", { name: /^到證交所看即時報價/ })
     if ((await link.boundingBox()).height < 44) throw new Error("TWSE link under 44px on touch")
+    const tops = await note.evaluate((el) => [...el.querySelectorAll("span:not(.sr-only), a")].map((x) => { const r = x.getBoundingClientRect(); return Math.round((r.top + r.bottom) / 2) }))
+    if (Math.max(...tops) - Math.min(...tops) > 4) throw new Error(`the market note wraps on a phone: ${JSON.stringify(tops)}`)
+    await p.locator("main header").getByText("11/12 漲跌", { exact: true }).waitFor({ timeout: 8000 })
     if (await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)) throw new Error("stock page scrolls sideways with the market note")
   } finally {
     await mk.close()
@@ -1687,16 +1703,27 @@ await check("討論（沒登入）：公開清單與主題不用登入就能讀�
     if (await p.getByText("我把聯發科的交易補記好了").count()) throw new Error("a group topic is listed for a signed-out visitor")
     if (await p.getByRole("radiogroup", { name: "範圍" }).count()) throw new Error("scope filter shown when signed out")
     await p.getByText(DISCLAIMER).waitFor()
-    const login = p.getByRole("link", { name: "登入", exact: true })
+    const login = p.getByRole("banner").getByRole("link", { name: "登入", exact: true })
     const border = await login.evaluate((el) => getComputedStyle(el).borderTopColor)
     if (/rgba\(0, 0, 0, 0\)/.test(border)) throw new Error("the 登入 button has no visible outline")
+    // 「登入」在內容的欄寬裡：右緣和下面的內容（主題清單）對齊，不是掛在畫面最右邊
+    const edges = await p.evaluate(() => ({
+      login: Math.round(document.querySelector("header a[href^='/login']").getBoundingClientRect().right),
+      list: Math.round(document.querySelector('ul[aria-label="主題"]').getBoundingClientRect().right),
+    }))
+    if (Math.abs(edges.login - edges.list) > 1) throw new Error(`登入 is not on the content's right edge: ${JSON.stringify(edges)}`)
+    // 免責旁邊一行：Forliosa 是什麼＋「登入」
+    const about = p.locator("main p", { hasText: "Forliosa 是以台股為主的投資管理工具" })
+    await about.waitFor({ timeout: 8000 })
+    if (!/^\/login/.test((await about.getByRole("link", { name: "登入", exact: true }).getAttribute("href")) ?? "")) throw new Error("the about line has no 登入 link")
     // 主題頁（站內導覽）：內文、回覆、被隱藏的回覆只有說明、表情只有計數、股票是純文字
     await p.getByRole("link", { name: "台積電法說會前，大家怎麼配置？" }).click()
     await p.getByRole("heading", { level: 1, name: "台積電法說會前，大家怎麼配置？" }).waitFor({ timeout: 8000 })
     await p.getByText("比重超過自己睡得著的程度就調，不用等法說會。").waitFor({ timeout: 8000 })
     await p.getByText("這則內容已被站方隱藏。", { exact: true }).waitFor()
     if (await p.getByText(/保證獲利/).count()) throw new Error("hidden reply body leaked to a visitor")
-    if (await p.getByRole("button", { name: /加表情|^檢舉|^刪除/ }).count()) throw new Error("write actions shown to a signed-out visitor")
+    if (await p.getByRole("button", { name: /加表情|^檢舉|^刪除|更多動作/ }).count()) throw new Error("write actions shown to a signed-out visitor")
+    await p.locator("main p", { hasText: "Forliosa 是以台股為主的投資管理工具" }).getByRole("link", { name: "登入", exact: true }).waitFor()
     if (await p.getByRole("textbox").count()) throw new Error("a composer is shown to a signed-out visitor")
     if (await p.locator("main").getByRole("link", { name: /台積電 2330/ }).count()) throw new Error("stock tags are links for a signed-out visitor")
     await p.getByText(DISCLAIMER).waitFor()
@@ -1746,7 +1773,8 @@ await check("討論（主要流程）：選公開暱稱 → 發公開主題（�
     await p.getByRole("option", { name: /2330/ }).first().click()
     await p.getByRole("list", { name: "已標記的股票" }).getByText("台積電").waitFor({ timeout: 5000 })
     await p.getByRole("button", { name: "發表", exact: true }).click()
-    await p.waitForURL(/\/discussions\/top_\d+$/, { timeout: 8000 })
+    // 新主題記著是從「公開」的清單來的（← 討論 回去時篩選還在）
+    await p.waitForURL(/\/discussions\/top_\d+\?scope=public$/, { timeout: 8000 })
     await p.getByRole("heading", { level: 1, name: "煙霧測試：年底要不要再平衡？" }).waitFor({ timeout: 8000 })
     await p.getByText("已發表").waitFor({ timeout: 8000 })
     // 內文：換行保留、網址是另開新視窗的連結（後面的全形逗號不算在網址裡）
@@ -1755,9 +1783,12 @@ await check("討論（主要流程）：選公開暱稱 → 發公開主題（�
     if (a.href !== "https://www.twse.com.tw/" || a.target !== "_blank" || a.rel !== "nofollow ugc noopener noreferrer" || a.text !== "https://www.twse.com.tw/" || !/pre-wrap/.test(a.pre)) throw new Error(`body link: ${JSON.stringify(a)}`)
     if ((await p.locator("article").getByRole("link", { name: /台積電 2330/ }).getAttribute("href")) !== "/stock/2330.TW") throw new Error("tagged stock is not a link to the stock page")
     await p.getByText(DISCLAIMER).waitFor()
-    // 自己的主題：可以刪除、不能檢舉
-    await p.getByRole("button", { name: "刪除主題" }).waitFor()
-    if (await p.getByRole("button", { name: "檢舉主題" }).count()) throw new Error("can report my own topic")
+    // 自己的主題：「更多動作」裡可以刪除、不能檢舉
+    await p.getByRole("button", { name: "主題的更多動作" }).click()
+    await p.getByRole("menuitem", { name: "刪除" }).waitFor({ timeout: 5000 })
+    if (await p.getByRole("menuitem", { name: /檢舉/ }).count()) throw new Error("can report my own topic")
+    await p.keyboard.press("Escape")
+    await p.getByRole("menu").waitFor({ state: "detached", timeout: 5000 })
     // 馬上回覆：任兩則公開發言至少間隔 10 秒 → 就地說幾秒後可以再送，內容留著
     const box = p.getByRole("textbox", { name: "回覆內容" })
     await box.fill("自己先回：我是每年年底調一次。")
@@ -1784,11 +1815,15 @@ await check("討論（主要流程）：選公開暱稱 → 發公開主題（�
     await p.getByRole("navigation", { name: "位置" }).getByRole("link", { name: "討論" }).click()
     const first = p.getByRole("list", { name: "主題" }).getByRole("listitem").first()
     await first.getByText("煙霧測試：年底要不要再平衡？").waitFor({ timeout: 8000 })
-    await first.getByText(/煙霧測試員（你）・1 則回覆/).waitFor()
+    const meta = await first.locator(".meta-line > div > *").allTextContents()
+    if (meta.join("|") !== "煙霧測試員（你）|1 則回覆|台積電 2330") throw new Error(`meta line: ${meta.join("|")}`)
+    if (!/scope=public/.test(p.url())) throw new Error(`← 討論 lost the list's filter: ${p.url()}`)
     // 檢舉別人的回覆
     await p.getByRole("link", { name: "0050 要不要改買 006208？" }).click()
     await p.getByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }).waitFor({ timeout: 8000 })
-    await p.getByRole("button", { name: "檢舉定期定額派的回覆" }).click()
+    await p.getByRole("button", { name: "定期定額派的回覆的更多動作" }).click()
+    if (await p.getByRole("menuitem", { name: "刪除" }).count()) throw new Error("can delete someone else's public reply")
+    await p.getByRole("menuitem", { name: "檢舉…" }).click()
     const dialog = p.getByRole("dialog")
     await dialog.getByRole("button", { name: "送出檢舉" }).click()
     await dialog.getByText("請選一個理由。").waitFor({ timeout: 5000 })
@@ -1821,7 +1856,7 @@ await check("討論（主要流程）：選公開暱稱 → 發公開主題（�
   })
 })
 
-await check("討論（群組）：群組主題只在「全部」與那個群組的篩選裡，公開的篩選看不到；在群組裡用顯示名稱發言、不需要公開暱稱、沒有檢舉；刪除先確認", async () => {
+await check("討論（群組）：群組主題只在「全部」與那個群組的篩選裡，公開的篩選看不到；在群組裡用顯示名稱發言、不需要公開暱稱、沒有檢舉；刪除可以復原、通知結束才真的刪掉", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/discussions", { waitUntil: "networkidle" })
     const scope = p.getByRole("radiogroup", { name: "範圍" })
@@ -1845,8 +1880,15 @@ await check("討論（群組）：群組主題只在「全部」與那個群組�
     await p.getByRole("link", { name: "這個月的定期定額，大家扣了嗎？" }).click()
     await p.getByRole("heading", { level: 1, name: "這個月的定期定額，大家扣了嗎？" }).waitFor({ timeout: 8000 })
     await p.getByText("已離開的成員").waitFor({ timeout: 8000 })
-    if (await p.getByRole("button", { name: /^檢舉/ }).count()) throw new Error("group content can be reported")
+    // 群組範圍沒有檢舉：別人的回覆的「更多動作」裡只有「刪除」（我是這個群組的擁有者）
+    await p.getByRole("button", { name: /回覆的更多動作$/ }).first().click()
+    await p.getByRole("menuitem", { name: "刪除" }).waitFor({ timeout: 5000 })
+    if (await p.getByRole("menuitem", { name: /檢舉/ }).count()) throw new Error("group content can be reported")
+    await p.keyboard.press("Escape")
+    await p.getByRole("menu").waitFor({ state: "detached", timeout: 5000 })
     if (await p.getByText(DISCLAIMER).count()) throw new Error("the public disclaimer is shown on a group topic")
+    // 作者那一行的群組名稱是連到群組「討論」分頁的連結
+    if ((await p.locator("article header").getByRole("link", { name: "家族投資" }).getAttribute("href")) !== "/groups/grp_family?tab=discussions") throw new Error("the group name is not a link to the group's discussions")
     const form = p.getByRole("form", { name: "回覆這個主題" })
     await form.getByText("以「示範使用者」在「家族投資」發言").waitFor({ timeout: 8000 })
     const box = form.getByRole("textbox", { name: "回覆內容" })
@@ -1858,18 +1900,86 @@ await check("討論（群組）：群組主題只在「全部」與那個群組�
     const mine = p.getByRole("list", { name: "回覆" }).getByRole("listitem").filter({ hasText: "我這個月也扣了。" })
     await mine.waitFor({ timeout: 8000 })
     await mine.getByText("示範使用者（你）").waitFor()
-    // 刪除：先確認（墨色，不是紅色）
-    await mine.getByRole("button", { name: /^刪除/ }).click()
-    const confirm = p.getByRole("alertdialog")
-    await confirm.getByText("刪除這則回覆？").waitFor({ timeout: 5000 })
-    const tone = await confirm.getByRole("button", { name: "刪除", exact: true }).evaluate((el) => {
-      const v = (n) => { const d = document.createElement("div"); d.style.color = `var(${n})`; document.body.appendChild(d); const out = getComputedStyle(d).color; d.remove(); return out }
-      return { bg: getComputedStyle(el).backgroundColor, act: v("--act"), red: v("--red") }
-    })
-    if (tone.bg !== tone.act || tone.bg === tone.red) throw new Error(`the delete button is not ink: ${JSON.stringify(tone)}`)
-    await confirm.getByRole("button", { name: "刪除", exact: true }).click()
-    await p.getByText("已刪除回覆").waitFor({ timeout: 8000 })
-    await mine.waitFor({ state: "detached", timeout: 8000 })
+    // 刪除：不先確認——那一則立刻不見、回覆數少一，通知附「復原」；「刪除」是墨色，不是紅色
+    const count = () => p.locator("#topic-replies").locator("xpath=..").getByText(/^\d+ 則$/).textContent()
+    const beforeCount = await count()
+    const remove = async () => {
+      await mine.getByRole("button", { name: /更多動作$/ }).click()
+      const item = p.getByRole("menuitem", { name: "刪除" })
+      await item.waitFor({ timeout: 5000 })
+      const tone = await item.evaluate((el) => {
+        const v = (n) => { const d = document.createElement("div"); d.style.color = `var(${n})`; document.body.appendChild(d); const out = getComputedStyle(d).color; d.remove(); return out }
+        return { color: getComputedStyle(el).color, red: v("--red") }
+      })
+      if (tone.color === tone.red) throw new Error(`the delete item is red: ${JSON.stringify(tone)}`)
+      await item.click()
+    }
+    await remove()
+    if (await p.getByRole("alertdialog").count()) throw new Error("delete still asks for confirmation")
+    await mine.waitFor({ state: "detached", timeout: 5000 })
+    const toast = p.locator("[data-sonner-toast]").filter({ hasText: "已刪除回覆" })
+    await toast.waitFor({ timeout: 5000 })
+    if ((await count()) === beforeCount) throw new Error("the reply count did not change after deleting")
+    // 復原：回到原位、回覆數也回來
+    await toast.getByRole("button", { name: "復原" }).click()
+    await mine.waitFor({ timeout: 5000 })
+    if ((await count()) !== beforeCount) throw new Error(`undo did not restore the count: ${await count()} vs ${beforeCount}`)
+    await toast.waitFor({ state: "detached", timeout: 8000 })
+    // 再刪一次、不復原：通知結束之後真的刪掉（重新讀取後還是不在）
+    await remove()
+    await mine.waitFor({ state: "detached", timeout: 5000 })
+    await toast.waitFor({ timeout: 5000 })
+    await toast.waitFor({ state: "detached", timeout: 12000 })
+    await p.waitForTimeout(600)
+    if (await mine.count()) throw new Error("the reply came back after the undo window")
+    if ((await count()) === beforeCount) throw new Error("the reply count came back after the undo window")
+    // ← 回到清單：篩選（家族投資）與排序（最新主題）都還在
+    await p.getByRole("navigation", { name: "位置" }).getByRole("link", { name: "討論" }).click()
+    await p.waitForURL(/\/discussions\?scope=group&group_id=grp_family&sort=new$/, { timeout: 8000 })
+    if (!(await p.getByRole("radiogroup", { name: "範圍" }).getByRole("radio", { name: "家族投資" }).isChecked())) throw new Error("the list forgot its filter")
+  })
+})
+
+await check("討論（草稿）：回覆打到一半按「改」去設定，上一頁回來字還在、可以清除；開新主題按「取消」再回來也還在", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/discussions/top_p_etf?discuss=named", { waitUntil: "networkidle" })
+    const box = p.getByRole("textbox", { name: "回覆內容" })
+    await box.waitFor({ timeout: 8000 })
+    await box.fill("寫到一半的回覆，先去改個暱稱。")
+    if (await p.getByRole("button", { name: "清除草稿" }).count()) throw new Error("清除草稿 is shown while typing")
+    await p.getByRole("form", { name: "回覆這個主題" }).getByRole("link", { name: "改" }).click()
+    await p.waitForURL(/\/settings/, { timeout: 8000 })
+    await p.goBack()
+    await box.waitFor({ timeout: 8000 })
+    if ((await box.inputValue()) !== "寫到一半的回覆，先去改個暱稱。") throw new Error(`the reply draft was lost: “${await box.inputValue()}”`)
+    // 別的主題的框是空的
+    await p.goto(base + "/discussions/top_p_us", { waitUntil: "networkidle" })
+    await box.waitFor({ timeout: 8000 })
+    if ((await box.inputValue()) !== "") throw new Error("another topic shows this topic's draft")
+    await p.goto(base + "/discussions/top_p_etf", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "清除草稿" }).click()
+    if ((await box.inputValue()) !== "") throw new Error("清除草稿 did not clear the box")
+    await p.reload({ waitUntil: "networkidle" })
+    await box.waitFor({ timeout: 8000 })
+    if ((await box.inputValue()) !== "") throw new Error("the cleared draft came back")
+    // 開新主題：取消（回到來的地方）之後再進來，內容還在
+    await p.goto(base + "/stock/0050.TW?tab=discussions", { waitUntil: "networkidle" })
+    await p.getByRole("link", { name: "開新主題" }).click()
+    await p.waitForURL(/\/discussions\/new\?symbol=0050\.TW&from=stock/, { timeout: 8000 })
+    await p.getByRole("navigation", { name: "位置" }).getByRole("link", { name: "元大台灣50" }).waitFor({ timeout: 8000 })
+    await p.getByRole("radio", { name: /^公開/ }).check()
+    await p.getByLabel("標題").fill("寫到一半的主題")
+    await p.getByLabel("內文").fill("先放著，等等再寫。")
+    const cancel = p.getByRole("link", { name: "取消" })
+    if (await cancel.getAttribute("aria-current")) throw new Error("取消 is marked aria-current")
+    await cancel.click()
+    await p.waitForURL(/\/stock\/0050\.TW\?tab=discussions/, { timeout: 8000 })
+    await p.getByRole("link", { name: "開新主題" }).click()
+    await p.getByText("這是上次還沒發表的內容。").waitFor({ timeout: 8000 })
+    if ((await p.getByLabel("標題").inputValue()) !== "寫到一半的主題" || (await p.getByLabel("內文").inputValue()) !== "先放著，等等再寫。") throw new Error("the new-topic draft was lost")
+    if (!(await p.getByRole("radio", { name: /^公開/ }).isChecked())) throw new Error("the draft forgot where to post")
+    await p.getByRole("button", { name: "清除草稿" }).click()
+    if ((await p.getByLabel("標題").inputValue()) !== "") throw new Error("清除草稿 did not clear the form")
   })
 })
 
@@ -1971,6 +2081,27 @@ await check("手機：討論的清單、主題、開新主題、站方管理—�
       const small = await smallTargets(p)
       if (small.length) throw new Error(`${path}: ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
     }
+    // 個股頁的分頁列：七個分頁在 iPhone 15（393px）上全部看得到，「討論」不用捲動就在畫面裡
+    await p.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+    await p.getByRole("tablist", { name: "個股資料" }).waitFor({ timeout: 8000 })
+    const tabRow = await p.getByRole("tablist", { name: "個股資料" }).evaluate((row) => ({
+      scroll: row.scrollWidth - row.clientWidth,
+      tabs: [...row.querySelectorAll("[role=tab]")].map((t) => { const r = t.getBoundingClientRect(); return { text: t.textContent, left: Math.round(r.left), right: Math.round(r.right), w: Math.round(r.width) } }),
+      vw: innerWidth,
+    }))
+    if (tabRow.tabs.length !== 7 || tabRow.scroll > 0 || tabRow.tabs.some((t) => t.left < 0 || t.right > tabRow.vw || t.w < 44)) throw new Error(`stock tabs do not all fit on a 393px phone: ${JSON.stringify(tabRow)}`)
+    // 主題頁：每一則發言左邊是日期格，字的左緣和清單的標題是同一條
+    await p.goto(base + "/discussions", { waitUntil: "networkidle" })
+    await p.getByText("台積電法說會前，大家怎麼配置？").first().waitFor({ timeout: 8000 })
+    const listLeft = await p.locator('ul[aria-label="主題"] > li a').first().evaluate((a) => Math.round(a.getBoundingClientRect().left))
+    await p.goto(base + "/discussions/top_p_tsmc", { waitUntil: "networkidle" })
+    await p.getByText("比重超過自己睡得著的程度就調").waitFor({ timeout: 8000 })
+    const topic = await p.evaluate(() => ({
+      title: Math.round(document.querySelector("article h1").getBoundingClientRect().left),
+      replies: [...document.querySelectorAll('ol[aria-label="回覆"] > li')].map((li) => ({ date: !!li.querySelector(".date-cell time"), text: Math.round(li.querySelector("p").getBoundingClientRect().left) })),
+      topicDate: !!document.querySelector("article > div .date-cell time"),
+    }))
+    if (!topic.topicDate || topic.title !== listLeft || topic.replies.some((r) => !r.date || r.text !== listLeft)) throw new Error(`the topic page is not on the list's date gutter: ${JSON.stringify({ listLeft, topic })}`)
     // 清單：整列可以按（按在列的右邊也到主題）、日期格是窄的一欄（標題有地方寫）
     await p.goto(base + "/discussions", { waitUntil: "networkidle" })
     const row = p.locator('ul[aria-label="主題"] > li').filter({ hasText: "定期定額的扣款日，選幾號有差嗎？" })
@@ -1986,6 +2117,14 @@ await check("手機：討論的清單、主題、開新主題、站方管理—�
     })
     if (hit.h < 44 || !hit.covers) throw new Error(`the topic row is not one link: ${JSON.stringify(hit)}`)
     if (hit.dateW > 56 || hit.titleLines !== 1) throw new Error(`the date column leaves too little room for the title: ${JSON.stringify(hit)}`)
+    // 按在那一行 meta 的字上也是打開主題（分隔符號與 meta 不擋住整列的連結）
+    const metaHit = await row.evaluate((li) => {
+      const a = li.querySelector("a")
+      const m = li.querySelector(".meta-line > div > *").getBoundingClientRect()
+      const at = document.elementFromPoint(m.left + m.width / 2, m.top + m.height / 2)
+      return at === a || a.contains(at)
+    })
+    if (!metaHit) throw new Error("tapping the meta line does not open the topic")
     await row.click({ position: { x: 300, y: 20 } })
     await p.waitForURL(/\/discussions\/top_p_day$/, { timeout: 8000 })
   })
