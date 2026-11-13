@@ -44,9 +44,9 @@ export function DividendsTab({ inst, quote, position }: { inst: InstrumentDetail
   if (rows.length === 0) {
     // 美股沒有可商用的配息來源（後端與商用 mock 都回空陣列）：不能說成「沒有配過息」
     return us ? (
-      <NotYet title="還不能顯示配息">美股目前沒有可商用的配息資料來源，這裡還不能顯示{inst.name}的配息。</NotYet>
+      <NotYet title="美股沒有配息資料" />
     ) : (
-      <NotYet title="沒有配息紀錄">{inst.name}過去沒有配息紀錄。</NotYet>
+      <NotYet title="沒有配息紀錄" />
     )
   }
   return (

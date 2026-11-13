@@ -174,7 +174,8 @@ describe("空狀態與錯誤：全站同一種樣子", () => {
       expect(box.className).not.toMatch(/dashed|rounded|bg-/)
     }
     expect(screen.getByText("還沒有週報")).toHaveClass("text-base", "font-semibold", "text-ink")
-    expect(screen.getByText("每週六晚上整理。")).toHaveClass("text-ink-2")
+    // 原因是要讀的句子：15px 墨色（淡墨小字只給日期、單位這類標註）
+    expect(screen.getByText("每週六晚上整理。")).toHaveClass("text-base", "text-ink")
     const retry = within(alert).getByRole("button", { name: "重新載入" })
     expect(retry.querySelector("svg")).toBeNull()
     await user.click(retry)
@@ -201,7 +202,9 @@ describe("聯絡簿的日期格", () => {
 
 describe("帳本主數字列：走勢畫不出來的原因", () => {
   it("只說後端 notes 講過的原因；沒講就不寫", () => {
-    expect(trendMissingReason(["AAPL：美股目前沒有可商用的行情來源，不提供價格資料，含美股時無法計算績效", "資料累積中：自 2026-10-01 起存檔"])).toBe("含美股，算不出來")
+    expect(trendMissingReason(["AAPL：美股沒有報價，含美股的績效算不出來", "資料從 2026/10/01 開始；持股期間有幾天沒有收盤價，績效算不出來"])).toBe("含美股，算不出來")
+    expect(trendMissingReason(["資料從 2026/10/01 開始"])).toBe("資料還不夠")
+    // 舊版後端的寫法也認得（前後端分開部署）
     expect(trendMissingReason(["資料累積中：自 2026-10-01 起存檔"])).toBe("資料還不夠")
     expect(trendMissingReason([])).toBeNull()
     expect(trendMissingReason(["其他說明"])).toBeNull()

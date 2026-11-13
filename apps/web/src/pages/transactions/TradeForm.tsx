@@ -40,7 +40,8 @@ export function TradeFormHost() {
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
   const title = edit ? "編輯交易" : "記一筆交易"
-  const description = isDesktop ? "填好數量與價格後，右側會即時試算手續費與稅。" : "填好數量與價格後，下方會即時試算手續費與稅。"
+  // 畫面上不寫副標（試算區自己會說要填什麼）；給螢幕報讀器一句
+  const description = "填數量與價格，試算手續費與稅，再儲存。"
   const formKey = edit?.id ?? "new"
 
   if (isDesktop) {
@@ -50,7 +51,7 @@ export function TradeFormHost() {
         <DialogContent className="max-h-[calc(100dvh-4rem)] gap-0 overflow-y-auto p-0 sm:max-w-[760px]">
           <DialogHeader className="px-6 pt-5 pb-4">
             <DialogTitle>{title}</DialogTitle>
-            <DialogDescription>{description}</DialogDescription>
+            <DialogDescription className="sr-only">{description}</DialogDescription>
           </DialogHeader>
           {open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="split" />}
         </DialogContent>
@@ -62,7 +63,7 @@ export function TradeFormHost() {
       <DrawerContent className="max-h-[92dvh]">
         <DrawerHeader className="pb-2">
           <DrawerTitle>{title}</DrawerTitle>
-          <DrawerDescription>{description}</DrawerDescription>
+          <DrawerDescription className="sr-only">{description}</DrawerDescription>
         </DrawerHeader>
         <div className="overflow-y-auto overscroll-contain">{open && <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout="stack" />}</div>
       </DrawerContent>
@@ -412,7 +413,7 @@ function formatNumberSafe(n: number | null) {
 }
 
 function PreviewBody({ preview, loading, ready, currency, type }: { preview?: TradePreview; loading: boolean; ready: boolean; currency: "TWD" | "USD"; type: TransactionType }) {
-  if (!ready) return <p className="text-md text-ink-2">填完數量與價格後，會自動試算手續費、證交稅與實際收付金額。</p>
+  if (!ready) return <p className="text-base text-ink">填了數量和價格才能試算。</p>
   if (loading || !preview) return <div className="flex flex-col gap-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /><Skeleton className="h-4 w-3/5" /></div>
   const rows: [string, number][] = [
     [type === "cash_dividend" ? "股利金額" : "成交金額", preview.gross],

@@ -24,9 +24,11 @@ import { formatMoney } from "@/lib/format"
 import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
 import { Pct } from "@/components/finance"
+import { usePageTitle } from "@/app/page-title"
 
 
 export function SettingsPage() {
+  usePageTitle("設定")
   // 查看別人的資產時，帳戶與定期定額會是對方的：結束查看後才能用（外觀與漲跌顏色在頭像選單）
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="設定" />
@@ -95,7 +97,7 @@ function Settings() {
       </Group>
 
       <Group title="隱私">
-        <Row label="開啟時預設隱私模式" description="遮蔽所有金額與股數，方便截圖分享；百分比照常顯示。隨時可用上方的眼睛圖示切換。" htmlFor="privacy-default">
+        <Row label="開啟時預設隱私模式" description="遮蔽金額與股數，百分比照常顯示。標題列的眼睛可以切換。" htmlFor="privacy-default">
           <Switch id="privacy-default" checked={p.privacyDefault} onCheckedChange={(v) => setPref({ privacyDefault: v })} />
         </Row>
       </Group>
@@ -145,7 +147,7 @@ function Row({ label, description, htmlFor, children }: { label: string; descrip
     <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
       <div className="min-w-0">
         {htmlFor ? <label htmlFor={htmlFor} className="font-medium">{label}</label> : <p className="font-medium">{label}</p>}
-        {description && <div className="mt-0.5 text-md text-ink-2">{description}</div>}
+        {description && <div className="mt-0.5 text-base text-ink">{description}</div>}
       </div>
       <div className="shrink-0">{children}</div>
     </div>
@@ -262,7 +264,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
-          <DialogDescription>折扣用「幾折」輸入，例如 2.8 折就填 2.8；不知道的話先填 6，之後可以改。</DialogDescription>
+          <DialogDescription>折扣填「幾折」，2.8 折就填 2.8；不知道先填 6。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 pointer-coarse:[&_input]:h-11">
           <div className="grid gap-3 sm:grid-cols-2">

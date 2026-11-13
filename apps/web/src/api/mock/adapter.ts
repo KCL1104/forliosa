@@ -16,7 +16,7 @@ import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
 import { mockMarketNow, mockMarketStatus, mockToday, type MockMarket } from "./market-status"
 import { buildCompany, buildRelated } from "./company"
-import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
+import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, ymd, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
 import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
@@ -331,14 +331,15 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     if (usHeld.length > 0) {
       return {
         ...empty, start_date: null, end_date: null, series: [],
-        notes: [`${usHeld.join("、")}：${US_NOTE}，含美股時無法計算績效`, `${accumulatingNote()}；需要持股期間每天的收盤價才能計算績效`],
+        // 後端只有在台股也缺收盤價時才多一句「資料從 … 開始；…」；示範帳本的台股資料是齊的，只說美股這一句
+        notes: [`${usHeld.join("、")}：${US_NOTE}，含美股的績效算不出來`],
       }
     }
     const full = buildPerformance(txns, range, accountId, benchmark, { isDemo: false })
     if (!full.start_date || full.start_date >= ARCHIVE_START) return { ...full, notes: [] }
     const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart: ARCHIVE_START })
     const bench = benchmark === "^TAIEXTR" ? { benchmark: clipped.benchmark ? { ...clipped.benchmark, twr: null } : null, series: clipped.series.map((p) => ({ ...p, benchmark_index: null })) } : {}
-    return { ...clipped, ...bench, notes: [`${accumulatingNote()}；績效從 ${clipped.start_date} 收盤開始計算`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }
+    return { ...clipped, ...bench, notes: [`績效從 ${ymd(clipped.start_date!)} 收盤開始算，之前沒有資料`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }
   }
   const sortTxns = () =>
     txns.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))

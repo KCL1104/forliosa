@@ -29,6 +29,7 @@ import { useReadOnly } from "@/api/view-as"
 import { PlainLink } from "@/app/links"
 import { PageFrame } from "@/app/PageFrame"
 import { trendMissingReason } from "./trend-reason"
+import { usePageTitle } from "@/app/page-title"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -42,6 +43,7 @@ export function LedgerPage() {
   const search = useSearch({ from: "/" }) as LedgerSearch
   const navigate = useNavigate()
   const view: LedgerView = search.view ?? "holdings"
+  usePageTitle("帳本")
   const summary = useSummary()
   const counts = useLedgerCounts()
   const pending = usePendingCount()

@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router"
+import { inText } from "@/lib/cjk"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAccounts } from "@/api/queries"
@@ -54,7 +55,7 @@ export function Delegations() {
       }
     >
       {/* 授權是後果重大的選擇：說明留著（在標題的印刷線下面，不夾在標題和線中間） */}
-      <p className="-mb-3 max-w-prose text-md text-ink-2">讓同群組的家人朋友唯讀查看你的帳本，可以只開放部分帳戶，隨時撤銷。</p>
+      <p className="-mb-3 max-w-prose text-base text-ink">同群組的人可以看你的帳本，不能改。可以只開放部分帳戶。</p>
       {list.isError ? (
         <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : !list.data ? (
@@ -142,7 +143,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
     const body = { scope, account_ids: scope === "accounts" ? picked : [] }
     const done = {
       onSuccess: (d: Delegation) => {
-        toast.success(editing ? `已更新${d.viewer.display_name}的查看範圍` : `已授權${d.viewer.display_name}查看`)
+        toast.success(editing ? `已更新${inText(d.viewer.display_name)}的查看範圍` : `已授權${inText(d.viewer.display_name)}查看`)
         onClose()
       },
       onError: (err: unknown) => setError(err instanceof ApiError && err.code === "already_member" ? "已經授權給這位成員了，請改用「修改範圍」。" : errText(err)),
@@ -155,8 +156,8 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>{editing ? `${editing.viewer.display_name}可以查看的範圍` : "授權查看"}</DialogTitle>
-          <DialogDescription>對方只能看，不能記帳或修改；AI 也不會讀你的資料給他。隨時可以撤銷。</DialogDescription>
+          <DialogTitle>{editing ? `${inText(editing.viewer.display_name, "start")}可以查看的範圍` : "授權查看"}</DialogTitle>
+          <DialogDescription>對方只能看，不能記帳或修改；AI 不會讀你的資料給他。</DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-5">
           {!editing && (
@@ -165,7 +166,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
               {candidates.isLoading ? (
                 <SkeletonLines rows={3} />
               ) : list.length === 0 ? (
-                <p className="text-md text-ink-2">
+                <p className="text-base text-ink">
                   只能授權給和你在同一個群組的人。先
                   <Link to="/groups" className="text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink" onClick={onClose}>
                     建立或加入群組
@@ -210,7 +211,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
                 { value: "accounts", label: "指定帳戶" },
               ]}
             />
-            <p className="text-sm text-ink-2">{scope === "all" ? "包含之後新增的帳戶。" : "只看得到勾選的帳戶，持股、績效與交易都只算這些帳戶。"}</p>
+            <p className="text-base text-ink">{scope === "all" ? "包含之後新增的帳戶。" : "只看得到勾選的帳戶，持股、績效與交易都只算這些帳戶。"}</p>
             {scope === "accounts" && (
               <ul className="border-y border-rule">
                 {(accounts.data ?? []).map((a) => (
@@ -253,7 +254,7 @@ function RemoveDialog({ d, mine, onClose }: { d: Delegation; mine: boolean; onCl
     <AlertDialog open onOpenChange={(o) => !o && onClose()}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>{mine ? `撤銷${name}的查看授權？` : `移除${name}給你的授權？`}</AlertDialogTitle>
+          <AlertDialogTitle>{mine ? `撤銷${inText(name)}的查看授權？` : `移除${inText(name)}給你的授權？`}</AlertDialogTitle>
           <AlertDialogDescription>
             {mine ? `${name}會立刻看不到你的帳本；之後要再授權一次才能查看。` : `你會看不到${name}的帳本；要再查看，需要他重新授權。`}
           </AlertDialogDescription>
@@ -265,7 +266,7 @@ function RemoveDialog({ d, mine, onClose }: { d: Delegation; mine: boolean; onCl
             onClick={() =>
               del.mutate(d.id, {
                 onSuccess: () => {
-                  toast.success(mine ? `已撤銷${name}的授權` : `已移除${name}的授權`)
+                  toast.success(mine ? `已撤銷${inText(name)}的授權` : `已移除${inText(name)}的授權`)
                   onClose()
                 },
                 onError: (err) => toast.error("沒有完成", { description: errText(err) }),

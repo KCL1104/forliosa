@@ -18,7 +18,7 @@ export function ShareTab({ group }: { group: Group }) {
       <h2 id="share-title" className="text-xl font-bold">
         我在「{group.name}」分享的內容
       </h2>
-      <p className="mt-1 mb-4 text-md text-ink-2">改了立即生效。關掉的內容其他成員馬上看不到，包括過去的週報與動態；其他群組不受影響。</p>
+      <p className="mt-1 mb-4 text-base text-ink">關掉的內容，其他成員馬上看不到，過去的週報與動態也是。只影響這個群組。</p>
       <ShareToggles value={group.my_share} onChange={save} pushTargets={group.push_targets} />
     </section>
   )

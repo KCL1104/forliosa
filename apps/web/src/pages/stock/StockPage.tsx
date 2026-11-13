@@ -1,4 +1,5 @@
 import NumberFlow from "@number-flow/react"
+import { inText } from "@/lib/cjk"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
@@ -28,6 +29,7 @@ import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
 import { marketLine, sourceNotes, twOpenApi, useDatasetSources, withFigures } from "./text"
 import { useReadOnly, useWho } from "@/api/view-as"
+import { usePageTitle } from "@/app/page-title"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
 const FinancialsTab = lazy(() => import("./tabs/FinancialsTab").then((m) => ({ default: m.FinancialsTab })))
@@ -68,6 +70,8 @@ function StockPageInner() {
   const tabs = readOnly ? TABS.filter((t) => t.value !== "discussions") : TABS
   const tab: StockTab = search.tab && tabs.some((t) => t.value === search.tab) ? search.tab : "overview"
   const instrument = useInstrument(symbol)
+  // 分頁標題：名稱＋代號（名稱還沒載入時先寫代號）
+  usePageTitle(instrument.data ? `${instrument.data.name} ${instrument.data.code}` : symbol.replace(/\.(TW|TWO)$/, ""))
   const quote = useQuote(symbol)
   const position = usePosition(symbol)
   // 交易歷史：出清的回合與所有買賣點（未持有也會回）——圖上的 B／S／D 與「過去的持有」都用它
@@ -239,9 +243,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
       <header className="mt-1">
         <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
         <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>
-        <p className="mt-1 max-w-prose text-sm text-ink-2">
-          {inst.market === "US" ? "美股目前沒有可商用的報價來源，價格、走勢與估值暫不提供；持股以成本計值。" : "目前沒有報價。"}
-        </p>
+        {inst.market === "US" && <p className="mt-1 max-w-prose text-base text-ink">美股沒有報價，所以沒有走勢和估值；持股以成本計值。</p>}
       </header>
     )
   }
@@ -327,7 +329,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
 /**
  * 「為什麼漲跌」：只在異常時出現，點了交給 AI 展開。
  * 句子是規則判斷的（漲跌幅、量、漲跌停…），所以是墨色 Noto Sans、數字 600；
- * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是紫色楷體。
+ * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是石墨灰楷體。
  */
 function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
@@ -344,11 +346,11 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const voice = modelWritten ? cn("ai-voice", kaiSize.line) : "text-base text-ink"
   if (readOnly) return <p className={cn("mt-3 max-w-prose", voice)}>{text}</p>
   // 換行交給 text-wrap: balance（兩行一樣長，最後一行不會只剩「漲 ›」）；› 前面的 word joiner（U+2060）讓 › 不會自己掉到下一行。
-  // › 的顏色跟句子：規則句是淡墨，只有模型寫的紫色楷體句子才用紫色
+  // › 的顏色跟句子：規則句是淡墨，只有模型寫的石墨灰楷體句子才用石墨灰
   return (
     <button
       type="button"
-      onClick={() => ask.submit(`${inst.name}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
+      onClick={() => ask.submit(`${inText(inst.name, "start")}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
       className={cn(
         // 觸控時可按範圍上下各多 10px（合計 44px 以上）：看不見的 ::before，字的位置不動
         "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-2.5 pointer-coarse:before:content-['']",

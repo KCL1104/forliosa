@@ -48,12 +48,12 @@ def make_account(client):
 def test_history_and_valuation_never_fall_back_to_demo(client, commercial):
     h = client.get(f"{API}/instruments/2330/history?range=1M").json()
     assert [(c["t"], c["c"]) for c in h["candles"]] == [("2026-11-11", 2395.0)]  # real, but short
-    assert h["is_demo"] is False and h["notes"] == ["資料累積中：自 2026-11-11 起存檔"]
+    assert h["is_demo"] is False and h["notes"] == ["資料從 2026/11/11 開始"]
     assert not any("示範" in s for s in h["sources"])
     us = client.get(f"{API}/instruments/AAPL/history?range=1M").json()
-    assert us["candles"] == [] and us["notes"] == ["美股目前沒有可商用的行情來源，不提供價格資料"]
+    assert us["candles"] == [] and us["notes"] == ["美股沒有報價"]
     v = client.get(f"{API}/instruments/2330/valuation?range=1Y").json()
-    assert v["is_demo"] is False and "資料累積中：自 2026-11-11 起存檔" in v["notes"]
+    assert v["is_demo"] is False and "資料從 2026/11/11 開始" in v["notes"]
     assert len(v["series"]) <= 1
     assert client.get(f"{API}/instruments/AAPL/quote").status_code == 404  # no quote rather than a demo one
     assert client.get(f"{API}/instruments/2330/dividends").json() == []  # no demo dividend history
@@ -74,7 +74,7 @@ def test_performance_waits_for_the_archive(client, commercial):
     assert r.status_code == 201, r.text
     p = client.get(f"{API}/portfolio/performance?range=1Y").json()
     assert p["series"] == [] and p["twr"] is None and p["is_demo"] is False
-    assert p["notes"] and p["notes"][0].startswith("資料累積中：自 2026-11-11 起存檔")
+    assert p["notes"] and p["notes"][0].startswith("資料從 2026/11/11 開始")
     holdings = client.get(f"{API}/portfolio/holdings").json()
     assert holdings[0]["is_demo"] is False and holdings[0]["price"] == 2395.0  # archived close
     summary = client.get(f"{API}/portfolio/summary").json()
@@ -102,10 +102,10 @@ def test_performance_starts_at_the_first_fully_archived_close(client, engine, ma
         assert p["series"][0]["market_value"] == 1_000_000.0
         # nine +10 closes: 1000 -> 1090
         assert p["twr"] == pytest.approx(1090 / 1000 - 1, abs=1e-6)
-        assert any(n.startswith("資料累積中") and "績效從" in n for n in p["notes"])
-        assert any("基準" in n for n in p["notes"])  # 0050 has no archive rows here
+        assert any(n.startswith("績效從 ") and "之前沒有資料" in n for n in p["notes"])
+        assert any("不能比較" in n for n in p["notes"])  # 0050 has no archive rows here
         five = client.get(f"{API}/portfolio/performance?range=5D").json()
-        assert len(five["series"]) == 6 and not any(n.startswith("資料累積中") for n in five["notes"])
+        assert len(five["series"]) == 6 and not any(n.startswith("績效從 ") for n in five["notes"])
     finally:
         set_market_data(market)
 

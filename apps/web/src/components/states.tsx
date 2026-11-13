@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils"
 
 /**
  * 空狀態與錯誤的同一種樣子（全站只有這一種，見 DESIGN.md「空狀態」）：
- * 上下各一條實線格線（沒有外框、沒有底色）、15px 墨色 600 標題、淡墨寫原因、最多一個動作。
+ * 上下各一條實線格線（沒有外框、沒有底色）、15px 墨色 600 標題、同樣 15px 墨色寫原因（要讀的句子不用淡墨小字）、最多一個動作。
  * 虛線在這個系統是「AI 草稿」，這裡不用。
  * `flush`：接在已經有格線的區塊標題下面時，不再畫上面那條線（標題的格線就是上面那條）。
  */
@@ -26,7 +26,7 @@ function StateBlock({
   return (
     <div {...props} className={cn("flex flex-col items-start border-y border-rule py-5", flush && "border-t-0 pt-2", className)}>
       <p className="text-base font-semibold text-ink">{title}</p>
-      {children && <div className="mt-1 max-w-prose text-md text-ink-2">{children}</div>}
+      {children && <div className="mt-1 max-w-prose text-base text-ink">{children}</div>}
       {action && <div className="mt-3">{action}</div>}
     </div>
   )
@@ -37,7 +37,7 @@ export function ErrorState({
   error,
   onRetry,
   className,
-  title = "這裡的資料沒有載入",
+  title = "資料沒有載入",
   retryLabel = "重新載入",
   flush,
 }: {

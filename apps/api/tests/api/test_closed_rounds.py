@@ -64,7 +64,7 @@ def test_closed_round_numbers_are_hand_checked(client, rounds):
         "realized_pnl_pct": round(29141 / 200079, 6),  # 0.145647
         "dividends_received": 5000.0,
         "fees_and_taxes": 859.0,  # 79 + 43 + 330 + 47 + 360
-        "sources": ["本系統帳本"],
+        "sources": ["帳本紀錄"],
     }
     assert r["realized_pnl_pct"] == 0.145647
 

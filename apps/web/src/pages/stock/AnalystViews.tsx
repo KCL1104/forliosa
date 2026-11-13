@@ -144,9 +144,9 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
     case "searching":
       return (
         <div>
-          <p className="max-w-prose text-base text-ink">正在找近期媒體報導的法人觀點，找到的每一筆都會附上來源。</p>
+          <p className="max-w-prose text-base text-ink">正在找近期媒體報導的法人觀點…</p>
           <p className="mt-2 flex min-h-6 items-center gap-2 text-sm text-ink-2">
-            {/* 靜止的紫點＋寫明正在做什麼（不用脈動假裝即時） */}
+            {/* 靜止的石墨灰點＋寫明正在做什麼（不用脈動假裝即時） */}
             <span aria-hidden className="size-1.5 shrink-0 rounded-full bg-ai" />
             <span className="min-w-0 truncate">搜尋網路：{inst.name} 法人評等與目標價…</span>
           </p>
@@ -164,7 +164,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
       return (
         <>
           <p className="font-medium">近期查無法人報導</p>
-          <p className="mt-0.5 max-w-prose text-md text-ink-2">近期的媒體報導裡，沒有找到附日期與來源的機構評等或目標價。</p>
+          <p className="mt-0.5 max-w-prose text-base text-ink">近期的媒體報導裡，沒有找到附日期與來源的機構評等或目標價。</p>
           <Footer asOf={state.data?.as_of} notes={notes} />
         </>
       )

@@ -3,6 +3,7 @@
  * 全部是純函式：只用使用者自己的資料計算，不做投資判斷、不捏造分析。
  * 介面上不加「本頁建議」「依頁面推薦」這類說明字樣（PRODUCT.md）。
  */
+import { inText } from "@/lib/cjk"
 import type {
   DividendRecord,
   Holding,
@@ -106,7 +107,7 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
   const held = !!s.position
   if (s.why?.show) {
     const d = direction(pct)
-    out.push({ kind: "why_move", symbol: s.symbol, text: `${s.name}今天為什麼${d === "down" ? "跌" : "漲"}？` })
+    out.push({ kind: "why_move", symbol: s.symbol, text: `${inText(s.name, "start")}今天為什麼${d === "down" ? "跌" : "漲"}？` })
   }
   if (isListedStock(s)) out.push({ kind: "foreign_flow", symbol: s.symbol, text: FOREIGN_FLOW_QUESTION })
   if (held) {
@@ -181,7 +182,7 @@ export function answerFor(kind: SuggestionKind, { ctx, privacy, today, asOf }: A
 
 function groupAnswer(): Answer {
   return {
-    text: "每個群組各自決定：預設只分享報酬率的百分比；持股權重、金額、交易動態（可以再附上成交價）與推播都要你自己打開，隨時可以在群組的「分享」分頁關掉，關掉後其他人馬上看不到。",
+    text: "預設只分享報酬率的百分比。持股權重、金額、交易動態（可附成交價）和推播要你自己打開，在群組的「分享」分頁改；關掉後其他人馬上看不到。",
     links: [{ label: "到群組", to: "/groups" }],
   }
 }
@@ -196,7 +197,7 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
       const [first, second] = movers
       const text =
         `今天${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${first!.name}（${pctWords(first!.day_change_pct)}）` +
-        (second ? `，其次是${second.name}（${pctWords(second.day_change_pct)}）。` : "。")
+        (second ? `，其次是${inText(second.name, "end")}（${pctWords(second.day_change_pct)}）。` : "。")
       return {
         text,
         rows: movers.map((h) => ({ label: h.name, value: money(h.day_change, privacy, true), tone: direction(h.day_change), hint: pctGlyph(h.day_change_pct) })),
@@ -220,16 +221,15 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
       if (!top) return null
       return {
         text:
-          `最大的一檔是${top.name}，佔 ${formatPercent(top.weight, { signed: false, decimals: 1 })}；前三大合計 ${formatPercent(top3, { signed: false, decimals: 1 })}` +
-          (industry ? `；${industry.label}佔 ${formatPercent(industry.weight, { signed: false, decimals: 1 })}。` : "。") +
-          "多集中才算太多要看你的目標。",
+          `最大的一檔是${inText(top.name, "end")}，佔 ${formatPercent(top.weight, { signed: false, decimals: 1 })}；前三大合計 ${formatPercent(top3, { signed: false, decimals: 1 })}` +
+          (industry ? `；${industry.label}佔 ${formatPercent(industry.weight, { signed: false, decimals: 1 })}。` : "。"),
         rows: [...holdings].sort((a, b) => b.weight - a.weight).slice(0, 3).map((h) => ({ label: h.name, value: formatPercent(h.weight, { signed: false, decimals: 1 }) })),
         asOf,
       }
     }
     case "onboard":
       return {
-        text: "直接說一句就好，例如「買 0050 2 張 52.4」或「00878 配息 1,100」。我會先算好稅費寫成草稿，你簽名後才入帳。",
+        text: "直接說，例如「買 0050 2 張 52.4」或「00878 配息 1,100」。我算好稅費寫成草稿，你簽名就入帳。",
         followUps: ["買 0050 2 張 52.4"],
       }
     default:
@@ -247,10 +247,10 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
   switch (kind) {
     case "why_move": {
       if (!s.why?.show) {
-        return { text: `${s.name}今天的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
+        return { text: `${inText(s.name, "start")}今天的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
       }
       return {
-        text: `${s.name}今天${pctWords(s.quote?.change_pct)}。目前看得到的是：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
+        text: `${inText(s.name, "start")}今天${pctWords(s.quote?.change_pct)}：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
         rows: s.why.reasons.map((r) => ({ label: r.text, value: "" })),
         links: [link("chips", listed ? "看籌碼" : "看法人買賣"), link("events", "看事件")],
         asOf: s.why.as_of ?? asOf,
@@ -274,7 +274,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
       const pos = s.position
       const cost = pos ? `你的均價 ${privacy ? MASK : price(pos.avg_cost)}。` : ""
       // 畫不出河流圖時照實說（美股沒有可商用的行情；台股缺倍數帶或本益比），不引用不存在的圖
-      if (us) return { text: `${cost}美股目前沒有可商用的行情來源，算不出本益比，也沒有河流圖。`, links: [link("financials", "看財務")], asOf }
+      if (us) return { text: `${cost}美股沒有報價，算不出本益比，也沒有河流圖。`, links: [link("financials", "看財務")], asOf }
       if (!pos || !eps || eps <= 0) return { text: "近四季 EPS ≤ 0，本益比沒有意義，可以改看股價淨值比。", links: [link("valuation", "看估值")], asOf }
       if (!hasRiver(s)) return { text: `${cost}這檔還沒有本益比河流圖。`, links: [link("valuation", "看估值")], asOf }
       const costPe = pos.avg_cost / eps
@@ -306,11 +306,11 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "is_expensive": {
       const pe = s.valuation?.current.per ?? s.overview?.pe ?? null
       const pct = s.valuation?.current.per_percentile_5y ?? null
-      if (pe === null && us) return { text: "美股目前沒有可商用的行情來源，算不出本益比。", links: [link("financials", "看財務")], asOf }
+      if (pe === null && us) return { text: "美股沒有報價，算不出本益比。", links: [link("financials", "看財務")], asOf }
       if (pe === null) return { text: "這檔沒有可用的本益比（ETF 或近四季虧損）。可以看殖利率與股價淨值比。", links: [link("valuation", "看估值")], asOf }
       const band = bandOf(pe, s.valuation?.per_multiples ?? [])
       return {
-        text: `本益比 ${pe.toFixed(1)} 倍${band ? `，在河流圖${band}` : ""}${pct !== null ? `；過去 5 年有 ${formatPercent(pct, { signed: false, decimals: 0 })} 的日子比現在便宜` : ""}。貴不貴要和成長一起看，這裡只列出位置。`,
+        text: `本益比 ${pe.toFixed(1)} 倍${band ? `，在河流圖${band}` : ""}${pct !== null ? `；過去 5 年有 ${formatPercent(pct, { signed: false, decimals: 0 })} 的日子比現在便宜` : ""}。`,
         links: [link("valuation", "看河流圖")],
         asOf,
       }
@@ -331,7 +331,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "foreign_flow":
       // 本機規則版沒有網路搜尋：說明為什麼沒有數字、給現在看得到的資料（真實後端由 AI 搜尋新聞，附來源與日期）
       return {
-        text: `上市股票的逐檔三大法人買賣超與外資持股比，證交所以付費商品提供（外資持股只免費公布前 20 名），沒有免費、可商用的完整來源，所以不顯示。${s.name}最近的外資動向要上網搜尋新聞才能回答，每一點都要附來源與日期。`,
+        text: `上市股票沒有逐檔的三大法人資料，外資持股只公布前 20 名。${inText(s.name, "start")}的外資動向現在查不到，可以先看融資融券和公告。`,
         links: [link("chips", "看融資融券"), link("events", "看公告")],
       }
     default:
@@ -365,7 +365,7 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
     if (/(法人|外資|投信|融資|融券|籌碼|大戶)/.test(t)) tab("chips", "看籌碼")
     if (/(股利|配息|除息|殖利率)/.test(t)) tab("dividends", "看股利")
     if (/(新聞|消息|事件|法說|股東會)/.test(t)) tab("events", "看事件")
-    if (links.length === 0) tab("overview", `看${s.name}總覽`)
+    if (links.length === 0) tab("overview", `看${inText(s.name)}總覽`)
   } else {
     if (/(股利|配息|除息)/.test(t)) links.push({ label: "看股利", to: "/", search: { view: "dividends" } })
     if (/(績效|報酬|XIRR|TWR|回撤)/i.test(t)) links.push({ label: "看績效", to: "/", search: { view: "performance" } })
@@ -373,7 +373,7 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
     if (links.length === 0) links.push({ label: "看持倉", to: "/" })
   }
   return {
-    text: "這題要查資料並附來源，這裡先不回答。現在可以記帳（例如「買 0050 2 張 52.4」），或問你持股的數字。這題可以先看這裡：",
+    text: "這題要上網查資料，現在答不了。記帳和持股的數字可以直接問，例如「買 0050 2 張 52.4」。可以先看：",
     links: links.slice(0, 3),
   }
 }

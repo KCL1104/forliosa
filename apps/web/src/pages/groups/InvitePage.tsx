@@ -13,6 +13,7 @@ import { Button, buttonVariants } from "@/components/ui/button"
 import { DEFAULT_SHARE } from "./labels"
 import { ShareToggles } from "./ShareToggles"
 import { FieldError } from "@/components/form-field"
+import { usePageTitle } from "@/app/page-title"
 
 /**
  * 邀請連結 `/invite/:token`：不需登入就能預覽（群組名稱、誰邀請的）。
@@ -26,6 +27,7 @@ export function InvitePage() {
     if (useViewAs.getState().target) switchViewAs(qc, null)
   }, [qc])
   const preview = useInvitePreview(token)
+  usePageTitle(preview.data ? `加入「${preview.data.group_name}」` : "邀請")
   const me = useQuery({ ...meQuery(), retry: false })
   const signedOut = me.error instanceof ApiError && me.error.status === 401
   const err = preview.error instanceof ApiError ? preview.error : null
@@ -81,7 +83,7 @@ function Gone({ title, body, signedIn }: { title: string; body: string; signedIn
 function SignInFirst({ token }: { token: string }) {
   return (
     <div className="flex flex-col gap-4">
-      <p className="text-ink-2">加入前會先讓你選要分享什麼；預設只分享報酬率的百分比，不會分享金額。</p>
+      <p className="text-base text-ink">加入前先選要分享什麼，預設只有報酬率的百分比。</p>
       <Link to="/login" search={{ next: `/invite/${token}` }} className={buttonVariants({ size: "lg", className: "w-full" })}>
         登入後加入
       </Link>
@@ -125,7 +127,7 @@ function ChooseAndJoin({ token, groupName }: { token: string; groupName: string 
         <h2 id="invite-share" className="text-lg font-bold">
           你要在「{groupName}」分享什麼？
         </h2>
-        <p className="mt-1 text-md text-ink-2">只對這個群組有效，加入後隨時可以在群組的「分享」分頁修改。</p>
+        <p className="mt-1 text-base text-ink">只對這個群組有效；加入後在「分享」分頁改。</p>
       </div>
       <ShareToggles value={share} onChange={setShare} idPrefix="invite" />
       {error && (

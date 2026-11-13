@@ -93,12 +93,12 @@ describe("重新設計新增的端點（形狀與 api-contract 一致）", () =>
 describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", () => {
   const api = createMockAdapter({ latency: [0, 0] })
 
-  it("沒有示範標記；存檔不足處回空資料＋「資料累積中」", async () => {
+  it("沒有示範標記；資料不足處回空資料＋「資料從 … 開始」", async () => {
     expect((await api.getPortfolioSummary()).is_demo).toBe(false)
     expect((await api.getHoldings()).every((h) => !h.is_demo)).toBe(true)
     const h = await api.getHistory("2330.TW", "1Y")
     expect(h.is_demo).toBe(false)
-    expect(h.notes?.[0]).toMatch(/^資料累積中：自 \d{4}-\d{2}-\d{2} 起存檔$/)
+    expect(h.notes?.[0]).toMatch(/^資料從 \d{4}\/\d{2}\/\d{2} 開始$/)
     expect((await api.getHistory("2330.TW", "1M")).notes).toEqual([])
   })
   it("美股：SEC EDGAR 的財報（美元、公司會計年度）與 8-K／10-Q／10-K 申報", async () => {
@@ -123,10 +123,10 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     // 美股沒有可商用的配息來源：股利是空的（畫面要說「沒有來源」，不是「沒有配過息」）
     expect(await api.getDividends("VOO")).toEqual([])
   })
-  it("盤中走勢一律沒有點，notes 說明沒有授權來源", async () => {
+  it("盤中走勢一律沒有點，notes 說價格是收盤價", async () => {
     const i = await api.getIntraday("2330.TW")
     expect(i.points).toEqual([])
-    expect(i.notes?.[0]).toContain("授權")
+    expect(i.notes?.[0]).toBe("沒有盤中走勢，價格是收盤後公布的收盤價")
   })
   it("美股沒有報價：持股 price 為 null、以成本計值；報價 404；含美股時績效為空＋notes", async () => {
     const aapl = (await api.getHoldings()).find((x) => x.symbol === "AAPL")!
@@ -140,7 +140,7 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     const one = await api.getPerformance({ range: "1Y", account_id: tw!.id })
     expect(one.series.length).toBeGreaterThan(20)
     expect(one.series[0]!.twr_index).toBe(1)
-    expect(one.notes?.[0]).toContain("資料累積中")
+    expect(one.notes?.[0]).toMatch(/^績效從 \d{4}\/\d{2}\/\d{2} 收盤開始算，之前沒有資料$/)
   })
   it("公告在前、新聞報導在後；新聞報導只有標題、媒體、時間、連結；上市股票沒有個股法人", async () => {
     const news = await api.getNews("2330.TW")
@@ -174,8 +174,7 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(ase.foreign_top20).toEqual({ as_of: "2026-11-12", rank: 12, pct: 0.7552, limit_pct: 1 })
     expect(ase.foreign_holding_pct.at(-1)?.pct).toBe(0.7552)
     // 在榜時仍說明為什麼沒有三大法人（與後端相同），再加前 20 名的說明
-    expect(ase.notes?.[0]).toContain("上市股票")
-    expect(ase.notes?.[0]).toContain("以付費商品提供")
+    expect(ase.notes?.[0]).toBe("上市股票沒有逐檔三大法人資料")
     expect(ase.notes?.[1]).toContain("前 20 名")
     expect(ase.sources.join("")).toContain("外資及陸資持股前20名彙總表")
     const tsmc = await api.getChips("2330.TW", "1M")
@@ -321,8 +320,8 @@ describe("資料來源與授權", () => {
     expect((await api.getAttributions()).datasets.map((d) => d.attribution)).toContain(fx)
     const holdings = await api.getHoldings()
     const us = holdings.find((h) => h.currency === "USD")!
-    expect((await api.getPosition(us.symbol))!.sources).toEqual(["本系統帳本", fx])
+    expect((await api.getPosition(us.symbol))!.sources).toEqual(["帳本紀錄", fx])
     const tw = holdings.find((h) => h.currency === "TWD")!
-    expect((await api.getPosition(tw.symbol))!.sources).toEqual(["本系統帳本"])
+    expect((await api.getPosition(tw.symbol))!.sources).toEqual(["帳本紀錄"])
   })
 })

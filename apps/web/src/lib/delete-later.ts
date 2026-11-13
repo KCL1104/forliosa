@@ -10,8 +10,8 @@ import { create } from "zustand"
  * 畫面用 `usePendingDeletes` 知道哪些東西正在等：清單與主題頁把它們濾掉。
  */
 
-/** 通知停留多久（毫秒）：這段時間內可以復原 */
-export const UNDO_MS = 6000
+/** 通知停留多久（毫秒）：這段時間內可以復原。10 秒：6 秒在手機上常常來不及看到就沒了 */
+export const UNDO_MS = 10_000
 
 /** 畫面上先拿掉、還沒真的刪除的東西（鍵是合約的 target：`topic:<id>`、`reply:<id>`） */
 export const usePendingDeletes = create<{ keys: ReadonlySet<string> }>(() => ({ keys: new Set<string>() }))

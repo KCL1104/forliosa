@@ -27,6 +27,7 @@ import { NotFoundPage } from "@/pages/NotFoundPage"
 import { REASON_LABEL } from "@/pages/discussions/labels"
 import { PostedTime } from "@/pages/discussions/PostedTime"
 import type { AdminDiscussionsSearch } from "@/router"
+import { usePageTitle } from "@/app/page-title"
 
 type Status = "open" | "resolved"
 type Confirm =
@@ -57,6 +58,7 @@ const isPermanent = (until: string) => until === PERMANENT_UNTIL || until.starts
 export function AdminDiscussionsPage() {
   const readOnly = useReadOnly()
   const { user } = useViewer()
+  usePageTitle(user?.is_admin ? "站方管理" : "找不到這個頁面")
   if (readOnly) return <ViewAsBlocked title="站方管理" />
   if (!user?.is_admin) return <NotFoundPage />
   return <Admin />

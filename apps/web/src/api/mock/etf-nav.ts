@@ -7,6 +7,7 @@
  */
 import type { EtfNav, NavPoint } from "../types"
 import { sourceOf } from "./attributions"
+import { ymd } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { dailyCandles, MOCK_TODAY, rng, tradingDays } from "./market"
 
@@ -89,7 +90,7 @@ export function buildEtfNav(spec: MockInstrumentSpec): EtfNav | null {
     history_start: points[0]!.t,
     // 示範存檔每個交易日都有（缺口的畫法見 EtfNavSection 的測試）
     history_missing: [],
-    notes: points.length < MIN_POINTS ? [`資料累積中：淨值自 ${points[0]!.t} 起存檔`] : [],
+    notes: points.length < MIN_POINTS ? [`淨值資料從 ${ymd(points[0]!.t)} 開始`] : [],
     sources: [sourceOf(NAV_SOURCE_KEY), sourceOf(priceKey)],
   }
 }

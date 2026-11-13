@@ -119,7 +119,7 @@ export function createRecurringStore(initial: RecurringPlan[], accounts: () => A
             title: `${p.name} 定期定額 ${nt(p.amount)}${scheduled === debit ? "" : `（${md(scheduled)} 非交易日，順延）`}`,
             amount_estimate: p.amount,
             is_demo: false,
-            sources: ["本系統帳本", CALENDAR_SOURCE],
+            sources: ["帳本紀錄", CALENDAR_SOURCE],
             plan_id: p.id,
             account_id: p.account_id,
             scheduled_date: scheduled,
@@ -157,7 +157,7 @@ export function createRecurringStore(initial: RecurringPlan[], accounts: () => A
       if (scheduled !== debit) rules.unshift(`扣款日 ${md(scheduled)} 不是交易日，順延到 ${md(debit)}`)
       return {
         plan_id: plan.id, scheduled_date: scheduled, date: debit, name: plan.name, amount: plan.amount, price_as_of: priceAsOf,
-        transaction, preview: { ...preview, rules }, is_demo: false, sources: ["本系統帳本", CALENDAR_SOURCE],
+        transaction, preview: { ...preview, rules }, is_demo: false, sources: ["帳本紀錄", CALENDAR_SOURCE],
       }
     },
   }

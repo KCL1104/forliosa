@@ -60,6 +60,7 @@ from forliosa.models import (
     Transaction,
     User,
 )
+from forliosa.services.coverage import ymd
 from forliosa.services.ledger_io import FxBook, load_ledger_input
 from forliosa.services.portfolio import PortfolioState, compute_state
 from forliosa.services.scope import ViewScope, set_view_scope
@@ -417,7 +418,7 @@ def _benchmark_period_returns(md: MarketData, window: PeriodWindow) -> tuple[lis
             out[k] = _window_return(daily, [True] * len(axis), axis, start, window.end) if ok else None
         rows.append({"symbol": sym, "name": md.benchmark_name(sym), "_returns": out})
         if md.policy == "commercial" and not closes:
-            notes.append(f"基準 {md.benchmark_name(sym)} 目前沒有可商用的資料")
+            notes.append(f"沒有 {md.benchmark_name(sym)} 的資料，不能比較")
     return rows, sources, is_demo, notes
 
 
@@ -449,8 +450,7 @@ def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str
                         "total_return_pct": pct(totals(proj.state(m.user)).total_return), "is_me": m.user_id == me_id})
     bench, sources, bench_demo, notes = _benchmark_period_returns(proj.md, window)
     if window.clipped and window.archive_since is not None:
-        notes.insert(0, f"資料累積中：自 {window.archive_since.isoformat()} 起存檔；"
-                        f"期間從 {window.starts[period].isoformat()} 收盤開始計算")
+        notes.insert(0, f"資料從 {ymd(window.archive_since)} 開始，這段期間從 {ymd(window.starts[period])} 收盤起算")
     return {
         "period": period,
         "date": window.end,
@@ -776,8 +776,7 @@ def digest_week_facts(db: Session, md: MarketData, members: list[Member], week_s
         trades = [{"user_id": uid, "count": counts[uid]} for uid in sharing_trades]
     bench, sources, bench_demo, notes = _benchmark_period_returns(md, window)
     if window.clipped and window.archive_since is not None:
-        notes.insert(0, f"資料累積中：自 {window.archive_since.isoformat()} 起存檔；"
-                        f"本週從 {window.starts['week'].isoformat()} 收盤開始計算")
+        notes.insert(0, f"資料從 {ymd(window.archive_since)} 開始，本週從 {ymd(window.starts['week'])} 收盤起算")
     facts = {
         "v": 1, "base_date": window.starts["week"].isoformat(), "end_date": window.end.isoformat(),
         "trading_days": len(days), "returns": returns, "holdings": holdings, "symbols": symbols, "trades": trades,

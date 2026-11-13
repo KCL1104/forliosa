@@ -24,7 +24,7 @@ describe("籌碼分頁：上市股票的外資持股比", () => {
     withQueries(<ChipsTab inst={tsmc} />)
     const section = await screen.findByRole("region", { name: "外資持股比" }, { timeout: 3000 })
     expect(section.textContent).not.toContain("72.1")
-    expect(within(section).getByText(/目前不在名單上/)).toBeInTheDocument()
+    expect(within(section).getByText(/不在名單上/)).toBeInTheDocument()
   })
   it("名列前 20 名：標題旁是名次；三大法人的空狀態仍說明原因", async () => {
     const ase = await api.getInstrument("3711.TW")
@@ -32,7 +32,7 @@ describe("籌碼分頁：上市股票的外資持股比", () => {
     const foreign = await screen.findByRole("region", { name: "外資持股比" }, { timeout: 3000 })
     expect(foreign.textContent).toContain("75.52%・前 20 名第 12 名")
     const inst = screen.getByRole("region", { name: "三大法人買賣超" })
-    expect(inst.textContent).toContain("證交所的開放資料沒有逐檔三大法人")
+    expect(inst.textContent).toContain("上市股票沒有逐檔三大法人資料")
     // 後端的長說明（OpenAPI、付費商品、上櫃怎麼存檔）不照印
     expect(document.body.textContent).not.toContain("上櫃股票由櫃買中心")
   })
@@ -40,7 +40,8 @@ describe("籌碼分頁：上市股票的外資持股比", () => {
     const tsmc = await api.getInstrument("2330.TW")
     withQueries(<ChipsTab inst={tsmc} />)
     const inst = await screen.findByRole("region", { name: "三大法人買賣超" }, { timeout: 3000 })
-    expect(inst.textContent).toContain("證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。")
+    expect(inst.textContent).toContain("上市股票沒有逐檔三大法人資料")
+    expect(inst.textContent).toContain("外資持股只公布前 20 名。")
     expect(document.body.textContent).not.toContain("OpenAPI")
   })
 })

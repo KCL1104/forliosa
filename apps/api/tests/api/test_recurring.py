@@ -146,7 +146,7 @@ def test_upcoming_includes_recurring_debits(client, calendar, monkeypatch):
         "2026-02-23", "2026-02-19", "recurring", "0050.TW", 5000.0)
     assert it["plan_id"] == pid and it["account_id"] == acc and it["is_demo"] is False
     assert "定期定額 NT$5,000" in it["title"] and "2/19 非交易日，順延" in it["title"]
-    assert any("臺灣證券交易所" in s for s in it["sources"]) and "本系統帳本" in it["sources"]
+    assert any("臺灣證券交易所" in s for s in it["sources"]) and "帳本紀錄" in it["sources"]
     month = client.get(f"{API}/portfolio/upcoming?days=30").json()
     assert [i["date"] for i in month] == ["2026-02-23", "2026-03-06"]
     assert client.get(f"{API}/portfolio/upcoming?days=30", params={"account_id": other}).json() == []

@@ -34,7 +34,7 @@ def test_attribution_names_agency_dataset_year_and_licence(monkeypatch):
     assert label("twse-openapi/valuation") == f"臺灣證券交易所〈上市個股日本益比、殖利率及股價淨值比〉（2026），{ogdl}"
     assert labels(tagged("archive+tpex_openapi", "price")) == [
         "Forliosa 自建存檔（證交所、櫃買中心開放資料）", f"證券櫃檯買賣中心〈上櫃股票行情〉（2026），{ogdl}"]
-    assert label("demo/price") == "示範資料（模擬）" and label("ledger") == "本系統帳本"
+    assert label("demo/price") == "示範資料（模擬）" and label("ledger") == "帳本紀錄"
     assert label("shioaji-data").startswith("永豐金證券 shioaji-data") and label("shioaji-data").endswith("第 1 版")
     meta = attributions("commercial")
     assert meta["notice"][1] == "政府資料開放授權條款：https://data.gov.tw/license"

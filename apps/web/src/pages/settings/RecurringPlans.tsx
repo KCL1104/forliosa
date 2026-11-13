@@ -90,7 +90,7 @@ export function RecurringPlans() {
         <EmptyState
           flush
           title="還沒有定期定額"
-          description="設定後，本週事項會列出每一次扣款，扣款日 AI 會先寫好交易草稿。"
+          description="扣款日 AI 會寫好交易草稿，等你簽名。"
           action={
             <Button variant="outline" size="sm" onClick={() => setEditing("new")}>
               新增第一個計畫
@@ -290,7 +290,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
           <label className="flex min-h-11 items-center justify-between gap-3 border-y border-rule py-2">
             <span>
               <span className="block font-medium">啟用</span>
-              <span className="block text-sm text-ink-2">暫停時不會出現扣款提醒，也不會提出草稿。</span>
+              <span className="block text-base text-ink">暫停時不會出現扣款提醒，也不會提出草稿。</span>
             </span>
             <Switch checked={active} onCheckedChange={setActive} />
           </label>

@@ -15,9 +15,12 @@ import { safeNext } from "@/lib/next-path"
 import { oauthErrorText } from "@/lib/oauth-errors"
 import type { LoginSearch } from "@/router"
 import { PlainLink } from "@/app/links"
+import { ABOUT_FORLIOSA } from "@/lib/about"
+import { LedgerSpecimen } from "./LedgerSpecimen"
 import { FieldError } from "@/components/form-field"
 import { textAction } from "@/components/text-action"
 import { cn } from "@/lib/utils"
+import { usePageTitle } from "@/app/page-title"
 
 /** 登入：用 Discord 登入（第一次登入就建立帳號）；開發環境另有開發登入 */
 export function LoginPage() {
@@ -27,6 +30,7 @@ export function LoginPage() {
   const me = useQuery(meQuery())
   const providers = useAuthProviders()
   const error = oauthErrorText(search.error)
+  usePageTitle("登入")
 
   // 已經登入（例如從書籤回到登入頁）：直接回去
   const signedIn = !!me.data && !error
@@ -36,10 +40,11 @@ export function LoginPage() {
   if (signedIn) return null
 
   return (
-    <AuthFrame>
-      <div className="flex flex-col gap-2">
+    <AuthFrame aside={<LedgerSpecimen />}>
+      <div className="flex flex-col gap-2.5">
         <h1 className="text-2xl font-bold tracking-[-0.01em]">登入</h1>
-        <p className="text-ink-2">{next.startsWith("/invite/") ? "登入後回到邀請，選好要分享什麼再加入群組。" : "第一次用 Discord 登入時會自動建立帳號。"}</p>
+        {/* 從連結進來的人不知道這是什麼：一句話說 Forliosa 是什麼（事實，不是宣傳句），旁邊是示範畫面 */}
+        <p className="text-base text-ink">{ABOUT_FORLIOSA}</p>
       </div>
       {error && (
         <p role="alert" className="border-y border-rule py-2.5 text-base">
@@ -69,6 +74,9 @@ export function LoginPage() {
             >
               用 Discord 登入
             </Button>
+          ) : null}
+          {providers.data.discord ? (
+            <p className="text-base text-ink">{next.startsWith("/invite/") ? "第一次登入會自動建立帳號，登入後回到邀請。" : "第一次登入會自動建立帳號。"}</p>
           ) : (
             <p className="text-ink-2">目前沒有開放登入。</p>
           )}

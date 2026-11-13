@@ -10,14 +10,16 @@ export type MockPolicy = "commercial" | "personal"
 /** 示範的「自建存檔」從這天開始：之前的日線、本益比、籌碼與績效都沒有 */
 export const ARCHIVE_START = "2026-06-01"
 
-export const accumulatingNote = (since = ARCHIVE_START) => `資料累積中：自 ${since} 起存檔`
-export const US_NOTE = "美股目前沒有可商用的行情來源，不提供價格資料"
-export const INTRADAY_NOTE = "目前沒有授權的盤中行情來源（證交所即時／延遲行情需付費授權），不提供分時走勢"
-export const TWSE_CHIPS_NOTE = "證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；外資持股只公布持股比率前 20 名；上櫃股票由櫃買中心 OpenAPI 每日存檔"
+/** 和後端 `coverage.ymd` 一樣：說明裡的日期寫成 2026/06/01 */
+export const ymd = (iso: string) => iso.replaceAll("-", "/")
+export const accumulatingNote = (since = ARCHIVE_START) => `資料從 ${ymd(since)} 開始`
+export const US_NOTE = "美股沒有報價"
+export const INTRADAY_NOTE = "沒有盤中走勢，價格是收盤後公布的收盤價"
+export const TWSE_CHIPS_NOTE = "上市股票沒有逐檔三大法人資料；外資持股只公布前 20 名"
 /** 名列外資持股前 20 名的上市股票：同樣說明為什麼沒有三大法人，但不含外資持股那一句 */
-export const TWSE_INST_NOTE = "證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；上櫃股票由櫃買中心 OpenAPI 每日存檔"
-export const TOP20_NOTE = "證交所只公布外資持股比率前 20 名，本股只有名列前 20 名的日子才有外資持股比"
-export const INDEX_NOTE = "發行量加權股價報酬指數目前沒有可商用的來源，暫時無法比較"
+export const TWSE_INST_NOTE = "上市股票沒有逐檔三大法人資料"
+export const TOP20_NOTE = "外資持股只公布前 20 名，這檔只有名列前 20 名的日子才有外資持股比"
+export const INDEX_NOTE = "沒有 發行量加權股價報酬指數 的資料，不能比較"
 
 export function readMockPolicy(): MockPolicy {
   if (typeof window === "undefined") return "commercial"

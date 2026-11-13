@@ -24,7 +24,7 @@ export function HoldingsTab({ group }: { group: Group }) {
       <div className="grid gap-10 md:grid-cols-2">
         <Section title="共同持股" titleId="gh-common" aside={h.is_demo ? <DemoTag /> : undefined}>
           {h.common.length === 0 ? (
-            <EmptyState flush title="還沒有共同持股" description="兩人以上都持有的股票才會列在這裡。" />
+            <EmptyState flush title="還沒有共同持股" description="要兩人以上都持有才算。" />
           ) : (
             <ul className="-mt-3">
               {h.common.map((c) => (

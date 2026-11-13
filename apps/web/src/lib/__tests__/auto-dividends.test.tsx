@@ -18,14 +18,14 @@ describe("交易來源標示", () => {
     expect(all.map((s) => SOURCE_TAG[s]?.label ?? null)).toEqual([null, "匯入", "由 AI 建立", "自動", "自動・已修改"])
     expect(all.filter(isAutoSource)).toEqual(["auto", "auto_edited"])
   })
-  it("自動入帳是淡墨細框（不是 AI 的紫色），可滑過看說明", () => {
+  it("自動入帳是淡墨細框（不是 AI 的石墨灰），可滑過看說明", () => {
     render(<SourceTag source="auto" />)
     const el = screen.getByText("自動")
     expect(el).toHaveClass("demo-tag", "text-ink-2")
     expect(el).not.toHaveClass("text-ai")
     expect(el.getAttribute("title")).toContain("除息日")
   })
-  it("改過的標「自動・已修改」；AI 建立的是紫色（固定標籤不用楷體）；自己記的什麼都沒有", () => {
+  it("改過的標「自動・已修改」；AI 建立的是石墨灰（固定標籤不用楷體）；自己記的什麼都沒有", () => {
     const { container } = render(
       <div>
         <SourceTag source="auto_edited" />
@@ -42,8 +42,8 @@ describe("交易來源標示", () => {
 
 describe("編輯自動入帳的股利", () => {
   it("說明：儲存後是自己的版本、刪除後不再自動入帳；改過的只說不再更新", () => {
-    expect(autoEditNotice("auto")).toBe("系統在除息日自動記下這筆股利。儲存變更後就是你自己的版本，系統不會再更新；刪除後也不會再自動入帳。")
-    expect(autoEditNotice("auto_edited")).toBe("這筆自動入帳的股利你改過，系統不會再更新它。")
+    expect(autoEditNotice("auto")).toBe("這筆股利是除息日自動入帳的。改了之後不會再自動更新；刪除後也不會再入帳。")
+    expect(autoEditNotice("auto_edited")).toBe("這筆自動入帳的股利你改過，不會再自動更新。")
     expect(autoEditNotice("manual")).toBeNull()
     expect(autoEditNotice("ai_draft")).toBeNull()
   })
@@ -66,9 +66,9 @@ describe("AI 記台股股利", () => {
     expect(replacedAutoDividend([txn({ source: "auto_edited" })], "2026-11-12")).toBeNull()
   })
   it("「股利入帳」的提問：台股說明自動入帳，美股照常問金額", () => {
-    expect(dividendAsk()).toContain("台股股利會在除息日自動入帳")
+    expect(dividendAsk()).toContain("台股股利在除息日自動入帳。")
     expect(dividendAsk()).toContain("「AAPL 配息 2.6」")
-    expect(dividendAsk("2330")).toMatch(/^2330 的股利會在除息日自動入帳/)
-    expect(dividendAsk("VOO")).toBe("VOO 領了多少？例如「VOO 配息 2.6」。金額照存摺上的實際入帳數字就好。")
+    expect(dividendAsk("2330")).toMatch(/^2330 的股利在除息日自動入帳。/)
+    expect(dividendAsk("VOO")).toBe("VOO 實際入帳多少？例如「VOO 配息 2.6」。")
   })
 })

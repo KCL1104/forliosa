@@ -342,7 +342,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           <Skeleton className="h-full w-full rounded-sm" />
         ) : empty ? (
           isIntraday ? (
-            <NoIntraday inst={inst} quote={quote} notes={intraday.data?.notes ?? []} onFiveDays={() => setRange("5D")} />
+            <NoIntraday inst={inst} quote={quote} onFiveDays={() => setRange("5D")} />
           ) : (
             <NoHistory notes={history.data?.notes ?? []} us={inst.market === "US"} />
           )
@@ -376,9 +376,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
 function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
   if (notes.length === 0) return <NotYet title="這段期間還沒有成交資料" />
   return (
-    <NotYet title={us ? "美股走勢暫時沒有" : "走勢資料累積中"}>
+    <NotYet title={us ? "美股沒有走勢" : "走勢資料累積中"}>
       <DataNotes notes={notes} className="text-md" />
-      {!us && <p className="mt-1">官方開放資料只有當天的收盤，從開始存檔那天起每個交易日累積一點，滿兩天就會畫出走勢。</p>}
+      {!us && <p className="mt-1">要有兩個交易日的收盤價才畫得出走勢。</p>}
     </NotYet>
   )
 }
@@ -386,9 +386,9 @@ function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
 /**
  * 1 日（盤中）走勢：沒有。Forliosa 沒有盤中即時報價（合法取得要付費授權），價格都是收盤後公布的收盤價——
  * 和報價下面那一行、資料來源頁的說法一致；不承諾「加入觀察就會記錄盤中走勢」。給一個現在能看的（5 日）。
- * 後端有說明（notes）時照原文接在後面。
+ * 後端的說明（notes）和標題是同一句話，不再印一次。
  */
-function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail; quote?: Quote; notes: string[]; onFiveDays: () => void }) {
+function NoIntraday({ inst, quote, onFiveDays }: { inst: InstrumentDetail; quote?: Quote; onFiveDays: () => void }) {
   return (
     <NotYet
       className="h-full justify-center"
@@ -399,7 +399,6 @@ function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail
         </Button>
       }
     >
-      <DataNotes notes={notes} className="text-md" />
       {quote && (
         <p className="num mt-1">
           {closeLabel(quote.as_of)}

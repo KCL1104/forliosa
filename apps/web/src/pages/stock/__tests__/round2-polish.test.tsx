@@ -44,7 +44,7 @@ describe("鍵值格：最後一列不留孤格", () => {
 })
 
 describe("空狀態（全站同一種）", () => {
-  it("上下實線、15px 墨色 600 標題、淡墨原因、最多一個動作；不用虛線", () => {
+  it("上下實線、15px 墨色 600 標題、15px 墨色的原因、最多一個動作；不用虛線", () => {
     const { container } = render(
       <NotYet title="這段期間還沒有成交資料" action={<button type="button">看 5 日走勢</button>}>
         官方開放資料只有當天的收盤。
@@ -58,7 +58,7 @@ describe("空狀態（全站同一種）", () => {
     expect(title.className).toContain("text-base")
     expect(title.className).toContain("font-semibold")
     expect(title.className).toContain("text-ink")
-    expect(screen.getByText("官方開放資料只有當天的收盤。").className).toContain("text-ink-2")
+    expect(screen.getByText("官方開放資料只有當天的收盤。").className).toMatch(/text-base.*text-ink(?!-)/)
     expect(screen.getAllByRole("button")).toHaveLength(1)
   })
 })

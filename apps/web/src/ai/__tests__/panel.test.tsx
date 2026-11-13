@@ -20,8 +20,8 @@ const stock = (p: Partial<StockData>): AiContext => ({
 })
 
 describe("面板的常用動作：一行文字連結，只放這一頁真的能做的事", () => {
-  it("帳本：記一筆交易・匯入對帳單・股利入帳", () => {
-    expect(quickActions({ route: "ledger", ledger: { holdings: [] } }).map((a) => a.label)).toEqual(["記一筆交易", "匯入對帳單", "股利入帳"])
+  it("帳本：記一筆交易・股利入帳（匯入對帳單還沒有，不放入口）", () => {
+    expect(quickActions({ route: "ledger", ledger: { holdings: [] } }).map((a) => a.label)).toEqual(["記一筆交易", "股利入帳"])
   })
   it("個股頁：記一筆這一檔（台股用名稱、美股用代號），有持股才有股利入帳；不放還沒開放的到價提醒", () => {
     const held = quickActions(stock({ position: { quantity: 1500 } as StockData["position"] }))
@@ -37,7 +37,7 @@ describe("面板的常用動作：一行文字連結，只放這一頁真的能�
   })
 })
 
-describe("對話的兩支筆：模型寫的字是紫色楷體，規則或範本寫的句子是墨色 Noto Sans", () => {
+describe("對話的兩支筆：模型寫的字是石墨灰楷體，規則或範本寫的句子是墨色 Noto Sans", () => {
   const runner = { submit: async () => undefined } as unknown as ReturnType<typeof useAiRunner>
   // jsdom 沒有 scrollIntoView（對話捲到最新一則）
   beforeAll(() => {
@@ -59,16 +59,16 @@ describe("對話的兩支筆：模型寫的字是紫色楷體，規則或範本�
       messages: [
         { id: "u1", role: "user", text: "台積電今天怎麼了？", at },
         { id: "a1", role: "ai", model: true, text: "台積電今天上漲。", at },
-        { id: "a2", role: "ai", model: false, text: "我照你說的算好了稅費，簽名後才會入帳。", at },
+        { id: "a2", role: "ai", model: false, text: "照你說的算好了稅費，你看一下。", at },
         { id: "a3", role: "ai", answer: { text: "今天拖累最多的是環球晶。", followUps: ["我的持股會不會太集中？"] }, at },
       ],
     })
     expect(screen.getByText("台積電今天上漲。").closest("p")).toHaveClass("ai-voice")
-    for (const t of ["我照你說的算好了稅費，簽名後才會入帳。", "今天拖累最多的是環球晶。"]) {
+    for (const t of ["照你說的算好了稅費，你看一下。", "今天拖累最多的是環球晶。"]) {
       expect(screen.getByText(t).closest("p")).not.toHaveClass("ai-voice")
       expect(screen.getByText(t).closest("p")).toHaveClass("text-ink")
     }
-    // 使用者的話是墨色 Noto Sans；追問是墨色文字連結，不是紫色
+    // 使用者的話是墨色 Noto Sans；追問是墨色文字連結，不是石墨灰
     expect(screen.getByText("台積電今天怎麼了？").closest("p")).not.toHaveClass("ai-voice")
     const follow = screen.getByRole("button", { name: "我的持股會不會太集中？" })
     expect(follow.className).toMatch(/text-ink/)
@@ -100,7 +100,7 @@ describe("免責只跟著回答，一段對話只出現一次：在最新一則�
     view([
       { id: "a1", role: "ai", model: true, text: "台積電今天上漲。", disclaimer: "模型回答的免責。", at },
       { id: "a2", role: "ai", answer: { text: "今天拖累最多的是環球晶。" }, disclaimer: "規則版回答的免責。", at },
-      { id: "a3", role: "ai", model: false, text: "我照你說的算好了稅費，簽名後才會入帳。", disclaimer: "草稿說明的免責。", at },
+      { id: "a3", role: "ai", model: false, text: "照你說的算好了稅費，你看一下。", disclaimer: "草稿說明的免責。", at },
     ])
     expect(screen.getByText("規則版回答的免責。")).toBeInTheDocument()
     expect(screen.queryByText("模型回答的免責。")).not.toBeInTheDocument()
@@ -192,7 +192,7 @@ describe("模型回答的排版：漢字片段收字距，數字和單位連成�
 
 describe("輸入框的鍵盤提示：畫面上只在有焦點時出現，螢幕閱讀器一直讀得到", () => {
   it("textarea 用 aria-describedby 指到「Enter 送出，Shift+Enter 換行」", () => {
-    render(<Composer variant="panel" placeholder="提出問題" onSubmit={() => undefined} onAttach={() => undefined} />)
+    render(<Composer variant="panel" placeholder="提出問題" onSubmit={() => undefined} onForm={() => undefined} />)
     const box = screen.getByRole("textbox", { name: "提出問題或下指令" })
     expect(box).toHaveAccessibleDescription("Enter 送出，Shift+Enter 換行")
   })

@@ -77,7 +77,7 @@ export function Price({ value, market, className }: { value: number | null | und
 export function PriceChange({ change, pct, market, className }: { change: number | null; pct: number | null; market: Market; className?: string }) {
   if (change === null) {
     return (
-      <span className={cn("num text-muted-foreground", className)} title="資料源沒有提供昨收，無法計算漲跌">
+      <span className={cn("num text-muted-foreground", className)} title="沒有前一天的收盤價，算不出漲跌">
         —
       </span>
     )
@@ -163,7 +163,7 @@ export function FlowPct({ value, className }: { value: number | null; className?
 
 /**
  * 交易來源標示：自動入帳（「自動」「自動・已修改」）與匯入是淡墨細框小字，可滑過看說明；
- * AI 建立的是紫色「由 AI 建立」（AI 做的事＝紫色；這是固定標籤不是模型寫的字，所以不用楷體）；自己記的不標示。
+ * AI 建立的是石墨灰「由 AI 建立」（AI 做的事＝石墨灰；這是固定標籤不是模型寫的字，所以不用楷體）；自己記的不標示。
  */
 export function SourceTag({ source, className }: { source: TransactionSource; className?: string }) {
   const tag = SOURCE_TAG[source]

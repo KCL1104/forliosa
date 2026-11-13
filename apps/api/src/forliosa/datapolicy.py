@@ -293,7 +293,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "sfb-opendata": (f"{SFB}〈開放資料〉", True),
     "shioaji-data": ("", True),  # labelled through DATASETS["shioaji-data/official"]
     "archive": ("Forliosa 自建存檔（證交所、櫃買中心開放資料）", True),
-    "ledger": ("本系統帳本", True),
+    "ledger": ("帳本紀錄", True),
     "rules": ("Forliosa 規則計算", True),
     "demo": ("示範資料（模擬）", True),
     "finmind": ("FinMind" + NON_COMMERCIAL_SUFFIX, False),
@@ -504,12 +504,12 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
         "conditional": pending,
         "stale": stale,
         "not_used": [
-            "臺灣證券交易所網站（T86 三大法人、MI_QFIIS 外資持股等）與基本市況報導 MIS：網站條款禁止未經同意以程式下載",
-            "證券櫃檯買賣中心網站歷史查詢、公開資訊觀測站網站：同上，只使用 OpenAPI 版本",
-            "臺灣期貨交易所網站（歷史行情查詢等）：只使用 OpenAPI（openapi.taifex.com.tw/v1）",
-            "期交所每筆成交資料（TimeAndSalesData、OptionsTimeAndSalesData、價差每筆成交）：檔案數百 MB，不下載",
+            "臺灣證券交易所網站（三大法人、外資持股等報表）與基本市況報導：網站條款禁止未經同意用程式下載",
+            "證券櫃檯買賣中心網站的歷史查詢、公開資訊觀測站網站：同樣禁止，只用它們的開放資料",
+            "臺灣期貨交易所網站（歷史行情查詢等）：只用它的開放資料",
+            "期交所的每筆成交資料：檔案有幾百 MB，不下載",
             "新聞網站本身：不爬取，也不存內文、摘要或圖片；「新聞報導」只存標題、媒體、時間與原文連結",
             *([] if policy == "personal" else
-              ["Yahoo股市 RSS（個股新聞）：條款限個人、非商業使用，只在 DATA_POLICY=personal 使用"]),
+              ["Yahoo股市 RSS（個股新聞）：條款限個人、非商業使用"]),
         ],
     }

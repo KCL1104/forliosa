@@ -14,7 +14,7 @@ export function DiscussionsTab({ group }: { group: Group }) {
         <h2 id="group-discussions-title" className="sr-only">
           討論
         </h2>
-        <p className="text-md text-ink-2">只有「{group.name}」的成員看得到。</p>
+        <p className="text-base text-ink">只有「{group.name}」的成員看得到。</p>
         <Link to="/discussions/new" search={{ scope: "group", group_id: group.id, from: "group" }} className={buttonVariants({ variant: "outline" })}>
           開新主題
         </Link>

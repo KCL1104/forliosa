@@ -37,7 +37,7 @@ function withSourcesFooter(ui: React.ReactNode) {
     </QueryClientProvider>,
   )
 }
-const TRACKING = "追蹤誤差不提供：標的指數的每日資料沒有開放授權。"
+const TRACKING = "沒有追蹤誤差（指數的每日資料沒有開放）。"
 
 async function section(symbol: string) {
   const inst = await api.getInstrument(symbol)
@@ -117,15 +117,15 @@ describe("總覽的「淨值與折溢價」", () => {
     fireEvent.click(screen.getByRole("button", { name: /資料來源與授權/ }))
     expect(screen.getByText(SOURCE_NAME)).toBeInTheDocument()
     expect(screen.getAllByText("政府資料開放授權條款第 1 版").length).toBeGreaterThan(0)
-    expect(s.textContent).not.toContain("資料累積中")
+    expect(s.textContent).not.toMatch(/資料從 .* 開始/)
     expect(s.textContent).not.toMatch(/[▲▼]/)
     expect(s.innerHTML).not.toMatch(/text-(rise|fall)|--(rise|fall)/)
     expect(within(s).getByText(/逐日數字（60 天）/)).toBeInTheDocument()
   })
 
-  it("00878：存檔不到 20 天，不畫走勢、照後端 notes 寫資料累積中", async () => {
+  it("00878：資料不到 20 天，不畫走勢、照後端 notes 寫資料從哪天開始", async () => {
     const s = await section("00878.TW")
-    expect(s.textContent).toContain("資料累積中：淨值自 2026-11-03 起存檔")
+    expect(s.textContent).toContain("淨值資料從 2026/11/03 開始")
     expect(within(s).queryByRole("img")).toBeNull()
     expect(within(s).getAllByRole("term").map((t) => t.textContent)).toContain("折溢價（11/12）")
   })

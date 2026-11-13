@@ -40,18 +40,18 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
       </Button>
 
       {list.loading ? (
-        <p className={cn("text-md text-ink-2", compact ? "mt-4" : "mt-8")} role="status">
+        <p className={cn("text-base text-ink", compact ? "mt-4" : "mt-8")} role="status">
           正在載入對話…
         </p>
       ) : list.error ? (
-        <p className={cn("text-md text-ink-2", compact ? "mt-4" : "mt-8")}>
+        <p className={cn("text-base text-ink", compact ? "mt-4" : "mt-8")}>
           對話紀錄暫時載入不了。
           <button type="button" onClick={list.retry} className="press ml-1 inline-flex min-h-9 items-center text-ink underline decoration-ctl underline-offset-4 hover:decoration-ink pointer-coarse:min-h-11">
             再試一次
           </button>
         </p>
       ) : list.all.length === 0 ? (
-        <EmptyState className={compact ? "mt-4" : "mt-8"} title="還沒有對話" description="問過的問題和 AI 寫的草稿會留在這裡。" />
+        <EmptyState className={compact ? "mt-4" : "mt-8"} title="還沒有對話" />
       ) : compact ? (
         <ThreadRows threads={list.all} onPick={pick} onRemove={list.remove} bleed className="mt-4 border-t border-rule" />
       ) : (

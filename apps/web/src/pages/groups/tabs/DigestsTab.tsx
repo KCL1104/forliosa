@@ -15,7 +15,7 @@ import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
 const FALLBACK_DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 
 /**
- * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（紫色楷體，和對話裡的回答同一套排版：`.ai-voice`＋`KaiText`）
+ * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（石墨灰楷體，和對話裡的回答同一套排版：`.ai-voice`＋`KaiText`）
  * ＋伺服器算的數字（依目前的分享設定過濾）＋免責。
  * 每一份都可以按表情、留言。
  */
@@ -57,7 +57,7 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
         <span className="num text-sm text-ink-2">{formatDateTime(d.created_at)}</span>
       </header>
       {d.status === "pending" ? (
-        <p className="text-ink-2">週報整理中，好了會出現在這裡。</p>
+        <p className="text-base text-ink">週報整理中。</p>
       ) : d.status === "failed" ? (
         <p className="text-ink-2">這週的週報沒有產生成功。</p>
       ) : (

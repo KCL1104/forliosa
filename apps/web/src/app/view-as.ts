@@ -1,4 +1,5 @@
 import { useQuery, useQueryClient, type Query, type QueryClient } from "@tanstack/react-query"
+import { inText } from "@/lib/cjk"
 import { useNavigate } from "@tanstack/react-router"
 import { useEffect } from "react"
 import { toast } from "sonner"
@@ -38,7 +39,7 @@ export function exitOnRevoked(err: unknown, qc: QueryClient, goHome: () => void)
   if (!target) return false
   switchViewAs(qc, null)
   goHome()
-  toast(`${target.owner.display_name}的授權已經撤銷，已回到你的帳本`)
+  toast(`${inText(target.owner.display_name, "start")}的授權已經撤銷，已回到你的帳本`)
   return true
 }
 

@@ -43,7 +43,7 @@ WORKER_STALE_HOURS = 12.0  # the daily job refreshes anything older than this
 FILINGS_DAYS = 400
 
 DISABLED_NOTE = ("SEC EDGAR 尚未啟用：伺服器沒有設定 SEC 要求的聯絡信箱（SEC_CONTACT_EMAIL），"
-                 "目前沒有美股財報與申報資料")
+                 "沒有美股財報與申報資料")
 UNAVAILABLE_NOTE = "SEC EDGAR 暫時無法連線，稍後再試"
 REFUSED_NOTE = "SEC EDGAR 拒絕了這次連線（流量限制或封鎖），一小時內不再向 SEC 取資料"
 NOT_LISTED_NOTE = "SEC EDGAR 找不到這個代號（ETF 與外國公司通常不在美國申報 10-K／10-Q）"

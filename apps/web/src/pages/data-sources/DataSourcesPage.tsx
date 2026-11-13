@@ -8,6 +8,7 @@ import { PageHeader, Section } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { cn } from "@/lib/utils"
+import { usePageTitle } from "@/app/page-title"
 
 /** 離開本站的連結（才用 ↗）：常駐 ctl 色底線、滑過變墨色 */
 const EXTERNAL = "underline decoration-ctl underline-offset-3 hover:decoration-ink"
@@ -26,6 +27,7 @@ const TWSE_MIS_URL = "https://mis.twse.com.tw/"
  * 「報價」那一段固定在最上面：沒有盤中即時報價，價格是收盤後公布的收盤價。
  */
 export function DataSourcesPage() {
+  usePageTitle("資料來源與授權")
   const q = useAttributions()
   const a = q.data
   const groups = useMemo(() => {
@@ -57,12 +59,12 @@ export function DataSourcesPage() {
         ) : (
           <>
             <Section title="報價" titleId="ds-quotes" bodyClassName="flex flex-col gap-2">
-              <p className="max-w-prose text-md">
-                Forliosa 沒有盤中即時報價。畫面上的股價都是收盤價：每個交易日收盤後由證交所與櫃買中心公布（通常在當天晚上到隔天清晨之間），公布之後才會更新。盤中看到的是上一個交易日的收盤價。
+              <p className="max-w-prose text-base">
+                Forliosa 的股價都是收盤價，沒有盤中報價。證交所與櫃買中心在收盤後公布（通常是當天晚上到隔天清晨），公布前看到的是上一個交易日的收盤價。
               </p>
-              <p className="max-w-prose text-md">要合法取得盤中報價需要付費授權，目前沒有購買。想看盤中的價格，請到證交所的網站：</p>
+              <p className="max-w-prose text-base">盤中報價要付費授權，Forliosa 沒有買。想看盤中的價格，請到證交所的網站：</p>
               {/* 連結自己一行（觸控時 44px 高），不夾在句子中間 */}
-              <p className="-mt-2 text-md">
+              <p className="-mt-2 text-base">
                 <a href={TWSE_MIS_URL} target="_blank" rel="noopener noreferrer" className={cn(EXTERNAL, "inline-flex min-h-9 items-center gap-0.5 pointer-coarse:min-h-11")}>
                   證交所「基本市況報導」
                   <ArrowUpRightIcon aria-hidden className="size-3.5 shrink-0" />
@@ -73,14 +75,14 @@ export function DataSourcesPage() {
 
             {/* 觸控時段落之間多一點：只有一行的段落裡的網址連結上下各有 12px 的可按範圍 */}
             <Section title="授權條款" titleId="ds-license" bodyClassName="flex flex-col gap-2 pointer-coarse:gap-3">
-              <p className="max-w-prose text-md">行情、匯率、公司資料與公告只用可合法商用的政府開放資料，以及我們從這些資料自建的每日存檔。</p>
+              <p className="max-w-prose text-base">行情、匯率、公司資料與公告都來自可以合法商用的政府開放資料，以及我們每天從這些資料存下來的紀錄。</p>
               {a.notice.map((n) => (
                 // 網址只在 / . ? & = - _ 後面斷行（Linkified）；整段另外允許在放不下時斷開，長網址不會撐寬頁面
-                <p key={n} className="max-w-prose text-md [overflow-wrap:anywhere]">
+                <p key={n} className="max-w-prose text-base [overflow-wrap:anywhere]">
                   <Linkified text={n} />
                 </p>
               ))}
-              {a.policy === "personal" && <p className="text-md text-ink-2">這個環境明確開啟了個人模式：標示「非商用」的來源只供個人使用。</p>}
+              {a.policy === "personal" && <p className="text-base">這個環境明確開啟了個人模式：標示「非商用」的來源只供個人使用。</p>}
             </Section>
 
             <section aria-labelledby="ds-datasets" className="flex flex-col">
@@ -106,26 +108,26 @@ export function DataSourcesPage() {
 
             {a.not_used.length > 0 && (
               <Section title="沒有使用的來源" titleId="ds-not-used" bodyClassName="flex flex-col gap-2">
-                <ul className="flex max-w-prose list-disc flex-col gap-1 pl-5 text-md text-ink-2 marker:text-ctl">
+                <ul className="flex max-w-prose list-disc flex-col gap-1 pl-5 text-base marker:text-ctl">
                   {a.not_used.map((n) => (
                     <li key={n}>{n}</li>
                   ))}
                 </ul>
-                <p className="max-w-prose text-md text-ink-2">盤中走勢、上市股票的個股三大法人與美股報價需要付費授權，目前不提供；畫面上會說明為什麼沒有。</p>
+                <p className="max-w-prose text-base">盤中走勢、上市股票的逐檔三大法人、美股報價要付費授權，Forliosa 沒有買。</p>
               </Section>
             )}
 
             <Section title="其他" titleId="ds-other" bodyClassName="flex flex-col gap-2">
-              <p className="max-w-prose text-md text-ink-2">
-                你的交易、持股與定期定額是你自己記下的帳（標示為「本系統帳本」）。走勢圖使用 TradingView Lightweight Charts™（Apache-2.0）；字型為 Noto Sans TC（SIL Open Font License 1.1）與數位發展部全字庫正楷體（擇用 SIL Open Font License 1.1）。
+              <p className="max-w-prose text-base">
+                你的交易、持股與定期定額是你自己記的帳（來源標示為「帳本紀錄」）。走勢圖使用 TradingView Lightweight Charts™（Apache-2.0）；字型為 Noto Sans TC（SIL Open Font License 1.1）與數位發展部全字庫正楷體（擇用 SIL Open Font License 1.1）。
               </p>
-              <p className="max-w-prose text-md text-ink-2">
-                個股頁的「新聞報導」只列媒體的原標題、媒體名稱、時間與原文連結，不轉載內文或圖片。標題主要來自 The GDELT Project 的新聞索引，以及我們自己架設、只供系統內部使用的 SearXNG 元搜尋（只查新聞）；兩者合計太少時才用 AI 網路搜尋補充。SearXNG 會自動查詢 Bing、DuckDuckGo、Brave 等搜尋引擎，這些搜尋引擎的條款不允許自動查詢：這個風險由 Forliosa 的營運者承擔，被搜尋引擎擋下時就停止查詢，不會設法繞過。媒體要求下架時，我們會移除該媒體的標題。
+              <p className="max-w-prose text-base">
+                個股頁的「新聞報導」只列原標題、媒體名稱、時間與原文連結，不轉載內文或圖片。標題來自 The GDELT Project 的新聞索引和我們自架的 SearXNG（只查新聞），兩者太少時用 AI 搜尋補。SearXNG 會自動查詢 Bing、DuckDuckGo、Brave 等搜尋引擎，這些搜尋引擎的條款不允許自動查詢；這個風險由 Forliosa 的營運者承擔，被擋下時就停止查詢，不會設法繞過。媒體要求下架時，我們會移除該媒體的標題。
               </p>
-              <p className="max-w-prose text-md text-ink-2">
-                個股頁的「法人觀點」不是授權的資料庫：有人按下查詢時，AI 才搜尋近期公開的媒體報導，列出機構、評等、目標價、日期與原文連結；同一檔當天共用一份，隔天刪除。這些是第三方意見，以原始報導為準，不是 Forliosa 的建議。
+              <p className="max-w-prose text-base">
+                個股頁的「法人觀點」來自媒體報導：有人按查詢時，AI 搜尋近期的公開報導，列出機構、評等、目標價、日期與原文連結。同一檔當天共用一份，隔天刪除。這些是第三方意見，以原始報導為準，不是 Forliosa 的建議。
               </p>
-              {api.kind === "mock" && <p className="max-w-prose text-md text-ink-2">目前沒有連到伺服器：這一頁的清單與畫面上的數字由瀏覽器內的模擬資料產生。</p>}
+              {api.kind === "mock" && <p className="max-w-prose text-base">沒有連到伺服器：這一頁的清單與畫面上的數字都是示範資料。</p>}
             </Section>
           </>
         )}

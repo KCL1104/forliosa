@@ -68,10 +68,9 @@ describe("個股頁的建議問題", () => {
     const tpex: AiContext = { route: "stock", stock: { ...base, symbol: "6488.TWO", market: "TPEX" as const, position: null } }
     expect(classifyQuestion("外資最近在賣嗎", tpex)).toBeNull()
     const a = answerFor("foreign_flow", { ctx, privacy: false, today: TODAY })!
-    expect(a.text).toContain("不顯示")
-    // 和籌碼分頁空狀態（後端 notes）的說法一致：證交所以付費商品提供，不是「沒有可商用的資料」
-    expect(a.text).toContain("證交所以付費商品提供")
-    expect(a.text).not.toContain("沒有可商用的資料")
+    // 只說事實（沒有逐檔資料、外資持股只公布前 20 名）；授權的原因只在「資料來源與授權」頁講
+    expect(a.text).toContain("上市股票沒有逐檔的三大法人資料，外資持股只公布前 20 名。")
+    expect(a.text).not.toMatch(/可商用|付費|每一點都要附來源/)
     expect(a.text).not.toMatch(/\d+ 張/)
     expect(a.links!.map((l) => l.search)).toEqual([{ tab: "chips" }, { tab: "events" }])
   })
@@ -97,7 +96,7 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
     expect(classifyQuestion("持股集中嗎", ctx)).toBe("concentration")
     const f = fallbackAnswer("幫我分析台積電的護城河", ctx)
     // 現在式：只說現在能做什麼，不承諾時程，也不扮演 AI 的人格
-    expect(f.text).toContain("這裡先不回答")
+    expect(f.text).toContain("這題要上網查資料，現在答不了。")
     expect(f.text).not.toMatch(/下一階段|開放|猜的答案/)
     expect(f.links!.length).toBeGreaterThan(0)
   })
@@ -154,7 +153,7 @@ describe("「我的成本在河流圖哪裡」：只在畫得出河流圖時問�
     expect(a.links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
     expect(answerFor("cost_on_river", { ctx, privacy: true, today: TODAY })!.text).not.toContain("143.41")
     // 本益比貴不貴：美股說明沒有行情，不說「ETF 或近四季虧損」；備援回答連到財務，不連到空的估值分頁
-    expect(answerFor("is_expensive", { ctx, privacy: false, today: TODAY })!.text).toContain("美股目前沒有可商用的行情來源")
+    expect(answerFor("is_expensive", { ctx, privacy: false, today: TODAY })!.text).toContain("美股沒有報價，算不出本益比。")
     expect(fallbackAnswer("本益比合理嗎", ctx).links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
   })
 

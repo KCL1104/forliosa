@@ -1,3 +1,4 @@
+import { inText } from "@/lib/cjk"
 import { ChevronDownIcon } from "lucide-react"
 import { useState } from "react"
 import { appNow } from "@/api"
@@ -36,7 +37,7 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
   return (
     <QuietSection title="新聞報導" titleId="ov-media">
       {items.length === 0 ? (
-        <NotYet className="-mt-1 border-t-0" title={`最近沒有找到${inst.name}的媒體報導`}>
+        <NotYet className="-mt-1 border-t-0" title={`最近沒有找到${inText(inst.name)}的媒體報導`}>
           新聞大約每小時更新一次。
         </NotYet>
       ) : (

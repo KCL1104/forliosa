@@ -26,6 +26,7 @@ import { newTopicOrigin, topicSearchFrom, type Origin } from "./origin"
 import { BackLink, OriginLink } from "./OriginLink"
 import { PublicNamePrompt } from "./PublicNamePrompt"
 import { PostingAs } from "./ReplyComposer"
+import { usePageTitle } from "@/app/page-title"
 
 type Destination = "public" | `group:${string}`
 
@@ -38,6 +39,7 @@ type Destination = "public" | `group:${string}`
  * 還原的時候表單上面有一行說明與「清除草稿」。麵包屑與「取消」回到來的地方（清單、群組或個股的「討論」分頁）。
  */
 export function NewTopicPage() {
+  usePageTitle("開新主題")
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="討論" />
   return <NewTopic />
@@ -279,7 +281,7 @@ function TopicForm({ user, groups, origin }: { user: User; groups: GroupSummary[
           ) : (
             <p className="text-sm text-ink-2">最多標記 {TOPIC_SYMBOLS_MAX} 檔。要換一檔，先移除一個。</p>
           )}
-          <p className="text-sm text-ink-2">標記的主題也會出現在那檔股票的「討論」分頁。</p>
+          <p className="text-base text-ink">標記的主題也會出現在那檔股票的「討論」分頁。</p>
         </div>
 
         {errors.form && (
@@ -310,7 +312,7 @@ function DestinationRow({ name, checked, onChange, label, detail }: { name: stri
         <input type="radio" name={name} checked={checked} onChange={onChange} className="size-4 shrink-0 accent-ink" />
         <span className="min-w-0">
           <span className="font-medium break-words">{label}</span>
-          <span className="ml-2 text-md text-ink-2 max-sm:ml-0 max-sm:block">{detail}</span>
+          <span className="ml-2 text-base text-ink max-sm:ml-0 max-sm:block">{detail}</span>
         </span>
       </label>
     </li>

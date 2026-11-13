@@ -96,7 +96,7 @@ def test_position_from_ledger(client, other_client):
     assert [m["type"] for m in p["markers"]] == ["buy", "sell", "dividend"]
     assert p["markers"][0]["quantity"] == 2000 and p["markers"][0]["price"] == 1000
     assert p["unrealized_pnl"] == pytest.approx(p["market_value"] - p["cost_basis"], abs=0.01)
-    assert "本系統帳本" in p["sources"]
+    assert "帳本紀錄" in p["sources"]
     # not held -> null; other users never see it
     assert client.get(f"{API}/instruments/2317/position").json() is None
     assert other_client.get(f"{API}/instruments/2330/position").json() is None
@@ -271,7 +271,7 @@ def test_listed_stocks_never_show_institutional_flows(client, archived, engine, 
 def test_intraday_has_no_points_without_a_licensed_source(client):
     client.post(f"{API}/watchlist", json={"symbol": "2330"})
     r = client.get(f"{API}/instruments/2330/intraday").json()
-    assert r["points"] == [] and r["sources"] == [] and "沒有授權的盤中行情來源" in r["notes"][0]
+    assert r["points"] == [] and r["sources"] == [] and "沒有盤中走勢" in r["notes"][0]
     assert r["reference_price"] is not None
     us = client.get(f"{API}/instruments/AAPL/intraday").json()
     assert us["points"] == [] and us["notes"] == ["美股沒有盤中走勢資料"]

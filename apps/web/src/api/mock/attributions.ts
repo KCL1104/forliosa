@@ -145,10 +145,10 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
     ],
     datasets,
     not_used: [
-      "臺灣證券交易所網站（T86 三大法人、MI_QFIIS 外資持股等）與基本市況報導 MIS：網站條款禁止未經同意以程式下載",
-      "證券櫃檯買賣中心網站歷史查詢、公開資訊觀測站網站：同上，只使用 OpenAPI 版本",
+      "臺灣證券交易所網站（三大法人、外資持股等報表）與基本市況報導：網站條款禁止未經同意用程式下載",
+      "證券櫃檯買賣中心網站的歷史查詢、公開資訊觀測站網站：同樣禁止，只用它們的開放資料",
       "新聞網站本身：不爬取，也不存內文、摘要或圖片；「新聞報導」只存標題、媒體、時間與原文連結",
-      ...(policy === "personal" ? [] : ["Yahoo股市 RSS（個股新聞）：條款限個人、非商業使用，只在 DATA_POLICY=personal 使用"]),
+      ...(policy === "personal" ? [] : ["Yahoo股市 RSS（個股新聞）：條款限個人、非商業使用"]),
     ],
   }
 }

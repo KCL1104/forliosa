@@ -24,7 +24,7 @@ export function FinancialsTab({ inst }: { inst: InstrumentDetail }) {
     if (inst.type === "etf") {
       return (
         <NotYet title="ETF 沒有自己的財報">
-          SEC 的 10-K／10-Q 是公司的財報；{inst.name}的持股與費用率要看發行商公告。美股目前也沒有可商用的配息資料來源。
+          持股與費用率請看發行商公告。
         </NotYet>
       )
     }
@@ -232,16 +232,11 @@ function EtfHoldings({ inst }: { inst: InstrumentDetail }) {
   const rows = (dividends.data ?? []).filter((d) => d.cash_dividend > 0).slice(0, 8)
   return (
     <div className="flex flex-col gap-10">
-      <Section title="成分股" titleId="etf-holdings">
-        <NotYet title="成分股資料來源還在確認">
-          {inst.name}的前十大持股、產業比重與規模，會在投信公告的資料接上後出現在這裡。
-        </NotYet>
-      </Section>
       <Section title="收益分配" titleId="etf-dist" aside="每單位配息（元）">
         {dividends.isLoading ? (
           <Skeleton className="h-40 w-full rounded-sm" />
         ) : rows.length === 0 ? (
-          <p className="text-md text-ink-2">沒有配息紀錄。</p>
+          <p className="text-base text-ink">沒有配息紀錄。</p>
         ) : (
           <ul className="-mt-3">
             {rows.map((d) => (

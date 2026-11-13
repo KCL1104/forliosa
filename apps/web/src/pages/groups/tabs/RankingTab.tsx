@@ -54,7 +54,7 @@ export function RankingTab({ group }: { group: Group }) {
           <SkeletonLines rows={5} />
         ) : (
           <>
-            {!b.ranked && <p className="text-md text-ink-2">這個群組不排名次，依加入順序列出。</p>}
+            {!b.ranked && <p className="text-base text-ink">這個群組不排名次，依加入順序列出。</p>}
             {b.entries.length === 0 ? (
               <EmptyState title="還沒有資料" />
             ) : (
@@ -243,7 +243,7 @@ function BoardList({ board, groupId }: { board: Leaderboard; groupId: string }) 
 function MyNullNote({ entries }: { entries: LeaderboardEntry[] }) {
   const me = entries.find((e) => e.is_me)
   if (!me || me.return_pct !== null) return null
-  return <p className="text-md text-ink-2">你的持股裡有沒有收盤價的股票（例如美股），期間報酬算不出來；總報酬照常列出。</p>
+  return <p className="text-base text-ink">你有持股沒有收盤價（例如美股），期間報酬算不出來；總報酬照常列出。</p>
 }
 
 /** 當天排行的討論串（`leaderboard:<date>`）。排行的回應沒有表情計數，所以這裡只有留言（見 OPEN_QUESTIONS） */

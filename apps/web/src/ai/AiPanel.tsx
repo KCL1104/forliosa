@@ -1,5 +1,5 @@
 import { HistoryIcon, PanelRightCloseIcon, SquarePenIcon } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { useUpcoming } from "@/api/queries"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
@@ -74,9 +74,66 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
   const [view, setView] = useState<"chat" | "history">("chat")
   useUpcoming(7)
 
+  // 還沒有對話：輸入框在最上面，建議接在它下面（面板不再是上面一大片空白、東西全擠在底部）。
+  // 有對話之後輸入框在底部，對話往上長。
+  const atTop = !thread
+  // 輸入框換位置時 DOM 節點會被搬動、焦點會掉：如果是在面板裡操作造成的（送出、按建議、新對話），把焦點放回輸入框。
+  // 從頁面打開一段對話（帳本的「待簽名」、紀錄頁）不搶焦點。
+  const touched = useRef(0)
+  const touch = () => {
+    touched.current = Date.now()
+  }
+  const wasAtTop = useRef(atTop)
+  useLayoutEffect(() => {
+    if (wasAtTop.current === atTop) return
+    wasAtTop.current = atTop
+    if (Date.now() - touched.current < 1500) composerRef.current?.focus()
+  }, [atTop, composerRef])
+
+  const composer = (
+    <div key="composer" className={cn("shrink-0 px-7 xl:pr-7 xl:pl-8", atTop ? "py-4" : "pt-2.5 pb-5")}>
+      <Composer
+        ref={composerRef}
+        variant="panel"
+        placeholder={composerPlaceholder(ctx, "panel")}
+        onSubmit={(t) => {
+          setView("chat")
+          void runner.submit(t)
+        }}
+        onForm={() => runner.action("form")}
+      />
+      <UsageNote />
+    </div>
+  )
+  // 捲動區留 6px 下內距：最後一個連結的焦點外框不會被裁掉
+  const body = (
+    <div key="body" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-7 pb-1.5 xl:pr-7 xl:pl-8">
+      {view === "history" ? (
+        <HistoryList compact onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
+      ) : thread ? (
+        // 對話從輸入框正上方往上長（mt-auto）：內容與輸入框之間沒有大片空白
+        <div className="mt-auto">
+          <Conversation key={thread.id} thread={thread} runner={runner} />
+        </div>
+      ) : (
+        <PanelHome
+          ctx={ctx}
+          runner={runner}
+          suggestions={suggestions}
+          size="panel"
+          onShowHistory={route.kind === "history" ? undefined : () => setView("history")}
+          // 紀錄頁本身就是完整的對話清單：旁邊的面板不再列「最近的對話」
+          hideRecent={route.kind === "history"}
+        />
+      )}
+    </div>
+  )
+
   return (
     <aside
       aria-label="問 AI"
+      onPointerDownCapture={touch}
+      onKeyDownCapture={touch}
       className="sticky top-16 flex h-[calc(100dvh-4rem)] w-[340px] shrink-0 flex-col xl:w-[400px] before:pointer-events-none before:absolute before:inset-y-0 before:left-0 before:z-10 before:w-1 before:border-x before:border-rule"
     >
       <header className="flex h-14 shrink-0 items-center gap-0.5 border-b border-rule pr-4 pl-7 xl:pl-8">
@@ -95,45 +152,8 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         </IconButton>
       </header>
 
-      {/*
-        輸入框一直在面板底部：還沒有對話時，建議、連結（或最近的對話）整塊貼在輸入框正上方（mt-auto）；
-        開始對話後，對話從同一個位置往上長，輸入框不會跳。捲動區留 6px 下內距：最後一個連結的焦點外框不會被裁掉。
-      */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-7 pb-1.5 xl:pr-7 xl:pl-8">
-        {view === "history" ? (
-          <HistoryList compact onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
-        ) : (
-          <div className="mt-auto">
-            {thread ? (
-              <Conversation key={thread.id} thread={thread} runner={runner} />
-            ) : (
-              <PanelHome
-                ctx={ctx}
-                runner={runner}
-                suggestions={suggestions}
-                size="panel"
-                onShowHistory={route.kind === "history" ? undefined : () => setView("history")}
-                // 紀錄頁本身就是完整的對話清單：旁邊的面板不再列「最近的對話」
-                hideRecent={route.kind === "history"}
-              />
-            )}
-          </div>
-        )}
-      </div>
-
-      <div className="shrink-0 px-7 pt-2.5 pb-5 xl:pr-7 xl:pl-8">
-        <Composer
-          ref={composerRef}
-          variant="panel"
-          placeholder={composerPlaceholder(ctx, "panel")}
-          onSubmit={(t) => {
-            setView("chat")
-            void runner.submit(t)
-          }}
-          onAttach={(k) => runner.action(k)}
-        />
-        <UsageNote />
-      </div>
+      {/* 兩塊都有 key：換順序時 React 搬節點，不重新掛載（輸入框裡打到一半的字還在） */}
+      {atTop ? [composer, body] : [body, composer]}
     </aside>
   )
 }

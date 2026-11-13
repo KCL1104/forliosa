@@ -54,12 +54,10 @@ from forliosa.timeutil import (
 )
 
 CHIPS_RANGES = ("1M", "3M", "6M", "1Y")
-LISTED_CHIPS_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
-                     "外資持股只公布持股比率前 20 名；上櫃股票由櫃買中心 OpenAPI 每日存檔")
+LISTED_CHIPS_NOTE = "上市股票沒有逐檔三大法人資料；外資持股只公布前 20 名"
 # A listed stock on the latest top-20 list: the same reason for the missing 三大法人, without the 外資持股 clause
-LISTED_INST_NOTE = ("證交所 OpenAPI 沒有上市股票的個股三大法人（證交所以付費商品提供），目前不提供；"
-                    "上櫃股票由櫃買中心 OpenAPI 每日存檔")
-TOP20_NOTE = "證交所只公布外資持股比率前 20 名，本股只有名列前 20 名的日子才有外資持股比"
+LISTED_INST_NOTE = "上市股票沒有逐檔三大法人資料"
+TOP20_NOTE = "外資持股只公布前 20 名，這檔只有名列前 20 名的日子才有外資持股比"
 FINANCIAL_PERIODS = ("quarterly", "annual")
 EVENT_PAST_DAYS = 365
 EVENT_FUTURE_DAYS = 120
@@ -209,7 +207,7 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
 
 
 # -- intraday -------------------------------------------------------------------------------------------
-INTRADAY_NOTE = "目前沒有授權的盤中行情來源（證交所即時／延遲行情需付費授權），不提供分時走勢"
+INTRADAY_NOTE = "沒有盤中走勢，價格是收盤後公布的收盤價"
 
 
 def intraday(md: MarketData, symbol: str) -> dict[str, Any]:
@@ -678,7 +676,7 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
                 d = report_publication_date(period)
                 if dlo <= d <= dhi and ("earnings", period) not in releases:
                     add(d, "earnings", f"{period} 財報公布期限（預估）",
-                        "尚未偵測到實際公布日：以上市櫃公司季報的法定公布期限顯示（實際日期以公司公告為準）",
+                        "還不知道實際公布日，先照季報的法定期限顯示（以公司公告為準）",
                         mine=recent, sources=["rules"], estimated=True, period=period)
             for m in range(1, 13):
                 d = date(y, m, 10)
@@ -686,10 +684,10 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
                 period = f"{prev_y}-{prev_m:02d}"
                 if not dlo <= d <= dhi or ("revenue_release", period) in releases:
                     continue
-                detail = "尚未偵測到實際公布日：每月 10 日前公布上個月營收（法定期限）"
+                detail = "還不知道實際公布日；法定期限是每月 10 日前公布上個月營收"
                 seen = backlog_revenue.get(period)
                 if seen is not None:
-                    detail = f"{seen.detail}；在開始存檔前已公布，實際日期不明，以法定期限顯示"
+                    detail = f"{seen.detail}；實際公布日期不明，以法定期限顯示"
                 add(d, "revenue_release", f"{prev_m} 月營收公布期限（預估）", detail, mine=recent,
                     sources=["rules", *([_event_source(seen)] if seen is not None else [])], estimated=True,
                     period=period)

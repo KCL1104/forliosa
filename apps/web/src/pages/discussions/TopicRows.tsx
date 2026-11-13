@@ -42,13 +42,16 @@ export function Disclaimer({ className }: { className?: string }) {
     <div className={className}>
       <p className="text-xs text-ink-2">{DISCLAIMER}</p>
       {!signedIn && (
-        <p className="mt-1 text-sm text-ink-2">
-          {ABOUT_FORLIOSA}
-          <Link to="/login" search={next === "/" ? {} : { next }} className={cn(textAction, "ml-2 text-sm")}>
-            登入
-          </Link>
-          <LegalLinks className={cn(textAction, "ml-4 text-sm")} />
-        </p>
+        <>
+          <p className="mt-1 text-sm text-ink-2">{ABOUT_FORLIOSA}</p>
+          {/* 連結自己一列：夾在句子裡時，44px 的可按高度會把行距撐開，換行後還會縮排 */}
+          <p className="flex flex-wrap items-center gap-x-5 text-sm">
+            <Link to="/login" search={next === "/" ? {} : { next }} className={cn(textAction, "text-sm")}>
+              登入
+            </Link>
+            <LegalLinks className={cn(textAction, "text-sm")} />
+          </p>
+        </>
       )}
     </div>
   )

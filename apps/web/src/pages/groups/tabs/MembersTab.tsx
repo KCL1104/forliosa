@@ -1,4 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
+import { inText } from "@/lib/cjk"
 import { EllipsisIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
@@ -113,7 +114,7 @@ function MemberRow({ m, group, onConfirm }: { m: GroupMember; group: Group; onCo
                     setRole.mutate(
                       { userId: m.user_id, role: m.role === "admin" ? "member" : "admin" },
                       {
-                        onSuccess: () => toast.success(m.role === "admin" ? `${m.display_name}改為成員` : `${m.display_name}成為管理員`),
+                        onSuccess: () => toast.success(m.role === "admin" ? `${inText(m.display_name, "start")}改為成員` : `${inText(m.display_name, "start")}成為管理員`),
                         onError: (err) => toast.error("沒有改成功", { description: errText(err) }),
                       },
                     )
@@ -142,13 +143,13 @@ function ConfirmDialog({ group, confirm, onClose }: { group: Group; confirm: Con
   const pending = remove.isPending || transfer.isPending || del.isPending
   const copy = {
     remove: confirm.kind === "remove" && {
-      title: `把${confirm.m.display_name}移出「${group.name}」？`,
+      title: `把${inText(confirm.m.display_name)}移出「${group.name}」？`,
       body: "他分享的內容會立刻從排行、動態與週報消失；之後要重新邀請才能加入。可以多人使用的邀請連結會一起撤回。",
       action: "移出群組",
     },
     transfer: confirm.kind === "transfer" && {
-      title: `把「${group.name}」轉給${confirm.m.display_name}？`,
-      body: `${confirm.m.display_name}會成為擁有者，你改為管理員。頻道設定與排名開關之後由他決定。`,
+      title: `把「${group.name}」轉給${inText(confirm.m.display_name, "end")}？`,
+      body: `${inText(confirm.m.display_name, "start")}會成為擁有者，你改為管理員。頻道設定與排名開關之後由他決定。`,
       action: "轉移",
     },
     leave: { title: `離開「${group.name}」？`, body: "你在這個群組的分享設定會刪除，你分享的內容立刻從排行、動態與週報消失。之後要重新被邀請才能加入。", action: "離開群組" },
@@ -157,9 +158,9 @@ function ConfirmDialog({ group, confirm, onClose }: { group: Group; confirm: Con
   const run = () => {
     const done = { onError: (err: unknown) => toast.error("沒有完成", { description: errText(err) }) }
     if (confirm.kind === "remove") {
-      remove.mutate({ userId: confirm.m.user_id, self: false }, { ...done, onSuccess: () => (toast.success(`已把${confirm.m.display_name}移出群組`), onClose()) })
+      remove.mutate({ userId: confirm.m.user_id, self: false }, { ...done, onSuccess: () => (toast.success(`已把${inText(confirm.m.display_name)}移出群組`), onClose()) })
     } else if (confirm.kind === "transfer") {
-      transfer.mutate(confirm.m.user_id, { ...done, onSuccess: () => (toast.success(`群組已轉給${confirm.m.display_name}`), onClose()) })
+      transfer.mutate(confirm.m.user_id, { ...done, onSuccess: () => (toast.success(`群組已轉給${inText(confirm.m.display_name, "end")}`), onClose()) })
     } else if (confirm.kind === "leave" && me) {
       remove.mutate(
         { userId: me.user_id, self: true },
@@ -322,7 +323,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
             <label htmlFor="group-ranking" className="font-medium">
               排名次
             </label>
-            <p className="text-md text-ink-2">{isOwner ? "關掉時排行只列出報酬率，依加入順序排列，沒有名次。" : "只有擁有者可以改。"}</p>
+            <p className="text-base text-ink">{isOwner ? "關掉時排行只列出報酬率，依加入順序排列，沒有名次。" : "只有擁有者可以改。"}</p>
           </div>
           <Switch
             id="group-ranking"
@@ -333,7 +334,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
         </div>
         {isOwner && (
           <div className="flex flex-col items-start gap-2 py-4">
-            <p className="text-md text-ink-2">擁有者要先把群組轉給別人才能離開（成員右邊的選項）。</p>
+            <p className="text-base text-ink">擁有者要先把群組轉給別人才能離開（成員右邊的選項）。</p>
             <Button variant="outline" onClick={onDelete}>
               刪除群組
             </Button>

@@ -257,7 +257,7 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
     else:
         found = last_close(md, plan.symbol)
         if found is None:
-            raise unprocessable(f"目前沒有 {plan.symbol} 的收盤價，無法估算股數", code="no_price")
+            raise unprocessable(f"沒有 {plan.symbol} 的收盤價，估不出股數", code="no_price")
         price, price_date, q = found
         if q is not None:
             is_demo = bool(q.is_demo)
@@ -266,7 +266,7 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
             price_rules.append(f"沒有 {debit.month}/{debit.day} 的收盤價，改用最近收盤價"
                                f"（{price_date.month}/{price_date.day}）估算，請照對帳單修改")
     if price <= 0:
-        raise unprocessable(f"目前沒有 {plan.symbol} 的收盤價，無法估算股數", code="no_price")
+        raise unprocessable(f"沒有 {plan.symbol} 的收盤價，估不出股數", code="no_price")
     shares = (plan.amount / price).to_integral_value(rounding=ROUND_FLOOR)
     if shares < 1:
         raise unprocessable(f"NT${plan.amount:,.0f} 不足買 1 股（收盤價 {price.normalize():f}）",

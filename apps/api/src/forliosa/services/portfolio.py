@@ -436,20 +436,20 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     notes: list[str] = []
     clipped = False
     if md.policy == "commercial":
-        from forliosa.services.coverage import US_NOTE, accumulating_note
+        from forliosa.services.coverage import US_NOTE, accumulating_note, ymd
 
         base = max((i for i, p in enumerate(points) if p.unpriced), default=-1) + 1
         if base >= ei:  # fewer than two fully priced closes: nothing honest to show yet
             us = sorted({m for p in points for m in p.unpriced if market_of_symbol(m) == "US"})
             if us:
-                notes.append(f"{'、'.join(us)}：{US_NOTE}，含美股時無法計算績效")
+                notes.append(f"{'、'.join(us)}：{US_NOTE}，含美股的績效算不出來")
             if len(points) < 2 or any(market_of_symbol(m) != "US" for p in points for m in p.unpriced):
-                notes.append(f"{accumulating_note(md)}；需要持股期間每天的收盤價才能計算績效")
+                notes.append(f"{accumulating_note(md)}；持股期間有幾天沒有收盤價，績效算不出來")
             return {**empty, "notes": notes}
         lumped = inception < axis[0]  # transactions before the first archived day are all booked on it
         if si < base or (lumped and si == 0 and not based):
             si, based, clipped = base, True, True
-            notes.append(f"{accumulating_note(md)}；績效從 {points[si].t.isoformat()} 收盤開始計算")
+            notes.append(f"績效從 {ymd(points[si].t)} 收盤開始算，之前沒有資料")
     window = points[si:ei + 1]
     returns = [p.daily_return for p in window]
     if based:
@@ -505,7 +505,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     else:
         rate = xirr(xirr_flows(points, si, ei))
     if md.policy == "commercial" and not b_closes:
-        notes.append(f"基準 {bench_name} 目前沒有可商用的資料")
+        notes.append(f"沒有 {bench_name} 的資料，不能比較")
     notes.extend(fx_notes(fx))
     vol = annualized_volatility(active_returns)
     return {
@@ -529,7 +529,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     }
 
 
-FX_MISSING_NOTE = "USD/TWD 以固定 31.5 換算：還沒有中央銀行〈銀行間新臺幣對美元收盤匯率〉的存檔"
+FX_MISSING_NOTE = "USD/TWD 以固定 31.5 換算：還沒有中央銀行公布的收盤匯率"
 FX_STALE_DAYS = 14  # longer than any Taiwan market closure (Lunar New Year), so only a stopped archive trips it
 
 

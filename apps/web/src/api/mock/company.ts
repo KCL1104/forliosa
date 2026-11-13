@@ -45,7 +45,7 @@ const distance = (a: number, b: number) => (a > 0 && b > 0 ? Math.abs(Math.log(a
 /** 規則與後端相同：基準／成分股 1 張、關係企業 1 張（雜項產業 2 張）、同業補滿 4 張；ETF 頁用同指數、同類型受益人數多 */
 export function buildRelated(spec: MockInstrumentSpec, benchmark: string): RelatedStocks {
   const out: RelatedStocks = { symbol: spec.symbol, items: [], sources: [], notes: [] }
-  if (spec.market === "US") return { ...out, notes: ["美股目前沒有可商用的相關股票資料"] }
+  if (spec.market === "US") return { ...out, notes: ["美股沒有相關股票資料"] }
   const picked: RelatedCard[] = []
   const add = (s: MockInstrumentSpec | undefined, reason: RelatedReason, label: string) => {
     if (!s || s.symbol === spec.symbol || picked.some((p) => p.symbol === s.symbol) || picked.length >= 4) return
@@ -147,7 +147,7 @@ export function buildCompany(spec: MockInstrumentSpec): CompanyAbout {
       : base
   }
   const facts = FACTS[spec.symbol]
-  if (!facts) return { ...base, notes: ["公司基本資料尚未存檔"] }
+  if (!facts) return { ...base, notes: ["還沒有公司基本資料"] }
   const wiki = spec.symbol === "2330.TW" ? TSMC_WIKI : null
   const ai = AI_DESCRIPTIONS[spec.symbol]
   const description: CompanyDescription | null = wiki ?? (ai ? { kind: "ai", label: "AI 依公開資料整理", text: ai.text, updated_at: "2026-11-12T14:35:00+08:00" } : null)

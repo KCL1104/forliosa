@@ -98,7 +98,7 @@ def test_events_use_actual_dates_and_label_deadlines_estimated(client, archived)
     # 10 月營收 was already in t187ap05 on the first archive run: date unknown -> deadline, estimated
     rev = [e for e in by_type(quanta, "revenue_release") if e["period"] == "2026-10"]
     assert [(e["date"], e["estimated"]) for e in rev] == [("2026-11-10", True)]
-    assert "353,250,414 千元" in rev[0]["detail"] and "開始存檔前已公布" in rev[0]["detail"]
+    assert "353,250,414 千元" in rev[0]["detail"] and "實際公布日期不明" in rev[0]["detail"]
 
     conf = client.get(f"{API}/instruments/2901/events").json()
     talks = by_type(conf, "investor_conference")
@@ -185,4 +185,4 @@ def test_meta_attributions_is_public(app):
     d = next(x for x in body["datasets"] if x["key"] == "twse-openapi/valuation")
     assert d["agency"] == "臺灣證券交易所" and d["dataset"] == "上市個股日本益比、殖利率及股價淨值比"
     assert d["attribution"].endswith("依政府資料開放授權條款第 1 版") and d["url"].startswith("https://openapi.twse")
-    assert any("MIS" in x for x in body["not_used"])
+    assert any("基本市況報導" in x for x in body["not_used"])

@@ -52,7 +52,7 @@ def test_same_day_premium_with_a_full_history(client, engine):
     assert (n["premium_pct"], n["premium_date"]) == (0.0147, "2026-11-12")
     assert len(n["history"]) == 25 and n["history"][0] == {"t": days[0].isoformat(), "nav": 100.0, "close": 100.5,
                                                             "premium_pct": 0.005}
-    assert n["history_start"] == days[0].isoformat() and n["notes"] == []  # ≥ 20 points: no 資料累積中
+    assert n["history_start"] == days[0].isoformat() and n["notes"] == []  # ≥ 20 points: no 「資料從…開始」 note
     assert n["history_missing"] == []  # every trading day in the span has a point
     assert n["sources"] == [NAV_ATTRIBUTION, TWSE_PRICE] and NAV_ATTRIBUTION in o["sources"]
     assert (n["currency"], n["fund_name"]) == ("TWD", "元大台灣卓越50基金")
@@ -69,7 +69,7 @@ def test_dates_differ_compute_on_the_newest_matching_day(client, engine):
     assert n["premium_date"] == "2026-11-11"
     assert n["premium_pct"] == pytest.approx(52.10 / 52.20 - 1, abs=1e-6) and n["premium_pct"] < 0  # 折價
     assert n["history"][-1] == {"t": "2026-11-11", "nav": 52.2, "close": 52.1, "premium_pct": n["premium_pct"]}
-    assert n["notes"] == ["資料累積中：淨值自 2026-11-10 起存檔"]  # 2 points < 20
+    assert n["notes"] == ["淨值資料從 2026/11/10 開始"]  # 2 points < 20
 
 
 def test_no_same_day_pair_no_premium_and_never_a_demo_or_finmind_close(client, engine):
@@ -81,7 +81,7 @@ def test_no_same_day_pair_no_premium_and_never_a_demo_or_finmind_close(client, e
     n = ov(client, "006208.TW")["etf_nav"]
     assert (n["nav"], n["nav_date"], n["close"], n["close_date"]) == (231.48, "2026-11-12", 236.6, "2026-11-11")
     assert n["premium_pct"] is None and n["premium_date"] is None and n["history"] == [] and n["history_missing"] == []
-    assert n["notes"] == [svc.NO_MATCH_NOTE, "資料累積中：淨值自 2026-11-12 起存檔"]
+    assert n["notes"] == [svc.NO_MATCH_NOTE, "淨值資料從 2026/11/12 開始"]
     # the 11/11 close is shown, so its dataset is attributed even though no date pairs up
     assert n["sources"] == [NAV_ATTRIBUTION, TWSE_PRICE]
 

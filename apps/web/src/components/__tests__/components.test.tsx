@@ -115,8 +115,8 @@ describe("<DayOfMonthPicker>（定期定額扣款日）", () => {
 
 describe("<DataNotes>", () => {
   it("照後端原文顯示、去重；沒有就不出現", () => {
-    render(<DataNotes notes={["資料累積中：自 2026-11-11 起存檔", "資料累積中：自 2026-11-11 起存檔"]} />)
-    expect(screen.getAllByText("資料累積中：自 2026-11-11 起存檔")).toHaveLength(1)
+    render(<DataNotes notes={["資料從 2026/11/11 開始", "資料從 2026/11/11 開始"]} />)
+    expect(screen.getAllByText("資料從 2026/11/11 開始")).toHaveLength(1)
     expect(render(<DataNotes notes={[]} />).container.innerHTML).toBe("")
   })
 })

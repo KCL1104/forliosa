@@ -32,6 +32,7 @@ from forliosa.models import (
     TaifexLargeTraders,
     TaifexPutCallRatio,
 )
+from forliosa.services.coverage import since_note
 from forliosa.services.portfolio import range_start
 from forliosa.timeutil import next_tw_trading_day, today_taipei
 
@@ -225,7 +226,7 @@ def overview(db: Session, md: MarketData) -> dict[str, Any]:
         notes.append(OPTIONS_LT_PENDING)
 
     if not (futures or pcr or tx or txo or lt_tx or lt_txo):
-        notes.append("期交所資料累積中：尚未存檔（每個交易日 21:40 存檔）")
+        notes.append("還沒有期交所資料，每個交易日 21:40 更新")
     notes.append("夜盤（盤後交易時段）列在它所屬的交易日：前一個交易日 15:00 開盤、當日 05:00 收盤；"
                  "漲跌以前一個交易日的結算價計算，和當日一般交易時段相同")
     return {
@@ -282,5 +283,5 @@ def futures_history(db: Session, md: MarketData, code: str, range_: str) -> dict
         out["sources"] = labels(["taifex-openapi/futures_daily"])
     if not series or series[0]["t"] > next_tw_trading_day(start) + timedelta(days=5):
         first = db.scalar(_filtered(select(func.min(TaifexFuturesDaily.trade_date)), TaifexFuturesDaily, md))
-        out["notes"].append(f"資料累積中：自 {first.isoformat()} 起存檔" if first else "資料累積中：尚未開始存檔")
+        out["notes"].append(since_note(first))
     return out

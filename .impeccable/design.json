@@ -126,47 +126,47 @@
       },
       "ai": {
         "role": "secondary",
-        "displayName": "老師的紫",
-        "canonical": "oklch(45.2% 0.150 292.7)",
+        "displayName": "鉛筆的石墨灰",
+        "canonical": "oklch(43.8% 0.028 264.2)",
         "tonalRamp": [
-          "#140631",
-          "#2c1b54",
-          "#46327a",
-          "#6850ab",
-          "#8a74d1",
-          "#ad9dec",
-          "#d2c6ff",
-          "#efe6ff"
+          "#0b111e",
+          "#222937",
+          "#3b4252",
+          "#5b6374",
+          "#7e8698",
+          "#a2abbd",
+          "#c8d1e4",
+          "#e5efff"
         ]
       },
       "ai-wash": {
         "role": "secondary",
-        "displayName": "紫色淡底",
-        "canonical": "oklch(96.6% 0.012 301.3)",
+        "displayName": "石墨淡底",
+        "canonical": "oklch(96.1% 0.003 264.5)",
         "tonalRamp": [
-          "#121114",
-          "#29282c",
-          "#434147",
-          "#646269",
-          "#87858c",
-          "#aca9b0",
-          "#d2d0d5",
-          "#efeef2"
+          "#111213",
+          "#28292a",
+          "#414244",
+          "#626365",
+          "#858688",
+          "#aaabad",
+          "#d0d1d3",
+          "#edeef0"
         ]
       },
       "ai-rule": {
         "role": "secondary",
-        "displayName": "紫色虛線",
-        "canonical": "oklch(71.2% 0.094 296.9)",
+        "displayName": "石墨灰虛線",
+        "canonical": "oklch(65.6% 0.022 267.2)",
         "tonalRamp": [
-          "#140c24",
-          "#2c2243",
-          "#473965",
-          "#68588f",
-          "#8b7bb4",
-          "#afa2d3",
-          "#d4caf2",
-          "#f1e9ff"
+          "#0d111b",
+          "#242934",
+          "#3d424e",
+          "#5e6370",
+          "#808694",
+          "#a5abb9",
+          "#cad1e0",
+          "#e8eefe"
         ]
       },
       "price-red": {
@@ -381,47 +381,47 @@
       },
       "night-ai": {
         "role": "secondary",
-        "displayName": "夜間・老師的紫",
-        "canonical": "oklch(72.5% 0.129 292.6)",
+        "displayName": "夜間・鉛筆的石墨灰",
+        "canonical": "oklch(82.5% 0.021 264.5)",
         "tonalRamp": [
-          "#14092c",
-          "#2b1e4e",
-          "#453673",
-          "#6654a1",
-          "#8978c7",
-          "#ac9fe4",
-          "#d2c8ff",
-          "#efe7ff"
+          "#0d111b",
+          "#242934",
+          "#3d424e",
+          "#5d6370",
+          "#808693",
+          "#a4abb9",
+          "#cad1df",
+          "#e7effd"
         ]
       },
       "night-ai-wash": {
         "role": "secondary",
-        "displayName": "夜間・紫色淡底",
-        "canonical": "oklch(23.0% 0.035 291.1)",
+        "displayName": "夜間・石墨淡底",
+        "canonical": "oklch(24.1% 0.030 267.3)",
         "tonalRamp": [
-          "#111019",
-          "#292733",
-          "#424050",
-          "#636075",
-          "#868398",
-          "#aaa8bb",
-          "#d1cfde",
-          "#eeedf9"
+          "#0c111f",
+          "#222938",
+          "#3b4253",
+          "#5b6375",
+          "#7e8699",
+          "#a2abbf",
+          "#c8d1e6",
+          "#e5eeff"
         ]
       },
       "night-ai-rule": {
         "role": "secondary",
-        "displayName": "夜間・紫色虛線",
-        "canonical": "oklch(48.0% 0.118 291.1)",
+        "displayName": "夜間・石墨灰虛線",
+        "canonical": "oklch(53.2% 0.038 268.3)",
         "tonalRamp": [
-          "#130a2a",
-          "#2a204b",
-          "#43386f",
-          "#64569d",
-          "#877ac2",
-          "#aba1df",
-          "#d1c9fd",
-          "#eee8ff"
+          "#0a1022",
+          "#21283c",
+          "#3a4257",
+          "#5a6379",
+          "#7c869e",
+          "#a1aac4",
+          "#c6d1eb",
+          "#e4eeff"
         ]
       },
       "night-price-red": {
@@ -592,15 +592,15 @@
       "refersTo": "suggestion-card",
       "description": "依頁面與資料自動出現的建議問題（不加說明字樣）。",
       "html": "<button class=\"ds-suggest\">今天誰拖累了我的報酬？<svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"1.6\" stroke-linecap=\"round\" stroke-linejoin=\"round\"><path d=\"M7.9 20A9 9 0 1 0 4 16.1L2 22z\"/><path d=\"M9.1 9a3 3 0 0 1 5.8 1c0 2-3 3-3 3M12 17h.01\"/></svg></button>",
-      "css": ".ds-suggest{display:flex;align-items:center;justify-content:space-between;gap:12px;width:340px;height:52px;padding:0 14px 0 16px;background:var(--raised,#fff);color:var(--ink,#1f2a44);border:1px solid var(--rule,#d6dee8);border-radius:6px;font:400 15px 'Noto Sans TC Variable',sans-serif;text-align:left;cursor:pointer}.ds-suggest svg{color:var(--ai,#5b3fa0);flex:none}.ds-suggest:hover{border-color:var(--ctl,#838ca0)}.ds-suggest:focus-visible{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}"
+      "css": ".ds-suggest{display:flex;align-items:center;justify-content:space-between;gap:12px;width:340px;height:52px;padding:0 14px 0 16px;background:var(--raised,#fff);color:var(--ink,#1f2a44);border:1px solid var(--rule,#d6dee8);border-radius:6px;font:400 15px 'Noto Sans TC Variable',sans-serif;text-align:left;cursor:pointer}.ds-suggest svg{color:var(--ai,#4a5262);flex:none}.ds-suggest:hover{border-color:var(--ctl,#838ca0)}.ds-suggest:focus-visible{outline:2px solid var(--ink,#1f2a44);outline-offset:2px}"
     },
     {
       "name": "Draft Card with Sign Box",
       "kind": "custom",
       "refersTo": "draft-card",
-      "description": "AI 草稿（紫色虛線、尚未生效）與方形「簽名｜確認入帳」格。",
+      "description": "AI 草稿（石墨灰虛線、尚未生效）與方形「簽名｜確認入帳」格。",
       "html": "<article class=\"ds-draft\"><h3>買進 元大台灣50 <small>0050</small></h3><p>成交日 11/12（四）</p><dl><div><dt>股數</dt><dd>2,000 股</dd></div><div><dt>成交價</dt><dd>@52.40</dd></div><div><dt>手續費</dt><dd>41</dd></div><div><dt>證交稅</dt><dd>0</dd></div><div class=\"sum\"><dt>合計</dt><dd>NT$104,841</dd></div></dl><footer><a>怎麼算的 ⌄</a><button class=\"ds-btn-outline\">修改</button><button class=\"ds-sign\"><small>簽名</small>確認入帳</button></footer></article>",
-      "css": ".ds-draft{width:340px;border:1px dashed var(--ai-rule,#a896d6);background:var(--ai-wash,#f5f2fb);font-family:'Noto Sans TC Variable',sans-serif}.ds-draft h3{margin:0;padding:14px 16px 0;font-size:17px;color:var(--ai,#5b3fa0)}.ds-draft h3 small{font-size:13px;font-weight:400}.ds-draft p{margin:0;padding:2px 16px 12px;font-size:13px;color:var(--ink-2,#5b6478);border-bottom:1px solid var(--rule,#d6dee8)}.ds-draft dl{display:grid;grid-template-columns:1fr 1fr;margin:0}.ds-draft dl div{display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--rule,#d6dee8)}.ds-draft dl div:nth-child(odd):not(.sum){border-right:1px solid var(--rule,#d6dee8)}.ds-draft dt{font-size:13px;color:var(--ink-2,#5b6478)}.ds-draft dd{margin:0;font-weight:500;color:var(--ai,#5b3fa0)}.ds-draft .sum{grid-column:1/3}.ds-draft .sum dt{font-weight:700;color:var(--ink,#1f2a44)}.ds-draft .sum dd{font-size:20px;font-weight:700}.ds-draft footer{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 16px}.ds-draft footer a{margin-right:auto;font-size:13px;color:var(--ai,#5b3fa0);text-decoration:underline}.ds-draft .ds-btn-outline{height:36px;padding:0 10px;border:1px solid var(--ctl,#838ca0);border-radius:4px;background:none}.ds-sign{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:76px;height:60px;border:0;border-radius:0;background:var(--act,#1f2a44);color:var(--act-fg,#fbfbf8);font-weight:700;font-size:14px;cursor:pointer}.ds-sign::after{content:'';position:absolute;inset:3px;border:1px solid currentColor;opacity:.4}.ds-sign small{font-size:12px;font-weight:400}.ds-sign:hover{background:var(--act-hover,#0f1730)}.ds-sign:active{transform:scale(.97)}.ds-sign:focus-visible{outline:2px solid var(--ai,#5b3fa0);outline-offset:2px}"
+      "css": ".ds-draft{width:340px;border:1px dashed var(--ai-rule,#8b919f);background:var(--ai-wash,#f1f2f4);font-family:'Noto Sans TC Variable',sans-serif}.ds-draft h3{margin:0;padding:14px 16px 0;font-size:17px;color:var(--ai,#4a5262)}.ds-draft h3 small{font-size:13px;font-weight:400}.ds-draft p{margin:0;padding:2px 16px 12px;font-size:13px;color:var(--ink-2,#5b6478);border-bottom:1px solid var(--rule,#d6dee8)}.ds-draft dl{display:grid;grid-template-columns:1fr 1fr;margin:0}.ds-draft dl div{display:flex;justify-content:space-between;padding:10px 16px;border-bottom:1px solid var(--rule,#d6dee8)}.ds-draft dl div:nth-child(odd):not(.sum){border-right:1px solid var(--rule,#d6dee8)}.ds-draft dt{font-size:13px;color:var(--ink-2,#5b6478)}.ds-draft dd{margin:0;font-weight:500;color:var(--ai,#4a5262)}.ds-draft .sum{grid-column:1/3}.ds-draft .sum dt{font-weight:700;color:var(--ink,#1f2a44)}.ds-draft .sum dd{font-size:20px;font-weight:700}.ds-draft footer{display:flex;align-items:center;gap:10px;padding:12px 12px 12px 16px}.ds-draft footer a{margin-right:auto;font-size:13px;color:var(--ai,#4a5262);text-decoration:underline}.ds-draft .ds-btn-outline{height:36px;padding:0 10px;border:1px solid var(--ctl,#838ca0);border-radius:4px;background:none}.ds-sign{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;width:76px;height:60px;border:0;border-radius:0;background:var(--act,#1f2a44);color:var(--act-fg,#fbfbf8);font-weight:700;font-size:14px;cursor:pointer}.ds-sign::after{content:'';position:absolute;inset:3px;border:1px solid currentColor;opacity:.4}.ds-sign small{font-size:12px;font-weight:400}.ds-sign:hover{background:var(--act-hover,#0f1730)}.ds-sign:active{transform:scale(.97)}.ds-sign:focus-visible{outline:2px solid var(--ai,#4a5262);outline-offset:2px}"
     },
     {
       "name": "AI Composer",
@@ -622,25 +622,25 @@
       "name": "Mobile Dock",
       "kind": "nav",
       "refersTo": "dock-tabs",
-      "description": "浮動膠囊分頁「帳本｜群組｜紀錄」＋獨立的紫色「問 AI」。",
+      "description": "底部列：文字分頁「帳本｜群組｜討論」＋右邊一格「問 AI」（平常只有石墨灰框線，有草稿等簽名才是實心）。",
       "html": "<div class=\"ds-dock\"><nav><a aria-current=\"page\"><i></i>帳本</a><a><i></i>群組</a><a><i></i>紀錄</a></nav><button>問 AI</button></div>",
-      "css": ".ds-dock{display:flex;gap:8px;width:358px;height:64px;font-family:'Noto Sans TC Variable',sans-serif}.ds-dock nav{flex:1;display:flex;border:1px solid var(--rule,#d6dee8);border-radius:32px;background:var(--raised,#fff);box-shadow:0 6px 18px rgb(15 23 48/.1),0 1px 2px rgb(15 23 48/.1)}.ds-dock a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;color:var(--ink-2,#5b6478)}.ds-dock a i{width:52px;height:28px;border-radius:14px}.ds-dock a[aria-current] {color:var(--ink,#1f2a44);font-weight:700}.ds-dock a[aria-current] i{background:rgb(31 42 68/.08)}.ds-dock button{width:86px;border:1px solid var(--ai-rule,#a896d6);border-radius:32px;background:var(--ai-wash,#f5f2fb);color:var(--ai,#5b3fa0);font-weight:700;font-size:13px;box-shadow:0 6px 18px rgb(15 23 48/.1)}"
+      "css": ".ds-dock{display:flex;gap:8px;width:358px;height:64px;font-family:'Noto Sans TC Variable',sans-serif}.ds-dock nav{flex:1;display:flex;border:1px solid var(--rule,#d6dee8);border-radius:32px;background:var(--raised,#fff);box-shadow:0 6px 18px rgb(15 23 48/.1),0 1px 2px rgb(15 23 48/.1)}.ds-dock a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;color:var(--ink-2,#5b6478)}.ds-dock a i{width:52px;height:28px;border-radius:14px}.ds-dock a[aria-current] {color:var(--ink,#1f2a44);font-weight:700}.ds-dock a[aria-current] i{background:rgb(31 42 68/.08)}.ds-dock button{width:86px;border:1px solid var(--ai-rule,#8b919f);border-radius:32px;background:var(--ai-wash,#f1f2f4);color:var(--ai,#4a5262);font-weight:700;font-size:13px;box-shadow:0 6px 18px rgb(15 23 48/.1)}"
     }
   ],
   "narrative": {
     "northStar": "家長簽名的聯絡簿（The Signed Contact Book）",
-    "overview": "帳本就是首頁。介面借用台灣學生每天帶回家的聯絡簿：淺色是紙白、深色是夜間筆記本；1px 藍灰格線就是結構，表格不包卡片；文字與動作用藍黑原子筆的墨色寫。AI 是另一支筆——老師的紫色筆，取代紅筆，因為紅色在這個產品代表「漲」。AI 說的話用文楷，看起來像手寫在簿子上的評語。AI 做的每件事都先寫成草稿（紫色虛線），使用者在方形「簽名｜確認入帳」格按下才生效；簽名後格子裡留下使用者的字。\n\n這是 Operate 介面：導覽、表格、分段、選單都是使用者早就會用的標準元件。世界只提供四樣東西：**字型**（Noto Sans TC＋只給 AI 的文楷）、**色盤**（紙、格線、藍黑墨、紫、價格紅綠）、**密度**（Google Finance 的留白主數字＋一行一格的帳）、**一個招牌動作**（簽名格）。",
+    "overview": "帳本就是首頁。介面借用台灣學生每天帶回家的聯絡簿：淺色是紙白、深色是夜間筆記本；1px 藍灰格線就是結構，表格不包卡片；文字與動作用藍黑原子筆的墨色寫。AI 是另一支筆——鉛筆，取代紅筆，因為紅色在這個產品代表「漲」。AI 說的話用文楷，看起來像手寫在簿子上的評語。AI 做的每件事都先寫成草稿（石墨灰虛線），使用者在方形「簽名｜確認入帳」格按下才生效；簽名後格子裡留下使用者的字。\n\n這是 Operate 介面：導覽、表格、分段、選單都是使用者早就會用的標準元件。世界只提供四樣東西：**字型**（Noto Sans TC＋只給 AI 的文楷）、**色盤**（紙、格線、藍黑墨、鉛筆的石墨灰、價格紅綠）、**密度**（Google Finance 的留白主數字＋一行一格的帳）、**一個招牌動作**（簽名格）。",
     "keyCharacteristics": [
       "紙白（深色：夜間筆記本）的底，1px 藍灰格線分隔每一行，沒有卡片包表格。",
       "藍黑墨是唯一的操作色：主要按鈕、選取中的分段、焦點框。",
-      "紫色只屬於 AI：問候、建議問題的圖示、回答、草稿卡、「待簽名」、「問 AI」按鈕。",
+      "鉛筆的石墨灰只屬於 AI：回答、草稿卡、「待簽名」、「問 AI」；介面上的顏色只剩價格的紅與綠。",
       "紅綠只表示價格的漲跌，永遠配 ▲▼。",
       "全站等寬數字；報價依升降單位決定小數位。"
     ],
     "rules": [
       {
         "name": "The Two Pens Rule",
-        "body": "墨色是使用者的筆，紫色是 AI 的筆。紫色出現的地方一定是 AI 說的話或 AI 做的事；AI 以外的東西不准用紫色。",
+        "body": "墨水是使用者的筆，鉛筆是 AI 的筆。石墨灰楷體與石墨灰虛線出現的地方一定是 AI 說的話或 AI 做的事；AI 以外的東西不用。",
         "section": "colors"
       },
       {
@@ -670,15 +670,15 @@
       }
     ],
     "dos": [
-      "**Do** 讓 AI 的每個動作先成為草稿（紫色虛線），使用者簽名才生效，事後可以復原並標示「由 AI 建立」。",
+      "**Do** 讓 AI 的每個動作先成為草稿（石墨灰虛線），使用者簽名才生效，事後可以復原並標示「由 AI 建立」。",
       "**Do** 漲跌一律 `--rise`／`--fall`＋▲▼，報價依升降單位決定小數位。",
       "**Do** 隱私模式遮蔽金額與股數、隱藏圖上的均價線與買賣點，保留百分比。",
       "**Do** 「為什麼」那一行、分頁第一行只在有值得說的事時出現；沒有就不顯示。",
       "**Do** 每個空狀態說明為什麼沒有、什麼時候會有，並給一個現在能做的動作。"
     ],
     "donts": [
-      "**Don't** 在 AI 以外的地方用紫色，也不要在價格以外的地方用紅綠（營收、法人、刪除都不行）。",
-      "**Don't** 在介面上寫「本頁建議」「依頁面推薦」「AI 摘要」這類說明 AI 機制的字樣；紫色文楷就是唯一的 AI 識別。",
+      "**Don't** 在 AI 以外的地方用 AI 的石墨灰楷體或虛線，也不要在價格以外的地方用紅綠（營收、法人、刪除都不行）。",
+      "**Don't** 在介面上寫「本頁建議」「依頁面推薦」「AI 摘要」這類說明 AI 機制的字樣；石墨灰楷體就是唯一的 AI 識別。",
       "**Don't** 放 AI 今日簡報、AI 旁註或市場總覽首頁。",
       "**Don't** 用卡片包表格、巢狀卡片、陰影區隔一般區塊；用格線。",
       "**Don't** 用印章、朱泥、徽記或任何仿實物質感（舊世界已移除）。",

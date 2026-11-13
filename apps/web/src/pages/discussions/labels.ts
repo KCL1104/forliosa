@@ -5,10 +5,10 @@ import { formatDateShort, todayInTaipei, TZ } from "@/lib/format"
 /** 每個公開討論頁底部固定的一行（合約） */
 export const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
 
-/**
- * 沒登入的訪客在免責那一行旁邊看到的一句：Forliosa 是什麼（照 PRODUCT.md 的產品說明寫，只說事實，不是宣傳句），後面接「登入」。
- */
-export const ABOUT_FORLIOSA = "Forliosa 是以台股為主的投資管理工具：持倉帳本與績效、個股資訊、AI 分析，另有親友群組。"
+export { ABOUT_FORLIOSA } from "@/lib/about"
+
+/** 公開暱稱的說明（選暱稱的地方、設定頁都用這一句；多久能改一次只有一種說法） */
+export const PUBLIC_NAME_HELP = "公開討論只顯示這個名字，看不到你的顯示名稱和頭像。2 到 20 個字，7 天內只能改一次。"
 
 /** 被站方隱藏的內容（主題的內文、回覆） */
 export const HIDDEN_NOTE = "這則內容已被站方隱藏。"

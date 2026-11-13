@@ -32,7 +32,7 @@ import {
   type UserRef,
 } from "../types"
 import { sourceOf } from "./attributions"
-import { ARCHIVE_START } from "./commercial"
+import { ARCHIVE_START, ymd } from "./commercial"
 import { findInstrument } from "./instruments"
 import { addDays, closeOn, MOCK_TODAY, parseDay } from "./market"
 import { PEOPLE, STATIC_PROFILES, type PeriodReturns, type RawTrade } from "./members"
@@ -678,8 +678,8 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
         { symbol: "0050.TW", name: "元大台灣50", return_pct: benchmarkReturn("0050.TW", start, date) },
       ]
       const notes: string[] = []
-      if (clipped) notes.push(`資料累積中：自 ${ARCHIVE_START} 起存檔，今年從 ${ARCHIVE_START} 收盤起算`)
-      if (benchmarks[0]!.return_pct === null) notes.push(`發行量加權股價報酬指數自 ${INDEX_ARCHIVE_START} 起存檔，期間起點更早時暫時無法比較`)
+      if (clipped) notes.push(`資料從 ${ymd(ARCHIVE_START)} 開始，這段期間從 ${ymd(ARCHIVE_START)} 收盤起算`)
+      if (benchmarks[0]!.return_pct === null) notes.push("沒有 發行量加權股價報酬指數 的資料，不能比較")
       return {
         period, date, start_date: start, as_of: "2026-11-12T13:30:00+08:00", ranked: g.ranking_enabled, entries, benchmarks, notes,
         sources: [sourceOf("twse-openapi/price"), sourceOf("tpex-openapi/price")], is_demo: !deps.commercial,

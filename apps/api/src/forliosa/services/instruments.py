@@ -213,7 +213,7 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
     per_vals = [p["per"] for p in series if p["per"] is not None]
     pbr_vals = [p["pbr"] for p in series if p["pbr"] is not None]
     if info.type != "stock":
-        notes.append("ETF 沒有每股盈餘與每股帳面淨值，不提供本益比與股價淨值比區間")
+        notes.append("ETF 沒有每股盈餘與每股淨值，所以沒有本益比與股價淨值比區間")
     elif not per_vals:
         notes.append("近四季 EPS 合計小於或等於 0，本益比無意義，區間留白")
     last = series[-1] if series else None

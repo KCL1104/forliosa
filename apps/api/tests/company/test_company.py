@@ -336,7 +336,7 @@ def test_listed_stock_in_the_top20_keeps_the_institutional_reason(client, stock_
 
     ase = client.get(f"{API}/instruments/3711.TW/chips?range=1M").json()
     assert ase["notes"] == [stock_svc.LISTED_INST_NOTE, stock_svc.TOP20_NOTE]
-    assert "以付費商品提供" in ase["notes"][0] and "上市股票" in ase["notes"][0]
+    assert ase["notes"][0] == "上市股票沒有逐檔三大法人資料"
 
 
 def test_listed_stock_that_dropped_off_the_top20_has_no_foreign_series(client, stock_archive, engine):

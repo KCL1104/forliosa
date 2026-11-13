@@ -8,7 +8,7 @@ import { findInstrument } from "./instruments"
 import { daysBetweenIso, usdTwd } from "./market"
 
 const r2 = (n: number) => Math.round(n * 100) / 100
-const LEDGER_SOURCE = ["本系統帳本"]
+const LEDGER_SOURCE = ["帳本紀錄"]
 
 interface Open {
   qty: number

@@ -18,9 +18,11 @@ import { direction, directionGlyph, formatDateShort, formatDateTime, formatPerce
 import { cn } from "@/lib/utils"
 import { ROLE_LABEL } from "./labels"
 import { FieldError } from "@/components/form-field"
+import { usePageTitle } from "@/app/page-title"
 
 /** 群組：我加入的群組＋建立群組；下面是可以貼到 LINE 的百分比分享卡 */
 export function GroupsPage() {
+  usePageTitle("群組")
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="群組" />
   return <Groups />
@@ -43,7 +45,7 @@ function Groups() {
         <SkeletonLines rows={4} />
       ) : groups.data.length === 0 ? (
         // 動作只有頁首的「建立群組」一個，這裡不再放第二顆
-        <EmptyState title="還沒有加入任何群組" description="建立一個群組，再把邀請連結傳給家人朋友；收到別人的邀請連結時，點開就能加入。" />
+        <EmptyState title="還沒有加入任何群組" description="建立群組，把邀請連結傳給家人朋友。別人給你的邀請連結，點開就能加入。" />
       ) : (
         <ul aria-label="我的群組" className="border-t border-rule">
           {groups.data.map((g) => (
@@ -170,7 +172,7 @@ function ShareCard() {
         </dl>
       </figure>
       {/* 後端的說明自己就有冒號（「AAPL、NVDA、VOO：美股目前沒有…」），前面用一句話接，不再疊一個冒號 */}
-      {month === null && mtd.data?.notes?.[0] && <p className="mt-2 max-w-md text-sm text-ink-2">本月算不出來。{withPeriod(mtd.data.notes[0])}</p>}
+      {month === null && mtd.data?.notes?.[0] && <p className="mt-2 max-w-md text-base text-ink">本月算不出來。{withPeriod(mtd.data.notes[0])}</p>}
       <Button
         variant="outline"
         className="mt-4"

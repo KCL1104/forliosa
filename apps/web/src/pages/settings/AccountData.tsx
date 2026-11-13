@@ -60,7 +60,7 @@ export function AccountData() {
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
             <p className="font-medium">匯出我的資料</p>
-            <p className="mt-0.5 text-md text-ink-2">下載一個 JSON 檔：個人資料、券商帳戶與交易、定期定額、觀察清單、AI 對話，以及你在群組與討論裡寫的內容。</p>
+            <p className="mt-0.5 text-base text-ink">下載一個 JSON 檔：個人資料、券商帳戶與交易、定期定額、觀察清單、AI 對話，以及你在群組與討論裡寫的內容。</p>
             {exportMe.isError && <FieldError className="mt-1.5">{exportErrorText(exportMe.error)}</FieldError>}
           </div>
           <Button variant="outline" className="shrink-0 self-start sm:self-auto" disabled={exportMe.isPending} onClick={() => exportMe.mutate()}>
@@ -70,7 +70,6 @@ export function AccountData() {
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
             <p className="font-medium">條款與隱私</p>
-            <p className="mt-0.5 text-md text-ink-2">我們怎麼處理你的資料，以及使用這個服務的約定。</p>
           </div>
           <p className="flex shrink-0 flex-wrap gap-x-5">
             <LegalLinks className={textAction} />
@@ -79,9 +78,17 @@ export function AccountData() {
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">
             <p className="font-medium">刪除帳號</p>
-            <p className="mt-0.5 text-md text-ink-2">帳本、AI 對話與個人資料會全部刪除，不能復原。要留一份的話，先匯出。</p>
+            <p className="mt-0.5 text-base text-ink">帳本、AI 對話與個人資料會全部刪除，不能復原。要留一份的話，先匯出。</p>
           </div>
-          <Button variant="outline" className="shrink-0 self-start sm:self-auto" onClick={() => setDeleting(true)}>
+          <Button
+            variant="outline"
+            className="shrink-0 self-start sm:self-auto"
+            onClick={() => {
+              // 剛按過「匯出」的通知還在的話先收掉：不要蓋在對話框上
+              toast.dismiss()
+              setDeleting(true)
+            }}
+          >
             刪除帳號…
           </Button>
         </div>
@@ -134,7 +141,7 @@ function DeleteAccountDialog({ onClose }: { onClose: () => void }) {
             <div>
               <p className="font-medium">會留下</p>
               <ul className="mt-1 flex list-disc flex-col gap-0.5 pl-5 text-ink-2 marker:text-ink-2">
-                <li>你在群組寫的留言、在討論寫的主題與回覆——作者會顯示成「已刪除的帳號」。想拿掉的話，先自己刪除再刪帳號。</li>
+                <li>你在群組寫的留言、在討論寫的主題與回覆，作者會顯示成「已刪除的帳號」。不想留的話，先刪掉它們再刪帳號。</li>
                 <li>你擁有的群組會轉給最早的管理員或成員；沒有其他成員的群組會一起刪除。</li>
               </ul>
             </div>

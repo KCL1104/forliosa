@@ -57,9 +57,9 @@ export function CommentThread({ groupId, target, id, className }: { groupId: str
       {comments.isLoading ? (
         <SkeletonLines rows={2} />
       ) : gone ? (
-        <p className="text-md text-ink-2">這則內容已經看不到了。</p>
+        <p className="text-base text-ink">這則內容已經看不到了。</p>
       ) : comments.isError ? (
-        <p className="text-md text-ink-2">留言沒有載入，請稍後再試。</p>
+        <p className="text-base text-ink">留言沒有載入，請稍後再試。</p>
       ) : (
         <>
           {(comments.data?.items ?? []).length > 0 && (

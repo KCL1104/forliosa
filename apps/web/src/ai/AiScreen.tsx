@@ -18,7 +18,8 @@ import { useAi, useCurrentThread } from "./store"
 import { useAiSuggestions } from "./remote-hooks"
 
 /**
- * 手機的「問 AI」：全螢幕。和桌面面板同一套：輸入框一直在底部，格線列的建議、一行文字連結（沒有建議的頁面是最近的對話）貼在它上方。
+ * 手機的「問 AI」：全螢幕。內容和桌面面板同一套；輸入框一直在底部（拇指按得到；桌面面板還沒有對話時輸入框在最上面），
+ * 格線列的建議、一行文字連結（沒有建議的頁面是最近的對話）貼在它上方。
  * 搜尋股票在手機上住在這裡：輸入代號或名稱時，符合的股票一律列在輸入框「上方」——
  * iOS Safari 的鍵盤直接蓋在全螢幕的畫面上（不縮版面），列在輸入框下方會被鍵盤蓋住。
  * 對話紀錄：手機的底部列沒有「紀錄」分頁，從這裡右上角的時鐘到紀錄頁（`/history`；「全部紀錄」也是）。
@@ -136,7 +137,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
           placeholder={composerPlaceholder(ctx, "screen")}
           onDraftChange={setTyping}
           onSubmit={(t) => void runner.submit(t)}
-          onAttach={(k) => runner.action(k)}
+          onForm={() => runner.action("form")}
         />
         <UsageNote />
       </div>

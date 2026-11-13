@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { inText } from "@/lib/cjk"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { FOREIGN_FLOW_QUESTION } from "@/ai/suggestions"
 import { useAskAi } from "@/ai/use-ask"
@@ -70,7 +71,7 @@ function ListedInstitutional({ inst, top20 }: { inst: InstrumentDetail; top20: b
   return (
     <NotYet
       className="border-t-0 pt-0"
-      title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人`}
+      title={`上市${inst.type === "etf" ? " ETF " : "股票"}沒有逐檔三大法人資料`}
       action={
         inst.type === "stock" &&
         !readOnly && (
@@ -80,7 +81,7 @@ function ListedInstitutional({ inst, top20 }: { inst: InstrumentDetail; top20: b
         )
       }
     >
-      {top20 ? "證交所的開放資料沒有逐檔三大法人。" : "證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。"}
+      {!top20 && "外資持股只公布前 20 名。"}
     </NotYet>
   )
 }
@@ -92,7 +93,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
   const listed = inst.market === "TWSE"
   useSourceNote(sourceNotes(chips.data?.sources))
   if (inst.market === "US") {
-    return <NotYet title="美股沒有台股的法人與融資融券資料">美股的機構持股（13F）一季公布一次，之後再評估是否加入。</NotYet>
+    return <NotYet title="美股沒有法人與融資融券資料" />
   }
   if (chips.isError) return <ErrorState error={chips.error} onRetry={() => void chips.refetch()} />
   if (!chips.data) return <Skeleton className="h-96 w-full rounded-sm" />
@@ -257,7 +258,7 @@ function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: 
   if (!top) {
     return (
       <NotYet className="-mt-3 border-t-0" title="不在外資持股前 20 名">
-        證交所只公布外資持股比率前 20 名，{inst.name}目前不在名單上。
+        證交所只公布外資持股比率前 20 名，{inText(inst.name, "start")}不在名單上。
       </NotYet>
     )
   }
@@ -268,7 +269,7 @@ function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: 
       ) : (
         <p className="num text-2xl font-medium">{formatPercent(top.pct, { signed: false })}</p>
       )}
-      <p className="mt-2 text-md text-ink-2">
+      <p className="mt-2 text-base text-ink">
         {formatDateShort(top.as_of)} 名列證交所外資及陸資持股前 20 名第 {top.rank} 名。{notes.map((n) => (n.endsWith("。") ? n : `${n}。`)).join("")}
       </p>
     </>

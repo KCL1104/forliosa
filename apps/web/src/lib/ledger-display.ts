@@ -101,8 +101,8 @@ export const USER_RECORD_WINDOW_DAYS = 120
 
 /** 編輯表單上方的說明：編輯自動入帳的股利會變成自己的版本；改過的不會再被更新 */
 export function autoEditNotice(source: Transaction["source"]): string | null {
-  if (source === "auto") return "系統在除息日自動記下這筆股利。儲存變更後就是你自己的版本，系統不會再更新；刪除後也不會再自動入帳。"
-  if (source === "auto_edited") return "這筆自動入帳的股利你改過，系統不會再更新它。"
+  if (source === "auto") return "這筆股利是除息日自動入帳的。改了之後不會再自動更新；刪除後也不會再入帳。"
+  if (source === "auto_edited") return "這筆自動入帳的股利你改過，不會再自動更新。"
   return null
 }
 

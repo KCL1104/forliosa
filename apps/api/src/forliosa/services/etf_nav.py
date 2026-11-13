@@ -38,13 +38,13 @@ MIN_POINTS = 20  # same-day (close, NAV) pairs before the history is drawn
 HISTORY_POINTS = 60  # at most this many points in the response (about three months of trading days)
 LOOKBACK_DAYS = 120  # calendar days of NAV / close rows read to find them
 
-NO_ARCHIVE_NOTE = "資料累積中：ETF 淨值每個交易日晚上存檔"
+NO_ARCHIVE_NOTE = "還沒有淨值資料，每個交易日晚上更新"
 NOT_IN_DATASET_NOTE = "〈證券投資信託基金每日淨值〉沒有這檔 ETF 的淨值"
 NO_MATCH_NOTE = "還沒有同一天的收盤價與淨值，不計算折溢價"
 
 
 def accumulating_note(since: date) -> str:
-    return f"資料累積中：淨值自 {since.isoformat()} 起存檔"
+    return f"淨值資料從 {since.strftime('%Y/%m/%d')} 開始"
 
 
 def premium(close: Decimal, nav: Decimal) -> Decimal | None:

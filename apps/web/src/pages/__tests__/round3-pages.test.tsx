@@ -198,13 +198,13 @@ describe("設定：列上的動作一套語法、區塊標題和其他頁面同�
 })
 
 describe("資料來源與授權", () => {
-  it("報價：固定一段——沒有盤中即時報價、價格是收盤後公布的收盤價、到證交所看、付費授權還沒買", async () => {
+  it("報價：固定一段——都是收盤價、沒有盤中報價、收盤後公布、到證交所看、付費授權沒有買", async () => {
     renderInRouter(<DataSourcesPage />)
     const quotes = await screen.findByRole("region", { name: "報價" }, T)
-    expect(quotes.textContent).toContain("沒有盤中即時報價")
+    expect(quotes.textContent).toContain("Forliosa 的股價都是收盤價，沒有盤中報價。")
     expect(quotes.textContent).toMatch(/收盤後.*公布/)
     expect(quotes.textContent).toMatch(/當天晚上到隔天清晨/)
-    expect(quotes.textContent).toMatch(/付費授權，目前沒有購買/)
+    expect(quotes.textContent).toMatch(/盤中報價要付費授權，Forliosa 沒有買。/)
     const link = within(quotes).getByRole("link", { name: /基本市況報導/ })
     expect(link).toHaveAttribute("href", "https://mis.twse.com.tw/")
     expect(link).toHaveAttribute("target", "_blank")

@@ -61,7 +61,7 @@ def instrument_quote(symbol: str, _user: User = Depends(current_user)):
     info = svc.require_instrument(md, symbol)
     q = md.quote(info.symbol)
     if q is None:
-        raise not_found("目前沒有報價")
+        raise not_found("沒有報價")
     return svc.quote_out(q)
 
 

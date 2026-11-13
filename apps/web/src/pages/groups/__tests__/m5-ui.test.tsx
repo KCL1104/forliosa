@@ -93,7 +93,7 @@ describe("群組畫面不透露誰沒分享", () => {
     expect(document.body.textContent).not.toContain("未分享")
     expect(within(table).getAllByText("沒有資料").length).toBeGreaterThan(0)
     // 只對自己說明為什麼是「—」
-    expect(screen.getByText(/你的持股裡有沒有收盤價的股票/)).toBeInTheDocument()
+    expect(screen.getByText(/你有持股沒有收盤價/)).toBeInTheDocument()
   })
 
   it("動態：沒開交易動態的人只有「加入了群組」；成交價只在對方開了才出現，隱私模式遮住", async () => {

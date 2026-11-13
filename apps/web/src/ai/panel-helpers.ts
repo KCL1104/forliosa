@@ -12,14 +12,13 @@ export interface QuickAction {
 
 /**
  * 依頁面出現的常用動作（一行文字連結）：只放這一頁真的能做的事。
- * 帳本：記一筆交易・匯入對帳單・股利入帳；個股頁：記一筆這一檔（有持股時加股利入帳）；
+ * 帳本：記一筆交易・股利入帳（匯入對帳單還沒有，不放入口）；個股頁：記一筆這一檔（有持股時加股利入帳）；
  * 群組、設定、資料來源、紀錄：沒有。
  */
 export function quickActions(ctx: AiContext): QuickAction[] {
   if (ctx.route === "ledger") {
     return [
       { key: "trade", label: "記一筆交易", run: "trade" },
-      { key: "import", label: "匯入對帳單", run: "import" },
       { key: "dividend", label: "股利入帳", run: "dividend" },
     ]
   }

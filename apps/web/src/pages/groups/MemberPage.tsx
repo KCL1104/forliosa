@@ -15,6 +15,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { ROLE_LABEL } from "./labels"
 import { FeedRow } from "./tabs/FeedTab"
 import { WeightList } from "./tabs/HoldingsTab"
+import { usePageTitle } from "@/app/page-title"
 
 /**
  * 一位成員分享給這個群組的內容（SharedPortfolio）：只顯示存在的區塊——
@@ -31,6 +32,7 @@ function Member() {
   const group = useGroup(groupId)
   const shared = useSharedPortfolio(groupId, userId)
   const member = group.data?.members.find((m) => m.user_id === userId)
+  usePageTitle(member?.display_name ?? "群組")
   const missing = (shared.error instanceof ApiError && shared.error.status === 404) || (group.error instanceof ApiError && group.error.status === 404)
   return (
     <PageFrame className="lg:pt-6">

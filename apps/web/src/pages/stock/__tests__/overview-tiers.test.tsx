@@ -35,7 +35,7 @@ const T = { timeout: 8000 }
 // 整個總覽一次載入十幾個查詢：全部測試一起跑時比較慢，給長一點的時間
 describe("總覽的三層", { timeout: 20_000 }, () => {
   afterEach(() => vi.restoreAllMocks())
-  it("第一層：一條鍵值帶；估值位置只說一次，規則句是墨色 Noto Sans（不是紫色楷體），刻度尺不用 ▼△", async () => {
+  it("第一層：一條鍵值帶；估值位置只說一次，規則句是墨色 Noto Sans（不是石墨灰楷體），刻度尺不用 ▼△", async () => {
     const inst = await api.getInstrument("2330.TW")
     const position = await api.getPosition("2330.TW")
     renderPage(<OverviewTab inst={inst} position={position} />)
@@ -45,7 +45,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     expect(sentence.closest(".ai-voice")).toBeNull()
     expect(sentence.className).toContain("text-ink")
     expect(band.textContent).not.toContain("5 年")
-    expect(within(band).getByText(/^資料累積中/)).toBeInTheDocument()
+    expect(within(band).getByText(/^資料從 2026\/06\/01 開始/)).toBeInTheDocument()
     // 百分位只說一次（不在格子、刻度或別的句子重複）
     // 月營收與籌碼各自載入：兩個都出現了再檢查
     await within(band).findByText("10 月營收", undefined, T)
@@ -186,7 +186,7 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
 })
 
 describe("規則句與來源的小工具", () => {
-  it("分頁第一行是墨色 Noto Sans，不是紫色楷體", () => {
+  it("分頁第一行是墨色 Noto Sans，不是石墨灰楷體", () => {
     render(<TabLead>本益比 20.8 倍。</TabLead>)
     const p = screen.getByText("本益比 20.8 倍。")
     expect(p.className).not.toContain("ai-voice")

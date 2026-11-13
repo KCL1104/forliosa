@@ -37,7 +37,7 @@ export function ShareToggles({
               <label htmlFor={id} className={cn("font-medium", locked && "text-ink-2")}>
                 {SHARE_COPY[key].label}
               </label>
-              <p className="text-md text-ink-2" id={`${id}-detail`}>
+              <p className="text-base text-ink" id={`${id}-detail`}>
                 {SHARE_COPY[key].detail}
                 {locked && "要先打開交易動態才會附上。"}
               </p>
@@ -65,8 +65,8 @@ export function ShareToggles({
 }
 
 function PushTargetsNote({ targets }: { targets?: PushTarget[] }) {
-  if (targets === undefined) return <p className="mt-1 text-sm text-ink-2">群組設定了頻道才會送出，只送你在這裡打開的內容。</p>
-  if (targets.length === 0) return <p className="mt-1 text-sm text-ink-2">這個群組還沒有設定頻道。</p>
+  if (targets === undefined) return <p className="mt-1 text-base text-ink">群組有設定頻道才會送；只送你打開的項目。</p>
+  if (targets.length === 0) return <p className="mt-1 text-base text-ink">這個群組還沒有設定頻道。</p>
   return (
     <p className="mt-1 text-sm text-ink-2">
       會送到：<span className="text-ink">{targets.map((t) => (t.kind === "telegram" ? `Telegram「${t.label}」` : t.label)).join("、")}</span>

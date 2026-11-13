@@ -12,7 +12,7 @@ import type { Thread } from "./types"
 const SEEDED: Thread[] = [
   { id: "seed_why", title: "為什麼台積電今天漲 4.83%？", updatedAt: "2026-11-12T13:41:00+08:00", messages: [], seeded: true },
   { id: "seed_878", title: "00878 下次除息能領多少？", updatedAt: "2026-11-11T21:08:00+08:00", messages: [], seeded: true },
-  { id: "seed_import", title: "幫我匯入 10 月永豐對帳單", updatedAt: "2026-11-08T10:15:00+08:00", messages: [], seeded: true },
+  { id: "seed_import", title: "補記 10 月的 0050 定期定額", updatedAt: "2026-11-08T10:15:00+08:00", messages: [], seeded: true },
   { id: "seed_conc", title: "我的持股會不會太集中？", updatedAt: "2026-11-02T22:30:00+08:00", messages: [], seeded: true },
 ]
 

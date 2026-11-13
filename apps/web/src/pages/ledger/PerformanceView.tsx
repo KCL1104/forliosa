@@ -105,7 +105,7 @@ export function PerformanceView() {
               ]}
             />
             {p.benchmark && p.benchmark.twr === null && (
-              <p className="mb-2 text-sm text-ink-2">「{p.benchmark.name}」這段期間沒有資料，暫時無法比較。</p>
+              <p className="mb-2 text-base text-ink">「{p.benchmark.name}」這段期間沒有資料，不能比較。</p>
             )}
             <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} mineLabel={`${me}的報酬`} height={300} />
           </Panel>
@@ -162,7 +162,7 @@ function Metrics({ p }: { p: Performance }) {
   const items: { label: string; help: string; value: React.ReactNode; sub?: React.ReactNode }[] = [
     {
       label: "時間加權報酬（TWR）",
-      help: "排除資金進出的影響，用來比較「選股與操作能力」。",
+      help: "不受存入、提出的影響，適合和基準比。",
       value: <Pct value={p.twr} />,
       sub: excess !== null && (
         // 和基準的差距不是價格漲跌：不用紅綠，用「多／少」說方向
@@ -173,7 +173,7 @@ function Metrics({ p }: { p: Performance }) {
     },
     {
       label: "年化 XIRR",
-      help: `把每一筆投入與取回的時間點算進去，反映${you}實際賺了多少（年化）。`,
+      help: `算進每一筆投入與取回的時間，是${you}實際的年化報酬。`,
       value: p.xirr === null ? <span className="text-ink-2">—</span> : <Pct value={p.xirr} />,
       sub: p.xirr === null ? (p.range === "1D" || p.range === "5D" ? "5 天以內不年化" : "期間太短或現金流不足，無法計算") : "金額加權",
     },
@@ -229,7 +229,7 @@ function ValuePanel({ p }: { p: Performance }) {
         ]}
       />
       {privacy ? (
-        <p className="py-10 text-center text-md text-ink-2">隱私模式開啟中，金額圖表已隱藏。</p>
+        <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
       ) : (
         <div className="h-[220px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -268,9 +268,9 @@ function DividendsByMonth({ p }: { p: Performance }) {
   return (
     <Panel title="每月股利" titleId="divm-title" aside={<span className="num text-md text-ink-2">{privacy ? MASK : `合計 ${formatMoney(total)}`}</span>}>
       {p.dividends_by_month.length === 0 ? (
-        <p className="text-md text-ink-2">這段期間沒有收到股利。</p>
+        <p className="text-base text-ink">這段期間沒有收到股利。</p>
       ) : privacy ? (
-        <p className="py-10 text-center text-md text-ink-2">隱私模式開啟中，金額圖表已隱藏。</p>
+        <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
       ) : (
         <div className="h-[200px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -299,9 +299,9 @@ function RealizedByYear({ p }: { p: Performance }) {
   return (
     <Panel title="每年已實現損益" titleId="real-title">
       {p.realized_by_year.length === 0 ? (
-        <p className="text-md text-ink-2">這段期間沒有賣出，沒有已實現損益。</p>
+        <p className="text-base text-ink">這段期間沒有賣出，沒有已實現損益。</p>
       ) : privacy ? (
-        <p className="py-10 text-center text-md text-ink-2">隱私模式開啟中，金額圖表已隱藏。</p>
+        <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
       ) : (
         <div className="h-[200px] w-full">
           <ResponsiveContainer width="100%" height="100%">
@@ -352,9 +352,9 @@ function Definitions() {
   return (
     <details className="group border-y border-rule py-3">
       <summary className="cursor-pointer text-md font-medium marker:text-ink-2">計算方式</summary>
-      <div className="mt-3 flex max-w-prose flex-col gap-2 text-md text-ink-2">
+      <div className="mt-3 flex max-w-prose flex-col gap-2 text-base text-ink">
         <p>價格用未還原收盤價；股利另以交易紀錄計入。</p>
-        <p>投資組合價值是每天收盤後所有持股的市值（美股依中央銀行公布的當日新臺幣對美元收盤匯率換算成新台幣），第一版不含現金部位。</p>
+        <p>投資組合價值是每天收盤後所有持股的市值（美股依中央銀行公布的當日新臺幣對美元收盤匯率換算成新台幣），不含現金部位。</p>
         <p>每日報酬 = （當日市值 + 當日流出）÷（前一日市值 + 當日流入）− 1。買進成本（含手續費）視為開盤前流入；賣出淨收入與現金股利（扣二代健保）視為收盤後流出。</p>
         <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率；最大回撤以 TWR 指數計算。</p>
       </div>

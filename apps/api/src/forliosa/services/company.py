@@ -126,7 +126,7 @@ def _empty(info: InstrumentInfo) -> dict[str, Any]:
 def _tw_stock(db: Session, md: MarketData, info: InstrumentInfo, out: dict[str, Any]) -> None:
     row = _profile_row(db, md, info.symbol)
     if row is None:
-        out["notes"].append("公司基本資料尚未存檔")
+        out["notes"].append("還沒有公司基本資料")
         return
     v = row.values or {}
     today = today_taipei()

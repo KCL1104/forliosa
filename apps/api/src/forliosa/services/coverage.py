@@ -13,12 +13,25 @@ from forliosa.timeutil import next_tw_trading_day
 
 # A series "covers" its range when its first point is within this many days of the first trading day.
 COVERAGE_GRACE_DAYS = 5
-US_NOTE = "美股目前沒有可商用的行情來源，不提供價格資料"
+US_NOTE = "美股沒有報價"
+
+
+NO_DATA_NOTE = "還沒有資料"
+
+
+def ymd(d: date) -> str:
+    """Dates inside user-facing notes: 2026/06/01 (the same format the pages use for ranges)."""
+    return d.strftime("%Y/%m/%d")
+
+
+def since_note(since: date | None) -> str:
+    """Where a series starts. Notes say the fact (when the data begins), not how it is stored or licensed —
+    the reasons live on the 資料來源與授權 page (product owner, 2026-11-13)."""
+    return f"資料從 {ymd(since)} 開始" if since else NO_DATA_NOTE
 
 
 def accumulating_note(md: MarketData, symbol: str | None = None) -> str:
-    since = md.archive_since(symbol)
-    return f"資料累積中：自 {since.isoformat()} 起存檔" if since else "資料累積中：尚未開始存檔"
+    return since_note(md.archive_since(symbol))
 
 
 def covers(first: date | None, start: date) -> bool:

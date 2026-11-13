@@ -4,6 +4,7 @@ import { useReadOnly } from "@/api/view-as"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageFrame } from "@/app/PageFrame"
 import { PageHeader } from "@/components/section"
+import { usePageTitle } from "@/app/page-title"
 
 /**
  * 紀錄：發起新對話、過去的對話（手機從「問 AI」畫面的時鐘進來；桌面在 AI 面板的紀錄圖示也看得到）。
@@ -11,6 +12,7 @@ import { PageHeader } from "@/components/section"
  * 查看別人的資產時不能用：這裡是查看者自己的 AI 紀錄，AI 也不讀被查看者的資料（和群組、設定一樣擋下）。
  */
 export function HistoryPage() {
+  usePageTitle("紀錄")
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="紀錄" />
   return <History />

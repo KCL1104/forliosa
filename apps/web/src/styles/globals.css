@@ -135,7 +135,7 @@
 /*
  * Forliosa 設計 token —— 世界觀：學校聯絡簿。說明見 /DESIGN.md。
  * 淺色是紙白、深色是藍黑夜間筆記本；1px 藍灰格線就是結構（表格不包卡片）；
- * 藍黑原子筆墨是文字與動作；紫色只屬於 AI（老師的筆）；紅綠只表示價格漲跌。
+ * 藍黑原子筆墨是文字與動作；石墨灰只屬於 AI（鉛筆）；紅綠只表示價格漲跌。
  */
 :root {
   /* 紙與墨 */
@@ -162,10 +162,14 @@
   --on-fg: var(--paper);
   --on-ring: var(--ink);
 
-  /* AI：老師的筆（紫） */
-  --ai: #5b3fa0;
-  --ai-wash: #f5f2fb;
-  --ai-rule: #a896d6;
+  /*
+   * AI：鉛筆（石墨灰）。AI 寫的字、起的草稿是鉛筆寫的，使用者簽名才是墨水（產品負責人 2026-11-13：不用紫色——
+   * 紫色是最典型的「AI 產品」顏色；改成鉛筆之後，介面上的顏色只剩價格的紅與綠）。
+   * 對紙 7.5:1、對淡底 6.9:1；虛線（草稿卡的框）對淡底 3.1:1。
+   */
+  --ai: #4a5262;
+  --ai-wash: #f1f2f4;
+  --ai-rule: #8b919f;
 
   /* 價格：紅與綠（依 data-convention 對應漲跌） */
   --red: #c42b2b;
@@ -246,9 +250,9 @@
   --on-fg: var(--ink);
   --on-ring: #8796ba;
 
-  --ai: #b4a3f5;
-  --ai-wash: #1a1a35;
-  --ai-rule: #6b5dbb;
+  --ai: #bfc6d4;
+  --ai-wash: #191f2e;
+  --ai-rule: #636c83;
 
   --red: #ff6b6b;
   --green: #4cc38a;
@@ -504,7 +508,7 @@
     font-feature-settings: "pnum" 1, "lnum" 1;
   }
 
-  /* AI 的話：老師的筆——紫色楷體。只給模型真的寫出來的字；規則或範本產生的句子用墨色 Noto Sans */
+  /* AI 的話：鉛筆——石墨灰楷體。只給模型真的寫出來的字；規則或範本產生的句子用墨色 Noto Sans */
   .ai-voice {
     font-family: var(--font-ai);
     color: var(--ai);
@@ -748,10 +752,10 @@
     pointer-events: none;
   }
   /*
-   * 「問 AI」格：和簽名格同一種方格（直角、內縮 3px 的細框），用老師的紫色。
-   * 簽名格是使用者的墨色（你簽名），這一格是 AI 的紫色（交給老師）。
-   * 淺色：AI 紫的實心格（紙上蓋的一格）。深色：平常只有紫色淡底＋1px 紫色框線＋紫色字——夜裡整頁最亮的一塊
-   * 不該是「問 AI」；有草稿在等簽名時（data-pending）才變成實心，和簽名格一樣亮。
+   * 「問 AI」格：和簽名格同一種方格（直角、內縮 3px 的細框），用鉛筆的石墨灰。
+   * 簽名格是使用者的墨色（你簽名），這一格是 AI 的石墨灰（交給 AI）。
+   * 平常（淺色與深色都一樣）只有石墨淡底＋1px 石墨灰框線＋石墨灰的字：鉛筆畫的一格。灰色的實心格看起來像停用的按鈕，
+   * 而且整頁最重的一塊不該是「問 AI」。有草稿在等簽名時（data-pending）才變成實心的石墨灰格。
    */
   .ask-box {
     position: relative;
@@ -780,12 +784,12 @@
   .ask-box:active {
     transform: scale(0.97);
   }
-  .dark .ask-box:not([data-pending]) {
+  .ask-box:not([data-pending]) {
     background: var(--ai-wash);
     color: var(--ai);
     box-shadow: inset 0 0 0 1px var(--ai-rule);
   }
-  .dark .ask-box:not([data-pending])::after {
+  .ask-box:not([data-pending])::after {
     border-color: var(--ai-rule);
     opacity: 0.55;
   }

@@ -87,14 +87,14 @@ export function KeyGrid({ items, className, cols = 3 }: { items: KeyItem[]; clas
 export type KeyItem = { label: string; value: React.ReactNode; title?: string; wide?: boolean }
 
 /**
- * 空狀態（全站同一種）：上下各一條實線格線（沒有外框、沒有底色）、15px 墨色標題（600）、淡墨寫原因、最多一個動作。
+ * 空狀態（全站同一種）：上下各一條實線格線（沒有外框、沒有底色）、15px 墨色標題（600）、同樣 15px 墨色寫原因、最多一個動作。
  * 虛線在這個系統是「AI 草稿」，空狀態不用。
  */
 export function NotYet({ title, children, action, className }: { title: string; children?: React.ReactNode; action?: React.ReactNode; className?: string }) {
   return (
     <div className={cn("flex flex-col items-start border-y border-rule py-5", className)}>
       <p className="text-base font-semibold text-ink">{title}</p>
-      {children && <div className="mt-1 max-w-prose text-md text-ink-2">{children}</div>}
+      {children && <div className="mt-1 max-w-prose text-base text-ink">{children}</div>}
       {action && <div className="mt-3">{action}</div>}
     </div>
   )

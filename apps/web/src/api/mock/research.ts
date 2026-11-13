@@ -401,7 +401,7 @@ export function buildEvents(spec: MockInstrumentSpec, holding: Holding | undefin
       out.push({
         date, type: "revenue_release", period, url: actual ? MOPS_URL : null, mine: qty > 0, amount_estimate: null, estimated: !actual,
         title: actual ? `公布 ${m} 月營收` : `${m} 月營收公布期限（預估）`,
-        detail: actual && rev ? `${m} 月營收 ${new Intl.NumberFormat("zh-TW").format(rev.revenue)} 千元，年增 ${rev.yoy_pct === null ? "—" : `${(rev.yoy_pct * 100).toFixed(1)}%`}` : actual ? null : "尚未偵測到實際公布日：每月 10 日前公布上個月營收（法定期限）",
+        detail: actual && rev ? `${m} 月營收 ${new Intl.NumberFormat("zh-TW").format(rev.revenue)} 千元，年增 ${rev.yoy_pct === null ? "—" : `${(rev.yoy_pct * 100).toFixed(1)}%`}` : actual ? null : "還不知道實際公布日；法定期限是每月 10 日前公布上個月營收",
         sources: actual ? mops : rule,
       })
     }
@@ -541,7 +541,7 @@ export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[], com
     currency: spec.currency,
     as_of: MOCK_AS_OF,
     // 美股的台幣金額用到匯率：後端一併列出匯率資料集的顯名聲明（商用模式是中央銀行的收盤匯率）
-    sources: ["本系統帳本", ...(spec.currency === "USD" ? [commercial ? sourceOf("cbc-opendata/fx") : "示範資料（模擬）"] : [])],
+    sources: ["帳本紀錄", ...(spec.currency === "USD" ? [commercial ? sourceOf("cbc-opendata/fx") : "示範資料（模擬）"] : [])],
     is_demo: !commercial,
   }
 }

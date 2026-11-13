@@ -4,6 +4,7 @@ import { FieldError } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
+import { PUBLIC_NAME_HELP } from "./labels"
 import { usePublicNameForm } from "./use-public-name-form"
 
 /**
@@ -26,8 +27,8 @@ export function PublicNamePrompt({ onDone, className }: { onDone?: (user: User) 
       <label htmlFor={id} className="text-base font-semibold text-ink">
         先選一個公開暱稱
       </label>
-      <p id={`${id}-help`} className="max-w-prose text-md text-ink-2">
-        公開討論裡大家看到的是這個名字，不是你的顯示名稱或頭像；群組裡仍用原本的名字。2 到 20 個字，之後每 7 天可以改一次。
+      <p id={`${id}-help`} className="max-w-prose text-base text-ink">
+        {PUBLIC_NAME_HELP}
       </p>
       <div className="mt-1.5 flex flex-wrap items-start gap-3">
         <Input

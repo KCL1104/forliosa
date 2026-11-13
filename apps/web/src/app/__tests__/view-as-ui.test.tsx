@@ -72,7 +72,7 @@ describe("查看模式：查看者自己的頁面", () => {
   it("紀錄頁（AI 對話）擋下，不能發起對話", async () => {
     useViewAs.getState().set(DAD)
     renderApp("/history")
-    expect(await screen.findByText(/這裡是你自己的紀錄，結束查看後才能使用/, undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText(/紀錄是你自己的，結束查看後才能用/, undefined, T)).toBeInTheDocument()
     expect(screen.queryByText("發起新對話")).toBeNull()
     expect(screen.queryByText("我的持股會不會太集中？")).toBeNull()
   })

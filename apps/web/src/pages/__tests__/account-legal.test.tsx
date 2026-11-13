@@ -129,6 +129,34 @@ describe("Markdown（條款文件的版面）", () => {
     expect(screen.getByText("【待填：生效日期】").tagName).toBe("MARK")
   })
 
+  it("節有 id；「第 N 節」是頁內連結；這份文件沒有那一節就只是字", () => {
+    const md = "# 文件\n\n## 1. 第一節\n\n見第 2 節，另見第 9 節。\n\n## 2. 第二節\n\n內文"
+    render(<Markdown source={md} />)
+    expect(screen.getByRole("heading", { level: 2, name: "1. 第一節" })).toHaveAttribute("id", "sec-1")
+    expect(screen.getByRole("heading", { level: 2, name: "2. 第二節" })).toHaveAttribute("id", "sec-2")
+    expect(screen.getByRole("link", { name: "第 2 節" })).toHaveAttribute("href", "#sec-2")
+    // 這份文件沒有第 9 節：不做成壞掉的連結
+    expect(screen.queryByRole("link", { name: "第 9 節" })).toBeNull()
+  })
+
+  it("表格：兩欄的照欄寬換行（沒有最小寬度）；三欄以上在手機改成一列一塊（欄名：內容），不橫向捲動", () => {
+    const two = "## 7. 保存多久\n\n| 資料 | 保存期間 |\n|---|---|\n| 登入狀態 | 30 天 |\n"
+    const { container, unmount } = render(<Markdown source={two} />)
+    const table = screen.getByRole("table", { name: "7. 保存多久（表格）" })
+    expect(table.className).not.toMatch(/min-w-|max-sm:hidden/)
+    expect(container.querySelector("ul")).toBeNull()
+    expect(container.querySelector(".overflow-x-auto")).toBeNull()
+    unmount()
+    const four = "## 4. 廠商\n\n| 廠商 | 做什麼 | 會經手什麼 | 所在地 |\n|---|---|---|---|\n| Railway | 主機 | 全部資料 | 新加坡 |\n"
+    render(<Markdown source={four} />)
+    // 桌面是表格（手機藏起來）；手機是清單（桌面藏起來）
+    expect(screen.getByRole("table", { name: "4. 廠商（表格）" })).toHaveClass("max-sm:hidden")
+    const list = screen.getByRole("list", { name: "4. 廠商（表格）" })
+    expect(list).toHaveClass("sm:hidden")
+    const row = within(list).getByRole("listitem")
+    expect(row.textContent).toBe("Railway做什麼：主機會經手什麼：全部資料所在地：新加坡")
+  })
+
   it("草稿的判斷與給審閱者看的引言", () => {
     expect(isDraft("生效日期：【待填：生效日期】")).toBe(true)
     expect(isDraft("生效日期：2026-12-01")).toBe(false)
@@ -161,10 +189,32 @@ describe("服務條款與隱私權政策的頁面", () => {
     expect(screen.getByRole("navigation", { name: "主要" })).toBeInTheDocument()
   })
 
+  it("分頁標題是文件名稱；有目錄（每一節一個頁內連結）；〈隱私權政策〉第 N 節連到那一頁的那一節；草稿日期不顯示", async () => {
+    mount()
+    renderApp("/terms")
+    expect(await screen.findByRole("heading", { level: 1, name: /服務條款/ }, T)).toBeInTheDocument()
+    await waitFor(() => expect(document.title).toBe("服務條款｜Forliosa"))
+    const toc = screen.getByRole("navigation", { name: "目錄" })
+    expect(within(toc).getByRole("link", { name: "重點先講" })).toHaveAttribute("href", "#sec-top")
+    expect(within(toc).getByRole("link", { name: "6. 討論區規則" })).toHaveAttribute("href", "#sec-6")
+    expect(screen.getByRole("heading", { level: 2, name: "6. 討論區規則" })).toHaveAttribute("id", "sec-6")
+    const article = screen.getByRole("article")
+    expect(within(article).getByRole("link", { name: "〈隱私權政策〉第 6 節" })).toHaveAttribute("href", "/privacy#sec-6")
+    expect(within(article).getAllByRole("link", { name: "第 9 節" })[0]).toHaveAttribute("href", "#sec-9")
+    expect(within(article).queryByText(/草稿日期/)).toBeNull()
+  })
+
   it("登入頁：登入即表示同意，連到兩份文件；剛刪除帳號回來時寫一句", async () => {
     mount({ signedIn: false })
     renderApp("/login")
     const consent = (await screen.findByText(/登入即表示你同意/, undefined, T)).closest("p")!
+    // 從連結進來的人不知道這是什麼：一句話說 Forliosa 是什麼，旁邊是用示範資料畫的帳本（標示示範資料；假數字不讀給報讀器）
+    expect(screen.getByText("Forliosa 是以台股為主的持倉帳本，可以看績效、查個股、問 AI，也能和親友開群組。")).toHaveClass("text-base", "text-ink")
+    const specimen = screen.getByRole("figure")
+    expect(specimen).toHaveTextContent("示範畫面：登入後的帳本。")
+    expect(within(specimen).getByText("示範資料")).toBeInTheDocument()
+    expect(within(specimen).getByText("台積電").closest("[aria-hidden]")).not.toBeNull()
+    await waitFor(() => expect(document.title).toBe("登入｜Forliosa"))
     expect(within(consent).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(consent).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
     expect(screen.queryByText("你的帳號已經刪除。")).toBeNull()
@@ -177,7 +227,7 @@ describe("服務條款與隱私權政策的頁面", () => {
     mount({ signedIn: false })
     renderApp("/discussions")
     await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
-    const about = screen.getByText(/Forliosa 是以台股為主/).closest("p")!
+    const about = screen.getByText(/Forliosa 是以台股為主/).closest("p")!.parentElement!
     expect(within(about).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(about).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
   })

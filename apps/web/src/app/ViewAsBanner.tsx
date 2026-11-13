@@ -1,3 +1,4 @@
+import { inText } from "@/lib/cjk"
 import { EyeIcon } from "lucide-react"
 import { useViewingAs } from "@/api/view-as"
 import { Button } from "@/components/ui/button"
@@ -47,8 +48,8 @@ export function ViewAsBlocked({ title }: { title: string }) {
   return (
     <PageFrame className="flex flex-col items-start gap-3">
       <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{title}</h1>
-      <p className="max-w-prose text-base text-ink-2">
-        正在查看 {target?.owner.display_name ?? "別人"} 的資產，這裡是你自己的{title}，結束查看後才能使用。
+      <p className="max-w-prose text-base text-ink">
+        正在查看{inText(target?.owner.display_name ?? "別人")}的資產。{title}是你自己的，結束查看後才能用。
       </p>
       <Button variant="outline" onClick={exit}>
         結束查看

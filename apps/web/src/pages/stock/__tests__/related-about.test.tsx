@@ -95,7 +95,7 @@ describe("總覽的「關於〈公司〉」", () => {
     fireEvent.click(screen.getByRole("button", { name: /資料來源與授權/ }))
     expect(screen.getByText("臺灣證券交易所〈上市公司基本資料〉（2026）")).toBeInTheDocument()
   })
-  it("沒有條目時是 AI 依公開資料整理的簡介（模型寫的字：紫色楷體）", async () => {
+  it("沒有條目時是 AI 依公開資料整理的簡介（模型寫的字：石墨灰楷體）", async () => {
     const gw = await api.getInstrument("6488.TWO")
     withQueries(<AboutCompany inst={gw} />)
     const section = await screen.findByRole("region", { name: "關於「環球晶」" }, { timeout: 3000 })

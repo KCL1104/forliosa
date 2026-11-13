@@ -6,7 +6,7 @@ import { ApiError } from "@/api/types"
 import { qk } from "@/api/queries"
 import { PrefsBridge } from "@/app/PrefsBridge"
 import { exitOnRevoked } from "@/app/view-as"
-import { Toaster } from "@/components/ui/sonner"
+import { AppToaster } from "@/app/AppToaster"
 import { TooltipProvider } from "@/components/ui/tooltip"
 import { createAppRouter } from "@/router"
 import "@/styles/globals.css"
@@ -43,7 +43,7 @@ createRoot(document.getElementById("root")!).render(
       <TooltipProvider delay={300}>
         <PrefsBridge />
         <RouterProvider router={router} />
-        <Toaster position="top-center" offset={{ top: "calc(env(safe-area-inset-top, 0px) + 12px)" }} />
+        <AppToaster />
       </TooltipProvider>
     </QueryClientProvider>
   </StrictMode>,

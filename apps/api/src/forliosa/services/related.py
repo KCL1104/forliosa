@@ -287,7 +287,7 @@ def related(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, A
     sym = info.symbol
     out: dict[str, Any] = {"symbol": sym, "items": [], "sources": [], "notes": []}
     if info.market == "US":
-        out["notes"].append("美股目前沒有可商用的相關股票資料")
+        out["notes"].append("美股沒有相關股票資料")
         return out
     today = today_taipei()
     built: dict[str, tuple[dict[str, Any], str] | None] = {}

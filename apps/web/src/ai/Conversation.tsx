@@ -18,7 +18,7 @@ import type { Answer, AnswerLink, Message, Thread } from "./types"
 type Runner = ReturnType<typeof useAiRunner>
 
 /**
- * 對話：使用者的話靠右（格線小框、墨色）；模型寫的話是紫色楷體，本機規則或範本寫的句子是墨色 Noto Sans；
+ * 對話：使用者的話靠右（格線小框、墨色）；模型寫的話是石墨灰楷體，本機規則或範本寫的句子是墨色 Noto Sans；
  * 草稿卡跟在後面，引用的網路來源是回答下方的「出處」註腳。免責聲明一段對話只出現一次，在最新一則回答下方。
  */
 export function Conversation({ thread, runner, size = "panel", onNavigate }: { thread: Thread; runner: Runner; size?: "panel" | "screen"; onNavigate?: () => void }) {
@@ -115,7 +115,7 @@ const modelSize = kaiSize
 const ruleSize = { panel: "text-base leading-relaxed", screen: "text-[1rem] leading-relaxed" } as const
 
 /**
- * 模型寫的話（紫色楷體）。漢字的片段收字距、數字和單位不在行尾拆開（`KaiText`）。
+ * 模型寫的話（石墨灰楷體）。漢字的片段收字距、數字和單位不在行尾拆開（`KaiText`）。
  * 後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
  * 後面接一個安靜的「無來源」小標記（淡墨，不用紅色）；按下展開說明。
  */
@@ -141,7 +141,7 @@ export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: 
   )
 }
 
-/** 本機規則或範本寫的句子（草稿的說明、規則版的回答）：不是模型寫的，墨色 Noto Sans、不用紫色 */
+/** 本機規則或範本寫的句子（草稿的說明、規則版的回答）：不是模型寫的，墨色 Noto Sans、不用石墨灰 */
 function RuleText({ text, size }: { text: string; size: "panel" | "screen" }) {
   return <p className={cn("whitespace-pre-line text-ink", ruleSize[size])}>{text}</p>
 }
@@ -171,7 +171,7 @@ function UngroundedMark({ passage }: { passage: UngroundedPassage }) {
   )
 }
 
-/** 串流中：一個安靜的紫點；查資料時旁邊一行灰字（回答寫完就消失） */
+/** 串流中：一個安靜的石墨灰點；查資料時旁邊一行灰字（回答寫完就消失） */
 function StreamingLine({ message }: { message: Message }) {
   const running = [...(message.tools ?? [])].reverse().find((t) => t.status === "running")
   return (
@@ -192,7 +192,7 @@ function ErrorNote({ code, message, size }: { code: string; message: string; siz
     )
   }
   return (
-    <p className="mt-2 flex items-start gap-2 text-md text-ink-2" role="status">
+    <p className="mt-2 flex items-start gap-2 text-base text-ink" role="status">
       <CircleAlertIcon aria-hidden className="mt-1 size-4 shrink-0" />
       <span>{message}</span>
     </p>

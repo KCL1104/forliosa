@@ -29,8 +29,8 @@ export function ChannelsTab({ group }: { group: Group }) {
   const linked = !!linking && c.telegram.status === "active"
   return (
     <div className="flex max-w-2xl flex-col gap-12">
-      <p className="text-md text-ink-2">
-        只有打開「推播」的成員，他在這個群組分享的內容才會送到這些頻道。{owner ? "" : "頻道由擁有者設定。"}
+      <p className="text-base text-ink">
+        成員自己打開「推播」，他分享的內容才會送到頻道。{owner ? "" : "頻道由擁有者設定。"}
       </p>
 
       <Section title="Discord" titleId="gc-discord" aside={<Status configured={c.discord.configured} status={c.discord.status} />}>
@@ -97,7 +97,7 @@ function NotifyToggles({ groupId, kind, value, editable }: { groupId: string; ki
           <label htmlFor={id} className="font-medium">
             {label}
           </label>
-          <p className="text-md text-ink-2">{detail}</p>
+          <p className="text-base text-ink">{detail}</p>
         </div>
         <Switch
           id={id}
@@ -219,7 +219,7 @@ function TelegramLink({ groupId, code, onCode }: { groupId: string; code: Telegr
             在群組裡傳 <code className="num rounded-xs bg-hov px-1.5 py-0.5 text-lg font-medium">/link {code.code}</code>
           </li>
         </ol>
-        <p className="num text-sm text-ink-2">連結碼 {formatDateTime(code.expires_at)} 前有效、只能用一次。連結好之後，這裡會顯示群組名稱。</p>
+        <p className="num text-sm text-ink-2">連結碼 {formatDateTime(code.expires_at)} 前有效，只能用一次。</p>
         <Button variant="ghost" size="sm" className="self-start" onClick={() => onCode(null)}>
           取消
         </Button>

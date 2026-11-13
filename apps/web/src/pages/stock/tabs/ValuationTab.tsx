@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react"
+import { isCoverageNote } from "@/lib/data-notes"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { appToday } from "@/api"
 import { useValuation } from "@/api/queries"
@@ -47,14 +48,13 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
       <div className="flex flex-col gap-10">
         <NotYet title={instrument.type === "etf" ? "ETF 沒有本益比與股價淨值比河流圖" : "這檔還沒有估值資料"}>
           {instrument.type === "etf"
-            ? instrument.market === "US"
-              ? "ETF 是一籃子股票，沒有自己的每股盈餘與帳面淨值；美股目前也沒有可商用的配息資料來源。"
-              : "ETF 是一籃子股票，沒有自己的每股盈餘與帳面淨值。下面是淨值與折溢價、殖利率走勢。"
-            : "還沒有這檔的歷史每股盈餘與淨值資料。"}
+            ? "ETF 是一籃子股票，沒有自己的每股盈餘與淨值。"
+            : "沒有這檔的歷史每股盈餘與淨值。"}
         </NotYet>
         {instrument.type === "etf" && instrument.market !== "US" && <EtfNavSection inst={instrument} titleId="val-premium" />}
         <YieldPanel valuation={v} />
-        <Notes notes={v.notes} />
+        {/* ETF：上面那一句已經說了為什麼沒有，後端同樣意思的說明不再印一次 */}
+        <Notes notes={v.notes.filter((n) => !n.startsWith("ETF 沒有"))} />
       </div>
     )
   }
@@ -62,7 +62,7 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
   // 期間照資料實際的長度寫：商用模式的存檔從 2026-06-01 才開始累積，不能說成「近 5 年」
   const span = valuationSpan(v.series, appToday())
   // 後端的說明分兩種：狀態（「資料累積中…」）一直看得到；算法（「EPS = 收盤價 ÷ 本益比」）收進河流圖的「怎麼看 ⌄」
-  const status = v.notes.filter((n) => n.startsWith("資料累積中"))
+  const status = v.notes.filter(isCoverageNote)
   const method = v.notes.filter((n) => !status.includes(n))
   // 估值位置（百分位）只在右邊「現在的本益比」說一次
   return (
@@ -171,7 +171,7 @@ function RiverPanel({
         {howTo.panel(
           <>
             <p>
-              每條帶是「{baseLabel} × 倍數」的股價，由下往上越來越貴（最下面到 {multiples[0]} 倍、最上面到 {multiples.at(-1)} 倍）；收盤價落在越上面的帶越貴。
+              每條帶是「{baseLabel} × 倍數」算出來的股價，從 {multiples[0]} 倍到 {multiples.at(-1)} 倍；收盤價越靠上面，{ratioLabel}越高。
             </p>
             {method.map((n) => (
               <p key={n} className="mt-1">
@@ -247,8 +247,8 @@ function RiverPanel({
         {currentInvalid ? (
           <div className="flex flex-col gap-2">
             <p className="text-2xl font-medium">不適用</p>
-            <p className="text-md text-ink-2">
-              {baseLabel}目前 ≤ 0（{last?.base !== null && last?.base !== undefined ? perShare(last.base) : "無資料"}），{ratioLabel}沒有意義。可改看股價淨值比或殖利率。
+            <p className="text-base text-ink">
+              {baseLabel} ≤ 0（{last?.base !== null && last?.base !== undefined ? perShare(last.base) : "無資料"}），{ratioLabel}沒有意義。可改看股價淨值比或殖利率。
             </p>
           </div>
         ) : (
@@ -325,7 +325,7 @@ function YieldPanel({ valuation }: { valuation: Valuation }) {
       action={data.length >= 2 ? howTo.toggle : undefined}
     >
       {data.length < 2 ? (
-        <p className="text-md text-ink-2">還沒有足夠的配息資料可以畫殖利率走勢。</p>
+        <p className="text-base text-ink">配息資料還不夠畫殖利率走勢。</p>
       ) : (
         <>
           {howTo.panel(<p>殖利率＝近 12 個月現金股利 ÷ 收盤價。</p>, "mb-2")}

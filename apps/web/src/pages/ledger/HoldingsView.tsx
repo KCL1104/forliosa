@@ -5,6 +5,7 @@ import { useHoldings, useIntraday, useWatchlist } from "@/api/queries"
 import type { Holding, WatchItem } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { Masked, Pct } from "@/components/finance"
+import { inText } from "@/lib/cjk"
 import { DemoTag } from "@/components/section"
 import { Sparkline } from "@/components/sparkline"
 import { EmptyState, ErrorState } from "@/components/states"
@@ -81,10 +82,9 @@ export function HoldingsView() {
 function UnpricedNote({ rows }: { rows: Holding[] }) {
   const list = unpricedHoldings(rows)
   if (list.length === 0) return null
-  const us = list.every((h) => h.market === "US")
   return (
-    <p className="mt-2.5 text-sm text-ink-2">
-      {us ? "美股目前沒有可商用的報價來源（需要授權的行情）" : "目前沒有報價"}，{list.map((h) => h.name).join("、")} 以成本計值，現價與漲跌顯示「—」。
+    <p className="mt-2.5 text-base text-ink">
+      {inText(list.map((h) => h.name).join("、"), "start")}沒有報價，以成本計值。
     </p>
   )
 }
@@ -97,7 +97,7 @@ function EmptyLedger() {
   return (
     <EmptyState
       title="帳本還是空的"
-      description="跟 AI 說一句就能記下第一筆。它會先算好手續費和稅寫成草稿，你簽名後才入帳。"
+      description="跟 AI 說一句，記下第一筆。"
       action={
         <Button variant="outline" onClick={() => ask.submit("買 0050 2 張 52.4")}>
           試試「買 0050 2 張 52.4」
@@ -319,7 +319,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
 
 /** 觀察是空的：區塊標題的格線就是上面那條線 */
 function WatchEmpty() {
-  return <EmptyState className="border-t-0" title="還沒有觀察的股票" description="在個股頁按「加入觀察」，這裡會列出今天的走勢。" />
+  return <EmptyState className="border-t-0" title="還沒有觀察的股票" description="在個股頁按「加入觀察」。" />
 }
 
 /** 手機：兩行列 */

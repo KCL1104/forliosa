@@ -1,6 +1,6 @@
 import { ArrowUpIcon, PlusIcon } from "lucide-react"
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { useAi } from "./store"
 
@@ -10,7 +10,8 @@ export interface ComposerHandle {
 
 interface Props {
   onSubmit: (text: string) => void
-  onAttach: (kind: "import" | "form") => void
+  /** 「＋」：改用表單記一筆 */
+  onForm: () => void
   variant: "panel" | "screen"
   placeholder: string
   /** 手機：輸入時往上回報文字，用來即時搜尋股票 */
@@ -21,7 +22,7 @@ interface Props {
  * 輸入框是 AI 的主要入口：提問、記帳指令（「買 0050 2 張 52.4」）、搜尋（手機）。提示字依頁面（`composerPlaceholder`）。
  * Enter 送出、Shift+Enter 換行；⌘J 從任何地方聚焦（桌面）。
  */
-export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ onSubmit, onAttach, variant, placeholder, onDraftChange }, ref) {
+export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ onSubmit, onForm, variant, placeholder, onDraftChange }, ref) {
   const [text, setText] = useState("")
   const area = useRef<HTMLTextAreaElement>(null)
   const hintId = useId()
@@ -52,27 +53,26 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   }
   const empty = text.trim().length === 0
 
+  // 「＋」只有一件事：打開表單記一筆（匯入對帳單還沒有，還沒有的功能不出現；只有一項就不做成選單）
   const attach = (
-    <DropdownMenu>
-      <DropdownMenuTrigger
+    <Tooltip>
+      <TooltipTrigger
         render={
           <button
             type="button"
-            aria-label="附件與其他記帳方式"
+            aria-label="用表單記一筆"
+            onClick={onForm}
             className={cn(
-              "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink",
+              "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink",
               variant === "panel" ? "size-9 pointer-coarse:size-11" : "size-11",
             )}
           />
         }
       >
         <PlusIcon aria-hidden className={variant === "panel" ? "size-[18px]" : "size-5"} />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" side="top" className="w-56">
-        <DropdownMenuItem onClick={() => onAttach("import")}>匯入對帳單</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => onAttach("form")}>改用表單記一筆</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
+      </TooltipTrigger>
+      <TooltipContent>用表單記一筆</TooltipContent>
+    </Tooltip>
   )
 
   if (variant === "screen") {

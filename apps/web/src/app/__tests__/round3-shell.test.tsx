@@ -11,7 +11,7 @@ import { ACCOUNT_ROUTES, DOCK_TABS, isAccountRoute, isQuietRoute, NAV_ITEMS, QUI
 /**
  * 第三輪（外殼）：
  * - 導覽設定在一個地方（nav.ts）：頂部列、底部列、AI 面板預設收成窄欄的頁面。
- * - 手機底部列的分頁從內容的左緣開始；深色的「問 AI」平常只有框線（`data-pending` 才實心）；待簽名的筆數同一個畫面不寫兩次。
+ * - 手機底部列的分頁從內容的左緣開始；「問 AI」平常只有框線（`data-pending` 才實心）；待簽名的筆數同一個畫面不寫兩次。
  * - 手機標題列有搜尋鈕，打開滿版的搜尋。
  * - 桌面 AI 面板：安靜的頁面預設是窄欄；在那裡打開後，換到別的安靜頁面也開著；有對話或草稿時換頁不收起來；紀錄頁不重複列對話。
  */
@@ -105,7 +105,7 @@ describe("手機底部列", () => {
     expect(links[1]!.querySelector("span")).not.toHaveAttribute("data-active")
   })
 
-  it("「問 AI」：平常沒有 data-pending（深色只有框線）；有草稿等簽名才有（實心）", async () => {
+  it("「問 AI」：平常沒有 data-pending（只有框線）；有草稿等簽名才有（實心）", async () => {
     renderApp("/groups")
     const ask = await screen.findByRole("button", { name: "問 AI" }, T)
     expect(ask).toHaveClass("ask-box")

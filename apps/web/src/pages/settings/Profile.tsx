@@ -8,7 +8,7 @@ import { Section } from "@/components/section"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { suspendedText, suspendedUntil } from "@/pages/discussions/labels"
+import { PUBLIC_NAME_HELP, suspendedText, suspendedUntil } from "@/pages/discussions/labels"
 import { usePublicNameForm } from "@/pages/discussions/use-public-name-form"
 import { FieldError } from "@/components/form-field"
 
@@ -64,8 +64,15 @@ function ProfileForm({ name: initial, email, avatar }: { name: string; email: st
           顯示名稱
         </label>
         <Input id="display-name" value={name} maxLength={30} autoComplete="nickname" aria-invalid={bad} aria-describedby="display-name-help" onChange={(e) => setName(e.target.value)} className="pointer-coarse:h-11 sm:col-start-1 sm:row-start-2" />
-        <p id="display-name-help" className="text-sm text-ink-2 sm:col-start-1 sm:row-start-3">
-          {bad ? "請填 1 到 30 個字。" : `群組裡大家看到的名字。登入帳號：${email}`}
+        {/* 說明是要讀的句子（15px 墨色）；登入帳號是標註（淡墨小字） */}
+        <p id="display-name-help" className="text-base text-ink sm:col-start-1 sm:row-start-3">
+          {bad ? (
+            "請填 1 到 30 個字。"
+          ) : (
+            <>
+              群組裡大家看到的名字。<span className="text-sm text-ink-2">登入帳號：{email}</span>
+            </>
+          )}
         </p>
         <SaveSlot dirty={dirty} disabled={bad || update.isPending} pending={update.isPending} />
       </div>
@@ -110,8 +117,8 @@ function PublicNameForm({ user }: { user: User }) {
           {form.error && (
             <FieldError id="public-name-error">{form.error}</FieldError>
           )}
-          <p id="public-name-help" className="text-sm text-ink-2">
-            公開討論裡大家看到的是這個名字，群組裡仍用顯示名稱。2 到 20 個字；{current ? "改了之後 7 天內不能再改。" : "選好之後，每 7 天可以改一次。"}
+          <p id="public-name-help" className="text-base text-ink">
+            {PUBLIC_NAME_HELP}
           </p>
         </div>
         <SaveSlot dirty={dirty} disabled={form.pending || !form.trimmed} pending={form.pending} />

@@ -86,7 +86,7 @@ def test_official_block_only(tech):
     assert {"rsi14", "kd", "macd", "bollinger", "volume", "high_low", "streak", "events"} <= set(block)
     short = f"日 K 只有 {len(DAYS)} 根（2026-06-01 起），不足以計算：MA120（需 120 根）、MA240（需 240 根）"
     assert short in block["notes"]
-    assert res["notes"] == ["資料累積中：自 2026-06-01 起存檔"]  # the same note get_stock_history passes on
+    assert res["notes"] == ["資料從 2026/06/01 開始"]  # the same note get_stock_history passes on
     assert "未還原權息" in res["units"] and "不是買賣建議" in res["units"]
 
 
@@ -149,11 +149,11 @@ def test_short_history_says_what_is_missing(tech):
     assert note.startswith(f"日 K 只有 12 根（{DAYS[-12].isoformat()} 起），不足以計算：")
     for name in ("MA20", "MA60", "MA120", "MA240", "RSI14", "MACD", "布林通道", "20 日高低點", "20 日量比"):
         assert name in note
-    assert any(n.startswith("資料累積中：自 ") for n in res["notes"])
+    assert any(n.startswith("資料從 ") for n in res["notes"])
     # nothing archived at all: no numbers, and the supplied price is not used
     out, res = run(tech, symbol="2317", price=200, price_source="user")
     assert not out.is_error and res["as_of_close"] is None and "with_provisional_price" not in res
-    assert res["notes"][0].startswith("資料累積中") and "沒有使用提供的價格" in res["notes"][-1]
+    assert res["notes"][0].startswith("資料從 ") and "沒有使用提供的價格" in res["notes"][-1]
 
 
 def test_us_symbol_without_price_data(tech):

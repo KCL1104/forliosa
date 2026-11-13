@@ -1,4 +1,5 @@
 import { Link } from "@tanstack/react-router"
+import { isCoverageNote } from "@/lib/data-notes"
 import { appToday } from "@/api"
 import { useChips, useCompany, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, InstrumentOverview, MonthlyRevenue, Position, Quote, Valuation } from "@/api/types"
@@ -243,7 +244,7 @@ function chipItems(inst: InstrumentDetail, c: NonNullable<ReturnType<typeof useC
         bigItem,
         ...(top ? [{ label: "外資持股", value: formatPercent(top.pct, { signed: false, decimals: 1 }), title: `證交所外資持股前 20 名第 ${top.rank} 名` }] : []),
       ],
-      note: `上市${inst.type === "etf" ? " ETF " : "股票"}不顯示逐檔三大法人${top ? `；外資持股是證交所前 20 名資料（第 ${top.rank} 名）` : ""}。`,
+      note: `上市${inst.type === "etf" ? " ETF " : "股票"}沒有逐檔三大法人資料${top ? `；外資持股是證交所前 20 名資料（第 ${top.rank} 名）` : ""}。`,
     }
   }
   const last5 = c.institutional.slice(-5)
@@ -323,7 +324,7 @@ function ValuationStrip({
           : `${you}的成本 ${costPe.toFixed(1)} 倍`
   const scale = pct !== null && history.length >= 2
   const ticks = scale ? TICKS.map((q) => quantile(history, q)) : []
-  const accumulating = span.full ? null : (v.notes.find((n) => n.startsWith("資料累積中")) ?? null)
+  const accumulating = span.full ? null : (v.notes.find(isCoverageNote) ?? null)
   return (
     <div className="border-t border-rule pt-3 pb-4">
       <p className="text-base text-ink">

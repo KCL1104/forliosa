@@ -176,7 +176,7 @@ describe("績效算不出來（示範帳本含美股）", () => {
     expect(screen.queryByRole("combobox", { name: "績效比較基準" })).toBeNull()
     expect(screen.getByRole("combobox", { name: "帳戶" })).toBeInTheDocument()
     // 原因只說一次；最多一個動作
-    expect(screen.getAllByText(/美股目前沒有可商用的行情來源/)).toHaveLength(1)
+    expect(screen.getAllByText(/美股沒有報價，含美股的績效算不出來/)).toHaveLength(1)
     // 帳戶是另一個查詢：等它回來才有「只看「…」」
     const actions = await screen.findAllByRole("button", { name: /^只看「/ }, T)
     expect(actions).toHaveLength(1)

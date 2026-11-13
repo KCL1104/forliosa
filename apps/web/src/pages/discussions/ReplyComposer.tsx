@@ -60,7 +60,7 @@ export function ReplyComposer({ topic, onPosted, className }: { topic: Topic; /*
       </p>
     )
   }
-  if (topic.status === "hidden" || !topic.can_reply) return <p className={cn("text-md text-ink-2", className)}>這個主題已被站方隱藏，不能再回覆。</p>
+  if (topic.status === "hidden" || !topic.can_reply) return <p className={cn("text-base text-ink", className)}>這個主題已被站方隱藏，不能再回覆。</p>
   if (topic.scope === "public") {
     const until = suspendedUntil(user)
     if (until) return <p className={cn("max-w-prose text-md text-ink", className)}>{suspendedText(until)}</p>

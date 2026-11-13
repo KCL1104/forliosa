@@ -1,3 +1,4 @@
+import { inText } from "@/lib/cjk"
 import { Link } from "@tanstack/react-router"
 import type { InstrumentDetail } from "@/api/types"
 import { buttonVariants } from "@/components/ui/button"
@@ -23,7 +24,7 @@ export function DiscussionsTab({ inst }: { inst: InstrumentDetail }) {
         filter={{ scope: "all", symbol: inst.symbol }}
         origin={{ kind: "stock", symbol: inst.symbol, name: inst.name }}
         signedIn
-        empty={{ title: `還沒有人討論${inst.name}`, description: "開一個主題並標記這檔股票，就會出現在這裡。" }}
+        empty={{ title: `還沒有人討論${inText(inst.name, "end")}` }}
       />
     </section>
   )

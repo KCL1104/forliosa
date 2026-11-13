@@ -13,6 +13,7 @@ import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { DiscussionsSearch } from "@/router"
 import { TopicRows } from "./TopicRows"
+import { usePageTitle } from "@/app/page-title"
 
 const SORTS: readonly { value: TopicSort; label: string }[] = [
   { value: "active", label: "最新回覆" },
@@ -25,6 +26,7 @@ const SORTS: readonly { value: TopicSort; label: string }[] = [
  * → 印好表頭的主題清單（格線列）→ 免責。查看別人的資產時擋下（和群組一樣）。
  */
 export function DiscussionsPage() {
+  usePageTitle("討論")
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="討論" />
   return <Discussions />

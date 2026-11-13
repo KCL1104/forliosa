@@ -120,7 +120,7 @@ export function useDeleteWithUndo() {
       deleteLater({
         key: `topic:${topic.id}`,
         title: "已刪除主題",
-        description: topic.reply_count > 0 ? `底下的 ${topic.reply_count} 則回覆也一起刪除。` : undefined,
+        description: topic.reply_count > 0 ? `底下的 ${topic.reply_count} 則回覆也一起刪除了。` : undefined,
         failed: "主題沒有刪除，已經放回原位",
         send: (opts) => api.deleteTopic(topic.id, opts),
         onDeleted: () => {

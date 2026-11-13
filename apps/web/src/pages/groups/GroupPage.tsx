@@ -15,6 +15,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import type { GroupSearch, GroupTab } from "@/router"
 import { ROLE_LABEL } from "./labels"
 import { RankingTab } from "./tabs/RankingTab"
+import { usePageTitle } from "@/app/page-title"
 
 const FeedTab = lazy(() => import("./tabs/FeedTab").then((m) => ({ default: m.FeedTab })))
 const DiscussionsTab = lazy(() => import("./tabs/DiscussionsTab").then((m) => ({ default: m.DiscussionsTab })))
@@ -51,6 +52,7 @@ function GroupView() {
   const search = useSearch({ from: "/groups/$groupId" }) as GroupSearch
   const tab: GroupTab = search.tab ?? "ranking"
   const group = useGroup(groupId)
+  usePageTitle(group.data?.name ?? "群組")
   const missing = group.error instanceof ApiError && group.error.status === 404
 
   return (

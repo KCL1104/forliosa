@@ -14,6 +14,16 @@ import { DateCell } from "@/components/date-cell"
 import { ReactionChips } from "@/components/reaction-chips"
 import { Section } from "@/components/section"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -28,6 +38,7 @@ import { PlainText } from "./PlainText"
 import { ReplyComposer } from "./ReplyComposer"
 import { ReportDialog } from "./ReportDialog"
 import { DATE_COL, Disclaimer, MetaLine, StockTags } from "./TopicRows"
+import { usePageTitle } from "@/app/page-title"
 
 type Reporting = { target: DiscussionTarget; what: string }
 
@@ -58,6 +69,8 @@ function TopicView() {
   const search = useSearch({ from: "/discussions/$topicId" }) as TopicSearch
   const { signedIn } = useViewer()
   const topic = useTopic(topicId)
+  // 分頁標題是主題的標題：公開主題的連結貼到聊天軟體時看得出是哪一篇
+  usePageTitle(topic.data?.title ?? "討論")
   const missing = topic.error instanceof ApiError && topic.error.status === 404
   // 從群組或個股的「討論」分頁來的：名稱要等主題載入才知道，載入前麵包屑先留空位（不先寫「討論」再跳成別的）
   const origin = topicOrigin(search, topic.data, { signedIn, settled: !topic.isPending })
@@ -94,8 +107,8 @@ function TopicMissing() {
   return (
     <div className="flex flex-col items-start gap-3 py-6">
       <h1 className="text-2xl font-bold">找不到這個主題</h1>
-      <p className="max-w-prose text-ink-2">
-        主題可能已經刪除。群組裡的主題只有成員看得到{signedIn ? "；你可能已經不在那個群組裡。" : "，要先登入。"}
+      <p className="max-w-prose text-base text-ink">
+        {signedIn ? "主題已經刪除，或是你不在它所屬的群組裡。" : "主題已經刪除，或是要登入才看得到的群組主題。"}
       </p>
       <PlainLink to="/discussions" className={buttonVariants({ variant: "outline" })}>
         回到討論
@@ -113,6 +126,25 @@ function Loaded({ topic, origin }: { topic: Topic; origin: Origin }) {
   // 剛按了刪除、通知還沒結束的回覆：先從畫面拿掉（按「復原」就回來）
   const pending = usePendingDeletes((s) => s.keys)
   const [reporting, setReporting] = useState<Reporting | null>(null)
+  // 有回覆的主題：刪除前先問一次（別人寫的回覆會一起刪掉）；沒有回覆的直接刪，通知裡可以復原
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const deleteTopic = () => {
+    del.topic(topic)
+    // 主題已經從畫面拿掉：回到來的地方（那裡的通知可以復原）
+    void goToOrigin(origin, { replace: true })
+  }
+  // 刪掉一則回覆之後，選單的按鈕也跟著不見、焦點會掉到頁面最上面：移到下一則（沒有就上一則、再沒有就回覆框）
+  const deleteReply = (replyId: string) => {
+    const row = document.getElementById(`reply-${replyId}`)
+    const neighbour = (row?.nextElementSibling ?? row?.previousElementSibling) as HTMLElement | null
+    del.reply(topic.id, replyId)
+    window.setTimeout(() => {
+      const active = document.activeElement
+      if (active && active !== document.body && active.isConnected) return
+      const target = neighbour?.isConnected ? neighbour : document.querySelector<HTMLElement>('textarea[aria-label="回覆內容"]')
+      target?.focus({ preventScroll: true })
+    }, 80)
+  }
   const loaded = replies.data?.pages.flatMap((p) => p.items) ?? []
   const items = loaded.filter((r) => !pending.has(`reply:${r.id}`))
   const replyCount = Math.max(0, topic.reply_count - (loaded.length - items.length))
@@ -167,7 +199,7 @@ function Loaded({ topic, origin }: { topic: Topic; origin: Origin }) {
           </header>
 
           <div className="mt-5">
-            {topicHidden && <p className="text-md text-ink-2">{topic.body === null ? HIDDEN_NOTE : HIDDEN_NOTE_WITH_BODY}</p>}
+            {topicHidden && <p className="text-base text-ink">{topic.body === null ? HIDDEN_NOTE : HIDDEN_NOTE_WITH_BODY}</p>}
             {topic.body !== null && <PlainText text={topic.body} className={cn(TOPIC_TEXT, LINE, topicHidden && "mt-2")} />}
           </div>
 
@@ -177,15 +209,7 @@ function Loaded({ topic, origin }: { topic: Topic; origin: Origin }) {
             // 被站方隱藏的內容：表情只顯示計數（不能再加）、不能檢舉
             canReact={signedIn && !topicHidden}
             onToggle={toggle(`topic:${topic.id}`)}
-            onDelete={
-              topic.can_delete
-                ? () => {
-                    del.topic(topic)
-                    // 主題已經從畫面拿掉：回到來的地方（那裡的通知可以復原）
-                    void goToOrigin(origin, { replace: true })
-                  }
-                : undefined
-            }
+            onDelete={topic.can_delete ? () => (topic.reply_count > 0 ? setConfirmDelete(true) : deleteTopic()) : undefined}
             onReport={topic.can_report && !topicHidden ? () => setReporting({ target: `topic:${topic.id}`, what: "主題" }) : undefined}
             what="主題"
           />
@@ -204,14 +228,14 @@ function Loaded({ topic, origin }: { topic: Topic; origin: Origin }) {
             {items.map((r) => {
               const hidden = r.status === "hidden"
               return (
-                <li key={r.id} className={cn(POST_ROW, "border-b border-rule py-3.5")}>
+                <li key={r.id} id={`reply-${r.id}`} tabIndex={-1} className={cn(POST_ROW, "border-b border-rule py-3.5 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-ink")}>
                   <PostDate iso={r.created_at} pad="-my-3.5 py-3.5" />
                   <div className="min-w-0 flex-1">
                     <div className="flex min-h-6 flex-wrap items-center gap-x-2 text-md text-ink-2">
                       <Byline author={r.author} group={!isPublic} />
                     </div>
                     <div className="mt-1">
-                      {hidden && <p className="text-md text-ink-2">{r.body === null ? HIDDEN_NOTE : HIDDEN_NOTE_WITH_BODY}</p>}
+                      {hidden && <p className="text-base text-ink">{r.body === null ? HIDDEN_NOTE : HIDDEN_NOTE_WITH_BODY}</p>}
                       {r.body !== null && <PlainText text={r.body} className={cn(REPLY_TEXT, LINE)} />}
                     </div>
                     <ContentActions
@@ -219,7 +243,7 @@ function Loaded({ topic, origin }: { topic: Topic; origin: Origin }) {
                       reactions={r.reactions}
                       canReact={signedIn && !hidden}
                       onToggle={toggle(`reply:${r.id}`)}
-                      onDelete={r.can_delete ? () => del.reply(topic.id, r.id) : undefined}
+                      onDelete={r.can_delete ? () => deleteReply(r.id) : undefined}
                       onReport={r.can_report && !hidden ? () => setReporting({ target: `reply:${r.id}`, what: "回覆" }) : undefined}
                       what={`${authorName(r.author)}的回覆`}
                     />
@@ -246,6 +270,25 @@ function Loaded({ topic, origin }: { topic: Topic; origin: Origin }) {
       </div>
 
       {reporting && <ReportDialog target={reporting.target} what={reporting.what} onClose={() => setReporting(null)} />}
+      <AlertDialog open={confirmDelete} onOpenChange={setConfirmDelete}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>刪除這個主題？</AlertDialogTitle>
+            <AlertDialogDescription>底下的 {topic.reply_count} 則回覆也會一起刪除。</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>取消</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                setConfirmDelete(false)
+                deleteTopic()
+              }}
+            >
+              刪除
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </article>
   )
 }
@@ -332,8 +375,17 @@ function ContentActions({
             <TooltipContent>更多動作</TooltipContent>
           </Tooltip>
           <DropdownMenuContent align="end" className="w-36">
-            {onDelete && <DropdownMenuItem onClick={onDelete}>刪除</DropdownMenuItem>}
-            {onReport && <DropdownMenuItem onClick={onReport}>檢舉…</DropdownMenuItem>}
+            {/* 觸控時每一項 44px 高（選單裡常常只有一項，更不能做成 28px 的小目標） */}
+            {onDelete && (
+              <DropdownMenuItem className="pointer-coarse:min-h-11" onClick={onDelete}>
+                刪除
+              </DropdownMenuItem>
+            )}
+            {onReport && (
+              <DropdownMenuItem className="pointer-coarse:min-h-11" onClick={onReport}>
+                檢舉…
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}

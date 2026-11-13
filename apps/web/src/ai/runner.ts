@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
+import { inText } from "@/lib/cjk"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
@@ -18,15 +19,15 @@ import type { Answer, Draft, DraftInstrument, Suggestion } from "./types"
 
 /** 「股利入帳」的提問：台股股利在除息日自動入帳，要記的是美股或更正金額 */
 export function dividendAsk(code?: string): string {
-  if (code && /^\d/.test(code)) return `${code} 的股利會在除息日自動入帳，不用另外記。金額和存摺不一樣的話，告訴我實際領到多少，例如「${code} 配息 1,100」。`
-  if (code) return `${code} 領了多少？例如「${code} 配息 2.6」。金額照存摺上的實際入帳數字就好。`
-  return "台股股利會在除息日自動入帳，不用另外記。美股股利告訴我哪一檔、領了多少，例如「AAPL 配息 2.6」；金額照存摺上的實際入帳數字就好。"
+  if (code && /^\d/.test(code)) return `${code} 的股利在除息日自動入帳。金額和存摺不一樣，就跟我說實際領到多少，例如「${code} 配息 1,100」。`
+  if (code) return `${code} 實際入帳多少？例如「${code} 配息 2.6」。`
+  return "台股股利在除息日自動入帳。美股股利跟我說哪一檔、實際入帳多少，例如「AAPL 配息 2.6」。"
 }
 
-/** 常用動作（依頁面）：記一筆交易、匯入對帳單、股利入帳… */
-export type AiAction = "trade" | "import" | "dividend" | "alert" | "checkup" | "form"
+/** 常用動作（依頁面）：記一筆交易、股利入帳… */
+export type AiAction = "trade" | "dividend" | "alert" | "checkup" | "form"
 
-const DRAFT_SAYS = "我照你說的算好了稅費，\n簽名後才會入帳。"
+const DRAFT_SAYS = "照你說的算好了稅費，你看一下。"
 
 function describe(d: Pick<Draft, "input" | "instrument">): string {
   const { input, instrument } = d
@@ -53,14 +54,12 @@ export function recurringDraftCopy(
     : `${formatMoney(d.amount)} 以 ${asOf} 收盤價 ${price} 估算股數（含零股），手續費另計`
   const notes = [
     r.missed
-      ? `${estimate}；這是 ${formatDateShort(tradeDate, false)} 的扣款，請照券商對帳單改成實際成交的股數和價格再簽名。`
-      : `${estimate}；實際成交以券商對帳單為準，簽名前可以改。`,
+      ? `${estimate}；這是 ${formatDateShort(tradeDate, false)} 的扣款，請照券商對帳單改成實際成交的股數和價格。`
+      : `${estimate}；實際成交以券商對帳單為準。`,
   ]
-  // 補記時用的是扣款日當天的收盤價嗎（後端沒有那天的真實收盤價會改用最近收盤價）
-  const closeWord = d.is_demo ? "示範價格" : d.price_as_of === tradeDate ? "那天的收盤價" : "最近收盤價"
   const text = r.missed
-    ? `${formatDateShort(tradeDate, false)} 是${d.name}定期定額的扣款日，帳本裡還沒有這一筆。\n我先照${closeWord}算好股數和手續費，你照對帳單改好再簽名，簽了才會入帳。`
-    : `今天是${d.name}定期定額的扣款日。\n我照${d.is_demo ? "示範價格" : "最近收盤價"}算好股數和手續費，簽名後才會入帳。`
+    ? `${formatDateShort(tradeDate, false)} 是${inText(d.name)}定期定額的扣款日，帳本裡還沒有這一筆。`
+    : `今天是${inText(d.name)}定期定額的扣款日。`
   return { tradeDate, notes, text }
 }
 
@@ -110,7 +109,7 @@ export function useAiRunner(ctx: AiContext) {
     const accounts = await qc.fetchQuery(accountsQuery())
     const account = accounts.find((a) => a.currency === inst.currency) ?? accounts[0]
     if (!account) {
-      say({ text: "還沒有券商帳戶，草稿不知道手續費怎麼算。先新增一個帳戶，再說一次就好。", links: [{ label: "新增券商帳戶", to: "/settings" }] })
+      say({ text: "還沒有券商帳戶，手續費算不出來。先新增帳戶，再說一次。", links: [{ label: "新增券商帳戶", to: "/settings" }] })
       return true
     }
     const isUS = inst.market === "US"
@@ -123,7 +122,7 @@ export function useAiRunner(ctx: AiContext) {
       if (price === null) {
         const q = await qc.fetchQuery({ queryKey: qk.quote(inst.symbol), queryFn: () => api.getQuote(inst.symbol), staleTime: 15_000 })
         price = q.price
-        notes.push(`沒有寫價格，先用最新價 ${formatPrice(q.price, inst.market)} 估算；簽名前可以改。`)
+        notes.push(`沒有寫價格，先用最近收盤價 ${formatPrice(q.price, inst.market)}。`)
       }
       if (!isUS && intent.unit === null) notes.push(`沒有寫單位，當作 ${formatQuantity(shares, "lot", inst.market)}。`)
       if (intent.side === "sell") {
@@ -148,7 +147,7 @@ export function useAiRunner(ctx: AiContext) {
     }
     const draft: Draft = { id: newId("dft"), status: "loading", input, instrument, notes, createdAt: new Date().toISOString() }
     upsertDraft(draft)
-    push({ role: "ai", text: intent.kind === "dividend" ? "我照你說的整理好了，簽名後才會入帳。" : DRAFT_SAYS, model: false, draftId: draft.id })
+    push({ role: "ai", text: intent.kind === "dividend" ? "照你說的整理好了，你看一下。" : DRAFT_SAYS, model: false, draftId: draft.id })
     await preview(draft.id, input)
     return true
   }
@@ -242,7 +241,7 @@ export function useAiRunner(ctx: AiContext) {
       if (intent.kind === "lookup") {
         const inst = await resolveInstrument(intent.target)
         if (inst) {
-          reply({ text: `${inst.name}（${inst.code}）在這裡。`, links: [{ label: `看${inst.name}`, to: "/stock/$symbol", params: { symbol: inst.symbol } }] })
+          reply({ text: `${inst.name}（${inst.code}）在這裡。`, links: [{ label: `看${inText(inst.name, "end")}`, to: "/stock/$symbol", params: { symbol: inst.symbol } }] })
           return
         }
       }
@@ -311,14 +310,10 @@ export function useAiRunner(ctx: AiContext) {
       case "trade":
         push({ role: "user", text: opts.code ? `記一筆 ${opts.code}` : "記一筆交易" }, { title: "記一筆交易" })
         say({
-          text: `說說看買賣了什麼，例如「${opts.code ? `買 ${opts.code} 1 張` : "買 0050 2 張 52.4"}」。我會先算好手續費和稅，寫成草稿給你簽名。`,
+          text: `買賣了什麼？例如「${opts.code ? `買 ${opts.code} 1 張` : "買 0050 2 張 52.4"}」。`,
           links: [{ label: "改用表單填", to: "#trade-form" }],
         })
         seedComposer(opts.code ? `買 ${opts.code} ` : "買 ")
-        return
-      case "import":
-        push({ role: "user", text: "匯入對帳單" }, { title: "匯入對帳單" })
-        say({ text: "還不能直接匯入對帳單。把對帳單上的每一筆說給我，例如「買 2330 1 張 1085」，會一筆一筆寫成草稿。" })
         return
       case "dividend": {
         push({ role: "user", text: "股利入帳" }, { title: "股利入帳" })
