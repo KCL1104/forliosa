@@ -11,7 +11,7 @@ import pytest
 from forliosa.marketdata.base import HistoryResult
 from forliosa.services import sharing
 from forliosa.timeutil import TAIPEI, last_tw_trading_day, today_taipei
-from tests.api.m5 import API, account, join, login, make_group, me_id, set_share, trade, trading_day
+from tests.api.m5 import API, account, join, login, make_group, me_id, set_share, trade
 
 
 def test_rank_entries_ties_nulls_and_unranked():
@@ -159,8 +159,10 @@ def test_performance_mtd_range(client):
     assert perf["series"][0]["twr_index"] == 1.0
     assert client.get(f"{API}/portfolio/performance", params={"range": "QTD"}).status_code == 422
     # A portfolio that starts this month starts on its first day (like the long ranges).
+    # Use the latest day the server has a close for (``end``), not "today": before 13:30 on a trading day today's
+    # close does not exist yet, and the test must not depend on the wall clock.
     fresh = account(client, "新帳戶")
-    first = trading_day(0)
+    first = end
     if first.month == today_taipei().month:
         trade(client, fresh["id"], "2317.TW", "buy", first, 1000, 100)
         perf = client.get(f"{API}/portfolio/performance", params={"range": "MTD", "account_id": fresh["id"]}).json()

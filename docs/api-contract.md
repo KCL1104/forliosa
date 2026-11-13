@@ -1042,7 +1042,7 @@
   ```jsonc
   { "tw": { "date": "2026-11-13",          // 台北時間的今天
             "is_trading_day": true,         // 依官方行事曆
-            "is_open": true,                // 交易日 09:00–13:30（台北）
+            "is_open": true,                // 交易日 09:00（含）到 13:30（不含），台北時間
             "open": "09:00", "close": "13:30" } }
   ```
 - 報價的 `as_of` 是那個收盤價所屬交易日的收盤時間；商用模式 `is_realtime` 一律 `false`。
@@ -1074,14 +1074,14 @@
   - 群組範圍：`{"name": "顯示名稱", "is_you": false, "user_id": "usr_…", "avatar_url": null}`（和群組動態相同）。
   - 帳號刪除後 `name: null`（前端顯示「已刪除的帳號」）；內容保留。
 - **公開暱稱**：`users.public_name`，2–20 字、一行（規則同顯示名稱，另外不能只有空白、前後空白去掉）、不分大小寫與全半形唯一（409 `public_name_taken`）；
-  不能是保留字（`forliosa`、`官方`、`管理員`、`站方`、`admin`、`system`，不分大小寫，含這些字也不行）。7 天內只能改一次（409 `public_name_cooldown`，帶 `retry_after_days`）。
+  不能是保留字（`forliosa`、`官方`、`管理員`、`站方`、`admin`、`system`，不分大小寫，含這些字也不行）。第一次設定不算；之後每改一次要等 7 天才能再改（409 `public_name_cooldown`，帶 `retry_after_days`）——打錯字可以馬上改一次。
   沒設定就發公開內容 → 409 `public_name_required`。改名後舊貼文顯示新暱稱。
   - `GET /users/me` 多 `public_name: string | null`、`is_admin: boolean`、`public_posting_suspended_until: string | null`（ISO 時間；永久為 `"9999-12-31T00:00:00Z"`）。
   - `PUT /users/me/public-name` `{"public_name"}` → `User`。
 - **內文**：純文字。主題內文 1–5000 字、回覆 1–2000 字，可換行（CRLF 轉 LF、連續空行最多 2 個、去掉行尾空白）；標題 1–80 字、一行；
   控制字元與看不見的格式字元（同名稱規則，換行除外）→ 422。不支援 Markdown、圖片；前端把 `http(s)://` 網址變成連結
   （`target="_blank" rel="nofollow ugc noopener noreferrer"`）。
-- **狀態 `status`**：`"visible"`｜`"hidden"`（站方隱藏）。隱藏的主題不出現在清單；直接打開回 `body: null`、`status: "hidden"`（作者本人與站方管理員仍拿得到 `body`）。
+- **狀態 `status`**：`"visible"`｜`"hidden"`（站方隱藏）。隱藏的主題不出現在任何清單（包括作者自己的 `mine=true`）；直接打開回 `status: "hidden"`、`body: null`、`title: "（已被站方隱藏的主題）"`、`symbols: []`（作者本人與站方管理員仍拿得到原本的標題、標記與內文）；回覆仍可讀、不能再回覆。
   隱藏的回覆留在原位、`body: null`。
 - **刪除**：作者可刪自己的；群組範圍另外允許群組 owner／admin。刪主題連同回覆、表情、檢舉一起刪。站方管理員不刪公開內容，只隱藏。
 - **表情**：和群組相同的六個（👍🎉🔥😮😢👀）；`reactions: [{"emoji","count","mine"}]`。
@@ -1090,7 +1090,19 @@
   - 群組：主題 20 則／天；回覆 120 則／小時。
 - **公開發言停權**：停權中發公開內容 → 403 `posting_suspended`（帶 `until`）；群組發言不受影響。
 - **AI 不讀這些內容**：AI 工具不讀討論，也不替使用者發言。
-- 錯誤代碼新增：`public_name_required`、`public_name_taken`、`public_name_cooldown`、`posting_suspended`、`rate_limited`（429）。
+- 錯誤代碼新增：`public_name_required`、`public_name_taken`、`public_name_cooldown`、`posting_suspended`、`rate_limited`（429）、`topic_hidden`（409）、`unknown_symbol`（422）。
+  附帶欄位放在 `error` 物件裡、和 `code`／`message` 同一層：`rate_limited` → `error.retry_after_seconds`（另有 `Retry-After` 標頭）；`posting_suspended` → `error.until`；`public_name_cooldown` → `error.retry_after_days`（1–7）。
+- **實作細節（後端 2026-11-13）**：
+  - 這一節的時間是 UTC、結尾 `Z`、到秒（其他端點仍是 `+08:00`）。
+  - 個人資料端點原本是 `GET /me`；`GET /users/me` 是同一個回應的別名，兩個都多了三個欄位。
+  - 公開範圍的 `author` 只有 `name` 與 `is_you` 兩個鍵（沒有 `user_id`、`avatar_url`，不是 `null`）。群組範圍裡已離開群組的作者是 `{"name": "已離開的成員", "is_you": false, "user_id": null, "avatar_url": null}`。
+  - 表情的 `PUT`／`DELETE` 回 204、沒有內容，前端自己更新或重新讀取。
+  - `can_reply` 只表示「已登入而且主題沒被隱藏」；沒有公開暱稱或被停權時，送出才會收到 409／403。
+  - 頻率限制用滾動的 24 小時／60 分鐘計算；刪掉貼文不會把額度還回來。檢舉也有限制：每人每小時 20 則新的檢舉（429）。
+  - 沒登入用 id 打開群組主題回 404（不透露存在）；沒登入列 `scope=group`／`all` 或 `mine=true`、以及所有寫入回 401。
+  - `scope=public` 卻帶 `group_id` → 422；清單的 `group_id` 只有 `scope=group` 時有效（而且必填）。內文裡的 Tab → 422。
+  - `/admin/*`：沒登入 401、登入但不是管理員 404。停權的 `days` 必填，永久要明確傳 `null`；對已停權的人再停權是更新同一筆。
+  - 管理員的檢舉清單依最近一次檢舉排序；`report_count`、`reasons`、`notes` 含已處理的；新的檢舉會把已處理的對象重新打開；主題的 `excerpt` 是「標題｜內文」。
 
 ### 討論主題與回覆
 

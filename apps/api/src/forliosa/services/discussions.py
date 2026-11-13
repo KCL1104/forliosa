@@ -67,7 +67,9 @@ RATE_LIMITS: dict[tuple[str, str], RateLimit] = {
 }
 PUBLIC_POST_GAP = timedelta(seconds=10)  # between any two public posts of one user
 POST_LOG_KEEP = max(limit.window for limit in RATE_LIMITS.values())  # older log rows are no longer counted
-PUBLIC_NAME_COOLDOWN = timedelta(days=7)  # one public name per 7 days (the first choice counts)
+PUBLIC_NAME_COOLDOWN = timedelta(days=7)  # one rename per 7 days (the first choice is free)
+REPORT_LIMIT = RateLimit(20, timedelta(hours=1))  # new reports per user (a repeat of the same target is not counted)
+HIDDEN_TITLE = "（已被站方隱藏的主題）"  # what others see instead of a hidden topic's title
 PERMANENT = datetime(9999, 12, 31, tzinfo=UTC)  # ``until`` of a permanent suspension
 EXCERPT_CHARS = 120
 
@@ -142,7 +144,8 @@ def me_fields(db: Session, user: User) -> dict[str, Any]:
 
 def set_public_name(db: Session, user: User, name: str) -> None:
     """Choose or change the public name (``name`` is already validated: 2–20 characters, one line, no reserved
-    word). Unique by :func:`textsafe.name_key`; one write per ``PUBLIC_NAME_COOLDOWN``. Old posts show the new name."""
+    word). Unique by :func:`textsafe.name_key`; one *change* per ``PUBLIC_NAME_COOLDOWN`` (the first choice is free, so
+    the cooldown starts with the first rename). Old posts show the new name."""
     if user.public_name == name:
         return
     at = now()
@@ -156,7 +159,10 @@ def set_public_name(db: Session, user: User, name: str) -> None:
     key = name_key(name)
     if db.scalar(select(User.id).where(User.public_name_key == key, User.id != user.id)) is not None:
         raise taken
-    user.public_name, user.public_name_key, user.public_name_changed_at = name, key, at
+    first = user.public_name is None
+    user.public_name, user.public_name_key = name, key
+    if not first:  # choosing the first name does not start the cooldown: a typo can be fixed once right away
+        user.public_name_changed_at = at
     try:
         db.commit()
     except IntegrityError as exc:  # someone took it between the check and the write
@@ -342,7 +348,7 @@ def _topic_base(viewer: Viewer, refs: _Refs, topic: DiscussionTopic, symbols: li
 
 def topic_out(db: Session, md: MarketData, viewer: Viewer, topic: DiscussionTopic) -> dict[str, Any]:
     refs = _refs(db, [topic], [])
-    return {
+    out = {
         **_topic_base(viewer, refs, topic, _symbols_of(db, md, [topic.id]).get(topic.id, []),
                       _reply_counts(db, [topic.id]).get(topic.id, 0)),
         "body": _body_for(viewer, topic, topic.status, topic.user_id, topic.body),
@@ -351,6 +357,10 @@ def topic_out(db: Session, md: MarketData, viewer: Viewer, topic: DiscussionTopi
         "can_report": _can_report(viewer, topic, topic.user_id),
         "can_reply": viewer.user is not None and topic.status == "visible",
     }
+    if topic.status == "hidden" and out["body"] is None:
+        # A hidden topic's title can be the harmful part (an ad, a tip): others get a placeholder and no stock tags.
+        out["title"], out["symbols"] = HIDDEN_TITLE, []
+    return out
 
 
 def _reply_out(viewer: Viewer, refs: _Refs, topic: DiscussionTopic, reply: DiscussionReply,
@@ -557,8 +567,17 @@ def report(db: Session, me: User, target: str, reason: str, note: str | None) ->
     if db.scalar(select(rp.id).where(rp.target_kind == kind, rp.target_id == content.id,
                                      rp.reporter_id == me.id)) is not None:
         return
+    at = now()
+    recent = [_aware(t) for t in db.scalars(
+        select(rp.created_at).where(rp.reporter_id == me.id, rp.created_at > at - REPORT_LIMIT.window)
+        .order_by(rp.created_at))]
+    if len(recent) >= REPORT_LIMIT.count:
+        seconds = max(1, math.ceil((recent[len(recent) - REPORT_LIMIT.count] + REPORT_LIMIT.window - at)
+                                   .total_seconds()))
+        raise ApiError(429, "rate_limited", f"檢舉太頻繁，請 {seconds} 秒後再試",
+                       extra={"retry_after_seconds": seconds}, headers={"Retry-After": str(seconds)})
     db.add(rp(id=new_id("rpt"), target_kind=kind, target_id=content.id, topic_id=topic.id, reporter_id=me.id,
-              reason=reason, note=note, status="open", created_at=now()))
+              reason=reason, note=note, status="open", created_at=at))
     try:
         db.commit()
     except IntegrityError:

@@ -270,7 +270,7 @@ def test_deleting_a_group_deletes_its_discussions(client, other_client, clock, e
 def test_hidden_topic_is_unlisted_and_opens_without_its_body(client, other_client, admin, clock):
     set_name(client, "阿土伯")
     set_name(other_client, "路人甲")
-    t = post_topic(client, clock, body="會被隱藏的內文", symbols=["2330"])
+    t = post_topic(client, clock, title="明牌報你知", body="會被隱藏的內文", symbols=["2330"])
     post_reply(other_client, clock, t["id"], "隱藏前的回覆")
     target = f"topic:{t['id']}"
     assert admin.post(f"{ADMIN_URL}/moderation", json={"target": target, "action": "hide"}).status_code == 204
@@ -281,10 +281,14 @@ def test_hidden_topic_is_unlisted_and_opens_without_its_body(client, other_clien
     for c in (anon, other_client):
         detail = c.get(f"{TOPICS_URL}/{t['id']}").json()
         assert detail["status"] == "hidden" and detail["body"] is None and detail["can_reply"] is False
-        assert "會被隱藏的內文" not in json.dumps(detail, ensure_ascii=False)
-    for c in (client, admin):  # the author and site admins still get the body
+        # the title can be the harmful part: others get a placeholder and no stock tags
+        assert detail["title"] == "（已被站方隱藏的主題）" and detail["symbols"] == []
+        dumped = json.dumps(detail, ensure_ascii=False)
+        assert "會被隱藏的內文" not in dumped and "明牌報你知" not in dumped
+    for c in (client, admin):  # the author and site admins still get the title, tags and body
         detail = c.get(f"{TOPICS_URL}/{t['id']}").json()
         assert detail["status"] == "hidden" and detail["body"] == "會被隱藏的內文"
+        assert detail["title"] == "明牌報你知" and [x["code"] for x in detail["symbols"]] == ["2330"]
     assert [x["body"] for x in replies(anon, t["id"])] == ["隱藏前的回覆"]  # replies stay readable
     clock.tick(seconds=GAP)
     for c in (other_client, client):

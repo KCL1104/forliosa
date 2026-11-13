@@ -71,6 +71,28 @@ def test_admin_endpoints_are_404_for_everyone_else(client, other_client, admin, 
 
 
 # -- reports -------------------------------------------------------------------------------------------------------
+def test_new_reports_are_limited_to_twenty_an_hour(client, other_client, clock):
+    from forliosa.services.discussions import REPORT_LIMIT
+
+    set_name(client, "阿土伯")
+    t = post_topic(client, clock)
+    targets = [f"topic:{t['id']}"]
+    for i in range(REPORT_LIMIT.count):
+        clock.tick(seconds=GAP)
+        r = client.post(f"{TOPICS_URL}/{t['id']}/replies", json={"body": f"回覆 {i}"})
+        assert r.status_code == 201, r.text
+        targets.append(f"reply:{r.json()['id']}")
+    for target in targets[:REPORT_LIMIT.count]:
+        assert other_client.post(REPORTS_URL, json={"target": target, "reason": "spam"}).status_code == 204
+    # a repeat of an already reported target is not a new report
+    assert other_client.post(REPORTS_URL, json={"target": targets[0], "reason": "spam"}).status_code == 204
+    r = other_client.post(REPORTS_URL, json={"target": targets[-1], "reason": "spam"})
+    assert r.status_code == 429 and error(r) == "rate_limited", r.text
+    assert 1 <= r.json()["error"]["retry_after_seconds"] <= 3600
+    clock.tick(hours=1, seconds=1)
+    assert other_client.post(REPORTS_URL, json={"target": targets[-1], "reason": "spam"}).status_code == 204
+
+
 def test_reports_one_per_user_per_target_and_not_on_own_content(app, client, other_client, admin, clock):
     set_name(client, "阿土伯")
     set_name(other_client, "路人甲")

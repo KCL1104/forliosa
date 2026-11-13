@@ -63,8 +63,10 @@ def test_public_name_is_unique_ignoring_case_and_width(client, other_client):
 
 
 def test_public_name_changes_once_per_seven_days(client, clock):
-    set_name(client, "阿土伯")
-    assert set_name(client, "阿土伯")["public_name"] == "阿土伯"  # the same name again is not a change
+    set_name(client, "阿土柏")
+    assert set_name(client, "阿土柏")["public_name"] == "阿土柏"  # the same name again is not a change
+    # The first choice does not start the cooldown: a typo can be fixed once right away; that change starts it.
+    assert set_name(client, "阿土伯")["public_name"] == "阿土伯"
     r = client.put(NAME_URL, json={"public_name": "阿土伯二號"})
     assert r.status_code == 409 and error(r) == "public_name_cooldown", r.text
     assert r.json()["error"]["retry_after_days"] == 7
