@@ -19,7 +19,8 @@ function History() {
   const ask = useAskAi()
   return (
     <PageFrame>
-      <div className="max-w-[760px]">
+      {/* 和設定、資料來源同一個欄寬（816px） */}
+      <div className="max-w-[816px]">
         <PageHeader title="紀錄" className="max-lg:sr-only" />
         <HistoryList onOpen={ask.reveal} onReplay={(t) => ask.submit(t)} />
       </div>

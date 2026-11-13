@@ -158,10 +158,10 @@ describe("「我的成本在河流圖哪裡」：只在畫得出河流圖時問�
     expect(fallbackAnswer("本益比合理嗎", ctx).links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
   })
 
-  it("加碼 1 張：現價與均價都帶「元」", () => {
+  it("加碼 1 張：收盤價與均價都帶「元」", () => {
     const ctx: AiContext = { route: "stock", stock: { ...base, position: { avg_cost: 600, quantity: 1000 } as never, quote: { price: 1085 } as never } }
     const a = answerFor("add_one_lot", { ctx, privacy: false, today: TODAY })!
     // 小數位跟著價格的格式（formatPrice），這裡只看單位
-    expect(a.text).toMatch(/^以現價 1,085 元加碼 1 張，均價會從 600(\.00)? 元變成約 842\.50? 元（不含手續費）/)
+    expect(a.text).toMatch(/^以收盤價 1,085 元加碼 1 張，均價會從 600(\.00)? 元變成約 842\.50? 元（不含手續費）/)
   })
 })

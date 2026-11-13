@@ -13,6 +13,7 @@ import { viewAsId } from "../view-as"
 import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
 import { buildAttributions, sourceOf } from "./attributions"
+import { mockMarketStatus, type MockMarket } from "./market-status"
 import { buildCompany, buildRelated } from "./company"
 import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, type MockPolicy } from "./commercial"
 import { computePreview } from "./fees"
@@ -97,6 +98,8 @@ export interface MockOptions {
   analystDelayMs?: number
   /** 是否已登入（預設 true；`?auth=signed-out` 模擬還沒登入） */
   signedIn?: boolean
+  /** 台股的市場狀態（預設 closed：最新的收盤價已經進來）；`?market=open|pending` 模擬盤中、收盤後還沒公布 */
+  market?: MockMarket
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
@@ -579,6 +582,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     draftRecurring: (id, date) => wait(() => recurring.draft(id, date)),
 
     getAttributions: () => wait(() => buildAttributions(commercial ? "commercial" : "personal")),
+    getMarketStatus: () => wait(() => mockMarketStatus(options.market ?? "closed")),
 
     getAnalystViews: (symbol) => wait(() => analyst.get(spec(symbol).symbol)),
     requestAnalystViews: (symbol) => wait(() => analyst.request(spec(symbol).symbol)),
@@ -642,7 +646,7 @@ const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",
-  "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions",
+  "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions", "getMarketStatus",
 ])
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([

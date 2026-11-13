@@ -164,21 +164,26 @@ export function DividendsView() {
                     {rows.map((t) => (
                       <li key={t.id} className={cn("relative grid min-h-11 grid-cols-[88px_1fr_auto] items-center gap-3 py-2.5 md:grid-cols-[120px_1fr_auto_auto]", t.symbol ? "ruled-row" : "border-b border-rule")}>
                         <DateCell date={t.trade_date} inline />
-                        {/* 名稱太長時截斷名稱與每股金額，來源標示一定看得到 */}
-                        <span className="flex min-w-0 items-baseline">
-                          <span className="min-w-0 truncate">
-                            {t.symbol && (
+                        {/*
+                          每股金額與來源標示一定看得到（不截斷、不縮）：放不下時整個換到名稱下面一行（靠左，和「接下來」同一招）；
+                          名稱自己就超過一行時才截斷名稱
+                        */}
+                        <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+                          {t.symbol && (
+                            <span className="max-w-full min-w-0 truncate">
                               <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className={cn("font-medium", STRETCH)}>
                                 {nameOf.get(t.symbol) ?? codeOf(t.symbol)}
                               </Link>
-                            )}
+                            </span>
+                          )}
+                          <span className="flex shrink-0 items-baseline gap-x-2">
                             {/* 每股金額帶幣別：台股「每股 5 元」，美股「每股 US$0.27」（不是「0.27 元」） */}
-                            <span className="ml-2 text-sm text-ink-2">
+                            <span className="text-sm whitespace-nowrap text-ink-2">
                               {t.type === "stock_dividend" ? "股票股利" : t.price !== null ? `每股 ${formatPerShare(t.price, t.symbol ? marketOf(t.symbol) : "TWSE", { dividend: true })}` : "現金股利"}
                             </span>
+                            {/* 標示浮在整列的連結上面：滑過仍然看得到說明 */}
+                            <SourceTag source={t.source} className="relative z-10 shrink-0" />
                           </span>
-                          {/* 標示浮在整列的連結上面：滑過仍然看得到說明 */}
-                          <SourceTag source={t.source} className="relative z-10 ml-2 shrink-0" />
                         </span>
                         <span className="num hidden text-right text-sm text-ink-2 md:block">
                           {t.health_insurance > 0 ? <>健保 {privacy ? "••••" : formatNumber(t.health_insurance)}</> : t.tax > 0 ? <>預扣 {privacy ? "••••" : formatNumber(t.tax, t.currency === "USD" ? 2 : 0)}</> : ""}

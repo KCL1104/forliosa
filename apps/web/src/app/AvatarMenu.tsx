@@ -1,4 +1,4 @@
-import { useNavigate } from "@tanstack/react-router"
+import { useNavigate, useRouterState } from "@tanstack/react-router"
 import { CalendarSyncIcon, LogOutIcon, ScrollTextIcon, SettingsIcon, WalletIcon } from "lucide-react"
 import { api } from "@/api"
 import { useMe } from "@/api/queries"
@@ -16,8 +16,13 @@ import {
 import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { usePrefs } from "@/stores/prefs"
 import type { ColorConvention, ThemePreference } from "@/api/types"
+import { isAccountRoute } from "./nav"
 
-/** 頭像選單：設定、帳戶、定期定額、資料來源與授權、外觀（主題與漲跌顏色）、登出 */
+/**
+ * 頭像選單：設定、帳戶、定期定額、資料來源與授權、外觀（主題與漲跌顏色）、登出。
+ * 設定與資料來源頁沒有自己的導覽分頁，是從這個選單進去的：桌面在這兩頁時，頭像下面畫導覽的那條線
+ * （選取語法 (a)，`data-active`——不是連結，所以不標 `aria-current`），選單裡對應的項目標 `aria-current="page"`。
+ */
 export function AvatarMenu() {
   const me = useMe()
   const navigate = useNavigate()
@@ -25,6 +30,8 @@ export function AvatarMenu() {
   const convention = usePrefs((s) => s.colorConvention)
   const setPref = usePrefSetter()
   const name = me.data?.display_name ?? "我"
+  const pathname = useRouterState({ select: (s) => s.location.pathname })
+  const here = (path: string) => (pathname === path ? ("page" as const) : undefined)
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -32,11 +39,13 @@ export function AvatarMenu() {
           <button
             type="button"
             aria-label={`帳號選單（${name}）`}
-            className="press grid size-11 place-items-center rounded-full lg:size-10"
+            data-active={isAccountRoute(pathname) ? "" : undefined}
+            // 桌面：按鈕撐滿頂部列的高度，選取的 2px 墨色線壓在頂部列的格線上（和「帳本／群組」同一套）
+            className="group/avatar grid size-11 place-items-center rounded-full lg:-mb-px lg:h-auto lg:w-10 lg:self-stretch lg:rounded-none lg:sel-tab"
           />
         }
       >
-        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-sel text-base font-medium text-ink">
+        <span aria-hidden className="grid size-9 place-items-center rounded-full bg-sel text-base font-medium text-ink transition-transform duration-150 ease-out group-active/avatar:scale-[0.97]">
           {name.slice(0, 1)}
         </span>
       </DropdownMenuTrigger>
@@ -48,7 +57,7 @@ export function AvatarMenu() {
           </DropdownMenuLabel>
         </DropdownMenuGroup>
         <DropdownMenuSeparator />
-        <DropdownMenuItem onClick={() => void navigate({ to: "/settings" })}>
+        <DropdownMenuItem aria-current={here("/settings")} onClick={() => void navigate({ to: "/settings" })}>
           <SettingsIcon aria-hidden />
           設定
         </DropdownMenuItem>
@@ -60,7 +69,7 @@ export function AvatarMenu() {
           <CalendarSyncIcon aria-hidden />
           定期定額
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={() => void navigate({ to: "/data-sources" })}>
+        <DropdownMenuItem aria-current={here("/data-sources")} onClick={() => void navigate({ to: "/data-sources" })}>
           <ScrollTextIcon aria-hidden />
           資料來源與授權
         </DropdownMenuItem>

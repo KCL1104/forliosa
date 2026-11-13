@@ -67,10 +67,13 @@ describe("手機底部列", () => {
     const nav = await screen.findByRole("navigation", { name: "主要" }, T)
     const links = within(nav).getAllByRole("link")
     expect(links.map((l) => l.textContent)).toEqual(["帳本", "群組", "紀錄"])
+    // 選取語法 (a) 的底部列版本畫在字上（第三輪：線和字一樣寬、對齊內容的左緣；可按範圍是整個連結）
     for (const link of links) {
-      expect(link.className).toMatch(/\bsel-tab-top\b/)
+      expect(link.querySelector("span")!.className).toMatch(/\bsel-tab-top\b/)
       expect(link.querySelector("svg")).toBeNull()
     }
+    expect(links[0]!.querySelector("span")).toHaveAttribute("data-active")
+    expect(links[1]!.querySelector("span")).not.toHaveAttribute("data-active")
     expect(links[0]).toHaveAttribute("aria-current", "page")
     expect(links[1]).not.toHaveAttribute("aria-current")
     expect(links[2]).not.toHaveAttribute("aria-current")

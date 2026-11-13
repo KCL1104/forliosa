@@ -13,8 +13,14 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
 
-/** 句子裡的連結：觸控時上下各多 12px 的可按範圍（合計 44px 以上）（行內元素的上下內距不改變行高） */
+/**
+ * 句子裡的連結：觸控時上下各多 12px 的可按範圍（合計 44px 以上；行內元素的上下內距不改變行高）。
+ * 下面那一行（筆數・成交價）在觸控時不接收點按（它沒有可以按的東西），所以蓋不到連結的下緣；
+ * 下面直接是表情列時，那一列往下讓 12px（見 FeedRow）。
+ */
 const INLINE_TOUCH = "pointer-coarse:py-3"
+/** 兩個字的名字只有 30px 寬：左右各多 8px 的可按範圍（負邊距抵掉，版面不動；`relative` 讓它不被後面的「買進」蓋住） */
+const NAME_TOUCH = "pointer-coarse:relative pointer-coarse:-mx-2 pointer-coarse:px-2"
 
 /**
  * 動態：成員的買賣（同一人同一天同一檔同方向合併成一則）與「加入了群組」。
@@ -70,7 +76,7 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
   const day = item.trade_date ?? item.created_at.slice(0, 10)
   const threadId = `thread-${item.id}`
   const name = (
-    <Link to="/groups/$groupId/members/$userId" params={{ groupId, userId: item.user_id }} className={cn("font-medium hover:underline", INLINE_TOUCH)}>
+    <Link to="/groups/$groupId/members/$userId" params={{ groupId, userId: item.user_id }} className={cn("font-medium hover:underline", INLINE_TOUCH, NAME_TOUCH)}>
       {item.display_name}
     </Link>
   )
@@ -94,8 +100,11 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
         {item.type === "trade" && (
           <>
             <TradeDetail item={item} />
-            {/* 觸控時每個按鈕 44px 高（看得到的框比較小），所以上面不再另外留空 */}
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 pointer-coarse:mt-0.5">
+            {/*
+              觸控時每個按鈕 44px 高（看得到的框比較小），所以上面不再另外留空；
+              上面直接是句子時（沒有筆數・成交價那一行）留 12px：句子裡的連結往下也有 44px 的可按範圍，不和表情疊在一起
+            */}
+            <div className={cn("mt-1.5 flex flex-wrap items-center gap-x-4", hasTradeDetail(item) ? "pointer-coarse:mt-0.5" : "pointer-coarse:mt-3")}>
               <Reactions groupId={groupId} target={`trade:${item.id}`} reactions={item.reactions} />
               <CommentsToggle count={item.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />
             </div>
@@ -122,15 +131,19 @@ function TradeLine({ item, name }: { item: FeedItem; name: React.ReactNode }) {
   )
 }
 
+/** 這一則有沒有「筆數・成交價」那一行 */
+const hasTradeDetail = (item: FeedItem) => (item.count ?? 1) > 1 || typeof item.price === "number"
+
 /** 合併筆數與成交價（只有對方開了附上成交價才有；隱私模式遮住） */
 function TradeDetail({ item }: { item: FeedItem }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const merged = (item.count ?? 1) > 1
   const hasPrice = typeof item.price === "number"
-  if (!merged && !hasPrice) return null
+  if (!hasTradeDetail(item)) return null
   const market = item.currency === "USD" ? "US" : marketOf(item.symbol ?? "")
   return (
-    <p className="num mt-0.5 text-sm text-ink-2">
+    // 觸控時這一行不接收點按：上面句子裡的連結（名字、股票）往下 12px 的可按範圍落在這裡
+    <p className="num mt-0.5 text-sm text-ink-2 pointer-coarse:pointer-events-none">
       {merged && <span>{item.count} 筆</span>}
       {merged && hasPrice && "・"}
       {hasPrice && (

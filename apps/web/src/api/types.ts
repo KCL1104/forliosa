@@ -1159,6 +1159,23 @@ export class ApiError extends Error {
 }
 
 /** 前端與資料來源之間唯一的邊界：HTTP 版與 mock 版都實作這個介面。 */
+/**
+ * `GET /meta/market-status`：台股今天是不是交易日、現在是不是盤中（不讀使用者資料，不用登入）。
+ * 沒有盤中即時報價：這個狀態只用來決定價格旁要不要加一行「盤中不更新」「今天的收盤價還沒公布」。
+ */
+export interface MarketStatus {
+  tw: {
+    /** 台北時間的今天（YYYY-MM-DD） */
+    date: string
+    /** 依官方行事曆 */
+    is_trading_day: boolean
+    /** 交易日 09:00–13:30（台北） */
+    is_open: boolean
+    open: string
+    close: string
+  }
+}
+
 export interface ForliosaApi {
   readonly kind: "http" | "mock"
   // 認證與使用者
@@ -1220,6 +1237,7 @@ export interface ForliosaApi {
   draftRecurring(id: string, date?: string): Promise<RecurringDraft>
   // 資料來源與授權（不需登入）
   getAttributions(): Promise<Attributions>
+  getMarketStatus(): Promise<MarketStatus>
   // 法人觀點：GET 讀當日共用快取；POST 觸發 AI 網路搜尋（計入觸發者的 AI 額度）
   getAnalystViews(symbol: string): Promise<AnalystViews>
   requestAnalystViews(symbol: string): Promise<AnalystViews>

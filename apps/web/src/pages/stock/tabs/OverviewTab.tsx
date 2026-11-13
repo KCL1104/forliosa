@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { appToday } from "@/api"
-import { useChips, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
+import { useChips, useCompany, useEvents, useNews, useOverview, useRevenue, useValuation } from "@/api/queries"
 import type { InstrumentDetail, InstrumentOverview, MonthlyRevenue, Position, Quote, Valuation } from "@/api/types"
 import { useReadOnly, useWho } from "@/api/view-as"
 import { Section } from "@/components/section"
@@ -32,15 +32,21 @@ import { Fig, KeyGrid, NotYet, type KeyItem } from "./kit"
  */
 export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
   const readOnly = useReadOnly()
+  const band = useKeyBand(inst, quote)
+  const company = useCompany(inst.symbol)
+  // 只剩一兩格（美股沒有行情時只有近四季 EPS）：不在分頁列下面單獨畫一條兩條線夾著的細帶，併進「關於」的鍵值格。
+  // 「關於」沒有資料可放時（公司資料載入失敗）才留在這裡寫成一行。
+  const folded = band.sparse && (company.isLoading || !!company.data)
   return (
     <div className="flex flex-col">
-      <KeyBand inst={inst} quote={quote} position={position} />
-      <Events inst={inst} position={position} className="mt-12" />
+      <KeyBand inst={inst} band={band} position={position} folded={folded} />
+      {/* 鍵值帶整個沒有東西時（併到「關於」了），事件就是第一塊，上面不留 48px */}
+      <Events inst={inst} position={position} className={band.empty || (folded && !band.notes) ? undefined : "mt-12"} />
       <div className="mt-14 flex flex-col gap-10">
         {/* 第三方的評等與目標價：個股才有（ETF 沒有分析師評等）；預設收合，展開才查 */}
         {inst.type === "stock" && !readOnly && <AnalystViewsCard key={inst.symbol} inst={inst} />}
         <NewsCoverage key={`news-${inst.symbol}`} inst={inst} />
-        <AboutCompany key={`about-${inst.symbol}`} inst={inst} />
+        <AboutCompany key={`about-${inst.symbol}`} inst={inst} extra={folded ? band.cells : undefined} />
         <RelatedStocks key={`related-${inst.symbol}`} inst={inst} />
       </div>
     </div>
@@ -49,7 +55,8 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
 
 // ── 第一層：鍵值帶 ───────────────────────────────────────
 
-function KeyBand({ inst, quote, position }: { inst: InstrumentDetail; quote?: Quote; position: Position | null }) {
+/** 鍵值帶的資料：總覽的行情與基本數字、月營收、籌碼（各自載入），只留有值的格子 */
+function useKeyBand(inst: InstrumentDetail, quote: Quote | undefined) {
   const overview = useOverview(inst.symbol)
   const o = overview.data
   const us = inst.market === "US"
@@ -70,21 +77,45 @@ function KeyBand({ inst, quote, position }: { inst: InstrumentDetail; quote?: Qu
   useSourceNote(sourceNotes(chip.items.length ? chips.data?.sources : null))
   useDatasetSources([rev.length > 0 && "shioaji-data/official"])
 
+  const loading = overview.isLoading
+  const notes = !!(o?.status.note || chip.note)
+  return {
+    cells,
+    loading,
+    showValuation,
+    valuation: valuation.data,
+    overviewEps: o?.eps_ttm ?? null,
+    statusNote: o?.status.note ?? null,
+    chipNote: chip.note,
+    notes,
+    nav: etf && !us,
+    /** 只剩一兩格：不夠排成鍵值格 */
+    sparse: !loading && !showValuation && cells.length > 0 && cells.length < 3,
+    /** 什麼都沒有（沒有格子、估值那一行、說明與 ETF 淨值）：整個區塊不出現 */
+    empty: !loading && !showValuation && cells.length === 0 && !notes && !(etf && !us),
+  }
+}
+
+function KeyBand({ inst, band, position, folded }: { inst: InstrumentDetail; band: ReturnType<typeof useKeyBand>; position: Position | null; folded: boolean }) {
+  const { cells } = band
+  // 沒有東西可放（或那一兩格併到「關於」了、也沒有說明）：不留一個只有標題的空區塊
+  if (band.empty || (folded && !band.notes)) return null
   return (
     <section id="ov-key" aria-labelledby="ov-key-title">
       <h2 id="ov-key-title" className="sr-only">
         關鍵數據
       </h2>
-      {showValuation && (
-        <ValuationStrip inst={inst} valuation={valuation.data!} overviewEps={o?.eps_ttm ?? null} overviewLoading={overview.isLoading} position={position} />
+      {band.showValuation && (
+        <ValuationStrip inst={inst} valuation={band.valuation!} overviewEps={band.overviewEps} overviewLoading={band.loading} position={position} />
       )}
-      {overview.isLoading ? (
+      {band.loading ? (
         <Skeleton className="h-56 w-full rounded-sm" />
       ) : cells.length >= 3 ? (
         <KeyGrid items={cells} />
       ) : (
-        // 只剩一兩格（美股沒有行情時只有近四季 EPS）：寫成一行，不在 3 欄格線裡留一格孤零零的
-        cells.length > 0 && (
+        // 只剩一兩格、而且「關於」放不了（公司資料沒有載入）：寫成一行，不在 3 欄格線裡留一格孤零零的
+        cells.length > 0 &&
+        !folded && (
           <p className="flex flex-wrap gap-x-6 gap-y-1 border-y border-rule py-3 text-base text-ink">
             {cells.map((it) => (
               <span key={it.label} title={it.title}>
@@ -94,13 +125,13 @@ function KeyBand({ inst, quote, position }: { inst: InstrumentDetail; quote?: Qu
           </p>
         )
       )}
-      {(o?.status.note || chip.note) && (
+      {band.notes && (
         <div className="mt-2 flex flex-col gap-0.5 text-sm">
-          {o?.status.note && <p className="text-ink">{o.status.note}</p>}
-          {chip.note && <p className="text-ink-2">{chip.note}</p>}
+          {band.statusNote && <p className="text-ink">{band.statusNote}</p>}
+          {band.chipNote && <p className="text-ink-2">{band.chipNote}</p>}
         </div>
       )}
-      {etf && !us && <EtfNavSection inst={inst} variant="band" />}
+      {band.nav && <EtfNavSection inst={inst} variant="band" />}
     </section>
   )
 }

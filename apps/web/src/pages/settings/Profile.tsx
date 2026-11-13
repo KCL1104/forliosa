@@ -4,6 +4,7 @@ import { useMe } from "@/api/queries"
 import { useUpdateMe } from "@/api/sharing-queries"
 import { ApiError } from "@/api/types"
 import { UserAvatar } from "@/components/avatar"
+import { Section } from "@/components/section"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
@@ -23,12 +24,9 @@ function ProfileForm({ name: initial, email, avatar }: { name: string; email: st
   // 簽名格只在真的改了名字時出現；沒改時桌面留一個看不見的同寬位置（輸入框不跳動），手機什麼都不放
   const dirty = trimmed !== initial
   return (
-    <section aria-labelledby="set-profile" className="flex flex-col gap-2">
-      <h2 id="set-profile" className="border-b border-rule pb-2 text-lg font-bold">
-        個人資料
-      </h2>
+    <Section title="個人資料" titleId="set-profile">
       <form
-        className="flex flex-col gap-4 py-2 sm:flex-row sm:items-center"
+        className="flex flex-col gap-4 py-1 sm:flex-row sm:items-center"
         onSubmit={(e) => {
           e.preventDefault()
           if (bad || !dirty) return
@@ -58,6 +56,6 @@ function ProfileForm({ name: initial, email, avatar }: { name: string; email: st
           )}
         </div>
       </form>
-    </section>
+    </Section>
   )
 }

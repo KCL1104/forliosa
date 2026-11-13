@@ -5,7 +5,7 @@ import { createJSONStorage, persist } from "zustand/middleware"
 export type HoldingColumn = "price" | "day_pct" | "day_change" | "value" | "avg_cost" | "unrealized" | "unrealized_pct"
 
 export const COLUMN_LABEL: Record<HoldingColumn, string> = {
-  price: "現價",
+  price: "收盤價",
   day_pct: "今日漲跌",
   day_change: "今日損益",
   value: "市值・佔比",

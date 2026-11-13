@@ -21,7 +21,8 @@ import { CustomizeButton } from "./CustomizeButton"
 import { HoldingsView } from "./HoldingsView"
 import { useLedgerPrefs } from "./ledger-prefs"
 import { useLedgerCounts } from "./use-ledger-counts"
-import { asOfLabel } from "@/lib/as-of"
+import { ledgerAsOf } from "@/lib/as-of"
+import { useClose } from "@/hooks/use-close"
 import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
@@ -192,6 +193,8 @@ function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView 
   const holdings = useHoldings()
   const trend = useTrend()
   const privacy = usePrefs((s) => s.privacyMode)
+  // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（盤中、今天的還沒公布時多半句說明），「今日」只在收盤價是今天的時候寫
+  const close = useClose(summary?.as_of)
   if (!summary) return <HeroSkeleton />
   const up = (trend.values.at(-1) ?? 0) >= (trend.values[0] ?? 0)
   const missingReason = trendMissingReason(trend.notes)
@@ -204,13 +207,13 @@ function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView 
       <div className="min-w-0">
         <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
           <b className="text-base font-medium text-ink">總資產</b>
-          {asOfLabel(summary.as_of)}
+          <span className="num whitespace-nowrap">{ledgerAsOf(close.state, summary.as_of)}</span>
           {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
         </p>
         <BigTotal value={summary.market_value} />
         <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3.5 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2">
           <div className={item}>
-            <dt className="text-sm text-ink-2">今日</dt>
+            <dt className="num text-sm text-ink-2">{close.day}</dt>
             <dd className="text-lg font-medium">
               <Delta amount={summary.day_change} pct={summary.day_change_pct} />
             </dd>

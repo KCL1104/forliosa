@@ -25,6 +25,7 @@ const RECENT = 3
  * - 最多 3 列一行一格的格線列：正在發生的事排前面——待簽名的草稿、扣款日的定期定額或補記——接著是依頁面與資料出現的建議。
  * - 一行依頁面出現的文字連結（帳本：記一筆交易・匯入對帳單・股利入帳）。
  * - 沒有建議也沒有動作的頁面（設定、資料來源、紀錄）：最近 3 段對話（標題＋相對時間），按下接著那段對話。
+ *   桌面的紀錄頁不列（`hideRecent`）：那一頁本身就是完整的對話清單，旁邊的面板不重複一次。
  */
 export function PanelHome({
   ctx,
@@ -32,6 +33,7 @@ export function PanelHome({
   suggestions,
   size,
   onShowHistory,
+  hideRecent,
 }: {
   ctx: AiContext
   runner: Runner
@@ -39,11 +41,13 @@ export function PanelHome({
   size: "panel" | "screen"
   /** 「全部紀錄」：切到面板的紀錄；紀錄頁本身不需要 */
   onShowHistory?: () => void
+  /** 不列「最近的對話」（桌面的紀錄頁：頁面已經列出所有對話） */
+  hideRecent?: boolean
 }) {
   const actions = quickActions(ctx)
   const pending = usePendingCount()
   // 待簽名那一列不算建議：設定頁有待簽名的草稿時，下面照樣列最近的對話
-  const showRecent = suggestions.length === 0 && actions.length === 0
+  const showRecent = !hideRecent && suggestions.length === 0 && actions.length === 0
   const threads = useThreadList({ enabled: showRecent })
   const screen = size === "screen"
   const rows = [

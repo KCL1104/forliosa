@@ -6,6 +6,7 @@ import { useCreateDelegation, useDelegationCandidates, useDelegations, useDelete
 import { ApiError, type Delegation, type DelegationScope } from "@/api/types"
 import { scopeText, useViewAsControls } from "@/app/view-as"
 import { UserAvatar } from "@/components/avatar"
+import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
@@ -30,6 +31,7 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
  * 授權查看（一對一、唯讀）：
  * - 我授權的人：只能選同群組的成員；範圍是全部帳戶或指定帳戶；隨時修改或撤銷（立即生效）
  * - 授權給我的人：按「查看」進入唯讀的查看模式；也可以自己移除
+ * 列上的動作全設定頁同一套：改內容或次要的是文字動作（修改範圍、移除），這一列最重的動作是外框按鈕（撤銷、查看）。
  */
 export function Delegations() {
   const list = useDelegations()
@@ -37,25 +39,27 @@ export function Delegations() {
   const [removing, setRemoving] = useState<{ d: Delegation; mine: boolean } | null>(null)
   const { enter } = useViewAsControls()
   return (
-    <section id="delegations" aria-labelledby="set-delegations" className="flex scroll-mt-20 flex-col gap-8">
-      <div className="flex flex-wrap items-end justify-between gap-2 border-b border-rule pb-2">
-        <div>
-          <h2 id="set-delegations" className="text-lg font-bold">
-            授權查看
-          </h2>
-          <p className="text-md text-ink-2">讓同群組的家人朋友唯讀查看你的帳本，可以只開放部分帳戶，隨時撤銷。</p>
-        </div>
+    <Section
+      id="delegations"
+      title="授權查看"
+      titleId="set-delegations"
+      className="scroll-mt-20"
+      bodyClassName="flex flex-col gap-8"
+      action={
         <Button variant="outline" size="sm" onClick={() => setEditing("new")}>
           授權給…
         </Button>
-      </div>
+      }
+    >
+      {/* 授權是後果重大的選擇：說明留著（在標題的印刷線下面，不夾在標題和線中間） */}
+      <p className="-mb-3 max-w-prose text-md text-ink-2">讓同群組的家人朋友唯讀查看你的帳本，可以只開放部分帳戶，隨時撤銷。</p>
       {list.isError ? (
-        <ErrorState flush className="-mt-5" error={list.error} onRetry={() => void list.refetch()} />
+        <ErrorState error={list.error} onRetry={() => void list.refetch()} />
       ) : !list.data ? (
         <SkeletonLines rows={3} />
       ) : (
         <>
-          <div className="-mt-6 flex flex-col gap-2">
+          <div className="flex flex-col gap-2">
             <h3 className="text-base font-bold">你授權的人</h3>
             {list.data.granted.length === 0 ? (
               <EmptyState title="還沒有授權給任何人" className="py-4" />
@@ -85,7 +89,8 @@ export function Delegations() {
                     <button type="button" onClick={() => setRemoving({ d, mine: false })} className={cn(textAction, "mr-2")}>
                       移除
                     </button>
-                    <Button size="sm" onClick={() => enter(d)} aria-label={`查看${d.owner.display_name}的資產`}>
+                    {/* 每一列都有一顆，所以是外框按鈕（一個畫面最多一顆墨色實心的主要按鈕） */}
+                    <Button variant="outline" size="sm" onClick={() => enter(d)} aria-label={`查看${d.owner.display_name}的資產`}>
                       查看
                     </Button>
                   </Row>
@@ -97,7 +102,7 @@ export function Delegations() {
       )}
       {editing && <GrantDialog key={editing === "new" ? "new" : editing.id} editing={editing === "new" ? null : editing} onClose={() => setEditing(null)} />}
       {removing && <RemoveDialog d={removing.d} mine={removing.mine} onClose={() => setRemoving(null)} />}
-    </section>
+    </Section>
   )
 }
 

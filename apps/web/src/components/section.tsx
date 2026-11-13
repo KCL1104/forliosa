@@ -2,7 +2,8 @@ import { cn } from "@/lib/utils"
 
 /**
  * 區塊（聯絡簿）：沒有卡片外框，只有標題下一條印刷線（--print；列與列之間的格線是 --rule）。格線就是結構。
- * 標題上方留白比下方多。
+ * 標題上方留白比下方多。區塊標題全站同一級：20px 700（帳本、個股、群組、成員、設定、資料來源都用這個元件）；
+ * 只有個股總覽第三層的參考區塊（`QuietSection`）是 17px。
  */
 export function Section({
   title,
@@ -12,6 +13,7 @@ export function Section({
   className,
   bodyClassName,
   aside,
+  id,
 }: {
   title?: React.ReactNode
   titleId?: string
@@ -20,9 +22,11 @@ export function Section({
   children: React.ReactNode
   className?: string
   bodyClassName?: string
+  /** 網址錨點（設定頁的 #accounts、#recurring、#delegations） */
+  id?: string
 }) {
   return (
-    <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col", className)}>
+    <section id={id} aria-labelledby={titleId} className={cn("flex min-w-0 flex-col", className)}>
       {(title || action) && (
         <header className="flex min-h-11 flex-wrap items-end gap-x-3 gap-y-1 border-b border-print pb-2">
           {title && (

@@ -14,7 +14,7 @@ import {
 } from "lightweight-charts"
 import { ChevronDownIcon } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
-import { useHistory, useIntraday, useToggleWatch, useWatchlist } from "@/api/queries"
+import { useHistory, useIntraday } from "@/api/queries"
 import type { HistoryRange, InstrumentDetail, Position, PositionMarker, Quote } from "@/api/types"
 import { DataNotes } from "@/components/data-notes"
 import { RangeChips } from "@/components/segmented"
@@ -35,11 +35,11 @@ import { useIsDesktop } from "@/hooks/use-media-query"
 import { useResolvedTheme } from "@/hooks/use-theme"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { cssVarColor } from "@/lib/css-color"
+import { closeLabel } from "@/lib/as-of"
 import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
 import { dayTime, importantMoments, movingAverage } from "@/lib/chart-math"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
-import { useReadOnly } from "@/api/view-as"
 import { NotYet } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
@@ -246,7 +246,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
               aria-checked={kind === k}
               disabled={isIntraday && k === "candle"}
               onClick={() => setKind(k)}
-              className="sel-chip h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:px-3.5"
+              // 觸控：外框裡的按鈕 40px 高，可按範圍用 ::before 上下各多 2px（蓋到外框的內距），合計 44px；一個字的「線」至少 44px 寬
+              className="sel-chip relative h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:min-w-11 pointer-coarse:px-3.5 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-0.5 pointer-coarse:before:content-['']"
             >
               {k === "line" ? "線" : "K 線"}
             </button>
@@ -294,7 +295,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
             aria-pressed={moments}
             disabled={isIntraday}
             onClick={() => setMoments(!moments)}
-            className="press sel-chip inline-flex h-7 items-center gap-1.5 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10"
+            className="press sel-chip relative inline-flex h-7 items-center gap-1.5 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-0.5 pointer-coarse:before:content-['']"
           >
             <span aria-hidden className={cn(moments ? "text-chart-ochre" : "text-ctl")}>
               ◆
@@ -382,50 +383,29 @@ function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
   )
 }
 
+/**
+ * 1 日（盤中）走勢：沒有。Forliosa 沒有盤中即時報價（合法取得要付費授權），價格都是收盤後公布的收盤價——
+ * 和報價下面那一行、資料來源頁的說法一致；不承諾「加入觀察就會記錄盤中走勢」。給一個現在能看的（5 日）。
+ * 後端有說明（notes）時照原文接在後面。
+ */
 function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail; quote?: Quote; notes: string[]; onFiveDays: () => void }) {
-  const watch = useWatchlist()
-  const toggle = useToggleWatch()
-  const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
-  const readOnly = useReadOnly()
-  if (notes.length > 0) {
-    // 後端說明為什麼沒有（只用可商用來源時沒有授權的盤中資料）：照實顯示，並給一個現在能看的
-    return (
-      <NotYet
-        className="h-full justify-center"
-        title="盤中走勢需要授權行情，目前提供收盤後資料"
-        action={
-          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={onFiveDays}>
-            看 5 日走勢
-          </Button>
-        }
-      >
-        <DataNotes notes={notes} className="text-md" />
-        {quote && (
-          <p className="num mt-1">
-            最近收盤 {formatPrice(quote.price, inst.market, inst.type)}
-            {quote.as_of && `（${formatDate(quote.as_of.slice(0, 10))}）`}
-          </p>
-        )}
-      </NotYet>
-    )
-  }
   return (
     <NotYet
       className="h-full justify-center"
-      title="1 日走勢只有持股與觀察清單會記錄"
+      title="沒有盤中走勢：價格是收盤後公布的收盤價"
       action={
-        !watching &&
-        !readOnly && (
-          <Button variant="outline" size="sm" className="pointer-coarse:h-11" disabled={toggle.isPending} onClick={() => toggle.mutate({ symbol: inst.symbol, on: true })}>
-            加入觀察
-          </Button>
-        )
+        <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={onFiveDays}>
+          看 5 日走勢
+        </Button>
       }
     >
-      {watching
-        ? "已經在觀察中，下一次盤中就會開始累積每分鐘的走勢。"
-        : `加入觀察後，盤中每分鐘會記下${inst.name}的價格。現在可以先看 5 日或 1 月。`}
-      {quote && ` 目前 ${formatPrice(quote.price, inst.market, inst.type)}。`}
+      <DataNotes notes={notes} className="text-md" />
+      {quote && (
+        <p className="num mt-1">
+          {closeLabel(quote.as_of)}
+          <span className="ml-2 text-ink">{formatPrice(quote.price, inst.market, inst.type)}</span>
+        </p>
+      )}
     </NotYet>
   )
 }

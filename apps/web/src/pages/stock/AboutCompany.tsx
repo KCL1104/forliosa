@@ -1,3 +1,5 @@
+import { kaiSize } from "@/ai/kai-size"
+import { KaiText } from "@/ai/kai-text"
 import { useCompany } from "@/api/queries"
 import type { CompanyAbout, InstrumentDetail } from "@/api/types"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -8,9 +10,11 @@ import { cn } from "@/lib/utils"
 import { QuietSection } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
-type Row = { label: string; value: React.ReactNode }
+type Row = { label: string; value: React.ReactNode; title?: string }
 
-function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
+/** `extra`：總覽的鍵值帶只剩一兩格時（美股沒有行情時的近四季 EPS）併進來的格子，排在公司資料後面、曾用名稱前面 */
+function aboutRows(c: CompanyAbout | undefined, inst: InstrumentDetail, extra: Row[] = []): Row[] {
+  if (!c) return extra
   const rows: Row[] = []
   const add = (label: string, value: React.ReactNode | null | undefined) => {
     if (value !== null && value !== undefined && value !== "") rows.push({ label, value })
@@ -20,6 +24,7 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
     add("總部", c.hq)
     add("交易所", c.exchanges?.join("、"))
     add("會計年度結束", c.fiscal_year_end ? fiscalYearEnd(c.fiscal_year_end) : null)
+    rows.push(...extra)
     add("曾用名稱", c.former_names?.length ? c.former_names.map((f) => f.name).join("、") : null)
     return rows
   }
@@ -28,7 +33,7 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
     add("追蹤指數", c.fund?.index_name)
     add("成立日期", c.incorporated ? formatDate(c.incorporated) : null)
     add(`${c.listing ?? "上市"}日期`, c.listed_date ? formatDate(c.listed_date) : null)
-    return rows
+    return [...rows, ...extra]
   }
   add("產業別", c.industry)
   add("成立日期", c.incorporated ? `${formatDate(c.incorporated)}・成立 ${c.years_since_incorporation ?? "—"} 年` : null)
@@ -52,7 +57,7 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
   add("發行股數", inst.shares_outstanding ? `${formatNumber(Math.round(inst.shares_outstanding / 1000))} 張` : null)
   if (inst.chain_stage) add("產業鏈", inst.chain_stage)
   if (inst.themes.length) add("題材", inst.themes.join("・"))
-  return rows
+  return [...rows, ...extra]
 }
 
 /**
@@ -61,14 +66,15 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
  *   沒有條目時是 AI 依官方資料寫的 2–3 句（模型寫的字：紫色楷體、標「AI 依公開資料整理」）。
  * - 緊湊的兩欄鍵值格：產業別、成立日期（成立 N 年）、上市／上櫃日期、總部、網站、實收資本額、董事長、總經理…
  * - 資料日期留在格子下面；資料來源登記到頁尾。
+ * - `extra`：總覽第一層只剩一兩格時（美股沒有行情，只有近四季 EPS）併到這張鍵值格，不在分頁列下面單獨畫一條細帶。
  */
-export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
+export function AboutCompany({ inst, extra }: { inst: InstrumentDetail; extra?: Row[] }) {
   const company = useCompany(inst.symbol)
   const c = company.data
   useSourceNote(sourceNotes(c?.sources.length ? c.sources : inst.data_sources))
   if (company.isLoading) return <Skeleton className="h-48 w-full rounded-sm" />
   const name = c?.short_name || inst.name
-  const rows = c ? aboutRows(c, inst) : []
+  const rows = aboutRows(c, inst, extra)
   const d = c?.description ?? null
   // 個人模式的 shioaji-data 研究摘要只在沒有維基百科／AI 簡介時顯示（commercial 為 null）
   const summary = d ? null : inst.summary
@@ -77,7 +83,14 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
     <QuietSection title={`關於「${name}」`} titleId="ov-company">
       {d && (
         <div className="max-w-prose pt-2">
-          <p className={cn("text-base leading-relaxed text-ink", d.kind === "ai" && "ai-voice text-lg leading-snug")}>{d.text}</p>
+          {d.kind === "ai" ? (
+            // 模型寫的簡介：和對話裡的回答同一套排版（17px／手機 18px、行高 1.8、`KaiText`）
+            <p className={cn("ai-voice", kaiSize.page)}>
+              <KaiText text={d.text} />
+            </p>
+          ) : (
+            <p className="text-base leading-relaxed text-ink">{d.text}</p>
+          )}
           <p className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-ink-2">
             <span className="demo-tag">{d.label}</span>
             {d.kind === "wikipedia" && d.url ? (
@@ -101,7 +114,7 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
         // 兩欄（手機一欄）；單數格時最後一格撐滿兩欄，最後一列不留孤格、格線連成一條
         <dl className={cn("grid gap-x-8 sm:grid-cols-2", (d || summary) && "mt-4 border-t border-rule")}>
           {rows.map((r) => (
-            <div key={r.label} className="relative flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5 sm:last:odd:col-span-2">
+            <div key={r.label} title={r.title} className="relative flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5 sm:last:odd:col-span-2">
               <dt className="shrink-0 text-md text-ink-2">{r.label}</dt>
               <dd className="min-w-0 text-right text-base break-words text-ink">{r.value}</dd>
             </div>

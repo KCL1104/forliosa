@@ -34,6 +34,7 @@ import {
   type WatchItem,
   type Why,
   type Attributions,
+  type MarketStatus,
   type ClosedRound,
   type PositionHistory,
   type RecurringDraft,
@@ -181,6 +182,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     draftRecurring: (id, date) => request<RecurringDraft>("POST", `/recurring/${enc(id)}/draft`, { query: { date } }),
 
     getAttributions: () => request<Attributions>("GET", "/meta/attributions"),
+    getMarketStatus: () => request<MarketStatus>("GET", "/meta/market-status"),
 
     getAnalystViews: (symbol) => request<AnalystViews>("GET", `/instruments/${enc(symbol)}/analyst-views`),
     requestAnalystViews: (symbol) => request<AnalystViews>("POST", `/instruments/${enc(symbol)}/analyst-views`),
