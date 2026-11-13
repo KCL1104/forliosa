@@ -37,14 +37,22 @@ const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ 
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
 const PerformanceView = lazy(() => import("./PerformanceView").then((m) => ({ default: m.PerformanceView })))
 
-/** 分段的順序，也是數字鍵 1–4 的對應（和 router 的 LEDGER_VIEWS 相同；不從 router 匯入值，避免循環匯入） */
-const VIEW_KEYS: readonly LedgerView[] = ["holdings", "transactions", "dividends", "performance"]
+/**
+ * 分段只有三個：持倉・紀錄・績效（產品負責人 2026-11-14：只需要記買進，賣出與股利不用特別去記——交易和股利
+ * 併成「紀錄」，想查才點）。網址的 `view` 不變：`transactions`、`dividends` 都屬於「紀錄」，在分段裡面用兩個小分頁切換。
+ * 順序也是數字鍵 1–3 的對應。
+ */
+type Segment = "holdings" | "records" | "performance"
+const SEGMENT_KEYS: readonly Segment[] = ["holdings", "records", "performance"]
+const segmentOf = (view: LedgerView): Segment => (view === "transactions" || view === "dividends" ? "records" : view)
+const viewOf = (segment: Segment): LedgerView => (segment === "records" ? "transactions" : segment)
 
-/** 帳本（首頁）：主數字 → 本週事項 → 分段（持倉・交易・股利・績效）→ 清單 */
+/** 帳本（首頁）：主數字 → 本週事項 → 分段（持倉・紀錄・績效）→ 清單 */
 export function LedgerPage() {
   const search = useSearch({ from: "/" }) as LedgerSearch
   const navigate = useNavigate()
   const view: LedgerView = search.view ?? "holdings"
+  const segment = segmentOf(view)
   usePageTitle("帳本")
   const summary = useSummary()
   const counts = useLedgerCounts()
@@ -55,12 +63,13 @@ export function LedgerPage() {
 
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
 
-  // 數字鍵 1–4 切換分段（持倉・交易・股利・績效）：焦點在輸入框、選單、對話框裡，或同時按著修飾鍵時不動作
+  // 數字鍵 1–3 切換分段（持倉・紀錄・績效）：焦點在輸入框、選單、對話框裡，或同時按著修飾鍵時不動作
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return
-      const next = VIEW_KEYS[["1", "2", "3", "4"].indexOf(e.key)]
-      if (!next) return
+      const segment = SEGMENT_KEYS[["1", "2", "3"].indexOf(e.key)]
+      if (!segment) return
+      const next = viewOf(segment)
       const t = e.target instanceof Element ? e.target : null
       if (t?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="combobox"]')) return
       if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
@@ -84,15 +93,14 @@ export function LedgerPage() {
       <div className="mt-5 flex items-center gap-4 lg:mt-11">
         <Segmented
           label="帳本內容"
-          value={view}
-          onChange={setView}
+          value={segment}
+          onChange={(v) => setView(viewOf(v))}
           controls="ledger-view"
           className="max-lg:flex-1"
           options={[
             { value: "holdings", label: "持倉", count: counts.holdings, shortcut: "1" },
-            { value: "transactions", label: "交易", count: counts.transactions, shortcut: "2" },
-            { value: "dividends", label: "股利", count: counts.dividends, shortcut: "3" },
-            { value: "performance", label: "績效", shortcut: "4" },
+            { value: "records", label: "紀錄", shortcut: "2" },
+            { value: "performance", label: "績效", shortcut: "3" },
           ]}
         />
         {pending > 0 && !readOnly && (
@@ -137,13 +145,44 @@ export function LedgerPage() {
         </button>
       )}
 
-      <div id="ledger-view" role="tabpanel" aria-labelledby={`tab-${view}`} className="mt-5 lg:mt-5">
+      <div id="ledger-view" role="tabpanel" aria-labelledby={`tab-${segment}`} className="mt-5 lg:mt-5">
+        {segment === "records" && (
+          // 紀錄裡的兩個小分頁：交易（買進、賣出與其他）、股利（台股的現金股利與配股是系統在除息日自動記的）
+          <div role="tablist" aria-label="紀錄的內容" className="mb-4 flex gap-5 border-b border-rule">
+            {([["transactions", "交易", counts.transactions], ["dividends", "股利", counts.dividends]] as const).map(([v, label, count]) => (
+              <button
+                key={v}
+                type="button"
+                role="tab"
+                id={`subtab-${v}`}
+                aria-selected={view === v}
+                aria-controls="ledger-records"
+                tabIndex={view === v ? 0 : -1}
+                onClick={() => setView(v)}
+                onKeyDown={(e) => {
+                  if (e.key !== "ArrowRight" && e.key !== "ArrowLeft") return
+                  e.preventDefault()
+                  setView(v === "transactions" ? "dividends" : "transactions")
+                  const list = e.currentTarget.parentElement
+                  requestAnimationFrame(() => list?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
+                }}
+                className={cn("sel-tab -mb-px inline-flex min-h-10 items-baseline gap-1.5 text-base text-ink-2 pointer-coarse:min-h-11", view === v && "active")}
+              >
+                {label}
+                {count != null && <span className="num text-sm font-normal text-ink-2">{count}</span>}
+              </button>
+            ))}
+          </div>
+        )}
         {view === "holdings" ? (
           <HoldingsView />
         ) : (
           <Suspense fallback={<Skeleton className="h-64 w-full rounded-sm" />}>
-            {view === "transactions" && <TransactionsView symbol={search.symbol} />}
-            {view === "dividends" && <DividendsView />}
+            {segment === "records" && (
+              <div id="ledger-records" role="tabpanel" aria-labelledby={`subtab-${view}`}>
+                {view === "transactions" ? <TransactionsView symbol={search.symbol} /> : <DividendsView />}
+              </div>
+            )}
             {view === "performance" && <PerformanceView />}
           </Suspense>
         )}

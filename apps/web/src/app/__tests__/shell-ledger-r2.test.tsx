@@ -127,23 +127,39 @@ describe("帳本主數字與分段", () => {
     expect(week.querySelector("svg")).toBeNull()
   })
 
-  it("數字鍵 1–4 切換分段；焦點在輸入框裡、或按著修飾鍵時不動作", async () => {
+  it("數字鍵 1–3 切換分段（持倉・紀錄・績效）；焦點在輸入框裡、或按著修飾鍵時不動作", async () => {
     const router = renderApp("/")
-    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    const tabs = await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+/g, "").trim())).toEqual(["持倉", "紀錄", "績效"])
     const view = () => (router.state.location.search as { view?: string }).view
     fireEvent.keyDown(document.body, { key: "2" })
     await waitFor(() => expect(view()).toBe("transactions"))
-    fireEvent.keyDown(document.body, { key: "4" })
+    fireEvent.keyDown(document.body, { key: "3" })
     await waitFor(() => expect(view()).toBe("performance"))
-    fireEvent.keyDown(document.body, { key: "3", metaKey: true })
+    fireEvent.keyDown(document.body, { key: "4" }) // 沒有第四段
+    fireEvent.keyDown(document.body, { key: "2", metaKey: true })
     const input = document.createElement("input")
     document.body.append(input)
-    fireEvent.keyDown(input, { key: "3" })
+    fireEvent.keyDown(input, { key: "2" })
     await new Promise((r) => setTimeout(r, 50))
     expect(view()).toBe("performance")
     input.remove()
     fireEvent.keyDown(document.body, { key: "1" })
     await waitFor(() => expect(view()).toBeUndefined())
+  })
+
+  it("「紀錄」裡有兩個小分頁：交易、股利；網址還是 view=transactions／dividends，兩個都算在「紀錄」", async () => {
+    const router = renderApp("/?view=dividends")
+    const tabs = await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    expect(within(tabs).getByRole("tab", { name: /紀錄/ })).toHaveAttribute("aria-selected", "true")
+    const sub = screen.getByRole("tablist", { name: "紀錄的內容" })
+    expect(within(sub).getByRole("tab", { name: /股利/ })).toHaveAttribute("aria-selected", "true")
+    await userEvent.click(within(sub).getByRole("tab", { name: /交易/ }))
+    await waitFor(() => expect((router.state.location.search as { view?: string }).view).toBe("transactions"))
+    expect(within(tabs).getByRole("tab", { name: /紀錄/ })).toHaveAttribute("aria-selected", "true")
+    // 持倉分段沒有這一列
+    await userEvent.click(within(tabs).getByRole("tab", { name: /持倉/ }))
+    await waitFor(() => expect(screen.queryByRole("tablist", { name: "紀錄的內容" })).toBeNull())
   })
 
   it("分段：觸控與手機版面每一段 44px，快速鍵寫在 aria-keyshortcuts", () => {

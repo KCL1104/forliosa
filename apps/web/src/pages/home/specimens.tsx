@@ -208,8 +208,6 @@ export function DraftSpecimen() {
         <dl className="grid grid-cols-2">
           <Cell label="股數" value="2,000 股" />
           <Cell label="成交價" value="52.40 元" right />
-          <Cell label="手續費" value="41" />
-          <Cell label="證交稅" value="0" right />
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-3 py-3 min-[360px]:px-4">
             <dt className="font-bold text-ink">合計</dt>
             <dd className="num text-xl font-bold text-ai">{formatMoney(104_841)}</dd>

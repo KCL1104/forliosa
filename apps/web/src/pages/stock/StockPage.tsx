@@ -1,3 +1,4 @@
+import { useUi } from "@/app/ui-store"
 import NumberFlow from "@number-flow/react"
 import { inText } from "@/lib/cjk"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
@@ -416,6 +417,7 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
 
 /** 我的部位：兩行（股數、均價、未實現、今日、已領股利）＋展開 */
 function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
+  const openReduce = useUi((s) => s.openReduce)
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
   const ask = useAskAi()
@@ -516,6 +518,11 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
               {!readOnly && (
                 <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("form", { code: inst.code })}>
                   記一筆
+                </Button>
+              )}
+              {!readOnly && p.quantity > 0 && (
+                <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => openReduce(inst.symbol)}>
+                  減少持股
                 </Button>
               )}
             </div>

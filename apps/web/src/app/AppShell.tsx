@@ -9,6 +9,7 @@ import { Wordmark } from "@/components/brand"
 import { Kbd } from "@/components/ui/kbd"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
+import { ReduceHost } from "@/pages/transactions/ReduceDialog"
 import { TradeFormHost } from "@/pages/transactions/TradeForm"
 import { usePrefs } from "@/stores/prefs"
 import { AvatarMenu } from "./AvatarMenu"
@@ -59,6 +60,7 @@ export function AppShell() {
       {!isDesktop && !readOnly && <AiScreen />}
       <CommandSearch />
       <TradeFormHost />
+      <ReduceHost />
     </div>
   )
 }

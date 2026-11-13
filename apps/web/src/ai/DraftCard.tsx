@@ -102,10 +102,9 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
             </>
           ) : isDividend ? (
             <>
+              {/* 稅與費用不逐項列在卡片上（產品負責人 2026-11-14）：只有總額和「實拿」，明細在「怎麼算的」裡 */}
               <Cell label="股利總額" value={input.amount != null ? money(input.amount) : "—"} />
-              <Cell label="二代健保" value={preview ? money(preview.health_insurance) : "…"} right />
-              <Cell label="預扣稅" value={preview ? money(preview.tax) : "…"} />
-              <Cell label="手續費" value={preview ? money(preview.fee) : "…"} right />
+              <Cell label="稅與費用" value={preview ? money(preview.health_insurance + preview.tax + preview.fee) : "…"} right />
             </>
           ) : (
             <>
@@ -122,8 +121,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
                 }
                 right
               />
-              <Cell label="手續費" value={preview ? money(preview.fee) : "…"} />
-              <Cell label={currency === "USD" ? "稅" : "證交稅"} value={preview ? money(preview.tax) : "…"} right />
+              {/* 手續費與稅不列在卡片上：它們算在「合計」裡（券商的損益表也是算進成本），金額在「怎麼算的」裡 */}
             </>
           )}
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-4 py-3">
@@ -166,6 +164,13 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
                 成交金額 {privacy ? "••••" : formatMoney(preview.gross, { currency, bare: true })}
                 {" = "}
                 {privacy ? "••••" : formatNumber(input.quantity, 0)} 股 × {formatPrice(input.price, instrument.market)}
+              </li>
+            )}
+            {preview && !isCash && (
+              <li className="num">
+                {isDividend
+                  ? `預扣稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}、二代健保 ${privacy ? "••••" : formatMoney(preview.health_insurance, { currency, bare: true })}、手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}`
+                  : `手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}、${currency === "USD" ? "稅" : "證交稅"} ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}`}
               </li>
             )}
             {(preview?.rules ?? []).map((r) => (

@@ -191,6 +191,23 @@ await check("帳本工具列的「記一筆」：直接開輸入框（不經過 
   await dialog.waitFor({ state: "detached", timeout: 4000 })
 })
 
+await check("減少持股：持倉那一列的選單（加碼・減少持股・全部賣出）→ 只填股數 → 用最新的收盤價記成賣出", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  await page.getByRole("button", { name: "鴻海的動作" }).click()
+  const items = await page.getByRole("menu").getByRole("menuitem").allInnerTexts()
+  if (items.join("|") !== "加碼|減少持股|全部賣出") throw new Error(`row menu: ${items}`)
+  await page.getByRole("menuitem", { name: "減少持股" }).click()
+  const dialog = page.getByRole("dialog")
+  await dialog.getByRole("heading", { name: "減少持股" }).waitFor()
+  await dialog.getByText(/記成賣出。$/).waitFor({ timeout: 8000 })
+  if (await dialog.getByText(/手續費|證交稅/).count()) throw new Error("the reduce dialog shows fees")
+  const label = await dialog.locator('label[for="reduce-qty"]').innerText()
+  await dialog.locator("#reduce-qty").fill(label.endsWith("張數") ? "1" : "1000")
+  await dialog.getByRole("button", { name: "賣出", exact: true }).click()
+  await page.getByText("已記錄：賣出 鴻海 1 張").waitFor({ timeout: 8000 })
+  await dialog.waitFor({ state: "detached", timeout: 4000 })
+})
+
 await check("帳本的欄位選單：勾選格排成兩欄，文字是橫的（不會被擠成一個字寬）", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "自訂欄位與顯示" }).click()
@@ -286,14 +303,20 @@ await check('aria-current="page" 只在頂部列的導覽上；字標、本週�
     if (marks.length !== 1 || marks[0].text !== "帳本") throw new Error(`nav should mark 帳本 on ${path}: ${JSON.stringify(marks)}`)
   }
 })
-await check("數字鍵 1–4 切換帳本分段（aria-keyshortcuts）；在輸入框裡打數字不會切換", async () => {
+await check("數字鍵 1–3 切換帳本分段（持倉・紀錄・績效；aria-keyshortcuts）；在輸入框裡打數字不會切換", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
-  await page.getByRole("tab", { name: /交易/ }).waitFor({ timeout: 8000 })
-  if ((await page.getByRole("tab", { name: /交易/ }).getAttribute("aria-keyshortcuts")) !== "2") throw new Error("missing aria-keyshortcuts")
+  await page.getByRole("tab", { name: /紀錄/ }).waitFor({ timeout: 8000 })
+  const segments = await page.getByRole("tablist", { name: "帳本內容" }).getByRole("tab").allInnerTexts()
+  if (segments.map((t) => t.replace(/[\d\s]/g, "")).join("|") !== "持倉|紀錄|績效") throw new Error(`ledger segments: ${segments}`)
+  if ((await page.getByRole("tab", { name: /紀錄/ }).getAttribute("aria-keyshortcuts")) !== "2") throw new Error("missing aria-keyshortcuts")
   await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
   await page.keyboard.press("2")
   await page.waitForURL(/view=transactions/)
-  await page.keyboard.press("4")
+  // 「紀錄」裡的兩個小分頁：交易、股利
+  await page.getByRole("tablist", { name: "紀錄的內容" }).getByRole("tab", { name: /股利/ }).click()
+  await page.waitForURL(/view=dividends/)
+  if ((await page.getByRole("tab", { name: /紀錄/ }).getAttribute("aria-selected")) !== "true") throw new Error("紀錄 is not selected on the dividends view")
+  await page.keyboard.press("3")
   await page.waitForURL(/view=performance/)
   const box = page.getByLabel("提出問題或下指令")
   await box.click()
@@ -952,7 +975,7 @@ await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／�
   await page.getByText("總資產").first().waitFor({ timeout: 8000 })
   if (await page.getByRole("complementary", { name: "問 AI" }).count()) throw new Error("AI panel visible in view-as")
   if (await page.getByText("觀察", { exact: true }).count()) throw new Error("watchlist visible in view-as")
-  await page.getByRole("tab", { name: /交易/ }).click()
+  await page.getByRole("tab", { name: /紀錄/ }).click()
   await page.locator(".form-head").filter({ hasText: "商品" }).getByText("數量", { exact: true }).waitFor({ timeout: 8000 })
   if (await page.getByRole("button", { name: "記一筆" }).count()) throw new Error("記一筆 visible in view-as")
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })

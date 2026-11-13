@@ -2,14 +2,14 @@ import { Link } from "@tanstack/react-router"
 import { XIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
-import { api } from "@/api"
+import { api, appToday } from "@/api"
 import { useAccounts, useDeleteTransaction, useQuote } from "@/api/queries"
 import type { Instrument, TransactionInput } from "@/api/types"
 import { FieldError, FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { formatPrice, formatQuantity, todayInTaipei } from "@/lib/format"
+import { formatPrice, formatQuantity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { AccountSelect, StampLine } from "./TradeForm"
@@ -41,7 +41,7 @@ export function QuickAdd({ initialSymbol, onDone, onFull }: { initialSymbol?: st
   const formRef = useRef<HTMLFormElement>(null)
   const [accountId, setAccountId] = useState("")
   const [symbol, setSymbol] = useState<Instrument | null>(null)
-  const [lots, setLots] = useState<Lot[]>(() => [{ id: 0, qty: "", date: todayInTaipei(), price: "" }])
+  const [lots, setLots] = useState<Lot[]>(() => [{ id: 0, qty: "", date: appToday(), price: "" }])
   const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
 
@@ -120,7 +120,7 @@ export function QuickAdd({ initialSymbol, onDone, onFull }: { initialSymbol?: st
 
   const addLot = () => {
     const id = nextId.current++
-    setLots((ls) => [...ls, { id, qty: "", date: ls.at(-1)?.date ?? todayInTaipei(), price: "" }])
+    setLots((ls) => [...ls, { id, qty: "", date: ls.at(-1)?.date ?? appToday(), price: "" }])
     setSubmitted(false)
     requestAnimationFrame(() => formRef.current?.querySelector<HTMLInputElement>(`#lot-qty-${id}`)?.focus())
   }
@@ -173,7 +173,7 @@ export function QuickAdd({ initialSymbol, onDone, onFull }: { initialSymbol?: st
                 />
               </Cell>
               <Cell label="買進日期" id={`lot-date-${l.id}`} first={i === 0} className={cn("max-sm:order-3", lots.length === 1 && "max-sm:col-span-2")}>
-                <Input id={`lot-date-${l.id}`} type="date" aria-label={`${nth}買進日期`} value={l.date} max={todayInTaipei()} onChange={(e) => setLot(l.id, { date: e.target.value })} />
+                <Input id={`lot-date-${l.id}`} type="date" aria-label={`${nth}買進日期`} value={l.date} max={appToday()} onChange={(e) => setLot(l.id, { date: e.target.value })} />
               </Cell>
               <Cell label={`買進價格${isUS ? "（美元）" : ""}`} id={`lot-price-${l.id}`} first={i === 0} error={err.price}>
                 <Input

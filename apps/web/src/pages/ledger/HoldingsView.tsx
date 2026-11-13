@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ArrowDownIcon, ArrowUpIcon, PinIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowUpIcon, EllipsisIcon, PinIcon } from "lucide-react"
 import { useMemo, useState } from "react"
 import { useHoldings, useIntraday, useWatchlist } from "@/api/queries"
 import type { Holding, WatchItem } from "@/api/types"
@@ -10,6 +10,7 @@ import { DemoTag } from "@/components/section"
 import { Sparkline } from "@/components/sparkline"
 import { EmptyState, ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, formatMoney, formatPercent, formatPrice, formatQuantity, toneClass } from "@/lib/format"
 import { codeOf, formatQuote, marketOf } from "@/lib/tick"
@@ -22,6 +23,7 @@ import { useActivePlans } from "./use-active-plans"
 import { useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
 import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
+import { useUi } from "@/app/ui-store"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
 
@@ -182,6 +184,11 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
             名稱
           </th>
           {columns.map(header)}
+          {!readOnly && (
+            <th scope="col" className="w-10">
+              <span className="sr-only">動作</span>
+            </th>
+          )}
         </tr>
       </thead>
       <tbody>
@@ -205,11 +212,43 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
                 <Cell c={c} h={h} maxWeight={maxWeight} />
               </td>
             ))}
+            {!readOnly && (
+              <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                <RowMenu h={h} />
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
-      {!readOnly && <WatchBody items={watch.data} columns={columns.length} loading={watch.isLoading} />}
+      {/* 多一欄：持股那幾列最右邊的動作選單 */}
+      {!readOnly && <WatchBody items={watch.data} columns={columns.length + 1} loading={watch.isLoading} />}
     </table>
+  )
+}
+
+/** 這一檔的動作：加碼、減少持股、全部賣出（賣出不用開表單：只填股數，用最新的收盤價記） */
+function RowMenu({ h }: { h: Holding }) {
+  const openTradeForm = useUi((s) => s.openTradeForm)
+  const openReduce = useUi((s) => s.openReduce)
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`${h.name}的動作`}
+            className="press -mr-2 ml-auto grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink"
+          />
+        }
+      >
+        <EllipsisIcon aria-hidden className="size-5" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36">
+        <DropdownMenuItem onClick={() => openTradeForm({ symbol: h.code })}>加碼</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => openReduce(h.symbol)}>減少持股</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => openReduce(h.symbol, true)}>全部賣出</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   )
 }
 
@@ -312,6 +351,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                   ) : null}
                 </td>
               ))}
+              <td />
             </tr>
           )
         })

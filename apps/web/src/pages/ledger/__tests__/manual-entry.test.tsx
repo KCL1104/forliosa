@@ -34,6 +34,7 @@ afterEach(() => {
   cleanup()
   useViewAs.getState().set(null)
   useUi.getState().closeTradeForm()
+  useUi.getState().closeReduce()
 })
 
 const T = { timeout: 4000 }
@@ -113,7 +114,7 @@ describe("帳本的「記一筆」", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
     const full = await screen.findByRole("dialog", {}, T)
     expect(await within(full).findByRole("heading", { name: "記一筆交易" }, T)).toBeInTheDocument()
-    expect(within(full).getByText("稅費試算")).toBeInTheDocument()
+    expect(await within(full).findByText("稅費試算", {}, T)).toBeInTheDocument()
     await waitFor(() => expect(within(full).getByText("台積電")).toBeInTheDocument(), T)
   })
 
@@ -149,5 +150,62 @@ describe("完整表單：存檔後再記一筆", () => {
     expect((dialog.querySelector("#trade-date") as HTMLInputElement).value).toBe("2024-03-05")
     expect(form.queryByText("台積電")).toBeNull()
     expect(form.getByRole("checkbox", { name: "存檔後再記一筆" })).toBeChecked()
+  })
+})
+
+describe("減少持股（賣出不用開表單）", () => {
+  it("只填股數：用最新的收盤價、今天的日期記成一筆賣出；超過持有的股數會擋下", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    const held = (await api.getHoldings()).find((h) => h.symbol === "2317.TW")!
+    const quote = await api.getQuote("2317.TW")
+    useUi.getState().openReduce("2317.TW")
+    const dialog = await screen.findByRole("dialog", {}, T)
+    const form = within(dialog)
+    expect(await form.findByRole("heading", { name: "減少持股" }, T)).toBeInTheDocument()
+    await form.findByText(/記成賣出。$/, {}, T)
+    const qty = dialog.querySelector<HTMLInputElement>("#reduce-qty")!
+    const inLots = dialog.querySelector('label[for="reduce-qty"]')!.textContent!.endsWith("張數")
+    // 超過持有
+    await userEvent.type(qty, String(inLots ? held.quantity / 1000 + 1 : held.quantity + 1000))
+    await userEvent.click(form.getByRole("button", { name: "賣出" }))
+    expect(form.getByText(/^最多 /)).toBeInTheDocument()
+    await userEvent.clear(qty)
+    await userEvent.type(qty, inLots ? "1" : "1000")
+    const before = (await api.listTransactions({ limit: 200 })).items.length
+    await userEvent.click(form.getByRole("button", { name: "賣出" }))
+    await waitFor(() => expect(useUi.getState().reduce.open).toBe(false), T)
+    const after = (await api.listTransactions({ limit: 200 })).items
+    expect(after.length).toBe(before + 1)
+    const sell = after.find((t) => t.type === "sell" && t.symbol === "2317.TW" && t.quantity === 1000 && t.price === quote.price)
+    expect(sell).toBeTruthy()
+  })
+
+  it("「全部賣出」先把股數填成全部；「改日期或價格」開完整表單、已經選在賣出", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    const held = (await api.getHoldings()).find((h) => h.symbol === "6488.TWO")!
+    useUi.getState().openReduce("6488.TWO", true)
+    const dialog = await screen.findByRole("dialog", {}, T)
+    const qty = await waitFor(() => {
+      const el = dialog.querySelector<HTMLInputElement>("#reduce-qty")
+      expect(el).not.toBeNull()
+      return el!
+    }, T)
+    await waitFor(() => expect([String(held.quantity), String(held.quantity / 1000)]).toContain(qty.value), T)
+    await userEvent.click(within(dialog).getByRole("button", { name: "改日期或價格" }))
+    const full = await screen.findByRole("dialog", {}, T)
+    expect(await within(full).findByRole("heading", { name: "記一筆交易" }, T)).toBeInTheDocument()
+    expect(await within(full).findByRole("radio", { name: "賣出" }, T)).toBeChecked()
+  })
+
+  it("持倉的每一列有動作選單：加碼、減少持股、全部賣出", async () => {
+    renderApp("/")
+    const table = await screen.findByRole("table", { name: "持倉" }, T)
+    await userEvent.click(await within(table).findByRole("button", { name: "鴻海的動作" }, T))
+    const menu = await screen.findByRole("menu", {}, T)
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["加碼", "減少持股", "全部賣出"])
+    await userEvent.click(within(menu).getByRole("menuitem", { name: "全部賣出" }))
+    expect(useUi.getState().reduce).toMatchObject({ open: true, symbol: "2317.TW", all: true })
   })
 })

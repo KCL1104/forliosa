@@ -40,7 +40,7 @@ const CASH_TYPES: TransactionType[] = ["deposit", "withdrawal", "fee", "tax", "i
  * 預設是簡單的買進輸入（`QuickAdd`）；編輯一筆交易、或從那裡按「賣出、股利或其他」，才是完整表單。
  */
 export function TradeFormHost() {
-  const { open, symbol, edit, full } = useUi((s) => s.tradeForm)
+  const { open, symbol, edit, full, sell } = useUi((s) => s.tradeForm)
   const openTradeForm = useUi((s) => s.openTradeForm)
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
@@ -48,12 +48,12 @@ export function TradeFormHost() {
   const title = edit ? "編輯交易" : quick ? "記一筆" : "記一筆交易"
   // 畫面上不寫副標；給螢幕報讀器一句
   const description = quick ? "選一檔股票，填股數、買進日期與價格。" : "填數量與價格，試算手續費與稅，再儲存。"
-  const formKey = edit?.id ?? (quick ? "quick" : "new")
+  const formKey = edit?.id ?? (quick ? "quick" : sell ? "sell" : "new")
   const body = (layout: "split" | "stack") =>
     quick ? (
       <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code) => openTradeForm({ symbol: code ?? symbol, full: true })} />
     ) : (
-      <TradeForm key={formKey} initialSymbol={symbol} edit={edit} onDone={close} layout={layout} />
+      <TradeForm key={formKey} initialSymbol={symbol} edit={edit} sell={sell} onDone={close} layout={layout} />
     )
 
   if (isDesktop) {
@@ -132,13 +132,13 @@ function initialState(edit: Transaction | undefined, unitPref: "lot" | "share"):
   }
 }
 
-export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymbol?: string; edit?: Transaction; onDone: () => void; layout: "split" | "stack" }) {
+export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initialSymbol?: string; edit?: Transaction; sell?: boolean; onDone: () => void; layout: "split" | "stack" }) {
   const accounts = useAccounts()
   const unitPref = usePrefs((s) => s.quantityUnit)
   const create = useCreateTransaction()
   const update = useUpdateTransaction()
   const remove = useDeleteTransaction()
-  const [f, setF] = useState<FormState>(() => initialState(edit, unitPref))
+  const [f, setF] = useState<FormState>(() => ({ ...initialState(edit, unitPref), ...(sell && !edit ? { mainType: "sell" as const } : {}) }))
   const [submitted, setSubmitted] = useState(false)
   // 連續記好幾筆（把現有的持股一筆一筆補進來）：存檔後表單留著，帳戶、類型、日期不動，其餘清空
   const [again, setAgain] = useState(false)
