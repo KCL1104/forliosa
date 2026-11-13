@@ -3,6 +3,9 @@
 1. A chat turn with tool use on the seeded demo user (``demo@forliosa.local``; seeded if missing).
 2. A question about 台積電 today that needs web search (citations printed).
 
+``--ask "台積電的技術面怎麼樣？" --symbol 2330.TW`` runs that one question instead (on that stock's page when
+``--symbol`` is given), e.g. to watch a turn that calls ``get_technicals``.
+
 ``--keys`` only sends one tiny request (``max_tokens=1``) through every key slot and prints each slot's workspace id,
 to check that ``CLAUDE_API_KEY_1..3`` really belong to three different workspaces (cost: a few millionths of a USD).
 
@@ -140,6 +143,8 @@ def check_analyst(pool, settings, symbols: list[str]) -> int:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Forliosa AI live smoke test (real API, small cost)")
     parser.add_argument("--only", type=int, choices=[1, 2], help="run only question 1 or 2")
+    parser.add_argument("--ask", metavar="QUESTION", help="run only this question instead of the two built-in ones")
+    parser.add_argument("--symbol", help="with --ask: ask on this stock's page, e.g. 2330.TW")
     parser.add_argument("--keys", action="store_true", help="only check which workspace each key slot belongs to")
     parser.add_argument("--analyst", nargs="+", metavar="SYMBOL",
                         help="only run the analyst-views generation for these stocks (at most 2)")
@@ -164,8 +169,9 @@ def main(argv: list[str] | None = None) -> int:
     with session_factory()() as db:
         user = _demo_user(db)
         md = get_market_data()
-        for n, (question, route, symbol) in enumerate(QUESTIONS, start=1):
-            if args.only and args.only != n:
+        asked = [(args.ask, f"/stock/{args.symbol}" if args.symbol else "/", args.symbol)] if args.ask else QUESTIONS
+        for n, (question, route, symbol) in enumerate(asked, start=1):
+            if args.only and not args.ask and args.only != n:
                 continue
             print(f"\n=== {n}. {question}（頁面 {route}）")
             turn = ChatTurn(db, user, md, pool, settings)

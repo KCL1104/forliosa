@@ -61,7 +61,7 @@ def test_schemas_are_strict_and_within_limits():
     assert names == {"get_portfolio_summary", "get_holdings", "get_transactions", "get_upcoming",
                      "get_stock_overview", "get_stock_history", "get_valuation", "get_chips", "get_financials",
                      "get_events", "get_news", "get_position", "search_instruments", "draft_transaction",
-                     "get_derivatives_overview"}
+                     "get_derivatives_overview", "get_technicals"}
     deriv = next(d for d in defs if d["name"] == "get_derivatives_overview")
     assert deriv["input_schema"] == {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
     st = server_tools(s)
@@ -143,6 +143,7 @@ def test_stock_tools_return_compact_json(two_users):
     for name, args in [("get_stock_overview", {"symbol": "2330"}),
                        ("get_stock_history", {"symbol": "2330", "range": "1Y"}),
                        ("get_valuation", {"symbol": "2330"}),
+                       ("get_technicals", {"symbol": "2330"}),
                        ("get_chips", {"symbol": "2330", "range": "3M"}),
                        ("get_financials", {"symbol": "2330", "period": "quarterly"}),
                        ("get_events", {"symbol": "2330", "mine_only": False}),
@@ -155,6 +156,10 @@ def test_stock_tools_return_compact_json(two_users):
         json.loads(out.content)
     _, hist = run(ctx, "get_stock_history", symbol="2330", range="1Y")
     assert len(hist["closes"]) <= 31 and hist["stats"]["days"] > 100
+    # demo bars (personal mode): every moving average exists, and nothing is called an official close
+    _, tech = run(ctx, "get_technicals", symbol="2330")
+    assert tech["is_demo"] is True and tech["as_of_close"]["official"] is False
+    assert set(tech["as_of_close"]["ma"]) == {"ma5", "ma10", "ma20", "ma60", "ma120", "ma240"}
     # listed (TWSE) stocks: no per-stock institutional flows or foreign holding, and the tool says why
     _, chips = run(ctx, "get_chips", symbol="2330", range="1M")
     assert chips["institutional_net_lots_total"] is None and chips["institutional_last_10_days"] == []

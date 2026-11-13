@@ -43,6 +43,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   ``group_digest_poll`` (every 5 minutes) collects the results, falls back to normal calls, and queues the pushes.
 * ``sharing_retention`` — every day 04:35: finished push rows after 30 days, Telegram link codes a day after they
   expired, digests 26 weeks after their week.
+* ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).
+  Requests already refuse an expired session; nothing else removes its row.
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
   watched, or viewed in the last 3 days), one GDELT request per symbol spaced ≥ 5 s, backing off after a 429; AI
   web search fills gaps within the monthly budget; headlines older than 30 days are deleted
@@ -230,6 +232,7 @@ class Worker:
             Job("group_digests", weekend_evening(time(20, 0)), self.group_digests),
             Job("group_digest_poll", every(300), self.group_digest_poll),
             Job("sharing_retention", daily_at(time(4, 35)), self.sharing_retention),
+            Job("session_purge", daily_at(time(4, 50)), self.session_purge),
             Job("monthly_archive", daily_at(time(10, 20), only_if=lambda n: n.day in MONTHLY_DAYS),
                 lambda: self.archive(MONTHLY_GROUPS)),
         ]
@@ -363,6 +366,17 @@ class Worker:
         n = await asyncio.to_thread(run)
         if n:
             log.info("sharing retention: %d rows deleted", n)
+
+    async def session_purge(self) -> None:
+        from forliosa.api.deps import purge_expired_sessions
+
+        def run() -> int:
+            with session_factory()() as db:
+                return purge_expired_sessions(db)
+
+        n = await asyncio.to_thread(run)
+        if n:
+            log.info("sessions: %d expired login sessions deleted", n)
 
     async def news_refresh(self) -> None:
         from forliosa.news.service import refresh
