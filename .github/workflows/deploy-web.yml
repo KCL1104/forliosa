@@ -1,0 +1,55 @@
+name: Deploy web (Cloudflare Pages)
+
+# 前端部署：main 有前端相關的變更時建置並上傳到 Cloudflare Pages 專案 `forliosa`（https://forliosa.trade）。
+# 需要兩個 repository secrets（Settings → Secrets and variables → Actions）：
+#   CLOUDFLARE_API_TOKEN   Cloudflare 的 API token（權限：Cloudflare Pages 編輯）
+#   CLOUDFLARE_ACCOUNT_ID  Cloudflare 帳號 ID
+# 後端（Railway）不在這裡：Railway 連著這個 repo，main 有 apps/api 的變更時自己重新部署。
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/web/**"
+      - "docs/legal/**"
+      - "pnpm-lock.yaml"
+      - "package.json"
+      - ".github/workflows/deploy-web.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    name: Build and deploy
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    env:
+      # 會自動加上 /api/v1。不設的話前端會用內建的示範資料，不會連後端。
+      VITE_API_BASE_URL: https://api.forliosa.trade
+    steps:
+      - name: Check that the Cloudflare secrets exist
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          if [ -z "$CLOUDFLARE_API_TOKEN" ] || [ -z "$CLOUDFLARE_ACCOUNT_ID" ]; then
+            echo "::error title=Missing secrets::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID under Settings → Secrets and variables → Actions, then re-run this workflow."
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      # No `version`: pnpm/action-setup reads `packageManager` from the root package.json.
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @forliosa/web build
+      - name: Deploy to Cloudflare Pages
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm dlx wrangler@4 pages deploy apps/web/dist --project-name=forliosa --branch=main --commit-dirty=true
