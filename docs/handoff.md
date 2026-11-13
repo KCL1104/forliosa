@@ -38,7 +38,16 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 - **AI 技術分析**（後端）：`get_technicals` 工具、盤中價格規則。AI 回答的寫法改過（`ai/prompts.py`「怎麼回答」），前端 `cleanAnswer()` 去掉殘留的 Markdown 記號。
 - **第四、第五輪潤飾**（見 §2.4）。
 
-後端：Alembic 單一 head `0014`。正式環境是 PostgreSQL（migration 已在上面跑過）；本機測試用 SQLite。
+2026-11-13 深夜到 11-14 新增（都已上線；每一項的決定與細節在 `PRODUCT.md`、`DESIGN.md`、`apps/api/CONTRACT_NOTES.md` 最後幾節、`docs/pending-decisions.md` L-10 到 L-14）：
+
+- **登入與首頁**：Google 登入（和 Discord 並列）；沒登入的 `/` 是介紹頁（標題「股票帳本」、三個示範畫面），登入頁在 `/login`。
+- **帳本只需要記買進**（方向 B）：分段「持倉・紀錄・績效」；「記一筆」照 Google 財經的輸入方式（選一檔 → 股數、日期、價格，可再加一筆買進，不顯示手續費）；賣出用持股那一列的「減少持股／全部賣出」（只填股數，用最新收盤價記）。貼 CSV 的匯入做過、負責人退掉，不要再做。
+- **市場頁** `/market`：指數、AI 收盤重點（全站共用一則）、類股、排行、重大訊息。
+- **AI**：畫圖工具 `draw_chart`、`get_related_stocks`、查不到當天價格時改找當天報導與相關類股、深度搜尋（一次算 5 題）、每日收盤簡報（設定裡打開，預設關）。
+- **歷史日線**：用 Yahoo Finance 回補五年（`PRICE_HISTORY_SOURCE=yahoo`，api 與 worker 都設了）。不是授權來源，負責人知情決定；只給走勢圖、技術指標、走勢小圖讀，帳本與績效不讀。`uv run python -m forliosa.history_backfill status｜drop`。
+- **隱私權政策**照實揭露 Cloudflare Web Analytics（負責人決定不關）。
+
+後端：Alembic 單一 head `0017`。正式環境是 PostgreSQL（migration 已在上面跑過）；本機測試用 SQLite。
 
 ## 2. 前端潤飾（Impeccable，兩輪）
 
@@ -83,6 +92,7 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 
 ## 3. 接下來可以做
 
+0. 第六次設計評分（Impeccable＋taste-skill，2026-11-14）的報告在 scratchpad，修正後的結果記在 §2。
 1. 產品負責人回覆 `docs/pending-decisions.md` 之後照決定實作。影響最大的五件：美股價格來源、「只記持股」帳戶的輸入畫面、券商對帳單樣本（M3 匯入）、部署前要建立的帳號（Discord 應用程式等，`docs/deploy.md`）、隱私權政策與服務條款。
 2. ~~討論串的頁面還沒有經過 Impeccable 評分~~（第四、第五次評分已涵蓋）。上線後的待辦在 `docs/pending-decisions.md` 最後一節（備份、Cloudflare Web Analytics、舊服務、法律文件待填的項目）。
 3. 財報狗式的 AI 產業新聞摘要（產品負責人說之後再做）。
