@@ -287,7 +287,7 @@
 | # | 問題 | 選項 → 建議 | 出處 |
 |---|---|---|---|
 | L-1 | ~~資料庫備份~~ | **已決定（2026-11-13）：照建議**——現在不做；開放給別人用之前，做「每天用 worker 把資料庫匯出到 Cloudflare R2」。 | `docs/deploy.md` 第 0 節 |
-| L-2 | Cloudflare 自動在網頁插入 Web Analytics（流量統計）的程式，隱私權政策寫的是「沒有追蹤」。 | **已決定：你到 Cloudflare 後台把 Web Analytics 關掉**（Workers & Pages → forliosa → Metrics／Settings）。**還沒做**：2026-11-13 晚上實測網頁仍會載入 `static.cloudflareinsights.com/beacon.min.js`。 | `docs/legal/README.md` |
+| L-2 | ~~Cloudflare Web Analytics 和隱私權政策不一致~~ | **已完成（2026-11-14）：你決定不關，改成在隱私權政策照實揭露**（重點、§2.6、§2.7、§4.1、§8）。它不設 Cookie、不在瀏覽器存東西（實測）。留給律師看的一點：頁面網址會送給 Cloudflare，邀請連結的網址裡有邀請碼。 | `docs/legal/privacy-policy.md`、`docs/legal/README.md` |
 | L-3 | ~~Railway 的舊服務~~ | **已完成（2026-11-13）**：刪除了舊的 `SearXNG`、`Redis` 兩個服務與三個沒在用的 volume（兩個沒掛上的 postgres volume、Redis 的 volume）。刪除前確認過 api、worker、Postgres、searxng-news 沒有任何變數參照它們。volume 在 Railway 是「待刪除」狀態，保留到 2026-11-15 才真的清掉（這之前可以在 Railway 後台還原）；兩個服務是立刻刪除的。 | `docs/deploy.md` 第 0 節 |
 | L-4 | 請用 Discord 在 `https://forliosa.trade` 登入一次，確認正式環境的登入流程。 | — | — |
 | L-5 | 法律文件還沒填的：管轄法院、責任上限金額、Anthropic 的資料保存期間、備份保存期間、生效日期；另有 13 處【待確認】要請律師看。這一輪只改了寫法（用詞和介面一致、登出那一句照產品實際行為改），沒有改實質內容。 | 你給管轄法院與責任上限 → 我填進去 → 律師看 → 設定 `TERMS_VERSION` 才生效 | `docs/legal/` |
