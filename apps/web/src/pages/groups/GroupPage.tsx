@@ -30,12 +30,12 @@ const TABS: { value: GroupTab; label: string }[] = [
   { value: "discussions", label: "討論" },
   { value: "holdings", label: "持股" },
   { value: "digests", label: "週報" },
-  { value: "share", label: "我的分享" },
+  { value: "share", label: "分享" },
   { value: "members", label: "成員" },
   { value: "channels", label: "頻道" },
 ]
 
-/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・討論・持股・週報・我的分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源） */
+/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・討論・持股・週報・分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源） */
 export function GroupPage() {
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="群組" />

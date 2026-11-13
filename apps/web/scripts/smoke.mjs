@@ -809,7 +809,7 @@ await check("我的分享：關掉交易動態 → 動態裡自己的買賣立�
   await page.getByRole("list", { name: "動態" }).waitFor({ timeout: 8000 })
   if (await page.getByRole("list", { name: "動態" }).getByText(/示範使用者\s*買進/).count()) throw new Error("own trades still visible")
   // 連續切兩個開關：兩筆設定照順序寫入，回到「我的分享」交易動態還是關的、金額還是開的（不會被先送的那筆蓋回去）
-  await page.getByRole("tab", { name: "我的分享" }).click()
+  await page.getByRole("tab", { name: "分享", exact: true }).click()
   if ((await page.getByRole("switch", { name: "交易動態" }).getAttribute("aria-checked")) !== "false") throw new Error("交易動態 switched back on")
   if ((await page.getByRole("switch", { name: "金額與損益" }).getAttribute("aria-checked")) !== "true") throw new Error("金額與損益 lost")
 })
@@ -1258,7 +1258,7 @@ await check("手機：查看爸爸時「問 AI」換成「結束查看」；橫�
   await m.getByRole("button", { name: /結束查看$/ }).click()
   await m.getByRole("button", { name: /^問 AI/ }).waitFor({ timeout: 8000 })
 })
-await check("手機：群組八個分頁（多了「討論」）每個 ≥ 44×44；iPhone 15 上只有最後的「頻道」露出一半、選到它就捲進來，夠寬的手機一次看得到全部；更窄的螢幕橫向捲動，直接打開「成員」時捲到那個分頁", async () => {
+await check("手機：群組八個分頁（多了「討論」）每個 ≥ 44×44；iPhone 15 上八個剛好放得下、沒有淡出，更窄的手機才捲動、選到的分頁會捲進來", async () => {
   const tabsOf = (p) =>
     p.getByRole("tablist", { name: "群組內容" }).evaluate((el) => {
       const c = el.getBoundingClientRect()
@@ -1276,14 +1276,14 @@ await check("手機：群組八個分頁（多了「討論」）每個 ≥ 44×4
         pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
       }
     })
-  // 從第一個分頁進來：前七個完整看得到，只有最後的「頻道」露出一半（後面還有 → 那一邊淡出）
+  // 從第一個分頁進來：iPhone 15（內容寬 353px）八個分頁（各 44px）剛好放得下，沒有被切到的、也沒有淡出
   await m.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
   await m.getByRole("tab", { name: "排行" }).waitFor({ timeout: 8000 })
   await m.waitForTimeout(300)
   const first = await tabsOf(m)
-  if (first.names !== "排行・動態・討論・持股・週報・我的分享・成員・頻道") throw new Error(`group tabs: ${first.names}`)
+  if (first.names !== "排行・動態・討論・持股・週報・分享・成員・頻道") throw new Error(`group tabs: ${first.names}`)
   if (first.small.length) throw new Error(`group tabs under 44×44: ${first.small.join(" | ")}`)
-  if (first.cut.join() !== "頻道" || !first.fadeEnd || first.fadeStart || first.overflow > 30) throw new Error(`on an iPhone 15 only the last tab may be cut: ${JSON.stringify(first)}`)
+  if (first.cut.length || first.fadeEnd || first.fadeStart || first.overflow > 0) throw new Error(`on an iPhone 15 all eight tabs must fit: ${JSON.stringify(first)}`)
   if (first.pageOverflow > 0) throw new Error(`the page scrolls sideways: ${JSON.stringify(first)}`)
   // 直接打開「成員」：選取中的分頁完整看得到
   await m.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })

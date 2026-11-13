@@ -16,7 +16,7 @@ export interface LedgerSearch {
   symbol?: string
 }
 
-/** 群組頁的分頁：排行・動態・討論・持股・週報・我的分享・成員・頻道 */
+/** 群組頁的分頁：排行・動態・討論・持股・週報・分享・成員・頻道 */
 export const GROUP_TABS = ["ranking", "feed", "discussions", "holdings", "digests", "share", "members", "channels"] as const
 export type GroupTab = (typeof GROUP_TABS)[number]
 export interface GroupSearch {

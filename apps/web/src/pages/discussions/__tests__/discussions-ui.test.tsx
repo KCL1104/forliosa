@@ -635,7 +635,7 @@ describe("個股與群組的「討論」分頁", () => {
     mount()
     renderApp("/groups/grp_family?tab=discussions")
     expect(await screen.findByRole("tab", { name: "討論" }, T)).toHaveAttribute("aria-selected", "true")
-    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["排行", "動態", "討論", "持股", "週報", "我的分享", "成員", "頻道"])
+    expect(screen.getAllByRole("tab").map((t) => t.textContent)).toEqual(["排行", "動態", "討論", "持股", "週報", "分享", "成員", "頻道"])
     await screen.findByText("我把聯發科的交易補記好了", undefined, T)
     expect(topicTitles()).toHaveLength(3)
     expect(screen.getByText("我把聯發科的交易補記好了").closest("li")).toHaveTextContent("示範使用者（你）・1 則回覆・聯發科 2454")

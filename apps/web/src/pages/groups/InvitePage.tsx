@@ -124,7 +124,7 @@ function ChooseAndJoin({ token, groupName }: { token: string; groupName: string 
         <h2 id="invite-share" className="text-lg font-bold">
           你要在「{groupName}」分享什麼？
         </h2>
-        <p className="mt-1 text-md text-ink-2">只對這個群組有效，加入後隨時可以在「我的分享」修改。</p>
+        <p className="mt-1 text-md text-ink-2">只對這個群組有效，加入後隨時可以在群組的「分享」分頁修改。</p>
       </div>
       <ShareToggles value={share} onChange={setShare} idPrefix="invite" />
       {error && (
