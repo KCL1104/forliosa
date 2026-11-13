@@ -1,4 +1,3 @@
-import { PencilIcon, PlusIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAccounts, useCreateAccount, useUpdateAccount } from "@/api/queries"
@@ -14,7 +13,8 @@ import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { SourcesFooter } from "@/components/sources"
-import { SkeletonLines } from "@/components/states"
+import { EmptyState, SkeletonLines } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -113,7 +113,7 @@ function Settings() {
           />
         </Row>
         <Row label="績效比較基準">
-          <BenchmarkSelect value={p.benchmark} onChange={(v) => setPref({ benchmark: v })} />
+          <BenchmarkSelect value={p.benchmark} onChange={(v) => setPref({ benchmark: v })} className="min-w-44 pointer-coarse:h-11!" />
         </Row>
       </Group>
 
@@ -163,14 +163,13 @@ function Accounts() {
       <div className="flex flex-wrap items-end justify-between gap-2">
         <h2 id="set-accounts" className="text-lg font-bold">券商帳戶</h2>
         <Button variant="outline" size="sm" onClick={() => setEditing(NEW_ACCOUNT)}>
-          <PlusIcon />
           新增帳戶
         </Button>
       </div>
       {!accounts.data ? (
         <SkeletonLines rows={3} />
       ) : accounts.data.length === 0 ? (
-        <p className="rounded-sm border border-dashed p-5 text-md text-ink-2">還沒有帳戶。先新增一個，例如「永豐－一般」，記交易時才會自動算手續費。</p>
+        <EmptyState title="還沒有帳戶" description="先新增一個，例如「永豐・一般」，記交易時才會自動算手續費。" />
       ) : (
         <ul className="flex flex-col divide-y divide-rule border-y border-rule">
           {accounts.data.map((a) => (
@@ -187,10 +186,9 @@ function Accounts() {
                   <div className="flex gap-1"><dt>最低</dt><dd className="text-foreground">{formatMoney(a.min_fee, { currency: a.currency, decimals: 0 })}{a.currency === "TWD" && `（零股 ${formatMoney(a.min_fee_odd_lot, { decimals: 0 })}）`}</dd></div>
                 </dl>
               </div>
-              <Button variant="ghost" size="sm" onClick={() => setEditing(a)} aria-label={`編輯 ${a.name}`}>
-                <PencilIcon />
+              <button type="button" onClick={() => setEditing(a)} aria-label={`編輯 ${a.name}`} className={textAction}>
                 編輯
-              </Button>
+              </button>
             </li>
           ))}
         </ul>
@@ -259,10 +257,10 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
           <DialogTitle className="text-lg font-bold">{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
           <DialogDescription>折扣用「幾折」輸入，例如 2.8 折就填 2.8；不知道的話先填 6，之後可以改。</DialogDescription>
         </DialogHeader>
-        <div className="grid gap-4">
+        <div className="grid gap-4 pointer-coarse:[&_input]:h-11">
           <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="帳戶名稱" htmlFor="acc-name" error={touched && nameBad ? "請填帳戶名稱，例如「永豐－一般」" : undefined}>
-              <Input id="acc-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="例如：永豐－一般" aria-invalid={touched && nameBad} />
+            <Field label="帳戶名稱" htmlFor="acc-name" error={touched && nameBad ? "請填帳戶名稱，例如「永豐・一般」" : undefined}>
+              <Input id="acc-name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} placeholder="例如：永豐・一般" aria-invalid={touched && nameBad} />
             </Field>
             <Field label="券商" htmlFor="acc-broker">
               <Input id="acc-broker" value={broker} onChange={(e) => setBroker(e.target.value)} maxLength={40} placeholder="例如：永豐金證券" />

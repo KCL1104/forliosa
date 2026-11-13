@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ChevronRightIcon, CopyIcon, PlusIcon } from "lucide-react"
+import { ChevronRightIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { appToday } from "@/api"
@@ -10,7 +10,7 @@ import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageHeader, Section } from "@/components/section"
-import { ErrorState, SkeletonLines } from "@/components/states"
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -33,10 +33,7 @@ function Groups() {
       <PageHeader
         title="群組"
         actions={
-          <Button onClick={() => setCreating(true)}>
-            <PlusIcon />
-            建立群組
-          </Button>
+          <Button onClick={() => setCreating(true)}>建立群組</Button>
         }
       />
       {groups.isError ? (
@@ -44,14 +41,8 @@ function Groups() {
       ) : !groups.data ? (
         <SkeletonLines rows={4} />
       ) : groups.data.length === 0 ? (
-        <div className="border-y border-rule py-8">
-          <p className="text-lg font-medium">還沒有加入任何群組</p>
-          <p className="mt-1 max-w-prose text-ink-2">建立一個群組，再把邀請連結傳給家人朋友；收到別人的邀請連結時，點開就能加入。</p>
-          <Button className="mt-4" variant="outline" onClick={() => setCreating(true)}>
-            <PlusIcon />
-            建立群組
-          </Button>
-        </div>
+        // 動作只有頁首的「建立群組」一個，這裡不再放第二顆
+        <EmptyState title="還沒有加入任何群組" description="建立一個群組，再把邀請連結傳給家人朋友；收到別人的邀請連結時，點開就能加入。" />
       ) : (
         <ul aria-label="我的群組" className="border-t border-rule">
           {groups.data.map((g) => (
@@ -127,7 +118,7 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
           <label htmlFor="group-name" className="text-sm font-medium">
             群組名稱
           </label>
-          <Input id="group-name" value={name} maxLength={40} autoFocus placeholder="例如：家族投資" aria-invalid={touched && bad} onChange={(e) => setName(e.target.value)} />
+          <Input id="group-name" className="pointer-coarse:h-11" value={name} maxLength={40} autoFocus placeholder="例如：家族投資" aria-invalid={touched && bad} onChange={(e) => setName(e.target.value)} />
           {touched && bad && (
             <p role="alert" className="text-sm text-destructive">
               請填 1 到 40 個字
@@ -179,7 +170,8 @@ function ShareCard() {
           ))}
         </dl>
       </figure>
-      {month === null && mtd.data?.notes?.[0] && <p className="mt-2 max-w-md text-sm text-ink-2">本月：{mtd.data.notes[0]}</p>}
+      {/* 後端的說明自己就有冒號（「AAPL、NVDA、VOO：美股目前沒有…」），前面用一句話接，不再疊一個冒號 */}
+      {month === null && mtd.data?.notes?.[0] && <p className="mt-2 max-w-md text-sm text-ink-2">本月算不出來。{withPeriod(mtd.data.notes[0])}</p>}
       <Button
         variant="outline"
         className="mt-4"
@@ -191,7 +183,6 @@ function ShareCard() {
           )
         }}
       >
-        <CopyIcon />
         複製分享文字
       </Button>
       {s && <p className="mt-2 text-sm text-ink-2">「{line}」</p>}
@@ -202,4 +193,9 @@ function ShareCard() {
 function glyphPct(r: number | null): string {
   const d = direction(r)
   return `${directionGlyph(d)}${formatPercent(r === null ? null : Math.abs(r), { signed: false, decimals: Math.abs(r ?? 0) >= 0.1 ? 1 : 2 })}`
+}
+
+/** 後端的說明沒有句點時補上（接在另一句後面） */
+function withPeriod(note: string): string {
+  return /[。！？]$/.test(note) ? note : `${note}。`
 }

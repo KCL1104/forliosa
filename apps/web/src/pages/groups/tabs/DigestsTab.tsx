@@ -2,7 +2,7 @@ import { useState } from "react"
 import { useDigests } from "@/api/sharing-queries"
 import type { Digest, Group } from "@/api/types"
 import { Pct } from "@/components/finance"
-import { ErrorState, SkeletonLines } from "@/components/states"
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort, formatDateTime } from "@/lib/format"
@@ -21,12 +21,7 @@ export function DigestsTab({ group }: { group: Group }) {
   if (digests.isError) return <ErrorState error={digests.error} onRetry={() => void digests.refetch()} />
   if (digests.isLoading) return <SkeletonLines rows={6} />
   if (items.length === 0) {
-    return (
-      <div className="border-y border-rule py-6">
-        <p className="font-medium">還沒有週報</p>
-        <p className="mt-1 max-w-prose text-md text-ink-2">每週六晚上整理這一週（週一到週五）的群組表現。</p>
-      </div>
-    )
+    return <EmptyState title="還沒有週報" description="每週六晚上整理這一週（週一到週五）的群組表現。" />
   }
   return (
     <div className="flex flex-col gap-12">
@@ -110,7 +105,7 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
         </>
       )}
       <p className="text-xs text-ink-2">{d.disclaimer || FALLBACK_DISCLAIMER}</p>
-      <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+      <div className="flex flex-wrap items-center gap-x-4">
         <Reactions groupId={groupId} target={`digest:${d.id}`} reactions={d.reactions} />
         <CommentsToggle count={d.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />
       </div>

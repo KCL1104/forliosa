@@ -117,14 +117,14 @@ describe("群組畫面不透露誰沒分享", () => {
     // 阿弟什麼都沒開：只有每個人都看得到的「加入了群組」
     const feed = await screen.findByRole("heading", { name: "動態" }, T)
     expect(feed.closest("section")!.textContent).toContain("加入了群組")
-    expect(screen.queryByText("還沒有資料。")).toBeNull()
+    expect(screen.queryByText("還沒有資料")).toBeNull()
     expect(screen.queryByRole("heading", { name: "報酬率" })).toBeNull()
     expect(screen.queryByRole("heading", { name: "金額" })).toBeNull()
     expect(document.body.textContent).not.toContain("未分享")
     cleanup()
     // 沒有任何區塊、也沒有動態（例如建立群組的人什麼都沒開）
     renderInRouter(<SharedPortfolioView p={{ ...bro, user_id: "usr_nobody" }} groupId="grp_family" isMe={false} />)
-    expect(await screen.findByText("還沒有資料。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("還沒有資料", undefined, T)).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "動態" })).toBeNull()
     cleanup()
     const mom = await api.getSharedPortfolio("grp_family", "usr_mom")

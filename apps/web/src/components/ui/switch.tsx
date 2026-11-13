@@ -15,7 +15,8 @@ function Switch({
       className={cn(
         // 開＝選取語法 (b)：on-bg 底＋1px 內框 on-ring（淺色是墨色實底；深色是格線藍底，不是白色實塊）
         // 關：淺色鉛筆灰實底；深色只有 1px 鉛筆灰內框（底和紙同色）
-        "data-checked:bg-on-bg data-checked:inset-ring data-checked:inset-ring-on-ring data-unchecked:bg-ctl dark:data-unchecked:bg-transparent dark:data-unchecked:inset-ring dark:data-unchecked:inset-ring-ctl aria-invalid:outline-2 aria-invalid:outline-offset-2 aria-invalid:outline-ink shrink-0 rounded-full border border-transparent data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] peer group/switch relative inline-flex items-center transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink after:absolute after:-inset-x-3 after:-inset-y-2 data-disabled:cursor-not-allowed data-disabled:opacity-50",
+        // 可按範圍用 ::after 往外擴：一般 56×34px，觸控時 56×44px（看得到的大小不變）
+        "data-checked:bg-on-bg data-checked:inset-ring data-checked:inset-ring-on-ring data-unchecked:bg-ctl dark:data-unchecked:bg-transparent dark:data-unchecked:inset-ring dark:data-unchecked:inset-ring-ctl aria-invalid:outline-2 aria-invalid:outline-offset-2 aria-invalid:outline-ink shrink-0 rounded-full border border-transparent data-[size=default]:h-[18.4px] data-[size=default]:w-[32px] data-[size=sm]:h-[14px] data-[size=sm]:w-[24px] peer group/switch relative inline-flex items-center transition-colors outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ink after:absolute after:-inset-x-3 after:-inset-y-2 pointer-coarse:after:-inset-y-[13px] data-disabled:cursor-not-allowed data-disabled:opacity-50",
         className
       )}
       {...props}

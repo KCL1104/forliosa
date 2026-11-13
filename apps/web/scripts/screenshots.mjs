@@ -343,6 +343,22 @@ const m5ShareAmounts = async (page) => {
   await page.getByRole("switch", { name: "金額與損益" }).click()
   await page.getByText(/可以推算你大約持有幾股/).waitFor({ timeout: 8000 })
 }
+/** 新群組（空狀態）：建立群組 → 成員分頁（還沒有邀請連結）；`tab` 給名稱時再切到那個分頁（週報、動態…） */
+const m5NewGroup = (tab, ready) => async (page) => {
+  await page.getByRole("button", { name: "建立群組" }).first().click()
+  await page.getByLabel("群組名稱").fill("登山社理財")
+  await page.getByRole("dialog").getByRole("button", { name: "建立群組" }).click()
+  await page.getByRole("heading", { name: "登山社理財", exact: true }).waitFor({ timeout: 8000 })
+  if (tab) await page.getByRole("tab", { name: tab }).click()
+  await page.getByText(ready).first().waitFor({ timeout: 8000 })
+  await page.evaluate(() => document.activeElement instanceof HTMLElement && document.activeElement.blur())
+}
+/** 動態：按下「刪除這則留言」之後的確認（刪除／取消） */
+const m5DeleteConfirm = async (page) => {
+  await m5FeedThread(page)
+  await page.getByRole("button", { name: "刪除這則留言" }).first().click()
+  await page.getByRole("button", { name: "刪除", exact: true }).waitFor()
+}
 const m5Privacy = async (page) => {
   await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
   await page.getByLabel("已隱藏").first().waitFor()
@@ -463,6 +479,9 @@ const SHOTS = [
   { name: "m5-group-share", path: "/groups/grp_family?tab=share", ready: "text=附上成交價", action: m5ShareAmounts },
   { name: "m5-group-members", path: "/groups/grp_family?tab=members", ready: "text=邀請連結" },
   { name: "m5-group-rename", path: "/groups/grp_family?tab=members", ready: "text=邀請連結", action: editField("群組名稱", "家族投資（2026）") },
+  { name: "m5-group-feed-confirm", path: "/groups/grp_family?tab=feed", ready: "text=加入了群組", action: m5DeleteConfirm },
+  { name: "m5-group-new-members", path: "/groups", ready: "text=大學同學", action: m5NewGroup(null, "沒有有效的邀請連結") },
+  { name: "m5-group-new-digests", path: "/groups", ready: "text=大學同學", action: m5NewGroup("週報", "還沒有週報") },
   { name: "m5-group-feed-member", path: "/groups/grp_family?tab=feed&member=usr_dad", ready: "text=只看爸爸" },
   { name: "m5-group-channels", path: "/groups/grp_family?tab=channels", ready: "text=Webhook 網址結尾" },
   { name: "m5-member", path: "/groups/grp_family/members/usr_dad", ready: "text=總損益" },

@@ -8,7 +8,8 @@ import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { UserAvatar } from "@/components/avatar"
 import { Money, Pct } from "@/components/finance"
 import { DemoTag, Section } from "@/components/section"
-import { ErrorState, SkeletonLines } from "@/components/states"
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import { buttonVariants } from "@/components/ui/button"
 import { ROLE_LABEL } from "./labels"
 import { FeedRow } from "./tabs/FeedTab"
@@ -86,8 +87,8 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
         </div>
       </header>
       {isMe && (
-        <p className="mt-3 text-md">
-          <Link to="/groups/$groupId" params={{ groupId }} search={{ tab: "share" }} className="underline underline-offset-3">
+        <p className="mt-2">
+          <Link to="/groups/$groupId" params={{ groupId }} search={{ tab: "share" }} className={textAction}>
             調整我在這個群組的分享
           </Link>
         </p>
@@ -95,54 +96,41 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
 
       <div className="mt-8 flex flex-col gap-10">
         {!sections && feedLoading && <SkeletonLines rows={3} />}
-        {nothing && <p className="border-y border-rule py-6 text-ink-2">還沒有資料。</p>}
-        {p.returns && (
-          <Section title="報酬率" titleId="mp-returns">
-            <dl className="grid grid-cols-2 gap-px border border-rule bg-rule sm:grid-cols-4">
-              {(
-                [
-                  ["今日", p.returns.day],
-                  ["本月", p.returns.month],
-                  ["今年", p.returns.year],
-                  ["總報酬（含股利）", p.returns.total],
-                ] as const
-              ).map(([label, v]) => (
-                <div key={label} className="bg-paper px-4 py-3">
-                  <dt className="text-sm text-ink-2">{label}</dt>
-                  <dd className="mt-0.5 text-xl font-medium">{v === null ? <span className="num text-ink-2">—</span> : <Pct value={v} />}</dd>
-                </div>
-              ))}
-            </dl>
-          </Section>
-        )}
-        {p.amounts && (
-          <Section title="金額" titleId="mp-amounts">
-            <dl className="grid grid-cols-1 gap-px border border-rule bg-rule sm:grid-cols-3">
-              <div className="bg-paper px-4 py-3">
-                <dt className="text-sm text-ink-2">市值</dt>
-                <dd className="mt-0.5 text-xl font-medium">
-                  <Money value={p.amounts.market_value} decimals={0} />
-                </dd>
-              </div>
-              <div className="bg-paper px-4 py-3">
-                <dt className="text-sm text-ink-2">今日損益</dt>
-                <dd className="mt-0.5 text-xl font-medium">
-                  <Money value={p.amounts.day_change} decimals={0} signed tone />
-                </dd>
-              </div>
-              <div className="bg-paper px-4 py-3">
-                <dt className="text-sm text-ink-2">總損益</dt>
-                <dd className="mt-0.5 text-xl font-medium">
-                  <Money value={p.amounts.total_pnl} decimals={0} signed tone />
-                </dd>
-              </div>
-            </dl>
-          </Section>
+        {nothing && <EmptyState title="還沒有資料" />}
+        {(p.returns || p.amounts) && (
+          // 報酬率與金額：兩欄格線鍵值列（和帳本同一套：標籤在左、數字靠右），沒有外框與格子；手機上下排
+          <div className="grid max-w-[720px] gap-x-8 gap-y-10 md:grid-cols-2">
+            {p.returns && (
+              <Section title="報酬率" titleId="mp-returns">
+                <KeyRows
+                  rows={(
+                    [
+                      ["今日", p.returns.day],
+                      ["本月", p.returns.month],
+                      ["今年", p.returns.year],
+                      ["總報酬（含股利）", p.returns.total],
+                    ] as const
+                  ).map(([label, v]) => [label, v === null ? <span className="num font-normal text-ink-2">—</span> : <Pct value={v} />])}
+                />
+              </Section>
+            )}
+            {p.amounts && (
+              <Section title="金額" titleId="mp-amounts">
+                <KeyRows
+                  rows={[
+                    ["市值", <Money value={p.amounts.market_value} decimals={0} />],
+                    ["今日損益", <Money value={p.amounts.day_change} decimals={0} signed tone />],
+                    ["總損益", <Money value={p.amounts.total_pnl} decimals={0} signed tone />],
+                  ]}
+                />
+              </Section>
+            )}
+          </div>
         )}
         {p.holdings && (
           // 權重清單最寬 720px：標題的格線跟著清單一樣寬
           <Section title="持股" titleId="mp-holdings" aside="權重，不含股數與金額" className="max-w-[720px]">
-            {p.holdings.length === 0 ? <p className="text-md text-ink-2">目前沒有持股。</p> : <WeightList holdings={p.holdings} className="-mt-3" />}
+            {p.holdings.length === 0 ? <EmptyState flush title="目前沒有持股" /> : <WeightList holdings={p.holdings} className="-mt-3" />}
           </Section>
         )}
         {items.length > 0 && (
@@ -156,5 +144,19 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
         )}
       </div>
     </>
+  )
+}
+
+/** 鍵值列：格線分隔，標籤淡墨在左、數字靠右（等寬數字，上下對齊）；每列 44px 以上 */
+function KeyRows({ rows }: { rows: (readonly [label: string, value: React.ReactNode])[] }) {
+  return (
+    <dl className="-mt-3">
+      {rows.map(([label, value]) => (
+        <div key={label} className="flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5">
+          <dt className="text-md text-ink-2">{label}</dt>
+          <dd className="text-lg font-medium">{value}</dd>
+        </div>
+      ))}
+    </dl>
   )
 }

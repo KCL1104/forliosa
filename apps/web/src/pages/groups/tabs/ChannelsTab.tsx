@@ -3,11 +3,13 @@ import { toast } from "sonner"
 import { useChannels, useDeleteChannel, useLinkTelegram, usePatchChannel, usePutDiscord } from "@/api/sharing-queries"
 import { ApiError, type ChannelNotify, type Group, type TelegramLinkCode } from "@/api/types"
 import { Section } from "@/components/section"
-import { ErrorState, SkeletonLines } from "@/components/states"
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatDateTime } from "@/lib/format"
+import { cn } from "@/lib/utils"
 
 const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請檢查網路後再試一次。")
 
@@ -42,13 +44,13 @@ export function ChannelsTab({ group }: { group: Group }) {
         ) : owner ? (
           <DiscordForm groupId={group.id} />
         ) : (
-          <p className="text-md text-ink-2">還沒有設定。</p>
+          <EmptyState flush title="還沒有設定" />
         )}
       </Section>
 
       <Section title="Telegram" titleId="gc-telegram" aside={<Status configured={c.telegram.configured} status={c.telegram.status} />}>
         {!c.telegram_available ? (
-          <p className="text-md text-ink-2">伺服器還沒有設定 Telegram bot，暫時不能連結。</p>
+          <EmptyState flush title="暫時不能連結" description="伺服器還沒有設定 Telegram bot。" />
         ) : (
           <>
             {c.telegram.status === "disabled" && <Disabled reason={c.telegram.disabled_reason} owner={owner} />}
@@ -63,7 +65,7 @@ export function ChannelsTab({ group }: { group: Group }) {
               <TelegramLink groupId={group.id} code={linked ? null : linking} onCode={setLinking} />
             )}
             {owner && c.telegram.configured && <Unlink groupId={group.id} kind="telegram" />}
-            {!owner && !c.telegram.configured && <p className="text-md text-ink-2">還沒有連結。</p>}
+            {!owner && !c.telegram.configured && <EmptyState flush title="還沒有連結" />}
           </>
         )}
       </Section>
@@ -159,6 +161,7 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
         </label>
         <Input
           id="discord-webhook"
+          className="pointer-coarse:h-11"
           type="url"
           inputMode="url"
           autoComplete="off"
@@ -255,8 +258,9 @@ function Unlink({ groupId, kind }: { groupId: string; kind: "discord" | "telegra
       </Button>
     </div>
   ) : (
-    <Button variant="ghost" size="sm" className="mt-4" onClick={() => setSure(true)}>
+    // 文字動作（常駐底線），不是只有灰字
+    <button type="button" className={cn(textAction, "mt-4")} onClick={() => setSure(true)}>
       解除{kind === "discord" ? " Discord" : " Telegram"}
-    </Button>
+    </button>
   )
 }

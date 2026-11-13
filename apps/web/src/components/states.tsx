@@ -1,20 +1,52 @@
-import { RotateCcwIcon } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ApiError } from "@/api/types"
 import { cn } from "@/lib/utils"
 
-/** 錯誤狀態：說明問題＋可以做什麼 */
+/**
+ * 空狀態與錯誤的同一種樣子（全站只有這一種，見 DESIGN.md「空狀態」）：
+ * 上下各一條實線格線（沒有外框、沒有底色）、15px 墨色 600 標題、淡墨寫原因、最多一個動作。
+ * 虛線在這個系統是「AI 草稿」，這裡不用。
+ * `flush`：接在已經有格線的區塊標題下面時，不再畫上面那條線（標題的格線就是上面那條）。
+ */
+function StateBlock({
+  title,
+  children,
+  action,
+  flush,
+  className,
+  ...props
+}: {
+  title: string
+  children?: React.ReactNode
+  action?: React.ReactNode
+  flush?: boolean
+  className?: string
+} & Omit<React.ComponentProps<"div">, "title" | "children" | "className">) {
+  return (
+    <div {...props} className={cn("flex flex-col items-start border-y border-rule py-5", flush && "border-t-0 pt-2", className)}>
+      <p className="text-base font-semibold text-ink">{title}</p>
+      {children && <div className="mt-1 max-w-prose text-md text-ink-2">{children}</div>}
+      {action && <div className="mt-3">{action}</div>}
+    </div>
+  )
+}
+
+/** 錯誤狀態：說明問題＋可以做什麼（重新載入） */
 export function ErrorState({
   error,
   onRetry,
   className,
   title = "這裡的資料沒有載入",
+  retryLabel = "重新載入",
+  flush,
 }: {
   error: unknown
   onRetry?: () => void
   className?: string
   title?: string
+  retryLabel?: string
+  flush?: boolean
 }) {
   const message =
     error instanceof ApiError
@@ -23,18 +55,21 @@ export function ErrorState({
         : error.message
       : "可能是網路不穩或伺服器暫時沒有回應。"
   return (
-    <div role="alert" className={cn("flex flex-col items-start gap-3 rounded-sm border border-dashed border-ctl p-5", className)}>
-      <div>
-        <p className="font-medium">{title}</p>
-        <p className="text-md text-muted-foreground">{message}</p>
-      </div>
-      {onRetry && (
-        <Button variant="outline" size="sm" onClick={onRetry}>
-          <RotateCcwIcon />
-          重新載入
-        </Button>
-      )}
-    </div>
+    <StateBlock
+      role="alert"
+      title={title}
+      flush={flush}
+      className={className}
+      action={
+        onRetry && (
+          <Button variant="outline" size="sm" onClick={onRetry}>
+            {retryLabel}
+          </Button>
+        )
+      }
+    >
+      {message}
+    </StateBlock>
   )
 }
 
@@ -53,25 +88,23 @@ export function ChartSkeleton({ height = 240, className }: { height?: number; cl
   return <Skeleton className={cn("w-full rounded-sm", className)} style={{ height }} aria-label="圖表載入中" />
 }
 
-/** 空狀態：說明這裡會出現什麼，並給一個下一步 */
+/** 空狀態：說明為什麼沒有、什麼時候會有，最多給一個現在能做的動作（outline 按鈕或文字連結） */
 export function EmptyState({
   title,
   description,
   action,
+  flush,
   className,
 }: {
   title: string
   description?: React.ReactNode
   action?: React.ReactNode
+  flush?: boolean
   className?: string
 }) {
   return (
-    <div className={cn("flex flex-col items-start gap-3 rounded-sm border border-dashed border-ctl p-6", className)}>
-      <div className="flex flex-col gap-1">
-        <p className="font-medium">{title}</p>
-        {description && <p className="max-w-prose text-md text-muted-foreground">{description}</p>}
-      </div>
-      {action}
-    </div>
+    <StateBlock title={title} action={action} flush={flush} className={className}>
+      {description}
+    </StateBlock>
   )
 }

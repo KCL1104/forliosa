@@ -5,12 +5,16 @@ import { useFeed } from "@/api/sharing-queries"
 import type { FeedItem, Group } from "@/api/types"
 import { UserAvatar } from "@/components/avatar"
 import { Masked } from "@/components/finance"
-import { ErrorState, SkeletonLines } from "@/components/states"
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { formatDateShort, formatPrice } from "@/lib/format"
 import { codeOf, marketOf } from "@/lib/tick"
+import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
+
+/** 句子裡的連結：觸控時上下各多 12px 的可按範圍（合計 44px 以上）（行內元素的上下內距不改變行高） */
+const INLINE_TOUCH = "pointer-coarse:py-3"
 
 /**
  * 動態：成員的買賣（同一人同一天同一檔同方向合併成一則）與「加入了群組」。
@@ -33,7 +37,7 @@ export function FeedTab({ group, member }: { group: Group; member?: string }) {
           // 篩選中＝選取語法 (b)；再按一次（或按 ×）取消
           aria-pressed="true"
           title="取消篩選"
-          className="press sel-chip inline-flex h-8 items-center gap-1.5 self-start rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-10"
+          className="press sel-chip inline-flex h-8 items-center gap-1.5 self-start rounded-sm px-2.5 text-sm text-ink-2 pointer-coarse:h-11 pointer-coarse:px-3"
         >
           只看{who?.display_name ?? "這位成員"}
           <XIcon aria-hidden className="size-3.5" />
@@ -44,7 +48,7 @@ export function FeedTab({ group, member }: { group: Group; member?: string }) {
       ) : feed.isLoading ? (
         <SkeletonLines rows={6} />
       ) : items.length === 0 ? (
-        <p className="border-y border-rule py-6 text-ink-2">還沒有資料。</p>
+        <EmptyState title="還沒有資料" />
       ) : (
         <ol aria-label="動態" className="border-t border-rule">
           {items.map((item) => (
@@ -66,7 +70,7 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
   const day = item.trade_date ?? item.created_at.slice(0, 10)
   const threadId = `thread-${item.id}`
   const name = (
-    <Link to="/groups/$groupId/members/$userId" params={{ groupId, userId: item.user_id }} className="font-medium hover:underline">
+    <Link to="/groups/$groupId/members/$userId" params={{ groupId, userId: item.user_id }} className={cn("font-medium hover:underline", INLINE_TOUCH)}>
       {item.display_name}
     </Link>
   )
@@ -90,7 +94,8 @@ export function FeedRow({ item, groupId, showName = true }: { item: FeedItem; gr
         {item.type === "trade" && (
           <>
             <TradeDetail item={item} />
-            <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            {/* 觸控時每個按鈕 44px 高（看得到的框比較小），所以上面不再另外留空 */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-x-4 pointer-coarse:mt-0.5">
               <Reactions groupId={groupId} target={`trade:${item.id}`} reactions={item.reactions} />
               <CommentsToggle count={item.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />
             </div>
@@ -109,9 +114,9 @@ function TradeLine({ item, name }: { item: FeedItem; name: React.ReactNode }) {
       {name}
       {name && " "}
       <span className="font-medium">{item.side === "sell" ? "賣出" : "買進"}</span>{" "}
-      <Link to="/stock/$symbol" params={{ symbol }} className="hover:underline">
-        {item.name}
-        <span className="num ml-1 text-ink-2">{codeOf(symbol)}</span>
+      <Link to="/stock/$symbol" params={{ symbol }} className={cn("underline decoration-ctl decoration-1 underline-offset-4 hover:decoration-ink", INLINE_TOUCH)}>
+        {/* 名稱和代號之間是空白字元（不是 margin），底線才連成一條 */}
+        {item.name} <span className="num text-ink-2">{codeOf(symbol)}</span>
       </Link>
     </p>
   )

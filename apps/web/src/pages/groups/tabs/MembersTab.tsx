@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { CopyIcon, EllipsisIcon, LinkIcon } from "lucide-react"
+import { EllipsisIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import {
@@ -16,7 +16,7 @@ import { ApiError, type Group, type GroupInvite, type GroupMember } from "@/api/
 import { UserAvatar } from "@/components/avatar"
 import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
-import { SkeletonLines } from "@/components/states"
+import { EmptyState, SkeletonLines } from "@/components/states"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -75,22 +75,33 @@ function MemberRow({ m, group, onConfirm }: { m: GroupMember; group: Group; onCo
   const canRemove = !m.is_me && m.role !== "owner" && (isOwner || (group.my_role === "admin" && m.role === "member"))
   const canRole = isOwner && !m.is_me
   return (
-    <li className="flex min-h-[64px] items-center gap-3 border-b border-rule py-2">
+    // 整列連到成員頁（名稱連結的 ::after 蓋滿整列）；選項按鈕浮在上面
+    <li className="ruled-row relative flex min-h-[64px] items-center gap-3 py-2">
       <UserAvatar name={m.display_name} url={m.avatar_url} />
       <div className="min-w-0 flex-1">
         <p className="flex items-center gap-2">
-          <Link to="/groups/$groupId/members/$userId" params={{ groupId: group.id, userId: m.user_id }} className="truncate text-lg font-medium hover:underline">
-            {m.display_name}
-          </Link>
-          {m.is_me && <span className="text-sm text-ink-2">（你）</span>}
-          {m.role !== "member" && <span className="demo-tag text-ink-2">{ROLE_LABEL[m.role]}</span>}
+          <span className="flex min-w-0 items-baseline">
+            <Link
+              to="/groups/$groupId/members/$userId"
+              params={{ groupId: group.id, userId: m.user_id }}
+              className={cn(
+                "truncate text-lg after:absolute after:inset-0 after:content-[''] hover:underline focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ink",
+                m.is_me ? "font-bold" : "font-medium",
+              )}
+            >
+              {m.display_name}
+            </Link>
+            {/* 自己：名字 700＋墨色「（你）」（和排行同一個標示） */}
+            {m.is_me && <span className="shrink-0 text-sm font-medium text-ink">（你）</span>}
+          </span>
+          {m.role !== "member" && <span className="demo-tag shrink-0 text-ink-2">{ROLE_LABEL[m.role]}</span>}
         </p>
         <p className="num text-sm text-ink-2">{formatDateShort(m.joined_at.slice(0, 10), false)} 加入</p>
       </div>
       {(canRemove || canRole) && (
         <DropdownMenu>
           <DropdownMenuTrigger
-            render={<button type="button" aria-label={`${m.display_name}的選項`} className="press grid size-10 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-11" />}
+            render={<button type="button" aria-label={`${m.display_name}的選項`} className="press relative z-10 grid size-10 place-items-center rounded-sm text-ink-2 hover:bg-sel hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11" />}
           >
             <EllipsisIcon aria-hidden className="size-5" />
           </DropdownMenuTrigger>
@@ -192,7 +203,7 @@ function Invites({ group }: { group: Group }) {
             <span className="text-sm font-medium">有效期限</span>
             <RangeChips label="有效期限" value={expires} onChange={setExpires} options={[{ value: "24h", label: "24 小時" }, { value: "7d", label: "7 天" }]} />
           </div>
-          <label className="flex h-10 items-center gap-2.5 text-base">
+          <label className="flex h-10 items-center gap-2.5 text-base pointer-coarse:h-11">
             <Switch checked={multi} onCheckedChange={setMulti} />
             可以多人使用
           </label>
@@ -206,7 +217,6 @@ function Invites({ group }: { group: Group }) {
               )
             }
           >
-            <LinkIcon />
             產生邀請連結
           </Button>
         </div>
@@ -214,7 +224,7 @@ function Invites({ group }: { group: Group }) {
         {!invites.data ? (
           <SkeletonLines rows={2} />
         ) : invites.data.length === 0 ? (
-          <p className="text-md text-ink-2">目前沒有有效的邀請連結。</p>
+          <EmptyState title="沒有有效的邀請連結" />
         ) : (
           <ul aria-label="有效的邀請" className="border-t border-rule">
             {invites.data.map((inv) => (
@@ -225,8 +235,9 @@ function Invites({ group }: { group: Group }) {
                     {formatDateTime(inv.expires_at)} 到期・已使用 {inv.uses} 次
                   </p>
                 </div>
+                {/* 撤回是真的控制項（外框按鈕），不是只有灰字 */}
                 <Button
-                  variant="ghost"
+                  variant="outline"
                   size="sm"
                   disabled={revoke.isPending}
                   onClick={() =>
@@ -252,7 +263,7 @@ function CreatedInvite({ invite }: { invite: GroupInvite }) {
     <div className="flex flex-col gap-2 border border-ink p-4" role="status">
       <p className="font-medium">新的邀請連結（只會顯示這一次）</p>
       <div className="flex gap-2">
-        <Input readOnly value={invite.url} aria-label="邀請連結" onFocus={(e) => e.currentTarget.select()} className="num" />
+        <Input readOnly value={invite.url} aria-label="邀請連結" onFocus={(e) => e.currentTarget.select()} className="num pointer-coarse:h-11" />
         <Button
           variant="outline"
           onClick={() =>
@@ -262,7 +273,6 @@ function CreatedInvite({ invite }: { invite: GroupInvite }) {
             )
           }
         >
-          <CopyIcon />
           複製
         </Button>
       </div>

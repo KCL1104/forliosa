@@ -1,6 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { Link, useNavigate, useParams } from "@tanstack/react-router"
-import { LogInIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { meQuery } from "@/api/queries"
@@ -83,7 +82,6 @@ function SignInFirst({ token }: { token: string }) {
     <div className="flex flex-col gap-4">
       <p className="text-ink-2">加入前會先讓你選要分享什麼；預設只分享報酬率的百分比，不會分享金額。</p>
       <Link to="/login" search={{ next: `/invite/${token}` }} className={buttonVariants({ size: "lg", className: "w-full" })}>
-        <LogInIcon />
         登入後加入
       </Link>
     </div>

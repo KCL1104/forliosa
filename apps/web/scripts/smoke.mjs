@@ -576,6 +576,99 @@ await check("排行：沒開報酬率的人不出現、沒有「未分享」；�
   await page.getByRole("radio", { name: "本月" }).click()
   await page.getByText(/10\/30 收盤/).first().waitFor({ timeout: 8000 })
 })
+await check("排行：名次依期間報酬排——那一欄是主數字、表頭有 aria-sort 與箭頭；總報酬是一般字級；自己的那一列用字標示、沒有底色", async () => {
+  await page.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
+  const table = page.getByRole("table", { name: "今日排行" })
+  await table.getByText("爸爸").waitFor({ timeout: 8000 })
+  const head = table.getByRole("columnheader", { name: "今日報酬" })
+  if ((await head.getAttribute("aria-sort")) !== "descending") throw new Error("period column has no aria-sort")
+  if (!(await head.locator("svg").count())) throw new Error("no sort arrow in the period column head")
+  if ((await table.getByRole("columnheader", { name: "總報酬（含股利）" }).getAttribute("aria-sort")) !== null) throw new Error("total column claims to be sorted")
+  const look = await table.getByRole("row").filter({ hasText: "爸爸" }).evaluate((tr) => {
+    const cells = [...tr.querySelectorAll("td")]
+    const style = (el) => { const c = getComputedStyle(el); return { size: parseFloat(c.fontSize), weight: Number(c.fontWeight), text: el.textContent } }
+    return { period: style(cells.at(-2)), total: style(cells.at(-1)) }
+  })
+  if (!(look.period.size > look.total.size && look.period.weight >= 600 && look.total.weight <= 400)) throw new Error(`period is not the emphasised figure: ${JSON.stringify(look)}`)
+  if (!/[▲▼]/.test(look.period.text) || !/[▲▼]/.test(look.total.text)) throw new Error("▲▼ missing on a return column")
+  const me = await table.getByRole("row").filter({ hasText: "（你）" }).evaluate((tr) => ({
+    bg: getComputedStyle(tr).backgroundColor,
+    weight: Number(getComputedStyle(tr.querySelector("a span span")).fontWeight),
+  }))
+  if (me.bg !== "rgba(0, 0, 0, 0)") throw new Error(`my row is tinted (${me.bg}) — looks like a stuck hover`)
+  if (me.weight < 700) throw new Error(`my name is not bold (${me.weight})`)
+  // 換期間：排序的表頭跟著換
+  await page.getByRole("radio", { name: "本月" }).click()
+  const month = page.getByRole("table", { name: "本月排行" }).getByRole("columnheader", { name: "本月報酬" })
+  await month.waitFor({ timeout: 8000 })
+  if ((await month.getAttribute("aria-sort")) !== "descending") throw new Error("sorted head did not follow the period")
+  // 不排名次的群組：沒有箭頭
+  await page.goto(base + "/groups/grp_friends", { waitUntil: "networkidle" })
+  const plain = page.getByRole("table", { name: "今日排行" }).getByRole("columnheader", { name: "今日報酬" })
+  await plain.waitFor({ timeout: 8000 })
+  if ((await plain.getAttribute("aria-sort")) !== null || (await plain.locator("svg").count())) throw new Error("unranked board shows a sort indicator")
+})
+await check("群組、設定、資料來源：空狀態沒有虛線；有字的按鈕沒有圖示；「撤回」是外框按鈕；分享卡說明不疊冒號；資料來源頁沒有副標", async () => {
+  const noIcon = async (button) => {
+    await button.first().waitFor({ timeout: 8000 })
+    if (await button.first().locator("svg").count()) throw new Error(`decorative icon on「${(await button.first().textContent())?.trim()}」`)
+  }
+  const dashedIn = (root) =>
+    root.evaluate((el) => [...el.querySelectorAll("*")].filter((n) => ["borderTopStyle", "borderBottomStyle", "borderLeftStyle"].some((k) => getComputedStyle(n)[k] === "dashed")).length)
+  await page.goto(base + "/groups", { waitUntil: "networkidle" })
+  await noIcon(page.getByRole("button", { name: "建立群組" }))
+  await noIcon(page.getByRole("button", { name: "複製分享文字" }))
+  // 分享卡的說明接在一句話後面，不是「本月：…：…」
+  const note = (await page.getByText(/^本月算不出來。/).textContent()) ?? ""
+  if (/^本月[：:]/.test(note) || !/。$/.test(note)) throw new Error(`share-card note: ${note}`)
+  // 新群組：成員分頁的空邀請清單、週報的空狀態——上下實線、沒有外框與底色
+  await page.getByRole("button", { name: "建立群組" }).first().click()
+  await page.getByLabel("群組名稱").fill("空狀態測試群")
+  await page.getByRole("dialog").getByRole("button", { name: "建立群組" }).click()
+  await page.getByRole("heading", { name: "空狀態測試群", exact: true }).waitFor({ timeout: 8000 })
+  const empty = page.getByText("沒有有效的邀請連結", { exact: true })
+  await empty.waitFor({ timeout: 8000 })
+  const box = await empty.evaluate((el) => {
+    const c = getComputedStyle(el.parentElement)
+    const t = getComputedStyle(el)
+    return { top: `${c.borderTopWidth} ${c.borderTopStyle}`, bottom: `${c.borderBottomWidth} ${c.borderBottomStyle}`, left: c.borderLeftWidth, bg: c.backgroundColor, radius: c.borderRadius, size: t.fontSize, weight: t.fontWeight }
+  })
+  if (box.top !== "1px solid" || box.bottom !== "1px solid" || box.left !== "0px" || box.bg !== "rgba(0, 0, 0, 0)" || box.radius !== "0px") throw new Error(`empty state is not two solid rules: ${JSON.stringify(box)}`)
+  if (box.size !== "15px" || Number(box.weight) < 600) throw new Error(`empty state title: ${JSON.stringify(box)}`)
+  await noIcon(page.getByRole("button", { name: "產生邀請連結" }))
+  await page.getByRole("button", { name: "產生邀請連結" }).click()
+  const revoke = page.getByRole("list", { name: "有效的邀請" }).getByRole("button", { name: "撤回" })
+  await revoke.waitFor({ timeout: 8000 })
+  const edge = await revoke.evaluate((el) => { const c = getComputedStyle(el); return { w: c.borderTopWidth, style: c.borderTopStyle, color: c.borderTopColor } })
+  if (edge.w !== "1px" || edge.style !== "solid" || /rgba\(0, 0, 0, 0\)|transparent/.test(edge.color)) throw new Error(`撤回 has no visible frame: ${JSON.stringify(edge)}`)
+  await page.getByRole("tab", { name: "週報" }).click()
+  await page.getByText("還沒有週報", { exact: true }).waitFor({ timeout: 8000 })
+  for (const [path, ready] of [
+    [null, "還沒有週報"],
+    ["/groups/grp_family?tab=feed", "加入了群組"],
+    ["/groups/grp_family?tab=holdings", "成員持股"],
+    ["/groups/grp_family/members/usr_dad", "總損益"],
+    ["/settings", "授權給你的人"],
+    ["/data-sources", "上市個股日成交資訊"],
+  ]) {
+    if (path) await page.goto(base + path, { waitUntil: "networkidle" })
+    await page.getByText(ready).first().waitFor({ timeout: 8000 })
+    const dashed = await dashedIn(page.locator("main"))
+    if (dashed) throw new Error(`${path ?? "new group digests"}: ${dashed} dashed borders outside AI drafts`)
+  }
+  // 資料來源頁：標題和「授權條款」之間沒有副標
+  const subtitle = await page.getByRole("heading", { level: 1, name: "資料來源與授權" }).evaluate((h) => {
+    const next = document.getElementById("ds-license")
+    const between = [...document.querySelectorAll("main p")].filter((p) => h.compareDocumentPosition(p) & Node.DOCUMENT_POSITION_FOLLOWING && p.compareDocumentPosition(next) & Node.DOCUMENT_POSITION_FOLLOWING)
+    return between.map((p) => p.textContent).join(" | ")
+  })
+  if (subtitle) throw new Error(`data-sources still has a subtitle: ${subtitle}`)
+  await page.goto(base + "/settings", { waitUntil: "networkidle" })
+  for (const name of ["新增帳戶", "新增定期定額", "授權給…"]) await noIcon(page.getByRole("button", { name, exact: true }))
+  await page.goto(base + "/groups/grp_family?tab=feed", { waitUntil: "networkidle" })
+  await noIcon(page.getByRole("button", { name: "加表情" }))
+  await noIcon(page.getByRole("button", { name: /^留言/ }))
+})
 await check("排行的討論串：留言 → 出現 → 刪除", async () => {
   await page.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
   const thread = page.getByRole("region", { name: /的討論$/ })
@@ -615,7 +708,7 @@ await check("我的分享：關掉交易動態 → 動態裡自己的買賣立�
 await check("成員分享：什麼都沒開只有「加入了群組」（不說「還沒有資料」）；隱私模式遮住金額", async () => {
   await page.goto(base + "/groups/grp_family/members/usr_bro", { waitUntil: "networkidle" })
   await page.getByText("加入了群組").waitFor({ timeout: 8000 })
-  if (await page.getByText("還沒有資料。").count()) throw new Error("「還沒有資料」 shown next to the feed")
+  if (await page.getByText("還沒有資料", { exact: true }).count()) throw new Error("「還沒有資料」 shown next to the feed")
   await page.goto(base + "/groups/grp_family/members/usr_dad", { waitUntil: "networkidle" })
   await page.getByText("總損益").waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "隱私模式：遮蔽金額" }).click()
@@ -764,7 +857,7 @@ await check("手機：查看爸爸時「問 AI」換成「結束查看」；橫�
   await m.getByRole("button", { name: /結束查看$/ }).click()
   await m.getByRole("button", { name: /^問 AI/ }).waitFor({ timeout: 8000 })
 })
-await check("手機：群組分頁列可以橫向捲動，直接打開「成員」時捲到那個分頁", async () => {
+await check("手機：群組七個分頁一次看得到（「成員」「頻道」不在淡出的那一邊）；更窄的螢幕才橫向捲動，直接打開「成員」時捲到那個分頁", async () => {
   await m.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
   await m.getByText("邀請連結").first().waitFor({ timeout: 8000 })
   const visible = await m.getByRole("tab", { name: "成員" }).evaluate((el) => {
@@ -772,6 +865,65 @@ await check("手機：群組分頁列可以橫向捲動，直接打開「成員�
     return r.left >= 0 && r.right <= window.innerWidth
   })
   if (!visible) throw new Error("active tab not scrolled into view")
+  const row = await m.getByRole("tablist", { name: "群組內容" }).evaluate((el) => ({
+    faded: el.hasAttribute("data-overflow-start") || el.hasAttribute("data-overflow-end"),
+    hidden: [...el.querySelectorAll('[role="tab"]')].filter((t) => { const r = t.getBoundingClientRect(); return r.left < 0 || r.right > window.innerWidth }).map((t) => t.textContent),
+    small: [...el.querySelectorAll('[role="tab"]')].filter((t) => t.getBoundingClientRect().height < 44).length,
+  }))
+  if (row.faded || row.hidden.length) throw new Error(`group tabs do not all fit on an iPhone 15: ${JSON.stringify(row)}`)
+  if (row.small) throw new Error(`${row.small} group tabs under 44px tall`)
+  // 320px 寬：放不下才捲動，選取中的「成員」捲進畫面，頁面本身不橫向捲動
+  const narrow = await browser.newContext({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+  try {
+    const n = await narrow.newPage()
+    await n.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
+    await n.getByText("邀請連結").first().waitFor({ timeout: 8000 })
+    await n.waitForTimeout(300)
+    const at320 = await n.getByRole("tab", { name: "成員" }).evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const c = el.parentElement.getBoundingClientRect()
+      return { inside: r.left >= c.left && r.right <= c.right, scrolls: el.parentElement.scrollWidth > el.parentElement.clientWidth, pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth }
+    })
+    if (!at320.scrolls || !at320.inside || at320.pageOverflow > 0) throw new Error(`320px: ${JSON.stringify(at320)}`)
+  } finally {
+    await narrow.close()
+  }
+})
+await check("手機：動態的表情・加表情・留言・刪除確認都 ≥ 44px；成員頁是格線鍵值列（不是指標磚），持股整列可點", async () => {
+  await m.goto(base + "/groups/grp_family?tab=feed", { waitUntil: "networkidle" })
+  const dad = m.getByRole("listitem").filter({ hasText: /爸爸\s*買進\s*台積電/ }).first()
+  await dad.getByText("成交價").waitFor({ timeout: 8000 })
+  const heights = async (loc) => loc.evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().height)))
+  const actions = [
+    ...(await heights(dad.getByRole("button", { name: /^(讚|厲害|恭喜) \d/ }))),
+    ...(await heights(dad.getByRole("button", { name: "加表情" }))),
+    ...(await heights(dad.getByRole("button", { name: /^留言/ }))),
+  ]
+  if (actions.length < 3 || actions.some((h) => h < 44)) throw new Error(`feed actions under 44px: ${actions.join(", ")}`)
+  await dad.getByRole("button", { name: /^留言/ }).click()
+  await dad.getByRole("button", { name: "刪除這則留言" }).first().click()
+  const confirm = [...(await heights(dad.getByRole("button", { name: "刪除", exact: true }))), ...(await heights(dad.getByRole("button", { name: "取消" })))]
+  if (confirm.length < 2 || confirm.some((h) => h < 44)) throw new Error(`delete confirm under 44px: ${confirm.join(", ")}`)
+  await dad.getByRole("button", { name: "取消" }).click()
+  await m.goto(base + "/groups/grp_family/members/usr_dad", { waitUntil: "networkidle" })
+  const returns = m.getByRole("region", { name: "報酬率" })
+  await returns.getByText("總報酬（含股利）").waitFor({ timeout: 8000 })
+  const rows = await returns.locator("dl > div").evaluateAll((els) =>
+    els.map((el) => { const c = getComputedStyle(el); const r = el.getBoundingClientRect(); return { h: r.height, w: r.width, left: c.borderLeftWidth, top: c.borderTopWidth, bottom: c.borderBottomWidth, bg: c.backgroundColor } }),
+  )
+  if (rows.length !== 4) throw new Error(`expected 4 return rows, got ${rows.length}`)
+  // 每一列：只有下面一條格線（沒有外框、沒有底色），整列寬，44px 以上
+  if (rows.some((r) => r.left !== "0px" || r.top !== "0px" || r.bottom !== "1px" || r.bg !== "rgba(0, 0, 0, 0)" || r.h < 44 || r.w < 300)) throw new Error(`member returns are not ruled key-value rows: ${JSON.stringify(rows)}`)
+  const holding = m.getByRole("region", { name: /持股/ }).getByRole("listitem").first()
+  const hit = await holding.evaluate((li) => {
+    const a = li.querySelector("a")
+    li.scrollIntoView({ block: "center" })
+    const r = li.getBoundingClientRect()
+    // 列的右邊（百分比那一欄）也按得到同一個連結
+    const at = document.elementFromPoint(r.right - 8, r.top + r.height / 2)
+    return { height: r.height, covers: at === a || a.contains(at) }
+  })
+  if (hit.height < 44 || !hit.covers) throw new Error(`holding row link does not cover the row: ${JSON.stringify(hit)}`)
 })
 await check("手機：問 AI 頂端的三個圖示鈕（新對話・紀錄・關閉）同一個樣式、都是 44px", async () => {
   await m.goto(base + "/", { waitUntil: "networkidle" })

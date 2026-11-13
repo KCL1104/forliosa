@@ -1,6 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { useNavigate, useSearch } from "@tanstack/react-router"
-import { LogInIcon, RotateCcwIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { api, DEV_LOGIN } from "@/api"
 import { meQuery, qk } from "@/api/queries"
@@ -8,6 +7,7 @@ import { useAuthProviders } from "@/api/sharing-queries"
 import { ApiError } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
 import { AuthFrame } from "@/app/AuthGate"
+import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -43,7 +43,7 @@ export function LoginPage() {
         </p>
       )}
       {providers.isError ? (
-        <BackendUnreachableInline error={providers.error} onRetry={() => void providers.refetch()} />
+        <ErrorState title="連不上伺服器" error={providers.error} onRetry={() => void providers.refetch()} retryLabel="重新連線" />
       ) : !providers.data ? (
         <Skeleton className="h-11 w-full" />
       ) : (
@@ -58,7 +58,6 @@ export function LoginPage() {
                 window.location.assign(api.discordLoginUrl(next))
               }}
             >
-              <LogInIcon />
               用 Discord 登入
             </Button>
           ) : (
@@ -68,21 +67,6 @@ export function LoginPage() {
         </div>
       )}
     </AuthFrame>
-  )
-}
-
-function BackendUnreachableInline({ error, onRetry }: { error: unknown; onRetry: () => void }) {
-  return (
-    <div role="alert" className="flex flex-col items-start gap-3">
-      <div>
-        <p className="font-medium">連不上伺服器</p>
-        <p className="text-md text-ink-2">{error instanceof ApiError ? error.message : "可能是網路不穩，或伺服器暫時沒有回應。"}</p>
-      </div>
-      <Button variant="outline" onClick={onRetry}>
-        <RotateCcwIcon />
-        重新連線
-      </Button>
-    </div>
   )
 }
 
@@ -114,7 +98,7 @@ function DevLoginForm({ next }: { next: string }) {
         </label>
         <p className="text-sm text-ink-2">只在開發環境可用；示範使用者是 demo@forliosa.local。</p>
       </div>
-      <Input id="dev-login-email" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
+      <Input id="dev-login-email" className="pointer-coarse:h-11" type="email" autoComplete="email" value={email} onChange={(e) => setEmail(e.target.value)} />
       {devLogin.error && (
         <p role="alert" className="text-sm text-destructive">
           {missing ? "這個伺服器沒有開放開發登入。" : devLogin.error.message}

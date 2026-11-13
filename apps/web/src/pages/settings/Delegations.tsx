@@ -1,5 +1,4 @@
 import { Link } from "@tanstack/react-router"
-import { EyeIcon, UserPlusIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
 import { useAccounts } from "@/api/queries"
@@ -8,7 +7,8 @@ import { ApiError, type Delegation, type DelegationScope } from "@/api/types"
 import { scopeText, useViewAsControls } from "@/app/view-as"
 import { UserAvatar } from "@/components/avatar"
 import { RangeChips } from "@/components/segmented"
-import { ErrorState, SkeletonLines } from "@/components/states"
+import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -46,12 +46,11 @@ export function Delegations() {
           <p className="text-md text-ink-2">讓同群組的家人朋友唯讀查看你的帳本，可以只開放部分帳戶，隨時撤銷。</p>
         </div>
         <Button variant="outline" size="sm" onClick={() => setEditing("new")}>
-          <UserPlusIcon />
           授權給…
         </Button>
       </div>
       {list.isError ? (
-        <ErrorState error={list.error} onRetry={() => void list.refetch()} />
+        <ErrorState flush className="-mt-5" error={list.error} onRetry={() => void list.refetch()} />
       ) : !list.data ? (
         <SkeletonLines rows={3} />
       ) : (
@@ -59,14 +58,14 @@ export function Delegations() {
           <div className="-mt-6 flex flex-col gap-2">
             <h3 className="text-base font-bold">你授權的人</h3>
             {list.data.granted.length === 0 ? (
-              <p className="text-md text-ink-2">還沒有授權給任何人。</p>
+              <EmptyState title="還沒有授權給任何人" className="py-4" />
             ) : (
               <ul className="border-t border-rule">
                 {list.data.granted.map((d) => (
                   <Row key={d.id} who={d.viewer} d={d}>
-                    <Button variant="ghost" size="sm" onClick={() => setEditing(d)}>
+                    <button type="button" onClick={() => setEditing(d)} className={cn(textAction, "mr-2")}>
                       修改範圍
-                    </Button>
+                    </button>
                     <Button variant="outline" size="sm" onClick={() => setRemoving({ d, mine: true })}>
                       撤銷
                     </Button>
@@ -78,16 +77,15 @@ export function Delegations() {
           <div className="flex flex-col gap-2">
             <h3 className="text-base font-bold">授權給你的人</h3>
             {list.data.received.length === 0 ? (
-              <p className="text-md text-ink-2">還沒有人授權給你。</p>
+              <EmptyState title="還沒有人授權給你" className="py-4" />
             ) : (
               <ul className="border-t border-rule">
                 {list.data.received.map((d) => (
                   <Row key={d.id} who={d.owner} d={d}>
-                    <Button variant="ghost" size="sm" onClick={() => setRemoving({ d, mine: false })}>
+                    <button type="button" onClick={() => setRemoving({ d, mine: false })} className={cn(textAction, "mr-2")}>
                       移除
-                    </Button>
+                    </button>
                     <Button size="sm" onClick={() => enter(d)} aria-label={`查看${d.owner.display_name}的資產`}>
-                      <EyeIcon />
                       查看
                     </Button>
                   </Row>
@@ -161,7 +159,7 @@ function GrantDialog({ editing, onClose }: { editing: Delegation | null; onClose
               ) : list.length === 0 ? (
                 <p className="text-md text-ink-2">
                   只能授權給和你在同一個群組的人。先
-                  <Link to="/groups" className="underline underline-offset-3" onClick={onClose}>
+                  <Link to="/groups" className="text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink" onClick={onClose}>
                     建立或加入群組
                   </Link>
                   。

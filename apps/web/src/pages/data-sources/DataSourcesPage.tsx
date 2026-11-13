@@ -7,6 +7,10 @@ import { PageFrame } from "@/app/PageFrame"
 import { PageHeader } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 
+/** 離開本站的連結（才用 ↗）：常駐 ctl 色底線、滑過變墨色；觸控時 44px 高 */
+const EXTERNAL =
+  "inline-flex items-center gap-0.5 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
+
 /**
  * 資料來源與授權：`GET /meta/attributions` 的每一個資料集，照後端給的完整顯名聲明列出
  * （政府資料開放授權條款第 1 版：沒有顯名「視為自始未取得授權」，所以文字不改寫）。
@@ -25,10 +29,8 @@ export function DataSourcesPage() {
     // 左緣和帳本相同；這一頁是長文，閱讀寬度限制在 816px（原本的版心）
     <PageFrame>
       <div className="flex max-w-[816px] flex-col gap-10">
-      <PageHeader
-        title="資料來源與授權"
-        description="行情、匯率、公司資料與公告只用可合法商用的政府開放資料，以及我們從這些資料自建的每日存檔。下面是每個資料集的顯名聲明。"
-      />
+      {/* 頁面標題下面不放副標；「只用哪些資料」這句是內容，放在授權條款的第一段 */}
+      <PageHeader title="資料來源與授權" className="mb-0" />
       {q.isError ? (
         <ErrorState error={q.error} onRetry={() => void q.refetch()} />
       ) : !a ? (
@@ -39,6 +41,7 @@ export function DataSourcesPage() {
             <h2 id="ds-license" className="border-b border-rule pb-2 text-lg font-bold">
               授權條款
             </h2>
+            <p className="max-w-prose text-md">行情、匯率、公司資料與公告只用可合法商用的政府開放資料，以及我們從這些資料自建的每日存檔。</p>
             {a.notice.map((n) => (
               // 長網址不能撐寬頁面：任何地方都可以斷行
               <p key={n} className="max-w-prose text-md [overflow-wrap:anywhere]">
@@ -60,14 +63,14 @@ export function DataSourcesPage() {
                     <div className="min-w-0">
                       <p className="text-base">{d.attribution}</p>
                       <p className="mt-0.5 flex flex-wrap gap-x-3 text-sm text-ink-2">
-                        <a href={d.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline-offset-3 hover:text-ink hover:underline">
+                        <a href={d.url} target="_blank" rel="noreferrer" className={EXTERNAL}>
                           資料集網址
                           <ArrowUpRightIcon aria-hidden className="size-3.5" />
                           <span className="sr-only">（另開新視窗）</span>
                         </a>
                         {/* 政府資料開放授權條款已列在最上面；授權不同的資料集（例如非商用來源）才逐筆連結 */}
                         {d.license_url !== mainLicense && (
-                          <a href={d.license_url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-0.5 underline-offset-3 hover:text-ink hover:underline">
+                          <a href={d.license_url} target="_blank" rel="noreferrer" className={EXTERNAL}>
                             {d.license}
                             <ArrowUpRightIcon aria-hidden className="size-3.5" />
                             <span className="sr-only">（另開新視窗）</span>
@@ -127,7 +130,7 @@ function Linkified({ text }: { text: string }) {
     <>
       {parts.map((p, i) =>
         /^https?:\/\//.test(p) ? (
-          <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all underline underline-offset-3">
+          <a key={i} href={p} target="_blank" rel="noreferrer" className="break-all underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:py-3">
             {p}
           </a>
         ) : (

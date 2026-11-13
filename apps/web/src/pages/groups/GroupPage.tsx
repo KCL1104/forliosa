@@ -104,8 +104,11 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
       </header>
 
       <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-6 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
-        {/* 手機放不下時橫向捲動（ScrollRow）：被遮住的那一邊淡出，選取中的分頁（例如直接打開「成員」）捲進畫面 */}
-        <ScrollRow role="tablist" aria-label="群組內容" className="flex gap-1">
+        {/*
+          手機（< 640px）：七個分頁平分整列（每個至少左右 4px），336px 以上的手機一次看得到全部——
+          「成員」「頻道」不會躲在淡出的那一邊。更窄才橫向捲動（ScrollRow：被遮住的那一邊淡出，選取中的分頁捲進畫面）。
+        */}
+        <ScrollRow role="tablist" aria-label="群組內容" className="flex sm:gap-1">
           {TABS.map((t, i) => {
             const active = t.value === tab
             return (
@@ -124,7 +127,7 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
                   go(TABS[(i + d + TABS.length) % TABS.length]!.value, true)
                 }}
                 onClick={() => go(t.value)}
-                className="sel-tab -mb-px flex h-12 shrink-0 items-center px-3 text-base text-ink-2"
+                className="sel-tab -mb-px flex h-12 shrink-0 items-center justify-center px-1 text-base text-ink-2 max-sm:grow sm:px-3"
               >
                 {t.label}
               </button>
