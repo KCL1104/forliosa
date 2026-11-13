@@ -1,6 +1,6 @@
 import { useNavigate } from "@tanstack/react-router"
 import { Command as CommandPrimitive } from "cmdk"
-import { EyeOffIcon, HistoryIcon, NotebookTextIcon, PlusIcon, SearchIcon, SettingsIcon, UsersIcon } from "lucide-react"
+import { SearchIcon } from "lucide-react"
 import { useEffect, useState } from "react"
 import { useInstrumentSearch } from "@/api/queries"
 import type { Instrument } from "@/api/types"
@@ -14,6 +14,7 @@ import { useReadOnly } from "@/api/view-as"
 
 /**
  * ⌘K 全域搜尋（cmdk）：代號或中文股名搜尋商品，也能跳頁與執行常用動作。
+ * 清單是文字列：動作與頁面前面不放裝飾圖示（只有輸入框的放大鏡，那是「這裡可以搜尋」）。
  * 依 emil-design-eng：每天用上百次的面板不做開關動畫。
  */
 export function CommandSearch() {
@@ -113,12 +114,10 @@ export function CommandSearch() {
               <CommandPrimitive.Group heading="常用動作" className={groupClass}>
                 {!readOnly && (
                   <CommandPrimitive.Item value="new-trade" onSelect={() => { close(); openTradeForm() }} className={itemClass}>
-                    <PlusIcon className="size-4 text-muted-foreground" aria-hidden />
                     <span className="flex-1">記一筆交易</span>
                   </CommandPrimitive.Item>
                 )}
                 <CommandPrimitive.Item value="privacy" onSelect={() => { togglePrivacy(); close() }} className={itemClass}>
-                  <EyeOffIcon className="size-4 text-muted-foreground" aria-hidden />
                   <span className="flex-1">切換隱私模式</span>
                 </CommandPrimitive.Item>
               </CommandPrimitive.Group>
@@ -127,7 +126,6 @@ export function CommandSearch() {
               <CommandPrimitive.Group heading="前往頁面" className={groupClass}>
                 {pages.map((p) => (
                   <CommandPrimitive.Item key={p.to} value={`page:${p.to}`} onSelect={() => go(p.to)} className={itemClass}>
-                    <p.icon className="size-4 text-muted-foreground" aria-hidden />
                     <span className="flex-1">{p.label}</span>
                   </CommandPrimitive.Item>
                 ))}
@@ -141,10 +139,10 @@ export function CommandSearch() {
 }
 
 const PAGES = [
-  { to: "/", label: "帳本", icon: NotebookTextIcon },
-  { to: "/groups", label: "群組", icon: UsersIcon },
-  { to: "/history", label: "紀錄", icon: HistoryIcon },
-  { to: "/settings", label: "設定", icon: SettingsIcon },
+  { to: "/", label: "帳本" },
+  { to: "/groups", label: "群組" },
+  { to: "/history", label: "紀錄" },
+  { to: "/settings", label: "設定" },
 ] as const
 
 const groupClass = cn(

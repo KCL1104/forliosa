@@ -1,5 +1,4 @@
 import { useQuery } from "@tanstack/react-query"
-import { Trash2Icon } from "lucide-react"
 import { useEffect, useMemo, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
@@ -398,8 +397,8 @@ function Actions({ edit, busy, onCancel, onDelete, className }: { edit: boolean;
         </Button>
       </div>
       {edit && (
-        <Button type="button" variant="ghost" className="text-destructive" onClick={onDelete}>
-          <Trash2Icon />
+        // 次要的文字動作：常駐鉛筆灰底線（看得出可以按），不放圖示
+        <Button type="button" variant="ghost" className="text-destructive underline decoration-ctl underline-offset-3 hover:decoration-ink" onClick={onDelete}>
           刪除這筆交易
         </Button>
       )}

@@ -53,7 +53,8 @@ export function RangeChips<T extends string>({
 
 /**
  * 分段（帳本：持倉・交易・股利・績效）：1px 鉛筆灰外框，選取＝選取語法 (b)（`sel-chip`）。
- * role=tablist；方向鍵切換。
+ * role=tablist；方向鍵切換。觸控與手機版面每一段 44px 高。
+ * `shortcut`：這一段的鍵盤快速鍵（由頁面自己處理按鍵；這裡只用 `aria-keyshortcuts` 告訴輔助科技）。
  */
 export function Segmented<T extends string>({
   value,
@@ -64,7 +65,7 @@ export function Segmented<T extends string>({
   controls,
 }: {
   value: T
-  options: readonly { value: T; label: string; count?: number | null }[]
+  options: readonly { value: T; label: string; count?: number | null; shortcut?: string }[]
   onChange: (v: T) => void
   label: string
   className?: string
@@ -80,7 +81,7 @@ export function Segmented<T extends string>({
     requestAnimationFrame(() => group?.querySelector<HTMLButtonElement>('[aria-selected="true"]')?.focus())
   }
   return (
-    <div role="tablist" aria-label={label} className={cn("flex gap-1 rounded-md border border-ctl p-1", className)}>
+    <div role="tablist" aria-label={label} className={cn("flex gap-1 rounded-md border border-ctl p-1 max-lg:p-[3px]", className)}>
       {options.map((o, i) => {
         const active = o.value === value
         return (
@@ -91,10 +92,11 @@ export function Segmented<T extends string>({
             id={`tab-${o.value}`}
             aria-selected={active}
             aria-controls={controls}
+            aria-keyshortcuts={o.shortcut}
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
-            className="press sel-chip relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-[38px] max-lg:flex-1 max-lg:px-2"
+            className="press sel-chip relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-11 max-lg:flex-1 max-lg:px-2 pointer-coarse:h-11"
           >
             {o.label}
             {o.count !== undefined && o.count !== null && <span className="num text-sm font-normal opacity-85 max-lg:hidden">{o.count}</span>}

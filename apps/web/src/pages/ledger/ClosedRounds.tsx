@@ -42,7 +42,7 @@ export function ClosedRounds() {
           aria-expanded={open}
           aria-controls="closed-list"
           onClick={() => setOpen(!open)}
-          className="flex min-h-[52px] w-full items-end gap-2 border-b border-rule pb-2 text-left hover:text-ink"
+          className="flex min-h-[52px] w-full items-end gap-2 border-b border-print pb-2 text-left hover:text-ink"
         >
           <span className="text-lg font-bold md:text-base">已出清</span>
           <span className="num text-sm font-normal text-ink-2">

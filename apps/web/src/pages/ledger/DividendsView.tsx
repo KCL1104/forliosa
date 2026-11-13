@@ -1,21 +1,26 @@
 import { useQuery } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { CoinsIcon } from "lucide-react"
 import { useMemo } from "react"
+import { PlainLink } from "@/app/links"
 import { appToday } from "@/api"
-import { listTransactionsUpTo, useHoldings, useSummary, useUpcoming } from "@/api/queries"
+import { listTransactionsUpTo, useSummary, useUpcoming } from "@/api/queries"
 import type { Transaction } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { Masked, SourceTag } from "@/components/finance"
 import { Section } from "@/components/section"
-import { ErrorState } from "@/components/states"
+import { EmptyState, ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { formatDateShort, formatDaysUntil, formatMoney, formatNumber } from "@/lib/format"
-import { codeOf } from "@/lib/tick"
+import { formatDateShort, formatDaysUntil, formatMoney, formatNumber, formatPerShare } from "@/lib/format"
+import { codeOf, marketOf } from "@/lib/tick"
+import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly, useWho } from "@/api/view-as"
 import { DateCell } from "@/components/date-cell"
+import { useSymbolNames } from "./use-symbol-names"
+
+/** 整列可點：股票名稱連結的 ::after 蓋滿整列（和持倉的手機列同一招），列上其他可以按的東西用 `relative z-10` 浮在上面 */
+const STRETCH = "after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ink"
 
 /** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {
@@ -24,7 +29,6 @@ export function DividendsView() {
   const you = useWho("你")
   const summary = useSummary()
   const upcoming = useUpcoming(30)
-  const holdings = useHoldings()
   const privacy = usePrefs((s) => s.privacyMode)
   const received = useQuery({
     queryKey: ["transactions", "dividends"],
@@ -33,7 +37,8 @@ export function DividendsView() {
       return [...cash.items, ...stock.items].sort((a, b) => b.trade_date.localeCompare(a.trade_date))
     },
   })
-  const nameOf = useMemo(() => new Map((holdings.data ?? []).map((h) => [h.symbol, h.name])), [holdings.data])
+  // 名稱：目前的持股＋出清過的（已經賣掉的股票領過的股利也有名稱）
+  const nameOf = useSymbolNames()
   const byYear = useMemo(() => {
     const map = new Map<string, Transaction[]>()
     for (const t of received.data ?? []) {
@@ -60,8 +65,7 @@ export function DividendsView() {
         titleId="div-next"
         action={
           readOnly ? undefined : (
-            <Button variant="outline" size="sm" onClick={() => ask.action("dividend")}>
-              <CoinsIcon />
+            <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("dividend")}>
               股利入帳
             </Button>
           )
@@ -70,7 +74,7 @@ export function DividendsView() {
         {upcoming.isLoading || summary.isLoading ? (
           <Skeleton className="h-24 w-full rounded-sm" />
         ) : soon.length === 0 ? (
-          <p className="py-2 text-md text-ink-2">接下來 60 天{you}的持股沒有除息、待入帳的股利，也沒有定期定額扣款。</p>
+          <EmptyState className="-mt-3 border-t-0" title="接下來 60 天沒有事項" description={`${you}的持股沒有除息、待入帳的股利，也沒有定期定額扣款。`} />
         ) : (
           <div className="-mt-3">
             <div aria-hidden className="form-head grid h-10 grid-cols-[88px_1fr_auto] items-end gap-3 pb-2 md:grid-cols-[120px_1fr_auto]">
@@ -80,7 +84,7 @@ export function DividendsView() {
             </div>
             <ul>
             {soon.map((u) => (
-              <li key={`${u.date}-${u.type}-${u.title}`} className="grid grid-cols-[88px_1fr_auto] items-center gap-3 border-b border-rule py-3 md:grid-cols-[120px_1fr_auto]">
+              <li key={`${u.date}-${u.type}-${u.title}`} className={cn("relative grid grid-cols-[88px_1fr_auto] items-center gap-3 py-3 md:grid-cols-[120px_1fr_auto]", u.symbol ? "ruled-row" : "border-b border-rule")}>
                 <DateCell date={u.date} pad="-my-3 py-3" inline>
                   <span className="mt-0.5 text-sm font-normal text-ink-2">{formatDaysUntil(u.date, today)}</span>
                 </DateCell>
@@ -88,7 +92,7 @@ export function DividendsView() {
                   {/* 名稱與類型：放不下時類型整個換到下一行（靠左，不縮排） */}
                   <span className="flex flex-wrap items-baseline gap-x-2">
                     {u.symbol ? (
-                      <Link to="/stock/$symbol" params={{ symbol: u.symbol }} className="font-medium hover:underline">
+                      <Link to="/stock/$symbol" params={{ symbol: u.symbol }} className={cn("font-medium", STRETCH)}>
                         {nameOf.get(u.symbol) ?? codeOf(u.symbol)}
                       </Link>
                     ) : null}
@@ -96,9 +100,14 @@ export function DividendsView() {
                       // 查看模式：設定頁是查看者自己的（被擋下），不連過去
                       <span className="whitespace-nowrap text-ink-2">定期定額扣款</span>
                     ) : u.type === "recurring" ? (
-                      <Link to="/settings" hash="recurring" className="whitespace-nowrap text-ink-2 underline-offset-3 hover:text-ink hover:underline">
+                      // 第二個連結（到設定的定期定額）浮在整列的連結上面；觸控時可點範圍放大到 44px
+                      <PlainLink
+                        to="/settings"
+                        hash="recurring"
+                        className="relative z-10 whitespace-nowrap text-ink-2 underline decoration-ctl underline-offset-3 before:absolute before:-inset-x-2 before:-inset-y-3 before:content-[''] hover:text-ink hover:decoration-ink"
+                      >
                         定期定額扣款
-                      </Link>
+                      </PlainLink>
                     ) : (
                       <span className="whitespace-nowrap text-ink-2">{u.type === "ex_dividend" ? "除息" : "股利入帳"}</span>
                     )}
@@ -124,9 +133,11 @@ export function DividendsView() {
         ) : received.isLoading ? (
           <Skeleton className="h-40 w-full rounded-sm" />
         ) : byYear.length === 0 ? (
-          <p className="py-2 text-md text-ink-2">
-            {readOnly ? "還沒有股利紀錄。" : "還沒有股利紀錄。台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。"}
-          </p>
+          <EmptyState
+            className="-mt-3 border-t-0"
+            title="還沒有股利紀錄"
+            description={readOnly ? undefined : "台股股利會在除息日自動入帳；美股股利領到時跟 AI 說「AAPL 配息 2.6」就能入帳。"}
+          />
         ) : (
           // 每一年是一張印好的表：年份與合計 → 表頭（雙線）→ 一列一筆
           <div className="flex flex-col gap-8">
@@ -151,19 +162,23 @@ export function DividendsView() {
                   </div>
                   <ul>
                     {rows.map((t) => (
-                      <li key={t.id} className="grid grid-cols-[88px_1fr_auto] items-center gap-3 border-b border-rule py-2.5 md:grid-cols-[120px_1fr_auto_auto]">
+                      <li key={t.id} className={cn("relative grid min-h-11 grid-cols-[88px_1fr_auto] items-center gap-3 py-2.5 md:grid-cols-[120px_1fr_auto_auto]", t.symbol ? "ruled-row" : "border-b border-rule")}>
                         <DateCell date={t.trade_date} inline />
                         {/* 名稱太長時截斷名稱與每股金額，來源標示一定看得到 */}
                         <span className="flex min-w-0 items-baseline">
                           <span className="min-w-0 truncate">
                             {t.symbol && (
-                              <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className="font-medium hover:underline">
+                              <Link to="/stock/$symbol" params={{ symbol: t.symbol }} className={cn("font-medium", STRETCH)}>
                                 {nameOf.get(t.symbol) ?? codeOf(t.symbol)}
                               </Link>
                             )}
-                            <span className="ml-2 text-sm text-ink-2">{t.type === "stock_dividend" ? "股票股利" : t.price !== null ? `每股 ${t.price} 元` : "現金股利"}</span>
+                            {/* 每股金額帶幣別：台股「每股 5 元」，美股「每股 US$0.27」（不是「0.27 元」） */}
+                            <span className="ml-2 text-sm text-ink-2">
+                              {t.type === "stock_dividend" ? "股票股利" : t.price !== null ? `每股 ${formatPerShare(t.price, t.symbol ? marketOf(t.symbol) : "TWSE", { dividend: true })}` : "現金股利"}
+                            </span>
                           </span>
-                          <SourceTag source={t.source} className="ml-2 shrink-0" />
+                          {/* 標示浮在整列的連結上面：滑過仍然看得到說明 */}
+                          <SourceTag source={t.source} className="relative z-10 ml-2 shrink-0" />
                         </span>
                         <span className="num hidden text-right text-sm text-ink-2 md:block">
                           {t.health_insurance > 0 ? <>健保 {privacy ? "••••" : formatNumber(t.health_insurance)}</> : t.tax > 0 ? <>預扣 {privacy ? "••••" : formatNumber(t.tax, t.currency === "USD" ? 2 : 0)}</> : ""}

@@ -1,20 +1,19 @@
 import NumberFlow from "@number-flow/react"
-import { Link, useNavigate, useSearch } from "@tanstack/react-router"
-import { CalendarDaysIcon, ChevronDownIcon, ChevronRightIcon, PenLineIcon } from "lucide-react"
-import { lazy, Suspense, useState } from "react"
+import { useNavigate, useSearch } from "@tanstack/react-router"
+import { lazy, Suspense, useEffect } from "react"
 import { api } from "@/api"
 import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
 import type { PortfolioSummary } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { useAi, usePendingCount } from "@/ai/store"
 import { Masked } from "@/components/finance"
+import { DateCell } from "@/components/date-cell"
 import { DemoTag } from "@/components/section"
 import { Segmented } from "@/components/segmented"
 import { Sparkline } from "@/components/sparkline"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useIsDesktop } from "@/hooks/use-media-query"
-import { direction, directionGlyph, formatDateShort, formatMoney, formatPercent, toneClass } from "@/lib/format"
+import { direction, directionGlyph, formatMoney, formatPercent, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import type { LedgerSearch, LedgerView } from "@/router"
@@ -26,12 +25,16 @@ import { asOfLabel } from "@/lib/as-of"
 import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
+import { PlainLink } from "@/app/links"
 import { PageFrame } from "@/app/PageFrame"
 import { trendMissingReason } from "./trend-reason"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
 const PerformanceView = lazy(() => import("./PerformanceView").then((m) => ({ default: m.PerformanceView })))
+
+/** 分段的順序，也是數字鍵 1–4 的對應（和 router 的 LEDGER_VIEWS 相同；不從 router 匯入值，避免循環匯入） */
+const VIEW_KEYS: readonly LedgerView[] = ["holdings", "transactions", "dividends", "performance"]
 
 /** 帳本（首頁）：主數字 → 本週事項 → 分段（持倉・交易・股利・績效）→ 清單 */
 export function LedgerPage() {
@@ -42,25 +45,38 @@ export function LedgerPage() {
   const counts = useLedgerCounts()
   const pending = usePendingCount()
   const ask = useAskAi()
-  const isDesktop = useIsDesktop()
   // 查看別人的資產（唯讀）：沒有待簽名的草稿（那是自己的 AI）
   const readOnly = useReadOnly()
 
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
+
+  // 數字鍵 1–4 切換分段（持倉・交易・股利・績效）：焦點在輸入框、選單、對話框裡，或同時按著修飾鍵時不動作
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return
+      const next = VIEW_KEYS[["1", "2", "3", "4"].indexOf(e.key)]
+      if (!next) return
+      const t = e.target instanceof Element ? e.target : null
+      if (t?.closest('input, textarea, select, [contenteditable=""], [contenteditable="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="combobox"]')) return
+      if (document.querySelector('[role="dialog"], [role="alertdialog"]')) return
+      e.preventDefault()
+      void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: next === "holdings" ? undefined : next, symbol: next === "transactions" ? s.symbol : undefined }), replace: true })
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [navigate])
 
   return (
     <PageFrame>
       <h1 className="sr-only">帳本</h1>
       {summary.isError ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
-      ) : isDesktop ? (
-        <HeroDesktop summary={summary.data} />
       ) : (
-        <HeroMobile summary={summary.data} />
+        <Hero summary={summary.data} view={view} />
       )}
       <WeekLine />
 
-      <div className="mt-3.5 flex items-center gap-4 lg:mt-11">
+      <div className="mt-5 flex items-center gap-4 lg:mt-11">
         <Segmented
           label="帳本內容"
           value={view}
@@ -68,10 +84,10 @@ export function LedgerPage() {
           controls="ledger-view"
           className="max-lg:flex-1"
           options={[
-            { value: "holdings", label: "持倉", count: counts.holdings },
-            { value: "transactions", label: "交易", count: counts.transactions },
-            { value: "dividends", label: "股利", count: counts.dividends },
-            { value: "performance", label: "績效" },
+            { value: "holdings", label: "持倉", count: counts.holdings, shortcut: "1" },
+            { value: "transactions", label: "交易", count: counts.transactions, shortcut: "2" },
+            { value: "dividends", label: "股利", count: counts.dividends, shortcut: "3" },
+            { value: "performance", label: "績效", shortcut: "4" },
           ]}
         />
         {pending > 0 && !readOnly && (
@@ -81,10 +97,9 @@ export function LedgerPage() {
               const id = Object.values(useAi.getState().drafts).find((d) => d.status === "pending")?.id ?? null
               ask.showDraft(id)
             }}
-            className="press hidden h-8 items-center gap-1.5 rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3 text-sm font-medium text-ai hover:border-ai lg:inline-flex"
+            className="press hidden h-8 items-center rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3 text-sm font-medium text-ai hover:border-ai lg:inline-flex"
             aria-label={`待簽名 ${pending} 筆：到 AI 面板的草稿確認`}
           >
-            <PenLineIcon aria-hidden className="size-[15px]" />
             待簽名 {pending} 筆
           </button>
         )}
@@ -94,11 +109,10 @@ export function LedgerPage() {
         <button
           type="button"
           onClick={() => ask.showDraft(Object.values(useAi.getState().drafts).find((d) => d.status === "pending")?.id ?? null)}
-          className="press mt-3 flex h-11 w-full items-center gap-2 rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-base font-medium text-ai lg:hidden"
+          className="press mt-3 flex h-11 w-full items-center justify-between rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-base font-medium text-ai lg:hidden"
         >
-          <PenLineIcon aria-hidden className="size-4" />
           待簽名 {pending} 筆
-          <ChevronRightIcon aria-hidden className="ml-auto size-4" />
+          <span aria-hidden className="font-normal">→</span>
         </button>
       )}
 
@@ -118,11 +132,11 @@ export function LedgerPage() {
   )
 }
 
-function BigTotal({ value, size }: { value: number; size: "desktop" | "mobile" }) {
+function BigTotal({ value }: { value: number }) {
   const privacy = usePrefs((s) => s.privacyMode)
   return (
-    <p className={cn("hero-figure flex items-baseline font-medium text-ink", size === "desktop" ? "mt-1.5 text-big tracking-[-0.02em]" : "mt-1.5 text-4xl tracking-[-0.015em]")}>
-      <span className={cn("font-normal tracking-normal text-ink-2", size === "desktop" ? "mr-2 text-2xl" : "mr-1 text-lg")}>NT$</span>
+    <p className="hero-figure mt-1 flex items-baseline text-4xl font-medium tracking-[-0.015em] text-ink lg:mt-1.5 lg:text-big lg:tracking-[-0.02em]">
+      <span className="mr-1.5 text-lg font-normal tracking-normal text-ink-2 lg:mr-2 lg:text-2xl">NT$</span>
       {privacy ? (
         <Masked className="tracking-[0.2em] text-ink" />
       ) : (
@@ -136,8 +150,9 @@ function Delta({ amount, pct, className }: { amount: number; pct: number | null;
   const privacy = usePrefs((s) => s.privacyMode)
   const d = direction(amount)
   return (
-    <span className={cn("num inline-flex items-baseline gap-2 whitespace-nowrap", toneClass(d), className)}>
-      {privacy ? <Masked /> : formatMoney(amount, { signed: true })}
+    // 金額與百分比各自不換行；手機上放不下一行時，百分比整個換到下一行
+    <span className={cn("num inline-flex flex-wrap items-baseline gap-x-2 [&>*]:whitespace-nowrap", toneClass(d), className)}>
+      {privacy ? <Masked /> : <span>{formatMoney(amount, { signed: true })}</span>}
       {/* 百分比和金額同一個字級；▲▼ 跟著字級（不另外縮小） */}
       <span>
         {directionGlyph(direction(pct))}
@@ -157,13 +172,22 @@ function useTrend() {
 /** 走勢畫不出來、而且後端說了原因時：右半邊一行說明，連到績效（那裡有完整說明與「只看新台幣帳戶」）。 */
 function TrendMissing({ reason }: { reason: string }) {
   return (
-    <Link to="/" search={{ view: "performance" }} className="mb-1.5 shrink-0 text-right text-sm text-ink-2 underline-offset-3 hover:text-ink hover:underline">
+    <PlainLink
+      to="/"
+      search={{ view: "performance" }}
+      className="mb-1.5 shrink-0 text-right text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink max-lg:hidden"
+    >
       近 1 個月走勢：{reason}
-    </Link>
+    </PlainLink>
   )
 }
 
-function HeroDesktop({ summary }: { summary?: PortfolioSummary }) {
+/**
+ * 主數字（手機與桌面同一套）：標籤一行 → 總資產大字 → 今日、總損益（含股利）。沒有卡片、沒有展開鈕。
+ * 桌面：今日與總損益排成一行，右邊是近 1 個月走勢（畫不出來時是一行原因）。
+ * 手機：兩行、標籤對齊成一欄；有走勢時是第三行。
+ */
+function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView }) {
   const showTrend = useLedgerPrefs((s) => s.showTrend)
   const holdings = useHoldings()
   const trend = useTrend()
@@ -171,95 +195,55 @@ function HeroDesktop({ summary }: { summary?: PortfolioSummary }) {
   if (!summary) return <HeroSkeleton />
   const up = (trend.values.at(-1) ?? 0) >= (trend.values[0] ?? 0)
   const missingReason = trendMissingReason(trend.notes)
+  const hasTrend = showTrend && trend.values.length > 1
+  const trendLabel = `近 1 個月總資產走勢：${up ? "上升" : "下降"}`
+  // 手機：dt／dd 直接是格線的格子（display: contents），標籤一欄、數字一欄；桌面：一項一組排成一行
+  const item = "contents lg:flex lg:items-baseline lg:gap-2.5"
   return (
-    <div className="flex items-end justify-between gap-8">
+    <div className="flex items-end justify-between gap-8 max-lg:mt-1.5">
       <div className="min-w-0">
-        <p className="flex items-center gap-2.5 text-sm text-ink-2">
+        <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
           <b className="text-base font-medium text-ink">總資產</b>
           {asOfLabel(summary.as_of)}
           {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
         </p>
-        <BigTotal value={summary.market_value} size="desktop" />
-        <dl className="mt-3.5 flex flex-wrap gap-x-12 gap-y-2">
-          <div className="flex items-baseline gap-2.5">
+        <BigTotal value={summary.market_value} />
+        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3.5 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2">
+          <div className={item}>
             <dt className="text-sm text-ink-2">今日</dt>
             <dd className="text-lg font-medium">
               <Delta amount={summary.day_change} pct={summary.day_change_pct} />
             </dd>
           </div>
-          <div className="flex items-baseline gap-2.5">
+          <div className={item}>
             <dt className="text-sm text-ink-2">總損益（含股利）</dt>
             <dd className="text-lg font-medium">
               <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
             </dd>
           </div>
+          {hasTrend && !privacy && (
+            <div className="contents lg:hidden">
+              <dt className="text-sm text-ink-2">近 1 個月</dt>
+              <dd className="self-center">
+                <Sparkline values={trend.values} baseline={trend.values[0]} width={120} height={28} tone="ink" dot label={trendLabel} />
+              </dd>
+            </div>
+          )}
         </dl>
       </div>
-      {showTrend && trend.values.length < 2 && !trend.loading && !trend.isError && missingReason && <TrendMissing reason={missingReason} />}
-      {showTrend && trend.values.length > 1 && (
-        <figure className="mb-1.5 text-right" aria-label={`近 1 個月總資產走勢：${up ? "上升" : "下降"}`}>
+      {/* 走勢畫不出來的原因連到績效；已經在績效分段時不重複（那裡有完整的說明） */}
+      {showTrend && view !== "performance" && trend.values.length < 2 && !trend.loading && !trend.isError && missingReason && <TrendMissing reason={missingReason} />}
+      {hasTrend && (
+        <figure className="mb-1.5 text-right max-lg:hidden" aria-label={trendLabel}>
           {privacy ? (
             <div className="grid h-10 w-[168px] place-items-center text-sm text-ink-2">走勢已隱藏</div>
           ) : (
-            <Sparkline values={trend.values} baseline={trend.values[0]} width={168} height={40} tone="ink" dot label={`近 1 個月總資產走勢：${up ? "上升" : "下降"}`} />
+            <Sparkline values={trend.values} baseline={trend.values[0]} width={168} height={40} tone="ink" dot label={trendLabel} />
           )}
           <figcaption className="mt-1.5 text-sm text-ink-2">近 1 個月</figcaption>
         </figure>
       )}
     </div>
-  )
-}
-
-function HeroMobile({ summary }: { summary?: PortfolioSummary }) {
-  const [open, setOpen] = useState(false)
-  const showTrend = useLedgerPrefs((s) => s.showTrend)
-  const holdings = useHoldings()
-  const trend = useTrend()
-  const privacy = usePrefs((s) => s.privacyMode)
-  if (!summary) return <HeroSkeleton />
-  const asOf = asOfLabel(summary.as_of).replace(/ \d\d:\d\d 收盤$/, " 收盤")
-  return (
-    <section aria-label="總資產" className="mt-3 rounded-xl border border-rule bg-raised py-[18px] pr-3 pl-5">
-      <div className="grid grid-cols-[1fr_auto] items-center">
-        <div className="min-w-0">
-          <p className="flex flex-wrap items-center gap-2 text-base text-ink-2">
-            總資產・{asOf}
-            {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
-          </p>
-          <BigTotal value={summary.market_value} size="mobile" />
-          <p className="mt-1.5 text-lg font-medium">
-            <Delta amount={summary.day_change} pct={summary.day_change_pct} className="flex-row-reverse" />
-            <span className="ml-2 font-normal text-ink-2">今天</span>
-          </p>
-        </div>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls="hero-more"
-          aria-label={open ? "收起總損益與走勢" : "展開總損益與走勢"}
-          onClick={() => setOpen(!open)}
-          className="press grid size-11 place-items-center rounded-full bg-hov text-ink"
-        >
-          <ChevronDownIcon aria-hidden className={cn("size-[22px] transition-transform duration-200", open && "rotate-180")} />
-        </button>
-      </div>
-      {open && (
-        <div id="hero-more" className="note-in mt-4 flex items-end justify-between gap-4 border-t border-rule pt-3.5">
-          <dl>
-            <dt className="text-sm text-ink-2">總損益（含股利）</dt>
-            <dd className="mt-0.5 text-lg font-medium">
-              <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
-            </dd>
-          </dl>
-          {showTrend && trend.values.length > 1 && !privacy && (
-            <figure className="text-right">
-              <Sparkline values={trend.values} baseline={trend.values[0]} width={120} height={34} tone="ink" dot label="近 1 個月總資產走勢" />
-              <figcaption className="mt-1 text-xs text-ink-2">近 1 個月</figcaption>
-            </figure>
-          )}
-        </div>
-      )}
-    </section>
   )
 }
 
@@ -278,39 +262,39 @@ function HeroSkeleton() {
   )
 }
 
-/** 本週 N 件事：除息、股利入帳、定期定額（規則計算，不是 AI 簡報） */
+/**
+ * 本週 N 件事：除息、股利入帳、定期定額（規則計算，不是 AI 簡報）。
+ * 一行格線列（上下各一條格線）：聯絡簿的日期格 → 最近的一件事 →「本週 N 件事 →」。
+ * 連到股利分段；它不是導覽，不標 aria-current（PlainLink）。
+ */
 function WeekLine() {
   const upcoming = useUpcoming(7)
   const privacy = usePrefs((s) => s.privacyMode)
   const items = upcoming.data ?? []
-  if (upcoming.isLoading) return <Skeleton className="mt-9 h-[52px] w-full rounded-none" />
+  if (upcoming.isLoading) return <Skeleton className="mt-5 h-[52px] w-full rounded-none lg:mt-9" />
   const first = items[0]
   return (
-    <Link
+    <PlainLink
       to="/"
       search={{ view: "dividends" }}
-      className="mt-2 flex min-h-12 items-center gap-2 py-2 text-base text-ink hover:bg-hov lg:mt-9 lg:min-h-[52px] lg:border-y lg:border-rule lg:pr-2 lg:pl-0.5 lg:text-base"
+      className="mt-5 grid min-h-[52px] grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 border-y border-rule py-2 text-base text-ink hover:bg-hov active:bg-hov lg:mt-9"
       aria-label={first ? `本週 ${items.length} 件事，查看全部` : "接下來 7 天沒有除息或入帳，查看股利"}
     >
-      <CalendarDaysIcon aria-hidden className="hidden size-[18px] text-ink-2 lg:block" />
       {first ? (
-        <span className="min-w-0 truncate">
-          <b className="font-medium">
-            <span className="lg:hidden">本週：</span>
-            <span className="max-lg:hidden">本週 {items.length} 件事：</span>
-          </b>
-          <time dateTime={first.date} className="num font-medium lg:mr-2">
-            {formatDateShort(first.date)}
-          </time>
-          <span className="max-lg:hidden">{upcomingText(first, privacy)}</span>
-          <span className="lg:hidden">{upcomingShort(first)}</span>
-        </span>
+        <>
+          <DateCell date={first.date} pad="-my-2 py-2" className="w-[3.25rem] lg:w-24" />
+          <span className="min-w-0 truncate">
+            <span className="max-lg:hidden">{upcomingText(first, privacy)}</span>
+            <span className="lg:hidden">{upcomingShort(first)}</span>
+          </span>
+          <span className="text-sm whitespace-nowrap text-ink-2">本週 {items.length} 件事 →</span>
+        </>
       ) : (
-        <span className="text-ink-2">接下來 7 天沒有除息、入帳或定期定額</span>
+        <>
+          <span className="col-span-2 text-ink-2">接下來 7 天沒有除息、入帳或定期定額</span>
+          <span className="text-sm whitespace-nowrap text-ink-2">股利 →</span>
+        </>
       )}
-      <ChevronRightIcon aria-hidden className="ml-auto size-[18px] shrink-0 text-ink-2" />
-    </Link>
+    </PlainLink>
   )
 }
-
-
