@@ -70,6 +70,11 @@ def session_user(request: Request, db: Session) -> User | None:
     return db.get(User, sess.user_id)
 
 
+def optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
+    """The signed-in user, or None without a valid session: for endpoints anyone may read (public discussions)."""
+    return session_user(request, db)
+
+
 def signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
     """The signed-in user, never a delegation's owner (for endpoints that must act as the viewer themselves)."""
     token = request.cookies.get(COOKIE_NAME)
@@ -107,5 +112,5 @@ def purge_expired_sessions(db: Session) -> int:
     return res.rowcount or 0
 
 
-__all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "select", "session_user",
-           "signed_in_user"]
+__all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "optional_user", "select",
+           "session_user", "signed_in_user"]

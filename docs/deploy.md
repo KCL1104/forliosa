@@ -72,6 +72,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `DISCORD_REDIRECT_URI` | 登入用 | `https://api.example.com/api/v1/auth/discord/callback` | 必須和 Developer Portal 的 Redirect 一字不差，https |
 | `TELEGRAM_BOT_TOKEN` | Telegram 推播用 | BotFather 給的 token | 見 2.5 節；**機密**，只放在 Railway Variables。api 用它判斷 `telegram_available`，worker 用它收發訊息 |
 | `TELEGRAM_BOT_USERNAME` | Telegram 推播用 | bot 的帳號（不含 `@`），例如 `ForliosaBot` | 兩個都設才會出現「連結 Telegram 群組」 |
+| `ADMIN_EMAILS` | 公開討論管理用 | `you@example.com,other@example.com` | 站方管理員：逗號分隔的 email，不分大小寫，和登入帳號的 email（Discord 已驗證的信箱）比對。管理員可以看公開討論的檢舉、隱藏內容、暫停某人的公開發言（`/api/v1/admin/discussions/*`）；其他人呼叫一律 404。不設就沒有人能處理檢舉。管理員看不到群組內容。改了要重新部署才生效 |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |
 | `DATA_POLICY` | | `commercial`（預設） | 只用可合法商用的政府開放資料與自己的存檔；**不要改成 `personal`**（見 `docs/research/data-sources-licensing.md`） |
 | `MARKET_DATA_PROVIDERS` | | 留空 | 用程式預設（開放資料與存檔）；商用模式下 FinMind、MIS 不會啟用 |

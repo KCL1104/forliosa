@@ -45,6 +45,11 @@ class User(BaseModel):
     display_name: str
     avatar_url: str | None = None
     preferences: Preferences
+    # Discussions: the nickname on public posts, site admin (ADMIN_EMAILS), and until when public posting is
+    # suspended (ISO time in UTC; permanent = "9999-12-31T00:00:00Z").
+    public_name: str | None = None
+    is_admin: bool = False
+    public_posting_suspended_until: str | None = None
 
 
 class MePatch(StrictModel):

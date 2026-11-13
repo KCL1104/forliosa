@@ -152,6 +152,9 @@ def update_group(db: Session, group: Group, m: GroupMember, changes: dict[str, A
 
 def delete_group(db: Session, group: Group, m: GroupMember) -> None:
     require_role(m, ("owner",), "只有擁有者可以刪除群組")
+    from forliosa.services import discussions  # imported here: discussions imports this module
+
+    discussions.purge_group(db, group.id)  # the group's topics with their replies, reactions and tags
     for model in (GroupComment, GroupReaction, GroupInvite, NotificationOutbox, TelegramLinkCode, GroupChannel,
                   GroupDigest, GroupShareSetting):
         db.execute(delete(model).where(model.group_id == group.id))

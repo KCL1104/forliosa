@@ -1505,3 +1505,83 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
    取名，不能真的分辨是哪個伺服器。前端要在成員的「推播」開關旁說明「群組換推播頻道時會自動關閉」；目前沒有另外通知成員。
 10. **webhook 設定次數與 circuit breaker**：每人、每群組 10 分鐘 5 次；10 分鐘內 500 次無效回應就暫停 webhook 請求 10 分鐘。建議維持；
     計數在記憶體裡，API 開多個程序時每個程序各算各的（目前 Railway 只有一個）。
+
+## 2026-11-13 討論串（公開／群組主題、回覆、表情、檢舉、站方管理）
+
+實作合約「討論串、線圖留言（彈幕）與指數頁」裡**討論串**的部分。**線圖留言（`/chart-comments`）與指數頁（`^TAIEX`、`^TPEX`）這一版沒有做**
+（產品負責人延後）：沒有相關資料表、端點或商品主檔項目；檢舉的 `target` 只有 `topic:<id>`、`reply:<id>`，管理端的檢舉項目沒有 `symbol`；
+主題的 `symbols` 只接受目前商品主檔裡的代號（指數 → 422 `unknown_symbol`）。既有的 `^TAIEXTR`／`^TPEXTR` 基準沒有動。
+
+程式：`services/discussions.py`（規則都在這裡）、`api/routes/discussions.py`、`api/schemas_discussions.py`；資料表在 migration `0013`
+（`discussion_topics`、`discussion_topic_symbols`、`discussion_replies`、`discussion_reactions`、`discussion_reports`、
+`discussion_suspensions`、`discussion_post_log`，以及 `users.public_name`、`public_name_key`、`public_name_changed_at`）。
+
+### 環境變數
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `ADMIN_EMAILS` | 空 | 站方管理員的 email（逗號分隔、不分大小寫，和 `users.email` 比對）。不是管理員呼叫 `/admin/*` → 404；沒登入 → 401。`GET /me` 的 `is_admin` 也看它 |
+
+### 合約沒寫清楚、我做的解讀
+
+- **`GET /users/me`**：既有的端點是 `GET /me`。兩個路徑都有，回應相同，都多了 `public_name`、`is_admin`、`public_posting_suspended_until`
+  （`POST /auth/dev-login`、`PATCH /me`、`PATCH /me/preferences` 的 `User` 也有）。`PUT /users/me/public-name` 另有別名 `PUT /me/public-name`。
+- **時間格式**：這一節的時間（`created_at`、`last_activity_at`、`first_reported_at`、`until`、`public_posting_suspended_until`）照合約範例用
+  UTC、`Z` 結尾、到秒（`2026-11-13T02:10:00Z`）；其他章節維持 `+08:00`。
+- **錯誤多帶的欄位放在 `error` 物件裡**（和 `code`、`message` 同一層）：`rate_limited` → `error.retry_after_seconds`（整數秒，至少 1；
+  另有標準的 `Retry-After` 標頭）；`posting_suspended` → `error.until`；`public_name_cooldown` → `error.retry_after_days`（整數，1–7）。
+- **公開暱稱**：
+  - 唯一性用 NFKC＋casefold 後的字串比對（連續空白視為一個）；顯示用使用者輸入的原樣（去頭尾空白）。
+  - 保留字比對同樣不分大小寫與全半形，字中間夾空白也算（`s y s t e m`）→ 422 `validation_error`。
+  - 「顯示名稱規則」放行、但畫面上看不到的字元（零寬連接符、韓文填充字、點字空白、變體選擇符等，`textsafe.visible`）：比對唯一性與
+    保留字時忽略，而且看得見的字至少要 2 個（擋掉「空白暱稱」與夾隱形字元冒充別人）。標題、內文、回覆也至少要有一個看得見的字。
+  - **「7 天內只能改一次」從第一次設定就開始算**：設定後 7 天內不能再改（存成一模一樣的名字不算、不重新計時）。較寬的讀法是「第一次設定不算」，
+    要改只需動 `set_public_name`。
+- **頻率限制**：
+  - 「天」「小時」是**滾動視窗**（過去 24 小時、過去 60 分鐘），不是日曆日；`retry_after_seconds` 是最早那一則離開視窗、或 10 秒間隔結束
+    的時間（取較晚的）。
+  - 由 `discussion_post_log`（每則發言一列，不含內容）計算，沒有記憶體狀態；**刪掉發言不會把額度還回來**。同一位使用者超過 1 天的列在他
+    下次發言時刪除。
+  - 「任兩則公開發言至少間隔 10 秒」跨主題與回覆；群組發言沒有間隔，也不佔公開的額度。
+  - 數字都在 `services/discussions.py` 最上面（`RATE_LIMITS`、`PUBLIC_POST_GAP`、`PUBLIC_NAME_COOLDOWN`）；時鐘可用 `set_clock` 換掉（測試不用等）。
+  - 公開發言的檢查順序：停權（403）→ 沒有公開暱稱（409）→ 頻率（429）。
+- **沒登入讀群組主題**：`GET /discussions/topics/{id}` 與 `…/replies` 對沒登入的人回 **404**（和不存在的 id 一樣，不透露主題存在）；
+  清單的 `scope=group`／`all`、`mine=true` 以及所有寫入才是 401。
+- **清單參數**：`scope` 預設 `public`；`scope=group` 一定要帶 `group_id`（沒帶 422、不是成員 404）；其他 `scope` 帶了 `group_id` 會被忽略（不會多看到
+  東西）。`symbol` 找不到商品就是空清單。`limit` 上限 100。發主題時 `scope=public` 帶 `group_id` → 422（避免把群組的話誤發成公開）。
+- **內文**：Tab 也算控制字元 → 422（只有換行例外）；開頭、結尾的空行會去掉。`symbols` 最多 5 個，重複的只留一個，找不到 → 422 `unknown_symbol`。
+- **群組範圍的作者**：已離開群組的人顯示 `{"name": "已離開的成員", "is_you": false, "user_id": null, "avatar_url": null}`（和群組留言相同，
+  不再露出身分）；帳號刪除是 `name: null`。公開範圍的作者物件**只有** `name`、`is_you` 兩個鍵（沒有值為 null 的 `user_id`／`avatar_url`）。
+  群組端點不會出現公開暱稱（公開身分和群組身分互相對不起來）。
+- **隱藏**：
+  - 隱藏的主題不出現在**任何**清單，包括作者自己的 `mine=true`（照合約字面）。
+  - 直接打開隱藏的主題時 `body` 是 `null`，但**標題、標記的商品、回覆仍然回傳**（合約只寫 `body: null`）。
+  - `reply_count` 含被隱藏的回覆（它們留在原位）。被隱藏的內容仍可按表情、被檢舉、被作者刪除。
+  - `can_reply`：已登入而且主題沒被隱藏。沒有公開暱稱、被停權時仍是 `true`（發的時候才回 409／403）。
+- **刪除**：公開內容只有作者能刪（站方管理員 403）；群組內容另外允許 owner／admin。刪回覆後 `last_activity_at` 退回剩下最新的那一則
+  （沒有回覆就是主題建立時間）。刪除群組時連同它的主題一起刪。
+- **表情**：`PUT`／`DELETE /discussions/reactions` 都回 204、沒有內容（重新讀主題或回覆才看得到新的 `reactions`）。
+- **唯讀查看（`X-Forliosa-View-As`）**：`GET /discussions/topics`、`/discussions/topics/{id}`、`…/replies`、`GET /users/me` 忽略標頭，
+  以登入者本人回答；寫入仍然被全站的規則擋下（403 `read_only`），`/admin/*` 的讀取回 403 `view_as_not_allowed`。
+- **AI**：沒有新增任何 AI 工具；`forliosa/ai` 不讀這些資料表（有測試）。
+
+### 檢舉與站方管理
+
+- 檢舉：`note` 最多 300 字、可換行（規則同內文）。同一人對同一則只留第一次（之後換理由也不算）。已處理過的對象再被別人檢舉，會回到 `open`。
+- `GET /admin/discussions/reports`：依「最近一次被檢舉的時間」新到舊。`status=open` 是還有未處理檢舉的對象，`resolved` 是全部處理完的。
+  `report_count`、`reasons`、`notes` 算這個對象的所有檢舉（含已處理的）。`topic_id` 每一筆都有（主題就是它自己）。主題的 `excerpt` 是
+  「標題｜內文」的前 120 字，回覆是內文前 120 字。
+- `POST /admin/discussions/moderation`：沒有人檢舉的公開內容也可以直接 `hide`。`unhide` 不會把檢舉改回未處理。
+- 停權：`days` **一定要給**（`1`、`7`、`30` 或明寫 `null`＝永久；沒給 422），避免漏欄位變成永久停權。`POST` 回 201 與那一筆
+  （`{"id", "public_name", "until", "reason", "created_at"}`，`reason` 沒填是 `null`）。同一個人已經在停權中再停一次，是**改掉原本那一筆**
+  （同一個 `id`，新的 `until`／`reason`）。作者帳號已刪除 → 422。解除已解除的 → 204；不存在的 id → 404。
+- 管理端點對群組範圍的 `target` 一律 404（站方看不到群組內容）。
+
+### 討論串待產品負責人確認
+
+1. **公開暱稱第一次設定也算一次**（設定後 7 天才能改）。建議維持（防止發完言馬上換名字）；若擔心打錯字，可改成第一次設定不算。
+2. **隱藏的主題仍看得到標題**（知道網址的人直接打開）。若標題本身就是廣告或人身攻擊，建議改成對作者與管理員以外的人回固定文字
+   （例如「這則主題已被隱藏」）；這會和合約「只把 `body` 設為 null」不同，所以這一版沒有改。
+3. **作者在自己的清單裡看不到被隱藏的主題**（合約：隱藏的不出現在清單）。建議之後讓 `mine=true` 列出自己被隱藏的主題並標示 `status: "hidden"`。
+4. **頻率限制用滾動 24 小時／60 分鐘**。建議維持（比「每天午夜歸零」難鑽漏洞）。
+5. **檢舉本身沒有頻率限制**（每人對每則只算一次）。之後若有人大量亂檢舉再加。

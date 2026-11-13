@@ -59,3 +59,43 @@ def discord_escape(text: str) -> str:
     out = _DISCORD_INLINE.sub(r"\\\1", text)
     return _DISCORD_LINE_START.sub(lambda m: "\\" + m.group(1) if m.group(1) else m.group(2) + "\\" + m.group(3),
                                    out, count=1)
+
+
+# -- multi-line text (discussion topics and replies) and public names ---------------------------------------------
+def normalize_text(text: str) -> str:
+    """Multi-line plain text as stored: CRLF / CR become LF, trailing whitespace of every line is removed, more than
+    two consecutive empty lines become two, and empty lines at the start and the end are dropped."""
+    out: list[str] = []
+    blank = 0
+    for line in text.replace("\r\n", "\n").replace("\r", "\n").split("\n"):
+        line = line.rstrip()
+        blank = 0 if line else blank + 1
+        if blank <= 2:
+            out.append(line)
+    return "\n".join(out).strip("\n")
+
+
+def text_has_control(text: str) -> bool:
+    """:func:`has_control` for multi-line text: LF is the only control character allowed (tabs, other line
+    separators and invisible format characters are not)."""
+    return has_control(text.replace("\n", ""))
+
+
+# Characters that show nothing (or a blank) although :func:`has_control` lets them through: the zero width joiner,
+# Hangul fillers, the braille blank, the combining grapheme joiner and variation selectors.
+_SHOWS_NOTHING = (KEEP_FORMAT | frozenset("\u115f\u1160\u3164\uffa0\u2800\u034f")
+                  | frozenset(map(chr, range(0xFE00, 0xFE10))) | frozenset(map(chr, range(0xE0100, 0xE01F0))))
+
+
+def visible(text: str) -> str:
+    """``text`` without whitespace and without characters that show nothing: what a reader actually sees of it
+    (empty for a "blank" name or post)."""
+    return "".join(ch for ch in text if not ch.isspace() and ch not in _SHOWS_NOTHING)
+
+
+def name_key(name: str) -> str:
+    """The comparison key of a public name: NFKC + casefold (full-width and half-width, upper and lower case are the
+    same name), without characters that show nothing, and with every run of whitespace as one space."""
+    key = unicodedata.normalize("NFKC", name)
+    key = "".join(ch for ch in key if ch not in _SHOWS_NOTHING)
+    return " ".join(unicodedata.normalize("NFKC", key.casefold()).split())

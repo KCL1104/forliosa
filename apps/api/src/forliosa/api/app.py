@@ -16,6 +16,7 @@ from forliosa.api.routes import (
     auth,
     delegations,
     derivatives,
+    discussions,
     groups,
     market,
     portfolio,
@@ -107,7 +108,8 @@ def create_app() -> FastAPI:
         return attributions(get_market_data().policy, settings.taifex_conditional_confirmed, dataset_status())
 
     for module in (users, auth, accounts, market, stock, derivatives, transactions, portfolio, watchlist, recurring,
-                   ai, delegations, groups):
+                   ai, delegations, groups, discussions):
         api.include_router(module.router)
+    api.include_router(discussions.admin_router)
     app.include_router(api)
     return app

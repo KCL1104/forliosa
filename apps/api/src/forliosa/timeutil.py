@@ -127,3 +127,10 @@ def is_tw_market_open(at: datetime | None = None) -> bool:
 def iso_taipei(dt: datetime) -> str:
     """ISO 8601 with +08:00 offset, second precision."""
     return dt.astimezone(TAIPEI).isoformat(timespec="seconds")
+
+
+def iso_utc(dt: datetime) -> str:
+    """ISO 8601 in UTC with a ``Z`` suffix, second precision (``2026-11-13T02:10:00Z``)."""
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%SZ")
