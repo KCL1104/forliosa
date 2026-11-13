@@ -11,14 +11,16 @@ import { safeNext } from "@/lib/next-path"
  * 登入閘門：先確認 `GET /me`，有 session 才渲染 App（其他請求不會先吃到一堆 401）。
  * - 開發模式連真實後端：沒有 session 時自動 `POST /auth/dev-login`（示範使用者，見 queries.ts 的 fetchMe）。
  * - 其他情況的 401：到登入頁（`/login?next=<現在的網址>`），登入後回到這裡。
+ * - `signedOut`：這一頁不用登入就能讀（公開討論）——401 時不導到登入頁，改顯示它（精簡的外殼）。
  * Session 過期時，任何 401 都會重設 `me`（見 main.tsx），回到這裡。
  */
-export function AuthGate({ children }: { children: React.ReactNode }) {
+export function AuthGate({ children, signedOut }: { children: React.ReactNode; signedOut?: React.ReactNode }) {
   const me = useQuery(meQuery())
   const href = useRouterState({ select: (s) => s.location.href })
   const unauthorized = me.error instanceof ApiError && me.error.status === 401
 
   if (me.data) return <>{children}</>
+  if (unauthorized && signedOut) return <>{signedOut}</>
   if (unauthorized) {
     const next = safeNext(href)
     return <Navigate to="/login" search={next === "/" ? {} : { next }} replace />

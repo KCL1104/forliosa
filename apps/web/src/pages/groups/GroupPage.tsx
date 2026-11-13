@@ -17,6 +17,7 @@ import { ROLE_LABEL } from "./labels"
 import { RankingTab } from "./tabs/RankingTab"
 
 const FeedTab = lazy(() => import("./tabs/FeedTab").then((m) => ({ default: m.FeedTab })))
+const DiscussionsTab = lazy(() => import("./tabs/DiscussionsTab").then((m) => ({ default: m.DiscussionsTab })))
 const HoldingsTab = lazy(() => import("./tabs/HoldingsTab").then((m) => ({ default: m.HoldingsTab })))
 const DigestsTab = lazy(() => import("./tabs/DigestsTab").then((m) => ({ default: m.DigestsTab })))
 const ShareTab = lazy(() => import("./tabs/ShareTab").then((m) => ({ default: m.ShareTab })))
@@ -26,6 +27,7 @@ const ChannelsTab = lazy(() => import("./tabs/ChannelsTab").then((m) => ({ defau
 const TABS: { value: GroupTab; label: string }[] = [
   { value: "ranking", label: "排行" },
   { value: "feed", label: "動態" },
+  { value: "discussions", label: "討論" },
   { value: "holdings", label: "持股" },
   { value: "digests", label: "週報" },
   { value: "share", label: "我的分享" },
@@ -33,7 +35,7 @@ const TABS: { value: GroupTab; label: string }[] = [
   { value: "channels", label: "頻道" },
 ]
 
-/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・持股・週報・我的分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源） */
+/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・討論・持股・週報・我的分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源） */
 export function GroupPage() {
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="群組" />
@@ -106,8 +108,9 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
 
       <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-6 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
         {/*
-          手機（< 640px）：七個分頁平分整列（每個至少左右 4px），336px 以上的手機一次看得到全部——
-          「成員」「頻道」不會躲在淡出的那一邊。更窄才橫向捲動（ScrollRow：被遮住的那一邊淡出，選取中的分頁捲進畫面）。
+          手機（< 640px）：八個分頁（多了「討論」）每個至少 44px 寬（觸控的可按範圍），合計 376px——比 iPhone 15 的內容寬（353px）
+          多一點，所以這一列橫向捲動（ScrollRow：被遮住的那一邊淡出，選取中的分頁捲進畫面）。常用的排在前面，
+          最後的「頻道」（只有群主設定推播時才用）在 iPhone 15 上露出一半。夠寬（≥ 416px）就平分整列、一次看得到全部。
         */}
         <ScrollRow role="tablist" aria-label="群組內容" className="flex sm:gap-1">
           {TABS.map((t, i) => {
@@ -128,7 +131,7 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
                   go(TABS[(i + d + TABS.length) % TABS.length]!.value, true)
                 }}
                 onClick={() => go(t.value)}
-                className="sel-tab -mb-px flex h-12 shrink-0 items-center justify-center px-1 text-base text-ink-2 max-sm:grow sm:px-3"
+                className="sel-tab -mb-px flex h-12 min-w-11 shrink-0 items-center justify-center px-1 text-base text-ink-2 max-sm:grow sm:px-3"
               >
                 {t.label}
               </button>
@@ -141,6 +144,7 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
         <Suspense fallback={<Skeleton className="h-64 w-full rounded-sm" />}>
           {tab === "ranking" && <RankingTab group={group} />}
           {tab === "feed" && <FeedTab group={group} member={member} />}
+          {tab === "discussions" && <DiscussionsTab group={group} />}
           {tab === "holdings" && <HoldingsTab group={group} />}
           {tab === "digests" && <DigestsTab group={group} />}
           {tab === "share" && <ShareTab group={group} />}

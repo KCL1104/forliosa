@@ -34,6 +34,7 @@ const FinancialsTab = lazy(() => import("./tabs/FinancialsTab").then((m) => ({ d
 const ChipsTab = lazy(() => import("./tabs/ChipsTab").then((m) => ({ default: m.ChipsTab })))
 const DividendsTab = lazy(() => import("./tabs/DividendsTab").then((m) => ({ default: m.DividendsTab })))
 const EventsTab = lazy(() => import("./tabs/EventsTab").then((m) => ({ default: m.EventsTab })))
+const DiscussionsTab = lazy(() => import("./tabs/DiscussionsTab").then((m) => ({ default: m.DiscussionsTab })))
 
 const TABS: { value: StockTab; label: string }[] = [
   { value: "overview", label: "總覽" },
@@ -42,10 +43,11 @@ const TABS: { value: StockTab; label: string }[] = [
   { value: "chips", label: "籌碼" },
   { value: "dividends", label: "股利" },
   { value: "events", label: "事件" },
+  { value: "discussions", label: "討論" },
 ]
 
 /**
- * 個股頁：上半部共用（報價、「為什麼」那一行、我的部位、走勢圖），下半部六個分頁。
+ * 個股頁：上半部共用（報價、「為什麼」那一行、我的部位、走勢圖），下半部七個分頁（最後一個是標記這檔股票的討論）。
  * 持有的人先看到自己：部位緊接在價格下，圖上有均價線與買賣點（隱私模式隱藏）。
  * 各區塊用到的資料來源登記到頁尾，整頁只有一個「資料來源與授權」。
  */
@@ -61,7 +63,10 @@ function StockPageInner() {
   const { symbol } = useParams({ from: "/stock/$symbol" })
   const search = useSearch({ from: "/stock/$symbol" })
   const navigate = useNavigate()
-  const tab: StockTab = search.tab ?? "overview"
+  // 查看別人的資產時沒有「討論」（討論是查看者自己的事，和群組一樣擋下）
+  const readOnly = useReadOnly()
+  const tabs = readOnly ? TABS.filter((t) => t.value !== "discussions") : TABS
+  const tab: StockTab = search.tab && tabs.some((t) => t.value === search.tab) ? search.tab : "overview"
   const instrument = useInstrument(symbol)
   const quote = useQuote(symbol)
   const position = usePosition(symbol)
@@ -111,7 +116,7 @@ function StockPageInner() {
 
       <div className="sticky top-(--sticky-top) z-20 -mx-5 mt-8 border-b border-rule bg-paper px-5 md:-mx-8 md:px-8 xl:-mx-14 xl:px-14">
         <ScrollRow role="tablist" aria-label="個股資料" className="gap-1">
-          {TABS.map((t) => {
+          {tabs.map((t) => {
             const active = t.value === tab
             return (
               <button
@@ -123,11 +128,11 @@ function StockPageInner() {
                 aria-controls="stock-tabpanel"
                 tabIndex={active ? 0 : -1}
                 onKeyDown={(e) => {
-                  const i = TABS.findIndex((x) => x.value === tab)
+                  const i = tabs.findIndex((x) => x.value === tab)
                   const d = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0
                   if (!d) return
                   e.preventDefault()
-                  const next = TABS[(i + d + TABS.length) % TABS.length]!
+                  const next = tabs[(i + d + tabs.length) % tabs.length]!
                   void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: next.value === "overview" ? undefined : next.value }, replace: true })
                   requestAnimationFrame(() => document.getElementById(`stock-tab-${next.value}`)?.focus())
                 }}
@@ -150,6 +155,7 @@ function StockPageInner() {
             {tab === "chips" && <ChipsTab inst={inst} />}
             {tab === "dividends" && <DividendsTab inst={inst} quote={quote.data} position={position.data ?? null} />}
             {tab === "events" && <EventsTab inst={inst} position={position.data ?? null} markers={history.data?.markers ?? position.data?.markers ?? []} />}
+            {tab === "discussions" && <DiscussionsTab inst={inst} />}
           </Suspense>
         )}
       </div>

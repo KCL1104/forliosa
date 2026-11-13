@@ -90,6 +90,24 @@
 | AI | ✅ 群組頁的建議問題「群組會分享我的哪些資料？」改成說明現在的規則 | `src/ai/suggestions.ts` |
 | 審查修正 | ✅ Telegram 停用後重新連結：依頻道變成使用中判斷完成，連結碼照常顯示；查看模式擋下「紀錄」頁，AI 請求也帶 `X-Forliosa-View-As`（伺服器白名單是最後一道），`useAskAi` 查看中不送出；帳本與個股頁的「你／我」查看中換成授權者名稱；手機橫幅 sticky、`--sticky-top` 排在橫幅下；⌘K 查看中的預設選取對得上看得到的項目；交易的空狀態與「接下來」的定期定額扣款在查看中不給寫入或設定頁的入口；成員詳細頁有動態時不說「還沒有資料」；橫幅範圍以 `GET /delegations`（不帶標頭）每分鐘更新 | `ChannelsTab.tsx`、`HistoryPage.tsx`、`src/ai/remote.ts`、`use-ask.ts`、`src/api/view-as.ts`、`src/app/view-as.ts`、`ViewAsBanner.tsx`、`AppShell.tsx`、`CommandSearch.tsx`、帳本與個股頁、`MemberPage.tsx`、`src/app/__tests__/view-as-ui.test.tsx` |
 
+## 第八批（2026-11-13）：討論串（`docs/api-contract.md`「討論串（2026-11-13）」）
+
+公開／群組的主題與回覆、表情、檢舉、站方管理、公開暱稱。線圖彈幕與指數頁暫緩，沒有做。前端自己決定的地方與要確認的事在 `OPEN_QUESTIONS.md` 57–67；視覺規則在 `DESIGN.md` Components〈討論〉。
+
+| 範圍 | 狀態 | 檔案 |
+|---|---|---|
+| 資料層 | ✅ 型別（公開範圍的作者只有 `name`／`is_you`）、16 個端點的 HTTP adapter（`PUT /users/me/public-name`、`/discussions/*`、`/admin/discussions/*`）；`ApiError.extra` 帶錯誤物件裡的附加欄位（`retry_after_seconds`、`until`、`retry_after_days`）；TanStack Query hooks，表情是樂觀更新（按下就改快取，失敗還原，送完再讀一次） | `src/api/types.ts`、`http.ts`、`discussion-queries.ts`、`view-as.ts` |
+| mock | ✅ 和後端同一套規則：沒登入能讀公開的、群組主題一律 404、檢查順序 停權 → 公開暱稱 → 頻率（滾動 24 小時／60 分鐘、公開發言間隔 10 秒，照實際時間）、暱稱唯一與 7 天冷卻（第一次不算）、隱藏、檢舉（每小時 20 則）、站方管理、時間是 UTC `Z`。示範資料：8 則公開主題（含被隱藏的回覆、已刪除帳號的回覆、內文有網址）、家族投資 3 則、大學同學 1 則、兩則待處理與兩則已處理的檢舉、一筆停權 | `src/api/mock/discussions.ts`、`adapter.ts`、`sharing.ts`、`src/lib/discussion-text.ts` |
+| 導覽與外殼 | ✅ 頂部列與手機底部列都是 帳本・群組・討論；「紀錄」從「問 AI」的時鐘到 `/history`；討論與站方管理是 AI 面板的安靜頁面；沒登入讀公開討論用精簡的外殼（字標＋登入）；查看別人的資產時討論擋下 | `src/app/nav.ts`、`RootLayout.tsx`、`AuthGate.tsx`、`PublicShell.tsx`、`AvatarMenu.tsx`、`CommandSearch.tsx`、`src/ai/AiScreen.tsx`、`src/lib/next-path.ts`、`src/router.tsx` |
+| 清單 | ✅ `/discussions`：篩選（全部｜公開｜我的群組）、排序（最新回覆｜最新主題）、印好表頭的格線列（日期格・標題・作者・回覆數・標記的股票・群組）、看更多、空狀態、免責 | `src/pages/discussions/DiscussionsPage.tsx`、`TopicRows.tsx` |
+| 主題頁 | ✅ `/discussions/:id`：內文（純文字、保留換行、網址變連結）、表情、回覆（格線列）、刪除（先確認）、檢舉、回覆區（回覆框／選公開暱稱／登入後發言／停權說明／主題已隱藏） | `TopicPage.tsx`、`ReplyComposer.tsx`、`PlainText.tsx`、`PostedTime.tsx`、`src/lib/linkify.ts` |
+| 開新主題 | ✅ `/discussions/new`：發到哪裡（`?scope=&group_id=` 預先選）、標題、內文、標記股票（`?symbol=` 預先標記，最多 5 檔）、就地的錯誤（422／409／403／429） | `NewTopicPage.tsx` |
+| 獨立元件 | ✅ `PublicNamePrompt`（選公開暱稱的一欄表單）、`ReportDialog`（只需要合約的 `target`）——之後的功能可以直接用 | `PublicNamePrompt.tsx`、`use-public-name-form.ts`、`ReportDialog.tsx` |
+| 入口 | ✅ 個股頁的「討論」分頁（事件後面；標記這一檔的主題）、群組頁的「討論」分頁（動態後面）、設定的公開暱稱與停權說明 | `src/pages/stock/tabs/DiscussionsTab.tsx`、`src/pages/groups/tabs/DiscussionsTab.tsx`、`src/pages/settings/Profile.tsx` |
+| 站方管理 | ✅ `/admin/discussions`（只有站方管理員，頭像選單的「站方管理」）：檢舉（待處理｜已處理；隱藏／不處理／停權…／取消隱藏，都先確認）、停權中（解除） | `src/pages/admin/AdminDiscussionsPage.tsx` |
+| 共用 | ✅ 表情小格抽成共用元件（群組與討論同一個）；連結樣式的外框按鈕有框線了；代號搜尋在觸控裝置 44px 高 | `src/components/reaction-chips.tsx`、`ui/button.tsx`、`symbol-picker.tsx` |
+| 測試 | ✅ 單元：mock 合約 30 項、文字規則與連結安全 9 項、畫面 31 項（沒登入的外殼、篩選與排序、公開暱稱、回覆與頻率限制、表情樂觀更新、檢舉、站方管理的權限、開新主題、查看模式、導覽）；冒煙：9 個路由＋7 個流程；截圖 32 組 | `src/api/mock/__tests__/discussions.test.ts`、`src/pages/discussions/__tests__/`、`scripts/smoke.mjs`、`scripts/screenshots.mjs` |
+
 ## 驗證
 
 - `pnpm typecheck`、`pnpm lint`（0 warning）、`pnpm test`（13 檔 166 項；第三批新增：法人觀點 reducer 與狀態、顯示規則、mock 端點；漏記扣款判斷；已出清依年份；定期定額標記；第四批新增：來源標示、編輯說明與「沒改不送出」、AI 會取代的自動入帳、mock 股利自動入帳的同步規則）、`pnpm build` 全部通過。

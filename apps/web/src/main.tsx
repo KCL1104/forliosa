@@ -13,11 +13,12 @@ import "@/styles/globals.css"
 
 /**
  * - Session 過期或被登出：任何 401 都把 `me` 重設，登入閘門（AuthGate）會導到登入頁。
+ *   本來就沒登入（在不用登入就能讀的公開討論頁）時不重設：沒有 session 可以過期，重設只會讓整頁重新載入一次。
  * - 查看別人的資產時授權被撤銷（403 `delegation_revoked`）：退出查看模式、回到自己的帳本。
  */
 function onApiError(err: unknown, key?: readonly unknown[]) {
   if (!(err instanceof ApiError)) return
-  if (err.status === 401 && key?.[0] !== qk.me[0]) {
+  if (err.status === 401 && key?.[0] !== qk.me[0] && queryClient.getQueryData(qk.me)) {
     void queryClient.resetQueries({ queryKey: qk.me })
   }
   exitOnRevoked(err, queryClient, () => void router.navigate({ to: "/" }))

@@ -1,5 +1,5 @@
 import { createHttpAdapter } from "./http"
-import { createMockAdapter, readMockScenario, readMockSignedIn } from "./mock/adapter"
+import { createMockAdapter, readMockDiscussion, readMockScenario, readMockSignedIn } from "./mock/adapter"
 import { readMockPolicy } from "./mock/commercial"
 import { mockMarketNow, readMockMarket } from "./mock/market-status"
 import { MOCK_AS_OF, MOCK_TODAY } from "./mock/market"
@@ -22,7 +22,7 @@ const mockMarket = baseUrl ? undefined : readMockMarket()
 
 export const api: ForliosaApi = baseUrl
   ? createHttpAdapter(baseUrl)
-  : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn(), market: mockMarket })
+  : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn(), market: mockMarket, discussion: readMockDiscussion() })
 
 /** 真實後端的 base URL（mock 模式為 undefined）；AI 對話的 SSE 串流直接用它 */
 export const apiBaseUrl: string | undefined = baseUrl

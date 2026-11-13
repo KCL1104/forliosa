@@ -1,42 +1,29 @@
 import { Trash2Icon } from "lucide-react"
 import { useId, useState } from "react"
 import { toast } from "sonner"
+import { toggleReaction } from "@/api/discussion-queries"
 import { useComments, useCreateComment, useDeleteComment, useToggleReaction } from "@/api/sharing-queries"
-import { ApiError, REACTION_EMOJIS, type CommentTarget, type Reaction, type ReactionEmoji } from "@/api/types"
+import { ApiError, type CommentTarget, type Reaction, type ReactionEmoji } from "@/api/types"
+import { QUIET_ACTION, ReactionChips } from "@/components/reaction-chips"
 import { SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { EMOJI_LABEL } from "./labels"
-
-/** 每一則動態都會重複的動作（加表情、留言）：文字動作的安靜版——淡墨字＋常駐底線，滑過或展開時變墨色（觸控時的可按範圍見 textAction） */
-const QUIET_ACTION = "text-sm text-ink-2 hover:text-ink aria-expanded:text-ink aria-expanded:decoration-ink"
 
 /**
- * 表情：已經有人按的表情是方肩的小格（4px、1px 格線框、表情＋數字——和系統裡其他選項同一種方格，不是膠囊）；
- * 自己按過的用選取語法 (b)。旁邊的「加表情」打開六個固定的表情。
+ * 群組裡的表情（動態、週報、排行討論）：畫面是共用的 `ReactionChips`（方肩的小格＋「加表情」）。
  * 按下立即反映，伺服器回來後以伺服器的計數為準。
  */
 export function Reactions({ groupId, target, reactions, className }: { groupId: string; target: CommentTarget; reactions: Reaction[]; className?: string }) {
   const toggle = useToggleReaction(groupId)
   // 樂觀更新：只在伺服器資料還是同一份時套用
   const [local, setLocal] = useState<{ base: Reaction[]; next: Reaction[] } | null>(null)
-  const [open, setOpen] = useState(false)
   const shown = local && local.base === reactions ? local.next : reactions
-  const press = (emoji: ReactionEmoji) => {
-    const cur = shown.find((r) => r.emoji === emoji)
-    const on = !cur?.mine
-    const next = REACTION_EMOJIS.map((e) => {
-      const r = shown.find((x) => x.emoji === e)
-      if (e !== emoji) return r
-      const count = (r?.count ?? 0) + (on ? 1 : -1)
-      return count > 0 ? { emoji: e, count, mine: on } : undefined
-    }).filter((x): x is Reaction => !!x)
-    setLocal({ base: reactions, next })
+  const press = (emoji: ReactionEmoji, on: boolean) => {
+    setLocal({ base: reactions, next: toggleReaction(shown, emoji, on) })
     toggle.mutate(
       { target, emoji, on },
       {
@@ -47,54 +34,7 @@ export function Reactions({ groupId, target, reactions, className }: { groupId: 
       },
     )
   }
-  return (
-    <div className={cn("flex flex-wrap items-center gap-x-1.5", className)}>
-      {shown.map((r) => (
-        // 觸控時按鈕本身 44px 高、至少 44px 寬，看得到的小格在裡面（選取語法 (b) 跟著 data-pressed）
-        <button
-          key={r.emoji}
-          type="button"
-          aria-pressed={r.mine}
-          aria-label={`${EMOJI_LABEL[r.emoji]} ${r.count}${r.mine ? "，你按過" : ""}`}
-          onClick={() => press(r.emoji)}
-          className="press inline-flex items-center justify-center rounded-sm pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-        >
-          <span
-            data-pressed={r.mine ? "" : undefined}
-            className="sel-chip inline-flex h-7 items-center gap-1 rounded-sm border border-rule px-2 text-sm text-ink-2 data-pressed:border-transparent pointer-coarse:h-8 pointer-coarse:px-2.5"
-          >
-            <span aria-hidden>{r.emoji}</span>
-            <span className="num">{r.count}</span>
-          </span>
-        </button>
-      ))}
-      <Popover open={open} onOpenChange={setOpen}>
-        {/* 和「留言」一樣是有字的文字動作（常駐底線），不放圖示 */}
-        <PopoverTrigger render={<button type="button" className={cn(textAction, QUIET_ACTION, "ml-1.5 first:ml-0")} />}>加表情</PopoverTrigger>
-        <PopoverContent className="w-auto flex-row gap-1 p-1.5" side="top" align="start">
-          {REACTION_EMOJIS.map((e) => {
-            const mine = shown.find((r) => r.emoji === e)?.mine ?? false
-            return (
-              <button
-                key={e}
-                type="button"
-                aria-pressed={mine}
-                aria-label={EMOJI_LABEL[e]}
-                title={EMOJI_LABEL[e]}
-                onClick={() => {
-                  press(e)
-                  setOpen(false)
-                }}
-                className="press sel-chip grid size-9 place-items-center rounded-sm text-lg pointer-coarse:size-11"
-              >
-                {e}
-              </button>
-            )
-          })}
-        </PopoverContent>
-      </Popover>
-    </div>
-  )
+  return <ReactionChips reactions={shown} onToggle={press} className={className} />
 }
 
 /** 「留言 N」：按下展開留言串 */

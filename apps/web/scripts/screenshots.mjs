@@ -416,6 +416,44 @@ const m5ViewAsStock = async (page) => {
 }
 
 /** 每個畫面：路徑、就緒條件、截圖前要做的動作 */
+/** 討論：捲到最底（回覆區、免責） */
+const discussBottom = async (page) => {
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }))
+}
+/** 討論：打開第一個「檢舉」（檢舉對話框） */
+const discussReport = async (page) => {
+  await page.getByRole("button", { name: /^檢舉/ }).first().click()
+  await page.getByRole("dialog").getByText("廣告或洗版").waitFor({ timeout: 8000 })
+}
+/** 開新主題：什麼都沒填就按「發表」（就地的錯誤） */
+const discussNewErrors = async (page) => {
+  await page.getByRole("button", { name: "發表", exact: true }).click()
+  await page.getByText("請寫標題。").waitFor({ timeout: 8000 })
+}
+/** 開新主題：填好標題與內文（發到公開、標記台積電） */
+const discussNewFilled = async (page) => {
+  await page.getByLabel("標題").fill("法說會後，定期定額要不要加碼？")
+  await page.getByLabel("內文").fill("每個月扣 0050 和台積電零股。\n\n法說會後如果回檔，想把下個月的扣款加一倍，但又怕接到刀子。有人是固定金額、完全不看新聞的嗎？")
+  await page.getByText("台積電").first().waitFor({ timeout: 8000 })
+}
+/** 站方管理：按第一個「停權…」（選期間與原因的確認框） */
+const discussSuspend = async (page) => {
+  await page.getByRole("button", { name: /^停權/ }).first().click()
+  await page.getByRole("alertdialog").getByRole("radiogroup", { name: "停權期間" }).waitFor({ timeout: 8000 })
+}
+/** 設定：公開暱稱那一欄打字（簽名格出現） */
+const discussNameEdited = async (page) => {
+  await page.getByLabel("公開暱稱").fill("示範小資")
+  await page.getByRole("button", { name: "儲存", exact: true }).waitFor({ timeout: 8000 })
+}
+/** 個股／群組分頁：把分頁列捲到頂端 */
+const toTabList = (label) => async (page) => {
+  await page.evaluate((l) => {
+    const bar = document.querySelector(`[aria-label="${l}"]`)
+    if (bar) window.scrollTo({ top: bar.getBoundingClientRect().top + window.scrollY - (window.innerWidth >= 1024 ? 64 : 0) - 8, behavior: "instant" })
+  }, label)
+}
+
 const SHOTS = [
   { name: "ledger", path: "/", ready: "text=總資產" },
   { name: "ledger-draft", path: "/", ready: "text=總資產", action: (page, mobile) => draft(page, mobile) },
@@ -534,6 +572,37 @@ const SHOTS = [
   { name: "m5-settings-delegations", path: "/settings", ready: "text=授權給你的人", action: m5Delegations },
   { name: "m5-view-as", path: "/settings", ready: "text=授權給你的人", action: m5ViewAs },
   { name: "m5-view-as-stock", path: "/settings", ready: "text=授權給你的人", action: m5ViewAsStock },
+  // 討論串（2026-11-13）：清單、主題、開新主題、沒登入、站方管理、設定的公開暱稱、個股與群組的討論分頁
+  { name: "discuss-list", path: "/discussions", ready: "text=台積電法說會前" },
+  { name: "discuss-list-public-new", path: "/discussions?scope=public&sort=new", ready: "text=台積電法說會前" },
+  { name: "discuss-list-group", path: "/discussions?scope=group&group_id=grp_family", ready: "text=我把聯發科的交易補記好了" },
+  { name: "discuss-list-signed-out", path: "/discussions?auth=signed-out", ready: "text=台積電法說會前" },
+  { name: "discuss-list-empty", path: "/discussions?mock=empty", ready: "text=還沒有主題" },
+  { name: "discuss-topic", path: "/discussions/top_p_tsmc", ready: "text=比重超過自己睡得著的程度就調" },
+  { name: "discuss-topic-name-prompt", path: "/discussions/top_p_tsmc", ready: "text=比重超過自己睡得著的程度就調", action: discussBottom },
+  { name: "discuss-topic-composer", path: "/discussions/top_p_tsmc?discuss=named", ready: "text=比重超過自己睡得著的程度就調", action: discussBottom },
+  { name: "discuss-topic-suspended", path: "/discussions/top_p_tsmc?discuss=suspended", ready: "text=比重超過自己睡得著的程度就調", action: discussBottom },
+  { name: "discuss-topic-signed-out", path: "/discussions/top_p_tsmc?auth=signed-out", ready: "text=比重超過自己睡得著的程度就調" },
+  { name: "discuss-topic-signed-out-bottom", path: "/discussions/top_p_tsmc?auth=signed-out", ready: "text=比重超過自己睡得著的程度就調", action: discussBottom },
+  { name: "discuss-topic-link", path: "/discussions/top_p_odd?discuss=named", ready: "text=每家券商的最低手續費不一樣" },
+  { name: "discuss-topic-group", path: "/discussions/top_g_dca", ready: "text=我明天去問營業員怎麼設定" },
+  { name: "discuss-topic-missing", path: "/discussions/top_nope", ready: "text=找不到這個主題" },
+  { name: "discuss-report", path: "/discussions/top_p_tsmc?discuss=named", ready: "text=比重超過自己睡得著的程度就調", action: discussReport },
+  { name: "discuss-new", path: "/discussions/new?discuss=named&scope=public&symbol=2330.TW", ready: "text=發到哪裡", action: discussNewFilled },
+  { name: "discuss-new-choose", path: "/discussions/new", ready: "text=發到哪裡" },
+  { name: "discuss-new-errors", path: "/discussions/new", ready: "text=發到哪裡", action: discussNewErrors },
+  { name: "discuss-new-name-prompt", path: "/discussions/new?scope=public", ready: "text=先選一個公開暱稱" },
+  { name: "discuss-new-group", path: "/discussions/new?scope=group&group_id=grp_family", ready: "text=發到哪裡" },
+  { name: "discuss-admin", path: "/admin/discussions", ready: "text=停權中" },
+  { name: "discuss-admin-resolved", path: "/admin/discussions?status=resolved", ready: "text=已隱藏" },
+  { name: "discuss-admin-suspend", path: "/admin/discussions", ready: "text=停權中", action: discussSuspend },
+  { name: "discuss-settings-name", path: "/settings", ready: "text=公開暱稱" },
+  { name: "discuss-settings-name-edited", path: "/settings", ready: "text=公開暱稱", action: discussNameEdited },
+  { name: "discuss-settings-suspended", path: "/settings?discuss=suspended", ready: "text=公開暱稱" },
+  { name: "discuss-stock-tab", path: "/stock/2330.TW?tab=discussions", ready: "text=台積電法說會前", action: toTabList("個股資料") },
+  { name: "discuss-stock-tab-empty", path: "/stock/2317.TW?tab=discussions", ready: "text=還沒有人討論鴻海", action: toTabList("個股資料") },
+  { name: "discuss-group-tab", path: "/groups/grp_family?tab=discussions", ready: "text=我把聯發科的交易補記好了" },
+  { name: "discuss-history-mobile", path: "/history", ready: "text=發起新對話", mobileOnly: true },
 ]
 const REAL_SHOTS = SHOTS.filter((s) => !s.action)
 

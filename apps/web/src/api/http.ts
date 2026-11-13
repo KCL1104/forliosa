@@ -63,6 +63,7 @@ import type {
   SharedPortfolio,
   TelegramLinkCode,
 } from "./types"
+import type { AdminReport, Reply, Suspension, Topic, TopicSummary } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
 
 type Query = Record<string, string | number | null | undefined>
@@ -103,16 +104,20 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     if (!res.ok) {
       let code = `http_${res.status}`
       let message = `伺服器回應錯誤（${res.status}）`
+      // 討論串的錯誤另外帶欄位（retry_after_seconds、until、retry_after_days），和 code／message 同一層
+      let extra: Record<string, unknown> = {}
       try {
         const data = (await res.json()) as Partial<ApiErrorBody>
         if (data.error) {
-          code = data.error.code
-          message = data.error.message
+          const { code: c, message: m, ...rest } = data.error
+          code = c
+          message = m
+          extra = rest
         }
       } catch {
         // 非 JSON 的錯誤內容：保留預設訊息
       }
-      throw new ApiError(res.status, code, message)
+      throw new ApiError(res.status, code, message, extra)
     }
     if (res.status === 204) return undefined as T
     const text = await res.text()
@@ -231,5 +236,26 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     linkTelegram: (id) => request<TelegramLinkCode>("POST", `/groups/${enc(id)}/channels/telegram/link`),
     patchTelegram: (id, patch) => request<unknown>("PATCH", `/groups/${enc(id)}/channels/telegram`, { body: patch }),
     deleteTelegram: (id) => request<void>("DELETE", `/groups/${enc(id)}/channels/telegram`),
+
+    // ── 討論串（docs/api-contract.md「討論串（2026-11-13）」） ──
+    setPublicName: (public_name) => request<User>("PUT", "/users/me/public-name", { body: { public_name } }),
+    listTopics: (query = {}) =>
+      request<Paged<TopicSummary>>("GET", "/discussions/topics", { query: { ...query, mine: query.mine ? "true" : undefined } }),
+    createTopic: (body) => request<Topic>("POST", "/discussions/topics", { body }),
+    getTopic: (id) => request<Topic>("GET", `/discussions/topics/${enc(id)}`),
+    deleteTopic: (id) => request<void>("DELETE", `/discussions/topics/${enc(id)}`),
+    listReplies: (topicId, query = {}) => request<Paged<Reply>>("GET", `/discussions/topics/${enc(topicId)}/replies`, { query }),
+    createReply: (topicId, body) => request<Reply>("POST", `/discussions/topics/${enc(topicId)}/replies`, { body }),
+    deleteReply: (id) => request<void>("DELETE", `/discussions/replies/${enc(id)}`),
+    addDiscussionReaction: (body) => request<void>("PUT", "/discussions/reactions", { body }),
+    removeDiscussionReaction: (target, emoji) => request<void>("DELETE", "/discussions/reactions", { query: { target, emoji } }),
+    reportDiscussion: (body) => request<void>("POST", "/discussions/reports", { body }),
+    listAdminReports: (query = {}) => request<Paged<AdminReport>>("GET", "/admin/discussions/reports", { query }),
+    moderateDiscussion: (body) => request<void>("POST", "/admin/discussions/moderation", { body }),
+    listSuspensions: () => request<Suspension[]>("GET", "/admin/discussions/suspensions"),
+    // `days` 一定要送：永久要明確傳 null（漏掉欄位後端回 422）
+    createSuspension: ({ target, days, reason }) =>
+      request<Suspension>("POST", "/admin/discussions/suspensions", { body: { target, days, ...(reason ? { reason } : {}) } }),
+    liftSuspension: (id) => request<void>("DELETE", `/admin/discussions/suspensions/${enc(id)}`),
   }
 }

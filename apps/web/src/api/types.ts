@@ -26,6 +26,12 @@ export interface User {
   /** Discord 頭像網址（M5）；開發登入或沒有頭像時為 null／不存在 */
   avatar_url?: string | null
   preferences: Preferences
+  /** 公開討論用的暱稱（`PUT /users/me/public-name`，2–20 字）；還沒設定過是 null。群組裡仍用 display_name */
+  public_name?: string | null
+  /** 站方管理員（後端的 ADMIN_EMAILS）：看得到 `/admin/discussions` */
+  is_admin?: boolean
+  /** 公開發言停權到什麼時候（UTC、`Z` 結尾；永久是 `PERMANENT_UNTIL`）；沒有停權是 null */
+  public_posting_suspended_until?: string | null
 }
 
 export interface DevLoginBody {
@@ -1142,19 +1148,169 @@ export interface InvitePreview {
   status: "valid" | "member"
 }
 
+// ── 討論串（docs/api-contract.md「討論串（2026-11-13）」）──────────────────
+// 這一節的時間是 UTC、結尾 `Z`、到秒。公開的主題與回覆不用登入就能讀；發言、表情、檢舉、群組範圍都要登入。
+
+export type DiscussionScope = "public" | "group"
+export type DiscussionStatus = "visible" | "hidden"
+
+/**
+ * 作者。公開範圍只有 `name`（公開暱稱）與 `is_you` 兩個鍵——沒有 user_id、顯示名稱、頭像；
+ * 群組範圍另有 `user_id`、`avatar_url`（已離開的成員：name「已離開的成員」、user_id null）。帳號刪除後 `name: null`。
+ */
+export interface DiscussionAuthor {
+  name: string | null
+  is_you: boolean
+  user_id?: string | null
+  avatar_url?: string | null
+}
+
+export interface TopicSymbol {
+  symbol: string
+  code: string
+  name: string
+}
+
+export interface TopicSummary {
+  id: string
+  scope: DiscussionScope
+  /** 群組範圍才有 */
+  group: { id: string; name: string } | null
+  title: string
+  /** 內文前 120 字（去掉換行） */
+  excerpt: string
+  symbols: TopicSymbol[]
+  author: DiscussionAuthor
+  created_at: string
+  last_activity_at: string
+  /** 含被隱藏的回覆（它們留在原位） */
+  reply_count: number
+  status: DiscussionStatus
+  mine: boolean
+}
+
+export interface Topic extends Omit<TopicSummary, "excerpt"> {
+  /** 被站方隱藏時是 null（作者本人與站方管理員仍拿得到） */
+  body: string | null
+  reactions: Reaction[]
+  can_delete: boolean
+  /** 公開範圍、已登入、不是自己的內容 */
+  can_report: boolean
+  /** 已登入而且主題沒被隱藏（沒有公開暱稱或被停權時，送出才會收到 409／403） */
+  can_reply: boolean
+}
+
+export interface Reply {
+  id: string
+  topic_id: string
+  body: string | null
+  author: DiscussionAuthor
+  created_at: string
+  status: DiscussionStatus
+  reactions: Reaction[]
+  mine: boolean
+  can_delete: boolean
+  can_report: boolean
+}
+
+/** 表情與檢舉的對象：`topic:<id>`、`reply:<id>` */
+export type DiscussionTarget = string
+
+export type TopicListScope = "public" | "group" | "all"
+export type TopicSort = "active" | "new"
+
+export interface TopicQuery {
+  /** `all`＝公開＋我所有群組的（要登入）；預設 public */
+  scope?: TopicListScope
+  /** 只有 scope=group 時有效（而且必填） */
+  group_id?: string
+  symbol?: string
+  mine?: boolean
+  /** active（預設）：依最後回覆時間；new：依建立時間 */
+  sort?: TopicSort
+  limit?: number
+  cursor?: string | null
+}
+
+export interface TopicInput {
+  scope: DiscussionScope
+  group_id?: string
+  /** 1–80 字、一行 */
+  title: string
+  /** 1–5000 字，可換行 */
+  body: string
+  /** 最多 5 檔，必須是商品主檔裡的代號 */
+  symbols?: string[]
+}
+
+export const TOPIC_TITLE_MAX = 80
+export const TOPIC_BODY_MAX = 5000
+export const REPLY_BODY_MAX = 2000
+export const REPORT_NOTE_MAX = 300
+export const TOPIC_SYMBOLS_MAX = 5
+export const PUBLIC_NAME_MIN = 2
+export const PUBLIC_NAME_MAX = 20
+/** 永久停權的 `until` */
+export const PERMANENT_UNTIL = "9999-12-31T00:00:00Z"
+
+export const REPORT_REASONS = ["spam", "solicitation", "abuse", "other"] as const
+export type ReportReason = (typeof REPORT_REASONS)[number]
+
+export interface ReportInput {
+  target: DiscussionTarget
+  reason: ReportReason
+  /** 最多 300 字 */
+  note?: string
+}
+
+/** 站方管理：依對象彙整的檢舉（只有公開內容；不含 email、user_id） */
+export interface AdminReport {
+  target: DiscussionTarget
+  kind: "topic" | "reply"
+  /** 主題是「標題｜內文」的前 120 字，回覆是內文前 120 字 */
+  excerpt: string
+  author_name: string | null
+  topic_id: string
+  /** 含已處理的 */
+  report_count: number
+  reasons: Partial<Record<ReportReason, number>>
+  notes: string[]
+  first_reported_at: string
+  status: "open" | "resolved"
+  hidden: boolean
+}
+
+export type ModerationAction = "hide" | "unhide" | "dismiss"
+/** 停權天數；null＝永久（一定要明確傳） */
+export type SuspensionDays = 1 | 7 | 30 | null
+
+export interface Suspension {
+  id: string
+  public_name: string | null
+  until: string
+  reason: string | null
+  created_at: string
+}
+
 // ── 錯誤 ──────────────────────────────────────────────────
 export interface ApiErrorBody {
-  error: { code: string; message: string }
+  error: { code: string; message: string; [extra: string]: unknown }
 }
 
 export class ApiError extends Error {
   readonly status: number
   readonly code: string
-  constructor(status: number, code: string, message: string) {
+  /**
+   * `error` 物件裡 `code`／`message` 以外的欄位（討論串）：`rate_limited` → `retry_after_seconds`、
+   * `posting_suspended` → `until`、`public_name_cooldown` → `retry_after_days`。
+   */
+  readonly extra: Readonly<Record<string, unknown>>
+  constructor(status: number, code: string, message: string, extra: Record<string, unknown> = {}) {
     super(message)
     this.name = "ApiError"
     this.status = status
     this.code = code
+    this.extra = extra
   }
 }
 
@@ -1286,4 +1442,26 @@ export interface ForliosaApi {
   linkTelegram(id: string): Promise<TelegramLinkCode>
   patchTelegram(id: string, patch: ChannelNotify): Promise<unknown>
   deleteTelegram(id: string): Promise<void>
+  // ── 討論串 ──
+  /** `PUT /users/me/public-name`：409 public_name_taken／public_name_cooldown（帶 retry_after_days） */
+  setPublicName(public_name: string): Promise<User>
+  /** 公開清單不用登入；scope=group／all、mine 要登入 */
+  listTopics(query?: TopicQuery): Promise<Paged<TopicSummary>>
+  createTopic(body: TopicInput): Promise<Topic>
+  getTopic(id: string): Promise<Topic>
+  deleteTopic(id: string): Promise<void>
+  /** 舊到新 */
+  listReplies(topicId: string, query?: { limit?: number; cursor?: string | null }): Promise<Paged<Reply>>
+  createReply(topicId: string, body: { body: string }): Promise<Reply>
+  deleteReply(id: string): Promise<void>
+  /** 204：沒有內容，前端自己更新或重新讀取 */
+  addDiscussionReaction(body: { target: DiscussionTarget; emoji: ReactionEmoji }): Promise<void>
+  removeDiscussionReaction(target: DiscussionTarget, emoji: ReactionEmoji): Promise<void>
+  reportDiscussion(body: ReportInput): Promise<void>
+  // 站方管理（不是管理員 → 404）
+  listAdminReports(query?: { status?: "open" | "resolved"; limit?: number; cursor?: string | null }): Promise<Paged<AdminReport>>
+  moderateDiscussion(body: { target: DiscussionTarget; action: ModerationAction }): Promise<void>
+  listSuspensions(): Promise<Suspension[]>
+  createSuspension(body: { target: DiscussionTarget; days: SuspensionDays; reason?: string }): Promise<Suspension>
+  liftSuspension(id: string): Promise<void>
 }

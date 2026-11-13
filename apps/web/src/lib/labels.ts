@@ -1,4 +1,14 @@
-import type { Market, TransactionSource, TransactionType } from "@/api/types"
+import type { Market, ReactionEmoji, TransactionSource, TransactionType } from "@/api/types"
+
+/** 表情的念法（螢幕閱讀器與滑過說明）：群組與討論串共用 */
+export const EMOJI_LABEL: Record<ReactionEmoji, string> = {
+  "👍": "讚",
+  "🎉": "恭喜",
+  "🔥": "厲害",
+  "😮": "驚訝",
+  "😢": "難過",
+  "👀": "關注",
+}
 
 /** 績效比較基準：設定與績效頁可選的項目（後端也接受任何商品代號） */
 export const BENCHMARK_OPTIONS: { value: string; label: string; description: string }[] = [

@@ -160,6 +160,7 @@ export function CommandSearch() {
 const PAGES = [
   { to: "/", label: "帳本" },
   { to: "/groups", label: "群組" },
+  { to: "/discussions", label: "討論" },
   { to: "/history", label: "紀錄" },
   { to: "/settings", label: "設定" },
 ] as const
