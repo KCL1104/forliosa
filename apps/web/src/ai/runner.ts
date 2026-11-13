@@ -12,6 +12,7 @@ import { usePrefs } from "@/stores/prefs"
 import { buildLocalChart, parseChartIntent } from "./chart-intent"
 import { parseIntent, sharesOf } from "./intent"
 import { AI_UNAVAILABLE } from "./answer-text"
+import { buildLocalDeepReport } from "./deep-search"
 import { aiApi, aiRemote, applyChatEvent, draftFromServer, streamChat, type AiUsage, type ChatEvent } from "./remote"
 import { aiKeys } from "./remote-hooks"
 import { newId, useAi } from "./store"
@@ -167,8 +168,8 @@ export function useAiRunner(ctx: AiContext) {
   }
 
   /** 真實後端：`POST /ai/chat` 串流。文字片段每 40ms 合併寫入一次，避免每個字都重繪與寫入 localStorage */
-  async function submitRemote(text: string) {
-    push({ role: "user", text }, { title: text })
+  async function submitRemote(text: string, deep = false) {
+    push({ role: "user", text, ...(deep ? { mode: "deep" as const } : {}) }, { title: text })
     const localThreadId = useAi.getState().threadId!
     const remoteId = useAi.getState().threads.find((t) => t.id === localThreadId)?.remoteId ?? null
     const aiId = push({ role: "ai", text: "", model: true, streaming: true })
@@ -202,7 +203,7 @@ export function useAiRunner(ctx: AiContext) {
     }
     const symbol = ctx.route === "stock" ? ctx.stock.symbol : null
     try {
-      await streamChat({ thread_id: remoteId, message: text, page: { route: window.location.pathname, symbol }, privacy }, onEvent)
+      await streamChat({ thread_id: remoteId, message: text, page: { route: window.location.pathname, symbol }, privacy, ...(deep ? { mode: "deep" as const } : {}) }, onEvent)
       flush()
       updateMessage(aiId, (m) => ({ ...m, streaming: false }))
     } catch (err) {
@@ -228,6 +229,9 @@ export function useAiRunner(ctx: AiContext) {
       toast("等這一則回答完再問下一題")
       return
     }
+    // 深度搜尋只對這一題有效：讀了就關掉（輸入框的切換鈕跟著彈回來）
+    const deep = useAi.getState().deepNext
+    if (deep) useAi.getState().setDeepNext(false)
     if (aiRemote) {
       // 後端已經回報 AI 無法使用（/ai/usage 的 available=false）：不送出，說明一句；記帳指令照樣寫成草稿
       if (qc.getQueryData<AiUsage>(aiKeys.usage)?.available === false) {
@@ -236,10 +240,21 @@ export function useAiRunner(ctx: AiContext) {
         await draftFrom(text)
         return
       }
-      return submitRemote(text)
+      return submitRemote(text, deep)
     }
-    push({ role: "user", text }, { title: text })
+    push({ role: "user", text, ...(deep ? { mode: "deep" as const } : {}) }, { title: text })
+    if (deep) return deepLocally(text)
     await answerLocally(text)
+  }
+
+  /** mock 模式的深度搜尋：用示範資料組一份同樣版面的整理（兩三句、短標題、每點一行、附來源） */
+  async function deepLocally(text: string) {
+    try {
+      const report = await buildLocalDeepReport(text, { api, resolve: resolveInstrument, fallback: ctx.route === "stock" ? ctx.stock.symbol : null })
+      push({ role: "ai", text: report.text, model: true, ...(report.citations.length ? { citations: report.citations } : {}) })
+    } catch (err) {
+      say({ text: `這次沒有整理好：${err instanceof Error ? err.message : "請再試一次"}。` })
+    }
   }
 
   /** 本機規則版（mock 模式與後端沒有 AI 時）。`replaceId`：把回答寫進已經存在的 AI 訊息 */

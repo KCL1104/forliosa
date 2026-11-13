@@ -143,6 +143,10 @@ class Settings(BaseSettings):
     # Market page (/market/overview): one shared AI summary per trading day (``forliosa.ai.market_summary``);
     # off = no model call and the page shows no summary.
     ai_market_summary_enabled: bool = True
+    # Daily closing briefing (``forliosa.ai.briefing``): for users who switched it on in their settings (off by
+    # default), the worker writes one briefing per trading day once the official closes are archived. This is the
+    # deployment's master switch: off = the worker job is not scheduled and nobody gets one.
+    ai_daily_briefing_enabled: bool = True
     # Group weekly digests (M5): the worker asks for a group-level summary every Saturday 20:00 (Taipei) through the
     # Message Batches API; off = digests keep their facts and are marked failed without a model call.
     ai_digest_enabled: bool = True

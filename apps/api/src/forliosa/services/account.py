@@ -31,6 +31,7 @@ from forliosa.api.errors import ApiError
 from forliosa.config import get_settings
 from forliosa.ids import new_id
 from forliosa.models import (
+    AiBriefing,
     AiDraft,
     AiMessage,
     AiThread,
@@ -172,7 +173,8 @@ def export_user(db: Session, user: User) -> dict[str, Any]:
         "recurring_plans": _rows(db, RecurringPlan, uid, RecurringPlan.created_at),
         "watchlist": _rows(db, WatchlistItem, uid, WatchlistItem.created_at),
         "auto_dividend_skips": _rows(db, AutoDividendSkip, uid, AutoDividendSkip.created_at),
-        "ai": {"threads": threads, "drafts": _rows(db, AiDraft, uid, AiDraft.created_at)},
+        "ai": {"threads": threads, "drafts": _rows(db, AiDraft, uid, AiDraft.created_at),
+               "briefings": _rows(db, AiBriefing, uid, AiBriefing.trading_day)},
         "groups": memberships,
         "group_comments": _rows(db, GroupComment, uid, GroupComment.created_at),
         "group_reactions": _rows(db, GroupReaction, uid, GroupReaction.created_at),
@@ -302,8 +304,8 @@ def delete_user(db: Session, user: User) -> None:
         mine = select(Delegation.id).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid))
         db.execute(delete(DelegationAccount).where(DelegationAccount.delegation_id.in_(mine)))
         db.execute(delete(Delegation).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid)))
-        for model in (AiDraft, AiMessage, AiThread, AutoDividendSkip, HoldingSnapshot, RecurringPlan, Transaction,
-                      WatchlistItem, BrokerAccount, UserSession, UserIdentity):
+        for model in (AiBriefing, AiDraft, AiMessage, AiThread, AutoDividendSkip, HoldingSnapshot, RecurringPlan,
+                      Transaction, WatchlistItem, BrokerAccount, UserSession, UserIdentity):
             db.execute(delete(model).where(model.user_id == uid))
         # What is left pointing at the user is kept without an author (ON DELETE SET NULL): group comments, discussion
         # topics and replies, AI usage counts, who created an invite / configured a channel / suspended someone.

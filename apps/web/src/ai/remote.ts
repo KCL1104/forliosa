@@ -84,6 +84,8 @@ export interface ChatBody {
   message: string
   page: { route: string; symbol: string | null }
   privacy: boolean
+  /** 深度搜尋：這一題多查幾輪、寫成一份整理（算 `AiUsage.deep_search_cost` 題） */
+  mode?: "deep"
 }
 
 export interface ThreadSummary {
@@ -100,6 +102,8 @@ interface ThreadMessage {
   turn_id: string
   role: "user" | "ai"
   text: string
+  /** 使用者的那一則：`deep`＝深度搜尋（選填：舊版後端沒有） */
+  mode?: "deep" | null
   citations: Citation[]
   drafts: ServerDraft[]
   /** 選填：舊版後端沒有 */
@@ -140,9 +144,14 @@ export interface AiUsage {
   cost_usd_month: number
   model: string
   available: boolean
+  /** 深度搜尋一次算幾題；`null`＝這個環境沒有深度搜尋（選填：舊版後端沒有，當成 5） */
+  deep_search_cost?: number | null
   /** 固定顯示的免責聲明（後端提供） */
   disclaimer?: string
 }
+
+/** 深度搜尋一次算幾題（後端沒說時的預設，也是 mock 模式用的數字） */
+export const DEEP_SEARCH_COST = 5
 
 function prefix(): string {
   const root = (apiBaseUrl ?? "").replace(/\/+$/, "")
@@ -328,7 +337,7 @@ export function applyChatEvent(m: Message, e: ChatEvent): Message {
 export function threadFromServer(t: ThreadDetail): { thread: Thread; drafts: Draft[] } {
   const drafts: Draft[] = []
   const messages: Message[] = t.messages.map((m) => {
-    if (m.role === "user") return { id: `srv_${m.id}`, role: "user", text: m.text, at: m.at }
+    if (m.role === "user") return { id: `srv_${m.id}`, role: "user", text: m.text, ...(m.mode === "deep" ? { mode: "deep" as const } : {}), at: m.at }
     drafts.push(...m.drafts.map(draftFromServer))
     return {
       id: `srv_${m.id}`,

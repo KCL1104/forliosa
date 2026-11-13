@@ -171,3 +171,48 @@ def test_monthly_archive_and_company_refresh_schedule():
     assert not monthly.due(datetime(2026, 11, 24, 10, 30, tzinfo=TAIPEI), None)
     company = jobs["company_refresh"]
     assert company.due(datetime(2026, 11, 12, 13, 36, tzinfo=TAIPEI), None)
+
+
+def test_daily_briefings_job_runs_evening_and_morning_and_follows_the_master_switch(monkeypatch):
+    from datetime import datetime
+
+    from forliosa.config import get_settings
+    from forliosa.timeutil import TAIPEI
+    from forliosa.worker import Worker
+
+    job = next(j for j in Worker(md=object()).jobs if j.name == "daily_briefings")  # type: ignore[arg-type]
+    at = lambda *a: datetime(*a, tzinfo=TAIPEI)  # noqa: E731
+    assert job.due(at(2026, 11, 12, 22, 21), None) and not job.due(at(2026, 11, 12, 22, 10), None)
+    # the exchanges publish between the evening and the early morning: later slots catch up, also on a Saturday
+    assert job.due(at(2026, 11, 12, 23, 51), at(2026, 11, 12, 22, 21))
+    assert job.due(at(2026, 11, 13, 6, 11), at(2026, 11, 12, 23, 51))
+    assert job.due(at(2026, 11, 14, 8, 21), at(2026, 11, 14, 6, 11))
+    assert not job.due(at(2026, 11, 14, 9, 0), at(2026, 11, 14, 8, 21))
+    monkeypatch.setenv("AI_DAILY_BRIEFING_ENABLED", "false")
+    get_settings.cache_clear()
+    try:
+        assert "daily_briefings" not in {j.name for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    finally:
+        monkeypatch.delenv("AI_DAILY_BRIEFING_ENABLED")
+        get_settings.cache_clear()
+
+
+def test_daily_briefings_job_writes_through_the_worker(engine, market, monkeypatch):
+    import asyncio
+    from datetime import datetime
+
+    from forliosa.ai import briefing
+    from forliosa.timeutil import TAIPEI
+    from forliosa.worker import Worker
+
+    seen = {}
+
+    def fake_run(db, md, now=None, **_kw):
+        seen["now"], seen["md"] = now, md
+        return briefing.RunResult(day=now.date(), written=2, with_points=1, purged=0)
+
+    monkeypatch.setattr(briefing, "run", fake_run)
+    clock = datetime(2026, 11, 12, 22, 20, tzinfo=TAIPEI)
+    worker = Worker(md=market, now_fn=lambda: clock)
+    asyncio.run(worker.daily_briefings())
+    assert seen == {"now": clock, "md": market}

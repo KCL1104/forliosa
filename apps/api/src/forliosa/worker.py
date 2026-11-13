@@ -59,6 +59,11 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``market_summary`` — trading days 15:05, 18:05 and 22:05: the market page's shared AI summary of the session that
   just closed (``forliosa.ai.market_summary``; a finished day is not asked again, a failed or empty one at most four
   times). No model call without a key, with web search off or with ``AI_MARKET_SUMMARY_ENABLED=false``.
+* ``daily_briefings`` — every day 22:20, 23:50, 06:10 and 08:20 (off with ``AI_DAILY_BRIEFING_ENABLED=false``): the
+  每日收盤簡報 of users who switched it on (``forliosa.ai.briefing``) — once the official closes of the latest finished
+  session are archived for both exchanges, one briefing per user and day (rule-computed facts plus, with a key and
+  quota left, a few cited AI notes); briefings older than 30 days are deleted. The exchanges publish between the
+  evening and the early morning, so the later slots catch what the earlier ones had to leave.
 * ``price_backfill`` — only with PRICE_HISTORY_SOURCE=yahoo, in a loop of its own: every 10 minutes one batch of
   the history backfill (``forliosa.history_backfill``: five years of daily candles before our archive began, per
   symbol, held and watched symbols first) until every symbol has been asked once, then one look a day. A refusal
@@ -256,6 +261,9 @@ class Worker:
         self._backfill_wait_until: datetime | None = None
         self._backfill_refusals = 0
         # Market page: the shared AI summary of the session that just closed (no model call without a key).
+        if settings.ai_daily_briefing_enabled:
+            self.jobs.append(Job("daily_briefings", daily_at(time(22, 20), time(23, 50), time(6, 10), time(8, 20)),
+                                 self.daily_briefings))
         if settings.ai_market_summary_enabled:
             self.jobs.append(Job("market_summary", daily_at(time(15, 5), time(18, 5), time(22, 5),
                                                              only_if=lambda n: is_tw_trading_day(n.date())),
@@ -437,6 +445,18 @@ class Worker:
         if res.asked or res.blocked:
             log.info("price backfill: asked %d symbols, stored %d (%d rows), %d left%s", res.asked, res.stored,
                      res.rows, res.remaining, "; the source refused, waiting" if res.blocked else "")
+
+    async def daily_briefings(self) -> None:
+        from forliosa.ai import briefing
+
+        def run():
+            with session_factory()() as db:
+                return briefing.run(db, self.md, now=self.now_fn())
+
+        res = await asyncio.to_thread(run)
+        if res.written or res.purged:
+            log.info("daily briefings %s: %d written (%d with AI notes), %d old ones deleted", res.day, res.written,
+                     res.with_points, res.purged)
 
     async def market_summary(self) -> None:
         from forliosa.ai import market_summary

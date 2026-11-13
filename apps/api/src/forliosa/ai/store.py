@@ -34,7 +34,8 @@ from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, BrokerAccount
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
-FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news")  # news: system-paid (user_id NULL)
+FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news",  # news: system-paid (user_id NULL)
+            "briefing")  # 每日收盤簡報 (``ai.briefing``): one question of the user's day, see ``messages_today``
 TITLE_MAX = 40
 BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard token prices
 
@@ -341,7 +342,8 @@ def messages_today(db: Session, user: User, now: datetime | None = None) -> int:
     chat = sum(message_cost(meta) for meta in db.scalars(select(AiMessage.meta).where(
         AiMessage.user_id == user.id, AiMessage.is_user_input.is_(True), AiMessage.created_at >= since)))
     analyst = db.scalar(select(func.count(func.distinct(AiUsage.thread_id))).where(
-        AiUsage.user_id == user.id, AiUsage.feature == "analyst", AiUsage.created_at >= since)) or 0
+        AiUsage.user_id == user.id, AiUsage.feature.in_(("analyst", "briefing")),  # a briefing's calls share one id too
+        AiUsage.created_at >= since)) or 0
     return chat + analyst
 
 

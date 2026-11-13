@@ -26,6 +26,7 @@ DEFAULT_PREFERENCES = {
     "privacy_mode": False,
     "cost_method": "average",
     "benchmark": "0050.TW",
+    "daily_briefing": False,  # 每日收盤簡報 (forliosa.ai.briefing): the worker writes one only for users who set it
 }
 
 

@@ -24,7 +24,8 @@ class ChatIn(_Strict):
     page: PageIn = Field(default_factory=PageIn)
     privacy: bool = False
     mode: Literal["deep"] | None = Field(
-        default=None, description="`deep`＝深度搜尋：這一題多查幾輪、寫成一份整理，算好幾題（`Usage.deep_search_cost`）")
+        default=None,
+        description="`deep`＝深度搜尋：這一題多查幾輪、寫成一份整理，算好幾題（`Usage.deep_search_cost`）")
 
 
 class Citation(BaseModel):
@@ -186,7 +187,8 @@ class Usage(BaseModel):
     model: str
     available: bool
     deep_search_cost: int | None = Field(
-        default=None, description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`）；`null`＝這個環境沒有深度搜尋（沒開網路搜尋）")
+        default=None,
+        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`）；`null`＝這個環境沒有深度搜尋（沒開網路搜尋）")
     disclaimer: str = Field(description="固定顯示在每則 AI 回答下方的一行字（模型不會自己寫免責聲明）")
 
 

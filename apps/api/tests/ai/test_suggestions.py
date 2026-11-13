@@ -64,7 +64,8 @@ def test_usage_shape(client, pool, ai_env):
     u = client.get(f"{API}/ai/usage").json()
     assert u == {**u, "messages_today": 0, "daily_message_limit": 30, "messages_remaining": 30, "tokens_month": 0,
                  "monthly_token_budget": None, "tokens_remaining": None, "cost_usd_month": 0.0,
-                 "model": "claude-haiku-5-5", "available": True, "disclaimer": "AI 回答僅供參考，非投資建議。"}
+                 "model": "claude-haiku-5-5", "available": True, "deep_search_cost": 5,
+                 "disclaimer": "AI 回答僅供參考，非投資建議。"}
     assert set(u) == {"date", "month", "messages_today", "daily_message_limit", "messages_remaining",
                       "tokens_month", "monthly_token_budget", "tokens_remaining", "cost_usd_month", "model",
-                      "available", "disclaimer"}
+                      "available", "deep_search_cost", "disclaimer"}

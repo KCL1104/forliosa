@@ -28,6 +28,7 @@ class Preferences(BaseModel):
     privacy_mode: bool = False
     cost_method: Literal["average", "fifo"] = "average"
     benchmark: str = "0050.TW"
+    daily_briefing: bool = False  # 每日收盤簡報：收盤資料存檔後，worker 依持股與觀察清單寫一則（預設關）
 
 
 class PreferencesPatch(StrictModel):
@@ -37,6 +38,7 @@ class PreferencesPatch(StrictModel):
     privacy_mode: bool | None = None
     cost_method: Literal["average", "fifo"] | None = None
     benchmark: str | None = None
+    daily_briefing: bool | None = None
 
 
 class User(BaseModel):
@@ -1185,3 +1187,48 @@ class MarketOverview(BaseModel):
     is_demo: bool
     notes: list[str]
     sources: list[str]
+
+
+# -- daily closing briefing (forliosa.ai.briefing) --------------------------------------------------------------
+class BriefingMover(BaseModel):
+    symbol: str
+    code: str
+    name: str
+    market: str
+    type: str
+    close: float | None
+    change_pct: float | None  # fraction
+    day_change: float | None = None  # the holding's value change that day (TWD); absent for watchlist symbols
+
+
+class BriefingUpcoming(BaseModel):
+    date: date
+    type: str  # ex_dividend | dividend_payment | recurring
+    symbol: str | None
+    title: str
+    amount_estimate: float | None
+
+
+class BriefingFacts(BaseModel):
+    """Computed by rules from the user's ledger and watchlist (official closes; never by a model)."""
+
+    market_value: float
+    day_change: float
+    day_change_pct: float | None
+    holdings: int
+    unpriced: int  # holdings without a close (e.g. US stocks): not in the day's change
+    gainers: list[BriefingMover]  # holdings that rose the most (at most 2)
+    losers: list[BriefingMover]  # holdings that fell the most (at most 2)
+    watchlist: list[BriefingMover]  # watched symbols that moved 3 % or more (at most 3)
+    upcoming: list[BriefingUpcoming]  # the week's ex-dividend dates, payments and recurring debits (at most 5)
+    is_demo: bool
+
+
+class Briefing(BaseModel):
+    id: str
+    date: date  # the trading day it describes
+    created_at: str
+    read: bool
+    facts: BriefingFacts
+    points: list[MarketSummaryPoint]  # the AI's cited notes about the biggest movers; may be empty
+

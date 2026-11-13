@@ -514,6 +514,25 @@ class AiMarketSummary(Base):
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 
+class AiBriefing(Base):
+    """A user's daily closing briefing (``forliosa.ai.briefing``): one per user and trading day, only for users
+    who switched it on. ``facts`` are computed by rules from the user's own ledger and watchlist; ``points`` are the
+    AI's cited notes about the day's biggest movers (verified like the market summary's; may be empty)."""
+
+    __tablename__ = "ai_briefings"
+    __table_args__ = (UniqueConstraint("user_id", "trading_day", name="uq_ai_briefing_user_day"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    trading_day: Mapped[date] = mapped_column(Date)
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    points: Mapped[list] = mapped_column(JSON, default=list)  # [{"text", "sources": [{"url", "title", "outlet"}]}]
+    ai_status: Mapped[str] = mapped_column(String(16), default="none")  # ok | empty | failed | none (not asked)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    read_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
 class FundProfile(Base):
     """ETF / fund basics from TWSE t187ap47_L 基金基本資料彙總表 (stored now, exposed later).
 

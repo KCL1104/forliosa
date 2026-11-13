@@ -6,6 +6,7 @@ import {
 } from "./types"
 import type {
   AccountInput,
+  Briefing,
   ChipsRange,
   FinancialsPeriod,
   HistoryRange,
@@ -52,6 +53,8 @@ export const qk = {
   attributions: ["meta", "attributions"] as const,
   marketStatus: ["meta", "market-status"] as const,
   marketOverview: ["market", "overview"] as const,
+  briefingLatest: ["ai", "briefings", "latest"] as const,
+  briefings: ["ai", "briefings", "list"] as const,
 }
 
 /** 後端每頁最多 200 筆：依 cursor 一頁一頁讀，最多讀到 `max` 筆（回傳是否還有更多） */
@@ -313,6 +316,28 @@ export function useAttributions() {
 /** 市場頁：收盤後的資料，一天只變幾次；AI 整理產生後下一次重新整理就看得到 */
 export function useMarketOverview() {
   return useQuery({ queryKey: qk.marketOverview, queryFn: () => api.getMarketOverview(), staleTime: 60_000, refetchInterval: 5 * 60_000 })
+}
+
+/**
+ * 每日收盤簡報：最新一則（過了兩個交易日、沒開、還沒產生都是 null）。一天只產生一次，不用常問。
+ * `enabled`：查看別人的資產時不問（那是登入者自己的 AI 內容）。
+ */
+export function useLatestBriefing(enabled = true) {
+  return useQuery({ enabled, queryKey: qk.briefingLatest, queryFn: () => api.getLatestBriefing(), staleTime: 5 * 60_000, refetchInterval: 15 * 60_000 })
+}
+export function useBriefings(enabled = true) {
+  return useQuery({ enabled, queryKey: qk.briefings, queryFn: () => api.listBriefings(14), staleTime: 5 * 60_000 })
+}
+/** 看過了：未讀的圓點馬上消失，伺服器記下來（別的裝置也不再標未讀） */
+export function useMarkBriefingRead() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) => api.markBriefingRead(id),
+    onMutate: (id) => {
+      qc.setQueryData<Briefing | null>(qk.briefingLatest, (b) => (b && b.id === id ? { ...b, read: true } : b))
+      qc.setQueryData<Briefing[]>(qk.briefings, (list) => list?.map((b) => (b.id === id ? { ...b, read: true } : b)))
+    },
+  })
 }
 
 export function useMarketStatus() {

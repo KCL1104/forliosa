@@ -16,6 +16,8 @@ export interface Preferences {
   privacy_mode: boolean
   cost_method: CostMethod
   benchmark: string
+  /** 每日收盤簡報：收盤資料公布後，依持股與觀察清單寫一則，放在「問 AI」裡（預設關） */
+  daily_briefing?: boolean
 }
 
 export interface User {
@@ -1360,6 +1362,54 @@ export interface MarketSummary {
   headline: string | null
   points: { text: string; sources: MarketSummarySource[] }[]
 }
+
+/** 每日收盤簡報裡的一檔：持股（有當天的市值變動）或觀察清單（沒有） */
+export interface BriefingMover {
+  symbol: string
+  code: string
+  name: string
+  market: Market
+  type: InstrumentType
+  close: number | null
+  change_pct: number | null
+  day_change?: number | null
+}
+
+export interface BriefingUpcoming {
+  date: string
+  /** ex_dividend、dividend_payment、recurring */
+  type: string
+  symbol: string | null
+  title: string
+  amount_estimate: number | null
+}
+
+/** 規則算出來的部分（不是模型寫的）：官方收盤價、自己的帳本與觀察清單 */
+export interface BriefingFacts {
+  market_value: number
+  day_change: number
+  day_change_pct: number | null
+  holdings: number
+  /** 沒有收盤價的持股檔數（例如美股）：不在今日損益裡 */
+  unpriced: number
+  gainers: BriefingMover[]
+  losers: BriefingMover[]
+  /** 觀察清單裡漲跌 3% 以上的 */
+  watchlist: BriefingMover[]
+  upcoming: BriefingUpcoming[]
+  is_demo: boolean
+}
+
+export interface Briefing {
+  id: string
+  /** 這一則講的交易日 */
+  date: string
+  created_at: string
+  read: boolean
+  facts: BriefingFacts
+  /** AI 依報導補的幾點（可能沒有） */
+  points: { text: string; sources: MarketSummarySource[] }[]
+}
 export interface MarketSector {
   /** 半導體 */
   name: string
@@ -1498,6 +1548,10 @@ export interface ForliosaApi {
   getMarketStatus(): Promise<MarketStatus>
   // 市場頁：指數、AI 收盤整理、類股、排行、重大訊息（收盤後的官方資料）
   getMarketOverview(): Promise<MarketOverview>
+  // 每日收盤簡報（開了的人才有；是登入者自己的，查看別人的資產時不讀）
+  getLatestBriefing(): Promise<Briefing | null>
+  listBriefings(limit?: number): Promise<Briefing[]>
+  markBriefingRead(id: string): Promise<void>
   // 法人觀點：GET 讀當日共用快取；POST 觸發 AI 網路搜尋（計入觸發者的 AI 額度）
   getAnalystViews(symbol: string): Promise<AnalystViews>
   requestAnalystViews(symbol: string): Promise<AnalystViews>

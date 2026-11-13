@@ -34,6 +34,7 @@ import {
   type WatchItem,
   type Why,
   type Attributions,
+  type Briefing,
   type MarketOverview,
   type MarketStatus,
   type ClosedRound,
@@ -195,6 +196,9 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getAttributions: () => request<Attributions>("GET", "/meta/attributions"),
     getMarketStatus: () => request<MarketStatus>("GET", "/meta/market-status"),
     getMarketOverview: () => request<MarketOverview>("GET", "/market/overview"),
+    getLatestBriefing: () => request<Briefing | null>("GET", "/ai/briefings/latest"),
+    listBriefings: (limit) => request<Briefing[]>("GET", "/ai/briefings", { query: { limit } }),
+    markBriefingRead: (id) => request<void>("POST", `/ai/briefings/${enc(id)}/read`),
 
     getAnalystViews: (symbol) => request<AnalystViews>("GET", `/instruments/${enc(symbol)}/analyst-views`),
     requestAnalystViews: (symbol) => request<AnalystViews>("POST", `/instruments/${enc(symbol)}/analyst-views`),

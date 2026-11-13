@@ -15,6 +15,7 @@ from forliosa.api.routes import (
     accounts,
     ai,
     auth,
+    briefings,
     delegations,
     derivatives,
     discussions,
@@ -123,7 +124,7 @@ def create_app() -> FastAPI:
         return market_status(db)
 
     for module in (users, auth, accounts, market, market_page, stock, derivatives, transactions, portfolio, watchlist,
-                   recurring, ai, delegations, groups, discussions):
+                   recurring, ai, briefings, delegations, groups, discussions):
         api.include_router(module.router)
     api.include_router(discussions.admin_router)
     app.include_router(api)

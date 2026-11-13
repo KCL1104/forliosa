@@ -20,6 +20,9 @@ interface AiState {
   focusDraftId: string | null
   /** 輸入框要預填的文字（例如點了「記一筆交易」） */
   composerSeed: { text: string; nonce: number } | null
+  /** 下一題用深度搜尋（輸入框的切換鈕）：只對送出的那一題有效，送出後自動關掉；不存檔 */
+  deepNext: boolean
+  setDeepNext: (on: boolean) => void
   /**
    * 這台瀏覽器上的對話與草稿是誰的（使用者 id）。對話存在 localStorage，同一台電腦換一個人登入時不能看到上一個人的對話：
    * 登入後 `claim(userId)`，不是同一個人就清掉；登出、刪除帳號時 `forget()`。
@@ -72,6 +75,7 @@ export const useAi = create<AiState>()(
       drafts: {},
       focusDraftId: null,
       composerSeed: null,
+      deepNext: false,
       ownerId: null,
 
       claim: (userId) =>
@@ -145,6 +149,7 @@ export const useAi = create<AiState>()(
         set((s) => (s.drafts[id] ? { drafts: { ...s.drafts, [id]: { ...s.drafts[id]!, ...patch } } } : s)),
       focusDraft: (focusDraftId) => set({ focusDraftId }),
       seedComposer: (text) => set({ composerSeed: { text, nonce: Date.now() } }),
+      setDeepNext: (deepNext) => set({ deepNext }),
     }),
     {
       name: "forliosa:ai",

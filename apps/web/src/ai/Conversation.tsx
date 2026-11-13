@@ -74,6 +74,8 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
           <p key={m.id} className="note-in mt-6 max-w-[85%] self-end rounded-sm border border-rule bg-raised px-3.5 py-1.5 text-base text-ink first:mt-2">
             <span className="sr-only">你說：</span>
             {m.text}
+            {/* 這一題是深度搜尋：問句下面一行小字（淡墨），重開對話時也在 */}
+            {m.mode === "deep" && <span className="mt-0.5 block text-sm text-ink-2">深度搜尋</span>}
           </p>
         ) : (
           <div key={m.id} className="note-in mt-4 flex flex-col" aria-busy={m.streaming || undefined}>
