@@ -910,8 +910,8 @@ await check("群組、設定、資料來源：空狀態沒有虛線；有字的�
   await page.goto(base + "/groups", { waitUntil: "networkidle" })
   await noIcon(page.getByRole("button", { name: "建立群組" }))
   await noIcon(page.getByRole("button", { name: "複製分享文字" }))
-  // 分享卡的說明接在一句話後面，不是「本月：…：…」
-  const note = (await page.getByText(/^本月算不出來。/).textContent()) ?? ""
+  // 分享卡的說明是一句話（「AAPL 沒有報價，本月算不出來。」），不是「本月：…：…」
+  const note = (await page.getByText(/本月算不出來。/).first().textContent()) ?? ""
   if (/^本月[：:]/.test(note) || !/。$/.test(note)) throw new Error(`share-card note: ${note}`)
   // 新群組：成員分頁的空邀請清單、週報的空狀態——上下實線、沒有外框與底色
   await page.getByRole("button", { name: "建立群組" }).first().click()
