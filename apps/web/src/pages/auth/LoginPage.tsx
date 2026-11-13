@@ -14,7 +14,10 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { safeNext } from "@/lib/next-path"
 import { oauthErrorText } from "@/lib/oauth-errors"
 import type { LoginSearch } from "@/router"
+import { PlainLink } from "@/app/links"
 import { FieldError } from "@/components/form-field"
+import { textAction } from "@/components/text-action"
+import { cn } from "@/lib/utils"
 
 /** 登入：用 Discord 登入（第一次登入就建立帳號）；開發環境另有開發登入 */
 export function LoginPage() {
@@ -43,6 +46,11 @@ export function LoginPage() {
           {error}
         </p>
       )}
+      {search.deleted && !error && (
+        <p role="status" className="border-y border-rule py-2.5 text-base">
+          你的帳號已經刪除。
+        </p>
+      )}
       {providers.isError ? (
         <ErrorState title="連不上伺服器" error={providers.error} onRetry={() => void providers.refetch()} retryLabel="重新連線" />
       ) : !providers.data ? (
@@ -67,6 +75,18 @@ export function LoginPage() {
           {(providers.data.dev_login || DEV_LOGIN.form) && <DevLoginForm next={next} />}
         </div>
       )}
+      {/* 登入就是同意：兩份文件不用登入就能讀 */}
+      <p className="text-sm text-ink-2">
+        登入即表示你同意
+        <PlainLink to="/terms" className={cn(textAction, "mx-1 text-sm")}>
+          服務條款
+        </PlainLink>
+        與
+        <PlainLink to="/privacy" className={cn(textAction, "ml-1 text-sm")}>
+          隱私權政策
+        </PlainLink>
+        。
+      </p>
     </AuthFrame>
   )
 }

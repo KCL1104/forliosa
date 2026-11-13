@@ -17,6 +17,7 @@ import { PlainLink } from "./links"
 import { DOCK_TABS, NAV_ITEMS } from "./nav"
 import { useUi } from "./ui-store"
 import { useViewAsControls } from "./view-as"
+import { TermsNotice } from "./TermsNotice"
 import { MOBILE_BANNER_HEIGHT, ViewAsBanner } from "./ViewAsBanner"
 
 /**
@@ -49,6 +50,7 @@ export function AppShell() {
       {/* 面板收成窄欄時，主欄多出來的寬度（面板 340／400px − 窄欄 56px）記在 --panel-slack：版心的左緣留在面板開著時的位置 */}
       <div className={cn(isDesktop && "flex items-start", hasPanel && !panel.open && "[--panel-slack:284px] xl:[--panel-slack:344px]")}>
         <main id="main" tabIndex={-1} className={cn("min-w-0 flex-1 outline-none", !isDesktop && "pb-[calc(env(safe-area-inset-bottom,0px)+var(--dock-h))]")}>
+          <TermsNotice />
           <Outlet />
         </main>
         {hasPanel && <AiPanel open={panel.open} onOpenChange={panel.setOpen} />}

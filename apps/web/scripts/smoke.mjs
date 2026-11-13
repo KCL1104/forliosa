@@ -61,6 +61,8 @@ const ROUTES = [
   ["/discussions/top_nope", "找不到這個主題"],
   ["/discussions/new", "發到哪裡"],
   ["/admin/discussions", "停權中"],
+  ["/terms", "服務條款"],
+  ["/privacy", "隱私權政策"],
   ["/stock/2330.TW?tab=discussions", "台積電法說會前，大家怎麼配置？"],
   ["/groups/grp_family?tab=discussions", "過年的紅包，要不要一起存 0056？"],
   ["/settings", "券商帳戶"],
@@ -1937,6 +1939,80 @@ await check("討論（群組）：群組主題只在「全部」與那個群組�
     await p.getByRole("navigation", { name: "位置" }).getByRole("link", { name: "討論" }).click()
     await p.waitForURL(/\/discussions\?scope=group&group_id=grp_family&sort=new$/, { timeout: 8000 })
     if (!(await p.getByRole("radiogroup", { name: "範圍" }).getByRole("radio", { name: "家族投資" }).isChecked())) throw new Error("the list forgot its filter")
+  })
+})
+
+await check("帳號：條款頁不用登入就能讀（草稿標示、一行不超過 40 個字、表格不撐寬頁面）；登入頁寫明同意；設定頁可以匯出與刪除帳號；條款更新時有一行", async () => {
+  // 沒登入：兩份文件都讀得到，是精簡的外殼
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/privacy?auth=signed-out", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: /隱私權政策/ }).waitFor({ timeout: 8000 })
+    if (!/\/privacy$/.test(new URL(p.url()).pathname)) throw new Error(`redirected to ${p.url()}`)
+    if (await p.locator('nav[aria-label="主要"]').count()) throw new Error("the signed-in shell is shown on a public legal page")
+    await p.getByRole("note").filter({ hasText: "草稿" }).waitFor({ timeout: 5000 })
+    if (await p.getByText(/供產品負責人與律師審閱/).count()) throw new Error("the reviewers' note is shown to visitors")
+    const doc = await p.evaluate(() => {
+      const article = document.querySelector("article")
+      const ps = [...article.querySelectorAll("p, li")].filter((el) => !el.closest("table") && el.textContent.trim().length > 60)
+      const widest = Math.max(...ps.map((el) => el.getBoundingClientRect().width / parseFloat(getComputedStyle(el).fontSize)))
+      return { widest: Math.round(widest * 10) / 10, tables: article.querySelectorAll("table").length, scripts: article.querySelectorAll("script, iframe").length, h2Rule: getComputedStyle(article.querySelector("h2")).borderBottomWidth }
+    })
+    if (doc.widest > 40.5) throw new Error(`a line of the policy is wider than 40em: ${JSON.stringify(doc)}`)
+    if (!doc.tables || doc.scripts || doc.h2Rule !== "1px") throw new Error(`policy structure: ${JSON.stringify(doc)}`)
+    await p.locator("article").getByRole("link", { name: "服務條款" }).click()
+    await p.getByRole("heading", { level: 1, name: /服務條款/ }).waitFor({ timeout: 8000 })
+    // 登入頁：同意文字連到兩份文件
+    await p.goto(base + "/login", { waitUntil: "networkidle" })
+    const consent = p.locator("p", { hasText: "登入即表示你同意" })
+    await consent.waitFor({ timeout: 8000 })
+    if ((await consent.getByRole("link", { name: "服務條款" }).getAttribute("href")) !== "/terms" || (await consent.getByRole("link", { name: "隱私權政策" }).getAttribute("href")) !== "/privacy") throw new Error("login consent links")
+  })
+  // 手機：表格自己橫向捲動，頁面不跟著捲；連結的可按範圍夠大
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    for (const path of ["/privacy", "/terms"]) {
+      await p.goto(base + path, { waitUntil: "networkidle" })
+      await p.getByRole("heading", { level: 1 }).first().waitFor({ timeout: 8000 })
+      const wide = await overflowX(p)
+      if (wide > 0) throw new Error(`${path}: the page scrolls sideways by ${wide}px`)
+    }
+  })
+  // 登入後：設定頁的「帳號與資料」
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/settings", { waitUntil: "networkidle" })
+    const section = p.getByRole("region", { name: "帳號與資料" })
+    await section.waitFor({ timeout: 8000 })
+    const download = p.waitForEvent("download", { timeout: 8000 })
+    await section.getByRole("button", { name: "匯出", exact: true }).click()
+    const file = await download
+    if (!/^forliosa-export-\d{8}\.json$/.test(file.suggestedFilename())) throw new Error(`export filename: ${file.suggestedFilename()}`)
+    await p.getByText("已下載匯出檔").waitFor({ timeout: 8000 })
+    // 刪除帳號：沒輸入那句話不能按；取消就什麼都沒發生
+    await section.getByRole("button", { name: "刪除帳號…" }).click()
+    const dialog = p.getByRole("dialog")
+    await dialog.getByRole("heading", { name: "刪除帳號？" }).waitFor({ timeout: 5000 })
+    const confirm = dialog.getByRole("button", { name: "永久刪除帳號" })
+    if (!(await confirm.isDisabled())) throw new Error("the delete button is enabled before typing the phrase")
+    await dialog.getByRole("textbox").fill("刪除")
+    if (!(await confirm.isDisabled())) throw new Error("the delete button is enabled with the wrong phrase")
+    await dialog.getByRole("button", { name: "取消" }).click()
+    await dialog.waitFor({ state: "detached", timeout: 5000 })
+    // 真的刪除：回到登入頁，寫一句帳號已刪除
+    await section.getByRole("button", { name: "刪除帳號…" }).click()
+    await p.getByRole("dialog").getByRole("textbox").fill("刪除我的帳號")
+    await p.getByRole("dialog").getByRole("button", { name: "永久刪除帳號" }).click()
+    await p.waitForURL(/\/login\?deleted=1/, { timeout: 8000 })
+    await p.getByText("你的帳號已經刪除。").waitFor({ timeout: 8000 })
+  })
+  // 條款更新：一行說明，按「知道了」之後消失、換頁也不再出現
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/settings?terms=updated", { waitUntil: "networkidle" })
+    const notice = p.getByRole("status").filter({ hasText: "服務條款與隱私權政策已更新" })
+    await notice.waitFor({ timeout: 8000 })
+    await notice.getByRole("button", { name: "知道了" }).click()
+    await notice.waitFor({ state: "detached", timeout: 8000 })
+    await p.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "帳本" }).click()
+    await p.getByText("總資產").first().waitFor({ timeout: 8000 })
+    if (await p.getByText("服務條款與隱私權政策已更新").count()) throw new Error("the terms notice came back after acknowledging")
   })
 })
 

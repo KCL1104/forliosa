@@ -27,6 +27,8 @@ export interface GroupSearch {
 export interface LoginSearch {
   next?: string
   error?: string
+  /** 剛刪除帳號回到登入頁：寫一句「你的帳號已經刪除」 */
+  deleted?: true
 }
 /** 討論清單：沒有 scope 是「全部」（公開＋我的群組）；`scope=public` 只看公開；`scope=group&group_id=` 只看一個群組 */
 export interface DiscussionsSearch {
@@ -127,6 +129,7 @@ const loginRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): LoginSearch => ({
     next: typeof s.next === "string" && s.next ? s.next : undefined,
     error: typeof s.error === "string" && s.error ? s.error : undefined,
+    deleted: s.deleted === 1 || s.deleted === "1" || s.deleted === true ? true : undefined,
   }),
   component: lazyRouteComponent(() => import("@/pages/auth/LoginPage"), "LoginPage"),
 })
@@ -193,6 +196,18 @@ const legacy = (path: string, to: string, search?: LedgerSearch) =>
     },
   })
 
+// 服務條款、隱私權政策：不用登入就能讀（`lib/next-path.ts` 的 `isPublicReadPath`）
+const termsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/terms",
+  component: lazyRouteComponent(() => import("@/pages/legal/routes"), "TermsPage"),
+})
+const privacyRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/privacy",
+  component: lazyRouteComponent(() => import("@/pages/legal/routes"), "PrivacyPage"),
+})
+
 const routeTree = rootRoute.addChildren([
   ledgerRoute,
   stockRoute,
@@ -208,6 +223,8 @@ const routeTree = rootRoute.addChildren([
   adminDiscussionsRoute,
   settingsRoute,
   dataSourcesRoute,
+  termsRoute,
+  privacyRoute,
   legacy("/holdings", "/"),
   legacy("/transactions", "/", { view: "transactions" }),
   legacy("/performance", "/", { view: "performance" }),

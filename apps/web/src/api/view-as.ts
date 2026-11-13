@@ -53,7 +53,7 @@ export function targetOf(d: Delegation): ViewAsTarget {
  */
 export function sendsViewAs(path: string, method = "GET"): boolean {
   if (method.toUpperCase() === "GET" && /^\/delegations(\?|$)/.test(path)) return false
-  return !/^\/(me|me\/preferences|users\/me\/public-name|auth\/[^?]*)(\?|$)/.test(path)
+  return !/^\/(me|me\/preferences|me\/export|me\/terms-accept|users\/me\/public-name|auth\/[^?]*)(\?|$)/.test(path)
 }
 
 /** 帳本主人的稱呼：自己的帳本照原本寫「你」／「我」，查看別人的資產時換成授權者的名稱（「爸爸的成本」「只看爸爸的」） */

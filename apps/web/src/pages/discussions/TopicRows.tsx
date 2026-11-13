@@ -11,6 +11,7 @@ import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
 import { safeNext } from "@/lib/next-path"
+import { LegalLinks } from "@/pages/legal/LegalLinks"
 import { cn } from "@/lib/utils"
 import { ABOUT_FORLIOSA, authorName, clockTime, DISCLAIMER, taipeiDay } from "./labels"
 import { topicSearchFrom, type Origin } from "./origin"
@@ -46,6 +47,7 @@ export function Disclaimer({ className }: { className?: string }) {
           <Link to="/login" search={next === "/" ? {} : { next }} className={cn(textAction, "ml-2 text-sm")}>
             登入
           </Link>
+          <LegalLinks className={cn(textAction, "ml-4 text-sm")} />
         </p>
       )}
     </div>

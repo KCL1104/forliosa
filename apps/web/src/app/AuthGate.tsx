@@ -1,10 +1,12 @@
 import { useQuery } from "@tanstack/react-query"
 import { Navigate, useRouterState } from "@tanstack/react-router"
+import { useEffect } from "react"
 import { meQuery } from "@/api/queries"
 import { ApiError } from "@/api/types"
 import { Wordmark } from "@/components/brand"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { claimLocalUserData } from "@/lib/local-data"
 import { safeNext } from "@/lib/next-path"
 
 /**
@@ -18,6 +20,11 @@ export function AuthGate({ children, signedOut }: { children: React.ReactNode; s
   const me = useQuery(meQuery())
   const href = useRouterState({ select: (s) => s.location.href })
   const unauthorized = me.error instanceof ApiError && me.error.status === 401
+  // 這台瀏覽器存著的 AI 對話如果是上一個人的，在畫面出來之前清掉（同一個人則保留）
+  const userId = me.data?.id
+  useEffect(() => {
+    if (userId) claimLocalUserData(userId)
+  }, [userId])
 
   if (me.data) return <>{children}</>
   if (unauthorized && signedOut) return <>{signedOut}</>

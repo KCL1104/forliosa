@@ -39,7 +39,7 @@ export const isAccountRoute = (pathname: string) => ACCOUNT_ROUTES.some((r) => u
  * AI 沒什麼可說的頁面：桌面的 AI 面板預設收成 56px 的窄欄（群組清單、群組、成員、討論、站方管理、設定、紀錄、資料來源）。
  * AI 不讀討論、也不替人發言，所以討論頁也在這裡。帳本與個股頁不在這裡：面板照記住的開合狀態（預設開）。
  */
-export const QUIET_ROUTES: readonly string[] = ["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources"]
+export const QUIET_ROUTES: readonly string[] = ["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy"]
 export const isQuietRoute = (pathname: string) => QUIET_ROUTES.some((r) => under(r)(pathname))
 
 /**

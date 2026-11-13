@@ -44,6 +44,7 @@ mock 預設模擬後端的 `DATA_POLICY=commercial`（只用可商用資料）�
 | `/discussions?discuss=named` | 討論：示範使用者已經有公開暱稱「示範小資」（預設沒有，發公開內容前要先選） |
 | `/discussions?discuss=suspended` | 討論：有公開暱稱，公開發言被站方暫停 7 天 |
 | `/discussions?discuss=member` | 討論：示範使用者不是站方管理員（預設是，頭像選單有「站方管理」）；`?discuss=default` 切回 |
+| `/settings?terms=updated` | 條款有新版本、這個帳號還沒確認：內容最上面一行「服務條款與隱私權政策已更新」；`?terms=default` 切回（預設沒有啟用版本） |
 
 mock 的討論資料在記憶體裡（重新載入就回到示範資料）：8 則公開主題、家族投資 3 則、大學同學 1 則，含一則被站方隱藏的回覆、兩則待處理的檢舉與一筆停權。
 頻率限制和後端一樣照實際的時間算：連發兩則公開內容，第二則會被擋下並說幾秒後可以再送。

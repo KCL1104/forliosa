@@ -1,4 +1,5 @@
 import {
+  ACCOUNT_DELETE_CONFIRMATION,
   ApiError,
   type Account,
   type ForliosaApi,
@@ -84,6 +85,19 @@ export function readMockSignedIn(): boolean {
  * mock 的討論串情境：網址 `?discuss=named`（示範使用者已經有公開暱稱「示範小資」）、`?discuss=suspended`（有暱稱、公開發言被停權 7 天）、
  * `?discuss=member`（不是站方管理員）；`?discuss=default` 切回預設（沒有公開暱稱、是站方管理員）。記在 sessionStorage。
  */
+/** mock 的條款情境：網址 `?terms=updated`（條款有新版本、這個帳號還沒確認）；`?terms=default` 切回預設（沒有啟用版本）。記在 sessionStorage。 */
+export function readMockTerms(): MockOptions["terms"] {
+  if (typeof window === "undefined") return undefined
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("terms")
+    if (fromUrl === "default") window.sessionStorage.removeItem("forliosa:mock-terms")
+    else if (fromUrl === "updated") window.sessionStorage.setItem("forliosa:mock-terms", fromUrl)
+    return window.sessionStorage.getItem("forliosa:mock-terms") === "updated" ? { current: "2026-12-01", accepted: "2026-11-13" } : undefined
+  } catch {
+    return undefined
+  }
+}
+
 export function readMockDiscussion(): DiscussionOptions {
   if (typeof window === "undefined") return {}
   let mode: string | null = null
@@ -126,6 +140,11 @@ export interface MockOptions {
   discussion?: DiscussionOptions
   /** 討論串的時鐘（毫秒，預設 Date.now）：頻率限制與暱稱冷卻用實際經過的時間算；測試時換掉就不用等 */
   clock?: () => number
+  /**
+   * 條款版本（預設：沒有啟用，兩個欄位都是 null）。`current`：後端的 TERMS_VERSION；`accepted`：這個帳號同意過的版本。
+   * 兩個不同時登入後會看到「服務條款與隱私權政策已更新」。
+   */
+  terms?: { current: string; accepted?: string | null }
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
@@ -134,7 +153,13 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const demo = !commercial
   const [minLatency, maxLatency] = options.latency ?? [120, 320]
 
-  let user: User = { id: "usr_01JDEMO", email: "demo@forliosa.local", display_name: "示範使用者", avatar_url: null, preferences: { ...DEFAULT_PREFS } }
+  let user: User = {
+    id: "usr_01JDEMO", email: "demo@forliosa.local", display_name: "示範使用者", avatar_url: null, preferences: { ...DEFAULT_PREFS },
+    terms_version_accepted: options.terms ? (options.terms.accepted ?? null) : null,
+    terms_version_current: options.terms?.current ?? null,
+  }
+  /** 匯出的次數（每小時 5 次；mock 不算時間，第 6 次起擋下） */
+  let exports = 0
   let signedIn = options.signedIn ?? true
   let accounts: Account[] = scenario === "empty" ? [] : ACCOUNTS.map((a) => ({ ...a }))
   let txns: Transaction[] = scenario === "empty" ? [] : seedTransactions()
@@ -345,6 +370,44 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getMe: () =>
       wait(() => {
         if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
+        return me()
+      }),
+    exportMe: () =>
+      wait(() => {
+        if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
+        if (++exports > 5) throw new ApiError(429, "rate_limited", "匯出太頻繁，請稍後再試", { retry_after_seconds: 1800 })
+        // 和後端同一個形狀（docs/api-contract.md「匯出我的資料」）；示範資料只放帳本的部分
+        return {
+          exported_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
+          format_version: 1,
+          profile: { id: user.id, email: user.email, display_name: user.display_name, public_name: me().public_name ?? null, preferences: user.preferences, terms_version_accepted: user.terms_version_accepted ?? null },
+          accounts,
+          transactions: txns,
+          holding_snapshots: [],
+          recurring_plans: [],
+          watchlist: [],
+          auto_dividend_skips: [],
+          ai: { threads: [], drafts: [] },
+          groups: [],
+          group_comments: [],
+          group_reactions: [],
+          delegations: { given: [], received: [] },
+          discussions: { topics: [], replies: [], reactions: [] },
+        }
+      }),
+    deleteMe: (confirm) =>
+      wait(() => {
+        if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
+        if (confirm !== ACCOUNT_DELETE_CONFIRMATION) throw new ApiError(422, "validation_error", `請輸入「${ACCOUNT_DELETE_CONFIRMATION}」確認`)
+        signedIn = false
+        accounts = []
+        txns = []
+      }),
+    acceptTerms: (version) =>
+      wait(() => {
+        if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
+        if (!user.terms_version_current || version !== user.terms_version_current) throw new ApiError(409, "terms_version_mismatch", "條款版本已經更新，請重新整理後再確認")
+        user = { ...user, terms_version_accepted: version }
         return me()
       }),
     updatePreferences: (patch) =>
@@ -721,7 +784,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 // ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
 type MethodName = Exclude<keyof ForliosaApi, "kind">
 /** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
-const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations", "setPublicName"])
+const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "exportMe", "deleteMe", "acceptTerms", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations", "setPublicName"])
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",

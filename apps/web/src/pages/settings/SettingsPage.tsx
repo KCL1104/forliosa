@@ -7,6 +7,7 @@ import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { RangeChips } from "@/components/charts/chart-kit"
 import { PageHeader, Section } from "@/components/section"
 import { RecurringPlans } from "./RecurringPlans"
+import { AccountData } from "./AccountData"
 import { Delegations } from "./Delegations"
 import { Profile } from "./Profile"
 import { useReadOnly } from "@/api/view-as"
@@ -121,6 +122,8 @@ function Settings() {
       <RecurringPlans />
 
       <Delegations />
+
+      <AccountData />
       </div>
       {/* 資料來源：一頁一個頁尾（設定頁沒有自己的資料，就是連到完整顯名聲明） */}
       <SourcesFooter className="max-w-measure" />

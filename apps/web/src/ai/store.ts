@@ -20,6 +20,13 @@ interface AiState {
   focusDraftId: string | null
   /** 輸入框要預填的文字（例如點了「記一筆交易」） */
   composerSeed: { text: string; nonce: number } | null
+  /**
+   * 這台瀏覽器上的對話與草稿是誰的（使用者 id）。對話存在 localStorage，同一台電腦換一個人登入時不能看到上一個人的對話：
+   * 登入後 `claim(userId)`，不是同一個人就清掉；登出、刪除帳號時 `forget()`。
+   */
+  ownerId: string | null
+  claim: (userId: string) => void
+  forget: () => void
 
   /** `quiet`：現在是不是安靜的頁面（開合分開記） */
   setPanelOpen: (open: boolean, quiet?: boolean) => void
@@ -65,6 +72,17 @@ export const useAi = create<AiState>()(
       drafts: {},
       focusDraftId: null,
       composerSeed: null,
+      ownerId: null,
+
+      claim: (userId) =>
+        set((s) =>
+          s.ownerId === userId
+            ? s
+            : s.ownerId === null
+              ? { ownerId: userId } // 還沒記過是誰的（第一次登入，或舊版留下的紀錄）：算這個人的
+              : { ownerId: userId, threads: [], drafts: {}, threadId: null, focusDraftId: null, composerSeed: null, hiddenThreadIds: [] },
+        ),
+      forget: () => set({ ownerId: null, threads: [], drafts: {}, threadId: null, focusDraftId: null, composerSeed: null, hiddenThreadIds: [] }),
 
       setPanelOpen: (open, quiet) => set(quiet ? { quietPanelOpen: open } : { panelOpen: open }),
       setMobileOpen: (mobileOpen) => set({ mobileOpen }),
@@ -132,8 +150,9 @@ export const useAi = create<AiState>()(
       name: "forliosa:ai",
       version: 1,
       storage: createJSONStorage(() => localStorage),
-      partialize: ({ panelOpen, threads, drafts, threadId }) => ({
+      partialize: ({ panelOpen, threads, drafts, threadId, ownerId }) => ({
         panelOpen,
+        ownerId,
         threadId,
         threads,
         // 只保留還沒處理的草稿與最近 20 筆

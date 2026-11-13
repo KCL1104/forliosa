@@ -17,6 +17,7 @@ import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { usePrefs } from "@/stores/prefs"
 import type { ColorConvention, ThemePreference } from "@/api/types"
 import { isAccountRoute } from "./nav"
+import { clearLocalUserData } from "@/lib/local-data"
 
 /**
  * 頭像選單：設定、帳戶、定期定額、資料來源與授權、站方管理（只有站方管理員）、外觀（主題與漲跌顏色）、登出。
@@ -106,7 +107,15 @@ export function AvatarMenu() {
         {api.kind === "http" && (
           <>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => void api.logout().then(() => window.location.reload())}>
+            <DropdownMenuItem
+              onClick={() =>
+                void api.logout().then(() => {
+                  // 這台瀏覽器上的 AI 對話與沒送出的草稿跟著登出清掉（下一個登入的人看不到）
+                  clearLocalUserData()
+                  window.location.reload()
+                })
+              }
+            >
               <LogOutIcon aria-hidden />
               登出
             </DropdownMenuItem>

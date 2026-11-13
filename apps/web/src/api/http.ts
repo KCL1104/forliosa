@@ -133,6 +133,9 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     devLogin: (body) => request<User>("POST", "/auth/dev-login", { body }),
     logout: () => request<void>("POST", "/auth/logout"),
     getMe: () => request<User>("GET", "/me"),
+    exportMe: () => request<Record<string, unknown>>("GET", "/me/export"),
+    deleteMe: (confirm) => request<void>("DELETE", "/me", { body: { confirm } }),
+    acceptTerms: (version) => request<User>("POST", "/me/terms-accept", { body: { version } }),
     updatePreferences: (patch: Partial<Preferences>) => request<User>("PATCH", "/me/preferences", { body: patch }),
 
     listAccounts: () => request<Account[]>("GET", "/accounts"),

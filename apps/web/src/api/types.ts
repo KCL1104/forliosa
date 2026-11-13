@@ -30,6 +30,12 @@ export interface User {
   public_name?: string | null
   /** 站方管理員（後端的 ADMIN_EMAILS）：看得到 `/admin/discussions` */
   is_admin?: boolean
+  /**
+   * 服務條款與隱私權政策的版本：這個帳號同意過的、和目前的（後端的 TERMS_VERSION；沒有啟用時兩個都是 null）。
+   * 目前的版本存在、而且和同意過的不同時，登入後顯示一行「已更新」請使用者按「知道了」（`POST /me/terms-accept`）。
+   */
+  terms_version_accepted?: string | null
+  terms_version_current?: string | null
   /** 公開發言停權到什麼時候（UTC、`Z` 結尾；永久是 `PERMANENT_UNTIL`）；沒有停權是 null */
   public_posting_suspended_until?: string | null
 }
@@ -1332,12 +1338,21 @@ export interface MarketStatus {
   }
 }
 
+/** 刪除帳號時要輸入的字（和後端相同） */
+export const ACCOUNT_DELETE_CONFIRMATION = "刪除我的帳號"
+
 export interface ForliosaApi {
   readonly kind: "http" | "mock"
   // 認證與使用者
   devLogin(body: DevLoginBody): Promise<User>
   logout(): Promise<void>
   getMe(): Promise<User>
+  /** 匯出我的資料（`GET /me/export`）：一個 JSON 物件，只有這個帳號自己的資料；每人每小時 5 次（429 `rate_limited`） */
+  exportMe(): Promise<Record<string, unknown>>
+  /** 刪除帳號（`DELETE /me`，不能復原）：`confirm` 必須是 `ACCOUNT_DELETE_CONFIRMATION`；成功後 session 也沒了 */
+  deleteMe(confirm: string): Promise<void>
+  /** 確認已讀目前版本的條款（`POST /me/terms-accept`）；版本不是目前的 → 409 `terms_version_mismatch` */
+  acceptTerms(version: string): Promise<User>
   updatePreferences(patch: Partial<Preferences>): Promise<User>
   // 帳戶
   listAccounts(): Promise<Account[]>
