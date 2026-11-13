@@ -455,6 +455,18 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
   }
 
   return {
+    // ── 討論串（mock/discussions.ts）用：我在哪些群組、每個群組現在的成員（作者顯示、刪除權限） ──
+    /** 我加入的群組與我的角色（沒登入是空的） */
+    myGroupRoles(): { id: string; name: string; role: GroupRole }[] {
+      if (!deps.signedIn()) return []
+      return myGroups().map((g) => ({ id: g.id, name: g.name, role: findMember(g, meId())!.role }))
+    },
+    /** 一個群組的名稱與目前的成員；群組不存在是 null */
+    groupRoster(groupId: string): { id: string; name: string; members: UserRef[] } | null {
+      const g = groups.find((x) => x.id === groupId)
+      return g ? { id: g.id, name: g.name, members: g.members.map(refOf) } : null
+    },
+
     // ── 授權查看 ──
     /** 授權查看：只有「別人授權給我、還有效」的才算；其他一律 delegation_revoked（不區分） */
     viewAsOwner(delegationId: string): { owner: UserRef; accountIds: string[] | "all" } {

@@ -1,5 +1,5 @@
 import { useNavigate, useRouterState } from "@tanstack/react-router"
-import { CalendarSyncIcon, LogOutIcon, ScrollTextIcon, SettingsIcon, WalletIcon } from "lucide-react"
+import { CalendarSyncIcon, LogOutIcon, ScrollTextIcon, SettingsIcon, ShieldIcon, WalletIcon } from "lucide-react"
 import { api } from "@/api"
 import { useMe } from "@/api/queries"
 import {
@@ -19,8 +19,8 @@ import type { ColorConvention, ThemePreference } from "@/api/types"
 import { isAccountRoute } from "./nav"
 
 /**
- * 頭像選單：設定、帳戶、定期定額、資料來源與授權、外觀（主題與漲跌顏色）、登出。
- * 設定與資料來源頁沒有自己的導覽分頁，是從這個選單進去的：桌面在這兩頁時，頭像下面畫導覽的那條線
+ * 頭像選單：設定、帳戶、定期定額、資料來源與授權、站方管理（只有站方管理員）、外觀（主題與漲跌顏色）、登出。
+ * 設定、資料來源與站方管理頁沒有自己的導覽分頁，是從這個選單進去的：桌面在這些頁面時，頭像下面畫導覽的那條線
  * （選取語法 (a)，`data-active`——不是連結，所以不標 `aria-current`），選單裡對應的項目標 `aria-current="page"`。
  */
 export function AvatarMenu() {
@@ -73,6 +73,13 @@ export function AvatarMenu() {
           <ScrollTextIcon aria-hidden />
           資料來源與授權
         </DropdownMenuItem>
+        {/* 站方管理員才有：公開討論的檢舉與停權 */}
+        {me.data?.is_admin && (
+          <DropdownMenuItem aria-current={here("/admin/discussions")} onClick={() => void navigate({ to: "/admin/discussions" })}>
+            <ShieldIcon aria-hidden />
+            站方管理
+          </DropdownMenuItem>
+        )}
         <DropdownMenuSeparator />
         <DropdownMenuGroup>
           <DropdownMenuLabel className="text-sm text-ink-2">外觀</DropdownMenuLabel>

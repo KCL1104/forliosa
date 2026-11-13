@@ -10,7 +10,6 @@ import { UsageNote } from "./AiPanel"
 import { Composer } from "./Composer"
 import { useAiContext, useRouteKind } from "./context"
 import { Conversation } from "./Conversation"
-import { HistoryList } from "./HistoryList"
 import { PanelHome } from "./Home"
 import { composerPlaceholder } from "./panel-helpers"
 import { parseIntent } from "./intent"
@@ -22,6 +21,7 @@ import { useAiSuggestions } from "./remote-hooks"
  * 手機的「問 AI」：全螢幕。和桌面面板同一套：輸入框一直在底部，格線列的建議、一行文字連結（沒有建議的頁面是最近的對話）貼在它上方。
  * 搜尋股票在手機上住在這裡：輸入代號或名稱時，符合的股票一律列在輸入框「上方」——
  * iOS Safari 的鍵盤直接蓋在全螢幕的畫面上（不縮版面），列在輸入框下方會被鍵盤蓋住。
+ * 對話紀錄：手機的底部列沒有「紀錄」分頁，從這裡右上角的時鐘到紀錄頁（`/history`；「全部紀錄」也是）。
  */
 export function AiScreen() {
   const open = useAi((s) => s.mobileOpen)
@@ -44,7 +44,6 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
   const runner = useAiRunner(ctx)
   const thread = useCurrentThread()
   const suggestions = useAiSuggestions(ctx)
-  const [view, setView] = useState<"chat" | "history">("chat")
   const [typing, setTyping] = useState("")
   const navigate = useNavigate()
   const newThread = useAi((s) => s.newThread)
@@ -54,7 +53,12 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
   const search = useInstrumentSearch(searchTerm)
   const results = searchTerm ? (search.data ?? []).slice(0, 5) : []
   // 搜尋結果都在輸入框上方：首頁狀態取代建議與連結（同一套格線列，最多約建議區的高度）；對話中浮在輸入框上
-  const home = view === "chat" && !thread
+  const home = !thread
+  // 紀錄是一整頁（/history）：關掉問 AI、到那一頁；從那裡挑一段對話會再打開這個畫面
+  const showHistory = () => {
+    onClose()
+    void navigate({ to: "/history" })
+  }
   const homeResults = home && results.length > 0
 
   const resultList = results.length > 0 && (
@@ -94,21 +98,13 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
     <>
       <header className="flex shrink-0 items-center gap-1 border-b border-rule pt-[env(safe-area-inset-top,0px)] pr-3 pl-5">
         <DialogPrimitive.Title className="mr-auto flex h-[60px] items-center text-[1.375rem] font-bold">
-          {view === "history" ? "紀錄" : "問 AI"}
+          問 AI
         </DialogPrimitive.Title>
-        {/* 三個圖示鈕同一個樣式（44px、方肩、淡墨，按下是淡墨底；「紀錄」打開時是選取語法 (b)） */}
-        <button
-          type="button"
-          aria-label="新對話"
-          onClick={() => {
-            newThread()
-            setView("chat")
-          }}
-          className={iconButton}
-        >
+        {/* 三個圖示鈕同一個樣式（44px、方肩、淡墨，按下是淡墨底）；「紀錄」（時鐘）到紀錄頁 */}
+        <button type="button" aria-label="新對話" onClick={() => newThread()} className={iconButton}>
           <SquarePenIcon aria-hidden className="size-[22px]" />
         </button>
-        <button type="button" aria-label="紀錄" aria-pressed={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")} className={iconButton}>
+        <button type="button" aria-label="紀錄" title="對話紀錄" onClick={showHistory} className={iconButton}>
           <HistoryIcon aria-hidden className="size-[22px]" />
         </button>
         <DialogPrimitive.Close aria-label="關閉" className={iconButton}>
@@ -121,25 +117,15 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
         開始對話後從同一個位置往上長，輸入框不會跳。捲動區留 6px 下內距：最後一個連結的焦點外框不會被裁掉。
       */}
       <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-5 pb-1.5">
-        {view === "history" ? (
-          <HistoryList onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
-        ) : (
-          <div className="mt-auto">
-            {thread ? (
-              <Conversation key={thread.id} thread={thread} runner={runner} size="screen" onNavigate={onClose} />
-            ) : homeResults ? (
-              resultList
-            ) : (
-              <PanelHome
-                ctx={ctx}
-                runner={runner}
-                suggestions={suggestions}
-                size="screen"
-                onShowHistory={route.kind === "history" ? undefined : () => setView("history")}
-              />
-            )}
-          </div>
-        )}
+        <div className="mt-auto">
+          {thread ? (
+            <Conversation key={thread.id} thread={thread} runner={runner} size="screen" onNavigate={onClose} />
+          ) : homeResults ? (
+            resultList
+          ) : (
+            <PanelHome ctx={ctx} runner={runner} suggestions={suggestions} size="screen" onShowHistory={route.kind === "history" ? undefined : showHistory} />
+          )}
+        </div>
       </div>
 
       {!home && resultList}
@@ -149,10 +135,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
           variant="screen"
           placeholder={composerPlaceholder(ctx, "screen")}
           onDraftChange={setTyping}
-          onSubmit={(t) => {
-            setView("chat")
-            void runner.submit(t)
-          }}
+          onSubmit={(t) => void runner.submit(t)}
           onAttach={(k) => runner.action(k)}
         />
         <UsageNote />

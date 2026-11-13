@@ -62,11 +62,11 @@ function renderInRouter(ui: React.ReactNode) {
 }
 
 describe("手機底部列", () => {
-  it("文字分頁「帳本｜群組｜紀錄」（選取語法 a，沒有圖示）＋「問 AI」方格（不是膠囊）", async () => {
+  it("文字分頁「帳本｜群組｜討論」（選取語法 a，沒有圖示）＋「問 AI」方格（不是膠囊）", async () => {
     renderApp("/")
     const nav = await screen.findByRole("navigation", { name: "主要" }, T)
     const links = within(nav).getAllByRole("link")
-    expect(links.map((l) => l.textContent)).toEqual(["帳本", "群組", "紀錄"])
+    expect(links.map((l) => l.textContent)).toEqual(["帳本", "群組", "討論"])
     // 選取語法 (a) 的底部列版本畫在字上（第三輪：線和字一樣寬、對齊內容的左緣；可按範圍是整個連結）
     for (const link of links) {
       expect(link.querySelector("span")!.className).toMatch(/\bsel-tab-top\b/)

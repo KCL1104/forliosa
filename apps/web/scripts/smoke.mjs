@@ -6,6 +6,9 @@
 // 第五批：上市股票不顯示逐檔三大法人（空狀態＋問 AI 外資動向，上櫃照常）、補記定期定額用扣款日的收盤價。
 // M5 分享：群組（建立、邀請連結、排行與討論串、動態與表情、我的分享、成員分享、頻道）、邀請（沒登入 → 登入 → 選分享 → 加入）、
 // 授權查看（授權給別人、查看別人的唯讀模式、授權失效自動退出）、登入頁的錯誤說明。
+// 討論串（2026-11-13）：沒登入讀公開清單與主題、選公開暱稱 → 發主題 → 回覆（頻率限制）→ 表情 → 檢舉 → 站方管理隱藏、
+// 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・群組・討論）與從「問 AI」的時鐘到紀錄。
+// mock 的狀態在記憶體裡：同一個流程用站內導覽（不重新載入），重新載入就回到示範資料。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 import { createRequire } from "node:module"
 
@@ -17,6 +20,8 @@ try {
   pw = require("/opt/node-tools/node_modules/playwright")
 }
 const base = (process.argv.find((a) => a.startsWith("--base="))?.slice(7) ?? "http://localhost:5173").replace(/\/$/, "")
+// 開發時只跑名稱含某段字的檢查：--only=討論（有些檢查接著上一個檢查的畫面，交付前要整份跑過）
+const onlyCheck = process.argv.find((a) => a.startsWith("--only="))?.slice(7)
 
 const ROUTES = [
   ["/", "總資產"],
@@ -49,6 +54,15 @@ const ROUTES = [
   ["/invite/club-2026", "分享什麼"],
   ["/invite/club-expired", "這個邀請已經失效"],
   ["/history", "發起新對話"],
+  ["/discussions", "台積電法說會前，大家怎麼配置？"],
+  ["/discussions?scope=group&group_id=grp_family", "我把聯發科的交易補記好了"],
+  ["/discussions/top_p_tsmc", "比重超過自己睡得著的程度就調"],
+  ["/discussions/top_g_dca", "我明天去問營業員怎麼設定"],
+  ["/discussions/top_nope", "找不到這個主題"],
+  ["/discussions/new", "發到哪裡"],
+  ["/admin/discussions", "停權中"],
+  ["/stock/2330.TW?tab=discussions", "台積電法說會前，大家怎麼配置？"],
+  ["/groups/grp_family?tab=discussions", "過年的紅包，要不要一起存 0056？"],
   ["/settings", "券商帳戶"],
   ["/transactions", "稅費"],
   ["/does-not-exist", "找不到這個頁面"],
@@ -62,6 +76,7 @@ page.on("console", (m) => m.type() === "error" && errors.push(`${page.url()} ${m
 page.on("pageerror", (e) => errors.push(`${page.url()} pageerror ${e.message}`))
 let failed = 0
 const check = async (name, fn) => {
+  if (onlyCheck && !name.includes(onlyCheck)) return
   try {
     await fn()
     console.log("✓", name)
@@ -880,7 +895,7 @@ const rctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, 
 const rp = await rctx.newPage()
 rp.on("console", (m) => m.type() === "error" && errors.push(`${rp.url()} ${m.text()}`))
 rp.on("pageerror", (e) => errors.push(`${rp.url()} pageerror ${e.message}`))
-await check("AI 面板：安靜的頁面（群組、設定、紀錄、資料來源）預設是窄欄，帳本與個股頁照記住的狀態；換頁時內容的左緣不動", async () => {
+await check("AI 面板：安靜的頁面（群組、討論、設定、紀錄、資料來源）預設是窄欄，帳本與個股頁照記住的狀態；換頁時內容的左緣不動", async () => {
   await rp.goto(base + "/", { waitUntil: "networkidle" })
   await rp.evaluate(() => document.documentElement.classList.remove("dark"))
   await rp.getByRole("complementary", { name: "問 AI", exact: true }).waitFor({ timeout: 8000 })
@@ -900,6 +915,18 @@ await check("AI 面板：安靜的頁面（群組、設定、紀錄、資料來�
   if (groups.railW !== 56) throw new Error(`rail is ${groups.railW}px`)
   if (groups.mainW <= ledger.mainW) throw new Error(`main column did not widen: ${JSON.stringify({ ledger, groups })}`)
   if (Math.abs(groups.left - ledger.left) > 1) throw new Error(`content left edge jumped between ledger and groups: ${JSON.stringify({ ledger, groups })}`)
+  // 討論也是安靜的頁面（AI 不讀討論）：頂部列的第三個分頁，窄欄、左緣不動
+  const topNav = await rp.getByRole("navigation", { name: "主要" }).getByRole("link").allTextContents()
+  if (topNav.join("・") !== "帳本・群組・討論") throw new Error(`top nav: ${topNav.join("・")}`)
+  await rp.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "討論" }).click()
+  await rp.getByRole("heading", { level: 1, name: "討論" }).waitFor({ timeout: 8000 })
+  await rp.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
+  if (await rp.getByRole("complementary", { name: "問 AI", exact: true }).count()) throw new Error("panel open on the discussions page by default")
+  const discussions = await edge()
+  if (discussions.railW !== 56 || Math.abs(discussions.left - ledger.left) > 1) throw new Error(`discussions page: ${JSON.stringify({ ledger, discussions })}`)
+  if ((await rp.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "討論" }).getAttribute("aria-current")) !== "page") throw new Error("討論 is not marked current")
+  await rp.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "群組" }).click()
+  await rp.getByRole("heading", { level: 1, name: "群組" }).waitFor({ timeout: 8000 })
   // 主欄的寬度沒有轉場（不會邊換頁邊滑動）
   const moving = await rp.evaluate(() => [document.getElementById("main"), document.querySelector("aside")].map((el) => getComputedStyle(el).transitionDuration))
   if (moving.some((d) => d !== "0s")) throw new Error(`main/aside animate: ${moving.join(", ")}`)
@@ -1157,7 +1184,7 @@ await check("手機：底部列是平的、滿版、貼齊畫面底部（沒有�
   if (bar.position !== "fixed" || bar.left !== 0 || bar.right !== bar.vw || Math.abs(bar.bottom - bar.vh) > 0.5) throw new Error(`bar is not flush with the viewport: ${JSON.stringify(bar)}`)
   if (bar.radius !== "0px" || bar.shadow !== "none" || bar.bg !== "none" || bar.edge !== "1px") throw new Error(`bar is not flat and ruled: ${JSON.stringify(bar)}`)
   if (bar.askRadius !== "0px" || bar.askShadow !== "none" || !bar.askInside || bar.askH < 44 || bar.askW < 44) throw new Error(`問 AI is not a square box inside the bar: ${JSON.stringify(bar)}`)
-  if (bar.tabs.map((t) => t.text).join("・") !== "帳本・群組・紀錄") throw new Error(`tabs: ${JSON.stringify(bar.tabs)}`)
+  if (bar.tabs.map((t) => t.text).join("・") !== "帳本・群組・討論") throw new Error(`tabs: ${JSON.stringify(bar.tabs)}`)
   if (bar.tabs.some((t) => t.h < 44 || t.icon)) throw new Error(`tabs must be text, ≥ 44px: ${JSON.stringify(bar.tabs)}`)
   if (bar.tabs.filter((t) => t.current === "page").map((t) => t.text).join() !== "帳本") throw new Error(`current tab: ${JSON.stringify(bar.tabs)}`)
   // 捲到最底：頁面最後的內容在底部列上面（下方留的是底部列的實際高度）
@@ -1231,21 +1258,57 @@ await check("手機：查看爸爸時「問 AI」換成「結束查看」；橫�
   await m.getByRole("button", { name: /結束查看$/ }).click()
   await m.getByRole("button", { name: /^問 AI/ }).waitFor({ timeout: 8000 })
 })
-await check("手機：群組七個分頁一次看得到（「成員」「頻道」不在淡出的那一邊）；更窄的螢幕才橫向捲動，直接打開「成員」時捲到那個分頁", async () => {
+await check("手機：群組八個分頁（多了「討論」）每個 ≥ 44×44；iPhone 15 上只有最後的「頻道」露出一半、選到它就捲進來，夠寬的手機一次看得到全部；更窄的螢幕橫向捲動，直接打開「成員」時捲到那個分頁", async () => {
+  const tabsOf = (p) =>
+    p.getByRole("tablist", { name: "群組內容" }).evaluate((el) => {
+      const c = el.getBoundingClientRect()
+      const tabs = [...el.querySelectorAll('[role="tab"]')].map((t) => ({ r: t.getBoundingClientRect(), text: t.textContent, selected: t.getAttribute("aria-selected") === "true" }))
+      return {
+        names: tabs.map((t) => t.text).join("・"),
+        fadeStart: el.hasAttribute("data-overflow-start"),
+        fadeEnd: el.hasAttribute("data-overflow-end"),
+        // 沒有完整露出來的分頁（被捲出去，或只露出一部分）
+        cut: tabs.filter((t) => t.r.left < c.left - 0.5 || t.r.right > c.right + 0.5).map((t) => t.text),
+        small: tabs.filter((t) => t.r.height < 44 || t.r.width < 44).map((t) => `${t.text} ${Math.round(t.r.width)}×${Math.round(t.r.height)}`),
+        // 選取中的分頁完整露出來，而且不在淡出的那 28px 裡
+        selectedClear: tabs.filter((t) => t.selected).every((t) => t.r.left >= c.left - 0.5 + (el.hasAttribute("data-overflow-start") ? 27 : 0) && t.r.right <= c.right + 0.5 - (el.hasAttribute("data-overflow-end") ? 27 : 0)),
+        overflow: el.scrollWidth - el.clientWidth,
+        pageOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      }
+    })
+  // 從第一個分頁進來：前七個完整看得到，只有最後的「頻道」露出一半（後面還有 → 那一邊淡出）
+  await m.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
+  await m.getByRole("tab", { name: "排行" }).waitFor({ timeout: 8000 })
+  await m.waitForTimeout(300)
+  const first = await tabsOf(m)
+  if (first.names !== "排行・動態・討論・持股・週報・我的分享・成員・頻道") throw new Error(`group tabs: ${first.names}`)
+  if (first.small.length) throw new Error(`group tabs under 44×44: ${first.small.join(" | ")}`)
+  if (first.cut.join() !== "頻道" || !first.fadeEnd || first.fadeStart || first.overflow > 30) throw new Error(`on an iPhone 15 only the last tab may be cut: ${JSON.stringify(first)}`)
+  if (first.pageOverflow > 0) throw new Error(`the page scrolls sideways: ${JSON.stringify(first)}`)
+  // 直接打開「成員」：選取中的分頁完整看得到
   await m.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
   await m.getByText("邀請連結").first().waitFor({ timeout: 8000 })
-  const visible = await m.getByRole("tab", { name: "成員" }).evaluate((el) => {
-    const r = el.getBoundingClientRect()
-    return r.left >= 0 && r.right <= window.innerWidth
-  })
-  if (!visible) throw new Error("active tab not scrolled into view")
-  const row = await m.getByRole("tablist", { name: "群組內容" }).evaluate((el) => ({
-    faded: el.hasAttribute("data-overflow-start") || el.hasAttribute("data-overflow-end"),
-    hidden: [...el.querySelectorAll('[role="tab"]')].filter((t) => { const r = t.getBoundingClientRect(); return r.left < 0 || r.right > window.innerWidth }).map((t) => t.textContent),
-    small: [...el.querySelectorAll('[role="tab"]')].filter((t) => t.getBoundingClientRect().height < 44).length,
-  }))
-  if (row.faded || row.hidden.length) throw new Error(`group tabs do not all fit on an iPhone 15: ${JSON.stringify(row)}`)
-  if (row.small) throw new Error(`${row.small} group tabs under 44px tall`)
+  await m.waitForTimeout(300)
+  const members = await tabsOf(m)
+  if (!members.selectedClear || members.pageOverflow > 0) throw new Error(`active tab not scrolled into view: ${JSON.stringify(members)}`)
+  // 選「頻道」：捲進來，完整看得到
+  await m.getByRole("tab", { name: "頻道" }).click()
+  await m.locator('[role="tab"][aria-selected="true"]').filter({ hasText: "頻道" }).waitFor({ timeout: 8000 })
+  await m.waitForTimeout(500)
+  const channels = await tabsOf(m)
+  if (!channels.selectedClear || channels.cut.includes("頻道")) throw new Error(`「頻道」 is not scrolled into view when selected: ${JSON.stringify(channels)}`)
+  // 夠寬的手機（430px）：八個分頁平分整列，一次看得到全部，沒有淡出
+  const wide = await browser.newContext({ viewport: { width: 430, height: 932 }, hasTouch: true, isMobile: true, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+  try {
+    const w = await wide.newPage()
+    await w.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
+    await w.getByText("邀請連結").first().waitFor({ timeout: 8000 })
+    await w.waitForTimeout(300)
+    const at430 = await tabsOf(w)
+    if (at430.cut.length || at430.fadeStart || at430.fadeEnd || at430.small.length || at430.pageOverflow > 0) throw new Error(`430px: group tabs do not all fit: ${JSON.stringify(at430)}`)
+  } finally {
+    await wide.close()
+  }
   // 320px 寬：放不下才捲動，選取中的「成員」捲進畫面，頁面本身不橫向捲動
   const narrow = await browser.newContext({ viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true, locale: "zh-TW", timezoneId: "Asia/Taipei" })
   try {
@@ -1311,9 +1374,26 @@ await check("手機：問 AI 頂端的三個圖示鈕（新對話・紀錄・關
   if (!looks[0].startsWith("44px 44px")) throw new Error(`header buttons not 44px: ${looks[0]}`)
   await dialog.getByRole("button", { name: "關閉" }).click()
 })
-await check("手機：底部分頁到紀錄", async () => {
-  await m.getByRole("link", { name: "紀錄" }).click()
-  await m.getByText("發起新對話").waitFor()
+await check("手機：AI 對話紀錄從「問 AI」的時鐘進去（底部列沒有「紀錄」分頁）→ 紀錄頁有看得到的標題；底部的「討論」到討論清單", async () => {
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  if (await m.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "紀錄" }).count()) throw new Error("the bottom bar still has a 紀錄 tab")
+  await m.getByRole("button", { name: /^問 AI/ }).click()
+  await m.getByRole("dialog").getByRole("button", { name: "紀錄", exact: true }).click()
+  await m.waitForURL(/\/history$/, { timeout: 8000 })
+  await m.getByText("發起新對話").waitFor({ timeout: 8000 })
+  await m.getByRole("dialog").waitFor({ state: "detached", timeout: 5000 })
+  // 沒有分頁告訴你這是哪一頁：標題在手機也看得到
+  const title = await m.getByRole("heading", { level: 1, name: "紀錄" }).boundingBox()
+  if (!title || title.height < 20 || title.width < 20) throw new Error(`the history page has no visible title on mobile: ${JSON.stringify(title)}`)
+  // 從紀錄挑一段對話：回到「問 AI」
+  await m.getByRole("list", { name: "對話" }).getByRole("button").first().click()
+  await m.getByRole("dialog").getByRole("button", { name: "關閉" }).click()
+  // 底部列的「討論」
+  await m.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "討論" }).click()
+  await m.waitForURL(/\/discussions$/, { timeout: 8000 })
+  await m.getByRole("heading", { level: 1, name: "討論" }).waitFor({ timeout: 8000 })
+  await m.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
+  if ((await m.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "討論" }).getAttribute("aria-current")) !== "page") throw new Error("討論 tab is not current")
 })
 
 // ── 第三輪設計修飾：手機 ───────────────────────────────────────
@@ -1569,10 +1649,367 @@ await check("手機（深色）：「問 AI」平常是紫色淡底＋框線＋�
   if (light.dark || /rgba\(0, 0, 0, 0\)/.test(light.bg) || light.bg === "rgb(245, 242, 251)") throw new Error(`light 問 AI should stay solid: ${JSON.stringify(light)}`)
 })
 
+// ── 討論串（2026-11-13）──────────────────────────────────────
+// 每個檢查用全新的瀏覽器狀態；mock 的資料在記憶體裡，同一個流程只用站內導覽（重新載入會回到示範資料）
+const fresh = async (options, fn) => {
+  const c = await browser.newContext({ locale: "zh-TW", timezoneId: "Asia/Taipei", ...options })
+  const p = await c.newPage()
+  p.on("console", (msg) => msg.type() === "error" && errors.push(`${p.url()} ${msg.text()}`))
+  p.on("pageerror", (e) => errors.push(`${p.url()} pageerror ${e.message}`))
+  try {
+    await fn(p)
+  } finally {
+    await c.close()
+  }
+}
+const DESKTOP = { viewport: { width: 1440, height: 900 } }
+const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
+const overflowX = (p) => p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+
+await check("討論（沒登入）：公開清單與主題不用登入就能讀，外殼只有字標與「登入」；群組主題看不到；「登入後發言」→ 登入 → 回到這個主題、可以回覆", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/discussions?auth=signed-out", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "討論" }).waitFor({ timeout: 8000 })
+    await p.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
+    if (!/\/discussions$/.test(new URL(p.url()).pathname)) throw new Error(`redirected to ${p.url()}`)
+    const shell = await p.evaluate(() => ({
+      nav: !!document.querySelector('nav[aria-label="主要"]'),
+      dock: !!document.querySelector(".dock"),
+      panel: !!document.querySelector("aside"),
+      ledgerLinks: [...document.querySelectorAll("a")].map((a) => a.getAttribute("href")).filter((h) => h === "/" || /^\/(stock|groups|settings|history|admin)/.test(h ?? "")),
+      rows: document.querySelectorAll('ul[aria-label="主題"] > li').length,
+      wordmarkLeft: Math.round(document.querySelector('a[aria-label="Forliosa 討論"]').getBoundingClientRect().left),
+      titleLeft: Math.round(document.querySelector("#main h1").getBoundingClientRect().left),
+    }))
+    if (shell.nav || shell.dock || shell.panel || shell.ledgerLinks.length) throw new Error(`signed-out shell is not minimal: ${JSON.stringify(shell)}`)
+    if (shell.rows !== 8) throw new Error(`expected the 8 public topics, got ${shell.rows}`)
+    if (shell.wordmarkLeft !== shell.titleLeft) throw new Error(`wordmark and content are not on one left edge: ${JSON.stringify(shell)}`)
+    if (await p.getByText("我把聯發科的交易補記好了").count()) throw new Error("a group topic is listed for a signed-out visitor")
+    if (await p.getByRole("radiogroup", { name: "範圍" }).count()) throw new Error("scope filter shown when signed out")
+    await p.getByText(DISCLAIMER).waitFor()
+    const login = p.getByRole("link", { name: "登入", exact: true })
+    const border = await login.evaluate((el) => getComputedStyle(el).borderTopColor)
+    if (/rgba\(0, 0, 0, 0\)/.test(border)) throw new Error("the 登入 button has no visible outline")
+    // 主題頁（站內導覽）：內文、回覆、被隱藏的回覆只有說明、表情只有計數、股票是純文字
+    await p.getByRole("link", { name: "台積電法說會前，大家怎麼配置？" }).click()
+    await p.getByRole("heading", { level: 1, name: "台積電法說會前，大家怎麼配置？" }).waitFor({ timeout: 8000 })
+    await p.getByText("比重超過自己睡得著的程度就調，不用等法說會。").waitFor({ timeout: 8000 })
+    await p.getByText("這則內容已被站方隱藏。", { exact: true }).waitFor()
+    if (await p.getByText(/保證獲利/).count()) throw new Error("hidden reply body leaked to a visitor")
+    if (await p.getByRole("button", { name: /加表情|^檢舉|^刪除/ }).count()) throw new Error("write actions shown to a signed-out visitor")
+    if (await p.getByRole("textbox").count()) throw new Error("a composer is shown to a signed-out visitor")
+    if (await p.locator("main").getByRole("link", { name: /台積電 2330/ }).count()) throw new Error("stock tags are links for a signed-out visitor")
+    await p.getByText(DISCLAIMER).waitFor()
+    // 群組的主題：找不到（不透露存在）
+    await p.goto(base + "/discussions/top_g_dca", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "找不到這個主題" }).waitFor({ timeout: 8000 })
+    // 登入後發言 → 登入頁 → 回到主題（已登入：一般的外殼、回覆區是選暱稱或回覆框）
+    await p.goto(base + "/discussions/top_p_tsmc", { waitUntil: "networkidle" })
+    await p.getByRole("link", { name: "登入後發言" }).click()
+    await p.waitForURL(/\/login\?next=%2Fdiscussions%2Ftop_p_tsmc/, { timeout: 8000 })
+    await p.getByRole("button", { name: "用 Discord 登入" }).click()
+    await p.waitForURL(/\/discussions\/top_p_tsmc/, { timeout: 8000 })
+    await p.getByRole("form", { name: "選公開暱稱" }).waitFor({ timeout: 8000 })
+    await p.getByRole("navigation", { name: "主要" }).waitFor({ timeout: 8000 })
+  })
+})
+
+await check("討論（主要流程）：選公開暱稱 → 發公開主題（標記股票）→ 馬上回覆被頻率限制擋下（說幾秒後）→ 等到了再送 → 按表情 → 檢舉別人的回覆 → 站方管理隱藏它", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/discussions", { waitUntil: "networkidle" })
+    await p.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
+    // 篩選「公開」後開新主題：預先選好公開
+    await p.getByRole("radiogroup", { name: "範圍" }).getByRole("radio", { name: "公開" }).click()
+    await p.getByRole("link", { name: "開新主題" }).click()
+    await p.waitForURL(/\/discussions\/new\?scope=public/, { timeout: 8000 })
+    if (!(await p.getByRole("radio", { name: /^公開/ }).isChecked())) throw new Error("公開 is not preselected")
+    // 還沒有公開暱稱：先選（保留字就地擋下、重複的由伺服器擋下）
+    const prompt = p.getByRole("form", { name: "選公開暱稱" })
+    await prompt.getByRole("textbox").fill("站方小幫手")
+    await prompt.getByRole("button", { name: "用這個暱稱" }).click()
+    await prompt.getByText("公開暱稱不能含「站方」。").waitFor({ timeout: 5000 })
+    await prompt.getByRole("textbox").fill("阿土伯")
+    await prompt.getByRole("button", { name: "用這個暱稱" }).click()
+    await prompt.getByText("這個暱稱已經有人用了，換一個試試。").waitFor({ timeout: 5000 })
+    await prompt.getByRole("textbox").fill("煙霧測試員")
+    await prompt.getByRole("button", { name: "用這個暱稱" }).click()
+    await p.getByText("公開暱稱是「煙霧測試員」").waitFor({ timeout: 8000 })
+    await prompt.waitFor({ state: "detached", timeout: 5000 })
+    await p.getByRole("form", { name: "新主題" }).getByText("以「煙霧測試員」公開發言").waitFor({ timeout: 5000 })
+    // 空的不送出
+    await p.getByRole("button", { name: "發表", exact: true }).click()
+    await p.getByText("請寫標題。").waitFor({ timeout: 5000 })
+    await p.getByText("請寫內文。").waitFor()
+    await p.getByLabel("標題").fill("煙霧測試：年底要不要再平衡？")
+    await p.getByLabel("內文").fill("今年股票漲很多，比重跑掉了。\n\n大家是固定每年調一次，還是差太多才調？\n參考：https://www.twse.com.tw/，謝謝。")
+    await p.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2330")
+    await p.getByRole("option", { name: /2330/ }).first().click()
+    await p.getByRole("list", { name: "已標記的股票" }).getByText("台積電").waitFor({ timeout: 5000 })
+    await p.getByRole("button", { name: "發表", exact: true }).click()
+    await p.waitForURL(/\/discussions\/top_\d+$/, { timeout: 8000 })
+    await p.getByRole("heading", { level: 1, name: "煙霧測試：年底要不要再平衡？" }).waitFor({ timeout: 8000 })
+    await p.getByText("已發表").waitFor({ timeout: 8000 })
+    // 內文：換行保留、網址是另開新視窗的連結（後面的全形逗號不算在網址裡）
+    const link = p.locator("article").getByRole("link", { name: /^https:\/\/www\.twse\.com\.tw\// })
+    const a = await link.evaluate((el) => ({ href: el.getAttribute("href"), target: el.target, rel: el.rel, text: el.firstChild.textContent, pre: getComputedStyle(el.parentElement).whiteSpace }))
+    if (a.href !== "https://www.twse.com.tw/" || a.target !== "_blank" || a.rel !== "nofollow ugc noopener noreferrer" || a.text !== "https://www.twse.com.tw/" || !/pre-wrap/.test(a.pre)) throw new Error(`body link: ${JSON.stringify(a)}`)
+    if ((await p.locator("article").getByRole("link", { name: /台積電 2330/ }).getAttribute("href")) !== "/stock/2330.TW") throw new Error("tagged stock is not a link to the stock page")
+    await p.getByText(DISCLAIMER).waitFor()
+    // 自己的主題：可以刪除、不能檢舉
+    await p.getByRole("button", { name: "刪除主題" }).waitFor()
+    if (await p.getByRole("button", { name: "檢舉主題" }).count()) throw new Error("can report my own topic")
+    // 馬上回覆：任兩則公開發言至少間隔 10 秒 → 就地說幾秒後可以再送，內容留著
+    const box = p.getByRole("textbox", { name: "回覆內容" })
+    await box.fill("自己先回：我是每年年底調一次。")
+    await p.getByRole("button", { name: "回覆", exact: true }).click()
+    const limited = p.getByRole("alert").filter({ hasText: /發言太頻繁，\d+ 秒後可以再送出。內容還在。/ })
+    await limited.waitFor({ timeout: 8000 })
+    if ((await box.inputValue()) !== "自己先回：我是每年年底調一次。") throw new Error("the reply text was lost on a rate limit")
+    const seconds = Number(/(\d+) 秒後/.exec(await limited.textContent())[1])
+    if (!(seconds >= 1 && seconds <= 10)) throw new Error(`retry after ${seconds}s`)
+    await p.waitForTimeout(seconds * 1000 + 300)
+    await p.getByRole("button", { name: "回覆", exact: true }).click()
+    const mine = p.getByRole("list", { name: "回覆" }).getByRole("listitem").filter({ hasText: "自己先回：我是每年年底調一次。" })
+    await mine.waitFor({ timeout: 8000 })
+    await mine.getByText("煙霧測試員（你）").waitFor()
+    await p.getByText("已送出回覆").waitFor({ timeout: 8000 })
+    if ((await box.inputValue()) !== "") throw new Error("the composer was not cleared after posting")
+    // 表情：加一個讚，立刻是自己按過的小格；再按一次收回
+    await p.locator("article > div").getByRole("button", { name: "加表情" }).first().click()
+    await p.getByRole("button", { name: "讚", exact: true }).click()
+    const chip = p.getByRole("button", { name: "讚 1，你按過" })
+    await chip.waitFor({ timeout: 5000 })
+    if ((await chip.getAttribute("aria-pressed")) !== "true") throw new Error("reaction chip not pressed")
+    // 回清單（站內導覽）：新的主題在最上面、寫著我的暱稱與 1 則回覆
+    await p.getByRole("navigation", { name: "位置" }).getByRole("link", { name: "討論" }).click()
+    const first = p.getByRole("list", { name: "主題" }).getByRole("listitem").first()
+    await first.getByText("煙霧測試：年底要不要再平衡？").waitFor({ timeout: 8000 })
+    await first.getByText(/煙霧測試員（你）・1 則回覆/).waitFor()
+    // 檢舉別人的回覆
+    await p.getByRole("link", { name: "0050 要不要改買 006208？" }).click()
+    await p.getByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }).waitFor({ timeout: 8000 })
+    await p.getByRole("button", { name: "檢舉定期定額派的回覆" }).click()
+    const dialog = p.getByRole("dialog")
+    await dialog.getByRole("button", { name: "送出檢舉" }).click()
+    await dialog.getByText("請選一個理由。").waitFor({ timeout: 5000 })
+    await dialog.getByRole("radio", { name: "廣告或洗版" }).check()
+    await dialog.getByLabel("補充說明（選填）").fill("煙霧測試的檢舉")
+    await dialog.getByRole("button", { name: "送出檢舉" }).click()
+    await p.getByText("已收到檢舉").waitFor({ timeout: 8000 })
+    await dialog.waitFor({ state: "detached", timeout: 5000 })
+    // 站方管理（頭像選單）：那一則在待處理的最上面 → 隱藏（先確認）→ 離開待處理
+    await p.getByRole("button", { name: /帳號選單/ }).click()
+    await p.getByRole("menuitem", { name: "站方管理" }).click()
+    await p.waitForURL(/\/admin\/discussions$/, { timeout: 8000 })
+    const open = p.getByRole("list", { name: "待處理的檢舉" })
+    const row = open.getByRole("listitem").filter({ hasText: "我是舊的不動、新的錢改買。" })
+    await row.waitFor({ timeout: 8000 })
+    await row.getByText(/定期定額派・檢舉 1 次：廣告或洗版 1/).waitFor()
+    await row.getByText("「煙霧測試的檢舉」").waitFor()
+    await row.getByRole("button", { name: /^隱藏/ }).click()
+    const confirm = p.getByRole("alertdialog")
+    await confirm.getByText("隱藏這則回覆？").waitFor({ timeout: 5000 })
+    await confirm.getByRole("button", { name: "隱藏", exact: true }).click()
+    await p.getByText("已隱藏這則回覆").waitFor({ timeout: 8000 })
+    await row.waitFor({ state: "detached", timeout: 8000 })
+    await p.getByRole("radio", { name: "已處理" }).click()
+    await p.getByRole("list", { name: "已處理的檢舉" }).getByRole("listitem").filter({ hasText: "我是舊的不動、新的錢改買。" }).getByText("已隱藏").waitFor({ timeout: 8000 })
+    // 回到那個主題：那一則寫著已被站方隱藏（我是站方管理員，所以還看得到原文）
+    await p.getByRole("list", { name: "已處理的檢舉" }).getByRole("listitem").filter({ hasText: "我是舊的不動、新的錢改買。" }).getByRole("link", { name: /看主題/ }).click()
+    await p.getByRole("heading", { level: 1, name: "0050 要不要改買 006208？" }).waitFor({ timeout: 8000 })
+    await p.getByRole("list", { name: "回覆" }).getByText("這則內容已被站方隱藏，其他人看不到下面的原文。").waitFor({ timeout: 8000 })
+  })
+})
+
+await check("討論（群組）：群組主題只在「全部」與那個群組的篩選裡，公開的篩選看不到；在群組裡用顯示名稱發言、不需要公開暱稱、沒有檢舉；刪除先確認", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/discussions", { waitUntil: "networkidle" })
+    const scope = p.getByRole("radiogroup", { name: "範圍" })
+    await scope.getByRole("radio", { name: "家族投資" }).waitFor({ timeout: 8000 })
+    await p.getByText("我把聯發科的交易補記好了").waitFor({ timeout: 8000 })
+    const rows = () => p.locator('ul[aria-label="主題"] > li').count()
+    if ((await rows()) !== 12) throw new Error(`全部: ${await rows()} rows`)
+    await scope.getByRole("radio", { name: "公開" }).click()
+    await p.getByText("我把聯發科的交易補記好了").waitFor({ state: "detached", timeout: 8000 })
+    if ((await rows()) !== 8) throw new Error(`公開: ${await rows()} rows`)
+    await scope.getByRole("radio", { name: "家族投資" }).click()
+    await p.getByText("我把聯發科的交易補記好了").waitFor({ timeout: 8000 })
+    await p.getByText("台積電法說會前，大家怎麼配置？").waitFor({ state: "detached", timeout: 8000 })
+    if ((await rows()) !== 3) throw new Error(`家族投資: ${await rows()} rows`)
+    if (await p.getByText(DISCLAIMER).count()) throw new Error("the public disclaimer is shown on group-only content")
+    // 排序：最新主題（記在網址）
+    await p.getByRole("radiogroup", { name: "排序" }).getByRole("radio", { name: "最新主題" }).click()
+    await p.waitForURL(/sort=new/, { timeout: 8000 })
+    await p.locator(".form-head").getByText("發表", { exact: true }).waitFor({ timeout: 8000 })
+    // 群組主題：用顯示名稱、頭像；沒有公開暱稱也能回覆；沒有檢舉
+    await p.getByRole("link", { name: "這個月的定期定額，大家扣了嗎？" }).click()
+    await p.getByRole("heading", { level: 1, name: "這個月的定期定額，大家扣了嗎？" }).waitFor({ timeout: 8000 })
+    await p.getByText("已離開的成員").waitFor({ timeout: 8000 })
+    if (await p.getByRole("button", { name: /^檢舉/ }).count()) throw new Error("group content can be reported")
+    if (await p.getByText(DISCLAIMER).count()) throw new Error("the public disclaimer is shown on a group topic")
+    const form = p.getByRole("form", { name: "回覆這個主題" })
+    await form.getByText("以「示範使用者」在「家族投資」發言").waitFor({ timeout: 8000 })
+    const box = form.getByRole("textbox", { name: "回覆內容" })
+    const before = await box.evaluate((el) => ({ h: el.getBoundingClientRect().height, resize: getComputedStyle(el).resize }))
+    await box.fill("我這個月也扣了。\n\n下個月想加碼一點。\n\n再想想。\n\n先這樣。")
+    const after = await box.evaluate((el) => el.getBoundingClientRect().height)
+    if (before.resize !== "none" || after <= before.h) throw new Error(`the reply box should grow with its content and have no resize grip: ${JSON.stringify({ before, after })}`)
+    await form.getByRole("button", { name: "回覆", exact: true }).click()
+    const mine = p.getByRole("list", { name: "回覆" }).getByRole("listitem").filter({ hasText: "我這個月也扣了。" })
+    await mine.waitFor({ timeout: 8000 })
+    await mine.getByText("示範使用者（你）").waitFor()
+    // 刪除：先確認（墨色，不是紅色）
+    await mine.getByRole("button", { name: /^刪除/ }).click()
+    const confirm = p.getByRole("alertdialog")
+    await confirm.getByText("刪除這則回覆？").waitFor({ timeout: 5000 })
+    const tone = await confirm.getByRole("button", { name: "刪除", exact: true }).evaluate((el) => {
+      const v = (n) => { const d = document.createElement("div"); d.style.color = `var(${n})`; document.body.appendChild(d); const out = getComputedStyle(d).color; d.remove(); return out }
+      return { bg: getComputedStyle(el).backgroundColor, act: v("--act"), red: v("--red") }
+    })
+    if (tone.bg !== tone.act || tone.bg === tone.red) throw new Error(`the delete button is not ink: ${JSON.stringify(tone)}`)
+    await confirm.getByRole("button", { name: "刪除", exact: true }).click()
+    await p.getByText("已刪除回覆").waitFor({ timeout: 8000 })
+    await mine.waitFor({ state: "detached", timeout: 8000 })
+  })
+})
+
+await check("討論（入口與設定）：個股的「討論」分頁（開新主題預先標記這一檔）、群組的「討論」分頁（預先選好群組）、設定的公開暱稱、停權時的說明、不是管理員看不到站方管理", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
+    const tabs = await p.getByRole("tablist", { name: "個股資料" }).getByRole("tab").allTextContents()
+    if (tabs.join("・") !== "總覽・估值・財務・籌碼・股利・事件・討論") throw new Error(`stock tabs: ${tabs.join("・")}`)
+    await p.getByRole("tab", { name: "討論" }).click()
+    await p.getByText("0050 要不要改買 006208？").waitFor({ timeout: 8000 })
+    await p.getByText("這個月的定期定額，大家扣了嗎？").waitFor()
+    if (await p.getByText("第一次買零股，手續費怎麼算？").count()) throw new Error("an untagged topic is listed on the stock tab")
+    await p.getByRole("link", { name: "開新主題" }).click()
+    await p.waitForURL(/\/discussions\/new\?symbol=0050\.TW/, { timeout: 8000 })
+    await p.getByRole("list", { name: "已標記的股票" }).getByText("元大台灣50").waitFor({ timeout: 8000 })
+    // 沒有預先選發到哪裡：不替使用者決定
+    if (await p.getByRole("radio", { checked: true }).count()) throw new Error("a destination is preselected without a preset")
+    // 群組的討論分頁
+    await p.goto(base + "/groups/grp_family", { waitUntil: "networkidle" })
+    await p.getByRole("tab", { name: "討論" }).click()
+    await p.getByText("過年的紅包，要不要一起存 0056？").waitFor({ timeout: 8000 })
+    await p.getByRole("link", { name: "開新主題" }).click()
+    await p.waitForURL(/\/discussions\/new\?scope=group&group_id=grp_family/, { timeout: 8000 })
+    if (!(await p.getByRole("radio", { name: /^家族投資/ }).isChecked())) throw new Error("the group is not preselected")
+    await p.getByRole("form", { name: "新主題" }).getByText("以「示範使用者」在「家族投資」發言").waitFor({ timeout: 8000 })
+    // 設定：公開暱稱（改過才有簽名格）；個人資料的錨點
+    await p.goto(base + "/settings#profile", { waitUntil: "networkidle" })
+    const name = p.getByLabel("公開暱稱")
+    await name.waitFor({ timeout: 8000 })
+    const form = p.locator("form").filter({ has: name })
+    if (await form.getByRole("button", { name: "儲存", exact: true }).count()) throw new Error("save shown before the public name changed")
+    await name.fill("煙霧測試員")
+    await form.getByRole("button", { name: "儲存", exact: true }).click()
+    await p.getByText("公開暱稱是「煙霧測試員」").waitFor({ timeout: 8000 })
+    await p.getByText(/改了之後 7 天內不能再改。/).waitFor({ timeout: 8000 })
+    // 第一次改名不用等；再改就要等 7 天
+    await name.fill("煙霧測試員二")
+    await form.getByRole("button", { name: "儲存", exact: true }).click()
+    await p.getByText("公開暱稱是「煙霧測試員二」").waitFor({ timeout: 8000 })
+    await name.fill("煙霧測試員三")
+    await form.getByRole("button", { name: "儲存", exact: true }).click()
+    await p.getByText("公開暱稱 7 天內只能改一次，7 天後可以再改。").waitFor({ timeout: 8000 })
+    // 停權：設定與回覆區都寫到什麼時候；群組照常
+    await p.goto(base + "/settings?discuss=suspended", { waitUntil: "networkidle" })
+    await p.getByText("你的公開發言已被站方暫停到 11/19（四）13:30。群組裡的發言不受影響。").waitFor({ timeout: 8000 })
+    await p.goto(base + "/discussions/top_p_etf", { waitUntil: "networkidle" })
+    await p.getByText("你的公開發言已被站方暫停到 11/19（四）13:30。群組裡的發言不受影響。").waitFor({ timeout: 8000 })
+    if (await p.getByRole("textbox", { name: "回覆內容" }).count()) throw new Error("composer shown while suspended")
+    await p.goto(base + "/discussions/top_g_dca", { waitUntil: "networkidle" })
+    await p.getByRole("textbox", { name: "回覆內容" }).waitFor({ timeout: 8000 })
+    // 不是站方管理員：頭像選單沒有「站方管理」，網址是找不到頁面
+    await p.goto(base + "/admin/discussions?discuss=member", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "找不到這個頁面" }).waitFor({ timeout: 8000 })
+    await p.getByRole("button", { name: /帳號選單/ }).click()
+    await p.getByRole("menuitem", { name: "設定", exact: true }).waitFor({ timeout: 5000 })
+    if (await p.getByRole("menuitem", { name: "站方管理" }).count()) throw new Error("站方管理 shown to a non-admin")
+  })
+})
+
+await check("討論（查看別人的資產）：討論的每一頁都擋下，個股頁沒有「討論」分頁", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/settings", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "查看爸爸的資產" }).click()
+    await p.getByText("正在查看 爸爸 的資產（唯讀）").waitFor({ timeout: 8000 })
+    for (const path of ["/discussions", "/discussions/top_p_etf", "/discussions/new"]) {
+      await p.goto(base + path, { waitUntil: "networkidle" })
+      await p.getByText(/這裡是你自己的討論，結束查看後才能使用/).waitFor({ timeout: 8000 })
+    }
+    await p.goto(base + "/admin/discussions", { waitUntil: "networkidle" })
+    await p.getByText(/這裡是你自己的站方管理，結束查看後才能使用/).waitFor({ timeout: 8000 })
+    await p.goto(base + "/stock/2330.TW?tab=discussions", { waitUntil: "networkidle" })
+    await p.getByText("參考價").first().waitFor({ timeout: 8000 })
+    if (await p.getByRole("tab", { name: "討論" }).count()) throw new Error("the stock page has a 討論 tab in view-as mode")
+  })
+})
+
+await check("手機：討論的清單、主題、開新主題、站方管理——可按範圍都 ≥ 44×44、頁面不橫向捲動；清單整列可以按、日期格是窄的一欄；沒登入也一樣", async () => {
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    for (const [path, ready] of [
+      ["/discussions", "台積電法說會前，大家怎麼配置？"],
+      ["/discussions?scope=group&group_id=grp_family", "我把聯發科的交易補記好了"],
+      ["/discussions/top_p_tsmc", "比重超過自己睡得著的程度就調"],
+      ["/discussions/top_p_tsmc?discuss=named", "比重超過自己睡得著的程度就調"],
+      ["/discussions/top_p_odd", "每家券商的最低手續費不一樣"],
+      ["/discussions/top_g_dca?discuss=default", "我明天去問營業員怎麼設定"],
+      ["/discussions/new?scope=public&symbol=2330.TW", "先選一個公開暱稱"],
+      ["/discussions/new?discuss=named&symbol=2330.TW", "標記的主題也會出現"],
+      ["/admin/discussions?discuss=default", "停權中"],
+      ["/admin/discussions?status=resolved", "已隱藏"],
+      ["/stock/2330.TW?tab=discussions", "台積電法說會前，大家怎麼配置？"],
+      ["/groups/grp_family?tab=discussions", "過年的紅包，要不要一起存 0056？"],
+      ["/settings", "公開暱稱"],
+    ]) {
+      await p.goto(base + path, { waitUntil: "networkidle" })
+      await p.getByText(ready).first().waitFor({ timeout: 8000 })
+      await p.waitForTimeout(400)
+      const wide = await overflowX(p)
+      if (wide > 0) throw new Error(`${path}: the page scrolls sideways by ${wide}px`)
+      const small = await smallTargets(p)
+      if (small.length) throw new Error(`${path}: ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
+    }
+    // 清單：整列可以按（按在列的右邊也到主題）、日期格是窄的一欄（標題有地方寫）
+    await p.goto(base + "/discussions", { waitUntil: "networkidle" })
+    const row = p.locator('ul[aria-label="主題"] > li').filter({ hasText: "定期定額的扣款日，選幾號有差嗎？" })
+    await row.waitFor({ timeout: 8000 })
+    const hit = await row.evaluate((li) => {
+      const a = li.querySelector("a")
+      const r = li.getBoundingClientRect()
+      li.scrollIntoView({ block: "center" })
+      const b = li.getBoundingClientRect()
+      const at = document.elementFromPoint(b.right - 6, b.top + b.height / 2)
+      const date = li.querySelector(".date-cell").getBoundingClientRect()
+      return { h: r.height, covers: at === a || a.contains(at), dateW: Math.round(date.width), titleLines: Math.round(a.getBoundingClientRect().height / parseFloat(getComputedStyle(a).lineHeight)) }
+    })
+    if (hit.h < 44 || !hit.covers) throw new Error(`the topic row is not one link: ${JSON.stringify(hit)}`)
+    if (hit.dateW > 56 || hit.titleLines !== 1) throw new Error(`the date column leaves too little room for the title: ${JSON.stringify(hit)}`)
+    await row.click({ position: { x: 300, y: 20 } })
+    await p.waitForURL(/\/discussions\/top_p_day$/, { timeout: 8000 })
+  })
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    for (const [path, ready] of [
+      ["/discussions?auth=signed-out", "台積電法說會前，大家怎麼配置？"],
+      ["/discussions/top_p_tsmc", "比重超過自己睡得著的程度就調"],
+    ]) {
+      await p.goto(base + path, { waitUntil: "networkidle" })
+      await p.getByText(ready).first().waitFor({ timeout: 8000 })
+      await p.waitForTimeout(400)
+      if (await p.locator(".dock").count()) throw new Error(`${path}: the bottom bar is shown to a signed-out visitor`)
+      const wide = await overflowX(p)
+      if (wide > 0) throw new Error(`${path}: the page scrolls sideways by ${wide}px`)
+      const small = await smallTargets(p)
+      if (small.length) throw new Error(`${path} (signed out): ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
+    }
+  })
+})
+
 await browser.close()
 if (errors.length) {
   failed++
   console.error(`\n${errors.length} 個 console 錯誤：\n  ${errors.slice(0, 10).join("\n  ")}`)
 }
-console.log(failed ? `\n${failed} 項失敗` : "\n全部通過")
+console.log(failed ? `\n${failed} 項失敗` : onlyCheck ? `\n名稱含「${onlyCheck}」的檢查通過（不是整份）` : "\n全部通過")
 process.exitCode = failed ? 1 : 0

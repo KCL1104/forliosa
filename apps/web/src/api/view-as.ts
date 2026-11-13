@@ -47,13 +47,13 @@ export function targetOf(d: Delegation): ViewAsTarget {
 }
 
 /**
- * 查看者自己的端點不帶標頭：自己的資料（`/me`、顯示偏好）、登入，以及讀自己收到的授權（`GET /delegations`：
+ * 查看者自己的端點不帶標頭：自己的資料（`/me`、顯示偏好、公開暱稱）、登入，以及讀自己收到的授權（`GET /delegations`：
  * 查看中用來更新橫幅的範圍，授權者可能改了範圍或刪了帳戶）。授權的寫入照樣帶標頭（伺服器回 read_only）。
  * 其他請求一律帶上，讓伺服器的白名單把關（預設拒絕；萬一畫面漏擋了寫入，伺服器回 read_only）。
  */
 export function sendsViewAs(path: string, method = "GET"): boolean {
   if (method.toUpperCase() === "GET" && /^\/delegations(\?|$)/.test(path)) return false
-  return !/^\/(me|me\/preferences|auth\/[^?]*)(\?|$)/.test(path)
+  return !/^\/(me|me\/preferences|users\/me\/public-name|auth\/[^?]*)(\?|$)/.test(path)
 }
 
 /** 帳本主人的稱呼：自己的帳本照原本寫「你」／「我」，查看別人的資產時換成授權者的名稱（「爸爸的成本」「只看爸爸的」） */

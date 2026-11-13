@@ -81,8 +81,9 @@ export function useDeleteDelegation() {
 }
 
 // ── 群組 ──────────────────────────────────────────────────
-export function useGroups() {
-  return useQuery({ queryKey: sk.groups, queryFn: () => api.listGroups(), staleTime: 30_000 })
+/** `enabled`：不用登入就能讀的頁面（公開討論）沒登入時不問（要登入，會 401） */
+export function useGroups(enabled = true) {
+  return useQuery({ enabled, queryKey: sk.groups, queryFn: () => api.listGroups(), staleTime: 30_000 })
 }
 export function useGroup(id: string) {
   return useQuery({ queryKey: sk.group(id), queryFn: () => api.getGroup(id), staleTime: 30_000, retry: no4xxRetry })

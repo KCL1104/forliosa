@@ -23,6 +23,7 @@ import { addDays, dailyCandles, dividendRecords, MOCK_AS_OF, MOCK_TODAY, monthly
 import { createRecurringStore, seedPlans } from "./recurring"
 import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
 import { createSharingStore, type MemberSource } from "./sharing"
+import { createDiscussionStore, type DiscussionOptions } from "./discussions"
 import { closedRounds, positionHistory } from "./rounds"
 import {
   buildChips,
@@ -79,6 +80,27 @@ export function readMockSignedIn(): boolean {
   }
 }
 
+/**
+ * mock 的討論串情境：網址 `?discuss=named`（示範使用者已經有公開暱稱「示範小資」）、`?discuss=suspended`（有暱稱、公開發言被停權 7 天）、
+ * `?discuss=member`（不是站方管理員）；`?discuss=default` 切回預設（沒有公開暱稱、是站方管理員）。記在 sessionStorage。
+ */
+export function readMockDiscussion(): DiscussionOptions {
+  if (typeof window === "undefined") return {}
+  let mode: string | null = null
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("discuss")
+    if (fromUrl === "default") window.sessionStorage.removeItem("forliosa:mock-discuss")
+    else if (fromUrl === "named" || fromUrl === "suspended" || fromUrl === "member") window.sessionStorage.setItem("forliosa:mock-discuss", fromUrl)
+    mode = window.sessionStorage.getItem("forliosa:mock-discuss")
+  } catch {
+    // sessionStorage 不可用時使用預設情境
+  }
+  if (mode === "named") return { publicName: "示範小資" }
+  if (mode === "suspended") return { publicName: "示範小資", suspended: true }
+  if (mode === "member") return { admin: false }
+  return {}
+}
+
 const DEFAULT_PREFS: Preferences = {
   color_convention: "tw",
   theme: "system",
@@ -100,6 +122,10 @@ export interface MockOptions {
   signedIn?: boolean
   /** 台股的市場狀態（預設 closed：最新的收盤價已經進來）；`?market=open|pending` 模擬盤中、收盤後還沒公布 */
   market?: MockMarket
+  /** 討論串：示範使用者的公開暱稱、是不是站方管理員、有沒有被停權（預設：沒有暱稱、是管理員、沒有停權） */
+  discussion?: DiscussionOptions
+  /** 討論串的時鐘（毫秒，預設 Date.now）：頻率限制與暱稱冷卻用實際經過的時間算；測試時換掉就不用等 */
+  clock?: () => number
 }
 
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
@@ -195,6 +221,23 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     scenario,
   )
 
+  // ── 討論串：時間從示範資料的「現在」起算，加上開啟後實際經過的時間（10 秒間隔、7 天冷卻都照真的時間） ──
+  const clock = options.clock ?? Date.now
+  const clockStart = clock()
+  const discussions = createDiscussionStore(
+    {
+      me: () => ({ user_id: user.id, display_name: user.display_name, avatar_url: user.avatar_url ?? null }),
+      signedIn: () => signedIn,
+      myGroupRoles: () => sharing.myGroupRoles(),
+      groupRoster: (id) => sharing.groupRoster(id),
+      now: () => Date.parse(MOCK_AS_OF) + (clock() - clockStart),
+    },
+    scenario,
+    options.discussion,
+  )
+  /** `User`：個人資料多了 public_name、is_admin、public_posting_suspended_until（`GET /me`、開發登入、PATCH 都有） */
+  const me = (): User => ({ ...user, ...discussions.meFields() })
+
   /**
    * 這次請求讀的是誰的帳本：平常是我；查看模式是授權者，而且只有授權範圍內的帳戶
    * （伺服器的分享投影；`account_id` 超出範圍回 404）。
@@ -289,7 +332,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     devLogin: (body) =>
       wait(() => {
         signedIn = true
-        return (user = { ...user, email: body.email, display_name: body.display_name ?? body.email.split("@")[0]! })
+        user = { ...user, email: body.email, display_name: body.display_name ?? body.email.split("@")[0]! }
+        return me()
       }),
     logout: () =>
       wait(() => {
@@ -298,9 +342,13 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getMe: () =>
       wait(() => {
         if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
-        return user
+        return me()
       }),
-    updatePreferences: (patch) => wait(() => (user = { ...user, preferences: { ...user.preferences, ...patch } })),
+    updatePreferences: (patch) =>
+      wait(() => {
+        user = { ...user, preferences: { ...user.preferences, ...patch } }
+        return me()
+      }),
 
     listAccounts: () => wait(() => ledger().accounts),
     createAccount: (body) =>
@@ -595,7 +643,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       wait(() => {
         const name = (patch.display_name ?? "").trim()
         if (name.length < 1 || name.length > 30) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：display_name")
-        return (user = { ...user, display_name: name })
+        user = { ...user, display_name: name }
+        return me()
       }),
     listDelegations: () => wait(() => sharing.listDelegations()),
     listDelegationCandidates: () => wait(() => sharing.listDelegationCandidates()),
@@ -606,7 +655,12 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     createGroup: (body) => wait(() => sharing.createGroup(body)),
     getGroup: (id) => wait(() => sharing.getGroup(id)),
     updateGroup: (id, patch) => wait(() => sharing.updateGroup(id, patch)),
-    deleteGroup: (id) => wait(() => sharing.deleteGroup(id)),
+    deleteGroup: (id) =>
+      wait(() => {
+        sharing.deleteGroup(id)
+        // 刪除群組時連同它的主題一起刪
+        discussions.purgeGroup(id)
+      }),
     transferGroup: (id, userId) => wait(() => sharing.transferGroup(id, userId)),
     setMemberRole: (id, userId, role) => wait(() => sharing.setMemberRole(id, userId, role)),
     removeMember: (id, userId) => wait(() => sharing.removeMember(id, userId)),
@@ -634,6 +688,28 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     linkTelegram: (id) => wait(() => sharing.linkTelegram(id)),
     patchTelegram: (id, patch) => wait(() => sharing.patchTelegram(id, patch)),
     deleteTelegram: (id) => wait(() => sharing.deleteTelegram(id)),
+
+    // ── 討論串 ──
+    setPublicName: (name) =>
+      wait(() => {
+        discussions.setPublicName(name)
+        return me()
+      }),
+    listTopics: (query) => wait(() => discussions.listTopics(query)),
+    createTopic: (body) => wait(() => discussions.createTopic(body)),
+    getTopic: (id) => wait(() => discussions.getTopic(id)),
+    deleteTopic: (id) => wait(() => discussions.deleteTopic(id)),
+    listReplies: (topicId, query) => wait(() => discussions.listReplies(topicId, query)),
+    createReply: (topicId, body) => wait(() => discussions.createReply(topicId, body)),
+    deleteReply: (id) => wait(() => discussions.deleteReply(id)),
+    addDiscussionReaction: (body) => wait(() => discussions.addReaction(body)),
+    removeDiscussionReaction: (target, emoji) => wait(() => discussions.removeReaction(target, emoji)),
+    reportDiscussion: (body) => wait(() => discussions.report(body)),
+    listAdminReports: (query) => wait(() => discussions.adminReports(query)),
+    moderateDiscussion: (body) => wait(() => discussions.moderate(body)),
+    listSuspensions: () => wait(() => discussions.listSuspensions()),
+    createSuspension: (body) => wait(() => discussions.createSuspension(body)),
+    liftSuspension: (id) => wait(() => discussions.liftSuspension(id)),
   }
 
   return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)
@@ -642,11 +718,13 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 // ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
 type MethodName = Exclude<keyof ForliosaApi, "kind">
 /** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
-const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations"])
+const VIEWER_OWN = new Set<MethodName>(["devLogin", "logout", "getMe", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "listDelegations", "setPublicName"])
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
   "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",
   "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions", "getMarketStatus",
+  // 討論串的讀取一律以登入者本人回答（前端在查看模式擋下討論頁）
+  "listTopics", "getTopic", "listReplies",
 ])
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([
@@ -660,6 +738,8 @@ const WRITES = new Set<MethodName>([
   "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
+  "createTopic", "deleteTopic", "createReply", "deleteReply", "addDiscussionReaction", "removeDiscussionReaction", "reportDiscussion",
+  "moderateDiscussion", "createSuspension", "liftSuspension",
 ])
 
 function guardViewAs(base: ForliosaApi, validate: (id: string) => unknown, wait: <T>(value: T | (() => T)) => Promise<T>): ForliosaApi {

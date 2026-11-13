@@ -88,7 +88,12 @@ async function fetchMe(): Promise<User> {
   }
 }
 
-export const meQuery = () => queryOptions({ queryKey: qk.me, queryFn: fetchMe, staleTime: 5 * 60_000 })
+/**
+ * `retryOnMount: false`：沒登入（401）時，之後掛上來的元件不再各自重問一次 `/me`——
+ * 不用登入就能讀的頁面（公開討論）裡，每個想知道「有沒有登入」的元件都讀這個查詢；重問會讓登入閘門回到載入中、
+ * 把整頁卸載再掛回來。Session 的變化由登入（寫入快取）與 401 的重設（main.tsx）處理。
+ */
+export const meQuery = () => queryOptions({ queryKey: qk.me, queryFn: fetchMe, staleTime: 5 * 60_000, retryOnMount: false })
 export const accountsQuery = () => queryOptions({ queryKey: qk.accounts, queryFn: () => api.listAccounts(), staleTime: 5 * 60_000 })
 export const summaryQuery = (accountId?: string) =>
   queryOptions({ queryKey: qk.summary(accountId), queryFn: () => api.getPortfolioSummary(accountId), staleTime: 30_000 })
@@ -97,6 +102,14 @@ export const holdingsQuery = (accountId?: string) =>
 
 export function useMe() {
   return useQuery(meQuery())
+}
+/**
+ * 現在是誰在看（不用登入就能讀的頁面用）：`user` 沒登入是 null。
+ * 登入閘門已經確認過 `/me`，所以這裡不會是載入中——只有「有登入」和「沒登入」。
+ */
+export function useViewer(): { user: User | null; signedIn: boolean } {
+  const me = useQuery(meQuery())
+  return { user: me.data ?? null, signedIn: !!me.data }
 }
 export function useAccounts() {
   return useQuery(accountsQuery())

@@ -40,6 +40,13 @@ mock 預設模擬後端的 `DATA_POLICY=commercial`（只用可商用資料）�
 | `/?mock=empty` | 首次使用：沒有帳戶、沒有交易 |
 | `/?mock=stress` | 壓力測試：超長股名、上千億金額、大幅虧損 |
 | `/?policy=personal` | 舊的示範資料（`is_demo: true`、有盤中走勢與媒體新聞） |
+| `/discussions?auth=signed-out` | 還沒登入：公開討論的清單與主題頁讀得到（精簡的外殼），其他頁面導到登入頁；`?auth=signed-in` 切回 |
+| `/discussions?discuss=named` | 討論：示範使用者已經有公開暱稱「示範小資」（預設沒有，發公開內容前要先選） |
+| `/discussions?discuss=suspended` | 討論：有公開暱稱，公開發言被站方暫停 7 天 |
+| `/discussions?discuss=member` | 討論：示範使用者不是站方管理員（預設是，頭像選單有「站方管理」）；`?discuss=default` 切回 |
+
+mock 的討論資料在記憶體裡（重新載入就回到示範資料）：8 則公開主題、家族投資 3 則、大學同學 1 則，含一則被站方隱藏的回覆、兩則待處理的檢舉與一筆停權。
+頻率限制和後端一樣照實際的時間算：連發兩則公開內容，第二則會被擋下並說幾秒後可以再送。
 
 ## 指令
 

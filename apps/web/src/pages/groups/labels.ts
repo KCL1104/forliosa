@@ -1,18 +1,11 @@
-import type { GroupRole, LeaderboardPeriod, ReactionEmoji, ShareSettings } from "@/api/types"
+import type { GroupRole, LeaderboardPeriod, ShareSettings } from "@/api/types"
 
 export const ROLE_LABEL: Record<GroupRole, string> = { owner: "擁有者", admin: "管理員", member: "成員" }
 
 export const PERIOD_LABEL: Record<LeaderboardPeriod, string> = { day: "今日", month: "本月", year: "今年" }
 
-/** 表情的念法（螢幕閱讀器與滑過說明） */
-export const EMOJI_LABEL: Record<ReactionEmoji, string> = {
-  "👍": "讚",
-  "🎉": "恭喜",
-  "🔥": "厲害",
-  "😮": "驚訝",
-  "😢": "難過",
-  "👀": "關注",
-}
+/** 表情的念法（螢幕閱讀器與滑過說明）：和討論串共用 */
+export { EMOJI_LABEL } from "@/lib/labels"
 
 /** 接受邀請時的預設：只開報酬率（本人確認後才送出） */
 export const DEFAULT_SHARE: ShareSettings = { returns: true, holdings: false, amounts: false, trades: false, trade_prices: false, push: false }

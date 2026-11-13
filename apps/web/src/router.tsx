@@ -4,8 +4,8 @@ import { RootLayout } from "@/app/RootLayout"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 import { LedgerPage } from "@/pages/ledger/LedgerPage"
 
-/** 個股頁六個分頁：總覽・估值・財務・籌碼・股利・事件 */
-export const STOCK_TABS = ["overview", "valuation", "financials", "chips", "dividends", "events"] as const
+/** 個股頁七個分頁：總覽・估值・財務・籌碼・股利・事件・討論 */
+export const STOCK_TABS = ["overview", "valuation", "financials", "chips", "dividends", "events", "discussions"] as const
 export type StockTab = (typeof STOCK_TABS)[number]
 
 export const LEDGER_VIEWS = ["holdings", "transactions", "dividends", "performance"] as const
@@ -16,8 +16,8 @@ export interface LedgerSearch {
   symbol?: string
 }
 
-/** 群組頁的分頁：排行・動態・持股・週報・我的分享・成員・頻道 */
-export const GROUP_TABS = ["ranking", "feed", "holdings", "digests", "share", "members", "channels"] as const
+/** 群組頁的分頁：排行・動態・討論・持股・週報・我的分享・成員・頻道 */
+export const GROUP_TABS = ["ranking", "feed", "discussions", "holdings", "digests", "share", "members", "channels"] as const
 export type GroupTab = (typeof GROUP_TABS)[number]
 export interface GroupSearch {
   tab?: GroupTab
@@ -27,6 +27,30 @@ export interface GroupSearch {
 export interface LoginSearch {
   next?: string
   error?: string
+}
+/** 討論清單：沒有 scope 是「全部」（公開＋我的群組）；`scope=public` 只看公開；`scope=group&group_id=` 只看一個群組 */
+export interface DiscussionsSearch {
+  scope?: "public" | "group"
+  group_id?: string
+  /** 預設依最後回覆排序；`new` 依發表時間 */
+  sort?: "new"
+}
+/** 開新主題：預先選好發到哪裡（`scope`、`group_id`）與標記的股票（`symbol`） */
+export interface NewTopicSearch {
+  scope?: "public" | "group"
+  group_id?: string
+  symbol?: string
+}
+/** 站方管理：預設是待處理的檢舉；`status=resolved` 是已處理 */
+export interface AdminDiscussionsSearch {
+  status?: "resolved"
+}
+const text = (v: unknown) => (typeof v === "string" && v ? v : undefined)
+/** `scope=group` 一定要有 `group_id`，否則當作沒有指定 */
+const scopeSearch = (s: Record<string, unknown>): { scope?: "public" | "group"; group_id?: string } => {
+  const group = text(s.group_id)
+  if (s.scope === "group" && group) return { scope: "group", group_id: group }
+  return { scope: s.scope === "public" ? "public" : undefined, group_id: undefined }
 }
 
 const rootRoute = createRootRouteWithContext<{ queryClient: QueryClient }>()({
@@ -97,6 +121,33 @@ const historyRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/history/HistoryPage"), "HistoryPage"),
 })
 
+const discussionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/discussions",
+  validateSearch: (s: Record<string, unknown>): DiscussionsSearch => ({ ...scopeSearch(s), sort: s.sort === "new" ? "new" : undefined }),
+  component: lazyRouteComponent(() => import("@/pages/discussions/DiscussionsPage"), "DiscussionsPage"),
+})
+
+const newTopicRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/discussions/new",
+  validateSearch: (s: Record<string, unknown>): NewTopicSearch => ({ ...scopeSearch(s), symbol: text(s.symbol) }),
+  component: lazyRouteComponent(() => import("@/pages/discussions/NewTopicPage"), "NewTopicPage"),
+})
+
+const topicRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/discussions/$topicId",
+  component: lazyRouteComponent(() => import("@/pages/discussions/TopicPage"), "TopicPage"),
+})
+
+const adminDiscussionsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/discussions",
+  validateSearch: (s: Record<string, unknown>): AdminDiscussionsSearch => ({ status: s.status === "resolved" ? "resolved" : undefined }),
+  component: lazyRouteComponent(() => import("@/pages/admin/AdminDiscussionsPage"), "AdminDiscussionsPage"),
+})
+
 const dataSourcesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/data-sources",
@@ -128,6 +179,10 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   inviteRoute,
   historyRoute,
+  discussionsRoute,
+  newTopicRoute,
+  topicRoute,
+  adminDiscussionsRoute,
   settingsRoute,
   dataSourcesRoute,
   legacy("/holdings", "/"),

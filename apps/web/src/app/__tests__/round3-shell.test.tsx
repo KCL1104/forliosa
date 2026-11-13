@@ -57,23 +57,29 @@ const draft: Draft = {
 const thread: Thread = { id: "thr_1", title: "買 0050 2 張 52.4", updatedAt: at, messages: [{ id: "m1", role: "user", text: "買 0050 2 張 52.4", at }] }
 
 describe("導覽設定（nav.ts）：一個地方", () => {
-  it("頂部列兩個目的地、底部列三個分頁；個股頁算在帳本裡", () => {
-    expect(NAV_ITEMS.map((n) => n.label)).toEqual(["帳本", "群組"])
-    expect(DOCK_TABS.map((n) => n.label)).toEqual(["帳本", "群組", "紀錄"])
+  it("頂部列三個目的地（帳本・群組・討論）、底部列同樣三個分頁（紀錄不在底部列）；個股頁算在帳本裡", () => {
+    expect(NAV_ITEMS.map((n) => n.label)).toEqual(["帳本", "群組", "討論"])
+    expect(DOCK_TABS.map((n) => n.label)).toEqual(["帳本", "群組", "討論"])
     const ledger = NAV_ITEMS[0]!
     expect(ledger.match("/")).toBe(true)
     expect(ledger.match("/stock/2330.TW")).toBe(true)
     expect(ledger.match("/settings")).toBe(false)
     expect(NAV_ITEMS[1]!.match("/groups/grp_family/members/usr_dad")).toBe(true)
+    const discussions = NAV_ITEMS[2]!
+    expect(discussions.to).toBe("/discussions")
+    for (const p of ["/discussions", "/discussions/new", "/discussions/top_p_tsmc"]) expect(discussions.match(p)).toBe(true)
+    for (const p of ["/", "/groups", "/admin/discussions", "/discussionsx"]) expect(discussions.match(p)).toBe(false)
   })
 
-  it("安靜的頁面：群組（清單、群組、成員）、設定、紀錄、資料來源；帳本與個股頁不是", () => {
-    expect([...QUIET_ROUTES]).toEqual(["/groups", "/settings", "/history", "/data-sources"])
-    for (const p of ["/groups", "/groups/grp_family", "/groups/grp_family/members/usr_dad", "/settings", "/history", "/data-sources"]) expect(isQuietRoute(p)).toBe(true)
-    for (const p of ["/", "/stock/2330.TW", "/groupsx", "/settings-old"]) expect(isQuietRoute(p)).toBe(false)
-    expect([...ACCOUNT_ROUTES]).toEqual(["/settings", "/data-sources"])
+  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、站方管理、設定、紀錄、資料來源；帳本與個股頁不是", () => {
+    expect([...QUIET_ROUTES]).toEqual(["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources"])
+    for (const p of ["/groups", "/groups/grp_family", "/groups/grp_family/members/usr_dad", "/discussions", "/discussions/new", "/discussions/top_p_tsmc", "/admin/discussions", "/settings", "/history", "/data-sources"]) expect(isQuietRoute(p)).toBe(true)
+    for (const p of ["/", "/stock/2330.TW", "/groupsx", "/settings-old", "/administrator"]) expect(isQuietRoute(p)).toBe(false)
+    expect([...ACCOUNT_ROUTES]).toEqual(["/settings", "/data-sources", "/admin"])
     expect(isAccountRoute("/settings")).toBe(true)
+    expect(isAccountRoute("/admin/discussions")).toBe(true)
     expect(isAccountRoute("/history")).toBe(false)
+    expect(isAccountRoute("/discussions")).toBe(false)
   })
 })
 
@@ -82,7 +88,7 @@ describe("手機底部列", () => {
     renderApp("/")
     const nav = await screen.findByRole("navigation", { name: "主要" }, T)
     const links = within(nav).getAllByRole("link")
-    expect(links.map((l) => l.textContent)).toEqual(["帳本", "群組", "紀錄"])
+    expect(links.map((l) => l.textContent)).toEqual(["帳本", "群組", "討論"])
     // 列和內容同一個左右邊界（20px）；分頁各自有左右內距，整組往左收回同樣的距離，第一個字落在邊界上
     expect(nav.parentElement!.className).toMatch(/\bpx-5\b/)
     expect(nav.className).toMatch(/-ml-4\b/)
