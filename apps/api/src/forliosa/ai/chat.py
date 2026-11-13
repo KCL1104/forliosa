@@ -24,6 +24,12 @@ Prompt caching: one breakpoint on the frozen system prompt (tools render before 
 cached together) plus top-level automatic caching for the growing conversation. Everything that changes per
 turn (time, page, privacy) is a ``role: "system"`` message after the user's message.
 
+深度搜尋 (``mode="deep"``, one turn): the same loop with ``web_search`` allowed ``AI_DEEP_SEARCH_MAX_USES`` times and
+``AI_DEEP_MAX_TOOL_ROUNDS`` rounds; what to research and how to write it up is in that turn's page context
+(``prompts.DEEP_SEARCH_NOTE``), never in the frozen system prompt. The tool list differs from an ordinary turn only
+in ``max_uses``, so that turn (and the one after it) misses the prompt cache. The user's row stores ``mode`` and how
+many questions the turn counts as (``store.messages_today``).
+
 Events (``event: <name>`` / ``data: <json>``):
 
 * ``thread``    ``{id, title, created}`` – always first
@@ -157,10 +163,13 @@ class ChatTurn:
         self.served = False  # a call on ``self.slot`` succeeded
         self._page: tuple[str | None, str | None, str | None, bool] = (None, None, None, False)
         self._new: list[dict[str, Any]] = []
+        self.deep = False  # 深度搜尋 (``mode: "deep"``): more searches, a longer write-up, counts as several questions
 
     # -- request building --------------------------------------------------------------------------------
     def tools(self) -> list[dict[str, Any]]:
-        return client_tool_definitions(self.settings) + server_tools(self.settings)
+        # 深度搜尋 only raises how often web_search may run; the tool list is otherwise the same
+        max_uses = self.settings.ai_deep_search_max_uses if self.deep else None
+        return client_tool_definitions(self.settings) + server_tools(self.settings, max_uses=max_uses)
 
     def params(self, model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -176,7 +185,7 @@ class ChatTurn:
     def _context(self) -> str:
         route, sym, name, privacy = self._page
         moved = self.recap is not None and self.history is self.recap
-        return page_context(self.now_fn(), route, sym, name, privacy, moved=moved)
+        return page_context(self.now_fn(), route, sym, name, privacy, moved=moved, deep=self.deep)
 
     # -- key slots -------------------------------------------------------------------------------------------
     def _use_recap(self, needed: bool) -> None:
@@ -370,8 +379,9 @@ class ChatTurn:
 
     # -- the turn ------------------------------------------------------------------------------------------
     def run(self, *, thread_id: str | None, message: str, route: str | None, symbol: str | None,
-            privacy: bool) -> Iterator[Event]:
+            privacy: bool, mode: str | None = None) -> Iterator[Event]:
         db, settings = self.db, self.settings
+        self.deep = mode == "deep" and settings.ai_web_search
         created = thread_id is None
         thread = (store.create_thread(db, self.user, message, store.model_for("chat", settings)) if created
                   else store.owned_thread(db, self.user, thread_id))
@@ -427,7 +437,8 @@ class ChatTurn:
                 "stop_reason": state.display.stop_reason, "usage": state.usage.as_dict(), "disclaimer": DISCLAIMER}
 
     def _loop(self, thread: AiThread, new: list[dict[str, Any]], state: TurnState, ctx: ToolContext):
-        for _ in range(max(1, self.settings.ai_max_tool_rounds)):
+        rounds = self.settings.ai_deep_max_tool_rounds if self.deep else self.settings.ai_max_tool_rounds
+        for _ in range(max(1, rounds)):
             first_text = [True]
             final, slot_index = yield from self._call(thread.model, new, state, first_text)
             self._segments(final, state)
@@ -487,9 +498,18 @@ class ChatTurn:
             self.db.rollback()  # discard anything a failed tool left pending
             store.save_turn(self.db, thread, self.user, turn_id, new, in_context=ok, user_text=message,
                             display=state.display, context_tokens=state.context_tokens if ok else None,
-                            key_slot=self.slot.index if served and self.slot is not None else None, recap=recap)
+                            key_slot=self.slot.index if served and self.slot is not None else None, recap=recap,
+                            user_meta=self._user_meta())
         except Exception:  # pragma: no cover - persistence must never break the stream's shutdown
             log.exception("could not save AI turn %s", turn_id)
+
+    def _user_meta(self) -> dict[str, Any]:
+        """What the user's row remembers about the turn. A 深度搜尋 counts as ``AI_DEEP_SEARCH_COST`` questions once
+        the model has answered a call of it; one that never reached the model (declined as off-topic, no key slot,
+        a failure before anything came back) counts as an ordinary question."""
+        if not self.deep:
+            return {}
+        return {"mode": "deep", "cost": self.settings.ai_deep_search_cost if self.served else 1}
 
     def _page_symbol(self, symbol: str | None) -> tuple[str | None, str | None]:
         if not symbol:

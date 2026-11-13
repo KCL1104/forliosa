@@ -143,10 +143,12 @@ class TurnDisplay:
 
 def save_turn(db: Session, thread: AiThread, user: User, turn_id: str, messages: list[dict[str, Any]], *,
               in_context: bool, user_text: str, display: TurnDisplay, context_tokens: int | None = None,
-              key_slot: int | None = None, recap: list[dict[str, Any]] | None = None) -> None:
+              key_slot: int | None = None, recap: list[dict[str, Any]] | None = None,
+              user_meta: dict[str, Any] | None = None) -> None:
     """Append one turn. ``messages[0]`` is the user's message; the last assistant message carries the display.
     ``key_slot`` pins the thread to the slot that served it; ``recap`` (when the thread moved to that slot) is
-    stored first, as hidden rows that replay starts from."""
+    stored first, as hidden rows that replay starts from. ``user_meta`` goes on the user's row: ``mode`` (``deep``)
+    and ``cost`` (how many questions of the daily limit the turn counts as, see ``messages_today``)."""
     base = (db.scalar(select(func.max(AiMessage.seq)).where(AiMessage.thread_id == thread.id)) or 0) + 1
     now = now_utc()
     rows: list[AiMessage] = []
@@ -164,7 +166,8 @@ def save_turn(db: Session, thread: AiThread, user: User, turn_id: str, messages:
     for i, m in enumerate(messages):
         turn_rows.append(AiMessage(thread_id=thread.id, user_id=user.id, turn_id=turn_id, seq=base + i,
                                    role=m["role"], content=m["content"], in_context=in_context, is_user_input=i == 0,
-                                   text=user_text if i == 0 else "", meta={}, created_at=now))
+                                   text=user_text if i == 0 else "", meta=dict(user_meta or {}) if i == 0 else {},
+                                   created_at=now))
     last_ai = next((r for r in reversed(turn_rows) if r.role == "assistant"), None)
     if last_ai is None:
         last_ai = AiMessage(thread_id=thread.id, user_id=user.id, turn_id=turn_id, seq=base + len(turn_rows),
@@ -228,6 +231,7 @@ def thread_detail(db: Session, user: User, thread_id: str) -> dict[str, Any]:
         meta = r.meta or {}
         if r.is_user_input:
             messages.append({"id": str(r.id), "turn_id": r.turn_id, "role": "user", "text": r.text,
+                             "mode": "deep" if meta.get("mode") == "deep" else None,
                              "at": iso_taipei(r.created_at)})
         elif meta.get("display"):
             cards = [draft_card(drafts[d], accounts.get((drafts[d].payload or {}).get("account_id")))
@@ -323,12 +327,19 @@ def slot_thread_counts(db: Session) -> dict[int, int]:
                            .group_by(AiThread.key_slot)).all())
 
 
+def message_cost(meta: dict[str, Any] | None) -> int:
+    """How many questions one user message counts as: 1, or what the turn stored (深度搜尋 counts as several)."""
+    cost = (meta or {}).get("cost", 1)
+    return cost if isinstance(cost, int) and cost > 0 else 1
+
+
 def messages_today(db: Session, user: User, now: datetime | None = None) -> int:
-    """Questions asked today (Taipei): chat messages plus analyst-view searches this user triggered (each search
-    counts as one question; its calls share one ``ai_usage.thread_id``, see ``analyst``)."""
+    """Questions asked today (Taipei): chat messages (a 深度搜尋 counts as ``AI_DEEP_SEARCH_COST`` of them, stored
+    on its row) plus analyst-view searches this user triggered (each search counts as one question; its calls share
+    one ``ai_usage.thread_id``, see ``analyst``)."""
     since = day_start(now)
-    chat = db.scalar(select(func.count()).select_from(AiMessage).where(
-        AiMessage.user_id == user.id, AiMessage.is_user_input.is_(True), AiMessage.created_at >= since)) or 0
+    chat = sum(message_cost(meta) for meta in db.scalars(select(AiMessage.meta).where(
+        AiMessage.user_id == user.id, AiMessage.is_user_input.is_(True), AiMessage.created_at >= since)))
     analyst = db.scalar(select(func.count(func.distinct(AiUsage.thread_id))).where(
         AiUsage.user_id == user.id, AiUsage.feature == "analyst", AiUsage.created_at >= since)) or 0
     return chat + analyst
@@ -345,10 +356,17 @@ def month_usage(db: Session, user: User, now: datetime | None = None) -> tuple[i
     return tokens, cost
 
 
-def check_quota(db: Session, user: User, settings: Settings, now: datetime | None = None) -> None:
-    if settings.ai_daily_message_limit > 0 and messages_today(db, user, now) >= settings.ai_daily_message_limit:
-        raise ApiError(429, "ai_daily_limit",
-                       f"今天的 AI 提問已達 {settings.ai_daily_message_limit} 則上限，明天再繼續問吧。")
+def check_quota(db: Session, user: User, settings: Settings, now: datetime | None = None, cost: int = 1) -> None:
+    """``cost``: how many questions the turn about to start counts as (深度搜尋: ``AI_DEEP_SEARCH_COST``). A turn
+    that would not fit in what is left of today does not start."""
+    if settings.ai_daily_message_limit > 0:
+        remaining = settings.ai_daily_message_limit - messages_today(db, user, now)
+        if remaining <= 0:
+            raise ApiError(429, "ai_daily_limit",
+                           f"今天的 AI 提問已達 {settings.ai_daily_message_limit} 則上限，明天再繼續問吧。")
+        if cost > remaining:
+            raise ApiError(429, "ai_daily_limit", f"今天還剩 {remaining} 題，深度搜尋一次要 {cost} 題。",
+                           extra={"remaining": remaining, "cost": cost})
     if settings.ai_monthly_token_budget > 0 and month_usage(db, user, now)[0] >= settings.ai_monthly_token_budget:
         raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量已達上限，下個月 1 日會重新計算。")
 
@@ -370,5 +388,7 @@ def usage_summary(db: Session, user: User, settings: Settings, available: bool) 
         "cost_usd_month": float(cost.quantize(Decimal("0.0001"))),
         "model": model_for("chat", settings),
         "available": available,
+        # None: 深度搜尋 is not offered here (it needs web search)
+        "deep_search_cost": settings.ai_deep_search_cost if settings.ai_web_search else None,
         "disclaimer": DISCLAIMER,
     }

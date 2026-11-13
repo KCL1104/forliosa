@@ -67,7 +67,7 @@ CHAT_SYSTEM = """你是 Forliosa 裡的投資助理。Forliosa 是以台股為�
 - 只做分析與整理，不保證報酬，不下買進或賣出的指令，也不給目標價；可以列出值得注意的面向，讓使用者自己判斷。
 - 提到價格、漲跌、報酬或估值時，順帶寫出資料時間（例如「11/12 收盤」「11/12 13:30」），時間取自工具結果。
 - 不要自己寫免責聲明或「僅供參考」「非投資建議」這類句子：畫面會在每則回答下方固定顯示。
-- 對話中由 App 提供的「頁面情境」系統訊息會告訴你現在時間、使用者正在看的頁面與隱私模式。使用者說「這檔」「它」時，指的是頁面上的那一檔。
+- 對話中由 App 提供的「頁面情境」系統訊息會告訴你現在時間、使用者正在看的頁面與隱私模式。使用者說「這檔」「它」時，指的是頁面上的那一檔。頁面情境寫「深度搜尋」的那一題，回答的長度、格式與搜尋的做法照那裡的指示，其餘規則不變。
 - 隱私模式開啟時，回答中不可寫出任何金額、股數、成本、市值或損益的絕對數字（草稿卡由畫面自行遮蔽）；改用百分比、排名與相對描述。"""  # noqa: E501
 
 WHY_SYSTEM = """你是台股新聞編輯。任務：用一句繁體中文（45 個字以內）說明這檔股票在指定交易日異常變動最可能的原因。
@@ -222,8 +222,18 @@ def route_kind(route: str | None) -> str:
     return "other"
 
 
+# 深度搜尋 (``mode: "deep"``): appended to the page context of that one turn. The frozen prompt only says that such a
+# turn follows these lines for length, format and how to search; every other rule (sources, no advice, numbers from
+# the tools) stays as it is.
+DEEP_SEARCH_NOTE = """- 深度搜尋：使用者要一份深入的整理，這一題照下面做
+  1. 先想清楚要查哪幾個面向：公司公告與財報、法說會、產業與供應鏈、競爭對手、風險、最近的消息。和問題無關的面向不查。
+  2. 數字先用工具查（報價、財報、估值、籌碼、月營收）；再分幾輪用 web_search 查不同的面向，一輪一個重點、換不同的關鍵字。來源的說法不一致時，把兩邊都寫出來。
+  3. 寫成一份整理：開頭兩三句結論；接著最多 8 點，每點一行、用「・」開頭，寫一個事實和它的數字或日期，並附引用。可以用最多 3 個短標題分組，標題自己一行、只有文字，前後不加任何符號。
+  4. 只寫查得到來源的事；查不到的面向用一句話說「查不到可靠來源」。不給買賣建議與目標價，結尾不加總結或提議。"""
+
+
 def page_context(now: datetime, route: str | None, symbol: str | None, symbol_name: str | None,
-                 privacy: bool, moved: bool = False) -> str:
+                 privacy: bool, moved: bool = False, deep: bool = False) -> str:
     kind = route_kind(route)
     page = ROUTE_LABELS[kind]
     if kind == "stock" and symbol:
@@ -241,6 +251,7 @@ def page_context(now: datetime, route: str | None, symbol: str | None, symbol_na
         f"- 使用者正在看：{page}\n"
         f"- 隱私模式：{privacy_line}"
         + (f"\n{MOVED_NOTE}" if moved else "")
+        + (f"\n{DEEP_SEARCH_NOTE}" if deep else "")
     )
 
 

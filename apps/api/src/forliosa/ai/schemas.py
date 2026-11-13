@@ -23,6 +23,8 @@ class ChatIn(_Strict):
     message: str = Field(min_length=1, max_length=4000)
     page: PageIn = Field(default_factory=PageIn)
     privacy: bool = False
+    mode: Literal["deep"] | None = Field(
+        default=None, description="`deep`＝深度搜尋：這一題多查幾輪、寫成一份整理，算好幾題（`Usage.deep_search_cost`）")
 
 
 class Citation(BaseModel):
@@ -125,6 +127,7 @@ class ThreadMessage(BaseModel):
     turn_id: str
     role: Literal["user", "ai"]
     text: str
+    mode: Literal["deep"] | None = Field(default=None, description="使用者的那一則：`deep`＝這一題是深度搜尋")
     citations: list[Citation] = []
     drafts: list[DraftCard] = []
     charts: list[ChartCard] = []
@@ -182,6 +185,8 @@ class Usage(BaseModel):
     cost_usd_month: float
     model: str
     available: bool
+    deep_search_cost: int | None = Field(
+        default=None, description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`）；`null`＝這個環境沒有深度搜尋（沒開網路搜尋）")
     disclaimer: str = Field(description="固定顯示在每則 AI 回答下方的一行字（模型不會自己寫免責聲明）")
 
 

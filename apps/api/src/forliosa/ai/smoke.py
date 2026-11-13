@@ -5,7 +5,9 @@
 3. A comparison that should call ``draw_chart`` (the card's title and how many points each line has are printed).
 
 ``--ask "台積電的技術面怎麼樣？" --symbol 2330.TW`` runs that one question instead (on that stock's page when
-``--symbol`` is given), e.g. to watch a turn that calls ``get_technicals``.
+``--symbol`` is given), e.g. to watch a turn that calls ``get_technicals``. Add ``--deep`` to ask it as a 深度搜尋
+(``mode="deep"``: more web searches, a longer write-up); the number of searches and the length of the answer are
+printed with the usage.
 
 ``--keys`` only sends one tiny request (``max_tokens=1``) through every key slot and prints each slot's workspace id,
 to check that ``CLAUDE_API_KEY_1..3`` really belong to three different workspaces (cost: a few millionths of a USD).
@@ -147,6 +149,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--only", type=int, choices=[1, 2, 3], help="run only question 1, 2 or 3")
     parser.add_argument("--ask", metavar="QUESTION", help="run only this question instead of the two built-in ones")
     parser.add_argument("--symbol", help="with --ask: ask on this stock's page, e.g. 2330.TW")
+    parser.add_argument("--deep", action="store_true", help="with --ask: ask it as a 深度搜尋 (mode=deep)")
     parser.add_argument("--keys", action="store_true", help="only check which workspace each key slot belongs to")
     parser.add_argument("--analyst", nargs="+", metavar="SYMBOL",
                         help="only run the analyst-views generation for these stocks (at most 2)")
@@ -178,9 +181,12 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\n=== {n}. {question}（頁面 {route}）")
             turn = ChatTurn(db, user, md, pool, settings)
             model = settings.ai_model
+            deep = bool(args.deep and args.ask)
+            answer = 0
             for name, data in turn.run(thread_id=None, message=question, route=route, symbol=symbol,
-                                       privacy=False):
+                                       privacy=False, mode="deep" if deep else None):
                 if name == "text":
+                    answer += len(data["delta"])
                     print(data["delta"], end="", flush=True)
                 elif name == "tool":
                     print(f"\n  [{data['status']}] {data['label']}", flush=True)
@@ -206,6 +212,8 @@ def main(argv: list[str] | None = None) -> int:
                     print(f"\n--- 用量：輸入 {u.input_tokens}、快取寫入 {u.cache_creation_input_tokens}、快取讀取 "
                           f"{u.cache_read_input_tokens}、輸出 {u.output_tokens}、搜尋 {u.web_search_requests} 次、"
                           f"擷取 {u.web_fetch_requests} 次；估計 US${cost:.5f}（{model}，stop={data['stop_reason']}）")
+                    if deep:
+                        print(f"--- 深度搜尋：回答 {answer} 個字、搜尋 {u.web_search_requests} 次")
     print(f"\n合計：輸入 {grand.input_tokens}、快取寫入 {grand.cache_creation_input_tokens}、快取讀取 "
           f"{grand.cache_read_input_tokens}、輸出 {grand.output_tokens}、搜尋 {grand.web_search_requests} 次；"
           f"估計 US${grand_cost:.5f}")

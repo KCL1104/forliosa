@@ -45,7 +45,8 @@ CHAT_DOC = {200: {"content": {"text/event-stream": {}},
                                  "（見 docs/api-contract.md）"}}
 
 
-@router.post("/chat", summary="AI 對話（SSE 串流）", response_class=StreamingResponse, responses=CHAT_DOC)
+@router.post("/chat", summary="AI 對話（SSE 串流）；`mode: \"deep\"` 是深度搜尋（多查幾輪、算好幾題）",
+             response_class=StreamingResponse, responses=CHAT_DOC)
 def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends(get_db)):
     settings = get_settings()
     pool = get_key_pool()
@@ -53,7 +54,10 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
         raise ApiError(503, "ai_unavailable", "AI 功能尚未設定（沒有可用的 API 金鑰）")
     if not pool.ranked(store.slot_month_costs(db)):
         raise ApiError(503, "ai_unavailable", "AI 服務暫時無法使用（API 額度已用完），請稍後再試。")
-    store.check_quota(db, user, settings)
+    deep = body.mode == "deep"
+    if deep and not settings.ai_web_search:
+        raise ApiError(503, "ai_unavailable", "這個環境沒有開網路搜尋，不能用深度搜尋。")
+    store.check_quota(db, user, settings, cost=settings.ai_deep_search_cost if deep else 1)
     if body.thread_id:
         thread = store.owned_thread(db, user, body.thread_id)
         if thread.context_tokens >= settings.ai_thread_max_context_tokens:
@@ -66,7 +70,7 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
             me = sdb.get(User, user_id)
             turn = ChatTurn(sdb, me, get_market_data(), pool, settings)
             for name, data in turn.run(thread_id=body.thread_id, message=body.message, route=body.page.route,
-                                       symbol=body.page.symbol, privacy=body.privacy):
+                                       symbol=body.page.symbol, privacy=body.privacy, mode=body.mode):
                 yield sse(name, data)
 
     return StreamingResponse(events(), media_type="text/event-stream", headers=SSE_HEADERS)

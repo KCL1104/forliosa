@@ -123,6 +123,12 @@ class Settings(BaseSettings):
     ai_request_timeout_seconds: float = 120.0
     ai_web_search: bool = True
     ai_web_search_max_uses: int = 3
+    # 深度搜尋 (``POST /ai/chat`` with ``mode: "deep"``): one question researched over several rounds of web search
+    # and written up as a short report. It may search this many times, loop this many times (client-tool rounds
+    # and resumed server-tool turns), and counts as this many questions of the daily limit.
+    ai_deep_search_max_uses: int = Field(default=12, ge=1, le=30)
+    ai_deep_max_tool_rounds: int = Field(default=16, ge=1, le=40)
+    ai_deep_search_cost: int = Field(default=5, ge=1, le=50)
     ai_web_search_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)  # [] = any
     ai_web_fetch: bool = True
     ai_web_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
