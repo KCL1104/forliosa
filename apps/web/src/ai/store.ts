@@ -23,6 +23,13 @@ interface AiState {
   newThread: () => void
   openThread: (id: string) => void
   deleteThread: (id: string) => void
+  /** 刪除後按「復原」：放回原來的位置（依更新時間） */
+  restoreThread: (thread: Thread) => void
+  /**
+   * 紀錄裡暫時藏起來的對話（不存檔）：示範紀錄刪除後、後端的對話在「復原」的時間內還沒真的刪掉
+   */
+  hiddenThreadIds: string[]
+  setThreadHidden: (id: string, hidden: boolean) => void
   push: (message: Omit<Message, "id" | "at">, opts?: { title?: string }) => string
   patchMessage: (id: string, patch: Partial<Message>) => void
   /** 串流中的 AI 訊息：用函式更新，避免競態 */
@@ -60,6 +67,15 @@ export const useAi = create<AiState>()(
       openThread: (id) => set({ threadId: id }),
       deleteThread: (id) =>
         set((s) => ({ threads: s.threads.filter((t) => t.id !== id), threadId: s.threadId === id ? null : s.threadId })),
+      restoreThread: (thread) =>
+        set((s) =>
+          s.threads.some((t) => t.id === thread.id)
+            ? s
+            : { threads: [...s.threads, thread].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt)).slice(0, 40) },
+        ),
+      hiddenThreadIds: [],
+      setThreadHidden: (id, hidden) =>
+        set((s) => ({ hiddenThreadIds: hidden ? [...new Set([...s.hiddenThreadIds, id])] : s.hiddenThreadIds.filter((x) => x !== id) })),
       push: (message, opts) => {
         const id = uid("msg")
         const m: Message = { ...message, id, at: now() }

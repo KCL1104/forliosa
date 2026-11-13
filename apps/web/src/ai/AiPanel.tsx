@@ -5,10 +5,11 @@ import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AskAiIcon } from "./ask-icon"
 import { Composer, type ComposerHandle } from "./Composer"
-import { useAiContext } from "./context"
+import { useAiContext, useRouteKind } from "./context"
 import { Conversation } from "./Conversation"
 import { HistoryList } from "./HistoryList"
 import { PanelHome } from "./Home"
+import { composerPlaceholder } from "./panel-helpers"
 import { useAiRunner } from "./runner"
 import { useAi, useCurrentThread, usePendingCount } from "./store"
 import { useAiSuggestions, useAiUsage, usageNote } from "./remote-hooks"
@@ -43,7 +44,7 @@ export function AiPanel() {
                 type="button"
                 onClick={() => setOpen(true)}
                 aria-label={pending > 0 ? `展開 AI 面板（待簽名 ${pending} 筆）` : "展開 AI 面板"}
-                className="press relative grid size-10 place-items-center rounded-sm text-ai hover:bg-ai-wash"
+                className="press relative grid size-10 place-items-center rounded-sm text-ai hover:bg-ai-wash pointer-coarse:size-11"
               />
             }
           >
@@ -64,9 +65,8 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
   const thread = useCurrentThread()
   const newThread = useAi((s) => s.newThread)
   const suggestions = useAiSuggestions(ctx)
+  const route = useRouteKind()
   const [view, setView] = useState<"chat" | "history">("chat")
-  // 還沒有對話：建議、連結和輸入框由上往下緊接著排；有對話時輸入框固定在底部
-  const home = view === "chat" && !thread
   useUpcoming(7)
 
   return (
@@ -82,7 +82,7 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         <IconButton label="新對話" onClick={() => { newThread(); setView("chat") }}>
           <SquarePenIcon aria-hidden className="size-[18px]" />
         </IconButton>
-        <IconButton label="紀錄與 AI 任務" pressed={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")}>
+        <IconButton label="紀錄" pressed={view === "history"} onClick={() => setView(view === "history" ? "chat" : "history")}>
           <HistoryIcon aria-hidden className="size-[18px]" />
         </IconButton>
         <IconButton label="收合 AI 面板" onClick={onCollapse}>
@@ -90,22 +90,35 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
         </IconButton>
       </header>
 
-      {/* 首頁狀態留 6px 下內距：最後一個連結的焦點外框（外推 4px）不會被捲動區裁掉 */}
-      <div className={cn("min-h-0 overflow-y-auto overscroll-contain px-7 xl:pr-7 xl:pl-8", home ? "shrink pb-1.5" : "flex-1 pb-4")}>
+      {/*
+        輸入框一直在面板底部：還沒有對話時，建議、連結（或最近的對話）整塊貼在輸入框正上方（mt-auto）；
+        開始對話後，對話從同一個位置往上長，輸入框不會跳。捲動區留 6px 下內距：最後一個連結的焦點外框不會被裁掉。
+      */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-7 pb-1.5 xl:pr-7 xl:pl-8">
         {view === "history" ? (
           <HistoryList compact onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
-        ) : thread ? (
-          <Conversation key={thread.id} thread={thread} runner={runner} />
         ) : (
-          <PanelHome ctx={ctx} runner={runner} suggestions={suggestions} size="panel" />
+          <div className="mt-auto">
+            {thread ? (
+              <Conversation key={thread.id} thread={thread} runner={runner} />
+            ) : (
+              <PanelHome
+                ctx={ctx}
+                runner={runner}
+                suggestions={suggestions}
+                size="panel"
+                onShowHistory={route.kind === "history" ? undefined : () => setView("history")}
+              />
+            )}
+          </div>
         )}
       </div>
 
-      <div className={cn("shrink-0 px-7 pb-5 xl:pr-7 xl:pl-8", home && "pt-2.5")}>
+      <div className="shrink-0 px-7 pt-2.5 pb-5 xl:pr-7 xl:pl-8">
         <Composer
           ref={composerRef}
           variant="panel"
-          placeholder={ctx.route === "stock" ? `問${ctx.stock.name}的事，或說：買 ${ctx.stock.code} 1 張` : "提出問題，或直接說：買 0050 2 張 52.4"}
+          placeholder={composerPlaceholder(ctx, "panel")}
           onSubmit={(t) => {
             setView("chat")
             void runner.submit(t)
@@ -138,7 +151,7 @@ function IconButton({ label, onClick, children, pressed }: { label: string; onCl
             aria-label={label}
             aria-pressed={pressed}
             onClick={onClick}
-            className="press sel-chip grid size-9 place-items-center rounded-sm text-ink-2"
+            className="press sel-chip grid size-9 place-items-center rounded-sm text-ink-2 pointer-coarse:size-11"
           />
         }
       >

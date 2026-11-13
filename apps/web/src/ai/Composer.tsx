@@ -18,7 +18,7 @@ interface Props {
 }
 
 /**
- * 輸入框是 AI 的主要入口：提問、記帳指令（「買 0050 2 張 52.4」）、搜尋（手機）。
+ * 輸入框是 AI 的主要入口：提問、記帳指令（「買 0050 2 張 52.4」）、搜尋（手機）。提示字依頁面（`composerPlaceholder`）。
  * Enter 送出、Shift+Enter 換行；⌘J 從任何地方聚焦（桌面）。
  */
 export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ onSubmit, onAttach, variant, placeholder, onDraftChange }, ref) {
@@ -61,7 +61,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
             aria-label="附件與其他記帳方式"
             className={cn(
               "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink",
-              variant === "panel" ? "size-9" : "size-11",
+              variant === "panel" ? "size-9 pointer-coarse:size-11" : "size-11",
             )}
           />
         }
@@ -90,7 +90,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
           value={text}
           onChange={(e) => change(e.target.value)}
           placeholder={placeholder}
-          aria-label="搜尋股票、提問，或直接說：買 0050 2 張 52.4"
+          aria-label="搜尋股票、提問或下指令"
           enterKeyHint="send"
           autoComplete="off"
           className="h-full min-w-0 flex-1 bg-transparent px-1 text-lg text-ink outline-none placeholder:text-ink-2"
@@ -144,7 +144,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
             type="submit"
             aria-label="送出"
             disabled={empty}
-            className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-rule disabled:text-ink-2"
+            className="press grid size-9 place-items-center rounded-sm bg-act text-act-fg hover:bg-act-hover disabled:bg-rule disabled:text-ink-2 pointer-coarse:size-11"
           >
             <ArrowUpIcon aria-hidden className="size-[18px]" />
           </button>

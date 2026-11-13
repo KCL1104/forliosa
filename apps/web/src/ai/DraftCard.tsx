@@ -82,9 +82,12 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
           {!isCash && <span className="num text-sm font-normal">{instrument.code}</span>}
           <span className="sr-only">{signed ? "，已入帳" : "，草稿，尚未入帳"}</span>
         </h3>
-        <p className="mt-0.5 text-sm text-ink-2">
-          {isDividend ? "入帳日" : isCash ? "日期" : "成交日"} {formatDateShort(input.trade_date)}
-          {account && <span>・{account.name}</span>}
+        {/* 帳戶名稱是使用者自己取的（可能含「・」「－」）：和日期之間用空白分開，不再接一個分隔符號 */}
+        <p className="mt-0.5 flex flex-wrap gap-x-3 text-sm text-ink-2">
+          <span>
+            {isDividend ? "入帳日" : isCash ? "日期" : "成交日"} {formatDateShort(input.trade_date)}
+          </span>
+          {account && <span>{account.name}</span>}
         </p>
       </header>
 
@@ -153,7 +156,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
 
       <footer className="flex items-center gap-2.5 py-3 pr-3 pl-4">
         <details className="group mr-auto min-w-0">
-          <summary className="inline-flex cursor-pointer list-none items-center gap-0.5 text-sm text-ai underline underline-offset-3 [&::-webkit-details-marker]:hidden">
+          <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-0.5 text-sm text-ai underline underline-offset-3 pointer-coarse:min-h-11 [&::-webkit-details-marker]:hidden">
             怎麼算的
             <ChevronDownIcon aria-hidden className="size-3.5 transition-transform group-open:rotate-180" />
           </summary>
@@ -176,20 +179,20 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
           </ul>
         </details>
         {signed ? (
-          <Button variant="outline" size="sm" className="h-9" onClick={onUndo}>
+          <Button variant="outline" size="sm" className="h-9 pointer-coarse:h-11" onClick={onUndo}>
             復原
           </Button>
         ) : editing ? (
           <>
-            <Button variant="ghost" size="sm" className="h-9" onClick={onDiscard}>
+            <Button variant="ghost" size="sm" className="h-9 pointer-coarse:h-11" onClick={onDiscard}>
               捨棄
             </Button>
-            <Button variant="outline" size="sm" className="h-9" onClick={() => setEditing(false)}>
+            <Button variant="outline" size="sm" className="h-9 pointer-coarse:h-11" onClick={() => setEditing(false)}>
               完成
             </Button>
           </>
         ) : (
-          <Button variant="outline" size="sm" className="h-9" onClick={() => setEditing(true)} disabled={status === "loading"}>
+          <Button variant="outline" size="sm" className="h-9 pointer-coarse:h-11" onClick={() => setEditing(true)} disabled={status === "loading"}>
             修改
           </Button>
         )}

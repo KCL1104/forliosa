@@ -1,158 +1,159 @@
-import { EllipsisIcon, SquarePenIcon, Trash2Icon } from "lucide-react"
-import { useState } from "react"
-import { toast } from "sonner"
-import { api } from "@/api"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { formatDateTime } from "@/lib/format"
+import { Trash2Icon } from "lucide-react"
+import { DateCell } from "@/components/date-cell"
+import { EmptyState } from "@/components/states"
+import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { TZ, todayInTaipei } from "@/lib/format"
+import { relativeTime } from "@/lib/news"
 import { cn } from "@/lib/utils"
-import { aiRemote } from "./remote"
-import { useRemoteThreadActions, useRemoteThreads } from "./remote-hooks"
+import { bleed, bleedPad } from "./panel-helpers"
 import { useAi } from "./store"
+import { useThreadList } from "./threads"
 import type { Thread } from "./types"
 
-/**
- * 紀錄：發起新對話、過去的對話、AI 任務。
- * 連真實後端時對話來自 `/ai/threads`（跨裝置）；mock 模式存在這台瀏覽器。AI 任務是示範資料（排程尚未開放）。
- */
-const SEEDED: Thread[] = [
-  { id: "seed_why", title: "為什麼台積電今天漲 4.83%？", updatedAt: "2026-11-12T13:41:00+08:00", messages: [], seeded: true },
-  { id: "seed_878", title: "00878 下次除息能領多少？", updatedAt: "2026-11-11T21:08:00+08:00", messages: [], seeded: true },
-  { id: "seed_import", title: "幫我匯入 10 月永豐對帳單", updatedAt: "2026-11-08T10:15:00+08:00", messages: [], seeded: true },
-  { id: "seed_conc", title: "我的持股會不會太集中？", updatedAt: "2026-11-02T22:30:00+08:00", messages: [], seeded: true },
-]
-
-interface Task {
-  id: string
-  title: string
-  next: string
-  paused?: boolean
+/** 台北時間的「13:41」 */
+function clock(iso: string): string {
+  return new Intl.DateTimeFormat("zh-TW", { timeZone: TZ, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(iso))
 }
-// 定期定額不是 AI 任務：計畫在設定頁管理，扣款日 AI 面板會提出草稿
-const TASKS: Task[] = [{ id: "task_checkup", title: "每週五盤後持倉健檢", next: "下次 11/13（五）14:30" }]
 
+/**
+ * 紀錄：發起新對話（一般按鈕）、過去的對話（刪除後可以復原）。
+ * 整頁（紀錄分頁）是一張印好表頭的表：第一欄是聯絡簿的日期格（日期＋時間），整列都可以按；
+ * 面板裡（`compact`）是一行一格的格線列：標題＋相對時間。
+ */
 export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; onOpen?: () => void; onReplay: (text: string) => void }) {
-  // 面板裡已有 h2（問 AI／紀錄），清單標題用 h3；整頁時用 h2
-  const H = compact ? "h3" : "h2"
-  const threads = useAi((s) => s.threads)
-  const openThread = useAi((s) => s.openThread)
   const newThread = useAi((s) => s.newThread)
-  const deleteThread = useAi((s) => s.deleteThread)
-  const [hidden, setHidden] = useState<string[]>([])
-  const [tasks, setTasks] = useState<Task[]>(api.kind === "mock" ? TASKS : [])
-  const remote = useRemoteThreads()
-  const remoteActions = useRemoteThreadActions()
-  const seeded = api.kind === "mock" ? SEEDED.filter((t) => !hidden.includes(t.id) && !threads.some((x) => x.title === t.title)) : []
-  const all = aiRemote
-    ? (remote.data?.items ?? []).map((t): Thread => ({ id: t.id, remoteId: t.id, title: t.title, updatedAt: t.updated_at, messages: [] }))
-    : [...threads.filter((t) => t.messages.length > 0), ...seeded].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
-
-  const remove = (t: Thread) => {
-    if (t.seeded) return setHidden((h) => [...h, t.id])
-    if (t.remoteId) {
-      remoteActions.remove(t.remoteId).catch((err: unknown) => toast.error("沒有刪除", { description: err instanceof Error ? err.message : "請再試一次" }))
-      return
-    }
-    deleteThread(t.id)
-  }
-
-  const open = (t: Thread) => {
-    if (t.remoteId) {
-      onOpen?.()
-      remoteActions.open(t.remoteId).catch((err: unknown) => toast.error("對話打不開", { description: err instanceof Error ? err.message : "請再試一次" }))
-      return
-    }
-    if (t.seeded) {
-      // 示範紀錄：用目前的資料重新問一次
-      newThread()
-      setHidden((h) => [...h, t.id])
-      onOpen?.()
-      onReplay(t.title)
-      return
-    }
-    openThread(t.id)
-    onOpen?.()
-  }
-
-  const row = cn("ruled-row flex min-h-[60px] items-center gap-2", compact ? "text-base" : "text-lg")
+  const list = useThreadList()
+  const pick = (t: Thread) => list.open(t, { onOpen, onReplay })
 
   return (
     <div className="flex flex-col">
-      <button
-        type="button"
+      <Button
+        variant="outline"
+        className={cn("self-start", compact ? "mt-4" : "mt-1")}
         onClick={() => {
           newThread()
           onOpen?.()
         }}
-        className={cn("press -mx-2 flex items-center gap-3 rounded-sm px-2 text-left font-medium hover:bg-hov", compact ? "mt-4 h-11 text-base" : "mt-2 h-14 text-xl")}
       >
-        <SquarePenIcon aria-hidden className={compact ? "size-5" : "size-6"} />
         發起新對話
-      </button>
+      </Button>
 
-      <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-6 text-sm" : "mt-9 text-base")}>對話</H>
-      {aiRemote && remote.isPending ? (
-        <p className="py-4 text-md text-ink-2" role="status">正在載入對話…</p>
-      ) : aiRemote && remote.isError ? (
-        <p className="py-4 text-md text-ink-2">
+      {list.loading ? (
+        <p className={cn("text-md text-ink-2", compact ? "mt-4" : "mt-8")} role="status">
+          正在載入對話…
+        </p>
+      ) : list.error ? (
+        <p className={cn("text-md text-ink-2", compact ? "mt-4" : "mt-8")}>
           對話紀錄暫時載入不了。
-          <button type="button" onClick={() => void remote.refetch()} className="press ml-1 text-ink underline underline-offset-4">
+          <button type="button" onClick={list.retry} className="press ml-1 inline-flex min-h-9 items-center text-ink underline decoration-ctl underline-offset-4 hover:decoration-ink pointer-coarse:min-h-11">
             再試一次
           </button>
         </p>
-      ) : all.length === 0 ? (
-        <p className="py-4 text-md text-ink-2">還沒有對話。問過的問題和 AI 寫的草稿會留在這裡。</p>
+      ) : list.all.length === 0 ? (
+        <EmptyState className={compact ? "mt-4" : "mt-8"} title="還沒有對話" description="問過的問題和 AI 寫的草稿會留在這裡。" />
+      ) : compact ? (
+        <ThreadRows threads={list.all} onPick={pick} onRemove={list.remove} bleed className="mt-4 border-t border-rule" />
       ) : (
-        <ul>
-          {all.map((t) => (
-            <li key={t.id} className={row}>
-              <button type="button" onClick={() => open(t)} className="min-w-0 flex-1 py-3 text-left">
-                <span className="line-clamp-2">{t.title}</span>
-                {!compact && <span className="num mt-0.5 block text-sm text-ink-2">{formatDateTime(t.updatedAt)}</span>}
-              </button>
-              <button
-                type="button"
-                aria-label={`刪除對話「${t.title}」`}
-                onClick={() => remove(t)}
-                className="press grid size-11 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink"
-              >
-                <Trash2Icon aria-hidden className="size-5" />
-              </button>
-            </li>
-          ))}
-        </ul>
+        <ThreadTable threads={list.all} onPick={pick} onRemove={list.remove} />
       )}
 
-      <p className="mt-2 text-sm text-ink-2">對話紀錄保留 30 天。</p>
-
-      <H className={cn("border-b border-rule pb-2 font-bold text-ink-2", compact ? "mt-8 text-sm" : "mt-11 text-base")}>AI 任務</H>
-      {tasks.length === 0 ? (
-        <p className="py-4 text-md text-ink-2">排定的健檢、提醒與報告會出現在這裡。</p>
-      ) : (
-        <ul>
-          {tasks.map((t) => (
-            <li key={t.id} className={cn(row, "py-2")}>
-              <div className="min-w-0 flex-1">
-                <p className={cn(t.paused && "text-ink-2")}>{t.title}</p>
-                <p className="num text-md text-ink-2">{t.paused ? "已暫停" : t.next}</p>
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger
-                  render={<button type="button" aria-label={`${t.title}的選項`} className="press grid size-11 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink" />}
-                >
-                  <EllipsisIcon aria-hidden className="size-5" />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  <DropdownMenuItem onClick={() => setTasks((ts) => ts.map((x) => (x.id === t.id ? { ...x, paused: !x.paused } : x)))}>
-                    {t.paused ? "恢復" : "暫停"}
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => setTasks((ts) => ts.filter((x) => x.id !== t.id))}>刪除</DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </li>
-          ))}
-        </ul>
-      )}
-      {api.kind === "mock" && <p className="mt-3 text-sm text-ink-2">AI 任務是示範資料，排程還沒開放。</p>}
+      <p className="mt-3 text-sm text-ink-2">對話紀錄保留 30 天。</p>
     </div>
+  )
+}
+
+/**
+ * 一行一格的對話列（面板的紀錄、沒有建議的頁面上「最近的對話」）：標題＋相對時間（淡墨），整列都可以按。
+ * 有 `onRemove` 時右邊多一個刪除圖示鈕（滑過有說明）。
+ */
+export function ThreadRows({
+  threads,
+  onPick,
+  onRemove,
+  size = "panel",
+  className,
+  label = "對話",
+  bleed: edge,
+}: {
+  threads: Thread[]
+  onPick: (t: Thread) => void
+  onRemove?: (t: Thread) => void
+  size?: "panel" | "screen"
+  className?: string
+  label?: string
+  /** 左右延伸到面板邊緣（和建議的格線列一樣） */
+  bleed?: boolean
+}) {
+  const now = new Date()
+  const screen = size === "screen"
+  return (
+    <ul aria-label={label} className={cn(edge && bleed[size], className)}>
+      {threads.map((t) => (
+        <li key={t.id} className={cn("ruled-row relative flex items-center gap-3", edge && bleedPad[size], screen ? "min-h-14" : "min-h-[52px]")}>
+          <button
+            type="button"
+            onClick={() => onPick(t)}
+            className={cn(
+              "min-w-0 flex-1 truncate py-3 text-left text-ink after:absolute after:inset-0 focus-visible:-outline-offset-2",
+              screen ? "text-lg" : "text-base",
+            )}
+          >
+            {t.title}
+          </button>
+          <span className="num shrink-0 text-sm text-ink-2">{relativeTime(t.updatedAt, now)}</span>
+          {onRemove && <RemoveButton thread={t} onRemove={onRemove} className="relative z-10 -mr-2" />}
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/** 紀錄頁：印好的表頭（日期・對話），日期格是日期＋時間，整列都可以按 */
+function ThreadTable({ threads, onPick, onRemove }: { threads: Thread[]; onPick: (t: Thread) => void; onRemove: (t: Thread) => void }) {
+  return (
+    <div className="mt-8">
+      <div aria-hidden className="form-head flex gap-3 pb-2">
+        <span className="w-[5.75rem] shrink-0 lg:w-[6.5rem]">日期</span>
+        <span>對話</span>
+      </div>
+      <ul aria-label="對話">
+        {threads.map((t) => (
+          <li key={t.id} className="ruled-row relative flex min-h-16 items-center gap-3 py-2.5">
+            <DateCell date={todayInTaipei(new Date(t.updatedAt))} inline className="w-[5.75rem] shrink-0 lg:w-[6.5rem]">
+              <span className="num mt-0.5 text-sm font-normal text-ink-2">{clock(t.updatedAt)}</span>
+            </DateCell>
+            <button
+              type="button"
+              onClick={() => onPick(t)}
+              className="min-w-0 flex-1 text-left text-base text-ink after:absolute after:inset-0 focus-visible:-outline-offset-2 lg:text-lg"
+            >
+              <span className="line-clamp-2">{t.title}</span>
+            </button>
+            <RemoveButton thread={t} onRemove={onRemove} className="relative z-10" />
+          </li>
+        ))}
+      </ul>
+    </div>
+  )
+}
+
+function RemoveButton({ thread, onRemove, className }: { thread: Thread; onRemove: (t: Thread) => void; className?: string }) {
+  return (
+    <Tooltip>
+      <TooltipTrigger
+        render={
+          <button
+            type="button"
+            aria-label={`刪除對話「${thread.title}」`}
+            onClick={() => onRemove(thread)}
+            className={cn("press grid size-11 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink", className)}
+          />
+        }
+      >
+        <Trash2Icon aria-hidden className="size-[18px]" />
+      </TooltipTrigger>
+      <TooltipContent>刪除對話</TooltipContent>
+    </Tooltip>
   )
 }

@@ -102,3 +102,66 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
     expect(f.links!.length).toBeGreaterThan(0)
   })
 })
+
+describe("「我的成本在河流圖哪裡」：只在畫得出河流圖時問；價格與成本都帶單位", () => {
+  const base = { symbol: "2330.TW", code: "2330", name: "台積電", market: "TWSE" as const, type: "stock" as const }
+  const held = { avg_cost: 692.61, quantity: 1500 } as never
+  const river = { per_multiples: [12, 16, 20, 24, 28], current: { per: 20.8, per_percentile_5y: 0.96 } }
+  const kinds = (p: object) => stockSuggestions({ ...base, position: held, ...p }, TODAY).map((x) => x.kind)
+
+  it("台股、有倍數帶、有本益比才問；美股、沒有倍數帶、沒有本益比都不問", () => {
+    expect(kinds({ overview: { eps_ttm: 52.3, pe: 20.8 }, valuation: river })).toContain("cost_on_river")
+    expect(kinds({ overview: { eps_ttm: 52.3, pe: 20.8 }, valuation: { ...river, per_multiples: [] } })).not.toContain("cost_on_river")
+    expect(kinds({ overview: { eps_ttm: 52.3, pe: null }, valuation: river })).not.toContain("cost_on_river")
+    const us = stockSuggestions(
+      { ...base, symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", position: held, overview: { eps_ttm: 8.98, pe: null } as never, valuation: river as never },
+      TODAY,
+    )
+    expect(us.map((x) => x.kind)).not.toContain("cost_on_river")
+    // 美股不用張：不問「加碼 1 張」
+    expect(us.map((x) => x.kind)).not.toContain("add_one_lot")
+  })
+
+  it("台股的回答：均價帶「元」、EPS 帶「元」，有本益比才說現在幾倍", () => {
+    const ctx: AiContext = { route: "stock", stock: { ...base, position: held, overview: { eps_ttm: 52.3, pe: 20.8 } as never, valuation: river as never } }
+    const a = answerFor("cost_on_river", { ctx, privacy: false, today: TODAY })!
+    expect(a.text).toContain("你的均價 692.61 元")
+    expect(a.text).toContain("EPS 52.3 元")
+    expect(a.text).toContain("現在是 20.8 倍")
+    expect(a.text).not.toContain("—")
+    expect(a.links!.map((l) => l.label)).toEqual(["看河流圖"])
+  })
+
+  it("美股（自由提問也一樣）：均價寫 US$，照實說沒有河流圖，不出現「—」，也不連到空的估值分頁", () => {
+    const ctx: AiContext = {
+      route: "stock",
+      stock: {
+        ...base,
+        symbol: "AAPL",
+        code: "AAPL",
+        name: "Apple",
+        market: "US",
+        position: { avg_cost: 143.41, quantity: 15 } as never,
+        overview: { eps_ttm: 8.98, pe: null } as never,
+        // 美股沒有可商用的行情：有倍數帶的設定，但算不出現在的本益比
+        valuation: { ...river, series: [], current: { per: null, per_percentile_5y: null } } as never,
+      },
+    }
+    expect(classifyQuestion("我的成本在河流圖哪裡？", ctx)).toBe("cost_on_river")
+    const a = answerFor("cost_on_river", { ctx, privacy: false, today: TODAY })!
+    expect(a.text).toContain("你的均價 US$143.41")
+    expect(a.text).not.toMatch(/143\.41 元|—|倍以下的帶/)
+    expect(a.links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
+    expect(answerFor("cost_on_river", { ctx, privacy: true, today: TODAY })!.text).not.toContain("143.41")
+    // 本益比貴不貴：美股說明沒有行情，不說「ETF 或近四季虧損」；備援回答連到財務，不連到空的估值分頁
+    expect(answerFor("is_expensive", { ctx, privacy: false, today: TODAY })!.text).toContain("美股目前沒有可商用的行情來源")
+    expect(fallbackAnswer("本益比合理嗎", ctx).links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
+  })
+
+  it("加碼 1 張：現價與均價都帶「元」", () => {
+    const ctx: AiContext = { route: "stock", stock: { ...base, position: { avg_cost: 600, quantity: 1000 } as never, quote: { price: 1085 } as never } }
+    const a = answerFor("add_one_lot", { ctx, privacy: false, today: TODAY })!
+    // 小數位跟著價格的格式（formatPrice），這裡只看單位
+    expect(a.text).toMatch(/^以現價 1,085 元加碼 1 張，均價會從 600(\.00)? 元變成約 842\.50? 元（不含手續費）/)
+  })
+})

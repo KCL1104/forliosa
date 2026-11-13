@@ -43,7 +43,7 @@ const DAD: ViewAsTarget = {
   delegation_id: "dlg_dad",
   owner: { user_id: "usr_dad", display_name: "爸爸", avatar_url: null },
   scope: "accounts",
-  accounts: [{ id: "acc_dad_yuanta", name: "元大－爸爸" }],
+  accounts: [{ id: "acc_dad_yuanta", name: "元大・爸爸" }],
 }
 
 const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } })
@@ -170,11 +170,11 @@ describe("查看模式：橫幅", () => {
   })
 
   it("範圍跟著授權者目前的設定，不是進入時的快照", async () => {
-    // 進入時是兩個帳戶；授權者之後只留「元大－爸爸」（mock 的 dlg_dad）
-    useViewAs.getState().set({ ...DAD, accounts: [...DAD.accounts, { id: "acc_dad_fubon", name: "富邦－退休金" }] })
+    // 進入時是兩個帳戶；授權者之後只留「元大・爸爸」（mock 的 dlg_dad）
+    useViewAs.getState().set({ ...DAD, accounts: [...DAD.accounts, { id: "acc_dad_fubon", name: "富邦・退休金" }] })
     renderApp("/")
     const banner = await screen.findByRole("region", { name: "查看模式" }, T)
-    await waitFor(() => expect(within(banner).getByText(/範圍：/).textContent).toBe("範圍：元大－爸爸"), T)
-    expect(useViewAs.getState().target?.accounts.map((a) => a.name)).toEqual(["元大－爸爸"])
+    await waitFor(() => expect(within(banner).getByText(/範圍：/).textContent).toBe("範圍：元大・爸爸"), T)
+    expect(useViewAs.getState().target?.accounts.map((a) => a.name)).toEqual(["元大・爸爸"])
   })
 })

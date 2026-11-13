@@ -415,6 +415,57 @@ await check("紀錄：對話保留 30 天", async () => {
   await page.goto(base + "/history", { waitUntil: "networkidle" })
   await page.getByText("對話紀錄保留 30 天。").first().waitFor()
 })
+await check("紀錄：刪除對話有「復原」（Sonner 通知），復原後對話回到清單", async () => {
+  const main = page.locator("main")
+  const name = "刪除對話「00878 下次除息能領多少？」"
+  await main.getByRole("button", { name }).click()
+  await page.getByText("已刪除對話").first().waitFor({ timeout: 5000 })
+  if (await main.getByRole("button", { name }).count()) throw new Error("thread still listed after delete")
+  await page.getByRole("button", { name: "復原" }).click()
+  await main.getByRole("button", { name }).waitFor({ timeout: 5000 })
+  if (await main.getByText("AI 任務").count()) throw new Error("demo AI tasks must not show")
+})
+await check("AI 面板：設定頁沒有建議 → 輸入框上方列最近 3 段對話、提示字不是交易例子；開始對話後輸入框不跳，免責只出現一次", async () => {
+  await page.goto(base + "/settings", { waitUntil: "networkidle" })
+  const panel = page.getByRole("complementary", { name: "問 AI" })
+  const box = panel.getByLabel("提出問題或下指令")
+  const placeholder = (await box.getAttribute("placeholder")) ?? ""
+  if (/買|張/.test(placeholder)) throw new Error(`settings placeholder suggests a trade: ${placeholder}`)
+  const recent = panel.getByRole("list", { name: "最近的對話" })
+  if ((await recent.getByRole("listitem").count()) !== 3) throw new Error(`expected 3 recent threads, got ${await recent.getByRole("listitem").count()}`)
+  // 按下最近的一段對話 → 接著那段對話（使用者的話出現在面板裡）；輸入框的位置不變
+  const before = (await box.boundingBox()).y
+  const first = recent.getByRole("button").first()
+  const title = ((await first.textContent()) ?? "").trim()
+  await first.click()
+  await panel.locator("p", { hasText: title }).first().waitFor({ timeout: 8000 })
+  if (await panel.getByRole("list", { name: "最近的對話" }).count()) throw new Error("still on the panel home after opening a thread")
+  const after = (await box.boundingBox()).y
+  if (Math.abs(after - before) > 1) throw new Error(`composer moved ${before} → ${after}`)
+  // 同一段對話再問一題：免責只在最新一則回答下方出現一次
+  await box.fill("持股會不會太集中")
+  await box.press("Enter")
+  await panel.getByText(/這題要查資料並附來源/).last().waitFor({ timeout: 8000 })
+  await page.waitForTimeout(300)
+  const disclaimers = await panel.getByText("AI 回答僅供參考，非投資建議。").count()
+  if (disclaimers !== 1) throw new Error(`expected one disclaimer per conversation, got ${disclaimers}`)
+  await panel.getByRole("button", { name: "新對話" }).click()
+})
+await check("美股：不問河流圖、提示字用「股」；自由提問也照實說（均價寫 US$，沒有「—」，不連到空的估值）", async () => {
+  await page.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
+  await page.getByText("關於「Apple」").first().waitFor({ timeout: 8000 })
+  const panel = page.getByRole("complementary", { name: "問 AI" })
+  const box = panel.getByLabel("提出問題或下指令")
+  const placeholder = (await box.getAttribute("placeholder")) ?? ""
+  if (!placeholder.includes("買 AAPL 10 股")) throw new Error(`AAPL placeholder ${placeholder}`)
+  if (await panel.getByRole("button", { name: "我的成本在河流圖哪裡？" }).count()) throw new Error("river question offered for a US stock")
+  await box.fill("我的成本在河流圖哪裡？")
+  await box.press("Enter")
+  await panel.getByText(/你的均價 US\$[\d,.]+。美股目前沒有可商用的行情來源/).waitFor({ timeout: 8000 })
+  if (await panel.getByText(/\d 元，用近四季|現在是 — 倍/).count()) throw new Error("US cost shown in 元 or with a dash")
+  if (await panel.getByRole("link", { name: /看河流圖/ }).count()) throw new Error("links to an empty river chart")
+  await panel.getByRole("button", { name: "新對話" }).click()
+})
 
 // ── 第四批：股利自動入帳 ─────────────────────────────────────
 await check("股利頁：台股股利標「自動」（滑過說明除息日自動入帳），美股股利沒有", async () => {
@@ -539,10 +590,10 @@ await check("授權查看：授權給姊姊（指定帳戶）→ 列出 → 撤�
   const dialog = page.getByRole("dialog")
   await dialog.getByText("姊姊").click()
   await dialog.getByRole("radio", { name: "指定帳戶" }).click()
-  await dialog.getByText("永豐－一般").click()
+  await dialog.getByText("永豐・一般").click()
   await dialog.getByRole("button", { name: "授權", exact: true }).click()
   await page.getByText("已授權姊姊查看").waitFor({ timeout: 8000 })
-  const row = page.getByRole("listitem").filter({ hasText: "姊姊" }).filter({ hasText: "永豐－一般" })
+  const row = page.getByRole("listitem").filter({ hasText: "姊姊" }).filter({ hasText: "永豐・一般" })
   await row.getByRole("button", { name: "撤銷" }).click()
   await page.getByRole("alertdialog").getByRole("button", { name: "撤銷" }).click()
   await page.getByText("已撤銷姊姊的授權").waitFor({ timeout: 8000 })
@@ -670,6 +721,18 @@ await check("手機：群組分頁列可以橫向捲動，直接打開「成員�
     return r.left >= 0 && r.right <= window.innerWidth
   })
   if (!visible) throw new Error("active tab not scrolled into view")
+})
+await check("手機：問 AI 頂端的三個圖示鈕（新對話・紀錄・關閉）同一個樣式、都是 44px", async () => {
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  await m.getByRole("button", { name: /^問 AI/ }).click()
+  const dialog = m.getByRole("dialog")
+  const buttons = [dialog.getByRole("button", { name: "新對話" }), dialog.getByRole("button", { name: "紀錄", exact: true }), dialog.getByRole("button", { name: "關閉" })]
+  const looks = await Promise.all(
+    buttons.map((b) => b.evaluate((el) => { const c = getComputedStyle(el); return [c.width, c.height, c.borderRadius, c.backgroundColor, c.color].join(" ") })),
+  )
+  if (new Set(looks).size !== 1) throw new Error(`header buttons differ: ${looks.join(" | ")}`)
+  if (!looks[0].startsWith("44px 44px")) throw new Error(`header buttons not 44px: ${looks[0]}`)
+  await dialog.getByRole("button", { name: "關閉" }).click()
 })
 await check("手機：底部分頁到紀錄", async () => {
   await m.getByRole("link", { name: "紀錄" }).click()

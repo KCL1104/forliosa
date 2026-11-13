@@ -471,8 +471,20 @@
     font-family: var(--font-ai);
     color: var(--ai);
     font-weight: 400;
-    /* 楷體在 tw-kai.css 放大到 120%（墨跡和 Noto Sans TC 的漢字等高），字距只收一點點；數字（Noto Sans）不會被擠 */
+    /* 楷體在 tw-kai.css 放大到 110%；沒有切片段的模型文字整段只收一點點，數字（Noto Sans）不會被擠 */
     letter-spacing: -0.01em;
+  }
+  /*
+   * 回答的排版（ai/kai-text.tsx 切成片段）：楷體的墨跡填不滿字框，漢字與全形標點的連續片段收 −0.05em，
+   * 看起來像手寫的評語、不是拉開字距的字型展示；數字與拉丁字母（Noto Sans）不收字距，
+   * 數字和它的單位（1,085 元、500 股、43.9%）連成一段，不在行尾拆開。
+   */
+  .ai-voice .kai-han {
+    letter-spacing: -0.06em;
+  }
+  .ai-voice .kai-num {
+    letter-spacing: 0;
+    white-space: nowrap;
   }
 
   /* 示範資料：細框小字，資料狀態而不是品牌 */

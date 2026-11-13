@@ -117,3 +117,41 @@ export function groundingReason(reason: string | null | undefined): string {
   if (REASON_TEXT[r]) return REASON_TEXT[r]
   return /^[a-z0-9_:-]+$/i.test(r) ? "" : r
 }
+
+/**
+ * 模型回答的排版片段（`KaiText`）：楷體的墨跡填不滿字框，漢字與全形標點的連續片段要收一點字距；
+ * 數字與拉丁字母是 Noto Sans，不收字距；數字和後面的單位（元、股、張、%、倍、億…）連成一段，不在行尾拆開。
+ * - `han`：漢字、全形標點、破折號與刪節號
+ * - `num`：數字（可帶 ▲▼、正負號、NT$／US$、千分位、小數、日期與時間的 / :）＋可選的單位
+ * - `plain`：其他（空白、換行、拉丁字母、半形標點）
+ */
+export interface KaiRun {
+  kind: "han" | "num" | "plain"
+  text: string
+}
+
+// 長的單位放前面（「個月」先於「月」、「美元」先於「元」）；數字和單位之間最多一個空白（不吃換行）
+const UNIT = "(?:個月|小時|分鐘|美元|%|％|元|股|張|倍|億|萬|兆|千|檔|天|月|年|日|週|季|次|筆|名|位|點|成|秒|人|家|則|項|期)"
+const NUM = `(?:[▲▼][ \\u00A0]?)?[+\\-−]?(?:NT\\$|US\\$|\\$)?[+\\-−]?\\d[\\d,]*(?:[.:/]\\d+)*(?:[ \\u00A0]?${UNIT})?`
+const HAN = "[\\u2E80-\\u9FFF\\uF900-\\uFAFF\\uFE30-\\uFE4F\\uFF00-\\uFFEF\\u2014\\u2025\\u2026\\u2027]+"
+const RUN = new RegExp(`(${NUM})|(${HAN})`, "gu")
+
+export function kaiRuns(text: string): KaiRun[] {
+  const out: KaiRun[] = []
+  const push = (kind: KaiRun["kind"], t: string) => {
+    if (!t) return
+    const prev = out[out.length - 1]
+    // 相鄰的數字各自一段（「1 張」「500 股」中間可以換行）；漢字與其他文字合併
+    if (prev && prev.kind === kind && kind !== "num") prev.text += t
+    else out.push({ kind, text: t })
+  }
+  let cursor = 0
+  for (const m of text.matchAll(RUN)) {
+    const at = m.index ?? 0
+    push("plain", text.slice(cursor, at))
+    push(m[1] ? "num" : "han", m[0])
+    cursor = at + m[0].length
+  }
+  push("plain", text.slice(cursor))
+  return out
+}

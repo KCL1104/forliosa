@@ -101,45 +101,85 @@ const recurringDraft = async (page, mobile) => {
 }
 
 /**
- * 模型寫的長回答（紫色楷體）：mock 模式只有規則版回答，這裡把一則「真實後端」樣子的對話放進 localStorage
- * （`model: true`、來源、一段沒有附來源的段落），再從「紀錄」打開，檢查楷體與數字、行高、無來源標記。
+ * 模型寫的長回答（紫色楷體）：mock 模式只有規則版回答，這裡把「真實後端」樣子的對話放進 localStorage
+ * （`model: true`、網路來源、一段沒有附來源的段落），再從「紀錄」打開，檢查楷體與數字、行高、無來源標記、出處註腳。
+ * `twoTurns`：同一段對話問兩次，免責只在最新一則回答下方出現一次。
  */
-const modelAnswer = async (page, mobile) => {
-  await page.evaluate(() => {
+const seedModelThread = async (page, mobile, twoTurns) => {
+  await page.evaluate((two) => {
     const at = new Date().toISOString()
     const text =
       "台積電今天上漲 4.83%，收在 1,085 元，是你今天貢獻最多的一檔，帳上多了 NT$75,000。\n" +
       "你持有 1 張 500 股，占總資產 43.9%，今天的漲跌大致決定了整個帳本的表現。\n" +
       "外資連續幾天買超，市場在等下個月的法說會。"
+    const first = [
+      { id: "msg_shot_u", role: "user", text: "台積電今天對我的帳本影響多大？", at },
+      {
+        id: "msg_shot_a",
+        role: "ai",
+        model: true,
+        text,
+        ungrounded: [{ text: "外資連續幾天買超，市場在等下個月的法說會。", reason: "uncited_news_claim" }],
+        citations: [
+          { url: "https://mops.twse.com.tw/", title: "公開資訊觀測站", cited_text: "台積電 115 年 10 月營收" },
+          { url: "https://money.udn.com/money/story/5612/0000001", title: "台積電法說會前夕 外資連三買", cited_text: "外資連續三個交易日買超台積電" },
+        ],
+        disclaimer: "AI 回答僅供參考，非投資建議。",
+        at,
+      },
+    ]
+    const second = [
+      { id: "msg_shot_u2", role: "user", text: "那我要不要再加碼？", at },
+      {
+        id: "msg_shot_a2",
+        role: "ai",
+        model: true,
+        text: "我不替你決定買賣。以現價 1,085 元再加碼 1 張，台積電占總資產會從 43.9% 升到大約 57%，帳本會更集中在一檔。要的話直接說「買 2330 1 張」，我先寫成草稿。",
+        citations: [],
+        disclaimer: "AI 回答僅供參考，非投資建議。",
+        at,
+      },
+    ]
     const thread = {
       id: "thr_shot_model",
       title: "台積電今天對我的帳本影響多大？",
       updatedAt: at,
-      messages: [
-        { id: "msg_shot_u", role: "user", text: "台積電今天對我的帳本影響多大？", at },
-        {
-          id: "msg_shot_a",
-          role: "ai",
-          model: true,
-          text,
-          ungrounded: [{ text: "外資連續幾天買超，市場在等下個月的法說會。", reason: "uncited_news_claim" }],
-          citations: [{ url: "https://mops.twse.com.tw/", title: "公開資訊觀測站", cited_text: "" }],
-          disclaimer: "AI 回答僅供參考，非投資建議。",
-          at,
-        },
-      ],
+      messages: two ? [...first, ...second] : first,
     }
     localStorage.setItem("forliosa:ai", JSON.stringify({ state: { panelOpen: true, threadId: null, threads: [thread], drafts: {} }, version: 1 }))
-  })
+  }, twoTurns)
   await page.reload({ waitUntil: "networkidle" })
   await page.getByText("總資產").first().waitFor({ timeout: 15000 })
   if (mobile) {
     await page.getByRole("button", { name: /^問 AI/ }).click()
     await page.waitForTimeout(400)
   }
-  await page.getByRole("button", { name: "紀錄與 AI 任務" }).click()
+  await page.getByRole("button", { name: "紀錄", exact: true }).click()
   await page.getByRole("button", { name: /^台積電今天對我的帳本影響多大？/ }).first().click()
-  await page.getByText(/外資連續幾天買超/).first().waitFor({ timeout: 8000 })
+  await page.getByText(twoTurns ? /我不替你決定買賣/ : /外資連續幾天買超/).first().waitFor({ timeout: 8000 })
+}
+const modelAnswer = (page, mobile) => seedModelThread(page, mobile, false)
+const modelThread = (page, mobile) => seedModelThread(page, mobile, true)
+
+/** 美股（AAPL，持有中）：面板的提示字用「股」；問「我的成本在河流圖哪裡？」→ 帶 US$ 的均價，照實說沒有河流圖 */
+const openAi = async (page, mobile) => {
+  if (mobile) {
+    await page.getByRole("button", { name: /^問 AI/ }).click()
+    await page.waitForTimeout(500)
+  }
+}
+const aaplRiver = async (page, mobile) => {
+  await openAi(page, mobile)
+  const box = mobile ? page.getByLabel(/搜尋股票、提問/) : page.getByLabel("提出問題或下指令")
+  await box.fill("我的成本在河流圖哪裡？")
+  await box.press("Enter")
+  await page.getByText(/美股目前沒有可商用的行情來源/).first().waitFor({ timeout: 8000 })
+  if (mobile) await box.blur()
+}
+/** 紀錄：刪除一段對話 → Sonner 通知「已刪除對話」附「復原」 */
+const historyUndo = async (page) => {
+  await page.getByRole("button", { name: /^刪除對話「00878 下次除息能領多少？」/ }).first().click()
+  await page.getByText("已刪除對話").first().waitFor({ timeout: 8000 })
 }
 
 /** 個股頁：按 AI 面板的建議「台積電今天為什麼漲？」→ 規則版回答（句子用字說漲跌、數字列、可以去的地方、墨色的追問連結） */
@@ -155,7 +195,7 @@ const whyMove = async (page, mobile) => {
 const pendingHome = async (page, mobile) => {
   await draft(page, mobile)
   if (mobile) {
-    await page.getByRole("button", { name: "紀錄與 AI 任務" }).click()
+    await page.getByRole("button", { name: "紀錄", exact: true }).click()
     await page.getByRole("button", { name: "發起新對話" }).click()
   } else {
     await page.getByRole("button", { name: "新對話" }).click()
@@ -352,6 +392,12 @@ const SHOTS = [
   { name: "ledger-closed", path: "/", ready: "text=總資產", action: closed },
   { name: "ledger-recurring-draft", path: "/", ready: "text=總資產", action: recurringDraft },
   { name: "ai-model-answer", path: "/", ready: "text=總資產", action: modelAnswer },
+  { name: "ai-model-thread", path: "/", ready: "text=總資產", action: modelThread },
+  // 美股的面板（提示字「買 AAPL 10 股」）與河流圖提問；沒有建議的頁面（設定）：輸入框上方是最近的對話
+  { name: "ai-aapl-home", path: "/stock/AAPL", ready: "text=關於「Apple」", action: openAi },
+  { name: "ai-aapl-river", path: "/stock/AAPL", ready: "text=關於「Apple」", action: aaplRiver },
+  { name: "ai-settings-recent", path: "/settings", ready: "text=新增定期定額", action: openAi },
+  { name: "history-undo", path: "/history", ready: "text=發起新對話", action: historyUndo },
   { name: "stock-2330-why-answer", path: "/stock/2330.TW", ready: "text=參考價", action: whyMove },
   { name: "ledger-pending-home", path: "/", ready: "text=總資產", action: pendingHome },
   { name: "ai-search", path: "/", ready: "text=總資產", mobileOnly: true, action: mobileSearch },

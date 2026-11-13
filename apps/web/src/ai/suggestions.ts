@@ -59,6 +59,18 @@ const MAX = 3
 export const FOREIGN_FLOW_QUESTION = "最近外資對這檔的動向？"
 export const isListedStock = (s: Pick<StockData, "market" | "type">) => s.market === "TWSE" && s.type === "stock"
 
+/**
+ * 「我的成本在河流圖哪裡」只在畫得出河流圖時問：台股個股、有本益比的倍數帶、現在有本益比。
+ * 美股沒有可商用的行情，估值分頁沒有河流圖，不問。
+ */
+export const hasRiver = (s: Pick<StockData, "market" | "type" | "valuation" | "overview">) =>
+  s.type === "stock" && s.market !== "US" && (s.valuation?.per_multiples.length ?? 0) > 0 && s.overview?.pe != null && (s.overview?.eps_ttm ?? 0) > 0
+
+/** 價格與成本永遠帶單位：台股「1,085 元」，美股「US$143.41」（和「2,000 股」同一套，值後面接單位） */
+export function priceText(p: number, market: Market): string {
+  return market === "US" ? `US$${formatPrice(p, market)}` : `${formatPrice(p, market)} 元`
+}
+
 /** 單一持股權重門檻、前三大合計門檻、單一產業門檻：任一超過就出現「會不會太集中」 */
 export const CONCENTRATION = { single: 0.15, top3: 0.45, industry: 0.4 } as const
 
@@ -100,7 +112,7 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
   if (held) {
     const next = s.position?.upcoming_dividend
     if (next && daysBetween(today, next.ex_dividend_date) <= 31) out.push({ kind: "next_dividend", symbol: s.symbol, text: "這次除息我可以領多少？" })
-    if (s.type === "stock" && (s.overview?.eps_ttm ?? 0) > 0) out.push({ kind: "cost_on_river", symbol: s.symbol, text: "我的成本在河流圖哪裡？" })
+    if (hasRiver(s)) out.push({ kind: "cost_on_river", symbol: s.symbol, text: "我的成本在河流圖哪裡？" })
     if (s.market !== "US") out.push({ kind: "add_one_lot", symbol: s.symbol, text: "加碼 1 張，均價會變多少？" })
   } else {
     if (s.type === "stock" && (s.overview?.pe ?? null) !== null) out.push({ kind: "is_expensive", symbol: s.symbol, text: "現在的本益比算貴嗎？" })
@@ -228,6 +240,10 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
 function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today: string, asOf?: string | null): Answer | null {
   const link = (tab: string, label: string): AnswerLink => ({ label, to: "/stock/$symbol", params: { symbol: s.symbol }, search: { tab } })
   const listed = s.market === "TWSE"
+  const us = s.market === "US"
+  const currency = us ? "USD" : "TWD"
+  const price = (n: number) => priceText(n, s.market)
+  const cash = (n: number) => (privacy ? MASK : formatMoney(n, { currency }))
   switch (kind) {
     case "why_move": {
       if (!s.why?.show) {
@@ -245,8 +261,10 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
       const next = s.position?.upcoming_dividend
       if (!next) return { text: "目前還沒有公告下一次除息。", links: [link("dividends", "看股利紀錄")], asOf }
       const big = next.amount_estimate >= 20_000
+      // 二代健保是台股股利的規則；美股股利不加這一句
+      const nhi = us ? "" : big ? "單筆超過 2 萬元，會扣二代健保 2.11%。" : "單筆未達 2 萬元，不扣二代健保。"
       return {
-        text: `${formatDateShort(next.ex_dividend_date)} 除息，以你目前的股數估算約 ${money(next.amount_estimate, privacy)}。${big ? "單筆超過 2 萬元，會扣二代健保 2.11%。" : "單筆未達 2 萬元，不扣二代健保。"}`,
+        text: `${formatDateShort(next.ex_dividend_date)} 除息，以你目前的股數估算約 ${cash(next.amount_estimate)}。${nhi}`,
         links: [link("dividends", "看股利")],
         asOf,
       }
@@ -254,35 +272,41 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "cost_on_river": {
       const eps = s.overview?.eps_ttm
       const pos = s.position
+      const cost = pos ? `你的均價 ${privacy ? MASK : price(pos.avg_cost)}。` : ""
+      // 畫不出河流圖時照實說（美股沒有可商用的行情；台股缺倍數帶或本益比），不引用不存在的圖
+      if (us) return { text: `${cost}美股目前沒有可商用的行情來源，算不出本益比，也沒有河流圖。`, links: [link("financials", "看財務")], asOf }
       if (!pos || !eps || eps <= 0) return { text: "近四季 EPS ≤ 0，本益比沒有意義，可以改看股價淨值比。", links: [link("valuation", "看估值")], asOf }
+      if (!hasRiver(s)) return { text: `${cost}這檔還沒有本益比河流圖。`, links: [link("valuation", "看估值")], asOf }
       const costPe = pos.avg_cost / eps
       const nowPe = s.overview?.pe ?? null
-      const multiples = s.valuation?.per_multiples ?? []
-      const band = bandOf(costPe, multiples)
+      const band = bandOf(costPe, s.valuation?.per_multiples ?? [])
       return {
-        text: `你的均價 ${privacy ? MASK : formatPrice(pos.avg_cost, s.market)} 元，用近四季 EPS ${eps} 換算是 ${privacy ? MASK : costPe.toFixed(1)} 倍本益比${band ? `，落在河流圖${band}` : ""}；現在是 ${nowPe?.toFixed(1) ?? "—"} 倍。`,
+        text:
+          `你的均價 ${privacy ? MASK : price(pos.avg_cost)}，用近四季 EPS ${eps} 元換算是 ${privacy ? MASK : costPe.toFixed(1)} 倍本益比` +
+          `${band ? `，落在河流圖${band}` : ""}${nowPe != null ? `；現在是 ${nowPe.toFixed(1)} 倍` : ""}。`,
         links: [link("valuation", "看河流圖")],
         asOf,
       }
     }
     case "add_one_lot": {
       const pos = s.position
-      const price = s.quote?.price
-      if (!pos || !price) return null
-      const next = (pos.avg_cost * pos.quantity + price * 1000) / (pos.quantity + 1000)
+      const now = s.quote?.price
+      if (!pos || !now || us) return null
+      const next = (pos.avg_cost * pos.quantity + now * 1000) / (pos.quantity + 1000)
       return {
-        text: `以現價 ${formatPrice(price, s.market)} 加碼 1 張，均價會從 ${privacy ? MASK : formatPrice(pos.avg_cost, s.market)} 變成約 ${privacy ? MASK : formatPrice(Math.round(next * 100) / 100, s.market)}（不含手續費）。要的話直接說，我先寫成草稿。`,
+        text: `以現價 ${price(now)}加碼 1 張，均價會從 ${privacy ? MASK : price(pos.avg_cost)}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}（不含手續費）。要的話直接說，我先寫成草稿。`,
         rows: [
           { label: "現在持有", value: privacy ? MASK : formatQuantity(pos.quantity, "lot", s.market) },
           { label: "加碼後", value: privacy ? MASK : formatQuantity(pos.quantity + 1000, "lot", s.market) },
         ],
-        followUps: [`買 ${s.code} 1 張 ${price}`],
+        followUps: [`買 ${s.code} 1 張 ${now}`],
         asOf,
       }
     }
     case "is_expensive": {
       const pe = s.valuation?.current.per ?? s.overview?.pe ?? null
       const pct = s.valuation?.current.per_percentile_5y ?? null
+      if (pe === null && us) return { text: "美股目前沒有可商用的行情來源，算不出本益比。", links: [link("financials", "看財務")], asOf }
       if (pe === null) return { text: "這檔沒有可用的本益比（ETF 或近四季虧損）。可以看殖利率與股價淨值比。", links: [link("valuation", "看估值")], asOf }
       const band = bandOf(pe, s.valuation?.per_multiples ?? [])
       return {
@@ -296,9 +320,10 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
       const lastYear = (s.dividends ?? []).filter((d) => d.ex_dividend_date && d.ex_dividend_date > yearAgo && d.ex_dividend_date <= today)
       const perShare = lastYear.reduce((sum, d) => sum + d.cash_dividend, 0)
       if (perShare <= 0) return { text: "過去一年沒有配息紀錄。", links: [link("dividends", "看股利")], asOf }
-      const lot = s.market === "US" ? 1 : 1000
+      const lot = us ? 1 : 1000
+      const per = Math.round(perShare * 100) / 100
       return {
-        text: `過去一年每股共配 ${Math.round(perShare * 100) / 100} 元；持有 ${s.market === "US" ? "1 股" : "1 張"}一年約可領 ${formatMoney(perShare * lot, { currency: s.market === "US" ? "USD" : "TWD" })}。這是用過去的配息估算，未來不一定相同。`,
+        text: `過去一年每股共配 ${us ? `US$${per}` : `${per} 元`}；持有 ${us ? "1 股" : "1 張"}一年約可領 ${formatMoney(perShare * lot, { currency })}。這是用過去的配息估算，未來不一定相同。`,
         links: [link("dividends", "看股利")],
         asOf,
       }
@@ -328,8 +353,14 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
   const links: AnswerLink[] = []
   if (ctx.route === "stock") {
     const s = ctx.stock
-    const tab = (k: string, label: string) => links.push({ label, to: "/stock/$symbol", params: { symbol: s.symbol }, search: { tab: k } })
-    if (/(本益比|估值|貴|便宜|河流)/.test(t)) tab("valuation", "看估值")
+    const tab = (k: string, label: string) => {
+      if (!links.some((l) => l.search?.tab === k)) links.push({ label, to: "/stock/$symbol", params: { symbol: s.symbol }, search: { tab: k } })
+    }
+    // 美股沒有估值資料（沒有可商用的行情）：本益比相關的問題連到財務（SEC 的每股盈餘）
+    if (/(本益比|估值|貴|便宜|河流)/.test(t)) {
+      if (s.market === "US") tab("financials", "看財務")
+      else tab("valuation", "看估值")
+    }
     if (/(營收|財報|毛利|EPS|獲利)/i.test(t)) tab("financials", "看財務")
     if (/(法人|外資|投信|融資|融券|籌碼|大戶)/.test(t)) tab("chips", "看籌碼")
     if (/(股利|配息|除息|殖利率)/.test(t)) tab("dividends", "看股利")

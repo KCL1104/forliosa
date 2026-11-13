@@ -202,15 +202,15 @@ describe("授權查看", () => {
     expect(await codeOf(api.createDelegation({ viewer_user_id: "usr_mom", scope: "all", account_ids: [] }))).toBe("409 already_member")
     expect(await codeOf(api.createDelegation({ viewer_user_id: "usr_sis", scope: "accounts", account_ids: ["acc_dad_yuanta"] }))).toBe("422 validation_error")
     const d = await api.createDelegation({ viewer_user_id: "usr_sis", scope: "accounts", account_ids: ["acc_01JSINOPAC"] })
-    expect(d.accounts).toEqual([{ id: "acc_01JSINOPAC", name: "永豐－一般" }])
+    expect(d.accounts).toEqual([{ id: "acc_01JSINOPAC", name: "永豐・一般" }])
   })
 
   it("查看模式：白名單的 GET 以授權者、只算範圍內的帳戶；寫入 read_only；其他 view_as_not_allowed；行情忽略標頭", async () => {
     const api: ForliosaApi = fresh()
     viewAs("dlg_dad")
-    expect((await api.listAccounts()).map((a) => a.name)).toEqual(["元大－爸爸"])
+    expect((await api.listAccounts()).map((a) => a.name)).toEqual(["元大・爸爸"])
     const holdings = await api.getHoldings()
-    expect(holdings.map((h) => h.symbol)).not.toContain("0056.TW") // 富邦－退休金不在範圍內
+    expect(holdings.map((h) => h.symbol)).not.toContain("0056.TW") // 富邦・退休金不在範圍內
     expect((await api.listTransactions({ limit: 200 })).items.every((t) => t.account_id === "acc_dad_yuanta")).toBe(true)
     expect(await codeOf(api.getHoldings("acc_dad_fubon"))).toBe("404 not_found")
     expect(await codeOf(api.createTransaction({ account_id: "acc_dad_yuanta", symbol: "2330.TW", type: "buy", trade_date: "2026-11-12", quantity: 1, price: 1 }))).toBe(

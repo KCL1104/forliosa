@@ -26,12 +26,12 @@ import {
 
 export const ACCOUNTS: Account[] = [
   {
-    id: "acc_01JSINOPAC", name: "永豐－一般", broker: "永豐金證券", currency: "TWD",
+    id: "acc_01JSINOPAC", name: "永豐・一般", broker: "永豐金證券", currency: "TWD",
     fee_rate: 0.001425, fee_discount: 0.28, min_fee: 20, min_fee_odd_lot: 1,
     tracking_mode: "transactions", created_at: "2023-03-01T10:00:00+08:00",
   },
   {
-    id: "acc_01JCATHAYUS", name: "國泰－複委託", broker: "國泰證券", currency: "USD",
+    id: "acc_01JCATHAYUS", name: "國泰・複委託", broker: "國泰證券", currency: "USD",
     fee_rate: 0.001, fee_discount: 1, min_fee: 3, min_fee_odd_lot: 3,
     tracking_mode: "transactions", created_at: "2023-05-20T10:00:00+08:00",
   },

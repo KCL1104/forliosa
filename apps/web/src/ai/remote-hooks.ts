@@ -51,8 +51,9 @@ export function usageNote(u: { messages_remaining: number | null; tokens_remaini
   return null
 }
 
-export function useRemoteThreads() {
-  return useQuery({ enabled: aiRemote, queryKey: aiKeys.threads, queryFn: () => aiApi.listThreads(), staleTime: 15_000 })
+/** 後端的對話清單；`enabled: false` 時不發請求（面板首頁只在要列最近的對話時才需要） */
+export function useRemoteThreads(enabled = true) {
+  return useQuery({ enabled: aiRemote && enabled, queryKey: aiKeys.threads, queryFn: () => aiApi.listThreads(), staleTime: 15_000 })
 }
 
 /** 打開、刪除後端的對話 */

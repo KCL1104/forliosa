@@ -31,9 +31,10 @@ OUT_FONTS = WEB / "src" / "assets" / "fonts" / "tw-kai"
 OUT_CSS = WEB / "src" / "styles" / "tw-kai.css"
 FAMILY = "TW-Kai"
 # 楷體的字面比 Noto Sans TC 小，而且坐得低（字框 −0.2–0.8em；Noto Sans TC 是 −0.12–0.88em）。
-# 120% 時「永台國的價說」的墨跡上緣和 Noto Sans TC 同字等高（canvas 量測：Noto 0.85em、楷體 0.86em），
-# 同一行的數字（Noto Sans）不會顯得比漢字大；字距只要收一點點（.ai-voice −0.01em）。
-SIZE_ADJUST = 120
+# size-adjust 同時放大字面與每個字的步距：120% 時漢字和 Noto Sans TC 等高，但楷體的墨跡填不滿字框，
+# 字與字之間空出約 0.2em，看起來像字距拉開的「手寫字型展示」。110% 時漢字仍比同一行的數字（Noto Sans）
+# 略大一點、不顯得小；剩下的空隙由回答的排版收掉（漢字的連續片段 −0.05em，數字不收，見 .ai-voice）。
+SIZE_ADJUST = 110
 
 # 標點與全形符號：AI 的話裡的「」，。、：；！？（）—…～ 也要是楷體
 PUNCT = list(range(0x3000, 0x3040)) + list(range(0xFE30, 0xFE50)) + list(range(0xFF01, 0xFF61)) + [0x2014, 0x2025, 0x2026, 0x2027]
