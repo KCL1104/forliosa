@@ -12,7 +12,7 @@ import {
   type Time,
   type UTCTimestamp,
 } from "lightweight-charts"
-import { ChevronDownIcon, StarIcon } from "lucide-react"
+import { ChevronDownIcon } from "lucide-react"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useHistory, useIntraday, useToggleWatch, useWatchlist } from "@/api/queries"
 import type { HistoryRange, InstrumentDetail, Position, PositionMarker, Quote } from "@/api/types"
@@ -31,15 +31,16 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useIsDesktop } from "@/hooks/use-media-query"
 import { useResolvedTheme } from "@/hooks/use-theme"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { cssVarColor } from "@/lib/css-color"
-import { formatDate, formatNumber, formatPercent, formatPrice } from "@/lib/format"
-import { formatQuote } from "@/lib/tick"
+import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
 import { dayTime, importantMoments, movingAverage } from "@/lib/chart-math"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useReadOnly } from "@/api/view-as"
+import { NotYet } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
 export type ChartRange = "1D" | HistoryRange
@@ -78,6 +79,8 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
  * 走勢圖：工具列（類型・比較・指標・重要時刻）＋區間。
  * 買進 B／賣出 S／股利 D 標記來自交易歷史（`position/history`，出清後也有）；持有時另有均價虛線。隱私模式全部隱藏。
  * 1 日線需要授權的盤中行情：商用模式沒有點，顯示說明（後端的 notes）。存檔不足時圖下照實寫出 notes。
+ * 手機上工具列放在區間下面：讀數與圖緊接在價格與部位下面，第一屏就看得到圖（工具列是次要的）。
+ * 沒有報價（商用模式的美股）時這個元件不出現（StockPage 不放），原因只在價格那一格說一次。
  */
 export function PriceChart({ inst, quote, position, markers }: { inst: InstrumentDetail; quote?: Quote; position: Position | null; markers?: PositionMarker[] }) {
   const [rangeChoice, setRange] = useState<ChartRange | null>(null)
@@ -89,6 +92,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const [moments, setMoments] = useState(true)
   const privacy = usePrefs((s) => s.privacyMode)
   const theme = useResolvedTheme()
+  const desktop = useIsDesktop()
   const convention = usePrefs((s) => s.colorConvention)
   const isIntraday = range === "1D"
   const history = useHistory(inst.symbol, isIntraday ? "5D" : range)
@@ -130,7 +134,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       rightPriceScale: { borderVisible: false, scaleMargins: { top: 0.1, bottom: volume && !isIntraday ? 0.24 : 0.08 }, mode: comparing ? PriceScaleMode.Percentage : PriceScaleMode.Normal },
       timeScale: { borderVisible: false, rightOffset: 2, fixLeftEdge: true, fixRightEdge: true, timeVisible: isIntraday, secondsVisible: false },
       crosshair: { mode: CrosshairMode.Magnet, vertLine: { color: ink2, labelBackgroundColor: labelBg }, horzLine: { color: ink2, labelBackgroundColor: labelBg } },
-      localization: { locale: "zh-TW", priceFormatter: (p: number) => (comparing ? `${p >= 0 ? "+" : ""}${p.toFixed(1)}%` : formatQuote(p, inst.market, inst.type)), dateFormat: "yyyy/MM/dd" },
+      // 縱軸與十字線上的價格：和報價同一套小數位（Tick Decimal Rule），十字線落在任意價位時四捨五入到報價的位數
+      localization: { locale: "zh-TW", priceFormatter: (p: number) => (comparing ? `${p >= 0 ? "+" : ""}${p.toFixed(1)}%` : formatPriceLevel(p, inst.market, inst.type)), dateFormat: "yyyy/MM/dd" },
       handleScroll: { vertTouchDrag: false },
     })
 
@@ -228,11 +233,10 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const blank = !isIntraday && empty && !history.isError
   const rangeReturn = !isIntraday && candles.length > 1 ? candles.at(-1)!.c / candles[0]!.c - 1 : null
 
-  return (
-    <section aria-label="走勢圖" className="mt-6">
-      {/* 沒有任何價格（美股商用模式、這段期間沒有成交）：不放工具列與讀數，只留空狀態 */}
-      {!blank && (
-      <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
+  const price = (p: number | undefined) => formatPrice(p, inst.market, inst.type)
+  // 沒有任何價格（這段期間沒有成交）：不放工具列與讀數，只留空狀態
+  const toolbar = !blank && (
+      <div className={cn("flex flex-wrap items-center gap-1.5 sm:gap-2", !desktop && "mt-3")}>
         <div role="radiogroup" aria-label="圖表類型" className="flex gap-0.5 rounded-sm border border-ctl p-0.5">
           {(["line", "candle"] as const).map((k) => (
             <button
@@ -242,14 +246,14 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
               aria-checked={kind === k}
               disabled={isIntraday && k === "candle"}
               onClick={() => setKind(k)}
-              className="sel-chip h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:px-3"
+              className="sel-chip h-7 rounded-xs px-2.5 text-sm text-ink-2 disabled:opacity-40 pointer-coarse:h-10 pointer-coarse:px-3.5"
             >
               {k === "line" ? "線" : "K 線"}
             </button>
           ))}
         </div>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="outline" size="sm" disabled={isIntraday} />}>
+          <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="pointer-coarse:h-11" disabled={isIntraday} />}>
             比較{compare !== "none" && `：${COMPARES.find((c) => c.value === compare)?.label}`}
             <ChevronDownIcon />
           </DropdownMenuTrigger>
@@ -267,7 +271,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           </DropdownMenuContent>
         </DropdownMenu>
         <DropdownMenu>
-          <DropdownMenuTrigger render={<Button variant="outline" size="sm" disabled={isIntraday} />}>
+          <DropdownMenuTrigger render={<Button variant="outline" size="sm" className="pointer-coarse:h-11" disabled={isIntraday} />}>
             指標
             <ChevronDownIcon />
           </DropdownMenuTrigger>
@@ -299,7 +303,11 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           </button>
         </div>
       </div>
-      )}
+  )
+
+  return (
+    <section aria-label="走勢圖" className="mt-6">
+      {desktop && toolbar}
 
       {!blank && (
       <p className="num mt-2 flex min-h-5 flex-wrap gap-x-3 text-sm text-ink-2" aria-live="off">
@@ -308,10 +316,10 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
             <span>{isIntraday ? `今天 ${readout.t}` : formatDate(readout.t)}</span>
             {"o" in readout && readout.o !== undefined && kind === "candle" && (
               <span>
-                開 {formatPrice(readout.o, inst.market)} 高 {formatPrice(readout.h, inst.market)} 低 {formatPrice(readout.l, inst.market)}
+                開 {price(readout.o)} 高 {price(readout.h)} 低 {price(readout.l)}
               </span>
             )}
-            <span className="text-ink">收 {formatPrice(readout.c, inst.market)}</span>
+            <span className="text-ink">收 {price(readout.c)}</span>
             {readout.v !== undefined && <span>量 {inst.market === "US" ? `${formatNumber(readout.v)} 股` : `${formatNumber(Math.round(readout.v / 1000))} 張`}</span>}
             {hover?.moment !== undefined && <span className="text-ink">◆ 單日 {formatPercent(hover.moment)}</span>}
             {!hover && rangeReturn !== null && <span>區間 {formatPercent(rangeReturn)}</span>}
@@ -354,6 +362,7 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
         </p>
       </div>
       )}
+      {!desktop && toolbar}
       <DataNotes
         notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), "價格為未還原收盤價。"] : []}
         className="mt-1"
@@ -362,15 +371,14 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   )
 }
 
-/** 這段期間沒有日線：商用模式是存檔還在累積（或美股沒有可商用的來源），照後端的 notes 說明 */
+/** 這段期間沒有日線：商用模式是存檔還在累積，照後端的 notes 說明（空狀態：上下實線、墨色標題、淡墨原因） */
 function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
-  if (notes.length === 0) return <p className="border-y border-dashed border-rule px-1 py-5 text-md text-ink-2">這段期間還沒有成交資料。</p>
+  if (notes.length === 0) return <NotYet title="這段期間還沒有成交資料" />
   return (
-    <div className="flex flex-col items-start gap-2 border-y border-dashed border-rule px-1 py-5">
-      <p className="font-medium">{us ? "美股走勢暫時沒有" : "走勢資料累積中"}</p>
-      <DataNotes notes={notes} className="max-w-prose text-md" />
-      {!us && <p className="max-w-prose text-md text-ink-2">官方開放資料只有當天的收盤，從開始存檔那天起每個交易日累積一點，滿兩天就會畫出走勢。</p>}
-    </div>
+    <NotYet title={us ? "美股走勢暫時沒有" : "走勢資料累積中"}>
+      <DataNotes notes={notes} className="text-md" />
+      {!us && <p className="mt-1">官方開放資料只有當天的收盤，從開始存檔那天起每個交易日累積一點，滿兩天就會畫出走勢。</p>}
+    </NotYet>
   )
 }
 
@@ -382,36 +390,42 @@ function NoIntraday({ inst, quote, notes, onFiveDays }: { inst: InstrumentDetail
   if (notes.length > 0) {
     // 後端說明為什麼沒有（只用可商用來源時沒有授權的盤中資料）：照實顯示，並給一個現在能看的
     return (
-      <div className="flex h-full flex-col items-start justify-center gap-2 border-y border-dashed border-rule px-1">
-        <p className="font-medium">盤中走勢需要授權行情，目前提供收盤後資料</p>
-        <DataNotes notes={notes} className="max-w-prose text-md" />
+      <NotYet
+        className="h-full justify-center"
+        title="盤中走勢需要授權行情，目前提供收盤後資料"
+        action={
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={onFiveDays}>
+            看 5 日走勢
+          </Button>
+        }
+      >
+        <DataNotes notes={notes} className="text-md" />
         {quote && (
-          <p className="num text-md text-ink-2">
-            最近收盤 {formatQuote(quote.price, inst.market, inst.type)}
+          <p className="num mt-1">
+            最近收盤 {formatPrice(quote.price, inst.market, inst.type)}
             {quote.as_of && `（${formatDate(quote.as_of.slice(0, 10))}）`}
           </p>
         )}
-        <Button variant="outline" size="sm" className="mt-1" onClick={onFiveDays}>
-          看 5 日走勢
-        </Button>
-      </div>
+      </NotYet>
     )
   }
   return (
-    <div className="flex h-full flex-col items-start justify-center gap-3 border-y border-dashed border-rule px-1">
-      <p className="font-medium">1 日走勢只有持股與觀察清單會記錄</p>
-      <p className="max-w-prose text-md text-ink-2">
-        {watching
-          ? "已經在觀察中，下一次盤中就會開始累積每分鐘的走勢。"
-          : `加入觀察後，盤中每分鐘會記下${inst.name}的價格。現在可以先看 5 日或 1 月。`}
-        {quote && ` 目前 ${formatPrice(quote.price, inst.market)}。`}
-      </p>
-      {!watching && !readOnly && (
-        <Button variant="outline" size="sm" disabled={toggle.isPending} onClick={() => toggle.mutate({ symbol: inst.symbol, on: true })}>
-          <StarIcon />
-          加入觀察
-        </Button>
-      )}
-    </div>
+    <NotYet
+      className="h-full justify-center"
+      title="1 日走勢只有持股與觀察清單會記錄"
+      action={
+        !watching &&
+        !readOnly && (
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" disabled={toggle.isPending} onClick={() => toggle.mutate({ symbol: inst.symbol, on: true })}>
+            加入觀察
+          </Button>
+        )
+      }
+    >
+      {watching
+        ? "已經在觀察中，下一次盤中就會開始累積每分鐘的走勢。"
+        : `加入觀察後，盤中每分鐘會記下${inst.name}的價格。現在可以先看 5 日或 1 月。`}
+      {quote && ` 目前 ${formatPrice(quote.price, inst.market, inst.type)}。`}
+    </NotYet>
   )
 }

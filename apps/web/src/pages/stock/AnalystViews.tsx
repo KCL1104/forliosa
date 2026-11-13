@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { ChevronDownIcon, SearchIcon } from "lucide-react"
+import { ChevronDownIcon } from "lucide-react"
 import { useCallback, useEffect, useReducer, useState } from "react"
 import { ApiError, api, appToday } from "@/api"
 import type { AnalystView, InstrumentDetail } from "@/api/types"
@@ -92,7 +92,7 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
           aria-expanded={open}
           aria-controls="ov-analyst-body"
           onClick={toggle}
-          className="group flex min-h-10 w-full items-end gap-x-3 border-b border-rule pb-2 text-left"
+          className="group flex min-h-10 w-full items-end gap-x-3 border-b border-rule pb-2 text-left pointer-coarse:min-h-11"
         >
           <span className="text-lg font-bold">法人觀點</span>
           <span className="pb-px text-sm font-normal text-ink-2">第三方意見</span>
@@ -194,7 +194,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
   }
 }
 
-/** 今天還沒有人查過：一個安靜的查詢按鈕（紫色圖示＝交給 AI 去找） */
+/** 今天還沒有人查過：一個安靜的查詢按鈕（只有字，不加裝飾圖示） */
 function SearchPrompt({ onSearch }: { onSearch: () => void }) {
   const usage = useAiUsage().data
   const off = usage?.available === false || usage?.messages_remaining === 0 || usage?.tokens_remaining === 0
@@ -210,7 +210,6 @@ function SearchPrompt({ onSearch }: { onSearch: () => void }) {
     <div className="flex flex-col items-start gap-3">
       <p className="max-w-prose text-md text-ink">近期媒體報導的機構評等與目標價，最多 5 筆，每筆附報導日期與原文連結。</p>
       <Button variant="outline" onClick={onSearch} disabled={off}>
-        <SearchIcon aria-hidden className="text-ai" />
         查詢近期法人觀點
       </Button>
       {hint && <p className="text-sm text-ink-2">{hint}</p>}
@@ -231,7 +230,7 @@ function SourceLink({ v, className }: { v: AnalystView; className?: string }) {
   const host = hostOf(v.url)
   return (
     <a href={v.url} target="_blank" rel="noopener noreferrer" className={cn("group inline-flex max-w-full min-w-0 items-center gap-1.5 rounded-sm", className)}>
-      <span className="min-w-0 truncate group-hover:underline">{v.source_title}</span>
+      <span className="min-w-0 truncate underline decoration-ctl underline-offset-3 group-hover:decoration-ink">{v.source_title}</span>
       {host && <span className="num shrink-0 text-sm text-ink-2">{host}</span>}
       <span className="sr-only">（另開新視窗）</span>
     </a>

@@ -243,6 +243,11 @@ const toSection = (id) => async (page, mobile) => {
     if (node) window.scrollTo({ top: node.getBoundingClientRect().top + window.scrollY - (m ? 72 : 136), behavior: "instant" })
   }, [id, mobile])
 }
+/** 估值分頁：打開河流圖的「怎麼看 ⌄」（術語說明預設收著） */
+const valuationHowTo = async (page) => {
+  await toTabs(page)
+  await page.getByRole("region", { name: /河流圖$/ }).getByRole("button", { name: /^怎麼看/ }).click()
+}
 /** 籌碼分頁捲到「外資持股比」 */
 const toForeign = async (page, mobile) => {
   await toTabs(page)
@@ -346,6 +351,10 @@ const SHOTS = [
   { name: "stock-2409-analyst-unavailable", path: "/stock/2409.TW", ready: "text=參考價", action: analystSearch(/法人觀點暫時查不到/) },
   { name: "ledger-recurring-marks", path: "/", ready: "text=總資產", action: recurringMarks },
   { name: "stock-2330-valuation", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: toTabs },
+  { name: "stock-2330-valuation-howto", path: "/stock/2330.TW?tab=valuation", ready: "text=各倍數對應的股價", action: valuationHowTo },
+  // 沒有報價（商用模式的美股）：估值只有一個空狀態；ETF 沒有河流圖，空狀態下面接淨值與殖利率
+  { name: "stock-aapl-valuation", path: "/stock/AAPL?tab=valuation", ready: "text=沒有報價，算不出估值", action: toTabs },
+  { name: "stock-0050-valuation", path: "/stock/0050.TW?tab=valuation", ready: "text=ETF 沒有本益比與股價淨值比河流圖", action: toTabs },
   { name: "stock-2330-chips", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人", action: toTabs },
   { name: "stock-6488-chips", path: "/stock/6488.TWO?tab=chips", ready: "text=三大法人買賣超", action: toTabs },
   { name: "stock-2330-foreign-ask", path: "/stock/2330.TW?tab=chips", ready: "text=上市股票不顯示逐檔三大法人", action: foreignAsk },

@@ -4,11 +4,10 @@ import { appNow } from "@/api"
 import { useNews } from "@/api/queries"
 import type { InstrumentDetail, NewsItem } from "@/api/types"
 import { ErrorState } from "@/components/states"
-import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { mediaNews, NEWS_PAGE_SIZE, outletLabel, relativeTime } from "@/lib/news"
-import { QuietSection } from "./tabs/kit"
+import { NotYet, QuietSection } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
 /** 總覽先列這麼多則；「看更多」每次再加 NEWS_PAGE_SIZE 則 */
@@ -37,7 +36,9 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
   return (
     <QuietSection title="新聞報導" titleId="ov-media">
       {items.length === 0 ? (
-        <p className="pt-2 text-md text-ink-2">最近沒有找到{inst.name}的媒體報導；新聞大約每小時更新一次。</p>
+        <NotYet className="-mt-1 border-t-0" title={`最近沒有找到${inst.name}的媒體報導`}>
+          新聞大約每小時更新一次。
+        </NotYet>
       ) : (
         <>
           <ul>
@@ -45,11 +46,16 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
               <NewsRow key={`${n.url}-${n.published_at}`} item={n} now={now} />
             ))}
           </ul>
+          {/* 文字按鈕：墨色、常駐底線（不是只有淡墨字），⌄ 表示在這裡往下展開 */}
           {items.length > shown && (
-            <Button variant="ghost" size="sm" className="mt-1 -ml-2.5 self-start text-ink-2" onClick={() => setShown((s) => s + NEWS_PAGE_SIZE)}>
+            <button
+              type="button"
+              onClick={() => setShown((s) => s + NEWS_PAGE_SIZE)}
+              className="mt-1 inline-flex min-h-10 items-center gap-0.5 self-start rounded-xs text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11"
+            >
               看更多
-              <ChevronDownIcon aria-hidden />
-            </Button>
+              <ChevronDownIcon aria-hidden className="size-3.5" />
+            </button>
           )}
         </>
       )}
@@ -62,12 +68,13 @@ function NewsRow({ item, now }: { item: NewsItem; now: Date }) {
   const outlet = outletLabel(item)
   const when = relativeTime(item.published_at, now, item.date_only)
   return (
-    <li className="flex flex-col-reverse gap-0.5 border-b border-rule py-2.5 sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-baseline sm:gap-6">
+    <li className="relative flex flex-col-reverse gap-0.5 border-b border-rule py-2.5 hover:bg-hov sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-baseline sm:gap-6">
+      {/* 連結撐滿整列（手機上整列都按得到）；標題本身滑過才畫底線（一整列標題都畫線太吵） */}
       <a
         href={item.url}
         target="_blank"
         rel="noopener noreferrer"
-        className="block text-base leading-snug break-words underline-offset-3 hover:underline focus-visible:underline"
+        className="block text-base leading-snug break-words underline-offset-3 after:absolute after:inset-0 hover:underline focus-visible:underline"
       >
         {item.title}
         <span className="sr-only">（{outlet}，另開新視窗）</span>

@@ -15,6 +15,7 @@ import { usePrefs } from "@/stores/prefs"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { sourceNotes, withoutKind } from "../text"
 import { DateCell } from "@/components/date-cell"
+import { NotYet } from "./kit"
 
 /**
  * 事件：過去與接下來的時間軸。官方公告（重大訊息、證交所公告）也在這條軸上，標「公告」並連到原文；
@@ -40,7 +41,7 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
     .map((m) => ({
       date: m.date,
       type: "trade" as const,
-      title: `${m.type === "buy" ? "買進" : "賣出"}${privacy || m.quantity === null ? "" : ` ${formatQuantity(m.quantity, unitPref, inst.market)}`}，成交價 ${formatPrice(m.price, inst.market)}`,
+      title: `${m.type === "buy" ? "買進" : "賣出"}${privacy || m.quantity === null ? "" : ` ${formatQuantity(m.quantity, unitPref, inst.market)}`}，成交價 ${inst.market === "US" ? "US$" : ""}${formatPrice(m.price, inst.market, inst.type)}`,
       detail: null,
       url: null,
       mine: true,
@@ -63,18 +64,19 @@ export function EventsTab({ inst, position, markers }: { inst: InstrumentDetail;
         ]}
       />
       <Section title="接下來" titleId="ev-next">
-        <Timeline rows={future} today={today} privacy={privacy} who={you} empty="目前沒有已公告的事件。" future />
+        <Timeline rows={future} today={today} privacy={privacy} who={you} empty={{ title: "目前沒有已公告的事件", reason: "除息、營收公布與法說會公告後會出現在這裡。" }} future />
       </Section>
       <Section title="過去" titleId="ev-past">
-        <Timeline rows={past} today={today} privacy={privacy} who={you} empty={filter === "mine" ? `沒有${you}的交易或股利紀錄。` : "沒有過去的事件。"} />
+        <Timeline rows={past} today={today} privacy={privacy} who={you} empty={filter === "mine" ? { title: "還沒有紀錄", reason: `沒有${you}的交易或股利紀錄。` } : { title: "沒有過去的事件" }} />
       </Section>
     </div>
   )
 }
 
 /** `who`：可領股利的主人（「你」，查看模式是授權者的名稱） */
-function Timeline({ rows, today, privacy, who, empty, future }: { rows: TimelineRow[]; today: string; privacy: boolean; who: string; empty: string; future?: boolean }) {
-  if (rows.length === 0) return <p className="text-md text-ink-2">{empty}</p>
+function Timeline({ rows, today, privacy, who, empty, future }: { rows: TimelineRow[]; today: string; privacy: boolean; who: string; empty: { title: string; reason?: string }; future?: boolean }) {
+  // 區塊標題下的格線就是空狀態上面那條線
+  if (rows.length === 0) return <NotYet className="-mt-3 border-t-0" title={empty.title}>{empty.reason}</NotYet>
   return (
     <ol className="-mt-3">
       {rows.map((e, i) => {
@@ -83,13 +85,13 @@ function Timeline({ rows, today, privacy, who, empty, future }: { rows: Timeline
         const announcement = e.type === "announcement" || e.type === "material_info"
         const amount = e.amount_estimate !== null && e.mine ? `${who}可領約 ${privacy ? "••••" : formatMoney(e.amount_estimate)}` : null
         return (
-          <li key={`${e.date}-${e.type}-${e.title}-${i}`} className="grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]">
+          <li key={`${e.date}-${e.type}-${e.title}-${i}`} className={cn("grid grid-cols-[5.75rem_minmax(0,1fr)] items-baseline border-b border-rule sm:grid-cols-[7rem_6.5rem_minmax(0,1fr)_auto]", e.url && "relative hover:bg-hov")}>
             <DateCell date={e.date} pad="py-3" inline className="row-span-3 sm:row-span-1" />
             <span className={cn("pt-3 pl-3 text-md sm:pb-3", e.mine ? "font-medium text-ink" : "text-ink-2")}>{kind}</span>
             <span className="min-w-0 pl-3 max-sm:col-start-2 sm:py-3 sm:pl-0">
               {e.url ? (
-                // 有原文的列：常駐的淡底線，和沒有連結的列分得出來
-                <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-rule underline-offset-3 hover:decoration-ink">
+                // 有原文的列：常駐的底線；連結撐滿整列（手機上整列都按得到）
+                <a href={e.url} target="_blank" rel="noreferrer" className="underline decoration-ctl underline-offset-3 after:absolute after:inset-0 hover:decoration-ink">
                   {title}
                   <span className="sr-only">（在{announcementHost(e.url)}查看，另開新視窗）</span>
                 </a>

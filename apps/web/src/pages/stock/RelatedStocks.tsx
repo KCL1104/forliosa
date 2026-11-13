@@ -1,11 +1,11 @@
 import { Link } from "@tanstack/react-router"
 import { useRelated } from "@/api/queries"
 import type { InstrumentDetail, RelatedCard } from "@/api/types"
-import { Pct, Price } from "@/components/finance"
+import { Pct } from "@/components/finance"
 import { ScrollRow } from "@/components/scroll-row"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
-import { formatPriceLevel } from "@/lib/format"
+import { formatPrice, formatPriceLevel } from "@/lib/format"
 import { QuietSection } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
@@ -40,8 +40,11 @@ export function RelatedStocks({ inst }: { inst: InstrumentDetail }) {
   )
 }
 
+/** 台股 ETF（含受益憑證）的代號都是 00 開頭：決定升降單位（ETF 50 元以上是 0.05 檔） */
+const typeOf = (code: string) => (code.startsWith("00") ? ("etf" as const) : ("stock" as const))
+
 function RelatedCell({ card }: { card: RelatedCard }) {
-  const code = card.is_index ? "指數" : card.symbol.split(".")[0]
+  const code = card.is_index ? "指數" : card.symbol.split(".")[0]!
   const body = (
     <>
       <p className="flex min-w-0 items-baseline gap-2">
@@ -52,14 +55,15 @@ function RelatedCell({ card }: { card: RelatedCard }) {
       </p>
       <p className="mt-0.5 flex flex-wrap items-baseline gap-x-2">
         <span className="num">
-          {card.is_index ? (card.close === null ? "—" : formatPriceLevel(card.close)) : <Price value={card.close} market={card.symbol.endsWith(".TWO") ? "TPEX" : "TWSE"} />}
+          {/* 和報價同一套小數位（214、52.40、1,085）；指數點位四捨五入 */}
+          {card.is_index ? (card.close === null ? "—" : formatPriceLevel(card.close)) : formatPrice(card.close, card.symbol.endsWith(".TWO") ? "TPEX" : "TWSE", typeOf(code))}
         </span>
         <Pct value={card.change_pct} className="text-md" />
       </p>
       <p className="mt-1 line-clamp-2 text-sm text-ink-2">{card.reason_label}</p>
     </>
   )
-  const cls = "block h-full py-2.5 pr-3 pl-3"
+  const cls = "block h-full min-h-11 py-2.5 pr-3 pl-3"
   if (card.is_index) return <div className={cls}>{body}</div>
   return (
     <Link

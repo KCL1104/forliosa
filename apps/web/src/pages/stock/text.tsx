@@ -1,4 +1,6 @@
 import { useAttributions } from "@/api/queries"
+import type { InstrumentDetail } from "@/api/types"
+import { MARKET_LABEL } from "@/lib/labels"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort } from "@/lib/format"
 import { type SourceNote, toSourceNote } from "@/lib/sources"
@@ -93,4 +95,18 @@ export function labelsCollide(a: { pos: number; text: string }, b: { pos: number
   const [a1, a2] = range(a)
   const [b1, b2] = range(b)
   return a1 < b2 + 12 && b1 < a2 + 12
+}
+
+/**
+ * 美股的產業名稱是英文（資料源原文）。麵包屑只在對得到台股產業別的時候寫中文——同一個詞，美股和台股讀起來一樣
+ * （「半導體業」是證交所的產業別名稱）；對不到的不自己翻譯，只寫「美股」。原文仍在「關於」的鍵值格裡。
+ */
+const US_INDUSTRY_ZH: Readonly<Record<string, string>> = { Semiconductors: "半導體業" }
+
+/** 麵包屑的市場與產業：「上市・半導體業」「上櫃・ETF」「美股・半導體業」「美股」 */
+export function marketLine(inst: Pick<InstrumentDetail, "market" | "type" | "industry">): string {
+  const market = MARKET_LABEL[inst.market]
+  if (inst.type === "etf") return `${market}・ETF`
+  const industry = inst.market === "US" ? US_INDUSTRY_ZH[inst.industry ?? ""] : inst.industry
+  return industry ? `${market}・${industry}` : market
 }

@@ -1,4 +1,3 @@
-import { AskAiIcon } from "@/ai/ask-icon"
 import { useState } from "react"
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { FOREIGN_FLOW_QUESTION } from "@/ai/suggestions"
@@ -67,15 +66,21 @@ const lots = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${formatNumber(M
 function ListedInstitutional({ inst, top20 }: { inst: InstrumentDetail; top20: boolean }) {
   const ask = useAskAi()
   const readOnly = useReadOnly()
+  // 動作只有一個：把問題交給 AI（問題本身就是按鈕的字；不加裝飾的筆圖示）
   return (
-    <NotYet className="border-t-0 pt-0" title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人`}>
-      <p>{top20 ? "證交所的開放資料沒有逐檔三大法人。" : "證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。"}</p>
-      {inst.type === "stock" && !readOnly && (
-        <Button variant="outline" size="sm" className="mt-3" onClick={() => ask.submit(FOREIGN_FLOW_QUESTION)}>
-          <AskAiIcon aria-hidden className="text-ai" />
-          {FOREIGN_FLOW_QUESTION}
-        </Button>
-      )}
+    <NotYet
+      className="border-t-0 pt-0"
+      title={`上市${inst.type === "etf" ? " ETF" : "股票"}不顯示逐檔三大法人`}
+      action={
+        inst.type === "stock" &&
+        !readOnly && (
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.submit(FOREIGN_FLOW_QUESTION)}>
+            {FOREIGN_FLOW_QUESTION}
+          </Button>
+        )
+      }
+    >
+      {top20 ? "證交所的開放資料沒有逐檔三大法人。" : "證交所的開放資料沒有逐檔三大法人；外資持股只有前 20 名。"}
     </NotYet>
   )
 }
@@ -222,7 +227,7 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
         </Section>
         <Section title="股權分散" titleId="chips-holders" aside={c.major_holders ? `集保 ${formatDateShort(c.major_holders.as_of)}` : undefined}>
           {!c.major_holders ? (
-            <p className="text-md text-ink-2">還沒有股權分散資料（每週五公布）。</p>
+            <NotYet className="-mt-3 border-t-0" title="還沒有股權分散資料">集保每週五公布。</NotYet>
           ) : (
             <ul className="-mt-3">
               {c.major_holders.buckets.map((b) => (
@@ -251,9 +256,9 @@ function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: 
   const top = chips.foreign_top20
   if (!top) {
     return (
-      <p className="text-md text-ink-2">
-        證交所只公布外資持股比率前 20 名，{inst.name}目前不在名單上，所以不顯示外資持股比。
-      </p>
+      <NotYet className="-mt-3 border-t-0" title="不在外資持股前 20 名">
+        證交所只公布外資持股比率前 20 名，{inst.name}目前不在名單上。
+      </NotYet>
     )
   }
   return (
@@ -271,7 +276,7 @@ function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: 
 }
 
 function MiniLine({ data, color, label, fmt }: { data: { t: string; v: number }[]; color: string; label: string; fmt: (v: number) => string }) {
-  if (data.length < 2) return <p className="text-md text-ink-2">資料不足。</p>
+  if (data.length < 2) return <NotYet className="-mt-3 border-t-0" title="資料還不夠畫走勢">至少要有兩天的資料。</NotYet>
   // 比率的變化很小時（例如外資持股 75.2%–75.5%），刻度要有一位小數才不會重複
   const values = data.map((d) => d.v)
   const pctDecimals = Math.max(...values) - Math.min(...values) < 0.03 ? 1 : 0

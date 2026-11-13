@@ -1,6 +1,6 @@
 import NumberFlow from "@number-flow/react"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
-import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon, StarIcon } from "lucide-react"
+import { ArrowLeftIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
 import { lazy, Suspense, useState } from "react"
 import { ApiError } from "@/api"
 import { useInstrument, useOverview, usePosition, usePositionHistory, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
@@ -15,8 +15,7 @@ import { ErrorState } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, directionGlyph, formatDateShort, formatMoney, formatPercent, formatPrice, formatQuantity, toneClass } from "@/lib/format"
-import { MARKET_LABEL } from "@/lib/labels"
-import { formatQuote, formatQuoteChange, limitPrices, limitState, quoteDecimals } from "@/lib/tick"
+import { formatQuoteChange, limitPrices, limitState, quoteDecimals } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
 import { usePrefs } from "@/stores/prefs"
@@ -24,7 +23,7 @@ import { asOfLabel } from "@/lib/as-of"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
-import { sourceNotes, twOpenApi, useDatasetSources, withFigures } from "./text"
+import { marketLine, sourceNotes, twOpenApi, useDatasetSources, withFigures } from "./text"
 import { useReadOnly, useWho } from "@/api/view-as"
 
 const ValuationTab = lazy(() => import("./tabs/ValuationTab").then((m) => ({ default: m.ValuationTab })))
@@ -86,6 +85,8 @@ function StockPageInner() {
     )
   }
   const inst = instrument.data
+  // 沒有報價：只在價格那一格說一次；由價格算出來的區塊（走勢、估值、殖利率、未實現）都不出現
+  const noQuote = quote.isError && !quote.data
   return (
     <div className="mx-auto w-full max-w-[1180px] px-5 pt-1 pb-12 md:px-8 lg:pt-6 xl:px-14">
       {!inst ? (
@@ -96,11 +97,12 @@ function StockPageInner() {
           <QuoteHeader inst={inst} quote={quote.data} missing={quote.isError} />
           <WhyLine inst={inst} />
           {position.data ? (
-            <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!quote.isError} />
+            <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!noQuote} />
           ) : (
             rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
           )}
-          <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} markers={history.data?.markers} />
+          {/* 沒有報價（商用模式的美股）：價格那一格已經說了原因，走勢圖整塊不放，不再說一次 */}
+          {!noQuote && <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} markers={history.data?.markers} />}
         </>
       )}
 
@@ -140,7 +142,7 @@ function StockPageInner() {
         {inst && (
           <Suspense fallback={<Skeleton className="h-72 w-full rounded-sm" />}>
             {tab === "overview" && <OverviewTab inst={inst} quote={quote.data} position={position.data ?? null} />}
-            {tab === "valuation" && <ValuationTab inst={inst} position={position.data ?? null} />}
+            {tab === "valuation" && <ValuationTab inst={inst} position={position.data ?? null} noQuote={noQuote} />}
             {tab === "financials" && <FinancialsTab inst={inst} />}
             {tab === "chips" && <ChipsTab inst={inst} />}
             {tab === "dividends" && <DividendsTab inst={inst} quote={quote.data} position={position.data ?? null} />}
@@ -180,10 +182,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         帳本
       </Link>
       <span className="num">{inst.code}</span>
-      <span>
-        {MARKET_LABEL[inst.market]}
-        {inst.type === "etf" ? "・ETF" : inst.industry ? `・${inst.industry}` : ""}
-      </span>
+      <span>{marketLine(inst)}</span>
       {status?.attention && (
         <span className="demo-tag border-ink font-medium" title={status.note ?? undefined}>
           注意股
@@ -196,6 +195,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
       )}
       {inst.is_demo && <DemoTag className="max-sm:hidden" />}
       {!readOnly && <span className="ml-auto flex items-center gap-2">
+        {/* 開關：開著時是選取語法 (b)（和隱私模式的眼睛同一種），不靠星號圖示表示狀態 */}
         {!held && (
           <Button
             variant="outline"
@@ -203,12 +203,12 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
             aria-pressed={watching}
             disabled={toggle.isPending}
             onClick={() => toggle.mutate({ symbol: inst.symbol, on: !watching })}
+            className="sel-chip pointer-coarse:h-11"
           >
-            <StarIcon className={cn(watching && "fill-ink")} />
             {watching ? "觀察中" : "加入觀察"}
           </Button>
         )}
-        <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
+        <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("trade", { code: inst.code })}>
           記一筆
         </Button>
       </span>}
@@ -221,12 +221,14 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
   const tw = twOpenApi(inst.market)
   useDatasetSources([!!quote && tw && `${tw}/reference`])
   if (missing && !quote) {
-    // 沒有報價（商用模式的美股）：不放一個大大的「—」，直接說明
+    // 沒有報價（商用模式的美股）：整頁只在價格這一格說一次原因——不放一個大大的「—」，
+    // 走勢圖、估值、殖利率這些由價格算出來的區塊不再各自重複這句話
     return (
       <header className="mt-1">
         <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
-        <p className="mt-2 max-w-prose text-md text-ink">
-          {inst.market === "US" ? "美股目前沒有可商用的報價來源（需要授權的行情），暫不提供價格與走勢；持股以成本計值。" : "目前沒有報價。"}
+        <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>
+        <p className="mt-1 max-w-prose text-sm text-ink-2">
+          {inst.market === "US" ? "美股目前沒有可商用的報價來源，價格、走勢與估值暫不提供；持股以成本計值。" : "目前沒有報價。"}
         </p>
       </header>
     )
@@ -267,12 +269,12 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
         <span>{quote ? asOfLabel(quote.as_of) || "—" : "—"}</span>
         {ref !== null && (
           <span>
-            參考價 <span className="text-ink">{formatQuote(ref, inst.market, inst.type)}</span>
+            參考價 <span className="text-ink">{formatPrice(ref, inst.market, inst.type)}</span>
           </span>
         )}
         {limits && (
           <span>
-            漲停 <span className="text-ink">{formatQuote(limits.up, inst.market, inst.type)}</span>・跌停 <span className="text-ink">{formatQuote(limits.down, inst.market, inst.type)}</span>
+            漲停 <span className="text-ink">{formatPrice(limits.up, inst.market, inst.type)}</span>・跌停 <span className="text-ink">{formatPrice(limits.down, inst.market, inst.type)}</span>
           </span>
         )}
         {quote?.is_demo && <span className="sm:hidden">示範資料</span>}
@@ -376,6 +378,8 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   const me = useWho("我")
   const [open, setOpen] = useState(false)
   const money = (n: number, signed = false) => formatMoney(n, { signed })
+  // 均價與成交價：和報價同一套小數位；美股寫 US$（帳本的金額是新台幣，價格是美元）
+  const price = (n: number | null) => `${inst.market === "US" ? "US$" : ""}${formatPrice(n, inst.market, inst.type)}`
   if (privacy) {
     return (
       <section aria-label={`${me}的部位`} className="mt-5 flex min-h-12 items-center border-y border-rule text-md text-ink-2">
@@ -389,21 +393,20 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
       <div className="flex items-center gap-3 py-2.5">
         <dl className="num flex min-w-0 flex-1 flex-wrap gap-x-5 gap-y-1.5 text-base sm:gap-x-7">
           <Item label="持有" value={formatQuantity(p.quantity, unit, inst.market)} />
-          <Item label="均價" value={formatPrice(p.avg_cost, inst.market)} />
-          <Item
-            label="未實現"
-            value={
-              priced ? (
+          <Item label="均價" value={price(p.avg_cost)} />
+          {/* 沒有報價時，未實現與今日是算不出來的：不放兩個「—」（價格那一格已經說了原因） */}
+          {priced && (
+            <Item
+              label="未實現"
+              value={
                 <span className="inline-flex items-baseline gap-1.5">
                   <span className={toneClass(direction(p.unrealized_pnl))}>{money(p.unrealized_pnl, true)}</span>
                   <Pct value={p.unrealized_pnl_pct} className="text-md" />
                 </span>
-              ) : (
-                <span className="text-ink-2" title="沒有報價，以成本計值">—</span>
-              )
-            }
-          />
-          <Item className="max-sm:hidden" label="今日" value={priced ? <span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span> : <span className="text-ink-2">—</span>} />
+              }
+            />
+          )}
+          {priced && <Item className="max-sm:hidden" label="今日" value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
           <Item className="max-sm:hidden" label="已領股利" value={money(p.dividends_received)} />
         </dl>
         <button
@@ -420,7 +423,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
       {open && (
         <div id="position-more" className="note-in grid gap-x-10 gap-y-4 border-t border-rule py-4 md:grid-cols-2">
           <dl className="num grid grid-cols-2 gap-x-6 gap-y-2 text-md">
-            <Item className="sm:hidden" label="今日" value={priced ? <span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span> : <span className="text-ink-2">—</span>} />
+            {priced && <Item className="sm:hidden" label="今日" value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
             <Item className="sm:hidden" label="已領股利" value={money(p.dividends_received)} />
             <Item label={priced ? "市值" : "市值（以成本計）"} value={money(p.market_value)} />
             <Item label="成本" value={money(p.cost_basis)} />
@@ -451,17 +454,17 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
                     {formatDateShort(m.date)} {m.type === "buy" ? "買進" : "賣出"}
                   </span>
                   <span className="text-ink-2">
-                    {m.quantity !== null ? formatQuantity(m.quantity, unit, inst.market) : ""} × {formatPrice(m.price, inst.market)}
+                    {m.quantity !== null ? formatQuantity(m.quantity, unit, inst.market) : ""} × {price(m.price)}
                   </span>
                 </li>
               ))}
             </ul>
             <div className="mt-3 flex flex-wrap gap-2">
-              <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm", className: "pointer-coarse:h-11" })}>
                 在帳本中查看
               </Link>
               {!readOnly && (
-                <Button variant="outline" size="sm" onClick={() => ask.action("trade", { code: inst.code })}>
+                <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("trade", { code: inst.code })}>
                   記一筆
                 </Button>
               )}

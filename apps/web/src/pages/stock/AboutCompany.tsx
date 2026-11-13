@@ -38,7 +38,7 @@ function aboutRows(c: CompanyAbout, inst: InstrumentDetail): Row[] {
   add(
     "網站",
     c.website ? (
-      <a href={c.website} target="_blank" rel="noopener noreferrer" className="break-all underline underline-offset-3 hover:decoration-2">
+      <a href={c.website} target="_blank" rel="noopener noreferrer" className="break-all underline decoration-ctl underline-offset-3 after:absolute after:inset-0 hover:decoration-ink">
         {displayHost(c.website)}
         <span className="sr-only">（另開新視窗）</span>
       </a>
@@ -82,12 +82,12 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
             <span className="demo-tag">{d.label}</span>
             {d.kind === "wikipedia" && d.url ? (
               <>
-                <a href={d.url} target="_blank" rel="noopener noreferrer" className="underline underline-offset-3 hover:text-ink">
+                <a href={d.url} target="_blank" rel="noopener noreferrer" className="underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:py-3">
                   維基百科「{d.title}」條目
                   <span className="sr-only">（另開新視窗）</span>
                 </a>
                 <span aria-hidden>・</span>
-                <a href={d.license_url ?? undefined} target="_blank" rel="noopener noreferrer" className="underline underline-offset-3 hover:text-ink">
+                <a href={d.license_url ?? undefined} target="_blank" rel="noopener noreferrer" className="underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:py-3">
                   {d.license}
                   <span className="sr-only">授權條款（另開新視窗）</span>
                 </a>
@@ -98,9 +98,10 @@ export function AboutCompany({ inst }: { inst: InstrumentDetail }) {
       )}
       {summary && <p className="max-w-prose pt-2 text-base">{summary}</p>}
       {rows.length > 0 && (
+        // 兩欄（手機一欄）；單數格時最後一格撐滿兩欄，最後一列不留孤格、格線連成一條
         <dl className={cn("grid gap-x-8 sm:grid-cols-2", (d || summary) && "mt-4 border-t border-rule")}>
           {rows.map((r) => (
-            <div key={r.label} className="flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5">
+            <div key={r.label} className="relative flex min-h-11 items-baseline justify-between gap-4 border-b border-rule py-2.5 sm:last:odd:col-span-2">
               <dt className="shrink-0 text-md text-ink-2">{r.label}</dt>
               <dd className="min-w-0 text-right text-base break-words text-ink">{r.value}</dd>
             </div>

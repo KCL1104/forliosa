@@ -8,8 +8,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { type ChartDay, chartDays, formatNav, formatPremium, NAV_MIN_POINTS, spanLabel } from "@/lib/etf-nav"
 import { AXIS_TICK } from "@/lib/chart"
-import { formatDate, formatDateShort, formatPercent } from "@/lib/format"
-import { formatQuote } from "@/lib/tick"
+import { formatDate, formatDateShort, formatPercent, formatPrice } from "@/lib/format"
 import { KeyGrid, NotYet } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
@@ -55,14 +54,16 @@ export function EtfNavSection({ inst, titleId, variant = "section" }: { inst: In
 }
 
 function NavBody({ inst, n, figures = true }: { inst: InstrumentDetail; n: EtfNav; figures?: boolean }) {
-  const price = (v: number | null | undefined) => formatQuote(v, inst.market, inst.type)
+  const price = (v: number | null | undefined) => formatPrice(v, inst.market, inst.type)
   const at = n.history.at(-1)
   const sameDay = n.premium_date !== null && n.premium_date === n.nav_date && n.premium_date === n.close_date
   const chart = n.history.length >= NAV_MIN_POINTS
   return (
     <>
+      {/* 區塊標題下的格線就是格子的上緣：不再畫第二條 */}
       {figures && (
         <KeyGrid
+          className="-mt-3 border-t-0"
           items={[
             { label: n.nav_date ? `淨值（${md(n.nav_date)}）` : "淨值", value: formatNav(n.nav), title: n.fund_name ?? undefined },
             { label: n.close_date ? `收盤（${md(n.close_date)}）` : "收盤", value: price(n.close) },
@@ -156,12 +157,13 @@ function PremiumChart({ points, missing, price }: { points: NavPoint[]; missing:
 
 /** 逐日數字（新的在前）：圖表的文字版，預設收合 */
 function DailyTable({ inst, points }: { inst: InstrumentDetail; points: NavPoint[] }) {
-  const price = (v: number) => formatQuote(v, inst.market, inst.type)
+  const price = (v: number) => formatPrice(v, inst.market, inst.type)
   return (
     <details className="group mt-1">
-      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-1 rounded-sm text-sm text-ink-2 hover:text-ink [&::-webkit-details-marker]:hidden">
+      {/* 和「怎麼看 ⌄」同一種：墨色、常駐 ctl 底線，⌄ 打開時轉向 */}
+      <summary className="inline-flex min-h-11 cursor-pointer list-none items-center gap-0.5 rounded-sm text-sm text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink [&::-webkit-details-marker]:hidden">
         逐日數字（{points.length} 天）
-        <ChevronDownIcon aria-hidden className="size-4 transition-transform duration-150 group-open:rotate-180 motion-reduce:transition-none" />
+        <ChevronDownIcon aria-hidden className="size-3.5 transition-transform duration-150 group-open:rotate-180 motion-reduce:transition-none" />
       </summary>
       <div className="max-h-72 overflow-y-auto">
         <table className="w-full text-md">
