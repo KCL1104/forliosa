@@ -264,7 +264,7 @@
 
 | # | 問題 | 選項 → 建議 | 出處 |
 |---|---|---|---|
-| N-1 | 「到證交所看即時報價」的連結網址對不對？個股頁用 `https://mis.twse.com.tw/stock/fibest.jsp?stock=<代號>`，資料來源頁用 `https://mis.twse.com.tw/`。這兩個網址沒辦法從開發環境驗證。 | 請點一次確認；不對的話給正確網址 → **請確認** | `apps/web/src/lib/as-of.ts`（`twseLiveQuoteUrl`）、`docs/api-contract.md`「收盤價的標示與盤中狀態」 |
+| N-1 | ~~「到證交所看即時報價」的連結網址~~ | **已解決（2026-11-13）**：個股頁照你給的格式 `https://mis.twse.com.tw/stock/detail-item?id=<tse\|otc>_<代號>.tw&ex=<tse\|otc>&lang=zhHant`（上市 tse、上櫃 otc）。資料來源頁連到首頁 `https://mis.twse.com.tw/`，如果首頁網址不對再跟我說。 | `apps/web/src/lib/as-of.ts`（`twseLiveQuoteUrl`） |
 | N-2 | 收盤價公布偵測上線後，原本固定時間的排程（14:35、23:45 等）要不要拿掉？ | A. 先都保留，看一兩週紀錄再決定；B. 現在就拿掉 → **A** | `apps/api/CONTRACT_NOTES.md`「盤中狀態與收盤價公布偵測」 |
 | N-3 | 自己的主題被站方隱藏後，作者在「我的主題」清單裡也看不到（直接開網址才看得到）。要不要列出來並標示「已被隱藏」？ | A. 列出並標示；B. 維持 → **A**（作者才知道發生了什麼事） | `apps/api/CONTRACT_NOTES.md`「討論串待產品負責人確認」3 |
 | N-4 | 公開討論不用登入就能讀，要不要讓搜尋引擎收錄？ | A. 可以收錄（有利曝光）；B. 先加上不收錄的標記，等使用條款準備好再打開 → **B**（和 5-2 隱私權政策與服務條款一起處理） | `PRODUCT.md`「討論與彈幕」 |

@@ -97,9 +97,10 @@ describe("標示的文字", () => {
     expect(withDayWord("收盤價", "11/12")).toBe("收盤價")
   })
 
-  it("證交所的連結只是網址（帶代號），不是 API", () => {
-    expect(twseLiveQuoteUrl("2330")).toBe("https://mis.twse.com.tw/stock/fibest.jsp?stock=2330")
-    expect(twseLiveQuoteUrl("00679B")).toBe("https://mis.twse.com.tw/stock/fibest.jsp?stock=00679B")
+  it("證交所的連結只是網址（帶代號；上市 tse、上櫃 otc），不是 API", () => {
+    expect(twseLiveQuoteUrl("2330", "TWSE")).toBe("https://mis.twse.com.tw/stock/detail-item?id=tse_2330.tw&ex=tse&lang=zhHant")
+    expect(twseLiveQuoteUrl("6488", "TPEX")).toBe("https://mis.twse.com.tw/stock/detail-item?id=otc_6488.tw&ex=otc&lang=zhHant")
+    expect(twseLiveQuoteUrl("00679B", "TPEX")).toBe("https://mis.twse.com.tw/stock/detail-item?id=otc_00679B.tw&ex=otc&lang=zhHant")
   })
 
   it("沒有任何「盤中・延遲」「即時」的寫法：其他市場的時間一律是「收盤」", () => {

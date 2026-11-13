@@ -87,9 +87,13 @@ export function withDayWord(label: string, word: string): string {
   return rest ? `${word} ${rest}` : word
 }
 
-/** 證交所「基本市況報導」的個股頁：只是給使用者按的連結（另開新視窗），本站不擷取那個網站 */
-export function twseLiveQuoteUrl(code: string): string {
-  return `https://mis.twse.com.tw/stock/fibest.jsp?stock=${encodeURIComponent(code)}`
+/**
+ * 證交所「基本市況報導」的個股頁：只是給使用者按的連結（另開新視窗），本站不擷取那個網站。
+ * 網址格式（產品負責人 2026-11-13 提供）：`detail-item?id=<tse|otc>_<代號>.tw&ex=<tse|otc>&lang=zhHant`，上市是 tse、上櫃是 otc。
+ */
+export function twseLiveQuoteUrl(code: string, market: "TWSE" | "TPEX"): string {
+  const ex = market === "TPEX" ? "otc" : "tse"
+  return `https://mis.twse.com.tw/stock/detail-item?id=${ex}_${encodeURIComponent(code)}.tw&ex=${ex}&lang=zhHant`
 }
 
 /** 美股等其他市場的報價時間：「11/12 05:00 收盤」（台北時間） */

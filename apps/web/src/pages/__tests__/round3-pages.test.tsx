@@ -306,7 +306,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     renderApp("/stock/2330.TW")
     expect(await screen.findByText("盤中不更新：這是 11/12（四）的收盤價。", undefined, T)).toBeInTheDocument()
     const link = screen.getByRole("link", { name: /^到證交所看即時報價/ })
-    expect(link).toHaveAttribute("href", "https://mis.twse.com.tw/stock/fibest.jsp?stock=2330")
+    expect(link).toHaveAttribute("href", "https://mis.twse.com.tw/stock/detail-item?id=tse_2330.tw&ex=tse&lang=zhHant")
     expect(link).toHaveAttribute("target", "_blank")
     expect(link).toHaveAttribute("rel", "noopener noreferrer")
     expect(document.getElementById("main")!.textContent).toContain("收盤價・11/12（四）")

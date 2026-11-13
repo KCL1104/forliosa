@@ -296,7 +296,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
           <span className="num">{close.note}</span>
           {close.state === "open" && (
             <a
-              href={twseLiveQuoteUrl(inst.code)}
+              href={twseLiveQuoteUrl(inst.code, inst.market === "TPEX" ? "TPEX" : "TWSE")}
               target="_blank"
               rel="noopener noreferrer"
               className="inline-flex items-center gap-0.5 text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11"

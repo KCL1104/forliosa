@@ -1064,7 +1064,7 @@ await check("收盤價的標示（盤中）：個股頁一行「盤中不更新�
   await kp.getByText("盤中不更新：這是 11/12（四）的收盤價。", { exact: true }).waitFor({ timeout: 8000 })
   const link = kp.getByRole("link", { name: /^到證交所看即時報價/ })
   const attrs = { href: await link.getAttribute("href"), target: await link.getAttribute("target"), rel: await link.getAttribute("rel") }
-  if (attrs.href !== "https://mis.twse.com.tw/stock/fibest.jsp?stock=2330" || attrs.target !== "_blank" || attrs.rel !== "noopener noreferrer") throw new Error(`TWSE link: ${JSON.stringify(attrs)}`)
+  if (attrs.href !== "https://mis.twse.com.tw/stock/detail-item?id=tse_2330.tw&ex=tse&lang=zhHant" || attrs.target !== "_blank" || attrs.rel !== "noopener noreferrer") throw new Error(`TWSE link: ${JSON.stringify(attrs)}`)
   if (!(await link.locator("svg").count())) throw new Error("external link without ↗")
   if (!((await kp.locator("main header").first().textContent()) ?? "").includes("收盤價・11/12（四）")) throw new Error("price label missing")
   // 這一行只在價格旁出現一次，其他地方不重複
