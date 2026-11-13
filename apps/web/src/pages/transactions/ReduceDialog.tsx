@@ -23,7 +23,7 @@ import { AccountSelect, StampLine } from "./TradeForm"
  * 要指定日期或成交價，按「改日期或價格」到完整表單。
  */
 const TITLE = "減少持股"
-const DESCRIPTION = "填賣出的股數；用最新的收盤價記成一筆賣出。"
+const DESCRIPTION = "填賣出的股數。日期是今天，價格用最新的收盤價。"
 
 export function ReduceHost() {
   const { open, symbol, all } = useUi((s) => s.reduce)
@@ -98,9 +98,12 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
       </div>
     )
   }
+  // 完整表單：選好的帳戶與已經填的股數一起帶過去
   const toFull = () => {
     onDone()
-    openTradeForm({ symbol: holding?.code ?? symbol, full: true, sell: true })
+    const typedShares = num(qty)
+    const q = typedShares === null ? undefined : inLots ? Math.round(typedShares * 1000) : typedShares
+    openTradeForm({ symbol: holding?.code ?? symbol, full: true, sell: true, prefill: { accountId: account, quantity: q && q > 0 ? q : undefined } })
   }
   if (!holding || !held) {
     return (
@@ -182,7 +185,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
             autoComplete="off"
             autoFocus={!all}
             enterKeyHint="done"
-            placeholder={inLots ? "例如 1" : "例如 1000"}
+            placeholder={inLots ? "例如 1" : isUS ? "例如 10" : "例如 1000"}
             value={qty}
             onChange={(e) => setQty(e.target.value)}
             aria-invalid={submitted && !!error}
@@ -201,7 +204,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
           用{quote.data?.as_of ? ` ${formatDateShort(quote.data.as_of.slice(0, 10), false)} ` : "最新"}的收盤價 <span className="num">{formatPrice(price, holding.market, holding.type)}</span> 記成賣出。
         </p>
       ) : (
-        <p className="text-base">這一檔沒有收盤價，請到完整表單填成交價。</p>
+        <p className="text-base">這一檔沒有收盤價，要自己填成交價。</p>
       )}
       <div className="flex flex-wrap items-center gap-x-4 gap-y-3">
         <button
@@ -209,7 +212,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
           onClick={toFull}
           className="mr-auto inline-flex min-h-9 items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
         >
-          改日期或價格
+          {price === null && !quote.isLoading ? "填成交價" : "改日期或價格"}
         </button>
         <div className="flex gap-2 max-sm:w-full">
           <Button type="button" variant="outline" className="max-sm:flex-1 sm:min-w-24" onClick={onDone}>

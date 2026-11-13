@@ -236,7 +236,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
         })
         onClose()
       },
-      onError: (err: Error) => toast.error(plan ? "更新失敗，表單內容仍保留" : "新增失敗，表單內容仍保留", { description: err.message }),
+      onError: (err: Error) => toast.error("沒有存成功，內容還在。", { description: err.message }),
     }
     if (plan) update.mutate({ id: plan.id, patch: body }, done)
     else create.mutate(body, done)

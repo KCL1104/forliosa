@@ -194,21 +194,27 @@ def _fmt_per_share(p: Decimal) -> str:
     return f"{p.normalize():f}"
 
 
+def _paid(payment_date: date) -> str:
+    return f"，{payment_date.month:02d}/{payment_date.day:02d} 發放"
+
+
 def cash_note(shares: Decimal, per_share: Decimal, payment_date: date | None) -> str:
-    note = f"除息前一日持有 {_fmt_shares(shares)} 股 × 每股現金股利 {_fmt_per_share(per_share)} 元"
+    """「1,500 股 × 每股 5 元，10/09 發放」: the shares are the holding the day before the ex-date (the ledger's
+    dividend rules say so once; the note does not repeat it)."""
+    note = f"{_fmt_shares(shares)} 股 × 每股 {_fmt_per_share(per_share)} 元"
     if payment_date is not None:
-        note += f"；發放日 {payment_date.isoformat()}"
+        note += _paid(payment_date)
     return note
 
 
 def stock_note(shares: Decimal, per_share: Decimal, new_shares: Decimal, cash: Decimal,
                payment_date: date | None) -> str:
-    note = (f"除權前一日持有 {_fmt_shares(shares)} 股 × 每股配股 {_fmt_per_share(per_share)} 元"
-            f"（每股面額 10 元）= 配發 {_fmt_shares(new_shares)} 股")
+    note = (f"{_fmt_shares(shares)} 股 × 每股配股 {_fmt_per_share(per_share)} 元"
+            f"（面額 10 元），配發 {_fmt_shares(new_shares)} 股")
     if cash > 0:
         note += f"，不足一股折付現金 {cash:,.0f} 元"
     if payment_date is not None:
-        note += f"；發放日 {payment_date.isoformat()}"
+        note += _paid(payment_date)
     return note
 
 

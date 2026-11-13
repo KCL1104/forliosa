@@ -15,9 +15,12 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatPercent, MASK, toneClass } from "@/lib/format"
+import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatNumber, formatPercent, MASK, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
+import { niceTicks } from "@/ai/chart-geometry"
+import { inText } from "@/lib/cjk"
+import { useHowToRead } from "@/pages/stock/tabs/how-to-read"
 import { useReadOnly, useWho } from "@/api/view-as"
 
 const RANGES: { value: PerformanceRange; label: string }[] = [
@@ -184,8 +187,10 @@ function Metrics({ p }: { p: Performance }) {
       value: <Pct value={p.twr} />,
       sub: excess !== null && (
         // 和基準的差距不是價格漲跌：不用紅綠，用「多／少」說方向
+        // 報酬率相減是「個百分點」，不是百分比；中文名稱前後不加空白（英數字的名稱才加）
         <span>
-          比 {p.benchmark?.name} {excess >= 0 ? "多" : "少"} <span className="num font-medium text-ink">{formatPercent(Math.abs(excess), { signed: false })}</span>
+          比{inText(p.benchmark?.name ?? "基準")}
+          {excess >= 0 ? "多" : "少"} <span className="num font-medium text-ink">{(Math.abs(excess) * 100).toFixed(2)}</span> 個百分點
         </span>
       ),
     },
@@ -199,7 +204,6 @@ function Metrics({ p }: { p: Performance }) {
       label: "最大回撤",
       help: "期間內從最高點往下跌的最大幅度（以時間加權指數計算）。",
       value: <span className="num">{formatPercent(p.max_drawdown)}</span>,
-      sub: "越接近 0 越穩",
     },
     {
       label: "年化波動度",
@@ -235,7 +239,7 @@ function ValuePanel({ p }: { p: Performance }) {
       titleId="value-title"
       aside={
         <span className="text-md text-ink-2">
-          {privacy ? MASK : `市值 ${formatMoneyCompact(last.market_value)}・淨投入 ${formatMoneyCompact(last.net_invested)}`}
+          {privacy ? MASK : `市值 ${formatMoneyCompact(last.market_value)}・投入本金 ${formatMoneyCompact(last.net_invested)}`}
         </span>
       }
     >
@@ -243,7 +247,7 @@ function ValuePanel({ p }: { p: Performance }) {
         className="mb-2"
         items={[
           { label: "市值", color: "var(--chart-mine)" },
-          { label: "淨投入本金", color: "var(--chart-bench)", shape: "line" },
+          { label: "投入本金", color: "var(--chart-bench)", shape: "line" },
         ]}
       />
       {privacy ? (
@@ -253,7 +257,8 @@ function ValuePanel({ p }: { p: Performance }) {
           <ResponsiveContainer width="100%" height="100%">
             <AreaChart data={p.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-              <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={56} tickFormatter={(t: string) => t.slice(0, 7).replace("-", "/")} />
+              {/* 三個月以上：刻度只放在每個月的第一個交易日（「2026/06」不會出現兩次）；更短的期間寫「6/11」 */}
+              <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={40} {...valueAxis(p.series.map((r) => r.t))} />
               <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={64} tickFormatter={(n: number) => formatCompact(n, 0)} />
               <Tooltip
                 cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}
@@ -264,7 +269,7 @@ function ValuePanel({ p }: { p: Performance }) {
                       title={formatDate(r.t)}
                       rows={[
                         { label: "市值", value: formatMoney(r.market_value), color: "var(--chart-mine)" },
-                        { label: "淨投入", value: formatMoney(r.net_invested), color: "var(--chart-bench)", shape: "line" },
+                        { label: "投入本金", value: formatMoney(r.net_invested), color: "var(--chart-bench)", shape: "line" },
                       ]}
                     />
                   ) : null
@@ -295,7 +300,7 @@ function DividendsByMonth({ p }: { p: Performance }) {
             <BarChart data={p.dividends_by_month} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
               <CartesianGrid vertical={false} stroke={GRID_STROKE} />
               <XAxis dataKey="month" tick={AXIS_TICK} tickLine={false} axisLine={false} tickFormatter={monthTick} minTickGap={12} />
-              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} tickFormatter={(n: number) => formatCompact(n, 1)} />
+              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={56} {...amountAxis(0, Math.max(...p.dividends_by_month.map((d) => d.amount)))} />
               <Tooltip
                 cursor={{ fill: "var(--muted)" }}
                 content={({ active, payload }) => {
@@ -318,7 +323,8 @@ function RealizedByYear({ p }: { p: Performance }) {
     <Panel title="每年已實現損益" titleId="real-title">
       {p.realized_by_year.length === 0 ? (
         <p className="text-base text-ink">這段期間沒有賣出，沒有已實現損益。</p>
-      ) : privacy ? (
+      ) : p.realized_by_year.length === 1 ? null : privacy ? (
+        // 只有一年時不畫圖：一根柱子的半版圖只是把下面那一行再畫一次
         <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
       ) : (
         <div className="h-[200px] w-full">
@@ -330,9 +336,8 @@ function RealizedByYear({ p }: { p: Performance }) {
                 tick={AXIS_TICK}
                 tickLine={false}
                 axisLine={false}
-                width={56}
-                domain={[(min: number) => Math.min(0, min), (max: number) => Math.max(0, max)]}
-                tickFormatter={(n: number) => formatCompact(n, 1)}
+                width={64}
+                {...amountAxis(Math.min(0, ...p.realized_by_year.map((r) => r.amount)), Math.max(0, ...p.realized_by_year.map((r) => r.amount)))}
               />
               <ReferenceLine y={0} stroke="var(--muted-foreground)" />
               <Tooltip
@@ -342,7 +347,7 @@ function RealizedByYear({ p }: { p: Performance }) {
                   return r ? <ChartTooltipBox title={`${r.year} 年`} rows={[{ label: "已實現損益", value: formatMoney(r.amount, { signed: true }) }]} /> : null
                 }}
               />
-              <Bar dataKey="amount" radius={[4, 4, 4, 4]} maxBarSize={48} isAnimationActive={false}>
+              <Bar dataKey="amount" radius={[2, 2, 0, 0]} maxBarSize={48} isAnimationActive={false}>
                 {p.realized_by_year.map((r) => (
                   <Cell key={r.year} fill={r.amount >= 0 ? "var(--rise)" : "var(--fall)"} />
                 ))}
@@ -351,10 +356,10 @@ function RealizedByYear({ p }: { p: Performance }) {
           </ResponsiveContainer>
         </div>
       )}
-      <ul className="mt-2 flex flex-wrap gap-x-4 text-sm">
+      <ul className={cn("flex flex-wrap gap-x-4", p.realized_by_year.length === 1 ? "text-base" : "mt-2 text-sm")}>
         {p.realized_by_year.map((r) => (
           <li key={r.year} className="num">
-            <span className="text-ink-2">{r.year}：</span>
+            <span className="text-ink-2">{r.year} 年：</span>
             <span className={toneClass(direction(r.amount))}>
               {privacy ? MASK : formatMoney(r.amount, { signed: true })}
               <span className="sr-only">{direction(r.amount) === "up" ? "獲利" : direction(r.amount) === "down" ? "虧損" : ""}</span>
@@ -366,16 +371,37 @@ function RealizedByYear({ p }: { p: Performance }) {
   )
 }
 
+/** 「計算方式 ⌄」：和「怎麼看 ⌄」「怎麼算的 ⌄」同一種開關（不用瀏覽器的 ▶；觸控 44px） */
 function Definitions() {
+  const how = useHowToRead("計算方式")
   return (
-    <details className="group border-y border-rule py-3">
-      <summary className="cursor-pointer text-md font-medium marker:text-ink-2">計算方式</summary>
-      <div className="mt-3 flex max-w-prose flex-col gap-2 text-base text-ink">
+    <div className="border-y border-rule py-2">
+      {how.toggle}
+      {how.panel(
+      <div className="mt-2 mb-1 flex flex-col gap-2 text-base text-ink">
         <p>價格用未還原收盤價；股利另以交易紀錄計入。</p>
         <p>投資組合價值是每天收盤後所有持股的市值（美股依中央銀行公布的當日新臺幣對美元收盤匯率換算成新台幣），不含現金部位。</p>
         <p>每日報酬 = （當日市值 + 當日流出）÷（前一日市值 + 當日流入）− 1。買進成本（含手續費）視為開盤前流入；賣出淨收入與現金股利（扣二代健保）視為收盤後流出。</p>
         <p>時間加權報酬（TWR）把每日報酬連乘；XIRR 以投資人的現金流（買進為負、賣出與股利為正、期末市值為正）求年化內部報酬率；最大回撤以 TWR 指數計算。</p>
-      </div>
-    </details>
+      </div>,
+      )}
+    </div>
   )
+}
+
+/** 市值圖的橫軸：三個月以上只在每個月第一個交易日放刻度（「2026/06」），更短寫「6/11」 */
+function valueAxis(days: string[]): { ticks?: string[]; tickFormatter: (t: string) => string } {
+  const first = days[0]
+  const last = days.at(-1)
+  const long = !!first && !!last && Date.parse(last) - Date.parse(first) >= 90 * 86_400_000
+  if (!long) return { tickFormatter: (t) => `${Number(t.slice(5, 7))}/${Number(t.slice(8, 10))}` }
+  const ticks = days.filter((t, i) => i > 0 && t.slice(0, 7) !== days[i - 1]!.slice(0, 7))
+  return { ticks, tickFormatter: (t) => t.slice(0, 7).replace("-", "/") }
+}
+
+/** 金額的縱軸：整齊的刻度（1、2、2.5、5 × 10ⁿ）；同一條軸只用一種寫法——10 萬以下寫整數，以上寫「萬」 */
+function amountAxis(lo: number, hi: number): { ticks: number[]; domain: [number, number]; tickFormatter: (n: number) => string } {
+  const ticks = niceTicks(lo, hi)
+  const big = Math.max(...ticks.map(Math.abs)) >= 100_000
+  return { ticks, domain: [ticks[0]!, ticks.at(-1)!], tickFormatter: (n) => (big ? formatCompact(n, 1) : formatNumber(n)) }
 }

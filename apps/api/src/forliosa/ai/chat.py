@@ -82,14 +82,14 @@ Event = tuple[str, dict[str, Any]]
 
 REFUSAL_MESSAGE = "這題沒辦法回答。換個問法，或問你的持股和個股。"
 _ERRORS = {
-    "ai_busy": "AI 現在很忙，等一下再送一次。",
+    "ai_busy": "現在問的人太多，等一下再送一次。",
     "ai_unavailable": "AI 暫時不能用，晚一點再試。",
     "ai_unreachable": "連不上 AI，等一下再送一次。",
     "ai_error": "這次沒有回答完，再送一次。一直失敗的話，開一段新對話。",
     "too_many_steps": "這題要查的資料太多。拆成幾個小問題再問。",
     "max_tokens": "回答太長，被截斷了。拆成幾個小問題再問。",
     "truncated": "回答太長，後面的部分沒有顯示。",
-    "interrupted": "回覆中斷了。",
+    "interrupted": "回答中斷了，再送一次。",
     "internal_error": "伺服器出了問題，這題沒有回答。等一下再送一次。",
 }
 WEB_TOOLS = ("web_search", "web_fetch")

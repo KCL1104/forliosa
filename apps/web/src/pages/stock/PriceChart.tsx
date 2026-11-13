@@ -17,6 +17,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useHistory, useIntraday } from "@/api/queries"
 import type { HistoryRange, InstrumentDetail, Position, PositionMarker, Quote } from "@/api/types"
 import { DataNotes } from "@/components/data-notes"
+import { Pct } from "@/components/finance"
 import { RangeChips } from "@/components/segmented"
 import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
@@ -323,7 +324,12 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
             <span className="text-ink">收 {price(readout.c)}</span>
             {readout.v !== undefined && <span>量 {inst.market === "US" ? `${formatNumber(readout.v)} 股` : `${formatNumber(Math.round(readout.v / 1000))} 張`}</span>}
             {hover?.moment !== undefined && <span className="text-ink">◆ 單日 {formatPercent(hover.moment)}</span>}
-            {!hover && rangeReturn !== null && <span>區間 {formatPercent(rangeReturn)}</span>}
+            {/* 區間的漲跌是價格的漲跌：▲▼＋漲跌色（Price-Only Red Rule 的「價格」） */}
+            {!hover && rangeReturn !== null && (
+              <span>
+                區間 <Pct value={rangeReturn} />
+              </span>
+            )}
           </>
         )}
       </p>

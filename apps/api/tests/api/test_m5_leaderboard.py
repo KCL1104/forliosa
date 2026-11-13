@@ -115,6 +115,35 @@ def test_member_without_prices_has_no_periods_and_ranks_last(client, other_clien
     assert (shared["returns"]["day"], shared["returns"]["month"], shared["returns"]["year"]) == (None, None, None)
 
 
+def test_holdings_without_closes_are_left_out_of_the_periods(client, other_client, board, market, monkeypatch):
+    """A member who also holds something with no close (US stocks under commercial) still gets period returns — on
+    the priced holdings only, like the ledger's 今日. Only the member's own row says so."""
+    a2 = account(client)
+    trade(client, a2["id"], "2317.TW", "buy", date(2024, 6, 3), 1000, 100)
+    month = client.get(f"{API}/groups/{board['gid']}/leaderboard", params={"period": "month"}).json()
+    before = next(e for e in month["entries"] if e["is_me"])["return_pct"]
+    real = market.history
+
+    def no_hon_hai(symbol, start, end):
+        if symbol == "2317.TW":
+            return HistoryResult(symbol, [], False, "")
+        return real(symbol, start, end)
+
+    monkeypatch.setattr(market, "history", no_hon_hai)
+    lb = client.get(f"{API}/groups/{board['gid']}/leaderboard", params={"period": "month"}).json()
+    me = next(e for e in lb["entries"] if e["is_me"])
+    assert me["return_pct"] is not None and me["rank"] is not None and me["excludes_unpriced"] is True
+    w = sharing.period_window(market)
+    closes = {c.t: c.c for c in market.history("2330.TW", w.starts["month"] - timedelta(days=14), w.end).candles}
+    start = closes[max(d for d in closes if d <= w.starts["month"])]
+    end = closes[max(d for d in closes if d <= w.end)]
+    assert me["return_pct"] == sharing.pct(float(end / start) - 1)  # 2330 alone
+    assert before is not None
+    # another member does not learn that A holds something without a close
+    seen = other_client.get(f"{API}/groups/{board['gid']}/leaderboard", params={"period": "month"}).json()
+    assert all(e["excludes_unpriced"] is False for e in seen["entries"])
+
+
 def test_member_starting_mid_period_counts_from_the_first_holding(app, client, board, market):
     late = login(app, "late@forliosa.local", "新手")
     join(client, late, board["gid"])

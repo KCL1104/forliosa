@@ -661,7 +661,9 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
         .filter((m) => m.share.returns)
         .map((m) => {
           const r = sourceFor(m.ref.user_id)?.returns()
-          return { ...refOf(m), return_pct: r4(r?.[period] ?? null), total_return_pct: r4(r?.total ?? null), is_me: m.ref.user_id === meId() }
+          const mine = m.ref.user_id === meId()
+          // 沒算進去的持股只在自己那一列說（別人的美股不是群組該知道的）
+          return { ...refOf(m), return_pct: r4(r?.[period] ?? null), total_return_pct: r4(r?.total ?? null), is_me: mine, excludes_unpriced: mine && !!r?.excludes_unpriced }
         })
       let entries = rows
       if (g.ranking_enabled) {

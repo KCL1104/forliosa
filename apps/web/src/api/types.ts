@@ -982,6 +982,8 @@ export interface LeaderboardEntry extends UserRef {
   /** 排行關閉（ranked: false）或期間報酬為 null 時沒有 */
   rank?: number | null
   is_me: boolean
+  /** 只在我自己那一列：期間報酬沒有算進沒有收盤價的持股（商用模式的美股）。別人的一律 false */
+  excludes_unpriced?: boolean
 }
 
 export interface BenchmarkReturn {

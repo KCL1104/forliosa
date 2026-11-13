@@ -24,6 +24,7 @@ import { useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
 import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
+import { useStartReduce } from "@/pages/transactions/use-start-reduce"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
 
@@ -229,7 +230,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
 /** 這一檔的動作：加碼、減少持股、全部賣出（賣出不用開表單：只填股數，用最新的收盤價記） */
 function RowMenu({ h }: { h: Holding }) {
   const openTradeForm = useUi((s) => s.openTradeForm)
-  const openReduce = useUi((s) => s.openReduce)
+  const reduce = useStartReduce()
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
@@ -245,8 +246,8 @@ function RowMenu({ h }: { h: Holding }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-36">
         <DropdownMenuItem onClick={() => openTradeForm({ symbol: h.code })}>加碼</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => openReduce(h.symbol)}>減少持股</DropdownMenuItem>
-        <DropdownMenuItem onClick={() => openReduce(h.symbol, true)}>全部賣出</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => reduce(h.symbol)}>減少持股</DropdownMenuItem>
+        <DropdownMenuItem onClick={() => reduce(h.symbol, true)}>全部賣出</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

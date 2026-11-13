@@ -1,6 +1,7 @@
 import { readMockPolicy } from "@/api/mock/commercial"
 import type { ForliosaApi, HistoryRange, Instrument, PerformanceRange } from "@/api/types"
 import { formatPercent, formatRevenueThousands } from "@/lib/format"
+import { inText } from "@/lib/cjk"
 import { normalize } from "./intent"
 import type { AiChart } from "./remote"
 
@@ -175,7 +176,7 @@ export async function buildLocalChart(
     })
     return done(
       { kind: "compare", title: `${names(series)} 漲跌幅（${label}）`, unit: "pct", currency: null, x: "date", range: intent.range, series, notes: [...notes, "漲跌幅只算價格變動，不含股利"], sources, is_demo: isDemo },
-      `${label}${series.map((s) => `${s.name} ${formatPercent(s.points.at(-1)!.v)}`).join("、")}。`,
+      compareSentence(label, series.map((s) => ({ name: s.name, r: s.points.at(-1)!.v }))),
     )
   }
 
@@ -217,7 +218,7 @@ export async function buildLocalChart(
     series
       .map((s) => {
         const last = s.points.at(-1)!
-        return revenue ? `${s.name} ${periodLabel(String(last.t))}營收 ${formatRevenueThousands(last.v)} 元` : `${s.name} ${last.t} 每股盈餘 ${last.v.toFixed(2)} 元`
+        return revenue ? `${s.name} ${periodLabel(String(last.t))}營收 ${formatRevenueThousands(last.v)}元` : `${s.name} ${last.t} 每股盈餘 ${last.v.toFixed(2)} 元`
       })
       .join("、") + "。",
   )
@@ -227,4 +228,24 @@ export async function buildLocalChart(
 function periodLabel(period: string): string {
   const m = /^\d{4}-(\d{2})/.exec(period)
   return m ? `${Number(m[1])} 月` : period
+}
+
+/** 句子裡的漲跌用字：「上漲 4.83%」「下跌 1.36%」「持平」（▲▼ 與漲跌色只在圖例的數字上） */
+const moveWords = (r: number) => (Math.abs(r) < 0.00005 ? "持平" : `${r > 0 ? "上漲" : "下跌"} ${formatPercent(Math.abs(r), { signed: false })}`)
+
+/**
+ * 比較圖的導言：說一件圖例沒有的事（差幾個百分點），不把圖例的數字再念一次（2026-11-14 第七次評分）。
+ * 兩檔：「近 6 個月台積電下跌 1.36%，比鴻海好 4.98 個百分點。」三檔以上：最好與最差的差距。
+ */
+export function compareSentence(label: string, items: { name: string; r: number }[]): string {
+  const sorted = [...items].sort((a, b) => b.r - a.r)
+  const best = sorted[0]!
+  const worst = sorted.at(-1)!
+  const gap = ((best.r - worst.r) * 100).toFixed(2)
+  if (items.length === 2) {
+    const [a, b] = items as [{ name: string; r: number }, { name: string; r: number }]
+    if (Math.abs(a.r - b.r) < 0.00005) return `${label}${inText(a.name, "start")}和${inText(b.name, "end")}都${moveWords(a.r)}。`
+    return `${label}${inText(a.name, "start")}${moveWords(a.r)}，比${inText(b.name)}${a.r > b.r ? "好" : "差"} ${gap} 個百分點。`
+  }
+  return `${label}${inText(best.name, "start")}最好（${moveWords(best.r)}），比最差的${inText(worst.name)}多 ${gap} 個百分點。`
 }

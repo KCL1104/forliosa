@@ -13,14 +13,14 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 log = logging.getLogger(__name__)
 
 _DEFAULT_MESSAGES = {
-    400: ("bad_request", "請求格式錯誤"),
+    400: ("bad_request", "送出的內容有問題，重新整理後再試。"),
     401: ("unauthorized", "請先登入"),
     403: ("forbidden", "沒有權限"),
-    404: ("not_found", "找不到資源"),
+    404: ("not_found", "找不到這個項目。"),
     405: ("method_not_allowed", "不支援這個操作"),
-    409: ("conflict", "資料衝突"),
+    409: ("conflict", "資料已經被改過，重新整理後再試。"),
     422: ("validation_error", "輸入資料格式錯誤"),
-    429: ("rate_limited", "請求太頻繁，請稍後再試"),
+    429: ("rate_limited", "太頻繁了，等一下再試。"),
 }
 
 
@@ -70,7 +70,7 @@ def install_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_req: Request, exc: StarletteHTTPException):
-        code, default = _DEFAULT_MESSAGES.get(exc.status_code, ("error", "發生錯誤"))
+        code, default = _DEFAULT_MESSAGES.get(exc.status_code, ("error", "伺服器出了問題，等一下再試一次。"))
         message = exc.detail if isinstance(exc.detail, str) and exc.status_code != 404 else default
         if exc.status_code == 404 and isinstance(exc.detail, str) and exc.detail != "Not Found":
             message = exc.detail

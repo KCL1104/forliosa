@@ -101,6 +101,8 @@ export interface PeriodReturns {
   month: number | null
   year: number | null
   total: number | null
+  /** 期間報酬沒有算進沒有收盤價的持股（與後端 `member_period_returns_ex` 相同） */
+  excludes_unpriced?: boolean
 }
 
 /** 沒有完整帳本的成員：分享出去會用到的數字 */

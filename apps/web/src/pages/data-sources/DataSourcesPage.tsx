@@ -75,7 +75,11 @@ export function DataSourcesPage() {
 
             {/* 觸控時段落之間多一點：只有一行的段落裡的網址連結上下各有 12px 的可按範圍 */}
             <Section title="授權條款" titleId="ds-license" bodyClassName="flex flex-col gap-2 pointer-coarse:gap-3">
-              <p className="max-w-prose text-base">行情、匯率、公司資料與公告都來自可以合法商用的政府開放資料，以及我們每天從這些資料存下來的紀錄。</p>
+              {/* 跟著資料走：正式環境開了 Yahoo 的歷史日線回補時，不能說「都來自政府開放資料」（2026-11-14 第七次評分） */}
+              <p className="max-w-prose text-base">
+                行情、匯率、公司資料與公告來自政府開放資料，以及我們每天從這些資料存下來的紀錄。
+                {a.datasets.some((d) => d.key === "yahoo-history") && "走勢圖裡較早的日線來自 Yahoo Finance，不是官方資料，也沒有轉載授權。"}
+              </p>
               {a.notice.map((n) => (
                 // 網址只在 / . ? & = - _ 後面斷行（Linkified）；整段另外允許在放不下時斷開，長網址不會撐寬頁面
                 <p key={n} className="max-w-prose text-base [overflow-wrap:anywhere]">

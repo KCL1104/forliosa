@@ -6,7 +6,8 @@ import { isCoverageNote } from "@/lib/data-notes"
  * 其他情況（載入失敗、沒有持股、notes 沒說）回傳 null，畫面不寫原因。
  */
 export function trendMissingReason(notes: readonly string[]): string | null {
-  if (notes.some((n) => n.includes("美股"))) return "含美股，算不出來"
+  // 績效頁在含美股時改算第一個新台幣帳戶：這裡說「算不出來」，點過去卻有圖（2026-11-14 第七次評分）
+  if (notes.some((n) => n.includes("美股"))) return "含美股，新台幣帳戶的在績效"
   if (notes.some(isCoverageNote)) return "資料還不夠"
   return null
 }

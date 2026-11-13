@@ -315,12 +315,15 @@ function PostDate({ iso, pad }: { iso: string; pad: string }) {
 function Byline({ author, group }: { author: DiscussionAuthor; group: boolean }) {
   const name = authorName(author)
   const known = author.name !== null && !(group && author.user_id === null)
+  // 外層是一般的 inline：`.meta-line` 的「・」(::before) 放在 flex 容器裡會變成一個項目、多吃一個 gap，作者名就比標題多縮 8px
   return (
-    <span className="inline-flex min-w-0 items-center gap-x-2">
-      {group && <UserAvatar name={name} url={author.avatar_url} size="sm" />}
-      <span className="min-w-0">
-        <span className={cn("text-md", known ? "font-medium text-ink" : "text-ink-2")}>{name}</span>
-        {author.is_you && <span className="text-md text-ink [font-feature-settings:'halt'_1]">（你）</span>}
+    <span className="min-w-0">
+      <span className="inline-flex min-w-0 items-center gap-x-2 align-middle">
+        {group && <UserAvatar name={name} url={author.avatar_url} size="sm" />}
+        <span className="min-w-0">
+          <span className={cn("text-md", known ? "font-medium text-ink" : "text-ink-2")}>{name}</span>
+          {author.is_you && <span className="text-md text-ink [font-feature-settings:'halt'_1]">（你）</span>}
+        </span>
       </span>
     </span>
   )

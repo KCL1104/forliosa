@@ -3,6 +3,7 @@
  * 全部是純函式：只用使用者自己的資料計算，不做投資判斷、不捏造分析。
  * 介面上不加「本頁建議」「依頁面推薦」這類說明字樣（PRODUCT.md）。
  */
+import { dayWord } from "@/lib/as-of"
 import { inText } from "@/lib/cjk"
 import type {
   DividendRecord,
@@ -88,13 +89,23 @@ export function isConcentrated(holdings: Holding[], summary?: PortfolioSummary):
   return (top?.weight ?? 0) >= CONCENTRATION.single || top3 >= CONCENTRATION.top3 || (industry?.weight ?? 0) >= CONCENTRATION.industry
 }
 
+/**
+ * 句子開頭的「今天」：收盤價的日期就是今天才說「今天」，否則寫日期（「11/12 」，後面接字時空一格）。
+ * 盤中與收盤價公布前，帳本寫「11/12 漲跌」，AI 面板不能寫「今天」（2026-11-14 第七次評分）
+ */
+export function dayLead(asOf: string | null | undefined, today: string): string {
+  const w = dayWord(asOf, today)
+  return w === "今日" ? "今天" : `${w} `
+}
+
 export function ledgerSuggestions({ holdings, summary }: LedgerData, today: string): Suggestion[] {
   if (holdings.length === 0) {
-    return [{ kind: "onboard", text: "怎麼用一句話記帳？" }]
+    return [{ kind: "onboard", text: "怎麼記第一筆？" }]
   }
   const out: Suggestion[] = []
-  if (holdings.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: "今天誰拖累了我的報酬？" })
-  else if (holdings.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: "今天誰幫我賺最多？" })
+  const day = dayLead(summary?.as_of, today)
+  if (holdings.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: `${day}誰拖累了我的報酬？` })
+  else if (holdings.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: `${day}誰幫我賺最多？` })
   const soon = (summary?.upcoming_dividends ?? []).filter((d) => daysBetween(today, d.ex_dividend_date) <= 31)
   if (soon.length > 0) out.push({ kind: "dividends_next", text: "下個月我能領多少股利？" })
   if (isConcentrated(holdings, summary)) out.push({ kind: "concentration", text: "我的持股會不會太集中？" })
@@ -193,10 +204,11 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
     case "lift": {
       const sign = kind === "drag" ? -1 : 1
       const movers = holdings.filter((h) => sign * h.day_change > 0).sort((a, b) => sign * (b.day_change - a.day_change)).slice(0, 3)
-      if (movers.length === 0) return { text: kind === "drag" ? "今天沒有持股下跌。" : "今天沒有持股上漲。", asOf }
+      const day = dayLead(asOf ?? summary?.as_of, today)
+      if (movers.length === 0) return { text: kind === "drag" ? `${day}沒有持股下跌。` : `${day}沒有持股上漲。`, asOf }
       const [first, second] = movers
       const text =
-        `今天${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${first!.name}（${pctWords(first!.day_change_pct)}）` +
+        `${day}${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${first!.name}（${pctWords(first!.day_change_pct)}）` +
         (second ? `，其次是${inText(second.name, "end")}（${pctWords(second.day_change_pct)}）。` : "。")
       return {
         text,

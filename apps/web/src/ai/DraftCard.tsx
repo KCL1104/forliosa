@@ -42,6 +42,8 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
   const [editing, setEditing] = useState(false)
   const ref = useRef<HTMLElement>(null)
   const titleId = useId()
+  const howId = useId()
+  const [howOpen, setHowOpen] = useState(false)
   const { input, instrument, preview, status } = draft
   const isDividend = input.type === "cash_dividend"
   // 後端 AI 也會起草配股與現金類交易（存入、提出、費用、稅、利息）
@@ -59,7 +61,8 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
     if (focused) ref.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
   }, [focused])
 
-  const money = (n: number) => (privacy ? <Masked /> : formatMoney(n, { currency, bare: true }))
+  // 美股的金額每一格都寫 US$（只有「實拿」有幣別的話，2.60 看不出是哪一種錢）；新台幣照舊不加
+  const money = (n: number) => (privacy ? <Masked /> : formatMoney(n, { currency, bare: currency !== "USD" }))
 
   if (discarded) {
     return <p className="mt-3 text-sm text-ink-2">已捨棄這份草稿（{verb}{isCash ? "" : ` ${instrument.name}`}）。</p>
@@ -152,37 +155,18 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
         </p>
       )}
 
+      {/* 「怎麼算的」展開的清單在按鈕列下面、佔滿卡片寬：放在同一列會把簽名格擠扁（320 寬只剩 31px；2026-11-14 第七次評分） */}
       <footer className="flex items-center gap-2.5 py-3 pr-3 pl-4">
-        <details className="group mr-auto min-w-0">
-          <summary className="inline-flex min-h-9 cursor-pointer list-none items-center gap-0.5 text-sm text-ai underline underline-offset-3 pointer-coarse:min-h-11 [&::-webkit-details-marker]:hidden">
-            怎麼算的
-            <ChevronDownIcon aria-hidden className="size-3.5 transition-transform group-open:rotate-180" />
-          </summary>
-          <ul className="mt-2 flex max-w-[22rem] flex-col gap-1 text-sm text-ink">
-            {!isDividend && preview && input.quantity !== null && input.price !== null && (
-              <li className="num">
-                成交金額 {privacy ? "••••" : formatMoney(preview.gross, { currency, bare: true })}
-                {" = "}
-                {privacy ? "••••" : formatNumber(input.quantity, 0)} 股 × {formatPrice(input.price, instrument.market)}
-              </li>
-            )}
-            {preview && !isCash && (
-              <li className="num">
-                {isDividend
-                  ? `預扣稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}、二代健保 ${privacy ? "••••" : formatMoney(preview.health_insurance, { currency, bare: true })}、手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}`
-                  : `手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}、${currency === "USD" ? "稅" : "證交稅"} ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}`}
-              </li>
-            )}
-            {(preview?.rules ?? []).map((r) => (
-              <li key={r}>{r}</li>
-            ))}
-            {preview && (
-              <li className="num text-ink-2">
-                {input.type === "buy" ? `合計 = 成交金額 + 手續費 + 稅` : isDividend ? "實拿 = 股利 − 預扣稅 − 二代健保 − 手續費" : `實收 = 成交金額 ${MINUS} 手續費 ${MINUS} 稅`}
-              </li>
-            )}
-          </ul>
-        </details>
+        <button
+          type="button"
+          aria-expanded={howOpen}
+          aria-controls={howId}
+          onClick={() => setHowOpen(!howOpen)}
+          className="mr-auto inline-flex min-h-9 min-w-0 items-center gap-0.5 text-sm text-ai underline underline-offset-3 pointer-coarse:min-h-11"
+        >
+          怎麼算的
+          <ChevronDownIcon aria-hidden className={cn("size-3.5 transition-transform", howOpen && "rotate-180")} />
+        </button>
         {signed ? (
           <Button variant="outline" size="sm" className="h-9 pointer-coarse:h-11" onClick={onUndo}>
             復原
@@ -203,6 +187,32 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
         )}
         <SignBox signed={signed} signature={signature} disabled={status !== "pending"} onSign={onSign} signedAt={draft.signedAt} />
       </footer>
+      {howOpen && (
+        <ul id={howId} className="flex flex-col gap-1 border-t border-rule px-4 py-2.5 text-sm text-ink">
+          {!isDividend && preview && input.quantity !== null && input.price !== null && (
+            <li className="num">
+              成交金額 {privacy ? "••••" : formatMoney(preview.gross, { currency, bare: true })}
+              {" = "}
+              {privacy ? "••••" : formatNumber(input.quantity, 0)} 股 × {formatPrice(input.price, instrument.market)}
+            </li>
+          )}
+          {preview && !isCash && (
+            <li className="num">
+              {isDividend
+                ? `預扣稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}、二代健保 ${privacy ? "••••" : formatMoney(preview.health_insurance, { currency, bare: true })}、手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}`
+                : `手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}、${currency === "USD" ? "稅" : "證交稅"} ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}`}
+            </li>
+          )}
+          {(preview?.rules ?? []).map((r) => (
+            <li key={r}>{r}</li>
+          ))}
+          {preview && (
+            <li className="num text-ink-2">
+              {input.type === "buy" ? `合計 = 成交金額 + 手續費 + 稅` : isDividend ? "實拿 = 股利 − 預扣稅 − 二代健保 − 手續費" : `實收 = 成交金額 ${MINUS} 手續費 ${MINUS} 稅`}
+            </li>
+          )}
+        </ul>
+      )}
     </article>
   )
 }

@@ -200,6 +200,8 @@ class LeaderboardEntry(UserRef):
     total_return_pct: float | None = None
     rank: int | None = None
     is_me: bool
+    # only on my own row: the period returns leave out my holdings without a close (US stocks under commercial)
+    excludes_unpriced: bool = False
 
 
 class BenchmarkReturn(BaseModel):

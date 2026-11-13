@@ -29,7 +29,7 @@ export function quickActions(ctx: AiContext): QuickAction[] {
  */
 export function composerPlaceholder(ctx: AiContext, variant: "panel" | "screen"): string {
   const screen = variant === "screen"
-  if (ctx.route === "ledger") return screen ? "搜尋，或說：買 0050 2 張" : "提出問題，或直接說：買 0050 2 張 52.4"
+  if (ctx.route === "ledger") return screen ? "搜尋，或說：買 0050 2 張" : "問問題，或說：買 0050 2 張 52.4"
   if (ctx.route === "stock") {
     const s = ctx.stock
     const trade = s.market === "US" ? `買 ${s.code} 10 股` : `買 ${s.code} 1 張`

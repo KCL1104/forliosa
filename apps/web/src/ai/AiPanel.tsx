@@ -1,6 +1,7 @@
 import { HistoryIcon, PanelRightCloseIcon, SquarePenIcon } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
-import { useUpcoming } from "@/api/queries"
+import { Link } from "@tanstack/react-router"
+import { useBriefings, useUpcoming } from "@/api/queries"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AskAiIcon } from "./ask-icon"
@@ -115,7 +116,10 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
   const body = (
     <div key="body" className="flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain px-7 pb-1.5 xl:pr-7 xl:pl-8">
       {view === "history" ? (
-        <HistoryList compact onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
+        <>
+          <HistoryList compact onOpen={() => setView("chat")} onReplay={(t) => void runner.submit(t)} />
+          <BriefingsLink />
+        </>
       ) : thread ? (
         // 對話從輸入框正上方往上長（mt-auto）：內容與輸入框之間沒有大片空白
         <div className="mt-auto">
@@ -199,5 +203,25 @@ function IconButton({ label, onClick, children, pressed }: { label: string; onCl
       </TooltipTrigger>
       <TooltipContent>{label}</TooltipContent>
     </Tooltip>
+  )
+}
+
+/**
+ * 桌面面板的對話紀錄最下面：之前的收盤簡報在「對話紀錄」頁（手機的時鐘直接到那一頁，桌面只切換面板）。
+ * 沒有簡報（沒開每日收盤簡報）就不出現（2026-11-14 第七次評分）
+ */
+function BriefingsLink() {
+  const list = useBriefings()
+  if (!list.data?.length) return null
+  return (
+    <p className="mt-2">
+      <Link
+        to="/history"
+        hash="briefing-history"
+        className="inline-flex min-h-9 items-center text-base text-ink underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11"
+      >
+        之前的收盤簡報
+      </Link>
+    </p>
   )
 }

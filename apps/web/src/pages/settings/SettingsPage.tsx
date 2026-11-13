@@ -282,7 +282,7 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
         onClose()
       },
       onError: (err: Error) =>
-        toast.error(isNew ? "新增失敗，表單內容仍保留" : "更新失敗，表單內容仍保留", { description: err.message }),
+        toast.error("沒有存成功，內容還在。", { description: err.message }),
     }
     // 編輯時不送幣別、追蹤方式與費率：已有交易的帳戶不能改幣別，也不要覆蓋自訂費率
     if (isNew) create.mutate({ ...editable, currency, tracking_mode: mode, fee_rate: currency === "USD" ? 0.001 : 0.001425 }, done)

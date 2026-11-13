@@ -51,7 +51,7 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     settings = get_settings()
     pool = get_key_pool()
     if not pool.available:
-        raise ApiError(503, "ai_unavailable", "AI 功能尚未設定（沒有可用的 API 金鑰）")
+        raise ApiError(503, "ai_unavailable", "AI 暫時不能用。")
     if not pool.ranked(store.slot_month_costs(db)):
         raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
     deep = body.mode == "deep"
@@ -61,7 +61,7 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     if body.thread_id:
         thread = store.owned_thread(db, user, body.thread_id)
         if thread.context_tokens >= settings.ai_thread_max_context_tokens:
-            raise ApiError(409, "thread_too_long", "這段對話已經很長了，請開一段新對話繼續問。")
+            raise ApiError(409, "thread_too_long", "這段對話太長了，開一段新對話再問。")
     user_id = user.id
 
     def events() -> Iterator[str]:

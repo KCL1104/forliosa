@@ -56,10 +56,10 @@ export function coveredByUser(rows: Transaction[], notices: DividendRecord[]): S
 
 const shares = new Intl.NumberFormat("en-US", { maximumFractionDigits: 6 })
 
-/** 備註：「除息前一日持有 1,500 股 × 每股現金股利 5 元；發放日 2026-10-09」（與後端相同） */
+/** 備註：「1,500 股 × 每股 5 元，10/09 發放」（與後端相同） */
 export function cashNote(qty: number, perShare: number, paymentDate: string | null): string {
-  const note = `除息前一日持有 ${shares.format(qty)} 股 × 每股現金股利 ${perShare} 元`
-  return paymentDate ? `${note}；發放日 ${paymentDate}` : note
+  const note = `${shares.format(qty)} 股 × 每股 ${perShare} 元`
+  return paymentDate ? `${note}，${paymentDate.slice(5, 7)}/${paymentDate.slice(8, 10)} 發放` : note
 }
 
 /** 除息日前一天收盤的持股（不含自動入帳的列） */

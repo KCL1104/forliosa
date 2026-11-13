@@ -74,11 +74,12 @@ export function KeyGrid({ items, className, cols = 3 }: { items: KeyItem[]; clas
   const ordered = arrange(items)
   const spans = lastRowSpans(ordered, cols)
   return (
-    <dl className={cn("grid grid-cols-2 gap-x-8 border-t border-rule", cols === 3 && "lg:grid-cols-6", className)}>
+    // 窄於 360px 排一欄（320 寬兩欄時長標籤把值擠出格子：殖利率只看得到「0.8」；2026-11-14 第七次評分）
+    <dl className={cn("grid grid-cols-2 gap-x-8 border-t border-rule max-[359px]:grid-cols-1 max-[359px]:*:col-span-1!", cols === 3 && "lg:grid-cols-6", className)}>
       {ordered.map((it, i) => (
         <div key={it.label} className={cn("flex min-h-11 items-baseline justify-between gap-3 border-b border-rule py-2.5", it.wide && "max-lg:col-span-2", spans[i])} title={it.title}>
-          <dt className="text-md whitespace-nowrap text-ink-2">{it.label}</dt>
-          <dd className="num text-right text-base text-ink">{it.value}</dd>
+          <dt className="min-w-0 text-md text-ink-2">{it.label}</dt>
+          <dd className="num text-right text-base whitespace-nowrap text-ink">{it.value}</dd>
         </div>
       ))}
     </dl>

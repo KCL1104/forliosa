@@ -85,15 +85,14 @@ describe("群組畫面不透露誰沒分享", () => {
     family = await api.getGroup("grp_family")
   })
 
-  it("排行：只有開了報酬率的人；沒有「未分享」；算不出來是「—」", async () => {
+  it("排行：只有開了報酬率的人；沒有「未分享」；有美股的人也有名次（只在自己那一列標「不含美股」）", async () => {
     renderInRouter(<RankingTab group={family} />)
     const table = await screen.findByRole("table", { name: "今日排行" }, T)
     await within(table).findByText("爸爸", undefined, T)
     expect(within(table).queryByText("阿弟")).toBeNull()
     expect(document.body.textContent).not.toContain("未分享")
-    expect(within(table).getAllByText("沒有資料").length).toBeGreaterThan(0)
-    // 只對自己說明為什麼是「—」
-    expect(screen.getByText(/你有持股沒有收盤價/)).toBeInTheDocument()
+    // 我有美股：期間報酬只算有收盤價的持股，只在自己那一列標「不含美股」（別人的不說）
+    expect(within(table).getAllByText("不含美股")).toHaveLength(1)
   })
 
   it("動態：沒開交易動態的人只有「加入了群組」；成交價只在對方開了才出現，隱私模式遮住", async () => {

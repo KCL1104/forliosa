@@ -20,7 +20,7 @@ describe("示範資料", () => {
       ["6488.TWO", "2026-09-22", 1000, 4, 4000, "auto"],
       ["2330.TW", "2026-09-16", 1500, 5, 7500, "auto"],
     ])
-    expect(rows[2]!.note).toBe("除息前一日持有 1,500 股 × 每股現金股利 5 元；發放日 2026-10-09")
+    expect(rows[2]!.note).toBe("1,500 股 × 每股 5 元，10/09 發放")
     expect(rows.every((t) => t.health_insurance === 0 && t.fee === 0 && t.currency === "TWD")).toBe(true)
   })
   it("之前自己記的股利維持手動；美股一直是手動；還沒到的除息日不記", async () => {
@@ -88,7 +88,7 @@ describe("重算", () => {
     const buy = await api.createTransaction({ account_id: acc.id, symbol: "2454.TW", type: "buy", trade_date: "2026-09-01", quantity: 1000, price: 1400 })
     const [row] = await autos(api, "2454.TW")
     expect(row).toMatchObject({ source: "auto", trade_date: "2026-10-08", quantity: 1200, amount: 30000, health_insurance: 633 })
-    expect(row!.note).toBe("除息前一日持有 1,200 股 × 每股現金股利 25 元；發放日 2026-10-30")
+    expect(row!.note).toBe("1,200 股 × 每股 25 元，10/30 發放")
     await api.deleteTransaction(buy.id)
     expect((await autos(api, "2454.TW"))[0]).toMatchObject({ quantity: 200, amount: 5000, health_insurance: 0 })
   })
@@ -136,7 +136,7 @@ describe("規則", () => {
     expect([...coveredByUser([rec("2026-06-10", null)], notices)]).toEqual([])
   })
   it("備註和後端相同；沒有發放日就不寫", () => {
-    expect(cashNote(10000, 2, "2026-07-10")).toBe("除息前一日持有 10,000 股 × 每股現金股利 2 元；發放日 2026-07-10")
-    expect(cashNote(1500, 0.55, null)).toBe("除息前一日持有 1,500 股 × 每股現金股利 0.55 元")
+    expect(cashNote(10000, 2, "2026-07-10")).toBe("10,000 股 × 每股 2 元，07/10 發放")
+    expect(cashNote(1500, 0.55, null)).toBe("1,500 股 × 每股 0.55 元")
   })
 })

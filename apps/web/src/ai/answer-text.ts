@@ -9,7 +9,7 @@
 export const DISCLAIMER = "AI 回答僅供參考，非投資建議。"
 
 /** 後端 AI 無法使用（503 `ai_unavailable`：沒有金鑰、所有金鑰停用或額度用完）時的一句話 */
-export const AI_UNAVAILABLE = "AI 暫時無法使用，請稍後再試。"
+export const AI_UNAVAILABLE = "AI 暫時不能用，晚一點再試。"
 
 /** 「僅供參考，非投資建議。」「AI 分析僅供參考，不構成投資建議」這類句子（可在一行的結尾） */
 const DISCLAIMER_TAIL = /[，,。．\s]*(?:以上)?(?:內容|資訊|分析|回答|AI\s*分析|AI\s*回答)?(?:僅供參考)[，,、\s]*(?:並)?(?:非|不構成|不代表|不是)(?:任何)?投資建議[。．.!！]*\s*$/

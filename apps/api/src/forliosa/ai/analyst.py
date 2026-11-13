@@ -126,7 +126,7 @@ RATING_PAGE_SEGMENTS = frozenset({"quote", "quotes", "analyst-ratings", "analyst
                                   "forecasts", "price-target", "price-targets", "consensus"})
 RATING_PAGE_SUFFIXES = ("-consensus-estimates", "-stock-forecast", "-price-target", "-price-targets",
                         "-analyst-ratings", "-analyst-estimates")
-NOTE_OFF = "法人觀點的 AI 網路搜尋目前沒有開啟。"
+NOTE_OFF = "現在查不到法人觀點。"
 
 
 @dataclass(frozen=True)
@@ -236,7 +236,7 @@ def request(db: Session, user: User, md: MarketData, symbol: str, *, pool: KeyPo
         return {**view(None, info.symbol), "status": "unavailable", "notes": [NOTE_OFF]}, None
     pool = pool or get_key_pool()
     if not pool.available:
-        raise ApiError(503, "ai_unavailable", "AI 功能尚未設定（沒有可用的 API 金鑰）")
+        raise ApiError(503, "ai_unavailable", "AI 暫時不能用。")
     if not pool.ranked(store.slot_month_costs(db)):
         raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
     store.check_quota(db, user, settings)

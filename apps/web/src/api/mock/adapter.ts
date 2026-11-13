@@ -202,14 +202,16 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const periodReturns = (list: Transaction[]) => {
     const summary = buildSummary(list, undefined, commercial)
     const holdings = buildHoldings(list, undefined, commercial)
-    // 有任何持股沒有收盤價（商用模式的美股）時，所有期間都是 null（不說明原因）
-    if (commercial && holdings.some((h) => h.price === null)) return { day: null, month: null, year: null, total: summary.total_return_pct }
+    // 沒有收盤價的持股（商用模式的美股）不算進期間報酬，和帳本的「今日」同一條規則（2026-11-14）
+    const unpriced = new Set(commercial ? holdings.filter((h) => h.price === null).map((h) => h.symbol) : [])
+    const priced = unpriced.size ? list.filter((t) => !t.symbol || !unpriced.has(t.symbol)) : list
     const opts = { isDemo: !commercial, ...(commercial ? { minStart: ARCHIVE_START } : {}) }
     return {
       day: summary.day_change_pct,
-      month: buildPerformance(list, "MTD", undefined, "0050.TW", opts).twr,
-      year: buildPerformance(list, "YTD", undefined, "0050.TW", opts).twr,
+      month: buildPerformance(priced, "MTD", undefined, "0050.TW", opts).twr,
+      year: buildPerformance(priced, "YTD", undefined, "0050.TW", opts).twr,
       total: summary.total_return_pct,
+      excludes_unpriced: unpriced.size > 0,
     }
   }
   const sharedHoldings = (list: Transaction[]) =>
@@ -234,8 +236,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     holdings: () => sharedHoldings(txns),
     amounts: () => sharedAmounts(txns),
     trades: () => rawTrades(txns),
-    // 商用模式：我有美股、沒有收盤價，週報酬算不出來
-    week: (w) => (commercial ? null : ({ "2026-11-02": 0.0097, "2026-10-26": 0.0043 })[w] ?? null),
+    // 商用模式的美股不算進週報酬（和排行同一條規則）
+    week: (w) => ({ "2026-11-02": 0.0097, "2026-10-26": 0.0043 })[w] ?? null,
   }
   const sharing = createSharingStore(
     {

@@ -472,7 +472,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   收盤的持股，不含同一次除權的自動配股、也不含除息日之後才買的股數；找不到對應的預告才用紀錄日前一天的持股。
 - **配股**：`stock_dividend_shares(股數, 每股配股元)`，不足一股以面額 10 元折付現金（元以下捨去）；`fee`、`tax`、`health_insurance` 都是 0
   （與手動記配股相同）。同一除權息日的現金與配股各一列；配到的股數參與之後的除息。
-- **備註**：`cash_note`／`stock_note`，例如「除息前一日持有 10,000 股 × 每股現金股利 2 元；發放日 2026-07-10」、
+- **備註**：`cash_note`／`stock_note`，例如「10,000 股 × 每股 2 元，07/10 發放」（股數是除息前一日的持股）、
   「除權前一日持有 1,234 股 × 每股配股 0.5 元（每股面額 10 元）= 配發 61 股，不足一股折付現金 7 元」。
 
 ### 使用者自己的紀錄（`covered_by_user`）
@@ -1251,6 +1251,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `InvitePreview.inviter_display_name` | 建立邀請的人已離開群組時改顯示目前 owner 的名稱 |
 | `POST /invites/{token}/accept`、`PUT /groups/{id}/share` | `share` 的六個開關**全部必填**（少一個 422）：前端必須讓本人確認每一項。成功回 200 |
 | `LeaderboardEntry.rank` | 沒有名次時是 `null`（鍵存在）：排行關閉，或該成員這期沒有數字 |
+| `LeaderboardEntry.excludes_unpriced` | 2026-11-14 新增：期間報酬沒有算進沒有收盤價的持股。只在自己那一列可能是 `true`，別人的一律 `false` |
 | `FeedItem`（`member_joined`） | 只有 `id`、`type`、`user_id`、`display_name`、`avatar_url`、`created_at`（= 加入時間）；不能留言或按表情 |
 | `FeedItem`（`trade`）`created_at` | 合併的交易裡最晚建立的那一筆的建立時間 |
 | `Comment` | 多 `avatar_url`（已離開、已刪除的帳號為 `null`） |
@@ -1312,7 +1313,9 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 - 期間起點：`day` = 前一個交易日、`month` = 上月最後一個交易日、`year` = 去年最後一個交易日（台股行事曆）。`DATA_POLICY=commercial` 時起點
   早於存檔第一天就改成存檔第一天，`notes` 第一行說明「資料累積中：自 … 起存檔；期間從 … 收盤開始計算」。
 - 成員報酬：所有帳戶合併，從今年的起點收盤開始逐日模擬（`domain.performance.simulate`，與績效頁同一套 TWR 公式），起點之前的交易都在起點
-  當天入帳（起點當天的報酬不算）；期間內完全沒有投入的成員該期為 `null`。年度區間內任何一天有持股沒有收盤價 → 三個期間都是 `null`。
+  當天入帳（起點當天的報酬不算）；期間內完全沒有投入的成員該期為 `null`。年度區間內**完全沒有收盤價**的持股（commercial 下的美股）
+  不算進去，重算一次（`member_period_returns_ex` 的第二個值；排行只在自己那一列回 `excludes_unpriced: true`，週報與成員頁用同一份數字）；
+  去掉之後仍有某天缺價 → 三個期間都是 `null`。
   每次請求重算（目前沒有快取）。
 - 基準：`^TAIEXTR` 為指數收盤比；0050 為含息報酬（除息日再投入，同績效頁的基準算法）。沒有資料時 `return_pct` 為 `null`，commercial 下
   `notes` 說明「基準 … 目前沒有可商用的資料」。

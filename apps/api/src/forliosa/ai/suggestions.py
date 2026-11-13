@@ -31,6 +31,17 @@ def _q(kind: str, text: str, a: str, b: str, symbol: str | None = None) -> dict[
     return out
 
 
+def _day_lead(summary: dict | None, today: date) -> str:
+    """「今天」only when the close the numbers use is today's; otherwise the close's date (「11/12」). Before the
+    day's close is published the ledger says 「11/12 漲跌」, so the panel must not say 「今天」."""
+    as_of = (summary or {}).get("as_of")
+    try:
+        day = date.fromisoformat(str(as_of)[:10]) if as_of else None
+    except ValueError:
+        day = None
+    return "今天" if day is None or day >= today else f"{day.month:02d}/{day.day:02d}"
+
+
 def _days(today: date, d: Any) -> int | None:
     if d is None:
         return None
@@ -46,12 +57,14 @@ def _pending_drafts(db: Session, user: User) -> int:
 
 def ledger_questions(holdings: list[dict], summary: dict | None, today: date) -> list[dict[str, Any]]:
     if not holdings:
-        return [_q("onboard", "怎麼用一句話記帳？", "怎麼用", "一句話記帳？")]
+        return [_q("onboard", "怎麼記第一筆？", "怎麼記", "第一筆？")]
     out = []
+    day = _day_lead(summary, today)
+    lead = day if day == "今天" else f"{day} "
     if any((h.get("day_change") or 0) < 0 for h in holdings):
-        out.append(_q("drag", "今天誰拖累了我的報酬？", "今天", "誰拖累了我？"))
+        out.append(_q("drag", f"{lead}誰拖累了我的報酬？", day, "誰拖累了我？"))
     elif any((h.get("day_change") or 0) > 0 for h in holdings):
-        out.append(_q("lift", "今天誰幫我賺最多？", "今天", "誰幫我賺最多？"))
+        out.append(_q("lift", f"{lead}誰幫我賺最多？", day, "誰幫我賺最多？"))
     soon = [d for d in (summary or {}).get("upcoming_dividends", [])
             if (n := _days(today, d.get("ex_dividend_date"))) is not None and 0 <= n <= DIVIDEND_WINDOW_DAYS]
     if soon:
@@ -124,7 +137,7 @@ def suggestions(db: Session, user: User, md: MarketData, route: str | None, symb
         watched = db.scalar(select(WatchlistItem.id).where(WatchlistItem.user_id == user.id,
                                                           WatchlistItem.symbol == info.symbol))
         if watched is None and not position:
-            actions.append({"kind": "watchlist_add", "label": "加入自選", "symbol": info.symbol})
+            actions.append({"kind": "watchlist_add", "label": "加入觀察", "symbol": info.symbol})
     elif kind == "ledger" or kind == "other":
         holdings: list[dict] = []
         summary: dict | None = None
@@ -139,5 +152,5 @@ def suggestions(db: Session, user: User, md: MarketData, route: str | None, symb
     elif kind == "groups":
         questions = [_q("group_share", "群組會分享我的哪些資料？", "群組會分享", "我的哪些資料？")]
     if pending:
-        actions.append({"kind": "review_drafts", "label": f"確認 {pending} 筆草稿", "count": pending})
+        actions.append({"kind": "review_drafts", "label": f"{pending} 筆草稿等你簽名", "count": pending})
     return {"route": kind, "symbol": resolved, "questions": questions, "actions": actions}

@@ -1,4 +1,4 @@
-import { useUi } from "@/app/ui-store"
+import { useStartReduce } from "@/pages/transactions/use-start-reduce"
 import NumberFlow from "@number-flow/react"
 import { inText } from "@/lib/cjk"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
@@ -186,7 +186,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const watch = useWatchlist()
   const toggle = useToggleWatch()
   const ask = useAskAi()
-  const openReduce = useUi((s) => s.openReduce)
+  const reduce = useStartReduce()
   // 查看別人的資產（唯讀）：不提供加入觀察、記一筆
   const readOnly = useReadOnly()
   const watching = (watch.data ?? []).some((w) => w.symbol === inst.symbol)
@@ -210,7 +210,8 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         </span>
       )}
       {inst.is_demo && <DemoTag className="max-sm:hidden" />}
-      {!readOnly && <span className="ml-auto flex items-center gap-2">
+      {/* 320 寬放不下時按鈕掉到下一行：靠左，不懸在右邊 */}
+      {!readOnly && <span className="ml-auto flex items-center gap-2 max-[359px]:ml-0">
         {/* 開關：開著時是選取語法 (b)（和隱私模式的眼睛同一種），不靠星號圖示表示狀態 */}
         {!held && (
           <Button
@@ -229,7 +230,7 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
         </Button>
         {/* 有持股時：賣出也在這裡（手機上不用先展開部位明細、往下捲；2026-11-14 第六次評分） */}
         {held && (
-          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => openReduce(inst.symbol)}>
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => reduce(inst.symbol)}>
             減少持股
           </Button>
         )}
@@ -426,8 +427,6 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
 function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
-  const ask = useAskAi()
-  const readOnly = useReadOnly()
   const me = useWho("我")
   const [open, setOpen] = useState(false)
   // 「今日」損益：收盤價的日期就是今天才寫「今日」，否則寫那個日期
@@ -477,8 +476,8 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
         </button>
       </div>
       {open && (
-        <div id="position-more" className="note-in grid gap-x-10 gap-y-4 border-t border-rule py-4 md:grid-cols-2">
-          <dl className="num grid grid-cols-[repeat(2,minmax(0,1fr))] gap-x-6 gap-y-2 text-md">
+        <div id="position-more" className="note-in grid items-start gap-x-10 gap-y-4 border-t border-rule py-4 md:grid-cols-2">
+          <dl className="num grid grid-cols-[repeat(2,minmax(0,1fr))] content-start gap-x-6 gap-y-2 text-md">
             {priced && <Item className="sm:hidden" label={day} value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
             <Item className="sm:hidden" label="已領股利" value={money(p.dividends_received)} />
             <Item label={priced ? "市值" : "市值（以成本計）"} value={money(p.market_value)} />
@@ -488,11 +487,11 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
             <Item
               className={priced ? undefined : "max-sm:col-span-2"}
               label="下次除息"
-              // 窄的手機上在「・」的地方換行（日期、金額各自不斷開），不撐寬頁面
+              // 窄的手機上在日期和金額之間換行（各自不斷開），不撐寬頁面；不用「・」（換行後一行會以「・」結尾）
               value={
                 p.upcoming_dividend ? (
                   <>
-                    <span className="whitespace-nowrap">{formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}</span>・<wbr />
+                    <span className="whitespace-nowrap">{formatDateShort(p.upcoming_dividend.ex_dividend_date, false)}</span> <wbr />
                     <span className="whitespace-nowrap">約 {money(p.upcoming_dividend.amount_estimate)}</span>
                   </>
                 ) : (
@@ -528,14 +527,10 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
               ))}
             </ul>
             <div className="mt-3 flex flex-wrap gap-2">
+              {/* 「記一筆」在標題列已經有一顆，這裡不重複 */}
               <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm", className: "pointer-coarse:h-11" })}>
                 在帳本中查看
               </Link>
-              {!readOnly && (
-                <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("form", { code: inst.code })}>
-                  記一筆
-                </Button>
-              )}
             </div>
           </div>
         </div>

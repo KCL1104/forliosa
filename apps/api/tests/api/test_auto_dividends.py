@@ -89,7 +89,7 @@ def test_cash_dividend_booked_on_ex_date_with_nhi(client, notices):
     assert (a["type"], a["trade_date"], a["quantity"], a["price"], a["amount"], a["source"]) == (
         "cash_dividend", "2026-07-16", 10000, 2.0, 20000, "auto")
     assert a["health_insurance"] == 422  # 2.11% of a single payment ≥ NT$20,000
-    assert "除息前一日持有 10,000 股 × 每股現金股利 2 元" in a["note"]
+    assert a["note"].startswith("10,000 股 × 每股 2 元")
     # the dividend offsets the ex-date price drop: it is income of the holding, not a deposit
     hold = client.get(f"{API}/portfolio/holdings").json()
     assert hold[0]["symbol"] == "0056.TW"

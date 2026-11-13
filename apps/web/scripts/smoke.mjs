@@ -288,6 +288,10 @@ await check("手動記帳表單（備援路徑）：試算稅費並儲存", asyn
   // 預設是簡單的買進輸入；賣出、股利與稅費試算在完整表單裡
   await page.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).click()
   await page.getByRole("dialog").getByRole("heading", { name: "記一筆交易" }).waitFor()
+  // 從「賣出、股利或其他」進來，類型先選在「賣出」（照填不會記成買進）；這裡要記的是買進，自己改回來
+  const types = page.getByRole("dialog").getByRole("radiogroup", { name: "交易類型" })
+  if ((await types.getByRole("radio", { name: "賣出" }).getAttribute("aria-checked")) !== "true") throw new Error("full form did not open on 賣出")
+  await types.getByRole("radio", { name: "買進" }).click()
   await page.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2454")
   await page.getByRole("option", { name: /2454/ }).first().click()
   await page.locator("#trade-qty").fill("1")
@@ -335,11 +339,11 @@ await check("交易：欄位是 日期・類型・商品・帳戶・數量・價
   await row.waitFor({ timeout: 8000 })
   await row.getByRole("link", { name: "聯發科", exact: true }).waitFor()
   await row.getByText("2454", { exact: true }).waitFor()
-  const note = row.getByText(/^除息前一日持有 200 股/)
+  const note = row.getByText(/^200 股 × 每股/)
   await note.waitFor()
   const clipped = await note.evaluate((el) => el.scrollWidth > el.clientWidth + 1 || getComputedStyle(el).textOverflow === "ellipsis" || getComputedStyle(el).overflow === "hidden")
   if (clipped) throw new Error("the auto-dividend note is truncated")
-  if (!(await note.textContent()).includes("發放日")) throw new Error("the auto-dividend note lost its ending")
+  if (!(await note.textContent()).includes("發放")) throw new Error("the auto-dividend note lost its ending")
   // 數量與價格各自一欄，靠右對齊在各自的表頭下面
   const aligned = await page.evaluate(() => {
     const head = [...document.querySelectorAll(".form-head")].find((el) => el.textContent.includes("商品"))

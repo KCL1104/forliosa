@@ -69,3 +69,18 @@ def test_usage_shape(client, pool, ai_env):
     assert set(u) == {"date", "month", "messages_today", "daily_message_limit", "messages_remaining",
                       "tokens_month", "monthly_token_budget", "tokens_remaining", "cost_usd_month", "model",
                       "available", "deep_search_cost", "disclaimer"}
+
+
+def test_day_word_follows_the_close_date():
+    """Before today's close is published the numbers are yesterday's: the question names the date, not 「今天」."""
+    from datetime import date
+
+    from forliosa.ai.suggestions import ledger_questions
+
+    holdings = [{"day_change": -10, "weight": 0.1}, {"day_change": 5, "weight": 0.1}]
+    today = date(2026, 11, 13)
+    old = ledger_questions(holdings, {"as_of": "2026-11-12T13:30:00+08:00"}, today)[0]
+    assert old["text"] == "11/12 誰拖累了我的報酬？" and old["lines"] == ["11/12", "誰拖累了我？"]
+    fresh = ledger_questions(holdings, {"as_of": "2026-11-13T13:30:00+08:00"}, today)[0]
+    assert fresh["text"] == "今天誰拖累了我的報酬？"
+    assert ledger_questions(holdings, None, today)[0]["text"].startswith("今天")

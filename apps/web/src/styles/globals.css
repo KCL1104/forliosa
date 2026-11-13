@@ -689,6 +689,8 @@
     gap: 2px;
     width: 76px;
     height: 60px;
+    /* 旁邊的東西再多也不讓簽名格被擠窄（它是觸控時唯一要按的東西） */
+    flex-shrink: 0;
     border-radius: 0;
     background: var(--act);
     color: var(--act-fg);

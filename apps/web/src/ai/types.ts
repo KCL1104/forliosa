@@ -47,10 +47,12 @@ export interface Answer {
   text: string
   rows?: AnswerRow[]
   links?: AnswerLink[]
-  /** 「資料至 11/12 13:30」 */
+  /** 數字的收盤日（畫面寫「11/12 收盤」） */
   asOf?: string | null
   /** 回答之後的追問 */
   followUps?: string[]
+  /** 操作的說明（「買賣了什麼？例如…」），不是回答：不掛免責 */
+  instruction?: boolean
 }
 
 export interface DraftInstrument {

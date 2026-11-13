@@ -241,14 +241,22 @@ def _window_return(daily: list[float], active: list[bool], axis: list[date], sta
 
 
 def member_period_returns(db: Session, md: MarketData, user: User, window: PeriodWindow) -> dict[str, float | None]:
+    return member_period_returns_ex(db, md, user, window)[0]
+
+
+def member_period_returns_ex(db: Session, md: MarketData, user: User,
+                             window: PeriodWindow) -> tuple[dict[str, float | None], bool]:
     """Time-weighted returns of all of ``user``'s accounts combined (TWD, closes) for every period of the window
     (leaderboard: day / month / year; weekly digest: week), from the window's common start dates. A member who starts
-    holding during a period counts from the first day with holdings. Any holding without a close on any day of the
-    window (e.g. US stocks under commercial) → every period None."""
+    holding during a period counts from the first day with holdings.
+
+    Holdings with no close at all in the window (US stocks under commercial) are left out, the same rule as the
+    ledger's 今日 and the performance page: the second value says so (product owner 2026-11-14 — before this the
+    member's every period was None, so someone with a 複委託 account never got a rank). Any other gap → None."""
     none = dict.fromkeys(window.starts)
     inp = load_ledger_input(db, user)
     if inp.first_date is None or inp.first_date > window.end:
-        return none
+        return none, False
     axis = _axis(window)
     symbols = sorted({t.symbol for t in inp.effective_transactions() if t.symbol and t.type in (
         "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")}
@@ -257,14 +265,24 @@ def member_period_returns(db: Session, md: MarketData, user: User, window: Perio
     closes = {s: _forward_filled(axis, {c.t: c.c for c in md.history(s, lookback, window.end).candles})
               for s in symbols}
     fx = FxBook.load(md, inp.first_date, window.end)
-    sim = simulate(inp.ledger_txns(fx), axis, lambda s, d: closes.get(s, {}).get(d),
-                   lambda c, d: fx.rate(c, d), inp.method, inp.openings(fx))
-    points = sim.points
+    txns, openings = inp.ledger_txns(fx), inp.openings(fx)
+
+    def run(skip: set[str]):
+        return simulate([t for t in txns if t.symbol not in skip], axis, lambda s, d: closes.get(s, {}).get(d),
+                        lambda c, d: fx.rate(c, d), inp.method, [o for o in openings if o.symbol not in skip]).points
+
+    points = run(set())
+    excluded = False
     if any(p.unpriced for p in points):
-        return none
+        never = {s for s, c in closes.items() if not c}
+        if not never:
+            return none, False
+        points, excluded = run(never), True
+        if any(p.unpriced for p in points):
+            return none, False
     daily = [p.daily_return for p in points]
     active = [False] + [points[i - 1].value + points[i].inflow > 0 for i in range(1, len(points))]
-    return {k: _window_return(daily, active, axis, start, window.end) for k, start in window.starts.items()}
+    return {k: _window_return(daily, active, axis, start, window.end) for k, start in window.starts.items()}, excluded
 
 
 @dataclass
@@ -307,6 +325,7 @@ class Projector:
         self.md = md
         self._states: dict[str, PortfolioState] = {}
         self._returns: dict[str, dict[str, float | None]] = {}
+        self._excluded: dict[str, bool] = {}
         self._window = window  # default: the leaderboard's day / month / year window
 
     @property
@@ -322,8 +341,14 @@ class Projector:
 
     def period_returns(self, user: User) -> dict[str, float | None]:
         if user.id not in self._returns:
-            self._returns[user.id] = member_period_returns(self.db, self.md, user, self.window)
+            self._returns[user.id], self._excluded[user.id] = member_period_returns_ex(self.db, self.md, user,
+                                                                                       self.window)
         return self._returns[user.id]
+
+    def excludes_unpriced(self, user: User) -> bool:
+        """The period returns leave out holdings without a close (US stocks under commercial)."""
+        self.period_returns(user)
+        return self._excluded.get(user.id, False)
 
     def returns_block(self, user: User) -> dict[str, float | None]:
         r = self.period_returns(user)
@@ -446,8 +471,11 @@ def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str
             continue
         r = proj.period_returns(m.user)
         is_demo |= proj.is_demo(m.user)
+        mine = m.user_id == me_id
+        # only my own row says what was left out: another member's US holdings are not for the group to see
         entries.append({**identity(m.user), "return_pct": pct(r[period]),
-                        "total_return_pct": pct(totals(proj.state(m.user)).total_return), "is_me": m.user_id == me_id})
+                        "total_return_pct": pct(totals(proj.state(m.user)).total_return), "is_me": mine,
+                        "excludes_unpriced": mine and proj.excludes_unpriced(m.user)})
     bench, sources, bench_demo, notes = _benchmark_period_returns(proj.md, window)
     if window.clipped and window.archive_since is not None:
         notes.insert(0, f"資料從 {ymd(window.archive_since)} 開始，這段期間從 {ymd(window.starts[period])} 收盤起算")

@@ -2,7 +2,8 @@ import { ArrowRightIcon, ArrowUpRightIcon, CircleAlertIcon } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { PlainLink } from "@/app/links"
 import { useUi } from "@/app/ui-store"
-import { formatDateTime } from "@/lib/format"
+import { closeDay } from "@/lib/as-of"
+import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { cleanAnswer, DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
 import { useAiUsage } from "./remote-hooks"
@@ -36,7 +37,10 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
     : -((last?.draftIds?.length ?? 0) + (last?.charts?.length ?? 0) + (last?.citations?.length ?? 0))
   // 免責只跟著回答（模型的回答、規則版回答），而且一段對話只出現一次：在最新一則回答下方；那則還在寫時先不出現。
   // 草稿前的說明是照使用者的指令算的稅費，不是建議，不算回答。
-  const latestAnswer = thread.messages.findLastIndex((m) => m.role === "ai" && !m.error && (m.streaming || !!m.answer || (!!m.text && m.model !== false)))
+  // 只有一顆連結（「看台積電」）或操作說明的不算回答（2026-11-14 第七次評分）
+  const latestAnswer = thread.messages.findLastIndex(
+    (m) => m.role === "ai" && !m.error && (m.streaming || (!!m.answer && !m.answer.instruction && (!!m.answer.text || !!m.answer.rows?.length)) || (!!m.text && m.model !== false)),
+  )
 
   useEffect(() => {
     // 只捲面板自己的捲動區：scrollIntoView 也會捲整頁（從個股頁的分頁按「問 AI」時，頁面會跳回頂端）
@@ -316,7 +320,8 @@ function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runn
           ))}
         </ul>
       )}
-      {answer.asOf && <p className="mt-2 text-sm text-ink-2">資料至 {formatDateTime(answer.asOf)}</p>}
+      {/* 數字都是收盤價：和帳本同一種寫法（「11/12 收盤」），不寫「13:30」這種像盤中的時刻 */}
+      {answer.asOf && closeDay(answer.asOf) && <p className="num mt-2 text-sm text-ink-2">{formatDateShort(closeDay(answer.asOf)!, false)} 收盤</p>}
     </div>
   )
 }

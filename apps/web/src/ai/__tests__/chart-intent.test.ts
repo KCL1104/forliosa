@@ -126,3 +126,13 @@ describe("buildLocalChart：用 API 的資料組出和後端同樣形狀的圖�
     expect(await buildLocalChart({ kind: "price", targets: ["不存在"], range: "6M" }, deps())).toEqual({ chart: null, text: "找不到「不存在」。換個代號試試，例如 0050、2330。" })
   })
 })
+
+describe("比較圖的導言", () => {
+  it("說差幾個百分點，不把圖例的數字再念一次", async () => {
+    const { compareSentence } = await import("@/ai/chart-intent")
+    expect(compareSentence("近 6 個月", [{ name: "台積電", r: -0.0136 }, { name: "鴻海", r: -0.0634 }])).toBe("近 6 個月台積電下跌 1.36%，比鴻海好 4.98 個百分點。")
+    expect(compareSentence("近 1 年", [{ name: "台積電", r: 0.1 }, { name: "元大台灣50", r: 0.12 }, { name: "鴻海", r: -0.05 }])).toBe(
+      "近 1 年元大台灣50 最好（上漲 12.00%），比最差的鴻海多 17.00 個百分點。",
+    )
+  })
+})

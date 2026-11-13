@@ -1,10 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
-import { api } from "@/api"
-import { useAccounts, useCreateTransaction, useDeleteTransaction, useUpdateTransaction } from "@/api/queries"
+import { api, appToday } from "@/api"
+import { useAccounts, useCreateTransaction, useDeleteTransaction, useHoldings, useUpdateTransaction } from "@/api/queries"
 import type { Account, Instrument, TradePreview, Transaction, TransactionInput, TransactionSource, TransactionType } from "@/api/types"
-import { useUi } from "@/app/ui-store"
+import { type TradePrefill, useUi } from "@/app/ui-store"
 import { RangeChips } from "@/components/charts/chart-kit"
 import { SourceTag } from "@/components/finance"
 import { Link } from "@tanstack/react-router"
@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
-import { formatMoney, formatQuantity, todayInTaipei } from "@/lib/format"
+import { defaultAccount } from "@/lib/default-account"
+import { formatMoney, formatQuantity } from "@/lib/format"
 import { TYPE_LABEL } from "@/lib/labels"
 import { autoEditNotice, isUnchangedEdit } from "@/lib/ledger-display"
 import { cn } from "@/lib/utils"
@@ -40,20 +41,21 @@ const CASH_TYPES: TransactionType[] = ["deposit", "withdrawal", "fee", "tax", "i
  * 預設是簡單的買進輸入（`QuickAdd`）；編輯一筆交易、或從那裡按「賣出、股利或其他」，才是完整表單。
  */
 export function TradeFormHost() {
-  const { open, symbol, edit, full, sell } = useUi((s) => s.tradeForm)
+  const { open, symbol, edit, full, sell, prefill } = useUi((s) => s.tradeForm)
   const openTradeForm = useUi((s) => s.openTradeForm)
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
   const quick = !edit && !full
   const title = edit ? "編輯交易" : quick ? "記一筆" : "記一筆交易"
   // 畫面上不寫副標；給螢幕報讀器一句
-  const description = quick ? "選一檔股票，填股數、買進日期與價格。" : "填數量與價格，試算手續費與稅，再儲存。"
+  const description = quick ? "選一檔股票，填股數、買進日期與價格。" : "賣出、股利與其他類型的交易。"
   const formKey = edit?.id ?? (quick ? "quick" : sell ? "sell" : "new")
   const body = (layout: "split" | "stack") =>
     quick ? (
-      <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code) => openTradeForm({ symbol: code ?? symbol, full: true })} sheet={layout === "stack"} />
+      // 「賣出、股利或其他」：買進之外最常見的是賣出，先選好；已經填的帳戶、第一筆的數量、價格、日期一起帶過去
+      <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code, filled) => openTradeForm({ symbol: code ?? symbol, full: true, sell: true, prefill: filled })} sheet={layout === "stack"} />
     ) : (
-      <TradeForm key={formKey} initialSymbol={symbol} edit={edit} sell={sell} onDone={close} layout={layout} />
+      <TradeForm key={formKey} initialSymbol={symbol} edit={edit} sell={sell} prefill={prefill} onDone={close} layout={layout} />
     )
 
   if (isDesktop) {
@@ -111,9 +113,24 @@ function useDebounced<T>(value: T, ms = 300): T {
   return v
 }
 
-function initialState(edit: Transaction | undefined, unitPref: "lot" | "share"): FormState {
+function initialState(edit: Transaction | undefined, unitPref: "lot" | "share", prefill?: TradePrefill): FormState {
   if (!edit) {
-    return { accountId: "", mainType: "buy", otherType: "deposit", symbol: null, date: todayInTaipei(), qtyText: "", qtyUnit: unitPref, priceText: "", amountText: "", dayTrade: false, note: "" }
+    const q = prefill?.quantity
+    // 帶過來的股數：偏好是張、而且剛好是整張才用張填（1 張 500 股寫成 1500 股，不寫 1.5）
+    const inLots = unitPref === "lot" && q != null && q % 1000 === 0
+    return {
+      accountId: prefill?.accountId ?? "",
+      mainType: prefill?.type ?? "buy",
+      otherType: "deposit",
+      symbol: null,
+      date: prefill?.date ?? appToday(),
+      qtyText: q != null ? String(inLots ? q / 1000 : q) : "",
+      qtyUnit: q != null ? (inLots ? "lot" : "share") : unitPref,
+      priceText: prefill?.price != null ? String(prefill.price) : "",
+      amountText: "",
+      dayTrade: false,
+      note: "",
+    }
   }
   const main: MainType = edit.type === "buy" || edit.type === "sell" || edit.type === "cash_dividend" ? edit.type : "other"
   return {
@@ -132,13 +149,14 @@ function initialState(edit: Transaction | undefined, unitPref: "lot" | "share"):
   }
 }
 
-export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initialSymbol?: string; edit?: Transaction; sell?: boolean; onDone: () => void; layout: "split" | "stack" }) {
+export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }: { initialSymbol?: string; edit?: Transaction; sell?: boolean; prefill?: TradePrefill; onDone: () => void; layout: "split" | "stack" }) {
   const accounts = useAccounts()
+  const holdings = useHoldings()
   const unitPref = usePrefs((s) => s.quantityUnit)
   const create = useCreateTransaction()
   const update = useUpdateTransaction()
   const remove = useDeleteTransaction()
-  const [f, setF] = useState<FormState>(() => ({ ...initialState(edit, unitPref), ...(sell && !edit ? { mainType: "sell" as const } : {}) }))
+  const [f, setF] = useState<FormState>(() => ({ ...initialState(edit, unitPref, prefill), ...(sell && !edit ? { mainType: "sell" as const } : {}) }))
   const [submitted, setSubmitted] = useState(false)
   // 連續記好幾筆（把現有的持股一筆一筆補進來）：存檔後表單留著，帳戶、類型、日期不動，其餘清空
   const [again, setAgain] = useState(false)
@@ -149,14 +167,14 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
   }, [round])
   const set = (patch: Partial<FormState>) => setF((s) => ({ ...s, ...patch }))
 
-  // 預先帶入的代號（帳戶未選時預設第一個）
+  // 預先帶入的代號（帳戶沒選過時：這一檔持有的帳戶 → 同幣別 → 第一個）
   const presetSymbol = edit?.symbol ?? initialSymbol
   useEffect(() => {
     if (!presetSymbol) return
     void api.getInstrument(presetSymbol).then((i) => setF((s) => (s.symbol ? s : { ...s, symbol: i })))
   }, [presetSymbol])
 
-  const accountId = f.accountId || accounts.data?.[0]?.id || ""
+  const accountId = f.accountId || defaultAccount(accounts.data, f.symbol, holdings.data)?.id || ""
   const account = accounts.data?.find((a) => a.id === accountId)
   const type: TransactionType = f.mainType === "other" ? f.otherType : f.mainType
   const isCash = CASH_TYPES.includes(type)
@@ -223,7 +241,7 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
             toast.success("已更新這筆交易", { description: <StampLine /> })
             onDone()
           },
-          onError: (err) => toast.error("更新失敗，表單內容仍保留", { description: err instanceof Error ? err.message : undefined }),
+          onError: (err) => toast.error("沒有存成功，內容還在。", { description: err instanceof Error ? err.message : undefined }),
         },
       )
       return
@@ -241,7 +259,7 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
             onClick: () =>
               void remove.mutateAsync(txn.id).then(
                 () => toast("已復原這筆交易"),
-                () => toast.error("復原失敗，請到交易紀錄手動刪除"),
+                () => toast.error("沒有復原成功。到「紀錄」刪掉這一筆。"),
               ),
           },
         })
@@ -253,7 +271,7 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
         }
         onDone()
       },
-      onError: (err) => toast.error("儲存失敗，表單內容仍保留", { description: err instanceof Error ? err.message : undefined }),
+      onError: (err) => toast.error("沒有存成功，內容還在。", { description: err instanceof Error ? err.message : undefined }),
     })
   }
 
@@ -269,13 +287,13 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
             onClick: () =>
               void create.mutateAsync(rest).then(
                 () => toast.success("已復原"),
-                (err: Error) => toast.error("復原失敗", { description: err.message }),
+                (err: Error) => toast.error("沒有復原成功。到「紀錄」再記一次。", { description: err.message }),
               ),
           },
         })
         onDone()
       },
-      onError: () => toast.error("刪除失敗，請稍後再試"),
+      onError: () => toast.error("沒有刪除成功。等一下再試一次。"),
     })
   }
   const busy = create.isPending || update.isPending
@@ -325,7 +343,7 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
             <AccountSelect accounts={accounts.data ?? []} value={accountId} onChange={(id) => set({ accountId: id })} />
           </Row>
           <Row label="日期" htmlFor="trade-date">
-            <Input id="trade-date" type="date" value={f.date} max={todayInTaipei()} onChange={(e) => set({ date: e.target.value })} />
+            <Input id="trade-date" type="date" value={f.date} max={appToday()} onChange={(e) => set({ date: e.target.value })} />
           </Row>
         </div>
 
@@ -354,7 +372,7 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
                   enterKeyHint="next"
                   value={f.qtyText}
                   onChange={(e) => set({ qtyText: e.target.value })}
-                  placeholder={f.qtyUnit === "lot" && !isUS ? "例如 1" : "例如 1000"}
+                  placeholder={f.qtyUnit === "lot" && !isUS ? "例如 1" : isUS ? "例如 10" : "例如 1000"}
                   aria-invalid={submitted && !!errors.qty}
                 />
                 {!isUS && (type === "buy" || type === "sell") && (

@@ -5,7 +5,7 @@ import { api, appToday } from "@/api"
 import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
 import { ApiError, type Instrument, type RecurringDraft, type TransactionInput } from "@/api/types"
 import { useUi } from "@/app/ui-store"
-import { formatDateShort, formatMoney, formatPrice, formatQuantity } from "@/lib/format"
+import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
 import { replacedAutoDividend } from "@/lib/ledger-display"
 import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
@@ -21,9 +21,9 @@ import type { Answer, Draft, DraftInstrument, Suggestion } from "./types"
 
 /** 「股利入帳」的提問：台股股利在除息日自動入帳，要記的是美股或更正金額 */
 export function dividendAsk(code?: string): string {
-  if (code && /^\d/.test(code)) return `${code} 的股利在除息日自動入帳。金額和存摺不一樣，就跟我說實際領到多少，例如「${code} 配息 1,100」。`
+  if (code && /^\d/.test(code)) return `${code} 的股利在除息日自動入帳。實拿的金額不一樣，打「${code} 配息 1,100」。`
   if (code) return `${code} 實際入帳多少？例如「${code} 配息 2.6」。`
-  return "台股股利在除息日自動入帳。美股股利跟我說哪一檔、實際入帳多少，例如「AAPL 配息 2.6」。"
+  return "美股的股利，打一句「AAPL 配息 2.6」就好。台股股利在除息日自動入帳。"
 }
 
 /** 常用動作（依頁面）：記一筆交易、股利入帳… */
@@ -52,13 +52,12 @@ export function recurringDraftCopy(
   const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
   const price = formatPrice(d.transaction.price, marketOf(d.transaction.symbol))
   const asOf = formatDateShort(d.price_as_of, false)
-  const estimate = d.is_demo
-    ? `${formatMoney(d.amount)} 以示範價格 ${price} 估算股數（不是真實行情，含零股），手續費另計`
-    : `${formatMoney(d.amount)} 以 ${asOf} 收盤價 ${price} 估算股數（含零股），手續費另計`
+  // 一句一件事；手續費已經算在合計裡（方向 B），不再寫「手續費另計」
+  const estimate = d.is_demo ? `股數用示範價格 ${price} 估算（不是真實行情）。` : `股數用 ${asOf} 收盤價 ${price} 估算。`
   const notes = [
     r.missed
-      ? `${estimate}；這是 ${formatDateShort(tradeDate, false)} 的扣款，請照券商對帳單改成實際成交的股數和價格。`
-      : `${estimate}；實際成交以券商對帳單為準。`,
+      ? `${estimate}這是 ${formatDateShort(tradeDate, false)} 的扣款。照對帳單改成實際的股數和價格。`
+      : `${estimate}實際成交以對帳單為準。`,
   ]
   const text = r.missed
     ? `${formatDateShort(tradeDate, false)} 是${inText(d.name)}定期定額的扣款日，帳本裡還沒有這一筆。`
@@ -96,7 +95,7 @@ export function useAiRunner(ctx: AiContext) {
       const p = await api.previewTransaction(input)
       patchDraft(draftId, { preview: p, status: "pending", error: undefined })
     } catch (err) {
-      patchDraft(draftId, { status: "error", error: err instanceof Error ? err.message : "稅費試算失敗" })
+      patchDraft(draftId, { status: "error", error: err instanceof Error ? err.message : "算不出手續費，這份草稿還不能簽名。" })
     }
   }
 
@@ -136,13 +135,12 @@ export function useAiRunner(ctx: AiContext) {
       input = { account_id: account.id, symbol: inst.symbol, type: intent.side, trade_date: intent.date ?? today, quantity: shares, price }
     } else {
       input = { account_id: account.id, symbol: inst.symbol, type: "cash_dividend", trade_date: intent.date ?? today, quantity: null, price: null, amount: intent.amount }
-      notes.push("股數用除息日前一天的持股。")
       // 台股股利已在除息日自動入帳時：簽名後以使用者記的這筆為準（自動那筆會移除，不會重複）
       if (!isUS) {
         try {
           const recent = await api.listTransactions({ account_id: account.id, symbol: inst.symbol, type: "cash_dividend", to: input.trade_date, limit: 20 })
           const auto = replacedAutoDividend(recent.items, input.trade_date)
-          if (auto) notes.push(`${formatDateShort(auto.trade_date, false)} 除息的股利已經自動入帳；簽名後改以這筆為準，不會重複計算。`)
+          if (auto) notes.push(`${formatDateShort(auto.trade_date, false)} 的股利已經自動入帳。簽名後以這筆為準。`)
         } catch {
           // 查不到既有紀錄不影響草稿
         }
@@ -150,7 +148,7 @@ export function useAiRunner(ctx: AiContext) {
     }
     const draft: Draft = { id: newId("dft"), status: "loading", input, instrument, notes, createdAt: new Date().toISOString() }
     upsertDraft(draft)
-    push({ role: "ai", text: intent.kind === "dividend" ? "草稿寫好了。" : DRAFT_SAYS, model: false, draftId: draft.id })
+    push({ role: "ai", text: intent.kind === "dividend" ? "實拿已扣稅與費用。" : DRAFT_SAYS, model: false, draftId: draft.id })
     await preview(draft.id, input)
     return true
   }
@@ -216,7 +214,7 @@ export function useAiRunner(ctx: AiContext) {
         await draftFrom(text)
         return
       }
-      const error = err instanceof ApiError ? { code: err.code, message: err.message } : { code: "network", message: "連不上伺服器，請稍後再試。" }
+      const error = err instanceof ApiError ? { code: err.code, message: err.message } : { code: "network", message: "連不上伺服器。等一下再送一次。" }
       updateMessage(aiId, (m) => ({ ...m, streaming: false, error }))
       if (err instanceof ApiError && err.status === 429) void qc.invalidateQueries({ queryKey: aiKeys.usage })
     }
@@ -254,7 +252,7 @@ export function useAiRunner(ctx: AiContext) {
       const report = await buildLocalDeepReport(text, { api, resolve: resolveInstrument, fallback: ctx.route === "stock" ? ctx.stock.symbol : null })
       push({ role: "ai", text: report.text, model: true, ...(report.citations.length ? { citations: report.citations } : {}) })
     } catch (err) {
-      say({ text: `這次沒有整理好：${err instanceof Error ? err.message : "請再試一次"}。` })
+      say({ text: err instanceof Error && err.message ? `這次沒有整理好。${err.message}` : "這次沒有整理好，再送一次。" })
     }
   }
 
@@ -277,7 +275,7 @@ export function useAiRunner(ctx: AiContext) {
       const a = kind ? answer(kind) : null
       reply(a ?? fallbackAnswer(text, ctx))
     } catch (err) {
-      reply({ text: `這次沒有處理好：${err instanceof Error ? err.message : "請再試一次"}。` })
+      reply({ text: err instanceof Error && err.message ? `這次沒有處理好。${err.message}` : "這次沒有處理好，再送一次。" })
     }
   }
 
@@ -340,6 +338,7 @@ export function useAiRunner(ctx: AiContext) {
         say({
           text: `買賣了什麼？例如「${opts.code ? `買 ${opts.code} 1 張` : "買 0050 2 張 52.4"}」。`,
           links: [{ label: "改用表單填", to: "#trade-form" }],
+          instruction: true,
         })
         seedComposer(opts.code ? `買 ${opts.code} ` : "買 ")
         return
@@ -353,6 +352,7 @@ export function useAiRunner(ctx: AiContext) {
         say({
           text: dividendAsk(opts.code),
           followUps: follow.slice(0, 2),
+          instruction: true,
         })
         seedComposer(opts.code ? `${opts.code} 配息 ` : "")
         return
@@ -385,8 +385,8 @@ export function useAiRunner(ctx: AiContext) {
         action: { label: "復原", onClick: () => void undo(id) },
       })
     } catch (err) {
-      patchDraft(id, { status: "error", error: err instanceof Error ? err.message : "入帳失敗" })
-      toast.error("沒有入帳", { description: err instanceof Error ? err.message : "請再試一次" })
+      patchDraft(id, { status: "error", error: err instanceof Error ? err.message : "沒有入帳" })
+      toast.error("沒有入帳，草稿還在。", { description: err instanceof Error ? err.message : undefined })
     }
   }
 
@@ -401,7 +401,7 @@ export function useAiRunner(ctx: AiContext) {
       void qc.invalidateQueries({ queryKey: ["transactions"] })
       toast("已復原，草稿還在等你簽名")
     } catch (err) {
-      toast.error("復原失敗", { description: err instanceof Error ? err.message : "請到交易紀錄手動刪除" })
+      toast.error("沒有復原成功。到「紀錄」刪掉這一筆。", { description: err instanceof Error ? err.message : undefined })
     }
   }
 

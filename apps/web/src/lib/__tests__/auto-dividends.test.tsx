@@ -9,7 +9,7 @@ import { autoEditNotice, isUnchangedEdit, replacedAutoDividend } from "@/lib/led
 const txn = (p: Partial<Transaction>): Transaction => ({
   id: "txn_1", account_id: "acc_1", symbol: "2330.TW", type: "cash_dividend", trade_date: "2026-09-16", quantity: 1500, price: 5,
   amount: 7500, fee: 0, tax: 0, health_insurance: 0, currency: "TWD", is_day_trade: false,
-  note: "除息前一日持有 1,500 股 × 每股現金股利 5 元；發放日 2026-10-09", source: "auto", created_at: "2026-09-16T18:00:00+08:00", ...p,
+  note: "1,500 股 × 每股 5 元，10/09 發放", source: "auto", created_at: "2026-09-16T18:00:00+08:00", ...p,
 })
 
 describe("交易來源標示", () => {

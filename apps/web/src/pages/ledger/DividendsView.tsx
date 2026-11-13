@@ -3,9 +3,9 @@ import { Link } from "@tanstack/react-router"
 import { useMemo } from "react"
 import { PlainLink } from "@/app/links"
 import { appToday } from "@/api"
-import { listTransactionsUpTo, useSummary, useUpcoming } from "@/api/queries"
+import { listTransactionsUpTo, useHoldings, useSummary, useUpcoming } from "@/api/queries"
 import type { Transaction } from "@/api/types"
-import { useAskAi } from "@/ai/use-ask"
+import { useUi } from "@/app/ui-store"
 import { Masked, SourceTag } from "@/components/finance"
 import { Section } from "@/components/section"
 import { EmptyState, ErrorState } from "@/components/states"
@@ -24,7 +24,9 @@ const STRETCH = "after:absolute after:inset-0 after:content-[''] focus-visible:o
 
 /** 股利：接下來（除息、入帳、定期定額扣款）＋已入帳（依年份，已扣二代健保）。定期定額的計畫在設定頁管理 */
 export function DividendsView() {
-  const ask = useAskAi()
+  const openTradeForm = useUi((s) => s.openTradeForm)
+  // 台股股利在除息日自動入帳：只有美股要自己記。沒有美股就不放按鈕（2026-11-14 第七次評分）
+  const usHeld = (useHoldings().data ?? []).filter((h) => h.market === "US")
   const readOnly = useReadOnly()
   const you = useWho("你")
   const summary = useSummary()
@@ -64,9 +66,21 @@ export function DividendsView() {
         title="接下來"
         titleId="div-next"
         action={
-          readOnly ? undefined : (
-            <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => ask.action("dividend")}>
-              股利入帳
+          readOnly || usHeld.length === 0 ? undefined : (
+            // 直接開完整表單、類型選「股利」（只有一檔美股時先選好），不產生對話
+            <Button
+              variant="outline"
+              size="sm"
+              className="pointer-coarse:h-11"
+              onClick={() =>
+                openTradeForm({
+                  symbol: usHeld.length === 1 ? usHeld[0]!.code : undefined,
+                  full: true,
+                  prefill: { type: "cash_dividend", accountId: usHeld.length === 1 ? usHeld[0]!.account_ids[0] : undefined },
+                })
+              }
+            >
+              美股股利入帳
             </Button>
           )
         }

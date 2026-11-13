@@ -3,12 +3,14 @@ import { XIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
-import { useAccounts, useCreateTransaction, useDeleteTransaction, useQuote } from "@/api/queries"
+import { useAccounts, useCreateTransaction, useDeleteTransaction, useHoldings, useQuote } from "@/api/queries"
 import type { Instrument, TransactionInput } from "@/api/types"
+import type { TradePrefill } from "@/app/ui-store"
 import { FieldError, FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { defaultAccount } from "@/lib/default-account"
 import { formatPrice, formatQuantity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
@@ -38,8 +40,9 @@ const num = (s: string): number | null => {
   return s.trim() === "" || Number.isNaN(n) ? null : n
 }
 
-export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { initialSymbol?: string; onDone: () => void; onFull: (symbol?: string) => void; sheet?: boolean }) {
+export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { initialSymbol?: string; onDone: () => void; onFull: (symbol?: string, prefill?: TradePrefill) => void; sheet?: boolean }) {
   const accounts = useAccounts()
+  const holdings = useHoldings()
   const create = useCreateTransaction()
   const remove = useDeleteTransaction()
   const unitPref = usePrefs((s) => s.quantityUnit)
@@ -69,7 +72,8 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
     }
   }, [initialSymbol])
 
-  const account = accounts.data?.find((a) => a.id === accountId) ?? accounts.data?.[0]
+  // 帳戶沒動過時跟著股票走：這一檔持有的帳戶 → 同幣別 → 第一個（Apple 不會記進新台幣帳戶）
+  const account = accounts.data?.find((a) => a.id === accountId) ?? defaultAccount(accounts.data, symbol, holdings.data)
   const quote = useQuote(symbol?.symbol ?? "", !!symbol)
   const isUS = symbol?.market === "US" || account?.currency === "USD"
   const inLots = unitPref === "lot" && !isUS
@@ -143,6 +147,19 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
   }
 
   const qtyLabel = inLots ? "張數" : "股數"
+  // 完整表單：帳戶與第一筆已經填的數量、價格、日期一起帶過去
+  const toFull = (
+    <button
+      type="button"
+      onClick={() => {
+        const first = lots[0]
+        onFull(symbol?.code, { accountId: account?.id, quantity: (first && shares(first)) || undefined, price: (first && num(first.price)) || undefined, date: first?.date })
+      }}
+      className="inline-flex min-h-9 items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
+    >
+      賣出、股利或其他
+    </button>
+  )
   return (
     <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className={cn("flex flex-col gap-4 px-4 sm:px-6", sheet ? "pb-0" : "pb-4 sm:pb-6")}>
       {(accounts.data?.length ?? 0) > 1 && (
@@ -225,22 +242,22 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
         })}
       </div>
 
-      {lots.length < MAX_LOTS && (
-        <button type="button" onClick={addLot} className="inline-flex min-h-9 items-center self-start text-base underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11">
-          再加一筆買進
-        </button>
+      {(lots.length < MAX_LOTS || sheet) && (
+        <div className="flex flex-wrap items-center justify-between gap-x-4">
+          {lots.length < MAX_LOTS && (
+            <button type="button" onClick={addLot} className="inline-flex min-h-9 items-center text-base underline decoration-ctl underline-offset-3 hover:decoration-ink pointer-coarse:min-h-11">
+              再加一筆買進
+            </button>
+          )}
+          {/* 手機：放在捲動區裡，固定的動作列只留取消／新增一行（鍵盤打開時欄位才看得到） */}
+          {sheet && toFull}
+        </div>
       )}
 
       {/* 手機抽屜：動作列貼在捲動區的底部（一條格線，不加陰影），再加幾筆也看得到「新增」 */}
       <div className={cn("flex flex-wrap items-center gap-x-4 gap-y-3 pt-1", sheet && "safe-bottom sticky bottom-0 z-10 -mx-4 border-t border-rule bg-popover px-4 py-3 sm:-mx-6 sm:px-6")}>
-        <button
-          type="button"
-          onClick={() => onFull(symbol?.code)}
-          className="mr-auto inline-flex min-h-9 items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
-        >
-          賣出、股利或其他
-        </button>
-        <div className="flex gap-2 max-sm:w-full">
+        {!sheet && toFull}
+        <div className={cn("flex gap-2 max-sm:w-full", !sheet && "ml-auto")}>
           <Button type="button" variant="outline" className="max-sm:flex-1 sm:min-w-24" onClick={onDone}>
             取消
           </Button>
