@@ -4,7 +4,7 @@ import { PlainLink } from "@/app/links"
 import { useUi } from "@/app/ui-store"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
+import { cleanAnswer, DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
 import { useAiUsage } from "./remote-hooks"
 import { DraftCard } from "./DraftCard"
 import { textLink } from "./Home"
@@ -79,7 +79,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
             <span className="sr-only">AI：</span>
             {m.text &&
               ((m.model ?? !!thread.remoteId) ? (
-                <AiText text={stripDisclaimer(m.text, m.disclaimer ?? fallbackDisclaimer)} ungrounded={m.ungrounded} size={size} />
+                <AiText text={stripDisclaimer(cleanAnswer(m.text), m.disclaimer ?? fallbackDisclaimer)} ungrounded={m.ungrounded} size={size} />
               ) : (
                 <RuleText text={m.text} size={size} />
               ))}

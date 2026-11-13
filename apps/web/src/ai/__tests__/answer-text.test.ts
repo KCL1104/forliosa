@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { DISCLAIMER, groundingReason, parseGrounding, splitUngrounded, stripDisclaimer } from "@/ai/answer-text"
+import { cleanAnswer, DISCLAIMER, groundingReason, parseGrounding, splitUngrounded, stripDisclaimer } from "@/ai/answer-text"
 import { applyChatEvent } from "@/ai/remote"
 import type { Message } from "@/ai/types"
 
@@ -85,5 +85,33 @@ describe("串流 reducer：grounding 與 done.disclaimer", () => {
     expect(done).toMatchObject({ streaming: false, disclaimer: "AI 回答僅供參考。" })
     const noText = applyChatEvent(base, { event: "done", data: { thread_id: "t", turn_id: "u", model: "m", stop_reason: "end_turn", usage } })
     expect(noText.disclaimer).toBeUndefined()
+  })
+})
+
+describe("cleanAnswer：模型寫出 Markdown 符號時，畫面上不出現那些符號", () => {
+  it("粗體、底線、反引號的記號拿掉，字留著", () => {
+    expect(cleanAnswer("**結論：持股集中在半導體。** 台積電占 35.7%")).toBe("結論：持股集中在半導體。 台積電占 35.7%")
+    expect(cleanAnswer("__前三大__合計 `72.6%`")).toBe("前三大合計 72.6%")
+  })
+
+  it("行首的標題記號拿掉；- 與 * 條列換成「・」，已經是「・」的不重複", () => {
+    expect(cleanAnswer("## 重點\n- 台積電 35.7%\n* 鴻海 21.9%\n・0050 15.0%\n• 環球晶")).toBe("重點\n・台積電 35.7%\n・鴻海 21.9%\n・0050 15.0%\n・環球晶")
+    expect(cleanAnswer("・**單一個股：** 台積電 35.7%")).toBe("・單一個股： 台積電 35.7%")
+  })
+
+  it("串流到一半（後半的記號還沒到）也不露出星號", () => {
+    expect(cleanAnswer("**結論：持股集")).toBe("結論：持股集")
+  })
+
+  it("[文字](網址) 只留文字；一般的字、負號、乘號與 ▲▼ 不動", () => {
+    expect(cleanAnswer("詳見[證交所公告](https://www.twse.com.tw/x)。")).toBe("詳見證交所公告。")
+    const plain = "今天賠，帳上市值下跌 80,062 元（▼1.44%）。\n均價 692.61 × 1,500 股；-3.5% 到 +2.1%"
+    expect(cleanAnswer(plain)).toBe(plain)
+  })
+
+  it("標出「無來源」的段落：回答清過符號之後仍然對得上", () => {
+    const raw = "・**除息：** 006208 已公告 11/17 除息。\n其他內容"
+    const segments = splitUngrounded(cleanAnswer(raw), [{ text: "・**除息：** 006208 已公告 11/17 除息。", reason: "uncited_news_claim" }])
+    expect(segments.find((x) => x.ungrounded)?.text).toBe("・除息： 006208 已公告 11/17 除息。")
   })
 })

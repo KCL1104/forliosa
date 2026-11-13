@@ -31,6 +31,22 @@ export function stripDisclaimer(text: string, disclaimer: string = DISCLAIMER): 
   return out.join("\n").replace(/\s+$/, "")
 }
 
+/**
+ * 畫面只顯示純文字，模型偶爾還是會寫出 Markdown 符號（`**粗體**`、`# 標題`、反引號、`- ` 條列）：這些符號原樣出現在回答裡很難看，
+ * 顯示前先清掉——粗體與底線的記號、行首的 `#`、反引號直接拿掉（字留著），行首的 `-`／`*`／`•` 條列換成「・」。
+ * 一個一個符號清（不要求成對），所以串流到一半、後半的 `**` 還沒到時也不會閃一下星號。
+ * `[文字](網址)` 只留文字（來源由畫面另外列）。數字裡的 `*`（乘號）前後是數字或空白，不會被當成粗體。
+ */
+export function cleanAnswer(text: string): string {
+  return text
+    .replace(/\[([^\]\n]+)\]\((?:https?:\/\/|\/)[^)\s]*\)/g, "$1")
+    .replace(/\*\*|__/g, "")
+    .replace(/`+/g, "")
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
+    .replace(/^([ \t]*)[-*•][ \t]+/gm, "$1・")
+    .replace(/^([ \t]*)・[ \t]*・[ \t]*/gm, "$1・")
+}
+
 /** 沒有附來源的段落（`grounding` 事件的一項；後端欄位以 text 為主，start／end 是選填的字元位置） */
 export interface UngroundedPassage {
   text: string
@@ -53,7 +69,8 @@ export function splitUngrounded(text: string, passages: UngroundedPassage[] | un
   if (!passages?.length || !text) return [{ text }]
   const spans: { start: number; end: number; p: UngroundedPassage }[] = []
   for (const p of passages) {
-    const needle = (p.text ?? "").trim()
+    // 回答顯示前清過 Markdown 符號（`cleanAnswer`）：要找的那一段也清一次才對得上
+    const needle = cleanAnswer(p.text ?? "").trim()
     if (!needle) continue
     let start = -1
     if (typeof p.start === "number" && typeof p.end === "number" && p.end > p.start && text.slice(p.start, p.end).trim() === needle) {
