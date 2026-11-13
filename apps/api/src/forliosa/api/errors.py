@@ -90,4 +90,4 @@ def install_error_handlers(app: FastAPI) -> None:
     @app.exception_handler(Exception)
     async def _unhandled(_req: Request, exc: Exception):  # pragma: no cover - safety net
         log.exception("unhandled error: %s", exc)
-        return JSONResponse(error_body("internal_error", "伺服器發生錯誤，請稍後再試"), status_code=500)
+        return JSONResponse(error_body("internal_error", "伺服器出了問題，等一下再試一次。"), status_code=500)

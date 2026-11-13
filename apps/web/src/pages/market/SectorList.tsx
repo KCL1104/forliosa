@@ -20,7 +20,7 @@ export function SectorList({ sectors }: { sectors: NonNullable<MarketOverview["s
   const max = Math.max(...items.map((s) => Math.abs(s.change_pct)), 0.0001)
   const collapsible = items.length > HEAD * 2 + 1
   return (
-    <Section title="類股" titleId="market-sectors" aside={<span className="num">{formatDateShort(sectors.date, false)}・漲跌幅由高到低</span>} bodyClassName="pt-0">
+    <Section title="類股" titleId="market-sectors" aside={<span className="num">{formatDateShort(sectors.date, false)}</span>} bodyClassName="pt-0">
       <ul className="@2xl:columns-2 @2xl:gap-x-10 @5xl:columns-3">
         {items.map((s, n) => {
           const middle = collapsible && n >= HEAD && n < items.length - HEAD

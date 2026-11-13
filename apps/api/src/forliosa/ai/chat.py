@@ -80,17 +80,17 @@ log = logging.getLogger(__name__)
 
 Event = tuple[str, dict[str, Any]]
 
-REFUSAL_MESSAGE = "這個問題我沒辦法回答。可以換個方式問，或問問你的持股與個股資料。"
+REFUSAL_MESSAGE = "這題沒辦法回答。換個問法，或問你的持股和個股。"
 _ERRORS = {
-    "ai_busy": "AI 服務目前忙碌，請稍後再試。",
-    "ai_unavailable": "AI 服務暫時無法使用。",
-    "ai_unreachable": "暫時連不上 AI 服務，請稍後再試。",
-    "ai_error": "這次沒有成功，請再試一次；如果一直失敗，請開新對話。",
-    "too_many_steps": "這個問題需要查太多資料了，請把問題拆小一點再問。",
-    "max_tokens": "回答太長被截斷了，請把問題拆小一點再問。",
+    "ai_busy": "AI 現在很忙，等一下再送一次。",
+    "ai_unavailable": "AI 暫時不能用，晚一點再試。",
+    "ai_unreachable": "連不上 AI，等一下再送一次。",
+    "ai_error": "這次沒有回答完，再送一次。一直失敗的話，開一段新對話。",
+    "too_many_steps": "這題要查的資料太多。拆成幾個小問題再問。",
+    "max_tokens": "回答太長，被截斷了。拆成幾個小問題再問。",
     "truncated": "回答太長，後面的部分沒有顯示。",
     "interrupted": "回覆中斷了。",
-    "internal_error": "發生錯誤，請稍後再試。",
+    "internal_error": "伺服器出了問題，這題沒有回答。等一下再送一次。",
 }
 WEB_TOOLS = ("web_search", "web_fetch")
 _THINKING_REJECTED = re.compile(r"bound to a different conversation|invalid `?signature`? in `?thinking`? block",

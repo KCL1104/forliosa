@@ -77,9 +77,9 @@ describe("帳本的「記一筆」", () => {
     const form = within(dialog)
     await waitFor(() => expect(form.getByText("台積電")).toBeInTheDocument(), T)
     const before = (await api.listTransactions({ limit: 200 })).items.length
-    // 沒填就按新增：說哪一格要填，不送出
+    // 沒填就按新增：說哪一格要填（照欄位的單位：預設以張填），不送出
     await userEvent.click(form.getByRole("button", { name: "新增" }))
-    expect(form.getByText("請輸入股數")).toBeInTheDocument()
+    expect(form.getByText("請輸入張數")).toBeInTheDocument()
     expect(form.getByText("請輸入價格")).toBeInTheDocument()
 
     const first = dialog.querySelector<HTMLInputElement>("#lot-qty-0")!

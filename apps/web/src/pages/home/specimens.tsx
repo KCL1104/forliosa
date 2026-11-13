@@ -190,7 +190,7 @@ function Item({ label, value }: { label: string; value: React.ReactNode }) {
 }
 
 // -- 問 AI -------------------------------------------------------------------------------------------
-/** 問 AI：使用者打的一句話 → 算好稅費的草稿卡（石墨灰虛線）→ 簽名格 */
+/** 問 AI：使用者打的一句話 → 草稿卡（石墨灰虛線；稅費算在合計裡）→ 簽名格 */
 export function DraftSpecimen() {
   return (
     <div className="flex flex-1 flex-col">

@@ -90,9 +90,14 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 - **Google 登入**（2026-11-13 晚上）：`/auth/google/start`、`/callback`，和 Discord 同一套帳號對應（同一個已驗證 Email 是同一個帳號）；登入頁兩顆一樣重的按鈕。設定與 Google Cloud Console 的步驟在 `docs/deploy.md` 2.4.1；實作細節在 `apps/api/CONTRACT_NOTES.md` 最後一節。三個 `GOOGLE_*` 沒設齊只是不出現，不會讓 API 起不來。
 - Railway 上沒在用的舊服務（`SearXNG`、`Redis`）與多餘的 volume 已刪除；現在只有 `Postgres`、`api`、`worker`、`searxng-news`。
 
+### 2.5 第六次評分（2026-11-14；Impeccable 31／40＋taste-skill）
+
+- 兩份報告同一天、看同一個 build（scratchpad，不進 git）。**Impeccable 31／40**（上一輪 34）：扣分幾乎都來自這一輪新做的「記一筆／減少持股」。**taste-skill**（沒有分數，用它的 14 項檢查表各給 1–10）：一致性 9、不加圖說 9，最低是「每個視覺都畫得出來」6（績效分段在示範帳本是空的）；高 3、中 6、低 8 個問題。
+- 已修：記一筆新增後帳本馬上更新（走 `useCreateTransaction`）；手機所有輸入框 16px（`pointer-coarse:text-[1rem]`；寫在 base 會被 utility 蓋掉）；張數換股數四捨五入、最多小數第三位；手機抽屜的「新增」黏在底部、第二筆起有提示字；打開時焦點在股票搜尋；「全部賣出」有自己的標題與按鈕；個股頁麵包屑旁有「減少持股」；績效預設看台幣帳戶；市場頁是安靜的頁面（AI 欄預設窄欄）；隱私權政策 320 寬不再溢出；`/history` 改名「對話紀錄」、按鈕統一叫「新對話」；收盤簡報在帳本旁不重複左邊的數字；來源列抽成 `CitedSources`；深色的空送出鈕、深度搜尋切換鈕的框；約 30 句固定文案（AI 婉拒句、錯誤訊息、規則版回答、市場頁標註）。
+- 等產品負責人決定：介紹頁第三欄（現在是「問 AI」的一句話記帳；Impeccable 建議改畫「記一筆」的表單，taste-skill 建議維持）。
+
 ## 3. 接下來可以做
 
-0. 第六次設計評分（Impeccable＋taste-skill，2026-11-14）的報告在 scratchpad，修正後的結果記在 §2。
 1. 產品負責人回覆 `docs/pending-decisions.md` 之後照決定實作。影響最大的五件：美股價格來源、「只記持股」帳戶的輸入畫面、券商對帳單樣本（M3 匯入）、部署前要建立的帳號（Discord 應用程式等，`docs/deploy.md`）、隱私權政策與服務條款。
 2. ~~討論串的頁面還沒有經過 Impeccable 評分~~（第四、第五次評分已涵蓋）。上線後的待辦在 `docs/pending-decisions.md` 最後一節（備份、Cloudflare Web Analytics、舊服務、法律文件待填的項目）。
 3. 財報狗式的 AI 產業新聞摘要（產品負責人說之後再做）。

@@ -998,7 +998,7 @@ describe("手機：底部列是 帳本・市場・群組・討論；AI 對話紀
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), T)
     const title = await screen.findByRole("heading", { level: 1, name: "對話紀錄" }, T)
     expect(title.closest("[class*='sr-only']")).toBeNull()
-    expect(await screen.findByRole("button", { name: "發起新對話" }, T)).toBeInTheDocument()
+    expect(await within(screen.getByRole("main")).findByRole("button", { name: "新對話" }, T)).toBeInTheDocument()
   })
 
   it("桌面：頂部列是 帳本・市場・群組・討論", async () => {

@@ -238,7 +238,7 @@ def request(db: Session, user: User, md: MarketData, symbol: str, *, pool: KeyPo
     if not pool.available:
         raise ApiError(503, "ai_unavailable", "AI 功能尚未設定（沒有可用的 API 金鑰）")
     if not pool.ranked(store.slot_month_costs(db)):
-        raise ApiError(503, "ai_unavailable", "AI 服務暫時無法使用（API 額度已用完），請稍後再試。")
+        raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
     store.check_quota(db, user, settings)
 
     day, gen = trading_day(now), new_id("anv")

@@ -1,6 +1,7 @@
-import type { MarketSummary, MarketSummarySource } from "@/api/types"
+import type { MarketSummary } from "@/api/types"
 import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
+import { CitedSources } from "@/components/cited-sources"
 import { Section } from "@/components/section"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -23,7 +24,7 @@ export function SummaryBlock({ summary }: { summary: MarketSummary }) {
             <p className={cn("ai-voice", kaiSize.page)}>
               <KaiText text={p.text} />
             </p>
-            <SourceLine sources={p.sources} />
+            <CitedSources sources={p.sources} />
           </li>
         ))}
       </ul>
@@ -33,38 +34,3 @@ export function SummaryBlock({ summary }: { summary: MarketSummary }) {
 }
 
 /** 這一點依據的報導：媒體名稱（同一家只列一次），13px 淡墨、常駐底線；連到原文、另開視窗 */
-function SourceLine({ sources }: { sources: MarketSummarySource[] }) {
-  const seen = new Set<string>()
-  const unique = sources.filter((s) => {
-    const key = s.outlet || hostOf(s.url)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-  if (unique.length === 0) return null
-  return (
-    <p className="mt-1 flex flex-wrap items-center gap-x-3 text-sm text-ink-2">
-      {unique.map((s) => (
-        <a
-          key={s.url}
-          href={s.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={s.title || undefined}
-          className="inline-flex items-center underline decoration-ctl decoration-1 underline-offset-4 transition-[text-decoration-color,color] hover:text-ink hover:decoration-ink pointer-coarse:min-h-11 pointer-coarse:min-w-11"
-        >
-          {s.outlet || hostOf(s.url)}
-          <span className="sr-only">：{s.title}（另開新視窗）</span>
-        </a>
-      ))}
-    </p>
-  )
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "")
-  } catch {
-    return "來源"
-  }
-}

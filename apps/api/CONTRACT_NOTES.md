@@ -1974,7 +1974,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 產品負責人看了 Google 財經的「深度搜尋」後同意做；額度由 Claude 定：一次算 5 題。只對送出的那一題有效，不是對話的狀態。
 
-- **請求**：`ChatIn.mode` 選填，只收 `"deep"`（其他值 422）。這個環境沒開網路搜尋（`AI_WEB_SEARCH=false`）時回 503 `ai_unavailable`「這個環境沒有開網路搜尋，不能用深度搜尋。」，`/ai/usage.deep_search_cost` 是 `null`，前端不放切換鈕。
+- **請求**：`ChatIn.mode` 選填，只收 `"deep"`（其他值 422）。這個環境沒開網路搜尋（`AI_WEB_SEARCH=false`）時回 503 `ai_unavailable`「現在不能用深度搜尋。」，`/ai/usage.deep_search_cost` 是 `null`，前端不放切換鈕。
 - **和一般的一輪差在哪**（`ai/chat.py`）：
   - `web_search` 的 `max_uses` 從 `AI_WEB_SEARCH_MAX_USES`（3）提高到 `AI_DEEP_SEARCH_MAX_USES`（12）。工具清單其他部分完全一樣。
   - 迴圈上限從 `AI_MAX_TOOL_ROUNDS`（8）提高到 `AI_DEEP_MAX_TOOL_ROUNDS`（16）：多搜尋幾次時伺服器工具會回 `pause_turn`，每次續傳算一輪。

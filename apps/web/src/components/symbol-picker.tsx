@@ -55,7 +55,7 @@ export function SymbolPicker({
         aria-invalid={invalid}
         aria-controls={listId}
         className={cn(
-          "h-10 w-full rounded-md border border-input bg-raised px-3 text-base outline-none pointer-coarse:h-11 placeholder:text-ink-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-md pointer-coarse:text-base",
+          "h-10 w-full rounded-md border border-input bg-raised px-3 text-base outline-none pointer-coarse:text-[1rem] pointer-coarse:h-11 placeholder:text-ink-2 focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-md pointer-coarse:text-base",
           invalid && "border-destructive",
         )}
         autoComplete="off"

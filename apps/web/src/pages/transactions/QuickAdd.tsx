@@ -3,7 +3,7 @@ import { XIcon } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
-import { useAccounts, useDeleteTransaction, useQuote } from "@/api/queries"
+import { useAccounts, useCreateTransaction, useDeleteTransaction, useQuote } from "@/api/queries"
 import type { Instrument, TransactionInput } from "@/api/types"
 import { FieldError, FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
@@ -28,6 +28,11 @@ interface Lot {
 }
 
 const MAX_LOTS = 12
+/** 台股的數量太細：以張填時最多小數第三位（1 股），以股填時要是整數 */
+const tooFine = (text: string, inLots: boolean): boolean => {
+  const t = text.replace(/[,\s]/g, "")
+  return inLots ? /\.\d{4,}$/.test(t) : /\.\d*[1-9]\d*$/.test(t)
+}
 const num = (s: string): number | null => {
   const n = Number(s.replace(/[,\s]/g, ""))
   return s.trim() === "" || Number.isNaN(n) ? null : n
@@ -35,6 +40,7 @@ const num = (s: string): number | null => {
 
 export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { initialSymbol?: string; onDone: () => void; onFull: (symbol?: string) => void; sheet?: boolean }) {
   const accounts = useAccounts()
+  const create = useCreateTransaction()
   const remove = useDeleteTransaction()
   const unitPref = usePrefs((s) => s.quantityUnit)
   const nextId = useRef(1)
@@ -44,6 +50,15 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
   const [lots, setLots] = useState<Lot[]>(() => [{ id: 0, qty: "", date: appToday(), price: "" }])
   const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
+
+  // 打開時焦點放在股票搜尋（Google 財經也是先選股票）；從個股頁帶入那一檔時放在數量
+  useEffect(() => {
+    const t = window.setTimeout(() => {
+      const target = formRef.current?.querySelector<HTMLInputElement>(initialSymbol ? "#lot-qty-0" : "[cmdk-input]")
+      target?.focus({ preventScroll: true })
+    }, 80)
+    return () => window.clearTimeout(t)
+  }, [initialSymbol])
 
   useEffect(() => {
     if (!initialSymbol) return
@@ -60,13 +75,14 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
   const inLots = unitPref === "lot" && !isUS
   const shares = (l: Lot) => {
     const q = num(l.qty)
-    return q === null ? null : inLots ? q * 1000 : q
+    // 張換股取整：2.006 × 1000 在浮點數是 2005.9999…，不取整會被說「不是整數」
+    return q === null ? null : inLots ? Math.round(q * 1000) : q
   }
   const errorOf = (l: Lot) => {
     const s = shares(l)
     const p = num(l.price)
     return {
-      qty: !s || s <= 0 ? "請輸入股數" : !isUS && !Number.isInteger(s) ? "台股股數必須是整數" : null,
+      qty: !s || s <= 0 ? `請輸入${inLots ? "張數" : "股數"}` : !isUS && tooFine(l.qty, inLots) ? (inLots ? "張數最多寫到小數第三位（1 股）" : "台股股數必須是整數") : null,
       price: !p || p <= 0 ? "請輸入價格" : null,
     }
   }
@@ -94,11 +110,12 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
     try {
       for (const l of lots) {
         const body: TransactionInput = { account_id: account.id, symbol: symbol.symbol, type: "buy", trade_date: l.date, quantity: shares(l), price: num(l.price), note: "" }
-        created.push((await api.createTransaction(body)).id)
+        // 走 useCreateTransaction：存好之後持股、總資產、交易清單會重抓（直接呼叫 api 的話帳本不會動，2026-11-14 評分）
+        created.push((await create.mutateAsync(body)).id)
         total += shares(l) ?? 0
       }
     } catch (err) {
-      toast.error(created.length ? `只記了 ${created.length} 筆，其餘沒有存成功` : "儲存失敗，內容仍保留", { description: err instanceof Error ? err.message : undefined })
+      toast.error(created.length ? `只記了 ${created.length} 筆，其餘沒有存成功，內容還在。` : "沒有存成功，內容還在。", { description: err instanceof Error ? err.message : undefined })
       // 已經存進去的那幾列拿掉，留下還沒存的，改完可以再按一次
       setLots((ls) => ls.slice(created.length))
       setBusy(false)
@@ -111,7 +128,7 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
         onClick: () =>
           void Promise.all(created.map((id) => remove.mutateAsync(id))).then(
             () => toast(created.length > 1 ? "已復原這幾筆交易" : "已復原這筆交易"),
-            () => toast.error("復原失敗，請到交易紀錄手動刪除"),
+            () => toast.error("沒有復原成功。到「紀錄」刪掉這幾筆。"),
           ),
       },
     })
@@ -165,7 +182,8 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
                   inputMode="decimal"
                   autoComplete="off"
                   aria-label={`${nth}${qtyLabel}`}
-                  placeholder={inLots ? "例如 1" : "例如 1000"}
+                  // 第二筆起沒有看得見的標籤（捲動後第一列的標籤也不在畫面上）：提示字直接寫欄位名稱
+                  placeholder={i === 0 ? (inLots ? "例如 1" : "例如 1000") : qtyLabel}
                   value={l.qty}
                   onChange={(e) => setLot(l.id, { qty: e.target.value })}
                   aria-invalid={!!err.qty}

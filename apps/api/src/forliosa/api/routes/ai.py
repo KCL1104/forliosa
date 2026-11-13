@@ -53,10 +53,10 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     if not pool.available:
         raise ApiError(503, "ai_unavailable", "AI 功能尚未設定（沒有可用的 API 金鑰）")
     if not pool.ranked(store.slot_month_costs(db)):
-        raise ApiError(503, "ai_unavailable", "AI 服務暫時無法使用（API 額度已用完），請稍後再試。")
+        raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
     deep = body.mode == "deep"
     if deep and not settings.ai_web_search:
-        raise ApiError(503, "ai_unavailable", "這個環境沒有開網路搜尋，不能用深度搜尋。")
+        raise ApiError(503, "ai_unavailable", "現在不能用深度搜尋。")
     store.check_quota(db, user, settings, cost=settings.ai_deep_search_cost if deep else 1)
     if body.thread_id:
         thread = store.owned_thread(db, user, body.thread_id)

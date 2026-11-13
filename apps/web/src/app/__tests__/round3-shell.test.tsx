@@ -75,12 +75,13 @@ describe("導覽設定（nav.ts）：一個地方", () => {
     for (const p of ["/", "/groups", "/admin/discussions", "/discussionsx"]) expect(discussions.match(p)).toBe(false)
   })
 
-  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、站方管理、設定、紀錄、資料來源、條款與隱私權政策；帳本與個股頁不是", () => {
-    expect([...QUIET_ROUTES]).toEqual(["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy"])
+  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、站方管理、設定、對話紀錄、資料來源、條款與隱私權政策、市場；帳本與個股頁不是", () => {
+    expect([...QUIET_ROUTES]).toEqual(["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy", "/market"])
+    expect(isQuietRoute("/market")).toBe(true)
     for (const p of ["/terms", "/privacy"]) expect(isQuietRoute(p)).toBe(true)
     expect(isQuietRoute("/termsx")).toBe(false)
     for (const p of ["/groups", "/groups/grp_family", "/groups/grp_family/members/usr_dad", "/discussions", "/discussions/new", "/discussions/top_p_tsmc", "/admin/discussions", "/settings", "/history", "/data-sources"]) expect(isQuietRoute(p)).toBe(true)
-    for (const p of ["/", "/stock/2330.TW", "/market", "/groupsx", "/settings-old", "/administrator"]) expect(isQuietRoute(p)).toBe(false)
+    for (const p of ["/", "/stock/2330.TW", "/marketx", "/groupsx", "/settings-old", "/administrator"]) expect(isQuietRoute(p)).toBe(false)
     expect([...ACCOUNT_ROUTES]).toEqual(["/settings", "/data-sources", "/admin"])
     expect(isAccountRoute("/settings")).toBe(true)
     expect(isAccountRoute("/admin/discussions")).toBe(true)
@@ -265,7 +266,7 @@ describe("桌面 AI 面板：安靜的頁面預設是窄欄", () => {
     const aside = await screen.findByRole("complementary", { name: "問 AI" }, T)
     await within(aside).findByRole("list", { name: "最近的對話" }, T)
     await go(router, "/history")
-    await screen.findByRole("button", { name: "發起新對話" }, T)
+    await within(await screen.findByRole("main", undefined, T)).findByRole("button", { name: "新對話" }, T)
     const onHistory = screen.getByRole("complementary", { name: "問 AI" })
     await waitFor(() => expect(within(onHistory).queryByRole("list", { name: "最近的對話" })).toBeNull())
     // 頁面自己的清單還在

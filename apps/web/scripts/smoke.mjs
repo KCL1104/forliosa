@@ -54,7 +54,7 @@ const ROUTES = [
   ["/groups/grp_club", "找不到這個群組"],
   ["/invite/club-2026", "分享什麼"],
   ["/invite/club-expired", "這個邀請已經失效"],
-  ["/history", "發起新對話"],
+  ["/history", "新對話"],
   ["/discussions", "台積電法說會前，大家怎麼配置？"],
   ["/discussions?scope=group&group_id=grp_family", "我把聯發科的交易補記好了"],
   ["/discussions/top_p_tsmc", "比重超過自己睡得著的程度就調"],
@@ -129,7 +129,7 @@ await check("自由提問：誠實說明現在答不了（不猜、不承諾時�
   await box.press("Enter")
   // 規則版回答用現在式：說明這題要上網查、現在答不了，再給最接近的手動路徑（帳本上是「看持倉」）
   const panel = page.getByRole("complementary", { name: "問 AI" })
-  await panel.getByText(/這題要上網查資料，現在答不了。/).last().waitFor({ timeout: 5000 })
+  await panel.getByText("這題要查網路資料，現在沒辦法。").last().waitFor({ timeout: 5000 })
   if (await panel.getByText(/下一階段/).count()) throw new Error("fallback must not promise a timeline")
   const path = panel.getByRole("link", { name: /看持倉/ }).last()
   await path.waitFor()
@@ -461,7 +461,7 @@ await check("上市股票的籌碼：三大法人是空狀態、外資持股只�
   const asks = page.getByRole("button", { name: "最近外資對這檔的動向？" })
   if ((await asks.count()) !== 2) throw new Error(`expected the panel chip and the empty-state button, got ${await asks.count()}`)
   await page.locator("main").getByRole("button", { name: "最近外資對這檔的動向？" }).click()
-  await page.getByText(/上市股票沒有逐檔的三大法人資料，外資持股只公布前 20 名。台積電的外資動向現在查不到/).waitFor({ timeout: 8000 })
+  await page.getByText("台積電沒有逐檔的外資買賣資料。").waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "新對話" }).click()
   await page.goto(base + "/stock/6488.TWO?tab=chips", { waitUntil: "networkidle" })
   await page.getByRole("heading", { name: "三大法人買賣超" }).waitFor({ timeout: 8000 })
@@ -781,7 +781,7 @@ await check("AI 面板：設定頁（展開後）沒有建議 → 輸入框在�
   // 同一段對話再問一題：免責只在最新一則回答下方出現一次
   await box.fill("持股會不會太集中")
   await box.press("Enter")
-  await panel.getByText(/這題要上網查資料，現在答不了。/).last().waitFor({ timeout: 8000 })
+  await panel.getByText("這題要查網路資料，現在沒辦法。").last().waitFor({ timeout: 8000 })
   await page.waitForTimeout(300)
   const disclaimers = await panel.getByText("AI 回答僅供參考，非投資建議。").count()
   if (disclaimers !== 1) throw new Error(`expected one disclaimer per conversation, got ${disclaimers}`)
@@ -1054,7 +1054,7 @@ await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／�
   await page.getByText(/群組是你自己的，結束查看後才能用/).waitFor({ timeout: 8000 })
   await page.goto(base + "/history", { waitUntil: "networkidle" })
   await page.getByText(/紀錄是你自己的，結束查看後才能用/).waitFor({ timeout: 8000 })
-  if (await page.getByText("發起新對話").count()) throw new Error("AI history usable in view-as")
+  if (await page.locator("main").getByRole("button", { name: "新對話", exact: true }).count()) throw new Error("AI history usable in view-as")
   await page.getByRole("region", { name: "查看模式" }).getByRole("button", { name: "結束查看" }).click()
   await page.getByText("已回到你的帳本").waitFor({ timeout: 8000 })
   if (await page.getByText("正在查看 爸爸 的資產（唯讀）").count()) throw new Error("banner still visible")
@@ -1143,7 +1143,7 @@ await check("AI 面板：開著一段對話時換到安靜的頁面不收起來�
   // 紀錄頁（用 ⌘K 換頁，不重新載入）：面板開著，但不列「最近的對話」——頁面本身就是清單
   await rp.keyboard.press("Control+k")
   await rp.getByRole("option", { name: "對話紀錄" }).click()
-  await rp.getByRole("button", { name: "發起新對話" }).waitFor({ timeout: 8000 })
+  await rp.locator("main").getByRole("button", { name: "新對話", exact: true }).waitFor({ timeout: 8000 })
   await rp.locator("main").getByRole("list", { name: "對話" }).waitFor({ timeout: 8000 })
   if (!(await panel.count())) throw new Error("panel should still be open (opened on a quiet page)")
   if (await panel.getByRole("list", { name: "最近的對話" }).count()) throw new Error("the panel repeats the conversations the history page lists")
@@ -1154,7 +1154,7 @@ await check("AI 面板：開著一段對話時換到安靜的頁面不收起來�
     await rp.getByText(ready).first().waitFor({ timeout: 8000 })
     return rp.evaluate(() => Math.round(document.querySelector("main [class*='max-w-measure']")?.getBoundingClientRect().width ?? 0))
   }
-  const widths = [await measure("/history", "發起新對話"), await measure("/settings", "券商帳戶"), await measure("/data-sources", "授權條款")]
+  const widths = [await measure("/history", "對話紀錄"), await measure("/settings", "券商帳戶"), await measure("/data-sources", "授權條款")]
   if (new Set(widths).size !== 1 || widths[0] !== 816) throw new Error(`content measures differ: ${widths.join(" / ")}`)
 })
 await check("楷體只有一種排法：群組週報、AI 公司簡介和對話裡的回答同一個字級與字距（漢字 −0.06em、數字不拆行）", async () => {
@@ -1578,7 +1578,7 @@ await check("手機：AI 對話紀錄從「問 AI」的時鐘進去（底部列�
   await m.getByRole("button", { name: /^問 AI/ }).click()
   await m.getByRole("dialog").getByRole("button", { name: "對話紀錄", exact: true }).click()
   await m.waitForURL(/\/history$/, { timeout: 8000 })
-  await m.getByText("發起新對話").waitFor({ timeout: 8000 })
+  await m.locator("main").getByRole("button", { name: "新對話", exact: true }).waitFor({ timeout: 8000 })
   await m.getByRole("dialog").waitFor({ state: "detached", timeout: 5000 })
   // 沒有分頁告訴你這是哪一頁：標題在手機也看得到
   const title = await m.getByRole("heading", { level: 1, name: "對話紀錄" }).boundingBox()
@@ -1756,7 +1756,7 @@ await check("手機：動態、成員、設定、紀錄、帳本的控制項可�
     ["/groups/grp_family?tab=digests", "本週報酬"],
     ["/groups/grp_family/members/usr_dad", "總損益"],
     ["/settings", "授權給你的人"],
-    ["/history", "發起新對話"],
+    ["/history", "新對話"],
     ["/", "總資產"],
     ["/?view=dividends", "已入帳"],
     ["/stock/2330.TW", "參考價"],

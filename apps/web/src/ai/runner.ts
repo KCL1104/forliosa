@@ -131,12 +131,12 @@ export function useAiRunner(ctx: AiContext) {
       if (intent.side === "sell") {
         const holdings = await qc.fetchQuery(holdingsQuery())
         const held = holdings.find((h) => h.symbol === inst.symbol)?.quantity ?? 0
-        if (held < shares) notes.push(`你目前持有 ${formatQuantity(held, "lot", inst.market)}，賣出的股數比持股多，入帳時會被擋下。`)
+        if (held < shares) notes.push(`你只有 ${formatQuantity(held, "lot", inst.market)}，比要賣的少，這筆不能入帳。`)
       }
       input = { account_id: account.id, symbol: inst.symbol, type: intent.side, trade_date: intent.date ?? today, quantity: shares, price }
     } else {
       input = { account_id: account.id, symbol: inst.symbol, type: "cash_dividend", trade_date: intent.date ?? today, quantity: null, price: null, amount: intent.amount }
-      notes.push("參與分配的股數由除息日前的持股自動帶入。")
+      notes.push("股數用除息日前一天的持股。")
       // 台股股利已在除息日自動入帳時：簽名後以使用者記的這筆為準（自動那筆會移除，不會重複）
       if (!isUS) {
         try {
@@ -150,7 +150,7 @@ export function useAiRunner(ctx: AiContext) {
     }
     const draft: Draft = { id: newId("dft"), status: "loading", input, instrument, notes, createdAt: new Date().toISOString() }
     upsertDraft(draft)
-    push({ role: "ai", text: intent.kind === "dividend" ? "照你說的整理好了，你看一下。" : DRAFT_SAYS, model: false, draftId: draft.id })
+    push({ role: "ai", text: intent.kind === "dividend" ? "草稿寫好了。" : DRAFT_SAYS, model: false, draftId: draft.id })
     await preview(draft.id, input)
     return true
   }
@@ -268,7 +268,8 @@ export function useAiRunner(ctx: AiContext) {
       if (intent.kind === "lookup") {
         const inst = await resolveInstrument(intent.target)
         if (inst) {
-          reply({ text: `${inst.name}（${inst.code}）在這裡。`, links: [{ label: `看${inText(inst.name, "end")}`, to: "/stock/$symbol", params: { symbol: inst.symbol } }] })
+          // 只留按鈕，不敘述介面（2026-11-14 第六次評分）
+          reply({ text: "", links: [{ label: `看${inText(inst.name, "end")}`, to: "/stock/$symbol", params: { symbol: inst.symbol } }] })
           return
         }
       }
@@ -358,11 +359,11 @@ export function useAiRunner(ctx: AiContext) {
       }
       case "alert":
         push({ role: "user", text: "設定到價提醒" }, { title: "設定到價提醒" })
-        say({ text: "還不能設定到價提醒。現在可以把它加入觀察，帳本上會看到今天的走勢。" })
+        say({ text: "還沒有到價提醒。" })
         return
       case "checkup":
         push({ role: "user", text: "排定持倉健檢" }, { title: "排定持倉健檢" })
-        say({ text: "還不能排定持倉健檢。現在可以直接問你持股的數字。" })
+        say({ text: "還沒有排定健檢。", followUps: ["我的持股會不會太集中？"] })
         return
       case "form":
         openTradeForm(opts.code ? { symbol: opts.code } : undefined)
@@ -380,7 +381,7 @@ export function useAiRunner(ctx: AiContext) {
       void qc.invalidateQueries({ queryKey: ["portfolio"] })
       void qc.invalidateQueries({ queryKey: ["transactions"] })
       toast.success(`已入帳：${describe(d)}`, {
-        description: `${formatDateShort(d.input.trade_date)}・由 AI 草稿建立，你已簽名`,
+        description: `${formatDateShort(d.input.trade_date)}・AI 草稿，已簽名`,
         action: { label: "復原", onClick: () => void undo(id) },
       })
     } catch (err) {

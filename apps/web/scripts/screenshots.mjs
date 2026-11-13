@@ -134,7 +134,7 @@ const seedModelThread = async (page, mobile, twoTurns) => {
         id: "msg_shot_a2",
         role: "ai",
         model: true,
-        text: "我不替你決定買賣。以現價 1,085 元再加碼 1 張，台積電占總資產會從 43.9% 升到大約 57%，帳本會更集中在一檔。要的話直接說「買 2330 1 張」，我先寫成草稿。",
+        text: "我不替你決定買賣。以現價 1,085 元再加碼 1 張，台積電占總資產會從 43.9% 升到大約 57%，帳本會更集中在一檔。",
         citations: [],
         disclaimer: "AI 回答僅供參考，非投資建議。",
         at,
@@ -209,12 +209,12 @@ const whyMove = async (page, mobile) => {
   await page.getByRole("list", { name: "可以這樣問" }).getByRole("button", { name: /今天為什麼(漲|跌)/ }).click()
   await page.getByRole("list", { name: "接著問" }).waitFor({ timeout: 8000 })
 }
-/** 草稿還沒簽名就開新對話：面板首頁的第一列是「1 筆草稿等你簽名」（手機從「紀錄」發起新對話） */
+/** 草稿還沒簽名就開新對話：面板首頁的第一列是「1 筆草稿等你簽名」（手機從「紀錄」開新對話） */
 const pendingHome = async (page, mobile) => {
   await draft(page, mobile)
   if (mobile) {
     await page.getByRole("button", { name: "對話紀錄", exact: true }).click()
-    await page.getByRole("button", { name: "發起新對話" }).click()
+    await page.locator("main").getByRole("button", { name: "新對話", exact: true }).click()
   } else {
     await page.getByRole("button", { name: "新對話" }).click()
   }
@@ -497,7 +497,7 @@ const SHOTS = [
   { name: "shell-search-empty", path: "/", ready: "text=總資產", mobileOnly: true, action: headerSearch("") },
   { name: "shell-panel-quiet", path: "/groups", ready: "text=大學同學", desktopOnly: true },
   { name: "shell-panel-quiet-open", path: "/groups", ready: "text=大學同學", desktopOnly: true, action: openAi },
-  { name: "history-panel-open", path: "/history", ready: "text=發起新對話", desktopOnly: true, action: openAi },
+  { name: "history-panel-open", path: "/history", ready: "main >> role=button[name=\"新對話\"]", desktopOnly: true, action: openAi },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
   // 沒有盤中即時報價：價格標「收盤價・日期」；盤中、收盤後今天的還沒公布時多一行（mock 用 ?market=open|pending 模擬）
   { name: "stock-2330-market-open", path: "/stock/2330.TW?market=open", ready: "text=盤中不更新" },
@@ -529,7 +529,7 @@ const SHOTS = [
   { name: "ai-aapl-home", path: "/stock/AAPL", ready: "text=關於「Apple」", action: openAi },
   { name: "ai-aapl-river", path: "/stock/AAPL", ready: "text=關於「Apple」", action: aaplRiver },
   { name: "ai-settings-recent", path: "/settings", ready: "text=新增定期定額", action: openAi },
-  { name: "history-undo", path: "/history", ready: "text=發起新對話", action: historyUndo },
+  { name: "history-undo", path: "/history", ready: "main >> role=button[name=\"新對話\"]", action: historyUndo },
   { name: "stock-2330-why-answer", path: "/stock/2330.TW", ready: "text=參考價", action: whyMove },
   { name: "ledger-pending-home", path: "/", ready: "text=總資產", action: pendingHome },
   { name: "ai-search", path: "/", ready: "text=總資產", mobileOnly: true, action: mobileSearch },
@@ -564,7 +564,7 @@ const SHOTS = [
   { name: "data-sources", path: "/data-sources", ready: "text=上市個股日成交資訊" },
   { name: "data-sources-expanded", path: "/data-sources", ready: "text=上市個股日成交資訊", action: allSources },
   { name: "data-sources-fx", path: "/data-sources", ready: "text=銀行間新臺幣對美元收盤匯率", action: fxSource },
-  { name: "history", path: "/history", ready: "text=發起新對話" },
+  { name: "history", path: "/history", ready: "main >> role=button[name=\"新對話\"]" },
   { name: "ledger-auto-dividends-transactions", path: "/?view=transactions", ready: "text=月", action: autoEdited },
   { name: "ledger-auto-dividends-dividends", path: "/?view=dividends", ready: "text=已入帳", action: received },
   { name: "ledger-auto-dividends-edit", path: "/?view=transactions", ready: "text=月", action: autoEdit },
@@ -637,7 +637,7 @@ const SHOTS = [
   { name: "discuss-stock-tab", path: "/stock/2330.TW?tab=discussions", ready: "text=台積電法說會前", action: toTabList("個股資料") },
   { name: "discuss-stock-tab-empty", path: "/stock/2317.TW?tab=discussions", ready: "text=還沒有人討論鴻海", action: toTabList("個股資料") },
   { name: "discuss-group-tab", path: "/groups/grp_family?tab=discussions", ready: "text=我把聯發科的交易補記好了" },
-  { name: "discuss-history-mobile", path: "/history", ready: "text=發起新對話", mobileOnly: true },
+  { name: "discuss-history-mobile", path: "/history", ready: "main >> role=button[name=\"新對話\"]", mobileOnly: true },
 ]
 const REAL_SHOTS = SHOTS.filter((s) => !s.action)
 

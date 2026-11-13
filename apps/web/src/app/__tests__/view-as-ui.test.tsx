@@ -73,7 +73,7 @@ describe("查看模式：查看者自己的頁面", () => {
     useViewAs.getState().set(DAD)
     renderApp("/history")
     expect(await screen.findByText(/紀錄是你自己的，結束查看後才能用/, undefined, T)).toBeInTheDocument()
-    expect(screen.queryByText("發起新對話")).toBeNull()
+    expect(screen.queryByRole("button", { name: "新對話" })).toBeNull()
     expect(screen.queryByText("我的持股會不會太集中？")).toBeNull()
   })
 })

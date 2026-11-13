@@ -4,6 +4,7 @@ import { useBriefings, useLatestBriefing, useMarkBriefingRead } from "@/api/quer
 import type { Briefing, BriefingMover } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
 import { Masked, Pct } from "@/components/finance"
+import { CitedSources } from "@/components/cited-sources"
 import { DateCell } from "@/components/date-cell"
 import { DemoTag, Section } from "@/components/section"
 import { direction, formatDateShort, formatMoney, toneClass } from "@/lib/format"
@@ -134,7 +135,7 @@ export function BriefingBody({ briefing, size, omitLedger = false }: { briefing:
                 <p className={cn("ai-voice", size === "page" ? kaiSize.page : kaiSize[size])}>
                   <KaiText text={p.text} />
                 </p>
-                <SourceLine sources={p.sources} />
+                <CitedSources sources={p.sources} />
               </li>
             ))}
           </ul>
@@ -169,42 +170,6 @@ function Movers({ items }: { items: BriefingMover[] }) {
 }
 
 /** 這一點依據的報導：媒體名稱（同一家只列一次），13px 淡墨、常駐底線；連到原文、另開視窗（和市場頁的收盤重點同一種寫法） */
-function SourceLine({ sources }: { sources: Briefing["points"][number]["sources"] }) {
-  const seen = new Set<string>()
-  const unique = sources.filter((s) => {
-    const key = s.outlet || hostOf(s.url)
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-  if (unique.length === 0) return null
-  return (
-    <p className="mt-1 flex flex-wrap items-center gap-x-3 text-sm text-ink-2">
-      {unique.map((s) => (
-        <a
-          key={s.url}
-          href={s.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          title={s.title || undefined}
-          className="inline-flex items-center underline decoration-ctl decoration-1 underline-offset-4 transition-[text-decoration-color,color] hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
-        >
-          {s.outlet || hostOf(s.url)}
-          <span className="sr-only">：{s.title}（另開新視窗）</span>
-        </a>
-      ))}
-    </p>
-  )
-}
-
-function hostOf(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, "")
-  } catch {
-    return "來源"
-  }
-}
-
 /** 對話紀錄頁的「收盤簡報」：最近 14 則，一列一則（日期、當天的損益），按一下展開。沒有簡報就整段不出現 */
 export function BriefingHistory() {
   const list = useBriefings()

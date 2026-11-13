@@ -251,7 +251,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
       <header className="mt-1">
         <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
         <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>
-        {inst.market === "US" && <p className="mt-1 max-w-prose text-base text-ink">美股沒有報價，所以沒有走勢和估值；持股以成本計值。</p>}
+        {inst.market === "US" && <p className="mt-1 max-w-prose text-base text-ink">美股沒有報價，所以沒有走勢和估值。持股照成本算。</p>}
       </header>
     )
   }

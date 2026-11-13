@@ -165,7 +165,7 @@ describe("市場頁的內容", () => {
     mount()
     renderApp()
     const section = (await screen.findByRole("heading", { name: "重大訊息" }, T)).closest("section")!
-    expect(within(section).getByText(/共 428 則，列出最新 12 則/)).toBeInTheDocument()
+    expect(within(section).getByText(/共 428 則$/)).toBeInTheDocument()
     expect(within(section).getAllByRole("link")).toHaveLength(6)
     expect(within(section).getAllByRole("link")[0]).toHaveAttribute("href", "/stock/2330.TW?tab=events")
     fireEvent.click(within(section).getByRole("button", { name: "再看 6 則" }))

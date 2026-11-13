@@ -68,8 +68,8 @@ describe("個股頁的建議問題", () => {
     const tpex: AiContext = { route: "stock", stock: { ...base, symbol: "6488.TWO", market: "TPEX" as const, position: null } }
     expect(classifyQuestion("外資最近在賣嗎", tpex)).toBeNull()
     const a = answerFor("foreign_flow", { ctx, privacy: false, today: TODAY })!
-    // 只說事實（沒有逐檔資料、外資持股只公布前 20 名）；授權的原因只在「資料來源與授權」頁講
-    expect(a.text).toContain("上市股票沒有逐檔的三大法人資料，外資持股只公布前 20 名。")
+    // 只說事實（沒有逐檔資料）；授權的原因只在「資料來源與授權」頁講
+    expect(a.text).toBe("台積電沒有逐檔的外資買賣資料。")
     expect(a.text).not.toMatch(/可商用|付費|每一點都要附來源/)
     expect(a.text).not.toMatch(/\d+ 張/)
     expect(a.links!.map((l) => l.search)).toEqual([{ tab: "chips" }, { tab: "events" }])
@@ -96,7 +96,7 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
     expect(classifyQuestion("持股集中嗎", ctx)).toBe("concentration")
     const f = fallbackAnswer("幫我分析台積電的護城河", ctx)
     // 現在式：只說現在能做什麼，不承諾時程，也不扮演 AI 的人格
-    expect(f.text).toContain("這題要上網查資料，現在答不了。")
+    expect(f.text).toBe("這題要查網路資料，現在沒辦法。")
     expect(f.text).not.toMatch(/下一階段|開放|猜的答案/)
     expect(f.links!.length).toBeGreaterThan(0)
   })

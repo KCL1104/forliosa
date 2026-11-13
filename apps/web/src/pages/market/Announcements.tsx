@@ -22,7 +22,7 @@ export function Announcements({ announcements }: { announcements: NonNullable<Ma
       titleId="market-announcements"
       aside={
         <span className="num">
-          {formatDateShort(announcements.date, false)}・共 {formatNumber(total)} 則{total > items.length && `，列出最新 ${items.length} 則`}
+          {formatDateShort(announcements.date, false)}・共 {formatNumber(total)} 則
         </span>
       }
       bodyClassName="max-w-[46rem] pt-0"

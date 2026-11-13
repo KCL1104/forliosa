@@ -15,7 +15,7 @@ import { DraftSpecimen, LedgerSpecimen, StockSpecimen } from "./specimens"
 const SPECIMENS: { title: string; label: string; body: React.ReactNode }[] = [
   { title: "帳本", label: "示範畫面：帳本。上面是總資產、今日漲跌與總損益，下面一列一檔持股，寫著股數、收盤價與當天漲跌。", body: <LedgerSpecimen /> },
   { title: "個股", label: "示範畫面：個股頁。股票名稱、收盤價與漲跌，下面是持有的股數、均價與未實現損益，再下面是收盤價的走勢圖。", body: <StockSpecimen /> },
-  { title: "問 AI", label: "示範畫面：問 AI。輸入「買 0050 2 張 52.4」，出現一張算好稅費的草稿，下面是簽名格。", body: <DraftSpecimen /> },
+  { title: "問 AI", label: "示範畫面：問 AI。輸入「買 0050 2 張 52.4」，出現一張草稿，寫著股數、成交價與合計，下面是簽名格。", body: <DraftSpecimen /> },
 ]
 
 export function HomePage() {

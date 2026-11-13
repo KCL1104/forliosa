@@ -21,16 +21,16 @@ const view = () =>
     </QueryClientProvider>,
   )
 
-describe("紀錄：發起新對話是一般按鈕；刪除對話有「復原」；沒有示範的 AI 任務", () => {
+describe("紀錄：新對話是一般按鈕；刪除對話有「復原」；沒有示範的 AI 任務", () => {
   afterEach(() => {
     toasts.length = 0
     act(() => useAi.setState({ threads: [], drafts: {}, threadId: null, hiddenThreadIds: [] }))
   })
 
-  it("發起新對話是按鈕（不是標題）；沒有「AI 任務」區塊與示範說明", () => {
+  it("新對話是按鈕（不是標題）；沒有「AI 任務」區塊與示範說明", () => {
     view()
-    expect(screen.getByRole("button", { name: "發起新對話" })).toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "發起新對話" })).not.toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "新對話" })).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "新對話" })).not.toBeInTheDocument()
     expect(screen.queryByText("AI 任務")).not.toBeInTheDocument()
     expect(screen.queryByText(/示範資料，排程還沒開放/)).not.toBeInTheDocument()
   })

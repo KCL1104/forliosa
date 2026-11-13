@@ -162,7 +162,7 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
   const isCash = CASH_TYPES.includes(type)
   const isUS = account?.currency === "USD" || f.symbol?.market === "US"
   const qty = parseNum(f.qtyText)
-  const shares = qty === null ? null : f.qtyUnit === "lot" && !isUS && (type === "buy" || type === "sell") ? qty * 1000 : qty
+  const shares = qty === null ? null : f.qtyUnit === "lot" && !isUS && (type === "buy" || type === "sell") ? Math.round(qty * 1000) : qty
   const price = parseNum(f.priceText)
   const amount = parseNum(f.amountText)
 
@@ -193,7 +193,14 @@ export function TradeForm({ initialSymbol, edit, sell, onDone, layout }: { initi
 
   const errors = {
     symbol: !isCash && !f.symbol ? "請選擇股票或 ETF" : null,
-    qty: !isCash && (!shares || shares <= 0) ? "請輸入數量" : !isCash && shares !== null && !Number.isInteger(shares) && !isUS ? "台股股數必須是整數" : null,
+    qty:
+      !isCash && (!shares || shares <= 0)
+        ? "請輸入數量"
+        : !isCash && !isUS && f.qtyUnit === "lot" && (type === "buy" || type === "sell") && /\.\d{4,}$/.test(f.qtyText.replace(/[,\s]/g, ""))
+          ? "張數最多寫到小數第三位（1 股）"
+          : !isCash && shares !== null && !Number.isInteger(shares) && !isUS
+            ? "台股股數必須是整數"
+            : null,
     price: !isCash && ["buy", "sell", "cash_dividend"].includes(type) && (!price || price <= 0) ? "請輸入價格" : null,
     amount: isCash && (!amount || amount <= 0) ? "請輸入金額" : null,
   }

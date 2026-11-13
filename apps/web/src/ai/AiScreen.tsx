@@ -4,6 +4,7 @@ import { HistoryIcon, SquarePenIcon, XIcon } from "lucide-react"
 import { useState } from "react"
 import { appToday } from "@/api"
 import { useInstrumentSearch } from "@/api/queries"
+import { useMediaQuery } from "@/hooks/use-media-query"
 import { MARKET_LABEL } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { UsageNote } from "./AiPanel"
@@ -47,6 +48,8 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
   const suggestions = useAiSuggestions(ctx)
   const [typing, setTyping] = useState("")
   const navigate = useNavigate()
+  // 320 寬放不下「搜尋，或說：買 0050 2 張」（只看得到一半）：窄螢幕用短的提示
+  const narrow = useMediaQuery("(max-width: 359px)")
   const newThread = useAi((s) => s.newThread)
   const route = useRouteKind()
   const intent = parseIntent(typing, appToday())
@@ -134,7 +137,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
       <div className="shrink-0 px-5 pt-2.5 pb-[max(12px,env(safe-area-inset-bottom,0px))]">
         <Composer
           variant="screen"
-          placeholder={composerPlaceholder(ctx, "screen")}
+          placeholder={narrow ? "搜尋或提問" : composerPlaceholder(ctx, "screen")}
           onDraftChange={setTyping}
           onSubmit={(t) => void runner.submit(t)}
           onForm={() => runner.action("form")}

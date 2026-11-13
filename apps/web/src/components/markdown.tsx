@@ -198,7 +198,8 @@ function span(t: Token, ctx: Ctx): React.ReactNode {
     case "del":
       return <s>{inline((t as Tokens.Del).tokens, ctx)}</s>
     case "codespan":
-      return <code className="num rounded-xs bg-sel px-1 text-[0.92em]">{decode((t as Tokens.Codespan).text)}</code>
+      // 長的網域或路徑（static.cloudflareinsights.com）在窄螢幕要能斷行，不撐寬頁面
+      return <code className="num rounded-xs bg-sel px-1 text-[0.92em] [overflow-wrap:anywhere]">{decode((t as Tokens.Codespan).text)}</code>
     case "br":
       return <br />
     case "link": {

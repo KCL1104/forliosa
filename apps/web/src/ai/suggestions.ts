@@ -229,7 +229,7 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
     }
     case "onboard":
       return {
-        text: "直接說，例如「買 0050 2 張 52.4」或「00878 配息 1,100」。我算好稅費寫成草稿，你簽名就入帳。",
+        text: "直接打，例如「買 0050 2 張 52.4」。",
         followUps: ["買 0050 2 張 52.4"],
       }
     default:
@@ -294,7 +294,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
       if (!pos || !now || us) return null
       const next = (pos.avg_cost * pos.quantity + now * 1000) / (pos.quantity + 1000)
       return {
-        text: `以收盤價 ${price(now)}加碼 1 張，均價會從 ${privacy ? MASK : price(pos.avg_cost)}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}（不含手續費）。要的話直接說，我先寫成草稿。`,
+        text: `以收盤價 ${price(now)}加碼 1 張，均價會從 ${privacy ? MASK : price(pos.avg_cost)}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}（不含手續費）。`,
         rows: [
           { label: "現在持有", value: privacy ? MASK : formatQuantity(pos.quantity, "lot", s.market) },
           { label: "加碼後", value: privacy ? MASK : formatQuantity(pos.quantity + 1000, "lot", s.market) },
@@ -331,7 +331,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "foreign_flow":
       // 本機規則版沒有網路搜尋：說明為什麼沒有數字、給現在看得到的資料（真實後端由 AI 搜尋新聞，附來源與日期）
       return {
-        text: `上市股票沒有逐檔的三大法人資料，外資持股只公布前 20 名。${inText(s.name, "start")}的外資動向現在查不到，可以先看融資融券和公告。`,
+        text: `${inText(s.name, "start")}沒有逐檔的外資買賣資料。`,
         links: [link("chips", "看融資融券"), link("events", "看公告")],
       }
     default:
@@ -373,7 +373,7 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
     if (links.length === 0) links.push({ label: "看持倉", to: "/" })
   }
   return {
-    text: "這題要上網查資料，現在答不了。記帳和持股的數字可以直接問，例如「買 0050 2 張 52.4」。可以先看：",
+    text: "這題要查網路資料，現在沒辦法。",
     links: links.slice(0, 3),
   }
 }

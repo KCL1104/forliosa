@@ -147,6 +147,7 @@ export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: 
 
 /** 本機規則或範本寫的句子（草稿的說明、規則版的回答）：不是模型寫的，墨色 Noto Sans、不用石墨灰 */
 function RuleText({ text, size }: { text: string; size: "panel" | "screen" }) {
+  if (!text) return null
   return <p className={cn("whitespace-pre-line text-ink", ruleSize[size])}>{text}</p>
 }
 
@@ -298,7 +299,7 @@ function AnswerView({ answer, runner, size, onNavigate }: { answer: Answer; runn
         </dl>
       )}
       {answer.links && answer.links.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className={cn("flex flex-wrap gap-2", answer.text && "mt-3")}>
           {answer.links.map((l) => (
             <AnswerLinkButton key={l.label} link={l} onNavigate={onNavigate} />
           ))}

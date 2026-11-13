@@ -17,7 +17,7 @@ function clock(iso: string): string {
 }
 
 /**
- * 紀錄：發起新對話（一般按鈕）、過去的對話（刪除後可以復原）。
+ * 紀錄：新對話（一般按鈕，和面板標題列的「新對話」同名）、過去的對話（刪除後可以復原）。
  * 整頁（紀錄頁）是一張印好表頭的表：第一欄是聯絡簿的日期格（日期＋時間），整列都可以按；
  * 面板裡（`compact`）是一行一格的格線列：標題＋相對時間。
  */
@@ -36,7 +36,7 @@ export function HistoryList({ compact, onOpen, onReplay }: { compact?: boolean; 
           onOpen?.()
         }}
       >
-        發起新對話
+        新對話
       </Button>
 
       {list.loading ? (

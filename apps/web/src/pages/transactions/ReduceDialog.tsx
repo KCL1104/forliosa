@@ -29,13 +29,15 @@ export function ReduceHost() {
   const { open, symbol, all } = useUi((s) => s.reduce)
   const close = useUi((s) => s.closeReduce)
   const isDesktop = useIsDesktop()
+  // 「全部賣出」是最不可逆的一個：標題直接說（2026-11-14 第六次評分）
+  const title = all ? "全部賣出" : TITLE
   const body = open && symbol ? <ReduceForm key={`${symbol}:${all ? "all" : "some"}`} symbol={symbol} all={!!all} onDone={close} /> : null
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && close()}>
         <DialogContent className="gap-0 p-0 sm:max-w-[440px]">
           <DialogHeader className="px-6 pt-5 pb-4">
-            <DialogTitle>{TITLE}</DialogTitle>
+            <DialogTitle>{title}</DialogTitle>
             <DialogDescription className="sr-only">{DESCRIPTION}</DialogDescription>
           </DialogHeader>
           {body}
@@ -47,7 +49,7 @@ export function ReduceHost() {
     <Drawer open={open} onOpenChange={(o) => !o && close()} repositionInputs={false}>
       <DrawerContent className="data-[vaul-drawer-direction=bottom]:max-h-[92dvh]">
         <DrawerHeader className="pb-2">
-          <DrawerTitle>{TITLE}</DrawerTitle>
+          <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription className="sr-only">{DESCRIPTION}</DrawerDescription>
         </DrawerHeader>
         <div className="overflow-y-auto overscroll-contain">{body}</div>
@@ -113,7 +115,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
 
   const shares = (() => {
     const q = num(qty)
-    return q === null ? null : inLots ? q * 1000 : q
+    return q === null ? null : inLots ? Math.round(q * 1000) : q
   })()
   const price = quote.data?.price ?? null
   const qtyLabel = inLots ? "張數" : "股數"
@@ -122,8 +124,10 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
   const error =
     !shares || shares <= 0
       ? `請輸入${qtyLabel}`
-      : !isUS && !Number.isInteger(shares)
-        ? "台股股數必須是整數"
+      : !isUS && (inLots ? /\.\d{4,}$/.test(qty.trim()) : !Number.isInteger(shares))
+        ? inLots
+          ? "張數最多寫到小數第三位（1 股）"
+          : "台股股數必須是整數"
         : shares > held
           ? `最多 ${heldInField}`
           : null
@@ -145,13 +149,13 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
               onClick: () =>
                 void remove.mutateAsync(txn.id).then(
                   () => toast("已復原這筆交易"),
-                  () => toast.error("復原失敗，請到紀錄裡手動刪除"),
+                  () => toast.error("沒有復原成功。到「紀錄」刪掉這一筆。"),
                 ),
             },
           })
           onDone()
         },
-        onError: (err) => toast.error("沒有存成功，內容仍保留", { description: err instanceof Error ? err.message : undefined }),
+        onError: (err) => toast.error("沒有存成功，內容還在。", { description: err instanceof Error ? err.message : undefined }),
       },
     )
   }
@@ -212,7 +216,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
             取消
           </Button>
           <Button type="submit" variant="sign" className="max-sm:flex-1 sm:min-w-28" disabled={create.isPending || price === null}>
-            {create.isPending ? "記錄中…" : "賣出"}
+            {create.isPending ? "記錄中…" : shares === held ? "全部賣出" : "賣出"}
           </Button>
         </div>
       </div>

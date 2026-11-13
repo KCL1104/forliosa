@@ -178,7 +178,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
             ))}
             {preview && (
               <li className="num text-ink-2">
-                {input.type === "buy" ? `應付 = 成交金額 + 手續費 + 稅` : isDividend ? "實拿 = 股利 − 預扣稅 − 二代健保 − 手續費" : `應收 = 成交金額 ${MINUS} 手續費 ${MINUS} 稅`}
+                {input.type === "buy" ? `合計 = 成交金額 + 手續費 + 稅` : isDividend ? "實拿 = 股利 − 預扣稅 − 二代健保 − 手續費" : `實收 = 成交金額 ${MINUS} 手續費 ${MINUS} 稅`}
               </li>
             )}
           </ul>
@@ -259,7 +259,7 @@ function EditFields({
       ...(date ? { trade_date: date } : {}),
     })
   }
-  const field = "num h-10 w-full rounded-sm border border-ctl bg-raised px-2.5 text-base text-ink outline-none focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ai"
+  const field = "num h-10 w-full rounded-sm border border-ctl bg-raised px-2.5 text-base text-ink outline-none pointer-coarse:text-[1rem] focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ai"
   return (
     <div className="grid grid-cols-2 gap-3 border-b border-rule px-4 py-3">
       {isDividend ? (
