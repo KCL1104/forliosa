@@ -1,4 +1,5 @@
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
+import { PlainLink } from "@/app/links"
 import { ArrowLeftIcon } from "lucide-react"
 import { lazy, Suspense } from "react"
 import { useGroup } from "@/api/sharing-queries"
@@ -53,10 +54,10 @@ function GroupView() {
   return (
     <PageFrame className="lg:pt-6">
       <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
-        <Link to="/groups" className="-ml-1 inline-flex h-9 items-center gap-1 rounded-sm px-1 text-ink hover:bg-hov pointer-coarse:h-11">
+        <PlainLink to="/groups" className="-ml-1 inline-flex h-9 items-center gap-1 rounded-sm px-1 text-ink hover:bg-hov pointer-coarse:h-11">
           <ArrowLeftIcon aria-hidden className="size-4" />
           群組
-        </Link>
+        </PlainLink>
       </nav>
       {missing ? (
         <GroupMissing />

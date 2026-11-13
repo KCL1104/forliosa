@@ -251,7 +251,7 @@ export function TradeForm({ initialSymbol, edit, onDone, layout }: { initialSymb
     return (
       <div className="flex flex-col gap-2 p-6 text-md">
         <p className="font-medium">還沒有券商帳戶</p>
-        <p className="text-ink-2">先新增一個帳戶（例如「永豐－一般」），手續費折扣才能算對。</p>
+        <p className="text-ink-2">先新增一個帳戶（例如「永豐・一般」），手續費折扣才能算對。</p>
         <Link to="/settings" onClick={onDone} className={cn(buttonVariants({ variant: "outline" }), "mt-2 self-start")}>
           到設定新增帳戶
         </Link>

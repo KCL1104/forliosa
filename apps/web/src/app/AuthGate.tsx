@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
 import { Navigate, useRouterState } from "@tanstack/react-router"
-import { RotateCcwIcon } from "lucide-react"
 import { meQuery } from "@/api/queries"
 import { ApiError } from "@/api/types"
 import { Wordmark } from "@/components/brand"
@@ -59,7 +58,6 @@ export function BackendUnreachable({ error, onRetry }: { error: unknown; onRetry
           {import.meta.env.DEV && "開發時請先在 apps/api 執行 uv run uvicorn forliosa.main:app --port 8000。"}
         </p>
         <Button variant="outline" className="self-start" onClick={onRetry}>
-          <RotateCcwIcon />
           重新連線
         </Button>
       </div>

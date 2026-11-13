@@ -1,4 +1,5 @@
 import { Link, useParams } from "@tanstack/react-router"
+import { PlainLink } from "@/app/links"
 import { ArrowLeftIcon } from "lucide-react"
 import { useFeed, useGroup, useSharedPortfolio } from "@/api/sharing-queries"
 import { ApiError, type SharedPortfolio } from "@/api/types"
@@ -34,7 +35,7 @@ function Member() {
   return (
     <PageFrame className="lg:pt-6">
       <nav aria-label="位置" className="flex min-h-11 items-center text-sm">
-        <Link
+        <PlainLink
           to="/groups/$groupId"
           params={{ groupId }}
           search={{ tab: "members" }}
@@ -42,7 +43,7 @@ function Member() {
         >
           <ArrowLeftIcon aria-hidden className="size-4" />
           {group.data?.name ?? "群組"}
-        </Link>
+        </PlainLink>
       </nav>
       {missing ? (
         <div className="flex flex-col items-start gap-3 py-6">

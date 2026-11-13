@@ -7,6 +7,14 @@ import { displayHost, fiscalYearEnd, formatCapital } from "@/lib/company"
 import { AboutCompany } from "../AboutCompany"
 import { RelatedStocks } from "../RelatedStocks"
 
+// 測試不掛路由：頁尾「資料來源與授權」用的 PlainLink（不標 aria-current 的站內連結）也換成一般連結
+vi.mock("@/app/links", () => ({
+  PlainLink: ({ children, to, ...rest }: { children: React.ReactNode; to: string } & Record<string, unknown>) => (
+    <a href={to} {...rest}>
+      {children}
+    </a>
+  ),
+}))
 vi.mock("@tanstack/react-router", () => ({
   Link: ({ children, to, params, ...rest }: { children: React.ReactNode; to: string; params?: { symbol: string } } & Record<string, unknown>) => (
     <a href={params ? to.replace("$symbol", params.symbol) : to} {...rest}>

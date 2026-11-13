@@ -1,6 +1,6 @@
-import { Link } from "@tanstack/react-router"
 import { ArrowRightIcon, ArrowUpRightIcon, CircleAlertIcon } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
+import { PlainLink } from "@/app/links"
 import { useUi } from "@/app/ui-store"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -327,7 +327,7 @@ function AnswerLinkButton({ link, onNavigate }: { link: AnswerLink; onNavigate?:
     )
   }
   return (
-    <Link
+    <PlainLink
       to={link.to as "/"}
       params={link.params as never}
       search={link.search as never}
@@ -336,6 +336,6 @@ function AnswerLinkButton({ link, onNavigate }: { link: AnswerLink; onNavigate?:
     >
       {link.label}
       <ArrowRightIcon aria-hidden className="size-3.5 text-ink-2" />
-    </Link>
+    </PlainLink>
   )
 }

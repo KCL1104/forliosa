@@ -1,4 +1,4 @@
-import { Link } from "@tanstack/react-router"
+import { PlainLink } from "@/app/links"
 import { ChevronDownIcon } from "lucide-react"
 import { useId, useState } from "react"
 import { SourcesContext, useSources } from "@/hooks/use-source-note"
@@ -27,9 +27,9 @@ export function SourcesFooter({ className }: { className?: string }) {
   if (notes.length === 0) {
     return (
       <p className={cn("mt-12 border-t border-rule text-sm", className)}>
-        <Link to="/data-sources" className="inline-flex min-h-11 items-center text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink">
+        <PlainLink to="/data-sources" className="inline-flex min-h-11 items-center text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink">
           資料來源與授權
-        </Link>
+        </PlainLink>
       </p>
     )
   }
@@ -67,9 +67,9 @@ export function SourcesFooter({ className }: { className?: string }) {
           </div>
         ))}
         <p className="border-t border-rule pt-3 text-sm">
-          <Link to="/data-sources" className="text-ink underline underline-offset-3 hover:decoration-2">
+          <PlainLink to="/data-sources" className="text-ink underline underline-offset-3 hover:decoration-2">
             完整顯名聲明
-          </Link>
+          </PlainLink>
         </p>
       </div>
     </footer>
