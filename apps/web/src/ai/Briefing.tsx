@@ -4,6 +4,7 @@ import { useBriefings, useLatestBriefing, useMarkBriefingRead } from "@/api/quer
 import type { Briefing, BriefingMover } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
 import { Masked, Pct } from "@/components/finance"
+import { DateCell } from "@/components/date-cell"
 import { DemoTag, Section } from "@/components/section"
 import { direction, formatDateShort, formatMoney, toneClass } from "@/lib/format"
 import { upcomingText } from "@/lib/ledger-display"
@@ -223,17 +224,19 @@ export function BriefingHistory() {
                 aria-expanded={open}
                 aria-controls={`briefing-${b.id}`}
                 onClick={() => setOpenId(open ? null : b.id)}
-                className="group flex min-h-12 w-full items-center gap-3 py-2 text-left text-base focus-visible:-outline-offset-2"
+                className="group flex min-h-12 w-full items-stretch gap-3 py-2 text-left text-base focus-visible:-outline-offset-2"
               >
-                <span className="num w-24 shrink-0">{formatDateShort(b.date)}</span>
-                {b.facts.holdings > 0 && (
-                  <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-2">
+                {/* 和上面的對話清單同一種日期格（日期墨色、星期小字淡墨，右邊一條格線） */}
+                <DateCell date={b.date} inline pad="-my-2 py-2" className="num w-24 shrink-0" />
+                {/* 展開時當日損益就在內文裡，標題列不再寫一次 */}
+                {b.facts.holdings > 0 && !open && (
+                  <span className="inline-flex min-w-0 flex-wrap items-baseline gap-x-2 self-center">
                     <span className="text-sm text-ink-2">當日</span>
                     {privacy ? <Masked /> : <span className={cn("num", toneClass(direction(b.facts.day_change)))}>{formatMoney(b.facts.day_change, { signed: true })}</span>}
                     <Pct value={b.facts.day_change_pct} />
                   </span>
                 )}
-                <ChevronDownIcon aria-hidden className={cn("ml-auto size-5 shrink-0 text-ink-2 transition-transform duration-150 group-hover:text-ink motion-reduce:transition-none", open && "rotate-180")} />
+                <ChevronDownIcon aria-hidden className={cn("ml-auto size-5 shrink-0 self-center text-ink-2 transition-transform duration-150 group-hover:text-ink motion-reduce:transition-none", open && "rotate-180")} />
               </button>
               <div id={`briefing-${b.id}`} hidden={!open} className="max-w-[46rem] pb-3">
                 {open && <BriefingBody briefing={b} size="page" />}
