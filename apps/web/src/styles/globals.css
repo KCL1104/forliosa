@@ -86,6 +86,23 @@
     border-bottom-color: var(--ink);
   }
 }
+/* (a) 在手機底部列：同一套語法，線改畫在上緣（壓在底部列上緣的印刷雙線上） */
+@utility sel-tab-top {
+  border-top: 2px solid transparent;
+  transition:
+    color 120ms ease,
+    border-color 120ms ease;
+  @media (hover: hover) and (pointer: fine) {
+    &:hover {
+      color: var(--ink);
+    }
+  }
+  &:is([aria-selected="true"], [aria-current]:not([aria-current="false"]), [data-active]:not([data-active="false"])) {
+    color: var(--ink);
+    font-weight: 700;
+    border-top-color: var(--ink);
+  }
+}
 /* (b) 分段、區間、篩選、日期格、切換群組：選取＝on-bg 底＋on-fg 字＋1px 內框 on-ring */
 @utility sel-chip {
   transition:
@@ -113,7 +130,7 @@
   }
 }
 /* 選取語法是系統的一部分：不管原始碼裡有沒有出現都產生 */
-@source inline("sel-tab sel-chip sel-row");
+@source inline("sel-tab sel-tab-top sel-chip sel-row");
 
 /*
  * Forliosa 設計 token —— 世界觀：學校聯絡簿。說明見 /DESIGN.md。
@@ -124,7 +141,9 @@
   /* 紙與墨 */
   --paper: #fbfbf8;
   --raised: #ffffff;
+  /* 格線有兩種：--rule 是列與列之間的格線（淡）；--print 是印在簿子上的線（表頭雙線、區塊標題底線、手機底部列的上緣），比格線深一階 */
   --rule: #d6dee8;
+  --print: #93a6c6;
   --ink: #1f2a44;
   --ink-2: #5b6478;
   --ctl: #838ca0;
@@ -188,18 +207,26 @@
   --destructive: var(--ink);
   --destructive-foreground: var(--paper);
   --scrim: rgb(15 23 48 / 0.32);
+  /* 手機底部列的高度（不含 safe area）；桌面（≥ 1024px）沒有底部列，是 0。要避開底部列的東西用 calc(var(--dock-h) + env(safe-area-inset-bottom, 0px)) */
+  --dock-h: 3.75rem;
   color-scheme: light;
+}
+@media (min-width: 1024px) {
+  :root {
+    --dock-h: 0px;
+  }
 }
 
 /*
- * 深色：藍黑夜間筆記本。頁面是深藍黑（色相 224），印刷格線是看得見但安靜的藍線，字是淡紙白。
+ * 深色：藍黑夜間筆記本。頁面是深藍黑（色相 224），格線是看得見但安靜的藍線，印刷線是更亮一階的印刷藍，字是淡紙白。
  * 對比（WCAG）：ink 15.1:1、ink-2 7.5:1（raised 7.0:1）、ctl 3.3:1、ai 8.3:1（ai-wash 7.6:1）、
- * 漲 6.6:1、跌 8.3:1；選取的內框 on-ring 對紙 6.2:1。
+ * 漲 6.6:1、跌 8.3:1；選取的內框 on-ring 對紙 6.2:1；格線 rule 對紙 1.9:1、印刷線 print 3.1:1。
  */
 .dark {
   --paper: #0e1424;
   --raised: #141b2e;
-  --rule: #2a3754;
+  --rule: #34446b;
+  --print: #4d6398;
   --ink: #e6e9f2;
   --ink-2: #9ba6c0;
   --ctl: #5a6888;
@@ -253,6 +280,7 @@
   --color-paper: var(--paper);
   --color-raised: var(--raised);
   --color-rule: var(--rule);
+  --color-print: var(--print);
   --color-ink: var(--ink);
   --color-ink-2: var(--ink-2);
   --color-ctl: var(--ctl);
@@ -516,8 +544,9 @@
   }
 
   /*
-   * 表頭（印好的表格）：13px 淡墨標籤，下面雙線（1px 格線、2px 空隙、1px 格線）。
-   * 用在 <thead>、表頭的 <tr>，或 div／li 做的格線清單表頭。雙線畫在背景，不佔版面：表頭列自己不要再加 border-b。
+   * 表頭（印好的表格）：13px 淡墨標籤，下面一條印刷雙線（1px、2px 空隙、1px，--print）。
+   * 用在 <thead>、表頭的 <tr>，或 div／li 做的格線清單表頭。雙線用 ::after 畫（上下各 1px 的框線，中間透明），
+   * 不佔版面、不靠底色：表頭列自己不要再加 border-b。（不用背景漸層：對比檢查工具會把漸層當成文字的底色。）
    */
   .form-head {
     font-size: var(--text-sm);
@@ -529,13 +558,19 @@
   .form-head:not(thead, tr),
   thead.form-head > tr > *,
   tr.form-head > * {
+    position: relative;
     font-weight: 400;
-    background-image: linear-gradient(var(--rule), var(--rule)), linear-gradient(var(--rule), var(--rule));
-    background-repeat: no-repeat;
-    background-size: 100% 1px;
-    background-position:
-      0 100%,
-      0 calc(100% - 3px);
+  }
+  .form-head:not(thead, tr)::after,
+  thead.form-head > tr > *::after,
+  tr.form-head > *::after {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    bottom: 0;
+    height: 4px;
+    border-block: 1px solid var(--print);
+    pointer-events: none;
   }
 
   /* 聯絡簿的日期格：日期是墨色 500，星期是 12px 淡墨（.weekday），右邊一條格線 */
@@ -635,6 +670,58 @@
   }
   .note-in {
     animation: note-in 220ms var(--ease-out) both;
+  }
+
+  /*
+   * 手機底部列（簿子的下緣）：平的、滿版、紙色；沒有浮起、沒有膠囊、沒有陰影。
+   * 上緣是和表頭同一條印刷雙線（::before）；分頁是選取語法 (a) 的底部列版本（sel-tab-top）。
+   * 高度 --dock-h（不含 safe area）。
+   */
+  .dock {
+    position: fixed;
+    inset-inline: 0;
+    bottom: 0;
+    z-index: 30;
+    background: var(--paper);
+    padding-bottom: env(safe-area-inset-bottom, 0px);
+    padding-inline: env(safe-area-inset-left, 0px) env(safe-area-inset-right, 0px);
+  }
+  .dock::before {
+    content: "";
+    position: absolute;
+    inset-inline: 0;
+    top: 0;
+    height: 4px;
+    border-block: 1px solid var(--print);
+    pointer-events: none;
+  }
+  /*
+   * 「問 AI」格：和簽名格同一種方格（直角、內縮 3px 的細框），用老師的紫色。
+   * 簽名格是使用者的墨色（你簽名），這一格是 AI 的紫色（交給老師）。
+   */
+  .ask-box {
+    position: relative;
+    display: inline-flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    border-radius: 0;
+    background: var(--ai);
+    color: var(--paper);
+    font-weight: 700;
+    transition: transform 140ms var(--ease-out);
+  }
+  .ask-box::after {
+    content: "";
+    position: absolute;
+    inset: 3px;
+    border: 1px solid currentColor;
+    opacity: 0.4;
+    pointer-events: none;
+  }
+  .ask-box:active {
+    transform: scale(0.97);
   }
 
   .safe-bottom {

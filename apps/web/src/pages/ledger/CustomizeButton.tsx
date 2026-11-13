@@ -33,7 +33,7 @@ export function CustomizeButton({ className }: { className?: string }) {
           <legend className="float-left mb-2 w-full text-sm font-bold text-ink">欄位</legend>
           <div className="grid grid-cols-2 gap-x-3 gap-y-1">
             {ALL_COLUMNS.map((c) => (
-              <label key={c} className={cn("flex min-h-9 items-center gap-2 text-md", c === "price" && "text-ink-2")}>
+              <label key={c} className={cn("flex min-h-9 items-center gap-2 text-md pointer-coarse:min-h-11", c === "price" && "text-ink-2")}>
                 <input type="checkbox" className="size-4 accent-[var(--ink)]" checked={columns.includes(c)} disabled={c === "price"} onChange={() => toggleColumn(c)} />
                 {COLUMN_LABEL[c]}
               </label>
@@ -55,7 +55,7 @@ export function CustomizeButton({ className }: { className?: string }) {
                     type="button"
                     aria-pressed={on}
                     onClick={() => togglePin(h.symbol)}
-                    className="flex min-h-9 w-full items-center gap-2 rounded-sm px-1 text-left text-md hover:bg-hov"
+                    className="flex min-h-9 w-full items-center gap-2 rounded-sm px-1 text-left text-md hover:bg-hov pointer-coarse:min-h-11"
                   >
                     <PinIcon aria-hidden className={cn("size-4", on ? "fill-ink text-ink" : "text-ctl")} />
                     <span className="flex-1 truncate">{h.name}</span>
@@ -65,7 +65,7 @@ export function CustomizeButton({ className }: { className?: string }) {
               )
             })}
           </ul>
-          <button type="button" onClick={reset} className="mt-2 text-sm text-ink-2 underline underline-offset-3 hover:text-ink">
+          <button type="button" onClick={reset} className="mt-2 text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11">
             還原預設
           </button>
         </div>

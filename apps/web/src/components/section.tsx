@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils"
 
 /**
- * 區塊（聯絡簿）：沒有卡片外框，只有標題下一條格線。格線就是結構。
+ * 區塊（聯絡簿）：沒有卡片外框，只有標題下一條印刷線（--print；列與列之間的格線是 --rule）。格線就是結構。
  * 標題上方留白比下方多。
  */
 export function Section({
@@ -24,7 +24,7 @@ export function Section({
   return (
     <section aria-labelledby={titleId} className={cn("flex min-w-0 flex-col", className)}>
       {(title || action) && (
-        <header className="flex min-h-11 flex-wrap items-end gap-x-3 gap-y-1 border-b border-rule pb-2">
+        <header className="flex min-h-11 flex-wrap items-end gap-x-3 gap-y-1 border-b border-print pb-2">
           {title && (
             <h2 id={titleId} className="flex min-w-0 items-baseline gap-2 text-xl font-bold">
               {title}

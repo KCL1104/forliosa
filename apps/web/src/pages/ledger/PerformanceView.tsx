@@ -9,7 +9,7 @@ import { AXIS_TICK, GRID_STROKE, monthTick } from "@/lib/chart"
 import { ReturnChart } from "@/components/charts/ReturnChart"
 import { Pct } from "@/components/finance"
 import { DemoTag, Section as Panel } from "@/components/section"
-import { ChartSkeleton, ErrorState } from "@/components/states"
+import { ChartSkeleton, EmptyState, ErrorState } from "@/components/states"
 import { DataNotes } from "@/components/data-notes"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -44,28 +44,34 @@ export function PerformanceView() {
   const perf = usePerformance(range, account, benchmark)
   const holdings = useHoldings(account)
   const p = perf.data
+  // 算不出來、而且換區間或基準也沒有用（含美股：沒有可商用的價格）：區間與比較基準不放，只留帳戶——那是唯一有用的控制項
+  const blocked = !!p && !perf.isError && p.series.length < 2 && (p.notes ?? []).some((n) => n.includes("美股"))
+  const accountOptions = accounts.data ?? []
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />
+        {!blocked && <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />}
         <Select
           value={account ?? "all"}
           onValueChange={(v) => setAccount(v === "all" ? undefined : (v as string))}
-          items={[{ value: "all", label: "全部帳戶" }, ...(accounts.data ?? []).map((a) => ({ value: a.id, label: a.name }))]}
+          items={[{ value: "all", label: "全部帳戶" }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]}
         >
-          <SelectTrigger size="sm" className="min-w-36" aria-label="帳戶">
+          <SelectTrigger size="sm" className="min-w-36 pointer-coarse:data-[size=sm]:h-11" aria-label="帳戶">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
             <SelectItem value="all">全部帳戶</SelectItem>
-            {(accounts.data ?? []).map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
+            {accountOptions.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}
           </SelectContent>
         </Select>
-        <span className="inline-flex items-center gap-2 text-sm text-ink-2">
-          比較基準
-          {!readOnly && <BenchmarkSelect size="sm" value={prefBenchmark} onChange={(v) => setPref({ benchmark: v })} />}
-        </span>
+        {/* 查看別人的資產：基準由授權者決定，名稱在圖例裡；這裡不放沒有控制項的標籤 */}
+        {!blocked && !readOnly && (
+          <span className="inline-flex items-center gap-2 text-sm text-ink-2">
+            比較基準
+            <BenchmarkSelect size="sm" className="min-w-44 pointer-coarse:data-[size=sm]:h-11" value={prefBenchmark} onChange={(v) => setPref({ benchmark: v })} />
+          </span>
+        )}
         {/* 期間（計算方式在最下面的「計算方式」） */}
         {(p?.start_date && p.end_date) || p?.is_demo ? (
           <p className="num flex items-center gap-2 text-sm text-ink-2 lg:ml-auto">
@@ -85,7 +91,7 @@ export function PerformanceView() {
           <ChartSkeleton height={300} />
         </>
       ) : p.series.length < 2 ? (
-        <NotEnough p={p} account={account} accounts={accounts.data ?? []} onAccount={setAccount} />
+        <NotEnough p={p} account={account} accounts={accountOptions} onAccount={setAccount} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
           <DataNotes notes={p.notes} />
@@ -116,31 +122,37 @@ export function PerformanceView() {
 }
 
 /**
- * 算不出績效時：照後端的 notes 說明為什麼（商用模式：存檔不足、美股沒有可商用的價格），
- * 並給一個現在能做的事——只看新台幣帳戶（不含美股）。
+ * 算不出績效時（空狀態，全站同一種）：標題＋後端 notes 的原文說明為什麼（商用模式：存檔不足、美股沒有可商用的價格），
+ * 最多一個現在能做的事——只看新台幣帳戶（不含美股）；有好幾個新台幣帳戶時，其他的從上面的帳戶選單選。
+ * 原因在這一頁只說這一次（主數字列右邊的「近 1 個月走勢：…」在績效分段不出現）。
  */
 function NotEnough({ p, account, accounts, onAccount }: { p: Performance; account?: string; accounts: { id: string; name: string; currency: string }[]; onAccount: (id: string) => void }) {
   const notes = p.notes ?? []
   const hasUs = notes.some((n) => n.includes("美股"))
-  const tw = accounts.filter((a) => a.currency === "TWD")
+  const tw = accounts.find((a) => a.currency === "TWD")
   return (
-    <div className="border-y border-rule py-6">
-      <p className="font-medium">{notes.length ? "績效還算不出來" : "資料還不夠計算績效"}</p>
-      {notes.length ? (
-        <DataNotes notes={notes} className="mt-1 max-w-prose text-md" />
-      ) : (
-        <p className="text-md text-ink-2">至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。</p>
-      )}
-      {hasUs && !account && tw.length > 0 && (
-        <div className="mt-3 flex flex-wrap gap-2">
-          {tw.map((a) => (
-            <Button key={a.id} variant="outline" size="sm" onClick={() => onAccount(a.id)}>
-              只看「{a.name}」
-            </Button>
-          ))}
-        </div>
-      )}
-    </div>
+    <EmptyState
+      // 這個分段的最後一塊：下面那條線是頁尾（資料來源）的上緣格線，不重複畫、不夾一段空白
+      className="border-b-0 pb-0"
+      title={notes.length ? "績效還算不出來" : "資料還不夠計算績效"}
+      description={
+        // 後端的原文，一則一行（放在空狀態的說明段落裡，所以用 span 不用清單）
+        notes.length
+          ? [...new Set(notes)].map((n) => (
+              <span key={n} className="block">
+                {n}
+              </span>
+            ))
+          : "至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。"
+      }
+      action={
+        hasUs && !account && tw ? (
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => onAccount(tw.id)}>
+            只看「{tw.name}」
+          </Button>
+        ) : undefined
+      }
+    />
   )
 }
 

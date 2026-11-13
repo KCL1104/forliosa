@@ -202,6 +202,21 @@ const pendingHome = async (page, mobile) => {
   }
   await page.getByRole("button", { name: "1 筆草稿等你簽名" }).waitFor({ timeout: 8000 })
 }
+/** 手機底部列：有待簽名的草稿時，「問 AI」那一格多一行「待簽名 1 筆」（寫一份草稿、關掉問 AI 回到帳本） */
+const pendingDock = async (page) => {
+  await draft(page, true)
+  await page.getByRole("dialog").getByRole("button", { name: "關閉" }).click()
+  await page.getByRole("button", { name: "問 AI（待簽名 1 筆）" }).waitFor({ timeout: 8000 })
+}
+/** 績效：含美股算不出來 → 只看新台幣帳戶，才有區間、比較基準與圖表 */
+const performanceTwd = async (page) => {
+  await page.getByRole("button", { name: /只看「永豐/ }).click()
+  await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
+}
+/** 捲到頁面最底：內容的最後一行在底部列上面，沒有被蓋住 */
+const toBottom = async (page) => {
+  await page.evaluate(() => window.scrollTo({ top: document.documentElement.scrollHeight, behavior: "instant" }))
+}
 /** 手機搜尋股票：輸入「00」，符合的股票取代建議、列在輸入框上方（iOS 的鍵盤會蓋住輸入框下方） */
 const mobileSearch = async (page) => {
   await page.getByRole("button", { name: /^問 AI/ }).click()
@@ -378,7 +393,12 @@ const SHOTS = [
   { name: "ledger-transactions", path: "/?view=transactions", ready: "text=月" },
   { name: "ledger-transactions-symbol", path: "/?view=transactions&symbol=2330.TW", ready: "text=只看 2330" },
   { name: "ledger-dividends", path: "/?view=dividends", ready: "text=已入帳" },
-  { name: "ledger-performance", path: "/?view=performance", ready: "text=比較基準" },
+  // 績效：示範帳本含美股（沒有可商用的價格）→ 一開始是空狀態（只留帳戶選單）；只看新台幣帳戶才有區間、基準與圖表
+  { name: "performance-empty", path: "/?view=performance", ready: "text=績效還算不出來" },
+  { name: "ledger-performance", path: "/?view=performance", ready: "text=績效還算不出來", action: performanceTwd },
+  // 手機底部列的其他狀態：待簽名、捲到最底（最後一行沒有被底部列蓋住）
+  { name: "shell-dock-pending", path: "/", ready: "text=總資產", mobileOnly: true, action: pendingDock },
+  { name: "shell-dock-bottom", path: "/stock/2330.TW", ready: "text=參考價", mobileOnly: true, action: toBottom },
   { name: "stock-2330-overview", path: "/stock/2330.TW", ready: "text=參考價" },
   // 總覽第一層（估值句、刻度尺、鍵值格）與第二層（事件表）；2317 持有中、成本在區間外、現在在中段（成本標籤要換到第二行）
   { name: "stock-2330-key", path: "/stock/2330.TW", ready: "text=參考價", action: toSection("ov-key") },

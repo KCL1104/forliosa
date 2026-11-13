@@ -7,7 +7,7 @@ import { useAskAi } from "@/ai/use-ask"
 import { Masked, Pct } from "@/components/finance"
 import { DemoTag } from "@/components/section"
 import { Sparkline } from "@/components/sparkline"
-import { ErrorState } from "@/components/states"
+import { EmptyState, ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, formatMoney, formatPercent, formatPrice, formatQuantity, toneClass } from "@/lib/format"
@@ -91,18 +91,18 @@ function UnpricedNote({ rows }: { rows: Holding[] }) {
 function EmptyLedger() {
   const ask = useAskAi()
   const readOnly = useReadOnly()
-  if (readOnly) return <p className="border-y border-rule py-8 text-ink-2">目前沒有持股。</p>
+  if (readOnly) return <EmptyState title="目前沒有持股" />
+  // 空狀態只給一個動作：交給 AI 記第一筆。表單在「交易」分段的「記一筆」與 AI 輸入框的「＋」裡
   return (
-    <div className="border-y border-rule py-8">
-      <p className="text-lg font-medium">帳本還是空的</p>
-      <p className="mt-1 max-w-prose text-ink-2">跟 AI 說一句就能記下第一筆，例如「買 0050 2 張 52.4」。它會先算好手續費和稅寫成草稿，你簽名後才入帳。</p>
-      <div className="mt-4 flex flex-wrap gap-2">
-        <Button onClick={() => ask.submit("買 0050 2 張 52.4")}>試試「買 0050 2 張 52.4」</Button>
-        <Button variant="outline" onClick={() => ask.action("form")}>
-          改用表單記一筆
+    <EmptyState
+      title="帳本還是空的"
+      description="跟 AI 說一句就能記下第一筆。它會先算好手續費和稅寫成草稿，你簽名後才入帳。"
+      action={
+        <Button variant="outline" onClick={() => ask.submit("買 0050 2 張 52.4")}>
+          試試「買 0050 2 張 52.4」
         </Button>
-      </div>
-    </div>
+      }
+    />
   )
 }
 
@@ -155,7 +155,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
           <button
             type="button"
             onClick={() => onSort({ key, dir: active && sort.dir === "desc" ? "asc" : "desc" })}
-            className={cn("-mr-1 inline-flex h-8 items-center gap-0.5 rounded-sm px-1 hover:text-ink", active && "text-ink")}
+            className={cn("-mr-1 inline-flex h-8 items-center gap-0.5 rounded-sm px-1 hover:text-ink pointer-coarse:h-11", active && "text-ink")}
           >
             {COLUMN_LABEL[c]}
             {/* 排序方向用箭頭（▲▼ 是價格漲跌的符號，不拿來表示排序） */}
@@ -263,7 +263,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
   return (
     <tbody>
       <tr>
-        <th scope="colgroup" colSpan={columns + 1} className="h-[72px] border-b border-rule pt-7 text-left align-bottom">
+        <th scope="colgroup" colSpan={columns + 1} className="h-[72px] border-b border-print pt-7 text-left align-bottom">
           <span className="flex items-baseline gap-2 pb-2 text-base font-bold">
             觀察<span className="num text-sm font-normal text-ink-2">{items?.length ?? 0} 檔</span>
           </span>
@@ -271,8 +271,8 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
       </tr>
       {(items ?? []).length === 0 ? (
         <tr>
-          <td colSpan={columns + 1} className="border-b border-rule py-4 text-md text-ink-2">
-            還沒有觀察的股票。在個股頁按「加入觀察」，這裡會列出今天的走勢。
+          <td colSpan={columns + 1} className="p-0">
+            <WatchEmpty />
           </td>
         </tr>
       ) : (
@@ -283,7 +283,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
             <tr key={w.symbol} className="ruled-row cursor-pointer" onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol: w.symbol } })}>
               <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
                 <div className="flex items-center justify-between gap-4 pr-1">
-                  <Link to="/stock/$symbol" params={{ symbol: w.symbol }} className="group block rounded-sm" onClick={(e) => e.stopPropagation()}>
+                  <Link to="/stock/$symbol" params={{ symbol: w.symbol }} className="group block rounded-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
                     <span className="block text-lg leading-snug font-medium group-hover:underline">{w.name}</span>
                     <span className="num block text-sm text-ink-2">{codeOf(w.symbol)} ・ 觀察中</span>
                   </Link>
@@ -313,6 +313,11 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
       )}
     </tbody>
   )
+}
+
+/** 觀察是空的：區塊標題的格線就是上面那條線 */
+function WatchEmpty() {
+  return <EmptyState className="border-t-0" title="還沒有觀察的股票" description="在個股頁按「加入觀察」，這裡會列出今天的走勢。" />
 }
 
 /** 手機：兩行列 */
@@ -355,12 +360,12 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
       </ul>
       {!readOnly && (
         <>
-      <h2 className="mt-9 flex h-11 items-end gap-2 border-b border-rule pb-2 text-lg font-bold">
+      <h2 className="mt-9 flex h-11 items-end gap-2 border-b border-print pb-2 text-lg font-bold">
         觀察 <span className="num text-sm font-normal text-ink-2">{watch.data?.length ?? 0} 檔</span>
         {watch.data?.some((w) => w.quote?.is_demo ?? w.is_demo) && <DemoTag className="mb-0.5 ml-auto" />}
       </h2>
       {(watch.data ?? []).length === 0 && !watch.isLoading ? (
-        <p className="py-4 text-md text-ink-2">還沒有觀察的股票。在個股頁按「加入觀察」，這裡會列出今天的走勢。</p>
+        <WatchEmpty />
       ) : (
         <ul aria-label="觀察">
           {(watch.data ?? []).map((w) => (
