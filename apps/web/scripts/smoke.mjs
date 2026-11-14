@@ -1898,7 +1898,18 @@ await check("手機：「問 AI」平常是石墨淡底＋框線＋石墨灰的�
         const v = (n) => { const d = document.createElement("div"); d.style.color = `var(${n})`; document.body.appendChild(d); const out = getComputedStyle(d).color; d.remove(); return out }
         return { bg: c.backgroundColor, color: c.color, frame: c.boxShadow, inner: getComputedStyle(el, "::after").borderTopWidth, text: el.textContent.trim(), ai: v("--ai"), wash: v("--ai-wash"), rule: v("--ai-rule"), paper: v("--paper"), dark: document.documentElement.classList.contains("dark") }
       })
-    const rest = await look("問 AI")
+    // 格子的底色與字色有 120ms 的過渡：連讀兩次一樣才算（不讀到過渡中間的顏色）
+    const settled = async (name) => {
+      let prev = await look(name)
+      for (let i = 0; i < 20; i++) {
+        await p.waitForTimeout(60)
+        const next = await look(name)
+        if (next.bg === prev.bg && next.color === prev.color) return next
+        prev = next
+      }
+      return prev
+    }
+    const rest = await settled("問 AI")
     if (!rest.dark) throw new Error("not in dark mode")
     if (rest.bg !== rest.wash || rest.color !== rest.ai || !rest.frame.includes(rest.rule) || rest.inner !== "1px") throw new Error(`dark resting 問 AI is not the outlined box: ${JSON.stringify(rest)}`)
     // 寫一份草稿（不簽名），關掉問 AI
@@ -1908,7 +1919,7 @@ await check("手機：「問 AI」平常是石墨淡底＋框線＋石墨灰的�
     await box.press("Enter")
     await p.getByText(/NT\$104,800/).first().waitFor({ timeout: 8000 })
     await p.getByRole("dialog").getByRole("button", { name: "關閉" }).click()
-    const pending = await look("問 AI（待簽名 1 筆）")
+    const pending = await settled("問 AI（待簽名 1 筆）")
     if (pending.bg !== pending.ai || pending.color !== pending.paper) throw new Error(`pending 問 AI is not the solid block: ${JSON.stringify(pending)}`)
     // 帳本頁：筆數寫在分段下面那一條，格子裡只有「問 AI」
     if (pending.text !== "問 AI") throw new Error(`the box repeats the count on the ledger: ${pending.text}`)
@@ -1917,7 +1928,7 @@ await check("手機：「問 AI」平常是石墨淡底＋框線＋石墨灰的�
     // 其他頁面沒有那一條：格子裡寫筆數
     await p.getByRole("navigation", { name: "主要" }).getByRole("link", { name: "群組" }).click()
     await p.getByRole("heading", { level: 1, name: "群組" }).waitFor({ timeout: 8000 })
-    const elsewhere = await look("問 AI（待簽名 1 筆）")
+    const elsewhere = await settled("問 AI（待簽名 1 筆）")
     if (!/待簽名 1 筆/.test(elsewhere.text) || elsewhere.bg !== elsewhere.ai) throw new Error(`the box should carry the count off the ledger: ${JSON.stringify(elsewhere)}`)
   } finally {
     await dk.close()
