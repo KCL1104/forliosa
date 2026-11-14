@@ -145,13 +145,11 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
                 _require(qty == qty.to_integral_value(), "台股股數必須是整數（零股以股為單位）")
             gross = amount if amount is not None else qty * px
             amount = gross
-            if fee is None:
-                fee = ZERO
-            else:
+            fee = fee if fee is not None else ZERO
+            tax = tax if tax is not None else ZERO
+            if fee > 0:
                 rules.append(f"手續費：自己填的 {fmt_money(fee, currency)}")
-            if tax is None:
-                tax = ZERO
-            elif t is TxnType.SELL:
+            if t is TxnType.SELL and tax > 0:
                 rules.append(f"交易稅：自己填的 {fmt_money(tax, currency)}")
             # buys: the ledger adds only the fee to the cost
             net = gross - fee - tax if t is TxnType.SELL else -(gross + fee)

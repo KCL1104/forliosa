@@ -218,7 +218,8 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
       quantity: shares,
       price,
       is_day_trade: type === "sell" ? f.dayTrade : false,
-      ...(type === "buy" || type === "sell" ? { fee: fee ?? 0, ...(type === "sell" ? { tax: tax ?? 0 } : {}) } : {}),
+      // 沒填就不送（後端當 0）；填了才送
+      ...(type === "buy" || type === "sell" ? { ...(fee !== null ? { fee } : {}), ...(type === "sell" && tax !== null ? { tax } : {}) } : {}),
       note: f.note,
     }
   }, [account, isCash, amount, type, f.date, f.symbol, shares, price, f.dayTrade, f.note, fee, tax])

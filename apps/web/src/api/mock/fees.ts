@@ -53,8 +53,8 @@ export function computePreview(
     const gross = body.amount ?? round2(qty * price)
     const fee = body.fee ?? 0
     const tax = body.type === "sell" ? (body.tax ?? 0) : (body.tax ?? 0)
-    if (body.fee != null) rules.push(`手續費：自己填的 ${money(fee, isUS ? "USD" : "TWD")}`)
-    if (body.type === "sell" && body.tax != null) rules.push(`交易稅：自己填的 ${money(tax, isUS ? "USD" : "TWD")}`)
+    if (fee > 0) rules.push(`手續費：自己填的 ${money(fee, isUS ? "USD" : "TWD")}`)
+    if (body.type === "sell" && tax > 0) rules.push(`交易稅：自己填的 ${money(tax, isUS ? "USD" : "TWD")}`)
     const net = body.type === "buy" ? -(gross + fee) : gross - fee - tax
     return { gross, fee, tax, health_insurance: 0, net_cash: round2(net), rules }
   }
