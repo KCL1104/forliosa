@@ -1325,6 +1325,63 @@ export interface Suspension {
   created_at: string
 }
 
+// ── 管理後台（只有站方管理員；不含 email、user id、金鑰） ─────────────
+/** 金鑰槽的狀態（和 `GET /ai/admin/keys` 相同的值） */
+export type KeySlotState = "ok" | "cooling" | "disabled" | "exhausted" | "over_budget" | "not_configured"
+export interface AdminKeySlot {
+  /** CLAUDE_API_KEY_<n> 的 n */
+  slot: number
+  configured: boolean
+  state: KeySlotState
+  retry_in_seconds: number | null
+  workspace_id: string | null
+  /** 本月（UTC）估計費用（美元） */
+  month_cost_usd: number
+  month_calls: number
+  monthly_budget_usd: number | null
+  /** 黏在這把金鑰上的對話數 */
+  threads: number
+  /** 最近一次失敗的狀態碼與錯誤類型（例如 "429 rate_limit_error"） */
+  last_error: string | null
+}
+export interface AdminDataset {
+  key: string
+  name: string
+  agency: string | null
+  /** 存檔看到的最新資料日期（YYYY-MM-DD） */
+  data_date: string | null
+  /** 最近一次存檔的時間（+08:00） */
+  fetched_at: string | null
+  /** 最新資料離今天幾天（日曆天） */
+  days_behind: number | null
+  /** 落後今天 3 個交易日以上 */
+  stale: boolean
+}
+export type BackfillStatus = "done" | "not_found" | "mismatch" | "no_overlap" | "error"
+/** `GET /admin/overview`：清單照後端的順序（資料集是最久沒有新資料的在前） */
+export interface AdminOverview {
+  users: { total: number; new_7d: number }
+  /** month：UTC 月份（金鑰槽的預算以 UTC 月計） */
+  ai: { month: string; slots: AdminKeySlot[] }
+  datasets: AdminDataset[]
+  history_backfill: { enabled: boolean; rows: number; pending: number; symbols: Record<BackfillStatus, number> }
+}
+/** 新聞下架的封鎖清單：存在資料庫的（新的在前），再來是寫在伺服器設定（NEWS_BLOCKED_DOMAINS）的 */
+export interface BlockedDomain {
+  domain: string
+  reason: string | null
+  /** 加入的時間；寫在伺服器設定的沒有 */
+  created_at: string | null
+  /** 寫在伺服器設定：這裡不能解除 */
+  from_env: boolean
+}
+export interface BlockDomainResult {
+  /** 正規化之後的網域（小寫、去掉 www.） */
+  domain: string
+  /** 刪掉幾則已存的標題（含子網域） */
+  deleted_headlines: number
+}
+
 // ── 錯誤 ──────────────────────────────────────────────────
 export interface ApiErrorBody {
   error: { code: string; message: string; [extra: string]: unknown }
@@ -1652,4 +1709,11 @@ export interface ForliosaApi {
   listSuspensions(): Promise<Suspension[]>
   createSuspension(body: { target: DiscussionTarget; days: SuspensionDays; reason?: string }): Promise<Suspension>
   liftSuspension(id: string): Promise<void>
+  // 管理後台（不是管理員 → 404）
+  getAdminOverview(): Promise<AdminOverview>
+  listBlockedDomains(): Promise<BlockedDomain[]>
+  /** 201：網域正規化之後的寫法與刪掉的標題數；不是網域 → 422 */
+  blockDomain(body: { domain: string; reason?: string }): Promise<BlockDomainResult>
+  /** 寫在伺服器設定的 → 409 `set_in_environment`；不在清單 → 404 */
+  unblockDomain(domain: string): Promise<void>
 }

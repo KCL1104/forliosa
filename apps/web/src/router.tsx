@@ -55,7 +55,7 @@ export interface NewTopicSearch extends DiscussionsSearch {
   symbol?: string
   from?: DiscussionFrom
 }
-/** 站方管理：預設是待處理的檢舉；`status=resolved` 是已處理 */
+/** 管理後台的「討論」：預設是待處理的檢舉；`status=resolved` 是已處理 */
 export interface AdminDiscussionsSearch {
   status?: "resolved"
 }
@@ -174,6 +174,17 @@ const topicRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/discussions/TopicPage"), "TopicPage"),
 })
 
+// 管理後台（站方管理員；其他人是「找不到這個頁面」）：外殼是 `app/AdminShell.tsx`，RootLayout 依路徑換上
+const adminRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin",
+  component: lazyRouteComponent(() => import("@/pages/admin/AdminOverviewPage"), "AdminOverviewPage"),
+})
+const adminNewsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/news",
+  component: lazyRouteComponent(() => import("@/pages/admin/AdminNewsPage"), "AdminNewsPage"),
+})
 const adminDiscussionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/discussions",
@@ -228,7 +239,9 @@ const routeTree = rootRoute.addChildren([
   discussionsRoute,
   newTopicRoute,
   topicRoute,
+  adminRoute,
   adminDiscussionsRoute,
+  adminNewsRoute,
   settingsRoute,
   dataSourcesRoute,
   termsRoute,

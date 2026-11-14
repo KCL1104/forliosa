@@ -8,6 +8,8 @@
   and checked by ``api.deps.current_user``); endpoints that read no user data (:data:`VIEW_AS_IGNORED`) ignore the
   header; every other request is refused: writes with 403 ``read_only``, other reads with 403 ``view_as_not_allowed``.
   The discussion reads are among the ignored ones: discussions always act as the signed-in viewer themselves.
+  Nothing under ``/admin`` (discussion moderation, the back office) is listed on purpose: an admin viewing someone's
+  ledger gets ``view_as_not_allowed`` for its reads and ``read_only`` for its writes.
 """
 
 from __future__ import annotations

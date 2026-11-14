@@ -240,3 +240,34 @@ export function useLiftSuspension() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: dk.suspensions }),
   })
 }
+
+// ── 管理後台：總覽、新聞下架 ─────────────────────────────────
+export const ak = {
+  overview: ["admin", "overview"] as const,
+  blocked: ["admin", "news", "blocked-domains"] as const,
+}
+/** 總覽（使用者人數、AI 金鑰槽、資料集、歷史日線回補）：管理員自己按「重新載入」或換頁回來才重抓 */
+export function useAdminOverview() {
+  return useQuery({ queryKey: ak.overview, queryFn: () => api.getAdminOverview(), staleTime: 60_000, retry: no4xxRetry })
+}
+export function useBlockedDomains() {
+  return useQuery({ queryKey: ak.blocked, queryFn: () => api.listBlockedDomains(), staleTime: 15_000, retry: no4xxRetry })
+}
+/** 封鎖之後清單重抓；個股頁的新聞也一起重抓（那個網域的標題已經刪掉） */
+export function useBlockDomain() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { domain: string; reason?: string }) => api.blockDomain(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ak.blocked })
+      void qc.invalidateQueries({ queryKey: ["news"] })
+    },
+  })
+}
+export function useUnblockDomain() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (domain: string) => api.unblockDomain(domain),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: ak.blocked }),
+  })
+}

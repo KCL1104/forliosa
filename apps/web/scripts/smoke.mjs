@@ -6,7 +6,7 @@
 // 第五批：上市股票沒有逐檔三大法人資料（空狀態＋問 AI 外資動向，上櫃照常）、補記定期定額用扣款日的收盤價。
 // M5 分享：群組（建立、邀請連結、排行與討論串、動態與表情、我的分享、成員分享、頻道）、邀請（沒登入 → 登入 → 選分享 → 加入）、
 // 授權查看（授權給別人、查看別人的唯讀模式、授權失效自動退出）、登入頁的錯誤說明。
-// 討論串（2026-11-13）：沒登入讀公開清單與主題、選公開暱稱 → 發主題 → 回覆（頻率限制）→ 表情 → 檢舉 → 站方管理隱藏、
+// 討論串（2026-11-13）：沒登入讀公開清單與主題、選公開暱稱 → 發主題 → 回覆（頻率限制）→ 表情 → 檢舉 → 管理後台隱藏、
 // 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・市場・群組・討論）與從「問 AI」的時鐘到紀錄。
 // mock 的狀態在記憶體裡：同一個流程用站內導覽（不重新載入），重新載入就回到示範資料。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
@@ -61,7 +61,9 @@ const ROUTES = [
   ["/discussions/top_g_dca", "我明天去問營業員怎麼設定"],
   ["/discussions/top_nope", "找不到這個主題"],
   ["/discussions/new", "發到哪裡"],
+  ["/admin", "AI 金鑰"],
   ["/admin/discussions", "停權中"],
+  ["/admin/news", "封鎖中"],
   ["/terms", "服務條款"],
   ["/privacy", "隱私權政策"],
   ["/stock/2330.TW?tab=discussions", "台積電法說會前，大家怎麼配置？"],
@@ -2019,7 +2021,7 @@ await check("討論（沒登入）：公開清單與主題不用登入就能讀�
   })
 })
 
-await check("討論（主要流程）：選公開暱稱 → 發公開主題（標記股票）→ 馬上回覆被頻率限制擋下（說幾秒後）→ 等到了再送 → 按表情 → 檢舉別人的回覆 → 站方管理隱藏它", async () => {
+await check("討論（主要流程）：選公開暱稱 → 發公開主題（標記股票）→ 馬上回覆被頻率限制擋下（說幾秒後）→ 等到了再送 → 按表情 → 檢舉別人的回覆 → 管理後台隱藏它", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/discussions", { waitUntil: "networkidle" })
     await p.getByText("台積電法說會前，大家怎麼配置？").waitFor({ timeout: 8000 })
@@ -2110,9 +2112,11 @@ await check("討論（主要流程）：選公開暱稱 → 發公開主題（�
     await dialog.getByRole("button", { name: "送出檢舉" }).click()
     await p.getByText("已收到檢舉").waitFor({ timeout: 8000 })
     await dialog.waitFor({ state: "detached", timeout: 5000 })
-    // 站方管理（頭像選單）：那一則在待處理的最上面 → 隱藏（先確認）→ 離開待處理
-    await p.getByRole("button", { name: /帳號選單/ }).click()
-    await p.getByRole("menuitem", { name: "站方管理" }).click()
+    // 管理後台（⌘K 的「管理後台」→「討論」分頁）：那一則在待處理的最上面 → 隱藏（先確認）→ 離開待處理
+    await p.getByRole("button", { name: /搜尋股票/ }).click()
+    await p.getByRole("option", { name: "管理後台" }).click()
+    await p.waitForURL(/\/admin$/, { timeout: 8000 })
+    await p.getByRole("navigation", { name: "管理後台" }).getByRole("link", { name: "討論" }).click()
     await p.waitForURL(/\/admin\/discussions$/, { timeout: 8000 })
     const open = p.getByRole("list", { name: "待處理的檢舉" })
     const row = open.getByRole("listitem").filter({ hasText: "我是舊的不動、新的錢改買。" })
@@ -2510,7 +2514,7 @@ await check("討論（草稿）：回覆打到一半按「改」去設定，上�
   })
 })
 
-await check("討論（入口與設定）：個股的「討論」分頁（開新主題預先標記這一檔）、群組的「討論」分頁（預先選好群組）、設定的公開暱稱、停權時的說明、不是管理員看不到站方管理", async () => {
+await check("討論（入口與設定）：個股的「討論」分頁（開新主題預先標記這一檔）、群組的「討論」分頁（預先選好群組）、設定的公開暱稱、停權時的說明、不是管理員看不到管理後台", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/stock/0050.TW", { waitUntil: "networkidle" })
     const tabs = await p.getByRole("tablist", { name: "個股資料" }).getByRole("tab").allTextContents()
@@ -2557,12 +2561,15 @@ await check("討論（入口與設定）：個股的「討論」分頁（開新�
     if (await p.getByRole("textbox", { name: "回覆內容" }).count()) throw new Error("composer shown while suspended")
     await p.goto(base + "/discussions/top_g_dca", { waitUntil: "networkidle" })
     await p.getByRole("textbox", { name: "回覆內容" }).waitFor({ timeout: 8000 })
-    // 不是站方管理員：頭像選單沒有「站方管理」，網址是找不到頁面
-    await p.goto(base + "/admin/discussions?discuss=member", { waitUntil: "networkidle" })
-    await p.getByRole("heading", { level: 1, name: "找不到這個頁面" }).waitFor({ timeout: 8000 })
-    await p.getByRole("button", { name: /帳號選單/ }).click()
-    await p.getByRole("menuitem", { name: "設定", exact: true }).waitFor({ timeout: 5000 })
-    if (await p.getByRole("menuitem", { name: "站方管理" }).count()) throw new Error("站方管理 shown to a non-admin")
+    // 不是站方管理員：管理後台的每一頁都是一般外殼裡的「找不到這個頁面」，⌘K 也沒有「管理後台」
+    for (const path of ["/admin?discuss=member", "/admin/discussions", "/admin/news"]) {
+      await p.goto(base + path, { waitUntil: "networkidle" })
+      await p.getByRole("heading", { level: 1, name: "找不到這個頁面" }).waitFor({ timeout: 8000 })
+      if (await p.getByRole("navigation", { name: "管理後台" }).count()) throw new Error("admin nav shown to a non-admin")
+    }
+    await p.getByRole("button", { name: /搜尋股票/ }).click()
+    await p.getByRole("option", { name: "設定" }).waitFor({ timeout: 5000 })
+    if (await p.getByRole("option", { name: "管理後台" }).count()) throw new Error("管理後台 in ⌘K for a non-admin")
   })
 })
 
@@ -2576,14 +2583,40 @@ await check("討論（查看別人的資產）：討論的每一頁都擋下，�
       await p.getByText(/討論是你自己的，結束查看後才能用/).waitFor({ timeout: 8000 })
     }
     await p.goto(base + "/admin/discussions", { waitUntil: "networkidle" })
-    await p.getByText(/站方管理是你自己的，結束查看後才能用/).waitFor({ timeout: 8000 })
+    await p.getByText(/管理後台是你自己的，結束查看後才能用/).waitFor({ timeout: 8000 })
     await p.goto(base + "/stock/2330.TW?tab=discussions", { waitUntil: "networkidle" })
     await p.getByText("參考價").first().waitFor({ timeout: 8000 })
     if (await p.getByRole("tab", { name: "討論" }).count()) throw new Error("the stock page has a 討論 tab in view-as mode")
   })
 })
 
-await check("手機：討論的清單、主題、開新主題、站方管理——可按範圍都 ≥ 44×44、頁面不橫向捲動；清單整列可以按、日期格是窄的一欄；沒登入也一樣", async () => {
+await check("管理後台（桌面）：自己的外殼（總覽・討論・新聞下架、回到帳本；沒有頭像選單）、總覽的四個區塊、新聞下架的封鎖與解除都先確認", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/admin", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { level: 1, name: "總覽" }).waitFor({ timeout: 8000 })
+    const nav = p.getByRole("navigation", { name: "管理後台" })
+    const tabs = await nav.getByRole("link").allTextContents()
+    if (tabs.join("|") !== "總覽|討論|新聞下架") throw new Error(`admin tabs: ${tabs.join("|")}`)
+    if (await p.getByRole("button", { name: /帳號選單/ }).count()) throw new Error("avatar menu inside the admin shell")
+    for (const name of ["使用者", "AI 金鑰", "資料", "歷史日線回補"]) await p.getByRole("heading", { level: 2, name, exact: true }).waitFor({ timeout: 5000 })
+    await p.getByText("冷卻中，38 秒後再試").waitFor({ timeout: 5000 })
+    await nav.getByRole("link", { name: "新聞下架" }).click()
+    await p.waitForURL(/\/admin\/news$/, { timeout: 8000 })
+    await p.getByRole("textbox", { name: "網域" }).fill("https://www.example.com/demo-news/1")
+    await p.getByRole("button", { name: "封鎖", exact: true }).click()
+    await p.getByRole("alertdialog").getByRole("button", { name: "封鎖", exact: true }).click()
+    await p.getByText("已封鎖 example.com").waitFor({ timeout: 8000 })
+    await p.getByRole("list", { name: "封鎖中的網域" }).getByRole("listitem").filter({ hasText: /^example\.com/ }).waitFor({ timeout: 8000 })
+    if (await p.getByRole("button", { name: "解除封鎖 sample-wire.example" }).count()) throw new Error("an env-set domain can be unblocked")
+    await p.getByRole("button", { name: "解除封鎖 example.com" }).click()
+    await p.getByRole("alertdialog").getByRole("button", { name: "解除", exact: true }).click()
+    await p.getByText("已解除封鎖 example.com").waitFor({ timeout: 8000 })
+    await p.getByRole("link", { name: "回到帳本" }).click()
+    await p.waitForURL((u) => new URL(u).pathname === "/", { timeout: 8000 })
+  })
+})
+
+await check("手機：討論的清單、主題、開新主題、管理後台——可按範圍都 ≥ 44×44、頁面不橫向捲動；清單整列可以按、日期格是窄的一欄；沒登入也一樣", async () => {
   await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
     for (const [path, ready] of [
       ["/discussions", "台積電法說會前，大家怎麼配置？"],
@@ -2596,6 +2629,8 @@ await check("手機：討論的清單、主題、開新主題、站方管理—�
       ["/discussions/new?discuss=named&symbol=2330.TW", "標記的主題也會出現"],
       ["/admin/discussions?discuss=default", "停權中"],
       ["/admin/discussions?status=resolved", "已隱藏"],
+      ["/admin", "AI 金鑰"],
+      ["/admin/news", "封鎖中"],
       ["/stock/2330.TW?tab=discussions", "台積電法說會前，大家怎麼配置？"],
       ["/groups/grp_family?tab=discussions", "過年的紅包，要不要一起存 0056？"],
       ["/settings", "公開暱稱"],

@@ -473,6 +473,11 @@ const MEDIA_PERSONAL: Record<string, MockMedia[]> = {
   "2330.TW": [["台積電相關新聞（Yahoo股市 RSS 示範）", "示範財經網", `${DEMO_NEWS_URL}/yahoo-2330-1`, 4, "Yahoo股市"]],
 }
 
+/** 所有示範報導的原文連結（管理後台的「新聞下架」用來算刪掉幾則） */
+export function mockMediaUrls(): string[] {
+  return [...Object.values(MEDIA), ...Object.values(MEDIA_PERSONAL)].flatMap((rows) => rows.map((r) => r[2]))
+}
+
 const MEDIA_SOURCE: Record<string, string> = { GDELT: GDELT_ATTRIBUTION, SearXNG: SEARXNG_ATTRIBUTION, "AI 搜尋": AI_SEARCH_ATTRIBUTION, Yahoo股市: YAHOO_RSS_ATTRIBUTION }
 
 function mediaOf(spec: MockInstrumentSpec, commercial: boolean): NewsItem[] {

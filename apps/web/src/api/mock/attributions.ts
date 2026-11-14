@@ -58,6 +58,11 @@ const ROWS: Row[] = [
   ["shioaji-data/official", "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）", "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data", "商品主檔、月營收、季報、市值"],
 ]
 
+/** 存檔的資料集（key、提供機關、名稱）：管理後台的「資料」用 */
+export function datasetRows(): [key: string, agency: string, dataset: string][] {
+  return [...ROWS, ...SEC_ROWS].map(([key, agency, dataset]) => [key, agency, dataset])
+}
+
 export function attributionOf(agency: string, dataset: string, year = YEAR): string {
   return `${agency}〈${dataset}〉（${year}），依${OGDL}`
 }

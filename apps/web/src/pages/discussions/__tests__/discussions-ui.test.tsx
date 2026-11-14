@@ -9,6 +9,7 @@ import { toggleReaction } from "@/api/discussion-queries"
 import { createMockAdapter, type MockOptions } from "@/api/mock/adapter"
 import { ApiError, type ForliosaApi, type Reaction } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
+import { useUi } from "@/app/ui-store"
 import { Toaster } from "@/components/ui/sonner"
 import { newTopicDraftKey, replyDraftKey } from "@/lib/drafts"
 import { createAppRouter } from "@/router"
@@ -22,7 +23,7 @@ vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
 /**
  * 討論串的畫面：沒登入的精簡外殼、清單的篩選與排序、公開暱稱、回覆與頻率限制、表情的樂觀更新、檢舉、
- * 站方管理的權限、開新主題、查看模式擋下、手機的紀錄入口。
+ * 管理後台（站方管理員：總覽、討論的檢舉與停權、新聞下架）的權限、開新主題、查看模式擋下、手機的紀錄入口。
  * 每個測試用一個全新的 mock adapter（和合約同一套規則），掛在全站共用的 `api` 上；時鐘可以往前撥。
  */
 let desktop = false
@@ -55,6 +56,8 @@ afterEach(() => {
   act(() => {
     resetAi()
     useViewAs.setState({ target: null })
+    // ⌘K 的開關是全站的狀態：測試裡開著的搜尋不留到下一個測試
+    useUi.setState({ searchOpen: false })
   })
   desktop = false
 })
@@ -581,28 +584,140 @@ describe("檢舉", () => {
   })
 })
 
-describe("站方管理：只有站方管理員", () => {
-  it("不是管理員：/admin/discussions 是「找不到這個頁面」、不向伺服器要檢舉；頭像選單沒有「站方管理」", async () => {
-    const user = userEvent.setup()
+describe("管理後台：只有站方管理員", () => {
+  it("不是管理員：/admin、/admin/discussions、/admin/news 都是一般外殼裡的「找不到這個頁面」，不向伺服器要任何管理資料", async () => {
     mount({ discussion: { admin: false } })
-    renderApp("/admin/discussions")
-    expect(await screen.findByRole("heading", { level: 1, name: "找不到這個頁面" }, T)).toBeInTheDocument()
-    expect(screen.queryByRole("heading", { name: "站方管理" })).toBeNull()
+    for (const path of ["/admin", "/admin/discussions", "/admin/news"]) {
+      renderApp(path)
+      expect(await screen.findByRole("heading", { level: 1, name: "找不到這個頁面" }, T)).toBeInTheDocument()
+      expect(screen.queryByRole("navigation", { name: "管理後台" })).toBeNull()
+      expect(screen.getByRole("button", { name: /帳號選單/ })).toBeInTheDocument()
+      cleanup()
+    }
+    expect(api.getAdminOverview).not.toHaveBeenCalled()
     expect(api.listAdminReports).not.toHaveBeenCalled()
     expect(api.listSuspensions).not.toHaveBeenCalled()
-    await user.click(screen.getByRole("button", { name: /帳號選單/ }))
-    expect(await screen.findByRole("menuitem", { name: "設定" }, T)).toBeInTheDocument()
-    expect(screen.queryByRole("menuitem", { name: "站方管理" })).toBeNull()
+    expect(api.listBlockedDomains).not.toHaveBeenCalled()
   })
 
-  it("管理員：頭像選單有「站方管理」；待處理的檢舉是格線列，隱藏先確認、處理完就離開待處理", async () => {
+  it("頭像選單沒有管理後台（管理員也沒有）；管理員的 ⌘K 有「管理後台」，不是管理員的沒有", async () => {
+    const user = userEvent.setup()
+    mount()
+    const router = renderApp("/")
+    await user.click(await screen.findByRole("button", { name: /帳號選單/ }, T))
+    expect(await screen.findByRole("menuitem", { name: "設定" }, T)).toBeInTheDocument()
+    expect(screen.queryByRole("menuitem", { name: /站方管理|管理後台/ })).toBeNull()
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "搜尋股票" }))
+    await user.click(await screen.findByRole("option", { name: "管理後台" }, T))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin"), T)
+    cleanup()
+    mount({ discussion: { admin: false } })
+    renderApp("/")
+    await user.click(await screen.findByRole("button", { name: "搜尋股票" }, T))
+    expect(await screen.findByRole("option", { name: "設定" }, T)).toBeInTheDocument()
+    expect(screen.queryByRole("option", { name: "管理後台" })).toBeNull()
+  })
+
+  it("管理員：管理後台自己的外殼（字標｜管理後台、總覽・討論・新聞下架、回到帳本），沒有頭像選單、底部列與問 AI", async () => {
+    const user = userEvent.setup()
+    mount()
+    const router = renderApp("/admin")
+    expect(await screen.findByRole("heading", { level: 1, name: "總覽" }, T)).toBeInTheDocument()
+    const nav = screen.getByRole("navigation", { name: "管理後台" })
+    expect(within(nav).getAllByRole("link").map((a) => `${a.textContent}:${a.getAttribute("href")}:${a.getAttribute("aria-current")}`)).toEqual([
+      "總覽:/admin:page",
+      "討論:/admin/discussions:null",
+      "新聞下架:/admin/news:null",
+    ])
+    expect(screen.getByRole("link", { name: "回到帳本" })).toHaveAttribute("href", "/")
+    expect(screen.queryByRole("button", { name: /帳號選單/ })).toBeNull()
+    expect(screen.queryByRole("navigation", { name: "主要" })).toBeNull()
+    expect(screen.queryByRole("button", { name: /問 AI/ })).toBeNull()
+    expect(document.title).toBe("總覽・管理後台｜Forliosa")
+    await user.click(within(nav).getByRole("link", { name: "討論" }))
+    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/discussions"), T)
+    expect(await screen.findByRole("heading", { level: 1, name: "討論" }, T)).toBeInTheDocument()
+    expect(within(screen.getByRole("navigation", { name: "管理後台" })).getByRole("link", { name: "討論" })).toHaveAttribute("aria-current", "page")
+  })
+
+  it("總覽：使用者人數、AI 金鑰（狀態、本月費用、沒有金鑰）、資料（最久沒更新的在前）、歷史日線回補", async () => {
+    mount()
+    renderApp("/admin")
+    const keys = await screen.findByRole("list", { name: "AI 金鑰" }, T)
+    expect([...keys.children].map((li) => li.textContent)).toEqual([
+      "金鑰 1正常US$3.84／預算 US$50.001,284 次呼叫・41 段對話・wrkspc_01JD7Q2M4X8V",
+      "金鑰 2冷卻中，38 秒後再試US$2.91／預算 US$50.00966 次呼叫・33 段對話・wrkspc_01JD7Q9K2B5N最近的錯誤：429 rate_limit_error",
+      "金鑰 3沒有設定",
+    ])
+    expect(screen.getByText("2026 年 11 月（UTC）")).toBeInTheDocument()
+    const users = screen.getByRole("region", { name: "使用者" })
+    expect(users).toHaveTextContent("帳號14")
+    expect(users).toHaveTextContent("過去 7 天新增3")
+    // 資料：預設只列沒有更新的（最久的在前），其他的收成一行；「全部 N 個」展開
+    const data = screen.getByRole("list", { name: "資料集" })
+    expect(data.children).toHaveLength(3)
+    expect(data.children[0]).toHaveTextContent("14 天沒有新資料")
+    expect(data.children[1]).toHaveTextContent("6 天沒有新資料")
+    expect(data.children[2]).toHaveTextContent(/^其他 \d+ 個最近 3 個交易日內都有新資料。$/)
+    expect(screen.getByText("2 個沒有更新")).toBeInTheDocument()
+    const more = screen.getByRole("button", { name: /^全部 \d+ 個$/ })
+    const total = Number(more.textContent!.match(/\d+/)![0])
+    await userEvent.setup().click(more)
+    expect(screen.getByRole("list", { name: "資料集" }).children).toHaveLength(total)
+    expect(screen.getByRole("list", { name: "資料集" }).children[2]).toHaveTextContent("存檔 11/12 06:10")
+    expect(screen.getByRole("button", { name: "只看沒有更新的" })).toHaveAttribute("aria-expanded", "true")
+    const backfill = screen.getByRole("region", { name: "歷史日線回補" })
+    expect(backfill).toHaveTextContent("狀態開著")
+    expect(backfill).toHaveTextContent("日線1,843,220 筆")
+    expect(backfill).toHaveTextContent("和存檔對不上9 檔")
+  })
+
+  it("新聞下架：封鎖先確認（網址也行，存成網域）、刪掉的標題數；寫在伺服器設定的不能解除；解除先確認", async () => {
+    const user = userEvent.setup()
+    mount()
+    renderApp("/admin/news")
+    const list = await screen.findByRole("list", { name: "封鎖中的網域" }, T)
+    expect([...list.children].map((li) => li.textContent)).toEqual([
+      "demo-press.example11/10 15:20 加入・11/10 來信要求下架解除",
+      "sample-wire.example寫在伺服器設定",
+    ])
+    // 空的不送出，就地說明
+    await user.click(screen.getByRole("button", { name: "封鎖" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("請輸入網域，例如 example.com。")
+    expect(api.blockDomain).not.toHaveBeenCalled()
+    // 不是網域：伺服器說 422，寫在那一欄下面
+    await user.type(screen.getByRole("textbox", { name: "網域" }), "not a domain")
+    await user.click(screen.getByRole("button", { name: "封鎖" }))
+    await user.click(within(await screen.findByRole("alertdialog", undefined, T)).getByRole("button", { name: "封鎖" }))
+    expect(await screen.findByRole("alert", undefined, T)).toHaveTextContent("請輸入網域，例如 example.com。")
+    await user.clear(screen.getByRole("textbox", { name: "網域" }))
+    await user.type(screen.getByRole("textbox", { name: "網域" }), "https://www.Example.com/demo-news/x")
+    await user.type(screen.getByRole("textbox", { name: "原因（選填）" }), "測試")
+    await user.click(screen.getByRole("button", { name: "封鎖" }))
+    const dialog = await screen.findByRole("alertdialog", undefined, T)
+    expect(dialog).toHaveTextContent("解除封鎖不會把刪掉的找回來")
+    await user.click(within(dialog).getByRole("button", { name: "封鎖" }))
+    await waitFor(() => expect(api.blockDomain).toHaveBeenLastCalledWith({ domain: "https://www.Example.com/demo-news/x", reason: "測試" }), T)
+    expect(await screen.findByText("已封鎖 example.com", undefined, T)).toBeInTheDocument()
+    expect(screen.getByText(/^刪掉 \d+ 則標題。$/)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("list", { name: "封鎖中的網域" }).children).toHaveLength(3), T)
+    expect(screen.getByRole("textbox", { name: "網域" })).toHaveValue("")
+    // 伺服器設定的沒有「解除」；資料庫裡的可以解除（先確認）
+    expect(screen.queryByRole("button", { name: "解除封鎖 sample-wire.example" })).toBeNull()
+    await user.click(screen.getByRole("button", { name: "解除封鎖 example.com" }))
+    const confirm = await screen.findByRole("alertdialog", undefined, T)
+    expect(confirm).toHaveTextContent("之前刪掉的標題不會回來")
+    await user.click(within(confirm).getByRole("button", { name: "解除" }))
+    await waitFor(() => expect(api.unblockDomain).toHaveBeenCalledWith("example.com"), T)
+    await waitFor(() => expect(screen.getByRole("list", { name: "封鎖中的網域" }).children).toHaveLength(2), T)
+  })
+
+  it("討論：待處理的檢舉是格線列，隱藏先確認、處理完就離開待處理", async () => {
     const user = userEvent.setup()
     const { adapter } = mount()
-    const router = renderApp("/discussions")
-    await user.click(await screen.findByRole("button", { name: /帳號選單/ }, T))
-    await user.click(await screen.findByRole("menuitem", { name: "站方管理" }, T))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/discussions"), T)
-    expect(await screen.findByRole("heading", { level: 1, name: "站方管理" }, T)).toBeInTheDocument()
+    const router = renderApp("/admin/discussions")
+    expect(await screen.findByRole("heading", { level: 1, name: "討論" }, T)).toBeInTheDocument()
     const open = await screen.findByRole("list", { name: "待處理的檢舉" }, T)
     expect(open.children).toHaveLength(2)
     const row = open.children[0] as HTMLElement
@@ -960,7 +1075,7 @@ describe("被站方隱藏的內容", () => {
 })
 
 describe("查看別人的資產：討論擋下（和群組一樣）", () => {
-  it("清單、主題、開新主題、站方管理都是擋頁；個股頁沒有「討論」分頁", async () => {
+  it("清單、主題、開新主題、管理後台都是擋頁；個股頁沒有「討論」分頁", async () => {
     const { adapter } = mount()
     const dad = (await adapter.listDelegations()).received[0]!
     act(() => useViewAs.setState({ target: { delegation_id: dad.id, owner: dad.owner, scope: dad.scope, accounts: dad.accounts } }))
@@ -970,7 +1085,7 @@ describe("查看別人的資產：討論擋下（和群組一樣）", () => {
       cleanup()
     }
     renderApp("/admin/discussions")
-    expect(await screen.findByText(/站方管理是你自己的，結束查看後才能用/, undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText(/管理後台是你自己的，結束查看後才能用/, undefined, T)).toBeInTheDocument()
     expect(api.listTopics).not.toHaveBeenCalled()
     expect(api.listAdminReports).not.toHaveBeenCalled()
     cleanup()

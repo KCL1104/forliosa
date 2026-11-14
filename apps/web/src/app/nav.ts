@@ -31,14 +31,17 @@ export const NAV_ITEMS: readonly NavItem[] = [LEDGER, MARKET, GROUPS, DISCUSSION
 export const DOCK_TABS: readonly NavItem[] = [LEDGER, MARKET, GROUPS, DISCUSSIONS]
 
 /**
- * 頭像選單裡的頁面（設定、資料來源與授權、站方管理）：桌面在這些頁面時，頭像下面畫導覽的那條線（選取語法 (a)），
- * 選單裡對應的項目標 `aria-current="page"`。不是新的導覽項目。
+ * 頭像選單裡的頁面（設定、資料來源與授權）：桌面在這些頁面時，頭像下面畫導覽的那條線（選取語法 (a)），
+ * 選單裡對應的項目標 `aria-current="page"`。不是新的導覽項目。管理後台（`/admin`）不在頭像選單裡（2026-11-14 移出）。
  */
-export const ACCOUNT_ROUTES: readonly string[] = ["/settings", "/data-sources", "/admin"]
+export const ACCOUNT_ROUTES: readonly string[] = ["/settings", "/data-sources"]
 export const isAccountRoute = (pathname: string) => ACCOUNT_ROUTES.some((r) => under(r)(pathname))
+/** 管理後台（`/admin`、`/admin/discussions`、`/admin/news`）：站方管理員用自己的外殼（`AdminShell`） */
+export const isAdminPath = under("/admin")
 
 /**
- * AI 沒什麼可說的頁面：桌面的 AI 面板預設收成 56px 的窄欄（群組清單、群組、成員、討論、站方管理、設定、紀錄、資料來源）。
+ * AI 沒什麼可說的頁面：桌面的 AI 面板預設收成 56px 的窄欄（群組清單、群組、成員、討論、設定、紀錄、資料來源）。
+ * `/admin` 留在清單裡：不是站方管理員的人打開它時是一般外殼裡的「找不到這個頁面」。
  * AI 不讀討論、也不替人發言，所以討論頁也在這裡。帳本與個股頁不在這裡：面板照記住的開合狀態（預設開）。
  */
 // 市場頁（2026-11-14 第六次評分）：面板開著只有三列最近的對話、下面一大片空白，預設收成窄欄

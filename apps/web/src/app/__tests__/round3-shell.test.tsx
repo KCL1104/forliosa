@@ -6,7 +6,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
 import { useAi } from "@/ai/store"
 import type { Draft, Thread } from "@/ai/types"
 import { createAppRouter } from "@/router"
-import { ACCOUNT_ROUTES, DOCK_TABS, isAccountRoute, isQuietRoute, NAV_ITEMS, QUIET_ROUTES } from "../nav"
+import { ACCOUNT_ROUTES, DOCK_TABS, isAccountRoute, isAdminPath, isQuietRoute, NAV_ITEMS, QUIET_ROUTES } from "../nav"
 
 /**
  * 第三輪（外殼）：
@@ -75,16 +75,19 @@ describe("導覽設定（nav.ts）：一個地方", () => {
     for (const p of ["/", "/groups", "/admin/discussions", "/discussionsx"]) expect(discussions.match(p)).toBe(false)
   })
 
-  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、站方管理、設定、對話紀錄、資料來源、條款與隱私權政策、市場；帳本與個股頁不是", () => {
+  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、管理後台、設定、對話紀錄、資料來源、條款與隱私權政策、市場；帳本與個股頁不是", () => {
     expect([...QUIET_ROUTES]).toEqual(["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy", "/market"])
     expect(isQuietRoute("/market")).toBe(true)
     for (const p of ["/terms", "/privacy"]) expect(isQuietRoute(p)).toBe(true)
     expect(isQuietRoute("/termsx")).toBe(false)
     for (const p of ["/groups", "/groups/grp_family", "/groups/grp_family/members/usr_dad", "/discussions", "/discussions/new", "/discussions/top_p_tsmc", "/admin/discussions", "/settings", "/history", "/data-sources"]) expect(isQuietRoute(p)).toBe(true)
     for (const p of ["/", "/stock/2330.TW", "/marketx", "/groupsx", "/settings-old", "/administrator"]) expect(isQuietRoute(p)).toBe(false)
-    expect([...ACCOUNT_ROUTES]).toEqual(["/settings", "/data-sources", "/admin"])
+    expect([...ACCOUNT_ROUTES]).toEqual(["/settings", "/data-sources"])
     expect(isAccountRoute("/settings")).toBe(true)
-    expect(isAccountRoute("/admin/discussions")).toBe(true)
+    // 管理後台不在頭像選單裡（2026-11-14）：自己的外殼
+    expect(isAccountRoute("/admin/discussions")).toBe(false)
+    for (const p of ["/admin", "/admin/discussions", "/admin/news"]) expect(isAdminPath(p)).toBe(true)
+    for (const p of ["/administrator", "/settings", "/"]) expect(isAdminPath(p)).toBe(false)
     expect(isAccountRoute("/history")).toBe(false)
     expect(isAccountRoute("/discussions")).toBe(false)
   })

@@ -718,7 +718,7 @@ SearXNG 對上游搜尋引擎送出的請求由 SearXNG 自己決定（瀏覽器
 - `uv run python -m forliosa.news searxng-check "台積電" [--language en] [--url http://localhost:8080]`：SearXNG 健康檢查（`/healthz`）＋查一次新聞，
   印出結果數、各引擎的結果數、沒有回應的引擎與原因（拒絕或暫時錯誤）。只印網址的 scheme、主機與埠（帳密會被去掉），不寫資料庫；回應正常時結束碼 0。
 - **下架**：`uv run python -m forliosa.news block udn.com --reason "2026-11-20 來函要求下架"` 立刻刪除該網域（含子網域）已存的標題，之後不再存也不顯示；
-  `unblock`、`blocked` 列出清單；環境變數 `NEWS_BLOCKED_DOMAINS=a.com,b.tw` 也會隱藏（但不刪資料列）。
+  `unblock`、`blocked` 列出清單；環境變數 `NEWS_BLOCKED_DOMAINS=a.com,b.tw` 也會隱藏（但不刪資料列）。管理後台的「新聞下架」（`/admin/news`）做的是同一件事。
 
 ### 環境變數
 
@@ -2104,6 +2104,16 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - SEC 的公司名稱是英文且常常全大寫（SEC 的原文）；沒有中文名、產業與簡介。
 - `company_tickers.json` 以申報公司為主，若收了申報 10-K 的信託型商品，也一律當 `stock`；它們的財報分頁是 SEC 的數字或空狀態。
 
+
+## 2026-11-14 管理後台（`/admin/overview`、`/admin/news/blocked-domains`）
+
+- 站方管理從頭像選單移出，做成獨立的管理後台（產品負責人）。新的端點在 `api/routes/admin.py`、`services/admin.py`、`api/schemas_admin.py`；
+  權限照 `/admin/discussions`（`services.discussions.require_admin`：沒登入 401、不是 `ADMIN_EMAILS` 404，在驗證本文之前）。
+- 總覽只回人數與狀態：使用者是 `total`、`new_7d`（session 沒有最後上線時間，所以沒有「活躍人數」）；金鑰槽從 key pool 的狀態逐欄挑出來
+  （回應模型列出每個欄位，service 之後多放的鍵不會漏到回應裡），沒有金鑰本身。
+- 新聞下架和 CLI（`python -m forliosa.news block|unblock|blocked`）用同一組函式（`news.service.block_domain`／`unblock_domain`），
+  封鎖時刪掉那個網域與子網域已存的標題；寫在 `NEWS_BLOCKED_DOMAINS` 的只列出來，API 不能解除（409 `set_in_environment`）。
+- 查看別人的資產時，`/admin/*` 都不在 view-as 的允許清單：讀取 403 `view_as_not_allowed`、寫入 403 `read_only`。
 
 ## 2026-11-14 手續費與稅不自動算（產品負責人決定）
 

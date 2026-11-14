@@ -1267,6 +1267,21 @@
 - 管理端點不回傳 email、`user_id`；用「某一則內容」指定作者。
 - 每個公開討論頁底部，前端固定一行：「使用者言論，不代表本站立場，也不是投資建議。」
 
+### 管理後台：總覽與新聞下架（2026-11-14）
+
+前端 `/admin`（總覽）、`/admin/discussions`（上面的檢舉與停權）、`/admin/news`（新聞下架）。權限和上面一樣：沒登入 401、不是站方管理員 404（在驗證本文之前）；
+查看別人的資產（`X-Forliosa-View-As`）時讀取 403 `view_as_not_allowed`、寫入 403 `read_only`。不回傳 email、`user_id` 或金鑰。
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}}` |
+| GET | `/admin/news/blocked-domains` | `[{"domain", "reason", "created_at", "from_env"}]`：存在資料庫的（新的在前），再來是只寫在 `NEWS_BLOCKED_DOMAINS` 的（`created_at` null、`from_env` true） |
+| POST | `/admin/news/blocked-domains` | `{"domain", "reason"?: ≤200 字}` → 201 `{"domain", "deleted_headlines"}`：網域正規化（小寫、網址只取主機、去掉 `www.`），封鎖它與子網域並刪掉已存的標題；不是網域 → 422 |
+| DELETE | `/admin/news/blocked-domains/{domain}` | 解除 → 204；寫在 `NEWS_BLOCKED_DOMAINS` 的 → 409 `set_in_environment`；不在清單 → 404。刪掉的標題不會回來 |
+
+- `ai.month` 是 UTC 月份（金鑰的預算以 UTC 月計）；`state` 和 `/ai/admin/keys` 相同，多一個 `not_configured`。
+- `datasets` 是 `dataset_status` 的每一列，最久沒有新資料的在前；`stale`：最新資料落後今天 3 個交易日以上（沒有資料也算）；`days_behind` 是日曆天。
+
 ### 暫緩：線圖留言（彈幕）與指數頁（設計保留，未實作）
 
 > 產品負責人 2026-11-13 決定先不做彈幕；指數頁原本是為了大盤彈幕才加的，一起暫緩。以下是當時談定的設計，之後要做時從這裡開始。

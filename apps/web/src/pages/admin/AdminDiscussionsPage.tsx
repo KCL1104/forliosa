@@ -2,12 +2,8 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { useId, useState } from "react"
 import { toast } from "sonner"
 import { useAdminReports, useCreateSuspension, useLiftSuspension, useModerate, useSuspensions } from "@/api/discussion-queries"
-import { useViewer } from "@/api/queries"
 import { ApiError, PERMANENT_UNTIL, REPORT_NOTE_MAX, REPORT_REASONS, type AdminReport, type Suspension, type SuspensionDays } from "@/api/types"
-import { useReadOnly } from "@/api/view-as"
-import { PageFrame } from "@/app/PageFrame"
-import { ViewAsBlocked } from "@/app/ViewAsBanner"
-import { PageHeader, Section } from "@/components/section"
+import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
@@ -23,11 +19,10 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { NotFoundPage } from "@/pages/NotFoundPage"
 import { REASON_LABEL } from "@/pages/discussions/labels"
 import { PostedTime } from "@/pages/discussions/PostedTime"
 import type { AdminDiscussionsSearch } from "@/router"
-import { usePageTitle } from "@/app/page-title"
+import { AdminPage } from "./AdminPage"
 
 type Status = "open" | "resolved"
 type Confirm =
@@ -49,19 +44,18 @@ const authorOf = (name: string | null) => (name ? `「${name}」` : "這位作�
 const isPermanent = (until: string) => until === PERMANENT_UNTIL || until.startsWith("9999")
 
 /**
- * 站方管理（只有站方管理員；其他人看到的是「找不到這個頁面」）：公開內容的檢舉與停權。
+ * 管理後台的「討論」（只有站方管理員；其他人看到的是「找不到這個頁面」）：公開內容的檢舉與停權。
  * - 檢舉：依對象彙整的格線列（待處理｜已處理）——內容節錄、主題或回覆、作者的公開暱稱、各理由的次數、檢舉人的補充說明；
  *   動作是文字動作「隱藏」「不處理」「停權…」（已處理的是「取消隱藏」），每一個都先確認。
  * - 停權中：公開暱稱、到什麼時候、原因，外框按鈕「解除」。
  * 站方看不到群組內容，也拿不到 email 或 user id：停權是「停這則內容的作者」。
  */
 export function AdminDiscussionsPage() {
-  const readOnly = useReadOnly()
-  const { user } = useViewer()
-  usePageTitle(user?.is_admin ? "站方管理" : "找不到這個頁面")
-  if (readOnly) return <ViewAsBlocked title="站方管理" />
-  if (!user?.is_admin) return <NotFoundPage />
-  return <Admin />
+  return (
+    <AdminPage title="討論">
+      <Admin />
+    </AdminPage>
+  )
 }
 
 function Admin() {
@@ -73,82 +67,78 @@ function Admin() {
   const [confirm, setConfirm] = useState<Confirm | null>(null)
   const items = reports.data?.pages.flatMap((p) => p.items) ?? []
   return (
-    <PageFrame>
-      <div className="flex max-w-measure flex-col gap-10">
-        <PageHeader title="站方管理" className="mb-0" />
+    <>
+      <Section
+        title="檢舉"
+        titleId="admin-reports"
+        bodyClassName="pt-0"
+        action={
+          <RangeChips
+            label="檢舉狀態"
+            value={status}
+            onChange={(v) => void navigate({ to: "/admin/discussions", search: { status: v === "resolved" ? "resolved" : undefined }, replace: true, resetScroll: false })}
+            options={[
+              { value: "open", label: "待處理" },
+              { value: "resolved", label: "已處理" },
+            ]}
+          />
+        }
+      >
+        {reports.isError ? (
+          <ErrorState flush error={reports.error} onRetry={() => void reports.refetch()} />
+        ) : !reports.data ? (
+          <SkeletonLines rows={5} className="pt-4" />
+        ) : items.length === 0 ? (
+          <EmptyState flush title={status === "open" ? "沒有待處理的檢舉" : "還沒有處理過的檢舉"} />
+        ) : (
+          <ul aria-label={status === "open" ? "待處理的檢舉" : "已處理的檢舉"}>
+            {items.map((r) => (
+              <ReportRow key={r.target} report={r} onAction={setConfirm} />
+            ))}
+          </ul>
+        )}
+        {reports.hasNextPage && (
+          <Button variant="outline" className="mt-4" disabled={reports.isFetchingNextPage} onClick={() => void reports.fetchNextPage()}>
+            {reports.isFetchingNextPage ? "載入中…" : "看更多"}
+          </Button>
+        )}
+      </Section>
 
-        <Section
-          title="檢舉"
-          titleId="admin-reports"
-          bodyClassName="pt-0"
-          action={
-            <RangeChips
-              label="檢舉狀態"
-              value={status}
-              onChange={(v) => void navigate({ to: "/admin/discussions", search: { status: v === "resolved" ? "resolved" : undefined }, replace: true, resetScroll: false })}
-              options={[
-                { value: "open", label: "待處理" },
-                { value: "resolved", label: "已處理" },
-              ]}
-            />
-          }
-        >
-          {reports.isError ? (
-            <ErrorState flush error={reports.error} onRetry={() => void reports.refetch()} />
-          ) : !reports.data ? (
-            <SkeletonLines rows={5} className="pt-4" />
-          ) : items.length === 0 ? (
-            <EmptyState flush title={status === "open" ? "沒有待處理的檢舉" : "還沒有處理過的檢舉"} />
-          ) : (
-            <ul aria-label={status === "open" ? "待處理的檢舉" : "已處理的檢舉"}>
-              {items.map((r) => (
-                <ReportRow key={r.target} report={r} onAction={setConfirm} />
-              ))}
-            </ul>
-          )}
-          {reports.hasNextPage && (
-            <Button variant="outline" className="mt-4" disabled={reports.isFetchingNextPage} onClick={() => void reports.fetchNextPage()}>
-              {reports.isFetchingNextPage ? "載入中…" : "看更多"}
-            </Button>
-          )}
-        </Section>
-
-        <Section title="停權中" titleId="admin-suspensions" bodyClassName="pt-0" aside={suspensions.data && suspensions.data.length > 0 ? <span className="num">{suspensions.data.length} 人</span> : undefined}>
-          {suspensions.isError ? (
-            <ErrorState flush error={suspensions.error} onRetry={() => void suspensions.refetch()} />
-          ) : !suspensions.data ? (
-            <SkeletonLines rows={2} className="pt-4" />
-          ) : suspensions.data.length === 0 ? (
-            <EmptyState flush title="目前沒有人被停權" />
-          ) : (
-            <ul aria-label="停權中">
-              {suspensions.data.map((s) => (
-                <li key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule py-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="font-medium break-words">{s.public_name ?? "已刪除的帳號"}</p>
-                    <p className="num mt-0.5 text-sm text-ink-2">
-                      {isPermanent(s.until) ? (
-                        "永久"
-                      ) : (
-                        <>
-                          到 <PostedTime iso={s.until} />
-                        </>
-                      )}
-                      {"・"}
-                      <PostedTime iso={s.created_at} /> 起{s.reason && <span className="text-ink">・{s.reason}</span>}
-                    </p>
-                  </div>
-                  <Button variant="outline" size="sm" aria-label={`解除${authorOf(s.public_name)}的停權`} onClick={() => setConfirm({ kind: "lift", suspension: s })}>
-                    解除
-                  </Button>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Section>
-      </div>
+      <Section title="停權中" titleId="admin-suspensions" bodyClassName="pt-0" aside={suspensions.data && suspensions.data.length > 0 ? <span className="num">{suspensions.data.length} 人</span> : undefined}>
+        {suspensions.isError ? (
+          <ErrorState flush error={suspensions.error} onRetry={() => void suspensions.refetch()} />
+        ) : !suspensions.data ? (
+          <SkeletonLines rows={2} className="pt-4" />
+        ) : suspensions.data.length === 0 ? (
+          <EmptyState flush title="目前沒有人被停權" />
+        ) : (
+          <ul aria-label="停權中">
+            {suspensions.data.map((s) => (
+              <li key={s.id} className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-rule py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="font-medium break-words">{s.public_name ?? "已刪除的帳號"}</p>
+                  <p className="num mt-0.5 text-sm text-ink-2">
+                    {isPermanent(s.until) ? (
+                      "永久"
+                    ) : (
+                      <>
+                        到 <PostedTime iso={s.until} />
+                      </>
+                    )}
+                    {"・"}
+                    <PostedTime iso={s.created_at} /> 起{s.reason && <span className="text-ink">・{s.reason}</span>}
+                  </p>
+                </div>
+                <Button variant="outline" size="sm" aria-label={`解除${authorOf(s.public_name)}的停權`} onClick={() => setConfirm({ kind: "lift", suspension: s })}>
+                  解除
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </Section>
       {confirm && <ConfirmDialog confirm={confirm} onClose={() => setConfirm(null)} />}
-    </PageFrame>
+    </>
   )
 }
 

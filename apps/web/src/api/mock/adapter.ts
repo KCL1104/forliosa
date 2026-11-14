@@ -28,6 +28,7 @@ import { createRecurringStore, seedPlans } from "./recurring"
 import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
 import { createSharingStore, type MemberSource } from "./sharing"
 import { createDiscussionStore, type DiscussionOptions } from "./discussions"
+import { createAdminStore } from "./admin"
 import { closedRounds, positionHistory } from "./rounds"
 import {
   buildChips,
@@ -298,17 +299,25 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   // ── 討論串：時間從示範資料的「現在」起算，加上開啟後實際經過的時間（10 秒間隔、7 天冷卻都照真的時間） ──
   const clock = options.clock ?? Date.now
   const clockStart = clock()
+  const discussionNow = () => mockMarketNow(options.market).getTime() + (clock() - clockStart)
   const discussions = createDiscussionStore(
     {
       me: () => ({ user_id: user.id, display_name: user.display_name, avatar_url: user.avatar_url ?? null }),
       signedIn: () => signedIn,
       myGroupRoles: () => sharing.myGroupRoles(),
       groupRoster: (id) => sharing.groupRoster(id),
-      now: () => mockMarketNow(options.market).getTime() + (clock() - clockStart),
+      now: discussionNow,
     },
     scenario,
     options.discussion,
   )
+  // ── 管理後台：和討論串的站方管理同一個判斷（沒登入 401、不是站方管理員 404） ──
+  const admin = createAdminStore({
+    requireAdmin: () => {
+      if (!signedIn) throw new ApiError(401, "unauthorized", "請先登入")
+      if (!discussions.meFields().is_admin) throw new ApiError(404, "not_found", "找不到這個頁面")
+    },
+  })
   /** `User`：個人資料多了 public_name、is_admin、public_posting_suspended_until（`GET /me`、開發登入、PATCH 都有） */
   const me = (): User => ({ ...user, ...discussions.meFields() })
 
@@ -647,7 +656,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         const all = buildEvents(s, holdingsNow().find((h) => h.symbol === s.symbol), commercial)
         return mine ? all.filter((e) => e.mine) : all
       }),
-    getNews: (symbol) => wait(() => buildNews(spec(symbol), commercial)),
+    getNews: (symbol) => wait(() => buildNews(spec(symbol), commercial).filter((n) => n.category !== "media" || !admin.hides(n.url))),
     getRelated: (symbol) => wait(() => buildRelated(spec(symbol), user.preferences.benchmark)),
     getCompany: (symbol) => wait(() => buildCompany(spec(symbol))),
     getPosition: (symbol) => wait(() => buildPosition(spec(symbol), ledger().txns, commercial)),
@@ -894,6 +903,12 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     listSuspensions: () => wait(() => discussions.listSuspensions()),
     createSuspension: (body) => wait(() => discussions.createSuspension(body)),
     liftSuspension: (id) => wait(() => discussions.liftSuspension(id)),
+
+    // ── 管理後台 ──
+    getAdminOverview: () => wait(() => admin.overview()),
+    listBlockedDomains: () => wait(() => admin.list()),
+    blockDomain: (body) => wait(() => admin.block(body, new Date(discussionNow()))),
+    unblockDomain: (domain) => wait(() => admin.unblock(domain)),
   }
 
   return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)
@@ -924,7 +939,7 @@ const WRITES = new Set<MethodName>([
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
   "createTopic", "deleteTopic", "createReply", "deleteReply", "addDiscussionReaction", "removeDiscussionReaction", "reportDiscussion",
-  "moderateDiscussion", "createSuspension", "liftSuspension",
+  "moderateDiscussion", "createSuspension", "liftSuspension", "blockDomain", "unblockDomain",
 ])
 
 function guardViewAs(base: ForliosaApi, validate: (id: string) => unknown, wait: <T>(value: T | (() => T)) => Promise<T>): ForliosaApi {

@@ -630,6 +630,9 @@ const SHOTS = [
   { name: "discuss-new-group", path: "/discussions/new?scope=group&group_id=grp_family", ready: "text=發到哪裡" },
   { name: "discuss-admin", path: "/admin/discussions", ready: "text=停權中" },
   { name: "discuss-admin-resolved", path: "/admin/discussions?status=resolved", ready: "text=已隱藏" },
+  // 管理後台（2026-11-14）：總覽、新聞下架
+  { name: "admin-overview", path: "/admin", ready: "text=AI 金鑰" },
+  { name: "admin-news", path: "/admin/news", ready: "text=封鎖中" },
   { name: "discuss-admin-suspend", path: "/admin/discussions", ready: "text=停權中", action: discussSuspend },
   { name: "discuss-settings-name", path: "/settings", ready: "text=公開暱稱" },
   { name: "discuss-settings-name-edited", path: "/settings", ready: "text=公開暱稱", action: discussNameEdited },

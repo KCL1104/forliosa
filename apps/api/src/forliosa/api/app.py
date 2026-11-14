@@ -13,6 +13,7 @@ from forliosa.api.errors import install_error_handlers
 from forliosa.api.middleware import VIEW_AS_HEADER, OriginCheckMiddleware, ViewAsMiddleware
 from forliosa.api.routes import (
     accounts,
+    admin,
     ai,
     auth,
     briefings,
@@ -127,5 +128,6 @@ def create_app() -> FastAPI:
                    recurring, ai, briefings, delegations, groups, discussions):
         api.include_router(module.router)
     api.include_router(discussions.admin_router)
+    api.include_router(admin.router)  # the back office: overview, news takedown blocklist
     app.include_router(api)
     return app

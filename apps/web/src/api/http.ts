@@ -66,7 +66,7 @@ import type {
   SharedPortfolio,
   TelegramLinkCode,
 } from "./types"
-import type { AdminReport, Reply, Suspension, Topic, TopicSummary } from "./types"
+import type { AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
 
 type Query = Record<string, string | number | null | undefined>
@@ -272,5 +272,10 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     createSuspension: ({ target, days, reason }) =>
       request<Suspension>("POST", "/admin/discussions/suspensions", { body: { target, days, ...(reason ? { reason } : {}) } }),
     liftSuspension: (id) => request<void>("DELETE", `/admin/discussions/suspensions/${enc(id)}`),
+    getAdminOverview: () => request<AdminOverview>("GET", "/admin/overview"),
+    listBlockedDomains: () => request<BlockedDomain[]>("GET", "/admin/news/blocked-domains"),
+    blockDomain: ({ domain, reason }) =>
+      request<BlockDomainResult>("POST", "/admin/news/blocked-domains", { body: { domain, ...(reason ? { reason } : {}) } }),
+    unblockDomain: (domain) => request<void>("DELETE", `/admin/news/blocked-domains/${enc(domain)}`),
   }
 }

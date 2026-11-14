@@ -106,6 +106,23 @@ describe("討論串的 HTTP adapter", () => {
     expect(Object.keys(calls[6]!.body as object)).toContain("days")
   })
 
+  it("管理後台：總覽、新聞下架的封鎖清單（網域放在路徑裡、編碼；沒有原因就不送 reason）", async () => {
+    const calls = captureFetch((c) => (c.method === "DELETE" ? noContent() : new Response(JSON.stringify({}), { status: 200 })))
+    const api = createHttpAdapter("https://api.example.test")
+    await api.getAdminOverview()
+    await api.listBlockedDomains()
+    await api.blockDomain({ domain: "udn.com", reason: "來信要求下架" })
+    await api.blockDomain({ domain: "example.com" })
+    await api.unblockDomain("money.udn.com")
+    expect(calls.map((c) => [c.method, c.path, c.body])).toEqual([
+      ["GET", "/admin/overview", undefined],
+      ["GET", "/admin/news/blocked-domains", undefined],
+      ["POST", "/admin/news/blocked-domains", { domain: "udn.com", reason: "來信要求下架" }],
+      ["POST", "/admin/news/blocked-domains", { domain: "example.com" }],
+      ["DELETE", "/admin/news/blocked-domains/money.udn.com", undefined],
+    ])
+  })
+
   it("錯誤物件裡的附加欄位帶進 ApiError.extra（和 code、message 同一層）", async () => {
     const api = createHttpAdapter("https://api.example.test")
     const fail = async (status: number, error: Record<string, unknown>, run: () => Promise<unknown>) => {

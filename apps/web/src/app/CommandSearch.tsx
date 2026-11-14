@@ -2,7 +2,7 @@ import { useNavigate } from "@tanstack/react-router"
 import { Command as CommandPrimitive } from "cmdk"
 import { SearchIcon, XIcon } from "lucide-react"
 import { useEffect, useState } from "react"
-import { useInstrumentSearch } from "@/api/queries"
+import { useInstrumentSearch, useViewer } from "@/api/queries"
 import type { Instrument } from "@/api/types"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { useIsDesktop } from "@/hooks/use-media-query"
@@ -29,6 +29,8 @@ export function CommandSearch() {
   const openTradeForm = useUi((s) => s.openTradeForm)
   // 查看別人的資產時是唯讀：不提供記帳
   const readOnly = useReadOnly()
+  // 管理後台不在頭像選單裡：站方管理員從這裡（「管理後台」）或直接打 /admin 進去
+  const admin = useViewer().user?.is_admin === true && !readOnly
   const togglePrivacy = usePrefs((s) => s.togglePrivacy)
   const navigate = useNavigate()
   const [q, setQ] = useState("")
@@ -65,7 +67,7 @@ export function CommandSearch() {
   }
 
   const results = search.data ?? []
-  const pages = PAGES.filter((p) => !q || p.label.includes(q.trim()))
+  const pages = (admin ? [...PAGES, ADMIN_PAGE] : PAGES).filter((p) => !q || p.label.includes(q.trim()))
   // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用。
   // 和下面渲染的條件一致（查看模式沒有「記一筆交易」），否則會選到不存在的項目
   const values = [
@@ -164,6 +166,7 @@ const PAGES = [
   { to: "/history", label: "對話紀錄" },
   { to: "/settings", label: "設定" },
 ] as const
+const ADMIN_PAGE = { to: "/admin", label: "管理後台" } as const
 
 const groupClass = cn(
   "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-sm [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground",
