@@ -80,7 +80,7 @@ export function AvatarMenu() {
           <DropdownMenuLabel className="text-sm text-ink-2">外觀</DropdownMenuLabel>
           <DropdownMenuRadioGroup value={theme} onValueChange={(v) => setPref({ theme: v as ThemePreference })}>
             <DropdownMenuRadioItem value="light">淺色（紙白）</DropdownMenuRadioItem>
-            <DropdownMenuRadioItem value="dark">深色（夜間筆記本）</DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="dark">深色（石墨）</DropdownMenuRadioItem>
             <DropdownMenuRadioItem value="system">跟隨系統</DropdownMenuRadioItem>
           </DropdownMenuRadioGroup>
         </DropdownMenuGroup>
