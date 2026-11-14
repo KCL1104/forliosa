@@ -1433,11 +1433,11 @@ await check("手機：持倉列有定期定額標記，按標記到設定、按�
   await list.getByRole("link", { name: /定期定額：每月 6 日/ }).click()
   await m.waitForURL(/\/settings#plan-rcp_demo0050/)
   await m.goto(base + "/", { waitUntil: "networkidle" })
-  // 按在列的右半邊（現價），不是名稱
+  // 按在列的右半邊（現價），不是名稱；最右邊 44px 是展開每一筆買賣的鈕（2026-11-14），按它不換頁
   const row = list.locator("li").filter({ hasText: "元大台灣50" })
   await row.evaluate((el) => el.scrollIntoView({ block: "center" }))
   const box = await row.boundingBox()
-  await m.mouse.click(box.x + box.width - 30, box.y + box.height / 2)
+  await m.mouse.click(box.x + box.width - 90, box.y + 36)
   await m.waitForURL(/\/stock\/0050\.TW/)
 })
 await check("手機：法人觀點三行列＋免責", async () => {
