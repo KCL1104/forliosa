@@ -12,7 +12,7 @@ import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { CommentThread } from "../Discussion"
+import { CommentThread, Reactions } from "../Discussion"
 import { PERIOD_LABEL } from "../labels"
 
 const PERIODS: { value: LeaderboardPeriod; label: string }[] = [
@@ -26,7 +26,7 @@ const PERIODS: { value: LeaderboardPeriod; label: string }[] = [
  * （較大較粗；表頭墨色＋排序箭頭，桌面的表頭帶 aria-sort）；總報酬（含股利）是一般字級的一欄，不排名。兩個都有 ▲▼。
  * 只列出伺服器回來的人（沒開報酬率的人不在裡面，也不標「未分享」）；期間報酬算不出來是「—」，不說原因。
  * 沒有收盤價的持股（美股）不算進期間報酬，只在自己那一列標「不含美股」。
- * 下面是當天排行的討論串。
+ * 表下面是當天排行的表情（和動態、週報同一個元件），再下面是當天排行的討論串。
  */
 export function RankingTab({ group }: { group: Group }) {
   const [period, setPeriod] = useState<LeaderboardPeriod>("day")
@@ -66,6 +66,8 @@ export function RankingTab({ group }: { group: Group }) {
             )}
             <MyNullNote entries={b.entries} />
             <DataNotes notes={b.notes} />
+            {/* 當天排行的表情：和動態、週報同一個元件；只有計數，不列出誰按的 */}
+            {b.entries.length > 0 && <Reactions groupId={group.id} target={`leaderboard:${b.date}`} reactions={b.reactions} />}
           </>
         )}
       </section>
@@ -249,7 +251,7 @@ function MyNullNote({ entries }: { entries: LeaderboardEntry[] }) {
   return <p className="text-base text-ink">這段期間算不出你的報酬。美股沒有收盤價，不算在內。</p>
 }
 
-/** 當天排行的討論串（`leaderboard:<date>`）。排行的回應沒有表情計數，所以這裡只有留言（見 OPEN_QUESTIONS） */
+/** 當天排行的討論串（`leaderboard:<date>`）；表情在排行表下面（排行的回應帶 `reactions`） */
 function LeaderboardThread({ groupId, date }: { groupId: string; date: string }) {
   return (
     <Section title={`${formatDateShort(date)}的討論`} titleId="rank-thread">

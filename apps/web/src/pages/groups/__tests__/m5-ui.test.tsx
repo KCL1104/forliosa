@@ -77,6 +77,25 @@ describe("分享開關", () => {
     expect(screen.getByText("Discord 頻道、Telegram「家族投資群」")).toBeInTheDocument()
     void rerender
   })
+  it("成員的推播旁說明群組換頻道時會自動關掉；擁有者、還沒有頻道、邀請預覽都不說", async () => {
+    const targets = [{ kind: "discord" as const, label: "Discord 頻道" }]
+    renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushTargets={targets} pushAutoOff />)
+    const note = await screen.findByText("群組換頻道時會自動關掉。")
+    // 念開關時一起念（aria-describedby）
+    expect(screen.getByRole("switch", { name: "推播" }).getAttribute("aria-describedby")).toContain(note.id)
+    cleanup()
+    renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushTargets={targets} pushAutoOff={false} />)
+    await screen.findByText("Discord 頻道")
+    expect(screen.queryByText("群組換頻道時會自動關掉。")).toBeNull()
+    cleanup()
+    renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushTargets={[]} pushAutoOff />)
+    await screen.findByText("這個群組還沒有設定頻道。")
+    expect(screen.queryByText("群組換頻道時會自動關掉。")).toBeNull()
+    cleanup()
+    renderInRouter(<ShareToggles value={DEFAULT_SHARE} onChange={() => {}} pushAutoOff />)
+    await screen.findByText(/群組有設定頻道才會送/)
+    expect(screen.queryByText("群組換頻道時會自動關掉。")).toBeNull()
+  })
 })
 
 describe("群組畫面不透露誰沒分享", () => {
@@ -93,6 +112,23 @@ describe("群組畫面不透露誰沒分享", () => {
     expect(document.body.textContent).not.toContain("未分享")
     // 我有美股：期間報酬只算有收盤價的持股，只在自己那一列標「不含美股」（別人的不說）
     expect(within(table).getAllByText("不含美股")).toHaveLength(1)
+  })
+
+  it("排行下面有當天的表情（和動態、週報同一個元件）；按了以伺服器的計數為準，只有計數", async () => {
+    const user = userEvent.setup()
+    renderInRouter(<RankingTab group={family} />)
+    const table = await screen.findByRole("table", { name: "今日排行" }, T)
+    const chip = await screen.findByRole("button", { name: "恭喜 3，你按過" }, T)
+    expect(chip).toHaveAttribute("aria-pressed", "true")
+    // 在排行表之後（表下面），不是在討論串裡
+    expect(table.compareDocumentPosition(chip) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    expect(screen.getByRole("button", { name: "加表情" })).toBeInTheDocument()
+    await user.click(chip)
+    expect(await screen.findByRole("button", { name: "恭喜 2" }, T)).toHaveAttribute("aria-pressed", "false")
+    // 還原示範資料（其他測試共用同一個 mock）
+    await user.click(screen.getByRole("button", { name: "恭喜 2" }))
+    await screen.findByRole("button", { name: "恭喜 3，你按過" }, T)
+    expect(document.body.textContent).not.toContain("未分享")
   })
 
   it("動態：沒開交易動態的人只有「加入了群組」；成交價只在對方開了才出現，隱私模式遮住", async () => {
@@ -181,6 +217,20 @@ describe("邀請：加入前先選分享", () => {
     expect(await api.getShare("grp_club")).toEqual({ ...DEFAULT_SHARE, trades: true })
     // 已經是成員：預覽變成「已經是成員」
     expect((await api.getInvite("club-2026")).status).toBe("member")
+  })
+
+  it("已經是成員：直接連到那個群組（預覽帶 group_id），不是群組清單", async () => {
+    renderApp("/invite/family-open")
+    expect(await screen.findByText("你已經是這個群組的成員。", undefined, T)).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "到群組" }).getAttribute("href")).toBe("/groups/grp_family")
+    expect((await api.getInvite("family-open")).group_id).toBe("grp_family")
+    // 還不是成員的人拿不到群組 id
+    await api.logout()
+    try {
+      expect(await api.getInvite("family-open")).not.toHaveProperty("group_id")
+    } finally {
+      await api.devLogin({ email: "demo@forliosa.local", display_name: "示範使用者" })
+    }
   })
 
   it("失效的邀請（410）與不存在的（404）有不同的說明", async () => {

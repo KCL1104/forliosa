@@ -62,8 +62,29 @@ def test_gdelt_query_is_english_with_the_country_or_language_filter():
     assert gdelt_query(query("3105", "穩懋", english=("WIN",), symbol="3105.TWO", market="TPEX")) == \
         "3105 sourcecountry:taiwan"
     assert gdelt_query(query("2308", "台達電", english=("DELTA",))) == "2308 sourcecountry:taiwan"
+    # US stocks: English, from US and UK outlets only (FIPS codes in an OR group; checked live 2026-11-14)
     us = query("NVDA", "NVIDIA", "US", ("NVIDIA",), symbol="NVDA")
-    assert gdelt_query(us) == "(NVIDIA OR NVDA) sourcelang:english"
+    assert gdelt_query(us) == "(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK) sourcelang:english"
+
+
+def test_us_news_comes_from_us_and_uk_outlets_only():
+    """The 2026-11-12 answer to ``sourcelang:english`` alone was mostly reprints from India, Australia, Singapore…;
+    the 2026-11-14 answer to the US/UK query has only those two. A US query also drops any other country GDELT
+    names in ``sourcecountry`` (a second check); a Taiwan query is not filtered by country here."""
+    us = query("NVDA", "NVIDIA", "US", ("NVIDIA",), symbol="NVDA")
+    f = RecordingFetcher(fixture_bytes("gdelt_nvda_us_uk_live_20261114.json"))
+    items = GdeltSource(f).fetch(us)
+    assert f.calls[0][1]["query"] == "(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK) sourcelang:english"
+    assert len(items) == 8 and {i.domain for i in items} >= {"theguardian.com", "bostonglobe.com"}
+    # the old, unfiltered answer: only its US and UK rows would survive
+    old = fixture_bytes("gdelt_nvda_english_live_20261112.json")
+    kept = GdeltSource(RecordingFetcher(old)).fetch(us)
+    assert len(parse_gdelt(old)) == 16 and len(kept) == 4  # India, Australia, China, Singapore… dropped
+    assert not {i.domain for i in kept} & {"businesstimes.com.sg"}
+    assert parse_gdelt({"articles": [{"title": "t", "url": "https://x.com/1", "seendate": "20261112T070000Z"}]},
+                       frozenset({"United States"}))  # no sourcecountry field: kept
+    tw = GdeltSource(RecordingFetcher(fixture_bytes("gdelt_tsmc_taiwan_live_20261112.json"))).fetch(query())
+    assert len(tw) == 17
 
 
 class RecordingFetcher(HttpFetcher):

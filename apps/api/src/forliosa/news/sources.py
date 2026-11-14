@@ -4,8 +4,8 @@
   use for any academic, commercial, or governmental use of any kind without fee" with a citation to GDELT.
   Queries are in **English** (GDELT indexes machine translations; 「台積電 sourcelang:chinese」 finds nothing):
   the company's English short name (t187ap03 英文簡稱 / mopsfin ``Symbol``) and its code, ``sourcecountry:taiwan``
-  for Taiwan stocks, ``sourcelang:english`` for US stocks. One IP may ask once every 5 s; a 429 stops the source
-  (:class:`SourceBlocked`) and the caller backs off.
+  for Taiwan stocks, ``sourcelang:english`` from US and UK outlets for US stocks. One IP may ask once every 5 s;
+  a 429 stops the source (:class:`SourceBlocked`) and the caller backs off.
 * :class:`forliosa.news.searxng.SearxngSource` — our private SearXNG's JSON API, **on by default** (product owner
   2026-11-12, third round): Chinese queries, news engines only, one query at a time, per-engine pauses; see that
   module.
@@ -36,6 +36,13 @@ log = logging.getLogger(__name__)
 
 GDELT_URL = "https://api.gdeltproject.org/api/v2/doc/doc"
 GDELT_MAX_RECORDS = 75
+# US stocks: English articles from US and UK outlets only (product owner 2026-11-14, 照建議): ``sourcelang:english``
+# alone brought many Indian and Australian local reprints. GDELT takes FIPS codes (US, UK — not GB) and an OR group
+# in parentheses; checked live 2026-11-14: ``(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK)
+# sourcelang:english`` answered 75 English articles, 72 United States + 3 United Kingdom.
+US_NEWS_COUNTRIES = ("US", "UK")
+# The same countries as GDELT names them in each article's ``sourcecountry``: a second check on the answer.
+US_NEWS_COUNTRY_NAMES = frozenset({"United States", "United Kingdom"})
 YAHOO_RSS_URL = "https://tw.stock.yahoo.com/rss"
 BLOCK_STATUSES = frozenset({403, 429, 451})
 
@@ -99,7 +106,8 @@ def _quoted(term: str) -> str:
 
 # -- GDELT ---------------------------------------------------------------------------------------------------
 def gdelt_query(q: Query) -> str:
-    """``(TSMC OR 2330) sourcecountry:taiwan`` / ``(NVIDIA OR NVDA) sourcelang:english``. Terms shorter than three
+    """``(TSMC OR 2330) sourcecountry:taiwan`` / ``(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK)
+    sourcelang:english`` (US stocks: US and UK outlets only, see :data:`US_NEWS_COUNTRIES`). Terms shorter than three
     characters are left out (GDELT rejects them and they match too much). For a Taiwan stock an English short name
     that is an everyday word (穩懋 「WIN」, 台達電 「DELTA」) is left out too: GDELT would answer with the newest
     articles using the word and the stock's own would not fit in the 75 records — the code finds those
@@ -114,7 +122,10 @@ def gdelt_query(q: Query) -> str:
     if not terms:
         raise ProviderUnavailable(f"{q.symbol}: no English search term for GDELT")
     body = terms[0] if len(terms) == 1 else "(" + " OR ".join(terms) + ")"
-    return f"{body} {'sourcecountry:taiwan' if q.taiwan else 'sourcelang:english'}"
+    if q.taiwan:
+        return f"{body} sourcecountry:taiwan"
+    countries = " OR ".join(f"sourcecountry:{c}" for c in US_NEWS_COUNTRIES)
+    return f"{body} ({countries}) sourcelang:english"
 
 
 def _gdelt_time(dt: datetime) -> str:
@@ -129,10 +140,11 @@ def parse_gdelt_seendate(value: str) -> datetime | None:
         return None
 
 
-def parse_gdelt(payload: bytes | str | dict[str, Any]) -> list[RawItem]:
+def parse_gdelt(payload: bytes | str | dict[str, Any], countries: frozenset[str] | None = None) -> list[RawItem]:
     """An ArtList JSON response -> raw items. GDELT answers errors as plain text with HTTP 200 (「Please limit
     requests to one every 5 seconds…」 is a block; 「The specified phrase is too short」 a bad query); an empty
-    result is ``{}``. ``socialimage`` and ``url_mobile`` are ignored."""
+    result is ``{}``. ``socialimage`` and ``url_mobile`` are ignored. With ``countries``, an article whose
+    ``sourcecountry`` names another country is dropped (one without the field is kept: the query already asked)."""
     if isinstance(payload, dict):
         data: Any = payload
     else:
@@ -149,6 +161,8 @@ def parse_gdelt(payload: bytes | str | dict[str, Any]) -> list[RawItem]:
     out: list[RawItem] = []
     for a in data.get("articles") or []:
         if not isinstance(a, dict):
+            continue
+        if countries is not None and a.get("sourcecountry") and str(a["sourcecountry"]) not in countries:
             continue
         title, url = str(a.get("title") or "").strip(), str(a.get("url") or "").strip()
         seen = parse_gdelt_seendate(str(a.get("seendate") or ""))
@@ -179,7 +193,7 @@ class GdeltSource:
             if exc.status in BLOCK_STATUSES:
                 raise SourceBlocked(f"GDELT HTTP {exc.status}") from exc
             raise
-        return parse_gdelt(raw)
+        return parse_gdelt(raw, None if q.taiwan else US_NEWS_COUNTRY_NAMES)
 
 
 # -- Yahoo股市 RSS (personal only) ----------------------------------------------------------------------------

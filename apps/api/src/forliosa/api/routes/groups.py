@@ -127,7 +127,8 @@ def revoke_invite(group_id: str, invite_id: str, user: User = Depends(signed_in_
     return Response(status_code=204)
 
 
-@router.get("/invites/{token}", response_model=InvitePreview, summary="邀請預覽（不需登入）")
+@router.get("/invites/{token}", response_model=InvitePreview, response_model_exclude_unset=True,
+            summary="邀請預覽（不需登入；已是成員時多 group_id）")
 def preview_invite(token: str, request: Request, db: Session = Depends(get_db)):
     return svc.preview_invite(db, token, session_user(request, db))
 

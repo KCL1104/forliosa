@@ -326,13 +326,30 @@ def dividend_status(e: DividendEvent) -> str:
     return "announced" if e.ex_dividend_date is not None else "resolved"
 
 
-def dividends(md: MarketData, symbol: str) -> list[dict[str, Any]]:
+# A resolution with no ex-dividend notice is listed only while its board date is this recent (product owner
+# 2026-11-14, 2-6): annual dividends often go ex more than four months after the board meeting, and an older one
+# without a notice most likely went ex before archiving started — listed, it would look like a pending dividend.
+RESOLUTION_SHOWN_DAYS = 180
+
+
+def resolution_shown(e: DividendEvent, today: date) -> bool:
+    """Notices always; a resolution only when its board date (else its AGM date) is within
+    :data:`RESOLUTION_SHOWN_DAYS` — one with neither date cannot be placed, so it is left out."""
+    if e.ex_dividend_date is not None:
+        return True
+    resolved_on = e.board_date or e.meeting_date
+    return resolved_on is not None and resolved_on >= today - timedelta(days=RESOLUTION_SHOWN_DAYS)
+
+
+def dividends(md: MarketData, symbol: str, today: date | None = None) -> list[dict[str, Any]]:
     """Ex-dividend notices plus TWSE board / AGM resolutions (t187ap45_L) not yet in a notice. A resolution's
-    ``ex_dividend_date`` is null until the notice appears (or when it went ex before archiving started);
+    ``ex_dividend_date`` is null until the notice appears; resolutions whose board date is older than
+    :data:`RESOLUTION_SHOWN_DAYS` without a notice are left out (they went ex before archiving started).
     ``cash_sources`` splits the cash by source — 資本公積 cash is generally not dividend income."""
     info = require_instrument(md, symbol)
     ans = md.dividends(info.symbol)
-    events = sorted(ans.value, key=dividend_sort_key, reverse=True)
+    today = today or today_taipei()
+    events = sorted((e for e in ans.value if resolution_shown(e, today)), key=dividend_sort_key, reverse=True)
     out = []
     for e in events:
         is_demo = e.is_demo or ans.is_demo

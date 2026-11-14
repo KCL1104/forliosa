@@ -1,4 +1,4 @@
-import { useState } from "react"
+import { useLayoutEffect, useRef, useState } from "react"
 import { Bar, BarChart, CartesianGrid, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { useDividends, useFinancials, useRevenue } from "@/api/queries"
 import type { Financials, FinancialsPeriod, InstrumentDetail, MonthlyRevenue } from "@/api/types"
@@ -124,6 +124,14 @@ function Revenue({ symbol }: { symbol: string }) {
   )
 }
 
+/**
+ * 財報表的「項目」欄：橫向捲動時固定在左邊，紙色底蓋住捲過去的數字；欄寬只給到最長的項目名稱，
+ * 多出來的寬度留給期間欄（手機上捲到最右邊時看得到兩期以上）。
+ * 有數字捲到它底下時（捲動容器帶 `data-scrolled`）右邊多一條 1px 格線，像試算表凍結的欄：被切掉一半的數字看得出是捲過去的。
+ * 表格用分開的框線（border-separate）、格線畫在每一格上：合併框線畫在表格上，固定的格子會把它蓋掉。
+ */
+const STICKY_LABEL = "sticky left-0 z-[1] w-24 bg-paper pr-3 group-data-scrolled/fin:shadow-[inset_-1px_0_0_var(--rule)]"
+
 const ROWS: { label: string; pick: (f: Financials) => (number | null)[]; kind: "money" | "pct" | "eps" }[] = [
   { label: "營收", pick: (f) => f.income.revenue, kind: "money" },
   { label: "毛利率", pick: (f) => f.margins.gross, kind: "pct" },
@@ -137,10 +145,30 @@ const ROWS: { label: string; pick: (f: Financials) => (number | null)[]; kind: "
   { label: "自由現金流", pick: (f) => f.cashflow.free_cash_flow, kind: "money" },
 ]
 
+/**
+ * 期間在欄、由舊到新的寬表格：手機上放不下時，一打開（以及換季／年、資料換了）就捲到最右邊，先看到最新一期。
+ * 只在這些時候捲一次，使用者自己往回捲之後不再拉回去；不用動畫。
+ */
+function useScrollToNewest<T extends HTMLElement>(key: unknown) {
+  const ref = useRef<T>(null)
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+    // 有東西捲到固定欄底下時標 data-scrolled（不用 state：捲動時不重畫整張表）
+    const mark = () => el.toggleAttribute("data-scrolled", el.scrollLeft > 0)
+    el.scrollLeft = el.scrollWidth - el.clientWidth
+    mark()
+    el.addEventListener("scroll", mark, { passive: true })
+    return () => el.removeEventListener("scroll", mark)
+  }, [key])
+  return ref
+}
+
 function Statements({ symbol }: { symbol: string }) {
   const [period, setPeriod] = useState<FinancialsPeriod>("quarterly")
   const fin = useFinancials(symbol, period)
   const f = fin.data
+  const scroller = useScrollToNewest<HTMLDivElement>(f)
   useSourceNote(sourceNotes(f?.sources))
   // 台股金額是新台幣千元；美股（SEC EDGAR）是美元，期間是公司的會計年度
   const usd = f?.currency === "USD"
@@ -178,11 +206,12 @@ function Statements({ symbol }: { symbol: string }) {
               </>
             ) : null}
           </TabLead>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[560px] border-collapse text-md">
+          {/* 捲到最新一期時，「項目」欄固定在左邊（紙色底蓋住捲過去的數字），每一列才讀得出是什麼 */}
+          <div ref={scroller} className="group/fin overflow-x-auto">
+            <table className="w-full min-w-[560px] border-separate border-spacing-0 text-md">
               <thead>
                 <tr className="form-head">
-                  <th scope="col" className="h-10 text-left">
+                  <th scope="col" className={cn(STICKY_LABEL, "h-10 text-left")}>
                     項目
                   </th>
                   {shown.map((p, i) => {
@@ -201,8 +230,8 @@ function Statements({ symbol }: { symbol: string }) {
                 {ROWS.map((r) => {
                   const col = r.pick(f)
                   return (
-                    <tr key={r.label} className="num border-b border-rule">
-                      <th scope="row" className="h-10 text-left font-normal">
+                    <tr key={r.label} className="num *:border-b *:border-rule">
+                      <th scope="row" className={cn(STICKY_LABEL, "h-10 text-left font-normal")}>
                         {r.label}
                       </th>
                       {shown.map((p, i) => (

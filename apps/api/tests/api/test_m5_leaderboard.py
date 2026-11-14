@@ -92,6 +92,45 @@ def test_leaderboard_api(client, other_client, board, market):
     assert shared["returns"]["month"] == me["return_pct"] and shared["returns"]["total"] == me["total_return_pct"]
 
 
+def test_leaderboard_carries_the_day_threads_reactions(client, other_client, board):
+    """``reactions`` and ``comment_count`` of ``leaderboard:<date>`` (4-3), like feed items and digests: tallies
+    only, the same for every period. The thread of the board's own date works even when the group was made after
+    that close (a weekend, or before 13:30)."""
+    gid = board["gid"]
+    day = client.get(f"{API}/groups/{gid}/leaderboard", params={"period": "day"}).json()
+    assert day["reactions"] == [] and day["comment_count"] == 0
+    target = f"leaderboard:{day['date']}"
+    for c, emoji in ((client, "🎉"), (other_client, "🎉"), (other_client, "👍"), (board["third"], "🎉")):
+        r = c.put(f"{API}/groups/{gid}/reactions", json={"target": target, "emoji": emoji})
+        assert r.status_code == 200, r.text
+    assert client.post(f"{API}/groups/{gid}/comments", json={"target": target, "body": "大家都紅"}).status_code == 201
+    month = client.get(f"{API}/groups/{gid}/leaderboard", params={"period": "month"}).json()
+    assert month["date"] == day["date"] and month["comment_count"] == 1
+    assert month["reactions"] == [{"emoji": "👍", "count": 1, "mine": False}, {"emoji": "🎉", "count": 3, "mine": True}]
+    seen = other_client.get(f"{API}/groups/{gid}/leaderboard", params={"period": "year"}).json()
+    assert seen["reactions"] == [{"emoji": "👍", "count": 1, "mine": True}, {"emoji": "🎉", "count": 3, "mine": True}]
+    # counts only: nobody is named, and the member who shares nothing is still not on the board
+    assert board["c"] not in str(seen) and {e["user_id"] for e in seen["entries"]} == {board["a"], board["b"]}
+    assert client.delete(f"{API}/groups/{gid}/reactions", params={"target": target, "emoji": "🎉"}).status_code == 200
+    again = client.get(f"{API}/groups/{gid}/leaderboard", params={"period": "day"}).json()
+    assert again["reactions"][1] == {"emoji": "🎉", "count": 2, "mine": False}
+
+
+def test_board_thread_of_the_close_before_the_group_was_made(board, market):
+    """A group made on Saturday shows Friday's board: that day's thread (comments, reactions) is a valid target."""
+    from forliosa.db import session_factory
+    from forliosa.models import Group
+
+    with session_factory()() as db:
+        g = db.get(Group, board["gid"])
+        g.created_at = datetime(2026, 11, 14, 10, 0, tzinfo=TAIPEI)  # a Saturday
+        members = sharing.members_of(db, g.id)
+        first = sharing.latest_close(market, g.created_at)
+        assert first <= date(2026, 11, 13)
+        assert sharing.target_visible(db, market, g, members, f"leaderboard:{first.isoformat()}")
+        assert not sharing.target_visible(db, market, g, members, "leaderboard:2026-10-30")  # before the group
+
+
 def test_unranked_board_keeps_join_order(client, other_client, board):
     client.patch(f"{API}/groups/{board['gid']}", json={"ranking_enabled": False})
     lb = other_client.get(f"{API}/groups/{board['gid']}/leaderboard", params={"period": "year"}).json()

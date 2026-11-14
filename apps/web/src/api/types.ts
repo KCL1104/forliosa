@@ -1015,6 +1015,9 @@ export interface Leaderboard {
   notes: string[]
   sources: string[]
   is_demo: boolean
+  /** 當天排行討論串（`leaderboard:<date>`，三個期間同一串）的留言數與表情；只有計數，不列出誰按的 */
+  comment_count: number
+  reactions: Reaction[]
 }
 
 export interface SharedHolding {
@@ -1172,6 +1175,8 @@ export interface InvitePreview {
   inviter_display_name: string
   /** member：已登入且已是成員 */
   status: "valid" | "member"
+  /** 只有 `status: "member"` 時有（成員本人才拿得到）：直接連到那個群組 */
+  group_id?: string
 }
 
 // ── 討論串（docs/api-contract.md「討論串（2026-11-13）」）──────────────────

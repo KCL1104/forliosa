@@ -665,7 +665,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 | 來源 | 什麼時候用 | 怎麼查 | 停止條件 |
 |---|---|---|---|
-| **GDELT DOC 2.0**（`api.gdeltproject.org/api/v2/doc/doc`，預設） | 每檔每次 worker 批次 | **英文**關鍵字：英文簡稱（`t187ap03_L`「英文簡稱」／`mopsfin_t187ap03_O` 的 `Symbol`，存在 `company_profiles`；沒有時用商品主檔的英文別名）＋代號，台股 `sourcecountry:taiwan`、美股 `sourcelang:english`（例：`(TSMC OR 2330) sourcecountry:taiwan`）。台股的英文簡稱是一般英文單字時（穩懋「WIN」、台達電「DELTA」；`news/normalize.py` 的 `COMMON_WORDS`）不放進查詢、只用代號（`3105 sourcecountry:taiwan`）：GDELT 比對機器翻譯後的全文、不分大小寫，這種字會讓 75 筆全被無關新聞佔滿；`mode=artlist`、`format=json`、`maxrecords=75`、`startdatetime` = 上次成功前 1 小時（最多 7 天） | 429／403、或 200 回「Please limit requests…」→ 這次批次不再問，整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（`news_fetch_state` 的 `symbol="*"`）；連線錯誤連 3 次 → 這次批次略過 |
+| **GDELT DOC 2.0**（`api.gdeltproject.org/api/v2/doc/doc`，預設） | 每檔每次 worker 批次 | **英文**關鍵字：英文簡稱（`t187ap03_L`「英文簡稱」／`mopsfin_t187ap03_O` 的 `Symbol`，存在 `company_profiles`；沒有時用商品主檔的英文別名）＋代號，台股 `sourcecountry:taiwan`、美股只收美國與英國媒體的英文報導 `(sourcecountry:US OR sourcecountry:UK) sourcelang:english`（2026-11-14 起；例：`(TSMC OR 2330) sourcecountry:taiwan`、`(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK) sourcelang:english`）。台股的英文簡稱是一般英文單字時（穩懋「WIN」、台達電「DELTA」；`news/normalize.py` 的 `COMMON_WORDS`）不放進查詢、只用代號（`3105 sourcecountry:taiwan`）：GDELT 比對機器翻譯後的全文、不分大小寫，這種字會讓 75 筆全被無關新聞佔滿；`mode=artlist`、`format=json`、`maxrecords=75`、`startdatetime` = 上次成功前 1 小時（最多 7 天） | 429／403、或 200 回「Please limit requests…」→ 這次批次不再問，整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（`news_fetch_state` 的 `symbol="*"`）；連線錯誤連 3 次 → 這次批次略過 |
 | **AI 網路搜尋**（`news/ai_search.py`） | 只在 GDELT 與 SearXNG 這 24 小時內都對這檔有回應（關掉或暫停中的不算）、且兩者（加 personal 的 Yahoo RSS）最近 7 天合計少於 `NEWS_AI_MIN_ITEMS`（3）則時；同一檔 `NEWS_AI_INTERVAL_HOURS`（24）內最多一次；每批最多 10 次 | `web_search`（最多 2 次，封鎖行情／論壇／交易所網站；**沒有** `web_fetch`）＋ strict 工具 `report_news`（只回網址清單）。**模型只負責挑選**：標題、網址、日期都取自 `web_search_result`（網址不在搜尋結果、行情頁、沒有日期的都丟掉） | 本月（UTC）`ai_usage.feature = "news"` 的估計費用 + US$0.05 超過 `NEWS_AI_BUDGET_USD`（30）就整月不跑；沒有金鑰、`AI_WEB_SEARCH=false`、`NEWS_AI_ENABLED=false` 也不跑 |
 | **SearXNG**（`news/searxng.py`；自架、只對內，`deploy/searxng`） | **預設開啟**（2026-11-12 第三輪）。網址：`NEWS_SEARXNG_URL`，不設時 prod 是 `http://searxng.railway.internal:8080`、dev／test 是 `http://localhost:8080`；`NEWS_SEARXNG_ENABLED=false` 或 `NEWS_SEARXNG_URL=`（空字串）關掉。每檔在 GDELT 之後問；這檔 `NEWS_SEARXNG_CACHE_MINUTES`（60）內回應過、或 GDELT 已有 ≥ `NEWS_SEARXNG_SKIP_GDELT_ITEMS`（8）則 24 小時內的標題就不問 | 中文查詢：台股 `q=台積電 2330&language=zh-TW`，美股 `q=NVIDIA NVDA&language=en`（英文簡稱＋代號）；都加 `categories=news&time_range=week&format=json&safesearch=0`。有引擎暫停時改用 `engines=<其他引擎>`（同時送 `categories` 會把全部新聞引擎加回來）。只讀 `title`、`url`、時間（`publishedDate`；沒有時用 `pubdate`／`metadata` 裡的「3 小時前」「3 hours ago」「昨天」，以天計的只標日期）與 `engines`；`content`、縮圖不讀；沒有時間的不收；**以週、月、年計的相對時間（「3 weeks ago」「2 週前」）也當作沒有時間、不收**：Brave News 與 DuckDuckGo News 不理 `time_range=week`，這種結果一定超過一週、而且日期可能差到 6 天（2026-11-12 審查後）；搜尋引擎轉址丟掉 | 一次只查一個、上一次查完到下一次開始 ≥ `NEWS_SEARXNG_INTERVAL_SECONDS`（10，最少 10）。**連不上**（拒絕連線、DNS、逾時、5xx、不是 JSON）→ 整個來源暫停 15 分鐘起、加倍到 4 小時（`last_status: "unreachable"`，不算錯誤）；我們自己的 SearXNG 回 403／429 → 暫停 `NEWS_SEARXNG_BACKOFF_MINUTES`（120）起。**上游引擎**（`unresponsive_engines`）：CAPTCHA／too many requests／access denied（含 `Suspended: …`）→ 那個引擎暫停 120 分鐘起、加倍到 24 小時；逾時等其他錯誤連 3 次 → 暫停 15 分鐘起；問的引擎全部失敗 → 整個 SearXNG 暫停；引擎全部暫停中 → SearXNG 暫停到最早恢復的那個。不換 IP、不用代理 |
 | **Yahoo股市 RSS** | 只有 `DATA_POLICY=personal`（條款限非商用；`NEWS_YAHOO_RSS=false` 可關） | `tw.stock.yahoo.com/rss?s=<代號>`。2026-11-12 實測這個參數回的是「最新新聞」頻道，所以靠下面的相關性篩選只留這檔的標題；原始媒體從描述開頭判斷（「MoneyDJ新聞」「【財訊快報／」「（中央社記者」），**描述本身不存** | 同上 |
@@ -779,7 +779,13 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
 ### 待產品負責人確認
 
 1. **AI 補缺的頻率**：目前同一檔 24 小時最多一次、每批最多 10 次、每月 US$30 封頂（約 600–1,000 次搜尋）。追蹤的小型股多時，月中可能就用完；要不要改成只補「有人持有」的股票？
-2. **美股來源**：`sourcelang:english` 會收到很多地方報與轉載（印度、澳洲地方報）。要不要改成只收美國／英國主要媒體（例如加 `sourcecountry:us`），或只用 AI 補？
+2. ~~**美股來源**~~ **已決定（產品負責人 2026-11-14，照建議）：只收美國／英國媒體。** 原本 `sourcelang:english` 會收到很多地方報與轉載（印度、澳洲地方報）。
+   美股的 GDELT 查詢改成 `(…) (sourcecountry:US OR sourcecountry:UK) sourcelang:english`（GDELT 用 FIPS 代碼：英國是 `UK` 不是 `GB`；國家條件要放在括號裡的 OR）。
+   2026-11-14 在沙盒實測：`(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK) sourcelang:english` 回 75 則，美國 72、英國 3，全部英文
+   （只加國家不加語言時會混進 euronews 阿拉伯文版這類非英文頁，所以兩個條件都留著）。解析時再依每則的 `sourcecountry`（「United States」「United Kingdom」）
+   檢查一次，其他國家的丟掉，沒有這個欄位的保留。實作：`news/sources.py` `US_NEWS_COUNTRIES`、`US_NEWS_COUNTRY_NAMES`；測試用當天的回應
+   （`tests/news/fixtures/gdelt_nvda_us_uk_live_20261114.json`）。注意：國家條件只擋掉外國轉載，美國地方台、地方報（例如 iHeart 的電台網站）仍會出現；
+   要再收窄成「主要媒體」得另外維護網域清單（沒有做）。
 3. **專欄名稱**：「| 台股雜談」這類專欄名稱目前保留（和 Google 財經一樣）。要不要也去掉？
 4. **Yahoo股市 RSS 的個股網址**：`?s=<代號>` 回的是全站最新新聞，只能靠標題篩選，命中率低。個股 RSS 的正確網址要在一般瀏覽器開 rss-index 產生一次確認。
 5. **SearXNG 對上游的請求像瀏覽器**（SearXNG 預設開啟後新增）：SearXNG 去問 Bing／DuckDuckGo／Brave 時，用的是瀏覽器樣式的 User-Agent 與連線特徵（SearXNG 本身的做法，
@@ -1008,8 +1014,11 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
     有股數就用「股數 × 每股資本公積」（元以下捨去），否則依比例；排除後的股利所得未達 2 萬就不扣，達到就以股利所得 × 2.11% 計。
     試算 `rules` 會列出「其中資本公積發放 X 元一般不屬股利所得，不計入」。對不上決議（上櫃沒有決議資料、存檔前的舊股利）時照整筆計算。
     已記的交易不會自動重算（自動入帳的股利例外：每次同步都依最新的預告與決議重算，見「2026-11-12 股利自動入帳」）。
-22. **股利決議沒有對上除權息預告時**：目前顯示 `status: "resolved"`、`ex_dividend_date: null`，包括「其實已在存檔前除權息」的舊決議
-    （例如台積電 2025Q4）。若前端覺得混淆，可以只顯示董事會日期在最近 N 天內的決議，請決定 N。
+22. ~~股利決議沒有對上除權息預告時~~ **已決定（產品負責人 2026-11-14，照建議）：N＝180 天。** 沒有對上除權息預告的決議
+    （`status: "resolved"`、`ex_dividend_date: null`）只在董事會日期（沒有董事會日期時用股東會日期）在最近 180 天內才列在
+    `/instruments/{symbol}/dividends`；更舊的多半是存檔開始前就已除權息（例如台積電 2025Q4），列出來像還沒除息，所以不列。
+    兩個日期都沒有的決議也不列。已對上預告的照常列出；個股事件（`dividend_resolution`）不受影響。實作：`services/instruments.py`
+    `RESOLUTION_SHOWN_DAYS`、`resolution_shown()`（AI 的 `get_stock_overview` 讀同一份，所以也看不到這些舊決議）。
 23. **刪除或改過的自動股利沒辦法恢復**：刪除（或修改）一筆自動入帳的股利後，略過紀錄永久保留，目前沒有端點列出或清除；使用者只能自己新增一筆。
     建議：先維持現狀，等有人反映再加 `GET /auto-dividend-skips` 與 `DELETE /auto-dividend-skips/{id}`（刪掉後下一次同步就補回），前端放在帳戶設定裡。
 
@@ -1258,6 +1267,8 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `GroupSummary` | `GET /groups` 依我加入的順序；`latest_activity_at` = 目前**看得到的**動態（含成員加入）與看得到的對象上的留言中最新的時間（被關掉的分享不會讓它變動）；`latest_digest_at` = 最新 `ready` 週報的 `created_at` |
 | `InviteOut` | 多 `created_at`；`GET /groups/{id}/invites` 的項目沒有 `url` 這個鍵 |
 | `InvitePreview.inviter_display_name` | 建立邀請的人已離開群組時改顯示目前 owner 的名稱 |
+| `InvitePreview.group_id` | 2026-11-14 新增（前端 OPEN_QUESTIONS 42，照前端建議）：只在 `status: "member"`（已登入、已是成員）時有這個鍵，其他情況（沒登入、還不是成員）鍵不存在——不是成員拿不到群組 id |
+| `Leaderboard.comment_count`、`reactions` | 2026-11-14 新增：當天排行的討論串 `leaderboard:<date>` 的留言數與表情計數（見「留言與表情」） |
 | `POST /invites/{token}/accept`、`PUT /groups/{id}/share` | `share` 的六個開關**全部必填**（少一個 422）：前端必須讓本人確認每一項。成功回 200 |
 | `LeaderboardEntry.rank` | 沒有名次時是 `null`（鍵存在）：排行關閉，或該成員這期沒有數字 |
 | `LeaderboardEntry.excludes_unpriced` | 2026-11-14 新增：期間報酬沒有算進沒有收盤價的持股。只在自己那一列可能是 `true`，別人的一律 `false` |
@@ -1345,7 +1356,11 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 ### 留言與表情
 
 - `target` 格式 `trade:<id>`、`digest:<id>`、`leaderboard:<YYYY-MM-DD>`；`digest` 必須是這個群組 `ready` 的週報；`leaderboard` 的日期必須在
-  群組建立日（台北）到今天之間。看不到、不存在、別的群組的一律 404「找不到討論對象」。刪除留言也要求對象目前看得到。
+  群組建立日（台北）到今天之間——起點是建立日與「建立當時的最新收盤日」較早的那一天（2026-11-14 修：週末或收盤前建立的群組，排行顯示的是
+  前一個收盤日，那一天的討論串原本會 404）。看不到、不存在、別的群組的一律 404「找不到討論對象」。刪除留言也要求對象目前看得到。
+- **排行回應帶 `comment_count`、`reactions`**（2026-11-14，產品負責人照建議，待決定 4-3；前端 OPEN_QUESTIONS 40）：對象是 `leaderboard:<date>`，
+  三個期間的 `date` 相同，所以是同一串。用和動態、週報同一個 `social_summary`：只有每個表情的計數與 `mine`，不列出誰按的；沒開報酬率的成員
+  照樣不在 `entries`，也沒有任何「沒分享幾人」的計數。實作：`services/sharing.py` `leaderboard()`。
 - 作者已離開：`display_name`「已離開的成員」、`user_id`／`avatar_url` 為 `null`；作者帳號已刪除（`user_id` 被設為 null）：「已刪除的帳號」。
   已離開成員按過的表情仍然計數。
 - `can_delete`：作者本人，或 owner／admin。

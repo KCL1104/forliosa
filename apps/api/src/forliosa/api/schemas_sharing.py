@@ -160,6 +160,8 @@ class InvitePreview(BaseModel):
     group_name: str
     inviter_display_name: str | None = None
     status: Literal["valid", "member"]
+    # only with status "member" (signed in and already a member); absent otherwise
+    group_id: str | None = None
 
 
 class AcceptIn(StrictModel):
@@ -195,6 +197,12 @@ class SharedPortfolio(UserRef):
     is_demo: bool | None = None
 
 
+class ReactionCount(BaseModel):
+    emoji: str
+    count: int
+    mine: bool
+
+
 class LeaderboardEntry(UserRef):
     return_pct: float | None = None
     total_return_pct: float | None = None
@@ -221,6 +229,9 @@ class Leaderboard(BaseModel):
     notes: list[str]
     sources: list[str]
     is_demo: bool
+    # the day's thread ``leaderboard:<date>`` (the same for every period), like FeedItem / Digest
+    comment_count: int
+    reactions: list[ReactionCount]
 
 
 class MemberHoldings(UserRef):
@@ -243,12 +254,6 @@ class GroupHoldings(BaseModel):
     common: list[CommonHolding]
     industries: list[IndustryOverlap]
     is_demo: bool
-
-
-class ReactionCount(BaseModel):
-    emoji: str
-    count: int
-    mine: bool
 
 
 class FeedItem(UserRef):

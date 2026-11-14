@@ -381,7 +381,11 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
     const [kind, ref] = [target.slice(0, target.indexOf(":")), target.slice(target.indexOf(":") + 1)]
     if (kind === "trade") return visibleFeed(g).some((i) => i.type === "trade" && i.id === ref)
     if (kind === "digest") return g.digests.some((d) => d.id === ref)
-    if (kind === "leaderboard") return /^\d{4}-\d{2}-\d{2}$/.test(ref) && ref >= g.created_at.slice(0, 10) && ref <= MOCK_TODAY
+    if (kind === "leaderboard") {
+      // 起點是建立日與當時排行的日期（最新收盤日）較早的那一天：週末建立的群組，排行顯示前一個收盤日，那一串也要能用
+      const first = [g.created_at.slice(0, 10), leaderboardDates("day").date].sort()[0]!
+      return /^\d{4}-\d{2}-\d{2}$/.test(ref) && ref >= first && ref <= MOCK_TODAY
+    }
     return false
   }
   const reactionsOf = (g: MockGroup, target: string): Reaction[] => {
@@ -624,10 +628,13 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
     getInvite(token: string): InvitePreview {
       const { g, inv } = inviteState(token)
       const inviter = peopleIndex().get(inv.inviter) ?? (inv.inviter === meId() ? meRef() : undefined)
+      const member = deps.signedIn() && !!findMember(g, meId())
       return {
         group_name: g.name,
         inviter_display_name: inviter?.display_name ?? "群組成員",
-        status: deps.signedIn() && findMember(g, meId()) ? "member" : "valid",
+        status: member ? "member" : "valid",
+        // 群組 id 只給已經是成員的本人
+        ...(member ? { group_id: g.id } : {}),
       }
     },
     acceptInvite(token: string, share: ShareSettings): Group {
@@ -682,9 +689,12 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const notes: string[] = []
       if (clipped) notes.push(`資料從 ${ymd(ARCHIVE_START)} 開始，這段期間從 ${ymd(ARCHIVE_START)} 收盤起算`)
       if (benchmarks[0]!.return_pct === null) notes.push("沒有 發行量加權股價報酬指數 的資料，不能比較")
+      // 當天排行的討論串（三個期間同一串）：只有計數與 mine，不列出誰按的
+      const thread = `leaderboard:${date}`
       return {
         period, date, start_date: start, as_of: "2026-11-12T13:30:00+08:00", ranked: g.ranking_enabled, entries, benchmarks, notes,
         sources: [sourceOf("twse-openapi/price"), sourceOf("tpex-openapi/price")], is_demo: !deps.commercial,
+        comment_count: commentCount(g, thread), reactions: reactionsOf(g, thread),
       }
     },
     getGroupHoldings(groupId: string): GroupHoldings {

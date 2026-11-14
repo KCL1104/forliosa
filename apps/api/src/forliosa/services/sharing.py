@@ -479,6 +479,10 @@ def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str
     bench, sources, bench_demo, notes = _benchmark_period_returns(proj.md, window)
     if window.clipped and window.archive_since is not None:
         notes.insert(0, f"資料從 {ymd(window.archive_since)} 開始，這段期間從 {ymd(window.starts[period])} 收盤起算")
+    # the day's thread (``leaderboard:<date>``, the same for every period): a comment count and reaction tallies,
+    # like feed items and digests — who reacted is not listed, and nothing counts the members who do not share
+    target = f"leaderboard:{window.end.isoformat()}"
+    counts, reactions = social_summary(proj.db, group.id, [target], me_id)
     return {
         "period": period,
         "date": window.end,
@@ -491,6 +495,8 @@ def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str
         "notes": notes,
         "sources": labels(["ledger", *sources]),
         "is_demo": is_demo or bench_demo,
+        "comment_count": counts.get(target, 0),
+        "reactions": reactions.get(target, []),
     }
 
 
@@ -678,7 +684,13 @@ def target_visible(db: Session, md: MarketData, group: Group, members: list[Memb
             day = date.fromisoformat(ref)
         except ValueError:
             return False
-        return group.created_at.astimezone(TAIPEI).date() <= day <= today_taipei()
+        if day > today_taipei():
+            return False
+        if day >= group.created_at.astimezone(TAIPEI).date():
+            return True
+        # before the group was made: only the board it first showed — a group made on a weekend (or before the
+        # close) shows the previous close, and that day's thread (comments and reactions under it) must work too
+        return day >= latest_close(md, group.created_at)
     return False
 
 

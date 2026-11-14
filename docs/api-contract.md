@@ -409,6 +409,7 @@
 - `/instruments/{symbol}/dividends`：`DividendRecord` 多 `status`（`"announced"` 有除權息日｜`"resolved"` 只有董事會／股東會決議）、`progress`、`board_date`、
   `meeting_date`、`cash_sources: {earnings, legal_reserve, capital_surplus} | null`（資本公積發放的現金一般不屬股利所得）、`sources`。上市公司的決議來自證交所
   〈上市公司股利分派情形〉；上櫃公司沒有開放來源（櫃買資料集 2021-08 停更），只有除權息預告。
+  `"resolved"` 的決議只列董事會日期（沒有時用股東會日期）在最近 180 天內的（2026-11-14）：更舊而沒有對上除權息預告的，多半在存檔開始前就已除權息。
 - `/instruments/{symbol}/events`：`type` 多 `dividend_resolution`（日期是董事會日）。
 - `/instruments/{symbol}/overview`、`/instruments/{symbol}`：多 `listed_date`；`market_cap`、`shares_outstanding` 改用證交所／櫃買〈公司基本資料〉的已發行普通股數（市值 = 股數 × 最新收盤）。
 - `/portfolio/performance`：`benchmark` 可用 `^TAIEXTR`（自建存檔：證交所 `MI_INDEX`／`MFI94U`）與 `^TPEXTR`（櫃買 `tpex_reward_index`），`benchmark.twr` 不再是 `null`（存檔自 2026-11-02 起）；有美股時 `notes` 說明 USD/TWD 的來源（見「匯率」）。
@@ -449,6 +450,8 @@
 ```
 
 - **順序**：先官方公告（台股；最近 90 天、最多 30 則，新的在前），再新聞報導（最近 30 天、最多 40 則，新的在前）。美股只有新聞報導。
+- **美股新聞只收美國與英國媒體的英文報導**（2026-11-14，產品負責人照建議；GDELT 查詢見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」）：外國的轉載
+  （印度、澳洲、新加坡的地方報）不列。回應形狀不變。
 - **新聞報導**（`category: "media"`）：`title` 是媒體原標題（去掉 GDELT 插入的空白與「| 財經」「- 自由財經」這類重複媒體或版名的尾巴）；
   `outlet` 是媒體名稱（依網域：udn.com 聯合新聞網、money.udn.com 經濟日報、cna.com.tw 中央社…；不認得的顯示網域）；
   `url` 是原文連結（去掉 `utm_*`、`fbclid`、`gclid` 這類追蹤參數；AMP 快取連結換成媒體自己的網址）；`source` 是怎麼找到的：`"GDELT"`、
@@ -869,7 +872,7 @@
 | POST | `/groups/{id}/invites` | 管理員 | `{"expires": "24h" \| "7d", "multi_use": false}`（預設 7 天、單次）→ `{"id", "url", "expires_at", "multi_use", "uses"}`；`url` 只在建立時回傳 |
 | GET | `/groups/{id}/invites` | 管理員 | 有效的邀請（不含 `url`） |
 | DELETE | `/groups/{id}/invites/{invite_id}` | 管理員 | 撤回 |
-| GET | `/invites/{token}` | 不需登入 | 預覽 `{"group_name", "inviter_display_name", "status": "valid" \| "member"}`（`member`：已登入且已是成員）。無效的 token 404；過期、撤回、用完 410 `invite_invalid` |
+| GET | `/invites/{token}` | 不需登入 | 預覽 `{"group_name", "inviter_display_name", "status": "valid" \| "member"}`（`member`：已登入且已是成員，這時多一個 `group_id`，只有成員本人拿得到，前端直接連到那個群組；2026-11-14）。無效的 token 404；過期、撤回、用完 410 `invite_invalid` |
 | POST | `/invites/{token}/accept` | 登入 | `{"share": ShareSettings}`（必填：前端先讓使用者確認開關）→ `Group`；已是成員 409 `already_member`；無效 404／410 |
 | GET | `/groups/{id}/share` | 成員 | 我在這個群組的 `ShareSettings` |
 | PUT | `/groups/{id}/share` | 成員 | 更新我在這個群組的 `ShareSettings`（立即生效） |
@@ -928,10 +931,14 @@
   "benchmarks": [{"symbol": "^TAIEXTR", "name": "發行量加權股價報酬指數", "return_pct": 0.0254},
                  {"symbol": "0050.TW", "name": "元大台灣50", "return_pct": 0.0247}],
   "notes": [], "sources": ["臺灣證券交易所〈…〉（2026），依政府資料開放授權條款第 1 版"],
-  "is_demo": false
+  "is_demo": false,
+  "comment_count": 2, "reactions": [{"emoji": "🎉", "count": 3, "mine": true}]   // 當天排行的討論串 leaderboard:<date>（2026-11-14）
 }
 ```
 
+- **排行的表情與留言數**（2026-11-14，產品負責人照建議）：`comment_count`、`reactions` 是對象 `leaderboard:<date>` 的計數，和 `FeedItem`、`Digest` 同一種形狀；
+  三個期間的 `date` 相同，所以是同一串。只有計數與「我按過沒有」（`mine`），不列出誰按的；沒開報酬率的成員照樣不在 `entries` 裡，也不另外計數。
+  排行最早的那一天（群組在週末或收盤前建立時，排行顯示的是前一個收盤日）也能留言、按表情。
 - **期間定義**：以收盤價、該成員全部帳戶合併、新台幣計。`day` = 最新收盤相對前一收盤；`month` = 上月最後收盤到最新收盤的 TWR；
   `year` = 去年最後收盤到最新收盤的 TWR。所有成員與基準共用同一個 `start_date`（期間起點與存檔起點較晚者）；期間中才開始持有的成員從第一天
   有持股起算。只記持股的帳戶以快照為期初。**整段期間都沒有收盤價的持股（commercial 下的美股）不算進期間報酬**（和帳本的「今日」同一條

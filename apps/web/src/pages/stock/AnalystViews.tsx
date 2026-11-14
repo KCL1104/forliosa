@@ -1,4 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
+import { Link } from "@tanstack/react-router"
 import { ChevronDownIcon } from "lucide-react"
 import { useCallback, useEffect, useReducer, useState } from "react"
 import { ApiError, api, appToday } from "@/api"
@@ -6,6 +7,7 @@ import type { AnalystView, InstrumentDetail } from "@/api/types"
 import { aiKeys, useAiUsage } from "@/ai/remote-hooks"
 import { DataNotes } from "@/components/data-notes"
 import { SkeletonLines } from "@/components/states"
+import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
 import {
   ANALYST_DISCLAIMER_FALLBACK,
@@ -165,6 +167,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
         <>
           <p className="font-medium">近期查無法人報導</p>
           <p className="mt-0.5 max-w-prose text-base text-ink">近期的媒體報導裡，沒有找到附日期與來源的機構評等或目標價。</p>
+          <EventsLink symbol={inst.symbol} />
           <Footer asOf={state.data?.as_of} notes={notes} />
         </>
       )
@@ -172,6 +175,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
       return (
         <>
           <p className="text-md text-ink">法人觀點暫時查不到，稍後再打開看看。</p>
+          <EventsLink symbol={inst.symbol} />
           <DataNotes notes={[...(notes ?? []), ...(state.error ? [state.error.message] : [])]} className="mt-1" />
         </>
       )
@@ -192,6 +196,20 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
     default:
       return null
   }
+}
+
+/**
+ * 查無報導／查不到時唯一的下一步：到「事件」分頁看官方公告（不花 AI 額度；再問 AI 多半同樣查不到）。
+ * 站內的文字連結：墨色字＋常駐底線，觸控時 44px 高（textAction）。
+ */
+function EventsLink({ symbol }: { symbol: string }) {
+  return (
+    <div className="mt-1.5">
+      <Link to="/stock/$symbol" params={{ symbol }} search={{ tab: "events" }} resetScroll={false} className={textAction}>
+        看公告
+      </Link>
+    </div>
+  )
 }
 
 /** 今天還沒有人查過：一個安靜的查詢按鈕（只有字，不加裝飾圖示） */

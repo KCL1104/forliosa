@@ -301,8 +301,12 @@ def preview_invite(db: Session, token: str, me: User | None) -> dict[str, Any]:
         inviter = db.scalar(select(GroupMember).where(GroupMember.group_id == group.id, GroupMember.role == "owner"))
     inviter_user = db.get(User, inviter.user_id) if inviter is not None else None
     is_member = me is not None and db.get(GroupMember, (group.id, me.id)) is not None
-    return {"group_name": group.name, "inviter_display_name": inviter_user.display_name if inviter_user else None,
-            "status": "member" if is_member else "valid"}
+    out: dict[str, Any] = {"group_name": group.name,
+                           "inviter_display_name": inviter_user.display_name if inviter_user else None,
+                           "status": "member" if is_member else "valid"}
+    if is_member:  # only a signed-in member learns the group id (the invite page links straight to the group)
+        out["group_id"] = group.id
+    return out
 
 
 def accept_invite(db: Session, token: str, me: User, share: dict[str, bool]) -> Group:

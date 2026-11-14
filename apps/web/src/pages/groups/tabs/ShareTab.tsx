@@ -19,7 +19,7 @@ export function ShareTab({ group }: { group: Group }) {
         我在「{group.name}」分享的內容
       </h2>
       <p className="mt-1 mb-4 text-base text-ink">關掉的內容，其他成員馬上看不到，過去的週報與動態也是。只影響這個群組。</p>
-      <ShareToggles value={group.my_share} onChange={save} pushTargets={group.push_targets} />
+      <ShareToggles value={group.my_share} onChange={save} pushTargets={group.push_targets} pushAutoOff={group.my_role !== "owner"} />
     </section>
   )
 }

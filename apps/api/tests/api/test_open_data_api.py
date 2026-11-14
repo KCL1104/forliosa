@@ -16,6 +16,7 @@ from forliosa.marketdata.archive_provider import ArchiveProvider
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
 from forliosa.models import MarketEvent, PriceDaily, ReferencePrice, TaifexFuturesDaily
+from forliosa.services import instruments
 from tests.archive.fakes import NOW, FakeFetcher
 
 API = "/api/v1"
@@ -121,10 +122,13 @@ def test_taiex_total_return_benchmark_comes_from_the_archive(client, archived, e
         640.08 / 619.37 - 1, abs=1e-6)
 
 
-def test_dividends_and_events_include_board_resolutions(client, archived, engine):
+def test_dividends_and_events_include_board_resolutions(client, archived, engine, monkeypatch):
+    monkeypatch.setattr(instruments, "today_taipei", lambda: NOW.date())
     divs = client.get(f"{API}/instruments/2330/dividends").json()
     resolved = {d["period"]: d for d in divs if d["status"] == "resolved"}
-    assert set(resolved) == {"2025Q4", "2026Q1", "2026Q2", "2026Q3"}
+    # resolutions without a notice only while the board date is within 180 days (2-6): 2025Q4 (board 2026-02-10)
+    # and 2026Q1 (2026-05-12) went ex before archiving started and would look pending
+    assert set(resolved) == {"2026Q2", "2026Q3"}
     q3 = resolved["2026Q3"]
     assert (q3["cash_dividend"], q3["ex_dividend_date"], q3["board_date"], q3["progress"]) == (
         9.0, None, "2026-11-10", "董事會決議")
@@ -145,6 +149,22 @@ def test_dividends_and_events_include_board_resolutions(client, archived, engine
     q2 = [d for d in divs if d["period"] == "2026Q2"]
     assert len(q2) == 1 and q2[0]["status"] == "announced" and q2[0]["ex_dividend_date"] == "2026-12-17"
     assert q2[0]["board_date"] == "2026-08-11" and len(q2[0]["sources"]) == 2
+
+
+def test_resolution_window_is_180_days_from_the_board_date():
+    from forliosa.marketdata.base import DividendEvent
+
+    today = date(2026, 11, 14)
+
+    def ev(**kw) -> DividendEvent:
+        return DividendEvent("2330.TW", 2026, "2026Q1", D(5), D(0), kw.pop("ex", None), None, **kw)
+
+    assert instruments.resolution_shown(ev(board_date=date(2026, 5, 18)), today)  # exactly 180 days
+    assert not instruments.resolution_shown(ev(board_date=date(2026, 5, 17)), today)
+    assert instruments.resolution_shown(ev(meeting_date=date(2026, 6, 1)), today)  # no board date: the AGM date
+    assert not instruments.resolution_shown(ev(), today)  # neither date: cannot tell how old it is
+    # a notice is always listed, however old its resolution
+    assert instruments.resolution_shown(ev(ex=date(2025, 7, 1), board_date=date(2025, 2, 10)), today)
 
 
 def test_capital_surplus_cash_is_split_out(engine, archived):

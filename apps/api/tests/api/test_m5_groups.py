@@ -171,7 +171,10 @@ def test_invite_lifecycle(app, client, other_client):
     r = anon.get(f"{API}/invites/{token}")
     assert r.status_code == 200 and r.json() == {"group_name": "家族投資", "inviter_display_name": "示範使用者",
                                                  "status": "valid"}
-    assert client.get(f"{API}/invites/{token}").json()["status"] == "member"
+    # a signed-in member also gets the group id (the invite page links straight to the group); nobody else does
+    assert client.get(f"{API}/invites/{token}").json() == {
+        "group_name": "家族投資", "inviter_display_name": "示範使用者", "status": "member", "group_id": gid}
+    assert "group_id" not in other_client.get(f"{API}/invites/{token}").json()
     assert anon.get(f"{API}/invites/not-a-token").status_code == 404
     # accept: login and the share choice are required
     assert anon.post(f"{API}/invites/{token}/accept", json={"share": SHARE_DEFAULT}).status_code == 401

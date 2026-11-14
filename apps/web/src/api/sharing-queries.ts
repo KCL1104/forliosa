@@ -237,6 +237,8 @@ function useInvalidateDiscussion(id: string) {
     void qc.invalidateQueries({ queryKey: sk.comments(id, target) })
     void qc.invalidateQueries({ queryKey: ["groups", id, "feed"] })
     void qc.invalidateQueries({ queryKey: sk.digests(id) })
+    // 排行帶當天討論串的計數（三個期間同一串）；只在這一串變動時才重新抓（排行每次都在伺服器重算）
+    if (target.startsWith("leaderboard:")) void qc.invalidateQueries({ queryKey: ["groups", id, "leaderboard"] })
   }
 }
 export function useCreateComment(id: string) {
