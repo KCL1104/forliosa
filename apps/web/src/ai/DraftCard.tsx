@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from "react"
 import { useAccounts, useMe } from "@/api/queries"
 import { Masked } from "@/components/finance"
 import { Button } from "@/components/ui/button"
-import { formatDateShort, formatMoney, formatNumber, formatPrice, formatQuantity, MINUS } from "@/lib/format"
+import { formatDateShort, formatMoney, formatNumber, formatPrice, formatQuantity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import type { Draft } from "./types"
@@ -124,7 +124,7 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
                 }
                 right
               />
-              {/* 手續費與稅不列在卡片上：它們算在「合計」裡（券商的損益表也是算進成本），金額在「怎麼算的」裡 */}
+              {/* 手續費與稅不自動算（2026-11-14）：卡片上只有股數、成交價與合計 */}
             </>
           )}
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-4 py-3">
@@ -196,21 +196,21 @@ export function DraftCard({ draft, onSign, onUndo, onRevise, onDiscard, focused 
               {privacy ? "••••" : formatNumber(input.quantity, 0)} 股 × {formatPrice(input.price, instrument.market)}
             </li>
           )}
-          {preview && !isCash && (
+          {/* 買賣不自動算手續費與稅（2026-11-14）：有填才列；股利的預扣稅、二代健保照常 */}
+          {preview && isDividend && (
             <li className="num">
-              {isDividend
-                ? `預扣稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}、二代健保 ${privacy ? "••••" : formatMoney(preview.health_insurance, { currency, bare: true })}、手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}`
-                : `手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}、${currency === "USD" ? "稅" : "證交稅"} ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}`}
+              {`預扣稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}、二代健保 ${privacy ? "••••" : formatMoney(preview.health_insurance, { currency, bare: true })}`}
+            </li>
+          )}
+          {preview && !isCash && !isDividend && preview.fee + preview.tax > 0 && (
+            <li className="num">
+              {`手續費 ${privacy ? "••••" : formatMoney(preview.fee, { currency, bare: true })}、交易稅 ${privacy ? "••••" : formatMoney(preview.tax, { currency, bare: true })}`}
             </li>
           )}
           {(preview?.rules ?? []).map((r) => (
             <li key={r}>{r}</li>
           ))}
-          {preview && (
-            <li className="num text-ink-2">
-              {input.type === "buy" ? `合計 = 成交金額 + 手續費 + 稅` : isDividend ? "實拿 = 股利 − 預扣稅 − 二代健保 − 手續費" : `實收 = 成交金額 ${MINUS} 手續費 ${MINUS} 稅`}
-            </li>
-          )}
+          {preview && isDividend && <li className="num text-ink-2">實拿 = 股利 − 預扣稅 − 二代健保</li>}
         </ul>
       )}
     </article>

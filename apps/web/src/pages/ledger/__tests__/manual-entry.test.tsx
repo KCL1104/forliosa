@@ -114,7 +114,9 @@ describe("帳本的「記一筆」", () => {
     await userEvent.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
     const full = await screen.findByRole("dialog", {}, T)
     expect(await within(full).findByRole("heading", { name: "記一筆交易" }, T)).toBeInTheDocument()
-    expect(await within(full).findByText("稅費試算", {}, T)).toBeInTheDocument()
+    // 手續費與稅不自動算（2026-11-14）：選填的欄位，右邊只有合計
+    expect(await within(full).findByLabelText("手續費（選填）", {}, T)).toBeInTheDocument()
+    expect(within(full).queryByText("稅費試算")).toBeNull()
     await waitFor(() => expect(within(full).getByText("台積電")).toBeInTheDocument(), T)
   })
 
@@ -151,8 +153,12 @@ describe("完整表單：存檔後再記一筆", () => {
     fireEvent.change(dialog.querySelector("#trade-date")!, { target: { value: "2024-03-05" } })
     await userEvent.type(dialog.querySelector("#trade-qty")!, "2")
     await userEvent.type(dialog.querySelector("#trade-price")!, "700")
-    await userEvent.click(form.getByRole("checkbox", { name: "存檔後再記一筆" }))
-    await userEvent.click(form.getByRole("button", { name: "儲存" }))
+    // 合計一欄在打字時重畫（aria-live）：jsdom 算無障礙名稱（getByRole）時偶爾碰到剛被拿掉的節點而丟錯，
+    // 這裡直接用元素找（勾選框只有這一個、送出鈕是 type=submit）
+    const again = () => dialog.querySelector<HTMLInputElement>('input[type="checkbox"]')!
+    await waitFor(() => expect(again()).toBeTruthy(), T)
+    await userEvent.click(again())
+    await userEvent.click(dialog.querySelector<HTMLButtonElement>('button[type="submit"]')!)
     await waitFor(async () => expect((await api.listTransactions({ limit: 200 })).items.length).toBe(before + 1), T)
     // 表單還開著，可以接著記下一筆
     expect(useUi.getState().tradeForm.open).toBe(true)
@@ -160,8 +166,10 @@ describe("完整表單：存檔後再記一筆", () => {
     expect((dialog.querySelector("#trade-price") as HTMLInputElement).value).toBe("")
     expect((dialog.querySelector("#trade-date") as HTMLInputElement).value).toBe("2024-03-05")
     expect(form.queryByText("台積電")).toBeNull()
-    expect(form.getByRole("checkbox", { name: "存檔後再記一筆" })).toBeChecked()
-  })
+    expect(again().checked).toBe(true)
+    expect(again().closest("label")?.textContent).toContain("存檔後再記一筆")
+    // 打字、存檔、重抓交易清單：機器忙的時候超過預設的 5 秒
+  }, 20_000)
 })
 
 describe("減少持股（賣出不用開表單）", () => {

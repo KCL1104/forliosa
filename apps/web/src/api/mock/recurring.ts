@@ -1,6 +1,6 @@
 /**
  * 定期定額（示範）：計畫的 CRUD、扣款日（遇週末順延到下一個交易日）、本週事項、交易草稿。
- * 規則與後端一致（apps/api/CONTRACT_NOTES.md「定期定額」）：成交日 = 扣款日；股數 = floor(金額 ÷ 收盤價)（含零股），手續費另計。
+ * 規則與後端一致（apps/api/CONTRACT_NOTES.md「定期定額」）：成交日 = 扣款日；股數 = floor(金額 ÷ 收盤價)（含零股）；不自動算手續費。
  * 扣款日已經過去（補記）用**扣款日當天**的收盤價，今天或之後用最近收盤價；
  * 草稿**不會建立交易**，使用者簽名後才 `POST /transactions`。
  */
@@ -151,9 +151,9 @@ export function createRecurringStore(initial: RecurringPlan[], accounts: () => A
         account_id: plan.account_id, symbol: plan.symbol, type: "buy" as const, trade_date: debit, quantity: shares, price,
         note: `定期定額 ${nt(plan.amount)}（${md(debit)}）`, source: "ai_draft" as const,
       }
-      const preview = computePreview(transaction, account, spec)
+      const preview = computePreview(transaction, account, spec, { auto: false })
       const lot = shares < 1000 ? "零股" : shares % 1000 === 0 ? "整張" : "整張＋零股"
-      const rules = [`股數 = floor(${nt(plan.amount)} ÷ 收盤價 ${price}（${md(priceAsOf)}）) = ${shares} 股（${lot}）`, "手續費另計，不從定期定額金額扣除", ...preview.rules]
+      const rules = [`股數 = floor(${nt(plan.amount)} ÷ 收盤價 ${price}（${md(priceAsOf)}）) = ${shares} 股（${lot}）`, ...preview.rules]
       if (scheduled !== debit) rules.unshift(`扣款日 ${md(scheduled)} 不是交易日，順延到 ${md(debit)}`)
       return {
         plan_id: plan.id, scheduled_date: scheduled, date: debit, name: plan.name, amount: plan.amount, price_as_of: priceAsOf,

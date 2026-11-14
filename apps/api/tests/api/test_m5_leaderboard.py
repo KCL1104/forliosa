@@ -196,7 +196,7 @@ def test_member_starting_mid_period_counts_from_the_first_holding(app, client, b
     closes = {c.t: c.c for c in market.history("2330.TW", buy_day - timedelta(days=14), w.end).candles}
     c_buy = closes[max(d for d in closes if d <= buy_day)]
     c_end = closes[max(d for d in closes if d <= w.end)]
-    fee = Decimal(20)  # the NT$20 minimum on a NT$1,000 trade
+    fee = Decimal(0)  # no automatic commission (2026-11-14)
     expected = float((1000 * c_buy) / (Decimal(1000) + fee)) - 1 if buy_day == w.end else None
     assert r["month"] is not None and r["year"] == r["month"]
     if expected is None:  # bought before the last day: buy-day return × later days

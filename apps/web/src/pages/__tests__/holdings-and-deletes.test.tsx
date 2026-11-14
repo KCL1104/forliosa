@@ -183,7 +183,8 @@ describe("只記持股的帳戶：持股的輸入", { timeout: 20_000 }, () => {
   it("記一筆：帳戶選到只記持股的帳戶，就換成持股的輸入（不記買進）；換回來又是買進", async () => {
     mount()
     await holdingsAccount()
-    const user = userEvent.setup()
+    // 下拉選單打開的動畫期間選項是 pointer-events: none：機器忙的時候會剛好點在動畫中，不檢查這一項
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)
     act(() => useUi.getState().openTradeForm())

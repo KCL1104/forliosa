@@ -13,13 +13,11 @@ from forliosa.api.errors import ApiError, unprocessable
 from forliosa.domain.fees import (
     ZERO,
     FeeBreakdown,
-    commission,
     dividend_cash_amount,
     fmt_money,
     preview_cash_dividend,
     round_half_up,
     stock_dividend_shares,
-    transaction_tax,
     truncate,
 )
 from forliosa.domain.ledger import SECURITY_TYPES, LedgerError, TxnType, replay
@@ -27,7 +25,7 @@ from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
 from forliosa.models import BrokerAccount, Transaction, User
 from forliosa.services import auto_dividends, sharing
-from forliosa.services.ledger_io import fee_schedule, instrument_ref, load_ledger_input, shares_held
+from forliosa.services.ledger_io import instrument_ref, load_ledger_input, shares_held
 from forliosa.timeutil import now_utc
 
 FIELDS = ("account_id", "symbol", "type", "trade_date", "quantity", "price", "amount", "fee", "tax",
@@ -86,7 +84,10 @@ def capital_surplus_part(md: MarketData, symbol: str, trade_date: date, amount: 
 
 def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
             exclude_txn_id: str | None = None, capital_surplus: Decimal | None = None) -> Computed:
-    """Normalize a transaction payload; auto-calculate fee, tax and NHI premium when omitted.
+    """Normalize a transaction payload. Buys and sells take the fee and tax the user typed, else 0 — commissions and
+    the securities transaction tax are not calculated (product owner 2026-11-14: the price the user enters is the
+    cost, like Google Finance; whoever wants exact numbers types them in). Dividends still get the NHI premium and
+    US withholding automatically (those are deducted before the money arrives).
 
     ``capital_surplus``: NT$ of a cash dividend paid from 資本公積 when the caller already knows it (the automatic
     dividend sync); otherwise it is looked up from the official resolution.
@@ -145,21 +146,15 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
             gross = amount if amount is not None else qty * px
             amount = gross
             if fee is None:
-                fee, fee_rules = commission(gross, qty, fee_schedule(account), ref)
-                rules += fee_rules
+                fee = ZERO
             else:
-                rules.append(f"手續費：使用者輸入 {fmt_money(fee, currency)}")
-            if t is TxnType.SELL:
-                if tax is None:
-                    tax, tax_rules = transaction_tax(gross, ref, trade_date, day_trade)
-                    rules += tax_rules
-                else:
-                    rules.append(f"證交稅：使用者輸入 {fmt_money(tax, currency)}")
-                net = gross - fee - tax
-            else:
-                tax = tax if tax is not None else ZERO
-                rules.append("證交稅：買進免稅" if ref.is_tw else "美股無證交稅")
-                net = -(gross + fee)
+                rules.append(f"手續費：自己填的 {fmt_money(fee, currency)}")
+            if tax is None:
+                tax = ZERO
+            elif t is TxnType.SELL:
+                rules.append(f"交易稅：自己填的 {fmt_money(tax, currency)}")
+            # buys: the ledger adds only the fee to the cost
+            net = gross - fee - tax if t is TxnType.SELL else -(gross + fee)
             nhi = ZERO
             preview = FeeBreakdown(gross, fee, tax, ZERO, net, rules)
         case TxnType.CASH_DIVIDEND:

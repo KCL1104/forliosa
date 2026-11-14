@@ -199,14 +199,14 @@ def test_draft_estimates_odd_lot_shares_and_fee(client, calendar, close_52_4, mo
     assert r.status_code == 200, r.text
     d = r.json()
     # next debit: 11/19 (Thursday). floor(5,000 ÷ 52.4 = 95.42) = 95 shares (odd lot);
-    # gross 95 × 52.4 = 4,978; fee floor(4,978 × 0.1425 % × 0.28 = 1.99) = 1 (odd-lot minimum NT$1)
+    # gross 95 × 52.4 = 4,978; no automatic commission (2026-11-14)
     assert (d["date"], d["scheduled_date"], d["price_as_of"], d["amount"]) == (
         "2026-11-19", "2026-11-19", "2026-11-11", 5000.0)
     assert d["transaction"] == {"account_id": acc, "symbol": "0050.TW", "type": "buy", "trade_date": "2026-11-19",
                                 "quantity": 95, "price": 52.4, "note": "定期定額 NT$5,000（11/19）",
                                 "source": "ai_draft"}
     p = d["preview"]
-    assert (p["gross"], p["fee"], p["tax"], p["net_cash"]) == (4978.0, 1.0, 0.0, -4979.0)
+    assert (p["gross"], p["fee"], p["tax"], p["net_cash"]) == (4978.0, 0.0, 0.0, -4978.0)
     assert p["rules"][0].startswith("股數 = floor(NT$5,000 ÷ 收盤價 52.4（11/11）) = 95 股（零股）")
     # a scheduled day on a weekend: 12/19 (Saturday) -> 12/21
     moved = client.post(f"{API}/recurring/{pid}/draft", params={"date": "2026-12-19"}).json()
@@ -215,7 +215,7 @@ def test_draft_estimates_odd_lot_shares_and_fee(client, calendar, close_52_4, mo
     assert client.get(f"{API}/transactions").json()["items"] == []
     t = client.post(f"{API}/transactions", json=d["transaction"])
     assert t.status_code == 201, t.text
-    assert (t.json()["source"], t.json()["fee"], t.json()["quantity"]) == ("ai_draft", 1.0, 95)
+    assert (t.json()["source"], t.json()["fee"], t.json()["quantity"]) == ("ai_draft", 0.0, 95)
 
     small = client.post(f"{API}/recurring", json={"account_id": acc, "symbol": "0050", "amount": 50,
                                                   "day_of_month": 6}).json()["id"]

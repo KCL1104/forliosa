@@ -35,12 +35,15 @@ def rounds(client):
     """2330: buy 2000 → sell 1000 → dividend → sell 1000 (closed) → buy 1000 again (still open)."""
     acc = make_account(client)
     d1, d2, d3, d4, d5 = day(300), day(200), day(150), day(100), day(50)
-    b1 = add(client, account_id=acc, symbol="2330.TW", type="buy", trade_date=d1, quantity=2000, price=100)
-    s1 = add(client, account_id=acc, symbol="2330.TW", type="sell", trade_date=d2, quantity=1000, price=110)
+    # fees and taxes are typed by the user (no automatic commission since 2026-11-14); the numbers are the ones the
+    # old fee schedule gave, so the hand-checked round below stays the same
+    b1 = add(client, account_id=acc, symbol="2330.TW", type="buy", trade_date=d1, quantity=2000, price=100, fee=79)
+    s1 = add(client, account_id=acc, symbol="2330.TW", type="sell", trade_date=d2, quantity=1000, price=110, fee=43,
+             tax=330)
     dv = add(client, account_id=acc, symbol="2330.TW", type="cash_dividend", trade_date=d3, price=5)
-    s2 = add(client, account_id=acc, symbol="2330.TW", type="sell", trade_date=d4, quantity=1000, price=120)
-    b2 = add(client, account_id=acc, symbol="2330.TW", type="buy", trade_date=d5, quantity=1000, price=90)
-    # hand-checked fees and taxes
+    s2 = add(client, account_id=acc, symbol="2330.TW", type="sell", trade_date=d4, quantity=1000, price=120, fee=47,
+             tax=360)
+    b2 = add(client, account_id=acc, symbol="2330.TW", type="buy", trade_date=d5, quantity=1000, price=90, fee=35)
     assert (b1["fee"], s1["fee"], s1["tax"], s2["fee"], s2["tax"], b2["fee"]) == (79, 43, 330, 47, 360, 35)
     assert dv["amount"] == 5000 and dv["health_insurance"] == 0  # 1000 × 5, below the NT$20,000 threshold
     return {"account": acc, "dates": (d1, d2, d3, d4, d5)}
@@ -86,8 +89,9 @@ def test_reopened_symbol_is_held_and_closed_one_is_not(client, rounds):
 
 def test_fully_sold_symbol_is_history_not_holding(client, other_client):
     acc = make_account(client)
-    add(client, account_id=acc, symbol="2317.TW", type="buy", trade_date=day(120), quantity=1000, price=200)
-    add(client, account_id=acc, symbol="2317.TW", type="sell", trade_date=day(60), quantity=1000, price=210)
+    add(client, account_id=acc, symbol="2317.TW", type="buy", trade_date=day(120), quantity=1000, price=200, fee=79)
+    add(client, account_id=acc, symbol="2317.TW", type="sell", trade_date=day(60), quantity=1000, price=210, fee=83,
+        tax=630)
     # dividend recorded on the payment date, after the shares were sold: it belongs to that round
     add(client, account_id=acc, symbol="2317.TW", type="cash_dividend", trade_date=day(30), amount=5500)
     assert client.get(f"{API}/portfolio/holdings").json() == []
@@ -107,13 +111,16 @@ def test_fully_sold_symbol_is_history_not_holding(client, other_client):
 def test_closed_rounds_per_account_and_day_trade(client):
     a = make_account(client, "甲")
     b = make_account(client, "乙")
-    add(client, account_id=a, symbol="0050.TW", type="buy", trade_date=day(90), quantity=1000, price=100)
-    add(client, account_id=b, symbol="0050.TW", type="buy", trade_date=day(80), quantity=500, price=100)
-    add(client, account_id=a, symbol="0050.TW", type="sell", trade_date=day(40), quantity=1000, price=101)
+    add(client, account_id=a, symbol="0050.TW", type="buy", trade_date=day(90), quantity=1000, price=100, fee=39)
+    add(client, account_id=b, symbol="0050.TW", type="buy", trade_date=day(80), quantity=500, price=100, fee=19)
+    add(client, account_id=a, symbol="0050.TW", type="sell", trade_date=day(40), quantity=1000, price=101, fee=40,
+        tax=101)
     # a day trade from zero is a round that opens and closes on the same day
     t = day(20)
-    add(client, account_id=b, symbol="2330.TW", type="buy", trade_date=t, quantity=1000, price=100, is_day_trade=True)
-    add(client, account_id=b, symbol="2330.TW", type="sell", trade_date=t, quantity=1000, price=101, is_day_trade=True)
+    add(client, account_id=b, symbol="2330.TW", type="buy", trade_date=t, quantity=1000, price=100, is_day_trade=True,
+        fee=39)
+    add(client, account_id=b, symbol="2330.TW", type="sell", trade_date=t, quantity=1000, price=101, is_day_trade=True,
+        fee=40, tax=151)
     closed = client.get(f"{API}/portfolio/closed").json()
     assert [(r["symbol"], r["account_id"], r["holding_days"]) for r in closed] == [
         ("2330.TW", b, 0), ("0050.TW", a, (date.fromisoformat(day(40)) - date.fromisoformat(day(90))).days)]

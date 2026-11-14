@@ -30,8 +30,8 @@ export function dividendAsk(code?: string): string {
 /** 常用動作（依頁面）：記一筆交易、股利入帳… */
 export type AiAction = "trade" | "dividend" | "alert" | "checkup" | "form"
 
-// 卡片上只列合計（不逐項列稅費，產品負責人 2026-11-14），所以只說合計含了什麼
-const DRAFT_SAYS = "合計已含手續費與稅。"
+// 草稿卡本身就是回答：前面不加句子（手續費與稅不自動算，2026-11-14）
+const DRAFT_SAYS = ""
 
 function describe(d: Pick<Draft, "input" | "instrument">): string {
   const { input, instrument } = d
@@ -53,7 +53,7 @@ export function recurringDraftCopy(
   const tradeDate = d.scheduled_date === r.scheduledDate ? d.transaction.trade_date : r.date
   const price = formatPrice(d.transaction.price, marketOf(d.transaction.symbol))
   const asOf = formatDateShort(d.price_as_of, false)
-  // 一句一件事；手續費已經算在合計裡（方向 B），不再寫「手續費另計」
+  // 一句一件事；手續費不自動算（2026-11-14），不提手續費
   const estimate = d.is_demo ? `股數用示範價格 ${price} 估算（不是真實行情）。` : `股數用 ${asOf} 收盤價 ${price} 估算。`
   const notes = [
     r.missed
@@ -90,7 +90,7 @@ export function useAiRunner(ctx: AiContext) {
       const p = await api.previewTransaction(input)
       patchDraft(draftId, { preview: p, status: "pending", error: undefined })
     } catch (err) {
-      patchDraft(draftId, { status: "error", error: err instanceof Error ? err.message : "算不出手續費，這份草稿還不能簽名。" })
+      patchDraft(draftId, { status: "error", error: err instanceof Error ? err.message : "算不出合計，這份草稿還不能簽名。" })
     }
   }
 
@@ -106,7 +106,7 @@ export function useAiRunner(ctx: AiContext) {
     const accounts = await qc.fetchQuery(accountsQuery())
     const account = accounts.find((a) => a.currency === inst.currency) ?? accounts[0]
     if (!account) {
-      say({ text: "還沒有券商帳戶，手續費算不出來。先新增帳戶，再說一次。", links: [{ label: "新增券商帳戶", to: "/settings" }] })
+      say({ text: "還沒有券商帳戶。先新增一個，再說一次。", links: [{ label: "新增券商帳戶", to: "/settings" }] })
       return true
     }
     const isUS = inst.market === "US"

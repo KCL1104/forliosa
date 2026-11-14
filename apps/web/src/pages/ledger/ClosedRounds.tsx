@@ -62,7 +62,7 @@ export function ClosedRounds() {
         <div id="closed-list" className="note-in">
           <ClosedTable years={years} isOpen={yearOpen} onToggle={toggleYear} accounts={accounts.data ?? []} multiAccount={multiAccount} />
           <ClosedList years={years} isOpen={yearOpen} onToggle={toggleYear} accounts={accounts.data ?? []} multiAccount={multiAccount} />
-          <p className="mt-2 text-sm text-ink-2">已實現損益扣除買賣手續費與證交稅；股利已扣二代健保，出清後才入帳的股利算在最近一個回合。</p>
+          <p className="mt-2 text-sm text-ink-2">已實現損益扣除你填的手續費與稅。股利已扣二代健保，出清後才入帳的股利算在最近一個回合。</p>
         </div>
       )}
     </section>

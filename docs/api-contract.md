@@ -168,7 +168,7 @@
 | 方法 | 路徑 | 說明 |
 |---|---|---|
 | GET | `/transactions?account_id=&symbol=&type=&from=&to=&limit=&cursor=` | 分頁，由新到舊 |
-| POST | `/transactions` | 建立；`fee`、`tax`、`health_insurance` 未提供時自動計算 |
+| POST | `/transactions` | 建立；買賣的 `fee`、`tax` 未提供時是 0（2026-11-14 起不自動算手續費與證交稅）；股利的 `tax`（美股預扣）、`health_insurance` 未提供時自動計算 |
 | PATCH | `/transactions/{id}` | 更新（自動入帳的股利改過後變成 `auto_edited`，見下方「股利自動入帳」） |
 | DELETE | `/transactions/{id}` | 刪除（自動入帳的股利刪除後不會再自動產生） |
 | POST | `/transactions/preview` | 預估稅費，body 同建立，回傳 `TradePreview` |
@@ -197,7 +197,7 @@
 }
 
 // TradePreview
-{"gross": 1070000, "fee": 426, "tax": 0, "health_insurance": 0, "net_cash": -1070426, "rules": ["手續費 0.1425% × 2.8 折", "證交稅：買進免稅"]}
+{"gross": 1070000, "fee": 0, "tax": 0, "health_insurance": 0, "net_cash": -1070000, "rules": []}
 ```
 
 ### 股利自動入帳（2026-11-12）

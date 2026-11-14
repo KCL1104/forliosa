@@ -97,17 +97,19 @@ def test_accounts_are_scoped_to_user(client, other_client):
 
 
 # -- transactions --------------------------------------------------------------------------------
-def test_buy_auto_fee_and_preview(client):
+def test_buy_takes_no_automatic_fee(client):
+    """2026-11-14: no automatic commission — the price the user enters is the cost; a typed fee is kept."""
     acc = make_account(client)
     body = {"account_id": acc["id"], "symbol": "2330", "type": "buy", "trade_date": "2025-03-03",
             "quantity": 1000, "price": 1070}
     p = client.post(f"{API}/transactions/preview", json=body).json()
-    # 1,070,000 × 0.1425% × 0.28 = 426.93 -> 426
-    assert p == {"gross": 1070000.0, "fee": 426.0, "tax": 0.0, "health_insurance": 0.0, "net_cash": -1070426.0,
-                 "rules": ["手續費 0.1425% × 2.8 折，元以下捨去", "證交稅：買進免稅"]}
+    assert p == {"gross": 1070000.0, "fee": 0.0, "tax": 0.0, "health_insurance": 0.0, "net_cash": -1070000.0,
+                 "rules": []}
     t = add_txn(client, **body)
-    assert t["symbol"] == "2330.TW" and t["fee"] == 426 and t["amount"] == 1070000 and t["currency"] == "TWD"
+    assert t["symbol"] == "2330.TW" and t["fee"] == 0 and t["amount"] == 1070000 and t["currency"] == "TWD"
     assert t["id"].startswith("txn_")
+    typed = client.post(f"{API}/transactions/preview", json={**body, "fee": 426}).json()
+    assert typed["fee"] == 426 and typed["net_cash"] == -1070426 and typed["rules"] == ["手續費：自己填的 NT$426"]
 
 
 def test_sell_tax_etf_and_day_trade(client):
@@ -116,19 +118,19 @@ def test_sell_tax_etf_and_day_trade(client):
             price=22)
     s = add_txn(client, account_id=acc["id"], symbol="00878.TW", type="sell", trade_date="2025-04-01",
                 quantity=2000, price="23.45")
-    assert s["tax"] == 46  # 46,900 × 0.1% = 46.9 -> 46
+    assert s["tax"] == 0 and s["fee"] == 0  # no automatic tax (2026-11-14)
     add_txn(client, account_id=acc["id"], symbol="2317.TW", type="buy", trade_date="2025-05-05", quantity=1000,
             price="240", is_day_trade=True)
     d = add_txn(client, account_id=acc["id"], symbol="2317.TW", type="sell", trade_date="2025-05-05",
-                quantity=1000, price="242.5", is_day_trade=True)
-    assert d["tax"] == 363  # 242,500 × 0.15% = 363.75 -> 363
+                quantity=1000, price="242.5", is_day_trade=True, tax=363)
+    assert d["tax"] == 363  # typed by the user
 
 
 def test_odd_lot_minimum_fee(client):
     acc = make_account(client)
     t = add_txn(client, account_id=acc["id"], symbol="2330.TW", type="buy", trade_date="2025-03-03", quantity=3,
                 price="10")
-    assert t["fee"] == 1  # 30 × 0.1425% × 0.28 = 0.01 -> 0 -> odd-lot minimum NT$1
+    assert t["fee"] == 0  # no automatic minimum fee either
     r = client.post(f"{API}/transactions", json={
         "account_id": acc["id"], "symbol": "2330.TW", "type": "buy", "trade_date": "2025-03-03",
         "quantity": "1.5", "price": 10})
@@ -181,14 +183,13 @@ def test_delete_buy_that_a_sell_depends_on_is_rejected(client):
     assert client.delete(f"{API}/transactions/{b['id']}").status_code == 422
 
 
-def test_patch_recalculates_fee(client):
+def test_patch_recalculates_amount_and_keeps_typed_fee(client):
     acc = make_account(client)
     t = add_txn(client, account_id=acc["id"], symbol="2330.TW", type="buy", trade_date="2025-03-03",
                 quantity=1000, price=1070)
     r = client.patch(f"{API}/transactions/{t['id']}", json={"price": 1000})
     assert r.status_code == 200, r.text
-    # 1,000,000 × 0.1425% × 0.28 = 399
-    assert r.json()["fee"] == 399 and r.json()["amount"] == 1000000
+    assert r.json()["fee"] == 0 and r.json()["amount"] == 1000000
     r = client.patch(f"{API}/transactions/{t['id']}", json={"fee": 1, "note": "折讓"})
     assert r.json()["fee"] == 1 and r.json()["note"] == "折讓"
 

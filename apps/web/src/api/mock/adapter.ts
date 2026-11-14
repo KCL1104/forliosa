@@ -482,7 +482,17 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     listAccounts: () => wait(() => ledger().accounts),
     createAccount: (body) =>
       wait(() => {
-        const acc: Account = { ...body, id: `acc_${++nextId}`, created_at: new Date().toISOString() }
+        // 與後端的預設相同（費率欄位留著，但手續費不再自動算）
+        const usd = body.currency === "USD"
+        const acc: Account = {
+          fee_rate: usd ? 0.001 : 0.001425,
+          fee_discount: 1,
+          min_fee: usd ? 0 : 20,
+          min_fee_odd_lot: usd ? 0 : 1,
+          ...body,
+          id: `acc_${++nextId}`,
+          created_at: new Date().toISOString(),
+        }
         accounts = [...accounts, acc]
         return acc
       }),
@@ -704,7 +714,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         // 與後端相同：自動入帳只由系統產生
         if ((body.source as string | undefined)?.startsWith("auto")) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：source")
         const s = body.symbol ? spec(body.symbol) : undefined
-        const p = computePreview(body, account, s)
+        // 使用者新記的：不自動算手續費與證交稅（自動入帳的股利、定期定額草稿另外產生）
+        const p = computePreview(body, account, s, { auto: false })
         const txn: Transaction = {
           id: `txn_${++nextId}`,
           account_id: body.account_id,
@@ -746,7 +757,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
             { ...next, amount: recomputeAmount ? null : next.amount, fee: patch.fee ?? null, tax: patch.tax ?? null, health_insurance: patch.health_insurance ?? null, source: undefined },
             accounts.find((a) => a.id === next.account_id),
             next.symbol ? findInstrument(next.symbol) : undefined,
+            { auto: false },
           )
+          // 與後端相同：手續費與稅只用這次送來的（沒送就是 0，不自動算）
           Object.assign(next, { amount: p.gross, fee: p.fee, tax: p.tax, health_insurance: p.health_insurance })
         }
         txns[idx] = next
@@ -763,7 +776,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         resync()
       }),
     previewTransaction: (body) =>
-      wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined)),
+      wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined, { auto: false })),
 
     getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),

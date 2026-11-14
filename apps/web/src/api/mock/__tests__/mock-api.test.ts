@@ -23,13 +23,16 @@ describe("mock adapter 與後端一致", () => {
     expect(p.benchmark).toMatchObject({ symbol: "^TAIEXTR", name: "發行量加權股價報酬指數" })
   })
 
-  it("現金類交易沒有數量與價格；手續費元以下捨去", async () => {
+  it("現金類交易沒有數量與價格；買賣不自動算手續費（2026-11-14），自己填的照用", async () => {
     const page = await api.listTransactions({ type: "deposit" })
     expect(page.items[0]!.quantity).toBeNull()
     expect(page.items[0]!.price).toBeNull()
     const [acc] = await api.listAccounts()
     const preview = await api.previewTransaction({ account_id: acc!.id, symbol: "2330.TW", type: "buy", trade_date: "2026-11-11", quantity: 1000, price: 1070 })
-    expect(preview.fee).toBe(426)
+    expect(preview.fee).toBe(0)
+    expect(preview.net_cash).toBe(-1070000)
+    const typed = await api.previewTransaction({ account_id: acc!.id, symbol: "2330.TW", type: "sell", trade_date: "2026-11-11", quantity: 1000, price: 1070, fee: 426, tax: 3210 })
+    expect([typed.fee, typed.tax, typed.net_cash]).toEqual([426, 3210, 1070000 - 426 - 3210])
   })
 })
 
@@ -86,7 +89,7 @@ describe("重新設計新增的端點（形狀與 api-contract 一致）", () =>
     const [acc] = await api.listAccounts()
     const t = await api.createTransaction({ account_id: acc!.id, symbol: "0050.TW", type: "buy", trade_date: "2026-11-12", quantity: 2000, price: 52.4, source: "ai_draft" })
     expect(t.source).toBe("ai_draft")
-    expect(t.fee).toBe(41)
+    expect(t.fee).toBe(0)
   })
 })
 

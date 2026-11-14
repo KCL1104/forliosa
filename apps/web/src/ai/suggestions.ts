@@ -306,7 +306,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
       if (!pos || !now || us) return null
       const next = (pos.avg_cost * pos.quantity + now * 1000) / (pos.quantity + 1000)
       return {
-        text: `以收盤價 ${price(now)}加碼 1 張，均價會從 ${privacy ? MASK : price(pos.avg_cost)}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}（不含手續費）。`,
+        text: `以收盤價 ${price(now)}加碼 1 張，均價會從 ${privacy ? MASK : price(pos.avg_cost)}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}。`,
         rows: [
           { label: "現在持有", value: privacy ? MASK : formatQuantity(pos.quantity, "lot", s.market) },
           { label: "加碼後", value: privacy ? MASK : formatQuantity(pos.quantity + 1000, "lot", s.market) },

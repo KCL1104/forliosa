@@ -210,7 +210,7 @@ export function DraftSpecimen() {
           <Cell label="成交價" value="52.40 元" right />
           <div className="col-span-2 flex items-center justify-between border-b border-rule px-3 py-3 min-[360px]:px-4">
             <dt className="font-bold text-ink">合計</dt>
-            <dd className="num text-xl font-bold text-ai">{formatMoney(104_841)}</dd>
+            <dd className="num text-xl font-bold text-ai">{formatMoney(104_800)}</dd>
           </div>
         </dl>
         <div className="flex items-center gap-2.5 py-3 pr-3 pl-3 min-[360px]:pl-4">

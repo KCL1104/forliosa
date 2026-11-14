@@ -281,7 +281,7 @@ def draft(db: Session, user: User, md: MarketData, plan: RecurringPlan, on: date
     lot = "零股" if shares < 1000 else ("整張" if shares % 1000 == 0 else "整張＋零股")
     rules = [f"股數 = floor(NT${plan.amount:,.0f} ÷ 收盤價 {price.normalize():f}"
              f"（{price_date.month}/{price_date.day}）) = {shares} 股（{lot}）", *price_rules,
-             "手續費另計，不從定期定額金額扣除", *preview.rules]
+             *preview.rules]
     if scheduled != debit:
         rules.insert(0, f"扣款日 {scheduled.month}/{scheduled.day} 不是交易日，順延到 {debit.month}/{debit.day}")
     return {

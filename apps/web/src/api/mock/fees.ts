@@ -33,15 +33,31 @@ function money(n: number, currency: "TWD" | "USD" = "TWD") {
   return `${prefix}${new Intl.NumberFormat("en-US", { maximumFractionDigits: 2 }).format(n)}`
 }
 
+/**
+ * 稅費試算（與後端 `services/transactions.compute` 相同）。
+ * 2026-11-14 起買賣**不自動算手續費與證交稅**（產品負責人：填的價格就是成本，要精準的話自己填）：
+ * 使用者新記的交易用 `auto: false`；`auto: true` 只給示範帳本的種子資料（模擬改規則之前就存好的交易，帶著當時算好的費用）。
+ */
 export function computePreview(
   body: TransactionInput,
   account: Account | undefined,
   spec: MockInstrumentSpec | undefined,
+  { auto = true }: { auto?: boolean } = {},
 ): TradePreview {
   const qty = body.quantity ?? 0
   const price = body.price ?? 0
   const isUS = spec ? spec.market === "US" : account?.currency === "USD"
   const rules: string[] = []
+
+  if ((body.type === "buy" || body.type === "sell") && !auto) {
+    const gross = body.amount ?? round2(qty * price)
+    const fee = body.fee ?? 0
+    const tax = body.type === "sell" ? (body.tax ?? 0) : (body.tax ?? 0)
+    if (body.fee != null) rules.push(`手續費：自己填的 ${money(fee, isUS ? "USD" : "TWD")}`)
+    if (body.type === "sell" && body.tax != null) rules.push(`交易稅：自己填的 ${money(tax, isUS ? "USD" : "TWD")}`)
+    const net = body.type === "buy" ? -(gross + fee) : gross - fee - tax
+    return { gross, fee, tax, health_insurance: 0, net_cash: round2(net), rules }
+  }
 
   if (body.type === "buy" || body.type === "sell") {
     const gross = body.amount ?? round2(qty * price)

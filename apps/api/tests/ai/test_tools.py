@@ -105,7 +105,7 @@ def test_draft_transaction_never_writes(two_users):
     out, res = run(ctx, "draft_transaction", type="buy", symbol="0050", quantity=2000, price=52.4)
     assert not out.is_error
     assert res["status"] == "pending_signature" and res["draft_id"].startswith("drf_")
-    assert res["preview"]["gross"] == 104800 and res["preview"]["fee"] == 41  # 104,800 × 0.1425% × 0.28
+    assert res["preview"]["gross"] == 104800 and res["preview"]["fee"] == 0  # no automatic commission
     assert txn_count(db) == before
     card = out.draft
     assert card["input"] == {"account_id": mine, "symbol": "0050.TW", "type": "buy", "trade_date": card["input"]

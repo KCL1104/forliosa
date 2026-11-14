@@ -37,5 +37,7 @@ export default defineConfig({
     setupFiles: ["./src/test/setup.ts"],
     include: ["src/**/*.test.{ts,tsx}"],
     css: false,
+    // 整批跑時 50 幾個檔案同時開 jsdom：走完整流程的畫面測試（打字、存檔、重抓）在機器忙時會超過預設的 5 秒
+    testTimeout: 15_000,
   },
 })

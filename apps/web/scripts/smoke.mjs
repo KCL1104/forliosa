@@ -103,12 +103,12 @@ await check("建議問題：點了就用自己的資料回答（誰拖累了我�
   await page.getByText(/今天拖累最多的是/).waitFor({ timeout: 5000 })
 })
 
-await check("AI 草稿：買 0050 2 張 52.4 → 稅費試算 → 待簽名 → 簽名入帳 → 復原", async () => {
+await check("AI 草稿：買 0050 2 張 52.4 → 合計（不自動算手續費）→ 待簽名 → 簽名入帳 → 復原", async () => {
   await page.getByRole("button", { name: "新對話" }).click()
   const box = page.getByLabel("提出問題或下指令")
   await box.fill("買 0050 2 張 52.4")
   await box.press("Enter")
-  await page.getByText("NT$104,841").waitFor({ timeout: 8000 })
+  await page.getByText("NT$104,800").waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: /待簽名 1 筆/ }).waitFor({ timeout: 5000 })
   await page.getByRole("button", { name: "簽名：確認入帳" }).click()
   await page.getByText(/已入帳：買進 元大台灣50/).waitFor({ timeout: 8000 })
@@ -281,11 +281,11 @@ await check("帳本的欄位選單：勾選格排成兩欄，文字是橫的（�
   await page.keyboard.press("Escape")
 })
 
-await check("手動記帳表單（備援路徑）：試算稅費並儲存", async () => {
+await check("手動記帳表單（備援路徑）：手續費選填、合計照填的算，並儲存", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   // 「＋」直接打開表單（只有一件事，不做成選單）
   await page.getByRole("button", { name: "用表單記一筆" }).click()
-  // 預設是簡單的買進輸入；賣出、股利與稅費試算在完整表單裡
+  // 預設是簡單的買進輸入；賣出、股利與選填的手續費在完整表單裡
   await page.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).click()
   await page.getByRole("dialog").getByRole("heading", { name: "記一筆交易" }).waitFor()
   // 從「賣出、股利或其他」進來，類型先選在「賣出」（照填不會記成買進）；這裡要記的是買進，自己改回來
@@ -296,7 +296,10 @@ await check("手動記帳表單（備援路徑）：試算稅費並儲存", asyn
   await page.getByRole("option", { name: /2454/ }).first().click()
   await page.locator("#trade-qty").fill("1")
   await page.locator("#trade-price").fill("1435")
-  await page.getByRole("dialog").getByText("手續費 0.1425% × 2.8 折").waitFor({ timeout: 8000 })
+  // 不自動算手續費：合計就是成交金額；自己填了手續費才加上去
+  await page.getByRole("dialog").getByText("NT$1,435,000").first().waitFor({ timeout: 8000 })
+  await page.locator("#trade-fee").fill("204")
+  await page.getByRole("dialog").getByText("NT$1,435,204").first().waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "儲存", exact: true }).click()
   await page.getByText(/已記錄：買進 聯發科/).waitFor({ timeout: 8000 })
 })
@@ -1901,7 +1904,7 @@ await check("手機：「問 AI」平常是石墨淡底＋框線＋石墨灰的�
     const box = p.getByLabel(/搜尋股票、提問/)
     await box.fill("買 0050 2 張 52.4")
     await box.press("Enter")
-    await p.getByText(/NT\$104,841/).first().waitFor({ timeout: 8000 })
+    await p.getByText(/NT\$104,800/).first().waitFor({ timeout: 8000 })
     await p.getByRole("dialog").getByRole("button", { name: "關閉" }).click()
     const pending = await look("問 AI（待簽名 1 筆）")
     if (pending.bg !== pending.ai || pending.color !== pending.paper) throw new Error(`pending 問 AI is not the solid block: ${JSON.stringify(pending)}`)

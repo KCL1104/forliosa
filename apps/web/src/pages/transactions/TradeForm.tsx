@@ -106,6 +106,9 @@ interface FormState {
   qtyUnit: "lot" | "share"
   priceText: string
   amountText: string
+  /** 手續費、交易稅：選填，使用者自己填（2026-11-14 起不自動算） */
+  feeText: string
+  taxText: string
   dayTrade: boolean
   note: string
 }
@@ -139,6 +142,8 @@ function initialState(edit: Transaction | undefined, unitPref: "lot" | "share", 
       qtyUnit: q != null ? (inLots ? "lot" : "share") : unitPref,
       priceText: prefill?.price != null ? String(prefill.price) : "",
       amountText: "",
+      feeText: "",
+      taxText: "",
       dayTrade: false,
       note: "",
     }
@@ -155,6 +160,9 @@ function initialState(edit: Transaction | undefined, unitPref: "lot" | "share", 
     qtyUnit: "share",
     priceText: edit.price !== null ? String(edit.price) : "",
     amountText: CASH_TYPES.includes(edit.type) ? String(edit.amount) : "",
+    // 編輯舊交易：存著的手續費與稅照原樣帶入（不帶入的話存檔會變成 0）
+    feeText: (edit.type === "buy" || edit.type === "sell") && edit.fee ? String(edit.fee) : "",
+    taxText: edit.type === "sell" && edit.tax ? String(edit.tax) : "",
     dayTrade: edit.is_day_trade,
     note: edit.note,
   }
@@ -194,6 +202,8 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
   const shares = qty === null ? null : f.qtyUnit === "lot" && !isUS && (type === "buy" || type === "sell") ? Math.round(qty * 1000) : qty
   const price = parseNum(f.priceText)
   const amount = parseNum(f.amountText)
+  const fee = parseNum(f.feeText)
+  const tax = parseNum(f.taxText)
 
   const body: TransactionInput | null = useMemo(() => {
     if (!account) return null
@@ -208,9 +218,10 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
       quantity: shares,
       price,
       is_day_trade: type === "sell" ? f.dayTrade : false,
+      ...(type === "buy" || type === "sell" ? { fee: fee ?? 0, ...(type === "sell" ? { tax: tax ?? 0 } : {}) } : {}),
       note: f.note,
     }
-  }, [account, isCash, amount, type, f.date, f.symbol, shares, price, f.dayTrade, f.note])
+  }, [account, isCash, amount, type, f.date, f.symbol, shares, price, f.dayTrade, f.note, fee, tax])
 
   const debounced = useDebounced(body)
   const preview = useQuery({
@@ -232,6 +243,8 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
             : null,
     price: !isCash && ["buy", "sell", "cash_dividend"].includes(type) && (!price || price <= 0) ? "請輸入價格" : null,
     amount: isCash && (!amount || amount <= 0) ? "請輸入金額" : null,
+    fee: f.feeText.trim() && (fee === null || fee < 0) ? "請填數字" : null,
+    tax: f.taxText.trim() && (tax === null || tax < 0) ? "請填數字" : null,
   }
   const hasError = Object.values(errors).some(Boolean) || !account
 
@@ -275,7 +288,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
           },
         })
         if (again) {
-          setF((s) => ({ ...s, symbol: null, qtyText: "", priceText: "", amountText: "", dayTrade: false, note: "" }))
+          setF((s) => ({ ...s, symbol: null, qtyText: "", priceText: "", amountText: "", feeText: "", taxText: "", dayTrade: false, note: "" }))
           setSubmitted(false)
           setRound((n) => n + 1)
           return
@@ -314,7 +327,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
     return (
       <div className="flex flex-col gap-2 p-6 text-md">
         <p className="font-medium">還沒有券商帳戶</p>
-        <p className="text-ink-2">先新增一個帳戶（例如「永豐・一般」），手續費折扣才能算對。</p>
+        <p className="text-ink-2">先新增一個帳戶，例如「永豐・一般」。</p>
         <Link to="/settings" onClick={onDone} className={cn(buttonVariants({ variant: "outline" }), "mt-2 self-start")}>
           到設定新增帳戶
         </Link>
@@ -409,11 +422,18 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
           </div>
         )}
 
-        {type === "sell" && !isUS && (
-          <label className="inline-flex cursor-pointer items-center gap-2 text-md select-none">
-            <input type="checkbox" className="size-4 accent-[var(--primary)]" checked={f.dayTrade} onChange={(e) => set({ dayTrade: e.target.checked })} />
-            這筆是當沖（證交稅 0.15%）
-          </label>
+        {/* 手續費與稅不自動算（2026-11-14）：要和對帳單一樣精準的人自己填，不填就是 0 */}
+        {(type === "buy" || type === "sell") && (
+          <div className="grid grid-cols-2 gap-3">
+            <Row label="手續費（選填）" htmlFor="trade-fee" error={submitted ? errors.fee : null}>
+              <Input id="trade-fee" inputMode="decimal" value={f.feeText} onChange={(e) => set({ feeText: e.target.value })} placeholder="0" aria-invalid={submitted && !!errors.fee} className="num" />
+            </Row>
+            {type === "sell" && (
+              <Row label="交易稅（選填）" htmlFor="trade-tax" error={submitted ? errors.tax : null}>
+                <Input id="trade-tax" inputMode="decimal" value={f.taxText} onChange={(e) => set({ taxText: e.target.value })} placeholder="0" aria-invalid={submitted && !!errors.tax} className="num" />
+              </Row>
+            )}
+          </div>
         )}
 
         <Row label="備註（選填）" htmlFor="trade-note">
@@ -422,14 +442,11 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
       </div>
 
       <aside
-        aria-label="稅費試算"
+        aria-label="合計"
         aria-live="polite"
         className={cn("flex flex-col gap-3 bg-hov/60 px-4 py-4 sm:px-6", layout === "split" ? "border-l" : "border-t")}
       >
-        <div className="flex items-center gap-2">
-          <h3 className="text-md font-semibold">稅費試算</h3>
-          <span className="demo-tag">預估</span>
-        </div>
+        <h3 className="text-md font-semibold">合計</h3>
         <PreviewBody preview={preview.data} loading={preview.isFetching && !preview.data} ready={!!debounced} currency={account?.currency ?? "TWD"} type={type} />
         {layout === "split" && <Actions edit={!!edit} busy={busy} onCancel={onDone} onDelete={deleteWithUndo} again={again} onAgain={setAgain} className="mt-auto pt-2" />}
       </aside>
@@ -437,7 +454,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
         <div className="safe-bottom sticky bottom-0 z-10 border-t bg-popover px-4 pt-3 pb-3">
           {preview.data && (
             <p className="mb-2 flex items-baseline justify-between text-md">
-              <span className="text-ink-2">{preview.data.net_cash < 0 ? "應付" : "實收"}（預估）</span>
+              <span className="text-ink-2">{preview.data.net_cash < 0 ? "合計" : "實收"}</span>
               <span className="num font-semibold">{formatMoney(Math.abs(preview.data.net_cash), { currency: account?.currency ?? "TWD" })}</span>
             </p>
           )}
@@ -496,14 +513,15 @@ function formatNumberSafe(n: number | null) {
 }
 
 function PreviewBody({ preview, loading, ready, currency, type }: { preview?: TradePreview; loading: boolean; ready: boolean; currency: "TWD" | "USD"; type: TransactionType }) {
-  if (!ready) return <p className="text-base text-ink">填了數量和價格才能試算。</p>
+  if (!ready) return <p className="text-base text-ink">填了數量和價格才算得出來。</p>
   if (loading || !preview) return <div className="flex flex-col gap-2"><Skeleton className="h-4 w-full" /><Skeleton className="h-4 w-4/5" /><Skeleton className="h-4 w-3/5" /></div>
-  const rows: [string, number][] = [
+  // 沒有的項目不列（手續費、稅是 0 的時候不寫「手續費 0」）
+  const rows = ([
     [type === "cash_dividend" ? "股利金額" : "成交金額", preview.gross],
     ["手續費", preview.fee],
-    ["證交稅", preview.tax],
-    ...(preview.health_insurance ? ([["二代健保", preview.health_insurance]] as [string, number][]) : []),
-  ]
+    [type === "cash_dividend" ? "預扣稅" : "交易稅", preview.tax],
+    ["二代健保", preview.health_insurance],
+  ] as [string, number][]).filter(([k, v], i) => i === 0 || (v !== 0 && k !== ""))
   return (
     <div className="flex flex-col gap-3">
       <dl className="flex flex-col gap-1.5 text-md">
@@ -514,7 +532,7 @@ function PreviewBody({ preview, loading, ready, currency, type }: { preview?: Tr
           </div>
         ))}
         <div className="mt-1 flex items-baseline justify-between gap-3 border-t pt-2">
-          <dt className="font-medium">{preview.net_cash < 0 ? "應付" : "實收"}</dt>
+          <dt className="font-medium">{preview.net_cash < 0 ? "合計" : "實收"}</dt>
           <dd className="num text-lg font-semibold">{formatMoney(Math.abs(preview.net_cash), { currency })}</dd>
         </div>
       </dl>

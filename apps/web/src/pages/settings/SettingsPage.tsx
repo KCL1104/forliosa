@@ -33,7 +33,6 @@ import {
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
-import { formatMoney } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
@@ -246,10 +245,6 @@ function Row({ label, description, htmlFor, children }: { label: string; descrip
   )
 }
 
-function discountText(d: number) {
-  return d >= 1 ? "無折扣" : `${Math.round(d * 100) / 10} 折`
-}
-
 function Accounts() {
   const accounts = useAccounts()
   const openTradeForm = useUi((s) => s.openTradeForm)
@@ -271,7 +266,7 @@ function Accounts() {
       {!accounts.data ? (
         <SkeletonLines rows={3} className="pt-3" />
       ) : accounts.data.length === 0 ? (
-        <EmptyState flush title="還沒有帳戶" description="先新增一個，例如「永豐・一般」，記交易時才會自動算手續費。" />
+        <EmptyState flush title="還沒有帳戶" description="先新增一個，例如「永豐・一般」。" />
       ) : (
         // 標題的印刷線就是清單上面那條線
         <ul className="flex flex-col divide-y divide-rule border-b border-rule">
@@ -283,11 +278,8 @@ function Accounts() {
                   <span className="demo-tag text-ink-2">{a.currency === "USD" ? "美元" : "新台幣"}</span>
                   <span className="demo-tag text-ink-2">{a.tracking_mode === "transactions" ? "逐筆交易" : "只記持股"}</span>
                 </div>
-                <dl className="num mt-1 flex flex-wrap gap-x-4 gap-y-0.5 text-sm text-ink-2">
-                  <div className="flex gap-1"><dt>券商</dt><dd className="text-foreground">{a.broker}</dd></div>
-                  <div className="flex gap-1"><dt>手續費</dt><dd className="text-foreground">{(a.fee_rate * 100).toFixed(4).replace(/0+$/, "")}% × {discountText(a.fee_discount)}</dd></div>
-                  <div className="flex gap-1"><dt>最低</dt><dd className="text-foreground">{formatMoney(a.min_fee, { currency: a.currency, decimals: 0 })}{a.currency === "TWD" && `（零股 ${formatMoney(a.min_fee_odd_lot, { decimals: 0 })}）`}</dd></div>
-                </dl>
+                {/* 不列手續費率：手續費不自動算（2026-11-14） */}
+                {a.broker && <p className="mt-1 text-sm text-ink-2">{a.broker}</p>}
               </div>
               {/* 只記持股的帳戶：「編輯持股」開持股的輸入（和記一筆同一個框）；兩個文字動作在手機上下排 */}
               <div className="flex shrink-0 flex-col items-end gap-x-5 sm:flex-row sm:items-center">
@@ -343,24 +335,14 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
   const [broker, setBroker] = useState(account.broker)
   const [currency, setCurrency] = useState(account.currency)
   const [mode, setMode] = useState(account.tracking_mode)
-  const [discount, setDiscount] = useState(String(Math.round(account.fee_discount * 100) / 10))
-  const [minFee, setMinFee] = useState(String(account.min_fee))
-  const [minOdd, setMinOdd] = useState(String(account.min_fee_odd_lot))
   const [touched, setTouched] = useState(false)
-  const d = Number(discount)
-  const discountBad = Number.isNaN(d) || d <= 0 || d > 10
   const nameBad = !name.trim()
   const pending = update.isPending || create.isPending
   const save = () => {
     setTouched(true)
-    if (nameBad || discountBad) return
-    const editable = {
-      name: name.trim(),
-      broker: broker.trim(),
-      fee_discount: d / 10,
-      min_fee: Number(minFee) || 0,
-      min_fee_odd_lot: Number(minOdd) || 0,
-    }
+    if (nameBad) return
+    // 不問手續費（產品負責人 2026-11-14：不自動算手續費，填的價格就是成本；要精準的話記交易時自己填）
+    const editable = { name: name.trim(), broker: broker.trim() }
     const done = {
       onSuccess: () => {
         toast.success(isNew ? `已新增「${editable.name}」` : `已更新「${editable.name}」`)
@@ -369,8 +351,8 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
       onError: (err: Error) =>
         toast.error("沒有存成功，內容還在。", { description: err.message }),
     }
-    // 編輯時不送幣別、追蹤方式與費率：已有交易的帳戶不能改幣別，也不要覆蓋自訂費率
-    if (isNew) create.mutate({ ...editable, currency, tracking_mode: mode, fee_rate: currency === "USD" ? 0.001 : 0.001425 }, done)
+    // 編輯時不送幣別與追蹤方式：已有交易的帳戶不能改幣別
+    if (isNew) create.mutate({ ...editable, currency, tracking_mode: mode }, done)
     else update.mutate({ id: account.id, patch: editable }, done)
   }
   return (
@@ -378,7 +360,7 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{isNew ? "新增券商帳戶" : "編輯帳戶"}</DialogTitle>
-          <DialogDescription>折扣填「幾折」，2.8 折就填 2.8；不知道先填 6。</DialogDescription>
+          <DialogDescription className="sr-only">帳戶名稱與券商。</DialogDescription>
         </DialogHeader>
         <div className="grid gap-4 pointer-coarse:[&_input]:h-11">
           <div className="grid gap-3 sm:grid-cols-2">
@@ -399,13 +381,6 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
               </Field>
             </div>
           )}
-          <div className="grid grid-cols-3 gap-3">
-            <Field label="手續費折扣（折）" htmlFor="acc-discount" error={touched && discountBad ? "請填 0.1 到 10" : undefined}>
-              <Input id="acc-discount" inputMode="decimal" value={discount} onChange={(e) => setDiscount(e.target.value)} aria-invalid={touched && discountBad} />
-            </Field>
-            <Field label="最低手續費" htmlFor="acc-min"><Input id="acc-min" inputMode="decimal" value={minFee} onChange={(e) => setMinFee(e.target.value)} /></Field>
-            <Field label="零股最低" htmlFor="acc-odd"><Input id="acc-odd" inputMode="decimal" value={minOdd} onChange={(e) => setMinOdd(e.target.value)} /></Field>
-          </div>
         </div>
         <DialogFooter>
           {!isNew && (

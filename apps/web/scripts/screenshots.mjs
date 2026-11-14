@@ -38,7 +38,7 @@ const draft = async (page, mobile) => {
   const box = mobile ? page.getByLabel(/搜尋股票、提問/) : page.getByLabel("提出問題或下指令")
   await box.fill("買 0050 2 張 52.4")
   await box.press("Enter")
-  await page.getByText(/NT\$104,841/).first().waitFor({ timeout: 8000 })
+  await page.getByText(/NT\$104,800/).first().waitFor({ timeout: 8000 })
   if (mobile) await page.getByLabel(/搜尋股票、提問/).blur()
 }
 

@@ -104,7 +104,7 @@ describe("沒登入的首頁：簡短的介紹頁", () => {
     expect(stock).toHaveTextContent("1,085")
     expect(stock).toHaveTextContent("▲4.83%")
     expect(draft).toHaveTextContent("買 0050 2 張 52.4")
-    expect(draft).toHaveTextContent("NT$104,841")
+    expect(draft).toHaveTextContent("NT$104,800")
     expect(draft.querySelector(".sign-box")).toHaveTextContent("簽名確認入帳")
     // 畫面上沒有日期（寫死的日期會過期）
     expect(document.querySelector("main")!.textContent).not.toMatch(/\d{1,2}\/\d{1,2}|20\d\d/)

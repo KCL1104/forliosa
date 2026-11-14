@@ -69,7 +69,9 @@ export interface Account {
   created_at: string
 }
 
-export type AccountInput = Omit<Account, "id" | "created_at">
+/** 新增帳戶：手續費率等欄位不再由畫面填（不自動算手續費，2026-11-14），後端有預設值 */
+export type AccountInput = Omit<Account, "id" | "created_at" | "fee_rate" | "fee_discount" | "min_fee" | "min_fee_odd_lot"> &
+  Partial<Pick<Account, "fee_rate" | "fee_discount" | "min_fee" | "min_fee_odd_lot">>
 
 export interface HoldingsSnapshotBody {
   as_of: string

@@ -247,7 +247,7 @@ function PlanDialog({ plan, accounts, onClose }: { plan: RecurringPlan | null; a
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{plan ? "修改定期定額" : "新增定期定額"}</DialogTitle>
-          <DialogDescription>股數 = 扣款金額 ÷ 收盤價（無條件捨去，含零股），手續費另計；補記過去的扣款用那天的收盤價。</DialogDescription>
+          <DialogDescription>股數 = 扣款金額 ÷ 收盤價（無條件捨去，含零股）。補記過去的扣款用那天的收盤價。</DialogDescription>
         </DialogHeader>
         <div className={cn("grid gap-4", TOUCH_FIELDS)}>
           <Field label="股票或 ETF" error={touched ? errors.symbol : null}>
