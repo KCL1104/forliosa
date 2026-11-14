@@ -7,10 +7,12 @@ Conventions
   parallel, in TWD at each transaction's FX rate (``fx_rate`` = TWD per 1 unit of currency).
 * Realized P&L on a sell = (gross - fee - tax) - cost of the shares sold.
 * Two cost methods: moving average (``average``, the Taiwan broker default) and ``fifo``.
-* Day-trade sells (``is_day_trade``) are matched first against same-day day-trade buys, so the
-  day-trade result does not disturb the average cost of the inventory (both methods).
+* Day-trade sells (``is_day_trade``) are matched first against the same day's buys of that account and symbol
+  (whether or not the buy itself was flagged: the entry form only flags sells), so the day-trade result does not
+  disturb the average cost of the inventory (both methods).
 * Within one trade date, events apply in this order: dividends and corporate actions (they
-  belong to holders at the previous close), then buys, then sells, then cash-only items.
+  belong to holders at the previous close), then buys and ordinary sells in the order they were entered (a sell
+  then a re-buy keeps the old average cost; 2026-11-14 review), then day-trade sells, then cash-only items.
 """
 
 from __future__ import annotations
@@ -51,12 +53,13 @@ _DAY_ORDER = {
     TxnType.CAPITAL_REDUCTION: 0,
     TxnType.DEPOSIT: 1,
     TxnType.BUY: 2,
-    TxnType.SELL: 3,
+    TxnType.SELL: 2,  # same rank as buys: the entry order decides (see the module docstring)
     TxnType.FEE: 4,
     TxnType.TAX: 4,
     TxnType.INTEREST: 4,
     TxnType.WITHDRAWAL: 5,
 }
+_DAY_TRADE_SELL = 3
 
 
 class CostMethod(StrEnum):
@@ -87,7 +90,10 @@ class LedgerTxn:
     seq: int = 0  # tie-breaker within a day (creation order)
 
     def sort_key(self) -> tuple:
-        return (self.trade_date, _DAY_ORDER[self.type], self.seq, self.id)
+        rank = _DAY_ORDER[self.type]
+        if self.type is TxnType.SELL and self.is_day_trade:
+            rank = _DAY_TRADE_SELL  # after the day's buys it is paired with
+        return (self.trade_date, rank, self.seq, self.id)
 
 
 @dataclass
@@ -140,7 +146,7 @@ class Position:
 
     def _pool(self) -> Lot | None:
         for lot in self.lots:
-            if not lot.day_trade:
+            if not lot.day_trade and lot.quantity > 0:
                 return lot
         return None
 
@@ -286,6 +292,7 @@ class Ledger:
         self.warnings: list[str] = []
         self.effective: dict[str, EffectiveTxn] = {}
         self.trail: list[TrailEntry] = []
+        self._day_trading: set[tuple[str, str | None]] = set()
 
     # -- helpers -----------------------------------------------------------------------------
     def position(self, account_id: str, symbol: str, currency: str) -> Position:
@@ -312,12 +319,28 @@ class Ledger:
             raise LedgerError(message)
         self.warnings.append(message)
 
+    def _close_out(self, pos: Position, t: LedgerTxn, held: Decimal) -> None:
+        """A capital reduction or reverse split that leaves no shares: the cost still on the books is a realized
+        loss, and the empty lots go (a later buy used to be merged into them; 2026-11-14 review)."""
+        if held <= 0 or pos.quantity > 0:
+            return
+        cost, cost_twd = pos.cost, pos.cost_twd
+        pos.lots = []
+        if cost:
+            self.realized.append(RealizedEvent(
+                t.trade_date, t.account_id, t.symbol, t.id, "trade", ZERO, ZERO, cost, -cost, -cost_twd, t.currency,
+            ))
+
     # -- application -------------------------------------------------------------------------
     def apply_day(self, txns: Iterable[LedgerTxn]) -> DayFlows:
         """Apply all transactions of a single date (any order; sorted here)."""
         flows = DayFlows()
         touched: set[tuple[str, str]] = set()
-        for t in sorted(txns, key=LedgerTxn.sort_key):
+        ordered = sorted(txns, key=LedgerTxn.sort_key)
+        # Buys on a day the same account sells that symbol as a day trade are kept apart (day-trade lots) so the
+        # day-trade sell pairs with them; whatever is left joins the inventory at the end of the day.
+        self._day_trading = {(t.account_id, t.symbol) for t in ordered if t.type is TxnType.SELL and t.is_day_trade}
+        for t in ordered:
             before = self.held(t.account_id, t.symbol) if t.symbol else ZERO
             self._apply(t, flows)
             if t.symbol:
@@ -339,7 +362,8 @@ class Ledger:
                 gross = t.quantity * t.price
                 cost = gross + t.fee
                 pos = self.position(t.account_id, t.symbol, t.currency)
-                pos.add(Lot(t.quantity, cost, cost * fx, t.trade_date, day_trade=t.is_day_trade))
+                day_trade = t.is_day_trade or (t.account_id, t.symbol) in self._day_trading
+                pos.add(Lot(t.quantity, cost, cost * fx, t.trade_date, day_trade=day_trade))
                 self._cash(t.account_id, t.currency, -cost)
                 flows.inflow += cost * fx
                 self.effective[t.id] = EffectiveTxn(t.id, t.quantity, -cost)
@@ -409,8 +433,10 @@ class Ledger:
                     raise LedgerError(f"交易 {t.id} 分割比例必須大於 0")
                 pos = self.position(t.account_id, t.symbol, t.currency)
                 held = pos.quantity
-                new_total = truncate(held * t.quantity)  # fractional shares are not issued
+                # Taiwan issues no fractional shares; US brokers keep them (2.5 AAPL × 3 = 7.5)
+                new_total = held * t.quantity if t.currency == "USD" else truncate(held * t.quantity)
                 pos.rescale(new_total)
+                self._close_out(pos, t, held)
                 self.effective[t.id] = EffectiveTxn(t.id, new_total - held, ZERO)
             case TxnType.CAPITAL_REDUCTION:
                 if not t.symbol:
@@ -420,9 +446,12 @@ class Ledger:
                 pos = self.position(t.account_id, t.symbol, t.currency)
                 held = pos.quantity
                 new_total = truncate(held * (ONE - t.quantity))
-                cash = t.amount
-                if cash <= 0 and t.price > 0:
+                # The refund per share applies to the shares held at replay time (an earlier buy entered later
+                # changes it); the stored amount is only used when no per-share refund was given.
+                if t.price > 0:
                     cash = truncate(held * t.price) if t.currency == "TWD" else truncate(held * t.price, 2)
+                else:
+                    cash = t.amount
                 pos.rescale(new_total)
                 if cash > 0:
                     excess, excess_twd = pos.reduce_cost(cash, cash * fx)
@@ -434,6 +463,7 @@ class Ledger:
                     self._cash(t.account_id, t.currency, cash)
                     flows.outflow += cash * fx
                     flows.sell_proceeds += cash * fx
+                self._close_out(pos, t, held)
                 self.effective[t.id] = EffectiveTxn(t.id, new_total - held, cash)
             case TxnType.DEPOSIT:
                 self._cash(t.account_id, t.currency, t.amount)

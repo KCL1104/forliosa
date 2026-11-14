@@ -30,7 +30,7 @@ from forliosa.ai.prompts import DISCLAIMER
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import Settings
 from forliosa.ids import new_id
-from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, BrokerAccount, User
+from forliosa.models import AiDraft, AiMessage, AiQuestion, AiThread, AiUsage, BrokerAccount, User
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
@@ -176,6 +176,8 @@ def save_turn(db: Session, thread: AiThread, user: User, turn_id: str, messages:
         turn_rows.append(last_ai)
     last_ai.text = display.text
     last_ai.meta = display.meta()
+    # the daily limit counts this row (it outlives the conversation)
+    db.add(AiQuestion(user_id=user.id, cost=message_cost(user_meta), created_at=now))
     db.add_all(rows + turn_rows)
     thread.updated_at = now
     if context_tokens is not None:
@@ -353,8 +355,10 @@ def messages_today(db: Session, user: User, now: datetime | None = None) -> int:
     on its row) plus analyst-view searches this user triggered (each search counts as one question; its calls share
     one ``ai_usage.thread_id``, see ``analyst``)."""
     since = day_start(now)
-    chat = sum(message_cost(meta) for meta in db.scalars(select(AiMessage.meta).where(
-        AiMessage.user_id == user.id, AiMessage.is_user_input.is_(True), AiMessage.created_at >= since)))
+    # ai_questions, not ai_messages: deleting a conversation deletes its messages, and used to give the day's
+    # questions back (2026-11-14 review)
+    chat = db.scalar(select(func.coalesce(func.sum(AiQuestion.cost), 0)).where(
+        AiQuestion.user_id == user.id, AiQuestion.created_at >= since)) or 0
     analyst = db.scalar(select(func.count(func.distinct(AiUsage.thread_id))).where(
         AiUsage.user_id == user.id, AiUsage.feature.in_(("analyst", "briefing")),  # a briefing's calls share one id too
         AiUsage.created_at >= since)) or 0

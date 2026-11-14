@@ -143,7 +143,9 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
             assert qty is not None and px is not None
             if ref.is_tw:
                 _require(qty == qty.to_integral_value(), "台股股數必須是整數（零股以股為單位）")
-            gross = amount if amount is not None else qty * px
+            # The ledger values buys and sells at quantity × price; a different stored amount made the preview and
+            # the holdings disagree (2026-11-14 review)
+            gross = qty * px
             amount = gross
             fee = fee if fee is not None else ZERO
             tax = tax if tax is not None else ZERO
@@ -198,13 +200,14 @@ def compute(db: Session, user: User, data: dict[str, Any], md: MarketData,
             preview = FeeBreakdown(ZERO, ZERO, ZERO, ZERO, ZERO, rules)
         case TxnType.CAPITAL_REDUCTION:
             _require(qty is not None and ZERO <= qty < 1, "請輸入減資比例（每 1 股減少幾股，介於 0 與 1）")
-            if amount is None:
-                if px:
-                    shares = held()
-                    amount = truncate(shares * px) if currency == "TWD" else truncate(shares * px, 2)
-                    rules.append(f"退還股款 = {shares} 股 × {px} 元")
-                else:
-                    amount = ZERO
+            # With a per-share refund the amount follows the shares held (recomputed on every edit, as the ledger
+            # does at replay); only a refund given as a total amount is kept as entered (2026-11-14 review)
+            if px:
+                shares = held()
+                amount = truncate(shares * px) if currency == "TWD" else truncate(shares * px, 2)
+                rules.append(f"退還股款 = {shares} 股 × {px} 元")
+            elif amount is None:
+                amount = ZERO
             rules.append(f"減資：每 1 股減少 {qty} 股；退還股款 {fmt_money(amount, currency)} 降低成本")
             fee, tax, nhi = fee or ZERO, tax or ZERO, nhi or ZERO
             preview = FeeBreakdown(amount, fee, tax, nhi, amount - fee - tax, rules)

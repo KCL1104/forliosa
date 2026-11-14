@@ -148,9 +148,9 @@ def daily_at(*times: time, only_if: Callable[[datetime], bool] = lambda _now: Tr
     """Due once after each listed Taipei time of day."""
 
     def due(now: datetime, last: datetime | None) -> bool:
-        # Yesterday's slots count too (still within the 3-hour window): a 23:45 slot the loop reached only after midnight
-        # (a long news batch held it) used to be skipped for good, because the slot was built from today's date
-        # (2026-11-14 review). ``only_if`` is asked about the slot, so a trading-day guard is about the slot's day.
+        # Yesterday's slots count too (still within the 3-hour window): a 23:45 slot the loop reached only after
+        # midnight (a long news batch held it) used to be skipped for good, because the slot was built from today's
+        # date (2026-11-14 review). ``only_if`` is asked about the slot, so a trading-day guard is about its day.
         for day in (now.date() - timedelta(days=1), now.date()):
             for t in times:
                 slot = datetime.combine(day, t, TAIPEI)

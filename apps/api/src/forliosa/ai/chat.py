@@ -255,10 +255,16 @@ class ChatTurn:
             state.round_start = None
             try:
                 with slot.client.messages.stream(**params) as stream:
-                    for ev in stream:
-                        for out in self._translate(ev, state, first_text_of_round):
-                            emitted = True
-                            yield out
+                    try:
+                        for ev in stream:
+                            for out in self._translate(ev, state, first_text_of_round):
+                                emitted = True
+                                yield out
+                    except BaseException:
+                        # The browser went away (GeneratorExit) or the stream failed part-way: the call is billed
+                        # all the same, so it counts toward the budgets (2026-11-14 review)
+                        self._record_partial(stream, slot.index, model)
+                        raise
                     final = stream.get_final_message()
                     headers = stream.response.headers
                 self.pool.observe(slot.index, headers)
@@ -302,6 +308,23 @@ class ChatTurn:
                 tried.add(slot.index)
                 if not self._recover(failure, tried, same, can_move=len(new) == 2):
                     raise ChatFailure(_classify(exc), str(exc)) from exc
+
+    def _record_partial(self, stream: Any, slot_index: int, model: str) -> None:
+        """Record what an interrupted streamed call has used so far (input from ``message_start``, the output
+        streamed until then). Nothing is recorded when the stream never started a message."""
+        try:
+            snap = stream.current_message_snapshot
+            usage = CallUsage.from_sdk(snap.usage)
+        except Exception:  # no message started: nothing was billed that we can see
+            return
+        if not (usage.input_tokens or usage.output_tokens):
+            return
+        try:
+            store.record_usage(self.db, user_id=self.user.id, thread_id=self.thread.id if self.thread else None,
+                               feature="chat", model=getattr(snap, "model", None) or model, key_slot=slot_index,
+                               usage=usage, stop_reason="interrupted")
+        except Exception:  # accounting must not hide the original failure
+            log.exception("could not record the usage of an interrupted AI call")
 
     def _translate(self, ev: Any, state: TurnState, first_text_of_round: list[bool]) -> Iterator[Event]:
         t = getattr(ev, "type", None)

@@ -34,6 +34,7 @@ from forliosa.models import (
     AiBriefing,
     AiDraft,
     AiMessage,
+    AiQuestion,
     AiThread,
     AutoDividendSkip,
     BrokerAccount,
@@ -302,8 +303,8 @@ def delete_user(db: Session, user: User) -> None:
         mine = select(Delegation.id).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid))
         db.execute(delete(DelegationAccount).where(DelegationAccount.delegation_id.in_(mine)))
         db.execute(delete(Delegation).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid)))
-        for model in (AiBriefing, AiDraft, AiMessage, AiThread, AutoDividendSkip, RecurringPlan, Transaction,
-                      WatchlistItem, BrokerAccount, UserSession, UserIdentity):
+        for model in (AiBriefing, AiDraft, AiMessage, AiQuestion, AiThread, AutoDividendSkip, RecurringPlan,
+                      Transaction, WatchlistItem, BrokerAccount, UserSession, UserIdentity):
             db.execute(delete(model).where(model.user_id == uid))
         # What is left pointing at the user is kept without an author (ON DELETE SET NULL): group comments, discussion
         # topics and replies, AI usage counts, who created an invite / configured a channel / suspended someone.

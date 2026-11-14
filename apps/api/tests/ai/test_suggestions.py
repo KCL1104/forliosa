@@ -103,4 +103,5 @@ def test_why_question_direction_and_day_follow_the_quote():
     assert q["text"] == "台積電11/13 為什麼跌？"
     assert q["lines"] == ["11/13", "為什麼跌？"]
     up = QuoteData(symbol="2330.TW", price=Decimal("1050"), prev_close=Decimal("1000"), trade_date=date(2026, 11, 14))
-    assert stock_questions(info, up, None, None, {"show": True}, date(2026, 11, 14))[0]["text"] == "台積電今天為什麼漲？"
+    q = stock_questions(info, up, None, None, {"show": True}, date(2026, 11, 14))[0]
+    assert q["text"] == "台積電今天為什麼漲？"

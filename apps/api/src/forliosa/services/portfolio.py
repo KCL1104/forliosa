@@ -465,9 +465,15 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         b_divs: dict[date, Decimal] = {}
         b_splits: dict[date, Decimal] = {}
     else:
-        b_divs = {e.ex_dividend_date: e.cash_dividend for e in md.dividends(bench_symbol).value
-                  if e.ex_dividend_date}
+        dividends = md.dividends(bench_symbol).value
+        b_divs = {e.ex_dividend_date: e.cash_dividend for e in dividends if e.ex_dividend_date}
         b_splits = {e.date: e.ratio for e in md.corporate_events(bench_symbol) if e.kind == "split"}
+        # A stock dividend (配股, X 元 per share at par 10) adds X/10 shares per share on the ex-rights date; without
+        # it a stock benchmark showed a false drop that day (2026-11-14 review)
+        for e in dividends:
+            if e.ex_dividend_date and e.stock_dividend:
+                b_splits[e.ex_dividend_date] = b_splits.get(e.ex_dividend_date, Decimal(1)) * (
+                    1 + Decimal(e.stock_dividend) / 10)
     b_returns = benchmark_returns(axis, b_closes.get, lambda d: b_divs.get(d, ZERO),
                                   lambda d: b_splits.get(d, Decimal(1)))
     b_window = b_returns[si:ei + 1]

@@ -445,7 +445,22 @@ class AiUsage(Base):
     web_search_requests: Mapped[int] = mapped_column(default=0)
     web_fetch_requests: Mapped[int] = mapped_column(default=0)
     cost_usd: Mapped[Decimal] = mapped_column(Money, default=Decimal(0))
-    stop_reason: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    # 40: "model_context_window_exceeded" is 30 characters (24 overflowed on PostgreSQL; 2026-11-14 review)
+    stop_reason: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class AiQuestion(Base):
+    """One question a user asked the AI (``cost``: how many of the daily limit it counts as; 深度搜尋 counts as
+    several). The daily limit counts these, not the messages: deleting a conversation must not hand the day's
+    questions back (2026-11-14 review). No content; purged with the AI retention window."""
+
+    __tablename__ = "ai_questions"
+    __table_args__ = (Index("ix_ai_questions_user_created", "user_id", "created_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+    cost: Mapped[int] = mapped_column(default=1)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 

@@ -25,7 +25,7 @@ from sqlalchemy.orm import Session
 
 from forliosa.config import get_settings
 from forliosa.db import session_factory
-from forliosa.models import AiDraft, AiMessage, AiThread
+from forliosa.models import AiDraft, AiMessage, AiQuestion, AiThread
 from forliosa.timeutil import now_utc
 
 log = logging.getLogger(__name__)
@@ -59,6 +59,7 @@ def purge(db: Session, days: int, now: datetime | None = None, dry_run: bool = F
             db.execute(update(AiDraft).where(AiDraft.thread_id.in_(ids)).values(thread_id=None))
             db.execute(delete(AiThread).where(AiThread.id.in_(ids)))
         db.execute(delete(AiDraft).where(AiDraft.updated_at < cutoff))
+        db.execute(delete(AiQuestion).where(AiQuestion.created_at < cutoff))  # only the daily limit reads them
         db.commit()
     result = PurgeResult(len(thread_ids), n_messages, n_drafts, cutoff)
     log.info("AI retention (%d days%s): %d threads, %d messages, %d drafts older than %s", days,

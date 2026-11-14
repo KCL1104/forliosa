@@ -16,6 +16,7 @@ from forliosa.api.errors import not_found, unprocessable
 from forliosa.datapolicy import label, labels, source_clause, tagged
 from forliosa.marketdata.base import DividendEvent, InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
+from forliosa.marketdata.indices import INDICES, is_index
 from forliosa.marketdata.service import MarketData, dividend_sort_key
 from forliosa.models import PriceDaily
 from forliosa.services.coverage import series_notes
@@ -99,9 +100,13 @@ def quote_out(q: QuoteData) -> dict[str, Any]:
 def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
     if range_ not in HISTORY_RANGES:
         raise unprocessable(f"不支援的區間：{range_}（可用 {'、'.join(HISTORY_RANGES)}）")
+    if is_index(symbol):
+        return _index_history(md, symbol, range_)
     info = require_instrument(md, symbol)
     today = today_taipei()
-    start = range_start(range_, today, date(1990, 1, 1))
+    # 5D: the last five sessions, looked up a month back (a week back left 0–4 candles after holidays such as
+    # Lunar New Year; 2026-11-14 review)
+    start = today - timedelta(days=30) if range_ == "5D" else range_start(range_, today, date(1990, 1, 1))
     h = md.history(info.symbol, start, today, backfill=True)  # a chart: may show the history backfill's days
     candles = h.candles
     notes = series_notes(md, info.symbol, start, candles[0].t if candles else None, backfill=True)
@@ -117,6 +122,26 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
         "is_demo": h.is_demo,
         "sources": labels(tagged(h.source, "price")),
         "notes": notes,
+    }
+
+
+def _index_history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
+    """A benchmark index (``^TAIEXTR``) for the stock chart's 比較 line: close-only candles from the archive. It used
+    to 404 (an index is not an instrument), so the comparison silently drew nothing (2026-11-14 review)."""
+    today = today_taipei()
+    start = today - timedelta(days=30) if range_ == "5D" else range_start(range_, today, date(1990, 1, 1))
+    h = md.index_history(symbol, start, today)
+    candles = h.candles[-5:] if range_ == "5D" else h.candles
+    name = INDICES[symbol].name
+    return {
+        "symbol": symbol,
+        "interval": "1d",
+        # Close-only levels: open/high/low repeat the close and volume is 0 (the comparison line reads the close)
+        "candles": [{"t": c.t, "o": ser.price(c.c), "h": ser.price(c.c), "l": ser.price(c.c), "c": ser.price(c.c),
+                     "v": 0} for c in candles],
+        "is_demo": h.is_demo,
+        "sources": labels([INDICES[symbol].source_key]) if candles else [],
+        "notes": [] if candles else [f"沒有 {name} 的資料，不能比較"],
     }
 
 

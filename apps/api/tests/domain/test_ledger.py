@@ -215,3 +215,70 @@ def test_cash_balance_tracking():
 def test_non_strict_oversell_with_nothing_held_books_no_gain():
     led = replay([tx("sell", date(2025, 1, 3), qty=100, price=10)]).ledger
     assert led.realized[0].pnl == 0 and led.warnings
+
+
+# -- 2026-11-14 review --------------------------------------------------------------------------------------
+def _pos(led, symbol="2330.TW"):
+    return led.positions[(ACC, symbol)]
+
+
+def test_day_trade_sell_pairs_with_the_days_unflagged_buy():
+    """The entry form only flags the sell as a day trade; the same day's buy must still be the one it closes."""
+    d = date(2025, 5, 2)
+    led = replay([
+        tx("buy", date(2025, 5, 1), qty=1000, price=100),
+        tx("buy", d, qty=1000, price=120),
+        tx("sell", d, qty=1000, price=125, day_trade=True),
+    ], CostMethod.AVERAGE).ledger
+    assert sum(e.pnl for e in led.realized) == D(5000)
+    assert (_pos(led).quantity, _pos(led).avg_cost) == (D(1000), D(100))
+
+
+def test_sell_then_rebuy_on_the_same_day_keeps_the_old_average_cost():
+    d = date(2025, 5, 2)
+    led = replay([
+        tx("buy", date(2025, 5, 1), qty=1000, price=100),
+        tx("sell", d, qty=1000, price=150),
+        tx("buy", d, qty=1000, price=150),
+    ], CostMethod.AVERAGE).ledger
+    assert sum(e.pnl for e in led.realized) == D(50000)
+    assert _pos(led).avg_cost == D(150)
+
+
+def test_buy_then_sell_on_the_same_day_sells_at_the_new_average():
+    d = date(2025, 5, 2)
+    led = replay([
+        tx("buy", date(2025, 5, 1), qty=1000, price=100),
+        tx("buy", d, qty=1000, price=120),
+        tx("sell", d, qty=1000, price=125),
+    ], CostMethod.AVERAGE).ledger
+    assert sum(e.pnl for e in led.realized) == D(15000)  # (100 + 120) / 2 = 110 average
+
+
+def test_a_capital_reduction_that_leaves_no_shares_realizes_the_cost():
+    led = replay([
+        tx("buy", date(2025, 1, 2), qty=1, price=1000),
+        tx("capital_reduction", date(2025, 3, 3), qty="0.5"),  # 0.5 share truncates to 0
+        tx("buy", date(2025, 4, 1), qty=1000, price=50),
+    ], CostMethod.AVERAGE).ledger
+    assert sum(e.pnl for e in led.realized) == D(-1000)
+    assert (_pos(led).quantity, _pos(led).avg_cost) == (D(1000), D(50))  # the later buy is not merged with the old cost
+
+
+def test_capital_reduction_refund_uses_the_shares_held_at_replay():
+    led = replay([
+        tx("buy", date(2025, 1, 2), qty=1000, price=100),
+        tx("buy", date(2025, 1, 3), qty=1000, price=100),
+        # entered when only 1,000 shares were recorded: the stored amount says 3,000, the per-share refund is 3
+        tx("capital_reduction", date(2025, 3, 3), qty="0.3", price=3, amount=3000),
+    ], CostMethod.AVERAGE).ledger
+    assert _pos(led).quantity == D(1400)
+    assert _pos(led).cost == D(200000) - D(6000)
+
+
+def test_us_splits_keep_fractional_shares():
+    led = replay([
+        tx("buy", date(2025, 1, 2), symbol="AAPL", qty="2.5", price=200, currency="USD", fx=32),
+        tx("split", date(2025, 3, 3), symbol="AAPL", qty=3, currency="USD", fx=32),
+    ], CostMethod.AVERAGE).ledger
+    assert _pos(led, "AAPL").quantity == D("7.5")
