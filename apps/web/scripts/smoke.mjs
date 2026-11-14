@@ -1039,7 +1039,7 @@ await check("頻道：webhook 網址不對 → 說明；測試訊息失敗 → �
   await page.getByRole("button", { name: "儲存並送測試訊息" }).click()
   await page.getByText(/測試訊息送不出去/).waitFor({ timeout: 8000 })
   await page.getByRole("button", { name: "產生連結碼" }).click()
-  await page.getByText(/\/link \d{6}/).waitFor({ timeout: 8000 })
+  await page.getByText(/\/link@\w+ \d{6}/).waitFor({ timeout: 8000 })
   await page.getByText("已連結：").waitFor({ timeout: 15000 })
 })
 await check("授權查看：授權給姊姊（指定帳戶）→ 列出 → 撤銷", async () => {
