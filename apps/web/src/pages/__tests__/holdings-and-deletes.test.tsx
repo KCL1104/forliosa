@@ -17,6 +17,10 @@ import { createAppRouter } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
+// 數字動畫（NumberFlow 是 web component）在 jsdom 裡更新數字會丟錯：刪掉一筆之後總資產會變，換成一般的字
+vi.mock("@number-flow/react", () => ({
+  default: ({ value, format, locales }: { value: number; format?: Intl.NumberFormatOptions; locales?: string }) => <span>{new Intl.NumberFormat(locales, format).format(value)}</span>,
+}))
 
 /**
  * 產品負責人 2026-11-14 照建議決定的三件事：
@@ -334,5 +338,110 @@ describe("刪除全部 AI 對話", { timeout: 20_000 }, () => {
     ])
     const mock = createMockAdapter({ latency: [0, 0] })
     await expect(mock.deleteAiThreads()).rejects.toMatchObject({ status: 403, code: "read_only" })
+  })
+})
+
+describe("持倉展開每一筆買賣（產品負責人 2026-11-14，參考 Google 財經）", { timeout: 20_000 }, () => {
+  const expand = async (name: string) => {
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    const table = await screen.findByRole("table", { name: "持倉" }, T)
+    await user.click(within(table).getByRole("button", { name: `展開${name}的每一筆買賣` }))
+    return within(table).findByRole("list", { name: `${name}的每一筆買賣` }, T)
+  }
+
+  it("展開台積電：每一筆的日期（不是今年寫出年份）、類型、股數、價格、金額、買進後漲跌；再按一次收起", async () => {
+    mount()
+    renderApp("/")
+    const list = await expand("台積電")
+    const rows = within(list).getAllByRole("listitem")
+    expect(rows).toHaveLength(2)
+    // 新的在前；2024/8/6 買 500 股 815 → 今天 1,085：+33.13%
+    expect(rows[0]).toHaveTextContent("2024/8/6（二）")
+    expect(rows[0]).toHaveTextContent("買進")
+    expect(rows[0]).toHaveTextContent("500 股")
+    expect(rows[0]).toHaveTextContent("NT$407,500")
+    expect(rows[0]).toHaveTextContent("33.13%")
+    expect(rows[1]).toHaveTextContent("2023/3/15（三）")
+    expect(rows[1]).toHaveTextContent("71.95%")
+    const table = screen.getByRole("table", { name: "持倉" })
+    const toggle = within(table).getByRole("button", { name: "收起台積電的每一筆買賣" })
+    expect(toggle).toHaveAttribute("aria-expanded", "true")
+    await userEvent.setup({ pointerEventsCheck: 0 }).click(toggle)
+    expect(within(table).queryByRole("list", { name: "台積電的每一筆買賣" })).toBeNull()
+  })
+
+  it("每一筆的 ⋯：修改打開完整表單（帶入那一筆，日期可以改）；刪除先確認，刪掉之後清單少一列", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    let list = await expand("台積電")
+    await user.click(within(list).getByRole("button", { name: "2024/8/6（二） 買進的動作" }))
+    await user.click(await screen.findByRole("menuitem", { name: "修改" }, T))
+    const dialog = await screen.findByRole("dialog", { name: "編輯交易" }, T)
+    expect(within(dialog).getByLabelText(/日期/)).toHaveValue("2024-08-06")
+    act(() => useUi.getState().closeTradeForm())
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "編輯交易" })).toBeNull(), T)
+
+    list = screen.getByRole("list", { name: "台積電的每一筆買賣" })
+    await user.click(within(list).getByRole("button", { name: "2023/3/15（三） 買進的動作" }))
+    await user.click(await screen.findByRole("menuitem", { name: "刪除" }, T))
+    const confirm = await screen.findByRole("alertdialog", undefined, T)
+    expect(confirm).toHaveTextContent("刪除這筆買進？")
+    await user.click(within(confirm).getByRole("button", { name: "刪除" }))
+    await waitFor(() => expect(api.deleteTransaction).toHaveBeenCalledTimes(1), T)
+    await waitFor(() => expect(within(screen.getByRole("list", { name: "台積電的每一筆買賣" })).getAllByRole("listitem")).toHaveLength(1), T)
+  })
+
+  it("最下面：再加一筆買進（記一筆、這一檔帶好）、減少持股", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    await expand("台積電")
+    await user.click(screen.getByRole("button", { name: "再加一筆買進" }))
+    expect(useUi.getState().tradeForm).toMatchObject({ open: true, symbol: "2330" })
+    act(() => useUi.getState().closeTradeForm())
+    await user.click(screen.getByRole("button", { name: "減少持股" }))
+    expect(useUi.getState().reduce).toMatchObject({ open: true, symbol: "2330.TW" })
+    act(() => useUi.setState({ reduce: { open: false } }))
+  })
+
+  it("分割過的那一檔（NVDA）不列買進後漲跌，最下面寫一句；隱私模式遮住股數、價格、金額", async () => {
+    mount()
+    renderApp("/")
+    const list = await expand("NVIDIA")
+    expect(within(list).getAllByRole("listitem").length).toBeGreaterThan(0)
+    expect(list.parentElement!.parentElement).toHaveTextContent("配過股或分割過，不列每一筆的漲跌。")
+    expect(list).not.toHaveTextContent("%")
+    cleanup()
+    act(() => usePrefs.setState({ privacyMode: true }))
+    try {
+      renderApp("/")
+      const masked = await expand("台積電")
+      expect(masked).not.toHaveTextContent("NT$407,500")
+      expect(masked).not.toHaveTextContent("500 股")
+      expect(masked).toHaveTextContent("2024/8/6（二）")
+    } finally {
+      act(() => usePrefs.setState({ privacyMode: false }))
+    }
+  })
+
+  it("只記持股的帳戶：那個帳戶的持股是一列「持股」（快照的日期、均價）；⋯ 修改打開那個帳戶的持股輸入", async () => {
+    mount()
+    const acc = await holdingsAccount()
+    await api.putHoldings(acc.id, { as_of: "2026-10-01", holdings: [{ symbol: "2330.TW", quantity: 1000, avg_cost: 600 }] })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const list = await expand("台積電")
+    const rows = within(list).getAllByRole("listitem")
+    expect(rows).toHaveLength(3)
+    // 不只一個帳戶：每一列寫帳戶
+    expect(rows[0]).toHaveTextContent("10/1（四）")
+    expect(rows[0]).toHaveTextContent("持股")
+    expect(rows[0]).toHaveTextContent("元大－只記持股")
+    expect(rows[0]).toHaveTextContent("NT$600,000")
+    expect(rows[0]).toHaveTextContent("80.83%")
+    await user.click(within(rows[0]!).getByRole("button", { name: "10/1（四） 持股的動作" }))
+    await user.click(await screen.findByRole("menuitem", { name: "修改" }, T))
+    expect(useUi.getState().tradeForm).toMatchObject({ open: true, symbol: "2330", accountId: acc.id })
   })
 })

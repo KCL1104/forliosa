@@ -2601,6 +2601,31 @@ await check("討論（查看別人的資產）：討論的每一頁都擋下，�
   })
 })
 
+await check("持倉展開每一筆買賣（2026-11-14）：日期（不是今年寫年份）、股數、價格、金額、買進後漲跌；⋯ 修改打開編輯交易；手機的展開鈕 ≥ 44×44、展開後不橫向捲動", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    const table = p.getByRole("table", { name: "持倉" })
+    await table.getByRole("button", { name: "展開台積電的每一筆買賣" }).click()
+    const list = table.getByRole("list", { name: "台積電的每一筆買賣" })
+    await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
+    const first = await list.getByRole("listitem").first().innerText()
+    if (!/2024\/8\/6/.test(first) || !/33\.13%/.test(first) || !/NT\$407,500/.test(first)) throw new Error(`first record: ${first}`)
+    await list.getByRole("button", { name: "2024/8/6（二） 買進的動作" }).click()
+    await p.getByRole("menuitem", { name: "修改" }).click()
+    await p.getByRole("dialog", { name: "編輯交易" }).waitFor({ timeout: 8000 })
+  })
+  await fresh({ ...pw.devices["iPhone SE"] }, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    const btn = p.getByRole("list", { name: "持倉" }).getByRole("button", { name: "展開台積電的每一筆買賣" })
+    const box = await btn.boundingBox()
+    if (!box || box.width < 44 || box.height < 44) throw new Error(`expand button ${JSON.stringify(box)}`)
+    await btn.click()
+    await p.getByRole("list", { name: "台積電的每一筆買賣" }).getByRole("listitem").first().waitFor({ timeout: 8000 })
+    const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+    if (over > 0) throw new Error(`horizontal scroll ${over}px`)
+  })
+})
+
 await check("管理後台（桌面）：自己的外殼（總覽・討論・新聞下架、回到帳本；沒有頭像選單）、總覽的四個區塊、新聞下架的封鎖與解除都先確認", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/admin", { waitUntil: "networkidle" })

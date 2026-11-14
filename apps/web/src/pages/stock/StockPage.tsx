@@ -23,6 +23,7 @@ import { formatQuoteChange, limitPrices, limitState, quoteDecimals } from "@/lib
 import { cn } from "@/lib/utils"
 import type { StockTab } from "@/router"
 import { usePrefs } from "@/stores/prefs"
+import { SymbolRecords } from "@/pages/ledger/SymbolRecords"
 import { asOfLabel, closeDay, twseLiveQuoteUrl, withDayWord } from "@/lib/as-of"
 import { useClose } from "@/hooks/use-close"
 import { useSourceNote } from "@/hooks/use-source-note"
@@ -423,7 +424,7 @@ function PastHolding({ inst, rounds }: { inst: InstrumentDetail; rounds: ClosedR
   )
 }
 
-/** 我的部位：兩行（股數、均價、未實現、今日、已領股利）＋展開 */
+/** 我的部位：一行（股數、均價、未實現、今日、已領股利）＋展開（市值、成本、已實現、下次除息，再來是每一筆買賣） */
 function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: InstrumentDetail; position: Position; rounds: ClosedRound[]; priced?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
@@ -442,7 +443,6 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
       </section>
     )
   }
-  const recent = [...p.markers].filter((m) => m.type === "buy" || m.type === "sell").sort((a, b) => b.date.localeCompare(a.date)).slice(0, 3)
   return (
     <section aria-label={`${me}的部位`} className="mt-5 border-y border-rule">
       <div className="flex items-center gap-3 py-2.5">
@@ -476,8 +476,8 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
         </button>
       </div>
       {open && (
-        <div id="position-more" className="note-in grid items-start gap-x-10 gap-y-4 border-t border-rule py-4 md:grid-cols-2">
-          <dl className="num grid grid-cols-[repeat(2,minmax(0,1fr))] content-start gap-x-6 gap-y-2 text-md">
+        <div id="position-more" className="note-in border-t border-rule py-4">
+          <dl className="num grid grid-cols-[repeat(2,minmax(0,1fr))] content-start gap-x-6 gap-y-2 text-md md:grid-cols-[repeat(4,minmax(0,1fr))]">
             {priced && <Item className="sm:hidden" label={day} value={<span className={toneClass(direction(p.day_change))}>{money(p.day_change, true)}</span>} />}
             <Item className="sm:hidden" label="已領股利" value={money(p.dividends_received)} />
             <Item label={priced ? "市值" : "市值（以成本計）"} value={money(p.market_value)} />
@@ -512,26 +512,21 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
               />
             )}
           </dl>
-          <div>
-            <p className="text-sm text-ink-2">最近的交易</p>
-            <ul className="mt-1">
-              {recent.map((m) => (
-                <li key={`${m.date}-${m.type}-${m.quantity}`} className="num flex justify-between gap-3 border-b border-rule py-1.5 text-md">
-                  <span>
-                    {formatDateShort(m.date)} {m.type === "buy" ? "買進" : "賣出"}
-                  </span>
-                  <span className="text-ink-2">
-                    {m.quantity !== null ? formatQuantity(m.quantity, unit, inst.market) : ""} × {price(m.price)}
-                  </span>
-                </li>
-              ))}
-            </ul>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {/* 「記一筆」在標題列已經有一顆，這裡不重複 */}
-              <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm", className: "pointer-coarse:h-11" })}>
-                在帳本中查看
-              </Link>
-            </div>
+          {/* 每一筆買賣（和持倉表展開的是同一份清單）：日期、股數、價格、金額、買進後漲跌；每一筆可以修改、刪除 */}
+          <SymbolRecords
+            className="mt-5"
+            symbol={inst.symbol}
+            code={inst.code}
+            name={inst.name}
+            market={inst.market}
+            type={inst.type}
+            price={priced ? (quote.data?.price ?? null) : null}
+          />
+          <div className="mt-3 flex flex-wrap gap-2">
+            {/* 「記一筆」「減少持股」在標題列已經有，這裡不重複 */}
+            <Link to="/" search={{ view: "transactions", symbol: inst.symbol }} className={buttonVariants({ variant: "outline", size: "sm", className: "pointer-coarse:h-11" })}>
+              在帳本中查看
+            </Link>
           </div>
         </div>
       )}

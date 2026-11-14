@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ArrowDownIcon, ArrowUpIcon, EllipsisIcon, PinIcon } from "lucide-react"
-import { useMemo, useState } from "react"
+import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, EllipsisIcon, PinIcon } from "lucide-react"
+import { Fragment, useMemo, useState } from "react"
 import { useHoldings, useIntraday, useWatchlist } from "@/api/queries"
 import type { Holding, WatchItem } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
@@ -25,6 +25,7 @@ import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { useStartReduce } from "@/pages/transactions/use-start-reduce"
+import { SymbolRecords } from "./SymbolRecords"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
 
@@ -177,6 +178,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   }
   const go = (symbol: string) => void navigate({ to: "/stock/$symbol", params: { symbol } })
   const plans = useActivePlans()
+  const [open, toggle] = useOpenRows()
   return (
     <table className="w-full border-collapse max-md:hidden" aria-label="持倉">
       <thead className="form-head">
@@ -185,40 +187,49 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
             名稱
           </th>
           {columns.map(header)}
-          {!readOnly && (
-            <th scope="col" className="w-10">
-              <span className="sr-only">動作</span>
-            </th>
-          )}
+          {/* 最右邊：動作選單（查看別人的資產時沒有）＋展開每一筆買賣 */}
+          <th scope="col" className={readOnly ? "w-10" : "w-[76px]"}>
+            <span className="sr-only">動作</span>
+          </th>
         </tr>
       </thead>
       <tbody>
         {rows.map((h) => (
-          <tr key={h.symbol} className="ruled-row cursor-pointer" onClick={() => go(h.symbol)}>
-            <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
-              {/* 名稱是連到個股頁的連結；定期定額標記是另一個連結（到設定），所以不包在一起 */}
-              <span className="flex items-center gap-1.5 text-lg leading-snug font-medium">
-                <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="rounded-sm hover:underline" onClick={(e) => e.stopPropagation()}>
-                  {h.name}
-                </Link>
-                {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 fill-ink-2 text-ink-2" />}
-                {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="-my-1" />}
-              </span>
-              <span className="num block text-sm text-ink-2">
-                {h.code} ・ <QtyText h={h} />
-              </span>
-            </th>
-            {columns.map((c) => (
-              <td key={c} className="num text-right text-lg whitespace-nowrap">
-                <Cell c={c} h={h} maxWeight={maxWeight} />
-              </td>
-            ))}
-            {!readOnly && (
+          <Fragment key={h.symbol}>
+            <tr className="ruled-row cursor-pointer" onClick={() => go(h.symbol)}>
+              <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
+                {/* 名稱是連到個股頁的連結；定期定額標記是另一個連結（到設定），所以不包在一起 */}
+                <span className="flex items-center gap-1.5 text-lg leading-snug font-medium">
+                  <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="rounded-sm hover:underline" onClick={(e) => e.stopPropagation()}>
+                    {h.name}
+                  </Link>
+                  {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 fill-ink-2 text-ink-2" />}
+                  {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="-my-1" />}
+                </span>
+                <span className="num block text-sm text-ink-2">
+                  {h.code} ・ <QtyText h={h} />
+                </span>
+              </th>
+              {columns.map((c) => (
+                <td key={c} className="num text-right text-lg whitespace-nowrap">
+                  <Cell c={c} h={h} maxWeight={maxWeight} />
+                </td>
+              ))}
               <td className="text-right" onClick={(e) => e.stopPropagation()}>
-                <RowMenu h={h} />
+                <span className="-mr-2 flex items-center justify-end">
+                  {!readOnly && <RowMenu h={h} />}
+                  <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} />
+                </span>
               </td>
+            </tr>
+            {open.has(h.symbol) && (
+              <tr>
+                <td id={recordsId(h)} colSpan={columns.length + 2} className="border-b border-rule pb-3 pl-6">
+                  <SymbolRecords symbol={h.symbol} code={h.code} name={h.name} market={h.market} type={h.type} price={h.price} actions />
+                </td>
+              </tr>
             )}
-          </tr>
+          </Fragment>
         ))}
       </tbody>
       {/* 多一欄：持股那幾列最右邊的動作選單 */}
@@ -238,7 +249,7 @@ function RowMenu({ h }: { h: Holding }) {
           <button
             type="button"
             aria-label={`${h.name}的動作`}
-            className="press -mr-2 ml-auto grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink"
+            className="press grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink"
           />
         }
       >
@@ -250,6 +261,36 @@ function RowMenu({ h }: { h: Holding }) {
         <DropdownMenuItem onClick={() => reduce(h.symbol, true)}>全部賣出</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
+  )
+}
+
+/** 展開的列（可以同時打開好幾檔） */
+function useOpenRows(): [Set<string>, (symbol: string) => void] {
+  const [open, setOpen] = useState<Set<string>>(() => new Set())
+  const toggle = (symbol: string) =>
+    setOpen((prev) => {
+      const next = new Set(prev)
+      if (next.has(symbol)) next.delete(symbol)
+      else next.add(symbol)
+      return next
+    })
+  return [open, toggle]
+}
+const recordsId = (h: Holding) => `records-${h.code}`
+
+/** 展開這一檔的每一筆買賣（日期、股數、價格、金額、買進後漲跌；每一筆可以修改、刪除） */
+function ExpandButton({ h, open, onToggle, className }: { h: Holding; open: boolean; onToggle: () => void; className?: string }) {
+  return (
+    <button
+      type="button"
+      aria-expanded={open}
+      aria-controls={recordsId(h)}
+      aria-label={open ? `收起${h.name}的每一筆買賣` : `展開${h.name}的每一筆買賣`}
+      onClick={onToggle}
+      className={cn("press grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-11", className)}
+    >
+      <ChevronDownIcon aria-hidden className={cn("size-5 transition-transform duration-200", open && "rotate-180")} />
+    </button>
   )
 }
 
@@ -372,6 +413,7 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
   const readOnly = useReadOnly()
   const plans = useActivePlans()
   const label = useColumnLabel()
+  const [open, toggle] = useOpenRows()
   return (
     <div className="md:hidden">
       <div className="form-head flex h-11 items-end justify-between pb-2">
@@ -382,28 +424,36 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
       </div>
       <ul aria-label="持倉">
         {rows.map((h) => (
-          // 整列可點（名稱連結的 ::after 蓋滿整列）；定期定額標記浮在上面，是另一個連結
-          <li key={h.symbol} className="ruled-row relative grid h-[72px] grid-cols-[1fr_auto] content-center gap-y-0.5">
-            <span className="flex min-w-0 items-center gap-1.5 text-lg leading-6 font-medium">
-              <Link
-                to="/stock/$symbol"
-                params={{ symbol: h.symbol }}
-                className="truncate after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ink"
-              >
-                {h.name}
-              </Link>
-              {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
-              {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="z-10" />}
-            </span>
-            <span className="num text-right text-lg leading-6">
-              {h.price === null ? <Dash /> : <>{h.currency === "USD" && "US$"}{formatQuote(h.price, h.market, h.type)}</>}
-            </span>
-            <span className="num text-sm leading-5 text-ink-2">
-              {h.code} ・ <QtyText h={h} />
-            </span>
-            <span className="text-right text-base leading-5">
-              {h.price === null ? <Dash /> : <Pct value={h.day_change_pct} />}
-            </span>
+          // 整列可點（名稱連結的 ::after 蓋滿整列）；定期定額標記與右邊的展開鈕浮在上面
+          <li key={h.symbol}>
+            <div className="ruled-row relative grid h-[72px] grid-cols-[1fr_auto_auto] content-center gap-y-0.5">
+              <span className="flex min-w-0 items-center gap-1.5 text-lg leading-6 font-medium">
+                <Link
+                  to="/stock/$symbol"
+                  params={{ symbol: h.symbol }}
+                  className="truncate after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ink"
+                >
+                  {h.name}
+                </Link>
+                {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
+                {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="z-10" />}
+              </span>
+              <span className="num text-right text-lg leading-6">
+                {h.price === null ? <Dash /> : <>{h.currency === "USD" && "US$"}{formatQuote(h.price, h.market, h.type)}</>}
+              </span>
+              <span className="num text-sm leading-5 text-ink-2">
+                {h.code} ・ <QtyText h={h} />
+              </span>
+              <span className="col-start-2 text-right text-base leading-5">
+                {h.price === null ? <Dash /> : <Pct value={h.day_change_pct} />}
+              </span>
+              <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} className="relative z-10 col-start-3 row-span-2 row-start-1 -mr-2.5 ml-1 self-center" />
+            </div>
+            {open.has(h.symbol) && (
+              <div id={recordsId(h)} className="border-b border-rule pb-3">
+                <SymbolRecords symbol={h.symbol} code={h.code} name={h.name} market={h.market} type={h.type} price={h.price} actions />
+              </div>
+            )}
           </li>
         ))}
       </ul>
