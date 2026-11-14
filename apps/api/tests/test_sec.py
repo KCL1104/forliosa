@@ -236,6 +236,46 @@ def test_first_10k_with_three_years_names_each_year_by_itself():
     assert quarters == {"FY2025Q1": 70, "FY2026Q1": 90}
 
 
+# Amazon-style cash flows: every 10-Q also reports the trailing twelve months (TTM). The window starts on
+# 2014-01-01 (12 years before TODAY), so the oldest 12-month span left is the TTM ending 2014-03-31 — not a fiscal year.
+_OCF = "NetCashProvidedByUsedInOperatingActivities"
+TTM_IN_10Q = _raw(**{_OCF: [
+    _fact("2014-01-01", "2014-03-31", -1.0, 2014, "Q1", "10-Q", "2014-04-25", "q114"),
+    _fact("2013-04-01", "2014-03-31", 5.0, 2014, "Q1", "10-Q", "2014-04-25", "q114"),  # TTM
+    _fact("2012-04-01", "2013-03-31", 4.0, 2014, "Q1", "10-Q", "2014-04-25", "q114"),  # TTM a year earlier
+    _fact("2014-04-01", "2014-06-30", 1.5, 2014, "Q2", "10-Q", "2014-07-25", "q214"),
+    _fact("2014-01-01", "2014-06-30", 0.5, 2014, "Q2", "10-Q", "2014-07-25", "q214"),
+    _fact("2013-07-01", "2014-06-30", 5.5, 2014, "Q2", "10-Q", "2014-07-25", "q214"),  # TTM
+    _fact("2014-07-01", "2014-09-30", 1.0, 2014, "Q3", "10-Q", "2014-10-24", "q314"),
+    _fact("2014-01-01", "2014-09-30", 1.5, 2014, "Q3", "10-Q", "2014-10-24", "q314"),
+    _fact("2013-10-01", "2014-09-30", 5.2, 2014, "Q3", "10-Q", "2014-10-24", "q314"),  # TTM
+    _fact("2014-01-01", "2014-12-31", 6.8, 2014, "FY", "10-K", "2015-01-30", "k14"),
+    _fact("2013-01-01", "2013-12-31", 5.5, 2014, "FY", "10-K", "2015-01-30", "k14"),  # before the window
+    _fact("2015-01-01", "2015-03-31", -0.5, 2015, "Q1", "10-Q", "2015-04-24", "q115"),
+    _fact("2014-01-01", "2014-03-31", -1.0, 2015, "Q1", "10-Q", "2015-04-24", "q115"),
+    _fact("2014-04-01", "2015-03-31", 7.3, 2015, "Q1", "10-Q", "2015-04-24", "q115"),  # TTM
+    _fact("2013-04-01", "2014-03-31", 5.0, 2015, "Q1", "10-Q", "2015-04-24", "q115"),  # TTM a year earlier
+    _fact("2015-01-01", "2015-12-31", 12.0, 2015, "FY", "10-K", "2016-01-29", "k15"),
+    _fact("2014-01-01", "2014-12-31", 6.8, 2015, "FY", "10-K", "2016-01-29", "k15"),
+]})
+
+
+def test_trailing_twelve_months_in_a_10q_are_not_a_fiscal_year():
+    facts = sec.trim_facts(TTM_IN_10Q, TODAY)
+    rows = {(r[0], r[1]): r for r in facts["tags"][_OCF]["USD"]}
+    assert rows[("2013-04-01", "2014-03-31")][4] == "Q1"  # the TTM keeps its 10-Q label
+    years = {p.label: p for p in sec.summarize(facts, "annual")}
+    assert list(years) == ["FY2014", "FY2015"]
+    assert (years["FY2014"].start, years["FY2014"].end) == (date(2014, 1, 1), date(2014, 12, 31))
+    assert years["FY2014"].values["operating"] == D("6.8") and years["FY2015"].values["operating"] == D("12.0")
+    quarters = {p.label: p for p in sec.summarize(facts, "quarterly")}
+    assert [quarters[f"FY2014Q{n}"].values["operating"] for n in (1, 2, 3)] == [D("-1.0"), D("1.5"), D("1.0")]
+    assert quarters["FY2014Q4"].values["operating"] == D("5.3") and "operating" in quarters["FY2014Q4"].derived
+    assert (quarters["FY2015Q1"].start, quarters["FY2015Q1"].end) == (date(2015, 1, 1), date(2015, 3, 31))
+    assert quarters["FY2015Q1"].values["operating"] == D("-0.5")
+    assert all(p.end.month in (3, 6, 9, 12) and p.start.month in (1, 4, 7, 10) for p in quarters.values())
+
+
 def test_facts_from_an_older_version_are_fetched_again(client, fake, engine):
     client.get(f"{API}/instruments/AAPL/financials")
     with Session(engine) as db:

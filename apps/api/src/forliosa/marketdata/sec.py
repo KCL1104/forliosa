@@ -458,8 +458,14 @@ class _FiscalYear:
 
 
 def _fiscal_years(series: dict[str, _Series]) -> list[_FiscalYear]:
-    """Fiscal years from the 12-month durations. The name is the smallest ``fy`` any annual report gave the span
-    (``trim_facts`` already moved comparatives back to their own year; facts stored before that did not)."""
+    """Fiscal years from the 12-month durations of annual reports. The name is the smallest ``fy`` any annual report
+    gave the span (``trim_facts`` already moved comparatives back to their own year; facts stored before that did not).
+
+    A 12-month span first reported in a 10-Q (``fp`` Q1–Q3) is a trailing twelve months, not a fiscal year: Amazon's
+    10-Qs report cash flows for the last twelve months too. Taken as a year, the oldest one in the window (the fiscal
+    year ending just before the window starts is cut off) was named a fiscal year, the real years overlapping it were
+    dropped and every later "year" became an April–March span. Only spans labelled ``FY`` (or not labelled at all)
+    count."""
     years: dict[tuple[date, date], int | None] = {}
     for concept, s in series.items():
         if concept in INSTANT or concept in ("eps", "diluted_shares"):
@@ -469,6 +475,8 @@ def _fiscal_years(series: dict[str, _Series]) -> list[_FiscalYear]:
             if start is None or not 350 <= (end - start).days <= 380:
                 continue
             fy, fp = s.labels.get(key, (None, None))
+            if fp not in (None, "FY"):
+                continue  # trailing twelve months in a quarterly report
             known = years.get((start, end))
             if fp == "FY" and fy is not None and (known is None or fy < known):
                 years[(start, end)] = fy
