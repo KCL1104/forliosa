@@ -2178,7 +2178,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 ### 市場資料
 - `worker.upsert_closes`：`ON CONFLICT DO UPDATE ... WHERE prices_daily.source NOT IN allowed_sources("commercial")`，存檔寫的官方來源那一天不會被合併來源標籤（`twse-openapi+shioaji-data`）蓋掉（商用模式只認完全相同的來源，那天會從走勢與報價消失；只有收盤的報價也會把開高低量清成空的）。
-- `worker.daily_at`：昨天的時段也算（仍限 3 小時內），條件（`only_if`）看時段那一天：23:45 的時段在午夜之後才輪到時不再被跳過。新聞批次仍在同一個迴圈裡跑（最多約 36 分鐘），之後要的話可以移到背景執行緒。
+- `worker.daily_at`：昨天的時段也算（仍限 3 小時內），條件（`only_if`）看時段那一天：23:45 的時段在午夜之後才輪到時不再被跳過。`news_refresh`（一批最多約 36 分鐘）與 `company_refresh` 改成各自一個迴圈（`Job.background`，和 Telegram 輪詢、歷史日線回補一樣），不再卡住收盤價檢查、群組推播與晚上的時段。
 - `Archiver._status`：沒有日期時保留原本的 `data_date`（只更新 `fetched_at`、`rows`）。
 - `Archiver.twse_reference`：整個 TWT84U 檔案標同一個交易日（檔案裡最新的 `LastTradingDay` 的下一個交易日）；原本用各檔自己的最後交易日，冷門股會蓋到更早的日子。
 - `history_backfill.official_first_dates`：只算 `source_clause(..., data_policy)` 會給的列。

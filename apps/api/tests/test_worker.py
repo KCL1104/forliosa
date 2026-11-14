@@ -164,6 +164,23 @@ def test_a_background_job_never_holds_up_the_others(monkeypatch):
     assert during >= 3
     assert next(j for j in Worker(md=object()).jobs if j.name == "telegram_poll").background  # type: ignore[arg-type]
 
+
+def test_news_and_company_descriptions_run_in_their_own_loops(monkeypatch):
+    """2026-11-14 review: a news batch (up to ~36 minutes) in the shared loop held up the close watch, the group
+    pushes and the late-evening slots."""
+    from forliosa.config import get_settings
+    from forliosa.worker import Worker
+
+    monkeypatch.setenv("NEWS_ENABLED", "true")
+    monkeypatch.setenv("COMPANY_DESCRIPTIONS_ENABLED", "true")
+    get_settings.cache_clear()
+    try:
+        jobs = {j.name: j for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    finally:
+        get_settings.cache_clear()
+    assert jobs["news_refresh"].background and jobs["company_refresh"].background
+    assert not jobs["after_close_refresh"].background and not jobs["group_push"].background
+
 def test_expired_login_sessions_are_purged_daily(engine):
     import asyncio
     from datetime import timedelta

@@ -48,11 +48,12 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
   watched, or viewed in the last 3 days), one GDELT request per symbol spaced ≥ 5 s, backing off after a 429; AI
   web search fills gaps within the monthly budget; headlines older than 30 days are deleted
-  (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only.
+  (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only. Its own loop
+  (``Job.background``): a batch can take most of the 45 minutes and must not hold up the other jobs.
 
 * ``company_refresh`` — every hour at :35: the 「關於」 description of tracked symbols (``forliosa.services.company``):
   a zh.wikipedia excerpt found through Wikidata (one request at a time, monthly per company, paused 6 h after a 429),
-  else an AI description from official facts (only when the facts changed).
+  else an AI description from official facts (only when the facts changed). Its own loop, like ``news_refresh``.
 * ``monthly_archive`` — the 10th and the 25th at 10:20: 董監事持股餘額明細 (company ↔ company links), TDCC 集保股東
   戶數 (2-22 / 2-23) and the ESG product text (archive group ``monthly``).
 
@@ -264,10 +265,15 @@ class Worker:
                 lambda: self.archive(MONTHLY_GROUPS)),
         ]
         settings = get_settings()
+        # News and company descriptions run in loops of their own (``Job.background``): a news batch takes up to
+        # ~36 minutes (GDELT spacing and back-off) and the Wikipedia lookups wait between requests; in the shared loop
+        # they held up the close watch, the group pushes and the evening slots (2026-11-14 review)
         if settings.news_enabled:
-            self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh))
+            self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh,
+                                 background=True))
         if settings.company_descriptions_enabled:
-            self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh))
+            self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh,
+                                 background=True))
         # History backfill (PRICE_HISTORY_SOURCE=yahoo): its own loop, a batch every 10 minutes until every symbol
         # has been asked once; then one look a day for newly listed symbols.
         self._backfill_wait_until: datetime | None = None
