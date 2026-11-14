@@ -28,7 +28,9 @@ REPORT_WORDS = ("財務報告", "財報", "財務報表")
 CONFERENCE_WORDS = ("法人說明會", "法說會", "投資人說明會", "業績發表會")
 _CN_DIGITS = {"零": 0, "〇": 0, "一": 1, "二": 2, "三": 3, "四": 4, "五": 5, "六": 6, "七": 7, "八": 8, "九": 9}
 _ROC_DATE = r"(\d{2,3})\s*/\s*(\d{1,2})\s*/\s*(\d{1,2})"
-_YEAR = r"([0-9]{2,3}|[一二三四五六七八九十百〇零]+)"  # ROC year: 115 or 一百一十五
+# ROC year (115, 一百一十五) or a Gregorian year (2026: KY companies often write those). The lookbehind keeps the "026"
+# inside "2026" from being read as ROC year 26 (= 1937; 2026-11-14 review).
+_YEAR = r"(?<![0-9])([0-9]{4}|[0-9]{2,3}|[一二三四五六七八九十百〇零]+)"
 
 
 @dataclass(frozen=True)
@@ -64,6 +66,14 @@ def cn_number(text: str) -> int | None:
     return total or None
 
 
+def _year(token: str) -> int | None:
+    """A year in a title: four digits are Gregorian (2026), anything shorter is ROC (115 → 2026)."""
+    n = cn_number(token)
+    if not n:
+        return None
+    return n if n >= 1912 else n + 1911
+
+
 def report_period(title: str, detail: str, announced: date) -> str | None:
     """The quarter a financial-report announcement is about ("2026Q3")."""
     m = re.search(rf"{_ROC_DATE}\s*[~～]\s*{_ROC_DATE}", detail or "")
@@ -76,12 +86,12 @@ def report_period(title: str, detail: str, announced: date) -> str | None:
     quarter_words = {"一": 1, "二": 2, "三": 3, "四": 4, "1": 1, "2": 2, "3": 3, "4": 4}
     m = re.search(rf"{_YEAR}\s*年度?\s*(?:第\s*([一二三四1-4])\s*季|(上半年))", title)
     if m:
-        roc = cn_number(m.group(1))
+        year = _year(m.group(1))
         q = 2 if m.group(3) else quarter_words[m.group(2)]
-        return f"{roc + 1911}Q{q}" if roc else None
+        return f"{year}Q{q}" if year else None
     m = re.search(rf"{_YEAR}\s*年度", title)
-    if m and "季" not in title and (roc := cn_number(m.group(1))):
-        return f"{roc + 1911}Q4"  # 年度財務報告
+    if m and "季" not in title and (year := _year(m.group(1))):
+        return f"{year}Q4"  # 年度財務報告
     m = re.search(r"第\s*([一二三四1-4])\s*季", title)
     if m:  # no year: the latest such quarter that ended before the announcement
         q = quarter_words[m.group(1)]
@@ -94,10 +104,10 @@ def revenue_period(title: str) -> str | None:
     m = re.search(rf"{_YEAR}\s*年\s*([0-9]{{1,2}}|[一二三四五六七八九十]+)\s*月份?", title)
     if not m:
         return None
-    roc, month = cn_number(m.group(1)), cn_number(m.group(2))
-    if not roc or not month or not 1 <= month <= 12:
+    year, month = _year(m.group(1)), cn_number(m.group(2))
+    if not year or not month or not 1 <= month <= 12:
         return None
-    return f"{roc + 1911}-{month:02d}"
+    return f"{year}-{month:02d}"
 
 
 def conference_date(detail: str, fact_date: str | None, announced: date) -> date:

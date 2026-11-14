@@ -33,6 +33,7 @@ from forliosa.api import serialize as ser
 from forliosa.datapolicy import dataset_served, labels, source_clause
 from forliosa.marketdata.base import code_of_symbol, market_of_symbol
 from forliosa.marketdata.cbc import FX_DATASET, PAIR
+from forliosa.marketdata.cbc import SOURCE as CBC_SOURCE
 from forliosa.marketdata.service import MarketData
 from forliosa.models import DatasetStatus, FxRate, IndexDaily, MarketEvent, PriceDaily, ReferencePrice
 from forliosa.services import derivatives
@@ -108,7 +109,10 @@ def _futures_item(db: Session, md: MarketData) -> tuple[dict[str, Any], str] | N
 
 
 def _fx_item(db: Session, md: MarketData) -> tuple[dict[str, Any], str] | None:
-    stmt = select(FxRate).where(FxRate.pair == PAIR).order_by(FxRate.date.desc()).limit(SPARK_POINTS + 1)
+    # Central-bank rows only: TAIFEX's 每日外幣參考匯率 rows (licence still conditional) would otherwise be shown under
+    # the central bank's attribution when its job fails (2026-11-14 review). Valuation's fx_history does the same.
+    stmt = (select(FxRate).where(FxRate.pair == PAIR, FxRate.source == CBC_SOURCE)
+            .order_by(FxRate.date.desc()).limit(SPARK_POINTS + 1))
     rows = list(db.scalars(_official(stmt, FxRate.source, md)))[::-1]
     if not rows:
         return None

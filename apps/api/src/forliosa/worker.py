@@ -104,6 +104,7 @@ from forliosa.archive import (
     tracked_symbols,
 )
 from forliosa.config import DEFAULT_SESSION_SECRET, Settings, get_settings
+from forliosa.datapolicy import allowed_sources
 from forliosa.db import get_engine, session_factory
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.base import ProviderUnavailable
@@ -147,12 +148,14 @@ def daily_at(*times: time, only_if: Callable[[datetime], bool] = lambda _now: Tr
     """Due once after each listed Taipei time of day."""
 
     def due(now: datetime, last: datetime | None) -> bool:
-        if not only_if(now):
-            return False
-        for t in times:
-            slot = datetime.combine(now.date(), t, TAIPEI)
-            if now >= slot and (last is None or last < slot) and now - slot < timedelta(hours=3):
-                return True
+        # Yesterday's slots count too (still within the 3-hour window): a 23:45 slot the loop reached only after midnight
+        # (a long news batch held it) used to be skipped for good, because the slot was built from today's date
+        # (2026-11-14 review). ``only_if`` is asked about the slot, so a trading-day guard is about the slot's day.
+        for day in (now.date() - timedelta(days=1), now.date()):
+            for t in times:
+                slot = datetime.combine(day, t, TAIPEI)
+                if now >= slot and (last is None or last < slot) and now - slot < timedelta(hours=3) and only_if(slot):
+                    return True
         return False
 
     return due
@@ -194,9 +197,14 @@ def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
     dialect = get_engine().dialect.name
     insert = pg_insert if dialect == "postgresql" else sqlite_insert
     stmt = insert(PriceDaily).values(rows)
+    # Never overwrite a row the archive wrote from an official source: a provider-chain quote can carry a merged label
+    # ("twse-openapi+shioaji-data") that commercial mode does not serve, which hid that day from history and quotes,
+    # and a close-only quote wiped open/high/low/volume (2026-11-14 review).
+    official = allowed_sources("commercial")
     stmt = stmt.on_conflict_do_update(
         index_elements=["symbol", "date"],
         set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close", "volume", "source")},
+        where=PriceDaily.source.not_in(official),
     )
     db.execute(stmt)
     db.commit()

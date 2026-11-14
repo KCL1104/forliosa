@@ -250,7 +250,11 @@ class Archiver:
         return n
 
     def _status(self, key: str, data_date: date | None, rows: int) -> None:
-        """Remember the newest data date seen for dataset ``key`` (``/meta/attributions`` shows it)."""
+        """Remember the newest data date seen for dataset ``key`` (``/meta/attributions`` shows it). An answer with
+        no dated rows (no ex-rights stocks today, an empty TAIFEX body) keeps the date already stored and only
+        records the fetch: writing null made the dataset look stale (2026-11-14 review)."""
+        if data_date is None:
+            data_date = self.db.scalar(select(DatasetStatus.data_date).where(DatasetStatus.key == key))
         upsert(self.db, DatasetStatus, [{"key": key, "data_date": data_date, "rows": rows,
                                          "fetched_at": datetime.now(TAIPEI)}], ["key"])
 
@@ -328,11 +332,18 @@ class Archiver:
         return upsert(self.db, ValuationDaily, rows, ["symbol", "date"])
 
     def twse_reference(self) -> int:
-        rows = [{"symbol": tw_symbol(r["code"], "TWSE"),
-                 "date": next_tw_trading_day(r["last_trading_day"] + timedelta(days=1)),
+        # The whole file is for one session: the trading day after the market's last session (the newest
+        # LastTradingDay in the file). A thinly traded stock's own LastTradingDay is older; stamping its row with
+        # that overwrote an earlier day and left the coming session without its reference price (2026-11-14 review).
+        parsed = od.parse_twt84u(self._list(f"{TWSE_OPENAPI}/exchangeReport/TWT84U"))
+        last = max((r["last_trading_day"] for r in parsed if r["last_trading_day"]), default=None)
+        if last is None:
+            return 0
+        day = next_tw_trading_day(last + timedelta(days=1))
+        rows = [{"symbol": tw_symbol(r["code"], "TWSE"), "date": day,
                  "reference_price": r["reference_price"], "limit_up": r["limit_up"], "limit_down": r["limit_down"],
                  "source": "twse-openapi"}
-                for r in od.parse_twt84u(self._list(f"{TWSE_OPENAPI}/exchangeReport/TWT84U"))]
+                for r in parsed]
         return upsert(self.db, ReferencePrice, rows, ["symbol", "date"])
 
     def margin_date(self) -> date:

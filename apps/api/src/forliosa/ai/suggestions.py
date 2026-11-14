@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 from forliosa.ai.prompts import route_kind
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiDraft, User, WatchlistItem
+from forliosa.services.instruments import change_base
 from forliosa.timeutil import today_taipei
 
 log = logging.getLogger(__name__)
@@ -83,9 +84,15 @@ def stock_questions(info: Any, quote: Any, overview: dict | None, position: dict
     sym = info.symbol
     out = []
     if why and why.get("show"):
-        pct = getattr(quote, "change", None)
-        word = "跌" if pct is not None and pct < 0 else "漲"
-        out.append(_q("why_move", f"{info.name}今天為什麼{word}？", "今天", f"為什麼{word}？", sym))
+        # Direction from the price against the change base (QuoteData has no ``change`` field), and the day the move
+        # happened: before the evening publication the quote is an earlier session's close (2026-11-14 review).
+        base = change_base(quote) if quote is not None else None
+        price = getattr(quote, "price", None)
+        word = "跌" if price is not None and base is not None and price < base else "漲"
+        traded = getattr(quote, "trade_date", None)
+        day = "今天" if traded is None or traded >= today else f"{traded.month:02d}/{traded.day:02d}"
+        lead = day if day == "今天" else f"{day} "
+        out.append(_q("why_move", f"{info.name}{lead}為什麼{word}？", day, f"為什麼{word}？", sym))
     if info.market == "TWSE" and info.type == "stock":
         # Listed stocks show no per-stock 三大法人／外資持股; the model answers from web news with sources and dates.
         out.append(_q("foreign_flow", FOREIGN_FLOW_QUESTION, "最近外資", "對這檔的動向？", sym))

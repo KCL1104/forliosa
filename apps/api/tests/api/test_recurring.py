@@ -213,7 +213,10 @@ def test_draft_estimates_odd_lot_shares_and_fee(client, calendar, close_52_4, mo
     assert moved["date"] == "2026-12-21" and "順延到 12/21" in moved["preview"]["rules"][0]
     # the draft creates nothing; signing it is a normal POST /transactions
     assert client.get(f"{API}/transactions").json()["items"] == []
-    t = client.post(f"{API}/transactions", json=d["transaction"])
+    # a future debit cannot be recorded yet (no future trade dates; 2026-11-14 review): sign it on the day
+    future = client.post(f"{API}/transactions", json=d["transaction"])
+    assert future.status_code == 422 and "未來" in future.text
+    t = client.post(f"{API}/transactions", json={**d["transaction"], "trade_date": "2026-11-06"})
     assert t.status_code == 201, t.text
     assert (t.json()["source"], t.json()["fee"], t.json()["quantity"]) == ("ai_draft", 0.0, 95)
 

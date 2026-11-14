@@ -51,6 +51,10 @@ def test_archive_run_is_idempotent(engine, market):
         ref = db.get(ReferencePrice, ("2330.TW", date(2026, 11, 12)))
         assert (ref.reference_price, ref.limit_up, ref.limit_down) == (D(2395), D(2630), D(2160))
         assert db.get(ReferencePrice, ("3680.TWO", date(2026, 11, 12))).reference_price == D("425.5")
+        # 2026-11-14 review: every TWSE row of the file is for the same coming session — a thinly traded stock
+        # (1538, its own LastTradingDay 11/09) is not stamped with an earlier day
+        twse_days = set(db.scalars(select(ReferencePrice.date).where(ReferencePrice.source == "twse-openapi")))
+        assert twse_days == {date(2026, 11, 12)}
         assert db.get(MarginDaily, ("2330.TW", date(2026, 11, 11))).margin_balance == 32523  # stamped 11-11
         assert db.get(InstitutionalDaily, ("6488.TWO", date(2026, 11, 11))).total_net == 1302529
         assert db.get(InstitutionalDaily, ("2330.TW", date(2026, 11, 11))) is None  # TWSE website: never scraped
@@ -124,3 +128,16 @@ def test_finmind_backfill_skips_listed_institutional_flows(engine, monkeypatch):
         ("6488", "TaiwanStockMarginPurchaseShortSale"),
         ("6488", "TaiwanStockShareholding"),
     ]
+
+
+def test_an_empty_answer_keeps_the_dataset_date(engine, market):
+    """2026-11-14 review: a job whose upstream returned no dated rows (no ex-rights stocks today) wrote a null date,
+    and the dataset looked stale."""
+    from forliosa.models import DatasetStatus
+
+    with Session(engine) as db:
+        archiver = Archiver(db, FakeFetcher(), "personal", now_fn=lambda: NOW)
+        archiver._status("tpex-openapi/exright", date(2026, 11, 11), 3)
+        archiver._status("tpex-openapi/exright", None, 0)
+        row = db.get(DatasetStatus, "tpex-openapi/exright")
+        assert (row.data_date, row.rows) == (date(2026, 11, 11), 0)

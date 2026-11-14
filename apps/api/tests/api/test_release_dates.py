@@ -186,3 +186,15 @@ def test_meta_attributions_is_public(app):
     assert d["agency"] == "臺灣證券交易所" and d["dataset"] == "上市個股日本益比、殖利率及股價淨值比"
     assert d["attribution"].endswith("依政府資料開放授權條款第 1 版") and d["url"].startswith("https://openapi.twse")
     assert any("基本市況報導" in x for x in body["not_used"])
+
+
+def test_gregorian_years_in_titles_are_not_read_as_roc_1937():
+    """2026-11-14 review: 「2026年10月」 used to match the "026" inside "2026" as ROC year 26 (= 1937)."""
+    from datetime import date
+
+    from forliosa.services.announcements import report_period, revenue_period
+
+    assert report_period("公告本公司2026年第三季合併財務報告", "", date(2026, 11, 10)) == "2026Q3"
+    assert revenue_period("公告本公司2026年10月合併營收") == "2026-10"
+    assert report_period("公告本公司115年第三季合併財務報告", "", date(2026, 11, 10)) == "2026Q3"
+    assert revenue_period("本公司一百一十五年十月份營收") == "2026-10"

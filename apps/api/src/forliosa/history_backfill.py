@@ -36,7 +36,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from forliosa.archive import tracked_symbols, upsert
-from forliosa.datapolicy import HISTORY_SOURCE
+from forliosa.datapolicy import HISTORY_SOURCE, source_clause
 from forliosa.marketdata import yahoo_history
 from forliosa.marketdata.base import ProviderUnavailable
 from forliosa.marketdata.http import HttpFetcher, HttpStatusError
@@ -68,9 +68,14 @@ class BatchResult:
 
 
 def official_first_dates(db: Session) -> dict[str, date]:
-    """symbol -> its first close that is not from the backfill (where official history begins)."""
+    """symbol -> its first close that charts actually serve (where official history begins). Only rows the active
+    data policy serves count: leftovers of removed jobs (``twse-mis``, ``twse-web``) or merged worker labels are never
+    shown, so counting them would leave a gap before them in the chart (2026-11-14 review)."""
+    from forliosa.config import get_settings
+
     rows = db.execute(select(PriceDaily.symbol, func.min(PriceDaily.date))
-                      .where(PriceDaily.source != HISTORY_SOURCE).group_by(PriceDaily.symbol))
+                      .where(source_clause(PriceDaily.source, get_settings().data_policy))
+                      .group_by(PriceDaily.symbol))
     return {s: d for s, d in rows if s.endswith((".TW", ".TWO"))}
 
 

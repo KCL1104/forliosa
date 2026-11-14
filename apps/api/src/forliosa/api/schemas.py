@@ -6,7 +6,7 @@ from datetime import date
 from decimal import Decimal
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from forliosa.textsafe import has_control
 
@@ -296,6 +296,28 @@ class TransactionIn(StrictModel):
     def _blank_symbol(cls, v: str | None) -> str | None:
         return v.strip() or None if v is not None else None
 
+    @field_validator("trade_date")
+    @classmethod
+    def _sane_date(cls, v: date) -> date:
+        return _check_trade_date(v)
+
+
+def _check_trade_date(v: date) -> date:
+    """A trade date between 1990 and today (Taipei). A year-1 date crashed every ledger read with an OverflowError,
+    and a future buy counted in today's holdings (2026-11-14 review)."""
+    from forliosa.timeutil import today_taipei
+
+    if v < EARLIEST_TRADE_DATE:
+        raise ValueError("日期太早（1990 年以前）")
+    if v > today_taipei():
+        raise ValueError("日期不能在未來")
+    return v
+
+
+EARLIEST_TRADE_DATE = date(1990, 1, 1)
+# Fields a PATCH may not set to null (a null would reach the ledger and crash it with a 500; 2026-11-14 review)
+_PATCH_NOT_NULL = ("account_id", "type", "trade_date", "currency", "is_day_trade", "note", "source")
+
 
 class TransactionPatch(StrictModel):
     account_id: str | None = None
@@ -312,6 +334,18 @@ class TransactionPatch(StrictModel):
     is_day_trade: bool | None = None
     note: str | None = Field(default=None, max_length=2000)
     source: Literal["manual", "import", "ai_draft"] | None = None
+
+    @field_validator("trade_date")
+    @classmethod
+    def _sane_date(cls, v: date | None) -> date | None:
+        return _check_trade_date(v) if v is not None else v
+
+    @model_validator(mode="after")
+    def _no_nulls(self) -> TransactionPatch:
+        nulls = [k for k in _PATCH_NOT_NULL if k in self.model_fields_set and getattr(self, k) is None]
+        if nulls:
+            raise ValueError(f"這些欄位不能是空的：{', '.join(nulls)}")
+        return self
 
 
 class Transaction(BaseModel):

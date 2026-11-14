@@ -49,6 +49,39 @@ def test_upsert_closes_stores_only_real_prices(engine):
         assert db.get(Instrument, "0050.TW").name == "元大台灣50"
 
 
+def test_late_slots_still_run_just_after_midnight():
+    """2026-11-14 review: a 23:45 slot reached only after midnight (the loop was busy) was skipped for good."""
+    due = daily_at(time(23, 45))
+    assert due(tp(2026, 11, 12, 0, 20), tp(2026, 11, 11, 14, 40))
+    assert not due(tp(2026, 11, 12, 0, 20), tp(2026, 11, 11, 23, 50))  # already ran for that slot
+    assert not due(tp(2026, 11, 12, 3, 0), tp(2026, 11, 11, 14, 40))  # more than 3 hours late: skipped
+    # the guard is about the slot's day: Friday 23:45 still runs at 00:20 on Saturday
+    trading = daily_at(time(23, 45), only_if=lambda n: n.weekday() < 5)
+    assert trading(tp(2026, 11, 14, 0, 20), tp(2026, 11, 13, 14, 40))
+    assert not trading(tp(2026, 11, 15, 0, 20), tp(2026, 11, 13, 23, 50))  # Saturday's slot: not a trading day
+
+
+def test_upsert_closes_never_overwrites_an_official_archive_row(engine):
+    """2026-11-14 review: a merged-source quote overwrote the archive's official row, and commercial mode (which only
+    serves exact official sources) then lost that day."""
+
+    class Merged(BaseProvider):
+        name = "merged"
+
+        def quotes(self, symbols):
+            return {s: QuoteData(s, price=D("2400"), prev_close=D("2285"), trade_date=date(2026, 11, 11),
+                                 source="twse-openapi+shioaji-data") for s in symbols if s == "2330.TW"}
+
+    with Session(engine) as db:
+        db.add(PriceDaily(symbol="2330.TW", date=date(2026, 11, 11), open=D("2330"), high=D("2395"), low=D("2305"),
+                          close=D("2395"), volume=33056476, source="twse-openapi"))
+        db.commit()
+        upsert_closes(db, MarketData([Merged()], policy="personal"), ["2330.TW"])
+        db.expire_all()
+        row = db.scalars(select(PriceDaily)).one()
+        assert (row.source, row.close, row.open) == ("twse-openapi", D("2395"), D("2330"))
+
+
 def test_evening_and_weekly_runs_include_the_new_groups():
     from forliosa.archive import JOB_GROUPS
     from forliosa.worker import EVENING_GROUPS, MONTHLY_GROUPS, SEC_GROUPS, WEEKLY_GROUPS, Worker

@@ -84,3 +84,23 @@ def test_day_word_follows_the_close_date():
     fresh = ledger_questions(holdings, {"as_of": "2026-11-13T13:30:00+08:00"}, today)[0]
     assert fresh["text"] == "今天誰拖累了我的報酬？"
     assert ledger_questions(holdings, None, today)[0]["text"].startswith("今天")
+
+
+def test_why_question_direction_and_day_follow_the_quote():
+    """2026-11-14 review: the 「為什麼漲／跌」 question took its direction from a field QuoteData does not have (always
+    「漲」) and always said 「今天」, even for an earlier session's close."""
+    from datetime import date
+    from decimal import Decimal
+    from types import SimpleNamespace
+
+    from forliosa.ai.suggestions import stock_questions
+    from forliosa.marketdata.base import QuoteData
+
+    info = SimpleNamespace(symbol="2330.TW", name="台積電", market="TWSE", type="stock")
+    down = QuoteData(symbol="2330.TW", price=Decimal("950"), prev_close=Decimal("1000"), trade_date=date(2026, 11, 13))
+    q = stock_questions(info, down, None, None, {"show": True}, date(2026, 11, 14))[0]
+    assert q["kind"] == "why_move"
+    assert q["text"] == "台積電11/13 為什麼跌？"
+    assert q["lines"] == ["11/13", "為什麼跌？"]
+    up = QuoteData(symbol="2330.TW", price=Decimal("1050"), prev_close=Decimal("1000"), trade_date=date(2026, 11, 14))
+    assert stock_questions(info, up, None, None, {"show": True}, date(2026, 11, 14))[0]["text"] == "台積電今天為什麼漲？"
