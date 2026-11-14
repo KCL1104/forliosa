@@ -182,13 +182,14 @@ function withViewAs(path: string, method: string, headers: Record<string, string
   return viewAs && sendsViewAs(path, method) ? { ...headers, [VIEW_AS_HEADER]: viewAs } : headers
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, opts: { keepalive?: boolean } = {}): Promise<T> {
   const headers: Record<string, string> = body === undefined ? { Accept: "application/json" } : { Accept: "application/json", "Content-Type": "application/json" }
   const res = await fetch(`${prefix()}${path}`, {
     method,
     credentials: "include",
     headers: withViewAs(path.split("?")[0]!, method, headers),
     body: body === undefined ? undefined : JSON.stringify(body),
+    ...(opts.keepalive ? { keepalive: true } : {}),
   })
   if (!res.ok) throw await toApiError(res)
   if (res.status === 204) return undefined as T
@@ -200,7 +201,8 @@ const enc = encodeURIComponent
 export const aiApi = {
   listThreads: (limit = 50) => request<{ items: ThreadSummary[]; next_cursor: string | null }>("GET", `/ai/threads?limit=${limit}`),
   getThread: (id: string) => request<ThreadDetail>("GET", `/ai/threads/${enc(id)}`),
-  deleteThread: (id: string) => request<void>("DELETE", `/ai/threads/${enc(id)}`),
+  /** `keepalive`：頁面要關掉時送出的刪除（復原的通知還沒結束），頁面卸載後照樣送完 */
+  deleteThread: (id: string, opts?: { keepalive?: boolean }) => request<void>("DELETE", `/ai/threads/${enc(id)}`, undefined, opts),
   getSuggestions: (route: string, symbol: string | null) =>
     request<ServerSuggestions>("GET", `/ai/suggestions?route=${enc(route)}${symbol ? `&symbol=${enc(symbol)}` : ""}`),
   getUsage: () => request<AiUsage>("GET", "/ai/usage"),

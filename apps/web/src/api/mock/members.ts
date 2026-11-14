@@ -27,12 +27,12 @@ export const DAD_ACCOUNTS: Account[] = [
   {
     id: "acc_dad_yuanta", name: "元大・爸爸", broker: "元大證券", currency: "TWD",
     fee_rate: 0.001425, fee_discount: 0.6, min_fee: 20, min_fee_odd_lot: 1,
-    tracking_mode: "transactions", created_at: "2024-01-05T10:00:00+08:00",
+    created_at: "2024-01-05T10:00:00+08:00",
   },
   {
     id: "acc_dad_fubon", name: "富邦・退休金", broker: "富邦證券", currency: "TWD",
     fee_rate: 0.001425, fee_discount: 0.5, min_fee: 20, min_fee_odd_lot: 1,
-    tracking_mode: "transactions", created_at: "2024-02-01T10:00:00+08:00",
+    created_at: "2024-02-01T10:00:00+08:00",
   },
 ]
 

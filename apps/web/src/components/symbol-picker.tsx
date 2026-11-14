@@ -46,7 +46,8 @@ export function SymbolPicker({
   const results = search.data ?? []
   const selectable = results.filter((i) => !accept || accept(i))
   // 非同步結果：選取不在清單裡時改選第一個可選的，打字後直接按 Enter 就能選
-  const selected = selectable.some((i) => i.symbol === active) ? active : (selectable[0]?.symbol ?? "")
+  // 還在查新的字時，清單是上一次的結果：不預先選取（Enter 不會選到上一次的第一檔）
+  const selected = search.isPlaceholderData ? "" : selectable.some((i) => i.symbol === active) ? active : (selectable[0]?.symbol ?? "")
   return (
     <CommandPrimitive shouldFilter={false} value={selected} onValueChange={setActive} label={label} className="relative">
       <CommandPrimitive.Input

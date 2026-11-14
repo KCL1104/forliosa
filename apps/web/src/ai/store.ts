@@ -145,8 +145,10 @@ export const useAi = create<AiState>()(
           const merged = { ...s.drafts }
           for (const d of drafts) {
             const local = merged[d.id]
-            // 本機剛簽名、還沒同步回來的狀態優先
-            merged[d.id] = local && local.status !== "loading" ? { ...d, ...local } : d
+            // 本機剛簽名、還沒同步回來的狀態優先；但伺服器已經是簽好或丟掉的，不讓本機舊的「待簽名」蓋回去
+            // （否則在另一台裝置簽過的草稿，這裡還能再簽一次；2026-11-14 review）
+            const serverDone = d.status === "signed" || d.status === "discarded"
+            merged[d.id] = local && local.status !== "loading" && !(serverDone && (local.status === "pending" || local.status === "error")) ? { ...d, ...local } : d
           }
           return { threads: [thread, ...kept].slice(0, 40), drafts: merged, threadId: thread.id }
         }),
@@ -198,29 +200,41 @@ export const useAi = create<AiState>()(
 
 export const newId = uid
 
+/** 目前的對話還在串流回答（這時送出的問題不會被接受） */
+export function currentThreadStreaming(): boolean {
+  const s = useAi.getState()
+  return !!s.threads.find((t) => t.id === s.threadId)?.messages.some((m) => m.streaming)
+}
+
 /** 目前對話 */
 export function useCurrentThread(): Thread | null {
   return useAi((s) => (s.threadId ? (s.threads.find((t) => t.id === s.threadId) ?? null) : null))
 }
 
+/**
+ * 還在對話紀錄裡的待簽名草稿：對話刪掉（或超過保存期限、超過 40 段被擠掉）之後，它的草稿打不開、也簽不了，
+ * 不算進「N 筆草稿等你簽名」（2026-11-14 review：原本會一直掛著、按了沒反應）
+ */
+function pendingDrafts(s: Pick<AiState, "drafts" | "threads">): Draft[] {
+  const live = new Set<string>()
+  for (const t of s.threads) for (const m of t.messages) for (const id of [m.draftId, ...(m.draftIds ?? [])]) if (id) live.add(id)
+  return Object.values(s.drafts).filter((d) => d.status === "pending" && live.has(d.id))
+}
+
 /** 待簽名的草稿數 */
 export function usePendingCount(): number {
-  return useAi((s) => Object.values(s.drafts).filter((d) => d.status === "pending").length)
+  return useAi((s) => pendingDrafts(s).length)
 }
 
 /** 面板裡有事：開著一段對話，或有草稿在等簽名（換頁時面板不因此收起來） */
 export function usePanelBusy(): boolean {
-  return useAi((s) => s.threadId !== null || Object.values(s.drafts).some((d) => d.status === "pending"))
+  return useAi((s) => s.threadId !== null || pendingDrafts(s).length > 0)
 }
 
-/** 最新一份待簽名的草稿（優先找還在紀錄裡的對話中的那份） */
+/** 最新一份待簽名的草稿（只算還在紀錄裡的對話中的） */
 export function latestPendingDraftId(): string | null {
-  const s = useAi.getState()
-  const pending = Object.values(s.drafts)
-    .filter((d) => d.status === "pending")
-    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
-  const inThread = pending.find((d) => s.threads.some((t) => t.messages.some((m) => m.draftId === d.id || m.draftIds?.includes(d.id))))
-  return (inThread ?? pending[0])?.id ?? null
+  const pending = pendingDrafts(useAi.getState()).sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+  return pending[0]?.id ?? null
 }
 
 /** 打開草稿所在的對話，並把草稿標成焦點約 2.4 秒（草稿卡會捲進畫面、加上外框） */

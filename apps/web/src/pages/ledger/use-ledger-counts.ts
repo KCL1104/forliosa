@@ -15,6 +15,7 @@ export function useLedgerCounts() {
   return {
     holdings: holdings.data?.length ?? null,
     transactions: txns.data ? (more ? null : items.length) : null,
-    dividends: txns.data ? items.filter((t) => t.type === "cash_dividend" || t.type === "stock_dividend").length : null,
+    // 超過 500 筆時只讀了最新的 500 筆：股利筆數不準，不寫數字（和交易筆數一樣）
+    dividends: txns.data && !more ? items.filter((t) => t.type === "cash_dividend" || t.type === "stock_dividend").length : null,
   }
 }

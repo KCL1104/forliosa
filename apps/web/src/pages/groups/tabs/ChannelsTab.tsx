@@ -216,7 +216,7 @@ function TelegramLink({ groupId, code, onCode }: { groupId: string; code: Telegr
             把 <b className="font-medium">@{code.bot_username}</b> 加進你們的 Telegram 群組。
           </li>
           <li>
-            在群組裡傳 <code className="num rounded-xs bg-hov px-1.5 py-0.5 text-lg font-medium">/link {code.code}</code>
+            在群組裡傳 <code className="num rounded-xs bg-hov px-1.5 py-0.5 text-lg font-medium break-all">/link@{code.bot_username} {code.code}</code>
           </li>
         </ol>
         <p className="num text-sm text-ink-2">連結碼 {formatDateTime(code.expires_at)} 前有效，只能用一次。</p>

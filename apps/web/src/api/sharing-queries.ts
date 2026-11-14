@@ -227,8 +227,26 @@ export function useFeed(id: string, userId?: string) {
     staleTime: 30_000,
   })
 }
+/** 一個對象的留言（舊到新）：讀到最後一頁（原本只讀前 50 則，第 51 則以後、包括剛送出的都看不到；2026-11-14 review） */
 export function useComments(id: string, target: CommentTarget, enabled = true) {
-  return useQuery({ enabled, queryKey: sk.comments(id, target), queryFn: () => api.listComments(id, target, { limit: 50 }), staleTime: 15_000, retry: no4xxRetry })
+  return useQuery({
+    enabled,
+    queryKey: sk.comments(id, target),
+    queryFn: async () => {
+      const first = await api.listComments(id, target, { limit: 50 })
+      const items = [...first.items]
+      let cursor = first.next_cursor
+      // 上限 20 頁（1,000 則），免得一直讀下去
+      for (let page = 1; cursor && page < 20; page++) {
+        const next = await api.listComments(id, target, { limit: 50, cursor })
+        items.push(...next.items)
+        cursor = next.next_cursor
+      }
+      return { ...first, items, next_cursor: cursor }
+    },
+    staleTime: 15_000,
+    retry: no4xxRetry,
+  })
 }
 /** 留言與表情改了：留言串、動態與週報的計數一起更新 */
 function useInvalidateDiscussion(id: string) {

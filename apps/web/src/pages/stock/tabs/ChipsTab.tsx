@@ -200,11 +200,12 @@ export function ChipsTab({ inst }: { inst: InstrumentDetail }) {
       )}
 
       <div className="grid gap-10 lg:grid-cols-2">
-        <Section title="融資餘額" titleId="chips-margin" aside={c.margin.length ? `${formatNumber(c.margin.at(-1)!.margin_balance)} 張` : undefined}>
-          <MiniLine data={c.margin.map((m) => ({ t: m.t, v: m.margin_balance }))} color="var(--chart-mine)" label="融資餘額" fmt={(v) => `${formatNumber(v)} 張`} />
+        {/* 資料源的空白格（null）不畫、不寫成 0 張（2026-11-14 review） */}
+        <Section title="融資餘額" titleId="chips-margin" aside={balanceText(c.margin.at(-1)?.margin_balance)}>
+          <MiniLine data={points(c.margin, "margin_balance")} color="var(--chart-mine)" label="融資餘額" fmt={(v) => `${formatNumber(v)} 張`} />
         </Section>
-        <Section title="融券餘額" titleId="chips-short" aside={c.margin.length ? `${formatNumber(c.margin.at(-1)!.short_balance)} 張` : undefined}>
-          <MiniLine data={c.margin.map((m) => ({ t: m.t, v: m.short_balance }))} color="var(--chart-blue)" label="融券餘額" fmt={(v) => `${formatNumber(v)} 張`} />
+        <Section title="融券餘額" titleId="chips-short" aside={balanceText(c.margin.at(-1)?.short_balance)}>
+          <MiniLine data={points(c.margin, "short_balance")} color="var(--chart-blue)" label="融券餘額" fmt={(v) => `${formatNumber(v)} 張`} />
         </Section>
         <Section
           title="外資持股比"
@@ -275,6 +276,11 @@ function ListedForeign({ inst, chips, notes }: { inst: InstrumentDetail; chips: 
     </>
   )
 }
+
+/** 最新一天的餘額；那天的資料源是空白就不寫（不是「0 張」） */
+const balanceText = (v: number | null | undefined) => (v === null || v === undefined ? undefined : `${formatNumber(v)} 張`)
+const points = <K extends "margin_balance" | "short_balance">(rows: { t: string; margin_balance: number | null; short_balance: number | null }[], key: K) =>
+  rows.flatMap((m) => (m[key] === null ? [] : [{ t: m.t, v: m[key] as number }]))
 
 function MiniLine({ data, color, label, fmt }: { data: { t: string; v: number }[]; color: string; label: string; fmt: (v: number) => string }) {
   if (data.length < 2) return <NotYet className="-mt-3 border-t-0" title="資料還不夠畫走勢">至少要有兩天的資料。</NotYet>

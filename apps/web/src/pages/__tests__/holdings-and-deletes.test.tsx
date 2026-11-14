@@ -4,11 +4,11 @@ import { act, cleanup, render, screen, waitFor, within } from "@testing-library/
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { useAi } from "@/ai/store"
-import { api, appToday } from "@/api"
+import { api } from "@/api"
 import { createHttpAdapter } from "@/api/http"
 import { createMockAdapter, type MockOptions } from "@/api/mock/adapter"
 import { listTransactionsUpTo } from "@/api/queries"
-import type { Account, ForliosaApi } from "@/api/types"
+import type { ForliosaApi } from "@/api/types"
 import { useViewAs, VIEW_AS_HEADER } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { Toaster } from "@/components/ui/sonner"
@@ -24,7 +24,7 @@ vi.mock("@number-flow/react", () => ({
 
 /**
  * 產品負責人 2026-11-14 照建議決定的三件事：
- * - 2-1「只記持股」的帳戶：記一筆換成持股的輸入（股票＋張數＋均價，一次好幾檔，存成快照），設定頁的帳戶列也進得去；
+ * - 記一筆（2026-11-14 第二次）：照 Google 財經分兩步，先選股票，再填股數、買進日期（月曆，一定要選）與價格；「只記持股」取消；
  * - 2-5 刪除券商帳戶：帳戶的編輯框裡「刪除這個帳戶」，說清楚一起刪掉什麼，要輸入帳戶名稱才能刪；
  * - 3-2 設定頁「刪除全部 AI 對話」：伺服器與這台瀏覽器上的對話都清掉，先問一次。
  */
@@ -85,141 +85,83 @@ function renderApp(path: string) {
   return router
 }
 
-const holdingsAccount = (): Promise<Account> =>
-  api.createAccount({ name: "元大－只記持股", broker: "元大證券", currency: "TWD", fee_rate: 0.001425, fee_discount: 0.6, min_fee: 20, min_fee_odd_lot: 1, tracking_mode: "holdings" })
-
-/** 在持股的輸入裡選一檔：搜尋框打代號，按那一列 */
-async function pick(dialog: HTMLElement, label: string, code: string) {
-  const user = userEvent.setup()
-  const box = await within(dialog).findByRole("combobox", { name: label }, T)
-  await user.type(box, code)
-  await user.click(await within(dialog).findByRole("option", { name: new RegExp(code) }, T))
+/** 打開記一筆（帳本右上的「記一筆」） */
+async function openQuickAdd() {
+  const user = userEvent.setup({ pointerEventsCheck: 0 })
+  await user.click((await screen.findAllByRole("button", { name: "記一筆" }, T))[0]!)
+  return screen.findByRole("dialog", { name: "記一筆" }, T)
 }
 
-describe("只記持股的帳戶：持股的輸入", { timeout: 20_000 }, () => {
-  it("設定頁的帳戶列「編輯持股」→ 一次填兩檔（張數照偏好）→ 存成持股；逐筆交易的帳戶沒有這個動作", async () => {
+describe("記一筆：先選股票，再填股數、買進日期、價格（產品負責人 2026-11-14，照 Google 財經）", { timeout: 20_000 }, () => {
+  it("第一步：沒打字時列持有的與觀察清單（現價、漲跌），「新增」不能按；選了才出現股數、日期、價格；✕ 回到第一步", async () => {
     mount()
-    const acc = await holdingsAccount()
-    const user = userEvent.setup()
-    renderApp("/settings")
-    await screen.findByRole("heading", { name: "券商帳戶" }, T)
-    expect(screen.queryByRole("button", { name: "編輯 永豐・一般 的持股" })).toBeNull()
-    await user.click(await screen.findByRole("button", { name: "編輯 元大－只記持股 的持股" }, T))
-    const dialog = await screen.findByRole("dialog", {}, T)
-    expect(within(dialog).getByRole("heading", { name: "目前持股" })).toBeInTheDocument()
-    expect(within(dialog).queryByText("買進日期")).toBeNull()
-
-    // 沒填就存：說要選股票，不送出
-    await user.click(await within(dialog).findByRole("button", { name: "存成持股" }, T))
-    expect(within(dialog).getByText("請選擇股票或 ETF")).toBeInTheDocument()
-
-    await pick(dialog, "第 1 檔的股票", "2330")
-    await user.type(within(dialog).getByRole("textbox", { name: "台積電的張數" }), "1.5")
-    expect(within(dialog).getByText("1,500 股")).toBeInTheDocument()
-    await user.type(within(dialog).getByRole("textbox", { name: "台積電的均價" }), "600")
-    await user.click(within(dialog).getByRole("button", { name: "再加一檔" }))
-    await pick(dialog, "第 2 檔的股票", "0050")
-    await user.type(within(dialog).getByRole("textbox", { name: "元大台灣50的張數" }), "2.0005")
-    await user.type(within(dialog).getByRole("textbox", { name: "元大台灣50的均價" }), "150")
-    await user.click(within(dialog).getByRole("button", { name: "存成持股" }))
-    expect(within(dialog).getByText("張數最多寫到小數第三位（1 股）")).toBeInTheDocument()
-    await user.clear(within(dialog).getByRole("textbox", { name: "元大台灣50的張數" }))
-    await user.type(within(dialog).getByRole("textbox", { name: "元大台灣50的張數" }), "2.006")
-    await user.click(within(dialog).getByRole("button", { name: "存成持股" }))
-
-    await waitFor(() => expect(useUi.getState().tradeForm.open).toBe(false), T)
-    expect(await screen.findByText("已存成持股：2 檔", {}, T)).toBeInTheDocument()
-    const snap = await api.getAccountHoldings(acc.id)
-    expect(snap.as_of).toBe(appToday())
-    // 2.006 張 → 2,006 股（取整，不是 2005.9999）
-    expect(snap.holdings).toEqual([
-      { symbol: "0050.TW", quantity: 2006, avg_cost: 150 },
-      { symbol: "2330.TW", quantity: 1500, avg_cost: 600 },
-    ])
-    // 帳本照快照算
-    const held = await api.getHoldings(acc.id)
-    expect(held.map((h) => [h.symbol, h.quantity]).sort()).toEqual([["0050.TW", 2006], ["2330.TW", 1500]])
-  })
-
-  it("帶入現在的快照：只改均價沿用原本的日期；改股數、移除一檔是今天的快照；「復原」放回原本的快照", async () => {
-    mount()
-    const acc = await holdingsAccount()
-    await api.putHoldings(acc.id, { as_of: "2026-10-01", holdings: [{ symbol: "2330.TW", quantity: 1000, avg_cost: 600 }, { symbol: "0050.TW", quantity: 2000, avg_cost: 150 }] })
-    const user = userEvent.setup()
-    renderApp("/")
-    await screen.findByRole("tablist", { name: "帳本內容" }, T)
-
-    act(() => useUi.getState().openTradeForm({ accountId: acc.id }))
-    let dialog = await screen.findByRole("dialog", {}, T)
-    const cost = await within(dialog).findByRole("textbox", { name: "台積電的均價" }, T)
-    expect((within(dialog).getByRole("textbox", { name: "台積電的張數" }) as HTMLInputElement).value).toBe("1")
-    expect((within(dialog).getByRole("textbox", { name: "元大台灣50的張數" }) as HTMLInputElement).value).toBe("2")
-    await user.clear(cost)
-    await user.type(cost, "612.5")
-    await user.click(within(dialog).getByRole("button", { name: "存成持股" }))
-    await waitFor(() => expect(useUi.getState().tradeForm.open).toBe(false), T)
-    let snap = await api.getAccountHoldings(acc.id)
-    expect(snap.as_of).toBe("2026-10-01")
-    expect(snap.holdings.find((h) => h.symbol === "2330.TW")).toEqual({ symbol: "2330.TW", quantity: 1000, avg_cost: 612.5 })
-
-    act(() => useUi.getState().openTradeForm({ accountId: acc.id }))
-    dialog = await screen.findByRole("dialog", {}, T)
-    await user.click(await within(dialog).findByRole("button", { name: "移除元大台灣50" }, T))
-    const qty = within(dialog).getByRole("textbox", { name: "台積電的張數" })
-    await user.clear(qty)
-    await user.type(qty, "2")
-    await user.click(within(dialog).getByRole("button", { name: "存成持股" }))
-    await waitFor(() => expect(useUi.getState().tradeForm.open).toBe(false), T)
-    snap = await api.getAccountHoldings(acc.id)
-    expect(snap).toMatchObject({ as_of: appToday(), holdings: [{ symbol: "2330.TW", quantity: 2000, avg_cost: 612.5 }] })
-
-    const toastEl = (await screen.findAllByText("已存成持股：1 檔", {}, T)).at(-1)!.closest("[data-sonner-toast]") as HTMLElement
-    await user.click(within(toastEl).getByRole("button", { name: "復原" }))
-    await waitFor(async () => expect((await api.getAccountHoldings(acc.id)).holdings).toHaveLength(2), T)
-    snap = await api.getAccountHoldings(acc.id)
-    expect(snap.as_of).toBe("2026-10-01")
-    expect(snap.holdings).toEqual([
-      { symbol: "0050.TW", quantity: 2000, avg_cost: 150 },
-      { symbol: "2330.TW", quantity: 1000, avg_cost: 612.5 },
-    ])
-  })
-
-  it("記一筆：帳戶選到只記持股的帳戶，就換成持股的輸入（不記買進）；換回來又是買進", async () => {
-    mount()
-    await holdingsAccount()
-    // 下拉選單打開的動畫期間選項是 pointer-events: none：機器忙的時候會剛好點在動畫中，不檢查這一項
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
-    await screen.findByRole("tablist", { name: "帳本內容" }, T)
-    act(() => useUi.getState().openTradeForm())
-    const dialog = await screen.findByRole("dialog", {}, T)
-    expect(within(dialog).getByRole("heading", { name: "記一筆" })).toBeInTheDocument()
-    expect(await within(dialog).findByRole("button", { name: "新增" }, T)).toBeInTheDocument()
+    const dialog = await openQuickAdd()
+    const held = await within(dialog).findByRole("group", { name: "持有的" }, T)
+    const tsmc = within(held).getByRole("option", { name: /2330.*台積電/ })
+    expect(tsmc).toHaveTextContent("1,085")
+    expect(within(dialog).getByRole("group", { name: "觀察清單" })).toHaveTextContent("廣達")
+    expect(within(dialog).queryByRole("textbox", { name: "張數" })).toBeNull()
+    expect(within(dialog).getByRole("button", { name: "新增" })).toBeDisabled()
 
-    await user.click(within(dialog).getByRole("combobox", { name: "券商帳戶" }))
-    await user.click(await screen.findByRole("option", { name: /元大－只記持股/ }, T))
-    expect(await within(dialog).findByRole("heading", { name: "目前持股" }, T)).toBeInTheDocument()
-    expect(await within(dialog).findByRole("button", { name: "存成持股" }, T)).toBeInTheDocument()
-    expect(within(dialog).queryByRole("button", { name: "新增" })).toBeNull()
-    expect(within(dialog).queryByText("買進價格")).toBeNull()
+    await user.click(tsmc)
+    const card = await within(dialog).findByRole("group", { name: "選好的股票" }, T)
+    expect(card).toHaveTextContent("2330")
+    expect(card).toHaveTextContent("台積電")
+    expect(within(dialog).getByRole("textbox", { name: "張數" })).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "買進日期，還沒選" })).toBeInTheDocument()
+    expect(within(dialog).getByRole("button", { name: "新增" })).toBeEnabled()
 
-    await user.click(within(dialog).getByRole("combobox", { name: "券商帳戶" }))
-    await user.click(await screen.findByRole("option", { name: /永豐・一般/ }, T))
-    expect(await within(dialog).findByRole("heading", { name: "記一筆" }, T)).toBeInTheDocument()
-    expect(within(dialog).getByRole("button", { name: "新增" })).toBeInTheDocument()
+    await user.click(within(card).getByRole("button", { name: "改選其他股票" }))
+    expect(await within(dialog).findByRole("group", { name: "持有的" }, T)).toBeInTheDocument()
+    expect(within(dialog).queryByRole("textbox", { name: "張數" })).toBeNull()
   })
 
-  it("持倉的「加碼」：那一檔在只記持股的帳戶裡，就開持股的輸入，焦點在那一檔的數量", async () => {
+  it("買進日期一開始空白、一定要選；月曆選一天之後，價格下面有那天的收盤價，點一下才填入；新增記成那一天的買進", async () => {
     mount()
-    const acc = await holdingsAccount()
-    await api.putHoldings(acc.id, { as_of: "2026-10-01", holdings: [{ symbol: "2382.TW", quantity: 2000, avg_cost: 300 }] })
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
-    await screen.findByRole("tablist", { name: "帳本內容" }, T)
-    act(() => useUi.getState().openTradeForm({ symbol: "2382" }))
-    const dialog = await screen.findByRole("dialog", {}, T)
-    expect(await within(dialog).findByRole("heading", { name: "目前持股" }, T)).toBeInTheDocument()
-    const qty = await within(dialog).findByRole("textbox", { name: "廣達的張數" }, T)
-    await waitFor(() => expect(document.activeElement).toBe(qty), T)
+    const dialog = await openQuickAdd()
+    await user.click(await within(dialog).findByRole("option", { name: /2330.*台積電/ }, T))
+    await user.type(await within(dialog).findByRole("textbox", { name: "張數" }, T), "1")
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    expect(within(dialog).getByText("請選買進日期")).toBeInTheDocument()
+    expect(within(dialog).getByText("請輸入價格")).toBeInTheDocument()
+
+    await user.click(within(dialog).getByRole("button", { name: "買進日期，還沒選" }))
+    // 今天以後的日子不能選
+    expect(await screen.findByRole("button", { name: /2026 年 11 月 13 日/ }, T)).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: /2026 年 11 月 10 日/ }))
+    expect(await within(dialog).findByRole("button", { name: "買進日期：2026/11/10（二）" }, T)).toBeInTheDocument()
+
+    const { close } = await api.getDailyClose("2330.TW", "2026-11-10")
+    expect(close).not.toBeNull()
+    const price = within(dialog).getByRole("textbox", { name: "買進價格" })
+    expect(price).toHaveValue("")
+    await user.click(await within(dialog).findByRole("button", { name: /^用 11\/10 收盤 .* 填入價格$/ }, T))
+    expect(price).toHaveValue(String(close))
+
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+    const buys = (await api.listTransactions({ symbol: "2330.TW", limit: 50 })).items.filter((t) => t.type === "buy" && t.trade_date === "2026-11-10")
+    expect(buys.map((t) => [t.quantity, t.price])).toEqual([[1000, close]])
+  })
+
+  it("存檔開始以前的日期沒有收盤價：價格下面什麼都不寫", async () => {
+    mount()
+    expect((await api.getDailyClose("2330.TW", "2024-03-15")).close).toBeNull()
+    expect((await api.getDailyClose("2330.TW", "2026-11-10")).close).toBeGreaterThan(0)
+  })
+
+  it("持倉的「加碼」直接到第二步（那一檔選好），焦點在股數", async () => {
+    mount()
+    renderApp("/")
+    await screen.findByRole("table", { name: "持倉" }, T)
+    act(() => useUi.getState().openTradeForm({ symbol: "2330" }))
+    const dialog = await screen.findByRole("dialog", { name: "記一筆" }, T)
+    expect(await within(dialog).findByRole("group", { name: "選好的股票" }, T)).toHaveTextContent("台積電")
+    await waitFor(() => expect(within(dialog).getByRole("textbox", { name: "張數" })).toHaveFocus(), T)
   })
 })
 
@@ -378,7 +320,7 @@ describe("持倉展開每一筆買賣（產品負責人 2026-11-14，參考 Goog
     await user.click(within(list).getByRole("button", { name: "2024/8/6（二） 買進的動作" }))
     await user.click(await screen.findByRole("menuitem", { name: "修改" }, T))
     const dialog = await screen.findByRole("dialog", { name: "編輯交易" }, T)
-    expect(within(dialog).getByLabelText(/日期/)).toHaveValue("2024-08-06")
+    expect(within(dialog).getByRole("button", { name: "日期" })).toHaveTextContent("2024/8/6（二）")
     act(() => useUi.getState().closeTradeForm())
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "編輯交易" })).toBeNull(), T)
 
@@ -423,25 +365,5 @@ describe("持倉展開每一筆買賣（產品負責人 2026-11-14，參考 Goog
     } finally {
       act(() => usePrefs.setState({ privacyMode: false }))
     }
-  })
-
-  it("只記持股的帳戶：那個帳戶的持股是一列「持股」（快照的日期、均價）；⋯ 修改打開那個帳戶的持股輸入", async () => {
-    mount()
-    const acc = await holdingsAccount()
-    await api.putHoldings(acc.id, { as_of: "2026-10-01", holdings: [{ symbol: "2330.TW", quantity: 1000, avg_cost: 600 }] })
-    const user = userEvent.setup({ pointerEventsCheck: 0 })
-    renderApp("/")
-    const list = await expand("台積電")
-    const rows = within(list).getAllByRole("listitem")
-    expect(rows).toHaveLength(3)
-    // 不只一個帳戶：每一列寫帳戶
-    expect(rows[0]).toHaveTextContent("10/1（四）")
-    expect(rows[0]).toHaveTextContent("持股")
-    expect(rows[0]).toHaveTextContent("元大－只記持股")
-    expect(rows[0]).toHaveTextContent("NT$600,000")
-    expect(rows[0]).toHaveTextContent("80.83%")
-    await user.click(within(rows[0]!).getByRole("button", { name: "10/1（四） 持股的動作" }))
-    await user.click(await screen.findByRole("menuitem", { name: "修改" }, T))
-    expect(useUi.getState().tradeForm).toMatchObject({ open: true, symbol: "2330", accountId: acc.id })
   })
 })

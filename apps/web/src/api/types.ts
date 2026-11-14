@@ -54,8 +54,6 @@ export interface DevLoginBody {
 
 // ── 券商帳戶 ──────────────────────────────────────────────
 export type Currency = "TWD" | "USD"
-export type TrackingMode = "transactions" | "holdings"
-
 export interface Account {
   id: string
   name: string
@@ -65,25 +63,12 @@ export interface Account {
   fee_discount: number
   min_fee: number
   min_fee_odd_lot: number
-  tracking_mode: TrackingMode
   created_at: string
 }
 
 /** 新增帳戶：手續費率等欄位不再由畫面填（不自動算手續費，2026-11-14），後端有預設值 */
 export type AccountInput = Omit<Account, "id" | "created_at" | "fee_rate" | "fee_discount" | "min_fee" | "min_fee_odd_lot"> &
   Partial<Pick<Account, "fee_rate" | "fee_discount" | "min_fee" | "min_fee_odd_lot">>
-
-export interface HoldingsSnapshotBody {
-  as_of: string
-  holdings: { symbol: string; quantity: number; avg_cost: number }[]
-}
-
-/** 「只記持股」帳戶目前的快照（`GET /accounts/{id}/holdings`）：還沒存過時 `as_of` 是 null、`holdings` 是空的 */
-export interface HoldingsSnapshot {
-  account_id: string
-  as_of: string | null
-  holdings: { symbol: string; quantity: number; avg_cost: number }[]
-}
 
 // ── 商品與行情 ────────────────────────────────────────────
 export type Market = "TWSE" | "TPEX" | "US"
@@ -113,6 +98,14 @@ export interface InstrumentDetail extends Instrument {
 }
 
 /** 報價：資料源沒有的欄位為 null（CONTRACT_NOTES「可能為 null」） */
+/** `GET /instruments/{symbol}/close?date=`：只讀自己存檔的官方收盤（不含 Yahoo 回補的日線），那天沒有資料時 `close` 是 null */
+export interface DailyClose {
+  symbol: string
+  date: string
+  close: number | null
+  currency: Currency
+}
+
 export interface Quote {
   symbol: string
   price: number
@@ -489,7 +482,8 @@ export type ChipsRange = "1M" | "3M" | "6M" | "1Y"
 /** 籌碼：法人與融資融券單位都是「張」 */
 export interface Chips {
   institutional: { t: string; foreign: number; trust: number; dealer: number; total: number }[]
-  margin: { t: string; margin_balance: number; short_balance: number }[]
+  /** 資料源的空白格是 null（後端 `int | None`） */
+  margin: { t: string; margin_balance: number | null; short_balance: number | null }[]
   foreign_holding_pct: { t: string; pct: number }[]
   /** 集保股權分散：後端提供 15 個分級，另有 `label`（例如「1,000 張以上」） */
   major_holders: { as_of: string; buckets: { level: string; label?: string; holders: number; shares: number; pct: number }[] } | null
@@ -537,6 +531,8 @@ export type InstrumentEventType =
   | "attention"
   | "disposition"
   | "shareholder_meeting"
+  /** 上市公司董事會／股東會的股利決議（除息日公告之前） */
+  | "dividend_resolution"
   /** 美股：SEC 的 8-K／10-Q／10-K 申報（`form`），連到 sec.gov 原文 */
   | "sec_filing"
 
@@ -1570,18 +1566,16 @@ export interface ForliosaApi {
   listAccounts(): Promise<Account[]>
   createAccount(body: AccountInput): Promise<Account>
   updateAccount(id: string, patch: Partial<AccountInput>): Promise<Account>
-  /** 刪除帳戶（不能復原）：連同交易、自動入帳的股利、持股快照與定期定額 */
+  /** 刪除帳戶（不能復原）：連同交易、自動入帳的股利與定期定額 */
   deleteAccount(id: string): Promise<void>
-  /** 「只記持股」帳戶目前的快照 */
-  getAccountHoldings(id: string): Promise<HoldingsSnapshot>
-  /** 以快照覆蓋「只記持股」帳戶的持股（逐筆交易的帳戶回 409）：快照日（含）之前的交易不算，自動股利從快照日之後才記 */
-  putHoldings(id: string, body: HoldingsSnapshotBody): Promise<HoldingsSnapshot>
   // 商品與行情
   searchInstruments(q: string): Promise<Instrument[]>
   getInstrument(symbol: string): Promise<InstrumentDetail>
   getQuote(symbol: string): Promise<Quote>
   getQuotes(symbols: string[]): Promise<Quote[]>
   getHistory(symbol: string, range: HistoryRange): Promise<History>
+  /** 某一天的收盤價（記一筆的「那天收盤」）：只來自自己存檔的官方收盤，沒有那天的資料時 `close` 是 null */
+  getDailyClose(symbol: string, date: string): Promise<DailyClose>
   getValuation(symbol: string, range?: "5Y" | "MAX"): Promise<Valuation>
   getRevenue(symbol: string): Promise<MonthlyRevenue[]>
   getDividends(symbol: string): Promise<DividendRecord[]>

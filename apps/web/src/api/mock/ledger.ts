@@ -28,12 +28,12 @@ export const ACCOUNTS: Account[] = [
   {
     id: "acc_01JSINOPAC", name: "永豐・一般", broker: "永豐金證券", currency: "TWD",
     fee_rate: 0.001425, fee_discount: 0.28, min_fee: 20, min_fee_odd_lot: 1,
-    tracking_mode: "transactions", created_at: "2023-03-01T10:00:00+08:00",
+    created_at: "2023-03-01T10:00:00+08:00",
   },
   {
     id: "acc_01JCATHAYUS", name: "國泰・複委託", broker: "國泰證券", currency: "USD",
     fee_rate: 0.001, fee_discount: 1, min_fee: 3, min_fee_odd_lot: 3,
-    tracking_mode: "transactions", created_at: "2023-05-20T10:00:00+08:00",
+    created_at: "2023-05-20T10:00:00+08:00",
   },
 ]
 
@@ -231,7 +231,8 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
         pos.qty -= pos.qty * q
         break
       case "stock_dividend":
-        pos.qty += Math.floor(pos.qty * ((x.price ?? 0) / 10))
+        // 和後端相同：有配發股數就用它，沒有才照每股配股（元）÷ 面額 10 元算
+        pos.qty += x.quantity ? x.quantity : Math.floor(pos.qty * ((x.price ?? 0) / 10))
         break
       case "cash_dividend":
         dividendsTwd += (x.amount - x.tax - x.health_insurance) * fx

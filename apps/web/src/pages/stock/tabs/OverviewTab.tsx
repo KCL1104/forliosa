@@ -227,7 +227,12 @@ function chipItems(inst: InstrumentDetail, c: NonNullable<ReturnType<typeof useC
   const listed = inst.market === "TWSE"
   if (!listed && c.institutional.length === 0) return { items: [], note: null }
   const m = c.margin
-  const change = (k: "margin_balance" | "short_balance") => (m.length > 5 ? m.at(-1)![k] - m.at(-6)![k] : null)
+  // 資料源的空白格是 null：算不出就是「—」
+  const change = (k: "margin_balance" | "short_balance") => {
+    const now = m.length > 5 ? m.at(-1)![k] : null
+    const before = m.length > 5 ? m.at(-6)![k] : null
+    return now === null || before === null ? null : now - before
+  }
   const marginChange = change("margin_balance")
   const bigs = (c.major_holders?.buckets ?? []).filter((b) => /^1,?000/.test(b.label ?? b.level) && /以上/.test(b.label ?? b.level))
   const big = bigs.length ? bigs.reduce((s, b) => s + b.pct, 0) : null
@@ -238,7 +243,7 @@ function chipItems(inst: InstrumentDetail, c: NonNullable<ReturnType<typeof useC
     const top = c.foreign_top20 ?? null
     return {
       items: [
-        { label: "融資餘額", value: m.length ? `${formatNumber(m.at(-1)!.margin_balance)} 張` : "—" },
+        { label: "融資餘額", value: m.at(-1)?.margin_balance != null ? `${formatNumber(m.at(-1)!.margin_balance!)} 張` : "—" },
         { label: "融資・5 日", value: marginChange === null ? "—" : lot(marginChange), title: "近 5 個交易日的融資增減" },
         { label: "融券・5 日", value: change("short_balance") === null ? "—" : lot(change("short_balance")!), title: "近 5 個交易日的融券增減" },
         bigItem,

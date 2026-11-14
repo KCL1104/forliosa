@@ -10,7 +10,6 @@ import { RecurringPlans } from "./RecurringPlans"
 import { AccountData } from "./AccountData"
 import { DeleteBrokerAccountDialog } from "./DeleteBrokerAccount"
 import { useDeleteAllThreads } from "@/ai/threads"
-import { useUi } from "@/app/ui-store"
 import { Delegations } from "./Delegations"
 import { Profile } from "./Profile"
 import { useReadOnly } from "@/api/view-as"
@@ -247,7 +246,6 @@ function Row({ label, description, htmlFor, children }: { label: string; descrip
 
 function Accounts() {
   const accounts = useAccounts()
-  const openTradeForm = useUi((s) => s.openTradeForm)
   const [editing, setEditing] = useState<Account | null>(null)
   const [deleting, setDeleting] = useState<Account | null>(null)
   return (
@@ -276,22 +274,13 @@ function Accounts() {
                 <div className="flex flex-wrap items-center gap-2">
                   <span className="font-medium">{a.name}</span>
                   <span className="demo-tag text-ink-2">{a.currency === "USD" ? "美元" : "新台幣"}</span>
-                  <span className="demo-tag text-ink-2">{a.tracking_mode === "transactions" ? "逐筆交易" : "只記持股"}</span>
                 </div>
                 {/* 不列手續費率：手續費不自動算（2026-11-14） */}
                 {a.broker && <p className="mt-1 text-sm text-ink-2">{a.broker}</p>}
               </div>
-              {/* 只記持股的帳戶：「編輯持股」開持股的輸入（和記一筆同一個框）；兩個文字動作在手機上下排 */}
-              <div className="flex shrink-0 flex-col items-end gap-x-5 sm:flex-row sm:items-center">
-                {a.tracking_mode === "holdings" && (
-                  <button type="button" onClick={() => openTradeForm({ accountId: a.id })} aria-label={`編輯 ${a.name} 的持股`} className={textAction}>
-                    編輯持股
-                  </button>
-                )}
-                <button type="button" onClick={() => setEditing(a)} aria-label={`編輯 ${a.name}`} className={textAction}>
-                  編輯
-                </button>
-              </div>
+              <button type="button" onClick={() => setEditing(a)} aria-label={`編輯 ${a.name}`} className={cn(textAction, "shrink-0")}>
+                編輯
+              </button>
             </li>
           ))}
         </ul>
@@ -322,7 +311,6 @@ const NEW_ACCOUNT: Account = {
   fee_discount: 0.6,
   min_fee: 20,
   min_fee_odd_lot: 1,
-  tracking_mode: "transactions",
   created_at: "",
 }
 
@@ -334,7 +322,6 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
   const [name, setName] = useState(account.name)
   const [broker, setBroker] = useState(account.broker)
   const [currency, setCurrency] = useState(account.currency)
-  const [mode, setMode] = useState(account.tracking_mode)
   const [touched, setTouched] = useState(false)
   const nameBad = !name.trim()
   const pending = update.isPending || create.isPending
@@ -351,8 +338,8 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
       onError: (err: Error) =>
         toast.error("沒有存成功，內容還在。", { description: err.message }),
     }
-    // 編輯時不送幣別與追蹤方式：已有交易的帳戶不能改幣別
-    if (isNew) create.mutate({ ...editable, currency, tracking_mode: mode }, done)
+    // 編輯時不送幣別：已有交易的帳戶不能改幣別
+    if (isNew) create.mutate({ ...editable, currency }, done)
     else update.mutate({ id: account.id, patch: editable }, done)
   }
   return (
@@ -372,14 +359,9 @@ function AccountDialog({ account, onClose, onDelete }: { account: Account; onClo
             </Field>
           </div>
           {isNew && (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <Field label="幣別">
-                <RangeChips label="幣別" value={currency} onChange={setCurrency} options={[{ value: "TWD", label: "新台幣" }, { value: "USD", label: "美元（複委託）" }]} />
-              </Field>
-              <Field label="追蹤方式">
-                <RangeChips label="追蹤方式" value={mode} onChange={setMode} options={[{ value: "transactions", label: "逐筆交易" }, { value: "holdings", label: "只記持股" }]} />
-              </Field>
-            </div>
+            <Field label="幣別">
+              <RangeChips label="幣別" value={currency} onChange={setCurrency} options={[{ value: "TWD", label: "新台幣" }, { value: "USD", label: "美元（複委託）" }]} />
+            </Field>
           )}
         </div>
         <DialogFooter>

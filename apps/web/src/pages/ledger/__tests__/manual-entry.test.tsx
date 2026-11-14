@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router"
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
 import { api } from "@/api"
@@ -39,6 +39,15 @@ afterEach(() => {
 
 const T = { timeout: 4000 }
 
+/** 日期欄位（月曆）選一天：打開 → 年、月的下拉選單 → 按那一天 */
+async function pickDate(field: HTMLElement, y: number, m: number, d: number) {
+  await userEvent.click(field)
+  await userEvent.selectOptions(await screen.findByRole("combobox", { name: "年份" }, T), String(y))
+  await userEvent.selectOptions(screen.getByRole("combobox", { name: "月份" }), String(m - 1))
+  await userEvent.click(screen.getByRole("button", { name: new RegExp(`^${y} 年 ${m} 月 ${d} 日`) }))
+  await waitFor(() => expect(screen.queryByRole("combobox", { name: "年份" })).toBeNull(), T)
+}
+
 function renderApp(path: string) {
   const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   const router = createAppRouter(qc, createMemoryHistory({ initialEntries: [path] }))
@@ -63,10 +72,12 @@ describe("帳本的「記一筆」", () => {
     expect(within(dialog).getByRole("heading", { name: "記一筆" })).toBeInTheDocument()
     // AI 面板沒有被叫出來問「買賣了什麼？」
     expect(screen.queryByText(/買賣了什麼/)).toBeNull()
-    // 簡單的輸入：沒有類型、備註、稅費試算
+    // 簡單的輸入：沒有類型、備註、稅費試算；第一步只有選股票（Google 財經的做法），「新增」還不能按
     expect(within(dialog).queryByText("稅費試算")).toBeNull()
     expect(within(dialog).queryByRole("group", { name: "交易類型" })).toBeNull()
-    expect(within(dialog).getByRole("textbox", { name: "買進價格" })).toBeInTheDocument()
+    expect(within(dialog).getByRole("combobox")).toBeInTheDocument()
+    expect(within(dialog).queryByRole("textbox", { name: "買進價格" })).toBeNull()
+    expect(within(dialog).getByRole("button", { name: "新增" })).toBeDisabled()
   })
 
   it("選一檔、填兩筆買進 → 新增：記成兩筆買進，對話框關閉", async () => {
@@ -77,21 +88,22 @@ describe("帳本的「記一筆」", () => {
     const form = within(dialog)
     await waitFor(() => expect(form.getByText("台積電")).toBeInTheDocument(), T)
     const before = (await api.listTransactions({ limit: 200 })).items.length
-    // 沒填就按新增：說哪一格要填（照欄位的單位：預設以張填），不送出
+    // 沒填就按新增：說哪一格要填（照欄位的單位：預設以張填；日期一定要選），不送出
     await userEvent.click(form.getByRole("button", { name: "新增" }))
     expect(form.getByText("請輸入張數")).toBeInTheDocument()
+    expect(form.getByText("請選買進日期")).toBeInTheDocument()
     expect(form.getByText("請輸入價格")).toBeInTheDocument()
 
     const first = dialog.querySelector<HTMLInputElement>("#lot-qty-0")!
     await userEvent.type(first, first.getAttribute("aria-label") === "張數" ? "1" : "1000")
-    fireEvent.change(dialog.querySelector("#lot-date-0")!, { target: { value: "2024-03-05" } })
+    await pickDate(form.getByRole("button", { name: "買進日期，還沒選" }), 2024, 3, 5)
     await userEvent.type(dialog.querySelector("#lot-price-0")!, "700")
     await userEvent.click(form.getByRole("button", { name: "再加一筆買進" }))
     const second = await form.findByRole("textbox", { name: /第 2 筆的(張數|股數)/ })
-    // 新的一筆沿用上一筆的日期
-    expect((form.getByLabelText("第 2 筆的買進日期") as HTMLInputElement).value).toBe("2024-03-05")
+    // 新的一筆日期一樣是空的（不沿用上一筆，免得忘了改）
+    expect(form.getByRole("button", { name: "第 2 筆的買進日期，還沒選" })).toBeInTheDocument()
     await userEvent.type(second, second.getAttribute("aria-label")!.endsWith("張數") ? "2" : "2000")
-    fireEvent.change(form.getByLabelText("第 2 筆的買進日期"), { target: { value: "2024-04-10" } })
+    await pickDate(form.getByRole("button", { name: "第 2 筆的買進日期，還沒選" }), 2024, 4, 10)
     await userEvent.type(form.getByRole("textbox", { name: "第 2 筆的買進價格" }), "760")
     await userEvent.click(form.getByRole("button", { name: "新增" }))
 
@@ -120,15 +132,21 @@ describe("帳本的「記一筆」", () => {
     await waitFor(() => expect(within(full).getByText("台積電")).toBeInTheDocument(), T)
   })
 
-  it("手機抽屜裡的帳戶選單開在抽屜裡面（開在 body 底下的話，Vaul 讓它按不到）", async () => {
+  it("手機抽屜裡的帳戶選單、日期的月曆開在抽屜裡面（開在 body 底下的話，Vaul 讓它按不到）", async () => {
     renderApp("/")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)
-    useUi.getState().openTradeForm()
+    useUi.getState().openTradeForm({ symbol: "2330" })
     const dialog = await screen.findByRole("dialog", {}, T)
     expect(dialog).toHaveAttribute("data-slot", "drawer-content")
-    await userEvent.click(await within(dialog).findByRole("combobox", { name: "券商帳戶" }, T))
+    // 打開時焦點先移到股數（等它移好再按，免得選單一打開就因為焦點移走而關上）
+    await waitFor(() => expect(dialog.querySelector("#lot-qty-0")).toHaveFocus(), T)
+    await userEvent.click(within(dialog).getByRole("combobox", { name: "券商帳戶" }))
     const option = await screen.findByRole("option", { name: /國泰・複委託/ }, T)
     expect(option.closest('[data-slot="drawer-content"]')).toBe(dialog)
+    await userEvent.click(await screen.findByRole("option", { name: /永豐・一般/ }, T))
+    await userEvent.click(within(dialog).getByRole("button", { name: "買進日期，還沒選" }))
+    const year = await screen.findByRole("combobox", { name: "年份" }, T)
+    expect(year.closest('[data-slot="drawer-content"]')).toBe(dialog)
   })
 
   it("交易分段不再另外放一顆「記一筆」（工具列那一顆每個分段都在）", async () => {
@@ -150,7 +168,8 @@ describe("完整表單：存檔後再記一筆", () => {
     const form = within(dialog)
     await waitFor(() => expect(form.getByText("台積電")).toBeInTheDocument(), T)
     const before = (await api.listTransactions({ limit: 200 })).items.length
-    fireEvent.change(dialog.querySelector("#trade-date")!, { target: { value: "2024-03-05" } })
+    // 日期是月曆：年、月用下拉選單，再按那一天
+    await pickDate(dialog.querySelector<HTMLButtonElement>("#trade-date")!, 2024, 3, 5)
     await userEvent.type(dialog.querySelector("#trade-qty")!, "2")
     await userEvent.type(dialog.querySelector("#trade-price")!, "700")
     // 合計一欄在打字時重畫（aria-live）：jsdom 算無障礙名稱（getByRole）時偶爾碰到剛被拿掉的節點而丟錯，
@@ -164,7 +183,7 @@ describe("完整表單：存檔後再記一筆", () => {
     expect(useUi.getState().tradeForm.open).toBe(true)
     await waitFor(() => expect((dialog.querySelector("#trade-qty") as HTMLInputElement).value).toBe(""), T)
     expect((dialog.querySelector("#trade-price") as HTMLInputElement).value).toBe("")
-    expect((dialog.querySelector("#trade-date") as HTMLInputElement).value).toBe("2024-03-05")
+    expect(dialog.querySelector("#trade-date")).toHaveTextContent("2024/3/5（二）")
     expect(form.queryByText("台積電")).toBeNull()
     expect(again().checked).toBe(true)
     expect(again().closest("label")?.textContent).toContain("存檔後再記一筆")

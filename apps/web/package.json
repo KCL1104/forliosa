@@ -30,6 +30,7 @@
     "lucide-react": "^1.72.0",
     "marked": "^15.0.12",
     "react": "^19.3.1",
+    "react-day-picker": "9.14.0",
     "react-dom": "^19.3.1",
     "react-virtuoso": "^4.18.21",
     "recharts": "^3.10.1",

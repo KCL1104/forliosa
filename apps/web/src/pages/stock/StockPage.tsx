@@ -139,7 +139,8 @@ function StockPageInner() {
                   if (!d) return
                   e.preventDefault()
                   const next = tabs[(i + d + tabs.length) % tabs.length]!
-                  void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: next.value === "overview" ? undefined : next.value }, replace: true })
+                  // 和按的一樣不捲回頂端（分頁列黏在上面時，用方向鍵換分頁不會跳走；2026-11-14 review）
+                  void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: next.value === "overview" ? undefined : next.value }, replace: true, resetScroll: false })
                   requestAnimationFrame(() => document.getElementById(`stock-tab-${next.value}`)?.focus())
                 }}
                 onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol }, search: { tab: t.value === "overview" ? undefined : t.value }, replace: true, resetScroll: false })}

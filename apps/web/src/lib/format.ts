@@ -195,6 +195,11 @@ export function formatDate(d: string): string {
   return `${y}/${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")}`
 }
 
+/** 2026-11-11 → 2026/11/11（三）（日期欄位：買進日期常常是好幾年前） */
+export function formatDateLong(d: string): string {
+  return `${parts(d).y}/${formatDateShort(d)}`
+}
+
 /** 2026-11-11 → 11/11（三） */
 export function formatDateShort(d: string, withWeekday = true): string {
   const { y, m, day } = parts(d)

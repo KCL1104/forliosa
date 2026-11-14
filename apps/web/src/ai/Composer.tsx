@@ -1,10 +1,11 @@
 import { ArrowUpIcon, PlusIcon } from "lucide-react"
+import { toast } from "sonner"
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
 import { deepSearchCost, deepSearchHint } from "./deep-search"
 import { useAiUsage } from "./remote-hooks"
-import { useAi } from "./store"
+import { currentThreadStreaming, useAi } from "./store"
 
 export interface ComposerHandle {
   focus: () => void
@@ -51,6 +52,11 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   const send = () => {
     const t = text.trim()
     if (!t) return
+    // 上一則還在回答：問題留在框裡，不清掉（原本清掉之後才被拒絕，打的字就不見了；2026-11-14 review）
+    if (currentThreadStreaming()) {
+      toast("等這一則回答完再問下一題")
+      return
+    }
     onSubmit(t)
     setText("")
     onDraftChange?.("")

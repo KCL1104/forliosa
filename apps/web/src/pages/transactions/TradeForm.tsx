@@ -22,7 +22,8 @@ import { autoEditNotice, isUnchangedEdit } from "@/lib/ledger-display"
 import { cn } from "@/lib/utils"
 import { FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
-import { type EntryMode, QuickAdd } from "./QuickAdd"
+import { DateField } from "@/components/date-field"
+import { QuickAdd } from "./QuickAdd"
 import { usePrefs } from "@/stores/prefs"
 
 
@@ -35,23 +36,28 @@ const MAIN_TYPES: { value: MainType; label: string }[] = [
 ]
 const OTHER_TYPES: TransactionType[] = ["stock_dividend", "split", "capital_reduction", "deposit", "withdrawal", "fee", "tax", "interest"]
 const CASH_TYPES: TransactionType[] = ["deposit", "withdrawal", "fee", "tax", "interest"]
+/** 數量欄的標籤：分割、減資是比例；股利的股數選填（空白由後端照持股算） */
+const QTY_LABEL: Partial<Record<TransactionType, string>> = {
+  split: "每 1 股變成幾股",
+  capital_reduction: "每 1 股減少幾股",
+  cash_dividend: "除息日持有股數（選填）",
+  stock_dividend: "配發股數（選填）",
+}
 
 /**
  * 掛在 AppShell：依裝置用 Dialog（桌面）或 Vaul Drawer（手機）。
- * 預設是簡單的買進輸入（`QuickAdd`）；編輯一筆交易、或從那裡按「賣出、股利或其他」，才是完整表單。
- * 帳戶是「只記持股」時，同一個輸入框是持股的輸入（`HoldingsEditor`），標題跟著換成「目前持股」。
+ * 預設是簡單的買進輸入（`QuickAdd`：先選股票，再填股數、買進日期與價格）；
+ * 編輯一筆交易、或從那裡按「賣出、股利或其他」，才是完整表單。
  */
 export function TradeFormHost() {
   const { open, symbol, edit, full, sell, prefill, accountId } = useUi((s) => s.tradeForm)
   const openTradeForm = useUi((s) => s.openTradeForm)
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
-  const [mode, setMode] = useState<EntryMode>("transactions")
   const quick = !edit && !full
-  const holdingsMode = quick && mode === "holdings"
-  const title = edit ? "編輯交易" : holdingsMode ? "目前持股" : quick ? "記一筆" : "記一筆交易"
+  const title = edit ? "編輯交易" : quick ? "記一筆" : "記一筆交易"
   // 畫面上不寫副標；給螢幕報讀器一句
-  const description = holdingsMode ? "每一檔填股數與均價，存成這個帳戶目前的持股。" : quick ? "選一檔股票，填股數、買進日期與價格。" : "賣出、股利與其他類型的交易。"
+  const description = quick ? "先選一檔股票，再填股數、買進日期與價格。" : "賣出、股利與其他類型的交易。"
   const formKey = edit?.id ?? (quick ? `quick:${accountId ?? ""}` : sell ? "sell" : "new")
   const body = (layout: "split" | "stack") =>
     quick ? (
@@ -62,7 +68,6 @@ export function TradeFormHost() {
         initialAccountId={accountId}
         onDone={close}
         onFull={(code, filled) => openTradeForm({ symbol: code ?? symbol, full: true, sell: true, prefill: filled })}
-        onModeChange={setMode}
         sheet={layout === "stack"}
       />
     ) : (
@@ -155,11 +160,12 @@ function initialState(edit: Transaction | undefined, unitPref: "lot" | "share", 
     otherType: main === "other" ? edit.type : "deposit",
     symbol: null,
     date: edit.trade_date,
-    // 編輯時一律以「股」帶入，避免張／股換算誤差
-    qtyText: edit.quantity !== null ? String(edit.quantity) : "",
+    // 編輯時一律以「股」帶入，避免張／股換算誤差。0 當成沒填：照金額記的股利，API 回的股數與每股金額是 0（2026-11-14 review）
+    qtyText: edit.quantity ? String(edit.quantity) : "",
     qtyUnit: "share",
-    priceText: edit.price !== null ? String(edit.price) : "",
-    amountText: CASH_TYPES.includes(edit.type) ? String(edit.amount) : "",
+    priceText: edit.price ? String(edit.price) : "",
+    // 現金類型的金額；照金額記的現金股利（沒有每股金額）帶入金額
+    amountText: CASH_TYPES.includes(edit.type) || (edit.type === "cash_dividend" && !edit.price) ? String(edit.amount) : "",
     // 編輯舊交易：存著的手續費與稅照原樣帶入（不帶入的話存檔會變成 0）
     feeText: (edit.type === "buy" || edit.type === "sell") && edit.fee ? String(edit.fee) : "",
     taxText: edit.type === "sell" && edit.tax ? String(edit.tax) : "",
@@ -205,24 +211,67 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
   const fee = parseNum(f.feeText)
   const tax = parseNum(f.taxText)
 
+  // 各類型的數量欄（2026-11-14 review：和後端的意思對齊）：
+  // 買賣是股數（台股整數）；分割、減資是比例（可以有小數）；現金股利是除息日持有股數、股票股利是配發股數，兩者選填（空白由後端照持股算）
+  const ratio = type === "split" || type === "capital_reduction"
+  const optionalQty = type === "cash_dividend" || type === "stock_dividend"
+  const qtyBlank = f.qtyText.trim() === ""
+  const errors = {
+    symbol: !isCash && !f.symbol ? "請選擇股票或 ETF" : null,
+    qty: isCash
+      ? null
+      : type === "split"
+        ? !qty || qty <= 0
+          ? "請輸入比例，例如 2"
+          : null
+        : type === "capital_reduction"
+          ? qty === null || qty < 0 || qty >= 1
+            ? "請輸入 0 到 1 之間的比例，例如 0.3"
+            : null
+          : optionalQty && qtyBlank
+            ? null
+            : !shares || shares <= 0
+              ? "請輸入數量"
+              : !isUS && f.qtyUnit === "lot" && (type === "buy" || type === "sell") && /\.\d{4,}$/.test(f.qtyText.replace(/[,\s]/g, ""))
+                ? "張數最多寫到小數第三位（1 股）"
+                : !Number.isInteger(shares) && !isUS
+                  ? "台股股數必須是整數"
+                  : null,
+    price:
+      (type === "buy" || type === "sell") && !(price && price > 0)
+        ? "請輸入價格"
+        : type === "cash_dividend" && !(price && price > 0) && !(amount && amount > 0)
+          ? "請輸入每股股利或股利金額"
+          : type === "stock_dividend" && !(price && price > 0) && !(shares && shares > 0)
+            ? "請輸入每股股票股利或配發股數"
+            : type === "capital_reduction" && !qtyBlank && f.priceText.trim() && (price === null || price < 0)
+              ? "請填數字"
+              : null,
+    amount: isCash ? (!amount || amount <= 0 ? "請輸入金額" : null) : type === "cash_dividend" && f.amountText.trim() && !(amount && amount > 0) ? "請填數字" : null,
+    fee: f.feeText.trim() && (fee === null || fee < 0) ? "請填數字" : null,
+    tax: f.taxText.trim() && (tax === null || tax < 0) ? "請填數字" : null,
+    date: !f.date ? "請選日期" : f.date > appToday() ? "不能選未來的日期" : null,
+  }
+  const invalid = Object.values(errors).some(Boolean)
+
   const body: TransactionInput | null = useMemo(() => {
-    if (!account) return null
-    if (isCash) return amount && amount > 0 ? { account_id: account.id, symbol: null, type, trade_date: f.date, quantity: null, price: null, amount } : null
-    if (!f.symbol || !shares || shares <= 0) return null
-    if ((type === "buy" || type === "sell" || type === "cash_dividend") && (!price || price <= 0)) return null
+    if (!account || invalid) return null
+    if (isCash) return { account_id: account.id, symbol: null, type, trade_date: f.date, quantity: null, price: null, amount }
+    if (!f.symbol) return null
     return {
       account_id: account.id,
       symbol: f.symbol.symbol,
       type,
       trade_date: f.date,
-      quantity: shares,
-      price,
+      quantity: ratio ? qty : shares && shares > 0 ? shares : null,
+      price: type === "split" ? null : price && price > 0 ? price : null,
+      ...(type === "cash_dividend" && amount && amount > 0 ? { amount } : {}),
       is_day_trade: type === "sell" ? f.dayTrade : false,
       // 沒填就不送（後端當 0）；填了才送
       ...(type === "buy" || type === "sell" ? { ...(fee !== null ? { fee } : {}), ...(type === "sell" && tax !== null ? { tax } : {}) } : {}),
       note: f.note,
     }
-  }, [account, isCash, amount, type, f.date, f.symbol, shares, price, f.dayTrade, f.note, fee, tax])
+  }, [account, invalid, isCash, amount, type, f.date, f.symbol, ratio, qty, shares, price, f.dayTrade, f.note, fee, tax])
 
   const debounced = useDebounced(body)
   const preview = useQuery({
@@ -232,22 +281,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
     staleTime: 60_000,
   })
 
-  const errors = {
-    symbol: !isCash && !f.symbol ? "請選擇股票或 ETF" : null,
-    qty:
-      !isCash && (!shares || shares <= 0)
-        ? "請輸入數量"
-        : !isCash && !isUS && f.qtyUnit === "lot" && (type === "buy" || type === "sell") && /\.\d{4,}$/.test(f.qtyText.replace(/[,\s]/g, ""))
-          ? "張數最多寫到小數第三位（1 股）"
-          : !isCash && shares !== null && !Number.isInteger(shares) && !isUS
-            ? "台股股數必須是整數"
-            : null,
-    price: !isCash && ["buy", "sell", "cash_dividend"].includes(type) && (!price || price <= 0) ? "請輸入價格" : null,
-    amount: isCash && (!amount || amount <= 0) ? "請輸入金額" : null,
-    fee: f.feeText.trim() && (fee === null || fee < 0) ? "請填數字" : null,
-    tax: f.taxText.trim() && (tax === null || tax < 0) ? "請填數字" : null,
-  }
-  const hasError = Object.values(errors).some(Boolean) || !account
+  const hasError = invalid || !account
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault()
@@ -367,8 +401,8 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
           <Row label="帳戶">
             <AccountSelect accounts={accounts.data ?? []} value={accountId} onChange={(id) => set({ accountId: id })} />
           </Row>
-          <Row label="日期" htmlFor="trade-date">
-            <Input id="trade-date" type="date" value={f.date} max={appToday()} onChange={(e) => set({ date: e.target.value })} />
+          <Row label="日期" htmlFor="trade-date" error={submitted ? errors.date : null}>
+            <DateField id="trade-date" value={f.date} onChange={(date) => set({ date })} invalid={!!(submitted && errors.date)} />
           </Row>
         </div>
 
@@ -385,7 +419,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
         ) : (
           <div className="grid gap-4 sm:grid-cols-2">
             <Row
-              label={type === "split" ? "每 1 股變成幾股" : type === "capital_reduction" ? "每 1 股減少幾股" : type === "cash_dividend" || type === "stock_dividend" ? "除息日持有股數" : "數量"}
+              label={QTY_LABEL[type] ?? "數量"}
               htmlFor="trade-qty"
               error={submitted ? errors.qty : null}
               hint={unitHint && f.qtyUnit === "lot" ? `= ${formatNumberSafe(shares)} 股` : unitHint ?? undefined}
@@ -397,7 +431,21 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
                   enterKeyHint="next"
                   value={f.qtyText}
                   onChange={(e) => set({ qtyText: e.target.value })}
-                  placeholder={f.qtyUnit === "lot" && !isUS ? "例如 1" : isUS ? "例如 10" : "例如 1000"}
+                  placeholder={
+                    type === "cash_dividend"
+                      ? "空白就照除息日的持股"
+                      : type === "stock_dividend"
+                        ? "空白就照持股算"
+                        : type === "split"
+                          ? "例如 2"
+                          : type === "capital_reduction"
+                            ? "例如 0.3"
+                            : f.qtyUnit === "lot" && !isUS
+                              ? "例如 1"
+                              : isUS
+                                ? "例如 10"
+                                : "例如 1000"
+                  }
                   aria-invalid={submitted && !!errors.qty}
                 />
                 {!isUS && (type === "buy" || type === "sell") && (
@@ -411,13 +459,35 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
                 )}
               </div>
             </Row>
-            {type !== "split" && type !== "capital_reduction" && (
+            {type !== "split" && (
               <Row
-                label={type === "cash_dividend" ? "每股現金股利（元）" : type === "stock_dividend" ? "每股股票股利（元）" : `成交價（${isUS ? "美元" : "元"}）`}
+                label={
+                  type === "cash_dividend"
+                    ? `每股現金股利（${isUS ? "美元" : "元"}）`
+                    : type === "stock_dividend"
+                      ? "每股股票股利（元）"
+                      : type === "capital_reduction"
+                        ? "每股退還股款（元，選填）"
+                        : `成交價（${isUS ? "美元" : "元"}）`
+                }
                 htmlFor="trade-price"
                 error={submitted ? errors.price : null}
               >
-                <Input id="trade-price" inputMode="decimal" enterKeyHint="done" value={f.priceText} onChange={(e) => set({ priceText: e.target.value })} placeholder={isUS ? "例如 268.42" : "例如 1085"} aria-invalid={submitted && !!errors.price} />
+                <Input
+                  id="trade-price"
+                  inputMode="decimal"
+                  enterKeyHint="done"
+                  value={f.priceText}
+                  onChange={(e) => set({ priceText: e.target.value })}
+                  placeholder={type === "cash_dividend" || type === "stock_dividend" ? "例如 4.5" : type === "capital_reduction" ? "例如 3" : isUS ? "例如 268.42" : "例如 1085"}
+                  aria-invalid={submitted && !!errors.price}
+                />
+              </Row>
+            )}
+            {/* 照入帳金額記的現金股利（美股的配息常常只知道金額）：填了就用這個金額 */}
+            {type === "cash_dividend" && (
+              <Row label={`股利金額（選填，${account?.currency === "USD" ? "美元" : "元"}）`} htmlFor="trade-amount" error={submitted ? errors.amount : null}>
+                <Input id="trade-amount" inputMode="decimal" value={f.amountText} onChange={(e) => set({ amountText: e.target.value })} placeholder="空白就照股數 × 每股算" aria-invalid={submitted && !!errors.amount} className="num" />
               </Row>
             )}
           </div>

@@ -171,7 +171,15 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
       </p>
       {accountIds.length > 1 && (
         <Row label="帳戶">
-          <AccountSelect accounts={(accounts.data ?? []).filter((a) => accountIds.includes(a.id))} value={account ?? ""} onChange={setAccountId} />
+          <AccountSelect
+            accounts={(accounts.data ?? []).filter((a) => accountIds.includes(a.id))}
+            value={account ?? ""}
+            onChange={(id) => {
+              // 換帳戶時清掉打好的數量：兩個帳戶的單位可能不同（一個整張、一個有零股），「1」會從 1 張變成 1 股（2026-11-14 review）
+              if (id !== account) setTyped(null)
+              setAccountId(id)
+            }}
+          />
         </Row>
       )}
       <div className="flex flex-col gap-1.5">

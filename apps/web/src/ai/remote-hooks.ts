@@ -70,8 +70,8 @@ export function useRemoteThreadActions() {
       const { thread, drafts } = threadFromServer(detail)
       useAi.getState().loadThread(local ? { ...thread, id: local.id } : thread, drafts)
     },
-    async remove(remoteId: string) {
-      await aiApi.deleteThread(remoteId)
+    async remove(remoteId: string, opts?: { keepalive?: boolean }) {
+      await aiApi.deleteThread(remoteId, opts)
       useAi.getState().removeRemote(remoteId)
       void qc.invalidateQueries({ queryKey: aiKeys.threads })
     },

@@ -9,7 +9,6 @@ import { addDays, dividendRecords } from "./market"
  * 股利自動入帳（與後端 `apps/api/src/forliosa/services/auto_dividends.py` 相同的規則，docs/handoff.md §3.0）：
  * - 只有台股（上市、上櫃）：依除息預告在**除息日**記一筆 `source: "auto"` 的現金股利，股數＝該帳戶除息日前一天收盤的持股；
  *   金額 = 股數 × 每股（元以下捨去），二代健保照一般規則估算。金額為 0 或還沒到除息日的不記；美股仍要自己記。
- * - 只記持股的帳戶：只記快照日之後的除息日。
  * - 使用者自己記的（manual／import／ai_draft）同類股利優先：同帳戶同商品、日期在除息日起 120 天內，就不產生（已有的會移除）。
  * - 使用者改過的（`auto_edited`）不再碰；刪掉的記一筆「略過」，之後不再產生。
  * 示範資料沒有配股（`stock_dividend` 都是 0），mock 只處理現金股利。
@@ -80,8 +79,6 @@ export interface AutoDividendContext {
   accounts: Account[]
   /** 已略過的股利（`skipKey`） */
   skips: ReadonlySet<string>
-  /** 只記持股的帳戶的快照日 */
-  snapshotAsOf?: (accountId: string) => string | undefined
   today: string
 }
 
@@ -93,7 +90,6 @@ export function syncAutoDividends(txns: Transaction[], ctx: AutoDividendContext)
   const existing = new Map(txns.filter((t) => t.source === "auto").map((t) => [skipKey(t), t]))
   const out = [...keep]
   for (const account of ctx.accounts) {
-    const asOf = account.tracking_mode === "holdings" ? ctx.snapshotAsOf?.(account.id) : undefined
     const symbols = new Set(keep.filter((t) => t.account_id === account.id && t.symbol).map((t) => t.symbol!))
     for (const symbol of [...symbols].sort()) {
       const notices = exDividendNotices(symbol)
@@ -102,7 +98,7 @@ export function syncAutoDividends(txns: Transaction[], ctx: AutoDividendContext)
       const covered = coveredByUser(rows.filter((t) => USER_SOURCES.has(t.source)), notices)
       for (const e of notices) {
         const ex = e.ex_dividend_date!
-        if (ex > ctx.today || (asOf !== undefined && ex <= asOf) || covered.has(ex)) continue
+        if (ex > ctx.today || covered.has(ex)) continue
         const key = `${account.id}|${symbol}|${ex}|cash`
         if (ctx.skips.has(key)) continue
         const qty = heldBefore(rows, ex)

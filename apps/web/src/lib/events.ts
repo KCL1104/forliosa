@@ -18,6 +18,7 @@ export const EVENT_LABEL: Record<string, string> = {
   attention: "注意股",
   disposition: "處置",
   shareholder_meeting: "股東會",
+  dividend_resolution: "股利決議",
   sec_filing: "SEC 申報",
   trade: "我的交易",
 }

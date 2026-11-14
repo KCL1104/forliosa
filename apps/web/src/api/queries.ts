@@ -10,7 +10,6 @@ import type {
   ChipsRange,
   FinancialsPeriod,
   HistoryRange,
-  HoldingsSnapshotBody,
   PerformanceRange,
   Preferences,
   RecurringPlanInput,
@@ -26,7 +25,6 @@ export const qk = {
   summary: (accountId?: string) => ["portfolio", "summary", accountId ?? "all"] as const,
   holdings: (accountId?: string) => ["portfolio", "holdings", accountId ?? "all"] as const,
   /** 「只記持股」帳戶的快照：放在 portfolio 底下，存了快照、刪了帳戶就跟著重新讀 */
-  snapshot: (accountId: string) => ["portfolio", "snapshot", accountId] as const,
   performance: (range: PerformanceRange, accountId?: string, benchmark?: string) =>
     ["portfolio", "performance", range, accountId ?? "all", benchmark ?? "default"] as const,
   instrument: (symbol: string) => ["instrument", symbol] as const,
@@ -174,6 +172,8 @@ function useInvalidatePortfolio() {
   return () => {
     void qc.invalidateQueries({ queryKey: ["portfolio"] })
     void qc.invalidateQueries({ queryKey: ["transactions"] })
+    // 個股頁的事件（「你可領約 NT$…」）照持股算：記了交易也要重抓（2026-11-14 review）
+    void qc.invalidateQueries({ queryKey: ["events"] })
   }
 }
 
@@ -200,6 +200,11 @@ export function useUpdatePreferences() {
       qc.setQueryData(qk.me, user)
       // 開關「每日收盤簡報」：有沒有簡報跟著變
       if (patch.daily_briefing !== undefined) void qc.invalidateQueries({ queryKey: ["ai", "briefings"] })
+      // 換成本計算方式：已實現損益、均價、績效都重算（2026-11-14 review：原本要等重新整理才看得到）
+      if (patch.cost_method !== undefined) {
+        void qc.invalidateQueries({ queryKey: ["portfolio"] })
+        void qc.invalidateQueries({ queryKey: ["transactions"] })
+      }
     },
   })
 }
@@ -233,15 +238,6 @@ export function useDeleteAccount() {
       invalidate()
     },
   })
-}
-/** 「只記持股」帳戶目前的快照（`enabled: false` 時不讀，例如還沒選到這種帳戶） */
-export function useAccountSnapshot(accountId: string, enabled = true) {
-  return useQuery({ enabled: enabled && !!accountId, queryKey: qk.snapshot(accountId), queryFn: () => api.getAccountHoldings(accountId), staleTime: 0 })
-}
-/** 存成持股：快照、持股、總資產、紀錄跟著重新讀 */
-export function usePutHoldings() {
-  const invalidate = useInvalidatePortfolio()
-  return useMutation({ mutationFn: ({ id, body }: { id: string; body: HoldingsSnapshotBody }) => api.putHoldings(id, body), onSuccess: invalidate })
 }
 
 // ── 重新設計新增（2026-11-12） ─────────────────────────────

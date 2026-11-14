@@ -83,6 +83,8 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
  * 手機上工具列放在區間下面：讀數與圖緊接在價格與部位下面，第一屏就看得到圖（工具列是次要的）。
  * 沒有報價（商用模式的美股）時這個元件不出現（StockPage 不放），原因只在價格那一格說一次。
  */
+const NO_MARKS: never[] = []
+
 export function PriceChart({ inst, quote, position, markers }: { inst: InstrumentDetail; quote?: Quote; position: Position | null; markers?: PositionMarker[] }) {
   const [rangeChoice, setRange] = useState<ChartRange | null>(null)
   const range: ChartRange = rangeChoice ?? (position ? "6M" : "1M")
@@ -105,7 +107,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const candles = useMemo(() => history.data?.candles ?? [], [history.data])
   const momentList = useMemo(() => (isIntraday ? [] : importantMoments(candles)), [candles, isIntraday])
   const comparing = compare !== "none" && !isIntraday && !!compareHistory.data && compareHistory.data.symbol !== inst.symbol
-  const marks = markers ?? position?.markers ?? []
+  // 沒有標記時用同一個空陣列：每次畫都給新的 [] 的話，圖表的 effect 會以為資料變了，每次重畫都重建圖表（2026-11-14 review）
+  const marks = markers ?? position?.markers ?? NO_MARKS
   const showMine = (!!position || marks.length > 0) && !privacy
   const showAvg = !!position && !privacy
   const points = intraday.data?.points ?? []

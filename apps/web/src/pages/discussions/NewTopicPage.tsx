@@ -10,7 +10,7 @@ import { ApiError, TOPIC_BODY_MAX, TOPIC_SYMBOLS_MAX, TOPIC_TITLE_MAX, type Grou
 import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
-import { SkeletonLines } from "@/components/states"
+import { ErrorState, SkeletonLines } from "@/components/states"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -61,7 +61,21 @@ function NewTopic() {
         </nav>
         <h1 className="mt-1 text-2xl font-bold tracking-[-0.01em] lg:text-3xl">開新主題</h1>
         {/* 群組清單回來之前不知道有哪些地方可以發：先放骨架，不讓選項跳動 */}
-        {me.data && groups.data && origin ? <TopicForm user={me.data} groups={groups.data} origin={origin} /> : <SkeletonLines rows={6} className="mt-6" />}
+        {/* 讀不到群組時說出來、可以重試（原本一直是骨架；2026-11-14 review） */}
+        {groups.isError || me.isError ? (
+          <ErrorState
+            className="mt-6"
+            error={groups.error ?? me.error}
+            onRetry={() => {
+              void groups.refetch()
+              void me.refetch()
+            }}
+          />
+        ) : me.data && groups.data && origin ? (
+          <TopicForm user={me.data} groups={groups.data} origin={origin} />
+        ) : (
+          <SkeletonLines rows={6} className="mt-6" />
+        )}
       </div>
     </PageFrame>
   )

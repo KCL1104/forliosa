@@ -54,6 +54,9 @@ const draft: Draft = {
   id: "d1", status: "pending", createdAt: at,
   input: { kind: "trade", side: "buy", code: "0050", quantity: 2000, price: 52.4 },
 } as unknown as Draft
+/** 草稿要在某一段對話裡（對話刪掉之後的草稿不算待簽名；2026-11-14 review） */
+const draftThread = { id: "t1", title: "買 0050", updatedAt: at, messages: [{ id: "m1", role: "ai", text: "", at, draftId: "d1" }] } as unknown as Thread
+const withDraft = { drafts: { d1: draft }, threads: [draftThread] }
 const thread: Thread = { id: "thr_1", title: "買 0050 2 張 52.4", updatedAt: at, messages: [{ id: "m1", role: "user", text: "買 0050 2 張 52.4", at }] }
 
 describe("導覽設定（nav.ts）：一個地方", () => {
@@ -124,7 +127,7 @@ describe("手機底部列", () => {
     const ask = await screen.findByRole("button", { name: "問 AI" }, T)
     expect(ask).toHaveClass("ask-box")
     expect(ask).not.toHaveAttribute("data-pending")
-    act(() => useAi.setState({ drafts: { d1: draft } }))
+    act(() => useAi.setState(withDraft))
     const pending = await screen.findByRole("button", { name: "問 AI（待簽名 1 筆）" }, T)
     expect(pending).toHaveAttribute("data-pending")
     // 群組頁沒有別的地方寫筆數：格子裡寫
@@ -132,7 +135,7 @@ describe("手機底部列", () => {
   })
 
   it("帳本頁：分段下面已經有「待簽名 1 筆」那一條，格子裡不再寫一次筆數", async () => {
-    act(() => useAi.setState({ drafts: { d1: draft } }))
+    act(() => useAi.setState(withDraft))
     renderApp("/")
     const box = await screen.findByRole("button", { name: "問 AI（待簽名 1 筆）" }, T)
     expect(box).toHaveAttribute("data-pending")
@@ -245,7 +248,7 @@ describe("桌面 AI 面板：安靜的頁面預設是窄欄", () => {
   })
 
   it("有草稿在等簽名：安靜的頁面也開著（重新整理後直接落在設定頁也一樣）", async () => {
-    act(() => useAi.setState({ drafts: { d1: draft } }))
+    act(() => useAi.setState(withDraft))
     renderApp("/settings")
     await screen.findByRole("heading", { level: 1, name: "設定" }, T)
     await screen.findByRole("complementary", { name: "問 AI" }, T)

@@ -87,8 +87,18 @@ export function DividendsView() {
       >
         {upcoming.isLoading || summary.isLoading ? (
           <Skeleton className="h-24 w-full rounded-sm" />
+        ) : upcoming.isError || summary.isError ? (
+          // 讀不到不是「沒有事項」（2026-11-14 review）
+          <ErrorState
+            flush
+            error={upcoming.error ?? summary.error}
+            onRetry={() => {
+              void upcoming.refetch()
+              void summary.refetch()
+            }}
+          />
         ) : soon.length === 0 ? (
-          <EmptyState className="-mt-3 border-t-0" title="接下來 60 天沒有事項" description={`${you}的持股沒有除息、待入帳的股利，也沒有定期定額扣款。`} />
+          <EmptyState className="-mt-3 border-t-0" title="接下來沒有事項" description={`${you}的持股接下來 60 天沒有除息，30 天內沒有股利入帳，也沒有定期定額扣款。`} />
         ) : (
           <div className="-mt-3">
             <div aria-hidden className="form-head grid h-10 grid-cols-[88px_1fr_auto] items-end gap-3 pb-2 md:grid-cols-[120px_1fr_auto]">

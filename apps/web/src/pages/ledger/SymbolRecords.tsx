@@ -1,11 +1,9 @@
 import { Link } from "@tanstack/react-router"
 import { EllipsisIcon } from "lucide-react"
-import { useQueries } from "@tanstack/react-query"
 import { useState } from "react"
 import { toast } from "sonner"
-import { api } from "@/api"
-import { qk, useAccounts, useDeleteTransaction } from "@/api/queries"
-import type { Currency, InstrumentType, Market, Transaction } from "@/api/types"
+import { useAccounts, useDeleteTransaction } from "@/api/queries"
+import type { InstrumentType, Market, Transaction } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { Masked, Pct } from "@/components/finance"
@@ -79,11 +77,6 @@ export function SymbolRecords({
   const remove = useDeleteTransaction()
   // 刪除的確認框放在清單這一層（不放在列裡）：那一列刪掉時確認框不會跟著卸載、關到一半
   const [deleting, setDeleting] = useState<{ t: Transaction; date: string; label: string } | null>(null)
-  // 「只記持股」的帳戶：讀那個帳戶目前的快照，這一檔在裡面就列一列「持股」
-  const holdingAccounts = (accounts.data ?? []).filter((a) => a.tracking_mode === "holdings")
-  const snapshots = useQueries({
-    queries: holdingAccounts.map((a) => ({ queryKey: qk.snapshot(a.id), queryFn: () => api.getAccountHoldings(a.id), staleTime: 0 })),
-  })
   if (q.isError) {
     return (
       <p className={cn("py-3 text-base text-ink", className)}>
@@ -94,7 +87,7 @@ export function SymbolRecords({
       </p>
     )
   }
-  if (!q.data || snapshots.some((x) => x.isPending)) {
+  if (!q.data) {
     return (
       <div aria-busy="true" aria-label={`${name}的紀錄載入中`} className={cn("flex flex-col gap-2 py-3", className)}>
         <Skeleton className="h-4 w-2/3" />
@@ -105,18 +98,11 @@ export function SymbolRecords({
   const all = q.data.items
   const diluted = all.some((t) => DILUTING.has(t.type))
   const trades = all.filter((t) => t.type === "buy" || t.type === "sell")
-  const snaps: Entry[] = holdingAccounts.flatMap((a, i) => {
-    const snap = snapshots[i]?.data
-    const row = snap?.as_of ? snap.holdings.find((x) => x.symbol === symbol) : undefined
-    return row && snap?.as_of ? [{ kind: "snapshot" as const, date: snap.as_of, accountId: a.id, quantity: row.quantity, avgCost: row.avg_cost, currency: a.currency }] : []
-  })
-  // 新的在前；同一天的交易照建立的先後
-  const entries: Entry[] = [...trades.map((t) => ({ kind: "trade" as const, date: t.trade_date, t })), ...snaps].sort(
-    (x, y) => y.date.localeCompare(x.date) || (x.kind === "trade" && y.kind === "trade" ? y.t.created_at.localeCompare(x.t.created_at) : 0),
-  )
+  // 新的在前；同一天的照建立的先後（後建立的在前）
+  const entries = [...trades].sort((x, y) => y.trade_date.localeCompare(x.trade_date) || y.created_at.localeCompare(x.created_at))
   const shown = entries.slice(0, RECORDS_SHOWN)
   const more = entries.length - shown.length + (q.data.more ? 1 : 0)
-  const multiAccount = new Set(entries.map((e) => (e.kind === "trade" ? e.t.account_id : e.accountId))).size > 1
+  const multiAccount = new Set(entries.map((t) => t.account_id)).size > 1
   const accountName = (id: string) => accounts.data?.find((a) => a.id === id)?.name
   const showChange = !diluted && price !== null
   return (
@@ -138,13 +124,12 @@ export function SymbolRecords({
           <ul aria-label={`${name}的每一筆買賣`}>
             {shown.map((e) => (
               <RecordRow
-                key={e.kind === "trade" ? e.t.id : `snapshot-${e.accountId}`}
+                key={e.id}
                 entry={e}
-                code={code}
                 market={market}
                 type={type}
                 price={showChange ? price : null}
-                account={multiAccount ? accountName(e.kind === "trade" ? e.t.account_id : e.accountId) : undefined}
+                account={multiAccount ? accountName(e.account_id) : undefined}
                 readOnly={readOnly}
                 onDelete={(t, date, label) => setDeleting({ t, date, label })}
               />
@@ -204,14 +189,8 @@ export function SymbolRecords({
   )
 }
 
-/** 一列：一筆買進／賣出，或「只記持股」帳戶的一份持股（快照） */
-type Entry =
-  | { kind: "trade"; date: string; t: Transaction }
-  | { kind: "snapshot"; date: string; accountId: string; quantity: number; avgCost: number; currency: Currency }
-
 function RecordRow({
   entry: e,
-  code,
   market,
   type,
   price,
@@ -219,8 +198,7 @@ function RecordRow({
   readOnly,
   onDelete,
 }: {
-  entry: Entry
-  code: string
+  entry: Transaction
   market: Market
   type?: InstrumentType
   price: number | null
@@ -230,16 +208,16 @@ function RecordRow({
 }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
-  const quantity = e.kind === "trade" ? e.t.quantity : e.quantity
-  const unitPrice = e.kind === "trade" ? e.t.price : e.avgCost
+  const quantity = e.quantity
+  const unitPrice = e.price
   const qty = quantity !== null ? formatQuantity(quantity, unit, market) : "—"
   const px = unitPrice !== null ? `${market === "US" ? "US$" : ""}${formatPrice(unitPrice, market, type)}` : "—"
-  const amount = e.kind === "trade" ? formatMoney(e.t.amount, { currency: e.t.currency }) : formatMoney(e.quantity * e.avgCost, { currency: e.currency })
-  const label = e.kind === "snapshot" ? "持股" : e.t.type === "buy" ? "買進" : "賣出"
+  const amount = formatMoney(e.amount, { currency: e.currency })
+  const label = e.type === "buy" ? "買進" : "賣出"
   const strong = label !== "賣出"
-  // 買進後漲跌：今天的收盤價對那一筆的買進價（持股快照對均價）
+  // 買進後漲跌：今天的收盤價對那一筆的買進價
   const change = label !== "賣出" && price !== null && unitPrice ? price / unitPrice - 1 : null
-  const date = recordDate(e.date)
+  const date = recordDate(e.trade_date)
   const hide = (s: string) => (privacy ? <Masked /> : s)
   return (
     <li className={cn("ruled-row min-h-12 items-baseline py-2 text-base", GRID)}>
@@ -262,7 +240,7 @@ function RecordRow({
       <span className="num text-right font-medium @max-2xl:hidden">{hide(amount)}</span>
       <span className="text-right @max-2xl:hidden">{change !== null && <Pct value={change} />}</span>
       <span className="row-span-2 flex justify-end self-center @2xl:row-span-1">
-        {!readOnly && (e.kind === "trade" ? <RecordMenu t={e.t} date={date} label={label} onDelete={() => onDelete(e.t, date, label)} /> : <SnapshotMenu accountId={e.accountId} code={code} date={date} />)}
+        {!readOnly && <RecordMenu t={e} date={date} label={label} onDelete={() => onDelete(e, date, label)} />}
       </span>
       <span className="num col-start-1 row-start-2 text-sm text-ink-2 @2xl:hidden">{privacy ? <Masked /> : `${qty} × ${px}`}</span>
       <span className="col-start-2 row-start-2 text-right text-sm @2xl:hidden">{change !== null && <Pct value={change} />}</span>
@@ -272,21 +250,6 @@ function RecordRow({
 
 const menuButton =
   "press -mr-2 grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11"
-
-/** 「只記持股」帳戶的那一列：修改＝打開那個帳戶的持股輸入（刪掉一檔也在那裡做） */
-function SnapshotMenu({ accountId, code, date }: { accountId: string; code: string; date: string }) {
-  const openTradeForm = useUi((s) => s.openTradeForm)
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger render={<button type="button" aria-label={`${date} 持股的動作`} className={menuButton} />}>
-        <EllipsisIcon aria-hidden className="size-5" />
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-36">
-        <DropdownMenuItem onClick={() => openTradeForm({ symbol: code, accountId })}>修改</DropdownMenuItem>
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
 
 /** 一筆的動作：修改（完整表單，日期也能改）、刪除（確認框在清單那一層） */
 function RecordMenu({ t, date, label, onDelete }: { t: Transaction; date: string; label: string; onDelete: () => void }) {

@@ -1,7 +1,7 @@
 import { useQuery } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { toast } from "sonner"
-import { listTransactionsUpTo, useAccountSnapshot, useDeleteAccount, useRecurringPlans } from "@/api/queries"
+import { listTransactionsUpTo, useDeleteAccount, useRecurringPlans } from "@/api/queries"
 import { ApiError, type Account } from "@/api/types"
 import { FieldError } from "@/components/form-field"
 import { Button } from "@/components/ui/button"
@@ -26,14 +26,11 @@ export function DeleteBrokerAccountDialog({ account, onClose }: { account: Accou
     queryFn: () => listTransactionsUpTo({ account_id: account.id }, COUNT_MAX),
     staleTime: 0,
   })
-  const snapshot = useAccountSnapshot(account.id, account.tracking_mode === "holdings")
   const plans = useRecurringPlans()
   const name = account.name.trim()
   const ready = sameAccountName(typed, name)
 
   const parts: string[] = []
-  const held = snapshot.data?.holdings.length ?? 0
-  if (held) parts.push(`${formatNumber(held)} 檔持股`)
   if (records.data) {
     const n = records.data.items.length
     if (records.data.more) parts.push(`${formatNumber(COUNT_MAX)} 筆以上的紀錄`)
@@ -41,7 +38,7 @@ export function DeleteBrokerAccountDialog({ account, onClose }: { account: Accou
   }
   const planCount = plans.data?.filter((p) => p.account_id === account.id).length ?? 0
   if (planCount) parts.push(`${formatNumber(planCount)} 個定期定額`)
-  const counted = records.isSuccess && (account.tracking_mode !== "holdings" || snapshot.isSuccess)
+  const counted = records.isSuccess
   const what = !counted ? "帳戶裡的紀錄會一起刪除。" : parts.length ? `帳戶裡的 ${parts.join("、")}會一起刪除。` : "帳戶裡沒有任何紀錄。"
 
   return (

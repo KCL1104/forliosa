@@ -66,7 +66,10 @@ export function CommandSearch() {
     void navigate({ to: "/stock/$symbol", params: { symbol: i.symbol } })
   }
 
-  const results = search.data ?? []
+  // 清空搜尋框時不留上一次的結果（placeholderData 會帶著舊的）
+  const results = q.trim() ? (search.data ?? []) : []
+  // 還在查新的字時，畫面上是上一次的結果：不預先選取，Enter 不會跳到上一次的第一檔（2026-11-14 review）
+  const stale = search.isPlaceholderData
   const pages = (admin ? [...PAGES, ADMIN_PAGE] : PAGES).filter((p) => !q || p.label.includes(q.trim()))
   // 結果是非同步回來的：目前選取的項目不在清單裡時改選第一項，Enter 才一定有作用。
   // 和下面渲染的條件一致（查看模式沒有「記一筆交易」），否則會選到不存在的項目
@@ -75,7 +78,7 @@ export function CommandSearch() {
     ...(q.trim() ? [] : [...(readOnly ? [] : ["new-trade"]), "privacy"]),
     ...pages.map((p) => `page:${p.to}`),
   ]
-  const selected = values.includes(active) ? active : (values[0] ?? "")
+  const selected = stale ? "" : values.includes(active) ? active : (values[0] ?? "")
 
   return (
     <Dialog open={open} onOpenChange={(o) => (o ? setOpen(true) : close())}>

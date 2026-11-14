@@ -110,16 +110,6 @@ describe("重算", () => {
     await api.deleteTransaction(mine.id)
     expect(await autos(api, "6488.TWO")).toHaveLength(1)
   })
-  it("只記持股的帳戶：只記快照日之後的除息日", async () => {
-    const api = fresh()
-    const acc = await api.createAccount({
-      name: "元大－只記持股", broker: "元大證券", currency: "TWD", fee_rate: 0.001425, fee_discount: 0.6, min_fee: 20, min_fee_odd_lot: 1, tracking_mode: "holdings",
-    })
-    await api.putHoldings(acc.id, { as_of: "2026-09-20", holdings: [{ symbol: "2330.TW", quantity: 1000, avg_cost: 900 }, { symbol: "6488.TWO", quantity: 2000, avg_cost: 450 }] })
-    const rows = (await autos(api)).filter((t) => t.account_id === acc.id)
-    // 2330 9/16 除息在快照日之前（快照已經反映）：不記
-    expect(rows.map((t) => [t.symbol, t.trade_date, t.amount])).toEqual([["6488.TWO", "2026-09-22", 8000]])
-  })
 })
 
 describe("規則", () => {

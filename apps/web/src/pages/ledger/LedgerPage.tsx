@@ -6,7 +6,7 @@ import { api } from "@/api"
 import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
 import type { PortfolioSummary } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
-import { useAi, usePendingCount } from "@/ai/store"
+import { latestPendingDraftId, usePendingCount } from "@/ai/store"
 import { Masked } from "@/components/finance"
 import { DateCell } from "@/components/date-cell"
 import { DemoTag } from "@/components/section"
@@ -107,7 +107,7 @@ export function LedgerPage() {
           <button
             type="button"
             onClick={() => {
-              const id = Object.values(useAi.getState().drafts).find((d) => d.status === "pending")?.id ?? null
+              const id = latestPendingDraftId()
               ask.showDraft(id)
             }}
             className="press hidden h-8 items-center rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3 text-sm font-medium text-ai hover:border-ai lg:inline-flex"
@@ -137,7 +137,7 @@ export function LedgerPage() {
       {pending > 0 && !readOnly && (
         <button
           type="button"
-          onClick={() => ask.showDraft(Object.values(useAi.getState().drafts).find((d) => d.status === "pending")?.id ?? null)}
+          onClick={() => ask.showDraft(latestPendingDraftId())}
           className="press mt-3 flex h-11 w-full items-center justify-between rounded-sm border border-dashed border-ai-rule bg-ai-wash px-3.5 text-base font-medium text-ai lg:hidden"
         >
           待簽名 {pending} 筆
@@ -334,6 +334,8 @@ function WeekLine() {
   const privacy = usePrefs((s) => s.privacyMode)
   const items = upcoming.data ?? []
   if (upcoming.isLoading) return <Skeleton className="mt-5 h-[52px] w-full rounded-none lg:mt-9" />
+  // 讀不到就不放這一行（不寫成「接下來 7 天沒有…」騙人；2026-11-14 review）
+  if (upcoming.isError) return null
   const first = items[0]
   return (
     <PlainLink

@@ -32,6 +32,8 @@ export type AiAction = "trade" | "dividend" | "alert" | "checkup" | "form"
 
 // 草稿卡本身就是回答：前面不加句子（手續費與稅不自動算，2026-11-14）
 const DRAFT_SAYS = ""
+/** 正在送出簽名的草稿（擋住連點；模組層級，面板與全螢幕的 runner 共用） */
+const signing = new Set<string>()
 
 function describe(d: Pick<Draft, "input" | "instrument">): string {
   const { input, instrument } = d
@@ -368,7 +370,9 @@ export function useAiRunner(ctx: AiContext) {
 
   async function sign(id: string) {
     const d = useAi.getState().drafts[id]
-    if (!d || d.status !== "pending") return
+    // 簽名送出中再按一次（連點、網路慢）：不再送第二次，否則會記成兩筆（2026-11-14 review）
+    if (!d || d.status !== "pending" || signing.has(id)) return
+    signing.add(id)
     try {
       const txn = await api.createTransaction({ ...d.input, source: "ai_draft" })
       patchDraft(id, { status: "signed", txnId: txn.id, signedAt: new Date().toISOString() })
@@ -382,6 +386,8 @@ export function useAiRunner(ctx: AiContext) {
     } catch (err) {
       patchDraft(id, { status: "error", error: err instanceof Error ? err.message : "沒有入帳" })
       toast.error("沒有入帳，草稿還在。", { description: err instanceof Error ? err.message : undefined })
+    } finally {
+      signing.delete(id)
     }
   }
 

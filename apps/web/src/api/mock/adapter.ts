@@ -5,7 +5,6 @@ import {
   type ForliosaApi,
   type History,
   type HistoryRange,
-  type HoldingsSnapshotBody,
   type Preferences,
   type Quote,
   type Transaction,
@@ -129,9 +128,6 @@ const DEFAULT_PREFS: Preferences = {
   daily_briefing: false,
 }
 
-/** 只記持股帳戶的快照在 mock 裡記成快照日的買進（帳本照常算）；後端是另一張表，所以交易清單與動態不列這些列 */
-const SNAPSHOT_NOTE = "持股快照"
-
 export interface MockOptions {
   scenario?: MockScenario
   /** 資料政策（預設 commercial，和後端一樣）：commercial 沒有示範標記，存檔不足處回空＋notes */
@@ -215,14 +211,11 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     txns.sort((a, b) => a.trade_date.localeCompare(b.trade_date))
   }
   let nextId = 90000
-  // 股利自動入帳：使用者刪掉或改過的自動入帳股利（不再產生）、只記持股帳戶的快照日
+  // 股利自動入帳：使用者刪掉或改過的自動入帳股利（不再產生）
   const skips = new Set<string>()
-  const snapshotAsOf = new Map<string, string>()
-  /** 只記持股帳戶目前的快照（`GET /accounts/{id}/holdings` 讀回來的；帳本的計算用 txns 裡的「持股快照」列） */
-  const snapshots = new Map<string, HoldingsSnapshotBody>()
-  /** 交易、快照、追蹤模式變更之後重算自動入帳的股利（後端在同一個請求裡做） */
+  /** 交易變更之後重算自動入帳的股利（後端在同一個請求裡做） */
   const resync = () => {
-    txns = syncAutoDividends(txns, { accounts, skips, snapshotAsOf: (id) => snapshotAsOf.get(id), today: MOCK_TODAY })
+    txns = syncAutoDividends(txns, { accounts, skips, today: MOCK_TODAY })
   }
   let watch: string[] = scenario === "empty" ? [] : ["2382.TW", "2308.TW", "2881.TW"]
   const recurring = createRecurringStore(scenario === "empty" ? [] : seedPlans(ACCOUNTS[0]!.id), () => accounts)
@@ -237,7 +230,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   /** 只記 manual／import／ai_draft 的買賣（股利、自動入帳、快照不列） */
   const rawTrades = (list: Transaction[]): RawTrade[] =>
     list
-      .filter((t) => (t.type === "buy" || t.type === "sell") && t.symbol && ["manual", "import", "ai_draft"].includes(t.source) && t.note !== SNAPSHOT_NOTE)
+      .filter((t) => (t.type === "buy" || t.type === "sell") && t.symbol && ["manual", "import", "ai_draft"].includes(t.source))
       .map((t) => ({ txn_id: t.id, side: t.type as "buy" | "sell", symbol: t.symbol!, trade_date: t.trade_date, quantity: t.quantity ?? 0, price: t.price ?? 0, currency: t.currency, created_at: t.created_at }))
   const periodReturns = (list: Transaction[]) => {
     const summary = buildSummary(list, undefined, commercial)
@@ -455,7 +448,6 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           profile: { id: user.id, email: user.email, display_name: user.display_name, public_name: me().public_name ?? null, preferences: user.preferences, terms_version_accepted: user.terms_version_accepted ?? null },
           accounts,
           transactions: txns,
-          holding_snapshots: [],
           recurring_plans: [],
           watchlist: [],
           auto_dividend_skips: [],
@@ -511,7 +503,6 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         if (!found) throw new ApiError(404, "not_found", "找不到帳戶")
         const next = { ...found, ...patch }
         accounts = accounts.map((a) => (a.id === id ? next : a))
-        if (next.tracking_mode !== found.tracking_mode) resync()
         return next
       }),
     deleteAccount: (id) =>
@@ -520,58 +511,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         accounts = accounts.filter((a) => a.id !== id)
         txns = txns.filter((t) => t.account_id !== id)
         for (const k of [...skips]) if (k.startsWith(`${id}|`)) skips.delete(k)
-        snapshotAsOf.delete(id)
-        snapshots.delete(id)
         // 和後端相同（外鍵 ON DELETE CASCADE）：這個帳戶的定期定額一起刪除
         for (const p of recurring.list(id)) recurring.remove(p.id)
       }),
-    getAccountHoldings: (id) =>
-      wait(() => {
-        if (!ledger().accounts.some((a) => a.id === id)) throw new ApiError(404, "not_found", "找不到帳戶")
-        const snap = snapshots.get(id)
-        return { account_id: id, as_of: snap?.as_of ?? null, holdings: snap ? snap.holdings.map((h) => ({ ...h })) : [] }
-      }),
-    putHoldings: (id, body) =>
-      wait(() => {
-        const account = accounts.find((a) => a.id === id)
-        if (!account) throw new ApiError(404, "not_found", "找不到帳戶")
-        // 和後端相同的檢查：只收「只記持股」的帳戶、認得的代號、台股整數股、同一檔只出現一次
-        if (account.tracking_mode !== "holdings") throw new ApiError(409, "conflict", "這個帳戶是逐筆交易模式；請先把追蹤模式改為「只記持股」")
-        const rows = body.holdings.map((h) => {
-          const s = findInstrument(h.symbol)
-          if (!s) throw new ApiError(422, "unknown_symbol", `找不到商品：${h.symbol}`)
-          if (s.market !== "US" && !Number.isInteger(h.quantity)) throw new ApiError(422, "validation_error", `${s.symbol} 台股股數必須是整數`)
-          if (!(h.quantity > 0) || !(h.avg_cost >= 0)) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：holdings")
-          return { symbol: s.symbol, quantity: h.quantity, avg_cost: h.avg_cost, currency: s.currency }
-        })
-        const seen = new Set<string>()
-        for (const r of rows) {
-          if (seen.has(r.symbol)) throw new ApiError(422, "validation_error", `${r.symbol} 重複出現`)
-          seen.add(r.symbol)
-        }
-        // 快照日（含）之前的交易不算（後端是不計入；mock 直接拿掉），之後的照常
-        txns = txns.filter((t) => t.account_id !== id || (t.trade_date > body.as_of && t.note !== SNAPSHOT_NOTE))
-        for (const r of rows) {
-          txns.push({
-            id: `txn_${++nextId}`, account_id: id, symbol: r.symbol, type: "buy", trade_date: body.as_of, quantity: r.quantity,
-            price: r.avg_cost, amount: Math.round(r.quantity * r.avg_cost), fee: 0, tax: 0, health_insurance: 0,
-            currency: r.currency, is_day_trade: false, note: SNAPSHOT_NOTE, source: "manual",
-            created_at: new Date().toISOString(),
-          })
-        }
-        const holdings = rows.map(({ symbol, quantity, avg_cost }) => ({ symbol, quantity, avg_cost })).sort((a, b) => a.symbol.localeCompare(b.symbol))
-        if (holdings.length) {
-          snapshots.set(id, { as_of: body.as_of, holdings })
-          snapshotAsOf.set(id, body.as_of)
-        } else {
-          snapshots.delete(id)
-          snapshotAsOf.delete(id)
-        }
-        sortTxns()
-        resync()
-        return { account_id: id, as_of: holdings.length ? body.as_of : null, holdings: holdings.map((h) => ({ ...h })) }
-      }),
-
     searchInstruments: (q) => wait(() => searchCatalog(visible(), q).slice(0, 20).map(strip)),
     getInstrument: (symbol) =>
       wait(() => {
@@ -593,6 +535,14 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       }),
     getQuote: (symbol) => wait(() => quoteOf(spec(symbol))),
     // 批次報價：沒有報價的代號（商用模式的美股）直接略過
+    getDailyClose: (symbol, date) =>
+      wait(() => {
+        // 和後端一樣只看自己存檔的收盤：商用模式下存檔開始以前、美股（沒有報價來源）都是 null
+        const s = spec(symbol)
+        const archived = !commercial || (date >= ARCHIVE_START && s.market !== "US")
+        const close = archived ? (dailyCandles(s).find((c) => c.t === date)?.c ?? null) : null
+        return { symbol: s.symbol, date, close, currency: s.market === "US" ? "USD" : "TWD" }
+      }),
     getQuotes: (symbols) => wait(() => symbols.map((x) => spec(x)).filter((x) => !(commercial && x.market === "US")).map(quoteOf)),
     getHistory: (symbol, range) =>
       wait((): History => {
@@ -703,7 +653,6 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         // 與後端相同：每頁最多 200 筆
         if ((query.limit ?? 50) > 200) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：筆數")
         const filtered = ledger(query.account_id).txns
-          .filter((t) => t.note !== SNAPSHOT_NOTE || t.source !== "manual")
           .filter((t) => !query.account_id || t.account_id === query.account_id)
           .filter((t) => !query.symbol || t.symbol === query.symbol)
           .filter((t) => !query.type || t.type === query.type)
@@ -920,7 +869,7 @@ type MethodName = Exclude<keyof ForliosaApi, "kind">
 const VIEWER_OWN = new Set<MethodName>(["getLatestBriefing", "listBriefings", "markBriefingRead", "devLogin", "logout", "getMe", "exportMe", "deleteMe", "acceptTerms", "updateMe", "updatePreferences", "getAuthProviders", "discordLoginUrl", "googleLoginUrl", "listDelegations", "setPublicName"])
 /** 不讀使用者資料的端點：忽略標頭 */
 const IGNORES_VIEW_AS = new Set<MethodName>([
-  "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getValuation", "getRevenue", "getDividends", "getOverview",
+  "searchInstruments", "getInstrument", "getQuote", "getQuotes", "getHistory", "getDailyClose", "getValuation", "getRevenue", "getDividends", "getOverview",
   "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions", "getMarketStatus", "getMarketOverview",
   // 討論串的讀取一律以登入者本人回答（前端在查看模式擋下討論頁）
   "listTopics", "getTopic", "listReplies",
@@ -928,12 +877,12 @@ const IGNORES_VIEW_AS = new Set<MethodName>([
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([
   "listAccounts", "getPortfolioSummary", "getHoldings", "getPerformance", "getClosedPositions", "getUpcoming", "listTransactions",
-  "getPosition", "getPositionHistory", "getEvents", "getAccountHoldings",
+  "getPosition", "getPositionHistory", "getEvents",
 ])
 /** 非 GET 的方法（查看模式一律 read_only） */
 const WRITES = new Set<MethodName>([
   "deleteAiThreads",
-  "createAccount", "updateAccount", "deleteAccount", "putHoldings", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
+  "createAccount", "updateAccount", "deleteAccount", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
   "deleteTransaction", "previewTransaction", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
   "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",

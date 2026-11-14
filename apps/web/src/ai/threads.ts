@@ -75,10 +75,22 @@ export function useThreadList({ enabled = true }: { enabled?: boolean } = {}) {
       const id = t.remoteId
       let settled = false
       s.setThreadHidden(id, true)
-      const commit = () => {
+      // 通知還沒結束就關掉或藏起分頁：當下送出（keepalive），不然重新打開時刪掉的對話又回來（2026-11-14 review）
+      const leaving = () => {
+        if (document.visibilityState === "hidden") commit(true)
+      }
+      const onPageHide = () => commit(true)
+      window.addEventListener("pagehide", onPageHide)
+      document.addEventListener("visibilitychange", leaving)
+      const stopListening = () => {
+        window.removeEventListener("pagehide", onPageHide)
+        document.removeEventListener("visibilitychange", leaving)
+      }
+      const commit = (keepalive = false) => {
         if (settled) return
         settled = true
-        remoteActions.remove(id).then(
+        stopListening()
+        remoteActions.remove(id, { keepalive }).then(
           () => useAi.getState().setThreadHidden(id, false),
           (err: unknown) => {
             useAi.getState().setThreadHidden(id, false)
@@ -92,11 +104,12 @@ export function useThreadList({ enabled = true }: { enabled?: boolean } = {}) {
           label: "復原",
           onClick: () => {
             settled = true
+            stopListening()
             useAi.getState().setThreadHidden(id, false)
           },
         },
-        onAutoClose: commit,
-        onDismiss: commit,
+        onAutoClose: () => commit(),
+        onDismiss: () => commit(),
       })
       return
     }
