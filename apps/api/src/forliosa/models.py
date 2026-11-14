@@ -66,7 +66,6 @@ class BrokerAccount(Base):
     fee_discount: Mapped[Decimal] = mapped_column(Money)
     min_fee: Mapped[Decimal] = mapped_column(Money)
     min_fee_odd_lot: Mapped[Decimal] = mapped_column(Money)
-    tracking_mode: Mapped[str] = mapped_column(String(16), default="transactions")
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
     transactions: Mapped[list[Transaction]] = relationship(
@@ -121,22 +120,6 @@ class AutoDividendSkip(Base):
     ex_date: Mapped[date] = mapped_column(Date)
     kind: Mapped[str] = mapped_column(String(8))  # cash | stock
     reason: Mapped[str] = mapped_column(String(16), default="deleted")
-    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
-
-
-class HoldingSnapshot(Base):
-    """Holdings-only accounts: the latest snapshot replaces the previous one (see PUT /holdings)."""
-
-    __tablename__ = "holding_snapshots"
-    __table_args__ = (UniqueConstraint("account_id", "symbol", name="uq_holding_snapshot_account_symbol"),)
-
-    id: Mapped[str] = mapped_column(String(32), primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-    account_id: Mapped[str] = mapped_column(ForeignKey("broker_accounts.id", ondelete="CASCADE"), index=True)
-    as_of: Mapped[date] = mapped_column(Date)
-    symbol: Mapped[str] = mapped_column(String(20))
-    quantity: Mapped[Decimal] = mapped_column(Money)
-    avg_cost: Mapped[Decimal] = mapped_column(Money)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 

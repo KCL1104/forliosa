@@ -47,7 +47,6 @@ from forliosa.domain.fees import ZERO
 from forliosa.domain.performance import benchmark_returns, simulate
 from forliosa.marketdata.service import MarketData
 from forliosa.models import (
-    BrokerAccount,
     Delegation,
     DelegationAccount,
     Group,
@@ -56,7 +55,6 @@ from forliosa.models import (
     GroupMember,
     GroupReaction,
     GroupShareSetting,
-    HoldingSnapshot,
     Transaction,
     User,
 )
@@ -258,18 +256,17 @@ def member_period_returns_ex(db: Session, md: MarketData, user: User,
     if inp.first_date is None or inp.first_date > window.end:
         return none, False
     axis = _axis(window)
-    symbols = sorted({t.symbol for t in inp.effective_transactions() if t.symbol and t.type in (
-        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")}
-        | {s.symbol for s in inp.snapshots})
+    symbols = sorted({t.symbol for t in inp.transactions if t.symbol and t.type in (
+        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")})
     lookback = axis[0] - timedelta(days=14)
     closes = {s: _forward_filled(axis, {c.t: c.c for c in md.history(s, lookback, window.end).candles})
               for s in symbols}
     fx = FxBook.load(md, inp.first_date, window.end)
-    txns, openings = inp.ledger_txns(fx), inp.openings(fx)
+    txns = inp.ledger_txns(fx)
 
     def run(skip: set[str]):
         return simulate([t for t in txns if t.symbol not in skip], axis, lambda s, d: closes.get(s, {}).get(d),
-                        lambda c, d: fx.rate(c, d), inp.method, [o for o in openings if o.symbol not in skip]).points
+                        lambda c, d: fx.rate(c, d), inp.method).points
 
     points = run(set())
     excluded = False
@@ -510,26 +507,10 @@ def joined_item_id(group_id: str, user_id: str, joined_at: datetime) -> str:
     return "gfi_" + keyed_id("feed-item-id", f"joined|{group_id}|{user_id}|{joined_at.isoformat()}")
 
 
-def snapshot_cutoffs(db: Session, user_ids: Iterable[str]) -> dict[str, date]:
-    """Holdings-only accounts of these users → their snapshot date (like the ledger, transactions on or before it do
-    not count)."""
-    ids = sorted(set(user_ids))
-    if not ids:
-        return {}
-    return dict(db.execute(
-        select(HoldingSnapshot.account_id, func.max(HoldingSnapshot.as_of))
-        .join(BrokerAccount, BrokerAccount.id == HoldingSnapshot.account_id)
-        .where(HoldingSnapshot.user_id.in_(ids), BrokerAccount.tracking_mode == "holdings")
-        .group_by(HoldingSnapshot.account_id)).all())
-
-
-def feed_eligible(t: Transaction, cutoffs: dict[str, date]) -> bool:
+def feed_eligible(t: Transaction) -> bool:
     """A transaction that can appear in a group feed (and so be pushed): a manual / imported / signed-draft buy or sell
-    with a symbol, not covered by a holdings-only account's snapshot."""
-    if t.type not in FEED_SIDES or t.source not in FEED_SOURCES or not t.symbol:
-        return False
-    as_of = cutoffs.get(t.account_id)
-    return as_of is None or t.trade_date > as_of
+    with a symbol."""
+    return t.type in FEED_SIDES and t.source in FEED_SOURCES and bool(t.symbol)
 
 
 def _feed_window(today: date | None = None) -> tuple[date, date]:
@@ -579,10 +560,9 @@ def feed_items(db: Session, md: MarketData, group: Group, members: list[Member],
             Transaction.user_id.in_(sorted(sharing)), Transaction.type.in_(FEED_SIDES),
             Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
             Transaction.trade_date >= lo, Transaction.trade_date <= hi))
-        cutoffs = snapshot_cutoffs(db, sharing)
         merged: dict[tuple[str, date, str, str], dict[str, Any]] = {}
         for t in txns:
-            if not feed_eligible(t, cutoffs):
+            if not feed_eligible(t):
                 continue
             key = (t.user_id, t.trade_date, t.symbol or "", t.type)
             cell = merged.setdefault(key, {"count": 0, "qty": ZERO, "value": ZERO, "currency": t.currency,
@@ -748,8 +728,7 @@ def push_trade_candidates(db: Session, members: list[Member], now: datetime) -> 
         Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
         Transaction.trade_date >= lo, Transaction.trade_date <= hi,
         Transaction.created_at >= now - timedelta(days=PUSH_TRADE_DAYS + 1)).order_by(Transaction.created_at))
-    cutoffs = snapshot_cutoffs(db, pushing)
-    return [(pushing[t.user_id], t) for t in txns if feed_eligible(t, cutoffs)]
+    return [(pushing[t.user_id], t) for t in txns if feed_eligible(t)]
 
 
 def still_pushable(db: Session, member: Member, txn: Transaction, configured_at: datetime, now: datetime) -> bool:
@@ -758,7 +737,7 @@ def still_pushable(db: Session, member: Member, txn: Transaction, configured_at:
     start = push_start(member, configured_at)
     lo, hi = push_trade_dates(now)
     return (start is not None and txn.created_at > start and lo <= txn.trade_date <= hi
-            and feed_eligible(txn, snapshot_cutoffs(db, [member.user_id])))
+            and feed_eligible(txn))
 
 
 def push_trade_view(md: MarketData, member: Member, txns: list[Transaction]) -> dict[str, Any]:
@@ -805,13 +784,12 @@ def digest_week_facts(db: Session, md: MarketData, members: list[Member], week_s
                 symbols[h["symbol"]] = {"name": h["name"], "industry": h["_industry"]}
     sharing_trades = [m.user_id for m in members if m.shares("trades")]
     if sharing_trades:
-        cutoffs = snapshot_cutoffs(db, sharing_trades)
         counts: dict[str, int] = dict.fromkeys(sharing_trades, 0)
         for t in db.scalars(select(Transaction).where(
                 Transaction.user_id.in_(sharing_trades), Transaction.type.in_(FEED_SIDES),
                 Transaction.source.in_(FEED_SOURCES), Transaction.trade_date >= week_start,
                 Transaction.trade_date <= week_end)):
-            if feed_eligible(t, cutoffs):
+            if feed_eligible(t):
                 counts[t.user_id] += 1
         trades = [{"user_id": uid, "count": counts[uid]} for uid in sharing_trades]
     bench, sources, bench_demo, notes = _benchmark_period_returns(md, window)

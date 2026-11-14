@@ -97,7 +97,7 @@ def ledger_view(db: Session, user: User, md: MarketData, account_id: str | None 
     if account_id and not inp.accounts:
         raise not_found("找不到帳戶")
     fx = FxBook.load(md, inp.first_date or today_taipei())
-    return LedgerView(inp, replay(inp.ledger_txns(fx), inp.method, inp.openings(fx)).ledger, fx)
+    return LedgerView(inp, replay(inp.ledger_txns(fx), inp.method).ledger, fx)
 
 
 def compute_state(db: Session, user: User, md: MarketData, account_id: str | None = None) -> PortfolioState:
@@ -366,9 +366,8 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     if inception is None or inception > today:
         return empty
 
-    symbols = sorted({t.symbol for t in inp.effective_transactions() if t.symbol and t.type in (
-        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")}
-        | {s.symbol for s in inp.snapshots})
+    symbols = sorted({t.symbol for t in inp.transactions if t.symbol and t.type in (
+        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")})
     hist_start = inception - timedelta(days=14)
     # one batched quote call warms the cache used by history()
     md.quotes([*symbols] if bench_is_index else [*symbols, bench_symbol])
@@ -395,7 +394,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     def fx_fn(currency: str, d: date) -> Decimal:
         return fx.rate(currency, d)
 
-    sim = simulate(inp.ledger_txns(fx), axis, price_fn, fx_fn, inp.method, inp.openings(fx))
+    sim = simulate(inp.ledger_txns(fx), axis, price_fn, fx_fn, inp.method)
     if fx.used_usd and fx.is_demo:
         is_demo = True
     points = sim.points
@@ -581,7 +580,7 @@ def upcoming(state: PortfolioState, md: MarketData, days: int,
     today = today_taipei()
     horizon = today + timedelta(days=days)
     recorded: dict[tuple[str, date], Decimal] = defaultdict(Decimal)
-    for t in state.inp.effective_transactions():
+    for t in state.inp.transactions:
         if t.type == "cash_dividend" and t.symbol:
             recorded[(t.symbol, t.trade_date)] += t.amount or ZERO
     out = []

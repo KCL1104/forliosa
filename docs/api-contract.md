@@ -60,9 +60,12 @@
 | GET | `/accounts` | `Account[]` |
 | POST | `/accounts` | 建立 |
 | PATCH | `/accounts/{id}` | 更新 |
-| DELETE | `/accounts/{id}` | 刪除（連同交易、自動入帳的股利、持股快照與這個帳戶的定期定額；不能復原）。前端要輸入帳戶名稱才送出 |
-| GET | `/accounts/{id}/holdings` | 「只記持股」模式目前的快照：`{"account_id", "as_of", "holdings": [{"symbol", "quantity", "avg_cost"}]}`；還沒存過時 `as_of` 是 `null`、`holdings` 是 `[]` |
-| PUT | `/accounts/{id}/holdings` | 「只記持股」模式：以快照覆蓋，body `{"as_of": "2026-11-11", "holdings": [{"symbol": "2330.TW", "quantity": 1500, "avg_cost": 612.5}]}`；回應同 GET。`holdings: []` 是清空。逐筆交易的帳戶 409 |
+| DELETE | `/accounts/{id}` | 刪除（連同交易、自動入帳的股利與這個帳戶的定期定額；不能復原）。前端要輸入帳戶名稱才送出 |
+
+**「只記持股」已取消（2026-11-14，產品負責人決定：像 Google 財經，每一筆買進都有日期）**：帳戶沒有 `tracking_mode` 了，每個帳戶都是逐筆記交易；
+`GET`／`PUT /accounts/{id}/holdings` 已移除（404）。舊的快照由 migration `0018` 轉成快照日的買進（見下方「取消「只記持股」、查某一天的收盤價」）。
+`POST`／`PATCH /accounts` 的 body 仍容許舊分頁送來的 `tracking_mode`：`"transactions"` 忽略；`"holdings"` 回 422，
+`{"error": {"code": "tracking_mode_removed", "message": "「只記持股」已經取消，每一筆買進都要記日期。"}}`。
 
 ```json
 // Account
@@ -75,8 +78,7 @@
   "fee_discount": 0.28,             // 2.8 折
   "min_fee": 20,
   "min_fee_odd_lot": 1,
-  "tracking_mode": "transactions",  // "transactions" | "holdings"
-  "created_at": "2026-11-11T10:00:00+08:00"
+  "created_at": "2026-11-11T10:00:00+08:00"   // 2026-11-14 起沒有 tracking_mode
 }
 ```
 
@@ -88,6 +90,7 @@
 | GET | `/instruments/{symbol}` | `InstrumentDetail` |
 | GET | `/instruments/{symbol}/quote` | `Quote` |
 | GET | `/quotes?symbols=2330.TW,0050.TW` | `Quote[]`（批次） |
+| GET | `/instruments/{symbol}/close?date=2026-11-12` | 那一天的官方收盤（記一筆買進時價格欄下的「那天收盤 1,085」）：`{"symbol": "2330.TW", "date": "2026-11-12", "close": 1085.0, "currency": "TWD"}`。只讀自建存檔（證交所／櫃買的收盤），**不讀 Yahoo Finance 的歷史回補**、不即時向上游查；那天沒有收盤（週末、休市、存檔開始以前、美股）時 `close` 是 `null`（仍是 200）。`date` 格式錯或晚於今天（台北）回 422；查不到商品 404（2026-11-14） |
 | GET | `/instruments/{symbol}/history?range=1M` | `range`：`5D`、`1M`、`6M`、`YTD`、`1Y`、`5Y`、`MAX`；回傳 `History`。正式環境開了歷史回補（`PRICE_HISTORY_SOURCE=yahoo`）時，存檔開始以前的日線來自 Yahoo Finance：`sources` 會列出，`notes` 有一句說明哪一天以前是它的資料（`apps/api/CONTRACT_NOTES.md`「歷史日線回補」） |
 | GET | `/instruments/{symbol}/valuation?range=5Y` | `Valuation`（本益比、股價淨值比河流圖用） |
 | GET | `/instruments/{symbol}/revenue` | `MonthlyRevenue[]`（由舊到新） |
@@ -218,7 +221,7 @@
 - **對象**：台股上市、上櫃的現金股利與配股，依證交所／櫃買的除權除息預告。金額為 0 或尚未公告的不記（公告後補上）；除息（權）日還沒到的不記
   （當天起才記）；示範資料從不入帳。美股沒有可商用的股利資料，仍由使用者手動記。
 - **日期與股數**：`trade_date` 是除息（權）日，所以除息日的股價下跌與股利同一天抵銷；`quantity` 是除息（權）日**前一天收盤**時該帳戶的持股
-  （含之前配發的股數）：除息日當天才買的不算，當天賣出的仍算。「只記持股」帳戶只記快照日之後的除息日。
+  （含之前配發的股數）：除息日當天才買的不算，當天賣出的仍算。
 - **金額**：與手動記一筆股利的計算相同。現金股利：`price` = 每股現金股利，`amount` = 股數 × 每股（台幣元以下捨去），`health_insurance` 自動估算
   （資本公積發放的部分排除）。配股：`quantity` = 配發股數，`price` = 每股配股（元），`amount` = 不足一股以面額折付的現金。`note` 寫出算法，發放日
   已公告時附上，例如「10,000 股 × 每股 2 元，07/10 發放」（股數是除息前一日的持股）。
@@ -231,7 +234,7 @@
   目前沒有端點可以列出或恢復；要記回來就自己新增一筆。
 - **不能自己建立自動交易**：`POST /transactions`、`PATCH /transactions/{id}` 的 `source` 只接受 `manual`、`import`、`ai_draft`；帶 `auto` 或
   `auto_edited` 回 422 `validation_error`。
-- **重算**：交易新增、修改、刪除，`PUT /accounts/{id}/holdings`，改 `tracking_mode`，以及每天存檔之後，自動股利會依最新的持股與預告新增、更新或移除
+- **重算**：交易新增、修改、刪除，以及每天存檔之後，自動股利會依最新的持股與預告新增、更新或移除
   （例如回頭補一筆除息前的買進，股數就跟著變；預告金額更正，金額就跟著變）。重算若會讓原本一致的帳目變得不一致（例如把一筆買進改到除權日之後，
   自動配股跟著變少，但原本配到的股數之後已經賣掉），整個請求回 422 `ledger_inconsistent`，`message` 以「自動入帳的股利依這筆變更重算後帳目不一致：」開頭，
   **什麼都不會寫入**。檢查的是重算後的帳目：除權前補記賣出、刪掉唯一的買進這類讓舊的自動配股失效的變更，會連同自動列一起更新，不會被擋。
@@ -843,11 +846,11 @@
 
 **以唯讀身分查看**：前端在請求加上標頭 `X-Forliosa-View-As: <delegation_id>`（CORS `allow_headers` 包含它）。以路由白名單實作，預設拒絕：
 
-1. **使用者資料端點**只允許這些 `GET`：`/accounts`、`/accounts/{id}/holdings`、`/portfolio/summary`、`/portfolio/holdings`、`/portfolio/performance`、
+1. **使用者資料端點**只允許這些 `GET`：`/accounts`、`/portfolio/summary`、`/portfolio/holdings`、`/portfolio/performance`、
    `/portfolio/closed`、`/portfolio/upcoming`、`/transactions`、`/transactions/{id}`、`/instruments/{symbol}/position`、
    `/instruments/{symbol}/position/history`、`/instruments/{symbol}/events`。回應以授權者身分計算，**而且授權者只有授權範圍內的帳戶**
    （`allocation.by_account`、`upcoming` 的定期定額、`events` 的 `mine`／`amount_estimate` 都只算範圍內）；`account_id` 參數超出範圍回 404。
-2. **不讀使用者資料的端點**忽略這個標頭：商品搜尋、`/instruments/{symbol}`、報價、K 線、估值、月營收、股利、總覽、盤中、籌碼、財務、
+2. **不讀使用者資料的端點**忽略這個標頭：商品搜尋、`/instruments/{symbol}`、報價、K 線、某一天的收盤（`/instruments/{symbol}/close`）、估值、月營收、股利、總覽、盤中、籌碼、財務、
    新聞、為什麼漲跌、`/quotes`、`/stream/quotes`、`/derivatives/*`、`/meta/*`、`/auth/providers`、`GET /me`。
 3. 其他請求：寫入（非 `GET`）回 403 `read_only`；其他使用者資料端點（AI、自選、群組、授權、設定、匯出）回 403 `view_as_not_allowed`。
 4. 授權不存在、已撤銷、或被授權者不是我：一律 403 `delegation_revoked`（不區分），前端退出查看模式。
@@ -941,7 +944,7 @@
   排行最早的那一天（群組在週末或收盤前建立時，排行顯示的是前一個收盤日）也能留言、按表情。
 - **期間定義**：以收盤價、該成員全部帳戶合併、新台幣計。`day` = 最新收盤相對前一收盤；`month` = 上月最後收盤到最新收盤的 TWR；
   `year` = 去年最後收盤到最新收盤的 TWR。所有成員與基準共用同一個 `start_date`（期間起點與存檔起點較晚者）；期間中才開始持有的成員從第一天
-  有持股起算。只記持股的帳戶以快照為期初。**整段期間都沒有收盤價的持股（commercial 下的美股）不算進期間報酬**（和帳本的「今日」同一條
+  有持股起算。**整段期間都沒有收盤價的持股（commercial 下的美股）不算進期間報酬**（和帳本的「今日」同一條
   規則，2026-11-14）；`LeaderboardEntry.excludes_unpriced` 只在**自己那一列**是 `true`（別人的一律 `false`：別人有沒有美股不是群組該知道的）。
   其他缺價（期間中有幾天沒有收盤價）時該成員所有期間為 `null`，排在最後、沒有 rank，不說明原因。報酬率四捨五入到 4 位後相同就並列名次（1、1、3）。
 - **總報酬率** `total_return_pct` 每筆都附上、不排名、沒有基準（各人起點不同）；同 `PortfolioSummary.total_return_pct`（含股利）。
@@ -1017,7 +1020,7 @@
 
 **交易動態**
 
-- 來源：開了 `trades` 的成員，`source` 為 `manual`、`import`、`ai_draft` 的 `buy`／`sell`（股利、自動入帳、只記持股的快照都不列），
+- 來源：開了 `trades` 的成員，`source` 為 `manual`、`import`、`ai_draft` 的 `buy`／`sell`（股利、自動入帳都不列），
   `trade_date`（台北）在最近 90 天內。打開 `trades` 時最近 90 天的也會出現（開關旁明講）。排序：`trade_date`、`created_at`、`id` 由新到舊。
 - 成員關掉 `trades` 或離開群組，他的動態立刻消失（留言保留但看不到；重新打開時恢復）；交易被刪除時，那則動態和底下的留言一起刪除。
 - 新成員加入時產生一則 `member_joined`（每個人都看得到加入的事實，不含任何分享內容）。
@@ -1341,3 +1344,30 @@
   ]
 }
 ```
+
+## 取消「只記持股」、查某一天的收盤價（2026-11-14）
+
+產品負責人決定（像 Google 財經：每一筆買進都有日期）：拿掉帳戶的「只記持股」追蹤模式；記一筆買進時選了日期，價格欄下顯示「那天收盤」，點一下填入。
+實作細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-14 取消「只記持股」、查某一天的收盤價」。
+
+**帳戶**
+
+- `Account` 沒有 `tracking_mode`；每個帳戶都是逐筆記交易。`GET`／`PUT /accounts/{id}/holdings` 移除（404）。
+- `POST /accounts`、`PATCH /accounts/{id}` 的 body 仍容許 `tracking_mode`（舊分頁會送）：`"transactions"` 忽略；`"holdings"` 回 422
+  `tracking_mode_removed`，`message`「「只記持股」已經取消，每一筆買進都要記日期。」；其他值照常是 422 `validation_error`。
+- 舊資料（migration `0018`，只做一次、不能還原）：有快照的「只記持股」帳戶，快照日（含）以前的交易刪除（帳本本來就不算它們，快照已經反映），
+  每一檔快照變成一筆**快照日的買進**：股數＝快照股數、`price`＝快照均價、手續費與稅 0、`source: "manual"`、`note`「由「只記持股」轉入」。
+  持股、成本、已實現損益與自動入帳的股利都和轉換前一樣。
+- **會變的**：績效以前從快照日的收盤市值開始算，現在那筆買進以均價成本投入，所以**快照日那天的報酬包含從均價到當天收盤的差距**；使用者把那筆
+  買進改成真正的日期與價格（持倉展開後每一筆都能改日期）就會正確。這幾筆買進是一般交易：在群組的交易動態裡會以快照日的買進出現。
+
+**某一天的收盤價**
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/instruments/{symbol}/close?date=YYYY-MM-DD` | `{"symbol", "date", "close": number \| null, "currency"}` |
+
+- 只讀自建存檔的官方收盤（證交所／櫃買開放資料，依資料政策），**不讀 Yahoo Finance 的歷史回補**（那批只給走勢圖、技術指標、走勢小圖）、
+  不即時向上游查。那一天沒有收盤列時 `close` 是 `null`、仍回 200：週末、休市日、存檔開始以前、還沒存檔的今天、美股。
+- `symbol` 可以只給代號（`2330`），回應是完整代號；查不到商品 404 `not_found`。`date` 缺少、格式錯或晚於今天（台北）回 422。
+- 要登入；查看別人資產（`X-Forliosa-View-As`）時忽略標頭（不讀使用者資料）。

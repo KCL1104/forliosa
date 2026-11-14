@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import bisect
 from collections.abc import Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -12,10 +12,10 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from forliosa.domain.fees import FeeSchedule, InstrumentRef
-from forliosa.domain.ledger import CostMethod, LedgerTxn, OpeningPosition, TxnType, replay
+from forliosa.domain.ledger import CostMethod, LedgerTxn, TxnType, replay
 from forliosa.marketdata.base import InstrumentInfo, market_of_symbol
 from forliosa.marketdata.service import MarketData
-from forliosa.models import BrokerAccount, HoldingSnapshot, Transaction, User
+from forliosa.models import BrokerAccount, Transaction, User
 from forliosa.services.scope import account_filter
 from forliosa.timeutil import today_taipei
 
@@ -104,38 +104,15 @@ class FxBook:
 class LedgerInput:
     accounts: list[BrokerAccount]
     transactions: list[Transaction]
-    snapshots: list[HoldingSnapshot]
     method: CostMethod
-    snapshot_as_of: dict[str, date] = field(default_factory=dict)
 
     @property
     def first_date(self) -> date | None:
-        dates = [t.trade_date for t in self.effective_transactions()] + [s.as_of for s in self.snapshots]
-        return min(dates) if dates else None
-
-    def effective_transactions(self) -> list[Transaction]:
-        """Holdings-mode accounts: only transactions after the snapshot date count."""
-        out = []
-        for t in self.transactions:
-            as_of = self.snapshot_as_of.get(t.account_id)
-            if as_of is not None and t.trade_date <= as_of:
-                continue
-            out.append(t)
-        return out
+        return min((t.trade_date for t in self.transactions), default=None)
 
     def ledger_txns(self, fx: FxBook | None = None) -> list[LedgerTxn]:
-        txns = sorted(self.effective_transactions(), key=lambda t: (t.created_at, t.id))
+        txns = sorted(self.transactions, key=lambda t: (t.created_at, t.id))
         return [to_ledger_txn(t, fx, seq) for seq, t in enumerate(txns)]
-
-    def openings(self, fx: FxBook | None = None) -> list[OpeningPosition]:
-        cur = {a.id: a for a in self.accounts}
-        out = []
-        for s in self.snapshots:
-            currency = "USD" if market_of_symbol(s.symbol) == "US" else "TWD"
-            rate = fx.rate(currency, s.as_of) if fx else Decimal(1)
-            if s.account_id in cur:
-                out.append(OpeningPosition(s.account_id, s.symbol, s.as_of, s.quantity, s.avg_cost, currency, rate))
-        return out
 
 
 def to_ledger_txn(t: Transaction, fx: FxBook | None, seq: int = 0) -> LedgerTxn:
@@ -163,27 +140,15 @@ def load_ledger_input(db: Session, user: User, account_id: str | None = None,
     accounts = [a for a in accounts if allowed is None or a.id in allowed]
     ids = [a.id for a in accounts]
     if not ids:
-        return LedgerInput([], [], [], CostMethod(preferences_of(user)["cost_method"]))
+        return LedgerInput([], [], CostMethod(preferences_of(user)["cost_method"]))
     txns = list(db.scalars(
         select(Transaction).where(Transaction.user_id == user.id, Transaction.account_id.in_(ids))
     ))
-    holdings_ids = [a.id for a in accounts if a.tracking_mode == "holdings"]
-    snaps: list[HoldingSnapshot] = []
-    if holdings_ids:
-        snaps = list(db.scalars(
-            select(HoldingSnapshot).where(HoldingSnapshot.user_id == user.id,
-                                          HoldingSnapshot.account_id.in_(holdings_ids))
-        ))
-    as_of: dict[str, date] = {}
-    for s in snaps:
-        as_of[s.account_id] = max(as_of.get(s.account_id, s.as_of), s.as_of)
-    return LedgerInput(accounts, txns, snaps, CostMethod(preferences_of(user)["cost_method"]), as_of)
+    return LedgerInput(accounts, txns, CostMethod(preferences_of(user)["cost_method"]))
 
 
 def shares_held(inp: LedgerInput, account_id: str, symbol: str, before: date,
                 exclude_txn_id: str | None = None) -> Decimal:
     """Shares of ``symbol`` held in ``account_id`` at the close before ``before``."""
     txns = [t for t in inp.ledger_txns() if t.trade_date < before and t.id != exclude_txn_id]
-    openings = [o for o in inp.openings() if o.as_of < before]
-    led = replay(txns, inp.method, openings).ledger
-    return led.held(account_id, symbol)
+    return replay(txns, inp.method).ledger.held(account_id, symbol)

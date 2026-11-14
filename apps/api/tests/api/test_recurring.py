@@ -14,7 +14,7 @@ from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.base import BaseProvider, Candle, QuoteData
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
-from forliosa.models import HoldingSnapshot, MarketHoliday, RecurringPlan
+from forliosa.models import MarketHoliday, RecurringPlan
 from forliosa.services import recurring as rec
 from forliosa.timeutil import has_official_calendar, is_tw_trading_day, next_tw_trading_day, set_official_holidays
 from tests.archive.fakes import NOW, FakeFetcher
@@ -130,25 +130,18 @@ def test_recurring_crud_validation_and_isolation(client, other_client):
     assert client.get(f"{API}/recurring/{pid}").status_code == 404
 
 
-def test_deleting_an_account_takes_its_plans_and_snapshot_with_it(client, engine):
-    """The settings dialog says what goes with a deleted account: its records, its 定期定額 and its holdings."""
+def test_deleting_an_account_takes_its_plans_with_it(client, engine):
+    """The settings dialog says what goes with a deleted account: its records and its 定期定額."""
     acc = make_account(client)
     keep = make_account(client)
     for a in (acc, keep):
         assert client.post(f"{API}/recurring", json={"account_id": a, "symbol": "0050", "amount": 5000,
                                                      "day_of_month": 6, "start_date": "2026-01-01"}).status_code == 201
-    held = client.post(f"{API}/accounts", json={"name": "元大", "currency": "TWD", "tracking_mode": "holdings"}).json()
-    snap = {"as_of": "2026-10-01", "holdings": [{"symbol": "2330", "quantity": 1000, "avg_cost": 600}]}
-    assert client.put(f"{API}/accounts/{held['id']}/holdings", json=snap).status_code == 200
-    assert client.get(f"{API}/accounts/{held['id']}/holdings").json()["holdings"] == [
-        {"symbol": "2330.TW", "quantity": 1000, "avg_cost": 600}]
 
     assert client.delete(f"{API}/accounts/{acc}").status_code == 204
-    assert client.delete(f"{API}/accounts/{held['id']}").status_code == 204
     assert [p["account_id"] for p in client.get(f"{API}/recurring").json()] == [keep]
     with Session(engine) as db:
         assert db.scalar(select(func.count()).select_from(RecurringPlan).where(RecurringPlan.account_id == acc)) == 0
-        assert db.scalar(select(func.count()).select_from(HoldingSnapshot)) == 0
 
 
 # -- upcoming --------------------------------------------------------------------------------------------

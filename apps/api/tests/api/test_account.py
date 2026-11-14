@@ -74,9 +74,9 @@ def test_export_is_a_json_attachment_with_only_my_own_data(client, other_client,
     assert r.headers["cache-control"] == "no-store"
     data = r.json()
     assert data["format_version"] == 1 and data["exported_at"].endswith("Z")
-    assert set(data) == {"exported_at", "format_version", "profile", "accounts", "transactions", "holding_snapshots",
-                         "recurring_plans", "watchlist", "auto_dividend_skips", "ai", "groups", "group_comments",
-                         "group_reactions", "delegations", "discussions"}
+    assert set(data) == {"exported_at", "format_version", "profile", "accounts", "transactions", "recurring_plans",
+                         "watchlist", "auto_dividend_skips", "ai", "groups", "group_comments", "group_reactions",
+                         "delegations", "discussions"}
     assert data["profile"]["email"] == "demo@forliosa.local" and data["profile"]["public_name"] == "阿土伯"
     assert data["profile"]["display_name"] == "示範使用者" and "preferences" in data["profile"]
     assert [a["id"] for a in data["accounts"]] == [acct["id"]]

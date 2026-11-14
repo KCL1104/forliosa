@@ -6,7 +6,7 @@ Rules (product owner, 2026-11-12; ``docs/handoff.md`` §3.0, ``docs/api-contract
   ``MarketData.dividends`` (never demo data). Notices whose amount is zero or not announced are not booked; US
   dividends have no commercially usable source yet and stay manual.
 * Shares = the account's holding at the close before the ex-date (``shares_held(before=ex_date)``, automatic
-  stock dividends of earlier ex-dates included). Holdings-only accounts: only ex-dates after the snapshot date.
+  stock dividends of earlier ex-dates included).
 * Booked on the ex-date, so the price drop and the dividend offset on the same day (no fake loss between the
   ex-date and the payment date); a known payment date goes into the note. Future ex-dates are not booked yet.
 * Amounts through ``services.transactions.compute``: cash = shares × per share truncated to whole NT$, NHI premium
@@ -19,7 +19,7 @@ Rules (product owner, 2026-11-12; ``docs/handoff.md`` §3.0, ``docs/api-contract
 
 ``sync_auto_dividends`` recomputes what should exist and adds / updates / deletes ``source="auto"`` rows (a
 back-filled buy before an ex-date, a deleted sell, a corrected notice). Triggers: transaction create / update /
-delete, holdings snapshot updates, a tracking-mode change, and the worker after each daily archive run.
+delete, and the worker after each daily archive run.
 """
 
 from __future__ import annotations
@@ -230,11 +230,9 @@ class _Holding:
 
     def held_before(self, d: date) -> Decimal:
         txns = [t for t in (*self.base, *self.extra) if t.trade_date < d]
-        openings = [o for o in self.inp.openings()
-                    if o.account_id == self.account_id and o.symbol == self.symbol and o.as_of < d]
-        if not txns and not openings:
+        if not txns:
             return ZERO
-        return replay(txns, self.inp.method, openings).ledger.held(self.account_id, self.symbol)
+        return replay(txns, self.inp.method).ledger.held(self.account_id, self.symbol)
 
 
 @dataclass
@@ -268,7 +266,6 @@ def _plan(db: Session, user: User, md: MarketData, account: BrokerAccount, symbo
     own = [t for t in inp.transactions if t.account_id == account.id and t.symbol == symbol
            and t.source in USER_SOURCES and t.type in TYPE_KIND]
     covered = covered_by_user(own, events)
-    as_of = inp.snapshot_as_of.get(account.id)
     holding = _Holding(inp, account.id, symbol,
                        [t for t in all_txns if t.account_id == account.id and t.symbol == symbol
                         and t.id not in auto_ids])
@@ -276,7 +273,7 @@ def _plan(db: Session, user: User, md: MarketData, account: BrokerAccount, symbo
     for n, e in enumerate(events):
         ex = e.ex_dividend_date
         assert ex is not None
-        if ex > today or (as_of is not None and ex <= as_of):
+        if ex > today:
             continue
         if _per_share(e, "cash") <= 0 and _per_share(e, "stock") <= 0:
             continue
@@ -337,7 +334,6 @@ class _Scope:
 
     def symbols(self, account_id: str, only: set[str] | None) -> list[str]:
         syms = {t.symbol for t in self.inp.transactions if t.account_id == account_id and is_tw(t.symbol)}
-        syms |= {s.symbol for s in self.inp.snapshots if s.account_id == account_id and is_tw(s.symbol)}
         return sorted(s for s in syms if s and (only is None or s in only))
 
 
@@ -469,7 +465,7 @@ def ledger_error(db: Session, user: User, account: BrokerAccount) -> str | None:
     """The strict replay's error for ``account``, or None when its books are consistent."""
     inp = load_ledger_input(db, user, accounts=[account])
     try:
-        replay(inp.ledger_txns(), inp.method, inp.openings(), strict=True)
+        replay(inp.ledger_txns(), inp.method, strict=True)
     except LedgerError as exc:
         return str(exc)
     return None

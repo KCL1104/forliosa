@@ -71,7 +71,6 @@ def test_view_as_reads_only_the_delegated_accounts(client, other_client, family)
 
     accounts = other_client.get(f"{API}/accounts", headers=h).json()
     assert [a["id"] for a in accounts] == [a1]
-    assert other_client.get(f"{API}/accounts/{a2}/holdings", headers=h).status_code == 404
     summary = other_client.get(f"{API}/portfolio/summary", headers=h).json()
     assert [x["key"] for x in summary["allocation"]["by_account"]] == [a1]
     holdings = other_client.get(f"{API}/portfolio/holdings", headers=h).json()
@@ -135,7 +134,6 @@ def test_view_as_is_default_deny(client, other_client, family):
         ("patch", "/me", {"display_name": "x"}),
         ("post", "/auth/logout", None),
         ("post", "/watchlist", {"symbol": "2330.TW"}),
-        ("put", f"/accounts/{family['a1']['id']}/holdings", {"as_of": "2026-01-05", "holdings": []}),
     ]
     for method, path, body in writes:
         r = getattr(other_client, method)(f"{API}{path}", headers=h, **({"json": body} if body else {}))

@@ -231,28 +231,38 @@ def test_unknown_symbol_and_validation_errors(client):
     assert r.status_code == 422 and r.json()["error"]["code"] == "validation_error"
 
 
-# -- holdings-only accounts -----------------------------------------------------------------------
-def test_holdings_snapshot_mode(client):
-    txn_acc = make_account(client)
-    r = client.put(f"{API}/accounts/{txn_acc['id']}/holdings",
-                   json={"as_of": "2026-01-05",
-                         "holdings": [{"symbol": "2330.TW", "quantity": 1500, "avg_cost": 612.5}]})
-    assert r.status_code == 409
-    acc = make_account(client, name="只記持股", tracking_mode="holdings")
-    as_of = trading_day(30).isoformat()
-    r = client.put(f"{API}/accounts/{acc['id']}/holdings",
-                   json={"as_of": as_of, "holdings": [{"symbol": "2330", "quantity": 1500, "avg_cost": 612.5},
-                                                      {"symbol": "0050.TW", "quantity": 2000, "avg_cost": 40}]})
+# -- 「只記持股」 removed (product owner, 2026-11-14: every buy has a date) ------------------------------
+HOLDINGS_MODE_REMOVED = "「只記持股」已經取消，每一筆買進都要記日期。"
+
+
+def test_accounts_have_no_tracking_mode(client):
+    acc = make_account(client)
+    assert "tracking_mode" not in acc
+    assert all("tracking_mode" not in a for a in client.get(f"{API}/accounts").json())
+    # the snapshot endpoints are gone
+    assert client.get(f"{API}/accounts/{acc['id']}/holdings").status_code == 404
+    r = client.put(f"{API}/accounts/{acc['id']}/holdings", json={"as_of": "2026-01-05", "holdings": []})
+    assert r.status_code == 404
+
+
+def test_stray_tracking_mode_from_an_old_tab(client):
+    # an old browser tab still sends tracking_mode="transactions": ignored
+    acc = make_account(client, tracking_mode="transactions")
+    assert "tracking_mode" not in acc
+    r = client.patch(f"{API}/accounts/{acc['id']}", json={"tracking_mode": "transactions", "name": "改名"})
     assert r.status_code == 200, r.text
-    assert {h["symbol"] for h in r.json()["holdings"]} == {"2330.TW", "0050.TW"}
-    hold = {h["symbol"]: h for h in client.get(f"{API}/portfolio/holdings").json()}
-    assert hold["2330.TW"]["quantity"] == 1500
-    assert hold["2330.TW"]["avg_cost"] == 612.5
-    assert hold["2330.TW"]["cost_basis"] == 918750  # 1,500 × 612.5
-    perf = client.get(f"{API}/portfolio/performance", params={"range": "ALL"}).json()
-    assert perf["start_date"] == as_of
-    # tracking starts on as_of: the first day's return is 0 (inflow at market value)
-    assert perf["series"][0]["twr_index"] == pytest.approx(1.0)
+    assert r.json()["name"] == "改名" and "tracking_mode" not in r.json()
+    # "holdings" is refused with a message that says why
+    r = client.post(f"{API}/accounts", json={"name": "只記持股", "tracking_mode": "holdings"})
+    assert r.status_code == 422
+    assert r.json()["error"]["code"] == "tracking_mode_removed"
+    assert r.json()["error"]["message"] == HOLDINGS_MODE_REMOVED
+    r = client.patch(f"{API}/accounts/{acc['id']}", json={"tracking_mode": "holdings"})
+    assert r.status_code == 422 and r.json()["error"]["message"] == HOLDINGS_MODE_REMOVED
+    assert [a["name"] for a in client.get(f"{API}/accounts").json()] == ["改名"]  # nothing was created
+    # anything else is still a validation error, and other unknown fields are still refused
+    assert client.post(f"{API}/accounts", json={"name": "x", "tracking_mode": "foo"}).status_code == 422
+    assert client.post(f"{API}/accounts", json={"name": "x", "mode": "transactions"}).status_code == 422
 
 
 # -- portfolio -----------------------------------------------------------------------------------

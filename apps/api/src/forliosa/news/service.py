@@ -2,7 +2,7 @@
 
 Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``python -m forliosa.news refresh``)
 -----------------------------------------------------------------------------------------------------------
-* **Which symbols**: tracked ones — in any ledger, holdings snapshot or watchlist (``archive.tracked_symbols``),
+* **Which symbols**: tracked ones — in any ledger or watchlist (``archive.tracked_symbols``),
   or viewed in the last ``NEWS_VIEW_DAYS`` days (``news_tracked_views``: symbol + time only, no user ids) — the
   stalest first, at most ``NEWS_MAX_SYMBOLS_PER_RUN``. Shared by everyone.
 * **Sources** (:mod:`forliosa.news.sources`): GDELT, then our private SearXNG (:mod:`forliosa.news.searxng`, on by

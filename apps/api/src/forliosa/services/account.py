@@ -52,7 +52,6 @@ from forliosa.models import (
     GroupMember,
     GroupReaction,
     GroupShareSetting,
-    HoldingSnapshot,
     NotificationOutbox,
     RecurringPlan,
     TelegramLinkCode,
@@ -169,7 +168,6 @@ def export_user(db: Session, user: User) -> dict[str, Any]:
         },
         "accounts": _rows(db, BrokerAccount, uid, BrokerAccount.created_at),
         "transactions": _rows(db, Transaction, uid, Transaction.trade_date, Transaction.created_at, Transaction.id),
-        "holding_snapshots": _rows(db, HoldingSnapshot, uid, HoldingSnapshot.as_of),
         "recurring_plans": _rows(db, RecurringPlan, uid, RecurringPlan.created_at),
         "watchlist": _rows(db, WatchlistItem, uid, WatchlistItem.created_at),
         "auto_dividend_skips": _rows(db, AutoDividendSkip, uid, AutoDividendSkip.created_at),
@@ -304,8 +302,8 @@ def delete_user(db: Session, user: User) -> None:
         mine = select(Delegation.id).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid))
         db.execute(delete(DelegationAccount).where(DelegationAccount.delegation_id.in_(mine)))
         db.execute(delete(Delegation).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid)))
-        for model in (AiBriefing, AiDraft, AiMessage, AiThread, AutoDividendSkip, HoldingSnapshot, RecurringPlan,
-                      Transaction, WatchlistItem, BrokerAccount, UserSession, UserIdentity):
+        for model in (AiBriefing, AiDraft, AiMessage, AiThread, AutoDividendSkip, RecurringPlan, Transaction,
+                      WatchlistItem, BrokerAccount, UserSession, UserIdentity):
             db.execute(delete(model).where(model.user_id == uid))
         # What is left pointing at the user is kept without an author (ON DELETE SET NULL): group comments, discussion
         # topics and replies, AI usage counts, who created an invite / configured a channel / suspended someone.

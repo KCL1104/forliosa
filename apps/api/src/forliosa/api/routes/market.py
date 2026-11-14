@@ -1,17 +1,20 @@
-"""Instruments, quotes, history, valuation, revenue, dividends and the SSE quote stream."""
+"""Instruments, quotes, history, one day's close, valuation, revenue, dividends and the SSE quote stream."""
 
 from __future__ import annotations
 
 import asyncio
 import json
+from datetime import date
 
 from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
+from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from forliosa.api.deps import current_user
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.api.schemas import (
+    DayClose,
     DividendRecord,
     History,
     Instrument,
@@ -21,6 +24,7 @@ from forliosa.api.schemas import (
     Valuation,
 )
 from forliosa.config import get_settings
+from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import instruments as svc
@@ -77,6 +81,13 @@ def batch_quotes(symbols: str = Query(max_length=2000), _user: User = Depends(cu
 @router.get("/instruments/{symbol}/history", response_model=History)
 def instrument_history(symbol: str, range: str = Query("1M"), _user: User = Depends(current_user)):
     return svc.history(get_market_data(), symbol, range.upper())
+
+
+@router.get("/instruments/{symbol}/close", response_model=DayClose,
+            summary="某一天的收盤價（只讀自建存檔的官方收盤；那天沒有收盤時 close 為 null）")
+def instrument_close(symbol: str, day: date = Query(alias="date", description="YYYY-MM-DD，不能晚於今天（台北）"),
+                     _user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return svc.close_on(db, get_market_data(), symbol, day)
 
 
 @router.get("/instruments/{symbol}/valuation", response_model=Valuation)

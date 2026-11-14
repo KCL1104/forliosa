@@ -2,13 +2,13 @@
 
 A fully sold symbol leaves the holdings but its rounds remain as history (the owner's decision of
 2026-11-12). Rounds are read off the ledger's trail, so every rule of the ledger (average cost or FIFO,
-day trades, stock dividends, splits, capital reductions, holdings snapshots) applies unchanged.
+day trades, stock dividends, splits, capital reductions) applies unchanged.
 
 Per round, in TWD at each transaction's FX rate:
 
-* ``bought_qty`` — shares bought (and opening snapshot shares); ``sold_qty`` — shares sold. They can
+* ``bought_qty`` — shares bought; ``sold_qty`` — shares sold. They can
   differ when stock dividends, splits or capital reductions changed the share count in between.
-* ``buy_cost`` — buy price × shares + buy commission (snapshots: shares × average cost).
+* ``buy_cost`` — buy price × shares + buy commission.
 * ``realized`` — the ledger's realized P&L of the round's sells and capital returns (net of commission and
   transaction tax, minus the cost of the shares sold), plus standalone fee / tax rows on the symbol.
 * ``dividends`` — net cash dividends (after the NHI premium / withholding) and cash in lieu of fractional
@@ -71,8 +71,7 @@ def holding_rounds(ledger: Ledger) -> list[Round]:
         key = (entry.account_id, entry.symbol)
         rnd = current.get(key)
         if rnd is None and entry.after > 0:
-            currency = entry.txn.currency if entry.txn else (entry.opening.currency if entry.opening else "TWD")
-            rnd = Round(entry.account_id, entry.symbol, currency, entry.trade_date)
+            rnd = Round(entry.account_id, entry.symbol, entry.txn.currency, entry.trade_date)
             current[key] = rnd
             latest[key] = rnd
             out.append(rnd)
@@ -86,14 +85,7 @@ def holding_rounds(ledger: Ledger) -> list[Round]:
 
 
 def _book(rnd: Round, entry: TrailEntry, realized: dict[str, Decimal], income: dict[str, Decimal]) -> None:
-    if entry.opening is not None:
-        op = entry.opening
-        rnd.bought_qty += op.quantity
-        rnd.buy_cost += op.quantity * op.avg_cost * op.fx_rate
-        return
     t = entry.txn
-    if t is None:
-        return
     fx = t.fx_rate
     rnd.txn_ids.append(t.id)
     match t.type:

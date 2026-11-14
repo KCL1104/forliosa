@@ -238,18 +238,3 @@ def test_latest_activity_ignores_hidden_items(client, other_client, setup):
     assert after > before
     set_share(other_client, gid)  # trades off: the activity time does not reveal the hidden trade
     assert client.get(f"{API}/groups").json()[0]["latest_activity_at"] == before
-
-
-def test_holdings_only_accounts_follow_the_ledger(client, other_client, setup):
-    gid = setup["gid"]
-    acc = account(other_client, "只記持股", tracking_mode="holdings")
-    with session_factory()() as db:  # recorded before the account switched to holdings-only
-        for d in (trading_day(20), trading_day(2)):
-            db.add(Transaction(id=new_id("txn"), user_id=setup["uid"], account_id=acc["id"], symbol="2454.TW",
-                               type="buy", trade_date=d, quantity=1000, price=100, amount=100000, source="manual"))
-        db.commit()
-    r = other_client.put(f"{API}/accounts/{acc['id']}/holdings", json={
-        "as_of": trading_day(10).isoformat(), "holdings": [{"symbol": "2454.TW", "quantity": 1000, "avg_cost": 90}]})
-    assert r.status_code == 200, r.text
-    trades = [i for i in items(client, gid)["items"] if i["type"] == "trade"]
-    assert [i["trade_date"] for i in trades] == [trading_day(2).isoformat()]  # the snapshot itself is never listed

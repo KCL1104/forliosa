@@ -6,7 +6,7 @@ consults it, so the owner's ledger is computed **as if the owner had only the de
 
 * :func:`forliosa.services.ledger_io.load_ledger_input` (summary, holdings, allocation incl. ``by_account``,
   performance, closed rounds, upcoming incl. recurring plans, position, position history, events ``mine``)
-* ``GET /accounts``, ``GET /accounts/{id}/holdings`` and ``/transactions`` (through :func:`account_ids`)
+* ``GET /accounts`` and ``/transactions`` (through :func:`account_ids`)
 
 The scope only narrows the owner's own data (``owner_id``); it never widens anything. The same session also refuses
 every write while the scope is active (:func:`guard_writes`: ORM flushes and bulk DML), so no write — an

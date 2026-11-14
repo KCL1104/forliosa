@@ -1,4 +1,4 @@
-"""Hand-calculated ledger replay checks: cost methods, corporate actions, day trades, snapshots."""
+"""Hand-calculated ledger replay checks: cost methods, corporate actions, day trades."""
 
 from datetime import date
 from decimal import Decimal as D
@@ -9,7 +9,6 @@ from forliosa.domain.ledger import (
     CostMethod,
     LedgerError,
     LedgerTxn,
-    OpeningPosition,
     TxnType,
     replay,
 )
@@ -158,10 +157,11 @@ def test_day_trade_does_not_disturb_inventory_average():
         assert pos.quantity == 1000 and pos.avg_cost == D(100)
 
 
-def test_holdings_snapshot_is_opening_position():
-    opening = OpeningPosition(ACC, "2330.TW", date(2026, 1, 5), D(1500), D("612.5"))
-    txns = [tx("sell", date(2026, 3, 2), qty=500, price=1000, fee=142, tax=1500)]
-    led = replay(txns, openings=[opening]).ledger
+def test_buy_at_an_average_cost_carries_it():
+    # 「只記持股」 snapshots became a buy at the snapshot's average cost on its date (migration 0018)
+    txns = [tx("buy", date(2026, 1, 5), qty=1500, price="612.5"),
+            tx("sell", date(2026, 3, 2), qty=500, price=1000, fee=142, tax=1500)]
+    led = replay(txns).ledger
     # cost of 500 = 612.5 × 500 = 306,250 ; proceeds 500,000 - 142 - 1,500 = 498,358 ; pnl 192,108
     assert led.realized[0].pnl == D(192108)
     assert led.positions[(ACC, "2330.TW")].quantity == 1000

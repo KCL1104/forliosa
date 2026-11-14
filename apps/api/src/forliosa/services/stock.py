@@ -578,7 +578,7 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
     qty = _held_quantity(state, sym)
     fx = next((r.fx for r in state.rows if r.symbol == sym), Decimal(1))
     div_txns: dict[date, Decimal] = defaultdict(Decimal)
-    for t in state.inp.effective_transactions():
+    for t in state.inp.transactions:
         if t.symbol == sym and t.type == "cash_dividend":
             div_txns[t.trade_date] += (t.amount or Decimal(0)) * fx
     out: list[dict[str, Any]] = []
@@ -823,7 +823,7 @@ def _markers(state, sym: str, with_account: bool = False) -> list[dict[str, Any]
     """Buy / sell / dividend markers of ``sym`` in trade-date order (all accounts in the state)."""
     led = state.ledger
     out = []
-    for t in sorted(state.inp.effective_transactions(), key=lambda t: (t.trade_date, t.created_at)):
+    for t in sorted(state.inp.transactions, key=lambda t: (t.trade_date, t.created_at)):
         if t.symbol != sym or t.type not in _MARKER_KINDS:
             continue
         eff = led.effective.get(t.id)

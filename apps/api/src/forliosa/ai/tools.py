@@ -166,8 +166,7 @@ def _accounts(ctx: ToolContext) -> list[BrokerAccount]:
 
 
 def _account_list(ctx: ToolContext) -> list[dict[str, Any]]:
-    return [{"id": a.id, "name": a.name, "broker": a.broker, "currency": a.currency,
-             "tracking_mode": a.tracking_mode} for a in _accounts(ctx)]
+    return [{"id": a.id, "name": a.name, "broker": a.broker, "currency": a.currency} for a in _accounts(ctx)]
 
 
 def _own_account_id(ctx: ToolContext, account_id: str | None) -> str | None:

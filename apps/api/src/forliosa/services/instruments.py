@@ -8,12 +8,16 @@ from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
 from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
-from forliosa.datapolicy import label, labels, tagged
+from forliosa.datapolicy import label, labels, source_clause, tagged
 from forliosa.marketdata.base import DividendEvent, InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.service import MarketData, dividend_sort_key
+from forliosa.models import PriceDaily
 from forliosa.services.coverage import series_notes
 from forliosa.services.portfolio import range_start
 from forliosa.timeutil import iso_taipei, today_taipei
@@ -114,6 +118,22 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
         "sources": labels(tagged(h.source, "price")),
         "notes": notes,
     }
+
+
+def close_on(db: Session, md: MarketData, symbol: str, day: date) -> dict[str, Any]:
+    """The official close of ``symbol`` on exactly ``day``, for the buy form's 「那天收盤」 hint.
+
+    Read from our own archive (``prices_daily``) only, under the data policy like the ledger's valuation: never the
+    history backfill's rows (``yahoo-history`` — product owner, 2026-11-13: Yahoo's data is for charts, technical
+    indicators and sparklines, never the ledger) and never a live request upstream. ``close`` is None when the
+    archive has no row for that very day (a weekend or holiday, before the archive began, a US stock).
+    """
+    if day > today_taipei():
+        raise unprocessable("日期不能晚於今天")
+    info = require_instrument(md, symbol)
+    close = db.scalar(select(PriceDaily.close).where(
+        PriceDaily.symbol == info.symbol, PriceDaily.date == day, source_clause(PriceDaily.source, md.policy)))
+    return {"symbol": info.symbol, "date": day, "close": ser.price(close), "currency": info.currency}
 
 
 _MANTISSAS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0)

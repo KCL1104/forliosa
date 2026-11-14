@@ -115,7 +115,6 @@ from forliosa.models import (
     FundProfile,
     FxRate,
     HolderCountMonthly,
-    HoldingSnapshot,
     IndexConstituent,
     IndexDaily,
     InstitutionalDaily,
@@ -189,9 +188,8 @@ def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
 
 
 def tracked_symbols(db: Session) -> list[str]:
-    """Symbols in any user's ledger, holdings snapshot or watchlist."""
+    """Symbols in any user's ledger or watchlist."""
     syms = set(db.scalars(select(Transaction.symbol).where(Transaction.symbol.is_not(None)).distinct()))
-    syms |= set(db.scalars(select(HoldingSnapshot.symbol).distinct()))
     syms |= set(db.scalars(select(WatchlistItem.symbol).distinct()))
     return sorted(s for s in syms if s)
 

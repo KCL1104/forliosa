@@ -253,7 +253,7 @@ def validate_ledger(db: Session, user: User, account: BrokerAccount, candidate: 
         inp.transactions.append(candidate)
     before: LedgerError | None = None
     try:
-        replay(inp.ledger_txns(), inp.method, inp.openings(), strict=True)
+        replay(inp.ledger_txns(), inp.method, strict=True)
     except LedgerError as exc:
         before = exc
     if md is None:
@@ -266,7 +266,7 @@ def validate_ledger(db: Session, user: User, account: BrokerAccount, candidate: 
     after = replace(inp, transactions=auto_dividends.with_recomputed(db, user, md, inp, account, symbols,
                                                                      extra_skips=[skip] if skip else ()))
     try:
-        replay(after.ledger_txns(), after.method, after.openings(), strict=True)
+        replay(after.ledger_txns(), after.method, strict=True)
     except LedgerError as exc:
         if before is None:
             raise auto_dividends.conflict_error(exc) from exc

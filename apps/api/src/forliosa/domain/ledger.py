@@ -90,19 +90,6 @@ class LedgerTxn:
         return (self.trade_date, _DAY_ORDER[self.type], self.seq, self.id)
 
 
-@dataclass(frozen=True)
-class OpeningPosition:
-    """Holdings-only accounts: a snapshot acts as the opening position on ``as_of``."""
-
-    account_id: str
-    symbol: str
-    as_of: date
-    quantity: Decimal
-    avg_cost: Decimal  # per share, trade currency, fees included
-    currency: str = "TWD"
-    fx_rate: Decimal = ONE
-
-
 @dataclass
 class Lot:
     quantity: Decimal
@@ -256,7 +243,7 @@ class IncomeEvent:
 class DayFlows:
     """Portfolio flows of one day in TWD, as defined by the performance contract."""
 
-    inflow: Decimal = ZERO  # I_t: buy cost incl. fee (+ opening snapshots at market value)
+    inflow: Decimal = ZERO  # I_t: buy cost incl. fee
     outflow: Decimal = ZERO  # O_t: sell net proceeds + net cash dividends + returned capital
     sell_proceeds: Decimal = ZERO  # part of outflow coming from sells / returned capital
 
@@ -265,8 +252,8 @@ class DayFlows:
 class TrailEntry:
     """One booking that touched a (account, symbol) position, in the order the ledger applied it.
 
-    ``txn`` is ``None`` for a holdings-only opening snapshot. ``before`` / ``after`` are the share counts
-    around the booking, so a round (0 → >0 → 0) can be read off the trail.
+    ``before`` / ``after`` are the share counts around the booking, so a round (0 → >0 → 0) can be read off the
+    trail.
     """
 
     account_id: str
@@ -274,8 +261,7 @@ class TrailEntry:
     trade_date: date
     before: Decimal
     after: Decimal
-    txn: LedgerTxn | None = None
-    opening: OpeningPosition | None = None
+    txn: LedgerTxn
 
 
 @dataclass(frozen=True)
@@ -327,15 +313,6 @@ class Ledger:
         self.warnings.append(message)
 
     # -- application -------------------------------------------------------------------------
-    def open(self, op: OpeningPosition) -> Decimal:
-        """Book a holdings snapshot as an opening position; returns its cost in TWD."""
-        pos = self.position(op.account_id, op.symbol, op.currency)
-        before = pos.quantity
-        cost = op.quantity * op.avg_cost
-        pos.add(Lot(op.quantity, cost, cost * op.fx_rate, op.as_of))
-        self.trail.append(TrailEntry(op.account_id, op.symbol, op.as_of, before, pos.quantity, opening=op))
-        return cost * op.fx_rate
-
     def apply_day(self, txns: Iterable[LedgerTxn]) -> DayFlows:
         """Apply all transactions of a single date (any order; sorted here)."""
         flows = DayFlows()
@@ -346,7 +323,7 @@ class Ledger:
             if t.symbol:
                 touched.add((t.account_id, t.symbol))
                 self.trail.append(TrailEntry(t.account_id, t.symbol, t.trade_date, before,
-                                             self.held(t.account_id, t.symbol), txn=t))
+                                             self.held(t.account_id, t.symbol), t))
         for key in touched:
             pos = self.positions.get(key)
             if pos:
@@ -487,21 +464,12 @@ class LedgerResult:
 def replay(
     txns: Iterable[LedgerTxn],
     method: CostMethod = CostMethod.AVERAGE,
-    openings: Iterable[OpeningPosition] = (),
     strict: bool = False,
 ) -> LedgerResult:
-    """Replay all transactions (and opening snapshots) in date order."""
+    """Replay all transactions in date order."""
     ledger = Ledger(method, strict=strict)
     by_date: dict[date, list[LedgerTxn]] = {}
     for t in txns:
         by_date.setdefault(t.trade_date, []).append(t)
-    opens_by_date: dict[date, list[OpeningPosition]] = {}
-    for op in openings:
-        opens_by_date.setdefault(op.as_of, []).append(op)
-    flows: dict[date, DayFlows] = {}
-    for d in sorted(set(by_date) | set(opens_by_date)):
-        opening_cost = sum((ledger.open(op) for op in opens_by_date.get(d, [])), ZERO)
-        f = ledger.apply_day(by_date.get(d, []))
-        f.inflow += opening_cost
-        flows[d] = f
+    flows = {d: ledger.apply_day(by_date[d]) for d in sorted(by_date)}
     return LedgerResult(ledger, flows)

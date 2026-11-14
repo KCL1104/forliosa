@@ -16,8 +16,7 @@
 | `DividendRecord` | `is_demo` | 陣列型回應沒有地方放整體的 `is_demo`，所以逐筆標示 |
 | `Valuation` | `notes: string[]` | 河流圖的說明，例如「EPS ≤ 0，本益比區間留白」、「ETF 沒有 EPS」、資料來源 |
 | `PortfolioSummary.allocation` | `by_account` | 依帳戶配置（規格 4.4 有列） |
-| `GET /accounts/{id}/holdings` | 新端點 | 讀回只記持股快照 |
-| `PUT /accounts/{id}/holdings` 回應 | `{"account_id", "as_of", "holdings": [...]}` | 合約沒定義回應格式 |
+| ~~`GET /accounts/{id}/holdings`~~ | ~~新端點~~ | 2026-11-14 取消「只記持股」，連同 `PUT` 一起移除 |
 | `GET /transactions/{id}` | 新端點 | 讀單筆交易 |
 | `GET /health` | 新端點 | 部署健康檢查，含各資料源狀態 |
 | `GET /stream/quotes` | `interval`（1–60 秒）、`once`（送一輪就結束，測試用） | |
@@ -69,7 +68,8 @@
 - **商品代號**：路徑與參數可以用 `2330`、`2330.tw`、`2330.TW`，回應一律是標準格式 `2330.TW`。
 - **美股帳戶預設手續費**：`currency = "USD"` 且沒給 `fee_rate`、`min_fee` 時預設為 0（台幣帳戶預設 0.1425%、
   最低 20 元、零股最低 1 元）。
-- **已有交易的帳戶不能改幣別**（409 `conflict`）。`PUT /holdings` 只允許 `tracking_mode = "holdings"` 的帳戶（409）。
+- **已有交易的帳戶不能改幣別**（409 `conflict`）。帳戶沒有 `tracking_mode`（2026-11-14 起）；body 帶 `"transactions"` 忽略、
+  帶 `"holdings"` 回 422 `tracking_mode_removed`（見「2026-11-14 取消「只記持股」、查某一天的收盤價」）。
 
 ## 績效計算的解讀
 
@@ -82,8 +82,8 @@
 - **現金股利以交易日期為準計入 `O_t`**。價格用未還原收盤價，除息日股價會下跌；如果股利記在發放日，
   除息日到發放日之間的 TWR 會短暫偏低，發放日再補回。示範資料把股利記在除息日（見待決事項）；台股自動入帳的股利
   也記在除息日（見「2026-11-12 股利自動入帳」），只有使用者自己記在發放日的紀錄仍有這個現象。
-- **只記持股帳戶**：快照日以當天收盤市值作為期初投入（`I_t`），從那天開始追蹤報酬；
-  損益則用使用者輸入的均價。快照日（含）之前的交易不計入。
+- ~~**只記持股帳戶**：快照日以當天收盤市值作為期初投入（`I_t`）~~（2026-11-14 取消「只記持股」後移除）：轉換後的帳戶在快照日有一筆
+  均價的買進，績效以均價成本投入（見「2026-11-14 取消「只記持股」、查某一天的收盤價」）。
 - **區間**：`start_date` 是區間內第一個有持股的交易日（不會早於第一筆交易）；`ALL` 從第一筆交易開始。
   不支援的 `range` 回 422。
 - **`1D`／`5D`（以交易日計）**：序列的第一點是**基準收盤**，`twr_index = benchmark_index = 1.0`，之後是最後
@@ -225,13 +225,13 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 ### `ClosedRound`（出清回合）
 
 一個回合＝某帳戶某檔從 0 股 → 大於 0 → 回到 0（同一檔可以有好幾個回合；當沖從 0 開始也算一個 `holding_days: 0` 的回合）。
-計算規則與帳本相同（均價／FIFO、當沖、配股、分割、減資、只記持股快照都適用），金額為台幣：
+計算規則與帳本相同（均價／FIFO、當沖、配股、分割、減資都適用），金額為台幣：
 
 | 欄位 | 定義 |
 |---|---|
 | `opened_at`／`closed_at`、`holding_days` | 第一次買進日／全部賣出那天；日曆天數 |
-| `total_bought_qty`／`total_sold_qty` | 買進股數（含快照）／賣出股數；中間有配股、分割、減資時兩者可以不同 |
-| `cost_basis` | 買進價金＋買進手續費（快照：股數 × 均價） |
+| `total_bought_qty`／`total_sold_qty` | 買進股數／賣出股數；中間有配股、分割、減資時兩者可以不同 |
+| `cost_basis` | 買進價金＋買進手續費 |
 | `realized_pnl`、`realized_pnl_pct` | 回合內賣出與減資退款的已實現損益（扣手續費、證交稅）；`pct = realized_pnl ÷ cost_basis` |
 | `dividends_received` | 回合內的現金股利淨額（已扣二代健保）；**出清後才入帳的股利**（除息後賣出、發放日入帳）算在最近一個回合 |
 | `fees_and_taxes` | 買賣手續費＋證交稅（＋單獨記錄的手續費／稅）；股利的二代健保已從 `dividends_received` 扣除，不重複列 |
@@ -439,14 +439,12 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 觸發 | 範圍 | 會讓帳目不一致時 |
 |---|---|---|
 | `POST`／`PATCH`／`DELETE /transactions` | 該筆交易的帳戶＋商品（修改時新舊兩組都算）；只有證券類交易、且是台股代號才同步，現金類交易不觸發 | `validate_ledger` 驗證的是**同步後**的帳本：先在記憶體裡套用變更、依新帳本重算受影響商品的自動列（`with_recomputed`；刪除或修改的那筆自動列當作已略過），再嚴格重播。所以除權前補記賣出、刪掉唯一的買進這類會讓舊的自動配股失效的變更可以通過。重播失敗時：沒有這次重算也一致 → 422 `ledger_inconsistent`「自動入帳的股利依這筆變更重算後帳目不一致：<重播錯誤>」；否則是一般的 `ledger_inconsistent`。整個請求不寫入。AI 的 `draft_transaction` 用同一個檢查 |
-| `PUT /accounts/{id}/holdings` | 整個帳戶 | 同上；但原本帳目就不一致時照樣同步、不擋 |
-| `PATCH /accounts/{id}`，且 `tracking_mode` 真的改變 | 整個帳戶 | 同上 |
 | worker：每次存檔的群組含 `twse` 或 `tpex` 之後（交易日 08:10、14:40、21:40） | 所有使用者的所有帳戶，每個帳戶各自 commit | 該帳戶 rollback、維持原狀並記 warning；其他錯誤記 exception；其他帳戶照常 |
 
 - 08:10 那次在開盤前就記上當天除息的股利（除權息預告隨 `twse`／`tpex` 群組存檔）。預告金額更正、補上發放日後，下一次同步會更新同一列
   （比較 `type`、`trade_date`、`quantity`、`price`、`amount`、`fee`、`tax`、`health_insurance`、`currency`、`is_day_trade`、`note`）；沒有變化就不寫（冪等）。
 - 同步只動 `source="auto"` 的列。同一個鍵（帳戶、商品、除息日、類型）多出來的列、以及 `auto` 但不是股利類型的列（不應該存在）都會刪掉。
-- `DELETE /accounts/{id}` 連同交易（含自動股利）、快照與該帳戶的略過紀錄一起刪除（外鍵也是 `ON DELETE CASCADE`）。
+- `DELETE /accounts/{id}` 連同交易（含自動股利）與該帳戶的略過紀錄一起刪除（外鍵也是 `ON DELETE CASCADE`）。
 - **併發**：交易的新增／修改／刪除與 worker 的同步都先鎖住帳戶列（PostgreSQL `SELECT … FOR UPDATE`；SQLite 本來就序列化寫入），
   worker 鎖住後重新讀取，避免覆蓋使用者剛改過的列或重複新增。
 - **示範帳號**：`seed` 的合成股利只記到 archive 第一個真實除息日的 120 天前為止，之後由自動入帳記真實的股利，同一次股利不會記兩次。
@@ -461,9 +459,9 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
   預告已撤回）時才刪除。
 - **撤回的預告**：每次成功取得非空的 `TWT48U_ALL`／`tpex_exright_prepost`，存檔會刪掉同市場、除息日在明天以後、但這次不在預告表裡的
   預告（除息日改期或取消）；過去與今天的預告不動，取得失敗或空表不刪。
-- **股數**：該帳戶該檔**不含自動列**的帳本，加上這次同步已決定的較早自動配股，重播到除息日前一天（`trade_date < ex_date`；快照期初也只算
-  `as_of < ex_date` 的）。大於 0 才記。
-- **只記持股帳戶**：除息日 ≤ 最新快照日的不記（快照股數已反映之前的股利）；換了較新的快照，快照日（含）之前的自動列會被移除。
+- **股數**：該帳戶該檔**不含自動列**的帳本，加上這次同步已決定的較早自動配股，重播到除息日前一天（`trade_date < ex_date`）。大於 0 才記。
+- ~~**只記持股帳戶**：除息日 ≤ 最新快照日的不記~~（2026-11-14 取消「只記持股」後移除）：轉換出來的買進記在快照日，除息日在那天或以前時前一天的持股是 0，
+  所以照樣不記。
 - **日期**：除息日 > 今天（台北）不記；除息日當天就記。
 - **現金股利**：走 `services/transactions.compute()`（`quantity` = 股數、`price` = 每股現金、`trade_date` = 除息日），所以金額元以下捨去，
   二代健保由 `compute()` 估算；資本公積部分（待確認 21）直接用事件的 `cash_sources` 傳給 `compute(capital_surplus=…)`，不再查一次。
@@ -528,7 +526,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 ### 快取與更新
 
-- worker 每天 07:50（台北，美股收盤後；不看台股交易日）跑 `archive` 的 `sec` 群組：更新代號表，再更新**所有使用者帳本、持股快照、
+- worker 每天 07:50（台北，美股收盤後；不看台股交易日）跑 `archive` 的 `sec` 群組：更新代號表，再更新**所有使用者帳本、
   自選裡的美股個股**（ETF 跳過）超過 12 小時沒更新的 companyfacts 與 submissions。`dataset_status` 記最新的申報日（`/meta/attributions`
   的 `last_updated`）。手動：`uv run python -m forliosa.archive run --only sec`。
 - 請求當下：快取超過 `SEC_STALE_HOURS`（24）就先向 SEC 取一次（逾時 `SEC_ON_DEMAND_TIMEOUT_SECONDS`＝6 秒、不重試），失敗就用快取並在
@@ -712,7 +710,7 @@ SearXNG 對上游搜尋引擎送出的請求由 SearXNG 自己決定（瀏覽器
 
 ### Worker 與 CLI
 
-- `news_refresh`：每 `NEWS_REFRESH_MINUTES`（45）分鐘，追蹤的股票＝任何人帳本／持股快照／自選裡的（`archive.tracked_symbols`）＋最近 `NEWS_VIEW_DAYS`（3）天看過的，
+- `news_refresh`：每 `NEWS_REFRESH_MINUTES`（45）分鐘，追蹤的股票＝任何人帳本／自選裡的（`archive.tracked_symbols`）＋最近 `NEWS_VIEW_DAYS`（3）天看過的，
   最久沒更新的先跑，每批最多 `NEWS_MAX_SYMBOLS_PER_RUN`（150）檔，批次最長是間隔的 80%（不會卡住其他排程）。全體共用。
 - `uv run python -m forliosa.news refresh [--symbol 2330.TW] [--no-ai]`：立即更新。
 - `uv run python -m forliosa.news searxng-check "台積電" [--language en] [--url http://localhost:8080]`：SearXNG 健康檢查（`/healthz`）＋查一次新聞，
@@ -1310,7 +1308,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
   `delegation_revoked`。
 - **範圍集中在一處**（`services/scope.py`）：解析授權後把「授權者 id＋允許的帳戶」存在這個請求的資料庫 session 上；`load_ledger_input`
   （摘要、持股、`allocation.by_account`、績效、出清、本週事項、部位、部位歷史、事件的 `mine`／`amount_estimate`）、`GET /accounts`、
-  `GET /accounts/{id}/holdings`、`/transactions`、定期定額（`upcoming` 的扣款）都經過它，所以授權者就像只有那些帳戶。範圍外的 `account_id`、
+  `/transactions`、定期定額（`upcoming` 的扣款）都經過它，所以授權者就像只有那些帳戶。範圍外的 `account_id`、
   帳戶或交易 id → 404。`/transactions?account_id=` 只在查看模式下對範圍外帳戶回 404（自己查看時維持原本回空清單）。
 - 查看模式下同一個 session 拒絕任何寫入（`before_flush` 直接丟 403 `read_only`），所以即使某個讀取路徑想寫（例如股利同步），也寫不進去。
 - 成本法、基準用授權者的偏好（計算本來就以授權者身分）；顯示偏好由前端用查看者自己的 `GET /me`。
@@ -1344,7 +1342,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 ### 交易動態
 
 - 範圍：開了 `trades` 的成員、`manual`／`import`／`ai_draft` 的 `buy`／`sell`、`trade_date` 在「今天（台北）往前 90 天」到今天之間
-  （未來日期不列）。「只記持股」帳戶在快照日當天或之前的交易不列（帳本也不算它們）。
+  （未來日期不列）。
 - 合併鍵：成員×交易日×商品×買賣。`count` = 筆數；`price` = 以股數加權的平均成交價（4 位小數，不含費用）、`currency` = 交易幣別，只有開了
   `trade_prices` 才有這兩個鍵。
 - `id`：`gfi_` + 以 `SESSION_SECRET` 衍生金鑰（用途 `feed-item-id`）對合併鍵做的 HMAC（26 字）。同一則在不同群組 id 相同，但留言與表情都
@@ -1409,7 +1407,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 ### 推播（`services/notifications.py`、`services/pushers.py`、`services/channels.py`）
 
 - **排入 outbox**（worker `group_push` 每分鐘）：有 `active` 且 `notify_trades` 的頻道的群組，找「目前同時開著 `trades` 與 `push`」的成員、
-  可出現在動態裡的買賣（`manual`／`import`／`ai_draft`，只記持股帳戶快照日當天或之前的不算）、`trade_date` 在今天與前兩天（台北）、
+  可出現在動態裡的買賣（`manual`／`import`／`ai_draft`）、`trade_date` 在今天與前兩天（台北）、
   `created_at` 晚於 `max(頻道 configured_at, push_enabled_at, trades_enabled_at)`。每筆交易每個頻道一列（`dedupe_key =
   trade:<group>:<kind>:<transaction>`），`not_before = created_at + 15 分鐘`。
 - **送出前再檢查一次**：交易還在（刪除時 outbox 列跟著刪）、成員還在群組而且兩個開關還開著、交易建立時間仍晚於上面那個時間（關掉再打開
@@ -1808,7 +1806,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 合約：`docs/api-contract.md`「帳號：匯出資料、刪除帳號、條款版本」。程式：`services/account.py`、`api/routes/users.py`；migration `0014`。
 
 - **`GET /me/export`**：一律是登入者本人的資料（查看別人資產時標頭被忽略）。金額與股數是資料庫裡的十進位字串（不是浮點數），時間是 UTC（`Z`）。
-  合約列的欄位之外多一個 `holding_snapshots`（「只記持股」帳戶的快照，也是使用者自己輸入的資料）。別人授權給我的（`delegations.received`）只列對方的顯示名稱與時間，
+  （2026-11-14 以前多一個 `holding_snapshots`；取消「只記持股」後移除，`format_version` 仍是 1。）別人授權給我的（`delegations.received`）只列對方的顯示名稱與時間，
   不列對方的帳戶。AI 訊息照資料庫原樣（含工具呼叫的結果——那是使用者自己的帳本資料）。
   **頻率限制（每人每小時 5 次）記在 API 程序的記憶體裡**：重啟就歸零、多副本時各算各的。目前只有一個副本；要嚴格的話之後改記在資料庫。
 - **`DELETE /me`**：一個資料庫交易。自己的資料用明確的順序刪（不依賴各資料庫 cascade 的順序）；群組留言、討論主題與回覆、AI 用量靠外鍵的 `ON DELETE SET NULL` 留下、作者變成 null。
@@ -1882,7 +1880,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   - 進度記在 `price_backfill`（alembic 0015）：`done`、`not_found`、`mismatch` 不再問。
 - **讀取**：`MarketData.history(symbol, start, end, backfill=True)` 才會讀到這些列（`datapolicy.source_clause(..., backfill=True)`，而且開關要開著）。
   - 讀的：`GET /instruments/{symbol}/history`、個股頁關鍵數據的 52 週高低與 3 個月均量、「為什麼漲跌」的 20 日均量、觀察清單與相關股票的走勢小圖、AI 的 `get_stock_history`／`get_technicals`。
-  - **不讀的**：帳本市值與績效（`services/portfolio.py`）、群組排行（`services/sharing.py`）、定期定額的扣款價（`services/recurring.py`）、估值走勢。原因：Yahoo 的開高低收已經照股票分割換算（0050 在 2025 年分割前的價格是當時成交價的四分之一），而且不回傳分割紀錄，還原不回去；拿來乘上當時的股數會算錯。
+  - **不讀的**：帳本市值與績效（`services/portfolio.py`）、群組排行（`services/sharing.py`）、定期定額的扣款價（`services/recurring.py`）、估值走勢、記一筆買進的「那天收盤」（`GET /instruments/{symbol}/close`，2026-11-14）。原因：Yahoo 的開高低收已經照股票分割換算（0050 在 2025 年分割前的價格是當時成交價的四分之一），而且不回傳分割紀錄，還原不回去；拿來乘上當時的股數會算錯。
 - **`History` 回應**：`sources` 多一項「Yahoo Finance（歷史日線，非官方資料）」；`notes` 多一句「2026/11/11 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算」。序列比要求的區間短時，第一句是「資料從 YYYY/MM/DD 開始」（這檔在 Yahoo 的第一天）。
 - **`GET /meta/attributions`**：開關開著時 `datasets` 多一筆 `key: "yahoo-history"`（`commercial: false`、`license_status: "non_commercial"`），資料來源頁會列出來並標「非商用」。
 - 成交量：Yahoo 的單位也是股，但不含盤後與零股，比官方少幾個百分點到一成多（2330 在 2026-11-12：Yahoo 29,205,152，官方 34,359,285）；開高低收和官方完全相同。
@@ -2122,3 +2120,45 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 帳戶的費率欄位保留（舊資料、API 不變），只是不再用來算；前端不再顯示、也不再填。`domain/fees.py` 的 `commission`、`transaction_tax` 留著（測試與日後若要恢復）。
 - 股利照舊：現金股利的二代健保、美股預扣 30% 仍自動算（錢入帳前就扣了）；定期定額草稿的說明不再寫「手續費另計」。
 - 已經存的交易不動（保留當時算好的費用）。
+
+## 2026-11-14 取消「只記持股」、查某一天的收盤價
+
+產品負責人決定（Google 財經式的記一筆：每一筆買進都有日期）。合約：`docs/api-contract.md`「取消「只記持股」、查某一天的收盤價」。
+
+### 帳戶與帳本
+
+- `broker_accounts.tracking_mode`、`holding_snapshots` 表、`GET`／`PUT /accounts/{id}/holdings`、帳本的期初部位（`OpeningPosition`：
+  `ledger_io` 的快照與「快照日以前的交易不算」、`domain/ledger.py`、績效的「快照以市值投入」、出清回合、自動股利的快照日、群組動態與推播的
+  快照日、存檔與新聞的追蹤代號、匯出、AI 工具的帳戶清單裡的 `tracking_mode`）全部移除。
+- `AccountIn`／`AccountPatch` 是 `extra="forbid"`，所以 `tracking_mode` 留成一個合約裡沒有的欄位（OpenAPI 標 `deprecated`）：
+  `"transactions"` 忽略，`"holdings"` 在路由裡回 422 `tracking_mode_removed`「「只記持股」已經取消，每一筆買進都要記日期。」
+  （`details` 指向 `tracking_mode`），其他值是一般的 `validation_error`。
+- **migration `0018`**（PostgreSQL 16 與 SQLite 都試過升級、降級、再升級）：
+  1. 找出 `tracking_mode = 'holdings'` 而且有快照列的帳戶；快照日 = 該帳戶快照列最新的 `as_of`。
+  2. 刪掉該帳戶 `trade_date` ≤ 快照日的交易（帳本本來就不算、快照已經反映；不分 `source`，自動股利列也一樣）。
+  3. 每一列快照新增一筆 `buy`：`trade_date` = 那列的 `as_of`、`quantity`、`price` = `avg_cost`、`amount` = 股數 × 價格、
+     `fee`／`tax`／`health_insurance` = 0、`currency` = 代號是 `.TW`／`.TWO` 結尾的 `TWD`，其他 `USD`（和舊的期初部位一樣）、
+     `is_day_trade = false`、`note`「由「只記持股」轉入」、`source = 'manual'`、新的 `txn_…` id、`created_at = updated_at` = 執行時間。
+  4. 所有帳戶設成 `transactions`，然後刪掉 `holding_snapshots` 表與 `tracking_mode` 欄。沒有快照的「只記持股」帳戶直接變成一般帳戶；
+     已經是逐筆模式的帳戶殘留的快照列（以前就不讀）跟著表刪掉。
+  - 降級只把欄位（全部 `transactions`）與空表加回來，轉換不還原。
+  - SQLite 上欄位用 `ALTER TABLE … DROP COLUMN` 直接刪（SQLite ≥ 3.35），**不用 batch 模式**：batch 會複製出新表再 `DROP` 舊的
+    `broker_accounts`，外鍵開著時 `DROP` 隱含的 `DELETE` 會把所有交易 cascade 刪掉（試過：交易全沒了）。
+- **一樣的**（`tests/test_holdings_mode_removal.py` 用轉換前的程式算出來的數字對照）：持股的股數、均價、成本，已實現損益、出清回合，
+  自動入帳的股利（快照日之後的除息照樣記同樣的股數與金額；快照日當天或以前的除息，前一天收盤的持股是 0，照樣不記），轉換後再同步一次不會有變化。
+- **不一樣的**：
+  - 績效以前在快照日用當天收盤市值當期初投入（那天報酬 0），現在那筆買進以均價成本投入，**快照日的 TWR 會包含從均價到當天收盤的未實現損益**，
+    XIRR 也以均價成本在快照日流出。要正確就請使用者把轉入的買進改成真正的買進日期與價格（持倉展開後每一筆都能改日期）。
+  - 轉入的買進是 `manual` 的 `buy`：開了 `trades` 的群組成員，快照日在最近 90 天內的會出現在交易動態；快照日在最近 3 天內、頻道設好、
+    分享開關在 migration 之前就打開的，worker 會推播一次（`created_at` 是 migration 的時間）。
+  - 只記持股帳戶快照日以前的交易（含使用者自己記的股利與存提款）刪掉了，不會回來（以前帳本也不算它們）。
+
+### `GET /instruments/{symbol}/close?date=`
+
+- `services/instruments.close_on`：`prices_daily` 裡 `symbol`、`date` 剛好那一天的一列，條件是 `datapolicy.source_clause(PriceDaily.source,
+  policy)`（`backfill=False`，和帳本估值同一個條件）：`yahoo-history` 不論開關都不讀；commercial 下也不讀非商用來源的列。不經過
+  `MarketData` 取價（沒有任何上游請求、沒有示範資料）。沒有那一列 → `close: null`、HTTP 200。
+- 先檢查日期（晚於今天〔台北〕422「日期不能晚於今天」；格式錯、缺少是一般的 422 `validation_error`，欄位名「日期」），再查商品
+  （`require_instrument`，查不到 404「找不到商品」，和 `/history` 等相同）。`currency` 是商品的幣別（存檔沒有美股，美股的 `close` 一律 `null`）。
+- 要登入；`X-Forliosa-View-As` 時忽略標頭（`VIEW_AS_IGNORED_PATHS`）。
+- 測試：`tests/api/test_day_close.py`。

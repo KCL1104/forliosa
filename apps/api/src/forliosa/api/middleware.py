@@ -35,7 +35,6 @@ def _compile(prefix: str, patterns: Iterable[str]) -> list[re.Pattern[str]]:
 # User-data reads served as the owner, limited to the delegated accounts (GET / HEAD only).
 VIEW_AS_READ_PATHS = (
     "/accounts",
-    "/accounts/{seg}/holdings",
     "/portfolio/summary",
     "/portfolio/holdings",
     "/portfolio/performance",
@@ -58,6 +57,7 @@ VIEW_AS_IGNORED_PATHS = (
     "/instruments/{seg}",
     "/instruments/{seg}/quote",
     "/instruments/{seg}/history",
+    "/instruments/{seg}/close",
     "/instruments/{seg}/valuation",
     "/instruments/{seg}/revenue",
     "/instruments/{seg}/dividends",

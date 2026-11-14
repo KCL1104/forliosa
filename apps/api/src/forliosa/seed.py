@@ -170,10 +170,10 @@ def seed(db: Session, md: MarketData, today: date | None = None) -> dict:
     user = User(id=new_id("usr"), email=DEMO_EMAIL, display_name=DEMO_NAME, preferences=dict(DEFAULT_PREFERENCES))
     tw = BrokerAccount(id=new_id("acc"), user_id=user.id, name="永豐－一般", broker="永豐金證券", currency="TWD",
                        fee_rate=Decimal("0.001425"), fee_discount=Decimal("0.28"), min_fee=Decimal(20),
-                       min_fee_odd_lot=Decimal(1), tracking_mode="transactions")
+                       min_fee_odd_lot=Decimal(1))
     us = BrokerAccount(id=new_id("acc"), user_id=user.id, name="國泰－複委託", broker="國泰證券", currency="USD",
                        fee_rate=Decimal("0.001"), fee_discount=Decimal(1), min_fee=Decimal(0),
-                       min_fee_odd_lot=Decimal(0), tracking_mode="transactions")
+                       min_fee_odd_lot=Decimal(0))
     db.add(user)
     db.flush()  # no ORM relationship from User, so insert it before the accounts explicitly
     db.add_all([tw, us])

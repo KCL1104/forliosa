@@ -3,9 +3,7 @@
 Definitions follow ``docs/api-contract.md`` ("績效計算定義"):
 
 * ``V_t``  — market value of all holdings at the close of day t, in TWD (cash excluded).
-* ``I_t``  — inflow, assumed before the open: buy cost including commission. A holdings-only
-  snapshot enters as an inflow at its market value on its ``as_of`` date, so tracking starts
-  that day (it has no history before it).
+* ``I_t``  — inflow, assumed before the open: buy cost including commission.
 * ``O_t``  — outflow, assumed after the close: sell proceeds net of commission and tax, cash
   dividends net of the NHI premium / withholding, returned capital from a capital reduction.
 * ``r_t = (V_t + O_t) / (V_{t-1} + I_t) - 1`` and ``r_t = 0`` when the denominator is 0.
@@ -23,7 +21,7 @@ from datetime import date
 from decimal import Decimal
 
 from forliosa.domain.fees import ZERO
-from forliosa.domain.ledger import CostMethod, Ledger, LedgerTxn, OpeningPosition
+from forliosa.domain.ledger import CostMethod, Ledger, LedgerTxn
 
 PriceFn = Callable[[str, date], Decimal | None]
 FxFn = Callable[[str, date], Decimal]
@@ -64,7 +62,6 @@ def simulate(
     price_fn: PriceFn,
     fx_fn: FxFn,
     method: CostMethod = CostMethod.AVERAGE,
-    openings: Sequence[OpeningPosition] = (),
 ) -> Simulation:
     """Replay the ledger day by day over ``axis`` (sorted trading days) and value it each close.
 
@@ -74,8 +71,7 @@ def simulate(
     """
     ledger = Ledger(method)
     txns_sorted = sorted(txns, key=LedgerTxn.sort_key)
-    opens_sorted = sorted(openings, key=lambda o: o.as_of)
-    ti = oi = 0
+    ti = 0
     last_trade_price: dict[str, Decimal] = {}
     points: list[SeriesPoint] = []
     v_prev = ZERO
@@ -90,16 +86,8 @@ def simulate(
             if t.symbol and t.price > 0 and t.type.value in ("buy", "sell"):
                 last_trade_price[t.symbol] = t.price
             ti += 1
-        opening_inflow = ZERO
-        while oi < len(opens_sorted) and opens_sorted[oi].as_of <= d:
-            op = opens_sorted[oi]
-            ledger.open(op)
-            px = price_fn(op.symbol, d)
-            unit = px if px is not None else op.avg_cost
-            opening_inflow += op.quantity * unit * fx_fn(op.currency, d)
-            oi += 1
         flows = ledger.apply_day(day)
-        inflow = flows.inflow + opening_inflow
+        inflow = flows.inflow
 
         value = ZERO
         unpriced: set[str] = set()

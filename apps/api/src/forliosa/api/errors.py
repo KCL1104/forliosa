@@ -58,7 +58,7 @@ _FIELD_LABELS = {
     "email": "電子郵件", "name": "名稱", "currency": "幣別", "account_id": "帳戶", "symbol": "商品代號",
     "type": "交易類型", "trade_date": "交易日期", "quantity": "數量", "price": "價格", "amount": "金額",
     "fee": "手續費", "tax": "稅", "holdings": "持股", "as_of": "日期", "range": "區間", "symbols": "商品代號",
-    "limit": "筆數", "cursor": "分頁游標",
+    "limit": "筆數", "cursor": "分頁游標", "date": "日期",
 }
 
 

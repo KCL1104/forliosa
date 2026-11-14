@@ -99,6 +99,17 @@ class DevLoginIn(StrictModel):
 
 
 # -- accounts ---------------------------------------------------------------------------------
+# 「只記持股」 was removed on 2026-11-14 (product owner: every buy has a date), and with it the account's tracking mode.
+# A browser tab opened before that still sends ``tracking_mode``: "transactions" is ignored, "holdings" is refused by
+# the route with a message that says why (``api.routes.accounts``). Not part of the documented request any more.
+LegacyTrackingMode = Literal["transactions", "holdings"] | None
+
+
+def _legacy_tracking_mode():
+    return Field(default=None, json_schema_extra={"deprecated": True},
+                 description='已取消（2026-11-14）："transactions" 會被忽略，"holdings" 回 422')
+
+
 class AccountIn(StrictModel):
     name: str = Field(min_length=1, max_length=100)
     broker: str = Field(default="", max_length=100)
@@ -107,7 +118,7 @@ class AccountIn(StrictModel):
     fee_discount: Decimal = Field(default=Decimal(1), gt=0, le=1)
     min_fee: Decimal | None = Field(default=None, ge=0)
     min_fee_odd_lot: Decimal | None = Field(default=None, ge=0)
-    tracking_mode: Literal["transactions", "holdings"] = "transactions"
+    tracking_mode: LegacyTrackingMode = _legacy_tracking_mode()
 
 
 class AccountPatch(StrictModel):
@@ -118,7 +129,7 @@ class AccountPatch(StrictModel):
     fee_discount: Decimal | None = Field(default=None, gt=0, le=1)
     min_fee: Decimal | None = Field(default=None, ge=0)
     min_fee_odd_lot: Decimal | None = Field(default=None, ge=0)
-    tracking_mode: Literal["transactions", "holdings"] | None = None
+    tracking_mode: LegacyTrackingMode = _legacy_tracking_mode()
 
 
 class Account(BaseModel):
@@ -130,25 +141,7 @@ class Account(BaseModel):
     fee_discount: float
     min_fee: float
     min_fee_odd_lot: float
-    tracking_mode: str
     created_at: str
-
-
-class SnapshotHolding(StrictModel):
-    symbol: str = Field(min_length=1, max_length=20)
-    quantity: Decimal = Field(gt=0)
-    avg_cost: Decimal = Field(ge=0)
-
-
-class HoldingsSnapshotIn(StrictModel):
-    as_of: date
-    holdings: list[SnapshotHolding] = Field(max_length=500)
-
-
-class HoldingsSnapshot(BaseModel):
-    account_id: str
-    as_of: date | None
-    holdings: list[dict]
 
 
 # -- instruments & quotes -----------------------------------------------------------------------
@@ -211,6 +204,15 @@ class History(BaseModel):
     is_demo: bool
     sources: list[str] = []
     notes: list[str] = []
+
+
+class DayClose(BaseModel):
+    """GET /instruments/{symbol}/close: the archived official close of one day (None: no row for that day)."""
+
+    symbol: str
+    date: date
+    close: float | None
+    currency: str
 
 
 class ValuationPoint(BaseModel):

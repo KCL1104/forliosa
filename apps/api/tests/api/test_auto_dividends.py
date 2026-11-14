@@ -286,33 +286,6 @@ def test_resync_that_breaks_the_books_is_refused(client, notices):
     assert next(t for t in txns(client, acc["id"]) if t["id"] == b["id"])["trade_date"] == "2026-05-05"
 
 
-# -- holdings-only accounts ------------------------------------------------------------------------
-def test_holdings_mode_books_only_after_the_snapshot(client, notices):
-    notices("2330.TW", date(2026, 6, 11), cash="5.00000000")
-    notices("2330.TW", date(2026, 9, 16), cash="5.00000000")
-    acc = make_account(client, tracking_mode="holdings")
-    r = client.put(f"{API}/accounts/{acc['id']}/holdings", json={
-        "as_of": "2026-07-01", "holdings": [{"symbol": "2330.TW", "quantity": 2000, "avg_cost": 900}]})
-    assert r.status_code == 200, r.text
-    assert [(r["trade_date"], r["quantity"]) for r in autos(client, acc["id"])] == [("2026-09-16", 2000)]
-    # a later snapshot absorbs it
-    client.put(f"{API}/accounts/{acc['id']}/holdings", json={
-        "as_of": "2026-10-01", "holdings": [{"symbol": "2330.TW", "quantity": 2000, "avg_cost": 900}]})
-    assert autos(client, acc["id"]) == []
-
-
-def test_switching_tracking_mode_resyncs(client, notices):
-    notices("2330.TW", date(2026, 6, 11), cash="5.00000000")
-    acc = make_account(client)
-    buy(client, acc, "2330.TW", "2026-05-04", 1000, "1000")
-    assert len(autos(client, acc["id"])) == 1
-    r = client.patch(f"{API}/accounts/{acc['id']}", json={"tracking_mode": "holdings"})
-    assert r.status_code == 200, r.text
-    client.put(f"{API}/accounts/{acc['id']}/holdings", json={
-        "as_of": "2026-07-01", "holdings": [{"symbol": "2330.TW", "quantity": 1000, "avg_cost": 1000}]})
-    assert autos(client, acc["id"]) == []
-
-
 def test_deleting_the_account_removes_its_skips(client, notices, engine):
     notices("2330.TW", date(2026, 6, 11), cash="5.00000000")
     acc = make_account(client)

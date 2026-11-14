@@ -6,7 +6,7 @@ from decimal import Decimal as D
 
 import pytest
 
-from forliosa.domain.ledger import LedgerTxn, OpeningPosition, TxnType
+from forliosa.domain.ledger import LedgerTxn, TxnType
 from forliosa.domain.performance import (
     annualized_volatility,
     benchmark_returns,
@@ -92,16 +92,6 @@ def test_dividend_is_an_outflow_not_a_value_change():
     # r2 = (95,000 + 5,000) / 100,000 - 1 = 0
     assert sim.points[1].daily_return == pytest.approx(0.0)
     assert sim.points[1].dividends == D(5000)
-
-
-def test_holdings_snapshot_starts_tracking_on_as_of():
-    days = DAYS[:3]
-    closes = {days[0]: D(20), days[1]: D(22), days[2]: D(21)}
-    op = OpeningPosition("acc", "XYZ.TW", days[1], D(100), D(5))  # bought long ago at 5
-    sim = simulate([], days, lambda s, d: closes[d], fx_fn, openings=[op])
-    r = [p.daily_return for p in sim.points]
-    # Day 1: nothing. Day 2: inflow at market (2,200), value 2,200 -> 0. Day 3: 2,100/2,200 - 1
-    assert r == pytest.approx([0.0, 0.0, 2100 / 2200 - 1])
 
 
 def test_xirr_matches_excel_textbook_example():
