@@ -81,6 +81,9 @@ PERIODS = ("day", "month", "year")
 BENCHMARKS = ("^TAIEXTR", "0050.TW")
 FEED_DAYS = 90
 FEED_SOURCES = ("manual", "import", "ai_draft")
+# Buys migration 0018 made out of 「只記持股」 snapshots: holdings, not trades — like the snapshots before them they are
+# never shown in group feeds, counted in digests or pushed to group channels (2026-11-14)
+CONVERTED_NOTE = "由「只記持股」轉入"
 FEED_SIDES = ("buy", "sell")
 REACTION_EMOJI = ("👍", "🎉", "🔥", "😮", "😢", "👀")
 LEFT_MEMBER = "已離開的成員"
@@ -510,7 +513,7 @@ def joined_item_id(group_id: str, user_id: str, joined_at: datetime) -> str:
 def feed_eligible(t: Transaction) -> bool:
     """A transaction that can appear in a group feed (and so be pushed): a manual / imported / signed-draft buy or sell
     with a symbol."""
-    return t.type in FEED_SIDES and t.source in FEED_SOURCES and bool(t.symbol)
+    return t.type in FEED_SIDES and t.source in FEED_SOURCES and bool(t.symbol) and t.note != CONVERTED_NOTE
 
 
 def _feed_window(today: date | None = None) -> tuple[date, date]:
@@ -558,7 +561,7 @@ def feed_items(db: Session, md: MarketData, group: Group, members: list[Member],
     if sharing:
         txns = db.scalars(select(Transaction).where(
             Transaction.user_id.in_(sorted(sharing)), Transaction.type.in_(FEED_SIDES),
-            Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
+            Transaction.source.in_(FEED_SOURCES), Transaction.note != CONVERTED_NOTE, Transaction.symbol.is_not(None),
             Transaction.trade_date >= lo, Transaction.trade_date <= hi))
         merged: dict[tuple[str, date, str, str], dict[str, Any]] = {}
         for t in txns:
@@ -689,7 +692,7 @@ def purge_trade_threads(db: Session, user_id: str, keys: Iterable[TradeKey]) -> 
     for d, symbol, side in set(keys):
         left = db.scalar(select(func.count()).select_from(Transaction).where(
             Transaction.user_id == user_id, Transaction.trade_date == d, Transaction.symbol == symbol,
-            Transaction.type == side, Transaction.source.in_(FEED_SOURCES)))
+            Transaction.type == side, Transaction.source.in_(FEED_SOURCES), Transaction.note != CONVERTED_NOTE))
         if left:
             continue
         target = f"trade:{feed_item_id(user_id, d, symbol, side)}"
@@ -725,7 +728,7 @@ def push_trade_candidates(db: Session, members: list[Member], now: datetime) -> 
     lo, hi = push_trade_dates(now)
     txns = db.scalars(select(Transaction).where(
         Transaction.user_id.in_(sorted(pushing)), Transaction.type.in_(FEED_SIDES),
-        Transaction.source.in_(FEED_SOURCES), Transaction.symbol.is_not(None),
+        Transaction.source.in_(FEED_SOURCES), Transaction.note != CONVERTED_NOTE, Transaction.symbol.is_not(None),
         Transaction.trade_date >= lo, Transaction.trade_date <= hi,
         Transaction.created_at >= now - timedelta(days=PUSH_TRADE_DAYS + 1)).order_by(Transaction.created_at))
     return [(pushing[t.user_id], t) for t in txns if feed_eligible(t)]
@@ -787,8 +790,8 @@ def digest_week_facts(db: Session, md: MarketData, members: list[Member], week_s
         counts: dict[str, int] = dict.fromkeys(sharing_trades, 0)
         for t in db.scalars(select(Transaction).where(
                 Transaction.user_id.in_(sharing_trades), Transaction.type.in_(FEED_SIDES),
-                Transaction.source.in_(FEED_SOURCES), Transaction.trade_date >= week_start,
-                Transaction.trade_date <= week_end)):
+                Transaction.source.in_(FEED_SOURCES), Transaction.note != CONVERTED_NOTE,
+                Transaction.trade_date >= week_start, Transaction.trade_date <= week_end)):
             if feed_eligible(t):
                 counts[t.user_id] += 1
         trades = [{"user_id": uid, "count": counts[uid]} for uid in sharing_trades]

@@ -2162,3 +2162,33 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   （`require_instrument`，查不到 404「找不到商品」，和 `/history` 等相同）。`currency` 是商品的幣別（存檔沒有美股，美股的 `close` 一律 `null`）。
 - 要登入；`X-Forliosa-View-As` 時忽略標頭（`VIEW_AS_IGNORED_PATHS`）。
 - 測試：`tests/api/test_day_close.py`。
+
+## 2026-11-14 全站 review 的修正
+
+六個方向的 review（帳本計算、市場資料、AI 與社群、前端帳本、前端其他、合約與 mock）找到的問題，修正與測試：
+
+### 帳本（`domain/ledger.py`、`services/transactions.py`）
+- `LedgerTxn.sort_key`：買進與一般賣出同一個 rank（`seq`，也就是建立的先後，決定順序）；當沖賣出 rank 3（排在當天的買進之後）。
+- `Ledger.apply_day` 先看當天有沒有當沖賣出：有的話，那個帳戶、那一檔當天的買進都放成當沖的 lot（`Lot.day_trade`），當沖賣出先配它們，`end_of_day` 再把剩下的併進庫存。
+- `Ledger._close_out`：減資或分割之後股數是 0、還有成本時，記一筆 `RealizedEvent(kind="trade", quantity=0, proceeds=0, cost=剩下的成本)`，清掉 lot；`Position._pool` 不再把 0 股的 lot 當成均價池。
+- 分割：`currency == "USD"` 時不截斷（`held × ratio`）；台股照舊截斷到整數股。
+- 減資：`price > 0` 時退還股款 = 重播當時的持股 × `price`（台幣截斷到元、美元到分）；`price` 是 0 才用存著的 `amount`。`compute()` 也一樣：有 `price` 就重算 `amount`（每次修改都重算）。
+- `buy`／`sell`：`gross = quantity × price`，不用送來的 `amount`。
+- `TransactionIn`／`TransactionPatch`：`trade_date` 1990-01-01 到 `today_taipei()`；`TransactionPatch` 對 `_PATCH_NOT_NULL` 裡的欄位送 `null` 回 422。
+
+### 市場資料
+- `worker.upsert_closes`：`ON CONFLICT DO UPDATE ... WHERE prices_daily.source NOT IN allowed_sources("commercial")`，存檔寫的官方來源那一天不會被合併來源標籤（`twse-openapi+shioaji-data`）蓋掉（商用模式只認完全相同的來源，那天會從走勢與報價消失；只有收盤的報價也會把開高低量清成空的）。
+- `worker.daily_at`：昨天的時段也算（仍限 3 小時內），條件（`only_if`）看時段那一天：23:45 的時段在午夜之後才輪到時不再被跳過。新聞批次仍在同一個迴圈裡跑（最多約 36 分鐘），之後要的話可以移到背景執行緒。
+- `Archiver._status`：沒有日期時保留原本的 `data_date`（只更新 `fetched_at`、`rows`）。
+- `Archiver.twse_reference`：整個 TWT84U 檔案標同一個交易日（檔案裡最新的 `LastTradingDay` 的下一個交易日）；原本用各檔自己的最後交易日，冷門股會蓋到更早的日子。
+- `history_backfill.official_first_dates`：只算 `source_clause(..., data_policy)` 會給的列。
+- `market_overview._fx_item`：只用 `FxRate.source == cbc.SOURCE`。
+- `announcements`：`_YEAR` 前面不能是數字，四位數的年份當西元。
+- `instruments.history`：`^` 開頭的指數走 `md.index_history`（收盤），5D 往前找 30 天取最後 5 根。
+- `portfolio` 的績效基準：配股（`stock_dividend` 元）在除權日乘以 `1 + 元/10`。
+
+### AI
+- `ai_questions`（migration 0019）：`save_turn` 每一題寫一列（`cost` 照 `user_meta`，深度搜尋算多題）；`messages_today` 從這裡加總。保存期間和 AI 對話一樣（`ai.retention.purge`），刪帳號時一起刪。上線那天以前的提問不搬過來（那天的次數重新算）。
+- `ChatTurn._call`：串流迴圈丟出例外（`GeneratorExit`、上游錯誤）時，從 `stream.current_message_snapshot.usage` 記一列 `ai_usage`（`stop_reason="interrupted"`）；沒有開始的訊息就不記。
+- `ai_usage.stop_reason` 加寬到 40（PostgreSQL 才改欄位；SQLite 不檢查長度）。
+- `suggestions.stock_questions`：「為什麼漲／跌」的方向用 `price` 對 `change_base(quote)`；收盤價的日子不是今天時寫那一天（「11/13」），和 `ledger_questions` 的 `_day_lead` 一樣。

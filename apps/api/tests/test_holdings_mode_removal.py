@@ -243,3 +243,20 @@ def test_converted_account_keeps_its_holdings_and_dividends(converted):
         autos = sorted((t.symbol, t.trade_date.isoformat(), t.type, t.quantity, t.price, t.amount, t.note)
                        for t in db.scalars(select(Transaction).where(Transaction.source == "auto")))
     assert autos == sorted(AUTOS)
+
+
+def test_converted_buys_stay_out_of_group_feeds_and_pushes():
+    """The buys migration 0018 makes out of snapshots are holdings, not trades: like the snapshots before them they
+    are not announced to groups (2026-11-14)."""
+    from datetime import date
+    from decimal import Decimal
+
+    from forliosa.models import Transaction
+    from forliosa.services.sharing import CONVERTED_NOTE, feed_eligible
+
+    converted = Transaction(id="txn_c", user_id="u", account_id="a", symbol="2330.TW", type="buy",
+                            trade_date=date(2026, 11, 13), quantity=Decimal(1000), price=Decimal(600),
+                            source="manual", note=CONVERTED_NOTE)
+    assert not feed_eligible(converted)
+    converted.note = ""
+    assert feed_eligible(converted)

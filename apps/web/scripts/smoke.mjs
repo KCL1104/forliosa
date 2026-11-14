@@ -233,21 +233,34 @@ await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 
   if (await panel.getByText(/用掉 5 題/).count()) throw new Error("the hint stays after sending")
 })
 
-await check("帳本工具列的「記一筆」：直接開輸入框（不經過 AI 面板）；選一檔、填兩筆買進 → 新增", async () => {
+await check("帳本工具列的「記一筆」（2026-11-14 照 Google 財經）：先選股票（列持有的），再填股數、月曆選買進日期、點那天收盤填價格；兩筆買進 → 新增", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "記一筆", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("heading", { name: "記一筆", exact: true }).waitFor()
   if (await page.getByText(/買賣了什麼/).count()) throw new Error("the toolbar button went through the AI panel")
   if (await dialog.getByText("稅費試算").count()) throw new Error("the simple entry shows the fee estimate")
+  // 第一步：只有選股票（持有的列在下面），「新增」不能按，還沒有股數、日期、價格
+  await dialog.getByRole("group", { name: "持有的" }).waitFor()
+  if (!(await dialog.getByRole("button", { name: "新增", exact: true }).isDisabled())) throw new Error("新增 is enabled before a stock is picked")
+  if (await dialog.locator("#lot-qty-0").count()) throw new Error("the details show before a stock is picked")
   await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2317")
-  await page.getByRole("option", { name: /2317/ }).first().click()
+  await dialog.getByRole("option", { name: /2317/ }).first().click()
+  // 第二步
+  await dialog.getByRole("group", { name: "選好的股票" }).waitFor()
   const qty = dialog.locator("#lot-qty-0")
   const inLots = (await qty.getAttribute("aria-label")) === "張數"
   await qty.fill(inLots ? "1" : "1000")
+  await dialog.getByRole("button", { name: "買進日期，還沒選" }).click()
+  await page.getByRole("button", { name: /年 11 月 10 日/ }).click()
+  await dialog.getByRole("button", { name: /^買進日期：\d{4}\/11\/10/ }).waitFor()
+  await dialog.getByRole("button", { name: /^用 11\/10 收盤 .* 填入價格$/ }).click()
+  if (!(await dialog.locator("#lot-price-0").inputValue())) throw new Error("the close did not fill the price")
   await dialog.locator("#lot-price-0").fill("230")
   await dialog.getByRole("button", { name: "再加一筆買進" }).click()
   await dialog.getByRole("textbox", { name: /第 2 筆的(張數|股數)/ }).fill(inLots ? "2" : "2000")
+  await dialog.getByRole("button", { name: "第 2 筆的買進日期，還沒選" }).click()
+  await page.getByRole("button", { name: /年 11 月 9 日/ }).click()
   await dialog.getByRole("textbox", { name: "第 2 筆的買進價格" }).fill("228")
   await dialog.getByRole("button", { name: "新增", exact: true }).click()
   await page.getByText(/已記錄：買進 鴻海 3 張（2 筆）/).waitFor({ timeout: 8000 })
