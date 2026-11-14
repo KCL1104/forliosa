@@ -150,6 +150,39 @@ export interface MockOptions {
   terms?: { current: string; accepted?: string | null; effectiveDate?: string | null; summary?: string | null }
 }
 
+/**
+ * 商品搜尋，排序和後端 `MarketData.search` 相同：代號（或完整代號 2330.TW）相同 → 代號開頭 → 名稱相同 → 名稱開頭 → 名稱包含 → 代號包含；
+ * 同一級台股在前、代號短的在前、內建清單在收盤檔的 ETF 之前。SEC 的美股只有英文查詢（ASCII、有英文字母）搜得到，
+ * 代號完全相同以外都排在最後。
+ */
+export function searchCatalog(items: MockInstrumentSpec[], q: string): MockInstrumentSpec[] {
+  const query = q.trim()
+  if (!query) return []
+  const qu = query.toUpperCase()
+  const english = /^[\x20-\x7e]+$/.test(query) && /[A-Za-z]/.test(query)
+  const alt = english ? qu.replace(/\./g, "-") : qu
+  const scored: { item: MockInstrumentSpec; key: number[] }[] = []
+  for (const item of items) {
+    const sec = item.listing === "sec"
+    if (sec && !english) continue
+    const code = item.code.toUpperCase()
+    const name = item.name
+    const nameU = name.toUpperCase()
+    const rank =
+      code === qu || code === alt || item.symbol.toUpperCase() === qu ? 0
+      : code.startsWith(qu) || code.startsWith(alt) ? 1
+      : name === query || nameU === qu ? 2
+      : name.startsWith(query) || nameU.startsWith(qu) ? 3
+      : name.includes(query) || nameU.includes(qu) ? 4
+      : code.includes(qu) ? 5
+      : -1
+    if (rank < 0) continue
+    scored.push({ item, key: [sec && rank > 0 ? 1 : 0, rank, item.market === "US" ? 1 : 0, item.code.length, item.listing ? 1 : 0] })
+  }
+  const cmp = (a: number[], b: number[]) => a.reduce((acc, v, i) => acc || v - b[i]!, 0)
+  return scored.sort((a, b) => cmp(a.key, b.key) || a.item.code.localeCompare(b.item.code)).map((s) => s.item)
+}
+
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const scenario = options.scenario ?? "default"
   const commercial = (options.policy ?? "commercial") === "commercial"
@@ -308,7 +341,11 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const visible = () => INSTRUMENTS.filter((i) => scenario === "stress" || i !== STRESS_INSTRUMENT)
   const strip = (s: MockInstrumentSpec) => ({
     symbol: s.symbol, code: s.code, name: s.name, market: s.market, type: s.type, currency: s.currency, industry: s.industry,
+    has_quote: !(commercial && s.market === "US"),
   })
+  /** 名稱的出處（沒有其他公司資料時）：收盤檔的 ETF、SEC 的代號表 */
+  const listingSources = (s: MockInstrumentSpec): string[] =>
+    s.listing === "sec" ? [sourceOf("sec-edgar/tickers")] : [sourceOf(s.market === "TPEX" ? "tpex-openapi/price" : "twse-openapi/price")]
   const quoteOf = (s: MockInstrumentSpec): Quote => {
     if (commercial && s.market === "US") throw new ApiError(404, "not_found", "目前沒有報價")
     const last = dailyCandles(s).at(-1)!
@@ -475,16 +512,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         resync()
       }),
 
-    searchInstruments: (q) =>
-      wait(() => {
-        const query = q.trim().toLowerCase()
-        if (!query) return []
-        return visible()
-          .filter((i) => i.code.toLowerCase().includes(query) || i.name.toLowerCase().includes(query) || i.symbol.toLowerCase().includes(query))
-          .sort((a, b) => Number(b.code.toLowerCase().startsWith(query)) - Number(a.code.toLowerCase().startsWith(query)))
-          .slice(0, 20)
-          .map(strip)
-      }),
+    searchInstruments: (q) => wait(() => searchCatalog(visible(), q).slice(0, 20).map(strip)),
     getInstrument: (symbol) =>
       wait(() => {
         const s = spec(symbol)
@@ -494,12 +522,12 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           return {
             ...strip(s), summary: null, chain_stage: null, themes: [],
             shares_outstanding: us ? null : s.shares_outstanding, market_cap: us ? null : s.market_cap,
-            data_sources: us ? ["內建商品清單"] : [sourceOf("shioaji-data/official")], is_demo: false,
+            data_sources: s.listing ? listingSources(s) : us ? ["內建商品清單"] : [sourceOf("shioaji-data/official")], is_demo: false,
           }
         }
         return {
           ...strip(s), summary: s.summary, chain_stage: s.chain_stage, themes: s.themes,
-          shares_outstanding: s.shares_outstanding, market_cap: s.market_cap, data_sources: s.data_sources,
+          shares_outstanding: s.shares_outstanding, market_cap: s.market_cap, data_sources: s.listing === "sec" ? listingSources(s) : s.data_sources,
           is_demo: true,
         }
       }),

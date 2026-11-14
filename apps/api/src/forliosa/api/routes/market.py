@@ -47,7 +47,8 @@ def _symbols(raw: str) -> list[str]:
 
 @router.get("/instruments/search", response_model=list[Instrument])
 def search(q: str = Query(min_length=1, max_length=50), _user: User = Depends(current_user)):
-    return [svc.instrument_out(i) for i in get_market_data().search(q, 20)]
+    md = get_market_data()
+    return [svc.instrument_out(i, md) for i in md.search(q, 20)]
 
 
 @router.get("/instruments/{symbol}", response_model=InstrumentDetail)

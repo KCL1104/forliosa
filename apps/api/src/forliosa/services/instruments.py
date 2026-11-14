@@ -22,10 +22,10 @@ HISTORY_RANGES = ("5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX")
 VALUATION_RANGES = ("1Y", "3Y", "5Y", "10Y", "MAX")
 
 
-def instrument_out(info: InstrumentInfo) -> dict[str, Any]:
+def instrument_out(info: InstrumentInfo, md: MarketData) -> dict[str, Any]:
     return {
         "symbol": info.symbol, "code": info.code, "name": info.name, "market": info.market, "type": info.type,
-        "currency": info.currency, "industry": info.industry,
+        "currency": info.currency, "industry": info.industry, "has_quote": md.has_quote(info),
     }
 
 
@@ -49,7 +49,7 @@ def detail(md: MarketData, symbol: str) -> dict[str, Any]:
     summary = (prof.summary if research_ok else None) or (info.summary if card_ok else None)
     stage = (prof.chain_stage if research_ok else None) or (info.chain_stage if card_ok else None)
     return {
-        **instrument_out(info),
+        **instrument_out(info, md),
         "industry": info.industry or prof.industry,
         "summary": summary,
         "chain_stage": stage,

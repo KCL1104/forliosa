@@ -3,7 +3,7 @@
  * 淨值由示範收盤價與一條平穩的折溢價序列反推，數字是模擬的；規則與後端相同：
  * - 折溢價 = 同一天的收盤價 ÷ 淨值 − 1；`premium_date` 是兩者都有的最近一天。
  * - 0050：存檔約 3 個月（畫走勢）；00878：存檔 8 天（資料累積中）；00679B：海外債券 ETF，淨值是前一個營業日的，
- *   最新收盤是今天，折溢價用前一天算；00999（壓力測試）不在資料集裡。
+ *   最新收盤是今天，折溢價用前一天算；00999（壓力測試）與 00687B（上櫃債券 ETF）不在資料集裡。
  */
 import type { EtfNav, NavPoint } from "../types"
 import { sourceOf } from "./attributions"
@@ -33,6 +33,8 @@ const SCENARIOS: Record<string, Scenario | "missing"> = {
   "00878.TW": { start: "2026-11-03", mean: 0.0011, spread: 0.0009, decimals: 2 },
   "00679B.TWO": { start: "2026-09-14", lag: true, mean: 0.0055, spread: 0.0028, decimals: 4 },
   "00999.TW": "missing",
+  // 多數上櫃債券 ETF 不在〈證券投資信託基金每日淨值〉裡（2026-11-12 實測）
+  "00687B.TWO": "missing",
 }
 const DEFAULT_SCENARIO: Scenario = { start: "2026-09-01", mean: 0.0012, spread: 0.0014, decimals: 2 }
 

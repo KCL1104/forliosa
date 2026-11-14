@@ -16,6 +16,8 @@ What is archived, and from where (field names: ``forliosa.marketdata.opendata``)
 table                       source (official open data, 政府資料開放授權條款第 1 版)
 ==========================  =========================================================
 prices_daily                TWSE STOCK_DAY_ALL, TPEx daily_close_quotes
+instruments (ETFs)          the same two files: code and short name of every listed ``00…`` ETF (NT$ lines only), so
+                            the instrument list has every ETF (``marketdata.archive_provider.ArchiveProvider.listings``)
 valuation_daily             TWSE BWIBBU_ALL, TPEx peratio_analysis
 reference_prices            TWSE TWT84U, TPEx NextReferencePrice/NextLimit*
 margin_daily                TWSE MI_MARGN, TPEx margin_balance
@@ -117,6 +119,7 @@ from forliosa.models import (
     IndexConstituent,
     IndexDaily,
     InstitutionalDaily,
+    Instrument,
     MarginDaily,
     MarketEvent,
     MarketHoliday,
@@ -263,6 +266,17 @@ class Archiver:
         if stored is None or stored <= newest:
             self._status(key, newest, len(rows))
 
+    def _listed_etfs(self, raw: list[dict[str, Any]], market: str) -> int:
+        """Every ETF a close file names -> ``instruments`` (type ``etf``, industry ``ETF``, NT$), so 00679B, 00981A …
+        can be searched and opened like the built-in ETFs (the archive provider lists these rows; built-in names and
+        aliases win). ``updated_at`` is when a close file last named the ETF: one no longer listed drops out of the
+        instrument list after ``archive_provider.LISTING_DAYS``."""
+        now = datetime.now(TAIPEI)
+        rows = [{"symbol": tw_symbol(e["code"], market), "code": e["code"], "name": e["name"], "market": market,
+                 "type": "etf", "currency": "TWD", "industry": "ETF", "updated_at": now}
+                for e in od.parse_listed_etfs(raw, market)]
+        return upsert(self.db, Instrument, rows, ["symbol"])
+
     def _taifex(self, path: str) -> list[dict[str, Any]]:
         """A TAIFEX OpenAPI dataset (JSON or CSV: the Cloudflare cache serves either, see marketdata/taifex.py)."""
         return tf.decode_rows(self.fetcher.get_bytes(f"{TAIFEX_OPENAPI}/{path}"))
@@ -295,12 +309,14 @@ class Archiver:
 
     # -- TWSE OpenAPI --------------------------------------------------------------------------
     def twse_prices(self) -> int:
-        quotes = parse_stock_day_all(self._list(f"{TWSE_OPENAPI}/exchangeReport/STOCK_DAY_ALL"))
+        raw = self._list(f"{TWSE_OPENAPI}/exchangeReport/STOCK_DAY_ALL")
+        quotes = parse_stock_day_all(raw)
         rows = [{"symbol": s, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low, "close": q.price,
                  "volume": q.volume, "source": "twse-openapi"}
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
         self._close_status("twse-openapi/price", rows)
+        self._listed_etfs(raw, "TWSE")
         return n
 
     def twse_valuation(self) -> int:
@@ -542,6 +558,7 @@ class Archiver:
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
         self._close_status("tpex-openapi/price", rows)
+        self._listed_etfs(raw, "TPEX")
         refs = [{"symbol": tw_symbol(r["code"], "TPEX"),
                  "date": next_tw_trading_day(r["last_trading_day"] + timedelta(days=1)),
                  "reference_price": r["reference_price"], "limit_up": r["limit_up"], "limit_down": r["limit_down"],

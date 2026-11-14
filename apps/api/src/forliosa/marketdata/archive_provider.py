@@ -10,6 +10,7 @@ facade keeps asking the next real provider for the days the archive does not hav
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import replace
@@ -26,12 +27,19 @@ from forliosa.marketdata.base import (
     BaseProvider,
     Candle,
     DividendEvent,
+    InstrumentInfo,
     InstrumentProfile,
     QuoteData,
     market_of_symbol,
+    tw_symbol,
 )
 from forliosa.marketdata.indices import index_by_data_id
 from forliosa.timeutil import market_close_dt, today_taipei
+
+# A listing nobody has named for this long (newest row minus this) is taken as delisted and leaves the instrument list.
+LISTING_DAYS = 365
+# SEC tickers as company_tickers.json spells them (BRK-B): a letter first, so never a Taiwan code.
+_US_TICKER = re.compile(r"^[A-Z][A-Z0-9-]{0,9}$")
 
 
 def _default_session() -> Session:
@@ -181,6 +189,42 @@ class ArchiveProvider(BaseProvider):
             rows.insert(0, before)
         self._remember("fx_history", pair, rows)
         return {r.date: r.rate for r in rows} or None
+
+    # -- instrument listings -------------------------------------------------------------------------
+    def listings(self) -> list[InstrumentInfo]:
+        """Instruments only the archive knows. The facade adds them after every provider's own list, so a built-in or
+        shioaji-data entry of the same symbol (Chinese aliases, industry) always wins.
+
+        * Taiwan ETFs named in the official close files (``instruments`` rows of type ``etf`` that the price jobs
+          write): type ``etf``, industry ``ETF``, NT$, source ``twse-openapi`` / ``tpex-openapi``.
+        * SEC's ``company_tickers.json`` (``sec_tickers``): US, US$, type ``stock``, the English name as SEC spells it,
+          source ``sec-edgar``. Tickers must start with a letter (``BRK-B`` keeps SEC's hyphen), so none can look like
+          a Taiwan code.
+
+        Rows the close files / SEC's file have not named within ``LISTING_DAYS`` of their newest row are left out
+        (delisted). One read per master rebuild (hourly), never per search."""
+        from forliosa.marketdata import opendata as od
+        from forliosa.models import Instrument, SecTicker
+
+        out: list[InstrumentInfo] = []
+        window = timedelta(days=LISTING_DAYS)
+        with self.session_fn() as db:
+            etf = (Instrument.type == "etf", Instrument.market.in_(("TWSE", "TPEX")))
+            newest = db.scalar(select(func.max(Instrument.updated_at)).where(*etf))
+            if newest is not None:
+                for r in db.scalars(select(Instrument).where(*etf, Instrument.updated_at >= newest - window)):
+                    if od.is_listed_etf_code(r.code) and r.symbol == tw_symbol(r.code, r.market):
+                        out.append(InstrumentInfo(r.symbol, r.code, r.name, r.market, "etf", "TWD", "ETF",
+                                                  source="twse-openapi" if r.market == "TWSE" else "tpex-openapi"))
+            newest = db.scalar(select(func.max(SecTicker.fetched_at)))
+            if newest is not None:
+                rows = db.execute(select(SecTicker.ticker, SecTicker.title)
+                                  .where(SecTicker.fetched_at >= newest - window)).all()
+                for ticker, title in rows:
+                    if _US_TICKER.match(ticker):
+                        out.append(InstrumentInfo(ticker, ticker, " ".join((title or "").split()) or ticker, "US",
+                                                  "stock", "USD", None, source="sec-edgar"))
+        return out
 
     # -- company profile ---------------------------------------------------------------------------
     def profile(self, symbol: str) -> InstrumentProfile | None:

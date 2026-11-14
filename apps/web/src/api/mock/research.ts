@@ -323,7 +323,12 @@ function usFinancials(spec: MockInstrumentSpec, period: FinancialsPeriod): Finan
     cashflow: { operating: [], investing: [], financing: [], free_cash_flow: [] },
     margins: { gross: [], operating: [], net: [] },
     shares: null, sources: [], is_demo: false,
-    notes: [spec.type === "etf" ? "ETF 沒有財務報表資料" : "SEC EDGAR 找不到這個代號（ETF 與外國公司通常不在美國申報 10-K／10-Q）"],
+    notes: [
+      spec.type === "etf" ? "ETF 沒有財務報表資料"
+      // SEC 代號表裡的公司：真實後端會向 SEC 取財報，示範資料只放了兩家
+      : spec.listing === "sec" ? "示範資料只有 AAPL、NVDA 的 SEC 財報"
+      : "SEC EDGAR 找不到這個代號（ETF 與外國公司通常不在美國申報 10-K／10-Q）",
+    ],
   }
 }
 

@@ -160,6 +160,8 @@ class Instrument(BaseModel):
     type: Literal["stock", "etf"]
     currency: str
     industry: str | None
+    # False: no quote source covers this market under DATA_POLICY (commercial: every US stock; 「沒有報價」)
+    has_quote: bool = True
 
 
 class InstrumentDetail(Instrument):

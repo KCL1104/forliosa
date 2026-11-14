@@ -40,7 +40,8 @@ export function normalize(input: string): string {
     .trim()
 }
 
-const CODE = /^(?:\d{4,6}[A-Z]?|[A-Z]{1,5})$/
+/** 台股代號（2330、00679B）或美股代號（NVDA、T；BRK.B 與 SEC 寫法的 BRK-B 都可以） */
+const CODE = /^(?:\d{4,6}[A-Z]?|[A-Z]{1,5}(?:[.-][A-Z])?)$/
 const NUMBER = /^\d+(?:\.\d+)?$/
 const BUY = /^(?:買進|買入|買)$/
 const SELL = /^(?:賣出|賣掉|賣)$/

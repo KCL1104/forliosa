@@ -98,6 +98,7 @@ from decimal import Decimal
 from typing import Any
 
 from forliosa.marketdata.base import parse_decimal, parse_int, parse_tw_date, tw_symbol
+from forliosa.marketdata.fund_nav import is_etf_code
 
 # Stocks (4 digits, incl. KY) and funds/ETFs/ETNs ("00…"); warrants, bonds and TDR warrants are skipped.
 _CODE = re.compile(r"^(\d{4}|00\d{2,4}[A-Z]?)$")
@@ -442,6 +443,35 @@ def parse_fund_profiles(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
         values["units"] = units
         out.append({"code": code, "date": d, "values": values})
     return out
+
+
+# -- listed ETFs (both close files) ------------------------------------------------------------------
+# Columns of the close files: TWSE STOCK_DAY_ALL Code / Name, TPEx tpex_mainboard_daily_close_quotes
+# SecuritiesCompanyCode / CompanyName.
+_CLOSE_FILE_KEYS = {"TWSE": ("Code", "Name"), "TPEX": ("SecuritiesCompanyCode", "CompanyName")}
+
+
+def is_listed_etf_code(code: str) -> bool:
+    """A Taiwan ETF quoted in NT$: ``00`` + 2–4 digits + an optional letter (B bond, L leveraged, R inverse, U futures,
+    A active …; ``fund_nav.is_etf_code``). ``…K`` codes are the foreign-currency trading lines of an ETF (00636K quotes
+    in US$): the ledger would value them as NT$, so they are left out."""
+    code = code.strip().upper()
+    return is_etf_code(code) and not code.endswith("K")
+
+
+def parse_listed_etfs(rows: list[dict[str, Any]], market: str) -> list[dict[str, Any]]:
+    """ETF codes and short names (「元大台灣50」「元大美債20年」) in a whole-market close file -> ``[{code, name}]``.
+
+    A row counts even without a close that day (bond ETFs often do not trade): the file lists every listed security.
+    Names are kept as published, whitespace collapsed; rows without a name are skipped."""
+    code_key, name_key = _CLOSE_FILE_KEYS[market]
+    out: dict[str, dict[str, Any]] = {}
+    for r in rows:
+        code = _text(r.get(code_key)).upper()
+        name = " ".join(_text(r.get(name_key)).split())
+        if is_listed_etf_code(code) and name:
+            out[code] = {"code": code, "name": name[:100]}
+    return sorted(out.values(), key=lambda e: e["code"])
 
 
 # -- TPEx OpenAPI ----------------------------------------------------------------------------------

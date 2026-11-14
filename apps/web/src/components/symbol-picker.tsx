@@ -4,7 +4,7 @@ import { useId, useState } from "react"
 import { useInstrumentSearch } from "@/api/queries"
 import type { Instrument } from "@/api/types"
 import { Button } from "@/components/ui/button"
-import { MARKET_LABEL } from "@/lib/labels"
+import { marketTag } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 
 /**
@@ -82,7 +82,7 @@ export function SymbolPicker({
               >
                 <span className="num w-14 shrink-0 font-semibold">{i.code}</span>
                 <span className="min-w-0 flex-1 truncate">{i.name}</span>
-                <span className="text-xs text-ink-2">{ok ? MARKET_LABEL[i.market] : (rejectReason ?? "不能選")}</span>
+                <span className="text-xs text-ink-2">{ok ? marketTag(i) : (rejectReason ?? "不能選")}</span>
               </CommandPrimitive.Item>
             )
           })}

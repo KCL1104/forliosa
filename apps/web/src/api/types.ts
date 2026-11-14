@@ -88,6 +88,8 @@ export interface Instrument {
   type: InstrumentType
   currency: Currency
   industry: string | null
+  /** false：這個市場沒有報價來源（商用模式的美股），搜尋結果標「沒有報價」。後端一定回；測試資料可以省略（視為有） */
+  has_quote?: boolean
 }
 
 export interface InstrumentDetail extends Instrument {

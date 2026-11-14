@@ -11,6 +11,7 @@ import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { buildLocalChart, parseChartIntent } from "./chart-intent"
 import { parseIntent, sharesOf } from "./intent"
+import { pickInstrument } from "./resolve"
 import { AI_UNAVAILABLE } from "./answer-text"
 import { buildLocalDeepReport } from "./deep-search"
 import { aiApi, aiRemote, applyChatEvent, draftFromServer, streamChat, type AiUsage, type ChatEvent } from "./remote"
@@ -81,13 +82,7 @@ export function useAiRunner(ctx: AiContext) {
   async function resolveInstrument(target: string): Promise<Instrument | null> {
     const q = target.trim()
     const results = await qc.fetchQuery({ queryKey: qk.search(q), queryFn: () => api.searchInstruments(q), staleTime: 5 * 60_000 })
-    const upper = q.toUpperCase()
-    return (
-      results.find((i) => i.code.toUpperCase() === upper || i.symbol.toUpperCase() === upper) ??
-      results.find((i) => i.name === q) ??
-      results[0] ??
-      null
-    )
+    return pickInstrument(q, results)
   }
 
   async function preview(draftId: string, input: TransactionInput) {

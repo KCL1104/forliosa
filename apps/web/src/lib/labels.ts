@@ -25,6 +25,11 @@ export function benchmarkLabel(symbol: string): string {
 /** 市場簡稱 */
 export const MARKET_LABEL: Record<Market, string> = { TWSE: "上市", TPEX: "上櫃", US: "美股" }
 
+/** 搜尋結果右側的市場標示；沒有報價的（商用模式的美股）寫「美股・沒有報價」 */
+export function marketTag(i: { market: Market; has_quote?: boolean }): string {
+  return i.has_quote === false ? `${MARKET_LABEL[i.market]}・沒有報價` : MARKET_LABEL[i.market]
+}
+
 /** 交易類型（zh-TW） */
 export const TYPE_LABEL: Record<TransactionType, string> = {
   buy: "買進",

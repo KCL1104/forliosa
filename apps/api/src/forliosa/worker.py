@@ -108,7 +108,7 @@ from forliosa.db import get_engine, session_factory
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.base import ProviderUnavailable
 from forliosa.marketdata.http import HttpFetcher
-from forliosa.marketdata.service import MarketData, get_market_data
+from forliosa.marketdata.service import LISTING_DATASETS, MarketData, get_market_data
 from forliosa.models import Instrument, PriceDaily
 from forliosa.timeutil import TAIPEI, is_tw_trading_day, now_taipei
 
@@ -204,9 +204,13 @@ def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
 
 
 def refresh_instruments(db: Session, md: MarketData) -> int:
+    """Cache the providers' instrument lists in ``instruments``. The archive's own listings are not written back: its
+    ETF rows are already there (the price jobs keep them current) and SEC's tickers stay in ``sec_tickers``."""
     master = md.master()
     existing = {i.symbol: i for i in db.scalars(select(Instrument))}
     for sym, info in master.items():
+        if info.source in LISTING_DATASETS:
+            continue
         row = existing.get(sym) or Instrument(symbol=sym)
         row.code, row.name, row.market, row.type = info.code, info.name, info.market, info.type
         row.currency, row.industry = info.currency, info.industry

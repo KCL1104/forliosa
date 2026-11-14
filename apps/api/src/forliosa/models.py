@@ -141,7 +141,9 @@ class HoldingSnapshot(Base):
 
 
 class Instrument(Base):
-    """Instrument master cache (refreshed by the worker from the market-data providers)."""
+    """Instrument master cache (refreshed by the worker from the market-data providers), plus every Taiwan ETF the
+    official close files name: the archive's price jobs write those rows (``updated_at`` = when a close file last named
+    the ETF) and ``ArchiveProvider.listings`` reads them back into the instrument list."""
 
     __tablename__ = "instruments"
 

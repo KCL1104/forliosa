@@ -19,7 +19,7 @@ from decimal import Decimal
 from typing import Any, TypeVar
 
 from forliosa.config import Settings
-from forliosa.datapolicy import Policy, provider_allowed
+from forliosa.datapolicy import Policy, label, provider_allowed
 from forliosa.domain.ticks import ex_rights_prices, is_fund_code, price_limits
 from forliosa.marketdata.base import (
     BaseProvider,
@@ -47,7 +47,12 @@ T = TypeVar("T")
 
 COOLDOWN_SECONDS = 300
 MASTER_TTL_SECONDS = 3600
+LISTINGS_RETRY_SECONDS = 60  # the master missed a provider's listings (database down): rebuild it this soon
 QUOTE_TTL_SECONDS = 30
+# Instruments only the archive's listings name (``InstrumentInfo.source`` -> the dataset their name comes from): every
+# ETF in the official close files, SEC's US tickers.
+LISTING_DATASETS = {"twse-openapi": "twse-openapi/price", "tpex-openapi": "tpex-openapi/price",
+                    "sec-edgar": "sec-edgar/tickers"}
 
 
 @dataclass
@@ -55,6 +60,28 @@ class Answer[T]:
     value: T
     is_demo: bool
     source: str
+
+
+class _Entry:
+    """One instrument in the search index: upper-cased code and names computed once per master rebuild."""
+
+    __slots__ = ("code", "info", "listing", "names", "symbol", "us_listing")
+
+    def __init__(self, info: InstrumentInfo):
+        self.info = info
+        self.code = info.code.upper()
+        self.symbol = info.symbol.upper()
+        self.names = tuple((n, n.upper()) for n in (info.name, *info.aliases))
+        self.listing = info.source in LISTING_DATASETS  # only the archive's listings know it
+        self.us_listing = self.listing and info.market == "US"  # SEC's tickers: English names only
+
+
+def listing_sources(info: InstrumentInfo) -> tuple[str, ...]:
+    """Where an instrument's name and code come from, for a page that has no other profile source."""
+    if info.source == "built-in":
+        return ("內建商品清單",)
+    key = LISTING_DATASETS.get(info.source)
+    return (label(key),) if key else ()
 
 
 class MarketData:
@@ -72,8 +99,9 @@ class MarketData:
         self._down_until: dict[str, float] = {}
         self._lock = threading.Lock()
         self._master: dict[str, InstrumentInfo] | None = None
-        self._master_at = 0.0
+        self._master_until = 0.0
         self._by_code: dict[str, list[str]] = {}
+        self._index: list[_Entry] = []
         self._quote_cache: dict[str, tuple[float, QuoteData]] = {}
 
     # -- provider plumbing -----------------------------------------------------------------------
@@ -132,23 +160,44 @@ class MarketData:
 
     # -- instruments -----------------------------------------------------------------------------
     def master(self) -> dict[str, InstrumentInfo]:
+        """Every known instrument by symbol, rebuilt at most hourly. Providers' own lists come first (shioaji-data's
+        cards, then the built-in catalog of the demo provider: names, Chinese aliases); a provider's ``listings()``
+        (the archive: every ETF in the official close files, SEC's US tickers) only adds symbols nobody else named.
+        If a listing cannot be read (database down), the master is rebuilt again after ``LISTINGS_RETRY_SECONDS``."""
         with self._lock:
-            if self._master is not None and time.monotonic() - self._master_at < MASTER_TTL_SECONDS:
+            if self._master is not None and time.monotonic() < self._master_until:
                 return self._master
         merged: dict[str, InstrumentInfo] = {}
         for p in self._available(include_demo=True):  # the built-in catalog is reference data, not prices
             items = self._call(p, p.instruments)
             for info in items or []:
                 merged.setdefault(info.symbol, info)
+        complete = True
+        for p in self.providers:  # a database read: not subject to a network provider's cool-down
+            fn = getattr(p, "listings", None)
+            if fn is None:
+                continue
+            try:
+                items = fn()
+            except Exception as exc:  # the list still works without them; try again soon
+                log.warning("instrument listings of %s unavailable: %s", p.name, exc)
+                complete = False
+                continue
+            for info in items or []:
+                merged.setdefault(info.symbol, info)
         by_code: dict[str, list[str]] = {}
         for sym, info in merged.items():
             by_code.setdefault(info.code.upper(), []).append(sym)
+        index = [_Entry(info) for info in merged.values()]
+        ttl = MASTER_TTL_SECONDS if complete else LISTINGS_RETRY_SECONDS
         with self._lock:
-            self._master, self._master_at, self._by_code = merged, time.monotonic(), by_code
+            self._master, self._by_code, self._index = merged, by_code, index
+            self._master_until = time.monotonic() + ttl
         return merged
 
     def resolve(self, text: str) -> str | None:
-        """'2330' / '2330.tw' / 'aapl' -> canonical symbol, or None if unknown."""
+        """'2330' / '2330.tw' / 'aapl' / 'brk.b' -> canonical symbol, or None if unknown. A code that two markets
+        share resolves to the Taiwan listing."""
         s = text.strip().upper()
         master = self.master()
         if s.endswith(".TWO"):
@@ -156,8 +205,13 @@ class MarketData:
         if s in master:
             return s
         syms = self._by_code.get(s)
+        if not syms and "." in s and market_of_symbol(s) == "US":
+            alt = s.replace(".", "-")  # BRK.B -> BRK-B (SEC's spelling)
+            if alt in master:
+                return alt
+            syms = self._by_code.get(alt)
         if syms:
-            return sorted(syms)[0]
+            return min(syms, key=lambda x: (market_of_symbol(x) == "US", x))
         return None
 
     def resolve_benchmark(self, text: str) -> str | None:
@@ -175,32 +229,48 @@ class MarketData:
         return self.master().get(sym) if sym else None
 
     def search(self, q: str, limit: int = 20) -> list[InstrumentInfo]:
+        """Code, name or alias matches, best first: exact code (or symbol, ``2330.TW``), code prefix, exact name, name
+        prefix, name contains, code contains. Within a rank Taiwan comes before the US, shorter codes first (0050 before
+        00500…), and the built-in / provider entries before the archive's listings of the same code length.
+
+        SEC's US tickers (English names only) answer English queries only (ASCII with a letter; ``2330`` or 「台積」
+        never reach them) and come after everything else unless the ticker matches exactly (``T``, ``MSFT``)."""
         q = q.strip()
         if not q:
             return []
         qu = q.upper()
+        self.master()
+        english = q.isascii() and any(c.isalpha() for c in q)
+        alt = qu.replace(".", "-") if english else qu  # BRK.B -> BRK-B
         scored: list[tuple[tuple, InstrumentInfo]] = []
-        for info in self.master().values():
-            code = info.code.upper()
-            names = [info.name, *info.aliases]
-            if code == qu:
+        for e in self._index:
+            if e.us_listing and not english:
+                continue
+            code = e.code
+            if code in (qu, alt) or e.symbol == qu:
                 rank = 0
-            elif code.startswith(qu):
+            elif code.startswith(qu) or code.startswith(alt):
                 rank = 1
-            elif any(n == q or n.upper() == qu for n in names):
+            elif any(n == q or nu == qu for n, nu in e.names):
                 rank = 2
-            elif any(n.startswith(q) or n.upper().startswith(qu) for n in names):
+            elif any(n.startswith(q) or nu.startswith(qu) for n, nu in e.names):
                 rank = 3
-            elif any(q in n or qu in n.upper() for n in names):
+            elif any(q in n or qu in nu for n, nu in e.names):
                 rank = 4
             elif qu in code:
                 rank = 5
             else:
                 continue
-            # Prefer Taiwan listings, then shorter codes (0050 before 00500…), then code order.
-            scored.append(((rank, info.market == "US", len(info.code), info.code), info))
+            info = e.info
+            later = e.us_listing and rank > 0
+            scored.append(((later, rank, info.market == "US", len(info.code), e.listing, info.code), info))
         scored.sort(key=lambda x: x[0])
         return [info for _, info in scored[:limit]]
+
+    def has_quote(self, info: InstrumentInfo) -> bool:
+        """Whether any quote source covers the instrument's market under the policy: US stocks have none under
+        ``commercial`` (no commercially usable US price source; personal mode fills them with demo prices)."""
+        return info.market != "US" or self.demo_data_allowed
 
     def profile(self, symbol: str) -> InstrumentProfile:
         """Merged across real providers, highest priority first: the archive's official company data (issued
@@ -217,7 +287,7 @@ class MarketData:
         info = self.instrument(symbol)
         return InstrumentProfile(
             symbol=symbol, summary=info.summary if info else None, chain_stage=info.chain_stage if info else None,
-            data_sources=("內建商品清單",) if info and info.source == "built-in" else (),
+            data_sources=listing_sources(info) if info else (),
         )
 
     # -- quotes ----------------------------------------------------------------------------------

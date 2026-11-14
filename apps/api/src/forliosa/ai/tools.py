@@ -315,7 +315,7 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     divs = [_pick(d, "year", "period", "cash_dividend", "stock_dividend", "ex_dividend_date", "payment_date",
                   "status", "progress", "board_date", "cash_sources", "is_demo") for d in divs]
     return {
-        **instr.instrument_out(info),
+        **instr.instrument_out(info, ctx.md),
         "summary": summary[:240] if isinstance(summary, str) else None,
         "themes": detail.get("themes") or [],
         "quote": _pick(instr.quote_out(q), "price", "prev_close", "reference_price", "change", "change_pct",
@@ -649,7 +649,7 @@ def search_instruments(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import instruments as instr
 
     found = ctx.md.search(args["query"], 10)
-    return {"results": [instr.instrument_out(i) for i in found]}
+    return {"results": [instr.instrument_out(i, ctx.md) for i in found]}
 
 
 # -- draft_transaction -----------------------------------------------------------------------------------
@@ -952,7 +952,9 @@ TOOLS: list[ToolSpec] = sorted([
              ("kind", "symbols", "range"), draw_chart, lambda a: _CHART_LABELS.get(a.get("kind"), "畫圖")),
     ToolSpec("search_instruments",
              "Find Taiwan or US stocks/ETFs by code or (partial) Chinese/English name. Call this when the user names "
-             "a company you cannot map to a code with certainty.",
+             "a company you cannot map to a code with certainty. US companies other than AAPL/NVDA/VOO/QQQ only have "
+             "their English name, so search them in English. has_quote false means there is no price: never guess "
+             "one.",
              {"query": {"type": "string", "description": "Code or name, e.g. 台積, 0056, NVDA"}},
              ("query",), search_instruments, lambda a: f"搜尋商品「{a.get('query', '')}」"),
     ToolSpec("draft_transaction",

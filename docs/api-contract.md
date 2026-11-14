@@ -83,7 +83,7 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/instruments/search?q=台積` | 用代號或中文名稱搜尋，回傳 `Instrument[]`（最多 20 筆） |
+| GET | `/instruments/search?q=台積` | 用代號或名稱搜尋，回傳 `Instrument[]`（最多 20 筆）。清單有內建商品、證交所／櫃買收盤檔裡的每一檔台股 ETF，以及 SEC〈company_tickers.json〉的美股代號（英文名）；SEC 的美股只有英文查詢搜得到，排在台股之後（代號完全相同的除外）。排序見 `apps/api/CONTRACT_NOTES.md`「2026-11-14 商品清單」 |
 | GET | `/instruments/{symbol}` | `InstrumentDetail` |
 | GET | `/instruments/{symbol}/quote` | `Quote` |
 | GET | `/quotes?symbols=2330.TW,0050.TW` | `Quote[]`（批次） |
@@ -102,7 +102,8 @@
   "market": "TWSE",          // "TWSE" | "TPEX" | "US"
   "type": "stock",           // "stock" | "etf"
   "currency": "TWD",
-  "industry": "半導體業"
+  "industry": "半導體業",    // 可為 null（SEC 代號表的美股沒有）
+  "has_quote": true          // false：目前的資料政策沒有這個市場的報價（商用模式的美股），搜尋結果標「沒有報價」
 }
 
 // InstrumentDetail = Instrument + 

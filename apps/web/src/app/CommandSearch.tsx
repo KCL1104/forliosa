@@ -7,7 +7,7 @@ import type { Instrument } from "@/api/types"
 import { Dialog, DialogClose, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { useVisualViewport } from "@/hooks/use-visual-viewport"
-import { MARKET_LABEL } from "@/lib/labels"
+import { MARKET_LABEL, marketTag } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useUi } from "./ui-store"
@@ -122,8 +122,7 @@ export function CommandSearch() {
                     <span className="num w-16 shrink-0 text-md font-semibold">{i.code}</span>
                     <span className="min-w-0 flex-1 truncate">{i.name}</span>
                     <span className="shrink-0 text-sm text-muted-foreground">
-                      {MARKET_LABEL[i.market]}
-                      {i.type === "etf" ? "・ETF" : i.industry ? `・${i.industry}` : ""}
+                      {i.has_quote === false ? marketTag(i) : `${MARKET_LABEL[i.market]}${i.type === "etf" ? "・ETF" : i.industry ? `・${i.industry}` : ""}`}
                     </span>
                   </CommandPrimitive.Item>
                 ))}

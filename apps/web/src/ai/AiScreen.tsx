@@ -5,7 +5,7 @@ import { useState } from "react"
 import { appToday } from "@/api"
 import { useInstrumentSearch } from "@/api/queries"
 import { useMediaQuery } from "@/hooks/use-media-query"
-import { MARKET_LABEL } from "@/lib/labels"
+import { marketTag } from "@/lib/labels"
 import { cn } from "@/lib/utils"
 import { UsageNote } from "./AiPanel"
 import { Composer } from "./Composer"
@@ -89,7 +89,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
             {/* 代號欄放得下 6 碼（006208）：17px 時 64px */}
             <span className={cn("num shrink-0 font-medium", home ? "w-16" : "w-14")}>{i.code}</span>
             <span className="min-w-0 flex-1 truncate">{i.name}</span>
-            <span className="shrink-0 text-sm text-ink-2">{MARKET_LABEL[i.market]}</span>
+            <span className="shrink-0 text-sm text-ink-2">{marketTag(i)}</span>
           </button>
         </li>
       ))}

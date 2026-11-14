@@ -19,6 +19,12 @@ export interface MockInstrumentSpec extends Omit<InstrumentDetail, "is_demo"> {
   /** 月營收基準（千元）與年成長 */
   revenue_base?: number
   revenue_growth?: number
+  /**
+   * 只有後端存檔的清單認得的商品（和後端 `ArchiveProvider.listings` 相同）：
+   * `close_file`＝證交所／櫃買收盤檔裡的 ETF（名稱照收盤檔）；`sec`＝SEC〈company_tickers.json〉的美股（只有英文名、
+   * 只有英文查詢搜得到、商用模式沒有報價）。沒寫的是內建清單或 shioaji-data 的商品。
+   */
+  listing?: "close_file" | "sec"
 }
 
 const TWSE_SRC = ["臺灣證券交易所 OpenAPI（政府資料開放授權條款第 1 版）", "shioaji-data（政府資料開放授權條款第 1 版）"]
@@ -157,13 +163,15 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     eps_now: 4.85, eps_growth: 0.02, bvps_now: 51.2, per_multiples: [22, 24, 26, 28, 30], pbr_multiples: [2.2, 2.4, 2.6, 2.8, 3],
     revenue_base: 19_000_000, revenue_growth: 0.02,
   },
-  {
-    symbol: "MSFT", code: "MSFT", name: "Microsoft", market: "US", type: "stock", currency: "USD", industry: "Software",
-    summary: "作業系統、Office 與 Azure 雲端服務。", chain_stage: "軟體", themes: ["雲端", "AI"],
-    shares_outstanding: 7430000000, market_cap: 3900000000000, data_sources: ["示範資料（美股資料來源待定）"],
-    price: 524.9, prev_close: 527.1, drift: 0.18, vol: 0.24, avg_volume: 20_000_000,
-    eps_now: 14.1, eps_growth: 0.14, bvps_now: 46, per_multiples: [25, 29, 33, 37, 41], pbr_multiples: [9, 11, 13, 15, 17],
-  },
+  // ── SEC〈company_tickers.json〉的美股：英文名照 SEC 的寫法，沒有中文名、產業與簡介 ─────────────
+  sec("MSFT", "MICROSOFT CORP", 524.9, 527.1, 0.18, 0.24, 20_000_000),
+  sec("TSLA", "Tesla, Inc.", 431.2, 425.8, 0.3, 0.55, 95_000_000),
+  sec("AMZN", "AMAZON COM INC", 238.4, 236.9, 0.15, 0.3, 45_000_000),
+  sec("GOOGL", "Alphabet Inc.", 281.5, 279.2, 0.17, 0.28, 30_000_000),
+  sec("TSM", "TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD", 302.6, 298.1, 0.25, 0.32, 14_000_000),
+  sec("BRK-B", "BERKSHIRE HATHAWAY INC", 497.3, 498.8, 0.1, 0.16, 4_000_000),
+  sec("JPM", "JPMORGAN CHASE & CO", 309.7, 307.4, 0.12, 0.22, 9_000_000),
+  sec("T", "AT&T INC.", 26.1, 26.3, 0.04, 0.18, 35_000_000),
   // ── 「相關股票」會出現的商品（關係企業、同業、同指數 ETF） ─────────────
   {
     symbol: "3443.TW", code: "3443", name: "創意", market: "TWSE", type: "stock", currency: "TWD", industry: "半導體業",
@@ -196,17 +204,44 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     price: 139.2, prev_close: 138.4, drift: 0.14, vol: 0.19, avg_volume: 9_000_000,
   },
   {
-    symbol: "006201.TWO", code: "006201", name: "元大富櫃50", market: "TPEX", type: "etf", currency: "TWD", industry: "ETF",
+    symbol: "006201.TWO", code: "006201", name: "元大富櫃50", market: "TPEX", type: "etf", currency: "TWD", industry: "ETF", listing: "close_file",
     summary: null, chain_stage: null, themes: ["中小型"], shares_outstanding: null, market_cap: null, data_sources: ["櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）"],
     price: 34.85, prev_close: 35.1, drift: 0.08, vol: 0.22, avg_volume: 600_000,
   },
   // 上櫃債券 ETF：淨值是前一個營業日的（海外標的），示範「淨值日期與收盤日期不同」
   {
-    symbol: "00679B.TWO", code: "00679B", name: "元大美債20年", market: "TPEX", type: "etf", currency: "TWD", industry: "ETF",
+    symbol: "00679B.TWO", code: "00679B", name: "元大美債20年", market: "TPEX", type: "etf", currency: "TWD", industry: "ETF", listing: "close_file",
     summary: null, chain_stage: null, themes: ["債券", "美債"], shares_outstanding: null, market_cap: null, data_sources: ["櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）"],
     price: 26.61, prev_close: 26.55, drift: 0.01, vol: 0.12, avg_volume: 9_000_000,
   },
 ]
+
+// ── 收盤檔裡的其他 ETF（不在內建清單）：主動式、反向、上櫃債券、高股息 ─────────────
+INSTRUMENTS.push(
+  closeFileEtf("00981A.TW", "主動統一台股增長", 24.2, 24.05, 0.12, 0.2, 60_000_000, ["主動式"]),
+  closeFileEtf("00632R.TW", "元大台灣50反1", 10.52, 10.66, -0.15, 0.2, 40_000_000, ["反向"]),
+  closeFileEtf("00940.TW", "元大台灣價值高息", 9.87, 9.85, 0.03, 0.13, 20_000_000, ["高股息"]),
+  closeFileEtf("00687B.TWO", "國泰20年美債", 30.12, 30.07, 0.01, 0.12, 5_000_000, ["債券", "美債"]),
+)
+
+function closeFileEtf(symbol: string, name: string, price: number, prev_close: number, drift: number, vol: number, avg_volume: number, themes: string[]): MockInstrumentSpec {
+  const tpex = symbol.endsWith(".TWO")
+  return {
+    symbol, code: symbol.split(".")[0]!, name, market: tpex ? "TPEX" : "TWSE", type: "etf", currency: "TWD", industry: "ETF", listing: "close_file",
+    summary: null, chain_stage: null, themes, shares_outstanding: null, market_cap: null,
+    data_sources: [tpex ? "櫃買中心 OpenAPI（政府資料開放授權條款第 1 版）" : "臺灣證券交易所 OpenAPI（政府資料開放授權條款第 1 版）"],
+    price, prev_close, drift, vol, avg_volume,
+  }
+}
+
+/** SEC 的美股：個人模式（示範資料）才有報價；簡介、產業、題材都沒有 */
+function sec(code: string, name: string, price: number, prev_close: number, drift: number, vol: number, avg_volume: number): MockInstrumentSpec {
+  return {
+    symbol: code, code, name, market: "US", type: "stock", currency: "USD", industry: null, listing: "sec",
+    summary: null, chain_stage: null, themes: [], shares_outstanding: null, market_cap: null, data_sources: [],
+    price, prev_close, drift, vol, avg_volume,
+  }
+}
 
 /** 壓力測試情境（?mock=stress）用：超長名稱、上千億市值、大幅下跌 */
 export const STRESS_INSTRUMENT: MockInstrumentSpec = {
@@ -226,5 +261,8 @@ export const NEGATIVE_EPS_WINDOWS: Record<string, { from: string; to: string; ep
 
 export function findInstrument(symbol: string): MockInstrumentSpec | undefined {
   const s = symbol.toUpperCase()
-  return INSTRUMENTS.find((i) => i.symbol.toUpperCase() === s || i.code.toUpperCase() === s)
+  const hit = INSTRUMENTS.find((i) => i.symbol.toUpperCase() === s || i.code.toUpperCase() === s)
+  if (hit || !s.includes(".") || s.includes(".TW")) return hit
+  const dashed = s.replace(/\./g, "-") // BRK.B → SEC 的寫法 BRK-B
+  return INSTRUMENTS.find((i) => i.code === dashed)
 }
