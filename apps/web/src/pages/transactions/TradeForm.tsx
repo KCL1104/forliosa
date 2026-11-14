@@ -22,7 +22,7 @@ import { autoEditNotice, isUnchangedEdit } from "@/lib/ledger-display"
 import { cn } from "@/lib/utils"
 import { FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
-import { QuickAdd } from "./QuickAdd"
+import { type EntryMode, QuickAdd } from "./QuickAdd"
 import { usePrefs } from "@/stores/prefs"
 
 
@@ -39,21 +39,32 @@ const CASH_TYPES: TransactionType[] = ["deposit", "withdrawal", "fee", "tax", "i
 /**
  * 掛在 AppShell：依裝置用 Dialog（桌面）或 Vaul Drawer（手機）。
  * 預設是簡單的買進輸入（`QuickAdd`）；編輯一筆交易、或從那裡按「賣出、股利或其他」，才是完整表單。
+ * 帳戶是「只記持股」時，同一個輸入框是持股的輸入（`HoldingsEditor`），標題跟著換成「目前持股」。
  */
 export function TradeFormHost() {
-  const { open, symbol, edit, full, sell, prefill } = useUi((s) => s.tradeForm)
+  const { open, symbol, edit, full, sell, prefill, accountId } = useUi((s) => s.tradeForm)
   const openTradeForm = useUi((s) => s.openTradeForm)
   const close = useUi((s) => s.closeTradeForm)
   const isDesktop = useIsDesktop()
+  const [mode, setMode] = useState<EntryMode>("transactions")
   const quick = !edit && !full
-  const title = edit ? "編輯交易" : quick ? "記一筆" : "記一筆交易"
+  const holdingsMode = quick && mode === "holdings"
+  const title = edit ? "編輯交易" : holdingsMode ? "目前持股" : quick ? "記一筆" : "記一筆交易"
   // 畫面上不寫副標；給螢幕報讀器一句
-  const description = quick ? "選一檔股票，填股數、買進日期與價格。" : "賣出、股利與其他類型的交易。"
-  const formKey = edit?.id ?? (quick ? "quick" : sell ? "sell" : "new")
+  const description = holdingsMode ? "每一檔填股數與均價，存成這個帳戶目前的持股。" : quick ? "選一檔股票，填股數、買進日期與價格。" : "賣出、股利與其他類型的交易。"
+  const formKey = edit?.id ?? (quick ? `quick:${accountId ?? ""}` : sell ? "sell" : "new")
   const body = (layout: "split" | "stack") =>
     quick ? (
       // 「賣出、股利或其他」：買進之外最常見的是賣出，先選好；已經填的帳戶、第一筆的數量、價格、日期一起帶過去
-      <QuickAdd key={formKey} initialSymbol={symbol} onDone={close} onFull={(code, filled) => openTradeForm({ symbol: code ?? symbol, full: true, sell: true, prefill: filled })} sheet={layout === "stack"} />
+      <QuickAdd
+        key={formKey}
+        initialSymbol={symbol}
+        initialAccountId={accountId}
+        onDone={close}
+        onFull={(code, filled) => openTradeForm({ symbol: code ?? symbol, full: true, sell: true, prefill: filled })}
+        onModeChange={setMode}
+        sheet={layout === "stack"}
+      />
     ) : (
       <TradeForm key={formKey} initialSymbol={symbol} edit={edit} sell={sell} prefill={prefill} onDone={close} layout={layout} />
     )

@@ -10,6 +10,7 @@ import type {
   ChipsRange,
   FinancialsPeriod,
   HistoryRange,
+  HoldingsSnapshotBody,
   PerformanceRange,
   Preferences,
   RecurringPlanInput,
@@ -24,6 +25,8 @@ export const qk = {
   accounts: ["accounts"] as const,
   summary: (accountId?: string) => ["portfolio", "summary", accountId ?? "all"] as const,
   holdings: (accountId?: string) => ["portfolio", "holdings", accountId ?? "all"] as const,
+  /** 「只記持股」帳戶的快照：放在 portfolio 底下，存了快照、刪了帳戶就跟著重新讀 */
+  snapshot: (accountId: string) => ["portfolio", "snapshot", accountId] as const,
   performance: (range: PerformanceRange, accountId?: string, benchmark?: string) =>
     ["portfolio", "performance", range, accountId ?? "all", benchmark ?? "default"] as const,
   instrument: (symbol: string) => ["instrument", symbol] as const,
@@ -217,6 +220,28 @@ export function useUpdateAccount() {
       void qc.invalidateQueries({ queryKey: qk.accounts })
     },
   })
+}
+/** 刪除帳戶（不能復原）：帳戶清單、持股、紀錄、定期定額都跟著重新讀 */
+export function useDeleteAccount() {
+  const qc = useQueryClient()
+  const invalidate = useInvalidatePortfolio()
+  return useMutation({
+    mutationFn: (id: string) => api.deleteAccount(id),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: qk.accounts })
+      void qc.invalidateQueries({ queryKey: qk.recurring })
+      invalidate()
+    },
+  })
+}
+/** 「只記持股」帳戶目前的快照（`enabled: false` 時不讀，例如還沒選到這種帳戶） */
+export function useAccountSnapshot(accountId: string, enabled = true) {
+  return useQuery({ enabled: enabled && !!accountId, queryKey: qk.snapshot(accountId), queryFn: () => api.getAccountHoldings(accountId), staleTime: 0 })
+}
+/** 存成持股：快照、持股、總資產、紀錄跟著重新讀 */
+export function usePutHoldings() {
+  const invalidate = useInvalidatePortfolio()
+  return useMutation({ mutationFn: ({ id, body }: { id: string; body: HoldingsSnapshotBody }) => api.putHoldings(id, body), onSuccess: invalidate })
 }
 
 // ── 重新設計新增（2026-11-12） ─────────────────────────────

@@ -22,7 +22,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from forliosa.ai.pricing import CallUsage, billable_tokens, estimate_cost
@@ -252,6 +252,20 @@ def delete_thread(db: Session, user: User, thread_id: str) -> None:
         d.thread_id = None
     db.delete(t)
     db.commit()
+
+
+def delete_all_threads(db: Session, user: User) -> int:
+    """Delete every conversation of ``user`` with all its messages (same rules as ``delete_thread``): drafts stay
+    with ``thread_id`` cleared, so a signed draft's transaction is untouched and a pending one still expires on its
+    own clock (``ai.retention``). ``ai_usage`` rows stay for accounting. Returns the number of threads deleted."""
+    owned = select(AiThread.id).where(AiThread.user_id == user.id)
+    bulk = {"synchronize_session": False}
+    db.execute(update(AiDraft).where(AiDraft.user_id == user.id, AiDraft.thread_id.in_(owned)).values(thread_id=None),
+               execution_options=bulk)
+    db.execute(delete(AiMessage).where(AiMessage.thread_id.in_(owned)), execution_options=bulk)
+    n = db.execute(delete(AiThread).where(AiThread.user_id == user.id), execution_options=bulk).rowcount
+    db.commit()
+    return n or 0
 
 
 # -- drafts ------------------------------------------------------------------------------------------------

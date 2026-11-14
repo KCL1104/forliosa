@@ -1123,6 +1123,10 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 - **額度**：每天提問數＝當天的使用者訊息數；每月 token＝`input + 快取寫入 + output + ceil(快取讀取 ÷ 10)`（快取讀取約十分之一價）。
   「為什麼漲跌」的共用快取不算在觸發者頭上。`ai_usage` 每次模型呼叫一列：token、搜尋次數、金鑰槽、估計費用（`ai/pricing.py`，
   Haiku 5.5 US$0.10／0.50 每百萬 token，提示超過 10 萬 token 為 0.50／2.50；快取讀 0.1 倍、寫 1.25 倍；搜尋 US$10／千次），**不含訊息內容**。
+- **刪除全部對話（產品負責人 2026-11-14 決定）**：`DELETE /ai/threads`（`store.delete_all_threads`）→ 204。和刪一段（`DELETE /threads/{id}`）同一套規則：
+  該使用者的 `ai_threads` 與它們全部的 `ai_messages` 刪掉；`ai_drafts` 保留、`thread_id` 改成 null（已簽名草稿建立的交易本來就在 `transactions`，不動；
+  待確認的草稿照自己的 30 天到期）；`ai_usage` 保留做帳。三個大量語句在同一個 commit 裡，沒有對話時也是 204。是寫入，所以查看別人的資產時
+  （`X-Forliosa-View-As`）被 `ViewAsMiddleware` 擋下：403 `read_only`，什麼都沒刪（`tests/ai/test_chat.py`）。前端在設定頁「AI」一區，刪完也清掉瀏覽器上的對話。
 - **保存期限 30 天（產品負責人決定）**：worker 每天 04:20（台北）執行，也可手動
   `uv run python -m forliosa.ai.retention [--days N] [--dry-run]`。刪除最後活動（`updated_at`）超過 `AI_RETENTION_DAYS` 天的 `ai_threads`
   與它全部的 `ai_messages`（含加密的搜尋內容、摘要、顯示用文字），以及 `updated_at` 超過期限的 `ai_drafts`（已簽名、已捨棄，和從沒簽名而過期的
@@ -1222,7 +1226,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 1. ~~額度數字~~：已確認（2026-11-12）每天 50 題、每月 300 萬計費 token。
 2. ~~網路搜尋來源~~：已決定不限網域、由模型判斷（只限財經資訊）。`web_fetch` 預設也不限網域，但封鎖證交所網站與 MIS（2026-11-12，見上方「工具」）。
 3. ~~為什麼漲跌 AI 句~~：已決定預設開啟。
-4. ~~對話保存期限~~：已決定 30 天。待確認：要不要在設定頁讓使用者自己刪除全部 AI 對話（目前只能一段一段刪）？
+4. ~~對話保存期限~~：已決定 30 天。~~要不要在設定頁讓使用者自己刪除全部 AI 對話~~：已決定（2026-11-14，照建議）——`DELETE /ai/threads`，見上方「刪除全部對話」。
 5. ~~免責聲明~~：已決定由前端固定顯示（`done.disclaimer`／`/ai/usage.disclaimer`），前端需要改為顯示這行字。
 6. **金鑰槽的 workspace 驗證**：目前假設三把金鑰各在不同 workspace（換槽一律用摘要）。`/ai/admin/keys` 會顯示每槽回報的 `workspace_id`，
    請確認三個值不同；若某兩把其實在同一個 workspace，之後可以讓它們之間換槽時不用摘要（目前沒做）。

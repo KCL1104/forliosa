@@ -1,6 +1,6 @@
 import { Link } from "@tanstack/react-router"
 import { XIcon } from "lucide-react"
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { useAccounts, useCreateTransaction, useDeleteTransaction, useHoldings, useQuote } from "@/api/queries"
@@ -14,6 +14,8 @@ import { defaultAccount } from "@/lib/default-account"
 import { formatPrice, formatQuantity } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
+import { HoldingsEditor } from "./HoldingsEditor"
+import { otherUnit, parseNumber as num, quantityError, toShares } from "./quantity-input"
 import { AccountSelect, StampLine } from "./TradeForm"
 
 /**
@@ -21,6 +23,7 @@ import { AccountSelect, StampLine } from "./TradeForm"
  * 選一檔 → 股數、買進日期、買進價格 →「新增」。同一檔分好幾次買的，按「再加一筆買進」多一列。
  * 沒有類型、備註與稅費試算：手續費照帳戶設定的費率算進成本，不另外顯示。
  * 賣出、股利與其他類型走完整表單（下面的文字連結）。
+ * 帳戶是「只記持股」時不記買進：同一個輸入框換成持股的輸入（`HoldingsEditor`，產品負責人 2026-11-14 決定 2-1）。
  */
 interface Lot {
   id: number
@@ -30,17 +33,26 @@ interface Lot {
 }
 
 const MAX_LOTS = 12
-/** 台股的數量太細：以張填時最多小數第三位（1 股），以股填時要是整數 */
-const tooFine = (text: string, inLots: boolean): boolean => {
-  const t = text.replace(/[,\s]/g, "")
-  return inLots ? /\.\d{4,}$/.test(t) : /\.\d*[1-9]\d*$/.test(t)
-}
-const num = (s: string): number | null => {
-  const n = Number(s.replace(/[,\s]/g, ""))
-  return s.trim() === "" || Number.isNaN(n) ? null : n
-}
 
-export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { initialSymbol?: string; onDone: () => void; onFull: (symbol?: string, prefill?: TradePrefill) => void; sheet?: boolean }) {
+export type EntryMode = "transactions" | "holdings"
+
+export function QuickAdd({
+  initialSymbol,
+  initialAccountId,
+  onDone,
+  onFull,
+  onModeChange,
+  sheet = false,
+}: {
+  initialSymbol?: string
+  /** 先選好的帳戶（設定頁的「編輯持股」） */
+  initialAccountId?: string
+  onDone: () => void
+  onFull: (symbol?: string, prefill?: TradePrefill) => void
+  /** 記買進或持股的輸入（外面的標題跟著換） */
+  onModeChange?: (mode: EntryMode) => void
+  sheet?: boolean
+}) {
   const accounts = useAccounts()
   const holdings = useHoldings()
   const create = useCreateTransaction()
@@ -48,8 +60,10 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
   const unitPref = usePrefs((s) => s.quantityUnit)
   const nextId = useRef(1)
   const formRef = useRef<HTMLFormElement>(null)
-  const [accountId, setAccountId] = useState("")
+  const [accountId, setAccountId] = useState(initialAccountId ?? "")
   const [symbol, setSymbol] = useState<Instrument | null>(null)
+  /** 打開時帶進來的那一檔（個股頁、持倉的「加碼」）：決定預設帳戶，之後換股票不影響 */
+  const [opened, setOpened] = useState<Instrument | null>(null)
   const [lots, setLots] = useState<Lot[]>(() => [{ id: 0, qty: "", date: appToday(), price: "" }])
   const [submitted, setSubmitted] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -66,32 +80,52 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
   useEffect(() => {
     if (!initialSymbol) return
     let alive = true
-    void api.getInstrument(initialSymbol).then((i) => alive && setSymbol((s) => s ?? i)).catch(() => undefined)
+    void api
+      .getInstrument(initialSymbol)
+      .then((i) => {
+        if (!alive) return
+        setOpened(i)
+        setSymbol((s) => s ?? i)
+      })
+      .catch(() => undefined)
     return () => {
       alive = false
     }
   }, [initialSymbol])
 
-  // 帳戶沒動過時跟著股票走：這一檔持有的帳戶 → 同幣別 → 第一個（Apple 不會記進新台幣帳戶）
-  const account = accounts.data?.find((a) => a.id === accountId) ?? defaultAccount(accounts.data, symbol, holdings.data)
-  const quote = useQuote(symbol?.symbol ?? "", !!symbol)
+  // 帳戶沒動過時跟著股票走：這一檔持有的帳戶 → 同幣別 → 第一個（Apple 不會記進新台幣帳戶）。
+  // 打開時帶進來的那一檔（持倉列已經讀好，不用等商品資料）決定一開始是記買進還是持股的輸入；
+  // 之後在買進的輸入裡換股票，只在逐筆交易的帳戶之間跟著走——不會選了一檔就整個換成持股的輸入。
+  const openedItem = initialSymbol ? (holdings.data?.find((h) => h.code === initialSymbol || h.symbol === initialSymbol) ?? opened) : null
+  const chosen = accounts.data?.find((a) => a.id === accountId)
+  const target = chosen ?? defaultAccount(accounts.data, openedItem, holdings.data)
+  const holdingsMode = target?.tracking_mode === "holdings"
+  const tradable = accounts.data?.filter((a) => a.tracking_mode !== "holdings")
+  const account = chosen ?? defaultAccount(tradable?.length ? tradable : accounts.data, symbol ?? openedItem, holdings.data)
+  const quote = useQuote(symbol?.symbol ?? "", !!symbol && !holdingsMode)
   const isUS = symbol?.market === "US" || account?.currency === "USD"
   const inLots = unitPref === "lot" && !isUS
-  const shares = (l: Lot) => {
-    const q = num(l.qty)
-    // 張換股取整：2.006 × 1000 在浮點數是 2005.9999…，不取整會被說「不是整數」
-    return q === null ? null : inLots ? Math.round(q * 1000) : q
-  }
+  const shares = (l: Lot) => toShares(l.qty, inLots)
   const errorOf = (l: Lot) => {
-    const s = shares(l)
     const p = num(l.price)
     return {
-      qty: !s || s <= 0 ? `請輸入${inLots ? "張數" : "股數"}` : !isUS && tooFine(l.qty, inLots) ? (inLots ? "張數最多寫到小數第三位（1 股）" : "台股股數必須是整數") : null,
+      qty: quantityError(l.qty, inLots, isUS),
       price: !p || p <= 0 ? "請輸入價格" : null,
     }
   }
   const invalid = !symbol || !account || lots.some((l) => Object.values(errorOf(l)).some(Boolean))
   const setLot = (id: number, patch: Partial<Lot>) => setLots((ls) => ls.map((l) => (l.id === id ? { ...l, ...patch } : l)))
+  // 畫面畫出來之前告訴外面（對話框的標題不會先閃一下「記一筆」）
+  useLayoutEffect(() => onModeChange?.(holdingsMode ? "holdings" : "transactions"), [holdingsMode, onModeChange])
+
+  const accountField = (accounts.data?.length ?? 0) > 1 && (
+    <Row label="帳戶" className="sm:max-w-xs">
+      <AccountSelect accounts={accounts.data ?? []} value={(holdingsMode ? target : account)?.id ?? ""} onChange={setAccountId} />
+    </Row>
+  )
+  if (holdingsMode && target) {
+    return <HoldingsEditor key={target.id} account={target} accountField={accountField} initialSymbol={initialSymbol} onDone={onDone} sheet={sheet} />
+  }
 
   if (accounts.data && accounts.data.length === 0) {
     return (
@@ -162,11 +196,7 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
   )
   return (
     <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className={cn("flex flex-col gap-4 px-4 sm:px-6", sheet ? "pb-0" : "pb-4 sm:pb-6")}>
-      {(accounts.data?.length ?? 0) > 1 && (
-        <Row label="帳戶" className="sm:max-w-xs">
-          <AccountSelect accounts={accounts.data ?? []} value={account?.id ?? ""} onChange={setAccountId} />
-        </Row>
-      )}
+      {accountField}
       <Row label="股票" error={submitted && !symbol ? "請選擇股票或 ETF" : null}>
         <SymbolPicker value={symbol} onChange={setSymbol} invalid={submitted && !symbol} />
         {symbol && quote.data && (
@@ -181,9 +211,8 @@ export function QuickAdd({ initialSymbol, onDone, onFull, sheet = false }: { ini
         {lots.map((l, i) => {
           const err = submitted ? errorOf(l) : { qty: null, price: null }
           const nth = lots.length > 1 ? `第 ${i + 1} 筆的` : ""
-          const s = shares(l)
           // 另一種單位的換算（「2 張」「2,000 股」）：只在有幫助的時候寫在欄位下面
-          const other = !s || isUS ? null : inLots ? `${new Intl.NumberFormat("zh-TW").format(s)} 股` : s >= 1000 && s % 1000 === 0 ? `${s / 1000} 張` : null
+          const other = otherUnit(shares(l), inLots, isUS)
           return (
             // 手機一筆排兩行：股數｜價格，下面是日期（有好幾筆時右邊是移除）；第二筆起上面加一條格線分開
             <div

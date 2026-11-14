@@ -118,6 +118,17 @@ describe("帳本的「記一筆」", () => {
     await waitFor(() => expect(within(full).getByText("台積電")).toBeInTheDocument(), T)
   })
 
+  it("手機抽屜裡的帳戶選單開在抽屜裡面（開在 body 底下的話，Vaul 讓它按不到）", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    useUi.getState().openTradeForm()
+    const dialog = await screen.findByRole("dialog", {}, T)
+    expect(dialog).toHaveAttribute("data-slot", "drawer-content")
+    await userEvent.click(await within(dialog).findByRole("combobox", { name: "券商帳戶" }, T))
+    const option = await screen.findByRole("option", { name: /國泰・複委託/ }, T)
+    expect(option.closest('[data-slot="drawer-content"]')).toBe(dialog)
+  })
+
   it("交易分段不再另外放一顆「記一筆」（工具列那一顆每個分段都在）", async () => {
     renderApp("/?view=transactions")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)

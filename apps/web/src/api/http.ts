@@ -8,6 +8,7 @@ import {
   type History,
   type HistoryRange,
   type Holding,
+  type HoldingsSnapshot,
   type HoldingsSnapshotBody,
   type Instrument,
   type InstrumentDetail,
@@ -144,7 +145,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     createAccount: (body: AccountInput) => request<Account>("POST", "/accounts", { body }),
     updateAccount: (id, patch) => request<Account>("PATCH", `/accounts/${enc(id)}`, { body: patch }),
     deleteAccount: (id) => request<void>("DELETE", `/accounts/${enc(id)}`),
-    putHoldings: (id, body: HoldingsSnapshotBody) => request<void>("PUT", `/accounts/${enc(id)}/holdings`, { body }),
+    getAccountHoldings: (id) => request<HoldingsSnapshot>("GET", `/accounts/${enc(id)}/holdings`),
+    putHoldings: (id, body: HoldingsSnapshotBody) => request<HoldingsSnapshot>("PUT", `/accounts/${enc(id)}/holdings`, { body }),
 
     searchInstruments: (q) => request<Instrument[]>("GET", "/instruments/search", { query: { q } }),
     getInstrument: (symbol) => request<InstrumentDetail>("GET", `/instruments/${enc(symbol)}`),
@@ -199,6 +201,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getLatestBriefing: () => request<Briefing | null>("GET", "/ai/briefings/latest"),
     listBriefings: (limit) => request<Briefing[]>("GET", "/ai/briefings", { query: { limit } }),
     markBriefingRead: (id) => request<void>("POST", `/ai/briefings/${enc(id)}/read`),
+    deleteAiThreads: () => request<void>("DELETE", "/ai/threads"),
 
     getAnalystViews: (symbol) => request<AnalystViews>("GET", `/instruments/${enc(symbol)}/analyst-views`),
     requestAnalystViews: (symbol) => request<AnalystViews>("POST", `/instruments/${enc(symbol)}/analyst-views`),

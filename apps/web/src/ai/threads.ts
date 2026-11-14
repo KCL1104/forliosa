@@ -1,7 +1,8 @@
+import { useMutation, useQueryClient } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api } from "@/api"
 import { aiRemote } from "./remote"
-import { useRemoteThreadActions, useRemoteThreads } from "./remote-hooks"
+import { aiKeys, useRemoteThreadActions, useRemoteThreads } from "./remote-hooks"
 import { useAi } from "./store"
 import type { Thread } from "./types"
 
@@ -15,6 +16,23 @@ const SEEDED: Thread[] = [
   { id: "seed_import", title: "補記 10 月的 0050 定期定額", updatedAt: "2026-11-08T10:15:00+08:00", messages: [], seeded: true },
   { id: "seed_conc", title: "我的持股會不會太集中？", updatedAt: "2026-11-02T22:30:00+08:00", messages: [], seeded: true },
 ]
+
+/**
+ * 設定頁「刪除全部 AI 對話」：伺服器上的全部刪掉（`DELETE /ai/threads`；草稿保留，已簽名草稿記下的交易留在帳本），
+ * 再清掉這台瀏覽器上的對話與草稿（和登出一樣），mock 的示範紀錄也藏起來。不能復原，所以沒有「復原」。
+ */
+export function useDeleteAllThreads() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.deleteAiThreads(),
+    onSuccess: () => {
+      useAi.getState().clearConversations(api.kind === "mock" ? SEEDED.map((t) => t.id) : [])
+      qc.setQueryData(aiKeys.threads, { items: [], next_cursor: null })
+      qc.removeQueries({ queryKey: ["ai", "thread"] })
+      void qc.invalidateQueries({ queryKey: aiKeys.threads })
+    },
+  })
+}
 
 export function useThreadList({ enabled = true }: { enabled?: boolean } = {}) {
   const threads = useAi((s) => s.threads)

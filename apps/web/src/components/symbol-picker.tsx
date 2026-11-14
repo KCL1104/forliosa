@@ -23,7 +23,8 @@ export function SymbolPicker({
   onChange: (i: Instrument | null) => void
   invalid?: boolean
   accept?: (i: Instrument) => boolean
-  rejectReason?: string
+  /** 不能選的原因（每一檔可以不同，例如持股的輸入：「幣別不同」「已經在上面」） */
+  rejectReason?: string | ((i: Instrument) => string)
   /** 輸入框的無障礙名稱（cmdk 自己產生 id 與 label，外面的 htmlFor 對不上，所以名稱從這裡給） */
   label?: string
 }) {
@@ -82,7 +83,7 @@ export function SymbolPicker({
               >
                 <span className="num w-14 shrink-0 font-semibold">{i.code}</span>
                 <span className="min-w-0 flex-1 truncate">{i.name}</span>
-                <span className="text-xs text-ink-2">{ok ? marketTag(i) : (rejectReason ?? "不能選")}</span>
+                <span className="text-xs text-ink-2">{ok ? marketTag(i) : ((typeof rejectReason === "function" ? rejectReason(i) : rejectReason) ?? "不能選")}</span>
               </CommandPrimitive.Item>
             )
           })}

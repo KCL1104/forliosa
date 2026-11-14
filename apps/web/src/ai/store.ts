@@ -30,6 +30,11 @@ interface AiState {
   ownerId: string | null
   claim: (userId: string) => void
   forget: () => void
+  /**
+   * 設定頁「刪除全部 AI 對話」之後：清掉這台瀏覽器上的對話與草稿（和登出時 `forget()` 清的一樣），但仍記著是誰的。
+   * `hide`：mock 模式的示範紀錄（不在 store 裡）一起藏起來。
+   */
+  clearConversations: (hide?: string[]) => void
 
   /** `quiet`：現在是不是安靜的頁面（開合分開記） */
   setPanelOpen: (open: boolean, quiet?: boolean) => void
@@ -61,6 +66,11 @@ interface AiState {
 /** 對話紀錄保留 30 天 */
 export const RETENTION_MS = 30 * 86_400_000
 
+/** 沒有任何對話與草稿（登出、刪除全部對話之後） */
+const NO_CONVERSATIONS = { threads: [], drafts: {}, threadId: null, focusDraftId: null, composerSeed: null } satisfies Partial<AiState>
+
+
+
 const uid = (p: string) => `${p}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
 const now = () => new Date().toISOString()
 
@@ -86,7 +96,8 @@ export const useAi = create<AiState>()(
               ? { ownerId: userId } // 還沒記過是誰的（第一次登入，或舊版留下的紀錄）：算這個人的
               : { ownerId: userId, threads: [], drafts: {}, threadId: null, focusDraftId: null, composerSeed: null, hiddenThreadIds: [] },
         ),
-      forget: () => set({ ownerId: null, threads: [], drafts: {}, threadId: null, focusDraftId: null, composerSeed: null, hiddenThreadIds: [] }),
+      forget: () => set({ ownerId: null, ...NO_CONVERSATIONS, hiddenThreadIds: [] }),
+      clearConversations: (hide = []) => set({ ...NO_CONVERSATIONS, hiddenThreadIds: hide }),
 
       setPanelOpen: (open, quiet) => set(quiet ? { quietPanelOpen: open } : { panelOpen: open }),
       setMobileOpen: (mobileOpen) => set({ mobileOpen }),

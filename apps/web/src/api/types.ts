@@ -76,6 +76,13 @@ export interface HoldingsSnapshotBody {
   holdings: { symbol: string; quantity: number; avg_cost: number }[]
 }
 
+/** 「只記持股」帳戶目前的快照（`GET /accounts/{id}/holdings`）：還沒存過時 `as_of` 是 null、`holdings` 是空的 */
+export interface HoldingsSnapshot {
+  account_id: string
+  as_of: string | null
+  holdings: { symbol: string; quantity: number; avg_cost: number }[]
+}
+
 // ── 商品與行情 ────────────────────────────────────────────
 export type Market = "TWSE" | "TPEX" | "US"
 export type InstrumentType = "stock" | "etf"
@@ -1499,8 +1506,12 @@ export interface ForliosaApi {
   listAccounts(): Promise<Account[]>
   createAccount(body: AccountInput): Promise<Account>
   updateAccount(id: string, patch: Partial<AccountInput>): Promise<Account>
+  /** 刪除帳戶（不能復原）：連同交易、自動入帳的股利、持股快照與定期定額 */
   deleteAccount(id: string): Promise<void>
-  putHoldings(id: string, body: HoldingsSnapshotBody): Promise<void>
+  /** 「只記持股」帳戶目前的快照 */
+  getAccountHoldings(id: string): Promise<HoldingsSnapshot>
+  /** 以快照覆蓋「只記持股」帳戶的持股（逐筆交易的帳戶回 409）：快照日（含）之前的交易不算，自動股利從快照日之後才記 */
+  putHoldings(id: string, body: HoldingsSnapshotBody): Promise<HoldingsSnapshot>
   // 商品與行情
   searchInstruments(q: string): Promise<Instrument[]>
   getInstrument(symbol: string): Promise<InstrumentDetail>
@@ -1556,6 +1567,11 @@ export interface ForliosaApi {
   getLatestBriefing(): Promise<Briefing | null>
   listBriefings(limit?: number): Promise<Briefing[]>
   markBriefingRead(id: string): Promise<void>
+  /**
+   * 刪除全部 AI 對話（`DELETE /ai/threads`）：草稿保留，已簽名草稿建立的交易留在帳本；查看別人的資產時 403 `read_only`。
+   * mock 模式的對話只存在這台瀏覽器（`ai/store.ts`），這裡沒有東西可刪。
+   */
+  deleteAiThreads(): Promise<void>
   // 法人觀點：GET 讀當日共用快取；POST 觸發 AI 網路搜尋（計入觸發者的 AI 額度）
   getAnalystViews(symbol: string): Promise<AnalystViews>
   requestAnalystViews(symbol: string): Promise<AnalystViews>

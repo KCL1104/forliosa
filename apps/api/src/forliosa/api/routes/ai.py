@@ -87,6 +87,12 @@ def get_thread(thread_id: str, user: User = Depends(current_user), db: Session =
     return store.thread_detail(db, user, thread_id)
 
 
+@router.delete("/threads", status_code=204, summary="刪除全部對話（草稿保留；已簽名草稿建立的交易留在帳本）")
+def delete_all_threads(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    store.delete_all_threads(db, user)
+    return Response(status_code=204)
+
+
 @router.delete("/threads/{thread_id}", status_code=204, summary="刪除對話（草稿保留）")
 def delete_thread(thread_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     store.delete_thread(db, user, thread_id)

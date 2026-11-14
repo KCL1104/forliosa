@@ -1,5 +1,6 @@
 """POST /ai/chat: SSE event shapes, the tool loop, request shape (caching, tools, page context), append-only
-replay, refusals, pause_turn, max_tokens, key failover inside a stream, quotas and thread endpoints."""
+replay, refusals, pause_turn, max_tokens, key failover inside a stream, quotas and thread endpoints (including
+deleting all of them at once)."""
 
 from __future__ import annotations
 
@@ -10,7 +11,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.ai.keypool import KeyPool, set_key_pool
-from forliosa.models import AiMessage, AiThread, AiUsage
+from forliosa.models import AiDraft, AiMessage, AiThread, AiUsage, Transaction
 from tests.ai.conftest import API, KEYS, buy, chat, make_account
 from tests.ai.fake_anthropic import (
     search_citation,
@@ -20,6 +21,7 @@ from tests.ai.fake_anthropic import (
     tool_use,
     web_search_result,
 )
+from tests.api.m5 import join, make_group, me_id
 
 EVENT_KEYS = {
     "thread": {"id", "title", "created"},
@@ -286,6 +288,57 @@ def test_thread_endpoints_and_ownership(client, other_client, pool, fake, engine
     with Session(engine) as db:
         assert db.scalar(select(func.count()).select_from(AiMessage).where(AiMessage.thread_id == t1)) == 0
         assert db.get(AiThread, t2) is not None
+
+
+def test_delete_all_threads_keeps_drafts_and_the_ledger(client, other_client, pool, fake, engine):
+    make_account(client)
+    fake.reply(tool_use("toolu_d", "draft_transaction", {"type": "buy", "symbol": "0050", "quantity": 2000,
+                                                         "price": 52.4}), stop_reason="tool_use")
+    fake.reply(text("草稿已準備好。")).reply(text("二")).reply(text("別人的"))
+    _status, events = chat(client, "買 0050 2 張 52.4")
+    t1 = events[0][1]["id"]
+    draft = next(d for n, d in events if n == "draft")
+    txn = client.post(f"{API}/transactions", json=draft["input"]).json()
+    assert client.patch(f"{API}/ai/drafts/{draft['id']}",
+                        json={"status": "signed", "transaction_id": txn["id"]}).status_code == 200
+    t2 = chat(client, "第二段")[1][0][1]["id"]
+    theirs = chat(other_client, "別人的")[1][0][1]["id"]
+    with Session(engine) as db:
+        uid = db.get(AiThread, t2).user_id
+        db.add(AiDraft(id="drf_pending", user_id=uid, thread_id=t2, status="pending", payload={}, preview={}, notes=[]))
+        db.commit()
+        usage_before = db.scalar(select(func.count()).select_from(AiUsage))
+
+    assert client.delete(f"{API}/ai/threads").status_code == 204
+    assert client.get(f"{API}/ai/threads").json()["items"] == []
+    assert client.get(f"{API}/ai/threads/{t1}").status_code == 404
+    with Session(engine) as db:
+        assert db.scalar(select(func.count()).select_from(AiMessage).where(AiMessage.thread_id.in_([t1, t2]))) == 0
+        signed = db.get(AiDraft, draft["id"])
+        assert signed.status == "signed" and signed.thread_id is None and signed.transaction_id == txn["id"]
+        pending = db.get(AiDraft, "drf_pending")
+        assert pending.status == "pending" and pending.thread_id is None
+        assert db.get(Transaction, txn["id"]) is not None  # the signed draft's transaction stays in the ledger
+        assert db.scalar(select(func.count()).select_from(AiUsage)) == usage_before  # kept for accounting
+        assert db.get(AiThread, theirs) is not None
+    assert client.get(f"{API}/transactions/{txn['id']}").status_code == 200
+    assert [t["id"] for t in other_client.get(f"{API}/ai/threads").json()["items"]] == [theirs]
+    assert client.delete(f"{API}/ai/threads").status_code == 204  # nothing left: still fine
+
+
+def test_delete_all_threads_is_refused_while_viewing_someone_else(client, other_client, pool, fake):
+    fake.reply(text("我的")).reply(text("查看者自己的"))
+    mine = chat(client, "我的對話")[1][0][1]["id"]
+    viewer_own = chat(other_client, "查看者的對話")[1][0][1]["id"]
+    group = make_group(client)
+    join(client, other_client, group["id"])
+    d = client.post(f"{API}/delegations",
+                    json={"viewer_user_id": me_id(other_client), "scope": "all", "account_ids": []})
+    assert d.status_code == 201, d.text
+    r = other_client.delete(f"{API}/ai/threads", headers={"X-Forliosa-View-As": d.json()["id"]})
+    assert r.status_code == 403 and r.json()["error"]["code"] == "read_only", r.text
+    assert [t["id"] for t in client.get(f"{API}/ai/threads").json()["items"]] == [mine]
+    assert [t["id"] for t in other_client.get(f"{API}/ai/threads").json()["items"]] == [viewer_own]
 
 
 def test_long_thread_must_start_over(client, pool, fake, engine, ai_env):

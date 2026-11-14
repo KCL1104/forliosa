@@ -60,8 +60,9 @@
 | GET | `/accounts` | `Account[]` |
 | POST | `/accounts` | 建立 |
 | PATCH | `/accounts/{id}` | 更新 |
-| DELETE | `/accounts/{id}` | 刪除（連同交易） |
-| PUT | `/accounts/{id}/holdings` | 「只記持股」模式：以快照覆蓋，body `{"as_of": "2026-11-11", "holdings": [{"symbol": "2330.TW", "quantity": 1500, "avg_cost": 612.5}]}` |
+| DELETE | `/accounts/{id}` | 刪除（連同交易、自動入帳的股利、持股快照與這個帳戶的定期定額；不能復原）。前端要輸入帳戶名稱才送出 |
+| GET | `/accounts/{id}/holdings` | 「只記持股」模式目前的快照：`{"account_id", "as_of", "holdings": [{"symbol", "quantity", "avg_cost"}]}`；還沒存過時 `as_of` 是 `null`、`holdings` 是 `[]` |
+| PUT | `/accounts/{id}/holdings` | 「只記持股」模式：以快照覆蓋，body `{"as_of": "2026-11-11", "holdings": [{"symbol": "2330.TW", "quantity": 1500, "avg_cost": 612.5}]}`；回應同 GET。`holdings: []` 是清空。逐筆交易的帳戶 409 |
 
 ```json
 // Account
@@ -564,6 +565,7 @@
 | GET | `/ai/threads?limit=30&cursor=` | `{"items": [ThreadSummary], "next_cursor"}`，最近更新的在前 |
 | GET | `/ai/threads/{id}` | `ThreadDetail`（別人的對話回 404） |
 | DELETE | `/ai/threads/{id}` | 204；草稿保留 |
+| DELETE | `/ai/threads` | 204；刪除自己**全部**的對話與訊息（設定頁「刪除全部 AI 對話」）。規則同上：草稿保留（`thread_id` 改成 `null`），已簽名草稿建立的交易留在帳本；用量紀錄保留。沒有對話也是 204。查看別人的資產時（`X-Forliosa-View-As`）403 `read_only` |
 | GET | `/ai/drafts?status=pending` | `DraftCard[]`；`status`：`pending`（預設）、`signed`、`discarded`、`all` |
 | PATCH | `/ai/drafts/{id}` | body `{"status": "signed", "transaction_id": "txn_…"}`、`{"status": "discarded"}`，或復原後 `{"status": "pending"}`；回 `DraftCard` |
 | GET | `/ai/suggestions?route=/stock/2330.TW&symbol=2330.TW` | `Suggestions`（規則產生，不呼叫模型） |

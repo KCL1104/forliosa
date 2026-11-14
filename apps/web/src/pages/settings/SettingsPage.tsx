@@ -8,6 +8,9 @@ import { RangeChips } from "@/components/charts/chart-kit"
 import { PageHeader, Section } from "@/components/section"
 import { RecurringPlans } from "./RecurringPlans"
 import { AccountData } from "./AccountData"
+import { DeleteBrokerAccountDialog } from "./DeleteBrokerAccount"
+import { useDeleteAllThreads } from "@/ai/threads"
+import { useUi } from "@/app/ui-store"
 import { Delegations } from "./Delegations"
 import { Profile } from "./Profile"
 import { useReadOnly } from "@/api/view-as"
@@ -17,10 +20,21 @@ import { SourcesFooter } from "@/components/sources"
 import { EmptyState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatMoney } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
 import { Pct } from "@/components/finance"
@@ -119,7 +133,7 @@ function Settings() {
         </Row>
       </Group>
 
-      <DailyBriefing />
+      <AiSettings />
 
       <Accounts />
 
@@ -137,12 +151,13 @@ function Settings() {
 
 /**
  * AI：每日收盤簡報的開關（預設關）。偏好存在伺服器上（worker 依它決定要不要寫），所以直接讀寫 `/me` 的偏好，
- * 不經過本機的顯示設定。
+ * 不經過本機的顯示設定。下面是「刪除全部 AI 對話」（產品負責人 2026-11-14 決定 3-2）。
  */
-function DailyBriefing() {
+function AiSettings() {
   const me = useMe()
   const update = useUpdatePreferences()
   const on = me.data?.preferences.daily_briefing ?? false
+  const [confirming, setConfirming] = useState(false)
   return (
     <Group title="AI">
       <Row label="每日收盤簡報" description="收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。" htmlFor="daily-briefing">
@@ -158,7 +173,55 @@ function DailyBriefing() {
           }
         />
       </Row>
+      <Row label="刪除全部 AI 對話">
+        <Button
+          variant="outline"
+          aria-label="刪除全部 AI 對話"
+          onClick={() => {
+            toast.dismiss()
+            setConfirming(true)
+          }}
+        >
+          刪除…
+        </Button>
+      </Row>
+      {confirming && <DeleteConversationsDialog onClose={() => setConfirming(false)} />}
     </Group>
+  )
+}
+
+/**
+ * 刪除全部 AI 對話：伺服器上的全部刪掉，這台瀏覽器上的對話與草稿也清掉（和登出一樣）。
+ * 不能復原，所以先問一次、沒有「復原」；已簽名的草稿記下的交易留在帳本。
+ */
+function DeleteConversationsDialog({ onClose }: { onClose: () => void }) {
+  const remove = useDeleteAllThreads()
+  return (
+    <AlertDialog open onOpenChange={(o) => !o && !remove.isPending && onClose()}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>刪除全部 AI 對話？</AlertDialogTitle>
+          <AlertDialogDescription>不能復原。已簽名的草稿記下的交易會留在帳本。</AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={remove.isPending}>取消</AlertDialogCancel>
+          <AlertDialogAction
+            disabled={remove.isPending}
+            onClick={() =>
+              remove.mutate(undefined, {
+                onSuccess: () => {
+                  toast.success("已刪除全部 AI 對話")
+                  onClose()
+                },
+                onError: (err) => toast.error("沒有刪除，對話都還在。", { description: err instanceof Error ? err.message : undefined }),
+              })
+            }
+          >
+            {remove.isPending ? "刪除中…" : "全部刪除"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   )
 }
 
@@ -189,7 +252,9 @@ function discountText(d: number) {
 
 function Accounts() {
   const accounts = useAccounts()
+  const openTradeForm = useUi((s) => s.openTradeForm)
   const [editing, setEditing] = useState<Account | null>(null)
+  const [deleting, setDeleting] = useState<Account | null>(null)
   return (
     <Section
       id="accounts"
@@ -224,14 +289,34 @@ function Accounts() {
                   <div className="flex gap-1"><dt>最低</dt><dd className="text-foreground">{formatMoney(a.min_fee, { currency: a.currency, decimals: 0 })}{a.currency === "TWD" && `（零股 ${formatMoney(a.min_fee_odd_lot, { decimals: 0 })}）`}</dd></div>
                 </dl>
               </div>
-              <button type="button" onClick={() => setEditing(a)} aria-label={`編輯 ${a.name}`} className={textAction}>
-                編輯
-              </button>
+              {/* 只記持股的帳戶：「編輯持股」開持股的輸入（和記一筆同一個框）；兩個文字動作在手機上下排 */}
+              <div className="flex shrink-0 flex-col items-end gap-x-5 sm:flex-row sm:items-center">
+                {a.tracking_mode === "holdings" && (
+                  <button type="button" onClick={() => openTradeForm({ accountId: a.id })} aria-label={`編輯 ${a.name} 的持股`} className={textAction}>
+                    編輯持股
+                  </button>
+                )}
+                <button type="button" onClick={() => setEditing(a)} aria-label={`編輯 ${a.name}`} className={textAction}>
+                  編輯
+                </button>
+              </div>
             </li>
           ))}
         </ul>
       )}
-      {editing && <AccountDialog key={editing.id || "new"} account={editing} onClose={() => setEditing(null)} />}
+      {editing && (
+        <AccountDialog
+          key={editing.id || "new"}
+          account={editing}
+          onClose={() => setEditing(null)}
+          onDelete={() => {
+            toast.dismiss()
+            setDeleting(editing)
+            setEditing(null)
+          }}
+        />
+      )}
+      {deleting && <DeleteBrokerAccountDialog key={deleting.id} account={deleting} onClose={() => setDeleting(null)} />}
     </Section>
   )
 }
@@ -249,8 +334,8 @@ const NEW_ACCOUNT: Account = {
   created_at: "",
 }
 
-/** 新增或編輯帳戶（account.id 為空字串時為新增） */
-function AccountDialog({ account, onClose }: { account: Account; onClose: () => void }) {
+/** 新增或編輯帳戶（account.id 為空字串時為新增）；編輯時左下角有「刪除這個帳戶」（開輸入帳戶名稱的確認框） */
+function AccountDialog({ account, onClose, onDelete }: { account: Account; onClose: () => void; onDelete: () => void }) {
   const isNew = !account.id
   const update = useUpdateAccount()
   const create = useCreateAccount()
@@ -323,6 +408,11 @@ function AccountDialog({ account, onClose }: { account: Account; onClose: () => 
           </div>
         </div>
         <DialogFooter>
+          {!isNew && (
+            <button type="button" onClick={onDelete} disabled={pending} className={cn(textAction, "mr-auto")}>
+              刪除這個帳戶
+            </button>
+          )}
           <Button variant="outline" onClick={onClose}>取消</Button>
           <Button variant="sign" onClick={save} disabled={pending}>{pending ? "儲存中…" : isNew ? "新增帳戶" : "儲存"}</Button>
         </DialogFooter>
