@@ -5,6 +5,8 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import os
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -253,13 +255,22 @@ class DiskCache:
 
     def write(self, namespace: str, key: str, data: bytes, suffix: str = ".json") -> None:
         p = self.path_for(namespace, key, suffix)
+        tmp: Path | None = None
         try:
             p.parent.mkdir(parents=True, exist_ok=True)
-            tmp = p.with_suffix(p.suffix + ".tmp")
-            tmp.write_bytes(data)
+            # A temporary file of its own: jobs in separate loops can write the same entry at once, and with one shared
+            # ".tmp" name the second rename failed (2026-11-14)
+            fd, name = tempfile.mkstemp(dir=p.parent, prefix=p.name + ".", suffix=".tmp")
+            tmp = Path(name)
+            with os.fdopen(fd, "wb") as f:
+                f.write(data)
             tmp.replace(p)
+            tmp = None
         except OSError as exc:  # cache is best-effort
             log.warning("cache write failed for %s: %s", p, exc)
+        finally:
+            if tmp is not None:
+                tmp.unlink(missing_ok=True)
 
 
 def sha256_hex(data: bytes) -> str:
