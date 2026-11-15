@@ -38,6 +38,34 @@ describe("AI 草稿的成交日", () => {
     expect(latestDraft().input.trade_date).toBe("2026-11-10")
   })
 
+  it("美股賣出沒有寫價格與日期：這個帳戶這一檔沒有更晚的交易時，成交日是紐約那一天", async () => {
+    const quote = await api.getQuote("AAPL")
+    const r = runner()
+    await act(() => r.current.submit("賣 AAPL 5 股"))
+    expect(latestDraft().input).toMatchObject({ symbol: "AAPL", type: "sell", quantity: 5, price: quote.price, trade_date: quote.trade_date })
+  })
+
+  it("美股賣出：今天剛記了買進（晚於收盤日）時記今天——記在收盤日，簽名時後端會擋下；自己寫的日期照寫的", async () => {
+    const account = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    const buy = await api.createTransaction({ account_id: account.id, symbol: "AAPL", type: "buy", trade_date: appToday(), quantity: 3, price: 300, note: "" })
+    try {
+      const r = runner()
+      await act(() => r.current.submit("賣 AAPL 5 股"))
+      expect(latestDraft().input).toMatchObject({ symbol: "AAPL", type: "sell", trade_date: appToday() })
+      await act(() => r.current.submit("11/10 賣 AAPL 5 股"))
+      expect(latestDraft().input.trade_date).toBe("2026-11-10")
+    } finally {
+      await api.deleteTransaction(buy.id)
+    }
+    // 兩句話、兩次預覽：機器忙的時候超過預設的 5 秒
+  }, 15_000)
+
+  it("台股賣出沒有寫價格與日期：成交日是今天", async () => {
+    const r = runner()
+    await act(() => r.current.submit("賣 2330 1 張"))
+    expect(latestDraft().input).toMatchObject({ symbol: "2330.TW", type: "sell", trade_date: appToday() })
+  })
+
   it("台股沒有寫價格與日期：成交日是今天", async () => {
     const r = runner()
     await act(() => r.current.submit("買 2330 1 張"))

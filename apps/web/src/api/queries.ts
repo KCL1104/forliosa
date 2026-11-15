@@ -136,12 +136,16 @@ export function usePerformance(range: PerformanceRange, accountId?: string, benc
 export function useInstrument(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.instrument(symbol), queryFn: () => api.getInstrument(symbol), staleTime: 10 * 60_000, retry: (n, e) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2 })
 }
+/** 4xx：問了也一樣（例如沒有報價的 404），不重試、不再問 */
+const isClientError = (e: unknown) => !!(e as { status?: number } | null)?.status?.toString().startsWith("4")
+
 export function useQuote(symbol: string, enabled = true) {
-  // 沒有報價（還沒有收盤價的美股，或美股收盤價沒開）回 404：不重試，也不要每分鐘再問
+  // 沒有報價（還沒有收盤價的美股，或美股收盤價沒開）回 404：不重試，也不要每分鐘再問。
+  // 暫時的錯誤（5xx、網路斷了）照樣每分鐘再問：不然第一次就遇到的話，台股整頁一直停在「沒有報價」
   return useQuery({
     enabled, queryKey: qk.quote(symbol), queryFn: () => api.getQuote(symbol), staleTime: 15_000,
-    refetchInterval: (q) => (q.state.error ? false : 60_000),
-    retry: (n, e) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2,
+    refetchInterval: (q) => (isClientError(q.state.error) ? false : 60_000),
+    retry: (n, e) => !isClientError(e) && n < 2,
   })
 }
 export function useHistory(symbol: string, range: HistoryRange) {

@@ -190,7 +190,7 @@ function sourceMeta(s: AdminNewsSource, n: AdminNews): string {
 
 /**
  * 美股收盤價（Databento EQUS.SUMMARY，2026-11-15）：開著沒有、存了幾筆、存到紐約的哪一天、還有幾檔沒回補，
- * 以及每一檔回補的結果。新追蹤的美股從 first_day（2024-07-01）回補。
+ * 以及每一檔回補的結果（沒人持有或觀察了的停止更新；舊版後端沒有這一項時寫 0 檔）。新追蹤的美股從 first_day（2024-07-01）回補。
  */
 function UsPrices({ u }: { u: AdminUsPrices }) {
   return (
@@ -202,6 +202,7 @@ function UsPrices({ u }: { u: AdminUsPrices }) {
         <Stat label="日線" value={`${formatNumber(u.rows)} 筆`} />
         <Stat label="還沒回補" value={`${formatNumber(u.pending)} 檔`} />
         <Stat label="完成" value={`${formatNumber(u.symbols.done)} 檔`} />
+        <Stat label="沒人追蹤（停更）" value={`${formatNumber(u.symbols.untracked ?? 0)} 檔`} />
         <Stat label="找不到" value={`${formatNumber(u.symbols.not_found)} 檔`} />
         <Stat label="出錯" value={`${formatNumber(u.symbols.error)} 檔`} />
       </dl>

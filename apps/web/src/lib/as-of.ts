@@ -83,21 +83,26 @@ export function dayWord(asOf: string | null | undefined, today: string): string 
   return !day || day === today ? "今日" : formatDateShort(day, false)
 }
 
+/** 這個時刻在紐約是不是正好 16:00:00（美股的報價一律標在紐約 16:00 收盤） */
+function isUsCloseStamp(asOf: string | null | undefined): boolean {
+  if (!asOf || Number.isNaN(Date.parse(asOf))) return false
+  const hms = new Intl.DateTimeFormat("en-GB", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", second: "2-digit", hourCycle: "h23" }).format(new Date(asOf))
+  return hms === "16:00:00"
+}
+
 /**
  * 帳本只有美股有價格時，那是紐約哪一天的收盤（YYYY-MM-DD）；否則 null，照台股的寫法（`closeState`、`dayWord`）。
  * 後端（與 mock）的 `summary.as_of`：只要有一檔不是美股的持股有價格，就是台股的收盤時刻；只有美股時是紐約 16:00——
  * 在台北已經是隔天清晨，不能拿台北的日期說「11/14 收盤・盤中不更新」或「今日」。
  * 日期取美股持股 `price_date` 最大的那天；舊版後端沒有這個欄位時由 `as_of` 換算。
- * 持股還沒載入時看 `allocation.by_market`：全部是美股才當成美股（沒有價格的持股在那裡以成本計，分不出來，寧可照台股）。
+ * 持股還沒載入（或載入失敗）時看 `as_of` 本身：美股的報價一律是紐約 16:00:00，`as_of` 正好是那個時刻才當成美股的收盤。
+ * 不看 `allocation.by_market`——沒有價格的持股在那裡以成本計；全部都沒有價格時 `as_of` 是「現在」，換成紐約的日期可能是週日。
  */
 export function ledgerUsCloseDay(
-  summary: { as_of?: string | null; allocation?: { by_market?: readonly { key: string }[] } } | null | undefined,
+  summary: { as_of?: string | null } | null | undefined,
   holdings: readonly Pick<Holding, "market" | "price" | "price_date">[] | null | undefined,
 ): string | null {
-  if (!holdings) {
-    const markets = summary?.allocation?.by_market ?? []
-    return markets.length > 0 && markets.every((m) => m.key === "US") ? usTradeDate(null, summary?.as_of) : null
-  }
+  if (!holdings) return isUsCloseStamp(summary?.as_of) ? usTradeDate(null, summary?.as_of) : null
   const priced = holdings.filter((h) => h.price !== null)
   if (priced.length === 0 || priced.some((h) => h.market !== "US")) return null
   const days = priced.map((h) => h.price_date).filter((d): d is string => !!d)

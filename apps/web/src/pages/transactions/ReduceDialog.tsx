@@ -14,12 +14,14 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
 import { usd, usDay, usTradeDate } from "@/lib/labels"
+import { closeSellDate } from "@/lib/sell-date"
 import { usePrefs } from "@/stores/prefs"
 import { AccountSelect, StampLine } from "./TradeForm"
 
 /**
  * 減少持股（產品負責人 2026-11-14：只需要記買進，賣出不用特別去記帳）。
- * 賣了之後在那一檔按「減少持股」或「全部賣出」：只填股數。日期是今天、價格用最新的收盤價（美股的日期是那個收盤的紐約交易日），
+ * 賣了之後在那一檔按「減少持股」或「全部賣出」：只填股數。日期是今天、價格用最新的收盤價（美股的日期是那個收盤的紐約交易日；
+ * 這個帳戶這一檔有更晚的交易時改記今天，見 `closeSellDate`），
  * 不自動算手續費與稅（2026-11-14）——記成一筆賣出，所以已實現損益和績效照常算得出來。
  * 要指定日期或成交價，按「改日期或價格」到完整表單。
  */
@@ -89,6 +91,8 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
   // 還沒動過輸入框（null）時：「全部賣出」先填成全部（換帳戶時跟著換），否則是空的
   const [typed, setTyped] = useState<string | null>(null)
   const [submitted, setSubmitted] = useState(false)
+  // 美股送出前先查有沒有更晚的交易，決定成交日（`closeSellDate`）
+  const [dating, setDating] = useState(false)
   const qty = typed ?? (all && held != null ? String(inLots ? held / 1000 : held) : "")
   const setQty = setTyped
 
@@ -141,13 +145,17 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
   // 欄位下面的換算：填的是張就寫股數、填的是股就寫成幾張幾股（和「記一筆」一樣）
   const converted = !shares || shares <= 0 || isUS ? null : inLots ? `${new Intl.NumberFormat("zh-TW").format(shares)} 股` : shares >= 1000 ? formatQuantity(shares, "lot", holding.market) : null
 
-  const submit = (e: React.FormEvent) => {
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)
-    if (error || !shares || price === null || !account) return
-    // 成交日和上面那句話同一天：台股是今天；美股是那個收盤的紐約交易日（「用 11/13（美東）的收盤價」就記在 11/13）
+    if (error || !shares || price === null || !account || dating || create.isPending) return
+    // 成交日和上面那句話同一天：台股是今天；美股是那個收盤的紐約交易日（「用 11/13（美東）的收盤價」就記在 11/13），
+    // 但這個帳戶這一檔有更晚的交易（例如今天剛記的買進）時記今天——記在買進之前，後端會擋下
+    setDating(true)
+    const tradeDate = await closeSellDate(api, { accountId: account, symbol, closeDate: usDate, today: appToday() })
+    setDating(false)
     create.mutate(
-      { account_id: account, symbol, type: "sell", trade_date: usDate ?? appToday(), quantity: shares, price, note: "" },
+      { account_id: account, symbol, type: "sell", trade_date: tradeDate, quantity: shares, price, note: "" },
       {
         onSuccess: (txn) => {
           toast.success(`已記錄：賣出 ${holding.name} ${formatQuantity(shares, unitPref, holding.market)}`, {
@@ -169,7 +177,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
   }
 
   return (
-    <form onSubmit={submit} noValidate className="flex flex-col gap-4 px-4 pb-4 sm:px-6 sm:pb-6">
+    <form onSubmit={(e) => void submit(e)} noValidate className="flex flex-col gap-4 px-4 pb-4 sm:px-6 sm:pb-6">
       <p className="text-base">
         {holding.name} <span className="num text-sm text-ink-2">{holding.code}</span>
         <span className="num ml-3 text-ink-2">持有 {allText}</span>
@@ -231,8 +239,8 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
           <Button type="button" variant="outline" className="max-sm:flex-1 sm:min-w-24" onClick={onDone}>
             取消
           </Button>
-          <Button type="submit" variant="sign" className="max-sm:flex-1 sm:min-w-28" disabled={create.isPending || price === null}>
-            {create.isPending ? "記錄中…" : shares === held ? "全部賣出" : "賣出"}
+          <Button type="submit" variant="sign" className="max-sm:flex-1 sm:min-w-28" disabled={create.isPending || dating || price === null}>
+            {create.isPending || dating ? "記錄中…" : shares === held ? "全部賣出" : "賣出"}
           </Button>
         </div>
       </div>

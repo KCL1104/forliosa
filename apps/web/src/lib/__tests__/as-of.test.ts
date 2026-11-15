@@ -142,11 +142,20 @@ describe("ledgerUsCloseDay：帳本只有美股有價格時，那是紐約哪一
     expect(ledgerUsCloseDay(usSummary, [aapl, { ...tsmc, price: null, price_date: null }])).toBe("2026-11-13")
   })
 
-  it("持股還沒載入：看配置的市場，全部是美股才當成美股", () => {
-    const byMarket = (...keys: string[]) => ({ ...usSummary, allocation: { by_market: keys.map((key) => ({ key })) } })
-    expect(ledgerUsCloseDay(byMarket("US"), undefined)).toBe("2026-11-13")
-    expect(ledgerUsCloseDay(byMarket("TWSE", "US"), undefined)).toBeNull()
-    expect(ledgerUsCloseDay(byMarket(), undefined)).toBeNull()
+  it("持股還沒載入：as_of 正好是紐約 16:00 才當成美股的收盤（冬令、夏令）", () => {
+    expect(ledgerUsCloseDay(usSummary, undefined)).toBe("2026-11-13")
+    expect(ledgerUsCloseDay({ as_of: "2026-07-02T04:00:00+08:00" }, undefined)).toBe("2026-07-01")
     expect(ledgerUsCloseDay(undefined, undefined)).toBeNull()
+    expect(ledgerUsCloseDay({ as_of: null }, undefined)).toBeNull()
+  })
+
+  it("持股還沒載入、全部都沒有價格：as_of 是「現在」，不當成美股（不會寫出週日的紐約日期）", () => {
+    // 週一 11/16 10:00 台北＝紐約週日 11/15 21:00；配置裡只有美股（沒有價格的以成本計）
+    const unpriced = { as_of: "2026-11-16T10:00:00+08:00", allocation: { by_market: [{ key: "US" }] } }
+    expect(ledgerUsCloseDay(unpriced, undefined)).toBeNull()
+    // 台股的收盤時刻（13:30 台北）也不是
+    expect(ledgerUsCloseDay({ as_of: THU_CLOSE }, undefined)).toBeNull()
+    // 差一秒也不是
+    expect(ledgerUsCloseDay({ as_of: "2026-11-14T05:00:01+08:00" }, undefined)).toBeNull()
   })
 })

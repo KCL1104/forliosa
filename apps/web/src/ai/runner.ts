@@ -8,6 +8,7 @@ import { useUi } from "@/app/ui-store"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
 import { usd, usDay, usTradeDate } from "@/lib/labels"
 import { replacedAutoDividend } from "@/lib/ledger-display"
+import { closeSellDate } from "@/lib/sell-date"
 import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
 import { buildLocalChart, parseChartIntent } from "./chart-intent"
@@ -150,7 +151,12 @@ export function useAiRunner(ctx: AiContext) {
         const held = holdings.find((h) => h.symbol === inst.symbol)?.quantity ?? 0
         if (held < shares) notes.push(`你只有 ${formatQuantity(held, "lot", inst.market)}，比要賣的少，這筆不能入帳。`)
       }
-      input = { account_id: account.id, symbol: inst.symbol, type: intent.side, trade_date: intent.date ?? closeDate ?? today, quantity: shares, price }
+      // 使用者寫的日期優先。美股賣出記在收盤日以前要先看這個帳戶這一檔有沒有更晚的交易（例如今天剛記的買進）：
+      // 有的話記今天，否則簽名時後端依日期重算會擋下（和「減少持股」同一個規則，`closeSellDate`）
+      const tradeDate =
+        intent.date ??
+        (intent.side === "sell" ? await closeSellDate(api, { accountId: account.id, symbol: inst.symbol, closeDate, today }) : (closeDate ?? today))
+      input = { account_id: account.id, symbol: inst.symbol, type: intent.side, trade_date: tradeDate, quantity: shares, price }
     } else {
       input = { account_id: account.id, symbol: inst.symbol, type: "cash_dividend", trade_date: intent.date ?? today, quantity: null, price: null, amount: intent.amount }
       // 台股股利已在除息日自動入帳時：簽名後以使用者記的這筆為準（自動那筆會移除，不會重複）

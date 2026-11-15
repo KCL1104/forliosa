@@ -681,6 +681,7 @@ describe("管理後台：只有站方管理員", () => {
     expect(us).toHaveTextContent("日線51,172 筆")
     expect(us).toHaveTextContent("還沒回補1 檔")
     expect(us).toHaveTextContent("完成86 檔")
+    expect(us).toHaveTextContent("沒人追蹤（停更）3 檔")
     expect(us).toHaveTextContent("找不到2 檔")
     expect(us).toHaveTextContent("出錯0 檔")
     // 和 Yahoo 的回補相鄰

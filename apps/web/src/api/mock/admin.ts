@@ -115,7 +115,7 @@ export function createAdminStore(deps: AdminDeps) {
         datasets: datasets(),
         history_backfill: { enabled: true, rows: 1_843_220, pending: 12, symbols: { done: 1702, not_found: 37, mismatch: 9, no_overlap: 4, error: 0 } },
         // 有人持有或觀察的美股＋SPY、DIA、ONEQ：每檔約 600 個交易日（2024-07-01 起）；剛加入的 1 檔 10 分鐘內回補
-        us_prices: { enabled: true, rows: 51_172, pending: 1, first_day: US_ARCHIVE_START, stored_through: US_SESSION, symbols: { done: 86, not_found: 2, error: 0 } },
+        us_prices: { enabled: true, rows: 51_172, pending: 1, first_day: US_ARCHIVE_START, stored_through: US_SESSION, symbols: { done: 86, untracked: 3, not_found: 2, error: 0 } },
         // 2026-11-15 的實際情形：GDELT 限流中、SearXNG 照常、AI 搜尋沒有用到
         news: {
           enabled: true,

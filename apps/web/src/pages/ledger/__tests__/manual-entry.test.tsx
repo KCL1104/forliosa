@@ -247,6 +247,33 @@ describe("減少持股（賣出不用開表單）", () => {
     }
   })
 
+  it("美股「全部賣出」：這個帳戶這一檔今天剛記了買進（晚於收盤日）時記今天——記在收盤日，後端依日期重算會擋下", async () => {
+    const held0 = (await api.getHoldings()).find((h) => h.market === "US" && h.price !== null)!
+    const quote = await api.getQuote(held0.symbol)
+    expect(quote.trade_date! < appToday()).toBe(true)
+    const buy = await api.createTransaction({ account_id: held0.account_ids[0]!, symbol: held0.symbol, type: "buy", trade_date: appToday(), quantity: 2, price: quote.price, note: "" })
+    const created = [buy.id]
+    try {
+      renderApp("/")
+      await screen.findByRole("tablist", { name: "帳本內容" }, T)
+      const held = (await api.getHoldings()).find((h) => h.symbol === held0.symbol)!
+      useUi.getState().openReduce(held.symbol, true)
+      const dialog = await screen.findByRole("dialog", {}, T)
+      const form = within(dialog)
+      await form.findByText(/記成賣出。$/, {}, T)
+      await waitFor(() => expect(dialog.querySelector<HTMLInputElement>("#reduce-qty")!.value).toBe(String(held.quantity)), T)
+      const before = new Set((await api.listTransactions({ limit: 200 })).items.map((t) => t.id))
+      await userEvent.click(form.getByRole("button", { name: "全部賣出" }))
+      await waitFor(() => expect(useUi.getState().reduce.open).toBe(false), T)
+      const sell = (await api.listTransactions({ limit: 200 })).items.find((t) => !before.has(t.id))!
+      created.push(sell.id)
+      expect(sell).toMatchObject({ type: "sell", symbol: held.symbol, quantity: held.quantity, trade_date: appToday() })
+    } finally {
+      // mock 的帳本在這個檔案裡是共用的：還原
+      for (const id of created) await api.deleteTransaction(id)
+    }
+  }, 15_000)
+
   it("「全部賣出」先把股數填成全部；「改日期或價格」開完整表單、已經選在賣出", async () => {
     renderApp("/")
     await screen.findByRole("tablist", { name: "帳本內容" }, T)

@@ -1394,7 +1394,8 @@ export interface AdminUsPrices {
   pending: number
   first_day: string
   stored_through: string | null
-  symbols: { done: number; not_found: number; error: number }
+  /** untracked：沒人持有或觀察了，停止更新（舊版後端沒有這個欄位） */
+  symbols: { done: number; untracked?: number; not_found: number; error: number }
 }
 /** 新聞來源的狀態（2026-11-15）：時間都是 +08:00 */
 export interface AdminNewsSource {
