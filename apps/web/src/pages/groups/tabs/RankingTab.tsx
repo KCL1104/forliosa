@@ -25,7 +25,7 @@ const PERIODS: { value: LeaderboardPeriod; label: string }[] = [
  * 排行：今日・本月・今年（可對照加權報酬指數與 0050）。名次依期間報酬排，所以期間報酬是主數字
  * （較大較粗；表頭墨色＋排序箭頭，桌面的表頭帶 aria-sort）；總報酬（含股利）是一般字級的一欄，不排名。兩個都有 ▲▼。
  * 只列出伺服器回來的人（沒開報酬率的人不在裡面，也不標「未分享」）；期間報酬算不出來是「—」，不說原因。
- * 沒有收盤價的持股（美股）不算進期間報酬，只在自己那一列標「不含美股」。
+ * 沒有收盤價的持股（剛加入、還沒抓到收盤價的美股）不算進期間報酬，只在自己那一列標「不含沒有收盤價的持股」。
  * 表下面是當天排行的表情（和動態、週報同一個元件），再下面是當天排行的討論串。
  */
 export function RankingTab({ group }: { group: Group }) {
@@ -100,11 +100,14 @@ function MemberName({ e, groupId, avatar = true }: { e: LeaderboardEntry; groupI
       className="group/name flex min-w-0 items-center gap-2.5 after:absolute after:inset-0 after:content-[''] focus-visible:outline-none focus-visible:after:outline-2 focus-visible:after:-outline-offset-2 focus-visible:after:outline-ink"
     >
       {avatar && <UserAvatar name={e.display_name} url={e.avatar_url} size="sm" />}
-      <span className="flex min-w-0 items-baseline">
-        <span className={cn("truncate text-lg group-hover/name:underline", e.is_me ? "font-bold" : "font-medium")}>{e.display_name}</span>
-        {e.is_me && <span className="shrink-0 text-sm font-medium text-ink">（你）</span>}
+      {/* 標示放不下時換到名字下面一行（手機的成員欄約 146px），名字不會被擠到只剩「…」 */}
+      <span className="flex min-w-0 flex-wrap items-baseline gap-x-1">
+        <span className="flex min-w-0 max-w-full items-baseline">
+          <span className={cn("truncate text-lg group-hover/name:underline", e.is_me ? "font-bold" : "font-medium")}>{e.display_name}</span>
+          {e.is_me && <span className="shrink-0 text-sm font-medium text-ink">（你）</span>}
+        </span>
         {/* 期間報酬只算有收盤價的持股（和帳本的「今日」同一條規則）：只在自己那一列說 */}
-        {e.is_me && e.excludes_unpriced && <span className="shrink-0 text-sm text-ink-2">不含美股</span>}
+        {e.is_me && e.excludes_unpriced && <span className="text-sm text-ink-2">不含沒有收盤價的持股</span>}
       </span>
     </Link>
   )
@@ -248,7 +251,7 @@ function BoardList({ board, groupId }: { board: Leaderboard; groupId: string }) 
 function MyNullNote({ entries }: { entries: LeaderboardEntry[] }) {
   const me = entries.find((e) => e.is_me)
   if (!me || me.return_pct !== null) return null
-  return <p className="text-base text-ink">這段期間算不出你的報酬。美股沒有收盤價，不算在內。</p>
+  return <p className="text-base text-ink">這段期間算不出你的報酬：持股有幾天沒有收盤價。</p>
 }
 
 /** 當天排行的討論串（`leaderboard:<date>`）；表情在排行表下面（排行的回應帶 `reactions`） */

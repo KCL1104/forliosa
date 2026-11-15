@@ -9,6 +9,7 @@ import type {
   Transaction,
 } from "../types"
 import { syncAutoDividends } from "./auto-dividends"
+import { hasUsCloses, US_AS_OF, US_SESSION } from "./commercial"
 import { computePreview } from "./fees"
 import { findInstrument, type MockInstrumentSpec } from "./instruments"
 import {
@@ -246,8 +247,9 @@ const r2 = (n: number) => Math.round(n * 100) / 100
 const r4 = (n: number) => Math.round(n * 10000) / 10000
 
 /**
- * 持股。`commercial`：美股沒有可商用的報價——`price: null`、以成本計值、今日與未實現為 0（與後端相同），
- * 也不標示示範資料。
+ * 持股。`commercial`（與後端相同，不標示示範資料）：每一檔帶 `price_date`（價格屬於哪一個交易日；美股是紐約的日期
+ * `US_SESSION`）。美股的收盤價（Databento）以今天的匯率換算新台幣；還沒有收盤價的美股（只有 SEC 代號表認得的，
+ * 模擬剛加入、還沒抓到）`price: null`、以成本計值、今日與未實現為 0。
  */
 export function buildHoldings(txns: Transaction[], accountId?: string, commercial = false): Holding[] {
   const state = replay(txns, MOCK_TODAY, accountId)
@@ -255,11 +257,11 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
   for (const pos of state.positions.values()) {
     if (pos.qty <= 0.0001) continue
     const spec = findInstrument(pos.symbol)!
-    if (commercial && spec.market === "US") {
+    if (commercial && spec.market === "US" && !hasUsCloses(spec)) {
       rows.push({
         symbol: spec.symbol, code: spec.code, name: spec.name, market: spec.market, type: spec.type,
         currency: spec.currency, industry: spec.industry, quantity: pos.qty, avg_cost: r4(pos.cost / pos.qty),
-        cost_basis: r2(pos.costTwd), price: null, prev_close: null, market_value: r2(pos.costTwd), day_change: 0,
+        cost_basis: r2(pos.costTwd), price: null, prev_close: null, price_date: null, market_value: r2(pos.costTwd), day_change: 0,
         day_change_pct: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0, weight: 0, account_ids: [...pos.accounts], is_demo: false,
       })
       continue
@@ -275,6 +277,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
       cost_basis: r2(pos.costTwd),
       price: spec.price,
       prev_close: spec.prev_close,
+      ...(commercial ? { price_date: spec.market === "US" ? US_SESSION : MOCK_TODAY } : {}),
       market_value: r2(mv),
       day_change: r2(day),
       day_change_pct: r4(spec.price / spec.prev_close - 1),
@@ -327,8 +330,10 @@ export function buildSummary(txns: Transaction[], accountId?: string, commercial
     })
     .sort((a, b) => a.ex_dividend_date.localeCompare(b.ex_dividend_date))
 
+  // 和後端相同：混合持股的時間用台股的收盤（美股的收盤在台北是清晨，不能讓台股看起來新了一天）；只有美股時是美股收盤的時間
+  const onlyUs = commercial && holdings.some((h) => h.price !== null) && holdings.every((h) => h.price === null || h.market === "US")
   return {
-    as_of: MOCK_AS_OF,
+    as_of: onlyUs ? US_AS_OF : MOCK_AS_OF,
     market_value: r2(mv),
     cost_basis: r2(cost),
     unrealized_pnl: r2(unrealized),

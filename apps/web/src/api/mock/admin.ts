@@ -7,12 +7,14 @@ import {
   type BlockedDomain,
   type MemberGrantBody,
 } from "../types"
-import { datasetRows } from "./attributions"
+import { DATABENTO_ROW, datasetRows } from "./attributions"
+import { US_ARCHIVE_START, US_SESSION } from "./commercial"
 import { mockMediaUrls } from "./research"
 
 /**
  * 管理後台的示範版（和後端 `services/admin.py` 同一套規則）：
- * - 總覽：使用者只有人數；金鑰槽只有狀態與本月用量（沒有金鑰）；資料集是最久沒有新資料的在前，落後 3 個交易日以上標 `stale`。
+ * - 總覽：使用者只有人數；金鑰槽只有狀態與本月用量（沒有金鑰）；資料集是最久沒有新資料的在前，落後 3 個交易日以上標 `stale`；
+ *   美股收盤價（Databento）的回補進度：存到紐約 11/11（台北 11/12 清晨抓的），1 檔剛加入還沒回補。
  * - 新聞下架：網域正規化（小寫、去掉 www.、從網址取主機）；封鎖會刪掉那個網域與子網域已存的標題（示範報導都在 example.com）；
  *   寫在伺服器設定的不能在這裡解除（409）。
  * - 會員：用 email 開通或續期（示範帳號只有 demo@forliosa.local 與 friend@forliosa.local；其他 email → 404）；
@@ -70,6 +72,8 @@ function datasets(): AdminDataset[] {
     }
   })
   rows.push({ key: "yahoo-history/price", name: "Yahoo Finance（歷史日線，非官方資料）", agency: null, data_date: "2026-11-11", fetched_at: FETCHED, days_behind: 1, stale: false })
+  // 美股收盤價：資料日期是紐約的交易日（11/11），紐約 17:00（台北 11/12 06:00）之後抓到
+  rows.push({ key: DATABENTO_ROW.key, name: DATABENTO_ROW.name, agency: DATABENTO_ROW.agency, data_date: US_SESSION, fetched_at: "2026-11-12T06:04:00+08:00", days_behind: 1, stale: false })
   // 最久沒有新資料的在前（日期相同時依 key）
   return rows.sort((a, b) => (a.data_date ?? "").localeCompare(b.data_date ?? "") || a.key.localeCompare(b.key))
 }
@@ -110,6 +114,8 @@ export function createAdminStore(deps: AdminDeps) {
         },
         datasets: datasets(),
         history_backfill: { enabled: true, rows: 1_843_220, pending: 12, symbols: { done: 1702, not_found: 37, mismatch: 9, no_overlap: 4, error: 0 } },
+        // 有人持有或觀察的美股＋SPY、DIA、ONEQ：每檔約 600 個交易日（2024-07-01 起）；剛加入的 1 檔 10 分鐘內回補
+        us_prices: { enabled: true, rows: 51_172, pending: 1, first_day: US_ARCHIVE_START, stored_through: US_SESSION, symbols: { done: 86, not_found: 2, error: 0 } },
         // 2026-11-15 的實際情形：GDELT 限流中、SearXNG 照常、AI 搜尋沒有用到
         news: {
           enabled: true,

@@ -21,9 +21,9 @@ import type {
   Why,
   WhyReason,
 } from "../types"
-import { AI_SEARCH_ATTRIBUTION, GDELT_ATTRIBUTION, SEARXNG_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
+import { AI_SEARCH_ATTRIBUTION, DATABENTO_ATTRIBUTION, GDELT_ATTRIBUTION, SEARXNG_ATTRIBUTION, secSourceOf, sourceOf, YAHOO_RSS_ATTRIBUTION } from "./attributions"
 import { buildEtfNav, NAV_SOURCE_KEY } from "./etf-nav"
-import { accumulatingNote, ARCHIVE_START, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE, TWSE_INST_NOTE } from "./commercial"
+import { accumulatingNote, ARCHIVE_START, hasUsCloses, INTRADAY_NOTE, TOP20_NOTE, TWSE_CHIPS_NOTE, TWSE_INST_NOTE, US_AS_OF, US_SESSION, usCandles } from "./commercial"
 import type { MockInstrumentSpec } from "./instruments"
 import { buildHoldings, replay } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, FX_NOW, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, rng, tradingDays } from "./market"
@@ -43,8 +43,9 @@ export function limitsOf(spec: MockInstrumentSpec) {
 
 // ── overview ─────────────────────────────────────────────
 export function buildOverview(spec: MockInstrumentSpec, commercial = false): InstrumentOverview {
+  if (commercial && spec.market === "US" && hasUsCloses(spec)) return usOverview(spec)
   if (commercial && spec.market === "US") {
-    // 美股沒有可商用的行情來源：價格欄位 null；近四季 EPS 與流通股數來自 SEC EDGAR 的存檔（與後端相同）
+    // 還沒有收盤價的美股：價格欄位 null；近四季 EPS 與流通股數來自 SEC EDGAR 的存檔（與後端相同）
     const sec = spec.type === "stock" ? SEC_MOCK[spec.symbol] : undefined
     return {
       symbol: spec.symbol, open: null, high: null, low: null, prev_close: null, reference_price: null, limit_up: null, limit_down: null,
@@ -98,6 +99,27 @@ export function buildOverview(spec: MockInstrumentSpec, commercial = false): Ins
   }
 }
 
+/**
+ * 商用模式的美股（Databento 的收盤）：開高低、成交量與 52 週區間來自紐約的日線；沒有參考價、漲跌停、本益比與股利
+ * （美股股利沒有來源）；個股的近四季 EPS、流通股數來自 SEC，市值＝流通股數 × 收盤價（與後端相同）。
+ */
+function usOverview(spec: MockInstrumentSpec): InstrumentOverview {
+  const candles = usCandles(spec)
+  const last = candles.at(-1)!
+  const year = candles.slice(-250)
+  const q3 = candles.slice(-63)
+  const sec = spec.type === "stock" ? SEC_MOCK[spec.symbol] : undefined
+  const shares = sec?.shares_outstanding ?? null
+  return {
+    symbol: spec.symbol, open: last.o, high: last.h, low: last.l, prev_close: spec.prev_close, reference_price: null, limit_up: null, limit_down: null,
+    volume: last.v, avg_volume_3m: Math.round(q3.reduce((s, c) => s + c.v, 0) / q3.length / 1000) * 1000,
+    market_cap: shares === null ? null : Math.round(shares * spec.price), pe: null, pb: null, dividend_yield: null, last_cash_dividend: null,
+    ex_dividend_date: null, eps_ttm: sec?.eps_ttm ?? null, high_52w: Math.max(...year.map((c) => c.h)), low_52w: Math.min(...year.map((c) => c.l)),
+    shares_outstanding: shares, status: { attention: false, disposition: false, note: null }, etf_nav: null, as_of: US_AS_OF,
+    sources: [DATABENTO_ATTRIBUTION, ...(sec ? [secSourceOf("sec-edgar/companyfacts")] : [])], is_demo: false,
+  }
+}
+
 // ── intraday（只有持股與自選有點） ────────────────────────
 function minuteLabels(): string[] {
   const out: string[] = []
@@ -116,7 +138,9 @@ export function buildIntraday(spec: MockInstrumentSpec, tracked: boolean, commer
     sources: commercial ? [] : DEMO_SRC,
     is_demo: !commercial,
   }
-  // 商用模式：沒有授權的盤中來源，一律沒有點（任何模式的後端都是這樣；personal 的 mock 保留示範走勢給開發用）
+  // 商用模式：沒有授權的盤中來源，一律沒有點（任何模式的後端都是這樣；personal 的 mock 保留示範走勢給開發用）。
+  // 美股的日期是收盤的那個紐約交易日，那一天已經收完（`is_partial: false`，和後端相同）
+  if (commercial && spec.market === "US") return { ...base, date: hasUsCloses(spec) ? US_SESSION : MOCK_TODAY, prev_close: hasUsCloses(spec) ? spec.prev_close : null, reference_price: null, notes: [INTRADAY_NOTE] }
   if (commercial) return { ...base, is_partial: true, notes: [INTRADAY_NOTE] }
   if (!tracked) return base
   const labels = spec.market === "US" ? usMinuteLabels() : minuteLabels()
@@ -549,7 +573,7 @@ export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[], com
     markers,
     upcoming_dividend: next && !(commercial && spec.market === "US") ? { ex_dividend_date: next.ex_dividend_date!, amount_estimate: round(next.cash_dividend * holding.quantity * fx, 0) } : null,
     currency: spec.currency,
-    as_of: MOCK_AS_OF,
+    as_of: commercial && hasUsCloses(spec) ? US_AS_OF : MOCK_AS_OF,
     // 美股的台幣金額用到匯率：後端一併列出匯率資料集的顯名聲明（商用模式是中央銀行的收盤匯率）
     sources: ["帳本紀錄", ...(spec.currency === "USD" ? [commercial ? sourceOf("cbc-opendata/fx") : "示範資料（模擬）"] : [])],
     is_demo: !commercial,
@@ -557,8 +581,13 @@ export function buildPosition(spec: MockInstrumentSpec, txns: Transaction[], com
 }
 
 // ── why（規則判斷，M4 前用模板句） ─────────────────────────
-export function buildWhy(spec: MockInstrumentSpec): Why {
-  const candles = dailyCandles(spec)
+/**
+ * `commercial`：和後端一樣帶 `trade_date`（這次漲跌屬於哪一個交易日）。美股（Databento 的收盤）是紐約的日期，
+ * 時間是紐約 16:00（台北隔天清晨），句子寫那一天的日期（「11/11 上漲」），不寫「今天」。
+ */
+export function buildWhy(spec: MockInstrumentSpec, commercial = false): Why {
+  const us = commercial && hasUsCloses(spec)
+  const candles = us ? usCandles(spec) : dailyCandles(spec)
   const last = candles.at(-1)!
   const prior = candles.slice(-21, -1)
   const avgVol = prior.reduce((s, c) => s + c.v, 0) / Math.max(prior.length, 1)
@@ -566,7 +595,8 @@ export function buildWhy(spec: MockInstrumentSpec): Why {
   const pct = spec.price / ref - 1
   const reasons: WhyReason[] = []
   const pctText = `${pct > 0 ? "▲" : "▼"}${Math.abs(pct * 100).toFixed(2)}%`
-  if (Math.abs(pct) >= 0.03) reasons.push({ kind: "price_move", text: `今天${pct > 0 ? "上漲" : "下跌"} ${pctText}，超過 ±3%` })
+  const when = us ? `${Number(US_SESSION.slice(5, 7))}/${Number(US_SESSION.slice(8))} ` : "今天"
+  if (Math.abs(pct) >= 0.03) reasons.push({ kind: "price_move", text: `${when}${pct > 0 ? "上漲" : "下跌"} ${pctText}，超過 ±3%` })
   const volRatio = last.v / avgVol
   if (volRatio >= 2 || (spec.symbol === "2330.TW" && Math.abs(pct) >= 0.03)) {
     reasons.push({ kind: "volume", text: `成交量是近 20 日均量的 ${Math.max(volRatio, 2.1).toFixed(1)} 倍` })
@@ -581,7 +611,8 @@ export function buildWhy(spec: MockInstrumentSpec): Why {
     show,
     headline: show ? reasons.filter((x) => x.kind !== "price_move").map((x) => x.text).slice(0, 2).join("，") || reasons[0]!.text : null,
     reasons: show ? reasons : [],
-    as_of: MOCK_AS_OF,
+    as_of: us ? US_AS_OF : MOCK_AS_OF,
+    ...(commercial ? { trade_date: us ? US_SESSION : MOCK_TODAY } : {}),
   }
 }
 

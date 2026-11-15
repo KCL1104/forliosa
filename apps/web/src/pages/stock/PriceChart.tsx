@@ -82,7 +82,8 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
  * 買進 B／賣出 S／股利 D 標記來自交易歷史（`position/history`，出清後也有）；持有時另有均價虛線。隱私模式全部隱藏。
  * 1 日線需要授權的盤中行情：商用模式沒有點，顯示說明（後端的 notes）。存檔不足時圖下照實寫出 notes。
  * 手機上工具列放在區間下面：讀數與圖緊接在價格與部位下面，第一屏就看得到圖（工具列是次要的）。
- * 美股和台股同一套：日線是紐約那一天的未還原收盤（Databento，2024/07/01 起），沒有的區間照後端的 notes 說；價格前面寫 US$。
+ * 美股和台股同一套：日線是紐約那一天的收盤（Databento，2024/07/01 起；區間裡有股票分割時後端換算過分割前的價格，
+ * notes 寫明），沒有的區間照後端的 notes 說；價格前面寫 US$。
  * 還沒有收盤價（剛加入、還沒抓過的美股）時這個元件不出現（StockPage 不放），只在價格那一格說一次。
  */
 const NO_MARKS: never[] = []
@@ -377,8 +378,9 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       )}
       {!desktop && toolbar}
       <DataNotes
-        // 美股和台股一樣是未還原的收盤；美股的分割比較常見，寫明分割前後的價格沒有調整
-        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), inst.market === "US" ? "價格為未還原收盤價（分割與配息都沒有調整）。" : "價格為未還原收盤價。"] : []}
+        // 美股的收盤和台股一樣沒有還原配息；但區間裡有股票分割時，後端把分割前的價格換算過、notes 會寫哪一天怎麼拆，
+        // 所以美股不說「未還原」，只說配息沒有還原
+        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), inst.market === "US" ? "價格為收盤價，配息沒有還原。" : "價格為未還原收盤價。"] : []}
         className="mt-1"
       />
     </section>

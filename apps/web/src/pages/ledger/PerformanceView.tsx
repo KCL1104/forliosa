@@ -1,7 +1,7 @@
 import { useState } from "react"
 import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { useAccounts, useHoldings, usePerformance } from "@/api/queries"
-import type { Performance, PerformanceRange } from "@/api/types"
+import type { Holding, Performance, PerformanceRange } from "@/api/types"
 import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
@@ -22,6 +22,7 @@ import { niceTicks } from "@/ai/chart-geometry"
 import { inText } from "@/lib/cjk"
 import { useHowToRead } from "@/pages/stock/tabs/how-to-read"
 import { useReadOnly, useWho } from "@/api/view-as"
+import { isUnpricedNote } from "./trend-reason"
 
 const RANGES: { value: PerformanceRange; label: string }[] = [
   { value: "1D", label: "1日" },
@@ -34,16 +35,18 @@ const RANGES: { value: PerformanceRange; label: string }[] = [
   { value: "ALL", label: "全部" },
 ]
 
-/** 算不出來、而且換區間或基準也沒有用：含美股（美股沒有可商用的價格） */
+/**
+ * 算不出來、而且換區間或基準也沒有用：有持股還沒有收盤價（剛加入、還沒抓到收盤價的美股；後端的說明是
+ * 「MSFT：還沒有收盤價，績效算不出來」，美股收盤價沒開時是「…：美股沒有報價，…」）
+ */
 function isBlocked(p: Performance | undefined, isError: boolean): boolean {
-  return !!p && !isError && p.series.length < 2 && (p.notes ?? []).some((n) => n.includes("美股"))
+  return !!p && !isError && p.series.length < 2 && (p.notes ?? []).some(isUnpricedNote)
 }
 
 export function PerformanceView() {
   const [range, setRange] = useState<PerformanceRange>("1Y")
-  // undefined＝全部帳戶。chosen：使用者自己在選單選過（選過「全部帳戶」就照他的意思顯示空狀態）
+  // undefined＝全部帳戶
   const [account, setAccount] = useState<string | undefined>()
-  const [chosen, setChosen] = useState(false)
   const accounts = useAccounts()
   // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
   const readOnly = useReadOnly()
@@ -52,29 +55,20 @@ export function PerformanceView() {
   const benchmark = readOnly ? undefined : prefBenchmark
   const setPref = usePrefSetter()
   const accountOptions = accounts.data ?? []
-  // 全部帳戶含美股就算不出績效（美股沒有報價）。還沒選過帳戶時，自動只看第一個新台幣帳戶、上面一行說明，
-  // 而不是一打開就是空白（產品負責人自己有複委託帳戶，每天都會看到；2026-11-14 設計評分）
-  const perfAll = usePerformance(range, account, benchmark)
-  const tw = accountOptions.find((a) => a.currency === "TWD")
-  const autoAccount = !chosen && account === undefined && isBlocked(perfAll.data, perfAll.isError) && tw ? tw.id : undefined
-  const effective = autoAccount ?? account
-  const perf = usePerformance(range, effective, benchmark)
-  const holdings = useHoldings(effective)
+  // 美股也有收盤價（2026-11-15）：全部帳戶照常算得出來，不再自動改看新台幣帳戶
+  const perf = usePerformance(range, account, benchmark)
+  const holdings = useHoldings(account)
   const p = perf.data
-  // 算不出來、而且換區間或基準也沒有用（含美股：沒有可商用的價格）：區間與比較基準不放，只留帳戶——那是唯一有用的控制項
+  // 算不出來、而且換區間或基準也沒有用（有持股還沒有收盤價）：區間與比較基準不放，只留帳戶——那是唯一有用的控制項
   const blocked = isBlocked(p, perf.isError)
-  const pick = (id: string | undefined) => {
-    setChosen(true)
-    setAccount(id)
-  }
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
         {!blocked && <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />}
         <Select
-          value={effective ?? "all"}
-          onValueChange={(v) => pick(v === "all" ? undefined : (v as string))}
+          value={account ?? "all"}
+          onValueChange={(v) => setAccount(v === "all" ? undefined : (v as string))}
           items={[{ value: "all", label: "全部帳戶" }, ...accountOptions.map((a) => ({ value: a.id, label: a.name }))]}
         >
           <SelectTrigger size="sm" className="min-w-36 pointer-coarse:data-[size=sm]:h-11" aria-label="帳戶">
@@ -111,10 +105,9 @@ export function PerformanceView() {
           <ChartSkeleton height={300} />
         </>
       ) : p.series.length < 2 ? (
-        <NotEnough p={p} account={effective} accounts={accountOptions} onAccount={pick} />
+        <NotEnough p={p} blocked={blocked} account={account} accounts={accountOptions} holdings={holdings.data} onAccount={setAccount} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
-          {autoAccount && tw && <p className="text-base text-ink">只算「{tw.name}」。美股沒有報價，含美股的帳戶算不出績效。</p>}
           <DataNotes notes={p.notes} />
           <Metrics p={p} />
           <Panel title="與基準比較" titleId="cmp-title">
@@ -143,14 +136,13 @@ export function PerformanceView() {
 }
 
 /**
- * 算不出績效時（空狀態，全站同一種）：標題＋後端 notes 的原文說明為什麼（商用模式：存檔不足、美股沒有可商用的價格），
- * 最多一個現在能做的事——只看新台幣帳戶（不含美股）；有好幾個新台幣帳戶時，其他的從上面的帳戶選單選。
- * 原因在這一頁只說這一次（主數字列右邊的「近 1 個月走勢：…」在績效分段不出現）。
+ * 算不出績效時（空狀態，全站同一種）：標題＋後端 notes 的原文說明為什麼（商用模式：存檔不足、有持股還沒有收盤價），
+ * 最多一個現在能做的事——有持股還沒有收盤價時，只看一個沒有那幾檔的帳戶（有持股、每一檔都有收盤價的第一個帳戶）；
+ * 其他帳戶從上面的帳戶選單選。原因在這一頁只說這一次（主數字列右邊的「近 1 個月走勢：…」在績效分段不出現）。
  */
-function NotEnough({ p, account, accounts, onAccount }: { p: Performance; account?: string; accounts: { id: string; name: string; currency: string }[]; onAccount: (id: string) => void }) {
+function NotEnough({ p, blocked, account, accounts, holdings, onAccount }: { p: Performance; blocked: boolean; account?: string; accounts: { id: string; name: string }[]; holdings?: Holding[]; onAccount: (id: string) => void }) {
   const notes = p.notes ?? []
-  const hasUs = notes.some((n) => n.includes("美股"))
-  const tw = accounts.find((a) => a.currency === "TWD")
+  const other = blocked && !account ? pricedAccount(accounts, holdings) : undefined
   return (
     <EmptyState
       // 這個分段的最後一塊：下面那條線是頁尾（資料來源）的上緣格線，不重複畫、不夾一段空白
@@ -167,14 +159,23 @@ function NotEnough({ p, account, accounts, onAccount }: { p: Performance; accoun
           : "至少需要兩個交易日的持股資料。記下交易後，隔一個交易日就會出現。"
       }
       action={
-        hasUs && !account && tw ? (
-          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => onAccount(tw.id)}>
-            只看「{tw.name}」
+        other ? (
+          <Button variant="outline" size="sm" className="pointer-coarse:h-11" onClick={() => onAccount(other.id)}>
+            只看「{other.name}」
           </Button>
         ) : undefined
       }
     />
   )
+}
+
+/** 有持股、而且每一檔都有收盤價的第一個帳戶（沒有收盤價的持股在哪些帳戶，看持股的 `account_ids`） */
+function pricedAccount<A extends { id: string }>(accounts: A[], holdings?: Holding[]): A | undefined {
+  if (!holdings) return undefined
+  const unpriced = new Set(holdings.filter((h) => h.price === null).flatMap((h) => h.account_ids))
+  if (unpriced.size === 0) return undefined
+  const held = new Set(holdings.filter((h) => h.price !== null).flatMap((h) => h.account_ids))
+  return accounts.find((a) => held.has(a.id) && !unpriced.has(a.id))
 }
 
 function Metrics({ p }: { p: Performance }) {

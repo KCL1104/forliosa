@@ -22,7 +22,7 @@ export interface MockInstrumentSpec extends Omit<InstrumentDetail, "is_demo"> {
   /**
    * 只有後端存檔的清單認得的商品（和後端 `ArchiveProvider.listings` 相同）：
    * `close_file`＝證交所／櫃買收盤檔裡的 ETF（名稱照收盤檔）；`sec`＝SEC〈company_tickers.json〉的美股（只有英文名、
-   * 只有英文查詢搜得到、商用模式沒有報價）。沒寫的是內建清單或 shioaji-data 的商品。
+   * 只有英文查詢搜得到；商用模式模擬「沒有人持有或觀察、還沒抓過收盤價」，沒有報價）。沒寫的是內建清單或 shioaji-data 的商品。
    */
   listing?: "close_file" | "sec"
 }
@@ -94,6 +94,31 @@ export const INSTRUMENTS: MockInstrumentSpec[] = [
     summary: "追蹤 S&P 500 指數的低成本 ETF，季配息。", chain_stage: null, themes: ["美股大盤", "季配息"],
     shares_outstanding: null, market_cap: null, data_sources: ["示範資料（美股資料來源待定）"],
     price: 634.2, prev_close: 631.9, drift: 0.13, vol: 0.17, avg_volume: 6_000_000,
+  },
+  {
+    symbol: "QQQ", code: "QQQ", name: "Invesco QQQ Trust", market: "US", type: "etf", currency: "USD", industry: "ETF",
+    summary: "追蹤那斯達克 100 指數的 ETF。", chain_stage: null, themes: ["美股科技"],
+    shares_outstanding: null, market_cap: null, data_sources: ["示範資料（美股資料來源待定）"],
+    price: 621.08, prev_close: 616.4, drift: 0.17, vol: 0.22, avg_volume: 45_000_000,
+  },
+  // 市場頁的美股 ETF（和 market-overview.ts 的收盤一致）：追蹤指數的 ETF，不是指數本身
+  {
+    symbol: "SPY", code: "SPY", name: "SPDR S&P 500 ETF Trust", market: "US", type: "etf", currency: "USD", industry: "ETF",
+    summary: "追蹤 S&P 500 指數的 ETF。", chain_stage: null, themes: ["美股大盤"],
+    shares_outstanding: null, market_cap: null, data_sources: ["示範資料（美股資料來源待定）"],
+    price: 683.41, prev_close: 679.29, drift: 0.13, vol: 0.17, avg_volume: 70_000_000,
+  },
+  {
+    symbol: "DIA", code: "DIA", name: "SPDR Dow Jones Industrial Average ETF Trust", market: "US", type: "etf", currency: "USD", industry: "ETF",
+    summary: "追蹤道瓊工業指數的 ETF。", chain_stage: null, themes: ["美股大盤"],
+    shares_outstanding: null, market_cap: null, data_sources: ["示範資料（美股資料來源待定）"],
+    price: 471.86, prev_close: 473.23, drift: 0.1, vol: 0.15, avg_volume: 3_500_000,
+  },
+  {
+    symbol: "ONEQ", code: "ONEQ", name: "Fidelity Nasdaq Composite Index ETF", market: "US", type: "etf", currency: "USD", industry: "ETF",
+    summary: "追蹤那斯達克綜合指數的 ETF。", chain_stage: null, themes: ["美股科技"],
+    shares_outstanding: null, market_cap: null, data_sources: ["示範資料（美股資料來源待定）"],
+    price: 87.94, prev_close: 87.06, drift: 0.16, vol: 0.22, avg_volume: 400_000,
   },
   // ── 不在持股中、但可以搜尋的商品 ───────────────────────────
   {
@@ -234,7 +259,7 @@ function closeFileEtf(symbol: string, name: string, price: number, prev_close: n
   }
 }
 
-/** SEC 的美股：個人模式（示範資料）才有報價；簡介、產業、題材都沒有 */
+/** SEC 的美股：個人模式（示範資料）才有報價（商用模式是還沒抓過收盤價的美股）；簡介、產業、題材都沒有 */
 function sec(code: string, name: string, price: number, prev_close: number, drift: number, vol: number, avg_volume: number): MockInstrumentSpec {
   return {
     symbol: code, code, name, market: "US", type: "stock", currency: "USD", industry: null, listing: "sec",

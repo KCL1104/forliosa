@@ -70,6 +70,7 @@ export function attributionOf(agency: string, dataset: string, year = YEAR): str
 /** 依資料集 key（例如 `twse-openapi/price`）取得顯名聲明，給各端點的 `sources` 用 */
 export function sourceOf(key: string): string {
   if (key.startsWith("sec-edgar/")) return secSourceOf(key)
+  if (key === DATABENTO_KEY) return DATABENTO_ATTRIBUTION
   const row = ROWS.find((r) => r[0] === key)
   return row ? attributionOf(row[1], row[2]) : key
 }
@@ -83,6 +84,16 @@ const SEC_ROWS: Row[] = [
   ["sec-edgar/submissions", SEC, "EDGAR 公司申報清單（submissions）", "https://data.sec.gov/submissions/", "美股事件：8-K、10-Q、10-K 申報（附 sec.gov 原文連結）"],
   ["sec-edgar/tickers", SEC, "公司代號與 CIK 對照表（company_tickers.json）", "https://www.sec.gov/files/company_tickers.json", "美股代號對應 SEC 公司編號（CIK）"],
 ]
+
+/**
+ * 美股收盤價（產品負責人 2026-11-15）：Databento 的 EQUS.SUMMARY（Nasdaq NLS Plus 的官方合併收盤，未還原權息，2024-07-01 起）。
+ * 和後端 datapolicy 的 `databento-equs/price` 同一句；只在美股收盤價有開的時候列出（mock：商用模式）。
+ */
+export const DATABENTO_KEY = "databento-equs/price"
+const DATABENTO_DATASET = "US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）"
+export const DATABENTO_ATTRIBUTION = `Databento〈${DATABENTO_DATASET}〉（${YEAR}），資料由 Databento 提供`
+/** 管理後台「資料」的那一列（key、提供機關、名稱） */
+export const DATABENTO_ROW = { key: DATABENTO_KEY, agency: "Databento", name: DATABENTO_DATASET } as const
 
 /** 新聞報導的來源（後端 datapolicy.py 的 gdelt/doc、yahoo-rss/stock） */
 const GDELT_TERMS_URL = "https://www.gdeltproject.org/about.html#termsofuse"
@@ -110,6 +121,15 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
   }))
   for (const [key, agency, dataset, url, used_for] of SEC_ROWS) {
     datasets.push({ key, agency, dataset, url, used_for, year: YEAR, license: SEC_LICENSE, license_url: SEC_LICENSE_URL, commercial: true, attribution: secSourceOf(key) })
+  }
+  if (policy === "commercial") {
+    // 後端多一個 license_status（"licensed"：付費的資料商）；前端的型別沒有這個欄位，畫面也不用
+    const databento: AttributionDataset & { license_status: string } = {
+      key: DATABENTO_KEY, agency: DATABENTO_ROW.agency, dataset: DATABENTO_DATASET, url: "https://databento.com/datasets/EQUS.SUMMARY",
+      used_for: "美股收盤價、日線、成交量（2024-07-01 起，未還原權息）", year: YEAR, license: "Databento 服務條款",
+      license_url: "https://databento.com/terms", license_status: "licensed", commercial: true, attribution: DATABENTO_ATTRIBUTION,
+    }
+    datasets.push(databento)
   }
   datasets.push({
     key: "gdelt/doc", agency: "The GDELT Project", dataset: "GDELT DOC 2.0 新聞索引", url: "https://api.gdeltproject.org/api/v2/doc/doc",

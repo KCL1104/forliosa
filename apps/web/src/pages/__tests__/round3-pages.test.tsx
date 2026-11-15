@@ -365,7 +365,9 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     const label = await screen.findByText("11/13 收盤（美東）", undefined, T)
     const header = label.closest("header")!
     expect(header.textContent).toContain("US$")
-    expect(header.textContent).toContain("參考價 US$350.00")
+    // 美股沒有參考價（台股的平盤價）：寫前一個交易日的收盤
+    expect(header.textContent).toContain("昨收 US$350.00")
+    expect(header.textContent).not.toContain("參考價")
     expect(header.textContent).not.toMatch(/05:00|11\/14|沒有報價/)
     expect(screen.queryByText(/盤中不更新/)).toBeNull()
     expect(screen.queryByRole("link", { name: /到證交所看即時報價/ })).toBeNull()

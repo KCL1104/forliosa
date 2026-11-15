@@ -3,9 +3,10 @@ import NumberFlow from "@number-flow/react"
 import { inText } from "@/lib/cjk"
 import { Link, useNavigate, useParams, useSearch } from "@tanstack/react-router"
 import { ArrowLeftIcon, ArrowUpRightIcon, ChevronDownIcon, ChevronRightIcon } from "lucide-react"
-import { lazy, Suspense, useState } from "react"
+import { useQueryClient } from "@tanstack/react-query"
+import { lazy, Suspense, useEffect, useState } from "react"
 import { ApiError } from "@/api"
-import { useInstrument, useOverview, usePosition, usePositionHistory, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
+import { qk, useInstrument, useOverview, usePosition, usePositionHistory, useQuote, useToggleWatch, useWatchlist, useWhy } from "@/api/queries"
 import type { ClosedRound, InstrumentDetail, Position, Quote, Why } from "@/api/types"
 import { Masked, Pct } from "@/components/finance"
 import { holdingPeriod } from "@/lib/ledger-display"
@@ -307,8 +308,9 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
           <span>{quote ? asOfLabel(quote.as_of) || "—" : "—"}</span>
         )}
         {ref !== null && (
+          // 美股沒有參考價（平盤價是台股的規則）：寫前一個交易日的收盤「昨收」，價格帶 US$
           <span>
-            參考價 <span className="text-ink">{us && "US$"}{formatPrice(ref, inst.market, inst.type)}</span>
+            {us ? "昨收" : "參考價"} <span className="text-ink">{us && "US$"}{formatPrice(ref, inst.market, inst.type)}</span>
           </span>
         )}
         {limits && (
@@ -353,7 +355,14 @@ function UsNoClose({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const served = useUsClosesServed()
   const watch = useWatchlist()
   const readOnly = useReadOnly()
+  const qc = useQueryClient()
   const tracked = held || (watch.data ?? []).some((w) => w.symbol === inst.symbol)
+  // 已經加入、等收盤價補上：每分鐘再問一次報價（報價查詢出錯後自己不會再問），補上了整頁就換成有價格的樣子，不用重新整理
+  useEffect(() => {
+    if (!served || !tracked) return
+    const timer = window.setInterval(() => void qc.invalidateQueries({ queryKey: qk.quote(inst.symbol) }), 60_000)
+    return () => window.clearInterval(timer)
+  }, [served, tracked, qc, inst.symbol])
   return (
     <>
       <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">{served ? "還沒有收盤價" : "沒有報價"}</p>

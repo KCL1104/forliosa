@@ -13,7 +13,7 @@ import { DemoTag, Section as Panel } from "@/components/section"
 import { usePrefs } from "@/stores/prefs"
 import { EtfNavSection } from "../EtfNavSection"
 import { MONTH_LABEL_WIDTH, monthTicks, useWidth } from "../month-ticks"
-import { beforeSpan, twOpenApi, useDatasetSources, valuationSpan } from "../text"
+import { beforeSpan, priceDatasetKey, twOpenApi, useDatasetSources, valuationSpan } from "../text"
 import { Fig, NotYet } from "./kit"
 import { useHowToRead } from "./how-to-read"
 import { ChartSkeleton, ErrorState } from "@/components/states"
@@ -38,7 +38,7 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
   // 估值序列沒有自己的 sources：收盤價與本益比、股價淨值比、殖利率的資料集（台股）登記到頁尾
   const tw = twOpenApi(instrument.market)
   const plotted = !!valuation.data?.series.length
-  useDatasetSources([plotted && tw && `${tw}/price`, plotted && tw && `${tw}/valuation`])
+  useDatasetSources([plotted && priceDatasetKey(instrument.market), plotted && tw && `${tw}/valuation`])
 
   if (us) return <UsValuation inst={instrument} />
   if (noQuote) {

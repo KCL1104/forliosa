@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import { api } from "@/api"
+import { api, ApiError } from "@/api"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { monthTicks } from "../month-ticks"
 import { OverviewTab } from "../tabs/OverviewTab"
@@ -115,7 +115,27 @@ describe("總覽的三層", { timeout: 20_000 }, () => {
     expect(rows.some((r) => r.textContent!.includes("10-K"))).toBe(true)
     expect(events.textContent).not.toContain("90 天")
     expect(events.textContent).not.toContain("目前沒有已公告")
-    // 第一層：美股沒有行情時只剩近四季 EPS——不畫只有一格的鍵值格，也不在分頁列下面單獨留一條兩條線夾著的細帶：
+    // 第一層：美股有收盤價（Databento）時是一般的鍵值帶——行情、市值、近四季 EPS（US$）；沒有本益比、殖利率這些美股沒有的格子
+    const band = await screen.findByRole("region", { name: "關鍵數據" }, T)
+    await within(band).findByText("近四季 EPS", undefined, T)
+    const terms = within(band).getAllByRole("term").map((t) => t.textContent)
+    expect(terms).toEqual(expect.arrayContaining(["開盤", "成交量", "近四季 EPS"]))
+    expect(terms).not.toContain("本益比")
+    expect(terms).not.toContain("殖利率")
+    expect(within(band).getByText("近四季 EPS").parentElement!.textContent).toMatch(/^近四季 EPSUS\$\d+\.\d\d$/)
+    const about = await screen.findByRole("region", { name: "關於「Apple」" }, T)
+    expect(within(about).queryByText("近四季 EPS")).toBeNull()
+    expect(document.body.textContent!.match(/近四季 EPS/g)).toHaveLength(1)
+  })
+
+  it("第一層（還沒有收盤價的美股）：只剩近四季 EPS 時併進「關於」，不在分頁列下面單獨留一條細帶", async () => {
+    const inst = await api.getInstrument("AAPL")
+    // 還沒抓到收盤價的美股：總覽只有 SEC 的近四季 EPS（和後端相同，價格欄位都是 null）
+    const overview = await api.getOverview("AAPL")
+    const nulls = Object.fromEntries(Object.entries(overview).filter(([, v]) => typeof v === "number").map(([k]) => [k, null]))
+    vi.spyOn(api, "getOverview").mockResolvedValue({ ...overview, ...nulls, eps_ttm: overview.eps_ttm })
+    vi.spyOn(api, "getQuote").mockRejectedValue(new ApiError(404, "not_found", "沒有報價"))
+    renderPage(<OverviewTab inst={inst} position={null} />)
     // 併進「關於」的鍵值格（排在會計年度結束後面、曾用名稱前面），數字還在、寫法一樣（US$）
     const about = await screen.findByRole("region", { name: "關於「Apple」" }, T)
     const eps = await within(about).findByText("近四季 EPS", undefined, T)

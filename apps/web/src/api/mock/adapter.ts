@@ -13,12 +13,25 @@ import {
 import { viewAsId } from "../view-as"
 import { createAnalystStore } from "./analyst"
 import { skipKey, syncAutoDividends } from "./auto-dividends"
-import { buildAttributions, sourceOf } from "./attributions"
+import { buildAttributions, DATABENTO_ATTRIBUTION, sourceOf } from "./attributions"
 import { mockMarketNow, mockMarketStatus, mockToday, type MockMarket } from "./market-status"
 import { buildFacts as buildBriefingFacts, createMockBriefings } from "./briefings"
 import { buildMarketOverview } from "./market-overview"
 import { buildCompany, buildRelated } from "./company"
-import { accumulatingNote, ARCHIVE_START, INDEX_NOTE, US_NOTE, ymd, type MockPolicy } from "./commercial"
+import {
+  accumulatingNote,
+  ARCHIVE_START,
+  hasUsCloses,
+  INDEX_NOTE,
+  NO_DATA_NOTE,
+  US_ARCHIVE_START,
+  US_AS_OF,
+  US_SESSION,
+  US_VALUATION_NOTE,
+  usCandles,
+  ymd,
+  type MockPolicy,
+} from "./commercial"
 import { computePreview } from "./fees"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
 import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
@@ -236,7 +249,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const periodReturns = (list: Transaction[]) => {
     const summary = buildSummary(list, undefined, commercial)
     const holdings = buildHoldings(list, undefined, commercial)
-    // 沒有收盤價的持股（商用模式的美股）不算進期間報酬，和帳本的「今日」同一條規則（2026-11-14）
+    // 沒有收盤價的持股（商用模式：還沒抓到收盤價的美股）不算進期間報酬，和帳本的「今日」同一條規則（2026-11-14）
     const unpriced = new Set(commercial ? holdings.filter((h) => h.price === null).map((h) => h.symbol) : [])
     const priced = unpriced.size ? list.filter((t) => !t.symbol || !unpriced.has(t.symbol)) : list
     const opts = { isDemo: !commercial, ...(commercial ? { minStart: ARCHIVE_START } : {}) }
@@ -270,7 +283,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     holdings: () => sharedHoldings(txns),
     amounts: () => sharedAmounts(txns),
     trades: () => rawTrades(txns),
-    // 商用模式的美股不算進週報酬（和排行同一條規則）
+    // 沒有收盤價的持股不算進週報酬（和排行同一條規則）
     week: (w) => ({ "2026-11-02": 0.0097, "2026-10-26": 0.0043 })[w] ?? null,
   }
   const sharing = createSharingStore(
@@ -348,26 +361,37 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     return s
   }
   const visible = () => INSTRUMENTS.filter((i) => scenario === "stress" || i !== STRESS_INSTRUMENT)
+  /** 商用模式沒有收盤價的美股（只有 SEC 代號表認得、模擬還沒抓到收盤價的）：沒有報價、`has_quote: false` */
+  const noQuote = (s: MockInstrumentSpec) => commercial && s.market === "US" && !hasUsCloses(s)
+  /** 商用模式有 Databento 收盤價的美股：日線是紐約的交易日（最後一根是 `US_SESSION`） */
+  const usPriced = (s: MockInstrumentSpec) => commercial && hasUsCloses(s)
+  const candlesOf = (s: MockInstrumentSpec) => (usPriced(s) ? usCandles(s) : dailyCandles(s))
+  /** 日線的顯名聲明（商用模式） */
+  const priceSource = (s: MockInstrumentSpec) => (s.market === "US" ? DATABENTO_ATTRIBUTION : sourceOf(`${s.market === "TPEX" ? "tpex" : "twse"}-openapi/price`))
   const strip = (s: MockInstrumentSpec) => ({
     symbol: s.symbol, code: s.code, name: s.name, market: s.market, type: s.type, currency: s.currency, industry: s.industry,
-    has_quote: !(commercial && s.market === "US"),
+    has_quote: !noQuote(s),
   })
   /** 名稱的出處（沒有其他公司資料時）：收盤檔的 ETF、SEC 的代號表 */
   const listingSources = (s: MockInstrumentSpec): string[] =>
     s.listing === "sec" ? [sourceOf("sec-edgar/tickers")] : [sourceOf(s.market === "TPEX" ? "tpex-openapi/price" : "twse-openapi/price")]
   const quoteOf = (s: MockInstrumentSpec): Quote => {
-    if (commercial && s.market === "US") throw new ApiError(404, "not_found", "目前沒有報價")
-    const last = dailyCandles(s).at(-1)!
+    if (noQuote(s)) throw new ApiError(404, "not_found", "沒有報價")
+    const last = candlesOf(s).at(-1)!
     const ref = referencePrice(s)
     const limits = limitsOf(s)
+    const us = usPriced(s)
     return {
       symbol: s.symbol, price: s.price, prev_close: s.prev_close,
       change: Math.round((s.price - ref) * 100) / 100,
       change_pct: Math.round((s.price / ref - 1) * 10000) / 10000,
       open: last.o, high: last.h, low: last.l, volume: last.v,
-      as_of: s.market === "US" ? "2026-11-12T05:00:00+08:00" : MOCK_AS_OF,
-      is_realtime: false, is_demo: demo, source: commercial ? (s.market === "TPEX" ? "tpex-openapi" : "twse-openapi") : "demo",
-      reference_price: ref,
+      // 美股：紐約 16:00 收盤（台北隔天清晨）；trade_date 是紐約的日期（和後端相同，商用模式才有）
+      as_of: s.market === "US" ? US_AS_OF : MOCK_AS_OF,
+      ...(commercial ? { trade_date: us ? US_SESSION : MOCK_TODAY } : {}),
+      is_realtime: false, is_demo: demo, source: commercial ? (us ? "databento-equs" : s.market === "TPEX" ? "tpex-openapi" : "twse-openapi") : "demo",
+      // 美股沒有參考價與漲跌停（Databento 的收盤只有開高低收量）
+      reference_price: us ? null : ref,
       limit_up: limits?.up ?? null,
       limit_down: limits?.down ?? null,
     }
@@ -375,34 +399,52 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const tracked = (symbol: string) => watch.includes(symbol) || buildHoldings(txns).some((h) => h.symbol === symbol)
   const holdingsNow = (accountId?: string) => buildHoldings(ledger(accountId).txns, accountId, commercial)
   // 每日收盤簡報：只讀自己的帳本（不跟著查看模式），事實和帳本頁、本週事項是同一組數字
+  // 和後端相同：簡報講的是台股那一天，漲跌只談台股（美股的收盤是紐約前一天）——美股的持股照算在持股數裡，但不列進漲跌
   const briefings = createMockBriefings(MOCK_TODAY, () => {
     const mine = buildHoldings(txns, undefined, commercial)
+    const movers = commercial ? mine.map((h) => (h.market === "US" ? { ...h, day_change_pct: null } : h)) : mine
     const watched = watch.map((symbol) => {
       const w = spec(symbol)
       return { symbol: w.symbol, code: w.code, name: w.name, market: w.market, type: w.type, quote: commercial && w.market === "US" ? null : quoteOf(w) }
     })
     return buildBriefingFacts(
-      buildSummary(txns, undefined, commercial), mine, watched,
+      buildSummary(txns, undefined, commercial), movers, watched,
       buildUpcoming(mine, findInstrument, 7, recurring.upcoming(today, addDays(today, 7)), commercial, today), demo,
     )
   })
-  /** 商用模式：回應裡最早的資料不早於存檔起點；區間更早時加上「資料累積中」 */
-  const clip = <T extends { t: string }>(rows: T[], from: string): { rows: T[]; notes: string[] } =>
-    commercial && from < ARCHIVE_START ? { rows: rows.filter((r) => r.t >= ARCHIVE_START), notes: [accumulatingNote()] } : { rows, notes: [] }
-  /** 商用模式的績效：含美股（沒有可商用的價格）就算不出來，其餘從存檔起點開始 */
+  /** 商用模式：回應裡最早的資料不早於存檔起點（美股是 Databento 的 2024-07-01）；區間更早時加上「資料從 … 開始」 */
+  const clip = <T extends { t: string }>(rows: T[], from: string, since = ARCHIVE_START): { rows: T[]; notes: string[] } =>
+    commercial && from < since ? { rows: rows.filter((r) => r.t >= since), notes: [accumulatingNote(since)] } : { rows, notes: [] }
+  /**
+   * 商用模式的績效（和後端相同）：只算每一檔持股都有收盤價的日子。台股的收盤從存檔起點（ARCHIVE_START）開始、
+   * 美股從 2024-07-01（Databento）開始：持股期間早於這些日子時，從「每一檔都有收盤價」的第一天收盤開始算。
+   * 現在還持有沒有收盤價的美股（剛加入、還沒抓到）就算不出來：「MSFT：還沒有收盤價，績效算不出來」。
+   */
   const commercialPerformance = (txns: Transaction[], range: Parameters<typeof buildPerformance>[1], accountId: string | undefined, benchmark: string) => {
-    const usHeld = [...new Set(txns.filter((t) => t.symbol && t.currency === "USD" && (!accountId || t.account_id === accountId)).map((t) => t.symbol!))].sort()
+    const mine = txns.filter((t) => t.symbol && (!accountId || t.account_id === accountId))
+    const symbols = [...new Set(mine.map((t) => t.symbol!))].sort()
+    const firstTrade = (sym: string) => mine.find((t) => t.symbol === sym)!.trade_date
+    const startOf = (sym: string) => (findInstrument(sym)!.market === "US" ? US_ARCHIVE_START : ARCHIVE_START)
+    const unpriced = buildHoldings(txns, accountId, true).filter((h) => h.price === null).map((h) => h.symbol).sort()
+    const priced = symbols.filter((sym) => !unpriced.includes(sym) && !noQuote(findInstrument(sym)!))
+    // 日期軸從有收盤價的第一天開始（後端：持有過的商品實際有收盤的日子）；之前的交易都記在那一天
+    const inception = mine.map((t) => t.trade_date).sort()[0]
+    const firstClose = priced.map(startOf).sort()[0]
+    const axisStart = inception && firstClose ? (inception > firstClose ? inception : firstClose) : null
     const empty = buildPerformance([], range, accountId, benchmark, { isDemo: false })
-    if (usHeld.length > 0) {
+    if (unpriced.length > 0) {
+      // 持股期間有幾天台股沒有收盤價（台股的存檔起點晚於日期軸的第一天）時，後端多一句「資料從 … 開始；…」
+      const twGap = !!axisStart && axisStart < ARCHIVE_START && priced.some((sym) => startOf(sym) === ARCHIVE_START && firstTrade(sym) < ARCHIVE_START)
       return {
         ...empty, start_date: null, end_date: null, series: [],
-        // 後端只有在台股也缺收盤價時才多一句「資料從 … 開始；…」；示範帳本的台股資料是齊的，只說美股這一句
-        notes: [`${usHeld.join("、")}：${US_NOTE}，含美股的績效算不出來`],
+        notes: [`${unpriced.join("、")}：還沒有收盤價，績效算不出來`, ...(twGap ? [`${accumulatingNote()}；持股期間有幾天沒有收盤價，績效算不出來`] : [])],
       }
     }
+    // 每一檔都有收盤價的第一天：持有時還沒有收盤價的商品，從它的收盤開始那天起；日期軸本身的第一天也是
+    const minStart = [axisStart ?? ARCHIVE_START, ...priced.filter((sym) => firstTrade(sym) < startOf(sym)).map(startOf)].sort().at(-1)!
     const full = buildPerformance(txns, range, accountId, benchmark, { isDemo: false })
-    if (!full.start_date || full.start_date >= ARCHIVE_START) return { ...full, notes: [] }
-    const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart: ARCHIVE_START })
+    if (!full.start_date || full.start_date >= minStart) return { ...full, notes: [] }
+    const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart })
     const bench = benchmark === "^TAIEXTR" ? { benchmark: clipped.benchmark ? { ...clipped.benchmark, twr: null } : null, series: clipped.series.map((p) => ({ ...p, benchmark_index: null })) } : {}
     return { ...clipped, ...bench, notes: [`績效從 ${ymd(clipped.start_date!)} 收盤開始算，之前沒有資料`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }
   }
@@ -535,27 +577,29 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         }
       }),
     getQuote: (symbol) => wait(() => quoteOf(spec(symbol))),
-    // 批次報價：沒有報價的代號（商用模式的美股）直接略過
+    // 批次報價：沒有報價的代號（商用模式還沒有收盤價的美股）直接略過
     getDailyClose: (symbol, date) =>
       wait(() => {
-        // 和後端一樣只看自己存檔的收盤：商用模式下存檔開始以前、美股（沒有報價來源）都是 null
+        // 和後端一樣只看自己存檔的收盤：商用模式下存檔開始以前、還沒有收盤價的美股都是 null；
+        // 美股的收盤（Databento）從 2024-07-01 起，日期是紐約的交易日
         const s = spec(symbol)
-        const archived = !commercial || (date >= ARCHIVE_START && s.market !== "US")
-        const close = archived ? (dailyCandles(s).find((c) => c.t === date)?.c ?? null) : null
+        const archived = !commercial || (hasUsCloses(s) ? date >= US_ARCHIVE_START : s.market !== "US" && date >= ARCHIVE_START)
+        const close = archived ? (candlesOf(s).find((c) => c.t === date)?.c ?? null) : null
         return { symbol: s.symbol, date, close, currency: s.market === "US" ? "USD" : "TWD" }
       }),
-    getQuotes: (symbols) => wait(() => symbols.map((x) => spec(x)).filter((x) => !(commercial && x.market === "US")).map(quoteOf)),
+    getQuotes: (symbols) => wait(() => symbols.map((x) => spec(x)).filter((x) => !noQuote(x)).map(quoteOf)),
     getHistory: (symbol, range) =>
       wait((): History => {
         if (commercial && symbol.startsWith("^")) return { symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [INDEX_NOTE] }
         // 指數（^TAIEXTR）：示範資料以 0050 的走勢代替
         const s = symbol.startsWith("^") ? spec(mockBenchmark(symbol).proxy) : spec(symbol)
-        if (commercial && s.market === "US") return { symbol: s.symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [US_NOTE] }
+        // 還沒有收盤價的美股：「還沒有資料」（和後端 coverage.since_note 相同）
+        if (noQuote(s)) return { symbol: s.symbol, interval: "1d", candles: [], is_demo: false, sources: [], notes: [NO_DATA_NOTE] }
         const from = rangeFrom(range)
-        const { rows, notes } = clip(dailyCandles(s).filter((c) => c.t >= from), from)
+        const { rows, notes } = clip(candlesOf(s).filter((c) => c.t >= from), from, s.market === "US" ? US_ARCHIVE_START : ARCHIVE_START)
         return {
           symbol: symbol.startsWith("^") ? symbol : s.symbol, interval: "1d", candles: rows, is_demo: demo,
-          sources: commercial ? [sourceOf(`${s.market === "TPEX" ? "tpex" : "twse"}-openapi/price`)] : [], notes,
+          sources: commercial ? [priceSource(s)] : [], notes,
         }
       }),
     getValuation: (symbol, range = "5Y") =>
@@ -563,14 +607,15 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         const s = spec(symbol)
         const from = addDays(MOCK_TODAY, -Math.round((range === "MAX" ? 6 : 5) * 365.25))
         const clipped = clip(valuationSeries(s, range === "MAX" ? 6 : 5), from)
+        // 美股沒有本益比、股價淨值比的來源（SEC 的 EPS 只在財務分頁）：沒有估值序列
         const series = commercial && s.market === "US" ? [] : clipped.rows
         const last = series.at(-1)
         const pers = series.map((p) => p.per).filter((x): x is number => x !== null)
         const currentPer = last?.per ?? null
         return {
           symbol: s.symbol,
-          per_multiples: s.per_multiples ?? [],
-          pbr_multiples: s.pbr_multiples ?? [],
+          per_multiples: commercial && s.market === "US" ? [] : (s.per_multiples ?? []),
+          pbr_multiples: commercial && s.market === "US" ? [] : (s.pbr_multiples ?? []),
           series,
           current: {
             per: currentPer,
@@ -583,7 +628,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
           },
           notes: commercial
             ? s.market === "US"
-              ? [US_NOTE]
+              ? [US_VALUATION_NOTE]
               : [...clipped.notes, ...(s.type === "etf" ? ["ETF 沒有每股盈餘與每股帳面淨值，不提供本益比與股價淨值比區間"] : ["本益比、股價淨值比、殖利率為證交所／櫃買中心公布值；EPS = 收盤價 ÷ 本益比"])]
             : s.type === "etf" ? ["ETF 沒有每股盈餘與每股帳面淨值，不提供本益比與股價淨值比區間"] : ["示範資料：EPS、淨值與倍數皆為模擬"],
           is_demo: demo,
@@ -612,19 +657,24 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getCompany: (symbol) => wait(() => buildCompany(spec(symbol))),
     getPosition: (symbol) => wait(() => buildPosition(spec(symbol), ledger().txns, commercial)),
     getPositionHistory: (symbol) => wait(() => positionHistory(ledger().txns, spec(symbol).symbol)),
-    getWhy: (symbol) => wait(() => buildWhy(spec(symbol))),
+    // 沒有報價時不判斷（和後端相同）
+    getWhy: (symbol) =>
+      wait(() => {
+        const s = spec(symbol)
+        return noQuote(s) ? { show: false, headline: null, reasons: [], as_of: null, trade_date: null, sources: [] } : buildWhy(s, commercial)
+      }),
 
     getWatchlist: () =>
       wait(() =>
         watch.map((symbol) => {
           const s = spec(symbol)
           if (commercial) {
-            // 沒有盤中來源：迷你走勢是最近 20 個收盤（sparkline_interval = 1d）
-            const us = s.market === "US"
+            // 沒有盤中來源：迷你走勢是最近 20 個收盤（sparkline_interval = 1d；美股是紐約的交易日）
+            const none = noQuote(s)
             return {
-              symbol: s.symbol, name: s.name, quote: us ? null : quoteOf(s),
-              sparkline: us ? [] : dailyCandles(s).slice(-20).map((c) => ({ t: c.t, price: c.c })),
-              sparkline_interval: "1d" as const, sources: us ? [] : [sourceOf(`${s.market === "TPEX" ? "tpex" : "twse"}-openapi/price`)], is_demo: false,
+              symbol: s.symbol, name: s.name, quote: none ? null : quoteOf(s),
+              sparkline: none ? [] : candlesOf(s).slice(-20).map((c) => ({ t: c.t, price: c.c })),
+              sparkline_interval: "1d" as const, sources: none ? [] : [priceSource(s)], is_demo: false,
             }
           }
           const intraday = buildIntraday(s, true)

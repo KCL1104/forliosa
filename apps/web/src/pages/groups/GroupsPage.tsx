@@ -146,7 +146,7 @@ function ShareCard() {
   const s = summary.data
   const month = mtd.data ? mtd.data.twr : undefined
   const today = appToday()
-  // 本月算不出來（含美股）時，分享文字與卡片都不提本月：沒有的值不寫進句子（不出現「本月 —」）
+  // 本月算不出來（有持股還沒有收盤價、資料還不夠）時，分享文字與卡片都不提本月：沒有的值不寫進句子（不出現「本月 —」）
   const monthKnown = month !== null && month !== undefined
   const noMonth = month === null
   const line = s
@@ -174,7 +174,7 @@ function ShareCard() {
           ))}
         </dl>
       </figure>
-      {/* 後端的說明自己就有冒號（「AAPL、NVDA、VOO：美股目前沒有…」），前面用一句話接，不再疊一個冒號 */}
+      {/* 後端的說明自己就有冒號（「MSFT：還沒有收盤價，…」），前面用一句話接，不再疊一個冒號 */}
       {noMonth && <p className="mt-2 max-w-md text-base text-ink">{monthMissing(mtd.data?.notes ?? [])}</p>}
       <Button
         variant="outline"
@@ -200,13 +200,15 @@ function glyphPct(r: number | null): string {
 }
 
 /**
- * 本月算不出來的原因，一句話：含美股時「AAPL、NVDA、VOO 沒有報價，本月算不出來。」；其他原因照後端的說明。
- * （後端那句是「AAPL、NVDA、VOO：美股沒有報價，含美股的績效算不出來」——接在「本月算不出來」後面就講了兩次）
+ * 本月算不出來的原因，一句話：有持股還沒有收盤價時「MSFT 還沒有收盤價，本月算不出來。」；其他原因照後端的說明。
+ * （後端那句是「MSFT：還沒有收盤價，績效算不出來」——接在「本月算不出來」後面就講了兩次。美股收盤價沒開的環境是
+ * 「AAPL、NVDA：美股沒有報價，含美股的績效算不出來」→「AAPL、NVDA 沒有報價，本月算不出來。」）
  */
 function monthMissing(notes: string[]): string {
-  const us = notes.find((n) => n.includes("美股"))
-  const symbols = us?.split("：")[0]
-  if (us && symbols && symbols !== us) return `${symbols} 沒有報價，本月算不出來。`
+  for (const n of notes) {
+    const m = /^(.+?)：(還沒有收盤價|美股沒有報價)/.exec(n)
+    if (m) return `${m[1]} ${m[2] === "還沒有收盤價" ? "還沒有收盤價" : "沒有報價"}，本月算不出來。`
+  }
   return notes[0] ? `本月算不出來。${withPeriod(notes[0])}` : "本月算不出來。"
 }
 
