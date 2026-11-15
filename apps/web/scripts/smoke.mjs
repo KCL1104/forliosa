@@ -2704,7 +2704,7 @@ await check("管理後台（桌面）：自己的外殼（總覽・討論・新�
     await p.getByRole("heading", { level: 1, name: "總覽" }).waitFor({ timeout: 8000 })
     const nav = p.getByRole("navigation", { name: "管理後台" })
     const tabs = await nav.getByRole("link").allTextContents()
-    if (tabs.join("|") !== "總覽|討論|新聞下架") throw new Error(`admin tabs: ${tabs.join("|")}`)
+    if (tabs.join("|") !== "總覽|討論|新聞下架|會員") throw new Error(`admin tabs: ${tabs.join("|")}`)
     if (await p.getByRole("button", { name: /帳號選單/ }).count()) throw new Error("avatar menu inside the admin shell")
     for (const name of ["使用者", "AI 金鑰", "資料", "歷史日線回補"]) await p.getByRole("heading", { level: 2, name, exact: true }).waitFor({ timeout: 5000 })
     await p.getByText("冷卻中，38 秒後再試").waitFor({ timeout: 5000 })
