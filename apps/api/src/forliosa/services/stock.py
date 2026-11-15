@@ -110,11 +110,9 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     q = md.quote(sym)
     # 52-week range and 3-month volume describe the chart, not a ledger: the history backfill's days count
     hist = md.history(sym, today - timedelta(days=400), today, backfill=True)
-    candles = hist.candles
-    if info.market == "US" and candles:  # unadjusted US closes: a split in the year folds in like the chart
-        from forliosa.services.instruments import split_adjusted
+    from forliosa.services.instruments import chart_candles
 
-        candles = split_adjusted(candles, md.corporate_events(sym))[0]
+    candles = chart_candles(md, sym, hist.candles)  # unadjusted US closes: a split in the year folds in like the chart
     year = [c for c in candles if c.t > today - timedelta(days=365)]
     three_m = [c for c in candles if c.t >= add_months(today, -3)]
     prof = md.profile(sym)
@@ -894,11 +892,9 @@ def why_reasons(db: Session, md: MarketData, info: InstrumentInfo, q: QuoteData,
             word = "上漲" if pct > 0 else "下跌"
             reasons.append({"kind": "price_move", "text": f"{when}{word} {abs(pct) * 100:.1f}%"})
     hist = md.history(sym, day - timedelta(days=45), day, backfill=True)
-    candles = hist.candles
-    if market_of_symbol(sym) == "US" and candles:  # volume before a split, in today's shares
-        from forliosa.services.instruments import split_adjusted
+    from forliosa.services.instruments import chart_candles
 
-        candles = split_adjusted(candles, md.corporate_events(sym))[0]
+    candles = chart_candles(md, sym, hist.candles)  # volume before a US split, in today's shares
     past = [c for c in candles if c.t < day][-20:]
     if q.volume and len(past) >= 10:
         avg = Decimal(sum(c.v for c in past)) / len(past)
@@ -906,9 +902,9 @@ def why_reasons(db: Session, md: MarketData, info: InstrumentInfo, q: QuoteData,
             reasons.append({"kind": "volume", "text": f"成交量是 20 日均量的 {Decimal(q.volume) / avg:.1f} 倍"})
     if q.reference_price is not None and q.prev_close is not None and q.reference_price != q.prev_close:
         if market_of_symbol(sym) == "US":  # the archive found a split on that session (no US dividend source)
-            ratio = q.prev_close / q.reference_price
-            how = (f"1 股拆成 {int(ratio.to_integral_value())} 股" if ratio > 1
-                   else f"{int((1 / ratio).to_integral_value())} 股合成 1 股")
+            from forliosa.services.instruments import split_how
+
+            how = split_how(q.prev_close / q.reference_price)
             reasons.append({"kind": "split",
                             "text": f"{when}股票分割（{how}），漲跌以換算後的昨收 {q.reference_price:.2f} 計算"})
         else:

@@ -25,6 +25,7 @@ from forliosa.ids import new_id
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.services.coverage import covers, series_notes, ymd
+from forliosa.services.instruments import split_how
 from forliosa.timeutil import today_taipei
 
 KINDS = ["price", "compare", "revenue", "eps", "performance"]
@@ -140,7 +141,7 @@ def price_chart(md: MarketData, info: InstrumentInfo, range_: str) -> dict[str, 
     until = c["backfill_until"]  # days up to here come split-adjusted (the series note says so)
     for d, (kind, ratio) in sorted(_adjustments(md, info.symbol).items()):
         if rows[0][0] < d <= rows[-1][0] and (until is None or d > until):
-            what = f"股票分割（1 股變 {ratio.normalize():f} 股）" if kind == "split" else "減資"
+            what = f"股票分割（{split_how(ratio)}）" if kind == "split" else "減資"
             notes.append(f"{ymd(d)} {what}，之前是當時的價格")
     notes.append("收盤價沒有還原權息，除權息日會有缺口")
     series = [{"name": info.name, "symbol": info.symbol, "points": [_point(t, _f(v)) for t, v in rows]}]

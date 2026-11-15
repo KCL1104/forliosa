@@ -131,7 +131,7 @@ def test_compare_stays_continuous_across_a_split(arch, monkeypatch):
     assert mtk["points"][-1]["v"] == pytest.approx(555 / 500 - 1, abs=1e-6)  # not −72 %
     assert f"聯發科 {split_day:%Y/%m/%d} 股票分割，漲跌幅已調整" in out.chart["notes"]
     out, _ = run(arch, kind="price", symbols=["2454"], range="1Y")
-    assert f"{split_day:%Y/%m/%d} 股票分割（1 股變 4 股），之前是當時的價格" in out.chart["notes"]
+    assert f"{split_day:%Y/%m/%d} 股票分割（1 股拆成 4 股），之前是當時的價格" in out.chart["notes"]
 
 
 def test_charts_read_the_history_backfill_and_do_not_adjust_it_twice(arch, monkeypatch):

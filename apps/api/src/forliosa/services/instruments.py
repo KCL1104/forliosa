@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.datapolicy import label, labels, source_clause, tagged
-from forliosa.marketdata.base import Candle, DividendEvent, InstrumentInfo, QuoteData
+from forliosa.marketdata.base import Candle, DividendEvent, InstrumentInfo, QuoteData, market_of_symbol
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.indices import INDICES, is_index
 from forliosa.marketdata.service import MarketData, dividend_sort_key
@@ -130,6 +130,25 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
     }
 
 
+def _whole(x: Decimal) -> str:
+    """1/6 as a Decimal is inexact: a ratio within a rounding of a whole number is printed as one."""
+    whole = x.to_integral_value()
+    return str(int(whole)) if abs(x - whole) < Decimal("0.0001") else format(x.normalize(), "f")
+
+
+def split_how(ratio: Decimal) -> str:
+    """「1 股拆成 10 股」 / 「6 股合成 1 股」 (a reverse split's ratio is 1/6: never 「1 股變 0.1666… 股」)."""
+    return f"1 股拆成 {_whole(ratio)} 股" if ratio > 1 else f"{_whole(1 / ratio)} 股合成 1 股"
+
+
+def chart_candles(md: MarketData, symbol: str, candles: list[Candle]) -> list[Candle]:
+    """Candles for a picture (chart, sparkline, 52-week range, average volume): a US series' splits folded in, like
+    the stock chart. The ledger and performance keep the prices as traded."""
+    if not candles or market_of_symbol(symbol) != "US":
+        return candles
+    return split_adjusted(candles, md.corporate_events(symbol))[0]
+
+
 def split_adjusted(candles: list[Candle], events: list[Any]) -> tuple[list[Candle], list[str]]:
     """Prices before each split divided by its ratio (volume multiplied), so the chart has no cliff; one note per
     split inside the series."""
@@ -144,14 +163,7 @@ def split_adjusted(candles: list[Candle], events: list[Any]) -> tuple[list[Candl
             if c.t < d:
                 f *= r
         out.append(c if f == 1 else Candle(c.t, c.o / f, c.h / f, c.l / f, c.c / f, round(c.v * f)))
-    def n(x: Decimal) -> str:  # 1/6 as a Decimal is inexact: a ratio within a rounding of a whole number is one
-        whole = x.to_integral_value()
-        return str(int(whole)) if abs(x - whole) < Decimal("0.0001") else format(x.normalize(), "f")
-
-    notes = []
-    for d, r in splits:
-        how = f"1 股拆成 {n(r)} 股" if r > 1 else f"{n(1 / r)} 股合成 1 股"
-        notes.append(f"{d.year}/{d.month:02d}/{d.day:02d} 股票分割（{how}），之前的價格已經換算")
+    notes = [f"{d.year}/{d.month:02d}/{d.day:02d} 股票分割（{split_how(r)}），之前的價格已經換算" for d, r in splits]
     return out, notes
 
 

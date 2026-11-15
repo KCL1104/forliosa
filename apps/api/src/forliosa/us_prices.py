@@ -254,4 +254,4 @@ def summary(db: Session) -> dict[str, Any]:
     have = stored_through(db)
     return {"enabled": get_settings().us_prices_served, "rows": rows, "pending": len(pending(db)),
             "first_day": FIRST_DAY.isoformat(), "stored_through": have.isoformat() if have else None,
-            "symbols": {k: int(counts.get(k, 0)) for k in ("done", "not_found", "error")}}
+            "symbols": {k: int(counts.get(k, 0)) for k in ("done", "untracked", "not_found", "error")}}

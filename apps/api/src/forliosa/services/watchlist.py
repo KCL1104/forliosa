@@ -14,7 +14,7 @@ from forliosa.datapolicy import labels, tagged
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
 from forliosa.models import User, WatchlistItem
-from forliosa.services.instruments import quote_out
+from forliosa.services.instruments import chart_candles, quote_out
 from forliosa.timeutil import today_taipei
 
 MAX_ITEMS = 200
@@ -30,7 +30,7 @@ def _sparkline(md: MarketData, symbol: str) -> tuple[list[dict], str, list[str]]
     """The last 20 daily closes (there is no licensed intraday source, so never minute points)."""
     today = today_taipei()
     h = md.history(symbol, today - timedelta(days=45), today, backfill=True)
-    candles = h.candles[-SPARKLINE_DAYS:]
+    candles = chart_candles(md, symbol, h.candles)[-SPARKLINE_DAYS:]  # a US split: no cliff
     return [{"t": c.t.isoformat(), "price": ser.price(c.c)} for c in candles], "1d", tagged(h.source, "price")
 
 

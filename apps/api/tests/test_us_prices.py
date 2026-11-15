@@ -65,6 +65,13 @@ class FakeDatabento:
         return [c for c in self.calls if c.url.path.endswith("timeseries.get_range")]
 
 
+@pytest.fixture(autouse=True)
+def _restore_market_data(market):
+    """Tests here install an archive-backed MarketData; the next test file gets the session's demo one back."""
+    yield
+    set_market_data(market)
+
+
 @pytest.fixture()
 def db(engine):
     with Session(engine) as s:
@@ -409,9 +416,9 @@ def test_the_why_line_names_a_split_and_the_52_weeks_are_converted(engine, monke
     monkeypatch.setattr(get_settings(), "us_price_source", "databento")
     t = today_taipei()
     with Session(engine) as s:
-        for back, o, c in ((3, "1700", "1720"), (2, "1715", "1710"), (1, "171.5", "168")):
+        for back, o, c, v in ((3, "1700", "1720", 1000), (2, "1715", "1710", 1100), (1, "171.5", "168", 12000)):
             s.add(PriceDaily(symbol="NVDA", date=t - timedelta(days=back), open=D(o), high=D(o), low=D(c), close=D(c),
-                             volume=1000, source="databento-equs"))
+                             volume=v, source="databento-equs"))  # a split trades about 10 × the shares
         s.commit()
     md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine), us_prices=True),
                      DemoProvider()], policy="commercial")
@@ -422,3 +429,76 @@ def test_the_why_line_names_a_split_and_the_52_weeks_are_converted(engine, monke
     assert split and "1 股拆成 10 股" in split[0]["text"] and "171.00" in split[0]["text"]
     assert not [r for r in w["reasons"] if r["kind"] == "ex_dividend"]
     assert o["high_52w"] == pytest.approx(171.5)  # 1715 before the split, in today's shares (not 1715)
+
+
+def test_a_crash_or_a_takeover_gap_is_not_taken_for_a_split(engine, monkeypatch):
+    """2026-11-15 review 2: an open at a third of the last close on 20 × the usual volume is a crash (−68 %), not a
+    1-for-3 split; doubling on 15 × the volume is a takeover, not a 2-for-1 reverse split."""
+    from forliosa.marketdata.archive_provider import detect_splits
+    from forliosa.services import stock
+    from forliosa.services.instruments import quote_out
+    from forliosa.timeutil import today_taipei
+
+    days = [date(2026, 10, 1) + timedelta(days=i) for i in range(25)]
+    usual = [(d, D("10.2"), D("10.2"), 1000) for d in days[:-1]]
+    assert detect_splits([*usual, (days[-1], D("3.40"), D("3.20"), 20000)]) == []
+    assert detect_splits([*usual, (days[-1], D("20.50"), D("20.60"), 15000)]) == []
+    assert detect_splits([*usual, (days[-1], D("3.40"), D("3.35"), 3000)]) == [(days[-1], D(3))]  # a real 3-for-1
+    assert detect_splits([*usual, (days[-1], D("3.40"), D("3.20"))]) == [(days[-1], D(3))]  # no volume: price only
+
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
+    t = today_taipei()
+    with Session(engine) as s:
+        for back in range(25, 1, -1):
+            s.add(PriceDaily(symbol="NVDA", date=t - timedelta(days=back), open=D("10.2"), high=D("10.3"),
+                             low=D("10.1"), close=D("10.2") if back > 2 else D("10.0"), volume=1000,
+                             source="databento-equs"))
+        s.add(PriceDaily(symbol="NVDA", date=t - timedelta(days=1), open=D("3.40"), high=D("3.55"), low=D("3.10"),
+                         close=D("3.20"), volume=20000, source="databento-equs"))
+        s.commit()
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine), us_prices=True),
+                     DemoProvider()], policy="commercial")
+    q = md.quotes(["NVDA"])["NVDA"]
+    assert q.reference_price == D("10.0000") and quote_out(q)["change_pct"] == pytest.approx(-0.68, abs=1e-4)
+    with Session(engine) as db:
+        w = stock.why(db, md, "NVDA")
+        o = stock.overview(db, md, "NVDA")
+    assert not [r for r in w["reasons"] if r["kind"] == "split"]
+    assert o["high_52w"] == pytest.approx(10.3)
+
+
+def test_sparklines_and_chart_notes_fold_a_split_in(engine, monkeypatch):
+    """2026-11-15 review 2: the watchlist sparkline had a cliff after a US split, and the AI chart printed a reverse
+    split as 「1 股變 0.3333… 股」."""
+    from forliosa.ai.charts import price_chart
+    from forliosa.services.watchlist import _sparkline
+    from forliosa.timeutil import today_taipei
+
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
+    t = today_taipei()
+    with Session(engine) as s:  # 1-for-3 reverse split on the last day
+        for back in range(6, 1, -1):
+            s.add(PriceDaily(symbol="NVDA", date=t - timedelta(days=back), open=D("2.00"), high=D("2.00"),
+                             low=D("2.00"), close=D("2.00"), volume=3000, source="databento-equs"))
+        s.add(PriceDaily(symbol="NVDA", date=t - timedelta(days=1), open=D("6.05"), high=D("6.10"), low=D("6.00"),
+                         close=D("6.10"), volume=1000, source="databento-equs"))
+        s.commit()
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine), us_prices=True),
+                     DemoProvider()], policy="commercial")
+    spark = [p["price"] for p in _sparkline(md, "NVDA")[0]]
+    assert spark == [6.0, 6.0, 6.0, 6.0, 6.0, 6.1]  # no 2 → 6.1 jump
+    card = price_chart(md, md.instrument("NVDA"), "1M")
+    notes = card["notes"] if isinstance(card, dict) else card
+    assert any("股票分割（3 股合成 1 股）" in n for n in notes) and not any("0.333" in n for n in notes)
+
+
+def test_the_admin_summary_counts_untracked_symbols(db):
+    watch(db, "TSLA")
+    fake = FakeDatabento("2026-11-13", {s: [("2026-11-12", "100")] for s in ("TSLA", "SPY", "DIA", "ONEQ", "VOO")})
+    us_prices.backfill(db, fake.fetcher())
+    db.delete(db.scalar(select(WatchlistItem).where(WatchlistItem.symbol == "TSLA")))
+    db.commit()
+    fake.bars = {s: [("2026-11-12", "100"), ("2026-11-13", "101")] for s in fake.bars}
+    fake.end = "2026-11-14"
+    us_prices.update(db, fake.fetcher())
+    assert us_prices.summary(db)["symbols"] == {"done": 4, "untracked": 1, "not_found": 0, "error": 0}

@@ -70,7 +70,7 @@ class AdminUsPrices(BaseModel):
     pending: int = Field(description="還沒回補的代號數")
     first_day: str = Field(description="資料最早從哪一天（EQUS.SUMMARY：2024-07-01）")
     stored_through: str | None = Field(description="已存的最新美股交易日（紐約日期）")
-    symbols: dict[str, int] = Field(description="各狀態的代號數：done、not_found、error")
+    symbols: dict[str, int] = Field(description="各狀態的代號數：done、untracked（沒人追蹤、停更）、not_found、error")
 
 
 NewsSourceState = Literal["ok", "paused", "off"]

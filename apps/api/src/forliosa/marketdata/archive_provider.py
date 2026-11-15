@@ -17,7 +17,6 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
-from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import func, select
@@ -46,11 +45,32 @@ US_SOURCE = "databento-equs"  # forliosa.us_prices.SOURCE (not imported: that mo
 _SPLIT_RATIOS = (2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 40, 50)
 
 
-def detect_splits(rows: list[tuple[date, Decimal | None, Decimal]]) -> list[tuple[date, Decimal]]:
-    """``[(date, open, close)]`` oldest first -> ``[(date, ratio)]``: ratio > 1 a split (shares per old share),
-    < 1 a reverse split."""
+# The money traded on a split day, against the usual: a split multiplies the shares traded about k times while the
+# money stays about the same; a crash or a takeover that opens at a third or double the last close trades 10–50 times
+# the usual volume (2026-11-15 review: a −68 % gap was taken for a 1-for-3 split).
+_SPLIT_MONEY_RANGE = (Decimal("0.25"), Decimal(4))
+_VOLUME_LOOKBACK = 20
+
+
+def _volume_fits(rows: list[tuple], i: int, ratio: Decimal) -> bool:
+    """The day's share volume ÷ (the previous sessions' average × ratio) is within :data:`_SPLIT_MONEY_RANGE`. Rows
+    without volumes (or no earlier volume) are price evidence only."""
+    vol = rows[i][3] if len(rows[i]) > 3 else None
+    past = [r[3] for r in rows[max(0, i - _VOLUME_LOOKBACK):i] if len(r) > 3 and r[3]]
+    if not vol or not past:
+        return True
+    money = Decimal(vol) / (Decimal(sum(past)) / len(past) * ratio)
+    return _SPLIT_MONEY_RANGE[0] <= money <= _SPLIT_MONEY_RANGE[1]
+
+
+def detect_splits(rows: list[tuple]) -> list[tuple[date, Decimal]]:
+    """``[(date, open, close[, volume])]`` oldest first -> ``[(date, ratio)]``: ratio > 1 a split (shares per old
+    share), < 1 a reverse split. The open has to be the previous close ÷ a common ratio (the close close to it), the
+    two sessions neighbours, and — with volumes — the day's volume has to fit the ratio (:func:`_volume_fits`)."""
     out: list[tuple[date, Decimal]] = []
-    for (prev_day, _, prev), (day, opened, close) in pairwise(rows):
+    for i in range(1, len(rows)):
+        prev_day, _, prev = rows[i - 1][:3]
+        day, opened, close = rows[i][:3]
         if not prev or not opened or not close or prev <= 0 or opened <= 0:
             continue
         if (day - prev_day).days > 5:  # not neighbouring sessions (a gap in the rows): no evidence of a split
@@ -61,7 +81,9 @@ def detect_splits(rows: list[tuple[date, Decimal | None, Decimal]]) -> list[tupl
         for k in _SPLIT_RATIOS:
             tol = Decimal("0.015") if k == 2 else Decimal("0.05")
             if abs(x / k - 1) <= tol and abs((close / prev if reverse else prev / close) / k - 1) <= Decimal("0.25"):
-                out.append((day, Decimal(1) / k if reverse else Decimal(k)))
+                ratio = Decimal(1) / k if reverse else Decimal(k)
+                if _volume_fits(rows, i, ratio):
+                    out.append((day, ratio))
                 break
     return out
 
@@ -183,9 +205,10 @@ class ArchiveProvider(BaseProvider):
             # A US split on the newest session: the day's change is measured from the previous close divided by the
             # ratio (2026-11-15 review: −90 % on a 1-for-10 split otherwise). Taiwan uses official reference prices.
             ref = None
-            if market_of_symbol(s) == "US" and prev is not None:
-                split = detect_splits([(rs[1].date, rs[1].open, rs[1].close), (last.date, last.open, last.close)])
-                ref = prev / split[0][1] if split else None
+            if market_of_symbol(s) == "US" and prev is not None:  # the three weeks read give the volume evidence
+                chron = [(x.date, x.open, x.close, x.volume) for x in reversed(rs)]
+                split = [r for d, r in detect_splits(chron) if d == last.date]
+                ref = prev / split[0] if split else None
             out[s] = QuoteData(symbol=s, price=last.close, prev_close=prev, open=last.open, high=last.high,
                                low=last.low, volume=last.volume, as_of=close_dt(s, last.date),
                                trade_date=last.date, source=last.source, reference_price=ref)
@@ -199,7 +222,7 @@ class ArchiveProvider(BaseProvider):
         if market_of_symbol(symbol) != "US" or not self.us_served():
             return None
         with self.session_fn() as db:
-            stmt = select(PriceDaily.date, PriceDaily.open, PriceDaily.close).where(
+            stmt = select(PriceDaily.date, PriceDaily.open, PriceDaily.close, PriceDaily.volume).where(
                 PriceDaily.symbol == symbol, PriceDaily.source == US_SOURCE).order_by(PriceDaily.date)
             rows = list(db.execute(self._filter(stmt, PriceDaily)).all())
         return [CorporateEvent(symbol, d, "split", r) for d, r in detect_splits(rows)] or None

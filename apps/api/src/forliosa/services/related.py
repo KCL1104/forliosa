@@ -47,7 +47,7 @@ from forliosa.models import (
     PriceDaily,
     User,
 )
-from forliosa.services.instruments import change_base, require_instrument
+from forliosa.services.instruments import change_base, chart_candles, require_instrument
 from forliosa.timeutil import today_taipei
 
 MAX_CARDS = 4
@@ -278,7 +278,8 @@ def _card(md: MarketData, c: Candidate, quotes: dict, today: date) -> tuple[dict
     return {"symbol": c.symbol, "name": name, "reason": c.reason, "reason_label": c.reason_label,
             "close": ser.price(price), "change_pct": ser.ratio(change),
             "as_of": (q.trade_date if q and q.trade_date else (h.candles[-1].t if h.candles else None)),
-            "sparkline": [{"t": x.t, "price": ser.price(x.c)} for x in h.candles], "is_index": False,
+            "sparkline": [{"t": x.t, "price": ser.price(x.c)} for x in chart_candles(md, c.symbol, h.candles)],
+            "is_index": False,
             "notes": [], "is_demo": h.is_demo or bool(q and q.is_demo)}, h.source
 
 
