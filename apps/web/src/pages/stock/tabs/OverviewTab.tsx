@@ -35,7 +35,7 @@ export function OverviewTab({ inst, quote, position }: { inst: InstrumentDetail;
   const readOnly = useReadOnly()
   const band = useKeyBand(inst, quote)
   const company = useCompany(inst.symbol)
-  // 只剩一兩格（美股沒有行情時只有近四季 EPS）：不在分頁列下面單獨畫一條兩條線夾著的細帶，併進「關於」的鍵值格。
+  // 只剩一兩格（例如還沒有收盤價的美股只有近四季 EPS）：不在分頁列下面單獨畫一條兩條線夾著的細帶，併進「關於」的鍵值格。
   // 「關於」沒有資料可放時（公司資料載入失敗）才留在這裡寫成一行。
   const folded = band.sparse && (company.isLoading || !!company.data)
   return (
@@ -70,7 +70,7 @@ function useKeyBand(inst: InstrumentDetail, quote: Quote | undefined) {
   const base = etf ? etfItems(inst, o, quote) : stockItems(inst, o, quote, { peInStrip: showValuation })
   const rev = !us && !etf ? revenueItems(revenue.data ?? []) : []
   const chip = !us && chips.data ? chipItems(inst, chips.data) : { items: [], note: null }
-  // 只列有值的格子：資料源沒給的欄位不排一整片「—」（ETF 沒有本益比、有的股票沒有殖利率；美股沒有行情，報價下方已經說明）
+  // 只列有值的格子：資料源沒給的欄位不排一整片「—」（ETF 沒有本益比、有的股票沒有殖利率；還沒有收盤價的美股，價格那一格已經說明）
   const cells = [...base, ...rev, ...chip.items].filter((it) => it.value !== "—")
 
   // 頁尾的資料來源：行情與估值（overview）、籌碼（融資融券、集保股權分散…）、月營收（shioaji-data 彙整的公開資訊觀測站資料）

@@ -54,6 +54,48 @@ describe("個股頁的建議問題", () => {
     expect(s[0]).toMatchObject({ text: "最近外資對這檔的動向？", symbol: "2330.TW" })
     expect(s.some((x) => /建議|本頁/.test(x.text))).toBe(false)
   })
+  it("美股的漲跌是紐約那一天的：問句與回答寫「11/13（美東）」不寫「今天」；沒有法人與籌碼，只連到事件；追問以股計", () => {
+    const us = {
+      symbol: "AAPL", code: "AAPL", name: "Apple", market: "US" as const, type: "stock" as const,
+      quote: { price: 356.27, change_pct: 0.0179, as_of: "2026-11-14T05:00:00+08:00", trade_date: "2026-11-13" } as never,
+      why: { show: true, headline: "成交量是均量 2 倍", reasons: [], as_of: "2026-11-14T05:00:00+08:00", trade_date: "2026-11-13" },
+    }
+    const s = stockSuggestions({ ...us, position: null }, TODAY)
+    expect(s[0]).toMatchObject({ kind: "why_move", text: "Apple 11/13（美東）為什麼漲？" })
+    const held: AiContext = { route: "stock", stock: { ...us, position: { avg_cost: 143.41, quantity: 15 } as never } }
+    const a = answerFor("why_move", { ctx: held, privacy: false, today: TODAY })!
+    expect(a.text).toBe("Apple 11/13（美東）上漲 1.79%：成交量是均量 2 倍。")
+    expect(a.text).not.toContain("今天")
+    expect(a.links!.map((l) => l.search)).toEqual([{ tab: "events" }])
+    expect(a.followUps).toEqual(["加碼 10 股，均價會變多少？"])
+    // 回答下面的「收盤」是台北的日期，美股不放
+    expect(a.asOf ?? null).toBeNull()
+    // 沒持有：美股沒有本益比資料，不追問貴不貴
+    const notHeld = answerFor("why_move", { ctx: { route: "stock", stock: { ...us, position: null } }, privacy: false, today: TODAY })!
+    expect(notHeld.followUps).toEqual([])
+    // 平常範圍：不說「法人」，連到事件
+    const quiet = answerFor("why_move", { ctx: { route: "stock", stock: { ...us, why: { ...us.why, show: false } } }, privacy: false, today: TODAY })!
+    expect(quiet.text).toBe("Apple 11/13（美東）的漲跌在平常的範圍內（上漲 1.79%），沒有出現異常的成交量或事件。")
+    expect(quiet.links!.map((l) => l.search)).toEqual([{ tab: "events" }])
+  })
+
+  it("台股的漲跌照舊：「今天」、連到籌碼與事件、追問 1 張", () => {
+    const tw: AiContext = {
+      route: "stock",
+      stock: {
+        ...base,
+        quote: { price: 1085, change_pct: 0.048, as_of: "2026-11-12T13:30:00+08:00" } as never,
+        why: { show: true, headline: "成交量是均量 2 倍", reasons: [], as_of: "2026-11-12T13:30:00+08:00" },
+        position: { avg_cost: 600, quantity: 1000 } as never,
+      },
+    }
+    const a = answerFor("why_move", { ctx: tw, privacy: false, today: TODAY })!
+    expect(a.text).toBe("台積電今天上漲 4.80%：成交量是均量 2 倍。")
+    expect(a.links!.map((l) => l.label)).toEqual(["看籌碼", "看事件"])
+    expect(a.followUps).toEqual(["加碼 1 張，均價會變多少？"])
+    expect(a.asOf).toBe("2026-11-12T13:30:00+08:00")
+  })
+
   it("上市個股才問外資動向：上櫃（頁面有櫃買的法人資料）、上市 ETF、美股不問", () => {
     const kinds = (p: { symbol: string; market: "TWSE" | "TPEX" | "US"; type: "stock" | "etf" }) =>
       stockSuggestions({ ...base, ...p, position: null, overview: { pe: 20 } as never }, TODAY).map((x) => x.kind)
@@ -117,8 +159,14 @@ describe("「我的成本在河流圖哪裡」：只在畫得出河流圖時問�
       TODAY,
     )
     expect(us.map((x) => x.kind)).not.toContain("cost_on_river")
-    // 美股不用張：不問「加碼 1 張」
+    // 美股不用張：還沒有收盤價時算不出來，不問加碼；有收盤價時問「加碼 10 股」，不是「1 張」
     expect(us.map((x) => x.kind)).not.toContain("add_one_lot")
+    const priced = stockSuggestions(
+      { ...base, symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", position: held, quote: { price: 356.27 } as never, overview: { eps_ttm: 8.98, pe: null } as never },
+      TODAY,
+    )
+    expect(priced.find((x) => x.kind === "add_one_lot")?.text).toBe("加碼 10 股，均價會變多少？")
+    expect(priced.some((x) => /張/.test(x.text))).toBe(false)
   })
 
   it("台股的回答：均價帶「元」、EPS 帶「元」，有本益比才說現在幾倍", () => {
@@ -152,9 +200,35 @@ describe("「我的成本在河流圖哪裡」：只在畫得出河流圖時問�
     expect(a.text).not.toMatch(/143\.41 元|—|倍以下的帶/)
     expect(a.links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
     expect(answerFor("cost_on_river", { ctx, privacy: true, today: TODAY })!.text).not.toContain("143.41")
-    // 本益比貴不貴：美股說明沒有行情，不說「ETF 或近四季虧損」；備援回答連到財務，不連到空的估值分頁
-    expect(answerFor("is_expensive", { ctx, privacy: false, today: TODAY })!.text).toContain("美股沒有報價，算不出本益比。")
+    // 原因是沒有美股的本益比序列（美股有收盤價了），不再說「沒有報價」
+    expect(a.text).toContain("美股沒有歷史本益比的資料")
+    expect(a.text).not.toContain("沒有報價")
+    // 本益比貴不貴：照實說沒有本益比的資料，不說「ETF 或近四季虧損」；連到財務，備援回答也連到財務，不連到空的估值分頁
+    const expensive = answerFor("is_expensive", { ctx, privacy: false, today: TODAY })!
+    expect(expensive.text).toBe("美股沒有歷史本益比的資料，看不出現在貴不貴。每股盈餘在財務分頁。")
+    expect(expensive.links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
     expect(fallbackAnswer("本益比合理嗎", ctx).links!.map((l) => l.search)).toEqual([{ tab: "financials" }])
+  })
+
+  it("美股加碼：以股計（10 股），收盤寫紐約的日期與 US$；回答下面不放台北日期的「收盤」", () => {
+    const ctx: AiContext = {
+      route: "stock",
+      stock: {
+        ...base,
+        symbol: "AAPL",
+        code: "AAPL",
+        name: "Apple",
+        market: "US",
+        position: { avg_cost: 143.41, quantity: 15 } as never,
+        quote: { price: 356.27, as_of: "2026-11-14T05:00:00+08:00", trade_date: "2026-11-13" } as never,
+      },
+    }
+    expect(classifyQuestion("加碼 10 股，均價會變多少？", ctx)).toBe("add_one_lot")
+    const a = answerFor("add_one_lot", { ctx, privacy: false, today: TODAY })!
+    expect(a.text).toBe("以 11/13（美東）收盤價 US$356.27 加碼 10 股，均價會從 US$143.41 變成約 US$228.55。")
+    expect(a.rows!.map((r) => r.value)).toEqual(["15 股", "25 股"])
+    expect(a.followUps).toEqual(["買 AAPL 10 股 356.27"])
+    expect(a.asOf ?? null).toBeNull()
   })
 
   it("加碼 1 張：收盤價與均價都帶「元」", () => {

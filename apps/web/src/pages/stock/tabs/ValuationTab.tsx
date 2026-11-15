@@ -1,4 +1,6 @@
+import { Link } from "@tanstack/react-router"
 import { useMemo, useState } from "react"
+import { buttonVariants } from "@/components/ui/button"
 import { isCoverageNote } from "@/lib/data-notes"
 import { Area, CartesianGrid, ComposedChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { appToday } from "@/api"
@@ -23,17 +25,22 @@ const BAND_VARS = ["var(--band-1)", "var(--band-2)", "var(--band-3)", "var(--ban
 
 /**
  * 估值：本益比／股價淨值比河流圖、現在的倍數、殖利率走勢。
- * 全部由價格算出來：沒有報價（商用模式的美股）時只放一個空狀態，不再重複價格那一格說過的原因，也沒有殖利率走勢。
+ * 全部由價格算出來：沒有報價時只放一個空狀態，不再重複價格那一格說過的原因，也沒有殖利率走勢。
+ * 美股有收盤價，但沒有歷史本益比、每股淨值與股利的序列（產品負責人 2026-11-15）：不畫河流圖、也沒有殖利率走勢，
+ * 一個空狀態指到「財務」（SEC 的每股盈餘在那裡）。
  * 「每條帶是…」「近 12 個月現金股利 ÷ 收盤價」這類術語說明收在「怎麼看 ⌄」裡，要看才打開。
  */
 export function ValuationTab({ inst: instrument, position, noQuote = false }: { inst: InstrumentDetail; position: Position | null; noQuote?: boolean }) {
-  const valuation = useValuation(instrument.symbol)
+  const us = instrument.market === "US"
+  // 美股沒有估值序列：不查
+  const valuation = useValuation(instrument.symbol, !us)
   const [mode, setMode] = useState<Mode>("per")
   // 估值序列沒有自己的 sources：收盤價與本益比、股價淨值比、殖利率的資料集（台股）登記到頁尾
   const tw = twOpenApi(instrument.market)
   const plotted = !!valuation.data?.series.length
   useDatasetSources([plotted && tw && `${tw}/price`, plotted && tw && `${tw}/valuation`])
 
+  if (us) return <UsValuation inst={instrument} />
   if (noQuote) {
     return <NotYet title="沒有報價，算不出估值">本益比、股價淨值比與殖利率都要用到股價。</NotYet>
   }
@@ -86,6 +93,34 @@ export function ValuationTab({ inst: instrument, position, noQuote = false }: { 
       <YieldPanel valuation={v} />
       <Notes notes={status} />
     </div>
+  )
+}
+
+/**
+ * 美股的估值分頁：只有收盤價，沒有歷史本益比、每股淨值與股利，所以沒有河流圖、也沒有殖利率走勢。
+ * 個股指到「財務」（SEC 的每股盈餘）；ETF 沒有自己的每股盈餘，不放動作。
+ */
+function UsValuation({ inst }: { inst: InstrumentDetail }) {
+  if (inst.type === "etf") {
+    return <NotYet title="ETF 沒有本益比與股價淨值比河流圖">ETF 是一籃子股票，沒有自己的每股盈餘與淨值；美股的股利沒有資料，所以也沒有殖利率。</NotYet>
+  }
+  return (
+    <NotYet
+      title="美股沒有本益比河流圖"
+      action={
+        <Link
+          to="/stock/$symbol"
+          params={{ symbol: inst.symbol }}
+          search={{ tab: "financials" }}
+          resetScroll={false}
+          className={buttonVariants({ variant: "outline", size: "sm", className: "pointer-coarse:h-11" })}
+        >
+          看財務
+        </Link>
+      }
+    >
+      美股只有收盤價，沒有歷史本益比、每股淨值與股利資料。每股盈餘在「財務」。
+    </NotYet>
   )
 }
 

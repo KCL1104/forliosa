@@ -13,7 +13,7 @@ import { createAppRouter } from "@/router"
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
 /**
- * 市場頁（`/market`）：指數、AI 收盤重點、類股、排行、重大訊息；都是收盤後的資料，沒有的區塊不出現。
+ * 市場頁（`/market`）：指數、AI 收盤重點、類股、排行、美股、重大訊息；都是收盤後的資料，沒有的區塊不出現。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -221,6 +221,142 @@ describe("市場頁的內容", () => {
     renderApp()
     expect(await screen.findByRole("alert", {}, T)).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "重新載入" })).toBeInTheDocument()
+  })
+})
+
+describe("美股（產品負責人 2026-11-15）", () => {
+  it("示範資料：SPY、DIA、ONEQ 是台北日期之前最後一個美股交易日（紐約）的收盤，20 個點的小圖；5 則 GDELT 新聞；頁尾有 Databento 與 GDELT", () => {
+    const o = buildMarketOverview(false)
+    expect(o.us?.date).toBe("2026-11-11")
+    expect(o.us?.items.map((i) => [i.symbol, i.tracks, i.unit, i.date])).toEqual([
+      ["SPY", "S&P 500", "美元", "2026-11-11"],
+      ["DIA", "道瓊工業指數", "美元", "2026-11-11"],
+      ["ONEQ", "那斯達克綜合指數", "美元", "2026-11-11"],
+    ])
+    for (const i of o.us!.items) {
+      expect(i.sparkline).toHaveLength(20)
+      expect(i.sparkline.at(-1)).toEqual({ t: i.date, v: i.value })
+      expect(i.sparkline.at(-2)!.v).toBeCloseTo(i.value! - i.change!, 2)
+    }
+    expect(o.us!.news).toHaveLength(5)
+    for (const n of o.us!.news) {
+      expect(n).toMatchObject({ category: "media", source: "GDELT" })
+      expect(n.url).toMatch(/^https:\/\/example\.com\//)
+      expect(Date.parse(n.published_at)).toBeLessThan(Date.parse("2026-11-12T13:30:00+08:00"))
+    }
+    expect(o.sources).toContain("Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供")
+    expect(o.sources.some((s) => s.startsWith("The GDELT Project"))).toBe(true)
+    // 週一（台北）看到的是上週五（紐約）的收盤
+    expect(buildMarketOverview(false, "2026-11-16").us?.date).toBe("2026-11-13")
+  })
+
+  it("在排行之後、重大訊息之前；標題旁寫紐約的日期「11/11 收盤（美東）」，不寫「今日」", async () => {
+    mount()
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "美股" }, T)).closest("section")!
+    const order = screen.getAllByRole("heading", { level: 2 }).map((h) => h.textContent)
+    expect(order.indexOf("美股")).toBe(order.indexOf("排行") + 1)
+    expect(order.indexOf("重大訊息")).toBe(order.indexOf("美股") + 1)
+    expect(within(section).getByText("11/11 收盤（美東）")).toBeInTheDocument()
+    expect(section).not.toHaveTextContent(/今日|即時/)
+  })
+
+  it("三檔 ETF：代號、追蹤哪個指數（不寫成指數本身）、US$ 收盤價、▲▼ 漲跌與幅度；每一列連到個股頁", async () => {
+    mount()
+    renderApp()
+    const list = await screen.findByRole("list", { name: "美股 ETF" }, T)
+    const links = within(list).getAllByRole("link")
+    expect(links.map((a) => a.getAttribute("href"))).toEqual(["/stock/SPY", "/stock/DIA", "/stock/ONEQ"])
+    const [spy, dia, oneq] = links as [HTMLElement, HTMLElement, HTMLElement]
+    expect(spy).toHaveTextContent("SPY")
+    expect(spy).toHaveTextContent("SPDR S&P 500 ETF Trust")
+    expect(spy).toHaveTextContent("追蹤 S&P 500")
+    expect(spy).toHaveTextContent("US$683.41")
+    expect(spy).toHaveTextContent("▲4.12")
+    expect(spy).toHaveTextContent("0.61%")
+    expect(spy).toHaveTextContent("上漲")
+    expect(dia).toHaveTextContent("追蹤道瓊工業指數")
+    expect(dia).toHaveTextContent("US$471.86")
+    expect(dia).toHaveTextContent("▼1.37")
+    expect(dia).toHaveTextContent("下跌")
+    expect(oneq).toHaveTextContent("追蹤那斯達克綜合指數")
+    expect(oneq).toHaveTextContent("US$87.94")
+    // 走勢小圖每一檔兩張（窄與寬各一），只給眼睛看
+    expect(spy.querySelectorAll("svg")).toHaveLength(2)
+    for (const svg of spy.querySelectorAll("svg")) expect(svg.closest("[aria-hidden]")).not.toBeNull()
+    // 日期都一樣時每一格不再寫日期
+    expect(within(list).queryByText(/收盤（美東）/)).toBeNull()
+  })
+
+  it("美股新聞：媒體・相對時間，標題連到原文、另開新視窗", async () => {
+    mount()
+    renderApp()
+    const list = await screen.findByRole("list", { name: "新聞" }, T)
+    const rows = within(list).getAllByRole("listitem")
+    expect(rows).toHaveLength(5)
+    expect(rows[0]).toHaveTextContent("Demo Wire・7 小時前")
+    const links = within(list).getAllByRole("link")
+    expect(links[0]).toHaveTextContent("Wall Street closes mixed as tech gains offset industrials (sample)")
+    expect(links[0]).toHaveAttribute("href", "https://example.com/demo-news/us-market-1")
+    for (const a of links) {
+      expect(a).toHaveAttribute("target", "_blank")
+      expect(a).toHaveAttribute("rel", "noopener noreferrer")
+    }
+  })
+
+  it("頁尾的資料來源列出 Databento 與 GDELT", async () => {
+    mount()
+    renderApp()
+    await screen.findByRole("heading", { name: "美股" }, T)
+    fireEvent.click(screen.getByRole("button", { name: "資料來源與授權" }))
+    expect(screen.getByText("Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026）")).toBeInTheDocument()
+    expect(screen.getByText(/^The GDELT Project〈GDELT DOC 2\.0 新聞索引〉/)).toBeInTheDocument()
+  })
+
+  it("某一檔的收盤日期和其他檔不同：那一格自己寫日期", async () => {
+    mount({}, (o) => ({ ...o, us: { ...o.us!, items: o.us!.items.map((i) => (i.symbol === "ONEQ" ? { ...i, date: "2026-11-10" } : i)) } }))
+    renderApp()
+    const list = await screen.findByRole("list", { name: "美股 ETF" }, T)
+    const links = within(list).getAllByRole("link")
+    expect(links[2]).toHaveTextContent("11/10 收盤（美東）")
+    expect(links[0]).not.toHaveTextContent("收盤（美東）")
+  })
+
+  it("沒有收盤價只有新聞：只列新聞，標題旁不寫日期", async () => {
+    mount({}, (o) => ({ ...o, us: { date: null, items: [], news: o.us!.news } }))
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "美股" }, T)).closest("section")!
+    expect(within(section).queryByRole("list", { name: "美股 ETF" })).toBeNull()
+    expect(within(section).queryByText(/收盤（美東）/)).toBeNull()
+    expect(within(within(section).getByRole("list", { name: "美股新聞" })).getAllByRole("link")).toHaveLength(5)
+  })
+
+  it("有收盤價沒有新聞：只列三檔 ETF", async () => {
+    mount({}, (o) => ({ ...o, us: { ...o.us!, news: [] } }))
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "美股" }, T)).closest("section")!
+    expect(within(section).getAllByRole("link")).toHaveLength(3)
+    expect(within(section).queryByRole("heading", { name: "新聞" })).toBeNull()
+  })
+
+  it("沒有美股（null，或舊版後端沒有這個欄位）：整塊不出現，其他區塊照常", async () => {
+    mount({}, (o) => ({ ...o, us: null }))
+    renderApp()
+    expect(await screen.findByRole("heading", { name: "排行" }, T)).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "美股" })).toBeNull()
+    cleanup()
+    mount({}, ({ us: _us, ...o }) => o)
+    renderApp()
+    expect(await screen.findByRole("heading", { name: "排行" }, T)).toBeInTheDocument()
+    expect(screen.queryByRole("heading", { name: "美股" })).toBeNull()
+    expect(screen.queryByText(/收盤（美東）/)).toBeNull()
+  })
+
+  it("台股都沒有、只有美股：不是空狀態，列出美股", async () => {
+    mount({}, (o) => ({ as_of: null, indices: [], summary: null, sectors: null, movers: null, announcements: null, us: o.us, is_demo: false, notes: [], sources: o.sources }))
+    renderApp()
+    expect(await screen.findByRole("heading", { name: "美股" }, T)).toBeInTheDocument()
+    expect(screen.queryByText("還沒有資料")).toBeNull()
   })
 })
 

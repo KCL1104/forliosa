@@ -68,9 +68,15 @@ export function Pct({ value, className, glyph = true, decimals = 2 }: { value: n
   )
 }
 
-/** 價格（公開資訊，不遮蔽）；沒有報價時顯示「—」 */
+/** 價格（公開資訊，不遮蔽）；美股前面寫 US$（「US$356.27」）；沒有報價時顯示「—」（不寫「US$—」） */
 export function Price({ value, market, className }: { value: number | null | undefined; market: Market; className?: string }) {
-  return <span className={cn("num whitespace-nowrap", className)}>{formatPrice(value, market)}</span>
+  const priced = value !== null && value !== undefined && !Number.isNaN(value)
+  return (
+    <span className={cn("num whitespace-nowrap", className)}>
+      {market === "US" && priced && "US$"}
+      {formatPrice(value, market)}
+    </span>
+  )
 }
 
 /** 漲跌點數＋幅度，例如「▲ 15.00（+1.40%）」；沒有昨收時無法計算，顯示「—」 */

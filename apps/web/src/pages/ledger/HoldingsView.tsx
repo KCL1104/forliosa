@@ -25,6 +25,7 @@ import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { useStartReduce } from "@/pages/transactions/use-start-reduce"
+import { useUsClosesServed } from "@/pages/stock/text"
 import { SymbolRecords } from "./SymbolRecords"
 
 type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
@@ -83,13 +84,23 @@ export function HoldingsView() {
   )
 }
 
+/**
+ * 沒有價格的持股，照成本算。美股的收盤（Databento）只抓有人觀察或持有的代號：剛記進帳本的美股約 10 分鐘內補上，
+ * 所以寫「還沒有收盤價」並說什麼時候會有；其他（台股）照舊。後端關掉美股收盤時（顯名清單沒有 Databento）
+ * 美股也照舊寫「沒有報價」，不承諾會補上。
+ */
 function UnpricedNote({ rows }: { rows: Holding[] }) {
+  const served = useUsClosesServed()
   const list = unpricedHoldings(rows)
   if (list.length === 0) return null
+  const us = served ? list.filter((h) => h.market === "US") : []
+  const other = list.filter((h) => !us.includes(h))
+  const names = (hs: Holding[]) => inText(hs.map((h) => h.name).join("、"), "start")
   return (
-    <p className="mt-2.5 text-base text-ink">
-      {inText(list.map((h) => h.name).join("、"), "start")}沒有報價，照成本算。
-    </p>
+    <>
+      {other.length > 0 && <p className="mt-2.5 text-base text-ink">{names(other)}沒有報價，照成本算。</p>}
+      {us.length > 0 && <p className="mt-2.5 text-base text-ink">{names(us)}還沒有收盤價，先照成本算；剛記進帳本的美股約 10 分鐘內補上。</p>}
+    </>
   )
 }
 
@@ -385,7 +396,8 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                 <td key={c} className="num text-right text-lg whitespace-nowrap">
                   {c === "price" ? (
                     <>
-                      {market === "US" && <span className="mr-0.5 text-sm text-ink-2">US$</span>}
+                      {/* 沒有收盤價時只寫「—」，不寫「US$—」 */}
+                      {market === "US" && w.quote && <span className="mr-0.5 text-sm text-ink-2">US$</span>}
                       {formatQuote(w.quote?.price, market)}
                     </>
                   ) : c === "day_pct" ? (
@@ -490,7 +502,7 @@ function WatchRowMobile({ w }: { w: WatchItem }) {
         <span className="truncate text-lg leading-6 font-medium">{w.name}</span>
         <Sparkline className="col-start-2 row-span-2 row-start-1 self-center" width={76} height={32} values={values} baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)} tone={d} label={`${w.name}今日走勢`} />
         <span className="num col-start-3 row-start-1 text-right text-lg leading-6">
-          {market === "US" && "US$"}
+          {market === "US" && w.quote && "US$"}
           {formatQuote(w.quote?.price, market)}
         </span>
         <span className="num col-start-1 row-start-2 text-sm leading-5 text-ink-2">{codeOf(w.symbol)}</span>

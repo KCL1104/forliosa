@@ -1745,8 +1745,8 @@ await check("手機：底部列的分頁從內容的左緣開始（第一個字�
   if (bar.tabs.some((t) => t.hitW < 44 || t.hitH < 44)) throw new Error(`tab targets: ${JSON.stringify(bar.tabs)}`)
   if (Math.abs(bar.vw - bar.askRight - bar.gutter) > 0.5) throw new Error(`問 AI is not on the right gutter: ${JSON.stringify(bar)}`)
 })
-// ── 市場頁（`/market`）：收盤後的指數、AI 收盤重點、類股、排行、重大訊息 ──
-await check("市場頁（桌面）：導覽標「市場」、指數帶日期、AI 收盤重點是鉛筆字並附來源、排行連到個股頁、重大訊息可展開；沒有橫向溢出", async () => {
+// ── 市場頁（`/market`）：收盤後的指數、AI 收盤重點、類股、排行、美股、重大訊息 ──
+await check("市場頁（桌面）：導覽標「市場」、指數帶日期、AI 收盤重點是鉛筆字並附來源、排行連到個股頁、美股 ETF 與新聞、重大訊息可展開；沒有橫向溢出", async () => {
   await page.goto(base + "/market", { waitUntil: "networkidle" })
   await page.getByRole("heading", { level: 1, name: "市場" }).waitFor({ timeout: 8000 })
   if ((await page.title()) !== "市場｜Forliosa") throw new Error(`title: ${await page.title()}`)
@@ -1757,7 +1757,8 @@ await check("市場頁（桌面）：導覽標「市場」、指數帶日期、A
   if (await page.getByText(/即時|盤中報價/).count()) throw new Error("the market page must not claim live data")
   const summary = page.locator("section", { has: page.getByRole("heading", { name: "收盤重點" }) })
   const voice = await summary.locator(".ai-voice").evaluateAll((els) => els.map((el) => ({ font: getComputedStyle(el).fontFamily, size: parseFloat(getComputedStyle(el).fontSize) })))
-  if (voice.length < 3 || voice.some((v) => !/Kai|楷/i.test(v.font) || v.size < 17)) throw new Error(`summary is not in the AI voice: ${JSON.stringify(voice)}`)
+  // AI voice 是黑體（Noto Sans TC、墨色；2026-11-14 從楷體改過來），桌面 16px 起
+  if (voice.length < 3 || voice.some((v) => !/Noto Sans TC/i.test(v.font) || v.size < 16)) throw new Error(`summary is not in the AI voice: ${JSON.stringify(voice)}`)
   const sources = await summary.getByRole("link").evaluateAll((els) => els.map((a) => ({ target: a.target, rel: a.rel, href: a.href })))
   if (sources.length < 3 || sources.some((a) => a.target !== "_blank" || !/noopener/.test(a.rel) || !/^https:/.test(a.href))) throw new Error(`summary sources: ${JSON.stringify(sources)}`)
   const sectors = page.locator("section", { has: page.getByRole("heading", { name: "類股" }) })
@@ -1771,6 +1772,15 @@ await check("市場頁（桌面）：導覽標「市場」、指數帶日期、A
   const before = await ann.getByRole("link").count()
   await ann.getByRole("button", { name: /^再看 \d+ 則$/ }).click()
   if ((await ann.getByRole("link").count()) <= before) throw new Error("「再看」did not show more announcements")
+  // 美股：SPY、DIA、ONEQ 是 ETF（寫追蹤哪個指數）、紐約日期、US$；新聞連到原文另開視窗；在排行與重大訊息之間
+  const us = page.locator("section", { has: page.getByRole("heading", { name: "美股", exact: true }) })
+  if (!/\d{1,2}\/\d{1,2} 收盤（美東）/.test(await us.locator("header").innerText())) throw new Error("the US block has no New York date")
+  const etfs = await us.getByRole("list", { name: "美股 ETF" }).getByRole("link").evaluateAll((els) => els.map((a) => ({ href: a.getAttribute("href"), text: a.innerText })))
+  if (etfs.map((e) => e.href).join() !== "/stock/SPY,/stock/DIA,/stock/ONEQ" || etfs.some((e) => !/追蹤/.test(e.text) || !/US\$\s*[\d,]+\.\d{2}/.test(e.text) || !/%/.test(e.text))) throw new Error(`US ETFs: ${JSON.stringify(etfs)}`)
+  const usNews = await us.getByRole("list", { name: "新聞" }).getByRole("link").evaluateAll((els) => els.map((a) => ({ target: a.target, rel: a.rel, href: a.href })))
+  if (usNews.length < 3 || usNews.some((a) => a.target !== "_blank" || !/noopener/.test(a.rel) || !/^https:/.test(a.href))) throw new Error(`US news: ${JSON.stringify(usNews)}`)
+  const h2 = await page.locator("#main h2").allInnerTexts()
+  if (h2.indexOf("美股") !== h2.indexOf("排行") + 1 || h2.indexOf("重大訊息") !== h2.indexOf("美股") + 1) throw new Error(`the US block is not between 排行 and 重大訊息: ${JSON.stringify(h2)}`)
   const flow = await page.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
   if (flow.sw > flow.cw) throw new Error(`horizontal overflow: ${JSON.stringify(flow)}`)
   await movers.getByRole("link", { name: /台積電/ }).first().click()
@@ -1803,7 +1813,16 @@ await check("市場頁（手機）：四個分頁＋「問 AI」在 393px 與 32
       if ((await shown()) !== 1) throw new Error(`${name}: ${await shown()} ranking lists are visible, want one at a time`)
       await movers.getByRole("radio", { name: "成交量" }).click()
       await movers.getByText(/張$/).first().waitFor({ timeout: 4000 })
-      const small = await p.evaluate(() => [...document.querySelectorAll("#main a, #main button")].filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.height < 44 || r.width < 44) }).map((el) => `${el.textContent.trim().slice(0, 12)} ${Math.round(el.getBoundingClientRect().width)}×${Math.round(el.getBoundingClientRect().height)}`))
+      // 撐滿整列的連結（美股新聞：`::after` 絕對定位蓋住整列）量的是那一列，不是標題文字本身
+      const small = await p.evaluate(() => {
+        const area = (el) => {
+          if (getComputedStyle(el, "::after").position !== "absolute") return el.getBoundingClientRect()
+          let box = el.parentElement
+          while (box && getComputedStyle(box).position === "static") box = box.parentElement
+          return (box ?? el).getBoundingClientRect()
+        }
+        return [...document.querySelectorAll("#main a, #main button")].filter((el) => { const r = area(el); return el.getBoundingClientRect().width > 0 && (r.height < 44 || r.width < 44) }).map((el) => `${el.textContent.trim().slice(0, 12)} ${Math.round(area(el).width)}×${Math.round(area(el).height)}`)
+      })
       if (small.length) throw new Error(`${name}: touch targets under 44px: ${small.join("、")}`)
       const flow = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
       if (flow.sw > flow.cw) throw new Error(`${name}: horizontal overflow ${JSON.stringify(flow)}`)

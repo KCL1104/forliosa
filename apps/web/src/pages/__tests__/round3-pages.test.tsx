@@ -347,13 +347,41 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(await screen.findByText("11/12 收盤・今天的還沒公布", undefined, T)).toBeInTheDocument()
   })
 
-  it("美股：維持「沒有報價」，沒有收盤價的標示與說明（就算是盤中）", async () => {
+  /** 美股的收盤（Databento）：紐約 11/13 的收盤，as_of 是紐約 16:00＝台北 11/14 05:00 */
+  const usClose = {
+    symbol: "AAPL", price: 356.27, prev_close: 350, change: 6.27, change_pct: 0.0179, open: 351, high: 357, low: 349.5, volume: 41_000_000,
+    as_of: "2026-11-14T05:00:00+08:00", trade_date: "2026-11-13", is_realtime: false, is_demo: false, source: "databento-equs",
+    reference_price: 350, limit_up: null, limit_down: null,
+  }
+  const withUsClose = () => {
+    const getQuote = api.getQuote
+    vi.spyOn(api, "getQuote").mockImplementation((symbol) => (symbol === "AAPL" ? Promise.resolve(usClose) : getQuote(symbol)))
+  }
+
+  it("美股：收盤寫紐約的日期「11/13 收盤（美東）」、價格帶 US$；不寫台北的「11/14 05:00」，就算是盤中也沒有台股的說明與連結", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ is_open: true }))
+    withUsClose()
     renderApp("/stock/AAPL")
-    expect(await screen.findByText("沒有報價", undefined, T)).toBeInTheDocument()
-    await screen.findByRole("region", { name: "關於「Apple」" }, T)
+    const label = await screen.findByText("11/13 收盤（美東）", undefined, T)
+    const header = label.closest("header")!
+    expect(header.textContent).toContain("US$")
+    expect(header.textContent).toContain("參考價 US$350.00")
+    expect(header.textContent).not.toMatch(/05:00|11\/14|沒有報價/)
     expect(screen.queryByText(/盤中不更新/)).toBeNull()
     expect(screen.queryByRole("link", { name: /到證交所看即時報價/ })).toBeNull()
+    expect(document.body.textContent).not.toContain("美股沒有報價，所以沒有走勢和估值")
+  })
+
+  it("美股的 1 日走勢空狀態：收盤寫紐約的日期與 US$", async () => {
+    const user = userEvent.setup()
+    withUsClose()
+    renderApp("/stock/AAPL")
+    await screen.findByText("11/13 收盤（美東）", undefined, T)
+    await user.click(await screen.findByRole("radio", { name: "1日" }, T))
+    await screen.findByText("沒有盤中走勢：價格是收盤後公布的收盤價", undefined, T)
+    const chart = screen.getByRole("region", { name: "走勢圖" })
+    expect(chart.textContent).toContain("11/13 收盤（美東）US$356.27")
+    expect(chart.textContent).not.toMatch(/11\/14|美股沒有走勢/)
   })
 
   it("1 日走勢的空狀態：同一種說法（收盤後公布的收盤價），不承諾盤中資料", async () => {

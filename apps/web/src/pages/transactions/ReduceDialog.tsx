@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
+import { usd, usDay, usTradeDate } from "@/lib/labels"
 import { usePrefs } from "@/stores/prefs"
 import { AccountSelect, StampLine } from "./TradeForm"
 
@@ -121,6 +122,9 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
     return q === null ? null : inLots ? Math.round(q * 1000) : q
   })()
   const price = quote.data?.price ?? null
+  // 收盤價是哪一天的：台股「11/12」；美股是紐約的交易日「11/13（美東）」（as_of 是紐約 16:00，台北已經是隔天）
+  const usDate = isUS && quote.data ? usTradeDate(quote.data.trade_date, quote.data.as_of) : null
+  const closeOn = usDate ? usDay(usDate) : !isUS && quote.data?.as_of ? formatDateShort(quote.data.as_of.slice(0, 10), false) : null
   const qtyLabel = inLots ? "張數" : "股數"
   const allText = formatQuantity(held, unitPref, holding.market)
   const heldInField = `${new Intl.NumberFormat("zh-TW").format(inLots ? held / 1000 : held)} ${inLots ? "張" : "股"}`
@@ -209,7 +213,7 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
         <Skeleton className="h-6 w-56 rounded-sm" />
       ) : price !== null ? (
         <p className="text-base">
-          用{quote.data?.as_of ? ` ${formatDateShort(quote.data.as_of.slice(0, 10), false)} ` : "最新"}的收盤價 <span className="num">{formatPrice(price, holding.market, holding.type)}</span> 記成賣出。
+          用{closeOn ? ` ${closeOn}${isUS ? "" : " "}` : "最新"}的收盤價 <span className="num">{isUS ? usd(price) : formatPrice(price, holding.market, holding.type)}</span> 記成賣出。
         </p>
       ) : (
         <p className="text-base">這一檔沒有收盤價，要自己填成交價。</p>

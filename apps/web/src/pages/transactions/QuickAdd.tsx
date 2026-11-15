@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { defaultAccount } from "@/lib/default-account"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
-import { marketTag } from "@/lib/labels"
+import { marketTag, usCloseLabel, usd, usTradeDate } from "@/lib/labels"
 import { marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
@@ -373,6 +373,9 @@ function DetailsStep({
   const qtyLabel = inLots ? "張數" : "股數"
   const priceLabel = `買進價格${isUS ? "（美元）" : ""}`
   const q = quote.data
+  // 收盤價是哪一天的：台股「11/12 收盤」；美股寫紐約的日期「11/13 收盤（美東）」（as_of 是紐約 16:00，台北已經是隔天）
+  const usDate = q && symbol.market === "US" ? usTradeDate(q.trade_date, q.as_of) : null
+  const closeOn = usDate ? usCloseLabel(usDate) : symbol.market !== "US" && q?.as_of ? `${formatDateShort(q.as_of, false)} 收盤` : null
   return (
     <form ref={formRef} onSubmit={(e) => void submit(e)} noValidate className={cn("flex flex-col gap-4 px-4 sm:px-6", !sheet && "pb-4 sm:pb-6")}>
       {/* 選好的股票：和搜尋框同一個位置；✕ 回到第一步 */}
@@ -384,7 +387,7 @@ function DetailsStep({
           </p>
           <p className="num text-xs text-ink-2">
             {marketTag(symbol)}
-            {q?.as_of ? `・${formatDateShort(q.as_of, false)} 收盤` : ""}
+            {closeOn ? `・${closeOn}` : ""}
           </p>
         </div>
         {q && (
@@ -499,8 +502,9 @@ function DetailsStep({
 }
 
 /**
- * 選了日期之後價格欄下面的「11/12 收盤 1,085」：點一下填進價格（實際成交價常常不同，所以不自動填）。
- * 只用自己存檔的官方收盤；那天沒有（假日、存檔開始以前、沒有報價來源）就不顯示。
+ * 選了日期之後價格欄下面的「11/12 收盤 1,085」（美股「11/13 收盤（美東）US$356.27」，日期是紐約的交易日）：
+ * 點一下填進價格（實際成交價常常不同，所以不自動填）。
+ * 只用自己存檔的官方收盤；那天沒有（假日、存檔開始以前、美股 2024/07/01 以前、還沒有收盤價）就不顯示。
  */
 function CloseHint({ instrument, date, price, onFill }: { instrument: Instrument; date: string; price: string; onFill: (price: string) => void }) {
   const q = useQuery({
@@ -512,8 +516,11 @@ function CloseHint({ instrument, date, price, onFill }: { instrument: Instrument
   })
   const close = q.data?.close
   if (close === null || close === undefined) return null
-  const text = formatPrice(close, instrument.market, instrument.type)
-  const label = `${formatDateShort(date, false)} 收盤 ${text}`
+  // 美股：選的日期就是紐約的交易日，寫「11/13 收盤（美東）US$356.27」
+  const label =
+    instrument.market === "US"
+      ? `${usCloseLabel(q.data?.date ?? date)} ${usd(close)}`
+      : `${formatDateShort(date, false)} 收盤 ${formatPrice(close, instrument.market, instrument.type)}`
   if (num(price) === close) return <p className="num text-sm text-ink-2">{label}</p>
   return (
     <button type="button" onClick={() => onFill(String(close))} aria-label={`用 ${label} 填入價格`} className={cn(textAction, "num self-start text-sm text-ink-2 hover:text-ink")}>

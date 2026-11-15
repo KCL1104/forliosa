@@ -1,7 +1,10 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from "@tanstack/react-router"
 import { fireEvent, render, screen, within } from "@testing-library/react"
 import { describe, expect, it } from "vitest"
 import { api } from "@/api"
+import { Price } from "@/components/finance"
+import { BENCHMARK_OPTIONS, marketTag, usCloseLabel, usd, usDay, usTradeDate } from "@/lib/labels"
 import { KeyGrid, NotYet, type KeyItem } from "../tabs/kit"
 import { ValuationTab } from "../tabs/ValuationTab"
 import { marketLine } from "../text"
@@ -71,12 +74,71 @@ describe("麵包屑的市場與產業", () => {
     expect(marketLine(await api.getInstrument("NVDA"))).toBe("美股・半導體業")
     expect(marketLine(await api.getInstrument("VOO"))).toBe("美股・ETF")
   })
+  it("⌘K 的搜尋結果用同一套（英文產業不直接印出來）；還沒有收盤價的美股寫「美股・還沒有收盤價」", () => {
+    expect(marketLine({ market: "US", type: "stock", industry: "Software—Infrastructure" })).toBe("美股")
+    expect(marketTag({ market: "US", has_quote: false })).toBe("美股・還沒有收盤價")
+    expect(marketTag({ market: "US", has_quote: true })).toBe("美股")
+    expect(marketTag({ market: "TWSE" })).toBe("上市")
+  })
 })
 
+describe("美股收盤的日期與價格", () => {
+  it("日期是紐約的交易日：as_of（紐約 16:00）在台北已經是隔天早上；沒有 trade_date 時由 as_of 換算（冬令、夏令）", () => {
+    expect(usTradeDate("2026-11-13", "2026-11-14T05:00:00+08:00")).toBe("2026-11-13")
+    expect(usTradeDate(null, "2026-11-14T05:00:00+08:00")).toBe("2026-11-13")
+    expect(usTradeDate(undefined, "2026-07-02T04:00:00+08:00")).toBe("2026-07-01")
+    expect(usTradeDate(null, null)).toBeNull()
+    expect(usCloseLabel("2026-11-13")).toBe("11/13 收盤（美東）")
+    expect(usDay("2026-11-13")).toBe("11/13（美東）")
+    expect(usd(356.27)).toBe("US$356.27")
+  })
+  it("價格元件：美股前面寫 US$，沒有價格時只寫「—」（不是「US$—」）；台股不變", () => {
+    expect(render(<Price value={356.27} market="US" />).container.textContent).toBe("US$356.27")
+    expect(render(<Price value={null} market="US" />).container.textContent).toBe("—")
+    expect(render(<Price value={1085} market="TWSE" />).container.textContent).toBe("1,085")
+  })
+  it("比較基準的 VOO 不叫指數、不寫示範資料；只是價格報酬", () => {
+    const voo = BENCHMARK_OPTIONS.find((o) => o.value === "VOO")!
+    expect(voo.label).toBe("VOO（追蹤 S&P 500）")
+    expect(voo.description).not.toMatch(/示範|含息/)
+    expect(voo.description).toContain("價格報酬")
+  })
+})
+
+/** 估值分頁的空狀態有連到「財務」的 Link：要有 router */
+function withRouter(ui: React.ReactNode) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+  const router = createRouter({ routeTree: createRootRoute({ component: () => <>{ui}</> }), history: createMemoryHistory({ initialEntries: ["/"] }) })
+  return render(
+    <QueryClientProvider client={client}>
+      <RouterProvider router={router as never} />
+    </QueryClientProvider>,
+  )
+}
+
 describe("估值分頁", { timeout: 20_000 }, () => {
-  it("沒有報價（商用模式的美股）：一個空狀態，不重複「沒有可商用的來源」，也沒有殖利率走勢", async () => {
+  it("美股（有收盤價也一樣）：沒有本益比序列——一個空狀態指到「財務」，沒有殖利率走勢，不寫「沒有報價」或「可商用」", async () => {
     const aapl = await api.getInstrument("AAPL")
-    const { container } = withQueries(<ValuationTab inst={aapl} position={null} noQuote />)
+    const { container } = withRouter(<ValuationTab inst={aapl} position={null} />)
+    expect(await screen.findByText("美股沒有本益比河流圖", undefined, T)).toBeInTheDocument()
+    expect(container.textContent).toContain("每股盈餘在「財務」")
+    const toFinancials = screen.getByRole("link", { name: "看財務" })
+    expect(toFinancials.getAttribute("href")).toContain("tab=financials")
+    expect(container.textContent).not.toMatch(/沒有報價|可商用/)
+    expect(screen.queryByRole("region", { name: "殖利率走勢" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "本益比河流圖" })).toBeNull()
+  })
+  it("美股 ETF：ETF 沒有河流圖、美股股利沒有資料所以沒有殖利率；不連到財務", async () => {
+    const voo = await api.getInstrument("VOO")
+    const { container } = withRouter(<ValuationTab inst={voo} position={null} />)
+    expect(await screen.findByText("ETF 沒有本益比與股價淨值比河流圖", undefined, T)).toBeInTheDocument()
+    expect(container.textContent).toContain("美股的股利沒有資料")
+    expect(screen.queryByRole("link", { name: "看財務" })).toBeNull()
+    expect(screen.queryByRole("region", { name: "殖利率走勢" })).toBeNull()
+  })
+  it("台股沒有報價時：一個空狀態，也沒有殖利率走勢", async () => {
+    const inst = await api.getInstrument("2330.TW")
+    const { container } = withQueries(<ValuationTab inst={inst} position={null} noQuote />)
     expect(await screen.findByText("沒有報價，算不出估值", undefined, T)).toBeInTheDocument()
     expect(container.textContent).not.toMatch(/可商用/)
     expect(screen.queryByRole("region", { name: "殖利率走勢" })).toBeNull()

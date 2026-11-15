@@ -3,9 +3,10 @@ import { inText } from "@/lib/cjk"
 import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { accountsQuery, holdingsQuery, qk } from "@/api/queries"
-import { ApiError, type Instrument, type RecurringDraft, type TransactionInput } from "@/api/types"
+import { ApiError, type Instrument, type Quote, type RecurringDraft, type TransactionInput } from "@/api/types"
 import { useUi } from "@/app/ui-store"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
+import { usd, usDay, usTradeDate } from "@/lib/labels"
 import { replacedAutoDividend } from "@/lib/ledger-display"
 import { codeOf, marketOf } from "@/lib/tick"
 import { usePrefs } from "@/stores/prefs"
@@ -119,9 +120,26 @@ export function useAiRunner(ctx: AiContext) {
       const shares = sharesOf(intent.quantity, intent.unit, isUS)
       let price = intent.price
       if (price === null) {
-        const q = await qc.fetchQuery({ queryKey: qk.quote(inst.symbol), queryFn: () => api.getQuote(inst.symbol), staleTime: 15_000 })
+        let q: Quote
+        try {
+          q = await qc.fetchQuery({ queryKey: qk.quote(inst.symbol), queryFn: () => api.getQuote(inst.symbol), staleTime: 15_000 })
+        } catch (err) {
+          // 還沒有收盤價的美股（還沒有人觀察或持有、還沒抓過）：請使用者把成交價寫進句子，輸入框留著原來那一句
+          if (isUS && err instanceof ApiError && err.status === 404) {
+            say({ text: `${inst.code} 還沒有收盤價。在句子最後寫上成交價再送出。`, instruction: true })
+            seedComposer(`${text.trim()} `)
+            return true
+          }
+          throw err
+        }
         price = q.price
-        notes.push(`沒有寫價格，先用最近收盤價 ${formatPrice(q.price, inst.market)}。`)
+        // 美股寫 US$ 與紐約的日期（「先用 11/13（美東）的收盤價 US$356.27」）；台股照舊
+        const usDate = isUS ? usTradeDate(q.trade_date, q.as_of) : null
+        notes.push(
+          isUS
+            ? `沒有寫價格，先用${usDate ? ` ${usDay(usDate)}的` : "最近"}收盤價 ${usd(q.price)}。`
+            : `沒有寫價格，先用最近收盤價 ${formatPrice(q.price, inst.market)}。`,
+        )
       }
       if (!isUS && intent.unit === null) notes.push(`沒有寫單位，當作 ${formatQuantity(shares, "lot", inst.market)}。`)
       if (intent.side === "sell") {

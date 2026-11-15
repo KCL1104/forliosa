@@ -1,6 +1,5 @@
 import { useAttributions } from "@/api/queries"
-import type { InstrumentDetail } from "@/api/types"
-import { MARKET_LABEL } from "@/lib/labels"
+import type { Market } from "@/api/types"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort } from "@/lib/format"
 import { type SourceNote, toSourceNote } from "@/lib/sources"
@@ -50,6 +49,25 @@ export function twOpenApi(market: string): "twse-openapi" | "tpex-openapi" | nul
   return market === "TWSE" ? "twse-openapi" : market === "TPEX" ? "tpex-openapi" : null
 }
 
+/** 美股收盤價的資料集（Databento〈US Equities Summary〉）：只在後端有提供美股收盤時列在 `/meta/attributions` */
+export const US_PRICE_KEY = "databento-equs/price"
+
+/** 收盤價的資料集 key：上市、上櫃是證交所與櫃買中心的開放資料，美股是 Databento */
+export function priceDatasetKey(market: Market): string | null {
+  if (market === "US") return US_PRICE_KEY
+  const tw = twOpenApi(market)
+  return tw && `${tw}/price`
+}
+
+/**
+ * 美股收盤有沒有在提供：`/meta/attributions` 列了 Databento 的收盤才有（後端關掉美股收盤時整筆不列）。
+ * 還沒載入（或載入失敗）時當成有——那是現在的設定；只用來決定「還沒有收盤價」那一句要不要說「加入後會補上」。
+ */
+export function useUsClosesServed(): boolean {
+  const datasets = useAttributions().data?.datasets
+  return datasets ? datasets.some((d) => d.key === US_PRICE_KEY) : true
+}
+
 /**
  * 估值序列實際涵蓋的期間：滿 4.5 年寫「過去 5 年」，不滿就寫實際的起點「6/1 以來」
  * （商用模式的本益比存檔從 2026-06-01 才開始累積，不能說成 5 年）。跨年時寫年份。
@@ -97,16 +115,5 @@ export function labelsCollide(a: { pos: number; text: string }, b: { pos: number
   return a1 < b2 + 12 && b1 < a2 + 12
 }
 
-/**
- * 美股的產業名稱是英文（資料源原文）。麵包屑只在對得到台股產業別的時候寫中文——同一個詞，美股和台股讀起來一樣
- * （「半導體業」是證交所的產業別名稱）；對不到的不自己翻譯，只寫「美股」。原文仍在「關於」的鍵值格裡。
- */
-const US_INDUSTRY_ZH: Readonly<Record<string, string>> = { Semiconductors: "半導體業" }
-
-/** 麵包屑的市場與產業：「上市・半導體業」「上櫃・ETF」「美股・半導體業」「美股」 */
-export function marketLine(inst: Pick<InstrumentDetail, "market" | "type" | "industry">): string {
-  const market = MARKET_LABEL[inst.market]
-  if (inst.type === "etf") return `${market}・ETF`
-  const industry = inst.market === "US" ? US_INDUSTRY_ZH[inst.industry ?? ""] : inst.industry
-  return industry ? `${market}・${industry}` : market
-}
+/** 麵包屑的市場與產業（⌘K 的搜尋結果也用）：搬到 `lib/labels`，殼層不必載入個股頁的程式 */
+export { marketLine } from "@/lib/labels"

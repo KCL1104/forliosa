@@ -29,7 +29,8 @@ import { useClose } from "@/hooks/use-close"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { PriceChart } from "./PriceChart"
 import { OverviewTab } from "./tabs/OverviewTab"
-import { marketLine, sourceNotes, twOpenApi, useDatasetSources, withFigures } from "./text"
+import { marketLine, sourceNotes, twOpenApi, US_PRICE_KEY, useDatasetSources, useUsClosesServed, withFigures } from "./text"
+import { usCloseLabel, usDay, usTradeDate } from "@/lib/labels"
 import { useReadOnly, useWho } from "@/api/view-as"
 import { usePageTitle } from "@/app/page-title"
 
@@ -99,7 +100,7 @@ function StockPageInner() {
     )
   }
   const inst = instrument.data
-  // 沒有報價：只在價格那一格說一次；由價格算出來的區塊（走勢、估值、殖利率、未實現）都不出現
+  // 沒有報價（還沒抓過收盤的美股）：只在價格那一格說一次；由價格算出來的區塊（走勢、估值、殖利率、未實現）都不出現
   const noQuote = quote.isError && !quote.data
   return (
     <div className="page-frame px-5 pt-1 pb-12 md:px-8 lg:pt-6 xl:px-14">
@@ -108,14 +109,14 @@ function StockPageInner() {
       ) : (
         <>
           <Breadcrumb inst={inst} held={!!position.data} />
-          <QuoteHeader inst={inst} quote={quote.data} missing={quote.isError} />
+          <QuoteHeader inst={inst} quote={quote.data} missing={quote.isError} held={!!position.data} />
           <WhyLine inst={inst} />
           {position.data ? (
             <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!noQuote} />
           ) : (
             rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
           )}
-          {/* 沒有報價（商用模式的美股）：價格那一格已經說了原因，走勢圖整塊不放，不再說一次 */}
+          {/* 還沒有收盤價（剛加入、還沒抓過的美股）：價格那一格已經說了，走勢圖整塊不放，不再說一次 */}
           {!noQuote && <PriceChart inst={inst} quote={quote.data} position={position.data ?? null} markers={history.data?.markers} />}
         </>
       )}
@@ -241,20 +242,22 @@ function Breadcrumb({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   )
 }
 
-function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?: Quote; missing?: boolean }) {
-  // 報價下方的參考價、漲跌停每個分頁都看得到：資料集登記到頁尾（收盤價由走勢圖登記）
+function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentDetail; quote?: Quote; missing?: boolean; held?: boolean }) {
+  // 報價下方的參考價、漲跌停每個分頁都看得到：資料集登記到頁尾（台股的收盤價由走勢圖登記）。
+  // 美股的收盤價（Databento）在這裡就登記：走勢圖沒有畫出來的區間也要顯名
   const tw = twOpenApi(inst.market)
-  useDatasetSources([!!quote && tw && `${tw}/reference`])
+  const us = inst.market === "US"
+  useDatasetSources([!!quote && tw && `${tw}/reference`, !!quote && us && US_PRICE_KEY])
   // 台股與台股 ETF：沒有盤中即時報價，價格標「收盤價・日期」；盤中、或收盤後今天的還沒公布時，下面多一行說明
   const close = useClose(tw ? quote?.as_of : null)
+  // 美股的收盤：紐約的交易日（as_of 是紐約 16:00，在台北已經是隔天早上，不寫台北的時刻）
+  const usDate = us && quote ? usTradeDate(quote.trade_date, quote.as_of) : null
   if (missing && !quote) {
-    // 沒有報價（商用模式的美股）：整頁只在價格這一格說一次原因——不放一個大大的「—」，
-    // 走勢圖、估值、殖利率這些由價格算出來的區塊不再各自重複這句話
+    // 沒有報價：整頁只在價格這一格說一次——不放一個大大的「—」，走勢圖、估值、殖利率這些由價格算出來的區塊不再各自重複
     return (
       <header className="mt-1">
         <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
-        <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>
-        {inst.market === "US" && <p className="mt-1 max-w-prose text-base text-ink">美股沒有報價，所以沒有走勢和估值。持股照成本算。</p>}
+        {us ? <UsNoClose inst={inst} held={held} /> : <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>}
       </header>
     )
   }
@@ -297,12 +300,15 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
           <span>
             <span className="text-ink">收盤價</span>・{formatDateShort(closeDay(quote.as_of)!)}
           </span>
+        ) : usDate ? (
+          // 美股：「11/13 收盤（美東）」——紐約的日期，不是台北的「11/14 05:00」
+          <span className="text-ink">{usCloseLabel(usDate)}</span>
         ) : (
           <span>{quote ? asOfLabel(quote.as_of) || "—" : "—"}</span>
         )}
         {ref !== null && (
           <span>
-            參考價 <span className="text-ink">{formatPrice(ref, inst.market, inst.type)}</span>
+            參考價 <span className="text-ink">{us && "US$"}{formatPrice(ref, inst.market, inst.type)}</span>
           </span>
         )}
         {limits && (
@@ -338,6 +344,29 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
 }
 
 /**
+ * 美股還沒有收盤價（產品負責人 2026-11-15）：美股的收盤（Databento）只抓有人觀察或持有的代號，剛加入的約 10 分鐘內
+ * 補上 2024/07/01 以來的收盤。價格的位置寫「還沒有收盤價」，下一句照實說什麼時候會有——還沒加入的說要加入
+ * （「加入觀察」就在上面的麵包屑），已經加入的說會補上；唯讀（查看別人的資產）時不教人加入。
+ * 後端關掉美股收盤時（顯名清單沒有 Databento）只寫「沒有報價」，不承諾會補上。
+ */
+function UsNoClose({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
+  const served = useUsClosesServed()
+  const watch = useWatchlist()
+  const readOnly = useReadOnly()
+  const tracked = held || (watch.data ?? []).some((w) => w.symbol === inst.symbol)
+  return (
+    <>
+      <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">{served ? "還沒有收盤價" : "沒有報價"}</p>
+      {served && !readOnly && (
+        <p className="mt-1 max-w-prose text-base text-ink">
+          {tracked ? "收盤價約 10 分鐘內補上，從 2024/07/01 起。" : "美股要在觀察清單或帳本裡才會抓收盤價。加入後約 10 分鐘內補上，從 2024/07/01 起。"}
+        </p>
+      )}
+    </>
+  )
+}
+
+/**
  * 「為什麼漲跌」：只在異常時出現，點了交給 AI 展開。
  * 句子是規則判斷的（漲跌幅、量、漲跌停…），所以是墨色 Noto Sans、數字 600；
  * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是黑體（墨色，`.ai-voice`）。
@@ -350,6 +379,10 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   useSourceNote(sourceNotes(why.data?.show ? why.data.sources : null))
   if (!why.data?.show || !why.data.headline) return null
   const d = direction(quote.data?.change_pct)
+  // 美股的漲跌是紐約那一天的（台北已經是隔天）：問句寫日期，不寫「今天」
+  const usDate = inst.market === "US" ? usTradeDate(why.data.trade_date ?? quote.data?.trade_date, why.data.as_of ?? quote.data?.as_of) : null
+  // 名稱和日期之間空一格（「Apple 11/13（美東）」「輝達 11/13（美東）」）
+  const lead = usDate ? `${inText(inst.name, "start").trimEnd()} ${usDay(usDate)}` : `${inText(inst.name, "start")}今天`
   const modelWritten = (why.data as Why & { ai?: boolean }).ai === true
   const headline = why.data.headline
   // 模型寫的句子和對話裡的回答同一套排版（`KaiText`：數字和單位不拆行）；只有一行，所以用 20px
@@ -361,7 +394,7 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   return (
     <button
       type="button"
-      onClick={() => ask.submit(`${inText(inst.name, "start")}今天為什麼${d === "down" ? "跌" : "漲"}？`)}
+      onClick={() => ask.submit(`${lead}為什麼${d === "down" ? "跌" : "漲"}？`)}
       className={cn(
         // 觸控時可按範圍上下各多 10px（合計 44px 以上）：看不見的 ::before，字的位置不動
         "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-2.5 pointer-coarse:before:content-['']",
@@ -431,9 +464,12 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   const unit = usePrefs((s) => s.quantityUnit)
   const me = useWho("我")
   const [open, setOpen] = useState(false)
-  // 「今日」損益：收盤價的日期就是今天才寫「今日」，否則寫那個日期
+  // 「今日」損益：收盤價的日期就是今天才寫「今日」，否則寫那個日期。
+  // 美股一律寫紐約的交易日（「11/13」）：那是紐約那一天的漲跌，不是台北的今天
   const quote = useQuote(inst.symbol, priced)
-  const { day } = useClose(inst.market === "US" ? null : quote.data?.as_of)
+  const close = useClose(inst.market === "US" ? null : quote.data?.as_of)
+  const usDate = inst.market === "US" && quote.data ? usTradeDate(quote.data.trade_date, quote.data.as_of) : null
+  const day = usDate ? formatDateShort(usDate, false) : close.day
   const money = (n: number, signed = false) => formatMoney(n, { signed })
   // 均價與成交價：和報價同一套小數位；美股寫 US$（帳本的金額是新台幣，價格是美元）
   const price = (n: number | null) => `${inst.market === "US" ? "US$" : ""}${formatPrice(n, inst.market, inst.type)}`

@@ -2,13 +2,16 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { createMemoryHistory, RouterProvider } from "@tanstack/react-router"
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest"
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
+import { api } from "@/api"
 import { useAi } from "@/ai/store"
+import { useUi } from "@/app/ui-store"
 import { createAppRouter } from "@/router"
 
 /**
- * 商品清單補上全部台股 ETF 與 SEC 的美股（待決定事項 1-4、1-5）：搜尋結果標「沒有報價」，
+ * 商品清單補上全部台股 ETF 與 SEC 的美股（待決定事項 1-4、1-5）：還沒有收盤價的美股搜尋結果標「還沒有收盤價」，
  * 只有英文名的美股（MSFT）與收盤檔裡的 ETF（00981A）個股頁都打得開。
+ * 美股的收盤（Databento，產品負責人 2026-11-15）只抓有人觀察或持有的代號：還沒加入的照實說加入後會補上。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -28,7 +31,26 @@ beforeEach(() => act(resetAi))
 afterEach(() => {
   cleanup()
   act(resetAi)
+  // 搜尋框的開關在模組層級的 store：上一個測試開著沒關的話，下一頁整個被對話框蓋住（aria-hidden）
+  act(() => useUi.getState().setSearchOpen(false))
+  vi.restoreAllMocks()
 })
+
+/** 後端有沒有在提供美股收盤：`/meta/attributions` 有沒有 Databento 的收盤（後端關掉時整筆不列） */
+const US_PRICE_KEY = "databento-equs/price"
+function usCloses(served: boolean) {
+  const get = api.getAttributions
+  vi.spyOn(api, "getAttributions").mockImplementation(async () => {
+    const a = await get()
+    const rest = a.datasets.filter((d) => d.key !== US_PRICE_KEY)
+    const databento = {
+      key: US_PRICE_KEY, agency: "Databento", dataset: "US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）", url: "https://databento.com/",
+      used_for: "美股收盤價", year: 2026, license: "Databento", license_url: "https://databento.com/", commercial: true,
+      attribution: "Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供",
+    }
+    return { ...a, datasets: served ? [...rest, databento] : rest }
+  })
+}
 
 const T = { timeout: 8000 }
 function renderApp(path: string) {
@@ -42,8 +64,8 @@ function renderApp(path: string) {
   return router
 }
 
-describe("搜尋：美股標「沒有報價」，收盤檔的 ETF 搜得到", () => {
-  it("輸入 tsla：Tesla 那一列寫「美股・沒有報價」；按下去打開個股頁", async () => {
+describe("搜尋：還沒有收盤價的美股標「還沒有收盤價」，收盤檔的 ETF 搜得到", () => {
+  it("輸入 tsla：Tesla 那一列寫「美股・還沒有收盤價」；按下去打開個股頁", async () => {
     const user = userEvent.setup()
     const router = renderApp("/")
     await user.click(await screen.findByRole("button", { name: "搜尋股票" }, T))
@@ -51,7 +73,8 @@ describe("搜尋：美股標「沒有報價」，收盤檔的 ETF 搜得到", ()
     await user.type(within(dialog).getByRole("combobox"), "tsla")
     const hit = await within(dialog).findByRole("option", { name: /TSLA/ }, T)
     expect(hit.textContent).toContain("Tesla, Inc.")
-    expect(hit.textContent).toContain("美股・沒有報價")
+    expect(hit.textContent).toContain("美股・還沒有收盤價")
+    expect(hit.textContent).not.toContain("沒有報價")
     await user.click(hit)
     await waitFor(() => expect(router.state.location.pathname).toBe("/stock/TSLA"))
   })
@@ -69,10 +92,38 @@ describe("搜尋：美股標「沒有報價」，收盤檔的 ETF 搜得到", ()
 })
 
 describe("個股頁", () => {
-  it("MSFT（SEC 代號表，只有英文名）：顯示名稱與「沒有報價」", async () => {
+  it("MSFT（SEC 代號表，只有英文名、沒有人觀察）：顯示名稱與「還沒有收盤價」，照實說加入觀察或記進帳本後會補上", async () => {
+    usCloses(true)
     renderApp("/stock/MSFT")
-    expect(await screen.findByText("沒有報價", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("還沒有收盤價", undefined, T)).toBeInTheDocument()
     expect((await screen.findAllByText("MICROSOFT CORP", undefined, T)).length).toBeGreaterThan(0)
+    expect(await screen.findByText(/^美股要在觀察清單或帳本裡才會抓收盤價。加入後約 10 分鐘內補上/, undefined, T)).toBeInTheDocument()
+    // 舊的說法（美股沒有報價、持股照成本算）不再出現；走勢圖整塊不放
+    expect(document.body.textContent).not.toMatch(/美股沒有報價|持股照成本算/)
+    expect(screen.queryByRole("region", { name: "走勢圖" })).toBeNull()
+  })
+
+  it("加入觀察之後：改說會補上，不再教人加入", async () => {
+    usCloses(true)
+    const user = userEvent.setup()
+    renderApp("/stock/MSFT")
+    await screen.findByText("還沒有收盤價", undefined, T)
+    try {
+      await user.click(await screen.findByRole("button", { name: "加入觀察" }, T))
+      expect(await screen.findByText("收盤價約 10 分鐘內補上，從 2024/07/01 起。", undefined, T)).toBeInTheDocument()
+      expect(screen.queryByText(/要在觀察清單或帳本裡/)).toBeNull()
+    } finally {
+      // mock 的觀察清單在這個檔案裡是共用的：還原
+      await api.removeWatch("MSFT")
+    }
+  })
+
+  it("後端關掉美股收盤時（顯名清單沒有 Databento）：只寫「沒有報價」，不承諾會補上", async () => {
+    usCloses(false)
+    renderApp("/stock/MSFT")
+    await screen.findAllByText("MICROSOFT CORP", undefined, T)
+    await waitFor(() => expect(screen.getByText("沒有報價")).toBeInTheDocument())
+    expect(screen.queryByText(/補上/)).toBeNull()
   })
 
   it("00981A（收盤檔的 ETF）：有收盤價", async () => {

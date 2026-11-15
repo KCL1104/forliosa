@@ -37,6 +37,7 @@ import { useResolvedTheme } from "@/hooks/use-theme"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { cssVarColor } from "@/lib/css-color"
 import { closeLabel } from "@/lib/as-of"
+import { usCloseLabel, usTradeDate } from "@/lib/labels"
 import { formatDate, formatNumber, formatPercent, formatPrice, formatPriceLevel } from "@/lib/format"
 import { dayTime, importantMoments, movingAverage } from "@/lib/chart-math"
 import { cn } from "@/lib/utils"
@@ -81,7 +82,8 @@ const minuteTime = (date: string, hm: string, us: boolean) => {
  * 買進 B／賣出 S／股利 D 標記來自交易歷史（`position/history`，出清後也有）；持有時另有均價虛線。隱私模式全部隱藏。
  * 1 日線需要授權的盤中行情：商用模式沒有點，顯示說明（後端的 notes）。存檔不足時圖下照實寫出 notes。
  * 手機上工具列放在區間下面：讀數與圖緊接在價格與部位下面，第一屏就看得到圖（工具列是次要的）。
- * 沒有報價（商用模式的美股）時這個元件不出現（StockPage 不放），原因只在價格那一格說一次。
+ * 美股和台股同一套：日線是紐約那一天的未還原收盤（Databento，2024/07/01 起），沒有的區間照後端的 notes 說；價格前面寫 US$。
+ * 還沒有收盤價（剛加入、還沒抓過的美股）時這個元件不出現（StockPage 不放），只在價格那一格說一次。
  */
 const NO_MARKS: never[] = []
 
@@ -237,7 +239,8 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
   const blank = !isIntraday && empty && !history.isError
   const rangeReturn = !isIntraday && candles.length > 1 ? candles.at(-1)!.c / candles[0]!.c - 1 : null
 
-  const price = (p: number | undefined) => formatPrice(p, inst.market, inst.type)
+  // 讀數的價格：美股前面寫 US$（「收 US$356.27」）
+  const price = (p: number | undefined) => `${inst.market === "US" && p !== undefined ? "US$" : ""}${formatPrice(p, inst.market, inst.type)}`
   // 沒有任何價格（這段期間沒有成交）：不放工具列與讀數，只留空狀態
   const toolbar = !blank && (
       <div className={cn("flex flex-wrap items-center gap-1.5 sm:gap-2", !desktop && "mt-3")}>
@@ -353,14 +356,14 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
           isIntraday ? (
             <NoIntraday inst={inst} quote={quote} onFiveDays={() => setRange("5D")} />
           ) : (
-            <NoHistory notes={history.data?.notes ?? []} us={inst.market === "US"} />
+            <NoHistory notes={history.data?.notes ?? []} />
           )
         ) : (
           <div ref={box} className="absolute inset-0" role="img" aria-label={`${inst.name}走勢圖，${RANGES.find((r) => r.value === range)?.label}${rangeReturn !== null ? `，區間 ${formatPercent(rangeReturn)}` : ""}`} />
         )}
       </div>
 
-      {/* 連報價都沒有時（美股商用模式），換區間也不會有資料：區間也不放 */}
+      {/* 連報價都沒有時，換區間也不會有資料：區間也不放 */}
       {!(blank && !quote) && (
       <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2">
         <RangeChips label="區間" value={range} options={RANGES} onChange={setRange} />
@@ -374,22 +377,32 @@ export function PriceChart({ inst, quote, position, markers }: { inst: Instrumen
       )}
       {!desktop && toolbar}
       <DataNotes
-        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), "價格為未還原收盤價。"] : []}
+        // 美股和台股一樣是未還原的收盤；美股的分割比較常見，寫明分割前後的價格沒有調整
+        notes={!empty && !loading ? [...(!isIntraday ? [...(history.data?.notes ?? []), ...(compare !== "none" ? (compareHistory.data?.notes ?? []) : [])] : []), inst.market === "US" ? "價格為未還原收盤價（分割與配息都沒有調整）。" : "價格為未還原收盤價。"] : []}
         className="mt-1"
       />
     </section>
   )
 }
 
-/** 這段期間沒有日線：商用模式是存檔還在累積，照後端的 notes 說明（空狀態：上下實線、墨色標題、淡墨原因） */
-function NoHistory({ notes, us }: { notes: string[]; us: boolean }) {
+/**
+ * 這段期間沒有日線：商用模式是存檔還在累積（台股從存檔開始那天、美股從 2024/07/01），照後端的 notes 說明
+ * （空狀態：上下實線、墨色標題、淡墨原因）。台股、美股同一種說法。
+ */
+function NoHistory({ notes }: { notes: string[] }) {
   if (notes.length === 0) return <NotYet title="這段期間還沒有成交資料" />
   return (
-    <NotYet title={us ? "美股沒有走勢" : "走勢資料累積中"}>
+    <NotYet title="走勢資料累積中">
       <DataNotes notes={notes} className="text-md" />
-      {!us && <p className="mt-1">要有兩個交易日的收盤價才畫得出走勢。</p>}
+      <p className="mt-1">要有兩個交易日的收盤價才畫得出走勢。</p>
     </NotYet>
   )
+}
+
+/** 美股收盤的日期是紐約的交易日：「11/13 收盤（美東）」，不寫台北的時刻 */
+function usClose(quote: Quote): string {
+  const day = usTradeDate(quote.trade_date, quote.as_of)
+  return day ? usCloseLabel(day) : "收盤價"
 }
 
 /**
@@ -410,8 +423,11 @@ function NoIntraday({ inst, quote, onFiveDays }: { inst: InstrumentDetail; quote
     >
       {quote && (
         <p className="num mt-1">
-          {closeLabel(quote.as_of)}
-          <span className="ml-2 text-ink">{formatPrice(quote.price, inst.market, inst.type)}</span>
+          {inst.market === "US" ? usClose(quote) : closeLabel(quote.as_of)}
+          <span className="ml-2 text-ink">
+            {inst.market === "US" && "US$"}
+            {formatPrice(quote.price, inst.market, inst.type)}
+          </span>
         </p>
       )}
     </NotYet>

@@ -12,7 +12,7 @@ import { sourceNotes } from "./text"
 
 type Row = { label: string; value: React.ReactNode; title?: string }
 
-/** `extra`：總覽的鍵值帶只剩一兩格時（美股沒有行情時的近四季 EPS）併進來的格子，排在公司資料後面、曾用名稱前面 */
+/** `extra`：總覽的鍵值帶只剩一兩格時（例如還沒有收盤價的美股只有近四季 EPS）併進來的格子，排在公司資料後面、曾用名稱前面 */
 function aboutRows(c: CompanyAbout | undefined, inst: InstrumentDetail, extra: Row[] = []): Row[] {
   if (!c) return extra
   const rows: Row[] = []
@@ -66,7 +66,7 @@ function aboutRows(c: CompanyAbout | undefined, inst: InstrumentDetail, extra: R
  *   沒有條目時是 AI 依官方資料寫的 2–3 句（模型寫的字：黑體（墨色，`.ai-voice`）、標「AI 依公開資料整理」）。
  * - 緊湊的兩欄鍵值格：產業別、成立日期（成立 N 年）、上市／上櫃日期、總部、網站、實收資本額、董事長、總經理…
  * - 資料日期留在格子下面；資料來源登記到頁尾。
- * - `extra`：總覽第一層只剩一兩格時（美股沒有行情，只有近四季 EPS）併到這張鍵值格，不在分頁列下面單獨畫一條細帶。
+ * - `extra`：總覽第一層只剩一兩格時（例如還沒有收盤價的美股，只有近四季 EPS）併到這張鍵值格，不在分頁列下面單獨畫一條細帶。
  */
 export function AboutCompany({ inst, extra }: { inst: InstrumentDetail; extra?: Row[] }) {
   const company = useCompany(inst.symbol)

@@ -1,10 +1,12 @@
-import type { MarketAnnouncement, MarketIndex, MarketMover, MarketOverview, MarketSector } from "../types"
+import type { MarketAnnouncement, MarketIndex, MarketMover, MarketOverview, MarketSector, MarketUs, MarketUsEtf, NewsItem } from "../types"
+import { GDELT_ATTRIBUTION } from "./attributions"
 import { INSTRUMENTS } from "./instruments"
 import { addDays, MOCK_TODAY, parseDay } from "./market"
 
 /**
  * 市場頁的示範資料（mock 模式）。形狀和後端 `GET /market/overview` 一樣；數字是示意，
  * 排行用示範商品主檔裡的普通股（不含 ETF、美股）算，和帳本、個股頁看到的價格一致。
+ * 美股（`us`）是 SPY、DIA、ONEQ 在台北 `today` 之前最後一個美股交易日（紐約日期）的收盤，加上幾則 GDELT 的美股新聞。
  */
 
 /** 往回數 n 個交易日（示範資料只排除週末），舊到新 */
@@ -33,6 +35,52 @@ function series(end: number, change: number, days: string[], seed: number, wobbl
 
 function index(key: MarketIndex["key"], name: string, unit: string, value: number, change: number, days: string[], seed: number, wobble = 0.02): MarketIndex {
   return { key, name, unit, value, change, change_pct: Number((change / (value - change)).toFixed(6)), date: days.at(-1)!, sparkline: series(value, change, days, seed, wobble) }
+}
+
+/** 美股收盤價的出處（和後端 datapolicy 的 `databento-equs/price` 同一句） */
+const DATABENTO_ATTRIBUTION = "Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供"
+
+/** 台北日期 `today` 之前的最後一個美股交易日（紐約日期；示範資料只排除週末）：美股收盤時台北已經是隔天早上 */
+function usSessionBefore(today: string): string {
+  let d = addDays(today, -1)
+  while ([0, 6].includes(parseDay(d).getUTCDay())) d = addDays(d, -1)
+  return d
+}
+
+function usEtf(symbol: "SPY" | "DIA" | "ONEQ", name: string, tracks: string, value: number, change: number, days: string[], seed: number): MarketUsEtf {
+  return {
+    key: symbol.toLowerCase(), symbol, name, tracks, unit: "美元", value, change,
+    change_pct: Number((change / (value - change)).toFixed(6)), date: days.at(-1)!, sparkline: series(value, change, days, seed, 0.016),
+  }
+}
+
+// 美股的新聞（GDELT，只有標題與連結）：和個股頁的示範報導一樣，虛構的媒體名稱、中性的英文標題、連到 example.com
+// [標題, 媒體, 網址的最後一段, 台北早上 7 點之前幾小時]
+const US_NEWS: [string, string, string, number][] = [
+  ["Wall Street closes mixed as tech gains offset industrials (sample)", "Demo Wire", "us-market-1", 1],
+  ["Treasury yields edge lower ahead of inflation data (sample)", "Demo Press", "us-market-2", 2],
+  ["Chip stocks lift the Nasdaq; a sample market headline", "Demo Markets TV", "us-market-3", 4],
+  ["Industrial shares slip after factory orders data (sample)", "Demo Wire", "us-market-4", 7],
+  ["What investors watch in next week's retail earnings (sample)", "Demo Business Review", "us-market-5", 11],
+]
+
+function usMarket(today: string): MarketUs {
+  const days = tradingDays(usSessionBefore(today), 20)
+  // 新聞的時間：台北 `today` 早上 7 點之前（紐約前一天的下午到傍晚），比示範的「現在」早
+  const base = Date.parse(`${today}T07:00:00+08:00`)
+  const news: NewsItem[] = US_NEWS.map(([title, outlet, slug, hoursAgo]) => ({
+    published_at: `${new Date(base - hoursAgo * 3_600_000 + 8 * 3_600_000).toISOString().slice(0, 19)}+08:00`,
+    title, source: "GDELT", outlet, url: `https://example.com/demo-news/${slug}`, category: "media", date_only: false, sources: [GDELT_ATTRIBUTION],
+  }))
+  return {
+    date: days.at(-1)!,
+    items: [
+      usEtf("SPY", "SPDR S&P 500 ETF Trust", "S&P 500", 683.41, 4.12, days, 13),
+      usEtf("DIA", "SPDR Dow Jones Industrial Average ETF Trust", "道瓊工業指數", 471.86, -1.37, days, 17),
+      usEtf("ONEQ", "Fidelity Nasdaq Composite Index ETF", "那斯達克綜合指數", 87.94, 0.88, days, 19),
+    ],
+    news,
+  }
 }
 
 const SECTORS: [string, number][] = [
@@ -102,6 +150,7 @@ export function buildMarketOverview(demo: boolean, today = MOCK_TODAY): MarketOv
       volume: by((m) => m.volume ?? 0),
     },
     announcements: { date: day, start_date: day, total: 428, items: announcements },
+    us: usMarket(today),
     is_demo: demo,
     notes: [],
     sources: [
@@ -111,6 +160,8 @@ export function buildMarketOverview(demo: boolean, today = MOCK_TODAY): MarketOv
       "臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版",
       "證券櫃檯買賣中心〈上櫃股票行情〉（2026），依政府資料開放授權條款第 1 版",
       "臺灣證券交易所〈上市公司每日重大訊息〉（2026），依政府資料開放授權條款第 1 版",
+      DATABENTO_ATTRIBUTION,
+      GDELT_ATTRIBUTION,
     ],
   }
 }

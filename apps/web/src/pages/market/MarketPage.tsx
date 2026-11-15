@@ -14,11 +14,13 @@ import { IndexStrip } from "./IndexStrip"
 import { Movers } from "./Movers"
 import { SectorList } from "./SectorList"
 import { SummaryBlock } from "./SummaryBlock"
+import { UsBlock } from "./UsBlock"
 
 /**
  * 市場：收盤後的市場資訊（產品負責人 2026-11-13；登入後另開一頁，首頁仍是帳本）。
- * 由上到下：指數 → AI 收盤重點（有才出現）→ 類股漲跌 → 排行 → 重大訊息。只有官方的收盤後資料：
- * 沒有盤中、沒有海外指數、美股與加密貨幣。每一塊自己帶日期（各交易所公布的時間不同）。
+ * 由上到下：指數 → AI 收盤重點（有才出現）→ 類股漲跌 → 排行 → 美股（SPY、DIA、ONEQ 與美股新聞；有才出現）→ 重大訊息。
+ * 只有收盤後的資料：沒有盤中、沒有海外指數本身（美股只列追蹤指數的 ETF）、沒有加密貨幣。
+ * 每一塊自己帶日期（各交易所公布的時間不同；美股是紐約的日期）。
  * 查看別人的資產時照常可看：這一頁沒有個人資料。
  */
 export function MarketPage() {
@@ -61,7 +63,8 @@ function Market() {
 
 function MarketBody({ data }: { data: MarketOverview }) {
   useSourceNote(data.sources)
-  const empty = data.indices.length === 0 && !data.sectors && !data.movers && !data.announcements && !data.summary
+  const us = data.us && (data.us.items.length > 0 || data.us.news.length > 0) ? data.us : null
+  const empty = data.indices.length === 0 && !data.sectors && !data.movers && !data.announcements && !data.summary && !us
   if (empty) return <EmptyState title="還沒有資料" />
   return (
     <div className="@container flex flex-col gap-10">
@@ -69,6 +72,7 @@ function MarketBody({ data }: { data: MarketOverview }) {
       {data.summary && <SummaryBlock summary={data.summary} />}
       {data.sectors && <SectorList sectors={data.sectors} />}
       {data.movers && <Movers movers={data.movers} />}
+      {us && <UsBlock us={us} />}
       {data.announcements && <Announcements announcements={data.announcements} />}
       <DataNotes notes={data.notes} />
     </div>

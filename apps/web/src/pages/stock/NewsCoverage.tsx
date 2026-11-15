@@ -3,11 +3,12 @@ import { ChevronDownIcon } from "lucide-react"
 import { useState } from "react"
 import { appNow } from "@/api"
 import { useNews } from "@/api/queries"
-import type { InstrumentDetail, NewsItem } from "@/api/types"
+import type { InstrumentDetail } from "@/api/types"
+import { NewsRow } from "@/components/news-row"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
-import { mediaNews, NEWS_PAGE_SIZE, outletLabel, relativeTime } from "@/lib/news"
+import { mediaNews, NEWS_PAGE_SIZE } from "@/lib/news"
 import { NotYet, QuietSection } from "./tabs/kit"
 import { sourceNotes } from "./text"
 
@@ -61,36 +62,5 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
         </>
       )}
     </QuietSection>
-  )
-}
-
-/** 一則一列：桌面標題在左、媒體・時間靠右；手機媒體・時間在上一行 */
-function NewsRow({ item, now }: { item: NewsItem; now: Date }) {
-  const outlet = outletLabel(item)
-  const when = relativeTime(item.published_at, now, item.date_only)
-  return (
-    <li className="relative flex flex-col-reverse gap-0.5 border-b border-rule py-2.5 hover:bg-hov sm:grid sm:grid-cols-[minmax(0,1fr)_auto] sm:items-baseline sm:gap-6">
-      {/* 連結撐滿整列（手機上整列都按得到）；標題本身滑過才畫底線（一整列標題都畫線太吵） */}
-      <a
-        href={item.url}
-        target="_blank"
-        rel="noopener noreferrer"
-        className="block text-base leading-snug break-words underline-offset-3 after:absolute after:inset-0 hover:underline focus-visible:underline"
-      >
-        {item.title}
-        <span className="sr-only">（{outlet}，另開新視窗）</span>
-      </a>
-      <p className="flex min-w-0 items-baseline gap-1 text-sm text-ink-2 sm:justify-end">
-        <span className="truncate">{outlet}</span>
-        {when && (
-          <>
-            <span aria-hidden>・</span>
-            <time dateTime={item.published_at} className="num shrink-0">
-              {when}
-            </time>
-          </>
-        )}
-      </p>
-    </li>
   )
 }

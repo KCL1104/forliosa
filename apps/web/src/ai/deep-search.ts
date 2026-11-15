@@ -1,5 +1,6 @@
 import type { ForliosaApi, Instrument } from "@/api/types"
 import { formatPercent, formatPrice } from "@/lib/format"
+import { usd, usDay, usTradeDate } from "@/lib/labels"
 import { normalize } from "./intent"
 import { DEEP_SEARCH_COST, type AiUsage, type Citation } from "./remote"
 
@@ -69,13 +70,20 @@ export async function buildLocalDeepReport(
   }
   const eps = financials?.income.eps ?? []
   const lastEps = [...eps.keys()].reverse().find((i) => typeof eps[i] === "number")
-  if (financials && lastEps !== undefined) business.push(`${financials.periods[lastEps]} 每股盈餘 ${eps[lastEps]} 元。`)
+  // 每股盈餘：台股寫「元」，美股（SEC）是美元，寫 US$
+  if (financials && lastEps !== undefined) {
+    business.push(`${financials.periods[lastEps]} 每股盈餘 ${inst.market === "US" ? `US$${eps[lastEps]}` : `${eps[lastEps]} 元`}。`)
+  }
   if (business.length) groups.push(["營運", business])
 
+  // 美股：價格寫 US$，日期是紐約的交易日（「11/13（美東）」；as_of 是紐約 16:00，台北已經是隔天）
+  const us = inst.market === "US"
+  const usDate = us && quote ? usTradeDate(quote.trade_date, quote.as_of) : null
+  const when = quote ? (usDate ? `${usDay(usDate)}` : quote.as_of ? `${day(quote.as_of)} ` : "") : ""
+  const closeText = quote ? (us ? usd(quote.price) : formatPrice(quote.price, inst.market, inst.type)) : ""
   const price: string[] = []
   if (quote) {
-    const when = quote.as_of ? `${day(quote.as_of)} ` : ""
-    price.push(`${when}收盤 ${formatPrice(quote.price, inst.market, inst.type)}${move(quote.change_pct) ? `，${move(quote.change_pct)}` : ""}。`)
+    price.push(`${when}收盤 ${closeText}${move(quote.change_pct) ? `，${move(quote.change_pct)}` : ""}。`)
   }
   if (overview?.pe != null) price.push(`本益比 ${overview.pe.toFixed(1)} 倍。`)
   if (overview?.dividend_yield != null) price.push(`殖利率 ${formatPercent(overview.dividend_yield, { signed: false })}。`)
@@ -87,7 +95,7 @@ export async function buildLocalDeepReport(
 
   if (groups.length === 0) return { text: `示範資料裡沒有${inst.name}可以整理的內容。`, citations: [] }
   const lead = [
-    quote ? `${inst.name}（${inst.code}）${quote.as_of ? `${day(quote.as_of)} ` : ""}收在 ${formatPrice(quote.price, inst.market, inst.type)}${move(quote.change_pct) ? `，${move(quote.change_pct)}` : ""}。` : `${inst.name}（${inst.code}）的整理如下。`,
+    quote ? `${inst.name}（${inst.code}）${when}收在 ${closeText}${move(quote.change_pct) ? `，${move(quote.change_pct)}` : ""}。` : `${inst.name}（${inst.code}）的整理如下。`,
     "這份整理用的是示範資料。",
   ].join("")
   const body = groups.slice(0, 3).map(([title, points]) => [title, ...points.map((p) => `・${p}`)].join("\n"))

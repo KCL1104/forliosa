@@ -5,6 +5,7 @@
  */
 import { dayWord } from "@/lib/as-of"
 import { inText } from "@/lib/cjk"
+import { usDay, usTradeDate } from "@/lib/labels"
 import type {
   DividendRecord,
   Holding,
@@ -63,7 +64,7 @@ export const isListedStock = (s: Pick<StockData, "market" | "type">) => s.market
 
 /**
  * 「我的成本在河流圖哪裡」只在畫得出河流圖時問：台股個股、有本益比的倍數帶、現在有本益比。
- * 美股沒有可商用的行情，估值分頁沒有河流圖，不問。
+ * 美股有收盤價，但沒有歷史本益比的序列，估值分頁沒有河流圖，不問。
  */
 export const hasRiver = (s: Pick<StockData, "market" | "type" | "valuation" | "overview">) =>
   s.type === "stock" && s.market !== "US" && (s.valuation?.per_multiples.length ?? 0) > 0 && s.overview?.pe != null && (s.overview?.eps_ttm ?? 0) > 0
@@ -98,6 +99,25 @@ export function dayLead(asOf: string | null | undefined, today: string): string 
   return w === "今日" ? "今天" : `${w} `
 }
 
+/** 美股這一次漲跌屬於紐約的哪一天（`why.trade_date`、報價的 `trade_date`，舊版後端由 `as_of` 換算） */
+function usMoveDate(s: StockData): string | null {
+  if (s.market !== "US") return null
+  return usTradeDate(s.why?.trade_date ?? s.quote?.trade_date, s.why?.as_of ?? s.quote?.as_of)
+}
+
+/**
+ * 「台積電今天」「Apple 11/13（美東）」：美股的漲跌是紐約那一天的（台北已經是隔天），不說「今天」。
+ * 名稱和日期之間空一格。
+ */
+function moveLead(s: StockData): string {
+  const day = usMoveDate(s)
+  return day ? `${inText(s.name, "start").trimEnd()} ${usDay(day)}` : `${inText(s.name, "start")}今天`
+}
+
+/** 加碼的單位：台股 1 張（1,000 股），美股以股計、問 10 股 */
+const addUnit = (market: Market) => (market === "US" ? { shares: 10, text: "10 股" } : { shares: 1000, text: "1 張" })
+const addQuestion = (market: Market) => `加碼 ${addUnit(market).text}，均價會變多少？`
+
 export function ledgerSuggestions({ holdings, summary }: LedgerData, today: string): Suggestion[] {
   if (holdings.length === 0) {
     return [{ kind: "onboard", text: "怎麼記第一筆？" }]
@@ -118,14 +138,15 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
   const held = !!s.position
   if (s.why?.show) {
     const d = direction(pct)
-    out.push({ kind: "why_move", symbol: s.symbol, text: `${inText(s.name, "start")}今天為什麼${d === "down" ? "跌" : "漲"}？` })
+    out.push({ kind: "why_move", symbol: s.symbol, text: `${moveLead(s)}為什麼${d === "down" ? "跌" : "漲"}？` })
   }
   if (isListedStock(s)) out.push({ kind: "foreign_flow", symbol: s.symbol, text: FOREIGN_FLOW_QUESTION })
   if (held) {
     const next = s.position?.upcoming_dividend
     if (next && daysBetween(today, next.ex_dividend_date) <= 31) out.push({ kind: "next_dividend", symbol: s.symbol, text: "這次除息我可以領多少？" })
     if (hasRiver(s)) out.push({ kind: "cost_on_river", symbol: s.symbol, text: "我的成本在河流圖哪裡？" })
-    if (s.market !== "US") out.push({ kind: "add_one_lot", symbol: s.symbol, text: "加碼 1 張，均價會變多少？" })
+    // 美股以股計（問 10 股），要有收盤價才算得出來
+    if (s.market !== "US" || s.quote) out.push({ kind: "add_one_lot", symbol: s.symbol, text: addQuestion(s.market) })
   } else {
     if (s.type === "stock" && (s.overview?.pe ?? null) !== null) out.push({ kind: "is_expensive", symbol: s.symbol, text: "現在的本益比算貴嗎？" })
     if ((s.overview?.last_cash_dividend ?? 0) > 0) out.push({ kind: "if_hold_dividend", symbol: s.symbol, text: "持有 1 張一年能領多少股利？" })
@@ -249,24 +270,30 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
   }
 }
 
-function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today: string, asOf?: string | null): Answer | null {
+function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today: string, quoteAsOf?: string | null): Answer | null {
   const link = (tab: string, label: string): AnswerLink => ({ label, to: "/stock/$symbol", params: { symbol: s.symbol }, search: { tab } })
   const listed = s.market === "TWSE"
   const us = s.market === "US"
+  // 回答下面的「11/12 收盤」是台北的日期：美股的收盤（紐約 16:00）在台北已經是隔天，不放這一行，日期寫在句子裡（「11/13（美東）」）
+  const asOf = us ? null : quoteAsOf
   const currency = us ? "USD" : "TWD"
   const price = (n: number) => priceText(n, s.market)
   const cash = (n: number) => (privacy ? MASK : formatMoney(n, { currency }))
   switch (kind) {
     case "why_move": {
+      // 美股：紐約那一天的漲跌（不說「今天」）；沒有法人與籌碼資料，只連到事件（SEC 申報）
+      const lead = moveLead(s)
       if (!s.why?.show) {
-        return { text: `${inText(s.name, "start")}今天的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
+        if (us) return { text: `${lead}的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量或事件。`, links: [link("events", "看事件")], asOf }
+        return { text: `${lead}的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }
       }
       return {
-        text: `${inText(s.name, "start")}今天${pctWords(s.quote?.change_pct)}：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
+        text: `${lead}${pctWords(s.quote?.change_pct)}：${s.why.headline ?? s.why.reasons[0]?.text ?? ""}。`,
         rows: s.why.reasons.map((r) => ({ label: r.text, value: "" })),
-        links: [link("chips", listed ? "看籌碼" : "看法人買賣"), link("events", "看事件")],
-        asOf: s.why.as_of ?? asOf,
-        followUps: s.position ? ["加碼 1 張，均價會變多少？"] : ["現在的本益比算貴嗎？"],
+        links: us ? [link("events", "看事件")] : [link("chips", listed ? "看籌碼" : "看法人買賣"), link("events", "看事件")],
+        asOf: us ? null : (s.why.as_of ?? asOf),
+        // 美股沒有本益比資料：沒持有時不追問貴不貴
+        followUps: s.position ? [addQuestion(s.market)] : us ? [] : ["現在的本益比算貴嗎？"],
       }
     }
     case "next_dividend": {
@@ -285,8 +312,8 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
       const eps = s.overview?.eps_ttm
       const pos = s.position
       const cost = pos ? `你的均價 ${privacy ? MASK : price(pos.avg_cost)}。` : ""
-      // 畫不出河流圖時照實說（美股沒有可商用的行情；台股缺倍數帶或本益比），不引用不存在的圖
-      if (us) return { text: `${cost}美股沒有報價，算不出本益比，也沒有河流圖。`, links: [link("financials", "看財務")], asOf }
+      // 畫不出河流圖時照實說（美股沒有歷史本益比的資料；台股缺倍數帶或本益比），不引用不存在的圖
+      if (us) return { text: `${cost}美股沒有歷史本益比的資料，所以沒有河流圖。每股盈餘在財務分頁。`, links: [link("financials", "看財務")], asOf }
       if (!pos || !eps || eps <= 0) return { text: "近四季 EPS ≤ 0，本益比沒有意義，可以改看股價淨值比。", links: [link("valuation", "看估值")], asOf }
       if (!hasRiver(s)) return { text: `${cost}這檔還沒有本益比河流圖。`, links: [link("valuation", "看估值")], asOf }
       const costPe = pos.avg_cost / eps
@@ -303,22 +330,27 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
     case "add_one_lot": {
       const pos = s.position
       const now = s.quote?.price
-      if (!pos || !now || us) return null
-      const next = (pos.avg_cost * pos.quantity + now * 1000) / (pos.quantity + 1000)
+      if (!pos || !now) return null
+      // 台股 1 張（1,000 股）；美股以股計，算 10 股，收盤寫紐約的日期（「11/13（美東）收盤價 US$356.27」）
+      const add = addUnit(s.market)
+      const next = (pos.avg_cost * pos.quantity + now * add.shares) / (pos.quantity + add.shares)
+      const usDate = us ? usTradeDate(s.quote?.trade_date, s.quote?.as_of) : null
+      const close = usDate ? ` ${usDay(usDate)}收盤價` : "收盤價"
       return {
-        text: `以收盤價 ${price(now)}加碼 1 張，均價會從 ${privacy ? MASK : price(pos.avg_cost)}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}。`,
+        text: `以${close} ${price(now)}${us ? " " : ""}加碼 ${add.text}，均價會從 ${privacy ? MASK : price(pos.avg_cost)}${us ? " " : ""}變成約 ${privacy ? MASK : price(Math.round(next * 100) / 100)}。`,
         rows: [
           { label: "現在持有", value: privacy ? MASK : formatQuantity(pos.quantity, "lot", s.market) },
-          { label: "加碼後", value: privacy ? MASK : formatQuantity(pos.quantity + 1000, "lot", s.market) },
+          { label: "加碼後", value: privacy ? MASK : formatQuantity(pos.quantity + add.shares, "lot", s.market) },
         ],
-        followUps: [`買 ${s.code} 1 張 ${now}`],
+        followUps: [`買 ${s.code} ${add.text} ${now}`],
         asOf,
       }
     }
     case "is_expensive": {
       const pe = s.valuation?.current.per ?? s.overview?.pe ?? null
       const pct = s.valuation?.current.per_percentile_5y ?? null
-      if (pe === null && us) return { text: "美股沒有報價，算不出本益比。", links: [link("financials", "看財務")], asOf }
+      // 美股有收盤價，但沒有歷史本益比的資料：看不出現在比過去貴或便宜；每股盈餘（SEC）在財務分頁
+      if (pe === null && us) return { text: "美股沒有歷史本益比的資料，看不出現在貴不貴。每股盈餘在財務分頁。", links: [link("financials", "看財務")], asOf }
       if (pe === null) return { text: "這檔沒有可用的本益比（ETF 或近四季虧損）。可以看殖利率與股價淨值比。", links: [link("valuation", "看估值")], asOf }
       const band = bandOf(pe, s.valuation?.per_multiples ?? [])
       return {
@@ -368,7 +400,7 @@ export function fallbackAnswer(text: string, ctx: AiContext): Answer {
     const tab = (k: string, label: string) => {
       if (!links.some((l) => l.search?.tab === k)) links.push({ label, to: "/stock/$symbol", params: { symbol: s.symbol }, search: { tab: k } })
     }
-    // 美股沒有估值資料（沒有可商用的行情）：本益比相關的問題連到財務（SEC 的每股盈餘）
+    // 美股沒有估值序列（估值分頁只有空狀態）：本益比相關的問題連到財務（SEC 的每股盈餘）
     if (/(本益比|估值|貴|便宜|河流)/.test(t)) {
       if (s.market === "US") tab("financials", "看財務")
       else tab("valuation", "看估值")
