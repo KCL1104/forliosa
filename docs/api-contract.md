@@ -1498,7 +1498,7 @@
   "pending": 2,                    // 還沒回補（或到了該再問的時候）的代號數
   "first_day": "2024-07-01",       // EQUS.SUMMARY 最早的一天
   "stored_through": "2026-11-13",  // 已存的最新美股交易日（紐約日期）；還沒有時 null
-  "symbols": { "done": 212, "not_found": 3, "error": 0 }
+  "symbols": { "done": 212, "untracked": 4, "not_found": 3, "error": 0 }
 }
 ```
 
