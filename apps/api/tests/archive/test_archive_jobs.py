@@ -141,3 +141,24 @@ def test_an_empty_answer_keeps_the_dataset_date(engine, market):
         archiver._status("tpex-openapi/exright", None, 0)
         row = db.get(DatasetStatus, "tpex-openapi/exright")
         assert (row.data_date, row.rows) == (date(2026, 11, 11), 0)
+
+
+def test_off_day_run_reads_only_the_files_that_change_on_non_trading_days(engine, market):
+    """2026-11-15: 重大訊息 files are replaced every calendar day (the file dated D holds D-1's announcements) and
+    Friday's MI_INDEX is posted after the 21:40 run. The weekend / holiday run reads only those (plus the other event
+    files of the same jobs), and stores Friday's announcements and indices."""
+    from forliosa.models import IndexDaily
+
+    fetcher = FakeFetcher()
+    with Session(engine) as db:
+        results = Archiver(db, fetcher, "commercial", now_fn=lambda: NOW).run(["everyday"])
+        assert [r.name for r in results] == ["twse events", "tpex events", "twse indices MI_INDEX"]
+        assert not any(r.error for r in results), [(r.name, r.error) for r in results]
+        assert any(u.endswith("/opendata/t187ap04_L") for u in fetcher.calls)
+        assert any(u.endswith("/mopsfin_t187ap04_O") for u in fetcher.calls)
+        assert any(u.endswith("/exchangeReport/MI_INDEX") for u in fetcher.calls)
+        # nothing else: no prices, valuations, margin, revenue … on a day without a session
+        assert not any(u.endswith(("/STOCK_DAY_ALL", "/BWIBBU_ALL", "/MI_MARGN", "/t187ap05_L")) for u in fetcher.calls)
+        markets = set(db.scalars(select(MarketEvent.symbol).where(MarketEvent.type == "material_info")))
+        assert any(s.endswith(".TW") for s in markets) and any(s.endswith(".TWO") for s in markets)
+        assert db.scalar(select(func.count()).select_from(IndexDaily).where(IndexDaily.market == "TWSE")) > 0

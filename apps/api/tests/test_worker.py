@@ -92,7 +92,10 @@ def test_evening_and_weekly_runs_include_the_new_groups():
 
     assert MORNING_GROUPS == ["twse", "tpex", "nav"]
     assert set(WEEKLY_GROUPS) == {"tdcc", "weekly"}
-    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) | set(MONTHLY_GROUPS) == set(JOB_GROUPS)
+    from forliosa.worker import OFF_DAY_GROUPS
+
+    assert set(EVENING_GROUPS) | set(WEEKLY_GROUPS) | set(SEC_GROUPS) | set(MONTHLY_GROUPS) | set(OFF_DAY_GROUPS) \
+        == set(JOB_GROUPS)
     # SEC EDGAR runs every day (US filings do not follow the Taiwan trading calendar), after the US close
     job = next(j for j in Worker(md=object()).jobs if j.name == "sec_archive")  # type: ignore[arg-type]
     from datetime import datetime
@@ -266,3 +269,27 @@ def test_daily_briefings_job_writes_through_the_worker(engine, market, monkeypat
     worker = Worker(md=market, now_fn=lambda: clock)
     asyncio.run(worker.daily_briefings())
     assert seen == {"now": clock, "md": market}
+
+
+def test_off_day_archive_runs_on_weekends_and_holidays_only():
+    """2026-11-15: the 重大訊息 file dated D holds D-1's announcements and changes every calendar day; reading it
+    only on trading days lost Friday's and Saturday's announcements (the market page stayed on 11/12 all weekend)."""
+    from datetime import datetime
+
+    from forliosa.timeutil import TAIPEI
+    from forliosa.worker import OFF_DAY_GROUPS, Worker
+
+    assert OFF_DAY_GROUPS == ["everyday"]
+    jobs = {j.name: j for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    off, morning = jobs["daily_archive_off_day"], jobs["daily_archive_morning"]
+    at = lambda *a: datetime(*a, tzinfo=TAIPEI)  # noqa: E731
+    # Saturday 11/14 and Sunday 11/15: 08:10 and 21:40; the trading-day morning run does not fire
+    assert off.due(at(2026, 11, 14, 8, 15), None) and not morning.due(at(2026, 11, 14, 8, 15), None)
+    assert off.due(at(2026, 11, 14, 21, 45), at(2026, 11, 14, 8, 15))
+    assert off.due(at(2026, 11, 15, 8, 15), at(2026, 11, 14, 21, 45))
+    assert not off.due(at(2026, 11, 14, 8, 5), None)
+    # a Saturday 21:40 slot the loop reaches after midnight still runs (it is about Saturday)
+    assert off.due(at(2026, 11, 15, 0, 30), at(2026, 11, 14, 8, 15))
+    # Friday 11/13 is a trading day: the twse / tpex groups already read the files, the off-day run stays quiet
+    assert not off.due(at(2026, 11, 13, 8, 15), None) and morning.due(at(2026, 11, 13, 8, 15), None)
+    assert not off.due(at(2026, 11, 14, 0, 30), at(2026, 11, 13, 8, 15))

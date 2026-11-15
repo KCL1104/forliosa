@@ -121,6 +121,9 @@ EVENING_GROUPS = ["twse", "tpex", "companies", "financials", "taifex", "cbc", "n
 # 08:10: today's reference prices and notices, plus a second look at the NAV file (it only holds the latest NAV of each
 # fund, so one posted after the 21:40 run would otherwise be lost when the next evening's file replaces it).
 MORNING_GROUPS = ["twse", "tpex", "nav"]
+# Non-trading days (weekends, holidays) at 08:10 and 21:40: the announcement files change every calendar day and
+# Friday's indices are posted after the 21:40 run (see ``Archiver.run``, group "everyday").
+OFF_DAY_GROUPS = ["everyday"]
 PRICE_BACKFILL_SECONDS = 600
 PRICE_BACKFILL_REFUSED_SECONDS = 1800
 WEEKLY_GROUPS = ["tdcc", "weekly"]
@@ -251,6 +254,9 @@ class Worker:
                 lambda: self.archive(["twse", "tpex"])),
             Job("daily_archive_evening", daily_at(time(21, 40), only_if=lambda n: is_tw_trading_day(n.date())),
                 lambda: self.archive(EVENING_GROUPS)),
+            Job("daily_archive_off_day", daily_at(time(8, 10), time(21, 40),
+                                                  only_if=lambda n: not is_tw_trading_day(n.date())),
+                lambda: self.archive(OFF_DAY_GROUPS)),
             Job("weekly_archive", weekly_at(5, time(10, 0)), self.weekly_archive),
             Job("sec_archive", daily_at(time(7, 50)), lambda: self.archive(SEC_GROUPS)),
             Job("ai_retention", daily_at(time(4, 20)), self.ai_retention),
@@ -300,7 +306,7 @@ class Worker:
             load_official_calendar(db)
         failed = [r.name for r in results if r.error]
         log.info("archive %s: %d datasets, %d failed %s", ",".join(groups), len(results), len(failed), failed or "")
-        if {"twse", "tpex"} & set(groups):  # ex-dividend notices are refreshed with these groups
+        if {"twse", "tpex", "everyday"} & set(groups):  # ex-dividend notices are refreshed with these groups
             await self.auto_dividends()
 
     async def auto_dividends(self) -> None:

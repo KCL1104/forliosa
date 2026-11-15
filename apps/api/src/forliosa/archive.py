@@ -156,7 +156,8 @@ MARGIN_READY = time(21, 0)
 # sec (07:50 daily): SEC EDGAR facts and filings of tracked US stocks; monthly (10th and 25th): 董監事持股餘額明細
 # (company ↔ company links), TDCC 集保股東戶數 and the ESG product-category text; nav (21:40, and 08:10 to catch NAVs
 # published after the evening run): 證券期貨局's 證券投資信託基金每日淨值 of listed / OTC ETFs.
-JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "nav", "tdcc", "weekly", "monthly", "sec")
+JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "nav", "tdcc", "weekly", "monthly", "sec",
+              "everyday")
 OFFICIAL_CLOSE_SOURCES = ("twse-openapi", "tpex-openapi")  # prices_daily rows from the exchanges' OpenAPIs
 TPEX50 = "TPEX50"
 SEC_DISABLED = "sec edgar（未設定 SEC_CONTACT_EMAIL，略過）"
@@ -911,6 +912,14 @@ class Archiver:
                              ("tpex revenue", self.tpex_revenue), ("tpex indices", self.tpex_indices),
                              ("tpex exright", self.tpex_exright),
                              ("tpex tpex50_constituents", self.tpex_constituents)):
+                self._run(name, fn)
+        if "everyday" in groups:
+            # Non-trading days (``worker.OFF_DAY_GROUPS``): 重大訊息 (t187ap04_L / mopsfin_t187ap04_O) is replaced every
+            # calendar day — the file dated D holds D-1's announcements, weekends included — and MI_INDEX posts a
+            # session's indices after the 21:40 run. Only reading them on trading days lost every Friday's and
+            # Saturday's announcements and left the market page on Thursday's index all weekend (2026-11-15).
+            for name, fn in (("twse events", self.twse_events), ("tpex events", self.tpex_events),
+                             ("twse indices MI_INDEX", self.twse_indices)):
                 self._run(name, fn)
         if "companies" in groups:
             for name, fn in (("twse dividends t187ap45_L", self.twse_dividends),
