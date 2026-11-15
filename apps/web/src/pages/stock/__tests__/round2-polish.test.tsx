@@ -74,11 +74,16 @@ describe("麵包屑的市場與產業", () => {
     expect(marketLine(await api.getInstrument("NVDA"))).toBe("美股・半導體業")
     expect(marketLine(await api.getInstrument("VOO"))).toBe("美股・ETF")
   })
-  it("⌘K 的搜尋結果用同一套（英文產業不直接印出來）；還沒有收盤價的美股寫「美股・還沒有收盤價」", () => {
+  it("⌘K 的搜尋結果用同一套（英文產業不直接印出來）；美股收盤價關著時美股寫「美股・沒有報價」，開著時只寫「美股」（不承諾會補上）", () => {
     expect(marketLine({ market: "US", type: "stock", industry: "Software—Infrastructure" })).toBe("美股")
-    expect(marketTag({ market: "US", has_quote: false })).toBe("美股・還沒有收盤價")
-    expect(marketTag({ market: "US", has_quote: true })).toBe("美股")
-    expect(marketTag({ market: "TWSE" })).toBe("上市")
+    // 開著（served）：合約上美股一律 has_quote=true；就算拿到 false 也不寫「還沒有收盤價」
+    expect(marketTag({ market: "US", has_quote: true }, true)).toBe("美股")
+    expect(marketTag({ market: "US", has_quote: false }, true)).toBe("美股")
+    // 關著：has_quote=false，寫「沒有報價」
+    expect(marketTag({ market: "US", has_quote: false }, false)).toBe("美股・沒有報價")
+    expect(marketTag({ market: "US", has_quote: true }, false)).toBe("美股")
+    expect(marketTag({ market: "TWSE" }, false)).toBe("上市")
+    expect(marketTag({ market: "TWSE" }, true)).toBe("上市")
   })
 })
 

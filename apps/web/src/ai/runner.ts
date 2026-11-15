@@ -119,6 +119,8 @@ export function useAiRunner(ctx: AiContext) {
     if (intent.kind === "trade") {
       const shares = sharesOf(intent.quantity, intent.unit, isUS)
       let price = intent.price
+      // 用了美股的收盤價、沒有寫日期：成交日記成那個收盤的紐約交易日（和「先用 11/13（美東）的收盤價」同一天），不是台北的今天
+      let closeDate: string | null = null
       if (price === null) {
         let q: Quote
         try {
@@ -135,6 +137,7 @@ export function useAiRunner(ctx: AiContext) {
         price = q.price
         // 美股寫 US$ 與紐約的日期（「先用 11/13（美東）的收盤價 US$356.27」）；台股照舊
         const usDate = isUS ? usTradeDate(q.trade_date, q.as_of) : null
+        closeDate = usDate
         notes.push(
           isUS
             ? `沒有寫價格，先用${usDate ? ` ${usDay(usDate)}的` : "最近"}收盤價 ${usd(q.price)}。`
@@ -147,7 +150,7 @@ export function useAiRunner(ctx: AiContext) {
         const held = holdings.find((h) => h.symbol === inst.symbol)?.quantity ?? 0
         if (held < shares) notes.push(`你只有 ${formatQuantity(held, "lot", inst.market)}，比要賣的少，這筆不能入帳。`)
       }
-      input = { account_id: account.id, symbol: inst.symbol, type: intent.side, trade_date: intent.date ?? today, quantity: shares, price }
+      input = { account_id: account.id, symbol: inst.symbol, type: intent.side, trade_date: intent.date ?? closeDate ?? today, quantity: shares, price }
     } else {
       input = { account_id: account.id, symbol: inst.symbol, type: "cash_dividend", trade_date: intent.date ?? today, quantity: null, price: null, amount: intent.amount }
       // 台股股利已在除息日自動入帳時：簽名後以使用者記的這筆為準（自動那筆會移除，不會重複）

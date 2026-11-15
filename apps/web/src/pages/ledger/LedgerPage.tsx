@@ -23,8 +23,7 @@ import { CustomizeButton } from "./CustomizeButton"
 import { HoldingsView } from "./HoldingsView"
 import { useLedgerPrefs } from "./ledger-prefs"
 import { useLedgerCounts } from "./use-ledger-counts"
-import { ledgerAsOf } from "@/lib/as-of"
-import { useClose } from "@/hooks/use-close"
+import { useLedgerClose } from "@/hooks/use-close"
 import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
@@ -252,8 +251,9 @@ function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView 
   const holdings = useHoldings()
   const trend = useTrend()
   const privacy = usePrefs((s) => s.privacyMode)
-  // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（盤中、今天的還沒公布時多半句說明），「今日」只在收盤價是今天的時候寫
-  const close = useClose(summary?.as_of)
+  // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（盤中、今天的還沒公布時多半句說明），「今日」只在收盤價是今天的時候寫。
+  // 只有美股有價格時是紐約的交易日（「11/13 收盤（美東）」「11/13」），不套台股的說明
+  const close = useLedgerClose()
   if (!summary) return <HeroSkeleton />
   const up = (trend.values.at(-1) ?? 0) >= (trend.values[0] ?? 0)
   const missingReason = trendMissingReason(trend.notes)
@@ -266,7 +266,7 @@ function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView 
       <div className="min-w-0">
         <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
           <b className="text-base font-medium text-ink">總資產</b>
-          <span className="num whitespace-nowrap">{ledgerAsOf(close.state, summary.as_of)}</span>
+          <span className="num whitespace-nowrap">{close.label}</span>
           {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
         </p>
         <BigTotal value={summary.market_value} />

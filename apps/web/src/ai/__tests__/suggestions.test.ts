@@ -144,6 +144,43 @@ describe("規則版回答：只用使用者自己的資料，隱私模式遮金�
   })
 })
 
+describe("帳本的「誰拖累／誰賺最多」說的是哪一天（美股的收盤是紐約另一天的）", () => {
+  /** 紐約 11/13（五）的收盤：as_of 是紐約 16:00＝台北 11/14 05:00 */
+  const usSummary = { ...summary(), as_of: "2026-11-14T05:00:00+08:00" } as PortfolioSummary
+  const apple = h({ symbol: "AAPL", code: "AAPL", name: "Apple", market: "US", currency: "USD", price: 356.27, price_date: "2026-11-13", day_change: -4200, day_change_pct: -0.021, weight: 0.1 })
+  const nvidia = h({ symbol: "NVDA", code: "NVDA", name: "輝達", market: "US", currency: "USD", price: 190, price_date: "2026-11-13", day_change: 3100, day_change_pct: 0.012, weight: 0.1 })
+
+  it("只有美股：問句與回答寫「11/13（美東）」，不寫「今天」或台北的「11/14」；回答下面不放台北日期的「收盤」", () => {
+    for (const today of ["2026-11-14", "2026-11-16"]) {
+      const s = ledgerSuggestions({ holdings: [apple, nvidia], summary: usSummary }, today)
+      expect(s[0]).toEqual({ kind: "drag", text: "11/13（美東）誰拖累了我的報酬？" })
+      const ctx: AiContext = { route: "ledger", ledger: { holdings: [apple, nvidia], summary: usSummary } }
+      const a = answerFor("drag", { ctx, privacy: false, today })!
+      expect(a.text).toBe("11/13（美東）拖累最多的是 Apple（下跌 2.10%）。")
+      expect(a.asOf ?? null).toBeNull()
+      expect(answerFor("lift", { ctx, privacy: false, today })!.text).toBe("11/13（美東）貢獻最多的是輝達（上漲 1.20%）。")
+    }
+    // 週二早上（台北）：紐約週一 11/16 的收盤，也不是「今天」
+    const tue = { ...summary(), as_of: "2026-11-17T05:00:00+08:00" } as PortfolioSummary
+    const mon = [{ ...apple, price_date: "2026-11-16" }]
+    expect(ledgerSuggestions({ holdings: mon, summary: tue }, "2026-11-17")[0]!.text).toBe("11/16（美東）誰拖累了我的報酬？")
+  })
+
+  it("台股和美股都有：「今天」只算台股；美股的漲跌是紐約另一天的，不算進這一句", () => {
+    const tsmc = h({ day_change: 10_000, day_change_pct: 0.0101 })
+    // 只有美股下跌、台股上漲：問「今天誰幫我賺最多」，不問誰拖累
+    const s = ledgerSuggestions({ holdings: [apple, tsmc], summary: summary() }, TODAY)
+    expect(s[0]).toEqual({ kind: "lift", text: "今天誰幫我賺最多？" })
+    const ctx: AiContext = { route: "ledger", ledger: { holdings: [apple, nvidia, tsmc], summary: summary() } }
+    const lift = answerFor("lift", { ctx, privacy: false, today: TODAY })!
+    expect(lift.text).toBe("今天貢獻最多的是台積電（上漲 1.01%）。")
+    expect(lift.rows!.map((r) => r.label)).toEqual(["台積電"])
+    expect(answerFor("drag", { ctx, privacy: false, today: TODAY })!.text).toBe("今天沒有持股下跌。")
+    // 只有美股有漲跌：「今天誰…」都不問
+    expect(ledgerSuggestions({ holdings: [apple, h({ day_change: 0, day_change_pct: 0 })], summary: summary() }, TODAY).some((x) => x.kind === "drag" || x.kind === "lift")).toBe(false)
+  })
+})
+
 describe("「我的成本在河流圖哪裡」：只在畫得出河流圖時問；價格與成本都帶單位", () => {
   const base = { symbol: "2330.TW", code: "2330", name: "台積電", market: "TWSE" as const, type: "stock" as const }
   const held = { avg_cost: 692.61, quantity: 1500 } as never

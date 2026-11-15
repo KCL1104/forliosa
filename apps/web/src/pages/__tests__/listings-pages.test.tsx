@@ -9,7 +9,7 @@ import { useUi } from "@/app/ui-store"
 import { createAppRouter } from "@/router"
 
 /**
- * 商品清單補上全部台股 ETF 與 SEC 的美股（待決定事項 1-4、1-5）：還沒有收盤價的美股搜尋結果標「還沒有收盤價」，
+ * 商品清單補上全部台股 ETF 與 SEC 的美股（待決定事項 1-4、1-5）：搜尋結果的美股只標「美股」（收盤價關著時「美股・沒有報價」），
  * 只有英文名的美股（MSFT）與收盤檔裡的 ETF（00981A）個股頁都打得開。
  * 美股的收盤（Databento，產品負責人 2026-11-15）只抓有人觀察或持有的代號：還沒加入的照實說加入後會補上。
  */
@@ -64,8 +64,9 @@ function renderApp(path: string) {
   return router
 }
 
-describe("搜尋：還沒有收盤價的美股標「還沒有收盤價」，收盤檔的 ETF 搜得到", () => {
-  it("輸入 tsla：Tesla 那一列寫「美股・還沒有收盤價」；按下去打開個股頁", async () => {
+describe("搜尋：美股收盤價開著時美股只標「美股」，關著時標「美股・沒有報價」；收盤檔的 ETF 搜得到", () => {
+  it("輸入 tsla（還沒抓過收盤）：開著時 has_quote 一律 true，那一列只寫「美股」——還沒有收盤價只在個股頁價格那一格說；按下去打開個股頁", async () => {
+    usCloses(true)
     const user = userEvent.setup()
     const router = renderApp("/")
     await user.click(await screen.findByRole("button", { name: "搜尋股票" }, T))
@@ -73,10 +74,24 @@ describe("搜尋：還沒有收盤價的美股標「還沒有收盤價」，收�
     await user.type(within(dialog).getByRole("combobox"), "tsla")
     const hit = await within(dialog).findByRole("option", { name: /TSLA/ }, T)
     expect(hit.textContent).toContain("Tesla, Inc.")
-    expect(hit.textContent).toContain("美股・還沒有收盤價")
-    expect(hit.textContent).not.toContain("沒有報價")
+    expect(hit.textContent).toMatch(/美股$/)
+    expect(hit.textContent).not.toMatch(/還沒有收盤價|沒有報價/)
     await user.click(hit)
     await waitFor(() => expect(router.state.location.pathname).toBe("/stock/TSLA"))
+  })
+
+  it("美股收盤價關著（後端的美股 has_quote=false）：寫「美股・沒有報價」，不寫「還沒有收盤價」（不承諾會補上）", async () => {
+    usCloses(false)
+    const search = api.searchInstruments
+    vi.spyOn(api, "searchInstruments").mockImplementation(async (q) => (await search(q)).map((i) => (i.market === "US" ? { ...i, has_quote: false } : i)))
+    const user = userEvent.setup()
+    renderApp("/")
+    await user.click(await screen.findByRole("button", { name: "搜尋股票" }, T))
+    const dialog = await screen.findByRole("dialog", { name: "搜尋股票與功能" }, T)
+    await user.type(within(dialog).getByRole("combobox"), "tsla")
+    const hit = await within(dialog).findByRole("option", { name: /TSLA/ }, T)
+    await waitFor(() => expect(hit.textContent).toContain("美股・沒有報價"))
+    expect(hit.textContent).not.toContain("還沒有收盤價")
   })
 
   it("輸入 00981：主動式 ETF 那一列寫「上市・ETF」", async () => {

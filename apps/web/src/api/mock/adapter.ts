@@ -361,7 +361,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     return s
   }
   const visible = () => INSTRUMENTS.filter((i) => scenario === "stress" || i !== STRESS_INSTRUMENT)
-  /** 商用模式沒有收盤價的美股（只有 SEC 代號表認得、模擬還沒抓到收盤價的）：沒有報價、`has_quote: false` */
+  /**
+   * 商用模式沒有收盤價的美股（只有 SEC 代號表認得、模擬還沒抓到收盤價的）：`/quote` 404。
+   * 和合約一樣，美股收盤價開著時 `has_quote` 一律是 true（搜尋結果分不出還沒抓到的）
+   */
   const noQuote = (s: MockInstrumentSpec) => commercial && s.market === "US" && !hasUsCloses(s)
   /** 商用模式有 Databento 收盤價的美股：日線是紐約的交易日（最後一根是 `US_SESSION`） */
   const usPriced = (s: MockInstrumentSpec) => commercial && hasUsCloses(s)
@@ -370,7 +373,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const priceSource = (s: MockInstrumentSpec) => (s.market === "US" ? DATABENTO_ATTRIBUTION : sourceOf(`${s.market === "TPEX" ? "tpex" : "twse"}-openapi/price`))
   const strip = (s: MockInstrumentSpec) => ({
     symbol: s.symbol, code: s.code, name: s.name, market: s.market, type: s.type, currency: s.currency, industry: s.industry,
-    has_quote: !noQuote(s),
+    // mock 的商用模式模擬美股收盤價開著（顯名清單有 Databento）、個人模式是示範資料：都有報價
+    has_quote: true,
   })
   /** 名稱的出處（沒有其他公司資料時）：收盤檔的 ETF、SEC 的代號表 */
   const listingSources = (s: MockInstrumentSpec): string[] =>

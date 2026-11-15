@@ -18,6 +18,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { defaultAccount } from "@/lib/default-account"
 import { formatDateShort, formatPrice, formatQuantity } from "@/lib/format"
 import { marketTag, usCloseLabel, usd, usTradeDate } from "@/lib/labels"
+import { useUsClosesServed } from "@/pages/stock/text"
 import { marketOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
@@ -152,6 +153,7 @@ function PickStep({
   const holdings = useHoldings()
   const watch = useWatchlist()
   const search = useInstrumentSearch(q)
+  const served = useUsClosesServed()
   const results = query ? (search.data ?? []) : []
   const quoted = results.filter((i) => i.has_quote !== false).map((i) => i.symbol)
   const quotes = useQuery({
@@ -172,17 +174,17 @@ function PickStep({
   const held = new Map<string, Holding>()
   for (const h of holdings.data ?? []) if (!held.has(h.symbol)) held.set(h.symbol, h)
   const heldChoices: Choice[] = [...held.values()].map((h) => ({
-    symbol: h.symbol, code: h.code, name: h.name, market: h.market, tag: marketTag(h), price: h.price, pct: h.day_change_pct, instrument: fromHolding(h),
+    symbol: h.symbol, code: h.code, name: h.name, market: h.market, tag: marketTag(h, served), price: h.price, pct: h.day_change_pct, instrument: fromHolding(h),
   }))
   const watchChoices: Choice[] = (watch.data ?? [])
     .filter((w) => !held.has(w.symbol))
     .map((w) => {
       const market = marketOf(w.symbol)
-      return { symbol: w.symbol, code: w.symbol, name: w.name, market, tag: marketTag({ market }), price: w.quote?.price ?? null, pct: w.quote?.change_pct ?? null }
+      return { symbol: w.symbol, code: w.symbol, name: w.name, market, tag: marketTag({ market }, served), price: w.quote?.price ?? null, pct: w.quote?.change_pct ?? null }
     })
   const quoteOf = new Map((quotes.data ?? []).map((x) => [x.symbol, x]))
   const resultChoices: Choice[] = results.map((i) => ({
-    symbol: i.symbol, code: i.code, name: i.name, market: i.market, tag: marketTag(i), price: quoteOf.get(i.symbol)?.price ?? null, pct: quoteOf.get(i.symbol)?.change_pct ?? null, instrument: i,
+    symbol: i.symbol, code: i.code, name: i.name, market: i.market, tag: marketTag(i, served), price: quoteOf.get(i.symbol)?.price ?? null, pct: quoteOf.get(i.symbol)?.change_pct ?? null, instrument: i,
   }))
   const groups: { heading: string; items: Choice[] }[] = query
     ? [{ heading: "搜尋結果", items: resultChoices }]
@@ -293,6 +295,7 @@ function DetailsStep({
   const remove = useDeleteTransaction()
   const unitPref = usePrefs((s) => s.quantityUnit)
   const quote = useQuote(symbol.symbol, symbol.has_quote !== false)
+  const served = useUsClosesServed()
   const nextId = useRef(1)
   const formRef = useRef<HTMLFormElement>(null)
   const [lots, setLots] = useState<Lot[]>(() => [newLot(0)])
@@ -386,7 +389,7 @@ function DetailsStep({
             <span className="truncate">{symbol.name}</span>
           </p>
           <p className="num text-xs text-ink-2">
-            {marketTag(symbol)}
+            {marketTag(symbol, served)}
             {closeOn ? `・${closeOn}` : ""}
           </p>
         </div>

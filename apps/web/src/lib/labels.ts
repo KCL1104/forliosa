@@ -28,11 +28,13 @@ export function benchmarkLabel(symbol: string): string {
 export const MARKET_LABEL: Record<Market, string> = { TWSE: "上市", TPEX: "上櫃", US: "美股" }
 
 /**
- * 搜尋結果右側的市場標示。還沒有收盤價的（沒有人觀察或持有、還沒抓過收盤的美股）寫「美股・還沒有收盤價」；
- * 有收盤價的搜尋結果寫市場與產業（`marketLine`，和麵包屑同一套）。
+ * 搜尋結果右側的市場標示。`served`：後端有沒有提供美股收盤價（`useUsClosesServed`）。
+ * 有提供時美股一律 `has_quote: true`（還沒抓到的只是 `/quote` 404，搜尋結果分不出來），只寫「美股」；
+ * 沒有提供時美股是 `has_quote: false`，寫「美股・沒有報價」——不承諾會補上。
+ * 有報價的搜尋結果另外寫市場與產業（`marketLine`，和麵包屑同一套）。
  */
-export function marketTag(i: { market: Market; has_quote?: boolean }): string {
-  return i.has_quote === false ? `${MARKET_LABEL[i.market]}・還沒有收盤價` : MARKET_LABEL[i.market]
+export function marketTag(i: { market: Market; has_quote?: boolean }, served: boolean): string {
+  return i.has_quote === false && !served ? `${MARKET_LABEL[i.market]}・沒有報價` : MARKET_LABEL[i.market]
 }
 
 /**

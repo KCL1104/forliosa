@@ -6,6 +6,7 @@ import { appToday } from "@/api"
 import { useInstrumentSearch } from "@/api/queries"
 import { useMediaQuery } from "@/hooks/use-media-query"
 import { marketTag } from "@/lib/labels"
+import { useUsClosesServed } from "@/pages/stock/text"
 import { cn } from "@/lib/utils"
 import { UsageNote } from "./AiPanel"
 import { Composer } from "./Composer"
@@ -55,6 +56,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
   const intent = parseIntent(typing, appToday())
   const searchTerm = intent.kind === "lookup" || (intent.kind === "question" && typing.trim().length <= 6) ? typing.trim() : ""
   const search = useInstrumentSearch(searchTerm)
+  const served = useUsClosesServed()
   const results = searchTerm ? (search.data ?? []).slice(0, 5) : []
   // 搜尋結果都在輸入框上方：首頁狀態取代建議與連結（同一套格線列，最多約建議區的高度）；對話中浮在輸入框上
   const home = !thread
@@ -89,7 +91,7 @@ function ScreenBody({ onClose }: { onClose: () => void }) {
             {/* 代號欄放得下 6 碼（006208）：17px 時 64px */}
             <span className={cn("num shrink-0 font-medium", home ? "w-16" : "w-14")}>{i.code}</span>
             <span className="min-w-0 flex-1 truncate">{i.name}</span>
-            <span className="shrink-0 text-sm text-ink-2">{marketTag(i)}</span>
+            <span className="shrink-0 text-sm text-ink-2">{marketTag(i, served)}</span>
           </button>
         </li>
       ))}

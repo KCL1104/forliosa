@@ -33,7 +33,7 @@ export const US_VALUATION_NOTE = "美股沒有本益比區間（沒有美股的�
 // ── 美股收盤價（商用模式；產品負責人 2026-11-15，Databento） ─────────────
 /**
  * 商用模式哪些美股有收盤價：內建清單的美股（AAPL、NVDA、VOO、QQQ，以及市場頁的 SPY、DIA、ONEQ）。
- * 只有 SEC 代號表認得的美股（MSFT、TSLA、T…）模擬「剛加入、還沒抓到收盤價」：沒有報價、`has_quote: false`。
+ * 只有 SEC 代號表認得的美股（MSFT、TSLA、T…）模擬「剛加入、還沒抓到收盤價」：`/quote` 404（`has_quote` 照合約仍是 true）。
  */
 export const hasUsCloses = (s: MockInstrumentSpec) => s.market === "US" && s.listing !== "sec"
 

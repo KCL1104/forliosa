@@ -3,7 +3,8 @@ import { createMemoryHistory, RouterProvider } from "@tanstack/react-router"
 import { cleanup, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
-import { api } from "@/api"
+import { api, appToday } from "@/api"
+import { usDay } from "@/lib/labels"
 import { useViewAs } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { createAppRouter } from "@/router"
@@ -217,6 +218,32 @@ describe("減少持股（賣出不用開表單）", () => {
     expect(after.length).toBe(before + 1)
     const sell = after.find((t) => t.type === "sell" && t.symbol === "2317.TW" && t.quantity === 1000 && t.price === quote.price)
     expect(sell).toBeTruthy()
+    // 台股：成交日是今天
+    expect(sell!.trade_date).toBe(appToday())
+  })
+
+  it("美股「全部賣出」：成交日是那個收盤的紐約交易日（和「用 11/11（美東）的收盤價」同一天），不是台北的今天", async () => {
+    renderApp("/")
+    await screen.findByRole("tablist", { name: "帳本內容" }, T)
+    const held = (await api.getHoldings()).find((h) => h.market === "US" && h.price !== null)!
+    const quote = await api.getQuote(held.symbol)
+    expect(quote.trade_date).toBeTruthy()
+    expect(quote.trade_date).not.toBe(appToday())
+    useUi.getState().openReduce(held.symbol, true)
+    const dialog = await screen.findByRole("dialog", {}, T)
+    const form = within(dialog)
+    expect(await form.findByText(new RegExp(`^用 ${usDay(quote.trade_date!)}的收盤價 US\\$`), {}, T)).toBeInTheDocument()
+    await waitFor(() => expect(dialog.querySelector<HTMLInputElement>("#reduce-qty")!.value).toBe(String(held.quantity)), T)
+    const before = new Set((await api.listTransactions({ limit: 200 })).items.map((t) => t.id))
+    await userEvent.click(form.getByRole("button", { name: "賣出" }))
+    await waitFor(() => expect(useUi.getState().reduce.open).toBe(false), T)
+    const sell = (await api.listTransactions({ limit: 200 })).items.find((t) => !before.has(t.id))!
+    try {
+      expect(sell).toMatchObject({ type: "sell", symbol: held.symbol, quantity: held.quantity, price: quote.price, trade_date: quote.trade_date })
+    } finally {
+      // mock 的帳本在這個檔案裡是共用的：還原
+      await api.deleteTransaction(sell.id)
+    }
   })
 
   it("「全部賣出」先把股數填成全部；「改日期或價格」開完整表單、已經選在賣出", async () => {

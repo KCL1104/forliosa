@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { MarketStatus } from "@/api/types"
 import { mockMarketNow, mockMarketStatus } from "@/api/mock/market-status"
-import { asOfLabel, closeDay, closeLabel, closeNote, closeState, dayWord, ledgerAsOf, twseLiveQuoteUrl, withDayWord } from "../as-of"
+import { asOfLabel, closeDay, closeLabel, closeNote, closeState, dayWord, ledgerAsOf, ledgerUsCloseDay, twseLiveQuoteUrl, withDayWord } from "../as-of"
 
 /**
  * 收盤價的標示（api-contract「收盤價的標示與盤中狀態」）：沒有盤中即時報價，
@@ -112,5 +112,41 @@ describe("標示的文字", () => {
     for (const text of [closeLabel(THU_CLOSE), closeNote("open", THU_CLOSE), closeNote("pending", THU_CLOSE), ledgerAsOf("open", THU_CLOSE), ledgerAsOf("pending", THU_CLOSE)]) {
       expect(text).not.toMatch(/延遲|即時/)
     }
+  })
+})
+
+describe("ledgerUsCloseDay：帳本只有美股有價格時，那是紐約哪一天的收盤", () => {
+  /** 紐約 11/13（五）16:00 的收盤＝台北 11/14（六）05:00 */
+  const usSummary = { as_of: "2026-11-14T05:00:00+08:00" }
+  const aapl = { market: "US" as const, price: 356.27, price_date: "2026-11-13" }
+  const tsmc = { market: "TWSE" as const, price: 1085, price_date: "2026-11-13" }
+
+  it("只有美股有價格：持股 price_date 最大的那天（不是台北的日期）", () => {
+    expect(ledgerUsCloseDay(usSummary, [aapl])).toBe("2026-11-13")
+    expect(ledgerUsCloseDay(usSummary, [{ ...aapl, price_date: "2026-11-12" }, aapl])).toBe("2026-11-13")
+    // 還沒有收盤價的美股（price null）不影響
+    expect(ledgerUsCloseDay(usSummary, [aapl, { market: "US", price: null, price_date: null }])).toBe("2026-11-13")
+  })
+
+  it("舊版後端沒有 price_date：由 summary.as_of 換算成紐約的日期（冬令、夏令）", () => {
+    expect(ledgerUsCloseDay(usSummary, [{ market: "US", price: 356.27 }])).toBe("2026-11-13")
+    expect(ledgerUsCloseDay({ as_of: "2026-07-02T04:00:00+08:00" }, [{ market: "US", price: 210, price_date: null }])).toBe("2026-07-01")
+  })
+
+  it("有任何一檔台股有價格、沒有持股、或全部都沒有價格：照台股（null）", () => {
+    expect(ledgerUsCloseDay({ as_of: THU_CLOSE }, [aapl, tsmc])).toBeNull()
+    expect(ledgerUsCloseDay({ as_of: THU_CLOSE }, [aapl, { ...tsmc, market: "TPEX" }])).toBeNull()
+    expect(ledgerUsCloseDay({ as_of: THU_CLOSE }, [])).toBeNull()
+    expect(ledgerUsCloseDay({ as_of: THU_CLOSE }, [{ market: "US", price: null, price_date: null }])).toBeNull()
+    // 台股沒有價格（以成本計）、美股有：帳本的 as_of 是美股的收盤
+    expect(ledgerUsCloseDay(usSummary, [aapl, { ...tsmc, price: null, price_date: null }])).toBe("2026-11-13")
+  })
+
+  it("持股還沒載入：看配置的市場，全部是美股才當成美股", () => {
+    const byMarket = (...keys: string[]) => ({ ...usSummary, allocation: { by_market: keys.map((key) => ({ key })) } })
+    expect(ledgerUsCloseDay(byMarket("US"), undefined)).toBe("2026-11-13")
+    expect(ledgerUsCloseDay(byMarket("TWSE", "US"), undefined)).toBeNull()
+    expect(ledgerUsCloseDay(byMarket(), undefined)).toBeNull()
+    expect(ledgerUsCloseDay(undefined, undefined)).toBeNull()
   })
 })

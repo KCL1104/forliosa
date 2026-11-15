@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { useUi } from "./ui-store"
 import { useReadOnly } from "@/api/view-as"
+import { useUsClosesServed } from "@/pages/stock/text"
 
 
 /**
@@ -127,8 +128,7 @@ export function CommandSearch() {
                     <span className="num w-16 shrink-0 text-md font-semibold">{i.code}</span>
                     <span className="min-w-0 flex-1 truncate">{i.name}</span>
                     <span className="shrink-0 text-sm text-muted-foreground">
-                      {/* 和麵包屑同一套（美股的英文產業不直接印出來）；還沒有收盤價的美股寫「美股・還沒有收盤價」 */}
-                      {i.has_quote === false ? marketTag(i) : marketLine(i)}
+                      <ResultMarket i={i} />
                     </span>
                   </CommandPrimitive.Item>
                 ))}
@@ -183,6 +183,15 @@ const itemClass =
  */
 const itemSheet = "min-h-12 rounded-none border-b border-rule px-5 text-lg"
 const groupSheet = "[&_[cmdk-group-heading]]:border-b [&_[cmdk-group-heading]]:border-rule [&_[cmdk-group-heading]]:px-5 [&_[cmdk-group-heading]]:pt-4 [&_[cmdk-group-heading]]:pb-2 [&_[cmdk-group-heading]]:font-normal"
+
+/**
+ * 搜尋結果右邊的市場與產業：和麵包屑同一套（美股的英文產業不直接印出來）；沒有報價的（美股收盤價關著時的美股）寫「美股・沒有報價」。
+ * 有結果時才讀美股收盤有沒有提供（搜尋框一直掛在外框上，不為它在每一頁都問一次）。
+ */
+function ResultMarket({ i }: { i: Instrument }) {
+  const served = useUsClosesServed()
+  return i.has_quote === false ? marketTag(i, served) : marketLine(i)
+}
 
 function isTyping(target: EventTarget | null) {
   const el = target as HTMLElement | null

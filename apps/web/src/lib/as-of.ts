@@ -1,5 +1,6 @@
-import type { MarketStatus } from "@/api/types"
+import type { Holding, MarketStatus } from "@/api/types"
 import { formatDateShort, TZ } from "@/lib/format"
+import { usTradeDate } from "@/lib/labels"
 
 /**
  * 收盤價的標示（見 api-contract「收盤價的標示與盤中狀態」）。
@@ -80,6 +81,27 @@ export function ledgerAsOf(state: CloseState, asOf: string | null | undefined): 
 export function dayWord(asOf: string | null | undefined, today: string): string {
   const day = closeDay(asOf)
   return !day || day === today ? "今日" : formatDateShort(day, false)
+}
+
+/**
+ * 帳本只有美股有價格時，那是紐約哪一天的收盤（YYYY-MM-DD）；否則 null，照台股的寫法（`closeState`、`dayWord`）。
+ * 後端（與 mock）的 `summary.as_of`：只要有一檔不是美股的持股有價格，就是台股的收盤時刻；只有美股時是紐約 16:00——
+ * 在台北已經是隔天清晨，不能拿台北的日期說「11/14 收盤・盤中不更新」或「今日」。
+ * 日期取美股持股 `price_date` 最大的那天；舊版後端沒有這個欄位時由 `as_of` 換算。
+ * 持股還沒載入時看 `allocation.by_market`：全部是美股才當成美股（沒有價格的持股在那裡以成本計，分不出來，寧可照台股）。
+ */
+export function ledgerUsCloseDay(
+  summary: { as_of?: string | null; allocation?: { by_market?: readonly { key: string }[] } } | null | undefined,
+  holdings: readonly Pick<Holding, "market" | "price" | "price_date">[] | null | undefined,
+): string | null {
+  if (!holdings) {
+    const markets = summary?.allocation?.by_market ?? []
+    return markets.length > 0 && markets.every((m) => m.key === "US") ? usTradeDate(null, summary?.as_of) : null
+  }
+  const priced = holdings.filter((h) => h.price !== null)
+  if (priced.length === 0 || priced.some((h) => h.market !== "US")) return null
+  const days = priced.map((h) => h.price_date).filter((d): d is string => !!d)
+  return days.length > 0 ? days.reduce((a, b) => (b > a ? b : a)) : usTradeDate(null, summary?.as_of)
 }
 
 /** 「今日漲跌」→「11/12 漲跌」：把標籤開頭的「今日」換成收盤價的日期（日期和後面的字之間空一格） */

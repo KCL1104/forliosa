@@ -65,6 +65,28 @@ export function StockPage() {
   )
 }
 
+/**
+ * 美股的收盤價剛補上（報價從 404 變成有資料）時：部位、交易歷史、持股與總資產都是還沒有價格時以成本算的
+ * （未實現 0、今日 0），整個 `["portfolio"]` 一起重抓。重抓完成以前回傳 true——這段時間不顯示舊的未實現與今日。
+ */
+function useRefreshOnFirstClose(symbol: string, noQuote: boolean, hasQuote: boolean): boolean {
+  const qc = useQueryClient()
+  // 哪一檔曾經沒有報價（換到別檔時不算）
+  const [waiting, setWaiting] = useState<string | null>(null)
+  const [refreshing, setRefreshing] = useState<string | null>(null)
+  useEffect(() => {
+    if (noQuote) {
+      setWaiting(symbol)
+      return
+    }
+    if (!hasQuote || waiting !== symbol) return
+    setWaiting(null)
+    setRefreshing(symbol)
+    void qc.invalidateQueries({ queryKey: ["portfolio"] }).finally(() => setRefreshing((s) => (s === symbol ? null : s)))
+  }, [noQuote, hasQuote, waiting, symbol, qc])
+  return (waiting === symbol && hasQuote) || refreshing === symbol
+}
+
 function StockPageInner() {
   const { symbol } = useParams({ from: "/stock/$symbol" })
   const search = useSearch({ from: "/stock/$symbol" })
@@ -81,6 +103,11 @@ function StockPageInner() {
   // 交易歷史：出清的回合與所有買賣點（未持有也會回）——圖上的 B／S／D 與「過去的持有」都用它
   const history = usePositionHistory(symbol)
   const rounds = history.data?.rounds ?? []
+  // 沒有報價（還沒抓過收盤的美股）：只在價格那一格說一次；由價格算出來的區塊（走勢、估值、殖利率、未實現）都不出現。
+  // 每分鐘再問一次的時候，查詢會短暫回到「載入中」（錯誤被清掉）：問過而且出錯過、還沒有資料，就還是沒有報價——
+  // 不然整頁每分鐘閃一次「—」、以成本算的未實現與走勢圖
+  const noQuote = !quote.data && (quote.isError || (quote.isFetching && quote.errorUpdateCount > 0))
+  const refreshing = useRefreshOnFirstClose(symbol, noQuote, !!quote.data)
 
   if (instrument.isError) {
     const notFound = instrument.error instanceof ApiError && instrument.error.status === 404
@@ -101,8 +128,6 @@ function StockPageInner() {
     )
   }
   const inst = instrument.data
-  // 沒有報價（還沒抓過收盤的美股）：只在價格那一格說一次；由價格算出來的區塊（走勢、估值、殖利率、未實現）都不出現
-  const noQuote = quote.isError && !quote.data
   return (
     <div className="page-frame px-5 pt-1 pb-12 md:px-8 lg:pt-6 xl:px-14">
       {!inst ? (
@@ -110,10 +135,10 @@ function StockPageInner() {
       ) : (
         <>
           <Breadcrumb inst={inst} held={!!position.data} />
-          <QuoteHeader inst={inst} quote={quote.data} missing={quote.isError} held={!!position.data} />
+          <QuoteHeader inst={inst} quote={quote.data} missing={noQuote} held={!!position.data} />
           <WhyLine inst={inst} />
           {position.data ? (
-            <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!noQuote} />
+            <PositionBlock inst={inst} position={position.data} rounds={rounds} priced={!noQuote && !refreshing} />
           ) : (
             rounds.length > 0 && <PastHolding inst={inst} rounds={rounds} />
           )}
@@ -258,7 +283,7 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
     return (
       <header className="mt-1">
         <h1 className="text-2xl font-bold tracking-[-0.01em] lg:text-3xl">{inst.name}</h1>
-        {us ? <UsNoClose inst={inst} held={held} /> : <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>}
+        {us ? <UsNoClose key={inst.symbol} inst={inst} held={held} /> : <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">沒有報價</p>}
       </header>
     )
   }
@@ -345,10 +370,15 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
   )
 }
 
+/** 等美股收盤價補上：每分鐘再問一次報價，最多問 30 分鐘（後端每 10 分鐘找一次新代號；Databento 不認得的代號一週後才再問） */
+const US_CLOSE_POLL_MS = 60_000
+const US_CLOSE_POLL_FOR_MS = 30 * 60_000
+
 /**
  * 美股還沒有收盤價（產品負責人 2026-11-15）：美股的收盤（Databento）只抓有人觀察或持有的代號，剛加入的約 10 分鐘內
  * 補上 2024/07/01 以來的收盤。價格的位置寫「還沒有收盤價」，下一句照實說什麼時候會有——還沒加入的說要加入
  * （「加入觀察」就在上面的麵包屑），已經加入的說會補上；唯讀（查看別人的資產）時不教人加入。
+ * 已經加入的每分鐘再問一次，問了 30 分鐘還沒有就停（資料源可能不認得這個代號，或暫時拒絕），不再說「約 10 分鐘內補上」。
  * 後端關掉美股收盤時（顯名清單沒有 Databento）只寫「沒有報價」，不承諾會補上。
  */
 function UsNoClose({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
@@ -357,18 +387,28 @@ function UsNoClose({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
   const readOnly = useReadOnly()
   const qc = useQueryClient()
   const tracked = held || (watch.data ?? []).some((w) => w.symbol === inst.symbol)
+  const [gaveUp, setGaveUp] = useState(false)
   // 已經加入、等收盤價補上：每分鐘再問一次報價（報價查詢出錯後自己不會再問），補上了整頁就換成有價格的樣子，不用重新整理
   useEffect(() => {
-    if (!served || !tracked) return
-    const timer = window.setInterval(() => void qc.invalidateQueries({ queryKey: qk.quote(inst.symbol) }), 60_000)
+    if (!served || !tracked || gaveUp) return
+    let waited = 0
+    const timer = window.setInterval(() => {
+      void qc.invalidateQueries({ queryKey: qk.quote(inst.symbol) })
+      waited += US_CLOSE_POLL_MS
+      if (waited >= US_CLOSE_POLL_FOR_MS) setGaveUp(true)
+    }, US_CLOSE_POLL_MS)
     return () => window.clearInterval(timer)
-  }, [served, tracked, qc, inst.symbol])
+  }, [served, tracked, gaveUp, qc, inst.symbol])
   return (
     <>
       <p className="mt-1 flex min-h-12 items-center text-xl font-medium text-ink-2 lg:min-h-15">{served ? "還沒有收盤價" : "沒有報價"}</p>
       {served && !readOnly && (
         <p className="mt-1 max-w-prose text-base text-ink">
-          {tracked ? "收盤價約 10 分鐘內補上，從 2024/07/01 起。" : "美股要在觀察清單或帳本裡才會抓收盤價。加入後約 10 分鐘內補上，從 2024/07/01 起。"}
+          {!tracked
+            ? "美股要在觀察清單或帳本裡才會抓收盤價。加入後約 10 分鐘內補上，從 2024/07/01 起。"
+            : gaveUp
+              ? "暫時抓不到這檔的收盤價。"
+              : "收盤價約 10 分鐘內補上，從 2024/07/01 起。"}
         </p>
       )}
     </>

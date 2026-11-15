@@ -19,12 +19,12 @@ import { AccountSelect, StampLine } from "./TradeForm"
 
 /**
  * 減少持股（產品負責人 2026-11-14：只需要記買進，賣出不用特別去記帳）。
- * 賣了之後在那一檔按「減少持股」或「全部賣出」：只填股數。日期是今天、價格用最新的收盤價，
+ * 賣了之後在那一檔按「減少持股」或「全部賣出」：只填股數。日期是今天、價格用最新的收盤價（美股的日期是那個收盤的紐約交易日），
  * 不自動算手續費與稅（2026-11-14）——記成一筆賣出，所以已實現損益和績效照常算得出來。
  * 要指定日期或成交價，按「改日期或價格」到完整表單。
  */
 const TITLE = "減少持股"
-const DESCRIPTION = "填賣出的股數。日期是今天，價格用最新的收盤價。"
+const DESCRIPTION = "填賣出的股數。價格用最新的收盤價；日期是今天，美股是那個收盤的交易日。"
 
 export function ReduceHost() {
   const { open, symbol, all } = useUi((s) => s.reduce)
@@ -145,8 +145,9 @@ function ReduceForm({ symbol, all, onDone }: { symbol: string; all: boolean; onD
     e.preventDefault()
     setSubmitted(true)
     if (error || !shares || price === null || !account) return
+    // 成交日和上面那句話同一天：台股是今天；美股是那個收盤的紐約交易日（「用 11/13（美東）的收盤價」就記在 11/13）
     create.mutate(
-      { account_id: account, symbol, type: "sell", trade_date: appToday(), quantity: shares, price, note: "" },
+      { account_id: account, symbol, type: "sell", trade_date: usDate ?? appToday(), quantity: shares, price, note: "" },
       {
         onSuccess: (txn) => {
           toast.success(`已記錄：賣出 ${holding.name} ${formatQuantity(shares, unitPref, holding.market)}`, {

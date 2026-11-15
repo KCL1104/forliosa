@@ -3,7 +3,7 @@
  * 全部是純函式：只用使用者自己的資料計算，不做投資判斷、不捏造分析。
  * 介面上不加「本頁建議」「依頁面推薦」這類說明字樣（PRODUCT.md）。
  */
-import { dayWord } from "@/lib/as-of"
+import { dayWord, ledgerUsCloseDay } from "@/lib/as-of"
 import { inText } from "@/lib/cjk"
 import { usDay, usTradeDate } from "@/lib/labels"
 import type {
@@ -99,6 +99,17 @@ export function dayLead(asOf: string | null | undefined, today: string): string 
   return w === "今日" ? "今天" : `${w} `
 }
 
+/**
+ * 帳本的「誰拖累／誰賺最多」說的是哪一天、算哪些持股（和帳本主數字同一個判斷，`ledgerUsCloseDay`）：
+ * - 只有美股有價格：那是紐約那一天的漲跌，寫「11/13（美東）」（`us`）
+ * - 其他：台股那一天（`dayLead`：「今天」或「11/12 」）；美股的漲跌是紐約另一天的，不算進這一句
+ */
+function ledgerDay({ holdings, summary }: LedgerData, today: string, asOf?: string | null): { lead: string; movers: Holding[]; us: boolean } {
+  const usDate = ledgerUsCloseDay(summary, holdings)
+  if (usDate) return { lead: usDay(usDate), movers: holdings, us: true }
+  return { lead: dayLead(asOf ?? summary?.as_of, today), movers: holdings.filter((h) => h.market !== "US"), us: false }
+}
+
 /** 美股這一次漲跌屬於紐約的哪一天（`why.trade_date`、報價的 `trade_date`，舊版後端由 `as_of` 換算） */
 function usMoveDate(s: StockData): string | null {
   if (s.market !== "US") return null
@@ -123,9 +134,9 @@ export function ledgerSuggestions({ holdings, summary }: LedgerData, today: stri
     return [{ kind: "onboard", text: "怎麼記第一筆？" }]
   }
   const out: Suggestion[] = []
-  const day = dayLead(summary?.as_of, today)
-  if (holdings.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: `${day}誰拖累了我的報酬？` })
-  else if (holdings.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: `${day}誰幫我賺最多？` })
+  const { lead: day, movers } = ledgerDay({ holdings, summary }, today)
+  if (movers.some((h) => h.day_change < 0)) out.push({ kind: "drag", text: `${day}誰拖累了我的報酬？` })
+  else if (movers.some((h) => h.day_change > 0)) out.push({ kind: "lift", text: `${day}誰幫我賺最多？` })
   const soon = (summary?.upcoming_dividends ?? []).filter((d) => daysBetween(today, d.ex_dividend_date) <= 31)
   if (soon.length > 0) out.push({ kind: "dividends_next", text: "下個月我能領多少股利？" })
   if (isConcentrated(holdings, summary)) out.push({ kind: "concentration", text: "我的持股會不會太集中？" })
@@ -219,17 +230,19 @@ function groupAnswer(): Answer {
   }
 }
 
-function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, privacy: boolean, today: string, asOf?: string | null): Answer | null {
+function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, privacy: boolean, today: string, quoteAsOf?: string | null): Answer | null {
+  const { lead: day, movers: candidates, us } = ledgerDay({ holdings, summary }, today, quoteAsOf)
+  // 只有美股時，`as_of` 是紐約 16:00（台北的隔天清晨）：回答下面不放台北日期的「收盤」（句子裡已經寫了紐約的日期）
+  const asOf = us ? null : quoteAsOf
   switch (kind) {
     case "drag":
     case "lift": {
       const sign = kind === "drag" ? -1 : 1
-      const movers = holdings.filter((h) => sign * h.day_change > 0).sort((a, b) => sign * (b.day_change - a.day_change)).slice(0, 3)
-      const day = dayLead(asOf ?? summary?.as_of, today)
+      const movers = candidates.filter((h) => sign * h.day_change > 0).sort((a, b) => sign * (b.day_change - a.day_change)).slice(0, 3)
       if (movers.length === 0) return { text: kind === "drag" ? `${day}沒有持股下跌。` : `${day}沒有持股上漲。`, asOf }
       const [first, second] = movers
       const text =
-        `${day}${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${first!.name}（${pctWords(first!.day_change_pct)}）` +
+        `${day}${kind === "drag" ? "拖累最多" : "貢獻最多"}的是${inText(first!.name, "end")}（${pctWords(first!.day_change_pct)}）` +
         (second ? `，其次是${inText(second.name, "end")}（${pctWords(second.day_change_pct)}）。` : "。")
       return {
         text,

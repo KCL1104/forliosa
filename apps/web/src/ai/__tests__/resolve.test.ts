@@ -45,16 +45,17 @@ describe("mock 的商品清單：和後端一樣的搜尋規則", () => {
     expect((await api.getInstrument("00981A.TW")).data_sources[0]).toContain("上市個股日成交資訊")
   })
 
-  it("SEC 的美股：只有英文查詢搜得到、代號完全相同才排第一，其他排在台股後面；還沒抓過收盤的 has_quote 是 false（標「還沒有收盤價」）", async () => {
+  it("SEC 的美股：只有英文查詢搜得到、代號完全相同才排第一，其他排在台股後面；美股收盤價開著時 has_quote 一律 true（還沒抓過收盤的只是報價 404）", async () => {
     for (const q of ["台積", "微軟", "2330", "00", "高股息"]) {
       const hits = await api.searchInstruments(q)
       expect(hits.some((h) => ["MSFT", "TSM", "TSLA", "T", "AMZN"].includes(h.symbol)), q).toBe(false)
     }
-    expect((await api.searchInstruments("T"))[0]).toMatchObject({ symbol: "T", name: "AT&T INC.", market: "US", has_quote: false })
+    expect((await api.searchInstruments("T"))[0]).toMatchObject({ symbol: "T", name: "AT&T INC.", market: "US", has_quote: true })
     expect((await api.searchInstruments("microsoft"))[0]!.symbol).toBe("MSFT")
     expect((await api.searchInstruments("BRK.B"))[0]!.symbol).toBe("BRK-B")
     const detail = await api.getInstrument("MSFT")
-    expect(detail).toMatchObject({ name: "MICROSOFT CORP", industry: null, summary: null, has_quote: false })
+    expect(detail).toMatchObject({ name: "MICROSOFT CORP", industry: null, summary: null, has_quote: true })
+    await expect(api.getQuote("MSFT")).rejects.toMatchObject({ status: 404 })
     expect(detail.data_sources[0]).toContain("company_tickers.json")
   })
 })

@@ -208,7 +208,8 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
 
   it("還沒有收盤價的美股（SEC 代號表才有的，模擬剛加入）：沒有報價、持股以成本計值、績效算不出來", async () => {
     const fresh = createMockAdapter({ latency: [0, 0] })
-    expect((await fresh.searchInstruments("MSFT"))[0]).toMatchObject({ symbol: "MSFT", has_quote: false })
+    // 合約：美股收盤價開著時 has_quote 一律 true，還沒抓到收盤的只有 /quote 404
+    expect((await fresh.searchInstruments("MSFT"))[0]).toMatchObject({ symbol: "MSFT", has_quote: true })
     await expect(fresh.getQuote("MSFT")).rejects.toMatchObject({ status: 404 })
     expect(await fresh.getQuotes(["MSFT", "AAPL"])).toHaveLength(1)
     const h = await fresh.getHistory("MSFT", "1Y")

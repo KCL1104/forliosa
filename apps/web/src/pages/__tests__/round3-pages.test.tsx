@@ -365,6 +365,57 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(await screen.findByText("11/12 收盤・今天的還沒公布", undefined, T)).toBeInTheDocument()
   })
 
+  /**
+   * 帳本只有美股有價格（Databento 的收盤）：持股只留有價格的美股（`price_date` 是紐約的日期），
+   * 總資產的 `as_of` 是紐約 16:00——台北已經是隔天清晨（後端與 mock 的 summary 都這樣挑）
+   */
+  const usOnlyLedger = (asOf: string, priceDate: string) => {
+    const getHoldings = api.getHoldings
+    const getSummary = api.getPortfolioSummary
+    vi.spyOn(api, "getHoldings").mockImplementation(async (id) =>
+      (await getHoldings(id)).filter((h) => h.market === "US" && h.price !== null).map((h) => ({ ...h, price_date: priceDate })),
+    )
+    vi.spyOn(api, "getPortfolioSummary").mockImplementation(async (id) => {
+      const s = await getSummary(id)
+      return { ...s, as_of: asOf, allocation: { ...s.allocation, by_market: s.allocation.by_market.filter((m) => m.key === "US") } }
+    })
+  }
+  /** 主數字旁寫紐約的收盤，「今日」換成那一天；不寫台北的日期，也沒有台股的「盤中不更新／今天的還沒公布」 */
+  const expectUsHero = async (day: string, taipeiDay: string) => {
+    const label = await screen.findByText(`${day} 收盤（美東）`, undefined, T)
+    const hero = label.closest("div")!
+    await waitFor(() => expect(within(hero).getByText(day, { selector: "dt" })).toBeInTheDocument())
+    expect(hero.textContent).not.toMatch(/今日|盤中不更新|還沒公布/)
+    expect(hero.textContent).not.toContain(taipeiDay)
+    // 持倉的表頭（手機的兩行列表頭）也是紐約的日期
+    expect(await screen.findByText(`收盤價・${day} 漲跌`, undefined, T)).toBeInTheDocument()
+    expect(screen.queryByText(/今日漲跌|今日損益/)).toBeNull()
+  }
+
+  it("帳本只有美股・週六早上（台北 11/14）：寫紐約週五的「11/13 收盤（美東）」與「11/13」，不寫週六的日期或「今日」", async () => {
+    vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-14", is_trading_day: false }))
+    vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-14T10:00:00+08:00"))
+    usOnlyLedger("2026-11-14T05:00:00+08:00", "2026-11-13")
+    renderApp("/")
+    await expectUsHero("11/13", "11/14")
+  })
+
+  it("帳本只有美股・週一台股盤中（台北 11/16 10:00）：仍是「11/13 收盤（美東）」，沒有台股的「盤中不更新」", async () => {
+    vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-16", is_open: true }))
+    vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-16T10:00:00+08:00"))
+    usOnlyLedger("2026-11-14T05:00:00+08:00", "2026-11-13")
+    renderApp("/")
+    await expectUsHero("11/13", "11/14")
+  })
+
+  it("帳本只有美股・週二早上（台北 11/17 07:00）：紐約週一的收盤寫「11/16 收盤（美東）」與「11/16」，不是「今日」", async () => {
+    vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-17" }))
+    vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-17T07:00:00+08:00"))
+    usOnlyLedger("2026-11-17T05:00:00+08:00", "2026-11-16")
+    renderApp("/")
+    await expectUsHero("11/16", "11/17")
+  })
+
   /** 美股的收盤（Databento）：紐約 11/13 的收盤，as_of 是紐約 16:00＝台北 11/14 05:00 */
   const usClose = {
     symbol: "AAPL", price: 356.27, prev_close: 350, change: 6.27, change_pct: 0.0179, open: 351, high: 357, low: 349.5, volume: 41_000_000,
