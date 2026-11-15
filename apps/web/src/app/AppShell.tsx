@@ -44,7 +44,7 @@ export function AppShell() {
   const hasPanel = isDesktop && !readOnly
   const stickyTop = isDesktop ? (readOnly ? "6.5rem" : "4rem") : readOnly ? MOBILE_BANNER_HEIGHT : "0px"
   return (
-    <div className="min-h-dvh bg-paper" style={{ "--sticky-top": stickyTop } as React.CSSProperties}>
+    <div data-app-shell="" className="min-h-dvh bg-paper" style={{ "--sticky-top": stickyTop } as React.CSSProperties}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-sm focus:bg-act focus:px-3 focus:py-2 focus:text-act-fg">
         跳到主要內容
       </a>

@@ -284,6 +284,29 @@ await check("記一筆的對話框不能往下捲到一片空白（搜尋結果�
   }
 })
 
+await check("有捲軸的長頁面和沒有捲軸的短頁面，頂部列與右側 AI 面板的位置一樣（佔寬度的捲軸不推動版面；2026-11-15）", async () => {
+  // 無頭 Chromium 預設把捲軸藏起來（--hide-scrollbars），看不到 Windows 那種佔寬度的捲軸：這一項另外開一個顯示捲軸的瀏覽器
+  const visible = await pw.chromium.launch({ ignoreDefaultArgs: ["--hide-scrollbars"] })
+  try {
+    const p = await visible.newPage({ viewport: { width: 1440, height: 900 }, locale: "zh-TW", timezoneId: "Asia/Taipei" })
+    const edges = async (path) => {
+      await p.goto(base + path, { waitUntil: "networkidle" })
+      await p.locator("aside").last().waitFor()
+      return p.evaluate(() => ({
+        scrolls: document.documentElement.scrollHeight > document.documentElement.clientHeight,
+        header: Math.round(document.querySelector("header").getBoundingClientRect().right),
+        aside: Math.round([...document.querySelectorAll("aside")].pop().getBoundingClientRect().right),
+      }))
+    }
+    const long = await edges("/market")
+    const short = await edges("/groups")
+    if (!long.scrolls || short.scrolls) throw new Error(`expected /market to scroll and /groups not to: ${JSON.stringify({ long, short })}`)
+    if (long.header !== short.header || long.aside !== short.aside) throw new Error(`the layout moves with the scrollbar: ${JSON.stringify({ long, short })}`)
+  } finally {
+    await visible.close()
+  }
+})
+
 await check("減少持股：持倉那一列的選單（加碼・減少持股・全部賣出）→ 只填股數 → 用最新的收盤價記成賣出", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "鴻海的動作" }).click()

@@ -44,7 +44,7 @@ function AdminShell() {
     </Link>
   ))
   return (
-    <div className="min-h-dvh bg-paper" style={{ "--sticky-top": isDesktop ? "4rem" : "0px", "--dock-h": "0px" } as React.CSSProperties}>
+    <div data-app-shell="" className="min-h-dvh bg-paper" style={{ "--sticky-top": isDesktop ? "4rem" : "0px", "--dock-h": "0px" } as React.CSSProperties}>
       <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-50 focus:rounded-sm focus:bg-act focus:px-3 focus:py-2 focus:text-act-fg">
         跳到主要內容
       </a>

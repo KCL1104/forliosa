@@ -413,6 +413,12 @@
     overscroll-behavior: none;
     background: var(--paper);
   }
+  /* 登入後的外殼（AppShell、AdminShell 標 `data-app-shell`）捲軸的位置一直留著：會佔寬度的捲軸（Windows）
+     只在長的頁面出現時，頂部列、版心和右側 AI 面板會跟著左右移 10px，換頁時面板忽左忽右（2026-11-15 產品負責人回報）。
+     手機、macOS 的浮動捲軸不佔寬度，不受影響。登入頁、介紹頁、公開討論不留：置中的短頁面留了會往左偏半條捲軸寬 */
+  html:has([data-app-shell]) {
+    scrollbar-gutter: stable;
+  }
   body {
     min-height: 100dvh;
     background: var(--paper);
