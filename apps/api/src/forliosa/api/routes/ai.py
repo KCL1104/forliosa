@@ -57,7 +57,7 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     deep = body.mode == "deep"
     if deep and not settings.ai_web_search:
         raise ApiError(503, "ai_unavailable", "現在不能用深度搜尋。")
-    store.check_quota(db, user, settings, cost=settings.ai_deep_search_cost if deep else 1)
+    store.check_quota(db, user, settings, cost=store.deep_search_cost(settings) if deep else 1)
     if body.thread_id:
         thread = store.owned_thread(db, user, body.thread_id)
         if thread.context_tokens >= settings.ai_thread_max_context_tokens:

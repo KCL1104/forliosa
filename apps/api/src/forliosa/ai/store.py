@@ -376,9 +376,29 @@ def month_usage(db: Session, user: User, now: datetime | None = None) -> tuple[i
     return tokens, cost
 
 
+# What one turn typically costs (Haiku, measured): an ordinary question, an analyst-view search or a briefing a few
+# cents; a 深度搜尋 US$0.10–0.12. A turn starts only if this still fits in the month's budget.
+TURN_ESTIMATE_USD = Decimal("0.03")
+DEEP_TURN_ESTIMATE_USD = Decimal("0.15")
+
+
+def deep_search_cost(settings: Settings) -> int:
+    """How many questions a 深度搜尋 counts as: ``AI_DEEP_SEARCH_COST``, never more than the daily limit."""
+    cost = settings.ai_deep_search_cost
+    return min(cost, settings.ai_daily_message_limit) if settings.ai_daily_message_limit > 0 else cost
+
+
+def month_budget_left(db: Session, user: User, settings: Settings, now: datetime | None = None) -> Decimal | None:
+    """US$ left of ``AI_MONTHLY_COST_BUDGET_USD`` this Taipei month (None: no budget)."""
+    if settings.ai_monthly_cost_budget_usd <= 0:
+        return None
+    return Decimal(str(settings.ai_monthly_cost_budget_usd)) - month_usage(db, user, now)[1]
+
+
 def check_quota(db: Session, user: User, settings: Settings, now: datetime | None = None, cost: int = 1) -> None:
-    """``cost``: how many questions the turn about to start counts as (深度搜尋: ``AI_DEEP_SEARCH_COST``). A turn
-    that would not fit in what is left of today does not start."""
+    """``cost``: how many questions the turn about to start counts as (深度搜尋: ``deep_search_cost``). A turn
+    that would not fit in what is left of today, or whose typical cost would not fit in the month's US$ budget,
+    does not start."""
     if settings.ai_daily_message_limit > 0:
         remaining = settings.ai_daily_message_limit - messages_today(db, user, now)
         if remaining <= 0:
@@ -389,6 +409,11 @@ def check_quota(db: Session, user: User, settings: Settings, now: datetime | Non
                            extra={"remaining": remaining, "cost": cost})
     if settings.ai_monthly_token_budget > 0 and month_usage(db, user, now)[0] >= settings.ai_monthly_token_budget:
         raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量已達上限，下個月 1 日會重新計算。")
+    left = month_budget_left(db, user, settings, now)
+    if left is not None and left < TURN_ESTIMATE_USD:
+        raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量已達上限，下個月 1 日會重新計算。")
+    if left is not None and cost > 1 and left < DEEP_TURN_ESTIMATE_USD:
+        raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量剩不多，深度搜尋要等下個月；一般提問還可以問。")
 
 
 def usage_summary(db: Session, user: User, settings: Settings, available: bool) -> dict[str, Any]:
@@ -406,9 +431,15 @@ def usage_summary(db: Session, user: User, settings: Settings, available: bool) 
         "monthly_token_budget": budget or None,
         "tokens_remaining": max(0, budget - tokens) if budget else None,
         "cost_usd_month": float(cost.quantize(Decimal("0.0001"))),
+        "monthly_cost_budget_usd": settings.ai_monthly_cost_budget_usd or None,
+        # no ordinary question can start this month (the US$ budget or the token budget is used up)
+        "month_budget_reached": bool(
+            (settings.ai_monthly_cost_budget_usd > 0
+             and Decimal(str(settings.ai_monthly_cost_budget_usd)) - cost < TURN_ESTIMATE_USD)
+            or (budget > 0 and tokens >= budget)),
         "model": model_for("chat", settings),
         "available": available,
         # None: 深度搜尋 is not offered here (it needs web search)
-        "deep_search_cost": settings.ai_deep_search_cost if settings.ai_web_search else None,
+        "deep_search_cost": deep_search_cost(settings) if settings.ai_web_search else None,
         "disclaimer": DISCLAIMER,
     }

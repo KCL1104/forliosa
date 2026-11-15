@@ -1047,8 +1047,9 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `AI_EFFORT_CHAT`、`AI_EFFORT_WHY` | `low` | `output_config.effort`（Haiku 5.5 預設 medium，這裡明確設 low） |
 | `AI_EFFORT_ANALYST` | `medium` | 法人觀點的 effort（要照多條規則逐筆整理，用 Haiku 5.5 的預設 medium；實測約 22–32 秒） |
 | `AI_MAX_TOKENS_CHAT`、`AI_MAX_TOOL_ROUNDS` | 8000、8 | 每次呼叫的輸出上限、每輪最多幾次模型呼叫 |
-| `AI_DAILY_MESSAGE_LIMIT` | 50 | 每人每天（台北日）提問數，0＝不限（產品負責人確認） |
+| `AI_DAILY_MESSAGE_LIMIT` | 3 | 每人每天（台北日）提問數，0＝不限（產品負責人 2026-11-15：有訂閱方案之前 3 題；原本 50） |
 | `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
+| `AI_MONTHLY_COST_BUDGET_USD` | 2 | 每人每月（台北月）估計花費上限（美元：對話、法人觀點、收盤簡報；共用的工作不算到任何人），0＝不限（產品負責人 2026-11-15）。一題開始前要剩得下它的一般花費（一般提問 US$0.03、深度搜尋 US$0.15，`store.TURN_ESTIMATE_USD`），所以一個月停在 US$2 或略低；剩不夠時 429 `ai_monthly_budget`，`/ai/usage` 的 `month_budget_reached` 為 true |
 | `AI_THREAD_MAX_CONTEXT_TOKENS` | 90,000 | 一段對話的提示超過這個大小就要求開新對話（Haiku 5.5 提示超過 10 萬 token 價格變 5 倍） |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、3 | 每輪最多 3 次搜尋 |
 | `AI_WEB_SEARCH_ALLOWED_DOMAINS` | 空（**不限網域**，產品負責人決定） | 逗號分隔；`recommended`＝內建的台灣財經媒體＋官方網域清單，`official`＝只有官方。預設由模型自己判斷何時搜尋、用哪些來源（只限財經資訊，見「範圍」） |

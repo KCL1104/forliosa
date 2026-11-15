@@ -567,7 +567,7 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| POST | `/ai/chat` | SSE 串流（`text/event-stream`）。body `{"thread_id": "thr_…" \| null, "message": "買 0050 2 張 52.4", "page": {"route": "/stock/2330.TW", "symbol": "2330.TW" \| null}, "privacy": false}`；`thread_id` 省略＝開新對話。選填 `"mode": "deep"`＝**深度搜尋**：這一題多查幾輪網路資料（`web_search` 上限從 3 次提高到 12 次）、寫成一份整理（兩三句結論、最多 8 點、最多 3 個短標題，仍是純文字），算 `Usage.deep_search_cost` 題（預設 5）；只對這一題有效 |
+| POST | `/ai/chat` | SSE 串流（`text/event-stream`）。body `{"thread_id": "thr_…" \| null, "message": "買 0050 2 張 52.4", "page": {"route": "/stock/2330.TW", "symbol": "2330.TW" \| null}, "privacy": false}`；`thread_id` 省略＝開新對話。選填 `"mode": "deep"`＝**深度搜尋**：這一題多查幾輪網路資料（`web_search` 上限從 3 次提高到 12 次）、寫成一份整理（兩三句結論、最多 8 點、最多 3 個短標題，仍是純文字），算 `Usage.deep_search_cost` 題（預設 3，不超過每天的題數）；只對這一題有效 |
 | GET | `/ai/threads?limit=30&cursor=` | `{"items": [ThreadSummary], "next_cursor"}`，最近更新的在前 |
 | GET | `/ai/threads/{id}` | `ThreadDetail`（別人的對話回 404） |
 | DELETE | `/ai/threads/{id}` | 204；草稿保留 |
@@ -657,9 +657,10 @@
 
 // Usage（上限為 null 表示不限制；messages_today 含今天觸發的法人觀點查詢，每次算一題）
 // deep_search_cost：深度搜尋一次算幾題（null＝這個環境沒有深度搜尋，前端不放切換鈕）；深度搜尋的那一題在 messages_today 裡算這麼多題
-{"date": "2026-11-12", "month": "2026-11", "messages_today": 3, "daily_message_limit": 50, "messages_remaining": 47,
+// monthly_cost_budget_usd：每人每月估計花費上限（美元，null＝不限）；month_budget_reached：這個月用完了（一般提問也不能問）
+{"date": "2026-11-12", "month": "2026-11", "messages_today": 1, "daily_message_limit": 3, "messages_remaining": 2,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
- "model": "claude-haiku-5-5", "available": true, "deep_search_cost": 5, "disclaimer": "AI 回答僅供參考，非投資建議。"}
+ "model": "claude-haiku-5-5", "available": true, "deep_search_cost": 3, "monthly_cost_budget_usd": 2.0, "month_budget_reached": false, "disclaimer": "AI 回答僅供參考，非投資建議。"}
 
 // KeySlots（GET /ai/admin/keys；slot = CLAUDE_API_KEY_<n> 的 n；不含金鑰）
 {"month": "2026-11",                  // UTC 月（預算以 UTC 月計）

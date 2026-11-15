@@ -176,7 +176,7 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
 }
 
 /**
- * 輸入框下方：只在提問額度剩 5 題以內、用完或 AI 暫時無法使用時出現一行。
+ * 輸入框下方：提問額度剩 5 題以內（每天 3 題時一直都在：「今天還可以問 N 題。」）、用完（今天的或這個月的）或 AI 暫時無法使用時出現一行。
  * 免責聲明不放這裡：每則 AI 回答下方已經固定顯示。
  */
 export function UsageNote({ className }: { className?: string }) {

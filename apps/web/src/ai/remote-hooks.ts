@@ -43,10 +43,13 @@ export function useAiUsage() {
 }
 
 /** 輸入框下方的一行：剩不多時提醒，用完時說明 */
-export function usageNote(u: { messages_remaining: number | null; tokens_remaining: number | null; available?: boolean } | undefined): string | null {
+export function usageNote(
+  u: { messages_remaining: number | null; tokens_remaining: number | null; month_budget_reached?: boolean; available?: boolean } | undefined,
+): string | null {
   if (!u) return null
   if (u.available === false) return "AI 暫時無法使用；記帳指令仍會寫成草稿。"
-  if (u.messages_remaining === 0 || u.tokens_remaining === 0) return "今天的提問額度用完了，明天再繼續。"
+  if (u.month_budget_reached || u.tokens_remaining === 0) return "這個月的提問額度用完了，下個月 1 日重新計算。"
+  if (u.messages_remaining === 0) return "今天的提問額度用完了，明天再繼續。"
   if (u.messages_remaining !== null && u.messages_remaining <= 5) return `今天還可以問 ${u.messages_remaining} 題。`
   return null
 }

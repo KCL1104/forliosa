@@ -532,7 +532,7 @@ class ChatTurn:
         a failure before anything came back) counts as an ordinary question."""
         if not self.deep:
             return {}
-        return {"mode": "deep", "cost": self.settings.ai_deep_search_cost if self.served else 1}
+        return {"mode": "deep", "cost": store.deep_search_cost(self.settings) if self.served else 1}
 
     def _page_symbol(self, symbol: str | None) -> tuple[str | None, str | None]:
         if not symbol:

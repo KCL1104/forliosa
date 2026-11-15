@@ -215,15 +215,18 @@ function EventsLink({ symbol }: { symbol: string }) {
 /** 今天還沒有人查過：一個安靜的查詢按鈕（只有字，不加裝飾圖示） */
 function SearchPrompt({ onSearch }: { onSearch: () => void }) {
   const usage = useAiUsage().data
-  const off = usage?.available === false || usage?.messages_remaining === 0 || usage?.tokens_remaining === 0
+  const monthDone = usage?.month_budget_reached === true || usage?.tokens_remaining === 0
+  const off = usage?.available === false || usage?.messages_remaining === 0 || monthDone
   const hint =
     usage?.available === false
       ? "AI 暫時無法使用，稍後再查。"
-      : usage?.messages_remaining === 0 || usage?.tokens_remaining === 0
-        ? "今天的提問額度用完了，明天再查。"
-        : usage?.messages_remaining !== null && usage?.messages_remaining !== undefined && usage.messages_remaining <= 5
-          ? `查詢算一題，今天還可以問 ${usage.messages_remaining} 題。`
-          : null
+      : monthDone
+        ? "這個月的提問額度用完了，下個月 1 日重新計算。"
+        : usage?.messages_remaining === 0
+          ? "今天的提問額度用完了，明天再查。"
+          : usage?.messages_remaining !== null && usage?.messages_remaining !== undefined && usage.messages_remaining <= 5
+            ? `查詢算一題，今天還可以問 ${usage.messages_remaining} 題。`
+            : null
   return (
     <div className="flex flex-col items-start gap-3">
       <p className="max-w-prose text-md text-ink">近期媒體報導的機構評等與目標價，最多 5 筆，每筆附報導日期與原文連結。</p>

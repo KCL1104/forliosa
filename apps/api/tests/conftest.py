@@ -118,6 +118,21 @@ def no_push_network():
 
 
 @pytest.fixture(autouse=True)
+def roomy_ai_quota(monkeypatch):
+    """The deployment's AI quota is tight (3 questions a day, about US$2 a month; 產品負責人 2026-11-15). Tests about
+    other things ask several questions: they run with the earlier roomy numbers. Quota tests set their own with
+    ``ai_env``, and ``tests/ai/test_quota_defaults.py`` checks the deployment's defaults."""
+    from forliosa.config import get_settings
+
+    monkeypatch.setenv("AI_DAILY_MESSAGE_LIMIT", "50")
+    monkeypatch.setenv("AI_DEEP_SEARCH_COST", "5")
+    monkeypatch.setenv("AI_MONTHLY_COST_BUDGET_USD", "0")
+    get_settings.cache_clear()
+    yield
+    get_settings.cache_clear()
+
+
+@pytest.fixture(autouse=True)
 def builtin_calendar():
     """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
     from forliosa.timeutil import set_official_holidays

@@ -184,11 +184,15 @@ class Usage(BaseModel):
     monthly_token_budget: int | None
     tokens_remaining: int | None
     cost_usd_month: float
+    monthly_cost_budget_usd: float | None = Field(
+        default=None, description="每人每月的 AI 花費上限（美元，估計值；`AI_MONTHLY_COST_BUDGET_USD`）；`null`＝不限")
+    month_budget_reached: bool = Field(
+        default=False, description="這個月的額度（美元或 token）用完了：一般提問也不能再問，下個月 1 日重新計算")
     model: str
     available: bool
     deep_search_cost: int | None = Field(
         default=None,
-        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`）；`null`＝這個環境沒有深度搜尋（沒開網路搜尋）")
+        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`，不超過每天的題數）；`null`＝這個環境沒有深度搜尋（沒開網路搜尋）")
     disclaimer: str = Field(description="固定顯示在每則 AI 回答下方的一行字（模型不會自己寫免責聲明）")
 
 

@@ -112,8 +112,13 @@ class Settings(BaseSettings):
     ai_effort_analyst: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_max_tokens_chat: int = 8000
     ai_max_tool_rounds: int = 8
-    ai_daily_message_limit: int = 50  # chat messages per user per Taipei day (0 = no limit)
+    # 產品負責人 2026-11-15: 3 questions a day (was 50) until there are subscription plans
+    ai_daily_message_limit: int = 3  # chat messages per user per Taipei day (0 = no limit)
     ai_monthly_token_budget: int = 3_000_000  # billable tokens per user per Taipei month (0 = no limit)
+    # 產品負責人 2026-11-15: about US$2 per user per Taipei month — the estimated cost of their chat, analyst views
+    # and briefings (shared jobs are charged to nobody). A turn starts only when its typical cost still fits
+    # (``store.TURN_ESTIMATE_USD``), so the month stays at or just under it (0 = no limit).
+    ai_monthly_cost_budget_usd: float = Field(default=2.0, ge=0)
     ai_thread_max_context_tokens: int = 90_000  # keep prompts under the 100K-token price tier
     ai_dev_dummy_key: bool = False  # send a placeholder key; a proxy injects the real one
     ai_key_cooldown_seconds: float = 60.0
@@ -128,7 +133,9 @@ class Settings(BaseSettings):
     # and resumed server-tool turns), and counts as this many questions of the daily limit.
     ai_deep_search_max_uses: int = Field(default=12, ge=1, le=30)
     ai_deep_max_tool_rounds: int = Field(default=16, ge=1, le=40)
-    ai_deep_search_cost: int = Field(default=5, ge=1, le=50)
+    # 3 (was 5) with the 3-a-day limit: a 深度搜尋 uses the whole day; never more than the daily limit
+    # (``store.deep_search_cost``), or it could never start
+    ai_deep_search_cost: int = Field(default=3, ge=1, le=50)
     ai_web_search_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)  # [] = any
     ai_web_fetch: bool = True
     ai_web_fetch_allowed_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)

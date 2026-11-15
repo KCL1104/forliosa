@@ -142,16 +142,20 @@ export interface AiUsage {
   monthly_token_budget: number | null
   tokens_remaining: number | null
   cost_usd_month: number
+  /** 每人每月的 AI 花費上限（美元，估計值）；`null`＝不限 */
+  monthly_cost_budget_usd?: number | null
+  /** 這個月的額度（美元或 token）用完了：一般提問也不能再問，下個月 1 日重新計算 */
+  month_budget_reached?: boolean
   model: string
   available: boolean
-  /** 深度搜尋一次算幾題；`null`＝這個環境沒有深度搜尋（選填：舊版後端沒有，當成 5） */
+  /** 深度搜尋一次算幾題（不超過每天的題數）；`null`＝這個環境沒有深度搜尋（選填：舊版後端沒有，當成 3） */
   deep_search_cost?: number | null
   /** 固定顯示的免責聲明（後端提供） */
   disclaimer?: string
 }
 
-/** 深度搜尋一次算幾題（後端沒說時的預設，也是 mock 模式用的數字） */
-export const DEEP_SEARCH_COST = 5
+/** 深度搜尋一次算幾題（後端沒說時的預設，也是 mock 模式用的數字）：每天 3 題時一次用掉一整天（產品負責人 2026-11-15） */
+export const DEEP_SEARCH_COST = 3
 
 function prefix(): string {
   const root = (apiBaseUrl ?? "").replace(/\/+$/, "")

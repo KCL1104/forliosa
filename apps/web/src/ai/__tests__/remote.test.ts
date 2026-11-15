@@ -93,6 +93,8 @@ describe("usageNote", () => {
     expect(usageNote({ messages_remaining: 30, tokens_remaining: 1e6 })).toBeNull()
     expect(usageNote({ messages_remaining: 3, tokens_remaining: 1e6 })).toBe("今天還可以問 3 題。")
     expect(usageNote({ messages_remaining: 0, tokens_remaining: 1e6 })).toContain("用完")
+    // 這個月的美元額度用完（每人每月約 US$2；產品負責人 2026-11-15）：說下個月，不是明天
+    expect(usageNote({ messages_remaining: 3, tokens_remaining: 1e6, month_budget_reached: true })).toBe("這個月的提問額度用完了，下個月 1 日重新計算。")
     expect(usageNote({ messages_remaining: null, tokens_remaining: null })).toBeNull()
     // 所有金鑰都不能用（503 ai_unavailable）：安靜的一句，不是錯誤畫面
     expect(usageNote({ messages_remaining: 40, tokens_remaining: 1e6, available: false })).toContain("AI 暫時無法使用")
