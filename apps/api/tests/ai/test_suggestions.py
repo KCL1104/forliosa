@@ -88,6 +88,24 @@ def test_day_word_follows_the_close_date():
     assert ledger_questions(holdings, None, today)[0]["text"].startswith("今天")
 
 
+def test_us_moves_are_new_york_days_not_today():
+    """2026-11-15 review: a US holding's day change is a New York session's. A US-only ledger names that day; a mixed
+    ledger's 「今天」 question counts only the Taiwan holdings."""
+    from datetime import date
+
+    from forliosa.ai.suggestions import ledger_questions
+
+    today = date(2026, 11, 16)
+    us_only = [{"market": "US", "price": 356.27, "price_date": "2026-11-13", "day_change": -40, "weight": 0.1},
+               {"market": "US", "price": 190.0, "price_date": "2026-11-12", "day_change": 0, "weight": 0.1}]
+    q = ledger_questions(us_only, {"as_of": "2026-11-14T05:00:00+08:00"}, today)[0]
+    assert q["text"] == "11/13（美東）誰拖累了我的報酬？" and q["lines"] == ["11/13（美東）", "誰拖累了我？"]
+    mixed = [{"market": "TWSE", "price": 1085, "day_change": 500, "weight": 0.1},
+             {"market": "US", "price": 356.27, "price_date": "2026-11-13", "day_change": -40, "weight": 0.1}]
+    q = ledger_questions(mixed, {"as_of": "2026-11-16T13:30:00+08:00"}, today)[0]
+    assert q["kind"] == "lift" and q["text"] == "今天誰幫我賺最多？"  # Apple's 11/13 drop is not today's drag
+
+
 def test_why_question_direction_and_day_follow_the_quote():
     """2026-11-14 review: the 「為什麼漲／跌」 question took its direction from a field QuoteData does not have (always
     「漲」) and always said 「今天」, even for an earlier session's close."""

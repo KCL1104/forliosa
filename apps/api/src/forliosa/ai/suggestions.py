@@ -43,6 +43,17 @@ def _day_lead(summary: dict | None, today: date) -> str:
     return "今天" if day is None or day >= today else f"{day.month:02d}/{day.day:02d}"
 
 
+def _us_close_day(holdings: list[dict]) -> date | None:
+    """Only US holdings have a price: the numbers are a New York session's (``price_date``), already the next morning
+    in Taipei, so the question names that day (「11/13（美東）」), never 「今天」. Same rule as the frontend's
+    ``ledgerUsCloseDay`` (apps/web/src/lib/as-of.ts; 2026-11-15 review)."""
+    priced = [h for h in holdings if h.get("price") is not None]
+    if not priced or any(h.get("market") != "US" for h in priced):
+        return None
+    days = [d if isinstance(d, date) else date.fromisoformat(str(d)[:10]) for h in priced if (d := h.get("price_date"))]
+    return max(days) if days else None
+
+
 def _days(today: date, d: Any) -> int | None:
     if d is None:
         return None
@@ -60,11 +71,17 @@ def ledger_questions(holdings: list[dict], summary: dict | None, today: date) ->
     if not holdings:
         return [_q("onboard", "怎麼記第一筆？", "怎麼記", "第一筆？")]
     out = []
-    day = _day_lead(summary, today)
-    lead = day if day == "今天" else f"{day} "
-    if any((h.get("day_change") or 0) < 0 for h in holdings):
+    us_day = _us_close_day(holdings)
+    if us_day is not None:  # a US-only ledger: New York's session, every holding
+        day = lead = f"{us_day.month}/{us_day.day}（美東）"
+        movers = holdings
+    else:  # the Taiwan day; a US holding's change is another (New York) session's, not part of this sentence
+        day = _day_lead(summary, today)
+        lead = day if day == "今天" else f"{day} "
+        movers = [h for h in holdings if h.get("market") != "US"]
+    if any((h.get("day_change") or 0) < 0 for h in movers):
         out.append(_q("drag", f"{lead}誰拖累了我的報酬？", day, "誰拖累了我？"))
-    elif any((h.get("day_change") or 0) > 0 for h in holdings):
+    elif any((h.get("day_change") or 0) > 0 for h in movers):
         out.append(_q("lift", f"{lead}誰幫我賺最多？", day, "誰幫我賺最多？"))
     soon = [d for d in (summary or {}).get("upcoming_dividends", [])
             if (n := _days(today, d.get("ex_dividend_date"))) is not None and 0 <= n <= DIVIDEND_WINDOW_DAYS]
