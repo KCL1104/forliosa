@@ -59,6 +59,7 @@ from typing import Any
 import anthropic
 from sqlalchemy.orm import Session
 
+from forliosa import plans
 from forliosa.ai import grounding, scope, store
 from forliosa.ai.keypool import Failure, KeyPool, KeysBusy, KeySlot, NoKeyAvailable, classify_failure
 from forliosa.ai.pricing import CallUsage
@@ -222,8 +223,12 @@ def render_messages(messages: list[dict[str, Any]], system_role: bool) -> list[d
 
 class ChatTurn:
     def __init__(self, db: Session, user: User, md: MarketData, pool: KeyPool, settings: Settings,
-                 now_fn: Callable[[], datetime] = now_taipei):
+                 now_fn: Callable[[], datetime] = now_taipei, economy: bool = False):
         self.db, self.user, self.md, self.pool, self.settings, self.now_fn = db, user, md, pool, settings, now_fn
+        # 省錢模式 (``store.month_mode``): the month's budget is spent, so this turn has no web search or fetch. The
+        # tool list differs from the thread's earlier turns, so replayed thinking is rejected once and the turn goes
+        # on from the plain-text recap (``_THINKING_REJECTED``).
+        self.economy = economy
         self.thread: AiThread | None = None
         self.slot: KeySlot | None = None  # the slot serving this turn (every call of the turn)
         self.costs: dict[int, Decimal] = {}  # estimated cost per slot this UTC month
@@ -239,7 +244,8 @@ class ChatTurn:
     def tools(self) -> list[dict[str, Any]]:
         # 深度搜尋 only raises how often web_search may run; the tool list is otherwise the same
         max_uses = self.settings.ai_deep_search_max_uses if self.deep else None
-        return client_tool_definitions(self.settings) + server_tools(self.settings, max_uses=max_uses)
+        web = [] if self.economy else server_tools(self.settings, max_uses=max_uses)
+        return client_tool_definitions(self.settings) + web
 
     def params(self, model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
@@ -256,7 +262,8 @@ class ChatTurn:
     def _context(self) -> str:
         route, sym, name, privacy = self._page
         moved = self.recap is not None and self.history is self.recap
-        return page_context(self.now_fn(), route, sym, name, privacy, moved=moved, deep=self.deep)
+        return page_context(self.now_fn(), route, sym, name, privacy, moved=moved, deep=self.deep,
+                            economy=self.economy)
 
     # -- key slots -------------------------------------------------------------------------------------------
     def _use_recap(self, needed: bool) -> None:
@@ -486,7 +493,7 @@ class ChatTurn:
     def run(self, *, thread_id: str | None, message: str, route: str | None, symbol: str | None,
             privacy: bool, mode: str | None = None) -> Iterator[Event]:
         db, settings = self.db, self.settings
-        self.deep = mode == "deep" and settings.ai_web_search
+        self.deep = mode == "deep" and settings.ai_web_search and not self.economy
         created = thread_id is None
         thread = (store.create_thread(db, self.user, message, store.model_for("chat", settings)) if created
                   else store.owned_thread(db, self.user, thread_id))
@@ -671,9 +678,12 @@ class ChatTurn:
         """What the user's row remembers about the turn. A 深度搜尋 counts as ``AI_DEEP_SEARCH_COST`` questions once
         the model has answered a call of it; one that never reached the model (declined as off-topic, no key slot,
         a failure before anything came back) counts as an ordinary question."""
+        if self.economy:
+            return {"economy": True}
         if not self.deep:
             return {}
-        return {"mode": "deep", "cost": store.deep_search_cost(self.settings) if self.served else 1}
+        plan = plans.plan_of(self.user, self.settings)
+        return {"mode": "deep", "cost": store.deep_search_cost(self.settings, plan) if self.served else 1}
 
     def _page_symbol(self, symbol: str | None) -> tuple[str | None, str | None]:
         if not symbol:

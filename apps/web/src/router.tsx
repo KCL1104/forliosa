@@ -185,6 +185,11 @@ const adminNewsRoute = createRoute({
   path: "/admin/news",
   component: lazyRouteComponent(() => import("@/pages/admin/AdminNewsPage"), "AdminNewsPage"),
 })
+const adminMembersRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/members",
+  component: lazyRouteComponent(() => import("@/pages/admin/AdminMembersPage"), "AdminMembersPage"),
+})
 const adminDiscussionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/discussions",
@@ -242,6 +247,7 @@ const routeTree = rootRoute.addChildren([
   adminRoute,
   adminDiscussionsRoute,
   adminNewsRoute,
+  adminMembersRoute,
   settingsRoute,
   dataSourcesRoute,
   termsRoute,

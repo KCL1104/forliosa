@@ -216,13 +216,17 @@ function EventsLink({ symbol }: { symbol: string }) {
 function SearchPrompt({ onSearch }: { onSearch: () => void }) {
   const usage = useAiUsage().data
   const monthDone = usage?.month_budget_reached === true || usage?.tokens_remaining === 0
-  const off = usage?.available === false || usage?.messages_remaining === 0 || monthDone
+  // 省錢模式：查法人觀點要上網搜尋，等下個月
+  const noWeb = usage?.economy === true
+  const off = usage?.available === false || usage?.messages_remaining === 0 || monthDone || noWeb
   const hint =
     usage?.available === false
       ? "AI 暫時無法使用，稍後再查。"
       : monthDone
         ? "這個月的提問額度用完了，下個月 1 日重新計算。"
-        : usage?.messages_remaining === 0
+        : noWeb
+          ? "這個月的網路搜尋額度用完了，下個月 1 日再查。"
+          : usage?.messages_remaining === 0
           ? "今天的提問額度用完了，明天再查。"
           : usage?.messages_remaining !== null && usage?.messages_remaining !== undefined && usage.messages_remaining <= 5
             ? `查詢算一題，今天還可以問 ${usage.messages_remaining} 題。`

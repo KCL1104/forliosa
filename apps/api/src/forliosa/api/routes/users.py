@@ -7,6 +7,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from forliosa import plans
 from forliosa.api.deps import create_session, current_user, destroy_session, signed_in_user
 from forliosa.api.errors import ApiError
 from forliosa.api.schemas import AccountDeleteIn, DevLoginIn, MePatch, PreferencesPatch, TermsAcceptIn, User
@@ -27,7 +28,8 @@ def user_out(db: Session, user: UserModel) -> dict:
     """The signed-in user's own profile, with their public name, whether they are a site admin and until when their
     public posting is suspended (``services.discussions``). Only ever returned to the user themselves."""
     return {"id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url,
-            "preferences": preferences_of(user), **discussions.me_fields(db, user), **account.terms_fields(user)}
+            "preferences": preferences_of(user), **discussions.me_fields(db, user), **account.terms_fields(user),
+            **plans.me_fields(user, get_settings())}
 
 
 @router.post("/auth/dev-login", response_model=User, summary="開發用登入（僅 FORLIOSA_ENV=dev）")
@@ -81,6 +83,8 @@ def put_public_name(body: PublicNameIn, user: UserModel = Depends(signed_in_user
 def patch_preferences(body: PreferencesPatch, user: UserModel = Depends(current_user),
                       db: Session = Depends(get_db)):
     changes = body.model_dump(exclude_unset=True, exclude_none=True)
+    if changes.get("daily_briefing") is True and not plans.plan_of(user, get_settings()).daily_briefing:
+        raise ApiError(403, "members_only", "每日收盤簡報是會員功能。")
     if "benchmark" in changes:
         sym = get_market_data().resolve_benchmark(changes["benchmark"])
         if sym is None:

@@ -43,6 +43,11 @@ class User(Base):
     # recorded when the account is created and on ``POST /me/terms-accept``. NULL: created before versions existed.
     terms_version_accepted: Mapped[str | None] = mapped_column(String(32), nullable=True)
     terms_accepted_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    # 會員方案 (``forliosa.plans``): "free" or "member"; a member until ``plan_until`` (NULL: no end date). Granted by a
+    # site admin on /admin/members for now (no payments yet); ``plan_note`` is the admin's own note (e.g. a transfer).
+    plan: Mapped[str] = mapped_column(String(16), default="free", server_default="free")
+    plan_until: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    plan_note: Mapped[str | None] = mapped_column(String(200), nullable=True)
 
 
 class UserSession(Base):

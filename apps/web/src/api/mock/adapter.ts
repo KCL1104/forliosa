@@ -28,6 +28,7 @@ import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
 import { createSharingStore, type MemberSource } from "./sharing"
 import { createDiscussionStore, type DiscussionOptions } from "./discussions"
 import { createAdminStore } from "./admin"
+import { todayInTaipei } from "@/lib/format"
 import { closedRounds, positionHistory } from "./rounds"
 import {
   buildChips,
@@ -858,6 +859,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     listBlockedDomains: () => wait(() => admin.list()),
     blockDomain: (body) => wait(() => admin.block(body, new Date(discussionNow()))),
     unblockDomain: (domain) => wait(() => admin.unblock(domain)),
+    listMembers: () => wait(() => admin.members(todayInTaipei(new Date(discussionNow())))),
+    grantMember: (body) => wait(() => admin.grant(body, todayInTaipei(new Date(discussionNow())))),
+    revokeMember: (userId) => wait(() => admin.revoke(userId)),
   }
 
   return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)
@@ -888,7 +892,7 @@ const WRITES = new Set<MethodName>([
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
   "createTopic", "deleteTopic", "createReply", "deleteReply", "addDiscussionReaction", "removeDiscussionReaction", "reportDiscussion",
-  "moderateDiscussion", "createSuspension", "liftSuspension", "blockDomain", "unblockDomain",
+  "moderateDiscussion", "createSuspension", "liftSuspension", "blockDomain", "unblockDomain", "grantMember", "revokeMember",
 ])
 
 function guardViewAs(base: ForliosaApi, validate: (id: string) => unknown, wait: <T>(value: T | (() => T)) => Promise<T>): ForliosaApi {

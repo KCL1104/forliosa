@@ -1,4 +1,12 @@
-import { ApiError, type AdminDataset, type AdminOverview, type BlockDomainResult, type BlockedDomain } from "../types"
+import {
+  ApiError,
+  type AdminDataset,
+  type AdminMember,
+  type AdminOverview,
+  type BlockDomainResult,
+  type BlockedDomain,
+  type MemberGrantBody,
+} from "../types"
 import { datasetRows } from "./attributions"
 import { mockMediaUrls } from "./research"
 
@@ -7,6 +15,8 @@ import { mockMediaUrls } from "./research"
  * - 總覽：使用者只有人數；金鑰槽只有狀態與本月用量（沒有金鑰）；資料集是最久沒有新資料的在前，落後 3 個交易日以上標 `stale`。
  * - 新聞下架：網域正規化（小寫、去掉 www.、從網址取主機）；封鎖會刪掉那個網域與子網域已存的標題（示範報導都在 example.com）；
  *   寫在伺服器設定的不能在這裡解除（409）。
+ * - 會員：用 email 開通或續期（示範帳號只有 demo@forliosa.local 與 friend@forliosa.local；其他 email → 404）；
+ *   到期日早於今天 → 422；過期的也列出，方便續期。
  * 呼叫的人不是站方管理員 → 404（`requireAdmin` 由 adapter 給，和討論串的站方管理同一個判斷）。
  */
 export interface AdminDeps {
@@ -71,6 +81,13 @@ export function createAdminStore(deps: AdminDeps) {
   /** 已經刪掉的示範報導（封鎖後不再出現在個股頁的新聞，再封鎖一次也不會再算一次） */
   const deleted = new Set<string>()
   const blocked = () => [...stored.keys(), ...ENV_BLOCKED]
+  const accounts: Record<string, { user_id: string; display_name: string }> = {
+    "demo@forliosa.local": { user_id: "usr_01JDEMO", display_name: "示範使用者" },
+    "friend@forliosa.local": { user_id: "usr_friend", display_name: "阿明" },
+  }
+  const members = new Map<string, AdminMember>([
+    ["usr_friend", { user_id: "usr_friend", email: "friend@forliosa.local", display_name: "阿明", until: "2026-12-14", note: "11/15 轉帳 NT$300", active: true }],
+  ])
 
   return {
     /** 個股頁的新聞：封鎖中的網域、封鎖時刪掉的報導不出現（解除封鎖也不會回來，和後端一樣） */
@@ -139,6 +156,31 @@ export function createAdminStore(deps: AdminDeps) {
       const domain = normalizeDomain(raw)
       if (ENV_BLOCKED.includes(domain)) throw new ApiError(409, "set_in_environment", "這個網域寫在伺服器設定裡，這裡不能解除。")
       if (!stored.delete(domain)) throw new ApiError(404, "not_found", "封鎖清單裡沒有這個網域")
+    },
+
+    members(today: string): AdminMember[] {
+      deps.requireAdmin()
+      return [...members.values()]
+        .map((m) => ({ ...m, active: m.until === null || m.until >= today }))
+        .sort((a, b) => Number(b.active) - Number(a.active) || (a.until ?? "9999-12-31").localeCompare(b.until ?? "9999-12-31") || a.email.localeCompare(b.email))
+    },
+
+    grant(body: MemberGrantBody, today: string): AdminMember {
+      deps.requireAdmin()
+      const email = body.email.trim().toLowerCase()
+      const account = accounts[email]
+      if (!account) throw new ApiError(404, "user_not_found", "找不到這個 email 的帳號：請對方先登入一次 Forliosa。")
+      if (body.until !== null && body.until < today) throw new ApiError(422, "until_in_past", "到期日不能早於今天。")
+      const note = body.note?.trim() || null
+      if (note && note.length > 200) throw new ApiError(422, "validation_error", "備註最多 200 個字")
+      const row: AdminMember = { ...account, email, until: body.until, note, active: true }
+      members.set(account.user_id, row)
+      return row
+    },
+
+    revoke(userId: string): void {
+      deps.requireAdmin()
+      if (!members.delete(userId)) throw new ApiError(404, "not_found", "這個帳號不是會員。")
     },
   }
 }

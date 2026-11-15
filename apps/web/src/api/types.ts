@@ -45,6 +45,20 @@ export interface User {
   public_posting_suspended_until?: string | null
   /** 站方暫停時寫的原因（只有本人看得到；沒寫是 null） */
   public_posting_suspended_reason?: string | null
+  /** 會員方案（選填：舊版後端與 mock 沒有，當成功能全開） */
+  plan?: UserPlan | null
+}
+
+/**
+ * 會員方案（產品負責人 2026-11-15）：免費每天 3 題、每月約 US$1；會員每天 30 題、約 US$3，另有深度搜尋與每日收盤簡報。
+ * 站方管理員算會員。還沒有付款：會員由站方在 `/admin/members` 手動開通。
+ */
+export interface UserPlan {
+  tier: "free" | "member"
+  /** 會員的最後一天（YYYY-MM-DD，台北）；null＝免費或沒有到期日 */
+  until: string | null
+  deep_search: boolean
+  daily_briefing: boolean
 }
 
 export interface DevLoginBody {
@@ -1397,6 +1411,24 @@ export interface BlockedDomain {
   /** 寫在伺服器設定：這裡不能解除 */
   from_env: boolean
 }
+/** 站方手動開通的會員（`GET /admin/members`；過期的也列出，方便續期） */
+export interface AdminMember {
+  user_id: string
+  email: string
+  display_name: string
+  /** 最後一天（YYYY-MM-DD，台北）；null＝沒有到期日 */
+  until: string | null
+  /** 站方自己的備註（例如收款紀錄） */
+  note: string | null
+  /** 今天還是會員 */
+  active: boolean
+}
+export interface MemberGrantBody {
+  email: string
+  /** 最後一天（YYYY-MM-DD）；null＝沒有到期日 */
+  until: string | null
+  note?: string
+}
 export interface BlockDomainResult {
   /** 正規化之後的網域（小寫、去掉 www.） */
   domain: string
@@ -1741,4 +1773,9 @@ export interface ForliosaApi {
   blockDomain(body: { domain: string; reason?: string }): Promise<BlockDomainResult>
   /** 寫在伺服器設定的 → 409 `set_in_environment`；不在清單 → 404 */
   unblockDomain(domain: string): Promise<void>
+  listMembers(): Promise<AdminMember[]>
+  /** 開通或續期；找不到這個 email 的帳號 → 404 `user_not_found`（對方要先登入一次）；到期日早於今天 → 422 */
+  grantMember(body: MemberGrantBody): Promise<AdminMember>
+  /** 改回免費；不是會員 → 404 */
+  revokeMember(userId: string): Promise<void>
 }

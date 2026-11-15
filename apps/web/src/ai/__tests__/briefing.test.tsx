@@ -274,4 +274,18 @@ describe("設定：每日收盤簡報的開關（預設關）", () => {
     expect(await screen.findByRole("button", { name: "問 AI" }, T)).toBeInTheDocument()
     expect(await api.getLatestBriefing()).toBeNull()
   })
+
+  it("免費帳號：開關是關的、不能打開，說明這是會員功能", async () => {
+    const me = await api.getMe()
+    vi.spyOn(api, "getMe").mockResolvedValue({
+      ...me,
+      preferences: { ...me.preferences, daily_briefing: true }, // 方案出來以前打開的：照樣顯示關
+      plan: { tier: "free", until: null, deep_search: false, daily_briefing: false },
+    })
+    renderApp("/settings")
+    expect(await screen.findByText("收盤後依你的持股與觀察清單寫一則。這是會員功能。", undefined, T)).toBeInTheDocument()
+    const sw = screen.getByRole("switch", { name: "每日收盤簡報" })
+    expect(sw).toHaveAttribute("aria-checked", "false")
+    expect(sw).toHaveAttribute("aria-disabled", "true") // Base UI 的開關用 aria-disabled，不是 disabled 屬性
+  })
 })

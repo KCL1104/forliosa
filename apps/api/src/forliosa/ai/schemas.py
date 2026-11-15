@@ -182,6 +182,7 @@ class Suggestions(BaseModel):
 class Usage(BaseModel):
     date: str
     month: str
+    plan: Literal["free", "member"] = Field(default="free", description="會員方案（`GET /me` 的 `plan.tier`）")
     messages_today: int
     daily_message_limit: int | None
     messages_remaining: int | None
@@ -190,14 +191,20 @@ class Usage(BaseModel):
     tokens_remaining: int | None
     cost_usd_month: float
     monthly_cost_budget_usd: float | None = Field(
-        default=None, description="每人每月的 AI 花費上限（美元，估計值；`AI_MONTHLY_COST_BUDGET_USD`）；`null`＝不限")
+        default=None, description="這個方案每月的 AI 花費上限（美元，估計值；免費 `AI_MONTHLY_COST_BUDGET_USD`、會員 "
+                                  "`AI_MEMBER_MONTHLY_COST_BUDGET_USD`）；`null`＝不限")
+    economy: bool = Field(
+        default=False, description="省錢模式：這個月的花費上限用完了，提問還可以問，但不上網搜尋；深度搜尋、分析師觀點"
+                                   "與收盤簡報等下個月 1 日")
     month_budget_reached: bool = Field(
-        default=False, description="這個月的額度（美元或 token）用完了：一般提問也不能再問，下個月 1 日重新計算")
+        default=False, description="這個月連省錢模式的額度也用完了（或 token 上限）：不能再問，下個月 1 日重新計算")
     model: str
     available: bool
     deep_search_cost: int | None = Field(
         default=None,
-        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`，不超過每天的題數）；`null`＝這個環境沒有深度搜尋（沒開網路搜尋）")
+        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`，不超過每天的題數）；`null`＝現在不能用深度搜尋（方案沒有、"
+                    "省錢模式，或這個環境沒開網路搜尋）")
+    deep_search_members_only: bool = Field(default=False, description="這個環境有深度搜尋，但這個方案沒有（會員功能）")
     disclaimer: str = Field(description="固定顯示在每則 AI 回答下方的一行字（模型不會自己寫免責聲明）")
 
 

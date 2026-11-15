@@ -256,8 +256,11 @@ DEEP_SEARCH_NOTE = """- 深度搜尋：使用者要一份深入的整理，這�
   4. 只寫查得到來源的事；查不到的面向用一句話說「查不到可靠來源」。不給買賣建議與目標價，結尾不加總結或提議。"""  # noqa: E501
 
 
+ECONOMY_NOTE = """- 這個月的網路搜尋額度用完了：這一題沒有 web_search 和 web_fetch。用其他工具回答（報價、財報、技術指標、get_news 的新聞）。問題需要網路上更新的消息才答得了時，先寫你查得到的部分，再用一句話說明網路搜尋下個月 1 日恢復。"""  # noqa: E501
+
+
 def page_context(now: datetime, route: str | None, symbol: str | None, symbol_name: str | None,
-                 privacy: bool, moved: bool = False, deep: bool = False) -> str:
+                 privacy: bool, moved: bool = False, deep: bool = False, economy: bool = False) -> str:
     kind = route_kind(route)
     page = ROUTE_LABELS[kind]
     if kind == "stock" and symbol:
@@ -276,6 +279,7 @@ def page_context(now: datetime, route: str | None, symbol: str | None, symbol_na
         f"- 隱私模式：{privacy_line}"
         + (f"\n{MOVED_NOTE}" if moved else "")
         + (f"\n{DEEP_SEARCH_NOTE}" if deep else "")
+        + (f"\n{ECONOMY_NOTE}" if economy else "")
     )
 
 

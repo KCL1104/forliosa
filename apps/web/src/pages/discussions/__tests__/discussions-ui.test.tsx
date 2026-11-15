@@ -585,9 +585,9 @@ describe("檢舉", () => {
 })
 
 describe("管理後台：只有站方管理員", () => {
-  it("不是管理員：/admin、/admin/discussions、/admin/news 都是一般外殼裡的「找不到這個頁面」，不向伺服器要任何管理資料", async () => {
+  it("不是管理員：/admin、/admin/discussions、/admin/news、/admin/members 都是一般外殼裡的「找不到這個頁面」，不向伺服器要任何管理資料", async () => {
     mount({ discussion: { admin: false } })
-    for (const path of ["/admin", "/admin/discussions", "/admin/news"]) {
+    for (const path of ["/admin", "/admin/discussions", "/admin/news", "/admin/members"]) {
       renderApp(path)
       expect(await screen.findByRole("heading", { level: 1, name: "找不到這個頁面" }, T)).toBeInTheDocument()
       expect(screen.queryByRole("navigation", { name: "管理後台" })).toBeNull()
@@ -598,6 +598,7 @@ describe("管理後台：只有站方管理員", () => {
     expect(api.listAdminReports).not.toHaveBeenCalled()
     expect(api.listSuspensions).not.toHaveBeenCalled()
     expect(api.listBlockedDomains).not.toHaveBeenCalled()
+    expect(api.listMembers).not.toHaveBeenCalled()
   })
 
   it("頭像選單沒有管理後台（管理員也沒有）；管理員的 ⌘K 有「管理後台」，不是管理員的沒有", async () => {
@@ -619,7 +620,7 @@ describe("管理後台：只有站方管理員", () => {
     expect(screen.queryByRole("option", { name: "管理後台" })).toBeNull()
   })
 
-  it("管理員：管理後台自己的外殼（字標｜管理後台、總覽・討論・新聞下架、回到帳本），沒有頭像選單、底部列與問 AI", async () => {
+  it("管理員：管理後台自己的外殼（字標｜管理後台、總覽・討論・新聞下架・會員、回到帳本），沒有頭像選單、底部列與問 AI", async () => {
     const user = userEvent.setup()
     mount()
     const router = renderApp("/admin")
@@ -629,6 +630,7 @@ describe("管理後台：只有站方管理員", () => {
       "總覽:/admin:page",
       "討論:/admin/discussions:null",
       "新聞下架:/admin/news:null",
+      "會員:/admin/members:null",
     ])
     expect(screen.getByRole("link", { name: "回到帳本" })).toHaveAttribute("href", "/")
     expect(screen.queryByRole("button", { name: /帳號選單/ })).toBeNull()
@@ -723,6 +725,41 @@ describe("管理後台：只有站方管理員", () => {
     await user.click(within(confirm).getByRole("button", { name: "解除" }))
     await waitFor(() => expect(api.unblockDomain).toHaveBeenCalledWith("example.com"), T)
     await waitFor(() => expect(screen.getByRole("list", { name: "封鎖中的網域" }).children).toHaveLength(2), T)
+  })
+
+  it("會員：用 email 開通（找不到帳號就地說明）、可以不設到期日；取消會員先確認", async () => {
+    const user = userEvent.setup()
+    mount()
+    renderApp("/admin/members")
+    const list = await screen.findByRole("list", { name: "會員" }, T)
+    expect([...list.children].map((li) => li.textContent)).toEqual(["阿明friend@forliosa.local到 2026/12/14・11/15 轉帳 NT$300續期取消會員"])
+    // 分頁只有「會員」是目前頁（總覽不跟著畫線）
+    const nav = screen.getByRole("navigation", { name: "管理後台" })
+    expect(within(nav).getAllByRole("link").map((a) => a.getAttribute("aria-current"))).toEqual([null, null, null, "page"])
+    // 空的不送出，就地說明
+    await user.click(screen.getByRole("button", { name: "開通" }))
+    expect(screen.getByRole("alert")).toHaveTextContent("請輸入對方登入用的 email。")
+    expect(api.grantMember).not.toHaveBeenCalled()
+    // 對方還沒登入過：伺服器說 404，寫在 email 下面
+    await user.type(screen.getByRole("textbox", { name: "Email" }), "nobody@example.com")
+    await user.click(screen.getByRole("button", { name: "開通" }))
+    expect(await screen.findByRole("alert", undefined, T)).toHaveTextContent("請對方先登入一次 Forliosa")
+    await user.clear(screen.getByRole("textbox", { name: "Email" }))
+    await user.type(screen.getByRole("textbox", { name: "Email" }), "demo@forliosa.local")
+    await user.click(screen.getByRole("button", { name: "不設到期日" }))
+    expect(screen.getByText("沒有到期日，要取消時在下面按「取消會員」。")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "開通" }))
+    await waitFor(() => expect(api.grantMember).toHaveBeenLastCalledWith({ email: "demo@forliosa.local", until: null }), T)
+    expect(await screen.findByText("示範使用者 是會員了", undefined, T)).toBeInTheDocument()
+    await waitFor(() => expect(screen.getByRole("list", { name: "會員" }).children).toHaveLength(2), T)
+    // 沒有到期日的不用續期
+    expect(screen.queryByRole("button", { name: "幫 示範使用者 續期" })).toBeNull()
+    await user.click(screen.getByRole("button", { name: "取消 阿明 的會員" }))
+    const confirm = await screen.findByRole("alertdialog", undefined, T)
+    expect(confirm).toHaveTextContent("馬上回到免費")
+    await user.click(within(confirm).getByRole("button", { name: "取消會員" }))
+    await waitFor(() => expect(api.revokeMember).toHaveBeenCalledWith("usr_friend"), T)
+    await waitFor(() => expect(screen.getByRole("list", { name: "會員" }).children).toHaveLength(1), T)
   })
 
   it("討論：待處理的檢舉是格線列，隱藏先確認、處理完就離開待處理", async () => {

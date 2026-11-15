@@ -5,6 +5,7 @@ import { qk } from "./queries"
 import {
   REACTION_EMOJIS,
   type DiscussionTarget,
+  type MemberGrantBody,
   type ModerationAction,
   type Paged,
   type Reaction,
@@ -245,6 +246,7 @@ export function useLiftSuspension() {
 export const ak = {
   overview: ["admin", "overview"] as const,
   blocked: ["admin", "news", "blocked-domains"] as const,
+  members: ["admin", "members"] as const,
 }
 /** 總覽（使用者人數、AI 金鑰槽、資料集、歷史日線回補）：管理員自己按「重新載入」或換頁回來才重抓 */
 export function useAdminOverview() {
@@ -269,5 +271,33 @@ export function useUnblockDomain() {
   return useMutation({
     mutationFn: (domain: string) => api.unblockDomain(domain),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ak.blocked }),
+  })
+}
+
+// ── 管理後台：會員（站方手動開通；還沒有付款） ─────────────────
+export function useMembers() {
+  return useQuery({ queryKey: ak.members, queryFn: () => api.listMembers(), staleTime: 15_000, retry: no4xxRetry })
+}
+/** 開通、續期或取消之後清單重抓；開通的是自己時，`/me` 與 AI 用量也要重抓（方案變了） */
+export function useGrantMember() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: MemberGrantBody) => api.grantMember(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ak.members })
+      void qc.invalidateQueries({ queryKey: qk.me })
+      void qc.invalidateQueries({ queryKey: ["ai", "usage"] })
+    },
+  })
+}
+export function useRevokeMember() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (userId: string) => api.revokeMember(userId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ak.members })
+      void qc.invalidateQueries({ queryKey: qk.me })
+      void qc.invalidateQueries({ queryKey: ["ai", "usage"] })
+    },
   })
 }

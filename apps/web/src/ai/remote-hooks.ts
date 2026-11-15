@@ -44,14 +44,24 @@ export function useAiUsage() {
 
 /** 輸入框下方的一行：剩不多時提醒，用完時說明 */
 export function usageNote(
-  u: { messages_remaining: number | null; tokens_remaining: number | null; month_budget_reached?: boolean; available?: boolean } | undefined,
+  u:
+    | {
+        messages_remaining: number | null
+        tokens_remaining: number | null
+        month_budget_reached?: boolean
+        economy?: boolean
+        available?: boolean
+      }
+    | undefined,
 ): string | null {
   if (!u) return null
   if (u.available === false) return "AI 暫時無法使用；記帳指令仍會寫成草稿。"
   if (u.month_budget_reached || u.tokens_remaining === 0) return "這個月的提問額度用完了，下個月 1 日重新計算。"
   if (u.messages_remaining === 0) return "今天的提問額度用完了，明天再繼續。"
-  if (u.messages_remaining !== null && u.messages_remaining <= 5) return `今天還可以問 ${u.messages_remaining} 題。`
-  return null
+  const left = u.messages_remaining !== null && u.messages_remaining <= 5 ? `今天還可以問 ${u.messages_remaining} 題。` : null
+  // 省錢模式：還能問，但這個月不上網查（回答只用站內的報價、財報與新聞）
+  if (u.economy) return `這個月的網路搜尋額度用完了，回答先只用站內資料，下個月 1 日恢復。${left ?? ""}`
+  return left
 }
 
 /** 後端的對話清單；`enabled: false` 時不發請求（面板首頁只在要列最近的對話時才需要） */

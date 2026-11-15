@@ -41,6 +41,15 @@ class PreferencesPatch(StrictModel):
     daily_briefing: bool | None = None
 
 
+class PlanOut(BaseModel):
+    """會員方案 (``forliosa.plans``). Site admins count as members."""
+
+    tier: Literal["free", "member"]
+    until: str | None = Field(default=None, description="會員的最後一天（YYYY-MM-DD，台北）；null＝免費或沒有到期日")
+    deep_search: bool = Field(description="這個方案可以用深度搜尋（會員）")
+    daily_briefing: bool = Field(description="這個方案有每日收盤簡報（會員）")
+
+
 class User(BaseModel):
     id: str
     email: str
@@ -62,6 +71,7 @@ class User(BaseModel):
     # sentence saying what changed (TERMS_EFFECTIVE_DATE, TERMS_SUMMARY; both optional).
     terms_effective_date: str | None = None
     terms_summary: str | None = None
+    plan: PlanOut | None = None
 
 
 class AccountDeleteIn(StrictModel):

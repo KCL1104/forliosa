@@ -1,4 +1,5 @@
-"""每日收盤簡報: one briefing per user and trading day, only for users who switched it on (off by default).
+"""每日收盤簡報: one briefing per user and trading day, only for members (``forliosa.plans``) who switched it on (off
+by default).
 
 Product owner, 2026-11-14 (after looking at Google Finance's "tasks"): one fixed kind of scheduled work instead of
 free-form tasks — after the close, a short briefing built from the user's own holdings and watchlist.
@@ -42,6 +43,7 @@ import anthropic
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from forliosa import plans
 from forliosa.ai import market_summary, store
 from forliosa.ai.analyst import search_results
 from forliosa.ai.keypool import KeyPool, get_key_pool
@@ -153,6 +155,11 @@ def opted_in(user: User) -> bool:
     return preferences_of(user).get("daily_briefing") is True
 
 
+def wanted(user: User, settings: Settings) -> bool:
+    """Switched on, and the user's plan includes the briefing (members; ``AI_FREE_DAILY_BRIEFING`` for everyone)."""
+    return opted_in(user) and plans.plan_of(user, settings).daily_briefing
+
+
 # -- facts (rules only) ---------------------------------------------------------------------------------------------
 def _mover(h: dict[str, Any]) -> dict[str, Any]:
     return {"symbol": h["symbol"], "code": h["code"], "name": h["name"], "market": h["market"], "type": h["type"],
@@ -234,7 +241,8 @@ def enabled(settings: Settings, pool: KeyPool | None = None) -> bool:
 
 
 def within_quota(db: Session, user: User, settings: Settings, now: datetime | None = None) -> bool:
-    """The month's budget only: a briefing is not one of the day's questions (產品負責人 2026-11-15)."""
+    """The month's budget only: a briefing is not one of the day's questions (產品負責人 2026-11-15). In 省錢模式
+    (the budget is spent) there is no briefing: it needs web search."""
     try:
         store.check_month_budget(db, user, settings, now)
     except ApiError:
@@ -384,7 +392,7 @@ def run(db: Session, md: MarketData, now: datetime | None = None, pool: KeyPool 
         except Exception:  # no keys configured: facts only
             pool = None
     for user in list(db.scalars(select(User).order_by(User.created_at, User.id))):
-        if not opted_in(user):
+        if not wanted(user, settings):
             continue
         try:
             row = generate_for_user(db, user, md, day, pool, settings, now)

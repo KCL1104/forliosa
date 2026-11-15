@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from forliosa import plans
 from forliosa.ai import store
 from forliosa.ai.chat import ChatTurn
 from forliosa.ai.keypool import get_key_pool
@@ -57,7 +58,12 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     deep = body.mode == "deep"
     if deep and not settings.ai_web_search:
         raise ApiError(503, "ai_unavailable", "現在不能用深度搜尋。")
-    store.check_quota(db, user, settings, cost=store.deep_search_cost(settings) if deep else 1)
+    plan = plans.plan_of(user, settings)
+    if deep and not plan.deep_search:
+        raise ApiError(403, "members_only", "深度搜尋是會員功能。")
+    # 省錢模式: the month's budget is spent; the turn runs without web search instead of being refused
+    economy = store.check_quota(db, user, settings, cost=store.deep_search_cost(settings, plan) if deep else 1,
+                                economy_ok=True)
     if body.thread_id:
         thread = store.owned_thread(db, user, body.thread_id)
         if thread.context_tokens >= settings.ai_thread_max_context_tokens:
@@ -68,7 +74,7 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
         # Own session: the request-scoped one is closed once streaming starts.
         with session_factory()() as sdb:
             me = sdb.get(User, user_id)
-            turn = ChatTurn(sdb, me, get_market_data(), pool, settings)
+            turn = ChatTurn(sdb, me, get_market_data(), pool, settings, economy=economy)
             for name, data in turn.run(thread_id=body.thread_id, message=body.message, route=body.page.route,
                                        symbol=body.page.symbol, privacy=body.privacy, mode=body.mode):
                 yield sse(name, data)
@@ -117,7 +123,8 @@ def get_suggestions(route: str = Query("/", max_length=200), symbol: str | None 
     return build_suggestions(db, user, get_market_data(), route, symbol)
 
 
-@router.get("/usage", response_model=Usage, summary="今天的提問數、本月 token 用量與上限、固定的免責聲明")
+@router.get("/usage", response_model=Usage,
+            summary="方案、今天的提問數、本月用量與上限（含省錢模式）、固定的免責聲明")
 def get_usage(user: User = Depends(current_user), db: Session = Depends(get_db)):
     pool = get_key_pool()
     available = pool.available and bool(pool.ranked(store.slot_month_costs(db)))

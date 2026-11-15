@@ -1,5 +1,5 @@
 """The site admins' back office (``/admin``): who may call it, the overview (counts only, never key material or
-emails), the news takedown blocklist and the read-only view-as refusal."""
+emails), the news takedown blocklist, members granted by hand and the read-only view-as refusal."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from tests.api.m5 import API, me_id
 
 ADMIN = f"{API}/admin"
 BLOCKED = f"{ADMIN}/news/blocked-domains"
+MEMBERS = f"{ADMIN}/members"
 KEYS = ("sk-ant-api03-FIRST-SECRET-KEY-VALUE", "sk-ant-api03-SECOND-SECRET-KEY-VALUE")
 
 
@@ -43,6 +44,9 @@ def test_back_office_is_404_for_everyone_but_site_admins(client, other_client, a
             c.post(BLOCKED, json={"domain": "example.com"}),
             c.post(BLOCKED, json={"nonsense": True}),  # 404 before the body is validated
             c.delete(f"{BLOCKED}/example.com"),
+            c.get(MEMBERS),
+            c.put(MEMBERS, json={"email": "demo@forliosa.local"}),
+            c.delete(f"{MEMBERS}/usr_x"),
         ]
 
     for c in (client, other_client):
@@ -195,7 +199,7 @@ def test_view_as_cannot_use_the_back_office(app, admin, client):
     r = client.post(f"{API}/delegations", json={"viewer_user_id": me_id(admin), "scope": "all"})
     assert r.status_code == 201, r.text
     h = {"X-Forliosa-View-As": r.json()["id"]}
-    for path in ("/admin/overview", "/admin/news/blocked-domains"):
+    for path in ("/admin/overview", "/admin/news/blocked-domains", "/admin/members"):
         r = admin.get(f"{API}{path}", headers=h)
         assert r.status_code == 403 and error(r) == "view_as_not_allowed", (path, r.text)
     r = admin.post(BLOCKED, json={"domain": "udn.com"}, headers=h)
@@ -258,3 +262,26 @@ def test_news_sources_that_are_switched_off_say_so(engine, admin, monkeypatch):
     by = {s["key"]: s for s in news["sources"]}
     assert by["gdelt"]["state"] == "off" and by["ai_search"]["state"] == "off"
     assert news["last_run_at"] is None and news["new_24h"] == 0
+
+
+# -- members --------------------------------------------------------------------------------------------------------
+def test_grant_renew_and_revoke_a_member(admin, client):
+    assert admin.get(MEMBERS).json() == []
+    r = admin.put(MEMBERS, json={"email": "nobody@example.com"})
+    assert r.status_code == 404 and error(r) == "user_not_found"
+    r = admin.put(MEMBERS, json={"email": "demo@forliosa.local", "until": "2020-01-01"})
+    assert r.status_code == 422
+    r = admin.put(MEMBERS, json={"email": "Demo@Forliosa.local", "until": "2099-01-31", "note": " 11/15 轉帳 NT$300 "})
+    assert r.status_code == 200, r.text
+    row = r.json()
+    assert (row["email"], row["until"], row["note"], row["active"]) == (
+        "demo@forliosa.local", "2099-01-31", "11/15 轉帳 NT$300", True)
+    assert client.get(f"{API}/me").json()["plan"]["tier"] == "member"
+    # renew: same account, a later day; the note can be cleared
+    r = admin.put(MEMBERS, json={"email": "demo@forliosa.local", "until": None, "note": ""})
+    assert (r.json()["until"], r.json()["note"]) == (None, None)
+    assert [m["email"] for m in admin.get(MEMBERS).json()] == ["demo@forliosa.local"]
+    assert admin.delete(f"{MEMBERS}/{row['user_id']}").status_code == 204
+    assert admin.delete(f"{MEMBERS}/{row['user_id']}").status_code == 404
+    assert admin.get(MEMBERS).json() == []
+    assert client.get(f"{API}/me").json()["plan"]["tier"] == "free"

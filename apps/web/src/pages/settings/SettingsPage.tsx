@@ -148,21 +148,27 @@ function Settings() {
 }
 
 /**
- * AI：每日收盤簡報的開關（預設關）。偏好存在伺服器上（worker 依它決定要不要寫），所以直接讀寫 `/me` 的偏好，
+ * AI：每日收盤簡報的開關（預設關；會員功能，免費帳號是關著、不能打開）。偏好存在伺服器上（worker 依它決定要不要寫），所以直接讀寫 `/me` 的偏好，
  * 不經過本機的顯示設定。下面是「刪除全部 AI 對話」（產品負責人 2026-11-14 決定 3-2）。
  */
 function AiSettings() {
   const me = useMe()
   const update = useUpdatePreferences()
-  const on = me.data?.preferences.daily_briefing ?? false
+  // 會員功能（產品負責人 2026-11-15）；舊版後端與 mock 沒有 plan：當成可以用
+  const allowed = me.data?.plan?.daily_briefing ?? true
+  const on = allowed && (me.data?.preferences.daily_briefing ?? false)
   const [confirming, setConfirming] = useState(false)
   return (
     <Group title="AI">
-      <Row label="每日收盤簡報" description="收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。" htmlFor="daily-briefing">
+      <Row
+        label="每日收盤簡報"
+        description={allowed ? "收盤後依你的持股與觀察清單寫一則，在「問 AI」最上面。" : "收盤後依你的持股與觀察清單寫一則。這是會員功能。"}
+        htmlFor="daily-briefing"
+      >
         <Switch
           id="daily-briefing"
           checked={on}
-          disabled={!me.data || update.isPending}
+          disabled={!me.data || update.isPending || !allowed}
           onCheckedChange={(v) =>
             update.mutate(
               { daily_briefing: v },

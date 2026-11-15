@@ -1,16 +1,19 @@
 """Request/response models of the site admins' back office (docs/api-contract.md 「管理後台」).
 
 The response models list every field explicitly: no email, user id or key material can reach a response by being
-added to a service dict later (unknown keys are dropped by the response model).
+added to a service dict later (unknown keys are dropped by the response model). The one exception is the members list
+(``AdminMember``): an admin grants membership by email, so it shows the members' emails.
 """
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
 from forliosa.api.schemas import StrictModel
+from forliosa.plans import NOTE_MAX
 from forliosa.services.admin import REASON_MAX
 from forliosa.textsafe import has_control
 
@@ -126,3 +129,32 @@ class BlockDomainIn(StrictModel):
 class BlockDomainOut(BaseModel):
     domain: str = Field(description="正規化之後的網域（小寫、去掉 www.）")
     deleted_headlines: int = Field(description="刪掉幾則已存的標題（含子網域）")
+
+
+class AdminMember(BaseModel):
+    """An account granted membership (``forliosa.plans``); expired ones stay listed so they can be renewed."""
+
+    user_id: str
+    email: str
+    display_name: str
+    until: str | None = Field(description="最後一天（YYYY-MM-DD，台北）；null＝沒有到期日")
+    note: str | None = Field(description="站方自己的備註（例如收款紀錄）")
+    active: bool = Field(description="今天還是會員")
+
+
+class MemberGrantIn(StrictModel):
+    email: str = Field(min_length=3, max_length=320)
+    until: date | None = Field(default=None, description="最後一天（台北）；null＝沒有到期日")
+    note: str | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v: str | None) -> str | None:
+        if v is None or not v.strip():
+            return None
+        v = v.strip()
+        if len(v) > NOTE_MAX:
+            raise ValueError(f"備註最多 {NOTE_MAX} 個字")
+        if has_control(v):
+            raise ValueError("備註不能有控制字元")
+        return v

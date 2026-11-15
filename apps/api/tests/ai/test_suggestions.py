@@ -70,7 +70,7 @@ def test_usage_shape(client, pool, ai_env):
     assert set(u) == {"date", "month", "messages_today", "daily_message_limit", "messages_remaining",
                       "tokens_month", "monthly_token_budget", "tokens_remaining", "cost_usd_month", "model",
                       "available", "deep_search_cost", "monthly_cost_budget_usd", "month_budget_reached",
-                      "disclaimer"}
+                      "disclaimer", "plan", "economy", "deep_search_members_only"}
 
 
 def test_day_word_follows_the_close_date():

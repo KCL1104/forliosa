@@ -598,7 +598,7 @@
 | `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
 | `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 回答僅供參考，非投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
 
-串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；429 `ai_daily_limit`（今天的提問數已達上限，每天 50 題；深度搜尋而今天剩下的題數不夠時也是這個代碼，訊息是「今天還剩 3 題，深度搜尋一次要 5 題。」，錯誤物件多 `remaining`、`cost`）／`ai_monthly_budget`（本月用量已達上限，每月 300 萬計費 token）；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完；`mode: "deep"` 而這個環境沒開網路搜尋時也是）。
+串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；403 `members_only`（`mode: "deep"` 而這個人的方案沒有深度搜尋）；429 `ai_daily_limit`（今天的提問數已達這個方案的上限；深度搜尋而今天剩下的題數不夠時也是這個代碼，訊息是「今天還剩 2 題，深度搜尋一次要 3 題。」，錯誤物件多 `remaining`、`cost`）／`ai_monthly_budget`（這個月連省錢模式的額度也用完了，或 token 上限；省錢模式時的深度搜尋也是這個代碼）。花費上限用完、還在省錢模式時，一般提問照常 200，只是這一題沒有 `web_search`／`web_fetch`；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完；`mode: "deep"` 而這個環境沒開網路搜尋時也是）。
 
 後端有多把 API 金鑰（各在自己的 workspace）：每段對話固定用同一把；那把不能用時自動換到別把，並以先前對話的純文字接續（前端不需要處理，`ThreadDetail` 不變）。
 
@@ -655,12 +655,16 @@
              {"kind": "watchlist_add", "label": "加入自選", "prompt": null, "symbol": "2330.TW", "count": null},
              {"kind": "review_drafts", "label": "確認 2 筆草稿", "prompt": null, "symbol": null, "count": 2}]}
 
-// Usage（上限為 null 表示不限制；messages_today 含今天觸發的法人觀點查詢，每次算一題）
-// deep_search_cost：深度搜尋一次算幾題（null＝這個環境沒有深度搜尋，前端不放切換鈕）；深度搜尋的那一題在 messages_today 裡算這麼多題
-// monthly_cost_budget_usd：每人每月估計花費上限（美元，null＝不限）；month_budget_reached：這個月用完了（一般提問也不能問）
-{"date": "2026-11-12", "month": "2026-11", "messages_today": 1, "daily_message_limit": 3, "messages_remaining": 2,
+// Usage（上限都是這個人的方案的；null 表示不限制；messages_today 含今天觸發的法人觀點查詢，每次算一題）
+// plan：會員方案（"free" | "member"，見「會員方案」）
+// deep_search_cost：深度搜尋一次算幾題（null＝現在不能用：方案沒有、省錢模式，或這個環境沒開網路搜尋；前端不放切換鈕）；
+//   深度搜尋的那一題在 messages_today 裡算這麼多題。deep_search_members_only：這個環境有深度搜尋，但這個方案沒有
+// monthly_cost_budget_usd：這個方案每月估計花費上限（美元，null＝不限）
+// economy：省錢模式（這個月的花費上限用完了；還能問，但不上網搜尋）；month_budget_reached：連省錢模式也用完了（不能再問）
+{"date": "2026-11-12", "month": "2026-11", "plan": "free", "messages_today": 1, "daily_message_limit": 3, "messages_remaining": 2,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
- "model": "claude-haiku-5-5", "available": true, "deep_search_cost": 3, "monthly_cost_budget_usd": 2.0, "month_budget_reached": false, "disclaimer": "AI 回答僅供參考，非投資建議。"}
+ "model": "claude-haiku-5-5", "available": true, "deep_search_cost": null, "deep_search_members_only": true,
+ "monthly_cost_budget_usd": 1.0, "economy": false, "month_budget_reached": false, "disclaimer": "AI 回答僅供參考，非投資建議。"}
 
 // KeySlots（GET /ai/admin/keys；slot = CLAUDE_API_KEY_<n> 的 n；不含金鑰）
 {"month": "2026-11",                  // UTC 月（預算以 UTC 月計）
@@ -709,7 +713,7 @@
 }
 ```
 - **共用**：同一檔、同一個台股交易日（台北時間今天；週末與休市日算最近一個交易日）全體使用者共用一份，建立後 24 小時刪除。
-- **計費**：觸發搜尋的人算一題（`/ai/usage.messages_today`，和對話共用 `AI_DAILY_MESSAGE_LIMIT`），token 計入他的每月額度；其他人讀同一份不計。額度用完回 429 `ai_daily_limit`／`ai_monthly_budget`；沒有可用金鑰回 503 `ai_unavailable`；功能關閉（`AI_ANALYST_ENABLED=false` 或網路搜尋停用）回 200 `unavailable`＋說明，不計費。
+- **計費**：觸發搜尋的人算一題（`/ai/usage.messages_today`，和對話共用每天的題數），token 計入他的每月額度（省錢模式時不能查：429 `ai_monthly_budget`）；其他人讀同一份不計。額度用完回 429 `ai_daily_limit`／`ai_monthly_budget`；沒有可用金鑰回 503 `ai_unavailable`；功能關閉（`AI_ANALYST_ENABLED=false` 或網路搜尋停用）回 200 `unavailable`＋說明，不計費。
 - **只有個股**：ETF 回 422 `analyst_views_stocks_only`（ETF 沒有個別機構的評等與目標價）；找不到商品 404。
 - **items**：最多 5 筆，依報導日期新到舊，同一家機構只留最新一筆（大摩／摩根士丹利／Morgan Stanley 這類常見別名算同一家；`institution` 照報導原文）。每筆的 `url` 必定是這次 AI 網路搜尋實際拿到的搜尋結果之一，`source_title` 是該搜尋結果自己的標題；`date` 是那篇報導的日期，由搜尋結果的網址日期或頁面日期核對（核對不到、超過 90 天、沒有具名機構——「美系外資」「外資券商」「Wall Street analysts」這類泛稱也算沒有具名——、評等與目標價都沒有、目標價幣別不是這檔股票的交易幣別，或來源是評等彙整站／報價頁／評等預測頁的，都不列）。`action` 是 調升／調降／維持／首評，報導沒寫為 `""`；`rating_text`、`target_price` 照報導原文，沒寫為 `null`；`currency` 是這檔股票的交易幣別。數字不換算、不平均、不比較。
 - **ready 且 items 是空的**＝近期查無附來源與日期的機構報導。核對後一筆都沒有，但搜尋結果裡有**這檔股票**的評等／目標價標題，或有候選只因網址或日期核對不到而被刪掉時，不宣稱「查無」，改回 `unavailable`（10 分鐘後可重查）；別檔股票的評等新聞不算。
@@ -1274,7 +1278,7 @@
 
 ### 管理後台：總覽與新聞下架（2026-11-14）
 
-前端 `/admin`（總覽）、`/admin/discussions`（上面的檢舉與停權）、`/admin/news`（新聞下架）。權限和上面一樣：沒登入 401、不是站方管理員 404（在驗證本文之前）；
+前端 `/admin`（總覽）、`/admin/discussions`（上面的檢舉與停權）、`/admin/news`（新聞下架）、`/admin/members`（會員，見「會員方案」）。權限和上面一樣：沒登入 401、不是站方管理員 404（在驗證本文之前）；
 查看別人的資產（`X-Forliosa-View-As`）時讀取 403 `view_as_not_allowed`、寫入 403 `read_only`。不回傳 email、`user_id` 或金鑰。
 
 | 方法 | 路徑 | 說明 |
@@ -1286,6 +1290,33 @@
 
 - `ai.month` 是 UTC 月份（金鑰的預算以 UTC 月計）；`state` 和 `/ai/admin/keys` 相同，多一個 `not_configured`。
 - `datasets` 是 `dataset_status` 的每一列，最久沒有新資料的在前；`stale`：最新資料落後今天 3 個交易日以上（沒有資料也算）；`days_behind` 是日曆天。
+
+### 會員方案（2026-11-15）
+
+產品負責人 2026-11-15 決定。還沒有付款：會員由站方在 `/admin/members` 手動開通（之後接金流）。站方管理員（`ADMIN_EMAILS`）算會員。
+
+| | 免費 | 會員 |
+|---|---|---|
+| 每天提問 | 3 題（`AI_DAILY_MESSAGE_LIMIT`） | 30 題（`AI_MEMBER_DAILY_MESSAGE_LIMIT`） |
+| 每月估計花費上限 | 約 US$1（`AI_MONTHLY_COST_BUDGET_USD`） | 約 US$3（`AI_MEMBER_MONTHLY_COST_BUDGET_USD`） |
+| 每月計費 token | 300 萬（`AI_MONTHLY_TOKEN_BUDGET`） | 不限（`AI_MEMBER_MONTHLY_TOKEN_BUDGET=0`） |
+| 深度搜尋（3 題） | 沒有（`AI_FREE_DEEP_SEARCH=false`） | 有 |
+| 每日收盤簡報 | 沒有（`AI_FREE_DAILY_BRIEFING=false`） | 有 |
+
+- **省錢模式**：這個月的花費剩不到一般提問的 US$0.03 時，提問照常（每天的題數照算），但不上網搜尋（沒有 `web_search`／`web_fetch`，約 US$0.002 一題；站內的報價、財報、技術指標、`get_news` 的新聞都還在）；
+  深度搜尋、法人觀點查詢、收盤簡報等下個月 1 日。花到上限的 `AI_ECONOMY_CAP_MULTIPLIER` 倍（預設 2）才完全停（`month_budget_reached`）。設 1 就是到上限直接停。
+- `GET /me` 多 `plan: {"tier": "free" | "member", "until": "YYYY-MM-DD" | null, "deep_search": bool, "daily_briefing": bool}`（`until`：會員的最後一天，台北；null＝免費或沒有到期日）。
+- `GET /ai/usage` 多 `plan`、`economy`、`deep_search_members_only`（見上面的 `Usage`）。
+
+站方（權限同管理後台：沒登入 401、不是站方管理員 404、查看別人的資產時 403）：
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/admin/members` | `[{"user_id", "email", "display_name", "until", "note", "active"}]`：開通過的帳號（過期的也列，方便續期；還有效的在前，再依最後一天） |
+| PUT | `/admin/members` | `{"email", "until": "YYYY-MM-DD" \| null, "note"?: ≤200 字}` → 同一列：開通或續期（email 不分大小寫）；找不到帳號（對方還沒登入過）→ 404 `user_not_found`；最後一天早於今天 → 422 `until_in_past` |
+| DELETE | `/admin/members/{user_id}` | 改回免費 → 204；不是會員 → 404 |
+
+會員到 `until` 那一天（台北）結束後自動回到免費（存的是隔天 00:00 台北的時刻）。這是管理後台唯一回傳 email 的地方：站方用 email 開通。
 
 ### 暫緩：線圖留言（彈幕）與指數頁（設計保留，未實作）
 
@@ -1324,7 +1355,8 @@
 
 ### 每日收盤簡報（2026-11-14）
 
-開關是偏好 `daily_briefing`（`PATCH /me/preferences`，預設 `false`）。worker 在收盤資料存好之後，替打開的人每個交易日寫一則；`AI_DAILY_BRIEFING_ENABLED=false` 整個停掉。
+開關是偏好 `daily_briefing`（`PATCH /me/preferences`，預設 `false`）。worker 在收盤資料存好之後，替打開的**會員**每個交易日寫一則；`AI_DAILY_BRIEFING_ENABLED=false` 整個停掉。
+免費帳號打開 → 403 `members_only`「每日收盤簡報是會員功能。」（關掉一律可以）；方案出來以前就打開的免費帳號不再收到（偏好留著，成為會員後恢復）。省錢模式時不寫（要上網搜尋）。
 
 ```json
 // Briefing

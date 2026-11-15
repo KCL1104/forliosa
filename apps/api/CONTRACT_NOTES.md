@@ -1050,9 +1050,12 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `AI_ANSWER_EDITOR` | `true` | 用到網路搜尋或個股新聞工具的回答，顯示前多一次不用工具的編輯呼叫（`ChatTurn._edit`、`prompts.EDITOR_SYSTEM`；effort low、最多 4000 token、30 秒）：改掉照抄的原文、句子裡的媒體名稱、說到工具的話，不改事實。編輯失敗、被截斷、太長或少了草稿裡的數字時，照原本寫的顯示（括號裡的股票代號、改寫成 11/13 時拿掉的年份不算；四捨五入或換了單位的同一個數字——7% 對 7.01%、3.51 萬張對 35,144 張——算保留）。深度搜尋從第一個字就先不送出（查之前寫的計畫句也一起整理）。「無來源」標記移到改寫後最像的那一句（相似度 ≥ 0.55，對不上就不標）。費用算進那位使用者的 `chat` 用量。2026-11-15 同樣 11 題實測：AI 腔訊號每題 1.5 → 0.5，每則多約 US$0.0002、1–2 秒 |
 | `AI_EFFORT_ANALYST` | `medium` | 法人觀點的 effort（要照多條規則逐筆整理，用 Haiku 5.5 的預設 medium；實測約 22–32 秒） |
 | `AI_MAX_TOKENS_CHAT`、`AI_MAX_TOOL_ROUNDS` | 8000、8 | 每次呼叫的輸出上限、每輪最多幾次模型呼叫 |
-| `AI_DAILY_MESSAGE_LIMIT` | 3 | 每人每天（台北日）提問數，0＝不限（產品負責人 2026-11-15：有訂閱方案之前 3 題；原本 50） |
+| `AI_DAILY_MESSAGE_LIMIT` | 3 | 免費帳號每天（台北日）提問數，0＝不限（產品負責人 2026-11-15；原本 50）。會員見 `AI_MEMBER_*`（`forliosa.plans`） |
 | `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
-| `AI_MONTHLY_COST_BUDGET_USD` | 2 | 每人每月（台北月）估計花費上限（美元：對話、法人觀點、收盤簡報；共用的工作不算到任何人），0＝不限（產品負責人 2026-11-15）。一題開始前要剩得下它的一般花費（一般提問 US$0.03、深度搜尋 US$0.15，`store.TURN_ESTIMATE_USD`），所以一個月停在 US$2 或略低；剩不夠時 429 `ai_monthly_budget`，`/ai/usage` 的 `month_budget_reached` 為 true |
+| `AI_MONTHLY_COST_BUDGET_USD` | 1 | 免費帳號每月（台北月）估計花費上限（美元：對話、法人觀點、收盤簡報；共用的工作不算到任何人），0＝不限（產品負責人 2026-11-15：從 US$2 降到 US$1）。一題要正常開始，得剩得下它的一般花費（一般提問 US$0.03、深度搜尋 US$0.15，`store.TURN_ESTIMATE_USD`）；剩不夠時進入**省錢模式**（`store.month_mode`）：提問照常，但這一題沒有 `web_search`／`web_fetch`（page context 多一行說明），深度搜尋、法人觀點、收盤簡報 429 `ai_monthly_budget`；`/ai/usage` 的 `economy` 為 true |
+| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、3、0 | 會員（`users.plan = "member"` 到 `plan_until`；站方管理員也算）每天的題數、每月花費上限、每月 token（0＝不限） |
+| `AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` | `false`、`false` | 免費帳號也能用深度搜尋／收盤簡報（個人部署用）；預設只給會員：免費帳號 `mode: "deep"` → 403 `members_only`，打開收盤簡報 → 403 `members_only` |
+| `AI_ECONOMY_CAP_MULTIPLIER` | 2 | 省錢模式一直到這個月花到上限的幾倍才完全停（429 `ai_monthly_budget`，`month_budget_reached` true）；1＝到上限直接停。省錢模式第一次在舊對話裡用時，工具清單和之前不同，回放的 thinking 會被拒一次，這一題改從純文字摘要接下去（`_THINKING_REJECTED`，和換金鑰槽同一條路） |
 | `AI_THREAD_MAX_CONTEXT_TOKENS` | 90,000 | 一段對話的提示超過這個大小就要求開新對話（Haiku 5.5 提示超過 10 萬 token 價格變 5 倍） |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、3 | 每輪最多 3 次搜尋 |
 | `AI_WEB_SEARCH_ALLOWED_DOMAINS` | 空（**不限網域**，產品負責人決定） | 逗號分隔；`recommended`＝內建的台灣財經媒體＋官方網域清單，`official`＝只有官方。預設由模型自己判斷何時搜尋、用哪些來源（只限財經資訊，見「範圍」） |

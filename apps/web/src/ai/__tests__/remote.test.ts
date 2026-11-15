@@ -93,8 +93,14 @@ describe("usageNote", () => {
     expect(usageNote({ messages_remaining: 30, tokens_remaining: 1e6 })).toBeNull()
     expect(usageNote({ messages_remaining: 3, tokens_remaining: 1e6 })).toBe("今天還可以問 3 題。")
     expect(usageNote({ messages_remaining: 0, tokens_remaining: 1e6 })).toContain("用完")
-    // 這個月的美元額度用完（每人每月約 US$2；產品負責人 2026-11-15）：說下個月，不是明天
+    // 這個月連省錢模式也用完（產品負責人 2026-11-15）：說下個月，不是明天
     expect(usageNote({ messages_remaining: 3, tokens_remaining: 1e6, month_budget_reached: true })).toBe("這個月的提問額度用完了，下個月 1 日重新計算。")
+    // 省錢模式：還能問，但這個月不上網查
+    expect(usageNote({ messages_remaining: 2, tokens_remaining: 1e6, economy: true })).toBe(
+      "這個月的網路搜尋額度用完了，回答先只用站內資料，下個月 1 日恢復。今天還可以問 2 題。",
+    )
+    expect(usageNote({ messages_remaining: 20, tokens_remaining: null, economy: true })).toBe("這個月的網路搜尋額度用完了，回答先只用站內資料，下個月 1 日恢復。")
+    expect(usageNote({ messages_remaining: 0, tokens_remaining: null, economy: true })).toBe("今天的提問額度用完了，明天再繼續。")
     expect(usageNote({ messages_remaining: null, tokens_remaining: null })).toBeNull()
     // 所有金鑰都不能用（503 ai_unavailable）：安靜的一句，不是錯誤畫面
     expect(usageNote({ messages_remaining: 40, tokens_remaining: 1e6, available: false })).toContain("AI 暫時無法使用")
