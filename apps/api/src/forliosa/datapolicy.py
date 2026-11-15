@@ -334,6 +334,15 @@ def _key(part: str) -> str:
 
 HISTORY_SOURCE = "yahoo-history"
 HISTORY_LICENSE_URL = "https://legal.yahoo.com/us/en/yahoo/terms/otos/index.html"
+US_PRICE_SOURCE = "databento-equs"  # forliosa.us_prices.SOURCE
+
+
+def us_prices_served() -> bool:
+    """US_PRICE_SOURCE=databento: Databento's US closes (``databento-equs`` rows) may be read and are credited. Off,
+    the rows stay stored but nothing reads or credits them."""
+    from forliosa.config import get_settings
+
+    return get_settings().us_prices_served
 
 
 def history_backfill_enabled() -> bool:
@@ -417,7 +426,8 @@ def allowed_sources(policy: Policy, backfill: bool = False) -> list[str]:
 
     ``backfill=True`` (charts only) adds the history backfill's key when the owner has switched it on."""
     keys = [k for k, (_, ok) in _SOURCES.items()
-            if k not in NEVER_ALLOWED and k != HISTORY_SOURCE and (ok or policy == "personal")]
+            if k not in NEVER_ALLOWED and k != HISTORY_SOURCE and (ok or policy == "personal")
+            and (k != US_PRICE_SOURCE or us_prices_served())]
     if backfill and history_backfill_enabled():
         keys.append(HISTORY_SOURCE)
     return keys
@@ -436,6 +446,8 @@ def source_clause(column, policy: Policy, backfill: bool = False):
     if policy == "commercial":
         return column.in_(allowed_sources(policy, backfill))
     never = {*NEVER_ALLOWED} if backfill and history_backfill_enabled() else {*NEVER_ALLOWED, HISTORY_SOURCE}
+    if not us_prices_served():
+        never.add(US_PRICE_SOURCE)
     return and_(*[not_(column.contains(k)) for k in sorted(never)])
 
 
@@ -512,6 +524,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     status = status or {}
     items, pending = [], []
     for d in DATASETS.values():
+        if d.key.startswith(f"{US_PRICE_SOURCE}/") and not us_prices_served():
+            continue  # credited only while its closes are served
         if d.license_status == "non_commercial" and policy != "personal":
             continue  # never used under commercial (listed in not_used instead)
         served = dataset_served(d.key, policy, confirmed)

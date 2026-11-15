@@ -148,7 +148,9 @@ def test_the_yahoo_backfill_cli_never_touches_the_us_progress(db):
 
 # -- serving ----------------------------------------------------------------------------------------------------
 @pytest.fixture()
-def us_md(engine):
+def us_md(engine, monkeypatch):
+    # US_PRICE_SOURCE=databento: the data policy reads and credits the rows (the provider flag decides per facade)
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
     with Session(engine) as s:
         for d, c in (("2026-11-12", "354.88"), ("2026-11-13", "356.27")):
             s.add(PriceDaily(symbol="AAPL", date=date.fromisoformat(d), close=D(c), source="databento-equs"))
@@ -173,6 +175,9 @@ def test_us_closes_are_served_only_when_switched_on(us_md):
     # a range before the first close says where the closes begin, not 「美股沒有報價」
     assert series_notes(on, "AAPL", date(2021, 11, 13), date(2026, 11, 12)) == ["資料從 2026/11/12 開始"]
     assert series_notes(off, "AAPL", date(2021, 11, 13), None) == ["美股沒有報價"]
+    from forliosa.datapolicy import allowed_sources
+
+    assert "databento-equs" in allowed_sources("commercial")
     # the Taiwan archive's start is not moved by US rows; a US symbol without rows has no start
     assert on.archive_since() == date(2026, 11, 13) and on.archive_since("MSFT") is None
 
@@ -203,6 +208,7 @@ def test_a_us_holding_is_valued_at_the_close_and_the_rate(client, engine, us_md,
 # -- market page ------------------------------------------------------------------------------------------------
 def test_market_page_us_row_and_taiwan_only_day_lookups(client, engine, monkeypatch):
     market_overview.clear_cache()
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
     with Session(engine) as s:
         for sym, rows in {"SPY": [("2026-11-12", "757.12"), ("2026-11-13", "754.37")],
                           "DIA": [("2026-11-13", "470.00")],
@@ -270,3 +276,36 @@ def test_off_without_the_switch_or_the_key(monkeypatch):
     us_prices.set_http(us_prices._UNSET)
     assert us_prices.http() is None
     assert DatasetStatus  # imported for the status key's table
+
+
+def test_switched_off_the_rows_are_neither_read_nor_credited(engine, monkeypatch):
+    from forliosa.datapolicy import allowed_sources, attributions
+
+    monkeypatch.setattr(get_settings(), "us_price_source", "")
+    assert "databento-equs" not in allowed_sources("commercial")
+    assert not [d for d in attributions("commercial")["datasets"] if d["key"].startswith("databento-equs")]
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
+    assert [d["key"] for d in attributions("commercial")["datasets"] if d["key"].startswith("databento")] == [
+        "databento-equs/price"]
+
+
+# -- splits (unadjusted closes) ---------------------------------------------------------------------------------
+def test_splits_are_found_from_the_open_and_folded_into_charts_only():
+    from forliosa.marketdata.archive_provider import detect_splits
+    from forliosa.marketdata.base import Candle, CorporateEvent
+    from forliosa.services.instruments import split_adjusted
+
+    d = date
+    rows = [(d(2024, 7, 11), D("1700"), D("1720.0")), (d(2024, 7, 12), D("1715"), D("1710.0")),
+            (d(2024, 7, 15), D("171.5"), D("168.0")),  # AVGO-like 10-for-1: opens at a tenth of the close
+            (d(2024, 7, 16), D("168"), D("84.5")),  # a 50 % crash during the day: not a split (the open did not gap)
+            (d(2024, 7, 17), D("42.9"), D("43.0"))]  # opens near half of 84.5 but 1.5 % off: not taken for 2-for-1
+    assert detect_splits(rows) == [(d(2024, 7, 15), D(10))]
+    assert detect_splits([(d(2025, 1, 2), D("2"), D("2.0")), (d(2025, 1, 3), D("40.2"), D("39.0"))]) == [
+        (d(2025, 1, 3), D(1) / 20)]  # 1-for-20 reverse split
+
+    candles = [Candle(d(2024, 7, 12), D("1715"), D("1720"), D("1700"), D("1710"), 100),
+               Candle(d(2024, 7, 15), D("171.5"), D("172"), D("166"), D("168"), 1000)]
+    adj, notes = split_adjusted(candles, [CorporateEvent("AVGO", d(2024, 7, 15), "split", D(10))])
+    assert (adj[0].c, adj[0].v, adj[1].c) == (D("171"), 1000, D("168"))
+    assert notes == ["2024/07/15 股票分割（1 股拆成 10 股），之前的價格已經換算"]

@@ -17,6 +17,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from datetime import date, timedelta
 from decimal import Decimal
+from itertools import pairwise
 from typing import Any
 
 from sqlalchemy import func, select
@@ -27,6 +28,7 @@ from forliosa.marketdata import cbc
 from forliosa.marketdata.base import (
     BaseProvider,
     Candle,
+    CorporateEvent,
     DividendEvent,
     InstrumentInfo,
     InstrumentProfile,
@@ -38,6 +40,30 @@ from forliosa.marketdata.indices import index_by_data_id
 from forliosa.timeutil import close_dt, today_taipei
 
 US_SOURCE = "databento-equs"  # forliosa.us_prices.SOURCE (not imported: that module imports the archive jobs)
+# Common split ratios (new shares per old). A day whose OPEN is the previous close divided by one of these (within the
+# tolerance) is taken as a split: an ordinary gap does not land on an exact fraction, and 2-for-1 needs the closest fit
+# (a 50 % crash at the open is possible, an open within 1.5 % of exactly half is not likely). Reverse splits likewise.
+_SPLIT_RATIOS = (2, 3, 4, 5, 6, 8, 10, 15, 20, 25, 30, 40, 50)
+
+
+def detect_splits(rows: list[tuple[date, Decimal | None, Decimal]]) -> list[tuple[date, Decimal]]:
+    """``[(date, open, close)]`` oldest first -> ``[(date, ratio)]``: ratio > 1 a split (shares per old share),
+    < 1 a reverse split."""
+    out: list[tuple[date, Decimal]] = []
+    for (_, _, prev), (day, opened, close) in pairwise(rows):
+        if not prev or not opened or not close or prev <= 0 or opened <= 0:
+            continue
+        r = prev / opened
+        reverse = r < 1
+        x = 1 / r if reverse else r
+        for k in _SPLIT_RATIOS:
+            tol = Decimal("0.015") if k == 2 else Decimal("0.05")
+            if abs(x / k - 1) <= tol and abs((close / prev if reverse else prev / close) / k - 1) <= Decimal("0.25"):
+                out.append((day, Decimal(1) / k if reverse else Decimal(k)))
+                break
+    return out
+
+
 # A listing nobody has named for this long (newest row minus this) is taken as delisted and leaves the instrument list.
 LISTING_DAYS = 365
 # SEC tickers as company_tickers.json spells them (BRK-B): a letter first, so never a Taiwan code.
@@ -156,6 +182,19 @@ class ArchiveProvider(BaseProvider):
                                low=last.low, volume=last.volume, as_of=close_dt(s, last.date),
                                trade_date=last.date, source=last.source)
         return out
+
+    def corporate_events(self, symbol: str) -> list[CorporateEvent] | None:
+        """US splits found in the stored (unadjusted) closes (:func:`detect_splits`); Databento's corporate-action
+        data may not be redistributed, so the price series itself is the evidence."""
+        from forliosa.models import PriceDaily
+
+        if market_of_symbol(symbol) != "US" or not self.us_served():
+            return None
+        with self.session_fn() as db:
+            stmt = select(PriceDaily.date, PriceDaily.open, PriceDaily.close).where(
+                PriceDaily.symbol == symbol, PriceDaily.source == US_SOURCE).order_by(PriceDaily.date)
+            rows = list(db.execute(self._filter(stmt, PriceDaily)).all())
+        return [CorporateEvent(symbol, d, "split", r) for d, r in detect_splits(rows)] or None
 
     def latest_close(self, symbol: str) -> tuple[date, Decimal] | None:
         q = (self.quotes([symbol]) or {}).get(symbol)

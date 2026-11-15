@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from forliosa.api import serialize as ser
 from forliosa.api.errors import not_found, unprocessable
 from forliosa.datapolicy import label, labels, source_clause, tagged
-from forliosa.marketdata.base import DividendEvent, InstrumentInfo, QuoteData
+from forliosa.marketdata.base import Candle, DividendEvent, InstrumentInfo, QuoteData
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.indices import INDICES, is_index
 from forliosa.marketdata.service import MarketData, dividend_sort_key
@@ -112,6 +112,9 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
     h = md.history(info.symbol, start, today, backfill=True)  # a chart: may show the history backfill's days
     candles = h.candles
     notes = series_notes(md, info.symbol, start, candles[0].t if candles else None, backfill=True)
+    if info.market == "US" and candles:  # US closes are unadjusted: a chart folds splits in (the ledger does not)
+        candles, split_notes = split_adjusted(candles, md.corporate_events(info.symbol))
+        notes += split_notes
     if range_ == "5D":
         candles = candles[-5:]
     return {
@@ -125,6 +128,30 @@ def history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
         "sources": labels(tagged(h.source, "price")),
         "notes": notes,
     }
+
+
+def split_adjusted(candles: list[Candle], events: list[Any]) -> tuple[list[Candle], list[str]]:
+    """Prices before each split divided by its ratio (volume multiplied), so the chart has no cliff; one note per
+    split inside the series."""
+    splits = [(e.date, e.ratio) for e in events if e.kind == "split" and e.ratio and e.ratio > 0]
+    splits = [(d, r) for d, r in splits if candles[0].t < d <= candles[-1].t]
+    if not splits:
+        return candles, []
+    out = []
+    for c in candles:
+        f = Decimal(1)
+        for d, r in splits:
+            if c.t < d:
+                f *= r
+        out.append(c if f == 1 else Candle(c.t, c.o / f, c.h / f, c.l / f, c.c / f, int(c.v * f)))
+    def n(x: Decimal) -> str:
+        return str(int(x)) if x == int(x) else format(x.normalize(), "f")
+
+    notes = []
+    for d, r in splits:
+        how = f"1 股拆成 {n(r)} 股" if r > 1 else f"{n(1 / r)} 股合成 1 股"
+        notes.append(f"{d.year}/{d.month:02d}/{d.day:02d} 股票分割（{how}），之前的價格已經換算")
+    return out, notes
 
 
 def _index_history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:

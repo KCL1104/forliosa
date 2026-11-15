@@ -132,6 +132,8 @@ export interface Quote {
   /** 股數（MIS 的「張」已乘 1,000） */
   volume: number | null
   as_of: string | null
+  /** 價格屬於哪一個交易日（YYYY-MM-DD）。美股是紐約的日期：as_of（紐約 16:00）在台北已經是隔天早上 */
+  trade_date?: string | null
   is_realtime: boolean
   is_demo: boolean
   source: string
@@ -355,6 +357,8 @@ export interface Holding {
   /** 沒有報價時為 null（以成本計值，並標示 is_demo） */
   price: number | null
   prev_close: number | null
+  /** price 屬於哪一個交易日（美股是紐約的日期）；沒有價格時 null */
+  price_date?: string | null
   market_value: number
   day_change: number
   day_change_pct: number | null
@@ -710,6 +714,8 @@ export interface Why {
   headline: string | null
   reasons: WhyReason[]
   as_of: string | null
+  /** 這次漲跌屬於哪一個交易日（美股是紐約的日期） */
+  trade_date?: string | null
   sources?: string[]
 }
 
@@ -1375,7 +1381,18 @@ export interface AdminOverview {
   ai: { month: string; slots: AdminKeySlot[] }
   datasets: AdminDataset[]
   history_backfill: { enabled: boolean; rows: number; pending: number; symbols: Record<BackfillStatus, number> }
+  /** 美股收盤價（Databento）：舊版後端沒有 */
+  us_prices?: AdminUsPrices | null
   news: AdminNews
+}
+/** 美股收盤價（Databento EQUS.SUMMARY）的回補進度；stored_through 是已存的最新美股交易日（紐約日期） */
+export interface AdminUsPrices {
+  enabled: boolean
+  rows: number
+  pending: number
+  first_day: string
+  stored_through: string | null
+  symbols: { done: number; not_found: number; error: number }
 }
 /** 新聞來源的狀態（2026-11-15）：時間都是 +08:00 */
 export interface AdminNewsSource {
@@ -1591,9 +1608,40 @@ export interface MarketOverview {
    * （產品負責人 2026-11-15）：`start_date` 是列進來最早的一天（交易日就等於 `date`），`total` 是這段期間全部的則數
    */
   announcements: { date: string; start_date: string; total: number; items: MarketAnnouncement[] } | null
+  /**
+   * 美股（產品負責人 2026-11-15）：SPY、DIA、ONEQ 的收盤（Databento；標成 ETF，不是指數本身），各自是紐約的交易日期；
+   * 以及 GDELT 的美股新聞。都沒有時 null（舊版後端沒有這個欄位）
+   */
+  us?: MarketUs | null
   is_demo: boolean
   notes: string[]
   sources: string[]
+}
+
+export interface MarketUsEtf {
+  key: string
+  /** SPY | DIA | ONEQ：點了開個股頁 */
+  symbol: string
+  name: string
+  /** 追蹤的指數（文字）：S&P 500、道瓊工業指數、那斯達克綜合指數 */
+  tracks: string
+  /** 美元 */
+  unit: string
+  value: number | null
+  change: number | null
+  change_pct: number | null
+  /** 紐約的交易日期 */
+  date: string
+  sparkline: { t: string; v: number | null }[]
+}
+
+export interface MarketUs {
+  /** 最新的美股交易日（紐約）；只有新聞時 null */
+  date: string | null
+  /** 美股收盤沒開（US_PRICE_SOURCE）或還沒存到時是空的 */
+  items: MarketUsEtf[]
+  /** 最新的美股新聞（GDELT，只有標題與連結），最多 6 則 */
+  news: NewsItem[]
 }
 
 export interface MarketStatus {
