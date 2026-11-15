@@ -136,7 +136,7 @@ def _numbers(text: str) -> set[str]:
 
 _CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?(?:\.TWO?|\.TW)?[)）]")
 # Years the editor may drop when it rewrites a date as 11/13: 2026, 2026/11/04, 115年 (ROC), 2026年
-_YEAR = re.compile(r"(?<!\d)(?:(?:19|20)\d\d(?=\s*[年/\-.])|1[01]\d(?=\s*年))")
+_YEAR = re.compile(r"(?<!\d)(?:(?:19|20)\d\d(?=\s*[年/\-.])|1[01]\d(?=\s*(?:年|/\d)))")
 
 
 def keeps_numbers(draft: str, edited: str) -> bool:
@@ -244,7 +244,8 @@ class ChatTurn:
     def params(self, model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "model": model,
-            "max_tokens": self.settings.ai_max_tokens_chat,
+            # 深度搜尋 thinks and searches far more: at medium effort 8000 tokens ran out before the report (2026-11-15)
+            "max_tokens": self.settings.ai_max_tokens_chat * (2 if self.deep else 1),
             "system": [{"type": "text", "text": CHAT_SYSTEM, "cache_control": {"type": "ephemeral"}}],
             "tools": self.tools(),
             "messages": render_messages(messages, model not in _NO_SYSTEM_ROLE),
@@ -509,7 +510,7 @@ class ChatTurn:
             yield "done", self._done(thread, turn_id, state)
             return
 
-        ctx = ToolContext(db=db, user=self.user, md=self.md, thread_id=thread.id)
+        ctx = ToolContext(db=db, user=self.user, md=self.md, thread_id=thread.id, message=message)
         ok = False
         try:
             self.costs = store.slot_month_costs(db)

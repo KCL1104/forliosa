@@ -302,3 +302,25 @@ def test_common_nicknames_resolve_to_the_stock(two_users):
         assert not out.is_error and res["symbol"] == "2330.TW", nick
     _, found = run(ctx, "search_instruments", query="發哥")
     assert found["results"][0]["symbol"] == "2454.TW" and "俗稱" in found["note"]
+
+
+def test_the_day_named_in_the_message_fills_an_omitted_trade_date(two_users):
+    """2026-11-15 AI test: told to convert 「昨天」, the model still left trade_date out; the tool reads the day."""
+    from datetime import date
+
+    from forliosa.ai.tools import day_in_message
+
+    sun = date(2026, 11, 15)
+    assert day_in_message("昨天賣了台積電 100 股 2350", sun) == (date(2026, 11, 14), "昨天")
+    assert day_in_message("上週五買了 0050 1 張 100", sun)[0] == date(2026, 11, 6)
+    assert day_in_message("週三買了鴻海", sun)[0] == date(2026, 11, 11)
+    assert day_in_message("11/12 買了鴻海 2 張 230", sun)[0] == date(2026, 11, 12)
+    assert day_in_message("12月3日買的", sun)[0] == date(2025, 12, 3)  # a day later this year is last year's
+    assert day_in_message("買 0050 2 張 102.5", sun) is None  # no day: today (the tool's default)
+    assert day_in_message("昨天和前天各買一張", sun) is None  # two different days: the model must split them
+    _db, ctx, mine, _ = two_users
+    ctx.message = "前天賣了台積電 100 股 600"
+    _, res = run(ctx, "draft_transaction", type="sell", symbol="2330", account_id=mine, quantity=100, price=600)
+    assert res["summary"].startswith((date.today().fromordinal(date.today().toordinal() - 2)).isoformat()) or \
+        "前天" in " ".join(res["notes"])
+    assert any("「前天」" in n for n in res["notes"])

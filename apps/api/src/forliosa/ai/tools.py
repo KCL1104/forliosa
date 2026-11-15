@@ -87,6 +87,7 @@ class ToolContext:
     # drafts already made this turn, by their exact content: the same draft again is not a second card (2026-11-15
     # AI test: the model re-sent one sell three times when it could not see how to change its date)
     drafted: dict[str, dict[str, Any]] = field(default_factory=dict)
+    message: str = ""  # the user's message this turn: a day it names fills a draft's omitted trade_date
 
 
 @dataclass
@@ -702,6 +703,34 @@ def _fmt_qty(q: Decimal) -> str:
     return f"{q:,f} 股"
 
 
+_WEEKDAY = {"一": 0, "二": 1, "三": 2, "四": 3, "五": 4, "六": 5, "日": 6, "天": 6}
+_REL_DAY = {"今天": 0, "今日": 0, "昨天": 1, "昨日": 1, "前天": 2, "大前天": 3}
+_MONTH_DAY = re.compile(r"(?<![\d/.])(1[0-2]|0?[1-9])\s*(?:/|月)\s*(3[01]|[12]\d|0?[1-9])(?:\s*日|號)?(?![\d/.%])")
+
+
+def day_in_message(message: str, today: date) -> tuple[date, str] | None:
+    """The one trade day a message names (昨天, 前天, 上週五, 週三, 11/12, 11月12日) → (date, the words); None when it
+    names none or several. 2026-11-15 AI test: the model left trade_date out for 「昨天賣了…」 even when told to fill
+    it, so the draft tool reads the day itself."""
+    found: list[tuple[date, str]] = []
+    for m in re.finditer(r"大前天|前天|昨天|昨日|今天|今日", message):
+        found.append((today - timedelta(days=_REL_DAY[m.group(0)]), m.group(0)))
+    for m in re.finditer(r"(上上|上)?(?:週|周|星期|禮拜)([一二三四五六日天])", message):
+        weeks = {"上上": 2, "上": 1}.get(m.group(1) or "", 0)
+        monday = today - timedelta(days=today.weekday()) - timedelta(weeks=weeks)
+        d = monday + timedelta(days=_WEEKDAY[m.group(2)])
+        if weeks or d <= today:
+            found.append((d, m.group(0)))
+    for m in _MONTH_DAY.finditer(message):
+        try:
+            d = date(today.year, int(m.group(1)), int(m.group(2)))
+        except ValueError:
+            continue
+        found.append((d if d <= today else d.replace(year=today.year - 1), m.group(0)))
+    days = {d for d, _ in found}
+    return found[0] if len(days) == 1 else None
+
+
 def draft_transaction(ctx: ToolContext, args: dict[str, Any]) -> Any:
     """Preview + pending draft. Never inserts a ``transactions`` row."""
     from forliosa.api.schemas import TransactionIn
@@ -742,6 +771,9 @@ def draft_transaction(ctx: ToolContext, args: dict[str, Any]) -> Any:
             trade_date = date.fromisoformat(args["trade_date"])
         except ValueError as exc:
             raise ToolError("trade_date 必須是 YYYY-MM-DD") from exc
+    elif (named := day_in_message(ctx.message, today_taipei())) is not None:
+        trade_date = named[0]
+        notes.append(f"日期依使用者說的「{named[1]}」記為 {trade_date.isoformat()}")
     if trade_date > today_taipei():
         raise ToolError("交易日期不能晚於今天")
 
