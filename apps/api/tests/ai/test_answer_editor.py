@@ -95,3 +95,10 @@ def test_numbers_and_flag_remapping():
     assert out[0]["text"] == "公司宣布 11/20 召開法說會。" and out[0]["start"] == start + 5
     assert out[1]["text"] == "前面的"  # before the edited part: unchanged
     assert len(out) == 2  # no close match: left out
+
+
+def test_the_number_check_allows_years_codes_and_rounded_or_rescaled_duplicates():
+    assert keeps_numbers("聯發科（2454.TW）2026年11月13日漲停，升7%，收漲 7.01%", "聯發科 11/13 漲停，收漲 7.01%")
+    assert keeps_numbers("將於 115 年 12 月 21 日下市；2026/11/04 融資 3.51 萬張", "12/21 下市；11/4 融資 35,144 張")
+    assert keeps_numbers("4 月營收 46,736,664 千元", "4 月營收 467.37 億元")
+    assert not keeps_numbers("目標價 400 元，日系 320 元", "目標價 400 元")  # a different number is not a rounding

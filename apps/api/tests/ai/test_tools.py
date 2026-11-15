@@ -276,3 +276,29 @@ def test_holding_fields_name_their_currency(two_users):
     assert holdings["count_by_market"] == {"台股": 1}
     _, pos = run(ctx, "get_position", symbol="2330")
     assert "cost_basis_twd" in pos and "avg_cost_native" in pos and "cost_basis" not in pos
+
+
+def test_the_same_draft_twice_in_one_turn_is_one_card(two_users):
+    """2026-11-15 AI test: unable to change the date, the model re-sent one sell three times (three cards)."""
+    _db, ctx, mine, _ = two_users
+    _, first = run(ctx, "draft_transaction", type="sell", symbol="2330", account_id=mine, quantity=100, price=600)
+    _, again = run(ctx, "draft_transaction", type="sell", symbol="2330", account_id=mine, quantity=100, price=600)
+    assert first["status"] == "pending_signature" and again["status"] == "already_drafted"
+    assert again["draft_id"] == first["draft_id"] and "trade_date" in again["instruction"]
+    assert len(ctx.drafts) == 1
+    # a different date is a different draft
+    _, dated = run(ctx, "draft_transaction", type="sell", symbol="2330", account_id=mine, quantity=100, price=600,
+                   trade_date="2026-11-13")
+    assert dated["status"] == "pending_signature" and dated["summary"].startswith("2026-11-13") and len(ctx.drafts) == 2
+    spec = next(t for t in client_tool_definitions(get_settings()) if t["name"] == "draft_transaction")
+    assert "昨天" in spec["input_schema"]["properties"]["trade_date"]["description"]
+
+
+def test_common_nicknames_resolve_to_the_stock(two_users):
+    """2026-11-15 AI test: 「台雞電」 was read as 台汽電 (8926)."""
+    _db, ctx, *_ = two_users
+    for nick in ("台雞電", "GG", "護國神山"):
+        out, res = run(ctx, "get_stock_overview", symbol=nick)
+        assert not out.is_error and res["symbol"] == "2330.TW", nick
+    _, found = run(ctx, "search_instruments", query="發哥")
+    assert found["results"][0]["symbol"] == "2454.TW" and "俗稱" in found["note"]

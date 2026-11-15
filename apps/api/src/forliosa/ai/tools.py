@@ -84,6 +84,9 @@ class ToolContext:
     thread_id: str | None = None
     drafts: list[dict[str, Any]] = field(default_factory=list)  # draft cards created during this turn
     charts: list[dict[str, Any]] = field(default_factory=list)  # chart cards drawn during this turn
+    # drafts already made this turn, by their exact content: the same draft again is not a second card (2026-11-15
+    # AI test: the model re-sent one sell three times when it could not see how to change its date)
+    drafted: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,9 +160,17 @@ def _pick(d: dict[str, Any] | None, *keys: str) -> dict[str, Any]:
     return {k: d.get(k) for k in keys if k in d}
 
 
+# Common nicknames investors type (2026-11-15 AI test: 「台雞電」 was read as 台汽電). Only well-established ones that
+# point at a single stock; anything vaguer goes through the normal search.
+NICKNAMES = {"台雞電": "2330", "台GG": "2330", "GG": "2330", "護國神山": "2330", "神山": "2330", "積積": "2330",
+             "發哥": "2454", "海公公": "2317", "鴻海公公": "2317"}
+
+
 def resolve_instrument(md: MarketData, text: str) -> InstrumentInfo:
-    """``2330`` / ``2330.TW`` / ``台積電`` → instrument; ambiguous names list the candidates."""
+    """``2330`` / ``2330.TW`` / ``台積電`` / a common nickname (``台雞電``) → instrument; ambiguous names list the
+    candidates."""
     text = (text or "").strip()
+    text = NICKNAMES.get(text, NICKNAMES.get(text.upper(), text))
     if not text:
         raise ToolError("請提供股票代號或名稱")
     info = md.instrument(text)
@@ -674,8 +685,13 @@ def draw_chart(ctx: ToolContext, args: dict[str, Any]) -> Any:
 def search_instruments(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import instruments as instr
 
-    found = ctx.md.search(args["query"], 10)
-    return {"results": [instr.instrument_out(i, ctx.md) for i in found]}
+    query = (args["query"] or "").strip()
+    nick = NICKNAMES.get(query, NICKNAMES.get(query.upper()))
+    found = ctx.md.search(nick or query, 10)
+    out: dict[str, Any] = {"results": [instr.instrument_out(i, ctx.md) for i in found]}
+    if nick:
+        out["note"] = f"「{query}」是 {nick} 的俗稱"
+    return out
 
 
 # -- draft_transaction -----------------------------------------------------------------------------------
@@ -780,6 +796,11 @@ def draft_transaction(ctx: ToolContext, args: dict[str, Any]) -> Any:
     }
     instrument = ({"symbol": info.symbol, "code": info.code, "name": info.name, "market": info.market,
                    "currency": info.currency} if info else None)
+    key = json.dumps(tx_input, sort_keys=True, default=str)
+    if key in ctx.drafted:
+        return {**ctx.drafted[key], "status": "already_drafted",
+                "instruction": "這一筆草稿剛才已經建立，畫面上已經有它的草稿卡，不要再建立一次。日期或其他欄位不對時，"
+                               "用改過的參數再呼叫一次（例如 trade_date 填 YYYY-MM-DD）。"}
     draft = AiDraft(id=new_id("drf"), user_id=ctx.user.id, thread_id=ctx.thread_id, status="pending",
                     payload=tx_input, preview=preview, instrument=instrument, notes=notes)
     ctx.db.add(draft)
@@ -790,7 +811,7 @@ def draft_transaction(ctx: ToolContext, args: dict[str, Any]) -> Any:
     what = f"{info.name}（{info.symbol}）" if info else ""
     qty_txt = f" {_fmt_qty(v['quantity'])}" if ttype in ("buy", "sell") else ""
     px_txt = f" @ {v['price'].normalize():f}" if ttype in ("buy", "sell") else ""
-    return {
+    out = {
         "status": "pending_signature",
         "draft_id": draft.id,
         "summary": f"{trade_date.isoformat()} {label} {what}{qty_txt}{px_txt}，帳戶「{account.name}」",
@@ -798,6 +819,8 @@ def draft_transaction(ctx: ToolContext, args: dict[str, Any]) -> Any:
         "notes": notes,
         "instruction": "草稿已顯示在畫面上，尚未寫入帳本；請使用者確認簽名後才會生效。",
     }
+    ctx.drafted[key] = {"draft_id": draft.id, "summary": out["summary"]}
+    return out
 
 
 def draft_card(draft: AiDraft, account: BrokerAccount | None) -> dict[str, Any]:
@@ -993,7 +1016,10 @@ TOOLS: list[ToolSpec] = sorted([
              {"type": {"type": "string", "enum": TXN_TYPES_FOR_DRAFT},
               "symbol": {"type": "string", "description": "Stock code or name; empty string for cash-only types"},
               "account_id": {"type": "string", "description": "Optional; omit to use the only account"},
-              "trade_date": {"type": "string", "format": "date", "description": "Optional, default today"},
+              "trade_date": {"type": "string", "format": "date",
+                             "description": "YYYY-MM-DD. When the user names a day (昨天, 前天, 上週五, "
+                                            "11/12) convert it to a date using today's date in the page context and "
+                                            "fill this in; omit only when no day is mentioned (today)"},
               "quantity": {"type": "number", "description": "Optional shares (1 張 = 1000)"},
               "price": {"type": "number", "description": "Optional price per share (or dividend per share)"},
               "amount": {"type": "number", "description": "Optional total amount (cash types, dividends)"},

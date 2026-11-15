@@ -47,6 +47,7 @@ Events (``event: <name>`` / ``data: <json>``):
 from __future__ import annotations
 
 import logging
+import math
 import re
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
@@ -133,14 +134,36 @@ def _numbers(text: str) -> set[str]:
     return {m.group(0).replace(",", "") for m in _NUMBER.finditer(text)}
 
 
-_CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?[)）]")
+_CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?(?:\.TWO?|\.TW)?[)）]")
+# Years the editor may drop when it rewrites a date as 11/13: 2026, 2026/11/04, 115年 (ROC), 2026年
+_YEAR = re.compile(r"(?<!\d)(?:(?:19|20)\d\d(?=\s*[年/\-.])|1[01]\d(?=\s*年))")
 
 
 def keeps_numbers(draft: str, edited: str) -> bool:
-    """Every number of the draft is still in the edited answer (thousands separators aside). A stock code in
-    parentheses after a name (「台積電(2330)」) may go: the editor is asked to drop that copied form."""
+    """Every number of the draft is still in the edited answer (thousands separators aside). The editor may drop a
+    stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」) and the year of a date it rewrites
+    as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」)."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
-    return _numbers(draft) - codes <= _numbers(edited)
+    years = {m.group(0) for m in _YEAR.finditer(draft)}
+    kept = _numbers(edited)
+    return all(_covered(x, kept) for x in _numbers(draft) - codes - years)
+
+
+def _covered(x: str, kept: set[str]) -> bool:
+    """``x`` is still there: the same number, or the same quantity rounded or in another unit (7 -> 7.01%,
+    3.51 萬張 -> 35,144 張, 46,736,664 千元 -> 467.37 億元): a power of ten apart within 0.6%."""
+    if x in kept:
+        return True
+    xv = float(x)
+    for y in kept:
+        yv = float(y)
+        if xv == 0 or yv == 0:
+            continue
+        ratio = xv / yv
+        k = round(math.log10(ratio))
+        if abs(k) <= 8 and abs(ratio / 10 ** k - 1) <= 0.006:
+            return True
+    return False
 
 
 def remap_flags(flagged: list[dict[str, Any]], draft: str, final: str, start: int) -> list[dict[str, Any]]:
@@ -377,7 +400,8 @@ class ChatTurn:
         t = getattr(ev, "type", None)
         if t == "text":
             # after web search or the news tool the answer is held back and edited before it is shown (``_edit``)
-            hold = self.settings.ai_answer_editor and state.used_web
+            # (a 深度搜尋 searches the web anyway: held from its first word, a plan written before searching included)
+            hold = self.settings.ai_answer_editor and (state.used_web or self.deep)
             if hold and state.held_from is None:
                 state.held_from = len(state.display.text)
             if first_text_of_round[0] and state.display.text and not state.display.text.endswith("\n"):

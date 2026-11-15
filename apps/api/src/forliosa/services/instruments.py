@@ -260,7 +260,14 @@ def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]
     if info.type != "stock":
         notes.append("ETF 沒有每股盈餘與每股淨值，所以沒有本益比與股價淨值比區間")
     elif not per_vals:
-        notes.append("近四季 EPS 合計小於或等於 0，本益比無意義，區間留白")
+        # Say why there is no P/E: no daily closes, no EPS archived yet, or EPS really not positive. "EPS <= 0" when the
+        # archive was only missing data contradicted the stock's own EPS (2026-11-15 AI test, 台積電 EPS 98.26)
+        if not series:
+            notes.append("這段期間沒有日線收盤價的存檔，算不出本益比區間")
+        elif all(p["eps_ttm"] is None for p in series):
+            notes.append("沒有近四季 EPS 的存檔，算不出本益比區間")
+        else:
+            notes.append("近四季 EPS 合計小於或等於 0，本益比無意義，區間留白")
     last = series[-1] if series else None
     current_per = last["per"] if last else None
     percentile = None
