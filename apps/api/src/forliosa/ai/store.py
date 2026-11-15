@@ -35,7 +35,7 @@ from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
 FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news",  # news: system-paid (user_id NULL)
-            "briefing")  # 每日收盤簡報 (``ai.briefing``): one question of the user's day, see ``messages_today``
+            "briefing")  # 每日收盤簡報 (``ai.briefing``): charged to the user's month, not to the day's questions
 TITLE_MAX = 40
 BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard token prices
 
@@ -353,15 +353,15 @@ def message_cost(meta: dict[str, Any] | None) -> int:
 def messages_today(db: Session, user: User, now: datetime | None = None) -> int:
     """Questions asked today (Taipei): chat messages (a 深度搜尋 counts as ``AI_DEEP_SEARCH_COST`` of them, stored
     on its row) plus analyst-view searches this user triggered (each search counts as one question; its calls share
-    one ``ai_usage.thread_id``, see ``analyst``)."""
+    one ``ai_usage.thread_id``, see ``analyst``). The daily closing briefing is not a question the user asked: it
+    counts toward the month's budget only (產品負責人 2026-11-15)."""
     since = day_start(now)
     # ai_questions, not ai_messages: deleting a conversation deletes its messages, and used to give the day's
     # questions back (2026-11-14 review)
     chat = db.scalar(select(func.coalesce(func.sum(AiQuestion.cost), 0)).where(
         AiQuestion.user_id == user.id, AiQuestion.created_at >= since)) or 0
     analyst = db.scalar(select(func.count(func.distinct(AiUsage.thread_id))).where(
-        AiUsage.user_id == user.id, AiUsage.feature.in_(("analyst", "briefing")),  # a briefing's calls share one id too
-        AiUsage.created_at >= since)) or 0
+        AiUsage.user_id == user.id, AiUsage.feature == "analyst", AiUsage.created_at >= since)) or 0
     return chat + analyst
 
 
@@ -407,12 +407,18 @@ def check_quota(db: Session, user: User, settings: Settings, now: datetime | Non
         if cost > remaining:
             raise ApiError(429, "ai_daily_limit", f"今天還剩 {remaining} 題，深度搜尋一次要 {cost} 題。",
                            extra={"remaining": remaining, "cost": cost})
+    check_month_budget(db, user, settings, now, deep=cost > 1)
+
+
+def check_month_budget(db: Session, user: User, settings: Settings, now: datetime | None = None,
+                       deep: bool = False) -> None:
+    """The month's token and US$ budgets only (the daily closing briefing: not one of the day's questions)."""
     if settings.ai_monthly_token_budget > 0 and month_usage(db, user, now)[0] >= settings.ai_monthly_token_budget:
         raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量已達上限，下個月 1 日會重新計算。")
     left = month_budget_left(db, user, settings, now)
     if left is not None and left < TURN_ESTIMATE_USD:
         raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量已達上限，下個月 1 日會重新計算。")
-    if left is not None and cost > 1 and left < DEEP_TURN_ESTIMATE_USD:
+    if left is not None and deep and left < DEEP_TURN_ESTIMATE_USD:
         raise ApiError(429, "ai_monthly_budget", "這個月的 AI 用量剩不多，深度搜尋要等下個月；一般提問還可以問。")
 
 

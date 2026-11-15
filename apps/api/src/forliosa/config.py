@@ -107,7 +107,9 @@ class Settings(BaseSettings):
     ai_model_report: str | None = None
     ai_model_analyst: str | None = None
     ai_model_digest: str | None = None  # group weekly digests (M5)
-    ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    # medium (was low): at low the answers copied search results and named outlets in the text; medium follows the
+    # writing rules and picks tools (news, search, charts) better, about US$0.01 a question (2026-11-15 measured)
+    ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_effort_why: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_analyst: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_max_tokens_chat: int = 8000

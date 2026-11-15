@@ -112,6 +112,7 @@ class TurnState:
     citation_keys: set[tuple[str | None, str]] = field(default_factory=set)
     tool_labels: dict[str, str] = field(default_factory=dict)
     fetched: list[dict[str, str | None]] = field(default_factory=list)
+    outlets: dict[str, str] = field(default_factory=dict)  # url -> outlet of citable tool results (get_news)
     context_tokens: int | None = None
     segments: list[grounding.Segment] = field(default_factory=list)  # text blocks of the answer (cited or not)
     round_start: int | None = None  # where this call's text starts in display.text
@@ -371,6 +372,8 @@ class ChatTurn:
         cited = getattr(c, "cited_text", "") or ""
         if ctype == "web_search_result_location":
             url, title = c.url, c.title
+        elif ctype == "search_result_location":  # a citable tool result (get_news)
+            url, title = getattr(c, "source", None), getattr(c, "title", None)
         elif ctype in ("char_location", "page_location", "content_block_location"):
             title = getattr(c, "document_title", None)
             match = next((f for f in state.fetched if title and f["title"] == title), None)
@@ -386,6 +389,8 @@ class ChatTurn:
             return None
         state.citation_keys.add(key)
         out = {"url": url, "title": title, "cited_text": cited}
+        if url and state.outlets.get(url):
+            out["outlet"] = state.outlets[url]
         state.display.citations.append(out)
         return out
 
@@ -496,6 +501,10 @@ class ChatTurn:
                     state.display.tools.append({"name": tu.name, "label": label})
                     yield "tool", {"id": tu.id, "name": tu.name, "status": "running", "label": label}
                     outcome = execute(ctx, tu.name, tu.input)
+                    if outcome.outlets:
+                        state.outlets.update(outcome.outlets)
+                    if isinstance(outcome.content, list):  # citable news: check the answer like a web search's
+                        state.used_web = True
                     yield "tool", {"id": tu.id, "name": tu.name, "status": "error" if outcome.is_error else "done",
                                    "label": label}
                     if outcome.draft is not None:

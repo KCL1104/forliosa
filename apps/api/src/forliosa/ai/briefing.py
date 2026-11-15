@@ -234,8 +234,9 @@ def enabled(settings: Settings, pool: KeyPool | None = None) -> bool:
 
 
 def within_quota(db: Session, user: User, settings: Settings, now: datetime | None = None) -> bool:
+    """The month's budget only: a briefing is not one of the day's questions (產品負責人 2026-11-15)."""
     try:
-        store.check_quota(db, user, settings, now)
+        store.check_month_budget(db, user, settings, now)
     except ApiError:
         return False
     return True
@@ -340,7 +341,7 @@ def generate_for_user(db: Session, user: User, md: MarketData, day: date, pool: 
         user_id = user.id
 
         def record(slot: int, msg: Any) -> None:
-            # thread_id = the briefing: its calls count as one question of the day (``store.messages_today``)
+            # thread_id = the briefing; charged to the user's month (not to the day's questions)
             store.record_usage(db, user_id=user_id, thread_id=briefing_id, feature=FEATURE,
                                model=msg.model or model, key_slot=slot, usage=CallUsage.from_sdk(msg.usage),
                                stop_reason=msg.stop_reason)

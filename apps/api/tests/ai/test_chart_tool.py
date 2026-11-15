@@ -323,7 +323,8 @@ def test_chart_event_is_streamed_and_kept_with_the_thread(client, other_client, 
 
 def test_system_prompt_says_when_to_draw_and_who_owns_the_numbers():
     for phrase in (
-        "## 圖表", "呼叫 draw_chart", "compare 把 2 到 5 檔的漲跌幅放在同一張圖", "一般的問答不要主動畫圖",
+        "## 圖表", "呼叫 draw_chart", "compare 把 2 到 5 檔的漲跌幅放在同一張圖", "不用等使用者要求就畫一張",
+        "只問一個數字、問新聞、問持股清單或觀念時不畫",
         "一個問題最多畫兩張", "圖上的數字全部由工具從資料庫讀取", "不能提供或修改任何一個點",
         "不要逐點列出數字", "status 是 no_data 表示沒有畫圖",
         "要畫圖只能呼叫 draw_chart，不要用文字或符號拼出圖表",

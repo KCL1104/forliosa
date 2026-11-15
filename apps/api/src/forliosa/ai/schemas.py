@@ -34,6 +34,11 @@ class Citation(BaseModel):
     cited_text: str = ""
 
 
+class ChatCitation(Citation):
+    outlet: str | None = Field(default=None,
+                               description="引用個股新聞工具的那一則時，那一則的媒體（或「公開資訊觀測站」）；網路搜尋的引用沒有")
+
+
 class ThreadSummary(BaseModel):
     id: str
     title: str
@@ -129,7 +134,7 @@ class ThreadMessage(BaseModel):
     role: Literal["user", "ai"]
     text: str
     mode: Literal["deep"] | None = Field(default=None, description="使用者的那一則：`deep`＝這一題是深度搜尋")
-    citations: list[Citation] = []
+    citations: list[ChatCitation] = []
     drafts: list[DraftCard] = []
     charts: list[ChartCard] = []
     tools: list[ToolStep] = []

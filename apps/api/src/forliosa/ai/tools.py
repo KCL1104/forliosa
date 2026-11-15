@@ -87,11 +87,28 @@ class ToolContext:
 
 
 @dataclass
+class Citable:
+    """A tool result the model can cite (產品負責人 2026-11-15: answers link the news they use): one ``search_result``
+    block per item (source = the item's URL), so a sentence built on it carries a ``search_result_location`` citation
+    and the answer lists it under 「出處」 with its outlet. The API takes a tool result made only of search results
+    (no text block beside them), so what the model needs to know about them is in the tool's description."""
+
+    items: list[dict[str, Any]]  # {url, title, outlet, text}
+
+
+@dataclass
 class ToolOutcome:
-    content: str
+    content: str | list[dict[str, Any]]
     is_error: bool = False
     draft: dict[str, Any] | None = None
     chart: dict[str, Any] | None = None
+    outlets: dict[str, str] = field(default_factory=dict)  # url -> outlet of the citable items (出處 shows the outlet)
+
+
+def citable_content(result: Citable) -> list[dict[str, Any]]:
+    return [{"type": "search_result", "source": it["url"], "title": it["title"][:300],
+             "content": [{"type": "text", "text": it["text"][:1000]}], "citations": {"enabled": True}}
+            for it in result.items]
 
 
 @dataclass(frozen=True)
@@ -584,18 +601,28 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
     info = resolve_instrument(ctx.md, args["symbol"])
     items = svc.news(ctx.db, ctx.md, info.symbol)[:12]
-    out: dict[str, Any] = {
-        "symbol": info.symbol, "name": info.name,
-        "headlines": [_pick(n, "published_at", "title", "category", "outlet", "source", "url") for n in items],
-        # the attribution each item carries (OGDL datasets, The GDELT Project with gdeltproject.org …), once
-        "sources": list(dict.fromkeys(x for n in items for x in n.get("sources") or [])),
-    }
-    if any(n.get("category") == "media" for n in items):
-        out["note"] = ("category media：媒體原標題（outlet 為媒體），只有標題沒有內文；提到時寫出媒體名稱與連結，"
-                       "內容以原文為準，需要細節再用 web_search")
-    elif not items:
-        out["note"] = "最近沒有公告或媒體標題；需要新聞時請改用 web_search"
-    return out
+    linked = [n for n in items if str(n.get("url") or "").startswith("http") and n.get("title")]
+    if not linked:  # nothing to cite: the headlines (if any) as data
+        out: dict[str, Any] = {
+            "symbol": info.symbol, "name": info.name,
+            "headlines": [_pick(n, "published_at", "title", "category", "outlet", "source") for n in items],
+            "sources": list(dict.fromkeys(x for n in items for x in n.get("sources") or [])),
+        }
+        if not items:
+            out["note"] = "最近沒有公告或媒體標題；需要新聞時請改用 web_search"
+        return out
+
+    def outlet(n: dict[str, Any]) -> str:
+        if n.get("category") == "media":
+            return n.get("outlet") or ""
+        return "公開資訊觀測站" if n.get("category") == "material_info" else "臺灣證券交易所"
+
+    def day(n: dict[str, Any]) -> str:
+        raw = str(n.get("published_at") or "")
+        return f"{int(raw[5:7])}/{int(raw[8:10])}" if len(raw) >= 10 and raw[4] == "-" else ""
+
+    return Citable([{"url": n["url"], "title": n["title"], "outlet": outlet(n),
+                          "text": "，".join(x for x in (outlet(n), day(n)) if x) + f"：{n['title']}"} for n in linked])
 
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -912,9 +939,11 @@ TOOLS: list[ToolSpec] = sorted([
              ("symbol", "mine_only"), get_events, _sym_label("查看 ", " 事件")),
     ToolSpec("get_news",
              "Recent headlines for a stock: official announcements of a Taiwan stock (company material information "
-             "and exchange news), then media headlines (category media: the original title, outlet, time and link, "
-             "found via The GDELT Project and similar indexes; titles only, no article text), with their sources. "
-             "Search the web when the question needs more than these headlines.",
+             "and exchange news), then media headlines (the original title, outlet, time and link, found via The "
+             "GDELT Project and similar indexes; titles only, no article text). Headlines with a link come back as "
+             "search results: cite the one a sentence relies on and the app lists its link under the answer; do not "
+             "name the outlet in the sentence and do not copy the title, write it in your own words. Search the web "
+             "when the question needs more than these headlines.",
              {"symbol": _SYMBOL}, ("symbol",), get_news, _sym_label("查看 ", " 新聞")),
     ToolSpec("get_position",
              "The user's own position in one stock: shares, average cost, cost basis, market value, unrealized and "
@@ -1121,4 +1150,7 @@ def execute(ctx: ToolContext, name: str, args: Any) -> ToolOutcome:
         return ToolOutcome("這項資料暫時查不到（系統錯誤），請改用其他方式回答或告訴使用者稍後再試", is_error=True)
     draft = ctx.drafts[-1] if len(ctx.drafts) > drafts_before else None
     chart = ctx.charts[-1] if len(ctx.charts) > charts_before else None
+    if isinstance(result, Citable):
+        outlets = {it["url"]: it["outlet"] for it in result.items if it.get("outlet")}
+        return ToolOutcome(citable_content(result), draft=draft, chart=chart, outlets=outlets)
     return ToolOutcome(dump(result), draft=draft, chart=chart)

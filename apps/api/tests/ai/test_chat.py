@@ -80,7 +80,7 @@ def test_tool_loop_streams_events_and_builds_cached_request(client, pool, fake):
     # frozen system prompt with a breakpoint + automatic caching for the conversation tail
     assert first["system"][0]["cache_control"] == {"type": "ephemeral"}
     assert first["cache_control"] == {"type": "ephemeral"}
-    assert first["output_config"] == {"effort": "low"}
+    assert first["output_config"] == {"effort": "medium"}
     assert first["model"] == "claude-haiku-5-5" and "temperature" not in first and "tool_choice" not in first
     tool_names = [t["name"] for t in first["tools"]]
     assert tool_names[-2:] == ["web_search", "web_fetch"]

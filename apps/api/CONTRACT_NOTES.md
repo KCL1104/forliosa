@@ -1044,7 +1044,8 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `AI_KEY_COOLDOWN_SECONDS`、`AI_REQUEST_TIMEOUT_SECONDS` | 60、120 | 沒有 `retry-after` 時的冷卻秒數（視為「猜測」，全部槽都在冷卻時仍可試一次） |
 | `AI_DEV_DUMMY_KEY` | `false` | 沒有金鑰時送一個占位字串，給會自動注入真金鑰的 proxy 用 |
 | `AI_MODEL` | `claude-haiku-5-5` | 產品負責人指定；`AI_MODEL_CHAT`／`AI_MODEL_WHY`／`AI_MODEL_IMPORT`／`AI_MODEL_REPORT`／`AI_MODEL_ANALYST` 可個別覆寫 |
-| `AI_EFFORT_CHAT`、`AI_EFFORT_WHY` | `low` | `output_config.effort`（Haiku 5.5 預設 medium，這裡明確設 low） |
+| `AI_EFFORT_CHAT` | `medium` | 對話的 `output_config.effort`。2026-11-15 從 low 改成 medium：同樣 11 題實測，low 會照抄搜尋結果、在句子裡寫媒體名稱，medium 比較照寫法規則走、也比較會自己挑工具（新聞、搜尋、畫圖）；一題約 US$0.01（low 約 US$0.006），平均多 4–5 秒 |
+| `AI_EFFORT_WHY` | `low` | 「為什麼漲跌」一句話的 effort |
 | `AI_EFFORT_ANALYST` | `medium` | 法人觀點的 effort（要照多條規則逐筆整理，用 Haiku 5.5 的預設 medium；實測約 22–32 秒） |
 | `AI_MAX_TOKENS_CHAT`、`AI_MAX_TOOL_ROUNDS` | 8000、8 | 每次呼叫的輸出上限、每輪最多幾次模型呼叫 |
 | `AI_DAILY_MESSAGE_LIMIT` | 3 | 每人每天（台北日）提問數，0＝不限（產品負責人 2026-11-15：有訂閱方案之前 3 題；原本 50） |
@@ -2029,7 +2030,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 只寫給打開偏好 `daily_briefing` 的人；沒有持股也沒有觀察清單的人不寫。
 - **事實**由規則算（`services/portfolio` 的 summary／holdings／upcoming、觀察清單），不讀 `yahoo-history`。
 - **AI 補充**：一次呼叫，`web_search` 最多 3 次，只能用 `report_briefing_points` 回報；送給模型的只有漲跌最多那一兩檔的名稱、代號、收盤價與漲跌幅（公開資料），不送股數、成本、市值。檢查方式和市場頁的收盤重點相同（`market_summary.verify`）。沒有金鑰、關掉網路搜尋、當天題數或當月 token 用完、或沒有一點通過檢查時，只有事實部分。
-- 額度：用量記在 `ai_usage.feature = "briefing"`，算當天的 1 題，token 算進當月。
+- 額度：用量記在 `ai_usage.feature = "briefing"`，**不算進當天的題數**（產品負責人 2026-11-15），花費與 token 算進當月；只有這個月的額度用完時才只寫事實部分（`store.check_month_budget`）。
 - 查看別人的資產時，中介層照樣擋掉 `/ai/*`：簡報只講自己的帳本。
 - 匯出資料（`GET /me/export`）多一個 `briefings`。
 - 花費：Haiku 等級，每人每個交易日約 US$0.03–0.05（最多 3 次搜尋＋約 2.5 萬輸入 token）；沒打開的人不花錢。

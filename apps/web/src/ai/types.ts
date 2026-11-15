@@ -90,7 +90,7 @@ export interface Message {
   /** 使用者的那一則：這一題是深度搜尋（多查幾輪、寫成一份整理、算好幾題） */
   mode?: "deep"
   /**
-   * `text` 是模型寫的（`/ai/chat` 串流、`/ai/threads` 載入）＝石墨灰楷體；`false` 是本機規則或範本寫的句子
+   * `text` 是模型寫的（`/ai/chat` 串流、`/ai/threads` 載入）＝黑體（墨色，`.ai-voice`）；`false` 是本機規則或範本寫的句子
    * （草稿的說明、定期定額的說明）＝墨色 Noto Sans。舊紀錄沒有這個欄位：連後端的對話視為模型寫的。
    */
   model?: boolean

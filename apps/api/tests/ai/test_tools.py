@@ -152,6 +152,10 @@ def test_stock_tools_return_compact_json(two_users):
                        ("search_instruments", {"query": "台積"})]:
         out = execute(ctx, name, args)
         assert not out.is_error, (name, out.content)
+        # get_news with linked headlines: only citable search results (the API takes no text block beside them)
+        if isinstance(out.content, list):
+            assert out.content and all(b["type"] == "search_result" for b in out.content)
+            continue
         assert len(out.content) < 14_100
         json.loads(out.content)
     _, hist = run(ctx, "get_stock_history", symbol="2330", range="1Y")

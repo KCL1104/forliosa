@@ -340,7 +340,7 @@ function QuoteHeader({ inst, quote, missing }: { inst: InstrumentDetail; quote?:
 /**
  * 「為什麼漲跌」：只在異常時出現，點了交給 AI 展開。
  * 句子是規則判斷的（漲跌幅、量、漲跌停…），所以是墨色 Noto Sans、數字 600；
- * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是石墨灰楷體。
+ * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是黑體（墨色，`.ai-voice`）。
  */
 function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
@@ -352,12 +352,12 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const d = direction(quote.data?.change_pct)
   const modelWritten = (why.data as Why & { ai?: boolean }).ai === true
   const headline = why.data.headline
-  // 模型寫的句子和對話裡的回答同一套排版（`KaiText`：漢字收字距、數字和單位不拆行）；只有一行，所以用 20px
+  // 模型寫的句子和對話裡的回答同一套排版（`KaiText`：數字和單位不拆行）；只有一行，所以用 20px
   const text = modelWritten ? <KaiText text={headline} /> : withFigures(headline)
   const voice = modelWritten ? cn("ai-voice", kaiSize.line) : "text-base text-ink"
   if (readOnly) return <p className={cn("mt-3 max-w-prose", voice)}>{text}</p>
   // 換行交給 text-wrap: balance（兩行一樣長，最後一行不會只剩「漲 ›」）；› 前面的 word joiner（U+2060）讓 › 不會自己掉到下一行。
-  // › 的顏色跟句子：規則句是淡墨，只有模型寫的石墨灰楷體句子才用石墨灰
+  // › 是淡墨：規則句和模型寫的句子現在同一種字、同一個顏色（黑體、墨色）
   return (
     <button
       type="button"
@@ -365,13 +365,13 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
       className={cn(
         // 觸控時可按範圍上下各多 10px（合計 44px 以上）：看不見的 ::before，字的位置不動
         "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-2.5 pointer-coarse:before:content-['']",
-        modelWritten ? "hover:decoration-ai-rule" : "hover:decoration-ctl",
+        "hover:decoration-ctl",
         voice,
       )}
     >
       {text}
       {"⁠"}
-      <ChevronRightIcon aria-hidden className={cn("ml-0.5 inline size-[1em] align-[-0.125em]", modelWritten ? "text-ai" : "text-ink-2")} />
+      <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em] text-ink-2" />
     </button>
   )
 }

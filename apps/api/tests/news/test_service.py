@@ -380,10 +380,9 @@ def test_us_stocks_get_media_only(client, engine, commercial_md):
 
 
 def test_ai_get_news_tool_gives_media_headlines_with_their_sources(client, engine, commercial_md):
-    """The AI tool sees what /news shows — official announcements, then media headlines — with the outlet and the
-    attribution each item needs (GDELT's citation), so an answer that repeats a headline can name where it is from."""
-    import json
-
+    """The AI tool sees what /news shows — official announcements, then media headlines. Linked headlines come back as
+    citable search results (2026-11-15): the source is the article's URL and the text names the outlet and the day,
+    so a sentence built on one carries a citation and the answer lists it with its outlet."""
     from forliosa.ai.tools import TOOLS_BY_NAME, ToolContext, execute
     from forliosa.models import User
 
@@ -395,13 +394,10 @@ def test_ai_get_news_tool_gives_media_headlines_with_their_sources(client, engin
         me = db.scalar(select(User).where(User.email == "demo@forliosa.local"))
         out = execute(ToolContext(db=db, user=me, md=commercial_md), "get_news", {"symbol": "2330"})
     assert not out.is_error, out.content
-    data = json.loads(out.content)
-    media = [n for n in data["headlines"] if n.get("category") == "media"]
-    assert media == [{"published_at": media[0]["published_at"], "title": "台積電CPO霸主地位穩了？",
-                      "category": "media", "outlet": "新頭殼", "source": "GDELT",
-                      "url": "https://newtalk.tw/news/view/2026-11-12/1"}]
-    assert label("gdelt/doc") in data["sources"] and len(data["sources"]) == len(set(data["sources"]))
-    assert "outlet" in data["note"]
+    media = [b for b in out.content if b["source"] == "https://newtalk.tw/news/view/2026-11-12/1"]
+    assert len(media) == 1 and media[0]["type"] == "search_result" and media[0]["title"] == "台積電CPO霸主地位穩了？"
+    assert media[0]["content"][0]["text"].startswith("新頭殼，") and media[0]["citations"] == {"enabled": True}
+    assert out.outlets["https://newtalk.tw/news/view/2026-11-12/1"] == "新頭殼"
     spec = TOOLS_BY_NAME["get_news"]
     assert "not included" not in spec.description and "GDELT" in spec.description
 

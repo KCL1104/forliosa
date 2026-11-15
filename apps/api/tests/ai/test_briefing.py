@@ -148,7 +148,7 @@ def test_a_briefing_waits_for_both_exchanges_closes(db):
 
 
 # -- the AI's points ----------------------------------------------------------------------------------------------
-def test_generate_keeps_verified_points_and_charges_the_user_one_question(holder, db, market, pool, fake, monkeypatch):
+def test_generate_keeps_verified_points_and_charges_the_users_month(holder, db, market, pool, fake, monkeypatch):
     monkeypatch.setattr(br, "ai_subjects", lambda facts: [
         {"symbol": "2330.TW", "code": "2330", "name": "台積電", "market": "TWSE", "type": "stock", "close": 1085.0,
          "change_pct": 0.0483, "day_change": 75000.0}])
@@ -163,11 +163,12 @@ def test_generate_keeps_verified_points_and_charges_the_user_one_question(holder
     assert [p["text"] for p in row.points] == [p["text"] for p in GOOD]
     assert row.points[0]["sources"][0]["url"] == CNA and set(row.points[0]["sources"][0]) == {"url", "title", "outlet"}
     assert row.facts["holdings"] == 2
-    # one usage row under the user, tied to the briefing: one question of the day, tokens in the month
+    # one usage row under the user, tied to the briefing: in the month's budget, not one of the day's questions
     usage = db.scalars(select(AiUsage)).all()
     assert [(u.feature, u.user_id, u.thread_id, u.web_search_requests) for u in usage] == [
         ("briefing", user.id, row.id, 1)]
-    assert store.messages_today(db, user, NOW) == before + 1
+    assert store.messages_today(db, user, NOW) == before
+    assert store.month_usage(db, user, NOW)[1] > 0
     # what the model was told: names, codes, closes and moves — nothing about quantities or money
     sent = fake.requests[0]["body"]
     assert sent["system"] == br.SYSTEM and [t["name"] for t in sent["tools"]] == ["web_search", br.TOOL_NAME]
@@ -207,20 +208,22 @@ def test_without_a_key_the_briefing_has_facts_only(holder, db, market, monkeypat
     assert row.facts["holdings"] == 2 and db.scalar(select(func.count()).select_from(AiUsage)) == 0
 
 
-def test_out_of_quota_the_briefing_has_facts_only(holder, db, market, pool, fake, ai_env, monkeypatch):
+def test_the_briefing_needs_the_months_budget_not_the_days_questions(holder, db, market, pool, fake, ai_env,
+                                                                    monkeypatch):
+    """產品負責人 2026-11-15: the briefing is not one of the day's questions; only the month's US$ counts."""
     monkeypatch.setattr(br, "ai_subjects", lambda facts: SUBJECT)
     ai_env(AI_DAILY_MESSAGE_LIMIT=1)
     fake.reply(text("好的。"))
     assert chat(holder, "今天如何？")[0] == 200  # the day's one question is used
-    asked = len(fake.requests)
     user = me(db)
-    assert not br.within_quota(db, user, get_settings())
-    row = br.generate_for_user(db, user, market, DAY, pool, get_settings())
-    assert (row.ai_status, row.points) == ("none", []) and row.facts["holdings"] == 2
-    assert len(fake.requests) == asked  # no model call for the briefing
-    # the month's tokens used up: the same
+    assert br.within_quota(db, user, get_settings())  # the day's questions do not stop the briefing
+    # the month's tokens used up: facts only, no model call
     ai_env(AI_DAILY_MESSAGE_LIMIT=50, AI_MONTHLY_TOKEN_BUDGET=1)
     assert not br.within_quota(db, user, get_settings())
+    asked = len(fake.requests)
+    row = br.generate_for_user(db, user, market, DAY, pool, get_settings())
+    assert (row.ai_status, row.points) == ("none", []) and row.facts["holdings"] == 2
+    assert len(fake.requests) == asked
 
 
 def test_no_model_call_when_nothing_moved_enough(holder, db, market, pool, fake, monkeypatch):

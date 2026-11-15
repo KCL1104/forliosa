@@ -15,7 +15,7 @@ import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
 const FALLBACK_DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 
 /**
- * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（石墨灰楷體，和對話裡的回答同一套排版：`.ai-voice`＋`KaiText`）
+ * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（黑體（墨色，`.ai-voice`），和對話裡的回答同一套排版：`.ai-voice`＋`KaiText`）
  * ＋伺服器算的數字（依目前的分享設定過濾）＋免責。
  * 每一份都可以按表情、留言。
  */

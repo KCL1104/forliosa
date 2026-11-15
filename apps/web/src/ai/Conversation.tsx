@@ -20,7 +20,7 @@ import type { Answer, AnswerLink, Message, Thread } from "./types"
 type Runner = ReturnType<typeof useAiRunner>
 
 /**
- * 對話：使用者的話靠右（格線小框、墨色）；模型寫的話是石墨灰楷體，本機規則或範本寫的句子是墨色 Noto Sans；
+ * 對話：使用者的話靠右（格線小框、墨色）；模型寫的話是黑體（墨色，`.ai-voice`），本機規則或範本寫的句子是墨色 Noto Sans；
  * 助理畫的圖（`ChartCard`）和草稿卡跟在後面，引用的網路來源是回答下方的「出處」註腳。免責聲明一段對話只出現一次，在最新一則回答下方。
  */
 export function Conversation({ thread, runner, size = "panel", onNavigate }: { thread: Thread; runner: Runner; size?: "panel" | "screen"; onNavigate?: () => void }) {
@@ -50,7 +50,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
     else end?.scrollIntoView({ block: "end" })
   }, [count, growth])
 
-  // 停在最底下時，內容後來長高（楷體字型載入、草稿卡算完稅費、出處出現）也留在最底下；使用者往上捲了就不動
+  // 停在最底下時，內容後來長高（字型載入、草稿卡算完稅費、出處出現）也留在最底下；使用者往上捲了就不動
   const rootRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     const root = rootRef.current
@@ -117,13 +117,13 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
   )
 }
 
-/** 模型寫的字：楷體約 17px（手機 18px）、行高 1.8，長回答在 400px 的面板裡也讀得下去（大小全站一套，見 kai-text.tsx） */
+/** 模型寫的字：約 16px（手機 17px）、行高 1.8，長回答在 400px 的面板裡也讀得下去（大小全站一套，見 kai-text.tsx） */
 const modelSize = kaiSize
 /** 規則或範本寫的句子：墨色 Noto Sans，和介面的內文同一級 */
 const ruleSize = { panel: "text-base leading-relaxed", screen: "text-[1rem] leading-relaxed" } as const
 
 /**
- * 模型寫的話（石墨灰楷體）。漢字的片段收字距、數字和單位不在行尾拆開（`KaiText`）。
+ * 模型寫的話（黑體（墨色，`.ai-voice`））。漢字的片段收字距、數字和單位不在行尾拆開（`KaiText`）。
  * 後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
  * 後面接一個安靜的「無來源」小標記（淡墨，不用紅色）；按下展開說明。
  */
@@ -191,7 +191,7 @@ function StreamingLine({ message }: { message: Message }) {
   )
 }
 
-/** 拒答是模型自己說的話（楷體）；額度、連線等狀況是一行說明 */
+/** 拒答是模型自己說的話（`.ai-voice`）；額度、連線等狀況是一行說明 */
 function ErrorNote({ code, message, size }: { code: string; message: string; size: "panel" | "screen" }) {
   if (code === "refusal") {
     return (
@@ -218,14 +218,16 @@ function hostOf(url: string | null): string {
 }
 
 /**
- * 引用的網路來源：回答下方安靜的註腳，像簿子頁尾的「出處」——左邊一個印好的標籤，右邊編號的格線清單
- * （標題——網域，13px）。標題是常駐底線的連結；只有離開本站的連結才有 ↗。滑過看引用的原文。網路搜尋的引用一定顯示，不收合。
+ * 引用的來源：回答下方安靜的註腳，像簿子頁尾的「出處」——左邊一個印好的標籤，右邊編號的格線清單
+ * （標題——媒體名稱，沒有媒體名稱時寫網域，13px）。標題是常駐底線的連結；只有離開本站的連結才有 ↗。滑過看引用的原文。
+ * 網路搜尋與個股新聞（`outlet`：PChome 新聞、公開資訊觀測站…）的引用一定顯示，不收合。
+ * 幾則公告共用同一個查詢頁網址時，標題不同就各列一則。
  */
 function Footnotes({ items }: { items: Citation[] }) {
   const id = useId()
   const seen = new Set<string>()
   const unique = items.filter((c) => {
-    const key = c.url ?? c.title ?? c.cited_text
+    const key = `${c.url ?? ""}|${c.title ?? c.cited_text}`
     if (seen.has(key)) return false
     seen.add(key)
     return true
@@ -237,10 +239,10 @@ function Footnotes({ items }: { items: Citation[] }) {
       </p>
       <ol aria-labelledby={id}>
         {unique.slice(0, 8).map((c, n) => {
-          const host = hostOf(c.url)
+          const host = c.outlet || hostOf(c.url)
           const label = c.title || host || "來源"
           return (
-            <li key={c.url ?? label} className="relative flex items-baseline gap-2 border-b border-rule py-2 last:border-0 pointer-coarse:min-h-11">
+            <li key={`${c.url ?? ""}|${label}`} className="relative flex items-baseline gap-2 border-b border-rule py-2 last:border-0 pointer-coarse:min-h-11">
               <span aria-hidden className="num w-3 shrink-0 text-ink-2">
                 {n + 1}
               </span>
@@ -261,7 +263,7 @@ function Footnotes({ items }: { items: Citation[] }) {
                     {label}
                   </span>
                 )}
-                {/* 網域和 ↗ 連在一起，不會只剩一個箭頭換到下一行 */}
+                {/* 媒體名稱（或網域）和 ↗ 連在一起，不會只剩一個箭頭換到下一行 */}
                 {host && host !== label ? (
                   <span className="text-ink-2">
                     {" — "}

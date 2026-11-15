@@ -7,7 +7,7 @@ import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 /**
- * AI 整理的收盤重點：每個交易日一則、所有人看到同一則。模型寫的字是鉛筆（石墨灰楷體，`.ai-voice`＋`KaiText`，
+ * AI 整理的收盤重點：每個交易日一則、所有人看到同一則。模型寫的字是鉛筆（黑體（墨色，`.ai-voice`），`.ai-voice`＋`KaiText`，
  * 和對話裡的回答同一套排法）；每一點下面列出它依據的報導（媒體名稱，連到原文）。沒有就整塊不出現。
  */
 export function SummaryBlock({ summary }: { summary: MarketSummary }) {

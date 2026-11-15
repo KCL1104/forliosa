@@ -2,8 +2,8 @@ import { Fragment } from "react"
 import { kaiRuns } from "./answer-text"
 
 /**
- * 模型寫的字（放在 `.ai-voice` 裡）：漢字的片段收字距（`.kai-han`），數字和單位連成一段、不在行尾拆開（`.kai-num`）。
- * 對話裡的回答、個股的「為什麼」、公司簡介、群組週報都用它——楷體全站只有這一種排法。
+ * 模型寫的字（放在 `.ai-voice` 裡）：數字和單位連成一段、不在行尾拆開（`.kai-num`）；漢字的片段標 `.kai-han`
+ * （楷體時代用來收字距，現在是黑體、不收）。對話裡的回答、個股的「為什麼」、公司簡介、群組週報都用它——全站只有這一種排法。
  */
 export function KaiText({ text }: { text: string }) {
   return (

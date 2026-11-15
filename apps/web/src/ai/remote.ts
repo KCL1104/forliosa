@@ -15,6 +15,8 @@ export interface Citation {
   url: string | null
   title: string | null
   cited_text: string
+  /** 引用的是個股新聞工具的那一則時，那一則的媒體（或「公開資訊觀測站」）；網路搜尋的引用沒有，畫面改寫網域 */
+  outlet?: string | null
 }
 
 export interface ToolStep {

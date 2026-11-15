@@ -591,7 +591,7 @@
 | `thread` | `{"id": "thr_…", "title": "我有哪些持股？", "created": true}` | 新對話時 `created: true` |
 | `text` | `{"delta": "台積電今天"}` | 回答文字片段，依序串接；換到下一輪（查完工具）時會先送 `"\n\n"` |
 | `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」 |
-| `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字"}` | 網路來源引用（已去重），顯示在回答下方 |
+| `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字", "outlet"?: "PChome 新聞"}` | 來源引用（已去重），顯示在回答下方。網路搜尋的引用，以及個股新聞工具（`get_news`）的公告與媒體標題（2026-11-15：工具把每則有連結的標題當成可引用的 `search_result` 交給模型）；後者多 `outlet`（媒體名稱，公告是「公開資訊觀測站」），出處寫媒體名稱而不是網域 |
 | `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |
 | `chart` | `ChartCard` | `draw_chart` 畫出來的圖卡（一則回答最多 3 張）：每條線的點都在裡面，前端照著畫；資料不足沒有畫時不送這個事件（同一份也存在 `ThreadMessage.charts`） |
 | `grounding` | `{"items": [GroundingItem]}` | 只在這一輪用了 `web_search`／`web_fetch` 時、最後一個 `text` 之後送：沒有引用又像新聞敘述的句子，前端在該句標「無來源」（同一份也存在 `ThreadMessage.grounding`） |
@@ -625,7 +625,7 @@
 {"id": "thr_…", "title": "…", "model": "claude-haiku-5-5", "created_at": "…", "updated_at": "…",
  "messages": [
    {"id": "12", "turn_id": "trn_…", "role": "user", "text": "台積電今天為什麼漲？", "citations": [], "drafts": [], "tools": [], "error": null, "at": "…"},
-   {"id": "15", "turn_id": "trn_…", "role": "ai", "text": "…", "citations": [{"url", "title", "cited_text"}],
+   {"id": "15", "turn_id": "trn_…", "role": "ai", "text": "…", "citations": [{"url", "title", "cited_text", "outlet"?}],
     "drafts": [DraftCard], "charts": [ChartCard], "tools": [{"name": "web_search", "label": "搜尋網路：台積電"}],
     "grounding": [GroundingItem], "error": null, "at": "…"}
  ]}
