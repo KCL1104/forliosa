@@ -39,8 +39,14 @@ export function ChannelsTab({ group }: { group: Group }) {
           <>
             {owner && c.discord.webhook_hint && <p className="num text-md text-ink-2">Webhook 網址結尾 {c.discord.webhook_hint}</p>}
             <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} />
-            {owner && <DiscordForm groupId={group.id} replacing />}
-            {owner && <Unlink groupId={group.id} kind="discord" />}
+            {owner && (
+              // 「換一個 webhook」和「解除 Discord」同一列、中間留 24px（原本兩個行內元素直接貼在一起；2026-11-15 產品負責人回報）。
+              // 展開成表單時表單佔滿一列，「解除」換到下一列
+              <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
+                <DiscordForm groupId={group.id} replacing />
+                <Unlink groupId={group.id} kind="discord" className="" />
+              </div>
+            )}
           </>
         ) : owner ? (
           <DiscordForm groupId={group.id} />
@@ -126,7 +132,7 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
   const [error, setError] = useState<string | null>(null)
   if (!open) {
     return (
-      <Button variant="outline" size="sm" className="mt-4" onClick={() => setOpen(true)}>
+      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
         換一個 webhook
       </Button>
     )
@@ -134,7 +140,7 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
   const looksRight = /^https:\/\/(discord|discordapp)\.com\/api\/webhooks\/\d+\/[\w-]+$/.test(url.trim())
   return (
     <form
-      className="mt-2 flex flex-col gap-3"
+      className="mt-2 flex basis-full flex-col gap-3"
       onSubmit={(e) => {
         e.preventDefault()
         if (!looksRight) {
@@ -238,11 +244,11 @@ function TelegramLink({ groupId, code, onCode }: { groupId: string; code: Telegr
   )
 }
 
-function Unlink({ groupId, kind }: { groupId: string; kind: "discord" | "telegram" }) {
+function Unlink({ groupId, kind, className = "mt-4" }: { groupId: string; kind: "discord" | "telegram"; className?: string }) {
   const del = useDeleteChannel(groupId, kind)
   const [sure, setSure] = useState(false)
   return sure ? (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
+    <div className={cn("flex flex-wrap items-center gap-2", className)}>
       <span className="text-md">解除後不會再送訊息到這個頻道。</span>
       <Button
         variant="outline"
@@ -258,7 +264,7 @@ function Unlink({ groupId, kind }: { groupId: string; kind: "discord" | "telegra
     </div>
   ) : (
     // 文字動作（常駐底線），不是只有灰字
-    <button type="button" className={cn(textAction, "mt-4")} onClick={() => setSure(true)}>
+    <button type="button" className={cn(textAction, className)} onClick={() => setSure(true)}>
       解除{kind === "discord" ? " Discord" : " Telegram"}
     </button>
   )
