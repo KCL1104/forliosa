@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
 import { api, appToday } from "@/api"
-import { usDay } from "@/lib/labels"
+import { usd, usDay } from "@/lib/labels"
 import { useViewAs } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { createAppRouter } from "@/router"
@@ -232,10 +232,11 @@ describe("減少持股（賣出不用開表單）", () => {
     useUi.getState().openReduce(held.symbol, true)
     const dialog = await screen.findByRole("dialog", {}, T)
     const form = within(dialog)
-    expect(await form.findByText(new RegExp(`^用 ${usDay(quote.trade_date!)}的收盤價 US\\$`), {}, T)).toBeInTheDocument()
+    const line = await form.findByText(/記成賣出。$/, {}, T)
+    expect(line.textContent).toBe(`用 ${usDay(quote.trade_date!)}的收盤價 ${usd(quote.price)} 記成賣出。`)
     await waitFor(() => expect(dialog.querySelector<HTMLInputElement>("#reduce-qty")!.value).toBe(String(held.quantity)), T)
     const before = new Set((await api.listTransactions({ limit: 200 })).items.map((t) => t.id))
-    await userEvent.click(form.getByRole("button", { name: "賣出" }))
+    await userEvent.click(form.getByRole("button", { name: "全部賣出" }))
     await waitFor(() => expect(useUi.getState().reduce.open).toBe(false), T)
     const sell = (await api.listTransactions({ limit: 200 })).items.find((t) => !before.has(t.id))!
     try {

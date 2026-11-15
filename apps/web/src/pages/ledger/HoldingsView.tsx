@@ -85,9 +85,9 @@ export function HoldingsView() {
 }
 
 /**
- * 沒有價格的持股，照成本算。美股的收盤（Databento）只抓有人觀察或持有的代號：剛記進帳本的美股約 10 分鐘內補上，
- * 所以寫「還沒有收盤價」並說什麼時候會有；其他（台股）照舊。後端關掉美股收盤時（顯名清單沒有 Databento）
- * 美股也照舊寫「沒有報價」，不承諾會補上。
+ * 沒有價格的持股，照成本算。美股的收盤（Databento）只抓有人觀察或持有的代號，所以美股寫「還沒有收盤價」；其他（台股）照舊。
+ * 不說「約 10 分鐘內補上」：這裡看不出是剛記進帳本、還是資料源不認得這個代號（一直補不上），做不到的時間不承諾。
+ * 後端關掉美股收盤時（顯名清單沒有 Databento）美股也照舊寫「沒有報價」。
  */
 function UnpricedNote({ rows }: { rows: Holding[] }) {
   const served = useUsClosesServed()
@@ -99,7 +99,7 @@ function UnpricedNote({ rows }: { rows: Holding[] }) {
   return (
     <>
       {other.length > 0 && <p className="mt-2.5 text-base text-ink">{names(other)}沒有報價，照成本算。</p>}
-      {us.length > 0 && <p className="mt-2.5 text-base text-ink">{names(us)}還沒有收盤價，先照成本算；剛記進帳本的美股約 10 分鐘內補上。</p>}
+      {us.length > 0 && <p className="mt-2.5 text-base text-ink">{names(us)}還沒有收盤價，先照成本算。</p>}
     </>
   )
 }

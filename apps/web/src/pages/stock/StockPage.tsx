@@ -71,20 +71,15 @@ export function StockPage() {
  */
 function useRefreshOnFirstClose(symbol: string, noQuote: boolean, hasQuote: boolean): boolean {
   const qc = useQueryClient()
-  // 哪一檔曾經沒有報價（換到別檔時不算）
+  // 哪一檔曾經沒有報價（換到別檔時不算）：render 時就記下，報價出現的那一次 render 已經知道要重抓
   const [waiting, setWaiting] = useState<string | null>(null)
-  const [refreshing, setRefreshing] = useState<string | null>(null)
+  if (noQuote && waiting !== symbol) setWaiting(symbol)
+  const due = !noQuote && hasQuote && waiting === symbol
   useEffect(() => {
-    if (noQuote) {
-      setWaiting(symbol)
-      return
-    }
-    if (!hasQuote || waiting !== symbol) return
-    setWaiting(null)
-    setRefreshing(symbol)
-    void qc.invalidateQueries({ queryKey: ["portfolio"] }).finally(() => setRefreshing((s) => (s === symbol ? null : s)))
-  }, [noQuote, hasQuote, waiting, symbol, qc])
-  return (waiting === symbol && hasQuote) || refreshing === symbol
+    if (!due) return
+    void qc.invalidateQueries({ queryKey: ["portfolio"] }).finally(() => setWaiting((w) => (w === symbol ? null : w)))
+  }, [due, symbol, qc])
+  return due
 }
 
 function StockPageInner() {
