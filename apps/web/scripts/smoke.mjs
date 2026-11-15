@@ -27,7 +27,8 @@ const ROUTES = [
   ["/", "總資產"],
   ["/?view=transactions", "稅費"],
   ["/?view=dividends", "已入帳"],
-  ["/?view=performance", "美股沒有報價，含美股的帳戶算不出績效"],
+  // 美股也有收盤價（Databento，2026-11-15）：含美股的「全部帳戶」照常算得出績效
+  ["/?view=performance", "績效從 2026/06/01 收盤開始算"],
   ["/stock/2330.TW", "近四季 EPS"],
   ["/stock/2330.TW?tab=valuation", "各倍數對應的股價"],
   // 友達虧損的年份在商用模式的存檔起點之前：用示範資料（personal）看「本益比沒有意義」
@@ -201,15 +202,16 @@ await check("每日收盤簡報：設定打開 → 面板最上面一塊、問 A
   await page.getByRole("heading", { name: "收盤簡報" }).first().waitFor({ timeout: 8000 })
 })
 
-await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 下面一句「用掉 5 題」→ 送出後那一題標「深度搜尋」、回一份有短標題與來源的整理、切換鈕彈回來", async () => {
+// 深度搜尋一次算 3 題（會員方案，2026-11-15；原本 5 題）
+await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 下面一句「用掉 3 題」→ 送出後那一題標「深度搜尋」、回一份有短標題與來源的整理、切換鈕彈回來", async () => {
   if (!(await page.getByLabel("提出問題或下指令").count())) await page.goto(base + "/", { waitUntil: "networkidle" })
   const panel = page.getByRole("complementary", { name: "問 AI" })
   const toggle = panel.getByRole("button", { name: "深度搜尋", exact: true })
   if ((await toggle.getAttribute("aria-pressed")) !== "false") throw new Error("the toggle should start off")
   if (await toggle.locator("svg").count()) throw new Error("the toggle has an icon")
-  if (await panel.getByText(/用掉 5 題/).count()) throw new Error("the hint shows while the toggle is off")
+  if (await panel.getByText(/用掉 \d+ 題/).count()) throw new Error("the hint shows while the toggle is off")
   await toggle.click()
-  const hint = panel.getByText("多查幾輪資料，寫成一份整理，用掉 5 題。")
+  const hint = panel.getByText("多查幾輪資料，寫成一份整理，用掉 3 題。")
   await hint.waitFor()
   const hintSize = await hint.evaluate((el) => parseFloat(getComputedStyle(el).fontSize))
   if (hintSize < 15) throw new Error(`the hint is ${hintSize}px (a sentence to read is 15px)`)
@@ -222,15 +224,17 @@ await check("深度搜尋：輸入框的切換鈕（文字、沒有圖示）→ 
   await panel.getByText("最近的消息").waitFor({ timeout: 8000 })
   const asked = panel.locator("p", { hasText: "深入研究台積電" }).first()
   if (!(await asked.getByText("深度搜尋", { exact: true }).count())) throw new Error("the question is not marked 深度搜尋")
-  const report = await panel.locator(".ai-voice").last().innerText()
-  const lines = report.split("\n").filter(Boolean)
-  const points = lines.filter((l) => l.startsWith("・"))
-  if (points.length < 3 || points.length > 8) throw new Error(`report points: ${points.length}`)
-  if (!lines.includes("營運") || !lines.includes("最近的消息")) throw new Error(`report headings: ${lines.filter((l) => !l.startsWith("・")).join("|")}`)
-  if (/\*\*|^#/m.test(report)) throw new Error("the report contains Markdown")
+  // 回答照 Markdown 顯示（2026-11-15）：mock 的「・」條列畫成清單（li），短標題是自己一段
+  const voice = panel.locator(".ai-voice").last()
+  const report = await voice.innerText()
+  const points = await voice.locator("li").count()
+  if (points < 3 || points > 8) throw new Error(`report points: ${points}`)
+  const heads = await voice.locator(":scope > p").allInnerTexts()
+  if (!heads.includes("營運") || !heads.includes("最近的消息")) throw new Error(`report headings: ${heads.join("|")}`)
+  if (/\*\*|^#|^・/m.test(report)) throw new Error("the report contains raw Markdown or bullet glyphs")
   if (!(await panel.getByText("出處", { exact: true }).count())) throw new Error("the report has no sources")
   if ((await toggle.getAttribute("aria-pressed")) !== "false") throw new Error("the toggle should switch itself off after sending")
-  if (await panel.getByText(/用掉 5 題/).count()) throw new Error("the hint stays after sending")
+  if (await panel.getByText(/用掉 \d+ 題/).count()) throw new Error("the hint stays after sending")
 })
 
 await check("帳本工具列的「記一筆」（2026-11-14 照 Google 財經）：先選股票（列持有的），再填股數、月曆選買進日期、點那天收盤填價格；兩筆買進 → 新增", async () => {
@@ -467,18 +471,36 @@ await check("商用模式：帳本、個股、績效都沒有「示範資料」�
     if (await page.getByText("示範資料", { exact: true }).count()) throw new Error(`示範資料 on ${path}`)
   }
 })
-await check("績效：含美股時一打開自動只算新台幣帳戶；選「全部帳戶」才是空狀態（只留帳戶選單、原因說一次、一個動作）→ 只看台幣帳戶就有區間、基準、績效與「績效從 … 開始算」", async () => {
-  // 一打開：自動只算新台幣帳戶，上面一行說明（不是空白）
-  await page.getByText(/^只算「.+」。美股沒有報價，含美股的帳戶算不出績效。$/).waitFor({ timeout: 8000 })
+await check("績效：含美股的「全部帳戶」照常算（不自動改看新台幣帳戶）、只看複委託帳戶也算得出來；有持股還沒有收盤價才是空狀態（只留帳戶選單、原因說一次、一個動作）→ 只看台幣帳戶就有區間、基準、績效與「績效從 … 開始算」", async () => {
+  // 美股也有收盤價（Databento，2026-11-15）：一打開就是「全部帳戶」的績效，沒有「只算…」那一行、不提美股沒有報價
+  await page.goto(base + "/?view=performance", { waitUntil: "networkidle" })
+  await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
+  await page.getByText(/績效從 2026\/06\/01 收盤開始算，之前沒有資料/).first().waitFor()
   await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
-  // 自己選「全部帳戶」：算不出來、換區間或基準也沒有用，不放那兩個控制項，只留帳戶；原因在這一頁只說一次
-  await page.getByRole("combobox", { name: "帳戶" }).click()
+  await page.getByRole("combobox", { name: "績效比較基準" }).waitFor()
+  const account = page.getByRole("combobox", { name: "帳戶" })
+  if (!/^全部帳戶/.test(((await account.textContent()) ?? "").trim())) throw new Error(`performance switched account on its own: ${await account.textContent()}`)
+  if (await page.locator("main").getByText(/^只算「|美股沒有報價|算不出績效/).count()) throw new Error("performance still blocks or narrows on US holdings")
+  // 只看複委託帳戶（只有美股）：一樣有績效
+  await account.click()
+  await page.getByRole("option", { name: "國泰・複委託" }).click()
+  await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
+  if (await page.getByText("算不出績效", { exact: true }).count()) throw new Error("the US account has no performance")
+  await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
+  // 持有還沒有收盤價的美股（SEC 才認得的 MSFT，用 AI 記一筆、站內不重新載入）：選「全部帳戶」才是空狀態——
+  // 算不出來、換區間或基準也沒有用，不放那兩個控制項，只留帳戶；原因在這一頁只說一次
+  const box = page.getByLabel("提出問題或下指令")
+  await box.fill("買 MSFT 10 股 400")
+  await box.press("Enter")
+  await page.getByRole("button", { name: "簽名：確認入帳" }).click({ timeout: 8000 })
+  await page.getByText(/已入帳：買進 MICROSOFT/).waitFor({ timeout: 8000 })
+  await account.click()
   await page.getByRole("option", { name: "全部帳戶" }).click()
   await page.getByText("算不出績效", { exact: true }).waitFor({ timeout: 8000 })
   if (await page.getByRole("radiogroup", { name: "績效區間" }).count()) throw new Error("range chips shown while nothing can be computed")
   if (await page.getByRole("combobox", { name: "績效比較基準" }).count()) throw new Error("benchmark select shown while nothing can be computed")
   await page.getByRole("combobox", { name: "帳戶" }).waitFor()
-  const reasons = await page.locator("main").getByText(/美股/).count()
+  const reasons = await page.locator("main").getByText(/還沒有收盤價/).count()
   if (reasons !== 1) throw new Error(`the reason should appear once, got ${reasons}`)
   await page.getByRole("button", { name: /^只看「/ }).first().waitFor({ timeout: 8000 })
   if ((await page.getByRole("button", { name: /^只看「/ }).count()) !== 1) throw new Error("the empty state should offer exactly one action")
@@ -703,25 +725,39 @@ await check("ETF 淨值與折溢價：0050 同一天、有走勢與逐日數字�
   await page.getByRole("region", { name: "關鍵數據" }).getByText("近四季 EPS").waitFor({ timeout: 8000 })
   if (await page.getByRole("region", { name: /淨值與折溢價|折溢價走勢/ }).count()) throw new Error("stocks have no NAV section")
 })
-await check("個股（第二輪）：美股沒有報價只在價格那一格說一次、沒有走勢圖與殖利率；麵包屑不寫英文產業；術語說明收在「怎麼看」；報價小數位依升降單位；空狀態不用虛線", async () => {
+await check("個股（第二輪）：美股收盤價寫 US$ 與紐約日期一次；還沒有收盤價的美股只在價格那一格說一次、沒有走勢圖；美股沒有殖利率走勢；麵包屑不寫英文產業；術語說明收在「怎麼看」；報價小數位依升降單位；空狀態不用虛線", async () => {
+  // 美股有收盤價（Databento，2026-11-15）：價格帶 US$，日期是紐約的交易日「11/11 收盤（美東）」，整頁只寫一次
   await page.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
   await page.getByRole("heading", { level: 1, name: "Apple" }).waitFor({ timeout: 8000 })
-  await page.getByText("沒有報價", { exact: true }).waitFor({ timeout: 8000 })
+  const head = page.locator("main header").first()
+  await head.getByText(/^\d{1,2}\/\d{1,2} 收盤（美東）$/).waitFor({ timeout: 8000 })
+  if (!/US\$/.test((await head.textContent()) ?? "")) throw new Error(`US price without US$: ${await head.textContent()}`)
   await page.getByRole("region", { name: "關於「Apple」" }).waitFor({ timeout: 8000 })
   const main = page.locator("main")
-  const said = await main.evaluate((el) => (el.textContent.match(/美股沒有報價/g) ?? []).length)
-  if (await main.getByText(/可商用/).count()) throw new Error("the page still talks about licensing")
-  if (said !== 1) throw new Error(`the no-quote reason should appear once on the overview, got ${said}`)
-  if (await page.getByRole("region", { name: "走勢圖" }).count()) throw new Error("no price chart without a quote")
+  const said = await main.evaluate((el) => (el.textContent.match(/收盤（美東）/g) ?? []).length)
+  if (said !== 1) throw new Error(`the New York date should appear once on the overview, got ${said}`)
+  if (await main.getByText(/可商用|沒有報價|還沒有收盤價/).count()) throw new Error("a priced US stock still says it has no quote (or talks about licensing)")
+  await page.getByRole("region", { name: "走勢圖" }).waitFor({ timeout: 8000 })
   const crumb = await page.getByRole("navigation", { name: "位置" }).textContent()
   if (/Consumer Electronics|[A-Za-z]{4,} [A-Za-z]{4,}/.test(crumb.replace("AAPL", ""))) throw new Error(`breadcrumb shows an English industry: ${crumb}`)
   const position = await page.getByRole("region", { name: /的部位$/ }).textContent()
-  if (!/US\$143\.41/.test(position) || /未實現/.test(position)) throw new Error(`US position: cost in US$, no unrealized without a quote: ${position}`)
+  if (!/US\$143\.41/.test(position) || !/未實現/.test(position)) throw new Error(`US position: cost in US$ and unrealized from the close: ${position}`)
+  // 估值：美股有收盤價但沒有歷史本益比——說一次「美股沒有本益比河流圖」、連到財務；沒有殖利率走勢（不畫 0%）
   await page.goto(base + "/stock/AAPL?tab=valuation", { waitUntil: "networkidle" })
-  await page.getByText("沒有報價，算不出估值").waitFor({ timeout: 8000 })
-  if (await page.getByRole("region", { name: "殖利率走勢" }).count()) throw new Error("yield trend is price-derived")
-  const again = await main.evaluate((el) => (el.textContent.match(/美股沒有報價/g) ?? []).length)
-  if (again !== 1) throw new Error(`the no-quote reason should appear once on valuation, got ${again}`)
+  await page.getByText("美股沒有本益比河流圖", { exact: true }).waitFor({ timeout: 8000 })
+  const toFinancials = page.locator("#stock-tabpanel").getByRole("link", { name: "看財務" })
+  if (!/tab=financials/.test((await toFinancials.getAttribute("href")) ?? "")) throw new Error(`valuation link: ${await toFinancials.getAttribute("href")}`)
+  if (await page.getByRole("region", { name: "殖利率走勢" }).count()) throw new Error("yield trend shown for a US stock")
+  if (await page.getByRole("region", { name: "本益比河流圖" }).count()) throw new Error("river chart shown for a US stock")
+  // SEC 才認得、還沒有收盤價的美股（MSFT）：「還沒有收盤價」只在價格那一格說一次，沒有走勢圖
+  await page.goto(base + "/stock/MSFT", { waitUntil: "networkidle" })
+  await page.locator("main header").first().getByText("還沒有收盤價", { exact: true }).waitFor({ timeout: 8000 })
+  await page.locator("#stock-tabpanel").waitFor({ timeout: 8000 })
+  await page.waitForTimeout(300)
+  const unpriced = await main.evaluate((el) => (el.textContent.match(/還沒有收盤價/g) ?? []).length)
+  if (unpriced !== 1) throw new Error(`the no-close reason should appear once, got ${unpriced}`)
+  if (await main.getByText(/美股沒有報價|收盤（美東）/).count()) throw new Error("unpriced US stock shows the old reason or a close date")
+  if (await page.getByRole("region", { name: "走勢圖" }).count()) throw new Error("no price chart without a close")
   // 估值：「每條帶是…」「近 12 個月現金股利 ÷ 收盤價」預設收著，按「怎麼看」才出現
   await page.goto(base + "/stock/2330.TW?tab=valuation", { waitUntil: "networkidle" })
   const river = page.getByRole("region", { name: "本益比河流圖" })
@@ -866,9 +902,12 @@ await check("美股：不問河流圖、提示字用「股」；自由提問也�
   if (await panel.getByRole("button", { name: "我的成本在河流圖哪裡？" }).count()) throw new Error("river question offered for a US stock")
   await box.fill("我的成本在河流圖哪裡？")
   await box.press("Enter")
-  await panel.getByText(/你的均價 US\$[\d,.]+。美股沒有報價，算不出本益比，也沒有河流圖。/).waitFor({ timeout: 8000 })
-  if (await panel.getByText(/\d 元，用近四季|現在是 — 倍/).count()) throw new Error("US cost shown in 元 or with a dash")
-  if (await panel.getByRole("link", { name: /看河流圖/ }).count()) throw new Error("links to an empty river chart")
+  // 美股有收盤價，但沒有歷史本益比：照實說沒有河流圖、每股盈餘在財務分頁（連到財務，不連到空的估值）
+  await panel.getByText(/你的均價 US\$[\d,.]+。美股沒有歷史本益比的資料，所以沒有河流圖。每股盈餘在財務分頁。/).waitFor({ timeout: 8000 })
+  if (await panel.getByText(/\d 元，用近四季|現在是 — 倍|美股沒有報價/).count()) throw new Error("US cost shown in 元, with a dash, or as having no quote")
+  if (await panel.getByRole("link", { name: /看河流圖|看估值/ }).count()) throw new Error("links to an empty river chart")
+  const toFinancials = panel.getByRole("link", { name: /看財務/ }).last()
+  if (!/\/stock\/AAPL\?tab=financials/.test((await toFinancials.getAttribute("href")) ?? "")) throw new Error(`answer link: ${await toFinancials.getAttribute("href")}`)
   await panel.getByRole("button", { name: "新對話" }).click()
 })
 
@@ -947,7 +986,8 @@ await check("排行：名次依期間報酬排——那一欄是主數字、表�
   if (!/[▲▼]/.test(look.period.text) || !/[▲▼]/.test(look.total.text)) throw new Error("▲▼ missing on a return column")
   const me = await table.getByRole("row").filter({ hasText: "（你）" }).evaluate((tr) => ({
     bg: getComputedStyle(tr).backgroundColor,
-    weight: Number(getComputedStyle(tr.querySelector("a span span")).fontWeight),
+    // 名字本身（可能被截斷的那一段）；外面包著換行用的 span（標示放不下時換到下一行）
+    weight: Number(getComputedStyle(tr.querySelector("a .truncate")).fontWeight),
   }))
   if (me.bg !== "rgba(0, 0, 0, 0)") throw new Error(`my row is tinted (${me.bg}) — looks like a stuck hover`)
   if (me.weight < 700) throw new Error(`my name is not bold (${me.weight})`)
@@ -972,9 +1012,23 @@ await check("群組、設定、資料來源：空狀態沒有虛線；有字的�
   await page.goto(base + "/groups", { waitUntil: "networkidle" })
   await noIcon(page.getByRole("button", { name: "建立群組" }))
   await noIcon(page.getByRole("button", { name: "複製分享文字" }))
-  // 分享卡的說明是一句話（「AAPL 沒有報價，本月算不出來。」），不是「本月：…：…」
-  const note = (await page.getByText(/本月算不出來。/).first().textContent()) ?? ""
-  if (/^本月[：:]/.test(note) || !/。$/.test(note)) throw new Error(`share-card note: ${note}`)
+  // 美股也有收盤價（2026-11-15）：分享卡照常有本月、沒有說明
+  const card = page.getByRole("region", { name: "分享卡" })
+  await card.getByText("本月", { exact: true }).waitFor({ timeout: 8000 })
+  if (await card.getByText(/算不出來/).count()) throw new Error("share card says the month cannot be computed although every holding has a close")
+  // 持有還沒有收盤價的美股（MSFT，用 AI 記一筆、站內換頁不重新載入）：分享卡的說明是一句話
+  // （「MSFT 還沒有收盤價，本月算不出來。」），不是「本月：…：…」
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  const ask = page.getByLabel("提出問題或下指令")
+  await ask.fill("買 MSFT 10 股 400")
+  await ask.press("Enter")
+  await page.getByRole("button", { name: "簽名：確認入帳" }).click({ timeout: 8000 })
+  await page.getByText(/已入帳：買進 MICROSOFT/).waitFor({ timeout: 8000 })
+  await page.getByRole("link", { name: "群組", exact: true }).first().click()
+  await page.waitForURL(/\/groups$/)
+  const note = (await card.getByText(/本月算不出來。/).first().textContent({ timeout: 8000 })) ?? ""
+  if (note !== "MSFT 還沒有收盤價，本月算不出來。") throw new Error(`share-card note: ${note}`)
+  if (await card.getByText("本月", { exact: true }).count()) throw new Error("share card still shows a month cell it cannot compute")
   // 新群組：成員分頁的空邀請清單、週報的空狀態——上下實線、沒有外框與底色
   await page.getByRole("button", { name: "建立群組" }).first().click()
   await page.getByLabel("群組名稱").fill("空狀態測試群")
@@ -1219,24 +1273,38 @@ await check("AI 面板：開著一段對話時換到安靜的頁面不收起來�
   const widths = [await measure("/history", "對話紀錄"), await measure("/settings", "券商帳戶"), await measure("/data-sources", "授權條款")]
   if (new Set(widths).size !== 1 || widths[0] !== 816) throw new Error(`content measures differ: ${widths.join(" / ")}`)
 })
-await check("楷體只有一種排法：群組週報、AI 公司簡介和對話裡的回答同一個字級與字距（漢字 −0.06em、數字不拆行）", async () => {
+// 模型寫的字 2026-11-15 起是墨色黑體（Noto Sans TC 400，桌面 16px、行高 1.8、不加字距），楷體拿掉了（DESIGN.md〈AI voice〉）
+await check("AI 的字只有一種排法：群組週報、AI 公司簡介和對話裡的回答同一套黑體、字級與字距（數字不拆行）", async () => {
+  const look = (el) => {
+    const c = getComputedStyle(el)
+    const han = el.querySelector(".kai-han")
+    const num = el.querySelector(".kai-num")
+    // 字距 0 的計算值是 "normal"
+    const spacing = (s) => (s === "normal" ? 0 : parseFloat(s))
+    return { family: c.fontFamily.split(",")[0].replace(/["']/g, "").trim(), size: c.fontSize, lh: (parseFloat(c.lineHeight) / parseFloat(c.fontSize)).toFixed(1), weight: c.fontWeight, han: han ? (spacing(getComputedStyle(han).letterSpacing) / parseFloat(c.fontSize)).toFixed(2) : null, numWrap: num ? getComputedStyle(num).whiteSpace : null }
+  }
   const voice = async (path, ready) => {
     await rp.goto(base + path, { waitUntil: "networkidle" })
     await rp.getByText(ready).first().waitFor({ timeout: 8000 })
     await rp.waitForTimeout(300)
-    return rp.locator("main .ai-voice").first().evaluate((el) => {
-      const c = getComputedStyle(el)
-      const han = el.querySelector(".kai-han")
-      const num = el.querySelector(".kai-num")
-      return { family: c.fontFamily.split(",")[0].replace(/["']/g, "").trim(), size: c.fontSize, lh: (parseFloat(c.lineHeight) / parseFloat(c.fontSize)).toFixed(1), han: han ? (parseFloat(getComputedStyle(han).letterSpacing) / parseFloat(c.fontSize)).toFixed(2) : null, numWrap: num ? getComputedStyle(num).whiteSpace : null }
-    })
+    return rp.locator("main .ai-voice").first().evaluate(look)
   }
   const digest = await voice("/groups/grp_family?tab=digests", "本週報酬")
   const about = await voice("/stock/6488.TWO", "AI 依公開資料整理")
-  for (const [name, v] of [["digest", digest], ["about", about]]) {
-    if (v.family !== "TW-Kai" || v.size !== "17px" || v.lh !== "1.8" || v.han !== "-0.06") throw new Error(`${name} kai differs from answers: ${JSON.stringify(v)}`)
+  // 對話裡的回答（面板）：問一題，等模型那一段出來
+  const panel = rp.getByRole("complementary", { name: "問 AI", exact: true })
+  if (!(await panel.count())) await rp.getByRole("button", { name: "展開 AI 面板" }).click()
+  const ask = panel.getByLabel("提出問題或下指令")
+  await ask.fill("深入研究台積電")
+  await panel.getByRole("button", { name: "深度搜尋", exact: true }).click()
+  await ask.press("Enter")
+  await panel.getByText("最近的消息").waitFor({ timeout: 8000 })
+  const answer = await panel.locator(".ai-voice").last().evaluate(look)
+  for (const [name, v] of [["digest", digest], ["about", about], ["answer", answer]]) {
+    if (v.family !== "Noto Sans TC Variable" || v.size !== "16px" || v.lh !== "1.8" || v.weight !== "400" || v.han !== "0.00") throw new Error(`${name} AI voice differs: ${JSON.stringify(v)}`)
   }
   if (digest.numWrap !== "nowrap") throw new Error(`digest numbers can split from their unit: ${JSON.stringify(digest)}`)
+  if (answer.numWrap !== "nowrap") throw new Error(`answer numbers can split from their unit: ${JSON.stringify(answer)}`)
 })
 await check("設定：列上的動作一套語法（文字動作＋一顆外框按鈕，沒有只有圖示的按鈕）；設定與資料來源的區塊標題 20px", async () => {
   await rp.goto(base + "/settings", { waitUntil: "networkidle" })
@@ -1277,15 +1345,26 @@ await check("估值河流圖（淺色）：5 階是等比的，最便宜的一�
   if (ramp.some((r) => r < 1.3)) throw new Error(`light river ramp steps: ${ramp.join(", ")}`)
   if (Math.max(...ramp) - Math.min(...ramp) > 0.06) throw new Error(`light river ramp is uneven: ${ramp.join(", ")}`)
 })
-await check("美股總覽：沒有分頁列下面那條只有「近四季 EPS」的細帶，併進「關於」的鍵值格", async () => {
+// 美股有收盤價（2026-11-15）以後，AAPL 是一般的鍵值帶；只剩近四季 EPS 併進「關於」的情況（還沒有收盤價、但有 SEC 財報的美股）
+// mock 沒有這種代號，由 overview-tiers.test.tsx 測。這裡看兩種真的會出現的美股總覽：
+await check("美股總覽：有收盤價是一般的鍵值帶（近四季 EPS 只出現一次、不在「關於」）；還沒有收盤價時分頁列下面沒有細帶，事件是第一塊", async () => {
   await rp.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
-  const about = rp.getByRole("region", { name: "關於「Apple」" })
-  await about.getByRole("term").getByText("近四季 EPS", { exact: true }).waitFor({ timeout: 8000 })
-  if (await rp.getByRole("region", { name: "關鍵數據" }).count()) throw new Error("the lone key strip is still there")
+  const band = rp.getByRole("region", { name: "關鍵數據" })
+  await band.getByRole("term").getByText("近四季 EPS", { exact: true }).waitFor({ timeout: 8000 })
+  const terms = await band.getByRole("term").allTextContents()
+  if (terms.length < 3 || !terms.includes("開盤") || terms.includes("本益比") || terms.includes("殖利率")) throw new Error(`US key band: ${terms.join("、")}`)
+  const eps = (await band.getByRole("term").getByText("近四季 EPS", { exact: true }).locator("..").textContent()) ?? ""
+  if (!/^近四季 EPSUS\$\d+\.\d\d$/.test(eps)) throw new Error(`EPS cell: ${eps}`)
   if ((await rp.locator("main").getByText("近四季 EPS").count()) !== 1) throw new Error("EPS should appear once")
-  const cells = await about.locator("dl > div").evaluateAll((els) => els.map((el) => Math.round(el.getBoundingClientRect().width)))
-  if (cells.length !== 6 || new Set(cells).size !== 1) throw new Error(`About grid should be 6 even cells: ${cells.join(", ")}`)
-  // 事件是第一塊：緊接在分頁列下面
+  const about = rp.getByRole("region", { name: "關於「Apple」" })
+  await about.waitFor({ timeout: 8000 })
+  if (await about.getByText("近四季 EPS").count()) throw new Error("EPS is folded into About although the key band has room")
+  // 還沒有收盤價（MSFT，SEC 沒有財報）：沒有任何格子，分頁列下面不留一條只有標題的細帶，事件緊接在分頁列下面
+  await rp.goto(base + "/stock/MSFT", { waitUntil: "networkidle" })
+  await rp.locator("#ov-events").waitFor({ timeout: 8000 })
+  await rp.waitForTimeout(300)
+  if (await rp.getByRole("region", { name: "關鍵數據" }).count()) throw new Error("an empty key strip is still there")
+  if (await rp.locator("#stock-tabpanel p.border-y").count()) throw new Error("a lone key strip line is still there")
   const gap = await rp.evaluate(() => document.getElementById("ov-events").getBoundingClientRect().top - document.getElementById("stock-tabpanel").getBoundingClientRect().top)
   if (gap > 48) throw new Error(`events start ${gap}px below the tab bar`)
 })
@@ -1350,14 +1429,15 @@ await check("收盤價的標示（盤中）：個股頁一行「盤中不更新�
   if (!((await kp.locator("main header").first().textContent()) ?? "").includes("收盤價・11/12（四）")) throw new Error("price label missing")
   // 這一行只在價格旁出現一次，其他地方不重複
   if ((await kp.getByText(/盤中不更新/).count()) !== 1) throw new Error("the note is repeated")
-  // 上櫃 ETF、上櫃股票也一樣；美股維持「沒有報價」
+  // 上櫃 ETF、上櫃股票也一樣；美股是紐約的收盤（「11/11 收盤（美東）」），台股盤中那一行與證交所連結都不出現
   await kp.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
   await kp.locator("main header p", { hasText: "盤中不更新" }).waitFor({ timeout: 8000 })
   const otc = await kp.getByRole("link", { name: /^到證交所看即時報價/ }).getAttribute("href")
   if (otc !== "https://mis.twse.com.tw/stock/detail-item?id=otc_6488.tw&ex=otc&lang=zhHant") throw new Error(`TPEx link: ${otc}`)
   await kp.goto(base + "/stock/AAPL", { waitUntil: "networkidle" })
-  await kp.getByText("沒有報價", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.locator("main header").first().getByText(/^\d{1,2}\/\d{1,2} 收盤（美東）$/).waitFor({ timeout: 8000 })
   if (await kp.getByText(/盤中不更新/).count()) throw new Error("US stock shows the Taiwan market note")
+  if (await kp.getByRole("link", { name: /到證交所看即時報價/ }).count()) throw new Error("US stock links to the TWSE live quote")
   await kp.goto(base + "/", { waitUntil: "networkidle" })
   await kp.getByText("11/12 收盤・盤中不更新", { exact: true }).waitFor({ timeout: 8000 })
   await kp.locator("main dt").getByText("11/12", { exact: true }).waitFor()

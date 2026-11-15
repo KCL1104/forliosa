@@ -50,8 +50,10 @@ def detect_splits(rows: list[tuple[date, Decimal | None, Decimal]]) -> list[tupl
     """``[(date, open, close)]`` oldest first -> ``[(date, ratio)]``: ratio > 1 a split (shares per old share),
     < 1 a reverse split."""
     out: list[tuple[date, Decimal]] = []
-    for (_, _, prev), (day, opened, close) in pairwise(rows):
+    for (prev_day, _, prev), (day, opened, close) in pairwise(rows):
         if not prev or not opened or not close or prev <= 0 or opened <= 0:
+            continue
+        if (day - prev_day).days > 5:  # not neighbouring sessions (a gap in the rows): no evidence of a split
             continue
         r = prev / opened
         reverse = r < 1
@@ -178,9 +180,15 @@ class ArchiveProvider(BaseProvider):
         for s, rs in by_sym.items():
             last = rs[0]
             prev = rs[1].close if len(rs) > 1 else None
+            # A US split on the newest session: the day's change is measured from the previous close divided by the
+            # ratio (2026-11-15 review: −90 % on a 1-for-10 split otherwise). Taiwan uses official reference prices.
+            ref = None
+            if market_of_symbol(s) == "US" and prev is not None:
+                split = detect_splits([(rs[1].date, rs[1].open, rs[1].close), (last.date, last.open, last.close)])
+                ref = prev / split[0][1] if split else None
             out[s] = QuoteData(symbol=s, price=last.close, prev_close=prev, open=last.open, high=last.high,
                                low=last.low, volume=last.volume, as_of=close_dt(s, last.date),
-                               trade_date=last.date, source=last.source)
+                               trade_date=last.date, source=last.source, reference_price=ref)
         return out
 
     def corporate_events(self, symbol: str) -> list[CorporateEvent] | None:

@@ -509,7 +509,10 @@ class Worker:
         try:
             res = await asyncio.to_thread(run)
         except HttpStatusError as exc:
-            self._us_refused(exc)
+            if exc.status in us_prices.REFUSALS:  # bad key, credit used up: both US jobs wait
+                self._us_refused(exc)
+            else:  # a 5xx: the next hourly try
+                log.warning("US closes: Databento answered %s", exc.status)
             return
         except ProviderUnavailable as exc:
             log.warning("US closes: Databento unavailable (%s)", exc)
@@ -537,6 +540,9 @@ class Worker:
 
         try:
             res = await asyncio.to_thread(run)
+        except HttpStatusError as exc:  # the range request answered neither a refusal nor data (a 5xx)
+            log.warning("US price backfill: Databento answered %s", exc.status)
+            return
         except ProviderUnavailable as exc:
             log.warning("US price backfill: Databento unavailable (%s)", exc)
             return

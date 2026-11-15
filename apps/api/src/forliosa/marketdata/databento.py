@@ -25,6 +25,7 @@ from __future__ import annotations
 import contextlib
 import csv
 import io
+import json
 import logging
 from dataclasses import dataclass
 from datetime import date, timedelta
@@ -135,8 +136,11 @@ def unresolved_from_warning(header: str | None) -> list[str]:
 
 def last_available_day(http: HttpFetcher) -> date:
     """The newest session in EQUS.SUMMARY (``metadata.get_dataset_range``; free). Asking past it is a 422."""
-    doc = http.get_json(f"{API}metadata.get_dataset_range", params={"dataset": DATASET})
+    # through _get (not get_json): a 401 / 402 / 403 is an HttpStatusError here as on the bars request, so a bad key
+    # or an empty credit pauses the jobs instead of being retried every run (2026-11-15 review)
+    text, _ = _get(http, f"{API}metadata.get_dataset_range", {"dataset": DATASET})
     try:
+        doc = json.loads(text)
         end = date.fromisoformat(str(doc["schema"][SCHEMA]["end"])[:10])
     except (KeyError, TypeError, ValueError) as exc:
         raise ProviderUnavailable("Databento 的資料範圍格式不對") from exc

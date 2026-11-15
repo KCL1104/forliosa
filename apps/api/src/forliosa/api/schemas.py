@@ -871,7 +871,7 @@ class PositionHistory(BaseModel):
 
 class WhyReason(BaseModel):
     kind: Literal["price_move", "volume", "limit_up", "limit_down", "attention", "disposition", "ex_dividend",
-                  "earnings", "revenue_release"]
+                  "split", "earnings", "revenue_release"]
     text: str
 
 

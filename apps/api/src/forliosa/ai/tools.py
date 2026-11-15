@@ -350,7 +350,7 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
         "summary": summary[:240] if isinstance(summary, str) else None,
         "themes": detail.get("themes") or [],
         "quote": _pick(instr.quote_out(q), "price", "prev_close", "reference_price", "change", "change_pct",
-                       "volume", "as_of", "is_realtime", "is_demo") if q is not None else None,
+                       "volume", "as_of", "trade_date", "is_realtime", "is_demo") if q is not None else None,
         "overview": {k: v for k, v in ov.items() if k not in ("symbol", "sources", "etf_nav")},
         **({"etf_nav": _etf_nav_for_ai(ov["etf_nav"])} if ov.get("etf_nav") else {}),
         "recent_dividends": divs,

@@ -143,9 +143,10 @@ def split_adjusted(candles: list[Candle], events: list[Any]) -> tuple[list[Candl
         for d, r in splits:
             if c.t < d:
                 f *= r
-        out.append(c if f == 1 else Candle(c.t, c.o / f, c.h / f, c.l / f, c.c / f, int(c.v * f)))
-    def n(x: Decimal) -> str:
-        return str(int(x)) if x == int(x) else format(x.normalize(), "f")
+        out.append(c if f == 1 else Candle(c.t, c.o / f, c.h / f, c.l / f, c.c / f, round(c.v * f)))
+    def n(x: Decimal) -> str:  # 1/6 as a Decimal is inexact: a ratio within a rounding of a whole number is one
+        whole = x.to_integral_value()
+        return str(int(whole)) if abs(x - whole) < Decimal("0.0001") else format(x.normalize(), "f")
 
     notes = []
     for d, r in splits:

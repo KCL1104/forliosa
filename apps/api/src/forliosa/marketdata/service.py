@@ -371,8 +371,9 @@ class MarketData:
                 by_day.setdefault(q.trade_date, []).append(s)
         out = dict(quotes)
         for s, q in quotes.items():
-            if market_of_symbol(s) == "US":
-                out[s] = replace(q, reference_price=q.prev_close, limit_up=None, limit_down=None)
+            if market_of_symbol(s) == "US":  # the previous close, unless the archive found a split on that day
+                ref = q.reference_price if q.reference_price is not None else q.prev_close
+                out[s] = replace(q, reference_price=ref, limit_up=None, limit_down=None)
         for d, syms in by_day.items():
             official = self._provider_map("reference_prices", syms, d)
             ex = self._provider_map("ex_rights_on", [s for s in syms if s not in official], d)

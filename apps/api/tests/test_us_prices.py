@@ -4,7 +4,7 @@ close × the central bank rate, the market page's US row, Taiwan-only day lookup
 
 from __future__ import annotations
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal as D
 
 import httpx
@@ -309,3 +309,114 @@ def test_splits_are_found_from_the_open_and_folded_into_charts_only():
     adj, notes = split_adjusted(candles, [CorporateEvent("AVGO", d(2024, 7, 15), "split", D(10))])
     assert (adj[0].c, adj[0].v, adj[1].c) == (D("171"), 1000, D("168"))
     assert notes == ["2024/07/15 股票分割（1 股拆成 10 股），之前的價格已經換算"]
+
+
+# -- review fixes (2026-11-15) ----------------------------------------------------------------------------------
+def test_a_backfill_does_not_make_the_update_skip_the_other_symbols(db):
+    watch(db, "AAPL")
+    fake = FakeDatabento("2026-11-13", {
+        "AAPL": [("2026-11-11", "355.63"), ("2026-11-12", "354.88"), ("2026-11-13", "356.27")],
+        "SPY": [("2026-11-12", "757.12"), ("2026-11-13", "754.37")], "DIA": [("2026-11-12", "470")],
+        "ONEQ": [("2026-11-12", "88")], "NVDA": [("2026-11-12", "190"), ("2026-11-13", "191")]})
+    us_prices.backfill(db, fake.fetcher())
+    assert us_prices.stored_through(db) == date(2026, 11, 12)
+    fake.end = "2026-11-14"  # Databento posts 11/13 …
+    from forliosa.models import WatchlistItem as W
+
+    db.add(W(id="wl_new", user_id="usr_w", symbol="NVDA"))  # … and someone adds NVDA before the hourly update
+    db.commit()
+    assert us_prices.backfill(db, fake.fetcher()).stored == 1
+    assert us_prices.stored_through(db) == date(2026, 11, 12)  # the backfill does not move the progress
+    res = us_prices.update(db, fake.fetcher())
+    assert not res.skipped and res.stored == date(2026, 11, 13)
+    assert closes(db, "AAPL")[-1][0] == date(2026, 11, 13) and closes(db, "SPY")[-1][0] == date(2026, 11, 13)
+
+
+def test_a_symbol_tracked_again_gets_the_sessions_it_missed(db):
+    watch(db, "TSLA")
+    days = ["2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06", "2026-11-09", "2026-11-10",
+            "2026-11-11", "2026-11-12", "2026-11-13"]
+    fake = FakeDatabento("2026-11-04", {s: [(d, "100") for d in days] for s in ("TSLA", "SPY", "DIA", "ONEQ")})
+    us_prices.backfill(db, fake.fetcher())
+    item = db.scalar(select(WatchlistItem).where(WatchlistItem.symbol == "TSLA"))
+    db.delete(item)
+    db.commit()
+    for end in ("2026-11-10", "2026-11-14"):  # nobody tracks TSLA while the sessions go on
+        fake.end = end
+        us_prices.update(db, fake.fetcher())
+    assert db.get(PriceBackfill, "TSLA").status == "untracked"
+    db.add(WatchlistItem(id="wl_back", user_id="usr_w", symbol="TSLA"))
+    db.commit()
+    assert us_prices.pending(db) == ["TSLA"]
+    us_prices.backfill(db, fake.fetcher())
+    assert [d.isoformat() for d, _ in closes(db, "TSLA")] == days  # no gap
+
+
+def test_a_split_day_quote_is_measured_from_the_converted_close(engine, monkeypatch):
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
+    from forliosa.timeutil import today_taipei
+
+    t = today_taipei()  # the archive quote reads the last three weeks
+    with Session(engine) as s:
+        for back, o, c in ((3, "1700", "1720"), (2, "1715", "1710"), (1, "171.5", "168")):  # 1 share → 10 on the last
+            s.add(PriceDaily(symbol="AVGO", date=t - timedelta(days=back), open=D(o), close=D(c),
+                             source="databento-equs"))
+        s.commit()
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine), us_prices=True),
+                     DemoProvider()], policy="commercial")
+    from forliosa.services.instruments import quote_out
+
+    q = md.quotes(["AVGO"])["AVGO"]
+    assert (q.prev_close, q.reference_price) == (D("1710.0000"), D("171.0000"))
+    out = quote_out(q)
+    assert out["change_pct"] == pytest.approx(168 / 171 - 1, abs=1e-4)  # −1.75 %, not −90 %
+
+
+def test_a_bad_key_on_the_first_request_pauses_the_backfill(db):
+    watch(db, "AAPL")
+
+    def refuse(req: httpx.Request) -> httpx.Response:
+        return httpx.Response(401, json={"detail": {"case": "auth_invalid"}})
+
+    client = httpx.Client(transport=httpx.MockTransport(refuse), auth=("db-test", ""))
+    fetcher = HttpFetcher(client=client, retries=0, extra_allowed=(databento.API,), limiter=RateLimiter())
+    res = us_prices.backfill(db, fetcher)
+    assert res.blocked and res.asked == 0 and db.scalar(select(PriceBackfill)) is None
+
+
+def test_a_gap_in_the_rows_is_not_taken_for_a_split():
+    from forliosa.marketdata.archive_provider import detect_splits
+
+    rows = [(date(2026, 9, 1), D("30"), D("30")), (date(2026, 11, 2), D("10"), D("10.1"))]  # two months apart
+    assert detect_splits(rows) == []
+    reverse = [(date(2025, 1, 2), D("2"), D("2.0")), (date(2025, 1, 3), D("12.1"), D("12.0"))]  # 1-for-6
+    from forliosa.marketdata.base import Candle
+    from forliosa.services.instruments import split_adjusted
+
+    (d, r), = detect_splits(reverse)
+    _, notes = split_adjusted([Candle(date(2025, 1, 2), D(2), D(2), D(2), D(2), 300),
+                               Candle(date(2025, 1, 3), D(12), D(12), D(12), D(12), 50)],
+                              [type("E", (), {"date": d, "kind": "split", "ratio": r})()])
+    assert notes == ["2025/01/03 股票分割（6 股合成 1 股），之前的價格已經換算"]
+
+
+def test_the_why_line_names_a_split_and_the_52_weeks_are_converted(engine, monkeypatch):
+    from forliosa.services import stock
+    from forliosa.timeutil import today_taipei
+
+    monkeypatch.setattr(get_settings(), "us_price_source", "databento")
+    t = today_taipei()
+    with Session(engine) as s:
+        for back, o, c in ((3, "1700", "1720"), (2, "1715", "1710"), (1, "171.5", "168")):
+            s.add(PriceDaily(symbol="NVDA", date=t - timedelta(days=back), open=D(o), high=D(o), low=D(c), close=D(c),
+                             volume=1000, source="databento-equs"))
+        s.commit()
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine), us_prices=True),
+                     DemoProvider()], policy="commercial")
+    with Session(engine) as db:
+        w = stock.why(db, md, "NVDA")
+        o = stock.overview(db, md, "NVDA")
+    split = [r for r in w["reasons"] if r["kind"] == "split"]
+    assert split and "1 股拆成 10 股" in split[0]["text"] and "171.00" in split[0]["text"]
+    assert not [r for r in w["reasons"] if r["kind"] == "ex_dividend"]
+    assert o["high_52w"] == pytest.approx(171.5)  # 1715 before the split, in today's shares (not 1715)

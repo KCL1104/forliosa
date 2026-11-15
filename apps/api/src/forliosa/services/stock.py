@@ -19,7 +19,7 @@ from sqlalchemy.orm import Session
 from forliosa.api import serialize as ser
 from forliosa.api.errors import unprocessable
 from forliosa.datapolicy import labels, source_clause, tagged
-from forliosa.marketdata.base import InstrumentInfo, QuoteData
+from forliosa.marketdata.base import InstrumentInfo, QuoteData, market_of_symbol
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.fund_nav import NAV_DATASET
 from forliosa.marketdata.opendata import TDCC_LEVELS
@@ -110,8 +110,13 @@ def overview(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
     q = md.quote(sym)
     # 52-week range and 3-month volume describe the chart, not a ledger: the history backfill's days count
     hist = md.history(sym, today - timedelta(days=400), today, backfill=True)
-    year = [c for c in hist.candles if c.t > today - timedelta(days=365)]
-    three_m = [c for c in hist.candles if c.t >= add_months(today, -3)]
+    candles = hist.candles
+    if info.market == "US" and candles:  # unadjusted US closes: a split in the year folds in like the chart
+        from forliosa.services.instruments import split_adjusted
+
+        candles = split_adjusted(candles, md.corporate_events(sym))[0]
+    year = [c for c in candles if c.t > today - timedelta(days=365)]
+    three_m = [c for c in candles if c.t >= add_months(today, -3)]
     prof = md.profile(sym)
     price = q.price if q else (hist.candles[-1].c if hist.candles else None)
     sources: list[str] = [*(tagged(q.source, "price") if q else []), *tagged(hist.source, "price")]
@@ -889,15 +894,27 @@ def why_reasons(db: Session, md: MarketData, info: InstrumentInfo, q: QuoteData,
             word = "上漲" if pct > 0 else "下跌"
             reasons.append({"kind": "price_move", "text": f"{when}{word} {abs(pct) * 100:.1f}%"})
     hist = md.history(sym, day - timedelta(days=45), day, backfill=True)
-    past = [c for c in hist.candles if c.t < day][-20:]
+    candles = hist.candles
+    if market_of_symbol(sym) == "US" and candles:  # volume before a split, in today's shares
+        from forliosa.services.instruments import split_adjusted
+
+        candles = split_adjusted(candles, md.corporate_events(sym))[0]
+    past = [c for c in candles if c.t < day][-20:]
     if q.volume and len(past) >= 10:
         avg = Decimal(sum(c.v for c in past)) / len(past)
         if avg > 0 and Decimal(q.volume) >= WHY_VOLUME_MULTIPLE * avg:
             reasons.append({"kind": "volume", "text": f"成交量是 20 日均量的 {Decimal(q.volume) / avg:.1f} 倍"})
     if q.reference_price is not None and q.prev_close is not None and q.reference_price != q.prev_close:
-        reasons.append({"kind": "ex_dividend",
-                        "text": f"{when}除權息，漲跌以參考價 {q.reference_price.normalize():f} 計算"
-                                f"（昨收 {q.prev_close.normalize():f}）"})
+        if market_of_symbol(sym) == "US":  # the archive found a split on that session (no US dividend source)
+            ratio = q.prev_close / q.reference_price
+            how = (f"1 股拆成 {int(ratio.to_integral_value())} 股" if ratio > 1
+                   else f"{int((1 / ratio).to_integral_value())} 股合成 1 股")
+            reasons.append({"kind": "split",
+                            "text": f"{when}股票分割（{how}），漲跌以換算後的昨收 {q.reference_price:.2f} 計算"})
+        else:
+            reasons.append({"kind": "ex_dividend",
+                            "text": f"{when}除權息，漲跌以參考價 {q.reference_price.normalize():f} 計算"
+                                    f"（昨收 {q.prev_close.normalize():f}）"})
     status, _ = trading_status(db, md, sym, today)
     if status["disposition"]:
         reasons.append({"kind": "disposition", "text": status["note"] or "處置中"})
