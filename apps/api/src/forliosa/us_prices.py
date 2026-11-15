@@ -46,6 +46,9 @@ log = logging.getLogger(__name__)
 SOURCE = "databento-equs"  # prices_daily.source / price_backfill.source (String(32))
 STATUS_KEY = f"{SOURCE}/price"  # dataset_status: the newest session stored
 MARKET_ETFS = ("SPY", "DIA", "ONEQ")  # the market page's US row: S&P 500, Dow Jones and Nasdaq Composite ETFs
+# The performance page's US benchmark option (VOO, apps/web lib/labels.ts BENCHMARK_OPTIONS): fetched whether or not
+# anyone holds it, so picking it always has closes (2026-11-15 review)
+BENCHMARK_ETFS = ("VOO",)
 FIRST_DAY = databento.FIRST_DAY
 # Re-read the last few sessions on every update: a late correction to a summary replaces the stored bar.
 OVERLAP_DAYS = 5
@@ -82,8 +85,8 @@ def http() -> HttpFetcher | None:
 
 
 def wanted(db: Session) -> list[str]:
-    """Every US symbol to keep: the market page's ETFs, then the tracked ones."""
-    return databento.us_symbols([*MARKET_ETFS, *tracked_symbols(db)])
+    """Every US symbol to keep: the market page's ETFs, the benchmark option, then the tracked ones."""
+    return databento.us_symbols([*MARKET_ETFS, *BENCHMARK_ETFS, *tracked_symbols(db)])
 
 
 def stored_through(db: Session) -> date | None:

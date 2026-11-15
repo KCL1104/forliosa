@@ -92,13 +92,15 @@ def test_backfill_then_update_store_unadjusted_closes_in_our_spelling(db):
         "AAPL": [("2024-07-01", "216.75"), ("2026-11-11", "355.63"), ("2026-11-12", "354.88"),
                  ("2026-11-13", "356.27")],
         "BRK.B": [("2026-11-12", "589.83")],
-        "SPY": [("2026-11-12", "757.12")], "DIA": [("2026-11-12", "470.00")], "ONEQ": [("2026-11-12", "88.10")]})
-    assert us_prices.pending(db) == ["SPY", "DIA", "ONEQ", "AAPL", "BRK-B", "ZZZZQ"]  # the market ETFs first
+        "SPY": [("2026-11-12", "757.12")], "DIA": [("2026-11-12", "470.00")], "ONEQ": [("2026-11-12", "88.10")],
+        "VOO": [("2026-11-12", "694.00")]})
+    # the market ETFs and the benchmark option first
+    assert us_prices.pending(db) == ["SPY", "DIA", "ONEQ", "VOO", "AAPL", "BRK-B", "ZZZZQ"]
 
     res = us_prices.backfill(db, fake.fetcher())
-    assert (res.asked, res.stored, res.not_found, res.remaining) == (6, 5, ["ZZZZQ"], 0)
+    assert (res.asked, res.stored, res.not_found, res.remaining) == (7, 6, ["ZZZZQ"], 0)
     get = fake.ranges()[0]
-    assert get.url.params["symbols"] == "SPY,DIA,ONEQ,AAPL,BRK.B,ZZZZQ"  # Databento spelling on the wire
+    assert get.url.params["symbols"] == "SPY,DIA,ONEQ,VOO,AAPL,BRK.B,ZZZZQ"  # Databento spelling on the wire
     # Databento has through 11/12 (its range end 11/13 is exclusive): the request asks up to 11/13, exclusive
     assert get.url.params["start"] == "2024-07-01" and get.url.params["end"] == "2026-11-13"
     assert closes(db, "BRK-B") == [(date(2026, 11, 12), D("589.8300"))]  # our spelling in the archive

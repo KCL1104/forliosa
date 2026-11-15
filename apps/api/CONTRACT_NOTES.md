@@ -2235,16 +2235,17 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 ### 存檔與 worker（`us_prices.py`、`worker.py`）
 
-- 要抓的代號：`SPY`、`DIA`、`ONEQ`，加上任何人帳本（交易紀錄）或觀察清單裡的美股（`archive.tracked_symbols`）。
+- 要抓的代號：`SPY`、`DIA`、`ONEQ`（市場頁），`VOO`（績效頁的美股比較基準，沒人持有也抓，`BENCHMARK_ETFS`），加上任何人帳本（交易紀錄）或觀察清單裡的美股（`archive.tracked_symbols`）。
+- 沒人持有、也沒人觀察的代號標成 `untracked`，之後不再更新；再有人加入時重新回補一次，中間缺的收盤會補上。
 - 存進 `prices_daily`，`source = 'databento-equs'`；只會覆蓋自己的列（`upsert … where source = 'databento-equs'`）。`dataset_status` 的 `databento-equs/price`
-  記最新的交易日（不會往回）。回補進度和 Yahoo 回補共用 `price_backfill`，用 `source` 分開（`history_backfill status｜drop` 只看、只刪 Yahoo 的）。
+  記最新的交易日（不會往回）。這個進度只由每日更新推進；回補只在第一次（還沒有進度時）設定，所以新代號回補到最新一天，也不會讓下一次更新跳過其他代號（2026-11-15 審查）。回補進度和 Yahoo 回補共用 `price_backfill`，用 `source` 分開（`history_backfill status｜drop` 只看、只刪 Yahoo 的）。
 - **`us_closes`**（背景迴圈）：從一個美股交易日收盤後一小時（紐約 17:00，`US_CLOSE_DELAY`）開始，那一天還沒存進來就每小時問一次（`US_CLOSE_POLL_SECONDS`）。
   不看台股的交易日；只用星期判斷美股交易日，美國放假那天沒有資料，收盤後 21 小時（多等 20 小時，`US_CLOSE_GIVE_UP`）就不再問。
   先讀免費的 `get_dataset_range`，Databento 有新的一天才買；每次重讀最後 5 天（`OVERLAP_DAYS`），事後修正過的收盤會蓋掉舊的。只更新已經回補完的代號。
   （產品負責人原本提的是台北 08:40；2026-11-15 改成收盤後一小時。）
 - **`us_backfill`**（每 10 分鐘，`US_BACKFILL_SECONDS`）：沒問過的代號（新加入帳本或觀察清單的）一次補 2024-07-01 以來的全部日線，每 100 檔一個請求；
-  `done`／`not_found`（Databento 不認得，7 天後再問）／`error`（1 小時後再問）。所以新加入的美股約 10 分鐘內有收盤價。
-- Databento 拒絕（401 金鑰錯、402 額度用完、403 沒有權限）：兩個工作一起暫停 30 分鐘，連續被拒就加倍，最長 6 小時；不改用別的來源。
+  `done`／`not_found`（Databento 不認得，7 天後再問）／`error`（回 5xx、逾時或斷線，1 小時後再問）／`untracked`（見上）。所以新加入的美股約 10 分鐘內有收盤價。
+- Databento 拒絕（401 金鑰錯、402 額度用完、403 沒有權限；免費的 `get_dataset_range` 被拒也算）：兩個工作一起暫停 30 分鐘，連續被拒就加倍，最長 6 小時；不改用別的來源。回 5xx 不暫停，等下一次（每小時／每 10 分鐘）再試。
 
 ### 讀取（`marketdata/archive_provider.py`、`datapolicy.py`、`marketdata/service.py`）
 
@@ -2255,8 +2256,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 沒有參數的 `first_date`（「存檔從哪天開始」）只看台股的列；美股的代號沒有任何列時 `archive_since` 是 `None`，`notes` 是「還沒有資料」。
 - 市場頁的排行、排行日、前一天的收盤只讀台股的列（`market_overview._tw_prices`），美股的列不會被排進漲跌幅前 10。
 - **分割**：收盤價沒有還原。`ArchiveProvider.corporate_events` 從存的開盤價找分割（`detect_splits`：開盤 ≈ 前一天收盤 ÷ 2、3、4、5…50，2 拆 1 容許 1.5%、其他 5%，
-  收盤也要對得上；反分割同理）。用在：`GET /history`（之前的價格與成交量換算，`notes`「YYYY/MM/DD 股票分割（1 股拆成 N 股），之前的價格已經換算」）、
-  AI 圖卡的 `compare`、美股基準（VOO）的報酬。**帳本不用它**：持股照使用者記的分割（`split` 交易）。
+  收盤也要對得上；反分割同理；只比相鄰的兩根，相隔超過 5 天（資料中間有缺）不算）。用在：`GET /history`（之前的價格與成交量換算，`notes`「YYYY/MM/DD 股票分割（1 股拆成 N 股），之前的價格已經換算」）、
+  AI 圖卡的 `compare`、美股基準（VOO）的報酬、個股總覽的 52 週高低與三個月均量、`why` 的 20 日均量。最新一天就是分割日時，報價的 `reference_price` 是昨收 ÷ 比例，漲跌以它計算（不會把 1 拆 10 畫成 −90%），`why` 多一條 `kind: "split"`「股票分割（1 股拆成 10 股），漲跌以換算後的昨收 171.00 計算」。**帳本不用它**：持股照使用者記的分割（`split` 交易）。
 - 帳本：市值＝收盤價 × 中央銀行收盤匯率（`FxBook`）。`PortfolioState.as_of` 先用台股報價的時間，沒有台股才用美股的（美股的 16:00 紐約是台北隔天清晨，
   不能讓含台股的帳本看起來新一天）。績效：還沒抓到收盤價的美股 → `notes`「MSFT：還沒有收盤價，績效算不出來」；關著時照舊「…：美股沒有報價，含美股的績效算不出來」。
 - `coverage.series_notes`：美股（商用模式）開著時是「資料從 YYYY/MM/DD 開始」（這一檔的第一天）或「還沒有資料」，關著時是「美股沒有報價」。

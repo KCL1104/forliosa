@@ -88,7 +88,7 @@ uv run python -m forliosa.worker
 | 每小時 :35 | 「關於」公司簡介：追蹤中的股票先用 Wikidata 找中文維基百科條目並節錄（每月一次、一次一個請求、429 就停 6 小時），沒有條目才用 AI 依官方資料寫 2–3 句（資料變了才重寫）。`uv run python -m forliosa.services.company refresh [代號…]` |
 | 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）用 GDELT 查媒體標題（每次間隔 ≥ 6 秒，429 就暫停），少於 3 則才用 AI 搜尋補（每月上限 US$30）；只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」）。每次另外多問 GDELT 一次美股市場新聞（市場頁，存在 `^US`；`NEWS_US_MARKET`） |
 | 美股收盤後一小時起（紐約 17:00＝台北冬令 06:00、夏令 05:00），每小時到那天存進來為止；不看台股交易日 | 美股收盤價 `us_closes`（`US_PRICE_SOURCE=databento`＋`DATABENTO_API_KEY` 才有）：Databento 有新的一天才買，重讀最後 5 天；美國放假那天 20 小時後不再等 |
-| 每 10 分鐘 | 美股回補 `us_backfill`（同上）：新出現在帳本或觀察清單的美股（和 SPY、DIA、ONEQ）補 2024-07-01 以來的日線，每 100 檔一個請求。Databento 拒絕（401／402／403）時兩個美股工作暫停 30 分鐘起、最長 6 小時 |
+| 每 10 分鐘 | 美股回補 `us_backfill`（同上）：新出現在帳本或觀察清單的美股（和 SPY、DIA、ONEQ、VOO）補 2024-07-01 以來的日線，每 100 檔一個請求。Databento 拒絕（401／402／403）時兩個美股工作暫停 30 分鐘起、最長 6 小時 |
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
@@ -244,7 +244,7 @@ src/forliosa/
 | 金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（`www.sitca.org.tw/MemberK0000/F/03/nav.csv`，檔案放在投信投顧公會主機；只抓這一個檔案、每 2 秒最多一次） | ETF 淨值與盤後折溢價（個股頁「淨值與折溢價」、AI `get_stock_overview`）；檔案只有每檔最新一筆，每天存檔累積 | 政府資料開放授權條款第 1 版（data.gov.tw 11109），須顯名 |
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
-| Databento 歷史 API（`hist.databento.com`，資料集 `EQUS.SUMMARY`） | 美股收盤價（`US_PRICE_SOURCE=databento` 時）：Nasdaq NLS Plus 的官方合併收盤，日線、未還原分割與股利，2024-07-01 起；只抓帳本或觀察清單裡的美股與 SPY、DIA、ONEQ → 報價、走勢、帳本市值、`/close`、市場頁美股、AI。`prices_daily.source = 'databento-equs'` | 付費、按量計費（先用註冊送的 US$125 額度）；顯名「Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供」。產品負責人沒有先確認能不能顯示給會員（2026-11-15，知道風險）；分割與股利資料不能轉載，沒有用 |
+| Databento 歷史 API（`hist.databento.com`，資料集 `EQUS.SUMMARY`） | 美股收盤價（`US_PRICE_SOURCE=databento` 時）：Nasdaq NLS Plus 的官方合併收盤，日線、未還原分割與股利，2024-07-01 起；只抓帳本或觀察清單裡的美股與 SPY、DIA、ONEQ、VOO → 報價、走勢、帳本市值、`/close`、市場頁美股、AI。`prices_daily.source = 'databento-equs'` | 付費、按量計費（先用註冊送的 US$125 額度）；顯名「Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供」。產品負責人沒有先確認能不能顯示給會員（2026-11-15，知道風險）；分割與股利資料不能轉載，沒有用 |
 | GDELT DOC 2.0（`api.gdeltproject.org`） | 個股頁「新聞報導」與市場頁的美股新聞：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
 | AI 網路搜尋（Claude `web_search`） | 新聞報導補缺（GDELT 少於 3 則時）；標題與連結取自搜尋結果 | 系統付費，每月上限 `NEWS_AI_BUDGET_USD`（30） |
 | SearXNG（自架） | 新聞報導的備用來源，**預設關**（`NEWS_SEARXNG_URL`） | 自動查詢上游搜尋引擎違反它們的條款，由營運者承擔 |
