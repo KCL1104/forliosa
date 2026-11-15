@@ -25,6 +25,7 @@ const TWSE_MIS_URL = "https://mis.twse.com.tw/"
  * 資料集依提供機關分組，每一組是一個收合的區塊：收著時列出這個機關的資料集名稱（看得出用了哪些），
  * 展開是每個資料集的完整顯名聲明、資料集連結與用途——五十幾個資料集全部攤開，手機要捲一萬多 px。
  * 「報價」那一段固定在最上面：沒有盤中即時報價，價格是收盤後公布的收盤價。
+ * 美股收盤價（Databento，`databento-equs/` 的資料集）有開的時候，報價與授權條款各多一段美股的說明。
  */
 export function DataSourcesPage() {
   usePageTitle("資料來源與授權")
@@ -36,6 +37,8 @@ export function DataSourcesPage() {
     return [...map.entries()]
   }, [a])
   const mainLicense = a?.datasets.find((d) => d.commercial)?.license_url
+  // 美股收盤價：後端只在美股收盤價有開的時候列出這個資料集
+  const usCloses = !!a?.datasets.some((d) => d.key.startsWith("databento-equs/"))
   // 展開的機關（預設全部收著）
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const allOpen = groups.length > 0 && groups.every(([agency]) => open.has(agency))
@@ -71,15 +74,26 @@ export function DataSourcesPage() {
                   <span className="sr-only">（另開新視窗）</span>
                 </a>
               </p>
+              {/* 美股收盤價有開時：美股的日期、更新時間與哪些美股有收盤價 */}
+              {usCloses && (
+                <p className="max-w-prose text-base">
+                  美股是紐約的收盤價，日期寫紐約的交易日。美股收盤一小時後開始更新，大約是台北時間清晨 6 點（美國夏令時間清晨 5 點）。只有有人持有或觀察的美股才有收盤價；剛加入的大約 10 分鐘內補上 2024 年 7 月以來的收盤價。
+                </p>
+              )}
             </Section>
 
             {/* 觸控時段落之間多一點：只有一行的段落裡的網址連結上下各有 12px 的可按範圍 */}
             <Section title="授權條款" titleId="ds-license" bodyClassName="flex flex-col gap-2 pointer-coarse:gap-3">
               {/* 跟著資料走：正式環境開了 Yahoo 的歷史日線回補時，不能說「都來自政府開放資料」（2026-11-14 第七次評分） */}
               <p className="max-w-prose text-base">
-                行情、匯率、公司資料與公告來自政府開放資料，以及我們每天從這些資料存下來的紀錄。
+                {usCloses ? "台股行情" : "行情"}、匯率、公司資料與公告來自政府開放資料，以及我們每天從這些資料存下來的紀錄。
                 {a.datasets.some((d) => d.key === "yahoo-history") && "走勢圖裡較早的日線來自 Yahoo Finance，不是官方資料，也沒有轉載授權。"}
               </p>
+              {usCloses && (
+                <p className="max-w-prose text-base">
+                  美股的收盤價來自 Databento（Nasdaq NLS Plus 的官方合併收盤），從 2024 年 7 月開始，是沒有還原股票分割與股利的原始價格。
+                </p>
+              )}
               {a.notice.map((n) => (
                 // 網址只在 / . ? & = - _ 後面斷行（Linkified）；整段另外允許在放不下時斷開，長網址不會撐寬頁面
                 <p key={n} className="max-w-prose text-base [overflow-wrap:anywhere]">
@@ -117,7 +131,7 @@ export function DataSourcesPage() {
                     <li key={n}>{n}</li>
                   ))}
                 </ul>
-                <p className="max-w-prose text-base">盤中走勢、上市股票的逐檔三大法人、美股報價要付費授權，Forliosa 沒有買。</p>
+                <p className="max-w-prose text-base">盤中走勢、上市股票的逐檔三大法人{usCloses ? "" : "、美股報價"}要付費授權，Forliosa 沒有買。</p>
               </Section>
             )}
 

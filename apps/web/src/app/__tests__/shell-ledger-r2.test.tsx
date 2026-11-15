@@ -3,6 +3,7 @@ import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } fr
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, describe, expect, it } from "vitest"
+import { api } from "@/api"
 import { useViewAs, type ViewAsTarget } from "@/api/view-as"
 import { Segmented } from "@/components/segmented"
 import { PerformanceView } from "@/pages/ledger/PerformanceView"
@@ -12,7 +13,7 @@ import { createAppRouter } from "@/router"
 /**
  * 第二輪設計修飾（外殼與帳本）：
  * 手機底部列是文字分頁＋「問 AI」方格；`aria-current="page"` 只在導覽上；
- * 主數字沒有卡片與展開鈕；數字鍵 1–4 切換分段；績效算不出來時不放沒有用的控制項；交易的數量與價格分欄。
+ * 主數字沒有卡片與展開鈕；數字鍵 1–4 切換分段；績效算不出來（有持股還沒有收盤價）時不放沒有用的控制項；交易的數量與價格分欄。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -183,38 +184,38 @@ describe("帳本主數字與分段", () => {
   })
 })
 
-describe("績效算不出來（示範帳本含美股）", () => {
-  it("一打開不是空白：自動只算新台幣帳戶，上面一行說明；帳戶選單選回「全部帳戶」才是空狀態", async () => {
-    const user = userEvent.setup()
+describe("績效：美股也有收盤價（2026-11-15）", () => {
+  it("全部帳戶照常算：一打開就有區間、比較基準與圖，不再自動只看新台幣帳戶", async () => {
     renderInRouter(<PerformanceView />)
-    expect(await screen.findByText(/^只算「.+」。美股沒有報價，含美股的帳戶算不出績效。$/, undefined, T)).toBeInTheDocument()
     expect(await screen.findByRole("radiogroup", { name: "績效區間" }, T)).toBeInTheDocument()
+    expect(await screen.findByText("與基準比較", undefined, T)).toBeInTheDocument()
+    expect(screen.getByRole("combobox", { name: "帳戶" })).toHaveTextContent("全部帳戶")
     expect(screen.queryByText("算不出績效")).toBeNull()
-    await user.click(screen.getByRole("combobox", { name: "帳戶" }))
-    await user.click(await screen.findByRole("option", { name: "全部帳戶" }, T))
-    expect(await screen.findByText("算不出績效", undefined, T)).toBeInTheDocument()
-    // 自己選了「全部帳戶」就照他的意思，不再自動換
     expect(screen.queryByText(/^只算「/)).toBeNull()
+    expect(document.body.textContent).not.toContain("美股沒有報價")
   })
 
-  it("選了全部帳戶：只留帳戶選單與一段說明，沒有區間與比較基準；按「只看」新台幣帳戶，控制項才出現", async () => {
+  it("有持股還沒有收盤價：只留帳戶選單與一段說明，沒有區間與比較基準；按「只看」沒有那一檔的帳戶，控制項才出現", async () => {
     const user = userEvent.setup()
-    renderInRouter(<PerformanceView />)
-    await screen.findByText(/^只算「/, undefined, T)
-    await user.click(screen.getByRole("combobox", { name: "帳戶" }))
-    await user.click(await screen.findByRole("option", { name: "全部帳戶" }, T))
-    expect(await screen.findByText("算不出績效", undefined, T)).toBeInTheDocument()
-    expect(screen.queryByRole("radiogroup", { name: "績效區間" })).toBeNull()
-    expect(screen.queryByRole("combobox", { name: "績效比較基準" })).toBeNull()
-    expect(screen.getByRole("combobox", { name: "帳戶" })).toBeInTheDocument()
-    // 原因只說一次；最多一個動作
-    expect(screen.getAllByText(/美股沒有報價，含美股的績效算不出來/)).toHaveLength(1)
-    // 帳戶是另一個查詢：等它回來才有「只看「…」」
-    const actions = await screen.findAllByRole("button", { name: /^只看「/ }, T)
-    expect(actions).toHaveLength(1)
-    await user.click(actions[0]!)
-    expect(await screen.findByRole("radiogroup", { name: "績效區間" }, T)).toBeInTheDocument()
-    expect(screen.getByRole("combobox", { name: "績效比較基準" })).toBeInTheDocument()
+    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    const t = await api.createTransaction({ account_id: us.id, symbol: "MSFT", type: "buy", trade_date: "2026-11-10", quantity: 2, price: 520 })
+    try {
+      renderInRouter(<PerformanceView />)
+      expect(await screen.findByText("算不出績效", undefined, T)).toBeInTheDocument()
+      expect(screen.queryByRole("radiogroup", { name: "績效區間" })).toBeNull()
+      expect(screen.queryByRole("combobox", { name: "績效比較基準" })).toBeNull()
+      expect(screen.getByRole("combobox", { name: "帳戶" })).toBeInTheDocument()
+      // 原因只說一次（後端的原文）；最多一個動作：有持股、每一檔都有收盤價的帳戶
+      expect(screen.getAllByText("MSFT：還沒有收盤價，績效算不出來")).toHaveLength(1)
+      const actions = await screen.findAllByRole("button", { name: /^只看「/ }, T)
+      expect(actions).toHaveLength(1)
+      expect(actions[0]).toHaveTextContent("只看「永豐・一般」")
+      await user.click(actions[0]!)
+      expect(await screen.findByRole("radiogroup", { name: "績效區間" }, T)).toBeInTheDocument()
+      expect(screen.getByRole("combobox", { name: "績效比較基準" })).toBeInTheDocument()
+    } finally {
+      await api.deleteTransaction(t.id)
+    }
   })
 })
 

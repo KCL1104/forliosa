@@ -219,10 +219,19 @@ def nice_multiples(values: list[float], count: int = 5) -> list[float]:
     return []
 
 
+US_VALUATION_NOTE = "美股沒有本益比區間（沒有美股的估值資料）"
+
+
 def valuation(md: MarketData, symbol: str, range_: str = "5Y") -> dict[str, Any]:
     if range_ not in VALUATION_RANGES:
         raise unprocessable(f"不支援的區間：{range_}（可用 {'、'.join(VALUATION_RANGES)}）")
     info = require_instrument(md, symbol)
+    if info.market == "US" and not md.demo_data_allowed:
+        # No US valuation series: no archived P/E, and US dividends have no source, so a yield would read 0 %
+        # (2026-11-15 integration). The SEC's EPS is on the financials tab.
+        return {"symbol": info.symbol, "per_multiples": [], "pbr_multiples": [], "series": [],
+                "current": {"per": None, "pbr": None, "dividend_yield": None, "per_percentile_5y": None},
+                "notes": [US_VALUATION_NOTE], "is_demo": False, "sources": []}
     today = today_taipei()
     start = range_start(range_, today, date(1990, 1, 1))
     five_y = range_start("5Y", today, date(1990, 1, 1))

@@ -138,10 +138,12 @@ function KeyBand({ inst, band, position, folded }: { inst: InstrumentDetail; ban
 }
 
 const has = (n: number | null | undefined): n is number => n !== null && n !== undefined
+const withUsd = (text: string, market: string) => (market === "US" && text !== "—" ? "US$" + text : text)
 
 function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quote: Quote | undefined, { peInStrip }: { peInStrip: boolean }): KeyItem[] {
   const us = inst.market === "US"
-  const p = (n: number | null | undefined) => formatPrice(n, inst.market, inst.type)
+  // 美股的價格一律帶 US$（「—」不帶）
+  const p = (n: number | null | undefined) => withUsd(formatPrice(n, inst.market, inst.type), inst.market)
   // 每股金額：台股寫「元」，美股是 US$ 前綴；EPS 到分（和估值分頁同一個格式），股利照公告的位數
   const eps = (n: number) => formatPerShare(n, inst.market)
   const dividend = (n: number) => formatPerShare(n, inst.market, { dividend: true })
@@ -169,7 +171,7 @@ function stockItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, q
  * 折溢價那格比較長（「溢價 0.14%」加日期），排在淨值、殖利率後面，手機上自己佔一列。
  */
 function etfItems(inst: InstrumentDetail, o: InstrumentOverview | undefined, quote: Quote | undefined): KeyItem[] {
-  const p = (n: number | null | undefined) => formatPrice(n, inst.market, inst.type)
+  const p = (n: number | null | undefined) => withUsd(formatPrice(n, inst.market, inst.type), inst.market)
   const n = o?.etf_nav
   const md = (d: string | null) => (d ? `（${formatDateShort(d, false)}）` : "")
   const nav = n && n.nav !== null ? n : null

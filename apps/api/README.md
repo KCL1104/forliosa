@@ -84,10 +84,11 @@ uv run python -m forliosa.worker
 | 每分鐘、每 20 秒 | 群組推播：排入並送出到期的交易動態推播（Discord webhook／Telegram）；有設 Telegram bot 時以 `getUpdates` 處理 `/link` 連結 |
 | 週六 20:00（週日補做）、每 5 分鐘 | 群組 AI 週報：建立上週一到週五的週報並以 Message Batches 送出；收結果、推播 |
 | 每天 04:35 | 群組推播紀錄 30 天、Telegram 連結碼、26 週前的週報 |
-
 | 每月 10、25 日 10:20 | 群組 `monthly`：董監事持股餘額明細（只留公司擔任法人董事或大股東的列，給「相關股票」的關係企業）、集保股東戶數（2-22／2-23）、ESG 產品類別 |
 | 每小時 :35 | 「關於」公司簡介：追蹤中的股票先用 Wikidata 找中文維基百科條目並節錄（每月一次、一次一個請求、429 就停 6 小時），沒有條目才用 AI 依官方資料寫 2–3 句（資料變了才重寫）。`uv run python -m forliosa.services.company refresh [代號…]` |
-| 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）用 GDELT 查媒體標題（每次間隔 ≥ 6 秒，429 就暫停），少於 3 則才用 AI 搜尋補（每月上限 US$30）；只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」） |
+| 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）用 GDELT 查媒體標題（每次間隔 ≥ 6 秒，429 就暫停），少於 3 則才用 AI 搜尋補（每月上限 US$30）；只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」）。每次另外多問 GDELT 一次美股市場新聞（市場頁，存在 `^US`；`NEWS_US_MARKET`） |
+| 美股收盤後一小時起（紐約 17:00＝台北冬令 06:00、夏令 05:00），每小時到那天存進來為止；不看台股交易日 | 美股收盤價 `us_closes`（`US_PRICE_SOURCE=databento`＋`DATABENTO_API_KEY` 才有）：Databento 有新的一天才買，重讀最後 5 天；美國放假那天 20 小時後不再等 |
+| 每 10 分鐘 | 美股回補 `us_backfill`（同上）：新出現在帳本或觀察清單的美股（和 SPY、DIA、ONEQ）補 2024-07-01 以來的日線，每 100 檔一個請求。Databento 拒絕（401／402／403）時兩個美股工作暫停 30 分鐘起、最長 6 小時 |
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
@@ -104,6 +105,7 @@ uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse
 只會連線到白名單內的網址（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`）：`openapi.twse.com.tw`、
 `www.tpex.org.tw/openapi`、`opendata.tdcc.com.tw`、`openapi.taifex.com.tw/v1`、投信投顧公會主機上的證期局淨值檔
 （只有 `www.sitca.org.tw/MemberK0000/F/03/nav.csv` 這一個檔案，網站其他頁面不在內）、shioaji-data 的 GitHub 檔案，以及 personal 明確開啟時的 FinMind。
+美股收盤價的 `hist.databento.com/v0/` 不在共用白名單裡，只有帶著金鑰的 Databento 抓取器（`marketdata/databento.py`）連得到。
 期交所的資料端點在 Cloudflare 後面，同一個端點可能回 JSON 也可能回 CSV（快取存什麼回什麼），解析器兩種都接受（`marketdata/taifex.py`）。
 User-Agent 誠實標示（不偽裝瀏覽器），遇到重新導向（例如證交所防火牆的 307）、403、429 就停，不重試到成功。
 **證交所／櫃買／MIS／公開資訊觀測站的網站一律不爬**（網站條款禁止未經同意以程式下載，見
@@ -180,6 +182,7 @@ src/forliosa/
                  archive_provider（自建存檔）、demo；
                  opendata.py 是證交所／櫃買／集保資料集解析器、taifex.py 是期交所解析器，service.py 負責備援順序、合併與參考價
   archive.py     官方開放資料每日存檔與回補（CLI：python -m forliosa.archive）
+  us_prices.py   美股收盤價（Databento EQUS.SUMMARY；marketdata/databento.py 是用戶端）：回補與每天更新，worker 的 us_backfill、us_closes
   datapolicy.py  DATA_POLICY、資料集清單與 sources 顯名聲明（GET /meta/attributions）
   market_calendar.py  把存檔的證交所休市日套用到交易日計算
   services/      交易（自動稅費＋帳本驗證）、投資組合（含本週事項、出清紀錄）、個股資料、個股頁（stock.py）、期貨盤勢（derivatives.py）、自選、
@@ -216,6 +219,8 @@ src/forliosa/
   最後結算價、保證金、股票期貨／選擇權標的：data.gov.tw 找不到對應的開放授權資料集）照常存檔，但**不顯示**，直到產品負責人取得
   期交所書面確認並設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`；詢問信見 [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)）。**從不使用示範資料**：存檔還不夠時回空資料並在 `notes` 說明「資料累積中：自 YYYY-MM-DD 起存檔」。
   shioaji-data 由 AI 整理的公司簡介、產業鏈、題材（授權待定）不顯示。
+  兩個由產品負責人決定、知道授權風險的例外：存檔以前的日線用 Yahoo Finance 回補（`PRICE_HISTORY_SOURCE=yahoo`，只給圖表）；
+  美股收盤價用 Databento（`US_PRICE_SOURCE=databento`，2026-11-15，見下方「美股收盤價」）。
 - `personal`：只給開發者本人明確開啟。示範資料補缺；把 `finmind` 加進 `MARKET_DATA_PROVIDERS` 才會用 FinMind
   （回應的 `sources` 以「（非商用）」結尾）。
 
@@ -239,7 +244,8 @@ src/forliosa/
 | 金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（`www.sitca.org.tw/MemberK0000/F/03/nav.csv`，檔案放在投信投顧公會主機；只抓這一個檔案、每 2 秒最多一次） | ETF 淨值與盤後折溢價（個股頁「淨值與折溢價」、AI `get_stock_overview`）；檔案只有每檔最新一筆，每天存檔累積 | 政府資料開放授權條款第 1 版（data.gov.tw 11109），須顯名 |
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
-| GDELT DOC 2.0（`api.gdeltproject.org`） | 個股頁「新聞報導」：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
+| Databento 歷史 API（`hist.databento.com`，資料集 `EQUS.SUMMARY`） | 美股收盤價（`US_PRICE_SOURCE=databento` 時）：Nasdaq NLS Plus 的官方合併收盤，日線、未還原分割與股利，2024-07-01 起；只抓帳本或觀察清單裡的美股與 SPY、DIA、ONEQ → 報價、走勢、帳本市值、`/close`、市場頁美股、AI。`prices_daily.source = 'databento-equs'` | 付費、按量計費（先用註冊送的 US$125 額度）；顯名「Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供」。產品負責人沒有先確認能不能顯示給會員（2026-11-15，知道風險）；分割與股利資料不能轉載，沒有用 |
+| GDELT DOC 2.0（`api.gdeltproject.org`） | 個股頁「新聞報導」與市場頁的美股新聞：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
 | AI 網路搜尋（Claude `web_search`） | 新聞報導補缺（GDELT 少於 3 則時）；標題與連結取自搜尋結果 | 系統付費，每月上限 `NEWS_AI_BUDGET_USD`（30） |
 | SearXNG（自架） | 新聞報導的備用來源，**預設關**（`NEWS_SEARXNG_URL`） | 自動查詢上游搜尋引擎違反它們的條款，由營運者承擔 |
 | Yahoo股市 RSS | personal 明確開啟時：新聞報導 | ⚠️ 條款限個人、非商業使用；保留「Yahoo股市」與原始媒體 |
@@ -254,12 +260,29 @@ src/forliosa/
 | 上市股票個股三大法人、外資持股 | `chips.institutional`／`foreign_holding_pct` 空＋`notes` | 證交所 OpenAPI 沒有；Data E-Shop 付費（約 NT$3,000／月起）或書面同意。上櫃股票有（櫃買 OpenAPI） |
 | 開始存檔前的歷史（日線、本益比、法人、融資） | 只回已存檔的部分，`notes`「資料累積中：自 … 起存檔」 | 官方 OpenAPI 只給最新一天；網站回補要同意 |
 | 績效 `/portfolio/performance` | 持股期間沒有每天的真實收盤價時 `series: []`＋`notes`；之後從第一個完整存檔日開始計算 | 同上 |
-| 美股價格、美股績效 | `price: null`（以成本計值，`is_demo: false`）、績效空＋`notes` | 沒有可商用的美股行情來源（SEC EDGAR 基本面待實作） |
+| ~~美股價格、美股績效~~ | 已有（2026-11-15，`US_PRICE_SOURCE=databento` 時）：Databento 的收盤價，2024-07-01 起。關著時照舊 `price: null`（以成本計值，`is_demo: false`）、績效空＋`notes`「…：美股沒有報價，含美股的績效算不出來」 | — |
+| 剛加入、還沒抓到收盤價的美股 | `/quote` 404、`Holding.price: null`（以成本計值）、績效空＋`notes`「MSFT：還沒有收盤價，績效算不出來」 | worker 每 10 分鐘回補一次，約 10 分鐘內補上 |
+| 美股 2024-07-01 以前的日線 | 走勢從 2024-07-01（或上市日）開始，`notes`「資料從 2024/07/01 開始」 | EQUS.SUMMARY 從那天開始 |
+| 美股股利、美股估值（本益比河流圖）、籌碼、相關股票、美股指數點數 | `/dividends` 空、估值序列沒有本益比、`chips`／`related` 空＋`notes`；市場頁只有 SPY、DIA、ONEQ 三檔 ETF | 沒有來源；指數點數要向指數公司取得授權 |
 | 期貨行情（台指期、夜盤） | `/derivatives/overview.futures: []`、`/derivatives/futures/{code}/history` 空＋`notes` | 同上（期交所〈期貨每日交易行情〉授權待確認） |
 | 基準指數 `^TAIEXTR`、`^TPEXTR` 的早期歷史 | 只有 2026-11-02 之後 | 報酬指數 OpenAPI 只給當月；更早要 FinMind（personal）或購買 |
 | 上櫃公司的股利決議 | 上櫃股票只有除權息預告後才出現在 `/dividends` | 櫃買 `mopsfin_t187ap39_O` 停在 2021-08 |
 | ~~媒體新聞~~ | 已有（2026-11-12）：`/news` 在官方公告後列出新聞報導（GDELT、AI 搜尋補缺；只有標題、媒體、時間、連結） | — |
 | 開始存檔前已公布的月營收日期 | 事件用法定期限，`estimated: true` | 只能從存檔第一次看到的日期判斷 |
+
+### 美股收盤價（Databento，2026-11-15）
+
+產品負責人決定用 Databento 的 `EQUS.SUMMARY`（研究：[`docs/research/us-market-data.md`](../../docs/research/us-market-data.md)；細節：`CONTRACT_NOTES.md`「2026-11-15 美股收盤價（Databento）」）。
+
+| 變數 | 放在哪裡 | 預設 | 說明 |
+|---|---|---|---|
+| `US_PRICE_SOURCE` | **api 與 worker** | 空 | `databento`：api 讀已存的美股收盤並列出顯名（不需要金鑰）；worker 有金鑰時才抓。空：不抓也不讀，已存的列留著但不讀、不列來源，美股回到「美股沒有報價」 |
+| `DATABENTO_API_KEY` | **只放 worker** | 空 | Databento 的金鑰（HTTP Basic：金鑰當使用者名稱、密碼空白）。按量計費；不會寫進 log |
+| `NEWS_US_MARKET` | worker | `true` | 市場頁的美股新聞：每次整理新聞多問 GDELT 一次 |
+
+- 進度：管理後台總覽的「美股收盤價」（`GET /admin/overview` 的 `us_prices`）：存到紐約的哪一天、日線筆數、還沒回補與找不到的檔數。
+- 收盤價沒有還原分割與股利；Databento 的分割、股利資料不能轉載，所以沒有用。帳本照使用者記的分割；走勢圖從開盤價偵測分割並換算。
+- 關掉：把 api 與 worker 的 `US_PRICE_SOURCE` 拿掉（已存的列留在 `prices_daily`，`source = 'databento-equs'`）。
 
 快取放在 `var/cache/`（已列入 .gitignore）。部署時建議掛載 volume，避免每次重啟都重新下載 shioaji-data 檔案。
 
@@ -279,6 +302,7 @@ src/forliosa/
    `DISCORD_REDIRECT_URI`（Discord 登入，見 `docs/deploy.md` 2.4 節）、`COOKIE_DOMAIN`（選填，例如 `.example.com`；不設則是 host-only cookie）。
    群組推播與週報在 worker：worker 另需和 api **相同**的 `SESSION_SECRET`（prod 沒設會拒絕啟動）、`FRONTEND_URL`、Claude 金鑰，
    要用 Telegram 時 api 與 worker 都設 `TELEGRAM_BOT_TOKEN`／`TELEGRAM_BOT_USERNAME`（見 `docs/deploy.md` 2.5 節）；worker 只能一個副本。
+   美股收盤價：api 與 worker 都設 `US_PRICE_SOURCE=databento`，`DATABENTO_API_KEY` 只設在 worker（見上方「美股收盤價」）。
 4. 建議為 api 與 worker 各自掛載 volume 到 `/app/var`（image 以非 root 執行，掛 volume 時設 `RAILWAY_RUN_UID=0`）。
 
 > 注意：`FORLIOSA_ENV=prod` 時開發登入會關閉，正式登入用 Discord（M5）與 Google（選用，`GOOGLE_*`，見 `docs/deploy.md` 2.4.1 節）：沒設三個 `DISCORD_*` 時正式環境沒有人能登入。
@@ -287,7 +311,8 @@ src/forliosa/
 
 - 績效的日期軸取自持股實際有成交資料的日期；交易日判斷用存檔的證交所 `holidaySchedule`（只有當年度），
   其他年份用內建清單（2027 為估計）。
-- 美股沒有可商用的資料源：commercial 下沒有價格，personal 下是示範資料。
+- 美股：`US_PRICE_SOURCE=databento` 時有 Databento 的收盤價（2024-07-01 起、只有帳本或觀察清單裡的代號）；沒開時 commercial 下沒有價格，personal 下是示範資料。
+  美股股利仍沒有來源。收盤價沒有還原分割：走勢圖從開盤價偵測分割並換算，帳本照使用者記的分割。
 - 盤中報價目前存在 API 程序記憶體（30 秒快取）；多個 API 副本共用報價要等 Redis 版本。
 - 沒有授權的盤中來源，`/intraday` 一律沒有點；`intraday_points` 資料表保留給之後的授權來源。
 - 歷史資料只能從開始存檔那天累積（commercial 不用示範資料補）。

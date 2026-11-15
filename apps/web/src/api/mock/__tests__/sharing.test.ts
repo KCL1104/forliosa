@@ -25,7 +25,7 @@ const viewAs = (id: string | null) =>
 afterEach(() => viewAs(null))
 
 describe("排行：只列開了報酬率的成員", () => {
-  it("沒開的人（阿弟）不在裡面；我有美股：只算有收盤價的持股、照樣有名次，只在我那一列標 excludes_unpriced", async () => {
+  it("沒開的人（阿弟）不在裡面；我的美股有收盤價，照常算進期間報酬（沒有 excludes_unpriced）", async () => {
     const api = fresh()
     const b = await api.getLeaderboard("grp_family", "day")
     const names = b.entries.map((e) => e.display_name)
@@ -34,11 +34,21 @@ describe("排行：只列開了報酬率的成員", () => {
     const me = b.entries.find((e) => e.is_me)!
     expect(me.return_pct).not.toBeNull()
     expect(me.rank).toBeGreaterThan(0)
-    expect(me.excludes_unpriced).toBe(true)
-    expect(b.entries.filter((e) => !e.is_me).every((e) => !e.excludes_unpriced)).toBe(true)
+    expect(b.entries.every((e) => !e.excludes_unpriced)).toBe(true)
     expect(b.entries.filter((e) => e.rank).length).toBe(4)
     expect(b.benchmarks.map((x) => x.symbol)).toEqual(["^TAIEXTR", "0050.TW"])
     expect(JSON.stringify(b)).not.toContain("未分享")
+  })
+  it("持有還沒有收盤價的美股：只算有收盤價的持股、照樣有名次，只在我那一列標 excludes_unpriced", async () => {
+    const api = fresh()
+    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    await api.createTransaction({ account_id: us.id, symbol: "MSFT", type: "buy", trade_date: "2026-11-10", quantity: 2, price: 520 })
+    const b = await api.getLeaderboard("grp_family", "day")
+    const me = b.entries.find((e) => e.is_me)!
+    expect(me.return_pct).not.toBeNull()
+    expect(me.rank).toBeGreaterThan(0)
+    expect(me.excludes_unpriced).toBe(true)
+    expect(b.entries.filter((e) => !e.is_me).every((e) => !e.excludes_unpriced)).toBe(true)
   })
   it("擁有者關掉排行：ranked false、沒有 rank 鍵、依加入順序", async () => {
     const api = fresh()

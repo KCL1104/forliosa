@@ -643,7 +643,7 @@ describe("管理後台：只有站方管理員", () => {
     expect(within(screen.getByRole("navigation", { name: "管理後台" })).getByRole("link", { name: "討論" })).toHaveAttribute("aria-current", "page")
   })
 
-  it("總覽：使用者人數、AI 金鑰（狀態、本月費用、沒有金鑰）、資料（最久沒更新的在前）、歷史日線回補", async () => {
+  it("總覽：使用者人數、AI 金鑰（狀態、本月費用、沒有金鑰）、資料（最久沒更新的在前）、美股收盤價、歷史日線回補", async () => {
     mount()
     renderApp("/admin")
     const keys = await screen.findByRole("list", { name: "AI 金鑰" }, T)
@@ -673,6 +673,18 @@ describe("管理後台：只有站方管理員", () => {
     expect(backfill).toHaveTextContent("狀態開著")
     expect(backfill).toHaveTextContent("日線1,843,220 筆")
     expect(backfill).toHaveTextContent("和存檔對不上9 檔")
+    // 美股收盤價（Databento）：存到紐約的哪一天、從 2024/07/01 起回補、每一檔的結果
+    const us = screen.getByRole("region", { name: "美股收盤價" })
+    expect(us).toHaveTextContent("Databento・2024/07/01 起")
+    expect(us).toHaveTextContent("狀態開著")
+    expect(us).toHaveTextContent("存到11/11（美東）")
+    expect(us).toHaveTextContent("日線51,172 筆")
+    expect(us).toHaveTextContent("還沒回補1 檔")
+    expect(us).toHaveTextContent("完成86 檔")
+    expect(us).toHaveTextContent("找不到2 檔")
+    expect(us).toHaveTextContent("出錯0 檔")
+    // 和 Yahoo 的回補相鄰
+    expect(us.compareDocumentPosition(backfill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
   })
 
   it("總覽的新聞來源（2026-11-15）：限流中的來源寫到什麼時候再試，其他照常的寫上次有回答與 24 小時存了幾則", async () => {

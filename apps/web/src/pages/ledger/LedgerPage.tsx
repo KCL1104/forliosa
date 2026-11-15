@@ -229,7 +229,7 @@ function useTrend() {
   return { values, loading: perf.isLoading, isError: perf.isError, notes: perf.data?.notes ?? [] }
 }
 
-/** 走勢畫不出來、而且後端說了原因時：右半邊一行說明，連到績效（那裡有完整說明與「只看新台幣帳戶」）。 */
+/** 走勢畫不出來、而且後端說了原因時：右半邊一行說明，連到績效（那裡有完整說明，以及只看每一檔都有收盤價的帳戶）。 */
 function TrendMissing({ reason }: { reason: string }) {
   return (
     <PlainLink

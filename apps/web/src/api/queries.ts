@@ -137,7 +137,7 @@ export function useInstrument(symbol: string, enabled = true) {
   return useQuery({ enabled, queryKey: qk.instrument(symbol), queryFn: () => api.getInstrument(symbol), staleTime: 10 * 60_000, retry: (n, e) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2 })
 }
 export function useQuote(symbol: string, enabled = true) {
-  // 沒有報價（商用模式的美股）回 404：不重試，也不要每分鐘再問
+  // 沒有報價（還沒有收盤價的美股，或美股收盤價沒開）回 404：不重試，也不要每分鐘再問
   return useQuery({
     enabled, queryKey: qk.quote(symbol), queryFn: () => api.getQuote(symbol), staleTime: 15_000,
     refetchInterval: (q) => (q.state.error ? false : 60_000),

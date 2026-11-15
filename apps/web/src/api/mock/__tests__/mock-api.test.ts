@@ -131,19 +131,101 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(i.points).toEqual([])
     expect(i.notes?.[0]).toBe("沒有盤中走勢，價格是收盤後公布的收盤價")
   })
-  it("美股沒有報價：持股 price 為 null、以成本計值；報價 404；含美股時績效為空＋notes", async () => {
+  it("美股收盤價（Databento）：報價是紐約 11/11 的收盤（台北 11/12 05:00）、持股照收盤價與今天的匯率計值", async () => {
+    const q = await api.getQuote("AAPL")
+    expect(q).toMatchObject({ price: 268.42, prev_close: 266.1, trade_date: "2026-11-11", as_of: "2026-11-12T05:00:00+08:00", source: "databento-equs", is_demo: false })
+    expect(q).toMatchObject({ reference_price: null, limit_up: null, limit_down: null, change: 2.32 })
+    // 台股的報價也帶交易日（和後端相同），時間不變
+    expect(await api.getQuote("2330.TW")).toMatchObject({ trade_date: "2026-11-12", as_of: "2026-11-12T13:30:00+08:00" })
     const aapl = (await api.getHoldings()).find((x) => x.symbol === "AAPL")!
-    expect(aapl.price).toBeNull()
-    expect(aapl.market_value).toBe(aapl.cost_basis)
-    await expect(api.getQuote("AAPL")).rejects.toMatchObject({ status: 404 })
+    expect(aapl).toMatchObject({ price: 268.42, prev_close: 266.1, price_date: "2026-11-11", is_demo: false })
+    expect(aapl.market_value).toBeCloseTo(aapl.quantity * 268.42 * 31.85, 1)
+    expect(aapl.day_change).toBeCloseTo(aapl.quantity * (268.42 - 266.1) * 31.85, 1)
+    expect((await api.getHoldings()).find((x) => x.symbol === "2330.TW")!.price_date).toBe("2026-11-12")
+    // 混合持股的時間用台股的收盤；只有美股的帳戶是美股收盤的時間
+    expect((await api.getPortfolioSummary()).as_of).toBe("2026-11-12T13:30:00+08:00")
+    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    expect((await api.getPortfolioSummary(us.id)).as_of).toBe("2026-11-12T05:00:00+08:00")
+    // 美股股利沒有來源：即將除息不列美股
+    expect((await api.getPortfolioSummary()).upcoming_dividends.some((d) => ["AAPL", "NVDA", "VOO"].includes(d.symbol))).toBe(false)
+  })
+
+  it("美股的日線從 2024/07/01 開始，最後一根是紐約的交易日；SPY、DIA、ONEQ 是內建的 ETF", async () => {
+    const h = await api.getHistory("AAPL", "5Y")
+    expect(h.candles[0]!.t >= "2024-07-01").toBe(true)
+    expect(h.candles.at(-1)).toMatchObject({ t: "2026-11-11", c: 268.42 })
+    expect(h.notes).toEqual(["資料從 2024/07/01 開始"])
+    expect(h.sources).toEqual(["Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供"])
+    expect((await api.getHistory("AAPL", "1Y")).notes).toEqual([])
+    expect((await api.getDailyClose("AAPL", "2026-11-11")).close).toBe(268.42)
+    expect((await api.getDailyClose("AAPL", "2024-06-28")).close).toBeNull()
+    for (const [symbol, name] of [["SPY", "SPDR S&P 500 ETF Trust"], ["DIA", "SPDR Dow Jones Industrial Average ETF Trust"], ["ONEQ", "Fidelity Nasdaq Composite Index ETF"], ["QQQ", "Invesco QQQ Trust"]] as const) {
+      expect(await api.getInstrument(symbol)).toMatchObject({ name, type: "etf", market: "US", has_quote: true })
+      expect((await api.getQuote(symbol)).trade_date).toBe("2026-11-11")
+    }
+    // 和市場頁的美股 ETF 同一個收盤
+    expect((await api.getQuote("SPY")).price).toBe((await api.getMarketOverview()).us!.items.find((i) => i.symbol === "SPY")!.value)
+    // 觀察清單：迷你走勢是最近 20 個紐約的收盤
+    await api.addWatch("NVDA")
+    const nvda = (await api.getWatchlist()).find((w) => w.symbol === "NVDA")!
+    expect(nvda.quote?.trade_date).toBe("2026-11-11")
+    expect(nvda.sparkline).toHaveLength(20)
+    expect(nvda.sparkline.at(-1)!.t).toBe("2026-11-11")
+    await api.removeWatch("NVDA")
+  })
+
+  it("美股的個股頁：總覽有開高低與 52 週區間（沒有參考價、本益比、股利）；估值沒有區間；為什麼漲跌寫紐約的日期", async () => {
+    const o = await api.getOverview("AAPL")
+    expect(o).toMatchObject({ prev_close: 266.1, reference_price: null, pe: null, dividend_yield: null, last_cash_dividend: null, eps_ttm: 8.98, as_of: "2026-11-12T05:00:00+08:00" })
+    expect(o.open).not.toBeNull()
+    expect(o.high_52w).toBeGreaterThanOrEqual(268.42)
+    expect(o.market_cap).toBe(Math.round(o.shares_outstanding! * 268.42))
+    expect(o.sources[0]).toMatch(/^Databento〈/)
+    const v = await api.getValuation("AAPL")
+    expect(v.series).toEqual([])
+    expect(v.per_multiples).toEqual([])
+    expect(v.notes).toEqual(["美股沒有本益比區間（沒有美股的估值資料）"])
+    expect(await api.getWhy("AAPL")).toMatchObject({ trade_date: "2026-11-11", as_of: "2026-11-12T05:00:00+08:00" })
+    expect((await api.getWhy("2330.TW")).trade_date).toBe("2026-11-12")
+    const i = await api.getIntraday("AAPL")
+    expect(i).toMatchObject({ date: "2026-11-11", points: [], is_partial: false })
+    expect(await api.getDividends("AAPL")).toEqual([])
+    expect((await api.getUpcoming(60)).some((u) => u.symbol === "AAPL" || u.symbol === "VOO")).toBe(false)
+  })
+
+  it("績效：美股也算得出來；全部帳戶從台股存檔起點、只有美股的帳戶從 2024/07/01 收盤開始算", async () => {
     const all = await api.getPerformance({ range: "1Y" })
+    expect(all.series.length).toBeGreaterThan(20)
+    expect(all.notes?.join("")).not.toContain("美股")
+    expect(all.series[0]!.twr_index).toBe(1)
+    expect(all.notes?.[0]).toBe("績效從 2026/06/01 收盤開始算，之前沒有資料")
+    expect((await api.getPerformance({ range: "1M" })).notes).toEqual([])
+    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    const usAll = await api.getPerformance({ range: "ALL", account_id: us.id })
+    expect(usAll.series[0]!.t >= "2024-07-01").toBe(true)
+    expect(usAll.notes?.[0]).toBe("績效從 2024/07/01 收盤開始算，之前沒有資料")
+  })
+
+  it("還沒有收盤價的美股（SEC 代號表才有的，模擬剛加入）：沒有報價、持股以成本計值、績效算不出來", async () => {
+    const fresh = createMockAdapter({ latency: [0, 0] })
+    expect((await fresh.searchInstruments("MSFT"))[0]).toMatchObject({ symbol: "MSFT", has_quote: false })
+    await expect(fresh.getQuote("MSFT")).rejects.toMatchObject({ status: 404 })
+    expect(await fresh.getQuotes(["MSFT", "AAPL"])).toHaveLength(1)
+    const h = await fresh.getHistory("MSFT", "1Y")
+    expect(h.candles).toEqual([])
+    expect(h.notes).toEqual(["還沒有資料"])
+    expect((await fresh.getWhy("MSFT")).show).toBe(false)
+    const us = (await fresh.listAccounts()).find((a) => a.currency === "USD")!
+    await fresh.createTransaction({ account_id: us.id, symbol: "MSFT", type: "buy", trade_date: "2026-11-10", quantity: 2, price: 520 })
+    const msft = (await fresh.getHoldings()).find((x) => x.symbol === "MSFT")!
+    expect(msft).toMatchObject({ price: null, price_date: null, day_change: 0 })
+    expect(msft.market_value).toBe(msft.cost_basis)
+    const all = await fresh.getPerformance({ range: "1Y" })
     expect(all.series).toEqual([])
-    expect(all.notes?.join("")).toContain("美股")
-    const [tw] = await api.listAccounts()
-    const one = await api.getPerformance({ range: "1Y", account_id: tw!.id })
-    expect(one.series.length).toBeGreaterThan(20)
-    expect(one.series[0]!.twr_index).toBe(1)
-    expect(one.notes?.[0]).toMatch(/^績效從 \d{4}\/\d{2}\/\d{2} 收盤開始算，之前沒有資料$/)
+    expect(all.notes).toEqual(["MSFT：還沒有收盤價，績效算不出來", "資料從 2026/06/01 開始；持股期間有幾天沒有收盤價，績效算不出來"])
+    // 只看新台幣帳戶就算得出來
+    const tw = (await fresh.listAccounts()).find((a) => a.currency === "TWD")!
+    expect((await fresh.getPerformance({ range: "1Y", account_id: tw.id })).series.length).toBeGreaterThan(20)
   })
   it("公告在前、新聞報導在後；新聞報導只有標題、媒體、時間、連結；上市股票沒有個股法人", async () => {
     const news = await api.getNews("2330.TW")
@@ -302,6 +384,7 @@ describe("資料來源與授權", () => {
       // 政府資料開放授權條款：「依…第 1 版」；SEC EDGAR 是美國政府公開資料（授權連結另列）
       // GDELT（新聞報導）：使用條款要求引用並連回 gdeltproject.org；維基百科 CC BY-SA 4.0 節錄、Wikidata CC0
       const special: Record<string, string> = {
+        "databento-equs/price": "資料由 Databento 提供",
         "gdelt/doc": "依 GDELT 使用條款引用：https://www.gdeltproject.org/",
         "wikipedia/zh": "依 CC BY-SA 4.0 節錄（不改寫）",
         "wikidata/entities": "CC0 1.0（公眾領域）",
@@ -312,6 +395,11 @@ describe("資料來源與授權", () => {
     expect(a.datasets.filter((d) => d.key.startsWith("sec-edgar/")).map((d) => d.license_url)).toEqual(Array(3).fill("https://www.sec.gov/about/webmaster-frequently-asked-questions"))
     expect(a.datasets.every((d) => d.commercial)).toBe(true)
     expect(a.datasets.some((d) => d.key === "yahoo-rss/stock")).toBe(false)
+    // 美股收盤價：Databento（後端的 license_status 是 licensed）
+    expect(a.datasets.find((d) => d.key === "databento-equs/price")).toMatchObject({
+      agency: "Databento", commercial: true, license_status: "licensed",
+      attribution: "Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供",
+    })
     const p = await createMockAdapter({ latency: [0, 0], policy: "personal" }).getAttributions()
     expect(p.datasets.some((d) => !d.commercial)).toBe(true)
     expect(p.datasets.find((d) => d.key === "yahoo-rss/stock")?.commercial).toBe(false)

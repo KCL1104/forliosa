@@ -24,6 +24,13 @@
 - 服務條款 6.5：被暫停時會看到管理員填的原因（有填的話）。
 - 資料來源頁（`/data-sources`）不再公開寫「搜尋引擎的條款不允許自動查詢、這個風險由營運者承擔」（產品負責人決定：頁面只寫做法，風險留在內部文件）。**請律師確認**這樣是否需要另外揭露。
 
+**2026-11-15 的修改（美股收盤價）**：產品負責人決定美股改用資料商 Databento 的收盤價（`PRODUCT.md`「美股收盤價」；沒有先寫信問能不能顯示給會員，知道授權風險）。
+
+- 服務條款 §2.3：原本寫「美股報價目前沒有」，改成美股的收盤價來自 Databento、美股收盤後（台北隔天清晨）更新、日期是紐約的交易日、只有有人記在帳本或觀察的美股才有、從 2024 年 7 月開始；「目前沒有」的例子改成美股股利。
+- 服務條款 §9.1：資料來源多列「資料商 Databento 提供的美股收盤價」。只寫來源，沒有寫我們取得了什麼授權。
+- 隱私權政策 §4.1：對外查詢的對象多 Databento，另起一段說明送出的只有美股代號（有人記在帳本或觀察的美股＋SPY、DIA、ONEQ）與我們自己的 API 金鑰，不含任何使用者資料。Databento 不經手個人資料，所以不列進廠商表。
+- 兩份文件的「草稿日期」那一行註明這次改了哪幾節。**請律師看** (d) 第 19 點。
+
 **撰寫時無法核對的事（重要）**：這次工作的網路環境連不到全國法規資料庫（`law.moj.gov.tw`）、臺北市法規查詢系統（`laws.gov.taipei`）與 Anthropic 的隱私說明網站（`privacy.claude.com`）。因此：
 
 - 草稿裡的法條條號是依記憶寫的，全部標了【待確認：條號與現行條文】，請律師對照現行條文。
@@ -125,7 +132,7 @@
 | P20 | §4.1 | Railway 放 API、背景工作、資料庫；Cloudflare Pages 放前端；API 目前不經 Cloudflare 代理 | `docs/deploy.md:5-12`、`:250-258` |
 | P21 | §4.1 | 頭像由瀏覽器直接向 Discord 的圖片伺服器讀取 | `api/services/discord_oauth.py:47`、`:123-125`；`web/src/components/avatar.tsx:12` |
 | P22 | §4.1、§6.2 | 推播送到 Discord webhook／Telegram Bot API | `api/services/pushers.py:186-205`、`:235-237` |
-| P23 | §4.1 | 對外查詢市場資料與新聞時只有股票代號與公司名稱；對象是有人持有、觀察或最近看過的股票；SearXNG 自架、只對內 | `api/config.py:136-168`；`PRODUCT.md:94-96`；`api/news/service.py:145-165`；`docs/deploy.md:10`、`:158-173`；`web/src/pages/data-sources/DataSourcesPage.tsx:123` |
+| P23 | §4.1 | 對外查詢市場資料與新聞時只有股票代號與公司名稱；對象是有人持有、觀察或最近看過的股票；SearXNG 自架、只對內。Databento（2026-11-15）只收到美股代號：任何人帳本（交易紀錄）或觀察清單裡的美股，加上 SPY、DIA、ONEQ；請求只帶我們的 API 金鑰（HTTP Basic）與固定的 User-Agent，沒有使用者資料 | `api/config.py:136-168`；`PRODUCT.md:94-96`；`api/news/service.py:145-165`；`docs/deploy.md:10`、`:158-173`；`web/src/pages/data-sources/DataSourcesPage.tsx:123`；`api/us_prices.py`（`wanted`：`MARKET_ETFS`＋`archive.tracked_symbols`）、`api/archive.py`（`tracked_symbols`）、`api/marketdata/databento.py`（`fetcher`、`daily_bars`）、`api/marketdata/http.py`（`USER_AGENT`） |
 | P24 | §4.3 | 站方管理員只處理公開內容，看不到 Email、帳號編號、群組內容 | `api/services/discussions.py:108-117`、`:590-599`、`:601-650`；`docs/api-contract.md:1141-1153` |
 | P25 | §4.3 | 資料庫內容除 webhook 網址外沒有另外加密 | `api/crypto.py`（只有 `channel-webhook` 一種加密用途）；`api/models.py`（其餘欄位為一般型別）。`docs/product-spec.md:422` 寫的「資料庫加密、後台存取留稽核紀錄」**沒有實作** |
 | P26 | §5.1 | AI 請求的內容：問題、對話歷史、頁面情境、工具查到的本人帳本資料 | `api/ai/chat.py:163-172`（`params`：只有 system、tools、messages，沒有使用者識別欄位）、`:380-383`；`api/ai/prompts.py:202-221`；`api/ai/tools.py:160-167`、`:189-297`、`:489-507`；`api/models.py:375-378`；`apps/api/CONTRACT_NOTES.md:1087-1091` |
@@ -154,7 +161,7 @@
 |---|---|---|---|
 | T1 | §1 | 帳本與資訊工具；不連接券商、不能下單 | `PRODUCT.md:27-33`、`:47` |
 | T2 | §1.3 | 目前不收費 | 程式沒有金流；`PRODUCT.md:17`、`:23`、`:57`（是否商業化尚未決定） |
-| T3 | §2.3 | 收盤價、非即時、公布時間、美股與上市法人資料目前沒有 | `docs/api-contract.md:1037-1059`；`PRODUCT.md:78`、`:105`、`:108-109`；`web/src/pages/data-sources/DataSourcesPage.tsx:61-63`、`:114` |
+| T3 | §2.3 | 收盤價、非即時、公布時間；美股收盤價來自 Databento（2026-11-15）：美股收盤後更新、紐約的交易日、只有帳本或觀察清單裡的美股、2024-07 起；美股股利與上市法人資料目前沒有 | `docs/api-contract.md:1037-1059`；`PRODUCT.md:78`、`:105`、`:108-109`；`web/src/pages/data-sources/DataSourcesPage.tsx:61-63`、`:114`；美股：`PRODUCT.md`「美股收盤價」、`docs/api-contract.md`「美股收盤價（2026-11-15）」、`api/us_prices.py`、`api/worker.py`（`us_closes`、`us_backfill`） |
 | T4 | §2.4 | 稅費、股利、績效是估算；自動股利可改可刪 | `PRODUCT.md:29`、`:111`；`docs/api-contract.md:201-241` |
 | T5 | §2.6 | 法人觀點是第三方看法；新聞只列標題與連結 | `PRODUCT.md:94`、`:110`；`api/ai/prompts.py:137`；`api/models.py:1039-1042` |
 | T6 | §3.1 | Discord 登入、需已驗證 Email、第一次登入自動建立帳號 | `docs/api-contract.md:778-785`；`web/src/pages/auth/LoginPage.tsx:38` |
@@ -174,7 +181,7 @@
 | T20 | §8.3 | AI 只產生草稿，確認後才寫入；沒寫價格時用收盤價估算 | `api/ai/tools.py:524-636`；`api/ai/prompts.py:36-40`；`PRODUCT.md:84` |
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
 | T22 | §8.5 | 每天 50 則、每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一則；對話太長要開新對話 | `api/config.py:98-100`；`api/ai/store.py:329-352`；`docs/api-contract.md:586`、`:588`、`:632`；`apps/api/CONTRACT_NOTES.md:1232` |
-| T23 | §9 | 資料來源與授權 | `api/datapolicy.py:54-92`、`:468-515`；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
+| T23 | §9 | 資料來源與授權（2026-11-15 多 Databento 的美股收盤價：資料集 `databento-equs/price`，只在 `US_PRICE_SOURCE=databento` 時列出） | `api/datapolicy.py:54-92`、`:468-515`（Databento：`DATASETS` 的 `databento-equs/price`、`us_prices_served`）；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
 | T24 | §11.5 | 產品內建的處置只有隱藏與暫停公開發言 | `api/models.py:27-41`（`User` 沒有停用欄位）；`api/services/discussions.py` |
 
 ---
@@ -201,7 +208,7 @@
 16. **隱私模式**不影響送給 AI 的資料（隱私 §5.3 已照實寫）。建議在隱私模式的開關或 AI 輸入框旁加一句說明，避免誤會。
 17. **AI 用量**：條款 §8.5 的數字後端有（`GET /ai/usage`），但我在前端沒找到顯示剩餘額度的畫面；建議顯示，讓使用者知道自己用了多少。
 
-**設定改了就要改草稿的地方**：`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_TOKEN_BUDGET`（50／300 萬）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
+**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_TOKEN_BUDGET`（50／300 萬）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
 
 ---
 
@@ -231,6 +238,7 @@
 16. **政府資料開放授權條款**。條款 §9 的寫法（標示來源、不暗示政府背書）是否符合授權條款第 1 版。
 17. **Cookie**。本服務只有登入必需的 Cookie，是否需要 Cookie 同意橫幅（我的理解是臺灣沒有專法要求，【待確認】）。
 18. **語氣與形式**。用「你」還是「您」；是否需要英文版（Discord 開發者後台的審核若需要）。
+19. **美股收盤價（Databento，2026-11-15）**。產品負責人沒有先取得 Databento 書面確認，就把 `EQUS.SUMMARY` 的收盤價存進資料庫、顯示給使用者（之後可能是付費會員）、讓 AI 讀取（研究：`docs/research/us-market-data.md` §3.2，那裡也有沒寄出的詢問信稿）。請確認：(a) Databento 的條款與交易所的轉載規定下，這樣用的風險與可能的後果；(b) 條款 §9.1 只寫「Databento 提供的美股收盤價」、§5.5 禁止轉售與違反來源授權的再利用，這樣寫夠不夠，要不要另外寫「美股資料只供你自己查看」；(c) 若 Databento 要求停止，條款 §11 的「服務變更」是否足以涵蓋整批刪除美股收盤價。
 
 ---
 

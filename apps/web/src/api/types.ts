@@ -843,6 +843,8 @@ export interface AttributionDataset {
   license: string
   license_url: string
   commercial: boolean
+  /** ogdl | public | open | licensed（付費資料商，例如 Databento）| conditional | non_commercial；舊版後端沒有 */
+  license_status?: string
   /** 完整顯名聲明：「提供機關〈資料集名稱〉（年份），依政府資料開放授權條款第 1 版」 */
   attribution: string
 }

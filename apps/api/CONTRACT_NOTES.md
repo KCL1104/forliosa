@@ -38,7 +38,7 @@
   兩者都是 `null`；`split` 的 `price` 是 `null`；`capital_reduction` 沒有退還股款時 `price` 是 `null`。
   （資料庫仍存 0；建立時傳 `null` 或省略都可以。）
 - **`is_demo` 的範圍**：只要回應裡有任何數字來自示範資料就是 `true`。投資組合層級（`PortfolioSummary`、
-  `Performance`）含美股時一定是 `true`（美股目前全部是示範資料）；前端用 `Holding.is_demo` 標出是哪幾檔
+  `Performance`）含美股時一定是 `true`（美股目前全部是示範資料；2026-11-15 起美股收盤價開著時，存了 Databento 收盤的美股是真的收盤價，不算示範資料）；前端用 `Holding.is_demo` 標出是哪幾檔
   （「含示範資料」章），台股的真實收盤價不會被標成示範資料。
 - **FinMind 額度用完時**：FinMind provider 會自行暫停呼叫一段時間（額度 15 分鐘、其他錯誤 5 分鐘），
   期間只回答磁碟快取（過期的也用），沒有快取的資料才交給下一個資料源（通常是示範資料）。
@@ -215,7 +215,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 | 位置 | 新增 | 說明 |
 |---|---|---|
-| `History`、`Performance` | `notes: string[]` | 「資料累積中：自 2026-11-11 起存檔」、「美股目前沒有可商用的行情來源…」等 |
+| `History`、`Performance` | `notes: string[]` | 「資料累積中：自 2026-11-11 起存檔」、「美股目前沒有可商用的行情來源…」等（後來的寫法見「2026-11-13 `notes` 與空狀態說明的寫法」與「2026-11-15 美股收盤價（Databento）」） |
 | `StockEvent` | `estimated: bool`、`period: string \| null`；`type` 多 `investor_conference` | `estimated` 只有法定期限的備援是 `true`；`period` 財報為 `"2026Q3"`、營收為 `"2026-10"` |
 | `NewsItem` | `category: "material_info" \| "exchange_news" \| "media"` | 官方公告的 `source` 是 `"公告"` |
 | `UpcomingItem`（`type: "recurring"`） | `plan_id`、`account_id`、`scheduled_date` | `date` 是順延後的扣款日，`scheduled_date` 是計畫原本的日子 |
@@ -278,7 +278,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | 開始存檔前的日線、本益比、籌碼 | 只回已存檔的部分＋`notes`「資料累積中：自 … 起存檔」；一點都沒有時是空陣列 |
 | 股利歷史 | `/dividends` 只有存檔的除權息預告，加上證交所〈上市公司股利分派情形〉的董事會／股東會決議（2026-11-12 起，見「第三批」）；陣列型回應沒有 `notes`，可能是 `[]` |
 | 績效 | 持股期間沒有每天的真實收盤價時 `series: []`＋`notes`；存檔足夠後從第一個完整存檔日（當作基準收盤，`twr_index` 1.0）開始，`notes` 說明起點 |
-| 美股 | 沒有報價（`/quote` 404、`Holding.price: null` 以成本計值、`is_demo: false`）、績效空＋`notes` |
+| ~~美股~~ | **已有（2026-11-15，`US_PRICE_SOURCE=databento` 時）**：Databento 的官方合併收盤，2024-07-01 起（見「2026-11-15 美股收盤價（Databento）」）。關著時、或還沒抓到收盤的代號照舊：沒有報價（`/quote` 404、`Holding.price: null` 以成本計值、`is_demo: false`）、績效空＋`notes` |
 | ~~USD/TWD 匯率~~ | **已有（2026-11-12）**：中央銀行〈銀行間新臺幣對美元收盤匯率〉（OGDL），任何模式都用；完全沒有存檔時才固定 31.5，績效 `notes` 說明（見「2026-11-12 匯率改用中央銀行開放資料」） |
 | 基準 `^TAIEXTR`／`^TPEXTR` | 2026-11-12 起由存檔提供（證交所 2026-11-02、櫃買 2026-11-02 起）；更早的日子沒有資料 |
 | ~~媒體新聞~~ | **已有（2026-11-12）**：GDELT（可商用、需引用）＋自架 SearXNG（預設開、只對內）、兩者不足才 AI 搜尋，只有標題、媒體、時間、連結（見「2026-11-12 新聞報導」） |
@@ -589,7 +589,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 
 - ~~商品清單（`master`）的美股仍只有內建的 AAPL、NVDA、VOO、QQQ~~：已改（2026-11-14）：SEC 代號表的美股都在商品清單裡，
   見「2026-11-14 商品清單：全部台股 ETF、SEC 的美股代號」。
-- 美股報價、股利仍沒有可商用來源（前端的股利分頁對美股寫「美股目前沒有可商用的配息資料來源」，不說成沒有配過息）。
+- ~~美股報價~~（已改，2026-11-15：Databento 的收盤價，見「2026-11-15 美股收盤價（Databento）」）、股利仍沒有可商用來源（前端的股利分頁對美股寫「美股目前沒有可商用的配息資料來源」，不說成沒有配過息）。
 - ~~在 10-Q 裡也報近 12 個月（TTM）數字的公司（例如 Amazon 的現金流量）會被當成會計年度~~：已修（2026-11-14）。會計年度只認年報的
   12 個月期間（`fp` 是 `FY`，或沒有標示）；第一次出現在 10-Q（`fp` Q1–Q3）的 12 個月期間是近 12 個月，不算。以前視窗最早的那一段
   （12 年前的那個會計年度正好被切掉）會變成「一年」，之後每一年都錯成 4 月到隔年 3 月。測試：`tests/test_sec.py` 的
@@ -982,7 +982,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 5. **FIFO 下的配股與分割**：目前按比例分攤到每一個批次（成本不變、每股成本下降）。
 6. **正式登入**：`FORLIOSA_ENV=prod` 時開發登入關閉，而 Email／Google 登入不在這次範圍，
    正式環境暫時無法登入。前端在 401 時顯示說明（開發模式會自動以示範使用者開發登入）。
-7. **美股資料源**：目前全部是示範資料；Yahoo 條款禁止轉發，需要決定有授權的來源。
+7. ~~**美股資料源**：目前全部是示範資料；Yahoo 條款禁止轉發，需要決定有授權的來源。~~ 已決定（產品負責人 2026-11-15）：美股收盤價用 Databento 的 EQUS.SUMMARY（沒有先寫信問顯示授權，負責人知道風險）；股利仍沒有來源。見「2026-11-15 美股收盤價（Databento）」。
 8. **FinMind**：匿名額度很小且與同一 IP 共用；建議申請 token（非商用），商業化要升級 Sponsor Pro 或換來源。
 9. ~~**MIS 非官方端點**~~：已移除（2026-11-12）。要盤中走勢需購買證交所延遲（約 NT$30,000／月）或即時行情授權。
 10. **shioaji-data AI 研究資料**（簡介、產業鏈、題材）授權待定：commercial 下 `GET /instruments/{symbol}` 的 `summary`、`chain_stage`、`themes` 不回（`null`／`[]`），personal 照樣顯示並標示來源。
@@ -1338,7 +1338,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 - 期間起點：`day` = 前一個交易日、`month` = 上月最後一個交易日、`year` = 去年最後一個交易日（台股行事曆）。`DATA_POLICY=commercial` 時起點
   早於存檔第一天就改成存檔第一天，`notes` 第一行說明「資料累積中：自 … 起存檔；期間從 … 收盤開始計算」。
 - 成員報酬：所有帳戶合併，從今年的起點收盤開始逐日模擬（`domain.performance.simulate`，與績效頁同一套 TWR 公式），起點之前的交易都在起點
-  當天入帳（起點當天的報酬不算）；期間內完全沒有投入的成員該期為 `null`。年度區間內**完全沒有收盤價**的持股（commercial 下的美股）
+  當天入帳（起點當天的報酬不算）；期間內完全沒有投入的成員該期為 `null`。年度區間內**完全沒有收盤價**的持股（commercial 下的美股；2026-11-15 起美股收盤價開著時，只剩還沒抓到收盤價的美股）
   不算進去，重算一次（`member_period_returns_ex` 的第二個值；排行只在自己那一列回 `excludes_unpriced: true`，週報與成員頁用同一份數字）；
   去掉之後仍有某天缺價 → 三個期間都是 `null`。
   每次請求重算（目前沒有快取）。
@@ -1733,7 +1733,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 ```
 
 - 資料走 `services.instruments.history(md, symbol, "5Y")`（就是 `get_stock_history` 用的那一個），所以 `DATA_POLICY`、`sources`、`is_demo`、
-  「資料累積中」的 `notes` 都和它一致；只取最後 500 根計算。商用模式的美股：`as_of_close: null`、`notes: ["美股目前沒有可商用的行情來源，不提供價格資料"]`。
+  「資料累積中」的 `notes` 都和它一致；只取最後 500 根計算。商用模式的美股：`as_of_close: null`、`notes: ["美股目前沒有可商用的行情來源，不提供價格資料"]`（2026-11-15 起只在美股收盤價關著時；開著時照常計算，K 棒是 Databento 的收盤、日期是紐約的交易日，分割已換算）。
 - **暫定價的那一天**＝今天（或今天以前）最近的台股交易日。存檔裡已經有那天的官方收盤 → 不用暫定價，`notes` 說明「…的官方收盤價已經有了，沒有使用提供的價格」
   （不是錯誤）。暫定 K 棒的開高低都等於那個價格、沒有成交量：這個區塊沒有 `volume`、`gap`、`open_gap_pct`，事件只列這一根會造成的（`events_if_closed_at_price`）。
 - **被拒絕的價格**（`is_error` 的工具結果，模型可以轉述）：不是大於 0 的數字；有 `price` 沒有合法的 `price_source`；台股／台股 ETF 的價格和最近收盤價相差超過
@@ -1839,8 +1839,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 |---|---|---|
 | 資料累積中：自 2026-06-01 起存檔 | 資料從 2026/06/01 開始（`coverage.since_note`；日期用 `coverage.ymd`） | 日線、估值、籌碼、期貨 |
 | 資料累積中：尚未開始存檔 | 還沒有資料 | 同上 |
-| 美股目前沒有可商用的行情來源，不提供價格資料 | 美股沒有報價（`coverage.US_NOTE`） | 日線、績效 |
-| …含美股時無法計算績效 | AAPL、NVDA：美股沒有報價，含美股的績效算不出來 | `GET /portfolio/performance` |
+| 美股目前沒有可商用的行情來源，不提供價格資料 | 美股沒有報價（`coverage.US_NOTE`）；2026-11-15 起只在美股收盤價關著時，開著時是「資料從 2024/07/01 開始」（這一檔的第一天）或「還沒有資料」 | 日線、績效 |
+| …含美股時無法計算績效 | AAPL、NVDA：美股沒有報價，含美股的績效算不出來（2026-11-15 起美股收盤價開著時：「MSFT：還沒有收盤價，績效算不出來」，只有還沒抓到收盤價的美股） | `GET /portfolio/performance` |
 | 資料累積中：…；需要持股期間每天的收盤價才能計算績效 | 資料從 … 開始；持股期間有幾天沒有收盤價，績效算不出來 | 同上 |
 | 資料累積中：…；績效從 2026-06-01 收盤開始計算 | 績效從 2026/06/01 收盤開始算，之前沒有資料 | 同上 |
 | 基準 X 目前沒有可商用的資料 | 沒有 X 的資料，不能比較 | 績效、排行、週報 |
@@ -1929,7 +1929,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - `compare` 用每天的報酬連乘，遇到分割或減資（`md.corporate_events`）那一天乘上調整係數（分割：新股數／舊股數；減資：1 − 減資比例），所以 1 拆 4 不會畫成 −75%，並加一句說明「○○ YYYY/MM/DD 股票分割，漲跌幅已調整」。`price` 不調整（和個股頁一樣是當時的價格），在分割日加說明。
 - 漲跌幅只算價格變動、不含股利（`notes` 固定有這一句）；`price` 固定有「收盤價沒有還原權息，除權息日會有缺口」。
 - 取樣：一張卡片所有線合計最多 480 個點（每條線 `max(40, 480 ÷ 線數)`），平均取樣、頭尾都留；五年的日線不會被截斷，也不會讓 SSE 與對話紀錄太大。
-- 畫不出來（收盤價不到兩天、沒有月營收、沒有 EPS、帳本不到兩個交易日、含美股的績效算不出來…）：**不送卡片**，工具回 `{"status": "no_data", "notes": [...]}`，模型照 `notes` 說缺什麼。`compare` 只剩一條線可畫也算畫不出來。
+- 畫不出來（收盤價不到兩天、沒有月營收、沒有 EPS、帳本不到兩個交易日、有持股沒有收盤價時的績效（2026-11-15 以前是「含美股」）…）：**不送卡片**，工具回 `{"status": "no_data", "notes": [...]}`，模型照 `notes` 說缺什麼。`compare` 只剩一條線可畫也算畫不出來。
 - 參數不對是 `is_error`（zh-TW 訊息）：`price` 給了兩檔、`compare` 只有一檔、超過 5 檔、台股和美股的 EPS 放在一起、找不到商品。一則回答最多 3 張（`charts.MAX_PER_TURN`），提示寫「一個問題最多畫兩張」。
 - 回給模型的是摘要（每條線的點數、起訖日與值、最高、最低、`price` 的漲跌幅、`notes`、`sources`），不是點；所以結果很小（實測約 700–900 字元）。
 - 隱私：`performance` 只有百分比，卡片與工具結果都沒有市值、成本、股數（測試檢查）；其他四種是公開的市場資料。隱私模式不需要另外遮蔽。
@@ -1953,7 +1953,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 ### 待產品負責人確認
 
 - 圖卡的資料來源那一行（政府資料開放授權的顯名聲明）每張圖都會出現，字很長；要不要改成只寫機關名稱、完整聲明留在「資料來源與授權」頁，需要先確認授權條款允不允許。
-- 「我的報酬率」圖在帳本含美股時畫不出來（和績效頁同一個原因：美股沒有報價）。
+- ~~「我的報酬率」圖在帳本含美股時畫不出來（和績效頁同一個原因：美股沒有報價）。~~ 已改（2026-11-15）：美股有收盤價後，只有還沒抓到收盤價的美股（剛加入，約 10 分鐘）會讓它畫不出來。
 
 ## 2026-11-13 市場頁（`GET /market/overview`）與 AI 收盤重點
 
@@ -2074,7 +2074,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   `type: "stock"`、`industry: null`、名稱照 SEC 的英文寫法（「MICROSOFT CORP」「Tesla, Inc.」），沒有中文名。代號照 SEC 的寫法
   （`BRK-B`）；`resolve`／搜尋也接受 `BRK.B`。代號一定是英文字母開頭，所以和台股代號不會撞。SEC 最新一次的檔案往前 365 天內都沒列出的代號不收。
 - 資料來源顯名：美國證券交易委員會（SEC）〈公司代號與 CIK 對照表（company_tickers.json）〉。
-- 財報與申報照舊（`services/sec`，請求當下或 worker 抓）；報價、走勢、股利沒有（商用模式）：個股頁是既有的美股空狀態
+- 財報與申報照舊（`services/sec`，請求當下或 worker 抓）；報價、走勢、股利沒有（商用模式；~~報價、走勢~~ 2026-11-15 起美股收盤價開著時有，只有出現在帳本或觀察清單裡的才會抓）：個股頁是既有的美股空狀態
   （`quote` 404、走勢 `notes: ["美股沒有報價"]`）。
 - 沒有設定 `SEC_CONTACT_EMAIL`、`sec_tickers` 是空的時候，美股只有內建的四檔，和以前一樣。
 
@@ -2084,13 +2084,13 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   **同樣長度時內建或商品卡的在收盤檔的 ETF 之前**（「00」：0050、0056、0051 …）。
 - SEC 的美股只有英文查詢搜得到（ASCII 而且有英文字母）：「2330」「台積」「微軟」都碰不到它們。搜得到時排在所有台股與內建美股之後，
   只有代號完全相同的例外（輸入 `T` 第一筆是 AT&T，輸入 `TS` 是 2330（別名 TSMC）、TSM、TSLA）。
-- `Instrument.has_quote`（搜尋與 `GET /instruments/{symbol}`）：這個市場在目前的 `DATA_POLICY` 有沒有報價來源。商用模式的美股是 `false`
+- `Instrument.has_quote`（搜尋與 `GET /instruments/{symbol}`）：這個市場在目前的 `DATA_POLICY` 有沒有報價來源。商用模式的美股是 `false`（2026-11-15 起美股收盤價開著時是 `true`，前端還沒有收盤的寫「美股・還沒有收盤價」）
   （包括內建四檔），前端搜尋結果寫「美股・沒有報價」；個人模式是 `true`（示範價格）。台股一律 `true`（還沒有收盤價的新 ETF 也是）。
 
 ### AI 與本機規則
 
 - 後端 `tools.resolve_instrument` 不變：先比代號，再用搜尋。中文名稱碰不到 SEC 的美股，所以「台積電」「鴻海」照舊；「微軟」找不到
-  （SEC 的公司沒有中文名，不猜）。`search_instruments` 的說明加一句：其他美股只有英文名、`has_quote` false 就是沒有價格。
+  （SEC 的公司沒有中文名，不猜）。`search_instruments` 的說明加一句：其他美股只有英文名、`has_quote` false 就是沒有價格（2026-11-15 再加：美股的價格是紐約交易日的收盤）。
 - 前端本機規則（`ai/resolve.ts` 的 `pickInstrument`，記帳指令、畫圖、只輸入代號）：代號或名稱完全相同的優先，其次第一筆；英文字只會落在
   台股——部分相同的美股不算。畫圖的句子裡「K 線」「日K」「KD」「RSI」「MACD」「5MA」當成雜字（K、KD、MA 都是美股代號）。
   記帳指令的代號也接受 `BRK.B`／`BRK-B`。
@@ -2166,7 +2166,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   policy)`（`backfill=False`，和帳本估值同一個條件）：`yahoo-history` 不論開關都不讀；commercial 下也不讀非商用來源的列。不經過
   `MarketData` 取價（沒有任何上游請求、沒有示範資料）。沒有那一列 → `close: null`、HTTP 200。
 - 先檢查日期（晚於今天〔台北〕422「日期不能晚於今天」；格式錯、缺少是一般的 422 `validation_error`，欄位名「日期」），再查商品
-  （`require_instrument`，查不到 404「找不到商品」，和 `/history` 等相同）。`currency` 是商品的幣別（存檔沒有美股，美股的 `close` 一律 `null`）。
+  （`require_instrument`，查不到 404「找不到商品」，和 `/history` 等相同）。`currency` 是商品的幣別（~~存檔沒有美股，美股的 `close` 一律 `null`~~ 已改，2026-11-15：美股收盤價開著時讀 `databento-equs` 的列，`date` 是紐約的交易日）。
 - 要登入；`X-Forliosa-View-As` 時忽略標頭（`VIEW_AS_IGNORED_PATHS`）。
 - 測試：`tests/api/test_day_close.py`。
 
@@ -2207,3 +2207,97 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - `last_success_at`：那個來源各代號列（不含 `*` 與 `@引擎`）最新的 `last_success_at`；`last_run_at`：各代號列最新的 `last_attempt_at`。
 - `new_24h`：`news_articles.fetched_at` 在 24 小時內、依 `source` 分組的筆數。
 - 暫停的引擎：SearXNG 的 `@引擎` 列 `backoff_until` 還沒到的。
+
+## 2026-11-15 美股收盤價（Databento）
+
+產品負責人決定（`PRODUCT.md`「美股收盤價」；研究 `docs/research/us-market-data.md`）：美股用 Databento 歷史 API 的 `EQUS.SUMMARY`
+（Nasdaq NLS Plus 的官方合併收盤），沒有先寫信問能不能顯示給會員，知道這個授權風險；按量計費，先用註冊送的 US$125 額度（6 個月到期）。
+合約見 [`docs/api-contract.md`](../../docs/api-contract.md)「美股收盤價（2026-11-15）」。前面各節說「美股沒有報價」的地方，美股收盤價開著時以這一節為準。
+
+### 來源（`marketdata/databento.py`，2026-11-15 實測）
+
+- `EQUS.SUMMARY`、schema `ohlcv-1d`：每個美股交易日一根，**沒有還原分割與股利**；`ts_event` 是那個交易日（紐約日期）的 00:00 UTC。
+  `metadata.get_dataset_range` 說資料從 2024-07-01 開始，`end` 不含；一天的那一根台北隔天清晨才有。
+- `timeseries.get_range`（`encoding=csv&pretty_px=true&pretty_ts=true&map_symbols=true`）回 CSV，價格 9 位小數，存成 4 位。
+- 代號：Databento 寫 `BRK.B`，我們照 SEC 寫 `BRK-B`（請求時換過去，回來換回來）。部分代號不認得時回 206＋`X-Warning`，全部不認得時 422 `symbology_invalid_request`。
+- 認證：HTTP Basic，金鑰當使用者名稱、密碼空白；金鑰不寫進 log。只有這支抓取器能連 `hist.databento.com`（`HttpFetcher` 的 `extra_allowed`），每秒最多一個請求、一個請求最多 100 個代號。
+- 費用依回傳的位元組計：6 檔、約 2.4 年 US$0.0056（`metadata.get_cost`）。Databento 的分割與股利資料不能轉載，所以沒有用。
+
+### 設定
+
+| 變數 | 放在哪裡 | 說明 |
+|---|---|---|
+| `US_PRICE_SOURCE` | **api 與 worker** | `""`（預設）：不抓也不讀，`databento-equs` 的列留著但沒有人讀，也不列在 `sources` 與 `/meta/attributions`。`databento`：api 讀已存的收盤（`Settings.us_prices_served`），worker 有金鑰時才抓（`us_prices_enabled`） |
+| `DATABENTO_API_KEY` | **只放 worker** | Databento 的金鑰（`SecretStr`）。api 不需要 |
+| `NEWS_US_MARKET` | worker | 預設 `true`：每次整理新聞多問 GDELT 一次美股新聞（市場頁） |
+
+`FORLIOSA_ENV=test` 一律不連 Databento（測試用假的 fetcher）。
+
+### 存檔與 worker（`us_prices.py`、`worker.py`）
+
+- 要抓的代號：`SPY`、`DIA`、`ONEQ`，加上任何人帳本（交易紀錄）或觀察清單裡的美股（`archive.tracked_symbols`）。
+- 存進 `prices_daily`，`source = 'databento-equs'`；只會覆蓋自己的列（`upsert … where source = 'databento-equs'`）。`dataset_status` 的 `databento-equs/price`
+  記最新的交易日（不會往回）。回補進度和 Yahoo 回補共用 `price_backfill`，用 `source` 分開（`history_backfill status｜drop` 只看、只刪 Yahoo 的）。
+- **`us_closes`**（背景迴圈）：從一個美股交易日收盤後一小時（紐約 17:00，`US_CLOSE_DELAY`）開始，那一天還沒存進來就每小時問一次（`US_CLOSE_POLL_SECONDS`）。
+  不看台股的交易日；只用星期判斷美股交易日，美國放假那天沒有資料，收盤後 21 小時（多等 20 小時，`US_CLOSE_GIVE_UP`）就不再問。
+  先讀免費的 `get_dataset_range`，Databento 有新的一天才買；每次重讀最後 5 天（`OVERLAP_DAYS`），事後修正過的收盤會蓋掉舊的。只更新已經回補完的代號。
+  （產品負責人原本提的是台北 08:40；2026-11-15 改成收盤後一小時。）
+- **`us_backfill`**（每 10 分鐘，`US_BACKFILL_SECONDS`）：沒問過的代號（新加入帳本或觀察清單的）一次補 2024-07-01 以來的全部日線，每 100 檔一個請求；
+  `done`／`not_found`（Databento 不認得，7 天後再問）／`error`（1 小時後再問）。所以新加入的美股約 10 分鐘內有收盤價。
+- Databento 拒絕（401 金鑰錯、402 額度用完、403 沒有權限）：兩個工作一起暫停 30 分鐘，連續被拒就加倍，最長 6 小時；不改用別的來源。
+
+### 讀取（`marketdata/archive_provider.py`、`datapolicy.py`、`marketdata/service.py`）
+
+- `ArchiveProvider` 只在 `us_prices_served` 時回答美股（報價、日線、`first_date`）；`datapolicy.allowed_sources`／`source_clause` 也只在開著時放行 `databento-equs`
+  （商用與個人模式都一樣）。`MarketData.has_quote` 對美股是 `true`。
+- 報價的 `as_of` 是那一天紐約 16:00（`timeutil.close_dt`／`us_close_dt`，台北冬令 05:00、夏令 04:00 的隔天），`trade_date` 是紐約的日期；回應多 `Quote.trade_date`、
+  `Holding.price_date`、`Why.trade_date`。`is_realtime` 一律 `false`。
+- 沒有參數的 `first_date`（「存檔從哪天開始」）只看台股的列；美股的代號沒有任何列時 `archive_since` 是 `None`，`notes` 是「還沒有資料」。
+- 市場頁的排行、排行日、前一天的收盤只讀台股的列（`market_overview._tw_prices`），美股的列不會被排進漲跌幅前 10。
+- **分割**：收盤價沒有還原。`ArchiveProvider.corporate_events` 從存的開盤價找分割（`detect_splits`：開盤 ≈ 前一天收盤 ÷ 2、3、4、5…50，2 拆 1 容許 1.5%、其他 5%，
+  收盤也要對得上；反分割同理）。用在：`GET /history`（之前的價格與成交量換算，`notes`「YYYY/MM/DD 股票分割（1 股拆成 N 股），之前的價格已經換算」）、
+  AI 圖卡的 `compare`、美股基準（VOO）的報酬。**帳本不用它**：持股照使用者記的分割（`split` 交易）。
+- 帳本：市值＝收盤價 × 中央銀行收盤匯率（`FxBook`）。`PortfolioState.as_of` 先用台股報價的時間，沒有台股才用美股的（美股的 16:00 紐約是台北隔天清晨，
+  不能讓含台股的帳本看起來新一天）。績效：還沒抓到收盤價的美股 → `notes`「MSFT：還沒有收盤價，績效算不出來」；關著時照舊「…：美股沒有報價，含美股的績效算不出來」。
+- `coverage.series_notes`：美股（商用模式）開著時是「資料從 YYYY/MM/DD 開始」（這一檔的第一天）或「還沒有資料」，關著時是「美股沒有報價」。
+- `GET /instruments/{symbol}/close`：開著時美股也有（`source_clause` 放行 `databento-equs`），`date` 是紐約的交易日。
+
+### 市場頁的美股（`services/market_overview.py`、`news/service.py`）
+
+- `us.items`：SPY（S&P 500）、DIA（道瓊工業指數）、ONEQ（那斯達克綜合指數），各取最近 21 個收盤算漲跌與 20 點的走勢小圖；`name` 是基金的名稱
+  （`marketdata/catalog.py` 的內建清單把這三檔標成 ETF），`tracks` 是追蹤的指數。**不顯示指數點數**：S&P 道瓊指數公司與 Nasdaq 的指數資料要另外授權。
+- `us.news`：`news.service.US_MARKET_KEY = "^US"`。worker 每次 `news_refresh`（以及 `python -m forliosa.news refresh`）在個股之前多問 GDELT 一次
+  （`Wall Street`、`S&P 500`、`Dow Jones`、`Nasdaq`；和美股個股一樣只收美國、英國媒體的英文報導），存在 `news_articles.symbol = '^US'`；被 GDELT 拒絕時照一般的暫停規則，
+  這一輪的個股也不問 GDELT。回應取最近 3 天、去重後最多 6 則，封鎖的網域不列。`NEWS_US_MARKET=false` 不問。
+- 最上層的 `as_of` 只看台股；`sources` 有美股 ETF 時加 `databento-equs/price`，有美股新聞時加 `gdelt/doc`。
+
+### 管理後台（`services/admin.overview` → `us_prices.summary`）
+
+`us_prices`：`enabled`（`US_PRICE_SOURCE=databento`，看的是 api 的設定）、`rows`（`databento-equs` 的列數）、`pending`（還沒問或該再問的代號數）、`first_day`（`2024-07-01`）、
+`stored_through`（`dataset_status` 的最新交易日，紐約日期）、`symbols`（`done`／`not_found`／`error` 的代號數）。
+
+### 顯名與授權（`datapolicy.py`）
+
+- 資料集 `databento-equs/price`：`agency` Databento、`title`「US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）」、`license_status: "licensed"`
+  （產品負責人選的付費資料商）、`license`「Databento 服務條款」（`https://databento.com/terms`）、`basis`「產品負責人 2026-11-15 決定使用（docs/research/us-market-data.md）」。
+- 顯名：「Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供」。只在開著時列出、加進 `sources`。
+- `licensed` 只表示「產品負責人選的付費來源」，**不是**已確認可以顯示給會員；畫面與資料來源頁只寫來源，不寫「可商用」。
+
+### AI
+
+- `CHAT_SYSTEM`：美股是每天的收盤價（2024-07-01 起、紐約的交易日期，只有放進帳本或觀察清單的才有）；價格寫 US$；收盤寫紐約的日期（「11/13 收盤（美東）」），
+  不寫台北的 `as_of`；美股用英文關鍵字搜尋。頁面情境多一行「美股：休市中；最近一個收盤日 11/13（美東）」。
+- `get_holdings` 每檔多 `price_date`；`search_instruments` 的說明改成「美股的價格是紐約交易日的收盤」。`get_stock_history`、`get_technicals`、`draw_chart` 照常讀得到。
+- 「為什麼漲跌」用報價的 `trade_date` 當那一天（美股的 `as_of` 已經是台北隔天）。
+- 每日收盤簡報：「漲跌最多的持股」與觀察清單只算台股（美股的收盤是另一個交易日）；AI 找報導的對象也只有台股。
+
+### 測試（不連網）
+
+`tests/marketdata/test_databento.py`（7）、`tests/test_us_prices.py`（10：回補與更新、被拒、Yahoo 的 CLI 不碰美股進度、開關、帳本市值與匯率、市場頁美股與只看台股的日期、
+收盤後一小時再每小時、沒有開關或金鑰、關著時不讀不列、分割只換算圖表）、`tests/news/test_us_market_news.py`（4）。
+
+### 待產品負責人確認
+
+1. **顯示授權**：Databento 沒有書面說 EQUS.SUMMARY 可以顯示給付費會員（研究 §3.2）。要不要之後還是寄附錄 A 的信？建議：開放註冊或開始收費前寄。
+2. **額度到期**：US$125 的額度 6 個月後到期；之後要綁信用卡按量付（每天幾百檔的日線預估每月不到 US$1），還是關掉？
+3. **美國假日**：worker 只用星期判斷美股交易日，美國放假那天會每小時問到隔天下午 1 點（紐約）才停；Databento 的範圍沒有新的一天時不花錢，只是多幾個免費的查詢。

@@ -1,5 +1,5 @@
 import type { MarketAnnouncement, MarketIndex, MarketMover, MarketOverview, MarketSector, MarketUs, MarketUsEtf, NewsItem } from "../types"
-import { GDELT_ATTRIBUTION } from "./attributions"
+import { DATABENTO_ATTRIBUTION, GDELT_ATTRIBUTION } from "./attributions"
 import { INSTRUMENTS } from "./instruments"
 import { addDays, MOCK_TODAY, parseDay } from "./market"
 
@@ -38,7 +38,6 @@ function index(key: MarketIndex["key"], name: string, unit: string, value: numbe
 }
 
 /** 美股收盤價的出處（和後端 datapolicy 的 `databento-equs/price` 同一句） */
-const DATABENTO_ATTRIBUTION = "Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供"
 
 /** 台北日期 `today` 之前的最後一個美股交易日（紐約日期；示範資料只排除週末）：美股收盤時台北已經是隔天早上 */
 function usSessionBefore(today: string): string {

@@ -1,16 +1,16 @@
 import { useState } from "react"
 import { useAdminOverview } from "@/api/discussion-queries"
-import type { AdminDataset, AdminKeySlot, AdminNews, AdminNewsSource, AdminOverview, BackfillStatus } from "@/api/types"
+import type { AdminDataset, AdminKeySlot, AdminNews, AdminNewsSource, AdminOverview, AdminUsPrices, BackfillStatus } from "@/api/types"
 import { Section, Stat } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
-import { formatDateShort, formatDateTime, formatMoney, formatNumber } from "@/lib/format"
+import { formatDate, formatDateShort, formatDateTime, formatMoney, formatNumber } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { AdminPage } from "./AdminPage"
 
 /**
- * 管理後台的總覽（`/admin`）：使用者人數、AI 金鑰、各資料集的最新資料日期、新聞來源、歷史日線回補。
+ * 管理後台的總覽（`/admin`）：使用者人數、AI 金鑰、各資料集的最新資料日期、新聞來源、美股收盤價、歷史日線回補。
  * 只有數字與狀態：沒有 email、user id，金鑰只有槽號與 workspace id。不自動重抓——按「重新載入」。
  */
 export function AdminOverviewPage() {
@@ -46,6 +46,8 @@ function Overview() {
       <KeySlots ai={o.ai} />
       <Datasets rows={o.datasets} />
       <NewsSources n={o.news} />
+      {/* 舊版後端沒有這一塊 */}
+      {o.us_prices && <UsPrices u={o.us_prices} />}
       <Backfill b={o.history_backfill} />
     </>
   )
@@ -184,6 +186,27 @@ function sourceMeta(s: AdminNewsSource, n: AdminNews): string {
   if (s.key === "searxng" && n.paused_engines.length > 0)
     parts.push(`暫停的引擎：${n.paused_engines.map((e) => `${e.engine}（到 ${formatDateTime(e.until)}）`).join("、")}`)
   return parts.join("・")
+}
+
+/**
+ * 美股收盤價（Databento EQUS.SUMMARY，2026-11-15）：開著沒有、存了幾筆、存到紐約的哪一天、還有幾檔沒回補，
+ * 以及每一檔回補的結果。新追蹤的美股從 first_day（2024-07-01）回補。
+ */
+function UsPrices({ u }: { u: AdminUsPrices }) {
+  return (
+    <Section title="美股收盤價" titleId="admin-us-prices" aside={`Databento・${formatDate(u.first_day)} 起`}>
+      <dl className="grid grid-cols-2 gap-x-6 gap-y-4 sm:grid-cols-4">
+        <Stat label="狀態" value={u.enabled ? "開著" : "關著"} />
+        {/* 紐約的交易日（存檔是台北隔天清晨） */}
+        <Stat label="存到" value={u.stored_through ? `${formatDateShort(u.stored_through, false)}（美東）` : "還沒有"} />
+        <Stat label="日線" value={`${formatNumber(u.rows)} 筆`} />
+        <Stat label="還沒回補" value={`${formatNumber(u.pending)} 檔`} />
+        <Stat label="完成" value={`${formatNumber(u.symbols.done)} 檔`} />
+        <Stat label="找不到" value={`${formatNumber(u.symbols.not_found)} 檔`} />
+        <Stat label="出錯" value={`${formatNumber(u.symbols.error)} 檔`} />
+      </dl>
+    </Section>
+  )
 }
 
 const BACKFILL_LABEL: [BackfillStatus, string][] = [

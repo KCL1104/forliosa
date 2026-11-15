@@ -104,14 +104,30 @@ describe("群組畫面不透露誰沒分享", () => {
     family = await api.getGroup("grp_family")
   })
 
-  it("排行：只有開了報酬率的人；沒有「未分享」；有美股的人也有名次（只在自己那一列標「不含美股」）", async () => {
+  it("排行：只有開了報酬率的人；沒有「未分享」；美股有收盤價，不標「不含…」", async () => {
     renderInRouter(<RankingTab group={family} />)
     const table = await screen.findByRole("table", { name: "今日排行" }, T)
     await within(table).findByText("爸爸", undefined, T)
     expect(within(table).queryByText("阿弟")).toBeNull()
     expect(document.body.textContent).not.toContain("未分享")
-    // 我有美股：期間報酬只算有收盤價的持股，只在自己那一列標「不含美股」（別人的不說）
-    expect(within(table).getAllByText("不含美股")).toHaveLength(1)
+    expect(document.body.textContent).not.toContain("不含")
+  })
+
+  it("持有還沒有收盤價的股票：照樣有名次，只在自己那一列標「不含沒有收盤價的持股」（別人的不說），放不下時換到名字下面", async () => {
+    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    const t = await api.createTransaction({ account_id: us.id, symbol: "MSFT", type: "buy", trade_date: "2026-11-10", quantity: 2, price: 520 })
+    try {
+      renderInRouter(<RankingTab group={family} />)
+      const table = await screen.findByRole("table", { name: "今日排行" }, T)
+      const labels = await within(table).findAllByText("不含沒有收盤價的持股", undefined, T)
+      expect(labels).toHaveLength(1)
+      expect(labels[0]!.closest("a")).toHaveTextContent("示範使用者（你）")
+      // 手機的成員欄很窄：標示和名字在可以換行的同一個容器裡，名字自己截斷
+      expect(labels[0]!.parentElement!.className).toMatch(/\bflex-wrap\b/)
+      expect(document.body.textContent).not.toContain("美股")
+    } finally {
+      await api.deleteTransaction(t.id)
+    }
   })
 
   it("排行下面有當天的表情（和動態、週報同一個元件）；按了以伺服器的計數為準，只有計數", async () => {

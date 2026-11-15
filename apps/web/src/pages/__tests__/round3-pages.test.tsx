@@ -239,6 +239,24 @@ describe("資料來源與授權", () => {
     expect(screen.getByRole("button", { name: "全部收合" })).toBeInTheDocument()
   })
 
+  it("美股收盤價（Databento）有開：報價說紐約的日期與更新時間，授權條款說來源與從哪天開始；「沒有買」不再列美股報價", async () => {
+    renderInRouter(<DataSourcesPage />)
+    const quotes = await screen.findByRole("region", { name: "報價" }, T)
+    expect(quotes.textContent).toContain("美股是紐約的收盤價，日期寫紐約的交易日。")
+    expect(quotes.textContent).toMatch(/台北時間清晨 6 點（美國夏令時間清晨 5 點）/)
+    expect(quotes.textContent).toMatch(/剛加入的大約 10 分鐘內補上 2024 年 7 月以來的收盤價。/)
+    const licence = screen.getByRole("region", { name: "授權條款" })
+    expect(licence.textContent).toContain("台股行情、匯率、公司資料與公告來自政府開放資料")
+    expect(licence.textContent).toContain("美股的收盤價來自 Databento（Nasdaq NLS Plus 的官方合併收盤），從 2024 年 7 月開始，是沒有還原股票分割與股利的原始價格。")
+    // 只說來源，不說可商用或有展示授權
+    expect(licence.textContent).not.toMatch(/Databento[^。]*(可商用|授權)/)
+    const notUsed = screen.getByRole("region", { name: "沒有使用的來源" })
+    expect(notUsed.textContent).toContain("盤中走勢、上市股票的逐檔三大法人要付費授權，Forliosa 沒有買。")
+    expect(notUsed.textContent).not.toContain("美股報價")
+    // 資料集：Databento 自己一組，顯名聲明照後端的原文
+    expect(screen.getByRole("button", { name: /^Databento/ })).toHaveTextContent("1 個資料集")
+  })
+
   it("授權條款裡的網址只在分隔符號後面斷行（不用 break-all），條款文字還在", async () => {
     renderInRouter(<DataSourcesPage />)
     const licence = await screen.findByRole("region", { name: "授權條款" }, T)
