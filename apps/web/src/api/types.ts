@@ -1542,6 +1542,8 @@ export interface MarketAnnouncement {
   code: string
   name: string
   title: string
+  /** 發言日期 */
+  date: string
   /** 「17:30」（台北） */
   time: string | null
   url: string | null
@@ -1552,8 +1554,11 @@ export interface MarketOverview {
   summary: MarketSummary | null
   sectors: { date: string; items: MarketSector[] } | null
   movers: MarketMovers | null
-  /** 最新一天的重大訊息：新的在前，最多 30 則；`total` 是當天全部的則數 */
-  announcements: { date: string; total: number; items: MarketAnnouncement[] } | null
+  /**
+   * 最新一天的重大訊息：新的在前，最多 30 則。最新的一天不是交易日（週末、放假）時，往前一起列到最後一個交易日
+   * （產品負責人 2026-11-15）：`start_date` 是列進來最早的一天（交易日就等於 `date`），`total` 是這段期間全部的則數
+   */
+  announcements: { date: string; start_date: string; total: number; items: MarketAnnouncement[] } | null
   is_demo: boolean
   notes: string[]
   sources: string[]

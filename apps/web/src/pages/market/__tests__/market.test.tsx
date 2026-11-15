@@ -166,11 +166,36 @@ describe("市場頁的內容", () => {
     renderApp()
     const section = (await screen.findByRole("heading", { name: "重大訊息" }, T)).closest("section")!
     expect(within(section).getByText(/共 428 則$/)).toBeInTheDocument()
+    // 交易日：只有那一天，每一列只有時間、沒有日期
+    expect(within(section).getAllByRole("link")[0]?.textContent).toMatch(/^\d{2}:\d{2}/)
     expect(within(section).getAllByRole("link")).toHaveLength(6)
     expect(within(section).getAllByRole("link")[0]).toHaveAttribute("href", "/stock/2330.TW?tab=events")
     fireEvent.click(within(section).getByRole("button", { name: "再看 6 則" }))
     expect(within(section).getAllByRole("link")).toHaveLength(12)
     expect(within(section).getByRole("button", { name: "收起來" })).toBeInTheDocument()
+  })
+
+  it("週末：重大訊息往前一起列到最後一個交易日，標題寫期間、每一列多一行日期（產品負責人 2026-11-15）", async () => {
+    mount({}, (o) => ({
+      ...o,
+      announcements: {
+        date: "2026-11-14", start_date: "2026-11-13", total: 3,
+        items: [
+          { symbol: "6488.TWO", code: "6488", name: "環球晶", title: "週六的公告", date: "2026-11-14", time: "07:00", url: null },
+          { symbol: "2330.TW", code: "2330", name: "台積電", title: "週五傍晚的公告", date: "2026-11-13", time: "17:30", url: null },
+          { symbol: "2317.TW", code: "2317", name: "鴻海", title: "週五早上的公告", date: "2026-11-13", time: "09:20", url: null },
+        ],
+      },
+    }))
+    renderApp()
+    const section = (await screen.findByRole("heading", { name: "重大訊息" }, T)).closest("section")!
+    expect(within(section).getByText("11/13–11/14・共 3 則")).toBeInTheDocument()
+    const links = within(section).getAllByRole("link")
+    expect(links.map((l) => l.textContent)).toEqual([
+      expect.stringMatching(/^11\/1407:00環球晶/),
+      expect.stringMatching(/^11\/1317:30台積電/),
+      expect.stringMatching(/^11\/1309:20鴻海/),
+    ])
   })
 
   it("什麼資料都沒有：只有一個空狀態", async () => {

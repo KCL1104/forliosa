@@ -78,7 +78,7 @@ export function buildMarketOverview(demo: boolean, today = MOCK_TODAY): MarketOv
   const announcements: MarketAnnouncement[] = TITLES.map((title, n) => {
     const i = stocks[n % stocks.length]!
     const minutes = 18 * 60 + 40 - n * 23
-    return { symbol: i.symbol, code: i.code, name: i.name, title, time: `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`, url: null }
+    return { symbol: i.symbol, code: i.code, name: i.name, title, date: day, time: `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`, url: null }
   })
   const sectors: MarketSector[] = SECTORS.map(([name, change_pct], n) => ({ name, index_name: `${name}類指數`, close: Number((180 + n * 37.4).toFixed(2)), change_pct })).sort((a, b) => b.change_pct - a.change_pct)
   return {
@@ -101,7 +101,7 @@ export function buildMarketOverview(demo: boolean, today = MOCK_TODAY): MarketOv
       losers: by((m) => -(m.change_pct ?? 0), (m) => (m.change_pct ?? 0) < 0),
       volume: by((m) => m.volume ?? 0),
     },
-    announcements: { date: day, total: 428, items: announcements },
+    announcements: { date: day, start_date: day, total: 428, items: announcements },
     is_demo: demo,
     notes: [],
     sources: [
