@@ -14,6 +14,7 @@
 - 資料只用可合法商用的來源：`DATA_POLICY=commercial`（預設）；不得自動擷取證交所網站或 MIS。
 - **唯一的例外（產品負責人 2026-11-13 決定，知道授權風險）**：存檔開始以前的五年日線用 Yahoo Finance 回補（`PRICE_HISTORY_SOURCE=yahoo`，只在正式環境的 Railway 變數打開）。這批資料只給走勢圖、技術指標、走勢小圖用，帳本的市值與績效不用；被擋（403、轉址）就停，不偽裝瀏覽器、不換位址。狀態：`cd apps/api && uv run python -m forliosa.history_backfill status`；整批刪除：`… history_backfill drop`。
 - 初期資料源不付費（不買 E-Shop 等付費資料）；缺的資料老實顯示空狀態。
+- **美股收盤價（產品負責人 2026-11-15 決定，沒有先寫信問 Databento，知道授權風險）**：用 Databento 歷史 API 的 `EQUS.SUMMARY`（官方合併收盤、日線、未還原權息，從 2024-07-01 起）；`US_PRICE_SOURCE=databento`＋`DATABENTO_API_KEY`（Basic auth：金鑰當使用者名稱、密碼空白）。按量計費，用註冊送的 US$125 額度（6 個月到期）。研究與待確認事項：`docs/research/us-market-data.md`。圖表維持自己的 Lightweight Charts，不改用 TradingView 小工具。
 - 檢查三把 Claude key 是否分屬三個 workspace：`cd apps/api && uv run python -m forliosa.ai.smoke --keys`。
 - AI 用 Claude API，預設模型 Haiku 等級；key 放在環境變數 `Claude_API_KEY_1..3`（三個 workspace，對話黏著同一把 key）。
 - 在這個雲端沙盒跑 AI smoke test：`cd apps/api && uv run python -m forliosa.ai.smoke`（沙盒禁止 web fetch 工具時程式會自動移除該工具重試）。
