@@ -1961,7 +1961,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 | 美元兌新台幣 | `fx_rates`（`USDTWD`） | 中央銀行 | 漲跌＝和前一筆相減 |
 | 類股 | `index_daily` | 證交所 MI_INDEX | 名稱以「類指數」結尾、不含「報酬」；四個舊的合併類（機電、塑膠化工、水泥窯製、化學生技醫療）成員各自有列，不列 |
 | 排行 | `prices_daily`、`reference_prices`、`dataset_status` | 證交所 STOCK_DAY_ALL、櫃買 `tpex_mainboard_daily_close_quotes` | 見下 |
-| 重大訊息 | `market_events`（`type = material_info`） | 證交所 t187ap04_L、櫃買 mopsfin_t187ap04_O | 最新一天；發言時間有的沒有補零（`92005`），`_clock` 統一成 `09:20` 再排序。**兩個檔每天都換、連週末也換：日期 D 的檔放的是 D−1 的訊息**（2026-11-15 實測：11/15 的檔是 11/14 的 2＋4 則），所以非交易日 08:10、21:40 也讀（worker `daily_archive_off_day`，archive 群組 `everyday`：兩邊的事件檔＋MI_INDEX——週五的指數在 21:40 之後才出來）。在這之前只有交易日讀，週五、週六的訊息沒有存到（11/13 的已經找不回來：開放資料只放最新一天，公開資訊觀測站網站不擷取） |
+| 重大訊息 | `market_events`（`type = material_info`） | 證交所 t187ap04_L、櫃買 mopsfin_t187ap04_O | 最新一天；發言時間有的沒有補零（`92005`），`_clock` 統一成 `09:20` 再排序。**兩個檔每天都換、連週末也換：日期 D 的檔放的是 D−1 的訊息**（2026-11-15 實測：11/15 的檔是 11/14 的 2＋4 則），所以非交易日 08:10、21:40 也讀（worker `daily_archive_off_day`，archive 群組 `everyday`：兩邊的事件檔＋MI_INDEX——週五的指數在 21:40 之後才出來）。在這之前只有交易日讀，週五、週六的訊息沒有存到（11/13 的已經找不回來：開放資料只放最新一天，公開資訊觀測站網站不擷取）。**最新一天不是交易日時往前列到最後一個交易日**（`last_tw_trading_day`；產品負責人 2026-11-15 選 A），回應多 `start_date` 與每則的 `date` |
 | AI 收盤重點 | `ai_market_summary` | `forliosa.ai.market_summary` | 見下 |
 
 ### 排行

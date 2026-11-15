@@ -38,6 +38,7 @@ from forliosa.marketdata.service import MarketData
 from forliosa.models import DatasetStatus, FxRate, IndexDaily, MarketEvent, PriceDaily, ReferencePrice
 from forliosa.services import derivatives
 from forliosa.services.coverage import NO_DATA_NOTE
+from forliosa.timeutil import last_tw_trading_day
 
 TAIEX = "發行量加權股價指數"
 TPEX_INDEX = "櫃買指數"
@@ -219,20 +220,25 @@ def _movers(db: Session, md: MarketData) -> dict[str, Any] | None:
 
 # -- announcements ----------------------------------------------------------------------------------------------
 def _announcements(db: Session, md: MarketData) -> dict[str, Any] | None:
+    """The newest day of 重大訊息 — and when that day has no session (a weekend, a holiday), every day back to the last
+    trading day: on a Sunday the page lists Friday's hundreds together with Saturday's few, not Saturday's alone
+    (產品負責人 2026-11-15). ``start_date`` is the earliest day that has rows (equal to ``date`` on a trading day)."""
     base = MarketEvent.type == "material_info"
     day = db.scalar(_official(select(func.max(MarketEvent.date)).where(base), MarketEvent.source, md))
     if day is None:
         return None
-    rows = list(db.scalars(_official(select(MarketEvent).where(base, MarketEvent.date == day),
+    since = last_tw_trading_day(day)
+    rows = list(db.scalars(_official(select(MarketEvent).where(base, MarketEvent.date >= since,
+                                                               MarketEvent.date <= day),
                                      MarketEvent.source, md)))
-    rows.sort(key=lambda r: (_clock((r.data or {}).get("time")) or "", r.symbol), reverse=True)
+    rows.sort(key=lambda r: (r.date, _clock((r.data or {}).get("time")) or "", r.symbol), reverse=True)
     items = []
     for r in rows[:ANNOUNCEMENTS_MAX]:
         info = md.instrument(r.symbol)
         items.append({"symbol": r.symbol, "code": code_of_symbol(r.symbol),
-                      "name": info.name if info else code_of_symbol(r.symbol), "title": r.title,
+                      "name": info.name if info else code_of_symbol(r.symbol), "title": r.title, "date": r.date,
                       "time": _clock((r.data or {}).get("time")), "url": r.url})
-    return {"date": day, "total": len(rows), "items": items,
+    return {"date": day, "start_date": min(r.date for r in rows), "total": len(rows), "items": items,
             "sources": sorted({f"{r.source}/material_info" for r in rows})}
 
 

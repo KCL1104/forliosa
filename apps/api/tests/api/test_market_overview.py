@@ -132,7 +132,9 @@ def test_indices_sectors_rankings_and_announcements(client, engine):
     assert m["gainers"][1]["market"] == "TPEX"
 
     a = o["announcements"]
-    assert (a["date"], a["total"]) == ("2026-11-12", 3)
+    # a trading day: only that day (11/11's row is not listed)
+    assert (a["date"], a["start_date"], a["total"]) == ("2026-11-12", "2026-11-12", 3)
+    assert {x["date"] for x in a["items"]} == {"2026-11-12"}
     assert [(x["code"], x["time"], x["title"]) for x in a["items"]] == [
         ("6488", "18:30", "澄清媒體報導"), ("2330", "17:30", "董事會決議股利分派"),
         ("2317", "09:20", "公告本公司取得機器設備")]
@@ -202,3 +204,36 @@ def test_readable_while_viewing_someone_elses_assets():
     from forliosa.api.middleware import ViewAsMiddleware
 
     assert ViewAsMiddleware(None, API).classify("GET", f"{API}/market/overview") == "ignore"
+
+
+def test_announcements_on_a_weekend_go_back_to_the_last_trading_day(client, engine):
+    """產品負責人 2026-11-15: on a Sunday the newest announcements are Saturday's few; the list goes back to Friday's
+    (the last trading day) so the session's hundreds are not hidden behind them. Thursday's are not listed."""
+    fri, sat = date(2026, 11, 13), date(2026, 11, 14)
+
+    def material(key: str, sym: str, day: date, at: str, title: str) -> MarketEvent:
+        return MarketEvent(key=key, symbol=sym, date=day, type="material_info", title=title, detail="",
+                           data={"time": at}, source="tpex-openapi" if sym.endswith(".TWO") else "twse-openapi")
+
+    with Session(engine) as db:
+        db.add_all([material("thu", "2330.TW", D12, "173000", "週四的"),
+                    material("fri-1", "2330.TW", fri, "173000", "週五傍晚"),
+                    material("fri-2", "2317.TW", fri, "092000", "週五早上"),
+                    material("sat", "6488.TWO", sat, "70003", "週六的")])
+        db.commit()
+    a = get(client)["announcements"]
+    assert (a["date"], a["start_date"], a["total"]) == ("2026-11-14", "2026-11-13", 3)
+    assert [(x["date"], x["time"], x["title"]) for x in a["items"]] == [
+        ("2026-11-14", "07:00", "週六的"), ("2026-11-13", "17:30", "週五傍晚"), ("2026-11-13", "09:20", "週五早上")]
+
+
+def test_a_missing_friday_does_not_pull_in_thursday(client, engine):
+    """Friday's file was never read (before 2026-11-15): Sunday lists Saturday's only, labelled with Saturday."""
+    with Session(engine) as db:
+        db.add_all([MarketEvent(key="thu", symbol="2330.TW", date=D12, type="material_info", title="週四的",
+                                detail="", data={"time": "173000"}, source="twse-openapi"),
+                    MarketEvent(key="sat", symbol="2330.TW", date=date(2026, 11, 14), type="material_info",
+                                title="週六的", detail="", data={"time": "70003"}, source="twse-openapi")])
+        db.commit()
+    a = get(client)["announcements"]
+    assert (a["date"], a["start_date"], a["total"]) == ("2026-11-14", "2026-11-14", 1)

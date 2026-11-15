@@ -1205,13 +1205,17 @@ class MarketAnnouncement(BaseModel):
     code: str
     name: str
     title: str
+    date: date  # 發言日期
     time: str | None  # "17:30" (Taipei)
     url: str | None
 
 
 class MarketAnnouncements(BaseModel):
-    date: date
-    total: int
+    date: date  # the newest day
+    # the earliest day listed: on a weekend / holiday the list goes back to the last trading day (equal to ``date``
+    # on a trading day)
+    start_date: date
+    total: int  # every announcement from start_date to date
     items: list[MarketAnnouncement]  # latest first, at most 30
 
 
