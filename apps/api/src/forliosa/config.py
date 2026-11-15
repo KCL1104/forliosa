@@ -110,6 +110,10 @@ class Settings(BaseSettings):
     # medium (was low): at low the answers copied search results and named outlets in the text; medium follows the
     # writing rules and picks tools (news, search, charts) better, about US$0.01 a question (2026-11-15 measured)
     ai_effort_chat: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    # An answer that used web search or the stock news tool is rewritten once by a small editor call before it is
+    # shown (``ai.chat.ChatTurn._edit``: copied source sentences, outlet names in the text, tool talk); measured
+    # 2026-11-15 on the same 11 questions: slop signals 1.5 -> 0.5 a question for about US$0.0002 and 1-2 seconds.
+    ai_answer_editor: bool = True
     ai_effort_why: Literal["low", "medium", "high", "xhigh", "max"] = "low"
     ai_effort_analyst: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     ai_max_tokens_chat: int = 8000

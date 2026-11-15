@@ -52,6 +52,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from difflib import SequenceMatcher
 from typing import Any
 
 import anthropic
@@ -60,7 +61,7 @@ from sqlalchemy.orm import Session
 from forliosa.ai import grounding, scope, store
 from forliosa.ai.keypool import Failure, KeyPool, KeysBusy, KeySlot, NoKeyAvailable, classify_failure
 from forliosa.ai.pricing import CallUsage
-from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, OFF_TOPIC_REPLY, page_context
+from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, page_context
 from forliosa.ai.tools import (
     ToolContext,
     client_tool_definitions,
@@ -117,9 +118,54 @@ class TurnState:
     segments: list[grounding.Segment] = field(default_factory=list)  # text blocks of the answer (cited or not)
     round_start: int | None = None  # where this call's text starts in display.text
     used_web: bool = False
+    # Where the held-back answer starts in ``display.text``: after web search or the news tool the answer is not
+    # streamed as it is written; ``ChatTurn._edit`` rewrites it once and streams the result (None: nothing held)
+    held_from: int | None = None
 
     def add_text(self, s: str) -> None:
         self.display.text += s
+
+
+_NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
+
+
+def _numbers(text: str) -> set[str]:
+    return {m.group(0).replace(",", "") for m in _NUMBER.finditer(text)}
+
+
+_CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?[)）]")
+
+
+def keeps_numbers(draft: str, edited: str) -> bool:
+    """Every number of the draft is still in the edited answer (thousands separators aside). A stock code in
+    parentheses after a name (「台積電(2330)」) may go: the editor is asked to drop that copied form."""
+    codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
+    return _numbers(draft) - codes <= _numbers(edited)
+
+
+def remap_flags(flagged: list[dict[str, Any]], draft: str, final: str, start: int) -> list[dict[str, Any]]:
+    """Grounding flags of the held-back draft, moved onto the edited text (positions in the whole answer)."""
+    out = []
+    targets = grounding.sentences(final)
+    for f in flagged:
+        a = f.get("start")
+        if isinstance(a, int) and a < start:  # before the edited part: unchanged
+            out.append(f)
+            continue
+        best, ratio = None, 0.0
+        for x, y in targets:
+            r = SequenceMatcher(None, f.get("text") or "", final[x:y], autojunk=False).ratio()
+            if r > ratio:
+                best, ratio = (x, y), r
+        if best is not None and ratio >= 0.55:
+            x, y = best
+            out.append({**f, "start": start + x, "end": start + y, "text": final[x:y]})
+    return out
+
+
+def _stream(text: str, size: int = 24) -> Iterator[Event]:
+    for i in range(0, len(text), size):
+        yield "text", {"delta": text[i:i + size]}
 
 
 def _classify(exc: BaseException) -> str:
@@ -330,14 +376,20 @@ class ChatTurn:
     def _translate(self, ev: Any, state: TurnState, first_text_of_round: list[bool]) -> Iterator[Event]:
         t = getattr(ev, "type", None)
         if t == "text":
+            # after web search or the news tool the answer is held back and edited before it is shown (``_edit``)
+            hold = self.settings.ai_answer_editor and state.used_web
+            if hold and state.held_from is None:
+                state.held_from = len(state.display.text)
             if first_text_of_round[0] and state.display.text and not state.display.text.endswith("\n"):
                 state.add_text("\n\n")
-                yield "text", {"delta": "\n\n"}
+                if not hold:
+                    yield "text", {"delta": "\n\n"}
             first_text_of_round[0] = False
             if state.round_start is None:
                 state.round_start = len(state.display.text)
             state.add_text(ev.text)
-            yield "text", {"delta": ev.text}
+            if not hold:
+                yield "text", {"delta": ev.text}
         elif t == "citation":
             c = self._citation(ev.citation, state)
             if c is not None:
@@ -440,24 +492,78 @@ class ChatTurn:
             self.stored = store.api_history(db, thread)
             self._route()
             ok = yield from self._loop(thread, new, state, ctx)
-            if ok and state.used_web:
-                flagged = grounding.check(state.display.text, state.segments)
-                if flagged:
-                    state.display.grounding = flagged
-                    yield "grounding", {"items": flagged}
+            flagged = grounding.check(state.display.text, state.segments) if ok and state.used_web else []
+            if state.held_from is not None:
+                flagged = yield from self._edit(thread, state, flagged, edit=ok and state.display.error is None)
+            if flagged:
+                state.display.grounding = flagged
+                yield "grounding", {"items": flagged}
         except GeneratorExit:
             state.display.error = {"code": "interrupted", "message": _ERRORS["interrupted"]}
             raise
         except ChatFailure as exc:
+            yield from self._release(state)  # what was held back is shown as written
             state.display.error = {"code": exc.code, "message": _ERRORS.get(exc.code, _ERRORS["ai_error"])}
             yield "error", state.display.error
         except Exception:
             log.exception("AI chat turn failed")
+            yield from self._release(state)
             state.display.error = {"code": "internal_error", "message": _ERRORS["internal_error"]}
             yield "error", state.display.error
         finally:
             self._persist(thread, turn_id, new, ok, message, state)
         yield "done", self._done(thread, turn_id, state)
+
+    # -- the answer editor ------------------------------------------------------------------------------------
+    def _release(self, state: TurnState) -> Iterator[Event]:
+        """Show the held-back text as it was written (the turn failed, or editing is off for it)."""
+        if state.held_from is None:
+            return
+        held, state.held_from = state.display.text[state.held_from:], None
+        yield from _stream(held)
+
+    def _edit(self, thread: AiThread, state: TurnState, flagged: list[dict[str, Any]], edit: bool):
+        """Rewrite the held-back answer once (產品負責人 2026-11-15: answers built on search results copied source
+        sentences and named outlets in the text) and stream the result. The edit is dropped, and the answer shown
+        as written, when the call fails, is cut off, or loses a number the draft had. Flagged (uncited) sentences
+        are moved onto the most similar sentence of the edited answer; one without a close match is left out."""
+        start = state.held_from
+        assert start is not None
+        draft = state.display.text[start:]
+        body = draft.lstrip()
+        lead = draft[: len(draft) - len(body)]
+        edited: str | None = None
+        if edit and body.strip():
+            yield "tool", {"id": "edit", "name": "edit_answer", "status": "running", "label": "整理回答"}
+            try:
+                edited = self._editor_call(thread, body)
+            except Exception:  # the answer as written is fine to show; editing is a nicety
+                log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
+            yield "tool", {"id": "edit", "name": "edit_answer", "status": "done", "label": "整理回答"}
+            if edited is not None and not keeps_numbers(body, edited):
+                log.warning("AI answer editor dropped a number; showing the answer as written")
+                edited = None
+        final = lead + (edited if edited is not None else body)
+        state.display.text = state.display.text[:start] + final
+        state.held_from = None
+        yield from _stream(final)
+        return remap_flags(flagged, draft, final, start) if edited is not None else flagged
+
+    def _editor_call(self, thread: AiThread, body: str) -> str | None:
+        slot = self.slot
+        if slot is None:
+            return None
+        model = thread.model
+        msg = slot.client.with_options(timeout=30.0, max_retries=0).messages.create(
+            model=model, max_tokens=4000, system=EDITOR_SYSTEM, output_config={"effort": "low"},
+            messages=[{"role": "user", "content": body}])
+        usage = CallUsage.from_sdk(msg.usage)
+        store.record_usage(self.db, user_id=self.user.id, thread_id=thread.id, feature="chat",
+                           model=msg.model or model, key_slot=slot.index, usage=usage, stop_reason=msg.stop_reason)
+        if msg.stop_reason != "end_turn":
+            return None
+        text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip()
+        return text if text and len(text) <= max(200, len(body) * 2) else None
 
     @staticmethod
     def _done(thread: AiThread, turn_id: str, state: TurnState) -> dict[str, Any]:
@@ -481,6 +587,7 @@ class ChatTurn:
                 # Classifier or model decline: no server-side fallback on this model. Never run the turn's tools;
                 # drop the turn from the context and tell the user to rephrase.
                 state.display.text = ""
+                state.held_from = None
                 state.segments.clear()
                 state.display.error = {"code": "refusal", "message": REFUSAL_MESSAGE}
                 yield "error", state.display.error
