@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { cleanAnswer, DISCLAIMER, groundingReason, parseGrounding, splitUngrounded, stripDisclaimer } from "@/ai/answer-text"
+import { cleanAnswer, DISCLAIMER, groundingReason, markNeedle, parseGrounding, splitUngrounded, stripDisclaimer, tidyAnswer } from "@/ai/answer-text"
 import { applyChatEvent } from "@/ai/remote"
 import type { Message } from "@/ai/types"
 
@@ -88,30 +88,46 @@ describe("串流 reducer：grounding 與 done.disclaimer", () => {
   })
 })
 
-describe("cleanAnswer：模型寫出 Markdown 符號時，畫面上不出現那些符號", () => {
-  it("粗體、底線、反引號的記號拿掉，字留著", () => {
-    expect(cleanAnswer("**結論：持股集中在半導體。** 台積電占 35.7%")).toBe("結論：持股集中在半導體。 台積電占 35.7%")
-    expect(cleanAnswer("__前三大__合計 `72.6%`")).toBe("前三大合計 72.6%")
+describe("回答是 Markdown（產品負責人 2026-11-15）：顯示前只換舊的條列、藏起串流中落單的星號", () => {
+  it("Markdown 原樣保留；舊的「・」「•」條列換成 `- `", () => {
+    const md = "**結論**：持股集中在半導體。\n- 台積電 35.7%\n1. 鴻海\n| 代號 | 漲跌 |\n|---|---|\n| 2330 | ▲0.4% |"
+    expect(cleanAnswer(md)).toBe(md)
+    expect(cleanAnswer("・台積電 35.7%\n• 環球晶")).toBe("- 台積電 35.7%\n- 環球晶")
   })
 
-  it("行首的標題記號拿掉；- 與 * 條列換成「・」，已經是「・」的不重複", () => {
-    expect(cleanAnswer("## 重點\n- 台積電 35.7%\n* 鴻海 21.9%\n・0050 15.0%\n• 環球晶")).toBe("重點\n・台積電 35.7%\n・鴻海 21.9%\n・0050 15.0%\n・環球晶")
-    expect(cleanAnswer("・**單一個股：** 台積電 35.7%")).toBe("・單一個股： 台積電 35.7%")
+  it("串流到一半（後半的 ** 還沒到）：最後一個落單的 ** 先拿掉；寫完之後不動", () => {
+    expect(cleanAnswer("**結論：持股集", { streaming: true })).toBe("結論：持股集")
+    expect(cleanAnswer("**結論**：持股集中", { streaming: true })).toBe("**結論**：持股集中")
+  })
+})
+
+describe("tidyAnswer：模型固定的小毛病交給程式整理", () => {
+  const year = 2026
+  it("民國年與「2026年11月12日」→ 月/日；不是今年才寫年份；「今（13）日」→「13 日」", () => {
+    expect(tidyAnswer("將於 115 年 12 月 21 日終止上市，2026年11月12日公布。", { year })).toBe("將於 12/21 終止上市，11/12 公布。")
+    expect(tidyAnswer("2025年12月31日封關", { year })).toBe("2025/12/31封關")
+    expect(tidyAnswer("台股今（13）日開高，今（12日）收黑", { year })).toBe("台股13 日開高，12 日收黑")
   })
 
-  it("串流到一半（後半的記號還沒到）也不露出星號", () => {
-    expect(cleanAnswer("**結論：持股集")).toBe("結論：持股集")
+  it("括號裡交代出處的說明拿掉；括號裡是資料時間或代號的不動；Markdown 連結不動", () => {
+    expect(tidyAnswer("12/21 終止上市（公開資訊觀測站）。淨值為負（PChome 新聞 11/11、鏡週刊 11/12）。")).toBe("12/21 終止上市。淨值為負。")
+    expect(tidyAnswer("漲 7.01%（資料來自工具）。外資賣超（資料來源：Yahoo 股市）。")).toBe("漲 7.01%。外資賣超。")
+    expect(tidyAnswer("收 2350 元（11/13 收盤資料），台積電（2330）")).toBe("收 2350 元（11/13 收盤資料），台積電（2330）")
+    expect(tidyAnswer("見[鉅亨新聞](https://news.cnyes.com/a)")).toBe("見[鉅亨新聞](https://news.cnyes.com/a)")
   })
 
-  it("[文字](網址) 只留文字；一般的字、負號、乘號與 ▲▼ 不動", () => {
-    expect(cleanAnswer("詳見[證交所公告](https://www.twse.com.tw/x)。")).toBe("詳見證交所公告。")
-    const plain = "今天賠，帳上市值下跌 80,062 元（▼1.44%）。\n均價 692.61 × 1,500 股；-3.5% 到 +2.1%"
-    expect(cleanAnswer(plain)).toBe(plain)
+  it("照貼回來的出處清單（整行就是引用的標題）與「資料來源：」行拿掉", () => {
+    const titles = ["公告本公司有價證券將於115年12月21日終止上市", "台揚財報淨值為負數12/21終止上市 股價跳空跌停"]
+    const raw = "台揚跌停。\n\n公開資訊觀測站，11/10：公告本公司有價證券將於115年12月21日終止上市\n- 11/11：台揚財報淨值為負數12/21終止上市 股價跳空跌停\n資料來源：PChome"
+    expect(tidyAnswer(raw, { titles, year })).toBe("台揚跌停。\n")
   })
 
-  it("標出「無來源」的段落：回答清過符號之後仍然對得上", () => {
-    const raw = "・**除息：** 006208 已公告 11/17 除息。\n其他內容"
-    const segments = splitUngrounded(cleanAnswer(raw), [{ text: "・**除息：** 006208 已公告 11/17 除息。", reason: "uncited_news_claim" }])
-    expect(segments.find((x) => x.ungrounded)?.text).toBe("・除息： 006208 已公告 11/17 除息。")
+  it("說到「工具」的片語換掉；清單之間的空行與漏出來的 <cite> 拿掉", () => {
+    expect(tidyAnswer("工具資料顯示近四季虧損。0050 的股利目前工具沒有顯示。")).toBe("資料顯示近四季虧損。0050 的股利目前沒有。")
+    expect(tidyAnswer("- 第一點\n\n- 第二點</cite>")).toBe("- 第一點\n- 第二點")
+  })
+
+  it("「無來源」的段落：整理過、拿掉格式記號之後，和畫面上的字對得上", () => {
+    expect(markNeedle("- **除息**：006208 已公告 115 年 11 月 17 日除息（公開資訊觀測站）。", { year })).toBe("除息：006208 已公告 11/17 除息。")
   })
 })

@@ -61,9 +61,9 @@ describe("對話的兩支筆：模型寫的字是石墨灰楷體，規則或範�
         { id: "a3", role: "ai", answer: { text: "今天拖累最多的是環球晶。", followUps: ["我的持股會不會太集中？"] }, at },
       ],
     })
-    expect(screen.getByText("台積電今天上漲。").closest("p")).toHaveClass("ai-voice")
+    expect(screen.getByText("台積電今天上漲。").closest(".ai-voice")).not.toBeNull()
     for (const t of ["照你說的算好了稅費，你看一下。", "今天拖累最多的是環球晶。"]) {
-      expect(screen.getByText(t).closest("p")).not.toHaveClass("ai-voice")
+      expect(screen.getByText(t).closest(".ai-voice")).toBeNull()
       expect(screen.getByText(t).closest("p")).toHaveClass("text-ink")
     }
     // 使用者的話是墨色 Noto Sans；追問是墨色文字連結，不是石墨灰
@@ -75,9 +75,9 @@ describe("對話的兩支筆：模型寫的字是石墨灰楷體，規則或範�
 
   it("舊紀錄沒有標記時：連後端的對話視為模型寫的，本機的對話視為規則版", () => {
     view({ id: "t2", remoteId: "thr_1", title: "q", updatedAt: at, messages: [{ id: "a1", role: "ai", text: "後端的回答。", at }] })
-    expect(screen.getByText("後端的回答。").closest("p")).toHaveClass("ai-voice")
+    expect(screen.getByText("後端的回答。").closest(".ai-voice")).not.toBeNull()
     view({ id: "t3", title: "q", updatedAt: at, messages: [{ id: "a2", role: "ai", text: "本機的說明。", at }] })
-    expect(screen.getByText("本機的說明。").closest("p")).not.toHaveClass("ai-voice")
+    expect(screen.getByText("本機的說明。").closest(".ai-voice")).toBeNull()
   })
 })
 
@@ -183,7 +183,7 @@ describe("模型回答的排版：漢字片段收字距，數字和單位連成�
     render(<AiText text="收在 1,085 元。" size="panel" />)
     const num = screen.getByText("1,085 元")
     expect(num).toHaveClass("kai-num")
-    expect(num.closest("p")).toHaveClass("ai-voice")
+    expect(num.closest(".ai-voice")).not.toBeNull()
     expect(screen.getByText("。")).toHaveClass("kai-han")
   })
 })

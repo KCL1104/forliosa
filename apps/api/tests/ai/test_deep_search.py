@@ -49,9 +49,10 @@ def test_the_note_says_how_to_research_and_how_to_write_it_up():
     ctx = page_context(datetime(2026, 11, 13, 10, 0, tzinfo=TAIPEI), "/stock/2330.TW", "2330.TW", "台積電", False,
                        deep=True)
     for part in ("公司公告與財報", "法說會", "競爭對手", "風險", "分幾輪用 web_search", "兩邊都寫出來", "兩三句結論",
-                 "最多 8 點", "最多 3 個短標題", "不給買賣建議與目標價"):
+                 "最多 8 點", "最多 3 個 `###` 短標題", "Markdown", "不給買賣建議與目標價"):
         assert part in ctx
-    assert "**" not in DEEP_SEARCH_NOTE and "#" not in DEEP_SEARCH_NOTE  # the UI shows plain text
+    # the answer is Markdown (產品負責人 2026-11-15): small ### headings and - lists, no big # headings
+    assert "`- `" in DEEP_SEARCH_NOTE and "## " not in DEEP_SEARCH_NOTE
     assert "深度搜尋" not in page_context(datetime(2026, 11, 13, 10, 0, tzinfo=TAIPEI), "/", None, None, False)
 
 

@@ -589,7 +589,7 @@
 | 事件 | data | 說明 |
 |---|---|---|
 | `thread` | `{"id": "thr_…", "title": "我有哪些持股？", "created": true}` | 新對話時 `created: true` |
-| `text` | `{"delta": "台積電今天"}` | 回答文字片段，依序串接；換到下一輪（查完工具）時會先送 `"\n\n"` |
+| `text` | `{"delta": "台積電今天"}` | 回答文字片段，依序串接；換到下一輪（查完工具）時會先送 `"\n\n"`。**回答是 Markdown**（2026-11-15 起：`- ` 清單、**粗體**、`###` 小標題、小表格；不放網址與大標題），前端用 Markdown 顯示；舊的回答可能是用「・」條列的純文字 |
 | `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」 |
 | `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字", "outlet"?: "PChome 新聞"}` | 來源引用（已去重），顯示在回答下方。網路搜尋的引用，以及個股新聞工具（`get_news`）的公告與媒體標題（2026-11-15：工具把每則有連結的標題當成可引用的 `search_result` 交給模型）；後者多 `outlet`（媒體名稱，公告是「公開資訊觀測站」），出處寫媒體名稱而不是網域 |
 | `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |

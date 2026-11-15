@@ -32,19 +32,83 @@ export function stripDisclaimer(text: string, disclaimer: string = DISCLAIMER): 
 }
 
 /**
- * 畫面只顯示純文字，模型偶爾還是會寫出 Markdown 符號（`**粗體**`、`# 標題`、反引號、`- ` 條列）：這些符號原樣出現在回答裡很難看，
- * 顯示前先清掉——粗體與底線的記號、行首的 `#`、反引號直接拿掉（字留著），行首的 `-`／`*`／`•` 條列換成「・」。
- * 一個一個符號清（不要求成對），所以串流到一半、後半的 `**` 還沒到時也不會閃一下星號。
- * `[文字](網址)` 只留文字（來源由畫面另外列）。數字裡的 `*`（乘號）前後是數字或空白，不會被當成粗體。
+ * 回答是 Markdown（產品負責人 2026-11-15；畫面用 `AiMarkdown` 顯示）。顯示前只做兩件事：
+ * - 舊的回答與 mock 用「・」條列：行首的「・」「•」換成 Markdown 的 `- `，一樣畫成清單。
+ * - 串流到一半、後半的 `**` 還沒到：最後一個落單的 `**` 先拿掉，不會閃一下星號。
  */
-export function cleanAnswer(text: string): string {
-  return text
-    .replace(/\[([^\]\n]+)\]\((?:https?:\/\/|\/)[^)\s]*\)/g, "$1")
-    .replace(/\*\*|__/g, "")
-    .replace(/`+/g, "")
-    .replace(/^[ \t]*#{1,6}[ \t]+/gm, "")
-    .replace(/^([ \t]*)[-*•][ \t]+/gm, "$1・")
-    .replace(/^([ \t]*)・[ \t]*・[ \t]*/gm, "$1・")
+export function cleanAnswer(text: string, { streaming = false }: { streaming?: boolean } = {}): string {
+  let out = text.replace(/^([ \t]*)[・•][ \t]*/gm, "$1- ")
+  if (streaming && (out.match(/\*\*/g)?.length ?? 0) % 2 === 1) {
+    const at = out.lastIndexOf("**")
+    out = out.slice(0, at) + out.slice(at + 2)
+  }
+  return out
+}
+
+/**
+ * 模型的固定小毛病，顯示前用程式整理（產品負責人 2026-11-15「AI 腔太重」；同樣的題目實測，提示詞改到某個程度之後
+ * 再改也降不下來，這幾種是固定的寫法，交給程式最穩）。只做這幾件事，不改內容：
+ * - 民國年、「2026年11月12日」寫法 → 「11/12」（不是今年才寫「2025/12/31」）；「今（13）日」「今（13日）」→「13 日」。
+ * - 括號裡交代出處的說明（「（公開資訊觀測站）」「（PChome 新聞 11/11、鏡週刊 11/12）」「（資料來源：…）」「（資料來自工具）」）
+ *   拿掉：出處由畫面列在回答下方。括號裡只有資料時間的（「（11/13 收盤資料）」）不動。
+ * - 照貼回來的出處清單：整行就是某個引用的標題（或「11/10：標題」「媒體，11/10：標題」），或「資料來源：…」開頭的行，拿掉。
+ * - 「工具資料顯示」「目前工具沒有顯示」這類說到工具的片語 → 「資料顯示」「目前沒有」。
+ * - 清單的點和點之間的空行拿掉（畫成緊湊的清單）；漏出來的 `<cite>` 標籤拿掉。
+ */
+export interface TidyOptions {
+  /** 這則回答的引用標題（`Citation.title`）：整行照貼的標題要拿掉 */
+  titles?: (string | null | undefined)[]
+  /** 今年（西元）：今年的日期只寫月/日 */
+  year?: number
+}
+
+const SOURCE_WORDS = /來源|報導|新聞|週刊|時報|日報|觀測站|工具|網站|Yahoo|股市|社群|論壇/
+const ROC_DATE = /(?<!\d)(1[01]\d)\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g
+const AD_DATE = /(?<!\d)(20\d\d)\s*年\s*(\d{1,2})\s*月\s*(\d{1,2})\s*日/g
+
+export function tidyAnswer(text: string, { titles = [], year }: TidyOptions = {}): string {
+  const md = (y: number, m: string, d: string) => (year && y !== year ? `${y}/${Number(m)}/${Number(d)}` : `${Number(m)}/${Number(d)}`)
+  const known = titles.map((t) => (t ?? "").trim()).filter((t) => t.length >= 8)
+  // 先拿掉照貼的出處清單（用原本的字比對標題），再整理寫法
+  let out = text
+    .replace(/<\/?cite[^>]*>/g, "")
+    .split("\n")
+    .filter((line) => {
+      const t = line.trim().replace(/^(?:[-*+・]|\d+[.)])\s+/, "").replace(/\*\*/g, "")
+      if (!t) return true
+      if (/^(資料)?來源[：:]/.test(t)) return false
+      const bare = t.replace(/^[^，：\n]{1,20}，(?=\d{1,2}\/\d{1,2}：)/, "").replace(/^\d{1,2}\/\d{1,2}：/, "").trim()
+      return !known.some((k) => bare === k || (bare.length >= 8 && k.includes(bare)))
+    })
+    .join("\n")
+  out = out
+    .replace(ROC_DATE, (_, y: string, m: string, d: string) => md(Number(y) + 1911, m, d))
+    .replace(AD_DATE, (_, y: string, m: string, d: string) => md(Number(y), m, d))
+    .replace(/今（(\d{1,2})）日|今（(\d{1,2})日）/g, (_, a?: string, b?: string) => `${a ?? b} 日`)
+    // 數字日期和後面的漢字之間空一格（「12/21 終止上市」），和其他回答的寫法一樣
+    .replace(/(?<![\d/])(\d{1,2}\/\d{1,2})(?=[\u4e00-\u9fff])/g, "$1 ")
+    // 括號裡交代出處的說明（全形與半形括號）；前面的空白一起拿掉。Markdown 連結的 `](網址)` 不動
+    .replace(/(?<!\])[ \t]*[（(]([^（）()\n]{1,60})[）)]/g, (all, inner: string) => (SOURCE_WORDS.test(inner) && !/^\s*\d/.test(inner) && !/^https?:/.test(inner) ? "" : all))
+    .replace(/(我們的)?工具(的)?資料(顯示|指出)/g, "資料$3")
+    .replace(/目前(我們的)?工具(沒有|未)(顯示|提供|回傳)/g, "目前沒有")
+  // 清單之間的空行；拿掉整行之後多出來的連續空行
+  return out.replace(/(^[-*・][ \t][^\n]*)\n[ \t]*\n(?=[-*・][ \t])/gm, "$1\n").replace(/\n{3,}/g, "\n\n").replace(/^\n+/, "")
+}
+
+/** 顯示用：舊的「・」條列換成 Markdown 清單，再整理固定的小毛病 */
+export function displayAnswer(text: string, opts: TidyOptions & { streaming?: boolean } = {}): string {
+  return tidyAnswer(cleanAnswer(text, { streaming: opts.streaming }), opts)
+}
+
+/**
+ * 沒有附來源的段落，換成畫面上找得到的樣子：同一套整理，再拿掉 Markdown 的格式記號（畫出來之後看不到的那些）——
+ * 行首的清單記號、`**`、`__`、反引號。
+ */
+export function markNeedle(passage: string, opts: TidyOptions = {}): string {
+  return displayAnswer(passage, opts)
+    .replace(/^[ \t]*(?:[-*+]|\d+[.)])[ \t]+/gm, "")
+    .replace(/\*\*|__|`/g, "")
+    .trim()
 }
 
 /** 沒有附來源的段落（`grounding` 事件的一項；後端欄位以 text 為主，start／end 是選填的字元位置） */
@@ -65,12 +129,12 @@ export interface TextSegment {
  * 把回答切成片段：每個沒有來源的段落成為一段（帶標記），其他文字原樣。
  * 先用 start／end（位置要和 text 對得上），對不上就在文字裡找 text；找不到的段落略過，不硬塞。
  */
-export function splitUngrounded(text: string, passages: UngroundedPassage[] | undefined): TextSegment[] {
+export function splitUngrounded(text: string, passages: UngroundedPassage[] | undefined, opts: TidyOptions = {}): TextSegment[] {
   if (!passages?.length || !text) return [{ text }]
   const spans: { start: number; end: number; p: UngroundedPassage }[] = []
   for (const p of passages) {
-    // 回答顯示前清過 Markdown 符號（`cleanAnswer`）：要找的那一段也清一次才對得上
-    const needle = cleanAnswer(p.text ?? "").trim()
+    // 回答顯示前整理過（`displayAnswer`）：要找的那一段也整理一次才對得上
+    const needle = displayAnswer(p.text ?? "", opts).trim()
     if (!needle) continue
     let start = -1
     if (typeof p.start === "number" && typeof p.end === "number" && p.end > p.start && text.slice(p.start, p.end).trim() === needle) {

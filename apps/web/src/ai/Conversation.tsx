@@ -5,7 +5,9 @@ import { useUi } from "@/app/ui-store"
 import { closeDay } from "@/lib/as-of"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { cleanAnswer, DISCLAIMER, groundingReason, splitUngrounded, stripDisclaimer, type UngroundedPassage } from "./answer-text"
+import { appToday } from "@/api"
+import { AiMarkdown } from "./ai-markdown"
+import { DISCLAIMER, displayAnswer, groundingReason, markNeedle, stripDisclaimer, type TidyOptions, type UngroundedPassage } from "./answer-text"
 import { useAiUsage } from "./remote-hooks"
 import { ChartCard } from "./ChartCard"
 import { DraftCard } from "./DraftCard"
@@ -86,7 +88,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
             <span className="sr-only">AI：</span>
             {m.text &&
               ((m.model ?? !!thread.remoteId) ? (
-                <AiText text={stripDisclaimer(cleanAnswer(m.text), m.disclaimer ?? fallbackDisclaimer)} ungrounded={m.ungrounded} size={size} />
+                <ModelAnswer message={m} disclaimer={m.disclaimer ?? fallbackDisclaimer} size={size} />
               ) : (
                 <RuleText text={m.text} size={size} />
               ))}
@@ -123,30 +125,27 @@ const modelSize = kaiSize
 const ruleSize = { panel: "text-base leading-relaxed", screen: "text-[1rem] leading-relaxed" } as const
 
 /**
- * 模型寫的話（黑體（墨色，`.ai-voice`））。漢字的片段收字距、數字和單位不在行尾拆開（`KaiText`）。
+ * 模型寫的話（黑體、墨色，`.ai-voice`）：Markdown（`AiMarkdown`：清單、粗體、小標題、表格、連結），數字和單位不在行尾拆開。
  * 後端標出「像事實、但沒有附來源」的段落時，段落下方一條淡淡的點線，
  * 後面接一個安靜的「無來源」小標記（淡墨，不用紅色）；按下展開說明。
  */
-export function AiText({ text, ungrounded, size }: { text: string; ungrounded?: UngroundedPassage[]; size: "panel" | "screen" }) {
-  const segments = splitUngrounded(text, ungrounded)
+export function AiText({ text, ungrounded, size, tidy }: { text: string; ungrounded?: UngroundedPassage[]; size: "panel" | "screen"; tidy?: TidyOptions }) {
+  const passages = (ungrounded ?? []).filter((p) => p.text)
   return (
-    <p className={cn("ai-voice whitespace-pre-line", modelSize[size])}>
-      {segments.map((seg, i) =>
-        seg.ungrounded ? (
-          <span key={i}>
-            <span className="underline decoration-ctl decoration-dotted decoration-1 underline-offset-[5px]">
-              <KaiText text={seg.text} />
-            </span>
-            <UngroundedMark passage={seg.ungrounded} />
-          </span>
-        ) : (
-          <span key={i}>
-            <KaiText text={seg.text} />
-          </span>
-        ),
-      )}
-    </p>
+    <AiMarkdown
+      source={text}
+      marks={passages.map((p) => markNeedle(p.text, tidy))}
+      mark={(i) => <UngroundedMark passage={passages[i]!} />}
+      className={cn("ai-voice", modelSize[size])}
+    />
   )
+}
+
+/** 模型寫的回答：顯示前整理固定的小毛病（`displayAnswer`：Markdown 符號、民國年、括號裡的出處、照貼的標題…），再拿掉重複的免責聲明 */
+function ModelAnswer({ message, disclaimer, size }: { message: Message; disclaimer: string; size: "panel" | "screen" }) {
+  const tidy: TidyOptions = { titles: message.citations?.map((c) => c.title), year: Number(appToday().slice(0, 4)) }
+  const text = displayAnswer(message.text ?? "", { ...tidy, streaming: message.streaming })
+  return <AiText text={stripDisclaimer(text, disclaimer)} ungrounded={message.ungrounded} size={size} tidy={tidy} />
 }
 
 /** 本機規則或範本寫的句子（草稿的說明、規則版的回答）：不是模型寫的，墨色 Noto Sans、不用石墨灰 */
