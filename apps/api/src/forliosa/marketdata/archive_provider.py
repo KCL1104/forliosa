@@ -2,7 +2,8 @@
 
 The archive is filled by ``forliosa.archive`` from official open data (and, under the personal policy,
 by backfills from FinMind and the TWSE website). Rows keep their original ``source``; under
-``DATA_POLICY=commercial`` rows from non-commercial sources are ignored.
+``DATA_POLICY=commercial`` rows from non-commercial sources are ignored. US closes come from Databento
+(``forliosa.us_prices``, source ``databento-equs``) and are read only while US_PRICE_SOURCE=databento.
 
 History from the archive is usually *partial* (it only grows from the day archiving started), so the
 facade keeps asking the next real provider for the days the archive does not have.
@@ -34,8 +35,9 @@ from forliosa.marketdata.base import (
     tw_symbol,
 )
 from forliosa.marketdata.indices import index_by_data_id
-from forliosa.timeutil import market_close_dt, today_taipei
+from forliosa.timeutil import close_dt, today_taipei
 
+US_SOURCE = "databento-equs"  # forliosa.us_prices.SOURCE (not imported: that module imports the archive jobs)
 # A listing nobody has named for this long (newest row minus this) is taken as delisted and leaves the instrument list.
 LISTING_DAYS = 365
 # SEC tickers as company_tickers.json spells them (BRK-B): a letter first, so never a Taiwan code.
@@ -55,9 +57,11 @@ class ArchiveProvider(BaseProvider):
     cooldown_seconds = 30
 
     def __init__(self, policy: Policy = "commercial", session_fn: Callable[[], Session] = _default_session,
-                 taifex_confirmed: bool | None = None):
+                 taifex_confirmed: bool | None = None, us_prices: bool | None = None):
         self.policy = policy
         self.session_fn = session_fn
+        # US_PRICE_SOURCE=databento (None: read the setting at call time): US symbols are answered from stored bars.
+        self.us_prices = us_prices
         # TAIFEX_CONDITIONAL_CONFIRMED (None: read the setting at call time) for ``served`` (conditional datasets).
         self.taifex_confirmed = taifex_confirmed
         # (method, symbol) -> source keys of the rows the last answer used (twse-openapi, finmind …),
@@ -76,15 +80,27 @@ class ArchiveProvider(BaseProvider):
     def served(self, key: str) -> bool:
         return dataset_served(key, self.policy, self.taifex_confirmed)
 
+    def us_served(self) -> bool:
+        if self.us_prices is not None:
+            return self.us_prices
+        from forliosa.config import get_settings
+
+        return get_settings().us_prices_served
+
+    def _answers(self, symbol: str) -> bool:
+        return market_of_symbol(symbol) != "US" or self.us_served()
+
     def first_date(self, symbol: str | None = None, backfill: bool = False) -> date | None:
         """Earliest archived close (of ``symbol`` or of any symbol): where the archive's history begins.
         ``backfill=True`` counts the history backfill's days too (charts)."""
         from forliosa.models import PriceDaily
 
+        if symbol and not self._answers(symbol):
+            return None
         with self.session_fn() as db:
-            stmt = select(func.min(PriceDaily.date))
-            if symbol:
-                stmt = stmt.where(PriceDaily.symbol == symbol)
+            # without a symbol: where the Taiwan archive begins (the US backfill from 2024-07-01 is not its start)
+            cond = PriceDaily.symbol == symbol if symbol else PriceDaily.source != US_SOURCE
+            stmt = select(func.min(PriceDaily.date)).where(cond)
             return db.scalar(self._filter(stmt, PriceDaily, backfill))
 
     def backfill_until(self, symbol: str) -> date | None:
@@ -106,7 +122,7 @@ class ArchiveProvider(BaseProvider):
     def history(self, symbol: str, start: date, end: date, backfill: bool = False) -> list[Candle] | None:
         from forliosa.models import PriceDaily
 
-        if market_of_symbol(symbol) == "US":
+        if not self._answers(symbol):
             return None
         with self.session_fn() as db:
             stmt = select(PriceDaily).where(PriceDaily.symbol == symbol, PriceDaily.date >= start,
@@ -122,7 +138,7 @@ class ArchiveProvider(BaseProvider):
     def quotes(self, symbols: list[str]) -> dict[str, QuoteData] | None:
         from forliosa.models import PriceDaily
 
-        tw = [s for s in symbols if market_of_symbol(s) != "US"]
+        tw = [s for s in symbols if self._answers(s)]  # Taiwan, and US while US closes are served
         if not tw:
             return {}
         since = today_taipei() - timedelta(days=21)
@@ -137,7 +153,7 @@ class ArchiveProvider(BaseProvider):
             last = rs[0]
             prev = rs[1].close if len(rs) > 1 else None
             out[s] = QuoteData(symbol=s, price=last.close, prev_close=prev, open=last.open, high=last.high,
-                               low=last.low, volume=last.volume, as_of=market_close_dt(last.date),
+                               low=last.low, volume=last.volume, as_of=close_dt(s, last.date),
                                trade_date=last.date, source=last.source)
         return out
 

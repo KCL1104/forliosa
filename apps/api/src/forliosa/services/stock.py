@@ -867,6 +867,7 @@ def why(db: Session, md: MarketData, symbol: str) -> dict[str, Any]:
         headline = "，".join([lead, *texts[1:2]])
     return {"symbol": sym, "show": bool(reasons), "headline": headline, "reasons": reasons,
             "as_of": iso_taipei(q.as_of) if q.as_of else None,
+            "trade_date": q.trade_date.isoformat() if q.trade_date else None,
             "sources": labels([*tagged(q.source, "price"), "rules"])}
 
 

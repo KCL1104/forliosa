@@ -58,5 +58,7 @@ def series_notes(md: MarketData, symbol: str, start: date, first: date | None,
     if covers(first, start):
         return notes
     if market_of_symbol(symbol) == "US" and md.policy == "commercial":
-        return [US_NOTE]
+        # US closes (Databento, from 2024-07-01) when served: where this symbol's closes begin, or that it has none
+        # yet (just added: the backfill runs every 10 minutes); otherwise there is no US price at all
+        return [since_note(first) if md.us_prices_served() else US_NOTE]
     return [since_note(first) if until is not None and first <= until else accumulating_note(md, symbol), *notes]

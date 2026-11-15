@@ -86,7 +86,8 @@ WIKIPEDIA_NOTICE = ("維基百科：條目文字依 CC BY-SA 4.0 授權；個股
                     f"連到原條目與授權條款（{WIKIPEDIA_LICENSE_URL}）")
 WIKIDATA_LICENSE_URL = "https://creativecommons.org/publicdomain/zero/1.0/deed.zh-hant"
 
-LicenseStatus = Literal["ogdl", "public", "open", "conditional", "non_commercial"]
+# "licensed": a paid data vendor the product owner chose (Databento, 2026-11-15; docs/research/us-market-data.md)
+LicenseStatus = Literal["ogdl", "public", "open", "licensed", "conditional", "non_commercial"]
 CONDITIONAL_NOTE = ("期交所 OpenAPI 的這個資料集在 data.gov.tw 沒有找到對應的政府資料開放授權條款資料集，"
                     "已存檔，但在期交所書面確認可商用前不顯示（TAIFEX_CONDITIONAL_CONFIRMED）")
 
@@ -106,8 +107,8 @@ class Dataset:
 
     @property
     def commercial(self) -> bool:
-        """Usable commercially without further confirmation (OGDL, US government public data, GDELT)."""
-        return self.license_status in ("ogdl", "public", "open")
+        """Usable commercially without further confirmation (OGDL, US government public data, GDELT, a paid vendor)."""
+        return self.license_status in ("ogdl", "public", "open", "licensed")
 
 
 DATASETS: dict[str, Dataset] = {d.key: d for d in (
@@ -252,6 +253,12 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("sec-edgar/tickers", SEC, "公司代號與 CIK 對照表（company_tickers.json）",
             "https://www.sec.gov/files/company_tickers.json", "美股代號對應 SEC 公司編號（CIK）",
             "public", "SEC Webmaster FAQ", SEC_LICENSE, SEC_LICENSE_URL, SEC_ATTRIBUTION),
+    # -- Databento (paid, metered; product owner 2026-11-15 — US closes without asking Databento about display rights
+    # first, knowing the risk). EQUS.SUMMARY: the official consolidated daily summary from Nasdaq NLS Plus.
+    Dataset("databento-equs/price", "Databento", "US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）",
+            "https://databento.com/datasets/EQUS.SUMMARY", "美股收盤價、日線、成交量（2024-07-01 起，未還原權息）",
+            "licensed", "產品負責人 2026-11-15 決定使用（docs/research/us-market-data.md）",
+            "Databento 服務條款", "https://databento.com/terms", "資料由 Databento 提供"),
     # -- 中央銀行 (data.gov.tw 7232): the whole daily history since 2008 in one JSON array (marketdata/cbc.py).
     Dataset("cbc-opendata/fx", CBC, "銀行間新臺幣對美元收盤匯率", f"{CBC_API}/FTDOpenData_Day",
             "美股換算新台幣", basis="data.gov.tw 7232"),
@@ -289,6 +296,7 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "tdcc-opendata": (f"{TDCC}〈開放資料〉", True),
     "taifex-openapi": (f"{TAIFEX}〈OpenAPI 開放資料〉", True),
     "sec-edgar": (f"{SEC} EDGAR（{SEC_ATTRIBUTION}）", True),
+    "databento-equs": ("", True),  # labelled through DATASETS["databento-equs/price"]
     "cbc-opendata": (f"{CBC}〈開放資料〉", True),
     "sfb-opendata": (f"{SFB}〈開放資料〉", True),
     "shioaji-data": ("", True),  # labelled through DATASETS["shioaji-data/official"]
@@ -370,7 +378,8 @@ def attribution(ds: Dataset, year: int | None = None) -> str:
     return f"{ds.agency}〈{ds.title}〉（{year or _year()}），{ds.attribution_tail}"
 
 
-_DEFAULT_DATASET = {"shioaji-data": "shioaji-data/official", "gdelt": "gdelt/doc", "yahoo-rss": "yahoo-rss/stock",
+_DEFAULT_DATASET = {"shioaji-data": "shioaji-data/official", "databento-equs": "databento-equs/price",
+                    "gdelt": "gdelt/doc", "yahoo-rss": "yahoo-rss/stock",
                     "wikipedia": "wikipedia/zh", "wikidata": "wikidata/entities"}
 
 

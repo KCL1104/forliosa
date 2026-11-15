@@ -356,7 +356,7 @@ def test_why_endpoint(client):
     r = client.get(f"{API}/instruments/2330/why")
     assert r.status_code == 200
     w = r.json()
-    assert set(w) == {"symbol", "show", "headline", "reasons", "as_of", "sources",
+    assert set(w) == {"symbol", "show", "headline", "reasons", "as_of", "trade_date", "sources",
                       "ai", "citations", "rule_headline"}  # AI (M4) fields are additive
     assert w["show"] == bool(w["reasons"]) and (w["headline"] is None) == (not w["reasons"])
 

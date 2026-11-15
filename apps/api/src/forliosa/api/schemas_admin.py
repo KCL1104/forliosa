@@ -62,6 +62,17 @@ class AdminBackfill(BaseModel):
     symbols: dict[str, int] = Field(description="各狀態的代號數：done、not_found、mismatch、no_overlap、error")
 
 
+class AdminUsPrices(BaseModel):
+    """US closes from Databento (``forliosa.us_prices``): progress of the backfill and the newest session stored."""
+
+    enabled: bool = Field(description="US_PRICE_SOURCE=databento（金鑰只放在 worker 上，抓資料的是 worker）")
+    rows: int = Field(description="已存的美股日線筆數")
+    pending: int = Field(description="還沒回補的代號數")
+    first_day: str = Field(description="資料最早從哪一天（EQUS.SUMMARY：2024-07-01）")
+    stored_through: str | None = Field(description="已存的最新美股交易日（紐約日期）")
+    symbols: dict[str, int] = Field(description="各狀態的代號數：done、not_found、error")
+
+
 NewsSourceState = Literal["ok", "paused", "off"]
 
 
@@ -99,6 +110,7 @@ class AdminOverview(BaseModel):
     ai: AdminAi
     datasets: list[AdminDataset]
     history_backfill: AdminBackfill
+    us_prices: AdminUsPrices | None = None
     news: AdminNews
 
 

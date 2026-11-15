@@ -12,7 +12,8 @@ What the API returns (checked live 2026-11-15):
   (Taipei), ``end`` of the range being exclusive.
 * ``timeseries.get_range`` with ``encoding=csv&pretty_px=true&pretty_ts=true&map_symbols=true`` answers a CSV:
   ``ts_event,rtype,publisher_id,instrument_id,open,high,low,close,volume,symbol`` (prices with 9 decimals).
-* Symbols are the listing's own spelling: ``BRK.B`` (our spelling too), not SEC's ``BRK-B``. A request where some
+* Symbols are the listing's own spelling: ``BRK.B``. Ours is SEC's (``BRK-B``, ``MarketData.resolve``): requests
+  use :func:`db_symbol`, and bars come back in ours (:func:`our_symbol`). A request where some
   symbols do not resolve answers 206 with an ``X-Warning`` header naming them; one where none resolve answers 422
   ``symbology_invalid_request``.
 * Authentication is HTTP Basic with the API key as the user name and an empty password. Cost is metered by the
@@ -73,12 +74,25 @@ def fetcher(api_key: str, timeout: float = 60.0) -> HttpFetcher:
                        limiter=RateLimiter(per_host={HOST: REQUEST_INTERVAL_SECONDS}))
 
 
+def db_symbol(symbol: str) -> str:
+    """Our (SEC) spelling -> Databento's: ``BRK-B`` -> ``BRK.B``."""
+    return symbol.strip().upper().replace("-", ".")
+
+
+def our_symbol(symbol: str) -> str:
+    """Databento's spelling -> ours: ``BRK.B`` -> ``BRK-B``."""
+    return symbol.strip().upper().replace(".", "-")
+
+
 def us_symbols(symbols: list[str]) -> list[str]:
-    """The US symbols among ``symbols`` in Databento's spelling (upper case), each once, in order."""
+    """The US symbols among ``symbols`` in our spelling (upper case; ``BRK.B`` becomes ``BRK-B``), each once."""
     out: list[str] = []
-    for s in symbols:
-        s = (s or "").strip().upper()
-        if s and market_of_symbol(s) == "US" and s not in out and " " not in s:
+    for raw in symbols:
+        raw = (raw or "").strip().upper()
+        if not raw or market_of_symbol(raw) != "US" or " " in raw:
+            continue
+        s = our_symbol(raw)
+        if s not in out:
             out.append(s)
     return out
 
@@ -105,7 +119,7 @@ def parse_csv(text: str) -> list[Bar]:
         except ValueError:
             continue
         vol = row.get("volume")
-        bars.append(Bar(symbol=(row.get("symbol") or "").upper(), date=day, open=_dec(row.get("open")),
+        bars.append(Bar(symbol=our_symbol(row.get("symbol") or ""), date=day, open=_dec(row.get("open")),
                         high=_dec(row.get("high")), low=_dec(row.get("low")), close=close,
                         volume=int(vol) if vol and vol.isdigit() else None))
     return bars
@@ -116,7 +130,7 @@ def unresolved_from_warning(header: str | None) -> list[str]:
     if not header or "did not resolve" not in header:
         return []
     tail = header.split("did not resolve:", 1)[1]
-    return [s.strip(" .\"'[]").upper() for s in tail.split(",") if s.strip(" .\"'[]")]
+    return [our_symbol(s.strip(" .\"'[]")) for s in tail.split(",") if s.strip(" .\"'[]")]
 
 
 def last_available_day(http: HttpFetcher) -> date:
@@ -143,7 +157,8 @@ def daily_bars(http: HttpFetcher, symbols: list[str], start: date, end: date,
     unresolved: list[str] = []
     for i in range(0, len(syms), BATCH):
         part = syms[i:i + BATCH]
-        params = {"dataset": DATASET, "schema": SCHEMA, "symbols": ",".join(part), "stype_in": "raw_symbol",
+        params = {"dataset": DATASET, "schema": SCHEMA, "symbols": ",".join(db_symbol(p) for p in part),
+                  "stype_in": "raw_symbol",
                   "start": start.isoformat(), "end": (end + timedelta(days=1)).isoformat(), "encoding": "csv",
                   "pretty_px": "true", "pretty_ts": "true", "map_symbols": "true"}
         url = f"{API}timeseries.get_range"

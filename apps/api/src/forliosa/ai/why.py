@@ -44,6 +44,13 @@ _inflight_lock = threading.Lock()
 
 
 def _trading_day(result: dict[str, Any]) -> date:
+    # The quote's own session (a US close: the New York date, while its Taipei as_of is the next morning)
+    td = result.get("trade_date")
+    if isinstance(td, str):
+        try:
+            return date.fromisoformat(td)
+        except ValueError:
+            pass
     as_of = result.get("as_of")
     if isinstance(as_of, str):
         try:

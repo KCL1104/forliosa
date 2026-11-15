@@ -90,6 +90,8 @@ def quote_out(q: QuoteData) -> dict[str, Any]:
         "low": ser.price(q.low),
         "volume": q.volume,
         "as_of": iso_taipei(q.as_of) if q.as_of else None,
+        # the session the price belongs to (a US close: the New York date, the day before its Taipei as_of)
+        "trade_date": q.trade_date.isoformat() if q.trade_date else None,
         "is_realtime": q.is_realtime,
         "is_demo": q.is_demo,
         "source": q.source,

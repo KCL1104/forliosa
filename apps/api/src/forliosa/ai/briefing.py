@@ -179,7 +179,9 @@ def build_facts(db: Session, user: User, md: MarketData, day: date) -> dict[str,
     if not holdings and not watched:
         return None
     summary = svc.summary(state, md)
-    priced = [h for h in holdings if h["price"] is not None and h["day_change_pct"] is not None]
+    # The day's movers are Taiwan holdings: a US close belongs to another session (the night before, New York time)
+    priced = [h for h in holdings if h["price"] is not None and h["day_change_pct"] is not None
+              and h["market"] != "US"]
     gainers = sorted((h for h in priced if h["day_change_pct"] > 0), key=lambda h: h["day_change_pct"], reverse=True)
     losers = sorted((h for h in priced if h["day_change_pct"] < 0), key=lambda h: h["day_change_pct"])
 
@@ -188,7 +190,7 @@ def build_facts(db: Session, user: User, md: MarketData, day: date) -> dict[str,
     watch = []
     for sym in watched:
         q = quotes.get(sym)
-        if q is None:
+        if q is None or market_of_symbol(sym) == "US":  # the Taiwan session's briefing (see the movers above)
             continue
         out = instr.quote_out(q)
         pct = out["change_pct"]
@@ -223,9 +225,11 @@ def build_facts(db: Session, user: User, md: MarketData, day: date) -> dict[str,
 
 def ai_subjects(facts: dict[str, Any]) -> list[dict[str, Any]]:
     """The one or two symbols worth a search: the biggest moves among the holdings, else on the watchlist."""
-    pool = [*facts["gainers"], *facts["losers"]] or facts["watchlist"]
-    big = [m for m in pool if m.get("change_pct") is not None and abs(Decimal(str(m["change_pct"]))) >= AI_MOVE_MIN_PCT
-           and m["market"] != "US"]
+    # Taiwan only: the briefing is about the Taiwan session (a US close is another day). US movers are taken out
+    # before the pool is chosen, so holdings that moved only in the US still leave room for the watchlist.
+    tw = lambda ms: [m for m in ms if m["market"] != "US"]  # noqa: E731
+    pool = tw([*facts["gainers"], *facts["losers"]]) or tw(facts["watchlist"])
+    big = [m for m in pool if m.get("change_pct") is not None and abs(Decimal(str(m["change_pct"]))) >= AI_MOVE_MIN_PCT]
     return sorted(big, key=lambda m: abs(m["change_pct"]), reverse=True)[:AI_MOVERS]
 
 

@@ -117,13 +117,16 @@ def compute_state(db: Session, user: User, md: MarketData, account_id: str | Non
     quotes = md.quotes(list(grouped)) if grouped else {}
     is_demo = False
     as_of_candidates: list[datetime] = []
+    us_as_of: list[datetime] = []
     for sym, row in grouped.items():
         row.quote = quotes.get(sym)
         row.fx = fx.latest(row.currency)
         if row.quote is not None:
             is_demo |= row.quote.is_demo
             if row.quote.as_of:
-                as_of_candidates.append(row.quote.as_of)
+                # A US close is stamped 16:00 New York (04:00 / 05:00 the next morning in Taipei): it must not make
+                # the Taiwan prices of a mixed portfolio look a day newer than they are
+                (us_as_of if market_of_symbol(sym) == "US" else as_of_candidates).append(row.quote.as_of)
         elif md.demo_data_allowed:
             is_demo = True  # valued at cost: not a real price (commercial: price is null, nothing synthetic)
         for pos in led.open_positions():
@@ -133,7 +136,7 @@ def compute_state(db: Session, user: User, md: MarketData, account_id: str | Non
     if fx.used_usd and fx.is_demo:
         is_demo = True
     rows = sorted(grouped.values(), key=lambda r: r.market_value, reverse=True)
-    as_of = max(as_of_candidates) if as_of_candidates else now_taipei()
+    as_of = max(as_of_candidates or us_as_of) if (as_of_candidates or us_as_of) else now_taipei()
     return PortfolioState(inp, led, rows, fx, is_demo, as_of, md.demo_data_allowed)
 
 
@@ -159,6 +162,8 @@ def holdings(state: PortfolioState) -> list[dict[str, Any]]:
             "cost_basis": ser.money(r.cost_twd),
             "price": ser.price(r.price),
             "prev_close": ser.price(q.prev_close) if q else None,
+            # the session of the price (a US close: the New York date)
+            "price_date": q.trade_date.isoformat() if q and q.trade_date and r.price is not None else None,
             "market_value": ser.money(mv),
             "day_change": ser.money(dc),
             "day_change_pct": ser.ratio(dc / (mv - dc)) if mv - dc else None,
@@ -440,7 +445,9 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         base = max((i for i, p in enumerate(points) if p.unpriced), default=-1) + 1
         if base >= ei:  # fewer than two fully priced closes: nothing honest to show yet
             us = sorted({m for p in points for m in p.unpriced if market_of_symbol(m) == "US"})
-            if us:
+            if us and md.us_prices_served():  # US closes exist (Databento): this one has none yet (just added)
+                notes.append(f"{'、'.join(us)}：還沒有收盤價，績效算不出來")
+            elif us:
                 notes.append(f"{'、'.join(us)}：{US_NOTE}，含美股的績效算不出來")
             if len(points) < 2 or any(market_of_symbol(m) != "US" for p in points for m in p.unpriced):
                 notes.append(f"{accumulating_note(md)}；持股期間有幾天沒有收盤價，績效算不出來")

@@ -75,6 +75,15 @@ class Settings(BaseSettings):
     # deletes every such row.
     price_history_source: Literal["", "yahoo"] = ""
     price_history_years: int = Field(default=5, ge=1, le=10)
+    # US end-of-day prices (product owner, 2026-11-15: Databento, chosen without asking Databento about display rights
+    # first; docs/research/us-market-data.md). "" (default): no US price is fetched and US rows are never read.
+    # "databento" with DATABENTO_API_KEY: the worker stores EQUS.SUMMARY daily bars (official consolidated closes,
+    # unadjusted, from 2024-07-01) of every tracked US symbol plus SPY / DIA / ONEQ in ``prices_daily`` (source
+    # ``databento-equs``; ``forliosa.us_prices``), an hour after the US close, and backfills newly tracked symbols.
+    us_price_source: Literal["", "databento"] = ""
+    # Databento's historical API key (HTTP Basic: the key is the user name, the password is empty). Metered by the
+    # bytes returned; never logged.
+    databento_api_key: SecretStr | None = None
     # TAIFEX OpenAPI datasets the open-data inventory marks ``conditional`` (no matching data.gov.tw OGDL
     # dataset found: 期貨／選擇權每日交易行情, 每日外幣參考匯率, 選擇權大額交易人 …) are archived but, under
     # DATA_POLICY=commercial, NOT shown to users until the owner has TAIFEX's written confirmation and sets
@@ -205,6 +214,8 @@ class Settings(BaseSettings):
     news_view_days: int = Field(default=3, ge=1)
     news_max_symbols_per_run: int = Field(default=150, ge=1)
     news_gdelt_enabled: bool = True
+    # The market page's US market news: one more GDELT request per refresh (stored under "^US"; 產品負責人 2026-11-15)
+    news_us_market: bool = True
     news_gdelt_interval_seconds: float = Field(default=6.0, ge=5.0)  # GDELT: one request every 5 s per IP
     # AI web search fills gaps: only for a symbol whose free sources gave fewer than NEWS_AI_MIN_ITEMS headlines in
     # the last 7 days, at most once per NEWS_AI_INTERVAL_HOURS per symbol, paid by the system (feature "news" in
@@ -313,7 +324,8 @@ class Settings(BaseSettings):
     def _frontend_origin(cls, v: str | None) -> str | None:
         return v.rstrip("/") if v else v
 
-    @field_validator("discord_client_secret", "google_client_secret", "telegram_bot_token", mode="before")
+    @field_validator("discord_client_secret", "google_client_secret", "telegram_bot_token", "databento_api_key",
+                     mode="before")
     @classmethod
     def _blank_secret(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
@@ -372,6 +384,17 @@ class Settings(BaseSettings):
         if self.frontend_url:
             return self.frontend_url
         return self.cors_origins[0] if self.cors_origins else "http://localhost:5173"
+
+    @property
+    def us_prices_served(self) -> bool:
+        """US_PRICE_SOURCE=databento: stored US closes are read (the API needs no key; only the worker fetches)."""
+        return self.us_price_source == "databento"
+
+    @property
+    def us_prices_enabled(self) -> bool:
+        """US_PRICE_SOURCE=databento with a key: the worker fetches US closes."""
+        return self.us_price_source == "databento" and bool(
+            self.databento_api_key and self.databento_api_key.get_secret_value().strip())
 
     @property
     def telegram_available(self) -> bool:

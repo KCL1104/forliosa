@@ -31,12 +31,14 @@ def test_parse_csv_keeps_priced_rows_with_the_session_date():
     bars = db.parse_csv(CSV)
     assert [(b.symbol, b.date, b.close) for b in bars] == [
         ("AAPL", date(2026, 11, 12), Decimal("354.8800")), ("AAPL", date(2026, 11, 13), Decimal("356.2700")),
-        ("BRK.B", date(2026, 11, 13), Decimal("592.9400"))]
+        ("BRK-B", date(2026, 11, 13), Decimal("592.9400"))]
     assert bars[0].high == Decimal("359.3684") and bars[0].volume == 31874978
 
 
 def test_us_symbols_skips_taiwan_and_duplicates():
-    assert db.us_symbols(["aapl", "2330.TW", "6488.TWO", "AAPL", " brk.b ", "", "BAD SYM"]) == ["AAPL", "BRK.B"]
+    mixed = ["aapl", "2330.TW", "6488.TWO", "AAPL", " brk.b ", "BRK-B", "", "BAD SYM"]
+    assert db.us_symbols(mixed) == ["AAPL", "BRK-B"]
+    assert (db.db_symbol("BRK-B"), db.our_symbol("BRK.B")) == ("BRK.B", "BRK-B")
 
 
 def test_unresolved_symbols_from_the_warning_header():
@@ -55,7 +57,7 @@ def test_daily_bars_caps_the_end_sends_basic_auth_and_reports_unknown_symbols(mo
         return httpx.Response(206, text=CSV, headers={
             "X-Warning": '["Warning: The streaming request had one or more symbols which did not resolve: ZZZZQ."]'})
 
-    r = db.daily_bars(fake(handler), ["AAPL", "BRK.B", "ZZZZQ", "2330.TW"], date(2020, 1, 1), date(2026, 11, 30))
+    r = db.daily_bars(fake(handler), ["AAPL", "BRK-B", "ZZZZQ", "2330.TW"], date(2020, 1, 1), date(2026, 11, 30))
     assert len(r.bars) == 3 and r.unresolved == ["ZZZZQ"]
     get = seen[-1]
     assert get.url.params["symbols"] == "AAPL,BRK.B,ZZZZQ"

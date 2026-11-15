@@ -40,6 +40,7 @@ from forliosa.marketdata.catalog import (
     ETF_CODES,
     FALLBACK_TW_STOCKS,
     TW_ETFS,
+    US_ETF_CODES,
     US_TICKERS,
     DemoSpec,
     default_spec,
@@ -314,7 +315,7 @@ class DemoProvider(BaseProvider):
     # -- fundamentals --------------------------------------------------------------------------
     def valuation_inputs(self, symbol: str) -> ValuationInputs | None:
         code = code_of_symbol(symbol)
-        if code.startswith("00") or symbol in ("VOO", "QQQ"):
+        if code.startswith("00") or symbol in US_ETF_CODES:
             return None  # ETFs have no EPS / book value
         spec = self._spec(symbol)
         _, anchor = self._anchor(symbol)

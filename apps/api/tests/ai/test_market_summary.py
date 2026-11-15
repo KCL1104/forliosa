@@ -216,6 +216,10 @@ def test_page_visit_starts_one_background_generation(client, pool, fake, monkeyp
     started: list = []
     monkeypatch.setattr(ms, "spawn", lambda job, name: started.append(job))
     monkeypatch.setattr(ms, "summary_day", lambda now=None: DAY)
+    # the request carries no clock: pin it, or the sources' "hours ago" ages count from the real today (they fell
+    # outside the report window once the real date was 3 days past DAY)
+    monkeypatch.setattr(ms, "now_utc", lambda: NOW)
+    monkeypatch.setattr(ms, "now_taipei", lambda: NOW.astimezone(ms.TAIPEI))
     answer(fake, "加權指數收漲 1%", GOOD)
     first = client.get(f"{API}/market/overview").json()
     assert first["summary"] is None and len(started) == 1 and fake.requests == []  # off the request thread

@@ -145,8 +145,10 @@ def _aware(dt: datetime) -> datetime:
 
 
 def overview(db: Session) -> dict[str, Any]:
+    from forliosa import us_prices
+
     return {"users": users_summary(db), "ai": ai_summary(db), "datasets": datasets_summary(db),
-            "history_backfill": backfill_summary(db), "news": news_summary(db)}
+            "history_backfill": backfill_summary(db), "us_prices": us_prices.summary(db), "news": news_summary(db)}
 
 
 # -- news takedown blocklist --------------------------------------------------------------------------------

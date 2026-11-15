@@ -273,11 +273,14 @@ def get_holdings(ctx: ToolContext, args: dict[str, Any]) -> Any:
     for h in rows:
         row = _currency_named(_pick(h, *keys))
         row["has_quote"] = h.get("price") is not None
+        if h.get("price_date"):
+            row["price_date"] = h["price_date"]
         holdings.append(row)
     return {"as_of": iso_taipei(state.as_of), "count": len(rows), "count_by_market": dict(by_market),
             "holdings": holdings,
             "notes": ["*_twd 欄位是新台幣（美股也已換算成新台幣）；*_native 欄位是該商品的原幣（見 currency）；"
-                      "quantity 為股數（1 張 = 1000 股）；has_quote 為 false 表示沒有報價，不要推測漲跌",
+                      "quantity 為股數（1 張 = 1000 股）；has_quote 為 false 表示沒有報價，不要推測漲跌；"
+                      "美股的 price_native 是美元、紐約交易日的收盤（price_date）",
                       *svc.fx_tool_notes(state.fx)]}
 
 
@@ -1035,9 +1038,9 @@ TOOLS: list[ToolSpec] = sorted([
              ("kind", "symbols", "range"), draw_chart, lambda a: _CHART_LABELS.get(a.get("kind"), "畫圖")),
     ToolSpec("search_instruments",
              "Find Taiwan or US stocks/ETFs by code or (partial) Chinese/English name. Call this when the user names "
-             "a company you cannot map to a code with certainty. US companies other than AAPL/NVDA/VOO/QQQ only have "
-             "their English name, so search them in English. has_quote false means there is no price: never guess "
-             "one.",
+             "a company you cannot map to a code with certainty. Most US companies only have their English name, so "
+             "search them in English. US prices are daily closes of the New York session; has_quote false means "
+             "there is no price: never guess one.",
              {"query": {"type": "string", "description": "Code or name, e.g. 台積, 0056, NVDA"}},
              ("query",), search_instruments, lambda a: f"搜尋商品「{a.get('query', '')}」"),
     ToolSpec("draft_transaction",

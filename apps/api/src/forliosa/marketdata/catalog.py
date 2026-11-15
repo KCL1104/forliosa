@@ -59,7 +59,13 @@ US_TICKERS: list[InstrumentInfo] = [
     _us("NVDA", "NVIDIA", "stock", "半導體", ("輝達", "NVIDIA Corporation")),
     _us("VOO", "Vanguard S&P 500 ETF", "etf", "ETF", ("標普500", "S&P 500")),
     _us("QQQ", "Invesco QQQ Trust", "etf", "ETF", ("那斯達克100", "Nasdaq 100")),
+    # The market page's US row (forliosa.us_prices.MARKET_ETFS): typed as ETFs here (SEC's ticker list calls every
+    # listing a stock), named as the funds they are
+    _us("SPY", "SPDR S&P 500 ETF Trust", "etf", "ETF", ("標普500", "S&P 500")),
+    _us("DIA", "SPDR Dow Jones Industrial Average ETF Trust", "etf", "ETF", ("道瓊", "Dow Jones")),
+    _us("ONEQ", "Fidelity Nasdaq Composite Index ETF", "etf", "ETF", ("那斯達克綜合", "Nasdaq Composite")),
 ]
+US_ETF_CODES = frozenset(i.code for i in US_TICKERS if i.type == "etf")
 
 # Offline fallback when shioaji-data is unreachable (tests, CI): a few large caps.
 FALLBACK_TW_STOCKS: list[InstrumentInfo] = [

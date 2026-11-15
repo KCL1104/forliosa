@@ -40,7 +40,7 @@ from forliosa.marketdata.catalog import KNOWN_SPLITS
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.http import HttpFetcher
 from forliosa.marketdata.indices import INDICES, resolve_index
-from forliosa.timeutil import last_tw_trading_day, market_close_dt
+from forliosa.timeutil import close_dt, last_tw_trading_day
 
 log = logging.getLogger(__name__)
 T = TypeVar("T")
@@ -268,9 +268,18 @@ class MarketData:
         return [info for _, info in scored[:limit]]
 
     def has_quote(self, info: InstrumentInfo) -> bool:
-        """Whether any quote source covers the instrument's market under the policy: US stocks have none under
-        ``commercial`` (no commercially usable US price source; personal mode fills them with demo prices)."""
-        return info.market != "US" or self.demo_data_allowed
+        """Whether any quote source covers the instrument's market under the policy: US stocks have stored Databento
+        closes while US_PRICE_SOURCE=databento (``forliosa.us_prices``); otherwise none under ``commercial``
+        (personal mode fills them with demo prices)."""
+        return info.market != "US" or self.demo_data_allowed or self.us_prices_served()
+
+    def us_prices_served(self) -> bool:
+        archive = next((p for p in self.providers if p.name == "archive"), None)
+        fn = getattr(archive, "us_served", None)
+        try:
+            return bool(fn()) if fn is not None else False
+        except Exception:  # pragma: no cover - settings unreadable
+            return False
 
     def profile(self, symbol: str) -> InstrumentProfile:
         """Merged across real providers, highest priority first: the archive's official company data (issued
@@ -320,12 +329,12 @@ class MarketData:
                     else:
                         partial[s] = _merge_quotes(cur, q)
             final: dict[str, QuoteData] = {}
-            # Commercial mode only has after-close data: whatever a provider reports, a Taiwan quote's time is the
-            # close of the session its price belongs to, and no quote is real-time.
+            # Commercial mode only has after-close data: whatever a provider reports, a quote's time is the close of
+            # the session its price belongs to (13:30 Taipei; 16:00 New York for a US close), and none is real-time.
             closes_only = self.policy == "commercial"
             for s, q in partial.items():
-                if q.trade_date is not None and (q.as_of is None or (closes_only and market_of_symbol(s) != "US")):
-                    q = replace(q, as_of=market_close_dt(q.trade_date))
+                if q.trade_date is not None and (q.as_of is None or closes_only):
+                    q = replace(q, as_of=close_dt(s, q.trade_date))
                 if closes_only and q.is_realtime:
                     q = replace(q, is_realtime=False)
                 final[s] = q
@@ -583,13 +592,18 @@ class MarketData:
             return None
 
     def archive_since(self, symbol: str | None = None) -> date | None:
-        """First archived trading day (of ``symbol``, else of any symbol) usable under the policy."""
+        """First archived trading day of ``symbol`` usable under the policy; without one (or a Taiwan symbol with no
+        row yet), where the Taiwan archive begins. A US symbol with no row has none: its closes come from a separate
+        backfill, not from the archive's daily runs."""
         archive = next((p for p in self.providers if p.name == "archive"), None)
         fn = getattr(archive, "first_date", None)
         if fn is None:
             return None
         try:
-            return (fn(symbol) if symbol else None) or fn(None)
+            own = fn(symbol) if symbol else None
+            if own is None and symbol and market_of_symbol(symbol) == "US":
+                return None
+            return own or fn(None)
         except Exception:  # the archive is optional (e.g. no database yet)
             return None
 

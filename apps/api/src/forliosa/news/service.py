@@ -288,6 +288,69 @@ def item_out(h: Headline) -> dict[str, Any]:
             "url": h.url, "category": "media", "date_only": h.date_only, "sources": labels([key])}
 
 
+# -- the US market's headlines (the market page's US row) ------------------------------------------------------------
+# One GDELT request per refresh for US market news, stored under this key (not a symbol: it never resolves to an
+# instrument) and shown on the market page (產品負責人 2026-11-15). US and UK English outlets, like US stocks.
+US_MARKET_KEY = "^US"
+US_MARKET_TERMS = ("Wall Street", "S&P 500", "Dow Jones", "Nasdaq")
+US_MARKET_LIMIT = 6
+
+
+def market_query(since: datetime, until: datetime) -> Query:
+    return Query(symbol=US_MARKET_KEY, code="", name="美股", market="US", english=US_MARKET_TERMS,
+                 terms=make_terms("", "", US_MARKET_TERMS), since=since, until=until)
+
+
+def market_items(db: Session, md: MarketData, *, settings: Settings | None = None, now: datetime | None = None,
+                 limit: int = US_MARKET_LIMIT) -> list[dict[str, Any]]:
+    """The newest US market headlines (metadata only, links to the outlets), blocked domains left out."""
+    settings = settings or get_settings()
+    if not settings.news_enabled:
+        return []
+    now = now or now_utc()
+    blocked = blocked_domains(db, settings)
+    rows = db.scalars(select(NewsArticle).where(NewsArticle.symbol == US_MARKET_KEY,
+                                                NewsArticle.published_at >= now - timedelta(days=3))
+                      .order_by(NewsArticle.published_at.desc()).limit(limit * 4))
+    heads = [Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
+                      source=r.source, date_only=bool(r.date_only)) for r in rows]
+    heads = [h for h in heads if _source_served(h.source, md.policy) and not is_blocked(h.url, blocked)
+             and not (h.domain and is_blocked(h.domain, blocked))]
+    return [item_out(h) for h in dedupe(heads)[:limit]]
+
+
+def _refresh_market(db: Session, src: NewsSource, now: datetime, report: RefreshReport,
+                    blocked: Sequence[str], settings: Settings) -> bool:
+    """One GDELT request for US market news. False when GDELT refused (paused like any other refusal)."""
+    st = _state(db, src.key, US_MARKET_KEY)
+    since = max(now - WINDOW, _aware(st.last_success_at) - OVERLAP) if st.last_success_at else now - WINDOW
+    q = market_query(since, now)
+    st.last_attempt_at = now
+    report.fetched[src.key] = report.fetched.get(src.key, 0) + 1
+    try:
+        raw = src.fetch(q)
+    except (SourceBlocked, SourceDown) as exc:
+        down = isinstance(exc, SourceDown)
+        st.last_status = "unreachable" if down else "blocked"
+        db.commit()
+        _mark_blocked(db, src.key, now, str(exc), BACKOFF_START if down else backoff_start(src.key, settings),
+                      status="unreachable" if down else "rate_limited", until=getattr(exc, "until", None))
+        return False
+    except Exception as exc:  # a bad answer: try again next run
+        report.errors += 1
+        st.last_status, st.failures = "error", (st.failures or 0) + 1
+        db.commit()
+        log.warning("news gdelt for the US market failed: %s", str(exc)[:200])
+        return True
+    heads = to_headlines(raw, q, src.key, blocked)
+    report.stored += store(db, US_MARKET_KEY, heads, now)
+    st = _state(db, src.key, US_MARKET_KEY)
+    st.last_success_at, st.last_status, st.items, st.failures = now, "ok" if heads else "empty", len(heads), 0
+    db.commit()
+    _mark_open(db, src.key, now)
+    return True
+
+
 def media_items(db: Session, md: MarketData, info: InstrumentInfo, *, settings: Settings | None = None,
                 now: datetime | None = None, extra: Iterable[Headline] = (), limit: int = MEDIA_LIMIT
                 ) -> list[dict[str, Any]]:
@@ -526,10 +589,15 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         ai = None
     elif ai == "default":
         ai = default_ai(settings)
+    market_run = symbols is None and settings.news_us_market  # the worker's and the CLI's run, not a test's list
     symbols = tracked(db, settings, now) if symbols is None else symbols
     blocked = blocked_domains(db, settings)
     open_sources = [s for s in sources if _source_open(db, s.key, now)]
     report.blocked_sources = [s.key for s in sources if s not in open_sources]
+    gdelt = next((s for s in open_sources if s.key == "gdelt"), None)
+    if market_run and gdelt is not None and not _refresh_market(db, gdelt, now, report, blocked, settings):
+        open_sources.remove(gdelt)
+        report.blocked_sources.append(gdelt.key)
     gdelt_on = any(s.key == "gdelt" for s in sources)
     failures: dict[str, int] = {}
     ai_runner: Any = None

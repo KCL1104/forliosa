@@ -83,7 +83,8 @@ def pending(db: Session, now: datetime | None = None) -> list[str]:
     """Symbols still to ask, the ones people hold or watch first."""
     now = now or now_utc()
     firsts = official_first_dates(db)
-    seen = {r.symbol: r for r in db.scalars(select(PriceBackfill))}
+    # ``price_backfill`` also holds the US price backfill's progress (``forliosa.us_prices``): only this source's rows
+    seen = {r.symbol: r for r in db.scalars(select(PriceBackfill).where(PriceBackfill.source == HISTORY_SOURCE))}
     todo = []
     for sym in firsts:
         r = seen.get(sym)
@@ -206,7 +207,8 @@ def run_batch(db: Session, http: HttpFetcher, years: int = 5, limit: int | None 
 
 
 def summary(db: Session) -> dict[str, int]:
-    counts = dict(db.execute(select(PriceBackfill.status, func.count()).group_by(PriceBackfill.status)).all())
+    counts = dict(db.execute(select(PriceBackfill.status, func.count()).where(PriceBackfill.source == HISTORY_SOURCE)
+                             .group_by(PriceBackfill.status)).all())
     counts["rows"] = db.scalar(select(func.count()).select_from(PriceDaily)
                                .where(PriceDaily.source == HISTORY_SOURCE)) or 0
     counts["pending"] = len(pending(db))
@@ -214,9 +216,10 @@ def summary(db: Session) -> dict[str, int]:
 
 
 def drop(db: Session) -> int:
-    """Delete every backfilled candle and the bookkeeping. Official rows are untouched."""
+    """Delete every backfilled candle and the bookkeeping. Official rows and the US price backfill (Databento) are
+    untouched."""
     n = db.execute(delete(PriceDaily).where(PriceDaily.source == HISTORY_SOURCE)).rowcount or 0
-    db.execute(delete(PriceBackfill))
+    db.execute(delete(PriceBackfill).where(PriceBackfill.source == HISTORY_SOURCE))
     db.execute(delete(DatasetStatus).where(DatasetStatus.key == STATUS_KEY))
     db.commit()
     return n

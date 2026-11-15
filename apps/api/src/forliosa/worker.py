@@ -86,7 +86,7 @@ import logging
 import signal
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
-from datetime import datetime, time, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -109,10 +109,10 @@ from forliosa.datapolicy import allowed_sources
 from forliosa.db import get_engine, session_factory
 from forliosa.market_calendar import load_official_calendar
 from forliosa.marketdata.base import ProviderUnavailable
-from forliosa.marketdata.http import HttpFetcher
+from forliosa.marketdata.http import HttpFetcher, HttpStatusError
 from forliosa.marketdata.service import LISTING_DATASETS, MarketData, get_market_data
 from forliosa.models import Instrument, PriceDaily
-from forliosa.timeutil import TAIPEI, is_tw_trading_day, now_taipei
+from forliosa.timeutil import TAIPEI, is_tw_trading_day, last_us_session, now_taipei, us_close_dt
 
 log = logging.getLogger("forliosa.worker")
 
@@ -130,6 +130,11 @@ WEEKLY_GROUPS = ["tdcc", "weekly"]
 MONTHLY_GROUPS = ["monthly"]
 MONTHLY_DAYS = (10, 25)
 SEC_GROUPS = ["sec"]
+# US closes (forliosa.us_prices): an hour after the close, then hourly; give up 20 hours later (a US holiday).
+US_CLOSE_DELAY = timedelta(hours=1)
+US_CLOSE_POLL_SECONDS = 3600
+US_CLOSE_GIVE_UP = timedelta(hours=20)
+US_BACKFILL_SECONDS = 600
 
 
 @dataclass
@@ -295,6 +300,14 @@ class Worker:
         if settings.price_history_source == "yahoo":
             self.jobs.append(Job("price_backfill", every(PRICE_BACKFILL_SECONDS), self.price_backfill,
                                  background=True))
+        # US closes (US_PRICE_SOURCE=databento; 產品負責人 2026-11-15: an hour after the US close, not the next
+        # morning): from 17:00 New York, hourly until the session is stored; newly tracked symbols every 10 minutes.
+        self._us_stored: date | None = None
+        self._us_wait_until: datetime | None = None
+        self._us_refusals = 0
+        if settings.us_prices_enabled:
+            self.jobs.append(Job("us_closes", self._us_closes_due, self.us_closes, background=True))
+            self.jobs.append(Job("us_backfill", every(US_BACKFILL_SECONDS), self.us_backfill, background=True))
 
     async def archive(self, groups: list[str]) -> None:
         def run() -> list:
@@ -469,6 +482,80 @@ class Worker:
         if res.asked or res.blocked:
             log.info("price backfill: asked %d symbols, stored %d (%d rows), %d left%s", res.asked, res.stored,
                      res.rows, res.remaining, "; the source refused, waiting" if res.blocked else "")
+
+    def _us_closes_due(self, now: datetime, last: datetime | None) -> bool:
+        """From an hour after a US session's close (17:00 New York), once an hour until that session is stored; given
+        up 20 hours later (a US holiday has no session to wait for)."""
+        session = last_us_session(now, after=US_CLOSE_DELAY)
+        if self._us_stored is not None and self._us_stored >= session:
+            return False
+        if now > us_close_dt(session) + US_CLOSE_DELAY + US_CLOSE_GIVE_UP:
+            return False
+        if self._us_wait_until is not None and now < self._us_wait_until:
+            return False
+        return last is None or now - last >= timedelta(seconds=US_CLOSE_POLL_SECONDS)
+
+    async def us_closes(self) -> None:
+        from forliosa import us_prices
+
+        fetcher = us_prices.http()
+        if fetcher is None:
+            return
+
+        def run():
+            with session_factory()() as db:
+                return us_prices.update(db, fetcher, now=self.now_fn())
+
+        try:
+            res = await asyncio.to_thread(run)
+        except HttpStatusError as exc:
+            self._us_refused(exc)
+            return
+        except ProviderUnavailable as exc:
+            log.warning("US closes: Databento unavailable (%s)", exc)
+            return
+        self._us_refusals = 0
+        self._us_stored = res.stored
+        if not res.skipped:
+            log.info("US closes: %d rows of %d symbols, newest session %s", res.rows, res.symbols, res.stored)
+
+    async def us_backfill(self) -> None:
+        from forliosa import us_prices
+
+        now = self.now_fn()
+        if self._us_wait_until is not None and now < self._us_wait_until:
+            return
+        fetcher = us_prices.http()
+        if fetcher is None:
+            return
+
+        def run():
+            with session_factory()() as db:
+                if not us_prices.pending(db):  # a database read; nothing is asked of Databento
+                    return None
+                return us_prices.backfill(db, fetcher, deadline_seconds=US_BACKFILL_SECONDS * 0.8)
+
+        try:
+            res = await asyncio.to_thread(run)
+        except ProviderUnavailable as exc:
+            log.warning("US price backfill: Databento unavailable (%s)", exc)
+            return
+        if res is None:
+            return
+        if res.blocked:
+            self._us_refused(None)
+            return
+        self._us_refusals = 0
+        log.info("US price backfill: asked %d symbols, %d stored (%d rows), %d unknown, %d left", res.asked,
+                 res.stored, res.rows, len(res.not_found), res.remaining)
+
+    def _us_refused(self, exc: HttpStatusError | None) -> None:
+        """Databento refused (bad key, credit used up): both US jobs wait 30 minutes, doubling up to 6 hours."""
+        self._us_refusals += 1
+        wait = min(PRICE_BACKFILL_REFUSED_SECONDS * 2 ** (self._us_refusals - 1), 6 * 3600)
+        self._us_wait_until = self.now_fn() + timedelta(seconds=wait)
+        log.warning("US prices: Databento refused%s; waiting %d minutes",
+                    f" ({exc.status})" if exc is not None else "", wait // 60)
 
     async def daily_briefings(self) -> None:
         from forliosa.ai import briefing

@@ -192,6 +192,9 @@ class Quote(BaseModel):
     low: float | None
     volume: int | None
     as_of: str | None
+    # The session the price belongs to (YYYY-MM-DD). A US close is the New York date: its as_of is 16:00 New York,
+    # which is the next morning in Taipei.
+    trade_date: str | None = None
     is_realtime: bool
     is_demo: bool
     source: str
@@ -449,6 +452,7 @@ class Holding(BaseModel):
     cost_basis: float
     price: float | None
     prev_close: float | None
+    price_date: str | None = None  # the session of ``price`` (YYYY-MM-DD; a US close: the New York date)
     market_value: float
     day_change: float
     day_change_pct: float | None
@@ -877,6 +881,7 @@ class Why(BaseModel):
     headline: str | None
     reasons: list[WhyReason]
     as_of: str | None
+    trade_date: str | None = None  # the session of the move (a US close: the New York date)
     sources: list[str] = []
 
 
@@ -1229,6 +1234,27 @@ class MarketAnnouncements(BaseModel):
     items: list[MarketAnnouncement]  # latest first, at most 30
 
 
+class MarketUsEtf(BaseModel):
+    """One ETF of the US row (Databento closes; shown as the ETF, never as the index it tracks)."""
+
+    key: str  # spy | dia | oneq
+    symbol: str  # SPY | DIA | ONEQ (opens the stock page)
+    name: str
+    tracks: str  # the index it tracks, in words: S&P 500 | 道瓊工業指數 | 那斯達克綜合指數
+    unit: str  # 美元
+    value: float | None
+    change: float | None
+    change_pct: float | None  # fraction
+    date: date  # the US session's date (New York)
+    sparkline: list[MarketSparkPoint]
+
+
+class MarketUs(BaseModel):
+    date: date | None  # the newest US session among the items (null: headlines only)
+    items: list[MarketUsEtf]  # empty while US closes are off (US_PRICE_SOURCE) or not stored yet
+    news: list[NewsItem] = []  # the newest US market headlines (GDELT; metadata only, links to the outlets)
+
+
 class MarketOverview(BaseModel):
     as_of: date | None
     indices: list[MarketIndex]
@@ -1236,6 +1262,8 @@ class MarketOverview(BaseModel):
     sectors: MarketSectors | None
     movers: MarketMovers | None
     announcements: MarketAnnouncements | None
+    # The US row: SPY, DIA, ONEQ closes (US_PRICE_SOURCE=databento); null while off or nothing is stored yet
+    us: MarketUs | None = None
     is_demo: bool
     notes: list[str]
     sources: list[str]

@@ -31,6 +31,7 @@ from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.datapolicy import dataset_served, labels, source_clause
+from forliosa.marketdata.archive_provider import US_SOURCE
 from forliosa.marketdata.base import code_of_symbol, market_of_symbol
 from forliosa.marketdata.cbc import FX_DATASET, PAIR
 from forliosa.marketdata.cbc import SOURCE as CBC_SOURCE
@@ -64,6 +65,11 @@ def clear_cache() -> None:
 
 def _official(stmt, column, md: MarketData):
     return stmt.where(source_clause(column, md.policy))
+
+
+def _tw_prices(stmt, md: MarketData):
+    """Official Taiwan closes only: US closes (``forliosa.us_prices``) share ``prices_daily`` but not its days."""
+    return _official(stmt, PriceDaily.source, md).where(PriceDaily.source != US_SOURCE)
 
 
 # -- indices ----------------------------------------------------------------------------------------------------
@@ -161,7 +167,7 @@ def _ranking_day(db: Session, md: MarketData) -> date | None:
         DatasetStatus.key.in_(("twse-openapi/price", "tpex-openapi/price")))) if d is not None]
     if len(days) == 2:
         return min(days)
-    return db.scalar(_official(select(func.max(PriceDaily.date)), PriceDaily.source, md))
+    return db.scalar(_tw_prices(select(func.max(PriceDaily.date)), md))
 
 
 def _entry(md: MarketData, symbol: str, close: Decimal, base: Decimal, volume: int | None) -> dict[str, Any]:
@@ -180,13 +186,13 @@ def _movers(db: Session, md: MarketData) -> dict[str, Any] | None:
         hit = _movers_cache.get((day, md.policy))
     if hit is not None:
         return hit
-    prev = db.scalar(_official(select(func.max(PriceDaily.date)).where(PriceDaily.date < day), PriceDaily.source, md))
-    today_rows = db.execute(_official(select(PriceDaily.symbol, PriceDaily.close, PriceDaily.volume)
-                                      .where(PriceDaily.date == day), PriceDaily.source, md)).all()
+    prev = db.scalar(_tw_prices(select(func.max(PriceDaily.date)).where(PriceDaily.date < day), md))
+    today_rows = db.execute(_tw_prices(select(PriceDaily.symbol, PriceDaily.close, PriceDaily.volume)
+                                       .where(PriceDaily.date == day), md)).all()
     prev_close: dict[str, Decimal] = {}
     if prev is not None:
-        prev_close = dict(db.execute(_official(select(PriceDaily.symbol, PriceDaily.close)
-                                               .where(PriceDaily.date == prev), PriceDaily.source, md)).all())
+        prev_close = dict(db.execute(_tw_prices(select(PriceDaily.symbol, PriceDaily.close)
+                                                .where(PriceDaily.date == prev), md)).all())
     refs = dict(db.execute(_official(select(ReferencePrice.symbol, ReferencePrice.reference_price)
                                      .where(ReferencePrice.date == day), ReferencePrice.source, md)).all())
     rows = []
@@ -251,6 +257,39 @@ def _clock(raw: Any) -> str | None:
     return f"{digits[:2]}:{digits[2:4]}"
 
 
+# -- US ETFs (forliosa.us_prices) ---------------------------------------------------------------------------------
+# The market page's US row (產品負責人 2026-11-15): ETFs, shown as themselves, never as the indices they track
+# (index values are licensed separately by S&P Dow Jones Indices and Nasdaq).
+US_ROW = (("SPY", "S&P 500"), ("DIA", "道瓊工業指數"), ("ONEQ", "那斯達克綜合指數"))
+
+
+def _us_item(db: Session, md: MarketData, symbol: str, tracks: str) -> dict[str, Any] | None:
+    stmt = (select(PriceDaily).where(PriceDaily.symbol == symbol, PriceDaily.source == US_SOURCE)
+            .order_by(PriceDaily.date.desc()).limit(SPARK_POINTS + 1))
+    rows = list(db.scalars(_official(stmt, PriceDaily.source, md)))[::-1]
+    if not rows:
+        return None
+    last = rows[-1]
+    change = last.close - rows[-2].close if len(rows) > 1 else None
+    pct = change / rows[-2].close if change is not None and rows[-2].close else None
+    info = md.instrument(symbol)
+    return {"key": symbol.lower(), "symbol": symbol, "name": info.name if info else symbol, "tracks": tracks,
+            "unit": "美元", "value": ser.price(last.close), "change": ser.price(change), "change_pct": ser.ratio(pct),
+            "date": last.date, "sparkline": [{"t": r.date, "v": ser.price(r.close)} for r in rows[-SPARK_POINTS:]]}
+
+
+def _us(db: Session, md: MarketData, now: datetime | None = None) -> dict[str, Any] | None:
+    """SPY, DIA and ONEQ closes (the US session's date; while US closes are served) and the newest US market headlines
+    (GDELT); ``None`` when there is neither."""
+    from forliosa.news import service as news
+
+    items = [i for i in (_us_item(db, md, s, t) for s, t in US_ROW) if i is not None] if md.us_prices_served() else []
+    heads = news.market_items(db, md, now=now)
+    if not items and not heads:
+        return None
+    return {"date": max(i["date"] for i in items) if items else None, "items": items, "news": heads}
+
+
 # -- the response -----------------------------------------------------------------------------------------------
 def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[str, Any]:
     from forliosa.ai import market_summary
@@ -259,6 +298,7 @@ def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[s
     sectors = _sectors(db, md, taiex_day)
     movers = _movers(db, md)
     announcements = _announcements(db, md)
+    us = _us(db, md, now)
     market_summary.ensure(db, now)
     summary = market_summary.latest(db, now)
     sources = [*index_sources]
@@ -266,6 +306,10 @@ def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[s
         sources += ["twse-openapi/price", "tpex-openapi/price"]
     if announcements:
         sources += announcements.pop("sources")
+    if us and us["items"]:
+        sources.append(f"{US_SOURCE}/price")
+    if us and us["news"]:
+        sources.append("gdelt/doc")
     as_of = max((d for d in (taiex_day, movers["date"] if movers else None) if d is not None), default=None)
     empty = not indices and not movers and not announcements
     return {
@@ -275,6 +319,7 @@ def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[s
         "sectors": sectors,
         "movers": movers,
         "announcements": announcements,
+        "us": us,
         "is_demo": False,
         "notes": [NO_DATA_NOTE] if empty else [],
         "sources": labels(dict.fromkeys(sources)),

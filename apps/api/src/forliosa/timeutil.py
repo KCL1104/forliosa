@@ -86,6 +86,31 @@ def is_us_trading_day(d: date) -> bool:
     return d.weekday() < 5
 
 
+NEW_YORK = ZoneInfo("America/New_York")
+US_CLOSE = time(16, 0)
+
+
+def us_close_dt(d: date) -> datetime:
+    """16:00 New York on session date ``d`` (04:00 or 05:00 the next morning in Taipei, by daylight saving)."""
+    return datetime.combine(d, US_CLOSE, NEW_YORK)
+
+
+def close_dt(symbol: str, d: date) -> datetime:
+    """When session ``d`` of ``symbol``'s market closed: 13:30 Taipei, or 16:00 New York for a US symbol."""
+    from forliosa.marketdata.base import market_of_symbol
+
+    return us_close_dt(d) if market_of_symbol(symbol) == "US" else market_close_dt(d)
+
+
+def last_us_session(now: datetime, after: timedelta = timedelta(0)) -> date:
+    """The latest weekday (New York) whose close plus ``after`` has passed at ``now``. US holidays are not known
+    here: on one, the stored bars simply have no row for that date."""
+    d = now.astimezone(NEW_YORK).date()
+    while d.weekday() >= 5 or us_close_dt(d) + after > now:
+        d -= timedelta(days=1)
+    return d
+
+
 @lru_cache(maxsize=64)
 def _tw_days(start: date, end: date) -> tuple[date, ...]:
     out = []
