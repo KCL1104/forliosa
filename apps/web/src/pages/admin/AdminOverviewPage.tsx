@@ -1,6 +1,6 @@
 import { useState } from "react"
 import { useAdminOverview } from "@/api/discussion-queries"
-import type { AdminDataset, AdminKeySlot, AdminOverview, BackfillStatus } from "@/api/types"
+import type { AdminDataset, AdminKeySlot, AdminNews, AdminNewsSource, AdminOverview, BackfillStatus } from "@/api/types"
 import { Section, Stat } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
@@ -10,7 +10,7 @@ import { cn } from "@/lib/utils"
 import { AdminPage } from "./AdminPage"
 
 /**
- * 管理後台的總覽（`/admin`）：使用者人數、AI 金鑰、各資料集的最新資料日期、歷史日線回補。
+ * 管理後台的總覽（`/admin`）：使用者人數、AI 金鑰、各資料集的最新資料日期、新聞來源、歷史日線回補。
  * 只有數字與狀態：沒有 email、user id，金鑰只有槽號與 workspace id。不自動重抓——按「重新載入」。
  */
 export function AdminOverviewPage() {
@@ -45,6 +45,7 @@ function Overview() {
       </Section>
       <KeySlots ai={o.ai} />
       <Datasets rows={o.datasets} />
+      <NewsSources n={o.news} />
       <Backfill b={o.history_backfill} />
     </>
   )
@@ -146,6 +147,43 @@ function DatasetRow({ r }: { r: AdminDataset }) {
       </div>
     </li>
   )
+}
+
+/** 新聞來源（2026-11-15）：每個來源照常、暫停（到什麼時候、為什麼）或沒有開，最近一次有回答、過去 24 小時存了幾則 */
+function NewsSources({ n }: { n: AdminNews }) {
+  const aside = n.enabled ? `每 ${n.refresh_minutes} 分鐘整理一次${n.last_run_at ? `・上次 ${formatDateTime(n.last_run_at)}` : ""}` : "沒有開"
+  return (
+    <Section title="新聞來源" titleId="admin-news" aside={aside} bodyClassName="pt-0">
+      <ul aria-label="新聞來源">
+        {n.sources.map((s) => (
+          <li key={s.key} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 border-b border-rule py-3">
+            <span className="font-medium">{s.name}</span>
+            <span className={cn("text-md", s.state === "paused" ? "font-medium text-ink" : "text-ink-2")}>{sourceState(s)}</span>
+            {s.state !== "off" && <span className="num ml-auto text-ink">過去 24 小時 {formatNumber(s.new_24h)} 則</span>}
+            {s.state !== "off" && <p className="num w-full text-sm text-ink-2">{sourceMeta(s, n)}</p>}
+          </li>
+        ))}
+      </ul>
+    </Section>
+  )
+}
+
+const PAUSE_WORD: Record<"rate_limited" | "blocked" | "unreachable", string> = { rate_limited: "限流中", blocked: "被拒", unreachable: "連不上" }
+
+function sourceState(s: AdminNewsSource): string {
+  if (s.state === "off") return "沒有開"
+  if (s.state === "ok") return "正常"
+  if (s.reason === "budget") return "本月預算用完"
+  const word = PAUSE_WORD[s.reason ?? "blocked"]
+  return s.paused_until ? `${word}，${formatDateTime(s.paused_until)} 再試` : word
+}
+
+function sourceMeta(s: AdminNewsSource, n: AdminNews): string {
+  const parts = [s.last_success_at ? `上次有回答 ${formatDateTime(s.last_success_at)}` : "還沒有回答過"]
+  if (s.key === "ai_search") parts.push(`本月 ${usd(n.ai_month_cost_usd)}／預算 ${usd(n.ai_budget_usd)}`)
+  if (s.key === "searxng" && n.paused_engines.length > 0)
+    parts.push(`暫停的引擎：${n.paused_engines.map((e) => `${e.engine}（到 ${formatDateTime(e.until)}）`).join("、")}`)
+  return parts.join("・")
 }
 
 const BACKFILL_LABEL: [BackfillStatus, string][] = [

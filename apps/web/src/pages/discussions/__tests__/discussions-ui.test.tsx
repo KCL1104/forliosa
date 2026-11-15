@@ -673,6 +673,18 @@ describe("管理後台：只有站方管理員", () => {
     expect(backfill).toHaveTextContent("和存檔對不上9 檔")
   })
 
+  it("總覽的新聞來源（2026-11-15）：限流中的來源寫到什麼時候再試，其他照常的寫上次有回答與 24 小時存了幾則", async () => {
+    mount()
+    renderApp("/admin")
+    const news = await screen.findByRole("list", { name: "新聞來源" }, T)
+    expect([...news.children].map((li) => li.textContent)).toEqual([
+      "GDELT限流中，11/12 13:42 再試過去 24 小時 0 則上次有回答 11/10 09:12",
+      "SearXNG正常過去 24 小時 7 則上次有回答 11/12 10:57・暫停的引擎：bing news（到 11/12 12:27）",
+      "AI 搜尋正常過去 24 小時 0 則還沒有回答過・本月 US$0.00／預算 US$30.00",
+    ])
+    expect(screen.getByText("每 45 分鐘整理一次・上次 11/12 11:42")).toBeInTheDocument()
+  })
+
   it("新聞下架：封鎖先確認（網址也行，存成網域）、刪掉的標題數；寫在伺服器設定的不能解除；解除先確認", async () => {
     const user = userEvent.setup()
     mount()

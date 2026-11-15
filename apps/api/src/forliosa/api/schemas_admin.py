@@ -59,11 +59,44 @@ class AdminBackfill(BaseModel):
     symbols: dict[str, int] = Field(description="各狀態的代號數：done、not_found、mismatch、no_overlap、error")
 
 
+NewsSourceState = Literal["ok", "paused", "off"]
+
+
+class AdminNewsSource(BaseModel):
+    """One news source: on or off, paused after a refusal (until when, why), when it last answered, what it added."""
+
+    key: str = Field(description="gdelt | searxng | ai_search | yahoo_rss")
+    name: str
+    state: NewsSourceState = Field(description="ok：照常問；paused：暫停中（paused_until 或預算）；off：沒有開")
+    paused_until: str | None = Field(description="暫停到什麼時候（+08:00）；不是暫停或沒有期限時是 null")
+    reason: Literal["rate_limited", "blocked", "unreachable", "budget"] | None = Field(
+        description="暫停的原因：限流（429）、拒絕（封鎖、每個引擎都暫停）、連不上、本月 AI 預算用完")
+    last_success_at: str | None = Field(description="最近一次有回答的時間（+08:00）")
+    new_24h: int = Field(description="過去 24 小時存進來的新標題數")
+
+
+class AdminNewsEngine(BaseModel):
+    engine: str = Field(description="SearXNG 的上游引擎，例如 \"bing news\"")
+    until: str = Field(description="暫停到什麼時候（+08:00）")
+
+
+class AdminNews(BaseModel):
+    enabled: bool = Field(description="NEWS_ENABLED")
+    refresh_minutes: int = Field(description="多久整理一次（分鐘）")
+    last_run_at: str | None = Field(description="最近一次向任何來源問新聞的時間（+08:00）")
+    new_24h: int = Field(description="過去 24 小時存進來的新標題數（全部來源）")
+    sources: list[AdminNewsSource]
+    paused_engines: list[AdminNewsEngine] = Field(description="暫停中的 SearXNG 上游引擎")
+    ai_month_cost_usd: float = Field(description="本月（UTC）新聞 AI 搜尋的估計費用")
+    ai_budget_usd: float = Field(description="NEWS_AI_BUDGET_USD")
+
+
 class AdminOverview(BaseModel):
     users: AdminUsers
     ai: AdminAi
     datasets: list[AdminDataset]
     history_backfill: AdminBackfill
+    news: AdminNews
 
 
 class BlockedDomain(BaseModel):

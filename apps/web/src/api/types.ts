@@ -1361,6 +1361,32 @@ export interface AdminOverview {
   ai: { month: string; slots: AdminKeySlot[] }
   datasets: AdminDataset[]
   history_backfill: { enabled: boolean; rows: number; pending: number; symbols: Record<BackfillStatus, number> }
+  news: AdminNews
+}
+/** 新聞來源的狀態（2026-11-15）：時間都是 +08:00 */
+export interface AdminNewsSource {
+  key: "gdelt" | "searxng" | "ai_search" | "yahoo_rss"
+  name: string
+  /** ok：照常問；paused：暫停中；off：沒有開 */
+  state: "ok" | "paused" | "off"
+  paused_until: string | null
+  /** 暫停的原因：限流（429）、拒絕、連不上、本月 AI 預算用完 */
+  reason: "rate_limited" | "blocked" | "unreachable" | "budget" | null
+  last_success_at: string | null
+  /** 過去 24 小時存進來的新標題數 */
+  new_24h: number
+}
+export interface AdminNews {
+  enabled: boolean
+  refresh_minutes: number
+  last_run_at: string | null
+  new_24h: number
+  sources: AdminNewsSource[]
+  /** 暫停中的 SearXNG 上游引擎 */
+  paused_engines: { engine: string; until: string }[]
+  /** 本月（UTC）新聞 AI 搜尋的估計費用與預算 */
+  ai_month_cost_usd: number
+  ai_budget_usd: number
 }
 /** 新聞下架的封鎖清單：存在資料庫的（新的在前），再來是寫在伺服器設定（NEWS_BLOCKED_DOMAINS）的 */
 export interface BlockedDomain {

@@ -8,7 +8,7 @@ Nothing here returns an email, a user id or key material: user numbers are count
 from __future__ import annotations
 
 import re
-from datetime import date, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 from sqlalchemy import func, select
@@ -21,7 +21,8 @@ from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import Settings, get_settings
 from forliosa.datapolicy import DATASETS, history_backfill_enabled, label
 from forliosa.market_calendar import load_official_calendar
-from forliosa.models import DatasetStatus, NewsBlockedDomain, User
+from forliosa.models import DatasetStatus, NewsArticle, NewsBlockedDomain, NewsFetchState, User
+from forliosa.news import ai_search as news_ai
 from forliosa.news import service as news
 from forliosa.news.normalize import normalize_domain
 from forliosa.timeutil import iso_taipei, now_utc, today_taipei, tw_trading_days
@@ -89,9 +90,63 @@ def backfill_summary(db: Session) -> dict[str, Any]:
             "symbols": {s: int(counts.get(s, 0)) for s in BACKFILL_STATUSES}}
 
 
+def news_summary(db: Session, now: datetime | None = None, policy: str | None = None) -> dict[str, Any]:
+    """The news sources as the worker sees them (``news_fetch_state``): each source on or off, paused after a refusal
+    (the source-wide row ``symbol = "*"``), when it last answered a symbol, and how many headlines it stored in the
+    last 24 hours. Counts and times only."""
+    settings = get_settings()
+    now = now or now_utc()
+    policy = policy or settings.data_policy
+    since = now - timedelta(hours=24)
+    stored = dict(db.execute(select(NewsArticle.source, func.count()).where(NewsArticle.fetched_at >= since)
+                             .group_by(NewsArticle.source)).all())
+    rows = list(db.scalars(select(NewsFetchState)))
+    wide = {r.source: r for r in rows if r.symbol == news.SOURCE_WIDE}
+    per_symbol = [r for r in rows if r.symbol != news.SOURCE_WIDE and not r.symbol.startswith(news.ENGINE_PREFIX)]
+    last_ok: dict[str, datetime] = {}
+    for r in per_symbol:
+        if r.last_success_at is not None:
+            last_ok[r.source] = max(last_ok.get(r.source, r.last_success_at), r.last_success_at)
+    attempts = [r.last_attempt_at for r in per_symbol if r.last_attempt_at is not None]
+    ai_spent = news_ai.month_spend(db, now)
+    ai_on = settings.news_ai_enabled and settings.news_ai_budget_usd > 0
+    searxng_on = bool(settings.news_searxng_enabled and settings.searxng_url)
+    configured = [("gdelt", settings.news_gdelt_enabled), ("searxng", searxng_on), ("ai_search", ai_on)]
+    if policy == "personal":
+        configured.append(("yahoo_rss", settings.news_yahoo_rss))
+    sources = []
+    for key, on in configured:
+        row = wide.get(key)
+        until = _aware(row.backoff_until) if row is not None and row.backoff_until is not None else None
+        paused = on and until is not None and until > now
+        reason = (row.last_status if row.last_status in ("rate_limited", "blocked", "unreachable") else "blocked") \
+            if paused and row is not None else None
+        if on and not paused and key == "ai_search" and not news_ai.budget_left(db, settings, now):
+            paused, reason = True, "budget"
+        sources.append({"key": key, "name": news.SOURCE_INFO[key][0],
+                        "state": "off" if not on else "paused" if paused else "ok",
+                        "paused_until": iso_taipei(until) if paused and until is not None else None,
+                        "reason": reason, "last_success_at": iso_taipei(last_ok[key]) if key in last_ok else None,
+                        "new_24h": int(stored.get(key, 0))})
+    engines = sorted(
+        ({"engine": r.symbol[len(news.ENGINE_PREFIX):], "until": iso_taipei(_aware(r.backoff_until))}
+         for r in rows if r.source == "searxng" and r.symbol.startswith(news.ENGINE_PREFIX)
+         and r.backoff_until is not None and _aware(r.backoff_until) > now),
+        key=lambda e: e["engine"])
+    return {"enabled": settings.news_enabled, "refresh_minutes": settings.news_refresh_minutes,
+            "last_run_at": iso_taipei(max(attempts)) if attempts else None,
+            "new_24h": int(sum(stored.values())), "sources": sources, "paused_engines": engines,
+            "ai_month_cost_usd": float(round(ai_spent, 4)), "ai_budget_usd": float(settings.news_ai_budget_usd)}
+
+
+def _aware(dt: datetime) -> datetime:
+    """SQLite returns naive datetimes: they are UTC."""
+    return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
+
+
 def overview(db: Session) -> dict[str, Any]:
     return {"users": users_summary(db), "ai": ai_summary(db), "datasets": datasets_summary(db),
-            "history_backfill": backfill_summary(db)}
+            "history_backfill": backfill_summary(db), "news": news_summary(db)}
 
 
 # -- news takedown blocklist --------------------------------------------------------------------------------

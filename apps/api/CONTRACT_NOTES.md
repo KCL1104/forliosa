@@ -2192,3 +2192,11 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - `ChatTurn._call`：串流迴圈丟出例外（`GeneratorExit`、上游錯誤）時，從 `stream.current_message_snapshot.usage` 記一列 `ai_usage`（`stop_reason="interrupted"`）；沒有開始的訊息就不記。
 - `ai_usage.stop_reason` 加寬到 40（PostgreSQL 才改欄位；SQLite 不檢查長度）。
 - `suggestions.stock_questions`：「為什麼漲／跌」的方向用 `price` 對 `change_base(quote)`；收盤價的日子不是今天時寫那一天（「11/13」），和 `ledger_questions` 的 `_day_lead` 一樣。
+
+## 2026-11-15 管理後台的新聞來源（`services.admin.news_summary`）
+
+- 暫停：`news_fetch_state` 的來源列（`symbol = "*"`）`backoff_until` 還沒到；原因照那一列的 `last_status`（`rate_limited`、`blocked`、`unreachable`）。AI 搜尋沒有來源列：本月預算用完（`ai_search.budget_left` 是 false）時算 `paused`、`reason: "budget"`、`paused_until: null`。
+- 沒有開：GDELT 看 `NEWS_GDELT_ENABLED`；SearXNG 看 `NEWS_SEARXNG_ENABLED` 與網址；AI 搜尋看 `NEWS_AI_ENABLED` 與預算大於 0；Yahoo股市只在個人模式列出。
+- `last_success_at`：那個來源各代號列（不含 `*` 與 `@引擎`）最新的 `last_success_at`；`last_run_at`：各代號列最新的 `last_attempt_at`。
+- `new_24h`：`news_articles.fetched_at` 在 24 小時內、依 `source` 分組的筆數。
+- 暫停的引擎：SearXNG 的 `@引擎` 列 `backoff_until` 還沒到的。

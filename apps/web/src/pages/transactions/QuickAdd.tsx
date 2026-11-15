@@ -225,8 +225,10 @@ function PickStep({
         </div>
         <CommandPrimitive.List
           id={listId}
+          // relative：列裡面螢幕報讀器才讀的字（漲跌的「上漲」）是絕對定位，沒有這個的話會跑出清單的捲動範圍，
+          // 把整個對話框撐高，可以往下捲到一大片空白（2026-11-15 產品負責人回報）
           className={cn(
-            "mt-2 overscroll-contain",
+            "relative mt-2 overscroll-contain",
             !sheet && "h-[min(20rem,calc(100dvh-20rem))] overflow-y-auto",
             "[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1 [&_[cmdk-group-heading]]:text-sm [&_[cmdk-group-heading]]:text-ink-2",
           )}

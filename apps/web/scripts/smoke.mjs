@@ -267,6 +267,23 @@ await check("帳本工具列的「記一筆」（2026-11-14 照 Google 財經）
   await dialog.waitFor({ state: "detached", timeout: 4000 })
 })
 
+await check("記一筆的對話框不能往下捲到一片空白（搜尋結果裡螢幕報讀器才讀的字不會撐高對話框；2026-11-15）", async () => {
+  await page.setViewportSize({ width: 1280, height: 640 })
+  try {
+    await page.goto(base + "/", { waitUntil: "networkidle" })
+    await page.getByRole("button", { name: "記一筆", exact: true }).click()
+    const dialog = page.getByRole("dialog")
+    await dialog.getByRole("group", { name: "持有的" }).waitFor()
+    await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2")
+    await dialog.getByRole("group", { name: "搜尋結果" }).waitFor()
+    const { scroll, client } = await dialog.evaluate((el) => ({ scroll: el.scrollHeight, client: el.clientHeight }))
+    if (scroll > client + 1) throw new Error(`the dialog scrolls past its content: ${scroll} > ${client}`)
+    await page.keyboard.press("Escape")
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 })
+  }
+})
+
 await check("減少持股：持倉那一列的選單（加碼・減少持股・全部賣出）→ 只填股數 → 用最新的收盤價記成賣出", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   await page.getByRole("button", { name: "鴻海的動作" }).click()

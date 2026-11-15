@@ -93,6 +93,21 @@ export function createAdminStore(deps: AdminDeps) {
         },
         datasets: datasets(),
         history_backfill: { enabled: true, rows: 1_843_220, pending: 12, symbols: { done: 1702, not_found: 37, mismatch: 9, no_overlap: 4, error: 0 } },
+        // 2026-11-15 的實際情形：GDELT 限流中、SearXNG 照常、AI 搜尋沒有用到
+        news: {
+          enabled: true,
+          refresh_minutes: 45,
+          last_run_at: "2026-11-12T11:42:33+08:00",
+          new_24h: 7,
+          sources: [
+            { key: "gdelt", name: "GDELT", state: "paused", paused_until: "2026-11-12T13:42:23+08:00", reason: "rate_limited", last_success_at: "2026-11-10T09:12:05+08:00", new_24h: 0 },
+            { key: "searxng", name: "SearXNG", state: "ok", paused_until: null, reason: null, last_success_at: "2026-11-12T10:57:23+08:00", new_24h: 7 },
+            { key: "ai_search", name: "AI 搜尋", state: "ok", paused_until: null, reason: null, last_success_at: null, new_24h: 0 },
+          ],
+          paused_engines: [{ engine: "bing news", until: "2026-11-12T12:27:19+08:00" }],
+          ai_month_cost_usd: 0,
+          ai_budget_usd: 30,
+        },
       }
     },
 

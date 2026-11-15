@@ -1277,7 +1277,7 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}}` |
+| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd"}}` |
 | GET | `/admin/news/blocked-domains` | `[{"domain", "reason", "created_at", "from_env"}]`：存在資料庫的（新的在前），再來是只寫在 `NEWS_BLOCKED_DOMAINS` 的（`created_at` null、`from_env` true） |
 | POST | `/admin/news/blocked-domains` | `{"domain", "reason"?: ≤200 字}` → 201 `{"domain", "deleted_headlines"}`：網域正規化（小寫、網址只取主機、去掉 `www.`），封鎖它與子網域並刪掉已存的標題；不是網域 → 422 |
 | DELETE | `/admin/news/blocked-domains/{domain}` | 解除 → 204；寫在 `NEWS_BLOCKED_DOMAINS` 的 → 409 `set_in_environment`；不在清單 → 404。刪掉的標題不會回來 |
@@ -1388,3 +1388,11 @@
 - **5 日走勢**（`range=5D`）：往前找一個月，取最後 5 個交易日（過年後原本只有 0–4 天）。
 - **AI 每天的提問次數**：`GET /ai/usage` 的 `messages_today` 改從 `ai_questions` 算（每問一題一列，刪掉對話也還在），刪除對話不會把當天的次數還回去。
 - **中斷的 AI 呼叫也記用量**：串流到一半中斷（關掉頁面、上游出錯）時，已經用掉的 token 記一列 `ai_usage`（`stop_reason: "interrupted"`），算進每把金鑰與每個人的每月預算。
+
+## 2026-11-15 管理後台：新聞來源
+
+`GET /admin/overview` 多一個 `news`：每個新聞來源（`gdelt`、`searxng`、`ai_search`；個人模式多 `yahoo_rss`）的
+`state`（`ok` 照常問／`paused` 暫停中／`off` 沒有開）、`paused_until`（暫停到什麼時候，+08:00）、`reason`
+（`rate_limited` 限流、`blocked` 被拒、`unreachable` 連不上、`budget` 本月 AI 預算用完）、`last_success_at`
+（最近一次有回答）、`new_24h`（過去 24 小時存進來的新標題數）；另有暫停中的 SearXNG 上游引擎、本月新聞 AI 搜尋的費用與預算、
+多久整理一次與最近一次整理的時間。只有數字與時間。

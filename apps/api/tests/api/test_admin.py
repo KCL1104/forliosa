@@ -204,3 +204,57 @@ def test_view_as_cannot_use_the_back_office(app, admin, client):
     r = admin.delete(f"{BLOCKED}/cna.com.tw", headers=h)
     assert r.status_code == 403 and error(r) == "read_only"
     assert [b["domain"] for b in admin.get(BLOCKED).json()] == ["cna.com.tw"]
+
+
+# -- news sources (2026-11-15) ----------------------------------------------------------------------------------
+def test_overview_shows_each_news_source(engine, admin):
+    """GDELT paused after a 429 (until when), SearXNG answering with today's headlines and one engine paused, the AI
+    search with this month's spend against its budget; counts and times only."""
+    from datetime import UTC, datetime
+
+    from forliosa.models import NewsFetchState
+
+    now = now_utc()
+    with Session(engine) as db:
+        db.add_all([
+            NewsFetchState(source="gdelt", symbol="*", last_status="rate_limited", failures=3,
+                           last_attempt_at=now - timedelta(minutes=5), backoff_until=now + timedelta(hours=2)),
+            NewsFetchState(source="gdelt", symbol="2330.TW", last_status="blocked",
+                           last_attempt_at=now - timedelta(minutes=5),
+                           last_success_at=datetime(2026, 11, 10, 1, 0, tzinfo=UTC)),
+            NewsFetchState(source="searxng", symbol="2330.TW", last_status="ok", items=4,
+                           last_attempt_at=now - timedelta(minutes=4), last_success_at=now - timedelta(minutes=4)),
+            NewsFetchState(source="searxng", symbol="@bing news", last_status="refused", failures=1,
+                           backoff_until=now + timedelta(hours=1)),
+            NewsFetchState(source="searxng", symbol="@google news", last_status="ok"),
+        ])
+        for n in range(3):
+            a = article("2330.TW", f"https://news.example.com/{n}", "news.example.com", 100 + n)
+            a.source = "searxng"
+            db.add(a)
+        old = article("2330.TW", "https://news.example.com/old", "news.example.com", 200)
+        old.fetched_at = now - timedelta(days=2)
+        db.add(old)
+        db.add(AiUsage(user_id=None, feature="news", model="claude-haiku", key_slot=1, cost_usd=Decimal("1.25")))
+        db.commit()
+    news = admin.get(f"{ADMIN}/overview").json()["news"]
+    by = {s["key"]: s for s in news["sources"]}
+    assert [s["key"] for s in news["sources"]] == ["gdelt", "searxng", "ai_search"]  # Yahoo RSS: personal only
+    assert by["gdelt"]["state"] == "paused" and by["gdelt"]["reason"] == "rate_limited"
+    assert by["gdelt"]["paused_until"].endswith("+08:00")
+    assert by["gdelt"]["last_success_at"].startswith("2026-11-10T09:00")
+    assert (by["searxng"]["state"], by["searxng"]["new_24h"], by["searxng"]["reason"]) == ("ok", 3, None)
+    assert by["ai_search"]["state"] == "ok"
+    assert news["new_24h"] == 3
+    assert [e["engine"] for e in news["paused_engines"]] == ["bing news"]
+    assert news["ai_month_cost_usd"] == pytest.approx(1.25)
+    assert news["last_run_at"].endswith("+08:00")
+
+
+def test_news_sources_that_are_switched_off_say_so(engine, admin, monkeypatch):
+    monkeypatch.setattr(get_settings(), "news_gdelt_enabled", False)
+    monkeypatch.setattr(get_settings(), "news_ai_budget_usd", 0.0)
+    news = admin.get(f"{ADMIN}/overview").json()["news"]
+    by = {s["key"]: s for s in news["sources"]}
+    assert by["gdelt"]["state"] == "off" and by["ai_search"]["state"] == "off"
+    assert news["last_run_at"] is None and news["new_24h"] == 0
