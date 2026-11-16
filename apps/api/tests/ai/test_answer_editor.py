@@ -146,7 +146,15 @@ def test_a_sentence_about_a_source_left_out_may_go_with_its_numbers():
 
 
 @pytest.mark.parametrize(("draft", "fixed"), [
-    ("11/11 公告 115 年第 3 季每股虧損 0.74 元。", "11/11 公告 第 3 季每股虧損 0.74 元。"),
+    # the space before a year that goes goes with it (2026-11-16: 「通過 第 3 季」 when the edit was dropped)
+    ("11/11 公告 115 年第 3 季每股虧損 0.74 元。", "11/11 公告第 3 季每股虧損 0.74 元。"),
+    ("董事會通過 115 年第 3 季合併財務報告", "董事會通過第 3 季合併財務報告"), ("- 115 年第 3 季虧損", "- 第 3 季虧損"),
+    ("Q3 115 年第 3 季", "Q3 第 3 季"),
+    # 「10 月 15 日」 is this year's 10/15 (the editor wrote it so); with a year, the year stays when it is not this one
+    ("以上都是 10 月 15 日法說會之前的目標價", "以上都是 10/15 法說會之前的目標價"), ("10月15日", "10/15"),
+    ("2025 年 10 月 15 日的報告", "2025/10/15 的報告"), ("2026 年 10 月 15 日的報告", "10/15 的報告"),
+    ("10月6日至10月7日調升", "10/6 至 10/7 調升"),
+    ("1999 年 10 月 15 日成立", "1999 年 10 月 15 日成立"), ("每年 10 月 15 日", "每年 10 月 15 日"),
     ("元富投顧 2026/10/02 發布報告", "元富投顧 10/2 發布報告"),
     ("2025/10/02 的報告", "2025/10/2 的報告"),
     ("115 年 12 月 21 日下市", "12/21 下市"), ("115年12月21日下市", "12/21 下市"), ("115/12/21 下市", "12/21 下市"),
@@ -206,3 +214,168 @@ def test_an_edit_that_drops_a_vetting_sentence_is_kept(client, pool, fake, ai_en
     _, events = chat(client, "禾榮科的目標價？")
     assert shown(events) == "元富投顧 10/2 給目標價 700 元。"
     assert not [n for n, _ in events if n == "text_reset"]
+
+
+# -- 2026-11-16, round 2: edits dropped for pasted source text, 「不列入」 and report dates; an invented unit ---------
+TODAY = date(2026, 11, 16)
+PASTED = "公司公告，11/10 15:02：本公司受邀參加永豐金證券匯立分公司舉辦之法人說明會"
+OWN = "- 11/10 公告受邀參加永豐金證券匯立分公司的法人說明會，11/12 參加。"
+
+
+def test_numbers_of_source_text_pasted_after_the_lines_own_words_may_go():
+    from forliosa.ai.chat import copied_spans, missing_numbers
+
+    draft = f"{OWN}{PASTED}\n- 11/11 董事會通過第 3 季財報。"
+    edited = f"{OWN}\n- 11/11 董事會通過第 3 季財報。"
+    assert missing_numbers(draft, edited, TODAY) == ["02", "15"]  # round 1: the edit was dropped for the 15:02
+    assert missing_numbers(draft, edited, TODAY, [PASTED]) == []
+    assert copied_spans(draft, [PASTED]) == [(len(OWN), len(OWN) + len(PASTED))]
+    # the line's own numbers still count
+    assert missing_numbers(draft, edited.replace("11/12 ", ""), TODAY, [PASTED]) == ["12"]
+    # a short match is not a paste
+    assert copied_spans("董事會通過財報", ["董事會通過財報"]) == []
+
+
+def test_a_line_that_is_only_a_paste_keeps_its_facts():
+    from forliosa.ai.chat import missing_numbers
+
+    src = "公司公告，11/10 15:02：10 月營收 197.7 萬元，年增 42.23%"
+    draft = f"- 11/10 公告營收。\n- {src}"
+    # its date and time may go, the facts written only there may not
+    assert missing_numbers(draft, "- 11/10 公告營收。\n- 10 月營收 197.7 萬元。", TODAY, [src]) == ["42.23"]
+    assert missing_numbers(draft, "- 11/10 公告營收。\n- 10 月營收 197.7 萬元，年增 42.23%。", TODAY, [src]) == []
+
+
+@pytest.mark.parametrize("sentence", [
+    "另有一家澳系外資喊 4,410 元，但報導沒寫機構名稱，所以不列入。", "一家未具名外資喊 4,410 元。",
+    "4,410 元的說法不計入。", "澳系外資 4,410 元的報告沒有寫出機構名稱。",
+])
+def test_more_vetting_sentences_may_go_with_their_numbers(sentence):
+    from forliosa.ai.chat import missing_numbers
+
+    assert missing_numbers("滙豐 10/14 調到 3,800 元。" + sentence, "滙豐 10/14 調到 3,800 元。") == []
+
+
+def test_the_rating_criteria_may_go_with_their_90():
+    from forliosa.ai.chat import missing_numbers
+
+    assert keeps_numbers("目前沒有禾榮科近 90 天內具名機構的評等與目標價資料。",
+                         "目前沒有禾榮科機構評等與目標價的資料。")
+    assert keeps_numbers("近 90 天內，具名外資的目標價多在 3,000 元以上。", "外資的目標價多在 3,000 元以上。")
+    assert missing_numbers("台積電近 90 天漲 30%。", "台積電漲 30%。") == ["90"]  # the period of a fact is a fact
+
+
+def test_a_report_date_counts_unless_the_edit_writes_it():
+    from forliosa.ai.chat import missing_numbers
+
+    draft = "- 外資持續賣超（11/15 報導）。"
+    assert keeps_numbers(draft, "- 外資 11/15 持續賣超。", TODAY)
+    assert keeps_numbers(draft, "- 外資 11 月 15 日持續賣超。", TODAY)
+    assert keeps_numbers(draft, "- 外資昨天持續賣超。", TODAY)  # today is 11/16
+    assert missing_numbers(draft, "- 外資持續賣超。", TODAY) == ["11", "15"]  # dropped with the 「報導」: caught
+
+
+def test_an_edit_that_gives_a_number_a_scale_is_caught():
+    from forliosa.ai.chat import added_scales
+
+    draft = "10 月營收 197.7 萬元，年增 42.23%；本年累計6,806去年累計6,916，年減 1.59%。"
+    assert added_scales(draft, "前十個月累計 6,806 萬元，去年同期為 6,916 萬元。") == ["6,806 萬", "6,916 萬"]
+    assert added_scales(draft, "10 月營收 197.7 萬元，前十個月累計 6,806，去年同期 6,916。") == []
+    assert added_scales("累計 6,806 千元", "累計 6,806 萬元") == ["6,806 萬"]  # 千 is not 萬
+    assert added_scales("累計 6,806 仟元", "累計 6,806 千元") == []  # 仟 is 千
+    assert added_scales("累計 6,806 千元", "累計 680.6 萬元") == []  # rescaled: a new number (the number check sees it)
+    # a table's unit is in its header
+    assert added_scales("| 營收（萬元） |\n|---|\n| 197.7 |", "營收 197.7 萬元") == []
+    assert added_scales("增資上限 5600 萬", "增資上限 5,600 萬元") == []
+
+
+def test_mops_boilerplate_and_the_site_before_a_notice_are_taken_out():
+    from forliosa.ai.chat import strip_boilerplate
+
+    footer = "完整財務業務資訊請至公開資訊觀測站之法人說明會一覽表或法說會項目下查閱。"
+    assert strip_boilerplate(f"- 11/12 受邀參加法說會。{footer}") == "- 11/12 受邀參加法說會。"
+    assert strip_boilerplate(f"11/12 受邀參加法說會，{footer}") == "11/12 受邀參加法說會。"
+    assert strip_boilerplate("- 11/10 公告。\n- 詳細內容請至公開資訊觀測站查詢。\n- 11/11 公告。") == \
+        "- 11/10 公告。\n- 11/11 公告。"
+    assert strip_boilerplate("11/10 到 11/11 共有四則公開資訊觀測站公告：") == "11/10 到 11/11 共有四則公告："
+    assert strip_boilerplate("公司在公開資訊觀測站公告增資") == "公司公告增資"
+    assert strip_boilerplate("公開資訊觀測站顯示") == "公開資訊觀測站顯示"  # the rest is the editor's
+
+
+def stored_answer(engine) -> str:
+    with Session(engine) as db:
+        return db.scalars(select(AiMessage).where(AiMessage.role == "assistant")).all()[-1].text
+
+
+def cited_turn(fake, *blocks) -> None:
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "禾榮科 公告"}),
+               web_search_result("srvtoolu_1", [{"url": "https://news.cnyes.com/a", "title": "鉅亨",
+                                                 "encrypted_content": "ENC"}]),
+               *blocks, usage={"server_tool_use": {"web_search_requests": 1}})
+
+
+def test_an_edit_that_drops_pasted_source_text_is_kept(client, pool, fake, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    cite = search_citation("https://news.cnyes.com/a", "鉅亨", PASTED)
+    cited_turn(fake, text(OWN, [cite]), text(PASTED, [cite]))
+    fake.reply(text(OWN))
+    _, events = chat(client, "禾榮科最近有什麼消息？")
+    assert shown(events) == OWN and not [n for n, _ in events if n == "text_reset"]
+
+
+def test_the_edit_gets_its_dates_fixed_and_boilerplate_dropped_too(client, pool, fake, engine, ai_env):
+    """2026-11-16: the editor wrote 「10 月 15 日」 itself, after the draft's dates had been fixed."""
+    ai_env(AI_ANSWER_EDITOR="true")
+    date_turn(fake, "元富投顧 10/15 給目標價 700 元。")
+    fake.reply(text("元富投顧 10 月 15 日給目標價 700 元。完整財務業務資訊請至公開資訊觀測站查閱。"))
+    _, events = chat(client, "禾榮科的目標價？")
+    fixed = "元富投顧 10/15 給目標價 700 元。"
+    assert shown(events) == fixed and stored_answer(engine) == fixed
+    assert [n for n, _ in events if n == "text_reset"] == ["text_reset"]  # the streamed edit is replaced once
+
+
+def test_an_edit_that_invents_a_unit_is_dropped(client, pool, fake, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    draft = "10 月營收 197.7 萬元，本年累計6,806去年累計6,916。"
+    date_turn(fake, draft)
+    fake.reply(text("10 月營收 197.7 萬元，前十個月累計 6,806 萬元，去年同期 6,916 萬元。"))
+    _, events = chat(client, "禾榮科的營收？")
+    assert shown(events) == draft
+
+
+def test_the_prompts_carry_units_recency_and_no_source_names_for_notices():
+    from forliosa.ai.prompts import CHAT_SYSTEM, EDITOR_SYSTEM
+
+    section = CHAT_SYSTEM[CHAT_SYSTEM.index("## 機構評等與目標價"):CHAT_SYSTEM.index("## 技術分析與盤中價格")]
+    for phrase in (
+        # recency: the month in the query, the newest of each institution
+        "「名稱 目標價 ○年○月」（○年○月 是「頁面情境」裡今天的年月）", "「名稱 外資 目標價 最新」",
+        "找到的都是一個月以前的，換關鍵字再搜一次最新的", "同一家機構有好幾則時只寫最新的一則",
+        # no 「所以不列入」, no criteria
+        "也不說哪一家沒列入", "所以不列入」整句都不寫", "回答裡不出現「近 90 天內」「具名機構」「具名外資」這類字",
+        "不加條件（不寫「目前沒有近 90 天內具名機構的…」）",
+    ):
+        assert phrase in section, phrase
+    for phrase in (
+        "哪一則「不列入」，也不寫篩選的條件（「近 90 天內」「具名機構」）",
+        # units from the source
+        "數字的單位照來源寫：來源標示「單位：仟元」「千元」時，寫「6,806 千元」，或正確換算成「680.6 萬元」",
+        "看不出單位的數字不寫，也不要自己補上單位",
+        # no pasted tool text, no site names for a 公告, no boilerplate, report dates in the sentence
+        "工具結果每一則開頭的「公司公告，11/10 15:02：」「鉅亨網，今天 09:12：」是給你看的出處與時間，不要抄進回答",
+        "公告也一樣不寫網站名稱：寫「11/11 公告…」", "不寫「共有四則公開資訊觀測站公告」",
+        "「完整財務業務資訊請至公開資訊觀測站…查閱」", "「10 月 15 日」", "不寫成「（10/14 報導）」",
+    ):
+        assert phrase in CHAT_SYSTEM, phrase
+    for phrase in (
+        "數字的單位照原稿：不新增、不更改單位或位數（千、萬、億、元、張、股、%），也不自己換算",
+        "原稿的數字沒有單位，就照樣不寫單位（「本年累計6,806」不可寫成「6,806 萬元」）",
+        "原稿寫「千元」就寫「千元」，不改成「萬元」",
+        "「（11/15 報導）」「（約 10/9 報導）」這類括號拿掉時，日期一定要留下，寫進句子",
+        "「公開資訊觀測站」也是網站名稱（「四則公開資訊觀測站公告」寫成「四則公告」）",
+        "叫人去網站查閱的句子（「完整財務業務資訊請至公開資訊觀測站…查閱」）刪掉",
+        # 2026-11-16 A/B: with 「公告與報導的制式文字…整句刪掉」 the edit dropped the opening sentence in 7 of 8
+        "原文條列前的第一句要留在最前面，不要刪掉，也不要改成條列",
+        "不採用、不列入、不可信", "所以不列入」", "「目前沒有機構評等與目標價的資料」",
+    ):
+        assert phrase in EDITOR_SYSTEM, phrase

@@ -46,7 +46,8 @@ Events (``event: <name>`` / ``data: <json>``):
 * ``text``      ``{delta}``
 * ``text_reset`` ``{text}`` – the whole answer of this turn so far, shown instead of what the ``text`` deltas built:
   the edit of a held-back answer streams as it is written (``ChatTurn._edit``), and when it is dropped after part of
-  it was shown (the editor failed, stopped early, ran long or lost a number) this brings back the answer as written
+  it was shown (the editor failed, stopped early, ran long or lost a number) this brings back the answer as written;
+  also after a complete edit whose dates or MOPS boilerplate were then fixed (``tidy_answer``)
 * ``tool``      ``{id, name, status: running|done|error, label}`` (``shared_research``: 「沿用 10:05 查好的資料」)
 * ``citation``  ``{url, title, cited_text}``
 * ``draft``     the draft card (see ``tools.draft_card``)
@@ -63,7 +64,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
@@ -245,20 +246,76 @@ _SOURCE_INDEX = re.compile(r"(?<![\d.])\d{1,2}\s*-\s*\d{1,2}\s*(?=(?:號|筆)?\s
 # EDITOR_SYSTEM deletes it whole, numbers and all (2026-11-16, 禾榮科: the one edit that did was dropped for
 # the missing 1418 and the draft was shown)
 _VETTING = re.compile(r"[^。！？\n]*(?:不採用|不予採用|不可信|出處(?:與日期)?都?不明|來源不明|日期不明"
-                      r"|AI ?生成|AI ?整理的?頁)[^。！？\n]*[。！？]?")
+                      r"|AI ?生成|AI ?整理的?頁|不列入|不計入|未具名|沒(?:有)?寫(?:出)?機構(?:的)?名稱"
+                      r"|未(?:寫明|寫出|註明)機構(?:的)?名稱)[^。！？\n]*[。！？]?")
+# The rating rule's own criteria written into the answer (「近 90 天內，具名外資的目標價…」,
+# 「目前沒有近 90 天內具名機構的…資料」): EDITOR_SYSTEM takes those words out, the 90 with them
+_CRITERIA = re.compile(r"(?:近|過去|最近)\s*90\s*天內?的?\s*[，、]?\s*(?=具名|的?(?:機構|外資|券商|投顧|評等|目標價))")
+# A cited source repeated word for word (2026-11-16, 禾榮科: 6 of 10 drafts pasted the cited text after their own
+# sentence, 「…法說會。公開資訊觀測站，11/10 15:02：本公司受邀參加…」, and an edit that rewrote it was dropped for the
+# 15:02): at least this many characters in a row of a citation's cited_text or title
+_MIN_COPY = 12
+_CLOCK = re.compile(r"(?<![\d:])(?:[01]?\d|2[0-3]):[0-5]\d(?![\d:])")
+_OWN_WORD = re.compile(r"[\u4e00-\u9fffA-Za-z]")  # a Chinese character or a Latin letter
 
 
-def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[str]:
+def copied_spans(text: str, sources: Iterable[str]) -> list[tuple[int, int]]:
+    """Where ``text`` repeats a source word for word (at least ``_MIN_COPY`` characters), merged, in order."""
+    spans: list[tuple[int, int]] = []
+    for src in dict.fromkeys(s for s in sources if s and len(s) >= _MIN_COPY):
+        for a, _, size in SequenceMatcher(None, text, src, autojunk=False).get_matching_blocks():
+            if size >= _MIN_COPY:
+                spans.append((a, a + size))
+    merged: list[tuple[int, int]] = []
+    for a, b in sorted(spans):
+        if merged and a <= merged[-1][1]:
+            merged[-1] = (merged[-1][0], max(b, merged[-1][1]))
+        else:
+            merged.append((a, b))
+    return merged
+
+
+def _blank_copies(draft: str, sources: Iterable[str]) -> str:
+    """``draft`` with the numbers of the source text it pasted blanked out (same length, positions kept). A paste
+    beside the line's own words (「…法說會。公開資訊觀測站，11/10 15:02：…」) repeats what the line says: all of its
+    numbers may go. A line that is nothing but a paste is the only place its facts are written: only its dates and
+    clock times may go."""
+    spans = copied_spans(draft, sources)
+    if not spans:
+        return draft
+    out = list(draft)
+    for a, b in spans:
+        line_start = draft.rfind("\n", 0, a) + 1
+        line_end = draft.find("\n", b)
+        line_end = len(draft) if line_end < 0 else line_end
+        own = draft[line_start:a] + draft[b:line_end]
+        for x, y in spans:  # other pastes on the same line are not the line's own words either
+            if (x, y) != (a, b) and line_start <= x < line_end:
+                own = own.replace(draft[x:y], "")
+        whole = len(_OWN_WORD.findall(own)) < 6
+        piece = draft[a:b]
+        if whole:
+            piece = _CLOCK.sub(lambda m: " " * len(m.group(0)), _MONTH_DAY.sub(lambda m: " " * len(m.group(0)), piece))
+        else:
+            piece = _NUMBER.sub(lambda m: " " * len(m.group(0)), piece)
+        out[a:b] = piece
+    return "".join(out)
+
+
+def missing_numbers(draft: str, edited: str, today: date | None = None, sources: Iterable[str] = ()) -> list[str]:
     """The numbers of the draft that are not in the edited answer (thousands separators aside). The editor may drop
     a stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」, 「台達電(2308-TW)」), the year
     of a date it rewrites as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」), a date in parentheses it rewrites as
     今天 or 11/16 (「今（16）日」, 「（16日）」) and, given ``today``, today's or yesterday's date when the edit says
     今天 or 昨天 (「16日09:59」, 「11/16 盤中」); also a rounded restatement of a figure the edit kept (「約 4%」 beside
-    「4.14%」), digits inside a link, a leaked search-result index (「8-1 來源」) and a sentence about a source left
-    out (「…因此不採用」). Only those spans: the same number elsewhere in the draft still counts."""
+    「4.14%」), digits inside a link, a leaked search-result index (「8-1 來源」), a sentence about a source left
+    out (「…因此不採用」, 「…沒寫機構名稱，所以不列入」), the rating rule's criteria (「近 90 天內具名機構」) and the
+    numbers of source text pasted beside the line's own words (``sources``: the turn's cited texts and titles;
+    ``_blank_copies``). Only those spans: the same number elsewhere in the draft still counts."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
     years = {m.group(0) for m in _YEAR.finditer(draft)}
-    rest = _SOURCE_INDEX.sub(" ", _URL.sub(" ", _DATE_IN_PARENS.sub(" ", _VETTING.sub(" ", draft))))
+    rest = _blank_copies(draft, sources)
+    rest = _SOURCE_INDEX.sub(" ", _URL.sub(" ", _DATE_IN_PARENS.sub(" ", _VETTING.sub(" ", _CRITERIA.sub(" ", rest)))))
     if today is not None:
         days = ([today] if _TODAY_WORDS.search(edited) else []) + \
             ([today - timedelta(days=1)] if _YESTERDAY_WORDS.search(edited) else [])
@@ -278,10 +335,30 @@ def _rounds_to(y: str, x: str) -> bool:
     return round(float(y), len(x.partition(".")[2])) == float(x)
 
 
-def keeps_numbers(draft: str, edited: str, today: date | None = None) -> bool:
+def keeps_numbers(draft: str, edited: str, today: date | None = None, sources: Iterable[str] = ()) -> bool:
     """Every number of the draft is still in the edited answer, but for the dates and codes ``missing_numbers``
     lets the editor rewrite."""
-    return not missing_numbers(draft, edited, today)
+    return not missing_numbers(draft, edited, today, sources)
+
+
+# A number with a scale (千, 萬, 億; 仟 is 千): 「6,806 千元」「13.8 億元」「1.2萬張」「197.7（萬元）」
+_SCALED = re.compile(r"(\d[\d,]*(?:\.\d+)?)\s*[（(]?\s*([仟千萬億兆])")
+
+
+def _scaled(text: str) -> set[tuple[float, str]]:
+    return {(float(m.group(1).replace(",", "")), m.group(2).replace("仟", "千")) for m in _SCALED.finditer(text)}
+
+
+def added_scales(draft: str, edited: str) -> list[str]:
+    """Numbers of the draft the edit gave a scale the draft did not (2026-11-16, 禾榮科: 「本年累計6,806」 from a
+    table in 仟元 became 「累計 6,806 萬元」, ten times too much, and the number check could not see it): the same
+    number with 千, 萬 or 億 after it in the edit, never with that scale in the draft. A number of a draft table row
+    (its unit is in the header) is left alone; a number the edit rescaled (6,806 千元 → 680.6 萬元) is a new number."""
+    had = _scaled(draft)
+    plain = {float(x) for line in draft.splitlines() if not line.lstrip().startswith("|") for x in _numbers(line)}
+    return [m.group(0) for m in _SCALED.finditer(edited)
+            if (v := float(m.group(1).replace(",", ""))) in plain
+            and (v, m.group(2).replace("仟", "千")) not in had]
 
 
 # Dates written the way CHAT_SYSTEM asks (11/13, a year only when it is not this year, no ROC year, no zero padding),
@@ -293,20 +370,28 @@ _AD_DATE = re.compile(r"(?<![\d/.])(20\d\d)(?:([/.-])(1[0-2]|0?[1-9])\2(3[01]|[1
 _ROC_DATE = re.compile(r"(?<![\d/.])(1[01]\d)(?:/(1[0-2]|0?[1-9])/(3[01]|[12]\d|0?[1-9])"
                        r"|\s*年\s*(1[0-2]|0?[1-9])\s*月\s*(3[01]|[12]\d|0?[1-9])\s*日)(?![\d/])")
 _ROC_MONTH = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*(1[0-2]|0?[1-9])\s*月(?!\s*\d)")
-_ROC_PERIOD = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*度?\s*"
+# with the space before it, which goes too when the year does (「通過 115 年第 3 季」 → 「通過第 3 季」, not
+# 「通過 第 3 季」)
+_ROC_PERIOD = re.compile(r"([ \t]*)(?<![\d/.])(1[01]\d)\s*年\s*度?\s*"
                          r"(第\s*[1-4一二三四]\s*季|前\s*[2-3二三]\s*季|[上下]\s*半\s*年)")
+# 「10 月 15 日」 without a year (the editor wrote it so, 2026-11-16): this year's date, 10/15; not after a year
+# (「1999 年 10 月 15 日」, 「每年 10 月 15 日」)
+_BARE_MD = re.compile(r"(?<![\d/.年])(?<!年 )(1[0-2]|0?[1-9])\s*月\s*(3[01]|[12]\d|0?[1-9])\s*日(?!\d)")
 _PADDED_MD = re.compile(r"(?<![\d/.:])(1[0-2]|0[1-9])/(3[01]|[12]\d|0[1-9])(?![\d/:])")
 _CJK = re.compile(r"[\u4e00-\u9fff]")  # a Chinese character
+_WIDE = re.compile(r"[\u4e00-\u9fff\u3000-\u303f\uff00-\uffef]")  # a Chinese character or full-width punctuation
 
 
 def normalize_dates(text: str, today: date) -> str:
-    """2026/10/02 → 10/2 (2025/10/02 → 2025/10/2), 2026年11月12日 → 11/12, 115 年 12 月 21 日 → 12/21, 115 年 10 月 →
-    10 月, 115 年第 3 季 → 第 3 季 (114 年度第 4 季 → 2025 年第 4 季), 10/02 → 10/2; ``today`` decides which year is
-    this year. Text inside links is left as it is."""
+    """2026/10/02 → 10/2 (2025/10/02 → 2025/10/2), 2026年11月12日 → 11/12 (2025 年 10 月 15 日 → 2025/10/15), 10 月
+    15 日 → 10/15, 115 年 12 月 21 日 → 12/21, 115 年 10 月 → 10 月, 115 年第 3 季 → 第 3 季 (114 年度第 4 季 → 2025
+    年第 4 季), 10/02 → 10/2; ``today`` decides which year is this year. Text inside links is left as it is."""
     def md(m: re.Match[str], year: int, month: str, day: str) -> str:
         text = f"{int(month)}/{int(day)}" if year == today.year else f"{year}/{int(month)}/{int(day)}"
-        # 「115年12月21日下市」 → 「12/21 下市」, like the prompt's 「11/13 收 30.5 元」
-        return text + " " if _CJK.match(m.string, m.end()) else text
+        # 「115年12月21日下市」 → 「12/21 下市」, 「10月6日至10月7日」 → 「10/6 至 10/7」, like the prompt's
+        # 「11/13 收 30.5 元」
+        before = " " if m.start() > 0 and _CJK.match(m.string, m.start() - 1) else ""
+        return before + text + (" " if _CJK.match(m.string, m.end()) else "")
 
     def ad(m: re.Match[str]) -> str:
         return md(m, int(m.group(1)), m.group(3) or m.group(5), m.group(4) or m.group(6))
@@ -318,11 +403,18 @@ def normalize_dates(text: str, today: date) -> str:
         year = int(roc_year) + 1911
         return "" if year == today.year else f"{year} 年"
 
+    def period(m: re.Match[str]) -> str:
+        year, space = year_of(m.group(2)), m.group(1)
+        if not year and space and m.start() > 0 and _WIDE.match(m.string, m.start() - 1):
+            space = ""
+        return space + year + m.group(3)
+
     def fix(part: str) -> str:
         part = _ROC_DATE.sub(roc, _AD_DATE.sub(ad, part))
         part = _ROC_MONTH.sub(lambda m: " ".join(x for x in (year_of(m.group(1)), f"{int(m.group(2))} 月") if x),
                               part)
-        part = _ROC_PERIOD.sub(lambda m: year_of(m.group(1)) + m.group(2), part)
+        part = _ROC_PERIOD.sub(period, part)
+        part = _BARE_MD.sub(lambda m: md(m, today.year, m.group(1), m.group(2)), part)
         return _PADDED_MD.sub(lambda m: f"{int(m.group(1))}/{int(m.group(2))}", part)
 
     out, pos = [], 0
@@ -330,6 +422,39 @@ def normalize_dates(text: str, today: date) -> str:
         out += [fix(text[pos:link.start()]), link.group(0)]
         pos = link.end()
     return "".join([*out, fix(text[pos:])])
+
+
+# MOPS's footer, copied from 公告 reprints (2026-11-16, 禾榮科: 「完整財務業務資訊請至公開資訊觀測站之法人說明會一覽表
+# 或法說會項目下查閱。」, kept by the editor): not a fact. The clause goes; after a comma, the sentence ends there.
+_MOPS_FOOTER = re.compile(r"(^|[。！？，；])([^。！？，；\n]*請(?:至|到|上|參閱|詳見|見)\s*公開資訊觀測站"
+                          r"[^。！？\n]*)([。！？]?)", re.MULTILINE)
+# The site named as where a 公告 was made: 「共有四則公開資訊觀測站公告」 → 「共有四則公告」,
+# 「公司在公開資訊觀測站公告」 → 「公司公告」 (CHAT_SYSTEM: no source names in sentences)
+_MOPS_NAME = re.compile(r"(?:在|於)?公開資訊觀測站(?:上)?(?:的)?(?=公告|重大訊息)")
+_EMPTY_ITEM = re.compile(r"\s*(?:[-*]|\d+\.)?\s*")
+
+
+def strip_boilerplate(text: str) -> str:
+    """The MOPS footer and the site's name before 公告 left out (``_MOPS_FOOTER``, ``_MOPS_NAME``); a list item left
+    empty goes with its line."""
+    def footer(m: re.Match[str]) -> str:
+        return m.group(3) if m.group(1) in "，；" and m.group(1) else m.group(1)
+
+    lines = []
+    for line in text.split("\n"):
+        new = _MOPS_NAME.sub("", _MOPS_FOOTER.sub(footer, line))
+        if new != line:
+            if _EMPTY_ITEM.fullmatch(new):
+                continue
+            new = new.rstrip()
+        lines.append(new)
+    return "\n".join(lines)
+
+
+def tidy_answer(text: str, today: date) -> str:
+    """The fixed rewrites of an answer that is edited (``ChatTurn._edit``): its dates (``normalize_dates``) and the MOPS
+    boilerplate (``strip_boilerplate``). Run on the draft before the editor sees it and on the edit."""
+    return strip_boilerplate(normalize_dates(text, today))
 
 
 def _editor_thinking(model: str) -> dict[str, Any]:
@@ -882,12 +1007,15 @@ class ChatTurn:
         it was shown already, a ``text_reset`` brings back the answer as written. Flagged (uncited) sentences are
         moved onto the most similar sentence of the edited answer; one without a close match is left out.
         ``state.display.text`` keeps the draft until the edit is complete, so a turn cut off meanwhile saves it. The
-        draft's dates are written the prompt's way first (``normalize_dates``): the editor gets them so, and so does the
-        answer shown as written."""
+        draft's dates are written the prompt's way and the MOPS boilerplate goes first (``tidy_answer``): the editor
+        gets it so, and so does the answer shown as written. The edit gets the same once it is complete (2026-11-16:
+        the editor wrote 「10 月 15 日」); when that changes it, a ``text_reset`` shows the result. An edit that gave a
+        number a scale the draft did not (``added_scales``: 「6,806」 → 「6,806 萬元」) is dropped as well."""
         start = state.held_from
         assert start is not None
+        today = self.now_fn().date()
         held = state.display.text[start:]
-        fixed = normalize_dates(held, self.now_fn().date())
+        fixed = tidy_answer(held, today)
         if fixed != held:  # whether or not the editor runs, and also what is shown when its edit is dropped
             flagged = remap_flags(flagged, held, fixed, start)
             state.display.text = state.display.text[:start] + fixed
@@ -920,10 +1048,17 @@ class ChatTurn:
             log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
         finally:
             pieces.close()  # the browser went away: the editor call stops too (its usage is recorded)
-        if edited is not None and (missing := missing_numbers(body, edited, self.now_fn().date())):
-            # the count only: the numbers may be the user's own amounts
-            log.warning("AI answer editor dropped %d number(s); showing the answer as written", len(missing))
-            edited = None
+        if edited is not None:
+            # the cited texts the draft may have pasted (their numbers need not stay; ``missing_numbers``)
+            sources = [normalize_dates(x, today) for c in state.display.citations
+                       for x in (c.get("cited_text"), c.get("title")) if x]
+            if missing := missing_numbers(body, edited, today, sources):
+                # the count only: the numbers may be the user's own amounts
+                log.warning("AI answer editor dropped %d number(s); showing the answer as written", len(missing))
+                edited = None
+            elif scaled := added_scales(body, edited):
+                log.warning("AI answer editor gave %d number(s) a scale; showing the answer as written", len(scaled))
+                edited = None
         timing.note(f"editor start {began:.2f} first {_s(first)} end {timing.at():.2f} "
                     f"{'edited' if edited is not None else 'as written'}")
         yield "tool", {"id": "edit", "name": "edit_answer", "status": "done", "label": "整理回答"}
@@ -934,8 +1069,10 @@ class ChatTurn:
             else:
                 yield from _stream(draft)
             return flagged
-        final = lead + edited
+        final = tidy_answer(lead + edited, today)
         state.display.text = state.display.text[:start] + final
+        if final != lead + edited:  # the edit as streamed is not what is kept: show the kept one
+            yield "text_reset", {"text": state.display.text}
         return remap_flags(flagged, draft, final, start)
 
     def _editor_stream(self, thread: AiThread, body: str) -> Iterator[str]:

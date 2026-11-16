@@ -346,5 +346,9 @@ def test_news_items_say_today_or_yesterday_and_the_time(ctx, monkeypatch):
     monkeypatch.setattr(tools, "now_utc", lambda: NOW)
     out = execute(ctx, "get_news", {"symbol": "2330"})
     texts = [b["content"][0]["text"] for b in out.content]
-    assert texts == ["鉅亨網，今天 11/16 09:12：今天早上的報導", "公開資訊觀測站，昨天 11/15：沒有時間的公告",
-                     "臺灣證券交易所，11/12 14:05：交易所新聞", "鉅亨網，11/13：只有日期的報導"]
+    assert texts == ["鉅亨網，今天 11/16 09:12：今天早上的報導", "公司公告，昨天 11/15：沒有時間的公告",
+                     "交易所公告，11/12 14:05：交易所新聞", "鉅亨網，11/13：只有日期的報導"]
+    # 出處 still names the site of a 公告
+    assert out.outlets[news[1]["url"]] == "公開資訊觀測站" and out.outlets[news[3]["url"]] == "臺灣證券交易所"
+    description = tools.TOOLS_BY_NAME["get_news"].description
+    assert "公司公告 or 交易所公告" in description and "do not copy that opening" in description

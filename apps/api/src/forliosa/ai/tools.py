@@ -837,8 +837,15 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
             return n.get("outlet") or ""
         return "公開資訊觀測站" if n.get("category") == "material_info" else "臺灣證券交易所"
 
+    def kind(n: dict[str, Any]) -> str:
+        """What the item starts with: the media outlet, or what kind of 公告 it is. Not the website of a 公告: the model
+        copied 「公開資訊觀測站，11/10 15:02：」 into its answers (2026-11-16, 禾榮科: 3 of 5; 出處 still shows it)."""
+        if n.get("category") == "media":
+            return outlet(n)
+        return "公司公告" if n.get("category") == "material_info" else "交易所公告"
+
     return Citable([{"url": n["url"], "title": n["title"], "outlet": outlet(n),
-                     "text": "，".join(x for x in (outlet(n), _news_time(n, today)) if x) + f"：{n['title']}"}
+                     "text": "，".join(x for x in (kind(n), _news_time(n, today)) if x) + f"：{n['title']}"}
                     for n in linked])
 
 
@@ -846,7 +853,7 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
 # page) while the stock page's 法人觀點 card had its own verified list: the card's entry of today, read only
 _ANALYST_NOTES = {"none": "今天還沒有人在個股頁查這一檔的法人觀點", "pending": "個股頁的法人觀點還在整理",
                   "unavailable": "個股頁的法人觀點今天沒有查到",
-                  "ready": "個股頁的法人觀點今天查過，沒有近 90 天具名機構的評等或目標價"}
+                  "ready": "個股頁的法人觀點今天查過，沒有機構的評等或目標價"}
 
 
 def _price_text(x: float) -> str:
@@ -881,7 +888,7 @@ def get_analyst_views(ctx: ToolContext, args: dict[str, Any]) -> Any:
     if not items:
         return {"symbol": info.symbol, "name": info.name, "status": views["status"],
                 "note": f"{_ANALYST_NOTES.get(views['status'], _ANALYST_NOTES['none'])}；需要時用 web_search 找近 90 天"
-                        "新聞報導裡具名機構的評等與目標價"}
+                        "新聞報導裡具名機構最新的評等與目標價（回答裡不寫「近 90 天」「具名」這些條件）"}
     today = today_taipei()
     return Citable([{"url": it["url"], "title": it.get("source_title") or info.name, "outlet": "",
                      "text": _analyst_line(it, today)} for it in items])
@@ -1250,10 +1257,11 @@ TOOLS: list[ToolSpec] = sorted([
              "Recent headlines for a stock: official announcements of a Taiwan stock (company material information "
              "and exchange news) and media headlines (the original title, outlet, time and link, found via The "
              "GDELT Project and similar indexes; titles only, no article text). The last 48 hours come first, "
-             "newest first; each item starts with its outlet and 今天/昨天 or the date, with the time when known. "
-             "Headlines with a link come back as "
+             "newest first; each item starts with its outlet (公司公告 or 交易所公告 for an announcement) and "
+             "今天/昨天 or the date, with the time when known. Headlines with a link come back as "
              "search results: cite the one a sentence relies on and the app lists its link under the answer; do not "
-             "name the outlet in the sentence and do not copy the title, write it in your own words. Search the web "
+             "name the outlet or the website (公開資訊觀測站) in the sentence, do not copy that opening "
+             "(「公司公告，11/10 15:02：」) or the title, write it in your own words (「11/10 公告…」). Search the web "
              "when the question needs more than these headlines.",
              {"symbol": _SYMBOL}, ("symbol",), get_news, _sym_label("查看 ", " 新聞")),
     ToolSpec("get_analyst_views",

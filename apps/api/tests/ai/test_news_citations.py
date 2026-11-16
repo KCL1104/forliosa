@@ -52,7 +52,8 @@ def test_news_headlines_are_citable_and_footnotes_carry_the_outlet(client, pool,
         ("search_result", "https://mops.twse.com.tw/mops/web/t05st01", {"enabled": True}),
         ("search_result", PCHOME, {"enabled": True})]
     assert blocks[1]["content"] == [{"type": "text", "text": "PChome 新聞，11/11 09:00：台揚淨值轉負 12/21 終止上市"}]
-    assert blocks[0]["content"][0]["text"].startswith("公開資訊觀測站，11/10 17:30：")
+    # a 公告 starts with what kind it is, not the website: 「公開資訊觀測站，…」 was copied into answers (2026-11-16)
+    assert blocks[0]["content"][0]["text"].startswith("公司公告，11/10 17:30：")
 
     # the citation carries the outlet, so 出處 shows 「PChome 新聞」 instead of the host
     cites = [d for n, d in events if n == "citation"]

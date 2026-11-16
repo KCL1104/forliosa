@@ -75,7 +75,7 @@ def test_todays_analyst_views_come_back_as_citable_search_results(ctx):
     ("pending", [], timedelta(minutes=1), "pending", "還在整理"),
     ("pending", [], timedelta(minutes=10), "unavailable", "今天沒有查到"),  # the generation died
     ("unavailable", [], timedelta(minutes=1), "unavailable", "今天沒有查到"),
-    ("ready", [], timedelta(hours=1), "ready", "沒有近 90 天具名機構的評等或目標價"),
+    ("ready", [], timedelta(hours=1), "ready", "沒有機構的評等或目標價"),
     ("ready", ITEMS, timedelta(hours=25), "none", "今天還沒有人在個股頁查"),  # expired
 ])
 def test_without_items_the_tool_says_so_and_points_to_web_search(ctx, status, items, age, expected, words):
@@ -87,7 +87,9 @@ def test_without_items_the_tool_says_so_and_points_to_web_search(ctx, status, it
     out = execute(ctx, "get_analyst_views", {"symbol": "2330"})
     res = json.loads(out.content)
     assert not out.is_error and res["status"] == expected and res["symbol"] == "2330.TW"
-    assert words in res["note"] and "web_search" in res["note"] and "具名機構" in res["note"]
+    assert words in res["note"] and "web_search" in res["note"] and "具名機構最新的評等與目標價" in res["note"]
+    # the criteria are for the search, not for the answer (2026-11-16: 「目前沒有禾榮科近 90 天內具名機構的…資料」)
+    assert "回答裡不寫「近 90 天」「具名」這些條件" in res["note"]
     assert rows(ctx.db) == before  # an expired or stale entry is not purged or rewritten here
 
 
@@ -119,7 +121,7 @@ def test_the_prompt_sends_rating_questions_to_the_card_first_and_drops_weak_sour
         < CHAT_SYSTEM.index("## 技術分析與盤中價格")
     section = CHAT_SYSTEM[CHAT_SYSTEM.index("## 機構評等與目標價"):CHAT_SYSTEM.index("## 技術分析與盤中價格")]
     for phrase in (
-        "先用 get_analyst_views", "再用 web_search 找近 90 天的新聞報導",
+        "先用 get_analyst_views", "再用 web_search 找近 90 天的新聞報導，要找最新的",
         "具名機構（券商、投顧、投資銀行）給的評等與目標價", "目標價彙整頁、股價行情頁、論壇、AI 整理的頁面上的數字不寫",
         "「法人」「美系外資」這類沒寫出機構名稱的不寫", "超過 90 天、出處或日期不明的也不寫",
         "不寫的就不提：不說找到幾筆（「只有一筆」）、哪一則不採用、為什麼不用",
