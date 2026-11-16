@@ -23,7 +23,7 @@ from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.models import AiUsage, DatasetStatus, GroupDailyReport, GroupPass, NotificationOutbox, Transaction
 from forliosa.services import group_daily, notifications, sharing
-from forliosa.timeutil import TAIPEI, market_close_dt, now_utc
+from forliosa.timeutil import TAIPEI, last_tw_trading_day, market_close_dt, now_utc
 from tests.api.m5 import (
     API,
     SHARE_ALL,
@@ -385,8 +385,13 @@ def _status(**dates: date | None) -> None:
         db.commit()
 
 
+def before(day: date) -> date:
+    """The trading day before ``day`` (on a Tuesday trading_day(4) is ``day`` itself: both are the Friday)."""
+    return last_tw_trading_day(day - timedelta(days=1))
+
+
 def test_waits_for_both_markets_then_the_cutoff(family, market, day):
-    prev = trading_day(4)
+    prev = before(day)
     _status(twse=day, tpex=prev, index=day)  # TPEx's official file is not in yet
     res = run(market, evening(day))
     assert res.waiting and reports(family["g"]["id"]) == []
@@ -400,7 +405,7 @@ def test_waits_for_both_markets_then_the_cutoff(family, market, day):
 
 
 def test_waits_for_the_index_until_the_cutoff(family, market, day):
-    _status(twse=day, tpex=day, index=trading_day(4))
+    _status(twse=day, tpex=day, index=before(day))
     assert run(market, evening(day)).waiting
     assert run(market, datetime.combine(day + timedelta(days=1), time(6, 40), TAIPEI)).created == 1
     _status(index=day)
