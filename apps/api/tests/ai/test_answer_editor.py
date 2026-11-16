@@ -695,9 +695,14 @@ def test_an_opening_split_into_items_keeps_its_first_half_first(draft, edited, k
     "一位不便具名的法人表示，第 4 季營收可望季增 5%。", "一位不方便具名的外資分析師指出，需求強勁。",
     "一位不肯具名的外資分析師透露，訂單滿載。", "一位拒絕具名的券商主管說，價格將上漲。",
     "一位婉拒具名的投顧老師認為，股價偏高。",
+    # round 2: a negated modal before 「具名」
+    "一位因未獲授權而無法具名的外資分析師表示，需求強勁。", "一位不能具名的外資分析師表示，需求強勁。",
+    "一位未能具名的券商主管表示，訂單滿載。", "一位不宜具名的投顧分析師認為，股價偏高。",
+    "一位不得具名的法人說，價格將上漲。", "一位要求不要具名的法人表示，需求強勁。",
 ])
 def test_more_news_wording_about_anonymity_stays(sentence):
     from forliosa.ai.chat import tidy_answer
 
     assert tidy_answer(sentence, TODAY) == sentence
     assert tidy_answer("台積電最新的具名目標價是小摩的 3,300 元。", TODAY) == "台積電最新的目標價是小摩的 3,300 元。"
+    assert tidy_answer("目前尚無具名券商的評等。", TODAY) == "目前尚無券商的評等。"
