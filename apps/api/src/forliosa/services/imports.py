@@ -77,6 +77,7 @@ FEE_MIN = Decimal(20)
 STOCK_TAX, DAY_TRADE_TAX, ETF_TAX = Decimal("0.003"), Decimal("0.0015"), Decimal("0.001")
 LOT = Decimal(1000)
 CLOSE_LOOKBACK_DAYS = 15
+MISSED_ROW = 2  # comparing two readings: a row one of them missed
 WEEKDAYS = "一二三四五六日"
 FIELD_LABELS = {"trade_date": "日期", "symbol_code": "代號", "name": "名稱", "side": "買賣", "kind": "種類",
                 "quantity": "股數", "quantity_unit": "單位", "price": "價格", "amount": "價金", "fee": "手續費",
@@ -269,15 +270,17 @@ def _arithmetic(row: _Row, info: InstrumentInfo, kind_day_trade: bool, t: str, q
         elif tw and lots and raw_qty is not None and abs(raw_qty * price - amount) <= tolerance:
             message += "，數量可能是股數，不是張數"
         row.add(_flag("amount_mismatch", message + "。"))
+    # 價金 as printed, or shares × price when that is what was misread: one misread figure gives one flag
+    bases = {amount, gross} if amount is not None else {gross}
     base = amount if amount is not None else gross
-    if tw and fee is not None and fee > max((base * FEE_RATE).to_integral_value(ROUND_FLOOR), FEE_MIN) + 1:
+    if tw and fee is not None and fee > max((max(bases) * FEE_RATE).to_integral_value(ROUND_FLOOR), FEE_MIN) + 1:
         row.add(_flag("fee_out_of_range", f"手續費 {_num(fee)} 比一般高很多。"))
     if t == "buy" and tw and tax is not None and tax > 0:
         row.add(_flag("side_inconsistent", "買進卻有交易稅，買賣可能看反了。"))
     if t == "sell" and tw and tax is not None:
         rates = (ETF_TAX, Decimal(0)) if info.type == "etf" else (STOCK_TAX, DAY_TRADE_TAX)
-        if not any(abs(tax - (base * r).to_integral_value(ROUND_FLOOR)) <= max(Decimal(1), base * r * Decimal("0.02"))
-                   for r in rates):
+        if not any(abs(tax - (b * r).to_integral_value(ROUND_FLOOR)) <= max(Decimal(1), b * r * Decimal("0.02"))
+                   for r in rates for b in bases):
             usual = ETF_TAX if info.type == "etf" else (DAY_TRADE_TAX if kind_day_trade else STOCK_TAX)
             expected = (base * usual).to_integral_value(ROUND_FLOOR)
             row.add(_flag("tax_out_of_range", f"賣出的交易稅是 {_num(tax)}，一般是成交金額的 "
@@ -377,15 +380,29 @@ class _Reading:
     totals: dict[str, Any] | None
 
     def score(self) -> int:
-        """Reading problems (lower is better): flagged rows, unreadable notes, totals that do not add up."""
-        s = sum(1 for r in self.rows for f in r.flags if f["code"] in RETRY_CODES)
+        """Reading problems (lower is better): rows with a reading flag, unreadable notes, totals that do not add up."""
+        s = sum(1 for r in self.rows if any(f["code"] in RETRY_CODES for f in r.flags))
         s += len(self.extraction.unreadable)
         return s + (3 if self.totals and self.totals["ok"] is False else 0)
 
 
+def parse_month(text: Any, last: bool) -> date | None:
+    """A month as printed (2026/10, 2026 年 10 月, 115/10 民國): its first day, or its last with ``last``."""
+    m = re.fullmatch(r"(\d{3,4})[./\-年](\d{1,2})月?", re.sub(r"\s+", "", _nfkc(text)))
+    if not m:
+        return None
+    year, month = int(m.group(1)), int(m.group(2))
+    year = year + 1911 if year < 1000 else year
+    if not 1 <= month <= 12:
+        return None
+    first = date(year, month, 1)
+    return (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1) if last else first
+
+
 def _period(ext: Extraction, today: date) -> tuple[date | None, date | None]:
-    starts = [d for d in (parse_date(s, None, today) for s in ext.period_from) if d]
-    ends = [d for d in (parse_date(s, None, today) for s in ext.period_to) if d]
+    """The statement's period; a month printed alone (``2026 年 10 月``) is that month."""
+    starts = [d for d in (parse_date(s, None, today) or parse_month(s, False) for s in ext.period_from) if d]
+    ends = [d for d in (parse_date(s, None, today) or parse_month(s, True) for s in ext.period_to) if d]
     start, end = (min(starts) if starts else None), (max(ends) if ends else None)
     return (start, end) if not (start and end and start > end) else (None, None)
 
@@ -503,9 +520,10 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
             combined += [s for s in second if set(s.pages) <= set(r.pages)] if i in need else [r]
         other = _evaluate(ctx, combined)
         n_first, n_other = len(reading.rows), len(other.rows)
-        # fewer rows read counts against a reading (a row it missed), unless the totals settle it
-        if other.score() + max(0, n_first - n_other) <= reading.score() + max(0, n_other - n_first) \
-                and any(s.ok for s in second):
+        # a row one reading has and the other does not counts against the shorter one (a missed row is worse than a
+        # flagged one: nobody sees it); ties go to the retry model
+        if other.score() + MISSED_ROW * max(0, n_first - n_other) \
+                <= reading.score() + MISSED_ROW * max(0, n_other - n_first) and any(s.ok for s in second):
             reading, used = other, retry_model
     if not any(r.ok for r in reading.results):
         failures = {r.failure for r in reading.results}

@@ -161,6 +161,12 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `AI_MARKET_SUMMARY_ENABLED` | `true` | 市場頁的 AI 收盤重點：每個交易日一則、全站共用（worker 15:05、18:05、22:05；收盤後第一次開頁面也會觸發）；不計入任何人的額度 |
 | `AI_DIGEST_ENABLED`、`AI_MODEL_DIGEST` | `true`、空 | 群組 AI 週報（worker 每週六 20:00，Message Batches；不計入任何成員的額度）；模型預設同 `AI_MODEL` |
 | `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
+| `IMPORT_STATEMENTS` | `off` | 匯入對帳單（`POST /imports/statement`；產品負責人 2026-11-16）誰能用：`off` 沒有人、`admins` 只有站方管理員（`ADMIN_EMAILS`；第一版）、`all` 所有登入的人（免費與會員一樣）。`GET /me` 的 `plan.statement_import` 照它算 |
+| `AI_MODEL_IMPORT`、`AI_EFFORT_IMPORT` | 空（＝`AI_MODEL`，`claude-haiku-5-5`）、`medium` | 讀對帳單的模型與 effort（結構化 JSON、沒有工具、一次最多 5 頁） |
+| `AI_MODEL_IMPORT_RETRY` | `claude-sonnet-5-5` | 驗算沒過、合計對不上、有沒讀清楚的地方或模型拒答時，那幾頁用這個模型再讀一次（effort low，一份約 US$0.08）；省錢模式不重讀；設成空字串＝不重讀 |
+| `IMPORT_DAILY_LIMIT` | 10 | 每人每天最多讀幾份（0＝不限）；不算每天的提問數，費用算進每月額度（`/ai/usage` 的 `imports_today`、`import_daily_limit`） |
+| `IMPORT_MAX_PAGES`、`IMPORT_MAX_BODY_MB` | 20、15 | 一次最多幾頁（圖片）、request body 最大幾 MB；超過回 413 |
+| `AI_IMPORT_MAX_TOKENS` | 16000 | 每次呼叫的 `max_tokens`（不串流；約 50 列）；答不完時把頁數切半重讀 |
 | `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |
 
 **範圍**：助理只協助投資理財、台股與美股、使用者自己的持股與交易，以及 Forliosa 的用法；寫程式、一般常識、作業、翻譯、寫作、角色扮演等要求，

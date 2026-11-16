@@ -44,7 +44,8 @@ def usage(client) -> dict:
 
 def test_a_free_account(client, pool, fake):
     me = client.get(f"{API}/me").json()
-    assert me["plan"] == {"tier": "free", "until": None, "deep_search": False, "daily_briefing": False}
+    assert me["plan"] == {"tier": "free", "until": None, "deep_search": False, "daily_briefing": False,
+                          "statement_import": False}  # IMPORT_STATEMENTS is off by default
     u = usage(client)
     assert (u["plan"], u["daily_message_limit"], u["deep_search_cost"], u["deep_search_members_only"]) == (
         "free", 3, None, True)
@@ -59,7 +60,8 @@ def test_a_free_account(client, pool, fake):
 def test_a_member(client, pool, fake, db):
     plans.grant(db, " Demo@Forliosa.local ", date(2099, 12, 31), "轉帳 NT$300")
     me = client.get(f"{API}/me").json()
-    assert me["plan"] == {"tier": "member", "until": "2099-12-31", "deep_search": True, "daily_briefing": True}
+    assert me["plan"] == {"tier": "member", "until": "2099-12-31", "deep_search": True, "daily_briefing": True,
+                          "statement_import": False}
     u = usage(client)
     assert (u["plan"], u["daily_message_limit"], u["deep_search_cost"], u["deep_search_members_only"]) == (
         "member", 30, 3, False)

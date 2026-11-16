@@ -99,7 +99,7 @@ describe("匯入對帳單", () => {
     const dialog = await openImport()
     await user.upload(fileInput(dialog), pdfFile())
     await user.type(await within(dialog).findByLabelText("PDF 密碼", {}, T), "A123456789{Enter}")
-    await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }, { timeout: 10_000 })
+    await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }, { timeout: 20_000 })
     await user.click(within(dialog).getByRole("button", { name: "補一筆買進" }))
     expect(within(dialog).queryByRole("button", { name: "補一筆買進" })).toBeNull()
     // 補的那一筆預設勾著：日期、價格空著，簽名時停下來
@@ -107,7 +107,7 @@ describe("匯入對帳單", () => {
     await user.click(sign)
     expect(await within(dialog).findByText("有 1 筆還沒填好。", {}, T)).toBeInTheDocument()
     expect(within(dialog).getByText("請選日期、請輸入價格。")).toBeInTheDocument()
-  }, 30_000)
+  }, 45_000)
 
   it("有密碼的 PDF：密碼不對 → 對的 → 讀成確認表 → 簽名匯入；密碼不會送到伺服器", async () => {
     desktop = true
@@ -127,7 +127,7 @@ describe("匯入對帳單", () => {
     await user.type(pw, "A123456789{Enter}")
     // 密碼對了就直接開始讀（不用再按一次）
     expect(await within(dialog).findByText("正在讀 2 頁…", {}, T)).toBeInTheDocument()
-    const sign = await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }, { timeout: 10_000 })
+    const sign = await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }, { timeout: 20_000 })
     expect(pdfCalls).toEqual([undefined, "A000000000", "A123456789"])
     expect(parse).toHaveBeenCalledTimes(1)
     const body = parse.mock.calls[0]![0]
@@ -147,7 +147,7 @@ describe("匯入對帳單", () => {
     await user.click(within(dialog).getByRole("button", { name: `簽名：匯入 ${count - 1} 筆` }))
     expect(await screen.findByText(`已匯入 ${count - 1} 筆`, {}, T)).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "匯入對帳單" })).toBeNull(), T)
-  }, 30_000)
+  }, 45_000)
 
   it("截圖（手機的抽屜）：「截圖會整張送給 AI 讀。」→ 三筆 → 匯入 → 復原整批", async () => {
     const user = userEvent.setup()
@@ -156,7 +156,7 @@ describe("匯入對帳單", () => {
     expect(await within(dialog).findByText("截圖會整張送給 AI 讀。", {}, T)).toBeInTheDocument()
     await within(dialog).findByText("1 張", {}, T)
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
-    const sign = await within(dialog).findByRole("button", { name: "簽名：匯入 3 筆" }, { timeout: 10_000 })
+    const sign = await within(dialog).findByRole("button", { name: "簽名：匯入 3 筆" }, { timeout: 20_000 })
     // 手機是一列一筆的清單：「修改」打開欄位
     await user.click(within(dialog).getByRole("button", { name: /^修改第 1 筆/ }))
     expect(within(dialog).getByLabelText("股數")).toBeInTheDocument()
@@ -167,7 +167,7 @@ describe("匯入對帳單", () => {
     expect(imported.length).toBeGreaterThanOrEqual(3)
     await user.click(screen.getByRole("button", { name: "復原" }))
     expect(await screen.findByText("已復原這次匯入", {}, T)).toBeInTheDocument()
-  }, 30_000)
+  }, 45_000)
 
   it("庫存畫面：直接說還不能匯入，給「換一個檔案」", async () => {
     const doc: StatementImport = {

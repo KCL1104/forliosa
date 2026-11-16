@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import itertools
 import logging
+from datetime import date
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -14,6 +15,7 @@ from forliosa.ai import chat as chat_mod
 from forliosa.ai.chat import keeps_numbers
 from forliosa.ai.keypool import Route
 from forliosa.models import AiMessage, AiUsage
+from forliosa.timeutil import now_taipei
 from tests.ai.conftest import chat
 from tests.ai.fake_anthropic import search_citation, server_tool_use, text, web_search_result
 
@@ -73,6 +75,8 @@ def test_the_edit_streams_as_it_is_written(client, pool, fake, engine, ai_env):
     assert answer_events(events) == ["tool:running", "text", "text", "tool:done"]
     assert shown(events) == EDITED and "鉅亨網" not in shown(events)
     assert fake.requests[1]["body"]["stream"] is True and "文字編輯" in fake.requests[1]["body"]["system"]
+    # no silent thinking before the first word (2026-11-16: 3 of 16 edits ran past the 4 s limit thinking)
+    assert fake.requests[1]["body"]["thinking"] == {"type": "disabled"}
     assert stored_answer(engine) == EDITED
     assert usage_stops(engine) == ["end_turn", "end_turn"]
 
@@ -161,6 +165,53 @@ def test_dates_in_parentheses_may_become_today():
     # only the date itself: the same number elsewhere still has to stay, and a dropped figure is still caught
     assert not keeps_numbers("今（16）日成交 16 萬張", "今天成交量放大")
     assert not keeps_numbers("今（16）日跌 7%，大盤跌 3%", "今天跌 7%")
+
+
+MON = date(2026, 11, 16)
+
+
+def test_news_flash_codes_and_todays_date_may_become_today():
+    # 2026-11-16 why_1: a clean edit was reset to the draft for the 2308 of cnyes's 「台達電(2308-TW)」
+    assert keeps_numbers("台達電(2308-TW)下跌120元。", "台達電下跌 120 元。")
+    assert keeps_numbers("台達電（2308-TWO）漲停", "台達電漲停")
+    # today's or yesterday's date written as a day, 11/16 or 11月16日 may become 今天／昨天
+    flash = "台達電(2308-TW)16日09:59下跌120元，報1120元。"
+    assert keeps_numbers(flash, "台達電今天 09:59 跌 120 元，報 1120 元。", MON)
+    assert keeps_numbers("台達電（2308.TW）16日盤中跌停。", "台達電今天盤中跌停。", MON)
+    assert keeps_numbers("11/16 盤中觸及跌停 1120 元，11/13 收 1,240 元",
+                         "今天盤中觸及跌停，報 1120 元，11/13 收 1240 元", MON)
+    assert keeps_numbers("11月15日外資賣超；15日收 1,240 元", "昨天外資賣超，昨天收 1240 元", MON)
+    # not without the date of today (a function call without it, an edit without 今天, another day) …
+    assert not keeps_numbers(flash, "台達電今天 09:59 跌 120 元，報 1120 元。")
+    assert not keeps_numbers(flash, "台達電 09:59 跌 120 元，報 1120 元。", MON)
+    assert not keeps_numbers("台達電（2308）30日股價一度跌停至1,335元。", "台達電今天股價一度跌停至 1,335 元。", MON)
+    assert not keeps_numbers("台達電 16日跌停，18日除息", "台達電今天跌停", MON)
+    assert not keeps_numbers("11/13 收 1,240 元", "今天收 1240 元", MON)
+    # … nor a number of days, or a figure of a quote line the editor left out (2026-11-16 a_0050_1)
+    assert not keeps_numbers("16日均線在 1,200 元", "今天均線在 1200 元", MON)
+    assert not keeps_numbers("0050.TW 98.10 4.40 4.29%，成交 172,713 張", "0050 今天盤中 98.10 元，跌 4.29%", MON)
+
+
+def test_a_cnyes_flash_edited_to_today_is_kept(client, pool, fake, engine, ai_env, caplog):
+    ai_env(AI_ANSWER_EDITOR="true")
+    day = now_taipei().day  # the turn's own today
+    flash = f"台達電今天盤中跌停。台達電(2308-TW){day}日09:59下跌120元，股價跌停報1120.0元。"
+    edit = "台達電今天盤中跌停，09:59 跌 120 元，報 1120 元。"
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台達電 跌停"}),
+               web_search_result("srvtoolu_1", [{"url": "https://news.cnyes.com/b", "title": "鉅亨",
+                                                 "encrypted_content": "ENC"}]),
+               text(flash, [search_citation("https://news.cnyes.com/b", "鉅亨", "下跌120元")]),
+               usage={"server_tool_use": {"web_search_requests": 1}})
+    fake.reply(text(edit))
+    _, events = chat(client, QUESTION, page=PAGE)
+    assert "text_reset" not in answer_events(events) and shown(events) == edit and stored_answer(engine) == edit
+
+
+def test_the_editor_thinks_only_where_it_cannot_be_turned_off():
+    # Haiku 5.5 accepts thinking off at effort low; Opus 5.5 and Sonnet 5.5 answer 400, so they keep the default
+    assert chat_mod._editor_thinking("claude-haiku-5-5") == {"thinking": {"type": "disabled"}}
+    assert chat_mod._editor_thinking("claude-opus-5-5") == {}
+    assert chat_mod._editor_thinking("claude-sonnet-5-5") == {}
 
 
 def test_every_turn_logs_one_line_of_timings(client, pool, fake, ai_env, caplog, monkeypatch):

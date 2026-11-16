@@ -25,6 +25,19 @@ def test_check_flags_only_uncited_news_claims():
     assert check("營收成長 3.5%，毛利率 53%。持股市值 120 萬。", []) == []
 
 
+def test_saying_there_is_no_news_is_no_claim():
+    # 2026-11-16: the 「為什麼漲跌」 rules make the model say so, and both were flagged 「無來源」
+    assert check("目前找不到今天台達電自己新增的公告，以上原因是財報、外資動向與盤面的累積。", []) == []
+    assert check("台達電今天盤中跌停，報 1120 元，但目前沒有它今天自己的公告或新聞，主要是大盤重挫。", []) == []
+    # a real claim in the same sentence still counts
+    assert [i["signals"][0] for i in check("目前沒有新的公告，但董事會今天宣布減資。", [])] == ["verb:宣布"]
+    assert [i["signals"][0] for i in check("公司今天公告減資，目前沒有其他消息。", [])] == ["verb:公告"]
+    # nor is the close not being out yet, the way the intraday rules have the model say it (2026-11-16 why_1) …
+    assert check("11/13 的收盤是官方資料，今天的收盤要等晚上公布。", []) == []
+    # … but a company publishing after the close is
+    assert [i["text"] for i in check("台積電今天收盤後公布 10 月營收。", [])] == ["台積電今天收盤後公布 10 月營收。"]
+
+
 def test_sentences_keep_offsets():
     t = "第一句。\n・第二點；第三點\n\n最後"
     assert [t[a:b] for a, b in sentences(t)] == ["第一句。", "・第二點；", "第三點", "最後"]

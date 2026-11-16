@@ -43,7 +43,7 @@ def sse(event: str, data: dict) -> str:
 
 
 CHAT_DOC = {200: {"content": {"text/event-stream": {}},
-                  "description": "事件：thread、text、tool、citation、draft、chart、grounding、error、done"
+                  "description": "事件：thread、text、text_reset、tool、citation、draft、chart、grounding、error、done"
                                  "（見 docs/api-contract.md）"}}
 
 

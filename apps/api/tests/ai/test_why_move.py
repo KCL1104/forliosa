@@ -40,10 +40,13 @@ def test_the_why_section_compares_with_the_market_and_puts_the_company_first():
         # what to look up: the move, the TAIEX at the same time, the company's own news three ways
         "get_stock_overview", "why_signals", "market_context", "vs_taiex_pct_points", "intraday_note",
         "加權指數同一時間漲跌多少", "寫出來源的時間", "每一種各搜一次", "找價格與大盤的搜尋不算",
-        "法說會", "目標價 調降", "english_name 加上 shares 或 stock", "大股東申報轉讓",
+        "法說會", "目標價 調降", "english_name 加上 Taiwan、股票代號與 shares 或 stock", "Delta Taiwan 2308 shares",
+        "大股東申報轉讓", "但它有 dates_differ 時（加權指數和這一檔的收盤不是同一天）也用 web_search 找",
         # how to answer
         "寫出這一檔和加權指數各漲跌多少，再說原因", "差 2 個百分點以上，就是這一檔自己的走勢",
-        "不可以只寫大盤的原因，開頭也不寫大盤、美股或類股的原因", "兩者差不多時，才說主要是跟著大盤", "逆勢漲",
+        "不可以只寫大盤的原因，開頭也不寫大盤、美股或類股的原因",
+        "也不寫「主要是大盤」「跟著大盤和權值股一起跌」這類說法",
+        "兩者差不多時，才說主要是跟著大盤", "逆勢漲", "不要改說主要是大盤",
         "目前找不到大華今天自己的消息", "並寫出日期，當作背景", "不要把大盤的原因寫成這一檔漲跌的原因",
         "問的不是台積電，就不寫台積電 ADR", "搜尋結果把它們寫在同一篇報導裡也一樣", "條列最多四點",
         "公司自己的原因在前、背景在後", "放在最後一點",
@@ -69,6 +72,16 @@ def test_the_intraday_rules_no_longer_lead_a_why_answer_with_the_close_or_with_a
 def test_the_editor_keeps_the_comparison_first():
     assert "開頭寫了這一檔和大盤的漲跌比較時保留在開頭，公司自己的原因放在大盤背景前面" in EDITOR_SYSTEM
     assert "不新增、不刪除任何事實" in EDITOR_SYSTEM
+
+
+def test_the_editor_keeps_times_and_quote_figures_and_adds_no_month_heading_or_english():
+    # 2026-11-16 review: with thinking off the editor merged repeated sentences and lost 09:59 / 11:31 (7 of 34
+    # edits), dropped a quote line's 4.40 and volume, wrote 30日 as 11/30, added ### headings and wrote 「also」
+    for phrase in ("保留每一個事實、數字、日期、時間（09:59）", "兩句裡的數字與時間都併進留下的那一句",
+                   "表格或報價列殘留的數字（漲跌、成交張數）寫進句子裡，不要刪掉",
+                   "只有日、沒有月份的日期（30 日）照原樣寫，不要自己補上月份", "原文是中文的字詞不要換成英文",
+                   "不新增原文沒有的 ### 小標題"):
+        assert phrase in EDITOR_SYSTEM, phrase
 
 
 def test_the_stock_page_one_liner_compares_with_the_market_too():
@@ -136,7 +149,27 @@ def test_overview_compares_only_closes_of_the_same_day(ctx, monkeypatch):
     res = overview(ctx, monkeypatch, quote("2330.TW", date(2026, 11, 13), "1050", "1050"), MON)
     assert res["market_context"]["taiex"]["date"] == "2026-11-16"
     assert "vs_taiex_pct_points" not in res["market_context"]
+    assert res["market_context"]["dates_differ"].startswith(
+        "加權指數是 11/16 的收盤，這一檔是 11/13 的收盤，不是同一天")
     assert res["why_signals"] == []  # flat: nothing to flag
+
+
+def test_overview_says_so_when_the_evening_close_is_in_but_the_index_is_not(ctx, monkeypatch):
+    # every trading evening the stock's close is archived from 13:35, MI_INDEX's TAIEX only after the 21:40 run
+    fri, mon = date(2026, 11, 13), date(2026, 11, 16)
+    index(ctx.db, "發行量加權股價指數", fri, "43675.12", "583.25", "0.0135")
+    ctx.db.commit()
+    res = overview(ctx, monkeypatch, quote("2330.TW", mon, "980", "1050"), MON.replace(hour=19))
+    m = res["market_context"]
+    assert m["taiex"]["date"] == "2026-11-13" and "vs_taiex_pct_points" not in m
+    assert m["dates_differ"] == ("加權指數是 11/13 的收盤，這一檔是 11/16 的收盤，不是同一天，不能拿來比較；"
+                                 "11/16 加權指數漲跌多少要用 web_search 找並寫出時間")
+    assert "intraday_note" not in res  # today's close is in: the note about the index is all the model gets
+    # the same day: nothing to say
+    index(ctx.db, "發行量加權股價指數", mon, "41885.57", "-1789.55", "0.0410")
+    ctx.db.commit()
+    assert "dates_differ" not in overview(ctx, monkeypatch, quote("2330.TW", mon, "980", "1050"),
+                                          MON.replace(hour=22))["market_context"]
 
 
 def test_overview_without_index_rows_or_for_a_us_stock_has_no_market_context(ctx, monkeypatch):

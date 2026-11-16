@@ -205,7 +205,8 @@ class Usage(BaseModel):
         description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`，不超過每天的題數）；`null`＝現在不能用深度搜尋（方案沒有、"
                     "省錢模式，或這個環境沒開網路搜尋）")
     deep_search_members_only: bool = Field(default=False, description="這個環境有深度搜尋，但這個方案沒有（會員功能）")
-    imports_today: int = Field(default=0, description="今天（台北）讀了幾份對帳單（`POST /imports/statement`；不算提問數）")
+    imports_today: int = Field(default=0,
+                               description="今天（台北）讀了幾份對帳單（`POST /imports/statement`；不算提問數）")
     import_daily_limit: int | None = Field(
         default=None, description="每天最多讀幾份對帳單（`IMPORT_DAILY_LIMIT`）；`null`＝不限")
     disclaimer: str = Field(description="固定顯示在每則 AI 回答下方的一行字（模型不會自己寫免責聲明）")

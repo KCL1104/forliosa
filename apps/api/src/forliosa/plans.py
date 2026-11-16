@@ -7,6 +7,9 @@ Claude's web search (省錢模式, ``store.month_mode``).
 
 A member is ``users.plan = "member"`` until ``users.plan_until`` (NULL: no end date). Site admins (``ADMIN_EMAILS``)
 count as members. There are no payments yet: a site admin grants membership on /admin/members (``grant``).
+
+匯入對帳單 (2026-11-16) does not depend on the tier: ``IMPORT_STATEMENTS`` opens it to nobody, site admins, or everyone
+(``Plan.statement_import``; ``GET /me`` → ``plan.statement_import``).
 """
 
 from __future__ import annotations

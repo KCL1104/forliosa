@@ -42,6 +42,9 @@ describe("確認表的一列", () => {
     const qty = editRow(d, { qty: "2,000" })
     expect(qty.amount).toBeNull()
     expect(toCandidate(qty, "acc_9")).toMatchObject({ account_id: "acc_9", symbol: "2317.TW", quantity: 2000, price: 196, amount: null, fee: 837, tax: 0, note: "" })
+    // 幣別：TWD／USD 照送，讀不出來（"" 或 other）不送
+    expect(toCandidate(toDraftRow(row({ currency: "USD" })), "a").currency).toBe("USD")
+    expect("currency" in toCandidate(toDraftRow(row({ currency: "other" as "TWD" })), "a")).toBe(false)
   })
 
   it("選了股票：「找不到」「對到好幾檔」那一句拿掉", () => {
@@ -109,6 +112,9 @@ describe("整份的句子", () => {
     expect(unsupportedLine({ document_kind: "not_a_trade_record", rows: [] })).toBe("這個檔案裡沒有買賣紀錄。")
     expect(unsupportedLine({ document_kind: "monthly_statement", rows: [] })).toBe("這個檔案裡沒有讀到買賣。")
     expect(unsupportedLine({ document_kind: "app_screenshot", rows: [row()] })).toBeNull()
+    // 伺服器寫了句子就照它的；能匯入的檔案不因為有 notice 就擋下來
+    expect(unsupportedLine({ document_kind: "holdings_snapshot", rows: [], notice: "庫存截圖還不能匯入。" })).toBe("庫存截圖還不能匯入。")
+    expect(unsupportedLine({ document_kind: "monthly_statement", rows: [row()], notice: "x" })).toBeNull()
   })
 
   it("股利、融券收成「略過」一行", () => {

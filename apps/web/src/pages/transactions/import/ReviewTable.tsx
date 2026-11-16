@@ -221,6 +221,11 @@ export function ReviewTable({
           <p className="num text-sm text-ink-2">{facts}</p>
           {totals && <p className="text-base text-ink">{totals}</p>}
           {doc.unreadable.length > 0 && <p className="text-base text-ink">沒讀清楚：{doc.unreadable.join("、")}。</p>}
+          {(doc.problems ?? []).map((p) => (
+            <p key={p.code + p.message} className="text-base text-ink">
+              {p.message}
+            </p>
+          ))}
           {doc.embedded_instructions.length > 0 && (
             <div>
               <p className="text-base text-ink">檔案裡有一段像指令的文字，沒有照做。</p>

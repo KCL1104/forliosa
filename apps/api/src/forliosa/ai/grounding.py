@@ -10,8 +10,9 @@ that overlaps no cited text block and reads like a factual news claim is listed 
 OpenAI, a 「quoted」 name). Numbers that came from our own tools carry no citation by design, so plain price /
 holding sentences are never flagged. The same goes for technical-analysis sentences (``get_technicals``): an
 indicator's abbreviation (MA20, KD, RSI, MACD …) is not a named actor, and the weaker verbs do not count where
-they describe our own price data (「收盤價還沒公布」, 「黃金交叉成立」, 「向上通過」). Offsets are Unicode code-point
-offsets into the answer text.
+they describe our own price data (「收盤價還沒公布」, 「今天的收盤要等晚上公布」, 「黃金交叉成立」, 「向上通過」; not
+「收盤後公布營收」) or say there is no news (「目前沒有它今天自己的公告」). Offsets are Unicode code-point offsets
+into the answer text.
 """
 
 from __future__ import annotations
@@ -29,10 +30,14 @@ _DATE = re.compile(r"\d{1,4}\s*[/年月-]\s*\d{1,2}|\d{1,2}\s*月\s*\d{1,2}\s*�
 _INDICATOR = r"(?:MA|EMA|SMA|RSI|KD|MACD|DIF|OSC|RSV|BIAS|Bollinger)\d*(?![A-Za-z])"
 _ACTOR = re.compile(r"董事會|股東會|公司|集團|政府|主管機關|金管會|央行|聯準會|法院|交易所|執行長|董事長|"
                     rf"(?<![A-Za-z0-9])(?!{_INDICATOR})[A-Z][A-Za-z0-9&.\-]+|「[^」]{{1,30}}」")
-# Weak verbs used about our own price data, not about an event: removed before looking for a weak verb.
-_DATA_PHRASE = re.compile(r"收盤價[^，。；,;]{0,8}(?:公布|公告)|(?:公布|公告)的?(?:官方)?收盤價|"
+# Weak verbs used about our own price data, or about news there is none of, not about an event: removed before
+# looking for a weak verb.
+_DATA_PHRASE = re.compile(r"收盤(?!後)價?[^，。；,;]{0,8}(?:公布|公告)|(?:公布|公告)的?(?:官方)?收盤價|"
                           r"(?:交叉|訊號|型態)[^，。；,;]{0,8}成立|成立[^，。；,;]{0,4}(?:交叉|訊號)|"
-                          r"(?:向上|向下|往上|往下)通過")
+                          r"(?:向上|向下|往上|往下)通過"
+                          # saying there is none is no claim: the 「為什麼漲跌」 rules make the model write
+                          # 「目前找不到台達電今天自己的消息」, and 「…沒有它今天自己的公告」 was flagged (2026-11-16)
+                          r"|(?:找不到|查不到|沒找到|沒有|尚無|並無)[^，。；,;]{0,12}?(?:公告|新聞|消息)")
 _SENTENCE = re.compile(r"[^。！？!?；;\n]+[。！？!?；;]*")
 
 REASON = "uncited_news_claim"

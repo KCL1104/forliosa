@@ -70,7 +70,9 @@ def test_usage_shape(client, pool, ai_env):
     assert set(u) == {"date", "month", "messages_today", "daily_message_limit", "messages_remaining",
                       "tokens_month", "monthly_token_budget", "tokens_remaining", "cost_usd_month", "model",
                       "available", "deep_search_cost", "monthly_cost_budget_usd", "month_budget_reached",
-                      "disclaimer", "plan", "economy", "deep_search_members_only"}
+                      "disclaimer", "plan", "economy", "deep_search_members_only",
+                      "imports_today", "import_daily_limit"}  # 匯入對帳單 (2026-11-16): reads, not questions
+    assert (u["imports_today"], u["import_daily_limit"]) == (0, 10)
 
 
 def test_day_word_follows_the_close_date():

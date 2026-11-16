@@ -188,6 +188,9 @@ def main(argv: list[str] | None = None) -> int:
                 if name == "text":
                     answer += len(data["delta"])
                     print(data["delta"], end="", flush=True)
+                elif name == "text_reset":  # the edit shown so far was dropped: the answer as written replaces it
+                    answer = len(data["text"])
+                    print(f"\n  ↺ 改回原本寫的回答：\n{data['text']}", end="", flush=True)
                 elif name == "tool":
                     print(f"\n  [{data['status']}] {data['label']}", flush=True)
                 elif name == "citation":

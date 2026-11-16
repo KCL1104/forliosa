@@ -46,6 +46,8 @@ export interface DraftRow {
   /** 對帳單上的價金：股數、價格沒改過才照送（改過就讓伺服器重算股數 × 價格） */
   amount: number | null
   isDayTrade: boolean
+  /** 讀出來的幣別（TWD／USD 才照送；複委託的新台幣金額由伺服器判斷） */
+  currency: "TWD" | "USD" | null
   flags: ImportFlag[]
   /** 使用者改過的欄位（顯示成墨色；整列改過的話「沒讀清楚」拿掉） */
   edited: ReadonlySet<keyof EditableFields>
@@ -83,6 +85,7 @@ export function toDraftRow(row: ImportRow): DraftRow {
     tax: numText(c.tax ?? 0),
     amount: c.amount ?? null,
     isDayTrade: !!c.is_day_trade,
+    currency: c.currency === "TWD" || c.currency === "USD" ? c.currency : null,
     flags: row.flags,
     edited: new Set(),
     picked: false,
@@ -125,6 +128,7 @@ export function shortfallRow(sell: DraftRow, id: string): DraftRow | null {
     tax: "",
     amount: null,
     isDayTrade: false,
+    currency: sell.currency,
     flags: [],
     edited: new Set(["qty", "date", "price"]),
     picked: true,
@@ -176,6 +180,7 @@ export function toCandidate(row: DraftRow, accountId: string): ImportCandidate {
     fee: fee ?? 0,
     tax: tax ?? 0,
     is_day_trade: row.isDayTrade,
+    ...(row.currency ? { currency: row.currency } : {}),
     note: "",
   }
 }
@@ -226,7 +231,13 @@ export function totalsLine(doc: Pick<StatementImport, "totals_check">, currency:
 }
 
 /** 庫存畫面、不是交易紀錄：第一版不能匯入，直接說 */
-export function unsupportedLine(doc: Pick<StatementImport, "document_kind" | "rows">): string | null {
+export function unsupportedLine(doc: Pick<StatementImport, "document_kind" | "rows" | "notice">): string | null {
+  const own = defaultUnsupported(doc)
+  // 伺服器寫了句子就用它的（同一件事只有一種說法）
+  return own && doc.notice ? doc.notice : own
+}
+
+function defaultUnsupported(doc: Pick<StatementImport, "document_kind" | "rows">): string | null {
   if (doc.document_kind === "holdings_snapshot") return "這是庫存畫面，沒有買進日期，還不能匯入。請改用對帳單或成交明細。"
   if (doc.document_kind === "not_a_trade_record") return "這個檔案裡沒有買賣紀錄。"
   if (doc.rows.length === 0) return "這個檔案裡沒有讀到買賣。"

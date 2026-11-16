@@ -89,8 +89,11 @@ SCHEMA: dict[str, Any] = {
     "properties": {
         "document_kind": {"type": "string", "enum": list(DOCUMENT_KINDS)},
         "broker_name": {"type": "string", "description": "券商名稱，例如「永豐金證券」；沒印是 \"\""},
-        "period_from": {"type": "string", "description": "對帳單期間的第一天，照印的抄；沒印是 \"\""},
-        "period_to": {"type": "string", "description": "對帳單期間的最後一天，照印的抄；沒印是 \"\""},
+        "period_from": {"type": "string",
+                        "description": "對帳單期間的第一天，照印的抄；只印月份（例如 2026 年 10 月）就抄月份；"
+                                       "沒印是 \"\""},
+        "period_to": {"type": "string",
+                      "description": "對帳單期間的最後一天，照印的抄；只印月份就抄月份；沒印是 \"\""},
         "rows": {"type": "array", "items": _ROW},
         "printed_totals": {
             "type": "object",

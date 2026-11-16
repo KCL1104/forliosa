@@ -410,6 +410,10 @@ export interface StatementImport {
   embedded_instructions: string[]
   model_used: string
   retried: boolean
+  /** 整份不能匯入時伺服器寫的一句話（庫存畫面、不是買賣紀錄）；選填 */
+  notice?: string | null
+  /** 怪不到哪一列的帳目問題（帳本本來就對不上）；選填 */
+  problems?: { code: string; message: string }[]
 }
 
 /** `POST /transactions/batch` 的內容（最多 200 列；伺服器把 `source` 寫成 `import`） */
