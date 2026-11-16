@@ -50,7 +50,7 @@ def gkg_zip(*rows: tuple[str, str, str, str]) -> bytes:
 class FakeFetcher:
     """URL -> bytes, an exception, or missing (404). Every request is recorded."""
 
-    def __init__(self, answers: dict[str, bytes | Exception] | None = None):
+    def __init__(self, answers: dict[str, bytes | BaseException] | None = None):
         self.answers = answers or {}
         self.urls: list[str] = []
 
@@ -60,7 +60,7 @@ class FakeFetcher:
         a = self.answers.get(url)
         if a is None:
             raise HttpStatusError("storage.googleapis.com 回應 HTTP 404", 404)
-        if isinstance(a, Exception):
+        if isinstance(a, BaseException):
             raise a
         return a
 
@@ -246,6 +246,43 @@ def test_the_bulk_files_are_matched_for_every_tracked_stock_not_only_the_batch(e
                               bulk=bulk, now_fn=lambda: NOW)
         assert rep.symbols == 1 and rep.bulk_ok  # the batch is one stock
         assert db.scalar(select(NewsArticle).where(NewsArticle.symbol == "2330.TW")) is not None
+
+
+def test_a_run_for_given_symbols_matches_the_bulk_files_for_every_tracked_stock(engine, commercial_md, settings):
+    """2026-11-16 pre-deploy review: `refresh --symbol 2317` read the new files for 2317 alone, and 2330 (tracked) never
+    got the headlines in them: the next run starts after them."""
+    f = FakeFetcher({index_url(): index(SLOT), url(SLOT): TRANSLATION})
+    bulk = gb.GdeltBulk(feeds=["translation"], max_files=1, fetcher=f)  # type: ignore[arg-type]
+    with Session(engine) as db:
+        for sym in ("2317.TW", "2330.TW"):
+            service.record_view(db, sym, NOW)
+        rep = service.refresh(db, commercial_md, settings=settings, sources=[FakeSource(items={})], ai=None,
+                              bulk=bulk, symbols=["2317.TW"], now_fn=lambda: NOW)
+        assert rep.symbols == 1 and rep.bulk_ok
+        for sym in ("2317.TW", "2330.TW"):
+            assert db.scalar(select(NewsArticle).where(NewsArticle.symbol == sym)) is not None, sym
+
+
+class Stopped(BaseException):
+    """The worker stopped mid-run (a redeploy's SIGKILL)."""
+
+
+def test_a_files_matches_are_stored_before_it_is_booked_as_read(engine, commercial_md, settings):
+    """2026-11-16 pre-deploy review: the matches were stored only after the whole run; a worker stopped while it read
+    the next file had booked the first one as read without storing its headlines, and they were lost for good."""
+    nxt = SLOT + gb.SLOT
+    f = FakeFetcher({index_url(): index(nxt), url(SLOT): TRANSLATION, url(nxt): Stopped()})
+    bulk = gb.GdeltBulk(feeds=["translation"], max_files=2, fetcher=f)  # type: ignore[arg-type]
+    now = nxt + timedelta(minutes=20)
+    with Session(engine) as db:
+        service.record_view(db, "2330.TW", now)
+        with pytest.raises(Stopped):
+            service.refresh(db, commercial_md, settings=settings, sources=[FakeSource(items={})], ai=None, bulk=bulk,
+                            now_fn=lambda: now)
+    with Session(engine) as db:  # the restarted worker
+        st = db.get(NewsFetchState, (gb.SOURCE, "@translation"))
+        assert st.last_success_at.replace(tzinfo=UTC) == SLOT  # booked as read …
+        assert len(list(db.scalars(select(NewsArticle).where(NewsArticle.symbol == "2330.TW")))) == 2  # … and kept
 
 
 def test_bulk_is_on_by_default_only_for_the_worker(settings: Settings):

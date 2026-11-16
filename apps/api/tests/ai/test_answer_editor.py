@@ -535,3 +535,136 @@ def test_the_held_back_start_of_an_edit_keeps_its_spaces_and_line_breaks(client,
     _, events = chat(client, "台積電今天怎麼了？")
     assert shown(events) == edited
 
+
+
+# -- 2026-11-16 pre-deploy review: quotes inside a sentence, English names first, a split opening, 「不便具名」 -------
+GARBLED = ("台積電 11/13 收 1,450 元，跌 1.2%。\n\n"
+           "- 分析師指出，AI 需求強勁帶動先進製程產能滿載，公司對明年展望樂觀。")
+GARBLED_SOURCE = "市場分析師表示，AI需求強勁帶動先進製程產能滿載，供應鏈訂單能見度直達明年。"
+TARIFF = "法人表示美國關稅政策不確定性仍高，建議保守因應"
+
+
+@pytest.mark.parametrize(("line", "source"), [
+    # a quote inside a sentence (strip_pastes had made it 「- 分析師指出公司對明年展望樂觀。」 and so on)
+    ("- 分析師指出，AI 需求強勁帶動先進製程產能滿載，公司對明年展望樂觀。", GARBLED_SOURCE),
+    ("- 外資認為台積電受惠於輝達新一代 GPU 晶片的強勁需求，維持買進評等。",
+     "外資報告指出，台積電受惠於輝達新一代GPU晶片的強勁需求，第4季營收可望再創新高。"),
+    ("台積電 11/13 收 1,450 元，法人表示美國關稅政策不確定性仍高，短線震盪。", TARIFF),
+    ("- 鉅亨網報導〈輝達財報優於預期 台積電供應鏈同步受惠〉，市場情緒偏多。",
+     "輝達財報優於預期 台積電供應鏈同步受惠"),
+    # inside its sentence, even with the line's numbers
+    ("台積電 11/13 收 1,450 元，法人表示 11/13 收盤 1,450 元以下仍有賣壓，短線震盪。",
+     "法人表示11/13收盤1,450元以下仍有賣壓"),
+    # a sentence of its own without a number: nothing shows the line says it
+    ("- 台積電 11/13 收 1,450 元。法人表示美國關稅政策不確定性仍高。", TARIFF),
+])
+def test_a_quote_inside_a_sentence_or_without_numbers_is_not_a_paste(line, source):
+    from forliosa.ai.chat import strip_pastes
+
+    assert strip_pastes(line, [source]) == line
+
+
+def test_a_paste_goes_with_its_own_full_stop():
+    from forliosa.ai.chat import strip_pastes
+
+    line = f"- 小摩 11/12 維持「優於大盤」評等，目標價 3,300 元。{TSMC_PASTES[0]}。"
+    assert strip_pastes(line, TSMC_PASTES) == "- 小摩 11/12 維持「優於大盤」評等，目標價 3,300 元。"
+    own = "- 小摩 11/12 維持、高盛 10/6 調升，目標價都是 3,300 元。"
+    assert strip_pastes(f"{own}{TSMC_PASTES[0]}。 {TSMC_PASTES[1]}", TSMC_PASTES) == own
+
+
+def test_a_quote_in_the_answer_as_written_stays_whole(client, pool, fake, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台積電 11/13"}),
+               web_search_result("srvtoolu_1", [{"url": "https://news.cnyes.com/a", "title": "鉅亨",
+                                                 "encrypted_content": "ENC"}]),
+               text(GARBLED, [search_citation("https://news.cnyes.com/a", "鉅亨", GARBLED_SOURCE)]),
+               usage={"server_tool_use": {"web_search_requests": 1}})
+    fake.error(500, "api_error", "editor down")  # the edit is dropped: the answer as written
+    _, events = chat(client, "台積電今天怎麼了？")
+    assert shown(events) == GARBLED
+
+
+US_DRAFT = "NVIDIA（NVDA）11/13 收 186.5 美元，漲 1.2%。據 CNBC 報導，資料中心需求強勁。"
+US_EDITED = "NVIDIA（NVDA）11/13 收 186.5 美元，漲 1.2%，資料中心需求強勁。"
+MSFT_EDITED = "**Microsoft** 11/13 收 510 美元，跌 0.8%，資料中心需求強勁。"
+
+
+def us_turn(fake, draft: str) -> None:
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "NVIDIA stock"}),
+               web_search_result("srvtoolu_1", [{"url": "https://www.cnbc.com/a", "title": "CNBC",
+                                                 "encrypted_content": "ENC"}]),
+               text(draft, [search_citation("https://www.cnbc.com/a", "CNBC", "資料中心需求強勁")]),
+               usage={"server_tool_use": {"web_search_requests": 1}})
+
+
+@pytest.mark.parametrize(("draft", "edited"), [
+    (US_DRAFT, US_EDITED),
+    ("**Microsoft** 11/13 收 510 美元，跌 0.8%。據報導，資料中心需求強勁。", MSFT_EDITED),
+    ("Microsoft 11/13 收 510 美元，跌 0.8%。據報導，資料中心需求強勁。", MSFT_EDITED),
+])
+def test_an_edit_that_starts_with_the_drafts_english_name_is_kept(client, pool, fake, ai_env, draft, edited):
+    """2026-11-16 pre-deploy review: streamed a few characters at a time, an edit starting like its draft with an
+    English name was dropped at 「NVIDIA（N」 (eight characters, none Chinese)."""
+    ai_env(AI_ANSWER_EDITOR="true")
+    us_turn(fake, draft)
+    fake.reply(*[text(edited[i:i + 2]) for i in range(0, len(edited), 2)])
+    _, events = chat(client, "今天怎麼了？")
+    assert shown(events) == edited and not [n for n, _ in events if n == "text_reset"]
+
+
+def test_an_english_editor_is_never_shown_after_an_english_start_either(client, pool, fake, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    us_turn(fake, US_DRAFT)
+    reply = "NVIDIA closed at $186.5 on 11/13, up 1.2%. Please paste the answer you'd like me to rewrite."
+    fake.reply(*[text(reply[i:i + 2]) for i in range(0, len(reply), 2)])
+    _, events = chat(client, "輝達今天怎麼了？")
+    assert not any("closed" in d.get("delta", "") for n, d in events if n == "text")
+    assert not [n for n, _ in events if n == "text_reset"]  # nothing of the edit was on screen
+    assert shown(events) == US_DRAFT
+
+
+DAHUA_1 = "大華今天跌 6.9%，大盤跌 2.1%，跌幅是大盤的三倍。"
+DAHUA_2 = "外資 11/13 把評等從「買進」調降到「中立」，目標價從 85 元降到 62 元，市場擔心明年車用訂單衰退。"
+UMC_2 = "11/14 傳出與格芯合併的談判破局，市場對成熟製程整併的預期落空，外資轉為賣超。"
+MTK_1 = "最新的目標價是高盛 11/10 的 1,800 元，評等「買進」。"
+MTK_2 = "其餘幾家在 10 月法說會前後調整，區間 1,500 到 1,750 元。"
+MTK_ITEMS = "- 高盛 11/10 調升到 1,800 元。\n- 摩根士丹利 10/30 維持 1,650 元。"
+
+
+@pytest.mark.parametrize(("draft", "edited", "kept"), [
+    # a two-sentence opening split into two items: its first half opens, the second stays in the list (it was
+    # moved up instead)
+    (f"{DAHUA_1}主因是{DAHUA_2}\n\n- 外資賣超 3,200 張。\n- 投信賣超 500 張。",
+     f"- 大華今天跌 6.9%，大盤跌 2.1%。\n- {DAHUA_2}\n- 外資賣超 3,200 張。\n- 投信賣超 500 張。",
+     f"大華今天跌 6.9%，大盤跌 2.1%。\n\n- {DAHUA_2}\n- 外資賣超 3,200 張。\n- 投信賣超 500 張。"),
+    ("聯電今天跌 3.2%，大盤跌 0.4%。主因是 11/14 傳出與格芯合併的談判破局，市場對成熟製程的整併預期落空，"
+     "外資轉為賣超。\n\n- 外資賣超 2.3 萬張。",
+     f"- 聯電今天跌 3.2%，大盤跌 0.4%。\n- {UMC_2}\n- 外資賣超 2.3 萬張。",
+     f"聯電今天跌 3.2%，大盤跌 0.4%。\n\n- {UMC_2}\n- 外資賣超 2.3 萬張。"),
+    # its first item closer to a draft item than to the whole opening, but nearly all of it the opening's words
+    ("聯發科最新的目標價是高盛 11/10 的 1,800 元，評等「買進」。其餘幾家都在 10 月法說會前後調整，"
+     f"區間在 1,500 到 1,750 元之間。\n\n{MTK_ITEMS}",
+     f"- {MTK_1}\n- {MTK_2}\n{MTK_ITEMS}",
+     f"{MTK_1}\n\n- {MTK_2}\n{MTK_ITEMS}"),
+    # the first item reworded too much to tell: the second sentence alone is not moved up, the first comes back
+    (f"{DAHUA_1}主因是{DAHUA_2}\n\n- 外資賣超 3,200 張。",
+     f"- 跌得比大盤多。\n- {DAHUA_2}\n- 外資賣超 3,200 張。",
+     f"{DAHUA_1}\n\n- 跌得比大盤多。\n- {DAHUA_2}\n- 外資賣超 3,200 張。"),
+])
+def test_an_opening_split_into_items_keeps_its_first_half_first(draft, edited, kept):
+    from forliosa.ai.chat import keep_opening
+
+    assert keep_opening(draft, edited) == kept
+
+
+@pytest.mark.parametrize("sentence", [
+    "一位不便具名的法人表示，第 4 季營收可望季增 5%。", "一位不方便具名的外資分析師指出，需求強勁。",
+    "一位不肯具名的外資分析師透露，訂單滿載。", "一位拒絕具名的券商主管說，價格將上漲。",
+    "一位婉拒具名的投顧老師認為，股價偏高。",
+])
+def test_more_news_wording_about_anonymity_stays(sentence):
+    from forliosa.ai.chat import tidy_answer
+
+    assert tidy_answer(sentence, TODAY) == sentence
+    assert tidy_answer("台積電最新的具名目標價是小摩的 3,300 元。", TODAY) == "台積電最新的目標價是小摩的 3,300 元。"

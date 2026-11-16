@@ -902,7 +902,8 @@ def test_query_terms_take_the_full_name_and_its_first_two_characters():
     assert not analyst._mentions("晶心科 目標價", terms) and not analyst._mentions("M310 目標價", terms)
 
 
-def test_an_empty_result_of_a_stock_rated_in_the_last_year_is_not_kept(client, pool, fake, jobs, monkeypatch):
+def test_an_empty_result_of_a_stock_rated_in_the_last_year_is_not_kept(client, pool, fake, jobs, monkeypatch,
+                                                                    engine):
     """A rating headline 191 days old (outside the card's 180 days): the stock is covered, so its empty result is
     searched again on the next trading day instead of standing for 3 trading days."""
     answer(fake, [], results=[("https://news.example.com/2026/05/05/tsmc", "外資調升台積電目標價", None)])
@@ -911,8 +912,16 @@ def test_an_empty_result_of_a_stock_rated_in_the_last_year_is_not_kept(client, p
     out = client.get(URL).json()
     assert out["status"] == "ready" and out["items"] == []
     assert out["expires_at"] == "2026-11-13T14:00:00+08:00"  # 24 hours, not Tuesday 00:00
-    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(days=1))
-    assert client.get(URL).json()["status"] == "none"
+    # the next trading day searches again from its start, not only once the entry expires (2026-11-16 review: Friday
+    # 09:30 still read Thursday's empty result, and the chat tool was told there was nothing)
+    with Session(engine) as db:
+        assert analyst.cached(db, "2330.TW", NOW + timedelta(hours=18))["status"] == "none"  # the chat tool
+    for later in (timedelta(hours=18), timedelta(hours=23, minutes=59), timedelta(days=1)):
+        monkeypatch.setattr(analyst, "now_utc", lambda later=later: NOW + later)
+        assert client.get(URL).json()["status"] == "none"
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(hours=19, minutes=30))  # Friday 09:30
+    answer(fake, [])
+    assert client.post(URL).json()["status"] == "pending" and len(jobs) == 1
 
 
 def test_the_question_names_the_company_and_how_to_search_a_short_name():
@@ -941,3 +950,56 @@ def test_an_unnamed_broker_with_a_named_ones_target_that_week_is_left_out():
     assert [(i["institution"], i["target_price"]) for i in items] == [("大摩", 2300.0), ("未具名外資（日系）", 1900.0)]
     assert reasons(dropped) == ["duplicate"]
 
+
+
+# -- 2026-11-16 pre-deploy review: a US stock searched by its brand, searches that failed ------------------------
+def test_a_us_stock_searched_by_the_first_word_of_its_name_is_on_target(pool, fake):
+    """SEC names a US stock 「Palantir Technologies Inc.」; searches and headlines say 「Palantir」. A search
+    「Palantir analyst price target」 was taken for one about another stock, so an empty result was never 「查無」
+    (each retry another question), and a headline 「Palantir price target raised…」 was not one about it."""
+    from forliosa.config import Settings
+
+    pltr = InstrumentInfo("PLTR", "PLTR", "Palantir Technologies Inc.", "US", "stock", "USD")
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "Palantir analyst price target"}),
+               results_block("srvtoolu_1", [("https://news.example.com/2026/11/10/pltr", "Palantir earnings preview",
+                                             None)]),
+               tool_use("toolu_r", "report_analyst_views", {"items": []}),
+               stop_reason="tool_use", usage={"server_tool_use": {"web_search_requests": 1}})
+    out = analyst.run_model(pltr, TODAY, "anv_t", pool, Settings(_env_file=None), lambda slot, msg: None)
+    assert (out.status, out.reason) == ("ready", None)
+    headline = R("https://news.example.com/2026/11/10/pltr", "Palantir price target raised to $200 at Wedbush")
+    assert analyst.rating_headlines([headline], pltr, TODAY) == 1
+    amzn = InstrumentInfo("AMZN", "AMZN", "AMAZON COM INC", "US", "stock", "USD")
+    terms = analyst.query_terms(amzn, analyst.Hints())
+    assert analyst._mentions("Amazon analyst price target", terms)
+    assert not analyst._mentions("Palantir analyst price target", terms)
+    # a one-word name and Taiwan stocks are left as they were
+    assert analyst.stock_terms(NVDA) == ["nvda", "nvidia", "輝達"]
+    assert analyst.stock_terms(TSMC) == ["2330", "tsmc", "台積電"]
+
+
+@pytest.mark.parametrize(("codes", "status"), [
+    (["too_many_requests", "unavailable"], "unavailable"),
+    (["too_many_requests", None], "unavailable"),  # one search failed, one answered: not 「查無」 either
+    (["max_uses_exceeded", None], "ready"),  # the searches allowed were made
+])
+def test_an_empty_report_after_failed_searches_is_not_claimed_as_none(client, pool, fake, jobs, codes, status):
+    """2026-11-16 pre-deploy review: every search answered too_many_requests / unavailable, the model reported an
+    empty list, and 2330 was 「近期查無」 for 3 trading days for everyone."""
+    blocks = []
+    for n, code in enumerate(codes):
+        tid = f"srvtoolu_{n}"
+        blocks.append(server_tool_use(tid, "web_search", {"query": "台積電 目標價"}))
+        if code is None:
+            blocks.append(results_block(tid, [("https://news.example.com/2026/11/10/a", "台積電法說會", None)]))
+        else:
+            blocks.append({"type": "web_search_tool_result", "tool_use_id": tid,
+                           "content": {"type": "web_search_tool_result_error", "error_code": code}})
+    fake.reply(*blocks, tool_use("toolu_r", "report_analyst_views", {"items": []}),
+               stop_reason="tool_use", usage={"server_tool_use": {"web_search_requests": len(codes)}})
+    client.post(URL)
+    jobs.pop()()
+    out = client.get(URL).json()
+    assert out["status"] == status and out["items"] == []
+    if status == "unavailable":
+        assert out["notes"] == ["14:10 之後可以再查一次。"] and out["expires_at"] == "2026-11-13T14:00:00+08:00"

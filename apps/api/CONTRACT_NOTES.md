@@ -712,7 +712,7 @@ SearXNG 對上游搜尋引擎送出的請求由 SearXNG 自己決定（瀏覽器
 
 - `news_refresh`：每 `NEWS_REFRESH_MINUTES`（45）分鐘，追蹤的股票＝任何人帳本／自選裡的（`archive.tracked_symbols`）＋最近 `NEWS_VIEW_DAYS`（3）天看過的，
   最久沒更新的先跑，每批最多 `NEWS_MAX_SYMBOLS_PER_RUN`（150）檔，批次最長是間隔的 80%（不會卡住其他排程）。全體共用。
-- `uv run python -m forliosa.news refresh [--symbol 2330.TW] [--no-ai]`：立即更新。
+- `uv run python -m forliosa.news refresh [--symbol 2330.TW] [--no-ai]`：立即更新（帶 `--symbol` 時只更新那幾檔，但 GDELT 整批檔仍比對全部追蹤中的台股）。
 - `uv run python -m forliosa.news searxng-check "台積電" [--language en] [--url http://localhost:8080]`：SearXNG 健康檢查（`/healthz`）＋查一次新聞，
   印出結果數、各引擎的結果數、沒有回應的引擎與原因（拒絕或暫時錯誤）。只印網址的 scheme、主機與埠（帳密會被去掉），不寫資料庫；回應正常時結束碼 0。
 - **下架**：`uv run python -m forliosa.news block udn.com --reason "2026-11-20 來函要求下架"` 立刻刪除該網域（含子網域）已存的標題，之後不再存也不顯示；
@@ -796,7 +796,10 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
   - **DOC API 變成台股的備用**：主要的 `translation` 檔最新讀到的那份在 2 小時內（`gdelt_bulk.FRESH`）就不問 DOC API（`skipped.gdelt_bulk`）；
     超過就恢復一檔一檔問，起點是整批檔最後涵蓋的時間前 1 小時（每檔的 `last_success_at` 記成最新一份檔的時段結束，不記批次時間；
     2026-11-16 審查前記的是批次時間，整批檔停住後改回 DOC API 時會漏掉約 40 分鐘）。整批檔比對**全部追蹤中的台股**，不只這一批的
-    150 檔（一份檔只讀一次，批次外的股票會永遠漏掉那份檔裡的新聞；比對很便宜，下載量不變）。整批檔可用時，每檔的 `news_fetch_state(gdelt, 代號)` 記成「已回應」（`last_success_at`），
+    150 檔（一份檔只讀一次，批次外的股票會永遠漏掉那份檔裡的新聞；比對很便宜，下載量不變）；CLI 帶 `--symbol` 時也一樣
+    （上線前審查：`refresh --symbol 2317` 原本只拿 2317 比對，其他台股永遠拿不到那幾份檔的新聞）。每一份檔比對到的新聞**先存進資料庫，
+    才把這份檔記成已讀**（`GdeltBulk.run` 的 `keep`；上線前審查：原本整批讀完才存，worker 中途被停掉時已記成已讀的檔的新聞會永久遺失；
+    現在中途停掉頂多重讀一份，重複的網址不會重複存）。整批檔可用時，每檔的 `news_fetch_state(gdelt, 代號)` 記成「已回應」（`last_success_at`），
     `last_attempt_at` 仍由批次走到這檔時寫，維持「最久沒更新的先跑」。整批檔的進度在 `news_fetch_state(gdelt_bulk, @translation|@english)`：
     `last_success_at` 是讀到的最新一份的時段（UTC），`items` 是上一次比對到的則數（不用新 migration）。
   - 管理後台的 GDELT 那一列仍只看 DOC API 的暫停狀態（`services/admin.py` 沒改）；整批檔的狀態看 `gdelt-bulk-check` 或 `news_fetch_state`。
@@ -1305,8 +1308,14 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
     「建議加碼」2,300 元 11/10，和大摩「優於大盤」2,300 元 11/11）。仍然不合併：具名的照列，未具名的當成轉述、記成 `duplicate`。
     這是決定 2 的小補充，負責人可以要求拿掉。
   - **搜錯公司不算查無**：任何一次搜尋的關鍵字沒有這檔的名稱、代號、ticker、別名、英文簡稱或公司全名（含中文名稱的前兩個字）時，
-    空結果改回 `unavailable`（`analyst.query_terms`；M31 有一次三次都搜「晶心科」，被存成查無保留 3 天）。問題裡多寫公司全名
+    空結果改回 `unavailable`（`analyst.query_terms`；M31 有一次三次都搜「晶心科」，被存成查無保留 3 天）。美股的名稱是 SEC 的寫法
+    （「Palantir Technologies Inc.」「AMAZON COM INC」），名稱有兩個字以上時第一個字（4 個字母以上）也算名稱（上線前審查：
+    「Palantir analyst price target」被當成搜錯公司，空結果永遠是 `unavailable`；同一個字也用來認「Palantir price target raised…」
+    這種評等標題）。問題裡多寫公司全名
     （`company_profiles` 的公司名稱去掉「股份有限公司」，例如「円星科技」）；名稱只有英數字（M31）時要求名稱和代號一起搜。
+  - **搜尋出錯不算查無**（上線前審查）：有一次 web_search 回錯誤（`web_search_tool_result_error`：`too_many_requests`、`unavailable`…；
+    用完次數的 `max_uses_exceeded` 不算）而且一筆都沒留下時，改回 `unavailable`（`analyst.search_errors`，原因 `search_error`），
+    10 分鐘後可重查；原本會存成「查無」保留 3 個交易日。
   - **關鍵字順序**：第一次「名稱 目標價」；第一次的結果有 90 天內的評等報導但都超過一個月才加年月搜最新的，否則直接換「名稱 投顧 目標價」
     「名稱 外資 評等 目標價」（家登兩次都把第二次搜尋花在加年月，沒搜到瑞銀 710）。舊的範例「名稱 法說會 主辦券商」被照字面搜了
     4/9 次，改成問題裡直接給一個寫好的關鍵字（「禾榮科 永豐金 目標價」，`prompts._broker` 取券商簡稱）；英文名稱放最後，
@@ -1351,8 +1360,8 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
   （提示要它放最後、寫日期，不寫「舊資料」）。對話的 `web_search` **每一題**都帶 `blocked_domains`（同一份 `SEARCH_BLOCKED_DOMAINS`，
   `tools.block_search`）：不只評等題，因為工具清單每一題不同會讓提示快取失效、重播的 thinking 被拒（見「省錢模式」），而且清單上的網站
   本來就是提示說不要用的（論壇、AI 頁、報價頁）。提示也加上「不叫使用者去其他網站查（例如 Goodinfo、CMoney）」。回答裡殘留的篩選字眼
-  （「最新的具名目標價」「近 90 天內，具名外資的…」）在整理回答時固定拿掉（`chat._SCREENING`，在 `tidy_answer` 裡；「未具名」和
-  「近 90 天外資買超」不動）。
+  （「最新的具名目標價」「近 90 天內，具名外資的…」）在整理回答時固定拿掉（`chat._SCREENING`，在 `tidy_answer` 裡；「未具名」、
+  新聞講匿名的說法（「不願具名」「不便具名」「不肯具名」「拒絕具名」「婉拒具名」「要求不具名」「非具名」）和「近 90 天外資買超」不動）。
 - **模型與時間**：`AI_MODEL_ANALYST`（預設 `AI_MODEL`，Haiku 5.5）、`AI_EFFORT_ANALYST=medium`、非串流、`max_tokens` 12000（實測輸出最多 4,608，含 thinking 與 8 筆候選）。
 
 ### 實測費用（產品負責人 2026-11-12 live smoke，`claude-haiku-5-5`）

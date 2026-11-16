@@ -602,8 +602,9 @@ def ai_window(db: Session, symbol: str, now: datetime) -> timedelta:
 def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequence[str], now: datetime,
                   report: RefreshReport, blocked: Sequence[str]) -> bool:
     """Read GDELT's new bulk files once for every tracked Taiwan stock (not only the batch's: ``tracked(limit=False)``)
-    and store the matches as GDELT headlines. While the files are current, each stock's ``gdelt`` row is booked as
-    answered up to the end of the newest file read (``last_success_at``, never moved back: the AI fallback's gate and
+    and store the matches as GDELT headlines, each file's before it is booked as read (``GdeltBulk.run``'s
+    ``keep``). While the files are current, each stock's ``gdelt`` row is booked as answered up to the end of the
+    newest file read (``last_success_at``, never moved back: the AI fallback's gate and
     the DOC API fallback's window read it, so once the files stop the DOC API starts an hour before what they covered;
     ``last_attempt_at`` stays the rotation's, set when the batch reaches the stock). Returns whether the files are
     current."""
@@ -614,16 +615,19 @@ def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequenc
             queries[info.symbol] = build_query(db, info, now - WINDOW, now)
     if not queries:
         return False
-    res = bulk.run(db, queries, now)
+    found: dict[str, int] = {}
+
+    def keep(matches: dict[str, list[RawItem]]) -> None:  # each file's matches, stored before it is booked as read
+        for sym, items in matches.items():
+            heads = to_headlines(items, queries[sym], "gdelt", blocked)
+            found[sym] = found.get(sym, 0) + len(heads)
+            report.stored += store(db, sym, heads, now)
+
+    res = bulk.run(db, queries, now, keep)
     report.fetched[bulk.key] = report.fetched.get(bulk.key, 0) + res.files
     report.bulk_rows += res.rows
     report.errors += res.errors
     report.blocked_sources += [f"{bulk.key}:{f}" for f in res.paused]
-    found: dict[str, int] = {}
-    for sym, items in res.items.items():
-        heads = to_headlines(items, queries[sym], "gdelt", blocked)
-        found[sym] = len(heads)
-        report.stored += store(db, sym, heads, now)
     ok = bulk.healthy(db, now)
     if ok:
         covered = min(now, bulk.covered_until(db) or now)
@@ -679,7 +683,10 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     elif ai == "default":
         ai = default_ai(settings)
     market_run = symbols is None and settings.news_us_market  # the worker's and the CLI's run, not a test's list
-    every = tracked(db, settings, now, limit=False) if symbols is None else symbols
+    # the bulk files are matched against every tracked stock, also on a run for given symbols (the CLI's --symbol):
+    # a file is read once (2026-11-16 review: `refresh --symbol 2317` read them for 2317 alone)
+    every = tracked(db, settings, now, limit=False) if symbols is None or isinstance(bulk, GdeltBulk) else []
+    every = every if symbols is None else list(dict.fromkeys([*every, *symbols]))
     symbols = every[:settings.news_max_symbols_per_run] if symbols is None else symbols
     blocked = blocked_domains(db, settings)
     open_sources = [s for s in sources if _source_open(db, s.key, now)]

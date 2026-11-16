@@ -313,25 +313,35 @@ def _blank_copies(draft: str, sources: Iterable[str]) -> str:
     return "".join(out)
 
 
+# What may follow a paste that goes (``strip_pastes``): the end of its sentence, nothing of the line's own
+_PASTE_TAIL = re.compile(r"[\s。！？!?.，,、；;]*")
+
+
 def strip_pastes(text: str, sources: Iterable[str]) -> str:
     """``text`` without the source text pasted after a line's own words, when the line already says every number of
     it (2026-11-16, 台積電: each item of a draft ended with get_analyst_views' wording, 「…目標價 3,300 元。小摩，
     11/12，維持，評等「優於大盤」，目標價 3,300 元」, and the answer was shown so when its edit was dropped). A line
-    that is only a paste, or a paste with a number the line does not say, stays."""
+    that is only a paste, or a paste with a number the line does not say, stays. So does a paste without a number
+    (nothing shows the line says it) and one inside a sentence (2026-11-16 review: 「分析師指出，AI 需求強勁帶動
+    先進製程產能滿載，公司對明年展望樂觀。」 had become 「分析師指出公司對明年展望樂觀。」): it goes only after the
+    end of a sentence, with nothing but punctuation after it on its line."""
     spans = copied_spans(text, sources)
     cut: list[tuple[int, int]] = []
     for a, b in spans:
         line_start = text.rfind("\n", 0, a) + 1
         line_end = text.find("\n", b)
         line_end = len(text) if line_end < 0 else line_end
-        own = text[line_start:a] + text[b:line_end]
+        own, after = text[line_start:a] + text[b:line_end], text[b:line_end]
         for x, y in spans:  # other pastes on the same line are not the line's own words either
             if (x, y) != (a, b) and line_start <= x < line_end:
-                own = own.replace(text[x:y], "")
-        said = _numbers(_CLOCK.sub(" ", text[a:b])) <= _numbers(own)  # its clock time (「15:02」) aside
-        if len(_OWN_WORD.findall(_ITEM.sub("", own, count=1))) >= 6 and said:
-            while a > line_start and text[a - 1] in " \t，、：:":  # the comma or space that joined it
+                own, after = own.replace(text[x:y], ""), after.replace(text[x:y], "")
+        nums = _numbers(_CLOCK.sub(" ", text[a:b]))  # its clock time (「15:02」) aside
+        pasted = text[line_start:a].rstrip().endswith(("。", "！", "？", "!", "?")) and _PASTE_TAIL.fullmatch(after)
+        if len(_OWN_WORD.findall(_ITEM.sub("", own, count=1))) >= 6 and nums and nums <= _numbers(own) and pasted:
+            while a > max(line_start, cut[-1][1] if cut else 0) and text[a - 1] in " \t":  # the space that joined it
                 a -= 1
+            while b < line_end and _PASTE_TAIL.fullmatch(text[b]):  # its own full stop (the line has one)
+                b += 1
             cut.append((a, b))
     for a, b in reversed(cut):
         text = text[:a] + text[b:]
@@ -513,8 +523,9 @@ def strip_boilerplate(text: str) -> str:
 # in 2 of 3 target answers, kept by the editor): 「具名」 before 機構／外資／目標價…, with the 「近 90 天內」 before it.
 # Not a period before anything else (「近 90 天外資買超」 stays), and not news wording about anonymity: 「未具名」
 # 「不願具名的分析師」「非具名的法人」「不具名的券商主管」 stay (2026-11-16 review: 「不願具名的外資分析師」 had become
-# 「不願外資分析師」).
-_SCREENING = re.compile(r"(?:(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*)?(?<![未不非願意匿])具名的?"
+# 「不願外資分析師」; so had 「不便具名」「不肯具名」「拒絕具名」「婉拒具名」).
+_SCREENING = re.compile(r"(?:(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*)?"
+                        r"(?<![未不非願意匿便肯絕拒想欲])具名的?"
                         r"(?=機構|外資|券商|投顧|投行|投資銀行|法人|分析師|目標價|評等|報告)"
                         r"|(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*"
                         r"(?=的?(?:(?:機構|外資|券商|投顧)的?)?(?:評等|目標價))")
@@ -555,34 +566,53 @@ def _ratio(a: str, b: str) -> float:
     return SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
+def _share(a: str, b: str) -> float:
+    """How much of ``a`` is ``b``'s words (its characters in the blocks it has in common with ``b``)."""
+    same = sum(n for _, _, n in SequenceMatcher(None, a, b, autojunk=False).get_matching_blocks())
+    return same / len(a) if a else 0.0
+
+
 def keep_opening(draft: str, edited: str) -> str:
     """The draft's opening sentence back when the edit made it a list item or dropped it (2026-11-16, round 3: 3 of
     11 edits started with 「- 」 where the draft opened with a sentence). The edit's first item, when it is that
-    sentence rewritten (closer to it than to any item of the draft's list), becomes the opening line again; a line
-    further down that is (the editor moved the opening to the end) moves to the top; otherwise the draft's first
-    sentence goes before the list."""
+    sentence rewritten or its first part (closer to it, or to its first sentence, than to any item of the draft's
+    list; or nearly all of it the opening's words: an opening of two sentences split into two items), becomes the
+    opening line again; a line further down that rewrites the whole opening, not only its second sentence (the
+    editor moved the opening to the end), moves to the top; otherwise the draft's first sentence goes before the
+    list."""
     d_lines, e_lines = draft.strip().split("\n"), edited.split("\n")
     first = next((i for i, x in enumerate(e_lines) if x.strip()), None)
     opening = d_lines[0].strip()
     if first is None or not opening or _NOT_SENTENCE.match(opening) or not _ITEM.match(e_lines[first]):
         return edited
     d_items = [_ITEM.sub("", x, count=1).strip() for x in d_lines[1:] if _ITEM.match(x)]
+    sentence = _FIRST_SENTENCE.match(opening)
+    lead = sentence.group(0) if sentence else opening
+    tail = opening[len(lead):].strip()
 
-    def rewrites_opening(line: str, at_least: float) -> bool:
-        r = _ratio(line, opening)
+    def rewrites_opening(line: str, at_least: float, *parts: str) -> bool:
+        r = max(_ratio(line, x) for x in (opening, *parts))
         return r >= at_least and all(r > _ratio(line, x) for x in d_items)
 
+    def part_of_opening(line: str) -> bool:
+        """The line is a piece of the opening (an opening of two sentences, or one long one, split into list
+        items): nearly all of it is the opening's words, more than any item of the draft's list."""
+        share = _share(line, opening)
+        return share >= 0.8 and all(share > _share(line, x) for x in d_items)
+
     item = _ITEM.sub("", e_lines[first], count=1).strip()
-    if rewrites_opening(item, 0.5):
+    # 2026-11-16 review: 「大華今天跌 6.9%，大盤跌 2.1%。」 (half of a two-sentence opening split in two items) was not
+    # taken for the opening, and the item with its other half was moved up instead
+    if rewrites_opening(item, 0.5, lead) or part_of_opening(item):
         rest = "\n".join(e_lines[first + 1:]).lstrip("\n")
         return item + ("\n\n" + rest if rest else "")
     for i in range(first + 1, len(e_lines)):
         line = _ITEM.sub("", e_lines[i], count=1).strip()
-        if line and not re.match(r"[#|]", line) and rewrites_opening(line, 0.6):
+        if line and not re.match(r"[#|]", line) and rewrites_opening(line, 0.6) \
+                and not (tail and _ratio(line, tail) >= _ratio(line, opening)):  # not only its second sentence
             rest = re.sub(r"\n{3,}", "\n\n", "\n".join(e_lines[first:i] + e_lines[i + 1:])).strip("\n")
             return line + "\n\n" + rest
-    sentence = _FIRST_SENTENCE.match(opening)
-    return (sentence.group(0) if sentence else opening) + "\n\n" + "\n".join(e_lines[first:])
+    return lead + "\n\n" + "\n".join(e_lines[first:])
 
 
 def _editor_thinking(model: str) -> dict[str, Any]:
@@ -637,7 +667,10 @@ class _EditorGaveUp(Exception):
     start in Chinese."""
 
 
-EDITOR_HEAD_CHARS = 8  # the edit's first characters, held back until they show it is written in Chinese
+# The edit's first characters, held back until they show it is written in Chinese: at least this many, and while
+# none is Chinese, as many more as the draft has before its first Chinese character (2026-11-16 review: an edit
+# starting 「NVIDIA（NVDA）11/13 收」 like its draft was dropped at 「NVIDIA（N」)
+EDITOR_HEAD_CHARS = 8
 
 
 def _chinese_head(head: str) -> str:
@@ -1253,7 +1286,9 @@ class ChatTurn:
         # the first words, held back until they show the edit is in Chinese like the draft (2026-11-16: an editor
         # call answered in English, 「I've got the new target price… Please paste the answer」, and it was on screen
         # for a second before the number check dropped it)
-        head: str | None = "" if _CJK.search(body) else None
+        first_cjk = _CJK.search(body)
+        head: str | None = "" if first_cjk else None
+        head_max = EDITOR_HEAD_CHARS + (first_cjk.start() if first_cjk else 0)
         headings = None if _HEADING.search(body) else _HeadingFilter()
         with client.messages.stream(model=model, max_tokens=4000, system=EDITOR_SYSTEM,
                                     output_config={"effort": "low"}, **_editor_thinking(model),
@@ -1280,7 +1315,7 @@ class ChatTurn:
                         raise _EditorGaveUp(f"longer than {limit} characters")
                     if head is not None:
                         head += words
-                        if len(head) < EDITOR_HEAD_CHARS:
+                        if len(head) < EDITOR_HEAD_CHARS or (len(head) < head_max and not _CJK.search(head)):
                             continue
                         words, head = _chinese_head(head), None
                     out.append(words)

@@ -39,8 +39,9 @@ gets one nudge; no report, a refusal or ``max_tokens`` → ``unavailable``. "Not
 items) is only claimed when nothing points the other way: when no item survives ``verify`` while the article
 results carry a rating headline about *this* stock (目標價, price target … with its name, code, ticker or alias in
 the title, not verifiably older than ``MAX_AGE_DAYS``), while a candidate was dropped only because its URL or date
-could not be checked (``UNSURE_DROPS``), or when a search left out the stock's name, code and aliases (``query_terms``:
-an M31 card was searched as 晶心科), the entry is ``unavailable`` (retried after 10 minutes).
+could not be checked (``UNSURE_DROPS``), when a search failed (``search_errors``: too_many_requests, unavailable…), or
+when a search left out the stock's name, code and aliases (``query_terms``: an M31 card was searched as 晶心科), the
+entry is ``unavailable`` (retried after 10 minutes).
 
 Grounding (``verify``): an item is kept only when its URL is one of the ``web_search_result`` URLs the model
 actually received in this generation (compared without scheme, ``www.``, trailing slash, fragment or
@@ -273,6 +274,11 @@ def kept_empty(db: Session, symbol: str, now: datetime) -> AiAnalystViews | None
     ).order_by(AiAnalystViews.trading_day.desc()).limit(1)).first()
     finished = _aware(row.finished_at) if row is not None else None
     if row is None or row.items or finished is None:
+        return None
+    # only one kept past its day (``keep_until``): an empty result of a stock rated in the last year
+    # (``Outcome.covered``) has the usual 24 hours, and the next trading day searches again (2026-11-16 review: it
+    # stood in for the next day until 24 hours after it was made)
+    if (_aware(row.expires_at) or now) <= finished + TTL:
         return None
     if new_notice(db, symbol, finished, now.astimezone(TAIPEI).date()):
         return None
@@ -507,6 +513,19 @@ def search_results(content: list[Any]) -> list[SearchResult]:
     return out
 
 
+def search_errors(content: list[Any]) -> list[str]:
+    """The error codes of the web searches that failed (``web_search_tool_result_error``: too_many_requests,
+    unavailable…), except ``max_uses_exceeded`` (the searches allowed were made)."""
+    out = []
+    for b in content:
+        err = _get(b, "content") if _get(b, "type") == "web_search_tool_result" else None
+        if err is not None and not isinstance(err, list) and _get(err, "type") == "web_search_tool_result_error":
+            code = str(_get(err, "error_code") or "unknown")
+            if code != "max_uses_exceeded":
+                out.append(code)
+    return out
+
+
 def _json(value: Any) -> Any:
     """A value the model may have sent JSON-encoded (``"[{…}]"`` instead of a list): decoded when it parses."""
     if isinstance(value, str):
@@ -557,6 +576,12 @@ def stock_terms(info: InstrumentInfo) -> list[str]:
         t = _CORPORATE_SUFFIX.sub("", (t or "").strip()).casefold()
         if len(t) >= 2:
             terms.add(t)
+    # a US company's first word is its name in headlines and searches: SEC's 「Palantir Technologies Inc.」 and
+    # 「AMAZON COM INC」 are 「Palantir」 and 「Amazon」 there (2026-11-16 review: 「Palantir analyst price target」 was
+    # taken for a search about another stock, and the empty result was never a 「查無」)
+    words = _CORPORATE_SUFFIX.sub("", (info.name or "").strip()).casefold().split()
+    if info.market == "US" and len(words) > 1 and len(words[0]) >= 4 and words[0].isascii() and words[0].isalpha():
+        terms.add(words[0])
     return sorted(terms)
 
 
@@ -638,7 +663,7 @@ class Outcome:
     stop_reason: str | None
     transcript: list[str]  # thinking summaries (when requested), stray text and the raw report (diagnostics)
     reason: str | None = None  # why it is unavailable: no_report | stopped | empty_despite_headlines | unverified
-    #                            | off_target
+    #                            | search_error | off_target
     covered: bool = False  # empty, but a result has a rating headline of it within COVERED_DAYS: not kept longer
 
 
@@ -659,7 +684,8 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
     "Nothing found" (``ready`` with no items) is only claimed when nothing points the other way: if no item
     survives while the search results carry a rating headline about this stock (``rating_headlines``), or while a
     candidate was dropped for a reason that does not show there is nothing (``UNSURE_DROPS``: a URL that is not
-    one of the results, a result without a readable date), the outcome is ``unavailable`` (retried after
+    one of the results, a result without a readable date), while a search failed (``search_errors``) or while a
+    search was for another stock (``query_terms``), the outcome is ``unavailable`` (retried after
     ``UNAVAILABLE_RETRY_AFTER``)."""
     model = store.model_for("analyst", settings)
     since = today - timedelta(days=MAX_AGE_DAYS)
@@ -725,13 +751,16 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
         unsure = any(d.reason in UNSURE_DROPS for d in dropped)
         terms = query_terms(info, hints)
         off_target = [q for q in queries if not _mentions(q, terms)]
-        if headlines or unsure or off_target:
+        failed = search_errors(content)
+        if headlines or unsure or off_target or failed:
             # Do not claim there are no reports: "unavailable" (retried later) instead of an empty "ready".
             log.warning("analyst views %s for %s: nothing kept of %d candidates (dropped: %s; %d results have "
-                        "rating headlines about it; %d searches without its name)", generation_id, info.symbol,
-                        len(reported), ", ".join(d.reason for d in dropped) or "none", headlines, len(off_target))
+                        "rating headlines about it; %d searches without its name; failed searches: %s)",
+                        generation_id, info.symbol, len(reported), ", ".join(d.reason for d in dropped) or "none",
+                        headlines, len(off_target), ", ".join(failed) or "none")
             return Outcome("unavailable", [], dropped, reported, results, usage, calls, queries, stop, transcript,
-                           "empty_despite_headlines" if headlines else "unverified" if unsure else "off_target")
+                           "empty_despite_headlines" if headlines else "unverified" if unsure
+                           else "search_error" if failed else "off_target")
         covered = rating_headlines(results, info, today, max_age_days=COVERED_DAYS) > 0
     return Outcome("ready", items, dropped, reported, results, usage, calls, queries, stop, transcript,
                    covered=covered)

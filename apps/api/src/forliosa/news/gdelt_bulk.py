@@ -53,7 +53,7 @@ import logging
 import re
 import zipfile
 import zlib
-from collections.abc import Iterable, Iterator, Mapping
+from collections.abc import Callable, Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
@@ -246,7 +246,12 @@ class GdeltBulk:
                     "is unreachable" if status == "unreachable" else "refused", reason[:160],
                     st.backoff_until.isoformat())
 
-    def run(self, db: Session, queries: Mapping[str, Query], now: datetime) -> BulkResult:
+    def run(self, db: Session, queries: Mapping[str, Query], now: datetime,
+            keep: Callable[[dict[str, list[RawItem]]], None] | None = None) -> BulkResult:
+        """Read the new files of each feed and match them against ``queries``. ``keep`` gets each file's matches
+        before the file is booked as read (its slot written to ``last_success_at``), so they are stored by then: a
+        run cut off between the two reads the file again (2026-11-16 review: the matches were stored only after the
+        whole run, and a worker stopped meanwhile lost the files already booked)."""
         res = BulkResult()
         for feed in self.feeds:
             index_name, suffix = FEEDS[feed]
@@ -314,7 +319,10 @@ class GdeltBulk:
                     log.warning("GDELT bulk %s not readable: %s", url.rsplit("/", 1)[-1], str(exc)[:200])
                     rows = []
                 res.rows += len(rows)
-                for sym, items in match(rows, queries).items():
+                found = match(rows, queries)
+                if keep is not None:
+                    keep(found)
+                for sym, items in found.items():
                     res.items.setdefault(sym, []).extend(items)
                     matched += len(items)
                 st.last_success_at = slot
