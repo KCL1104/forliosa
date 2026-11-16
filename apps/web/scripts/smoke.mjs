@@ -2023,7 +2023,9 @@ await check("市場頁（手機）：四個分頁＋「問 AI」在 393px 與 32
 await check("手機：動態、成員、設定、紀錄、帳本的控制項可按範圍都 ≥ 44×44；表情是 4px 方肩的小格、留言框沒有拖曳把手", async () => {
   for (const [path, ready] of [
     ["/groups/grp_family?tab=feed", "加入了群組"],
-    ["/groups/grp_family?tab=digests", "本週報酬"],
+    ["/groups/grp_family?tab=digests&report=weekly", "本週報酬"],
+    ["/groups/grp_family?tab=digests", "今日報酬"],
+    ["/groups/grp_hiking?tab=members", "免費・上限 15 人"],
     ["/groups/grp_family/members/usr_dad", "總損益"],
     ["/settings", "授權給你的人"],
     ["/history", "新對話"],
