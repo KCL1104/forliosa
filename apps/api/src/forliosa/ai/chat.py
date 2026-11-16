@@ -60,7 +60,7 @@ import time
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from difflib import SequenceMatcher
 from typing import Any
@@ -117,6 +117,11 @@ _NO_SYSTEM_ROLE: set[str] = set()
 # the answer is shown as written.
 EDITOR_FIRST_TOKEN_SECONDS = 4.0
 EDITOR_TOTAL_SECONDS = 20.0
+# Haiku 5.5 thinks by default and streams nothing while it does (display "omitted"): 3 of 16 live edits hit the
+# first-word limit after 4.5 s of silence and the draft was shown (2026-11-16). Rewording needs no thinking; with
+# it off the first word came in 0.4–0.7 s. Haiku 5.5 accepts "disabled" at effort high or below; Opus 5.5, Sonnet
+# 5.5 and Fable reject it (400), so other models keep their default.
+EDITOR_NO_THINKING_MODELS = ("claude-haiku-5",)
 # Tools that write (a draft) or add to the turn (a chart card) run one at a time on the turn's own session, after the
 # read-only tools of the same round, which run side by side (``ChatTurn._run_tools``)
 SEQUENTIAL_TOOLS = frozenset({"draft_transaction", "draw_chart"})
@@ -203,7 +208,8 @@ def _numbers(text: str) -> set[str]:
     return {m.group(0).replace(",", "") for m in _NUMBER.finditer(text)}
 
 
-_CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?(?:\.TWO?|\.TW)?[)）]")
+# 「台積電(2330)」「聯發科（2454.TW）」, and cnyes's 「台達電(2308-TW)」 (2026-11-16: a clean edit was dropped for it)
+_CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?(?:[.-]TWO?)?[)）]")
 # Years the editor may drop when it rewrites a date as 11/13: 2026, 2026/11/04, 115年 (ROC), 2026年
 _YEAR = re.compile(r"(?<!\d)(?:(?:19|20)\d\d(?=\s*[年/\-.])|1[01]\d(?=\s*(?:年|/\d)))")
 # A date in parentheses, the way news copy writes it: 「今（16）日」「昨（15）日」「本（11）月」「今（2026）年」,
@@ -212,17 +218,44 @@ _YEAR = re.compile(r"(?<!\d)(?:(?:19|20)\d\d(?=\s*[年/\-.])|1[01]\d(?=\s*(?:年
 _DATE_IN_PARENS = re.compile(r"[今昨明前本上下去同當][（(]\s*\d{1,4}\s*[)）]\s*[日月年]"
                              r"|[（(]\s*(?:\d{1,2}\s*月\s*)?\d{1,2}\s*日\s*[)）]"
                              r"|[（(]\s*(?:1[0-2]|0?[1-9])\s*/\s*(?:3[01]|[12]\d|0?[1-9])\s*[)）]")
+# A day without its month, the way news flashes write it: 「台達電(2308-TW)16日09:59下跌120元」 (not 「11月16日」,
+# 「11/16」 or 「20日均線」). The editor writes it as 今天／昨天, so it may go when it is today's or yesterday's day and
+# the edit says so (2026-11-16: an edit that wrote 「台達電今天 09:59 跌 120 元」 was dropped for the 16).
+_BARE_DAY = re.compile(r"(?<![\d/月.])(3[01]|[12]\d|0?[1-9])\s*日(?![均線內後前以來])")
+_TODAY_WORDS = re.compile(r"今天|今日")
+_YESTERDAY_WORDS = re.compile(r"昨天|昨日")
 
 
-def keeps_numbers(draft: str, edited: str) -> bool:
-    """Every number of the draft is still in the edited answer (thousands separators aside). The editor may drop a
-    stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」), the year of a date it rewrites
-    as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」) and a date in parentheses it rewrites as 今天 or 11/16
-    (「今（16）日」, 「（16日）」; only the date itself: the same number elsewhere in the draft still counts)."""
+def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[str]:
+    """The numbers of the draft that are not in the edited answer (thousands separators aside). The editor may drop
+    a stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」, 「台達電(2308-TW)」), the year
+    of a date it rewrites as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」), a date in parentheses it rewrites as
+    今天 or 11/16 (「今（16）日」, 「（16日）」) and, given ``today``, a day without its month that is today's or
+    yesterday's when the edit says 今天 or 昨天 (「16日09:59」). Only the date itself: the same number elsewhere in
+    the draft still counts."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
     years = {m.group(0) for m in _YEAR.finditer(draft)}
+    rest = _DATE_IN_PARENS.sub(" ", draft)
+    if today is not None:
+        days = set()
+        if _TODAY_WORDS.search(edited):
+            days.add(today.day)
+        if _YESTERDAY_WORDS.search(edited):
+            days.add((today - timedelta(days=1)).day)
+        rest = _BARE_DAY.sub(lambda m: " " if int(m.group(1)) in days else m.group(0), rest)
     kept = _numbers(edited)
-    return all(_covered(x, kept) for x in _numbers(_DATE_IN_PARENS.sub(" ", draft)) - codes - years)
+    return sorted(x for x in _numbers(rest) - codes - years if not _covered(x, kept))
+
+
+def keeps_numbers(draft: str, edited: str, today: date | None = None) -> bool:
+    """Every number of the draft is still in the edited answer, but for the dates and codes ``missing_numbers``
+    lets the editor rewrite."""
+    return not missing_numbers(draft, edited, today)
+
+
+def _editor_thinking(model: str) -> dict[str, Any]:
+    """The editor call's ``thinking``: off where the model allows it (``EDITOR_NO_THINKING_MODELS``)."""
+    return {"thinking": {"type": "disabled"}} if model.startswith(EDITOR_NO_THINKING_MODELS) else {}
 
 
 def _covered(x: str, kept: set[str]) -> bool:
@@ -723,8 +756,9 @@ class ChatTurn:
             log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
         finally:
             pieces.close()  # the browser went away: the editor call stops too (its usage is recorded)
-        if edited is not None and not keeps_numbers(body, edited):
-            log.warning("AI answer editor dropped a number; showing the answer as written")
+        if edited is not None and (missing := missing_numbers(body, edited, self.now_fn().date())):
+            # the count only: the numbers may be the user's own amounts
+            log.warning("AI answer editor dropped %d number(s); showing the answer as written", len(missing))
             edited = None
         timing.note(f"editor start {began:.2f} first {_s(first)} end {timing.at():.2f} "
                     f"{'edited' if edited is not None else 'as written'}")
@@ -760,7 +794,7 @@ class ChatTurn:
         size = 0
         pending = ""  # white space held back until a word follows it (none is shown at the start or the end)
         with client.messages.stream(model=model, max_tokens=4000, system=EDITOR_SYSTEM,
-                                    output_config={"effort": "low"},
+                                    output_config={"effort": "low"}, **_editor_thinking(model),
                                     messages=[{"role": "user", "content": body}]) as stream:
             try:
                 for ev in stream:

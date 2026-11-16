@@ -78,6 +78,8 @@ export function ReviewTable({
   const [busy, setBusy] = useState<"checking" | "saving" | "recheck" | null>(recheckOnMount ? "recheck" : null)
   const [notice, setNotice] = useState<string | null>(null)
   const added = useRef(0)
+  /** 已經「補一筆買進」的賣出（同一筆不再補第二次） */
+  const [shortfallFor, setShortfallFor] = useState<ReadonlySet<string>>(new Set())
   const tableRef = useRef<HTMLDivElement>(null)
   const skipped = useMemo(() => doc.rows.filter(isSkipped), [doc.rows])
   const included = rows.filter((r) => r.include)
@@ -133,7 +135,8 @@ export function ReviewTable({
   const addShortfall = (sell: DraftRow) => {
     const id = `added_${++added.current}`
     const buy = shortfallRow(sell, id)
-    if (!buy) return
+    if (!buy || shortfallFor.has(sell.id)) return
+    setShortfallFor((xs) => new Set(xs).add(sell.id))
     setRows((rs) => {
       const i = rs.findIndex((r) => r.id === sell.id)
       return [...rs.slice(0, i), buy, ...rs.slice(i)]
@@ -234,7 +237,7 @@ export function ReviewTable({
           {sheet ? (
             <ul aria-label="讀出來的交易">
               {rows.map((r, i) => (
-                <MobileRow key={r.id} row={r} n={i + 1} errors={showErrors && r.include ? rowErrors(r, t) : {}} onPatch={patch} onInclude={setInclude} onShortfall={addShortfall} />
+                <MobileRow key={r.id} row={r} n={i + 1} errors={showErrors && r.include ? rowErrors(r, t) : {}} onPatch={patch} onInclude={setInclude} onShortfall={shortfallFor.has(r.id) ? undefined : addShortfall} />
               ))}
             </ul>
           ) : (
@@ -268,7 +271,7 @@ export function ReviewTable({
                 </tr>
               </thead>
               {rows.map((r, i) => (
-                <DesktopRow key={r.id} row={r} n={i + 1} errors={showErrors && r.include ? rowErrors(r, t) : {}} onPatch={patch} onInclude={setInclude} onShortfall={addShortfall} />
+                <DesktopRow key={r.id} row={r} n={i + 1} errors={showErrors && r.include ? rowErrors(r, t) : {}} onPatch={patch} onInclude={setInclude} onShortfall={shortfallFor.has(r.id) ? undefined : addShortfall} />
               ))}
             </table>
           )}
@@ -314,7 +317,8 @@ interface RowProps {
   errors: RowErrors
   onPatch: (id: string, p: Partial<EditableFields>) => void
   onInclude: (id: string, include: boolean) => void
-  onShortfall: (row: DraftRow) => void
+  /** 「補一筆買進」（已經補過的那一列沒有） */
+  onShortfall?: (row: DraftRow) => void
 }
 
 /** AI 讀的是鉛筆（石墨灰），使用者改過的是墨水 */
@@ -570,7 +574,7 @@ function Flags({ row: r, errors, onShortfall, onPatch }: { row: DraftRow; errors
         return (
           <li key={f.code} className={cn("flex flex-wrap items-baseline gap-x-3", note ? "text-sm text-ink-2" : "text-base text-ink", f.severity === "error" && "font-medium")}>
             <span>{f.message}</span>
-            {f.code === "oversell" && r.symbol && (
+            {f.code === "oversell" && r.symbol && onShortfall && (
               <button type="button" onClick={() => onShortfall(r)} className={cn(textAction, "font-normal")}>
                 補一筆買進
               </button>

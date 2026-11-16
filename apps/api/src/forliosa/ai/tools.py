@@ -422,11 +422,22 @@ def _market_context(ctx: ToolContext, info: InstrumentInfo, quote: dict[str, Any
     elif (name := _industry_index_name(info.industry)) and (sector := _index_close(ctx, name)) is not None:
         out["industry_index"] = sector
     pct = quote.get("change_pct") if quote else None
-    if pct is not None and taiex["change_pct"] is not None and quote and \
-            quote.get("trade_date") == str(taiex["date"]):
+    day = quote.get("trade_date") if quote else None
+    if pct is not None and taiex["change_pct"] is not None and day == str(taiex["date"]):
         out["vs_taiex_pct_points"] = round((pct - taiex["change_pct"]) * 100, 2)
     out["note"] = MARKET_CONTEXT_NOTE
+    if day and day != str(taiex["date"]):
+        # Every trading evening the stock's close is archived (from 13:35) hours before MI_INDEX's TAIEX of the
+        # same session (after the 21:40 run): said outright, or the model pairs today's move with Friday's index
+        out["dates_differ"] = (f"加權指數是 {_md(taiex['date'])} 的收盤，這一檔是 {_md(day)} 的收盤，不是同一天，"
+                               f"不能拿來比較；{_md(day)} 加權指數漲跌多少要用 web_search 找並寫出時間")
     return out
+
+
+def _md(day: Any) -> str:
+    """「11/13」 from a date or its ISO string."""
+    d = date.fromisoformat(str(day)[:10])
+    return f"{d.month}/{d.day}"
 
 
 def _intraday_note(info: InstrumentInfo, q: Any, now: datetime) -> str | None:
@@ -1074,7 +1085,8 @@ TOOLS: list[ToolSpec] = sorted([
              "attention/disposition status and recent dividends; for Taiwan ETFs also the NAV (淨值) with its date and "
              "the after-close premium/discount (折溢價) vs NAV on the same date. Also english_name (for searching "
              "foreign news), market_context (the latest official close of the TAIEX and the stock's sector index, "
-             "and vs_taiex_pct_points), why_signals (rule-based anomalies of the latest session) and intraday_note "
+             "and vs_taiex_pct_points, or dates_differ when the index's close is of another day), why_signals "
+             "(rule-based anomalies of the latest session) and intraday_note "
              "(today's close is not out yet). Call this first for any question about a specific stock's price, why "
              "it moved or basic data, or an ETF's NAV or premium/discount.",
              {"symbol": _SYMBOL}, ("symbol",), get_stock_overview, _sym_label("查看 ", " 關鍵數據")),

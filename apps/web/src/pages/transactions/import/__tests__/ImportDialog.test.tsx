@@ -92,6 +92,23 @@ const pdfFile = () => new File(["%PDF-1.7 synthetic"], "202610對帳單.pdf", { 
 const pngFile = () => new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a])], "成交明細.png", { type: "image/png" })
 
 describe("匯入對帳單", () => {
+  // mock 的帳本在同一個檔案的測試之間是共用的：這一項要在任何匯入之前（之後的匯入會補上長榮的買進，就不賣超了）
+  it("賣超：「補一筆買進」只補一次；補的那一筆沒填日期與價格就不能簽名", async () => {
+    desktop = true
+    const user = userEvent.setup()
+    const dialog = await openImport()
+    await user.upload(fileInput(dialog), pdfFile())
+    await user.type(await within(dialog).findByLabelText("PDF 密碼", {}, T), "A123456789{Enter}")
+    await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }, { timeout: 10_000 })
+    await user.click(within(dialog).getByRole("button", { name: "補一筆買進" }))
+    expect(within(dialog).queryByRole("button", { name: "補一筆買進" })).toBeNull()
+    // 補的那一筆預設勾著：日期、價格空著，簽名時停下來
+    const sign = within(dialog).getByRole("button", { name: /^簽名：匯入 \d+ 筆$/ })
+    await user.click(sign)
+    expect(await within(dialog).findByText("有 1 筆還沒填好。", {}, T)).toBeInTheDocument()
+    expect(within(dialog).getByText("請選日期、請輸入價格。")).toBeInTheDocument()
+  }, 30_000)
+
   it("有密碼的 PDF：密碼不對 → 對的 → 讀成確認表 → 簽名匯入；密碼不會送到伺服器", async () => {
     desktop = true
     const parse = vi.spyOn(api, "parseStatement")
@@ -130,22 +147,6 @@ describe("匯入對帳單", () => {
     await user.click(within(dialog).getByRole("button", { name: `簽名：匯入 ${count - 1} 筆` }))
     expect(await screen.findByText(`已匯入 ${count - 1} 筆`, {}, T)).toBeInTheDocument()
     await waitFor(() => expect(screen.queryByRole("dialog", { name: "匯入對帳單" })).toBeNull(), T)
-  }, 30_000)
-
-  it("賣超：「補一筆買進」只補一次；補的那一筆沒填日期與價格就不能簽名", async () => {
-    desktop = true
-    const user = userEvent.setup()
-    const dialog = await openImport()
-    await user.upload(fileInput(dialog), pdfFile())
-    await user.type(await within(dialog).findByLabelText("PDF 密碼", {}, T), "A123456789{Enter}")
-    await within(dialog).findByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }, { timeout: 10_000 })
-    await user.click(within(dialog).getByRole("button", { name: "補一筆買進" }))
-    expect(within(dialog).queryByRole("button", { name: "補一筆買進" })).toBeNull()
-    // 補的那一筆預設勾著：日期、價格空著，簽名時停下來
-    const sign = within(dialog).getByRole("button", { name: /^簽名：匯入 \d+ 筆$/ })
-    await user.click(sign)
-    expect(await within(dialog).findByText("有 1 筆還沒填好。", {}, T)).toBeInTheDocument()
-    expect(within(dialog).getByText("請選日期、請輸入價格。")).toBeInTheDocument()
   }, 30_000)
 
   it("截圖（手機的抽屜）：「截圖會整張送給 AI 讀。」→ 三筆 → 匯入 → 復原整批", async () => {

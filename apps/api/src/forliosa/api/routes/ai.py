@@ -31,6 +31,7 @@ from forliosa.config import get_settings
 from forliosa.db import get_db, session_factory
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
+from forliosa.services import imports
 
 router = APIRouter(prefix="/ai", tags=["ai"])
 
@@ -128,7 +129,9 @@ def get_suggestions(route: str = Query("/", max_length=200), symbol: str | None 
 def get_usage(user: User = Depends(current_user), db: Session = Depends(get_db)):
     pool = get_key_pool()
     available = pool.available and bool(pool.ranked(store.slot_month_costs(db)))
-    return store.usage_summary(db, user, get_settings(), available)
+    settings = get_settings()
+    # 匯入對帳單: reads today and the daily cap (not questions: ``messages_today`` leaves them out)
+    return {**store.usage_summary(db, user, settings, available), **imports.usage_fields(db, user, settings)}
 
 
 @router.get("/admin/keys", response_model=KeySlotsOut,
