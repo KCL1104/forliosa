@@ -1,6 +1,7 @@
 """群組加值包與群組 AI 日報: group_passes, group_daily_reports, groups.grandfathered_member_cap, …
 
-產品負責人 2026-11-16 (群組訂閱 memo, all 14 recommendations): a free group takes up to 15 members, a boosted one 50.
+產品負責人 2026-11-16 (群組訂閱 memo, all 14 recommendations): a free group takes up to 5 members (the memo said 15;
+the owner lowered it the same day), a boosted one 50.
 Every group that exists now keeps 50 (``groups.grandfathered_member_cap = 50``, set here); groups made later get NULL.
 ``group_passes``: boosts a site admin grants by hand (no payments yet), attached to one group by its owner.
 ``group_daily_reports``: the daily AI report of boosted groups (facts by user id, filtered on read; 30 days).

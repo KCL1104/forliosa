@@ -1232,6 +1232,13 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
   `messages_today` = 對話提問數＋今天觸發的生成數），之後每次模型呼叫一列，token 計入他的每月額度。讀共用結果的人不計。
   POST 先檢查金鑰（503 `ai_unavailable`）與額度（429），已有的 `pending`／`ready` 不檢查也不計。
 - **只有個股**：ETF（`type != "stock"`）回 422 `analyst_views_stocks_only`，不呼叫模型；前端本來就只對個股顯示。
+- **對話也讀它（2026-11-16，`get_analyst_views`）**：「禾榮科 機構給出的評級與目標價為何?」原本只靠 `web_search`（論壇貼文、
+  沒寫名稱的「美系外資」、AI 整理頁）。對話工具 `get_analyst_views` 只讀今天這一份（`analyst.cached`：不刪過期列、不改
+  `pending`、不啟動搜尋、不計費、不寫 `ai_usage`；過期的當作 `none`，`pending` 超過 5 分鐘當作 `unavailable`）。`ready` 有
+  項目時每筆回一個可引用的 `search_result`（網址＝報導、標題＝報導標題、內文「元大投顧，11/10，調升，評等「買進」，目標價
+  1,350 元」，不是今年才寫年份），所以引用和網路搜尋一樣列在出處；沒有項目時回 `{status, note}`，請模型改用 `web_search`；
+  ETF 回 `status: none`。系統提示新增「機構評等與目標價」一節：先用這個工具，不夠再搜尋近 90 天的新聞；只寫具名機構，
+  彙整頁、行情頁、論壇、AI 整理頁、沒寫名稱、超過 90 天或出處日期不明的都不寫，**也不提到**（不說找到幾筆、哪一則不採用）。
 - **模型與時間**：`AI_MODEL_ANALYST`（預設 `AI_MODEL`，Haiku 5.5）、`AI_EFFORT_ANALYST=medium`、非串流、`max_tokens` 12000（實測輸出最多 4,608，含 thinking 與 8 筆候選）。
 
 ### 實測費用（產品負責人 2026-11-12 live smoke，`claude-haiku-5-5`）
@@ -2533,7 +2540,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 ## 2026-11-16 群組加值包第一階段（`services.group_plans`、`services.group_daily`）
 
-產品負責人照建議（群組訂閱 memo 的 14 項）。還沒有付款：站方手動開通，負責人先用自己的群組試。
+產品負責人照建議（群組訂閱 memo 的 14 項）；同一天再改：免費群組上限 15 → 5 位、群組加值 NT$300／月、NT$3,000／年
+（`docs/pending-decisions.md`「2026-11-16 群組加值包的價格與免費人數上限」）。還沒有付款：站方手動開通，負責人先用自己的群組試。
 
 - **方案存在哪裡**：`group_passes` 表（不是 `groups` 的欄位）：一列一個加值包，付款人 `payer_id`（帳號刪除 SET NULL）、用在哪個群組
   `group_id`（群組刪除 SET NULL：回到付款人手上）、`until`（最後一天的隔天 00:00 台北，和會員的 `plan_until` 一樣）、`note`、`source=manual`。
@@ -2562,8 +2570,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **推播**：`notification_outbox.kind = "daily"`、`daily_report_id`（加在舊表上，所以沒有外鍵：日報刪除時一起刪 outbox 列，找不到日報的列取消）。
   `not_before` = `group_daily.push_at`（23:00–07:30 寫好的延到 07:30）。Discord 一則最多 2,000 字：報酬最多列 20 人、買賣最多 10 項。
 - **保存**：日報 30 天（`sharing_retention` 04:35）。
-- **設定**：`GROUP_FREE_MEMBER_CAP`（15）、`GROUP_BOOSTED_MEMBER_CAP`（50）、`GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD`（5）。
-  價格（NT$149／月、NT$1,490／年）只寫在文件，沒有付款的程式。
+- **設定**：`GROUP_FREE_MEMBER_CAP`（5）、`GROUP_BOOSTED_MEMBER_CAP`（50）、`GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD`（5）。
+  價格（群組加值 NT$300／月、NT$3,000／年；個人會員 NT$490／月、NT$4,900／年）只寫在文件，沒有付款的程式。加值多出來的 AI 成本只有日報，每個群組每月不到 NT$1。
 - **帳號與群組變動時**：付款人刪除帳號 → `payer_id` NULL；已經用在群組上的照樣用到 `until`，還沒用上的沒有人能再用（作廢）。群組轉給別人不動
   加值包；原付款人不再是那個群組的 owner 時不能把它移走（409 `pass_in_use`）。沒有成員的群組被刪除時 `group_id` NULL，付款人還在就回到他手上。
 - **文件**（2026-11-16）：服務條款 §7.8（上限）、新的 §7.9（群組加值與日報）、§1.3／§11.6／§13 收費以後的草稿；隱私 §2.3、§4.3、§5.5（日報送給 AI 的內容，

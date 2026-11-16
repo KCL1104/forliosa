@@ -65,7 +65,7 @@
 
 **2026-11-16 的修改（群組加值包）**：產品負責人照建議定了 14 項（`docs/pending-decisions.md`「2026-11-16 群組加值包」；產品的寫法在 `PRODUCT.md`「群組加值包」）。第一階段**不收錢**：站方在管理後台開通給付款人，負責人先用自己的群組試；收錢等律師說可以以後（決定 1、13）。條文照功能本身寫，收費以後才適用的部分寫成草稿並標【待確認：收費前請律師確認…】。
 
-- **條款 §7.8 人數上限**：原本「每個群組最多 50 位成員」。改成免費的群組 15 位、有加值的 50 位；**在上限開始區分以前就建立的群組不論有沒有加值都維持 50 位**（程式：migration 0023 把當時所有群組的 `groups.grandfathered_member_cap` 設成 50）；滿了只是不能加人，不會移除任何人；沒有超過 50 位的群組。沒有寫日期：「開始區分以前」就是 0023 部署到正式環境的那一刻，律師要寫成日期時填部署日。
+- **條款 §7.8 人數上限**：原本「每個群組最多 50 位成員」。改成免費的群組 5 位、有加值的 50 位（產品負責人同一天把免費的從建議的 15 位改成 5 位）；**在上限開始區分以前就建立的群組不論有沒有加值都維持 50 位**（程式：migration 0023 把當時所有群組的 `groups.grandfathered_member_cap` 設成 50）；滿了只是不能加人，不會移除任何人；沒有超過 50 位的群組。沒有寫日期：「開始區分以前」就是 0023 部署到正式環境的那一刻，律師要寫成日期時填部署日。
 - **條款新增 §7.9「群組加值」**：擁有者取得、用在自己擁有的一個群組；目前由我們開通試用、不收費；有加值的群組 50 位與群組 AI 日報，每個人的 AI 額度不變；群組轉給別人或取得的人刪帳號照樣用到期，群組刪除時回到取得的人手上；到期不移除成員、超過免費上限不能再加人、日報停但以前的 30 天內照樣看得到；成員之間的分攤自己處理、我們不代收（電子支付機構管理條例，見 (f) 第 13 點），也不能用群組經營收費的明牌或跟單（§6.2）；日報只用成員打開的項目、不點名、不建議、不預測，不到 2 位分享報酬率時沒有 AI 段落，深夜寫好的早上 7:30 才推播。
 - **條款 §1.3**：「目前不收費」照舊（加一句群組加值目前開通試用、也不收費），下面加一段**收費以後的條件草稿**（價格與期間寫在方案說明頁；1、3、12 個月；不自動續扣；金流服務商的付款頁或銀行轉帳；第一次購買 7 天內全額退、之後不退、停止服務時按比例退；Email 收據；付款前自己勾選同意），標【待確認】。條款 §11.6 加「停止服務時已付費的期間按比例退還」、§13 加「價格改變只適用之後的購買，不用『繼續使用就表示同意』」，都標【待確認】。§12.3 的責任上限照舊是【待填】（建議寫法見 (a) 第 15 項）。
 - **條款 §2.1、§6.6、§7.3、§7.4**：列舉的內容多「群組 AI 日報」；刪除群組時日報一起刪、加值回到取得的人手上；日報推不推播由擁有者決定、預設不推。
@@ -240,7 +240,7 @@
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
 | T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$3；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
 | T25 | §8.10 | 匯入對帳單：AI 可能讀錯、確認後才寫入、可整批復原；上傳的內容送到 AI 服務供應商 | `docs/api-contract.md`「匯入對帳單（2026-11-16）」（`POST /transactions/batch` 全部或全不、`DELETE /transactions/batches/{id}`）；`api/services/transactions.py`（`create_batch`、`delete_batch`） |
-| T26 | §7.8 | 免費 15、加值 50；上限開始區分以前的群組 50；滿了 409、不移除任何人；每人 20 個群組 | `api/config.py`（`group_free_member_cap`、`group_boosted_member_cap`）；`api/services/group_plans.py`（`plan_of`、`full_message`）；`api/services/groups.py`（`accept_invite`、`MAX_GROUPS`）；`apps/api/alembic/versions/0023_group_passes.py`（`UPDATE groups SET grandfathered_member_cap = 50`） |
+| T26 | §7.8 | 免費 5、加值 50；上限開始區分以前的群組 50；滿了 409、不移除任何人；每人 20 個群組 | `api/config.py`（`group_free_member_cap`、`group_boosted_member_cap`）；`api/services/group_plans.py`（`plan_of`、`full_message`）；`api/services/groups.py`（`accept_invite`、`MAX_GROUPS`）；`apps/api/alembic/versions/0023_group_passes.py`（`UPDATE groups SET grandfathered_member_cap = 50`） |
 | T27 | §7.9、§6.6 | 擁有者把自己的加值用在自己擁有的群組；轉讓或付款人刪帳號照樣用到期；群組刪除時回到付款人手上；到期日報停、以前的照樣看得到；個人 AI 額度不變 | `api/services/group_plans.py`（`attach`：只有 owner、`pass_in_use`；`boosted_group_ids`）；`api/services/group_daily.py`（`run` 只寫加值中的群組；`reports_page` 不看方案）；`api/ai/store.py`（`feature = "group_daily"`、`user_id` NULL，不算進任何人的額度） |
 | T28 | §1.3、§11.6、§13 | 收費以後的條件：只有草稿，**程式裡沒有任何付款功能** | `apps/api/pyproject.toml`（沒有金流套件）；`api/services/group_plans.py`（`source` 只有 `manual`）；`PRODUCT.md`「群組加值包」的價格與收錢方式（只寫在文件） |
 | T23 | §9 | 資料來源與授權（2026-11-15 多 Databento 的美股收盤價：資料集 `databento-equs/price`，只在 `US_PRICE_SOURCE=databento` 時列出；2026-11-16 多證交所的兩個下載檔 `twse-opendata/price`、`twse-opendata/index`，shioaji-data 的用途多「晚上先放進來的收盤價」） | `api/datapolicy.py:54-92`、`:468-515`（Databento：`DATASETS` 的 `databento-equs/price`、`us_prices_served`；證交所下載檔：`DATASETS` 的 `twse-opendata/*`、`shioaji-data/official`）；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
@@ -274,7 +274,7 @@
 20. **匯出資料不含群組加值的紀錄**（隱私 §10.1 列的匯出內容沒有寫它，照實）。`GET /me/export` 沒有 `group_passes`；開始收費以前建議加上（取得的加值、期限、用在哪個群組）。
 21. **群組加值的紀錄沒有保存期限**（隱私 §7 照實寫「持續保留」）。開始收費以後要配合稅法的憑證保存年限訂一個期限（見 (f) 第 17 點）。
 
-**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域、`GROUP_FREE_MEMBER_CAP`／`GROUP_BOOSTED_MEMBER_CAP`（15／50；條款 §7.8、§7.9）、`GROUP_DAILY_ENABLED`（關掉時沒有新的日報：條款 §7.9 與隱私 §5.5、§6.1、§6.2 的日報可以留著）、`AI_MODEL_DIGEST`（日報與週報用的模型；換成別家的要改隱私 §4.1、§5.5）。
+**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域、`GROUP_FREE_MEMBER_CAP`／`GROUP_BOOSTED_MEMBER_CAP`（5／50；條款 §7.8、§7.9）、`GROUP_DAILY_ENABLED`（關掉時沒有新的日報：條款 §7.9 與隱私 §5.5、§6.1、§6.2 的日報可以留著）、`AI_MODEL_DIGEST`（日報與週報用的模型；換成別家的要改隱私 §4.1、§5.5）。
 
 ---
 
@@ -359,7 +359,7 @@
 
 **帶去的資料**：這兩份草稿；`PRODUCT.md`「群組加值包」「會員方案」；一則群組 AI 日報的畫面與推播訊息（負責人用自己的群組試用時截圖）。
 
-**現在的狀態**：還沒有收任何錢。會員與群組加值都由站方在管理後台手動開通，群組加值先給負責人自己的群組試用。預計的收費方式（都還沒做）：個人會員每月 NT$300；群組加值每月 NT$149、每年 NT$1,490；預付、不自動續扣（1、3、12 個月）；用綠界「個人會員」的收款連結或銀行轉帳收款，收到後手動開通；第一次購買 7 天內全額退款。
+**現在的狀態**：還沒有收任何錢。會員與群組加值都由站方在管理後台手動開通，群組加值先給負責人自己的群組試用。預計的收費方式（都還沒做）：個人會員每月 NT$490、每年 NT$4,900；群組加值每月 NT$300、每年 NT$3,000（2026-11-16 定；加值多出來的 AI 成本只有日報，每個群組每月不到 NT$1）；預付、不自動續扣（1、3、12 個月）；用綠界「個人會員」的收款連結或銀行轉帳收款，收到後手動開通；第一次購買 7 天內全額退款。
 
 標「（未查證）」的，是研究時只看到搜尋摘要或二手資料、沒能打開原文的。
 
@@ -370,7 +370,7 @@
 3. **群主向成員分攤**：成員私下（例如 LINE Pay）把錢轉給群主，像合租串流服務，我們不經手。這樣會不會讓群主被認定是用群組收費提供投資建議？條款 §7.9 寫「擁有者不能用群組經營收費的明牌、帶單或跟單服務」，夠不夠？要不要乾脆禁止群主向成員收錢？
 4. **群組 AI 日報的內容**：只寫群組整體（幾個人漲跌、和指數比、兩人以上共同持有的股票今天的漲跌、買賣筆數），不點名、不給建議、不提目標價、不預測、不解釋原因；新聞只連到站內的「AI 收盤重點」與「為什麼漲跌」。這樣算不算「分析意見或推介建議」？每天推播一則到聊天室，風險有沒有變大？
 5. **免責的寫法**：日報與 AI 回答下面的「AI 分析僅供參考，不構成投資建議。」加上條款 §2，夠不夠？要不要換字樣、換位置？
-6. **人數**：免費 15 位、加值 50 位。之後如果要開 100 人以上的群組（這種群組多半是老師帶的社團），風險差多少？
+6. **人數**：免費 5 位、加值 50 位。之後如果要開 100 人以上的群組（這種群組多半是老師帶的社團），風險差多少？
 7. **轉述目標價**：AI 回答與法人觀點會轉述券商、外資已發表的目標價並附來源（`PRODUCT.md`「AI 回答可以轉述目標價」）。收費以後還可以嗎？
 
 ### 收費方式與消費者保護
@@ -385,7 +385,7 @@
 
 ### 稅、登記、發票與金流
 
-15. **登記的門檻**：個人在網路上賣服務，每月營業額未滿 NT$5 萬不用辦稅籍登記（財政部，2025-01-01 起：https://www.etax.nat.gov.tw/etwmain/tax-info/network-transaction-taxtation-area/press/PEwQK1V ）。年繳的錢是不是算在收到的那個月？（一個月賣出 34 份年繳的群組加值就超過。）超過時只要辦稅籍登記（小規模營業人），還是也要商業登記（未查證）？
+15. **登記的門檻**：個人在網路上賣服務，每月營業額未滿 NT$5 萬不用辦稅籍登記（財政部，2025-01-01 起：https://www.etax.nat.gov.tw/etwmain/tax-info/network-transaction-taxtation-area/press/PEwQK1V ）。年繳的錢是不是算在收到的那個月？（一個月賣出 17 份年繳的群組加值，或 11 份年繳的個人會員，就超過。）超過時只要辦稅籍登記（小規模營業人），還是也要商業登記（未查證）？
 16. **發票與收據**：小規模營業人的營業稅 1% 由國稅局按季核定，每月 NT$20 萬以下不用開統一發票（https://www.etax.nat.gov.tw/etwmain/tax-info/network-transaction-taxtation-area/seller/export-case ）。登記以前與以後，寄 Email 收據（不是統一發票）可以嗎？收據上要寫什麼？
 17. **所得與記帳**：收入算營利所得還是執行業務所得？要記哪些帳、憑證留幾年？（會員與群組加值的開通紀錄要配合保存，見 (c) 第 21 點。）
 18. **登記以後要揭露的**：網路銷售的營業人要在網站上標示營業人名稱與統一編號（2023-01-01 起）。個人的營業人名稱是不是就是本名？

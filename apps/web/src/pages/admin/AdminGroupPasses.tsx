@@ -174,7 +174,7 @@ export function GroupPasses() {
             <label htmlFor={`${id}-note`} className="text-sm font-medium">
               備註（選填，只有站方看得到）
             </label>
-            <Input id={`${id}-note`} value={note} maxLength={NOTE_MAX} autoComplete="off" placeholder="例如：11/16 轉帳 NT$149" onChange={(e) => setNote(e.target.value)} />
+            <Input id={`${id}-note`} value={note} maxLength={NOTE_MAX} autoComplete="off" placeholder="例如：11/16 轉帳 NT$300" onChange={(e) => setNote(e.target.value)} />
           </div>
           <Button type="submit" className="self-start" disabled={grant.isPending}>
             開通

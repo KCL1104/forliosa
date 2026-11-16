@@ -93,7 +93,7 @@ export function createAdminStore(deps: AdminDeps) {
     "kai@forliosa.local": { user_id: "usr_kai", display_name: "阿凱" },
   }
   const members = new Map<string, AdminMember>([
-    ["usr_friend", { user_id: "usr_friend", email: "friend@forliosa.local", display_name: "阿明", until: "2026-12-14", note: "11/15 轉帳 NT$300", active: true }],
+    ["usr_friend", { user_id: "usr_friend", email: "friend@forliosa.local", display_name: "阿明", until: "2026-12-14", note: "11/15 轉帳 NT$490", active: true }],
   ])
 
   return {

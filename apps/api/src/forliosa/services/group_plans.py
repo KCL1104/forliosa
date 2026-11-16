@@ -2,7 +2,7 @@
 how many members each group takes, and what site admins and group owners do with boosts. No payments yet: a site admin
 grants a boost by hand and the owner tries it out on their own groups.
 
-* **Member caps**: a free group takes ``GROUP_FREE_MEMBER_CAP`` (15) members, a boosted one
+* **Member caps**: a free group takes ``GROUP_FREE_MEMBER_CAP`` (5) members, a boosted one
   ``GROUP_BOOSTED_MEMBER_CAP`` (50). A group made before the change keeps ``groups.grandfathered_member_cap`` (50,
   set by migration 0023) whatever its plan. More than 50 is not offered. The cap only stops new members
   (``groups.accept_invite``, 409 ``limit_reached`` naming the cap): nobody is ever removed, also when a boost ends.

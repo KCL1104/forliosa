@@ -1191,12 +1191,12 @@ await check("群組加值包：報告分頁的日報｜週報、頻道的「日�
   if ((await daily.getAttribute("aria-checked")) !== "false") throw new Error("日報 push is not off by default")
   await daily.click()
   await page.getByRole("switch", { name: "日報", checked: true }).waitFor({ timeout: 8000 })
-  // 群組設定：加值中的群組；登山社免費 15 人滿了 → 不能產生邀請連結 → 用還沒用的加值 → 上限 50
+  // 群組設定：加值中的群組；登山社免費 5 人滿了 → 不能產生邀請連結 → 用還沒用的加值 → 上限 50
   await page.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
   await page.getByText("加值到 12/31・上限 50 人").waitFor({ timeout: 8000 })
   await page.goto(base + "/groups/grp_hiking?tab=members", { waitUntil: "networkidle" })
-  await page.getByText("免費・上限 15 人").waitFor({ timeout: 8000 })
-  await page.getByText("已經有 15 位成員，上限是 15 人。新的成員不能加入。").waitFor({ timeout: 8000 })
+  await page.getByText("免費・上限 5 人").waitFor({ timeout: 8000 })
+  await page.getByText("已經有 5 位成員，上限是 5 人。新的成員不能加入。").waitFor({ timeout: 8000 })
   if (!(await page.getByRole("button", { name: "產生邀請連結" }).isDisabled())) throw new Error("a full group can make invite links")
   await page.getByRole("button", { name: "用在這個群組" }).click()
   await page.getByText("加值到 12/15・上限 50 人").waitFor({ timeout: 8000 })
@@ -2025,7 +2025,7 @@ await check("手機：動態、成員、設定、紀錄、帳本的控制項可�
     ["/groups/grp_family?tab=feed", "加入了群組"],
     ["/groups/grp_family?tab=digests&report=weekly", "本週報酬"],
     ["/groups/grp_family?tab=digests", "今日報酬"],
-    ["/groups/grp_hiking?tab=members", "免費・上限 15 人"],
+    ["/groups/grp_hiking?tab=members", "免費・上限 5 人"],
     ["/groups/grp_family/members/usr_dad", "總損益"],
     ["/settings", "授權給你的人"],
     ["/history", "新對話"],

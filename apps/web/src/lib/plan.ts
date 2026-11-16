@@ -25,7 +25,7 @@ export function userPlanLabel(plan: Pick<UserPlan, "tier" | "until">, today: str
   return plan.until ? `會員，到 ${untilDay(plan.until, today)}` : "會員"
 }
 
-/** 群組的方案（群組設定那一列）：「加值到 12/31・上限 50 人」「免費・上限 15 人」；舊版後端沒有 plan 時不寫 */
+/** 群組的方案（群組設定那一列）：「加值到 12/31・上限 50 人」「免費・上限 5 人」；舊版後端沒有 plan 時不寫 */
 export function groupPlanLabel(plan: Pick<GroupPlan, "tier" | "until" | "member_cap">, today: string): string {
   const head = plan.tier === "boosted" ? (plan.until ? `加值到 ${untilDay(plan.until, today)}` : "加值") : "免費"
   return `${head}・上限 ${plan.member_cap} 人`

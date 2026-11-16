@@ -1124,7 +1124,7 @@ export interface GroupSummary {
 
 /**
  * 群組的方案（群組加值包第一階段，產品負責人 2026-11-16）：還沒有付款，由站方在 `/admin/members` 替付款人擁有的群組開通。
- * 免費群組上限 15 人、加值 50 人；這次改變以前建立的群組（`grandfathered`）免費也是 50 人。
+ * 免費群組上限 5 人、加值 50 人；這次改變以前建立的群組（`grandfathered`）免費也是 50 人。
  * 到期不踢人：人數超過上限的群組不能再加人；日報停，以前的日報照樣看得到。
  */
 export interface GroupPlan {

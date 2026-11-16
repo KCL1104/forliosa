@@ -262,7 +262,7 @@ describe("群組加值包（和後端 group_plans、group_daily 同一套規則�
     week: () => null,
   }
 
-  it("人數上限看方案：免費 15、加值 50、以前建立的 50；滿了 → 409 limit_reached，句子說上限", async () => {
+  it("人數上限看方案：免費 5、加值 50、以前建立的 50；滿了 → 409 limit_reached，句子說上限", async () => {
     // 換一個人（不是登山社的成員）用登山社的邀請連結加入
     let who = { user_id: "usr_01JDEMO", display_name: "示範使用者", avatar_url: null }
     const store = createSharingStore({
@@ -277,7 +277,7 @@ describe("群組加值包（和後端 group_plans、group_daily 同一套規則�
     }
     expect(err).toBeInstanceOf(ApiError)
     expect(`${(err as ApiError).status} ${(err as ApiError).code}`).toBe("409 limit_reached")
-    expect((err as ApiError).message).toBe("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）")
+    expect((err as ApiError).message).toBe("這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）")
     // 預覽就先說滿了（選分享之前）；同一句話
     expect(store.getInvite("hiking-open")).toMatchObject({ full: true, full_message: (err as ApiError).message })
     // 投資讀書會（以前建立的，免費也是 50）照樣能加入
@@ -319,7 +319,7 @@ describe("群組加值包（和後端 group_plans、group_daily 同一套規則�
     expect((await api.getGroup("grp_friends")).plan?.tier).toBe("boosted")
     expect(await codeOf(api.grantGroupPass({ email: "demo@forliosa.local", until: "9999-12-31" }))).toBe("422 until_too_far")
     await api.revokeGroupPass(made.id)
-    expect((await api.getGroup("grp_hiking")).plan?.member_cap).toBe(15)
+    expect((await api.getGroup("grp_hiking")).plan?.member_cap).toBe(5)
     // 停止不刪紀錄：列成已到期，可以再延長
     expect((await api.listGroupPasses()).find((r) => r.id === made.id)).toMatchObject({ active: false, group_id: "grp_hiking", note: "試用" })
   })

@@ -16,7 +16,7 @@ import { limitText } from "../labels"
  * 群組加值包第一階段（產品負責人 2026-11-16）的畫面：「報告」分頁的日報｜週報、頻道的「日報」開關、群組設定的方案與加值、
  * 人數上限（邀請與加入）、設定頁的方案、管理後台的群組加值。用瀏覽器裡的 mock adapter（和後端同一套規則）。
  * 示範資料：家族投資（我是擁有者，加值到 12/31，有四天的日報）、大學同學（以前加值過，只剩舊的日報）、
- * 登山社（我是擁有者，免費、15 人已經滿了）；我另外有一個到 12/15、還沒用的加值。
+ * 登山社（我是擁有者，免費、5 人已經滿了）；我另外有一個到 12/15、還沒用的加值。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -70,18 +70,18 @@ describe("方案的寫法", () => {
     expect(userPlanLabel({ tier: "free", until: null }, "2026-11-16")).toBe("免費")
     expect(untilDay("2026-01-05", "2026-11-16")).toBe("1/5")
   })
-  it("群組的方案：上限照伺服器給的寫（不寫死 15、50）；到了或超過上限就是滿了", () => {
+  it("群組的方案：上限照伺服器給的寫（不寫死 5、50）；到了或超過上限就是滿了", () => {
     expect(groupPlanLabel({ tier: "boosted", until: "2026-12-31", member_cap: 50 }, "2026-11-16")).toBe("加值到 12/31・上限 50 人")
-    expect(groupPlanLabel({ tier: "free", until: null, member_cap: 15 }, "2026-11-16")).toBe("免費・上限 15 人")
+    expect(groupPlanLabel({ tier: "free", until: null, member_cap: 8 }, "2026-11-16")).toBe("免費・上限 8 人")
     expect(groupPlanLabel({ tier: "free", until: null, member_cap: 5 }, "2026-11-16")).toBe("免費・上限 5 人")
-    expect(groupFull(15, { member_cap: 15 })).toBe(true)
-    expect(groupFull(30, { member_cap: 15 })).toBe(true)
-    expect(groupFull(14, { member_cap: 15 })).toBe(false)
+    expect(groupFull(5, { member_cap: 5 })).toBe(true)
+    expect(groupFull(30, { member_cap: 5 })).toBe(true)
+    expect(groupFull(4, { member_cap: 5 })).toBe(false)
     expect(groupFull(99, null)).toBe(false)
   })
   it("加入時群組滿了：照伺服器的句子寫、說要找誰；自己的群組太多：前面加「沒辦法加入」", () => {
-    expect(limitText("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）")).toBe(
-      "這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）。請告訴邀請你的人。",
+    expect(limitText("這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）")).toBe(
+      "這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）。請告訴邀請你的人。",
     )
     expect(limitText("每人最多加入 20 個群組")).toBe("沒辦法加入：每人最多加入 20 個群組")
   })
@@ -217,12 +217,12 @@ describe("群組設定的方案與人數上限", () => {
     expect(screen.queryByText(/新的成員不能加入/)).toBeNull()
   })
 
-  it("免費、15 人滿了：說新的成員不能加入、不能產生邀請連結；擁有者把還沒用的加值用在這裡 → 上限 50", async () => {
+  it("免費、5 人滿了：說新的成員不能加入、不能產生邀請連結；擁有者把還沒用的加值用在這裡 → 上限 50", async () => {
     const user = userEvent.setup()
     mount()
     renderApp("/groups/grp_hiking?tab=members")
-    expect(await screen.findByText("免費・上限 15 人", undefined, T)).toBeInTheDocument()
-    expect(screen.getByText("已經有 15 位成員，上限是 15 人。新的成員不能加入。")).toHaveAttribute("role", "status")
+    expect(await screen.findByText("免費・上限 5 人", undefined, T)).toBeInTheDocument()
+    expect(screen.getByText("已經有 5 位成員，上限是 5 人。新的成員不能加入。")).toHaveAttribute("role", "status")
     expect(screen.getByRole("button", { name: "產生邀請連結" })).toBeDisabled()
     // 我的兩個加值：還沒用的（直接用）與用在家族投資的（移過來要先確認）
     expect(await screen.findByText("你有一個到 12/15 的加值，還沒有用在群組。", undefined, T)).toBeInTheDocument()
@@ -262,27 +262,27 @@ describe("邀請：群組滿了", () => {
     const user = userEvent.setup()
     mount()
     vi.spyOn(api, "acceptInvite").mockRejectedValue(
-      new ApiError(409, "limit_reached", "這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）"),
+      new ApiError(409, "limit_reached", "這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）"),
     )
     renderApp("/invite/club-2026")
     await user.click(await screen.findByRole("button", { name: "加入群組" }, T))
-    expect(await screen.findByText("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）。請告訴邀請你的人。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）。請告訴邀請你的人。", undefined, T)).toBeInTheDocument()
   })
   it("預覽就說滿了（full）：不讓對方選完分享才被擋", async () => {
     mount()
     vi.spyOn(api, "getInvite").mockResolvedValue({
       group_name: "登山社", inviter_display_name: "阿凱", status: "valid", full: true,
-      full_message: "這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）",
+      full_message: "這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）",
     })
     renderApp("/invite/hiking-open")
-    expect(await screen.findByText("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）。請告訴邀請你的人。", undefined, T)).toBeInTheDocument()
+    expect(await screen.findByText("這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）。請告訴邀請你的人。", undefined, T)).toBeInTheDocument()
     expect(screen.queryByRole("button", { name: "加入群組" })).toBeNull()
   })
-  it("示範資料：登山社是這次改變以後建立的免費群組，15 人、上限 15", async () => {
+  it("示範資料：登山社是這次改變以後建立的免費群組，5 人、上限 5", async () => {
     const adapter = createMockAdapter({ latency: [0, 0] })
     const g = await adapter.getGroup("grp_hiking")
-    expect(g.members).toHaveLength(15)
-    expect(g.plan).toEqual({ tier: "free", until: null, member_cap: 15, grandfathered: false, daily_report: false })
+    expect(g.members).toHaveLength(5)
+    expect(g.plan).toEqual({ tier: "free", until: null, member_cap: 5, grandfathered: false, daily_report: false })
   })
 })
 
@@ -339,7 +339,7 @@ describe("管理後台：群組加值", () => {
     expect(rows).toEqual([
       "示範使用者demo@forliosa.local到 2026/12/15・還沒選群組・11/16 試用（第二個）延長停止",
       "示範使用者demo@forliosa.local到 2026/12/31・群組 grp_family・11/16 試用延長停止",
-      "阿凱kai@forliosa.local2026/11/6 到期・群組 grp_friends・10/7 轉帳 NT$149延長",
+      "阿凱kai@forliosa.local2026/11/6 到期・群組 grp_friends・10/7 轉帳 NT$300延長",
     ])
     expect(list).not.toHaveTextContent("家族投資")
   })
@@ -375,7 +375,7 @@ describe("管理後台：群組加值", () => {
     const dialog = await screen.findByRole("dialog", undefined, T)
     expect(dialog).toHaveTextContent("現在在 2026/11/6 到期。")
     await user.click(within(dialog).getByRole("button", { name: "儲存" }))
-    await waitFor(() => expect(api.updateGroupPass).toHaveBeenCalledWith("gps_friends", expect.objectContaining({ note: "10/7 轉帳 NT$149" })))
+    await waitFor(() => expect(api.updateGroupPass).toHaveBeenCalledWith("gps_friends", expect.objectContaining({ note: "10/7 轉帳 NT$300" })))
     await user.click(screen.getAllByRole("button", { name: "停止 示範使用者 的群組加值" })[1]!)
     const confirm = await screen.findByRole("alertdialog", undefined, T)
     expect(confirm).toHaveTextContent("那個群組馬上回到免費：日報停止，人數超過上限時不能再加人，不會移出成員。")

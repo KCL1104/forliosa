@@ -962,7 +962,7 @@ class Group(Base):
     ranking_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
-    # 群組加值包 (2026-11-16): groups that existed before the free cap went down to 15 keep this many members (50, set
+    # 群組加值包 (2026-11-16): groups that existed before the free cap went down to 5 keep this many members (50, set
     # by migration 0023) whatever their plan; NULL for groups made later (``services.group_plans``).
     grandfathered_member_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
 

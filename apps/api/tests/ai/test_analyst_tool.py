@@ -102,7 +102,8 @@ def test_an_etf_has_no_analyst_views(ctx):
 def test_the_line_writes_a_year_only_for_another_year_and_us_dollar_targets():
     item = {"institution": "Morgan Stanley", "action": "維持", "rating_text": "Overweight", "target_price": 231.5,
             "currency": "USD", "date": "2026-12-28"}
-    assert tools._analyst_line(item, date(2027, 1, 5)) == "Morgan Stanley，2026/12/28，維持，評等「Overweight」，目標價 US$231.5"
+    assert tools._analyst_line(item, date(2027, 1, 5)) == \
+        "Morgan Stanley，2026/12/28，維持，評等「Overweight」，目標價 US$231.5"
     assert tools._analyst_line({**item, "currency": "TWD", "target_price": 700.0, "rating_text": None},
                                date(2026, 12, 30)) == "Morgan Stanley，12/28，維持，目標價 700 元"
 
@@ -121,7 +122,8 @@ def test_the_prompt_sends_rating_questions_to_the_card_first_and_drops_weak_sour
         "先用 get_analyst_views", "再用 web_search 找近 90 天的新聞報導",
         "具名機構（券商、投顧、投資銀行）給的評等與目標價", "目標價彙整頁、股價行情頁、論壇、AI 整理的頁面上的數字不寫",
         "「法人」「美系外資」這類沒寫出機構名稱的不寫", "超過 90 天、出處或日期不明的也不寫",
-        "不寫的就不提：不說找到幾筆、哪一則不採用、為什麼不用",
+        "不寫的就不提：不說找到幾筆（「只有一筆」）、哪一則不採用、為什麼不用",
+        "網址有 forum、標題是討論區的頁面也是論壇",
         "評等照來源的用詞寫（例如「買進」「中立」「加碼」）", "不寫成網站自己的分類（「看多」）",
         "表格的欄位名稱（「多空評等」「預估 EPS」）", "寫預估 EPS 時寫出是哪一年的預估",
         "不算平均或上漲空間", "目前沒有機構評等與目標價的資料",

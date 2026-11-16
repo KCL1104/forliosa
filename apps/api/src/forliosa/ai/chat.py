@@ -241,11 +241,11 @@ _APPROX = re.compile(r"(?:大約|約|將近|接近|近|逾|超過)\s*(?:下跌|�
 _URL = re.compile(r"\]\([^)\s]*\)|https?://[^\s)）\]」]+")
 _SOURCE_INDEX = re.compile(r"(?<![\d.])\d{1,2}\s*-\s*\d{1,2}\s*(?=(?:號|筆)?\s*(?:來源|搜尋結果|結果))"
                            r"|(?:來源|搜尋結果)\s*\d{1,2}(?:\s*-\s*\d{1,2})?")
-# A sentence about a source left out (「另有一則目標價 1,418 元的說法，來源是 AI 生成的整理頁面，出處與日期都不明，因此不
-# 採用。」): EDITOR_SYSTEM deletes it whole, numbers and all (2026-11-16, 禾榮科: the one edit that did was dropped for the
-# missing 1418 and the draft was shown)
-_VETTING = re.compile(r"[^。！？\n]*(?:不採用|不予採用|不可信|出處(?:與日期)?都?不明|來源不明|日期不明|AI ?生成|AI ?整理的?頁)"
-                      r"[^。！？\n]*[。！？]?")
+# A sentence about a source left out (「另有一則目標價 1,418 元的說法，來源是 AI 生成的整理頁面，因此不採用。」):
+# EDITOR_SYSTEM deletes it whole, numbers and all (2026-11-16, 禾榮科: the one edit that did was dropped for
+# the missing 1418 and the draft was shown)
+_VETTING = re.compile(r"[^。！？\n]*(?:不採用|不予採用|不可信|出處(?:與日期)?都?不明|來源不明|日期不明"
+                      r"|AI ?生成|AI ?整理的?頁)[^。！？\n]*[。！？]?")
 
 
 def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[str]:
@@ -286,14 +286,15 @@ def keeps_numbers(draft: str, edited: str, today: date | None = None) -> bool:
 
 # Dates written the way CHAT_SYSTEM asks (11/13, a year only when it is not this year, no ROC year, no zero padding),
 # fixed in the held-back draft before the editor sees it: the model copies them from MOPS titles and rating tables and
-# the editor, which does not know this year, left them (2026-11-16, 禾榮科: 「115 年第 3 季」 in 7 and 「2026/10/02」 in 6
-# of 8 answers). Links are left as they are.
+# the editor, which does not know this year, left them (2026-11-16, 禾榮科: 「115 年第 3 季」 in 7 and
+# 「2026/10/02」 in 6 of 8 answers). Links are left as they are.
 _AD_DATE = re.compile(r"(?<![\d/.])(20\d\d)(?:([/.-])(1[0-2]|0?[1-9])\2(3[01]|[12]\d|0?[1-9])"
                       r"|\s*年\s*(1[0-2]|0?[1-9])\s*月\s*(3[01]|[12]\d|0?[1-9])\s*日)(?![\d/])")
 _ROC_DATE = re.compile(r"(?<![\d/.])(1[01]\d)(?:/(1[0-2]|0?[1-9])/(3[01]|[12]\d|0?[1-9])"
                        r"|\s*年\s*(1[0-2]|0?[1-9])\s*月\s*(3[01]|[12]\d|0?[1-9])\s*日)(?![\d/])")
 _ROC_MONTH = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*(1[0-2]|0?[1-9])\s*月(?!\s*\d)")
-_ROC_PERIOD = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*度?\s*(第\s*[1-4一二三四]\s*季|前\s*[2-3二三]\s*季|[上下]\s*半\s*年)")
+_ROC_PERIOD = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*度?\s*"
+                         r"(第\s*[1-4一二三四]\s*季|前\s*[2-3二三]\s*季|[上下]\s*半\s*年)")
 _PADDED_MD = re.compile(r"(?<![\d/.:])(1[0-2]|0[1-9])/(3[01]|[12]\d|0[1-9])(?![\d/:])")
 _CJK = re.compile(r"[\u4e00-\u9fff]")  # a Chinese character
 

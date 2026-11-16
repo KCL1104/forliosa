@@ -745,7 +745,7 @@ describe("管理後台：只有站方管理員", () => {
     mount()
     renderApp("/admin/members")
     const list = await screen.findByRole("list", { name: "會員" }, T)
-    expect([...list.children].map((li) => li.textContent)).toEqual(["阿明friend@forliosa.local到 2026/12/14・11/15 轉帳 NT$300續期取消會員"])
+    expect([...list.children].map((li) => li.textContent)).toEqual(["阿明friend@forliosa.local到 2026/12/14・11/15 轉帳 NT$490續期取消會員"])
     // 分頁只有「會員」是目前頁（總覽不跟著畫線）
     const nav = screen.getByRole("navigation", { name: "管理後台" })
     expect(within(nav).getAllByRole("link").map((a) => a.getAttribute("aria-current"))).toEqual([null, null, null, "page"])

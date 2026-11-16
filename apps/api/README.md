@@ -167,6 +167,8 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `AI_RETENTION_DAYS` | 30 | 對話、訊息、草稿在最後活動後保存幾天（0＝永久） |
 | `AI_MARKET_SUMMARY_ENABLED` | `true` | 市場頁的 AI 收盤重點：每個交易日一則、全站共用（worker 15:05、18:05、22:05；收盤後第一次開頁面也會觸發）；不計入任何人的額度 |
 | `AI_DIGEST_ENABLED`、`AI_MODEL_DIGEST` | `true`、空 | 群組 AI 週報（worker 每週六 20:00，Message Batches；不計入任何成員的額度）；模型預設同 `AI_MODEL` |
+| `GROUP_FREE_MEMBER_CAP`、`GROUP_BOOSTED_MEMBER_CAP` | 5、50 | 群組加值包（產品負責人 2026-11-16）：免費群組最多幾位成員、加值的群組最多幾位；0023 部署當時已有的群組維持 50（`groups.grandfathered_member_cap`）。滿了只擋加入，不移除人。api 與 worker 設一樣的值 |
+| `GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD` | `true`、5 | 群組 AI 日報（只給加值的群組，每個交易日一則；不計入任何成員的額度）；全部群組合計每月的花費上限（美元，0＝不限） |
 | `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
 | `IMPORT_STATEMENTS` | `off` | 匯入對帳單（`POST /imports/statement`；產品負責人 2026-11-16）誰能用：`off` 沒有人、`admins` 只有站方管理員（`ADMIN_EMAILS`；第一版）、`all` 所有登入的人（免費與會員一樣）。`GET /me` 的 `plan.statement_import` 照它算 |
 | `AI_MODEL_IMPORT`、`AI_EFFORT_IMPORT` | 空（＝`AI_MODEL`，`claude-haiku-5-5`）、`medium` | 讀對帳單的模型與 effort（結構化 JSON、沒有工具、一次最多 5 頁） |

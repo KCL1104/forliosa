@@ -203,9 +203,9 @@ class Settings(BaseSettings):
     # 群組加值包 (產品負責人 2026-11-16, ``forliosa.services.group_plans``): a free group takes up to this many members,
     # a boosted one (a pass granted on /admin/group-passes, attached by the group's owner) up to the second number.
     # Groups made before the change keep 50 (``groups.grandfathered_member_cap``, set by migration 0023). More than 50
-    # is not offered (the leaderboard is computed on every request). Prices (NT$149 a month, NT$1,490 a year) are
-    # docs only: there is no payment code yet.
-    group_free_member_cap: int = Field(default=15, ge=2, le=50)
+    # is not offered (the leaderboard is computed on every request). Free 5 / boosted 50 and the prices (NT$300 a month,
+    # NT$3,000 a year) are the owner's 2026-11-16 decision; prices are docs only: there is no payment code yet.
+    group_free_member_cap: int = Field(default=5, ge=2, le=50)
     group_boosted_member_cap: int = Field(default=50, ge=2, le=50)
     # 群組 AI 日報 (``forliosa.services.group_daily``): boosted groups only, one per trading day once the closes are in.
     # Off = the worker job is not scheduled. The AI paragraph is charged to nobody (feature ``group_daily``); once the

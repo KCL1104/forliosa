@@ -126,7 +126,7 @@ class GroupPlanOut(BaseModel):
 
     tier: Literal["free", "boosted"]
     until: str | None = Field(default=None, description="加值的最後一天（YYYY-MM-DD，台北）；null＝免費")
-    member_cap: int = Field(description="最多幾位成員（免費 15、加值 50；之前建立的群組維持 50）；滿了就不能再加入")
+    member_cap: int = Field(description="最多幾位成員（免費 5、加值 50；之前建立的群組維持 50）；滿了就不能再加入")
     grandfathered: bool = Field(description="加值包推出前建立的群組：不論方案都維持 50 位")
     daily_report: bool = Field(description="有群組 AI 日報（加值中）")
 

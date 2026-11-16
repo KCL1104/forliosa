@@ -153,7 +153,7 @@ interface MockGroup {
   reactions: Map<string, Map<ReactionEmoji, Set<string>>>
   digests: MockDigest[]
   daily: MockDaily[]
-  /** 這次改變（免費上限降到 15 人）以前建立的群組：上限維持 50 人 */
+  /** 這次改變（免費上限降到 5 人）以前建立的群組：上限維持 50 人 */
   grandfathered: boolean
   discord: MockDiscord | null
   telegram: MockTelegram | null
@@ -163,8 +163,8 @@ interface MockGroup {
 const DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 /** 加權報酬指數的存檔起點（後端 CONTRACT_NOTES：證交所 2026-11-02 起） */
 const INDEX_ARCHIVE_START = "2026-11-02"
-/** 群組加值包（後端 GROUP_FREE_MEMBER_CAP、GROUP_BOOSTED_MEMBER_CAP）：免費 15 人、加值 50 人；以前建立的群組 50 人 */
-const FREE_CAP = 15
+/** 群組加值包（後端 GROUP_FREE_MEMBER_CAP、GROUP_BOOSTED_MEMBER_CAP）：免費 5 人、加值 50 人；以前建立的群組 50 人 */
+const FREE_CAP = 5
 const BOOSTED_CAP = 50
 const MAX_GROUPS = 20
 
@@ -191,7 +191,7 @@ function isoTaipei(ms: number): string {
 const roleRank: Record<GroupRole, number> = { owner: 0, admin: 1, member: 2 }
 
 /** 登山社的其他 14 位（示範用的稱呼） */
-const HIKERS = ["阿傑", "小雯", "大熊", "佳佳", "老周", "小安", "阿哲", "Kevin", "美玲", "阿德", "小魚", "志豪", "雅婷", "阿峰"]
+const HIKERS = ["阿傑", "小雯", "大熊", "佳佳"]
 
 /** 示範用：一個人在某一天的報酬（不是今天的日報用；固定的假數字，-1.5% 到 +2.5%） */
 function pseudoDayReturn(userId: string, day: string): number {
@@ -330,7 +330,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       telegram: null,
       telegramLink: null,
     }
-    // 免費、而且已經滿了的群組（這次改變以後建立的，上限 15 人）：我是擁有者；其他 14 位只開了… 什麼都沒開
+    // 免費、而且已經滿了的群組（這次改變以後建立的，上限 5 人）：我是擁有者；其他 4 位什麼都沒開
     const hikers = HIKERS.map((name, i): UserRef => ({ user_id: `usr_hike_${i + 1}`, display_name: name, avatar_url: null }))
     extraPeople.push(...hikers)
     const hiking: MockGroup = {
@@ -341,7 +341,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       ],
       former: new Set(),
       invites: [
-        { id: "inv_hiking", token: "hiking-open", expires_at: "2026-11-18T20:00:00+08:00", multi_use: true, uses: 14, revoked: false, inviter: me.user_id },
+        { id: "inv_hiking", token: "hiking-open", expires_at: "2026-11-18T20:00:00+08:00", multi_use: true, uses: 4, revoked: false, inviter: me.user_id },
       ],
       comments: [],
       reactions: new Map(),
@@ -362,7 +362,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
     passes.push(
       { id: "gps_family", payer: me.user_id, group_id: family.id, until: "2026-12-31", note: "11/16 試用", created_at: "2026-11-12T09:00:00+08:00", attached_at: "2026-11-12T09:05:00+08:00" },
       { id: "gps_spare", payer: me.user_id, group_id: null, until: "2026-12-15", note: "11/16 試用（第二個）", created_at: "2026-11-12T09:01:00+08:00", attached_at: null },
-      { id: "gps_friends", payer: PEOPLE.kai.user_id, group_id: friends.id, until: "2026-11-06", note: "10/7 轉帳 NT$149", created_at: "2026-10-07T21:00:00+08:00", attached_at: "2026-10-07T21:10:00+08:00" },
+      { id: "gps_friends", payer: PEOPLE.kai.user_id, group_id: friends.id, until: "2026-11-06", note: "10/7 轉帳 NT$300", created_at: "2026-10-07T21:00:00+08:00", attached_at: "2026-10-07T21:10:00+08:00" },
     )
 
     const dadBuy = `trade:gfi_${PEOPLE.dad.user_id}_${MOCK_TODAY}_2330.TW_buy`
@@ -516,7 +516,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
   }
   const commentCount = (g: MockGroup, target: string) => g.comments.filter((c) => c.target === target).length
 
-  /** 群組的方案（後端 `group_plans.plan_of`）：用在這個群組、還沒到期的加值 → 加值；上限 免費 15、加值 50，以前建立的 50 */
+  /** 群組的方案（後端 `group_plans.plan_of`）：用在這個群組、還沒到期的加值 → 加值；上限 免費 5、加值 50，以前建立的 50 */
   const planOf = (g: MockGroup): GroupPlan => {
     const live = passes.filter((x) => x.group_id === g.id && x.until >= MOCK_TODAY).map((x) => x.until).sort()
     const boosted = live.length > 0

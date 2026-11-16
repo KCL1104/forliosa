@@ -23,8 +23,8 @@ export const SHARE_COPY: Record<keyof ShareSettings, { label: string; detail: st
 }
 
 /**
- * 409 `limit_reached` 有兩種：群組滿了（群組加值包：免費 15 人、加值 50 人；伺服器的句子已經說了上限，
- * 「這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）」）→ 照寫、再說要找誰；
+ * 409 `limit_reached` 有兩種：群組滿了（群組加值包：免費 5 人、加值 50 人；伺服器的句子已經說了上限，
+ * 「這個群組已經滿了：免費群組最多 5 位成員（加值的群組最多 50 位）」）→ 照寫、再說要找誰；
  * 自己加入的群組太多（「每人最多加入 20 個群組」）→ 前面加「沒辦法加入：」。
  */
 export function limitText(message: string): string {

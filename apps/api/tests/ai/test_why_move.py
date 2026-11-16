@@ -110,7 +110,7 @@ def test_a_news_question_gets_no_price_or_market_and_no_source_vetting():
 def test_the_editor_deletes_source_vetting_and_rewrites_table_labels():
     for phrase in ("不新增、不刪除任何事實（下面寫明要整句刪掉的除外）",
                    "交代資料篩選的句子整句刪掉，連同裡面的數字", "「目前只找到一筆可引用的資料」",
-                   "「另有一則…說法，來源是…，因此不採用」",
+                   "「另有一則…說法，來源是…，因此不採用」", "同一句還有事實時，只拿掉交代篩選的字",
                    "網站表格的欄位名稱（「多空評等」「預估 EPS」）不要照抄", "「多空評等為看多」寫成「評等看多」"):
         assert phrase in EDITOR_SYSTEM, phrase
 

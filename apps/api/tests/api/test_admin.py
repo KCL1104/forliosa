@@ -271,11 +271,11 @@ def test_grant_renew_and_revoke_a_member(admin, client):
     assert r.status_code == 404 and error(r) == "user_not_found"
     r = admin.put(MEMBERS, json={"email": "demo@forliosa.local", "until": "2020-01-01"})
     assert r.status_code == 422
-    r = admin.put(MEMBERS, json={"email": "Demo@Forliosa.local", "until": "2099-01-31", "note": " 11/15 轉帳 NT$300 "})
+    r = admin.put(MEMBERS, json={"email": "Demo@Forliosa.local", "until": "2099-01-31", "note": " 11/15 轉帳 NT$490 "})
     assert r.status_code == 200, r.text
     row = r.json()
     assert (row["email"], row["until"], row["note"], row["active"]) == (
-        "demo@forliosa.local", "2099-01-31", "11/15 轉帳 NT$300", True)
+        "demo@forliosa.local", "2099-01-31", "11/15 轉帳 NT$490", True)
     assert client.get(f"{API}/me").json()["plan"]["tier"] == "member"
     # renew: same account, a later day; the note can be cleared
     r = admin.put(MEMBERS, json={"email": "demo@forliosa.local", "until": None, "note": ""})
