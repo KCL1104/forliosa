@@ -311,9 +311,10 @@ def test_never_more_than_one_request_per_ten_minutes_even_across_restarts(engine
     scene.start()  # redeployed at 13:48: nothing in memory
     scene.run(at(DAY, 13, 48), at(DAY, 14, 20))
     assert scene.twse.times() == [at(DAY, 13, 45), at(DAY, 13, 55), at(DAY, 14, 5), at(DAY, 14, 15)]
-    scene.run(at(DAY, 14, 21), at(DAY, 23, 0))
+    scene.run(at(DAY, 14, 21), at(DAY + timedelta(days=1), 1, 0))
     times = scene.twse.times()
-    assert times[-1] == at(DAY, 17, 55)  # the last look of the day; the evening release and the OpenAPI take over
+    assert times[-1] == at(DAY, 23, 55)  # the last look of the day; the next morning's OpenAPI takes over
+    assert len(times) == 62  # 13:45 … 23:55, one every 10 minutes
     assert all(b - a >= timedelta(minutes=10) for a, b in itertools.pairwise(times))
     assert prices(engine) == {} and scene.refreshes == []
 
@@ -344,13 +345,24 @@ def test_a_server_error_is_asked_again_ten_minutes_later(engine, scene):
 
 
 def test_nothing_is_asked_outside_trading_day_afternoons(engine, scene):
-    for start, end in ((at(DAY, 0, 0), at(DAY, 13, 44)), (at(DAY, 18, 0), at(DAY, 23, 59)),
+    for start, end in ((at(DAY, 0, 0), at(DAY, 13, 44)), (at(DAY, 23, 59), at(DAY, 23, 59)),
                        (at(date(2026, 11, 14), 0, 0), at(date(2026, 11, 15), 23, 59)),  # a weekend
                        (at(date(2026, 10, 9), 13, 0), at(date(2026, 10, 9), 19, 0))):  # 國慶日 (built-in holiday)
         scene.run(start, end)
     assert scene.twse.requests == []
-    assert closes.twse_poll_day(at(DAY, 13, 45)) == DAY and closes.twse_poll_day(at(DAY, 17, 59)) == DAY
-    assert closes.twse_poll_day(at(DAY, 13, 44)) is None and closes.twse_poll_day(at(DAY, 18, 0)) is None
+    assert closes.twse_poll_day(at(DAY, 13, 45)) == DAY and closes.twse_poll_day(at(DAY, 23, 58)) == DAY
+    assert closes.twse_poll_day(at(DAY, 13, 44)) is None and closes.twse_poll_day(at(DAY, 23, 59)) is None
+    assert closes.twse_poll_day(at(DAY + timedelta(days=1), 0, 0)) is None
+
+
+def test_a_worker_started_in_the_evening_still_gets_the_same_day_file(engine, scene):
+    """2026-11-16: the worker was redeployed at 18:15 and 21:30, after the old 18:00 cut-off, so the afternoon file was
+    never asked for and the listed closes waited for the evening release. Now the first poll after a late start
+    fetches it once, and then nothing more is asked that day."""
+    scene.run(at(DAY, 21, 30), at(DAY, 23, 59))
+    assert scene.twse.times()[0] == at(DAY, 21, 30)
+    assert len(scene.twse.times()) <= 2  # STOCK_DAY_ALL (and MI_INDEX once), then stored: no more requests
+    assert prices(engine)["2330.TW"][2] == "twse-opendata"
 
 
 def test_the_switch_turns_the_job_off(md, monkeypatch):
