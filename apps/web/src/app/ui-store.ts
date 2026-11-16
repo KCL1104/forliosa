@@ -9,6 +9,8 @@ export interface TradePrefill {
   quantity?: number
   price?: number
   date?: string
+  /** 記一筆第一筆填的手續費（帶到完整表單的「手續費（選填）」） */
+  fee?: number
 }
 
 /** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股 */

@@ -57,7 +57,7 @@ export function TradeFormHost() {
   const quick = !edit && !full
   const title = edit ? "編輯交易" : quick ? "記一筆" : "記一筆交易"
   // 畫面上不寫副標；給螢幕報讀器一句
-  const description = quick ? "先選一檔股票，再填股數、買進日期與價格。" : "賣出、股利與其他類型的交易。"
+  const description = quick ? "先選一檔股票，再填股數、買進日期與價格，手續費選填。" : "賣出、股利與其他類型的交易。"
   const formKey = edit?.id ?? (quick ? `quick:${accountId ?? ""}` : sell ? "sell" : "new")
   const body = (layout: "split" | "stack") =>
     quick ? (
@@ -77,8 +77,8 @@ export function TradeFormHost() {
   if (isDesktop) {
     return (
       <Dialog open={open} onOpenChange={(o) => !o && close()}>
-        {/* 完整表單兩欄、自己排內距（右欄的試算滿到邊緣）；簡單輸入只有一欄，窄一點 */}
-        <DialogContent className={cn("max-h-[calc(100dvh-4rem)] gap-0 overflow-y-auto p-0", quick ? "sm:max-w-[600px]" : "sm:max-w-[760px]")}>
+        {/* 完整表單兩欄、自己排內距（右欄的試算滿到邊緣）；簡單輸入只有一欄，窄一點（一筆一列四格：股數、日期、價格、手續費） */}
+        <DialogContent className={cn("max-h-[calc(100dvh-4rem)] gap-0 overflow-y-auto p-0", quick ? "sm:max-w-[680px]" : "sm:max-w-[760px]")}>
           <DialogHeader className="px-6 pt-5 pb-4">
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription className="sr-only">{description}</DialogDescription>
@@ -147,7 +147,7 @@ function initialState(edit: Transaction | undefined, unitPref: "lot" | "share", 
       qtyUnit: q != null ? (inLots ? "lot" : "share") : unitPref,
       priceText: prefill?.price != null ? String(prefill.price) : "",
       amountText: "",
-      feeText: "",
+      feeText: prefill?.fee != null ? String(prefill.fee) : "",
       taxText: "",
       dayTrade: false,
       note: "",

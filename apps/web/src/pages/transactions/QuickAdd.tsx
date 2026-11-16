@@ -28,10 +28,11 @@ import { AccountSelect, StampLine } from "./TradeForm"
 /**
  * 記一筆（預設的輸入方式；產品負責人 2026-11-14 第二次：照 Google 財經新增持有資產的做法，分兩步）：
  * ① 選股票：搜尋框，沒打字時列出持有的與觀察清單（現價、漲跌），一打字換成搜尋結果；這一步「新增」不能按。
- * ② 選好的股票（現價、漲跌、✕ 回到第一步）→ 每一筆的股數、買進日期（月曆，一開始空白、一定要選）、買進價格。
+ * ② 選好的股票（現價、漲跌、✕ 回到第一步）→ 每一筆的股數、買進日期（月曆，一開始空白、一定要選）、買進價格、手續費（選填）。
  *    選了日期，價格下面寫「那天收盤 1,085」，點一下才填進去（只用自己存檔的官方收盤，Yahoo 回補的日線不進帳本）。
  *    同一檔分好幾次買的，按「再加一筆買進」多一列（日期一樣空白）。
- * 沒有類型、備註與手續費：手續費與稅不自動算（2026-11-14），填的價格就是成本；賣出、股利與其他類型走完整表單。
+ * 手續費（產品負責人 2026-11-16）：每一筆自己填，不填就是 0、不自動算（2026-11-14）；幣別是這一檔的計價幣別（後端照商品記，
+ * 美股是美元，不看帳戶）。沒有類型與備註；交易稅只有賣出，在完整表單。賣出、股利與其他類型走完整表單。
  * 「只記持股」的帳戶取消了（2026-11-14）：每一筆買進都有日期。
  */
 interface Lot {
@@ -39,10 +40,19 @@ interface Lot {
   qty: string
   date: string
   price: string
+  /** 選填；空白就不送（後端當 0） */
+  fee: string
 }
 
 const MAX_LOTS = 12
-const newLot = (id: number): Lot => ({ id, qty: "", date: "", price: "" })
+const newLot = (id: number): Lot => ({ id, qty: "", date: "", price: "", fee: "" })
+
+/** 填的手續費：空白是 null（不送）；不是數字或小於 0 是 NaN（「請填數字」） */
+const feeOf = (l: Lot): number | null => {
+  if (!l.fee.trim()) return null
+  const n = num(l.fee)
+  return n !== null && Number.isFinite(n) && n >= 0 ? n : Number.NaN
+}
 
 export function QuickAdd({
   initialSymbol,
@@ -270,7 +280,7 @@ function PickStep({
   )
 }
 
-// ── 第二步：股數、買進日期、買進價格 ───────────────────────────
+// ── 第二步：股數、買進日期、買進價格、手續費 ────────────────────────
 
 function DetailsStep({
   symbol,
@@ -311,6 +321,7 @@ function DetailsStep({
       qty: quantityError(l.qty, inLots, isUS),
       date: !l.date ? "請選買進日期" : l.date > today ? "不能選未來的日期" : null,
       price: !p || p <= 0 ? "請輸入價格" : null,
+      fee: Number.isNaN(feeOf(l)) ? "請填數字" : null,
     }
   }
   const invalid = !account || lots.some((l) => Object.values(errorOf(l)).some(Boolean))
@@ -330,7 +341,7 @@ function DetailsStep({
       const first = lots.find((l) => Object.values(errorOf(l)).some(Boolean))
       if (first) {
         const err = errorOf(first)
-        const id = err.qty ? `lot-qty-${first.id}` : err.date ? `lot-date-${first.id}` : `lot-price-${first.id}`
+        const id = err.qty ? `lot-qty-${first.id}` : err.date ? `lot-date-${first.id}` : err.price ? `lot-price-${first.id}` : `lot-fee-${first.id}`
         document.getElementById(id)?.focus()
       }
       return
@@ -340,7 +351,18 @@ function DetailsStep({
     let total = 0
     try {
       for (const l of lots) {
-        const body: TransactionInput = { account_id: account.id, symbol: symbol.symbol, type: "buy", trade_date: l.date, quantity: shares(l), price: num(l.price), note: "" }
+        // 手續費沒填就不送（後端當 0）；填了 0 也照送
+        const fee = feeOf(l)
+        const body: TransactionInput = {
+          account_id: account.id,
+          symbol: symbol.symbol,
+          type: "buy",
+          trade_date: l.date,
+          quantity: shares(l),
+          price: num(l.price),
+          ...(fee !== null ? { fee } : {}),
+          note: "",
+        }
         // 走 useCreateTransaction：存好之後持股、總資產、交易清單會重抓
         created.push((await create.mutateAsync(body)).id)
         total += shares(l) ?? 0
@@ -375,6 +397,9 @@ function DetailsStep({
 
   const qtyLabel = inLots ? "張數" : "股數"
   const priceLabel = `買進價格${isUS ? "（美元）" : ""}`
+  // 買進的手續費記在這一檔的計價幣別（後端用商品的幣別，不看帳戶）：美股寫在標籤上，和買進價格的「（美元）」一樣
+  const feeLabel = `手續費${symbol.currency === "USD" ? "（美元）" : ""}`
+  const many = lots.length > 1
   const q = quote.data
   // 收盤價是哪一天的：台股「11/12 收盤」；美股寫紐約的日期「11/13 收盤（美東）」（as_of 是紐約 16:00，台北已經是隔天）
   const usDate = q && symbol.market === "US" ? usTradeDate(q.trade_date, q.as_of) : null
@@ -412,15 +437,20 @@ function DetailsStep({
 
       <div className="flex flex-col gap-3">
         {lots.map((l, i) => {
-          const err = submitted ? errorOf(l) : { qty: null, date: null, price: null }
-          const nth = lots.length > 1 ? `第 ${i + 1} 筆的` : ""
+          const err = submitted ? errorOf(l) : { qty: null, date: null, price: null, fee: null }
+          const nth = many ? `第 ${i + 1} 筆的` : ""
           const first = i === 0
           return (
-            // 手機一筆排兩行：股數｜價格，下面是日期（有好幾筆時右邊是移除）；第二筆起上面加一條格線分開
+            // 桌面一筆一列四格（＋移除）：日期那一格至少 11rem，「2026/11/12（四）」和日曆圖示不會被切掉。
+            // 手機一筆排兩行：股數｜價格，下面日期｜手續費（有好幾筆時手續費右邊是移除，價格跨到最右邊）；
+            // 左欄至少 11.75rem（窄手機最多 57%）放得下日期；第二筆起上面加一條格線分開
             <div
               key={l.id}
               className={cn(
-                "grid grid-cols-2 items-start gap-x-2 gap-y-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1.3fr)_minmax(0,1fr)_auto]",
+                "grid items-start gap-x-2 gap-y-3",
+                many
+                  ? "grid-cols-[minmax(min(11.75rem,57%),1fr)_minmax(0,1fr)_auto] sm:grid-cols-[minmax(0,1fr)_minmax(11rem,1.3fr)_minmax(0,1fr)_minmax(0,1fr)_auto]"
+                  : "grid-cols-[minmax(min(11.75rem,57%),1fr)_minmax(0,1fr)] sm:grid-cols-[minmax(0,1fr)_minmax(11rem,1.3fr)_minmax(0,1fr)_minmax(0,1fr)]",
                 i > 0 && "max-sm:border-t max-sm:border-rule max-sm:pt-3",
               )}
             >
@@ -438,7 +468,7 @@ function DetailsStep({
                   className="num"
                 />
               </Cell>
-              <Cell label="買進日期" id={`lot-date-${l.id}`} first={first} error={err.date} className={cn("max-sm:order-3", lots.length === 1 && "max-sm:col-span-2")}>
+              <Cell label="買進日期" id={`lot-date-${l.id}`} first={first} error={err.date} className="max-sm:order-3">
                 <DateField id={`lot-date-${l.id}`} label={`${nth}買進日期`} value={l.date} onChange={(date) => setLot(l.id, { date })} invalid={!!err.date} />
               </Cell>
               <Cell
@@ -447,6 +477,7 @@ function DetailsStep({
                 first={first}
                 error={err.price}
                 extra={l.date && <CloseHint instrument={symbol} date={l.date} price={l.price} onFill={(price) => setLot(l.id, { price })} />}
+                className={cn(many && "max-sm:col-span-2")}
               >
                 <Input
                   id={`lot-price-${l.id}`}
@@ -461,14 +492,29 @@ function DetailsStep({
                   className="num"
                 />
               </Cell>
-              {lots.length > 1 && (
+              <Cell label={feeLabel} id={`lot-fee-${l.id}`} first={first} error={err.fee} className="max-sm:order-3">
+                <Input
+                  id={`lot-fee-${l.id}`}
+                  inputMode="decimal"
+                  autoComplete="off"
+                  enterKeyHint="done"
+                  aria-label={`${nth}手續費`}
+                  // 選填：不填就是 0，不自動算（2026-11-14）
+                  placeholder={first ? "選填" : "手續費"}
+                  value={l.fee}
+                  onChange={(e) => setLot(l.id, { fee: e.target.value })}
+                  aria-invalid={!!err.fee}
+                  className="num"
+                />
+              </Cell>
+              {many && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="icon"
                   aria-label={`移除第 ${i + 1} 筆`}
-                  // 第一列有標籤：往下對齊輸入框；手機上排在這一筆的最後、靠右
-                  className={cn("max-sm:order-4 max-sm:self-end max-sm:justify-self-end", first && "sm:mt-[1.625rem]")}
+                  // 第一筆有標籤：往下對齊輸入框（桌面是那一列，手機是日期與手續費那一行）；手機上排在這一筆的最後
+                  className={cn("max-sm:order-4", first && "mt-[1.625rem]")}
                   onClick={() => setLots((ls) => ls.filter((x) => x.id !== l.id))}
                 >
                   <XIcon aria-hidden />
@@ -493,9 +539,16 @@ function DetailsStep({
         toFull={
           <ToFull
             onClick={() => {
-              // 完整表單：帳戶與第一筆已經填的數量、價格、日期一起帶過去
+              // 完整表單：帳戶與第一筆已經填的數量、價格、日期、手續費一起帶過去（手續費 0 也帶；不是數字的不帶）
               const l = lots[0]
-              onFull(symbol.code, { accountId: account?.id, quantity: (l && shares(l)) || undefined, price: (l && num(l.price)) || undefined, date: l?.date || undefined })
+              const fee = l ? feeOf(l) : null
+              onFull(symbol.code, {
+                accountId: account?.id,
+                quantity: (l && shares(l)) || undefined,
+                price: (l && num(l.price)) || undefined,
+                date: l?.date || undefined,
+                fee: fee !== null && !Number.isNaN(fee) ? fee : undefined,
+              })
             }}
           />
         }
@@ -599,7 +652,8 @@ function OpeningSkeleton({ sheet }: { sheet: boolean }) {
   return (
     <div className={cn("flex flex-col gap-4 px-4 sm:px-6", !sheet && "pb-4 sm:pb-6")} aria-busy="true">
       <Skeleton className="h-14 w-full" />
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+        <Skeleton className="h-10" />
         <Skeleton className="h-10" />
         <Skeleton className="h-10" />
         <Skeleton className="h-10" />
