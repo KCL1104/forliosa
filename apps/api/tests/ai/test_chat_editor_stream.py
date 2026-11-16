@@ -187,6 +187,11 @@ def test_news_flash_codes_and_todays_date_may_become_today():
     assert not keeps_numbers("台達電（2308）30日股價一度跌停至1,335元。", "台達電今天股價一度跌停至 1,335 元。", MON)
     assert not keeps_numbers("台達電 16日跌停，18日除息", "台達電今天跌停", MON)
     assert not keeps_numbers("11/13 收 1,240 元", "今天收 1240 元", MON)
+    # a rounded restatement may go when the exact figure stays (2026-11-16 why_6: 「約 4%」 merged into 「4.14%」) …
+    assert keeps_numbers("大盤同時跌約 4%。加權指數跌 1806.45 點，跌幅 4.14%", "加權指數跌 1806.45 點，約 4.14%", MON)
+    assert keeps_numbers("跌幅約 9.7%，盤中跌 9.68%", "盤中跌 9.68%", MON)
+    assert not keeps_numbers("大盤約跌 4%，台達電跌 9.68%", "台達電跌 9.68%", MON)  # nothing it rounds
+    assert not keeps_numbers("大盤跌 4%，加權指數跌 4.14%", "加權指數跌 4.14%", MON)  # not written as a rounding
     # … nor a number of days, or a figure of a quote line the editor left out (2026-11-16 a_0050_1)
     assert not keeps_numbers("16日均線在 1,200 元", "今天均線在 1200 元", MON)
     assert not keeps_numbers("0050.TW 98.10 4.40 4.29%，成交 172,713 張", "0050 今天盤中 98.10 元，跌 4.29%", MON)
@@ -205,6 +210,37 @@ def test_a_cnyes_flash_edited_to_today_is_kept(client, pool, fake, engine, ai_en
     fake.reply(text(edit))
     _, events = chat(client, QUESTION, page=PAGE)
     assert "text_reset" not in answer_events(events) and shown(events) == edit and stored_answer(engine) == edit
+
+
+def test_headings_the_edit_adds_become_plain_lines(client, pool, fake, engine, ai_env):
+    # 2026-11-16: with thinking off the editor made the first sentence a ### heading in 8 to 15 of 33 edits
+    ai_env(AI_ANSWER_EDITOR="true")
+    web_turn(fake)
+    fake.reply(text("### 台積電 11/13 收高\n\n" + EDITED + "\n## 尾盤\n- 4061 張 # 賣單"))
+    _, events = chat(client, QUESTION, page=PAGE)
+    want = "台積電 11/13 收高\n\n" + EDITED + "\n尾盤\n- 4061 張 # 賣單"  # a # inside a line stays
+    assert shown(events) == want and stored_answer(engine) == want
+
+
+def test_the_heading_filter_works_on_any_split_and_only_at_line_starts():
+    edit = "### 標題一\n內文 #2 名\n   ## 標題二\n- 第一點"
+    for size in (1, 2, 3, 5, len(edit)):
+        f = chat_mod._HeadingFilter()
+        assert "".join(f.feed(edit[i:i + size]) for i in range(0, len(edit), size)) == \
+            "標題一\n內文 #2 名\n   標題二\n- 第一點"
+
+
+def test_an_answer_with_headings_keeps_the_edits_headings(client, pool, fake, engine, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    draft = "### 台積電\n" + DRAFT
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台積電 11/13"}),
+               web_search_result("srvtoolu_1", [{"url": "https://news.cnyes.com/a", "title": "鉅亨",
+                                                 "encrypted_content": "ENC"}]),
+               text(draft, [search_citation("https://news.cnyes.com/a", "鉅亨", "最後一盤丟出4061張砍單")]),
+               usage={"server_tool_use": {"web_search_requests": 1}})
+    fake.reply(text("### 台積電\n" + EDITED))
+    _, events = chat(client, QUESTION, page=PAGE)
+    assert shown(events) == "### 台積電\n" + EDITED
 
 
 def test_the_editor_thinks_only_where_it_cannot_be_turned_off():

@@ -77,10 +77,11 @@ def test_the_editor_keeps_the_comparison_first():
 def test_the_editor_keeps_times_and_quote_figures_and_adds_no_month_heading_or_english():
     # 2026-11-16 review: with thinking off the editor merged repeated sentences and lost 09:59 / 11:31 (7 of 34
     # edits), dropped a quote line's 4.40 and volume, wrote 30日 as 11/30, added ### headings and wrote 「also」
+    # (the headings it still adds are undone as the edit streams: test_chat_editor_stream)
     for phrase in ("保留每一個事實、數字、日期、時間（09:59）", "兩句裡的數字與時間都併進留下的那一句",
                    "表格或報價列殘留的數字（漲跌、成交張數）寫進句子裡，不要刪掉",
                    "只有日、沒有月份的日期（30 日）照原樣寫，不要自己補上月份", "原文是中文的字詞不要換成英文",
-                   "不新增原文沒有的 ### 小標題"):
+                   "不要把句子改成標題，也不新增原文沒有的標題", "原文有 ### 小標題才保留"):
         assert phrase in EDITOR_SYSTEM, phrase
 
 

@@ -119,9 +119,9 @@ EDITOR_FIRST_TOKEN_SECONDS = 4.0
 EDITOR_TOTAL_SECONDS = 20.0
 # Haiku 5.5 thinks by default and streams nothing while it does (display "omitted"): 3 of 16 live edits hit the
 # first-word limit after 4.5 s of silence and the draft was shown (2026-11-16). With thinking off the first word came
-# in 0.4–1.2 s in 108 calls; edits that lost a number: 7 of 33 against 4 of 33 with it on (where 4 more thought for
-# 3.5–6.6 s), once EDITOR_SYSTEM asked to keep times. Haiku 5.5 accepts "disabled" at effort high or below; Opus 5.5,
-# Sonnet 5.5 and Fable reject it (400), so other models keep their default.
+# in 0.4–2.1 s in 141 calls; edits that lost a number: 4–7 of 33 against 4 of 33 with it on (where 4 more thought for
+# 3.5–6.6 s), and the ### headings it adds are undone (``_HeadingFilter``). Haiku 5.5 accepts "disabled" at effort
+# high or below; Opus 5.5, Sonnet 5.5 and Fable reject it (400), so other models keep their default.
 EDITOR_NO_THINKING_MODELS = ("claude-haiku-5",)
 # Tools that write (a draft) or add to the turn (a chart card) run one at a time on the turn's own session, after the
 # read-only tools of the same round, which run side by side (``ChatTurn._run_tools``)
@@ -226,6 +226,9 @@ _BARE_DAY = re.compile(r"(?<![\d/月.])(3[01]|[12]\d|0?[1-9])\s*日(?![均線內
 _MONTH_DAY = re.compile(r"(?<![\d.])(1[0-2]|0?[1-9])\s*(?:/|月)\s*(3[01]|[12]\d|0?[1-9])(?:\s*日)?(?![\d/])")
 _TODAY_WORDS = re.compile(r"今天|今日")
 _YESTERDAY_WORDS = re.compile(r"昨天|昨日")
+# A rounded restatement (「大盤約跌 4%」 beside 「跌 4.14%」): the editor keeps one of the two (EDITOR_SYSTEM says to
+# write a thing once), so it may go when the draft's exact figure stays (2026-11-16: 「約 4%」 merged into 「4.14%」)
+_APPROX = re.compile(r"(?:大約|約|將近|接近|近|逾|超過)\s*(?:下跌|上漲|跌|漲)?\s*(\d[\d,]*(?:\.\d+)?)")
 
 
 def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[str]:
@@ -233,8 +236,8 @@ def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[
     a stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」, 「台達電(2308-TW)」), the year
     of a date it rewrites as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」), a date in parentheses it rewrites as
     今天 or 11/16 (「今（16）日」, 「（16日）」) and, given ``today``, today's or yesterday's date when the edit says
-    今天 or 昨天 (「16日09:59」, 「11/16 盤中」). Only the date itself: the same number elsewhere in the draft still
-    counts."""
+    今天 or 昨天 (「16日09:59」, 「11/16 盤中」); also a rounded restatement of a figure the edit kept (「約 4%」 beside
+    「4.14%」). Only the date itself: the same number elsewhere in the draft still counts."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
     years = {m.group(0) for m in _YEAR.finditer(draft)}
     rest = _DATE_IN_PARENS.sub(" ", draft)
@@ -245,7 +248,16 @@ def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[
                                                    for d in days) else m.group(0), rest)
         rest = _BARE_DAY.sub(lambda m: " " if any(d.day == int(m.group(1)) for d in days) else m.group(0), rest)
     kept = _numbers(edited)
-    return sorted(x for x in _numbers(rest) - codes - years if not _covered(x, kept))
+    numbers = _numbers(rest)
+    approx = {m.group(1).replace(",", "") for m in _APPROX.finditer(rest)}
+    return sorted(x for x in numbers - codes - years
+                  if not _covered(x, kept) and not (x in approx and any(y != x and y in kept and _rounds_to(y, x)
+                                                                         for y in numbers)))
+
+
+def _rounds_to(y: str, x: str) -> bool:
+    """``y`` rounded to the decimals ``x`` has is ``x`` (4.14 -> 4, 9.68 -> 9.7)."""
+    return round(float(y), len(x.partition(".")[2])) == float(x)
 
 
 def keeps_numbers(draft: str, edited: str, today: date | None = None) -> bool:
@@ -309,21 +321,21 @@ _HEADING = re.compile(r"(?m)^ {0,3}#")
 
 
 class _HeadingFilter:
-    """Leaves out the Markdown heading lines (「### …」) of an edit whose draft had none: with thinking off the editor
-    turned the answer's first sentence into a ### heading in 8 to 15 of 33 edits (2026-11-16), and EDITOR_SYSTEM
-    saying not to did not stop it. Fed the edit as it streams; a line starting with # is dropped up to its line end."""
+    """Turns the Markdown headings (「### …」) of an edit whose draft had none back into plain lines: with thinking off
+    the editor made the answer's first sentence a ### heading in 8 to 15 of 33 edits (2026-11-16), and EDITOR_SYSTEM
+    saying not to did not stop it. Fed the edit as it streams: the #s at the start of a line and the spaces after
+    them are left out (the line itself stays, so no number goes)."""
 
     def __init__(self) -> None:
-        self.line_start, self.skipping = True, False
+        self.line_start, self.marker = True, False
 
     def feed(self, text: str) -> str:
         out = []
         for c in text:
-            if self.skipping:
-                self.skipping = c != "\n"
-            elif self.line_start and c == "#":
-                self.skipping = True
-            else:
+            if self.line_start and c == "#":
+                self.marker = True
+            elif not (self.marker and c == " "):
+                self.marker = False
                 out.append(c)
                 self.line_start = c == "\n" or (self.line_start and c == " ")
         return "".join(out)
