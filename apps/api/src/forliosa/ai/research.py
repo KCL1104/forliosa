@@ -452,12 +452,47 @@ def sources_from(citations: list[dict[str, Any]], results: list[dict[str, Any]],
         return 0 if _mentions(body, names) else 1 if index_words.search(body) else 2
 
     out = sorted(cited.values(), key=rank)
-    for r in results:
-        if r["url"] not in cited and r["title"] and _mentions(r["title"], names) \
-                and all(r["url"] != s["url"] for s in out):
-            out.append({"url": r["url"], "title": r["title"][:TITLE_CHARS], "snippets": [], "outlet": None,
-                        "page_age": r.get("page_age"), "found_at": found_at})
+    # Uncited results whose title names the company (or, when nothing cited covers the index, the market): news of
+    # the day first, quote pages and forums never. 2026-11-16 live check: 「盤中速報 - 台達電(2308)股價殺至跌停」 was
+    # the 25th result; taken in search order, the entry held two copies of a 13-day-old story instead.
+    need_index = not any(rank(s) == 1 for s in out)
+    titles = {s["title"] for s in out}
+    extra = []
+    for i, r in enumerate(results):
+        title = r["title"]
+        if r["url"] in cited or not title or title in titles or _NOT_NEWS.search(r["url"]) \
+                or _NOT_NEWS.search(title):
+            continue
+        company = _mentions(title, names)
+        if not (company or (need_index and index_words.search(title))):
+            continue
+        titles.add(title)
+        age = _age_days(r.get("page_age"), now)
+        extra.append(((not company, age > 1, age, not _MOVE.search(title), i), r))
+    for _, r in sorted(extra, key=lambda x: x[0]):
+        out.append({"url": r["url"], "title": r["title"][:TITLE_CHARS], "snippets": [], "outlet": None,
+                    "page_age": r.get("page_age"), "found_at": found_at})
     return out[:MAX_SOURCES]
+
+
+# Quote pages, charts and forums: not news (their titles say nothing about why)
+_NOT_NEWS = re.compile(r"/forum|/quote|google\.com/finance|/INDEX/|/stock/\d+/?$|討論|走勢圖|股價與新聞|行情",
+                       re.IGNORECASE)
+_AGE = re.compile(r"(\d+)\s*(minute|hour|day|week|month|year)s?\s+ago", re.IGNORECASE)
+_AGE_DAYS = {"minute": 1 / 1440, "hour": 1 / 24, "day": 1, "week": 7, "month": 30, "year": 365}
+
+
+def _age_days(page_age: Any, now: datetime) -> float:
+    """「3 hours ago」「2 days ago」「November 16, 2026」 → days before ``now`` (999 when unknown)."""
+    text = str(page_age or "").strip()
+    if m := _AGE.search(text):
+        return int(m.group(1)) * _AGE_DAYS[m.group(2).lower()]
+    for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
+        try:
+            return float((now.astimezone(TAIPEI).date() - datetime.strptime(text, fmt).date()).days)
+        except ValueError:
+            continue
+    return 999.0
 
 
 def _merge(first: list[dict[str, Any]], then: list[dict[str, Any]]) -> list[dict[str, Any]]:

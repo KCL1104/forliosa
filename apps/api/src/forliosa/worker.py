@@ -50,8 +50,11 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``group_digests`` — Saturday 20:00 Taipei (catch-up until Sunday ends): the weekly AI digest of every group for the
   week Monday–Friday that just ended, sent as one Message Batches request (``forliosa.services.digests``);
   ``group_digest_poll`` (every 5 minutes) collects the results, falls back to normal calls, and queues the pushes.
+* ``group_daily`` — every 10 minutes (off with ``GROUP_DAILY_ENABLED=false``): the 群組 AI 日報 of boosted groups
+  (``forliosa.services.group_daily``) for the latest session, once both markets' official closes and TWSE's indices
+  are stored (from 06:30 the next morning with whatever is in); one per group and day, pushed at once or at 07:30.
 * ``sharing_retention`` — every day 04:35: finished push rows after 30 days, Telegram link codes a day after they
-  expired, digests 26 weeks after their week.
+  expired, digests 26 weeks after their week, daily reports after 30 days.
 * ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).
   Requests already refuse an expired session; nothing else removes its row.
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
@@ -318,6 +321,10 @@ class Worker:
             self.jobs.append(Job("market_summary", daily_at(time(15, 5), time(18, 5), time(22, 5),
                                                              only_if=lambda n: is_tw_trading_day(n.date())),
                                  self.market_summary))
+        # 群組 AI 日報 (boosted groups): every 10 minutes; written once the session's closes are in (or at the 06:30
+        # cut-off), one per group and day, so a look with nothing to do is one query of dataset_status at most.
+        if settings.group_daily_enabled:
+            self.jobs.append(Job("group_daily", every(600), self.group_daily))
         if settings.price_history_source == "yahoo":
             self.jobs.append(Job("price_backfill", every(PRICE_BACKFILL_SECONDS), self.price_backfill,
                                  background=True))
@@ -491,12 +498,22 @@ class Worker:
         if n:
             log.info("group digests: %d finished", n)
 
+    async def group_daily(self) -> None:
+        """群組 AI 日報 (``forliosa.services.group_daily.run``): pending reports first, then the latest session's."""
+        from forliosa.services import group_daily
+
+        def run() -> group_daily.RunResult:
+            with session_factory()() as db:
+                return group_daily.run(db, self.md, now=self.now_fn())
+
+        await asyncio.to_thread(run)
+
     async def sharing_retention(self) -> None:
-        from forliosa.services import digests, notifications
+        from forliosa.services import digests, group_daily, notifications
 
         def run() -> int:
             with session_factory()() as db:
-                return notifications.purge_old(db) + digests.purge_old(db)
+                return notifications.purge_old(db) + digests.purge_old(db) + group_daily.purge_old(db)
 
         n = await asyncio.to_thread(run)
         if n:

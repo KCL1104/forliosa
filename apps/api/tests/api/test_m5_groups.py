@@ -220,10 +220,13 @@ def test_inviter_name_falls_back_to_owner_when_inviter_left(client, other_client
 
 
 def test_limits(app, client, other_client):
-    from forliosa.models import User
+    """A group made before the 群組加值包 (grandfathered by migration 0023) keeps 50 members; the per-person limit of 20
+    groups. The free and boosted caps: tests/api/test_group_plans.py."""
+    from forliosa.models import Group, User
 
     g = make_group(client)
     with session_factory()() as db:
+        db.get(Group, g["id"]).grandfathered_member_cap = 50
         for i in range(48):
             uid = f"usr_fill{i:02d}"
             db.add(User(id=uid, email=f"f{i}@x.y", display_name=f"f{i}", preferences={}))

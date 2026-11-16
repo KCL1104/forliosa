@@ -20,7 +20,7 @@ function addMonth(ymd: string): string {
  * 多一個月的最後一天：還是會員就從原本的最後一天往後接，否則從今天開始（11/15 開通 → 12/14）。
  * 沒有到期日的會員不需要續期。
  */
-export function monthLater(today: string, current?: AdminMember): string {
+export function monthLater(today: string, current?: Pick<AdminMember, "active" | "until">): string {
   const start = current?.active && current.until ? addDays(current.until, 1) : today
   return addDays(addMonth(start), -1)
 }

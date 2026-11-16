@@ -121,6 +121,16 @@ class PushTarget(BaseModel):
     label: str
 
 
+class GroupPlanOut(BaseModel):
+    """群組加值包 (``services.group_plans``): every member sees it."""
+
+    tier: Literal["free", "boosted"]
+    until: str | None = Field(default=None, description="加值的最後一天（YYYY-MM-DD，台北）；null＝免費")
+    member_cap: int = Field(description="最多幾位成員（免費 15、加值 50；之前建立的群組維持 50）；滿了就不能再加入")
+    grandfathered: bool = Field(description="加值包推出前建立的群組：不論方案都維持 50 位")
+    daily_report: bool = Field(description="有群組 AI 日報（加值中）")
+
+
 class GroupOut(BaseModel):
     id: str
     name: str
@@ -130,6 +140,7 @@ class GroupOut(BaseModel):
     members: list[GroupMemberOut]
     my_share: ShareSettings
     push_targets: list[PushTarget]
+    plan: GroupPlanOut
 
 
 class GroupSummary(BaseModel):
@@ -140,6 +151,30 @@ class GroupSummary(BaseModel):
     ranking_enabled: bool
     latest_activity_at: str | None = None
     latest_digest_at: str | None = None
+    latest_daily_at: str | None = Field(default=None, description="最新一份群組 AI 日報寫好的時間")
+    plan: GroupPlanOut
+
+
+class PlanAttachIn(StrictModel):
+    """The owner puts one of their own boosts (``GET /me/group-passes``) on this group."""
+
+    pass_id: str = Field(min_length=1, max_length=32)
+
+
+class MyPassGroup(BaseModel):
+    id: str
+    name: str
+    my_role: Literal["owner", "admin", "member"]
+
+
+class MyGroupPass(BaseModel):
+    """A boost this account was granted (as the payer)."""
+
+    id: str
+    until: str | None = Field(description="最後一天（YYYY-MM-DD，台北）")
+    active: bool
+    attached: bool = Field(description="已經用在某個群組")
+    group: MyPassGroup | None = Field(description="用在哪個群組（只有我還是成員時才有）")
 
 
 class InviteIn(StrictModel):
@@ -369,6 +404,75 @@ class DigestPage(BaseModel):
     next_cursor: str | None = None
 
 
+# -- 群組 AI 日報 (boosted groups) ------------------------------------------------------------------------------------
+class DailyReturn(BaseModel):
+    user_id: str
+    display_name: str
+    day_return_pct: float | None = None
+
+
+class DailyBenchmark(BaseModel):
+    symbol: str
+    name: str
+    day_return_pct: float | None = None
+
+
+class DailyCommonHolding(BaseModel):
+    symbol: str
+    name: str
+    holder_count: int
+    day_change_pct: float | None = Field(default=None, description="這檔股票這天的漲跌（台股；美股為 null）")
+
+
+class DailyTrade(BaseModel):
+    """The day's trades without names: side and stock, merged."""
+
+    side: Literal["buy", "sell"]
+    symbol: str
+    name: str
+    count: int
+
+
+class DailyWhy(BaseModel):
+    """A common holding that moved the most: link to its 「為什麼漲跌」 on the stock page (/stock/{symbol})."""
+
+    symbol: str
+    name: str
+    day_change_pct: float | None = None
+
+
+class DailyFacts(BaseModel):
+    """Filtered on every read by the current memberships and share settings."""
+
+    returns: list[DailyReturn]
+    benchmarks: list[DailyBenchmark]
+    common_holdings: list[DailyCommonHolding]
+    trades: list[DailyTrade]
+    trades_count: int
+    why: list[DailyWhy]
+
+
+class DailyReport(BaseModel):
+    id: str
+    status: Literal["pending", "ready", "failed"] = Field(
+        description="pending：AI 摘要還在寫；ready：寫好了（summary 可能是空的，notes 會說為什麼）；failed：只有數字")
+    trading_day: date
+    created_at: str
+    finished_at: str | None = None
+    summary: str
+    facts: DailyFacts
+    notes: list[str]
+    market_summary: bool = Field(description="市場頁有這天的 AI 收盤重點（連到 /market）")
+    disclaimer: str
+    sources: list[str]
+    is_demo: bool
+
+
+class DailyReportPage(BaseModel):
+    items: list[DailyReport]
+    next_cursor: str | None = None
+
+
 # -- push channels ------------------------------------------------------------------------------------------------
 class DiscordIn(StrictModel):
     """The webhook URL is checked strictly and tested before it is saved; it is never echoed back."""
@@ -376,11 +480,13 @@ class DiscordIn(StrictModel):
     webhook_url: str = Field(min_length=1, max_length=300)
     notify_trades: bool = True
     notify_digest: bool = True
+    notify_daily: bool | None = Field(default=None, description="群組 AI 日報；省略＝不變（新的頻道是關的）")
 
 
 class ChannelPatch(StrictModel):
     notify_trades: bool | None = None
     notify_digest: bool | None = None
+    notify_daily: bool | None = None
 
 
 class DiscordChannel(BaseModel):
@@ -390,6 +496,7 @@ class DiscordChannel(BaseModel):
     webhook_hint: str | None = Field(default=None, description="只有擁有者看得到（…/最後 4 碼）")
     notify_trades: bool
     notify_digest: bool
+    notify_daily: bool = Field(description="群組 AI 日報（加值的群組；預設關）")
 
 
 class TelegramChannel(BaseModel):
@@ -399,6 +506,7 @@ class TelegramChannel(BaseModel):
     chat_title: str | None = None
     notify_trades: bool
     notify_digest: bool
+    notify_daily: bool = Field(description="群組 AI 日報（加值的群組；預設關）")
 
 
 class Channels(BaseModel):

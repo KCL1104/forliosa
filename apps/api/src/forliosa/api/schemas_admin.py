@@ -170,3 +170,53 @@ class MemberGrantIn(StrictModel):
         if has_control(v):
             raise ValueError("備註不能有控制字元")
         return v
+
+
+def _admin_note(v: str | None) -> str | None:
+    if v is None or not v.strip():
+        return None
+    v = v.strip()
+    if len(v) > NOTE_MAX:
+        raise ValueError(f"備註最多 {NOTE_MAX} 個字")
+    if has_control(v):
+        raise ValueError("備註不能有控制字元")
+    return v
+
+
+class AdminGroupPass(BaseModel):
+    """A 群組加值包 granted by hand (``services.group_plans``). Only the payer and the group's id: never the group's
+    name, members or content."""
+
+    id: str
+    payer_user_id: str | None = Field(description="付款人；帳號刪除後是 null（加值照樣用到到期）")
+    email: str | None
+    display_name: str | None
+    until: str | None = Field(description="最後一天（YYYY-MM-DD，台北）")
+    note: str | None = Field(description="站方自己的備註（例如收款紀錄）")
+    active: bool = Field(description="今天還在加值")
+    group_id: str | None = Field(description="用在哪個群組（編號）；null＝付款人還沒選")
+    attached_at: str | None = None
+    created_at: str
+
+
+class GroupPassGrantIn(StrictModel):
+    email: str = Field(min_length=3, max_length=320, description="付款人的 email（對方要先登入過一次）")
+    until: date = Field(description="最後一天（台北）")
+    note: str | None = None
+    group_id: str | None = Field(default=None, min_length=1, max_length=32,
+                                 description="直接用在這個群組（付款人必須是擁有者）；省略＝由付款人在群組設定選")
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v: str | None) -> str | None:
+        return _admin_note(v)
+
+
+class GroupPassPatch(StrictModel):
+    until: date | None = Field(default=None, description="新的最後一天（延長或縮短）")
+    note: str | None = None
+
+    @field_validator("note")
+    @classmethod
+    def _note(cls, v: str | None) -> str | None:
+        return _admin_note(v)

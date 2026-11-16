@@ -186,6 +186,37 @@ function isoTaipei(ms: number): string {
 
 const roleRank: Record<GroupRole, number> = { owner: 0, admin: 1, member: 2 }
 
+/** 登山社的其他 14 位（示範用的稱呼） */
+const HIKERS = ["阿傑", "小雯", "大熊", "佳佳", "老周", "小安", "阿哲", "Kevin", "美玲", "阿德", "小魚", "志豪", "雅婷", "阿峰"]
+
+/** 示範用：一個人在某一天的報酬（不是今天的日報用；固定的假數字，-1.5% 到 +2.5%） */
+function pseudoDayReturn(userId: string, day: string): number {
+  let h = 0
+  for (const ch of `${userId}:${day}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  return ((h % 400) - 150) / 10000
+}
+
+/** 日報 AI 段落的示範（後端是 Haiku 照數字寫；這裡用固定的句型，數字和下面的表一致） */
+function demoDailySummary(f: DailyReportFacts, today: boolean): string | null {
+  const rets = f.returns.map((r) => r.day_return_pct).filter((x): x is number => x !== null)
+  if (rets.length < 2) return null
+  const pct = (x: number) => `${x < 0 ? "−" : "+"}${Math.abs(x * 100).toFixed(1)}%`
+  const move = (x: number) => `${x < 0 ? "跌" : "漲"} ${Math.abs(x * 100).toFixed(1)}%`
+  const up = rets.filter((x) => x > 0).length
+  const down = rets.filter((x) => x < 0).length
+  const day = today ? "今天" : "當天"
+  const parts = [`${day}有分享報酬的 ${rets.length} 個人，${up} 個漲、${down} 個跌，從 ${pct(Math.min(...rets))} 到 ${pct(Math.max(...rets))}。`]
+  const [taiex, etf] = f.benchmarks
+  if (taiex?.day_return_pct != null && etf?.day_return_pct != null) {
+    const beat = rets.filter((x) => x > etf.day_return_pct!).length
+    parts.push(`${taiex.name}${move(taiex.day_return_pct)}，${etf.name}${move(etf.day_return_pct)}，${rets.length} 個人裡有 ${beat} 個漲得比 0050 多。`)
+  }
+  const top = f.common_holdings[0]
+  if (top?.day_change_pct != null) parts.push(`${top.holder_count} 個人都有的${top.name}${move(top.day_change_pct)}。`)
+  parts.push(f.trades.length > 0 ? `${day}有 ${f.trades.length} 筆買賣。` : `${day}沒有買賣。`)
+  return parts.join("")
+}
+
 export function createSharingStore(deps: SharingDeps, scenario: "default" | "empty" | "stress" = "default") {
   // mock 的時鐘：示範資料的「現在」是 11/12 13:30，之後每個動作往後一分鐘
   let clock = Date.parse("2026-11-12T13:30:00+08:00")
@@ -201,6 +232,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
 
   const groups: MockGroup[] = []
   const extraPeople: UserRef[] = []
+  const passes: MockPass[] = []
   const delegations: { id: string; owner: UserRef; viewer: UserRef; scope: "all" | "accounts"; account_ids: string[]; created_at: string }[] = []
 
   if (scenario !== "empty") {
@@ -232,7 +264,16 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
           summary: "這週群組的表現有些分歧，有人小幅下跌、也有人小賺，整體和大盤接近持平。持股重疊集中在半導體與高股息 ETF；這週的買賣比前一週多，主要是零股與 ETF。",
         },
       ],
-      discord: { hint: "…/x9Kd", status: "active", disabled_reason: null, notify_trades: true, notify_digest: true },
+      // 加值中（站方開給我、我用在這個群組；到 12/31）：最近四個交易日的日報
+      daily: [MOCK_TODAY, prevTradingDay(MOCK_TODAY), prevTradingDay(prevTradingDay(MOCK_TODAY)), prevTradingDay(prevTradingDay(prevTradingDay(MOCK_TODAY)))].map(
+        (day, i) => ({
+          id: `gdr_family_${day.replaceAll("-", "")}`, trade_date: day, status: "ready" as const,
+          created_at: i === 0 ? `${day}T13:26:00+08:00` : `${day}T23:12:00+08:00`,
+          contributors: [me.user_id, PEOPLE.dad.user_id, PEOPLE.mom.user_id, PEOPLE.sis.user_id],
+        }),
+      ),
+      grandfathered: true,
+      discord: { hint: "…/x9Kd", status: "active", disabled_reason: null, notify_trades: true, notify_digest: true, notify_daily: false },
       telegram: null,
       telegramLink: null,
     }
@@ -249,8 +290,14 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       comments: [],
       reactions: new Map(),
       digests: [],
+      // 阿凱以前加值過（11/6 到期）：日報停了，以前的日報照樣看得到
+      daily: ["2026-11-06", "2026-11-05"].map((day) => ({
+        id: `gdr_friends_${day.replaceAll("-", "")}`, trade_date: day, status: "ready" as const, created_at: `${day}T23:08:00+08:00`,
+        contributors: [PEOPLE.kai.user_id, PEOPLE.yun.user_id, PEOPLE.ming.user_id, me.user_id],
+      })),
+      grandfathered: true,
       discord: null,
-      telegram: { chat_title: "大學同學投資群", status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", notify_trades: true, notify_digest: true },
+      telegram: { chat_title: "大學同學投資群", status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", notify_trades: true, notify_digest: true, notify_daily: false },
       telegramLink: null,
     }
     const club: MockGroup = {
@@ -267,11 +314,41 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       comments: [],
       reactions: new Map(),
       digests: [],
+      daily: [],
+      grandfathered: true,
       discord: null,
       telegram: null,
       telegramLink: null,
     }
-    groups.push(family, friends, club)
+    // 免費、而且已經滿了的群組（這次改變以後建立的，上限 15 人）：我是擁有者；其他 14 位只開了… 什麼都沒開
+    const hikers = HIKERS.map((name, i): UserRef => ({ user_id: `usr_hike_${i + 1}`, display_name: name, avatar_url: null }))
+    extraPeople.push(...hikers)
+    const hiking: MockGroup = {
+      id: "grp_hiking", name: "登山社", ranking_enabled: true, created_at: "2026-11-11T20:00:00+08:00",
+      members: [
+        member(me, "owner", "2026-11-11T20:00:00+08:00", { returns: true }),
+        ...hikers.map((p, i) => member(p, "member", `2026-11-11T20:${String(10 + i * 3).padStart(2, "0")}:00+08:00`, { returns: false })),
+      ],
+      former: new Set(),
+      invites: [
+        { id: "inv_hiking", token: "hiking-open", expires_at: "2026-11-18T20:00:00+08:00", multi_use: true, uses: 14, revoked: false, inviter: me.user_id },
+      ],
+      comments: [],
+      reactions: new Map(),
+      digests: [],
+      daily: [],
+      grandfathered: false,
+      discord: null,
+      telegram: null,
+      telegramLink: null,
+    }
+    groups.push(family, friends, club, hiking)
+    // 群組加值：我的兩個（一個用在家族投資、一個還沒選群組），阿凱在大學同學那個已經到期
+    passes.push(
+      { id: "gps_family", payer: me.user_id, group_id: family.id, until: "2026-12-31", note: "11/16 試用", created_at: "2026-11-12T09:00:00+08:00", attached_at: "2026-11-12T09:05:00+08:00" },
+      { id: "gps_spare", payer: me.user_id, group_id: null, until: "2026-12-15", note: "11/16 試用（第二個）", created_at: "2026-11-12T09:01:00+08:00", attached_at: null },
+      { id: "gps_friends", payer: PEOPLE.kai.user_id, group_id: friends.id, until: "2026-11-06", note: "10/7 轉帳 NT$149", created_at: "2026-10-07T21:00:00+08:00", attached_at: "2026-10-07T21:10:00+08:00" },
+    )
 
     const dadBuy = `trade:gfi_${PEOPLE.dad.user_id}_${MOCK_TODAY}_2330.TW_buy`
     const sisSell = `trade:gfi_${PEOPLE.sis.user_id}_2026-10-28_2603.TW_sell`
@@ -424,12 +501,105 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
   }
   const commentCount = (g: MockGroup, target: string) => g.comments.filter((c) => c.target === target).length
 
+  /** 群組的方案（後端 `group_plans.plan_of`）：用在這個群組、還沒到期的加值 → 加值；上限 免費 15、加值 50，以前建立的 50 */
+  const planOf = (g: MockGroup): GroupPlan => {
+    const live = passes.filter((x) => x.group_id === g.id && x.until >= MOCK_TODAY).map((x) => x.until).sort()
+    const boosted = live.length > 0
+    return {
+      tier: boosted ? "boosted" : "free", until: live.at(-1) ?? null,
+      member_cap: Math.max(boosted ? BOOSTED_CAP : FREE_CAP, g.grandfathered ? BOOSTED_CAP : 0),
+      grandfathered: g.grandfathered, daily_report: boosted,
+    }
+  }
+  /** 加入時人數到上限的說明（後端 `group_plans.full_message`） */
+  const fullMessage = (plan: GroupPlan) =>
+    plan.member_cap < BOOSTED_CAP && plan.tier !== "boosted"
+      ? `這個群組已經滿了：免費群組最多 ${plan.member_cap} 位成員（加值的群組最多 ${BOOSTED_CAP} 位）`
+      : `這個群組已經滿了：最多 ${plan.member_cap} 位成員`
   const toGroup = (g: MockGroup, me: MockMember): Group => ({
     id: g.id, name: g.name, my_role: me.role, ranking_enabled: g.ranking_enabled, created_at: g.created_at,
     members: g.members.map((m): GroupMember => ({ ...refOf(m), role: m.role, joined_at: m.joined_at, is_me: m.ref.user_id === meId() })),
     my_share: { ...me.share },
     push_targets: pushTargets(g),
+    plan: planOf(g),
   })
+
+  /** 一則日報的數字：寫好時有分享的人，再依目前的成員與開關過濾（後端每次讀取都重新過濾） */
+  const dailyFacts = (g: MockGroup, d: MockDaily): DailyReportFacts => {
+    const prev = prevTradingDay(d.trade_date)
+    const sharing = (key: keyof ShareSettings) => g.members.filter((m) => m.share[key])
+    const returns = sharing("returns")
+      .filter((m) => d.contributors.includes(m.ref.user_id))
+      .map((m) => {
+        const src = sourceFor(m.ref.user_id)
+        const day = d.trade_date === MOCK_TODAY ? (src?.returns().day ?? null) : pseudoDayReturn(m.ref.user_id, d.trade_date)
+        return { user_id: m.ref.user_id, display_name: refOf(m).display_name, day_return_pct: r4(day) }
+      })
+    const { common } = overlap(sharing("holdings").map((m) => ({ symbols: holdingsOf(m.ref.user_id).map((x) => x.symbol) })))
+    const change = (symbol: string): number | null => {
+      const spec = findInstrument(symbol)
+      return spec ? r4(closeOn(spec, d.trade_date) / closeOn(spec, prev) - 1) : null
+    }
+    const common_holdings = common.map((c) => ({ ...c, day_change_pct: change(c.symbol) }))
+    // 那天的買賣：不寫是誰，同一檔同方向合併（後端 `daily_facts_view`）
+    const merged = new Map<string, DailyReportFacts["trades"][number]>()
+    for (const m of sharing("trades")) {
+      for (const t of sourceFor(m.ref.user_id)?.trades() ?? []) {
+        if (t.trade_date !== d.trade_date) continue
+        const key = `${t.side}_${t.symbol}`
+        const cell = merged.get(key) ?? { side: t.side, symbol: t.symbol, name: findInstrument(t.symbol)?.name ?? t.symbol, count: 0 }
+        cell.count += 1
+        merged.set(key, cell)
+      }
+    }
+    const trades = [...merged.values()]
+    // 「為什麼漲跌」：漲跌最多的共同持股（後端 DAILY_WHY_MIN 0.5%、最多 DAILY_WHY_MAX 3 檔）
+    const why = common_holdings
+      .filter((c) => c.day_change_pct !== null && Math.abs(c.day_change_pct) >= 0.005)
+      .sort((a, b) => Math.abs(b.day_change_pct!) - Math.abs(a.day_change_pct!) || a.symbol.localeCompare(b.symbol))
+      .slice(0, 3)
+      .map(({ symbol, name, day_change_pct }) => ({ symbol, name, day_change_pct }))
+    return {
+      returns,
+      benchmarks: [
+        { symbol: "^TAIEXTR", name: "發行量加權股價報酬指數", day_return_pct: benchmarkReturn("^TAIEXTR", prev, d.trade_date) },
+        { symbol: "0050.TW", name: "元大台灣50", day_return_pct: benchmarkReturn("0050.TW", prev, d.trade_date) },
+      ],
+      common_holdings,
+      trades,
+      trades_count: trades.reduce((n, t) => n + t.count, 0),
+      why,
+    }
+  }
+  const dailyOut = (g: MockGroup, d: MockDaily): DailyReport => {
+    const facts = dailyFacts(g, d)
+    // 收回：寫好時有分享報酬的人，現在有誰不在、或關掉了報酬率 → 不給 AI 段落（數字照樣過濾後給）；說法和後端一樣
+    const withdrawn = d.contributors.some((uid) => !g.members.find((m) => m.ref.user_id === uid)?.share.returns)
+    const written = d.status === "ready" && d.contributors.length >= 2 ? demoDailySummary(facts, d.trade_date === MOCK_TODAY) : null
+    const notes =
+      d.status === "pending"
+        ? ["AI 摘要還在寫。"]
+        : written && withdrawn
+          ? ["寫這段 AI 摘要時用到的分享內容已有變動（有成員調整了分享設定或離開群組），摘要不再顯示。"]
+          : !written
+            ? [d.contributors.length < 2 ? "分享報酬率的成員不到 2 位，這天沒有 AI 摘要。" : "這天的 AI 摘要沒有寫成，下面的數字照常。"]
+            : []
+    return {
+      id: d.id, status: d.status, trading_day: d.trade_date, created_at: d.created_at, finished_at: d.status === "pending" ? null : d.created_at,
+      summary: written && !withdrawn ? written : "", facts, notes,
+      // 市場頁的收盤重點只有最新一天（示範資料）
+      market_summary: d.trade_date === MOCK_TODAY,
+      disclaimer: DISCLAIMER, sources: [sourceOf("twse-openapi/price"), sourceOf("tpex-openapi/price")], is_demo: !deps.commercial,
+    }
+  }
+  const passOut = (x: MockPass): MyGroupPass => {
+    const g = x.group_id ? groups.find((y) => y.id === x.group_id) : undefined
+    const mine = g && findMember(g, meId())
+    return {
+      id: x.id, until: x.until, active: x.until >= MOCK_TODAY, attached: x.group_id !== null,
+      group: g && mine ? { id: g.id, name: g.name, my_role: mine.role } : null,
+    }
+  }
   const pushTargets = (g: MockGroup): PushTarget[] => [
     ...(g.discord?.status === "active" ? [{ kind: "discord" as const, label: "Discord 頻道" }] : []),
     ...(g.telegram?.status === "active" ? [{ kind: "telegram" as const, label: g.telegram.chat_title }] : []),
@@ -555,6 +725,8 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
           id: g.id, name: g.name, my_role: findMember(g, meId())!.role, member_count: g.members.length, ranking_enabled: g.ranking_enabled,
           latest_activity_at: feed[0]?.created_at ?? null,
           latest_digest_at: g.digests.find((d) => d.status === "ready")?.created_at ?? null,
+          latest_daily_at: g.daily.find((d) => d.status !== "pending")?.created_at ?? null,
+          plan: planOf(g),
         }
       })
     },
@@ -566,7 +738,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const at = now()
       const g: MockGroup = {
         id: id("grp"), name, ranking_enabled: true, created_at: at, members: [member(meRef(), "owner", at, {})], former: new Set(), invites: [],
-        comments: [], reactions: new Map(), digests: [], discord: null, telegram: null, telegramLink: null,
+        comments: [], reactions: new Map(), digests: [], daily: [], grandfathered: false, discord: null, telegram: null, telegramLink: null,
       }
       groups.push(g)
       return toGroup(g, g.members[0]!)
@@ -593,6 +765,8 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       groups.splice(groups.indexOf(g), 1)
+      // 加值回到付款人手上，還沒選群組
+      for (const x of passes) if (x.group_id === g.id) Object.assign(x, { group_id: null, attached_at: null })
     },
     transferGroup(groupId: string, userId: string): Group {
       const { g, me } = memberGroup(groupId)
@@ -671,7 +845,8 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const { g, inv } = inviteState(token)
       if (findMember(g, meId())) throw new ApiError(409, "already_member", "你已經是這個群組的成員")
       const settings = validShare(share)
-      if (g.members.length >= MAX_MEMBERS) throw new ApiError(409, "limit_reached", `每個群組最多 ${MAX_MEMBERS} 位成員`)
+      const plan = planOf(g)
+      if (g.members.length >= plan.member_cap) throw new ApiError(409, "limit_reached", fullMessage(plan))
       if (myGroups().length >= MAX_GROUPS) throw new ApiError(409, "limit_reached", `每人最多加入 ${MAX_GROUPS} 個群組`)
       inv.uses += 1
       const m: MockMember = { ref: meRef(), role: "member", joined_at: now(), share: settings }
@@ -845,26 +1020,98 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       return paginate(rows, query.limit ?? 8, query.cursor)
     },
 
+    // ── 日報（加值群組；免費群組也讀得到以前的） ──
+    listDailyReports(groupId: string, query: { limit?: number; cursor?: string | null } = {}): Paged<DailyReport> {
+      const { g } = memberGroup(groupId)
+      const rows = [...g.daily].sort((a, b) => b.trade_date.localeCompare(a.trade_date)).map((d) => dailyOut(g, d))
+      return paginate(rows, query.limit ?? 10, query.cursor)
+    },
+
+    // ── 群組加值 ──
+    /** 我的加值（後端 `group_plans.my_passes`）：還在用的在前，再依最後一天 */
+    listMyGroupPasses(): MyGroupPass[] {
+      requireSignedIn()
+      return passes
+        .filter((x) => x.payer === meId())
+        .map(passOut)
+        .sort((a, b) => Number(b.active) - Number(a.active) || (a.until ?? "").localeCompare(b.until ?? ""))
+    },
+    /** 擁有者把自己的加值用在這個群組（後端 `group_plans.attach`） */
+    attachGroupPass(groupId: string, passId: string): Group {
+      const { g, me } = memberGroup(groupId)
+      if (me.role !== "owner") throw new ApiError(403, "forbidden", "只有擁有者可以替群組加值")
+      const x = passes.find((y) => y.id === passId && y.payer === meId())
+      if (!x) throw new ApiError(404, "not_found", "找不到這個群組加值")
+      if (x.until < MOCK_TODAY) throw new ApiError(409, "pass_expired", "這個群組加值已經到期")
+      if (x.group_id !== g.id) {
+        const old = x.group_id ? groups.find((y) => y.id === x.group_id) : undefined
+        if (old && findMember(old, meId())?.role !== "owner") throw new ApiError(409, "pass_in_use", "這個群組加值用在另一個群組，而你已經不是那個群組的擁有者")
+        Object.assign(x, { group_id: g.id, attached_at: now() })
+      }
+      return toGroup(g, me)
+    },
+    /** 站方的清單（後端 `group_plans.admin_list`；只有群組編號，沒有名稱）：`who` 把付款人換成 email 與顯示名稱 */
+    adminPasses(who: (userId: string) => { email: string; display_name: string } | null) {
+      return passes
+        .map((x) => {
+          const payer = x.payer ? who(x.payer) : null
+          return {
+            id: x.id, payer_user_id: x.payer, email: payer?.email ?? null, display_name: payer?.display_name ?? null, until: x.until, note: x.note,
+            active: x.until >= MOCK_TODAY, group_id: x.group_id, attached_at: x.attached_at, created_at: x.created_at,
+          }
+        })
+        .sort((a, b) => Number(b.active) - Number(a.active) || a.until.localeCompare(b.until) || (a.email ?? "").localeCompare(b.email ?? "") || a.id.localeCompare(b.id))
+    },
+    /** 站方開通（後端 `admin_grant`）：給了群組編號時付款人要是擁有者 */
+    adminGrantPass(payer: string, body: { until: string; note?: string; group_id?: string }, today: string): MockPass {
+      if (!body.until || body.until < today) throw new ApiError(422, "until_in_past", "到期日不能早於今天。")
+      const note = body.note?.trim() || null
+      if (note && note.length > 200) throw new ApiError(422, "validation_error", "備註最多 200 個字")
+      if (body.group_id) {
+        const g = groups.find((y) => y.id === body.group_id)
+        if (!g) throw new ApiError(404, "group_not_found", "找不到這個群組編號。")
+        if (findMember(g, payer)?.role !== "owner") throw new ApiError(409, "not_group_owner", "這個帳號不是這個群組的擁有者：加值只能用在付款人自己擁有的群組。")
+      }
+      const at = now()
+      const x: MockPass = { id: id("gps"), payer, group_id: body.group_id ?? null, until: body.until, note, created_at: at, attached_at: body.group_id ? at : null }
+      passes.push(x)
+      return x
+    },
+    adminUpdatePass(passId: string, patch: { until?: string; note?: string | null }, today: string): void {
+      const x = passes.find((y) => y.id === passId)
+      if (!x) throw new ApiError(404, "not_found", "找不到這個群組加值。")
+      if (patch.until !== undefined) {
+        if (patch.until < today) throw new ApiError(422, "until_in_past", "到期日不能早於今天。")
+        x.until = patch.until
+      }
+      if (patch.note !== undefined) x.note = patch.note?.trim() || null
+    },
+    adminRevokePass(passId: string): void {
+      const i = passes.findIndex((y) => y.id === passId)
+      if (i < 0) throw new ApiError(404, "not_found", "找不到這個群組加值。")
+      passes.splice(i, 1)
+    },
+
     // ── 頻道 ──
     getChannels(groupId: string): Channels {
       const { g, me } = memberGroup(groupId)
       // 示範：產生連結碼約 6 秒後，當作 owner 已在 Telegram 群組傳了 /link
       if (g.telegramLink && Date.now() >= g.telegramLink.linkAt) {
-        g.telegram = { chat_title: `${g.name}群`, status: "active", disabled_reason: null, notify_trades: true, notify_digest: true }
+        g.telegram = { chat_title: `${g.name}群`, status: "active", disabled_reason: null, notify_trades: true, notify_digest: true, notify_daily: false }
         g.telegramLink = null
       }
       const owner = me.role === "owner"
       return {
         discord: g.discord
-          ? { configured: true, status: g.discord.status, disabled_reason: g.discord.disabled_reason, ...(owner ? { webhook_hint: g.discord.hint } : {}), notify_trades: g.discord.notify_trades, notify_digest: g.discord.notify_digest }
-          : { configured: false, status: null, disabled_reason: null, ...(owner ? { webhook_hint: null } : {}), notify_trades: true, notify_digest: true },
+          ? { configured: true, status: g.discord.status, disabled_reason: g.discord.disabled_reason, ...(owner ? { webhook_hint: g.discord.hint } : {}), notify_trades: g.discord.notify_trades, notify_digest: g.discord.notify_digest, notify_daily: g.discord.notify_daily }
+          : { configured: false, status: null, disabled_reason: null, ...(owner ? { webhook_hint: null } : {}), notify_trades: true, notify_digest: true, notify_daily: false },
         telegram: g.telegram
-          ? { configured: true, status: g.telegram.status, disabled_reason: g.telegram.disabled_reason, chat_title: g.telegram.chat_title, notify_trades: g.telegram.notify_trades, notify_digest: g.telegram.notify_digest }
-          : { configured: false, status: null, disabled_reason: null, chat_title: null, notify_trades: true, notify_digest: true },
+          ? { configured: true, status: g.telegram.status, disabled_reason: g.telegram.disabled_reason, chat_title: g.telegram.chat_title, notify_trades: g.telegram.notify_trades, notify_digest: g.telegram.notify_digest, notify_daily: g.telegram.notify_daily }
+          : { configured: false, status: null, disabled_reason: null, chat_title: null, notify_trades: true, notify_digest: true, notify_daily: false },
         telegram_available: true,
       }
     },
-    putDiscord(groupId: string, body: { webhook_url: string; notify_trades: boolean; notify_digest: boolean }): void {
+    putDiscord(groupId: string, body: { webhook_url: string; notify_trades: boolean; notify_digest: boolean; notify_daily?: boolean }): void {
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       let url: URL
@@ -879,9 +1126,9 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       }
       // 示範：token 含 fail 時當作測試訊息送不出去
       if (m[2]!.includes("fail")) throw new ApiError(422, "webhook_failed", "測試訊息送不出去，請確認 webhook 網址還有效")
-      g.discord = { hint: `…/${m[2]!.slice(-4)}`, status: "active", disabled_reason: null, notify_trades: !!body.notify_trades, notify_digest: !!body.notify_digest }
+      g.discord = { hint: `…/${m[2]!.slice(-4)}`, status: "active", disabled_reason: null, notify_trades: !!body.notify_trades, notify_digest: !!body.notify_digest, notify_daily: !!body.notify_daily }
     },
-    patchDiscord(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean }): void {
+    patchDiscord(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean; notify_daily?: boolean }): void {
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       if (!g.discord) throw new ApiError(404, "not_found", "還沒有設定 Discord 頻道")
@@ -900,7 +1147,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       g.telegramLink = { code, expires_at, linkAt: Date.now() + 6000 }
       return { code, bot_username: "forliosa_bot", expires_at }
     },
-    patchTelegram(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean }): void {
+    patchTelegram(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean; notify_daily?: boolean }): void {
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       if (!g.telegram) throw new ApiError(404, "not_found", "還沒有連結 Telegram 群組")

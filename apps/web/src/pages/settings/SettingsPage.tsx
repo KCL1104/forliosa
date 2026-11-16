@@ -38,7 +38,9 @@ import { FormField as Field } from "@/components/form-field"
 import { Pct } from "@/components/finance"
 import { usePageTitle } from "@/app/page-title"
 import { appToday } from "@/api"
-import { userPlanLabel } from "@/lib/plan"
+import { untilDay, userPlanLabel } from "@/lib/plan"
+import { useMyGroupPasses } from "@/api/sharing-queries"
+import { Link } from "@tanstack/react-router"
 
 
 export function SettingsPage() {
@@ -152,16 +154,44 @@ function Settings() {
 }
 
 /**
- * 方案（產品負責人 2026-11-16 決定 14）：「會員，到 12/31」、沒有到期日的「會員」或「免費」，只有這一行。
- * 還沒有付款，會員由站方開通；群組的加值寫在那個群組的「成員」分頁（群組設定）。舊版後端沒有 plan 時不出現。
+ * 方案（產品負責人 2026-11-16 決定 14）：「會員，到 12/31」、沒有到期日的「會員」或「免費」。
+ * 站方開給我的群組加值（還在用的）一個一列：「群組加值，到 12/31」＋用在哪個群組（連結），還沒選的說到哪裡選。
+ * 還沒有付款，都由站方開通。舊版後端沒有 plan 時整區不出現。
  */
 function PlanSettings() {
   const me = useMe()
+  const passes = useMyGroupPasses(!!me.data?.plan)
   const plan = me.data?.plan
   if (!plan) return null
+  const today = appToday()
   return (
     <Group title="方案">
-      <Row label={userPlanLabel(plan, appToday())}>{null}</Row>
+      <Row label={userPlanLabel(plan, today)}>{null}</Row>
+      {(passes.data ?? [])
+        .filter((p) => p.active && p.until)
+        .map((p) => (
+          <Row
+            key={p.id}
+            label={`群組加值，到 ${untilDay(p.until!, today)}`}
+            description={
+              p.group ? (
+                <>
+                  用在「
+                  <Link to="/groups/$groupId" params={{ groupId: p.group.id }} className={cn(textAction, "text-base")}>
+                    {p.group.name}
+                  </Link>
+                  」。
+                </>
+              ) : p.attached ? (
+                "用在一個你已經不在的群組。"
+              ) : (
+                "還沒有用在群組。到你擁有的群組的「成員」分頁，在群組設定裡選。"
+              )
+            }
+          >
+            {null}
+          </Row>
+        ))}
     </Group>
   )
 }

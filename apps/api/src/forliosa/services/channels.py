@@ -156,6 +156,8 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             "disabled_reason": ch.disabled_reason if ch else None,
             "notify_trades": bool(ch.notify_trades) if ch else True,
             "notify_digest": bool(ch.notify_digest) if ch else True,
+            # 群組 AI 日報 (boosted groups): off until the owner turns it on
+            "notify_daily": bool(ch.notify_daily) if ch else False,
         }
         if kind == "discord":
             hint = ch.webhook_hint if ch is not None and me.role == "owner" else None
@@ -174,7 +176,7 @@ def connect_message(group: Group) -> str:
 
 
 def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, notify_trades: bool,
-                notify_digest: bool) -> None:
+                notify_digest: bool, notify_daily: bool | None = None) -> None:
     owner_only(m)
     url = pushers.parse_webhook_url(webhook_url)
     if url is None:
@@ -188,6 +190,7 @@ def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, not
         raise unprocessable("無法送出測試訊息：請確認 webhook 還存在、網址完整，再試一次", code="webhook_failed")
     now = now_utc()
     ch = _channel(db, group.id, "discord")
+    fresh = ch is None or ch.status == REMOVED
     if ch is None:
         ch = GroupChannel(group_id=group.id, kind="discord")
         db.add(ch)
@@ -197,6 +200,10 @@ def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, not
     ch.status, ch.disabled_reason = "active", None
     ch.webhook_encrypted, ch.webhook_hint = encrypt_secret(url), pushers.webhook_hint(url)
     ch.notify_trades, ch.notify_digest = notify_trades, notify_digest
+    if notify_daily is not None:
+        ch.notify_daily = notify_daily
+    elif fresh:  # a new destination starts with the daily report off
+        ch.notify_daily = False
     ch.configured_by, ch.configured_at, ch.updated_at = m.user_id, now, now
     db.commit()
 
@@ -214,6 +221,8 @@ def patch_channel(db: Session, group: Group, m: GroupMember, kind: str, changes:
         ch.notify_trades = on
     if "notify_digest" in changes:
         ch.notify_digest = bool(changes["notify_digest"])
+    if "notify_daily" in changes:
+        ch.notify_daily = bool(changes["notify_daily"])
     ch.updated_at = now
     db.commit()
 
@@ -278,13 +287,14 @@ def link_chat(db: Session, code: str, chat_id: int, chat_title: str, now: dateti
         return None
     ch = _channel(db, group.id, "telegram")
     if ch is None:
-        ch = GroupChannel(group_id=group.id, kind="telegram", notify_trades=True, notify_digest=True)
+        ch = GroupChannel(group_id=group.id, kind="telegram", notify_trades=True, notify_digest=True,
+                          notify_daily=False)
         db.add(ch)
     else:
         if ch.telegram_chat_id != chat_id:  # another chat, or set up again after it was removed
             _reset_others_push(db, group.id, row.created_by, now)
         if ch.status == REMOVED:
-            ch.notify_trades, ch.notify_digest = True, True
+            ch.notify_trades, ch.notify_digest, ch.notify_daily = True, True, False
     _cancel_pending(db, group.id, "telegram")
     ch.status, ch.disabled_reason = "active", None
     ch.telegram_chat_id, ch.chat_title = chat_id, (one_line(chat_title) or "Telegram 群組")[:255]

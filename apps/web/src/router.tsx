@@ -190,9 +190,14 @@ const adminNewsRoute = createRoute({
   path: "/admin/news",
   component: lazyRouteComponent(() => import("@/pages/admin/AdminNewsPage"), "AdminNewsPage"),
 })
+/** 管理後台「會員」：個人會員（預設）或群組加值（`?kind=group`） */
+export interface AdminMembersSearch {
+  kind?: "group"
+}
 const adminMembersRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/members",
+  validateSearch: (s: Record<string, unknown>): AdminMembersSearch => ({ kind: s.kind === "group" ? "group" : undefined }),
   component: lazyRouteComponent(() => import("@/pages/admin/AdminMembersPage"), "AdminMembersPage"),
 })
 const adminDiscussionsRoute = createRoute({

@@ -3,9 +3,12 @@ import { inText } from "@/lib/cjk"
 import { EllipsisIcon } from "lucide-react"
 import { useState } from "react"
 import { toast } from "sonner"
+import { appToday } from "@/api"
 import {
+  useAttachGroupPass,
   useCreateInvite,
   useDeleteGroup,
+  useMyGroupPasses,
   useInvites,
   useRemoveMember,
   useRevokeInvite,
@@ -13,7 +16,7 @@ import {
   useTransferGroup,
   useUpdateGroup,
 } from "@/api/sharing-queries"
-import { ApiError, type Group, type GroupInvite, type GroupMember } from "@/api/types"
+import { ApiError, type Group, type GroupInvite, type GroupMember, type MyGroupPass } from "@/api/types"
 import { UserAvatar } from "@/components/avatar"
 import { Section } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
@@ -33,6 +36,7 @@ import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSepara
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { formatDateShort, formatDateTime } from "@/lib/format"
+import { groupFull, groupPlanLabel, untilDay } from "@/lib/plan"
 import { cn } from "@/lib/utils"
 import { ROLE_LABEL } from "../labels"
 
@@ -188,7 +192,10 @@ function ConfirmDialog({ group, confirm, onClose }: { group: Group; confirm: Con
   )
 }
 
-/** 邀請連結：有效的邀請（期限、單次或多次、用了幾次、撤回）；新的連結只在產生時顯示一次 */
+/**
+ * 邀請連結：有效的邀請（期限、單次或多次、用了幾次、撤回）；新的連結只在產生時顯示一次。
+ * 人數到了上限（群組加值包：免費 15、加值 50；到期不踢人，所以也可能超過）：最上面一行說新的成員不能加入，「產生邀請連結」不能按。
+ */
 function Invites({ group }: { group: Group }) {
   const invites = useInvites(group.id, true)
   const create = useCreateInvite(group.id)
@@ -196,9 +203,15 @@ function Invites({ group }: { group: Group }) {
   const [expires, setExpires] = useState<"24h" | "7d">("7d")
   const [multi, setMulti] = useState(false)
   const [created, setCreated] = useState<GroupInvite | null>(null)
+  const full = groupFull(group.members.length, group.plan)
   return (
     <Section title="邀請連結" titleId="gm-invites">
       <div className="flex flex-col gap-4">
+        {full && group.plan && (
+          <p role="status" className="border-y border-rule py-2.5 text-base text-ink">
+            已經有 {group.members.length} 位成員，上限是 {group.plan.member_cap} 人。新的成員不能加入。
+          </p>
+        )}
         <div className="flex flex-wrap items-end gap-x-6 gap-y-3">
           <div className="flex flex-col gap-1.5">
             <span className="text-sm font-medium">有效期限</span>
@@ -210,7 +223,7 @@ function Invites({ group }: { group: Group }) {
           </label>
           <Button
             variant="outline"
-            disabled={create.isPending}
+            disabled={create.isPending || full}
             onClick={() =>
               create.mutate(
                 { expires, multi_use: multi },
@@ -284,7 +297,7 @@ function CreatedInvite({ invite }: { invite: GroupInvite }) {
   )
 }
 
-/** 群組設定：名稱（管理員）、排名（只有擁有者）、刪除群組（只有擁有者） */
+/** 群組設定：名稱（管理員）、排名（只有擁有者）、方案（管理員看得到；只有擁有者能用自己的加值）、刪除群組（只有擁有者） */
 function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void }) {
   const update = useUpdateGroup(group.id)
   const [name, setName] = useState(group.name)
@@ -332,6 +345,7 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
             onCheckedChange={(on) => update.mutate({ ranking_enabled: on }, { onError: (err) => toast.error("沒有改成功", { description: errText(err) }) })}
           />
         </div>
+        <PlanRow group={group} />
         {isOwner && (
           <div className="flex flex-col items-start gap-2 py-4">
             <p className="text-base text-ink">擁有者要先把群組轉給別人才能離開（成員右邊的選項）。</p>
@@ -342,5 +356,69 @@ function GroupSettings({ group, onDelete }: { group: Group; onDelete: () => void
         )}
       </div>
     </Section>
+  )
+}
+
+/**
+ * 群組設定的「方案」（群組加值包第一階段）：「加值到 12/31・上限 50 人」或「免費・上限 15 人」。
+ * 擁有者另外看到自己還能用的加值（站方開給他的，`GET /me/group-passes`）：還沒用在群組的「用在這個群組」；
+ * 用在自己擁有的另一個群組的「移到這個群組」（先確認：那個群組回到免費）。只列會讓這個群組加值得更久的。
+ * 舊版後端沒有 plan 時這一列不出現。
+ */
+function PlanRow({ group }: { group: Group }) {
+  const isOwner = group.my_role === "owner"
+  const passes = useMyGroupPasses(isOwner && !!group.plan)
+  const attach = useAttachGroupPass(group.id)
+  const [moving, setMoving] = useState<MyGroupPass | null>(null)
+  const plan = group.plan
+  if (!plan) return null
+  const today = appToday()
+  const usable = (passes.data ?? []).filter(
+    (p) => p.active && !!p.until && p.until > (plan.until ?? "") && p.group?.id !== group.id && (!p.attached || p.group?.my_role === "owner"),
+  )
+  const run = (p: MyGroupPass) =>
+    attach.mutate(p.id, {
+      onSuccess: () => {
+        toast.success(`「${group.name}」加值到 ${untilDay(p.until!, today)}`)
+        setMoving(null)
+      },
+      onError: (err) => {
+        toast.error("沒有加值", { description: errText(err) })
+        setMoving(null)
+      },
+    })
+  return (
+    <div className="flex flex-col gap-3 py-4">
+      <div>
+        <p className="font-medium">方案</p>
+        <p className="num text-base text-ink">{groupPlanLabel(plan, today)}</p>
+      </div>
+      {usable.map((p) => (
+        <div key={p.id} className="flex flex-wrap items-center justify-between gap-x-6 gap-y-2 border-t border-rule pt-3">
+          <p className="num text-base text-ink">
+            {p.attached ? `你到 ${untilDay(p.until!, today)} 的加值用在「${p.group!.name}」。` : `你有一個到 ${untilDay(p.until!, today)} 的加值，還沒有用在群組。`}
+          </p>
+          <Button variant="outline" size="sm" disabled={attach.isPending} onClick={() => (p.attached ? setMoving(p) : run(p))}>
+            {p.attached ? "移到這個群組" : "用在這個群組"}
+          </Button>
+        </div>
+      ))}
+      {moving && (
+        <AlertDialog open onOpenChange={(o) => !o && !attach.isPending && setMoving(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>把加值移到「{group.name}」？</AlertDialogTitle>
+              <AlertDialogDescription>「{moving.group!.name}」會回到免費，日報停止。成員不會被移出。</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>取消</AlertDialogCancel>
+              <AlertDialogAction disabled={attach.isPending} onClick={() => run(moving)}>
+                移過來
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      )}
+    </div>
   )
 }

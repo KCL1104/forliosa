@@ -1331,35 +1331,40 @@ export interface Digest {
 }
 
 /**
- * 群組 AI 日報的數字（加值群組，每個交易日；和週報同一套規則）：伺服器每次讀取時依「目前」的分享設定過濾，
+ * 群組 AI 日報的數字（加值群組，每個交易日；和週報同一套規則）：伺服器每次讀取時依「目前」的成員與分享設定過濾，
  * 不含金額、股數、觀察清單。
  */
 export interface DailyReportFacts {
   /** 開了報酬率的成員那天的報酬（和排行的「今日」一樣） */
   returns: { user_id: string; display_name: string; day_return_pct: number | null }[]
   benchmarks: { symbol: string; name: string; day_return_pct: number | null }[]
-  /** 兩人以上持有的股票（只算開了持股的成員）與它那天的漲跌 */
+  /** 兩人以上持有的股票（只算開了持股的成員）與它那天的漲跌（美股是 null） */
   common_holdings: { symbol: string; name: string; holder_count: number; day_change_pct: number | null }[]
-  /** 那天的買賣：只算開了交易動態的成員，不寫是誰；匯入對帳單的不算 */
-  trades: { side: "buy" | "sell"; symbol: string; name: string }[]
-  /** 站內有「為什麼漲跌」說明的共同持股（連到個股頁） */
-  why: { symbol: string; name: string }[]
+  /** 那天的買賣：只算開了交易動態的成員，不寫是誰、同一檔同方向合併（`count` 筆）；匯入對帳單的不算 */
+  trades: { side: "buy" | "sell"; symbol: string; name: string; count: number }[]
+  trades_count: number
+  /** 漲跌最多的共同持股：連到個股頁的「為什麼漲跌」 */
+  why: { symbol: string; name: string; day_change_pct: number | null }[]
 }
 
 export interface DailyReport {
   id: string
+  /** pending：AI 段落還在寫；ready：寫好了（summary 可能是空的，notes 說為什麼）；failed：只有數字 */
   status: "pending" | "ready" | "failed"
-  /** 哪一天的收盤 */
-  trade_date: string
+  /** 哪一天的收盤（YYYY-MM-DD） */
+  trading_day: string
   created_at: string
-  /** AI 只寫群組整體（2–4 句），不點名，不給買賣建議、目標價或預測；少於 2 人分享報酬時沒有 */
-  summary: string | null
-  facts: DailyReportFacts | null
+  finished_at?: string | null
+  /** AI 只寫群組整體（2–4 句），不點名，不給買賣建議、目標價或預測；沒有時是空字串（少於 2 人分享報酬、有人收回） */
+  summary: string
+  facts: DailyReportFacts
+  /** 為什麼沒有 AI 段落之類的說明（照原文顯示） */
+  notes: string[]
+  /** 市場頁有這一天的 AI 收盤重點（連到 /market） */
+  market_summary: boolean
   disclaimer: string
   sources: string[]
-  /** 留言與表情（`daily:<id>`）；選填：後端沒有時不顯示 */
-  comment_count?: number
-  reactions?: Reaction[]
+  is_demo: boolean
 }
 
 export type ChannelStatus = "active" | "disabled"
@@ -1436,8 +1441,6 @@ export interface InvitePreview {
   status: "valid" | "member"
   /** 只有 `status: "member"` 時有（成員本人才拿得到）：直接連到那個群組 */
   group_id?: string
-  /** 群組的人數已經到上限，不能再加人（選填：舊版後端沒有；加入時照樣會被擋，409） */
-  full?: boolean
 }
 
 // ── 討論串（docs/api-contract.md「討論串（2026-11-13）」）──────────────────

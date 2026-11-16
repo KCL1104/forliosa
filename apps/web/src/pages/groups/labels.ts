@@ -21,3 +21,12 @@ export const SHARE_COPY: Record<keyof ShareSettings, { label: string; detail: st
   trade_prices: { label: "附上成交價", detail: "交易動態另外附上成交價（不含手續費與稅）。" },
   push: { label: "推播", detail: "把你分享的內容也送到群組的 Discord／Telegram 頻道。" },
 }
+
+/**
+ * 409 `limit_reached` 有兩種：群組滿了（群組加值包：免費 15 人、加值 50 人；伺服器的句子已經說了上限，
+ * 「這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）」）→ 照寫、再說要找誰；
+ * 自己加入的群組太多（「每人最多加入 20 個群組」）→ 前面加「沒辦法加入：」。
+ */
+export function limitText(message: string): string {
+  return message.includes("滿了") ? `${message.replace(/[。.]$/, "")}。請告訴邀請你的人。` : `沒辦法加入：${message}`
+}

@@ -1,5 +1,5 @@
 """The site admins' back office (docs/api-contract.md 「管理後台」): an overview, the news takedown blocklist and the
-members granted by hand (``forliosa.plans``; no payments yet).
+members and 群組加值包 granted by hand (``forliosa.plans``, ``services.group_plans``; no payments yet).
 
 Guarded like the discussion moderation endpoints (``routes.discussions.admin_router``): signed in (401), and a site
 admin (``ADMIN_EMAILS``) or 404 — before the body is validated, so the path reveals nothing. Every endpoint acts as
@@ -15,16 +15,20 @@ from sqlalchemy.orm import Session
 from forliosa import plans
 from forliosa.api.deps import signed_in_user
 from forliosa.api.schemas_admin import (
+    AdminGroupPass,
     AdminMember,
     AdminOverview,
     BlockDomainIn,
     BlockDomainOut,
     BlockedDomain,
+    GroupPassGrantIn,
+    GroupPassPatch,
     MemberGrantIn,
 )
 from forliosa.db import get_db
 from forliosa.models import User
 from forliosa.services import admin as svc
+from forliosa.services import group_plans
 from forliosa.services.discussions import require_admin
 
 
@@ -74,4 +78,29 @@ def grant_member(body: MemberGrantIn, db: Session = Depends(get_db)):
 @router.delete("/members/{user_id}", status_code=204, response_class=Response, summary="取消會員（改回免費）")
 def revoke_member(user_id: str = Path(max_length=32), db: Session = Depends(get_db)):
     plans.revoke(db, user_id)
+    return Response(status_code=204)
+
+
+# -- 群組加值包 (no payments yet: granted by hand; the admin never sees a group's name or content) ------------------
+@router.get("/group-passes", response_model=list[AdminGroupPass],
+            summary="群組加值包（站方手動開通的；到期的也列出，方便延長）")
+def list_group_passes(db: Session = Depends(get_db)):
+    return group_plans.admin_list(db)
+
+
+@router.post("/group-passes", response_model=AdminGroupPass, status_code=201,
+             summary="開通群組加值包（用付款人的 email；給 group_id 就直接用在那個群組，付款人必須是擁有者）")
+def grant_group_pass(body: GroupPassGrantIn, db: Session = Depends(get_db)):
+    return group_plans.admin_grant(db, body.email, body.until, body.note, body.group_id)
+
+
+@router.patch("/group-passes/{pass_id}", response_model=AdminGroupPass, summary="延長（或縮短）、改備註")
+def patch_group_pass(body: GroupPassPatch, pass_id: str = Path(max_length=32), db: Session = Depends(get_db)):
+    return group_plans.admin_update(db, pass_id, body.model_dump(exclude_unset=True))
+
+
+@router.delete("/group-passes/{pass_id}", status_code=204, response_class=Response,
+               summary="取消群組加值包（群組回到免費的上限；不會移除任何成員）")
+def revoke_group_pass(pass_id: str = Path(max_length=32), db: Session = Depends(get_db)):
+    group_plans.admin_revoke(db, pass_id)
     return Response(status_code=204)

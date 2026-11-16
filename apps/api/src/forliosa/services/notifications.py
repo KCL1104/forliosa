@@ -13,6 +13,11 @@ day, symbol, side) go out as one message; the price (share-weighted average, no 
 who push (:func:`sharing.digest_facts_view` with ``pushing_only``); the summary itself only while every member whose
 numbers went into it still pushes (:func:`sharing.digest_summary_pushable`).
 
+**Daily reports** (群組 AI 日報 of boosted groups; channels with ``notify_daily``, off by default): queued when a report
+is finished, due at once — or at 07:30 when it finished between 23:00 and 07:30 (``group_daily.push_at``). The text
+has only the numbers of members who push (:func:`sharing.daily_facts_view` with ``pushing_only``) and the AI paragraph
+only while every member whose numbers went into it still pushes.
+
 **Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
 :func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,
 a masked link or other formatting to a message.
@@ -36,7 +41,15 @@ from forliosa.config import Settings, get_settings
 from forliosa.crypto import decrypt_secret
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
-from forliosa.models import Group, GroupChannel, GroupDigest, NotificationOutbox, TelegramLinkCode, Transaction
+from forliosa.models import (
+    Group,
+    GroupChannel,
+    GroupDailyReport,
+    GroupDigest,
+    NotificationOutbox,
+    TelegramLinkCode,
+    Transaction,
+)
 from forliosa.services import channels, pushers, sharing
 from forliosa.services.pushers import SendResult
 from forliosa.timeutil import now_utc
@@ -106,6 +119,27 @@ def enqueue_digest(db: Session, digest: GroupDigest, now: datetime | None = None
     return added
 
 
+def enqueue_daily(db: Session, report: GroupDailyReport, now: datetime | None = None) -> int:
+    """Queue a finished daily report for the group's channels that take daily reports (due at once, or at 07:30 when
+    it finished during the night)."""
+    from forliosa.services.group_daily import push_at
+
+    now = now or now_utc()
+    added = 0
+    for ch in db.scalars(select(GroupChannel).where(GroupChannel.group_id == report.group_id,
+                                                    GroupChannel.status == "active",
+                                                    GroupChannel.notify_daily.is_(True))):
+        key = f"daily:{report.id}:{ch.kind}"
+        if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key)):
+            continue
+        db.add(NotificationOutbox(id=new_id("ntf"), group_id=report.group_id, channel_kind=ch.kind, kind="daily",
+                                  dedupe_key=key, daily_report_id=report.id, status="pending", attempts=0,
+                                  not_before=push_at(report.finished_at or now), created_at=now))
+        added += 1
+    db.commit()
+    return added
+
+
 # -- message text (plain text: Discord markdown escaped in every dynamic value, no parse_mode on Telegram) --------
 def _pct(value: float | None) -> str:
     return "—" if value is None else f"{value * 100:+.2f}%"
@@ -167,6 +201,46 @@ def digest_text(group: Group, digest: GroupDigest, view: dict[str, Any], summary
     link = _link(settings)
     if link:
         lines.append(f"完整週報：{link}")
+    if summary:
+        lines.append(DISCLAIMER)
+    return "\n".join(lines)
+
+
+DAILY_MAX_RETURNS = 20  # a channel message lists this many members' returns (Discord cuts at 2,000 characters)
+DAILY_MAX_TRADES = 10
+
+
+def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], summary: str | None, kind: str,
+               settings: Settings) -> str:
+    """The memo's format: a title line, the AI paragraph, then the numbers (one decimal, −), the link and the note."""
+    from forliosa.services.group_daily import pct1, weekday
+
+    d = report.trading_day
+    lines = [f"Forliosa 群組「{_t(group.name, kind)}」日報　{d.month}/{d.day}（{weekday(d)}）收盤"]
+    if summary:
+        lines.append(_t(summary, kind))
+    returns = view["returns"]
+    if returns:
+        shown = "、".join(f"{_t(r['display_name'], kind)} {pct1(r['day_return_pct'], '−')}"
+                         for r in returns[:DAILY_MAX_RETURNS])
+        more = f" 等 {len(returns)} 人" if len(returns) > DAILY_MAX_RETURNS else ""
+        lines.append(f"今日報酬：{shown}{more}")
+    bench = [b for b in view["benchmarks"] if b.get("day_return_pct") is not None]
+    if bench:
+        lines.append("對照：" + "、".join(f"{_t(b['name'], kind)} {pct1(b['day_return_pct'], '−')}" for b in bench))
+    if view["common_holdings"]:
+        lines.append("共同持股：" + "、".join(
+            f"{_t(c['name'], kind)}（{c['holder_count']} 人）"
+            + (f"{pct1(c['day_change_pct'], '−')}" if c.get("day_change_pct") is not None else "")
+            for c in view["common_holdings"][:5]))
+    if view["trades"]:
+        items = [f"{SIDE_LABEL.get(t['side'], t['side'])} {_t(t['name'], kind)}"
+                 + (f"（{t['count']} 筆）" if t["count"] > 1 else "") for t in view["trades"][:DAILY_MAX_TRADES]]
+        more = f" 等 {view['trades_count']} 筆" if len(view["trades"]) > DAILY_MAX_TRADES else ""
+        lines.append("今天的買賣：" + "、".join(items) + more)
+    link = _link(settings)
+    if link:
+        lines.append(f"完整日報（含 AI 收盤重點與為什麼漲跌的連結）：{link}")
     if summary:
         lines.append(DISCLAIMER)
     return "\n".join(lines)
@@ -257,6 +331,27 @@ def _send_digest(db: Session, settings: Settings, row: NotificationOutbox, now: 
     _apply(db, ch, [row], _deliver(db, ch, text, settings), now)
 
 
+def _send_daily(db: Session, settings: Settings, row: NotificationOutbox, now: datetime) -> None:
+    ch = db.get(GroupChannel, (row.group_id, row.channel_kind))
+    group = db.get(Group, row.group_id)
+    report = db.get(GroupDailyReport, row.daily_report_id) if row.daily_report_id else None
+    if group is None or ch is None or not _channel_ok(ch, "notify_daily"):
+        _cancel([row], "channel_off")
+        return
+    if report is None or report.status not in ("ready", "failed"):
+        _cancel([row], "not_ready")
+        return
+    members = sharing.members_of(db, group.id)
+    view = sharing.daily_facts_view(report.facts or {}, members, pushing_only=True)
+    if not (view["returns"] or view["common_holdings"] or view["trades"]):
+        _cancel([row], "not_shared")
+        return
+    summary = (report.summary if report.status == "ready" and report.summary
+               and sharing.digest_summary_pushable(report.facts or {}, members) else None)
+    text = daily_text(group, report, view, summary, ch.kind, settings)
+    _apply(db, ch, [row], _deliver(db, ch, text, settings), now)
+
+
 def send_due(db: Session, md: MarketData, settings: Settings | None = None, now: datetime | None = None) -> int:
     """Send every due pending row (re-checking what may be shown). Returns the number of rows handled."""
     settings = settings or get_settings()
@@ -267,9 +362,13 @@ def send_due(db: Session, md: MarketData, settings: Settings | None = None, now:
                                      NotificationOutbox.id).limit(SEND_BATCH)))
     trades: dict[tuple, list[tuple[NotificationOutbox, Transaction]]] = defaultdict(list)
     digests: list[NotificationOutbox] = []
+    dailies: list[NotificationOutbox] = []
     for r in rows:
         if r.kind == "digest":
             digests.append(r)
+            continue
+        if r.kind == "daily":
+            dailies.append(r)
             continue
         t = db.get(Transaction, r.transaction_id) if r.kind == "trade" and r.transaction_id else None
         if t is None:
@@ -282,6 +381,9 @@ def send_due(db: Session, md: MarketData, settings: Settings | None = None, now:
     for r in digests:
         if r.status == "pending":
             _send_digest(db, settings, r, now)
+    for r in dailies:
+        if r.status == "pending":
+            _send_daily(db, settings, r, now)
     db.commit()
     return len(rows)
 

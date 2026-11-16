@@ -16,6 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { direction, directionGlyph, formatDateShort, formatDateTime, formatPercent, toneClass } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { untilDay } from "@/lib/plan"
 import { ROLE_LABEL } from "./labels"
 import { FieldError } from "@/components/form-field"
 import { usePageTitle } from "@/app/page-title"
@@ -76,6 +77,8 @@ function GroupRow({ g }: { g: GroupSummary }) {
             <span>{g.member_count} 位成員</span>
             {!g.ranking_enabled && <span>不排名次</span>}
             {g.latest_activity_at && <span>最近動態 {formatDateTime(g.latest_activity_at)}</span>}
+            {g.plan?.tier === "boosted" && <span>{g.plan.until ? `加值到 ${untilDay(g.plan.until, appToday())}` : "加值"}</span>}
+            {g.latest_daily_at && <span>日報 {formatDateShort(g.latest_daily_at.slice(0, 10), false)}</span>}
             {g.latest_digest_at && <span>週報 {formatDateShort(g.latest_digest_at.slice(0, 10), false)}</span>}
           </span>
         </span>

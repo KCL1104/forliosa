@@ -1,6 +1,6 @@
 """Family groups (親友群組): groups, members, invites, share settings, leaderboard, holdings, feed, comments and
-reactions, weekly AI digests and push channels. Non-members get 404 everywhere; what members see of each other comes
-from ``services.sharing``."""
+reactions, weekly AI digests, the 群組加值包 (plan, daily AI reports) and push channels. Non-members get 404
+everywhere; what members see of each other comes from ``services.sharing``."""
 
 from __future__ import annotations
 
@@ -18,6 +18,7 @@ from forliosa.api.schemas_sharing import (
     CommentIn,
     CommentOut,
     CommentPage,
+    DailyReportPage,
     DigestPage,
     DiscordIn,
     EmojiLiteral,
@@ -31,6 +32,8 @@ from forliosa.api.schemas_sharing import (
     InviteOut,
     InvitePreview,
     Leaderboard,
+    MyGroupPass,
+    PlanAttachIn,
     ReactionIn,
     Reactions,
     RoleIn,
@@ -42,7 +45,7 @@ from forliosa.api.schemas_sharing import (
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
-from forliosa.services import channels, digests, sharing
+from forliosa.services import channels, digests, group_daily, group_plans, sharing
 from forliosa.services import groups as svc
 
 router = APIRouter(tags=["groups"])
@@ -232,6 +235,31 @@ def list_digests(group_id: str, limit: int = Query(8, ge=1, le=52), cursor: str 
     return digests.digests_page(db, g, user.id, limit, cursor)
 
 
+# -- 群組加值包: the plan and the daily AI reports --------------------------------------------------------------------
+@router.put("/groups/{group_id}/plan", response_model=GroupOut,
+            summary="把我的群組加值包用在這個群組（擁有者；加值包由站方開通給付款人）")
+def attach_plan(group_id: str, body: PlanAttachIn, user: User = Depends(signed_in_user),
+                db: Session = Depends(get_db)):
+    g, m = svc.require_member(db, group_id, user)
+    group_plans.attach(db, g, m, body.pass_id)
+    return svc.group_out(db, g, user)
+
+
+@router.get("/me/group-passes", response_model=list[MyGroupPass], tags=["me"],
+            summary="我拿到的群組加值包（付款人）；用在哪個群組（我還是成員時才有群組名稱）")
+def my_group_passes(user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
+    return group_plans.my_passes(db, user)
+
+
+@router.get("/groups/{group_id}/daily-reports", response_model=DailyReportPage,
+            summary="群組 AI 日報（新到舊；加值結束後以前的照樣看得到；facts 依目前的分享設定過濾）")
+def list_daily_reports(group_id: str, limit: int = Query(10, ge=1, le=31),
+                       cursor: str | None = Query(None, max_length=300), user: User = Depends(signed_in_user),
+                       db: Session = Depends(get_db)):
+    g, _ = svc.require_member(db, group_id, user)
+    return group_daily.reports_page(db, g, limit, cursor)
+
+
 # -- push channels ---------------------------------------------------------------------------------------------------
 @router.get("/groups/{group_id}/channels", response_model=Channels,
             summary="推播頻道（每位成員都看得到；webhook_hint 只有擁有者看得到）")
@@ -244,7 +272,7 @@ def get_channels(group_id: str, user: User = Depends(signed_in_user), db: Sessio
             summary="設定 Discord webhook（擁有者；先送測試訊息，失敗 422 webhook_failed）")
 def put_discord(group_id: str, body: DiscordIn, user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
     g, m = svc.require_member(db, group_id, user)
-    channels.put_discord(db, g, m, body.webhook_url, body.notify_trades, body.notify_digest)
+    channels.put_discord(db, g, m, body.webhook_url, body.notify_trades, body.notify_digest, body.notify_daily)
     return channels.channels_out(db, g, m)
 
 

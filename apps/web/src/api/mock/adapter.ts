@@ -335,7 +335,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     return {
       ...user,
       ...fields,
-      plan: { tier: "member", until: null, deep_search: true, daily_briefing: true, statement_import: fields.is_admin },
+      // 站方管理員算會員、沒有到期日；`?discuss=member`（不是管理員）是開通到 12/31 的會員（設定頁「會員，到 12/31」）
+      plan: { tier: "member", until: fields.is_admin ? null : "2026-12-31", deep_search: true, daily_briefing: true, statement_import: fields.is_admin },
     }
   }
 
@@ -900,6 +901,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     createGroup: (body) => wait(() => sharing.createGroup(body)),
     getGroup: (id) => wait(() => sharing.getGroup(id)),
     updateGroup: (id, patch) => wait(() => sharing.updateGroup(id, patch)),
+    listMyGroupPasses: () => wait(() => sharing.listMyGroupPasses()),
+    attachGroupPass: (id, passId) => wait(() => sharing.attachGroupPass(id, passId)),
     deleteGroup: (id) =>
       wait(() => {
         sharing.deleteGroup(id)
@@ -926,6 +929,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     addReaction: (id, body) => wait(() => sharing.addReaction(id, body)),
     removeReaction: (id, target, emoji) => wait(() => sharing.removeReaction(id, target, emoji)),
     listDigests: (id, query) => wait(() => sharing.listDigests(id, query)),
+    listDailyReports: (id, query) => wait(() => sharing.listDailyReports(id, query)),
     getChannels: (id) => wait(() => sharing.getChannels(id)),
     putDiscord: (id, body) => wait(() => sharing.putDiscord(id, body)),
     patchDiscord: (id, patch) => wait(() => sharing.patchDiscord(id, patch)),
@@ -964,6 +968,28 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     listMembers: () => wait(() => admin.members(todayInTaipei(new Date(discussionNow())))),
     grantMember: (body) => wait(() => admin.grant(body, todayInTaipei(new Date(discussionNow())))),
     revokeMember: (userId) => wait(() => admin.revoke(userId)),
+    listGroupPasses: () =>
+      wait(() => {
+        admin.requireAdmin()
+        return sharing.adminPasses((uid) => (uid === user.id ? { email: user.email, display_name: user.display_name } : admin.accountById(uid)))
+      }),
+    grantGroupPass: (body) =>
+      wait(() => {
+        const payer = admin.accountByEmail(body.email)
+        const created = sharing.adminGrantPass(payer.user_id, body, todayInTaipei(new Date(discussionNow())))
+        return sharing.adminPasses(() => ({ email: payer.email, display_name: payer.display_name })).find((x) => x.id === created.id)!
+      }),
+    updateGroupPass: (id, patch) =>
+      wait(() => {
+        admin.requireAdmin()
+        sharing.adminUpdatePass(id, patch, todayInTaipei(new Date(discussionNow())))
+        return sharing.adminPasses((uid) => admin.accountById(uid)).find((x) => x.id === id)!
+      }),
+    revokeGroupPass: (id) =>
+      wait(() => {
+        admin.requireAdmin()
+        sharing.adminRevokePass(id)
+      }),
   }
 
   return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)

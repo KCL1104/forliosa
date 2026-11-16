@@ -10,7 +10,7 @@ import { AuthFrame } from "@/app/AuthGate"
 import { switchViewAs } from "@/app/view-as"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
-import { DEFAULT_SHARE } from "./labels"
+import { DEFAULT_SHARE, limitText } from "./labels"
 import { ShareToggles } from "./ShareToggles"
 import { FieldError } from "@/components/form-field"
 import { usePageTitle } from "@/app/page-title"
@@ -120,7 +120,7 @@ function ChooseAndJoin({ token, groupName }: { token: string; groupName: string 
           err instanceof ApiError && err.status === 410
             ? "這個邀請剛剛失效了，請向邀請你的人要一個新的連結。"
             : err instanceof ApiError && err.code === "limit_reached"
-              ? `沒辦法加入：${err.message}`
+              ? limitText(err.message)
               : err instanceof ApiError
                 ? err.message
                 : "沒有加入成功，請再試一次。",

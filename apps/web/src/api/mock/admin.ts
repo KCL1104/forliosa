@@ -17,8 +17,9 @@ import { mockMediaUrls } from "./research"
  *   美股收盤價（Databento）的回補進度：存到紐約 11/11（台北 11/12 清晨抓的），1 檔剛加入還沒回補。
  * - 新聞下架：網域正規化（小寫、去掉 www.、從網址取主機）；封鎖會刪掉那個網域與子網域已存的標題（示範報導都在 example.com）；
  *   寫在伺服器設定的不能在這裡解除（409）。
- * - 會員：用 email 開通或續期（示範帳號只有 demo@forliosa.local 與 friend@forliosa.local；其他 email → 404）；
+ * - 會員：用 email 開通或續期（示範帳號只有 demo@forliosa.local、friend@forliosa.local 與 kai@forliosa.local；其他 email → 404）；
  *   到期日早於今天 → 422；過期的也列出，方便續期。
+ * - 群組加值：群組在分享的 mock（`sharing.ts`），這裡只負責站方的權限與用 email 找付款人。
  * 呼叫的人不是站方管理員 → 404（`requireAdmin` 由 adapter 給，和討論串的站方管理同一個判斷）。
  */
 export interface AdminDeps {
@@ -88,12 +89,30 @@ export function createAdminStore(deps: AdminDeps) {
   const accounts: Record<string, { user_id: string; display_name: string }> = {
     "demo@forliosa.local": { user_id: "usr_01JDEMO", display_name: "示範使用者" },
     "friend@forliosa.local": { user_id: "usr_friend", display_name: "阿明" },
+    // 大學同學的擁有者（群組加值的示範：他以前替那個群組加值過）
+    "kai@forliosa.local": { user_id: "usr_kai", display_name: "阿凱" },
   }
   const members = new Map<string, AdminMember>([
     ["usr_friend", { user_id: "usr_friend", email: "friend@forliosa.local", display_name: "阿明", until: "2026-12-14", note: "11/15 轉帳 NT$300", active: true }],
   ])
 
   return {
+    /** 用 email 找帳號（群組加值的付款人；對方要先登入過一次 → 否則 404，和會員同一個說法） */
+    accountByEmail(raw: string): { user_id: string; display_name: string; email: string } {
+      deps.requireAdmin()
+      const email = raw.trim().toLowerCase()
+      const account = accounts[email]
+      if (!account) throw new ApiError(404, "user_not_found", "找不到這個 email 的帳號：請對方先登入一次 Forliosa。")
+      return { ...account, email }
+    },
+    /** 付款人的 email 與顯示名稱（站方的群組加值清單） */
+    accountById(userId: string): { email: string; display_name: string } | null {
+      const hit = Object.entries(accounts).find(([, a]) => a.user_id === userId)
+      return hit ? { email: hit[0], display_name: hit[1].display_name } : null
+    },
+    /** 和 adapter 的其他站方動作一樣：不是站方管理員 → 404 */
+    requireAdmin: deps.requireAdmin,
+
     /** 個股頁的新聞：封鎖中的網域、封鎖時刪掉的報導不出現（解除封鎖也不會回來，和後端一樣） */
     hides(url: string): boolean {
       const host = hostOf(url)

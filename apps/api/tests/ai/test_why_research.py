@@ -51,7 +51,8 @@ def cold_answer(fake, answer: str = "台達電今天跌 6.9%，大盤跌 3.1%。
     fake.reply(tool_use("toolu_o", "get_stock_overview", {"symbol": "2308"}), stop_reason="tool_use")
     fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台達電 股價 重挫"}),
                web_search_result("srvtoolu_1", [
-                   {"url": A, "title": "台達電重挫 外資調降目標價", "encrypted_content": "E1", "page_age": "2 hours ago"},
+                   {"url": A, "title": "台達電重挫 外資調降目標價", "encrypted_content": "E1",
+                    "page_age": "2 hours ago"},
                    {"url": B, "title": "台股盤中重挫逾 300 點", "encrypted_content": "E2"},
                    {"url": C, "title": "無關的新聞", "encrypted_content": "E3"},
                    {"url": D, "title": "台達電法說會後連兩天下跌", "encrypted_content": "E4"}]),
@@ -287,7 +288,7 @@ def test_the_next_asker_gets_the_research_as_citable_search_results(client, othe
     cites = [d for n, d in events if n == "citation"]
     assert cites == [{"url": A, "title": "台達電重挫 外資調降目標價", "cited_text": "台達電股價重挫 6.9%"}]
     # checked like a web-search answer: the cited sentence passes, the uncited news claim is flagged
-    flagged = [d for n, d in events if n == "grounding"][0]["items"]
+    flagged = next(d for n, d in events if n == "grounding")["items"]
     assert [f["text"] for f in flagged] == ["公司宣布明年擴產。"]
     r = row(engine)
     assert r.hits == 1 and r.searches == 1  # answered from it: not rewritten
@@ -323,7 +324,8 @@ def test_a_warm_turn_that_searches_again_puts_the_new_sources_first(client, othe
     fake.reply(server_tool_use("srvtoolu_2", "web_search", {"query": "Delta Taiwan 2308 shares"}),
                web_search_result("srvtoolu_2", [{"url": new, "title": "Delta Electronics shares slide",
                                                  "encrypted_content": "E5"}]),
-               text("外電說台達電訂單遞延。", [search_citation(new, "Delta Electronics shares slide", "Delta shares fell")]))
+               text("外電說台達電訂單遞延。",
+                    [search_citation(new, "Delta Electronics shares slide", "Delta shares fell")]))
     chat(other_client, "台達電為什麼跌？有更新的消息嗎")
     after = row(engine)
     assert [s["url"] for s in after.sources][:2] == [new, A]
