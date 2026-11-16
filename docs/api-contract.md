@@ -794,7 +794,7 @@
 - **存在與權限**：不是成員的人，群組相關端點一律 404 `not_found`（不透露群組是否存在）；是成員但權限不足回 403 `forbidden`。
 - **CSRF**：非 `GET`／`HEAD`／`OPTIONS` 的請求若帶 `Origin`，必須在 `CORS_ORIGINS` 內，否則 403 `forbidden`（全站適用）。
 - **上限**：每個群組的人數上限看方案（群組加值包，2026-11-16）：免費 15 位（`GROUP_FREE_MEMBER_CAP`）、加值 50 位（`GROUP_BOOSTED_MEMBER_CAP`），
-  2026-11-16 以前建立的群組不論方案都是 50 位（`plan.grandfathered`）；滿了回 409 `limit_reached`，訊息寫出上限（例如「這個群組已經滿了：
+  migration 0023 部署以前就建立的群組不論方案都是 50 位（`plan.grandfathered`）；滿了回 409 `limit_reached`，訊息寫出上限（例如「這個群組已經滿了：
   免費群組最多 15 位成員（加值的群組最多 50 位）」）。上限只擋新成員，不會移除任何人。每人最多加入 20 個群組（超過回 409 `limit_reached`）。
 - 錯誤代碼：`forbidden`、`not_found`、`read_only`、`view_as_not_allowed`、`delegation_revoked`、`already_member`、`invite_invalid`、
   `limit_reached`、`webhook_failed`、`telegram_unavailable`（409：伺服器沒有設定 Telegram bot）、`rate_limited`（429：設定 Discord
@@ -914,7 +914,9 @@
 ```json
 // GroupSummary
 {"id": "grp_...", "name": "家族投資", "my_role": "owner", "member_count": 5, "ranking_enabled": true,
- "latest_activity_at": "2026-11-12T13:40:00+08:00", "latest_digest_at": "2026-11-15T20:00:00+08:00"}
+ "latest_activity_at": "2026-11-12T13:40:00+08:00", "latest_digest_at": "2026-11-15T20:00:00+08:00",
+ "latest_daily_at": "2026-11-16T23:40:03+08:00",                                        // 2026-11-16：最新一份日報寫好的時間
+ "plan": {"tier": "boosted", "until": "2026-12-31", "member_cap": 50, "grandfathered": false, "daily_report": true}}
 
 // Group
 {
@@ -923,7 +925,9 @@
   "members": [{"user_id": "usr_...", "display_name": "爸爸", "avatar_url": null, "role": "owner",
                "joined_at": "2026-11-12T20:00:00+08:00", "is_me": true}],
   "my_share": ShareSettings,
-  "push_targets": [{"kind": "discord", "label": "Discord 頻道"}, {"kind": "telegram", "label": "家族投資群"}]   // 每位成員都看得到
+  "push_targets": [{"kind": "discord", "label": "Discord 頻道"}, {"kind": "telegram", "label": "家族投資群"}],  // 每位成員都看得到
+  "plan": {"tier": "free", "until": null, "member_cap": 50, "grandfathered": true, "daily_report": false}
+  // 2026-11-16 群組加值包，每位成員都看得到：免費 15、加值 50；加值包推出前建立的群組 grandfathered=true、不論方案都是 50（見「群組加值包與群組 AI 日報」）
 }
 
 // ShareSettings（預設只開 returns；接受邀請時由本人確認）

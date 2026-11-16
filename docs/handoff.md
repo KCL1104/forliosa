@@ -54,7 +54,14 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 - 匯入的買賣不進群組動態、推播與週報（`services/sharing.py` 的 `FEED_SOURCES`）。不算每天的題數，花費算進每月額度，每人每天 10 份。
 - 隱私權政策與服務條款 §8 已照附錄改；律師要看的兩件（塗不掉時身分證字號會送到境外的 AI 廠商、Anthropic 的保存期間）在 `docs/legal/README.md` (d) 第 20 點。
 
-後端：Alembic 單一 head `0021`（2026-11-16 匯入對帳單）。正式環境是 PostgreSQL（`0020` 以前的 migration 已在上面跑過，`0021` 跟著下一次部署跑）；本機測試用 SQLite。
+2026-11-16 新增：**群組加值包第一階段（不收錢）**（產品負責人 14 項都照建議；決定在 `docs/pending-decisions.md`「2026-11-16 群組加值包」，產品在 `PRODUCT.md`「群組加值包」，畫面在 `DESIGN.md` 群組〈報告〉、管理後台〈會員〉、設定頁〈方案〉，合約在 `docs/api-contract.md`「群組加值包與群組 AI 日報」，後端細節在 `apps/api/CONTRACT_NOTES.md`「2026-11-16 群組加值包第一階段」）：
+
+- 群組人數上限：免費 15、加值 50，0023 部署當時已有的群組維持 50（`groups.grandfathered_member_cap`）；滿了只擋加入，不移除人。
+- 加值包（`group_passes`）由站方在 `/admin/members?kind=group` 用付款人的 email 開通，付款人在群組設定的「方案」用在自己擁有的群組（`PUT /groups/{id}/plan`）。沒有任何付款的程式；價格與收錢方式只寫在文件。
+- 群組 AI 日報（`services/group_daily.py`，worker 每 10 分鐘）：只有加值中的群組、交易日、兩個市場的正式收盤與加權指數都到才寫（隔天 06:30 以後用當時有的）；只用分享的數字、匿名代號、Haiku effort low、`ai_usage.feature = "group_daily"`；群組頁「報告」分頁的日報｜週報；頻道的「日報」推播預設關，23:00–07:30 寫好的 07:30 送。
+- 法律：條款 §7.8、§7.9 與隱私 §5.5、§6 已照功能改；收費以後的條文是草稿（標【待確認】）；收費前的律師問題清單在 `docs/legal/README.md` (f)。
+
+後端：Alembic 單一 head `0023`（`0021` 匯入對帳單、`0022` 為什麼漲跌的研究共用、`0023` 群組加值包）。正式環境是 PostgreSQL（`0020` 以前的 migration 已在上面跑過，`0021`–`0023` 跟著下一次部署跑）；本機測試用 SQLite。
 
 ## 2. 前端潤飾（Impeccable，兩輪）
 

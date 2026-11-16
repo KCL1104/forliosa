@@ -181,10 +181,11 @@ class Settings(BaseSettings):
     ai_why_blocking: bool = False  # True: /why waits for the model; False: generate in the background
     # Shared research behind 「X 今天為什麼漲／跌」 chat answers (``forliosa.ai.research``): one entry per symbol and
     # trading session, used by every user's next why-question. Intraday it is reused this many minutes; after the
-    # close until the next session opens (one written before the session's close was stored ends when it is).
-    # Off = every why-question searches on its own.
+    # close until the next session opens, at most this many hours (one written before the session's close was
+    # stored ends when it is). Off = every why-question searches on its own.
     ai_research_cache: bool = True
     ai_research_intraday_minutes: int = Field(default=45, ge=1, le=240)
+    ai_research_after_close_hours: int = Field(default=4, ge=1, le=24)
     # Analyst views (/instruments/{symbol}/analyst-views): third-party ratings found by web search, shared per
     # symbol per trading day; off = POST answers "unavailable" without a model call.
     ai_analyst_enabled: bool = True

@@ -420,7 +420,7 @@
 
 **只有你能做的**
 
-1. **部署**：Alembic `0023` 跟著部署跑（部署那一刻已經存在的群組都維持 50 位；之後建立的群組免費 15 位）。開關都有預設（`GROUP_FREE_MEMBER_CAP` 15、`GROUP_BOOSTED_MEMBER_CAP` 50、`GROUP_DAILY_ENABLED` 開、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD` 5），不用設變數；api 與 worker 都讀得到同樣的值就好。
+1. **部署**：Alembic `0023` 跟著部署跑（部署那一刻已經存在的群組都維持 50 位；之後建立的群組免費 15 位）。開關都有預設（`GROUP_FREE_MEMBER_CAP` 15、`GROUP_BOOSTED_MEMBER_CAP` 50、`GROUP_DAILY_ENABLED` 開、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD` 5），不用設變數；要改的話 api 與 worker 設一樣的值。
 2. **試用**：管理後台 `/admin/members` → 「群組加值」，用你自己的 email 開一個（最後一天自己定）；到你擁有的群組的「成員」分頁，群組設定的「方案」按「用在這個群組」。下一個交易日晚上（多半 11:30 左右）在「報告」分頁看日報。想推播的話，到「頻道」打開「日報」（深夜寫好的早上 7:30 才送）。
 3. **律師**：預約一次，帶 `docs/legal/README.md` (f) 的清單（收費前）；(d) 的其他【待確認】可以同一次問。律師說可以以前不收錢。
 4. **之後決定要收錢時**（第 2 階段）：申請綠界個人會員、做收款連結；我做方案說明頁（價格、期間、不會自動續扣、7 天內可退、付款前自己勾選同意）、條款定稿、email 收據；你每月記一次總額，盯著 NT$5 萬。
