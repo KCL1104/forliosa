@@ -281,6 +281,13 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
             "個股頁「新聞報導」：媒體標題、媒體名稱、時間與原文連結", "open",
             "GDELT Terms of Use：unlimited and unrestricted use … without fee（需引用並連回 gdeltproject.org）",
             "GDELT 使用條款（免費、可商用，需引用 GDELT）", GDELT_TERMS_URL, f"依 GDELT 使用條款引用：{GDELT_SITE}"),
+    # The same GDELT index as 15-minute files (news.gdelt_bulk): Taiwan stocks' headlines, stored as ``gdelt`` rows
+    # and attributed like the DOC API's (same terms, same citation).
+    Dataset("gdelt/gkg", GDELT, "GDELT GKG 2.1 每 15 分鐘整批檔",
+            "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/",
+            "個股頁「新聞報導」（台股）：媒體標題、媒體名稱、時間與原文連結", "open",
+            "GDELT Terms of Use：unlimited and unrestricted use … without fee（需引用並連回 gdeltproject.org）",
+            "GDELT 使用條款（免費、可商用，需引用 GDELT）", GDELT_TERMS_URL, f"依 GDELT 使用條款引用：{GDELT_SITE}"),
     Dataset("yahoo-rss/stock", "Yahoo股市", "個股新聞 RSS", YAHOO_RSS_TERMS_URL,
             "個股頁「新聞報導」（只在 DATA_POLICY=personal）：標題、原始媒體、時間與連結", "non_commercial",
             "RSS 使用條款：個人和非營利組織可以在非商業用途內免費使用，須保留「Yahoo股市」與原始媒體標示",

@@ -9,7 +9,8 @@ import { formatQuote } from "@/lib/tick"
 
 /** 後端沒有附免責文字時用的常數（和合約範例相同） */
 export const ANALYST_DISCLAIMER_FALLBACK = "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。"
-export const ANALYST_MAX_ITEMS = 5
+/** 最多 8 筆（產品負責人 2026-11-16：台積電有 7 筆查證過的資料，5 筆時被截掉 2 筆） */
+export const ANALYST_MAX_ITEMS = 8
 /** 後端實測（2026-11-12，2–3 次網路搜尋）一次生成約 20–30 秒；每 2.5 秒問一次 */
 export const ANALYST_POLL_MS = 2500
 /** 搜尋超過這麼久還沒好：停止輪詢，請使用者稍後再打開（後端 5 分鐘沒完成會改成 `unavailable`） */
@@ -117,12 +118,17 @@ export function nextPoll(s: AnalystState, now: number): "poll" | "timeout" | nul
   return "poll"
 }
 
-/** 要顯示的列：最多 5 筆、新到舊（後端已排序；這裡再保證一次），沒有日期或來源的不列 */
+/** 要顯示的列：最多 8 筆，近 90 天的新到舊、「舊資料」排在後面（後端已排序；這裡再保證一次），沒有日期或來源的不列 */
 export function visibleViews(items: AnalystView[] | undefined): AnalystView[] {
   return (items ?? [])
     .filter((v) => v.date && v.url && v.source_title)
-    .sort((a, b) => b.date.localeCompare(a.date))
+    .sort((a, b) => Number(a.old === true) - Number(b.old === true) || b.date.localeCompare(a.date))
     .slice(0, ANALYST_MAX_ITEMS)
+}
+
+/** 法說會一行：「11/11（永豐金證券匯立分公司舉辦）」；公司自己召開的只寫日期 */
+export function conferenceLine(c: { date: string; host: string | null }, today: string): string {
+  return `${viewDate(c.date, today)}${c.host ? `（${c.host}舉辦）` : ""}`
 }
 
 /** 目標價：台股依升降單位＋「元」，美股 US$ 兩位小數；沒有寫目標價為「—」 */

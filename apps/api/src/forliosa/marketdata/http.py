@@ -158,6 +158,9 @@ ALLOWED_URL_PREFIXES = (
     # under DATA_POLICY=personal, Yahoo股市's RSS feeds (non-commercial terms). A self-hosted SearXNG is allowed per
     # fetcher (``extra_allowed``) when NEWS_SEARXNG_URL is set. News sites themselves are never fetched.
     "https://api.gdeltproject.org/api/v2/doc/doc",
+    # GDELT's 15-minute GKG files (forliosa.news.gdelt_bulk, decision 7 of 2026-11-16): the objects of its public
+    # bucket data.gdeltproject.org, read over HTTPS (same terms as the DOC API)
+    "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/",
     "https://tw.stock.yahoo.com/rss",
     # 「關於」 description (forliosa.services.company): Wikidata's API (CC0; find the article by ticker) and the
     # zh.wikipedia REST summary (CC BY-SA 4.0 excerpt, shown unchanged with attribution). Nothing else on Wikimedia.

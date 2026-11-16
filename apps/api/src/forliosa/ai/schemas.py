@@ -271,6 +271,21 @@ class AnalystView(BaseModel):
     date: str = Field(description="報導發布日期（由搜尋結果的網址或頁面日期核對）")
     source_title: str = Field(description="搜尋結果中那篇報導的標題")
     url: str = Field(description="那篇報導的網址（必定是這次搜尋結果中的一筆）")
+    unnamed: bool = Field(default=False, description="報導沒寫是哪一家外資（institution 是「未具名外資（日系）」）")
+    old: bool = Field(default=False, description="報導超過 90 天（畫面標「舊資料」，排在後面）")
+
+
+class AnalystConference(BaseModel):
+    date: str = Field(description="法說會日期（重大訊息存檔）")
+    host: str | None = Field(default=None, description="受邀參加時的主辦券商或活動名稱；公司自己召開為 null")
+
+
+class AnalystConferences(BaseModel):
+    """Official 法說會 context, links only (nothing fetched from MOPS)."""
+
+    last: AnalystConference | None = Field(default=None, description="近 180 天最近一次舉行的法說會")
+    next: AnalystConference | None = Field(default=None, description="30 天內的下一場法說會")
+    url: str = Field(description="公開資訊觀測站「法人說明會一覽表」")
 
 
 class AnalystViews(BaseModel):
@@ -279,7 +294,9 @@ class AnalystViews(BaseModel):
     status: Literal["none", "pending", "ready", "unavailable"]
     symbol: str
     as_of: str | None = Field(default=None, description="查詢完成時間（ready 才有）")
-    expires_at: str | None = Field(default=None, description="這份共用結果被刪除的時間（建立後 24 小時）")
-    items: list[AnalystView] = Field(default_factory=list, description="最多 5 筆，報導日期新到舊")
+    expires_at: str | None = Field(default=None, description="這份共用結果被刪除的時間（建立後 24 小時；"
+                                                             "查無時保留 3 個交易日）")
+    items: list[AnalystView] = Field(default_factory=list, description="最多 8 筆：近 90 天的新到舊，舊資料在後")
     disclaimer: str
     notes: list[str] = Field(default_factory=list)
+    conference: AnalystConferences | None = Field(default=None, description="法說會的官方連結（台股；美股 null）")

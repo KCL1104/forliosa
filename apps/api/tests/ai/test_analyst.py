@@ -69,8 +69,10 @@ GOOD = [
 
 
 def test_get_post_poll_then_shared_by_everyone(client, other_client, pool, fake, jobs, engine):
-    assert client.get(URL).json() == {"status": "none", "symbol": "2330.TW", "as_of": None, "expires_at": None,
-                                      "items": [], "disclaimer": analyst.ANALYST_DISCLAIMER, "notes": []}
+    assert client.get(URL).json() == {
+        "status": "none", "symbol": "2330.TW", "as_of": None, "expires_at": None, "items": [],
+        "disclaimer": analyst.ANALYST_DISCLAIMER, "notes": [],
+        "conference": {"last": None, "next": None, "url": analyst.MOPS_CONFERENCE_URL}}
     answer(fake, GOOD)
     r = client.post(URL)
     assert r.status_code == 200 and r.json()["status"] == "pending" and len(jobs) == 1
@@ -82,12 +84,14 @@ def test_get_post_poll_then_shared_by_everyone(client, other_client, pool, fake,
     assert out["expires_at"] == "2026-11-13T14:00:00+08:00"
     assert out["items"] == [
         {"institution": "摩根士丹利", "action": "調升", "rating_text": "加碼", "target_price": 1350.0,
-         "currency": "TWD",
-         "date": "2026-11-10", "source_title": "大摩調升台積電目標價至1,350元", "url": RESULTS[0][0]},
+         "currency": "TWD", "date": "2026-11-10", "source_title": "大摩調升台積電目標價至1,350元",
+         "url": RESULTS[0][0], "unnamed": False, "old": False},
         {"institution": "高盛", "action": "維持", "rating_text": "買進", "target_price": 1300.0, "currency": "TWD",
-         "date": "2026-11-05", "source_title": "高盛維持台積電買進評等", "url": RESULTS[1][0]},
+         "date": "2026-11-05", "source_title": "高盛維持台積電買進評等", "url": RESULTS[1][0], "unnamed": False,
+         "old": False},
         {"institution": "花旗", "action": "調降", "rating_text": "中立", "target_price": None, "currency": "TWD",
-         "date": "2026-10-28", "source_title": "花旗調降台積電評等至中立", "url": RESULTS[2][0]},
+         "date": "2026-10-28", "source_title": "花旗調降台積電評等至中立", "url": RESULTS[2][0], "unnamed": False,
+         "old": False},
     ]
     # once ready, POST from anyone returns it: no new search, no new charge
     assert other_client.post(URL).json()["status"] == "ready" and jobs == [] and len(fake.requests) == 1
@@ -98,7 +102,7 @@ def test_get_post_poll_then_shared_by_everyone(client, other_client, pool, fake,
     assert req["tools"][0]["max_uses"] == 3 and req["tools"][1]["strict"] is True
     assert req["output_config"] == {"effort": "medium"}
     question = req["messages"][0]["content"]
-    assert "台積電（2330.TW，上市，以新台幣交易）" in question and "2026-08-14" in question
+    assert "台積電（2330.TW，上市，以新台幣交易）" in question and "2026-05-16" in question  # 180 days back
 
 
 def test_prompts_keep_chat_rule_and_quote_only(client):
@@ -314,7 +318,7 @@ def test_candidates_all_dropped_as_unverifiable_are_not_claimed_as_none(client, 
 
 def test_candidates_dropped_for_settled_reasons_are_ready_and_empty(client, pool, fake, jobs):
     """Every candidate checked and dropped for what it is (too old, unnamed, no rating): "近期查無" holds."""
-    results = [("https://news.example.com/2026/06/01/tsmc", "台積電法說會重點整理", None),
+    results = [("https://news.example.com/2026/04/01/tsmc", "台積電法說會重點整理", None),
                ("https://news.example.com/2026/11/10/tsmc", "台積電營收創新高", None)]
     answer(fake, [item("高盛", results[0][0], target_price=1300),     # too_old
                   item("法人", results[1][0], target_price=1500)], results)  # unnamed
@@ -345,7 +349,11 @@ def test_rating_headlines_count_only_this_stock():
     assert n(TSMC, "23301 目標價") == 0  # not 2330
     assert n(NVDA, "Nvidia upgrade cycle lifts demand", "NVIDIA earnings preview") == 0
     assert n(NVDA, "Morgan Stanley raises Nvidia price target", "NVDA upgraded to Buy", "輝達獲調升目標價") == 3
-    assert n(TSMC, "大摩調升台積電目標價", age="June 1, 2026") == 0  # verifiably older than 90 days
+    assert n(TSMC, "大摩調升台積電目標價", age="April 1, 2026") == 0  # verifiably older than 180 days
+    assert n(TSMC, "大摩調升台積電目標價", age="June 1, 2026") == 1  # 164 days: shown as 舊資料
+    # an article whose candidate was dropped for what it is (an unnamed broker older than 30 days) is accounted for
+    assert analyst.rating_headlines([R("https://n.com/a", "外資調降台積電目標價", "2026-10-01")], TSMC, TODAY,
+                                    frozenset({"https://n.com/a"})) == 0
     assert n(TSMC, "大摩調升台積電目標價", age=None) == 1  # date unknown: still a hint
     # rating aggregators and rating pages do not count as evidence
     assert n(NVDA, "NVDA price target", url="https://tipranks.com/x") == 0
@@ -412,9 +420,35 @@ def test_verify_one_per_institution_folds_aliases():
     ("外資券商 A", None), ("某外資", None), ("某外資券商", None), ("日系券商", None), ("國內投顧", None),
     ("外資分析師", None), ("Analysts", None), ("Wall Street analysts", None), ("Wall Street", None),
     ("brokers", None), ("a U.S. brokerage", None), ("TheStreet", None), ("市場共識", None),
+    ("金控龍頭旗下投顧", None), ("老牌投顧", None),  # live 2026-11-16 (家登): describes a firm, does not name it
 ])
 def test_institution_key(name, key):
     assert analyst.institution_key(name) == key
+
+
+def test_a_real_target_after_a_price_fall_is_kept():
+    """2026-11-16: Goldman's NT$4,120 for 台達電 at NT$1,240 (3.3 ×) was dropped as "another currency" by the 3 ×
+    bound; the bound is 6 × now. The ADR mix-up only ever shows on the low side."""
+    delta = InstrumentInfo("2308.TW", "2308", "台達電", "TWSE", "stock", "TWD", aliases=("DELTA",))
+    results = [R(f"https://n.com/{k}") for k in range(3)]
+    cands = [item("高盛", "https://n.com/0", target_price=4120), item("花旗", "https://n.com/1", target_price=7500),
+             item("小摩", "https://n.com/2", target_price=150)]  # 6.05 × and 0.12 × the price: another currency
+    items, dropped = analyst.verify(cands, results, delta, TODAY, reference=1240.0)
+    assert [(i["institution"], i["target_price"]) for i in items] == [("高盛", 4120.0)]
+    assert reasons(dropped) == ["currency", "currency"]
+    assert analyst.TARGET_RATIO_MAX == 6.0
+
+
+def test_a_twd_target_reported_as_usd_on_an_adr_page_is_dropped():
+    """2026-11-16 review: on a US-listed ADR of a Taiwan company the mix-up shows on the high side (NT$145 for 2412
+    reported as USD on CHT at US$40 is 3.6 ×), so US stocks keep the 3 × bound."""
+    cht = InstrumentInfo("CHT", "CHT", "Chunghwa Telecom", "US", "stock", "USD", aliases=("中華電",))
+    results = [R(f"https://n.com/{k}") for k in range(2)]
+    cands = [item("凱基投顧", "https://n.com/0", target_price=145, currency="USD"),
+             item("Citi", "https://n.com/1", target_price=48, currency="USD")]
+    items, dropped = analyst.verify(cands, results, cht, TODAY, reference=40.0)
+    assert [i["institution"] for i in items] == ["Citi"] and reasons(dropped) == ["currency"]
+    assert analyst.TARGET_RATIO_MAX_US == 3.0
 
 
 def test_verify_drops_a_target_far_from_the_last_price_as_another_currency():
@@ -460,15 +494,17 @@ def test_reference_price_is_never_a_demo_quote():
 
 def test_verify_uses_the_article_date_and_drops_unverifiable_or_old():
     results = [R("https://a.com/2026/11/09/tsmc", age="2026-01-01"), R("https://b.com/x", age="3 days ago"),
-               R("https://c.com/y", age=None), R("https://d.com/z", age="June 1, 2026"),
-               R("https://e.com/w", age="2026-11-20")]
+               R("https://c.com/y", age=None), R("https://d.com/z", age="April 1, 2026"),
+               R("https://e.com/w", age="2026-11-20"), R("https://f.com/v", age="June 1, 2026")]
     items, dropped = analyst.verify([item("甲", "https://a.com/2026/11/09/tsmc", target_price=1, date="2026-10-01"),
                                      item("乙", "https://b.com/x", target_price=1),
                                      item("丙", "https://c.com/y", target_price=1),
                                      item("丁", "https://d.com/z", target_price=1),
-                                     item("戊", "https://e.com/w", target_price=1)], results, TSMC, TODAY)
-    # the URL date wins over page_age and over the model's own date
-    assert [(i["institution"], i["date"]) for i in items] == [("甲", "2026-11-09"), ("乙", "2026-11-09")]
+                                     item("戊", "https://e.com/w", target_price=1),
+                                     item("己", "https://f.com/v", target_price=1)], results, TSMC, TODAY)
+    # the URL date wins over page_age and over the model's own date; 91–180 days old: kept, marked old, last
+    assert [(i["institution"], i["date"], i["old"]) for i in items] == [
+        ("甲", "2026-11-09", False), ("乙", "2026-11-09", False), ("己", "2026-06-01", True)]
     assert reasons(dropped) == ["date_unverified", "too_old", "future"]
 
 
@@ -481,23 +517,25 @@ def test_verify_fields_never_invented():
              item("花旗", "https://n.com/4", rating_text="中立", currency="USD"),       # no target: currency moot
              item("大摩", "https://n.com/5", rating_text="加碼", target_price=-1),      # nonsense target → none
              item("高盛", "https://n.com/6", rating_text="x" * 31, target_price=1300.5, action="未註明"),
-             item("美系外資", "https://n.com/7", rating_text="中立")]                  # unnamed
+             item("國內投顧", "https://n.com/7", rating_text="中立")]                  # unnamed, not foreign
     items, dropped = analyst.verify(cands, results, TSMC, TODAY)
     assert reasons(dropped) == ["unnamed", "unnamed", "empty", "currency", "unnamed"]
     assert [(i["institution"], i["rating_text"], i["target_price"], i["action"]) for i in items] == [
         ("花旗", "中立", None, "維持"), ("大摩", "加碼", None, "維持"), ("高盛", None, 1300.5, "")]
     assert all(i["currency"] == "TWD" and i["source_title"] == "標題" for i in items)
+    assert not any(i["unnamed"] or i["old"] for i in items)
 
 
-def test_verify_newest_first_one_per_institution_at_most_five():
-    results = [R(f"https://n.com/{k}", age=f"2026-11-0{k + 1}") for k in range(8)]
-    cands = [item(f"範例{k}證券", f"https://n.com/{k}", rating_text="買進") for k in range(7)]
-    cands.append(item("範例 6 證券", "https://n.com/7", rating_text="中立"))  # same institution, newer article
+def test_verify_newest_first_one_per_institution_at_most_eight():
+    results = [R(f"https://n.com/{k}", age=f"2026-11-{k + 1:02d}") for k in range(11)]
+    cands = [item(f"範例{k}證券", f"https://n.com/{k}", rating_text="買進") for k in range(10)]
+    cands.append(item("範例 9 證券", "https://n.com/10", rating_text="中立"))  # same institution, newer article
     items, dropped = analyst.verify(cands, results, NVDA, TODAY)
     assert [(i["institution"], i["date"]) for i in items] == [
-        ("範例 6 證券", "2026-11-08"), ("範例5證券", "2026-11-06"), ("範例4證券", "2026-11-05"),
+        ("範例 9 證券", "2026-11-11"), ("範例8證券", "2026-11-09"), ("範例7證券", "2026-11-08"),
+        ("範例6證券", "2026-11-07"), ("範例5證券", "2026-11-06"), ("範例4證券", "2026-11-05"),
         ("範例3證券", "2026-11-04"), ("範例2證券", "2026-11-03")]
-    assert reasons(dropped) == ["duplicate"] and all(i["currency"] == "USD" for i in items)
+    assert reasons(dropped) == ["duplicate", "limit", "limit"] and all(i["currency"] == "USD" for i in items)
 
 
 @pytest.mark.parametrize(("age", "expected"), [
@@ -621,3 +659,285 @@ def test_search_blocks_aggregators_unless_an_allow_list_is_set(ai_env):
     ai_env(AI_WEB_SEARCH_ALLOWED_DOMAINS="recommended")
     [search] = analyst.search_tools(get_settings())
     assert "blocked_domains" not in search and search["allowed_domains"]
+
+
+# -- 2026-11-16 decisions (the analyst / news memo) -----------------------------------------------------------
+def test_unnamed_foreign_brokers_are_labelled_recent_only_at_most_two_never_folded():
+    """Decision 2: 「日系外資」 → 「未具名外資（日系）」, at most 2, only within 30 days, never merged with a named one
+    (M31's only report in the window named no firm)."""
+    results = [R(f"https://n.com/{k}", age=a) for k, a in enumerate(
+        ["2026-11-11", "2026-11-10", "2026-11-09", "2026-11-08", "2026-10-01", "2026-11-07"])]
+    cands = [item("日系外資", "https://n.com/0", action="調降", target_price=1200),
+             item("日系外資", "https://n.com/1", action="調降", target_price=1200),  # the same story elsewhere
+             item("美系外資 C", "https://n.com/2", rating_text="中立"),
+             item("某外資", "https://n.com/3", rating_text="買進"),                  # a third unnamed: past the cap
+             item("歐系外資", "https://n.com/4", target_price=1500),                 # 42 days old
+             item("野村", "https://n.com/5", target_price=1400)]
+    items, dropped = analyst.verify(cands, results, TSMC, TODAY)
+    assert [(i["institution"], i["date"], i["unnamed"]) for i in items] == [
+        ("未具名外資（日系）", "2026-11-11", True), ("未具名外資（美系）", "2026-11-09", True),
+        ("野村", "2026-11-07", False)]
+    assert sorted(reasons(dropped)) == ["duplicate", "limit", "unnamed_old"]
+    # 「美系外資（摩根士丹利）」 names a firm: a named item; 「國內投顧」「法人」 are not foreign brokers: dropped
+    assert analyst.unnamed_label("美系外資（摩根士丹利）") == "未具名外資（美系）"  # but institution_key wins first
+    assert analyst.institution_key("美系外資（摩根士丹利）") == "morganstanley"
+    assert [analyst.unnamed_label(n) for n in ("外資", "外資券商 A", "港資券商", "國內投顧", "法人", "券商")] == [
+        "未具名外資", "未具名外資", "未具名外資（港資）", None, None, None]
+
+
+def test_named_recent_items_come_first_then_unnamed_then_old_up_to_eight():
+    """Decisions 3–4: 8 items; reports 91–180 days old are kept as 舊資料 after the newer ones; unnamed brokers only
+    fill room the named recent ones leave."""
+    ages = [f"2026-11-{d:02d}" for d in (10, 9, 8)] + ["2026-11-11", "2026-11-05", "2026-11-04"] + \
+        ["2026-05-15", "2026-06-15", "2026-07-15", "2026-08-01"]
+    results = [R(f"https://n.com/{k}", age=a) for k, a in enumerate(ages)]
+    cands = [item(f"範例{k}證券", f"https://n.com/{k}", rating_text="買進") for k in range(3)]
+    cands += [item(n, f"https://n.com/{k}", rating_text="中立") for k, n in ((3, "日系外資"), (4, "美系外資"),
+                                                                           (5, "歐系外資"))]
+    cands += [item(f"舊{k}證券", f"https://n.com/{k}", rating_text="買進") for k in range(6, 10)]
+    items, dropped = analyst.verify(cands, results, TSMC, TODAY)
+    # 5/15 is 181 days old: too old; the rest of the old ones fill the room after 3 named + 2 unnamed
+    assert [(i["institution"], i["old"]) for i in items] == [
+        ("未具名外資（日系）", False), ("範例0證券", False), ("範例1證券", False), ("範例2證券", False),
+        ("未具名外資（美系）", False), ("舊9證券", True), ("舊8證券", True), ("舊7證券", True)]
+    assert sorted(reasons(dropped)) == ["limit", "too_old"]
+    # with 8 named recent items, nothing else is shown
+    many = [R(f"https://m.com/{k}", age=f"2026-11-{k + 1:02d}") for k in range(10)]
+    cands = [item(f"甲{k}證券", f"https://m.com/{k}", rating_text="買進") for k in range(8)]
+    cands += [item("日系外資", "https://m.com/8", rating_text="中立"), item("乙證券", "https://m.com/9",
+                                                                         rating_text="買進")]
+    many.append(R("https://m.com/old", age="2026-07-01"))
+    cands.append(item("丙證券", "https://m.com/old", rating_text="買進"))
+    items, dropped = analyst.verify(cands, many, TSMC, TODAY)
+    assert len(items) == 8 and not any(i["unnamed"] or i["old"] for i in items)
+    assert reasons(dropped) == ["limit", "limit", "limit"]
+
+
+def test_one_institution_one_day_prefers_a_reputable_outlet():
+    results = [R("https://blog.example.com/a", age="2026-11-10"), R("https://money.udn.com/money/story/5607/1",
+                                                                     age="2026-11-10")]
+    items, dropped = analyst.verify([item("大摩", "https://blog.example.com/a", target_price=1350),
+                                     item("摩根士丹利", "https://money.udn.com/money/story/5607/1", target_price=1350)],
+                                    results, TSMC, TODAY)
+    assert [i["url"] for i in items] == ["https://money.udn.com/money/story/5607/1"]
+    assert reasons(dropped) == ["duplicate"]
+
+
+@pytest.mark.parametrize("url", [
+    "https://aigc-note.cmoney.tw/answer/123", "https://www.cmoney.tw/forum/article/185082146",
+    "https://www.cmnews.com.tw/article/cmoneyairesearcher-abc", "https://blog.fugle.tw/post/earnings-call-7799-2025-12-10",
+    "https://histock.tw/stock/7799", "https://pchome.megatime.com.tw/stock/sid7799.html", "https://www.ptt.cc/bbs/Stock/M.1.html",
+    # 2026-11-16 re-measure
+    "https://finance.biggo.com.tw/quote/5203.TW", "https://stock.pchome.com.tw/stock/sid6533.html",
+    "https://ww2.money-link.com.tw/TWStock/StockNews.aspx?SymId=6643", "https://www.fugle.tw/ai/6643",
+    "https://agdstock.club/iic/5203-x", "https://www.fastbull.com/quotation-detail/10100_7799",
+    "https://www.gurufocus.com/stock/ROCO:3680/forecast", "https://pchome.megatime.com.tw/m/stock/sid1784_1.html",
+])
+def test_ai_written_quote_and_forum_pages_are_not_articles(url):
+    assert not analyst.is_article(url)
+
+
+def test_chat_and_card_block_the_news_sides_list(ai_env):
+    from types import SimpleNamespace
+
+    from forliosa.ai.chat import ChatTurn
+    from forliosa.ai.tools import CHAT_BLOCKED_DOMAINS, SEARCH_BLOCKED_DOMAINS, block_search, server_tools
+    from forliosa.config import get_settings
+    from forliosa.news.ai_search import SEARCH_BLOCKED
+    from forliosa.news.outlets import NOT_NEWS_DOMAINS
+
+    [search] = analyst.search_tools(get_settings())
+    for host in ("cmoney.tw", "cmnews.com.tw", "fugle.tw", "histock.tw", "goodinfo.tw", "ptt.cc",
+                 "finance.biggo.com.tw", "stock.pchome.com.tw", "benzinga.com"):
+        assert host in search["blocked_domains"]
+    assert search["blocked_domains"] == list(SEARCH_BLOCKED_DOMAINS) and len(SEARCH_BLOCKED_DOMAINS) <= 100
+    assert "pchome.megatime.com.tw" not in SEARCH_BLOCKED_DOMAINS  # its /news pages are reprints (QUOTE_PATHS)
+    # one list (2026-11-16 review: three lists had drifted apart): the news side's not-news domains in every one
+    assert set(NOT_NEWS_DOMAINS) <= set(CHAT_BLOCKED_DOMAINS) <= set(SEARCH_BLOCKED_DOMAINS)
+    assert set(NOT_NEWS_DOMAINS) <= set(SEARCH_BLOCKED)
+    # chat keeps the rating sites that also publish news (a US stock's "why did it move")
+    assert {"benzinga.com", "zacks.com"}.isdisjoint(CHAT_BLOCKED_DOMAINS)
+    turn = SimpleNamespace(settings=get_settings(), deep=False, economy=False)
+    chat_tools = ChatTurn.tools(turn)  # type: ignore[arg-type]
+    assert next(t for t in chat_tools if t["name"] == "web_search")["blocked_domains"] == list(CHAT_BLOCKED_DOMAINS)
+    chat_tools = block_search(server_tools(get_settings()), CHAT_BLOCKED_DOMAINS)
+    assert "blocked_domains" in next(t for t in chat_tools if t["name"] == "web_fetch")  # still TWSE / MIS only
+    assert next(t for t in chat_tools if t["name"] == "web_fetch")["blocked_domains"] == ["www.twse.com.tw",
+                                                                                          "mis.twse.com.tw"]
+
+
+@pytest.mark.parametrize(("title", "host"), [
+    ("本公司受邀參加永豐金證券匯立分公司舉辦之法人說明會", "永豐金證券匯立分公司"),
+    ("本公司受邀參加Daiwa Investment Conference Singapore 2026", "Daiwa Investment Conference Singapore 2026"),
+    ("豐興受國票綜合證券邀請召開法人說明會", "國票綜合證券"),
+    ("大拓-KY 12/16參加康和證券舉辦之線上法說會", "康和證券"),
+    ("本公司應凱基證券之邀請參加法人說明會", "凱基證券"),
+    ("公告本公司召開法人說明會", None),
+    ("本公司受邀參加法人說明會", None),
+])
+def test_conference_host(title, host):
+    assert analyst.conference_host(title) == host
+
+
+def _notice(db: Session, symbol: str, day: date, title: str, created: datetime, key: str, clause: str = "第12款",
+            fact: date | None = None, detail: str = "") -> None:
+    from forliosa.models import MarketEvent
+
+    db.add(MarketEvent(key=key, symbol=symbol, date=day, type="material_info", title=title, detail=detail, url=None,
+                       data={"clause": clause, "time": "150210", "fact_date": (fact or day).isoformat()},
+                       source="twse-openapi", created_at=created))
+    db.commit()
+
+
+def test_the_question_carries_the_english_name_and_the_latest_conference(client, pool, fake, jobs, engine):
+    from forliosa.models import CompanyProfile
+
+    with Session(engine) as db:
+        db.add(CompanyProfile(symbol="2330.TW", date=TODAY, values={"english_short_name": "TSMC"}, source="test",
+                              fetched_at=NOW))
+        db.commit()
+        _notice(db, "2330.TW", date(2026, 10, 10), "本公司受邀參加凱基證券舉辦之法人說明會", NOW - timedelta(days=30),
+                "c1", fact=date(2026, 10, 15))
+        _notice(db, "2330.TW", date(2026, 11, 11), "本公司召開法人說明會", NOW, "c2", fact=date(2026, 11, 25))
+    answer(fake, GOOD)
+    out = client.post(URL).json()
+    assert out["conference"] == {"last": {"date": "2026-10-15", "host": "凱基證券"},
+                                 "next": {"date": "2026-11-25", "host": None}, "url": analyst.MOPS_CONFERENCE_URL}
+    jobs.pop()()
+    question = fake.requests[0]["body"]["messages"][0]["content"]
+    assert "英文名稱：TSMC" in question and "最近一次法說會：2026-10-15（凱基證券舉辦）" in question
+
+
+# 禾榮科's archived notice as it is (2026-11-16): 事實發生日 11/10, the 法說會 itself on 11/12
+HNMC_DETAIL = ("1.召開法人說明會之日期:115/11/12 2.召開法人說明會之時間:14 時 00 分 3.召開法人說明會之地點:台北市 "
+               "4.法人說明會擇要訊息:本公司受邀參加永豐金證券匯立分公司舉辦之法人說明會，說明公司營運概況及未來展望")
+
+
+def test_the_conference_date_is_the_day_it_is_held_not_the_fact_date(engine):
+    from forliosa.marketdata.base import InstrumentInfo
+
+    hnmc = InstrumentInfo("7799.TW", "7799", "禾榮科", "TWSE", "stock", "TWD")
+    with Session(engine) as db:
+        _notice(db, "7799.TW", date(2026, 11, 10), "本公司受邀參加永豐金證券匯立分公司舉辦之法人說明會",
+                datetime(2026, 11, 10, 7, 2, tzinfo=UTC), "hnmc", fact=date(2026, 11, 10), detail=HNMC_DETAIL)
+        held = analyst.conference_info(db, hnmc, date(2026, 11, 16))
+        assert held["last"] == {"date": "2026-11-12", "host": "永豐金證券匯立分公司"} and held["next"] is None
+        ahead = analyst.conference_info(db, hnmc, date(2026, 11, 11))  # announced, not held yet
+        assert ahead["last"] is None and ahead["next"] == {"date": "2026-11-12", "host": "永豐金證券匯立分公司"}
+        assert analyst.query_hints(db, hnmc, date(2026, 11, 16)).conference == date(2026, 11, 12)
+        # searched empty on 11/11 (after the notice was archived): the 法說會 of 11/12 searches again from 11/13
+        since = datetime(2026, 11, 11, 6, 0, tzinfo=UTC)
+        assert analyst.new_notice(db, "7799.TW", since, date(2026, 11, 12)) is False
+        assert analyst.new_notice(db, "7799.TW", since, date(2026, 11, 13)) is True
+
+
+def test_an_empty_result_is_kept_three_trading_days_unless_a_new_notice(client, other_client, pool, fake, jobs,
+                                                                         engine, monkeypatch):
+    """Decision 5: Thursday's empty search stands on Friday and Monday (shared, no new search or charge); Tuesday
+    is a new search. A 法說會 notice archived after the search, or a 法說會 held since, searches again sooner."""
+    answer(fake, [], results=[("https://news.example.com/2026/11/10/tsmc", "台積電法說會重點整理", None)])
+    client.post(URL)
+    jobs.pop()()
+    thursday = client.get(URL).json()
+    assert thursday["status"] == "ready" and thursday["items"] == []
+    assert thursday["expires_at"] == "2026-11-17T00:00:00+08:00"  # Tuesday 00:00: kept Thu, Fri, Mon
+    for later in (NOW + timedelta(days=1), NOW + timedelta(days=4, hours=9)):  # Friday 14:00, Monday 23:00
+        monkeypatch.setattr(analyst, "now_utc", lambda later=later: later)
+        out = other_client.post(URL).json()
+        assert out["status"] == "ready" and out["as_of"] == thursday["as_of"] and jobs == []
+    assert other_client.get(f"{API}/ai/usage").json()["messages_today"] == 0
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(days=5))  # Tuesday 14:00
+    assert client.get(URL).json()["status"] == "none"
+
+    # a new 法說會 notice archived on Friday: searched again on Friday
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(days=1))
+    with Session(engine) as db:
+        _notice(db, "2330.TW", date(2026, 11, 13), "本公司受邀參加元大證券舉辦之法人說明會", NOW + timedelta(hours=20),
+                "n1", fact=date(2026, 11, 26))
+    assert client.get(URL).json()["status"] == "none"
+    answer(fake, GOOD)
+    assert client.post(URL).json()["status"] == "pending" and len(jobs) == 1
+
+
+def test_a_conference_held_since_the_empty_search_searches_again(client, pool, fake, jobs, engine, monkeypatch):
+    with Session(engine) as db:  # announced long before the search, held on Friday 11/13
+        _notice(db, "2330.TW", date(2026, 11, 2), "本公司召開法人說明會", NOW - timedelta(days=10), "h1",
+                fact=date(2026, 11, 13))
+    answer(fake, [], results=[("https://news.example.com/2026/11/10/tsmc", "台積電法說會重點整理", None)])
+    client.post(URL)
+    jobs.pop()()
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(hours=18))  # Friday 08:00: held today
+    assert client.get(URL).json()["status"] == "ready"
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(days=4))  # Monday: held since the search
+    assert client.get(URL).json()["status"] == "none"
+    with Session(engine) as db:
+        assert analyst.new_notice(db, "2330.TW", NOW, date(2026, 11, 13)) is False
+        assert analyst.new_notice(db, "2330.TW", NOW, date(2026, 11, 16)) is True
+
+
+def test_a_result_with_items_is_not_kept_past_its_day(client, pool, fake, jobs, monkeypatch):
+    answer(fake, GOOD)
+    client.post(URL)
+    jobs.pop()()
+    assert client.get(URL).json()["expires_at"] == "2026-11-13T14:00:00+08:00"
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(hours=18))  # Friday 08:00
+    assert client.get(URL).json()["status"] == "none"
+
+
+# -- 2026-11-16 re-measure: M31 searched as 晶心科, 家登 empty where another search found UBS ---------------------
+def test_an_empty_report_from_searches_for_another_stock_is_not_claimed_as_none(client, pool, fake, jobs):
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "聯電 目標價"}),
+               results_block("srvtoolu_1", [("https://news.example.com/2026/11/10/umc", "聯電法說會", None)]),
+               tool_use("toolu_r", "report_analyst_views", {"items": []}),
+               stop_reason="tool_use", usage={"server_tool_use": {"web_search_requests": 1}})
+    client.post(URL)
+    jobs.pop()()
+    assert client.get(URL).json()["status"] == "unavailable"  # searched again after 10 minutes, not kept 3 days
+
+
+def test_query_terms_take_the_full_name_and_its_first_two_characters():
+    m31 = InstrumentInfo("6643.TWO", "6643", "M31", "TPEX", "stock", "TWD")
+    terms = analyst.query_terms(m31, analyst.Hints(full_name="円星科技"))
+    assert analyst._mentions("M31 6643 目標價", terms) and analyst._mentions("円星 目標價", terms)
+    assert not analyst._mentions("晶心科 目標價", terms) and not analyst._mentions("M310 目標價", terms)
+
+
+def test_an_empty_result_of_a_stock_rated_in_the_last_year_is_not_kept(client, pool, fake, jobs, monkeypatch):
+    """A rating headline 191 days old (outside the card's 180 days): the stock is covered, so its empty result is
+    searched again on the next trading day instead of standing for 3 trading days."""
+    answer(fake, [], results=[("https://news.example.com/2026/05/05/tsmc", "外資調升台積電目標價", None)])
+    client.post(URL)
+    jobs.pop()()
+    out = client.get(URL).json()
+    assert out["status"] == "ready" and out["items"] == []
+    assert out["expires_at"] == "2026-11-13T14:00:00+08:00"  # 24 hours, not Tuesday 00:00
+    monkeypatch.setattr(analyst, "now_utc", lambda: NOW + timedelta(days=1))
+    assert client.get(URL).json()["status"] == "none"
+
+
+def test_the_question_names_the_company_and_how_to_search_a_short_name():
+    from forliosa.ai.prompts import analyst_question
+
+    q = analyst_question("M31", "6643.TWO", "TPEX", "TWD", "2026-11-16", "2026-05-20", full_name="円星科技")
+    assert "公司全名：円星科技" in q and "「M31 6643 目標價」" in q
+    q = analyst_question("禾榮科", "7799.TW", "TWSE", "TWD", "2026-11-16", "2026-05-20", english="HNMC",
+                         conference="2026-11-12", host="永豐金證券匯立分公司")
+    assert "英文名稱：HNMC（簡稱，英文搜尋要加 Taiwan）" in q
+    assert "最近一次法說會：2026-11-12（永豐金證券匯立分公司舉辦）" in q and "可以搜：「禾榮科 永豐金 目標價」" in q
+    # the old example 「名稱 法說會 主辦券商」 was searched word for word in 4 of 9 cards
+    assert "法說會 主辦券商" not in ANALYST_SYSTEM
+    assert "用券商的名字搜（例如「禾榮科 永豐金 目標價」）" in ANALYST_SYSTEM
+
+
+def test_an_unnamed_broker_with_a_named_ones_target_that_week_is_left_out():
+    """2026-11-16 re-measure, 台達電: 「美系外資」 2,300 (11/10) was 大摩's 2,300 (11/11) retold; listed twice."""
+    delta = InstrumentInfo("2308.TW", "2308", "台達電", "TWSE", "stock", "TWD")
+    results = [R("https://n.com/0", age="2026-11-11"), R("https://n.com/1", age="2026-11-10"),
+               R("https://n.com/2", age="2026-11-09")]
+    cands = [item("大摩", "https://n.com/0", rating_text="優於大盤", target_price=2300),
+             item("美系外資", "https://n.com/1", rating_text="建議加碼", target_price=2300),
+             item("日系外資", "https://n.com/2", rating_text="中立", target_price=1900)]
+    items, dropped = analyst.verify(cands, results, delta, TODAY)
+    assert [(i["institution"], i["target_price"]) for i in items] == [("大摩", 2300.0), ("未具名外資（日系）", 1900.0)]
+    assert reasons(dropped) == ["duplicate"]
+

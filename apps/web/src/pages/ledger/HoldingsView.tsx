@@ -20,7 +20,7 @@ import { unpricedHoldings } from "@/lib/ledger-display"
 import { ClosedRounds } from "./ClosedRounds"
 import { RecurringMark } from "./RecurringMark"
 import { useActivePlans } from "./use-active-plans"
-import { useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
+import { COLUMN_HINT, useLedgerPrefs, type HoldingColumn } from "./ledger-prefs"
 import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
@@ -30,9 +30,9 @@ import { textAction } from "@/components/text-action"
 import { useUsClosesServed } from "@/pages/stock/text"
 import { SymbolRecords } from "./SymbolRecords"
 
-type SortKey = "value" | "day_pct" | "day_change" | "unrealized" | "unrealized_pct" | "name"
+type SortKey = "value" | "day_pct" | "day_change" | "pnl" | "unrealized" | "unrealized_pct" | "name"
 
-/** 持倉：桌面 5 欄表格（可自訂、可排序）；手機兩行列（左名稱、代號・股數；右現價、今日漲跌） */
+/** 持倉：桌面表格（預設 名稱・收盤價・今日漲跌・今日損益・損益・市值；可自訂、可排序）；手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌） */
 export function HoldingsView() {
   const holdings = useHoldings()
   const pinned = useLedgerPrefs((s) => s.pinned)
@@ -47,6 +47,8 @@ export function HoldingsView() {
           return h.day_change_pct ?? 0
         case "day_change":
           return h.day_change
+        // 「損益」欄照金額排（同一個數字，但是自己的排序鍵：和「未實現損益」欄一起開著時只標一欄）
+        case "pnl":
         case "unrealized":
           return h.unrealized_pnl
         case "unrealized_pct":
@@ -154,6 +156,7 @@ function RowsSkeleton() {
 const SORTABLE: Partial<Record<HoldingColumn, SortKey>> = {
   day_pct: "day_pct",
   day_change: "day_change",
+  pnl: "pnl",
   value: "value",
   unrealized: "unrealized",
   unrealized_pct: "unrealized_pct",
@@ -162,6 +165,7 @@ const WIDTH: Record<HoldingColumn, string> = {
   price: "w-[150px]",
   day_pct: "w-[140px]",
   day_change: "w-[150px]",
+  pnl: "w-[150px]",
   value: "w-[170px]",
   avg_cost: "w-[120px]",
   unrealized: "w-[150px]",
@@ -175,23 +179,45 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   const readOnly = useReadOnly()
   const maxWeight = Math.max(...rows.map((h) => h.weight), 0.0001)
   const label = useColumnLabel()
+  const stackDay = stacksDay(columns)
+  const sortButton = (key: SortKey, text: string, className?: string) => {
+    const active = sort.key === key
+    return (
+      <button
+        type="button"
+        onClick={() => onSort({ key, dir: active && sort.dir === "desc" ? "asc" : "desc" })}
+        className={cn(
+          "inline-flex h-8 items-center justify-end gap-0.5 rounded-sm px-1 hover:text-ink pointer-coarse:h-11 pointer-coarse:min-w-11",
+          active && "text-ink",
+          className,
+        )}
+      >
+        {text}
+        {/* 排序方向用箭頭（▲▼ 是價格漲跌的符號，不拿來表示排序） */}
+        {active && (sort.dir === "desc" ? <ArrowDownIcon aria-hidden className="size-3.5" /> : <ArrowUpIcon aria-hidden className="size-3.5" />)}
+      </button>
+    )
+  }
   const header = (c: HoldingColumn) => {
     const key = SORTABLE[c]
     const active = key && sort.key === key
     return (
-      <th key={c} scope="col" className={cn("h-10 text-right", WIDTH[c])} aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}>
-        {key ? (
-          <button
-            type="button"
-            onClick={() => onSort({ key, dir: active && sort.dir === "desc" ? "asc" : "desc" })}
-            className={cn("-mr-1 inline-flex h-8 items-center gap-0.5 rounded-sm px-1 hover:text-ink pointer-coarse:h-11", active && "text-ink")}
-          >
-            {label(c)}
-            {/* 排序方向用箭頭（▲▼ 是價格漲跌的符號，不拿來表示排序） */}
-            {active && (sort.dir === "desc" ? <ArrowDownIcon aria-hidden className="size-3.5" /> : <ArrowUpIcon aria-hidden className="size-3.5" />)}
-          </button>
-        ) : (
-          label(c)
+      <th
+        key={c}
+        scope="col"
+        // 數字欄之間至少留 12px（pl-3）：欄寬被擠到只剩內容寬時，數字也不會連在一起
+        className={cn("h-10 pl-3 text-right @max-[52rem]:w-px", WIDTH[c], stackDay && c === "day_pct" && "@max-[52rem]:hidden")}
+        aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
+        title={COLUMN_HINT[c]}
+      >
+        {key ? sortButton(key, label(c), "-mr-1") : label(c)}
+        {/* 窄的時候今日漲跌併進這一格：表頭也多一個「漲跌」可以照漲跌幅排。主欄更窄（< 46rem）時只在正照它排的時候出現，省下名稱的寬度 */}
+        {stackDay && c === "day_change" && (
+          <span className={cn("@min-[52rem]:hidden", sort.key !== "day_pct" && "@max-[46rem]:hidden")}>
+            <span aria-hidden>・</span>
+            {sortButton("day_pct", "漲跌", "-mx-1")}
+            {sort.key === "day_pct" && <span className="sr-only">{sort.dir === "desc" ? "（照漲跌由大到小排）" : "（照漲跌由小到大排）"}</span>}
+          </span>
         )}
       </th>
     )
@@ -200,63 +226,76 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   const plans = useActivePlans()
   const [open, toggle] = useOpenRows()
   return (
-    <table className="w-full border-collapse max-md:hidden" aria-label="持倉">
-      <thead className="form-head">
-        <tr>
-          <th scope="col" className="h-10 text-left">
-            名稱
-          </th>
-          {columns.map(header)}
-          {/* 最右邊：動作選單（查看別人的資產時沒有）＋展開每一筆買賣 */}
-          <th scope="col" className={readOnly ? "w-10" : "w-[76px]"}>
-            <span className="sr-only">動作</span>
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((h) => (
-          <Fragment key={h.symbol}>
-            <tr className="ruled-row cursor-pointer" onClick={() => go(h.symbol)}>
-              <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
-                {/* 名稱是連到個股頁的連結；定期定額標記是另一個連結（到設定），所以不包在一起 */}
-                <span className="flex items-center gap-1.5 text-lg leading-snug font-medium">
-                  <Link to="/stock/$symbol" params={{ symbol: h.symbol }} className="rounded-sm hover:underline" onClick={(e) => e.stopPropagation()}>
-                    {h.name}
-                  </Link>
-                  {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 fill-ink-2 text-ink-2" />}
-                  {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="-my-1" />}
-                </span>
-                <span className="num block text-sm text-ink-2">
-                  {h.code} ・ <QtyText h={h} />
-                </span>
-              </th>
-              {columns.map((c) => (
-                <td key={c} className="num text-right text-lg whitespace-nowrap">
-                  <Cell c={c} h={h} maxWeight={maxWeight} />
-                </td>
-              ))}
-              <td className="text-right" onClick={(e) => e.stopPropagation()}>
-                <span className="-mr-2 flex items-center justify-end">
-                  {!readOnly && <RowMenu h={h} />}
-                  <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} />
-                </span>
-              </td>
-            </tr>
-            {open.has(h.symbol) && (
-              <tr>
-                <td id={recordsId(h)} colSpan={columns.length + 2} className="border-b border-rule pb-3 pl-6">
-                  <SymbolRecords symbol={h.symbol} code={h.code} name={h.name} market={h.market} type={h.type} price={h.price} actions />
+    // 欄位跟著容器的寬度排（@container，不是視窗）：主欄窄於 52rem（開著 AI 面板、視窗不到約 1350px；平板）時見 stacksDay
+    <div className="@container max-md:hidden">
+      <table className="w-full border-collapse" aria-label="持倉">
+        <thead className="form-head">
+          <tr>
+            <th scope="col" className="h-10 text-left">
+              名稱
+            </th>
+            {columns.map(header)}
+            {/* 最右邊：動作選單（查看別人的資產時沒有）＋展開每一筆買賣 */}
+            <th scope="col" className={readOnly ? "w-10" : "w-[76px]"}>
+              <span className="sr-only">動作</span>
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((h) => (
+            <Fragment key={h.symbol}>
+              <tr className="ruled-row cursor-pointer" onClick={() => go(h.symbol)}>
+                <th scope="row" className={NAME_CELL}>
+                  {/* 名稱是連到個股頁的連結；定期定額標記是另一個連結（到設定），所以不包在一起 */}
+                  <span className="flex min-w-0 items-center gap-1.5 text-lg leading-snug font-medium">
+                    <Link to="/stock/$symbol" params={{ symbol: h.symbol }} title={h.name} className="min-w-0 rounded-sm hover:underline @max-[52rem]:truncate" onClick={(e) => e.stopPropagation()}>
+                      {h.name}
+                    </Link>
+                    {pinned.includes(h.symbol) && <PinIcon aria-label="已釘選" className="size-3.5 shrink-0 fill-ink-2 text-ink-2" />}
+                    {plans.get(h.symbol) && <RecurringMark plans={plans.get(h.symbol)!} className="-my-1" />}
+                  </span>
+                  <span className="num block text-sm text-ink-2 @max-[52rem]:truncate">
+                    {h.code} ・ <QtyText h={h} />
+                  </span>
+                </th>
+                {columns.map((c) => (
+                  <td key={c} className={cn("num pl-3 text-right text-lg whitespace-nowrap", stackDay && c === "day_pct" && "@max-[52rem]:hidden")}>
+                    <Cell c={c} h={h} maxWeight={maxWeight} stackDay={stackDay} />
+                  </td>
+                ))}
+                <td className="text-right" onClick={(e) => e.stopPropagation()}>
+                  <span className="-mr-2 flex items-center justify-end">
+                    {!readOnly && <RowMenu h={h} />}
+                    <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} />
+                  </span>
                 </td>
               </tr>
-            )}
-          </Fragment>
-        ))}
-      </tbody>
-      {/* 多一欄：持股那幾列最右邊的動作選單 */}
-      {!readOnly && <WatchBody items={watch.data} columns={columns.length + 1} loading={watch.isLoading} />}
-    </table>
+              {open.has(h.symbol) && (
+                <tr>
+                  <td id={recordsId(h)} colSpan={columns.length + 2} className="border-b border-rule pb-3 pl-6">
+                    <SymbolRecords symbol={h.symbol} code={h.code} name={h.name} market={h.market} type={h.type} price={h.price} actions />
+                  </td>
+                </tr>
+              )}
+            </Fragment>
+          ))}
+        </tbody>
+        {/* 多一欄：持股那幾列最右邊的動作選單 */}
+        {!readOnly && <WatchBody items={watch.data} columns={columns.length + 1} loading={watch.isLoading} />}
+      </table>
+    </div>
   )
 }
+
+/**
+ * 主欄窄的時候（< 52rem，1280px 開著 AI 面板是 758px）放不下六欄數字：「今日漲跌」併進「今日損益」那一格的第二行
+ * （金額一行、百分比一行，和「損益」「市值・佔比」同一個樣子），兩欄都開著才併。寬的時候照常分兩欄。
+ * 這時數字欄只佔自己需要的寬度，名稱欄拿剩下的、放不下就截斷（滑過看全名），列高維持 60px。
+ */
+const stacksDay = (columns: HoldingColumn[]) => columns.includes("day_pct") && columns.includes("day_change")
+
+/** 名稱欄（列標題）：窄的時候 max-width 0，讓名稱欄不撐寬表格，拿數字欄剩下的寬度 */
+const NAME_CELL = "h-[60px] py-1.5 pr-3 text-left font-normal @max-[52rem]:max-w-0"
 
 /** 這一檔的動作：加碼、減少持股、全部賣出（賣出不用開表單：只填股數，用最新的收盤價記） */
 function RowMenu({ h }: { h: Holding }) {
@@ -322,7 +361,7 @@ function QtyText({ h }: { h: Holding }) {
 
 const Dash = () => <span className="text-ink-2" title="沒有報價">—</span>
 
-function Cell({ c, h, maxWeight }: { c: HoldingColumn; h: Holding; maxWeight: number }) {
+function Cell({ c, h, maxWeight, stackDay = false }: { c: HoldingColumn; h: Holding; maxWeight: number; stackDay?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const money = (n: number, signed = false) => (privacy ? <Masked /> : formatMoney(n, { signed, bare: true }))
   // 沒有報價（商用模式的美股）：今日與未實現不是真的 0，顯示「—」
@@ -340,7 +379,25 @@ function Cell({ c, h, maxWeight }: { c: HoldingColumn; h: Holding; maxWeight: nu
     case "day_pct":
       return unpriced ? <Dash /> : <Pct value={h.day_change_pct} />
     case "day_change":
-      return unpriced ? <Dash /> : <span className={toneClass(direction(h.day_change))}>{money(h.day_change, true)}</span>
+      if (unpriced) return <Dash />
+      return stackDay ? (
+        <span className="flex flex-col items-end">
+          <span className={cn("leading-tight", toneClass(direction(h.day_change)))}>{money(h.day_change, true)}</span>
+          <Pct value={h.day_change_pct} className="mt-0.5 text-sm leading-tight @min-[52rem]:hidden" />
+        </span>
+      ) : (
+        <span className={toneClass(direction(h.day_change))}>{money(h.day_change, true)}</span>
+      )
+    case "pnl":
+      // 金額一行、報酬率一行（和「市值・佔比」同一個樣子）；隱私模式只遮金額，百分比照常
+      return unpriced ? (
+        <Dash />
+      ) : (
+        <span className="flex flex-col items-end">
+          <span className={cn("leading-tight", toneClass(direction(h.unrealized_pnl)))}>{money(h.unrealized_pnl, true)}</span>
+          <Pct value={h.unrealized_pnl_pct} className="mt-0.5 text-sm leading-tight" />
+        </span>
+      )
     case "value":
       return (
         <span className="flex flex-col items-end">
@@ -365,6 +422,7 @@ function Cell({ c, h, maxWeight }: { c: HoldingColumn; h: Holding; maxWeight: nu
 function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: number; loading: boolean }) {
   const navigate = useNavigate()
   const visible = useLedgerPrefs((s) => s.columns)
+  const stackDay = stacksDay(visible)
   if (loading) return null
   return (
     <tbody>
@@ -387,13 +445,14 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
           const d = direction(w.quote?.change_pct ?? null)
           return (
             <tr key={w.symbol} className="ruled-row cursor-pointer" onClick={() => void navigate({ to: "/stock/$symbol", params: { symbol: w.symbol } })}>
-              <th scope="row" className="h-[60px] py-1.5 pr-3 text-left font-normal">
+              <th scope="row" className={NAME_CELL}>
                 <div className="flex items-center justify-between gap-4 pr-1">
-                  <Link to="/stock/$symbol" params={{ symbol: w.symbol }} className="group block rounded-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                    <span className="block text-lg leading-snug font-medium group-hover:underline">{w.name}</span>
-                    <span className="num block text-sm text-ink-2">{codeOf(w.symbol)} ・ 觀察中</span>
+                  <Link to="/stock/$symbol" params={{ symbol: w.symbol }} title={w.name} className="group block min-w-0 rounded-sm whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+                    <span className="block text-lg leading-snug font-medium group-hover:underline @max-[52rem]:truncate">{w.name}</span>
+                    <span className="num block text-sm text-ink-2 @max-[52rem]:truncate">{codeOf(w.symbol)} ・ 觀察中</span>
                   </Link>
                   <Sparkline
+                    className="@max-[46rem]:hidden"
                     values={w.sparkline.map((p) => p.price)}
                     baseline={w.sparkline_interval === "1d" ? null : (w.quote?.reference_price ?? w.quote?.prev_close ?? null)}
                     tone={d}
@@ -402,7 +461,7 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                 </div>
               </th>
               {visible.map((c) => (
-                <td key={c} className="num text-right text-lg whitespace-nowrap">
+                <td key={c} className={cn("num pl-3 text-right text-lg whitespace-nowrap", stackDay && c === "day_pct" && "@max-[52rem]:hidden")}>
                   {c === "price" ? (
                     <>
                       {/* 沒有收盤價時只寫「—」，不寫「US$—」 */}
@@ -411,6 +470,9 @@ function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: 
                     </>
                   ) : c === "day_pct" ? (
                     <Pct value={w.quote?.change_pct ?? null} />
+                  ) : c === "day_change" && stackDay ? (
+                    // 窄的時候「今日漲跌」併進這一欄：觀察的股票沒有損益，只有漲跌
+                    <Pct value={w.quote?.change_pct ?? null} className="@min-[52rem]:hidden" />
                   ) : null}
                 </td>
               ))}

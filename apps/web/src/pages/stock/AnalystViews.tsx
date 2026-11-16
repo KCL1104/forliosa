@@ -3,7 +3,7 @@ import { Link } from "@tanstack/react-router"
 import { ChevronDownIcon } from "lucide-react"
 import { useCallback, useEffect, useReducer, useState } from "react"
 import { ApiError, api, appToday } from "@/api"
-import type { AnalystView, InstrumentDetail } from "@/api/types"
+import type { AnalystView, AnalystViews, InstrumentDetail } from "@/api/types"
 import { aiKeys, useAiUsage } from "@/ai/remote-hooks"
 import { DataNotes } from "@/components/data-notes"
 import { SkeletonLines } from "@/components/states"
@@ -14,6 +14,7 @@ import {
   ANALYST_INITIAL,
   ANALYST_POLL_MS,
   analystReducer,
+  conferenceLine,
   formatTarget,
   hostOf,
   loadOnOpen,
@@ -74,8 +75,10 @@ function useAnalystViews(symbol: string) {
 }
 
 /**
- * 法人觀點：個股頁總覽的收合區塊（格線，不是卡片）。第三方已公開的評等與目標價，最多 5 筆，每筆附日期與來源。
+ * 法人觀點：個股頁總覽的收合區塊（格線，不是卡片）。第三方已公開的評等與目標價，最多 8 筆，每筆附日期與來源；
+ * 沒寫是哪一家的外資標「未具名外資（日系）」（字灰一階），超過 90 天的標「舊資料」排在後面（產品負責人 2026-11-16）。
  * 不算平均、上漲空間，不排名、不寫買賣提示；評等是文字，不上紅綠。免責文字永遠顯示（後端提供）。沒有個人資料，隱私模式不影響。
+ * 查無或查不到時，只放官方連結：存檔的法說會日期、公開資訊觀測站法說會一覽（不抓簡報）、看公告。
  */
 export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
   const [open, setOpen] = useState(false)
@@ -166,8 +169,8 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
       return (
         <>
           <p className="font-medium">近期查無法人報導</p>
-          <p className="mt-0.5 max-w-prose text-base text-ink">近期的媒體報導裡，沒有找到附日期與來源的機構評等或目標價。</p>
-          <EventsLink symbol={inst.symbol} />
+          <p className="mt-0.5 max-w-prose text-base text-ink">近半年的媒體報導裡，沒有找到附日期與來源的機構評等或目標價。小型股常沒有法人報告。</p>
+          <Official symbol={inst.symbol} conference={state.data?.conference} />
           <Footer asOf={state.data?.as_of} notes={notes} />
         </>
       )
@@ -175,7 +178,7 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
       return (
         <>
           <p className="text-md text-ink">法人觀點暫時查不到，稍後再打開看看。</p>
-          <EventsLink symbol={inst.symbol} />
+          <Official symbol={inst.symbol} conference={state.data?.conference} />
           <DataNotes notes={[...(notes ?? []), ...(state.error ? [state.error.message] : [])]} className="mt-1" />
         </>
       )
@@ -199,15 +202,26 @@ function Body({ inst, state, onSearch, onRetry }: { inst: InstrumentDetail; stat
 }
 
 /**
- * 查無報導／查不到時唯一的下一步：到「事件」分頁看官方公告（不花 AI 額度；再問 AI 多半同樣查不到）。
- * 站內的文字連結：墨色字＋常駐底線，觸控時 44px 高（textAction）。
+ * 查無報導／查不到時的下一步，只有官方資料（不花 AI 額度；再問 AI 多半同樣查不到）：存檔的法說會日期（最近一次、
+ * 下一場）、公開資訊觀測站的法說會一覽（只放連結，不抓簡報：著作權屬公司，證交所網站不得自動擷取）、到「事件」分頁看公告。
+ * 文字連結：墨色字＋常駐底線，觸控時 44px 高（textAction）。
  */
-function EventsLink({ symbol }: { symbol: string }) {
+function Official({ symbol, conference }: { symbol: string; conference?: AnalystViews["conference"] }) {
+  const today = appToday()
   return (
     <div className="mt-1.5">
-      <Link to="/stock/$symbol" params={{ symbol }} search={{ tab: "events" }} resetScroll={false} className={textAction}>
-        看公告
-      </Link>
+      {conference?.last && <p className="num text-md text-ink">最近一次法說會 {conferenceLine(conference.last, today)}</p>}
+      {conference?.next && <p className="num text-md text-ink">下一場法說會 {conferenceLine(conference.next, today)}</p>}
+      <div className="flex flex-wrap items-center gap-x-5">
+        {conference?.url && (
+          <a href={conference.url} target="_blank" rel="noopener noreferrer" className={textAction}>
+            法說會一覽（公開資訊觀測站）<span className="sr-only">（另開新視窗）</span>
+          </a>
+        )}
+        <Link to="/stock/$symbol" params={{ symbol }} search={{ tab: "events" }} resetScroll={false} className={textAction}>
+          看公告
+        </Link>
+      </div>
     </div>
   )
 }
@@ -233,7 +247,7 @@ function SearchPrompt({ onSearch }: { onSearch: () => void }) {
             : null
   return (
     <div className="flex flex-col items-start gap-3">
-      <p className="max-w-prose text-md text-ink">近期媒體報導的機構評等與目標價，最多 5 筆，每筆附報導日期與原文連結。</p>
+      <p className="max-w-prose text-md text-ink">近半年媒體報導的機構評等與目標價，最多 8 筆，每筆附報導日期與原文連結。</p>
       <Button variant="outline" onClick={onSearch} disabled={off}>
         查詢近期法人觀點
       </Button>
@@ -280,8 +294,13 @@ function ViewsTable({ items }: { items: AnalystView[] }) {
       <tbody>
         {items.map((v) => (
           <tr key={`${v.date}-${v.institution}-${v.url}`} className="border-b border-rule">
-            <td className="num h-[52px] py-2 text-md">{viewDate(v.date, today)}</td>
-            <th scope="row" className="truncate py-2 pr-3 text-left font-medium">{v.institution}</th>
+            <td className="num h-[52px] py-2 text-md">
+              {viewDate(v.date, today)}
+              {v.old && <span className="block text-sm leading-4 text-ink-2">舊資料</span>}
+            </td>
+            <th scope="row" className={cn("truncate py-2 pr-3 text-left", v.unnamed ? "font-normal text-ink-2" : "font-medium")}>
+              {v.institution}
+            </th>
             <td className="truncate py-2 pr-3">{ratingLine(v)}</td>
             <td className="num py-2 pr-6 text-right whitespace-nowrap">{formatTarget(v.target_price, v.currency)}</td>
             <td className="py-2 text-md">
@@ -302,13 +321,16 @@ function ViewsList({ items }: { items: AnalystView[] }) {
       {items.map((v) => (
         <li key={`${v.date}-${v.institution}-${v.url}`} className="border-b border-rule pt-3 pb-1">
           <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-3 gap-y-0.5">
-            <span className="truncate text-lg leading-6 font-medium">{v.institution}</span>
+            <span className={cn("truncate text-lg leading-6", v.unnamed ? "text-ink-2" : "font-medium")}>{v.institution}</span>
             <span className="num text-right text-lg leading-6">
               <span className="mr-1 text-sm text-ink-2">目標價</span>
               {formatTarget(v.target_price, v.currency)}
             </span>
             <span className="text-base leading-5">{ratingLine(v)}</span>
-            <span className="num text-right text-sm leading-5 text-ink-2">{viewDate(v.date, today)}</span>
+            <span className="num text-right text-sm leading-5 text-ink-2">
+              {v.old && "舊資料・"}
+              {viewDate(v.date, today)}
+            </span>
           </div>
           <SourceLink v={v} className="min-h-11 text-md text-ink-2" />
         </li>

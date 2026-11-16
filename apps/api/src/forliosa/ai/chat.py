@@ -82,6 +82,7 @@ from forliosa.ai.keypool import Failure, KeyPool, KeysBusy, KeySlot, NoKeyAvaila
 from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, page_context
 from forliosa.ai.tools import (
+    CHAT_BLOCKED_DOMAINS,
     ToolContext,
     ToolOutcome,
     block_search,
@@ -312,6 +313,31 @@ def _blank_copies(draft: str, sources: Iterable[str]) -> str:
     return "".join(out)
 
 
+def strip_pastes(text: str, sources: Iterable[str]) -> str:
+    """``text`` without the source text pasted after a line's own words, when the line already says every number of
+    it (2026-11-16, 台積電: each item of a draft ended with get_analyst_views' wording, 「…目標價 3,300 元。小摩，
+    11/12，維持，評等「優於大盤」，目標價 3,300 元」, and the answer was shown so when its edit was dropped). A line
+    that is only a paste, or a paste with a number the line does not say, stays."""
+    spans = copied_spans(text, sources)
+    cut: list[tuple[int, int]] = []
+    for a, b in spans:
+        line_start = text.rfind("\n", 0, a) + 1
+        line_end = text.find("\n", b)
+        line_end = len(text) if line_end < 0 else line_end
+        own = text[line_start:a] + text[b:line_end]
+        for x, y in spans:  # other pastes on the same line are not the line's own words either
+            if (x, y) != (a, b) and line_start <= x < line_end:
+                own = own.replace(text[x:y], "")
+        said = _numbers(_CLOCK.sub(" ", text[a:b])) <= _numbers(own)  # its clock time (「15:02」) aside
+        if len(_OWN_WORD.findall(_ITEM.sub("", own, count=1))) >= 6 and said:
+            while a > line_start and text[a - 1] in " \t，、：:":  # the comma or space that joined it
+                a -= 1
+            cut.append((a, b))
+    for a, b in reversed(cut):
+        text = text[:a] + text[b:]
+    return text
+
+
 def missing_numbers(draft: str, edited: str, today: date | None = None, sources: Iterable[str] = ()) -> list[str]:
     """The numbers of the draft that are not in the edited answer (thousands separators aside). The editor may drop
     a stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」, 「台達電(2308-TW)」), the year
@@ -369,6 +395,16 @@ def added_scales(draft: str, edited: str) -> list[str]:
     return [m.group(0) for m in _SCALED.finditer(edited)
             if (v := float(m.group(1).replace(",", ""))) in plain
             and (v, m.group(2).replace("仟", "千")) not in had]
+
+
+# A conversion the draft did not make (2026-11-16, 台積電: the draft's 「5,000新台幣／1,000美元」, two targets for two
+# listings, became 「5,000 新台幣，相當於 1,000 美元」: every number was still there)
+_CONVERSION = re.compile(r"相當於|約合|折合|換算")
+
+
+def added_conversions(draft: str, edited: str) -> list[str]:
+    """The conversion words (相當於, 約合, 折合, 換算) of the edit that the draft does not have."""
+    return sorted({w for w in _CONVERSION.findall(edited) if w not in draft})
 
 
 # Dates written the way CHAT_SYSTEM asks (11/13, a year only when it is not this year, no ROC year, no zero padding),
@@ -475,11 +511,25 @@ def strip_boilerplate(text: str) -> str:
 
 # The rating rule's screening words left in an answer (2026-11-16, round 3: 「台積電最新的具名目標價是小摩的 3,300 元」
 # in 2 of 3 target answers, kept by the editor): 「具名」 before 機構／外資／目標價…, with the 「近 90 天內」 before it.
-# Not 「未具名」, and not a period before anything else (「近 90 天外資買超」 stays).
-_SCREENING = re.compile(r"(?:(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*)?(?<!未)具名的?"
+# Not a period before anything else (「近 90 天外資買超」 stays), and not news wording about anonymity: 「未具名」
+# 「不願具名的分析師」「非具名的法人」「不具名的券商主管」 stay (2026-11-16 review: 「不願具名的外資分析師」 had become
+# 「不願外資分析師」).
+_SCREENING = re.compile(r"(?:(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*)?(?<![未不非願意匿])具名的?"
                         r"(?=機構|外資|券商|投顧|投行|投資銀行|法人|分析師|目標價|評等|報告)"
                         r"|(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*"
                         r"(?=的?(?:(?:機構|外資|券商|投顧)的?)?(?:評等|目標價))")
+# 「沒有具名…」 followed in the same sentence by the broker it did not count (「目前沒有具名的機構評等，只有一家日系外資
+# 調降目標價」): without 「具名」 the sentence says the opposite of its second half, so it stays as written
+_NEGATED = re.compile(r"(?:沒有|並無|尚無|無)\s*$")
+_UNNAMED_AFTER = re.compile(r"未具名|[美日歐英德法瑞港陸中韓星亞澳][系資]|(?:只|僅|但|另|不過)有")
+
+
+def _unscreen(m: re.Match[str]) -> str:
+    if "具名" in m.group(0) and _NEGATED.search(m.string, 0, m.start()):
+        rest = re.split(r"[。！？\n]", m.string[m.end():], maxsplit=1)[0]
+        if _UNNAMED_AFTER.search(rest):
+            return m.group(0)
+    return ""
 
 
 def tidy_answer(text: str, today: date) -> str:
@@ -490,9 +540,9 @@ def tidy_answer(text: str, today: date) -> str:
     here, the editor made the answer's first sentence a list item in 3 of 3 edits (2026-11-16)."""
     out, pos = [], 0
     for link in _URL.finditer(text):  # never inside a link
-        out += [_SCREENING.sub("", text[pos:link.start()]), link.group(0)]
+        out += [_SCREENING.sub(_unscreen, text[pos:link.start()]), link.group(0)]
         pos = link.end()
-    return strip_boilerplate(normalize_dates("".join([*out, _SCREENING.sub("", text[pos:])]), today))
+    return strip_boilerplate(normalize_dates("".join([*out, _SCREENING.sub(_unscreen, text[pos:])]), today))
 
 
 # A list item or a heading, not a sentence (the answer's first line must be a sentence: CHAT_SYSTEM, EDITOR_SYSTEM)
@@ -501,19 +551,36 @@ _NOT_SENTENCE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
 _FIRST_SENTENCE = re.compile(r"[^。！？]+[。！？]")
 
 
+def _ratio(a: str, b: str) -> float:
+    return SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
 def keep_opening(draft: str, edited: str) -> str:
     """The draft's opening sentence back when the edit made it a list item or dropped it (2026-11-16, round 3: 3 of
     11 edits started with 「- 」 where the draft opened with a sentence). The edit's first item, when it is that
-    sentence rewritten, becomes the opening line again; otherwise the draft's first sentence goes before the list."""
+    sentence rewritten (closer to it than to any item of the draft's list), becomes the opening line again; a line
+    further down that is (the editor moved the opening to the end) moves to the top; otherwise the draft's first
+    sentence goes before the list."""
     d_lines, e_lines = draft.strip().split("\n"), edited.split("\n")
     first = next((i for i, x in enumerate(e_lines) if x.strip()), None)
     opening = d_lines[0].strip()
     if first is None or not opening or _NOT_SENTENCE.match(opening) or not _ITEM.match(e_lines[first]):
         return edited
+    d_items = [_ITEM.sub("", x, count=1).strip() for x in d_lines[1:] if _ITEM.match(x)]
+
+    def rewrites_opening(line: str, at_least: float) -> bool:
+        r = _ratio(line, opening)
+        return r >= at_least and all(r > _ratio(line, x) for x in d_items)
+
     item = _ITEM.sub("", e_lines[first], count=1).strip()
-    rest = "\n".join(e_lines[first + 1:]).lstrip("\n")
-    if SequenceMatcher(None, item, opening, autojunk=False).ratio() >= 0.5:
+    if rewrites_opening(item, 0.5):
+        rest = "\n".join(e_lines[first + 1:]).lstrip("\n")
         return item + ("\n\n" + rest if rest else "")
+    for i in range(first + 1, len(e_lines)):
+        line = _ITEM.sub("", e_lines[i], count=1).strip()
+        if line and not re.match(r"[#|]", line) and rewrites_opening(line, 0.6):
+            rest = re.sub(r"\n{3,}", "\n\n", "\n".join(e_lines[first:i] + e_lines[i + 1:])).strip("\n")
+            return line + "\n\n" + rest
     sentence = _FIRST_SENTENCE.match(opening)
     return (sentence.group(0) if sentence else opening) + "\n\n" + "\n".join(e_lines[first:])
 
@@ -566,7 +633,17 @@ def _stream(text: str, size: int = 24) -> Iterator[Event]:
 
 
 class _EditorGaveUp(Exception):
-    """The streamed edit is not used: its first word or its end came too late, or it outgrew the draft."""
+    """The streamed edit is not used: its first word or its end came too late, it outgrew the draft, or it did not
+    start in Chinese."""
+
+
+EDITOR_HEAD_CHARS = 8  # the edit's first characters, held back until they show it is written in Chinese
+
+
+def _chinese_head(head: str) -> str:
+    if not _CJK.search(head):
+        raise _EditorGaveUp("the edit does not start in Chinese")
+    return head
 
 
 _HEADING = re.compile(r"(?m)^ {0,3}#")
@@ -665,11 +742,13 @@ class ChatTurn:
     # -- request building --------------------------------------------------------------------------------
     def tools(self) -> list[dict[str, Any]]:
         # 深度搜尋 only raises how often web_search may run; the tool list is otherwise the same. web_search always
-        # blocks SEARCH_BLOCKED_DOMAINS (aggregators, quote pages, AI-written pages, forums; the 2026-11-16 memo):
+        # blocks CHAT_BLOCKED_DOMAINS (rating aggregators, quote pages, AI-written pages, forums; the 2026-11-16 memo):
         # every turn, not only rating questions, since a tool list that changes between turns invalidates the cache
-        # and the replayed thinking (see ``economy``), and the prompt already tells the model not to use those pages.
+        # and the replayed thinking (see ``economy``). Rating sites that also publish news (Benzinga, Zacks) stay
+        # searchable: the card's list blocks them, chat answers ratings from the card first.
         max_uses = self.settings.ai_deep_search_max_uses if self.deep else None
-        web = [] if self.economy else block_search(server_tools(self.settings, max_uses=max_uses))
+        web = [] if self.economy else block_search(server_tools(self.settings, max_uses=max_uses),
+                                                   CHAT_BLOCKED_DOMAINS)
         return client_tool_definitions(self.settings) + web
 
     def params(self, model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1074,7 +1153,10 @@ class ChatTurn:
         draft's dates are written the prompt's way and the MOPS boilerplate goes first (``tidy_answer``): the editor
         gets it so, and so does the answer shown as written. The edit gets the same once it is complete (2026-11-16:
         the editor wrote 「10 月 15 日」); when that changes it, a ``text_reset`` shows the result. An edit that gave a
-        number a scale the draft did not (``added_scales``: 「6,806」 → 「6,806 萬元」) is dropped as well."""
+        number a scale the draft did not (``added_scales``: 「6,806」 → 「6,806 萬元」) or made a conversion it did not
+        (``added_conversions``: 「相當於 1,000 美元」) is dropped as well. An edit is held back until its first
+        characters show it is in Chinese (``_chinese_head``); the answer shown as written leaves out the source
+        text pasted after its own sentences (``strip_pastes``)."""
         start = state.held_from
         assert start is not None
         today = self.now_fn().date()
@@ -1112,10 +1194,10 @@ class ChatTurn:
             log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
         finally:
             pieces.close()  # the browser went away: the editor call stops too (its usage is recorded)
+        # the cited texts the draft may have pasted (their numbers need not stay; ``missing_numbers``)
+        sources = [normalize_dates(x, today) for c in state.display.citations
+                   for x in (c.get("cited_text"), c.get("title")) if x]
         if edited is not None:
-            # the cited texts the draft may have pasted (their numbers need not stay; ``missing_numbers``)
-            sources = [normalize_dates(x, today) for c in state.display.citations
-                       for x in (c.get("cited_text"), c.get("title")) if x]
             if missing := missing_numbers(body, edited, today, sources):
                 # the count only: the numbers may be the user's own amounts
                 log.warning("AI answer editor dropped %d number(s); showing the answer as written", len(missing))
@@ -1123,11 +1205,20 @@ class ChatTurn:
             elif scaled := added_scales(body, edited):
                 log.warning("AI answer editor gave %d number(s) a scale; showing the answer as written", len(scaled))
                 edited = None
+            elif added_conversions(body, edited):
+                log.warning("AI answer editor added a conversion; showing the answer as written")
+                edited = None
         timing.note(f"editor start {began:.2f} first {_s(first)} end {timing.at():.2f} "
                     f"{'edited' if edited is not None else 'as written'}")
         yield "tool", {"id": "edit", "name": "edit_answer", "status": "done", "label": "整理回答"}
         state.held_from = None
         if edited is None:
+            # shown as written, but without the source text pasted after its own sentences (``strip_pastes``)
+            bare = lead + strip_pastes(body, sources)
+            if bare != draft:
+                flagged = remap_flags(flagged, draft, bare, start)
+                state.display.text = state.display.text[:start] + bare
+                draft = bare
             if shown:  # part of the edit is on screen: the whole answer as written replaces it
                 yield "text_reset", {"text": state.display.text}
             else:
@@ -1159,6 +1250,10 @@ class ChatTurn:
         out: list[str] = []
         size = 0
         pending = ""  # white space held back until a word follows it (none is shown at the start or the end)
+        # the first words, held back until they show the edit is in Chinese like the draft (2026-11-16: an editor
+        # call answered in English, 「I've got the new target price… Please paste the answer」, and it was on screen
+        # for a second before the number check dropped it)
+        head: str | None = "" if _CJK.search(body) else None
         headings = None if _HEADING.search(body) else _HeadingFilter()
         with client.messages.stream(model=model, max_tokens=4000, system=EDITOR_SYSTEM,
                                     output_config={"effort": "low"}, **_editor_thinking(model),
@@ -1169,7 +1264,7 @@ class ChatTurn:
                     elapsed = _clock() - t0
                     if elapsed > EDITOR_TOTAL_SECONDS:
                         raise _EditorGaveUp(f"not done after {elapsed:.1f}s")
-                    if not out and t != "text" and elapsed > EDITOR_FIRST_TOKEN_SECONDS:
+                    if not out and not head and t != "text" and elapsed > EDITOR_FIRST_TOKEN_SECONDS:
                         raise _EditorGaveUp(f"no word after {elapsed:.1f}s")
                     if t != "text" or not ev.text:
                         continue
@@ -1183,8 +1278,16 @@ class ChatTurn:
                     size += len(words)
                     if size > limit:
                         raise _EditorGaveUp(f"longer than {limit} characters")
+                    if head is not None:
+                        head += words
+                        if len(head) < EDITOR_HEAD_CHARS:
+                            continue
+                        words, head = _chinese_head(head), None
                     out.append(words)
                     yield words
+                if head:  # a short edit, all of it held back
+                    out.append(_chinese_head(head))
+                    yield out[-1]
             except BaseException:
                 self._record_partial(stream, slot.index, model)
                 raise

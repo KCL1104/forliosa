@@ -7,8 +7,9 @@ Patterns were taken from the live TWSE ``t187ap04_L`` / TPEx ``mopsfin_t187ap04_
   the period; titles alone use 「115年第3季」「一百一十五年第三季」「115年度第三季」「114年度」(annual = Q4).
   The announcement date (發言日期) is the day the board approved and published the report.
 * **Investor conference** (``investor_conference``, 法說會): 第12款 — titles vary (「公告本公司召開法人說明會」,
-  「本公司受邀參加Daiwa Investment Conference Singapore 2026」); 事實發生日 and 「召開法人說明會之日期：115/11/23」
-  are the conference date (a range 「115/11/12 ~ 115/11/13」 starts on its first day).
+  「本公司受邀參加Daiwa Investment Conference Singapore 2026」); 「召開法人說明會之日期：115/11/23」 is the conference
+  date (a range 「115/11/12 ~ 115/11/13」 starts on its first day), the 事實發生日 only when the 說明 has none (an
+  invited company's 事實發生日 can be the day it accepted: 禾榮科 2026-11-10 for a 法說會 on 11/12).
 * **Monthly revenue** (``revenue_release``): 「公告本公司115年10月合併營收情形」 (第53款).
 
 Corrections (「更正…」) never count as a release: the original announcement is the release date.
@@ -110,19 +111,24 @@ def revenue_period(title: str) -> str | None:
     return f"{year}-{month:02d}"
 
 
+def _detail_date(detail: str, label: str) -> date | None:
+    m = re.search(rf"{label}\s*[:：]\s*{_ROC_DATE}", detail or "")
+    return parse_tw_date(f"{m.group(1)}/{m.group(2)}/{m.group(3)}") if m else None
+
+
 def conference_date(detail: str, fact_date: str | None, announced: date) -> date:
+    """The day the 法說會 is held: 「召開法人說明會之日期」 of the 說明 (the first day of a range), else the 事實發生日,
+    else the announcement date. The 說明's date comes first: an invited company's 事實發生日 can be the day it
+    accepted (2026-11-16, 禾榮科: 事實發生日 11/10, 「召開法人說明會之日期:115/11/12」)."""
+    held = _detail_date(detail, "召開法人說明會之日期")
+    if held is not None:
+        return held
     if fact_date:
         try:
             return date.fromisoformat(fact_date)
         except ValueError:
             pass
-    for label in ("召開法人說明會之日期", "事實發生日"):
-        m = re.search(rf"{label}\s*[:：]\s*{_ROC_DATE}", detail or "")
-        if m:
-            d = parse_tw_date(f"{m.group(1)}/{m.group(2)}/{m.group(3)}")
-            if d is not None:
-                return d
-    return announced
+    return _detail_date(detail, "事實發生日") or announced
 
 
 def classify(title: str, detail: str, data: dict | None, announced: date) -> Release | None:

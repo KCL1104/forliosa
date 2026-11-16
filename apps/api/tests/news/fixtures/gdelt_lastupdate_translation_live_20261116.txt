@@ -1,0 +1,3 @@
+84640 3cc2934a9a0c88f31789345050b25a64 http://data.gdeltproject.org/gdeltv2/20261116123000.translation.export.CSV.zip
+121024 38ad3129a6bd61cb6dfbb38dc710f132 http://data.gdeltproject.org/gdeltv2/20261116123000.translation.mentions.CSV.zip
+13251333 3c3a35b7b0d4f10726300a99fd8f7fac http://data.gdeltproject.org/gdeltv2/20261116123000.translation.gkg.csv.zip

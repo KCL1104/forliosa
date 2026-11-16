@@ -254,12 +254,12 @@ AI_RESULTS = [
     ("https://www.cna.com.tw/news/afe/202611110123.aspx", "台積電美國廠進度超前 | 產經 | 中央社 CNA",
      "November 11, 2026"),
     ("https://tw.stock.yahoo.com/quote/2330.TW", "台積電(2330) 走勢圖 - Yahoo股市", None),  # a quote page
-    ("https://www.ctee.com.tw/news/20261101700001", "台積電上月舊聞", "2026-11-01"),  # outside 7 days
+    ("https://www.ctee.com.tw/news/20261001700001", "台積電上月舊聞", "2026-10-01"),  # outside the 30-day window
 ]
 
 
 def test_ai_fills_gaps_only_from_search_results(engine, commercial_md, settings, pool, fake):
-    gdelt = FakeSource(items={"2330.TW": gdelt_items()[:3]})  # only 1 relevant headline in 7 days
+    gdelt = FakeSource(items={"2330.TW": gdelt_items()[:3]})  # none of them names 台積電: nothing stored
     ai_answer(fake, AI_RESULTS, [u for u, _, _ in AI_RESULTS] + ["https://made-up.example.com/台積電"])
     with Session(engine) as db:
         rep = service.refresh(db, commercial_md, settings=settings, sources=[gdelt], symbols=["2330.TW"],
@@ -268,7 +268,12 @@ def test_ai_fills_gaps_only_from_search_results(engine, commercial_md, settings,
         body = fake.requests[0]["body"]
         tools = {t["name"]: t for t in body["tools"]}
         assert set(tools) == {"web_search", "report_news"}  # no web_fetch: no site is read
-        assert "www.twse.com.tw" in tools["web_search"]["blocked_domains"]
+        blocked = tools["web_search"]["blocked_domains"]
+        assert "www.twse.com.tw" in blocked and len(blocked) <= 100
+        assert {"cmoney.tw", "cmnews.com.tw", "fugle.tw", "histock.tw"} <= set(blocked)  # not news (2026-11-16)
+        # nothing stored from the last 14 days: the search covers 30; reputable outlets preferred, no robot flashes
+        assert "最近 30 天" in body["system"] and "經濟日報" in body["system"] and "盤中速報" in body["system"]
+        assert "2026-10-13 之後" in body["messages"][0]["content"]
         ai_rows = [r for r in stored(db) if r.source == "ai_search"]
         # titles, links and dates are the search results' own; the made-up URL, the quote page and the old article
         # are dropped
@@ -283,13 +288,62 @@ def test_ai_fills_gaps_only_from_search_results(engine, commercial_md, settings,
         assert rep2.ai_searches == 0 and len(fake.requests) == 1
 
 
+def test_ai_window_is_14_days_or_30_without_any_recent_headline(engine):
+    h = service.Headline
+    with Session(engine) as db:
+        assert service.ai_window(db, "2330.TW", NOW) == timedelta(days=30)
+        old = NOW - timedelta(days=13)
+        service.store(db, "2330.TW", [h("台積電舊聞", "https://udn.com/1", "聯合新聞網", "udn.com", old,
+                                        "ai_search")], NOW)
+        assert service.ai_window(db, "2330.TW", NOW) == timedelta(days=14)
+        assert service.ai_window(db, "2330.TW", NOW + timedelta(days=2)) == timedelta(days=30)
+
+
+def test_ai_runs_while_gdelt_is_paused(engine, commercial_md, settings, pool, fake):
+    """2026-11-16 bug: the AI step waited for a GDELT answer, and GDELT's DOC API is paused after a 429 most of the
+    day, so small caps never got one. A paused (or unreachable) source no longer holds the AI back."""
+    with Session(engine) as db:
+        blocked = FakeSource(blocked=True)
+        ai_answer(fake, AI_RESULTS[:2], [AI_RESULTS[0][0], AI_RESULTS[1][0]])
+        rep = service.refresh(db, commercial_md, settings=settings, sources=[blocked], symbols=["2330.TW"],
+                              now_fn=lambda: NOW)
+        assert rep.blocked_sources == ["gdelt"] and rep.ai_searches == 1
+        assert len([r for r in stored(db) if r.source == "ai_search"]) == 2
+        # in the next run GDELT is still in its pause (not asked at all): the AI step for another stock runs too
+        ai_answer(fake, [], [])
+        rep = service.refresh(db, commercial_md, settings=settings, sources=[blocked], symbols=["2454.TW"],
+                              now_fn=lambda: NOW + timedelta(minutes=5))
+        assert len(blocked.calls) == 1 and rep.ai_searches == 1
+
+
+def test_an_ai_search_that_found_nothing_waits_72_hours(engine, commercial_md, settings, pool, fake):
+    """2026-11-16 review: with the GDELT gate fixed, a stock with no news even 30 days back (M31, 訊聯) was searched
+    every day for nothing. Rows the page hides (a quote page stored before 2026-11-16) do not count as headlines."""
+    blocked = FakeSource(blocked=True)
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [service.Headline(f"台積電(2330) 走勢圖 {k}", f"https://tw.stock.yahoo.com/quote/{k}",
+                                                       "Yahoo股市", "tw.stock.yahoo.com", NOW - timedelta(days=1),
+                                                       "gdelt") for k in range(3)], NOW)
+        assert service.recent_free_count(db, "2330.TW", NOW) == 0
+        ai_answer(fake, [], [])
+        rep = service.refresh(db, commercial_md, settings=settings, sources=[blocked], symbols=["2330.TW"],
+                              now_fn=lambda: NOW)
+        assert rep.ai_searches == 1
+        for hours, searched in ((25, 0), (71, 0), (73, 1)):
+            ai_answer(fake, [], [])
+            rep = service.refresh(db, commercial_md, settings=settings, sources=[blocked], symbols=["2330.TW"],
+                                  now_fn=lambda hours=hours: NOW + timedelta(hours=hours))
+            assert rep.ai_searches == searched, hours
+
+
 def test_ai_is_not_used_when_gdelt_has_enough_or_did_not_answer(engine, commercial_md, settings, pool, fake):
     with Session(engine) as db:
         enough = FakeSource(items={"2330.TW": gdelt_items()})
         rep = service.refresh(db, commercial_md, settings=settings, sources=[enough], symbols=["2330.TW"],
                               now_fn=lambda: NOW)
         assert rep.ai_searches == 0
-        failing = FakeSource(blocked=True)  # GDELT did not answer for 2454: no AI search instead of it
+        # GDELT answering but failing for 2454 (an error, not a refusal): no AI search instead of it
+        failing = FakeSource(error=ConnectionError("reset by peer"))
         rep = service.refresh(db, commercial_md, settings=settings, sources=[failing], symbols=["2454.TW"],
                               now_fn=lambda: NOW)
         assert rep.ai_searches == 0 and fake.requests == []
@@ -340,7 +394,7 @@ def test_news_endpoint_lists_media_after_announcements(client, engine, commercia
             service.Headline("台積電CPO霸主地位穩了？", "https://newtalk.tw/news/view/2026-11-12/1", "新頭殼",
                              "newtalk.tw", now - timedelta(hours=3), "gdelt"),
             service.Headline("台積電美國廠進度超前", "https://www.cna.com.tw/news/afe/1.aspx", "中央社", "cna.com.tw",
-                             now - timedelta(days=1), "ai_search", date_only=True),
+                             now - timedelta(days=2), "ai_search", date_only=True),  # an earlier day: after
             service.Headline("台積電 Yahoo 轉載", "https://tw.stock.yahoo.com/news/1", "MoneyDJ", "tw.stock.yahoo.com",
                              now - timedelta(hours=1), "yahoo_rss"),
         ], now)
@@ -357,6 +411,20 @@ def test_news_endpoint_lists_media_after_announcements(client, engine, commercia
     with Session(engine) as db:  # the view is noted: symbol and time only
         view = db.get(NewsTrackedView, "2330.TW")
         assert view is not None and set(NewsTrackedView.__table__.columns.keys()) == {"symbol", "last_viewed_at"}
+
+
+def test_robot_flashes_and_pages_that_are_not_news_stored_earlier_are_hidden(engine, commercial_md, settings):
+    h = service.Headline
+    with Session(engine) as db:
+        service.store(db, "2308.TW", [
+            h("盤中速報 - 台達電(2308)股價殺至跌停，跌停價1120...", "https://news.cnyes.com/news/id/6200001", "鉅亨網",
+              "news.cnyes.com", NOW - timedelta(hours=1), "ai_search"),
+            h("台達電(2308)目標價", "https://aigc-note.cmoney.tw/answer/1", "aigc-note.cmoney.tw",
+              "aigc-note.cmoney.tw", NOW - timedelta(hours=2), "searxng"),
+            h("台達電法說會釋利多", "https://money.udn.com/money/story/5607/1", "經濟日報", "money.udn.com",
+              NOW - timedelta(hours=3), "gdelt")], NOW)
+        items = service.media_items(db, commercial_md, commercial_md.instrument("2308"), settings=settings, now=NOW)
+        assert [i["title"] for i in items] == ["台達電法說會釋利多"]
 
 
 def test_yahoo_rss_rows_are_shown_only_under_personal(client, engine, personal_md):

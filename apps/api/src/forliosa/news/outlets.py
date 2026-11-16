@@ -72,6 +72,8 @@ OUTLETS: dict[str, Outlet] = {
     "ntdtv.com": Outlet("新唐人", ("新唐人",)),
     "taipeitimes.com": Outlet("Taipei Times", ("taipei times",)),
     "taiwannews.com.tw": Outlet("Taiwan News", ("taiwan news",)),
+    "ithome.com.tw": Outlet("iThome", ("ithome",)),
+    "cardu.com.tw": Outlet("卡優新聞網", ("卡優新聞網", "卡優", "cardu")),
     "line.me": Outlet("LINE TODAY", ("line today",), aggregator=True),
     "yahoo.com": Outlet("Yahoo新聞", ("yahoo新聞", "yahoo奇摩新聞", "yahoo"), aggregator=True),
     "tw.stock.yahoo.com": Outlet("Yahoo股市", ("yahoo股市", "yahoo財經", "yahoo"), aggregator=True),
@@ -124,26 +126,31 @@ TAIWAN_DOMAINS = frozenset({
     "taipeitimes.com", "digitimes.com",
 })
 # Reputable business news (產品負責人 2026-11-16, memo §2 item 5): preferred, never required — a story found in one
-# of them wins over a copy elsewhere, and within a day they come first in the order the server returns. Taiwan:
-# 經濟日報、工商時報、MoneyDJ、鉅亨、中央社（及 Focus Taiwan）、自由財經; US: Reuters, CNBC and the other wire / business
-# papers.
+# of them wins over a copy elsewhere, and within a day they come first in the order the server returns.
+# Taiwan: 經濟日報、工商時報、MoneyDJ、鉅亨、中央社（及 Focus Taiwan）、自由財經.
+# US: Reuters, CNBC and the other wire services and business papers.
 REPUTABLE_DOMAINS = frozenset({
     "money.udn.com", "ctee.com.tw", "moneydj.com", "cnyes.com", "cna.com.tw", "focustaiwan.tw", "ec.ltn.com.tw",
     "reuters.com", "cnbc.com", "bloomberg.com", "wsj.com", "ft.com", "apnews.com", "marketwatch.com", "barrons.com",
 })
 # Not news (memo 2026-11-16 §1, measured): quote and rating pages, forums and blogs, and AI-written "news" (CMoney's
-# aigc-note Q&A and cmnews AI articles, Fugle's AI 法說會 notes). Never stored or shown as a headline, and blocked in
-# the AI news search. A host matches with its subdomains; NOT_NEWS_PATHS only for path prefixes on one host.
+# aigc-note Q&A and cmnews AI articles, Fugle's AI 法說會 notes and /ai pages). Never stored or shown as a headline,
+# blocked in the AI news search, and the base of the chat's and the 法人觀點 card's web_search blocklist
+# (``ai.tools.CHAT_BLOCKED_DOMAINS``: one list, 2026-11-16 review). A host matches with its subdomains;
+# NOT_NEWS_PATHS only for path prefixes on one host.
 NOT_NEWS_DOMAINS = (
     "cmoney.tw", "cmnews.com.tw", "goodinfo.tw", "wantgoo.com", "histock.tw", "istock.tw", "winvest.tw",
     "poorstock.com", "finlab.tw", "finlab.finance", "findbillion.com", "uc913.com", "nstock.tw", "myth-capital.com",
-    "toalpha.tw", "blog.fugle.tw", "treelazy.com", "stock.wearn.com", "vocus.cc", "gate.com", "finance.biggo.com",
-    "ptt.cc", "dcard.tw", "mobile01.com", "pixnet.net", "blog.udn.com", "city.udn.com", "tradingview.com",
-    "stockanalysis.com", "marketbeat.com", "tipranks.com",
+    "toalpha.tw", "fugle.tw", "treelazy.com", "stock.wearn.com", "vocus.cc", "gate.com", "finance.biggo.com",
+    "finance.biggo.com.tw", "stock.pchome.com.tw", "agdstock.club", "fastbull.com", "stockopedia.com",
+    "gurufocus.com", "ptt.cc", "dcard.tw", "mobile01.com", "pixnet.net", "blog.udn.com", "city.udn.com",
+    "tradingview.com", "stockanalysis.com", "marketbeat.com", "tipranks.com",
 )
 NOT_NEWS_PATHS: dict[str, tuple[str, ...]] = {
-    "pchome.megatime.com.tw": ("/stock",),  # quote pages; its /news pages are real reprints
+    "pchome.megatime.com.tw": ("/stock", "/m/stock"),  # quote pages; its /news pages are real reprints
     "tw.stock.yahoo.com": ("/quote",),
+    "money-link.com.tw": ("/twstock",),  # quote and per-stock list pages; /realtimenews/ are articles
+    "ww2.money-link.com.tw": ("/twstock",),
 }
 
 

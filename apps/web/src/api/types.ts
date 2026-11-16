@@ -1035,9 +1035,22 @@ export interface AnalystView {
   date: string
   source_title: string
   url: string
+  /** 報導沒寫是哪一家外資：`institution` 是「未具名外資（日系）」（最多 2 筆、只限 30 天內；舊版後端沒有這個欄位） */
+  unnamed?: boolean
+  /** 報導超過 90 天（最多 180 天）：標「舊資料」，排在新資料後面（舊版後端沒有這個欄位） */
+  old?: boolean
 }
 
-/** `GET/POST /instruments/{symbol}/analyst-views`：同一檔同一交易日全體共用，24 小時後刪除；最多 5 筆，新到舊 */
+/** 存檔的法說會（重大訊息）：日期與受邀時的主辦券商或活動名稱（公司自己召開為 null） */
+export interface AnalystConference {
+  date: string
+  host: string | null
+}
+
+/**
+ * `GET/POST /instruments/{symbol}/analyst-views`：同一檔同一交易日全體共用，24 小時後刪除（查無時保留 3 個交易日）；
+ * 最多 8 筆：近 90 天的新到舊，舊資料排在後面
+ */
 export interface AnalystViews {
   status: AnalystViewsStatus
   symbol?: string
@@ -1047,6 +1060,8 @@ export interface AnalystViews {
   /** 固定顯示的免責文字（後端提供；沒有時前端用常數） */
   disclaimer?: string
   notes?: string[]
+  /** 法說會的官方連結（只放連結，不抓簡報）：近 180 天最近一次、30 天內下一場、公開資訊觀測站法說會一覽。美股為 null */
+  conference?: { last: AnalystConference | null; next: AnalystConference | null; url: string } | null
 }
 
 // ── 分享（M5，docs/api-contract.md「分享（M5）」）─────────────────────

@@ -38,7 +38,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   ``forliosa.services.auto_dividends.sync_all_users`` books, corrects or removes automatic dividends.
 * ``ai_retention`` — every day 04:20: deletes AI threads, messages and drafts whose last activity is older than
   ``AI_RETENTION_DAYS`` (30; ``forliosa.ai.retention``, also a CLI). Usage records are kept.
-* ``ai_analyst_purge`` — every hour at :05: deletes shared analyst views 24 hours after they were created
+* ``ai_analyst_purge`` — every hour at :05: deletes shared analyst views past their ``expires_at`` — 24 hours after
+  they were created, an empty result of a stock nobody rated in the last year after 3 trading days
   (``forliosa.ai.analyst.purge_expired``; reads purge them too, so an expired entry is never shown).
 * ``group_push`` — every minute: queues group-channel pushes of trades and sends what is due
   (``forliosa.services.notifications``: 15 minutes after a trade was created, re-checked against the share settings,
@@ -58,8 +59,10 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).
   Requests already refuse an expired session; nothing else removes its row.
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
-  watched, or viewed in the last 3 days), one GDELT request per symbol spaced ≥ 5 s, backing off after a 429; AI
-  web search fills gaps within the monthly budget; headlines older than 30 days are deleted
+  watched, or viewed in the last 3 days): Taiwan stocks from GDELT's new 15-minute bulk files (one download for every
+  symbol, ``forliosa.news.gdelt_bulk``), US stocks — and Taiwan stocks while the bulk files are not current — one
+  GDELT DOC request per symbol spaced ≥ 5 s, backing off after a 429; AI web search fills gaps within the monthly
+  budget; headlines older than 30 days are deleted
   (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only. Its own loop
   (``Job.background``): a batch can take most of the 45 minutes and must not hold up the other jobs.
 

@@ -352,7 +352,8 @@ def test_the_prompts_carry_units_recency_and_no_source_names_for_notices():
         "「名稱 目標價 ○年○月」（○年○月 是「頁面情境」裡今天的年月）", "「名稱 外資 目標價 最新」",
         "找到的都是一個月以前的，換關鍵字再搜一次最新的", "同一家機構有好幾則時只寫最新的一則",
         # no 「所以不列入」, no criteria
-        "也不說哪一家沒列入", "所以不列入」整句都不寫", "回答裡不出現「近 90 天內」「具名機構」「具名外資」這類字",
+        "也不說哪一家沒列入", "所以不列入」整句都不寫", "回答裡不出現「具名」「未具名」「近 90 天」「半年內」這類字",
+        "不寫「最新的具名目標價」，寫「最新的目標價」",
         "不加條件（不寫「目前沒有近 90 天內具名機構的…」）",
     ):
         assert phrase in section, phrase
@@ -408,4 +409,118 @@ def test_a_pasted_notice_label_goes(draft, fixed):
 
     assert tidy_answer(draft, TODAY) == fixed
     assert keeps_numbers(draft, fixed, TODAY) or "15:02" in draft
+
+
+
+# -- 2026-11-16, round 3 leftovers: the opening sentence, the rating rule's screening words ------------------------
+@pytest.mark.parametrize(("draft", "edited", "kept"), [
+    # the opening made a list item: back to a sentence, the rest of the list after a blank line
+    ("台達電今天跌停，收 1,120 元。\n\n- 外資賣超。", "- 台達電今天跌停，收在 1,120 元。\n- 外資賣超。",
+     "台達電今天跌停，收在 1,120 元。\n\n- 外資賣超。"),
+    # the opening dropped and its fact folded into an item: the draft's first sentence comes back before the list
+    ("台積電最新的目標價是小摩 11/12 的 3,300 元。其餘是法說會前後的報告。\n\n- 滙豐 10/14 調高到 3,800 元。",
+     "- 滙豐 10/14 把目標價調高到 3,800 元。\n- 小摩 11/12 維持 3,300 元。",
+     "台積電最新的目標價是小摩 11/12 的 3,300 元。\n\n- 滙豐 10/14 把目標價調高到 3,800 元。\n"
+     "- 小摩 11/12 維持 3,300 元。"),
+    # nothing to restore: the edit opens with a sentence, or the draft opened with a list itself
+    ("台達電跌停。\n\n- 外資賣超。", "台達電今天跌停。\n\n- 外資賣超。", "台達電今天跌停。\n\n- 外資賣超。"),
+    ("- 台達電跌停。\n- 外資賣超。", "- 台達電今天跌停。\n- 外資賣超。", "- 台達電今天跌停。\n- 外資賣超。"),
+    ("### 重點\n台達電跌停。", "- 台達電跌停。", "- 台達電跌停。"),
+    # the opening dropped and the edit's first item is the draft's first item (2026-11-16 review): the item stays
+    # in the list, the opening comes back
+    ("台積電最新的目標價是摩根大通 11/12 的 3,300 元。\n\n- 摩根大通 11/12 維持「優於大盤」評等，目標價 3,300 元。\n"
+     "- 伯恩斯坦 11/9 調升，目標價 3,828 元。",
+     "- 摩根大通 11/12 維持「優於大盤」評等，目標價 3,300 元。\n- 伯恩斯坦 11/9 調升，目標價 3,828 元。",
+     "台積電最新的目標價是摩根大通 11/12 的 3,300 元。\n\n- 摩根大通 11/12 維持「優於大盤」評等，目標價 3,300 元。\n"
+     "- 伯恩斯坦 11/9 調升，目標價 3,828 元。"),
+    # the opening moved to the end: moved back, not written twice
+    ("禾榮科目前沒有機構評等與目標價的資料。\n\n- 公司 11/10 參加永豐金證券舉辦的法說會。",
+     "- 公司 11/10 參加永豐金證券舉辦的法說會。\n\n目前沒有禾榮科的機構評等與目標價資料。",
+     "目前沒有禾榮科的機構評等與目標價資料。\n\n- 公司 11/10 參加永豐金證券舉辦的法說會。"),
+])
+def test_the_opening_sentence_stays_a_sentence(draft, edited, kept):
+    from forliosa.ai.chat import keep_opening
+
+    assert keep_opening(draft, edited) == kept
+
+
+def test_an_edit_that_lists_the_opening_is_shown_with_its_sentence_back(client, pool, fake, engine, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    date_turn(fake, "元富投顧 10/2 給目標價 700 元。\n\n- 國票投顧 10/1 評等「區間操作」。")
+    fake.reply(text("- 元富投顧 10/2 給的目標價是 700 元。\n- 國票投顧 10/1 評等「區間操作」。"))
+    _, events = chat(client, "禾榮科的目標價？")
+    fixed = "元富投顧 10/2 給的目標價是 700 元。\n\n- 國票投顧 10/1 評等「區間操作」。"
+    assert shown(events) == fixed and stored_answer(engine) == fixed
+    assert [n for n, _ in events if n == "text_reset"] == ["text_reset"]  # the streamed edit is replaced once
+
+
+@pytest.mark.parametrize(("text_in", "text_out"), [
+    ("台積電最新的具名目標價是小摩的 3,300 元。", "台積電最新的目標價是小摩的 3,300 元。"),
+    ("台積電最新一筆具名機構的目標價是小摩的 3,300 元。", "台積電最新一筆機構的目標價是小摩的 3,300 元。"),
+    ("近 90 天內，具名外資的目標價最高 4,410 元。", "外資的目標價最高 4,410 元。"),
+    ("目前沒有近 90 天內具名機構的評等與目標價資料。", "目前沒有機構的評等與目標價資料。"),
+    ("目前沒有近 90 天的機構評等。", "目前沒有機構評等。"),
+    # not the rating rule's words
+    ("近 90 天外資買超 1 萬張。", "近 90 天外資買超 1 萬張。"),
+    ("一家未具名的日系外資調降目標價。", "一家未具名的日系外資調降目標價。"),
+    # news wording about anonymity (2026-11-16 review: 「不願具名的外資分析師」 had become 「不願外資分析師」)
+    ("一位不願具名的外資分析師表示，需求強勁。", "一位不願具名的外資分析師表示，需求強勁。"),
+    ("據非具名的法人透露，營收將成長。", "據非具名的法人透露，營收將成長。"),
+    ("要求不具名的券商主管說，市場過熱。", "要求不具名的券商主管說，市場過熱。"),
+    # without 「具名」 the sentence would contradict its second half
+    ("目前沒有具名的機構評等，只有一家日系外資調降目標價。", "目前沒有具名的機構評等，只有一家日系外資調降目標價。"),
+    ("目前沒有具名機構的評等與目標價資料。", "目前沒有機構的評等與目標價資料。"),
+])
+def test_the_rating_rules_screening_words_go(text_in, text_out):
+    from forliosa.ai.chat import tidy_answer
+
+    assert tidy_answer(text_in, TODAY) == text_out
+
+
+# -- 2026-11-16 re-measure: an editor that answered in English, a draft that pasted get_analyst_views' wording -----
+TSMC_PASTES = ["小摩，11/12，維持，評等「優於大盤」，目標價 3,300 元",
+               "高盛，10/6，調升，評等「買進」，目標價 3,300 元"]
+TSMC_DRAFT = ("最新的目標價是小摩在 11/12 維持的 3,300 元。\n\n"
+              f"- 小摩 11/12 維持「優於大盤」評等，目標價 3,300 元。{TSMC_PASTES[0]}\n"
+              f"- 高盛 10/6 調升，評等「買進」，目標價 3,300 元。{TSMC_PASTES[1]}")
+TSMC_BARE = ("最新的目標價是小摩在 11/12 維持的 3,300 元。\n\n- 小摩 11/12 維持「優於大盤」評等，目標價 3,300 元。\n"
+             "- 高盛 10/6 調升，評等「買進」，目標價 3,300 元。")
+
+
+def test_pastes_after_a_lines_own_words_go_when_the_line_says_their_numbers():
+    from forliosa.ai.chat import strip_pastes
+
+    assert strip_pastes(TSMC_DRAFT, TSMC_PASTES) == TSMC_BARE
+    # a line that is only a paste, and a paste with a number the line does not say, stay
+    only = f"- {TSMC_PASTES[0]}"
+    assert strip_pastes(only, TSMC_PASTES) == only
+    news = "10 月營收 197.7 萬元，年增 42.23%"
+    line = f"- 公司 11/10 公告十月營收成長。{news}"
+    assert strip_pastes(line, [news]) == line
+    # the clock time of a pasted 公告 label is not a fact of the line
+    assert strip_pastes(f"{OWN}{PASTED}", [PASTED]) == OWN
+
+
+def test_an_editor_that_does_not_write_chinese_is_never_shown(client, pool, fake, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台積電 目標價"}),
+               web_search_result("srvtoolu_1", [{"url": "https://news.cnyes.com/a", "title": "鉅亨",
+                                                 "encrypted_content": "ENC"}]),
+               text(TSMC_DRAFT, [search_citation("https://news.cnyes.com/a", "鉅亨", x) for x in TSMC_PASTES]),
+               usage={"server_tool_use": {"web_search_requests": 1}})
+    fake.reply(text("I've got the new target price: the most recent one is Morgan Stanley's 3,300 yuan from 11/12. "
+                    "Please paste the answer you'd like me to rewrite."))
+    _, events = chat(client, "台積電的目標價是多少？")
+    assert not any("I've" in d.get("delta", "") for n, d in events if n == "text")
+    assert not [n for n, _ in events if n == "text_reset"]  # nothing of the edit was on screen
+    assert shown(events) == TSMC_BARE  # the answer as written, without the pasted tool wording
+
+
+def test_an_edit_that_adds_a_conversion_is_caught():
+    from forliosa.ai.chat import added_conversions
+
+    draft = "- Aletheia 10/19 給的目標價是 5,000 新台幣／1,000 美元。"
+    assert added_conversions(draft, "- Aletheia 10/19 的目標價訂為 5,000 新台幣，相當於 1,000 美元。") == ["相當於"]
+    assert added_conversions(draft, "- Aletheia 10/19 的目標價是 5,000 新台幣與 1,000 美元。") == []
+    assert added_conversions("營收約合 3 億元。", "營收約合 3 億元。") == []
 

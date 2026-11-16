@@ -37,9 +37,9 @@ Matching
 --------
 Only rows from Taiwanese sites (:func:`forliosa.news.outlets.is_taiwan_outlet`: a ``.tw`` host or
 ``TAIWAN_DOMAINS``, standing in for the DOC API's ``sourcecountry:taiwan``) and only for Taiwan stocks. A headline
-must name the company in its title (:func:`forliosa.news.normalize.is_relevant`: 中文簡稱, code, English short name), the
-rule every source follows. US stocks keep the DOC API, whose ``sourcecountry:US OR UK`` filter the bulk files cannot
-express (they carry no source country).
+must name the company in its title (:func:`forliosa.news.normalize.is_relevant`: 中文簡稱, code, English short
+name), the rule every source follows. US stocks keep the DOC API, whose ``sourcecountry:US OR UK`` filter the bulk
+files cannot express (they carry no source country).
 
 State: ``news_fetch_state`` rows ``source = "gdelt_bulk"``, ``symbol = "@translation"`` / ``"@english"``;
 ``last_success_at`` is the time slot of the newest file read (UTC), ``items`` the matches in the last run.
@@ -52,6 +52,7 @@ import io
 import logging
 import re
 import zipfile
+import zlib
 from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
@@ -212,6 +213,14 @@ class GdeltBulk:
                 return True
         return False
 
+    def covered_until(self, db: Session) -> datetime | None:
+        """Up to when the bulk files were read: the end of the primary feed's newest file read (else any configured
+        feed's), or ``None``."""
+        feeds = [PRIMARY_FEED] if PRIMARY_FEED in self.feeds else list(self.feeds)
+        done = [d for f in feeds if (row := db.get(NewsFetchState, (SOURCE, "@" + f))) is not None
+                and (d := _aware(row.last_success_at)) is not None]
+        return max(done) + SLOT if done else None
+
     def slots(self, last: datetime | None, latest: datetime) -> tuple[list[datetime], int]:
         """The slots to read after ``last`` up to ``latest`` (at most ``max_files``, the newest), and how many older
         ones are skipped."""
@@ -300,7 +309,7 @@ class GdeltBulk:
                     if len(data) > MAX_BYTES:
                         raise ValueError(f"{len(data)} bytes")
                     rows = list(gkg_rows(data))
-                except (zipfile.BadZipFile, ValueError, OSError) as exc:  # a broken file is skipped, not retried
+                except (zipfile.BadZipFile, zlib.error, EOFError, ValueError, OSError) as exc:  # skipped, not retried
                     res.errors += 1
                     log.warning("GDELT bulk %s not readable: %s", url.rsplit("/", 1)[-1], str(exc)[:200])
                     rows = []

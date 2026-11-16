@@ -225,8 +225,8 @@ def test_gdelt_fixture_through_the_whole_pipeline():
         "台積電CPO霸主地位穩了？法人看好2027年EPS估達151元",
         "部分員工資訊遭置外部網站 台積電：無證據顯示系統遭入侵",
         "台積電營運再傳捷報！看好AI商機又不想重押單一個股 還能買「這檔」？",
+        "輝達盤後暴跌逾8％！台積電領殺 指數跌逾300點失守4萬4",  # 自由財經 (reputable) first in a tie of 01:30 UTC
         "網傳駭客販售台積電4.6萬筆資料 民眾憂：連護國神山都守不住？",
-        "輝達盤後暴跌逾8％！台積電領殺 指數跌逾300點失守4萬4",
         "【台股盤中】台積電上攻！台股站回43K大關 收復10日線",
         "可口可樂本益比竟比台積電高！高科技輸給「快樂水」股民揭估值差異 | 台股雜談",
         "台積電10月營收再創高！外資喊3300元 3奈米缺貨恐至2028年",
@@ -279,3 +279,34 @@ def test_date_only_items_get_one_day_of_grace_not_an_open_window():
            RawItem("台積電三週前", "https://udn.com/21", day(21), date_only=True),
            RawItem("台積電昨天", "https://udn.com/1", day(1), date_only=True)]
     assert [x.title for x in to_headlines(raw, q, "searxng", [])] == ["台積電七天前", "台積電昨天"]
+
+
+def test_robot_quote_flashes_and_pages_that_are_not_news_are_dropped():
+    """鉅亨's machine flashes repeat the price / monthly revenue the page shows; CMoney's AI pages and quote sites are
+    not news (2026-11-16, measured on 7799 / 2308)."""
+    from forliosa.news.normalize import is_bot_flash
+
+    assert is_bot_flash("盤中速報 - 台達電(2308)股價殺至跌停，跌停價1120...")
+    assert is_bot_flash("營收速報 - 禾榮科(7799)10月營收198萬元年增率高達...") and is_bot_flash("【盤中速報】台積電")
+    assert not is_bot_flash("鉅亨速報 - Factset 最新調查：台積電(2330)目標價調升")
+    assert not is_bot_flash("台積電盤中速報出爐？")
+    terms = make_terms("台達電", "2308", ["DELTA"])
+    q = Query("2308.TW", "2308", "台達電", "TWSE", ("DELTA",), terms, FETCHED_AT - timedelta(days=7), FETCHED_AT)
+    at = FETCHED_AT - timedelta(hours=1)
+    raw = [RawItem("盤中速報 - 台達電(2308)股價殺至跌停，跌停價1120...", "https://news.cnyes.com/news/id/1", at),
+           RawItem("【10:31 即時新聞】台達電(2308)盤中強漲8%", "https://cmnews.com.tw/article/cmoneyai-1", at),
+           RawItem("台達電(2308)個股資訊", "https://pchome.megatime.com.tw/stock/sid2308.html", at),
+           RawItem("台達電法說會：AI 電源訂單滿到明年", "https://money.udn.com/money/story/5607/1", at)]
+    assert [h.title for h in to_headlines(raw, q, "searxng", [])] == ["台達電法說會：AI 電源訂單滿到明年"]
+
+
+def test_rank_puts_reputable_outlets_first_within_a_day():
+    from forliosa.news.normalize import rank
+
+    day = datetime.combine(FETCHED_AT.date(), time(10, 0), TAIPEI)
+    h = [Headline("a", "https://www.ettoday.net/news/1", "ETtoday", "ettoday.net", day + timedelta(hours=5), "gdelt"),
+         Headline("b", "https://money.udn.com/money/story/1", "經濟日報", "money.udn.com", day, "gdelt"),
+         Headline("c", "https://www.setn.com/news/1", "三立", "setn.com", day - timedelta(days=1), "gdelt"),
+         Headline("d", "https://www.cna.com.tw/news/1", "中央社", "cna.com.tw", day - timedelta(days=1, hours=3),
+                  "gdelt")]
+    assert [x.title for x in rank(h)] == ["b", "a", "d", "c"]  # newest day first; within a day reputable first

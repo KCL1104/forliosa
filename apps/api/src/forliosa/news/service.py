@@ -5,8 +5,12 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 * **Which symbols**: tracked ones — in any ledger or watchlist (``archive.tracked_symbols``),
   or viewed in the last ``NEWS_VIEW_DAYS`` days (``news_tracked_views``: symbol + time only, no user ids) — the
   stalest first, at most ``NEWS_MAX_SYMBOLS_PER_RUN``. Shared by everyone.
-* **Sources** (:mod:`forliosa.news.sources`): GDELT, then our private SearXNG (:mod:`forliosa.news.searxng`, on by
-  default), then Yahoo股市 RSS (only under ``DATA_POLICY=personal``). One request per symbol per source; the HTTP
+* **GDELT bulk files first** (:mod:`forliosa.news.gdelt_bulk`, 2026-11-16): the new 15-minute GKG files are read once
+  for every Taiwan stock of the batch (Taiwanese sites only, the title naming the company) and stored as ``gdelt``
+  headlines. While they are current, the DOC API is not asked for Taiwan stocks.
+* **Sources** (:mod:`forliosa.news.sources`): GDELT's DOC API (US stocks; Taiwan stocks only while the bulk files are
+  not current), then our private SearXNG (:mod:`forliosa.news.searxng`, on by default), then Yahoo股市 RSS (only under
+  ``DATA_POLICY=personal``). One request per symbol per source; the HTTP
   limiter spaces GDELT requests ≥ ``NEWS_GDELT_INTERVAL_SECONDS`` (≥ 5 s). A 429 / block stops that source for the
   run and backs it off (15 min, doubling to 4 h; SearXNG from ``NEWS_SEARXNG_BACKOFF_MINUTES``; ``news_fetch_state``
   row ``symbol = "*"``); an unreachable source (:class:`SourceDown`) is paused the same way from 15 min; three
@@ -16,20 +20,24 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
   booked one by one (rows ``symbol = "@<engine>"``): a refusing engine is left out of the next queries, every
   engine paused pauses SearXNG (:func:`record_searxng_engines`).
 * **AI fallback** (:mod:`forliosa.news.ai_search`): only when GDELT and SearXNG answered for the symbol in the last
-  24 h (each one that is on and not paused) and the free sources together hold fewer than ``NEWS_AI_MIN_ITEMS``
-  headlines from the last 7 days; once per ``NEWS_AI_INTERVAL_HOURS`` per symbol, at most ``AI_MAX_PER_RUN`` per
-  run, while the month's budget lasts.
+  24 h (each one that is answering in this run: a paused or unreachable source does not hold it back — 2026-11-16
+  fix) and the free sources together hold fewer than ``NEWS_AI_MIN_ITEMS`` headlines from the last 7 days; it
+  searches the last 14 days (30 when nothing is stored from the last 14); once per ``NEWS_AI_INTERVAL_HOURS`` per
+  symbol, at most ``AI_MAX_PER_RUN`` per run, while the month's budget lasts.
 * **Every headline** goes through :mod:`forliosa.news.normalize`: GDELT spacing removed, outlet / section suffix
   removed, the outlet named from its domain, kept only when the title names the company (Chinese short name,
-  code or English short name), never from a blocked domain or a search-engine redirect, newer than the query
-  window; stored once per (symbol, canonical URL: tracking parameters, ``www.`` / ``m.`` / AMP variants and
-  ``http`` vs ``https`` folded together). Deleted ``NEWS_RETENTION_DAYS`` after publication.
+  code or English short name), never from a blocked domain, a search-engine redirect, a page that is not news
+  (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (鉅亨「盤中速報」),
+  newer than the query window; stored once per (symbol, canonical URL: tracking parameters, ``www.`` / ``m.`` /
+  AMP variants and ``http`` vs ``https`` folded together). Deleted ``NEWS_RETENTION_DAYS`` after publication.
 
 Read (``GET /instruments/{symbol}/news``)
 ----------------------------------------
 :func:`media_items`: the symbol's stored headlines of the retention window, Yahoo RSS rows only under
-``personal``, blocked domains hidden, de-duplicated (same URL or near-identical title; the original outlet beats an
-aggregator copy), newest first, at most ``MEDIA_LIMIT``. :func:`record_view` notes that the symbol was viewed.
+``personal``, blocked domains, pages that are not news and robot flashes hidden, de-duplicated (same URL or
+near-identical title; the original outlet beats an aggregator copy, a reputable outlet another copy), the newest day
+first and within a day the reputable outlets first (:func:`normalize.rank`; the stock page sorts by time itself), at
+most ``MEDIA_LIMIT``. :func:`record_view` notes that the symbol was viewed.
 """
 
 from __future__ import annotations
@@ -96,6 +104,9 @@ GDELT_FRESH = timedelta(hours=24)  # the AI fallback needs a GDELT (and SearXNG)
 # with none in the last 14 days (small caps often have a story only every few weeks).
 AI_WINDOW = timedelta(days=14)
 AI_WINDOW_EMPTY = timedelta(days=30)
+# After an AI search that found nothing, the next one waits this long (2026-11-16 review: with the GDELT gate fixed,
+# a quiet stock was searched every day at about US$0.023, for nothing).
+AI_EMPTY_INTERVAL = timedelta(hours=72)
 SOURCE_WIDE = "*"
 # SearXNG's upstream engines: news_fetch_state rows (source "searxng", symbol "@<engine>").
 ENGINE_PREFIX = "@"
@@ -162,8 +173,10 @@ def record_view(db: Session, symbol: str, now: datetime | None = None) -> None:
     db.commit()
 
 
-def tracked(db: Session, settings: Settings, now: datetime) -> list[str]:
-    """Held / watched symbols plus those viewed in the last ``NEWS_VIEW_DAYS`` days, stalest GDELT fetch first."""
+def tracked(db: Session, settings: Settings, now: datetime, *, limit: bool = True) -> list[str]:
+    """Held / watched symbols plus those viewed in the last ``NEWS_VIEW_DAYS`` days, stalest GDELT fetch first; the
+    first ``NEWS_MAX_SYMBOLS_PER_RUN`` of them unless ``limit`` is false (the GDELT bulk files are matched against
+    every one: a file is read once, so a symbol left out of its batch would never get its matches)."""
     from forliosa.archive import tracked_symbols
 
     since = now - timedelta(days=settings.news_view_days)
@@ -173,7 +186,7 @@ def tracked(db: Session, settings: Settings, now: datetime) -> list[str]:
         select(NewsFetchState).where(NewsFetchState.source == "gdelt"))}
     epoch = datetime(1970, 1, 1, tzinfo=UTC)
     symbols.sort(key=lambda s: last.get(s) or epoch)
-    return symbols[:settings.news_max_symbols_per_run]
+    return symbols[:settings.news_max_symbols_per_run] if limit else symbols
 
 
 # -- queries ------------------------------------------------------------------------------------------------
@@ -565,10 +578,15 @@ def _mark_open(db: Session, source: str, now: datetime) -> None:
         db.commit()
 
 
-def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str]) -> int:
-    return db.scalar(select(func.count()).select_from(NewsArticle).where(
-        NewsArticle.symbol == symbol, NewsArticle.source.in_(list(sources)),
-        NewsArticle.published_at >= since)) or 0
+def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str] | None = None) -> int:
+    """Stored headlines of ``symbol`` published since ``since`` (from ``sources``, else any), not counting rows the
+    reading side hides (quote pages, forums, robot flashes stored before 2026-11-16: ``is_not_news``,
+    ``is_bot_flash``), so that they do not hold the AI fallback back."""
+    q = select(NewsArticle.url, NewsArticle.title).where(NewsArticle.symbol == symbol,
+                                                         NewsArticle.published_at >= since)
+    if sources is not None:
+        q = q.where(NewsArticle.source.in_(list(sources)))
+    return sum(1 for url, title in db.execute(q) if not is_not_news(url) and not is_bot_flash(title))
 
 
 def recent_free_count(db: Session, symbol: str, now: datetime) -> int:
@@ -578,17 +596,17 @@ def recent_free_count(db: Session, symbol: str, now: datetime) -> int:
 
 def ai_window(db: Session, symbol: str, now: datetime) -> timedelta:
     """How far back the AI fallback searches: 14 days, or 30 when nothing at all is stored from the last 14 days."""
-    found = db.scalar(select(func.count()).select_from(NewsArticle).where(
-        NewsArticle.symbol == symbol, NewsArticle.published_at >= now - AI_WINDOW)) or 0
-    return AI_WINDOW if found else AI_WINDOW_EMPTY
+    return AI_WINDOW if recent_count(db, symbol, now - AI_WINDOW) else AI_WINDOW_EMPTY
 
 
 def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequence[str], now: datetime,
                   report: RefreshReport, blocked: Sequence[str]) -> bool:
-    """Read GDELT's new bulk files once for every Taiwan stock of the batch and store the matches as GDELT headlines.
-    While the files are current, each stock's ``gdelt`` row is booked as answered (``last_success_at``: the AI
-    fallback's gate and the DOC API fallback's window read it; ``last_attempt_at`` stays the rotation's, set when the
-    batch reaches the stock). Returns whether the files are current."""
+    """Read GDELT's new bulk files once for every tracked Taiwan stock (not only the batch's: ``tracked(limit=False)``)
+    and store the matches as GDELT headlines. While the files are current, each stock's ``gdelt`` row is booked as
+    answered up to the end of the newest file read (``last_success_at``, never moved back: the AI fallback's gate and
+    the DOC API fallback's window read it, so once the files stop the DOC API starts an hour before what they covered;
+    ``last_attempt_at`` stays the rotation's, set when the batch reaches the stock). Returns whether the files are
+    current."""
     queries: dict[str, Query] = {}
     for sym in symbols:
         info = md.instrument(sym)
@@ -608,9 +626,11 @@ def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequenc
         report.stored += store(db, sym, heads, now)
     ok = bulk.healthy(db, now)
     if ok:
+        covered = min(now, bulk.covered_until(db) or now)
         for sym in queries:
             st = _state(db, "gdelt", sym)
-            st.last_success_at, st.failures = now, 0
+            before = _aware(st.last_success_at) if st.last_success_at else None
+            st.last_success_at, st.failures = max(covered, before) if before else covered, 0
             st.items = found.get(sym, 0)
             st.last_status = "ok" if st.items else "empty"
         db.commit()
@@ -659,7 +679,8 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     elif ai == "default":
         ai = default_ai(settings)
     market_run = symbols is None and settings.news_us_market  # the worker's and the CLI's run, not a test's list
-    symbols = tracked(db, settings, now) if symbols is None else symbols
+    every = tracked(db, settings, now, limit=False) if symbols is None else symbols
+    symbols = every[:settings.news_max_symbols_per_run] if symbols is None else symbols
     blocked = blocked_domains(db, settings)
     open_sources = [s for s in sources if _source_open(db, s.key, now)]
     report.blocked_sources = [s.key for s in sources if s not in open_sources]
@@ -668,7 +689,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         open_sources.remove(gdelt)
         report.blocked_sources.append(gdelt.key)
     if isinstance(bulk, GdeltBulk):
-        report.bulk_ok = _refresh_bulk(db, md, bulk, symbols, now, report, blocked)
+        report.bulk_ok = _refresh_bulk(db, md, bulk, every, now, report, blocked)
     gdelt_on = any(s.key == "gdelt" for s in sources)
     failures: dict[str, int] = {}
     ai_runner: Any = None
@@ -802,7 +823,8 @@ def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdel
     """GDELT and SearXNG together hold fewer than NEWS_AI_MIN_ITEMS headlines from the last 7 days, each of them
     answered for this symbol in the last 24 hours while it is answering in this run (GDELT: its bulk files are current
     or its DOC API is not paused; SearXNG: on and not paused — a paused source does not hold the AI back), and no AI
-    search for this symbol in the last NEWS_AI_INTERVAL_HOURS."""
+    search for this symbol in the last NEWS_AI_INTERVAL_HOURS (``AI_EMPTY_INTERVAL`` after one that found
+    nothing)."""
     for source, on in (("gdelt", gdelt_on), ("searxng", searxng_on)):
         if not on:
             continue
@@ -812,5 +834,9 @@ def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdel
     if recent_free_count(db, symbol, now) >= settings.news_ai_min_items:
         return False
     st = db.get(NewsFetchState, ("ai_search", symbol))
-    return not (st is not None and st.last_attempt_at is not None
-                and now - _aware(st.last_attempt_at) < timedelta(hours=settings.news_ai_interval_hours))
+    if st is None or st.last_attempt_at is None:
+        return True
+    wait = timedelta(hours=settings.news_ai_interval_hours)
+    if st.last_status == "empty":  # found nothing even 30 days back (M31, 訊聯): not every day
+        wait = max(wait, AI_EMPTY_INTERVAL)
+    return now - _aware(st.last_attempt_at) >= wait

@@ -361,6 +361,96 @@ await check("帳本的欄位選單：勾選格排成兩欄，文字是橫的（�
   await page.keyboard.press("Escape")
 })
 
+await check("持倉表預設有「損益」欄（產品負責人 2026-11-16 選 A）：在今日損益與市值・佔比之間，一格是 +金額、下一行 ▲報酬率", async () => {
+  await page.goto(base + "/", { waitUntil: "networkidle" })
+  const table = page.getByRole("table", { name: "持倉" })
+  await table.getByRole("columnheader", { name: "損益", exact: true }).waitFor({ timeout: 8000 })
+  // innerText：窄的時候才出現的「・漲跌」（display: none）不算
+  const heads = (await table.locator("thead th").allInnerTexts()).map((t) => t.trim())
+  const at = heads.indexOf("損益")
+  if (at < 1 || heads[at + 1] !== "市值・佔比" || !/損益$/.test(heads[at - 1])) throw new Error(`holdings headers: ${heads.join("|")}`)
+  const row = table.getByRole("row").filter({ has: page.getByRole("link", { name: "台積電", exact: true }) })
+  const text = (await row.getByRole("cell").nth(at - 1).innerText()).replace(/\s+/g, " ").trim()
+  if (!/^\+[\d,]+ ▲ ?[\d.]+%/.test(text)) throw new Error(`pnl cell: ${text}`)
+})
+
+for (const [vw, tier] of [[1024, "narrow"], [1280, "mid"]]) {
+  await check(`持倉表在窄的主欄（${vw}px、開著 AI 面板）：不跑到面板底下；今日漲跌併進今日損益的第二行；數字欄至少隔 12px；名稱放不下就截斷，每一列 60px`, async () => {
+    const p = await ctx.newPage()
+    await p.setViewportSize({ width: vw, height: 900 })
+    try {
+      await p.goto(base + "/", { waitUntil: "networkidle" })
+      const expand = p.getByRole("button", { name: /展開 AI 面板/ })
+      if (await expand.count()) await expand.click()
+      const table = p.getByRole("table", { name: "持倉" })
+      await table.getByRole("columnheader", { name: "損益", exact: true }).waitFor({ timeout: 8000 })
+      const measure = () =>
+        table.evaluate((t) => {
+          const box = t.parentElement.getBoundingClientRect()
+          const panel = document.querySelector('aside[aria-label="問 AI"]')?.getBoundingClientRect()
+          const rows = [...t.tBodies[0].querySelectorAll("tr.ruled-row")]
+          // 第一列每一格文字的左右緣（看得到的字）
+          const spans = [...rows[0].cells].slice(1, -1).filter((c) => getComputedStyle(c).display !== "none").map((cell) => {
+            let l = Infinity, r = -Infinity
+            const w = document.createTreeWalker(cell, NodeFilter.SHOW_TEXT)
+            for (let n; (n = w.nextNode()); ) {
+              if (!n.textContent.trim() || n.parentElement.closest(".sr-only")) continue
+              const range = document.createRange()
+              range.selectNodeContents(n)
+              const b = range.getBoundingClientRect()
+              if (b.width) (l = Math.min(l, b.left)), (r = Math.max(r, b.right))
+            }
+            cell.querySelectorAll("[aria-hidden].relative").forEach((bar) => (l = Math.min(l, bar.getBoundingClientRect().left)))
+            return [l, r]
+          })
+          return {
+            width: Math.round(box.width),
+            overflow: Math.round(t.getBoundingClientRect().right - box.right),
+            underPanel: panel ? t.getBoundingClientRect().right > panel.left + 0.5 : false,
+            heads: [...t.tHead.rows[0].cells].filter((c) => c.getBoundingClientRect().width > 0).map((c) => c.innerText.trim()),
+            heights: rows.map((r) => Math.round(r.getBoundingClientRect().height)),
+            gaps: spans.slice(1).map((s, i) => Math.round(s[0] - spans[i][1])),
+            spark: [...t.tBodies[1]?.querySelectorAll("svg[role=img]") ?? []].some((g) => g.getBoundingClientRect().width > 0),
+          }
+        })
+      const m = await measure()
+      if (m.overflow > 0 || m.underPanel) throw new Error(`holdings table overflows its column: ${JSON.stringify(m)}`)
+      if (m.width >= 832) throw new Error(`expected a narrow column with the AI panel open: ${JSON.stringify(m)}`)
+      if (m.heights.some((h) => h !== 60)) throw new Error(`holdings rows should all be 60px (names truncate): ${JSON.stringify(m)}`)
+      if (Math.min(...m.gaps) < 12) throw new Error(`numbers too close together: ${JSON.stringify(m)}`)
+      // 最窄（< 46rem）時觀察列的走勢小圖收起來；1280 開著面板時放得下
+      if (m.spark !== (tier === "mid")) throw new Error(`watch sparklines at ${vw}: ${JSON.stringify(m)}`)
+      const dayHead = tier === "mid" ? /^(今日|當日|\d+\/\d+ )損益・漲跌$/ : /^(今日|當日|\d+\/\d+ )損益$/
+      if (m.heads.some((h) => /^(今日|當日|\d+\/\d+ )漲跌$/.test(h)) || !m.heads.includes("損益") || !m.heads.some((h) => dayHead.test(h))) throw new Error(`narrow headers: ${m.heads.join("|")}`)
+      const at = m.heads.indexOf("損益")
+      const row = table.getByRole("row").filter({ has: p.getByRole("link", { name: "台積電", exact: true }) })
+      const visibleCells = row.getByRole("cell").filter({ visible: true })
+      const day = (await visibleCells.nth(at - 2).innerText()).replace(/\s+/g, " ").trim()
+      if (!/^[+−][\d,]+ [▲▼] ?[\d.]+%/.test(day)) throw new Error(`today cell should stack amount over percent: ${day}`)
+      if (tier === "mid") {
+        // 併欄的時候也能照漲跌幅排；變得更窄時正在用的排序還看得到
+        await table.getByRole("button", { name: "漲跌", exact: true }).click()
+        // 每一列第一個 ▲▼ 百分比就是今日漲跌（釘選的排在最上面，不算）
+        const pct = await table.locator("tbody").first().locator("tr.ruled-row").evaluateAll((rows) =>
+          rows
+            .filter((r) => !r.querySelector('[aria-label="已釘選"]'))
+            .map((r) => {
+              const t = r.innerText.match(/([▲▼])\s?([\d.]+)%/)
+              return t ? (t[1] === "▼" ? -1 : 1) * Number(t[2]) : 0
+            }),
+        )
+        if (pct.some((v, i) => i > 0 && v > pct[i - 1])) throw new Error(`not sorted by today's percent: ${pct}`)
+        await p.setViewportSize({ width: 1024, height: 900 })
+        await p.waitForTimeout(200)
+        const n = await measure()
+        if (!n.heads.some((h) => /損益・漲跌$/.test(h))) throw new Error(`sorting by percent should stay visible when narrower: ${n.heads.join("|")}`)
+      }
+    } finally {
+      await p.close()
+    }
+  })
+}
+
 await check("手動記帳表單（備援路徑）：手續費選填、合計照填的算，並儲存", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
   // 「＋」：開了匯入對帳單的帳號（mock 的示範使用者是站方管理員）是兩項的選單——記一筆、匯入對帳單（2026-11-16）
@@ -609,7 +699,7 @@ await check("法人觀點：預設收合；2330 展開就有 3 筆（日期・�
   if ((await toggle.getAttribute("aria-expanded")) !== "false") throw new Error("should start collapsed")
   await toggle.click()
   const table = page.getByRole("table", { name: "法人觀點" })
-  await table.getByText("外資券商 A", { exact: true }).waitFor({ timeout: 8000 })
+  await table.getByText("範例證券 A", { exact: true }).waitFor({ timeout: 8000 })
   if ((await table.locator("tbody tr").count()) !== 3) throw new Error("expected 3 rows")
   await table.getByText("1,350 元").waitFor()
   await page.getByText("非 Forliosa 建議").first().waitFor()
@@ -1685,7 +1775,7 @@ await check("手機：持倉列有定期定額標記，按標記到設定、按�
 await check("手機：法人觀點三行列＋免責", async () => {
   await m.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
   await m.getByRole("button", { name: /法人觀點/ }).click()
-  await m.getByRole("list", { name: "法人觀點" }).getByText("外資券商 A", { exact: true }).waitFor({ timeout: 8000 })
+  await m.getByRole("list", { name: "法人觀點" }).getByText("範例證券 A", { exact: true }).waitFor({ timeout: 8000 })
   await m.getByText("非 Forliosa 建議").first().waitFor()
 })
 await check("手機：查看爸爸時「問 AI」換成「結束查看」；橫幅往下捲也在頂端，個股分頁列排在它下面", async () => {

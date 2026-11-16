@@ -5,6 +5,7 @@ import {
   ANALYST_INITIAL,
   ANALYST_TIMEOUT_MS,
   analystReducer,
+  conferenceLine,
   formatTarget,
   loadOnOpen,
   nextPoll,
@@ -103,17 +104,25 @@ describe("法人觀點的狀態", () => {
 })
 
 describe("法人觀點的顯示", () => {
-  it("最多 5 筆、新到舊，沒有日期或來源的不列", () => {
+  it("最多 8 筆、新到舊、舊資料排在後面，沒有日期或來源的不列", () => {
     const rows = visibleViews([
       item({ date: "2026-10-01" }),
+      item({ date: "2026-07-01", old: true, institution: "舊的" }),
       item({ date: "2026-11-10" }),
       item({ date: "", institution: "沒日期" }),
       item({ url: "", institution: "沒來源" }),
-      ...["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04"].map((date) => item({ date })),
+      item({ date: "2026-11-11", unnamed: true, institution: "未具名外資（日系）" }),
+      ...["2026-11-01", "2026-11-02", "2026-11-03", "2026-11-04", "2026-11-05"].map((date) => item({ date })),
     ])
-    expect(rows).toHaveLength(5)
-    expect(rows.map((r) => r.date)).toEqual(["2026-11-10", "2026-11-04", "2026-11-03", "2026-11-02", "2026-11-01"])
-    expect(rows.some((r) => r.institution === "沒日期" || r.institution === "沒來源")).toBe(false)
+    expect(rows).toHaveLength(8)
+    expect(rows.map((r) => r.date)).toEqual(["2026-11-11", "2026-11-10", "2026-11-05", "2026-11-04", "2026-11-03", "2026-11-02", "2026-11-01", "2026-10-01"])
+    expect(rows.some((r) => r.institution === "沒日期" || r.institution === "沒來源" || r.old)).toBe(false)
+    // 舊資料在新資料後面（就算日期比較新也一樣：後端只會給 90 天以上的）
+    expect(visibleViews([item({ date: "2026-08-01", old: true }), item({ date: "2026-07-01" })]).map((r) => r.old ?? false)).toEqual([false, true])
+  })
+  it("法說會一行：日期＋受邀時的主辦券商", () => {
+    expect(conferenceLine({ date: "2026-11-11", host: "永豐金證券匯立分公司" }, "2026-11-16")).toBe("11/11（永豐金證券匯立分公司舉辦）")
+    expect(conferenceLine({ date: "2025-12-10", host: null }, "2026-01-05")).toBe("2025/12/10")
   })
   it("目標價照原文、等寬：台股依升降單位＋元，美股 US$ 兩位；評等照抄、日期跨年寫年份", () => {
     expect(formatTarget(1350, "TWD")).toBe("1,350 元")
@@ -128,11 +137,14 @@ describe("法人觀點的顯示", () => {
 })
 
 describe("mock：法人觀點（GET/POST /instruments/{symbol}/analyst-views）", () => {
-  it("2330 直接有 3 筆；其他先 none，POST 後 ready 1–2 筆；2881 查無報導；2409 查不到", async () => {
+  it("2330 直接有 5 筆（含未具名、舊資料）；其他先 none，POST 後 ready 1–2 筆；2881 查無報導；2409 查不到", async () => {
     const api = createMockAdapter({ latency: [0, 0], analystDelayMs: 0 })
     const tsmc = await api.getAnalystViews("2330.TW")
     expect(tsmc).toMatchObject({ status: "ready", symbol: "2330.TW" })
-    expect(tsmc.items).toHaveLength(3)
+    expect(tsmc.items).toHaveLength(5)
+    expect(tsmc.items!.filter((v) => v.unnamed).map((v) => v.institution)).toEqual(["未具名外資（日系）"])
+    expect(tsmc.items!.at(-1)?.old).toBe(true)
+    expect(tsmc.conference?.url).toMatch(/^https:\/\/mops\.twse\.com\.tw\//)
     expect(tsmc.disclaimer).toMatch(/非 Forliosa 建議/)
     for (const v of tsmc.items!) expect(v).toMatchObject({ currency: "TWD", url: expect.stringMatching(/^https:\/\/example\.com\//) })
     // 新到舊
@@ -151,6 +163,7 @@ describe("mock：法人觀點（GET/POST /instruments/{symbol}/analyst-views）"
     expect(await api.getAnalystViews("2409.TW")).toMatchObject({ status: "unavailable" })
     const us = await api.requestAnalystViews("NVDA")
     expect(us.items?.[0]?.currency).toBe("USD")
+    expect(us.conference).toBeNull()
   })
   it("POST 之後先是 pending，時間到才 ready；同一天再 POST 共用同一份", async () => {
     const api = createMockAdapter({ latency: [0, 0], analystDelayMs: 60_000 })
@@ -158,6 +171,6 @@ describe("mock：法人觀點（GET/POST /instruments/{symbol}/analyst-views）"
     expect(await api.getAnalystViews("2317.TW")).toMatchObject({ status: "pending" })
     expect(await api.requestAnalystViews("2317.TW")).toMatchObject({ status: "pending" })
     // 已經有一份的（2330）POST 不重查
-    expect((await api.requestAnalystViews("2330.TW")).items).toHaveLength(3)
+    expect((await api.requestAnalystViews("2330.TW")).items).toHaveLength(5)
   })
 })

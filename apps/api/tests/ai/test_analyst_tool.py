@@ -71,12 +71,11 @@ def test_todays_analyst_views_come_back_as_citable_search_results(ctx):
 
 
 @pytest.mark.parametrize(("status", "items", "age", "expected", "words"), [
-    (None, None, None, "none", "今天還沒有人在個股頁查這一檔的法人觀點"),
+    (None, None, None, "none", "今天還沒有人查"),
     ("pending", [], timedelta(minutes=1), "pending", "還在整理"),
-    ("pending", [], timedelta(minutes=10), "unavailable", "今天沒有查到"),  # the generation died
-    ("unavailable", [], timedelta(minutes=1), "unavailable", "今天沒有查到"),
-    ("ready", [], timedelta(hours=1), "ready", "沒有機構的評等或目標價"),
-    ("ready", ITEMS, timedelta(hours=25), "none", "今天還沒有人在個股頁查"),  # expired
+    ("pending", [], timedelta(minutes=10), "unavailable", "這次沒有查到"),  # the generation died
+    ("unavailable", [], timedelta(minutes=1), "unavailable", "這次沒有查到"),
+    ("ready", ITEMS, timedelta(hours=25), "none", "今天還沒有人查"),  # expired
 ])
 def test_without_items_the_tool_says_so_and_points_to_web_search(ctx, status, items, age, expected, words):
     import json
@@ -87,10 +86,47 @@ def test_without_items_the_tool_says_so_and_points_to_web_search(ctx, status, it
     out = execute(ctx, "get_analyst_views", {"symbol": "2330"})
     res = json.loads(out.content)
     assert not out.is_error and res["status"] == expected and res["symbol"] == "2330.TW"
-    assert words in res["note"] and "web_search" in res["note"] and "具名機構最新的評等與目標價" in res["note"]
-    # the criteria are for the search, not for the answer (2026-11-16: 「目前沒有禾榮科近 90 天內具名機構的…資料」)
-    assert "回答裡不寫「近 90 天」「具名」這些條件" in res["note"]
+    assert words in res["note"] and "web_search" in res["note"] and "機構最新的評等與目標價" in res["note"]
+    # no screening words for the model to copy (2026-11-16: 「目前沒有禾榮科近 90 天內具名機構的…資料」)
+    assert "具名" not in res["note"] and "90" not in res["note"]
     assert rows(ctx.db) == before  # an expired or stale entry is not purged or rewritten here
+
+
+def test_a_recent_empty_result_is_the_answer_without_a_search(ctx):
+    """The card looked and found none (decision 1, 2026-11-16): the chat says so, like the card, and does not search
+    on its own (where it found forum posts and AI-written pages for 禾榮科)."""
+    import json
+
+    entry(ctx.db, "ready", [], created=NOW - timedelta(hours=1))
+    res = json.loads(execute(ctx, "get_analyst_views", {"symbol": "2330"}).content)
+    assert res["status"] == "ready" and "11/16 查過新聞報導，沒有機構的評等或目標價" in res["note"]
+    assert "「目前沒有機構評等與目標價的資料」" in res["note"] and "不用再搜尋" in res["note"]
+    assert "web_search" not in res["note"]
+
+
+def test_an_empty_result_of_an_earlier_trading_day_still_answers(ctx):
+    """An empty result is kept for 3 trading days (decision 5): Thursday's empty search answers on Monday."""
+    import json
+
+    thursday = datetime(2026, 11, 12, 6, 0, tzinfo=UTC)
+    ctx.db.add(AiAnalystViews(symbol="2330.TW", trading_day=date(2026, 11, 12), status="ready", items=[], notes=[],
+                              model="claude-haiku-5-5", generation_id="anv_thu", requested_by=None,
+                              created_at=thursday, finished_at=thursday,
+                              expires_at=analyst.keep_until(date(2026, 11, 12))))
+    ctx.db.commit()
+    res = json.loads(execute(ctx, "get_analyst_views", {"symbol": "2330"}).content)
+    assert res["status"] == "ready" and "11/12 查過" in res["note"]
+
+
+def test_unnamed_and_older_items_read_the_way_the_answer_writes_them(ctx):
+    items = [{**ITEMS[0], "institution": "未具名外資（日系）", "unnamed": True},
+             {**ITEMS[1], "institution": "未具名外資", "unnamed": True, "rating_text": "買進"},
+             {**ITEMS[1], "institution": "瑞銀", "date": "2026-05-20", "old": True, "target_price": 710.0}]
+    entry(ctx.db, items=items)
+    out = execute(ctx, "get_analyst_views", {"symbol": "2330"})
+    assert [b["content"][0]["text"] for b in out.content] == [
+        "一家日系外資，11/10，調升，評等「買進」，目標價 1,350 元", "一家外資，10/28，評等「買進」",
+        "瑞銀，5/20，評等「中立」，目標價 710 元，較舊的報導"]
 
 
 def test_an_etf_has_no_analyst_views(ctx):
@@ -121,10 +157,17 @@ def test_the_prompt_sends_rating_questions_to_the_card_first_and_drops_weak_sour
         < CHAT_SYSTEM.index("## 技術分析與盤中價格")
     section = CHAT_SYSTEM[CHAT_SYSTEM.index("## 機構評等與目標價"):CHAT_SYSTEM.index("## 技術分析與盤中價格")]
     for phrase in (
-        "先用 get_analyst_views", "再用 web_search 找近 90 天的新聞報導，要找最新的",
-        "具名機構（券商、投顧、投資銀行）給的評等與目標價", "目標價彙整頁、股價行情頁、論壇、AI 整理的頁面上的數字不寫",
-        "「法人」「美系外資」這類沒寫出機構名稱的不寫", "超過 90 天、出處或日期不明的也不寫",
-        "不寫的就不提：不說找到幾筆（「只有一筆」）、哪一則不採用、為什麼不用",
+        "先用 get_analyst_views", "它有項目時只用它的項目回答，不再搜尋",
+        "它說最近查過、沒有機構的評等或目標價時，就寫「目前沒有機構評等與目標價的資料」，不再搜尋",
+        "它還沒查或查不到時，才用 web_search 找新聞報導，要找最新的", "「名稱 投顧 目標價」「名稱 法說 目標價」",
+        "券商、投顧、投資銀行給的評等與目標價，報導日期在半年內",
+        "目標價彙整頁、股價行情頁、論壇、AI 整理的頁面上的數字不寫",
+        "「法人」「市場」這類說法不寫", "一個月內的最多寫兩則，寫成「一家日系外資」，不猜是哪一家",
+        "也不叫使用者去其他網站查", "標「較舊的報導」的放在最後",
+        "不寫的就不提：不說找到幾筆（「只有一筆」「目前有一則」）、哪一則不採用、為什麼不用",
+        # 2026-11-16 re-measure: an ADR target 「相當於」 a TWD one, a range for an opening, a missing date
+        "台股只寫新台幣的目標價", "也不換算（不寫「相當於」「約合」）", "每一點都寫報導日期",
+        "第一句寫最新的一則", "不寫區間，也不寫誰最高、誰最低",
         "網址有 forum、標題是討論區的頁面也是論壇",
         "評等照來源的用詞寫（例如「買進」「中立」「加碼」）", "不寫成網站自己的分類（「看多」）",
         "表格的欄位名稱（「多空評等」「預估 EPS」）", "寫預估 EPS 時寫出是哪一年的預估",

@@ -32,7 +32,7 @@ afterEach(() => {
 describe("法人觀點：查無報導／查不到時的下一步", { timeout: 20_000 }, () => {
   const disclaimer = "以下為媒體報導的第三方觀點，非 Forliosa 建議。"
 
-  it("近期查無法人報導：一個「看公告」連到事件分頁（常駐底線的文字連結，觸控 44px）", async () => {
+  it("近期查無法人報導（沒有法說會資料時）：一個「看公告」連到事件分頁（常駐底線的文字連結，觸控 44px）", async () => {
     vi.spyOn(api, "getAnalystViews").mockResolvedValue({ status: "ready", symbol: "2881.TW", as_of: "2026-11-12T09:12:00+08:00", items: [], disclaimer, notes: [] })
     const inst = await api.getInstrument("2881.TW")
     renderInRouter(<AnalystViewsCard inst={inst} />)
@@ -44,6 +44,44 @@ describe("法人觀點：查無報導／查不到時的下一步", { timeout: 20
     expect(link.className).toMatch(/\bpointer-coarse:min-h-11\b/)
     // 只有一個動作：不另外放「問 AI」或「再查一次」
     expect(screen.queryByRole("button", { name: /問 AI|查詢近期法人觀點|再試一次/ })).toBeNull()
+  })
+
+  it("查無報導時放官方連結：存檔的法說會日期、公開資訊觀測站法說會一覽（另開新視窗）、看公告", async () => {
+    const conference = {
+      last: { date: "2026-11-11", host: "永豐金證券匯立分公司" },
+      next: { date: "2026-11-25", host: null },
+      url: "https://mops.twse.com.tw/mops/#/web/t100sb07_1",
+    }
+    vi.spyOn(api, "getAnalystViews").mockResolvedValue({ status: "ready", symbol: "2881.TW", as_of: "2026-11-12T09:12:00+08:00", items: [], disclaimer, notes: [], conference })
+    const inst = await api.getInstrument("2881.TW")
+    renderInRouter(<AnalystViewsCard inst={inst} />)
+    fireEvent.click(await screen.findByRole("button", { name: /法人觀點/ }, T))
+    await screen.findByText(/小型股常沒有法人報告/, undefined, T)
+    expect(screen.getByText(/^最近一次法說會 11\/11（永豐金證券匯立分公司舉辦）$/)).toBeTruthy()
+    expect(screen.getByText(/^下一場法說會 11\/25$/)).toBeTruthy()
+    const mops = screen.getByRole("link", { name: /法說會一覽（公開資訊觀測站）/ })
+    expect(mops.getAttribute("href")).toBe(conference.url)
+    expect(mops.getAttribute("target")).toBe("_blank")
+    expect(screen.getByRole("link", { name: "看公告" })).toBeTruthy()
+  })
+
+  it("未具名外資與舊資料照標籤顯示，舊資料排在後面", async () => {
+    const base = { action: "", rating_text: "中立", target_price: 1200, currency: "TWD" as const, source_title: "報導", url: "https://example.com/" }
+    vi.spyOn(api, "getAnalystViews").mockResolvedValue({
+      status: "ready", symbol: "2330.TW", as_of: "2026-11-12T09:12:00+08:00", disclaimer, notes: [],
+      items: [
+        { ...base, institution: "本土投顧 G", date: "2026-06-01", old: true, url: "https://example.com/a" },
+        { ...base, institution: "未具名外資（日系）", date: "2026-11-10", unnamed: true, url: "https://example.com/b" },
+      ],
+    })
+    const inst = await api.getInstrument("2330.TW")
+    renderInRouter(<AnalystViewsCard inst={inst} />)
+    fireEvent.click(await screen.findByRole("button", { name: /法人觀點/ }, T))
+    const table = await screen.findByRole("table", { name: "法人觀點" }, T)
+    const rows = Array.from(table.querySelectorAll("tbody tr")).map((r) => r.textContent ?? "")
+    expect(rows[0]).toMatch(/未具名外資（日系）/)
+    expect(rows[1]).toMatch(/舊資料/)
+    expect(rows[1]).toMatch(/本土投顧 G/)
   })
 
   it("法人觀點暫時查不到：同一個「看公告」", async () => {

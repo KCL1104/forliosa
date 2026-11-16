@@ -40,6 +40,7 @@ from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiDraft, BrokerAccount, User
 from forliosa.models import Transaction as TxnModel
+from forliosa.news.outlets import NOT_NEWS_DOMAINS
 from forliosa.timeutil import (
     TAIPEI,
     is_tw_market_open,
@@ -75,23 +76,24 @@ USER_LOCATION = {"type": "approximate", "city": "Taipei", "region": "Taiwan", "c
 # subdomains, so an allow-list entry that covers a blocked host is narrowed to the hosts we may read.
 FETCH_BLOCKED_DOMAINS = ["www.twse.com.tw", "mis.twse.com.tw"]
 _FETCH_NARROWED = {"twse.com.tw": ["openapi.twse.com.tw"]}
-# Not news, for any question about a stock: rating aggregators (their rating data is their licensed product,
-# docs/research/analyst-ratings.md), quote and data pages, AI-written pages, forums and blogs. Blocked in web_search
-# of the 法人觀點 card and of chat (``block_search``; the 2026-11-16 memo: chat answered 禾榮科's ratings from a CMoney
-# forum post and an AI-written CMoney page). A domain covers its subdomains: cmoney.tw also blocks its forum and its
-# AI Q&A (aigc-note.cmoney.tw), fugle.tw its blog's AI 法說會 summaries. News outlets are never on it.
-SEARCH_BLOCKED_DOMAINS = (
-    # rating aggregators and rating / forecast pages
-    "tipranks.com", "marketbeat.com", "stockanalysis.com", "tradingview.com", "benzinga.com", "zacks.com",
-    "wallstreetzen.com", "fintel.io", "public.com", "marketscreener.com", "simplywall.st", "alphaspread.com",
-    "valueinvesting.io", "tickernerd.com", "chartmill.com",
-    # Taiwanese quote / data pages and AI-written pages (measured 2026-11-16: they filled the small caps' results)
-    "goodinfo.tw", "wantgoo.com", "cmoney.tw", "cmnews.com.tw", "fugle.tw", "histock.tw", "istock.tw", "winvest.tw",
-    "poorstock.com", "finlab.finance", "findbillion.com", "uc913.com", "nstock.tw", "myth-capital.com", "toalpha.tw",
-    "treelazy.com", "wearn.com", "ytdf.yuanta.com.tw", "finance.biggo.com", "gate.com",
-    # forums and blogs
-    "ptt.cc", "mobile01.com", "dcard.tw", "vocus.cc", "pixnet.net",
+# Not news, for any question about a stock: quote and data pages, AI-written pages, forums and blogs
+# (``news.outlets.NOT_NEWS_DOMAINS``, the list the news side stores nothing from) and rating aggregators (their rating
+# data is their licensed product, docs/research/analyst-ratings.md). Blocked in the web_search of chat and of the 法人
+# 觀點 card (``block_search``; the 2026-11-16 memo: chat answered 禾榮科's ratings from a CMoney forum post and an
+# AI-written CMoney page). A domain covers its subdomains: cmoney.tw also blocks its forum and its AI Q&A
+# (aigc-note.cmoney.tw), fugle.tw its blog's AI 法說會 summaries. News outlets are never on it.
+RATING_AGGREGATORS = (
+    "tipranks.com", "marketbeat.com", "stockanalysis.com", "tradingview.com", "wallstreetzen.com", "fintel.io",
+    "public.com", "simplywall.st", "alphaspread.com", "valueinvesting.io", "tickernerd.com", "chartmill.com",
 )
+# Rating sites that also publish news (Benzinga's newswire, Zacks' and MarketScreener's articles: often the source of
+# "why did X move" for a US stock): blocked for the card only (2026-11-16 review).
+RATING_NEWS_SITES = ("benzinga.com", "zacks.com", "marketscreener.com")
+# Chat's list: the same for every turn (a tool list that changes between turns invalidates the prompt cache and the
+# replayed thinking), so it is fixed, not chosen by the question.
+CHAT_BLOCKED_DOMAINS = tuple(dict.fromkeys((*RATING_AGGREGATORS, *NOT_NEWS_DOMAINS, "wearn.com",
+                                            "ytdf.yuanta.com.tw")))
+SEARCH_BLOCKED_DOMAINS = tuple(dict.fromkeys((*RATING_NEWS_SITES, *CHAT_BLOCKED_DOMAINS)))  # the card's
 _REJECTED_HINT = re.compile(r"not (?:be )?(?:allowed|supported|enabled|available|permitted)|unsupported|disabled|"
                             r"does not support|do not support|cannot use|can't use", re.IGNORECASE)
 _excluded: dict[str, dict[str, Any]] = {}  # server tool type -> {type, name, reason, at}
@@ -1427,12 +1429,14 @@ def server_tools(settings: Settings, *, fetch: bool = True, max_uses: int | None
         return [t for t in tools if t["type"] not in _excluded]
 
 
-def block_search(tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """``web_search`` with ``SEARCH_BLOCKED_DOMAINS`` blocked (the 法人觀點 card and chat), unless an allow-list is
-    configured: the API takes ``allowed_domains`` or ``blocked_domains``, not both. Changes ``tools`` in place."""
+def block_search(tools: list[dict[str, Any]], domains: tuple[str, ...] = SEARCH_BLOCKED_DOMAINS
+                 ) -> list[dict[str, Any]]:
+    """``web_search`` with ``domains`` blocked (``SEARCH_BLOCKED_DOMAINS`` for the 法人觀點 card,
+    ``CHAT_BLOCKED_DOMAINS`` for chat), unless an allow-list is configured: the API takes ``allowed_domains`` or
+    ``blocked_domains``, not both. Changes ``tools`` in place."""
     for t in tools:
         if t.get("name") == "web_search" and "allowed_domains" not in t:
-            t["blocked_domains"] = list(SEARCH_BLOCKED_DOMAINS)
+            t["blocked_domains"] = list(domains)
     return tools
 
 
