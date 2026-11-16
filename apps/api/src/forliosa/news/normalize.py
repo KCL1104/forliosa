@@ -378,7 +378,7 @@ def is_relevant(title: str, terms: Terms) -> bool:
 # Machine-written flashes that only repeat a price or a monthly revenue figure the stock page already shows (鉅亨
 # 「盤中速報 - 台達電(2308)股價殺至跌停…」「營收速報 - 禾榮科(7799)10月營收…」, measured 2026-11-16): never stored
 # or shown. 鉅亨's 「鉅亨速報 - Factset 最新調查」 (consensus estimates) is not a quote flash and stays.
-_BOT_FLASH = re.compile("^\\s*[《〈【\\[(（]?\\s*(?:盤中|盤後|開盤|收盤|營收|漲停|跌停)速報")
+_BOT_FLASH = re.compile(r"^\s*[《〈【\[(（]?\s*(?:盤中|盤後|開盤|收盤|營收|漲停|跌停)速報")
 
 
 def is_bot_flash(title: str) -> bool:

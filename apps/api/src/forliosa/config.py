@@ -262,6 +262,13 @@ class Settings(BaseSettings):
     # The market page's US market news: one more GDELT request per refresh (stored under "^US"; 產品負責人 2026-11-15)
     news_us_market: bool = True
     news_gdelt_interval_seconds: float = Field(default=6.0, ge=5.0)  # GDELT: one request every 5 s per IP
+    # GDELT's 15-minute bulk files (forliosa.news.gdelt_bulk; 產品負責人 2026-11-16, decision 7): Taiwan stocks' GDELT
+    # headlines come from the GKG files (the translingual stream keeps the Chinese page titles) — one download per file
+    # for every symbol instead of one DOC API request per symbol. The DOC API stays for US stocks and is the fallback
+    # while the bulk files are not current. Feeds: translation (Chinese and other non-English sites), english.
+    news_gdelt_bulk: bool = True
+    news_gdelt_bulk_feeds: Annotated[list[str], NoDecode] = Field(default_factory=lambda: ["translation", "english"])
+    news_gdelt_bulk_max_files: int = Field(default=8, ge=1, le=96)  # per feed and run (8 = the last 2 hours)
     # AI web search fills gaps: only for a symbol whose free sources gave fewer than NEWS_AI_MIN_ITEMS headlines in
     # the last 7 days, at most once per NEWS_AI_INTERVAL_HOURS per symbol, paid by the system (feature "news" in
     # ai_usage) and stopped for the rest of the (UTC) month once NEWS_AI_BUDGET_USD is spent.
@@ -318,6 +325,15 @@ class Settings(BaseSettings):
         """Unset (None) -> the default for FORLIOSA_ENV (:attr:`searxng_url`); an empty value -> "" (off)."""
         if isinstance(v, str):
             return v.strip().rstrip("/")
+        return v
+
+    @field_validator("news_gdelt_bulk_feeds", mode="before")
+    @classmethod
+    def _split_gdelt_bulk_feeds(cls, v: object) -> object:
+        if isinstance(v, str):
+            v = [s.strip().lower() for s in v.split(",") if s.strip()]
+        if isinstance(v, list) and any(f not in ("translation", "english") for f in v):
+            raise ValueError("NEWS_GDELT_BULK_FEEDS: translation and/or english")
         return v
 
     @field_validator("news_searxng_engines", mode="before")

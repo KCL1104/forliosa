@@ -84,6 +84,7 @@ from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, EDITOR_SYSTEM, OFF_TOPI
 from forliosa.ai.tools import (
     ToolContext,
     ToolOutcome,
+    block_search,
     client_tool_definitions,
     exclude_tool,
     execute,
@@ -472,13 +473,49 @@ def strip_boilerplate(text: str) -> str:
     return "\n".join(lines)
 
 
+# The rating rule's screening words left in an answer (2026-11-16, round 3: 「台積電最新的具名目標價是小摩的 3,300 元」
+# in 2 of 3 target answers, kept by the editor): 「具名」 before 機構／外資／目標價…, with the 「近 90 天內」 before it.
+# Not 「未具名」, and not a period before anything else (「近 90 天外資買超」 stays).
+_SCREENING = re.compile(r"(?:(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*)?(?<!未)具名的?"
+                        r"(?=機構|外資|券商|投顧|投行|投資銀行|法人|分析師|目標價|評等|報告)"
+                        r"|(?:近|過去|最近)\s*(?:90|180)\s*天內?的?\s*[，、]?\s*"
+                        r"(?=的?(?:(?:機構|外資|券商|投顧)的?)?(?:評等|目標價))")
+
+
 def tidy_answer(text: str, today: date) -> str:
-    """The fixed rewrites of an answer that is edited (``ChatTurn._edit``): its dates (``normalize_dates``) and the MOPS
-    boilerplate (``strip_boilerplate``). Run on the draft before the editor sees it and on the edit. A report's date
-    in parentheses (「（11/15 報導）」) is left to the editor (EDITOR_SYSTEM: write it into the sentence): moved to the
-    start of its list item here, the editor made the answer's first sentence a list item in 3 of 3 edits
-    (2026-11-16)."""
-    return strip_boilerplate(normalize_dates(text, today))
+    """The fixed rewrites of an answer that is edited (``ChatTurn._edit``): its dates (``normalize_dates``), the MOPS
+    boilerplate (``strip_boilerplate``) and the rating rule's screening words (``_SCREENING``: 「具名機構」 →
+    「機構」). Run on the draft before the editor sees it and on the edit. A report's date in parentheses (「（11/15
+    報導）」) is left to the editor (EDITOR_SYSTEM: write it into the sentence): moved to the start of its list item
+    here, the editor made the answer's first sentence a list item in 3 of 3 edits (2026-11-16)."""
+    out, pos = [], 0
+    for link in _URL.finditer(text):  # never inside a link
+        out += [_SCREENING.sub("", text[pos:link.start()]), link.group(0)]
+        pos = link.end()
+    return strip_boilerplate(normalize_dates("".join([*out, _SCREENING.sub("", text[pos:])]), today))
+
+
+# A list item or a heading, not a sentence (the answer's first line must be a sentence: CHAT_SYSTEM, EDITOR_SYSTEM)
+_ITEM = re.compile(r"\s*(?:[-*+]|\d+[.)])\s+")
+_NOT_SENTENCE = re.compile(r"\s*(?:[-*+]\s|\d+[.)]\s|#|\|)")
+_FIRST_SENTENCE = re.compile(r"[^。！？]+[。！？]")
+
+
+def keep_opening(draft: str, edited: str) -> str:
+    """The draft's opening sentence back when the edit made it a list item or dropped it (2026-11-16, round 3: 3 of
+    11 edits started with 「- 」 where the draft opened with a sentence). The edit's first item, when it is that
+    sentence rewritten, becomes the opening line again; otherwise the draft's first sentence goes before the list."""
+    d_lines, e_lines = draft.strip().split("\n"), edited.split("\n")
+    first = next((i for i, x in enumerate(e_lines) if x.strip()), None)
+    opening = d_lines[0].strip()
+    if first is None or not opening or _NOT_SENTENCE.match(opening) or not _ITEM.match(e_lines[first]):
+        return edited
+    item = _ITEM.sub("", e_lines[first], count=1).strip()
+    rest = "\n".join(e_lines[first + 1:]).lstrip("\n")
+    if SequenceMatcher(None, item, opening, autojunk=False).ratio() >= 0.5:
+        return item + ("\n\n" + rest if rest else "")
+    sentence = _FIRST_SENTENCE.match(opening)
+    return (sentence.group(0) if sentence else opening) + "\n\n" + "\n".join(e_lines[first:])
 
 
 def _editor_thinking(model: str) -> dict[str, Any]:
@@ -627,9 +664,12 @@ class ChatTurn:
 
     # -- request building --------------------------------------------------------------------------------
     def tools(self) -> list[dict[str, Any]]:
-        # 深度搜尋 only raises how often web_search may run; the tool list is otherwise the same
+        # 深度搜尋 only raises how often web_search may run; the tool list is otherwise the same. web_search always
+        # blocks SEARCH_BLOCKED_DOMAINS (aggregators, quote pages, AI-written pages, forums; the 2026-11-16 memo):
+        # every turn, not only rating questions, since a tool list that changes between turns invalidates the cache
+        # and the replayed thinking (see ``economy``), and the prompt already tells the model not to use those pages.
         max_uses = self.settings.ai_deep_search_max_uses if self.deep else None
-        web = [] if self.economy else server_tools(self.settings, max_uses=max_uses)
+        web = [] if self.economy else block_search(server_tools(self.settings, max_uses=max_uses))
         return client_tool_definitions(self.settings) + web
 
     def params(self, model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
@@ -1093,9 +1133,10 @@ class ChatTurn:
             else:
                 yield from _stream(draft)
             return flagged
-        final = tidy_answer(lead + edited, today)
+        final = tidy_answer(lead + keep_opening(body, edited), today)
         state.display.text = state.display.text[:start] + final
-        if final != lead + edited:  # the edit as streamed is not what is kept: show the kept one
+        # the edit as streamed is not what is kept (its opening restored, a date or boilerplate fixed): show the kept
+        if final != lead + edited:
             yield "text_reset", {"text": state.display.text}
         return remap_flags(flagged, draft, final, start)
 
