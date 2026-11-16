@@ -255,17 +255,26 @@ _CRITERIA = re.compile(r"(?:近|過去|最近)\s*90\s*天內?的?\s*[，、]?\s*
 # sentence, 「…法說會。公開資訊觀測站，11/10 15:02：本公司受邀參加…」, and an edit that rewrote it was dropped for the
 # 15:02): at least this many characters in a row of a citation's cited_text or title
 _MIN_COPY = 12
+# 「第三季」「前十個月」 in the edit for the draft's 「第 3 季」「前 10 個月」 (2026-11-16: an edit was dropped for
+# the 3)
+_CN_DIGITS = {c: str(i) for i, c in enumerate("一二三四五六七八九十", 1)} | {"十一": "11", "十二": "12"}
+_CN_COUNT = re.compile(r"([第前近])\s*(十[一二]|[一二三四五六七八九十])\s*(季|個月|個?年|週|名|大)")
 _CLOCK = re.compile(r"(?<![\d:])(?:[01]?\d|2[0-3]):[0-5]\d(?![\d:])")
 _OWN_WORD = re.compile(r"[\u4e00-\u9fffA-Za-z]")  # a Chinese character or a Latin letter
 
 
 def copied_spans(text: str, sources: Iterable[str]) -> list[tuple[int, int]]:
-    """Where ``text`` repeats a source word for word (at least ``_MIN_COPY`` characters), merged, in order."""
+    """Where ``text`` repeats a source word for word (at least ``_MIN_COPY`` characters, white space aside: the model
+    copies 「第3季」 as 「第 3 季」), merged, in order."""
+    where = [i for i, c in enumerate(text) if not c.isspace()]  # position in ``text`` of each character of ``dense``
+    dense = "".join(text[i] for i in where)
     spans: list[tuple[int, int]] = []
-    for src in dict.fromkeys(s for s in sources if s and len(s) >= _MIN_COPY):
-        for a, _, size in SequenceMatcher(None, text, src, autojunk=False).get_matching_blocks():
+    for src in dict.fromkeys("".join(s.split()) for s in sources if s):
+        if len(src) < _MIN_COPY:
+            continue
+        for a, _, size in SequenceMatcher(None, dense, src, autojunk=False).get_matching_blocks():
             if size >= _MIN_COPY:
-                spans.append((a, a + size))
+                spans.append((where[a], where[a + size - 1] + 1))
     merged: list[tuple[int, int]] = []
     for a, b in sorted(spans):
         if merged and a <= merged[-1][1]:
@@ -322,7 +331,7 @@ def missing_numbers(draft: str, edited: str, today: date | None = None, sources:
         rest = _MONTH_DAY.sub(lambda m: " " if any((d.month, d.day) == (int(m.group(1)), int(m.group(2)))
                                                    for d in days) else m.group(0), rest)
         rest = _BARE_DAY.sub(lambda m: " " if any(d.day == int(m.group(1)) for d in days) else m.group(0), rest)
-    kept = _numbers(edited)
+    kept = _numbers(_CN_COUNT.sub(lambda m: f"{m.group(1)}{_CN_DIGITS[m.group(2)]}{m.group(3)}", edited))
     numbers = _numbers(rest)
     approx = {m.group(1).replace(",", "") for m in _APPROX.finditer(rest)}
     return sorted(x for x in numbers - codes - years
@@ -431,18 +440,30 @@ _MOPS_FOOTER = re.compile(r"(^|[。！？，；])([^。！？，；\n]*請(?:至
 # The site named as where a 公告 was made: 「共有四則公開資訊觀測站公告」 → 「共有四則公告」,
 # 「公司在公開資訊觀測站公告」 → 「公司公告」 (CHAT_SYSTEM: no source names in sentences)
 _MOPS_NAME = re.compile(r"(?:在|於)?公開資訊觀測站(?:上)?(?:的)?(?=公告|重大訊息)")
+# The opening of a get_news 公告 item pasted into the answer (「…法說會。公開資訊觀測站，11/10 15:02：本公司受邀…」; the
+# editor made it 「公開資訊觀測站 11/10 15:02 有此公告」): the tool's label for the model, not part of the answer. Its
+# date stays unless the line has it already
+_NOTICE_HEAD = re.compile(r"(?:公開資訊觀測站|臺灣證券交易所|公司公告|交易所公告)，(?P<when>(?:今天 |昨天 )?(?:\d{4}/)?"
+                          r"(?P<md>(?:1[0-2]|0?[1-9])/(?:3[01]|[12]\d|0?[1-9]))(?: (?:[01]?\d|2[0-3]):[0-5]\d)?)：")
 _EMPTY_ITEM = re.compile(r"\s*(?:[-*]|\d+\.)?\s*")
 
 
+def _notice_heads(line: str) -> str:
+    def head(m: re.Match[str]) -> str:
+        rest = line[:m.start()] + line[m.end():]
+        return "" if re.search(rf"(?<![\d/]){re.escape(m.group('md'))}(?![\d/])", rest) else m.group("when") + " "
+    return _NOTICE_HEAD.sub(head, line)
+
+
 def strip_boilerplate(text: str) -> str:
-    """The MOPS footer and the site's name before 公告 left out (``_MOPS_FOOTER``, ``_MOPS_NAME``); a list item left
-    empty goes with its line."""
+    """The MOPS footer, the site's name before 公告 and the label of a pasted 公告 item left out (``_MOPS_FOOTER``,
+    ``_MOPS_NAME``, ``_NOTICE_HEAD``); a list item left empty goes with its line."""
     def footer(m: re.Match[str]) -> str:
         return m.group(3) if m.group(1) in "，；" and m.group(1) else m.group(1)
 
     lines = []
     for line in text.split("\n"):
-        new = _MOPS_NAME.sub("", _MOPS_FOOTER.sub(footer, line))
+        new = _notice_heads(_MOPS_NAME.sub("", _MOPS_FOOTER.sub(footer, line)))
         if new != line:
             if _EMPTY_ITEM.fullmatch(new):
                 continue
@@ -453,7 +474,10 @@ def strip_boilerplate(text: str) -> str:
 
 def tidy_answer(text: str, today: date) -> str:
     """The fixed rewrites of an answer that is edited (``ChatTurn._edit``): its dates (``normalize_dates``) and the MOPS
-    boilerplate (``strip_boilerplate``). Run on the draft before the editor sees it and on the edit."""
+    boilerplate (``strip_boilerplate``). Run on the draft before the editor sees it and on the edit. A report's date
+    in parentheses (「（11/15 報導）」) is left to the editor (EDITOR_SYSTEM: write it into the sentence): moved to the
+    start of its list item here, the editor made the answer's first sentence a list item in 3 of 3 edits
+    (2026-11-16)."""
     return strip_boilerplate(normalize_dates(text, today))
 
 

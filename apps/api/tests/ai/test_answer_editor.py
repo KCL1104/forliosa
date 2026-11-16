@@ -379,3 +379,33 @@ def test_the_prompts_carry_units_recency_and_no_source_names_for_notices():
         "不採用、不列入、不可信", "所以不列入」", "「目前沒有機構評等與目標價的資料」",
     ):
         assert phrase in EDITOR_SYSTEM, phrase
+
+
+def test_a_paste_with_spaces_and_a_number_in_chinese_still_match():
+    """2026-11-16 round 2 live: 「…公告本公司董事會通過第 3 季合併財務報告」 (the cited 「第3季」 with spaces) and
+    an edit that wrote 「第三季」 was dropped for the 3."""
+    from forliosa.ai.chat import copied_spans, missing_numbers
+
+    src = "公司公告，11/11 16:30：公告本公司董事會通過第3季合併財務報告"
+    draft = "- 第三季合併財務報告已由董事會通過，公告本公司董事會通過第 3 季合併財務報告。"
+    a = draft.index("公告本公司")
+    assert copied_spans(draft, [src]) == [(a, len(draft) - 1)]
+    assert missing_numbers(draft, "- 第三季合併財務報告已由董事會通過。", TODAY, [src]) == []
+    assert keeps_numbers("前 10 個月累計 6,806 千元，第 3 季虧損", "前十個月累計 6,806 千元，第三季虧損")
+    assert not keeps_numbers("第 3 季虧損 0.74 元", "第二季虧損 0.74 元")
+
+
+@pytest.mark.parametrize(("draft", "fixed"), [
+    # the label of a pasted 公告 item goes; its date stays unless the line has it (then its clock time goes too)
+    ("- 11/10 公告受邀參加法說會。公開資訊觀測站，11/10 15:02：本公司受邀參加法說會",
+     "- 11/10 公告受邀參加法說會。本公司受邀參加法說會"),
+    ("- 董事會通過財報。公司公告，11/11 16:30：公告本公司董事會通過第3季合併財務報告",
+     "- 董事會通過財報。11/11 16:30 公告本公司董事會通過第3季合併財務報告"),
+    ("- 公司公告，今天 11/16 09:12：本公司董事會決議", "- 今天 11/16 09:12 本公司董事會決議"),
+])
+def test_a_pasted_notice_label_goes(draft, fixed):
+    from forliosa.ai.chat import tidy_answer
+
+    assert tidy_answer(draft, TODAY) == fixed
+    assert keeps_numbers(draft, fixed, TODAY) or "15:02" in draft
+
