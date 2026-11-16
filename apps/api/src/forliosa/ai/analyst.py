@@ -13,6 +13,10 @@ and by the worker's daily retention job). ``POST`` starts a generation when ther
 ``unavailable`` and older than ``UNAVAILABLE_RETRY_AFTER``); an entry that is ``pending`` or ``ready`` is returned
 without a new charge. A ``pending`` entry older than ``PENDING_TIMEOUT`` (the process died) reads as
 ``unavailable``. Stocks only: ETFs have no broker ratings, so the API answers 422 ``analyst_views_stocks_only``.
+An empty ``ready`` entry (nothing found: in practice a small cap) is kept for ``EMPTY_KEEP_TRADING_DAYS`` trading
+days and stands in for the following days' entries (``kept_empty``), unless a 法說會 or financial-report notice of
+that stock was archived after it, or a 法說會 was held since (``new_notice``): then the stock is searched again
+(product owner 2026-11-16, decision 5).
 
 Charging
 --------
@@ -40,12 +44,15 @@ actually received in this generation (compared without scheme, ``www.``, trailin
 percent-encoding; the shown URL and title are the search result's own), the page is an article (not an aggregator,
 quote, rating or forecast page: ``is_article``), and the article date can be read from that result's URL or
 ``page_age`` metadata (the shown date is that article date, not the model's). Items older than ``MAX_AGE_DAYS``,
-without a named institution (「美系外資」「外資券商」「Wall Street analysts」 are not names: ``institution_key``),
 with neither rating nor target price, or with a target price in another currency are dropped; a target price far
 from the last real price (``TARGET_RATIO_MIN``–``TARGET_RATIO_MAX``, an internal filter that is never shown) is
 treated as another currency too. Numbers are passed through as written — never converted, averaged or compared.
 Newest first, one per institution (大摩 = 摩根士丹利 = Morgan Stanley; the shown name is the report's own), at most
-``MAX_ITEMS``.
+``MAX_ITEMS``; items older than ``RECENT_DAYS`` are marked ``old`` (shown as 舊資料) and come after the newer ones.
+An institution the report does not name (``institution_key``: 「美系外資」「外資券商」「Wall Street analysts」) is
+dropped, except a foreign broker named only by region (「日系外資」 → 「未具名外資（日系）」, ``unnamed_label``): kept
+when at most ``UNNAMED_MAX_AGE_DAYS`` old, marked ``unnamed``, at most ``UNNAMED_MAX``, never folded into a named one
+(product owner 2026-11-16, decisions 2–4).
 """
 
 from __future__ import annotations
@@ -57,12 +64,12 @@ import re
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import anthropic
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -77,20 +84,30 @@ from forliosa.ai.prompts import (
     ANALYST_TOOL_NAME,
     analyst_question,
 )
-from forliosa.ai.tools import exclude_tool, rejected_tool, server_tools
+from forliosa.ai.tools import SEARCH_BLOCKED_DOMAINS, block_search, exclude_tool, rejected_tool, server_tools
 from forliosa.api.errors import ApiError, not_found
 from forliosa.config import Settings, get_settings
 from forliosa.db import session_factory
 from forliosa.ids import new_id
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
-from forliosa.models import AiAnalystViews, User
-from forliosa.timeutil import TAIPEI, iso_taipei, last_tw_trading_day, now_utc
+from forliosa.models import AiAnalystViews, MarketEvent, User
+from forliosa.services.announcements import classify
+from forliosa.timeutil import TAIPEI, iso_taipei, last_tw_trading_day, next_tw_trading_day, now_utc
 
 log = logging.getLogger(__name__)
 
-MAX_ITEMS = 5
-MAX_AGE_DAYS = 90
+# Product owner 2026-11-16 (the analyst / news memo, decisions 2–5): up to 8 items (2330 had 7 verified, 2 were cut
+# at 5); reports up to 180 days old, those older than 90 days labelled 舊資料 and listed after the newer ones; an
+# unnamed foreign broker (「日系外資」) shown as 「未具名外資（日系）」, at most 2 and only within 30 days; an empty
+# result kept 3 trading days unless a new 法說會 / financial-report notice appears.
+MAX_ITEMS = 8
+MAX_AGE_DAYS = 180
+RECENT_DAYS = 90
+UNNAMED_MAX = 2
+UNNAMED_MAX_AGE_DAYS = 30
+EMPTY_KEEP_TRADING_DAYS = 3
+NOTICE_LOOKBACK_DAYS = 60  # how far back the material information is read for new_notice
 TTL = timedelta(hours=24)
 PENDING_TIMEOUT = timedelta(minutes=5)
 UNAVAILABLE_RETRY_AFTER = timedelta(minutes=10)
@@ -101,25 +118,34 @@ MAX_RATING_CHARS = 30
 MAX_TITLE_CHARS = 200
 # Internal plausibility filter for a target price (never shown, never used for any figure): a target outside
 # this multiple of the last real price is most likely another currency (e.g. the TSM ADR's USD target reported
-# as TWD for 2330.TW is about 0.16 × the TWD price per 1× upside, 2412's 10-share CHT ADR about 0.32 ×).
+# as TWD for 2330.TW is about 0.16 × the TWD price per 1× upside, 2412's 10-share CHT ADR about 0.32 ×). The mix-up
+# only ever shows on the low side; the upper bound was 3 × until a real target after a price fall was dropped
+# (2026-11-16: Goldman's NT$4,120 for 2308 at NT$1,240, 3.3 ×).
 TARGET_RATIO_MIN = 0.4
-TARGET_RATIO_MAX = 3.0
+TARGET_RATIO_MAX = 6.0
 # Drops that do not show there is nothing to report (a mangled URL, a result without a readable date): when nothing
 # is kept and a candidate was dropped for one of these, the entry is ``unavailable`` (retried later), never an
 # empty ``ready``.
 UNSURE_DROPS = frozenset({"url_not_in_results", "date_unverified"})
-# Not articles: rating aggregators (their rating data is their licensed product, docs/research/analyst-ratings.md)
-# and quote pages. ``AGGREGATOR_HOSTS`` (and subdomains) are blocked in the search tool and dropped by ``verify``;
+# Not articles: rating aggregators (their rating data is their licensed product, docs/research/analyst-ratings.md),
+# quote and data pages, AI-written pages, forums. ``AGGREGATOR_HOSTS`` (and subdomains;
+# ``tools.SEARCH_BLOCKED_DOMAINS``, shared with chat) are blocked in the search tool and dropped by ``verify``;
 # ``QUOTE_PATHS`` (host and subdomains → path prefixes) and the rating-page path words are dropped by ``verify``.
-AGGREGATOR_HOSTS = ("tipranks.com", "marketbeat.com", "stockanalysis.com", "tradingview.com", "goodinfo.tw",
-                    "wantgoo.com", "cmoney.tw", "benzinga.com", "zacks.com", "wallstreetzen.com", "fintel.io",
-                    "public.com", "marketscreener.com", "simplywall.st", "alphaspread.com", "valueinvesting.io",
-                    "tickernerd.com", "chartmill.com")
+AGGREGATOR_HOSTS = SEARCH_BLOCKED_DOMAINS
 QUOTE_PATHS: dict[str, tuple[str, ...]] = {
     "tw.stock.yahoo.com": ("/quote",), "finance.yahoo.com": ("/quote",), "cnyes.com": ("/twstock", "/usstock"),
     "invest.cnyes.com": ("/",), "money.cnn.com": ("/quote",), "wsj.com": ("/market-data",),
     "marketwatch.com": ("/investing/",), "nasdaq.com": ("/market-activity/",), "investing.com": ("/equities/",),
+    "pchome.megatime.com.tw": ("/stock",),  # its /news pages are real reprints
 }
+# Reputable outlets (the memo's §2.5): preferred, never required — a strict allow-list would leave small caps with
+# even less. The prompt asks for them first; ``verify`` keeps their article when one institution's report of the
+# same day comes from several outlets.
+PREFERRED_HOSTS = ("money.udn.com", "ctee.com.tw", "moneydj.com", "cnyes.com", "cna.com.tw", "ltn.com.tw",
+                   "reuters.com", "cnbc.com")
+# The 法說會 list of 公開資訊觀測站 (法人說明會一覽表): linked, never fetched (decision 6; TWSE's site terms forbid
+# automated downloads, and the slides are the company's copyright).
+MOPS_CONFERENCE_URL = "https://mops.twse.com.tw/mops/#/web/t100sb07_1"
 # A path segment like these is a rating / forecast page, unless the URL carries an article date.
 RATING_PAGE_SEGMENTS = frozenset({"quote", "quotes", "analyst-ratings", "analyst-research", "analyst-insights",
                                   "analystestimates", "analyst-estimates", "estimates", "research-ratings", "forecast",
@@ -139,8 +165,18 @@ class SearchResult:
 @dataclass(frozen=True)
 class Dropped:
     candidate: dict[str, Any]
-    reason: str  # url_not_in_results | not_article | date_unverified | too_old | future | unnamed | empty | currency
-    #              | duplicate  (``currency`` also covers a target outside TARGET_RATIO_MIN–MAX × the last price)
+    reason: str  # url_not_in_results | not_article | date_unverified | too_old | future | unnamed | unnamed_old
+    #              | empty | currency | duplicate | limit  (``currency`` also covers a target outside
+    #              TARGET_RATIO_MIN–MAX × the last price; ``limit``: past MAX_ITEMS or UNNAMED_MAX)
+
+
+@dataclass(frozen=True)
+class Hints:
+    """What the search can start from (the memo's §2.4): the English short name and the latest 法說會 held (date and
+    the broker hosting it), from data Forliosa already has."""
+    english: str | None = None
+    conference: date | None = None
+    host: str | None = None
 
 
 # -- time and cache --------------------------------------------------------------------------------------------
@@ -171,10 +207,119 @@ def resolve_stock(md: MarketData, symbol: str) -> InstrumentInfo:
     return info
 
 
+def keep_until(day: date) -> datetime:
+    """When an empty ``ready`` entry of trading day ``day`` expires: 00:00 Taipei of the trading day
+    ``EMPTY_KEEP_TRADING_DAYS`` trading days later (searched on Monday: kept through Wednesday)."""
+    d = day
+    for _ in range(EMPTY_KEEP_TRADING_DAYS):
+        d = next_tw_trading_day(d + timedelta(days=1))
+    return datetime.combine(d, time.min, TAIPEI)
+
+
+def _conferences(db: Session, symbol: str, since: date) -> list[tuple[date, str | None, MarketEvent]]:
+    """Archived 法說會 notices (重大訊息 第12款) of ``symbol`` announced on or after ``since``: (conference date, the
+    host broker when the company was invited, row)."""
+    out = []
+    for r in db.scalars(select(MarketEvent).where(MarketEvent.symbol == symbol, MarketEvent.type == "material_info",
+                                                  MarketEvent.date >= since)):
+        rel = classify(r.title, r.detail, r.data, r.date)
+        if rel is not None and rel.kind == "investor_conference":
+            out.append((rel.date, conference_host(r.title), r))
+    return out
+
+
+def new_notice(db: Session, symbol: str, since: datetime, today: date) -> bool:
+    """A reason to search again after an empty result of ``since``: a 法說會 or financial-report notice of
+    ``symbol`` archived after it (and announced no earlier than the day before), or a 法說會 held since (reports
+    cluster around both)."""
+    since_day = since.astimezone(TAIPEI).date()
+    lo = since_day - timedelta(days=NOTICE_LOOKBACK_DAYS)
+    for r in db.scalars(select(MarketEvent).where(MarketEvent.symbol == symbol, MarketEvent.type == "material_info",
+                                                  MarketEvent.date >= lo)):
+        rel = classify(r.title, r.detail, r.data, r.date)
+        if rel is None or rel.kind not in ("investor_conference", "earnings"):
+            continue
+        created = _aware(r.created_at)
+        if created is not None and created > since and r.date >= since_day - timedelta(days=1):
+            return True
+        if rel.kind == "investor_conference" and since_day < rel.date <= today:
+            return True
+    return False
+
+
+def kept_empty(db: Session, symbol: str, now: datetime) -> AiAnalystViews | None:
+    """The empty ``ready`` entry of an earlier trading day that still stands for today (``keep_until``, no
+    ``new_notice`` since it was searched), or ``None``. Read only."""
+    row = db.scalars(select(AiAnalystViews).where(
+        AiAnalystViews.symbol == symbol, AiAnalystViews.trading_day < trading_day(now),
+        AiAnalystViews.status == "ready", AiAnalystViews.expires_at > now,
+    ).order_by(AiAnalystViews.trading_day.desc()).limit(1)).first()
+    finished = _aware(row.finished_at) if row is not None else None
+    if row is None or row.items or finished is None:
+        return None
+    if new_notice(db, symbol, finished, now.astimezone(TAIPEI).date()):
+        return None
+    return row
+
+
+_HOST_PATTERNS = (
+    # 受邀參加永豐金證券匯立分公司舉辦之法人說明會, 12/16參加康和證券舉辦之線上法說會
+    re.compile(r"參加\s*(?:由\s*)?(.+?)\s*所?(?:舉辦|主辦)"),
+    re.compile(r"[受應]\s*(?!邀)(.+?)\s*(?:之\s*)?邀請"),  # 受國票綜合證券邀請召開法人說明會, 應凱基證券之邀請
+    re.compile(r"受邀參加\s*(.+?)\s*$"),  # 受邀參加Daiwa Investment Conference Singapore 2026
+)
+
+
+def conference_host(title: str) -> str | None:
+    """Who hosts a 法說會 the company was invited to, from the notice's title (「永豐金證券匯立分公司」,
+    「Daiwa Investment Conference Singapore 2026」); ``None`` for the company's own (「公告本公司召開法人說明會」)."""
+    for p in _HOST_PATTERNS:
+        m = p.search(title or "")
+        if m:
+            host = m.group(1).strip(" 「」『』\"'")
+            if host and len(host) <= 60 and not re.search(r"說明會|法說|本公司", host):
+                return host
+    return None
+
+
+def conference_info(db: Session, info: InstrumentInfo, today: date) -> dict[str, Any] | None:
+    """Official 法說會 context for the card (links only, nothing fetched): the latest 法說會 held in the last
+    ``MAX_AGE_DAYS`` and the next one within 30 days, from the archived notices, and the link to the MOPS list.
+    ``None`` for US stocks."""
+    if info.market == "US":
+        return None
+    found = _conferences(db, info.symbol, today - timedelta(days=MAX_AGE_DAYS))
+    held = [c for c in found if today - timedelta(days=MAX_AGE_DAYS) <= c[0] <= today]
+    ahead = [c for c in found if today < c[0] <= today + timedelta(days=30)]
+    last = max(held, key=lambda c: c[0]) if held else None
+    nxt = min(ahead, key=lambda c: c[0]) if ahead else None
+    return {"last": {"date": last[0].isoformat(), "host": last[1]} if last else None,
+            "next": {"date": nxt[0].isoformat(), "host": nxt[1]} if nxt else None,
+            "url": MOPS_CONFERENCE_URL}
+
+
+def query_hints(db: Session, info: InstrumentInfo, today: date) -> Hints:
+    """``Hints`` for the search: the English short name (``news.service.english_names``) and the latest 法說會 held
+    in the last 60 days. Best effort: missing data gives empty hints."""
+    from forliosa.news.service import english_names
+
+    try:
+        english = next((n for n in english_names(db, info) if n.casefold() != info.name.casefold()), None)
+        held = [c for c in _conferences(db, info.symbol, today - timedelta(days=NOTICE_LOOKBACK_DAYS))
+                if c[0] <= today] if info.market != "US" else []
+    except Exception:  # hints only steer the search
+        log.warning("analyst views: no query hints for %s", info.symbol, exc_info=True)
+        return Hints()
+    last = max(held, key=lambda c: c[0]) if held else None
+    return Hints(english, last[0] if last else None, last[1] if last else None)
+
+
 def _current(db: Session, symbol: str, now: datetime) -> AiAnalystViews | None:
     purge_expired(db, now)
     row = db.get(AiAnalystViews, (symbol, trading_day(now)))
-    if row is not None and row.status == "pending" and now - _aware(row.created_at) > PENDING_TIMEOUT:
+    if row is None:
+        return kept_empty(db, symbol, now)
+    if row.status == "pending" and now - _aware(row.created_at) > PENDING_TIMEOUT:
         log.warning("analyst views for %s: generation %s never finished; marked unavailable", symbol,
                     row.generation_id)
         row.status, row.notes, row.finished_at = "unavailable", [], now
@@ -188,11 +333,17 @@ def _retry_open(row: AiAnalystViews, now: datetime) -> bool:
     return row.status == "unavailable" and now - finished >= UNAVAILABLE_RETRY_AFTER
 
 
-def view(row: AiAnalystViews | None, symbol: str) -> dict[str, Any]:
-    """The contract shape (``docs/api-contract.md`` 法人觀點)."""
+def _item(item: dict[str, Any]) -> dict[str, Any]:
+    """A stored item in the contract shape (entries stored before 2026-11-16 have no ``unnamed`` / ``old``)."""
+    return {**item, "unnamed": bool(item.get("unnamed")), "old": bool(item.get("old"))}
+
+
+def view(row: AiAnalystViews | None, symbol: str, conference: dict[str, Any] | None = None) -> dict[str, Any]:
+    """The contract shape (``docs/api-contract.md`` 法人觀點). ``conference``: ``conference_info`` (``None`` when
+    not looked up: US stocks and the chat tool)."""
     if row is None:
         return {"status": "none", "symbol": symbol, "as_of": None, "expires_at": None, "items": [],
-                "disclaimer": ANALYST_DISCLAIMER, "notes": []}
+                "disclaimer": ANALYST_DISCLAIMER, "notes": [], "conference": conference}
     ready = row.status == "ready"
     finished = _aware(row.finished_at)
     notes = list(row.notes or [])
@@ -200,25 +351,37 @@ def view(row: AiAnalystViews | None, symbol: str) -> dict[str, Any]:
         notes.append(f"{(finished + UNAVAILABLE_RETRY_AFTER).astimezone(TAIPEI):%H:%M} 之後可以再查一次。")
     return {"status": row.status, "symbol": row.symbol,
             "as_of": iso_taipei(finished) if ready and finished else None,
-            "expires_at": iso_taipei(_aware(row.expires_at)), "items": list(row.items or []) if ready else [],
-            "disclaimer": ANALYST_DISCLAIMER, "notes": notes}
+            "expires_at": iso_taipei(_aware(row.expires_at)),
+            "items": [_item(i) for i in row.items or []] if ready else [],
+            "disclaimer": ANALYST_DISCLAIMER, "notes": notes, "conference": conference}
+
+
+def _conference(db: Session, info: InstrumentInfo, now: datetime) -> dict[str, Any] | None:
+    try:
+        return conference_info(db, info, now.astimezone(TAIPEI).date())
+    except Exception:  # official links are a nicety: never fail the card for them
+        log.warning("analyst views: no 法說會 info for %s", info.symbol, exc_info=True)
+        db.rollback()
+        return None
 
 
 def read(db: Session, md: MarketData, symbol: str, now: datetime | None = None) -> dict[str, Any]:
-    """``GET``: today's shared entry, or ``status: none`` (also once a failed search may be retried, so the page
-    offers the search again)."""
+    """``GET``: today's shared entry (or a kept empty one, ``kept_empty``), or ``status: none`` (also once a failed
+    search may be retried, so the page offers the search again)."""
     info = resolve_stock(md, symbol)
     now = now or now_utc()
     row = _current(db, info.symbol, now)
-    return view(None if row is not None and _retry_open(row, now) else row, info.symbol)
+    return view(None if row is not None and _retry_open(row, now) else row, info.symbol,
+                _conference(db, info, now))
 
 
 def cached(db: Session, symbol: str, now: datetime | None = None) -> dict[str, Any]:
-    """Today's shared entry of a resolved stock symbol, for the chat tool ``get_analyst_views``: like ``read`` but
-    without writing anything (no purge, no generation, no charge), since chat tools run side by side on sessions of
-    their own. An expired entry reads as ``none``; a ``pending`` one past ``PENDING_TIMEOUT`` as ``unavailable``."""
+    """Today's shared entry of a resolved stock symbol (or a kept empty one), for the chat tool
+    ``get_analyst_views``: like ``read`` but without writing anything (no purge, no generation, no charge), since
+    chat tools run side by side on sessions of their own. An expired entry reads as ``none``; a ``pending`` one past
+    ``PENDING_TIMEOUT`` as ``unavailable``."""
     now = now or now_utc()
-    row = db.get(AiAnalystViews, (symbol, trading_day(now)))
+    row = db.get(AiAnalystViews, (symbol, trading_day(now))) or kept_empty(db, symbol, now)
     if row is None or (_aware(row.expires_at) or now) <= now:
         return view(None, symbol)
     out = view(row, symbol)
@@ -244,10 +407,11 @@ def request(db: Session, user: User, md: MarketData, symbol: str, *, pool: KeyPo
     now = now or now_utc()
     info = resolve_stock(md, symbol)
     row = _current(db, info.symbol, now)
+    conf = _conference(db, info, now)
     if row is not None and not _retry_open(row, now):  # pending, ready, or failed moments ago: shared, no charge
-        return view(row, info.symbol), None
+        return view(row, info.symbol, conf), None
     if not settings.ai_analyst_enabled or not settings.ai_web_search or not server_tools(settings, fetch=False):
-        return {**view(None, info.symbol), "status": "unavailable", "notes": [NOTE_OFF]}, None
+        return {**view(None, info.symbol, conf), "status": "unavailable", "notes": [NOTE_OFF]}, None
     pool = pool or get_key_pool()
     if not pool.available:
         raise ApiError(503, "ai_unavailable", "AI 暫時不能用。")
@@ -270,15 +434,15 @@ def request(db: Session, user: User, md: MarketData, symbol: str, *, pool: KeyPo
             db.commit()
             if not claimed:
                 db.expire_all()
-                return view(db.get(AiAnalystViews, (info.symbol, day)), info.symbol), None
+                return view(db.get(AiAnalystViews, (info.symbol, day)), info.symbol, conf), None
     except IntegrityError:  # another request created today's entry first: share it
         db.rollback()
-        return view(db.get(AiAnalystViews, (info.symbol, day)), info.symbol), None
+        return view(db.get(AiAnalystViews, (info.symbol, day)), info.symbol, conf), None
     # The search counts as one question right away (its model calls add their tokens later).
     store.record_usage(db, user_id=user.id, thread_id=gen, feature="analyst", model=fields["model"], key_slot=None,
                        usage=CallUsage(), stop_reason="started")
     db.expire_all()
-    out = view(db.get(AiAnalystViews, (info.symbol, day)), info.symbol)
+    out = view(db.get(AiAnalystViews, (info.symbol, day)), info.symbol, conf)
     user_id, chosen = user.id, pool
 
     def job() -> None:
@@ -376,18 +540,20 @@ def _mentions(title: str, terms: list[str]) -> bool:
     return False
 
 
-def rating_headlines(results: list[SearchResult], info: InstrumentInfo, today: date) -> int:
+def rating_headlines(results: list[SearchResult], info: InstrumentInfo, today: date,
+                     explained: frozenset[str] = frozenset()) -> int:
     """How many article results have a rating / target-price headline about *this* stock (its name, code, ticker
     or alias in the title) that is not verifiably older than ``MAX_AGE_DAYS`` — the check that keeps an empty
     report from being shown as "nothing found". Other stocks' ratings, credit ratings and aggregator pages do
-    not count."""
+    not count, nor do the articles in ``explained`` (normalized URLs of candidates ``verify`` dropped for what they
+    are: an unnamed broker older than 30 days, another currency…)."""
     terms = stock_terms(info)
     oldest = today - timedelta(days=MAX_AGE_DAYS)
     n = 0
     for r in results:
         title = r.title or ""
         if not (is_article(r.url) and _RATING_HEADLINE.search(title) and not _CREDIT_RATING.search(title)
-                and _mentions(title, terms)):
+                and _mentions(title, terms)) or _norm_url(r.url) in explained:
             continue
         published = date_from_url(r.url) or date_from_page_age(r.page_age, today)
         if published is None or published >= oldest:
@@ -430,22 +596,18 @@ class Outcome:
 
 
 def search_tools(settings: Settings) -> list[dict[str, Any]]:
-    """``web_search`` (no ``web_fetch``) with rating aggregators blocked, unless an allow-list is configured
+    """``web_search`` (no ``web_fetch``) with ``AGGREGATOR_HOSTS`` blocked, unless an allow-list is configured
     (the API takes one or the other)."""
-    tools = server_tools(settings, fetch=False, max_uses=settings.ai_analyst_search_max_uses)
-    for t in tools:
-        if t.get("name") == "web_search" and "allowed_domains" not in t:
-            t["blocked_domains"] = list(AGGREGATOR_HOSTS)
-    return tools
+    return block_search(server_tools(settings, fetch=False, max_uses=settings.ai_analyst_search_max_uses))
 
 
 def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPool, settings: Settings,
               record: Callable[[int, Any], None], costs: Any = None, thinking_display: str | None = None,
-              reference: float | None = None) -> Outcome:
+              reference: float | None = None, hints: Hints | None = None) -> Outcome:
     """Ask the model (web search + ``report_analyst_views``), then verify. ``record(slot, message)`` stores the
     usage of every call. Raises on API errors (the caller marks the entry unavailable). ``reference`` is the last
-    real price, only for ``verify``'s internal currency check. ``thinking_display`` (``"summarized"``) is only for
-    the live smoke's diagnostics.
+    real price, only for ``verify``'s internal currency check; ``hints`` (``query_hints``) go into the question.
+    ``thinking_display`` (``"summarized"``) is only for the live smoke's diagnostics.
 
     "Nothing found" (``ready`` with no items) is only claimed when nothing points the other way: if no item
     survives while the search results carry a rating headline about this stock (``rating_headlines``), or while a
@@ -454,8 +616,11 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
     ``UNAVAILABLE_RETRY_AFTER``)."""
     model = store.model_for("analyst", settings)
     since = today - timedelta(days=MAX_AGE_DAYS)
+    hints = hints or Hints()
     messages: list[dict[str, Any]] = [{"role": "user", "content": analyst_question(
-        info.name, info.symbol, info.market, info.currency, today.isoformat(), since.isoformat())}]
+        info.name, info.symbol, info.market, info.currency, today.isoformat(), since.isoformat(),
+        english=hints.english, conference=hints.conference.isoformat() if hints.conference else None,
+        host=hints.host)}]
     params: dict[str, Any] = {
         "model": model, "max_tokens": MAX_TOKENS, "system": ANALYST_SYSTEM,
         "tools": [*search_tools(settings), ANALYST_TOOL],
@@ -506,7 +671,9 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
                        "no_report" if reported is None else "stopped")
     items, dropped = verify(reported, results, info, today, reference)
     if not items:
-        headlines = rating_headlines(results, info, today)
+        explained = frozenset(_norm_url(str(d.candidate.get("url") or "")) for d in dropped
+                              if d.reason not in UNSURE_DROPS)
+        headlines = rating_headlines(results, info, today, explained)
         unsure = any(d.reason in UNSURE_DROPS for d in dropped)
         if headlines or unsure:
             # Do not claim there are no reports: "unavailable" (retried later) instead of an empty "ready".
@@ -544,7 +711,7 @@ def generate(db: Session, md: MarketData, info: InstrumentInfo, day: date, gener
     today = now_utc().astimezone(TAIPEI).date()
     try:
         outcome = run_model(info, today, generation_id, pool, settings, record, store.slot_month_costs(db),
-                            reference=reference_price(md, info.symbol))
+                            reference=reference_price(md, info.symbol), hints=query_hints(db, info, today))
         status, items, notes = outcome.status, outcome.items, []
         if outcome.dropped:
             log.info("analyst views %s for %s: %s, kept %d, dropped %s", generation_id, info.symbol, status,
@@ -553,10 +720,12 @@ def generate(db: Session, md: MarketData, info: InstrumentInfo, day: date, gener
         log.exception("analyst views generation %s for %s failed", generation_id, info.symbol)
         db.rollback()
         status, items, notes = "unavailable", [], []
+    # nothing found (in practice a small cap): kept for EMPTY_KEEP_TRADING_DAYS trading days (``kept_empty``)
+    keep = {"expires_at": keep_until(day)} if status == "ready" and not items else {}
     db.execute(update(AiAnalystViews).where(
         AiAnalystViews.symbol == info.symbol, AiAnalystViews.trading_day == day,
         AiAnalystViews.generation_id == generation_id).values(
-        status=status, items=items, notes=notes, finished_at=now_utc()))
+        status=status, items=items, notes=notes, finished_at=now_utc(), **keep))
     db.commit()
     return db.get(AiAnalystViews, (info.symbol, day))
 
@@ -725,6 +894,35 @@ def _name_key(name: str) -> str | None:
     return _ALIASES.get(s, s)
 
 
+# A foreign broker named only by its region (「日系外資」「美系券商」「港資券商」), or not at all (「外資」
+# 「某外資」「外資券商 A」「外資分析師」), compared like ``_norm_name``. 「券商」「投行」 alone may be domestic:
+# not matched.
+_UNNAMED_FOREIGN = re.compile(r"(?:某一?家?|一家|另一?家|一位)?"
+                              r"(?:(?P<region>[美日歐英德法瑞港陸中韓星亞澳])(?P<kind>系|資))?"
+                              r"(?P<noun>外資券商|外資法人|外資機構|外資|外商券商|外商|券商|投資銀行|投行)"
+                              r"(?:分析師|研究員)?")
+
+
+def unnamed_label(name: str) -> str | None:
+    """「未具名外資（日系）」 for a foreign broker a report names only by region (「日系外資」「美系券商 C」),
+    「未具名外資」 for 「外資」「某外資」「外資券商 A」; ``None`` for anything else (a named institution, 「法人」
+    「國內投顧」「分析師」, 「Wall Street analysts」). 「美系外資（摩根士丹利）」 names one: check ``institution_key``
+    first."""
+    m = _PAREN.match(name.strip())
+    for part in (m.group(1), m.group(2)) if m else (name,):
+        s = _norm_name(re.sub(r"(?:\s+|(?<=[\u4e00-\u9fff]))[A-Za-z0-9]{1,2}$", "", part.strip()))
+        u = _UNNAMED_FOREIGN.fullmatch(s)
+        if u is None or (u.group("region") is None and "外" not in u.group("noun")):
+            continue
+        return f"未具名外資（{u.group('region')}{u.group('kind')}）" if u.group("region") else "未具名外資"
+    return None
+
+
+def _preferred(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower().removeprefix("www.")
+    return any(_on_host(host, h) for h in PREFERRED_HOSTS)
+
+
 def _text(value: Any, limit: int) -> str | None:
     if not isinstance(value, str):
         return None
@@ -742,15 +940,21 @@ def _price(value: Any) -> float | None:
 def verify(candidates: list[dict[str, Any]], results: list[SearchResult], info: InstrumentInfo,
            today: date, reference: float | None = None) -> tuple[list[dict[str, Any]], list[Dropped]]:
     """Keep the candidates that the search results support (see the module docstring). Returns the items in the
-    contract shape (newest first, one per institution — aliases folded by ``institution_key`` — at most
-    ``MAX_ITEMS``) and the dropped candidates. ``reference`` (the last real price, optional) only drops a target
-    price outside ``TARGET_RATIO_MIN``–``TARGET_RATIO_MAX`` times it as another currency; it is never shown or
-    compared in the output."""
+    contract shape and the dropped candidates. One per institution (aliases folded by ``institution_key``; on one
+    day the article of a ``PREFERRED_HOSTS`` outlet first), at most ``MAX_ITEMS``: the named ones of the last
+    ``RECENT_DAYS`` first, then at most ``UNNAMED_MAX`` unnamed foreign brokers (``unnamed_label``, at most
+    ``UNNAMED_MAX_AGE_DAYS`` old; the same label, rating and target count once), then older named ones (``old``).
+    Shown newest first, the old ones last. ``reference`` (the last real price, optional) only drops a target price
+    outside ``TARGET_RATIO_MIN``–``TARGET_RATIO_MAX`` times it as another currency; it is never shown or compared in
+    the output."""
     by_url: dict[str, SearchResult] = {}
     for r in results:
         by_url.setdefault(_norm_url(r.url), r)
     oldest = today - timedelta(days=MAX_AGE_DAYS)
-    kept: list[tuple[str, dict[str, Any]]] = []
+    recent = today - timedelta(days=RECENT_DAYS)
+    unnamed_since = today - timedelta(days=UNNAMED_MAX_AGE_DAYS)
+    named: list[tuple[str, dict[str, Any]]] = []
+    unnamed: list[tuple[str, dict[str, Any]]] = []
     dropped: list[Dropped] = []
     for c in candidates:
         result = by_url.get(_norm_url(str(c.get("url") or "")))
@@ -772,8 +976,12 @@ def verify(candidates: list[dict[str, Any]], results: list[SearchResult], info: 
             continue
         institution = _text(c.get("institution"), MAX_INSTITUTION_CHARS)
         key = institution_key(institution) if institution else None
-        if institution is None or key is None:
+        label = unnamed_label(institution) if institution and key is None else None
+        if key is None and label is None:
             dropped.append(Dropped(c, "unnamed"))
+            continue
+        if label is not None and published < unnamed_since:
+            dropped.append(Dropped(c, "unnamed_old"))
             continue
         rating = _text(c.get("rating_text"), MAX_RATING_CHARS)
         target = _price(c.get("target_price"))
@@ -785,18 +993,33 @@ def verify(candidates: list[dict[str, Any]], results: list[SearchResult], info: 
             dropped.append(Dropped(c, "empty"))
             continue
         action = c.get("action") if c.get("action") in ("調升", "調降", "維持", "首評") else ""
-        kept.append((key, {"institution": institution, "action": action, "rating_text": rating,
-                           "target_price": target, "currency": info.currency, "date": published.isoformat(),
-                           "source_title": " ".join(result.title.split())[:MAX_TITLE_CHARS] or _norm_url(result.url),
-                           "url": result.url}))
-    kept.sort(key=lambda k: k[1]["date"], reverse=True)  # stable: the model's order within a day
-    items: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for key, item in kept:
-        if key in seen:
-            dropped.append(Dropped(item, "duplicate"))
-            continue
-        seen.add(key)
-        items.append(item)
-    return items[:MAX_ITEMS], dropped
+        entry = {"institution": label or institution, "action": action, "rating_text": rating,
+                 "target_price": target, "currency": info.currency, "date": published.isoformat(),
+                 "source_title": " ".join(result.title.split())[:MAX_TITLE_CHARS] or _norm_url(result.url),
+                 "url": result.url, "unnamed": label is not None, "old": published < recent}
+        if label is None:
+            named.append((key or "", entry))
+        else:  # the same story in several outlets counts once; never folded into a named institution
+            unnamed.append((f"{label}|{rating}|{target}", entry))
 
+    def one_each(kept: list[tuple[str, dict[str, Any]]]) -> list[dict[str, Any]]:
+        # newest first, a preferred outlet first within a day (stable: else the model's order)
+        kept.sort(key=lambda k: (k[1]["date"], _preferred(k[1]["url"])), reverse=True)
+        out: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for key, item in kept:
+            if key in seen:
+                dropped.append(Dropped(item, "duplicate"))
+                continue
+            seen.add(key)
+            out.append(item)
+        return out
+
+    named_items, unnamed_items = one_each(named), one_each(unnamed)
+    fresh = [i for i in named_items if not i["old"]][:MAX_ITEMS]
+    room = MAX_ITEMS - len(fresh)
+    anonymous = unnamed_items[:min(UNNAMED_MAX, room)]
+    older = [i for i in named_items if i["old"]][:room - len(anonymous)]
+    shown = {id(i) for i in (*fresh, *anonymous, *older)}
+    dropped.extend(Dropped(i, "limit") for i in (*named_items, *unnamed_items) if id(i) not in shown)
+    return sorted([*fresh, *anonymous], key=lambda i: i["date"], reverse=True) + older, dropped

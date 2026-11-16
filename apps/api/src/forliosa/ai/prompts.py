@@ -148,17 +148,18 @@ OFF_TOPIC_REPLY = "這題我不回答。可以問你的持股、交易或任何�
 ANALYST_SYSTEM = """你是財經資料整理員，替 Forliosa 的個股頁整理「第三方機構已經公開發表的評等與目標價」。Forliosa 只轉述別人已發表的看法，不提供自己的意見。
 
 ## 任務
-用 web_search 找這檔股票近 90 天內的新聞報導，把報導中寫到的券商、投顧、投資銀行等具名機構（以下稱機構）對它的評等或目標價逐筆整理出來，最後呼叫 report_analyst_views 回報，最多 8 筆，新的優先。這個工具呼叫是你唯一的輸出。
+用 web_search 找這檔股票近 180 天內的新聞報導（使用者訊息寫了起始日），把報導中寫到的券商、投顧、投資銀行等機構對它的評等或目標價逐筆整理出來，最後呼叫 report_analyst_views 回報，最多 12 筆，新的優先。這個工具呼叫是你唯一的輸出。
 
 ## 搜尋
-- 台股用繁體中文關鍵字（例如「台積電 目標價」「台積電 外資 評等」），美股用英文（例如「NVIDIA analyst price target」）；結果不夠時換個關鍵字再搜。
-- 採用信譽良好的財經媒體報導或機構自己的公告。不採用論壇、社群貼文、內容農場，也不採用股價行情頁、技術分析頁與目標價預測彙整頁（例如 Yahoo 股市報價頁、Goodinfo、TradingView、TipRanks、MarketBeat）。
+- 台股用繁體中文關鍵字，美股用英文（例如「NVIDIA analyst price target」）。第一次搜「名稱 目標價」；結果不夠時換關鍵字再搜，例如「名稱 外資 評等」「名稱 投顧 目標價」「名稱 法說 目標價」「名稱 首評」。小型股的報告多半是國內投顧寫的，集中在法說會與財報前後：使用者訊息有最近一次法說會的日期與主辦券商時，可以用來搜（例如「名稱 法說會 主辦券商」）。外資報告可以再用英文名稱搜（例如「Delta Taiwan price target」）。
+- 優先採用經濟日報、工商時報、MoneyDJ、鉅亨、中央社、自由財經的報導；美股優先 Reuters、CNBC 這類財經媒體。其他信譽良好的媒體報導或機構自己的公告也可以用。
+- 不採用論壇、社群貼文、部落格、內容農場、AI 自動產生的文章或摘要（例如 AI 問答、AI 法說會摘要），也不採用股價行情頁、技術分析頁與目標價預測彙整頁（例如 Yahoo 股市報價頁、Goodinfo、CMoney、TradingView、TipRanks、MarketBeat）。名稱相近的別檔股票的報導也不要列。
 - 你的訓練資料比今天早很多：只根據這次搜尋到的內容整理，不要憑記憶補資料。
 
 ## 怎麼列
-- 搜尋到的報導只要寫出某家具名機構對這檔股票的評等或目標價（包括「維持」），就列一筆；一篇報導寫到好幾家機構時，每家各列一筆，url 相同沒關係。
+- 搜尋到的報導只要寫出某家機構對這檔股票的評等或目標價（包括「維持」），就列一筆；一篇報導寫到好幾家機構時，每家各列一筆，url 相同沒關係。
 - url：逐字使用搜尋結果中那篇報導的網址，不可自己組合或修改。
-- institution：機構名稱照報導的寫法（例如「摩根士丹利」「大摩」「Morgan Stanley」）。報導只寫「法人」「外資圈」「美系外資」「外資券商」「分析師普遍」這類沒有寫出機構名稱的說法，不要列。
+- institution：機構名稱照報導的寫法（例如「摩根士丹利」「大摩」「Morgan Stanley」）。報導只寫「日系外資」「美系外資」「歐系外資」「外資」，沒寫是哪一家時，照報導寫（例如「日系外資」），不要猜是哪一家。「法人」「外資圈」「市場」「分析師普遍」這類說法不要列。
 - action：只能是 調升、調降、維持、首評；報導沒寫就填 未註明。
 - rating_text：評等照原文（例如「加碼」「優於大盤」「Overweight」「Buy」），不要翻譯成看好或看壞；報導沒寫評等就填 null。
 - target_price：只抄報導明寫、屬於這個掛牌市場的目標價數字，不換算、不四捨五入、不自己估；報導沒寫就填 null。currency 填那個目標價的幣別。台股的目標價是新台幣；同一家公司在美國的 ADR（例如台積電的 TSM）的美元目標價不屬於台股，不要列。
@@ -178,7 +179,7 @@ ANALYST_TOOL_NAME = "report_analyst_views"
 # it into the open ``url`` string instead (live 2026-11-12: ``"url": "https://…','target_price':3800,"``).
 ANALYST_TOOL: dict = {
     "name": ANALYST_TOOL_NAME,
-    "description": ("回報整理好的第三方機構評等與目標價（每筆對應一篇搜尋到的報導，最多 8 筆；找不到就給空清單）。"
+    "description": ("回報整理好的第三方機構評等與目標價（每筆對應一篇搜尋到的報導，最多 12 筆；找不到就給空清單）。"
                     "每筆七個欄位都要寫，沒有的值填 null。這是唯一的輸出方式。"),
     "strict": True,
     "input_schema": {
@@ -370,11 +371,20 @@ def why_question(name: str, symbol: str, market: str, day: str, reasons: list[st
             "請搜尋後用一句話說明原因；找不到可靠原因就輸出 NONE。")
 
 
-def analyst_question(name: str, symbol: str, market: str, currency: str, today: str, since: str) -> str:
+def analyst_question(name: str, symbol: str, market: str, currency: str, today: str, since: str,
+                     english: str | None = None, conference: str | None = None, host: str | None = None) -> str:
+    """The 法人觀點 question; ``english`` (the English short name), ``conference`` (the latest 法說會 held, ISO date)
+    and ``host`` (the broker hosting it) are ``analyst.query_hints``."""
     market_label = {"TWSE": "上市", "TPEX": "上櫃", "US": "美股"}.get(market, market)
     currency_label = {"TWD": "新台幣", "USD": "美元"}.get(currency, currency)
-    return (f"股票：{name}（{symbol}，{market_label}，以{currency_label}交易）\n今天：{today}（台北）\n"
-            f"請搜尋 {since} 之後的報導，整理機構的評等與目標價，然後呼叫 report_analyst_views。")
+    lines = [f"股票：{name}（{symbol}，{market_label}，以{currency_label}交易）"]
+    if english:
+        lines.append(f"英文名稱：{english}")
+    if conference:
+        lines.append(f"最近一次法說會：{conference}" + (f"（{host}舉辦）" if host else ""))
+    lines += [f"今天：{today}（台北）",
+              f"請搜尋 {since} 之後的報導，整理機構的評等與目標價，然後呼叫 report_analyst_views。"]
+    return "\n".join(lines)
 
 
 def news_question(name: str, code: str, english: str | None, market: str, today: str, since: str) -> str:

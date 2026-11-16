@@ -12,14 +12,15 @@ that only repeats the outlet or names a generic section (財經, 證券, 生活�
 from __future__ import annotations
 
 import difflib
+import functools
 import hashlib
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from urllib.parse import parse_qsl, unquote, urlencode, urlsplit, urlunsplit
 
-from forliosa.news.outlets import host_of, is_aggregator, on_domain, outlet_aliases
+from forliosa.news.outlets import host_of, is_aggregator, is_reputable, on_domain, outlet_aliases
 
 
 def _ranges(*pairs: tuple[int, int]) -> str:
@@ -307,6 +308,7 @@ def is_common_word(term: str) -> bool:
     return " ".join(term.split()).casefold() in COMMON_WORDS
 
 
+@functools.lru_cache(maxsize=4096)
 def _ascii_name_pattern(name: str) -> re.Pattern[str]:
     """How an English name must appear in a headline, as a whole word:
 
@@ -372,6 +374,17 @@ def is_relevant(title: str, terms: Terms) -> bool:
     return False
 
 
+# -- robot quote flashes ------------------------------------------------------------------------------------
+# Machine-written flashes that only repeat a price or a monthly revenue figure the stock page already shows (鉅亨
+# 「盤中速報 - 台達電(2308)股價殺至跌停…」「營收速報 - 禾榮科(7799)10月營收…」, measured 2026-11-16): never stored
+# or shown. 鉅亨's 「鉅亨速報 - Factset 最新調查」 (consensus estimates) is not a quote flash and stays.
+_BOT_FLASH = re.compile("^\\s*[《〈【\\[(（]?\\s*(?:盤中|盤後|開盤|收盤|營收|漲停|跌停)速報")
+
+
+def is_bot_flash(title: str) -> bool:
+    return bool(_BOT_FLASH.search(title or ""))
+
+
 # -- de-duplication -----------------------------------------------------------------------------------------
 _TITLE_NOISE = re.compile(r"[\W_]+", re.UNICODE)
 SIMILAR_TITLE_RATIO = 0.88
@@ -408,9 +421,10 @@ class Headline:
 
 def dedupe(items: Iterable[Headline]) -> list[Headline]:
     """One headline per story: the same URL (normalised) or a near-identical title. The original outlet wins over
-    an aggregator copy (Yahoo, LINE TODAY, MSN), the canonical page over an AMP / mobile variant, then the earliest
-    one. Returned newest first."""
-    ordered = sorted(items, key=lambda h: (is_aggregator(h.url), is_amp_or_mobile(h.url), h.published_at))
+    an aggregator copy (Yahoo, LINE TODAY, MSN), a reputable outlet (:data:`outlets.REPUTABLE_DOMAINS`) over another
+    copy, the canonical page over an AMP / mobile variant, then the earliest one. Returned newest first."""
+    ordered = sorted(items, key=lambda h: (is_aggregator(h.url), not is_reputable(h.url), is_amp_or_mobile(h.url),
+                                           h.published_at))
     kept: list[Headline] = []
     seen_urls: set[str] = set()
     for h in ordered:
@@ -422,6 +436,17 @@ def dedupe(items: Iterable[Headline]) -> list[Headline]:
         kept.append(h)
     kept.sort(key=lambda h: h.published_at, reverse=True)
     return kept
+
+
+_TAIPEI = timezone(timedelta(hours=8))
+
+
+def rank(items: Iterable[Headline]) -> list[Headline]:
+    """Newest day first (Taipei); within a day the reputable outlets first, then newest first. The stock page sorts
+    by time itself; this order is what the AI news tool and the list limit see (reputable preferred, never
+    required)."""
+    return sorted(items, key=lambda h: (-h.published_at.astimezone(_TAIPEI).toordinal(), not is_reputable(h.url),
+                                        -h.published_at.timestamp()))
 
 
 # -- takedown blocklist -------------------------------------------------------------------------------------

@@ -4,6 +4,10 @@ A host matches its longest listed suffix (``money.udn.com`` 經濟日報 before 
 host is shown as its domain without ``www.``. ``aliases`` are the extra spellings an outlet uses in its own
 ``<title>`` suffix (「| 三立新聞網 SETN.COM」「| ETtoday財經雲」), so ``normalize.strip_suffixes`` can remove a tail
 that only repeats the outlet.
+
+Three lists sort sites for the 「新聞報導」 list (2026-11-16): :data:`TAIWAN_DOMAINS` (with every ``.tw`` host: what
+GDELT's bulk files are filtered to for Taiwan stocks), :data:`REPUTABLE_DOMAINS` (preferred, never required) and
+:data:`NOT_NEWS_DOMAINS` (quote pages, forums, blogs, AI-written pages: never a headline).
 """
 
 from __future__ import annotations
@@ -111,6 +115,38 @@ OUTLETS: dict[str, Outlet] = {
 }
 
 
+# Taiwanese outlets outside the .tw top-level domain (a .tw host is Taiwanese by itself). GDELT's bulk files carry no
+# source country, so this list stands in for the DOC API's ``sourcecountry:taiwan`` (which, by GDELT's 2018 domain
+# list, also files cnyes.com and moneydj.com under China and storm.mg under Madagascar).
+TAIWAN_DOMAINS = frozenset({
+    "udn.com", "chinatimes.com", "ettoday.net", "setn.com", "storm.mg", "yam.com", "cnyes.com", "moneydj.com",
+    "nownews.com", "mirrormedia.mg", "upmedia.mg", "thenewslens.com", "ctwant.com", "ctinews.com", "taisounds.com",
+    "taipeitimes.com", "digitimes.com",
+})
+# Reputable business news (產品負責人 2026-11-16, memo §2 item 5): preferred, never required — a story found in one
+# of them wins over a copy elsewhere, and within a day they come first in the order the server returns. Taiwan:
+# 經濟日報、工商時報、MoneyDJ、鉅亨、中央社（及 Focus Taiwan）、自由財經; US: Reuters, CNBC and the other wire / business
+# papers.
+REPUTABLE_DOMAINS = frozenset({
+    "money.udn.com", "ctee.com.tw", "moneydj.com", "cnyes.com", "cna.com.tw", "focustaiwan.tw", "ec.ltn.com.tw",
+    "reuters.com", "cnbc.com", "bloomberg.com", "wsj.com", "ft.com", "apnews.com", "marketwatch.com", "barrons.com",
+})
+# Not news (memo 2026-11-16 §1, measured): quote and rating pages, forums and blogs, and AI-written "news" (CMoney's
+# aigc-note Q&A and cmnews AI articles, Fugle's AI 法說會 notes). Never stored or shown as a headline, and blocked in
+# the AI news search. A host matches with its subdomains; NOT_NEWS_PATHS only for path prefixes on one host.
+NOT_NEWS_DOMAINS = (
+    "cmoney.tw", "cmnews.com.tw", "goodinfo.tw", "wantgoo.com", "histock.tw", "istock.tw", "winvest.tw",
+    "poorstock.com", "finlab.tw", "finlab.finance", "findbillion.com", "uc913.com", "nstock.tw", "myth-capital.com",
+    "toalpha.tw", "blog.fugle.tw", "treelazy.com", "stock.wearn.com", "vocus.cc", "gate.com", "finance.biggo.com",
+    "ptt.cc", "dcard.tw", "mobile01.com", "pixnet.net", "blog.udn.com", "city.udn.com", "tradingview.com",
+    "stockanalysis.com", "marketbeat.com", "tipranks.com",
+)
+NOT_NEWS_PATHS: dict[str, tuple[str, ...]] = {
+    "pchome.megatime.com.tw": ("/stock",),  # quote pages; its /news pages are real reprints
+    "tw.stock.yahoo.com": ("/quote",),
+}
+
+
 def host_of(url: str) -> str:
     """``https://www.cna.com.tw:443/news/…`` -> ``cna.com.tw`` (lower case, no ``www.``, no port)."""
     try:
@@ -147,6 +183,44 @@ def outlet_name(url: str, domain_hint: str | None = None) -> str:
 def is_aggregator(url: str) -> bool:
     entry = outlet_entry(host_of(url))
     return bool(entry and entry[1].aggregator)
+
+
+def _host(url_or_host: str) -> str:
+    return host_of(url_or_host) if "://" in url_or_host else url_or_host.lower().removeprefix("www.").rstrip(".")
+
+
+def is_taiwan_outlet(url_or_host: str) -> bool:
+    """A Taiwanese news site: a ``.tw`` host, one of :data:`TAIWAN_DOMAINS`, or Yahoo's Taiwan edition."""
+    host = _host(url_or_host)
+    if not host:
+        return False
+    if host.endswith(".tw"):
+        return True
+    if host.startswith("tw.") and on_domain(host, "yahoo.com"):
+        return True
+    return any(on_domain(host, d) for d in TAIWAN_DOMAINS)
+
+
+def is_reputable(url_or_host: str) -> bool:
+    host = _host(url_or_host)
+    return bool(host) and any(on_domain(host, d) for d in REPUTABLE_DOMAINS)
+
+
+def is_not_news(url: str) -> bool:
+    """A quote / rating page, a forum or blog, or an AI-written page (:data:`NOT_NEWS_DOMAINS`)."""
+    host = _host(url)
+    if not host:
+        return False
+    if any(on_domain(host, d) for d in NOT_NEWS_DOMAINS):
+        return True
+    prefixes = NOT_NEWS_PATHS.get(host)
+    if prefixes and "://" in url:
+        try:
+            path = (urlsplit(url.strip()).path or "/").lower()
+        except ValueError:
+            return False
+        return path.startswith(prefixes)
+    return False
 
 
 def _squash(text: str) -> str:
