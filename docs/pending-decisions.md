@@ -445,3 +445,17 @@
 - 寫進 `PRODUCT.md`「群組加值包」、`DESIGN.md` 群組設定〈方案〉、`docs/api-contract.md`、`apps/api/CONTRACT_NOTES.md`、服務條款 §7.8（`docs/legal/README.md` 的 §7.8 修改與 T26）、`docs/product-spec.md`、`docs/handoff.md`。
 
 **只有你能做的**：部署不用設變數（預設就是 5 位）。
+
+---
+
+## 2026-11-16 會員的 AI 額度與個人會員的價格（產品負責人）
+
+| # | 事情 | 決定 |
+|---|---|---|
+| 1 | 會員每月的 AI 花費上限 | **約 US$3 → 約 US$8**（`AI_MEMBER_MONTHLY_COST_BUDGET_USD=8`）。免費帳號照舊約 US$1 |
+| 2 | 會員的省錢模式要到哪裡才停 | **上限的 1.25 倍**（約 US$10；`AI_MEMBER_ECONOMY_CAP_MULTIPLIER=1.25`）。免費帳號照舊兩倍（`AI_ECONOMY_CAP_MULTIPLIER=2`） |
+| 3 | 個人會員的價格 | **NT$490／月、NT$4,900／年**（原本預計 NT$300／月）。只寫在文件，還沒有任何付款的程式；會員仍由站方在管理後台開通 |
+
+寫進 `PRODUCT.md`「會員方案」、`docs/api-contract.md`「會員方案（2026-11-15）」、`apps/api/CONTRACT_NOTES.md`、服務條款 §8.5（`docs/legal/README.md`「2026-11-16 的修改（會員的每月額度）」）。
+
+**只有你能做的**：部署不用設變數（新的預設就是 US$8 與 1.25 倍）；正式環境的 Railway 如果自己設過 `AI_MEMBER_MONTHLY_COST_BUDGET_USD=3`，要拿掉或改成 8。

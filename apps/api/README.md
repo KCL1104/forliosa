@@ -157,8 +157,8 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 |---|---|---|
 | `AI_MODEL` | `claude-haiku-5-5` | `AI_MODEL_CHAT`／`AI_MODEL_WHY` 可個別覆寫 |
 | `AI_DAILY_MESSAGE_LIMIT`、`AI_MONTHLY_TOKEN_BUDGET`、`AI_MONTHLY_COST_BUDGET_USD` | 3、3,000,000、1 | 免費帳號每天提問數、每月計費 token、每月估計花費（美元）（0＝不限；產品負責人 2026-11-15） |
-| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、3、0 | 會員（站方在 `/admin/members` 開通；站方管理員也算）。深度搜尋與收盤簡報只給會員（`AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` 可以開給所有人） |
-| `AI_ECONOMY_CAP_MULTIPLIER` | 2 | 花費上限用完後的省錢模式（不上網搜尋）一直到花了上限的幾倍才停；1＝到上限就停 |
+| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、8、0 | 會員（站方在 `/admin/members` 開通；站方管理員也算；每月約 US$8 是 2026-11-16 起，以前 US$3）。深度搜尋與收盤簡報只給會員（`AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` 可以開給所有人） |
+| `AI_ECONOMY_CAP_MULTIPLIER`、`AI_MEMBER_ECONOMY_CAP_MULTIPLIER` | 2、1.25 | 花費上限用完後的省錢模式（不上網搜尋）一直到花了上限的幾倍才停（前一個是免費帳號的，後一個是會員的，2026-11-16）；1＝到上限就停 |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES`、`AI_WEB_SEARCH_ALLOWED_DOMAINS` | `true`、5、空 | 預設不限網域，由模型判斷何時搜尋、用哪些來源（只限財經資訊） |
 | `AI_DEEP_SEARCH_COST`、`AI_DEEP_SEARCH_MAX_USES`、`AI_DEEP_MAX_TOOL_ROUNDS` | 3（不超過每天的題數）、12、16 | 深度搜尋（`POST /ai/chat` 的 `mode: "deep"`）：一次算幾題、最多搜尋幾次、迴圈最多幾輪 |
 | `AI_WEB_FETCH_ALLOWED_DOMAINS` | （空，不限） | 產品負責人 2026-11-12 決定開放，由 AI 自行判斷；可設 `official` 只讀官方網域 |

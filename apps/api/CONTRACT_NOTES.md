@@ -1053,9 +1053,9 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `AI_DAILY_MESSAGE_LIMIT` | 3 | 免費帳號每天（台北日）提問數，0＝不限（產品負責人 2026-11-15；原本 50）。會員見 `AI_MEMBER_*`（`forliosa.plans`） |
 | `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
 | `AI_MONTHLY_COST_BUDGET_USD` | 1 | 免費帳號每月（台北月）估計花費上限（美元：對話、法人觀點、收盤簡報；共用的工作不算到任何人），0＝不限（產品負責人 2026-11-15：從 US$2 降到 US$1）。一題要正常開始，得剩得下它的一般花費（一般提問 US$0.05、深度搜尋 US$0.15，`store.TURN_ESTIMATE_USD`）；剩不夠時進入**省錢模式**（`store.month_mode`）：提問照常，但這一題沒有 `web_search`／`web_fetch`（page context 多一行說明），深度搜尋、法人觀點、收盤簡報 429 `ai_monthly_budget`；`/ai/usage` 的 `economy` 為 true |
-| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、3、0 | 會員（`users.plan = "member"` 到 `plan_until`；站方管理員也算）每天的題數、每月花費上限、每月 token（0＝不限） |
+| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、8、0 | 會員（`users.plan = "member"` 到 `plan_until`；站方管理員也算）每天的題數、每月花費上限、每月 token（0＝不限）。每月花費上限 2026-11-16 從 3 改成 8（產品負責人） |
 | `AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` | `false`、`false` | 免費帳號也能用深度搜尋／收盤簡報（個人部署用）；預設只給會員：免費帳號 `mode: "deep"` → 403 `members_only`，打開收盤簡報 → 403 `members_only` |
-| `AI_ECONOMY_CAP_MULTIPLIER` | 2 | 省錢模式一直到這個月花到上限的幾倍才完全停（429 `ai_monthly_budget`，`month_budget_reached` true）；1＝到上限直接停。省錢模式第一次在舊對話裡用時，工具清單和之前不同，回放的 thinking 會被拒一次，這一題改從純文字摘要接下去（`_THINKING_REJECTED`，和換金鑰槽同一條路） |
+| `AI_ECONOMY_CAP_MULTIPLIER`、`AI_MEMBER_ECONOMY_CAP_MULTIPLIER` | 2、1.25 | 省錢模式一直到這個月花到上限的幾倍才完全停（前一個是免費帳號的，後一個是會員的：產品負責人 2026-11-16，`plans.Plan.economy_cap_multiplier`、`store.month_mode`）（429 `ai_monthly_budget`，`month_budget_reached` true）；1＝到上限直接停。省錢模式第一次在舊對話裡用時，工具清單和之前不同，回放的 thinking 會被拒一次，這一題改從純文字摘要接下去（`_THINKING_REJECTED`，和換金鑰槽同一條路） |
 | `AI_THREAD_MAX_CONTEXT_TOKENS` | 90,000 | 一段對話的提示超過這個大小就要求開新對話（Haiku 5.5 提示超過 10 萬 token 價格變 5 倍） |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、5 | 每輪最多 5 次搜尋（2026-11-16 從 3 提高：「為什麼漲跌」要查價格、大盤與公司消息三種） |
 | `AI_WEB_SEARCH_ALLOWED_DOMAINS` | 空（**不限網域**，產品負責人決定） | 逗號分隔；`recommended`＝內建的台灣財經媒體＋官方網域清單，`official`＝只有官方。預設由模型自己判斷何時搜尋、用哪些來源（只限財經資訊，見「範圍」） |

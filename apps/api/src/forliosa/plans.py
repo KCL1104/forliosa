@@ -2,8 +2,10 @@
 
 Free accounts: ``AI_DAILY_MESSAGE_LIMIT`` questions a day (3) and about ``AI_MONTHLY_COST_BUDGET_USD`` a month (US$1);
 no 深度搜尋 and no daily closing briefing. Members: ``AI_MEMBER_DAILY_MESSAGE_LIMIT`` (30), about
-``AI_MEMBER_MONTHLY_COST_BUDGET_USD`` (US$3), both features. Over the month's budget either plan keeps asking without
-Claude's web search (省錢模式, ``store.month_mode``).
+``AI_MEMBER_MONTHLY_COST_BUDGET_USD`` (US$8 since 2026-11-16; US$3 before), both features. Over the month's budget
+either plan keeps asking without Claude's web search (省錢模式, ``store.month_mode``) until its spending reaches
+``Plan.economy_cap_multiplier`` × the budget: ``AI_ECONOMY_CAP_MULTIPLIER`` (2) for free accounts,
+``AI_MEMBER_ECONOMY_CAP_MULTIPLIER`` (1.25, 產品負責人 2026-11-16) for members.
 
 A member is ``users.plan = "member"`` until ``users.plan_until`` (NULL: no end date). Site admins (``ADMIN_EMAILS``)
 count as members. There are no payments yet: a site admin grants membership on /admin/members (``grant``).
@@ -38,6 +40,8 @@ class Plan:
     daily_message_limit: int  # 0: no limit
     monthly_cost_budget_usd: float  # 0: no limit
     monthly_token_budget: int  # 0: no limit
+    # 省錢模式 runs until the month's spending reaches this many times the US$ budget (1: stop at the budget)
+    economy_cap_multiplier: float
     deep_search: bool
     daily_briefing: bool
     # 匯入對帳單 (2026-11-16): ``IMPORT_STATEMENTS`` off | admins | all, the same for free accounts and members
@@ -65,10 +69,11 @@ def plan_of(user: User, settings: Settings, now: datetime | None = None) -> Plan
     if is_member(user, now):
         return Plan(MEMBER, None if is_site_admin(user) else user.plan_until,
                     settings.ai_member_daily_message_limit, settings.ai_member_monthly_cost_budget_usd,
-                    settings.ai_member_monthly_token_budget, True, True, imports)
+                    settings.ai_member_monthly_token_budget, settings.ai_member_economy_cap_multiplier, True, True,
+                    imports)
     return Plan(FREE, None, settings.ai_daily_message_limit, settings.ai_monthly_cost_budget_usd,
-                settings.ai_monthly_token_budget, settings.ai_free_deep_search, settings.ai_free_daily_briefing,
-                imports)
+                settings.ai_monthly_token_budget, settings.ai_economy_cap_multiplier, settings.ai_free_deep_search,
+                settings.ai_free_daily_briefing, imports)
 
 
 def last_day(until: datetime | None) -> date | None:

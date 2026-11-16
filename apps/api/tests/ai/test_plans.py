@@ -122,3 +122,35 @@ def test_analyst_views_wait_for_next_month_in_economy_mode(client, pool, fake, a
     assert usage(client)["economy"] is True
     r = client.post(f"{API}/instruments/2330/analyst-views")
     assert r.status_code == 429 and r.json()["error"]["code"] == "ai_monthly_budget"
+
+
+def test_members_stop_economy_mode_sooner(db, client, ai_env, monkeypatch):
+    """產品負責人 2026-11-16: members about US$8 a month (US$3 before) and 省錢模式 only up to 1.25 times that (about
+    US$10; AI_MEMBER_ECONOMY_CAP_MULTIPLIER); free accounts keep US$1 and twice the budget
+    (AI_ECONOMY_CAP_MULTIPLIER)."""
+    from decimal import Decimal
+
+    from forliosa.ai import store
+
+    for name in ("AI_MONTHLY_COST_BUDGET_USD", "AI_MEMBER_MONTHLY_COST_BUDGET_USD", "AI_ECONOMY_CAP_MULTIPLIER",
+                 "AI_MEMBER_ECONOMY_CAP_MULTIPLIER"):
+        monkeypatch.delenv(name, raising=False)
+    ai_env()  # the defaults
+    spent = {"usd": Decimal(0)}
+    monkeypatch.setattr(store, "month_usage", lambda db, user, now=None: (0, spent["usd"]))
+
+    def mode(usd: str) -> str:
+        spent["usd"] = Decimal(usd)
+        return store.month_mode(db, demo(db), get_settings())
+
+    plan = plans.plan_of(demo(db), get_settings())
+    assert (plan.tier, plan.monthly_cost_budget_usd, plan.economy_cap_multiplier) == ("free", 1.0, 2.0)
+    assert [mode(u) for u in ("0.90", "0.99", "1.95", "1.995")] == ["normal", "economy", "economy", "stopped"]
+
+    plans.grant(db, DEMO, None, None)
+    plan = plans.plan_of(demo(db), get_settings())
+    assert (plan.tier, plan.monthly_cost_budget_usd, plan.economy_cap_multiplier) == ("member", 8.0, 1.25)
+    assert [mode(u) for u in ("7.90", "7.99", "9.95", "9.995", "12")] == [
+        "normal", "economy", "economy", "stopped", "stopped"]
+    ai_env(AI_MEMBER_ECONOMY_CAP_MULTIPLIER=1)  # no 省錢模式 for members: stop at the budget
+    assert mode("7.99") == "stopped"

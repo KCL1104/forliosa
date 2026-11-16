@@ -31,7 +31,7 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
 /**
  * 會員（`/admin/members`）：還沒有付款，由站方用 email 開通（對方要先登入過一次）。標題右邊切換「個人會員｜群組加值」
  * （`?kind=group`；群組加值包第一階段，`AdminGroupPasses.tsx`）。
- * 個人會員每天 30 題、每月約 US$3，另有深度搜尋與每日收盤簡報；免費每天 3 題、約 US$1。
+ * 個人會員每天 30 題、每月約 US$8（2026-11-16 起；省錢模式到 1.25 倍才停），另有深度搜尋與每日收盤簡報；免費每天 3 題、約 US$1（省錢模式到兩倍）。
  * 最後一天過完自動回到免費；過期的也列在下面，方便續期。
  */
 export function AdminMembersPage() {

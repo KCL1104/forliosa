@@ -43,7 +43,7 @@
   - 隱私 §5.1：AI 讀到的帳戶清單沒有「追蹤方式」（`api/ai/tools.py` 的 `get_accounts` 只給編號、名稱、券商、幣別）。
   - 隱私 §10.1、§10.2：設定頁已經可以一次刪除全部 AI 對話（2026-11-14，待決定事項 3-2），從「要寫信」移到「可以自己做」。
   - 條款 §8.3：AI 的買賣草稿不再「包含估算的手續費與稅」（2026-11-14 起不自動算）；股利草稿仍先扣掉估算的二代健保與美股預扣稅。
-  - 條款 §8.5：原本寫「每天最多 50 則」；現在是免費 3 題、會員 30 題，每月估計花費上限（免費約 US$1、會員約 US$3），免費另有 300 萬計費 token；深度搜尋一次 3 題；用完進省錢模式、兩倍才停；匯入不算題數、每天 10 份。
+  - 條款 §8.5：原本寫「每天最多 50 則」；現在是免費 3 題、會員 30 題，每月估計花費上限（免費約 US$1、會員約 US$3；同一天稍後改成會員約 US$8，見下方「會員的每月額度」），免費另有 300 萬計費 token；深度搜尋一次 3 題；用完進省錢模式、兩倍才停（會員後來改成 1.25 倍）；匯入不算題數、每天 10 份。
 - **請律師看** (d) 第 20 點。
 
 **2026-11-16 的修改（台股收盤價提早進來）**：產品負責人決定（`PRODUCT.md`「台股收盤價什麼時候進來」；研究 `docs/research/same-day-close.md`；決定的紀錄 `docs/pending-decisions.md`「2026-11-16 台股當天收盤價」）：
@@ -76,6 +76,11 @@
 - **隱私 §2.7**：「沒有付款資料」照舊（現在確實沒有），加一句開始收費時會先改這一節與 §4.1，標【待確認】。
 - **請律師看**：新的 (f)「收費前的律師問題清單」（決定 1）。(d) 第 7 點的投顧問題併進 (f) 第 1–7 點。
 - **同一天審查後的修正**：隱私 §5.5 改成「當天有報酬數字的成員」（還沒有帳本的人不算、不送）、沒有人分享交易動態時不送買賣筆數；§6.1 加「之後刪除或改掉的交易，日報裡也不再列出」；§6.2 日報推播的買賣和交易推播同一條規則（只送打開推播以後記的、送出前沒刪的）。站方「停止」加值改成**不刪紀錄**、列成已到期，和 §7「加值紀錄持續保留」一致。
+
+**2026-11-16 的修改（會員的每月額度）**：產品負責人決定會員每月估計花費上限從約 US$3 提高到約 US$8，省錢模式改成花到上限的 1.25 倍就停（免費帳號照舊：約 US$1、兩倍）。
+
+- **服務條款 §8.5**：「會員約 US$3」改成「會員約 US$8」；「花到上限的兩倍才停到下個月」改成「免費帳號花到上限的兩倍、會員花到上限的 1.25 倍才停到下個月」。
+- 個人會員的預定價格（NT$490／月、NT$4,900／年）只記在 `PRODUCT.md` 與 `docs/pending-decisions.md`，還沒有付款的程式，條款不寫價格。
 
 **撰寫時無法核對的事（重要）**：這次工作的網路環境連不到全國法規資料庫（`law.moj.gov.tw`）、臺北市法規查詢系統（`laws.gov.taipei`）與 Anthropic 的隱私說明網站（`privacy.claude.com`）。因此：
 
@@ -238,7 +243,7 @@
 | T19 | §8.2 | 列出引用來源、標示無來源（可能漏標誤標）、固定聲明 | `api/ai/grounding.py`；`api/ai/prompts.py:60`；`apps/api/CONTRACT_NOTES.md:1100-1105`、`:1226` |
 | T20 | §8.3 | AI 只產生草稿，確認後才寫入；沒寫價格時用收盤價估算；買賣草稿不算手續費與稅（2026-11-14），股利草稿先扣二代健保與美股預扣稅 | `api/ai/tools.py`（`draft_transaction`：沒有手續費、稅的參數）；`api/services/transactions.py`（`compute`）；`apps/api/CONTRACT_NOTES.md`「2026-11-14 手續費與稅不自動算」；`PRODUCT.md`「手續費與稅不自動算」 |
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
-| T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$3；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
+| T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$8（2026-11-16 以前 US$3）；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍（會員 1.25 倍，2026-11-16）；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`、`ai_member_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
 | T25 | §8.10 | 匯入對帳單：AI 可能讀錯、確認後才寫入、可整批復原；上傳的內容送到 AI 服務供應商 | `docs/api-contract.md`「匯入對帳單（2026-11-16）」（`POST /transactions/batch` 全部或全不、`DELETE /transactions/batches/{id}`）；`api/services/transactions.py`（`create_batch`、`delete_batch`） |
 | T26 | §7.8 | 免費 5、加值 50；上限開始區分以前的群組 50；滿了 409、不移除任何人；每人 20 個群組 | `api/config.py`（`group_free_member_cap`、`group_boosted_member_cap`）；`api/services/group_plans.py`（`plan_of`、`full_message`）；`api/services/groups.py`（`accept_invite`、`MAX_GROUPS`）；`apps/api/alembic/versions/0023_group_passes.py`（`UPDATE groups SET grandfathered_member_cap = 50`） |
 | T27 | §7.9、§6.6 | 擁有者把自己的加值用在自己擁有的群組；轉讓或付款人刪帳號照樣用到期；群組刪除時回到付款人手上；到期日報停、以前的照樣看得到；個人 AI 額度不變 | `api/services/group_plans.py`（`attach`：只有 owner、`pass_in_use`；`boosted_group_ids`）；`api/services/group_daily.py`（`run` 只寫加值中的群組；`reports_page` 不看方案）；`api/ai/store.py`（`feature = "group_daily"`、`user_id` NULL，不算進任何人的額度） |
@@ -274,7 +279,7 @@
 20. **匯出資料不含群組加值的紀錄**（隱私 §10.1 列的匯出內容沒有寫它，照實）。`GET /me/export` 沒有 `group_passes`；開始收費以前建議加上（取得的加值、期限、用在哪個群組）。
 21. **群組加值的紀錄沒有保存期限**（隱私 §7 照實寫「持續保留」）。開始收費以後要配合稅法的憑證保存年限訂一個期限（見 (f) 第 17 點）。
 
-**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域、`GROUP_FREE_MEMBER_CAP`／`GROUP_BOOSTED_MEMBER_CAP`（5／50；條款 §7.8、§7.9）、`GROUP_DAILY_ENABLED`（關掉時沒有新的日報：條款 §7.9 與隱私 §5.5、§6.1、§6.2 的日報可以留著）、`AI_MODEL_DIGEST`（日報與週報用的模型；換成別家的要改隱私 §4.1、§5.5）。
+**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`／`AI_MEMBER_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$8／300 萬／3 題／2 倍／1.25 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域、`GROUP_FREE_MEMBER_CAP`／`GROUP_BOOSTED_MEMBER_CAP`（5／50；條款 §7.8、§7.9）、`GROUP_DAILY_ENABLED`（關掉時沒有新的日報：條款 §7.9 與隱私 §5.5、§6.1、§6.2 的日報可以留著）、`AI_MODEL_DIGEST`（日報與週報用的模型；換成別家的要改隱私 §4.1、§5.5）。
 
 ---
 

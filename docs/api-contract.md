@@ -1409,13 +1409,14 @@
 | | 免費 | 會員 |
 |---|---|---|
 | 每天提問 | 3 題（`AI_DAILY_MESSAGE_LIMIT`） | 30 題（`AI_MEMBER_DAILY_MESSAGE_LIMIT`） |
-| 每月估計花費上限 | 約 US$1（`AI_MONTHLY_COST_BUDGET_USD`） | 約 US$3（`AI_MEMBER_MONTHLY_COST_BUDGET_USD`） |
+| 每月估計花費上限 | 約 US$1（`AI_MONTHLY_COST_BUDGET_USD`） | 約 US$8（`AI_MEMBER_MONTHLY_COST_BUDGET_USD`；2026-11-16 以前 US$3） |
+| 省錢模式到上限的幾倍才停 | 2 倍（`AI_ECONOMY_CAP_MULTIPLIER`） | 1.25 倍（`AI_MEMBER_ECONOMY_CAP_MULTIPLIER`，2026-11-16） |
 | 每月計費 token | 300 萬（`AI_MONTHLY_TOKEN_BUDGET`） | 不限（`AI_MEMBER_MONTHLY_TOKEN_BUDGET=0`） |
 | 深度搜尋（3 題） | 沒有（`AI_FREE_DEEP_SEARCH=false`） | 有 |
 | 每日收盤簡報 | 沒有（`AI_FREE_DAILY_BRIEFING=false`） | 有 |
 
 - **省錢模式**：這個月的花費剩不到一般提問的 US$0.05 時，提問照常（每天的題數照算），但不上網搜尋（沒有 `web_search`／`web_fetch`，約 US$0.002 一題；站內的報價、財報、技術指標、`get_news` 的新聞都還在）；
-  深度搜尋、法人觀點查詢、收盤簡報等下個月 1 日。花到上限的 `AI_ECONOMY_CAP_MULTIPLIER` 倍（預設 2）才完全停（`month_budget_reached`）。設 1 就是到上限直接停。
+  深度搜尋、法人觀點查詢、收盤簡報等下個月 1 日。花到上限的 `AI_ECONOMY_CAP_MULTIPLIER` 倍（免費帳號，預設 2）或 `AI_MEMBER_ECONOMY_CAP_MULTIPLIER` 倍（會員，預設 1.25，2026-11-16）才完全停（`month_budget_reached`）。設 1 就是到上限直接停。
 - `GET /me` 多 `plan: {"tier": "free" | "member", "until": "YYYY-MM-DD" | null, "deep_search": bool, "daily_briefing": bool}`（`until`：會員的最後一天，台北；null＝免費或沒有到期日）。2026-11-16 再多 `"statement_import": bool`（能不能匯入對帳單，見「匯入對帳單」）。
 - `GET /ai/usage` 多 `plan`、`economy`、`deep_search_members_only`（見上面的 `Usage`）。
 
