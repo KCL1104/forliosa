@@ -316,17 +316,32 @@ def label(entry: Research) -> str:
     return f"沿用 {entry.updated_at.astimezone(TAIPEI):%H:%M} 查好的資料"
 
 
-def _close_line(found: Lookup) -> str | None:
-    quote = ((found.entry.facts if found.entry else None) or {}).get("quote") or {}
-    td = quote.get("trade_date")
-    if not td or str(td) >= found.key.session.isoformat():
-        return None
-    session = _md(found.key.session)
+def _num(x: Any) -> str:
+    return f"{float(x):,.2f}".rstrip("0").rstrip(".")
+
+
+def _facts_lines(found: Lookup) -> list[str]:
+    """The official numbers: all of them when they are the session's own close; otherwise only the latest close (to
+    measure the session's move from), said to be older. 2026-11-16 live check: the previous day's index move and
+    anomalies beside today's searched numbers made the model deliberate longer and once compare the wrong days."""
+    facts = (found.entry.facts if found.entry else None) or {}
+    quote = facts.get("quote") or {}
+    td, session = quote.get("trade_date"), found.key.session
+    if td and str(td) >= session.isoformat():
+        keep = {k: facts[k] for k in ("quote", "market_context", "why_signals") if k in facts}
+        return ["  官方收盤數字（get_stock_overview，不用引用）："
+                + json.dumps(keep, ensure_ascii=False, separators=(",", ":"))]
+    lines = []
+    s = _md(session)
+    if td and quote.get("price") is not None:
+        price = f"US${_num(quote['price'])}" if found.info.currency == "USD" else f"{_num(quote['price'])} 元"
+        lines.append(f"  最新的官方收盤是 {_md(td)} 的 {price}（不是 {s} 的）。")
     if found.key.phase == INTRADAY:
-        return (f"盤中：quote 與 market_context 是 {_md(td)} 的官方收盤，不是今天的；"
-                "今天這一檔與大盤漲跌多少看搜尋結果，寫出來源的時間")
-    return (f"{session} 的官方收盤價還沒公布：quote 是 {_md(td)} 的收盤；{session} 漲跌多少看搜尋結果並寫出來源的時間"
-            "（官方收盤價什麼時候更新照「台股收盤價」那一行寫）")
+        lines.append(f"  盤中：{s} 這一檔與大盤漲跌多少看搜尋結果，寫出來源的時間。")
+    else:
+        where = "（官方收盤價什麼時候更新照「台股收盤價」那一行寫）" if found.key.market != "US" else ""
+        lines.append(f"  {s} 的官方收盤價還沒進來：{s} 漲跌多少看搜尋結果並寫出來源的時間{where}。")
+    return lines
 
 
 def note(found: Lookup) -> str:
@@ -348,11 +363,7 @@ def note(found: Lookup) -> str:
         f"  2. 不用再呼叫 {'get_stock_overview、' if entry.facts else ''}get_news 或 web_search；只有{again}時，才再用"
         " web_search 找。問題的其他部分（持股、技術面、記帳）照平常用工具。",
     ]
-    if entry.facts:
-        lines.append("  數字（get_stock_overview 的官方資料，不用引用）："
-                     + json.dumps(entry.facts, ensure_ascii=False, separators=(",", ":")))
-    if close := _close_line(found):
-        lines.append(f"  {close}")
+    lines += _facts_lines(found)
     if entry.one_liner:
         lines.append(f"  個股頁的 AI 一句話（出處在搜尋結果裡）：{entry.one_liner}")
     listed = []

@@ -87,13 +87,14 @@ FORBIDDEN = re.compile(
 STYLE = re.compile(r"整體而言|整體來看|總的來說|總體來看|值得注意|值得一提|此外|另外值得|表現亮眼|亮眼|"
                    r"值得肯定|穩健|可喜|遺憾|不錯|強勁|疲弱|—|――|！|!|\*\*|#")
 PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+MINUS = re.compile(r"-(?=\d+(?:\.\d+)?\s*%)")
 
 SYSTEM = (
     "你替一個親友投資群組寫「今日摘要」，會顯示在群組頁面上，也可能推播到群組的聊天室。"
     "你只會拿到匿名的成員代號與伺服器算好的數字。\n\n"
     "規則：\n"
     "1. 只描述群組整體：幾個人漲、幾個人跌、報酬的範圍；和「發行量加權股價報酬指數」「元大台灣50」比；"
-    "兩人以上共同持有的股票今天的漲跌；今天有幾筆買賣。\n"
+    "兩人以上共同持有的股票今天的漲跌（最多寫兩檔，持有人數多的先寫）；今天有幾筆買賣。\n"
     "2. 不點名，也不要寫出任何成員代號（不要出現「成員 A」這類字），不要猜測任何人的身分，不要評論誰做得好或不好。\n"
     "3. 不給任何買進、賣出、加碼、減碼建議，不提目標價，不預測之後的走勢，不解釋漲跌的原因。\n"
     "4. 只用提供的數字和人數，照抄，不要自己算新的數字；百分比照提供的寫到小數點後一位。沒有資料的項目就略過。\n"
@@ -301,6 +302,7 @@ def write(db: Session, r: GroupDailyReport, pool: KeyPool | None, settings: Sett
                            stop_reason=getattr(msg, "stop_reason", None))
         text = " ".join("".join(getattr(b, "text", "") for b in msg.content
                                 if getattr(b, "type", None) == "text").split())
+        text = MINUS.sub("−", text)  # the report's own minus sign (−1.2%), like its numbers
         if getattr(msg, "stop_reason", None) not in ("end_turn", "stop_sequence"):
             problem = "沒寫完"
             continue

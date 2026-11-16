@@ -20,19 +20,40 @@ import { textAction } from "@/components/text-action"
 import { todayInTaipei } from "@/lib/format"
 import { formatDay, monthLater } from "@/lib/membership"
 import { AdminPage } from "./AdminPage"
+import { GroupPasses } from "./AdminGroupPasses"
+import { RangeChips } from "@/components/segmented"
+import { useNavigate, useSearch } from "@tanstack/react-router"
+import type { AdminMembersSearch } from "@/router"
 
 const NOTE_MAX = 200
 const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請檢查網路後再試一次。")
 
 /**
- * 會員（`/admin/members`）：還沒有付款，由站方用 email 開通（對方要先登入過一次）。
- * 會員每天 30 題、每月約 US$3，另有深度搜尋與每日收盤簡報；免費每天 3 題、約 US$1。
+ * 會員（`/admin/members`）：還沒有付款，由站方用 email 開通（對方要先登入過一次）。標題右邊切換「個人會員｜群組加值」
+ * （`?kind=group`；群組加值包第一階段，`AdminGroupPasses.tsx`）。
+ * 個人會員每天 30 題、每月約 US$3，另有深度搜尋與每日收盤簡報；免費每天 3 題、約 US$1。
  * 最後一天過完自動回到免費；過期的也列在下面，方便續期。
  */
 export function AdminMembersPage() {
+  const search = useSearch({ strict: false }) as AdminMembersSearch
+  const navigate = useNavigate()
+  const kind = search.kind === "group" ? "group" : "member"
   return (
-    <AdminPage title="會員">
-      <Members />
+    <AdminPage
+      title="會員"
+      actions={
+        <RangeChips
+          label="種類"
+          value={kind}
+          onChange={(k) => void navigate({ to: "/admin/members", search: { kind: k === "group" ? "group" : undefined }, replace: true })}
+          options={[
+            { value: "member", label: "個人會員" },
+            { value: "group", label: "群組加值" },
+          ]}
+        />
+      }
+    >
+      {kind === "group" ? <GroupPasses /> : <Members />}
     </AdminPage>
   )
 }

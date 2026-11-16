@@ -240,7 +240,7 @@ def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], sum
         lines.append("今天的買賣：" + "、".join(items) + more)
     link = _link(settings)
     if link:
-        lines.append(f"完整日報（含 AI 收盤重點與為什麼漲跌的連結）：{link}")
+        lines.append(f"完整日報：{link}")
     if summary:
         lines.append(DISCLAIMER)
     return "\n".join(lines)

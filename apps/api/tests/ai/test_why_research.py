@@ -208,6 +208,34 @@ def test_search_result_blocks_cite_each_passage_and_fall_back_to_the_title():
          "content": [{"type": "text", "text": "三"}]}]
 
 
+def test_the_note_carries_the_rule_and_only_the_numbers_of_the_session(market):
+    info = market.instrument("2308.TW")
+    src = [{"url": A, "title": "台達電重挫", "snippets": ["x"], "page_age": "2 hours ago",
+            "found_at": "2026-11-16T10:05+08:00"}, {"url": D, "title": "台達電法說會", "snippets": []}]
+    evening = research.Key("2308.TW", "TWSE", date(2026, 11, 16), "after_close")
+    same_day = {**OVERVIEW, "quote": {**OVERVIEW["quote"], "trade_date": "2026-11-16"}}
+    found = research.Lookup(evening, info, research.Research(research.facts_from(
+        [{"role": "assistant", "content": [tool_use("t", "get_stock_overview", {"symbol": "2308"})]},
+         {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "t",
+                                       "content": json.dumps(same_day, ensure_ascii=False)}]}], "2308.TW"),
+        src, "法說會下修展望。", NOW + timedelta(minutes=5), 3))
+    text = research.note(found)
+    assert text.startswith("- 今天的共用研究：台達電（2308.TW）11/16收盤後為什麼漲跌，10:05 有人問過")
+    assert "不用再呼叫 get_stock_overview、get_news 或 web_search" in text
+    assert "沒有這家公司自己的原因" not in text  # after the close a missing company reason is not searched again
+    assert '"market_context":' in text and '"why_signals":["今天下跌 6.9%"]' in text and "english_name" not in text
+    assert "個股頁的 AI 一句話（出處在搜尋結果裡）：法說會下修展望。" in text
+    assert "1. 台達電重挫（news.cnyes.com，頁面時間 2 hours ago，11/16 10:05 找到）" in text
+    assert "2. 台達電法說會（money.udn.com，只有標題）" in text
+    # intraday, with the previous session's close: only that close, and a missing company reason may be searched
+    intraday = dataclasses.replace(found, key=research.Key("2308.TW", "TWSE", date(2026, 11, 16), "intraday"),
+                                   entry=dataclasses.replace(found.entry, facts=OVERVIEW))
+    text = research.note(intraday)
+    assert "最新的官方收盤是 11/13 的 1,180 元（不是 11/16 的）" in text and "market_context" not in text
+    assert "盤中：11/16 這一檔與大盤漲跌多少看搜尋結果" in text and "沒有這家公司自己的原因" in text
+    assert research.label(found.entry) == "沿用 10:05 查好的資料"
+
+
 def test_the_stock_page_sentence_seeds_its_session_without_reviving_old_research(engine):
     s = get_settings()
     evening = datetime(2026, 11, 16, 19, 0, tzinfo=TAIPEI)
@@ -277,7 +305,8 @@ def test_the_next_asker_gets_the_research_as_citable_search_results(client, othe
     system = body["messages"][1]
     assert system["role"] == "system" and "今天的共用研究" in system["content"]
     assert "不用再呼叫 get_stock_overview、get_news 或 web_search" in system["content"]
-    assert '"change_pct":-0.069' in system["content"] and "2 hours ago" in system["content"]
+    assert "最新的官方收盤是 11/13 的 1,180 元" in system["content"] and "2 hours ago" in system["content"]
+    assert "market_context" not in system["content"]  # the earlier day's index move is left out
     assert "盤中" in system["content"] or "收盤後" in system["content"]
     # web search is still offered (a newer-news follow-up may need it) and the frozen system prompt is unchanged
     assert any(t.get("name") == "web_search" for t in body["tools"])
