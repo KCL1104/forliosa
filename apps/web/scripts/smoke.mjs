@@ -261,14 +261,31 @@ await check("帳本工具列的「記一筆」（2026-11-14 照 Google 財經）
   await dialog.getByRole("button", { name: /^用 11\/10 收盤 .* 填入價格$/ }).click()
   if (!(await dialog.locator("#lot-price-0").inputValue())) throw new Error("the close did not fill the price")
   await dialog.locator("#lot-price-0").fill("230")
+  // 手續費（產品負責人 2026-11-16）：每一筆選填；第一筆填 20，第二筆不填
+  const fee = dialog.locator("#lot-fee-0")
+  if ((await fee.getAttribute("placeholder")) !== "選填") throw new Error(`fee placeholder: ${await fee.getAttribute("placeholder")}`)
+  if (!(await dialog.locator("label[for=lot-fee-0]").textContent())?.startsWith("手續費")) throw new Error("the fee has no visible label")
+  await fee.fill("20")
   await dialog.getByRole("button", { name: "再加一筆買進" }).click()
   await dialog.getByRole("textbox", { name: /第 2 筆的(張數|股數)/ }).fill(inLots ? "2" : "2000")
   await dialog.getByRole("button", { name: "第 2 筆的買進日期，還沒選" }).click()
   await page.getByRole("button", { name: /年 11 月 9 日/ }).click()
   await dialog.getByRole("textbox", { name: "第 2 筆的買進價格" }).fill("228")
+  if ((await dialog.getByRole("textbox", { name: "第 2 筆的手續費" }).inputValue()) !== "") throw new Error("the second buy's fee is not empty")
   await dialog.getByRole("button", { name: "新增", exact: true }).click()
   await page.getByText(/已記錄：買進 鴻海 3 張（2 筆）/).waitFor({ timeout: 8000 })
   await dialog.waitFor({ state: "detached", timeout: 4000 })
+  // 存下來的手續費：到「紀錄」（站內換頁，mock 的資料還在）打開那兩筆，填的 20 在，沒填的是空的（0）
+  await page.getByRole("tab", { name: /紀錄/ }).click()
+  await page.waitForURL(/view=transactions/)
+  for (const [day, want] of [["11/10", "20"], ["11/9", ""]]) {
+    await page.getByRole("button", { name: new RegExp(`^編輯 ${day}.* 買進 鴻海 2317$`) }).first().click()
+    const edit = page.getByRole("dialog", { name: "編輯交易" })
+    const saved = await edit.locator("#trade-fee").inputValue()
+    if (saved !== want) throw new Error(`the ${day} buy's saved fee is "${saved}", not "${want}"`)
+    await page.keyboard.press("Escape")
+    await edit.waitFor({ state: "detached", timeout: 4000 })
+  }
 })
 
 await check("記一筆的對話框不能往下捲到一片空白（搜尋結果裡螢幕報讀器才讀的字不會撐高對話框；2026-11-15）", async () => {
@@ -2119,6 +2136,70 @@ const fresh = async (options, fn) => {
 const DESKTOP = { viewport: { width: 1440, height: 900 } }
 const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
 const overflowX = (p) => p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+
+await check("記一筆的每一筆買進排得整齊：桌面一列四格（股數・日期・價格・手續費）＋移除；手機兩行（股數｜價格、日期｜手續費＋移除）；日期不被切掉、可按範圍 ≥ 44px、不橫向捲動", async () => {
+  const lotBoxes = (p) =>
+    p.evaluate(() => {
+      const box = (sel) => {
+        const el = document.querySelector(sel)
+        if (!el) return null
+        const r = el.getBoundingClientRect()
+        return { x: Math.round(r.left), y: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width) }
+      }
+      const date = document.querySelector("#lot-date-0 span")
+      return {
+        qty: box("#lot-qty-0"), date: box("#lot-date-0"), price: box("#lot-price-0"), fee: box("#lot-fee-0"),
+        remove: box('[aria-label="移除第 1 筆"]'), qty2: box("#lot-qty-1"),
+        clipped: date ? date.scrollWidth > date.clientWidth : true,
+      }
+    })
+  const open = async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "記一筆", exact: true }).first().click()
+    const dialog = p.getByRole("dialog")
+    await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2330")
+    await dialog.getByRole("option", { name: /2330/ }).first().click()
+    await dialog.getByRole("group", { name: "選好的股票" }).waitFor()
+    await dialog.getByRole("button", { name: "買進日期，還沒選" }).click()
+    await p.getByRole("button", { name: /年 11 月 12 日/ }).click()
+    await dialog.getByRole("button", { name: /^買進日期：2026\/11\/12（四）$/ }).waitFor()
+    await dialog.getByRole("button", { name: "再加一筆買進" }).click()
+    await dialog.locator("#lot-qty-1").waitFor()
+    await p.waitForTimeout(300)
+    return dialog
+  }
+  const near = (a, b) => Math.abs(a - b) <= 1
+  await fresh(DESKTOP, async (p) => {
+    await open(p)
+    const { qty, date, price, fee, remove, clipped } = await lotBoxes(p)
+    if (clipped) throw new Error("desktop: the date 2026/11/12（四） is cut off")
+    if (![date, price, fee].every((b) => near(b.y, qty.y))) throw new Error(`desktop: the four cells are not on one line ${JSON.stringify({ qty, date, price, fee })}`)
+    if (!(qty.r < date.x && date.r < price.x && price.r < fee.x && fee.r < remove.x)) throw new Error(`desktop: the order is not 股數・日期・價格・手續費・移除 ${JSON.stringify({ qty, date, price, fee, remove })}`)
+    if (!near(remove.y + (remove.b - remove.y) / 2, fee.y + (fee.b - fee.y) / 2)) throw new Error(`desktop: the remove button is not level with the inputs ${JSON.stringify({ fee, remove })}`)
+  })
+  for (const [name, options] of [["iPhone 15", pw.devices["iPhone 15"]], ["375px", { viewport: { width: 375, height: 700 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }]]) {
+    await fresh(options, async (p) => {
+      const dialog = await open(p)
+      const { qty, date, price, fee, remove, qty2, clipped } = await lotBoxes(p)
+      if (clipped) throw new Error(`${name}: the date 2026/11/12（四） is cut off`)
+      if (!near(price.y, qty.y) || !(price.x > qty.r)) throw new Error(`${name}: row 1 is not 數量｜價格 ${JSON.stringify({ qty, price })}`)
+      if (!near(fee.y, date.y) || !(fee.x > date.r) || !(date.y > qty.b)) throw new Error(`${name}: row 2 is not 日期｜手續費 ${JSON.stringify({ date, fee })}`)
+      if (!near(date.x, qty.x) || !near(fee.x, price.x)) throw new Error(`${name}: the two rows' columns do not line up ${JSON.stringify({ qty, date, price, fee })}`)
+      // 有好幾筆時移除在手續費右邊（和輸入框同一條線），不另外佔一行；價格跨到右邊
+      if (!(remove.x > fee.r) || !near(remove.y + (remove.b - remove.y) / 2, fee.y + (fee.b - fee.y) / 2) || !near(remove.r, price.r)) throw new Error(`${name}: the remove button is not at the end of 日期｜手續費 ${JSON.stringify({ price, fee, remove })}`)
+      if (!(qty2.y > remove.b)) throw new Error(`${name}: the second buy starts before the first one ends`)
+      const wide = await overflowX(p)
+      if (wide > 0) throw new Error(`${name}: the page scrolls sideways by ${wide}px`)
+      const sheetWide = await dialog.evaluate((el) => el.scrollWidth - el.clientWidth)
+      if (sheetWide > 0) throw new Error(`${name}: the drawer scrolls sideways by ${sheetWide}px`)
+      const small = await smallTargets(p)
+      if (small.length) throw new Error(`${name}: ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
+      // 動作列只有一行按鈕（取消／新增）
+      const footer = await dialog.getByRole("button", { name: "新增", exact: true }).evaluate((el) => el.parentElement.getBoundingClientRect().height)
+      if (footer > 50) throw new Error(`${name}: the footer buttons take more than one line (${footer}px)`)
+    })
+  }
+})
 
 await check("討論（沒登入）：公開清單與主題不用登入就能讀，外殼只有字標（連到首頁）、「討論」與「登入」；群組主題看不到；「登入後發言」→ 登入 → 回到這個主題、可以回覆", async () => {
   await fresh(DESKTOP, async (p) => {

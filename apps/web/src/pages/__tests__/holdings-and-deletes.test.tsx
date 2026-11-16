@@ -165,6 +165,150 @@ describe("記一筆：先選股票，再填股數、買進日期、價格（產�
   })
 })
 
+/** 記一筆直接到第二步（持倉的「加碼」那條路）：這一檔已經選好 */
+async function openQuickAddFor(symbol: string) {
+  await screen.findByRole("table", { name: "持倉" }, T)
+  act(() => useUi.getState().openTradeForm({ symbol }))
+  const dialog = await screen.findByRole("dialog", { name: "記一筆" }, T)
+  await within(dialog).findByRole("group", { name: "選好的股票" }, T)
+  return dialog
+}
+
+/** 填一筆買進：`nth` 是第幾筆（只有一筆時欄位名稱前面沒有「第 1 筆的」）；日期是 2026 年 11 月的某一天 */
+async function fillLot(user: ReturnType<typeof userEvent.setup>, dialog: HTMLElement, lot: { nth?: number; qty: string; day: number; price: string; fee?: string }) {
+  const p = lot.nth ? `第 ${lot.nth} 筆的` : ""
+  const d = within(dialog)
+  await user.type(d.getByRole("textbox", { name: `${p}張數` }), lot.qty)
+  await user.click(d.getByRole("button", { name: `${p}買進日期，還沒選` }))
+  await user.click(await screen.findByRole("button", { name: new RegExp(`^2026 年 11 月 ${lot.day} 日`) }, T))
+  await user.type(d.getByRole("textbox", { name: `${p}買進價格` }), lot.price)
+  if (lot.fee !== undefined) await user.type(d.getByRole("textbox", { name: `${p}手續費` }), lot.fee)
+}
+
+/** 這次送出的買進（spy 在 mock 的 createTransaction 上） */
+const sentBuys = () => vi.mocked(api.createTransaction).mock.calls.map(([body]) => body).filter((b) => b.type === "buy")
+
+describe("記一筆：每一筆買進可以填手續費（產品負責人 2026-11-16；選填、不填就是 0、不自動算）", { timeout: 20_000 }, () => {
+  it("填了 20：送出的買進帶 fee: 20，存下來的交易與持股成本都算進去", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    // 第一筆看得到的標籤是「手續費」，提示字「選填」
+    const fee = within(dialog).getByRole("textbox", { name: "手續費" })
+    expect(fee).toHaveAttribute("placeholder", "選填")
+    expect(fee).toHaveAttribute("inputmode", "decimal")
+    expect(within(dialog).getByText("手續費", { selector: "label" })).toBeInTheDocument()
+    const costOf = async () => (await api.getHoldings()).filter((h) => h.symbol === "2330.TW").reduce((s, h) => s + h.cost_basis, 0)
+    const before = await costOf()
+
+    await fillLot(user, dialog, { qty: "1", day: 10, price: "700", fee: "20" })
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+
+    expect(sentBuys()).toHaveLength(1)
+    expect(sentBuys()[0]).toMatchObject({ symbol: "2330.TW", type: "buy", trade_date: "2026-11-10", quantity: 1000, price: 700, fee: 20 })
+    const saved = (await api.listTransactions({ symbol: "2330.TW", limit: 50 })).items.find((t) => t.type === "buy" && t.trade_date === "2026-11-10" && t.price === 700)
+    expect(saved?.fee).toBe(20)
+    // 買進的成本 = 成交金額＋手續費
+    expect((await costOf()) - before).toBeCloseTo(700_020, 0)
+  })
+
+  it("沒填：送出的買進沒有 fee（後端當 0），一樣存得進去", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    await fillLot(user, dialog, { qty: "1", day: 10, price: "700" })
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+    expect(sentBuys()).toHaveLength(1)
+    expect(sentBuys()[0]).not.toHaveProperty("fee")
+  })
+
+  it("「abc」或負數：手續費下面寫「請填數字」、不送出；清掉就能新增", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    await fillLot(user, dialog, { qty: "1", day: 10, price: "700", fee: "abc" })
+    const fee = within(dialog).getByRole("textbox", { name: "手續費" })
+    // 還沒按新增前不寫錯誤（和其他欄位一樣）
+    expect(within(dialog).queryByText("請填數字")).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    expect(within(dialog).getByText("請填數字")).toBeInTheDocument()
+    expect(fee).toHaveAttribute("aria-invalid", "true")
+    expect(fee).toHaveFocus()
+    expect(sentBuys()).toHaveLength(0)
+
+    await user.clear(fee)
+    await user.type(fee, "-5")
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    expect(within(dialog).getByText("請填數字")).toBeInTheDocument()
+    expect(sentBuys()).toHaveLength(0)
+    expect(screen.getByRole("dialog", { name: "記一筆" })).toBeInTheDocument()
+
+    await user.clear(fee)
+    expect(within(dialog).queryByText("請填數字")).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+    expect(sentBuys()).toHaveLength(1)
+    expect(sentBuys()[0]).not.toHaveProperty("fee")
+  })
+
+  it("兩筆買進：各自送自己填的手續費（填 0 也照送）", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    await fillLot(user, dialog, { qty: "1", day: 9, price: "700", fee: "0" })
+    await user.click(within(dialog).getByRole("button", { name: "再加一筆買進" }))
+    // 第二筆起沒有看得見的標籤：提示字寫欄位名稱
+    const second = await within(dialog).findByRole("textbox", { name: "第 2 筆的手續費" }, T)
+    expect(second).toHaveAttribute("placeholder", "手續費")
+    expect(second).toHaveValue("")
+    await fillLot(user, dialog, { nth: 2, qty: "2", day: 10, price: "760", fee: "35" })
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+    expect(sentBuys().map((b) => [b.trade_date, b.quantity, b.price, b.fee])).toEqual([
+      ["2026-11-09", 1000, 700, 0],
+      ["2026-11-10", 2000, 760, 35],
+    ])
+  })
+
+  it("可以寫千分位：「1,234」送出 1234", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    await fillLot(user, dialog, { qty: "1", day: 10, price: "700", fee: "1,234" })
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+    expect(sentBuys()[0]?.fee).toBe(1234)
+  })
+
+  it("「賣出、股利或其他」：第一筆填的手續費帶到完整表單的「手續費（選填）」", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    await fillLot(user, dialog, { qty: "1", day: 10, price: "700", fee: "20" })
+    await user.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
+    const full = await screen.findByRole("dialog", { name: "記一筆交易" }, T)
+    expect(await within(full).findByLabelText("手續費（選填）", {}, T)).toHaveValue("20")
+    expect(within(full).getByLabelText(/^成交價/)).toHaveValue("700")
+    expect(sentBuys()).toHaveLength(0)
+  })
+
+  it("美股：手續費記在美元（後端照這一檔的幣別記），標籤寫「手續費（美元）」", async () => {
+    mount()
+    renderApp("/")
+    const dialog = await openQuickAddFor("AAPL")
+    expect(within(dialog).getByText("手續費（美元）", { selector: "label" })).toBeInTheDocument()
+    expect(within(dialog).getByRole("textbox", { name: "手續費" })).toHaveAttribute("placeholder", "選填")
+  })
+})
+
 describe("刪除券商帳戶", { timeout: 20_000 }, () => {
   it("編輯框的「刪除這個帳戶」：寫出會一起刪掉的筆數，輸入帳戶名稱才能按；刪掉之後帳戶不見了", async () => {
     mount()
