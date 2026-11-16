@@ -806,7 +806,10 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
   提示詞（`ai_search.news_system`）把 `NEWS_SYSTEM` 的「最近 7 天」換成實際天數，並加上：優先可信財經媒體、不要機器人快訊與 AI 寫的文章。
 - **不是新聞的網頁**（`outlets.NOT_NEWS_DOMAINS`／`NOT_NEWS_PATHS`）：CMoney 全站（含 aigc-note AI 問答、論壇）、cmnews（CMoney AI 新聞）、富果部落格（AI 法說會摘要）、
   HiStock、istock、winvest、nstock、Goodinfo、玩股網、PTT、Dcard、Mobile01、痞客邦、udn 部落格、PChome 股市的 `/stock` 報價頁、Yahoo股市 `/quote` 等：不存、不顯示（已存的也藏起來），
-  AI 新聞搜尋也封鎖（`ai_search.SEARCH_BLOCKED`，38 個，上限 100）。和下架封鎖清單是兩回事（那是法律下架）。
+  AI 新聞搜尋也封鎖（`ai_search.SEARCH_BLOCKED`，44 個，上限 100）。和下架封鎖清單是兩回事（那是法律下架）。
+  2026-11-16 重測後：這份也是對話與法人觀點搜尋封鎖清單的底（`ai.tools.CHAT_BLOCKED_DOMAINS`，三份不再各寫各的）；補上 BigGo 的 .com.tw、
+  stock.pchome.com.tw、agdstock.club、fastbull、stockopedia、gurufocus，富果改成整個 fugle.tw（含 /ai 的 AI 頁），富聯網的 `/TWStock`
+  與 PChome 股市的 `/m/stock` 用路徑擋。計數（AI 補缺的觸發條件、`ai_window`）也不算這些被藏起來的列。
 - **機器人快訊**（`normalize.is_bot_flash`）：標題開頭是「盤中速報」「盤後速報」「開盤速報」「收盤速報」「營收速報」「漲停速報」「跌停速報」（可有括號）的不存、不顯示——
   頁面上已經有股價和月營收。鉅亨「鉅亨速報 - Factset 最新調查」（共識預估）不是快訊，保留。
 - **可信媒體優先，不是只准用**（`outlets.REPUTABLE_DOMAINS`：經濟日報、工商時報、MoneyDJ、鉅亨、中央社（含 Focus Taiwan）、自由財經；Reuters、CNBC、Bloomberg、WSJ、FT、AP、MarketWatch、Barron's）：

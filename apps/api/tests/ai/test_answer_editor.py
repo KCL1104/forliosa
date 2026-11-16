@@ -524,3 +524,14 @@ def test_an_edit_that_adds_a_conversion_is_caught():
     assert added_conversions(draft, "- Aletheia 10/19 的目標價是 5,000 新台幣與 1,000 美元。") == []
     assert added_conversions("營收約合 3 億元。", "營收約合 3 億元。") == []
 
+
+def test_the_held_back_start_of_an_edit_keeps_its_spaces_and_line_breaks(client, pool, fake, ai_env):
+    """The first EDITOR_HEAD_CHARS are held back until they show Chinese; the white space between the pieces that
+    arrive meanwhile stays (a list after the opening keeps its blank line)."""
+    ai_env(AI_ANSWER_EDITOR="true")
+    web_turn(fake)
+    edited = "台積電 11/13 收 2350 元。\n\n- 漲 0.43%。\n- 尾盤有 4061 張賣單。"
+    fake.reply(*[text(edited[i:i + 3]) for i in range(0, len(edited), 3)])
+    _, events = chat(client, "台積電今天怎麼了？")
+    assert shown(events) == edited
+

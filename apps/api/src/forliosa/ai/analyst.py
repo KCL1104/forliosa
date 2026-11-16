@@ -51,7 +51,8 @@ with neither rating nor target price, or with a target price in another currency
 from the last real price (``TARGET_RATIO_MIN``–``TARGET_RATIO_MAX``, ``TARGET_RATIO_MAX_US`` for US stocks, an
 internal filter that is never shown) is treated as another currency too. Numbers are passed through as written —
 never converted, averaged or compared. Newest first, one per institution (大摩 = 摩根士丹利 = Morgan Stanley; the
-shown name is the report's own), at most ``MAX_ITEMS``; items older than ``RECENT_DAYS`` are marked ``old`` (shown as 舊資料) and come after the newer ones.
+shown name is the report's own), at most ``MAX_ITEMS``; items older than ``RECENT_DAYS`` are marked ``old`` (shown
+as 舊資料) and come after the newer ones.
 An institution the report does not name (``institution_key``: 「美系外資」「外資券商」「Wall Street analysts」) is
 dropped, except a foreign broker named only by region (「日系外資」 → 「未具名外資（日系）」, ``unnamed_label``): kept
 when at most ``UNNAMED_MAX_AGE_DAYS`` old, marked ``unnamed``, at most ``UNNAMED_MAX``, never folded into a named one

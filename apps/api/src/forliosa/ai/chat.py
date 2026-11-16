@@ -1269,7 +1269,7 @@ class ChatTurn:
                     if t != "text" or not ev.text:
                         continue
                     piece = pending + (headings.feed(ev.text) if headings else ev.text)
-                    if not out:
+                    if not out and not head:  # nothing accepted yet (held back or shown): no leading space
                         piece = piece.lstrip()
                     words = piece.rstrip()
                     pending = piece[len(words):]

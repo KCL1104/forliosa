@@ -443,7 +443,7 @@ for (const [vw, tier] of [[1024, "narrow"], [1280, "mid"]]) {
         await p.setViewportSize({ width: 1024, height: 900 })
         await p.waitForTimeout(200)
         const n = await measure()
-        if (!n.heads.some((h) => /損益・漲跌$/.test(h))) throw new Error(`sorting by percent should stay visible when narrower: ${n.heads.join("|")}`)
+        if (!n.heads.some((h) => /損益・漲跌/.test(h))) throw new Error(`sorting by percent should stay visible when narrower: ${n.heads.join("|")}`)
       }
     } finally {
       await p.close()
@@ -693,14 +693,14 @@ await check("隱私模式：定期定額標記不露出金額", async () => {
   await page.getByRole("table", { name: "持倉" }).getByRole("link", { name: "定期定額：每月 6 日 ••••（到設定查看）" }).waitFor()
   await page.getByRole("button", { name: /隱私模式開啟中/ }).click()
 })
-await check("法人觀點：預設收合；2330 展開就有 3 筆（日期・機構・評等・目標價・來源）與免責", async () => {
+await check("法人觀點：預設收合；2330 展開就有 5 筆（日期・機構・評等・目標價・來源；含未具名外資與舊資料）與免責", async () => {
   await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
   const toggle = page.getByRole("button", { name: /法人觀點/ })
   if ((await toggle.getAttribute("aria-expanded")) !== "false") throw new Error("should start collapsed")
   await toggle.click()
   const table = page.getByRole("table", { name: "法人觀點" })
   await table.getByText("範例證券 A", { exact: true }).waitFor({ timeout: 8000 })
-  if ((await table.locator("tbody tr").count()) !== 3) throw new Error("expected 3 rows")
+  if ((await table.locator("tbody tr").count()) !== 5) throw new Error("expected 5 rows")  // 示範資料 2026-11-16 起 5 筆
   await table.getByText("1,350 元").waitFor()
   await page.getByText("非 Forliosa 建議").first().waitFor()
   for (const banned of ["平均", "上漲空間", "建議買進"]) if (await page.locator("#ov-analyst-body").getByText(banned).count()) throw new Error(`found ${banned}`)

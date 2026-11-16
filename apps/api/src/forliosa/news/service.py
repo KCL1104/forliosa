@@ -6,8 +6,8 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
   or viewed in the last ``NEWS_VIEW_DAYS`` days (``news_tracked_views``: symbol + time only, no user ids) — the
   stalest first, at most ``NEWS_MAX_SYMBOLS_PER_RUN``. Shared by everyone.
 * **GDELT bulk files first** (:mod:`forliosa.news.gdelt_bulk`, 2026-11-16): the new 15-minute GKG files are read once
-  for every Taiwan stock of the batch (Taiwanese sites only, the title naming the company) and stored as ``gdelt``
-  headlines. While they are current, the DOC API is not asked for Taiwan stocks.
+  and matched against every tracked Taiwan stock, not only the batch's (Taiwanese sites only, the title naming the
+  company), and stored as ``gdelt`` headlines. While they are current, the DOC API is not asked for Taiwan stocks.
 * **Sources** (:mod:`forliosa.news.sources`): GDELT's DOC API (US stocks; Taiwan stocks only while the bulk files are
   not current), then our private SearXNG (:mod:`forliosa.news.searxng`, on by default), then Yahoo股市 RSS (only under
   ``DATA_POLICY=personal``). One request per symbol per source; the HTTP
