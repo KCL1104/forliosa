@@ -64,9 +64,11 @@ STATUS_KEYS = (*OFFICIAL_KEYS["TWSE"], *OFFICIAL_KEYS["TPEX"], *INTERIM_KEYS.val
                TWSE_POLL_KEY, TWSE_REFUSED_KEY)
 
 TWSE_POLL_FROM = time(13, 45)
-# Last request of the day: the file is normally there by ~13:50; later on, the evening release and the next morning's
-# OpenAPI cover the session (and nothing keeps knocking on www.twse.com.tw into the night).
-TWSE_POLL_UNTIL = time(18, 0)
+# Last request of the day. The file is normally there by ~13:50 and polling stops as soon as the session is stored (or
+# TWSE refuses), so the late hours only matter when the worker was down or redeployed in the afternoon: 2026-11-16 the
+# worker restarted at 18:15 and 21:30, the poll (then until 18:00) never ran, and the listed closes waited for the
+# evening release. Still at most one request every 10 minutes, as CLAUDE.md's exception allows (no end time there).
+TWSE_POLL_UNTIL = time(23, 59)
 TWSE_POLL_SECONDS = 10 * 60
 EVENING_FROM = time(20, 30)
 EVENING_UNTIL = time(2, 0)  # the next calendar day
@@ -109,7 +111,7 @@ WINDOWS: dict[str, tuple[Window, ...]] = {
         Window("openapi", 1, time(5, 20), time(5, 45)),
     ),
 }
-# The afternoon window ends at 14:30 although the file is polled until 18:00 (TWSE_POLL_UNTIL): it is normally in by
+# The afternoon window ends at 14:30 although the file is polled until 23:59 (TWSE_POLL_UNTIL): it is normally in by
 # ~13:50, and one not in by 14:30 is late or refused — the evening expectation is the honest one; a later afternoon
 # arrival simply comes sooner than said (2026-11-16 review, kept on purpose).
 
@@ -271,7 +273,7 @@ def _mark(db: Session, key: str, data_date: date | None, rows: int, at: datetime
 
 # -- 1. TWSE's same-day download files --------------------------------------------------------------------------------
 def twse_poll_day(now: datetime) -> date | None:
-    """The session the same-day TWSE file is polled for at ``now``: today, on a trading day from 13:45 to 18:00."""
+    """The session the same-day TWSE file is polled for at ``now``: today, on a trading day from 13:45 to 23:59."""
     at = now.astimezone(TAIPEI)
     if is_tw_trading_day(at.date()) and TWSE_POLL_FROM <= at.time() < TWSE_POLL_UNTIL:
         return at.date()

@@ -12,7 +12,7 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   briefings once both markets' official closes are in). A market whose day is stored is not asked again; "stored" is
   read from ``dataset_status`` (``…/price``), so a restart neither repeats nor forgets anything, and a scheduled run
   that got there first counts too. Nothing is asked between 08:30 and 13:35 on a trading day.
-* ``twse_sameday_close`` — TWSE_OPENDATA_CLOSE (default on), trading days 13:45–18:00: at most every 10 minutes (the
+* ``twse_sameday_close`` — TWSE_OPENDATA_CLOSE (default on), trading days 13:45–23:59: at most every 10 minutes (the
   last request time is kept in ``dataset_status``), until the session is stored, the two data.gov.tw download links
   on www.twse.com.tw (the narrow exception in CLAUDE.md; ``forliosa.closes.TwseSameDay``) — listed closes and TAIEX
   the afternoon of the session instead of 05:20 the next morning. A refusal (redirect, 403, 429 …) stops it for the
