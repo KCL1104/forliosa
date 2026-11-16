@@ -241,6 +241,11 @@ _APPROX = re.compile(r"(?:大約|約|將近|接近|近|逾|超過)\s*(?:下跌|�
 _URL = re.compile(r"\]\([^)\s]*\)|https?://[^\s)）\]」]+")
 _SOURCE_INDEX = re.compile(r"(?<![\d.])\d{1,2}\s*-\s*\d{1,2}\s*(?=(?:號|筆)?\s*(?:來源|搜尋結果|結果))"
                            r"|(?:來源|搜尋結果)\s*\d{1,2}(?:\s*-\s*\d{1,2})?")
+# A sentence about a source left out (「另有一則目標價 1,418 元的說法，來源是 AI 生成的整理頁面，出處與日期都不明，因此不
+# 採用。」): EDITOR_SYSTEM deletes it whole, numbers and all (2026-11-16, 禾榮科: the one edit that did was dropped for the
+# missing 1418 and the draft was shown)
+_VETTING = re.compile(r"[^。！？\n]*(?:不採用|不予採用|不可信|出處(?:與日期)?都?不明|來源不明|日期不明|AI ?生成|AI ?整理的?頁)"
+                      r"[^。！？\n]*[。！？]?")
 
 
 def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[str]:
@@ -249,11 +254,11 @@ def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[
     of a date it rewrites as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」), a date in parentheses it rewrites as
     今天 or 11/16 (「今（16）日」, 「（16日）」) and, given ``today``, today's or yesterday's date when the edit says
     今天 or 昨天 (「16日09:59」, 「11/16 盤中」); also a rounded restatement of a figure the edit kept (「約 4%」 beside
-    「4.14%」), digits inside a link and a leaked search-result index (「8-1 來源」). Only those spans: the same number
-    elsewhere in the draft still counts."""
+    「4.14%」), digits inside a link, a leaked search-result index (「8-1 來源」) and a sentence about a source left
+    out (「…因此不採用」). Only those spans: the same number elsewhere in the draft still counts."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
     years = {m.group(0) for m in _YEAR.finditer(draft)}
-    rest = _SOURCE_INDEX.sub(" ", _URL.sub(" ", _DATE_IN_PARENS.sub(" ", draft)))
+    rest = _SOURCE_INDEX.sub(" ", _URL.sub(" ", _DATE_IN_PARENS.sub(" ", _VETTING.sub(" ", draft))))
     if today is not None:
         days = ([today] if _TODAY_WORDS.search(edited) else []) + \
             ([today - timedelta(days=1)] if _YESTERDAY_WORDS.search(edited) else [])
@@ -277,6 +282,53 @@ def keeps_numbers(draft: str, edited: str, today: date | None = None) -> bool:
     """Every number of the draft is still in the edited answer, but for the dates and codes ``missing_numbers``
     lets the editor rewrite."""
     return not missing_numbers(draft, edited, today)
+
+
+# Dates written the way CHAT_SYSTEM asks (11/13, a year only when it is not this year, no ROC year, no zero padding),
+# fixed in the held-back draft before the editor sees it: the model copies them from MOPS titles and rating tables and
+# the editor, which does not know this year, left them (2026-11-16, 禾榮科: 「115 年第 3 季」 in 7 and 「2026/10/02」 in 6
+# of 8 answers). Links are left as they are.
+_AD_DATE = re.compile(r"(?<![\d/.])(20\d\d)(?:([/.-])(1[0-2]|0?[1-9])\2(3[01]|[12]\d|0?[1-9])"
+                      r"|\s*年\s*(1[0-2]|0?[1-9])\s*月\s*(3[01]|[12]\d|0?[1-9])\s*日)(?![\d/])")
+_ROC_DATE = re.compile(r"(?<![\d/.])(1[01]\d)(?:/(1[0-2]|0?[1-9])/(3[01]|[12]\d|0?[1-9])"
+                       r"|\s*年\s*(1[0-2]|0?[1-9])\s*月\s*(3[01]|[12]\d|0?[1-9])\s*日)(?![\d/])")
+_ROC_MONTH = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*(1[0-2]|0?[1-9])\s*月(?!\s*\d)")
+_ROC_PERIOD = re.compile(r"(?<![\d/.])(1[01]\d)\s*年\s*度?\s*(第\s*[1-4一二三四]\s*季|前\s*[2-3二三]\s*季|[上下]\s*半\s*年)")
+_PADDED_MD = re.compile(r"(?<![\d/.:])(1[0-2]|0[1-9])/(3[01]|[12]\d|0[1-9])(?![\d/:])")
+_CJK = re.compile(r"[\u4e00-\u9fff]")  # a Chinese character
+
+
+def normalize_dates(text: str, today: date) -> str:
+    """2026/10/02 → 10/2 (2025/10/02 → 2025/10/2), 2026年11月12日 → 11/12, 115 年 12 月 21 日 → 12/21, 115 年 10 月 →
+    10 月, 115 年第 3 季 → 第 3 季 (114 年度第 4 季 → 2025 年第 4 季), 10/02 → 10/2; ``today`` decides which year is
+    this year. Text inside links is left as it is."""
+    def md(m: re.Match[str], year: int, month: str, day: str) -> str:
+        text = f"{int(month)}/{int(day)}" if year == today.year else f"{year}/{int(month)}/{int(day)}"
+        # 「115年12月21日下市」 → 「12/21 下市」, like the prompt's 「11/13 收 30.5 元」
+        return text + " " if _CJK.match(m.string, m.end()) else text
+
+    def ad(m: re.Match[str]) -> str:
+        return md(m, int(m.group(1)), m.group(3) or m.group(5), m.group(4) or m.group(6))
+
+    def roc(m: re.Match[str]) -> str:
+        return md(m, int(m.group(1)) + 1911, m.group(2) or m.group(4), m.group(3) or m.group(5))
+
+    def year_of(roc_year: str) -> str:
+        year = int(roc_year) + 1911
+        return "" if year == today.year else f"{year} 年"
+
+    def fix(part: str) -> str:
+        part = _ROC_DATE.sub(roc, _AD_DATE.sub(ad, part))
+        part = _ROC_MONTH.sub(lambda m: " ".join(x for x in (year_of(m.group(1)), f"{int(m.group(2))} 月") if x),
+                              part)
+        part = _ROC_PERIOD.sub(lambda m: year_of(m.group(1)) + m.group(2), part)
+        return _PADDED_MD.sub(lambda m: f"{int(m.group(1))}/{int(m.group(2))}", part)
+
+    out, pos = [], 0
+    for link in _URL.finditer(text):
+        out += [fix(text[pos:link.start()]), link.group(0)]
+        pos = link.end()
+    return "".join([*out, fix(text[pos:])])
 
 
 def _editor_thinking(model: str) -> dict[str, Any]:
@@ -828,9 +880,16 @@ class ChatTurn:
         is late, stops for anything but ``end_turn``, outgrows the draft or loses a number the draft had; when part of
         it was shown already, a ``text_reset`` brings back the answer as written. Flagged (uncited) sentences are
         moved onto the most similar sentence of the edited answer; one without a close match is left out.
-        ``state.display.text`` keeps the draft until the edit is complete, so a turn cut off meanwhile saves it."""
+        ``state.display.text`` keeps the draft until the edit is complete, so a turn cut off meanwhile saves it. The
+        draft's dates are written the prompt's way first (``normalize_dates``): the editor gets them so, and so does the
+        answer shown as written."""
         start = state.held_from
         assert start is not None
+        held = state.display.text[start:]
+        fixed = normalize_dates(held, self.now_fn().date())
+        if fixed != held:  # whether or not the editor runs, and also what is shown when its edit is dropped
+            flagged = remap_flags(flagged, held, fixed, start)
+            state.display.text = state.display.text[:start] + fixed
         if not edit or not state.display.text[start:].strip():
             yield from self._release(state)
             return flagged

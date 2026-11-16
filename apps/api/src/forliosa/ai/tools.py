@@ -499,8 +499,11 @@ def _intraday_note(info: InstrumentInfo, q: Any, now: datetime, close: dict[str,
         if text := window_text(start, end, now):
             expected = f"這個市場的官方收盤價{expect_update(text)}（畫面上也這樣寫）。"
     day = f"{q.trade_date.month}/{q.trade_date.day}"
+    # only for a question about the price or the move (2026-11-16: a news-and-ratings question got the close, the
+    # TAIEX and 「今天的收盤價尚未公布」 because this note asked for them unconditionally)
     return (f"{when}：quote、market_context 與 why_signals 都是 {day} 的官方收盤資料，不是{label}的。{expected}"
-            f"{label}這一檔與加權指數漲跌多少，要用 web_search 找可引用的來源並寫出時間")
+            f"使用者問{label}的價格或漲跌時，{label}這一檔與加權指數漲跌多少要用 web_search 找可引用的來源並寫出時間；"
+            "只問消息、評等或財報時不用寫股價，也不用說收盤價還沒公布")
 
 
 ETF_NAV_AI_NOTE = ("premium_pct = close ÷ NAV − 1 on premium_date only (the newest date with both an official close "
@@ -837,6 +840,51 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
     return Citable([{"url": n["url"], "title": n["title"], "outlet": outlet(n),
                      "text": "，".join(x for x in (outlet(n), _news_time(n, today)) if x) + f"：{n['title']}"}
                     for n in linked])
+
+
+# 「禾榮科 機構給出的評級與目標價為何?」 (2026-11-16) was answered from web search alone (a forum post, an AI-written
+# page) while the stock page's 法人觀點 card had its own verified list: the card's entry of today, read only
+_ANALYST_NOTES = {"none": "今天還沒有人在個股頁查這一檔的法人觀點", "pending": "個股頁的法人觀點還在整理",
+                  "unavailable": "個股頁的法人觀點今天沒有查到",
+                  "ready": "個股頁的法人觀點今天查過，沒有近 90 天具名機構的評等或目標價"}
+
+
+def _price_text(x: float) -> str:
+    """1300.0 → "1,300", 52.40 → "52.4"."""
+    return f"{x:,.2f}".rstrip("0").rstrip(".")
+
+
+def _analyst_line(item: dict[str, Any], today: date) -> str:
+    """「元富投顧，10/2，維持，評等「買進」，目標價 700 元」 (the year only when it is not this year)."""
+    d = date.fromisoformat(str(item["date"])[:10])
+    parts = [item["institution"], f"{d.month}/{d.day}" if d.year == today.year else f"{d.year}/{d.month}/{d.day}"]
+    if item.get("action"):
+        parts.append(item["action"])
+    if item.get("rating_text"):
+        parts.append(f"評等「{item['rating_text']}」")
+    if item.get("target_price") is not None:
+        price = _price_text(float(item["target_price"]))
+        parts.append(f"目標價 US${price}" if item.get("currency") == "USD" else f"目標價 {price} 元")
+    return "，".join(parts)
+
+
+def get_analyst_views(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.ai import analyst
+
+    info = resolve_instrument(ctx.md, args["symbol"])
+    if info.type != "stock":
+        return {"symbol": info.symbol, "name": info.name, "status": "none",
+                "note": "ETF 沒有個別機構的評等與目標價"}
+    views = analyst.cached(ctx.db, info.symbol, now_utc())
+    items = [it for it in views["items"] if str(it.get("url") or "").startswith("http")] \
+        if views["status"] == "ready" else []
+    if not items:
+        return {"symbol": info.symbol, "name": info.name, "status": views["status"],
+                "note": f"{_ANALYST_NOTES.get(views['status'], _ANALYST_NOTES['none'])}；需要時用 web_search 找近 90 天"
+                        "新聞報導裡具名機構的評等與目標價"}
+    today = today_taipei()
+    return Citable([{"url": it["url"], "title": it.get("source_title") or info.name, "outlet": "",
+                     "text": _analyst_line(it, today)} for it in items])
 
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -1208,6 +1256,15 @@ TOOLS: list[ToolSpec] = sorted([
              "name the outlet in the sentence and do not copy the title, write it in your own words. Search the web "
              "when the question needs more than these headlines.",
              {"symbol": _SYMBOL}, ("symbol",), get_news, _sym_label("查看 ", " 新聞")),
+    ToolSpec("get_analyst_views",
+             "Third-party ratings and target prices of one stock, as the stock page's 法人觀點 card collected them "
+             "today: each item is one named broker or investment bank's rating and/or target price from a news "
+             "article of the last 90 days, with its date and link (read-only: nothing is searched here). Items come "
+             "back as search results: cite the one a sentence relies on, write the rating in the source's own words "
+             "and never add an average, an upside or your own target. When there are no items (status none, "
+             "pending or unavailable, or nothing found), search the web for news articles instead. Call this first "
+             "when the user asks about a stock's ratings, target prices or what brokers think of it.",
+             {"symbol": _SYMBOL}, ("symbol",), get_analyst_views, _sym_label("查看 ", " 法人觀點")),
     ToolSpec("get_position",
              "The user's own position in one stock: shares, average cost, cost basis, market value, unrealized and "
              "realized P&L, dividends received, today's change, the next dividend estimate and recent trades. Call "

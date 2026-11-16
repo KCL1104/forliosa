@@ -213,6 +213,20 @@ def read(db: Session, md: MarketData, symbol: str, now: datetime | None = None) 
     return view(None if row is not None and _retry_open(row, now) else row, info.symbol)
 
 
+def cached(db: Session, symbol: str, now: datetime | None = None) -> dict[str, Any]:
+    """Today's shared entry of a resolved stock symbol, for the chat tool ``get_analyst_views``: like ``read`` but
+    without writing anything (no purge, no generation, no charge), since chat tools run side by side on sessions of
+    their own. An expired entry reads as ``none``; a ``pending`` one past ``PENDING_TIMEOUT`` as ``unavailable``."""
+    now = now or now_utc()
+    row = db.get(AiAnalystViews, (symbol, trading_day(now)))
+    if row is None or (_aware(row.expires_at) or now) <= now:
+        return view(None, symbol)
+    out = view(row, symbol)
+    if row.status == "pending" and now - _aware(row.created_at) > PENDING_TIMEOUT:
+        out["status"] = "unavailable"
+    return out
+
+
 # -- starting a generation -------------------------------------------------------------------------------------
 Job = Callable[[], None]
 

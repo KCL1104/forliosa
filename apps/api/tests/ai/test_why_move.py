@@ -87,6 +87,34 @@ def test_the_editor_keeps_times_and_quote_figures_and_adds_no_month_heading_or_e
         assert phrase in EDITOR_SYSTEM, phrase
 
 
+def test_a_news_question_gets_no_price_or_market_and_no_source_vetting():
+    """產品負責人 2026-11-16: 「禾榮科 最近有甚麼消息嗎? 機構給出的評級與目標價為何?」 ended with the 11/13 close, the
+    TAIEX and 「今天（11/16）的收盤價尚未公布」, and said which source it had left out and why."""
+    for phrase in (
+        # a news question is answered with the news only
+        "問某一檔有什麼消息、最近有什麼新聞：先用 get_news",
+        "只寫消息本身，不寫股價、漲跌、和大盤的比較，也不說收盤價還沒公布（使用者同時問了價格或漲跌才寫）",
+        "問評等、目標價，或券商、外資怎麼看：照下面「機構評等與目標價」做",
+        "沒被問到的面向（股價與大盤漲跌、收盤價什麼時候公布、",
+        # sources: a disagreement between credible ones is shown, a dropped one is never mentioned
+        "可信的來源說法不一致時，兩種說法都寫出來並各自引用", "不可信、出處或日期不明的來源直接不用，回答裡也不提到它",
+        "也不交代資料的篩選：不寫找到幾筆、「只找到一筆可引用的資料」、哪個來源不採用或為什麼不用",
+        # dates
+        "月和日不補 0（10/2，不是 10/02）", "不是今年的才寫年份（2025/10/2）", "「115 年第 3 季」寫「第 3 季」",
+        "「今天（11/16）」",
+    ):
+        assert phrase in CHAT_SYSTEM, phrase
+    assert "來源說法不一致時要說明" not in CHAT_SYSTEM and "目前查不到可靠來源" not in CHAT_SYSTEM
+
+
+def test_the_editor_deletes_source_vetting_and_rewrites_table_labels():
+    for phrase in ("不新增、不刪除任何事實（下面寫明要整句刪掉的除外）",
+                   "交代資料篩選的句子整句刪掉，連同裡面的數字", "「目前只找到一筆可引用的資料」",
+                   "「另有一則…說法，來源是…，因此不採用」",
+                   "網站表格的欄位名稱（「多空評等」「預估 EPS」）不要照抄", "「多空評等為看多」寫成「評等看多」"):
+        assert phrase in EDITOR_SYSTEM, phrase
+
+
 def test_the_stock_page_one_liner_compares_with_the_market_too():
     for phrase in ("45 個字以內", "也查同一天加權指數漲跌多少", "差 2 個百分點以上", "這家公司自己的事",
                    "不可以只寫大盤的原因", "跟著大盤漲跌並寫出大盤的漲跌幅", "不寫別家公司的股價或 ADR",
@@ -231,6 +259,18 @@ def test_intraday_note_after_midnight_and_with_the_expected_time():
     # Monday's close in (the same-day file or the evening interim close): no note
     assert tools._intraday_note(info, SimpleNamespace(trade_date=date(2026, 11, 16)), tue_0030) is None
     assert tools._intraday_note(info, friday, datetime(2026, 11, 16, 13, 29, tzinfo=TAIPEI)) is not None  # 盤中
+
+
+def test_intraday_note_asks_for_the_move_only_when_the_user_asks_about_it():
+    """2026-11-16, 禾榮科: the note asked for today's move and the TAIEX unconditionally, so a news-and-ratings
+    answer ended with the close, the TAIEX and 「今天的收盤價尚未公布」."""
+    info = SimpleNamespace(market="TWSE")
+    friday = SimpleNamespace(trade_date=date(2026, 11, 13))
+    after_close = tools._intraday_note(info, friday, MON.replace(hour=18))
+    assert after_close.endswith("使用者問今天的價格或漲跌時，今天這一檔與加權指數漲跌多少要用 web_search 找可引用的來源"
+                                "並寫出時間；只問消息、評等或財報時不用寫股價，也不用說收盤價還沒公布")
+    after_midnight = tools._intraday_note(info, friday, datetime(2026, 11, 17, 0, 30, tzinfo=TAIPEI))
+    assert "使用者問11/16的價格或漲跌時" in after_midnight and "只問消息、評等或財報時不用寫股價" in after_midnight
 
 
 def test_the_page_context_says_where_each_markets_close_is():
