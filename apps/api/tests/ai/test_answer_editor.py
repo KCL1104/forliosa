@@ -110,3 +110,16 @@ def test_the_number_check_allows_years_codes_and_rounded_or_rescaled_duplicates(
     assert keeps_numbers("將於 115 年 12 月 21 日下市；2026/11/04 融資 3.51 萬張", "12/21 下市；11/4 融資 35,144 張")
     assert keeps_numbers("4 月營收 46,736,664 千元", "4 月營收 467.37 億元")
     assert not keeps_numbers("目標價 400 元，日系 320 元", "目標價 400 元")  # a different number is not a rounding
+
+
+def test_links_and_leaked_source_indexes_are_not_facts_the_editor_must_keep():
+    """2026-11-16 effort A/B: edits that removed a pasted link or 「8-1 來源」 were reverted to the worse draft."""
+    from forliosa.ai.chat import keeps_numbers, missing_numbers
+
+    draft = ("台達電今天跌 9.7%，見[新聞](https://www.businesstoday.com.tw/article/2026/11/16/202611160123)。"
+             "這是 8-1 來源所寫的數字。")
+    edited = "台達電今天跌 9.7%。"
+    assert keeps_numbers(draft, edited)
+    assert missing_numbers("看 https://news.cnyes.com/news/id/6200001 與來源 3，台達電跌 9.7%", "台達電跌 9.7%") == []
+    # a real figure outside the link still counts
+    assert missing_numbers("台達電跌 9.7%，外資賣超 1,411 張，見 https://x.tw/a/1411", "台達電跌 9.7%") == ["1411"]

@@ -229,6 +229,12 @@ _YESTERDAY_WORDS = re.compile(r"昨天|昨日")
 # A rounded restatement (「大盤約跌 4%」 beside 「跌 4.14%」): the editor keeps one of the two (EDITOR_SYSTEM says to
 # write a thing once), so it may go when the draft's exact figure stays (2026-11-16: 「約 4%」 merged into 「4.14%」)
 _APPROX = re.compile(r"(?:大約|約|將近|接近|近|逾|超過)\s*(?:下跌|上漲|跌|漲)?\s*(\d[\d,]*(?:\.\d+)?)")
+# Not facts: digits inside a link (a pasted 「[新聞](https://…/2026/11/16/123456)」 the editor rightly removes) and a
+# search-result index the model leaked (「8-1 來源」「來源 3」). Dropping them must not bring the draft back (2026-11-16
+# effort A/B: 5 of 24 edits were reverted, 4 of them to a worse draft)
+_URL = re.compile(r"\]\([^)\s]*\)|https?://[^\s)）\]」]+")
+_SOURCE_INDEX = re.compile(r"(?<![\d.])\d{1,2}\s*-\s*\d{1,2}\s*(?=(?:號|筆)?\s*(?:來源|搜尋結果|結果))"
+                           r"|(?:來源|搜尋結果)\s*\d{1,2}(?:\s*-\s*\d{1,2})?")
 
 
 def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[str]:
@@ -237,10 +243,11 @@ def missing_numbers(draft: str, edited: str, today: date | None = None) -> list[
     of a date it rewrites as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」), a date in parentheses it rewrites as
     今天 or 11/16 (「今（16）日」, 「（16日）」) and, given ``today``, today's or yesterday's date when the edit says
     今天 or 昨天 (「16日09:59」, 「11/16 盤中」); also a rounded restatement of a figure the edit kept (「約 4%」 beside
-    「4.14%」). Only the date itself: the same number elsewhere in the draft still counts."""
+    「4.14%」), digits inside a link and a leaked search-result index (「8-1 來源」). Only those spans: the same number
+    elsewhere in the draft still counts."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
     years = {m.group(0) for m in _YEAR.finditer(draft)}
-    rest = _DATE_IN_PARENS.sub(" ", draft)
+    rest = _SOURCE_INDEX.sub(" ", _URL.sub(" ", _DATE_IN_PARENS.sub(" ", draft)))
     if today is not None:
         days = ([today] if _TODAY_WORDS.search(edited) else []) + \
             ([today - timedelta(days=1)] if _YESTERDAY_WORDS.search(edited) else [])
