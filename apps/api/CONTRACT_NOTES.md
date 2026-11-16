@@ -1311,7 +1311,11 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
     空結果改回 `unavailable`（`analyst.query_terms`；M31 有一次三次都搜「晶心科」，被存成查無保留 3 天）。美股的名稱是 SEC 的寫法
     （「Palantir Technologies Inc.」「AMAZON COM INC」），名稱有兩個字以上時第一個字（4 個字母以上）也算名稱（上線前審查：
     「Palantir analyst price target」被當成搜錯公司，空結果永遠是 `unavailable`；同一個字也用來認「Palantir price target raised…」
-    這種評等標題）。問題裡多寫公司全名
+    這種評等標題）。但只限這個字只屬於這家公司：沒有別家 SEC 公司的名稱也用它開頭（以 CIK 算，同一家的不同股別不算），
+    也不是評等標題常見的字或券商名稱（`analyst.us_brand`、`_NOT_A_BRAND`：price、first、Jefferies、Goldman…）。上線前審查第二輪：
+    原本每一檔都算，The Taiwan Fund（TWN）把「Taiwan Semiconductor price target raised」、Goldman Sachs BDC 把「Goldman Sachs raises
+    Nvidia price target」、T. Rowe Price（SEC 寫「PRICE T ROWE GROUP INC」）把任何「price target」標題都當成自己的評等，
+    沒有評等的這類股票永遠拿不到「查無」，每次重查都花一題加一次搜尋。問題裡多寫公司全名
     （`company_profiles` 的公司名稱去掉「股份有限公司」，例如「円星科技」）；名稱只有英數字（M31）時要求名稱和代號一起搜。
   - **搜尋出錯不算查無**（上線前審查）：有一次 web_search 回錯誤（`web_search_tool_result_error`：`too_many_requests`、`unavailable`…；
     用完次數的 `max_uses_exceeded` 不算）而且一筆都沒留下時，改回 `unavailable`（`analyst.search_errors`，原因 `search_error`），

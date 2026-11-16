@@ -953,29 +953,77 @@ def test_an_unnamed_broker_with_a_named_ones_target_that_week_is_left_out():
 
 
 # -- 2026-11-16 pre-deploy review: a US stock searched by its brand, searches that failed ------------------------
-def test_a_us_stock_searched_by_the_first_word_of_its_name_is_on_target(pool, fake):
+SEC_NAMES = [("PLTR", 1321655, "Palantir Technologies Inc."), ("AMZN", 1018724, "AMAZON COM INC"),
+             ("TWN", 804123, "TAIWAN FUND INC"), ("TSM", 1046179, "TAIWAN SEMICONDUCTOR MANUFACTURING CO LTD"),
+             ("GSBD", 1572694, "Goldman Sachs BDC, Inc."), ("GS", 886982, "GOLDMAN SACHS GROUP INC"),
+             ("APLE", 1418121, "Apple Hospitality REIT, Inc."), ("AAPL", 320193, "Apple Inc."),
+             ("TROW", 1113169, "PRICE T ROWE GROUP INC"), ("JEF", 96223, "Jefferies Financial Group Inc."),
+             ("BRK-A", 1067983, "BERKSHIRE HATHAWAY INC"), ("BRK-B", 1067983, "BERKSHIRE HATHAWAY INC")]
+
+
+def us_stock(engine, symbol: str) -> tuple[InstrumentInfo, analyst.Hints]:
+    from forliosa.models import SecTicker
+
+    with Session(engine) as db:
+        if db.get(SecTicker, "PLTR") is None:
+            db.add_all(SecTicker(ticker=t, cik=cik, title=title) for t, cik, title in SEC_NAMES)
+            db.commit()
+        name = next(title for t, _, title in SEC_NAMES if t == symbol)
+        info = InstrumentInfo(symbol, symbol, name, "US", "stock", "USD", None, source="sec-edgar")
+        return info, analyst.query_hints(db, info, TODAY)
+
+
+def test_a_us_stock_searched_by_the_first_word_of_its_name_is_on_target(pool, fake, engine):
     """SEC names a US stock 「Palantir Technologies Inc.」; searches and headlines say 「Palantir」. A search
     「Palantir analyst price target」 was taken for one about another stock, so an empty result was never 「查無」
     (each retry another question), and a headline 「Palantir price target raised…」 was not one about it."""
     from forliosa.config import Settings
 
-    pltr = InstrumentInfo("PLTR", "PLTR", "Palantir Technologies Inc.", "US", "stock", "USD")
+    pltr, hints = us_stock(engine, "PLTR")
+    assert hints.brand == "palantir"
     fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "Palantir analyst price target"}),
                results_block("srvtoolu_1", [("https://news.example.com/2026/11/10/pltr", "Palantir earnings preview",
                                              None)]),
                tool_use("toolu_r", "report_analyst_views", {"items": []}),
                stop_reason="tool_use", usage={"server_tool_use": {"web_search_requests": 1}})
-    out = analyst.run_model(pltr, TODAY, "anv_t", pool, Settings(_env_file=None), lambda slot, msg: None)
+    out = analyst.run_model(pltr, TODAY, "anv_t", pool, Settings(_env_file=None), lambda slot, msg: None, hints=hints)
     assert (out.status, out.reason) == ("ready", None)
     headline = R("https://news.example.com/2026/11/10/pltr", "Palantir price target raised to $200 at Wedbush")
-    assert analyst.rating_headlines([headline], pltr, TODAY) == 1
-    amzn = InstrumentInfo("AMZN", "AMZN", "AMAZON COM INC", "US", "stock", "USD")
-    terms = analyst.query_terms(amzn, analyst.Hints())
+    assert analyst.rating_headlines([headline], pltr, TODAY, brand=hints.brand) == 1
+    amzn, hints = us_stock(engine, "AMZN")
+    terms = analyst.query_terms(amzn, hints)
     assert analyst._mentions("Amazon analyst price target", terms)
     assert not analyst._mentions("Palantir analyst price target", terms)
     # a one-word name and Taiwan stocks are left as they were
     assert analyst.stock_terms(NVDA) == ["nvda", "nvidia", "輝達"]
     assert analyst.stock_terms(TSMC) == ["2330", "tsmc", "台積電"]
+
+
+@pytest.mark.parametrize(("symbol", "query", "title"), [
+    ("TWN", "Taiwan Fund analyst rating", "Taiwan Semiconductor price target raised to $400 at Needham"),
+    ("GSBD", "Goldman Sachs BDC analyst price target", "Goldman Sachs raises Nvidia price target to $250"),
+    ("APLE", "Apple Hospitality REIT analyst price target", "Apple price target raised to $300 at Wedbush"),
+    ("TROW", "T. Rowe Price TROW analyst rating", "Nvidia price target raised to $250 at UBS"),
+    ("JEF", "Jefferies Financial Group JEF price target", "Nvidia price target raised to $250 at Jefferies"),
+])
+def test_a_first_word_shared_with_another_company_is_not_its_name(pool, fake, engine, symbol, query, title):
+    """Round 2 of the pre-deploy review: with every multi-word US name's first word taken for the stock, a rating
+    headline of another company sharing it (Taiwan Semiconductor for The Taiwan Fund, Goldman Sachs rating Nvidia for
+    Goldman Sachs BDC) or a broker's (Jefferies) or a headline word (T. Rowe Price is 「PRICE T ROWE GROUP INC」) made
+    an empty result 「unavailable」 every time: never 「查無」, each retry another question and web search."""
+    from forliosa.config import Settings
+
+    info, hints = us_stock(engine, symbol)
+    assert hints.brand is None
+    url = "https://www.reuters.com/markets/2026/11/10/rating"
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": query}),
+               results_block("srvtoolu_1", [(url, title, None)]),
+               tool_use("toolu_r", "report_analyst_views", {"items": []}),
+               stop_reason="tool_use", usage={"server_tool_use": {"web_search_requests": 1}})
+    out = analyst.run_model(info, TODAY, "anv_t", pool, Settings(_env_file=None), lambda slot, msg: None, hints=hints)
+    assert (out.status, out.reason, out.covered) == ("ready", None, False)
+    # a word one company has (Berkshire's two share classes are one CIK) is still its name
+    assert us_stock(engine, "BRK-B")[1].brand == "berkshire"
 
 
 @pytest.mark.parametrize(("codes", "status"), [

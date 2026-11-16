@@ -671,6 +671,15 @@ class _EditorGaveUp(Exception):
 # none is Chinese, as many more as the draft has before its first Chinese character (2026-11-16 review: an edit
 # starting 「NVIDIA（NVDA）11/13 收」 like its draft was dropped at 「NVIDIA（N」)
 EDITOR_HEAD_CHARS = 8
+# ... and while none is Chinese and every English word so far is one the draft has, up to this many: an edit that cut
+# a Chinese lead-in starts with the name after it (round 2: 「據 CNBC 報導，Microsoft 11/13 收…」 edited to
+# 「Microsoft 11/13 收…」, 「評等與目標價只有一筆：Wedbush…」 to 「Wedbush…」 were dropped at 「Microsof」)
+EDITOR_HEAD_MAX = 48
+
+
+def _draft_words(head: str, draft: str) -> bool:
+    """Whether every run of English letters in ``head`` (the last one may be cut short) is in ``draft``."""
+    return all(w in draft for w in re.findall(r"[A-Za-z]+", head))
 
 
 def _chinese_head(head: str) -> str:
@@ -1315,7 +1324,8 @@ class ChatTurn:
                         raise _EditorGaveUp(f"longer than {limit} characters")
                     if head is not None:
                         head += words
-                        if len(head) < EDITOR_HEAD_CHARS or (len(head) < head_max and not _CJK.search(head)):
+                        if len(head) < EDITOR_HEAD_CHARS or (not _CJK.search(head) and (
+                                len(head) < head_max or (len(head) < EDITOR_HEAD_MAX and _draft_words(head, body)))):
                             continue
                         words, head = _chinese_head(head), None
                     out.append(words)

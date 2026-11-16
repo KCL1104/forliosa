@@ -624,7 +624,40 @@ def test_an_english_editor_is_never_shown_after_an_english_start_either(client, 
     assert shown(events) == US_DRAFT
 
 
-DAHUA_1 = "大華今天跌 6.9%，大盤跌 2.1%，跌幅是大盤的三倍。"
+@pytest.mark.parametrize("size", [1, 2, 3, 5])
+@pytest.mark.parametrize(("draft", "edited"), [
+    ("據 CNBC 報導，Microsoft 11/13 收 510 美元，跌 0.8%，資料中心需求強勁。",
+     "Microsoft 11/13 收 510 美元，跌 0.8%，資料中心需求強勁。"),
+    ("評等與目標價只有一筆：Morgan Stanley 11/12 維持 Overweight，目標價 230 美元，資料中心需求強勁。",
+     "Morgan Stanley 11/12 維持 Overweight，目標價 230 美元，資料中心需求強勁。"),
+    ("路透 11/13 報導，NVIDIA（NVDA）將擴大資本支出，資料中心需求強勁。",
+     "NVIDIA（NVDA）11/13 傳出將擴大資本支出，資料中心需求強勁。"),
+])
+def test_an_edit_that_cut_a_chinese_lead_in_before_an_english_name_is_kept(client, pool, fake, ai_env, draft,
+                                                                           edited, size):
+    """Round 2 of the pre-deploy review: EDITOR_SYSTEM cuts 「據 CNBC 報導，」「評等與目標價只有一筆：」 and puts the
+    subject first, so the edit starts with the English name after it; it was dropped at 「Microsof」 (eight
+    characters, none Chinese) and the lead-in stayed on screen."""
+    ai_env(AI_ANSWER_EDITOR="true")
+    us_turn(fake, draft)
+    fake.reply(*[text(edited[i:i + size]) for i in range(0, len(edited), size)])
+    _, events = chat(client, "今天怎麼了？")
+    assert shown(events) == edited and not [n for n, _ in events if n == "text_reset"]
+
+
+def test_an_english_editor_using_the_drafts_names_is_still_never_shown(client, pool, fake, ai_env):
+    ai_env(AI_ANSWER_EDITOR="true")
+    draft = "評等與目標價只有一筆：Morgan Stanley 11/12 維持 Overweight，目標價 230 美元，資料中心需求強勁。"
+    us_turn(fake, draft)
+    reply = "Morgan Stanley 11/12 maintained Overweight with a $230 target. 資料中心需求強勁。"
+    fake.reply(*[text(reply[i:i + 2]) for i in range(0, len(reply), 2)])
+    _, events = chat(client, "今天怎麼了？")
+    assert not any("maint" in d.get("delta", "") for n, d in events if n == "text")
+    assert not [n for n, _ in events if n == "text_reset"]  # nothing of the edit was on screen
+    assert shown(events) == draft
+
+
+DAHUA_1 ="大華今天跌 6.9%，大盤跌 2.1%，跌幅是大盤的三倍。"
 DAHUA_2 = "外資 11/13 把評等從「買進」調降到「中立」，目標價從 85 元降到 62 元，市場擔心明年車用訂單衰退。"
 UMC_2 = "11/14 傳出與格芯合併的談判破局，市場對成熟製程整併的預期落空，外資轉為賣超。"
 MTK_1 = "最新的目標價是高盛 11/10 的 1,800 元，評等「買進」。"

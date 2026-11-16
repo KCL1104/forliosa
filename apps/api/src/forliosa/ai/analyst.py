@@ -74,7 +74,7 @@ from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
 
 import anthropic
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -96,7 +96,7 @@ from forliosa.db import session_factory
 from forliosa.ids import new_id
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
-from forliosa.models import AiAnalystViews, MarketEvent, User
+from forliosa.models import AiAnalystViews, MarketEvent, SecTicker, User
 from forliosa.news.outlets import is_not_news
 from forliosa.services.announcements import classify
 from forliosa.timeutil import TAIPEI, iso_taipei, last_tw_trading_day, next_tw_trading_day, now_utc
@@ -189,11 +189,13 @@ class Dropped:
 @dataclass(frozen=True)
 class Hints:
     """What the search can start from (the memo's §2.4): the English short name, the latest 法說會 held (date and
-    the broker hosting it) and the company's full name (「円星科技」 for M31), from data Forliosa already has."""
+    the broker hosting it) and the company's full name (「円星科技」 for M31), from data Forliosa already has.
+    ``brand``: a US company's first word when it names it alone (``us_brand``: 「palantir」)."""
     english: str | None = None
     conference: date | None = None
     host: str | None = None
     full_name: str | None = None
+    brand: str | None = None
 
 
 # -- time and cache --------------------------------------------------------------------------------------------
@@ -334,9 +336,40 @@ def full_name(db: Session, info: InstrumentInfo) -> str | None:
     return name if name and name != info.name else None
 
 
+# words that lead rating headlines and searches about other stocks: a US company whose SEC name starts with one is
+# not known by it alone (T. Rowe Price is 「PRICE T ROWE GROUP INC」; Jefferies, Raymond James… rate other stocks)
+_NOT_A_BRAND = frozenset({
+    "price", "target", "stock", "stocks", "market", "news", "hold", "group", "outlook", "first", "analyst", "rating",
+    "jefferies", "raymond", "piper", "stifel", "mizuho", "nomura", "truist", "oppenheimer", "wells", "hsbc", "loop",
+    "northland", "daiwa", "baird", "kepler", "benchmark", "needham", "wedbush", "cowen", "cantor", "guggenheim",
+    "barclays", "goldman", "morgan", "deutsche", "bernstein", "macquarie", "citizens", "susquehanna", "rosenblatt"})
+
+
+def _first_word(name: str) -> str:
+    m = re.match(r"[a-z]+", name.strip().casefold())
+    return m.group(0) if m else ""
+
+
+def us_brand(db: Session, info: InstrumentInfo) -> str | None:
+    """A US company's first word, when it names it alone: SEC's 「Palantir Technologies Inc.」 and 「AMAZON COM INC」
+    are 「Palantir」 and 「Amazon」 in headlines and searches (2026-11-16 review: 「Palantir analyst price target」 was
+    taken for a search about another stock, and the empty result was never a 「查無」). Only a word of 4 or more
+    letters that no other SEC company's name starts with (by CIK: 「Taiwan」 is also Taiwan Semiconductor's,
+    「Goldman」 Goldman Sachs's, 「Apple」 Apple's for Apple Hospitality REIT) and that is not in ``_NOT_A_BRAND``
+    (round 2 of the review: 「Taiwan Semiconductor price target raised」 was taken for a rating of The Taiwan Fund,
+    whose empty result then never was 「查無」)."""
+    words = _CORPORATE_SUFFIX.sub("", (info.name or "").strip()).casefold().split()
+    word = words[0] if info.market == "US" and len(words) > 1 else ""
+    if len(word) < 4 or not (word.isascii() and word.isalpha()) or word in _NOT_A_BRAND:
+        return None
+    rows = db.execute(select(SecTicker.cik, SecTicker.title).where(func.lower(SecTicker.title).like(f"{word}%")))
+    return word if len({cik for cik, title in rows if _first_word(title or "") == word}) <= 1 else None
+
+
 def query_hints(db: Session, info: InstrumentInfo, today: date) -> Hints:
     """``Hints`` for the search: the English short name (``news.service.english_names``), the latest 法說會 held
-    in the last 60 days and the company's full name. Best effort: missing data gives empty hints."""
+    in the last 60 days, the company's full name and a US company's brand (``us_brand``). Best effort: missing
+    data gives empty hints."""
     from forliosa.news.service import english_names
 
     try:
@@ -344,11 +377,12 @@ def query_hints(db: Session, info: InstrumentInfo, today: date) -> Hints:
         held = [c for c in _conferences(db, info.symbol, today - timedelta(days=NOTICE_LOOKBACK_DAYS))
                 if c[0] <= today] if info.market != "US" else []
         company = full_name(db, info)
+        brand = us_brand(db, info)
     except Exception:  # hints only steer the search
         log.warning("analyst views: no query hints for %s", info.symbol, exc_info=True)
         return Hints()
     last = max(held, key=lambda c: c[0]) if held else None
-    return Hints(english, last[0] if last else None, last[1] if last else None, company)
+    return Hints(english, last[0] if last else None, last[1] if last else None, company, brand)
 
 
 def _current(db: Session, symbol: str, now: datetime) -> AiAnalystViews | None:
@@ -568,20 +602,14 @@ _CORPORATE_SUFFIX = re.compile(r"[\s,]+(?:corporation|corp|incorporated|inc|co|c
                                r"group|class [a-z])\.?$", re.IGNORECASE)
 
 
-def stock_terms(info: InstrumentInfo) -> list[str]:
+def stock_terms(info: InstrumentInfo, brand: str | None = None) -> list[str]:
     """Words that show a headline is about this stock: its name, code, ticker and aliases (台積電, 2330, TSMC;
-    NVIDIA, NVDA, 輝達), case-folded, corporate suffixes removed."""
-    terms: set[str] = set()
+    NVIDIA, NVDA, 輝達), case-folded, corporate suffixes removed, and ``brand`` (``us_brand``: 「palantir」)."""
+    terms: set[str] = {brand} if brand else set()
     for t in (info.name, info.code, info.symbol.split(".")[0], *info.aliases):
         t = _CORPORATE_SUFFIX.sub("", (t or "").strip()).casefold()
         if len(t) >= 2:
             terms.add(t)
-    # a US company's first word is its name in headlines and searches: SEC's 「Palantir Technologies Inc.」 and
-    # 「AMAZON COM INC」 are 「Palantir」 and 「Amazon」 there (2026-11-16 review: 「Palantir analyst price target」 was
-    # taken for a search about another stock, and the empty result was never a 「查無」)
-    words = _CORPORATE_SUFFIX.sub("", (info.name or "").strip()).casefold().split()
-    if info.market == "US" and len(words) > 1 and len(words[0]) >= 4 and words[0].isascii() and words[0].isalpha():
-        terms.add(words[0])
     return sorted(terms)
 
 
@@ -589,7 +617,7 @@ def query_terms(info: InstrumentInfo, hints: Hints) -> list[str]:
     """``stock_terms`` with the hints' English and full names, and the first two characters of a Chinese name
     (「円星」 for 円星科技, 「禾榮」 for 禾榮科): a search that has none of them is not about this stock (2026-11-16:
     all three searches of an M31 card were for 晶心科)."""
-    terms = set(stock_terms(info))
+    terms = set(stock_terms(info, hints.brand))
     for t in (hints.english, hints.full_name):
         t = _CORPORATE_SUFFIX.sub("", (t or "").strip()).casefold()
         if len(t) >= 2:
@@ -610,14 +638,15 @@ def _mentions(title: str, terms: list[str]) -> bool:
 
 
 def rating_headlines(results: list[SearchResult], info: InstrumentInfo, today: date,
-                     explained: frozenset[str] = frozenset(), max_age_days: int = MAX_AGE_DAYS) -> int:
+                     explained: frozenset[str] = frozenset(), max_age_days: int = MAX_AGE_DAYS,
+                     brand: str | None = None) -> int:
     """How many article results have a rating / target-price headline about *this* stock (its name, code, ticker
     or alias in the title) that is not verifiably older than ``MAX_AGE_DAYS`` — the check that keeps an empty
     report from being shown as "nothing found". Other stocks' ratings, credit ratings and aggregator pages do
     not count, nor do the articles in ``explained`` (normalized URLs of candidates ``verify`` dropped for what they
     are: an unnamed broker older than 30 days, another currency…). ``max_age_days``: ``COVERED_DAYS`` to tell
-    whether anyone rated the stock in the last year."""
-    terms = stock_terms(info)
+    whether anyone rated the stock in the last year. ``brand``: ``Hints.brand``."""
+    terms = stock_terms(info, brand)
     oldest = today - timedelta(days=max_age_days)
     n = 0
     for r in results:
@@ -747,7 +776,7 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
     if not items:
         explained = frozenset(_norm_url(str(d.candidate.get("url") or "")) for d in dropped
                               if d.reason not in UNSURE_DROPS)
-        headlines = rating_headlines(results, info, today, explained)
+        headlines = rating_headlines(results, info, today, explained, brand=hints.brand)
         unsure = any(d.reason in UNSURE_DROPS for d in dropped)
         terms = query_terms(info, hints)
         off_target = [q for q in queries if not _mentions(q, terms)]
@@ -761,7 +790,7 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
             return Outcome("unavailable", [], dropped, reported, results, usage, calls, queries, stop, transcript,
                            "empty_despite_headlines" if headlines else "unverified" if unsure
                            else "search_error" if failed else "off_target")
-        covered = rating_headlines(results, info, today, max_age_days=COVERED_DAYS) > 0
+        covered = rating_headlines(results, info, today, max_age_days=COVERED_DAYS, brand=hints.brand) > 0
     return Outcome("ready", items, dropped, reported, results, usage, calls, queries, stop, transcript,
                    covered=covered)
 
