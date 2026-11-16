@@ -486,6 +486,30 @@ class AiWhyCache(Base):
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 
+class AiWhyResearch(Base):
+    """The research behind 「X 今天為什麼漲／跌」 chat answers, shared by every user (``forliosa.ai.research``,
+    產品負責人 2026-11-16): per symbol, trading session and phase (``intraday`` / ``after_close``), the market-level
+    facts of the stock overview and the sources a why-answer cited or its searches returned for that company. No user
+    column on purpose: nobody's holdings, messages or answer text is ever stored here."""
+
+    __tablename__ = "ai_why_research"
+    __table_args__ = (Index("ix_ai_why_research_expires", "expires_at"),)
+
+    symbol: Mapped[str] = mapped_column(String(20), primary_key=True)
+    session: Mapped[date] = mapped_column(Date, primary_key=True)  # the market's own date (New York for US stocks)
+    phase: Mapped[str] = mapped_column(String(12), primary_key=True)  # intraday | after_close
+    market: Mapped[str] = mapped_column(String(8))
+    facts: Mapped[dict | None] = mapped_column(JSON, nullable=True)
+    sources: Mapped[list] = mapped_column(JSON, default=list)  # [{url, title, snippets, outlet, page_age, found_at}]
+    one_liner: Mapped[str | None] = mapped_column(Text, nullable=True)  # the stock page's AI sentence (ai_why_cache)
+    close_in: Mapped[bool] = mapped_column(Boolean, default=False)  # the session's close was stored when written
+    searches: Mapped[int] = mapped_column(Integer, default=0)
+    hits: Mapped[int] = mapped_column(Integer, default=0)  # turns that used it
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    expires_at: Mapped[datetime] = mapped_column(TZDateTime)
+
+
 class AiAnalystViews(Base):
     """Third-party ratings / target prices found by AI web search (``forliosa.ai.analyst``): one shared entry per
     symbol per Taiwan trading day, deleted ``expires_at`` (24 h after creation). Only the verified items of one

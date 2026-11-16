@@ -69,7 +69,10 @@ export function DataSourcesPage() {
               </p>
               {/* 什麼時候更新（2026-11 實測；兩個交易所都沒有公布固定的時間）：上市下午那一批只在證交所的下載網址開著時才有 */}
               <ul aria-label="收盤價平常什麼時候更新" className="flex max-w-prose list-disc flex-col gap-1 pl-5 text-base marker:text-ctl">
-                <li className="num">{twseAfternoon ? "上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）" : "上市：晚上 8:30–11:45，晚的時候隔天清晨 5:20–5:40"}</li>
+                {/* 下午那一批不一定拿得到（2026-11-16 實測：指數檔被擋過一次），拿不到時是晚上那一批：照實寫 */}
+                <li className="num">
+                  {twseAfternoon ? "上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）；下午拿不到時晚上 8:30–11:45" : "上市：晚上 8:30–11:45，晚的時候隔天清晨 5:20–5:45"}
+                </li>
                 <li className="num">上櫃：晚上 8:30–11:45，少數日子到半夜 1:30</li>
               </ul>
               <p className="max-w-prose text-base">

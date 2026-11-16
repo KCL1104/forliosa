@@ -3,7 +3,7 @@ import { useEffect, useRef } from "react"
 import { appToday, marketNow } from "@/api"
 import { useHoldings, useMarketStatus, useSummary } from "@/api/queries"
 import type { Market, TwClose } from "@/api/types"
-import { closeLine, closeNote, closesChanged, closeState, dayWord, ledgerBoardDays, ledgerUsCloseDay, twClose, type CloseState, type TwBoard } from "@/lib/as-of"
+import { closeLine, closeNote, closesChanged, closeState, dayWord, indexNote, ledgerBoardDays, ledgerUsCloseDay, twClose, type CloseState, type TwBoard } from "@/lib/as-of"
 import { formatDateShort } from "@/lib/format"
 import { usCloseLabel } from "@/lib/labels"
 
@@ -52,22 +52,45 @@ export function useMarketCloseNote(asOf: string | null | undefined): string | nu
   return closeLine(status, boards, asOf, marketNow(), status?.date ?? appToday()).note
 }
 
+/**
+ * 市場頁指數那一排下面的一行：上市個股的收盤價進來了、加權指數還沒有時，指數預計什麼時候進來（`indexNote`）。
+ * 舊版後端沒有 `index`：null。
+ */
+export function useIndexCloseNote(): string | null {
+  const status = useMarketStatus().data?.tw
+  return indexNote(twClose(status, "TWSE"), marketNow())
+}
+
 /** 收盤價進來時重新讀的查詢：帳本（摘要、持股、績效、部位）、報價、觀察清單、市場頁、走勢圖、估值、「為什麼」 */
 const CLOSE_QUERIES = [["portfolio"], ["quote"], ["watchlist"], ["market"], ["history"], ["valuation"], ["overview"], ["why"]] as const
 
 /**
+ * 第一次重新讀之後再讀一次的間隔：後端的報價快取 30 秒（`marketdata/service.py` QUOTE_TTL_SECONDS），
+ * 收盤價剛存進去的那 30 秒內讀到的可能還是快取裡前一天的價格——之後就沒有東西會再讓帳本更新（2026-11-16 審查）
+ */
+export const CLOSE_REFETCH_AGAIN_MS = 35_000
+
+/**
  * 收盤價一進來就自己更新（不跳通知）：`market-status` 每分鐘問一次（分頁在背景時不問，回到分頁時馬上問），
- * 任何一個市場的收盤價進來了（`closesChanged`），就讓帳本、報價與市場頁重新讀。掛在外殼上，一個分頁一份。
+ * 任何一個市場的收盤價進來了（`closesChanged`），就讓帳本、報價與市場頁重新讀，35 秒後再讀一次（後端報價快取過期後）。
+ * 掛在外殼上，一個分頁一份。
  */
 export function useCloseRefresh(): void {
   const qc = useQueryClient()
   const closes = useMarketStatus().data?.tw.closes
   const prev = useRef<readonly TwClose[] | undefined>(undefined)
+  const again = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     if (!closes) return
     if (closesChanged(prev.current, closes)) {
-      for (const queryKey of CLOSE_QUERIES) void qc.invalidateQueries({ queryKey: [...queryKey] })
+      const refetch = () => {
+        for (const queryKey of CLOSE_QUERIES) void qc.invalidateQueries({ queryKey: [...queryKey] })
+      }
+      refetch()
+      clearTimeout(again.current)
+      again.current = setTimeout(refetch, CLOSE_REFETCH_AGAIN_MS)
     }
     prev.current = closes
   }, [closes, qc])
+  useEffect(() => () => clearTimeout(again.current), [])
 }

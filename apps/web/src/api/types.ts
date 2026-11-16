@@ -1834,9 +1834,20 @@ export interface TwClose {
   /** 最新的收盤價是暫時的（晚上先進來的，等官方的完整檔覆蓋） */
   interim: boolean
   /**
-   * 預計下一次進來的時間窗（台北時間的 ISO-8601）；已經存了時是 null。
+   * 預計下一次進來的時間窗（台北時間的 ISO-8601）；已經存了時是 null——只存了晚上的暫時收盤價時（`interim`）例外：
+   * 那一批沒有 ETF，這裡是官方檔預計進來的時間窗（ETF 還在等它）。
    * 依目前開著的資料來源與現在的時間：時間窗過了還沒進來，就是下一個來源的時間窗。
    */
+  expected_from: string | null
+  expected_to: string | null
+  /** 上市才有（2026-11-16 合約擴充）：加權指數等證交所指數的收盤；只有證交所自己的檔案有，晚上那一批沒有 */
+  index?: TwIndexClose | null
+}
+
+/** `TwClose.index`：證交所指數那一天的收盤進來了沒有、預計什麼時候進來（欄位意思和 `TwClose` 相同） */
+export interface TwIndexClose {
+  stored: boolean
+  latest: string | null
   expected_from: string | null
   expected_to: string | null
 }

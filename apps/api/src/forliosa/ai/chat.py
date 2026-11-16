@@ -28,6 +28,12 @@ Prompt caching: one breakpoint on the frozen system prompt (tools render before 
 cached together) plus top-level automatic caching for the growing conversation. Everything that changes per
 turn (time, page, privacy) is a ``role: "system"`` message after the user's message.
 
+「X 今天為什麼漲／跌」 (``research``, 產品負責人 2026-11-16): the research of such a question is shared by every user
+per stock and trading session. A fresh entry goes into the turn as citable ``search_result`` blocks before the user's
+text, with its facts and a short rule in the system message; the turn is then held, edited and grounding-checked like
+one that searched, and shows a ``shared_research`` step. A turn that searched stores what it found for the next asker.
+深度搜尋 neither reads nor writes it.
+
 深度搜尋 (``mode="deep"``, one turn): the same loop with ``web_search`` allowed ``AI_DEEP_SEARCH_MAX_USES`` times and
 ``AI_DEEP_MAX_TOOL_ROUNDS`` rounds; what to research and how to write it up is in that turn's page context
 (``prompts.DEEP_SEARCH_NOTE``), never in the frozen system prompt. The tool list differs from an ordinary turn only
@@ -41,7 +47,7 @@ Events (``event: <name>`` / ``data: <json>``):
 * ``text_reset`` ``{text}`` – the whole answer of this turn so far, shown instead of what the ``text`` deltas built:
   the edit of a held-back answer streams as it is written (``ChatTurn._edit``), and when it is dropped after part of
   it was shown (the editor failed, stopped early, ran long or lost a number) this brings back the answer as written
-* ``tool``      ``{id, name, status: running|done|error, label}``
+* ``tool``      ``{id, name, status: running|done|error, label}`` (``shared_research``: 「沿用 10:05 查好的資料」)
 * ``citation``  ``{url, title, cited_text}``
 * ``draft``     the draft card (see ``tools.draft_card``)
 * ``chart``     a chart card drawn by ``draw_chart`` (see ``charts``): every series with its points
@@ -70,7 +76,7 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from forliosa import plans
-from forliosa.ai import grounding, scope, store
+from forliosa.ai import grounding, research, scope, store
 from forliosa.ai.keypool import Failure, KeyPool, KeysBusy, KeySlot, NoKeyAvailable, classify_failure
 from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, page_context
@@ -414,6 +420,8 @@ class ChatTurn:
         self._page: tuple[str | None, str | None, str | None, bool] = (None, None, None, False)
         self._new: list[dict[str, Any]] = []
         self.deep = False  # 深度搜尋 (``mode: "deep"``): more searches, a longer write-up, counts as several questions
+        # A why-question about one stock (``research``): its key, and the shared research this turn answers from
+        self.why: research.Lookup | None = None
 
     # -- request building --------------------------------------------------------------------------------
     def tools(self) -> list[dict[str, Any]]:
@@ -438,8 +446,36 @@ class ChatTurn:
         route, sym, name, privacy = self._page
         moved = self.recap is not None and self.history is self.recap
         now = self.now_fn()
-        return page_context(now, route, sym, name, privacy, moved=moved, deep=self.deep, economy=self.economy,
+        text = page_context(now, route, sym, name, privacy, moved=moved, deep=self.deep, economy=self.economy,
                             closes=self._tw_closes(now))
+        if self.why is not None and self.why.entry is not None:  # the shared research this turn answers from
+            text += "\n" + research.note(self.why)
+        return text
+
+    def _find_research(self, message: str, symbol: str | None) -> research.Lookup | None:
+        """The shared research of a why-question (not in 深度搜尋, which researches on its own); best effort."""
+        if self.deep or not self.settings.ai_research_cache:
+            return None
+        try:
+            found = research.lookup(self.db, self.md, message, symbol, self.now_fn())
+        except Exception as exc:  # never fail a turn over it: the turn researches as before
+            log.warning("AI why research not read: %s", exc)
+            self.db.rollback()
+            return None
+        if found is not None:
+            self.timing.note(f"research {'hit' if found.entry else 'miss'}")
+        return found
+
+    def _share_research(self, new: list[dict[str, Any]], state: TurnState, ok: bool) -> None:
+        """Store what this why-turn's web search found, for the next asker (``research.remember``); best effort."""
+        if self.why is None or not ok or self.deep:
+            return
+        try:
+            research.remember(self.db, self.why, new, state.display.citations, state.outlets, self.now_fn(),
+                              self.settings)
+        except Exception:  # the answer is out already; sharing it is a nicety
+            log.warning("AI why research not stored", exc_info=True)
+            self.db.rollback()
 
     def _tw_closes(self, now: datetime) -> list[dict[str, Any]] | None:
         """Where each Taiwan market's close is (``forliosa.closes``), for the page context; best effort."""
@@ -722,12 +758,23 @@ class ChatTurn:
         turn_id = new_id("trn")
         sym, name = self._page_symbol(symbol)
         self._page = (route, sym, name, privacy)
-        new: list[dict[str, Any]] = [{"role": "user", "content": [{"type": "text", "text": message}]},
+        off_topic = scope.precheck(message) if settings.ai_scope_precheck else None
+        self.why = self._find_research(message, sym) if off_topic is None else None
+        shared = self.why.entry if self.why is not None else None
+        # the shared research goes before the user's text as citable search results (``research.blocks``); its rule
+        # and facts are in the system message (``_context``)
+        user: list[dict[str, Any]] = [*(research.blocks(shared) if shared else []), {"type": "text", "text": message}]
+        new: list[dict[str, Any]] = [{"role": "user", "content": user},
                                      {"role": "system", "content": self._context()}]
         self._new = new
         state = TurnState()
+        if shared is not None:  # answered from search results like a web search's: held, edited, grounding-checked
+            state.used_web = True
+            state.outlets.update(research.outlets(shared))
+            step = {"id": "research", "name": "shared_research", "status": "done", "label": research.label(shared)}
+            state.display.tools.append({"name": step["name"], "label": step["label"]})
+            yield "tool", step
 
-        off_topic = scope.precheck(message) if settings.ai_scope_precheck else None
         if off_topic is not None:  # clearly not about investing: decline without a model call
             log.info("AI chat: off-topic request (%s) declined without a model call", off_topic)
             state.display.text, state.display.stop_reason = OFF_TOPIC_REPLY, "off_topic"
@@ -763,6 +810,7 @@ class ChatTurn:
             yield "error", state.display.error
         finally:
             self._persist(thread, turn_id, new, ok, message, state)
+        self._share_research(new, state, ok)
         yield "done", self._done(thread, turn_id, state)
 
     # -- the answer editor ------------------------------------------------------------------------------------

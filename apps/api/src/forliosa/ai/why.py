@@ -2,7 +2,8 @@
 
 Only when the rules already say ``show`` (a real anomaly). The model searches the web (Taiwan location) and
 writes one cited zh-TW sentence; the result is cached per symbol per trading day in ``ai_why_cache`` and shared
-by every user. Any failure, an answer without citations, or ``NONE`` falls back to the rule template. By default
+by every user; a sentence also joins the chat's shared research of that session (``research.seed_from_why``). Any
+failure, an answer without citations, or ``NONE`` falls back to the rule template. By default
 the sentence is generated in a background thread (the first request returns the rule template right away);
 ``AI_WHY_BLOCKING=1`` waits for it instead. On by default (``AI_WHY_ENABLED``).
 
@@ -23,7 +24,7 @@ from typing import Any
 import anthropic
 from sqlalchemy.orm import Session
 
-from forliosa.ai import store
+from forliosa.ai import research, store
 from forliosa.ai.keypool import KeyPool, get_key_pool
 from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import WHY_SYSTEM, why_question
@@ -181,4 +182,10 @@ def generate(db: Session, md: MarketData, result: dict[str, Any], day: date, poo
         db.add(row)
     row.status, row.text, row.citations, row.model, row.created_at = status, text, cites, model, now_utc()
     db.commit()
+    if status == "ok" and settings.ai_research_cache:  # the sentence and its sources join the chat's shared research
+        try:
+            research.seed_from_why(db, sym, day, text, cites, now_utc(), settings)
+        except Exception:  # the sentence is stored; sharing it with the chat is a nicety
+            log.warning("AI why for %s: shared research not seeded", sym, exc_info=True)
+            db.rollback()
     return row

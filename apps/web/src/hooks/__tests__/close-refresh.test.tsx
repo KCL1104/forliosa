@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import { qk } from "@/api/queries"
 import type { MarketStatus, TwClose } from "@/api/types"
-import { useCloseRefresh } from "../use-close"
+import { CLOSE_REFETCH_AGAIN_MS, useCloseRefresh } from "../use-close"
 
 /**
  * 收盤價一進來，帳本自己更新（不跳通知；產品負責人 2026-11-16）：`market-status` 的 `tw.closes` 有一個市場的收盤價進來了，
@@ -41,6 +41,28 @@ describe("useCloseRefresh", () => {
     expect(t.invalidate).not.toHaveBeenCalled()
     await t.next(status([close("TWSE", { stored: true, latest: "2026-11-16", expected_from: null, expected_to: null }), close("TPEX")]))
     await waitFor(() => expect(t.invalidated()).toEqual(expect.arrayContaining(['["portfolio"]', '["quote"]', '["watchlist"]', '["market"]'])))
+  })
+
+  it("35 秒後再讀一次：後端的報價快取 30 秒，剛存進去時讀到的可能還是前一天的價格（2026-11-16 審查）", async () => {
+    const t = setup(status([close("TWSE"), close("TPEX")]))
+    await waitFor(() => expect(api.getMarketStatus).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 20))
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] })
+    try {
+      await t.next(status([close("TWSE", { stored: true, latest: "2026-11-16", expected_from: null, expected_to: null }), close("TPEX")]))
+      const portfolio = () => t.invalidated().filter((k) => k === '["portfolio"]').length
+      // react-query 用 0 ms 的計時器通知元件（時鐘不前進）
+      for (let i = 0; i < 5 && portfolio() === 0; i++) await vi.advanceTimersByTimeAsync(0)
+      expect(portfolio()).toBe(1)
+      await vi.advanceTimersByTimeAsync(CLOSE_REFETCH_AGAIN_MS - 1)
+      expect(portfolio()).toBe(1)
+      await vi.advanceTimersByTimeAsync(1)
+      expect(portfolio()).toBe(2)
+      await vi.advanceTimersByTimeAsync(CLOSE_REFETCH_AGAIN_MS * 3)
+      expect(portfolio()).toBe(2) // 只多一次
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("沒有變（只是每分鐘再問一次、或時間窗換了）：不重新讀", async () => {

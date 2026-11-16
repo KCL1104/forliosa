@@ -7,7 +7,7 @@ import { DemoTag, PageHeader } from "@/components/section"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { EmptyState, ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
-import { useMarketCloseNote } from "@/hooks/use-close"
+import { useIndexCloseNote, useMarketCloseNote } from "@/hooks/use-close"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { formatDateShort } from "@/lib/format"
 import { Announcements } from "./Announcements"
@@ -80,6 +80,16 @@ function CloseNote({ asOf }: { asOf: string | null }) {
   )
 }
 
+/**
+ * 指數那一排下面：上市個股的收盤價已經進來、加權指數還沒有時（證交所下午的指數檔被擋；晚上那一批沒有指數），
+ * 指數預計什麼時候更新（「加權指數預計明天清晨 5:20–5:45 更新」）。只在需要時出現，自己一行。
+ */
+function IndexCloseNote() {
+  const note = useIndexCloseNote()
+  if (!note) return null
+  return <p className="num text-sm text-ink-2">{note}</p>
+}
+
 function MarketBody({ data }: { data: MarketOverview }) {
   useSourceNote(data.sources)
   const us = data.us && (data.us.items.length > 0 || data.us.news.length > 0) ? data.us : null
@@ -87,7 +97,12 @@ function MarketBody({ data }: { data: MarketOverview }) {
   if (empty) return <EmptyState title="還沒有資料" />
   return (
     <div className="@container flex flex-col gap-10">
-      {data.indices.length > 0 && <IndexStrip indices={data.indices} />}
+      {data.indices.length > 0 && (
+        <div className="flex flex-col gap-2">
+          <IndexStrip indices={data.indices} />
+          <IndexCloseNote />
+        </div>
+      )}
       {data.summary && <SummaryBlock summary={data.summary} />}
       {data.sectors && <SectorList sectors={data.sectors} />}
       {data.movers && <Movers movers={data.movers} />}

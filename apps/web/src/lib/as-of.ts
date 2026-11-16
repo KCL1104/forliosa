@@ -55,8 +55,9 @@ export function closeState(market: MarketStatus["tw"] | null | undefined, asOf: 
   if (day >= market.date) return "settled"
   if (market.is_open) return "open"
   const close = twClose(market, board)
-  // 這一檔的日期比該進來的那一天舊、而且那一天的還沒存：在等。已經存了還是舊的（停牌、沒有成交）就不說
-  if (close) return !close.stored && day < close.session ? "pending" : "settled"
+  // 這一檔的日期比該進來的那一天舊、而且那一天的還沒存：在等。已經存了還是舊的（停牌、沒有成交）就不說——
+  // 只存了晚上的暫時收盤價時（`interim`）例外：那一批沒有 ETF，舊的還在等官方檔（後端給官方檔的時間窗）
+  if (close) return (!close.stored || close.interim) && day < close.session ? "pending" : "settled"
   const clock = taipei(now)
   if (market.is_trading_day && clock.day === market.date && clock.time >= market.close) return "pending"
   return "settled"
@@ -149,7 +150,7 @@ function whichDay(session: string | null | undefined, today: string): string {
  * 漲跌旁另外標那是哪一天的漲跌（`dayWord`）。
  * - 盤中：「盤中不更新」
  * - 在等：「今天的收盤價預計下午 2:00–2:30 更新」「今天的收盤價預計今晚 8:30–11:45 更新」；
- *   半夜以後在等前一個交易日的：「11/16 的收盤價還沒公布，預計清晨 5:20–5:40 更新」；
+ *   半夜以後在等前一個交易日的：「11/16 的收盤價還沒公布，預計清晨 5:20–5:45 更新」；
  *   不知道什麼時候（舊版後端、時間窗過了）：「今天的收盤價還沒公布」「11/16 的收盤價還沒公布」
  */
 export function closeNote(state: CloseState, asOf: string | null | undefined, close?: TwClose | null, now: Date = new Date()): string | null {
@@ -167,27 +168,41 @@ export function closeNote(state: CloseState, asOf: string | null | undefined, cl
 export interface BoardDay {
   board: TwBoard
   day: string
+  /** 帳本：這個市場最舊的持股日期（和 `day` 一樣時可省略）。只存了晚上的暫時收盤價時用來看 ETF 是不是還在等 */
+  oldest?: string
 }
 
 /**
  * 帳本裡上市、上櫃各自的收盤日：有價格的台股持股的 `price_date`，每個市場取最新的那天
  * （一檔停牌不影響整個市場）；舊版後端沒有 `price_date` 時用 `as_of` 的台北日期。沒有台股持股時是空的。
+ * `oldest` 是最舊的那天：晚上先進來的暫時收盤價沒有 ETF，那時候 ETF 的價格還是前一天的（`closeLine`）。
  */
 export function ledgerBoardDays(holdings: readonly Pick<Holding, "market" | "price" | "price_date">[] | null | undefined, asOf: string | null | undefined): BoardDay[] {
   const fallback = closeDay(asOf)
   const out: BoardDay[] = []
   for (const board of BOARDS) {
     const days = (holdings ?? []).filter((h) => h.market === board && h.price !== null).map((h) => h.price_date ?? fallback).filter((d): d is string => !!d)
-    if (days.length) out.push({ board, day: days.reduce((a, b) => (b > a ? b : a)) })
+    if (!days.length) continue
+    const day = days.reduce((a, b) => (b > a ? b : a))
+    const oldest = days.reduce((a, b) => (b < a ? b : a))
+    out.push(oldest === day ? { board, day } : { board, day, oldest })
   }
   return out
+}
+
+/**
+ * 一個市場「還在等的那一檔」的日期：只存了晚上的暫時收盤價（`interim`）時是最舊的持股日期——那一批沒有 ETF，
+ * ETF 還是前一天的價格、還在等官方檔；其他時候是最新的那天（停牌的一檔不算在等）
+ */
+function waitingDay(market: MarketStatus["tw"] | null | undefined, b: BoardDay): string {
+  return twClose(market, b.board)?.interim && b.oldest ? b.oldest : b.day
 }
 
 /**
  * 帳本主數字旁那一行（市場頁標題旁的說明也是）：
  * - `label`：「11/13 收盤」；兩個市場的日期不同時「上市 11/16・上櫃 11/13 收盤」；盤中「11/12 收盤・盤中不更新」
  * - `note`（只在有市場在等時）：帳本裡的市場都在等同一個時間窗（包括只有上市的帳本）——「今天的預計下午 2:00–2:30 更新」
- *   「11/16 的預計清晨 5:20–5:40 更新」「今天的還沒公布」；只有一個市場在等——「上櫃預計今晚 8:30–11:45 更新」；
+ *   「11/16 的預計清晨 5:20–5:45 更新」「今天的還沒公布」；只有一個市場在等——「上櫃預計今晚 8:30–11:45 更新」；
  *   兩個市場的時間窗不同——「上市預計下午 2:30 前更新・上櫃預計今晚更新」
  * - `day`：「今日」損益、「今日漲跌」的那個詞：每個市場的收盤日都是今天才寫「今日」；都是同一天寫那天（「11/12」）；
  *   上市、上櫃的日期不同時寫「當日」（每一檔是它自己那天的漲跌）
@@ -218,11 +233,13 @@ export function closeLine(
   const days = boards.map((b) => b.day)
   const same = days.every((d) => d === days[0])
   const base = same ? `${formatDateShort(days[0]!, false)} 收盤` : `${boards.map((b) => `${BOARD_NAME[b.board]} ${formatDateShort(b.day, false)}`).join("・")} 收盤`
-  const day = days.every((d) => d === today) ? "今日" : same ? formatDateShort(days[0]!, false) : "當日"
+  // 只存了晚上的暫時收盤價、ETF 還是前一天的：每一檔是它自己那天的漲跌，寫「當日」，不寫「今日」
+  const lagging = boards.some((b) => waitingDay(market, b) !== b.day)
+  const day = lagging ? "當日" : days.every((d) => d === today) ? "今日" : same ? formatDateShort(days[0]!, false) : "當日"
   if (!market) return { label: base, note: null, day }
   if (market.is_open && days.some((d) => d < market.date)) return { label: `${base}・盤中不更新`, note: null, day }
   const waiting = boards
-    .filter((b) => closeState(market, `${b.day}T13:30:00+08:00`, now, b.board) === "pending")
+    .filter((b) => closeState(market, `${waitingDay(market, b)}T13:30:00+08:00`, now, b.board) === "pending")
     .map((b) => twClose(market, b.board) ?? { market: b.board })
   return { label: base, note: waiting.length ? pendingNote(waiting, boards.length, now, today) : null, day }
 }
@@ -250,6 +267,21 @@ function pendingNote(waiting: readonly Waiting[], boards: number, now: Date, tod
   const days = new Set(waiting.map(which))
   const lead = days.size === 1 && which(waiting[0]!) !== "今天的" ? `${which(waiting[0]!)}收盤：` : ""
   return lead + waiting.map((c) => `${BOARD_NAME[c.market]}${text(c, true)}`).join("・")
+}
+
+/**
+ * 市場頁指數那一排下面的一行：上市個股的收盤價已經進來、加權指數還沒有時（證交所下午的指數檔被擋、或晚上那一批——
+ * 它沒有指數），寫指數預計什麼時候進來：「加權指數預計明天清晨 5:20–5:45 更新」，半夜以後
+ * 「加權指數 11/16 的收盤預計清晨 5:20–5:45 更新」，不知道時「加權指數還沒更新」。上市個股也還在等時不寫（標題旁已經說了）。
+ * `close` 是上市那一筆（`tw.closes` 的 TWSE）；舊版後端沒有 `index`：null。
+ */
+export function indexNote(close: TwClose | null | undefined, now: Date): string | null {
+  const index = close?.index
+  if (!close || !index || index.stored || !close.stored) return null
+  const which = whichDay(close.session, taipei(now).day)
+  const w = expectedWindow(index, now)
+  if (!w) return "加權指數還沒更新"
+  return which === "今天的" ? `加權指數${expectUpdate(w.full)}` : `加權指數 ${which}收盤${expectUpdate(w.full)}`
 }
 
 /**

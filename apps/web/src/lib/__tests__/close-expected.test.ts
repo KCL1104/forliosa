@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { MarketStatus, TwClose } from "@/api/types"
 import { mockCloses, mockMarketNow, mockMarketStatus } from "@/api/mock/market-status"
-import { closeLine, closeNote, closesChanged, closeState, expectedWindow, ledgerBoardDays, type BoardDay } from "../as-of"
+import { closeLine, closeNote, closesChanged, closeState, expectedWindow, indexNote, ledgerBoardDays, type BoardDay } from "../as-of"
 
 /**
  * 預計更新的時間（產品負責人 2026-11-16）：上市、上櫃的收盤價各自什麼時候進來，由後端依開著的來源給時間窗
@@ -158,7 +158,8 @@ describe("ledgerBoardDays：帳本裡上市、上櫃各自的收盤日", () => {
       { market: "US" as const, price: 356, price_date: "2026-11-13" },
       { market: "TPEX" as const, price: null, price_date: null },
     ]
-    expect(ledgerBoardDays(holdings, FRI_CLOSE)).toEqual([{ board: "TWSE", day: MON }, { board: "TPEX", day: "2026-11-13" }])
+    // `oldest`：最舊的那天（晚上只存了暫時收盤價時看 ETF 是不是還在等，見下面）
+    expect(ledgerBoardDays(holdings, FRI_CLOSE)).toEqual([{ board: "TWSE", day: MON, oldest: "2026-11-10" }, { board: "TPEX", day: "2026-11-13" }])
     // 舊版後端沒有 price_date：用 as_of 的台北日期
     expect(ledgerBoardDays([{ market: "TPEX", price: 300 }], FRI_CLOSE)).toEqual([{ board: "TPEX", day: "2026-11-13" }])
     expect(ledgerBoardDays(undefined, FRI_CLOSE)).toEqual([])
@@ -198,5 +199,52 @@ describe("mock：時間窗跟著示範的時鐘", () => {
     for (const flag of ["closed", "open"] as const) expect(mockMarketStatus(flag).tw.closes!.every((c) => c.stored && c.expected_from === null)).toBe(true)
     // 存到那一天：不再等
     expect(mockCloses(at("2026-11-13", "15:00"), "2026-11-13").every((c) => c.stored)).toBe(true)
+  })
+})
+
+/**
+ * 2026-11-16 審查：晚上的暫時收盤價（shioaji-data）沒有 ETF，後端卻把整個市場標成「已存」——ETF 默默顯示前一天的價格、
+ * 帳本還寫「今日」。後端現在在只存了暫時收盤價時（`interim`）給官方檔的時間窗。
+ */
+describe("只存了晚上的暫時收盤價（interim）：ETF 還在等官方檔", () => {
+  const TPEX_OFFICIAL = win(MON, "23:15", "23:45")
+  const interim = close("TPEX", { stored: true, latest: MON, interim: true, ...TPEX_OFFICIAL })
+  const m = status(MON, [close("TWSE", { stored: true, latest: MON }), interim])
+
+  it("個股頁：ETF（前一天的價格）寫官方檔預計幾點更新；有暫時收盤價的股票不寫（也不標「暫時」）", () => {
+    const now = at(MON, "21:00")
+    expect(closeState(m, FRI_CLOSE, now, "TPEX")).toBe("pending")
+    expect(closeNote("pending", FRI_CLOSE, interim, now)).toBe("今天的收盤價預計今晚 11:15–11:45 更新")
+    expect(closeState(m, `${MON}T13:30:00+08:00`, now, "TPEX")).toBe("settled")
+    // 官方檔進來以後（interim 變回 false）：舊的就是停牌、沒有成交，不說
+    const official = status(MON, [close("TWSE", { stored: true, latest: MON }), close("TPEX", { stored: true, latest: MON })])
+    expect(closeState(official, FRI_CLOSE, now, "TPEX")).toBe("settled")
+  })
+
+  it("帳本：那個市場有 ETF 還是前一天的——說預計幾點更新，「今日」改「當日」", () => {
+    const boards: BoardDay[] = [{ board: "TWSE", day: MON }, { board: "TPEX", day: MON, oldest: "2026-11-13" }]
+    expect(closeLine(m, boards, FRI_CLOSE, at(MON, "21:00"), MON)).toEqual({ label: "11/16 收盤", note: "上櫃預計今晚 11:15–11:45 更新", day: "當日" })
+    // 全部都有暫時收盤價（沒有 ETF）：照舊
+    expect(closeLine(m, [{ board: "TWSE", day: MON }, { board: "TPEX", day: MON }], FRI_CLOSE, at(MON, "21:00"), MON)).toEqual({ label: "11/16 收盤", note: null, day: "今日" })
+    // 不是暫時的（官方檔）：舊的一檔是停牌，不影響
+    const official = status(MON, [close("TWSE", { stored: true, latest: MON }), close("TPEX", { stored: true, latest: MON })])
+    expect(closeLine(official, boards, FRI_CLOSE, at(MON, "23:50"), MON)).toEqual({ label: "11/16 收盤", note: null, day: "今日" })
+  })
+})
+
+/** 2026-11-16 實測：上市個股的下載檔進來了，3 秒後指數檔被擋（307）——加權指數停在上一個交易日，要說什麼時候更新 */
+describe("indexNote：加權指數還沒進來", () => {
+  const index = (o: Partial<NonNullable<TwClose["index"]>> = {}) => ({ stored: false, latest: "2026-11-13", expected_from: iso(TUE, "05:20"), expected_to: iso(TUE, "05:45"), ...o })
+  it("上市個股進來了、指數還沒：寫指數預計幾點更新；半夜以後寫哪一天的", () => {
+    const twse = close("TWSE", { stored: true, latest: MON, index: index() })
+    expect(indexNote(twse, at(MON, "15:50"))).toBe("加權指數預計明天清晨 5:20–5:45 更新")
+    expect(indexNote(twse, at(TUE, "00:30"))).toBe("加權指數 11/16 的收盤預計清晨 5:20–5:45 更新")
+    expect(indexNote(twse, at(TUE, "06:00"))).toBe("加權指數還沒更新")
+  })
+  it("指數也進來了、上市個股還在等（標題旁已經說了）、上櫃、舊版後端：不寫", () => {
+    expect(indexNote(close("TWSE", { stored: true, latest: MON, index: index({ stored: true, latest: MON }) }), at(MON, "15:50"))).toBeNull()
+    expect(indexNote(close("TWSE", { index: index() }), at(MON, "15:50"))).toBeNull()
+    expect(indexNote(close("TPEX", { stored: true, latest: MON, index: null }), at(MON, "15:50"))).toBeNull()
+    expect(indexNote(close("TWSE", { stored: true, latest: MON }), at(MON, "15:50"))).toBeNull()
   })
 })

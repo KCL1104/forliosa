@@ -205,7 +205,7 @@ describe("資料來源與授權", () => {
     expect(quotes.textContent).toMatch(/收盤後.*公布/)
     // 平常幾點更新（實測的時間）：證交所的下載網址開著時，上市下午就進來；上櫃晚上
     const times = within(quotes).getByRole("list", { name: "收盤價平常什麼時候更新" })
-    expect(times.textContent).toContain("上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）")
+    expect(times.textContent).toContain("上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）；下午拿不到時晚上 8:30–11:45")
     expect(times.textContent).toContain("上櫃：晚上 8:30–11:45，少數日子到半夜 1:30")
     expect(quotes.textContent).toMatch(/還沒更新時，帳本與個股頁會寫預計幾點更新/)
     expect(quotes.textContent).toMatch(/盤中報價要付費授權，Forliosa 沒有買。/)
@@ -271,7 +271,7 @@ describe("資料來源與授權", () => {
     })
     renderInRouter(<DataSourcesPage />)
     const times = await screen.findByRole("list", { name: "收盤價平常什麼時候更新" }, T)
-    expect(times.textContent).toContain("上市：晚上 8:30–11:45，晚的時候隔天清晨 5:20–5:40")
+    expect(times.textContent).toContain("上市：晚上 8:30–11:45，晚的時候隔天清晨 5:20–5:45")
     expect(times.textContent).not.toContain("下午")
   })
 

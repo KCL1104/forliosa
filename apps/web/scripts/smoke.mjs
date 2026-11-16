@@ -1399,7 +1399,7 @@ await check("資料來源：固定一段說明都是收盤價、沒有盤中報�
   await quotes.getByText(/Forliosa 的股價都是收盤價，沒有盤中報價。/).waitFor({ timeout: 8000 })
   // 平常幾點更新（實測；證交所的下載網址開著時上市下午就進來）
   const times = quotes.getByRole("list", { name: "收盤價平常什麼時候更新" })
-  await times.getByText("上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）").waitFor()
+  await times.getByText("上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）；下午拿不到時晚上 8:30–11:45").waitFor()
   await times.getByText("上櫃：晚上 8:30–11:45，少數日子到半夜 1:30").waitFor()
   await quotes.getByText(/盤中報價要付費授權，Forliosa 沒有買。/).waitFor()
   const mis = quotes.getByRole("link", { name: /基本市況報導/ })

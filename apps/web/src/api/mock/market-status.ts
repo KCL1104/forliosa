@@ -47,7 +47,7 @@ const isWeekday = (day: string) => ![0, 6].includes(parseDay(day).getUTCDay())
  * - 上櫃：永豐 shioaji-data 與櫃買中心 OpenAPI（晚上）→ shioaji-data 晚到的日子（半夜）
  * `[距離交易日幾天, 開始, 結束]`
  */
-const WINDOWS: Record<TwClose["market"], [number, string, string][]> = {
+const WINDOWS: Record<TwClose["market"] | "TWSE_INDEX", [number, string, string][]> = {
   TWSE: [
     [0, "14:00", "14:30"],
     [0, "20:30", "23:45"],
@@ -57,6 +57,11 @@ const WINDOWS: Record<TwClose["market"], [number, string, string][]> = {
   TPEX: [
     [0, "20:30", "23:45"],
     [1, "00:00", "01:30"],
+  ],
+  // 加權指數等證交所指數（上市那一筆的 `index`）：只有證交所自己的檔案有——下午的下載網址，再來是隔天清晨的 OpenAPI
+  TWSE_INDEX: [
+    [0, "14:00", "14:30"],
+    [1, "05:20", "05:45"],
   ],
 }
 
@@ -70,12 +75,16 @@ export function mockCloses(now: Date, latest: string = MOCK_TODAY): TwClose[] {
   const today = `${p.year}-${p.month}-${p.day}`
   let session = isWeekday(today) && `${p.hour}:${p.minute}` >= "13:30" ? today : addDays(today, -1)
   while (!isWeekday(session)) session = addDays(session, -1)
-  return (["TWSE", "TPEX"] as const).map((market) => {
-    const stored = latest >= session
-    const next = stored
+  const stored = latest >= session
+  const next = (key: keyof typeof WINDOWS) =>
+    stored
       ? undefined
-      : WINDOWS[market].map(([d, from, to]) => [`${addDays(session, d)}T${from}:00+08:00`, `${addDays(session, d)}T${to}:00+08:00`] as const).find(([, to]) => Date.parse(to) > now.getTime())
-    return { market, session, stored, latest, interim: false, expected_from: next?.[0] ?? null, expected_to: next?.[1] ?? null }
+      : WINDOWS[key].map(([d, from, to]) => [`${addDays(session, d)}T${from}:00+08:00`, `${addDays(session, d)}T${to}:00+08:00`] as const).find(([, to]) => Date.parse(to) > now.getTime())
+  return (["TWSE", "TPEX"] as const).map((market) => {
+    const w = next(market)
+    const i = next("TWSE_INDEX")
+    const index = market === "TWSE" ? { stored, latest, expected_from: i?.[0] ?? null, expected_to: i?.[1] ?? null } : null
+    return { market, session, stored, latest, interim: false, expected_from: w?.[0] ?? null, expected_to: w?.[1] ?? null, index }
   })
 }
 
