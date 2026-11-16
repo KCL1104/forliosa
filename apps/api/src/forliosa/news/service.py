@@ -52,6 +52,7 @@ from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.http import HttpFetcher, RateLimiter
 from forliosa.marketdata.service import MarketData
 from forliosa.models import CompanyProfile, NewsArticle, NewsBlockedDomain, NewsFetchState, NewsTrackedView
+from forliosa.news.gdelt_bulk import GdeltBulk
 from forliosa.news.normalize import (
     Headline,
     clean_title,
@@ -59,12 +60,14 @@ from forliosa.news.normalize import (
     dedupe,
     is_amp_or_mobile,
     is_blocked,
+    is_bot_flash,
     is_relevant,
     make_terms,
     normalize_domain,
+    rank,
     url_key,
 )
-from forliosa.news.outlets import host_of, outlet_name
+from forliosa.news.outlets import host_of, is_not_news, outlet_name
 from forliosa.news.searxng import SearxngSource, engine_refused
 from forliosa.news.sources import (
     GdeltSource,
@@ -89,6 +92,10 @@ BACKOFF_START = timedelta(minutes=15)
 BACKOFF_MAX = timedelta(hours=4)
 VIEW_WRITE_EVERY = timedelta(minutes=10)
 GDELT_FRESH = timedelta(hours=24)  # the AI fallback needs a GDELT (and SearXNG) answer this recent
+# The AI fallback's search window (2026-11-16, memo §2 item 6): 14 days for a stock with few headlines, 30 days for one
+# with none in the last 14 days (small caps often have a story only every few weeks).
+AI_WINDOW = timedelta(days=14)
+AI_WINDOW_EMPTY = timedelta(days=30)
 SOURCE_WIDE = "*"
 # SearXNG's upstream engines: news_fetch_state rows (source "searxng", symbol "@<engine>").
 ENGINE_PREFIX = "@"
@@ -201,17 +208,19 @@ def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datet
 
 # -- normalising and storing --------------------------------------------------------------------------------
 def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Sequence[str]) -> list[Headline]:
-    """Raw items -> normalised, relevant, unblocked headlines inside the query window."""
+    """Raw items -> normalised, relevant, unblocked headlines inside the query window. Never a page that is not news
+    (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (``盤中速報``)."""
     out: list[Headline] = []
     for it in items:
         url = clean_url(it.url)
-        if url is None or is_blocked(url, blocked) or (it.domain and is_blocked(it.domain, blocked)):
+        if url is None or is_blocked(url, blocked) or (it.domain and is_blocked(it.domain, blocked)) \
+                or is_not_news(url):
             continue
         host = host_of(url)
         outlet = it.outlet or outlet_name(url, it.domain)
         title = clean_title(it.title, url, outlet)
         published = _aware(it.published_at)
-        if not title or not is_relevant(title, q.terms):
+        if not title or not is_relevant(title, q.terms) or is_bot_flash(title):
             continue
         if published > q.until + timedelta(minutes=30):
             continue
@@ -282,6 +291,14 @@ def _source_served(source: str, policy: Policy) -> bool:
     return policy == "personal" or source not in PERSONAL_ONLY_SOURCES
 
 
+def shown(h: Headline, policy: Policy, blocked: Sequence[str]) -> bool:
+    """Served under this data policy, not taken down, news (not a quote page or robot flash stored before
+    2026-11-16)."""
+    return (_source_served(h.source, policy) and not is_blocked(h.url, blocked)
+            and not (h.domain and is_blocked(h.domain, blocked)) and not is_not_news(h.url)
+            and not is_bot_flash(h.title))
+
+
 def item_out(h: Headline) -> dict[str, Any]:
     label, key = SOURCE_INFO.get(h.source, (h.source, h.source))
     return {"published_at": iso_taipei(h.published_at), "title": h.title, "source": label, "outlet": h.outlet,
@@ -314,8 +331,7 @@ def market_items(db: Session, md: MarketData, *, settings: Settings | None = Non
                       .order_by(NewsArticle.published_at.desc()).limit(limit * 4))
     heads = [Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
                       source=r.source, date_only=bool(r.date_only)) for r in rows]
-    heads = [h for h in heads if _source_served(h.source, md.policy) and not is_blocked(h.url, blocked)
-             and not (h.domain and is_blocked(h.domain, blocked))]
+    heads = [h for h in heads if shown(h, md.policy, blocked)]
     return [item_out(h) for h in dedupe(heads)[:limit]]
 
 
@@ -367,9 +383,8 @@ def media_items(db: Session, md: MarketData, info: InstrumentInfo, *, settings: 
     heads = [Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
                       source=r.source, date_only=bool(r.date_only)) for r in rows]
     heads += list(extra)
-    heads = [h for h in heads if _source_served(h.source, md.policy) and not is_blocked(h.url, blocked)
-             and not (h.domain and is_blocked(h.domain, blocked))]
-    return [item_out(h) for h in dedupe(heads)[:limit]]
+    heads = [h for h in heads if shown(h, md.policy, blocked)]
+    return [item_out(h) for h in rank(dedupe(heads))[:limit]]
 
 
 # -- refreshing ---------------------------------------------------------------------------------------------
@@ -432,11 +447,20 @@ def default_sources(settings: Settings, policy: Policy, fetcher: HttpFetcher | N
     return out
 
 
+def gdelt_bulk_source(settings: Settings) -> GdeltBulk | None:
+    """GDELT's 15-minute bulk files for Taiwan stocks (on unless NEWS_GDELT_ENABLED or NEWS_GDELT_BULK is false)."""
+    if not (settings.news_gdelt_enabled and settings.news_gdelt_bulk and settings.news_gdelt_bulk_feeds):
+        return None
+    return GdeltBulk(feeds=settings.news_gdelt_bulk_feeds, max_files=settings.news_gdelt_bulk_max_files)
+
+
 @dataclass
 class RefreshReport:
     symbols: int = 0
-    fetched: dict[str, int] = field(default_factory=dict)  # source -> requests made
+    fetched: dict[str, int] = field(default_factory=dict)  # source -> requests made (gdelt_bulk: files read)
     stored: int = 0
+    bulk_rows: int = 0  # Taiwanese headlines in the GDELT bulk files read
+    bulk_ok: bool = False  # the bulk files are current: the DOC API is not asked for Taiwan stocks
     blocked_sources: list[str] = field(default_factory=list)
     ai_searches: int = 0
     ai_skipped: str | None = None  # why the AI fallback did not run at all (budget, off, no keys)
@@ -552,6 +576,47 @@ def recent_free_count(db: Session, symbol: str, now: datetime) -> int:
     return recent_count(db, symbol, now - WINDOW, FREE_SOURCES)
 
 
+def ai_window(db: Session, symbol: str, now: datetime) -> timedelta:
+    """How far back the AI fallback searches: 14 days, or 30 when nothing at all is stored from the last 14 days."""
+    found = db.scalar(select(func.count()).select_from(NewsArticle).where(
+        NewsArticle.symbol == symbol, NewsArticle.published_at >= now - AI_WINDOW)) or 0
+    return AI_WINDOW if found else AI_WINDOW_EMPTY
+
+
+def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequence[str], now: datetime,
+                  report: RefreshReport, blocked: Sequence[str]) -> bool:
+    """Read GDELT's new bulk files once for every Taiwan stock of the batch and store the matches as GDELT headlines.
+    While the files are current, each stock's ``gdelt`` row is booked as answered (``last_success_at``: the AI
+    fallback's gate and the DOC API fallback's window read it; ``last_attempt_at`` stays the rotation's, set when the
+    batch reaches the stock). Returns whether the files are current."""
+    queries: dict[str, Query] = {}
+    for sym in symbols:
+        info = md.instrument(sym)
+        if info is not None and info.market != "US":
+            queries[info.symbol] = build_query(db, info, now - WINDOW, now)
+    if not queries:
+        return False
+    res = bulk.run(db, queries, now)
+    report.fetched[bulk.key] = report.fetched.get(bulk.key, 0) + res.files
+    report.bulk_rows += res.rows
+    report.errors += res.errors
+    report.blocked_sources += [f"{bulk.key}:{f}" for f in res.paused]
+    found: dict[str, int] = {}
+    for sym, items in res.items.items():
+        heads = to_headlines(items, queries[sym], "gdelt", blocked)
+        found[sym] = len(heads)
+        report.stored += store(db, sym, heads, now)
+    ok = bulk.healthy(db, now)
+    if ok:
+        for sym in queries:
+            st = _state(db, "gdelt", sym)
+            st.last_success_at, st.failures = now, 0
+            st.items = found.get(sym, 0)
+            st.last_status = "ok" if st.items else "empty"
+        db.commit()
+    return ok
+
+
 def default_ai(settings: Settings) -> AiFactory:
     """The AI fallback when it may run now: on, web search on, keys configured and not exhausted."""
 
@@ -571,10 +636,12 @@ def default_ai(settings: Settings) -> AiFactory:
 
 def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, sources: list[NewsSource] | None = None,
             ai: AiFactory | str | None = "default", symbols: list[str] | None = None,
-            now_fn: Callable[[], datetime] = now_utc, deadline_seconds: float | None = None) -> RefreshReport:
-    """One batch over the tracked symbols (see the module docstring). ``sources`` / ``ai`` / ``symbols`` are for
-    tests and the CLI; by default they follow the settings and ``DATA_POLICY``. ``ai=None`` turns the AI fallback
-    off for this run; ``"default"`` uses the key pool when ``NEWS_AI_ENABLED`` and ``AI_WEB_SEARCH`` allow it."""
+            now_fn: Callable[[], datetime] = now_utc, deadline_seconds: float | None = None,
+            bulk: GdeltBulk | str | None = "default") -> RefreshReport:
+    """One batch over the tracked symbols (see the module docstring). ``sources`` / ``ai`` / ``symbols`` / ``bulk``
+    are for tests and the CLI; by default they follow the settings and ``DATA_POLICY``. ``ai=None`` turns the AI
+    fallback off for this run; ``"default"`` uses the key pool when ``NEWS_AI_ENABLED`` and ``AI_WEB_SEARCH`` allow
+    it. ``bulk="default"`` reads GDELT's bulk files only when ``sources`` is not given (tests pass their sources)."""
     from forliosa.news import ai_search
 
     settings = settings or get_settings()
@@ -584,6 +651,8 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     started = _time.monotonic()
     now = now_fn()
     purge(db, settings, now)
+    if bulk == "default":
+        bulk = gdelt_bulk_source(settings) if sources is None else None
     sources = default_sources(settings, md.policy) if sources is None else sources
     if not settings.news_ai_enabled or (ai == "default" and not settings.ai_web_search):
         ai = None
@@ -598,6 +667,8 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     if market_run and gdelt is not None and not _refresh_market(db, gdelt, now, report, blocked, settings):
         open_sources.remove(gdelt)
         report.blocked_sources.append(gdelt.key)
+    if isinstance(bulk, GdeltBulk):
+        report.bulk_ok = _refresh_bulk(db, md, bulk, symbols, now, report, blocked)
     gdelt_on = any(s.key == "gdelt" for s in sources)
     failures: dict[str, int] = {}
     ai_runner: Any = None
@@ -614,6 +685,11 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         base = build_query(db, info, now - WINDOW, now)
         for src in list(open_sources):
             if not src.supports(base):
+                continue
+            if src.key == "gdelt" and report.bulk_ok and base.taiwan:  # the bulk files covered it
+                report.skipped["gdelt_bulk"] = report.skipped.get("gdelt_bulk", 0) + 1
+                _state(db, "gdelt", info.symbol).last_attempt_at = now  # keeps the stalest-first rotation turning
+                db.commit()
                 continue
             searx = src if isinstance(src, SearxngSource) else None
             if searx is not None:
@@ -673,7 +749,10 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         # -- AI fallback --------------------------------------------------------------------------------
         if ai is None or report.ai_searches >= AI_MAX_PER_RUN:
             continue
-        if not _ai_due(db, settings, info.symbol, now, gdelt_on=gdelt_on,
+        # A paused or unreachable source does not hold the AI back (2026-11-16: GDELT's DOC API is paused after a 429
+        # most of the day, and the AI step waited for it): only the sources answering in this run must have answered.
+        gdelt_answering = (report.bulk_ok and base.taiwan) or any(s.key == "gdelt" for s in open_sources)
+        if not _ai_due(db, settings, info.symbol, now, gdelt_on=gdelt_answering,
                        searxng_on=any(s.key == "searxng" for s in open_sources)):
             continue
         if not ai_search.budget_left(db, settings, now):
@@ -690,7 +769,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         st = _state(db, "ai_search", info.symbol)
         st.last_attempt_at = now
         db.commit()
-        q = base
+        q = replace(base, since=now - ai_window(db, info.symbol, now))
         gen = ai_search.new_generation_id()
         report.ai_searches += 1
         try:
@@ -708,8 +787,10 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         st = _state(db, "ai_search", info.symbol)
         st.last_success_at, st.last_status, st.items, st.failures = now, "ok" if heads else "empty", len(heads), 0
         db.commit()
-    log.info("news refresh: %d symbols, requests %s, %d new headlines, %d AI searches%s%s%s", report.symbols,
+    log.info("news refresh: %d symbols, requests %s, %d new headlines, %d AI searches%s%s%s%s", report.symbols,
              report.fetched, report.stored, report.ai_searches,
+             f", GDELT bulk {'current' if report.bulk_ok else 'not current'} ({report.bulk_rows} Taiwanese rows)"
+             if "gdelt_bulk" in report.fetched or report.bulk_ok else "",
              f", skipped {report.skipped}" if report.skipped else "",
              f", paused {report.blocked_sources}" if report.blocked_sources else "",
              f", paused SearXNG engines {report.paused_engines}" if report.paused_engines else "")
@@ -719,8 +800,9 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
 def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdelt_on: bool,
             searxng_on: bool = False) -> bool:
     """GDELT and SearXNG together hold fewer than NEWS_AI_MIN_ITEMS headlines from the last 7 days, each of them
-    answered for this symbol in the last 24 hours (GDELT when it is on; SearXNG while it is on and not paused — a
-    paused SearXNG does not hold the AI back), and no AI search for this symbol in the last NEWS_AI_INTERVAL_HOURS."""
+    answered for this symbol in the last 24 hours while it is answering in this run (GDELT: its bulk files are current
+    or its DOC API is not paused; SearXNG: on and not paused — a paused source does not hold the AI back), and no AI
+    search for this symbol in the last NEWS_AI_INTERVAL_HOURS."""
     for source, on in (("gdelt", gdelt_on), ("searxng", searxng_on)):
         if not on:
             continue

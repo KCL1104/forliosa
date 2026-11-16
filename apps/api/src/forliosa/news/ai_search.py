@@ -1,14 +1,17 @@
 """AI web-search fallback for the 「新聞報導」 list (product owner 2026-11-12, decision 1).
 
 Used by the news worker only for a symbol whose free sources gave fewer than ``NEWS_AI_MIN_ITEMS`` (3) headlines
-in the last 7 days, at most once per ``NEWS_AI_INTERVAL_HOURS`` per symbol, and only while this (UTC) month's
+in the last 7 days, searching the last 14 days (30 when nothing is stored from the last 14; 2026-11-16), at most once
+per ``NEWS_AI_INTERVAL_HOURS`` per symbol, and only while this (UTC) month's
 ``feature = "news"`` spend in ``ai_usage`` is below ``NEWS_AI_BUDGET_USD`` (US$30; the system pays, ``user_id`` is
 NULL). One non-streaming ``messages.create`` through ``KeyPool.call`` with ``web_search`` only (no ``web_fetch``:
 nothing is read from news sites or www.twse.com.tw) and the strict client tool ``report_news`` whose only output is
 a list of URLs. **The model only selects**: each kept item's title, link and date come from the
 ``web_search_result`` block with that URL (compared like :func:`forliosa.ai.analyst._norm_url`); a URL that is not
 one of the results, a quote / rating page (``analyst.is_article``) or a result without a readable date is dropped.
-The caller then applies the same relevance filter, blocklist and de-duplication as every other source.
+The caller then applies the same relevance filter, blocklist and de-duplication as every other source. The search
+leaves out quote pages, forums and AI-written pages (``outlets.NOT_NEWS_DOMAINS``) and the prompt prefers reputable
+business news and rules out robot quote flashes (:func:`news_system`; the caller drops any flash that slips through).
 """
 
 from __future__ import annotations
@@ -41,6 +44,7 @@ from forliosa.ai.tools import exclude_tool, rejected_tool, server_tools
 from forliosa.config import Settings
 from forliosa.ids import new_id
 from forliosa.models import AiUsage
+from forliosa.news.outlets import NOT_NEWS_DOMAINS
 from forliosa.news.sources import Query, RawItem
 from forliosa.timeutil import TAIPEI
 
@@ -54,10 +58,19 @@ MAX_URLS = 10
 # Upper estimate of one search (2 web searches = US$0.02 plus tokens): a search starts only when this much budget
 # is left, so the month never ends far above the cap.
 RESERVE_USD = Decimal("0.05")
-# Never offered as news: quote / forum / aggregator pages and the exchange websites.
-SEARCH_BLOCKED = ["goodinfo.tw", "wantgoo.com", "cmoney.tw", "pchome.com.tw", "tradingview.com", "investing.com",
-                  "stockanalysis.com", "marketbeat.com", "tipranks.com", "www.twse.com.tw", "mis.twse.com.tw",
-                  "mops.twse.com.tw", "ptt.cc", "dcard.tw", "youtube.com", "facebook.com"]
+# Never offered as news: quote / forum / aggregator pages, AI-written pages (outlets.NOT_NEWS_DOMAINS, extended
+# 2026-11-16: CMoney incl. its AI Q&A and forum, cmnews, Fugle's AI 法說會 notes, HiStock and other quote sites) and the
+# exchange websites.
+SEARCH_BLOCKED = list(dict.fromkeys([
+    "goodinfo.tw", "wantgoo.com", "cmoney.tw", "pchome.com.tw", "tradingview.com", "investing.com",
+    "stockanalysis.com", "marketbeat.com", "tipranks.com", "www.twse.com.tw", "mis.twse.com.tw", "mops.twse.com.tw",
+    "ptt.cc", "dcard.tw", "youtube.com", "facebook.com", *NOT_NEWS_DOMAINS]))
+# Added to the prompt (2026-11-16, memo §2 items 5 and 6): reputable outlets preferred, robot flashes left out.
+NEWS_SYSTEM_EXTRA = """
+
+## 媒體
+- 優先列可信的財經媒體：經濟日報、工商時報、MoneyDJ、鉅亨、中央社、自由財經；美股是 Reuters、CNBC 這類通訊社和財經報。其他媒體的報導也可以列。
+- 不要列機器人自動產生的股價或營收快訊（例如鉅亨的「盤中速報」「營收速報」），也不要列 AI 自動寫的文章（包括 AI 寫的法說會摘要）。"""  # noqa: E501
 
 
 def month_spend(db: Session, now: datetime) -> Decimal:
@@ -70,6 +83,14 @@ def month_spend(db: Session, now: datetime) -> Decimal:
 def budget_left(db: Session, settings: Settings, now: datetime) -> bool:
     budget = Decimal(str(settings.news_ai_budget_usd))
     return budget > 0 and month_spend(db, now) + RESERVE_USD <= budget
+
+
+def news_system(days: int) -> str:
+    """The news prompt for a search over the last ``days`` days (the prompt's own default says 7)."""
+    base = NEWS_SYSTEM.replace("最近 7 天", f"最近 {days} 天")
+    if base == NEWS_SYSTEM and days != 7:  # the wording changed: say it once more, plainly
+        base += f"\n\n這次找最近 {days} 天的報導（日期見問題）。"
+    return base + NEWS_SYSTEM_EXTRA
 
 
 def search_tools(settings: Settings, blocked: list[str]) -> list[dict[str, Any]]:
@@ -149,7 +170,8 @@ class AiSearch:
         messages: list[dict[str, Any]] = [{"role": "user", "content": news_question(
             q.name, q.code, q.english[0] if q.english else None, q.market, today.isoformat(),
             q.since.astimezone(TAIPEI).date().isoformat())}]
-        params: dict[str, Any] = {"model": model, "max_tokens": MAX_TOKENS, "system": NEWS_SYSTEM,
+        days = max(7, round((now - q.since).total_seconds() / 86400))
+        params: dict[str, Any] = {"model": model, "max_tokens": MAX_TOKENS, "system": news_system(days),
                                   "tools": [*search_tools(settings, blocked), NEWS_TOOL]}
         if not any(t.get("name") == "web_search" for t in params["tools"]):
             return []
