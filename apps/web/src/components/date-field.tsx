@@ -24,6 +24,8 @@ export function DateField({
   invalid,
   describedBy,
   className,
+  format = formatDateLong,
+  icon = true,
 }: {
   id?: string
   value: string
@@ -37,6 +39,10 @@ export function DateField({
   invalid?: boolean
   describedBy?: string
   className?: string
+  /** 欄位上顯示的寫法（預設「2026/11/12（四）」；匯入對帳單的表格只寫「10/1（四）」） */
+  format?: (value: string) => string
+  /** 前面的日曆圖示（表格裡很窄的一格不放） */
+  icon?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const selected = value ? toDate(value) : undefined
@@ -63,8 +69,8 @@ export function DateField({
           className,
         )}
       >
-        <CalendarIcon aria-hidden className="size-4 shrink-0 text-ink-2" />
-        {value ? <span className="num min-w-0 truncate">{formatDateLong(value)}</span> : <span className="min-w-0 truncate text-muted-foreground">{placeholder}</span>}
+        {icon && <CalendarIcon aria-hidden className="size-4 shrink-0 text-ink-2" />}
+        {value ? <span className="num min-w-0 truncate">{format(value)}</span> : <span className="min-w-0 truncate text-muted-foreground">{placeholder}</span>}
       </PopoverTrigger>
       <PopoverContent align="start" className="w-auto gap-0 p-3">
         <DayPicker

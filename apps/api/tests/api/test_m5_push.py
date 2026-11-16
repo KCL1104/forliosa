@@ -283,3 +283,19 @@ def test_default_share_never_pushes(app, client, fake, market):
     _g, b = setup_group(app, client, fake, SHARE_DEFAULT)
     trade(b, account(b)["id"], "2330", "buy", today_taipei(), 1000, 600)
     assert run(market)[0] == 0
+
+
+def test_imported_statement_is_never_pushed(app, client, fake, market):
+    """產品負責人 2026-11-16: a statement import would push a whole month at once; imported trades are never pushed
+    (nor shown in the feed or counted in digests)."""
+    _g, b = setup_group(app, client, fake)
+    acc = account(b)
+    rows = [{"symbol": "2330", "type": "buy", "trade_date": today_taipei().isoformat(), "quantity": 1000,
+             "price": 600}]
+    r = b.post(f"{API}/transactions/batch", json={"account_id": acc["id"], "origin": "import", "rows": rows})
+    assert r.status_code == 201, r.text
+    assert run(market)[0] == 0
+    run(market, now_utc() + LATER)
+    assert fake.discord == [] and outbox() == []
+    trade(b, acc["id"], "2317", "buy", today_taipei(), 1000, 100)  # a trade entered by hand still goes
+    assert run(market)[0] == 1

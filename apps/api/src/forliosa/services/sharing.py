@@ -12,7 +12,7 @@
   fees, transaction ids or prices (prices only in the feed with ``trade_prices``).
 
 Group feed items are computed, not stored: a trade item is one member's buys (or sells) of one symbol on one Taipei
-day (``manual`` / ``import`` / ``ai_draft`` buy / sell rows only), its id a keyed hash of that key
+day (``manual`` / ``ai_draft`` buy / sell rows only; imported statement rows never), its id a keyed hash of that key
 (:func:`feed_item_id`). Comments and reactions on a trade item are deleted with its last underlying transaction
 (:func:`purge_trade_threads`).
 
@@ -80,7 +80,9 @@ DEFAULT_SHARE = {"returns": True, "holdings": False, "amounts": False, "trades":
 PERIODS = ("day", "month", "year")
 BENCHMARKS = ("^TAIEXTR", "0050.TW")
 FEED_DAYS = 90
-FEED_SOURCES = ("manual", "import", "ai_draft")
+# Imported statement rows (``source="import"``, 產品負責人 2026-11-16) are left out like the converted buys below: a
+# statement brings months of trades at once and would flood the group's feed, its channels and the weekly digest.
+FEED_SOURCES = ("manual", "ai_draft")
 # Buys migration 0018 made out of 「只記持股」 snapshots: holdings, not trades — like the snapshots before them they are
 # never shown in group feeds, counted in digests or pushed to group channels (2026-11-14)
 CONVERTED_NOTE = "由「只記持股」轉入"
@@ -511,8 +513,8 @@ def joined_item_id(group_id: str, user_id: str, joined_at: datetime) -> str:
 
 
 def feed_eligible(t: Transaction) -> bool:
-    """A transaction that can appear in a group feed (and so be pushed): a manual / imported / signed-draft buy or sell
-    with a symbol."""
+    """A transaction that can appear in a group feed (and so be pushed): a manual or signed-draft buy or sell with a
+    symbol (never an imported one)."""
     return t.type in FEED_SIDES and t.source in FEED_SOURCES and bool(t.symbol) and t.note != CONVERTED_NOTE
 
 

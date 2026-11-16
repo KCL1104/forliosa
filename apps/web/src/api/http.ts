@@ -66,6 +66,7 @@ import type {
   TelegramLinkCode,
 } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
+import type { StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
 
 type Query = Record<string, string | number | null | undefined>
@@ -91,7 +92,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
   const root = baseUrl.replace(/\/+$/, "")
   const prefix = root.endsWith("/api/v1") ? root : `${root}/api/v1`
 
-  async function request<T>(method: string, path: string, opts: { query?: Query; body?: unknown; keepalive?: boolean } = {}): Promise<T> {
+  async function request<T>(method: string, path: string, opts: { query?: Query; body?: unknown; keepalive?: boolean; signal?: AbortSignal } = {}): Promise<T> {
     const headers: Record<string, string> = { Accept: "application/json" }
     if (opts.body !== undefined) headers["Content-Type"] = "application/json"
     // 授權查看：查看中每個請求都帶上授權 id（查看者自己的端點除外，見 view-as.ts）
@@ -104,6 +105,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       // 頁面卸載時送出的請求（延後的刪除）：瀏覽器在頁面關掉後照樣送完
       ...(opts.keepalive ? { keepalive: true } : {}),
+      // 匯入對帳單的「取消」：中斷還在等的讀取
+      ...(opts.signal ? { signal: opts.signal } : {}),
     })
     if (!res.ok) {
       let code = `http_${res.status}`
@@ -179,6 +182,11 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     updateTransaction: (id, patch) => request<Transaction>("PATCH", `/transactions/${enc(id)}`, { body: patch }),
     deleteTransaction: (id) => request<void>("DELETE", `/transactions/${enc(id)}`),
     previewTransaction: (body) => request<TradePreview>("POST", "/transactions/preview", { body }),
+    // 匯入對帳單：JSON（base64 的頁面圖片），不是 multipart
+    parseStatement: (body, opts) => request<StatementImport>("POST", "/imports/statement", { body, signal: opts?.signal }),
+    checkTransactionBatch: (body) => request<TransactionBatchCheck>("POST", "/transactions/batch", { body: { ...body, dry_run: true } }),
+    createTransactionBatch: (body) => request<TransactionBatchResult>("POST", "/transactions/batch", { body: { ...body, dry_run: false } }),
+    deleteTransactionBatch: (batchId) => request<{ batch_id: string; deleted: number }>("DELETE", `/transactions/batches/${enc(batchId)}`),
 
     getPortfolioSummary: (accountId) =>
       request<PortfolioSummary>("GET", "/portfolio/summary", { query: { account_id: accountId } }),

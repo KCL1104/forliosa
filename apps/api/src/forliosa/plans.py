@@ -37,6 +37,8 @@ class Plan:
     monthly_token_budget: int  # 0: no limit
     deep_search: bool
     daily_briefing: bool
+    # 匯入對帳單 (2026-11-16): ``IMPORT_STATEMENTS`` off | admins | all, the same for free accounts and members
+    statement_import: bool = False
 
     @property
     def member(self) -> bool:
@@ -49,13 +51,21 @@ def is_member(user: User, now: datetime | None = None) -> bool:
     return user.plan == MEMBER and (user.plan_until is None or user.plan_until > (now or now_utc()))
 
 
+def statement_import_open(user: User, settings: Settings) -> bool:
+    """``IMPORT_STATEMENTS``: ``all`` opens 匯入對帳單 to every account, ``admins`` to site admins only."""
+    mode = settings.import_statements
+    return mode == "all" or (mode == "admins" and is_site_admin(user))
+
+
 def plan_of(user: User, settings: Settings, now: datetime | None = None) -> Plan:
+    imports = statement_import_open(user, settings)
     if is_member(user, now):
         return Plan(MEMBER, None if is_site_admin(user) else user.plan_until,
                     settings.ai_member_daily_message_limit, settings.ai_member_monthly_cost_budget_usd,
-                    settings.ai_member_monthly_token_budget, True, True)
+                    settings.ai_member_monthly_token_budget, True, True, imports)
     return Plan(FREE, None, settings.ai_daily_message_limit, settings.ai_monthly_cost_budget_usd,
-                settings.ai_monthly_token_budget, settings.ai_free_deep_search, settings.ai_free_daily_briefing)
+                settings.ai_monthly_token_budget, settings.ai_free_deep_search, settings.ai_free_daily_briefing,
+                imports)
 
 
 def last_day(until: datetime | None) -> date | None:
@@ -66,7 +76,8 @@ def last_day(until: datetime | None) -> date | None:
 def me_fields(user: User, settings: Settings) -> dict[str, Any]:
     p = plan_of(user, settings)
     return {"plan": {"tier": p.tier, "until": d.isoformat() if (d := last_day(p.until)) else None,
-                     "deep_search": p.deep_search, "daily_briefing": p.daily_briefing}}
+                     "deep_search": p.deep_search, "daily_briefing": p.daily_briefing,
+                     "statement_import": p.statement_import}}
 
 
 # -- site admins: grant and revoke ----------------------------------------------------------------------------------

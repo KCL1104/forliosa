@@ -1,2 +1,7 @@
 packages:
   - "apps/web"
+
+# pdfjs-dist 把 @napi-rs/canvas 列為選用相依（只有在 Node 裡畫 PDF 才用到）：瀏覽器用不到，
+# 裝了還會讓 jsdom 改用真的 canvas、改變既有測試的行為，所以不裝。
+overrides:
+  "@napi-rs/canvas": "-"

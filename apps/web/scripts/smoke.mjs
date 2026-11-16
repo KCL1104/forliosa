@@ -10,6 +10,9 @@
 // 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・市場・群組・討論）與從「問 AI」的時鐘到紀錄。
 // mock 的狀態在記憶體裡：同一個流程用站內導覽（不重新載入），重新載入就回到示範資料。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
+// 匯入對帳單（2026-11-16）：有密碼的 PDF（scripts/fixtures/statement-locked.pdf：合成的假資料，密碼是假的身分證字號 A123456789）
+// → 在瀏覽器裡解開、塗掉個資 → 確認表（每一種檢查結果）→ 補一筆買進、選股票 → 簽名匯入 → 復原；截圖；手機的抽屜；沒開放的帳號沒有入口。
+import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 
 const require = createRequire(import.meta.url)
@@ -359,8 +362,9 @@ await check("帳本的欄位選單：勾選格排成兩欄，文字是橫的（�
 
 await check("手動記帳表單（備援路徑）：手續費選填、合計照填的算，並儲存", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
-  // 「＋」直接打開表單（只有一件事，不做成選單）
-  await page.getByRole("button", { name: "用表單記一筆" }).click()
+  // 「＋」：開了匯入對帳單的帳號（mock 的示範使用者是站方管理員）是兩項的選單——記一筆、匯入對帳單（2026-11-16）
+  await page.getByRole("button", { name: "記一筆或匯入對帳單" }).click()
+  await page.getByRole("menuitem", { name: "記一筆" }).click()
   // 預設是簡單的買進輸入；賣出、股利與選填的手續費在完整表單裡
   await page.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).click()
   await page.getByRole("dialog").getByRole("heading", { name: "記一筆交易" }).waitFor()
@@ -3003,6 +3007,140 @@ await check("手機：討論的清單、主題、開新主題、管理後台—�
       const small = await smallTargets(p)
       if (small.length) throw new Error(`${path} (signed out): ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
     }
+  })
+})
+
+// ── 匯入對帳單（v1，2026-11-16） ──────────────────────────────
+const LOCKED_PDF = new URL("./fixtures/statement-locked.pdf", import.meta.url)
+/** 一張「截圖」：用瀏覽器自己截一張 PNG（內容不重要，mock 不看圖） */
+const screenshotFile = async (p) => ({ name: "成交明細.png", mimeType: "image/png", buffer: await p.screenshot({ clip: { x: 0, y: 0, width: 390, height: 844 } }) })
+
+await check("匯入對帳單（桌面）：記一筆第一步的「從對帳單匯入」→ 有密碼的 PDF（密碼不對 → 對的）→ 確認表（每一種檢查結果、整份核對、像指令的文字、略過股利）→ 選股票、補一筆買進 → 簽名匯入 → 已匯入 N 筆 → 復原", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "記一筆", exact: true }).click()
+    await p.getByRole("dialog").getByRole("button", { name: "從對帳單匯入" }).click()
+    const dialog = p.getByRole("dialog", { name: "匯入對帳單" })
+    await dialog.waitFor({ timeout: 8000 })
+    await dialog.locator("input[type=file]").setInputFiles({ name: "202610對帳單.pdf", mimeType: "application/pdf", buffer: readFileSync(LOCKED_PDF) })
+    // 密碼在瀏覽器裡用（pdf.js）：打錯是「密碼不對」，提示是身分證字號
+    const pwd = dialog.getByLabel("PDF 密碼")
+    await pwd.waitFor({ timeout: 20000 })
+    await dialog.getByText("通常是身分證字號，英文大寫。", { exact: false }).waitFor()
+    await pwd.fill("A000000000")
+    await dialog.getByRole("button", { name: "開始讀" }).click()
+    await dialog.getByText("密碼不對", { exact: true }).waitFor({ timeout: 20000 })
+    await pwd.fill("A123456789")
+    await dialog.getByRole("button", { name: "開始讀" }).click()
+    // 讀取中可以取消；mock 收到的文字層裡還有身分證字號時會拒絕（塗黑有沒有做，靠這個擋）
+    await dialog.getByText(/^正在讀 2 頁…$/).waitFor({ timeout: 20000 })
+    await dialog.getByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }).waitFor({ timeout: 15000 })
+    for (const text of [
+      "比對帳單的合計少 NT$12,450，可能漏讀了。",
+      "檔案裡有一段像指令的文字，沒有照做。",
+      "找不到「台積」。",
+      "「國泰」對得到好幾檔，選一檔。",
+      "賣出 2,000 股，超過當時持有的 1,000 股。",
+      "10/6 已經記過一筆一樣的。",
+      "這一列沒讀清楚。",
+      "融資買進，當成一般買進匯入。",
+      "台股的股數要是整數。",
+    ]) {
+      await dialog.getByText(text, { exact: true }).first().waitFor({ timeout: 4000 })
+    }
+    for (const re of [/^那天收盤 .+，這裡是 .+。$/, /^股數 × 價格和成交金額差 900。$/, /不是交易日。$/, /不在對帳單的期間/, /已經記過一筆股數一樣、價格不同的買進。$/, /^當沖：/]) {
+      await dialog.getByText(re).first().waitFor({ timeout: 4000 })
+    }
+    // 確認表是 AI 草稿的樣子：石墨灰虛線
+    const dashed = await dialog.locator("table").evaluate((t) => getComputedStyle(t.parentElement).borderTopStyle)
+    if (dashed !== "dashed") throw new Error(`the review table should sit in a dashed draft box, got ${dashed}`)
+    // 股利、融券不匯入：收成一行
+    await dialog.getByRole("button", { name: "略過 3 筆股利、1 筆融券" }).click()
+    await dialog.getByText("股利已經自動入帳。", { exact: true }).first().waitFor()
+    const before = Number((await dialog.getByRole("button", { name: /^簽名：匯入 \d+ 筆$/ }).getAttribute("aria-label")).match(/\d+/)[0])
+    // 找不到「台積」：句子旁邊選一檔（先用對帳單上的名稱搜）
+    await dialog.getByRole("button", { name: "選一檔" }).first().click()
+    await p.getByRole("option", { name: /2330/ }).first().click()
+    if (await dialog.getByText("找不到「台積」。", { exact: true }).count()) throw new Error("the unknown-symbol message should go away once a stock is picked")
+    await dialog.getByRole("checkbox", { name: "匯入：10/14 買進 台積電" }).check()
+    // 賣超：補一筆買進（日期、價格自己填），再勾那筆賣出
+    await dialog.getByRole("button", { name: "補一筆買進" }).click()
+    await dialog.locator("#imp-date-added_1").click()
+    await p.getByRole("button", { name: "上個月" }).click()
+    await p.getByRole("button", { name: /^2026 年 10 月 8 日/ }).click()
+    await dialog.locator("#imp-price-added_1").fill(await dialog.locator("#imp-price-row_13").inputValue())
+    await dialog.getByRole("checkbox", { name: "匯入：10/13 賣出 長榮" }).check()
+    const sign = dialog.getByRole("button", { name: `簽名：匯入 ${before + 3} 筆` })
+    await sign.click()
+    await p.getByText(`已匯入 ${before + 3} 筆`).waitFor({ timeout: 10000 })
+    await dialog.waitFor({ state: "detached", timeout: 4000 })
+    // 匯入的交易在紀錄裡標「匯入」；整批復原
+    await p.getByRole("button", { name: "復原" }).first().click()
+    await p.getByText("已復原這次匯入").waitFor({ timeout: 8000 })
+  })
+})
+
+await check("匯入對帳單（截圖）：AI 輸入框的「＋」是兩項的選單 → 匯入對帳單 → 截圖 → 「截圖會整張送給 AI 讀。」→ 三筆 → 匯入 3 筆；讀取中可以取消", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "記一筆或匯入對帳單" }).click()
+    const items = await p.getByRole("menuitem").allTextContents()
+    if (items.join("|") !== "記一筆|匯入對帳單") throw new Error(`the ＋ menu should have exactly 記一筆 and 匯入對帳單: ${items}`)
+    await p.getByRole("menuitem", { name: "匯入對帳單" }).click()
+    const dialog = p.getByRole("dialog", { name: "匯入對帳單" })
+    await dialog.locator("input[type=file]").setInputFiles(await screenshotFile(p))
+    await dialog.getByText("截圖會整張送給 AI 讀。", { exact: true }).waitFor({ timeout: 8000 })
+    await dialog.getByText("1 張", { exact: true }).waitFor({ timeout: 8000 })
+    // 取消：回到選好的檔案，檔案還在
+    await dialog.getByRole("button", { name: "開始讀" }).click()
+    await dialog.getByText(/^正在讀 1 張…$/).waitFor({ timeout: 8000 })
+    await dialog.getByRole("button", { name: "取消" }).click()
+    await dialog.getByText("成交明細.png").waitFor({ timeout: 8000 })
+    await dialog.getByRole("button", { name: "開始讀" }).click()
+    await dialog.getByRole("button", { name: "簽名：匯入 3 筆" }).click({ timeout: 15000 })
+    await p.getByText("已匯入 3 筆").waitFor({ timeout: 10000 })
+  })
+})
+
+await check("匯入對帳單（手機 iPhone 15）：記一筆的抽屜 → 從對帳單匯入 → 截圖 → 一列一筆的清單（修改展開欄位）→ 不橫向捲動、可以按的都 ≥ 44px → 匯入", async () => {
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "記一筆", exact: true }).click()
+    await p.getByRole("dialog").getByRole("button", { name: "從對帳單匯入" }).click()
+    const sheet = p.getByRole("dialog", { name: "匯入對帳單" })
+    await sheet.waitFor({ timeout: 8000 })
+    await sheet.locator("input[type=file]").setInputFiles(await screenshotFile(p))
+    await sheet.getByRole("button", { name: "開始讀" }).click()
+    const sign = sheet.getByRole("button", { name: "簽名：匯入 3 筆" })
+    await sign.waitFor({ timeout: 15000 })
+    await sheet.getByRole("button", { name: /^修改第 1 筆/ }).click()
+    await sheet.locator("#imp-qty-row_01").waitFor()
+    await p.waitForTimeout(400)
+    const wide = await overflowX(p)
+    if (wide > 0) throw new Error(`the page scrolls sideways by ${wide}px`)
+    const inner = await sheet.evaluate((el) => el.scrollWidth - el.clientWidth)
+    if (inner > 0) throw new Error(`the sheet scrolls sideways by ${inner}px`)
+    const small = await smallTargets(p)
+    if (small.length) throw new Error(`${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
+    await sign.click()
+    await p.getByText("已匯入 3 筆").waitFor({ timeout: 10000 })
+  })
+})
+
+await check("匯入對帳單：沒開放的帳號（不是站方管理員）沒有任何入口——記一筆第一步沒有連結、「＋」直接打開表單；空的帳本有「從對帳單匯入」", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/?discuss=member", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "記一筆", exact: true }).click()
+    await p.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).waitFor()
+    if (await p.getByRole("button", { name: "從對帳單匯入" }).count()) throw new Error("import entry shown to a non-admin")
+    await p.keyboard.press("Escape")
+    await p.getByRole("button", { name: "用表單記一筆" }).waitFor()
+    if (await p.getByRole("button", { name: "記一筆或匯入對帳單" }).count()) throw new Error("the ＋ became a menu for a non-admin")
+    await p.goto(base + "/?discuss=default&mock=empty", { waitUntil: "networkidle" })
+    await p.getByText("帳本還是空的").waitFor({ timeout: 8000 })
+    await p.getByRole("button", { name: "從對帳單匯入" }).click()
+    // 示範的空帳本沒有券商帳戶：先建立帳戶
+    await p.getByRole("dialog", { name: "匯入對帳單" }).getByText("還沒有券商帳戶，先到設定建立一個。").waitFor({ timeout: 8000 })
   })
 })
 

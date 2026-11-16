@@ -39,7 +39,7 @@ def test_deep_turn_raises_the_search_limit_and_puts_the_instructions_in_the_page
     fake.reply(text("一般"))
     chat(client, "台積電今天怎麼樣")
     plain = fake.requests[1]["body"]
-    assert search_tool(plain)["max_uses"] == get_settings().ai_web_search_max_uses == 3
+    assert search_tool(plain)["max_uses"] == get_settings().ai_web_search_max_uses == 5
     strip = lambda tools: [{k: v for k, v in t.items() if k != "max_uses"} for t in tools]  # noqa: E731
     assert strip(body["tools"]) == strip(plain["tools"])
     assert "深度搜尋" not in context_of(plain)

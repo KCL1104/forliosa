@@ -31,6 +31,21 @@
 - 隱私權政策 §4.1：對外查詢的對象多 Databento，另起一段說明送出的只有美股代號（有人記在帳本或觀察的美股＋SPY、DIA、ONEQ＋績效比較基準 VOO）與我們自己的 API 金鑰，不含任何使用者資料。Databento 不經手個人資料，所以不列進廠商表。
 - 兩份文件的「草稿日期」那一行註明這次改了哪幾節。**請律師看** (d) 第 19 點。
 
+**2026-11-16 的修改（匯入對帳單）**：產品負責人決定做「從對帳單匯入」（`PRODUCT.md`「匯入對帳單」；11 項決定在 `docs/pending-decisions.md`「2026-11-16 匯入對帳單」，第 11 項就是「法律文件照附錄改」）。使用者上傳 PDF 對帳單或截圖，AI 讀成一張表，使用者核對、確認後才寫進帳本。第一版只開給站方管理員（`IMPORT_STATEMENTS=admins`），但條文照功能本身寫，開放給所有人時不用再改。
+
+- 隱私「重點先講」：多一點——對帳單頁面或截圖會送到 Anthropic；PDF 密碼只在瀏覽器裡用；頁首認得出來的個資先在瀏覽器裡塗掉，**截圖、照片與掃描的 PDF 塗不了、整張送出**；檔案、密碼、讀出的內容都不保存，只保存確認匯入的交易。
+- 隱私 §2.2：交易的來源多「從對帳單匯入」與批次編號。原本「不會取得你的…身分證字號」改成「不會要求或保存你的身分證字號」，並說明 PDF 密碼（通常是身分證字號）只在瀏覽器裡用、不會送到伺服器——原本那句承諾靠「在瀏覽器裡解密」維持住，但對帳單上**印的**身分證字號塗不掉時會經過伺服器送給 AI，所以「不會取得」不能再寫。
+- 隱私 §2.5、§3、§4.1（Anthropic 那一列多「你上傳的對帳單頁面與截圖」）、§6.1（交易動態那一列：匯入的買賣不出現、不推播）、§7（多兩列：匯入的交易；不保存的檔案、密碼、頁面與讀出的表格）。
+- 隱私 §5：新增 **§5.6「匯入對帳單」**（在瀏覽器裡先處理什麼、截圖塗不了、送出什麼到哪裡、AI 怎麼讀、保存什麼、群組看不到）；§5.2 多一段「例外：匯入對帳單」；原本的 §5.6「AI 不會替你做的事」、§5.7「保存」改成 §5.7、§5.8，內容各多一句。§5.8 的【待填】（Anthropic 的保存與訓練）**沒有填**：官方 API 文件 2026-11-16 讀過，但商用條款與隱私中心的頁面仍然打不開，見 (d) 第 5、20 點。
+- 條款 §1.2：帳本的資料多「你確認從對帳單匯入的」。條款 §8 新增**第 10 點「匯入對帳單」**：AI 可能讀錯、寫入前請逐筆核對、確認後才寫入且可整批復原；只能上傳自己帳戶的對帳單；上傳的內容會送到 AI 服務供應商、截圖整張送出。加在最後一點，所以其他點的編號不變。
+- **順手更正的過時寫法**（和匯入無關，是之前的決定沒有跟著改到）：
+  - 隱私 §2.2：帳戶不再列「手續費率與折扣、最低手續費、追蹤方式」（2026-11-14 起表單不問、「只記持股」取消；較早的帳戶留著當時填的折扣與最低手續費，照實寫）；拿掉「只記持股的帳戶：每檔的股數與平均成本」（快照已轉成買進、表已刪除）。
+  - 隱私 §5.1：AI 讀到的帳戶清單沒有「追蹤方式」（`api/ai/tools.py` 的 `get_accounts` 只給編號、名稱、券商、幣別）。
+  - 隱私 §10.1、§10.2：設定頁已經可以一次刪除全部 AI 對話（2026-11-14，待決定事項 3-2），從「要寫信」移到「可以自己做」。
+  - 條款 §8.3：AI 的買賣草稿不再「包含估算的手續費與稅」（2026-11-14 起不自動算）；股利草稿仍先扣掉估算的二代健保與美股預扣稅。
+  - 條款 §8.5：原本寫「每天最多 50 則」；現在是免費 3 題、會員 30 題，每月估計花費上限（免費約 US$1、會員約 US$3），免費另有 300 萬計費 token；深度搜尋一次 3 題；用完進省錢模式、兩倍才停；匯入不算題數、每天 10 份。
+- **請律師看** (d) 第 20 點。
+
 **撰寫時無法核對的事（重要）**：這次工作的網路環境連不到全國法規資料庫（`law.moj.gov.tw`）、臺北市法規查詢系統（`laws.gov.taipei`）與 Anthropic 的隱私說明網站（`privacy.claude.com`）。因此：
 
 - 草稿裡的法條條號是依記憶寫的，全部標了【待確認：條號與現行條文】，請律師對照現行條文。
@@ -63,7 +78,7 @@
 | 3 | ~~【待填：主機所在地區（Railway 的區域）】~~ | 隱私 §4.1 | 資料實際放在哪裡 | **已填（2026-11-13）**：新加坡。api、worker、PostgreSQL 都部署在 Railway 的 `asia-southeast1` 區域；API 的 DNS 是「DNS only」，不經 Cloudflare 代理，§4.1 的【待確認】一併拿掉 |
 | 4 | ~~【待填：伺服器紀錄保存期間】~~ | 隱私 §7 | 存取紀錄（含 IP）留多久 | **已填（2026-11-13）**：7 天。Railway 文件〈Logs〉的 Log retention：Hobby 方案 7 天、Pro 方案 30 天；目前是 Hobby。**升級方案時這一格要改** |
 | 5 | 【待填：資料庫備份的做法與保存期間】 | 隱私 §7 | 有沒有備份、留多久 | **還不能填**：Railway 的 volume 備份只給 Pro 方案（2026-11-13 API 回覆，目前是 Hobby），所以現在**沒有備份**。等產品負責人決定：A. 升級 Pro 用內建備份（每日保存 6 天、每週保存 1 個月）；B. 每天 `pg_dump` 到 Cloudflare R2，保存天數自己定；C. 寫明「目前沒有備份」。正式開放前要定案 |
-| 6 | 【待填：AI 服務供應商如何保存送出的內容、是否用於訓練模型】 | 隱私 §5.7 | 照 Anthropic 當時公布的條款寫 | 見 (d) 第 5 點的網址，讀完再填；不要憑印象寫 |
+| 6 | 【待填：AI 服務供應商如何保存送出的內容、是否用於訓練模型】 | 隱私 §5.8（2026-11-16 以前是 §5.7） | 照 Anthropic 當時公布的條款寫；2026-11-16 起也涵蓋匯入對帳單送出的頁面 | 見 (d) 第 5、20 點的網址，讀完再填；不要憑印象寫 |
 | 7 | 【待填：最低年齡】 | 隱私 §12、條款 §3.2 | 幾歲可以用 | A. 18 歲（最單純，不必處理法定代理人同意）；B. 比照 Discord 的年齡下限，未成年需法定代理人同意。建議 A |
 | 8 | 【待填：確認申請人是本人的方式】 | 隱私 §10.2 | 刪除帳號、索取副本時怎麼驗證 | 要求用帳號登記的 Email（Discord 已驗證的那個）寄信，並回信到同一個 Email 確認 |
 | 9 | 【待填：是否收取查詢或複製本的必要成本費用】 | 隱私 §10.2 | 個資法允許酌收成本 | 不收費 |
@@ -140,8 +155,8 @@
 | P28 | 重點、§5.3 | 隱私模式只要求 AI 不寫出絕對數字，資料照樣送出 | `api/ai/prompts.py:50`、`:213`；`api/ai/tools.py`（工具不看隱私模式） |
 | P29 | §5.4 | 網路搜尋與讀取網頁由 AI 服務供應商執行，關鍵字由 AI 決定 | `api/ai/tools.py:816-846`；`api/ai/prompts.py:30-32`；`api/config.py:107-112` |
 | P30 | §5.5 | 群組週報只送匿名代號與數字；為什麼漲跌、法人觀點、新聞補充、公司簡介只送股票資訊 | `api/services/digests.py:66-74`、`:128-149`；`docs/api-contract.md:1001-1003`；`api/ai/prompts.py:179-181`、`:224-242` |
-| P31 | §5.6 | AI 不寫入帳本，只產生草稿 | `api/models.py:400-402`；`docs/api-contract.md:558` |
-| P32 | §5.7、§7 | AI 對話、訊息、草稿最後活動後 30 天刪除；可逐段刪除；用量紀錄保留；瀏覽器端也留 30 天 | `api/ai/retention.py:43-66`；`api/config.py:126`；`api/worker.py:226`；`api/api/routes/ai.py:86`；`api/models.py:420-429`；`web/src/ai/store.ts:52`、`:132-150` |
+| P31 | §5.7（原 §5.6） | AI 不寫入帳本，只產生草稿；匯入的表格也是確認後才寫入 | `api/models.py:400-402`；`docs/api-contract.md:558`；匯入：`api/api/routes/transactions.py`（`POST /transactions/batch`） |
+| P32 | §5.8（原 §5.7）、§7 | AI 對話、訊息、草稿最後活動後 30 天刪除；可逐段刪除；用量紀錄保留；瀏覽器端也留 30 天 | `api/ai/retention.py:43-66`；`api/config.py:126`；`api/worker.py:226`；`api/api/routes/ai.py:86`；`api/models.py:420-429`；`web/src/ai/store.ts:52`、`:132-150` |
 | P33 | §6.1 | 分享開關與預設值、關掉立即生效、不標示誰沒分享、可推算股數、留言顯示「已離開的成員」、加入動態、邀請預覽、授權候選名單 | `api/services/sharing.py:79-88`；`api/models.py:890-911`；`docs/api-contract.md:750-755`、`:882-890`、`:983-988`；`api/services/groups.py:288-299`；`api/services/delegations.py:55-62` |
 | P34 | §6.2 | 推播內容、本人要開、換頻道自動關閉 | `docs/api-contract.md:1009-1020`；`api/services/notifications.py:135-173`；`api/services/channels.py:124-130` |
 | P35 | §6.3 | 授權查看看得到與看不到的範圍；不會因離開群組自動撤銷 | `api/api/middleware.py`（`VIEW_AS_READ_PATHS`、`ViewAsMiddleware.classify`）；`docs/api-contract.md:812-826` |
@@ -154,6 +169,10 @@
 | P42 | §10.3 | 刪除帳號後哪些刪除、哪些保留 | `api/models.py` 的外鍵設定：`CASCADE`（`:48`、`:57`、`:81`、`:365`、`:388`、`:408`、`:852-853`、`:885`、`:1315`）與 `SET NULL`（`:429`、`:940`、`:1238`、`:1265`、`:1300`）；`docs/api-contract.md:1035`、`:1076`。**群組轉交目前只是合約裡的規劃，還沒有程式**（見 (c) 第 1 點） |
 | P43 | §11 | 沒有已驗證 Email 不能建立帳號；沒登入可讀公開討論與資料來源 | `api/services/discord_oauth.py:201-202`；`docs/api-contract.md:1070`、`:1079`；`api/api/app.py`（`/meta/attributions` 不需登入） |
 | P44 | §12 | 目前沒有驗證年齡 | 程式裡沒有相關欄位或檢查 |
+| P45 | 重點、§2.2、§5.6 | 匯入對帳單：PDF 在瀏覽器裡用 pdf.js 解密，密碼與原始檔不送出；每頁畫成圖片、依文字層塗掉身分證字號（`[A-Z][12489]\d{8}`）與「客戶姓名／姓名／通訊地址／地址／電話／帳號」後面的值；截圖沒有文字層、整張送出 | `web/src/pages/transactions/import/prepare-pdf.ts`、`mask.ts`、`prepare-image.ts`、`ImportDialog.tsx`（「截圖會整張送給 AI 讀。」）；`docs/api-contract.md`「匯入對帳單（2026-11-16）」。**2026-11-16 寫這段時前端還在實作，瀏覽器裡的解密與塗黑還沒在真的瀏覽器與真的對帳單上測過**（伺服器上同樣的做法用合成檔測過）；開放給所有人前請再核一次 |
+| P46 | §2.5、§5.6、§5.8、§7 | 匯入時伺服器只轉送、不保存檔案、頁面與讀出的表格，不寫 log；只存確認匯入的交易（`source: "import"`、`import_batch_id`）與一列 `ai_usage`（`feature: "import"`，不含內容）；原文不寫進備註 | `api/api/routes/imports.py`、`api/ai/importer.py`、`api/services/imports.py`（2026-11-16 實作中，上線前對照程式再核一次）；`api/models.py`（`Transaction.import_batch_id`）；`apps/api/alembic/versions/0021_import_batches.py`（沒有其他匯入的資料表）；`apps/api/CONTRACT_NOTES.md`「2026-11-16 匯入對帳單」 |
+| P47 | §5.6 | 讀檔的 AI 沒有工具、只照抄；不抄姓名、身分證字號、帳號；像指令的文字不照做；驗算沒過時用另一個模型（`claude-sonnet-5-5`）重讀一次；重複與賣超只在伺服器上比對 | `apps/api/CONTRACT_NOTES.md`「2026-11-16 匯入對帳單」（讀檔、驗算與旗標）；`api/services/transactions.py`（`check_batch`） |
+| P48 | §6.1、§5.6 | 匯入的買賣不進群組動態、推播與週報 | `api/services/sharing.py`（`FEED_SOURCES = ("manual", "ai_draft")`）；`apps/api/tests/api/test_m5_feed.py`、`test_m5_push.py`、`test_m5_digest.py` |
 
 ### 服務條款
 
@@ -178,9 +197,10 @@
 | T17 | §7 | 預設只分享報酬率、推播要本人開、換頻道自動關閉、擁有者要先轉移、邀請期限、授權不自動撤銷、人數上限 | `api/services/sharing.py:79-80`；`api/services/groups.py:40-42`；`docs/api-contract.md:755`、`:758`、`:812`、`:841-846`、`:1018-1020` |
 | T18 | §8.1 | AI 只處理投資相關問題 | `api/ai/prompts.py:17-21`；`api/ai/scope.py:50` |
 | T19 | §8.2 | 列出引用來源、標示無來源（可能漏標誤標）、固定聲明 | `api/ai/grounding.py`；`api/ai/prompts.py:60`；`apps/api/CONTRACT_NOTES.md:1100-1105`、`:1226` |
-| T20 | §8.3 | AI 只產生草稿，確認後才寫入；沒寫價格時用收盤價估算 | `api/ai/tools.py:524-636`；`api/ai/prompts.py:36-40`；`PRODUCT.md:84` |
+| T20 | §8.3 | AI 只產生草稿，確認後才寫入；沒寫價格時用收盤價估算；買賣草稿不算手續費與稅（2026-11-14），股利草稿先扣二代健保與美股預扣稅 | `api/ai/tools.py`（`draft_transaction`：沒有手續費、稅的參數）；`api/services/transactions.py`（`compute`）；`apps/api/CONTRACT_NOTES.md`「2026-11-14 手續費與稅不自動算」；`PRODUCT.md`「手續費與稅不自動算」 |
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
-| T22 | §8.5 | 每天 50 則、每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一則；對話太長要開新對話 | `api/config.py:98-100`；`api/ai/store.py:329-352`；`docs/api-contract.md:586`、`:588`、`:632`；`apps/api/CONTRACT_NOTES.md:1232` |
+| T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$3；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
+| T25 | §8.10 | 匯入對帳單：AI 可能讀錯、確認後才寫入、可整批復原；上傳的內容送到 AI 服務供應商 | `docs/api-contract.md`「匯入對帳單（2026-11-16）」（`POST /transactions/batch` 全部或全不、`DELETE /transactions/batches/{id}`）；`api/services/transactions.py`（`create_batch`、`delete_batch`） |
 | T23 | §9 | 資料來源與授權（2026-11-15 多 Databento 的美股收盤價：資料集 `databento-equs/price`，只在 `US_PRICE_SOURCE=databento` 時列出） | `api/datapolicy.py:54-92`、`:468-515`（Databento：`DATASETS` 的 `databento-equs/price`、`us_prices_served`）；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
 | T24 | §11.5 | 產品內建的處置只有隱藏與暫停公開發言 | `api/models.py:27-41`（`User` 沒有停用欄位）；`api/services/discussions.py` |
 
@@ -195,7 +215,7 @@
 3. **登出不清除瀏覽器裡的 AI 對話紀錄**（隱私 §8 已照實寫）。`forliosa:ai` 留在瀏覽器（`web/src/ai/store.ts:132-150`），登出只重新整理（`web/src/app/AvatarMenu.tsx:109`）。同一台瀏覽器換另一個帳號登入時，前一個人的對話是否會顯示出來，我沒有實際測；建議確認，並在登出或換帳號時清除。修好後把隱私 §8 的粗體提醒改掉。
 4. **同意的紀錄與入口**（條款前言寫「登入即同意」）。登入頁目前沒有任何條款文字或連結（`web/src/pages/auth/LoginPage.tsx`），也沒有記錄使用者同意了哪一版。至少要在登入按鈕旁加上一行並連到兩份文件（見 (e)）；建議另外記錄同意的版本與時間。
 5. **備份、監控、紀錄保存**（隱私 §7 的兩個空格；條款 §11.3）。目前沒有備份與監控（`docs/deploy.md:302`）。之後如果加錯誤追蹤（例如 Sentry）或分析工具，隱私 §2.7、§4.1 要先改。
-6. **一次刪除全部 AI 對話**（隱私 §10.2 寫來信處理）。目前只能逐段刪（`apps/api/CONTRACT_NOTES.md:1220` 也列為待確認）。
+6. ~~**一次刪除全部 AI 對話**（隱私 §10.2 寫來信處理）。目前只能逐段刪（`apps/api/CONTRACT_NOTES.md:1220` 也列為待確認）。~~ 2026-11-14 已做（設定頁「AI」，`DELETE /ai/threads`）；2026-11-16 隱私 §10.1、§10.2 跟著改了。
 7. **過期的登入紀錄沒有清除**。`purge_expired_sessions`（`api/api/deps.py:109-112`）沒有任何地方呼叫，過期的列（雜湊、帳號、時間）會一直留在資料庫。草稿只寫「到期後失效」，沒有說會刪除；建議排進 worker。
 8. **AI 用量紀錄沒有保存期限**（隱私 §7 照實寫「持續保留」）。含帳號編號與時間；建議訂一個期限（例如 13 個月）並實作。
 9. **通知機制**（隱私 §9、§14；條款 §13）。沒有寄信功能，也沒有 app 內公告。條款變更、資安事故通知目前都只能你自己從 support@forliosa.trade 手動寄信（收件地址在資料庫的 `users.email`）。建議做一個登入後的公告橫幅。
@@ -207,8 +227,9 @@
 15. **邀請連結預覽**不用登入就顯示群組名稱與邀請人的顯示名稱（`api/services/groups.py:288-299`）。草稿已照實寫（隱私 §6.1、條款 §7.6），這是提醒不是缺口。
 16. **隱私模式**不影響送給 AI 的資料（隱私 §5.3 已照實寫）。建議在隱私模式的開關或 AI 輸入框旁加一句說明，避免誤會。
 17. **AI 用量**：條款 §8.5 的數字後端有（`GET /ai/usage`），但我在前端沒找到顯示剩餘額度的畫面；建議顯示，讓使用者知道自己用了多少。
+18. **匯入對帳單的塗黑**（隱私重點、§5.6）。草稿寫的是設計：PDF 在瀏覽器裡解密、塗掉認得出來的個資。2026-11-16 寫草稿時，瀏覽器裡的 pdf.js 解密與塗黑還沒在真的瀏覽器、真的對帳單上測過（伺服器上的同樣做法用合成檔測過），各家券商頁首的欄位名稱也還不知道。第一版只開給站方管理員，正是為了先用產品負責人自己的對帳單試；**開放給所有人（`IMPORT_STATEMENTS=all`）之前**，請確認塗黑在真的對帳單上有效，§5.6「只有認得出來的才塗得掉」的說法也還成立。如果改成在伺服器上解密（備案），密碼就會送到伺服器，重點、§2.2、§5.6 都要改。
 
-**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_TOKEN_BUDGET`（50／300 萬）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
+**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
 
 ---
 
@@ -225,6 +246,14 @@
    - `https://privacy.claude.com/en/articles/15425996-data-retention-practices-for-covered-models`
 
    搜尋結果的摘要（未經核對，只供你知道要查什麼）提到：商用 API 的內容預設不用於訓練；保存期間依模型與功能不同；批次處理等功能不在零資料保留的範圍。請以原頁為準。
+
+   **2026-11-16 補充**：上面第三個網址（Anthropic 的 API 文件〈API and data retention〉）這次打得開、讀過了，原文是這樣寫的（**仍然不是商用條款**：`privacy.claude.com` 兩頁還是被沙盒擋住，沒能核對；草稿的【待填】因此照舊留著）：
+   - 「Retained data is never used for model training without your express permission.」
+   - 「Conversation content (your prompts and Claude's outputs) is not retained by default」；例外是指定的幾個模型（Covered Models：Claude Fable 5.x、Claude Mythos 5.x）要保存 30 天。本產品用的 `claude-haiku-5-5`、`claude-sonnet-5-5` 不在這份名單裡。
+   - 被 Anthropic 的自動安全機制標記、或依法必須保存的，最多保存 2 年（即使有零資料保留的安排也一樣）。
+   - 功能表：Message Batches API 保存 29 天（群組週報用它，`api/services/digests.py`）；Files API 留到刪除為止（匯入對帳單**不用**它，圖片直接放在請求裡）；伺服器端的網路搜尋工具可以零資料保留。
+   - 結構化輸出（匯入對帳單用它）只快取 JSON schema 24 小時，不是內容。
+   - 送出的圖片不用於訓練模型；直接放在請求裡的圖片送出者無法刪除（vision 文件）。
 6. **未成年人**。最低年齡怎麼訂；未成年人使用是否需要法定代理人同意以及如何取得；兒童及少年福利與權益保障法對有公開討論區的網站有沒有額外要求【待確認】；Discord 自己的年齡規定。
 7. **證券投資顧問法規**。條款 §2 聲明不是投顧。請確認下列功能在**免費**與**未來收費**兩種情況下，是否可能被認定為經營證券投資顧問業務（證券投資信託及顧問法第 4 條、第 107 條【待確認】）：AI 對個股的分析與「為什麼漲跌」；「法人觀點」引用第三方評等與目標價；群組的交易動態與排行（是否像帶單）；公開討論區（使用者招攬時站方的責任）。`PRODUCT.md:57` 把投顧法規列為尚未決定，`docs/pending-decisions.md:215-217` 建議在收費或放廣告前諮詢。
 8. **消費者保護法與定型化契約**。免費服務是否構成消費關係；審閱期；條款 §12 的免責與賠償上限是否有效（消保法第 12 條、民法第 222 條、第 247 條之 1【待確認】）；條款 §14 的合意管轄對消費者與小額訴訟的效力；條款 §13「繼續使用視為同意」的效力。
@@ -239,6 +268,12 @@
 17. **Cookie**。本服務只有登入必需的 Cookie，是否需要 Cookie 同意橫幅（我的理解是臺灣沒有專法要求，【待確認】）。
 18. **語氣與形式**。用「你」還是「您」；是否需要英文版（Discord 開發者後台的審核若需要）。
 19. **美股收盤價（Databento，2026-11-15）**。產品負責人沒有先取得 Databento 書面確認，就把 `EQUS.SUMMARY` 的收盤價存進資料庫、顯示給使用者（之後可能是付費會員）、讓 AI 讀取（研究：`docs/research/us-market-data.md` §3.2，那裡也有沒寄出的詢問信稿）。請確認：(a) Databento 的條款與交易所的轉載規定下，這樣用的風險與可能的後果；(b) 條款 §9.1 只寫「Databento 提供的美股收盤價」、§5.5 禁止轉售與違反來源授權的再利用，這樣寫夠不夠，要不要另外寫「美股資料只供你自己查看」；(c) 若 Databento 要求停止，條款 §11 的「服務變更」是否足以涵蓋整批刪除美股收盤價。
+20. **匯入對帳單（2026-11-16）**。使用者上傳券商的對帳單或截圖，由 AI 服務供應商（Anthropic，境外）讀成交易表（隱私 §5.6、條款 §8.10）。請確認：
+    - (a) **塗不掉時，身分證字號會送到境外的 AI 廠商。** PDF 頁首認得出來的姓名、身分證字號、帳號、地址、電話會先在使用者的瀏覽器裡塗掉，但只有認得出來的才塗得掉；**截圖、照片與掃描的 PDF 完全塗不了，整張送出**（產品負責人決定照樣送，畫面只寫一句「截圖會整張送給 AI 讀。」，讓使用者自己塗的工具第二版才做）。這時對帳單上的姓名、身分證字號、帳號、地址會經過我們的伺服器（只轉送、不保存）送到 Anthropic。請看：只靠隱私 §5.6 的告知與那一句畫面文字夠不夠，還是要另外取得同意（例如第一次匯入時勾選）；國際傳輸（個資法第 21 條【待確認：條號與現行條文】）；身分證字號是否有特別的處理要求。
+    - (b) **Anthropic 對送出內容保存多久、是否用於訓練。** 官方 API 文件說對話內容預設不保存、被安全機制標記的最多保存 2 年（見第 5 點的 2026-11-16 補充）；商用條款與隱私中心沒能核對，所以隱私 §5.8 的【待填】還沒填。對帳單是財務資料，請在填之前讀原文。
+    - (c) **只能上傳自己的對帳單**（條款 §8.10）：家人替長輩匯入（上傳別人的對帳單）時，誰是蒐集者、要不要當事人同意。
+    - (d) 伺服器只在記憶體裡轉送、讀完就丟、不寫 log，這仍算「處理」與「國際傳輸」；隱私 §2.5、§5.6 的寫法夠不夠清楚。
+    - (e) 條款 §8.10「AI 可能讀錯，請逐筆核對」與 §12 的責任限制，對匯入錯誤造成的帳目差錯是否足夠。
 
 ---
 

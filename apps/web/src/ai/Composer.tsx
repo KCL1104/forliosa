@@ -1,8 +1,11 @@
 import { ArrowUpIcon, PlusIcon } from "lucide-react"
 import { toast } from "sonner"
 import { forwardRef, useEffect, useId, useImperativeHandle, useRef, useState } from "react"
+import { useUi } from "@/app/ui-store"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
+import { useCanImportStatements } from "@/pages/transactions/import/access"
 import { deepSearchCost, deepSearchHint } from "./deep-search"
 import { useAiUsage } from "./remote-hooks"
 import { currentThreadStreaming, useAi } from "./store"
@@ -13,7 +16,7 @@ export interface ComposerHandle {
 
 interface Props {
   onSubmit: (text: string) => void
-  /** 「＋」：改用表單記一筆 */
+  /** 「＋」：改用表單記一筆（開了匯入對帳單時是選單的第一項） */
   onForm: () => void
   variant: "panel" | "screen"
   placeholder: string
@@ -37,6 +40,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   const setDeep = useAi((s) => s.setDeepNext)
   // 一次算幾題（後端說的；mock 模式用預設）。null＝這個環境沒有深度搜尋，不放切換鈕
   const deepCost = deepSearchCost(useAiUsage().data)
+  const canImport = useCanImportStatements()
+  const openImport = useUi((s) => s.openImport)
   useImperativeHandle(ref, () => ({ focus: () => (variant === "panel" ? area.current : line.current)?.focus() }), [variant])
 
   useEffect(() => {
@@ -67,24 +72,27 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   }
   const empty = text.trim().length === 0
 
-  // 「＋」只有一件事：打開表單記一筆（匯入對帳單還沒有，還沒有的功能不出現；只有一項就不做成選單）
-  const attach = (
+  // 「＋」：開了匯入對帳單的帳號是兩項的選單（記一筆、匯入對帳單；2026-11-16）；沒開的只有一件事，直接打開表單記一筆（只有一項就不做成選單）
+  const plusClass = cn(
+    "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink",
+    variant === "panel" ? "size-9 pointer-coarse:size-11" : "size-11",
+  )
+  const plusIcon = <PlusIcon aria-hidden className={variant === "panel" ? "size-[18px]" : "size-5"} />
+  const attach = canImport ? (
+    <DropdownMenu>
+      <DropdownMenuTrigger render={<button type="button" aria-label="記一筆或匯入對帳單" className={plusClass} />}>{plusIcon}</DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-40">
+        <DropdownMenuItem onClick={onForm} className="min-h-9 text-md pointer-coarse:min-h-11 pointer-coarse:text-base">
+          記一筆
+        </DropdownMenuItem>
+        <DropdownMenuItem onClick={openImport} className="min-h-9 text-md pointer-coarse:min-h-11 pointer-coarse:text-base">
+          匯入對帳單
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  ) : (
     <Tooltip>
-      <TooltipTrigger
-        render={
-          <button
-            type="button"
-            aria-label="用表單記一筆"
-            onClick={onForm}
-            className={cn(
-              "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink",
-              variant === "panel" ? "size-9 pointer-coarse:size-11" : "size-11",
-            )}
-          />
-        }
-      >
-        <PlusIcon aria-hidden className={variant === "panel" ? "size-[18px]" : "size-5"} />
-      </TooltipTrigger>
+      <TooltipTrigger render={<button type="button" aria-label="用表單記一筆" onClick={onForm} className={plusClass} />}>{plusIcon}</TooltipTrigger>
       <TooltipContent>用表單記一筆</TooltipContent>
     </Tooltip>
   )

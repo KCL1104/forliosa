@@ -59,6 +59,11 @@ export interface UserPlan {
   until: string | null
   deep_search: boolean
   daily_briefing: boolean
+  /**
+   * 匯入對帳單（2026-11-16，後端的 IMPORT_STATEMENTS：off｜admins｜all）。選填：舊版後端沒有這個欄位時當成沒有，
+   * 入口一律不出現（和上面兩個「沒有就當全開」相反：這個功能要明確打開）
+   */
+  statement_import?: boolean
 }
 
 export interface DevLoginBody {
@@ -247,6 +252,8 @@ export interface Transaction {
    */
   source: TransactionSource
   created_at: string
+  /** 匯入對帳單時同一次簽名寫進去的那一批（`DELETE /transactions/batches/{id}` 整批復原）；其他來源是 null 或沒有 */
+  import_batch_id?: string | null
 }
 
 /**
@@ -296,6 +303,151 @@ export interface TradePreview {
   health_insurance: number
   net_cash: number
   rules: string[]
+}
+
+// ── 匯入對帳單（v1，產品負責人 2026-11-16；docs/api-contract.md「匯入對帳單」） ──
+/**
+ * AI 讀出來的是哪一種檔案。`holdings_snapshot`（庫存畫面，沒有買進日期）第一版還不能匯入；
+ * `not_a_trade_record`：檔案裡沒有買賣紀錄。
+ */
+export type ImportDocumentKind = "monthly_statement" | "trade_confirmation" | "app_screenshot" | "holdings_snapshot" | "not_a_trade_record"
+
+/**
+ * 伺服器逐列驗算的結果（`flags[].code`）。訊息（`message`）是伺服器寫好的句子，畫面照原文顯示。
+ * 預設勾不勾由伺服器的 `include` 決定；`dividend_auto`、`short_sale` 那幾列不匯入（收在「略過 N 筆」裡）。
+ */
+export type ImportFlagCode =
+  | "unknown_symbol"
+  | "ambiguous_symbol"
+  | "amount_mismatch"
+  | "fee_out_of_range"
+  | "tax_out_of_range"
+  | "side_inconsistent"
+  | "not_trading_day"
+  | "outside_period"
+  | "price_far_from_close"
+  | "oversell"
+  | "duplicate"
+  | "possible_duplicate"
+  | "dividend_auto"
+  | "short_sale"
+  | "day_trade"
+  | "margin"
+  | "currency_mismatch"
+  | "fractional_tw_qty"
+  | "unreadable"
+
+export interface ImportFlag {
+  /** 新版伺服器可能多出前端還不認得的代碼：照樣顯示訊息 */
+  code: ImportFlagCode | (string & {})
+  message: string
+  severity: "error" | "warning" | "info" | (string & {})
+}
+
+/** 一列的候選交易：`TransactionInput` 去掉 `source`（伺服器寫成 `import`）。找不到股票時 `symbol` 是 null */
+export type ImportCandidate = Omit<TransactionInput, "source">
+
+/** AI 照抄的原文（全部是字串；讀不到的是空字串） */
+export interface ImportRaw {
+  trade_date?: string
+  settle_date?: string
+  symbol_code?: string
+  name?: string
+  side?: string
+  kind?: string
+  quantity?: string
+  price?: string
+  amount?: string
+  fee?: string
+  tax?: string
+  net_amount?: string
+  currency?: string
+  page?: number | string
+}
+
+export interface ImportRow {
+  row_id: string
+  candidate: ImportCandidate
+  raw: ImportRaw
+  flags: ImportFlag[]
+  /** 預設要不要匯入（找不到股票、賣超、重複、當沖、沒讀清楚…是 false） */
+  include: boolean
+}
+
+/** 送去讀的一頁：PDF 在瀏覽器裡解密、轉成圖片並塗掉個資之後的 JPEG＋塗過的文字層；截圖切成不超過 2,576px 的圖 */
+export interface ImportPage {
+  media_type: "image/jpeg" | "image/png" | "image/webp"
+  /** base64（不含 `data:` 前綴） */
+  data: string
+  /** PDF 的文字層（個資換成「〔已遮蔽〕」，最多 20,000 字）；截圖沒有 */
+  text?: string
+}
+
+export interface StatementImportInput {
+  /** 用哪個帳戶驗算賣超與重複（不給就用第一個帳戶） */
+  account_id?: string
+  kind: "pdf" | "images"
+  pages: ImportPage[]
+}
+
+export interface StatementImport {
+  document_kind: ImportDocumentKind
+  /** 對帳單上的券商名稱（沒有是空字串） */
+  broker_name: string
+  /** 對帳單的期間（YYYY-MM-DD；沒有是空字串或 null） */
+  period: { from: string | null; to: string | null } | null
+  rows: ImportRow[]
+  /** 對帳單印的合計（原文字串） */
+  printed_totals: { amount?: string; fee?: string; tax?: string; net_amount?: string } | null
+  /**
+   * 整份核對：讀出來的列加起來和對帳單印的合計比。`diff`＝讀出來的 − 印的（負的是少了，可能漏讀）；
+   * 對帳單沒有印合計時 `ok` 是 null
+   */
+  totals_check: { ok: boolean | null; diff: number | null } | null
+  /** 沒讀清楚的地方（整份的；某一列的在那一列的 `unreadable`） */
+  unreadable: string[]
+  /** 檔案裡像指令的文字（照抄、沒有照做） */
+  embedded_instructions: string[]
+  model_used: string
+  retried: boolean
+}
+
+/** `POST /transactions/batch` 的內容（最多 200 列；伺服器把 `source` 寫成 `import`） */
+export interface TransactionBatchInput {
+  account_id: string
+  origin: "import"
+  rows: ImportCandidate[]
+}
+
+/**
+ * `dry_run: true`：每一列重新驗算（不呼叫 AI、不寫入）。旗標的 `severity: "error"` 是這一列在裡面就寫不進去；
+ * `ok` 是同樣的內容現在寫得進去；`problems` 是怪不到哪一列的（帳本本來就對不上）
+ */
+export interface TransactionBatchCheck {
+  dry_run?: true
+  ok?: boolean
+  rows: { index: number; flags: ImportFlag[] }[]
+  problems?: { code: string; message: string }[]
+}
+
+/**
+ * `dry_run: false`：一次全部寫入。有一列不行就一列都不寫：422 `batch_rejected`，
+ * `error.rows: [{index, code, message}]`（`index` 是 null 的是整批的問題）
+ */
+export interface TransactionBatchResult {
+  dry_run?: false
+  batch_id: string
+  /** 交易 id，順序和送出去的列一樣 */
+  created: string[]
+  /** 補記的買進在除息日以前時，台股股利照常自動入帳：這次多記了幾筆 */
+  auto_dividends_added: number
+}
+
+/** 422 `batch_rejected` 的每一列 */
+export interface BatchRejectedRow {
+  index: number | null
+  code: string
+  message: string
 }
 
 export interface Page<T> {
@@ -1714,6 +1866,18 @@ export interface ForliosaApi {
   updateTransaction(id: string, patch: Partial<TransactionInput>): Promise<Transaction>
   deleteTransaction(id: string): Promise<void>
   previewTransaction(body: TransactionInput): Promise<TradePreview>
+  // 匯入對帳單（`/me` 的 `plan.statement_import` 打開時）
+  /**
+   * `POST /imports/statement`：AI 讀檔＋伺服器驗算，什麼都不存。429 `ai_import_daily_limit`／`ai_month_limit`、
+   * 503（AI 沒有設定）、403（沒開放）、413（太大）。`signal` 取消讀取
+   */
+  parseStatement(body: StatementImportInput, opts?: { signal?: AbortSignal }): Promise<StatementImport>
+  /** `POST /transactions/batch {dry_run: true}`：改過之後重新驗算 */
+  checkTransactionBatch(body: TransactionBatchInput): Promise<TransactionBatchCheck>
+  /** `POST /transactions/batch {dry_run: false}`：一次寫入（全部或全不） */
+  createTransactionBatch(body: TransactionBatchInput): Promise<TransactionBatchResult>
+  /** `DELETE /transactions/batches/{id}`：整批復原；之後記的賣出用到這批買進時 422 `ledger_inconsistent` */
+  deleteTransactionBatch(batchId: string): Promise<{ batch_id: string; deleted: number }>
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>

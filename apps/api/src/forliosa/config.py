@@ -154,7 +154,9 @@ class Settings(BaseSettings):
     ai_key_sticky_wait_seconds: float = 5.0
     ai_request_timeout_seconds: float = 120.0
     ai_web_search: bool = True
-    ai_web_search_max_uses: int = 3
+    # 5 (was 3; 2026-11-16): a 「為什麼漲跌」 answer searches the price, the market and the company two or three ways,
+    # and the cap of 3 was reached. A tool-definition value, the same on every request, so the prompt cache holds.
+    ai_web_search_max_uses: int = 5
     # 深度搜尋 (``POST /ai/chat`` with ``mode: "deep"``): one question researched over several rounds of web search
     # and written up as a short report. It may search this many times, loop this many times (client-tool rounds
     # and resumed server-tool turns), and counts as this many questions of the daily limit.
@@ -191,6 +193,20 @@ class Settings(BaseSettings):
     # Who may read GET /ai/admin/keys outside FORLIOSA_ENV=dev/test (comma-separated emails).
     ai_admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
     ai_model_news: str | None = None
+    # 匯入對帳單 (POST /imports/statement, ``forliosa.ai.importer`` + ``services.imports``; 產品負責人 2026-11-16).
+    # Who may use it: off (nobody) | admins (site admins, ADMIN_EMAILS: the first version) | all (every signed-in
+    # account, free and members alike). ``AI_MODEL_IMPORT`` (above) reads the pages; when the server's checks fail,
+    # the totals do not match, something was unreadable or the model refused, the failing pages are read once more
+    # with ``AI_MODEL_IMPORT_RETRY`` (never in 省錢模式). Not one of the day's questions: billed to the month's budget,
+    # at most ``IMPORT_DAILY_LIMIT`` reads a day per user (0 = no limit).
+    import_statements: Literal["off", "admins", "all"] = "off"
+    ai_model_import_retry: str = "claude-sonnet-5-5"
+    ai_effort_import: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
+    import_max_pages: int = Field(default=20, ge=1, le=100)
+    import_max_body_mb: float = Field(default=15.0, gt=0, le=64)
+    import_daily_limit: int = Field(default=10, ge=0)
+    # non-streaming calls: above ~21K the SDK asks for streaming; about 50 rows fit in 16K
+    ai_import_max_tokens: int = Field(default=16000, ge=1024, le=21000)
 
     # -- discussions: site admins (ADMIN_EMAILS, comma-separated emails, case-insensitive) ------------------------
     # They moderate *public* discussion content through /admin/discussions/* (reports, hide / unhide, public posting

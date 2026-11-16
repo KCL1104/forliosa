@@ -43,7 +43,7 @@ def tool_names(body: dict) -> set[str]:
 
 
 def test_the_monthly_dollar_budget_then_economy_mode(client, pool, fake, ai_env):
-    """A turn starts normally while its typical cost still fits: an ordinary question needs US$0.03 left, a 深度搜尋
+    """A turn starts normally while its typical cost still fits: an ordinary question needs US$0.05 left, a 深度搜尋
     US$0.15. Below that, questions run without web search (省錢模式) until twice the budget is spent."""
     ai_env(AI_MONTHLY_COST_BUDGET_USD=2)
     fake.reply(text("一"), usage={"input_tokens": 200_000, "output_tokens": 2_000})

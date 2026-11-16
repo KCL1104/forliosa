@@ -16,6 +16,7 @@ from forliosa.marketdata.base import DividendEvent
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
 from forliosa.models import AutoDividendSkip, MarketEvent, Transaction
+from forliosa.services import auto_dividends
 from forliosa.services.auto_dividends import covered_by_user, sync_all_users
 from forliosa.timeutil import today_taipei
 
@@ -325,6 +326,59 @@ def test_changes_are_validated_after_the_resync(client, notices, change):
         r = client.patch(f"{API}/transactions/{b['id']}", json={"trade_date": "2026-06-24"})
         assert r.status_code == 200, r.text
     assert autos(client, acc["id"]) == []
+
+
+# -- the statement import (POST /transactions/batch) -----------------------------------------------------------
+def import_rows(client, acc, rows, dry_run=False):
+    return client.post(f"{API}/transactions/batch", json={"account_id": acc["id"], "origin": "import",
+                                                          "dry_run": dry_run, "rows": rows})
+
+
+def test_imported_buys_before_an_ex_date_book_dividends_with_one_resync(client, notices, monkeypatch):
+    notices("2330.TW", date(2026, 6, 11), cash="5.00000000")
+    notices("0056.TW", date(2026, 7, 16), cash="2.00000000")
+    acc = make_account(client)
+    syncs = []
+    real_sync = auto_dividends.sync_auto_dividends
+
+    def counting_sync(*args, **kwargs):
+        syncs.append(kwargs.get("symbols"))
+        return real_sync(*args, **kwargs)
+
+    monkeypatch.setattr(auto_dividends, "sync_auto_dividends", counting_sync)
+    rows = [{"symbol": "2330.TW", "type": "buy", "trade_date": "2026-05-04", "quantity": 1000, "price": 1000},
+            {"symbol": "0056.TW", "type": "buy", "trade_date": "2026-05-04", "quantity": 10000, "price": 38},
+            {"symbol": "2330.TW", "type": "sell", "trade_date": "2026-06-01", "quantity": 300, "price": 1050}]
+    r = import_rows(client, acc, rows)
+    assert r.status_code == 201, r.text
+    assert r.json()["auto_dividends_added"] == 2
+    assert len(syncs) == 1 and set(syncs[0]) == {"2330.TW", "0056.TW"}  # once for the whole batch
+    assert [(a["symbol"], a["quantity"], a["source"]) for a in autos(client, acc["id"])] == [
+        ("2330.TW", 700, "auto"), ("0056.TW", 10000, "auto")]
+    # undoing the import takes the dividends it brought with it
+    assert client.delete(f"{API}/transactions/batches/{r.json()['batch_id']}").status_code == 200
+    assert autos(client, acc["id"]) == [] and txns(client, acc["id"]) == []
+
+
+def test_imported_sell_that_only_breaks_the_books_after_the_resync(client, notices):
+    """A back-filled sell before an ex-date shrinks the automatic stock dividend; the shares a later sell needed are
+    then missing, though the books without the resync still add up."""
+    notices("6488.TWO", date(2026, 6, 23), ratio="0.10000000")
+    acc = make_account(client)
+    buy(client, acc, "6488.TWO", "2026-05-04", 2000, "400")
+    sell(client, acc, "6488.TWO", "2026-07-01", 2150, "420")
+    assert [r["quantity"] for r in autos(client, acc["id"])] == [200]
+    rows = [{"symbol": "6488.TWO", "type": "sell", "trade_date": "2026-06-10", "quantity": 50, "price": 410}]
+    message = "匯入以後，自動入帳的股利重算，帳目對不起來：2026-07-01 賣出 6488.TWO 2,150 股，超過當時持有的 2,145 股。"
+    check = import_rows(client, acc, rows, dry_run=True).json()
+    assert check["ok"] is False
+    assert check["rows"] == [{"index": 0, "flags": [{"code": "ledger_inconsistent", "message": message,
+                                                     "severity": "error"}]}]
+    r = import_rows(client, acc, rows)
+    assert r.status_code == 422
+    assert r.json()["error"]["rows"] == [{"index": 0, "code": "ledger_inconsistent", "message": message}]
+    assert [r["quantity"] for r in autos(client, acc["id"])] == [200]  # nothing changed
+    assert len(txns(client, acc["id"])) == 3
 
 
 def test_deleting_a_manual_stock_dividend_lets_the_automatic_one_back(client, notices):

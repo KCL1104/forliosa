@@ -16,6 +16,8 @@ export default defineConfig({
     alias: { "@": fileURLToPath(new URL("./src", import.meta.url)) },
   },
   server: { port: 5173, host: true, proxy: apiProxy },
+  // pdf.js（匯入對帳單）本身就是 ESM、只在那個畫面動態載入：不預先打包，開發時第一次打開才不會重新整理整頁
+  optimizeDeps: { exclude: ["pdfjs-dist"] },
   preview: { port: 4173, proxy: apiProxy },
   build: {
     rollupOptions: {

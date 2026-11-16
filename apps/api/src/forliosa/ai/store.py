@@ -379,9 +379,9 @@ def month_usage(db: Session, user: User, now: datetime | None = None) -> tuple[i
 
 
 # What one turn typically costs (Haiku, measured): an ordinary question, an analyst-view search or a briefing a few
-# cents; a 深度搜尋 US$0.10–0.12; a question in 省錢模式 (no web search) well under a cent. A turn starts only if
-# this still fits in what is left of the month.
-TURN_ESTIMATE_USD = Decimal("0.03")
+# cents, a 「為什麼漲跌」 question with 3–5 searches US$0.04–0.05 (2026-11-16); a 深度搜尋 US$0.10–0.12; a question in
+# 省錢模式 (no web search) well under a cent. A turn starts only if this still fits in what is left of the month.
+TURN_ESTIMATE_USD = Decimal("0.05")
 DEEP_TURN_ESTIMATE_USD = Decimal("0.15")
 ECONOMY_TURN_ESTIMATE_USD = Decimal("0.01")
 

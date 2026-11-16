@@ -178,6 +178,11 @@ def run_ai(fake: FakeClaude, sat: date, pool: KeyPool | None = None) -> KeyPool:
 
 
 def test_facts_come_from_the_projection(family, market):
+    in_week = tw_trading_days(family["sat"] - timedelta(days=5), family["sat"] - timedelta(days=1))[-1]
+    imported = {"account_id": account(family["c"], "國泰－一般")["id"], "origin": "import",
+                "rows": [{"symbol": "2317", "type": "buy", "trade_date": in_week.isoformat(), "quantity": 1000,
+                          "price": 100}]}
+    assert family["c"].post(f"{API}/transactions/batch", json=imported).status_code == 201  # never counted
     [d] = create(market, family["sat"])
     ids = family["ids"]
     assert d.status == "pending" and d.week_start == family["sat"] - timedelta(days=5)

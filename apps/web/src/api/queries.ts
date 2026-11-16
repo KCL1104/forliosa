@@ -14,6 +14,7 @@ import type {
   Preferences,
   RecurringPlanInput,
   Transaction,
+  TransactionBatchInput,
   TransactionInput,
   TransactionQuery,
 } from "./types"
@@ -195,6 +196,16 @@ export function useUpdateTransaction() {
 export function useDeleteTransaction() {
   const invalidate = useInvalidatePortfolio()
   return useMutation({ mutationFn: (id: string) => api.deleteTransaction(id), onSuccess: invalidate })
+}
+/** 匯入對帳單：一次寫入整批（全部或全不）；寫進去之後持股、總資產、交易清單重抓 */
+export function useCreateTransactionBatch() {
+  const invalidate = useInvalidatePortfolio()
+  return useMutation({ mutationFn: (body: TransactionBatchInput) => api.createTransactionBatch(body), onSuccess: invalidate })
+}
+/** 匯入的「復原」：整批刪掉（不是一筆一筆刪：有賣出的批次一筆一筆刪會被擋） */
+export function useDeleteTransactionBatch() {
+  const invalidate = useInvalidatePortfolio()
+  return useMutation({ mutationFn: (batchId: string) => api.deleteTransactionBatch(batchId), onSuccess: invalidate })
 }
 export function useUpdatePreferences() {
   const qc = useQueryClient()

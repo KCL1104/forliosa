@@ -48,6 +48,8 @@ class PlanOut(BaseModel):
     until: str | None = Field(default=None, description="會員的最後一天（YYYY-MM-DD，台北）；null＝免費或沒有到期日")
     deep_search: bool = Field(description="這個方案可以用深度搜尋（會員）")
     daily_briefing: bool = Field(description="這個方案有每日收盤簡報（會員）")
+    statement_import: bool = Field(default=False, description="能不能匯入對帳單（`IMPORT_STATEMENTS`：off｜admins｜all；"
+                                                              "免費與會員一樣）")
 
 
 class User(BaseModel):
@@ -382,6 +384,8 @@ class Transaction(BaseModel):
     # dividend the user edited; never overwritten again)
     source: Literal["manual", "import", "ai_draft", "auto", "auto_edited"]
     created_at: str
+    # the statement import that wrote this row (``DELETE /transactions/batches/{id}`` undoes it); null otherwise
+    import_batch_id: str | None = None
 
 
 class TransactionPage(BaseModel):
@@ -396,6 +400,83 @@ class TradePreview(BaseModel):
     health_insurance: float
     net_cash: float
     rules: list[str]
+
+
+# -- transaction batches: the statement import (``services.transactions.check_batch`` / ``create_batch``) --------------
+BATCH_MAX_ROWS = 200  # = services.transactions.BATCH_MAX_ROWS
+
+
+class TransactionBatchRow(StrictModel):
+    """A ``TransactionIn`` without ``source`` (the server writes ``import``). ``account_id`` may be left out (the
+    batch's own; a different one is that row's error). The date is checked per row — a future or pre-1990 date is that
+    row's ``bad_date`` error, not a 422 of the whole request — and only buys and sells are imported
+    (``unsupported_type``)."""
+
+    account_id: str | None = None
+    symbol: str | None = Field(default=None, max_length=20)
+    type: TxnTypeLiteral
+    trade_date: date
+    quantity: Decimal | None = Field(default=None, ge=0)
+    price: Decimal | None = Field(default=None, ge=0)
+    amount: Decimal | None = Field(default=None, ge=0)
+    fee: Decimal | None = Field(default=None, ge=0)
+    tax: Decimal | None = Field(default=None, ge=0)
+    health_insurance: Decimal | None = Field(default=None, ge=0)
+    currency: Literal["TWD", "USD"] | None = None
+    is_day_trade: bool = False
+    note: str = Field(default="", max_length=2000)
+
+    @field_validator("symbol")
+    @classmethod
+    def _blank_symbol(cls, v: str | None) -> str | None:
+        return v.strip() or None if v is not None else None
+
+
+class TransactionBatchIn(StrictModel):
+    account_id: str
+    origin: Literal["import"] = "import"
+    dry_run: bool = False
+    rows: list[TransactionBatchRow] = Field(min_length=1, max_length=BATCH_MAX_ROWS)
+
+
+class BatchFlag(BaseModel):
+    code: str
+    message: str
+    # error: the batch cannot be written with this row in it; warning: shown, the row can still be imported
+    severity: Literal["error", "warning"]
+
+
+class BatchRowFlags(BaseModel):
+    index: int  # the row's place in the request's ``rows``
+    flags: list[BatchFlag]
+
+
+class BatchProblem(BaseModel):
+    """An error no row can be blamed for (the books were already inconsistent)."""
+
+    code: str
+    message: str
+
+
+class TransactionBatchCheck(BaseModel):
+    """``dry_run: true``: nothing written. ``ok``: the same rows would be written now."""
+
+    dry_run: Literal[True] = True
+    ok: bool
+    rows: list[BatchRowFlags]
+    problems: list[BatchProblem]
+
+
+class TransactionBatchCreated(BaseModel):
+    dry_run: Literal[False] = False
+    batch_id: str
+    created: list[str]  # transaction ids, in the order of the request's rows
+    auto_dividends_added: int  # automatic dividends the sync booked because of the import (a back-filled buy)
+
+
+class TransactionBatchDeleted(BaseModel):
+    batch_id: str
+    deleted: int
 
 
 # -- portfolio ----------------------------------------------------------------------------------

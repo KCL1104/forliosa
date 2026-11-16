@@ -19,6 +19,7 @@ export function SymbolPicker({
   accept,
   rejectReason,
   label = "搜尋股票",
+  initialQuery = "",
 }: {
   value: Instrument | null
   onChange: (i: Instrument | null) => void
@@ -28,8 +29,10 @@ export function SymbolPicker({
   rejectReason?: string | ((i: Instrument) => string)
   /** 輸入框的無障礙名稱（cmdk 自己產生 id 與 label，外面的 htmlFor 對不上，所以名稱從這裡給） */
   label?: string
+  /** 一打開就先搜這幾個字（匯入對帳單：對帳單上寫的名稱） */
+  initialQuery?: string
 }) {
-  const [q, setQ] = useState("")
+  const [q, setQ] = useState(initialQuery)
   const [active, setActive] = useState("")
   const search = useInstrumentSearch(q)
   const served = useUsClosesServed()

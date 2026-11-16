@@ -36,7 +36,8 @@ def test_feed_merges_per_member_day_symbol_side(client, other_client, setup):
     trade(other_client, acc, "2330.TW", "buy", d1, 1000, 110)
     trade(other_client, acc, "2330.TW", "buy", d1, 2000, 120, source="ai_draft")
     trade(other_client, acc, "2330.TW", "sell", d1, 500, 130)
-    trade(other_client, acc, "2330.TW", "buy", d2, 100, 140, source="import")
+    trade(other_client, acc, "2330.TW", "buy", d2, 100, 140)
+    trade(other_client, acc, "2330.TW", "buy", d2, 100, 150, source="import")  # imported rows are never shown
     other_client.post(f"{API}/transactions", json={"account_id": acc, "symbol": "2330.TW", "type": "cash_dividend",
                                                    "trade_date": d2.isoformat(), "quantity": 4000, "price": 1})
     trades = [i for i in items(client, gid)["items"] if i["type"] == "trade"]
@@ -58,13 +59,29 @@ def test_feed_window_and_sources(client, other_client, setup):
     trade(other_client, acc, "2330.TW", "buy", trading_day(95), 1000, 100)  # older than 90 days
     trade(other_client, acc, "2317.TW", "buy", trading_day(5), 1000, 100)
     with session_factory()() as db:  # rows the feed must not show
-        for source, d in (("auto", trading_day(4)), ("auto_edited", trading_day(4)), ("manual", today_taipei()
-                                                                                         + timedelta(days=3))):
+        for source, d in (("auto", trading_day(4)), ("auto_edited", trading_day(4)), ("import", trading_day(4)),
+                          ("manual", today_taipei() + timedelta(days=3))):
             db.add(Transaction(id=new_id("txn"), user_id=uid, account_id=acc, symbol="2454.TW", type="buy",
                                trade_date=d, quantity=1, price=1, amount=1, source=source))
         db.commit()
     trades = [i for i in items(client, gid)["items"] if i["type"] == "trade"]
     assert [i["symbol"] for i in trades] == ["2317.TW"]
+
+
+def test_imported_statement_never_reaches_the_feed(client, other_client, setup):
+    """A statement import (產品負責人 2026-11-16) brings months of trades at once: none of them is a feed item, and
+    a manual trade of the same day and stock is counted alone."""
+    gid, acc = setup["gid"], setup["acc"]
+    d = trading_day(2)
+    rows = [{"symbol": "2330.TW", "type": side, "trade_date": trading_day(days).isoformat(), "quantity": 1000,
+             "price": 100} for days, side in ((20, "buy"), (10, "sell"), (2, "buy"))]
+    r = other_client.post(f"{API}/transactions/batch", json={"account_id": acc, "origin": "import", "rows": rows})
+    assert r.status_code == 201, r.text
+    assert [i for i in items(client, gid)["items"] if i["type"] == "trade"] == []
+    trade(other_client, acc, "2330.TW", "buy", d, 500, 110)
+    trades = [i for i in items(client, gid)["items"] if i["type"] == "trade"]
+    assert [(i["trade_date"], i["side"], i["count"], i.get("price")) for i in trades] == [
+        (d.isoformat(), "buy", 1, 110.0)]
 
 
 def test_member_joined_items_pagination_and_filter(app, client, other_client, setup):

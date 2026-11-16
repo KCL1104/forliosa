@@ -103,6 +103,9 @@ class Transaction(Base):
     # manual | import | ai_draft (a signed AI / recurring-plan draft) | auto (booked by the dividend sync) |
     # auto_edited (an automatic dividend the user edited; the sync never touches it again)
     source: Mapped[str] = mapped_column(String(16), default="manual")
+    # The statement import (``POST /transactions/batch``) that wrote this row, so the whole import can be undone at once
+    # (``DELETE /transactions/batches/{id}``); NULL for every other row.
+    import_batch_id: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
 

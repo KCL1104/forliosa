@@ -13,7 +13,7 @@ export interface TradePrefill {
   fee?: number
 }
 
-/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股 */
+/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股、匯入對帳單 */
 interface UiState {
   searchOpen: boolean
   setSearchOpen: (open: boolean) => void
@@ -32,6 +32,10 @@ interface UiState {
   reduce: { open: boolean; symbol?: string; all?: boolean }
   openReduce: (symbol: string, all?: boolean) => void
   closeReduce: () => void
+  /** 匯入對帳單（從記一筆的第一步、AI 輸入框的「＋」、空的帳本打開） */
+  importOpen: boolean
+  openImport: () => void
+  closeImport: () => void
 }
 
 export const useUi = create<UiState>((set) => ({
@@ -44,4 +48,8 @@ export const useUi = create<UiState>((set) => ({
   reduce: { open: false },
   openReduce: (symbol, all) => set({ reduce: { open: true, symbol, all } }),
   closeReduce: () => set((s) => ({ reduce: { ...s.reduce, open: false } })),
+  importOpen: false,
+  // 從記一筆打開時先把記一筆關掉（兩個對話框不疊在一起）
+  openImport: () => set((s) => ({ importOpen: true, tradeForm: { ...s.tradeForm, open: false } })),
+  closeImport: () => set({ importOpen: false }),
 }))

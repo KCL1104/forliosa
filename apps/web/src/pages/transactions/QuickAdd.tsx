@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { api, appToday } from "@/api"
 import { useAccounts, useCreateTransaction, useDeleteTransaction, useHoldings, useInstrumentSearch, useQuote, useWatchlist } from "@/api/queries"
 import type { Account, Holding, Instrument, Market, TransactionInput } from "@/api/types"
-import type { TradePrefill } from "@/app/ui-store"
+import { type TradePrefill, useUi } from "@/app/ui-store"
 import { DateField } from "@/components/date-field"
 import { Pct, Price } from "@/components/finance"
 import { FieldError, FormField as Row } from "@/components/form-field"
@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { otherUnit, parseNumber as num, quantityError, toShares } from "./quantity-input"
 import { AccountSelect, StampLine } from "./TradeForm"
+import { useCanImportStatements } from "./import/access"
 
 /**
  * 記一筆（預設的輸入方式；產品負責人 2026-11-14 第二次：照 Google 財經新增持有資產的做法，分兩步）：
@@ -160,6 +161,8 @@ function PickStep({
   const inputRef = useRef<HTMLInputElement>(null)
   const listId = useId()
   const query = q.trim()
+  const canImport = useCanImportStatements()
+  const openImport = useUi((s) => s.openImport)
   const holdings = useHoldings()
   const watch = useWatchlist()
   const search = useInstrumentSearch(q)
@@ -275,7 +278,17 @@ function PickStep({
           ))}
         </CommandPrimitive.List>
       </CommandPrimitive>
-      <Footer sheet={sheet} onCancel={onDone} toFull={<ToFull onClick={onFull} />} />
+      <Footer
+        sheet={sheet}
+        onCancel={onDone}
+        toFull={
+          <>
+            <ToFull onClick={onFull} />
+            {/* 匯入對帳單（2026-11-16）：第一步的左下角，和「賣出、股利或其他」同一種連結 */}
+            {canImport && <FooterLink onClick={openImport}>從對帳單匯入</FooterLink>}
+          </>
+        }
+      />
     </div>
   )
 }
@@ -624,13 +637,18 @@ function Cell({
 }
 
 function ToFull({ onClick }: { onClick: () => void }) {
+  return <FooterLink onClick={onClick}>賣出、股利或其他</FooterLink>
+}
+
+/** 動作列左邊的淡墨連結（「賣出、股利或其他」「從對帳單匯入」） */
+function FooterLink({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button
       type="button"
       onClick={onClick}
       className="inline-flex min-h-9 items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink pointer-coarse:min-h-11"
     >
-      賣出、股利或其他
+      {children}
     </button>
   )
 }

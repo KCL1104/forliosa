@@ -40,7 +40,17 @@ from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiDraft, BrokerAccount, User
 from forliosa.models import Transaction as TxnModel
-from forliosa.timeutil import is_tw_trading_day, iso_taipei, last_tw_trading_day, now_utc, today_taipei
+from forliosa.timeutil import (
+    MARKET_OPEN,
+    TAIPEI,
+    is_tw_market_open,
+    is_tw_trading_day,
+    iso_taipei,
+    last_tw_trading_day,
+    now_taipei,
+    now_utc,
+    today_taipei,
+)
 
 log = logging.getLogger(__name__)
 
@@ -332,11 +342,13 @@ def get_upcoming(ctx: ToolContext, args: dict[str, Any]) -> Any:
 
 # -- stock tools -----------------------------------------------------------------------------------------
 def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    from forliosa.news.service import english_names
     from forliosa.services import instruments as instr
     from forliosa.services import stock as svc
 
     info = resolve_instrument(ctx.md, args["symbol"])
     sym = info.symbol
+    now = now_taipei()
     q = ctx.md.quote(sym)
     detail = instr.detail(ctx.md, sym)
     summary = detail.get("summary")
@@ -345,17 +357,91 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
     div_sources = [x for d in divs for x in d.get("sources") or []]
     divs = [_pick(d, "year", "period", "cash_dividend", "stock_dividend", "ex_dividend_date", "payment_date",
                   "status", "progress", "board_date", "cash_sources", "is_demo") for d in divs]
+    quote = _pick(instr.quote_out(q), "price", "prev_close", "reference_price", "change", "change_pct",
+                  "volume", "as_of", "trade_date", "is_realtime", "is_demo") if q is not None else None
+    english = english_names(ctx.db, info)
+    market = _market_context(ctx, info, quote)
+    note = _intraday_note(info, q, now)
     return {
         **instr.instrument_out(info, ctx.md),
+        "english_name": english[0] if english else None,  # the foreign-news search (「為什麼漲跌」 step 3)
         "summary": summary[:240] if isinstance(summary, str) else None,
         "themes": detail.get("themes") or [],
-        "quote": _pick(instr.quote_out(q), "price", "prev_close", "reference_price", "change", "change_pct",
-                       "volume", "as_of", "trade_date", "is_realtime", "is_demo") if q is not None else None,
+        "quote": quote,
+        **({"market_context": market} if market else {}),
+        "why_signals": ([r["text"] for r in svc.why_reasons(ctx.db, ctx.md, info, q, now.date())]
+                        if q is not None and q.price is not None else []),
+        **({"intraday_note": note} if note else {}),
         "overview": {k: v for k, v in ov.items() if k not in ("symbol", "sources", "etf_nav")},
         **({"etf_nav": _etf_nav_for_ai(ov["etf_nav"])} if ov.get("etf_nav") else {}),
         "recent_dividends": divs,
         "sources": list(dict.fromkeys([*ov.get("sources", []), *div_sources])),
     }
+
+
+# 「台達電今天為啥跌這麼多?」 (2026-11-16) got market-wide reasons only: nothing told the model how far the stock
+# moved against the market. get_stock_overview now carries the latest official index closes beside the stock's,
+# the rule-based anomalies (``why_reasons``) and, while today's close is not out, a note saying so.
+MARKET_CONTEXT_NOTE = ("官方收盤（收盤後公布，不是即時）；change_pct 為分數（0.0123＝1.23%）；vs_taiex_pct_points＝"
+                       "這一檔的漲跌幅減加權指數的漲跌幅（百分點，只在兩者是同一天時才有）")
+
+
+def _industry_index_name(industry: str | None) -> str | None:
+    """The TWSE sector index of an industry: 電子零組件業 → 電子零組件類指數, 水泥工業 → 水泥類指數, 紡織纖維 →
+    紡織纖維類指數 (``index_daily`` has no row for an industry without one, e.g. 電子商務)."""
+    if not industry:
+        return None
+    for suffix in ("工業", "業"):
+        if industry.endswith(suffix) and len(industry) > len(suffix):
+            return industry.removesuffix(suffix) + "類指數"
+    return industry + "類指數"
+
+
+def _index_close(ctx: ToolContext, name: str) -> dict[str, Any] | None:
+    """The latest official close of one index as the market page shows it (``index_daily``)."""
+    from forliosa.services import market_overview as mo
+
+    found = mo._index_item("", name, mo._index_rows(ctx.db, ctx.md, name), "")
+    if found is None:
+        return None
+    item = found[0]
+    return {"name": name, "date": item["date"], "close": item["value"], "change_pct": item["change_pct"]}
+
+
+def _market_context(ctx: ToolContext, info: InstrumentInfo, quote: dict[str, Any] | None) -> dict[str, Any] | None:
+    """Taiwan stocks: the TAIEX and the stock's sector index (TPEx: the 櫃買指數), with the gap to the TAIEX in
+    percentage points when the stock's close is of the same day."""
+    from forliosa.services import market_overview as mo
+
+    if info.market not in ("TWSE", "TPEX") or (taiex := _index_close(ctx, mo.TAIEX)) is None:
+        return None
+    out: dict[str, Any] = {"taiex": taiex}
+    if info.market == "TPEX":
+        if (tpex := _index_close(ctx, mo.TPEX_INDEX)) is not None:
+            out["tpex_index"] = tpex
+    elif (name := _industry_index_name(info.industry)) and (sector := _index_close(ctx, name)) is not None:
+        out["industry_index"] = sector
+    pct = quote.get("change_pct") if quote else None
+    if pct is not None and taiex["change_pct"] is not None and quote and \
+            quote.get("trade_date") == str(taiex["date"]):
+        out["vs_taiex_pct_points"] = round((pct - taiex["change_pct"]) * 100, 2)
+    out["note"] = MARKET_CONTEXT_NOTE
+    return out
+
+
+def _intraday_note(info: InstrumentInfo, q: Any, now: datetime) -> str | None:
+    """A Taiwan trading day from the open until the official close is archived (that evening): the quote and the
+    index closes are the previous session's. The prompt's intraday protocol starts from this note."""
+    if info.market not in ("TWSE", "TPEX") or q is None or q.trade_date is None:
+        return None
+    now = now.astimezone(TAIPEI)
+    today = now.date()
+    if not is_tw_trading_day(today) or now.time() < MARKET_OPEN or q.trade_date >= today:
+        return None
+    when = "盤中" if is_tw_market_open(now) else "今天已收盤，但今天的官方收盤價還沒公布"
+    day = f"{q.trade_date.month}/{q.trade_date.day}"
+    return (f"{when}：quote、market_context 與 why_signals 都是 {day} 的官方收盤資料，不是今天的。"
+            "今天這一檔與加權指數漲跌多少，要用 web_search 找可引用的來源並寫出時間")
 
 
 ETF_NAV_AI_NOTE = ("premium_pct = close ÷ NAV − 1 on premium_date only (the newest date with both an official close "
@@ -611,11 +697,62 @@ def get_events(ctx: ToolContext, args: dict[str, Any]) -> Any:
             "upcoming": [_pick(e, *keys) for e in upcoming], "recent": [_pick(e, *keys) for e in past]}
 
 
+NEWS_TOOL_MAX = 12
+NEWS_RECENT = timedelta(hours=48)
+NEWS_OLD_NOTICE = timedelta(days=14)
+NEWS_OLD_NOTICE_MAX = 4
+
+
+def _published(n: dict[str, Any]) -> datetime | None:
+    try:
+        at = datetime.fromisoformat(str(n.get("published_at") or ""))
+    except ValueError:
+        return None
+    return at if at.tzinfo else at.replace(tzinfo=TAIPEI)
+
+
+def news_for_ai(items: list[dict[str, Any]], now: datetime) -> list[dict[str, Any]]:
+    """The stock page's list (90 days of 公告 first, then media) reordered for a question about today. 2026-11-16:
+    a stock with a dozen 公告 left no room for the morning's media headline in the 12 the tool returns. Everything
+    of the last 48 hours comes first, newest first; then the 公告 (at most 4 of those older than 14 days); then the
+    older media headlines."""
+    recent, notices, media = [], [], []
+    old_notices = 0
+    for n in items:
+        at = _published(n)
+        if at is not None and now - at <= NEWS_RECENT:
+            recent.append((at, n))
+        elif n.get("category") == "media":
+            media.append(n)
+        elif at is None or now - at > NEWS_OLD_NOTICE:
+            old_notices += 1
+            if old_notices <= NEWS_OLD_NOTICE_MAX:
+                notices.append(n)
+        else:
+            notices.append(n)
+    recent.sort(key=lambda x: x[0], reverse=True)
+    return [*(n for _, n in recent), *notices, *media][:NEWS_TOOL_MAX]
+
+
+def _news_time(n: dict[str, Any], today: date) -> str:
+    """「今天 11/16 09:12」「昨天 11/15 21:40」「11/13 14:05」; no time for a date-only headline or a 公告 without
+    one (stored at 00:00), so this morning's story is not mistaken for Friday's."""
+    at = _published(n)
+    if at is None:
+        return ""
+    at = at.astimezone(TAIPEI)
+    rel = {today: "今天 ", today - timedelta(days=1): "昨天 "}.get(at.date(), "")
+    clock = "" if n.get("date_only") or (at.hour, at.minute) == (0, 0) else f" {at:%H:%M}"
+    return f"{rel}{at.month}/{at.day}{clock}"
+
+
 def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import stock as svc
 
     info = resolve_instrument(ctx.md, args["symbol"])
-    items = svc.news(ctx.db, ctx.md, info.symbol)[:12]
+    now = now_utc()
+    today = now.astimezone(TAIPEI).date()
+    items = news_for_ai(svc.news(ctx.db, ctx.md, info.symbol), now)
     linked = [n for n in items if str(n.get("url") or "").startswith("http") and n.get("title")]
     if not linked:  # nothing to cite: the headlines (if any) as data
         out: dict[str, Any] = {
@@ -632,12 +769,9 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
             return n.get("outlet") or ""
         return "公開資訊觀測站" if n.get("category") == "material_info" else "臺灣證券交易所"
 
-    def day(n: dict[str, Any]) -> str:
-        raw = str(n.get("published_at") or "")
-        return f"{int(raw[5:7])}/{int(raw[8:10])}" if len(raw) >= 10 and raw[4] == "-" else ""
-
     return Citable([{"url": n["url"], "title": n["title"], "outlet": outlet(n),
-                          "text": "，".join(x for x in (outlet(n), day(n)) if x) + f"：{n['title']}"} for n in linked])
+                     "text": "，".join(x for x in (outlet(n), _news_time(n, today)) if x) + f"：{n['title']}"}
+                    for n in linked])
 
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -938,8 +1072,11 @@ TOOLS: list[ToolSpec] = sorted([
              "Key data for one stock or ETF: name, industry, latest quote (price, change vs reference price, volume), "
              "open/high/low, limit up/down, P/E, P/B, dividend yield, EPS (TTM), 52-week range, market cap, "
              "attention/disposition status and recent dividends; for Taiwan ETFs also the NAV (淨值) with its date and "
-             "the after-close premium/discount (折溢價) vs NAV on the same date. Call this first for any question "
-             "about a specific stock's price or basic data, or an ETF's NAV or premium/discount.",
+             "the after-close premium/discount (折溢價) vs NAV on the same date. Also english_name (for searching "
+             "foreign news), market_context (the latest official close of the TAIEX and the stock's sector index, "
+             "and vs_taiex_pct_points), why_signals (rule-based anomalies of the latest session) and intraday_note "
+             "(today's close is not out yet). Call this first for any question about a specific stock's price, why "
+             "it moved or basic data, or an ETF's NAV or premium/discount.",
              {"symbol": _SYMBOL}, ("symbol",), get_stock_overview, _sym_label("查看 ", " 關鍵數據")),
     ToolSpec("get_stock_history",
              "Daily price history of a stock over a range: start/end close, % change, high/low with dates, average "
@@ -997,8 +1134,10 @@ TOOLS: list[ToolSpec] = sorted([
              ("symbol", "mine_only"), get_events, _sym_label("查看 ", " 事件")),
     ToolSpec("get_news",
              "Recent headlines for a stock: official announcements of a Taiwan stock (company material information "
-             "and exchange news), then media headlines (the original title, outlet, time and link, found via The "
-             "GDELT Project and similar indexes; titles only, no article text). Headlines with a link come back as "
+             "and exchange news) and media headlines (the original title, outlet, time and link, found via The "
+             "GDELT Project and similar indexes; titles only, no article text). The last 48 hours come first, "
+             "newest first; each item starts with its outlet and 今天/昨天 or the date, with the time when known. "
+             "Headlines with a link come back as "
              "search results: cite the one a sentence relies on and the app lists its link under the answer; do not "
              "name the outlet in the sentence and do not copy the title, write it in your own words. Search the web "
              "when the question needs more than these headlines.",

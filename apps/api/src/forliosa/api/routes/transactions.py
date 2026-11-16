@@ -1,4 +1,4 @@
-"""Transactions CRUD with cursor pagination, and the fee/tax preview."""
+"""Transactions CRUD with cursor pagination, the fee/tax preview, and batches (the statement import)."""
 
 from __future__ import annotations
 
@@ -16,6 +16,10 @@ from forliosa.api.errors import not_found, unprocessable
 from forliosa.api.schemas import (
     TradePreview,
     Transaction,
+    TransactionBatchCheck,
+    TransactionBatchCreated,
+    TransactionBatchDeleted,
+    TransactionBatchIn,
     TransactionIn,
     TransactionPage,
     TransactionPatch,
@@ -45,7 +49,7 @@ def txn_out(t: TxnModel) -> dict:
         "amount": ser.money(t.amount),
         "fee": ser.money(t.fee), "tax": ser.money(t.tax), "health_insurance": ser.money(t.health_insurance),
         "currency": t.currency, "is_day_trade": t.is_day_trade, "note": t.note, "source": t.source,
-        "created_at": iso_taipei(t.created_at),
+        "created_at": iso_taipei(t.created_at), "import_batch_id": t.import_batch_id,
     }
 
 
@@ -116,6 +120,29 @@ def preview_transaction(body: TransactionIn, user: User = Depends(current_user),
     p = svc.compute(db, user, body.model_dump(), get_market_data()).preview
     return {"gross": ser.money(p.gross), "fee": ser.money(p.fee), "tax": ser.money(p.tax),
             "health_insurance": ser.money(p.health_insurance), "net_cash": ser.money(p.net_cash), "rules": p.rules}
+
+
+@router.post("/batch", response_model=TransactionBatchCheck | TransactionBatchCreated, status_code=201,
+             summary="一次寫入多筆（匯入對帳單）")
+def create_batch(body: TransactionBatchIn, response: Response, user: User = Depends(current_user),
+                 db: Session = Depends(get_db)):
+    """``dry_run``: 200 with every row's flags, nothing written. Otherwise every row or none: 201 with the batch id,
+    or 422 ``batch_rejected`` with ``rows: [{index, code, message}]`` (index null: the whole batch)."""
+    rows = [r.model_dump() for r in body.rows]
+    md = get_market_data()
+    if body.dry_run:
+        check = svc.check_batch(db, user, body.account_id, rows, md)
+        response.status_code = 200
+        return {"dry_run": True, "ok": check.ok, "rows": [{"index": i, "flags": f} for i, f in enumerate(check.flags)],
+                "problems": [{"code": p["code"], "message": p["message"]} for p in check.problems]}
+    res = svc.create_batch(db, user, body.account_id, rows, md)
+    return {"dry_run": False, "batch_id": res.batch_id, "created": [t.id for t in res.created],
+            "auto_dividends_added": res.auto_dividends_added}
+
+
+@router.delete("/batches/{batch_id}", response_model=TransactionBatchDeleted, summary="整批復原一次匯入")
+def delete_batch(batch_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
+    return {"batch_id": batch_id, "deleted": svc.delete_batch(db, user, batch_id, get_market_data())}
 
 
 @router.get("/{txn_id}", response_model=Transaction)
