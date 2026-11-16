@@ -480,7 +480,8 @@ def test_a_refusal_or_an_unreadable_note_is_read_again(client, pool, fake, env):
     fake.reply(text(""), stop_reason="refusal")
     res = read(client)
     assert res.status_code == 422
-    assert res.json()["error"] == {"code": "unreadable_file", "message": "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。"}
+    assert res.json()["error"] == {"code": "unreadable_file",
+                                   "message": "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。"}
     assert client.get(f"{API}/ai/usage").json()["imports_today"] == before + 1
 
 

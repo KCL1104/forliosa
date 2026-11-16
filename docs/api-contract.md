@@ -1572,11 +1572,12 @@
 }
 ```
 
-- **讀法**：預設 `claude-haiku-5-5`（`AI_MODEL_IMPORT`），結構化 JSON 輸出、沒有工具、不串流，一次最多 5 頁。AI 只照抄、不計算、不猜；不抄姓名、身分證字號與帳號。逐列驗算沒過、合計對不上、`unreadable` 不是空的或模型拒答時，用 `claude-sonnet-5-5`（`AI_MODEL_IMPORT_RETRY`）重讀一次（`retried: true`，一份約 US$0.08）；省錢模式不重讀。
+- **讀法**：預設 `claude-haiku-5-5`（`AI_MODEL_IMPORT`），結構化 JSON 輸出、沒有工具、不串流，一次最多 5 頁。AI 只照抄、不計算、不猜；不抄姓名、身分證字號與帳號。逐列驗算沒過、合計對不上、`unreadable` 不是空的或模型拒答時，用 `claude-sonnet-5-5`（`AI_MODEL_IMPORT_RETRY`）重讀一次（`retried: true`，一份約 US$0.08）；省錢模式不重讀，使用者按了取消（連線已經關掉）也不重讀。重讀時某幾頁又沒讀出來，那幾頁保留第一次讀到的列。
 - **不存**：檔案、頁面、文字層、讀出的列都不存、不寫 log；只記一列用量（`ai_usage` 的 `feature: "import"`，不含內容）。讀出的原文與名稱不會放進 `candidate.note`（對話的 AI 讀得到備註）。
 - **額度**：不算每天的題數（`/ai/usage` 的 `messages_today` 不變）；費用算進每月的額度。每人每天最多 `IMPORT_DAILY_LIMIT`（10）次。省錢模式照樣能讀，花到上限的兩倍才停。`GET /ai/usage` 多 `imports_today`（今天讀了幾次）、`import_daily_limit`（10）。
 - **誰能用**：`IMPORT_STATEMENTS`：`off`（預設，沒有人）｜`admins`（只有站方管理員；第一版）｜`all`（所有登入的人，免費與會員一樣）。`GET /me` 的 `plan.statement_import` 照它算；前端只在 `true` 時放入口。
-- **錯誤**（暫定，照設計附錄）：403（`plan.statement_import` 是 `false`）；413（超過 20 頁或 15 MB，`IMPORT_MAX_BODY_MB`）；圖片的檔頭不是 JPEG／PNG／WebP 時拒絕（代碼以實作為準）；429 `ai_import_daily_limit`（今天的次數用完）；429 這個月連省錢模式的額度也用完（附錄寫 `ai_month_limit`，提問共用的檢查目前回 `ai_monthly_budget`）；503（沒有可用的 AI 金鑰）。
+- **錯誤**（暫定，照設計附錄）：403（`plan.statement_import` 是 `false`）；413（超過 20 頁或 15 MB，`IMPORT_MAX_BODY_MB`）；圖片的檔頭不是 JPEG／PNG／WebP 時拒絕（代碼以實作為準）；429 `ai_import_daily_limit`（今天的次數用完）；429 這個月連省錢模式的額度也用完（附錄寫 `ai_month_limit`，提問共用的檢查目前回 `ai_monthly_budget`）；503（沒有可用的 AI 金鑰）；422 `unreadable_file`：每一頁都沒讀出來（API 不收圖片、模型拒答、明細太多停在一半、回的不是約定的 JSON；明細太多時的句子是「明細太多，一次讀不完。分成幾張截圖，或把 PDF 分開再匯入。」）——已經呼叫過模型的照樣算一次。
+- **日期**：照印的抄，伺服器換算（民國年、`YYYY/MM/DD`、`MM/DD/YYYY`）；兩位數年份（`26/10/03` 或美式 `10/03/26`）照對帳單期間的年份判斷，判斷不出來就當沒讀清楚；1990 年以前或明年以後的年份也當沒讀清楚（`unreadable`）。
 
 **旗標（`flags[].code`）與預設**
 
@@ -1598,7 +1599,7 @@
 | `short_sale` | 融券 | 不匯入 |
 | `day_trade` | 當沖（候選的 `is_day_trade: true`） | `false` |
 | `margin` | 融資買進：當一般買進匯入，標出來 | `true` |
-| `currency_mismatch` | 美股（複委託）卻是新台幣的金額 | `false` |
+| `currency_mismatch` | 美股（複委託）卻是新台幣的金額；或美股的手續費超過 US$50 也超過成交金額的 1%（台幣交割的複委託常把手續費印成新台幣：「手續費 150 以美元來說太高，可能是新台幣。」） | `false` |
 | `fractional_tw_qty` | 台股的股數不是整數 | `false` |
 | `unreadable` | 這一列沒讀清楚 | `false` |
 
@@ -1631,7 +1632,7 @@
 
 **`DELETE /transactions/batches/{batch_id}`**（已實作）
 
-- 刪掉這一批**還在的**每一列（之後被改到別的帳戶的也算），先拿掉它們重播一次帳本：之後的交易用到這批的股數（例如之後記的賣出）→ 422 `ledger_inconsistent`「之後的交易用到這次匯入的股數，不能整批復原：…」，什麼都不刪；一列都不剩或不是自己的 → 404「找不到這次匯入」。
+- 刪掉這一批**還在的**每一列（之後被改到別的帳戶的也算），先拿掉它們重播一次帳本：之後的交易用到這批的股數（例如之後記的賣出）→ 422 `ledger_inconsistent`「之後的交易用到這次匯入的股數，不能整批復原：11/10 賣出鴻海 3,580 股，超過當時持有的 0 股。」，什麼都不刪；一列都不剩或不是自己的 → 404「找不到這次匯入」。
 - 通過就整批刪掉、自動股利重算一次，回 `{"batch_id": "imp_…", "deleted": 28}`。前端的「復原」用這個，不是一筆一筆刪（有賣出的批次一筆一筆平行刪會被擋）。
 - 匯入的列也可以照常用 `PATCH`／`DELETE /transactions/{id}` 一筆一筆改或刪；改過仍是 `source: "import"`。
 

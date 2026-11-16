@@ -174,7 +174,8 @@ def test_undo_is_refused_while_later_rows_depend_on_it(client):
     assert r.status_code == 422
     err = r.json()["error"]
     assert err["code"] == "ledger_inconsistent"
-    assert err["message"] == "之後的交易用到這次匯入的股數，不能整批復原：2025/3/10 賣出台積電 600 股，超過當時持有的 0 股。"
+    assert err["message"] == ("之後的交易用到這次匯入的股數，不能整批復原："
+                              "2025/3/10 賣出台積電 600 股，超過當時持有的 0 股。")
     assert len(txns(client, acc["id"])) == 2
     assert client.delete(f"{API}/transactions/{sell['id']}").status_code == 204
     assert client.delete(f"{API}/transactions/batches/{out['batch_id']}").status_code == 200
