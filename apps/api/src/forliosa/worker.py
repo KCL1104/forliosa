@@ -4,13 +4,22 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 
 * ``after_close_refresh`` — 14:35 and 23:45 Taipei on trading days: refreshes the instrument master
   and writes the latest real closes of tracked symbols into ``prices_daily``.
-* ``close_watch`` — on a trading day from 13:35 Taipei until 08:30 the next morning, every 15 minutes: the
-  exchanges publish the day's closing prices at no fixed time (observed: late evening to early morning), so the worker
-  asks each exchange's close dataset — a conditional request for its first kilobyte, 304 while unchanged — whether it
-  has turned to that day. When one has, that market's archive group runs once (closes, PER/PBR, notices, automatic
-  dividends) followed by ``after_close_refresh``. A market whose day is stored is not asked again; "stored" is read
-  from ``dataset_status`` (``…/price``), so a restart neither repeats nor forgets anything, and a scheduled run that
-  got there first counts too. Nothing is asked on a non-trading day or between 08:30 and 13:35.
+* ``close_watch`` — on a trading day from 13:35 Taipei until 08:30 the next trading day (through a weekend or a
+  holiday), every 15 minutes: the OpenAPIs publish the day's closing prices at no fixed time (TPEx about 23:30, TWSE
+  about 05:20 the next morning), so the worker asks each exchange's close dataset — a conditional request for its
+  first kilobyte, 304 while unchanged — whether it has turned to that day. When one has, that market's archive group
+  runs once (closes, PER/PBR, notices, automatic dividends) followed by ``after_close_refresh`` (and the daily
+  briefings once both markets' official closes are in). A market whose day is stored is not asked again; "stored" is
+  read from ``dataset_status`` (``…/price``), so a restart neither repeats nor forgets anything, and a scheduled run
+  that got there first counts too. Nothing is asked between 08:30 and 13:35 on a trading day.
+* ``twse_sameday_close`` — TWSE_OPENDATA_CLOSE (default on), trading days 13:45–18:00: at most every 10 minutes (the
+  last request time is kept in ``dataset_status``), until the session is stored, the two data.gov.tw download links
+  on www.twse.com.tw (the narrow exception in CLAUDE.md; ``forliosa.closes.TwseSameDay``) — listed closes and TAIEX
+  the afternoon of the session instead of 05:20 the next morning. A refusal (redirect, 403, 429 …) stops it for the
+  day. Then ``after_close_refresh``. The close watch still stores the OpenAPI's file over it the next morning.
+* ``evening_closes`` — SHIOAJI_EVENING_CLOSE (default on), trading days 20:30 until 02:00, every 15 minutes:
+  shioaji-data's evening release as an interim close for a market whose session is not stored yet
+  (``forliosa.closes.EveningCloses``; close only, replaced by the official file). Then ``after_close_refresh``.
 * ``daily_archive`` — 08:10 (today's reference prices, notices), 14:40 (closes, PER/PBR, events, indices) and
   21:40 (margin, institutional flows, financial statements, company profiles and dividend resolutions, and the
   TAIFEX datasets: futures / options reports, 三大法人, large traders, put/call ratio, FX, margins when changed;
@@ -93,7 +102,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
 
-from forliosa import logredact
+from forliosa import closes, logredact
 from forliosa.archive import (
     CLOSE_DATASETS,
     CLOSE_WATCH_SECONDS,
@@ -238,11 +247,14 @@ def refresh_instruments(db: Session, md: MarketData) -> int:
 
 class Worker:
     def __init__(self, md: MarketData | None = None, now_fn: Callable[[], datetime] = now_taipei,
-                 fetcher_fn: Callable[[], HttpFetcher] = default_fetcher):
+                 fetcher_fn: Callable[[], HttpFetcher] = default_fetcher,
+                 twse_fetcher_fn: Callable[[], HttpFetcher] = closes.twse_fetcher):
         self.md = md or get_market_data()
         self.now_fn = now_fn  # the clock of the archive runs and the close watch (tests inject one)
-        self.fetcher_fn = fetcher_fn  # the HTTP client of the archive runs and the close watch
+        self.fetcher_fn = fetcher_fn  # the HTTP client of the archive runs, the close watch and the evening closes
+        self.twse_fetcher_fn = twse_fetcher_fn  # TWSE's same-day download files: no retries
         self._close_publication: ClosePublication | None = None
+        self._evening: closes.EveningCloses | None = None
         self._stop = asyncio.Event()
         from forliosa.services.channels import TelegramPoller
 
@@ -276,6 +288,15 @@ class Worker:
                 lambda: self.archive(MONTHLY_GROUPS)),
         ]
         settings = get_settings()
+        # Same-day closes (forliosa.closes): the job is due every minute in its window; how often TWSE is actually asked
+        # (at most every 10 minutes) is decided from dataset_status, so a restart cannot ask sooner.
+        if settings.twse_opendata_close:
+            self.jobs.append(Job("twse_sameday_close", every(60, only_if=lambda n: closes.twse_poll_day(n) is not None),
+                                 self.twse_sameday_close))
+        if settings.shioaji_evening_close:
+            self.jobs.append(Job("evening_closes", every(closes.EVENING_SECONDS,
+                                                         only_if=lambda n: closes.evening_day(n) is not None),
+                                 self.evening_closes))
         # News and company descriptions run in loops of their own (``Job.background``): a news batch takes up to
         # ~36 minutes (GDELT spacing and back-off) and the Wikipedia lookups wait between requests; in the shared loop
         # they held up the close watch, the group pushes and the evening slots (2026-11-14 review)
@@ -363,6 +384,53 @@ class Worker:
             refreshed = True
         if refreshed:
             await self.after_close_refresh()
+            await self.briefings_when_closes_are_in()
+
+    async def twse_sameday_close(self) -> None:
+        """One look at TWSE's same-day download files (``forliosa.closes.TwseSameDay``: it decides from
+        ``dataset_status`` whether a request is due at all)."""
+        def run() -> closes.TwsePoll:
+            with session_factory()() as db:
+                return closes.TwseSameDay(self.twse_fetcher_fn(), self.md.policy, now_fn=self.now_fn).poll(db)
+
+        res = await asyncio.to_thread(run)
+        if res.prices or res.indices:
+            await self.after_close_refresh()
+            await self.briefings_when_closes_are_in()
+
+    async def evening_closes(self) -> None:
+        """One look at shioaji-data's evening release (``forliosa.closes.EveningCloses``)."""
+        if self._evening is None:
+            self._evening = closes.EveningCloses(self.fetcher_fn(), get_settings().shioaji_data_base_url,
+                                                 self.md.policy, now_fn=self.now_fn)
+        evening = self._evening
+
+        def run() -> closes.EveningPoll:
+            with session_factory()() as db:
+                return evening.poll(db)
+
+        try:
+            res = await asyncio.to_thread(run)
+        except (ProviderUnavailable, ValueError) as exc:  # unreachable, a 5xx, a changed file: the next look
+            log.warning("evening closes: shioaji-data not read: %s", exc)
+            return
+        if res.stored:
+            await self.after_close_refresh()
+
+    async def briefings_when_closes_are_in(self) -> None:
+        """The daily briefings as soon as both markets' official closes of the latest session are stored (memo
+        2026-11-16: about 23:35 with TWSE's same-day file, instead of the 06:10 slot); the fixed slots stay as the
+        safety net. ``briefing.run`` writes nothing while a market is missing and never writes a briefing twice."""
+        if not get_settings().ai_daily_briefing_enabled:
+            return
+
+        def ready() -> bool:
+            with session_factory()() as db:
+                stored = closes.official_close_dates(db)
+            return all(d is not None and d >= closes.due_session(self.now_fn()) for d in stored.values())
+
+        if await asyncio.to_thread(ready):
+            await self.daily_briefings()
 
     async def weekly_archive(self) -> None:
         await self.archive(WEEKLY_GROUPS)

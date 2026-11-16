@@ -43,8 +43,30 @@
   - 隱私 §5.1：AI 讀到的帳戶清單沒有「追蹤方式」（`api/ai/tools.py` 的 `get_accounts` 只給編號、名稱、券商、幣別）。
   - 隱私 §10.1、§10.2：設定頁已經可以一次刪除全部 AI 對話（2026-11-14，待決定事項 3-2），從「要寫信」移到「可以自己做」。
   - 條款 §8.3：AI 的買賣草稿不再「包含估算的手續費與稅」（2026-11-14 起不自動算）；股利草稿仍先扣掉估算的二代健保與美股預扣稅。
-  - 條款 §8.5：原本寫「每天最多 50 則」；現在是免費 3 題、會員 30 題，每月估計花費上限（免費約 US$1、會員約 US$3），免費另有 300 萬計費 token；深度搜尋一次 3 題；用完進省錢模式、兩倍才停；匯入不算題數、每天 10 份。
+  - 條款 §8.5：原本寫「每天最多 50 則」；現在是免費 3 題、會員 30 題，每月估計花費上限（免費約 US$1、會員約 US$3；同一天稍後改成會員約 US$8，見下方「會員的每月額度」），免費另有 300 萬計費 token；深度搜尋一次 3 題；用完進省錢模式、兩倍才停（會員後來改成 1.25 倍）；匯入不算題數、每天 10 份。
 - **請律師看** (d) 第 20 點。
+
+**2026-11-16 的修改（台股收盤價提早進來）**：產品負責人決定（`PRODUCT.md`「台股收盤價什麼時候進來」；研究 `docs/research/same-day-close.md`；決定的紀錄 `docs/pending-decisions.md`「2026-11-16 台股當天收盤價」）：
+
+- **對自己的規則開一個窄例外**：CLAUDE.md 原本寫「不得自動擷取證交所網站或 MIS」。現在只例外兩個網址——證交所在政府資料開放平臺登記的下載網址 `https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data`（個股日成交資訊，data.gov.tw 11549）與 `…/MI_INDEX?response=open_data`（每日收盤行情－大盤統計，11555）。條件：不帶日期參數、交易日 13:45 起最多每 10 分鐘一次、拿到當天的就停；被擋（轉址、403、429）就停，不偽裝瀏覽器、不換位址；證交所其他網頁與 MIS 照舊不抓；**櫃買網站的下載網址不在例外裡**。上市收盤價因此從隔天清晨提早到當天下午約 2 點。
+- **依據**：
+  - 資料本身：data.gov.tw 把這兩個網址登記成資料集的檔案，授權是〈政府資料開放授權條款－第1版〉，可以商用、要顯名（資料來源頁照舊列出）。
+  - 證交所網站條款第 6 條禁止程式自動下載，但「依臺灣證券交易所同意之方式或經臺灣證券交易所同意者」不在此限；第 8 條排除證交所已授權政府資料開放平臺提供的資料。
+  - **證交所 2025-09-17 在平臺上公開回覆**：有人問 11549 這個網址「是否可以使用自動程式進行下載?」，證交所回「本資料集可以使用自動程式進行下載。」（2016、2020 年也有意思相近的回覆，原文摘錄在研究文件 §3。）
+  - 產品負責人**決定不寫信**確認（研究原本建議同時寄信）。
+- **風險**：
+  - 那是平臺上的留言回覆，不是合約；證交所之後可以改口、撤回同意，或停止提供這兩個網址（授權條款第 5 點也允許提供機關停止提供）。證交所表示不同意時，關掉 `TWSE_OPENDATA_CLOSE` 就停，資料照舊等隔天清晨的 OpenAPI。
+  - 證交所網站有防火牆，以前對程式回過 307。程式遇到轉址、403、429 就停一天，不繞過——這一點對刑法「無故」的判斷很重要（`docs/research/data-sources-licensing.md` §4.2 的 Lawsnote 案）。
+  - 2026-11-16 15:00 實際下載過一次，拿得到；之後會不會被擋不知道。
+- **服務條款 §2.3**：原本寫台股收盤價「通常在當天晚上到隔天清晨之間」更新。改成上市通常當天下午、上櫃通常當天晚上、有時晚到隔天清晨；畫面上的「預計更新時間」是我們觀察到的時間，不是交易所承諾的；晚上先更新的只有收盤價；下午的成交量可能還沒包含盤後、零股與鉅額交易。
+- **服務條款 §9.1**：臺灣證券交易所後面加「包括它在政府資料開放平臺登記、可供程式下載的每日收盤資料」；另寫明部分開放資料經由永豐金證券公開轉存的 shioaji-data 取得（晚上先放進來的收盤價就是它，之前也已經用它做商品清單）。
+- 隱私權政策不用改：這兩個來源只下載公開的市場資料，請求不帶任何使用者資料（和 OpenAPI 一樣）。
+- **請律師看** (d) 第 21 點。
+
+**2026-11-16 的修改（會員的每月額度）**：產品負責人決定會員每月估計花費上限從約 US$3 提高到約 US$8，省錢模式改成花到上限的 1.25 倍就停（免費帳號照舊：約 US$1、兩倍）。
+
+- **服務條款 §8.5**：「會員約 US$3」改成「會員約 US$8」；「花到上限的兩倍才停到下個月」改成「免費帳號花到上限的兩倍、會員花到上限的 1.25 倍才停到下個月」。
+- 個人會員的預定價格（NT$490／月、NT$4,900／年）只記在 `PRODUCT.md` 與 `docs/pending-decisions.md`，還沒有付款的程式，條款不寫價格。
 
 **撰寫時無法核對的事（重要）**：這次工作的網路環境連不到全國法規資料庫（`law.moj.gov.tw`）、臺北市法規查詢系統（`laws.gov.taipei`）與 Anthropic 的隱私說明網站（`privacy.claude.com`）。因此：
 
@@ -180,7 +202,7 @@
 |---|---|---|---|
 | T1 | §1 | 帳本與資訊工具；不連接券商、不能下單 | `PRODUCT.md:27-33`、`:47` |
 | T2 | §1.3 | 目前不收費 | 程式沒有金流；`PRODUCT.md:17`、`:23`、`:57`（是否商業化尚未決定） |
-| T3 | §2.3 | 收盤價、非即時、公布時間；美股收盤價來自 Databento（2026-11-15）：美股收盤後更新、紐約的交易日、只有帳本或觀察清單裡的美股、2024-07 起；美股股利與上市法人資料目前沒有 | `docs/api-contract.md:1037-1059`；`PRODUCT.md:78`、`:105`、`:108-109`；`web/src/pages/data-sources/DataSourcesPage.tsx:61-63`、`:114`；美股：`PRODUCT.md`「美股收盤價」、`docs/api-contract.md`「美股收盤價（2026-11-15）」、`api/us_prices.py`、`api/worker.py`（`us_closes`、`us_backfill`） |
+| T3 | §2.3 | 收盤價、非即時、公布時間；美股收盤價來自 Databento（2026-11-15）：美股收盤後更新、紐約的交易日、只有帳本或觀察清單裡的美股、2024-07 起；美股股利與上市法人資料目前沒有 | `docs/api-contract.md:1037-1059`；`PRODUCT.md:78`、`:105`、`:108-109`；`web/src/pages/data-sources/DataSourcesPage.tsx:61-63`、`:114`；美股：`PRODUCT.md`「美股收盤價」、`docs/api-contract.md`「美股收盤價（2026-11-15）」、`api/us_prices.py`、`api/worker.py`（`us_closes`、`us_backfill`）；台股的更新時間（2026-11-16：上市下午、上櫃晚上、有時隔天清晨；預計時間是觀察值；晚上那一批只有收盤價）：`PRODUCT.md`「台股收盤價什麼時候進來」、`api/closes.py`（`WINDOWS`、`TwseSameDay`、`EveningCloses`）、`docs/research/same-day-close.md` |
 | T4 | §2.4 | 稅費、股利、績效是估算；自動股利可改可刪 | `PRODUCT.md:29`、`:111`；`docs/api-contract.md:201-241` |
 | T5 | §2.6 | 法人觀點是第三方看法；新聞只列標題與連結 | `PRODUCT.md:94`、`:110`；`api/ai/prompts.py:137`；`api/models.py:1039-1042` |
 | T6 | §3.1 | Discord 登入、需已驗證 Email、第一次登入自動建立帳號 | `docs/api-contract.md:778-785`；`web/src/pages/auth/LoginPage.tsx:38` |
@@ -199,9 +221,9 @@
 | T19 | §8.2 | 列出引用來源、標示無來源（可能漏標誤標）、固定聲明 | `api/ai/grounding.py`；`api/ai/prompts.py:60`；`apps/api/CONTRACT_NOTES.md:1100-1105`、`:1226` |
 | T20 | §8.3 | AI 只產生草稿，確認後才寫入；沒寫價格時用收盤價估算；買賣草稿不算手續費與稅（2026-11-14），股利草稿先扣二代健保與美股預扣稅 | `api/ai/tools.py`（`draft_transaction`：沒有手續費、稅的參數）；`api/services/transactions.py`（`compute`）；`apps/api/CONTRACT_NOTES.md`「2026-11-14 手續費與稅不自動算」；`PRODUCT.md`「手續費與稅不自動算」 |
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
-| T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$3；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
+| T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$8（2026-11-16 以前 US$3）；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍（會員 1.25 倍，2026-11-16）；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`、`ai_member_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
 | T25 | §8.10 | 匯入對帳單：AI 可能讀錯、確認後才寫入、可整批復原；上傳的內容送到 AI 服務供應商 | `docs/api-contract.md`「匯入對帳單（2026-11-16）」（`POST /transactions/batch` 全部或全不、`DELETE /transactions/batches/{id}`）；`api/services/transactions.py`（`create_batch`、`delete_batch`） |
-| T23 | §9 | 資料來源與授權（2026-11-15 多 Databento 的美股收盤價：資料集 `databento-equs/price`，只在 `US_PRICE_SOURCE=databento` 時列出） | `api/datapolicy.py:54-92`、`:468-515`（Databento：`DATASETS` 的 `databento-equs/price`、`us_prices_served`）；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
+| T23 | §9 | 資料來源與授權（2026-11-15 多 Databento 的美股收盤價：資料集 `databento-equs/price`，只在 `US_PRICE_SOURCE=databento` 時列出；2026-11-16 多證交所的兩個下載檔 `twse-opendata/price`、`twse-opendata/index`，shioaji-data 的用途多「晚上先放進來的收盤價」） | `api/datapolicy.py:54-92`、`:468-515`（Databento：`DATASETS` 的 `databento-equs/price`、`us_prices_served`；證交所下載檔：`DATASETS` 的 `twse-opendata/*`、`shioaji-data/official`）；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
 | T24 | §11.5 | 產品內建的處置只有隱藏與暫停公開發言 | `api/models.py:27-41`（`User` 沒有停用欄位）；`api/services/discussions.py` |
 
 ---
@@ -229,7 +251,7 @@
 17. **AI 用量**：條款 §8.5 的數字後端有（`GET /ai/usage`），但我在前端沒找到顯示剩餘額度的畫面；建議顯示，讓使用者知道自己用了多少。
 18. **匯入對帳單的塗黑**（隱私重點、§5.6）。草稿寫的是設計：PDF 在瀏覽器裡解密、塗掉認得出來的個資。2026-11-16 寫草稿時，瀏覽器裡的 pdf.js 解密與塗黑還沒在真的瀏覽器、真的對帳單上測過（伺服器上的同樣做法用合成檔測過），各家券商頁首的欄位名稱也還不知道。第一版只開給站方管理員，正是為了先用產品負責人自己的對帳單試；**開放給所有人（`IMPORT_STATEMENTS=all`）之前**，請確認塗黑在真的對帳單上有效，§5.6「只有認得出來的才塗得掉」的說法也還成立。如果改成在伺服器上解密（備案），密碼就會送到伺服器，重點、§2.2、§5.6 都要改。
 
-**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
+**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`／`AI_MEMBER_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$8／300 萬／3 題／2 倍／1.25 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
 
 ---
 
@@ -274,6 +296,12 @@
     - (c) **只能上傳自己的對帳單**（條款 §8.10）：家人替長輩匯入（上傳別人的對帳單）時，誰是蒐集者、要不要當事人同意。
     - (d) 伺服器只在記憶體裡轉送、讀完就丟、不寫 log，這仍算「處理」與「國際傳輸」；隱私 §2.5、§5.6 的寫法夠不夠清楚。
     - (e) 條款 §8.10「AI 可能讀錯，請逐筆核對」與 §12 的責任限制，對匯入錯誤造成的帳目差錯是否足夠。
+21. **用程式下載證交所網站上的兩個開放資料網址（2026-11-16）**。產品負責人對自己「不自動擷取證交所網站」的規則開了窄例外（見上方「2026-11-16 的修改（台股收盤價提早進來）」），沒有寫信取得書面同意。請確認：
+    - (a) 證交所 2025-09-17 在政府資料開放平臺上的留言回覆（「本資料集可以使用自動程式進行下載」，回答的是 11549 的網址）能不能當作網站條款第 6 條的「依臺灣證券交易所同意之方式」或「經臺灣證券交易所同意」；11555（大盤統計）只有 2020 年「可使用response=open_data抓取」的回覆，是否同樣涵蓋。
+    - (b) 依條款第 8 條，平臺授權的資料本來就不受網站條款限制——那「怎麼下載」是不是仍受第 6 條拘束（研究的理解：資料的授權沒問題，爭點只在用程式連證交所網站這件事）。
+    - (c) 證交所撤回同意或封鎖時，我們停止抓取就夠了嗎；已經存下來的當天收盤價（隔天清晨會被 OpenAPI 的同一份資料取代）要不要刪。
+    - (d) 刑法第 359 條「無故」的風險：做法是只抓兩個登記的完整網址、低頻（每天大約 2–3 次）、誠實的 User-Agent、被擋就停、不繞過。這樣是否足以說明不是「無故」【待確認】。
+    - (e) 要不要依研究原本的建議，仍然寫信給 opendata@twse.com.tw 取得書面確認（產品負責人目前決定不寄）。
 
 ---
 

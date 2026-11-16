@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     # USD/TWD: valuation uses the central bank's 銀行間新臺幣對美元收盤匯率 (OGDL) in every mode.
     taifex_conditional_confirmed: bool = False
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
+    # Same-day Taiwan closes (product owner 2026-11-16; forliosa.closes). TWSE_OPENDATA_CLOSE: on trading-day afternoons
+    # (from 13:45, at most every 10 minutes, until the session is in; a redirect / 403 / 429 stops it for the day) read
+    # the two download links TWSE registered on data.gov.tw — the narrow exception in CLAUDE.md; false switches it off
+    # (e.g. if TWSE objects). SHIOAJI_EVENING_CLOSE: from 20:30 every 15 minutes, take shioaji-data's evening release as
+    # an interim close (close only, marked interim) for a market whose official close is not in yet.
+    twse_opendata_close: bool = True
+    shioaji_evening_close: bool = True
     # SEC EDGAR (US fundamentals and filings). SEC requires a declared User-Agent with a contact e-mail:
     # "Forliosa/1.0 <SEC_CONTACT_EMAIL>". The address is read from the environment only (SecretStr: never shown
     # in reprs or settings dumps, never logged); without it SEC is disabled and US financials / filings return an
@@ -135,17 +142,19 @@ class Settings(BaseSettings):
     # run without Claude's web search (省錢模式, see ``ai_economy_cap_multiplier``) (0 = no limit).
     ai_monthly_cost_budget_usd: float = Field(default=1.0, ge=0)
     # Members (``users.plan = "member"`` until ``users.plan_until``; site admins count as members): 30 a day and about
-    # US$3 a month; no token budget (the US$ budget is the limit).
+    # US$8 a month (產品負責人 2026-11-16; US$3 before); no token budget (the US$ budget is the limit).
     ai_member_daily_message_limit: int = Field(default=30, ge=0)
-    ai_member_monthly_cost_budget_usd: float = Field(default=3.0, ge=0)
+    ai_member_monthly_cost_budget_usd: float = Field(default=8.0, ge=0)
     ai_member_monthly_token_budget: int = Field(default=0, ge=0)
     # 深度搜尋 and the daily closing briefing are for members; true = free accounts get them too (a personal deployment)
     ai_free_deep_search: bool = False
     ai_free_daily_briefing: bool = False
     # 省錢模式: once the month's US$ budget is spent, questions still run, without Claude's web search and fetch (about
     # US$0.002 each instead of US$0.02), until the month's spending reaches this many times the budget. 深度搜尋,
-    # analyst views and the briefing wait for next month. 1 = stop at the budget instead.
+    # analyst views and the briefing wait for next month. 1 = stop at the budget instead. This one is free accounts';
+    # members stop at AI_MEMBER_ECONOMY_CAP_MULTIPLIER × their budget (產品負責人 2026-11-16: 1.25, about US$10).
     ai_economy_cap_multiplier: float = Field(default=2.0, ge=1)
+    ai_member_economy_cap_multiplier: float = Field(default=1.25, ge=1)
     ai_thread_max_context_tokens: int = 90_000  # keep prompts under the 100K-token price tier
     ai_dev_dummy_key: bool = False  # send a placeholder key; a proxy injects the real one
     ai_key_cooldown_seconds: float = 60.0

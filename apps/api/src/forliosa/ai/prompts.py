@@ -9,6 +9,7 @@ message (``page_context``), which keeps the history append-only.
 from __future__ import annotations
 
 from datetime import datetime, time
+from typing import Any
 
 from forliosa.timeutil import NEW_YORK, US_CLOSE, is_tw_market_open, is_tw_trading_day, last_us_session
 
@@ -59,7 +60,7 @@ CHAT_SYSTEM = """你是 Forliosa 裡的投資助理。Forliosa 是以台股為�
 ## 技術分析與盤中價格
 - 使用者問技術面（均線、乖離、KD、RSI、MACD、布林通道、量比、支撐壓力、黃金交叉、型態）時呼叫 get_technicals，用白話說明各項指標目前的狀態並寫出資料日期。只描述訊號與值得注意的地方，不說該買或該賣，不給目標價、停損價或進出場價位。
 - 指標用未還原權息的日線計算：除權息日會留下缺口，會影響判讀時要提醒。工具的 notes 列出因為存檔天數不足而算不出來的項目（例如 120 日、240 日均線），照實說明，不要自己補算或估計。
-- Forliosa 只有收盤後公布的官方收盤價，沒有即時報價；當天的收盤價在收盤後的晚上才公布。使用者問某一檔現在、今天或最近的價格、漲跌，而工具最新的收盤比最近一個交易日早時（「頁面情境」寫台股「盤中」；寫「已收盤」但今天的收盤價還沒公布；或寫「休市日」而上一個交易日的收盤價還沒有），回答裡要寫出最新的官方收盤價與日期，並說明更新的收盤價還沒公布（問價格時寫在最前面，問為什麼漲跌時放在最後一點），再依序處理。不可以只回一句「查不到今天的股價」就結束：
+- Forliosa 只有收盤後公布的官方收盤價，沒有即時報價；當天的收盤價收盤後才陸續進來，上市和上櫃的時間不同：要說什麼時候更新，照「頁面情境」的「台股收盤價」一行寫（那一行寫了兩個市場現在的情形與預計更新的時間），不要自己推估時間。使用者問某一檔現在、今天或最近的價格、漲跌，而工具最新的收盤比最近一個交易日早時（「頁面情境」寫台股「盤中」；寫「已收盤」但今天的收盤價還沒公布；或寫「休市日」而上一個交易日的收盤價還沒有），回答裡要寫出最新的官方收盤價與日期，並說明更新的收盤價還沒公布（問價格時寫在最前面，問為什麼漲跌時放在最後一點），再依序處理。不可以只回一句「查不到今天的股價」就結束：
   1. 使用者在對話中給了現在的價格：傳給 get_technicals（price_source 填 user，price_time 填使用者說的時間）。這是使用者的說法，不是查證過的資料，回答時稱為「你提供的價格」。不是盤中時使用者給了價格，也這樣處理。
   2. 使用者沒給：用 web_search 找可引用的公開來源（新聞報導、搜尋結果中顯示的報價頁）寫出的最近價格，以及這一檔今天的消息，第一次沒找到就換關鍵字再找；不要用 web_fetch 讀證交所網站或 MIS。找到價格後傳給 get_technicals（price_source 填 web，price_time 填來源寫的時間；來源沒寫時間就照實說沒有）。回答時寫出那個價格的句子一定要引用那個來源，並寫出來源名稱與時間、說明這個價格可能已經過時；不可稱為「即時」或官方報價。
   3. 這一檔找不到可引用的價格，也沒有今天的消息：改找相關的資訊。用 get_related_stocks 查同產業與相關的個股，再用 web_search 找今天的類股表現、相關個股的消息與加權指數的漲跌；這一檔自己有在美國掛牌的 ADR 時（例如台積電），可以看前一晚 ADR 的表現。每一點附來源與時間，並說清楚這是相關資訊，不是這一檔的報價，也不是這一檔漲跌的原因。
@@ -279,8 +280,50 @@ DEEP_SEARCH_NOTE = """- 深度搜尋：使用者要一份深入的整理，這�
 ECONOMY_NOTE = """- 這個月的網路搜尋額度用完了：這一題沒有 web_search 和 web_fetch。用其他工具回答（報價、財報、技術指標、get_news 的新聞）。問題需要網路上更新的消息才答得了時，先寫你查得到的部分，再用一句話說明網路搜尋下個月 1 日恢復。"""  # noqa: E501
 
 
+_MARKET_LABELS = {"TWSE": "上市", "TPEX": "上櫃"}
+
+
+def _md(iso: str) -> str:
+    d = datetime.fromisoformat(iso)
+    return f"{d.month}/{d.day}"
+
+
+def closes_line(closes: list[dict[str, Any]] | None, now: datetime) -> str | None:
+    """「台股收盤價」 in the page context, from ``GET /meta/market-status``'s ``tw.closes`` (``forliosa.closes``): per
+    market whether the session's close is in, interim, or still awaited and when it is expected."""
+    from forliosa.closes import expect_update, window_text
+
+    if not closes:
+        return None
+
+    def expected(c: dict[str, Any]) -> str | None:
+        """The app's own words for the window (「預計今晚 8:30–11:45 更新」, 12-hour like the screen)."""
+        if not (c.get("expected_from") and c.get("expected_to")):
+            return None
+        text = window_text(datetime.fromisoformat(c["expected_from"]), datetime.fromisoformat(c["expected_to"]), now)
+        return expect_update(text) if text else None
+
+    parts = []
+    for c in closes:
+        label, day = _MARKET_LABELS.get(c["market"], c["market"]), _md(c["session"])
+        if c["stored"]:
+            interim = ""
+            if c["interim"]:
+                official = expected(c)
+                interim = ("（晚上先放的暫時資料：只有收盤價、沒有 ETF；官方檔案"
+                           f"{official or '還沒進來'}）")
+            parts.append(f"{label} {day} 的收盤價已進來{interim}")
+            continue
+        text = f"{label} {day} 的收盤價還沒公布"
+        if when := expected(c):
+            text += f"，{when}"
+        parts.append(text)
+    return "；".join(parts)
+
+
 def page_context(now: datetime, route: str | None, symbol: str | None, symbol_name: str | None,
-                 privacy: bool, moved: bool = False, deep: bool = False, economy: bool = False) -> str:
+                 privacy: bool, moved: bool = False, deep: bool = False, economy: bool = False,
+                 closes: list[dict[str, Any]] | None = None) -> str:
     kind = route_kind(route)
     page = ROUTE_LABELS[kind]
     if kind == "stock" and symbol:
@@ -295,11 +338,13 @@ def page_context(now: datetime, route: str | None, symbol: str | None, symbol_na
     us_open = ny.weekday() < 5 and time(9, 30) <= ny.time() < US_CLOSE
     last = last_us_session(now)
     us_line = f"{'盤中' if us_open else '休市中'}；最近一個收盤日 {last.month}/{last.day}（美東）"
+    tw_closes = closes_line(closes, now)
     return (
         "頁面情境（由 App 提供，不是使用者輸入）\n"
         f"- 現在時間：{now:%Y-%m-%d}（週{_WEEKDAYS[now.weekday()]}）{now:%H:%M} 台北\n"
         f"- 台股：{market}\n"
-        f"- 美股：{us_line}\n"
+        + (f"- 台股收盤價：{tw_closes}\n" if tw_closes else "")
+        + f"- 美股：{us_line}\n"
         f"- 使用者正在看：{page}\n"
         f"- 隱私模式：{privacy_line}"
         + (f"\n{MOVED_NOTE}" if moved else "")

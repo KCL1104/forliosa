@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import * as apiModule from "@/api"
 import { api } from "@/api"
-import type { Group, MarketStatus } from "@/api/types"
+import type { Group, MarketStatus, TwClose } from "@/api/types"
 import { kaiSize } from "@/ai/kai-size"
 import { RangeChips } from "@/components/segmented"
 import { textAction } from "@/components/text-action"
@@ -203,7 +203,11 @@ describe("資料來源與授權", () => {
     const quotes = await screen.findByRole("region", { name: "報價" }, T)
     expect(quotes.textContent).toContain("Forliosa 的股價都是收盤價，沒有盤中報價。")
     expect(quotes.textContent).toMatch(/收盤後.*公布/)
-    expect(quotes.textContent).toMatch(/當天晚上到隔天清晨/)
+    // 平常幾點更新（實測的時間）：證交所的下載網址開著時，上市下午就進來；上櫃晚上
+    const times = within(quotes).getByRole("list", { name: "收盤價平常什麼時候更新" })
+    expect(times.textContent).toContain("上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）；下午拿不到時晚上 8:30–11:45")
+    expect(times.textContent).toContain("上櫃：晚上 8:30–11:45，少數日子到半夜 1:30")
+    expect(quotes.textContent).toMatch(/還沒更新時，帳本與個股頁會寫預計幾點更新/)
     expect(quotes.textContent).toMatch(/盤中報價要付費授權，Forliosa 沒有買。/)
     const link = within(quotes).getByRole("link", { name: /基本市況報導/ })
     expect(link).toHaveAttribute("href", "https://mis.twse.com.tw/")
@@ -225,12 +229,14 @@ describe("資料來源與授權", () => {
     expect(twse).toHaveAttribute("aria-expanded", "true")
     expect(visible(statement)).toBe(true)
     const group = twse.closest("section")!
-    const dataset = within(group).getByRole("link", { name: /^上市個股日成交資訊/ })
+    // 同一份資料的兩個網址（OpenAPI、證交所在政府資料開放平臺登記的下載網址）：報讀時多唸網站，聽得出不同
+    const dataset = within(group).getByRole("link", { name: /^上市個股日成交資訊（openapi\.twse\.com\.tw，/ })
     expect(dataset).toHaveAttribute("href", "https://openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL")
     expect(dataset).toHaveAttribute("target", "_blank")
+    expect(within(group).getByRole("link", { name: /^上市個股日成交資訊（www\.twse\.com\.tw，/ })).toHaveAttribute("href", "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data")
     expect(document.body.textContent).not.toContain("資料集網址")
-    // 每個連結的文字都不一樣（是資料集的名稱）
-    const names = within(group).getAllByRole("link").map((a) => a.textContent)
+    // 每個連結報讀的名稱都不一樣（是資料集的名稱）
+    const names = within(group).getAllByRole("link").map((a) => a.getAttribute("aria-label") ?? a.textContent)
     expect(new Set(names).size).toBe(names.length)
     // 全部展開：每一個資料集的顯名聲明都在頁面上
     await user.click(screen.getByRole("button", { name: "全部展開" }))
@@ -255,6 +261,18 @@ describe("資料來源與授權", () => {
     expect(notUsed.textContent).not.toContain("美股報價")
     // 資料集：Databento 自己一組，顯名聲明照後端的原文
     expect(screen.getByRole("button", { name: /^Databento/ })).toHaveTextContent("1 個資料集")
+  })
+
+  it("證交所的下載網址關著（後端沒有列 twse-opendata）：上市寫晚上、晚的時候隔天清晨，不寫下午", async () => {
+    const get = api.getAttributions
+    vi.spyOn(api, "getAttributions").mockImplementation(async () => {
+      const a = await get()
+      return { ...a, datasets: a.datasets.filter((d) => !d.key.startsWith("twse-opendata/")) }
+    })
+    renderInRouter(<DataSourcesPage />)
+    const times = await screen.findByRole("list", { name: "收盤價平常什麼時候更新" }, T)
+    expect(times.textContent).toContain("上市：晚上 8:30–11:45，晚的時候隔天清晨 5:20–5:45")
+    expect(times.textContent).not.toContain("下午")
   })
 
   it("授權條款裡的網址只在分隔符號後面斷行（不用 break-all），條款文字還在", async () => {
@@ -353,7 +371,7 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(within(hero).getByText("11/12", { selector: "dt" })).toBeInTheDocument()
   })
 
-  it("收盤後、今天的收盤價還沒公布：一行說明，沒有連結；帳本「11/12 收盤・今天的還沒公布」", async () => {
+  it("收盤後、今天的收盤價還沒公布（舊版後端，沒有 closes）：一行說明，沒有連結；帳本「11/12 收盤・今天的還沒公布」", async () => {
     vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({}))
     vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-13T15:10:00+08:00"))
     renderApp("/stock/2330.TW")
@@ -362,7 +380,57 @@ describe("價格是收盤價（沒有盤中即時報價）", () => {
     expect(screen.getByText("11/12 漲跌")).toBeInTheDocument()
     cleanup()
     renderApp("/")
-    expect(await screen.findByText("11/12 收盤・今天的還沒公布", undefined, T)).toBeInTheDocument()
+    const label = await screen.findByText("11/12 收盤", undefined, T)
+    expect(label.parentElement!.textContent).toContain("11/12 收盤・今天的還沒公布")
+  })
+
+  /** 上市、上櫃的收盤價各自什麼時候進來（產品負責人 2026-11-16）：`tw.closes` 的時間窗 */
+  const closes = (o: { twse?: Partial<TwClose>; tpex?: Partial<TwClose> } = {}): TwClose[] => [
+    { market: "TWSE", session: "2026-11-13", stored: false, latest: "2026-11-12", interim: false, expected_from: "2026-11-13T14:00:00+08:00", expected_to: "2026-11-13T14:30:00+08:00", ...o.twse },
+    { market: "TPEX", session: "2026-11-13", stored: false, latest: "2026-11-12", interim: false, expected_from: "2026-11-13T20:30:00+08:00", expected_to: "2026-11-13T23:45:00+08:00", ...o.tpex },
+  ]
+
+  it("收盤後 13:40：個股頁寫這個市場預計幾點更新（上市下午、上櫃今晚）；帳本一行並列兩個市場", async () => {
+    vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ closes: closes() }))
+    vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-13T13:40:00+08:00"))
+    renderApp("/stock/2330.TW")
+    expect(await screen.findByText("今天的收盤價預計下午 2:00–2:30 更新", undefined, T)).toBeInTheDocument()
+    expect(screen.getByText("11/12 漲跌")).toBeInTheDocument()
+    cleanup()
+    renderApp("/stock/6488.TWO")
+    expect(await screen.findByText("今天的收盤價預計今晚 8:30–11:45 更新", undefined, T)).toBeInTheDocument()
+    cleanup()
+    renderApp("/")
+    const label = await screen.findByText("11/12 收盤", undefined, T)
+    await waitFor(() => expect(label.parentElement!.textContent).toContain("11/12 收盤・上市預計下午 2:30 前更新・上櫃預計今晚更新"))
+    expect(await screen.findByText("收盤價・11/12 漲跌", undefined, T)).toBeInTheDocument()
+  })
+
+  it("上市進來了、上櫃還沒：帳本日期分開寫、只說上櫃；「今日」不寫（每一檔是它自己那天的漲跌）", async () => {
+    vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ closes: closes({ twse: { stored: true, latest: "2026-11-13", expected_from: null, expected_to: null } }) }))
+    vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-13T15:00:00+08:00"))
+    const getHoldings = api.getHoldings
+    vi.spyOn(api, "getHoldings").mockImplementation(async (id) =>
+      (await getHoldings(id)).map((h) => ({ ...h, price_date: h.market === "TWSE" && h.price !== null ? "2026-11-13" : h.price_date })),
+    )
+    renderApp("/")
+    const label = await screen.findByText("上市 11/13・上櫃 11/12 收盤", undefined, T)
+    expect(label.parentElement!.textContent).toContain("上櫃預計今晚 8:30–11:45 更新")
+    const hero = label.closest("div")!
+    await waitFor(() => expect(within(hero).getByText("當日", { selector: "dt" })).toBeInTheDocument())
+    expect(hero.textContent).not.toMatch(/今日/)
+    expect(await screen.findByText("收盤價・當日漲跌", undefined, T)).toBeInTheDocument()
+  })
+
+  it("過了半夜還沒進來：說明不會不見，寫在等的是哪一天（11/13 的收盤價還沒公布，預計清晨 5:20–5:40 更新）", async () => {
+    const night = closes({
+      twse: { expected_from: "2026-11-14T05:20:00+08:00", expected_to: "2026-11-14T05:40:00+08:00" },
+      tpex: { stored: true, latest: "2026-11-13", expected_from: null, expected_to: null },
+    })
+    vi.spyOn(api, "getMarketStatus").mockResolvedValue(status({ date: "2026-11-14", is_trading_day: false, closes: night }))
+    vi.spyOn(apiModule, "marketNow").mockReturnValue(new Date("2026-11-14T01:30:00+08:00"))
+    renderApp("/stock/2330.TW")
+    expect(await screen.findByText("11/13 的收盤價還沒公布，預計清晨 5:20–5:40 更新", undefined, T)).toBeInTheDocument()
   })
 
   /**

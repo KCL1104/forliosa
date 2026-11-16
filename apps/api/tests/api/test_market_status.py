@@ -30,11 +30,17 @@ def at():
 
 
 def status(app) -> dict:
+    """The ``tw`` block without ``closes`` (where each market's close is: tests/test_same_day_closes.py), whose shape
+    is checked here."""
     r = TestClient(app).get(URL)  # no session
     assert r.status_code == 200, r.text
     body = r.json()
-    assert set(body) == {"tw"} and set(body["tw"]) == {"date", "is_trading_day", "is_open", "open", "close"}
+    assert set(body) == {"tw"} and set(body["tw"]) == {"date", "is_trading_day", "is_open", "open", "close", "closes"}
     assert (body["tw"]["open"], body["tw"]["close"]) == ("09:00", "13:30")
+    closes = body["tw"].pop("closes")
+    assert [c["market"] for c in closes] == ["TWSE", "TPEX"]
+    for c in closes:
+        assert set(c) == {"market", "session", "stored", "latest", "interim", "expected_from", "expected_to", "index"}
     return body["tw"]
 
 

@@ -7,6 +7,7 @@ import { useAiPanelOpen } from "@/ai/panel-open"
 import { useAi, usePendingCount } from "@/ai/store"
 import { Wordmark } from "@/components/brand"
 import { Kbd } from "@/components/ui/kbd"
+import { useCloseRefresh } from "@/hooks/use-close"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
 import { BriefingDot } from "@/ai/Briefing"
@@ -62,11 +63,18 @@ export function AppShell() {
       {!isDesktop && <Dock />}
       {!isDesktop && !readOnly && <AiScreen />}
       <CommandSearch />
+      <CloseRefresh />
       <TradeFormHost />
       <ReduceHost />
       {!readOnly && <ImportHost />}
     </div>
   )
+}
+
+/** 收盤價一進來就讓帳本、報價與市場頁重新讀（不跳通知）；單獨一個元件，市場狀態每分鐘更新時不重畫整個外殼 */
+function CloseRefresh() {
+  useCloseRefresh()
+  return null
 }
 
 function PrivacyButton({ size = "desktop" }: { size?: "desktop" | "mobile" }) {

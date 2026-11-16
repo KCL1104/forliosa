@@ -31,6 +31,9 @@ const ROWS: Row[] = [
   ["twse-openapi/board", "臺灣證券交易所", "上市公司董事、監察人持股餘額明細資料", "https://openapi.twse.com.tw/v1/opendata/t187ap11_L", "相關股票：關係企業（只用上市櫃公司擔任法人董事或大股東的列，不存個人資料）"],
   ["twse-openapi/esg_products", "臺灣證券交易所", "上市公司企業ESG資訊揭露彙總資料-產品品質與安全", "https://openapi.twse.com.tw/v1/opendata/t187ap46_L_14", "AI 公司簡介的官方資料（依產品類別之產品產量）"],
   ["twse-openapi/company", "臺灣證券交易所", "上市公司基本資料", "https://openapi.twse.com.tw/v1/opendata/t187ap03_L", "已發行股數、市值、產業別、上市日期；「關於」：總部縣市、網站、實收資本額、董事長、總經理、簽證會計師事務所、股務代理"],
+  // 產品負責人 2026-11-16：證交所在政府資料開放平臺登記的下載網址（11549、11555），上市收盤價當天下午就進來；隔天清晨 OpenAPI 的同一份資料覆蓋
+  ["twse-opendata/price", "臺灣證券交易所", "上市個股日成交資訊", "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data", "當天下午的上市收盤價、日線（隔天清晨由 OpenAPI 的同一份資料取代）"],
+  ["twse-opendata/index", "臺灣證券交易所", "每日收盤行情-大盤統計資訊", "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=open_data", "當天下午的加權指數與類股指數收盤（隔天清晨由 OpenAPI 的同一份資料取代）"],
   ["tpex-openapi/price", "證券櫃檯買賣中心", "上櫃股票行情", "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", "收盤價、日線、成交量"],
   ["tpex-openapi/valuation", "證券櫃檯買賣中心", "上櫃股票個股本益比、殖利率、股價淨值比", "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_peratio_analysis", "本益比、殖利率、股價淨值比"],
   ["tpex-openapi/reference", "證券櫃檯買賣中心", "上櫃股票行情", "https://www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes", "參考價、漲跌停（次一交易日）"],

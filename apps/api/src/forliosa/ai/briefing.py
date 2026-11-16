@@ -54,7 +54,7 @@ from forliosa.config import Settings, get_settings
 from forliosa.ids import new_id
 from forliosa.marketdata.base import market_of_symbol
 from forliosa.marketdata.service import MarketData
-from forliosa.models import AiBriefing, DatasetStatus, User, WatchlistItem
+from forliosa.models import AiBriefing, User, WatchlistItem
 from forliosa.services.ledger_io import preferences_of
 from forliosa.timeutil import TAIPEI, iso_taipei, now_utc, today_taipei, tw_trading_days
 
@@ -62,7 +62,6 @@ log = logging.getLogger(__name__)
 
 FEATURE = "briefing"
 TOOL_NAME = "report_briefing_points"
-PRICE_STATUS_KEYS = ("twse-openapi/price", "tpex-openapi/price")
 MAX_AGE_DAYS = 4  # a session older than this is not briefed any more (e.g. after a long outage)
 KEEP_DAYS = 30
 SHOW_SESSIONS = 2  # ``latest`` shows a briefing until two trading days have passed
@@ -137,15 +136,17 @@ class RunResult:
 
 # -- which day ------------------------------------------------------------------------------------------------------
 def briefing_day(db: Session, now: datetime | None = None) -> date | None:
-    """The latest finished session whose official closes are archived for every exchange we archive, or ``None``
-    while they are still awaited (the exchanges publish between the evening and the next early morning). Without
-    any archive at all (demo data) the latest finished session is used as it is."""
+    """The latest finished session whose official closes are archived for both exchanges, or ``None`` while they are
+    still awaited (TWSE's same-day file in the afternoon, else its OpenAPI the next morning; TPEx about 23:30 — the
+    interim evening closes do not count: ``forliosa.closes.official_close_dates``). Without any archive at all (demo
+    data) the latest finished session is used as it is."""
+    from forliosa.closes import official_close_dates
+
     day = market_summary.summary_day(now)
     today = (now or now_utc()).astimezone(TAIPEI).date()
     if (today - day).days > MAX_AGE_DAYS:
         return None
-    archived = [d for d in db.scalars(select(DatasetStatus.data_date).where(DatasetStatus.key.in_(PRICE_STATUS_KEYS)))
-                if d is not None]
+    archived = [d for d in official_close_dates(db).values() if d is not None]
     if archived and min(archived) < day:
         return None
     return day

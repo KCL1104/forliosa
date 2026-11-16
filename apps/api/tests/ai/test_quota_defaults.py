@@ -1,6 +1,6 @@
 """The deployment's AI quota (產品負責人 2026-11-15): free accounts 3 questions a day and about US$1 a month, members
-30 a day and about US$3; over the month's budget questions go on without web search (省錢模式) up to twice the
-budget."""
+30 a day and about US$8 (2026-11-16; US$3 before); over the month's budget questions go on without web search (省錢模式)
+up to twice the budget for free accounts, 1.25 times for members (2026-11-16)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from tests.ai.fake_anthropic import text
 
 DEFAULTS = ("AI_DAILY_MESSAGE_LIMIT", "AI_DEEP_SEARCH_COST", "AI_MONTHLY_COST_BUDGET_USD",
             "AI_MEMBER_DAILY_MESSAGE_LIMIT", "AI_MEMBER_MONTHLY_COST_BUDGET_USD", "AI_FREE_DEEP_SEARCH",
-            "AI_FREE_DAILY_BRIEFING")
+            "AI_FREE_DAILY_BRIEFING", "AI_ECONOMY_CAP_MULTIPLIER", "AI_MEMBER_ECONOMY_CAP_MULTIPLIER")
 
 
 def test_the_defaults(monkeypatch):
@@ -20,9 +20,9 @@ def test_the_defaults(monkeypatch):
     s = Settings(_env_file=None)
     assert (s.ai_daily_message_limit, s.ai_monthly_cost_budget_usd, s.ai_monthly_token_budget) == (3, 1.0, 3_000_000)
     assert (s.ai_member_daily_message_limit, s.ai_member_monthly_cost_budget_usd,
-            s.ai_member_monthly_token_budget) == (30, 3.0, 0)
+            s.ai_member_monthly_token_budget) == (30, 8.0, 0)
     assert (s.ai_free_deep_search, s.ai_free_daily_briefing) == (False, False)
-    assert (s.ai_deep_search_cost, s.ai_economy_cap_multiplier) == (3, 2.0)
+    assert (s.ai_deep_search_cost, s.ai_economy_cap_multiplier, s.ai_member_economy_cap_multiplier) == (3, 2.0, 1.25)
     assert store.deep_search_cost(s) == 3
 
 

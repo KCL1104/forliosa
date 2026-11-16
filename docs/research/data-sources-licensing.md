@@ -346,8 +346,9 @@
 | shioaji-data 官方欄位 | ✅ 有條件 | 標示來源；MOPS 回補的歷史部分，建議連同證交所詢問信一併確認 |
 | SEC EDGAR | ✅ 可以 | ≤10 次／秒；User-Agent 寫明身分與聯絡信箱 |
 | FRED | ⚠️ 有條件 | 只用公有領域序列；不快取、不整批下載 |
+| 證交所網站上 data.gov.tw 登記的下載網址（11549 `STOCK_DAY_ALL?response=open_data`、11555 `MI_INDEX?response=open_data`） | ✅ 有條件（2026-11-16 補） | 政府資料開放授權；證交所 2025-09-17 在平臺回覆「本資料集可以使用自動程式進行下載」。只限登記的完整網址、不帶日期參數、低頻、被擋就停。產品負責人 2026-11-16 對「不抓證交所網站」開了這個例外（CLAUDE.md）。見 [`same-day-close.md`](same-day-close.md) |
 | 證交所網站（T86、MI_QFIIS、歷史查詢） | ❓ 先問 | 取得書面同意或購買 E-Shop |
-| 櫃買網站（歷史查詢） | ❓ 先問 | 同上 |
+| 櫃買網站（歷史查詢；data.gov.tw 11370 登記的下載網址也是） | ❓ 先問 | 同上；11370 沒找到櫃買明確同意程式下載的回覆（[`same-day-close.md`](same-day-close.md) §3） |
 | 期交所網站 | ❓ 先問 | |
 | MOPS 網站／新版 JSON API | ❓ 先問 | 能用 OpenAPI 的一律用 OpenAPI |
 | 集保股權分散查詢網站（一年歷史） | ❓ 先問 | |

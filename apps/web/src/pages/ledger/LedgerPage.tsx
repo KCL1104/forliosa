@@ -251,7 +251,8 @@ function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView 
   const holdings = useHoldings()
   const trend = useTrend()
   const privacy = usePrefs((s) => s.privacyMode)
-  // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（盤中、今天的還沒公布時多半句說明），「今日」只在收盤價是今天的時候寫。
+  // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（上市、上櫃日期不同時分開寫）；盤中多半句「盤中不更新」，
+  // 收盤價還沒進來時多一句預計幾點更新。「今日」只在每個市場的收盤價都是今天的時候寫。
   // 只有美股有價格時是紐約的交易日（「11/13 收盤（美東）」「11/13」），不套台股的說明
   const close = useLedgerClose()
   if (!summary) return <HeroSkeleton />
@@ -268,6 +269,16 @@ function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView 
           <b className="text-base font-medium text-ink">總資產</b>
           <span className="num whitespace-nowrap">{close.label}</span>
           {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
+          {/* 在等的收盤價預計幾點進來（只在需要時）：桌面接在日期後面（「11/12 收盤・今天的預計下午 2:00–2:30 更新」），
+              手機自己一行，日期那一行不會被擠到換行 */}
+          {close.note && (
+            <span className="num whitespace-nowrap max-sm:basis-full sm:-ml-2.5">
+              <span aria-hidden className="max-sm:hidden">
+                ・
+              </span>
+              {close.note}
+            </span>
+          )}
         </p>
         <BigTotal value={summary.market_value} />
         <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3.5 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2">

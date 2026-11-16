@@ -54,7 +54,7 @@ _COMMON_STOCK = re.compile(r"^(?!00)\d{4}$")
 # not a ranking entry (the daily limit is ±10 %).
 MAX_MOVE = Decimal("0.11")
 
-_movers_cache: dict[tuple[date, str], dict[str, Any]] = {}
+_movers_cache: dict[tuple[date, str, bool], dict[str, Any]] = {}
 _movers_lock = threading.Lock()
 
 
@@ -133,7 +133,9 @@ def _fx_item(db: Session, md: MarketData) -> tuple[dict[str, Any], str] | None:
 
 def _indices(db: Session, md: MarketData) -> tuple[list[dict[str, Any]], list[str], date | None]:
     taiex = _index_rows(db, md, TAIEX)
-    found = [_index_item("taiex", "加權指數", taiex, "twse-openapi/index"),
+    # the afternoon of a session the newest TAIEX comes from TWSE's same-day file (forliosa.closes); credited as such
+    taiex_dataset = "twse-opendata/index" if taiex and taiex[-1].source == "twse-opendata" else "twse-openapi/index"
+    found = [_index_item("taiex", "加權指數", taiex, taiex_dataset),
              _index_item("tpex", TPEX_INDEX, _index_rows(db, md, TPEX_INDEX), "tpex-openapi/index"),
              _futures_item(db, md), _fx_item(db, md)]
     items = [f for f in found if f is not None]
@@ -161,13 +163,29 @@ def _sectors(db: Session, md: MarketData, day: date | None) -> dict[str, Any] | 
 
 # -- movers -----------------------------------------------------------------------------------------------------
 def _ranking_day(db: Session, md: MarketData) -> date | None:
-    """The latest day both exchanges' closes are stored for (``dataset_status``); without those rows, the newest
-    official day in ``prices_daily``."""
-    days = [d for d in db.scalars(select(DatasetStatus.data_date).where(
-        DatasetStatus.key.in_(("twse-openapi/price", "tpex-openapi/price")))) if d is not None]
+    """The latest day both exchanges' official closes are stored for (``forliosa.closes.official_close_dates``: TWSE's
+    OpenAPI or its same-day file, TPEx's OpenAPI — never the interim evening closes, which carry no volume); without
+    those rows, the newest official day in ``prices_daily``."""
+    from forliosa.closes import official_close_dates
+
+    days = [d for d in official_close_dates(db).values() if d is not None]
     if len(days) == 2:
         return min(days)
     return db.scalar(_tw_prices(select(func.max(PriceDaily.date)), md))
+
+
+def _twse_final(db: Session) -> date | None:
+    """The newest TWSE session from the OpenAPI (final). A ranking of a newer day was built from the same-day file."""
+    return db.scalar(select(DatasetStatus.data_date).where(DatasetStatus.key == "twse-openapi/price"))
+
+
+def _twse_price_dataset(db: Session, day: date) -> str:
+    """Whose listed closes a ranking of ``day`` used: TWSE's same-day file until the OpenAPI's file of the day is in."""
+    final = _twse_final(db)
+    same_day = db.scalar(select(DatasetStatus.data_date).where(DatasetStatus.key == "twse-opendata/price"))
+    if (final is None or final < day) and same_day is not None and same_day >= day:
+        return "twse-opendata/price"
+    return "twse-openapi/price"
 
 
 def _entry(md: MarketData, symbol: str, close: Decimal, base: Decimal, volume: int | None) -> dict[str, Any]:
@@ -182,8 +200,12 @@ def _movers(db: Session, md: MarketData) -> dict[str, Any] | None:
     day = _ranking_day(db, md)
     if day is None:
         return None
+    # Keyed on whether TWSE's rows of the day are final too: the OpenAPI's file replaces the same-day file's the next
+    # morning (with the after-hours volume), and the ranking is built again then.
+    final = _twse_final(db)
+    key = (day, md.policy, final is not None and final >= day)
     with _movers_lock:
-        hit = _movers_cache.get((day, md.policy))
+        hit = _movers_cache.get(key)
     if hit is not None:
         return hit
     prev = db.scalar(_tw_prices(select(func.max(PriceDaily.date)).where(PriceDaily.date < day), md))
@@ -220,7 +242,7 @@ def _movers(db: Session, md: MarketData) -> dict[str, Any] | None:
     if out is not None:
         with _movers_lock:
             _movers_cache.clear()  # one day at a time
-            _movers_cache[(day, md.policy)] = out
+            _movers_cache[key] = out
     return out
 
 
@@ -303,7 +325,7 @@ def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[s
     summary = market_summary.latest(db, now)
     sources = [*index_sources]
     if movers:
-        sources += ["twse-openapi/price", "tpex-openapi/price"]
+        sources += [_twse_price_dataset(db, movers["date"]), "tpex-openapi/price"]
     if announcements:
         sources += announcements.pop("sources")
     if us and us["items"]:

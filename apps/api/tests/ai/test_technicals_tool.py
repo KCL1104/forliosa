@@ -268,7 +268,8 @@ def test_system_prompt_has_the_technical_and_intraday_price_rules():
         "price_source 填 user", "回答時稱為「你提供的價格」", "不是查證過的資料",
         "price_source 填 web", "price_time 填來源寫的時間", "一定要引用那個來源", "這個價格可能已經過時",
         "不可稱為「即時」或官方報價", "不要用 web_fetch 讀證交所網站或 MIS",
-        "當天的收盤價在收盤後的晚上才公布", "寫「已收盤」但今天的收盤價還沒公布",
+        "當天的收盤價收盤後才陸續進來，上市和上櫃的時間不同", "照「頁面情境」的「台股收盤價」一行寫",
+        "不要自己推估時間", "寫「已收盤」但今天的收盤價還沒公布",
         "或寫「休市日」而上一個交易日的收盤價還沒有", "並說明更新的收盤價還沒公布",
         "不可以只回一句「查不到今天的股價」就結束", "以及這一檔今天的消息",
         "用 get_related_stocks 查同產業與相關的個股", "今天的類股表現、相關個股的消息與加權指數的漲跌",
@@ -278,9 +279,31 @@ def test_system_prompt_has_the_technical_and_intraday_price_rules():
         "或使用者在對話中自己提供的數字（要標明是使用者提供的）",
     ):
         assert phrase in CHAT_SYSTEM, phrase
+    assert "晚上才公布" not in CHAT_SYSTEM  # wrong for listed stocks (the afternoon, or the next morning)
     # the standing rules are still there
     for phrase in ("只做分析與整理，不保證報酬，不下買進或賣出的指令，也不給你自己的目標價", "不要憑記憶或推測寫數字",
                    "網路搜尋不是行情來源：股價、成交量、財報數字以工具資料為準", "只寫有根據的事實"):
         assert phrase in CHAT_SYSTEM, phrase
     assert CHAT_SYSTEM.index("## 資料從哪裡來") < CHAT_SYSTEM.index("## 技術分析與盤中價格") \
         < CHAT_SYSTEM.index("## 圖表") < CHAT_SYSTEM.index("## 記帳一律先起草")
+
+
+def test_an_interim_evening_close_makes_no_gap_or_volume(tech, engine):
+    """2026-11-16 review: the evening's interim close (forliosa.closes, close only) is charted with open = high = low =
+    close and no volume; the indicators reported a made-up opening gap from it. Its open / high / low / volume are
+    unknown here instead, and a note says so."""
+    with Session(engine) as db:
+        db.add(PriceDaily(symbol="2330.TW", date=TODAY, close=D(str(round(LAST * 1.05, 1))), source="shioaji-data"))
+        db.commit()
+    out, res = run(tech, symbol="2330")
+    block = res["as_of_close"]
+    assert not out.is_error and block["date"] == TODAY.isoformat()
+    assert "open_gap_pct" not in block and "gap" not in block and "volume" not in block
+    assert any("晚上先進來的收盤價，只有收盤價" in n for n in res["notes"])
+    # an official close of the same height has its gap
+    with Session(engine) as db:
+        row = db.get(PriceDaily, ("2330.TW", TODAY))
+        row.open = row.high = row.low = row.close
+        row.volume, row.source = 30_000_000, "twse-openapi"
+        db.commit()
+    assert run(tech, symbol="2330")[1]["as_of_close"]["gap"] == "up"

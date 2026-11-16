@@ -437,8 +437,20 @@ class ChatTurn:
     def _context(self) -> str:
         route, sym, name, privacy = self._page
         moved = self.recap is not None and self.history is self.recap
-        return page_context(self.now_fn(), route, sym, name, privacy, moved=moved, deep=self.deep,
-                            economy=self.economy)
+        now = self.now_fn()
+        return page_context(now, route, sym, name, privacy, moved=moved, deep=self.deep, economy=self.economy,
+                            closes=self._tw_closes(now))
+
+    def _tw_closes(self, now: datetime) -> list[dict[str, Any]] | None:
+        """Where each Taiwan market's close is (``forliosa.closes``), for the page context; best effort."""
+        from forliosa.closes import tw_closes
+
+        try:
+            return tw_closes(self.db, now, self.settings)
+        except Exception as exc:  # never fail a turn over this line
+            log.warning("page context: closes not read: %s", exc)
+            self.db.rollback()
+            return None
 
     # -- key slots -------------------------------------------------------------------------------------------
     def _use_recap(self, needed: bool) -> None:

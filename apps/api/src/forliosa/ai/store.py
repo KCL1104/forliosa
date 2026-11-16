@@ -406,7 +406,8 @@ def month_budget_left(db: Session, user: User, settings: Settings, now: datetime
 def month_mode(db: Session, user: User, settings: Settings, now: datetime | None = None,
                plan: Plan | None = None) -> MonthMode:
     """``normal``: an ordinary turn still fits in the month's US$ budget. ``economy`` (省錢模式): it does not, but
-    questions go on without Claude's web search until spending reaches ``AI_ECONOMY_CAP_MULTIPLIER`` × the budget.
+    questions go on without Claude's web search until spending reaches the plan's ``economy_cap_multiplier`` × the
+    budget (``AI_ECONOMY_CAP_MULTIPLIER`` for free accounts, ``AI_MEMBER_ECONOMY_CAP_MULTIPLIER`` for members).
     ``stopped``: that is spent too, or the plan's token budget is."""
     plan = plan or plans.plan_of(user, settings)
     tokens, cost = month_usage(db, user, now)
@@ -417,9 +418,9 @@ def month_mode(db: Session, user: User, settings: Settings, now: datetime | None
     budget = Decimal(str(plan.monthly_cost_budget_usd))
     if budget - cost >= TURN_ESTIMATE_USD:
         return "normal"
-    cap = budget * Decimal(str(settings.ai_economy_cap_multiplier))
-    return "economy" if settings.ai_economy_cap_multiplier > 1 and cap - cost >= ECONOMY_TURN_ESTIMATE_USD \
-        else "stopped"
+    multiplier = plan.economy_cap_multiplier
+    cap = budget * Decimal(str(multiplier))
+    return "economy" if multiplier > 1 and cap - cost >= ECONOMY_TURN_ESTIMATE_USD else "stopped"
 
 
 MONTH_STOPPED = "這個月的 AI 用量已達上限，下個月 1 日會重新計算。"

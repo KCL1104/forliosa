@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { MarketStatus } from "@/api/types"
 import { mockMarketNow, mockMarketStatus } from "@/api/mock/market-status"
-import { asOfLabel, closeDay, closeLabel, closeNote, closeState, dayWord, ledgerAsOf, ledgerUsCloseDay, twseLiveQuoteUrl, withDayWord } from "../as-of"
+import { asOfLabel, closeDay, closeLabel, closeLine, closeNote, closeState, dayWord, ledgerUsCloseDay, twseLiveQuoteUrl, withDayWord } from "../as-of"
 
 /**
  * 收盤價的標示（api-contract「收盤價的標示與盤中狀態」）：沒有盤中即時報價，
@@ -62,9 +62,10 @@ describe("closeState：盤中／收盤後還沒公布／其他", () => {
     expect(closeDay("2026-11-12T16:30:00Z")).toBe("2026-11-13")
   })
 
-  it("mock 的三個情境（?market=closed|open|pending）和它的時鐘對得起來", () => {
-    for (const [flag, state] of [["closed", "settled"], ["open", "open"], ["pending", "pending"]] as const) {
-      expect(closeState(mockMarketStatus(flag).tw, THU_CLOSE, mockMarketNow(flag))).toBe(state)
+  it("mock 的情境（?market=closed|open|pending|evening|night）和它的時鐘對得起來", () => {
+    for (const [flag, state] of [["closed", "settled"], ["open", "open"], ["pending", "pending"], ["evening", "pending"], ["night", "pending"]] as const) {
+      expect(closeState(mockMarketStatus(flag).tw, THU_CLOSE, mockMarketNow(flag), "TWSE")).toBe(state)
+      expect(closeState(mockMarketStatus(flag).tw, THU_CLOSE, mockMarketNow(flag), "TPEX")).toBe(state)
     }
   })
 })
@@ -80,11 +81,12 @@ describe("標示的文字", () => {
     expect(closeNote("open", null)).toBeNull()
   })
 
-  it("帳本主數字旁的三種寫法", () => {
-    expect(ledgerAsOf("open", THU_CLOSE)).toBe("11/12 收盤・盤中不更新")
-    expect(ledgerAsOf("pending", THU_CLOSE)).toBe("11/12 收盤・今天的還沒公布")
-    expect(ledgerAsOf("settled", "2026-11-13T13:30:00+08:00")).toBe("11/13 收盤")
-    expect(ledgerAsOf("settled", null)).toBe("")
+  it("帳本主數字旁的寫法（舊版後端沒有 closes）：盤中、還沒公布、最新", () => {
+    const line = (m: MarketStatus["tw"], asOf: string | null, now: Date) => closeLine(m, [], asOf, now, m.date)
+    expect(line(tw("2026-11-13", { is_open: true }), THU_CLOSE, at("2026-11-13", "10:00"))).toEqual({ label: "11/12 收盤・盤中不更新", note: null, day: "11/12" })
+    expect(line(tw("2026-11-13"), THU_CLOSE, at("2026-11-13", "15:00"))).toEqual({ label: "11/12 收盤", note: "今天的還沒公布", day: "11/12" })
+    expect(line(tw("2026-11-13"), "2026-11-13T13:30:00+08:00", at("2026-11-13", "20:00"))).toEqual({ label: "11/13 收盤", note: null, day: "今日" })
+    expect(line(tw("2026-11-13"), null, at("2026-11-13", "20:00")).label).toBe("")
   })
 
   it("「今日」只在收盤價是今天的時候寫，否則寫那個日期", () => {
@@ -96,6 +98,8 @@ describe("標示的文字", () => {
     expect(withDayWord("今日損益", "11/12")).toBe("11/12 損益")
     expect(withDayWord("今日", "11/12")).toBe("11/12")
     expect(withDayWord("收盤價", "11/12")).toBe("收盤價")
+    // 上市、上櫃的日期不同（帳本）：「當日漲跌」
+    expect(withDayWord("今日漲跌", "當日")).toBe("當日漲跌")
   })
 
   it("證交所的連結只是網址（帶代號；上市 tse、上櫃 otc），不是 API", () => {
@@ -109,7 +113,8 @@ describe("標示的文字", () => {
     expect(asOfLabel("2026-11-12T10:42:00+08:00")).toBe("11/12 10:42 收盤")
     expect(asOfLabel("2026-11-12T05:00:00+08:00")).toBe("11/12 05:00 收盤")
     expect(asOfLabel(null)).toBe("")
-    for (const text of [closeLabel(THU_CLOSE), closeNote("open", THU_CLOSE), closeNote("pending", THU_CLOSE), ledgerAsOf("open", THU_CLOSE), ledgerAsOf("pending", THU_CLOSE)]) {
+    const open = closeLine(tw("2026-11-13", { is_open: true }), [], THU_CLOSE, at("2026-11-13", "10:00"), "2026-11-13")
+    for (const text of [closeLabel(THU_CLOSE), closeNote("open", THU_CLOSE), closeNote("pending", THU_CLOSE), open.label]) {
       expect(text).not.toMatch(/延遲|即時/)
     }
   })

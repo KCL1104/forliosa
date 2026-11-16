@@ -1053,9 +1053,9 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `AI_DAILY_MESSAGE_LIMIT` | 3 | 免費帳號每天（台北日）提問數，0＝不限（產品負責人 2026-11-15；原本 50）。會員見 `AI_MEMBER_*`（`forliosa.plans`） |
 | `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
 | `AI_MONTHLY_COST_BUDGET_USD` | 1 | 免費帳號每月（台北月）估計花費上限（美元：對話、法人觀點、收盤簡報；共用的工作不算到任何人），0＝不限（產品負責人 2026-11-15：從 US$2 降到 US$1）。一題要正常開始，得剩得下它的一般花費（一般提問 US$0.05、深度搜尋 US$0.15，`store.TURN_ESTIMATE_USD`）；剩不夠時進入**省錢模式**（`store.month_mode`）：提問照常，但這一題沒有 `web_search`／`web_fetch`（page context 多一行說明），深度搜尋、法人觀點、收盤簡報 429 `ai_monthly_budget`；`/ai/usage` 的 `economy` 為 true |
-| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、3、0 | 會員（`users.plan = "member"` 到 `plan_until`；站方管理員也算）每天的題數、每月花費上限、每月 token（0＝不限） |
+| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、8、0 | 會員（`users.plan = "member"` 到 `plan_until`；站方管理員也算）每天的題數、每月花費上限、每月 token（0＝不限）。每月花費上限 2026-11-16 從 3 改成 8（產品負責人） |
 | `AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` | `false`、`false` | 免費帳號也能用深度搜尋／收盤簡報（個人部署用）；預設只給會員：免費帳號 `mode: "deep"` → 403 `members_only`，打開收盤簡報 → 403 `members_only` |
-| `AI_ECONOMY_CAP_MULTIPLIER` | 2 | 省錢模式一直到這個月花到上限的幾倍才完全停（429 `ai_monthly_budget`，`month_budget_reached` true）；1＝到上限直接停。省錢模式第一次在舊對話裡用時，工具清單和之前不同，回放的 thinking 會被拒一次，這一題改從純文字摘要接下去（`_THINKING_REJECTED`，和換金鑰槽同一條路） |
+| `AI_ECONOMY_CAP_MULTIPLIER`、`AI_MEMBER_ECONOMY_CAP_MULTIPLIER` | 2、1.25 | 省錢模式一直到這個月花到上限的幾倍才完全停（前一個是免費帳號的，後一個是會員的：產品負責人 2026-11-16，`plans.Plan.economy_cap_multiplier`、`store.month_mode`）（429 `ai_monthly_budget`，`month_budget_reached` true）；1＝到上限直接停。省錢模式第一次在舊對話裡用時，工具清單和之前不同，回放的 thinking 會被拒一次，這一題改從純文字摘要接下去（`_THINKING_REJECTED`，和換金鑰槽同一條路） |
 | `AI_THREAD_MAX_CONTEXT_TOKENS` | 90,000 | 一段對話的提示超過這個大小就要求開新對話（Haiku 5.5 提示超過 10 萬 token 價格變 5 倍） |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、5 | 每輪最多 5 次搜尋（2026-11-16 從 3 提高：「為什麼漲跌」要查價格、大盤與公司消息三種） |
 | `AI_WEB_SEARCH_ALLOWED_DOMAINS` | 空（**不限網域**，產品負責人決定） | 逗號分隔；`recommended`＝內建的台灣財經媒體＋官方網域清單，`official`＝只有官方。預設由模型自己判斷何時搜尋、用哪些來源（只限財經資訊，見「範圍」） |
@@ -1644,7 +1644,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 ### 收盤價公布偵測（worker 的 `close_watch`，`archive.py`：`close_watch_day`、`ClosePublication`、`close_archived`）
 
 - **時間**：交易日 13:35 起到隔天 08:30（不管隔天是不是交易日），每 15 分鐘一次；非交易日的下午與晚上、每天 08:30–13:35 都不做。
-  交易日同樣依官方行事曆。
+  交易日同樣依官方行事曆。（2026-11-16 起改成看到**下一個交易日** 08:30，週末與連假照看，見「2026-11-16 台股當天收盤價提早進來」。）
 - **問法**：對兩個收盤檔——證交所 `openapi.twse.com.tw/v1/exchangeReport/STOCK_DAY_ALL`、櫃買
   `www.tpex.org.tw/openapi/v1/tpex_mainboard_daily_close_quotes`（就是存檔本來在抓的那兩個檔）——各送一個**條件式請求，而且只要前 1,024 位元組**
   （`If-None-Match`／`If-Modified-Since`＋`Range: bytes=0-1023`，`Accept-Encoding: identity`；`HttpFetcher.probe`）。
@@ -1672,6 +1672,8 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 
 1. **14:35 的 `after_close_refresh` 與 14:40 的存檔現在大多拿不到當天收盤**（交易所晚上到清晨才公布，只觀察過一天）。這一版都保留；
    建議上線觀察一兩週 worker 記錄裡 `close watch: … has published` 的時間，再決定要不要拿掉 14:35／23:45 那兩次。
+   **2026-11-16 更新**：量到了——證交所 OpenAPI 每天清晨 05:20–05:28 整批更新一次（21 個端點），櫃買個股收盤約 23:30、櫃買指數 14:00
+   （所以 14:40 存得到當天的櫃買指數）。上市當天的收盤改由證交所的下載檔在下午進來（`twse_sameday_close`）。14:35、14:40 照舊保留（待決定事項 N-2 的 A）。
 2. **公布之後跑的是整個市場群組**（上市 12 個存檔工作、上櫃 8 個，每個工作 1–5 個請求），不是只抓收盤檔。好處是本益比、參考價、公告同時更新，
    代價是每個市場每天多一輪請求（都受每主機間隔限制）。建議維持。
 
@@ -1902,7 +1904,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 ### 查不到當天的價格（`ai/prompts.py`，`CHAT_SYSTEM`「技術分析與盤中價格」）
 
-原因是官方收盤價在收盤後的晚上才公布，工具最新的收盤是前一個交易日。原本的規則只寫「盤中」；現在涵蓋三種情況：
+原因是官方收盤價在收盤後的晚上才公布，工具最新的收盤是前一個交易日（2026-11-16 更正：上市原本是隔天清晨，現在多半下午就進來；時間照頁面情境的「台股收盤價」一行，見「2026-11-16 台股當天收盤價提早進來」）。原本的規則只寫「盤中」；現在涵蓋三種情況：
 盤中、已收盤但今天的收盤價還沒公布、休市日而上一個交易日的收盤價還沒有。處理順序：
 
 1. 先寫最新的官方收盤價與日期，並說明更新的收盤價還沒公布。
@@ -2387,3 +2389,119 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 3. **瀏覽器裡的 pdf.js 解密與塗黑還沒在真的瀏覽器裡實測**；伺服器上同樣的做法（pikepdf 解密、pypdfium2 畫圖與塗黑）用合成檔測過，可以當備案——但那樣密碼就會送到伺服器，隱私權政策要跟著改。
 4. **真的對帳單**：準確度、塗黑要認的頁首欄位、退佣與定期定額的寫法、複委託的幣別欄位、哪幾家的 PDF 文字層是壞的——都要負責人用自己的對帳單試過才知道。
 5. **Anthropic 的保存規定**：API 文件說對話內容預設不保存、被安全機制標記的最多保存 2 年；商用條款與隱私中心的頁面被沙盒擋住，沒能核對（`docs/legal/README.md` (d) 第 20 點）。
+
+## 2026-11-16 台股當天收盤價提早進來、預計更新時間（`forliosa.closes`）
+
+產品負責人 2026-11-16：開證交所下載網址的窄例外（CLAUDE.md）、「不用換來源也該修的地方」照建議、shioaji-data 晚上的收盤先放進來、
+不用 Yahoo、**App 裡要寫出預計更新時間**（研究：[`docs/research/same-day-close.md`](../../docs/research/same-day-close.md)；量到的時間也寫在 `closes.py` 開頭）。
+合約：`docs/api-contract.md`「台股收盤價什麼時候進來（2026-11-16）」；產品：`PRODUCT.md`「台股收盤價什麼時候進來」；畫面怎麼寫：`DESIGN.md` Copy〈預計更新的時間〉；
+決定的紀錄：`docs/pending-decisions.md`「2026-11-16 台股當天收盤價」。不寄信給證交所或櫃買（產品負責人）；櫃買網站的下載網址不在例外裡，沒有抓。
+
+### 合約：`GET /meta/market-status` 的 `tw.closes`（新增欄位，舊欄位不變）
+
+```json
+{"market": "TWSE", "session": "2026-11-16", "stored": false, "latest": "2026-11-13", "interim": false,
+ "expected_from": "2026-11-16T14:00:00+08:00", "expected_to": "2026-11-16T14:30:00+08:00"}
+```
+
+- 一定兩筆，先 `TWSE` 再 `TPEX`。`session`：收盤時間（13:30）已經過了的最近一個交易日——過了半夜還是那一天，週末是週五。
+- `stored`：那一天的收盤已經存進來（官方檔案、證交所當天的下載檔，或晚上的暫時資料都算）。`latest`：這個市場存進來的最新一天。
+- `interim`：最新那一天只有 shioaji-data 晚上的暫時收盤價（只有收盤價），官方檔案還沒進來。
+- `expected_from`／`expected_to`（台北時間 ISO-8601）：還沒存進來時，下一個預計進來的時段；已存進來是 null。現在在某個時段裡就是那個時段；
+  時段過了還沒進來就換下一個；全部過了是 null（不亂承諾）。時段只算有打開的來源（`TWSE_OPENDATA_CLOSE`、`SHIOAJI_EVENING_CLOSE`；
+  當天被證交所擋了，下午那段也不算）：
+
+| 市場 | 來源 | 時段（台北） | 依據 |
+|---|---|---|---|
+| 上市 | 證交所下載檔 | 當天 14:00–14:30 | 證交所說約 13:50；13:45 起每 10 分鐘看一次 |
+| 上市、上櫃 | shioaji-data 晚上的檔 | 當天 20:30–23:45、隔天 00:00–01:30 | 10/15–11/13 共 19 天：16 天 20:22–23:39，3 天 00:05–01:29 |
+| 上櫃 | 櫃買 OpenAPI | 當天 23:15–23:45（和上一段重疊時合併成 20:30–23:45） | 約 23:30，收盤監看每 15 分鐘 |
+| 上市 | 證交所 OpenAPI | 隔天 05:20–05:45 | 每天清晨批次 05:20–05:28，收盤監看每 15 分鐘 |
+
+### 證交所下載檔（`marketdata/twse_opendata.py`、`closes.TwseSameDay`）
+
+- 白名單：`marketdata/http.py` 的 `ALLOWED_EXACT_URLS` 只有兩個完整網址，必須一字不差、不能帶 `params`；同一主機的其他路徑、
+  其他 `response=`、`&date=…` 都拒絕。不跟轉址（307 等於被擋）；User-Agent 照舊誠實標示；不重試（`retries=0`）。
+- 2026-11-16 15:00 實際下載一次的格式：`text/csv;charset=utf-8`、沒有 BOM、每個值都有引號；
+  `Content-Disposition: attachment; filename="STOCK_DAY_ALL_20261116.csv"`（大盤統計是 `MI_INDEX_IND_20261116.csv`）。
+  欄位和 OpenAPI 一樣、只是中文名稱（`日期,證券代號,證券名稱,成交股數,成交金額,開盤價,最高價,最低價,收盤價,漲跌價差,成交筆數`；
+  `日期,指數/報酬指數,收盤指數,漲跌(+/-),漲跌點數,漲跌百分比(%),特殊處理註記`），換成 OpenAPI 的欄位名後用同一個解析器。
+  沒成交的證券價格欄是空的；下午那份有幾個報酬指數還沒有值，整列只有名稱（沒有日期，略過）。fixture：`tests/marketdata/fixtures/*open_data_live_20261116.csv`。
+- **日期規則**：每一列都有民國日期，全部要一樣；有檔名時檔名的日期也要一樣；不一樣就整份不存。日期要等於今天（輪詢的那一天）才存；
+  比今天早＝還沒公布，下次再看；比今天晚＝不存並記警告。另外，50 檔以上有成交的股票收盤價全部和上一個交易日存的一樣時（不比成交量），
+  當成舊檔改了日期，不存。時鐘從來不決定資料日期。
+- 輪詢：交易日 13:45–18:00；工作每分鐘檢查一次，但上次請求時間（`dataset_status` 的 `twse-opendata/poll`）不到 10 分鐘就不送，
+  重啟也一樣。個股和大盤都存進來就停。被擋（3xx、403、404、429……任何 `HttpStatusError`）寫 `twse-opendata/refused`＝那一天，
+  當天不再送（重啟也記得），隔一個交易日再看。5xx 或連不上：10 分鐘後再看。
+- 存檔：`prices_daily` 與 `index_daily` 的 `source = 'twse-opendata'`（`datapolicy`：`twse-opendata/price` 11549、
+  `twse-opendata/index` 11555，政府資料開放授權條款，可商用）；狀態 `twse-opendata/price`、`twse-opendata/index`。
+  不會蓋掉 OpenAPI 的列；隔天清晨 OpenAPI 的存檔照舊更新每一欄（`source` 也換成 `twse-openapi`），所以整列乾淨換掉。
+  下午那份的成交量可能還沒算盤後、零股、鉅額（未證實），收盤價不變。存進來後跑 `after_close_refresh`。收盤監看照舊等 OpenAPI 的檔。
+
+### 晚上的暫時收盤價（`closes.EveningCloses`）
+
+- 交易日 20:30 到隔天 02:00 每 15 分鐘：還沒有那一天收盤的市場（官方、下載檔、暫時資料都沒有）才看。
+  `raw.githubusercontent.com/…/v1/tw/market/daily.json` 開頭就是 `{"as_of":{"tpex":…,"twse":…}`：先用條件式請求讀前 512 bytes
+  （沒變是 304），那個市場的 `as_of` 變成那一天才下載整個檔。
+- 只存「日期就是那一天」的列，代號只對應最近三週有官方收盤的股票（`.TW`／`.TWO` 從那裡來，認不得的代號不猜）。
+  只有收盤價（開高低、成交量是 null），`source = 'shioaji-data'`；狀態 `shioaji-data/interim_twse`、`shioaji-data/interim_tpex`。
+  不會蓋掉官方的列（OpenAPI 或證交所下載檔）；官方的存檔會蓋掉它。
+- 走勢圖遇到這種列，開高低用收盤價、成交量是 0（官方檔案進來就換掉）。
+
+### 誰等官方收盤（暫時資料不算）
+
+- 每日收盤簡報（`ai/briefing.briefing_day`）與市場頁的排行（`services/market_overview._ranking_day`）改看
+  `closes.official_close_dates`：上市是 OpenAPI 或下載檔，上櫃是 OpenAPI。市場頁排行用到下載檔時來源列「twse-opendata/price」；
+  排行快取另外記上市是不是已經換成 OpenAPI 的檔，換了就重算。加權指數用到下載檔時來源列「twse-opendata/index」。
+- 收盤簡報：收盤監看或下載檔存進來後，兩個市場的官方收盤都到了就馬上跑（大多是 23:35 左右，以前要等 06:10）；固定時段照舊當備援。
+- ETF 折溢價（`services/etf_nav`）的「官方收盤」也包含下載檔（`archive.OFFICIAL_CLOSE_SOURCES`）。
+
+### 不用換來源也該修的（後端部分）
+
+- 收盤監看（`archive.close_watch_day`）：從交易日 13:35 看到**下一個交易日** 08:30。週五的收盤如果週六 08:30 以後才出來，以前要等到週一
+  08:10，現在週末照看（只問還沒存進來的市場；平常週六清晨就存好了，週末什麼都不送）。連假前一天一樣。
+- AI：系統提示詞不再說「晚上才公布」，改成上市上櫃時間不同、照頁面情境寫；頁面情境多一行「台股收盤價」（每個市場進來了沒、預計幾點更新）；
+  `get_stock_overview` 的 `intraday_note` 過了半夜也會說「11/16 的官方收盤價還沒公布」，並帶上預計時段（以前 00:00–09:00 沒有）。
+
+### 設定
+
+| 變數 | 預設 | 說明 |
+|---|---|---|
+| `TWSE_OPENDATA_CLOSE` | `true` | 證交所下載檔（只有 worker 會抓）；`false` 關掉，`expected_*` 也不再算下午那段 |
+| `SHIOAJI_EVENING_CLOSE` | `true` | 晚上的暫時收盤價；`false` 關掉 |
+
+### 測試（不連網）
+
+`tests/test_same_day_closes.py`：真檔解析、日期規則（昨天的檔、檔名不符、內容和上一天相同、未來日期都不存）、白名單只認兩個完整網址、
+轉址不跟、每 10 分鐘最多一次（重啟也一樣）、被擋就停一天、5xx 再看、時段外不送、開關、OpenAPI 隔天整列取代、暫時資料的流程、
+`tw.closes` 在 13:31、14:05、14:40、21:00、23:50、00:30、02:00、06:00、週末的值、開關不同時的時段、端點、收盤簡報與排行只認官方。
+`tests/test_close_watch.py`：週五的收盤週六才出來仍會存、沒出來一路看到週一 08:30。
+
+### 2026-11-16 審查後的修正
+
+- **合約擴充**：`tw.closes` 的 TWSE 那筆多一個 `index`（`stored`、`latest`、`expected_from`、`expected_to`；TPEX 是 `null`），是證交所指數
+  （加權指數…）那一天的收盤。只有證交所自己的檔案有（下午 14:00–14:30 的大盤統計下載檔，再來隔天 05:20–05:45 的 OpenAPI；`closes.WINDOWS["TWSE_INDEX"]`）。
+  15:46 實測個股檔進來、3 秒後指數檔 307，當天就停了，加權指數等隔天清晨；市場頁指數那一排下面寫一行預計時間（`indexNote`）。
+- **只存了暫時收盤價時**（`interim`）`expected_*` 是官方檔的時段（不含 shioaji-data 的那幾段）：晚上那一批沒有 ETF（本機的 daily.json 1,963 個代號沒有一個 `00` 開頭），
+  ETF 還在等。前端把「那個市場 `interim`、這一檔日期比 `session` 舊」也當成在等；帳本那個市場有持股還是前一天的，「今日」改「當日」。
+  AI 的頁面情境寫「晚上先放的暫時資料：只有收盤價、沒有 ETF；官方檔案預計…更新」，`intraday_note` 也帶官方檔的時段。
+- 官方檔（兩個 OpenAPI、證交所下載檔）存進來時，同一天、同一市場剩下的暫時資料整列刪掉（`Archiver._drop_interim`）：官方檔沒有收盤價的代號（沒成交、停牌）不留一筆假的。
+- 證交所回 HTTP 200 但內容是網頁（`Content-Type` 有 html，或開頭是 `<`；例如 WAF 的「Request Rejected」）也當成被擋，當天停（`twse_opendata.blocked`，
+  `refused` 的 `rows` 記 200）。每次 200 與被擋都記 log，帶 `X-Cache`（觀察 CDN 快取過期時是不是比較常被擋）。
+- 防舊檔換日期：只比收盤價（前一天存的列隔天已換成 OpenAPI 的最終成交量，比成交量會放過換了日期的舊下午檔）。
+- 報價：資料庫的暫時收盤價本來就只有收盤價，`MarketData.quotes` 不再為了補開高低去問後面的即時來源（以前每次都下載一份還是前一天的收盤檔）。
+- 技術分析（`get_technicals`）：最後一根是暫時收盤價時開高低與成交量當成不知道，不算開盤跳空、跳空、量比，加一行說明；`technicals.analyze` 最後一根沒有最高最低價時不判斷跳空。
+  走勢圖照舊（開高低用收盤價、成交量 0，官方檔進來就換掉）。
+- AI 的預計時間改成和畫面一樣的寫法（12 小時制加時段：「預計今晚 8:30–11:45 更新」；`closes.window_text`）。
+- 帳本的 AI 建議問題：上市、上櫃持股的日期不同時寫「最近」（和前端 `ledgerDay` 一樣）。
+- `/meta/attributions`：`TWSE_OPENDATA_CLOSE` 關掉時不列 `twse-opendata/*`，「沒有使用」那句也不提兩個下載網址（資料來源頁才不會還寫上市「下午」）。
+- 前端：收盤價進來時重新讀一次，35 秒後再讀一次（報價快取 30 秒）。資料來源頁上市寫「下午 2:00–2:30…；下午拿不到時晚上 8:30–11:45」、清晨 5:45。
+- 刻意保留：下午那一段只寫到 14:30（下載檔問到 18:00）。14:30 還沒進來多半是晚了或被擋，說「今晚」比較老實；之後提早進來只是比說的早。
+
+### 待確認
+
+1. 下載檔的成交量是不是少了盤後、零股、鉅額（未證實；隔天 OpenAPI 會換掉）。
+2. shioaji-data 沒有保證時間；有幾天整晚都沒更新（例如 10/23 拖到 10/27），那時就等官方檔。
+3. `margin_date()` 假設 MI_MARGN 21:00 後是當天的（memo 說 Last-Modified 是 05:23，未驗證）——這次沒動。
+4. 證交所下載檔多常被擋：11/16 兩次 15:00 的請求都是 CDN 快取（`X-Cache: HIT`），15:46 指數檔快取過期（`EXPIRED`）就回 307。
+   13:45–14:00 檔案剛公布、快取最可能是空的；照規則不能繞過，看一兩週的 log（`twse same-day file`）再決定要不要跟負責人談。

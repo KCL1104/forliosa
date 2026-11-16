@@ -153,7 +153,7 @@ export interface MockOptions {
   analystDelayMs?: number
   /** 是否已登入（預設 true；`?auth=signed-out` 模擬還沒登入） */
   signedIn?: boolean
-  /** 台股的市場狀態（預設 closed：最新的收盤價已經進來）；`?market=open|pending` 模擬盤中、收盤後還沒公布 */
+  /** 台股的市場狀態（預設 closed：最新的收盤價已經進來）；`?market=open|pending|evening|night` 模擬盤中、收盤後與半夜還沒進來 */
   market?: MockMarket
   /** 討論串：示範使用者的公開暱稱、是不是站方管理員、有沒有被停權（預設：沒有暱稱、是管理員、沒有停權） */
   discussion?: DiscussionOptions

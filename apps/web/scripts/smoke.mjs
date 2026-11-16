@@ -845,7 +845,11 @@ await check("頭像選單：資料來源與授權（完整顯名聲明）", asyn
   if ((await twse.getAttribute("aria-expanded")) !== "false") throw new Error("dataset groups should start collapsed")
   await page.getByText(/上市個股日成交資訊、上市個股日本益比/).waitFor()
   await twse.click()
-  await page.getByText("臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版").waitFor()
+  // 上市個股日成交資訊有兩個網址（OpenAPI、證交所在政府資料開放平臺登記的下載網址；2026-11-16）：兩筆聲明一樣，連結報讀時多唸網站
+  const statements = page.getByText("臺灣證券交易所〈上市個股日成交資訊〉（2026），依政府資料開放授權條款第 1 版")
+  await statements.first().waitFor()
+  if ((await statements.count()) !== 2) throw new Error(`上市個股日成交資訊 statements: ${await statements.count()}`)
+  await page.getByRole("link", { name: /^上市個股日成交資訊（www\.twse\.com\.tw，資料集，另開新視窗）$/ }).waitFor()
 })
 await check("紀錄：對話保留 30 天", async () => {
   await page.goto(base + "/history", { waitUntil: "networkidle" })
@@ -1393,7 +1397,10 @@ await check("資料來源：固定一段說明都是收盤價、沒有盤中報�
   await rp.goto(base + "/data-sources", { waitUntil: "networkidle" })
   const quotes = rp.getByRole("region", { name: "報價" })
   await quotes.getByText(/Forliosa 的股價都是收盤價，沒有盤中報價。/).waitFor({ timeout: 8000 })
-  await quotes.getByText(/通常是當天晚上到隔天清晨/).waitFor()
+  // 平常幾點更新（實測；證交所的下載網址開著時上市下午就進來）
+  const times = quotes.getByRole("list", { name: "收盤價平常什麼時候更新" })
+  await times.getByText("上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）；下午拿不到時晚上 8:30–11:45").waitFor()
+  await times.getByText("上櫃：晚上 8:30–11:45，少數日子到半夜 1:30").waitFor()
   await quotes.getByText(/盤中報價要付費授權，Forliosa 沒有買。/).waitFor()
   const mis = quotes.getByRole("link", { name: /基本市況報導/ })
   if ((await mis.getAttribute("target")) !== "_blank" || !/noopener/.test((await mis.getAttribute("rel")) ?? "") || !/^https:\/\/mis\.twse\.com\.tw\//.test((await mis.getAttribute("href")) ?? "")) throw new Error("基本市況報導 link attributes")
@@ -1411,7 +1418,7 @@ await check("資料來源：固定一段說明都是收盤價、沒有盤中報�
 })
 await rctx.close()
 
-// 沒有盤中即時報價：價格標「收盤價・日期」，盤中、收盤後今天的還沒公布時多一行（mock 的 ?market= 旗標；另開一個分頁，不影響其他檢查）
+// 沒有盤中即時報價：價格標「收盤價・日期」，盤中、收盤價還沒進來時多一行（還沒進來時寫預計幾點更新；mock 的 ?market= 旗標；另開一個分頁，不影響其他檢查）
 const kctx = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: "zh-TW", timezoneId: "Asia/Taipei" })
 const kp = await kctx.newPage()
 kp.on("pageerror", (e) => errors.push(`market pageerror ${e.message}`))
@@ -1421,7 +1428,7 @@ await check("收盤價的標示（預設：最新的收盤價已經進來）：�
   const head = kp.locator("main header").first()
   await head.getByText("收盤價", { exact: true }).waitFor({ timeout: 8000 })
   if (!((await head.textContent()) ?? "").includes("收盤價・11/12（四）")) throw new Error(`price label: ${await head.textContent()}`)
-  if (await kp.getByText(/盤中不更新|還沒公布/).count()) throw new Error("note shown although the latest close is in")
+  if (await kp.getByText(/盤中不更新|還沒公布|預計.*更新/).count()) throw new Error("note shown although the latest close is in")
   if (await kp.getByRole("link", { name: /到證交所看即時報價/ }).count()) throw new Error("TWSE link shown although the latest close is in")
   if (/延遲|盤中・/.test((await kp.locator("main").textContent()) ?? "")) throw new Error("the page suggests delayed or intraday quotes")
   await kp.goto(base + "/", { waitUntil: "networkidle" })
@@ -1468,18 +1475,46 @@ await check("收盤價的標示（盤中）：個股頁一行「盤中不更新�
   await table.getByRole("columnheader", { name: "11/12 損益" }).waitFor()
   if (await table.getByRole("columnheader", { name: /今日/ }).count()) throw new Error("holdings header still says 今日")
 })
-await check("收盤價的標示（收盤後、今天的還沒公布）：一行說明、沒有連結；帳本「11/12 收盤・今天的還沒公布」；切回預設後說明消失", async () => {
+await check("收盤價的標示（收盤後 13:40）：個股頁寫這個市場預計幾點更新（上市下午、上櫃今晚）、沒有連結；帳本一行並列兩個市場；市場頁標題旁也寫；切回預設後說明消失", async () => {
   await kp.goto(base + "/stock/2330.TW?market=pending", { waitUntil: "networkidle" })
-  await kp.getByText("今天的收盤價還沒公布", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.getByText("今天的收盤價預計下午 2:00–2:30 更新", { exact: true }).waitFor({ timeout: 8000 })
   await kp.locator("main header").getByText("11/12 漲跌", { exact: true }).waitFor({ timeout: 8000 })
   if (await kp.getByRole("link", { name: /到證交所看即時報價/ }).count()) throw new Error("TWSE link shown after the close")
+  // 上櫃：今晚
+  await kp.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
+  await kp.getByText("今天的收盤價預計今晚 8:30–11:45 更新", { exact: true }).waitFor({ timeout: 8000 })
+  // 帳本（上市、上櫃都有）：日期一次，兩個市場的預計時間並列成一行
   await kp.goto(base + "/", { waitUntil: "networkidle" })
-  await kp.getByText("11/12 收盤・今天的還沒公布", { exact: true }).waitFor({ timeout: 8000 })
+  const label = kp.getByText("11/12 收盤", { exact: true })
+  await label.waitFor({ timeout: 8000 })
+  await kp.getByText(/^・?上市預計下午 2:30 前更新・上櫃預計今晚更新$/).waitFor({ timeout: 8000 })
   await kp.getByRole("table", { name: "持倉" }).getByRole("columnheader", { name: "11/12 漲跌" }).waitFor({ timeout: 8000 })
+  // 市場頁：標題旁的日期後面
+  await kp.goto(base + "/market", { waitUntil: "networkidle" })
+  await kp.getByText(/^・?上市預計下午 2:30 前更新・上櫃預計今晚更新$/).waitFor({ timeout: 8000 })
   await kp.goto(base + "/stock/2330.TW?market=closed", { waitUntil: "networkidle" })
   await kp.getByText("參考價").first().waitFor({ timeout: 8000 })
   await kp.waitForTimeout(400)
-  if (await kp.getByText(/盤中不更新|還沒公布/).count()) throw new Error("note still shown after switching back")
+  if (await kp.getByText(/盤中不更新|還沒公布|預計.*更新/).count()) throw new Error("note still shown after switching back")
+})
+await check("收盤價的標示（晚上 9 點、上市下午那一批沒進來）：兩個市場都等晚上那一批，帳本只寫一次", async () => {
+  await kp.goto(base + "/stock/2330.TW?market=evening", { waitUntil: "networkidle" })
+  await kp.getByText("今天的收盤價預計今晚 11:45 前更新", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.goto(base + "/", { waitUntil: "networkidle" })
+  await kp.getByText(/^・?今天的預計今晚 11:45 前更新$/).waitFor({ timeout: 8000 })
+})
+await check("收盤價的標示（過了半夜、11/13 的還沒進來）：說明不會不見，寫在等哪一天與預計清晨幾點；上櫃沒有時間窗只說還沒公布；切回預設", async () => {
+  await kp.goto(base + "/stock/2330.TW?market=night", { waitUntil: "networkidle" })
+  await kp.getByText("11/13 的收盤價還沒公布，預計清晨 5:20–5:45 更新", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
+  await kp.getByText("11/13 的收盤價還沒公布", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.goto(base + "/", { waitUntil: "networkidle" })
+  await kp.getByText(/^・?11\/13 的收盤：上市預計清晨 5:45 前更新・上櫃還沒公布$/).waitFor({ timeout: 8000 })
+  if (await kp.locator("main dt").getByText("今日", { exact: true }).count()) throw new Error("hero says 今日 after midnight")
+  await kp.goto(base + "/?market=closed", { waitUntil: "networkidle" })
+  await kp.getByText("11/12 收盤", { exact: true }).waitFor({ timeout: 8000 })
+  await kp.waitForTimeout(400)
+  if (await kp.getByText(/還沒公布|預計.*更新/).count()) throw new Error("note still shown after switching back")
 })
 await kctx.close()
 
@@ -2033,7 +2068,7 @@ await check("手機：帳本主數字旁的時間一行放得下（盤中的寫�
   try {
     const p = await mk.newPage()
     await p.goto(base + "/?market=pending", { waitUntil: "networkidle" })
-    const asOf = p.getByText("11/12 收盤・今天的還沒公布", { exact: true })
+    const asOf = p.getByText("11/12 收盤", { exact: true })
     await asOf.waitFor({ timeout: 8000 })
     const line = await asOf.evaluate((el) => {
       const label = el.parentElement
@@ -2042,6 +2077,22 @@ await check("手機：帳本主數字旁的時間一行放得下（盤中的寫�
       return { sameLine: Math.abs((r.top + r.bottom) / 2 - (first.top + first.bottom) / 2) < 6, right: r.right, vw: innerWidth }
     })
     if (!line.sameLine || line.right > line.vw - 19) throw new Error(`hero as-of wraps or overflows on a phone: ${JSON.stringify(line)}`)
+    // 預計更新的時間：手機上自己一行（前面的「・」不顯示），一行放得下、不撐寬畫面
+    const expected = p.getByText(/^・?上市預計下午 2:30 前更新・上櫃預計今晚更新$/)
+    await expected.waitFor({ timeout: 8000 })
+    const nb = await expected.evaluate((el) => {
+      const r = el.getBoundingClientRect()
+      const date = el.parentElement.children[1].getBoundingClientRect()
+      return { h: r.height, lh: parseFloat(getComputedStyle(el).lineHeight), below: r.top >= date.bottom - 1, left: r.left, dateLeft: el.parentElement.firstElementChild.getBoundingClientRect().left, right: r.right, vw: innerWidth, dot: getComputedStyle(el.firstElementChild).display }
+    })
+    if (nb.h > nb.lh * 1.5 || !nb.below || Math.abs(nb.left - nb.dateLeft) > 1 || nb.right > nb.vw - 16 || nb.dot !== "none") throw new Error(`hero expected-time line on a phone: ${JSON.stringify(nb)}`)
+    // 個股頁：預計更新的那一行也是一行
+    await p.goto(base + "/stock/2330.TW?market=night", { waitUntil: "networkidle" })
+    const stockNote = p.getByText("11/13 的收盤價還沒公布，預計清晨 5:20–5:45 更新", { exact: true })
+    await stockNote.waitFor({ timeout: 8000 })
+    const sb = await stockNote.evaluate((el) => ({ h: el.getBoundingClientRect().height, lh: parseFloat(getComputedStyle(el).lineHeight) }))
+    if (sb.h > sb.lh * 1.5) throw new Error(`stock expected-time line wraps on a phone: ${JSON.stringify(sb)}`)
+    await p.goto(base + "/?market=pending", { waitUntil: "networkidle" })
     const head = p.getByText("收盤價・11/12 漲跌", { exact: true })
     await head.waitFor({ timeout: 8000 })
     if ((await head.evaluate((el) => el.getBoundingClientRect().height)) > 24) throw new Error("holdings header wraps")

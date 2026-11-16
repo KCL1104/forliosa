@@ -43,6 +43,8 @@ from forliosa.marketdata.http import HttpFetcher, SingleFlight
 from forliosa.marketdata.indices import INDICES, resolve_index
 from forliosa.timeutil import close_dt, last_tw_trading_day
 
+INTERIM_CLOSE_SOURCE = "shioaji-data"  # forliosa.archive.INTERIM_CLOSE_SOURCE: the archive's interim evening closes
+
 log = logging.getLogger(__name__)
 T = TypeVar("T")
 
@@ -359,8 +361,12 @@ class MarketData:
                 pending.append(s)
         if pending:
             partial: dict[str, QuoteData] = {}
+            # The archive's interim evening close (forliosa.closes, close only by nature): nothing later in the chain
+            # fills its open / high / low / volume (their files are an older session until the official one is
+            # archived), so it is not asked — it downloaded a whole close file for nothing (2026-11-16 review).
+            interim: set[str] = set()
             for p in self._available():
-                need = [s for s in pending if s not in partial or partial[s].missing()
+                need = [s for s in pending if s not in partial or (partial[s].missing() and s not in interim)
                         or (not p.is_demo and partial[s].is_demo)]
                 if not need:
                     break
@@ -368,6 +374,8 @@ class MarketData:
                 for s, q in got.items():
                     if q.price is None:
                         continue
+                    if p.name == "archive" and q.source == INTERIM_CLOSE_SOURCE:
+                        interim.add(s)
                     cur = partial.get(s)
                     if cur is None:
                         partial[s] = q

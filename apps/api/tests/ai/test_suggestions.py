@@ -108,6 +108,22 @@ def test_us_moves_are_new_york_days_not_today():
     assert q["kind"] == "lift" and q["text"] == "今天誰幫我賺最多？"  # Apple's 11/13 drop is not today's drag
 
 
+def test_listed_and_otc_closes_of_different_days_say_recently():
+    """2026-11-16 review: the listed close is in by the afternoon, the OTC one in the evening; meanwhile each holding's
+    change is its own day's, so the question says 「最近」 like the frontend's (ledgerBoardDays), never 「今天」."""
+    from datetime import date
+
+    from forliosa.ai.suggestions import ledger_questions
+
+    today = date(2026, 11, 16)
+    holdings = [{"market": "TWSE", "price": 2215, "price_date": "2026-11-16", "day_change": -135, "weight": 0.3},
+                {"market": "TPEX", "price": 445, "price_date": "2026-11-13", "day_change": 5, "weight": 0.1}]
+    q = ledger_questions(holdings, {"as_of": "2026-11-16T13:30:00+08:00"}, today)[0]
+    assert q["text"] == "最近誰拖累了我的報酬？" and q["lines"] == ["最近", "誰拖累了我？"]
+    same = [{**h, "price_date": "2026-11-16"} for h in holdings]
+    assert ledger_questions(same, {"as_of": "2026-11-16T13:30:00+08:00"}, today)[0]["text"] == "今天誰拖累了我的報酬？"
+
+
 def test_why_question_direction_and_day_follow_the_quote():
     """2026-11-14 review: the 「為什麼漲／跌」 question took its direction from a field QuoteData does not have (always
     「漲」) and always said 「今天」, even for an earlier session's close."""
