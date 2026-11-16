@@ -52,9 +52,11 @@ def test_the_why_section_compares_with_the_market_and_puts_the_company_first():
         "公司自己的原因在前、背景在後", "放在最後一點",
     ):
         assert phrase in section, phrase
-    # rating and target changes: who and which way, never the number (產品負責人: the AI gives no target price)
-    assert "寫出是哪一家機構、調了什麼並附引用，不寫目標價和調整幅度的數字" in section
-    assert "只做分析與整理，不保證報酬，不下買進或賣出的指令，也不給目標價" in CHAT_SYSTEM
+    # rating and target changes: which institution and what changed; a published target price may be quoted with a
+    # citation (產品負責人 2026-11-16), never the AI's own target or an upside it computed
+    assert "寫出是哪一家機構、調了什麼；來源寫了目標價就照寫" in section and "並附引用" in section
+    assert "也不自己算上漲空間" in section
+    assert "也不給你自己的目標價（轉述具名機構已發表的目標價可以，寫出機構並附引用）" in CHAT_SYSTEM
 
 
 def test_the_intraday_rules_no_longer_lead_a_why_answer_with_the_close_or_with_an_adr():

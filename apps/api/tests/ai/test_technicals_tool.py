@@ -279,7 +279,7 @@ def test_system_prompt_has_the_technical_and_intraday_price_rules():
     ):
         assert phrase in CHAT_SYSTEM, phrase
     # the standing rules are still there
-    for phrase in ("只做分析與整理，不保證報酬，不下買進或賣出的指令，也不給目標價", "不要憑記憶或推測寫數字",
+    for phrase in ("只做分析與整理，不保證報酬，不下買進或賣出的指令，也不給你自己的目標價", "不要憑記憶或推測寫數字",
                    "網路搜尋不是行情來源：股價、成交量、財報數字以工具資料為準", "只寫有根據的事實"):
         assert phrase in CHAT_SYSTEM, phrase
     assert CHAT_SYSTEM.index("## 資料從哪裡來") < CHAT_SYSTEM.index("## 技術分析與盤中價格") \

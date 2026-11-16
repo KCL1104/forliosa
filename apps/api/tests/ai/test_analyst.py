@@ -102,7 +102,8 @@ def test_get_post_poll_then_shared_by_everyone(client, other_client, pool, fake,
 
 
 def test_prompts_keep_chat_rule_and_quote_only(client):
-    assert "也不給目標價" in CHAT_SYSTEM  # the chat prompt is unchanged
+    # the chat prompt never gives its own target price; it may quote a named institution's, cited (2026-11-16)
+    assert "也不給你自己的目標價" in CHAT_SYSTEM and "轉述具名機構已發表的目標價可以" in CHAT_SYSTEM
     assert ANALYST_SYSTEM != CHAT_SYSTEM
     for rule in ("不給你自己的評等、目標價或看法", "不計算平均", "上漲空間", "不排名", "不寫買進、賣出",
                  "逐字使用搜尋結果"):
