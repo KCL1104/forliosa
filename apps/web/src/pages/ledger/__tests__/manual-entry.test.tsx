@@ -142,7 +142,8 @@ describe("帳本的「記一筆」", () => {
     expect(dialog).toHaveAttribute("data-slot", "drawer-content")
     // 打開時焦點先移到股數（等它移好再按，免得選單一打開就因為焦點移走而關上）
     await waitFor(() => expect(dialog.querySelector("#lot-qty-0")).toHaveFocus(), T)
-    await userEvent.click(within(dialog).getByRole("combobox", { name: "券商帳戶" }))
+    // 帳戶選單要等帳戶清單載入才出現（只有一個帳戶時不顯示）：用 findBy 等它，不然清單慢一點就找不到
+    await userEvent.click(await within(dialog).findByRole("combobox", { name: "券商帳戶" }, T))
     const option = await screen.findByRole("option", { name: /國泰・複委託/ }, T)
     expect(option.closest('[data-slot="drawer-content"]')).toBe(dialog)
     await userEvent.click(await screen.findByRole("option", { name: /永豐・一般/ }, T))
