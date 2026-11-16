@@ -24,21 +24,22 @@ from forliosa.models import (
     Group,
     GroupChannel,
     GroupComment,
+    GroupDailyReport,
     GroupDigest,
     GroupInvite,
     GroupMember,
+    GroupPass,
     GroupReaction,
     GroupShareSetting,
     NotificationOutbox,
     TelegramLinkCode,
     User,
 )
-from forliosa.services import sharing
+from forliosa.services import group_plans, sharing
 from forliosa.services.sharing import Member
 from forliosa.timeutil import TAIPEI, iso_taipei, now_utc
 
-MAX_MEMBERS = 50
-MAX_GROUPS = 20
+MAX_GROUPS = 20  # groups per person; a group's member cap depends on its plan (``services.group_plans``)
 INVITE_TTL = {"24h": timedelta(hours=24), "7d": timedelta(days=7)}
 ROLES = ("owner", "admin", "member")
 MANAGERS = ("owner", "admin")
@@ -96,6 +97,7 @@ def group_out(db: Session, group: Group, me: User) -> dict[str, Any]:
                      "is_me": m.user_id == me.id} for m in members],
         "my_share": sharing.share_out(mine.share),
         "push_targets": push_targets(db, group.id),
+        "plan": group_plans.plan_out(group_plans.plan_of(db, group)),
     }
 
 
@@ -105,10 +107,14 @@ def summary_out(db: Session, md: MarketData, group: Group, me: User) -> dict[str
     activity = sharing.latest_activity(db, md, group, members)
     digest = db.scalar(select(func.max(GroupDigest.created_at)).where(GroupDigest.group_id == group.id,
                                                                      GroupDigest.status == "ready"))
+    daily = db.scalar(select(func.max(GroupDailyReport.finished_at)).where(
+        GroupDailyReport.group_id == group.id, GroupDailyReport.status.in_(("ready", "failed"))))
     return {"id": group.id, "name": group.name, "my_role": mine.role, "member_count": len(members),
             "ranking_enabled": bool(group.ranking_enabled),
             "latest_activity_at": iso_taipei(activity) if activity else None,
-            "latest_digest_at": iso_taipei(digest) if digest else None}
+            "latest_digest_at": iso_taipei(digest) if digest else None,
+            "latest_daily_at": iso_taipei(daily) if daily else None,
+            "plan": group_plans.plan_out(group_plans.plan_of(db, group))}
 
 
 def my_groups(db: Session, md: MarketData, me: User) -> list[dict[str, Any]]:
@@ -157,8 +163,10 @@ def purge(db: Session, group: Group) -> None:
 
     discussions.purge_group(db, group.id)  # the group's topics with their replies, reactions and tags
     for model in (GroupComment, GroupReaction, GroupInvite, NotificationOutbox, TelegramLinkCode, GroupChannel,
-                  GroupDigest, GroupShareSetting):
+                  GroupDigest, GroupDailyReport, GroupShareSetting):
         db.execute(delete(model).where(model.group_id == group.id))
+    # a boost goes back to its payer, unattached (they can put it on another group they own)
+    db.execute(update(GroupPass).where(GroupPass.group_id == group.id).values(group_id=None, attached_at=None))
     db.execute(delete(GroupMember).where(GroupMember.group_id == group.id))
     db.delete(group)
 
@@ -316,9 +324,17 @@ def accept_invite(db: Session, token: str, me: User, share: dict[str, bool]) -> 
         raise not_found("找不到邀請")
     if db.get(GroupMember, (group.id, me.id)) is not None:
         raise ApiError(409, "already_member", "你已經是這個群組的成員")
-    if member_count(db, group.id) >= MAX_MEMBERS:
-        raise limit_reached(f"每個群組最多 {MAX_MEMBERS} 位成員")
+    # Joins of one group take turns: the group's row is written first (PostgreSQL: a concurrent join's UPDATE waits
+    # for this transaction; SQLite: the first write takes the database's write lock), and only then are the members
+    # counted — two people accepting at once cannot both take the last seat.
+    db.execute(update(Group).where(Group.id == group.id).values(updated_at=Group.updated_at)
+               .execution_options(synchronize_session=False))
+    plan = group_plans.plan_of(db, group)
+    if member_count(db, group.id) >= plan.member_cap:
+        db.rollback()
+        raise limit_reached(group_plans.full_message(plan))
     if group_count(db, me.id) >= MAX_GROUPS:
+        db.rollback()
         raise limit_reached(f"每人最多加入 {MAX_GROUPS} 個群組")
     # Count the use atomically: two people accepting a single-use link at once → only one wins.
     cond = [GroupInvite.id == inv.id, GroupInvite.revoked_at.is_(None), GroupInvite.expires_at > now_utc()]

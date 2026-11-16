@@ -1116,6 +1116,42 @@ export interface GroupSummary {
   ranking_enabled: boolean
   latest_activity_at: string | null
   latest_digest_at: string | null
+  /** 最新一則日報寫好的時間（選填：舊版後端沒有） */
+  latest_daily_at?: string | null
+  /** 群組的方案（選填：舊版後端沒有，當成以前的規則：免費、上限 50 人、沒有日報） */
+  plan?: GroupPlan | null
+}
+
+/**
+ * 群組的方案（群組加值包第一階段，產品負責人 2026-11-16）：還沒有付款，由站方在 `/admin/members` 替付款人擁有的群組開通。
+ * 免費群組上限 15 人、加值 50 人；這次改變以前建立的群組（`grandfathered`）免費也是 50 人。
+ * 到期不踢人：人數超過上限的群組不能再加人；日報停，以前的日報照樣看得到。
+ */
+export interface GroupPlan {
+  /** boosted：加值中（有群組 AI 日報） */
+  tier: "free" | "boosted"
+  /** 加值的最後一天（YYYY-MM-DD，台北）；免費是 null */
+  until: string | null
+  /** 現在最多幾位成員 */
+  member_cap: number
+  /** 這次改變以前建立的群組：免費的上限也是 50 人 */
+  grandfathered: boolean
+  /** 有群組 AI 日報（＝加值中） */
+  daily_report?: boolean
+}
+
+/**
+ * 我的群組加值（`GET /me/group-passes`）：站方開給我的加值，用在我擁有的一個群組。
+ * `group` 只在我還是那個群組的成員時有（轉給別人後我仍是成員，看得到名稱；離開了就是 null）。
+ */
+export interface MyGroupPass {
+  id: string
+  /** 最後一天（YYYY-MM-DD，台北） */
+  until: string | null
+  active: boolean
+  /** 用在某個群組了 */
+  attached: boolean
+  group: { id: string; name: string; my_role: GroupRole } | null
 }
 
 export interface GroupMember extends UserRef {
@@ -1155,6 +1191,8 @@ export interface Group {
   my_share: ShareSettings
   /** 群組推播到哪些頻道（每位成員都看得到） */
   push_targets: PushTarget[]
+  /** 群組的方案（選填：舊版後端沒有） */
+  plan?: GroupPlan | null
 }
 
 export type LeaderboardPeriod = "day" | "month" | "year"
@@ -1292,6 +1330,38 @@ export interface Digest {
   reactions: Reaction[]
 }
 
+/**
+ * 群組 AI 日報的數字（加值群組，每個交易日；和週報同一套規則）：伺服器每次讀取時依「目前」的分享設定過濾，
+ * 不含金額、股數、觀察清單。
+ */
+export interface DailyReportFacts {
+  /** 開了報酬率的成員那天的報酬（和排行的「今日」一樣） */
+  returns: { user_id: string; display_name: string; day_return_pct: number | null }[]
+  benchmarks: { symbol: string; name: string; day_return_pct: number | null }[]
+  /** 兩人以上持有的股票（只算開了持股的成員）與它那天的漲跌 */
+  common_holdings: { symbol: string; name: string; holder_count: number; day_change_pct: number | null }[]
+  /** 那天的買賣：只算開了交易動態的成員，不寫是誰；匯入對帳單的不算 */
+  trades: { side: "buy" | "sell"; symbol: string; name: string }[]
+  /** 站內有「為什麼漲跌」說明的共同持股（連到個股頁） */
+  why: { symbol: string; name: string }[]
+}
+
+export interface DailyReport {
+  id: string
+  status: "pending" | "ready" | "failed"
+  /** 哪一天的收盤 */
+  trade_date: string
+  created_at: string
+  /** AI 只寫群組整體（2–4 句），不點名，不給買賣建議、目標價或預測；少於 2 人分享報酬時沒有 */
+  summary: string | null
+  facts: DailyReportFacts | null
+  disclaimer: string
+  sources: string[]
+  /** 留言與表情（`daily:<id>`）；選填：後端沒有時不顯示 */
+  comment_count?: number
+  reactions?: Reaction[]
+}
+
 export type ChannelStatus = "active" | "disabled"
 
 export interface DiscordChannel {
@@ -1302,6 +1372,8 @@ export interface DiscordChannel {
   webhook_hint?: string | null
   notify_trades: boolean
   notify_digest: boolean
+  /** 群組 AI 日報（加值群組；預設關，擁有者決定）。選填：舊版後端沒有 */
+  notify_daily?: boolean
 }
 
 export interface TelegramChannel {
@@ -1311,6 +1383,8 @@ export interface TelegramChannel {
   chat_title: string | null
   notify_trades: boolean
   notify_digest: boolean
+  /** 群組 AI 日報（加值群組；預設關，擁有者決定）。選填：舊版後端沒有 */
+  notify_daily?: boolean
 }
 
 export interface Channels {
@@ -1323,6 +1397,15 @@ export interface Channels {
 export interface ChannelNotify {
   notify_trades?: boolean
   notify_digest?: boolean
+  notify_daily?: boolean
+}
+
+/** 設定 Discord：webhook 網址＋要送哪些（日報選填：舊版後端沒有） */
+export interface DiscordInput {
+  webhook_url: string
+  notify_trades: boolean
+  notify_digest: boolean
+  notify_daily?: boolean
 }
 
 export interface TelegramLinkCode {
@@ -1353,6 +1436,8 @@ export interface InvitePreview {
   status: "valid" | "member"
   /** 只有 `status: "member"` 時有（成員本人才拿得到）：直接連到那個群組 */
   group_id?: string
+  /** 群組的人數已經到上限，不能再加人（選填：舊版後端沒有；加入時照樣會被擋，409） */
+  full?: boolean
 }
 
 // ── 討論串（docs/api-contract.md「討論串（2026-11-13）」）──────────────────
@@ -1604,6 +1689,41 @@ export interface MemberGrantBody {
   /** 最後一天（YYYY-MM-DD）；null＝沒有到期日 */
   until: string | null
   note?: string
+}
+/**
+ * 群組加值（`GET /admin/group-passes`；群組加值包第一階段，還沒有付款）：站方用 email 開給付款人，到最後一天為止。
+ * 付款人（群組的擁有者）在群組設定裡選要用在哪個群組；站方也可以直接給群組編號。站方只看得到群組編號，看不到群組名稱與內容。
+ * 群組轉給別人、付款人刪除帳號，加值照樣用到到期（付款人的欄位變成 null）。過期的也列出，方便續期。
+ */
+export interface AdminGroupPass {
+  id: string
+  payer_user_id: string | null
+  /** 付款人的 email 與顯示名稱；刪除帳號後是 null */
+  email: string | null
+  display_name: string | null
+  /** 最後一天（YYYY-MM-DD，台北） */
+  until: string | null
+  /** 站方自己的備註（例如收款紀錄） */
+  note: string | null
+  /** 今天還在加值 */
+  active: boolean
+  /** 用在哪個群組（只有編號）；付款人還沒選是 null */
+  group_id: string | null
+  attached_at: string | null
+  created_at: string
+}
+export interface GroupPassGrantBody {
+  /** 付款人的 email（對方要先登入過一次） */
+  email: string
+  /** 最後一天（YYYY-MM-DD，台北）；加值一定有到期日 */
+  until: string
+  note?: string
+  /** 直接用在這個群組（付款人要是擁有者）；不給就由付款人自己選 */
+  group_id?: string
+}
+export interface GroupPassPatch {
+  until?: string
+  note?: string | null
 }
 export interface BlockDomainResult {
   /** 正規化之後的網域（小寫、去掉 www.） */
@@ -1970,6 +2090,10 @@ export interface ForliosaApi {
   createGroup(body: { name: string }): Promise<Group>
   getGroup(id: string): Promise<Group>
   updateGroup(id: string, patch: { name?: string; ranking_enabled?: boolean }): Promise<Group>
+  /** 我的群組加值（站方開給我的） */
+  listMyGroupPasses(): Promise<MyGroupPass[]>
+  /** 擁有者把自己的一個加值用在這個群組（`PUT /groups/{id}/plan`）；到期 → 409 `pass_expired`、在已經轉走的群組上 → 409 `pass_in_use` */
+  attachGroupPass(id: string, passId: string): Promise<Group>
   deleteGroup(id: string): Promise<void>
   transferGroup(id: string, userId: string): Promise<unknown>
   setMemberRole(id: string, userId: string, role: "admin" | "member"): Promise<unknown>
@@ -1991,8 +2115,10 @@ export interface ForliosaApi {
   addReaction(id: string, body: { target: CommentTarget; emoji: ReactionEmoji }): Promise<void>
   removeReaction(id: string, target: CommentTarget, emoji: ReactionEmoji): Promise<void>
   listDigests(id: string, query?: { limit?: number; cursor?: string | null }): Promise<Paged<Digest>>
+  /** 群組 AI 日報（新到舊）；免費群組也讀得到以前加值時的日報 */
+  listDailyReports(id: string, query?: { limit?: number; cursor?: string | null }): Promise<Paged<DailyReport>>
   getChannels(id: string): Promise<Channels>
-  putDiscord(id: string, body: { webhook_url: string } & Required<ChannelNotify>): Promise<unknown>
+  putDiscord(id: string, body: DiscordInput): Promise<unknown>
   patchDiscord(id: string, patch: ChannelNotify): Promise<unknown>
   deleteDiscord(id: string): Promise<void>
   linkTelegram(id: string): Promise<TelegramLinkCode>
@@ -2033,4 +2159,12 @@ export interface ForliosaApi {
   grantMember(body: MemberGrantBody): Promise<AdminMember>
   /** 改回免費；不是會員 → 404 */
   revokeMember(userId: string): Promise<void>
+  /** 群組加值：加值中與過期的 */
+  listGroupPasses(): Promise<AdminGroupPass[]>
+  /** 開通；找不到帳號 → 404 `user_not_found`；到期日早於今天 → 422；給了群組編號但對方不是擁有者 → 409 `not_group_owner`、群組不存在 → 404 */
+  grantGroupPass(body: GroupPassGrantBody): Promise<AdminGroupPass>
+  /** 續期（改最後一天）或改備註 */
+  updateGroupPass(id: string, patch: GroupPassPatch): Promise<AdminGroupPass>
+  /** 馬上停止（不踢人，群組回到免費的上限） */
+  revokeGroupPass(id: string): Promise<void>
 }

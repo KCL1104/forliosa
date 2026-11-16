@@ -199,6 +199,19 @@ class Settings(BaseSettings):
     # Group weekly digests (M5): the worker asks for a group-level summary every Saturday 20:00 (Taipei) through the
     # Message Batches API; off = digests keep their facts and are marked failed without a model call.
     ai_digest_enabled: bool = True
+    # 群組加值包 (產品負責人 2026-11-16, ``forliosa.services.group_plans``): a free group takes up to this many members,
+    # a boosted one (a pass granted on /admin/group-passes, attached by the group's owner) up to the second number.
+    # Groups made before the change keep 50 (``groups.grandfathered_member_cap``, set by migration 0023). More than 50
+    # is not offered (the leaderboard is computed on every request). Prices (NT$149 a month, NT$1,490 a year) are
+    # docs only: there is no payment code yet.
+    group_free_member_cap: int = Field(default=15, ge=2, le=50)
+    group_boosted_member_cap: int = Field(default=50, ge=2, le=50)
+    # 群組 AI 日報 (``forliosa.services.group_daily``): boosted groups only, one per trading day once the closes are in.
+    # Off = the worker job is not scheduled. The AI paragraph is charged to nobody (feature ``group_daily``); once the
+    # month's group_daily spending reaches the budget (US$, all groups together; 0 = no limit) reports get no AI
+    # paragraph until next month.
+    group_daily_enabled: bool = True
+    ai_group_daily_monthly_budget_usd: float = Field(default=5.0, ge=0)
     # Off-topic requests (coding, homework, role-play …) with no finance word are declined without a model call.
     ai_scope_precheck: bool = True
     # Threads, messages and drafts are deleted this many days after their last activity (0 = keep forever).

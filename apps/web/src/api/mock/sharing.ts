@@ -4,6 +4,8 @@ import {
   type Account,
   type Channels,
   type Comment,
+  type DailyReport,
+  type DailyReportFacts,
   type Delegation,
   type DelegationCandidate,
   type DelegationInput,
@@ -14,6 +16,7 @@ import {
   type GroupHoldings,
   type GroupInvite,
   type GroupMember,
+  type GroupPlan,
   type GroupRole,
   type GroupSummary,
   type InviteInput,
@@ -21,6 +24,7 @@ import {
   type Leaderboard,
   type LeaderboardEntry,
   type LeaderboardPeriod,
+  type MyGroupPass,
   type Paged,
   type PushTarget,
   type Reaction,
@@ -38,7 +42,7 @@ import { addDays, closeOn, MOCK_TODAY, parseDay } from "./market"
 import { PEOPLE, STATIC_PROFILES, type PeriodReturns, type RawTrade } from "./members"
 
 /**
- * 分享（M5）的 mock：群組、授權查看、動態、留言與表情、週報、頻道。
+ * 分享（M5）的 mock：群組、授權查看、動態、留言與表情、週報、日報、頻道、群組加值。
  * 隱私規則和合約一樣（docs/api-contract.md「分享（M5）」）：
  * - 每次讀取時依「目前」的分享設定重新投影；沒開放的鍵不存在，不是 null 也不是 0。
  * - 沒開放的成員不出現在排行、動態、持股；`SharedPortfolio` 沒開任何項目時只回身分欄位。
@@ -104,6 +108,7 @@ interface MockDiscord {
   disabled_reason: string | null
   notify_trades: boolean
   notify_digest: boolean
+  notify_daily: boolean
 }
 interface MockTelegram {
   chat_title: string
@@ -111,6 +116,25 @@ interface MockTelegram {
   disabled_reason: string | null
   notify_trades: boolean
   notify_digest: boolean
+  notify_daily: boolean
+}
+/** 一則日報：寫好時有分享報酬的人（`contributors`）；數字讀取時依目前的成員與開關重新算、過濾 */
+interface MockDaily {
+  id: string
+  trade_date: string
+  created_at: string
+  status: DailyReport["status"]
+  contributors: string[]
+}
+/** 群組加值（後端的 GroupPass）：站方開給付款人，付款人用在自己擁有的一個群組；`until` 是最後一天 */
+export interface MockPass {
+  id: string
+  payer: string | null
+  group_id: string | null
+  until: string
+  note: string | null
+  created_at: string
+  attached_at: string | null
 }
 interface MockGroup {
   id: string
@@ -124,6 +148,9 @@ interface MockGroup {
   comments: MockComment[]
   reactions: Map<string, Map<ReactionEmoji, Set<string>>>
   digests: MockDigest[]
+  daily: MockDaily[]
+  /** 這次改變（免費上限降到 15 人）以前建立的群組：上限維持 50 人 */
+  grandfathered: boolean
   discord: MockDiscord | null
   telegram: MockTelegram | null
   telegramLink: { code: string; expires_at: string; linkAt: number } | null
@@ -132,7 +159,9 @@ interface MockGroup {
 const DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 /** 加權報酬指數的存檔起點（後端 CONTRACT_NOTES：證交所 2026-11-02 起） */
 const INDEX_ARCHIVE_START = "2026-11-02"
-const MAX_MEMBERS = 50
+/** 群組加值包（後端 GROUP_FREE_MEMBER_CAP、GROUP_BOOSTED_MEMBER_CAP）：免費 15 人、加值 50 人；以前建立的群組 50 人 */
+const FREE_CAP = 15
+const BOOSTED_CAP = 50
 const MAX_GROUPS = 20
 
 const r4 = (x: number | null): number | null => (x === null ? null : Math.round(x * 10000) / 10000)

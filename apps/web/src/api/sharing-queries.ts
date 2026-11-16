@@ -5,6 +5,7 @@ import type {
   ChannelNotify,
   CommentTarget,
   DelegationInput,
+  DiscordInput,
   Group,
   InviteInput,
   LeaderboardPeriod,
@@ -21,6 +22,7 @@ export const sk = {
   delegations: ["delegations"] as const,
   candidates: ["delegations", "candidates"] as const,
   groups: ["groups"] as const,
+  passes: ["me", "group-passes"] as const,
   group: (id: string) => ["groups", id] as const,
   share: (id: string) => ["groups", id, "share"] as const,
   leaderboard: (id: string, period: LeaderboardPeriod) => ["groups", id, "leaderboard", period] as const,
@@ -29,6 +31,7 @@ export const sk = {
   feed: (id: string, userId?: string) => ["groups", id, "feed", userId ?? "all"] as const,
   comments: (id: string, target: CommentTarget) => ["groups", id, "comments", target] as const,
   digests: (id: string) => ["groups", id, "digests"] as const,
+  daily: (id: string) => ["groups", id, "daily"] as const,
   channels: (id: string) => ["groups", id, "channels"] as const,
   invites: (id: string) => ["groups", id, "invites"] as const,
   invite: (token: string) => ["invite", token] as const,
@@ -105,6 +108,22 @@ function useInvalidateGroup(id: string) {
     void qc.invalidateQueries({ queryKey: sk.group(id) })
     void qc.invalidateQueries({ queryKey: sk.groups, exact: true })
   }
+}
+/** 我的群組加值（設定頁的「方案」、群組設定的「用在這個群組」） */
+export function useMyGroupPasses(enabled = true) {
+  return useQuery({ enabled, queryKey: sk.passes, queryFn: () => api.listMyGroupPasses(), staleTime: 30_000, retry: no4xxRetry })
+}
+/** 把加值用在這個群組：群組（方案、上限）、群組清單、我的加值（用在哪裡）都重抓；原本用在別的群組時那個群組也變了 */
+export function useAttachGroupPass(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (passId: string) => api.attachGroupPass(id, passId),
+    onSuccess: (g) => {
+      qc.setQueryData(sk.group(id), g)
+      void qc.invalidateQueries({ queryKey: sk.groups })
+      void qc.invalidateQueries({ queryKey: sk.passes })
+    },
+  })
 }
 export function useUpdateGroup(id: string) {
   const invalidate = useInvalidateGroup(id)
@@ -255,6 +274,7 @@ function useInvalidateDiscussion(id: string) {
     void qc.invalidateQueries({ queryKey: sk.comments(id, target) })
     void qc.invalidateQueries({ queryKey: ["groups", id, "feed"] })
     void qc.invalidateQueries({ queryKey: sk.digests(id) })
+    void qc.invalidateQueries({ queryKey: sk.daily(id) })
     // 排行帶當天討論串的計數（三個期間同一串）；只在這一串變動時才重新抓（排行每次都在伺服器重算）
     if (target.startsWith("leaderboard:")) void qc.invalidateQueries({ queryKey: ["groups", id, "leaderboard"] })
   }
@@ -293,6 +313,18 @@ export function useDigests(id: string) {
   })
 }
 
+// ── 日報（加值群組） ────────────────────────────────────────
+export function useDailyReports(id: string) {
+  return useInfiniteQuery({
+    queryKey: sk.daily(id),
+    queryFn: ({ pageParam }) => api.listDailyReports(id, { limit: 10, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+    staleTime: 60_000,
+    retry: no4xxRetry,
+  })
+}
+
 // ── 頻道 ──────────────────────────────────────────────────
 /** `poll`：等 Telegram 群組傳 /link 時每 3 秒看一次，連結好了就停 */
 export function useChannels(id: string, opts: { poll?: boolean } = {}) {
@@ -314,7 +346,7 @@ function useInvalidateChannels(id: string) {
 export function usePutDiscord(id: string) {
   const invalidate = useInvalidateChannels(id)
   return useMutation({
-    mutationFn: (body: { webhook_url: string } & Required<ChannelNotify>) => api.putDiscord(id, body),
+    mutationFn: (body: DiscordInput) => api.putDiscord(id, body),
     onSuccess: invalidate,
   })
 }

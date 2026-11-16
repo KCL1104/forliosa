@@ -65,6 +65,7 @@ import type {
   SharedPortfolio,
   TelegramLinkCode,
 } from "./types"
+import type { AdminGroupPass, DailyReport, MyGroupPass } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
 import type { StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
@@ -229,6 +230,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     createGroup: (body) => request<Group>("POST", "/groups", { body }),
     getGroup: (id) => request<Group>("GET", `/groups/${enc(id)}`),
     updateGroup: (id, patch) => request<Group>("PATCH", `/groups/${enc(id)}`, { body: patch }),
+    listMyGroupPasses: () => request<MyGroupPass[]>("GET", "/me/group-passes"),
+    attachGroupPass: (id, passId) => request<Group>("PUT", `/groups/${enc(id)}/plan`, { body: { pass_id: passId } }),
     deleteGroup: (id) => request<void>("DELETE", `/groups/${enc(id)}`),
     transferGroup: (id, userId) => request<unknown>("POST", `/groups/${enc(id)}/transfer`, { body: { user_id: userId } }),
     setMemberRole: (id, userId, role) => request<unknown>("PATCH", `/groups/${enc(id)}/members/${enc(userId)}`, { body: { role } }),
@@ -250,6 +253,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     addReaction: (id, body) => request<void>("PUT", `/groups/${enc(id)}/reactions`, { body }),
     removeReaction: (id, target, emoji) => request<void>("DELETE", `/groups/${enc(id)}/reactions`, { query: { target, emoji } }),
     listDigests: (id, query = {}) => request<Paged<Digest>>("GET", `/groups/${enc(id)}/digests`, { query }),
+    listDailyReports: (id, query = {}) => request<Paged<DailyReport>>("GET", `/groups/${enc(id)}/daily-reports`, { query }),
     getChannels: (id) => request<Channels>("GET", `/groups/${enc(id)}/channels`),
     putDiscord: (id, body) => request<unknown>("PUT", `/groups/${enc(id)}/channels/discord`, { body }),
     patchDiscord: (id, patch) => request<unknown>("PATCH", `/groups/${enc(id)}/channels/discord`, { body: patch }),
@@ -287,5 +291,10 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     grantMember: ({ email, until, note }) =>
       request<AdminMember>("PUT", "/admin/members", { body: { email, until, ...(note ? { note } : {}) } }),
     revokeMember: (userId) => request<void>("DELETE", `/admin/members/${enc(userId)}`),
+    listGroupPasses: () => request<AdminGroupPass[]>("GET", "/admin/group-passes"),
+    grantGroupPass: ({ email, until, note, group_id }) =>
+      request<AdminGroupPass>("POST", "/admin/group-passes", { body: { email, until, ...(note ? { note } : {}), ...(group_id ? { group_id } : {}) } }),
+    updateGroupPass: (id, patch) => request<AdminGroupPass>("PATCH", `/admin/group-passes/${enc(id)}`, { body: patch }),
+    revokeGroupPass: (id) => request<void>("DELETE", `/admin/group-passes/${enc(id)}`),
   }
 }

@@ -5,6 +5,8 @@ import { qk } from "./queries"
 import {
   REACTION_EMOJIS,
   type DiscussionTarget,
+  type GroupPassGrantBody,
+  type GroupPassPatch,
   type MemberGrantBody,
   type ModerationAction,
   type Paged,
@@ -247,6 +249,7 @@ export const ak = {
   overview: ["admin", "overview"] as const,
   blocked: ["admin", "news", "blocked-domains"] as const,
   members: ["admin", "members"] as const,
+  passes: ["admin", "group-passes"] as const,
 }
 /** 總覽（使用者人數、AI 金鑰槽、資料集、歷史日線回補）：管理員自己按「重新載入」或換頁回來才重抓 */
 export function useAdminOverview() {
@@ -300,4 +303,30 @@ export function useRevokeMember() {
       void qc.invalidateQueries({ queryKey: ["ai", "usage"] })
     },
   })
+}
+
+// ── 管理後台：群組加值（群組加值包第一階段；還沒有付款） ─────────
+export function useGroupPasses() {
+  return useQuery({ queryKey: ak.passes, queryFn: () => api.listGroupPasses(), staleTime: 15_000, retry: no4xxRetry })
+}
+/** 開通、續期或停止之後：清單、我自己的加值與群組（方案、人數上限、日報）都重抓——站方常常是開給自己試用 */
+function useInvalidatePasses() {
+  const qc = useQueryClient()
+  return () => {
+    void qc.invalidateQueries({ queryKey: ak.passes })
+    void qc.invalidateQueries({ queryKey: ["me", "group-passes"] })
+    void qc.invalidateQueries({ queryKey: ["groups"] })
+  }
+}
+export function useGrantGroupPass() {
+  const invalidate = useInvalidatePasses()
+  return useMutation({ mutationFn: (body: GroupPassGrantBody) => api.grantGroupPass(body), onSuccess: invalidate })
+}
+export function useUpdateGroupPass() {
+  const invalidate = useInvalidatePasses()
+  return useMutation({ mutationFn: ({ id, patch }: { id: string; patch: GroupPassPatch }) => api.updateGroupPass(id, patch), onSuccess: invalidate })
+}
+export function useRevokeGroupPass() {
+  const invalidate = useInvalidatePasses()
+  return useMutation({ mutationFn: (id: string) => api.revokeGroupPass(id), onSuccess: invalidate })
 }

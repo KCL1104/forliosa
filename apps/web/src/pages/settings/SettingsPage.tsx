@@ -37,6 +37,8 @@ import { usePrefs } from "@/stores/prefs"
 import { FormField as Field } from "@/components/form-field"
 import { Pct } from "@/components/finance"
 import { usePageTitle } from "@/app/page-title"
+import { appToday } from "@/api"
+import { userPlanLabel } from "@/lib/plan"
 
 
 export function SettingsPage() {
@@ -57,6 +59,8 @@ function Settings() {
       <PageHeader title="設定" className="mb-0" />
 
       <Profile />
+
+      <PlanSettings />
 
       <Group title="顯示">
         <Row
@@ -144,6 +148,21 @@ function Settings() {
       {/* 資料來源：一頁一個頁尾（設定頁沒有自己的資料，就是連到完整顯名聲明） */}
       <SourcesFooter className="max-w-measure" />
     </PageFrame>
+  )
+}
+
+/**
+ * 方案（產品負責人 2026-11-16 決定 14）：「會員，到 12/31」、沒有到期日的「會員」或「免費」，只有這一行。
+ * 還沒有付款，會員由站方開通；群組的加值寫在那個群組的「成員」分頁（群組設定）。舊版後端沒有 plan 時不出現。
+ */
+function PlanSettings() {
+  const me = useMe()
+  const plan = me.data?.plan
+  if (!plan) return null
+  return (
+    <Group title="方案">
+      <Row label={userPlanLabel(plan, appToday())}>{null}</Row>
+    </Group>
   )
 }
 

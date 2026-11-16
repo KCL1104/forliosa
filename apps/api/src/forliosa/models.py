@@ -962,6 +962,9 @@ class Group(Base):
     ranking_enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+    # 群組加值包 (2026-11-16): groups that existed before the free cap went down to 15 keep this many members (50, set
+    # by migration 0023) whatever their plan; NULL for groups made later (``services.group_plans``).
+    grandfathered_member_cap: Mapped[int | None] = mapped_column(Integer, nullable=True)
 
 
 class GroupMember(Base):
@@ -1080,6 +1083,8 @@ class GroupChannel(Base):
     chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
     notify_trades: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_digest: Mapped[bool] = mapped_column(Boolean, default=True)
+    # 群組 AI 日報 pushes (boosted groups): off unless the owner turns it on (2026-11-16)
+    notify_daily: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     configured_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     configured_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
@@ -1102,12 +1107,58 @@ class NotificationOutbox(Base):
     transaction_id: Mapped[str | None] = mapped_column(ForeignKey("transactions.id", ondelete="CASCADE"),
                                                        nullable=True, index=True)
     digest_id: Mapped[str | None] = mapped_column(ForeignKey("group_digests.id", ondelete="CASCADE"), nullable=True)
+    # kind "daily": the 群組 AI 日報 (no foreign key: the column was added to an existing table; the report's purge
+    # deletes its rows, and a row whose report is gone is cancelled)
+    daily_report_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(10), default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     not_before: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     last_error: Mapped[str | None] = mapped_column(String(200), nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     sent_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class GroupPass(Base):
+    """群組加值包 (2026-11-16, ``services.group_plans``): one boost a site admin granted to a payer (no payments yet),
+    attached to one group the payer owns (``group_id``; NULL until the payer picks one). The group stays boosted until
+    ``until`` (exclusive: 00:00 Taipei after the last day) even when the payer hands the group over or deletes their
+    account (``payer_id`` SET NULL); a deleted group hands the pass back to the payer unattached. ``note`` is the
+    admin's own note; ``source`` manual (payments later)."""
+
+    __tablename__ = "group_passes"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payer_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
+    group_id: Mapped[str | None] = mapped_column(ForeignKey("groups.id", ondelete="SET NULL"), nullable=True,
+                                                 index=True)
+    until: Mapped[datetime] = mapped_column(TZDateTime)
+    note: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    source: Mapped[str] = mapped_column(String(16), default="manual")
+    attached_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class GroupDailyReport(Base):
+    """群組 AI 日報 (2026-11-16, ``services.group_daily``): one per boosted group and Taiwan trading day. ``facts`` are
+    stored by ``user_id`` like the weekly digest's and filtered by the current memberships and share settings on every
+    read. ``status``: pending (AI paragraph being written) | ready | failed (facts only). Deleted after 30 days."""
+
+    __tablename__ = "group_daily_reports"
+    __table_args__ = (UniqueConstraint("group_id", "trading_day", name="uq_group_daily_day"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
+    trading_day: Mapped[date] = mapped_column(Date)
+    status: Mapped[str] = mapped_column(String(12), default="pending")
+    summary: Mapped[str] = mapped_column(Text, default="")
+    facts: Mapped[dict] = mapped_column(JSON, default=dict)
+    sources: Mapped[list] = mapped_column(JSON, default=list)
+    model: Mapped[str] = mapped_column(String(64), default="")
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
 
 
 class TelegramLinkCode(Base):

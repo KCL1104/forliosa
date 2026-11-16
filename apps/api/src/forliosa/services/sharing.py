@@ -878,3 +878,131 @@ def digest_summary_visible(facts: dict[str, Any], members: list[Member], pushing
 def digest_summary_pushable(facts: dict[str, Any], members: list[Member]) -> bool:
     """:func:`digest_summary_visible` for a channel: every contributor must also push."""
     return digest_summary_visible(facts, members, pushing_only=True)
+
+
+# -- 群組 AI 日報 facts (``services.group_daily``; boosted groups) -----------------------------------------------------
+DAILY_FLAT = 0.0005  # a day return under 0.05% either way counts as flat (it reads 0.0%)
+DAILY_WHY_MIN = 0.005  # a common holding that moved at least 0.5% either way gets a 「為什麼漲跌」 link …
+DAILY_WHY_MAX = 3  # … at most this many, the largest moves first
+
+
+def _closed_on(md: MarketData, symbol: str, day: date) -> bool:
+    lo = day - timedelta(days=10)
+    hist = md.index_history(symbol, lo, day) if symbol.startswith("^") else md.history(symbol, lo, day)
+    return bool(hist.candles) and hist.candles[-1].t == day
+
+
+def _day_moves(md: MarketData, symbols: list[str], day: date) -> dict[str, float | None]:
+    """The day's move of each Taiwan symbol (public market data): the quote's change against the reference price when
+    the quote is of ``day`` (ex-dividend days included), else the day's close against the previous close. US symbols
+    and symbols without a close on ``day``: None."""
+    from forliosa.marketdata.base import market_of_symbol
+    from forliosa.services.instruments import quote_out
+
+    tw = [s for s in symbols if market_of_symbol(s) != "US"]
+    quotes = md.quotes(tw) if tw else {}
+    out: dict[str, float | None] = {s: None for s in symbols}
+    for s in tw:
+        q = quotes.get(s)
+        value: float | None = None
+        if q is not None and q.trade_date == day:
+            value = quote_out(q)["change_pct"]
+        else:
+            candles = md.history(s, day - timedelta(days=14), day).candles
+            if len(candles) >= 2 and candles[-1].t == day and candles[-2].c:
+                value = float(candles[-1].c / candles[-2].c - 1)
+        out[s] = pct(value) if value is not None else None
+    return out
+
+
+def digest_day_facts(db: Session, md: MarketData, members: list[Member], day: date) -> tuple[dict[str, Any], list[str]]:
+    """One group's trading day ``day``, computed from the projection like :func:`digest_week_facts`: the day return
+    (the leaderboard's 今日: from the previous session's close) of members who share ``returns``; the held symbols of
+    those who share ``holdings``, with each Taiwan symbol's move that day (public market data); the day's feed trades
+    of those who share ``trades`` — side and symbol only, never quantities, prices or accounts (imported statement rows
+    never); and the benchmarks' day returns (None when the benchmark has no close of ``day`` yet). Stored **by
+    user_id**; :func:`daily_facts_view` filters them by the current memberships and toggles on every read."""
+    base = last_tw_trading_day(day - timedelta(days=1))
+    window = window_for(md, {"day": base}, day)
+    proj = Projector(db, md, window)
+    returns, holdings, trades = [], [], []
+    symbols: dict[str, dict[str, Any]] = {}
+    is_demo = False
+    for m in members:
+        if m.shares("returns"):
+            returns.append({"user_id": m.user_id, "day_return_pct": pct(proj.period_returns(m.user)["day"])})
+            is_demo |= proj.is_demo(m.user)
+        if m.shares("holdings"):
+            hs = holdings_list(proj.state(m.user))
+            is_demo |= proj.is_demo(m.user)
+            holdings.append({"user_id": m.user_id, "symbols": [h["symbol"] for h in hs]})
+            for h in hs:
+                symbols[h["symbol"]] = {"name": h["name"]}
+    for sym, move in _day_moves(md, sorted(symbols), day).items():
+        symbols[sym]["day_change_pct"] = move
+    sharing_trades = [m.user_id for m in members if m.shares("trades")]
+    if sharing_trades:
+        items: dict[str, list[dict[str, str]]] = {uid: [] for uid in sharing_trades}
+        for t in db.scalars(select(Transaction).where(
+                Transaction.user_id.in_(sharing_trades), Transaction.type.in_(FEED_SIDES),
+                Transaction.source.in_(FEED_SOURCES), Transaction.note != CONVERTED_NOTE,
+                Transaction.trade_date == day).order_by(Transaction.created_at, Transaction.id)):
+            if feed_eligible(t) and t.symbol:
+                items[t.user_id].append({"side": t.type, "symbol": t.symbol})
+                if t.symbol not in symbols:
+                    info = md.instrument(t.symbol)
+                    symbols[t.symbol] = {"name": info.name if info else t.symbol}
+        trades = [{"user_id": uid, "count": len(items[uid]), "items": items[uid]} for uid in sharing_trades]
+    bench, sources, bench_demo, notes = _benchmark_period_returns(md, window)
+    benchmarks = []
+    for b in bench:
+        value = pct(b["_returns"]["day"])
+        if value is not None and not _closed_on(md, b["symbol"], day):
+            value = None
+            notes.append(f"還沒有{b['name']}這一天的收盤，不能比較")
+        benchmarks.append({"symbol": b["symbol"], "name": b["name"], "day_return_pct": value})
+    facts = {
+        "v": 1, "trading_day": day.isoformat(), "base_date": window.starts["day"].isoformat(),
+        "returns": returns, "holdings": holdings, "symbols": symbols, "trades": trades, "benchmarks": benchmarks,
+        "notes": notes, "is_demo": is_demo or bench_demo,
+    }
+    return facts, labels(["ledger", *sources])
+
+
+def daily_facts_view(facts: dict[str, Any], members: list[Member], pushing_only: bool = False) -> dict[str, Any]:
+    """A stored daily report's facts as members see them **now** (``pushing_only``: what a channel may show): day
+    returns with display names, the benchmarks, symbols two or more of them hold with that day's move, the day's
+    trades without names (side and stock, merged), and the common holdings that moved the most (「為什麼漲跌」
+    links)."""
+    by_id = {m.user_id: m for m in members}
+    returns = []
+    for r in facts.get("returns", []):
+        m = _allowed(by_id, r["user_id"], "returns", pushing_only)
+        if m is not None:
+            returns.append({"user_id": m.user_id, "display_name": m.user.display_name,
+                            "day_return_pct": r["day_return_pct"]})
+    info = facts.get("symbols", {})
+    holders: dict[str, set[str]] = defaultdict(set)
+    for h in facts.get("holdings", []):
+        if _allowed(by_id, h["user_id"], "holdings", pushing_only) is not None:
+            for sym in h["symbols"]:
+                holders[sym].add(h["user_id"])
+    common = [{"symbol": s, "name": (info.get(s) or {}).get("name") or s, "holder_count": len(u),
+               "day_change_pct": (info.get(s) or {}).get("day_change_pct")} for s, u in holders.items() if len(u) >= 2]
+    common.sort(key=lambda c: (-c["holder_count"], c["symbol"]))
+    merged: dict[tuple[str, str], dict[str, Any]] = {}
+    for t in facts.get("trades", []):
+        if _allowed(by_id, t["user_id"], "trades", pushing_only) is None:
+            continue
+        for it in t.get("items", []):
+            cell = merged.setdefault((it["side"], it["symbol"]), {
+                "side": it["side"], "symbol": it["symbol"],
+                "name": (info.get(it["symbol"]) or {}).get("name") or it["symbol"], "count": 0})
+            cell["count"] += 1
+    trades = list(merged.values())
+    moved = [c for c in common if c["day_change_pct"] is not None and abs(c["day_change_pct"]) >= DAILY_WHY_MIN]
+    moved.sort(key=lambda c: (-abs(c["day_change_pct"]), c["symbol"]))
+    return {"returns": returns, "benchmarks": list(facts.get("benchmarks", [])), "common_holdings": common,
+            "trades": trades, "trades_count": sum(t["count"] for t in trades),
+            "why": [{"symbol": c["symbol"], "name": c["name"], "day_change_pct": c["day_change_pct"]}
+                    for c in moved[:DAILY_WHY_MAX]]}

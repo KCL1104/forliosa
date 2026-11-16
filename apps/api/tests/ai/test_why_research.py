@@ -1,0 +1,367 @@
+"""Shared research behind 「X 今天為什麼漲／跌」 (``forliosa.ai.research``, 產品負責人 2026-11-16): one entry per stock,
+trading session and phase, written by a why-turn that searched, read by the next why-turn of anyone — as citable
+``search_result`` blocks plus the facts and a rule in the system message — and never holding anything of a user's."""
+
+from __future__ import annotations
+
+import dataclasses
+import json
+from datetime import date, datetime, timedelta
+
+import pytest
+from sqlalchemy import inspect
+from sqlalchemy.orm import Session
+
+from forliosa.ai import research
+from forliosa.ai import tools as tools_mod
+from forliosa.config import get_settings
+from forliosa.models import AiMessage, AiWhyResearch, PriceDaily, User
+from forliosa.timeutil import NEW_YORK, TAIPEI, now_taipei
+from tests.ai.conftest import chat
+from tests.ai.fake_anthropic import search_citation, server_tool_use, text, tool_use, web_search_result
+
+NOW = datetime(2026, 11, 16, 10, 0, tzinfo=TAIPEI)  # Monday, 盤中
+PAGE = {"route": "/stock/2308.TW", "symbol": "2308.TW"}
+A = "https://news.cnyes.com/news/id/1"
+B = "https://www.cna.com.tw/news/2"
+C = "https://example.com/unrelated"
+D = "https://money.udn.com/money/story/4"
+OVERVIEW = {"symbol": "2308.TW", "code": "2308", "name": "台達電", "market": "TWSE", "industry": "電子零組件業",
+            "english_name": "Delta Electronics", "summary": "公司簡介不分享",
+            "quote": {"price": 1180.0, "change_pct": -0.069, "trade_date": "2026-11-13"},
+            "market_context": {"taiex": {"name": "發行量加權股價指數", "date": "2026-11-13", "change_pct": -0.031}},
+            "why_signals": ["今天下跌 6.9%"], "recent_dividends": [{"year": 2026, "cash_dividend": 6}]}
+
+
+def location(url: str, title: str, cited: str, index: int) -> dict:
+    return {"type": "search_result_location", "source": url, "title": title, "cited_text": cited,
+            "search_result_index": index, "start_block_index": 0, "end_block_index": 1}
+
+
+@pytest.fixture()
+def overview(monkeypatch):
+    """``get_stock_overview`` answers with OVERVIEW (the demo data has no index closes)."""
+    spec = tools_mod.TOOLS_BY_NAME["get_stock_overview"]
+    monkeypatch.setitem(tools_mod.TOOLS_BY_NAME, "get_stock_overview",
+                        dataclasses.replace(spec, handler=lambda ctx, args: dict(OVERVIEW)))
+
+
+def cold_answer(fake, answer: str = "台達電今天跌 6.9%，大盤跌 3.1%。") -> None:
+    """Round 1: the overview; round 2: one web search and an answer citing two of its results."""
+    fake.reply(tool_use("toolu_o", "get_stock_overview", {"symbol": "2308"}), stop_reason="tool_use")
+    fake.reply(server_tool_use("srvtoolu_1", "web_search", {"query": "台達電 股價 重挫"}),
+               web_search_result("srvtoolu_1", [
+                   {"url": A, "title": "台達電重挫 外資調降目標價", "encrypted_content": "E1", "page_age": "2 hours ago"},
+                   {"url": B, "title": "台股盤中重挫逾 300 點", "encrypted_content": "E2"},
+                   {"url": C, "title": "無關的新聞", "encrypted_content": "E3"},
+                   {"url": D, "title": "台達電法說會後連兩天下跌", "encrypted_content": "E4"}]),
+               text(answer, [search_citation(B, "台股盤中重挫逾 300 點", "加權指數盤中跌 3.1%"),
+                             search_citation(A, "台達電重挫 外資調降目標價", "台達電股價重挫 6.9%")]),
+               text("外資調降目標價。", [search_citation(A, "台達電重挫 外資調降目標價", "外資把目標價調降")]))
+
+
+def row(engine, key: research.Key | None = None) -> AiWhyResearch | None:
+    key = key or research.key_for("2308.TW", now_taipei())
+    with Session(engine) as db:
+        r = db.get(AiWhyResearch, (key.symbol, key.session, key.phase))
+        if r is not None:
+            db.expunge(r)
+        return r
+
+
+# -- the key and its time to live -----------------------------------------------------------------------------
+@pytest.mark.parametrize(("at", "session", "phase"), [
+    (datetime(2026, 11, 16, 9, 0), date(2026, 11, 16), "intraday"),
+    (datetime(2026, 11, 16, 13, 29), date(2026, 11, 16), "intraday"),
+    (datetime(2026, 11, 16, 13, 30), date(2026, 11, 16), "after_close"),
+    (datetime(2026, 11, 16, 23, 0), date(2026, 11, 16), "after_close"),
+    (datetime(2026, 11, 17, 8, 59), date(2026, 11, 16), "after_close"),  # before the open: the previous session
+    (datetime(2026, 11, 14, 12, 0), date(2026, 11, 13), "after_close"),  # Saturday: Friday's
+])
+def test_taiwan_sessions_and_phases(at, session, phase):
+    key = research.key_for("2308.TW", at.replace(tzinfo=TAIPEI))
+    assert (key.session, key.phase, key.market) == (session, phase, "TWSE")
+    assert research.key_for("6488.TWO", at.replace(tzinfo=TAIPEI)).market == "TPEX"
+
+
+def test_us_sessions_use_new_york_dates():
+    open_ny = datetime(2026, 11, 16, 10, 0, tzinfo=NEW_YORK)
+    key = research.key_for("NVDA", open_ny)
+    assert (key.market, key.session, key.phase) == ("US", date(2026, 11, 16), "intraday")
+    # Tuesday morning in Taipei: Monday's New York session has closed
+    key = research.key_for("NVDA", datetime(2026, 11, 17, 8, 0, tzinfo=TAIPEI))
+    assert (key.session, key.phase) == (date(2026, 11, 16), "after_close")
+
+
+def test_intraday_lives_45_minutes_and_after_close_until_the_next_open():
+    s = get_settings()
+    intraday = research.key_for("2308.TW", NOW)
+    assert research.expires_for(intraday, NOW, s) == NOW + timedelta(minutes=45)
+    friday = research.key_for("2308.TW", datetime(2026, 11, 13, 15, 0, tzinfo=TAIPEI))
+    assert research.expires_for(friday, NOW, s) == datetime(2026, 11, 16, 9, 0, tzinfo=TAIPEI)
+    us = research.key_for("NVDA", datetime(2026, 11, 14, 12, 0, tzinfo=TAIPEI))  # Friday 11/13 in New York
+    assert research.next_open(us) == datetime(2026, 11, 16, 9, 30, tzinfo=NEW_YORK)
+
+
+def _entry(**kw) -> AiWhyResearch:
+    base = {"symbol": "2308.TW", "session": date(2026, 11, 16), "phase": "after_close", "market": "TWSE",
+            "sources": [{"url": A, "title": "t", "snippets": ["s"]}], "close_in": False,
+            "expires_at": datetime(2026, 11, 17, 9, 0, tzinfo=TAIPEI)}
+    return AiWhyResearch(**{**base, **kw})
+
+
+def test_freshness_ends_at_expiry_and_when_the_close_lands_after_it_was_written(engine):
+    evening = datetime(2026, 11, 16, 19, 0, tzinfo=TAIPEI)
+    with Session(engine) as db:
+        assert research.is_fresh(db, _entry(), evening)
+        assert not research.is_fresh(db, _entry(), datetime(2026, 11, 17, 9, 0, tzinfo=TAIPEI))
+        assert not research.is_fresh(db, _entry(sources=[]), evening)
+        # the session's close (official, same-day or interim) comes in: research written before it is redone
+        db.add(PriceDaily(symbol="2308.TW", date=date(2026, 11, 16), close=1180, source="shioaji-data"))
+        db.flush()
+        assert not research.is_fresh(db, _entry(), evening)
+        assert research.is_fresh(db, _entry(close_in=True), evening)  # written with the close: still good
+        intraday = _entry(phase="intraday", expires_at=NOW + timedelta(minutes=45))
+        assert research.is_fresh(db, intraday, NOW + timedelta(minutes=44))
+        assert not research.is_fresh(db, intraday, NOW + timedelta(minutes=46))
+
+
+# -- the question ----------------------------------------------------------------------------------------------
+@pytest.mark.parametrize(("message", "why"), [
+    ("台達電今天為啥跌這麼多?", True), ("為什麼漲停", True), ("台積電怎麼了", True), ("鴻海今天大跌原因", True),
+    ("台積電的股價是多少", False), ("幫我記一筆買進", False), ("為什麼要分散投資", False),
+])
+def test_why_questions(message, why):
+    assert research.is_why_question(message) is why
+
+
+@pytest.mark.parametrize(("message", "page", "expected"), [
+    ("台達電今天為啥跌這麼多?", None, "2308.TW"),
+    ("為什麼跌這麼多", "2308.TW", "2308.TW"),  # the page's stock
+    ("台積電為什麼漲", "2308.TW", "2330.TW"),  # the message names another one: that one
+    ("2330 為什麼漲停", None, "2330.TW"),
+    ("台雞電為什麼跌", None, "2330.TW"),
+    ("大盤今天為什麼跌", "2308.TW", None),  # about the market, not the page's stock
+    ("我的持股為什麼跌", "2308.TW", None),
+    ("台積電跟台達電為什麼一起跌", None, None),  # two stocks
+    ("台達電跌到 1180 了為什麼", None, "2308.TW"),  # a price is not a code
+    ("台達電最近為什麼一直跌", None, None),  # another period than the session
+    ("台達電連跌三天的原因", None, None),
+    ("台達電 11/13 為什麼跌", None, None),
+    ("台達電 11/16 為什麼跌", None, "2308.TW"),
+    ("台達電昨天為什麼跌", None, None),  # the session is today
+    ("為什麼跌", None, None),  # no stock at all
+])
+def test_detect_finds_one_stock_on_this_session(market, message, page, expected):
+    found = research.detect(market, message, page, NOW)
+    assert (found[0].symbol if found else None) == expected
+
+
+def test_yesterday_is_the_session_before_the_open():
+    tuesday = datetime(2026, 11, 17, 8, 0, tzinfo=TAIPEI)
+    key = research.key_for("2308.TW", tuesday)
+    assert research.fits_session("台達電昨天為什麼跌", key, tuesday)
+    assert not research.fits_session("台達電昨天為什麼跌", research.key_for("2308.TW", NOW), NOW)
+
+
+# -- what is stored ----------------------------------------------------------------------------------------------
+def test_facts_keep_only_the_market_level_overview_fields():
+    msgs = [{"role": "assistant", "content": [tool_use("toolu_o", "get_stock_overview", {"symbol": "2308"})]},
+            {"role": "user", "content": [{"type": "tool_result", "tool_use_id": "toolu_o",
+                                          "content": json.dumps(OVERVIEW, ensure_ascii=False)}]}]
+    facts = research.facts_from(msgs, "2308.TW")
+    assert set(facts) == {"symbol", "name", "market", "industry", "english_name", "quote", "market_context",
+                          "why_signals"}
+    assert research.facts_from(msgs, "2330.TW") is None  # another stock's overview
+    msgs[1]["content"][0]["content"] = '{"symbol":"2308.TW","name":"台達電…（資料過長已截斷）'
+    assert research.facts_from(msgs, "2308.TW") is None
+
+
+def test_sources_put_the_company_first_then_the_index_and_add_uncited_titles_naming_it(market):
+    info = market.instrument("2308.TW")
+    cites = [{"url": C, "title": "無關", "cited_text": "別的事"},
+             {"url": B, "title": "台股盤中重挫", "cited_text": "加權指數盤中跌 3.1%"},
+             {"url": A, "title": "台達電重挫", "cited_text": "台達電股價重挫 6.9%"},
+             {"url": A, "title": "台達電重挫", "cited_text": "外資調降目標價"},
+             {"url": "forliosa://x", "title": "x", "cited_text": "y"}]
+    results = [{"url": A, "title": "台達電重挫", "page_age": "2 hours ago"}, {"url": D, "title": "台達電法說會"},
+               {"url": "https://example.com/q", "title": "無關標題"}]
+    out = research.sources_from(cites, results, {B: "中央社"}, info, None, NOW)
+    assert [s["url"] for s in out] == [A, B, C, D]
+    assert out[0]["snippets"] == ["台達電股價重挫 6.9%", "外資調降目標價"] and out[0]["page_age"] == "2 hours ago"
+    assert out[1]["outlet"] == "中央社" and out[3]["snippets"] == []  # an uncited result: its title only
+    assert out[0]["found_at"] == "2026-11-16T10:00+08:00"
+
+
+def test_search_result_blocks_cite_each_passage_and_fall_back_to_the_title():
+    entry = research.Research(facts=None, sources=[{"url": A, "title": "台達電重挫", "snippets": ["一", "二"]},
+                                                   {"url": D, "title": "台達電法說會", "snippets": []},
+                                                   {"url": B, "title": "", "snippets": ["三"]}],
+                              one_liner=None, updated_at=NOW, searches=1)
+    assert research.blocks(entry) == [
+        {"type": "search_result", "source": A, "title": "台達電重挫", "citations": {"enabled": True},
+         "content": [{"type": "text", "text": "一"}, {"type": "text", "text": "二"}]},
+        {"type": "search_result", "source": D, "title": "台達電法說會", "citations": {"enabled": True},
+         "content": [{"type": "text", "text": "台達電法說會"}]},
+        {"type": "search_result", "source": B, "title": "cna.com.tw", "citations": {"enabled": True},
+         "content": [{"type": "text", "text": "三"}]}]
+
+
+def test_the_stock_page_sentence_seeds_its_session_without_reviving_old_research(engine):
+    s = get_settings()
+    evening = datetime(2026, 11, 16, 19, 0, tzinfo=TAIPEI)
+    cites = [{"url": B, "title": "中央社", "cited_text": "法說會下修展望"}]
+    with Session(engine) as db:
+        seeded = research.seed_from_why(db, "2308.TW", date(2026, 11, 16), "法說會下修展望，股價重挫。", cites,
+                                        evening, s)
+        assert seeded.one_liner == "法說會下修展望，股價重挫。" and seeded.phase == "after_close"
+        assert [x["url"] for x in seeded.sources] == [B] and seeded.searches == 0
+        # a chat's research of the same session goes first; a later seed only adds after it
+        key = research.Key("2308.TW", "TWSE", date(2026, 11, 16), "after_close")
+        research._upsert(db, key, evening, s, sources=[{"url": A, "title": "a", "snippets": ["x"]}], searches=2)
+        research.seed_from_why(db, "2308.TW", date(2026, 11, 16), "另一句。", [{"url": D, "title": "d"}], evening, s)
+        got = db.get(AiWhyResearch, ("2308.TW", date(2026, 11, 16), "after_close"))
+        assert [x["url"] for x in got.sources] == [A, B, D] and got.searches == 2
+        # a past session (the next one has opened) is not seeded
+        assert research.seed_from_why(db, "2308.TW", date(2026, 11, 13), "x", cites, evening, s) is None
+
+
+# -- through the chat ------------------------------------------------------------------------------------------
+def test_a_why_turn_that_searched_stores_market_level_research_only(client, pool, fake, engine, overview):
+    cold_answer(fake, "台達電今天跌 6.9%，大盤跌 3.1%。你 1,150 元買的部位帳面虧損 30,000 元。")
+    status, events = chat(client, "我 1150 元買的台達電今天為啥跌這麼多？", page=PAGE)
+    assert status == 200 and not any(n == "error" for n, _ in events)
+    # the cold turn searched as before: nothing was injected
+    first = fake.requests[0]["body"]["messages"][0]["content"]
+    assert [b["type"] for b in first] == ["text"]
+
+    r = row(engine)
+    assert r is not None and r.market == "TWSE" and r.searches == 1 and r.hits == 0
+    assert [s["url"] for s in r.sources] == [A, B, D]  # cited (company, index), then a title naming the company
+    assert r.sources[0]["snippets"] == ["台達電股價重挫 6.9%", "外資把目標價調降"]
+    assert r.facts["quote"]["change_pct"] == -0.069 and "summary" not in r.facts
+    assert "recent_dividends" not in r.facts
+    # nothing of the user: no user column, and not their message, their numbers, their id or the answer text
+    assert {c.key for c in inspect(AiWhyResearch).mapper.column_attrs} == {
+        "symbol", "session", "phase", "market", "facts", "sources", "one_liner", "close_in", "searches", "hits",
+        "created_at", "updated_at", "expires_at"}
+    with Session(engine) as db:
+        user = db.query(User).filter_by(email="demo@forliosa.local").one()
+        dumped = json.dumps([r.facts, r.sources, r.one_liner], ensure_ascii=False)
+        for private in ("1150", "1,150", "30,000", "帳面虧損", "你 1", user.id, user.email, "為啥跌這麼多"):
+            assert private not in dumped
+
+
+def test_the_next_asker_gets_the_research_as_citable_search_results(client, other_client, pool, fake, engine,
+                                                                     overview):
+    cold_answer(fake)
+    assert chat(client, "台達電今天為啥跌這麼多?", page=PAGE)[0] == 200
+    cold_calls = len(fake.requests)
+
+    # another user, another thread: one model call, no tools needed, citing the shared sources
+    fake.reply(text("台達電今天跌 6.9%，大盤跌 3.1%，跌幅是大盤的兩倍。",
+                    [location(A, "台達電重挫 外資調降目標價", "台達電股價重挫 6.9%", 0)]),
+               text("公司宣布明年擴產。"))
+    status, events = chat(other_client, "台達電今天為什麼跌這麼多？")
+    assert status == 200
+    assert len(fake.requests) == cold_calls + 1
+    body = fake.requests[-1]["body"]
+    user = body["messages"][0]["content"]
+    assert [b["type"] for b in user] == ["search_result"] * 3 + ["text"]
+    assert user[-1] == {"type": "text", "text": "台達電今天為什麼跌這麼多？"}
+    assert user[0] == {"type": "search_result", "source": A, "title": "台達電重挫 外資調降目標價",
+                       "citations": {"enabled": True},
+                       "content": [{"type": "text", "text": "台達電股價重挫 6.9%"},
+                                   {"type": "text", "text": "外資把目標價調降"}]}
+    system = body["messages"][1]
+    assert system["role"] == "system" and "今天的共用研究" in system["content"]
+    assert "不用再呼叫 get_stock_overview、get_news 或 web_search" in system["content"]
+    assert '"change_pct":-0.069' in system["content"] and "2 hours ago" in system["content"]
+    assert "盤中" in system["content"] or "收盤後" in system["content"]
+    # web search is still offered (a newer-news follow-up may need it) and the frozen system prompt is unchanged
+    assert any(t.get("name") == "web_search" for t in body["tools"])
+    assert body["system"] == fake.requests[0]["body"]["system"]
+
+    steps = [d for n, d in events if n == "tool"]
+    assert steps[0]["name"] == "shared_research" and steps[0]["label"].startswith("沿用 ")
+    cites = [d for n, d in events if n == "citation"]
+    assert cites == [{"url": A, "title": "台達電重挫 外資調降目標價", "cited_text": "台達電股價重挫 6.9%"}]
+    # checked like a web-search answer: the cited sentence passes, the uncited news claim is flagged
+    flagged = [d for n, d in events if n == "grounding"][0]["items"]
+    assert [f["text"] for f in flagged] == ["公司宣布明年擴產。"]
+    r = row(engine)
+    assert r.hits == 1 and r.searches == 1  # answered from it: not rewritten
+
+
+def test_the_thread_replays_the_shared_research_unchanged(client, other_client, pool, fake, engine, overview):
+    cold_answer(fake)
+    chat(client, "台達電今天為啥跌這麼多?", page=PAGE)
+    fake.reply(text("台達電今天跌 6.9%。", [location(A, "台達電重挫 外資調降目標價", "台達電股價重挫 6.9%", 0)]))
+    events = chat(other_client, "台達電為什麼跌？")[1]
+    thread_id = next(d["id"] for n, d in events if n == "thread")
+    injected = fake.requests[-1]["body"]["messages"][0]
+    fake.reply(text("外資最近賣超。"))
+    assert chat(other_client, "那外資怎麼看？", thread_id=thread_id)[0] == 200
+    replay = fake.requests[-1]["body"]["messages"]
+    assert replay[0] == injected
+    assert replay[2]["role"] == "assistant" and replay[2]["content"][0]["citations"][0]["source"] == A
+    assert [b["type"] for b in replay[3]["content"]] == ["text"]  # the follow-up is not a why-question
+    # the history view shows what the user typed, not the injected sources
+    detail = other_client.get(f"/api/v1/ai/threads/{thread_id}").json()
+    assert detail["messages"][0]["text"] == "台達電為什麼跌？"
+    with Session(engine) as db:
+        stored = db.query(AiMessage).filter_by(thread_id=thread_id, is_user_input=True).first()
+        assert stored.content[0]["type"] == "search_result"
+
+
+def test_a_warm_turn_that_searches_again_puts_the_new_sources_first(client, other_client, pool, fake, engine,
+                                                                    overview):
+    cold_answer(fake)
+    chat(client, "台達電今天為啥跌這麼多?", page=PAGE)
+    before = row(engine)
+    new = "https://www.reuters.com/delta"
+    fake.reply(server_tool_use("srvtoolu_2", "web_search", {"query": "Delta Taiwan 2308 shares"}),
+               web_search_result("srvtoolu_2", [{"url": new, "title": "Delta Electronics shares slide",
+                                                 "encrypted_content": "E5"}]),
+               text("外電說台達電訂單遞延。", [search_citation(new, "Delta Electronics shares slide", "Delta shares fell")]))
+    chat(other_client, "台達電為什麼跌？有更新的消息嗎")
+    after = row(engine)
+    assert [s["url"] for s in after.sources][:2] == [new, A]
+    assert after.searches == 2 and after.updated_at >= before.updated_at
+    assert after.facts == before.facts  # this turn did not read the overview: the facts stay
+
+
+def test_missing_or_stale_research_means_the_turn_researches_as_before(client, other_client, pool, fake, engine,
+                                                                       overview):
+    cold_answer(fake)
+    chat(client, "台達電今天為啥跌這麼多?", page=PAGE)
+    key = research.key_for("2308.TW", now_taipei())
+    with Session(engine) as db:
+        r = db.get(AiWhyResearch, (key.symbol, key.session, key.phase))
+        r.expires_at = now_taipei() - timedelta(minutes=1)
+        db.commit()
+    fake.reply(text("好的。"))
+    chat(other_client, "台達電為什麼跌？")
+    assert [b["type"] for b in fake.requests[-1]["body"]["messages"][0]["content"]] == ["text"]
+    assert "今天的共用研究" not in fake.requests[-1]["body"]["messages"][1]["content"]
+
+
+def test_deep_search_neither_reads_nor_writes_it(client, other_client, pool, fake, engine, overview):
+    cold_answer(fake)
+    chat(client, "台達電今天為啥跌這麼多?", page=PAGE)
+    before = row(engine)
+    fake.reply(server_tool_use("srvtoolu_9", "web_search", {"query": "台達電"}),
+               web_search_result("srvtoolu_9", [{"url": "https://x.com/deep", "title": "台達電深入",
+                                                 "encrypted_content": "E"}]),
+               text("深入整理。", [search_citation("https://x.com/deep", "台達電深入", "深入")]))
+    assert chat(other_client, "台達電今天為什麼跌", mode="deep")[0] == 200
+    assert [b["type"] for b in fake.requests[-1]["body"]["messages"][0]["content"]] == ["text"]
+    after = row(engine)
+    assert after.sources == before.sources and after.hits == 0
+
+
+def test_switched_off_it_is_not_used(client, other_client, pool, fake, engine, overview, ai_env):
+    ai_env(AI_RESEARCH_CACHE="false")
+    cold_answer(fake)
+    chat(client, "台達電今天為啥跌這麼多?", page=PAGE)
+    assert row(engine) is None

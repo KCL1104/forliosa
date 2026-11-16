@@ -16,13 +16,17 @@ export interface LedgerSearch {
   symbol?: string
 }
 
-/** 群組頁的分頁：排行・動態・討論・持股・週報・分享・成員・頻道 */
+/** 群組頁的分頁：排行・動態・討論・持股・報告・分享・成員・頻道（「報告」的值沿用 digests：以前的連結照樣打得開） */
 export const GROUP_TABS = ["ranking", "feed", "discussions", "holdings", "digests", "share", "members", "channels"] as const
 export type GroupTab = (typeof GROUP_TABS)[number]
+/** 「報告」分頁的日報／週報 */
+export type GroupReport = "daily" | "weekly"
 export interface GroupSearch {
   tab?: GroupTab
   /** 動態：只看一位成員 */
   member?: string
+  /** 報告：日報或週報（沒有時：有日報的群組是日報，其他是週報） */
+  report?: GroupReport
 }
 export interface LoginSearch {
   next?: string
@@ -120,6 +124,7 @@ const groupRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): GroupSearch => ({
     tab: GROUP_TABS.includes(s.tab as GroupTab) && s.tab !== "ranking" ? (s.tab as GroupTab) : undefined,
     member: typeof s.member === "string" && s.member ? s.member : undefined,
+    report: s.report === "daily" || s.report === "weekly" ? s.report : undefined,
   }),
   component: lazyRouteComponent(() => import("@/pages/groups/GroupPage"), "GroupPage"),
 })

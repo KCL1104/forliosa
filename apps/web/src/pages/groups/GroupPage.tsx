@@ -20,7 +20,7 @@ import { usePageTitle } from "@/app/page-title"
 const FeedTab = lazy(() => import("./tabs/FeedTab").then((m) => ({ default: m.FeedTab })))
 const DiscussionsTab = lazy(() => import("./tabs/DiscussionsTab").then((m) => ({ default: m.DiscussionsTab })))
 const HoldingsTab = lazy(() => import("./tabs/HoldingsTab").then((m) => ({ default: m.HoldingsTab })))
-const DigestsTab = lazy(() => import("./tabs/DigestsTab").then((m) => ({ default: m.DigestsTab })))
+const ReportsTab = lazy(() => import("./tabs/ReportsTab").then((m) => ({ default: m.ReportsTab })))
 const ShareTab = lazy(() => import("./tabs/ShareTab").then((m) => ({ default: m.ShareTab })))
 const MembersTab = lazy(() => import("./tabs/MembersTab").then((m) => ({ default: m.MembersTab })))
 const ChannelsTab = lazy(() => import("./tabs/ChannelsTab").then((m) => ({ default: m.ChannelsTab })))
@@ -30,13 +30,16 @@ const TABS: { value: GroupTab; label: string }[] = [
   { value: "feed", label: "動態" },
   { value: "discussions", label: "討論" },
   { value: "holdings", label: "持股" },
-  { value: "digests", label: "週報" },
+  { value: "digests", label: "報告" },
   { value: "share", label: "分享" },
   { value: "members", label: "成員" },
   { value: "channels", label: "頻道" },
 ]
 
-/** 一個群組：名稱與成員數 → sticky 分頁（排行・動態・討論・持股・週報・分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源） */
+/**
+ * 一個群組：名稱與成員數 → sticky 分頁（排行・動態・討論・持股・報告・分享・成員・頻道）→ 頁尾資料來源（分頁登記的來源）。
+ * 「報告」是原本的「週報」（群組加值包第一階段多了日報，放在同一個分頁裡切換，不加第九個分頁）。
+ */
 export function GroupPage() {
   const readOnly = useReadOnly()
   if (readOnly) return <ViewAsBlocked title="群組" />
@@ -150,7 +153,7 @@ function Loaded({ group, tab, member }: { group: Group; tab: GroupTab; member?: 
           {tab === "feed" && <FeedTab group={group} member={member} />}
           {tab === "discussions" && <DiscussionsTab group={group} />}
           {tab === "holdings" && <HoldingsTab group={group} />}
-          {tab === "digests" && <DigestsTab group={group} />}
+          {tab === "digests" && <ReportsTab group={group} />}
           {tab === "share" && <ShareTab group={group} />}
           {tab === "members" && <MembersTab group={group} />}
           {tab === "channels" && <ChannelsTab group={group} />}

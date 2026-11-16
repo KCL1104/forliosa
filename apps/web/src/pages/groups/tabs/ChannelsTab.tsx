@@ -17,11 +17,13 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
 /**
  * 頻道：群組的 Discord（webhook）與 Telegram（bot）。每位成員都看得到推播到哪裡；只有擁有者可以設定。
  * 只會送出開了「推播」的成員所分享的內容。webhook 網址不顯示，只有最後 4 碼。
+ * 「日報」開關只在加值的群組出現（預設關，擁有者決定；群組加值包第一階段）；到期後已經打開的照樣列出，方便關掉。
  */
 export function ChannelsTab({ group }: { group: Group }) {
   const [linking, setLinking] = useState<TelegramLinkCode | null>(null)
   const channels = useChannels(group.id, { poll: !!linking })
   const owner = group.my_role === "owner"
+  const boosted = group.plan?.tier === "boosted"
   if (channels.isError) return <ErrorState error={channels.error} onRetry={() => void channels.refetch()} />
   if (!channels.data) return <SkeletonLines rows={6} />
   const c = channels.data
@@ -38,18 +40,18 @@ export function ChannelsTab({ group }: { group: Group }) {
         {c.discord.configured ? (
           <>
             {owner && c.discord.webhook_hint && <p className="num text-md text-ink-2">Webhook 網址結尾 {c.discord.webhook_hint}</p>}
-            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} />
+            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} daily={boosted || !!c.discord.notify_daily} />
             {owner && (
               // 「換一個 webhook」和「解除 Discord」同一列、中間留 24px（原本兩個行內元素直接貼在一起；2026-11-15 產品負責人回報）。
               // 展開成表單時表單佔滿一列，「解除」換到下一列
               <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-                <DiscordForm groupId={group.id} replacing />
+                <DiscordForm groupId={group.id} replacing daily={boosted} />
                 <Unlink groupId={group.id} kind="discord" className="" />
               </div>
             )}
           </>
         ) : owner ? (
-          <DiscordForm groupId={group.id} />
+          <DiscordForm groupId={group.id} daily={boosted} />
         ) : (
           <EmptyState flush title="還沒有設定" />
         )}
@@ -67,7 +69,9 @@ export function ChannelsTab({ group }: { group: Group }) {
                 {linked && <span className="ml-2 text-md text-ink-2">連結完成</span>}
               </p>
             )}
-            {c.telegram.configured && <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} />}
+            {c.telegram.configured && (
+              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} daily={boosted || !!c.telegram.notify_daily} />
+            )}
             {owner && (!c.telegram.configured || c.telegram.status === "disabled") && (
               <TelegramLink groupId={group.id} code={linked ? null : linking} onCode={setLinking} />
             )}
@@ -93,7 +97,20 @@ function Disabled({ reason, owner }: { reason: string | null; owner: boolean }) 
   )
 }
 
-function NotifyToggles({ groupId, kind, value, editable }: { groupId: string; kind: "discord" | "telegram"; value: Required<ChannelNotify>; editable: boolean }) {
+function NotifyToggles({
+  groupId,
+  kind,
+  value,
+  editable,
+  daily,
+}: {
+  groupId: string
+  kind: "discord" | "telegram"
+  value: ChannelNotify & { notify_trades: boolean; notify_digest: boolean }
+  editable: boolean
+  /** 有沒有「日報」這一列（加值群組，或已經打開的） */
+  daily: boolean
+}) {
   const patch = usePatchChannel(groupId, kind)
   const row = (key: keyof ChannelNotify, label: string, detail: string) => {
     const id = `${kind}-${key}`
@@ -107,7 +124,7 @@ function NotifyToggles({ groupId, kind, value, editable }: { groupId: string; ki
         </div>
         <Switch
           id={id}
-          checked={value[key]}
+          checked={value[key] ?? false}
           disabled={!editable || patch.isPending}
           onCheckedChange={(on) => patch.mutate({ [key]: on }, { onError: (err) => toast.error("沒有改成功", { description: errText(err) }) })}
         />
@@ -118,17 +135,19 @@ function NotifyToggles({ groupId, kind, value, editable }: { groupId: string; ki
     <div className="mt-2 border-t border-rule">
       {row("notify_trades", "交易動態", "成員的買賣，交易建立 15 分鐘後送出。")}
       {row("notify_digest", "週報", "每週六晚上的群組 AI 週報。")}
+      {daily && row("notify_daily", "日報", "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送。")}
     </div>
   )
 }
 
-/** 貼上 Discord 頻道的 webhook 網址；儲存前伺服器先送一則測試訊息 */
-function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: boolean }) {
+/** 貼上 Discord 頻道的 webhook 網址；儲存前伺服器先送一則測試訊息。日報（加值群組）預設不送 */
+function DiscordForm({ groupId, replacing, daily = false }: { groupId: string; replacing?: boolean; daily?: boolean }) {
   const put = usePutDiscord(groupId)
   const [open, setOpen] = useState(!replacing)
   const [url, setUrl] = useState("")
   const [trades, setTrades] = useState(true)
   const [digest, setDigest] = useState(true)
+  const [dailyOn, setDailyOn] = useState(false)
   const [error, setError] = useState<string | null>(null)
   if (!open) {
     return (
@@ -149,7 +168,7 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
         }
         setError(null)
         put.mutate(
-          { webhook_url: url.trim(), notify_trades: trades, notify_digest: digest },
+          { webhook_url: url.trim(), notify_trades: trades, notify_digest: digest, ...(daily ? { notify_daily: dailyOn } : {}) },
           {
             onSuccess: () => {
               setUrl("")
@@ -195,6 +214,12 @@ function DiscordForm({ groupId, replacing }: { groupId: string; replacing?: bool
           <Switch checked={digest} onCheckedChange={setDigest} />
           送週報
         </label>
+        {daily && (
+          <label className="flex items-center gap-2.5">
+            <Switch checked={dailyOn} onCheckedChange={setDailyOn} />
+            送日報
+          </label>
+        )}
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="sign" disabled={put.isPending || !url.trim()}>

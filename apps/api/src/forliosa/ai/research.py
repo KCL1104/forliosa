@@ -137,7 +137,7 @@ _WHAT_HAPPENED = re.compile(r"怎麼了|怎麼回事|發生什麼|發生了什�
 _N = r"[\d一二兩三四五六七八九十]+"
 _OTHER_TIME = re.compile(r"前天|上週|上周|上禮拜|上星期|這週|這周|本週|本周|這禮拜|這星期|這個月|本月|上個月|今年|去年|"
                          r"半年|一年|最近|近期|近日|這陣子|這幾天|這兩天|這幾週|幾個月|幾週|"
-                         rf"連(?:續)?\s*{_N}\s*(?:天|日|根|週|周)|{_N}\s*(?:天|週|周|個月|年)(?:來|以來|內)")
+                         rf"連(?:續)?(?:漲|跌|紅|黑|殺|噴)?\s*{_N}\s*(?:天|日|根|週|周)|{_N}\s*(?:天|週|周|個月|年)(?:來|以來|內)")
 _YESTERDAY = re.compile(r"昨天|昨日")
 _DATE = re.compile(r"(?<![\d.])(1[0-2]|0?[1-9])\s*(?:/|月)\s*(3[01]|[12]\d|0?[1-9])(?:\s*[日號])?(?![\d/])")
 # Words that make a question about the market or the user's own portfolio, not the stock of the page
@@ -146,6 +146,8 @@ _CODE = re.compile(r"(?<![\dA-Za-z.])(\d{4,6}[A-Za-z]?)(?:\.TWO?|\.tw|\.two|-TW)
 _TICKER = re.compile(r"(?<![A-Za-z0-9.])([A-Za-z]{2,5}(?:\.[A-Za-z])?)(?![A-Za-z0-9])")
 _NOT_TICKERS = frozenset({"AI", "ETF", "ETFS", "ADR", "EPS", "KD", "RSI", "MACD", "MA", "USD", "TWD", "TAIEX", "OK",
                           "PE", "PB", "IPO", "CEO", "GDP", "CPI", "FED", "FOMC", "TSE", "OTC", "API", "APP", "NEWS"})
+_NUMBER_BEFORE = set("到在收破跌漲站價剩回")
+_NUMBER_AFTER = set("元點塊%％張萬億")
 _MAX_NAME = 12
 _names: tuple[int, int, dict[str, str]] | None = None  # (id, size) of the master it was built from, name -> symbol
 
@@ -199,7 +201,10 @@ def symbols_in(md: MarketData, message: str) -> list[str]:
             out.append(sym)
 
     for m in _CODE.finditer(message):
-        add(md.resolve(m.group(1)))
+        # a price or a point count is not a code (「跌到 1240」「跌 1336 點」)
+        before, after = message[:m.start()].rstrip()[-1:], message[m.end():].lstrip()[:1]
+        if before not in _NUMBER_BEFORE and after not in _NUMBER_AFTER:
+            add(md.resolve(m.group(1)))
     for m in _TICKER.finditer(message):
         t = m.group(1).upper()
         if t not in _NOT_TICKERS and (sym := md.resolve(t)) and market_of_symbol(sym) == "US":
