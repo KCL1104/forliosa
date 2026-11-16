@@ -40,7 +40,7 @@ export const DEV_LOGIN = {
 
 /**
  * 「今天」：示範資料固定在 MOCK_TODAY（截圖與測試穩定），真實後端用台北時區的今天。
- * 示範資料的 `?market=open|pending` 是最後一個收盤日的下一個交易日（和 mock 的 `GET /meta/market-status` 同一天）。
+ * 示範資料的 `?market=open|pending|evening|night` 是那個情境的日期（和 mock 的 `GET /meta/market-status` 同一天）。
  */
 export function appToday(): string {
   return api.kind === "mock" ? mockToday(mockMarket) : todayInTaipei()

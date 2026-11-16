@@ -1218,12 +1218,27 @@ class FuturesHistory(BaseModel):
 
 
 # -- market status (GET /meta/market-status) ----------------------------------------------------------------
+class MarketClose(BaseModel):
+    """Where one market's close is (``forliosa.closes.tw_closes``)."""
+
+    market: Literal["TWSE", "TPEX"]
+    session: str  # YYYY-MM-DD: the latest trading day whose close is due (13:30 Taipei has passed)
+    stored: bool  # that session's close is stored (official, or interim)
+    latest: str | None  # YYYY-MM-DD: the newest stored close of this market
+    interim: bool  # the newest stored close is shioaji-data's evening close, awaiting the official file
+    # Taipei ISO-8601 (+08:00): when the session's close is next expected — the window of the route due next, from what
+    # is switched on and the measured publication times; null when stored or once every window has passed
+    expected_from: str | None
+    expected_to: str | None
+
+
 class MarketSession(BaseModel):
     date: str  # today in Taipei, YYYY-MM-DD
     is_trading_day: bool  # official calendar
     is_open: bool  # a trading day, 09:00 up to (not including) 13:30 Taipei
     open: str  # "09:00"
     close: str  # "13:30"
+    closes: list[MarketClose]  # TWSE, then TPEX
 
 
 class MarketStatus(BaseModel):

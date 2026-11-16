@@ -9,7 +9,10 @@
   ``MARKET_DATA_PROVIDERS``; its rows are labelled 「非商用」.
 * **Never, in any mode**: the TWSE / TPEx / MIS / MOPS *websites* (their terms forbid automated downloads
   without written consent). Rows archived from them before 2026-11-12 (``twse-web``, ``twse-mis``) are
-  ignored by every query.
+  ignored by every query. The one exception (product owner 2026-11-16): the two download links TWSE registered on
+  data.gov.tw for 個股日成交資訊 (11549) and 每日收盤行情－大盤統計 (11555) — TWSE answered on the platform that the
+  dataset 「可以使用自動程式進行下載」. Source ``twse-opendata``: the same official data as the OpenAPI, published the
+  afternoon of the session instead of the next morning (``forliosa.closes``); the OpenAPI rows replace it.
 
 Attribution: the Open Government Data License v1 (政府資料開放授權條款第 1 版) requires the providing
 agency, the dataset name and the year; without it the licence is void from the start. Every ``sources``
@@ -65,6 +68,7 @@ TAIFEX = "臺灣期貨交易所"
 CBC = "中央銀行"
 SFB = "金融監督管理委員會證券期貨局"  # data.gov.tw 11109 提供機關 (checked 2026-11-12)
 TWSE_API = "https://openapi.twse.com.tw/v1"
+TWSE_WEB = "https://www.twse.com.tw/exchangeReport"  # only the two data.gov.tw download links (``twse-opendata``)
 MEETINGS = "公司召開股東常（臨時）會日期、地點及採用電子投票情形等資料彙總表"
 TPEX_API = "https://www.tpex.org.tw/openapi/v1"
 TAIFEX_API = "https://openapi.taifex.com.tw/v1"
@@ -114,6 +118,13 @@ class Dataset:
 DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("twse-openapi/price", TWSE, "上市個股日成交資訊", f"{TWSE_API}/exchangeReport/STOCK_DAY_ALL",
             "收盤價、日線、成交量"),
+    # -- the data.gov.tw download links on www.twse.com.tw (same official data, the afternoon of the session). Only
+    # these two exact URLs (marketdata/http.py ALLOWED_EXACT_URLS); the next morning's OpenAPI rows replace them.
+    Dataset("twse-opendata/price", TWSE, "上市個股日成交資訊", f"{TWSE_WEB}/STOCK_DAY_ALL?response=open_data",
+            "當天下午的上市收盤價、日線（隔天清晨由 OpenAPI 的同一份資料取代）",
+            basis="data.gov.tw 11549；證交所 2025-09-17 於平臺回覆「本資料集可以使用自動程式進行下載」"),
+    Dataset("twse-opendata/index", TWSE, "每日收盤行情-大盤統計資訊", f"{TWSE_WEB}/MI_INDEX?response=open_data",
+            "當天下午的加權指數與類股指數收盤（隔天清晨由 OpenAPI 的同一份資料取代）", basis="data.gov.tw 11555"),
     Dataset("twse-openapi/valuation", TWSE, "上市個股日本益比、殖利率及股價淨值比",
             f"{TWSE_API}/exchangeReport/BWIBBU_ALL", "本益比、殖利率、股價淨值比"),
     Dataset("twse-openapi/reference", TWSE, "上市個股股價升降幅度", f"{TWSE_API}/exchangeReport/TWT84U",
@@ -286,12 +297,13 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("shioaji-data/official",
             "永豐金證券 shioaji-data（彙整臺灣證券交易所、證券櫃檯買賣中心、公開資訊觀測站開放資料）",
             "公司基本資料、每日收盤與市值、月營收、季報", "https://github.com/Sinotrade/shioaji-data",
-            "商品主檔、月營收、季報、市值"),
+            "商品主檔、月營收、季報、市值；晚上先放進來的收盤價（官方檔案進來後取代）"),
 )}
 
 # key -> (label for non-dataset keys, commercially usable)
 _SOURCES: dict[str, tuple[str, bool]] = {
     "twse-openapi": (f"{TWSE}〈OpenAPI 開放資料〉", True),
+    "twse-opendata": ("", True),  # labelled through DATASETS["twse-opendata/price"] (or ``…/index``)
     "tpex-openapi": (f"{TPEX}〈OpenAPI 開放資料〉", True),
     "tdcc-opendata": (f"{TDCC}〈開放資料〉", True),
     "taifex-openapi": (f"{TAIFEX}〈OpenAPI 開放資料〉", True),
@@ -388,6 +400,7 @@ def attribution(ds: Dataset, year: int | None = None) -> str:
 
 
 _DEFAULT_DATASET = {"shioaji-data": "shioaji-data/official", "databento-equs": "databento-equs/price",
+                    "twse-opendata": "twse-opendata/price",
                     "gdelt": "gdelt/doc", "yahoo-rss": "yahoo-rss/stock",
                     "wikipedia": "wikipedia/zh", "wikidata": "wikidata/entities"}
 
@@ -562,7 +575,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
         "conditional": pending,
         "stale": stale,
         "not_used": [
-            "臺灣證券交易所網站（三大法人、外資持股等報表）與基本市況報導：網站條款禁止未經同意用程式下載",
+            "臺灣證券交易所網站（三大法人、外資持股等報表）與基本市況報導：網站條款禁止未經同意用程式下載"
+            "（只用證交所在政府資料開放平臺登記、表示可以用程式下載的兩個網址：個股日成交資訊、大盤統計）",
             "證券櫃檯買賣中心網站的歷史查詢、公開資訊觀測站網站：同樣禁止，只用它們的開放資料",
             "臺灣期貨交易所網站（歷史行情查詢等）：只用它的開放資料",
             "期交所的每筆成交資料：檔案有幾百 MB，不下載",

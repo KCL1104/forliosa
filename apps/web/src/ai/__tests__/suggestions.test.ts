@@ -48,6 +48,14 @@ describe("個股頁的建議問題", () => {
     expect(s.map((x) => x.kind)).toEqual(["why_move", "foreign_flow", "next_dividend"])
     expect(s[0]!.text).toBe("台積電今天為什麼漲？")
   })
+  it("收盤價還不是今天的（盤中、今天的還沒進來）：問「台積電 11/12 為什麼漲？」，不說「今天」", () => {
+    const s = stockSuggestions(
+      { ...base, quote: { change_pct: 0.048, as_of: "2026-11-12T13:30:00+08:00" } as never, why: { show: true, headline: "成交量是均量 2 倍", reasons: [], as_of: null } },
+      "2026-11-13",
+    )
+    expect(s[0]!.text).toBe("台積電 11/12 為什麼漲？")
+    expect(stockSuggestions({ ...base, quote: { change_pct: 0.048, as_of: "2026-11-13T13:30:00+08:00" } as never, why: { show: true, headline: "x", reasons: [], as_of: null } }, "2026-11-13")[0]!.text).toBe("台積電今天為什麼漲？")
+  })
   it("未持有：外資動向（上市個股）、貴不貴、持有 1 張能領多少", () => {
     const s = stockSuggestions({ ...base, position: null, overview: { pe: 20, last_cash_dividend: 5 } as never }, TODAY)
     expect(s.map((x) => x.kind)).toEqual(["foreign_flow", "is_expensive", "if_hold_dividend"])
@@ -178,6 +186,18 @@ describe("帳本的「誰拖累／誰賺最多」說的是哪一天（美股的�
     expect(answerFor("drag", { ctx, privacy: false, today: TODAY })!.text).toBe("今天沒有持股下跌。")
     // 只有美股有漲跌：「今天誰…」都不問
     expect(ledgerSuggestions({ holdings: [apple, h({ day_change: 0, day_change_pct: 0 })], summary: summary() }, TODAY).some((x) => x.kind === "drag" || x.kind === "lift")).toBe(false)
+  })
+
+  it("上市今天下午進來了、上櫃要到晚上：每一檔是它自己那天的漲跌，寫「最近」，不說「今天」", () => {
+    // 後端的 as_of 是兩個市場裡最新的那天（今天）
+    const mon = { ...summary(), as_of: "2026-11-16T13:30:00+08:00" } as PortfolioSummary
+    const tsmc = h({ price_date: "2026-11-16", day_change: -8000, day_change_pct: -0.008 })
+    const otc = h({ symbol: "6488.TWO", code: "6488", name: "環球晶", market: "TPEX", price_date: "2026-11-13", day_change: 2000, day_change_pct: 0.004 })
+    expect(ledgerSuggestions({ holdings: [tsmc, otc], summary: mon }, "2026-11-16")[0]).toEqual({ kind: "drag", text: "最近誰拖累了我的報酬？" })
+    const ctx: AiContext = { route: "ledger", ledger: { holdings: [tsmc, otc], summary: mon } }
+    expect(answerFor("drag", { ctx, privacy: false, today: "2026-11-16" })!.text).toBe("最近拖累最多的是台積電（下跌 0.80%）。")
+    // 兩個市場都是今天的：「今天」
+    expect(ledgerSuggestions({ holdings: [tsmc, { ...otc, price_date: "2026-11-16" }], summary: mon }, "2026-11-16")[0]!.text).toBe("今天誰拖累了我的報酬？")
   })
 })
 

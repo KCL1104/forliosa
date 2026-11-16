@@ -84,6 +84,7 @@ import time as _time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -158,7 +159,11 @@ MARGIN_READY = time(21, 0)
 # published after the evening run): 證券期貨局's 證券投資信託基金每日淨值 of listed / OTC ETFs.
 JOB_GROUPS = ("twse", "tpex", "companies", "financials", "taifex", "cbc", "nav", "tdcc", "weekly", "monthly", "sec",
               "everyday")
-OFFICIAL_CLOSE_SOURCES = ("twse-openapi", "tpex-openapi")  # prices_daily rows from the exchanges' OpenAPIs
+OPENAPI_CLOSE_SOURCES = ("twse-openapi", "tpex-openapi")  # prices_daily rows from the exchanges' OpenAPIs (final)
+# Official closes: the OpenAPIs, and TWSE's same-day download file (``twse-opendata``, forliosa.closes) — the same data,
+# hours earlier; the OpenAPI row replaces it the next morning. shioaji-data's evening closes are interim, not official.
+OFFICIAL_CLOSE_SOURCES = (*OPENAPI_CLOSE_SOURCES, "twse-opendata")
+INTERIM_CLOSE_SOURCE = "shioaji-data"
 TPEX50 = "TPEX50"
 SEC_DISABLED = "sec edgar（未設定 SEC_CONTACT_EMAIL，略過）"
 
@@ -448,6 +453,46 @@ class Archiver:
         mi = od.parse_mi_index(self._list(f"{TWSE_OPENAPI}/exchangeReport/MI_INDEX"))
         n = self._indices(mi, "TWSE", "twse-openapi")
         self._status("twse-openapi/index", max((r["date"] for r in mi), default=None), len(mi))
+        return n
+
+    # -- TWSE same-day download files and interim closes (forliosa.closes polls; these only store) ------------------
+    def store_twse_opendata_prices(self, raw: list[dict[str, Any]]) -> int:
+        """STOCK_DAY_ALL from the data.gov.tw download link (rows already in the OpenAPI's field names, one session,
+        checked by the caller) -> ``prices_daily`` source ``twse-opendata``. A row an OpenAPI wrote is never replaced
+        (that one is final); an interim or older row of the same day is. The OpenAPI's own run replaces these rows the
+        next morning (``twse_prices`` updates every column)."""
+        from forliosa.marketdata.twse_opendata import PRICE_DATASET, SOURCE
+
+        quotes = parse_stock_day_all(raw)
+        rows = [{"symbol": s, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low, "close": q.price,
+                 "volume": q.volume, "source": SOURCE}
+                for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
+        n = upsert(self.db, PriceDaily, rows, ["symbol", "date"], where=PriceDaily.source.not_in(OPENAPI_CLOSE_SOURCES))
+        self._close_status(PRICE_DATASET, rows)
+        self._listed_etfs(raw, "TWSE")
+        return n
+
+    def store_twse_opendata_indices(self, raw: list[dict[str, Any]]) -> int:
+        """MI_INDEX (大盤統計) from the download link -> ``index_daily`` source ``twse-opendata`` (the OpenAPI's run
+        replaces it the next morning; an OpenAPI row already there is kept)."""
+        from forliosa.marketdata.twse_opendata import INDEX_DATASET, SOURCE
+
+        mi = od.parse_mi_index(raw)
+        out = [{"name": r["name"], "date": r["date"], "market": "TWSE", "open": None, "high": None, "low": None,
+                "close": r["close"], "change": r["change"], "change_pct": r["change_pct"], "source": SOURCE}
+               for r in mi]
+        n = upsert(self.db, IndexDaily, out, ["name", "date"], where=IndexDaily.source.not_in(OPENAPI_CLOSE_SOURCES))
+        self._close_status(INDEX_DATASET, out)
+        return n
+
+    def store_interim_closes(self, closes: dict[str, Decimal], day: date, status_key: str) -> int:
+        """Close-only rows of ``day`` (symbol -> close) from shioaji-data's evening release, source ``shioaji-data``.
+        Never over an official row (OpenAPI or the same-day TWSE file); any official run replaces them."""
+        rows = [{"symbol": s, "date": day, "open": None, "high": None, "low": None, "close": c, "volume": None,
+                 "source": INTERIM_CLOSE_SOURCE} for s, c in sorted(closes.items())]
+        n = upsert(self.db, PriceDaily, rows, ["symbol", "date"],
+                   where=PriceDaily.source.not_in(OFFICIAL_CLOSE_SOURCES))
+        self._close_status(status_key, rows)
         return n
 
     def twse_dividends(self) -> int:
@@ -1012,10 +1057,12 @@ def default_fetcher() -> HttpFetcher:
 
 
 # -- close publication (worker job ``close_watch``) ------------------------------------------------------------------
-# The exchanges publish a trading day's closing prices at no fixed time: observed between the late evening and the
-# next early morning (TWSE STOCK_DAY_ALL after 22:15, by 05:20; TPEx around 23:30 — docs/research/
-# quote-refresh-terms.md §3). From 13:35 on a trading day until 08:30 the next morning the worker therefore asks every
-# 15 minutes whether each exchange's close dataset has turned to that day, and archives the market once when it has.
+# The exchanges' OpenAPIs publish a trading day's closing prices at no fixed time: TPEx around 23:30 the same night,
+# TWSE in its nightly batch around 05:20 the next morning (measured 2026-11-13/16; docs/research/quote-refresh-terms.md
+# §3). From 13:35 on a trading day until 08:30 the next trading day the worker therefore asks every 15 minutes whether
+# each exchange's close dataset has turned to that day, and archives the market once when it has. A TWSE day already
+# stored from the same-day download file (``twse-opendata``, forliosa.closes) is still watched here: the OpenAPI's
+# file is the final one and replaces it.
 @dataclass(frozen=True)
 class CloseDataset:
     market: str  # TWSE | TPEX
@@ -1029,7 +1076,7 @@ CLOSE_DATASETS = (
     CloseDataset("TPEX", "tpex", f"{TPEX_OPENAPI}/tpex_mainboard_daily_close_quotes", "tpex-openapi/price"),
 )
 CLOSE_WATCH_FROM = time(13, 35)  # Taipei, on a trading day
-CLOSE_WATCH_UNTIL = time(8, 30)  # the next morning (whatever day that is)
+CLOSE_WATCH_UNTIL = time(8, 30)  # on the next trading day (over a weekend or a holiday: through it)
 CLOSE_WATCH_SECONDS = 15 * 60
 CLOSE_PROBE_BYTES = 1024  # both files start with their first row, whose first field is the date
 _FIRST_DATE = re.compile(rb'"Date"\s*:\s*"([0-9/\-]{7,10})"')
@@ -1037,16 +1084,19 @@ _FIRST_DATE = re.compile(rb'"Date"\s*:\s*"([0-9/\-]{7,10})"')
 
 def close_watch_day(now: datetime) -> date | None:
     """The trading day whose closing prices are awaited at ``now``: today from 13:35 Taipei when today is a trading
-    day, or yesterday until 08:30 when yesterday was one. ``None`` at any other time — so never on the afternoon or
-    night of a non-trading day, and never between 08:30 and 13:35."""
+    day; otherwise the last trading day before today until 08:30 of the next trading day — the next morning on a
+    weekday, but through a weekend or a holiday (a Friday close published after Saturday 08:30 used to wait until the
+    Monday 08:10 run; memo 2026-11-16). ``None`` only between 08:30 and 13:35 on a trading day. Only a market whose day
+    is not stored yet is asked (:func:`close_archived`), so a normal weekend sends nothing."""
     at = now.astimezone(TAIPEI)
     today = at.date()
-    if at.time() >= CLOSE_WATCH_FROM:
-        return today if is_tw_trading_day(today) else None
-    if at.time() < CLOSE_WATCH_UNTIL:
-        yesterday = today - timedelta(days=1)
-        return yesterday if is_tw_trading_day(yesterday) else None
-    return None
+    if is_tw_trading_day(today):
+        if at.time() >= CLOSE_WATCH_FROM:
+            return today
+        if at.time() >= CLOSE_WATCH_UNTIL:
+            return None
+    previous = last_tw_trading_day(today - timedelta(days=1))
+    return previous if previous >= today - timedelta(days=21) else None
 
 
 def close_archived(db: Session, dataset: CloseDataset, day: date) -> bool:

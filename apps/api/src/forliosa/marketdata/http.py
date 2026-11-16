@@ -164,9 +164,21 @@ ALLOWED_URL_PREFIXES = (
     "https://www.wikidata.org/w/api.php",
     "https://zh.wikipedia.org/api/rest_v1/page/summary/",
 )
+# Whole URLs allowed only exactly as written: nothing may be appended (no ``&date=…``, no other ``response=``), and no
+# ``params`` may be sent with them. The two download links TWSE registered on data.gov.tw for 個股日成交資訊
+# (11549) and 每日收盤行情－大盤統計 (11555): TWSE answered on the platform (2025-09-17) that the dataset
+# 「可以使用自動程式進行下載」, and the product owner opened this exception on 2026-11-16 (CLAUDE.md; forliosa.closes
+# polls them on trading-day afternoons). Every other page on www.twse.com.tw — and MIS — stays off the list.
+ALLOWED_EXACT_URLS = frozenset({
+    "https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data",
+    "https://www.twse.com.tw/exchangeReport/MI_INDEX?response=open_data",
+})
 
 
-def url_allowed(url: str) -> bool:
+def url_allowed(url: str, params: dict[str, Any] | None = None) -> bool:
+    """On the allowlist: under one of the prefixes, or one of the exact URLs sent as it is (without ``params``)."""
+    if url in ALLOWED_EXACT_URLS:
+        return not params
     return url.startswith(ALLOWED_URL_PREFIXES)
 
 
@@ -208,8 +220,8 @@ class HttpFetcher:
             follow_redirects=False,  # a redirect (e.g. a WAF 307) is a refusal: stop, never chase it
         )
 
-    def _require_allowed(self, url: str) -> None:
-        if not (url_allowed(url) or (self.extra_allowed and url.startswith(self.extra_allowed))):
+    def _require_allowed(self, url: str, params: dict[str, Any] | None = None) -> None:
+        if not (url_allowed(url, params) or (self.extra_allowed and url.startswith(self.extra_allowed))):
             raise ProviderUnavailable(f"{url} 不在授權來源白名單（marketdata/http.py ALLOWED_URL_PREFIXES）")
 
     def probe(self, url: str, etag: str | None = None, last_modified: str | None = None,
@@ -258,8 +270,13 @@ class HttpFetcher:
 
     def get_bytes(self, url: str, params: dict[str, Any] | None = None,
                   headers: dict[str, str] | None = None) -> bytes:
+        return self.fetch(url, params=params, headers=headers)[0]
+
+    def fetch(self, url: str, params: dict[str, Any] | None = None,
+              headers: dict[str, str] | None = None) -> tuple[bytes, httpx.Headers]:
+        """:meth:`get_bytes` plus the response headers (e.g. a download's ``Content-Disposition`` file name)."""
         host = urlparse(url).hostname or ""
-        self._require_allowed(url)
+        self._require_allowed(url, params)
         delay = self.backoff
         last_exc: Exception | None = None
         started, waited = time.monotonic(), 0.0
@@ -275,7 +292,7 @@ class HttpFetcher:
                     if took >= SLOW_FETCH_SECONDS:  # where a slow page or AI turn spent its time (2026-11-16)
                         log.info("slow fetch %s%s: %.2f s, %.2f s of it waiting for the host interval, %d attempt(s)",
                                  host, urlparse(url).path, took, waited, attempt + 1)
-                    return resp.content
+                    return resp.content, resp.headers
                 if resp.status_code in (402, 403, 404, 405, 407, 429, 451) or 300 <= resp.status_code < 400:
                     raise HttpStatusError(f"{host} 回應 HTTP {resp.status_code}", resp.status_code)
                 last_exc = ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")

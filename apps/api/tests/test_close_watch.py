@@ -34,8 +34,18 @@ from forliosa.services.instruments import quote_out
 from forliosa.timeutil import TAIPEI, is_tw_trading_day, last_tw_trading_day, market_close_dt, today_taipei
 from forliosa.worker import Worker
 
+
+def _watched_day() -> date:
+    """A recent trading day whose next calendar day is a trading day too (so "the next morning" ends the watch at 08:30
+    whatever weekday the tests run on; a session before a weekend is watched through it: see the weekend tests)."""
+    d = last_tw_trading_day(today_taipei() - timedelta(days=1))
+    while not is_tw_trading_day(d + timedelta(days=1)):
+        d = last_tw_trading_day(d - timedelta(days=1))
+    return d
+
+
 # The trading day being watched and the one before it — recent ones, so the archive's quote window covers them.
-DAY = last_tw_trading_day(today_taipei() - timedelta(days=1))
+DAY = _watched_day()
 PREVIOUS = last_tw_trading_day(DAY - timedelta(days=1))
 NEXT = DAY + timedelta(days=1)
 PATHS = {"/v1/exchangeReport/STOCK_DAY_ALL": "TWSE", "/openapi/v1/tpex_mainboard_daily_close_quotes": "TPEX"}
@@ -208,23 +218,26 @@ def ticks(start: datetime, end: datetime) -> list[datetime]:
 
 
 # -- the window ---------------------------------------------------------------------------------------------------
-def test_the_watch_runs_from_1335_on_a_trading_day_until_0830_the_next_morning():
-    assert is_tw_trading_day(DAY)
+def test_the_watch_runs_from_1335_on_a_trading_day_until_0830_the_next_trading_day():
+    assert is_tw_trading_day(DAY) and is_tw_trading_day(NEXT)
     assert close_watch_day(at(DAY, 13, 34)) is None and close_watch_day(at(DAY, 9, 0)) is None
     assert close_watch_day(at(DAY, 13, 35)) == DAY and close_watch_day(at(DAY, 23, 59)) == DAY
     assert close_watch_day(at(NEXT, 0, 0)) == DAY and close_watch_day(at(NEXT, 8, 29)) == DAY
     assert close_watch_day(at(NEXT, 8, 30)) is None and close_watch_day(at(NEXT, 12, 0)) is None
-    # a weekend: nothing on Saturday afternoon or Sunday, Friday's watch ends on Saturday 08:30
+    # a weekend: Friday's watch goes on through Saturday and Sunday until Monday 08:30 (memo 2026-11-16: a Friday close
+    # published after Saturday 08:30 used to wait for Monday's 08:10 run); only a market not stored yet is asked
     friday = date(2026, 11, 13)
-    assert close_watch_day(at(friday, 22, 0)) == friday == close_watch_day(at(date(2026, 11, 14), 5, 0))
-    for when in (at(date(2026, 11, 14), 8, 30), at(date(2026, 11, 14), 14, 0), at(date(2026, 11, 15), 3, 0),
-                 at(date(2026, 11, 15), 20, 0), at(date(2026, 11, 16), 8, 0)):
-        assert close_watch_day(when) is None, when
+    for when in (at(friday, 22, 0), at(date(2026, 11, 14), 5, 0), at(date(2026, 11, 14), 8, 30),
+                 at(date(2026, 11, 14), 14, 0), at(date(2026, 11, 15), 3, 0), at(date(2026, 11, 15), 20, 0),
+                 at(date(2026, 11, 16), 8, 0), at(date(2026, 11, 16), 8, 29)):
+        assert close_watch_day(when) == friday, when
+    assert close_watch_day(at(date(2026, 11, 16), 8, 30)) is None
     assert close_watch_day(at(date(2026, 11, 16), 13, 35)) == date(2026, 11, 16)
-    # a holiday in the built-in calendar (2026-10-09, a Friday): not that afternoon, not the next morning
-    assert close_watch_day(at(date(2026, 10, 9), 15, 0)) is None
-    assert close_watch_day(at(date(2026, 10, 10), 6, 0)) is None
-    assert close_watch_day(at(date(2026, 10, 9), 6, 0)) == date(2026, 10, 8)  # Thursday's watch is still running
+    # a holiday in the built-in calendar (2026-10-09, a Friday): Thursday's watch runs through it and the weekend
+    for when in (at(date(2026, 10, 9), 6, 0), at(date(2026, 10, 9), 15, 0), at(date(2026, 10, 10), 6, 0),
+                 at(date(2026, 10, 12), 8, 29)):
+        assert close_watch_day(when) == date(2026, 10, 8), when
+    assert close_watch_day(at(date(2026, 10, 12), 8, 30)) is None
     # the clock may be in any zone
     assert close_watch_day(at(DAY, 13, 35).astimezone(tz=None)) == DAY
 
@@ -386,21 +399,75 @@ def test_an_unreachable_exchange_is_asked_again_and_does_not_stop_the_other(engi
 
 
 # -- when nothing may be asked ------------------------------------------------------------------------------------
-def test_nothing_is_asked_outside_the_window_or_on_a_non_trading_day(engine, md, watched):
+def test_nothing_is_asked_outside_the_window_or_once_the_session_is_stored(engine, md, watched):
     s = Scenario(md, twse=at(DAY, 14, 0), tpex=at(DAY, 14, 0))
     job = next(j for j in s.worker.jobs if j.name == "close_watch")
-    saturday, sunday, holiday = date(2026, 11, 14), date(2026, 11, 15), date(2026, 10, 9)
-    for when in (at(DAY, 9, 0), at(DAY, 13, 34), at(NEXT, 8, 30), at(NEXT, 13, 0), at(saturday, 8, 30),
-                 at(saturday, 15, 0), at(sunday, 2, 0), at(sunday, 22, 0), at(holiday, 14, 0), at(holiday, 23, 0)):
-        if when.date() == NEXT and is_tw_trading_day(NEXT) and when.time() >= time(13, 35):
-            continue
+    for when in (at(DAY, 9, 0), at(DAY, 13, 34), at(NEXT, 8, 30), at(NEXT, 13, 0)):  # 08:30–13:35 on a trading day
         s.clock.t = when
         assert not job.due(when, None), when
         asyncio.run(s.worker.close_watch())  # even when called directly
+    # a weekend or a holiday is inside the watch of the session before it — but with that session stored (the normal
+    # case: Friday's TWSE file lands about 05:20 on Saturday) nothing is asked
+    saturday, sunday, holiday = date(2026, 11, 14), date(2026, 11, 15), date(2026, 10, 9)
+    with Session(engine) as db:
+        for key in ("twse-openapi/price", "tpex-openapi/price"):
+            db.add(DatasetStatus(key=key, data_date=date(2026, 11, 13), rows=1))
+        db.commit()
+    for when in (at(saturday, 8, 30), at(saturday, 15, 0), at(sunday, 2, 0), at(sunday, 22, 0), at(holiday, 14, 0),
+                 at(holiday, 23, 0)):
+        s.clock.t = when
+        assert job.due(when, None), when
+        asyncio.run(s.worker.close_watch())
     assert s.exchanges.requests == [] and s.exchanges.other == [] and s.archive_runs == []
     assert job.due(at(DAY, 13, 35), None) and job.due(at(NEXT, 8, 29), at(NEXT, 8, 10))
     assert not job.due(at(DAY, 13, 49), at(DAY, 13, 35))  # at most once every 15 minutes
     assert job.due(at(DAY, 13, 50), at(DAY, 13, 35))
+
+
+def _recent_friday_before_a_weekend() -> date:
+    d = today_taipei() - timedelta(days=1)
+    while not (d.weekday() == 4 and is_tw_trading_day(d) and is_tw_trading_day(d + timedelta(days=3))):
+        d -= timedelta(days=1)
+    return d
+
+
+@pytest.fixture()
+def friday(monkeypatch) -> date:
+    """The watched session is a Friday (module globals the fake exchanges read)."""
+    import sys
+
+    module = sys.modules[__name__]
+    day = _recent_friday_before_a_weekend()
+    previous = last_tw_trading_day(day - timedelta(days=1))
+    closes = {previous: CLOSES[PREVIOUS], day: CLOSES[DAY]}
+    monkeypatch.setattr(module, "DAY", day)
+    monkeypatch.setattr(module, "PREVIOUS", previous)
+    monkeypatch.setattr(module, "CLOSES", closes)
+    return day
+
+
+def test_a_friday_close_published_on_saturday_morning_is_still_archived(engine, md, watched, friday):
+    """Memo 2026-11-16: the watch used to end on Saturday 08:30, so a Friday TWSE file published later waited for
+    Monday's 08:10 run. Now it goes on through the weekend — asking only the market still missing."""
+    saturday, monday = friday + timedelta(days=1), friday + timedelta(days=3)
+    s = Scenario(md, twse=at(saturday, 9, 40), tpex=at(friday, 23, 30))
+    s.morning_archive()
+    s.run(at(friday, 13, 0), at(monday, 9, 0))
+    assert s.archive_runs == [(at(friday, 23, 35), ("tpex",)), (at(saturday, 9, 50), ("twse",))]
+    assert s.exchanges.times("TWSE")[-1] == at(saturday, 9, 50)  # nothing asked for the rest of the weekend
+    assert s.exchanges.times("TPEX")[-1] == at(friday, 23, 35)
+    assert s.stored(engine) == {"2330.TW": D("2400"), "6488.TWO": D("450")}
+
+
+def test_a_friday_close_never_published_is_watched_until_monday_0830(engine, md, watched, friday):
+    monday = friday + timedelta(days=3)
+    s = Scenario(md, twse=None, tpex=at(friday, 23, 30))
+    s.morning_archive()
+    s.run(at(friday, 13, 0), at(monday, 13, 0))
+    twse = s.exchanges.times("TWSE")
+    assert twse[0] == at(friday, 13, 35) and twse[-1] == at(monday, 8, 20)
+    assert s.exchanges.kinds("TWSE") == ["206", *["304"] * (len(twse) - 1)]  # conditional, never a download
+    assert s.archive_runs == [(at(friday, 23, 35), ("tpex",))]
 
 
 def test_an_official_closure_is_not_watched(engine, md, watched):
@@ -408,6 +475,7 @@ def test_an_official_closure_is_not_watched(engine, md, watched):
     from forliosa.market_calendar import load_official_calendar
 
     s = Scenario(md, twse=at(DAY, 14, 0), tpex=at(DAY, 14, 0))
+    s.morning_archive()  # the session before it is stored
     with Session(engine) as db:
         db.add(MarketHoliday(date=DAY, name="颱風停止交易", description="", is_trading_day=False,
                              source="twse-openapi"))

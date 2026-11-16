@@ -39,18 +39,24 @@ def set_clock(clock: Callable[[], datetime] | None) -> None:
     _clock = clock or now_taipei
 
 
-def market_status(db: Session, now: datetime | None = None) -> dict[str, Any]:
-    """``GET /meta/market-status``: is the Taiwan market in session right now? No user data.
+def market_status(db: Session, now: datetime | None = None, settings: Any = None) -> dict[str, Any]:
+    """``GET /meta/market-status``: is the Taiwan market in session right now, and where is each market's close? No
+    user data.
 
     ``is_trading_day`` follows the official calendar (reloaded here: one small query); ``is_open`` is a trading day
     from 09:00 up to, not including, 13:30 Taipei. Prices are never real-time (there is no licensed intraday
     source): the frontend uses this to say whether the close it shows is "today's, not out yet" or simply the latest.
+    ``closes`` (one more small query, :func:`forliosa.closes.tw_closes`): per market (TWSE, TPEX) the session whose
+    close is due, whether it is stored, the newest stored close, whether that one is interim, and the window the next
+    arrival is expected in — so the pending note survives midnight and can say when.
     """
+    from forliosa.closes import tw_closes
+
     load_official_calendar(db)
     at = (now or _clock()).astimezone(TAIPEI)
     return {"tw": {"date": at.date().isoformat(), "is_trading_day": is_tw_trading_day(at.date()),
                    "is_open": is_tw_market_open(at), "open": MARKET_OPEN.strftime("%H:%M"),
-                   "close": MARKET_CLOSE.strftime("%H:%M")}}
+                   "close": MARKET_CLOSE.strftime("%H:%M"), "closes": tw_closes(db, at, settings)}}
 
 
 def load_official_calendar(db: Session) -> int:

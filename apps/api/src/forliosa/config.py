@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     # USD/TWD: valuation uses the central bank's 銀行間新臺幣對美元收盤匯率 (OGDL) in every mode.
     taifex_conditional_confirmed: bool = False
     shioaji_data_base_url: str = "https://raw.githubusercontent.com/Sinotrade/shioaji-data/main"
+    # Same-day Taiwan closes (product owner 2026-11-16; forliosa.closes). TWSE_OPENDATA_CLOSE: on trading-day afternoons
+    # (from 13:45, at most every 10 minutes, until the session is in; a redirect / 403 / 429 stops it for the day) read
+    # the two download links TWSE registered on data.gov.tw — the narrow exception in CLAUDE.md; false switches it off
+    # (e.g. if TWSE objects). SHIOAJI_EVENING_CLOSE: from 20:30 every 15 minutes, take shioaji-data's evening release as
+    # an interim close (close only, marked interim) for a market whose official close is not in yet.
+    twse_opendata_close: bool = True
+    shioaji_evening_close: bool = True
     # SEC EDGAR (US fundamentals and filings). SEC requires a declared User-Agent with a contact e-mail:
     # "Forliosa/1.0 <SEC_CONTACT_EMAIL>". The address is read from the environment only (SecretStr: never shown
     # in reprs or settings dumps, never logged); without it SEC is disabled and US financials / filings return an

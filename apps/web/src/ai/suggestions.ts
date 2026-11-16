@@ -3,7 +3,7 @@
  * 全部是純函式：只用使用者自己的資料計算，不做投資判斷、不捏造分析。
  * 介面上不加「本頁建議」「依頁面推薦」這類說明字樣（PRODUCT.md）。
  */
-import { dayWord, ledgerUsCloseDay } from "@/lib/as-of"
+import { dayWord, ledgerBoardDays, ledgerUsCloseDay } from "@/lib/as-of"
 import { inText } from "@/lib/cjk"
 import { usDay, usTradeDate } from "@/lib/labels"
 import type {
@@ -100,14 +100,16 @@ export function dayLead(asOf: string | null | undefined, today: string): string 
 }
 
 /**
- * 帳本的「誰拖累／誰賺最多」說的是哪一天、算哪些持股（和帳本主數字同一個判斷，`ledgerUsCloseDay`）：
+ * 帳本的「誰拖累／誰賺最多」說的是哪一天、算哪些持股（和帳本主數字同一個判斷，`ledgerUsCloseDay`、`ledgerBoardDays`）：
  * - 只有美股有價格：那是紐約那一天的漲跌，寫「11/13（美東）」（`us`）
+ * - 上市、上櫃的收盤日不同（上市下午已經進來、上櫃要到晚上）：每一檔是它自己那天的漲跌，寫「最近」，不說「今天」
  * - 其他：台股那一天（`dayLead`：「今天」或「11/12 」）；美股的漲跌是紐約另一天的，不算進這一句
  */
 function ledgerDay({ holdings, summary }: LedgerData, today: string, asOf?: string | null): { lead: string; movers: Holding[]; us: boolean } {
   const usDate = ledgerUsCloseDay(summary, holdings)
   if (usDate) return { lead: usDay(usDate), movers: holdings, us: true }
-  return { lead: dayLead(asOf ?? summary?.as_of, today), movers: holdings.filter((h) => h.market !== "US"), us: false }
+  const days = new Set(ledgerBoardDays(holdings, summary?.as_of).map((b) => b.day))
+  return { lead: days.size > 1 ? "最近" : dayLead(asOf ?? summary?.as_of, today), movers: holdings.filter((h) => h.market !== "US"), us: false }
 }
 
 /** 美股這一次漲跌屬於紐約的哪一天（`why.trade_date`、報價的 `trade_date`，舊版後端由 `as_of` 換算） */
@@ -117,12 +119,15 @@ function usMoveDate(s: StockData): string | null {
 }
 
 /**
- * 「台積電今天」「Apple 11/13（美東）」：美股的漲跌是紐約那一天的（台北已經是隔天），不說「今天」。
- * 名稱和日期之間空一格。
+ * 「台積電今天」「台積電 11/12 」「Apple 11/13（美東）」：台股的收盤價是今天的才說「今天」；
+ * 美股的漲跌是紐約那一天的（台北已經是隔天），不說「今天」。名稱和日期之間空一格。
  */
-function moveLead(s: StockData): string {
+function moveLead(s: StockData, today: string): string {
   const day = usMoveDate(s)
-  return day ? `${inText(s.name, "start").trimEnd()} ${usDay(day)}` : `${inText(s.name, "start")}今天`
+  if (day) return `${inText(s.name, "start").trimEnd()} ${usDay(day)}`
+  // 台股：收盤價是今天的才說「今天」；還沒進來（盤中、上櫃要到晚上）時是上一個收盤日「台積電 11/12 」
+  const lead = dayLead(s.why?.as_of ?? s.quote?.as_of, today)
+  return lead === "今天" ? `${inText(s.name, "start")}今天` : `${inText(s.name, "start").trimEnd()} ${lead}`
 }
 
 /** 加碼的單位：台股 1 張（1,000 股），美股以股計、問 10 股 */
@@ -149,7 +154,7 @@ export function stockSuggestions(s: StockData, today: string): Suggestion[] {
   const held = !!s.position
   if (s.why?.show) {
     const d = direction(pct)
-    out.push({ kind: "why_move", symbol: s.symbol, text: `${moveLead(s)}為什麼${d === "down" ? "跌" : "漲"}？` })
+    out.push({ kind: "why_move", symbol: s.symbol, text: `${moveLead(s, today)}為什麼${d === "down" ? "跌" : "漲"}？` })
   }
   if (isListedStock(s)) out.push({ kind: "foreign_flow", symbol: s.symbol, text: FOREIGN_FLOW_QUESTION })
   if (held) {
@@ -295,7 +300,7 @@ function stockAnswer(kind: SuggestionKind, s: StockData, privacy: boolean, today
   switch (kind) {
     case "why_move": {
       // 美股：紐約那一天的漲跌（不說「今天」）；沒有法人與籌碼資料，只連到事件（SEC 申報）
-      const lead = moveLead(s)
+      const lead = moveLead(s, today)
       if (!s.why?.show) {
         if (us) return { text: `${lead}的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量或事件。`, links: [link("events", "看事件")], asOf }
         return { text: `${lead}的漲跌在平常的範圍內（${pctWords(s.quote?.change_pct)}），沒有出現異常的成交量${listed ? "" : "、法人"}或事件。`, links: [link("chips", "看籌碼")], asOf }

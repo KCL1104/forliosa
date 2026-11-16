@@ -269,8 +269,9 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
   const tw = twOpenApi(inst.market)
   const us = inst.market === "US"
   useDatasetSources([!!quote && tw && `${tw}/reference`, !!quote && us && US_PRICE_KEY])
-  // 台股與台股 ETF：沒有盤中即時報價，價格標「收盤價・日期」；盤中、或收盤後今天的還沒公布時，下面多一行說明
-  const close = useClose(tw ? quote?.as_of : null)
+  // 台股與台股 ETF：沒有盤中即時報價，價格標「收盤價・日期」；盤中、或收盤價還沒進來時，下面多一行說明
+  // （還沒進來時寫這個市場預計幾點更新：上市、上櫃公布的時間不同）
+  const close = useClose(tw ? quote?.as_of : null, inst.market)
   // 美股的收盤：紐約的交易日（as_of 是紐約 16:00，在台北已經是隔天早上，不寫台北的時刻）
   const usDate = us && quote ? usTradeDate(quote.trade_date, quote.as_of) : null
   if (missing && !quote) {
@@ -341,7 +342,7 @@ function QuoteHeader({ inst, quote, missing, held = false }: { inst: InstrumentD
         {quote?.is_demo && <span className="sm:hidden">示範資料</span>}
       </p>
       {close.note && (
-        // 只在需要時出現的一行：盤中（附證交所的連結——只是連結，本站不擷取那個網站）、收盤後今天的收盤價還沒公布
+        // 只在需要時出現的一行：盤中（附證交所的連結——只是連結，本站不擷取那個網站）、收盤價還沒進來（預計幾點更新）
         <p className="mt-1 flex flex-wrap items-center text-sm text-ink-2">
           <span>{close.note}</span>
           {close.state === "open" && (
@@ -511,7 +512,7 @@ function PositionBlock({ inst, position: p, rounds, priced = true }: { inst: Ins
   // 「今日」損益：收盤價的日期就是今天才寫「今日」，否則寫那個日期。
   // 美股一律寫紐約的交易日（「11/13」）：那是紐約那一天的漲跌，不是台北的今天
   const quote = useQuote(inst.symbol, priced)
-  const close = useClose(inst.market === "US" ? null : quote.data?.as_of)
+  const close = useClose(inst.market === "US" ? null : quote.data?.as_of, inst.market)
   const usDate = inst.market === "US" && quote.data ? usTradeDate(quote.data.trade_date, quote.data.as_of) : null
   const day = usDate ? formatDateShort(usDate, false) : close.day
   const money = (n: number, signed = false) => formatMoney(n, { signed })

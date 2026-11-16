@@ -24,7 +24,7 @@ const TWSE_MIS_URL = "https://mis.twse.com.tw/"
  *
  * 資料集依提供機關分組，每一組是一個收合的區塊：收著時列出這個機關的資料集名稱（看得出用了哪些），
  * 展開是每個資料集的完整顯名聲明、資料集連結與用途——五十幾個資料集全部攤開，手機要捲一萬多 px。
- * 「報價」那一段固定在最上面：沒有盤中即時報價，價格是收盤後公布的收盤價。
+ * 「報價」那一段固定在最上面：沒有盤中即時報價，價格是收盤後公布的收盤價；上市、上櫃平常幾點更新（實測的時間）。
  * 美股收盤價（Databento，`databento-equs/` 的資料集）有開的時候，報價與授權條款各多一段美股的說明。
  */
 export function DataSourcesPage() {
@@ -39,6 +39,8 @@ export function DataSourcesPage() {
   const mainLicense = a?.datasets.find((d) => d.commercial)?.license_url
   // 美股收盤價：後端只在美股收盤價有開的時候列出這個資料集
   const usCloses = !!a?.datasets.some((d) => d.key.startsWith("databento-equs/"))
+  // 上市收盤價下午就進來：證交所在政府資料開放平臺登記的下載網址（產品負責人 2026-11-16）開著時，後端列出 `twse-opendata/` 的資料集
+  const twseAfternoon = !!a?.datasets.some((d) => d.key.startsWith("twse-opendata/"))
   // 展開的機關（預設全部收著）
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set())
   const allOpen = groups.length > 0 && groups.every(([agency]) => open.has(agency))
@@ -63,7 +65,15 @@ export function DataSourcesPage() {
           <>
             <Section title="報價" titleId="ds-quotes" bodyClassName="flex flex-col gap-2">
               <p className="max-w-prose text-base">
-                Forliosa 的股價都是收盤價，沒有盤中報價。證交所與櫃買中心在收盤後公布（通常是當天晚上到隔天清晨），公布前看到的是上一個交易日的收盤價。
+                Forliosa 的股價都是收盤價，沒有盤中報價。證交所與櫃買中心收盤後公布當天的收盤價，我們拿到就更新；公布前看到的是上一個交易日的收盤價。平常大約是：
+              </p>
+              {/* 什麼時候更新（2026-11 實測；兩個交易所都沒有公布固定的時間）：上市下午那一批只在證交所的下載網址開著時才有 */}
+              <ul aria-label="收盤價平常什麼時候更新" className="flex max-w-prose list-disc flex-col gap-1 pl-5 text-base marker:text-ctl">
+                <li className="num">{twseAfternoon ? "上市：下午 2:00–2:30（證交所在政府資料開放平臺登記的下載網址）" : "上市：晚上 8:30–11:45，晚的時候隔天清晨 5:20–5:40"}</li>
+                <li className="num">上櫃：晚上 8:30–11:45，少數日子到半夜 1:30</li>
+              </ul>
+              <p className="max-w-prose text-base">
+                這是我們量到的時間，交易所沒有公布固定的時間；還沒更新時，帳本與個股頁會寫預計幾點更新。晚上先進來的收盤價沒有開盤、最高、最低與成交量，官方的完整資料進來後補上（上櫃晚上 11:30 左右，上市隔天清晨 5:30 左右）。
               </p>
               <p className="max-w-prose text-base">盤中報價要付費授權，Forliosa 沒有買。想看盤中的價格，請到證交所的網站：</p>
               {/* 連結自己一行（觸控時 44px 高），不夾在句子中間 */}
@@ -176,13 +186,14 @@ function AgencyGroup({ agency, rows, open, onToggle, mainLicense }: { agency: st
           <ChevronDownIcon aria-hidden className={cn("size-5 shrink-0 text-ink-2 transition-transform duration-150 group-hover:text-ink motion-reduce:transition-none", open && "rotate-180")} />
         </button>
       </h3>
-      {!open && <p className="-mt-1 pb-3 text-md text-ink-2">{rows.map((d) => d.dataset).join("、")}</p>}
+      {/* 同一個資料集有兩個網址（上市個股日成交資訊：OpenAPI 與證交所在政府資料開放平臺登記的下載網址）時只列一次 */}
+      {!open && <p className="-mt-1 pb-3 text-md text-ink-2">{[...new Set(rows.map((d) => d.dataset))].join("、")}</p>}
       <ul id={panelId} hidden={!open}>
         {rows.map((d) => (
           <li key={d.key} className="grid gap-x-6 gap-y-1 border-t border-rule py-3 md:grid-cols-[minmax(0,1fr)_200px]">
             <div className="min-w-0">
               <p className="text-base">
-                <Attribution d={d} />
+                <Attribution d={d} twin={rows.some((o) => o !== d && o.dataset === d.dataset)} />
               </p>
               {(d.license_url !== mainLicense || !d.commercial) && (
                 <p className="mt-0.5 flex flex-wrap items-center gap-x-3 text-sm text-ink-2 pointer-coarse:mt-3">
@@ -211,10 +222,12 @@ function AgencyGroup({ agency, rows, open, onToggle, mainLicense }: { agency: st
  * 完整顯名聲明（文字照後端給的，不改寫）；聲明裡的資料集名稱就是連到那個資料集的連結（離開本站，所以有 ↗）。
  * 聲明裡找不到資料集名稱時（格式不同的來源），聲明照原文，後面另外接一個以資料集名稱為文字的連結。
  */
-function Attribution({ d }: { d: AttributionDataset }) {
+function Attribution({ d, twin = false }: { d: AttributionDataset; twin?: boolean }) {
+  // 同一組裡有同名的資料集（同一份資料的兩個網址）：報讀時多唸網站，兩個連結聽得出不同
+  const host = twin ? hostOf(d.url) : ""
   const link = (
     // 「另開新視窗」寫在 aria-label：聲明的文字（textContent）保持後端給的原文，中間不插別的字
-    <a href={d.url} target="_blank" rel="noopener noreferrer" aria-label={`${d.dataset}（資料集，另開新視窗）`} className={cn(EXTERNAL, INLINE_TOUCH)}>
+    <a href={d.url} target="_blank" rel="noopener noreferrer" aria-label={`${d.dataset}（${host ? `${host}，` : ""}資料集，另開新視窗）`} className={cn(EXTERNAL, INLINE_TOUCH)}>
       {d.dataset}
       <ArrowUpRightIcon aria-hidden className="ml-0.5 inline size-3.5 align-[-0.125em]" />
     </a>
@@ -234,6 +247,14 @@ function Attribution({ d }: { d: AttributionDataset }) {
       <Linkified text={d.attribution.slice(at + d.dataset.length)} />
     </>
   )
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return ""
+  }
 }
 
 /** 授權條款文字裡的網址變成連結（網址在全形標點前結束，例如「（https://…）」的右括號不算網址） */

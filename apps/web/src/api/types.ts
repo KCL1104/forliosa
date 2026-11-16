@@ -1637,7 +1637,8 @@ export class ApiError extends Error {
 /** 前端與資料來源之間唯一的邊界：HTTP 版與 mock 版都實作這個介面。 */
 /**
  * `GET /meta/market-status`：台股今天是不是交易日、現在是不是盤中（不讀使用者資料，不用登入）。
- * 沒有盤中即時報價：這個狀態只用來決定價格旁要不要加一行「盤中不更新」「今天的收盤價還沒公布」。
+ * 沒有盤中即時報價：這個狀態只用來決定價格旁要不要加一行「盤中不更新」「今天的收盤價預計下午 2:00–2:30 更新」，
+ * 以及收盤價進來時自動重新讀帳本與報價（`useCloseRefresh`）。
  */
 /**
  * 市場頁（`GET /market/overview`）：都是收盤後的官方資料，沒有盤中、沒有海外指數。
@@ -1813,7 +1814,31 @@ export interface MarketStatus {
     is_open: boolean
     open: string
     close: string
+    /** 上市、上櫃各自的收盤價進來了沒有、預計什麼時候進來（2026-11-16）；舊版後端沒有這個欄位 */
+    closes?: TwClose[]
   }
+}
+
+/**
+ * `market-status` 的 `tw.closes`：一個市場（上市或上櫃）的收盤價。
+ * 兩個交易所公布的時間不同（上市下午、上櫃晚上），所以分開說。
+ */
+export interface TwClose {
+  market: "TWSE" | "TPEX"
+  /** 最近一個「收盤價該進來了」或「已經存了」的交易日（台北，YYYY-MM-DD） */
+  session: string
+  /** 這個交易日的收盤價已經存了 */
+  stored: boolean
+  /** 存了的最新收盤日；還沒有時 null */
+  latest: string | null
+  /** 最新的收盤價是暫時的（晚上先進來的，等官方的完整檔覆蓋） */
+  interim: boolean
+  /**
+   * 預計下一次進來的時間窗（台北時間的 ISO-8601）；已經存了時是 null。
+   * 依目前開著的資料來源與現在的時間：時間窗過了還沒進來，就是下一個來源的時間窗。
+   */
+  expected_from: string | null
+  expected_to: string | null
 }
 
 /** 刪除帳號時要輸入的字（和後端相同） */

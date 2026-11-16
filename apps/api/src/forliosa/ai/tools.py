@@ -41,7 +41,6 @@ from forliosa.marketdata.service import MarketData
 from forliosa.models import AiDraft, BrokerAccount, User
 from forliosa.models import Transaction as TxnModel
 from forliosa.timeutil import (
-    MARKET_OPEN,
     TAIPEI,
     is_tw_market_open,
     is_tw_trading_day,
@@ -361,7 +360,7 @@ def get_stock_overview(ctx: ToolContext, args: dict[str, Any]) -> Any:
                   "volume", "as_of", "trade_date", "is_realtime", "is_demo") if q is not None else None
     english = english_names(ctx.db, info)
     market = _market_context(ctx, info, quote)
-    note = _intraday_note(info, q, now)
+    note = _intraday_note(info, q, now, _market_close(ctx, info, now))
     return {
         **instr.instrument_out(info, ctx.md),
         "english_name": english[0] if english else None,  # the foreign-news search (「為什麼漲跌」 step 3)
@@ -434,25 +433,54 @@ def _market_context(ctx: ToolContext, info: InstrumentInfo, quote: dict[str, Any
     return out
 
 
+def _market_close(ctx: ToolContext, info: InstrumentInfo, now: datetime) -> dict[str, Any] | None:
+    """This market's entry of ``forliosa.closes.tw_closes`` (when its close is expected); best effort."""
+    if info.market not in ("TWSE", "TPEX"):
+        return None
+    from forliosa.closes import tw_closes
+
+    try:
+        return next((c for c in tw_closes(ctx.db, now) if c["market"] == info.market), None)
+    except Exception as exc:  # never fail the tool over the expected time
+        log.warning("get_stock_overview: closes not read: %s", exc)
+        ctx.db.rollback()
+        return None
+
+
 def _md(day: Any) -> str:
     """「11/13」 from a date or its ISO string."""
     d = date.fromisoformat(str(day)[:10])
     return f"{d.month}/{d.day}"
 
 
-def _intraday_note(info: InstrumentInfo, q: Any, now: datetime) -> str | None:
-    """A Taiwan trading day from the open until the official close is archived (that evening): the quote and the
-    index closes are the previous session's. The prompt's intraday protocol starts from this note."""
+def _intraday_note(info: InstrumentInfo, q: Any, now: datetime, close: dict[str, Any] | None = None) -> str | None:
+    """While the quote is older than the session it should show: during the session (盤中), or after the close until
+    that session's close is stored — also after midnight, when the session is no longer "today". ``close`` is this
+    market's entry of ``forliosa.closes.tw_closes``: its expected window is passed on. The prompt's intraday protocol
+    starts from this note."""
+    from forliosa.closes import due_session
+
     if info.market not in ("TWSE", "TPEX") or q is None or q.trade_date is None:
         return None
     now = now.astimezone(TAIPEI)
     today = now.date()
-    if not is_tw_trading_day(today) or now.time() < MARKET_OPEN or q.trade_date >= today:
+    if is_tw_market_open(now):
+        session, when = today, "盤中"
+    else:
+        session = due_session(now)
+        when = ("今天已收盤，但今天的官方收盤價還沒公布" if session == today
+                else f"{_md(session)} 的官方收盤價還沒公布")
+    if q.trade_date >= session:
         return None
-    when = "盤中" if is_tw_market_open(now) else "今天已收盤，但今天的官方收盤價還沒公布"
+    label = "今天" if session == today else _md(session)
+    expected = ""
+    if close and not close.get("stored") and close.get("expected_from") and close.get("expected_to"):
+        start, end = (datetime.fromisoformat(close[k]).astimezone(TAIPEI) for k in ("expected_from", "expected_to"))
+        on = "今天" if start.date() == today else _md(start.date())
+        expected = f"這個市場的收盤價預計 {on} {start:%H:%M}–{end:%H:%M} 更新。"
     day = f"{q.trade_date.month}/{q.trade_date.day}"
-    return (f"{when}：quote、market_context 與 why_signals 都是 {day} 的官方收盤資料，不是今天的。"
-            "今天這一檔與加權指數漲跌多少，要用 web_search 找可引用的來源並寫出時間")
+    return (f"{when}：quote、market_context 與 why_signals 都是 {day} 的官方收盤資料，不是{label}的。{expected}"
+            f"{label}這一檔與加權指數漲跌多少，要用 web_search 找可引用的來源並寫出時間")
 
 
 ETF_NAV_AI_NOTE = ("premium_pct = close ÷ NAV − 1 on premium_date only (the newest date with both an official close "

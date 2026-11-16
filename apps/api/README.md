@@ -79,6 +79,9 @@ uv run python -m forliosa.worker
 | 08:10、14:40 | 存檔：證交所、櫃買 OpenAPI（收盤、本益比、參考價與漲跌停、融資融券、上櫃三大法人與外資持股、除權息預告、注意／處置、重大訊息、股東會、月營收、證交所新聞、ETF 基本資料、休市日、指數與報酬指數、上櫃除權息計算結果、富櫃五十成分股；08:10 與 21:40 另存證交所外資持股前 20 名 `MI_QFIIS_sort_20`，白天略過，因為它沒有日期欄位）；08:10 另讀一次**證期局 ETF 淨值**（群組 `nav`：檔案只有最新一筆，21:40 之後才公布的淨值靠這次補上） |
 | 21:40 | 同上，加上季報（`t187ap06`／`07`／`17`）、公司基本資料與股利決議（`t187ap03`、`t187ap45_L`），以及**期交所** OpenAPI（期貨／選擇權行情、三大法人、大額交易人、Put/Call 比、外幣參考匯率、保證金〔變動才存〕）、**中央銀行**〈銀行間新臺幣對美元收盤匯率〉（群組 `cbc`；第一次執行回補 2008 年起的全部歷史）與**證期局 ETF 淨值**〈證券投資信託基金每日淨值〉（群組 `nav`，排在收盤存檔之後；只存上市櫃 ETF 的列）。夜盤算在下一個交易日，所以不必清晨另跑 |
 | 14:35、23:45 | 更新商品主檔，把持股與自選的真實收盤價寫入 `prices_daily` |
+| 13:45–18:00，最多每 10 分鐘（`TWSE_OPENDATA_CLOSE`，預設開） | **上市當天收盤** `twse_sameday_close`（`forliosa.closes`）：證交所在政府資料開放平臺登記的兩個下載網址（個股日成交資訊、大盤統計），收盤後約 13:50 就有。只抓這兩個完整網址、不帶日期參數，拿到當天的就停；被擋（轉址、403、429）當天不再抓；上次請求的時間記在 `dataset_status`，重啟也不會提早。資料日期看檔案裡每一列的「日期」和檔名，不看時鐘。存成 `twse-opendata`（官方資料，帳本市值與績效照用），隔天清晨 OpenAPI 的檔案整列取代 |
+| 20:30 到隔天 02:00，每 15 分鐘（`SHIOAJI_EVENING_CLOSE`，預設開） | **晚上的暫時收盤價** `evening_closes`：shioaji-data 的 `daily.json`（多半 20:20–23:40 更新）先讀前 512 bytes 看 `as_of`，官方收盤還沒進來的市場才下載整個檔，存成只有收盤價的 `shioaji-data` 列（暫時資料），官方檔案進來後取代 |
+| 13:35 到下一個交易日 08:30，每 15 分鐘 | `close_watch`：問兩個 OpenAPI 的收盤檔換成那一天了沒（條件式請求前 1 KB）；換了就跑那個市場的存檔。櫃買約 23:30、證交所約隔天 05:20。週五的收盤一路看到週一 08:30（以前到週六 08:30 就停）；已經存進來的市場不再問。兩個市場的官方收盤都進來後馬上寫每日收盤簡報 |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
 | 每分鐘、每 20 秒 | 群組推播：排入並送出到期的交易動態推播（Discord webhook／Telegram）；有設 Telegram bot 時以 `getUpdates` 處理 `/link` 連結 |
@@ -102,7 +105,9 @@ uv run python -m forliosa.archive run                      # 執行一次全部�
 uv run python -m forliosa.archive run --only twse,tpex     # 只跑部分：twse、tpex、companies、financials、taifex、cbc、nav、tdcc、weekly、monthly、sec
 ```
 
-只會連線到白名單內的網址（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES`）：`openapi.twse.com.tw`、
+只會連線到白名單內的網址（`marketdata/http.py` 的 `ALLOWED_URL_PREFIXES` 與 `ALLOWED_EXACT_URLS`）：`openapi.twse.com.tw`、
+證交所在政府資料開放平臺登記的兩個下載網址（只有 `https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data` 與
+`…/MI_INDEX?response=open_data` 這兩個完整網址，多一個參數都不行）、
 `www.tpex.org.tw/openapi`、`opendata.tdcc.com.tw`、`openapi.taifex.com.tw/v1`、投信投顧公會主機上的證期局淨值檔
 （只有 `www.sitca.org.tw/MemberK0000/F/03/nav.csv` 這一個檔案，網站其他頁面不在內）、shioaji-data 的 GitHub 檔案，以及 personal 明確開啟時的 FinMind。
 美股收盤價的 `hist.databento.com/v0/` 不在共用白名單裡，只有帶著金鑰的 Databento 抓取器（`marketdata/databento.py`）連得到。
@@ -111,6 +116,8 @@ User-Agent 誠實標示（不偽裝瀏覽器），遇到重新導向（例如證
 **證交所／櫃買／MIS／公開資訊觀測站的網站一律不爬**（網站條款禁止未經同意以程式下載，見
 [`docs/research/data-sources-licensing.md`](../../docs/research/data-sources-licensing.md)）；原本的 T86、MI_QFIIS 網站回補與
 MIS 盤中輪詢已移除，舊資料庫裡來源是 `twse-web`、`twse-mis` 的資料列在任何模式都不會被讀出。
+唯一的例外是上面白名單裡證交所的兩個下載網址（產品負責人 2026-11-16，CLAUDE.md；見下方「資料來源與授權」）：它們是 data.gov.tw 登記的資料集檔案，
+證交所公開回覆過可以用程式下載。櫃買網站在 data.gov.tw 登記的下載網址（例如 11370 上櫃股票行情）**不在**例外裡，沒有抓。
 
 `backfill` 只剩 FinMind（非商用），而且只有 `DATA_POLICY=personal` 並在 `MARKET_DATA_PROVIDERS` 明確列出 `finmind` 時才會執行：
 
@@ -168,6 +175,8 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `IMPORT_MAX_PAGES`、`IMPORT_MAX_BODY_MB` | 20、15 | 一次最多幾頁（圖片）、request body 最大幾 MB；超過回 413 |
 | `AI_IMPORT_MAX_TOKENS` | 16000 | 每次呼叫的 `max_tokens`（不串流；約 50 列）；答不完時把頁數切半重讀 |
 | `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |
+| `TWSE_OPENDATA_CLOSE` | `true` | worker 在交易日下午抓證交所的兩個下載網址，上市收盤當天約 14:00 進來（見排程）；證交所表示不同意就設 `false`。api 用它算 `market-status` 的預計時間（`tw.closes`），所以**api 與 worker 都要設** |
+| `SHIOAJI_EVENING_CLOSE` | `true` | worker 晚上用 shioaji-data 先放暫時收盤價（見排程）；同上，api 與 worker 都要設 |
 
 **範圍**：助理只協助投資理財、台股與美股、使用者自己的持股與交易，以及 Forliosa 的用法；寫程式、一般常識、作業、翻譯、寫作、角色扮演等要求，
 用一句繁體中文婉拒並把話題帶回投資。明顯的情況（例如「幫我寫 Python 爬蟲」）在伺服器端就婉拒、不花模型費用；只要提到任何財經字詞或股票代號就交給模型判斷。
@@ -220,7 +229,7 @@ src/forliosa/
 
 **`DATA_POLICY`**（預設 `commercial`）：
 
-- `commercial`（預設）：只用可合法商用的資料——政府開放資料（證交所／櫃買／期交所 OpenAPI、集保開放資料、中央銀行匯率）、shioaji-data 官方檔，
+- `commercial`（預設）：只用可合法商用的資料——政府開放資料（證交所／櫃買／期交所 OpenAPI、證交所在 data.gov.tw 登記的兩個下載網址、集保開放資料、中央銀行匯率）、shioaji-data 官方檔，
   以及由它們建立的自建存檔。期交所資料集中**授權「有條件」**的（期貨／選擇權每日交易行情、每日外幣參考匯率、選擇權大額交易人、
   最後結算價、保證金、股票期貨／選擇權標的：data.gov.tw 找不到對應的開放授權資料集）照常存檔，但**不顯示**，直到產品負責人取得
   期交所書面確認並設定 `TAIFEX_CONDITIONAL_CONFIRMED=true`（預設 `false`；詢問信見 [`docs/outreach/taifex-licence-inquiry.md`](../../docs/outreach/taifex-licence-inquiry.md)）。**從不使用示範資料**：存檔還不夠時回空資料並在 `notes` 說明「資料累積中：自 YYYY-MM-DD 起存檔」。
@@ -232,6 +241,8 @@ src/forliosa/
 
 **任何模式都不使用**：證交所網站（`www.twse.com.tw` 的 T86、MI_QFIIS 等）、基本市況報導 MIS（`mis.twse.com.tw`）、
 櫃買網站（如 `peQryDate`）、公開資訊觀測站網站——這些網站的條款禁止未經書面同意以程式下載。
+唯一的例外（產品負責人 2026-11-16，CLAUDE.md）：證交所在政府資料開放平臺登記的兩個下載網址（data.gov.tw 11549、11555；
+證交所 2025-09-17 在平臺上回覆「本資料集可以使用自動程式進行下載」），見上方排程的 `twse_sameday_close`。櫃買網站的下載網址不在例外裡。
 
 **顯名聲明**：政府資料開放授權條款第 1 版要求標示提供機關、資料集名稱與年份，沒有標示視為自始未取得授權。
 每個回應的 `sources` 都是這個格式，例如「臺灣證券交易所〈上市個股日本益比、殖利率及股價淨值比〉（2026），依政府資料開放授權條款第 1 版」；
@@ -243,12 +254,13 @@ src/forliosa/
 | 來源 | 用途 | 授權與限制 |
 |---|---|---|
 | 證交所／櫃買中心 OpenAPI | 收盤行情、本益比、參考價與漲跌停、融資融券、除權息預告、注意／處置、重大訊息、股東會、月營收、季報、休市日、證交所新聞、ETF 基本資料、**指數與報酬指數**（`MI_INDEX`、`MFI94U`、`tpex_index`、`tpex_reward_index` → 基準 `^TAIEXTR`、`^TPEXTR`）、**上市股利決議**（`t187ap45_L`：盈餘／法定公積／資本公積分列）、**公司基本資料**（`t187ap03_L`、`mopsfin_t187ap03_O`：已發行股數 → 市值、產業、上市日）、**上櫃除權息計算結果**（`tpex_exright_daily`：官方參考價）；櫃買另有個股三大法人與外資持股（都只有最新一天，每天存檔） | 政府資料開放授權條款第 1 版，可商用，**須顯名** |
+| 證交所在政府資料開放平臺登記的下載網址（`www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data`、`…/MI_INDEX?response=open_data`；只有這兩個完整網址，2026-11-16 起） | **上市當天的收盤**：個股日成交資訊（開高低收、成交量）與大盤統計（加權指數、類股指數），收盤後約 13:50 就有；worker `twse_sameday_close` 交易日 13:45 起最多每 10 分鐘抓，拿到當天的就停（`TWSE_OPENDATA_CLOSE`）。`prices_daily`／`index_daily` 的 `source = 'twse-opendata'`，帳本市值與績效照用；隔天清晨 OpenAPI 的檔整列取代。下午那份的成交量可能還沒算盤後、零股、鉅額（未證實） | 政府資料開放授權條款第 1 版（data.gov.tw 11549、11555），可商用，**須顯名**。證交所 2025-09-17 在平臺回覆「本資料集可以使用自動程式進行下載」；網站條款第 6 條（依同意之方式不在此限）、第 8 條（平臺授權的資料除外）。產品負責人的窄例外（CLAUDE.md）：不帶日期參數、被擋（轉址、403、429）當天就停、不偽裝瀏覽器；證交所表示不同意就關掉。研究：[`docs/research/same-day-close.md`](../../docs/research/same-day-close.md) |
 | 期交所 OpenAPI | 三大法人（5 個依日期資料集）、期貨大額交易人、臺指選擇權 Put/Call 比 → `/derivatives/overview`、AI 工具 `get_derivatives_overview` | 同上（data.gov.tw 11592–11600、11337／11338、11322） |
 | 期交所 OpenAPI（有條件） | 期貨／選擇權每日交易行情（含夜盤）、每日外幣參考匯率（只存檔：USD/TWD 改用中央銀行）、選擇權大額交易人、最後結算價、保證金、股票期貨／選擇權標的 | 推定 OGDL，但 data.gov.tw 沒有個別資料集：**存檔但不顯示**，`TAIFEX_CONDITIONAL_CONFIRMED=true` 後才顯示 |
 | 集保開放資料 | 股權分散表（只有當週，每週存檔） | 同上 |
 | 中央銀行開放資料（`cpx.cbc.gov.tw/api/OpenData/FTDOpenData_Day`） | 〈銀行間新臺幣對美元收盤匯率〉：USD/TWD（美股換算新台幣；2008-01-02 起每個營業日） | 同上（data.gov.tw 7232） |
 | 金融監督管理委員會證券期貨局〈證券投資信託基金每日淨值〉（`www.sitca.org.tw/MemberK0000/F/03/nav.csv`，檔案放在投信投顧公會主機；只抓這一個檔案、每 2 秒最多一次） | ETF 淨值與盤後折溢價（個股頁「淨值與折溢價」、AI `get_stock_overview`）；檔案只有每檔最新一筆，每天存檔累積 | 政府資料開放授權條款第 1 版（data.gov.tw 11109），須顯名 |
-| shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值 | 官方資料部分為政府資料開放授權條款第 1 版；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
+| shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值；**晚上的暫時收盤價**（2026-11-16 起，worker `evening_closes`，`SHIOAJI_EVENING_CLOSE`）：`v1/tw/market/daily.json` 大多當天 20:20–23:40 更新（19 天裡 3 天拖到隔天 00:05–01:29），官方收盤還沒進來的市場先存只有收盤價的列（`source = 'shioaji-data'`，開高低與成交量是 null；`dataset_status` `shioaji-data/interim_twse`、`…_tpex`）。官方的檔（證交所下載檔或 OpenAPI、櫃買 OpenAPI）進來後整列取代，暫時的列從不蓋掉官方的列；每日收盤簡報與市場頁排行不用它 | 官方資料部分為政府資料開放授權條款第 1 版（它本身是從證交所、櫃買在 data.gov.tw 登記的網址轉存的）；沒有保證更新時間；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
 | Databento 歷史 API（`hist.databento.com`，資料集 `EQUS.SUMMARY`） | 美股收盤價（`US_PRICE_SOURCE=databento` 時）：Nasdaq NLS Plus 的官方合併收盤，日線、未還原分割與股利，2024-07-01 起；只抓帳本或觀察清單裡的美股與 SPY、DIA、ONEQ、VOO → 報價、走勢、帳本市值、`/close`、市場頁美股、AI。`prices_daily.source = 'databento-equs'` | 付費、按量計費（先用註冊送的 US$125 額度）；顯名「Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供」。產品負責人沒有先確認能不能顯示給會員（2026-11-15，知道風險）；分割與股利資料不能轉載，沒有用 |
 | GDELT DOC 2.0（`api.gdeltproject.org`） | 個股頁「新聞報導」與市場頁的美股新聞：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |

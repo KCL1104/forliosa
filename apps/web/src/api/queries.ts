@@ -380,6 +380,10 @@ export function useMarkBriefingRead() {
   })
 }
 
+/**
+ * 台股現在是不是盤中、上市與上櫃的收盤價進來了沒有（`tw.closes`）。每分鐘問一次（分頁在背景時不問）；
+ * 回到這個分頁時馬上再問（全站預設不在回到分頁時重抓）：收盤價進來時帳本自己更新（`useCloseRefresh`）。
+ */
 export function useMarketStatus() {
-  return useQuery({ queryKey: qk.marketStatus, queryFn: () => api.getMarketStatus(), staleTime: 30_000, refetchInterval: 60_000, retry: false })
+  return useQuery({ queryKey: qk.marketStatus, queryFn: () => api.getMarketStatus(), staleTime: 30_000, refetchInterval: 60_000, refetchOnWindowFocus: true, retry: false })
 }
