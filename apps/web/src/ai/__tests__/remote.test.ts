@@ -54,6 +54,24 @@ describe("applyChatEvent", () => {
     expect(m.streaming).toBe(false)
   })
 
+  it("replaces the shown text with the turn's whole text on text_reset (a dropped streamed edit)", () => {
+    const events: ChatEvent[] = [
+      { event: "text", data: { delta: "我查一下。" } },
+      { event: "tool", data: { id: "edit", name: "edit_answer", status: "running", label: "整理回答" } },
+      { event: "text", data: { delta: "台積電今天收高" } },
+      { event: "tool", data: { id: "edit", name: "edit_answer", status: "done", label: "整理回答" } },
+      { event: "text_reset", data: { text: "我查一下。台積電 11/13 收 2,350 元，漲 0.43%。" } },
+    ]
+    const m = events.reduce(applyChatEvent, start)
+    expect(m.text).toBe("我查一下。台積電 11/13 收 2,350 元，漲 0.43%。")
+    // a malformed reset changes nothing
+    expect(applyChatEvent(m, { event: "text_reset", data: {} as never }).text).toBe(m.text)
+    // the SSE parser passes it through like any other event
+    const got: ChatEvent[] = []
+    createSseParser((e) => got.push(e))('event: text_reset\ndata: {"text":"原本寫的"}\n\n')
+    expect(got).toEqual([{ event: "text_reset", data: { text: "原本寫的" } }])
+  })
+
   it("drops streamed text on a refusal and keeps it on other errors", () => {
     const partial = { ...start, text: "這個" }
     expect(applyChatEvent(partial, { event: "error", data: { code: "refusal", message: "沒辦法回答" } })).toMatchObject({ text: "", error: { code: "refusal" } })

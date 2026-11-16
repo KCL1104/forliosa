@@ -72,6 +72,8 @@ export interface AiChart {
 export type ChatEvent =
   | { event: "thread"; data: { id: string; title: string; created: boolean } }
   | { event: "text"; data: { delta: string } }
+  /** 整理過的回答邊寫邊送；編輯中途失敗、被截斷或少了數字時，用這一輪回答原本寫的全文取代已顯示的字（2026-11-16） */
+  | { event: "text_reset"; data: { text: string } }
   | { event: "tool"; data: Required<Pick<ToolStep, "id" | "status">> & ToolStep }
   | { event: "citation"; data: Citation }
   | { event: "draft"; data: ServerDraft }
@@ -317,6 +319,9 @@ export function applyChatEvent(m: Message, e: ChatEvent): Message {
   switch (e.event) {
     case "text":
       return { ...m, text: (m.text ?? "") + e.data.delta }
+    case "text_reset":
+      // 這一輪的全文：取代目前顯示的字（不是接在後面）
+      return typeof e.data?.text === "string" ? { ...m, text: e.data.text } : m
     case "tool": {
       const tools = [...(m.tools ?? [])]
       const i = tools.findIndex((t) => t.id === e.data.id)

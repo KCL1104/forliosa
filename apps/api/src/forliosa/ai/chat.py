@@ -20,6 +20,10 @@ slot are stored once a call there succeeds. The same recap recovers a 400 that r
 A server tool the API refuses (400 naming its ``type``) is left out for the rest of the process and the call is
 retried without it (``tools.rejected_tool``).
 
+The read-only client tools of one round run side by side, each on a session of its own; ``draft_transaction`` and
+``draw_chart`` run after them on the turn's session (``ChatTurn._run_tools``). Every turn logs one line of timings
+(setup, each model call, each tool, the editor, the first visible text, the total; ``TurnTiming``).
+
 Prompt caching: one breakpoint on the frozen system prompt (tools render before it, so tools + system are
 cached together) plus top-level automatic caching for the growing conversation. Everything that changes per
 turn (time, page, privacy) is a ``role: "system"`` message after the user's message.
@@ -34,6 +38,9 @@ Events (``event: <name>`` / ``data: <json>``):
 
 * ``thread``    ``{id, title, created}`` – always first
 * ``text``      ``{delta}``
+* ``text_reset`` ``{text}`` – the whole answer of this turn so far, shown instead of what the ``text`` deltas built:
+  the edit of a held-back answer streams as it is written (``ChatTurn._edit``), and when it is dropped after part of
+  it was shown (the editor failed, stopped early, ran long or lost a number) this brings back the answer as written
 * ``tool``      ``{id, name, status: running|done|error, label}``
 * ``citation``  ``{url, title, cited_text}``
 * ``draft``     the draft card (see ``tools.draft_card``)
@@ -49,15 +56,18 @@ from __future__ import annotations
 import logging
 import math
 import re
+import time
 from collections.abc import Callable, Iterator
-from dataclasses import dataclass, field
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass, field, replace
 from datetime import datetime
 from decimal import Decimal
 from difflib import SequenceMatcher
 from typing import Any
 
 import anthropic
-from sqlalchemy.orm import Session
+from sqlalchemy import Engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from forliosa import plans
 from forliosa.ai import grounding, scope, store
@@ -66,6 +76,7 @@ from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, page_context
 from forliosa.ai.tools import (
     ToolContext,
+    ToolOutcome,
     client_tool_definitions,
     exclude_tool,
     execute,
@@ -100,6 +111,17 @@ _THINKING_REJECTED = re.compile(r"bound to a different conversation|invalid `?si
                                 re.IGNORECASE)
 # Models that rejected mid-conversation system messages: the page context is sent as a user-turn reminder.
 _NO_SYSTEM_ROLE: set[str] = set()
+# The answer editor streams (2026-11-16: the whole edit ran before its first word was shown, 1.4–3.1 s). Its first
+# word must come within EDITOR_FIRST_TOKEN_SECONDS (also the connect and read timeout, so a silent connection is cut;
+# checked again at every event) and the whole edit within EDITOR_TOTAL_SECONDS (checked at every event); otherwise
+# the answer is shown as written.
+EDITOR_FIRST_TOKEN_SECONDS = 4.0
+EDITOR_TOTAL_SECONDS = 20.0
+# Tools that write (a draft) or add to the turn (a chart card) run one at a time on the turn's own session, after the
+# read-only tools of the same round, which run side by side (``ChatTurn._run_tools``)
+SEQUENTIAL_TOOLS = frozenset({"draft_transaction", "draw_chart"})
+MAX_PARALLEL_TOOLS = 4
+_clock = time.monotonic  # tests replace it
 
 
 class ChatFailure(Exception):
@@ -128,6 +150,52 @@ class TurnState:
         self.display.text += s
 
 
+def _s(x: float | None) -> str:
+    return "-" if x is None else f"{x:.2f}"
+
+
+@dataclass
+class CallSpan:
+    """One attempt of a model call, in seconds from the start of the turn."""
+
+    n: int
+    start: float
+    headers: float | None = None  # the response headers came (the SDK returns from ``stream()``)
+    first: float | None = None  # the first event
+    end: float | None = None  # the final message
+
+
+@dataclass
+class TurnTiming:
+    """Where the time of one turn went, logged as one line when it ends (2026-11-16: a 17–20 s answer could not be
+    attributed from the access log). Offsets are seconds from the start of the turn; tools are durations. No user
+    content goes into it."""
+
+    start: float = field(default_factory=lambda: _clock())
+    parts: list[str] = field(default_factory=list)
+    calls: int = 0
+    first_text: float | None = None  # the first visible word reached the browser
+
+    def at(self) -> float:
+        return _clock() - self.start
+
+    def note(self, part: str) -> None:
+        self.parts.append(part)
+
+    def call(self) -> CallSpan:
+        if not self.calls:  # everything before the first model call: thread, page symbol, history, key slot
+            self.note(f"setup {self.at():.2f}")
+        self.calls += 1
+        return CallSpan(self.calls, self.at())
+
+    def close(self, span: CallSpan) -> None:
+        self.note(f"call{span.n} start {span.start:.2f} headers {_s(span.headers)} first {_s(span.first)} "
+                  f"end {_s(span.end)}")
+
+    def line(self) -> str:
+        return "; ".join([*self.parts, f"first text {_s(self.first_text)}", f"total {self.at():.2f}"])
+
+
 _NUMBER = re.compile(r"\d[\d,]*(?:\.\d+)?")
 
 
@@ -138,16 +206,23 @@ def _numbers(text: str) -> set[str]:
 _CODE_IN_PARENS = re.compile(r"[(（](\d{4,6})[A-Z]?(?:\.TWO?|\.TW)?[)）]")
 # Years the editor may drop when it rewrites a date as 11/13: 2026, 2026/11/04, 115年 (ROC), 2026年
 _YEAR = re.compile(r"(?<!\d)(?:(?:19|20)\d\d(?=\s*[年/\-.])|1[01]\d(?=\s*(?:年|/\d)))")
+# A date in parentheses, the way news copy writes it: 「今（16）日」「昨（15）日」「本（11）月」「今（2026）年」,
+# 「週一（16日）」「（11月16日）」「（11/16）」. The editor rewrites these as 今天／昨天／11/16 (EDITOR_SYSTEM), so
+# their numbers may go (2026-11-16: an edit that turned 「今（16）日」 into 「今天」 was dropped for the missing 16)
+_DATE_IN_PARENS = re.compile(r"[今昨明前本上下去同當][（(]\s*\d{1,4}\s*[)）]\s*[日月年]"
+                             r"|[（(]\s*(?:\d{1,2}\s*月\s*)?\d{1,2}\s*日\s*[)）]"
+                             r"|[（(]\s*(?:1[0-2]|0?[1-9])\s*/\s*(?:3[01]|[12]\d|0?[1-9])\s*[)）]")
 
 
 def keeps_numbers(draft: str, edited: str) -> bool:
     """Every number of the draft is still in the edited answer (thousands separators aside). The editor may drop a
-    stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」) and the year of a date it rewrites
-    as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」)."""
+    stock code in parentheses after a name (「台積電(2330)」, 「聯發科（2454.TW）」), the year of a date it rewrites
+    as 11/13 (「2026年11月4日」, 「115 年」, 「2026/11/04」) and a date in parentheses it rewrites as 今天 or 11/16
+    (「今（16）日」, 「（16日）」; only the date itself: the same number elsewhere in the draft still counts)."""
     codes = {m.group(1) for m in _CODE_IN_PARENS.finditer(draft)}
     years = {m.group(0) for m in _YEAR.finditer(draft)}
     kept = _numbers(edited)
-    return all(_covered(x, kept) for x in _numbers(draft) - codes - years)
+    return all(_covered(x, kept) for x in _numbers(_DATE_IN_PARENS.sub(" ", draft)) - codes - years)
 
 
 def _covered(x: str, kept: set[str]) -> bool:
@@ -192,6 +267,25 @@ def _stream(text: str, size: int = 24) -> Iterator[Event]:
         yield "text", {"delta": text[i:i + size]}
 
 
+class _EditorGaveUp(Exception):
+    """The streamed edit is not used: its first word or its end came too late, or it outgrew the draft."""
+
+
+def _run_here(ctx: ToolContext, name: str, args: Any) -> tuple[ToolOutcome, float]:
+    t = _clock()
+    return execute(ctx, name, args), _clock() - t
+
+
+def _run_apart(sessions: Callable[[], Session], ctx: ToolContext, user_id: str, name: str,
+               args: Any) -> tuple[ToolOutcome, float]:
+    """A read-only tool on a worker thread, with a session and the user of its own: the turn's session (and the
+    objects loaded through it) is never used off its thread; ``execute`` rolls back only this session on an error."""
+    t = _clock()
+    with sessions() as db:
+        own = replace(ctx, db=db, user=db.get(User, user_id), drafts=[], charts=[], drafted={})
+        return execute(own, name, args), _clock() - t
+
+
 def _classify(exc: BaseException) -> str:
     if isinstance(exc, KeysBusy):
         return "ai_busy"
@@ -223,8 +317,12 @@ def render_messages(messages: list[dict[str, Any]], system_role: bool) -> list[d
 
 class ChatTurn:
     def __init__(self, db: Session, user: User, md: MarketData, pool: KeyPool, settings: Settings,
-                 now_fn: Callable[[], datetime] = now_taipei, economy: bool = False):
+                 now_fn: Callable[[], datetime] = now_taipei, economy: bool = False,
+                 sessions: Callable[[], Session] | None = None):
         self.db, self.user, self.md, self.pool, self.settings, self.now_fn = db, user, md, pool, settings, now_fn
+        # Sessions for the read-only tools that run side by side (``_run_tools``); by default on the engine of ``db``
+        self.sessions = sessions
+        self.timing = TurnTiming()
         # 省錢模式 (``store.month_mode``): the month's budget is spent, so this turn has no web search or fetch. The
         # tool list differs from the thread's earlier turns, so replayed thinking is rejected once and the turn goes
         # on from the plain-text recap (``_THINKING_REJECTED``).
@@ -285,7 +383,9 @@ class ChatTurn:
                                     exclude or ())
         except (NoKeyAvailable, KeysBusy) as exc:
             raise ChatFailure(_classify(exc), str(exc)) from exc
-        if route.wait > 0:
+        if route.wait > 0:  # the pinned slot cools down for a moment: wait for it rather than move the thread
+            log.info("AI thread %s waits %.1fs for key #%d (sticky)", self._tid(), route.wait, route.slot.index)
+            self.timing.note(f"wait {route.wait:.2f} key #{route.slot.index}")
             self.pool.sleep(route.wait)
         self.slot = route.slot
         moved = bool(self.stored) and route.slot.index != self.thread.key_slot
@@ -303,6 +403,7 @@ class ChatTurn:
         wait = self.pool.wait_seconds(slot)
         if transient and wait <= max_wait and slot.index not in same:  # recovers within the short wait: stay
             same.add(slot.index)
+            self.timing.note(f"retry wait {max(wait, 0.5):.2f} key #{slot.index}")
             self.pool.sleep(max(wait, 0.5))
             return True
         if can_move:  # nothing of this turn exists yet: another slot (and a recap) is safe
@@ -314,9 +415,14 @@ class ChatTurn:
                 return True
         if transient and len(tried) == 1 and slot.index not in same:  # nothing else to try: once more
             same.add(slot.index)
+            self.timing.note(f"retry wait 1.00 key #{slot.index}")
             self.pool.sleep(1.0)
             return True
         return False
+
+    def _tid(self) -> str:
+        """The thread in a timing log line: its id's prefix only."""
+        return self.thread.id[:16] if self.thread is not None else "-"
 
     # -- one streamed API call -----------------------------------------------------------------------------
     def _call(self, model: str, new: list[dict[str, Any]], state: TurnState,
@@ -331,10 +437,14 @@ class ChatTurn:
             params = self.params(model, self.history + new)
             emitted = False
             state.round_start = None
+            span = self.timing.call()
             try:
                 with slot.client.messages.stream(**params) as stream:
+                    span.headers = self.timing.at()
                     try:
                         for ev in stream:
+                            if span.first is None:
+                                span.first = self.timing.at()
                             for out in self._translate(ev, state, first_text_of_round):
                                 emitted = True
                                 yield out
@@ -345,6 +455,7 @@ class ChatTurn:
                         raise
                     final = stream.get_final_message()
                     headers = stream.response.headers
+                span.end = self.timing.at()
                 self.pool.observe(slot.index, headers)
                 self.pool.mark_success(slot)
                 self.served = True
@@ -386,6 +497,8 @@ class ChatTurn:
                 tried.add(slot.index)
                 if not self._recover(failure, tried, same, can_move=len(new) == 2):
                     raise ChatFailure(_classify(exc), str(exc)) from exc
+            finally:  # every attempt, also a failed or interrupted one (``end -``)
+                self.timing.close(span)
 
     def _record_partial(self, stream: Any, slot_index: int, model: str) -> None:
         """Record what an interrupted streamed call has used so far (input from ``message_start``, the output
@@ -492,6 +605,23 @@ class ChatTurn:
     # -- the turn ------------------------------------------------------------------------------------------
     def run(self, *, thread_id: str | None, message: str, route: str | None, symbol: str | None,
             privacy: bool, mode: str | None = None) -> Iterator[Event]:
+        """One turn (``_turn``), noting when its first word was shown and logging its timings when it ends (also when
+        the browser went away: closing this closes the turn, which saves what it has)."""
+        self.timing = timing = TurnTiming()
+        events = self._turn(thread_id=thread_id, message=message, route=route, symbol=symbol, privacy=privacy,
+                            mode=mode)
+        try:
+            for name, data in events:
+                words = data.get("delta") if name == "text" else data.get("text") if name == "text_reset" else None
+                if timing.first_text is None and isinstance(words, str) and words.strip():
+                    timing.first_text = timing.at()
+                yield name, data
+        finally:
+            events.close()
+            log.info("AI turn %s timings (s): %s", self._tid(), timing.line())
+
+    def _turn(self, *, thread_id: str | None, message: str, route: str | None, symbol: str | None,
+              privacy: bool, mode: str | None) -> Iterator[Event]:
         db, settings = self.db, self.settings
         self.deep = mode == "deep" and settings.ai_web_search and not self.economy
         created = thread_id is None
@@ -556,46 +686,114 @@ class ChatTurn:
 
     def _edit(self, thread: AiThread, state: TurnState, flagged: list[dict[str, Any]], edit: bool):
         """Rewrite the held-back answer once (產品負責人 2026-11-15: answers built on search results copied source
-        sentences and named outlets in the text) and stream the result. The edit is dropped, and the answer shown
-        as written, when the call fails, is cut off, or loses a number the draft had. Flagged (uncited) sentences
-        are moved onto the most similar sentence of the edited answer; one without a close match is left out."""
+        sentences and named outlets in the text), streaming the edit as it is written (2026-11-16: the first word
+        came only after the whole edit). The edit is dropped, and the answer shown as written, when the call fails,
+        is late, stops for anything but ``end_turn``, outgrows the draft or loses a number the draft had; when part of
+        it was shown already, a ``text_reset`` brings back the answer as written. Flagged (uncited) sentences are
+        moved onto the most similar sentence of the edited answer; one without a close match is left out.
+        ``state.display.text`` keeps the draft until the edit is complete, so a turn cut off meanwhile saves it."""
         start = state.held_from
         assert start is not None
+        if not edit or not state.display.text[start:].strip():
+            yield from self._release(state)
+            return flagged
         draft = state.display.text[start:]
         body = draft.lstrip()
         lead = draft[: len(draft) - len(body)]
+        timing = self.timing
+        began, first = timing.at(), None
+        yield "tool", {"id": "edit", "name": "edit_answer", "status": "running", "label": "整理回答"}
         edited: str | None = None
-        if edit and body.strip():
-            yield "tool", {"id": "edit", "name": "edit_answer", "status": "running", "label": "整理回答"}
-            try:
-                edited = self._editor_call(thread, body)
-            except Exception:  # the answer as written is fine to show; editing is a nicety
-                log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
-            yield "tool", {"id": "edit", "name": "edit_answer", "status": "done", "label": "整理回答"}
-            if edited is not None and not keeps_numbers(body, edited):
-                log.warning("AI answer editor dropped a number; showing the answer as written")
-                edited = None
-        final = lead + (edited if edited is not None else body)
-        state.display.text = state.display.text[:start] + final
+        shown = ""  # the edit streamed so far (after ``lead``)
+        pieces = self._editor_stream(thread, body)
+        try:
+            while True:
+                try:
+                    piece = next(pieces)
+                except StopIteration as stop:
+                    edited = stop.value
+                    break
+                if first is None:
+                    first = timing.at()
+                yield "text", {"delta": (lead if not shown else "") + piece}
+                shown += piece
+        except _EditorGaveUp as exc:
+            log.warning("AI answer editor: %s; showing the answer as written", exc)
+        except Exception:  # the answer as written is fine to show; editing is a nicety
+            log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
+        finally:
+            pieces.close()  # the browser went away: the editor call stops too (its usage is recorded)
+        if edited is not None and not keeps_numbers(body, edited):
+            log.warning("AI answer editor dropped a number; showing the answer as written")
+            edited = None
+        timing.note(f"editor start {began:.2f} first {_s(first)} end {timing.at():.2f} "
+                    f"{'edited' if edited is not None else 'as written'}")
+        yield "tool", {"id": "edit", "name": "edit_answer", "status": "done", "label": "整理回答"}
         state.held_from = None
-        yield from _stream(final)
-        return remap_flags(flagged, draft, final, start) if edited is not None else flagged
+        if edited is None:
+            if shown:  # part of the edit is on screen: the whole answer as written replaces it
+                yield "text_reset", {"text": state.display.text}
+            else:
+                yield from _stream(draft)
+            return flagged
+        final = lead + edited
+        state.display.text = state.display.text[:start] + final
+        return remap_flags(flagged, draft, final, start)
 
-    def _editor_call(self, thread: AiThread, body: str) -> str | None:
+    def _editor_stream(self, thread: AiThread, body: str) -> Iterator[str]:
+        """The editor call, streamed: yields the edited answer as it is written, without leading or trailing white
+        space (what it yields is exactly what it returns), and returns it, or None when the call stopped for anything
+        but ``end_turn`` or wrote nothing. Raises ``_EditorGaveUp`` when no word came within
+        ``EDITOR_FIRST_TOKEN_SECONDS``, the edit ran past ``EDITOR_TOTAL_SECONDS`` or outgrew the draft (twice its
+        length, at least 200 characters), and the SDK's errors when the call fails; what a call cut short used is
+        recorded all the same."""
         slot = self.slot
         if slot is None:
             return None
         model = thread.model
-        msg = slot.client.with_options(timeout=30.0, max_retries=0).messages.create(
-            model=model, max_tokens=4000, system=EDITOR_SYSTEM, output_config={"effort": "low"},
-            messages=[{"role": "user", "content": body}])
+        limit = max(200, len(body) * 2)
+        timeout = anthropic.Timeout(EDITOR_TOTAL_SECONDS, connect=EDITOR_FIRST_TOKEN_SECONDS,
+                                    read=EDITOR_FIRST_TOKEN_SECONDS)
+        client = slot.client.with_options(timeout=timeout, max_retries=0)
+        t0 = _clock()
+        out: list[str] = []
+        size = 0
+        pending = ""  # white space held back until a word follows it (none is shown at the start or the end)
+        with client.messages.stream(model=model, max_tokens=4000, system=EDITOR_SYSTEM,
+                                    output_config={"effort": "low"},
+                                    messages=[{"role": "user", "content": body}]) as stream:
+            try:
+                for ev in stream:
+                    t = getattr(ev, "type", None)
+                    elapsed = _clock() - t0
+                    if elapsed > EDITOR_TOTAL_SECONDS:
+                        raise _EditorGaveUp(f"not done after {elapsed:.1f}s")
+                    if not out and t != "text" and elapsed > EDITOR_FIRST_TOKEN_SECONDS:
+                        raise _EditorGaveUp(f"no word after {elapsed:.1f}s")
+                    if t != "text" or not ev.text:
+                        continue
+                    piece = pending + ev.text
+                    if not out:
+                        piece = piece.lstrip()
+                    words = piece.rstrip()
+                    pending = piece[len(words):]
+                    if not words:
+                        continue
+                    size += len(words)
+                    if size > limit:
+                        raise _EditorGaveUp(f"longer than {limit} characters")
+                    out.append(words)
+                    yield words
+            except BaseException:
+                self._record_partial(stream, slot.index, model)
+                raise
+            msg = stream.get_final_message()
         usage = CallUsage.from_sdk(msg.usage)
         store.record_usage(self.db, user_id=self.user.id, thread_id=thread.id, feature="chat",
                            model=msg.model or model, key_slot=slot.index, usage=usage, stop_reason=msg.stop_reason)
         if msg.stop_reason != "end_turn":
             return None
-        text = "".join(b.text for b in msg.content if getattr(b, "type", None) == "text").strip()
-        return text if text and len(text) <= max(200, len(body) * 2) else None
+        return "".join(out) or None
 
     @staticmethod
     def _done(thread: AiThread, turn_id: str, state: TurnState) -> dict[str, Any]:
@@ -634,32 +832,89 @@ class ChatTurn:
                 yield "error", state.display.error
                 return not tool_uses  # a cut-off tool call cannot stay in the history
             if final.stop_reason == "tool_use" and tool_uses:
-                results = []
-                for tu in tool_uses:
-                    label = tool_label(tu.name, tu.input if isinstance(tu.input, dict) else {})
-                    state.display.tools.append({"name": tu.name, "label": label})
-                    yield "tool", {"id": tu.id, "name": tu.name, "status": "running", "label": label}
-                    outcome = execute(ctx, tu.name, tu.input)
-                    if outcome.outlets:
-                        state.outlets.update(outcome.outlets)
-                    if isinstance(outcome.content, list):  # citable news: check the answer like a web search's
-                        state.used_web = True
-                    yield "tool", {"id": tu.id, "name": tu.name, "status": "error" if outcome.is_error else "done",
-                                   "label": label}
-                    if outcome.draft is not None:
-                        state.display.draft_ids.append(outcome.draft["id"])
-                        yield "draft", outcome.draft
-                    if outcome.chart is not None:
-                        state.display.charts.append(outcome.chart)
-                        yield "chart", outcome.chart
-                    result: dict[str, Any] = {"type": "tool_result", "tool_use_id": tu.id, "content": outcome.content}
-                    if outcome.is_error:
-                        result["is_error"] = True
-                    results.append(result)
+                results = yield from self._run_tools(tool_uses, state, ctx)
                 new.append({"role": "user", "content": results})
                 continue
             return True  # end_turn / stop_sequence
         raise ChatFailure("too_many_steps")
+
+    def _run_tools(self, tool_uses: list[Any], state: TurnState, ctx: ToolContext):
+        """Run one round's client tools; returns a ``tool_result`` for every ``tool_use``, in the model's order (one
+        user message). The read-only tools of a round run side by side, each on a session of its own (2026-11-16: a
+        why-question's overview and news lookups ran one after the other); ``SEQUENTIAL_TOOLS`` run after them, one at
+        a time, on the turn's session. ``done`` events, and what each result adds to the turn (outlets, citable news,
+        draft and chart cards), follow the model's order, so nothing depends on which tool finished first."""
+        began = self.timing.at()
+        labels = {tu.id: tool_label(tu.name, tu.input if isinstance(tu.input, dict) else {}) for tu in tool_uses}
+        together = [tu for tu in tool_uses if tu.name not in SEQUENTIAL_TOOLS]
+        sessions = self._tool_sessions() if len(together) > 1 else None
+        if sessions is None:
+            together = []
+        outcomes: dict[str, ToolOutcome] = {}
+        seconds: dict[str, float] = {}
+        if together:
+            for tu in together:
+                yield from self._tool_running(tu, labels[tu.id], state)
+            user_id = ctx.user.id  # read here: the turn's objects stay on this thread
+            pool = ThreadPoolExecutor(max_workers=min(len(together), MAX_PARALLEL_TOOLS), thread_name_prefix="ai-tool")
+            try:
+                futures = [pool.submit(_run_apart, sessions, ctx, user_id, tu.name, tu.input) for tu in together]
+                for tu, fut in zip(together, futures, strict=True):
+                    try:
+                        outcomes[tu.id], seconds[tu.id] = fut.result()
+                    except Exception:  # it could not get a session of its own: run it here instead
+                        log.warning("AI tool %s could not run on its own session; running it here", tu.name,
+                                    exc_info=True)
+                        outcomes[tu.id], seconds[tu.id] = _run_here(ctx, tu.name, tu.input)
+                    yield from self._tool_done(tu, labels[tu.id], outcomes[tu.id], state)
+            finally:  # the browser went away: tools still running finish on their own and close their sessions
+                pool.shutdown(wait=False, cancel_futures=True)
+        for tu in tool_uses:
+            if tu.id in outcomes:
+                continue
+            yield from self._tool_running(tu, labels[tu.id], state)
+            outcomes[tu.id], seconds[tu.id] = _run_here(ctx, tu.name, tu.input)
+            yield from self._tool_done(tu, labels[tu.id], outcomes[tu.id], state)
+        each = ", ".join(f"{tu.name} {seconds[tu.id]:.2f}" for tu in tool_uses)
+        self.timing.note(f"tools {self.timing.at() - began:.2f}{' parallel' if together else ''} [{each}]")
+        results: list[dict[str, Any]] = []
+        for tu in tool_uses:
+            outcome = outcomes[tu.id]
+            result: dict[str, Any] = {"type": "tool_result", "tool_use_id": tu.id, "content": outcome.content}
+            if outcome.is_error:
+                result["is_error"] = True
+            results.append(result)
+        return results
+
+    def _tool_sessions(self) -> Callable[[], Session] | None:
+        """Sessions for tools that run side by side: on the engine of the turn's session, so they see the same
+        database. None (run them one at a time) when that session is not on an engine of its own."""
+        if self.sessions is not None:
+            return self.sessions
+        try:
+            bind = self.db.get_bind()
+        except Exception:  # pragma: no cover - an unbound session
+            return None
+        return sessionmaker(bind, expire_on_commit=False) if isinstance(bind, Engine) else None
+
+    @staticmethod
+    def _tool_running(tu: Any, label: str, state: TurnState) -> Iterator[Event]:
+        state.display.tools.append({"name": tu.name, "label": label})
+        yield "tool", {"id": tu.id, "name": tu.name, "status": "running", "label": label}
+
+    @staticmethod
+    def _tool_done(tu: Any, label: str, outcome: ToolOutcome, state: TurnState) -> Iterator[Event]:
+        if outcome.outlets:
+            state.outlets.update(outcome.outlets)
+        if isinstance(outcome.content, list):  # citable news: check the answer like a web search's
+            state.used_web = True
+        yield "tool", {"id": tu.id, "name": tu.name, "status": "error" if outcome.is_error else "done", "label": label}
+        if outcome.draft is not None:
+            state.display.draft_ids.append(outcome.draft["id"])
+            yield "draft", outcome.draft
+        if outcome.chart is not None:
+            state.display.charts.append(outcome.chart)
+            yield "chart", outcome.chart
 
     def _persist(self, thread: AiThread, turn_id: str, new: list[dict[str, Any]], ok: bool, message: str,
                  state: TurnState) -> None:

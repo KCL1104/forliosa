@@ -9,6 +9,7 @@ import os
 import tempfile
 import threading
 import time
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -53,20 +54,69 @@ class RateLimiter:
         return host
 
     def wait(self, host: str) -> float:
-        """Block until the host's interval has passed; returns seconds slept."""
+        """Block until the host's interval has passed; returns seconds slept.
+
+        The caller's slot (``interval`` after the slot before it) is reserved under the lock and the sleep happens after
+        the lock is released: requests to one host still start ``interval`` apart, in the order they asked, but a wait
+        for TWSE's 3 s no longer holds up requests to every other host (2026-11-16: shioaji-data downloads sat 3–6 s
+        behind TWSE waits while an AI turn and the stock page loaded at once)."""
         interval = self.interval_for(host)
         key = self.bucket(host)
         with self._lock:
             now = self._clock()
             last = self._last.get(key)
-            slept = 0.0
-            if last is not None and interval > 0:
-                remaining = interval - (now - last)
-                if remaining > 0:
-                    self._sleep(remaining)
-                    slept = remaining
-            self._last[key] = self._clock()
-            return slept
+            start = now if last is None or interval <= 0 else max(now, last + interval)
+            self._last[key] = start
+        slept = start - now
+        if slept > 0:
+            self._sleep(slept)
+        return slept
+
+
+class _Flight:
+    __slots__ = ("done", "error", "owner", "value")
+
+    def __init__(self, owner: int):
+        self.owner = owner  # the thread running the call
+        self.done = threading.Event()
+        self.value: Any = None
+        self.error: BaseException | None = None
+
+
+class SingleFlight:
+    """At most one call in flight per key: a caller that finds the key's call running waits for it and gets its result,
+    or its exception. Nothing is kept once the call is over: callers cache results themselves, and an error is never
+    cached (the next caller tries again). A call that asks for its own key again (same thread) runs it directly
+    instead of waiting for itself."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._calls: dict[Hashable, _Flight] = {}
+
+    def do[T](self, key: Hashable, fn: Callable[[], T]) -> T:
+        me = threading.get_ident()
+        with self._lock:
+            flight = self._calls.get(key)
+            leader = flight is None
+            if flight is None:
+                flight = self._calls[key] = _Flight(me)
+        if not leader:
+            if flight.owner == me:
+                return fn()
+            flight.done.wait()
+            if flight.error is not None:
+                raise flight.error
+            return flight.value
+        try:
+            flight.value = fn()
+            return flight.value
+        except BaseException as exc:
+            flight.error = exc
+            raise
+        finally:
+            with self._lock:
+                del self._calls[key]
+            flight.done.set()
 
 
 # Polite intervals per host (docs/research/data-sources-licensing.md §4.4, open-data-inventory.md §12.2):
@@ -74,6 +124,7 @@ class RateLimiter:
 # requests / s per requester across all of sec.gov; one process stays at ≤ 4 / s (0.25 s), so the API server and the
 # worker together stay under 10 / s.
 SEC_INTERVAL_SECONDS = 0.25
+SLOW_FETCH_SECONDS = 1.0  # a download that took this long (host interval included) is logged with its timing
 DEFAULT_LIMITER = RateLimiter(
     default_interval=0.0,
     per_host={"twse.com.tw": 3.0, "tpex.org.tw": 2.0, "tdcc.com.tw": 2.0, "taifex.com.tw": 2.0,
@@ -211,14 +262,19 @@ class HttpFetcher:
         self._require_allowed(url)
         delay = self.backoff
         last_exc: Exception | None = None
+        started, waited = time.monotonic(), 0.0
         for attempt in range(self.retries + 1):
-            self.limiter.wait(host)
+            waited += self.limiter.wait(host)
             try:
                 resp = self.client.get(url, params=params, headers=headers)
             except httpx.HTTPError as exc:
                 last_exc = exc
             else:
                 if resp.status_code == 200:
+                    took = time.monotonic() - started
+                    if took >= SLOW_FETCH_SECONDS:  # where a slow page or AI turn spent its time (2026-11-16)
+                        log.info("slow fetch %s%s: %.2f s, %.2f s of it waiting for the host interval, %d attempt(s)",
+                                 host, urlparse(url).path, took, waited, attempt + 1)
                     return resp.content
                 if resp.status_code in (402, 403, 404, 405, 407, 429, 451) or 300 <= resp.status_code < 400:
                     raise HttpStatusError(f"{host} 回應 HTTP {resp.status_code}", resp.status_code)

@@ -14,6 +14,7 @@ downloads from the website without consent, so the former ``peQryDate`` website 
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from decimal import Decimal
 from typing import Any
 
@@ -27,7 +28,7 @@ from forliosa.marketdata.base import (
     parse_tw_date,
     tw_symbol,
 )
-from forliosa.marketdata.http import HttpFetcher
+from forliosa.marketdata.http import HttpFetcher, SingleFlight
 from forliosa.timeutil import market_close_dt
 
 OPENAPI_BASE = "https://www.tpex.org.tw/openapi/v1"
@@ -60,19 +61,36 @@ class TpexOpenApiProvider(BaseProvider):
     def __init__(self, fetcher: HttpFetcher | None = None):
         self.fetcher = fetcher or HttpFetcher()
         self._cache: dict[str, tuple[float, Any]] = {}
+        self._flight = SingleFlight()
+
+    def _cached(self, key: str, load: Callable[[], Any]) -> Any:
+        """``load()``'s value, kept CACHE_SECONDS. One download per key at a time: requests that need it meanwhile
+        wait for that one instead of each queueing another 2 s TPEx slot (as TwseOpenApiProvider._get)."""
+        def fresh() -> tuple[float, Any] | None:
+            hit = self._cache.get(key)
+            return hit if hit and time.monotonic() - hit[0] < self.CACHE_SECONDS else None
+
+        def download() -> Any:
+            hit = fresh()  # a download that finished just before this one started
+            if hit:
+                return hit[1]
+            value = load()
+            self._cache[key] = (time.monotonic(), value)
+            return value
+
+        hit = fresh()
+        return hit[1] if hit else self._flight.do(key, download)
 
     def _daily(self) -> dict[str, QuoteData]:
-        hit = self._cache.get("daily")
-        if hit and time.monotonic() - hit[0] < self.CACHE_SECONDS:
-            return hit[1]
+        return self._cached("daily", self._download_daily)
+
+    def _download_daily(self) -> dict[str, QuoteData]:
         # tpex_mainboard_quotes (≈ 0.4 MB, stocks only) has the same keys as
         # tpex_mainboard_daily_close_quotes (≈ 5 MB incl. warrants, archived by forliosa.archive).
         rows = self.fetcher.get_json(f"{OPENAPI_BASE}/tpex_mainboard_quotes")
         if not isinstance(rows, list):
             raise ProviderUnavailable("TPEx daily close quotes 格式不符")
-        parsed = parse_daily_close_quotes(rows)
-        self._cache["daily"] = (time.monotonic(), parsed)
-        return parsed
+        return parse_daily_close_quotes(rows)
 
     def quotes(self, symbols: list[str]) -> dict[str, QuoteData] | None:
         wanted = [s for s in symbols if market_of_symbol(s) == "TPEX"]
@@ -86,14 +104,7 @@ class TpexOpenApiProvider(BaseProvider):
         wanted = {s for s in symbols if market_of_symbol(s) == "TPEX"}
         if not wanted:
             return {}
-        hit = self._cache.get("exright")
-        if hit and time.monotonic() - hit[0] < self.CACHE_SECONDS:
-            rows = hit[1]
-        else:
-            rows = self.fetcher.get_json(f"{OPENAPI_BASE}/tpex_exright_prepost")
-            if not isinstance(rows, list):
-                raise ProviderUnavailable("TPEx exright_prepost 格式不符")
-            self._cache["exright"] = (time.monotonic(), rows)
+        rows = self._cached("exright", self._download_exright)
         out = {}
         for r in rows:
             sym = tw_symbol(str(r.get("SecuritiesCompanyCode") or "").strip(), "TPEX")
@@ -103,3 +114,9 @@ class TpexOpenApiProvider(BaseProvider):
                 if cash or ratio:
                     out[sym] = (cash, ratio)
         return out
+
+    def _download_exright(self) -> list[dict[str, Any]]:
+        rows = self.fetcher.get_json(f"{OPENAPI_BASE}/tpex_exright_prepost")
+        if not isinstance(rows, list):
+            raise ProviderUnavailable("TPEx exright_prepost 格式不符")
+        return rows

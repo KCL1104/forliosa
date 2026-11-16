@@ -27,7 +27,7 @@ from forliosa.marketdata.base import (
     parse_tw_date,
     tw_symbol,
 )
-from forliosa.marketdata.http import HttpFetcher
+from forliosa.marketdata.http import HttpFetcher, SingleFlight
 from forliosa.timeutil import market_close_dt
 
 OPENAPI_BASE = "https://openapi.twse.com.tw/v1"
@@ -111,10 +111,23 @@ class TwseOpenApiProvider(BaseProvider):
     def __init__(self, fetcher: HttpFetcher | None = None):
         self.fetcher = fetcher or HttpFetcher()
         self._cache: dict[str, tuple[float, Any]] = {}
+        self._flight = SingleFlight()
+
+    def _cached(self, path: str) -> tuple[float, Any] | None:
+        hit = self._cache.get(path)
+        return hit if hit and _time.monotonic() - hit[0] < self.CACHE_SECONDS else None
 
     def _get(self, path: str) -> Any:
-        hit = self._cache.get(path)
-        if hit and _time.monotonic() - hit[0] < self.CACHE_SECONDS:
+        hit = self._cached(path)
+        if hit:
+            return hit[1]
+        # One download per path at a time: requests that need it meanwhile (the stock page's endpoints and an AI turn)
+        # wait for that one instead of each queueing another 3 s TWSE slot (2026-11-16: TWT48U_ALL fetched 3–5 times).
+        return self._flight.do(path, lambda: self._download(path))
+
+    def _download(self, path: str) -> Any:
+        hit = self._cached(path)  # a download that finished just before this one started
+        if hit:
             return hit[1]
         data = self.fetcher.get_json(f"{OPENAPI_BASE}{path}")
         if not isinstance(data, list):

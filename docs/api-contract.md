@@ -592,7 +592,8 @@
 |---|---|---|
 | `thread` | `{"id": "thr_…", "title": "我有哪些持股？", "created": true}` | 新對話時 `created: true` |
 | `text` | `{"delta": "台積電今天"}` | 回答文字片段，依序串接；換到下一輪（查完工具）時會先送 `"\n\n"`。**回答是 Markdown**（2026-11-15 起：`- ` 清單、**粗體**、`###` 小標題、小表格；不放網址與大標題），前端用 Markdown 顯示；舊的回答可能是用「・」條列的純文字 |
-| `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」。用到網路搜尋或個股新聞工具的回答，寫完先不送 `text`，多一個 `{"id": "edit", "name": "edit_answer", "label": "整理回答"}` 的步驟（2026-11-15：一次不用工具的編輯呼叫，改掉照抄的原文、句子裡的媒體名稱、說到工具的話，不改事實與數字），之後才送整理過的 `text`；編輯失敗、被截斷或少了數字時送原本寫的 |
+| `text_reset` | `{"text": "這一輪回答的全文"}` | 用 `text` **取代**這一輪目前顯示的回答文字（不是接在後面；之後不會再有 `text`）。只在整理回答（`edit_answer`）邊寫邊送、送出一部分後又改回原本寫的回答時出現（2026-11-16）。`text` 是整則回答，包括查網路之前已經送出的字；之後的 `grounding` 位置以它為準，也和 `ThreadMessage.text` 相同 |
+| `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」。用到網路搜尋或個股新聞工具的回答，寫完先不送 `text`，多一個 `{"id": "edit", "name": "edit_answer", "label": "整理回答"}` 的步驟（2026-11-15：一次不用工具的編輯呼叫，改掉照抄的原文、句子裡的媒體名稱、說到工具的話，不改事實與數字）；2026-11-16 起整理過的 `text` 在 `running` 之後邊寫邊送，`done` 在整理完時。編輯失敗、太慢、被截斷、太長或少了數字時改顯示原本寫的：還沒送出整理過的字就送原本的 `text`，已經送出一部分就送 `text_reset`。同一輪裡 `tool` 可以先送好幾個 `running` 再依序送 `done`（2026-11-16 起同一輪的唯讀工具同時查） |
 | `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字", "outlet"?: "PChome 新聞"}` | 來源引用（已去重），顯示在回答下方。網路搜尋的引用，以及個股新聞工具（`get_news`）的公告與媒體標題（2026-11-15：工具把每則有連結的標題當成可引用的 `search_result` 交給模型）；後者多 `outlet`（媒體名稱，公告是「公開資訊觀測站」），出處寫媒體名稱而不是網域 |
 | `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |
 | `chart` | `ChartCard` | `draw_chart` 畫出來的圖卡（一則回答最多 3 張）：每條線的點都在裡面，前端照著畫；資料不足沒有畫時不送這個事件（同一份也存在 `ThreadMessage.charts`） |

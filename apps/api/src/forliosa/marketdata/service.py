@@ -9,12 +9,13 @@
 
 from __future__ import annotations
 
+import functools
 import logging
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -38,7 +39,7 @@ from forliosa.marketdata.base import (
 )
 from forliosa.marketdata.catalog import KNOWN_SPLITS
 from forliosa.marketdata.demo import DemoProvider
-from forliosa.marketdata.http import HttpFetcher
+from forliosa.marketdata.http import HttpFetcher, SingleFlight
 from forliosa.marketdata.indices import INDICES, resolve_index
 from forliosa.timeutil import close_dt, last_tw_trading_day
 
@@ -53,6 +54,14 @@ QUOTE_TTL_SECONDS = 30
 # ETF in the official close files, SEC's US tickers.
 LISTING_DATASETS = {"twse-openapi": "twse-openapi/price", "tpex-openapi": "tpex-openapi/price",
                     "sec-edgar": "sec-edgar/tickers"}
+# Live ex-dividend notice files the worker also archives (TWT48U_ALL, tpex_exright_prepost) -> the ``dataset_status``
+# row the same archive run writes: ``forliosa.archive`` groups ``twse`` / ``tpex`` store the closes, then the notices
+# (which have no status row of their own). While that run is recent the archive's copy alone answers dividends and
+# ex-rights, so a request never waits for the live file (2026-11-16: TWT48U_ALL took 0.3–3.8 s of an AI turn); a notice
+# posted since shows up after the next run. No archive, no row or an older run (weekend, failed run): asked as before.
+ARCHIVED_NOTICES = {"twse_openapi": "twse-openapi/price", "tpex_openapi": "tpex-openapi/price"}
+# Trading days run both groups at 08:10, 14:40 and 21:40: the longest gap (21:40 → 08:10) is 10.5 h.
+NOTICES_FRESH_SECONDS = 12 * 3600
 
 
 @dataclass
@@ -103,6 +112,7 @@ class MarketData:
         self._by_code: dict[str, list[str]] = {}
         self._index: list[_Entry] = []
         self._quote_cache: dict[str, tuple[float, QuoteData]] = {}
+        self._flight = SingleFlight()
 
     # -- provider plumbing -----------------------------------------------------------------------
     @property
@@ -145,6 +155,32 @@ class MarketData:
                         "serves_data": self.demo_data_allowed or not p.is_demo})
         return out
 
+    def _archived_notices(self) -> set[str]:
+        """Live notice providers (``ARCHIVED_NOTICES``) the archive has answered for: it comes before them, did not fail
+        in this call (a failure puts it on cool-down) and the worker archived that market's notices recently."""
+        names = [p.name for p in self.providers]
+        if "archive" not in names or self._down_until.get("archive", 0) > time.monotonic():
+            return set()
+        first = names.index("archive")
+        keys = {name: key for name, key in ARCHIVED_NOTICES.items() if name in names[first + 1:]}
+        session_fn = getattr(self.providers[first], "session_fn", None)
+        if not keys or session_fn is None:
+            return set()
+        from sqlalchemy import select
+
+        from forliosa.models import DatasetStatus
+
+        try:
+            with session_fn() as db:
+                rows = db.execute(select(DatasetStatus.key, DatasetStatus.fetched_at).where(
+                    DatasetStatus.key.in_(list(keys.values())))).all()
+            fetched = {key: at for key, at in rows}
+        except Exception as exc:  # the live endpoints answer instead
+            log.warning("archive status unavailable: %s", exc)
+            return set()
+        since = datetime.now(UTC) - timedelta(seconds=NOTICES_FRESH_SECONDS)
+        return {name for name, key in keys.items() if (at := fetched.get(key)) is not None and at >= since}
+
     def _real_anchor(self, symbol: str) -> tuple[date, Decimal] | None:
         """Latest real close for the demo provider to anchor its synthetic path."""
         for p in self._available():
@@ -167,6 +203,15 @@ class MarketData:
         with self._lock:
             if self._master is not None and time.monotonic() < self._master_until:
                 return self._master
+        # One rebuild at a time: requests that need the master meanwhile wait for it instead of each downloading
+        # shioaji-data's cards (2.8 MB) and reading the listings again (2026-11-16: three at once on a cold start)
+        return self._flight.do("master", self._rebuild_master)
+
+    def _rebuild_master(self) -> dict[str, InstrumentInfo]:
+        with self._lock:
+            if self._master is not None and time.monotonic() < self._master_until:
+                return self._master  # a rebuild that finished just before this one started
+        started = time.monotonic()
         merged: dict[str, InstrumentInfo] = {}
         for p in self._available(include_demo=True):  # the built-in catalog is reference data, not prices
             items = self._call(p, p.instruments)
@@ -193,6 +238,8 @@ class MarketData:
         with self._lock:
             self._master, self._by_code, self._index = merged, by_code, index
             self._master_until = time.monotonic() + ttl
+        # hourly, inside whichever request needs it first: its time shows in that request (2026-11-16 AI latency)
+        log.info("instrument master rebuilt: %d instruments in %.2f s", len(merged), time.monotonic() - started)
         return merged
 
     def resolve(self, text: str) -> str | None:
@@ -346,6 +393,7 @@ class MarketData:
     # -- reference price (平盤) and limits ---------------------------------------------------------
     def _provider_map(self, method: str, symbols: list[str], d: date) -> dict[str, Any]:
         out: dict[str, Any] = {}
+        archived = functools.cache(self._archived_notices)  # read once, after the archive has answered
         for p in self._available():
             fn = getattr(p, method, None)
             if fn is None:
@@ -353,6 +401,8 @@ class MarketData:
             need = [s for s in symbols if s not in out]
             if not need:
                 break
+            if method == "ex_rights_on" and p.name in ARCHIVED_NOTICES and p.name in archived():
+                continue  # the archive's copy of the same notices answered already
             got = self._call(p, lambda fn=fn, need=need: fn(need, d)) or {}
             for s, v in got.items():
                 out.setdefault(s, v)
@@ -497,9 +547,12 @@ class MarketData:
         """Dividends merged from every real provider (by ex-date); demo only when none has any."""
         merged: dict[Any, DividendEvent] = {}
         names: list[str] = []
+        archived = functools.cache(self._archived_notices)  # read once, after the archive has answered
         for p in self._available():
             if p.is_demo:
                 continue
+            if p.name in ARCHIVED_NOTICES and p.name in archived():
+                continue  # the archive's copy of the same notices answered already
             value = self._call(p, lambda p=p: p.dividends(symbol))
             if not value:
                 continue

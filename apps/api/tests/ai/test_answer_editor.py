@@ -25,7 +25,15 @@ def web_turn(fake):
 
 
 def shown(events) -> str:
-    return "".join(d["delta"] for n, d in events if n == "text")
+    """What the browser shows: ``text`` deltas appended, a ``text_reset`` (the streamed edit was dropped) replacing
+    them."""
+    out = ""
+    for n, d in events:
+        if n == "text":
+            out += d["delta"]
+        elif n == "text_reset":
+            out = d["text"]
+    return out
 
 
 def test_the_default_is_on(monkeypatch):

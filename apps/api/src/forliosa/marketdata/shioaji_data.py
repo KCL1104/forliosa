@@ -35,7 +35,7 @@ from forliosa.marketdata.base import (
     tw_symbol,
 )
 from forliosa.marketdata.catalog import ETF_CODES
-from forliosa.marketdata.http import DiskCache, HttpFetcher, sha256_hex
+from forliosa.marketdata.http import DiskCache, HttpFetcher, SingleFlight, sha256_hex
 from forliosa.timeutil import market_close_dt
 
 log = logging.getLogger(__name__)
@@ -47,6 +47,10 @@ SOURCE_FINANCIALS = "shioaji-data：月營收、季財報（公開資訊觀測�
 SOURCE_RESEARCH = "shioaji-data 公司研究：業務簡介、產業鏈位置、題材（AI 整理並交叉核對，授權待定）"
 
 MANIFEST_TTL_SECONDS = 600
+# An older manifest is still served, for up to a day, while one background download replaces it: a request never waits
+# for the 0.6 MB file once it has been read (a release changes about once a day; 2026-11-16: 0.1–0.8 s per AI turn).
+MANIFEST_STALE_SECONDS = 86400
+_MISSING = object()
 
 
 def pct_to_fraction(value: object) -> Decimal | None:
@@ -156,13 +160,44 @@ class ShioajiDataProvider(BaseProvider):
         self._lock = threading.Lock()
         self._manifest: dict[str, Any] | None = None
         self._manifest_at = 0.0
+        self._refreshing = False  # a background manifest download is running
         self._parsed: dict[str, Any] = {}  # sha256 -> parsed object
+        # One download per file at a time (the manifest, a company's file): requests that need it meanwhile wait for it
+        self._flight = SingleFlight()
 
     # -- raw access ----------------------------------------------------------------------------
     def manifest(self) -> dict[str, Any]:
         with self._lock:
+            doc, age = self._manifest, time.monotonic() - self._manifest_at
+        if doc is not None and age < MANIFEST_TTL_SECONDS:
+            return doc
+        if doc is not None and age < MANIFEST_STALE_SECONDS:
+            self._refresh_manifest()
+            return doc
+        return self._flight.do("manifest", self._download_manifest)
+
+    def _refresh_manifest(self) -> None:
+        """Download the manifest again in a background thread (one at a time)."""
+        with self._lock:
+            if self._refreshing:
+                return
+            self._refreshing = True
+
+        def run() -> None:
+            try:
+                self._flight.do("manifest", self._download_manifest)
+            except Exception as exc:  # the old manifest stays; the next request tries again
+                log.warning("shioaji-data manifest refresh failed: %s", exc)
+            finally:
+                with self._lock:
+                    self._refreshing = False
+
+        threading.Thread(target=run, name="shioaji-manifest", daemon=True).start()
+
+    def _download_manifest(self) -> dict[str, Any]:
+        with self._lock:
             if self._manifest is not None and time.monotonic() - self._manifest_at < MANIFEST_TTL_SECONDS:
-                return self._manifest
+                return self._manifest  # a download that finished just before this one started
         try:
             raw = self.fetcher.get_bytes(f"{self.base_url}/v1/manifest.json")
             doc = json.loads(raw)
@@ -179,8 +214,15 @@ class ShioajiDataProvider(BaseProvider):
 
     def _load(self, path: str, sha: str | None) -> Any:
         """Fetch a manifest-listed file, using the sha256-keyed disk cache."""
-        if sha and sha in self._parsed:
-            return self._parsed[sha]
+        hit = self._parsed.get(sha, _MISSING) if sha else _MISSING
+        if hit is not _MISSING:
+            return hit
+        return self._flight.do(("file", sha or path), lambda: self._load_once(path, sha))
+
+    def _load_once(self, path: str, sha: str | None) -> Any:
+        hit = self._parsed.get(sha, _MISSING) if sha else _MISSING  # loaded just before this call started
+        if hit is not _MISSING:
+            return hit
         raw = self.cache.read("files", sha) if sha else None
         if raw is None:
             raw = self.fetcher.get_bytes(f"{self.base_url}/{path}")
