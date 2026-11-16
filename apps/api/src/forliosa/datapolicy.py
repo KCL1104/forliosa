@@ -357,6 +357,14 @@ def us_prices_served() -> bool:
     return get_settings().us_prices_served
 
 
+def twse_opendata_on() -> bool:
+    """TWSE_OPENDATA_CLOSE (default on): TWSE's data.gov.tw download links are polled for the same-day close, and
+    credited (``/meta/attributions``; the data sources page says 「下午」 from that list) only then."""
+    from forliosa.config import get_settings
+
+    return bool(getattr(get_settings(), "twse_opendata_close", True))
+
+
 def history_backfill_enabled() -> bool:
     """PRICE_HISTORY_SOURCE=yahoo: the product owner's decision (2026-11-13) to fill the years before our archive
     with Yahoo Finance's daily candles. Not a licensed source — the rows keep their own key so they can be removed in
@@ -539,6 +547,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
     for d in DATASETS.values():
         if d.key.startswith(f"{US_PRICE_SOURCE}/") and not us_prices_served():
             continue  # credited only while its closes are served
+        if d.key.startswith("twse-opendata/") and not twse_opendata_on():
+            continue  # TWSE_OPENDATA_CLOSE off: not downloaded (its rows give way to the OpenAPI's the next morning)
         if d.license_status == "non_commercial" and policy != "personal":
             continue  # never used under commercial (listed in not_used instead)
         served = dataset_served(d.key, policy, confirmed)
@@ -576,7 +586,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
         "stale": stale,
         "not_used": [
             "臺灣證券交易所網站（三大法人、外資持股等報表）與基本市況報導：網站條款禁止未經同意用程式下載"
-            "（只用證交所在政府資料開放平臺登記、表示可以用程式下載的兩個網址：個股日成交資訊、大盤統計）",
+            + ("（只用證交所在政府資料開放平臺登記、表示可以用程式下載的兩個網址：個股日成交資訊、大盤統計）"
+               if twse_opendata_on() else ""),
             "證券櫃檯買賣中心網站的歷史查詢、公開資訊觀測站網站：同樣禁止，只用它們的開放資料",
             "臺灣期貨交易所網站（歷史行情查詢等）：只用它的開放資料",
             "期交所的每筆成交資料：檔案有幾百 MB，不下載",

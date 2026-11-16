@@ -270,7 +270,9 @@ def analyze(bars: Sequence[Bar], *, provisional: bool = False, window: int = EVE
         if not provisional:
             if last.o is not None and prev.c:
                 out["open_gap_pct"] = _pct(last.o / prev.c - 1)
-            if lows[-1] > highs[-2]:
+            if last.h is None or last.l is None:
+                pass  # no high / low for the day (e.g. an interim close-only bar): a gap is unknown, not "none"
+            elif lows[-1] > highs[-2]:
                 out["gap"] = "up"  # the whole bar is above the previous bar's high
             elif highs[-1] < lows[-2]:
                 out["gap"] = "down"

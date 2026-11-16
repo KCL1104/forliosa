@@ -87,7 +87,7 @@ from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import StatementError
@@ -274,6 +274,18 @@ class Archiver:
         if stored is None or stored <= newest:
             self._status(key, newest, len(rows))
 
+    def _drop_interim(self, market: str, rows: list[dict[str, Any]]) -> None:
+        """An official close file of a session supersedes the interim evening closes (shioaji-data) of that market and
+        session: a security the official file has no close for (it did not trade, e.g. suspended) keeps no stand-in
+        row from the evening release (2026-11-16 review). Rows the file has were replaced by its upsert already."""
+        days = {r["date"] for r in rows}
+        if not days:
+            return
+        suffix = ".TWO" if market == "TPEX" else ".TW"
+        self.db.execute(delete(PriceDaily).where(PriceDaily.source == INTERIM_CLOSE_SOURCE, PriceDaily.date.in_(days),
+                                                 PriceDaily.symbol.like(f"%{suffix}")))
+        self.db.commit()
+
     def _listed_etfs(self, raw: list[dict[str, Any]], market: str) -> int:
         """Every ETF a close file names -> ``instruments`` (type ``etf``, industry ``ETF``, NT$), so 00679B, 00981A …
         can be searched and opened like the built-in ETFs (the archive provider lists these rows; built-in names and
@@ -324,6 +336,7 @@ class Archiver:
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
         self._close_status("twse-openapi/price", rows)
+        self._drop_interim("TWSE", rows)
         self._listed_etfs(raw, "TWSE")
         return n
 
@@ -469,6 +482,7 @@ class Archiver:
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"], where=PriceDaily.source.not_in(OPENAPI_CLOSE_SOURCES))
         self._close_status(PRICE_DATASET, rows)
+        self._drop_interim("TWSE", rows)
         self._listed_etfs(raw, "TWSE")
         return n
 
@@ -613,6 +627,7 @@ class Archiver:
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
         self._close_status("tpex-openapi/price", rows)
+        self._drop_interim("TPEX", rows)
         self._listed_etfs(raw, "TPEX")
         refs = [{"symbol": tw_symbol(r["code"], "TPEX"),
                  "date": next_tw_trading_day(r["last_trading_day"] + timedelta(days=1)),

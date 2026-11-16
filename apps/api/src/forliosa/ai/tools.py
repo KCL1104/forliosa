@@ -447,6 +447,22 @@ def _market_close(ctx: ToolContext, info: InstrumentInfo, now: datetime) -> dict
         return None
 
 
+def _interim_close(ctx: ToolContext, symbol: str, day: date) -> bool:
+    """``symbol``'s stored close of ``day`` is the interim evening close (close only; forliosa.closes)."""
+    from forliosa.archive import INTERIM_CLOSE_SOURCE
+    from forliosa.models import PriceDaily
+
+    if getattr(ctx, "db", None) is None:
+        return False
+    try:
+        return ctx.db.scalar(select(PriceDaily.source).where(PriceDaily.symbol == symbol,
+                                                            PriceDaily.date == day)) == INTERIM_CLOSE_SOURCE
+    except Exception as exc:  # best effort: never fail the tool over it
+        log.warning("get_technicals: interim close not checked: %s", exc)
+        ctx.db.rollback()
+        return False
+
+
 def _md(day: Any) -> str:
     """「11/13」 from a date or its ISO string."""
     d = date.fromisoformat(str(day)[:10])
@@ -474,10 +490,14 @@ def _intraday_note(info: InstrumentInfo, q: Any, now: datetime, close: dict[str,
         return None
     label = "今天" if session == today else _md(session)
     expected = ""
-    if close and not close.get("stored") and close.get("expected_from") and close.get("expected_to"):
-        start, end = (datetime.fromisoformat(close[k]).astimezone(TAIPEI) for k in ("expected_from", "expected_to"))
-        on = "今天" if start.date() == today else _md(start.date())
-        expected = f"這個市場的收盤價預計 {on} {start:%H:%M}–{end:%H:%M} 更新。"
+    # stored only as the interim evening close (no ETFs in it): the window is the official file's (forliosa.closes)
+    waiting = close and (not close.get("stored") or close.get("interim"))
+    if waiting and close.get("expected_from") and close.get("expected_to"):
+        from forliosa.closes import expect_update, window_text
+
+        start, end = (datetime.fromisoformat(close[k]) for k in ("expected_from", "expected_to"))
+        if text := window_text(start, end, now):
+            expected = f"這個市場的官方收盤價{expect_update(text)}（畫面上也這樣寫）。"
     day = f"{q.trade_date.month}/{q.trade_date.day}"
     return (f"{when}：quote、market_context 與 why_signals 都是 {day} 的官方收盤資料，不是{label}的。{expected}"
             f"{label}這一檔與加權指數漲跌多少，要用 web_search 找可引用的來源並寫出時間")
@@ -619,6 +639,12 @@ def get_technicals(ctx: ToolContext, args: dict[str, Any]) -> Any:
     bars = [ta.Bar(t=c["t"], c=c["c"], o=c["o"], h=c["h"], l=c["l"], v=c["v"])
             for c in h["candles"] if c["c"] is not None][-TECHNICALS_MAX_BARS:]
     notes: list[str] = list(h.get("notes") or [])
+    if bars and _interim_close(ctx, info.symbol, bars[-1].t):
+        # the evening's interim close (forliosa.closes): the chart draws it with open = high = low = close and no
+        # volume; here they are unknown, so no opening gap, gap or volume ratio is made up from it (2026-11-16 review)
+        bars[-1] = ta.Bar(t=bars[-1].t, c=bars[-1].c)
+        notes.append(f"{bars[-1].t.isoformat()} 是晚上先進來的收盤價，只有收盤價：沒有開盤、最高、最低價與成交量"
+                     "（不提供跳空與量比），官方的完整資料稍後補上")
     out: dict[str, Any] = {"symbol": info.symbol, "name": info.name, "currency": info.currency}
     if not bars:
         out["as_of_close"] = None

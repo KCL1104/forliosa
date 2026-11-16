@@ -54,6 +54,19 @@ def _us_close_day(holdings: list[dict]) -> date | None:
     return max(days) if days else None
 
 
+def _boards_differ(holdings: list[dict]) -> bool:
+    """Listed and OTC holdings carry closes of different days (the listed close is in by the afternoon, the OTC one
+    in the evening): each holding's change is its own day's, so the question says 「最近」, never 「今天」. Same rule as
+    the frontend's ``ledgerDay`` (apps/web/src/ai/suggestions.ts, ``ledgerBoardDays``: each market's newest
+    ``price_date``; 2026-11-16 review)."""
+    newest: dict[str, str] = {}
+    for h in holdings:
+        board, day = h.get("market"), h.get("price_date")
+        if board in ("TWSE", "TPEX") and h.get("price") is not None and day:
+            newest[board] = max(newest.get(board, ""), str(day)[:10])
+    return len(set(newest.values())) > 1
+
+
 def _days(today: date, d: Any) -> int | None:
     if d is None:
         return None
@@ -76,8 +89,8 @@ def ledger_questions(holdings: list[dict], summary: dict | None, today: date) ->
         day = lead = f"{us_day.month}/{us_day.day}（美東）"
         movers = holdings
     else:  # the Taiwan day; a US holding's change is another (New York) session's, not part of this sentence
-        day = _day_lead(summary, today)
-        lead = day if day == "今天" else f"{day} "
+        day = "最近" if _boards_differ(holdings) else _day_lead(summary, today)
+        lead = day if day in ("今天", "最近") else f"{day} "
         movers = [h for h in holdings if h.get("market") != "US"]
     if any((h.get("day_change") or 0) < 0 for h in movers):
         out.append(_q("drag", f"{lead}誰拖累了我的報酬？", day, "誰拖累了我？"))

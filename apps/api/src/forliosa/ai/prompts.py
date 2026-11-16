@@ -291,20 +291,32 @@ def _md(iso: str) -> str:
 def closes_line(closes: list[dict[str, Any]] | None, now: datetime) -> str | None:
     """「台股收盤價」 in the page context, from ``GET /meta/market-status``'s ``tw.closes`` (``forliosa.closes``): per
     market whether the session's close is in, interim, or still awaited and when it is expected."""
+    from forliosa.closes import expect_update, window_text
+
     if not closes:
         return None
+
+    def expected(c: dict[str, Any]) -> str | None:
+        """The app's own words for the window (「預計今晚 8:30–11:45 更新」, 12-hour like the screen)."""
+        if not (c.get("expected_from") and c.get("expected_to")):
+            return None
+        text = window_text(datetime.fromisoformat(c["expected_from"]), datetime.fromisoformat(c["expected_to"]), now)
+        return expect_update(text) if text else None
+
     parts = []
     for c in closes:
         label, day = _MARKET_LABELS.get(c["market"], c["market"]), _md(c["session"])
         if c["stored"]:
-            interim = "（晚上先放的暫時資料，官方檔案還沒進來）" if c["interim"] else ""
+            interim = ""
+            if c["interim"]:
+                official = expected(c)
+                interim = ("（晚上先放的暫時資料：只有收盤價、沒有 ETF；官方檔案"
+                           f"{official or '還沒進來'}）")
             parts.append(f"{label} {day} 的收盤價已進來{interim}")
             continue
         text = f"{label} {day} 的收盤價還沒公布"
-        if c.get("expected_from") and c.get("expected_to"):
-            start, end = (datetime.fromisoformat(c[k]) for k in ("expected_from", "expected_to"))
-            date_part = "今天" if start.date() == now.date() else f"{start.month}/{start.day}"
-            text += f"，預計 {date_part} {start:%H:%M}–{end:%H:%M} 更新"
+        if when := expected(c):
+            text += f"，{when}"
         parts.append(text)
     return "；".join(parts)
 

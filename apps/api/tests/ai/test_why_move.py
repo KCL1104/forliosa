@@ -220,10 +220,12 @@ def test_intraday_note_after_midnight_and_with_the_expected_time():
     assert note.startswith("11/16 的官方收盤價還沒公布：") and "不是11/16的" in note and "11/16這一檔" in note
     close = {"market": "TWSE", "stored": False, "expected_from": "2026-11-17T05:20:00+08:00",
              "expected_to": "2026-11-17T05:45:00+08:00"}
-    assert "這個市場的收盤價預計 今天 05:20–05:45 更新。" in tools._intraday_note(info, friday, tue_0030, close)
+    # the app's own words (12-hour, the part of the day), as the screen writes them (forliosa.closes.window_text)
+    assert "這個市場的官方收盤價預計清晨 5:20–5:45 更新（畫面上也這樣寫）。" in tools._intraday_note(
+        info, friday, tue_0030, close)
     close_1405 = {**close, "expected_from": "2026-11-16T14:00:00+08:00", "expected_to": "2026-11-16T14:30:00+08:00"}
     note = tools._intraday_note(info, friday, MON.replace(hour=14, minute=5), close_1405)
-    assert note.startswith("今天已收盤，但今天的官方收盤價還沒公布：") and "預計 今天 14:00–14:30 更新" in note
+    assert note.startswith("今天已收盤，但今天的官方收盤價還沒公布：") and "預計下午 2:00–2:30 更新" in note
     # Monday's close in (the same-day file or the evening interim close): no note
     assert tools._intraday_note(info, SimpleNamespace(trade_date=date(2026, 11, 16)), tue_0030) is None
     assert tools._intraday_note(info, friday, datetime(2026, 11, 16, 13, 29, tzinfo=TAIPEI)) is not None  # 盤中
@@ -240,14 +242,19 @@ def test_the_page_context_says_where_each_markets_close_is():
          "expected_from": "2026-11-16T20:30:00+08:00", "expected_to": "2026-11-16T23:45:00+08:00"},
     ]
     line = closes_line(closes, now)
-    assert line == "上市 11/16 的收盤價已進來；上櫃 11/16 的收盤價還沒公布，預計 今天 20:30–23:45 更新"
+    assert line == "上市 11/16 的收盤價已進來；上櫃 11/16 的收盤價還沒公布，預計今晚 11:45 前更新"
     ctx = page_context(now, "/", None, None, False, closes=closes)
     assert f"- 台股：已收盤\n- 台股收盤價：{line}\n- 美股：" in ctx
-    interim = [{**closes[1], "stored": True, "interim": True, "expected_from": None, "expected_to": None}]
-    assert closes_line(interim, now) == "上櫃 11/16 的收盤價已進來（晚上先放的暫時資料，官方檔案還沒進來）"
+    # interim (no ETFs in it): the official file's window is still given (forliosa.closes.tw_closes)
+    interim = [{**closes[1], "stored": True, "interim": True, "expected_from": "2026-11-16T23:15:00+08:00",
+                "expected_to": "2026-11-16T23:45:00+08:00"}]
+    assert closes_line(interim, now) == (
+        "上櫃 11/16 的收盤價已進來（晚上先放的暫時資料：只有收盤價、沒有 ETF；官方檔案預計今晚 11:15–11:45 更新）")
+    gone = [{**interim[0], "expected_from": None, "expected_to": None}]
+    assert closes_line(gone, now).endswith("官方檔案還沒進來）")
     late = [{**closes[0], "stored": False, "expected_from": "2026-11-17T05:20:00+08:00",
              "expected_to": "2026-11-17T05:45:00+08:00"}]
-    assert closes_line(late, now) == "上市 11/16 的收盤價還沒公布，預計 11/17 05:20–05:45 更新"
+    assert closes_line(late, now) == "上市 11/16 的收盤價還沒公布，預計明天清晨 5:20–5:45 更新"
     assert "台股收盤價" not in page_context(now, "/", None, None, False)  # no closes read: no line
 
 

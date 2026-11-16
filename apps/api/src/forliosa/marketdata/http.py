@@ -183,11 +183,13 @@ def url_allowed(url: str, params: dict[str, Any] | None = None) -> bool:
 
 
 class HttpStatusError(ProviderUnavailable):
-    """The upstream answered with a refusal status (403, 404, 429, a redirect …); ``status`` is the HTTP code."""
+    """The upstream answered with a refusal status (403, 404, 429, a redirect …); ``status`` is the HTTP code and
+    ``headers`` the response's (when known: e.g. a CDN's ``X-Cache`` for the log)."""
 
-    def __init__(self, message: str, status: int):
+    def __init__(self, message: str, status: int, headers: httpx.Headers | None = None):
         super().__init__(message)
         self.status = status
+        self.headers = headers
 
 
 @dataclass(frozen=True)
@@ -294,7 +296,7 @@ class HttpFetcher:
                                  host, urlparse(url).path, took, waited, attempt + 1)
                     return resp.content, resp.headers
                 if resp.status_code in (402, 403, 404, 405, 407, 429, 451) or 300 <= resp.status_code < 400:
-                    raise HttpStatusError(f"{host} 回應 HTTP {resp.status_code}", resp.status_code)
+                    raise HttpStatusError(f"{host} 回應 HTTP {resp.status_code}", resp.status_code, resp.headers)
                 last_exc = ProviderUnavailable(f"{host} 回應 HTTP {resp.status_code}")
             if attempt < self.retries:
                 time.sleep(delay)

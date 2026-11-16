@@ -101,7 +101,17 @@ WINDOWS: dict[str, tuple[Window, ...]] = {
         Window("openapi", 0, time(23, 15), time(23, 45)),  # about 23:30, close watch every 15 minutes
         Window("shioaji-data", 1, time(0, 0), time(1, 30)),
     ),
+    # 加權指數 and the other TWSE indices (tw.closes TWSE ``index``): only TWSE's own files carry them (shioaji-data
+    # has no index), so when the afternoon MI_INDEX is refused the next one is the morning batch (2026-11-16 review:
+    # STOCK_DAY_ALL came in at 15:46 and MI_INDEX answered 307 three seconds later).
+    "TWSE_INDEX": (
+        Window("twse-opendata", 0, time(14, 0), time(14, 30)),
+        Window("openapi", 1, time(5, 20), time(5, 45)),
+    ),
 }
+# The afternoon window ends at 14:30 although the file is polled until 18:00 (TWSE_POLL_UNTIL): it is normally in by
+# ~13:50, and one not in by 14:30 is late or refused — the evening expectation is the honest one; a later afternoon
+# arrival simply comes sooner than said (2026-11-16 review, kept on purpose).
 
 
 def due_session(now: datetime) -> date:
@@ -160,8 +170,57 @@ def _iso(dt: datetime | None) -> str | None:
     return dt.astimezone(TAIPEI).isoformat(timespec="seconds") if dt is not None else None
 
 
+def _period(h: int) -> str:
+    return ("半夜" if h < 3 else "凌晨" if h < 5 else "清晨" if h < 7 else "早上" if h < 12 else "中午" if h < 13
+            else "下午" if h < 18 else "晚上")
+
+
+def _clock12(t: datetime) -> str:
+    return f"{t.hour % 12 or 12}:{t.minute:02d}"
+
+
+def _when(t: datetime, today: date) -> str:
+    p = _period(t.hour)
+    if t.date() == today:
+        return "今晚" if p == "晚上" else p
+    if t.date() == today + timedelta(days=1):
+        return "明晚" if p == "晚上" else p if p in ("半夜", "凌晨") else f"明天{p}"
+    return f"{t.month}/{t.day} {p}"
+
+
+def window_text(start: datetime, end: datetime, now: datetime) -> str | None:
+    """An expected window in the app's words (apps/web/src/lib/as-of.ts ``expectedWindow``): 「下午 2:00–2:30」
+    「今晚 8:30–11:45」「明天清晨 5:20–5:45」; inside the window 「下午 2:30 前」; ``None`` once it has passed. The AI
+    page context and tools use it so the model writes the times the way the screen does (12-hour, with the part of
+    the day)."""
+    at = now.astimezone(TAIPEI)
+    start, end, today = start.astimezone(TAIPEI), end.astimezone(TAIPEI), at.date()
+    if end < at:
+        return None
+    if start <= at:
+        return f"{_when(end, today)} {_clock12(end)} 前"
+    if start.date() == end.date() and _period(start.hour) == _period(end.hour):
+        return f"{_when(start, today)} {_clock12(start)}–{_clock12(end)}"
+    return f"{_when(start, today)} {_clock12(start)} 到{_when(end, today)} {_clock12(end)}"
+
+
+def expect_update(text: str) -> str:
+    """「預計下午 2:00–2:30 更新」「預計下午 2:30 前更新」: a space between a number and the next word (as on
+    screen)."""
+    return f"預計{text}{' ' if text[-1:].isdigit() else ''}更新"
+
+
+def _expected(window: tuple[datetime, datetime] | None) -> dict[str, str | None]:
+    return {"expected_from": _iso(window[0]) if window else None, "expected_to": _iso(window[1]) if window else None}
+
+
 def tw_closes(db: Session, now: datetime | None = None, settings: Any = None) -> list[dict[str, Any]]:
-    """``tw.closes`` of ``GET /meta/market-status`` (one small query of ``dataset_status``)."""
+    """``tw.closes`` of ``GET /meta/market-status`` (one small query of ``dataset_status``).
+
+    ``expected_*`` while the session is stored only as the interim evening close (``interim``): the window of the
+    official file — the evening release has no ETFs (and no open / high / low / volume), so an ETF of that market still
+    waits for it (2026-11-16 review). TWSE's entry also carries ``index`` (加權指數 and the other TWSE indices: same
+    fields, from TWSE's own files only)."""
     if settings is None:
         from forliosa.config import get_settings
 
@@ -170,19 +229,33 @@ def tw_closes(db: Session, now: datetime | None = None, settings: Any = None) ->
     session = due_session(at)
     status = _status(db)
     refused = status[TWSE_REFUSED_KEY].data_date if TWSE_REFUSED_KEY in status else None
+    routes = routes_on(settings, refused, session)
     out = []
     for market in MARKETS:
         official = _newest(status, OFFICIAL_KEYS[market])
-        interim = _newest(status, (INTERIM_KEYS[market],))
-        latest = max((d for d in (official, interim) if d is not None), default=None)
+        interim_day = _newest(status, (INTERIM_KEYS[market],))
+        latest = max((d for d in (official, interim_day) if d is not None), default=None)
         stored = latest is not None and latest >= session
-        window = None if stored else expected_window(market, session, at, routes_on(settings, refused, session))
-        out.append({
+        interim = interim_day is not None and (official is None or interim_day > official)
+        if not stored:
+            window = expected_window(market, session, at, routes)
+        elif interim:
+            window = expected_window(market, session, at, routes - {"shioaji-data"})
+        else:
+            window = None
+        entry: dict[str, Any] = {
             "market": market, "session": session.isoformat(), "stored": stored,
-            "latest": latest.isoformat() if latest else None,
-            "interim": interim is not None and (official is None or interim > official),
-            "expected_from": _iso(window[0]) if window else None, "expected_to": _iso(window[1]) if window else None,
-        })
+            "latest": latest.isoformat() if latest else None, "interim": interim, **_expected(window),
+        }
+        entry["index"] = None
+        if market == "TWSE":
+            index_latest = _newest(status, TWSE_INDEX_KEYS)
+            index_stored = index_latest is not None and index_latest >= session
+            entry["index"] = {
+                "stored": index_stored, "latest": index_latest.isoformat() if index_latest else None,
+                **_expected(None if index_stored else expected_window("TWSE_INDEX", session, at, routes)),
+            }
+        out.append(entry)
     return out
 
 
@@ -270,9 +343,11 @@ class TwseSameDay:
                     res.indices = archiver.store_twse_opendata_indices(rows)
                     log.info("twse same-day file: %d index closes of %s stored", res.indices, day)
         except HttpStatusError as exc:
+            # a redirect, 403, 429 … — or a block page sent with 200 (tod.blocked): stop for the day
             res.refused = exc.status
             _mark(db, TWSE_REFUSED_KEY, day, exc.status, now)
-            log.warning("twse same-day file: www.twse.com.tw answered HTTP %s; no more requests today", exc.status)
+            log.warning("twse same-day file: %s (X-Cache %s); no more requests to www.twse.com.tw today", exc,
+                        exc.headers.get("x-cache") if exc.headers is not None else None)
         except ProviderUnavailable as exc:  # unreachable, a 5xx, a changed format: the next poll tries again
             db.rollback()
             log.warning("twse same-day file not stored: %s", exc)
@@ -281,26 +356,33 @@ class TwseSameDay:
     def _download(self, url: str, parse, date_key: str, res: TwsePoll) -> tuple[list[dict[str, Any]], date]:
         res.asked += 1
         raw, headers = self.fetcher.fetch(url, headers=tod.ACCEPT_CSV)
+        # kept in the log to see how often the CDN serves the file and how often the origin refuses (2026-11-16: a 307
+        # came with X-Cache EXPIRED, the 200s with HIT)
+        log.info("twse same-day file %s: HTTP 200, X-Cache %s", url.rsplit("/", 1)[-1], headers.get("x-cache"))
+        if tod.blocked(raw, headers.get("content-type")):
+            raise HttpStatusError(f"www.twse.com.tw 回了網頁（{headers.get('content-type')}），不是 CSV：當成被擋", 200,
+                                  headers)
         rows = parse(raw)
         return rows, tod.file_date(rows, date_key, headers.get("content-disposition"))
 
     @staticmethod
     def _check_not_previous(db: Session, rows: list[dict[str, Any]], day: date, previous: date | None) -> None:
-        """A file whose every traded close and volume equals the previous stored session's is that session relabelled
-        (a stale copy), not ``day``: raise, store nothing. (No real session leaves 50+ traded stocks all unchanged.)"""
+        """A file whose every traded close equals the previous stored session's is that session relabelled (a stale
+        copy), not ``day``: raise, store nothing. (No real session leaves 50+ traded stocks all unchanged.) Closes only:
+        the stored previous session has the next morning's final volume, which an afternoon copy may lack."""
         from forliosa.marketdata.twse import parse_stock_day_all
 
         if previous is None or previous >= day:
             return
-        quotes = {s: (q.price, q.volume) for s, q in parse_stock_day_all(rows).items() if q.volume}
+        quotes = {s: q.price for s, q in parse_stock_day_all(rows).items() if q.volume}
         if len(quotes) < SAME_AS_BEFORE_MIN:
             return
-        before = {s: (c, v) for s, c, v in db.execute(select(PriceDaily.symbol, PriceDaily.close, PriceDaily.volume)
-                                                      .where(PriceDaily.date == previous,
-                                                             PriceDaily.symbol.in_(list(quotes))))}
+        before = dict(db.execute(select(PriceDaily.symbol, PriceDaily.close)
+                                 .where(PriceDaily.date == previous, PriceDaily.symbol.in_(list(quotes))))
+                      .tuples().all())
         common = [s for s in quotes if s in before]
         if len(common) >= SAME_AS_BEFORE_MIN and all(quotes[s] == before[s] for s in common):
-            raise ProviderUnavailable(f"證交所下載檔標示 {day}，但內容和 {previous} 完全相同")
+            raise ProviderUnavailable(f"證交所下載檔標示 {day}，但收盤價和 {previous} 完全相同")
 
 
 # -- 2. shioaji-data's evening release (interim) ----------------------------------------------------------------------

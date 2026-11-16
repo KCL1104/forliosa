@@ -55,6 +55,14 @@ MI_INDEX_COLUMNS = {
 _FILENAME_DATE = re.compile(r'filename\*?=[^;]*?(\d{8})\.csv', re.IGNORECASE)
 
 
+def blocked(raw: bytes, content_type: str | None) -> bool:
+    """A web page instead of the CSV — e.g. a WAF's 「Request Rejected」 page sent with HTTP 200: a refusal, like a 403
+    (stop for the day), not a changed format (2026-11-16 review: retried every 10 minutes until 18:00 otherwise)."""
+    if "html" in (content_type or "").lower():
+        return True
+    return raw.lstrip(b"\xef\xbb\xbf \t\r\n")[:1] == b"<"
+
+
 def _rows(raw: bytes, columns: Mapping[str, str], what: str) -> list[dict[str, Any]]:
     """CSV -> rows keyed by the OpenAPI field names. A renamed or missing column raises before anything is stored."""
     try:
