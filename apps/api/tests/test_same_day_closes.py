@@ -591,9 +591,12 @@ def friday_in(engine):
 def test_1405_listed_close_expected_this_afternoon_otc_tonight(engine, friday_in):
     c = closes_at(engine, at(DAY, 14, 5))
     assert c["TWSE"] == {"market": "TWSE", "session": "2026-11-16", "stored": False, "latest": "2026-11-13",
-                         "interim": False, "expected_from": iso(DAY, 14, 0), "expected_to": iso(DAY, 14, 30)}
+                         "interim": False, "expected_from": iso(DAY, 14, 0), "expected_to": iso(DAY, 14, 30),
+                         "index": {"stored": False, "latest": None, "expected_from": iso(DAY, 14, 0),
+                                   "expected_to": iso(DAY, 14, 30)}}
     assert c["TPEX"] == {"market": "TPEX", "session": "2026-11-16", "stored": False, "latest": "2026-11-13",
-                         "interim": False, "expected_from": iso(DAY, 20, 30), "expected_to": iso(DAY, 23, 45)}
+                         "interim": False, "expected_from": iso(DAY, 20, 30), "expected_to": iso(DAY, 23, 45),
+                         "index": None}
     # 13:30–14:00: the same windows (the session is due from 13:30)
     assert window(closes_at(engine, at(DAY, 13, 31))["TWSE"]) == (iso(DAY, 14, 0), iso(DAY, 14, 30))
 
@@ -618,8 +621,9 @@ def test_2100_interim_otc_close(engine, friday_in):
     assert window(c["TPEX"]) == (iso(DAY, 20, 30), iso(DAY, 23, 45))
     write_status(engine, twse_opendata_price=DAY, shioaji_data_interim_tpex=DAY)
     c = closes_at(engine, at(DAY, 21, 0))
+    # stored as the interim close, which has no ETFs: the official file's window is still given (2026-11-16 review)
     assert (c["TPEX"]["stored"], c["TPEX"]["latest"], c["TPEX"]["interim"], window(c["TPEX"])) == (
-        True, "2026-11-16", True, (None, None))
+        True, "2026-11-16", True, (iso(DAY, 23, 15), iso(DAY, 23, 45)))
     assert (c["TWSE"]["stored"], c["TWSE"]["interim"]) == (True, False)
     write_status(engine, tpex_openapi_price=DAY)  # 23:30: the official file
     assert closes_at(engine, at(DAY, 23, 40))["TPEX"]["interim"] is False
@@ -688,9 +692,12 @@ def test_the_endpoint(app, engine):
         market_calendar.set_clock(None)
     assert body["tw"]["closes"] == [
         {"market": "TWSE", "session": "2026-11-16", "stored": True, "latest": "2026-11-16", "interim": False,
-         "expected_from": None, "expected_to": None},
+         "expected_from": None, "expected_to": None,
+         # the indices' file not in (e.g. MI_INDEX refused after STOCK_DAY_ALL came in): the next morning's batch
+         "index": {"stored": False, "latest": None, "expected_from": "2026-11-17T05:20:00+08:00",
+                   "expected_to": "2026-11-17T05:45:00+08:00"}},
         {"market": "TPEX", "session": "2026-11-16", "stored": False, "latest": "2026-11-13", "interim": False,
-         "expected_from": "2026-11-16T20:30:00+08:00", "expected_to": "2026-11-16T23:45:00+08:00"},
+         "expected_from": "2026-11-16T20:30:00+08:00", "expected_to": "2026-11-16T23:45:00+08:00", "index": None},
     ]
 
 
@@ -707,3 +714,156 @@ def test_the_briefing_and_the_rankings_count_the_same_day_file_but_not_interim_c
     write_status(engine, tpex_openapi_price=DAY)
     with Session(engine) as db:
         assert briefing_day(db, at(DAY, 23, 40)) == DAY  # about 23:35 instead of 06:10 the next morning
+
+
+# -- 2026-11-16 review ------------------------------------------------------------------------------------------------
+BLOCK_PAGE = (b"<html><head><title>Request Rejected</title></head><body>The requested URL was rejected.</body></html>")
+
+
+@pytest.mark.parametrize("content_type", ["text/html", "text/csv;charset=utf-8"])
+def test_a_block_page_sent_with_200_is_a_refusal(engine, scene, content_type):
+    """A WAF page with HTTP 200 (F5 style) is not a changed format to retry every 10 minutes: stop for the day."""
+    scene.twse.body["STOCK_DAY_ALL"] = (BLOCK_PAGE, {"Content-Type": content_type})
+    scene.run(at(DAY, 13, 40), at(DAY, 18, 0))
+    assert scene.twse.times() == [at(DAY, 13, 45)]
+    st = status(engine)
+    assert st[closes.TWSE_REFUSED_KEY] == DAY and prices(engine) == {}
+    assert tod.blocked(b"  <!DOCTYPE html>", None) and not tod.blocked(STOCK_DAY_ALL_CSV, "text/csv;charset=utf-8")
+
+
+def test_a_relabelled_afternoon_file_is_stale_even_when_the_stored_volumes_are_final(engine, friday_stored,
+                                                                                       monkeypatch):
+    """Friday's row was replaced by the OpenAPI's final file (more volume: after-hours, odd lots); Friday's afternoon
+    file relabelled as Monday still has every close equal: not stored."""
+    monkeypatch.setattr(closes, "SAME_AS_BEFORE_MIN", 3)
+    with Session(engine) as db:
+        for q in parse_stock_day_all(tod.stock_day_all_rows(STOCK_DAY_ALL_CSV)).values():
+            row = db.get(PriceDaily, (q.symbol, PREV)) or PriceDaily(symbol=q.symbol, date=PREV, source="twse-openapi")
+            row.close, row.volume = q.price, (q.volume or 0) + 1000
+            db.add(row)
+        db.commit()
+    twse = Twse(Clock(at(DAY, 14, 5)), published=at(DAY, 13, 0))
+    assert poll(engine, twse, at(DAY, 14, 5)).prices == 0 and prices(engine) == {}
+
+
+def test_the_listed_indices_have_their_own_expectation(engine, friday_in):
+    """15:46 on 2026-11-16: STOCK_DAY_ALL came in, MI_INDEX answered 307 three seconds later — 加權指數 then waits for
+    the next morning's batch (shioaji-data has no index), and tw.closes says so."""
+    write_status(engine, twse_opendata_price=DAY, twse_opendata_refused=DAY)
+    c = closes_at(engine, at(DAY, 15, 50))
+    assert (c["TWSE"]["stored"], window(c["TWSE"])) == (True, (None, None))
+    assert c["TWSE"]["index"] == {"stored": False, "latest": None, "expected_from": iso(TUE, 5, 20),
+                                  "expected_to": iso(TUE, 5, 45)}
+    with Session(engine) as db:
+        db.add(DatasetStatus(key="twse-opendata/index", data_date=DAY, rows=1))
+        db.commit()
+    assert closes_at(engine, at(DAY, 15, 50))["TWSE"]["index"] == {"stored": True, "latest": "2026-11-16",
+                                                                   "expected_from": None, "expected_to": None}
+    assert closes_at(engine, at(DAY, 15, 50))["TPEX"]["index"] is None
+
+
+def test_an_interim_market_still_gives_the_official_window(engine, friday_in):
+    """The evening release has no ETFs: while a market is stored only as interim, an ETF of it still waits for the
+    official file, so its window is given (the frontend shows it for a holding older than the session)."""
+    write_status(engine, shioaji_data_interim_twse=DAY, shioaji_data_interim_tpex=DAY, twse_opendata_refused=DAY)
+    c = closes_at(engine, at(DAY, 22, 0))
+    assert (c["TWSE"]["stored"], c["TWSE"]["interim"], window(c["TWSE"])) == (True, True, (iso(TUE, 5, 20),
+                                                                                          iso(TUE, 5, 45)))
+    assert (c["TPEX"]["stored"], c["TPEX"]["interim"], window(c["TPEX"])) == (True, True, (iso(DAY, 23, 15),
+                                                                                          iso(DAY, 23, 45)))
+    assert window(closes_at(engine, at(TUE, 0, 30))["TPEX"]) == (None, None)  # its window has passed
+    write_status(engine, tpex_openapi_price=DAY)
+    assert window(closes_at(engine, at(DAY, 23, 40))["TPEX"]) == (None, None)  # official: nothing more expected
+
+
+def test_interim_rows_the_official_file_has_no_close_for_are_dropped(engine, friday_stored):
+    """A security in the evening release that did not trade (the official file has no close for it) keeps no
+    stand-in row once the official file is in; the other market's interim rows stay."""
+    with Session(engine) as db:
+        archiver = Archiver(db, None)
+        archiver.store_interim_closes({"6488.TWO": D("431.5"), "3105.TWO": D("100")}, DAY, "shioaji-data/interim_tpex")
+        archiver.store_interim_closes({"2317.TW": D("218.5")}, DAY, "shioaji-data/interim_twse")
+    tpex_row = {"Date": "1151116", "SecuritiesCompanyCode": "6488", "CompanyName": "環球晶", "Close": "431.50",
+                "Change": "-13.50", "Open": "440.00", "High": "441.00", "Low": "430.00", "TradingShares": "1500000"}
+
+    class TpexOpenApi:
+        def get_json(self, url, params=None, headers=None):
+            return [tpex_row] if url.endswith("tpex_mainboard_daily_close_quotes") else []
+
+    with Session(engine) as db:
+        Archiver(db, TpexOpenApi()).tpex_prices()
+    stored = prices(engine)
+    assert stored["6488.TWO"] == (D("431.50"), 1500000, "tpex-openapi") and "3105.TWO" not in stored
+    assert stored["2317.TW"] == (D("218.5"), None, "shioaji-data")  # TWSE's official file is not in yet
+
+
+def test_the_archives_interim_quote_is_not_filled_from_the_live_close_files(engine):
+    """Close-only by nature: the live providers' files are an older session until the official one is archived, so
+    asking them downloaded a whole close file for nothing."""
+    from forliosa.marketdata.base import BaseProvider
+
+    with Session(engine) as db:
+        for sym, src in (("6488.TWO", "tpex-openapi"), ("2330.TW", "twse-openapi")):
+            db.add(PriceDaily(symbol=sym, date=PREV, open=D("1"), high=D("1"), low=D("1"), close=D("1"), volume=1,
+                              source=src))
+        db.add(PriceDaily(symbol="6488.TWO", date=DAY, close=D("2"), source="shioaji-data"))
+        db.add(PriceDaily(symbol="2330.TW", date=DAY, open=D("2"), high=D("2"), low=D("2"), close=D("2"), volume=5,
+                          source="twse-opendata"))
+        db.commit()
+    asked = []
+
+    class Live(BaseProvider):
+        is_demo = False
+
+        def __init__(self, name):
+            self.name = name
+
+        def quotes(self, symbols):
+            asked.append((self.name, tuple(symbols)))
+            return {}
+
+    md = MarketData([ArchiveProvider("commercial", session_fn=lambda: Session(engine)), Live("tpex_openapi"),
+                     Live("shioaji_data")], policy="commercial")
+    import forliosa.marketdata.archive_provider as ap
+
+    ap_today = ap.today_taipei
+    ap.today_taipei = lambda: DAY
+    try:
+        q = md.quotes(["6488.TWO", "2330.TW"], use_cache=False)
+    finally:
+        ap.today_taipei = ap_today
+    assert asked == []
+    assert (q["6488.TWO"].price, q["6488.TWO"].trade_date, q["6488.TWO"].open) == (D("2"), DAY, None)
+
+
+def test_the_attributions_follow_the_switch(monkeypatch):
+    from forliosa.config import get_settings
+    from forliosa.datapolicy import attributions
+
+    keys = {d["key"] for d in attributions("commercial")["datasets"]}
+    assert {"twse-opendata/price", "twse-opendata/index"} <= keys
+    monkeypatch.setenv("TWSE_OPENDATA_CLOSE", "false")
+    get_settings.cache_clear()
+    try:
+        body = attributions("commercial")
+        assert not any(d["key"].startswith("twse-opendata/") for d in body["datasets"])
+        assert "兩個網址" not in body["not_used"][0]
+    finally:
+        monkeypatch.delenv("TWSE_OPENDATA_CLOSE")
+        get_settings.cache_clear()
+
+
+@pytest.mark.parametrize(("now", "start", "end", "text"), [
+    (at(DAY, 13, 40), at(DAY, 14, 0), at(DAY, 14, 30), "下午 2:00–2:30"),
+    (at(DAY, 14, 5), at(DAY, 14, 0), at(DAY, 14, 30), "下午 2:30 前"),
+    (at(DAY, 15, 0), at(DAY, 20, 30), at(DAY, 23, 45), "今晚 8:30–11:45"),
+    (at(DAY, 15, 0), at(TUE, 5, 20), at(TUE, 5, 45), "明天清晨 5:20–5:45"),
+    (at(DAY, 23, 50), at(TUE, 0, 0), at(TUE, 1, 30), "半夜 12:00–1:30"),
+    (at(TUE, 2, 0), at(TUE, 5, 20), at(TUE, 5, 45), "清晨 5:20–5:45"),
+    (at(DAY, 15, 0), at(DAY, 23, 15), at(TUE, 1, 30), "今晚 11:15 到半夜 1:30"),
+    (at(TUE, 6, 0), at(TUE, 5, 20), at(TUE, 5, 45), None),
+])
+def test_window_text_writes_times_like_the_screen(now, start, end, text):
+    assert closes.window_text(start, end, now) == text
+    if text:
+        assert closes.expect_update(text) in (f"預計{text} 更新", f"預計{text}更新")

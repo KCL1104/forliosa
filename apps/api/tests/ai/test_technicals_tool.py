@@ -286,3 +286,24 @@ def test_system_prompt_has_the_technical_and_intraday_price_rules():
         assert phrase in CHAT_SYSTEM, phrase
     assert CHAT_SYSTEM.index("## 資料從哪裡來") < CHAT_SYSTEM.index("## 技術分析與盤中價格") \
         < CHAT_SYSTEM.index("## 圖表") < CHAT_SYSTEM.index("## 記帳一律先起草")
+
+
+def test_an_interim_evening_close_makes_no_gap_or_volume(tech, engine):
+    """2026-11-16 review: the evening's interim close (forliosa.closes, close only) is charted with open = high = low =
+    close and no volume; the indicators reported a made-up opening gap from it. Its open / high / low / volume are
+    unknown here instead, and a note says so."""
+    with Session(engine) as db:
+        db.add(PriceDaily(symbol="2330.TW", date=TODAY, close=D(str(round(LAST * 1.05, 1))), source="shioaji-data"))
+        db.commit()
+    out, res = run(tech, symbol="2330")
+    block = res["as_of_close"]
+    assert not out.is_error and block["date"] == TODAY.isoformat()
+    assert "open_gap_pct" not in block and "gap" not in block and "volume" not in block
+    assert any("晚上先進來的收盤價，只有收盤價" in n for n in res["notes"])
+    # an official close of the same height has its gap
+    with Session(engine) as db:
+        row = db.get(PriceDaily, ("2330.TW", TODAY))
+        row.open = row.high = row.low = row.close
+        row.volume, row.source = 30_000_000, "twse-openapi"
+        db.commit()
+    assert run(tech, symbol="2330")[1]["as_of_close"]["gap"] == "up"

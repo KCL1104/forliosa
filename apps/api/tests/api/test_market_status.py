@@ -40,7 +40,7 @@ def status(app) -> dict:
     closes = body["tw"].pop("closes")
     assert [c["market"] for c in closes] == ["TWSE", "TPEX"]
     for c in closes:
-        assert set(c) == {"market", "session", "stored", "latest", "interim", "expected_from", "expected_to"}
+        assert set(c) == {"market", "session", "stored", "latest", "interim", "expected_from", "expected_to", "index"}
     return body["tw"]
 
 

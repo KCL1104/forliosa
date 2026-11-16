@@ -224,8 +224,10 @@ def test_intraday_note_after_midnight_and_with_the_expected_time():
     assert "這個市場的官方收盤價預計清晨 5:20–5:45 更新（畫面上也這樣寫）。" in tools._intraday_note(
         info, friday, tue_0030, close)
     close_1405 = {**close, "expected_from": "2026-11-16T14:00:00+08:00", "expected_to": "2026-11-16T14:30:00+08:00"}
+    assert "預計下午 2:00–2:30 更新" in tools._intraday_note(info, friday, MON.replace(hour=13, minute=50), close_1405)
     note = tools._intraday_note(info, friday, MON.replace(hour=14, minute=5), close_1405)
-    assert note.startswith("今天已收盤，但今天的官方收盤價還沒公布：") and "預計下午 2:00–2:30 更新" in note
+    # inside the window: only its end
+    assert note.startswith("今天已收盤，但今天的官方收盤價還沒公布：") and "預計下午 2:30 前更新" in note
     # Monday's close in (the same-day file or the evening interim close): no note
     assert tools._intraday_note(info, SimpleNamespace(trade_date=date(2026, 11, 16)), tue_0030) is None
     assert tools._intraday_note(info, friday, datetime(2026, 11, 16, 13, 29, tzinfo=TAIPEI)) is not None  # 盤中

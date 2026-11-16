@@ -377,9 +377,9 @@ class TwseSameDay:
         quotes = {s: q.price for s, q in parse_stock_day_all(rows).items() if q.volume}
         if len(quotes) < SAME_AS_BEFORE_MIN:
             return
-        before = dict(db.execute(select(PriceDaily.symbol, PriceDaily.close)
-                                 .where(PriceDaily.date == previous, PriceDaily.symbol.in_(list(quotes))))
-                      .tuples().all())
+        before = {s: c for s, c in db.execute(select(PriceDaily.symbol, PriceDaily.close)
+                                              .where(PriceDaily.date == previous,
+                                                     PriceDaily.symbol.in_(list(quotes))))}
         common = [s for s in quotes if s in before]
         if len(common) >= SAME_AS_BEFORE_MIN and all(quotes[s] == before[s] for s in common):
             raise ProviderUnavailable(f"證交所下載檔標示 {day}，但收盤價和 {previous} 完全相同")
