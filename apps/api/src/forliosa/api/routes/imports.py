@@ -8,9 +8,11 @@ echo its value.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import binascii
 import json
+import threading
 
 from fastapi import APIRouter, Depends, Request
 from fastapi.concurrency import run_in_threadpool
@@ -102,4 +104,17 @@ async def read_statement(request: Request, user: User = Depends(current_user), d
     body = await read_capped(request, int(settings.import_max_body_mb * 1024 * 1024))
     data, pages = parse_body(body, settings)
     del body
-    return await run_in_threadpool(svc.read_statement, db, user, data.account_id, pages, get_market_data(), settings)
+    # 取消 in the browser closes the request: the read goes on in its thread, but skips the second reading
+    gone = threading.Event()
+    watcher = asyncio.create_task(_watch_disconnect(request, gone))
+    try:
+        return await run_in_threadpool(svc.read_statement, db, user, data.account_id, pages, get_market_data(),
+                                       settings, cancelled=gone.is_set)
+    finally:
+        watcher.cancel()
+
+
+async def _watch_disconnect(request: Request, gone: threading.Event, every: float = 1.0) -> None:
+    while not await request.is_disconnected():
+        await asyncio.sleep(every)
+    gone.set()

@@ -369,7 +369,7 @@ def test_imported_sell_that_only_breaks_the_books_after_the_resync(client, notic
     sell(client, acc, "6488.TWO", "2026-07-01", 2150, "420")
     assert [r["quantity"] for r in autos(client, acc["id"])] == [200]
     rows = [{"symbol": "6488.TWO", "type": "sell", "trade_date": "2026-06-10", "quantity": 50, "price": 410}]
-    message = "匯入以後，自動入帳的股利重算，帳目對不起來：2026-07-01 賣出 6488.TWO 2,150 股，超過當時持有的 2,145 股。"
+    message = "匯入以後，自動入帳的股利重算，帳目對不起來：7/1 賣出環球晶 2,150 股，超過當時持有的 2,145 股。"
     check = import_rows(client, acc, rows, dry_run=True).json()
     assert check["ok"] is False
     assert check["rows"] == [{"index": 0, "flags": [{"code": "ledger_inconsistent", "message": message,

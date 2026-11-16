@@ -9,7 +9,8 @@ Checks (``flags[].code``; ``include`` is the default tick in the review table):
 
 * reading: ``unreadable`` (a field the model could not read, or a buy/sell without date, shares or price),
   ``unknown_symbol`` / ``ambiguous_symbol`` (name or code → instrument, a code whose name does not match),
-  ``currency_mismatch`` (a US stock in NT$: 複委託), ``fractional_tw_qty``; ``day_trade`` (listed, not ticked),
+  ``currency_mismatch`` (a US stock priced in NT$, or a US fee above US$50 and 1%: NT$ on a 複委託 statement),
+  ``fractional_tw_qty``; ``day_trade`` (listed, not ticked),
   ``margin`` (imported as an ordinary trade and tagged); dividends (``dividend_auto``: Taiwan dividends are booked
   automatically) and short sales (``short_sale``) are never imported.
 * arithmetic (Taiwan): ``amount_mismatch`` (shares × price against the printed 價金; also 張/股 mix-ups),
@@ -34,7 +35,7 @@ import logging
 import re
 import time
 import unicodedata
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
@@ -74,6 +75,7 @@ TW_PRICE_BAND = Decimal("0.105")
 US_PRICE_BAND = Decimal("0.20")
 FEE_RATE = Decimal("0.001425")
 FEE_MIN = Decimal(20)
+US_FEE_FLOOR, US_FEE_RATE = Decimal(50), Decimal("0.01")  # a US fee above both is probably NT$ (複委託)
 STOCK_TAX, DAY_TRADE_TAX, ETF_TAX = Decimal("0.003"), Decimal("0.0015"), Decimal("0.001")
 LOT = Decimal(1000)
 CLOSE_LOOKBACK_DAYS = 15
@@ -120,36 +122,59 @@ def dec(text: Any) -> Decimal | None:
 
 
 _DATE_SPLIT = re.compile(r"[./\-年月]")
+EARLIEST_YEAR = 1990  # as the batch write checks it (``bad_date``)
+
+
+def _plausible(d: date | None, today: date) -> date | None:
+    """A date a statement can hold: 1990 up to next year (anything else is a misreading, and would break the price
+    lookup's arithmetic near ``date.min``)."""
+    return d if d is not None and EARLIEST_YEAR <= d.year <= today.year + 1 else None
+
+
+def _try_date(y: int, m: int, d: int) -> date | None:
+    try:
+        return date(y, m, d)
+    except ValueError:
+        return None
 
 
 def parse_date(text: Any, year_hint: int | None, today: date) -> date | None:
-    """A date as printed: 2026/10/03, 115/10/03 (民國), 2026-10-03, 20261003, 10/03/2026 (US), or 10/03 (the year of the
-    statement's period, else this year — last year when that would be in the future)."""
+    """A date as printed: 2026/10/03, 115/10/03 (民國), 2026-10-03, 20261003, 10/03/2026 or 10/03/26 (US), 26/10/03,
+    or 10/03 (the year of the statement's period, else this year — last year when that would be in the future).
+    None for what cannot be read, a two-digit year that reads both ways, or a year outside 1990 … next year."""
     s = re.sub(r"\s+", "", _nfkc(text)).removesuffix("日")
     if not s:
         return None
-    try:
-        if re.fullmatch(r"\d{8}", s):
-            return date(int(s[:4]), int(s[4:6]), int(s[6:]))
-        parts = [p for p in _DATE_SPLIT.split(s) if p]
-        if not parts or not all(p.isdigit() for p in parts):
-            return None
-        n = [int(p) for p in parts]
-        if len(parts) == 3:
-            if len(parts[0]) == 4:
-                return date(n[0], n[1], n[2])
-            if len(parts[2]) == 4:
-                return date(n[2], n[0], n[1])
-            if len(parts[0]) == 3 or (len(parts[0]) == 2 and n[0] >= 79):  # 民國 79 = 1990
-                return date(n[0] + 1911, n[1], n[2])
-            if len(parts[0]) == 2:
-                return date(2000 + n[0], n[1], n[2])
-            return None
-        if len(parts) == 2:
-            d = date(year_hint or today.year, n[0], n[1])
-            return d.replace(year=d.year - 1) if year_hint is None and d > today else d
-    except ValueError:
+    if re.fullmatch(r"\d{8}", s):
+        return _plausible(_try_date(int(s[:4]), int(s[4:6]), int(s[6:])), today)
+    parts = [p for p in _DATE_SPLIT.split(s) if p]
+    if not parts or not all(p.isdigit() for p in parts):
         return None
+    n = [int(p) for p in parts]
+    if len(parts) == 3:
+        if len(parts[0]) == 4:
+            return _plausible(_try_date(n[0], n[1], n[2]), today)
+        if len(parts[2]) == 4:
+            return _plausible(_try_date(n[2], n[0], n[1]), today)
+        if len(parts[0]) == 3 or (len(parts[0]) == 2 and n[0] >= 79):  # 民國 79 = 1990
+            return _plausible(_try_date(n[0] + 1911, n[1], n[2]), today)
+        if len(parts[0]) <= 2 and len(parts[2]) <= 2:
+            # YY/MM/DD or the US MM/DD/YY: the statement's year decides; without one, only a reading that makes sense
+            ymd = _plausible(_try_date(2000 + n[0], n[1], n[2]), today)
+            mdy = _plausible(_try_date(2000 + n[2], n[0], n[1]), today)
+            if year_hint is not None:
+                ymd = ymd if ymd and ymd.year == year_hint else None
+                mdy = mdy if mdy and mdy.year == year_hint else None
+            else:
+                ymd = ymd if ymd and ymd <= today else None
+                mdy = mdy if mdy and mdy <= today else None
+            return (ymd or mdy) if not (ymd and mdy) or ymd == mdy else None
+        return None
+    if len(parts) == 2:
+        d = _try_date(year_hint or today.year, n[0], n[1])
+        if d is not None and year_hint is None and d > today:
+            d = _try_date(d.year - 1, d.month, d.day)
+        return _plausible(d, today)
     return None
 
 
@@ -275,6 +300,9 @@ def _arithmetic(row: _Row, info: InstrumentInfo, kind_day_trade: bool, t: str, q
     base = amount if amount is not None else gross
     if tw and fee is not None and fee > max((max(bases) * FEE_RATE).to_integral_value(ROUND_FLOOR), FEE_MIN) + 1:
         row.add(_flag("fee_out_of_range", f"手續費 {_num(fee)} 比一般高很多。"))
+    # 複委託 settled in NT$ often prints the fee in NT$ next to US$ prices: booked as US$ it would inflate the cost
+    if not tw and fee is not None and fee > max(US_FEE_FLOOR, max(bases) * US_FEE_RATE):
+        row.add(_flag("currency_mismatch", f"手續費 {_num(fee)} 以美元來說太高，可能是新台幣。"))
     if t == "buy" and tw and tax is not None and tax > 0:
         row.add(_flag("side_inconsistent", "買進卻有交易稅，買賣可能看反了。"))
     if t == "sell" and tw and tax is not None:
@@ -393,7 +421,7 @@ def parse_month(text: Any, last: bool) -> date | None:
         return None
     year, month = int(m.group(1)), int(m.group(2))
     year = year + 1911 if year < 1000 else year
-    if not 1 <= month <= 12:
+    if not 1 <= month <= 12 or year < EARLIEST_YEAR or year > today_taipei().year + 1:
         return None
     first = date(year, month, 1)
     return (first.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1) if last else first
@@ -466,13 +494,22 @@ def _account(db: Session, user: User, account_id: str | None) -> BrokerAccount:
     return acc
 
 
+def _lock_user(db: Session, user: User) -> None:
+    """PostgreSQL: lock the user's row until the transaction ends (counting today's reads and recording a new one)."""
+    if db.get_bind().dialect.name == "postgresql":
+        db.execute(select(User.id).where(User.id == user.id).with_for_update())
+
+
 def read_statement(db: Session, user: User, account_id: str | None, pages: Sequence[Page], md: MarketData,
-                   settings: Settings, pool: KeyPool | None = None) -> dict[str, Any]:
+                   settings: Settings, pool: KeyPool | None = None,
+                   cancelled: Callable[[], bool] | None = None) -> dict[str, Any]:
     """Read ``pages`` and check every row against ``account_id``'s books (default: the user's first account).
 
     429 ``ai_import_daily_limit`` after ``IMPORT_DAILY_LIMIT`` reads today; 429 ``ai_monthly_budget`` once the month's
     budget and 省錢模式's allowance are spent (in 省錢模式 the pages are read once, with no second reading); 503
-    ``ai_unavailable`` without a usable key; 422 ``unreadable_file`` when the API cannot read any page."""
+    ``ai_unavailable`` without a usable key; 422 ``unreadable_file`` when no page could be read (refused by the API,
+    cut off, refused by the model). ``cancelled``: true once the client has gone (no second reading then; the first
+    one still counts as one of today's reads, it was billed)."""
     account = _account(db, user, account_id)
     limit = settings.import_daily_limit
     if limit > 0 and imports_today(db, user) >= limit:
@@ -487,9 +524,14 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
     model, retry_model = store.model_for(FEATURE, settings), settings.ai_model_import_retry.strip()
     read_id = new_id("stm")
     user_id = user.id
-    # counts toward today's reads from the start (two reads in parallel cannot both slip under the limit)
+    # Counts toward today's reads from the start. The count is taken again with the user's row locked until the
+    # 'started' row is committed, so two reads sent at once are counted one after the other (PostgreSQL; SQLite, used
+    # in development, has no row locks).
+    _lock_user(db, user)
+    if limit > 0 and imports_today(db, user) >= limit:
+        raise ApiError(429, "ai_import_daily_limit", f"今天已經匯入 {limit} 份，明天再匯入。", extra={"limit": limit})
     started = store.record_usage(db, user_id=user_id, thread_id=read_id, feature=FEATURE, model=model, key_slot=None,
-                                 usage=CallUsage(), stop_reason="started")
+                                 usage=CallUsage(), stop_reason="started")  # commits: the lock is released
     began = time.monotonic()
     billed = 0
 
@@ -508,7 +550,9 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
     ctx = _Ctx(db, md, account, today_taipei(), (None, None))
     reading = _evaluate(ctx, first)
     retried, used = False, model
-    need = [] if economy or not retry_model else _needs_retry(reading)
+    # no second reading in 省錢模式, or once the user has cancelled (closed the request): nobody would see it
+    gone = cancelled is not None and cancelled()
+    need = [] if economy or not retry_model or gone else _needs_retry(reading)
     if need:
         groups = [[by_number[n] for n in first[i].pages] for i in need]
         second = importer.read_groups(pool, groups, retry_model, importer.RETRY_EFFORT,
@@ -517,7 +561,11 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
         retried = True
         combined: list[ChunkResult] = []
         for i, r in enumerate(first):
-            combined += [s for s in second if set(s.pages) <= set(r.pages)] if i in need else [r]
+            parts = [s for s in second if set(s.pages) <= set(r.pages)]
+            # a chunk's second reading replaces its first only when all of it was read (or the first failed too):
+            # a part that failed again must not take the rows the first reading had with it
+            retry_used = i in need and parts and (all(s.ok for s in parts) or not r.ok)
+            combined += parts if retry_used else [r]
         other = _evaluate(ctx, combined)
         n_first, n_other = len(reading.rows), len(other.rows)
         # a row one reading has and the other does not counts against the shorter one (a missed row is worse than a
@@ -532,8 +580,10 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
             db.commit()
         if failures <= {"unavailable"}:
             raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
-        if failures <= {"bad_request", "unavailable"}:
-            raise ApiError(422, "unreadable_file", "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。")
+        # nothing was read (cut off, refused, not the schema's JSON): say so, not "no trades in this file"
+        if "max_tokens" in failures:
+            raise ApiError(422, "unreadable_file", "明細太多，一次讀不完。分成幾張截圖，或把 PDF 分開再匯入。")
+        raise ApiError(422, "unreadable_file", "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。")
     ctx.period = _period(reading.extraction, ctx.today)
     problems = _check_books(db, user, md, account, reading.rows)
     db.rollback()  # the books check writes nothing; make sure nothing is left pending

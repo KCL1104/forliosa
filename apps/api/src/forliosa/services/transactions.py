@@ -516,8 +516,16 @@ class _Refused:
     message: str  # in the ledger's own words
 
 
-def _refused(txns: list[Transaction], method: CostMethod) -> tuple[list[_Refused], dict[str, int]]:
-    """Every booking of ``txns`` that a strict replay would refuse, and each transaction's place in the replay."""
+def _stock(md: MarketData | None, symbol: str | None) -> str:
+    """鴻海 (the instrument's name), else the short code (2317, AAPL)."""
+    info = md.instrument(symbol) if md is not None and symbol else None
+    return info.name if info is not None else (symbol or "").removesuffix(".TWO").removesuffix(".TW")
+
+
+def _refused(txns: list[Transaction], method: CostMethod, md: MarketData | None = None
+             ) -> tuple[list[_Refused], dict[str, int]]:
+    """Every booking of ``txns`` that a strict replay would refuse, and each transaction's place in the replay.
+    Messages read like the batch's own: 「11/10 賣出鴻海 3,580 股，超過當時持有的 0 股」."""
     ltx = LedgerInput([], txns, method).ledger_txns()
     places = {t.id: n for n, t in enumerate(sorted(ltx, key=LedgerTxn.sort_key))}
     try:
@@ -527,12 +535,12 @@ def _refused(txns: list[Transaction], method: CostMethod) -> tuple[list[_Refused
     out = []
     for e in trail:  # the two conditions ``Ledger._problem`` is called on
         t = e.txn
-        day = t.trade_date.isoformat()
+        day = _day(t.trade_date)
         if t.type is TxnType.SELL and t.quantity > e.before:
-            message = f"{day} 賣出 {t.symbol} {_num(t.quantity)} 股，超過當時持有的 {_num(e.before)} 股"
+            message = f"{day} 賣出{_stock(md, t.symbol)} {_num(t.quantity)} 股，超過當時持有的 {_num(e.before)} 股"
             out.append(_Refused(t, places[t.id], e.before, message))
         elif t.type is TxnType.STOCK_DIVIDEND and e.before <= 0 < t.quantity:
-            out.append(_Refused(t, places[t.id], e.before, f"{day} {t.symbol} 配股時沒有持股"))
+            out.append(_Refused(t, places[t.id], e.before, f"{day} {_stock(md, t.symbol)} 配股時沒有持股"))
     return out, places
 
 
@@ -544,7 +552,7 @@ def _flag_ledger(db: Session, user: User, md: MarketData, account: BrokerAccount
     of the account the batch breaks (``ledger_inconsistent`` on the batch's last sell of that stock before it).
     Returns the problems no batch row can be blamed for."""
     after = auto_dividends.with_recomputed(db, user, md, inp, account, {t.symbol for t in batch})
-    refused, places = _refused(after, inp.method)
+    refused, places = _refused(after, inp.method, md)
     if not refused:
         return []
     dividends_only = not _refused(inp.transactions, inp.method)[0]
@@ -651,6 +659,18 @@ def create_batch(db: Session, user: User, account_id: str, rows: Sequence[Mappin
     return BatchResult(batch_id, [t for t in check.candidates if t is not None], synced.created)
 
 
+def _first_refusal(db: Session, user: User, account: BrokerAccount, removing: Sequence[Transaction],
+                   md: MarketData) -> str | None:
+    """The first booking the account's books refuse without ``removing`` (as ``validate_ledger`` with ``md`` replays
+    them), in the batch's words; None when there is none to name."""
+    gone = {t.id for t in removing}
+    inp = load_ledger_input(db, user, accounts=[account])
+    inp.transactions = [t for t in inp.transactions if t.id not in gone]
+    after = auto_dividends.with_recomputed(db, user, md, inp, account, {t.symbol for t in removing if t.symbol})
+    refused = _refused(after, inp.method, md)[0]
+    return refused[0].message if refused and refused[0].txn is not None else None
+
+
 def delete_batch(db: Session, user: User, batch_id: str, md: MarketData) -> int:
     """Undo an import: delete every row of the batch that is still there, after one replay of the account without
     them (an account each, should rows have been moved to another account since). 422 ``ledger_inconsistent`` when
@@ -664,13 +684,14 @@ def delete_batch(db: Session, user: User, batch_id: str, md: MarketData) -> int:
     rows = list(db.scalars(select(Transaction).where(*in_batch)))
     for account_id in account_ids:
         account = _get_account(db, user, account_id)
+        removing = [t for t in rows if t.account_id == account_id]
         try:
-            validate_ledger(db, user, account, None, remove_id={t.id for t in rows if t.account_id == account_id},
-                            md=md)
+            validate_ledger(db, user, account, None, remove_id={t.id for t in removing}, md=md)
         except ApiError as exc:
             if exc.code != "ledger_inconsistent":
                 raise
-            raise unprocessable(f"之後的交易用到這次匯入的股數，不能整批復原：{exc.message}",
+            detail = _first_refusal(db, user, account, removing, md) or exc.message
+            raise unprocessable(f"之後的交易用到這次匯入的股數，不能整批復原：{detail.rstrip('。')}。",
                                 code="ledger_inconsistent") from exc
     scopes = list(dict.fromkeys(s for t in rows for s in _dividend_scope(t)))
     feed_keys = sharing.trade_keys(rows)

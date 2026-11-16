@@ -127,7 +127,7 @@ def test_batch_sell_that_breaks_a_later_sell_is_blamed(client):
     rows = [row("2330.TW", "buy", "2025-03-04", 200, 1000), row("2330.TW", "sell", "2025-03-10", 300, 1020)]
     r = batch(client, acc["id"], rows)
     assert r.status_code == 422, r.text
-    message = "匯入以後帳目對不起來：2025-03-20 賣出 2330.TW 1,000 股，超過當時持有的 900 股。"
+    message = "匯入以後帳目對不起來：2025/3/20 賣出台積電 1,000 股，超過當時持有的 900 股。"
     assert r.json()["error"]["rows"] == [{"index": 1, "code": "ledger_inconsistent", "message": message}]
     assert len(txns(client, acc["id"])) == 2
 
@@ -142,7 +142,7 @@ def test_books_already_inconsistent_are_a_problem_of_the_whole_batch(client):
     rows = [row("2330.TW", "buy", "2025-03-04", 1000, 1000)]
     out = batch(client, acc["id"], rows, dry_run=True).json()
     assert out["ok"] is False and flags_of(out) == {0: []}
-    problem = "匯入以後帳目對不起來：2025-03-03 賣出 2317.TW 100 股，超過當時持有的 0 股。"
+    problem = "匯入以後帳目對不起來：2025/3/3 賣出鴻海 100 股，超過當時持有的 0 股。"
     assert out["problems"] == [{"code": "ledger_inconsistent", "message": problem}]
     r = batch(client, acc["id"], rows)
     assert r.status_code == 422
@@ -174,7 +174,7 @@ def test_undo_is_refused_while_later_rows_depend_on_it(client):
     assert r.status_code == 422
     err = r.json()["error"]
     assert err["code"] == "ledger_inconsistent"
-    assert err["message"].startswith("之後的交易用到這次匯入的股數，不能整批復原：")
+    assert err["message"] == "之後的交易用到這次匯入的股數，不能整批復原：2025/3/10 賣出台積電 600 股，超過當時持有的 0 股。"
     assert len(txns(client, acc["id"])) == 2
     assert client.delete(f"{API}/transactions/{sell['id']}").status_code == 204
     assert client.delete(f"{API}/transactions/batches/{out['batch_id']}").status_code == 200

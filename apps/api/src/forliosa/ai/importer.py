@@ -335,10 +335,17 @@ def merge(results: Sequence[ChunkResult]) -> Extraction:
                       list(dict.fromkeys(unreadable))[:20], list(dict.fromkeys(instructions))[:10])
 
 
-# Taiwan ID / resident certificate numbers: never echoed back, even if the model copied one
-ID_NUMBER = re.compile(r"[A-Z][12489]\d{8}")
+# Taiwan ID / resident certificate numbers (the old 統一證號 too: a second letter A–D): never sent on in the text layer
+# or echoed back, even if the model copied one; full-width letters and digits (Big5 reports) count the same
+ID_NUMBER = re.compile(r"[A-Z][12489A-D]\d{8}")
 MASKED = "〔已遮蔽〕"
+_HALF_WIDTH = {c: c - 0xFEE0 for c in range(0xFF01, 0xFF5F)}  # Ａ → A, １ → 1: one character for one, places kept
 
 
 def scrub(text: str) -> str:
-    return ID_NUMBER.sub(MASKED, text)
+    folded = text.translate(_HALF_WIDTH)
+    out, last = [], 0
+    for m in ID_NUMBER.finditer(folded):
+        out += [text[last:m.start()], MASKED]
+        last = m.end()
+    return "".join(out) + text[last:] if out else text

@@ -4,8 +4,10 @@ limits and the second reading with the retry model."""
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
+import threading
 from datetime import date
 from decimal import Decimal
 
@@ -13,10 +15,14 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from forliosa.ai import importer
+from forliosa.ai import importer, store
 from forliosa.ai.keypool import KeyPool, set_key_pool
+from forliosa.ai.pricing import CallUsage
+from forliosa.api.routes import imports as import_routes
 from forliosa.config import get_settings
+from forliosa.marketdata.service import get_market_data
 from forliosa.models import AiUsage, PriceDaily, Transaction, User
+from forliosa.services import imports as svc
 from forliosa.services.imports import parse_date, parse_month, totals_check
 from forliosa.timeutil import now_utc
 from tests.ai.fake_anthropic import FakeAnthropic, text
@@ -256,6 +262,45 @@ def test_dates_as_printed():
     assert parse_date("2026/10", None, TODAY) is None  # a month: the period's bounds below
     assert (parse_month("2026 年 10 月", False), parse_month("115/10", True)) == (date(2026, 10, 1), date(2026, 10, 31))
     assert parse_month("2024/02", True) == date(2024, 2, 29) and parse_month("2026/13", True) is None
+    # two-digit years: the statement's year decides between YY/MM/DD and the US MM/DD/YY; without one, both → None
+    assert parse_date("10/03/26", 2026, TODAY) == date(2026, 10, 3)
+    assert parse_date("26/10/03", 2026, TODAY) == date(2026, 10, 3)
+    assert parse_date("10/3/26", 2026, TODAY) == date(2026, 10, 3)
+    assert parse_date("10/03/26", None, TODAY) is None
+    # a year no statement holds is a misreading (1990 … next year)
+    assert parse_date("0001/01/05", None, TODAY) is None and parse_date("2099/01/05", None, TODAY) is None
+    assert parse_date("1989/12/29", None, TODAY) is None and parse_date("10/03", 1, TODAY) is None
+    assert parse_month("0001/01", False) is None
+
+
+def test_a_misread_year_is_unreadable_not_a_crash(client, pool, fake, env):
+    env(AI_MODEL_IMPORT_RETRY="")
+    account(client)
+    answer(fake, doc([r("0001/01/05")], period=("", "")))
+    res = read(client)
+    assert res.status_code == 200, res.text
+    row = res.json()["rows"][0]
+    assert "unreadable" in flags(row) and row["candidate"]["trade_date"] == "" and row["include"] is False
+
+
+def test_a_us_fee_too_high_for_dollars_is_flagged(client, pool, fake, env):
+    """複委託 settled in NT$: US$ prices with the fee in NT$ (150 for a US$2,300 trade) — not ticked."""
+    env(AI_MODEL_IMPORT_RETRY="")
+    account(client, name="複委託", currency="USD")
+    answer(fake, doc([r("2026/10/20", "AAPL", "APPLE INC", qty="10", price="230", amount="2300", fee="150", tax="0",
+                       currency="USD"),
+                      r("2026/10/21", "AAPL", "APPLE INC", qty="10", price="230", amount="2300", fee="15", tax="0",
+                        currency="USD")]))
+    rows = read(client, kind="images").json()["rows"]
+    assert [f["message"] for f in rows[0]["flags"]] == ["手續費 150 以美元來說太高，可能是新台幣。"]
+    assert flags(rows[0]) == ["currency_mismatch"] and rows[0]["include"] is False
+    assert flags(rows[1]) == [] and rows[1]["include"] is True
+
+
+def test_id_numbers_are_scrubbed_in_any_width():
+    assert importer.scrub("身分證字號 Ａ１２３４５６７８９ 止") == "身分證字號 〔已遮蔽〕 止"
+    assert importer.scrub("統一證號 AC01234567、FA12345678") == "統一證號 〔已遮蔽〕、〔已遮蔽〕"
+    assert importer.scrub("A123456789") == "〔已遮蔽〕" and importer.scrub("2330 台積電 1,000") == "2330 台積電 1,000"
 
 
 def test_price_far_from_the_archived_close(client, pool, fake, env, engine):
@@ -313,6 +358,89 @@ def test_failing_pages_are_read_again_with_the_retry_model(client, pool, fake, e
     assert [u.model for u in usage_rows(db)] == [HAIKU, HAIKU, HAIKU, SONNET]  # started + three calls
 
 
+def _billed(model):
+    return [importer.CallRecord(model, 1, CallUsage(input_tokens=1000, output_tokens=1000), "end_turn")]
+
+
+def test_a_chunk_the_retry_model_fails_on_keeps_its_first_reading(client, pool, env, monkeypatch):
+    """6 pages, two chunks, both read again; the second reading of page 6 fails (overloaded): page 6's rows from the
+    first reading stay, the retry model's pages 1–5 are used."""
+    account(client)
+    saturday = [r("2026/10/03", page=p) for p in range(1, 6)]  # not a trading day: read again
+    weekday = [r("2026/10/02", page=p) for p in range(1, 6)]
+    page6 = [r("2026/10/06", "2412", "中華電", qty="1000", price="120", amount="999999", fee="171", page=6),
+             r("2026/10/07", "2412", "中華電", qty="1000", price="120", amount="120000", fee="171", page=6)]
+
+    def first(_pool, _pages, model, *a, **k):
+        return [importer.ChunkResult((1, 2, 3, 4, 5), model, doc(saturday), calls=_billed(model)),
+                importer.ChunkResult((6,), model, doc(page6), calls=_billed(model))]
+
+    def second(_pool, groups, model, *a, **k):
+        assert [tuple(p.number for p in g) for g in groups] == [(1, 2, 3, 4, 5), (6,)]
+        return [importer.ChunkResult((1, 2, 3, 4, 5), model, doc(weekday), calls=_billed(model)),
+                importer.ChunkResult((6,), model, None, failure="unavailable")]
+
+    monkeypatch.setattr(importer, "read_pages", first)
+    monkeypatch.setattr(importer, "read_groups", second)
+    out = read(client, 6).json()
+    assert (out["model_used"], out["retried"], out["unreadable"]) == (SONNET, True, [])
+    assert [x["candidate"]["trade_date"] for x in out["rows"]] == ["2026-10-02"] * 5 + ["2026-10-06", "2026-10-07"]
+
+
+def test_no_second_reading_once_the_user_has_cancelled(client, pool, env, db, monkeypatch):
+    account(client)
+    calls = []
+
+    def first(_pool, _pages, model, *a, **k):
+        return [importer.ChunkResult((1,), model, doc([r("2026/10/03")]), calls=_billed(model))]  # a Saturday
+
+    monkeypatch.setattr(importer, "read_pages", first)
+    monkeypatch.setattr(importer, "read_groups", lambda *a, **k: calls.append(a) or [])
+    out = svc.read_statement(db, demo_user(db), None, [importer.Page(1, "image/png", PNG)], get_market_data(),
+                             get_settings(), pool, cancelled=lambda: True)
+    assert (out["retried"], calls) == (False, [])
+    assert flags(out["rows"][0]) == ["not_trading_day"]
+
+
+def test_a_closed_request_is_noticed():
+    class Request:
+        polls = 0
+
+        async def is_disconnected(self):
+            self.polls += 1
+            return self.polls >= 3
+
+    gone = threading.Event()
+    asyncio.run(import_routes._watch_disconnect(Request(), gone, every=0))
+    assert gone.is_set()
+
+
+def test_the_daily_count_is_taken_again_under_the_lock(client, pool, fake, env, db, monkeypatch):
+    """Two reads sent at once: the one that gets the user's row second counts the first one's 'started' row."""
+    env(IMPORT_DAILY_LIMIT=1, AI_MODEL_IMPORT_RETRY="")
+    account(client)
+
+    def the_other_read_got_there_first(session, user):
+        store.record_usage(session, user_id=user.id, thread_id="stm_other", feature="import", model=HAIKU,
+                           key_slot=None, usage=CallUsage(), stop_reason="started")
+
+    monkeypatch.setattr(svc, "_lock_user", the_other_read_got_there_first)
+    res = read(client)
+    assert res.status_code == 429 and res.json()["error"]["code"] == "ai_import_daily_limit"
+    assert fake.requests == [] and [u.thread_id for u in usage_rows(db)] == ["stm_other"]
+
+
+def test_cut_off_on_every_page_says_so(client, pool, fake, env):
+    env(AI_MODEL_IMPORT_RETRY="")
+    account(client)
+    fake.reply(text('{"document_kind": "monthly_st'), stop_reason="max_tokens",
+               usage={"input_tokens": 9000, "output_tokens": 16000})
+    res = read(client)
+    assert res.status_code == 422
+    assert res.json()["error"] == {"code": "unreadable_file",
+                                   "message": "明細太多，一次讀不完。分成幾張截圖，或把 PDF 分開再匯入。"}
+
+
 def test_long_uploads_are_read_five_pages_a_call_in_parallel(client, pool, fake, env, db):
     env(AI_MODEL_IMPORT_RETRY="")
     account(client)
@@ -346,10 +474,14 @@ def test_a_refusal_or_an_unreadable_note_is_read_again(client, pool, fake, env):
     out = read(client).json()
     assert (out["model_used"], out["retried"], out["unreadable"]) == (SONNET, True, [])
 
+    # nothing read either time: an error, not "this file has no trades" (both calls were billed: it counts)
+    before = client.get(f"{API}/ai/usage").json()["imports_today"]
     fake.reply(text(""), stop_reason="refusal")
     fake.reply(text(""), stop_reason="refusal")
-    out = read(client).json()
-    assert (out["rows"], out["unreadable"], out["retried"]) == ([], ["第 1 頁沒有讀出來。"], True)
+    res = read(client)
+    assert res.status_code == 422
+    assert res.json()["error"] == {"code": "unreadable_file", "message": "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。"}
+    assert client.get(f"{API}/ai/usage").json()["imports_today"] == before + 1
 
 
 def test_too_many_rows_for_one_answer_splits_the_pages(client, pool, fake, env, db):
