@@ -25,6 +25,20 @@ describe("找個資", () => {
     expect(findSensitiveRanges("A1234567890 X12345678")).toEqual([])
   })
 
+  it("全形的號碼、舊式統一證號、戶名、客戶名稱、沒有冒號的客戶帳號（Big5 報表的寫法）", () => {
+    const values = (text: string) => findSensitiveRanges(text).map(([s, e]) => text.slice(s, e))
+    expect(values("Ａ１２３４５６７８９")).toEqual(["Ａ１２３４５６７８９"])
+    expect(values("FA12345678")).toEqual(["FA12345678"])
+    expect(values("統一證號 AC01234567")).toEqual(["AC01234567"])
+    expect(values("戶名：王小明")).toEqual(["王小明"])
+    expect(values("客戶名稱：王小明　電話：02-0000-0000")).toEqual(["王小明", "02-0000-0000"])
+    expect(values("客戶帳號 1234567")).toEqual(["1234567"])
+    expect(values("證券帳號：9A99 0123456")).toEqual(["9A99 0123456"])
+    // 交易列與表頭照舊不碰
+    expect(findSensitiveRanges("１１５/１０/０３  現股  買  ２３３０  台積電  １,０００")).toEqual([])
+    expect(findSensitiveRanges("帳戶名稱：一般  成交日期")).toEqual([])
+  })
+
   it("地址到全形空白或兩個空白為止（中間的單一空白算地址的一部分）；電話要接冒號", () => {
     const text = "通訊地址：臺北市中正區範例路 1 段 1 號 1 樓　電話：02-0000-0000"
     expect(findSensitiveRanges(text).map(([s, e]) => text.slice(s, e))).toEqual(["臺北市中正區範例路 1 段 1 號 1 樓", "02-0000-0000"])

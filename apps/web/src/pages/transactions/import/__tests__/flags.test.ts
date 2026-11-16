@@ -3,6 +3,8 @@ import type { Account, ImportRow } from "@/api/types"
 import {
   accountForBroker,
   editRow,
+  forAccountSwitch,
+  includeAfterCheck,
   isSkipped,
   mergeFlags,
   newFlagCodes,
@@ -10,6 +12,7 @@ import {
   rowTotal,
   shortfallRow,
   skippedSummary,
+  statementCurrency,
   toCandidate,
   toDraftRow,
   totalsLine,
@@ -74,7 +77,8 @@ describe("賣超：補一筆買進", () => {
   it("從伺服器的句子算出差的股數；日期與價格空著讓使用者填", () => {
     const sell = toDraftRow(row({ type: "sell", symbol: "2603.TW", quantity: 2000, price: 216 }, [flag("oversell", "賣出 2,000 股，超過當時持有的 1,000 股。", "error")], false, "長榮"))
     const buy = shortfallRow(sell, "added_1")
-    expect(buy).toMatchObject({ id: "added_1", include: true, type: "buy", qty: "1000", date: "", price: "", added: true })
+    // 股數和其他列一樣寫千分位
+    expect(buy).toMatchObject({ id: "added_1", include: true, type: "buy", qty: "1,000", date: "", price: "", added: true })
     expect(buy?.symbol?.symbol).toBe("2603.TW")
     // 當時一股都沒有
     const none = toDraftRow(row({ type: "sell", quantity: 500 }, [flag("oversell", "賣出 500 股，超過當時持有的 0 股。", "error")]))
@@ -90,6 +94,50 @@ describe("重新驗算（dry_run）的結果併進來", () => {
     expect(mergeFlags(editRow(d, { qty: "3000" }), []).map((f) => f.code)).toEqual(["margin"])
     // 同一個代碼不重複
     expect(mergeFlags(d, [flag("margin")]).filter((f) => f.code === "margin")).toHaveLength(1)
+  })
+
+  it("讀檔時才算得出來的（張數、買賣看反、價格、非交易日、手續費、稅、期間）重新驗算後還在；改了相關的格子才拿掉", () => {
+    const read = [
+      flag("amount_mismatch", "股數 × 價格和成交金額差 587,412，股數可能是張數（1 張＝1,000 股）。"),
+      flag("side_inconsistent"), flag("price_far_from_close"), flag("not_trading_day"), flag("outside_period"),
+      flag("fee_out_of_range"), flag("tax_out_of_range"), flag("currency_mismatch"), flag("day_trade"),
+    ]
+    const d = toDraftRow(row({ quantity: 3 }, read))
+    // 換帳戶時的重新驗算：dry_run 只回帳本的，讀檔時的一個都不少
+    expect(mergeFlags(d, []).map((f) => f.code)).toEqual(read.map((f) => f.code))
+    expect(newFlagCodes(d.flags, mergeFlags(d, []))).toEqual([])
+    const codes = (patch: Parameters<typeof editRow>[1]) => mergeFlags(editRow(d, patch), []).map((f) => f.code)
+    expect(codes({ qty: "3,000" })).not.toContain("amount_mismatch")
+    expect(codes({ qty: "3,000" })).toContain("not_trading_day")
+    expect(codes({ date: "2026-10-02" })).not.toContain("not_trading_day")
+    expect(codes({ date: "2026-10-02" })).not.toContain("outside_period")
+    expect(codes({ fee: "837" })).not.toContain("fee_out_of_range")
+    expect(codes({ type: "sell" })).not.toContain("side_inconsistent")
+    // 幣別、當沖改哪一格都留著
+    expect(codes({ qty: "1", price: "1", fee: "1", tax: "1", date: "2026-10-02", type: "sell" })).toEqual(["currency_mismatch", "day_trade"])
+  })
+
+  it("新出現的賣超、重複：使用者沒自己動過勾選就跟伺服器一樣不勾；自己勾的照舊", () => {
+    const d = toDraftRow(row())
+    const merged = mergeFlags(d, [flag("duplicate", "10/1 已經記過一筆一樣的。")])
+    expect(includeAfterCheck(d, merged)).toBe(false)
+    expect(includeAfterCheck({ ...d, includeSet: true }, merged)).toBe(true)
+    // 早就看過的（不是新的）、或只是提醒（價格）：不動
+    const seen = toDraftRow(row({}, [flag("duplicate")]))
+    expect(includeAfterCheck(seen, mergeFlags(seen, [flag("duplicate")]))).toBe(true)
+    expect(includeAfterCheck(d, mergeFlags(d, [flag("price_far_from_close")]))).toBe(true)
+  })
+
+  it("換帳戶：沒勾的列上舊帳戶的賣超、重複拿掉；只因為這些沒勾的列重新勾上（自己取消的、讀不清楚的不動）", () => {
+    const dup = toDraftRow(row({}, [flag("duplicate", "10/1 已經記過一筆一樣的。")], false))
+    const mine = { ...dup, id: "mine", includeSet: true }
+    const unread = toDraftRow(row({}, [flag("duplicate"), flag("unreadable", "這一列的價格沒讀清楚。", "error")], false))
+    const day = toDraftRow(row({}, [flag("day_trade")], false))
+    const [a, b, c, e] = forAccountSwitch([dup, mine, unread, day])
+    expect([a!.include, a!.flags]).toEqual([true, []])
+    expect([b!.include, b!.flags]).toEqual([false, []])
+    expect([c!.include, c!.flags.map((f) => f.code)]).toEqual([false, ["unreadable"]])
+    expect(e).toBe(day)
   })
 
   it("多出來的代碼（使用者還沒看過）", () => {
@@ -132,5 +180,20 @@ describe("整份的句子", () => {
     expect(accountForBroker(accounts, "永豐金證券股份有限公司", "a1")).toBe("a2")
     expect(accountForBroker(accounts, "範例證券股份有限公司", "a1")).toBe("a1")
     expect(accountForBroker(accounts, "", "a2")).toBe("a2")
+  })
+
+  it("先選帳戶也看幣別：台股對帳單不選同一家的美元複委託；原本的幣別不對時改成幣別相同的", () => {
+    const accounts = [
+      { id: "tw_other", name: "元大－一般", broker: "元大證券", currency: "TWD" },
+      { id: "us", name: "富邦－複委託", broker: "富邦證券", currency: "USD" },
+      { id: "tw", name: "富邦－一般", broker: "富邦證券", currency: "TWD" },
+    ] as Account[]
+    expect(accountForBroker(accounts, "富邦綜合證券股份有限公司", "tw_other", "TWD")).toBe("tw")
+    expect(accountForBroker(accounts, "富邦綜合證券股份有限公司", "tw_other", "USD")).toBe("us")
+    expect(accountForBroker(accounts, "國泰證券", "tw_other", "USD")).toBe("us")
+    expect(accountForBroker(accounts, "國泰證券", "tw_other", "TWD")).toBe("tw_other")
+    expect(statementCurrency({ rows: [row(), row({ symbol: "AAPL" }), row({ symbol: "NVDA" })] })).toBe("USD")
+    expect(statementCurrency({ rows: [row(), row({ symbol: "AAPL" }, [flag("dividend_auto")])] })).toBe("TWD")
+    expect(statementCurrency({ rows: [] })).toBeNull()
   })
 })

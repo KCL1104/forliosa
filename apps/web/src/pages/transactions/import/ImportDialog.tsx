@@ -17,7 +17,7 @@ import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } f
 import { Input } from "@/components/ui/input"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
-import { accountForBroker, unsupportedLine } from "./flags"
+import { accountForBroker, statementCurrency, unsupportedLine } from "./flags"
 import { bodyClass, footerClass } from "./layout"
 import { ImageReadError, MAX_IMAGES, MAX_PAGES, prepareImage, sniffFile } from "./prepare-image"
 import { openPdf, PdfOpenError, PdfPasswordError, preparePdf } from "./prepare-pdf"
@@ -254,7 +254,8 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
       setError(`一次最多 ${MAX_PAGES} 頁，這次有 ${pages.length} 頁。少選幾張再試。`)
       return
     }
-    const account = firstAccount(accounts.data ?? [])
+    // 帳戶清單還沒載入時先等它：讀檔時驗算的帳戶要是確定的那一個（確認表照它判斷要不要換帳戶重算）
+    const account = firstAccount(accounts.data ?? (await accounts.refetch()).data ?? [])
     setError(null)
     setReadingPages({ count: pages.length, unit: p ? "頁" : "張" })
     setPhase("reading")
@@ -336,13 +337,13 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
       )
     }
     const list = accounts.data ?? []
-    const initial = accountForBroker(list, doc.result.broker_name, doc.account)
+    const initial = accountForBroker(list, doc.result.broker_name, doc.account, statementCurrency(doc.result))
     return (
       <ReviewTable
         doc={doc.result}
         accounts={list}
         initialAccountId={initial}
-        recheckOnMount={initial !== doc.account}
+        checkedAccountId={doc.account}
         sheet={sheet}
         onDone={done}
         onCancel={onClose}

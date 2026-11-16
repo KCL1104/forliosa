@@ -16,7 +16,9 @@ import { AccountSelect } from "../TradeForm"
 import { bodyClass, footerClass } from "./layout"
 import {
   editRow,
+  forAccountSwitch,
   hasErrors,
+  includeAfterCheck,
   isSkipped,
   mergeFlags,
   newFlagCodes,
@@ -55,7 +57,7 @@ export function ReviewTable({
   doc,
   accounts,
   initialAccountId,
-  recheckOnMount = false,
+  checkedAccountId,
   sheet,
   onDone,
   onCancel,
@@ -64,8 +66,8 @@ export function ReviewTable({
   doc: StatementImport
   accounts: Account[]
   initialAccountId: string
-  /** 讀檔時驗算用的帳戶和這裡先選好的不同（對帳單上的券商對到別的帳戶）：一打開就照這個帳戶重新驗算 */
-  recheckOnMount?: boolean
+  /** 讀檔時伺服器照哪個帳戶驗算賣超、重複；和先選好的不同（對帳單上的券商對到別的帳戶）時，一打開就照先選好的重算 */
+  checkedAccountId: string
   sheet: boolean
   onDone: (result: TransactionBatchResult, count: number) => void
   onCancel: () => void
@@ -75,41 +77,64 @@ export function ReviewTable({
   const [accountId, setAccountId] = useState(initialAccountId)
   const [rows, setRows] = useState<DraftRow[]>(() => doc.rows.filter((r) => !isSkipped(r)).map(toDraftRow))
   const [showErrors, setShowErrors] = useState(false)
+  const recheckOnMount = initialAccountId !== checkedAccountId
   const [busy, setBusy] = useState<"checking" | "saving" | "recheck" | null>(recheckOnMount ? "recheck" : null)
   const [notice, setNotice] = useState<string | null>(null)
   const added = useRef(0)
   /** 已經「補一筆買進」的賣出（同一筆不再補第二次） */
   const [shortfallFor, setShortfallFor] = useState<ReadonlySet<string>>(new Set())
   const tableRef = useRef<HTMLDivElement>(null)
+  /** 表格上的帳本旗標是照哪個帳戶算的 */
+  const checkedFor = useRef(checkedAccountId)
+  /** 最新一次驗算（換帳戶換得快時，舊的結果不寫回表格） */
+  const checkSeq = useRef(0)
   const skipped = useMemo(() => doc.rows.filter(isSkipped), [doc.rows])
   const included = rows.filter((r) => r.include)
   const t = today()
 
   const patch = (id: string, p: Partial<EditableFields>) => setRows((rs) => rs.map((r) => (r.id === id ? editRow(r, p) : r)))
-  const setInclude = (id: string, include: boolean) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, include } : r)))
+  const setInclude = (id: string, include: boolean) => setRows((rs) => rs.map((r) => (r.id === id ? { ...r, include, includeSet: true } : r)))
 
   /**
-   * 重新驗算勾著的列（dry_run）：旗標併進表格。回傳多出新問題的列數、伺服器說寫不進去的列數（`severity: "error"`）、
-   * 怪不到哪一列的問題
+   * 重新驗算勾著的列（dry_run）：旗標併進表格；新出現賣超、重複的列照伺服器的規則不勾（使用者自己動過勾選的不動）。
+   * 換了帳戶時，沒勾的列上照舊帳戶算的帳本句子先拿掉，只因為那些句子沒勾的列重新勾上一起驗算。
+   * 回傳檢查結果變了（多了新問題、勾選變了）的列數、伺服器說寫不進去的列數（`severity: "error"`）、怪不到哪一列的問題；
+   * `stale`：驗算途中又換了帳戶，這次的結果不算。
    */
-  const recheck = async (list: DraftRow[], account: string): Promise<{ changed: number; blocking: number; problems: string[] }> => {
-    const sent = list.filter((r) => r.include)
-    if (sent.length === 0) return { changed: 0, blocking: 0, problems: [] }
-    const check = await api.checkTransactionBatch({ account_id: account, origin: "import", rows: sent.map((r) => toCandidate(r, account)) })
-    const fresh = new Map(check.rows.map((x) => [x.index, x.flags]))
+  const recheck = async (list: DraftRow[], account: string): Promise<{ changed: number; blocking: number; problems: string[]; stale?: boolean }> => {
+    const seq = ++checkSeq.current
+    const base = account === checkedFor.current ? list : forAccountSwitch(list)
+    const sent = base.filter((r) => r.include)
+    const check = sent.length ? await api.checkTransactionBatch({ account_id: account, origin: "import", rows: sent.map((r) => toCandidate(r, account)) }) : null
+    if (seq !== checkSeq.current) return { changed: 0, blocking: 0, problems: [], stale: true }
+    checkedFor.current = account
+    const fresh = new Map((check?.rows ?? []).map((x) => [x.index, x.flags]))
+    const before = new Map(list.map((r) => [r.id, r]))
     let changed = 0
     let blocking = 0
-    const next = new Map<string, ImportFlag[]>()
+    const next = new Map<string, { flags: ImportFlag[]; include: boolean }>()
+    for (const r of base) next.set(r.id, { flags: r.flags, include: r.include })
     sent.forEach((r, i) => {
       const got = fresh.get(i) ?? []
       const merged = mergeFlags(r, got)
-      if (newFlagCodes(r.flags, merged).length) changed++
+      next.set(r.id, { flags: merged, include: includeAfterCheck(r, merged) })
       if (got.some((f) => f.severity === "error")) blocking++
-      next.set(r.id, merged)
     })
-    setRows((rs) => rs.map((r) => (next.has(r.id) ? { ...r, flags: next.get(r.id)! } : r)))
-    const problems = (check.problems ?? []).map((p) => p.message)
-    if (check.ok === false && blocking === 0 && problems.length === 0) problems.push("帳本現在對不上，這一批寫不進去。")
+    for (const [id, n] of next) {
+      const was = before.get(id)!
+      if (newFlagCodes(was.flags, n.flags).length || n.include !== was.include) changed++
+    }
+    setRows((rs) =>
+      rs.map((r) => {
+        const n = next.get(r.id)
+        if (!n) return r
+        // 驗算途中自己改了勾選的，照使用者的
+        const include = n.include !== before.get(r.id)!.include && r.include === before.get(r.id)!.include ? n.include : r.include
+        return { ...r, flags: n.flags, include }
+      }),
+    )
+    const problems = (check?.problems ?? []).map((p) => p.message)
+    if (check?.ok === false && blocking === 0 && problems.length === 0) problems.push("帳本現在對不上，這一批寫不進去。")
     return { changed, blocking, problems }
   }
 
@@ -160,6 +185,7 @@ export function ReviewTable({
     setBusy("checking")
     try {
       const check = await recheck(rows, accountId)
+      if (check.stale) return
       if (check.changed) {
         setNotice(`有 ${check.changed} 筆的檢查結果變了，看過再按一次。`)
         return

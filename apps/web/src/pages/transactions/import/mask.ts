@@ -2,10 +2,11 @@
  * 在瀏覽器裡塗掉對帳單的個資（PDF 的文字層找得到位置的才塗得掉；截圖沒有文字層，整張送出）。
  * 不碰 pdf.js：輸入是已經換算成畫布座標（左上角原點、往下是 y）的文字框，輸出是要塗黑的框與塗過的文字。
  *
- * 找的東西：
- * - 身分證字號／居留證號（英文字母＋1、2、4、8、9 開頭的 9 個數字）；
+ * 找的東西（全形的英文字母、數字、冒號當成半形看：Big5 的報表常用全形字）：
+ * - 身分證字號／居留證號（英文字母＋1、2、4、8、9 開頭的 9 個數字）、舊式的統一證號（第二個字是 A–D 的英文字母）；
  * - 「分公司代碼-帳號」的寫法（9A99-0123456）；
- * - 「客戶姓名、姓名、身分證字號、通訊地址、地址、電話、手機、帳號」這些標籤後面的值（到下一個空白段、下一個標籤或行尾）。
+ * - 「客戶姓名、客戶名稱、戶名、姓名、身分證字號、統一證號、居留證號、通訊地址、地址、電話、手機、客戶帳號、證券帳號、帳號」
+ *   這些標籤後面的值（到下一個空白段、下一個標籤或行尾）。
  * 一行裡的字由好幾個文字框拼起來；找到的那一段落在哪幾個框、框裡的第幾個字，就塗那一小段（橫寫的字照字數比例切）。
  */
 
@@ -38,10 +39,10 @@ export interface MaskResult {
 
 export const MASK_TOKEN = "〔已遮蔽〕"
 
-const ID_RE = /(?<![A-Za-z0-9])[A-Z][12489]\d{8}(?!\d)/g
+const ID_RE = /(?<![A-Za-z0-9])[A-Z][12489A-D]\d{8}(?!\d)/g
 const ACCOUNT_RE = /(?<![\w-])[0-9A-Z]{4}-\d{6,8}(?![\w-])/g
 /** 冒號可以省略的標籤（標籤本身夠明確） */
-const STRONG_LABELS = ["客戶姓名", "身分證字號", "身分證號", "通訊地址", "聯絡地址", "戶籍地址"]
+const STRONG_LABELS = ["客戶姓名", "客戶名稱", "戶名", "身分證字號", "身分證號", "統一證號", "居留證號", "通訊地址", "聯絡地址", "戶籍地址", "客戶帳號", "證券帳號"]
 /** 一定要接冒號的標籤（「電話」「帳號」也可能是表頭） */
 const LABELS = ["姓名", "地址", "電話", "手機", "帳號"]
 const LABEL_RE = new RegExp(
@@ -94,8 +95,12 @@ function lineText(line: Line): { text: string; spans: { item: TextBox; start: nu
   return { text, spans }
 }
 
+/** 全形英數、標點換成半形（一個字換一個字，位置不變；全形空白不換：它是值的結尾） */
+const halfWidth = (s: string) => s.replace(/[\uFF01-\uFF5E]/g, (c) => String.fromCharCode(c.charCodeAt(0) - 0xfee0))
+
 /** 一行裡要塗的範圍 [start, end) */
-export function findSensitiveRanges(text: string): [number, number][] {
+export function findSensitiveRanges(line: string): [number, number][] {
+  const text = halfWidth(line)
   const out: [number, number][] = []
   for (const re of [ID_RE, ACCOUNT_RE]) {
     re.lastIndex = 0

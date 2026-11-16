@@ -160,6 +160,8 @@ describe("匯入對帳單", () => {
     // 手機是一列一筆的清單：「修改」打開欄位
     await user.click(within(dialog).getByRole("button", { name: /^修改第 1 筆/ }))
     expect(within(dialog).getByLabelText("股數")).toBeInTheDocument()
+    // 讀檔時還不知道帳戶（帳戶清單還沒載入）時，打開後先照選好的帳戶重算一次，算完才能簽名
+    await waitFor(() => expect(sign).toBeEnabled(), T)
     await user.click(sign)
     expect(await screen.findByText("已匯入 3 筆", {}, T)).toBeInTheDocument()
     const txns = await api.listTransactions({ limit: 200 })
@@ -168,6 +170,41 @@ describe("匯入對帳單", () => {
     await user.click(screen.getByRole("button", { name: "復原" }))
     expect(await screen.findByText("已復原這次匯入", {}, T)).toBeInTheDocument()
   }, 45_000)
+
+  it("對帳單的券商對到另一個帳戶：一打開就照那個帳戶重算——那裡記過的那筆不勾；讀檔時的提醒（非交易日）還在", async () => {
+    desktop = true
+    const all = (await api.listTransactions({ limit: 200, account_id: "acc_01JCATHAYUS" })).items
+    const t = all.find((x) => x.account_id === "acc_01JCATHAYUS" && x.symbol === "AAPL" && x.type === "buy")!
+    const candidate = (over: Partial<StatementImport["rows"][number]["candidate"]>) => ({
+      account_id: "acc_01JSINOPAC", symbol: "AAPL", type: "buy" as const, trade_date: t.trade_date, quantity: t.quantity, price: t.price,
+      amount: null, fee: t.fee, tax: 0, currency: "USD" as const, is_day_trade: false, note: "", ...over,
+    })
+    const doc: StatementImport = {
+      document_kind: "trade_confirmation", broker_name: "國泰綜合證券股份有限公司", period: null,
+      rows: [
+        { row_id: "r1", candidate: candidate({}), raw: { name: "APPLE INC", symbol_code: "AAPL", page: 1 }, flags: [], include: true },
+        {
+          row_id: "r2", candidate: candidate({ symbol: "NVDA", trade_date: "2026-10-03", quantity: 1, price: 180 }), raw: { name: "NVIDIA", symbol_code: "NVDA", page: 1 },
+          flags: [{ code: "not_trading_day", message: "10/3（六）不是交易日。", severity: "warning" }], include: true,
+        },
+      ],
+      printed_totals: null, totals_check: null, unreadable: [], embedded_instructions: [], model_used: "claude-haiku-5-5", retried: false,
+    }
+    vi.spyOn(api, "parseStatement").mockResolvedValue(doc)
+    const check = vi.spyOn(api, "checkTransactionBatch")
+    const user = userEvent.setup()
+    const dialog = await openImport()
+    await user.upload(fileInput(dialog), pngFile())
+    await within(dialog).findByText("1 張", {}, T)
+    await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
+    const dup = await within(dialog).findByRole("checkbox", { name: /買進 APPLE INC$/ }, T)
+    await waitFor(() => expect(dup).not.toBeChecked(), T)
+    expect(check.mock.calls[0]![0].account_id).toBe("acc_01JCATHAYUS")
+    expect(within(dialog).getByText(/已經記過一筆/)).toBeInTheDocument()
+    expect(within(dialog).getByText("10/3（六）不是交易日。")).toBeInTheDocument()
+    expect(within(dialog).getByRole("checkbox", { name: /買進 NVIDIA$/ })).toBeChecked()
+    expect(within(dialog).getByRole("button", { name: "簽名：匯入 1 筆" })).toBeInTheDocument()
+  })
 
   it("庫存畫面：直接說還不能匯入，給「換一個檔案」", async () => {
     const doc: StatementImport = {

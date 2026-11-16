@@ -7,16 +7,39 @@ import { parseNumber } from "../quantity-input"
  * 確認表的資料與規則（不碰畫面，測試得到）：
  * - 伺服器回的每一列（`ImportRow`）變成可以改的 `DraftRow`；改過的格子記下來（鉛筆變墨水）。
  * - 股利、融券（`dividend_auto`、`short_sale`）不進表格，收成「略過 N 筆股利、N 筆融券」。
- * - 簽名前重新驗算（dry_run）：伺服器算得出來的旗標換成新的；只有讀檔時才知道的（沒讀清楚、找不到股票、當沖、融資、幣別）
- *   留著，除非使用者已經處理了（選了股票、改過那一列）。
+ * - 重新驗算（dry_run，`check_batch`）只算帳本：賣超、重複、帳目、這一列本身寫不進去的原因。這些換成新的；
+ *   讀檔時才算得出來的（沒讀清楚、找不到股票、金額、手續費、稅、日期、價格、當沖、融資、幣別）留著，
+ *   除非使用者改了相關的格子（改了股數或價格，「股數 × 價格和成交金額差」就拿掉）。
+ * - 換帳戶時，賣超、重複照新的帳戶重算；伺服器預設不勾的（賣超、重複）新出現時，使用者沒自己動過勾選的列跟著不勾。
  */
 
 /** 不匯入、收在「略過」裡的 */
 export const SKIPPED_CODES: ReadonlySet<string> = new Set(["dividend_auto", "short_sale"])
 /** 旁邊可以選股票的 */
 export const PICK_SYMBOL_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "ambiguous_symbol"])
-/** 只有讀檔時才知道、重新驗算不會再算一次的 */
-const READ_ONLY_CODES: ReadonlySet<string> = new Set(["unreadable", "unknown_symbol", "ambiguous_symbol", "day_trade", "margin", "currency_mismatch"])
+/** 重新驗算（`check_batch`）會再算一次的：每次都換成新的（`unknown_symbol` 兩邊都有，照讀檔時的留著，選了股票才拿掉） */
+const LEDGER_CODES: ReadonlySet<string> = new Set([
+  "oversell", "duplicate", "possible_duplicate", "ledger_inconsistent",
+  "validation_error", "invalid_row", "bad_date", "account_mismatch", "unsupported_type",
+])
+/** 帳本的檢查裡，伺服器預設不勾的（和後端 `services/imports.py` 的 EXCLUDED 相同） */
+const UNTICK_CODES: ReadonlySet<string> = new Set(["oversell", "duplicate", "possible_duplicate", "ledger_inconsistent"])
+/** 伺服器預設不勾的全部代碼（和後端的 EXCLUDED 相同；另外任何 `severity: "error"` 也不勾） */
+const EXCLUDED_CODES: ReadonlySet<string> = new Set([
+  ...UNTICK_CODES, "unknown_symbol", "ambiguous_symbol", "dividend_auto", "short_sale", "day_trade", "currency_mismatch", "fractional_tw_qty", "unreadable",
+])
+/** 讀檔時的旗標：改了哪幾格就算處理過（重新驗算時拿掉） */
+const RESOLVED_BY: Readonly<Record<string, readonly (keyof EditableFields)[]>> = {
+  unreadable: ["qty", "price", "date", "type"],
+  amount_mismatch: ["qty", "price"],
+  fractional_tw_qty: ["qty"],
+  price_far_from_close: ["price", "date", "symbol"],
+  fee_out_of_range: ["fee"],
+  tax_out_of_range: ["tax", "type"],
+  side_inconsistent: ["type", "tax"],
+  not_trading_day: ["date"],
+  outside_period: ["date"],
+}
 /** 標籤（不是要處理的問題）：小一號淡墨 */
 export const NOTE_CODES: ReadonlySet<string> = new Set(["margin", "day_trade"])
 
@@ -55,6 +78,8 @@ export interface DraftRow {
   picked: boolean
   /** 「補一筆買進」加的列 */
   added: boolean
+  /** 使用者自己勾過或取消過（之後的驗算不再替他改勾選） */
+  includeSet: boolean
 }
 
 export type EditableFields = Pick<DraftRow, "date" | "type" | "qty" | "price" | "fee" | "tax" | "symbol">
@@ -90,6 +115,7 @@ export function toDraftRow(row: ImportRow): DraftRow {
     edited: new Set(),
     picked: false,
     added: false,
+    includeSet: false,
   }
 }
 
@@ -122,7 +148,7 @@ export function shortfallRow(sell: DraftRow, id: string): DraftRow | null {
     readName: sell.symbol.name,
     type: "buy",
     date: "",
-    qty: String(missing),
+    qty: numText(missing),
     price: "",
     fee: "",
     tax: "",
@@ -133,6 +159,7 @@ export function shortfallRow(sell: DraftRow, id: string): DraftRow | null {
     edited: new Set(["qty", "date", "price"]),
     picked: true,
     added: true,
+    includeSet: true,
   }
 }
 
@@ -196,15 +223,41 @@ export function rowTotal(row: DraftRow): number | null {
   return row.type === "buy" ? gross + fee + tax : gross - fee - tax
 }
 
+/** 讀檔時的旗標，使用者已經處理了（選了股票、改了相關的格子） */
+function resolved(row: DraftRow, code: string): boolean {
+  if (row.picked && PICK_SYMBOL_CODES.has(code)) return true
+  return (RESOLVED_BY[code] ?? []).some((k) => row.edited.has(k))
+}
+
 /**
- * 重新驗算的結果併進來：伺服器算得出來的換成新的；只有讀檔時才知道的留著——
- * 選過股票就拿掉「找不到／對到好幾檔」，整列改過（股數、價格、日期、買賣）就拿掉「沒讀清楚」。
+ * 重新驗算的結果併進來：帳本的（賣超、重複、寫不進去的原因）換成這次的；讀檔時才算得出來的留著，處理過的拿掉。
  */
 export function mergeFlags(row: DraftRow, fresh: ImportFlag[]): ImportFlag[] {
-  const fixed = (["qty", "price", "date", "type"] as const).some((k) => row.edited.has(k))
-  const kept = row.flags.filter((f) => READ_ONLY_CODES.has(f.code) && !(row.picked && PICK_SYMBOL_CODES.has(f.code)) && !(fixed && f.code === "unreadable"))
+  const kept = row.flags.filter((f) => !LEDGER_CODES.has(f.code) && !resolved(row, f.code))
   const codes = new Set(kept.map((f) => f.code))
   return [...kept, ...fresh.filter((f) => !codes.has(f.code))]
+}
+
+/**
+ * 驗算後的勾選：新出現伺服器預設不勾的帳本問題（賣超、重複），使用者又沒自己動過勾選，就跟伺服器一樣不勾。
+ */
+export function includeAfterCheck(row: DraftRow, merged: ImportFlag[]): boolean {
+  if (!row.include || row.includeSet) return row.include
+  return !newFlagCodes(row.flags, merged).some((c) => UNTICK_CODES.has(c))
+}
+
+/**
+ * 換了帳戶（讀檔時照另一個帳戶算的）：沒勾的列上，照舊帳戶算的帳本句子拿掉；只因為這些句子才沒勾的列
+ * （使用者也沒自己動過勾選）重新勾上，和勾著的列一起照新帳戶驗算。
+ */
+export function forAccountSwitch(rows: DraftRow[]): DraftRow[] {
+  return rows.map((r) => {
+    if (r.include) return r
+    const flags = r.flags.filter((f) => !LEDGER_CODES.has(f.code))
+    if (flags.length === r.flags.length) return r
+    const onlyBooks = r.flags.some((f) => UNTICK_CODES.has(f.code)) && !flags.some((f) => EXCLUDED_CODES.has(f.code) || f.severity === "error")
+    return { ...r, flags, include: !r.includeSet && onlyBooks }
+  })
 }
 
 /** 這一次驗算多出來、使用者還沒看過的旗標（有的話先停下來給他看，不直接寫入） */
@@ -247,13 +300,33 @@ function defaultUnsupported(doc: Pick<StatementImport, "document_kind" | "rows">
 /** 去掉公司名稱的尾巴，比對券商：「永豐金證券股份有限公司」和帳戶的「永豐金證券」、「永豐」都算同一家 */
 const brokerKey = (s: string) => s.replace(/股份有限公司|有限公司|綜合證券|證券|金控|公司|\s/g, "")
 
-/** 對帳單上有券商名稱時，先選好券商相同的帳戶；沒有或對不到就照原本的 */
-export function accountForBroker(accounts: Account[], broker: string, fallback: string): string {
+/**
+ * 先選好的帳戶：券商相同、幣別也相同的（台股對帳單不選同一家的美元複委託帳戶）；對不到券商就照原本的，
+ * 但原本的幣別不對時，改成第一個幣別相同的帳戶。`currency`：這份對帳單的幣別（不知道就不看幣別）。
+ */
+export function accountForBroker(accounts: Account[], broker: string, fallback: string, currency?: "TWD" | "USD" | null): string {
   const key = brokerKey(broker)
-  if (!key) return fallback
-  const hit = accounts.find((a) => {
-    const k = brokerKey(a.broker || a.name)
-    return k && (k.includes(key) || key.includes(k))
-  })
-  return hit?.id ?? fallback
+  const pool = currency ? accounts.filter((a) => a.currency === currency) : accounts
+  const hit = key
+    ? pool.find((a) => {
+        const k = brokerKey(a.broker || a.name)
+        return k && (k.includes(key) || key.includes(k))
+      })
+    : undefined
+  if (hit) return hit.id
+  if (currency && !pool.some((a) => a.id === fallback)) return pool[0]?.id ?? fallback
+  return fallback
+}
+
+/** 這份對帳單的幣別：要匯入的列（股利、融券以外）多數是哪一種；讀不出來是 null */
+export function statementCurrency(doc: Pick<StatementImport, "rows">): "TWD" | "USD" | null {
+  let twd = 0
+  let usd = 0
+  for (const r of doc.rows) {
+    if (isSkipped(r)) continue
+    const c = r.candidate.symbol ? (marketOf(r.candidate.symbol) === "US" ? "USD" : "TWD") : r.candidate.currency
+    if (c === "TWD") twd++
+    else if (c === "USD") usd++
+  }
+  return twd === 0 && usd === 0 ? null : usd > twd ? "USD" : "TWD"
 }

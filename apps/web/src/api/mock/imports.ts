@@ -19,8 +19,9 @@ import { closeOn, parseDay } from "./market"
 /**
  * 匯入對帳單的 mock（和後端 `services/imports.py`、`POST /transactions/batch` 同一套代碼與規則，只做示範用得到的部分）：
  * - `POST /imports/statement`：不管上傳什麼，PDF 回一份 2026 年 10 月的月對帳單（每一種檢查結果都至少一列），
- *   截圖回一張三筆的成交明細。賣超、重複、價格、金額這些照目前的帳本即時算，所以 dry_run 改過之後會跟著變。
- * - `POST /transactions/batch`：dry_run 重新驗算；寫入時有一列不行就整批不寫（422 `rows`）。
+ *   截圖回一張三筆的成交明細。賣超、重複、價格、金額這些照目前的帳本即時算。
+ * - `POST /transactions/batch`：dry_run 重新驗算帳本（賣超、重複，和後端一樣不算金額、日期、價格）；
+ *   寫入時有一列不行就整批不寫（422 `rows`）。
  * - `DELETE /transactions/batches/{id}`：整批刪掉；之後的賣出用到這批買進時 422 `ledger_inconsistent`。
  */
 
@@ -29,6 +30,9 @@ const EXCLUDED_BY_DEFAULT: ReadonlySet<ImportFlagCode> = new Set([
   "unknown_symbol", "ambiguous_symbol", "oversell", "duplicate", "possible_duplicate", "dividend_auto", "short_sale",
   "day_trade", "currency_mismatch", "fractional_tw_qty", "unreadable",
 ])
+
+/** dry_run（`POST /transactions/batch`）會回的代碼——和後端的 `check_batch` 相同（台股小數股數在後端是 validation_error） */
+const DRY_RUN_CODES: ReadonlySet<string> = new Set(["unknown_symbol", "fractional_tw_qty", "oversell", "duplicate", "possible_duplicate"])
 
 export const MOCK_IMPORT_DAILY_LIMIT = 10
 const PERIOD = { from: "2026-10-01", to: "2026-10-31" }
@@ -325,7 +329,8 @@ export function createImportStore(deps: {
     },
     check(body: TransactionBatchInput): TransactionBatchCheck {
       const account = accountFor(body.account_id)
-      const flags = checkCandidates(body.rows, { txns: deps.txns(), accountId: account.id })
+      // 和後端的 check_batch 一樣只回帳本與這一列寫不寫得進去（金額、日期、價格這些只有讀檔時才算）
+      const flags = checkCandidates(body.rows, { txns: deps.txns(), accountId: account.id }).map((f) => f.filter((x) => DRY_RUN_CODES.has(x.code)))
       const ok = !flags.some((f) => f.some((x) => x.severity === "error"))
       return { dry_run: true, ok, rows: flags.map((f, index) => ({ index, flags: f })), problems: [] }
     },
