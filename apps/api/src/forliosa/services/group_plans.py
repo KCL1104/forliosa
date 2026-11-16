@@ -181,7 +181,8 @@ def admin_revoke(db: Session, pass_id: str) -> None:
 
 # -- the payer and the group's owner ----------------------------------------------------------------------------------
 def my_passes(db: Session, me: User, now: datetime | None = None) -> list[dict[str, Any]]:
-    """The boosts this account was granted, newest end first. The group's name only while I am a member of it."""
+    """The boosts this account was granted, active first, then by last day. The group's name only while I am a member
+    of it."""
     now = now or now_utc()
     out = []
     for p in db.scalars(select(GroupPass).where(GroupPass.payer_id == me.id)):
@@ -194,7 +195,7 @@ def my_passes(db: Session, me: User, now: datetime | None = None) -> list[dict[s
         d = last_day(p.until)
         out.append({"id": p.id, "until": d.isoformat() if d else None, "active": is_active(p, now),
                     "attached": p.group_id is not None, "group": group})
-    out.sort(key=lambda r: (not r["active"], r["until"] or ""), reverse=False)
+    out.sort(key=lambda r: (not r["active"], r["until"] or ""))
     return out
 
 

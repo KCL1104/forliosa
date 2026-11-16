@@ -6,6 +6,7 @@
 // 第五批：上市股票沒有逐檔三大法人資料（空狀態＋問 AI 外資動向，上櫃照常）、補記定期定額用扣款日的收盤價。
 // M5 分享：群組（建立、邀請連結、排行與討論串、動態與表情、我的分享、成員分享、頻道）、邀請（沒登入 → 登入 → 選分享 → 加入）、
 // 授權查看（授權給別人、查看別人的唯讀模式、授權失效自動退出）、登入頁的錯誤說明。
+// 群組加值包（2026-11-16）：「報告」分頁的日報｜週報、頻道的「日報」開關、群組設定的方案與加值、滿了不能邀請、設定頁的方案、管理後台的群組加值。
 // 討論串（2026-11-13）：沒登入讀公開清單與主題、選公開暱稱 → 發主題 → 回覆（頻率限制）→ 表情 → 檢舉 → 管理後台隱藏、
 // 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・市場・群組・討論）與從「問 AI」的時鐘到紀錄。
 // mock 的狀態在記憶體裡：同一個流程用站內導覽（不重新載入），重新載入就回到示範資料。
@@ -1074,8 +1075,10 @@ await check("群組、設定、資料來源：空狀態沒有虛線；有字的�
   await revoke.waitFor({ timeout: 8000 })
   const edge = await revoke.evaluate((el) => { const c = getComputedStyle(el); return { w: c.borderTopWidth, style: c.borderTopStyle, color: c.borderTopColor } })
   if (edge.w !== "1px" || edge.style !== "solid" || /rgba\(0, 0, 0, 0\)|transparent/.test(edge.color)) throw new Error(`撤回 has no visible frame: ${JSON.stringify(edge)}`)
-  await page.getByRole("tab", { name: "週報" }).click()
+  // 「報告」（原本的「週報」）：新群組沒有日報，沒有切換，直接是週報的空狀態
+  await page.getByRole("tab", { name: "報告" }).click()
   await page.getByText("還沒有週報", { exact: true }).waitFor({ timeout: 8000 })
+  if (await page.getByRole("radiogroup", { name: "報告" }).count()) throw new Error("a group without daily reports shows the 日報｜週報 switch")
   for (const [path, ready] of [
     [null, "還沒有週報"],
     ["/groups/grp_family?tab=feed", "加入了群組"],
@@ -1160,6 +1163,55 @@ await check("頻道：webhook 網址不對 → 說明；測試訊息失敗 → �
   await page.getByRole("button", { name: "產生連結碼" }).click()
   await page.getByText(/\/link@\w+ \d{6}/).waitFor({ timeout: 8000 })
   await page.getByText("已連結：").waitFor({ timeout: 15000 })
+})
+await check("群組加值包：報告分頁的日報｜週報、頻道的「日報」開關（只有加值群組、預設關）、群組設定的方案、滿了不能邀請 → 用加值、設定頁的方案、管理後台的群組加值", async () => {
+  // 報告：加值群組預設是日報；最新一則有今日報酬、AI 段落、站內連結；切到週報記在網址
+  await page.goto(base + "/groups/grp_family?tab=digests", { waitUntil: "networkidle" })
+  const kind = page.getByRole("radiogroup", { name: "報告" })
+  await kind.waitFor({ timeout: 8000 })
+  if ((await kind.getByRole("radio", { name: "日報" }).getAttribute("aria-checked")) !== "true") throw new Error("a boosted group does not open on 日報")
+  const latest = page.getByRole("article").first()
+  await latest.getByText("今日報酬").waitFor({ timeout: 8000 })
+  if (!(await latest.locator(".ai-voice").count())) throw new Error("the latest daily report has no AI paragraph")
+  if ((await latest.getByRole("link", { name: "收盤重點 →" }).getAttribute("href")) !== "/market#market-summary") throw new Error("收盤重點 link")
+  if (await page.getByRole("article").nth(1).getByRole("link").count()) throw new Error("an older daily report links to today's pages")
+  await kind.getByRole("radio", { name: "週報" }).click()
+  await page.getByRole("heading", { name: "11/2–11/6 週報" }).waitFor({ timeout: 8000 })
+  if (!page.url().includes("report=weekly")) throw new Error(`週報 is not kept in the URL: ${page.url()}`)
+  // 加值結束的群組：以前的日報照樣看得到
+  await page.goto(base + "/groups/grp_friends?tab=digests", { waitUntil: "networkidle" })
+  await page.getByText("這個群組已經沒有加值，不會再有新的日報。").waitFor({ timeout: 8000 })
+  // 頻道：免費群組沒有「日報」；加值群組有，預設關，擁有者打開
+  await page.goto(base + "/groups/grp_friends?tab=channels", { waitUntil: "networkidle" })
+  await page.getByRole("switch", { name: "週報" }).first().waitFor({ timeout: 8000 })
+  if (await page.getByRole("switch", { name: "日報" }).count()) throw new Error("a free group has a 日報 push switch")
+  await page.goto(base + "/groups/grp_family?tab=channels", { waitUntil: "networkidle" })
+  const daily = page.getByRole("switch", { name: "日報" })
+  await daily.waitFor({ timeout: 8000 })
+  if ((await daily.getAttribute("aria-checked")) !== "false") throw new Error("日報 push is not off by default")
+  await daily.click()
+  await page.getByRole("switch", { name: "日報", checked: true }).waitFor({ timeout: 8000 })
+  // 群組設定：加值中的群組；登山社免費 15 人滿了 → 不能產生邀請連結 → 用還沒用的加值 → 上限 50
+  await page.goto(base + "/groups/grp_family?tab=members", { waitUntil: "networkidle" })
+  await page.getByText("加值到 12/31・上限 50 人").waitFor({ timeout: 8000 })
+  await page.goto(base + "/groups/grp_hiking?tab=members", { waitUntil: "networkidle" })
+  await page.getByText("免費・上限 15 人").waitFor({ timeout: 8000 })
+  await page.getByText("已經有 15 位成員，上限是 15 人。新的成員不能加入。").waitFor({ timeout: 8000 })
+  if (!(await page.getByRole("button", { name: "產生邀請連結" }).isDisabled())) throw new Error("a full group can make invite links")
+  await page.getByRole("button", { name: "用在這個群組" }).click()
+  await page.getByText("加值到 12/15・上限 50 人").waitFor({ timeout: 8000 })
+  if (await page.getByRole("button", { name: "產生邀請連結" }).isDisabled()) throw new Error("invite links stay disabled after the boost")
+  // 設定頁：自己的方案與群組加值（用在哪個群組）
+  await page.goto(base + "/settings", { waitUntil: "networkidle" })
+  const plan = page.locator("section").filter({ has: page.getByRole("heading", { name: "方案", exact: true }) })
+  await plan.getByText("群組加值，到 12/31").waitFor({ timeout: 8000 })
+  if ((await plan.getByRole("link", { name: "家族投資" }).getAttribute("href")) !== "/groups/grp_family") throw new Error("the pass does not link its group")
+  // 管理後台：會員頁切到群組加值；清單只有群組編號
+  await page.goto(base + "/admin/members?kind=group", { waitUntil: "networkidle" })
+  const passes = page.getByRole("list", { name: "群組加值" })
+  await passes.getByText("群組 grp_family").waitFor({ timeout: 8000 })
+  if ((await passes.getByRole("listitem").count()) !== 3) throw new Error("admin pass list")
+  if (await passes.getByText("家族投資").count()) throw new Error("the admin list shows a group's name")
 })
 await check("授權查看：授權給姊姊（指定帳戶）→ 列出 → 撤銷", async () => {
   await page.goto(base + "/settings#delegations", { waitUntil: "networkidle" })
@@ -1299,7 +1351,7 @@ await check("AI 面板：開著一段對話時換到安靜的頁面不收起來�
   if (new Set(widths).size !== 1 || widths[0] !== 816) throw new Error(`content measures differ: ${widths.join(" / ")}`)
 })
 // 模型寫的字 2026-11-15 起是墨色黑體（Noto Sans TC 400，桌面 16px、行高 1.8、不加字距），楷體拿掉了（DESIGN.md〈AI voice〉）
-await check("AI 的字只有一種排法：群組週報、AI 公司簡介和對話裡的回答同一套黑體、字級與字距（數字不拆行）", async () => {
+await check("AI 的字只有一種排法：群組週報與日報、AI 公司簡介和對話裡的回答同一套黑體、字級與字距（數字不拆行）", async () => {
   const look = (el) => {
     const c = getComputedStyle(el)
     const han = el.querySelector(".kai-han")
@@ -1314,7 +1366,8 @@ await check("AI 的字只有一種排法：群組週報、AI 公司簡介和對�
     await rp.waitForTimeout(300)
     return rp.locator("main .ai-voice").first().evaluate(look)
   }
-  const digest = await voice("/groups/grp_family?tab=digests", "本週報酬")
+  const digest = await voice("/groups/grp_family?tab=digests&report=weekly", "本週報酬")
+  const daily = await voice("/groups/grp_family?tab=digests", "今日報酬")
   const about = await voice("/stock/6488.TWO", "AI 依公開資料整理")
   // 對話裡的回答（面板）：問一題，等模型那一段出來
   const panel = rp.getByRole("complementary", { name: "問 AI", exact: true })
@@ -1325,7 +1378,7 @@ await check("AI 的字只有一種排法：群組週報、AI 公司簡介和對�
   await ask.press("Enter")
   await panel.getByText("最近的消息").waitFor({ timeout: 8000 })
   const answer = await panel.locator(".ai-voice").last().evaluate(look)
-  for (const [name, v] of [["digest", digest], ["about", about], ["answer", answer]]) {
+  for (const [name, v] of [["digest", digest], ["daily", daily], ["about", about], ["answer", answer]]) {
     if (v.family !== "Noto Sans TC Variable" || v.size !== "16px" || v.lh !== "1.8" || v.weight !== "400" || v.han !== "0.00") throw new Error(`${name} AI voice differs: ${JSON.stringify(v)}`)
   }
   if (digest.numWrap !== "nowrap") throw new Error(`digest numbers can split from their unit: ${JSON.stringify(digest)}`)
@@ -1677,7 +1730,7 @@ await check("手機：群組八個分頁（多了「討論」）每個 ≥ 44×4
   await m.getByRole("tab", { name: "排行" }).waitFor({ timeout: 8000 })
   await m.waitForTimeout(300)
   const first = await tabsOf(m)
-  if (first.names !== "排行・動態・討論・持股・週報・分享・成員・頻道") throw new Error(`group tabs: ${first.names}`)
+  if (first.names !== "排行・動態・討論・持股・報告・分享・成員・頻道") throw new Error(`group tabs: ${first.names}`)
   if (first.small.length) throw new Error(`group tabs under 44×44: ${first.small.join(" | ")}`)
   if (first.cut.length || first.fadeEnd || first.fadeStart || first.overflow > 0) throw new Error(`on an iPhone 15 all eight tabs must fit: ${JSON.stringify(first)}`)
   if (first.pageOverflow > 0) throw new Error(`the page scrolls sideways: ${JSON.stringify(first)}`)

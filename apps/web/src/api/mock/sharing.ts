@@ -191,8 +191,9 @@ const HIKERS = ["阿傑", "小雯", "大熊", "佳佳", "老周", "小安", "阿
 
 /** 示範用：一個人在某一天的報酬（不是今天的日報用；固定的假數字，-1.5% 到 +2.5%） */
 function pseudoDayReturn(userId: string, day: string): number {
-  let h = 0
-  for (const ch of `${userId}:${day}`) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  // FNV-1a：相鄰的日期也會差很多
+  let h = 2166136261
+  for (const ch of `${userId}:${day}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619) >>> 0
   return ((h % 400) - 150) / 10000
 }
 

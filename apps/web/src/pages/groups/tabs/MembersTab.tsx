@@ -148,7 +148,7 @@ function ConfirmDialog({ group, confirm, onClose }: { group: Group; confirm: Con
   const copy = {
     remove: confirm.kind === "remove" && {
       title: `把${inText(confirm.m.display_name)}移出「${group.name}」？`,
-      body: "他分享的內容會立刻從排行、動態與週報消失；之後要重新邀請才能加入。可以多人使用的邀請連結會一起撤回。",
+      body: "他分享的內容會立刻從排行、動態與報告消失；之後要重新邀請才能加入。可以多人使用的邀請連結會一起撤回。",
       action: "移出群組",
     },
     transfer: confirm.kind === "transfer" && {
@@ -156,8 +156,8 @@ function ConfirmDialog({ group, confirm, onClose }: { group: Group; confirm: Con
       body: `${inText(confirm.m.display_name, "start")}會成為擁有者，你改為管理員。頻道設定與排名開關之後由他決定。`,
       action: "轉移",
     },
-    leave: { title: `離開「${group.name}」？`, body: "你在這個群組的分享設定會刪除，你分享的內容立刻從排行、動態與週報消失。之後要重新被邀請才能加入。", action: "離開群組" },
-    delete: { title: `刪除「${group.name}」？`, body: "群組、留言、週報與頻道設定都會刪除，所有成員都看不到。這個動作無法復原。", action: "刪除群組" },
+    leave: { title: `離開「${group.name}」？`, body: "你在這個群組的分享設定會刪除，你分享的內容立刻從排行、動態與報告消失。之後要重新被邀請才能加入。", action: "離開群組" },
+    delete: { title: `刪除「${group.name}」？`, body: "群組、留言、報告與頻道設定都會刪除，所有成員都看不到。這個動作無法復原。", action: "刪除群組" },
   }[confirm.kind] as { title: string; body: string; action: string }
   const run = () => {
     const done = { onError: (err: unknown) => toast.error("沒有完成", { description: errText(err) }) }
@@ -208,7 +208,7 @@ function Invites({ group }: { group: Group }) {
     <Section title="邀請連結" titleId="gm-invites">
       <div className="flex flex-col gap-4">
         {full && group.plan && (
-          <p role="status" className="border-y border-rule py-2.5 text-base text-ink">
+          <p role="status" className="border-b border-rule pb-3 text-base font-medium text-ink">
             已經有 {group.members.length} 位成員，上限是 {group.plan.member_cap} 人。新的成員不能加入。
           </p>
         )}

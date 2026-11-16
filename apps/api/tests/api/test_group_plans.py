@@ -115,7 +115,7 @@ def test_two_people_cannot_both_take_the_last_seat(app, client, monkeypatch):
             try:
                 group_svc.accept_invite(db, token, me, dict(SHARE_DEFAULT))
                 results[i] = "ok"
-            except Exception as exc:  # noqa: BLE001 - the loser's 409
+            except Exception as exc:  # the loser's 409
                 results[i] = getattr(exc, "code", type(exc).__name__)
 
     first = threading.Thread(target=run, args=(0,))

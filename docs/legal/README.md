@@ -63,6 +63,19 @@
 - 隱私權政策不用改：這兩個來源只下載公開的市場資料，請求不帶任何使用者資料（和 OpenAPI 一樣）。
 - **請律師看** (d) 第 21 點。
 
+**2026-11-16 的修改（群組加值包）**：產品負責人照建議定了 14 項（`docs/pending-decisions.md`「2026-11-16 群組加值包」；產品的寫法在 `PRODUCT.md`「群組加值包」）。第一階段**不收錢**：站方在管理後台開通給付款人，負責人先用自己的群組試；收錢等律師說可以以後（決定 1、13）。條文照功能本身寫，收費以後才適用的部分寫成草稿並標【待確認：收費前請律師確認…】。
+
+- **條款 §7.8 人數上限**：原本「每個群組最多 50 位成員」。改成免費的群組 15 位、有加值的 50 位；**在上限開始區分以前就建立的群組不論有沒有加值都維持 50 位**（程式：migration 0023 把當時所有群組的 `groups.grandfathered_member_cap` 設成 50）；滿了只是不能加人，不會移除任何人；沒有超過 50 位的群組。沒有寫日期：「開始區分以前」就是 0023 部署到正式環境的那一刻，律師要寫成日期時填部署日。
+- **條款新增 §7.9「群組加值」**：擁有者取得、用在自己擁有的一個群組；目前由我們開通試用、不收費；有加值的群組 50 位與群組 AI 日報，每個人的 AI 額度不變；群組轉給別人或取得的人刪帳號照樣用到期，群組刪除時回到取得的人手上；到期不移除成員、超過免費上限不能再加人、日報停但以前的 30 天內照樣看得到；成員之間的分攤自己處理、我們不代收（電子支付機構管理條例，見 (f) 第 13 點），也不能用群組經營收費的明牌或跟單（§6.2）；日報只用成員打開的項目、不點名、不建議、不預測，不到 2 位分享報酬率時沒有 AI 段落，深夜寫好的早上 7:30 才推播。
+- **條款 §1.3**：「目前不收費」照舊（加一句群組加值目前開通試用、也不收費），下面加一段**收費以後的條件草稿**（價格與期間寫在方案說明頁；1、3、12 個月；不自動續扣；金流服務商的付款頁或銀行轉帳；第一次購買 7 天內全額退、之後不退、停止服務時按比例退；Email 收據；付款前自己勾選同意），標【待確認】。條款 §11.6 加「停止服務時已付費的期間按比例退還」、§13 加「價格改變只適用之後的購買，不用『繼續使用就表示同意』」，都標【待確認】。§12.3 的責任上限照舊是【待填】（建議寫法見 (a) 第 15 項）。
+- **條款 §2.1、§6.6、§7.3、§7.4**：列舉的內容多「群組 AI 日報」；刪除群組時日報一起刪、加值回到取得的人手上；日報推不推播由擁有者決定、預設不推。
+- **隱私 §5.5**：新增「群組 AI 日報」送給 AI 的內容，逐項照程式（`services/group_daily.py` 的 `anonymous_prompt`）：匿名代號與算好的數字；不送顯示名稱、群組名稱、帳號編號、金額、股數、任何一位的持股、誰買賣了哪一檔；不到 2 位分享報酬率時不呼叫 AI；不上網搜尋。
+- **隱私 §6.1、§6.2**：日報裡別人看得到什麼（開了報酬率的人當天的報酬和名字；持股只算進共同持股；買賣不寫是誰）；推播的日報只用開了「推播」的人的數字，AI 摘要只在每一位都開推播時附上，深夜的早上 7:30 送。
+- **隱私 §2.3、§3、§7、§10.3**：存了什麼（日報以帳號編號記當天的數字、讀的時候過濾；群組加值的帳號、群組、期限、備註）、用途、保存期間（日報 30 天；加值紀錄持續保留，做帳與續期用）、刪帳號後加值怎麼辦。
+- **隱私 §4.3 順手更正**：原本寫「管理畫面不顯示 Email、帳號編號」，但 2026-11-15 的會員開通頁本來就用 Email 開通、會顯示 Email（`docs/api-contract.md`「會員方案」：「這是管理後台唯一回傳 email 的地方」）。改成：討論的管理畫面不顯示 Email；會員與群組加值的開通畫面看得到被開通的人的 Email、顯示名稱、期限與備註，群組加值另外看得到群組編號，看不到群組名稱與成員；任何管理畫面都看不到群組內的內容。
+- **隱私 §2.7**：「沒有付款資料」照舊（現在確實沒有），加一句開始收費時會先改這一節與 §4.1，標【待確認】。
+- **請律師看**：新的 (f)「收費前的律師問題清單」（決定 1）。(d) 第 7 點的投顧問題併進 (f) 第 1–7 點。
+
 **撰寫時無法核對的事（重要）**：這次工作的網路環境連不到全國法規資料庫（`law.moj.gov.tw`）、臺北市法規查詢系統（`laws.gov.taipei`）與 Anthropic 的隱私說明網站（`privacy.claude.com`）。因此：
 
 - 草稿裡的法條條號是依記憶寫的，全部標了【待確認：條號與現行條文】，請律師對照現行條文。
@@ -122,6 +135,10 @@
 | 【待確認：是否需要依著作權法訂定「通知／取下」與重複侵權的處理程序】 | 條款 §6.7 | 見 (d) 第 9 點 |
 | 【待確認：責任限制條款在消費者保護法與民法下的效力】 | 條款 §12.4 | 見 (d) 第 8 點 |
 | 【待確認：合意管轄條款對消費者的效力】 | 條款 §14 | 見 (d) 第 8 點 |
+| 【待確認：收費前請律師確認付費方案的條文】 | 條款 §1.3 | 2026-11-16 群組加值包：收費以後的條件草稿（期間、不自動續扣、付款方式、退款、收據、勾選同意）。見 (f) 第 8–12 點 |
+| 【待確認：收費前請律師確認停止服務時退費的寫法】 | 條款 §11.6 | 同上，見 (f) 第 11 點 |
+| 【待確認：收費前請律師確認價格變更的寫法】 | 條款 §13 | 同上，見 (f) 第 11 點 |
+| 【待確認：收費前請律師確認付款資料與金流服務商的寫法】 | 隱私 §2.7 | 同上，見 (f) 第 22 點；開始收費時 §4.1 的廠商表也要加金流服務商 |
 
 ### 草稿替你做的承諾（不是空格，但請你確認願意承諾）
 
@@ -190,6 +207,10 @@
 | P46 | §2.5、§5.6、§5.8、§7 | 匯入時伺服器只轉送、不保存檔案、頁面與讀出的表格，不寫 log；只存確認匯入的交易（`source: "import"`、`import_batch_id`）與一列 `ai_usage`（`feature: "import"`，不含內容）；原文不寫進備註 | `api/api/routes/imports.py`、`api/ai/importer.py`、`api/services/imports.py`（2026-11-16 實作中，上線前對照程式再核一次）；`api/models.py`（`Transaction.import_batch_id`）；`apps/api/alembic/versions/0021_import_batches.py`（沒有其他匯入的資料表）；`apps/api/CONTRACT_NOTES.md`「2026-11-16 匯入對帳單」 |
 | P47 | §5.6 | 讀檔的 AI 沒有工具、只照抄；不抄姓名、身分證字號、帳號；像指令的文字不照做；驗算沒過時用另一個模型（`claude-sonnet-5-5`）重讀一次；重複與賣超只在伺服器上比對 | `apps/api/CONTRACT_NOTES.md`「2026-11-16 匯入對帳單」（讀檔、驗算與旗標）；`api/services/transactions.py`（`check_batch`） |
 | P48 | §6.1、§5.6 | 匯入的買賣不進群組動態、推播與週報 | `api/services/sharing.py`（`FEED_SOURCES = ("manual", "ai_draft")`）；`apps/api/tests/api/test_m5_feed.py`、`test_m5_push.py`、`test_m5_digest.py` |
+| P49 | §2.3、§6.1、§7 | 群組 AI 日報：只有加值的群組；facts 以 `user_id` 存，讀的時候依目前的成員與分享開關過濾；報酬率與名字一起列、持股只算兩人以上共同持有、買賣只有方向與股票（同一檔同方向合併，不寫是誰）、匯入的買賣不算；關掉或離開後摘要收回；保存 30 天 | `api/services/sharing.py`（`digest_day_facts`、`daily_facts_view`、`digest_summary_visible`）；`api/services/group_daily.py`（`report_out`、`purge_old`、`RETENTION_DAYS = 30`）；`api/models.py`（`GroupDailyReport`）；`apps/api/alembic/versions/0023_group_passes.py` |
+| P50 | §5.5 | 日報送給 AI 的只有匿名代號（隨機順序）與算好的數字；不到 2 位分享報酬率不呼叫；不上網搜尋；點名、建議、目標價、預測、沒提供的數字會被擋下重寫 | `api/services/group_daily.py`（`anonymous_prompt`、`request_params`：沒有 tools、`check`、`FORBIDDEN`、`MIN_RETURN_SHARERS`） |
+| P51 | §6.2 | 日報推播：頻道的 `notify_daily`（預設關，只有擁有者能改）；只用開了 `push` 的成員；AI 摘要只在每一位都開推播時附上；23:00–07:30 寫好的 07:30 送 | `api/services/notifications.py`（`enqueue_daily`、`daily_text`）；`api/services/group_daily.py`（`push_at`）；`api/services/channels.py`（`notify_daily`）；`api/services/sharing.py`（`daily_facts_view(pushing_only=True)`） |
+| P52 | §2.3、§4.3、§7、§10.3 | 群組加值存付款人、群組、期限、備註、`source=manual`；站方清單只有付款人的 email／名稱與群組編號，沒有群組名稱；付款人刪帳號 `payer_id` 變 NULL、群組刪除 `group_id` 變 NULL；沒有清除的工作（持續保留） | `api/services/group_plans.py`（`_admin_row`、`admin_list`）；`api/models.py`（`GroupPass`）；`apps/api/alembic/versions/0023_group_passes.py`（兩個 `SET NULL` 外鍵）；`docs/api-contract.md`「會員方案」的 `/admin/group-passes` |
 
 ### 服務條款
 
@@ -218,6 +239,9 @@
 | T21 | §8.4 | AI 不給目標價；可引用第三方評等 | `api/ai/prompts.py:46`、`:72-97` |
 | T22 | §8.5 | 免費每天 3 題、會員 30 題；每月估計花費上限免費約 US$1、會員約 US$3；免費每月 300 萬計費 token；被婉拒的問題與法人觀點查詢各算一題、深度搜尋 3 題；省錢模式到上限的兩倍；匯入不算題數、每天 10 份；對話太長要開新對話 | `api/config.py`（`ai_daily_message_limit`、`ai_member_daily_message_limit`、`ai_monthly_cost_budget_usd`、`ai_member_monthly_cost_budget_usd`、`ai_monthly_token_budget`、`ai_deep_search_cost`、`ai_economy_cap_multiplier`）；`api/ai/store.py`（`AiQuestion` 在每一題開始時就記）；`docs/api-contract.md`「會員方案（2026-11-15）」「匯入對帳單（2026-11-16）」 |
 | T25 | §8.10 | 匯入對帳單：AI 可能讀錯、確認後才寫入、可整批復原；上傳的內容送到 AI 服務供應商 | `docs/api-contract.md`「匯入對帳單（2026-11-16）」（`POST /transactions/batch` 全部或全不、`DELETE /transactions/batches/{id}`）；`api/services/transactions.py`（`create_batch`、`delete_batch`） |
+| T26 | §7.8 | 免費 15、加值 50；上限開始區分以前的群組 50；滿了 409、不移除任何人；每人 20 個群組 | `api/config.py`（`group_free_member_cap`、`group_boosted_member_cap`）；`api/services/group_plans.py`（`plan_of`、`full_message`）；`api/services/groups.py`（`accept_invite`、`MAX_GROUPS`）；`apps/api/alembic/versions/0023_group_passes.py`（`UPDATE groups SET grandfathered_member_cap = 50`） |
+| T27 | §7.9、§6.6 | 擁有者把自己的加值用在自己擁有的群組；轉讓或付款人刪帳號照樣用到期；群組刪除時回到付款人手上；到期日報停、以前的照樣看得到；個人 AI 額度不變 | `api/services/group_plans.py`（`attach`：只有 owner、`pass_in_use`；`boosted_group_ids`）；`api/services/group_daily.py`（`run` 只寫加值中的群組；`reports_page` 不看方案）；`api/ai/store.py`（`feature = "group_daily"`、`user_id` NULL，不算進任何人的額度） |
+| T28 | §1.3、§11.6、§13 | 收費以後的條件：只有草稿，**程式裡沒有任何付款功能** | `apps/api/pyproject.toml`（沒有金流套件）；`api/services/group_plans.py`（`source` 只有 `manual`）；`PRODUCT.md`「群組加值包」的價格與收錢方式（只寫在文件） |
 | T23 | §9 | 資料來源與授權（2026-11-15 多 Databento 的美股收盤價：資料集 `databento-equs/price`，只在 `US_PRICE_SOURCE=databento` 時列出；2026-11-16 多證交所的兩個下載檔 `twse-opendata/price`、`twse-opendata/index`，shioaji-data 的用途多「晚上先放進來的收盤價」） | `api/datapolicy.py:54-92`、`:468-515`（Databento：`DATASETS` 的 `databento-equs/price`、`us_prices_served`；證交所下載檔：`DATASETS` 的 `twse-opendata/*`、`shioaji-data/official`）；`docs/research/data-sources-licensing.md`；`GET /meta/attributions`（`api/api/app.py`） |
 | T24 | §11.5 | 產品內建的處置只有隱藏與暫停公開發言 | `api/models.py:27-41`（`User` 沒有停用欄位）；`api/services/discussions.py` |
 
@@ -245,8 +269,11 @@
 16. **隱私模式**不影響送給 AI 的資料（隱私 §5.3 已照實寫）。建議在隱私模式的開關或 AI 輸入框旁加一句說明，避免誤會。
 17. **AI 用量**：條款 §8.5 的數字後端有（`GET /ai/usage`），但我在前端沒找到顯示剩餘額度的畫面；建議顯示，讓使用者知道自己用了多少。
 18. **匯入對帳單的塗黑**（隱私重點、§5.6）。草稿寫的是設計：PDF 在瀏覽器裡解密、塗掉認得出來的個資。2026-11-16 寫草稿時，瀏覽器裡的 pdf.js 解密與塗黑還沒在真的瀏覽器、真的對帳單上測過（伺服器上的同樣做法用合成檔測過），各家券商頁首的欄位名稱也還不知道。第一版只開給站方管理員，正是為了先用產品負責人自己的對帳單試；**開放給所有人（`IMPORT_STATEMENTS=all`）之前**，請確認塗黑在真的對帳單上有效，§5.6「只有認得出來的才塗得掉」的說法也還成立。如果改成在伺服器上解密（備案），密碼就會送到伺服器，重點、§2.2、§5.6 都要改。
+19. **收費的功能（2026-11-16 群組加值包）**。條款 §1.3、§11.6、§13 與隱私 §2.7 寫了收費以後的條件草稿（方案說明頁、付款前勾選同意、7 天內退款、Email 收據、停止服務時按比例退），**這些都還沒有程式**：沒有方案說明頁、沒有勾選同意的紀錄、沒有退款或收據的流程。第二階段（律師說可以以後）要先做出來或改成人工流程，再把【待確認】拿掉。
+20. **匯出資料不含群組加值的紀錄**（隱私 §10.1 列的匯出內容沒有寫它，照實）。`GET /me/export` 沒有 `group_passes`；開始收費以前建議加上（取得的加值、期限、用在哪個群組）。
+21. **群組加值的紀錄沒有保存期限**（隱私 §7 照實寫「持續保留」）。開始收費以後要配合稅法的憑證保存年限訂一個期限（見 (f) 第 17 點）。
 
-**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域。
+**設定改了就要改草稿的地方**：`US_PRICE_SOURCE`（關掉美股收盤價時，條款 §2.3、§9.1 與隱私 §4.1 的 Databento 要拿掉）、`TWSE_OPENDATA_CLOSE`（關掉時上市收盤價回到晚上或隔天清晨：條款 §2.3 的「上市股票通常在當天下午更新」與 §9.1 的證交所下載檔要改）、`SHIOAJI_EVENING_CLOSE`（關掉時條款 §2.3「晚上先更新的收盤價」那一句拿掉）、`IMPORT_STATEMENTS`（`off` 時隱私 §5.6 與條款 §8.10 描述的功能沒有人能用，可以留著；開放與否不用改條文）、`IMPORT_DAILY_LIMIT`（10；條款 §8.5）、`AI_MODEL_IMPORT_RETRY`（重讀用的模型，隱私 §5.6 寫「Anthropic 的另一個模型」；換成別家的模型要改 §4.1 與 §5.6）、`AI_RETENTION_DAYS`（30 天；設 0 是永久保存）、`AI_DAILY_MESSAGE_LIMIT`／`AI_MEMBER_DAILY_MESSAGE_LIMIT`／`AI_MONTHLY_COST_BUDGET_USD`／`AI_MEMBER_MONTHLY_COST_BUDGET_USD`／`AI_MONTHLY_TOKEN_BUDGET`／`AI_DEEP_SEARCH_COST`／`AI_ECONOMY_CAP_MULTIPLIER`（3／30／US$1／US$3／300 萬／3 題／2 倍；條款 §8.5；2026-11-16 以前條款寫的是 50 則）、`SESSION_TTL_DAYS`（30）、`NEWS_VIEW_DAYS`、`DATA_POLICY`（改成 `personal` 會用到非商用來源，條款 §9 不再正確）、`AI_WEB_SEARCH`／`AI_WEB_FETCH`、`AI_WEB_DYNAMIC_FILTERING`、`api` 改成經 Cloudflare 代理、Railway 區域、`GROUP_FREE_MEMBER_CAP`／`GROUP_BOOSTED_MEMBER_CAP`（15／50；條款 §7.8、§7.9）、`GROUP_DAILY_ENABLED`（關掉時沒有新的日報：條款 §7.9 與隱私 §5.5、§6.1、§6.2 的日報可以留著）、`AI_MODEL_DIGEST`（日報與週報用的模型；換成別家的要改隱私 §4.1、§5.5）。
 
 ---
 
@@ -272,7 +299,7 @@
    - 結構化輸出（匯入對帳單用它）只快取 JSON schema 24 小時，不是內容。
    - 送出的圖片不用於訓練模型；直接放在請求裡的圖片送出者無法刪除（vision 文件）。
 6. **未成年人**。最低年齡怎麼訂；未成年人使用是否需要法定代理人同意以及如何取得；兒童及少年福利與權益保障法對有公開討論區的網站有沒有額外要求【待確認】；Discord 自己的年齡規定。
-7. **證券投資顧問法規**。條款 §2 聲明不是投顧。請確認下列功能在**免費**與**未來收費**兩種情況下，是否可能被認定為經營證券投資顧問業務（證券投資信託及顧問法第 4 條、第 107 條【待確認】）：AI 對個股的分析與「為什麼漲跌」；「法人觀點」引用第三方評等與目標價；群組的交易動態與排行（是否像帶單）；公開討論區（使用者招攬時站方的責任）。`PRODUCT.md:57` 把投顧法規列為尚未決定，`docs/pending-decisions.md:215-217` 建議在收費或放廣告前諮詢。
+7. **證券投資顧問法規**。條款 §2 聲明不是投顧。請確認下列功能在**免費**與**未來收費**兩種情況下，是否可能被認定為經營證券投資顧問業務（證券投資信託及顧問法第 4 條、第 107 條【待確認】）：AI 對個股的分析與「為什麼漲跌」；「法人觀點」引用第三方評等與目標價；群組的交易動態與排行（是否像帶單）；公開討論區（使用者招攬時站方的責任）。`PRODUCT.md:57` 把投顧法規列為尚未決定，`docs/pending-decisions.md:215-217` 建議在收費或放廣告前諮詢。**2026-11-16**：收費的情況（個人會員、群組加值、群組 AI 日報）展開成 (f) 第 1–7 點，請一起看。
 8. **消費者保護法與定型化契約**。免費服務是否構成消費關係；審閱期；條款 §12 的免責與賠償上限是否有效（消保法第 12 條、民法第 222 條、第 247 條之 1【待確認】）；條款 §14 的合意管轄對消費者與小額訴訟的效力；條款 §13「繼續使用視為同意」的效力。
 9. **著作權**。條款 §4.3 公開貼文的授權範圍是否足夠且不過寬；使用者貼侵權內容時，網路服務提供者的免責要件（著作權法第六章之一，是否必須有通知／取下流程、聯絡窗口與重複侵權者的處理【待確認】），目前產品只能隱藏內容與暫停公開發言，沒有終止帳號的功能；新聞標題與連結、維基百科節錄的現行做法（已有研究：`docs/research/news-and-external-sources.md`）。
 10. **討論區的法律風險**。使用者散布不實訊息影響股價（證券交易法第 155 條【待確認】）、誹謗、公開他人個資時站方的責任與處理義務；檢調或主管機關調閱使用者資料時的程序（隱私 §4.4）；是否需要保存發言者資料一定期間。

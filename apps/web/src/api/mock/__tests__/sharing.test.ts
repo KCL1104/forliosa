@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from "vitest"
 import { createMockAdapter } from "@/api/mock/adapter"
+import { createSharingStore, DEFAULT_SHARE } from "@/api/mock/sharing"
 import { ApiError, type ForliosaApi } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
 
@@ -249,5 +250,89 @@ describe("授權查看", () => {
     await api.deleteDelegation("dlg_dad")
     viewAs("dlg_dad")
     expect(await codeOf(api.listAccounts())).toBe("403 delegation_revoked")
+  })
+})
+
+describe("群組加值包（和後端 group_plans、group_daily 同一套規則）", () => {
+  const source = {
+    returns: () => ({ day: 0.01, month: 0.02, year: 0.03, total: 0.1 }),
+    holdings: () => [],
+    amounts: () => ({ market_value: 0, day_change: 0, total_pnl: 0 }),
+    trades: () => [],
+    week: () => null,
+  }
+
+  it("人數上限看方案：免費 15、加值 50、以前建立的 50；滿了 → 409 limit_reached，句子說上限", async () => {
+    // 換一個人（不是登山社的成員）用登山社的邀請連結加入
+    let who = { user_id: "usr_01JDEMO", display_name: "示範使用者", avatar_url: null }
+    const store = createSharingStore({
+      me: () => who, signedIn: () => true, commercial: true, myAccounts: () => [], mine: source, dad: source, dadAccounts: [], origin: () => "http://localhost",
+    })
+    who = { user_id: "usr_stranger", display_name: "路人", avatar_url: null }
+    let err: unknown
+    try {
+      store.acceptInvite("hiking-open", DEFAULT_SHARE)
+    } catch (e) {
+      err = e
+    }
+    expect(err).toBeInstanceOf(ApiError)
+    expect(`${(err as ApiError).status} ${(err as ApiError).code}`).toBe("409 limit_reached")
+    expect((err as ApiError).message).toBe("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）")
+    // 投資讀書會（以前建立的，免費也是 50）照樣能加入
+    expect(store.acceptInvite("club-2026", DEFAULT_SHARE).plan).toEqual({ tier: "free", until: null, member_cap: 50, grandfathered: true, daily_report: false })
+  })
+
+  it("擁有者把加值用在群組、從別的群組移過來；刪掉群組時加值回到付款人手上", async () => {
+    const api = fresh()
+    expect((await api.getGroup("grp_family")).plan).toMatchObject({ tier: "boosted", until: "2026-12-31", member_cap: 50 })
+    const hiking = await api.attachGroupPass("grp_hiking", "gps_family")
+    expect(hiking.plan).toMatchObject({ tier: "boosted", until: "2026-12-31", member_cap: 50, daily_report: true })
+    // 家族投資回到免費（以前建立的，上限還是 50）
+    expect((await api.getGroup("grp_family")).plan).toEqual({ tier: "free", until: null, member_cap: 50, grandfathered: true, daily_report: false })
+    expect((await api.listMyGroupPasses()).find((p) => p.id === "gps_family")!.group).toEqual({ id: "grp_hiking", name: "登山社", my_role: "owner" })
+    await api.deleteGroup("grp_hiking")
+    expect((await api.listMyGroupPasses()).find((p) => p.id === "gps_family")).toMatchObject({ attached: false, group: null, active: true })
+    // 不是擁有者不能用；別人的加值 404
+    expect(await codeOf(api.attachGroupPass("grp_friends", "gps_spare"))).toBe("403 forbidden")
+    expect(await codeOf(api.attachGroupPass("grp_family", "gps_friends"))).toBe("404 not_found")
+  })
+
+  it("站方：清單只有群組編號；開通要先登入過、到期日不能早於今天、給了群組編號要是擁有者；延長、停止", async () => {
+    const api = fresh()
+    const rows = await api.listGroupPasses()
+    expect(rows.map((r) => [r.id, r.group_id, r.active])).toEqual([
+      ["gps_spare", null, true],
+      ["gps_family", "grp_family", true],
+      ["gps_friends", "grp_friends", false],
+    ])
+    expect(JSON.stringify(rows)).not.toContain("家族投資")
+    expect(await codeOf(api.grantGroupPass({ email: "nobody@example.com", until: "2026-12-31" }))).toBe("404 user_not_found")
+    expect(await codeOf(api.grantGroupPass({ email: "friend@forliosa.local", until: "2026-01-01" }))).toBe("422 until_in_past")
+    expect(await codeOf(api.grantGroupPass({ email: "friend@forliosa.local", until: "2026-12-31", group_id: "grp_family" }))).toBe("409 not_group_owner")
+    expect(await codeOf(api.grantGroupPass({ email: "friend@forliosa.local", until: "2026-12-31", group_id: "grp_nope" }))).toBe("404 group_not_found")
+    const made = await api.grantGroupPass({ email: "demo@forliosa.local", until: "2026-12-20", group_id: "grp_hiking", note: " 試用 " })
+    expect(made).toMatchObject({ email: "demo@forliosa.local", group_id: "grp_hiking", until: "2026-12-20", note: "試用", active: true })
+    expect((await api.getGroup("grp_hiking")).plan?.member_cap).toBe(50)
+    expect((await api.updateGroupPass("gps_friends", { until: "2026-12-06" })).active).toBe(true)
+    expect((await api.getGroup("grp_friends")).plan?.tier).toBe("boosted")
+    await api.revokeGroupPass(made.id)
+    expect((await api.getGroup("grp_hiking")).plan?.member_cap).toBe(15)
+  })
+
+  it("日報：數字依目前的分享設定過濾；有人關掉報酬率，AI 段落收回、notes 說為什麼", async () => {
+    const api = fresh()
+    const before = (await api.listDailyReports("grp_family")).items
+    expect(before.map((r) => r.trading_day)).toEqual(["2026-11-12", "2026-11-11", "2026-11-10", "2026-11-09"])
+    expect(before[0]!.summary).toMatch(/^今天有分享報酬的 4 個人/)
+    expect(before[0]!.facts.returns.map((r) => r.display_name)).toEqual(["示範使用者", "爸爸", "媽媽", "姊姊"])
+    expect(JSON.stringify(before)).not.toMatch(/market_value|quantity|amount/)
+    await api.putShare("grp_family", { ...DEFAULT_SHARE, returns: false, holdings: true })
+    const after = (await api.listDailyReports("grp_family")).items[0]!
+    expect(after.summary).toBe("")
+    expect(after.notes).toEqual(["寫這段 AI 摘要時用到的分享內容已有變動（有成員調整了分享設定或離開群組），摘要不再顯示。"])
+    expect(after.facts.returns.map((r) => r.display_name)).toEqual(["爸爸", "媽媽", "姊姊"])
+    // 免費群組也讀得到以前的日報；從來沒有的群組是空的
+    expect((await api.listDailyReports("grp_friends")).items).toHaveLength(2)
+    expect((await api.listDailyReports("grp_hiking")).items).toEqual([])
   })
 })

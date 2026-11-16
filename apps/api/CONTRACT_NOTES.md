@@ -2523,3 +2523,35 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 3. `margin_date()` 假設 MI_MARGN 21:00 後是當天的（memo 說 Last-Modified 是 05:23，未驗證）——這次沒動。
 4. 證交所下載檔多常被擋：11/16 兩次 15:00 的請求都是 CDN 快取（`X-Cache: HIT`），15:46 指數檔快取過期（`EXPIRED`）就回 307。
    13:45–14:00 檔案剛公布、快取最可能是空的；照規則不能繞過，看一兩週的 log（`twse same-day file`）再決定要不要跟負責人談。
+
+## 2026-11-16 群組加值包第一階段（`services.group_plans`、`services.group_daily`）
+
+產品負責人照建議（群組訂閱 memo 的 14 項）。還沒有付款：站方手動開通，負責人先用自己的群組試。
+
+- **方案存在哪裡**：`group_passes` 表（不是 `groups` 的欄位）：一列一個加值包，付款人 `payer_id`（帳號刪除 SET NULL）、用在哪個群組
+  `group_id`（群組刪除 SET NULL：回到付款人手上）、`until`（最後一天的隔天 00:00 台北，和會員的 `plan_until` 一樣）、`note`、`source=manual`。
+  群組有任何一個還沒到期的加值包就是加值中；`until` 取最晚的。之後接金流時同一張表加訂單欄位。
+- **舊群組維持 50 人**：migration 0023 把當時所有群組的 `groups.grandfathered_member_cap` 設成 50；之後建立的是 NULL。上限 =
+  max(方案的上限, 這個數字)。
+- **最後一個名額的搶位**：`accept_invite` 先寫一次群組那一列（`UPDATE groups SET updated_at = updated_at`）才數人數：PostgreSQL 上同一個群組的
+  第二個加入要等第一個交易結束，SQLite 上第一個寫入拿到整個資料庫的寫鎖。測試 `test_two_people_cannot_both_take_the_last_seat` 用兩個執行緒
+  （拿掉這一行時兩個都進得去）。
+- **站方看不到群組名稱**：`/admin/group-passes` 只有付款人的 email／名稱、日期、備註、群組編號（隱私權政策 §4.3）。站方可以用群組編號直接
+  開在群組上（付款人必須是 owner），否則由付款人在群組設定選。
+- **日報的數字**：`sharing.digest_day_facts`／`daily_facts_view`（和週報同一個模組、同一套 `_allowed` 規則，`prompt_contributors` 與收回規則直接沿用
+  `digest_prompt_contributors`／`digest_summary_visible`）。成員的「今日」用排行的同一套 TWR（前一個交易日收盤到這天收盤）；共同持股的漲跌優先用
+  那天的報價（對參考價，除息日不會算成大跌），報價不是那天時用前後兩天的收盤。基準在那天沒有收盤時寫 null（不讓往前補的價格算成 0%）。
+- **什麼時候寫**：不掛在 close watch 上（那裡是另一個工作流程正在改的地方），worker 自己每 10 分鐘看 `dataset_status`：兩個市場的正式收盤
+  （`closes.OFFICIAL_KEYS`）加證交所指數（`TWSE_INDEX_KEYS`）都到這天才寫；晚間的暫時收盤沒有 ETF，所以 06:30 以前不用它。沒有任何
+  `dataset_status` 列時（展示資料、開發）直接寫。
+- **模型與檢查**：和週報同一個模型設定（`AI_MODEL_DIGEST`，預設 Haiku 5.5），effort low，一般呼叫（Batches 最多要 24 小時，省下的錢一則不到
+  US$0.0003）。檢查：成員代號、建議／目標價／預測／解釋原因的字、套話與破折號驚嘆號、超過 220 字、**段落裡的百分比必須是 prompt 裡有的數字**
+  （取絕對值、一位小數比對）。不行就把原因附在 prompt 後面重寫一次。段落裡的 `-1.2%` 換成 `−1.2%`。
+- **實測**（2026-11-16，三把 key、展示資料、六人群組）：一則 978 輸入／858 輸出 token（含思考），US$0.000527；段落：
+  「今天有分享報酬的 6 個人，3 個漲、2 個跌、1 個持平，從 −2.5% 到 +1.0%。元大台灣50 漲 0.4%，6 個人裡有 2 個漲得比它多。3 人都有的元大台灣50
+  漲 0.4%，台積電跌 0.6%。今天有 3 筆買賣。」展示資料沒有發行量加權股價報酬指數，所以那一句自動略過。
+- **推播**：`notification_outbox.kind = "daily"`、`daily_report_id`（加在舊表上，所以沒有外鍵：日報刪除時一起刪 outbox 列，找不到日報的列取消）。
+  `not_before` = `group_daily.push_at`（23:00–07:30 寫好的延到 07:30）。Discord 一則最多 2,000 字：報酬最多列 20 人、買賣最多 10 項。
+- **保存**：日報 30 天（`sharing_retention` 04:35）。
+- **設定**：`GROUP_FREE_MEMBER_CAP`（15）、`GROUP_BOOSTED_MEMBER_CAP`（50）、`GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD`（5）。
+  價格（NT$149／月、NT$1,490／年）只寫在文件，沒有付款的程式。

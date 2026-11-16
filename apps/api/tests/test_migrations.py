@@ -93,3 +93,37 @@ def test_import_batch_column_keeps_every_row_both_ways(tmp_path):
             assert conn.execute(text("SELECT id FROM broker_accounts")).scalars().all() == ["acc_1"]
     finally:
         engine.dispose()
+
+
+def test_group_passes_grandfather_existing_groups_and_keep_rows_both_ways(tmp_path):
+    """0023 (群組加值包): every group that exists at the upgrade keeps 50 members (``grandfathered_member_cap``);
+    groups, members and channels survive the round trip (plain ALTER TABLE, no batch copy of ``groups``)."""
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'passes.db'}"
+    command.upgrade(_config(url), "0022")
+    engine = make_engine(url)
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "users", {"id": "usr_1", "email": "a@b.c"})
+            _insert(conn, "groups", {"id": "grp_old", "name": "大學同學"})
+            _insert(conn, "group_members", {"group_id": "grp_old", "user_id": "usr_1", "role": "owner"})
+            _insert(conn, "group_channels", {"group_id": "grp_old", "kind": "discord", "status": "active"})
+        command.upgrade(_config(url), "0023")
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT grandfathered_member_cap FROM groups")).scalar_one() == 50
+            assert conn.execute(text("SELECT notify_daily FROM group_channels")).scalar_one() in (0, False)
+            _insert(conn, "groups", {"id": "grp_new", "name": "新群組"})  # made after the change: no 50
+            assert conn.execute(text("SELECT grandfathered_member_cap FROM groups WHERE id = 'grp_new'")).scalar_one() \
+                is None
+        assert {"group_passes", "group_daily_reports"} <= set(inspect(engine).get_table_names())
+        command.downgrade(_config(url), "0022")
+        inspector = inspect(engine)
+        assert "grandfathered_member_cap" not in {c["name"] for c in inspector.get_columns("groups")}
+        assert "group_passes" not in inspector.get_table_names()
+        with engine.begin() as conn:
+            assert sorted(conn.execute(text("SELECT id FROM groups")).scalars().all()) == ["grp_new", "grp_old"]
+            assert conn.execute(text("SELECT user_id FROM group_members")).scalars().all() == ["usr_1"]
+            assert conn.execute(text("SELECT kind FROM group_channels")).scalars().all() == ["discord"]
+    finally:
+        engine.dispose()

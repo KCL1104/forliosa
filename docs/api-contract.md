@@ -793,7 +793,9 @@
 - **精度**：分享投影裡的權重四捨五入到 0.01、報酬率到 0.0001。同時打開「持股」與「金額」時，別人可以推算大約股數：前端在開關旁提示。
 - **存在與權限**：不是成員的人，群組相關端點一律 404 `not_found`（不透露群組是否存在）；是成員但權限不足回 403 `forbidden`。
 - **CSRF**：非 `GET`／`HEAD`／`OPTIONS` 的請求若帶 `Origin`，必須在 `CORS_ORIGINS` 內，否則 403 `forbidden`（全站適用）。
-- **上限**：每個群組最多 50 位成員；每人最多加入 20 個群組（超過回 409 `limit_reached`）。
+- **上限**：每個群組的人數上限看方案（群組加值包，2026-11-16）：免費 15 位（`GROUP_FREE_MEMBER_CAP`）、加值 50 位（`GROUP_BOOSTED_MEMBER_CAP`），
+  2026-11-16 以前建立的群組不論方案都是 50 位（`plan.grandfathered`）；滿了回 409 `limit_reached`，訊息寫出上限（例如「這個群組已經滿了：
+  免費群組最多 15 位成員（加值的群組最多 50 位）」）。上限只擋新成員，不會移除任何人。每人最多加入 20 個群組（超過回 409 `limit_reached`）。
 - 錯誤代碼：`forbidden`、`not_found`、`read_only`、`view_as_not_allowed`、`delegation_revoked`、`already_member`、`invite_invalid`、
   `limit_reached`、`webhook_failed`、`telegram_unavailable`（409：伺服器沒有設定 Telegram bot）、`rate_limited`（429：設定 Discord
   webhook 太頻繁，或伺服器暫停呼叫 Discord）、`oauth_*`（見登入）；格式錯誤一律 422 `validation_error`。
@@ -898,12 +900,15 @@
 | PUT | `/groups/{id}/reactions` | 成員 | `{"target", "emoji"}` 加表情（重複呼叫不重複計） |
 | DELETE | `/groups/{id}/reactions?target=&emoji=` | 成員 | 收回自己的表情 |
 | GET | `/groups/{id}/digests?limit=8&cursor=` | 成員 | 群組 AI 週報，新到舊（`limit` 1–52），`{"items": Digest[], "next_cursor"}` |
+| GET | `/groups/{id}/daily-reports?limit=10&cursor=` | 成員 | 群組 AI 日報，新到舊（`limit` 1–31），`{"items": DailyReport[], "next_cursor"}`；加值結束後以前的照樣列出（見群組加值包） |
+| PUT | `/groups/{id}/plan` | owner | `{"pass_id"}` 把自己的一個群組加值包用在這個群組 → `Group`；不是 owner 403；不是自己的加值包 404；已到期 409 `pass_expired`；用在另一個群組而自己已不是那個群組的 owner 409 `pass_in_use`（同時擁有兩個群組時可以移過來） |
+| GET | `/me/group-passes` | 登入 | 我（付款人）拿到的群組加值包：`[{"id", "until", "active", "attached", "group": {"id", "name", "my_role"} \| null}]`（`group` 只在我還是成員時有） |
 | GET | `/groups/{id}/channels` | 成員 | `Channels`（`webhook_hint` 只有 owner 看得到，其他人為 `null`） |
 | PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades"?, "notify_digest"?}`（兩個開關預設 `true`）→ `Channels`；儲存前送一則測試訊息，失敗 422 `webhook_failed`；網址格式不符 422 `validation_error`（錯誤訊息不含網址）；同一人或同一群組 10 分鐘內超過 5 次 → 429 `rate_limited`（不送出）；換成另一個 webhook 時，其他成員的 `push` 自動關閉（見推播） |
-| PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_digest"?}` → `Channels`；還沒設定 404 |
+| PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_digest"?, "notify_daily"?}` → `Channels`；還沒設定 404。`notify_daily`（群組 AI 日報）預設關；`PUT` 也可以帶，省略＝不變（新的目的地是關的） |
 | DELETE | `/groups/{id}/channels/discord` | owner | 解除（204；還沒送出的推播取消；之後再設定算新的目的地） |
 | POST | `/groups/{id}/channels/telegram/link` | owner | → `{"code", "bot_username", "expires_at"}`：把 bot 加進 Telegram 群組，在群組裡傳 `/link <code>`（10 分鐘內、一次性；再產生一組會讓舊的失效）；伺服器沒有 bot 時 409 `telegram_unavailable` |
-| PATCH | `/groups/{id}/channels/telegram` | owner | `{"notify_trades"?, "notify_digest"?}` → `Channels`；還沒連結 404 |
+| PATCH | `/groups/{id}/channels/telegram` | owner | `{"notify_trades"?, "notify_digest"?, "notify_daily"?}` → `Channels`；還沒連結 404 |
 | DELETE | `/groups/{id}/channels/telegram` | owner | 解除（204） |
 
 ```json
@@ -1052,6 +1057,42 @@
   還開著當時分享的那一項（報酬率、持股、交易動態）時才顯示；否則 `summary` 為空字串，`notes` 加一則「摘要不再顯示」的說明
   （狀態仍是 `ready`，facts、留言、表情照常）。他重新打開那一項時摘要恢復。推播用同一套規則，另外要求每一位都開著 `push`。
 - 週報（連同留言、表情）保存 26 週。
+
+**群組加值包與群組 AI 日報**（產品負責人 2026-11-16，第一階段：還沒有付款，站方手動開通試用）
+
+- `Group` 與 `GroupSummary` 多 `plan: {"tier": "free" | "boosted", "until": "YYYY-MM-DD" | null, "member_cap": 15 | 50, "grandfathered": bool,
+  "daily_report": bool}`（每位成員都看得到）；`GroupSummary` 另多 `latest_daily_at`。`Channels` 的兩種頻道都多 `notify_daily`（預設 `false`）。
+- **加值包**：站方用付款人的 email 開通（`/admin/group-passes`，見會員方案），到 `until` 那一天（台北）為止；付款人（群組的 owner）在群組設定用
+  `PUT /groups/{id}/plan` 選要用在哪個群組，或站方開通時直接給 `group_id`。群組轉給別人、付款人刪除帳號，加值照樣用到到期；群組刪除時加值回到
+  付款人手上（沒有用在任何群組）。站方只看得到付款人的 email、日期、備註與群組編號，看不到群組名稱、成員與內容。
+- **到期以後**：不踢人；人數超過免費上限的群組不能再加人；日報停，以前的日報照樣看得到（保存 30 天）。週報所有群組都有。
+- **群組 AI 日報**（只有加值中的群組；每個交易日一份）：worker 每 10 分鐘看一次，等到這個交易時段兩個市場的正式收盤價與證交所指數都存好
+  （證交所當天下午的檔案、櫃買約 23:30）才寫；隔天 06:30 以後就用當時有的（某個市場只有晚間暫時收盤價時加一則說明；沒有指數時不比加權報酬指數）。
+  - `facts` 和週報同一套規則：只用成員對這個群組打開的項目，以 `user_id` 儲存、讀取時依目前的設定過濾。`returns`（開了報酬率的成員那天的報酬，
+    和排行的「今日」一樣）、`benchmarks`（發行量加權股價報酬指數、元大台灣50）、`common_holdings`（兩人以上持有，含那天的漲跌；美股是 null）、
+    `trades`（開了交易動態的成員那天的買賣：方向與股票，不寫是誰，同一檔同方向合併 `count`；匯入對帳單的不算）、`trades_count`、
+    `why`（漲跌最多的共同持股，最多 3 檔，連到個股頁的「為什麼漲跌」）。`market_summary`：市場頁有這一天的 AI 收盤重點（連到 `/market`）。
+    不含金額、股數、觀察清單、個人收盤簡報或 AI 對話。日報不自己上網搜尋。
+  - AI 段落（2–4 句）只在開了報酬率的成員至少 2 位時才寫；AI 只拿到匿名代號（隨機排序）和伺服器算好的數字（幾人漲跌、範圍、幾人贏過基準、
+    共同持股的漲跌、買賣筆數）。點名、建議、目標價、預測、解釋原因、用了沒提供的數字、套話的回答會請它重寫一次，還是不行就只有數字（`failed`）。
+    用 Haiku（effort low）一般呼叫，不計入成員的 AI 額度（`ai_usage.feature = "group_daily"`）；`AI_GROUP_DAILY_MONTHLY_BUDGET_USD`（預設 US$5）是
+    所有群組加起來每月的上限。收回規則和週報一樣：寫進段落的成員有人離開或關掉當時分享的項目，`summary` 變空字串、`notes` 加一則說明。
+  - `status`：`pending`（AI 段落還在寫）｜`ready`（寫好了；`summary` 可能是空的，`notes` 說為什麼）｜`failed`（只有數字）。
+  - **推播**：頻道的 `notify_daily` 打開才送（owner 決定，預設關）；23:00–07:30 寫好的等到 07:30 再送。只有開了 `push` 的成員的數字會送出，
+    AI 段落只在寫進段落的每一位都開著 `push` 時才附上。
+
+```json
+// DailyReport
+{"id": "gdr_...", "status": "ready", "trading_day": "2026-11-16", "created_at": "2026-11-16T23:40:00+08:00",
+ "finished_at": "2026-11-16T23:40:03+08:00",
+ "summary": "今天有分享報酬的 6 個人，3 個漲、2 個跌、1 個持平，從 −2.5% 到 +1.0%。元大台灣50 漲 0.4%，6 個人裡有 2 個漲得比它多。…",
+ "facts": {"returns": [{"user_id": "usr_...", "display_name": "小芸", "day_return_pct": -0.0031}],
+           "benchmarks": [{"symbol": "^TAIEXTR", "name": "發行量加權股價報酬指數", "day_return_pct": 0.008}],
+           "common_holdings": [{"symbol": "2330.TW", "name": "台積電", "holder_count": 3, "day_change_pct": -0.006}],
+           "trades": [{"side": "buy", "symbol": "2330.TW", "name": "台積電", "count": 1}], "trades_count": 3,
+           "why": [{"symbol": "2454.TW", "name": "聯發科", "day_change_pct": 0.035}]},
+ "notes": [], "market_summary": true, "disclaimer": "AI 分析僅供參考，不構成投資建議。", "sources": ["…"], "is_demo": false}
+```
 
 **推播**
 
@@ -1372,6 +1413,10 @@
 | GET | `/admin/members` | `[{"user_id", "email", "display_name", "until", "note", "active"}]`：開通過的帳號（過期的也列，方便續期；還有效的在前，再依最後一天） |
 | PUT | `/admin/members` | `{"email", "until": "YYYY-MM-DD" \| null, "note"?: ≤200 字}` → 同一列：開通或續期（email 不分大小寫）；找不到帳號（對方還沒登入過）→ 404 `user_not_found`；最後一天早於今天 → 422 `until_in_past` |
 | DELETE | `/admin/members/{user_id}` | 改回免費 → 204；不是會員 → 404 |
+| GET | `/admin/group-passes` | 群組加值包（2026-11-16）：`[{"id", "payer_user_id", "email", "display_name", "until", "note", "active", "group_id", "attached_at", "created_at"}]`，還有效的在前；付款人刪除帳號後 `payer_user_id`／`email`／`display_name` 為 null；只有群組編號，沒有群組名稱 |
+| POST | `/admin/group-passes` | `{"email", "until": "YYYY-MM-DD", "note"?, "group_id"?}` → 201 同一列；找不到帳號 404 `user_not_found`；最後一天早於今天 422 `until_in_past`；給了 `group_id`：找不到 404 `group_not_found`，付款人不是那個群組的 owner 409 `not_group_owner` |
+| PATCH | `/admin/group-passes/{id}` | `{"until"?, "note"?}` 延長（或縮短）、改備註 → 同一列；找不到 404 |
+| DELETE | `/admin/group-passes/{id}` | 取消（群組回到免費的上限，不移除任何人）→ 204；找不到 404 |
 
 會員到 `until` 那一天（台北）結束後自動回到免費（存的是隔天 00:00 台北的時刻）。這是管理後台唯一回傳 email 的地方：站方用 email 開通。
 
