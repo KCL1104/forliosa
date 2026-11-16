@@ -9,7 +9,7 @@ export interface TradePrefill {
   quantity?: number
   price?: number
   date?: string
-  /** 記一筆第一筆填的手續費（帶到完整表單的「手續費（選填）」） */
+  /** 記一筆第一筆填的手續費（帶到完整表單的「手續費（選填，元／美元）」） */
   fee?: number
 }
 

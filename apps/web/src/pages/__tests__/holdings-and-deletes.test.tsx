@@ -165,10 +165,10 @@ describe("記一筆：先選股票，再填股數、買進日期、價格（產�
   })
 })
 
-/** 記一筆直接到第二步（持倉的「加碼」那條路）：這一檔已經選好 */
-async function openQuickAddFor(symbol: string) {
+/** 記一筆直接到第二步（持倉的「加碼」那條路）：這一檔已經選好；`accountId` 是先選好的帳戶 */
+async function openQuickAddFor(symbol: string, accountId?: string) {
   await screen.findByRole("table", { name: "持倉" }, T)
-  act(() => useUi.getState().openTradeForm({ symbol }))
+  act(() => useUi.getState().openTradeForm({ symbol, accountId }))
   const dialog = await screen.findByRole("dialog", { name: "記一筆" }, T)
   await within(dialog).findByRole("group", { name: "選好的股票" }, T)
   return dialog
@@ -287,7 +287,25 @@ describe("記一筆：每一筆買進可以填手續費（產品負責人 2026-1
     expect(sentBuys()[0]?.fee).toBe(1234)
   })
 
-  it("「賣出、股利或其他」：第一筆填的手續費帶到完整表單的「手續費（選填）」", async () => {
+  it("全形數字（注音輸入法的全形模式）：「２０」「１，２３４」照樣讀得懂，股數、價格也一樣", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAddFor("2330")
+    await fillLot(user, dialog, { qty: "１．５", day: 9, price: "７０１", fee: "２０" })
+    await user.click(within(dialog).getByRole("button", { name: "再加一筆買進" }))
+    await within(dialog).findByRole("textbox", { name: "第 2 筆的手續費" }, T)
+    await fillLot(user, dialog, { nth: 2, qty: "２", day: 10, price: "７６０", fee: "１，２３４" })
+    await user.click(within(dialog).getByRole("button", { name: "新增" }))
+    expect(within(dialog).queryByText("請填數字")).toBeNull()
+    await waitFor(() => expect(screen.queryByRole("dialog", { name: "記一筆" })).toBeNull(), T)
+    expect(sentBuys().map((b) => [b.quantity, b.price, b.fee])).toEqual([
+      [1500, 701, 20],
+      [2000, 760, 1234],
+    ])
+  })
+
+  it("「賣出、股利或其他」：第一筆填的手續費帶到完整表單的「手續費（選填，元）」", async () => {
     mount()
     const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
@@ -295,17 +313,53 @@ describe("記一筆：每一筆買進可以填手續費（產品負責人 2026-1
     await fillLot(user, dialog, { qty: "1", day: 10, price: "700", fee: "20" })
     await user.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
     const full = await screen.findByRole("dialog", { name: "記一筆交易" }, T)
-    expect(await within(full).findByLabelText("手續費（選填）", {}, T)).toHaveValue("20")
-    expect(within(full).getByLabelText(/^成交價/)).toHaveValue("700")
+    expect(await within(full).findByLabelText("手續費（選填，元）", {}, T)).toHaveValue("20")
+    expect(within(full).getByLabelText("成交價（元）")).toHaveValue("700")
     expect(sentBuys()).toHaveLength(0)
   })
 
-  it("美股：手續費記在美元（後端照這一檔的幣別記），標籤寫「手續費（美元）」", async () => {
+  it("美股：手續費記在美元（後端照這一檔的幣別記），標籤寫「手續費（美元）」，螢幕報讀器也念得到「美元」；完整表單也寫美元", async () => {
     mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
     renderApp("/")
     const dialog = await openQuickAddFor("AAPL")
     expect(within(dialog).getByText("手續費（美元）", { selector: "label" })).toBeInTheDocument()
-    expect(within(dialog).getByRole("textbox", { name: "手續費" })).toHaveAttribute("placeholder", "選填")
+    // 無障礙名稱包含看得到的標籤（WCAG 2.5.3）
+    const fee = within(dialog).getByRole("textbox", { name: "手續費（美元）" })
+    expect(fee).toHaveAttribute("placeholder", "選填")
+    expect(within(dialog).getByRole("textbox", { name: "買進價格（美元）" })).toBeInTheDocument()
+    await user.type(fee, "1.5")
+    await user.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
+    const full = await screen.findByRole("dialog", { name: "記一筆交易" }, T)
+    expect(await within(full).findByLabelText("手續費（選填，美元）", {}, T)).toHaveValue("1.5")
+    expect(within(full).getByLabelText("成交價（美元）")).toBeInTheDocument()
+  })
+
+  it("幣別看這一檔，不看帳戶：台股記進美元帳戶不寫「美元」；美股記進新台幣帳戶照樣寫「美元」", async () => {
+    mount()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    // 2330 記進「國泰・複委託」（美元帳戶）：後端照商品記成新台幣
+    let dialog = await openQuickAddFor("2330", "acc_01JCATHAYUS")
+    expect(within(dialog).getByRole("combobox", { name: "券商帳戶" })).toHaveTextContent("國泰・複委託")
+    expect(within(dialog).getByText("手續費", { selector: "label" })).toBeInTheDocument()
+    expect(within(dialog).getByText("買進價格", { selector: "label" })).toBeInTheDocument()
+    expect(within(dialog).queryByText(/美元/, { selector: "label" })).toBeNull()
+    await user.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
+    let full = await screen.findByRole("dialog", { name: "記一筆交易" }, T)
+    expect(await within(full).findByLabelText("手續費（選填，元）", {}, T)).toBeInTheDocument()
+    expect(within(full).getByLabelText("成交價（元）")).toBeInTheDocument()
+    act(() => useUi.getState().closeTradeForm())
+    await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull(), T)
+
+    // AAPL 記進「永豐・一般」（新台幣帳戶）：還是美元
+    dialog = await openQuickAddFor("AAPL", "acc_01JSINOPAC")
+    expect(within(dialog).getByRole("combobox", { name: "券商帳戶" })).toHaveTextContent("永豐・一般")
+    expect(within(dialog).getByText("手續費（美元）", { selector: "label" })).toBeInTheDocument()
+    expect(within(dialog).getByText("買進價格（美元）", { selector: "label" })).toBeInTheDocument()
+    await user.click(within(dialog).getByRole("button", { name: "賣出、股利或其他" }))
+    full = await screen.findByRole("dialog", { name: "記一筆交易" }, T)
+    expect(await within(full).findByLabelText("手續費（選填，美元）", {}, T)).toBeInTheDocument()
   })
 })
 

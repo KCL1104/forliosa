@@ -24,6 +24,7 @@ import { FormField as Row } from "@/components/form-field"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { DateField } from "@/components/date-field"
 import { QuickAdd } from "./QuickAdd"
+import { numberText, parseNumber } from "./quantity-input"
 import { usePrefs } from "@/stores/prefs"
 
 
@@ -95,7 +96,8 @@ export function TradeFormHost() {
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription className="sr-only">{description}</DrawerDescription>
         </DrawerHeader>
-        <div className="overflow-y-auto overscroll-contain">{open && body("stack")}</div>
+        {/* 動作列固定在底部（記一筆約 121px、完整表單約 150px）：點進一格時捲到動作列上面，鍵盤打開時不會被蓋住 */}
+        <div className="scroll-pb-40 overflow-y-auto overscroll-contain">{open && body("stack")}</div>
       </DrawerContent>
     </Drawer>
   )
@@ -118,10 +120,8 @@ interface FormState {
   note: string
 }
 
-function parseNum(s: string): number | null {
-  const n = Number(s.replace(/[,\s]/g, ""))
-  return s.trim() === "" || Number.isNaN(n) ? null : n
-}
+// 和記一筆同一套：可以有千分位、可以是全形數字（「２０」）
+const parseNum = parseNumber
 
 function useDebounced<T>(value: T, ms = 300): T {
   const [v, setV] = useState(value)
@@ -204,6 +204,8 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
   const type: TransactionType = f.mainType === "other" ? f.otherType : f.mainType
   const isCash = CASH_TYPES.includes(type)
   const isUS = account?.currency === "USD" || f.symbol?.market === "US"
+  // 買賣的價格與費用記在這一檔的計價幣別（後端照商品記，不看帳戶）：台股記進美元帳戶也是新台幣
+  const tradeUSD = f.symbol ? f.symbol.currency === "USD" : isUS
   const qty = parseNum(f.qtyText)
   const shares = qty === null ? null : f.qtyUnit === "lot" && !isUS && (type === "buy" || type === "sell") ? Math.round(qty * 1000) : qty
   const price = parseNum(f.priceText)
@@ -232,7 +234,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
             ? null
             : !shares || shares <= 0
               ? "請輸入數量"
-              : !isUS && f.qtyUnit === "lot" && (type === "buy" || type === "sell") && /\.\d{4,}$/.test(f.qtyText.replace(/[,\s]/g, ""))
+              : !isUS && f.qtyUnit === "lot" && (type === "buy" || type === "sell") && /\.\d{4,}$/.test(numberText(f.qtyText))
                 ? "張數最多寫到小數第三位（1 股）"
                 : !Number.isInteger(shares) && !isUS
                   ? "台股股數必須是整數"
@@ -468,7 +470,7 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
                       ? "每股股票股利（元）"
                       : type === "capital_reduction"
                         ? "每股退還股款（元，選填）"
-                        : `成交價（${isUS ? "美元" : "元"}）`
+                        : `成交價（${tradeUSD ? "美元" : "元"}）`
                 }
                 htmlFor="trade-price"
                 error={submitted ? errors.price : null}
@@ -493,14 +495,14 @@ export function TradeForm({ initialSymbol, edit, sell, prefill, onDone, layout }
           </div>
         )}
 
-        {/* 手續費與稅不自動算（2026-11-14）：要和對帳單一樣精準的人自己填，不填就是 0 */}
+        {/* 手續費與稅不自動算（2026-11-14）：要和對帳單一樣精準的人自己填，不填就是 0；幣別和成交價一樣 */}
         {(type === "buy" || type === "sell") && (
           <div className="grid grid-cols-2 gap-3">
-            <Row label="手續費（選填）" htmlFor="trade-fee" error={submitted ? errors.fee : null}>
+            <Row label={`手續費（選填，${tradeUSD ? "美元" : "元"}）`} htmlFor="trade-fee" error={submitted ? errors.fee : null}>
               <Input id="trade-fee" inputMode="decimal" value={f.feeText} onChange={(e) => set({ feeText: e.target.value })} placeholder="0" aria-invalid={submitted && !!errors.fee} className="num" />
             </Row>
             {type === "sell" && (
-              <Row label="交易稅（選填）" htmlFor="trade-tax" error={submitted ? errors.tax : null}>
+              <Row label={`交易稅（選填，${tradeUSD ? "美元" : "元"}）`} htmlFor="trade-tax" error={submitted ? errors.tax : null}>
                 <Input id="trade-tax" inputMode="decimal" value={f.taxText} onChange={(e) => set({ taxText: e.target.value })} placeholder="0" aria-invalid={submitted && !!errors.tax} className="num" />
               </Row>
             )}

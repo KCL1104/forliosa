@@ -2137,7 +2137,7 @@ const DESKTOP = { viewport: { width: 1440, height: 900 } }
 const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
 const overflowX = (p) => p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
 
-await check("記一筆的每一筆買進排得整齊：桌面一列四格（股數・日期・價格・手續費）＋移除；手機兩行（股數｜價格、日期｜手續費＋移除）；日期不被切掉、可按範圍 ≥ 44px、不橫向捲動", async () => {
+await check("記一筆的每一筆買進排得整齊：桌面一列四格（股數・日期・價格・手續費）＋移除；手機兩行（股數｜價格、日期｜手續費＋移除）；日期不被切掉、標籤不折行（360px 的美股）、可按範圍 ≥ 44px、不橫向捲動；鍵盤打開時點進的格子不被動作列蓋住", async () => {
   const lotBoxes = (p) =>
     p.evaluate(() => {
       const box = (sel) => {
@@ -2151,14 +2151,16 @@ await check("記一筆的每一筆買進排得整齊：桌面一列四格（股�
         qty: box("#lot-qty-0"), date: box("#lot-date-0"), price: box("#lot-price-0"), fee: box("#lot-fee-0"),
         remove: box('[aria-label="移除第 1 筆"]'), qty2: box("#lot-qty-1"),
         clipped: date ? date.scrollWidth > date.clientWidth : true,
+        // 標籤一行（text-sm 的行高 20px）：折成兩行的話那一格的輸入框會比同一行的低
+        labels: [...document.querySelectorAll('label[for^="lot-"]')].filter((l) => l.getBoundingClientRect().height > 24).map((l) => l.textContent),
       }
     })
-  const open = async (p) => {
+  const open = async (p, code = "2330") => {
     await p.goto(base + "/", { waitUntil: "networkidle" })
     await p.getByRole("button", { name: "記一筆", exact: true }).first().click()
     const dialog = p.getByRole("dialog")
-    await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill("2330")
-    await dialog.getByRole("option", { name: /2330/ }).first().click()
+    await dialog.getByPlaceholder("代號或名稱，例如 2330、台積").fill(code)
+    await dialog.getByRole("option", { name: new RegExp(code) }).first().click()
     await dialog.getByRole("group", { name: "選好的股票" }).waitFor()
     await dialog.getByRole("button", { name: "買進日期，還沒選" }).click()
     await p.getByRole("button", { name: /年 11 月 12 日/ }).click()
@@ -2177,11 +2179,14 @@ await check("記一筆的每一筆買進排得整齊：桌面一列四格（股�
     if (!(qty.r < date.x && date.r < price.x && price.r < fee.x && fee.r < remove.x)) throw new Error(`desktop: the order is not 股數・日期・價格・手續費・移除 ${JSON.stringify({ qty, date, price, fee, remove })}`)
     if (!near(remove.y + (remove.b - remove.y) / 2, fee.y + (fee.b - fee.y) / 2)) throw new Error(`desktop: the remove button is not level with the inputs ${JSON.stringify({ fee, remove })}`)
   })
-  for (const [name, options] of [["iPhone 15", pw.devices["iPhone 15"]], ["375px", { viewport: { width: 375, height: 700 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }]]) {
+  const phone = (width) => ({ viewport: { width, height: 700 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 })
+  // 360px 是常見的 Android 寬度；美股的「手續費（美元）」比那一欄寬（2026-11-16 review）
+  for (const [name, options, code] of [["iPhone 15", pw.devices["iPhone 15"], "2330"], ["375px", phone(375), "2330"], ["360px AAPL", phone(360), "AAPL"]]) {
     await fresh(options, async (p) => {
-      const dialog = await open(p)
-      const { qty, date, price, fee, remove, qty2, clipped } = await lotBoxes(p)
+      const dialog = await open(p, code)
+      const { qty, date, price, fee, remove, qty2, clipped, labels } = await lotBoxes(p)
       if (clipped) throw new Error(`${name}: the date 2026/11/12（四） is cut off`)
+      if (labels.length) throw new Error(`${name}: labels wrap onto two lines: ${labels.join("、")}`)
       if (!near(price.y, qty.y) || !(price.x > qty.r)) throw new Error(`${name}: row 1 is not 數量｜價格 ${JSON.stringify({ qty, price })}`)
       if (!near(fee.y, date.y) || !(fee.x > date.r) || !(date.y > qty.b)) throw new Error(`${name}: row 2 is not 日期｜手續費 ${JSON.stringify({ date, fee })}`)
       if (!near(date.x, qty.x) || !near(fee.x, price.x)) throw new Error(`${name}: the two rows' columns do not line up ${JSON.stringify({ qty, date, price, fee })}`)
@@ -2190,13 +2195,38 @@ await check("記一筆的每一筆買進排得整齊：桌面一列四格（股�
       if (!(qty2.y > remove.b)) throw new Error(`${name}: the second buy starts before the first one ends`)
       const wide = await overflowX(p)
       if (wide > 0) throw new Error(`${name}: the page scrolls sideways by ${wide}px`)
-      const sheetWide = await dialog.evaluate((el) => el.scrollWidth - el.clientWidth)
+      const sheetWide = await dialog.evaluate((el) => Math.max(el.scrollWidth - el.clientWidth, ...[...el.querySelectorAll(".overflow-y-auto")].map((s) => s.scrollWidth - s.clientWidth)))
       if (sheetWide > 0) throw new Error(`${name}: the drawer scrolls sideways by ${sheetWide}px`)
       const small = await smallTargets(p)
       if (small.length) throw new Error(`${name}: ${small.length} targets under 44px — ${small.slice(0, 6).join(" | ")}`)
       // 動作列只有一行按鈕（取消／新增）
       const footer = await dialog.getByRole("button", { name: "新增", exact: true }).evaluate((el) => el.parentElement.getBoundingClientRect().height)
       if (footer > 50) throw new Error(`${name}: the footer buttons take more than one line (${footer}px)`)
+      if (name !== "iPhone 15") return
+      // 鍵盤打開（看得到的高度剩 410px）時，要點的格子常常正好在固定的動作列底下：Chromium 只在格子不在捲動範圍裡時才捲，
+      // 動作列底下也算在範圍裡，所以沒有 scroll-padding 的話點進去還是被蓋住。先把格子捲到動作列底下再點
+      await p.setViewportSize({ width: 393, height: 410 })
+      await p.waitForTimeout(300)
+      for (const id of ["lot-fee-0", "lot-qty-1"]) {
+        const placed = await p.evaluate((id) => {
+          document.activeElement?.blur()
+          const el = document.getElementById(id)
+          const sc = el.closest(".overflow-y-auto")
+          const bar = document.querySelector('[role="dialog"] .sticky').getBoundingClientRect()
+          sc.scrollTop += el.getBoundingClientRect().top - (bar.top + 16)
+          return el.getBoundingClientRect().top > bar.top
+        }, id)
+        if (!placed) throw new Error(`${name}: could not scroll ${id} under the action bar to test it`)
+        await p.locator("#" + id).focus()
+        await p.waitForTimeout(300)
+        const covered = await p.evaluate(() => {
+          const el = document.activeElement
+          const b = el.getBoundingClientRect()
+          const hit = document.elementFromPoint(b.x + b.width / 2, b.y + b.height / 2)
+          return hit === el ? null : `${el.id} at y ${Math.round(b.top)}–${Math.round(b.bottom)} is under ${hit?.tagName}.${hit?.className}`
+        })
+        if (covered) throw new Error(`${name} with the keyboard open: ${covered}`)
+      }
     })
   }
 })

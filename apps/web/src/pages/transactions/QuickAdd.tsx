@@ -396,9 +396,10 @@ function DetailsStep({
   }
 
   const qtyLabel = inLots ? "張數" : "股數"
-  const priceLabel = `買進價格${isUS ? "（美元）" : ""}`
-  // 買進的手續費記在這一檔的計價幣別（後端用商品的幣別，不看帳戶）：美股寫在標籤上，和買進價格的「（美元）」一樣
-  const feeLabel = `手續費${symbol.currency === "USD" ? "（美元）" : ""}`
+  // 買進的價格與手續費記在這一檔的計價幣別（後端用商品的幣別，不看帳戶）：美股寫「（美元）」，台股記進美元帳戶也不寫
+  const inUSD = symbol.currency === "USD"
+  const priceLabel = `買進價格${inUSD ? "（美元）" : ""}`
+  const feeLabel = `手續費${inUSD ? "（美元）" : ""}`
   const many = lots.length > 1
   const q = quote.data
   // 收盤價是哪一天的：台股「11/12 收盤」；美股寫紐約的日期「11/13 收盤（美東）」（as_of 是紐約 16:00，台北已經是隔天）
@@ -484,7 +485,7 @@ function DetailsStep({
                   inputMode="decimal"
                   autoComplete="off"
                   enterKeyHint="done"
-                  aria-label={`${nth}買進價格`}
+                  aria-label={`${nth}${priceLabel}`}
                   placeholder={first ? "每股價格" : "價格"}
                   value={l.price}
                   onChange={(e) => setLot(l.id, { price: e.target.value })}
@@ -498,7 +499,7 @@ function DetailsStep({
                   inputMode="decimal"
                   autoComplete="off"
                   enterKeyHint="done"
-                  aria-label={`${nth}手續費`}
+                  aria-label={`${nth}${feeLabel}`}
                   // 選填：不填就是 0，不自動算（2026-11-14）
                   placeholder={first ? "選填" : "手續費"}
                   value={l.fee}
@@ -513,8 +514,9 @@ function DetailsStep({
                   variant="ghost"
                   size="icon"
                   aria-label={`移除第 ${i + 1} 筆`}
-                  // 第一筆有標籤：往下對齊輸入框（桌面是那一列，手機是日期與手續費那一行）；手機上排在這一筆的最後
-                  className={cn("max-sm:order-4", first && "mt-[1.625rem]")}
+                  // 第一筆有標籤：往下對齊輸入框（桌面是那一列，手機是日期與手續費那一行）；手機上排在這一筆的最後，
+                  // ✕ 靠右對齊價格的右緣、和手續費隔開一段，看起來是移除整筆，不像清除手續費那一格
+                  className={cn("max-sm:order-4 max-sm:justify-end", first && "mt-[1.625rem]")}
                   onClick={() => setLots((ls) => ls.filter((x) => x.id !== l.id))}
                 >
                   <XIcon aria-hidden />
@@ -608,7 +610,9 @@ function Cell({
   return (
     <div className={cn("flex min-w-0 flex-col gap-1.5", className)}>
       {first && (
-        <label htmlFor={id} className="text-sm font-medium">
+        // 不折行：同一行的格子靠標籤一樣高對齊。360px 寬的手機上「手續費（美元）」比那一欄寬，
+        // 多出來的字伸到右邊移除鈕的上面（那裡空著），不會把輸入框擠到下面一行
+        <label htmlFor={id} className="text-sm font-medium whitespace-nowrap">
           {label}
         </label>
       )}

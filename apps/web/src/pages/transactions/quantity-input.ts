@@ -4,15 +4,20 @@
  * 不取整會被說「不是整數」；以股填時要是整數。
  */
 
-/** 輸入框的文字 → 數字（可以有千分位逗號與空白）；空白或不是數字時是 null */
+/**
+ * 輸入框的數字文字：全形（注音輸入法全形模式打的「２０」「１，２３４」「１２．５」）先換成半形，再拿掉千分位逗號與空白
+ */
+export const numberText = (s: string): string => s.normalize("NFKC").replace(/[,\s]/g, "")
+
+/** 輸入框的文字 → 數字（可以有千分位逗號與空白、可以是全形）；空白或不是數字時是 null */
 export const parseNumber = (s: string): number | null => {
-  const n = Number(s.replace(/[,\s]/g, ""))
+  const n = Number(numberText(s))
   return s.trim() === "" || Number.isNaN(n) ? null : n
 }
 
 /** 台股的數量太細：以張填時超過小數第三位，以股填時不是整數 */
 export const tooFine = (text: string, inLots: boolean): boolean => {
-  const t = text.replace(/[,\s]/g, "")
+  const t = numberText(text)
   return inLots ? /\.\d{4,}$/.test(t) : /\.\d*[1-9]\d*$/.test(t)
 }
 

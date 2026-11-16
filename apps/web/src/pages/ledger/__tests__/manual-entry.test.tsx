@@ -128,7 +128,8 @@ describe("帳本的「記一筆」", () => {
     const full = await screen.findByRole("dialog", {}, T)
     expect(await within(full).findByRole("heading", { name: "記一筆交易" }, T)).toBeInTheDocument()
     // 手續費與稅不自動算（2026-11-14）：選填的欄位，右邊只有合計
-    expect(await within(full).findByLabelText("手續費（選填）", {}, T)).toBeInTheDocument()
+    // 幣別和成交價一樣（台股「元」）
+    expect(await within(full).findByLabelText("手續費（選填，元）", {}, T)).toBeInTheDocument()
     expect(within(full).queryByText("稅費試算")).toBeNull()
     await waitFor(() => expect(within(full).getByText("台積電")).toBeInTheDocument(), T)
   })
