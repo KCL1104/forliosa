@@ -63,9 +63,15 @@ def test_a_new_group_is_free_with_the_lower_cap(app, client):
     fill(g["id"], free_cap() - 2)
     join(client, login(app, "last@x.tw", "最後一位"), g["id"])  # the last seat
     assert count(g["id"]) == free_cap()
-    r = accept(login(app, "late@x.tw", "晚到"), client, g["id"])
+    late = login(app, "late@x.tw", "晚到")
+    token = token_of(invite(client, g["id"]))
+    preview = late.get(f"{API}/invites/{token}").json()  # said before the invitee picks what to share
+    assert preview["full"] is True and f"免費群組最多 {free_cap()} 位成員" in preview["full_message"]
+    assert client.get(f"{API}/invites/{token}").json()["full"] is False  # a member is not joining
+    r = late.post(f"{API}/invites/{token}/accept", json={"share": SHARE_DEFAULT})
     assert r.status_code == 409
     err = r.json()["error"]
+    assert err["message"] == preview["full_message"]
     assert err["code"] == "limit_reached"
     assert f"免費群組最多 {free_cap()} 位成員" in err["message"]
     assert f"加值的群組最多 {boosted_cap()} 位" in err["message"]
@@ -171,6 +177,9 @@ def test_admin_grant_checks(app, client, admin):
     assert grant(admin, "nobody@x.tw").json()["error"]["code"] == "user_not_found"
     r = admin.post(f"{API}/admin/group-passes", json={"email": "demo@forliosa.local", "until": today_plus(-1)})
     assert r.status_code == 422 and r.json()["error"]["code"] == "until_in_past"
+    for far in ("9999-12-31", today_plus(365 * 5 + 2)):  # a typo, not a 500 (end_of would overflow)
+        r = admin.post(f"{API}/admin/group-passes", json={"email": "demo@forliosa.local", "until": far})
+        assert r.status_code == 422 and r.json()["error"]["code"] == "until_too_far"
     r = grant(admin, "demo@forliosa.local", group_id=theirs["id"])
     assert r.status_code == 409 and r.json()["error"]["code"] == "not_group_owner"
     assert grant(admin, "demo@forliosa.local", group_id="grp_missing").json()["error"]["code"] == "group_not_found"
@@ -209,7 +218,11 @@ def test_extend_revoke_and_expiry_never_remove_anyone(app, client, admin):
     assert admin.delete(f"{API}/admin/group-passes/{p['id']}").status_code == 204
     assert client.get(f"{API}/groups/{g['id']}").json()["plan"]["tier"] == "free"
     assert count(g["id"]) == members
-    assert admin.delete(f"{API}/admin/group-passes/{p['id']}").status_code == 404
+    # the record stays (payer, dates, note, group: the books and refunds), listed as ended; stopping again is a no-op
+    [row] = [r for r in admin.get(f"{API}/admin/group-passes").json() if r["id"] == p["id"]]
+    assert row["active"] is False and row["group_id"] == g["id"] and row["email"] == "demo@forliosa.local"
+    assert admin.delete(f"{API}/admin/group-passes/{p['id']}").status_code == 204
+    assert admin.delete(f"{API}/admin/group-passes/gps_nope").status_code == 404
 
 
 def test_transfer_and_account_deletion_keep_the_boost(app, client, admin):

@@ -84,13 +84,20 @@ def plan_out(plan: GroupPlan) -> dict[str, Any]:
             "grandfathered": plan.grandfathered, "daily_report": plan.boosted}
 
 
-def boosted_group_ids(db: Session, *moments: datetime) -> set[str]:
-    """Groups with a pass that had not ended at any of these moments (the daily report: the session's close, now)."""
-    out: set[str] = set()
-    for gid, until in db.execute(select(GroupPass.group_id, GroupPass.until).where(GroupPass.group_id.is_not(None))):
+def boosting_passes(db: Session, *moments: datetime) -> dict[str, list[str]]:
+    """``{group id: [pass ids]}`` of passes on a group that had not ended at any of these moments (the daily report:
+    the session's close, now)."""
+    out: dict[str, list[str]] = {}
+    for pid, gid, until in db.execute(select(GroupPass.id, GroupPass.group_id, GroupPass.until)
+                                      .where(GroupPass.group_id.is_not(None)).order_by(GroupPass.id)):
         if any(_aware(until) > t for t in moments):
-            out.add(gid)
+            out.setdefault(gid, []).append(pid)
     return out
+
+
+def boosted_group_ids(db: Session, *moments: datetime) -> set[str]:
+    """Groups with a pass that had not ended at any of these moments."""
+    return set(boosting_passes(db, *moments))
 
 
 def full_message(plan: GroupPlan, settings: Settings | None = None) -> str:
@@ -120,9 +127,15 @@ def admin_list(db: Session, now: datetime | None = None) -> list[dict[str, Any]]
     return sorted(out, key=lambda r: (not r["active"], r["until"] or "", r["email"] or "", r["id"]))
 
 
+MAX_YEARS = 5  # a last day further away is a typo (and 9999-12-31 would overflow end_of)
+
+
 def _check_until(until: date, now: datetime) -> None:
-    if until < now.astimezone(TAIPEI).date():
+    today = now.astimezone(TAIPEI).date()
+    if until < today:
         raise ApiError(422, "until_in_past", "到期日不能早於今天。")
+    if until > today + timedelta(days=365 * MAX_YEARS):
+        raise ApiError(422, "until_too_far", f"到期日最多是 {MAX_YEARS} 年後。")
 
 
 def _owned_group(db: Session, group_id: str, user_id: str) -> Group:
@@ -170,12 +183,15 @@ def admin_update(db: Session, pass_id: str, changes: dict[str, Any], now: dateti
     return _admin_row(p, db.get(User, p.payer_id) if p.payer_id else None, now)
 
 
-def admin_revoke(db: Session, pass_id: str) -> None:
-    """Take a boost away at once (the group falls back to its free cap; nobody is removed)."""
+def admin_revoke(db: Session, pass_id: str, now: datetime | None = None) -> None:
+    """End a boost at once (the group falls back to its free cap; nobody is removed). The record stays — payer, dates,
+    note and group, for the books and refunds (privacy policy §7) — listed as ended; it can be extended again."""
+    now = now or now_utc()
     p = db.get(GroupPass, pass_id)
     if p is None:
         raise not_found("找不到這個群組加值。")
-    db.delete(p)
+    if is_active(p, now):
+        p.until, p.updated_at = now, now
     db.commit()
 
 

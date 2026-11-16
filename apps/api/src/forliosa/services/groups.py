@@ -314,6 +314,11 @@ def preview_invite(db: Session, token: str, me: User | None) -> dict[str, Any]:
                            "status": "member" if is_member else "valid"}
     if is_member:  # only a signed-in member learns the group id (the invite page links straight to the group)
         out["group_id"] = group.id
+    # at its cap the join would be refused (409 limit_reached): say so before the invitee picks what to share
+    plan = group_plans.plan_of(db, group)
+    out["full"] = not is_member and member_count(db, group.id) >= plan.member_cap
+    if out["full"]:
+        out["full_message"] = group_plans.full_message(plan)
     return out
 
 

@@ -22,11 +22,14 @@ import { formatDay, monthLater } from "@/lib/membership"
 
 const NOTE_MAX = 200
 const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請檢查網路後再試一次。")
+/** 最後一天最多 5 年後（後端 `until_too_far`；打錯成 9999 年時日曆就選不到） */
+const maxUntil = (today: string) => new Date(Date.parse(`${today}T00:00:00Z`) + 5 * 365 * 86_400_000).toISOString().slice(0, 10)
 
 /**
  * 群組加值（`/admin/members?kind=group`；群組加值包第一階段，還沒有付款）：站方用付款人的 email 開通，到最後一天為止。
  * 付款人在自己擁有的群組的設定裡選要用在哪個群組；站方也可以直接填群組編號（付款人要是那個群組的擁有者）。
- * 站方只看得到付款人與群組編號，看不到群組名稱與內容。過期的也列出：「延長」改最後一天，「停止」馬上回到免費（不移出成員）。
+ * 站方只看得到付款人與群組編號，看不到群組名稱與內容。過期的也列出：「延長」改最後一天，「停止」馬上回到免費（不移出成員）；
+ * 停止的紀錄照樣留著、列成已到期（做帳與退款用，隱私權政策 §7），之後也可以再延長。
  */
 export function GroupPasses() {
   const list = useGroupPasses()
@@ -128,6 +131,7 @@ export function GroupPasses() {
               type="date"
               value={until}
               min={today}
+              max={maxUntil(today)}
               {...field("until")}
               onChange={(e) => {
                 setUntil(e.target.value)
@@ -281,6 +285,7 @@ function ExtendDialog({ pass, onClose }: { pass: AdminGroupPass; onClose: () => 
               type="date"
               value={until}
               min={today}
+              max={maxUntil(today)}
               aria-invalid={error ? true : undefined}
               aria-describedby={error ? `${id}-until-error` : undefined}
               onChange={(e) => {
@@ -324,6 +329,7 @@ function RevokeDialog({ pass, onClose }: { pass: AdminGroupPass; onClose: () => 
           <AlertDialogTitle>停止 {who(pass)} 的群組加值？</AlertDialogTitle>
           <AlertDialogDescription>
             {pass.group_id ? "那個群組馬上回到免費：日報停止，人數超過上限時不能再加人，不會移出成員。" : "還沒用在群組，停止後付款人就不能再選。"}
+            這筆紀錄會留著、列成已到期，之後可以再延長。
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>

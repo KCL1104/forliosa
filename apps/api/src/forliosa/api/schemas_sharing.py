@@ -197,6 +197,9 @@ class InvitePreview(BaseModel):
     status: Literal["valid", "member"]
     # only with status "member" (signed in and already a member); absent otherwise
     group_id: str | None = None
+    # 群組加值包 2026-11-16: the group is at its member cap, a join would be refused; full_message only when full
+    full: bool = False
+    full_message: str | None = None
 
 
 class AcceptIn(StrictModel):
@@ -444,11 +447,13 @@ class DailyWhy(BaseModel):
 class DailyFacts(BaseModel):
     """Filtered on every read by the current memberships and share settings."""
 
-    returns: list[DailyReturn]
+    returns: list[DailyReturn]  # members with a day return that day
+    returns_no_data: int = Field(0, description="開了報酬率、但那天沒有報酬數字的成員人數（例如還沒有帳本）：只列人數")
     benchmarks: list[DailyBenchmark]
     common_holdings: list[DailyCommonHolding]
-    trades: list[DailyTrade]
+    trades: list[DailyTrade]  # still there (a trade deleted or changed later drops out)
     trades_count: int
+    trades_shared: bool = Field(True, description="還有成員對群組開著交易動態；false 時不知道有沒有買賣，不顯示這一列")
     why: list[DailyWhy]
 
 

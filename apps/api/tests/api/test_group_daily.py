@@ -21,8 +21,8 @@ from forliosa import closes
 from forliosa.ai.keypool import KeyPool
 from forliosa.config import get_settings
 from forliosa.db import session_factory
-from forliosa.models import AiUsage, DatasetStatus, GroupDailyReport, GroupPass, NotificationOutbox
-from forliosa.services import group_daily, notifications
+from forliosa.models import AiUsage, DatasetStatus, GroupDailyReport, GroupPass, NotificationOutbox, Transaction
+from forliosa.services import group_daily, notifications, sharing
 from forliosa.timeutil import TAIPEI, market_close_dt, now_utc
 from tests.api.m5 import (
     API,
@@ -141,7 +141,7 @@ def family(app, client, day):
     assert r.status_code == 201, r.text  # imported: never
     boost(g["id"])
     return {"g": g, "free": free, "a": client, "b": b, "c": c,
-            "ids": {"a": me_id(client), "b": me_id(b), "c": me_id(c)}}
+            "ids": {"a": me_id(client), "b": me_id(b), "c": me_id(c)}, "acc": {"b": b_acc, "c": c_acc}}
 
 
 # -- who gets one, and what it holds -----------------------------------------------------------------------------------
@@ -156,8 +156,9 @@ def test_only_boosted_groups_and_only_shared_numbers(family, market, day):
     facts = r.facts
     assert [x["user_id"] for x in facts["returns"]] == [ids["a"], ids["b"], ids["c"]]
     assert sorted(h["user_id"] for h in facts["holdings"]) == sorted([ids["a"], ids["b"]])
-    assert {t["user_id"]: t["items"] for t in facts["trades"]} == {
-        ids["b"]: [{"side": "buy", "symbol": "2317.TW"}], ids["c"]: [{"side": "buy", "symbol": "2454.TW"}]}
+    assert {t["user_id"]: [(i["side"], i["symbol"]) for i in t["items"]] for t in facts["trades"]} == {
+        ids["b"]: [("buy", "2317.TW")], ids["c"]: [("buy", "2454.TW")]}
+    assert len(facts["prompt_trade_ids"]) == 2 and facts["pass_id"]
     blob = json.dumps(facts, ensure_ascii=False)
     for secret in ("示範使用者", "小明", "小華", "大學同學", "quantity", "price", "2412", "永豐", "國泰"):
         assert secret not in blob
@@ -240,6 +241,77 @@ def test_a_group_where_nobody_shares_anything_gets_no_report(app, client, market
     assert run(market, evening(day)).created == 0 and reports(g["id"]) == []
 
 
+def test_members_without_a_number_are_counted_not_described(app, client, market, day):
+    """Members who share returns but have no ledger (yet) have no day return: they are not 'sharers' for the AI
+    paragraph's two-member minimum, nor in the prompt; the page only counts them."""
+    g = make_group(client, "登山社")
+    trade(client, account(client)["id"], "2330", "buy", trading_day(40), 1000, 500)
+    for i in range(3):
+        join(client, login(app, f"h{i}@x.tw", f"山友{i}"), g["id"], {**SHARE_NONE, "returns": True})
+    boost(g["id"])
+    fake = FakeModel()
+    run(market, evening(day), fake)
+    [r] = reports(g["id"])
+    assert fake.requests == [] and r.error == "few_sharers"
+    facts = client.get(f"{API}/groups/{g['id']}/daily-reports").json()["items"][0]["facts"]
+    assert len(facts["returns"]) == 1 and facts["returns"][0]["day_return_pct"] is not None
+    assert facts["returns_no_data"] == 3 and facts["trades_shared"] is False
+
+    empty = make_group(login(app, "solo@x.tw", "一個人"), "臨時群組")  # only a member without a number: no report
+    boost(empty["id"])
+    run(market, evening(day))
+    assert reports(empty["id"]) == []
+
+
+def test_nobody_sharing_trades_means_no_trade_count(app, client, market, day):
+    g = make_group(client)
+    b = login(app, "b@x.tw", "小明")
+    join(client, b, g["id"], {**SHARE_NONE, "returns": True})
+    for c in (client, b):
+        trade(c, account(c)["id"], "2330", "buy", trading_day(40), 1000, 500)
+    boost(g["id"])
+    fake = FakeModel(lambda p: "今天有分享報酬的 2 個人。")
+    run(market, evening(day), fake)
+    assert "買賣筆數" not in fake.prompts[0]  # unknown, not 0
+    item = client.get(f"{API}/groups/{g['id']}/daily-reports").json()["items"][0]
+    assert item["facts"]["trades_shared"] is False and item["facts"]["trades"] == [] and item["summary"]
+    with session_factory()() as db:
+        members = sharing.members_of(db, g["id"])
+        _, allowed = group_daily.anonymous_prompt(reports(g["id"])[0], members)
+    assert group_daily.check("今天有 7 筆買賣。", allowed)  # a count the prompt never had
+
+
+def test_a_deleted_or_changed_trade_drops_out_and_withdraws_the_paragraph(family, market, day):
+    g, a, b = family["g"], family["a"], family["b"]
+    run(market, evening(day))
+    url = f"{API}/groups/{g['id']}/daily-reports"
+    assert a.get(url).json()["items"][0]["summary"]
+    with session_factory()() as db:
+        tid = db.scalar(select(Transaction.id).where(Transaction.user_id == family["ids"]["b"],
+                                                     Transaction.trade_date == day))
+    r = b.delete(f"{API}/transactions/{tid}")
+    assert r.status_code == 204, r.text
+    item = a.get(url).json()["items"][0]
+    assert [t["symbol"] for t in item["facts"]["trades"]] == ["2454.TW"] and item["facts"]["trades_count"] == 1
+    assert item["summary"] == "" and group_daily.SUMMARY_WITHDRAWN in item["notes"]  # it counted 2 trades
+
+
+def test_one_report_per_boost_and_day(client, market, day):
+    """A boost moved to another of the owner's groups after its report was written does not write a second one."""
+    g1, g2 = make_group(client, "一"), make_group(client, "二")
+    trade(client, account(client)["id"], "2330", "buy", trading_day(40), 1000, 500)
+    with session_factory()() as db:
+        db.add(GroupPass(id="gps_move", payer_id=me_id(client), group_id=g1["id"], until=now_utc() + timedelta(days=30),
+                         source="manual", created_at=now_utc(), updated_at=now_utc()))
+        db.commit()
+    assert run(market, evening(day, time(23, 30))).created == 1
+    assert client.put(f"{API}/groups/{g2['id']}/plan", json={"pass_id": "gps_move"}).status_code == 200
+    assert run(market, evening(day, time(23, 40))).created == 0
+    assert len(reports(g1["id"])) == 1 and reports(g2["id"]) == []
+    boost(g2["id"])  # a second boost of its own: it gets one
+    assert run(market, evening(day, time(23, 50))).created == 1
+
+
 # -- checking the answer ----------------------------------------------------------------------------------------------
 @pytest.mark.parametrize("bad", [
     "成員 A 今天漲最多。",
@@ -267,9 +339,17 @@ def test_two_bad_answers_keep_the_facts_only(family, market, day):
 
 
 def test_check_and_formatting():
-    allowed = {2.3, 1.2, 0.8}
-    assert group_daily.check("今天有分享報酬的 3 個人，從 −1.2% 到 +2.3%。加權報酬指數漲 0.80%。", allowed) is None
+    allowed = group_daily.Allowed(pcts={2.3, -1.2, 0.8, -0.6, 0.4}, counts={3, 2, 1, 0},
+                                  names=["元大S&P500", "台積電", "元大台灣50"])
+    assert group_daily.check("今天有分享報酬的 3 個人，2 個漲、1 個跌，從 −1.2% 到 +2.3%。加權報酬指數漲 0.80%。"
+                             "台積電跌 0.6%，元大S&P500 漲 0.4%。今天有 0 筆買賣。", allowed) is None
+    assert group_daily.check("從 1.2% 到 2.3%。", allowed) is None  # no sign given: the absolute value is checked
     assert "99.9%" in group_daily.check("漲 99.9%。", allowed)
+    # caught on the NFKC form, with the sign or direction, counts, and labels however they are written
+    for bad in ("從 −1.2％ 到 +9.9％。", "台積電漲 0.6%。", "台積電上漲了 0.6%。", "漲幅 1.2%。",
+                "加權報酬指數 −0.8%。", "今天有分享報酬的 16 個人。", "今天有 5 筆買賣。", "A 和 C 漲得比 0050 多。",
+                "成員Ａ漲 2.3%。", "Ｂ漲 2.3%。"):
+        assert group_daily.check(bad, allowed) is not None, bad
     assert group_daily.check("", allowed) == "沒有內容"
     assert group_daily.check("字" * 300, allowed) == "太長"
     assert group_daily.pct1(-0.0123, "−") == "−1.2%" and group_daily.pct1(0.0004) == "0.0%"
@@ -378,6 +458,7 @@ def _channel(family, daily: bool = True) -> PushFake:
 
 def test_finished_at_night_is_pushed_at_0730_with_only_pushing_members(family, market, day):
     fake = _channel(family)
+    trade(family["b"], family["acc"]["b"]["id"], "2303", "buy", day, 1000, 50)  # after the channel was set up
     sent_before = len(fake.discord)
     run(market, evening(day, time(23, 40)))
     with session_factory()() as db:
@@ -394,7 +475,10 @@ def test_finished_at_night_is_pushed_at_0730_with_only_pushing_members(family, m
     [r] = reports(family["g"]["id"])
     assert r.summary not in text and "AI 分析僅供參考" not in text  # 示範使用者 and 小華 contributed, do not push
     assert "台積電" not in text  # one pushing member shares holdings: nothing is common
-    assert "今天的買賣：買進 " in text and "聯發科" not in text  # only 小明's trade (小華 does not push)
+    # sent the morning after: 當日／那天, not 今日／今天
+    assert "當日報酬：" in text and "今日報酬" not in text and "今天的買賣" not in text
+    # only 小明's trade made after the channel was set up (the push start of trade pushes); 小華 does not push
+    assert "那天的買賣：買進 聯電" in text and "鴻海" not in text and "聯發科" not in text
 
 
 def test_finished_in_the_evening_is_pushed_at_once_and_not_when_off(family, market, day):
@@ -410,7 +494,8 @@ def test_finished_in_the_evening_is_due_at_once(family, market, day):
     run(market, evening(day, time(19, 0)))
     with session_factory()() as db:
         notifications.send_due(db, market, now=evening(day, time(19, 1)))
-    assert len(fake.discord) == n + 1 and "日報" in fake.discord[-1].body["content"]
+    text = fake.discord[-1].body["content"]
+    assert len(fake.discord) == n + 1 and "日報" in text and "今日報酬：" in text  # sent the same evening
 
 
 def test_the_daily_job_is_scheduled(monkeypatch):

@@ -100,7 +100,7 @@ def patch_group_pass(body: GroupPassPatch, pass_id: str = Path(max_length=32), d
 
 
 @router.delete("/group-passes/{pass_id}", status_code=204, response_class=Response,
-               summary="取消群組加值包（群組回到免費的上限；不會移除任何成員）")
+               summary="停止群組加值包：馬上結束（群組回到免費的上限；不會移除任何成員），紀錄保留、列為已結束")
 def revoke_group_pass(pass_id: str = Path(max_length=32), db: Session = Depends(get_db)):
     group_plans.admin_revoke(db, pass_id)
     return Response(status_code=204)

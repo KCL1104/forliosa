@@ -15,8 +15,10 @@ numbers went into it still pushes (:func:`sharing.digest_summary_pushable`).
 
 **Daily reports** (群組 AI 日報 of boosted groups; channels with ``notify_daily``, off by default): queued when a report
 is finished, due at once — or at 07:30 when it finished between 23:00 and 07:30 (``group_daily.push_at``). The text
-has only the numbers of members who push (:func:`sharing.daily_facts_view` with ``pushing_only``) and the AI paragraph
-only while every member whose numbers went into it still pushes.
+has only the numbers of members who push (:func:`sharing.daily_facts_view` with ``pushing_only``), only trades still
+there and created after the member's push start (like trade pushes), and the AI paragraph only while every member whose
+numbers went into it still pushes and every trade it counted is still sent. Sent after the trading day (most are, at
+07:30) it says 當日報酬／那天的買賣 instead of 今日／今天.
 
 **Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
 :func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,
@@ -52,7 +54,7 @@ from forliosa.models import (
 )
 from forliosa.services import channels, pushers, sharing
 from forliosa.services.pushers import SendResult
-from forliosa.timeutil import now_utc
+from forliosa.timeutil import TAIPEI, now_utc
 
 log = logging.getLogger("forliosa.notifications")
 
@@ -211,11 +213,13 @@ DAILY_MAX_TRADES = 10
 
 
 def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], summary: str | None, kind: str,
-               settings: Settings) -> str:
-    """The memo's format: a title line, the AI paragraph, then the numbers (one decimal, −), the link and the note."""
+               settings: Settings, same_day: bool = True) -> str:
+    """The memo's format: a title line, the AI paragraph, then the numbers (one decimal, −), the link and the note.
+    ``same_day``: sent on the trading day itself (今日報酬, 今天的買賣); else 當日報酬, 那天的買賣."""
     from forliosa.services.group_daily import pct1, weekday
 
     d = report.trading_day
+    day_word, trades_word = ("今日", "今天") if same_day else ("當日", "那天")
     lines = [f"Forliosa 群組「{_t(group.name, kind)}」日報　{d.month}/{d.day}（{weekday(d)}）收盤"]
     if summary:
         lines.append(_t(summary, kind))
@@ -224,7 +228,7 @@ def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], sum
         shown = "、".join(f"{_t(r['display_name'], kind)} {pct1(r['day_return_pct'], '−')}"
                          for r in returns[:DAILY_MAX_RETURNS])
         more = f" 等 {len(returns)} 人" if len(returns) > DAILY_MAX_RETURNS else ""
-        lines.append(f"今日報酬：{shown}{more}")
+        lines.append(f"{day_word}報酬：{shown}{more}")
     bench = [b for b in view["benchmarks"] if b.get("day_return_pct") is not None]
     if bench:
         lines.append("對照：" + "、".join(f"{_t(b['name'], kind)} {pct1(b['day_return_pct'], '−')}" for b in bench))
@@ -237,7 +241,7 @@ def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], sum
         items = [f"{SIDE_LABEL.get(t['side'], t['side'])} {_t(t['name'], kind)}"
                  + (f"（{t['count']} 筆）" if t["count"] > 1 else "") for t in view["trades"][:DAILY_MAX_TRADES]]
         more = f" 等 {view['trades_count']} 筆" if len(view["trades"]) > DAILY_MAX_TRADES else ""
-        lines.append("今天的買賣：" + "、".join(items) + more)
+        lines.append(f"{trades_word}的買賣：" + "、".join(items) + more)
     link = _link(settings)
     if link:
         lines.append(f"完整日報：{link}")
@@ -342,13 +346,16 @@ def _send_daily(db: Session, settings: Settings, row: NotificationOutbox, now: d
         _cancel([row], "not_ready")
         return
     members = sharing.members_of(db, group.id)
-    view = sharing.daily_facts_view(report.facts or {}, members, pushing_only=True)
+    facts = report.facts or {}
+    live = sharing.daily_trades_live(db, facts, members, ch.configured_at)  # not deleted, after the push start
+    view = sharing.daily_facts_view(facts, members, pushing_only=True, live=live)
     if not (view["returns"] or view["common_holdings"] or view["trades"]):
         _cancel([row], "not_shared")
         return
     summary = (report.summary if report.status == "ready" and report.summary
-               and sharing.digest_summary_pushable(report.facts or {}, members) else None)
-    text = daily_text(group, report, view, summary, ch.kind, settings)
+               and sharing.daily_summary_visible(facts, members, live, pushing_only=True) else None)
+    same_day = now.astimezone(TAIPEI).date() == report.trading_day
+    text = daily_text(group, report, view, summary, ch.kind, settings, same_day)
     _apply(db, ch, [row], _deliver(db, ch, text, settings), now)
 
 

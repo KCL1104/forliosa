@@ -947,8 +947,8 @@ def digest_day_facts(db: Session, md: MarketData, members: list[Member], day: da
                 Transaction.user_id.in_(sharing_trades), Transaction.type.in_(FEED_SIDES),
                 Transaction.source.in_(FEED_SOURCES), Transaction.note != CONVERTED_NOTE,
                 Transaction.trade_date == day).order_by(Transaction.created_at, Transaction.id)):
-            if feed_eligible(t) and t.symbol:
-                items[t.user_id].append({"side": t.type, "symbol": t.symbol})
+            if feed_eligible(t) and t.symbol:  # the id: a trade deleted or changed later drops out on read
+                items[t.user_id].append({"side": t.type, "symbol": t.symbol, "id": t.id})
                 if t.symbol not in symbols:
                     info = md.instrument(t.symbol)
                     symbols[t.symbol] = {"name": info.name if info else t.symbol}
@@ -969,18 +969,58 @@ def digest_day_facts(db: Session, md: MarketData, members: list[Member], day: da
     return facts, labels(["ledger", *sources])
 
 
-def daily_facts_view(facts: dict[str, Any], members: list[Member], pushing_only: bool = False) -> dict[str, Any]:
+def daily_trades_live(db: Session, facts: dict[str, Any], members: list[Member],
+                      configured_at: datetime | None = None) -> dict[str, tuple[str, str]]:
+    """The stored trades of a daily report that may still be shown, ``{transaction id: (side, symbol)}``: the
+    transaction still exists and is still a feed trade of that day (a deleted or changed one drops out, like the
+    feed). With ``configured_at`` (a channel's), only trades created after the member's :func:`push_start`, the rule
+    of trade pushes."""
+    ids = [it["id"] for t in facts.get("trades", []) for it in t.get("items", []) if it.get("id")]
+    if not ids:
+        return {}
+    day = date.fromisoformat(facts["trading_day"])
+    by_id = {m.user_id: m for m in members}
+    out: dict[str, tuple[str, str]] = {}
+    for t in db.scalars(select(Transaction).where(Transaction.id.in_(ids))):
+        if not feed_eligible(t) or t.trade_date != day:
+            continue
+        if configured_at is not None:
+            m = by_id.get(t.user_id)
+            start = push_start(m, configured_at) if m is not None else None
+            if start is None or t.created_at <= start:
+                continue
+        out[t.id] = (t.type, t.symbol)
+    return out
+
+
+def daily_summary_visible(facts: dict[str, Any], members: list[Member], live: dict[str, tuple[str, str]],
+                          pushing_only: bool = False) -> bool:
+    """:func:`digest_summary_visible` for a daily report, which also counted the day's trades: every trade the
+    paragraph counted (``facts["prompt_trade_ids"]``) must still be there and showable (``live``)."""
+    return (digest_summary_visible(facts, members, pushing_only)
+            and all(i in live for i in facts.get("prompt_trade_ids", [])))
+
+
+def daily_facts_view(facts: dict[str, Any], members: list[Member], pushing_only: bool = False,
+                     live: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
     """A stored daily report's facts as members see them **now** (``pushing_only``: what a channel may show): day
-    returns with display names, the benchmarks, symbols two or more of them hold with that day's move, the day's
-    trades without names (side and stock, merged), and the common holdings that moved the most (「為什麼漲跌」
-    links)."""
+    returns with display names (members without a number that day are only counted, ``returns_no_data``), the
+    benchmarks, symbols two or more of them hold with that day's move, the day's trades without names (side and
+    stock, merged; with ``live`` from :func:`daily_trades_live`, only trades still there) and whether anyone still
+    shares trades (``trades_shared``: without, "no trades" would be a guess), and the common holdings that moved the
+    most (「為什麼漲跌」 links)."""
     by_id = {m.user_id: m for m in members}
     returns = []
+    no_data = 0
     for r in facts.get("returns", []):
         m = _allowed(by_id, r["user_id"], "returns", pushing_only)
-        if m is not None:
-            returns.append({"user_id": m.user_id, "display_name": m.user.display_name,
-                            "day_return_pct": r["day_return_pct"]})
+        if m is None:
+            continue
+        if r["day_return_pct"] is None:
+            no_data += 1
+            continue
+        returns.append({"user_id": m.user_id, "display_name": m.user.display_name,
+                        "day_return_pct": r["day_return_pct"]})
     info = facts.get("symbols", {})
     holders: dict[str, set[str]] = defaultdict(set)
     for h in facts.get("holdings", []):
@@ -991,10 +1031,14 @@ def daily_facts_view(facts: dict[str, Any], members: list[Member], pushing_only:
                "day_change_pct": (info.get(s) or {}).get("day_change_pct")} for s, u in holders.items() if len(u) >= 2]
     common.sort(key=lambda c: (-c["holder_count"], c["symbol"]))
     merged: dict[tuple[str, str], dict[str, Any]] = {}
+    trades_shared = False
     for t in facts.get("trades", []):
         if _allowed(by_id, t["user_id"], "trades", pushing_only) is None:
             continue
+        trades_shared = True
         for it in t.get("items", []):
+            if live is not None and live.get(it.get("id", "")) != (it["side"], it["symbol"]):
+                continue
             cell = merged.setdefault((it["side"], it["symbol"]), {
                 "side": it["side"], "symbol": it["symbol"],
                 "name": (info.get(it["symbol"]) or {}).get("name") or it["symbol"], "count": 0})
@@ -1002,7 +1046,8 @@ def daily_facts_view(facts: dict[str, Any], members: list[Member], pushing_only:
     trades = list(merged.values())
     moved = [c for c in common if c["day_change_pct"] is not None and abs(c["day_change_pct"]) >= DAILY_WHY_MIN]
     moved.sort(key=lambda c: (-abs(c["day_change_pct"]), c["symbol"]))
-    return {"returns": returns, "benchmarks": list(facts.get("benchmarks", [])), "common_holdings": common,
-            "trades": trades, "trades_count": sum(t["count"] for t in trades),
+    return {"returns": returns, "returns_no_data": no_data, "benchmarks": list(facts.get("benchmarks", [])),
+            "common_holdings": common, "trades": trades, "trades_count": sum(t["count"] for t in trades),
+            "trades_shared": trades_shared,
             "why": [{"symbol": c["symbol"], "name": c["name"], "day_change_pct": c["day_change_pct"]}
                     for c in moved[:DAILY_WHY_MAX]]}

@@ -18,6 +18,7 @@ import { usePageTitle } from "@/app/page-title"
 /**
  * 邀請連結 `/invite/:token`：不需登入就能預覽（群組名稱、誰邀請的）。
  * 沒登入 → 到登入頁（登入後回到這裡）；已登入 → 先選分享（預設只開報酬率）再加入。
+ * 群組人數已到上限（預覽的 `full`）→ 直接說，不讓對方登入、選完分享才被擋。
  */
 export function InvitePage() {
   const { token } = useParams({ from: "/invite/$token" })
@@ -62,6 +63,8 @@ export function InvitePage() {
                 </Link>
               )}
             </div>
+          ) : preview.data.full ? (
+            <p className="text-base text-ink">{limitText(preview.data.full_message ?? "這個群組已經滿了")}</p>
           ) : signedOut ? (
             <SignInFirst token={token} />
           ) : (

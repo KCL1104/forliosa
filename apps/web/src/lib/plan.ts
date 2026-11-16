@@ -10,6 +10,15 @@ export function untilDay(ymd: string, today: string): string {
   return y === today.slice(0, 4) ? md : `${y}/${md}`
 }
 
+/** 到期的加值在設定頁還列多久（天）：付款人看得出加值已經結束 */
+export const ENDED_PASS_DAYS = 30
+
+/** 最後一天 `ymd` 已過、而且在 `days` 天以內（`today` 是台北的今天） */
+export function endedWithin(ymd: string, today: string, days = ENDED_PASS_DAYS): boolean {
+  const diff = (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${ymd}T00:00:00Z`)) / 86_400_000
+  return diff > 0 && diff <= days
+}
+
 /** 自己的方案（設定頁；決定 14）：「會員，到 12/31」、沒有到期日的「會員」（站方管理員也是）、「免費」 */
 export function userPlanLabel(plan: Pick<UserPlan, "tier" | "until">, today: string): string {
   if (plan.tier !== "member") return "免費"

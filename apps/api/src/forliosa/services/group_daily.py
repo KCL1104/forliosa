@@ -9,21 +9,25 @@ when the owner turns 「日報」 on for a channel, pushed there.
   of 發行量加權股價報酬指數 and 元大台灣50. Never amounts, quantities, watchlists, personal briefings or AI chats. News
   only as links to pages the site already has: the market page's AI 收盤重點 and the stocks' 「為什麼漲跌」 — the report
   does no web search of its own.
-* **The AI paragraph** (2–4 sentences): only with two or more members sharing returns. The model sees anonymous labels
-  in a random order and numbers the server already worked out (how many rose and fell, the range, how many beat each
-  benchmark, the common holdings' moves, the trade count). An answer that names a label, gives advice or a target
-  price, predicts, explains a move, uses a number the prompt did not have, or reads like boilerplate is rejected; one
+* **The AI paragraph** (2–4 sentences): only with two or more members sharing returns who have a number that day (a
+  member without a ledger is only counted on the page). The model sees anonymous labels in a random order and numbers
+  the server already worked out (how many rose and fell, the range, how many beat each benchmark, the common holdings'
+  moves, the trade count — only while someone shares trades). An answer that names a label (also a lone or full-width
+  letter), gives advice or a target price, predicts, explains a move, uses a percentage (or its direction) or a count
+  the prompt did not have, or reads like boilerplate is rejected; one
   rewrite is asked for, then the report keeps its facts only (``failed``). One normal Messages call on the digest model
   (Haiku, effort low), charged to nobody (``ai_usage.feature = "group_daily"``, ``user_id`` NULL, ``thread_id`` the
   report id). ``AI_GROUP_DAILY_MONTHLY_BUDGET_USD`` caps the month for all groups together.
 * **Withdrawal**: like the digest, the paragraph is shown (and pushed) only while every member whose numbers went into
-  it still shares them (``sharing.digest_summary_visible``); the facts are filtered by the current settings on every
-  read.
+  it still shares them and every trade it counted is still there (``sharing.daily_summary_visible``); the facts are
+  filtered by the current settings on every read, and a trade deleted or changed later drops out
+  (``sharing.daily_trades_live``).
 * **When**: trading days, for the latest finished session, once both markets' official closes of that session are
   stored (``forliosa.closes``: TWSE's same-day file in the afternoon, TPEx about 23:30) and TWSE's indices too. From
   06:30 the next morning (:data:`CUTOFF`) it is written with whatever is in: interim evening closes for a market whose
   official file is late (with a note), no 加權報酬指數 comparison while TWSE's index file is missing. The worker looks
-  every 10 minutes (``Worker.group_daily``); one report per group and day.
+  every 10 minutes (``Worker.group_daily``); one report per group and day, and per boost and day (a boost moved to
+  another group after its report was written does not write a second one that day).
 * **Push**: channels with ``notify_daily`` (default off). A report finished between 23:00 and 07:30 is sent at 07:30
   (:func:`push_at`); only members who push contribute to the pushed text.
 * **When a boost ends** no new report is written; earlier ones stay readable until they are 30 days old.
@@ -36,6 +40,7 @@ import binascii
 import logging
 import re
 import secrets
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -86,7 +91,11 @@ FORBIDDEN = re.compile(
 # House style: no evaluations, filler connectives, dashes, exclamation marks or Markdown.
 STYLE = re.compile(r"整體而言|整體來看|總的來說|總體來看|值得注意|值得一提|此外|另外值得|表現亮眼|亮眼|"
                    r"值得肯定|穩健|可喜|遺憾|不錯|強勁|疲弱|—|――|！|!|\*\*|#")
-PERCENT = re.compile(r"(\d+(?:\.\d+)?)\s*%")
+# Checked on the NFKC form (full-width ％, letters and digits become plain ones): a percentage with its sign, a count
+# of people or trades, a lone capital letter (a member label; stock names are taken out first).
+PERCENT = re.compile(r"([+\-−]?)\s*(\d+(?:\.\d+)?)\s*%")
+COUNT = re.compile(r"(?<![\d.])(\d+)\s*(?:個|位|人|筆)")
+LABEL = re.compile(r"(?<![A-Za-z0-9])[A-Z](?![A-Za-z0-9])")
 MINUS = re.compile(r"-(?=\d+(?:\.\d+)?\s*%)")
 
 SYSTEM = (
@@ -97,7 +106,9 @@ SYSTEM = (
     "兩人以上共同持有的股票今天的漲跌（最多寫兩檔，持有人數多的先寫）；今天有幾筆買賣。\n"
     "2. 不點名，也不要寫出任何成員代號（不要出現「成員 A」這類字），不要猜測任何人的身分，不要評論誰做得好或不好。\n"
     "3. 不給任何買進、賣出、加碼、減碼建議，不提目標價，不預測之後的走勢，不解釋漲跌的原因。\n"
-    "4. 只用提供的數字和人數，照抄，不要自己算新的數字；百分比照提供的寫到小數點後一位。沒有資料的項目就略過。\n"
+    "4. 只用提供的數字和人數，照抄，不要自己算新的數字；百分比照提供的寫到小數點後一位。"
+    "指數和股票的漲跌，負的寫「跌」：台積電 −0.6% 寫成「台積電跌 0.6%」；報酬的範圍照提供的寫（從 −2.5% 到 +1.0%）。"
+    "沒有資料的項目就略過。\n"
     "5. 繁體中文（台灣用語），2 到 4 句、150 字以內，純文字：不要標題、條列或 Markdown。\n"
     "6. 像群組裡的人在報今天的數字：句子短，直接說。不加評語或鼓勵（不寫「表現亮眼」「值得肯定」「穩健」），"
     "不用「整體而言」「值得注意的是」「此外」這類連接語，不用破折號或驚嘆號，最後一句不總結、不展望。\n\n"
@@ -172,57 +183,94 @@ def weekday(d: date) -> str:
     return WEEKDAYS[d.weekday()]
 
 
+@dataclass
+class Allowed:
+    """What a paragraph may write: the percentages as the prompt shows them (signed, one decimal), the counts of
+    people and trades, and the stock and benchmark names (their letters are not member labels)."""
+    pcts: set[float] = field(default_factory=set)
+    counts: set[int] = field(default_factory=set)
+    names: list[str] = field(default_factory=list)
+
+
 def anonymous_prompt(report: GroupDailyReport, members: list[sharing.Member],
-                     shuffle: Callable[[list], None] | None = None) -> tuple[str, set[float]]:
-    """What the model sees, and the percentages (absolute, one decimal) it may write. Never a display name, user id,
-    group name or one member's holdings."""
+                     shuffle: Callable[[list], None] | None = None,
+                     live: dict[str, tuple[str, str]] | None = None) -> tuple[str, Allowed]:
+    """What the model sees, and what it may write. Never a display name, user id, group name or one member's
+    holdings. Members without a number that day are left out; the trade count only while someone shares trades."""
     facts = report.facts or {}
-    view = sharing.daily_facts_view(facts, members)
-    values = [r["day_return_pct"] for r in view["returns"]]
-    known = [v for v in values if v is not None]
+    view = sharing.daily_facts_view(facts, members, live=live)
+    values = [r["day_return_pct"] for r in view["returns"] if r["day_return_pct"] is not None]
+    known = list(values)
     (shuffle or secrets.SystemRandom().shuffle)(values)
-    allowed: set[float] = set()
+    allowed = Allowed()
 
     def show(v: float | None) -> str:
+        text = pct1(v)
         if v is not None:
-            allowed.add(round(abs(v) * 100, 1))
-        return pct1(v)
+            allowed.pcts.add(float(text.rstrip("%")))
+        return text
+
+    def count(n: int) -> int:
+        allowed.counts.add(n)
+        return n
 
     day = report.trading_day
     lines = [f"交易日：{day.isoformat()}（{weekday(day)}）",
-             f"今天有分享報酬率的成員：{len(values)} 位（匿名、順序隨機）"]
+             f"今天有分享報酬率的成員：{count(len(values))} 位（匿名、順序隨機）"]
     lines += [f"- 成員 {_label(i)}：{show(v)}" for i, v in enumerate(values)]
     if known:
         up = sum(1 for v in known if v >= sharing.DAILY_FLAT)
         down = sum(1 for v in known if v <= -sharing.DAILY_FLAT)
-        lines.append(f"上漲 {up} 位、下跌 {down} 位、持平 {len(known) - up - down} 位；"
+        lines.append(f"上漲 {count(up)} 位、下跌 {count(down)} 位、持平 {count(len(known) - up - down)} 位；"
                      f"最低 {show(min(known))}，最高 {show(max(known))}")
     bench = [b for b in view["benchmarks"] if b.get("day_return_pct") is not None]
     if bench:
         lines.append("對照（今日）：" + "、".join(f"{b['name']} {show(b['day_return_pct'])}" for b in bench))
         for b in bench:
             above = sum(1 for v in known if v > b["day_return_pct"])
-            lines.append(f"報酬高於{b['name']}的成員：{above} 位")
-    common = [f"{c['name']}（{c['holder_count']} 人，{show(c['day_change_pct'])}）"
+            lines.append(f"報酬高於{b['name']}的成員：{count(above)} 位")
+    common = [f"{c['name']}（{count(c['holder_count'])} 人，{show(c['day_change_pct'])}）"
               for c in view["common_holdings"][:10]]
     lines.append("兩人以上共同持有的股票（持有人數，今日漲跌）：" + ("、".join(common) if common else "無"))
-    lines.append(f"今天的買賣筆數（只算有分享交易動態的成員）：{view['trades_count']}")
+    if view["trades_shared"]:  # nobody shares trades: the count is unknown, not 0
+        lines.append(f"今天的買賣筆數（只算有分享交易動態的成員）：{count(view['trades_count'])}")
+    allowed.names = [b["name"] for b in bench] + [c["name"] for c in view["common_holdings"][:10]]
     return "\n".join(lines), allowed
 
 
-def check(text: str, allowed: set[float]) -> str | None:
-    """Why ``text`` cannot be shown (None: it can)."""
+def _direction(before: str) -> int:
+    """The sign the words right before a percentage give it: 漲 0.6%, 上漲了 0.6%, 漲幅 0.6% (+1), 跌 0.6% (−1)."""
+    tail = before.rstrip().removesuffix("了").removesuffix("幅")
+    return 1 if tail.endswith("漲") else -1 if tail.endswith("跌") else 0
+
+
+def check(text: str, allowed: Allowed) -> str | None:
+    """Why ``text`` cannot be shown (None: it can). Checked on the NFKC form, so full-width ％, letters and digits
+    are caught too: a percentage must be one the prompt had, with its sign when the text gives one (−0.6%, 跌 0.6%);
+    a count of people or trades must be one of the prompt's; no lone capital letter (a member label)."""
     if not text:
         return "沒有內容"
     if len(text) > MAX_SUMMARY_CHARS:
         return "太長"
-    if m := FORBIDDEN.search(text):
+    norm = unicodedata.normalize("NFKC", text)
+    if m := FORBIDDEN.search(norm):
         return f"用了「{m.group(0)}」"
-    if m := STYLE.search(text):
+    if m := STYLE.search(norm):
         return f"用了「{m.group(0)}」"
-    for m in PERCENT.finditer(text):
-        if round(float(m.group(1)), 1) not in allowed:
-            return f"寫了提供的資料裡沒有的數字 {m.group(0)}"
+    bare = norm
+    for name in sorted(allowed.names, key=len, reverse=True):
+        bare = bare.replace(unicodedata.normalize("NFKC", name), " ")
+    if m := LABEL.search(bare):
+        return f"寫了成員代號「{m.group(0)}」"
+    plain = {abs(v) for v in allowed.pcts}
+    for m in PERCENT.finditer(norm):
+        value = round(float(m.group(2)), 1)
+        sign = {"+": 1, "-": -1, "−": -1}.get(m.group(1)) or _direction(norm[:m.start()])
+        if (sign * value not in allowed.pcts) if sign else (value not in plain):
+            return f"寫了提供的資料裡沒有的數字或方向 {m.group(0).strip()}"
+    for m in COUNT.finditer(norm):
+        if int(m.group(1)) not in allowed.counts:
+            return f"寫了提供的資料裡沒有的人數或筆數 {m.group(0)}"
     return None
 
 
@@ -261,8 +309,9 @@ def _transient(exc: BaseException) -> bool:
 def write(db: Session, r: GroupDailyReport, pool: KeyPool | None, settings: Settings, now: datetime) -> None:
     """The AI paragraph of a pending report (or why there is none), then its pushes."""
     members = sharing.members_of(db, r.group_id)
-    view = sharing.daily_facts_view(r.facts or {}, members)
-    if len(view["returns"]) < MIN_RETURN_SHARERS:
+    live = sharing.daily_trades_live(db, r.facts or {}, members)
+    view = sharing.daily_facts_view(r.facts or {}, members, live=live)
+    if len(view["returns"]) < MIN_RETURN_SHARERS:  # members with a number that day
         _done(db, r, "ready", now, error="few_sharers")
         return
     budget = Decimal(str(settings.ai_group_daily_monthly_budget_usd))
@@ -275,8 +324,13 @@ def write(db: Session, r: GroupDailyReport, pool: KeyPool | None, settings: Sett
         return
     facts = dict(r.facts or {})
     facts["prompt_contributors"] = sharing.digest_prompt_contributors(facts, members)
+    traders = set(facts["prompt_contributors"]["trades"])
+    # the trades the paragraph counts: one deleted or changed later withdraws it (sharing.daily_summary_visible)
+    facts["prompt_trade_ids"] = sorted(it["id"] for t in facts.get("trades", []) if t["user_id"] in traders
+                                       for it in t.get("items", [])
+                                       if live.get(it.get("id", "")) == (it["side"], it["symbol"]))
     r.facts = facts
-    prompt, allowed = anonymous_prompt(r, members)
+    prompt, allowed = anonymous_prompt(r, members, live=live)
     problem: str | None = None
     for _ in range(2):  # the answer, and one rewrite when it cannot be shown
         content = prompt if problem is None else f"{prompt}\n\n（上一版不能用：{problem}。照規則重寫，只回摘要本身。）"
@@ -315,8 +369,9 @@ def write(db: Session, r: GroupDailyReport, pool: KeyPool | None, settings: Sett
 
 
 def create(db: Session, md: MarketData, group: Group, day: date, now: datetime, notes: list[str],
-           settings: Settings) -> GroupDailyReport | None:
-    """The day's report with its facts (pending), or None when nobody shares anything the report could show."""
+           settings: Settings, pass_id: str | None = None) -> GroupDailyReport | None:
+    """The day's report with its facts (pending), or None when nobody shares anything the report could show (a day
+    return, a common holding or a trade). ``pass_id``: the boost it is written under (one report per boost and day)."""
     members = sharing.members_of(db, group.id)
     if not any(m.shares(k) for m in members for k in sharing.DIGEST_PARTS):
         return None
@@ -325,6 +380,7 @@ def create(db: Session, md: MarketData, group: Group, day: date, now: datetime, 
     if not (view["returns"] or view["common_holdings"] or view["trades"]):
         return None
     facts["notes"] = [*notes, *facts.get("notes", [])]
+    facts["pass_id"] = pass_id
     r = GroupDailyReport(id=new_id("gdr"), group_id=group.id, trading_day=day, status="pending", summary="",
                          facts=facts, sources=sources, model=store.model_for(DIGEST_MODEL_FEATURE, settings),
                          attempts=0, created_at=now)
@@ -351,12 +407,16 @@ def run(db: Session, md: MarketData, now: datetime | None = None, pool: KeyPool 
     if day is None:
         return res
     res.day = day
-    boosted = group_plans.boosted_group_ids(db, market_close_dt(day), now)
-    if not boosted:
+    passes = group_plans.boosting_passes(db, market_close_dt(day), now)
+    if not passes:
         return res
-    have = set(db.scalars(select(GroupDailyReport.group_id).where(GroupDailyReport.trading_day == day,
-                                                                  GroupDailyReport.group_id.in_(boosted))))
-    todo = sorted(boosted - have)
+    done = db.execute(select(GroupDailyReport.group_id, GroupDailyReport.facts)
+                      .where(GroupDailyReport.trading_day == day)).all()
+    have = {gid for gid, _ in done}
+    # one report per boost and day: a boost moved to another group after its report was written does not write a
+    # second one that day
+    used = {(facts or {}).get("pass_id") for _, facts in done}
+    todo = sorted(set(passes) - have)
     if not todo:
         return res
     ready, notes = closes_ready(db, day, now)
@@ -365,9 +425,11 @@ def run(db: Session, md: MarketData, now: datetime | None = None, pool: KeyPool 
         return res
     for gid in todo:
         group = db.get(Group, gid)
-        if group is None:
+        free = [p for p in passes[gid] if p not in used]
+        if group is None or not free:
             continue
-        r = create(db, md, group, day, now, notes, settings)
+        used.add(free[0])
+        r = create(db, md, group, day, now, notes, settings, pass_id=free[0])
         if r is None:
             continue
         res.created += 1
@@ -381,9 +443,12 @@ def run(db: Session, md: MarketData, now: datetime | None = None, pool: KeyPool 
 
 
 # -- reading ---------------------------------------------------------------------------------------------------------
-def report_out(r: GroupDailyReport, members: list[sharing.Member], market_summary: bool) -> dict[str, Any]:
+def report_out(r: GroupDailyReport, members: list[sharing.Member], market_summary: bool,
+               live: dict[str, tuple[str, str]] | None = None) -> dict[str, Any]:
+    """``live``: :func:`sharing.daily_trades_live` (the trades still there); without it, none are."""
     facts = r.facts or {}
-    show = bool(r.summary) and r.status == "ready" and sharing.digest_summary_visible(facts, members)
+    live = live or {}
+    show = bool(r.summary) and r.status == "ready" and sharing.daily_summary_visible(facts, members, live)
     notes = list(facts.get("notes", []))
     if r.status == "pending":
         notes.append(WRITING)
@@ -394,7 +459,8 @@ def report_out(r: GroupDailyReport, members: list[sharing.Member], market_summar
     return {
         "id": r.id, "status": r.status, "trading_day": r.trading_day, "created_at": iso_taipei(r.created_at),
         "finished_at": iso_taipei(r.finished_at) if r.finished_at else None,
-        "summary": r.summary if show else "", "facts": sharing.daily_facts_view(facts, members), "notes": notes,
+        "summary": r.summary if show else "", "facts": sharing.daily_facts_view(facts, members, live=live),
+        "notes": notes,
         "market_summary": market_summary, "disclaimer": DISCLAIMER, "sources": list(r.sources or []),
         "is_demo": bool(facts.get("is_demo")),
     }
@@ -423,7 +489,8 @@ def reports_page(db: Session, group: Group, limit: int, cursor: str | None) -> d
     days = {r.trading_day for r in page}
     summaries = set(db.scalars(select(AiMarketSummary.trading_day).where(
         AiMarketSummary.trading_day.in_(days), AiMarketSummary.status == "ok"))) if days else set()
-    return {"items": [report_out(r, members, r.trading_day in summaries) for r in page],
+    return {"items": [report_out(r, members, r.trading_day in summaries,
+                                 sharing.daily_trades_live(db, r.facts or {}, members)) for r in page],
             "next_cursor": _cursor(page[-1]) if len(rows) > limit else None}
 
 

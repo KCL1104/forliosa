@@ -176,7 +176,7 @@ describe("邀請", () => {
   it("沒登入可以預覽；加入要登入；選好分享才加入；已是成員 409；失效 410；不存在 404", async () => {
     const api = fresh()
     await api.logout()
-    expect(await api.getInvite("club-2026")).toEqual({ group_name: "投資讀書會", inviter_display_name: "林老師", status: "valid" })
+    expect(await api.getInvite("club-2026")).toEqual({ group_name: "投資讀書會", inviter_display_name: "林老師", status: "valid", full: false })
     expect(await codeOf(api.acceptInvite("club-2026", { returns: true, holdings: false, amounts: false, trades: false, trade_prices: false, push: false }))).toBe("401 unauthorized")
     await api.devLogin({ email: "demo@forliosa.local", display_name: "示範使用者" })
     const share = { returns: true, holdings: false, amounts: false, trades: true, trade_prices: false, push: false }
@@ -278,6 +278,8 @@ describe("群組加值包（和後端 group_plans、group_daily 同一套規則�
     expect(err).toBeInstanceOf(ApiError)
     expect(`${(err as ApiError).status} ${(err as ApiError).code}`).toBe("409 limit_reached")
     expect((err as ApiError).message).toBe("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）")
+    // 預覽就先說滿了（選分享之前）；同一句話
+    expect(store.getInvite("hiking-open")).toMatchObject({ full: true, full_message: (err as ApiError).message })
     // 投資讀書會（以前建立的，免費也是 50）照樣能加入
     expect(store.acceptInvite("club-2026", DEFAULT_SHARE).plan).toEqual({ tier: "free", until: null, member_cap: 50, grandfathered: true, daily_report: false })
   })
@@ -315,8 +317,11 @@ describe("群組加值包（和後端 group_plans、group_daily 同一套規則�
     expect((await api.getGroup("grp_hiking")).plan?.member_cap).toBe(50)
     expect((await api.updateGroupPass("gps_friends", { until: "2026-12-06" })).active).toBe(true)
     expect((await api.getGroup("grp_friends")).plan?.tier).toBe("boosted")
+    expect(await codeOf(api.grantGroupPass({ email: "demo@forliosa.local", until: "9999-12-31" }))).toBe("422 until_too_far")
     await api.revokeGroupPass(made.id)
     expect((await api.getGroup("grp_hiking")).plan?.member_cap).toBe(15)
+    // 停止不刪紀錄：列成已到期，可以再延長
+    expect((await api.listGroupPasses()).find((r) => r.id === made.id)).toMatchObject({ active: false, group_id: "grp_hiking", note: "試用" })
   })
 
   it("日報：數字依目前的分享設定過濾；有人關掉報酬率，AI 段落收回、notes 說為什麼", async () => {
@@ -331,6 +336,12 @@ describe("群組加值包（和後端 group_plans、group_daily 同一套規則�
     expect(after.summary).toBe("")
     expect(after.notes).toEqual(["寫這段 AI 摘要時用到的分享內容已有變動（有成員調整了分享設定或離開群組），摘要不再顯示。"])
     expect(after.facts.returns.map((r) => r.display_name)).toEqual(["爸爸", "媽媽", "姊姊"])
+    // 只關掉持股（報酬率照開）也收回：段落也用了共同持股（後端看 returns、holdings、trades 三種）
+    const api2 = fresh()
+    const fam = await api2.getGroup("grp_family")
+    expect(fam.my_share.holdings).toBe(true)
+    await api2.putShare("grp_family", { ...fam.my_share, holdings: false })
+    expect((await api2.listDailyReports("grp_family")).items[0]!.summary).toBe("")
     // 免費群組也讀得到以前的日報；從來沒有的群組是空的
     expect((await api.listDailyReports("grp_friends")).items).toHaveLength(2)
     expect((await api.listDailyReports("grp_hiking")).items).toEqual([])

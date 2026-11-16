@@ -126,6 +126,8 @@ export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean })
                 </li>
               ))}
             </ul>
+            {/* 開了報酬率、那天沒有數字的人（例如還沒記帳）：只寫人數，不畫一排「—」 */}
+            {(f.returns_no_data ?? 0) > 0 && <p className="mt-1 text-sm text-ink-2">另 {f.returns_no_data} 人沒有這天的資料。</p>}
           </div>
         )}
         <div className="flex flex-col gap-4">
@@ -145,14 +147,17 @@ export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean })
               </ul>
             </div>
           )}
-          <div>
-            <h3 className="text-sm text-ink-2">{today ? "今天" : "那天"}的買賣</h3>
-            <p className="mt-1">
-              {f.trades.length > 0
-                ? f.trades.map((t) => `${t.side === "buy" ? "買進" : "賣出"} ${t.name}${t.count > 1 ? `（${t.count} 筆）` : ""}`).join("、")
-                : "沒有"}
-            </p>
-          </div>
+          {/* 沒有人開交易動態時不知道有沒有買賣：整列不出現（不寫「沒有」） */}
+          {(f.trades_shared ?? true) && (
+            <div>
+              <h3 className="text-sm text-ink-2">{today ? "今天" : "那天"}的買賣</h3>
+              <p className="mt-1">
+                {f.trades.length > 0
+                  ? f.trades.map((t) => `${t.side === "buy" ? "買進" : "賣出"} ${t.name}${t.count > 1 ? `（${t.count} 筆）` : ""}`).join("、")
+                  : "沒有"}
+              </p>
+            </div>
+          )}
           {latest && f.why.length > 0 && (
             <div>
               <h3 className="text-sm text-ink-2">為什麼漲跌</h3>
@@ -179,7 +184,12 @@ export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean })
   )
 }
 
-/** 一天的漲跌：算不出來是「—」（不說原因） */
+/**
+ * 一天的漲跌：一位小數，和 AI 段落、推播一樣（備忘錄的格式）；不到 0.05% 算持平（後端 `DAILY_FLAT`），
+ * 寫 0.0%、不畫箭頭，表格和段落說的「幾個持平」才對得起來。算不出來是「—」（不說原因）。
+ */
+const DAILY_FLAT = 0.0005
 function DayPct({ value }: { value: number | null }) {
-  return value === null ? <span className="num text-ink-2">—</span> : <Pct value={value} />
+  if (value === null) return <span className="num text-ink-2">—</span>
+  return <Pct value={Math.abs(value) < DAILY_FLAT ? 0 : value} decimals={1} />
 }

@@ -380,7 +380,8 @@ def _facts_lines(found: Lookup) -> list[str]:
 
 def _page_time(s: dict[str, Any]) -> str | None:
     """When the page is from, in our own words: 「11/16 08:05」 (「2 hours ago」, counted from when it was found),
-    「10/30」 (「October 30, 2026」), 「2025/10/30」 (another year); None when unknown."""
+    「約 11/2」 (「14 days ago」: the search engine rounds), 「10/30」 (「October 30, 2026」), 「2025/10/30」 (another
+    year); None when unknown."""
     text = str(s.get("page_age") or "").strip()
     try:
         found = datetime.fromisoformat(str(s.get("found_at"))) if s.get("found_at") else None
@@ -389,9 +390,11 @@ def _page_time(s: dict[str, Any]) -> str | None:
     if m := _AGE.search(text):
         if found is None:
             return None
-        unit = m.group(2).lower()
-        t = found - timedelta(days=int(m.group(1)) * _AGE_DAYS[unit])
-        return f"{t.month}/{t.day} {t:%H:%M}" if unit in ("minute", "hour") else f"{t.month}/{t.day}"
+        n, unit = int(m.group(1)), m.group(2).lower()
+        t = found - timedelta(days=n * _AGE_DAYS[unit])
+        if unit in ("minute", "hour"):
+            return f"{t.month}/{t.day} {t:%H:%M}"
+        return f"{'約 ' if n * _AGE_DAYS[unit] >= 2 else ''}{t.month}/{t.day}"
     for fmt in ("%B %d, %Y", "%b %d, %Y", "%Y-%m-%d"):
         try:
             d = datetime.strptime(text, fmt).date()

@@ -118,13 +118,17 @@ interface MockTelegram {
   notify_digest: boolean
   notify_daily: boolean
 }
-/** 一則日報：寫好時有分享報酬的人（`contributors`）；數字讀取時依目前的成員與開關重新算、過濾 */
+/**
+ * 一則日報：寫好時有分享報酬的人（`contributors`）與開著持股、交易動態的人（`parts`，後端 `prompt_contributors`）；
+ * 數字讀取時依目前的成員與開關重新算、過濾；三種裡有人關掉或離開就收回 AI 段落
+ */
 interface MockDaily {
   id: string
   trade_date: string
   created_at: string
   status: DailyReport["status"]
   contributors: string[]
+  parts?: { holdings: string[]; trades: string[] }
 }
 /** 群組加值（後端的 GroupPass）：站方開給付款人，付款人用在自己擁有的一個群組；`until` 是最後一天 */
 export interface MockPass {
@@ -203,10 +207,14 @@ function demoDailySummary(f: DailyReportFacts, today: boolean): string | null {
   if (rets.length < 2) return null
   const pct = (x: number) => `${x < 0 ? "−" : "+"}${Math.abs(x * 100).toFixed(1)}%`
   const move = (x: number) => `${x < 0 ? "跌" : "漲"} ${Math.abs(x * 100).toFixed(1)}%`
-  const up = rets.filter((x) => x > 0).length
-  const down = rets.filter((x) => x < 0).length
+  // 不到 0.05% 算持平（後端 DAILY_FLAT；頁面的表格也這樣畫）
+  const up = rets.filter((x) => x >= 0.0005).length
+  const down = rets.filter((x) => x <= -0.0005).length
+  const flat = rets.length - up - down
   const day = today ? "今天" : "當天"
-  const parts = [`${day}有分享報酬的 ${rets.length} 個人，${up} 個漲、${down} 個跌，從 ${pct(Math.min(...rets))} 到 ${pct(Math.max(...rets))}。`]
+  const parts = [
+    `${day}有分享報酬的 ${rets.length} 個人，${up} 個漲、${down} 個跌${flat ? `、${flat} 個持平` : ""}，從 ${pct(Math.min(...rets))} 到 ${pct(Math.max(...rets))}。`,
+  ]
   const [taiex, etf] = f.benchmarks
   if (taiex?.day_return_pct != null && etf?.day_return_pct != null) {
     const beat = rets.filter((x) => x > etf.day_return_pct!).length
@@ -214,7 +222,8 @@ function demoDailySummary(f: DailyReportFacts, today: boolean): string | null {
   }
   const top = f.common_holdings[0]
   if (top?.day_change_pct != null) parts.push(`${top.holder_count} 個人都有的${top.name}${move(top.day_change_pct)}。`)
-  parts.push(f.trades.length > 0 ? `${day}有 ${f.trades.length} 筆買賣。` : `${day}沒有買賣。`)
+  // 筆數是 trades_count（合併前）；沒有人開交易動態時不知道，不寫
+  if (f.trades_shared !== false) parts.push(f.trades_count > 0 ? `${day}有 ${f.trades_count} 筆買賣。` : `${day}沒有買賣。`)
   return parts.join("")
 }
 
@@ -344,6 +353,11 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       telegramLink: null,
     }
     groups.push(family, friends, club, hiking)
+    // 日報寫好時開著持股、交易動態的人：之後有人關掉，AI 段落就收回（後端 `digest_summary_visible` 看三種）
+    for (const g of groups) {
+      const sharers = (key: keyof ShareSettings) => g.members.filter((m) => m.share[key]).map((m) => m.ref.user_id)
+      for (const d of g.daily) d.parts = { holdings: sharers("holdings"), trades: sharers("trades") }
+    }
     // 群組加值：我的兩個（一個用在家族投資、一個還沒選群組），阿凱在大學同學那個已經到期
     passes.push(
       { id: "gps_family", payer: me.user_id, group_id: family.id, until: "2026-12-31", note: "11/16 試用", created_at: "2026-11-12T09:00:00+08:00", attached_at: "2026-11-12T09:05:00+08:00" },
@@ -529,13 +543,15 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
   const dailyFacts = (g: MockGroup, d: MockDaily): DailyReportFacts => {
     const prev = prevTradingDay(d.trade_date)
     const sharing = (key: keyof ShareSettings) => g.members.filter((m) => m.share[key])
-    const returns = sharing("returns")
+    const allReturns = sharing("returns")
       .filter((m) => d.contributors.includes(m.ref.user_id))
       .map((m) => {
         const src = sourceFor(m.ref.user_id)
         const day = d.trade_date === MOCK_TODAY ? (src?.returns().day ?? null) : pseudoDayReturn(m.ref.user_id, d.trade_date)
         return { user_id: m.ref.user_id, display_name: refOf(m).display_name, day_return_pct: r4(day) }
       })
+    // 那天沒有數字的人只算人數（後端 `returns_no_data`）
+    const returns = allReturns.filter((r) => r.day_return_pct !== null)
     const { common } = overlap(sharing("holdings").map((m) => ({ symbols: holdingsOf(m.ref.user_id).map((x) => x.symbol) })))
     const change = (symbol: string): number | null => {
       const spec = findInstrument(symbol)
@@ -569,13 +585,19 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       common_holdings,
       trades,
       trades_count: trades.reduce((n, t) => n + t.count, 0),
+      trades_shared: sharing("trades").length > 0,
+      returns_no_data: allReturns.length - returns.length,
       why,
     }
   }
   const dailyOut = (g: MockGroup, d: MockDaily): DailyReport => {
     const facts = dailyFacts(g, d)
     // 收回：寫好時有分享報酬的人，現在有誰不在、或關掉了報酬率 → 不給 AI 段落（數字照樣過濾後給）；說法和後端一樣
-    const withdrawn = d.contributors.some((uid) => !g.members.find((m) => m.ref.user_id === uid)?.share.returns)
+    const still = (uid: string, key: keyof ShareSettings) => !!g.members.find((m) => m.ref.user_id === uid)?.share[key]
+    const withdrawn =
+      d.contributors.some((uid) => !still(uid, "returns")) ||
+      (d.parts?.holdings ?? []).some((uid) => !still(uid, "holdings")) ||
+      (d.parts?.trades ?? []).some((uid) => !still(uid, "trades"))
     const written = d.status === "ready" && d.contributors.length >= 2 ? demoDailySummary(facts, d.trade_date === MOCK_TODAY) : null
     const notes =
       d.status === "pending"
@@ -833,12 +855,17 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const { g, inv } = inviteState(token)
       const inviter = peopleIndex().get(inv.inviter) ?? (inv.inviter === meId() ? meRef() : undefined)
       const member = deps.signedIn() && !!findMember(g, meId())
+      // 人數到上限：先說（後端預覽的 `full`），不讓對方選完分享才被擋
+      const plan = planOf(g)
+      const full = !member && g.members.length >= plan.member_cap
       return {
         group_name: g.name,
         inviter_display_name: inviter?.display_name ?? "群組成員",
         status: member ? "member" : "valid",
         // 群組 id 只給已經是成員的本人
         ...(member ? { group_id: g.id } : {}),
+        full,
+        ...(full ? { full_message: fullMessage(plan) } : {}),
       }
     },
     acceptInvite(token: string, share: ShareSettings): Group {
@@ -1066,6 +1093,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
     /** 站方開通（後端 `admin_grant`）：給了群組編號時付款人要是擁有者 */
     adminGrantPass(payer: string, body: { until: string; note?: string; group_id?: string }, today: string): MockPass {
       if (!body.until || body.until < today) throw new ApiError(422, "until_in_past", "到期日不能早於今天。")
+      if (body.until > addDays(today, 5 * 365)) throw new ApiError(422, "until_too_far", "到期日最多是 5 年後。")
       const note = body.note?.trim() || null
       if (note && note.length > 200) throw new ApiError(422, "validation_error", "備註最多 200 個字")
       if (body.group_id) {
@@ -1083,14 +1111,16 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       if (!x) throw new ApiError(404, "not_found", "找不到這個群組加值。")
       if (patch.until !== undefined) {
         if (patch.until < today) throw new ApiError(422, "until_in_past", "到期日不能早於今天。")
+        if (patch.until > addDays(today, 5 * 365)) throw new ApiError(422, "until_too_far", "到期日最多是 5 年後。")
         x.until = patch.until
       }
       if (patch.note !== undefined) x.note = patch.note?.trim() || null
     },
+    /** 停止（後端 `admin_revoke`）：馬上結束，紀錄留著、列成已到期（做帳與退款用），之後可以再延長 */
     adminRevokePass(passId: string): void {
-      const i = passes.findIndex((y) => y.id === passId)
-      if (i < 0) throw new ApiError(404, "not_found", "找不到這個群組加值。")
-      passes.splice(i, 1)
+      const x = passes.find((y) => y.id === passId)
+      if (!x) throw new ApiError(404, "not_found", "找不到這個群組加值。")
+      if (x.until >= MOCK_TODAY) x.until = addDays(MOCK_TODAY, -1)
     },
 
     // ── 頻道 ──
@@ -1127,7 +1157,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       }
       // 示範：token 含 fail 時當作測試訊息送不出去
       if (m[2]!.includes("fail")) throw new ApiError(422, "webhook_failed", "測試訊息送不出去，請確認 webhook 網址還有效")
-      g.discord = { hint: `…/${m[2]!.slice(-4)}`, status: "active", disabled_reason: null, notify_trades: !!body.notify_trades, notify_digest: !!body.notify_digest, notify_daily: !!body.notify_daily }
+      g.discord = { hint: `…/${m[2]!.slice(-4)}`, status: "active", disabled_reason: null, notify_trades: !!body.notify_trades, notify_digest: !!body.notify_digest, notify_daily: body.notify_daily ?? g.discord?.notify_daily ?? false }
     },
     patchDiscord(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean; notify_daily?: boolean }): void {
       const { g, me } = memberGroup(groupId)

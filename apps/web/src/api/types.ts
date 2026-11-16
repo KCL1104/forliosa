@@ -1335,14 +1335,18 @@ export interface Digest {
  * 不含金額、股數、觀察清單。
  */
 export interface DailyReportFacts {
-  /** 開了報酬率的成員那天的報酬（和排行的「今日」一樣） */
+  /** 開了報酬率、那天有報酬數字的成員的報酬（和排行的「今日」一樣） */
   returns: { user_id: string; display_name: string; day_return_pct: number | null }[]
+  /** 開了報酬率、但那天沒有報酬數字的成員人數（例如還沒有帳本）：只寫人數（舊版後端沒有） */
+  returns_no_data?: number
   benchmarks: { symbol: string; name: string; day_return_pct: number | null }[]
   /** 兩人以上持有的股票（只算開了持股的成員）與它那天的漲跌（美股是 null） */
   common_holdings: { symbol: string; name: string; holder_count: number; day_change_pct: number | null }[]
   /** 那天的買賣：只算開了交易動態的成員，不寫是誰、同一檔同方向合併（`count` 筆）；匯入對帳單的不算 */
   trades: { side: "buy" | "sell"; symbol: string; name: string; count: number }[]
   trades_count: number
+  /** 還有成員開著交易動態；false 時不知道有沒有買賣，不寫「沒有」（舊版後端沒有：當成 true） */
+  trades_shared?: boolean
   /** 漲跌最多的共同持股：連到個股頁的「為什麼漲跌」 */
   why: { symbol: string; name: string; day_change_pct: number | null }[]
 }
@@ -1441,6 +1445,10 @@ export interface InvitePreview {
   status: "valid" | "member"
   /** 只有 `status: "member"` 時有（成員本人才拿得到）：直接連到那個群組 */
   group_id?: string
+  /** 群組人數已到上限，加入會被擋（409 limit_reached）：先說，不讓對方選完分享才知道 */
+  full?: boolean
+  /** `full` 時伺服器的說明（和 409 的訊息一樣） */
+  full_message?: string
 }
 
 // ── 討論串（docs/api-contract.md「討論串（2026-11-13）」）──────────────────

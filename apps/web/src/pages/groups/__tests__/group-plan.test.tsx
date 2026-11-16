@@ -113,6 +113,39 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
     expect(within(older).queryByRole("link")).toBeNull()
   })
 
+  it("一位小數、不到 0.05% 是持平（和 AI 段落一樣）；沒有數字的人只寫人數；沒人開交易動態時沒有買賣那一列", async () => {
+    mount()
+    const [real] = (await api.listDailyReports("grp_family")).items
+    vi.spyOn(api, "listDailyReports").mockResolvedValue({
+      items: [
+        {
+          ...real!,
+          summary: "",
+          facts: {
+            ...real!.facts,
+            returns: [
+              { user_id: "u1", display_name: "阿哲", day_return_pct: -0.0002 },
+              { user_id: "u2", display_name: "小芸", day_return_pct: 0.0123 },
+            ],
+            returns_no_data: 2,
+            trades: [],
+            trades_count: 0,
+            trades_shared: false,
+          },
+        },
+      ],
+      next_cursor: null,
+    })
+    renderApp("/groups/grp_family?tab=digests&report=daily")
+    const [article] = (await screen.findAllByRole("article", undefined, T)) as [HTMLElement]
+    const flat = within(article).getByText("阿哲").closest("li")!
+    expect(flat).toHaveTextContent("0.0%")
+    expect(flat).not.toHaveTextContent("▼")
+    expect(within(article).getByText("小芸").closest("li")).toHaveTextContent("▲1.2%")
+    expect(within(article).getByText("另 2 人沒有這天的資料。")).toBeInTheDocument()
+    expect(within(article).queryByText(/的買賣$/)).toBeNull()
+  })
+
   it("切到週報：網址記住（?report=weekly），看到原本的週報", async () => {
     const user = userEvent.setup()
     mount()
@@ -235,6 +268,16 @@ describe("邀請：群組滿了", () => {
     await user.click(await screen.findByRole("button", { name: "加入群組" }, T))
     expect(await screen.findByText("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）。請告訴邀請你的人。", undefined, T)).toBeInTheDocument()
   })
+  it("預覽就說滿了（full）：不讓對方選完分享才被擋", async () => {
+    mount()
+    vi.spyOn(api, "getInvite").mockResolvedValue({
+      group_name: "登山社", inviter_display_name: "阿凱", status: "valid", full: true,
+      full_message: "這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）",
+    })
+    renderApp("/invite/hiking-open")
+    expect(await screen.findByText("這個群組已經滿了：免費群組最多 15 位成員（加值的群組最多 50 位）。請告訴邀請你的人。", undefined, T)).toBeInTheDocument()
+    expect(screen.queryByRole("button", { name: "加入群組" })).toBeNull()
+  })
   it("示範資料：登山社是這次改變以後建立的免費群組，15 人、上限 15", async () => {
     const adapter = createMockAdapter({ latency: [0, 0] })
     const g = await adapter.getGroup("grp_hiking")
@@ -253,6 +296,18 @@ describe("設定頁的方案（決定 14）", () => {
     expect(within(section).getByRole("link", { name: "家族投資" })).toHaveAttribute("href", "/groups/grp_family")
     expect(within(section).getByText("群組加值，到 12/15")).toBeInTheDocument()
     expect(within(section).getByText(/還沒有用在群組。到你擁有的群組的「成員」分頁/)).toBeInTheDocument()
+  })
+  it("到期 30 天內的加值照樣列出，寫已到期；更早的不列", async () => {
+    mount()
+    vi.spyOn(api, "listMyGroupPasses").mockResolvedValue([
+      { id: "gps_a", until: "2026-11-06", active: false, attached: true, group: { id: "grp_friends", name: "大學同學", my_role: "member" } },
+      { id: "gps_b", until: "2026-09-01", active: false, attached: false, group: null },
+    ] satisfies MyGroupPass[])
+    renderApp("/settings")
+    const section = (await screen.findByRole("heading", { name: "方案" }, T)).closest("section")!
+    expect(await within(section).findByText("群組加值，11/6 已到期", undefined, T)).toBeInTheDocument()
+    expect(within(section).getByRole("link", { name: "大學同學" })).toBeInTheDocument()
+    expect(within(section).queryByText(/9\/1/)).toBeNull()
   })
   it("一般會員：「會員，到 12/31」；免費帳號：「免費」；沒有加值就只有這一列", async () => {
     mount({ discussion: { admin: false } })

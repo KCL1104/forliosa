@@ -886,7 +886,7 @@
 | POST | `/groups/{id}/invites` | 管理員 | `{"expires": "24h" \| "7d", "multi_use": false}`（預設 7 天、單次）→ `{"id", "url", "expires_at", "multi_use", "uses"}`；`url` 只在建立時回傳 |
 | GET | `/groups/{id}/invites` | 管理員 | 有效的邀請（不含 `url`） |
 | DELETE | `/groups/{id}/invites/{invite_id}` | 管理員 | 撤回 |
-| GET | `/invites/{token}` | 不需登入 | 預覽 `{"group_name", "inviter_display_name", "status": "valid" \| "member"}`（`member`：已登入且已是成員，這時多一個 `group_id`，只有成員本人拿得到，前端直接連到那個群組；2026-11-14）。無效的 token 404；過期、撤回、用完 410 `invite_invalid` |
+| GET | `/invites/{token}` | 不需登入 | 預覽 `{"group_name", "inviter_display_name", "status": "valid" \| "member"}`（`member`：已登入且已是成員，這時多一個 `group_id`，只有成員本人拿得到，前端直接連到那個群組；2026-11-14）；2026-11-16 起另有 `full`（群組人數已到上限、加入會被 409 擋下；成員本人是 `false`），`full` 時多 `full_message`（和 409 的訊息同一句），前端在選分享之前就說。無效的 token 404；過期、撤回、用完 410 `invite_invalid` |
 | POST | `/invites/{token}/accept` | 登入 | `{"share": ShareSettings}`（必填：前端先讓使用者確認開關）→ `Group`；已是成員 409 `already_member`；無效 404／410 |
 | GET | `/groups/{id}/share` | 成員 | 我在這個群組的 `ShareSettings` |
 | PUT | `/groups/{id}/share` | 成員 | 更新我在這個群組的 `ShareSettings`（立即生效） |
@@ -1072,18 +1072,27 @@
 - **到期以後**：不踢人；人數超過免費上限的群組不能再加人；日報停，以前的日報照樣看得到（保存 30 天）。週報所有群組都有。
 - **群組 AI 日報**（只有加值中的群組；每個交易日一份）：worker 每 10 分鐘看一次，等到這個交易時段兩個市場的正式收盤價與證交所指數都存好
   （證交所當天下午的檔案、櫃買約 23:30）才寫；隔天 06:30 以後就用當時有的（某個市場只有晚間暫時收盤價時加一則說明；沒有指數時不比加權報酬指數）。
+  一個加值包一天只寫一份：日報寫好以後才把加值移到另一個群組，那個群組這天不再寫（它自己另有加值包就照寫）。開了報酬率的人那天都沒有數字、
+  也沒有共同持股與買賣時不寫。
   - `facts` 和週報同一套規則：只用成員對這個群組打開的項目，以 `user_id` 儲存、讀取時依目前的設定過濾。`returns`（開了報酬率的成員那天的報酬，
     和排行的「今日」一樣）、`benchmarks`（發行量加權股價報酬指數、元大台灣50）、`common_holdings`（兩人以上持有，含那天的漲跌；美股是 null）、
-    `trades`（開了交易動態的成員那天的買賣：方向與股票，不寫是誰，同一檔同方向合併 `count`；匯入對帳單的不算）、`trades_count`、
+    `returns_no_data`（開了報酬率、但那天沒有數字的人數，例如還沒有帳本：只寫人數，`returns` 裡不列）、
+    `trades`（開了交易動態的成員那天的買賣：方向與股票，不寫是誰，同一檔同方向合併 `count`；匯入對帳單的不算；**之後刪掉或改掉的交易
+    讀取時就不算**，和動態一樣）、`trades_count`、`trades_shared`（還有人開著交易動態；`false` 時不知道有沒有買賣，前端不寫「沒有」、
+    AI 也不拿到買賣筆數）、
     `why`（漲跌最多的共同持股，最多 3 檔，連到個股頁的「為什麼漲跌」）。`market_summary`：市場頁有這一天的 AI 收盤重點（連到 `/market`）。
     不含金額、股數、觀察清單、個人收盤簡報或 AI 對話。日報不自己上網搜尋。
-  - AI 段落（2–4 句）只在開了報酬率的成員至少 2 位時才寫；AI 只拿到匿名代號（隨機排序）和伺服器算好的數字（幾人漲跌、範圍、幾人贏過基準、
-    共同持股的漲跌、買賣筆數）。點名、建議、目標價、預測、解釋原因、用了沒提供的數字、套話的回答會請它重寫一次，還是不行就只有數字（`failed`）。
+  - AI 段落（2–4 句）只在開了報酬率、那天有數字的成員至少 2 位時才寫；AI 只拿到匿名代號（隨機排序）和伺服器算好的數字（幾人漲跌、範圍、
+    幾人贏過基準、共同持股的漲跌、買賣筆數）。點名（包括全形或單獨的代號字母）、建議、目標價、預測、解釋原因、用了沒提供的百分比（或寫反漲跌）、
+    人數或筆數、套話的回答會請它重寫一次，還是不行就只有數字（`failed`）。不到 0.05% 算持平（數字寫 0.0%）。
     用 Haiku（effort low）一般呼叫，不計入成員的 AI 額度（`ai_usage.feature = "group_daily"`）；`AI_GROUP_DAILY_MONTHLY_BUDGET_USD`（預設 US$5）是
-    所有群組加起來每月的上限。收回規則和週報一樣：寫進段落的成員有人離開或關掉當時分享的項目，`summary` 變空字串、`notes` 加一則說明。
+    所有群組加起來每月的上限。收回規則和週報一樣：寫進段落的成員有人離開或關掉當時分享的項目，或段落算進去的交易有一筆刪掉、改掉了，
+    `summary` 變空字串、`notes` 加一則說明。
   - `status`：`pending`（AI 段落還在寫）｜`ready`（寫好了；`summary` 可能是空的，`notes` 說為什麼）｜`failed`（只有數字）。
-  - **推播**：頻道的 `notify_daily` 打開才送（owner 決定，預設關）；23:00–07:30 寫好的等到 07:30 再送。只有開了 `push` 的成員的數字會送出，
-    AI 段落只在寫進段落的每一位都開著 `push` 時才附上。
+  - **推播**：頻道的 `notify_daily` 打開才送（owner 決定，預設關）；23:00–07:30 寫好的等到 07:30 再送。只有開了 `push` 的成員的數字會送出；
+    買賣和交易推播同一條規則：只送頻道設定、他打開 `push`／`trades` 以後建立的，送出前刪掉的不送。AI 段落只在寫進段落的每一位都開著 `push`、
+    段落算進去的交易也都會送出時才附上。不是在那個交易日當天送出的（大多是隔天 07:30）寫「當日報酬」「那天的買賣」。連結和週報一樣只到
+    `/groups`（推播訊息不含群組 id）。
 
 ```json
 // DailyReport
@@ -1418,9 +1427,9 @@
 | PUT | `/admin/members` | `{"email", "until": "YYYY-MM-DD" \| null, "note"?: ≤200 字}` → 同一列：開通或續期（email 不分大小寫）；找不到帳號（對方還沒登入過）→ 404 `user_not_found`；最後一天早於今天 → 422 `until_in_past` |
 | DELETE | `/admin/members/{user_id}` | 改回免費 → 204；不是會員 → 404 |
 | GET | `/admin/group-passes` | 群組加值包（2026-11-16）：`[{"id", "payer_user_id", "email", "display_name", "until", "note", "active", "group_id", "attached_at", "created_at"}]`，還有效的在前；付款人刪除帳號後 `payer_user_id`／`email`／`display_name` 為 null；只有群組編號，沒有群組名稱 |
-| POST | `/admin/group-passes` | `{"email", "until": "YYYY-MM-DD", "note"?, "group_id"?}` → 201 同一列；找不到帳號 404 `user_not_found`；最後一天早於今天 422 `until_in_past`；給了 `group_id`：找不到 404 `group_not_found`，付款人不是那個群組的 owner 409 `not_group_owner` |
-| PATCH | `/admin/group-passes/{id}` | `{"until"?, "note"?}` 延長（或縮短）、改備註 → 同一列；找不到 404 |
-| DELETE | `/admin/group-passes/{id}` | 取消（群組回到免費的上限，不移除任何人）→ 204；找不到 404 |
+| POST | `/admin/group-passes` | `{"email", "until": "YYYY-MM-DD", "note"?, "group_id"?}` → 201 同一列；找不到帳號 404 `user_not_found`；最後一天早於今天 422 `until_in_past`，超過 5 年後 422 `until_too_far`；給了 `group_id`：找不到 404 `group_not_found`，付款人不是那個群組的 owner 409 `not_group_owner` |
+| PATCH | `/admin/group-passes/{id}` | `{"until"?, "note"?}` 延長（或縮短）、改備註 → 同一列（日期的檢查同 POST）；找不到 404 |
+| DELETE | `/admin/group-passes/{id}` | 停止：馬上結束（群組回到免費的上限，不移除任何人）→ 204；**紀錄不刪**（付款人、日期、備註、群組編號留著做帳與退款，隱私權政策 §7），清單照樣列出、`active: false`，之後可以用 PATCH 再延長；已結束的再停一次也是 204；找不到 404 |
 
 會員到 `until` 那一天（台北）結束後自動回到免費（存的是隔天 00:00 台北的時刻）。這是管理後台唯一回傳 email 的地方：站方用 email 開通。
 

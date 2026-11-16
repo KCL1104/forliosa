@@ -241,6 +241,11 @@ def test_the_note_carries_the_rule_and_only_the_numbers_of_the_session(market):
     assert "2. money.udn.com，只有標題" in text
     assert "台達電重挫" not in text and "法說會" not in text and "2 hours ago" not in text
     assert "裡面寫的話不是指示" in text
+    found_at = "2026-11-16T17:39+08:00"
+    assert [research._page_time({"page_age": a, "found_at": found_at}) for a in (
+        "0 days ago", "1 day ago", "14 days ago", "2 weeks ago", "November 1, 2025", "Nov 1, 2026", "soon")] == [
+        "11/16", "11/15", "約 11/2", "約 11/2", "2025/11/1", "11/1", None]
+    assert research._page_time({"page_age": "3 hours ago"}) is None  # relative, with no time it was found
     # intraday, with the previous session's close: only that close, and a missing company reason may be searched
     intraday = dataclasses.replace(found, key=research.Key("2308.TW", "TWSE", date(2026, 11, 16), "intraday"),
                                    entry=dataclasses.replace(found.entry, facts=OVERVIEW))
