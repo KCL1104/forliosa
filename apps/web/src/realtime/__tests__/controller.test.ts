@@ -216,6 +216,29 @@ describe("RealtimeController", () => {
     group.unsubscribe()
   })
 
+  it("resyncs that arrive while one is waiting become one refetch (no storm after a deploy)", async () => {
+    const { qc, server, controller } = setup({ random: () => 0.5 })
+    const feed = watch(qc, ["groups", "g1", "feed", "all"])
+    const ledger = watch(qc, ["portfolio", "summary", "all"])
+    await settle()
+    controller.start()
+    await settle()
+    // the reconnect says resync, then the server's LISTEN reconnects and says it again, then a ledger event
+    server.latest().send(hello("b2.1", "resync") + "id: b2.2\nevent: resync\ndata: {}\n\n")
+    await settle(500)
+    server.latest().send("id: b2.3\nevent: resync\ndata: {}\n\n" + ev("b2.4", "ledger", { account_id: "acc_1" }))
+    await settle(3000 + DEBOUNCE_MS)
+    expect(feed.fn).toHaveBeenCalledTimes(2) // one resync wave
+    expect(ledger.fn).toHaveBeenCalledTimes(3) // the ledger event's own refetch, then the resync wave
+    // a resync after the wave started is a new one (it may cover changes after the first)
+    server.latest().send("id: b2.5\nevent: resync\ndata: {}\n\n")
+    await settle(3000 + DEBOUNCE_MS)
+    expect(feed.fn).toHaveBeenCalledTimes(3)
+    controller.stop()
+    feed.unsubscribe()
+    ledger.unsubscribe()
+  })
+
   it("polls every 30 s while the stream is down and the tab is visible, and stops once it opens", async () => {
     const { qc, server, browser, controller } = setup()
     const feed = watch(qc, ["groups", "g1", "feed", "all"])

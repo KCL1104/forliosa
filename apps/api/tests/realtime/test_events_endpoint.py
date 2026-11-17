@@ -296,10 +296,13 @@ def test_logout_closes_my_stream(server):
 
 def test_a_seventh_tab_replaces_the_oldest(server):
     a = browser(server, "demo@forliosa.local", "示範使用者")
-    streams = [Stream(server, a.token) for _ in range(6)]
+    streams: list[Stream] = []
     try:
-        for s in streams:
-            s.next("hello")
+        # one after the other: six sockets opened at once register in whatever order the server serves them, and the
+        # oldest *registered* one is replaced (2026-11-17 merge: flaky when the first socket was not the first served)
+        for _ in range(6):
+            streams.append(Stream(server, a.token))
+            streams[-1].next("hello")
         seventh = Stream(server, a.token)
         streams.append(seventh)
         seventh.next("hello")

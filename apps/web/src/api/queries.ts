@@ -511,9 +511,13 @@ export function useMarketReports(kind?: ReportKind, enabled = true) {
     staleTime: 60_000,
   })
 }
-/** 盲測的一份：A／B／C 哪些能看、我的票（盲測開給所有人時；否則 404，不重試） */
+/**
+ * 盲測的一份：A／B／C 哪些能看、我的票（盲測開給所有人時；否則 404，不重試）。一個版本寫好、揭曉、自己在別的分頁投票時伺服器會通知
+ * （`market.reports`）；「這個版本不會來了」（寫失敗、超過預算）沒有通知，所以即時更新連著時照樣 5 分鐘問一次，斷著時 2 分鐘
+ */
 export function useMarketReportTrial(id: string, enabled = true) {
-  return useQuery({ enabled, queryKey: qk.reportTrial(id), queryFn: () => api.getMarketReportTrial(id), staleTime: 30_000, refetchInterval: 2 * 60_000, retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 1 })
+  const interval = useLiveInterval(2 * 60_000, 5 * 60_000)
+  return useQuery({ enabled, queryKey: qk.reportTrial(id), queryFn: () => api.getMarketReportTrial(id), staleTime: 30_000, refetchInterval: interval, retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 1 })
 }
 /** 盲測的一個版本（一般形式）；還在寫是 409、沒有寫成是 404 */
 export function useMarketReportVariant(id: string, label: ReportVariant, enabled = true) {

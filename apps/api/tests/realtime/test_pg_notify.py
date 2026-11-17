@@ -135,6 +135,44 @@ def test_a_lost_listen_connection_reconnects_and_tells_everyone_to_refetch(pg_se
         stream.close()
 
 
+def test_the_listen_connection_and_open_streams_stay_outside_both_pools(pg_server, pg_engine):
+    """2026-11-17 merge with the API speed work (request pool 5 + 10, the archive's own pool 5 + 10): the hub's LISTEN
+    connection is a psycopg connection of its own — one backend, ``forliosa-realtime`` — and neither it nor 12 open
+    streams hold a pooled connection, so all 15 of the request pool can be taken at once while they are open; a write
+    still reaches the streams through NOTIFY."""
+    from forliosa.db import archive_session_factory
+
+    base, _hub = pg_server
+    archive = archive_session_factory().kw["bind"]
+    assert archive is not pg_engine and archive.url == pg_engine.url
+    users = [browser(base, f"p{i}@forliosa.local", f"使用者{i}") for i in range(3)]
+    streams = [Stream(base, u.token) for u in users for _ in range(4)]
+    try:
+        for s in streams:
+            s.next("hello")
+        time.sleep(0.2)
+        assert pg_engine.pool.checkedout() == 0 and archive.pool.checkedout() == 0
+        timeout, pg_engine.pool._timeout = pg_engine.pool._timeout, 2.0
+        held = []
+        try:
+            held = [pg_engine.connect() for _ in range(pg_engine.pool.size() + pg_engine.pool._max_overflow)]
+            listen = [r[0] for r in held[0].execute(text(
+                "SELECT query FROM pg_stat_activity WHERE application_name = 'forliosa-realtime'"))]
+        finally:
+            for c in held:
+                c.close()
+            pg_engine.pool._timeout = timeout
+        # one backend; its last statement is the LISTEN, or the idle probe if the test ran past IDLE_SECONDS
+        assert len(listen) == 1 and listen[0] in ("LISTEN forliosa_rt_v1", "SELECT 1"), listen
+        acc = users[0].post(f"{API}/accounts", json={"name": "新", "broker": "", "currency": "TWD",
+                                                     "fee_discount": 0.28}).json()
+        assert streams[0].next("ledger", timeout=3.0)["data"]["account_id"] == acc["id"]
+        assert pg_engine.pool.checkedout() == 0
+    finally:
+        for s in streams:
+            s.close()
+
+
 def test_notify_happens_inside_the_transaction(pg_engine):
     """The payload is sent with the commit, and a large audience is split under Postgres's 8000-byte limit."""
     import psycopg

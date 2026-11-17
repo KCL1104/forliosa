@@ -4237,6 +4237,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   短 session 在 threadpool 查完就還；`test_the_stream_holds_no_database_connection` 確認串流開著時 `pool.checkedout() == 0`。
 - **另外看到的（沒有修）**：`GET /stream/quotes` 和 `POST /ai/chat` 用 `Depends(get_db)`，串流期間一直佔著一條連線（`routes/ai.py` 的註解說
   串流開始就關，這個 FastAPI 版本並不是）；可以改成 `Depends(get_db, scope="function")` 或自己開短 session。
+  **（和批次 4 合併後已不成立：API 速度工作 adf1796 讓兩者在開始串流前就把連線還回連線池，見「API 速度」的「串流不占連線」。）**
 - **測試**：`tests/realtime/test_capture.py`（各寫入路徑送什麼給誰：朋友接受邀請 → 擁有者與他自己；只分享給有分享的群組；匯入一批一個事件；
   授權範圍；討論公開／群組；登出、刪除帳號；市場報告公開／試跑；rollback 不送；同值不算改；關掉開關）、`test_hub.py`、`test_events_endpoint.py`
   （TestClient 跑短串流；真的 uvicorn 跑朋友加入群組 2 秒內收到、另一台裝置的交易、別人看不到我的 tab 與帳本、不佔連線、登出關串流、第 7 條、
@@ -4292,8 +4293,61 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   （不帶 id；那段時間伺服器漏接過就回 `resync`）。
 - **路由檢查表變成真的測試**：`tests/realtime/test_route_coverage.py` 的 `ANNOUNCES` 列出每個寫入端點會送的種類，
   `test_the_route_announces_what_the_table_says` 逐一實際呼叫並確認都送了（64 個端點；呼叫 Claude API 或要整套報告流程的 6 個在
-  `NOT_DRIVEN`，由寫入那些列的測試代替）。`delegations.update`、`discussions.moderate`、`accounts.delete_holding`（暫停定期定額）、
+  `NOT_DRIVEN`，由寫入那些列的測試代替；**和批次 4 合併後**：85 個寫入端點，72 個會送事件〔67 個實際呼叫、5 個 `NOT_DRIVEN`〕、13 個刻意不送）。`delegations.update`、`discussions.moderate`、`accounts.delete_holding`（暫停定期定額）、
   `groups.put_discord`（重設其他人的推播）、`groups.remove_member`（撤回邀請）也檢查收件人。
 - **沒有修的**：`tests/api/test_m5_feed.py::test_deleting_the_last_trade_deletes_its_thread` 在某些日期會失敗（`trading_day(3)` 和
   `trading_day(5)` 落在同一天時；基底 99f45b6 一樣），和即時更新無關，另外處理。
 
+## 2026-11-17 即時更新 × 批次 4（匯入庫存、清除所有持倉、API 速度、盲測開給所有人、LangSearch）合併
+
+`deploy-int5`（批次 4，0c589ed）合併 `realtime`（0b278a5）。兩邊的功能都留著；下面是合併時要決定、要補的地方。
+
+- **衝突**：`api/app.py`（import：`perf` 和 `TAB_HEADER` 都要）、`db.py`（`set_engine` 兩邊都要：先丟掉舊的存檔連線池，再裝上寫入擷取）、
+  本檔與 `docs/api-contract.md`（兩邊都是附加在最後：批次 4 的段落在前、即時更新在後）。其餘自動合併；`Dockerfile` 只有即時更新改
+  （`--timeout-graceful-shutdown 10`），啟動仍是先 `alembic upgrade head` 再 `exec uvicorn`。
+- **批次 4 的寫入路徑補上事件**（`tests/realtime/test_route_coverage.py` 多 4 個端點，另外把原本 `NOT_DRIVEN` 的 `admin_reports.vote`、
+  `admin_reports.reveal` 改成實際呼叫；`tests/realtime/test_merge_batch4.py`）：
+  - **刪除這檔、清除所有持倉、匯入庫存「以券商為準」**：批次 4 把三者共用的刪除改成一句 Core `DELETE`（`services.transactions.delete_records`），
+    ORM 擷取看不到（合併後 `accounts.delete_holding` 少了 `ledger`，路由檢查表抓到）。`delete_records` 在刪除前自己 `realtime.emit`：
+    每個少了紀錄的帳戶一個 `ledger{account_id}`（自己的裝置），加上 `LedgerFanout`（分享報酬／持股的群組一律；只分享交易的群組只在刪掉的
+    紀錄裡有動態看得到的那幾筆時；授權範圍涵蓋那個帳戶的查看者 `ledger.viewas`）——和逐筆刪除送的一樣。試算（`dry_run`）回滾，事件跟著丟掉。
+    暫停的定期定額照舊由 ORM 擷取送 `recurring`（清除時沒有紀錄可清、只暫停計畫的 404 也送）。
+  - **匯入庫存的寫入**（`write_batch` 的 `add_all`）與**匯入對帳單**（`POST /transactions/batch`、復原 `DELETE /transactions/batches/{id}`）
+    本來就是 ORM：一個帳戶一個 `ledger`。`POST /imports/positions`（AI 讀圖）只有 `AiUsage` → `ai.usage`。
+  - **盲測開給所有人**（`MREPORT_TRIAL_AUDIENCE=all` 或後台設定）：盲測的那幾期是 `visibility=admin`，原本的規則只送給站方，開放之後
+    成員的「盲測」頁就聽不到。現在 `capture.TrialReport` 在寫入的交易裡讀 `market_report_config.trial_audience`（同一個交易改的也算）：
+    開放時送給所有登入的人，沒開放時只給站方（盲測報告的 id 照舊不會到看不到的人手上）。觸發：一個版本寫好（worker 的 `new_version`，
+    `variant` 有值）、第一個版本打開投票（`ai_published_at`）、揭曉（`revealed_at`）、揭曉後換撰寫設定（成員看得到選了哪個）；
+    改「盲測對象」或模式一律送給所有人（成員多了或少了盲測）。**投票**（`PUT /market/reports/{id}/vote`、後台的投票）：`admin.reports`
+    給站方、`market.reports{report_id}` 只給投票的人自己（別的分頁的「你選了」）；揭曉前票數不公開，所以不送給別人。
+  - **刻意不送**：LangSearch 存的新聞（和其他新聞來源一樣，個股頁照自己的間隔讀；`test_langsearch_news_rows_announce_nothing`）；
+    舊日期的參考收盤（Yahoo，唯讀）；AI 用 LangSearch 的每日用量列（內部記帳）。群組日報照舊由 ORM 擷取送 `group.reports`。
+  - 前端：新的查詢 key 都在既有的前綴下（`["transactions","count"]`、`["transactions","symbol-records",…]`、`["portfolio","records"]`、
+    `["portfolio","upcoming",7,"recurring"]`、`["market","reports","trial"|"variant",…]`），`topics.test.ts` 逐一確認。盲測頁原本每 2 分鐘問一次：
+    串流連著時改成 5 分鐘（「這個版本不會來了」沒有通知），斷著時照舊 2 分鐘。
+- **和 API 速度工作的連線池**（請求池 5＋10、存檔池 5＋10、逾時 30 秒）：
+  - 串流不佔連線：20 條串流（兩個池子各 15 條的上限以上）開著時兩個池子 `checkedout() == 0`，請求池 15 條可以同時拿走，16 個帳本請求照常
+    （`test_open_streams_leave_every_pooled_connection_free`）。PostgreSQL：LISTEN 是 psycopg 自己的一條連線（`pg_stat_activity` 裡唯一的
+    `forliosa-realtime`），12 條串流開著時兩個池子都是 0、請求池 15 條拿得到（`test_pg_notify.test_the_listen_connection_and_open_streams_stay_outside_both_pools`）。
+  - 部署或 LISTEN 重連後全部重抓：12 個分頁各自在 0–3 秒內同時重抓帳本頁的 13 個請求（156 個），全部 200、最慢 1.5 秒、沒有連線池逾時
+    （請求池逾時調成 10 秒來看）；請求池最高用到 15/15、存檔池 11/15（`test_a_resync_storm_is_served_without_a_pool_timeout`）。請求池會滿，
+    所以前端多做兩件事：同一批事件裡好幾個動作對到同一個查詢時只重新讀一次（`applyActions` 先收集再一次 `invalidateQueries`；之前逐一呼叫，
+    第二次會取消第一次已送出的請求再送一次，伺服器兩次都做——例如清除所有持倉並暫停定期定額的 `ledger`＋`recurring`、`resync`＋任何事件）；
+    等待中的 `resync` 再來一個就併成一次。
+  - 慢請求記錄的 `inflight`：開著的 SSE 串流在送出回應標頭後就不算「處理中」（不然每一行都多了開著的分頁數）；`perf.inflight()`。
+- **和 API 速度工作的快取**：`market.closes` 進來時 hub 照舊先清 30 秒報價快取與市場頁排行快取；`test_a_stored_close_is_in_the_next_read_after_its_event`
+  先證明沒有事件時報價快取確實會把新收盤藏住，再證明事件之後下一次讀就是新的（事件到讀完 < 2 秒）。速度工作新增的快取不會藏住收盤：
+  存檔起始日（1 小時）只在存進更早的官方收盤時才會變（測試確認新收盤不改它）；相關股票母體依 `dataset_status` 的版本當 key；美股分割偵測依
+  那一檔的最新日與筆數當 key；除權息公告狀態（60 秒）與收盤無關；管理後台兩個筆數（10 分鐘）不在任何事件重抓的範圍裡（後台總覽本來就沒有通知）。
+- **gzip**：批次 4 的 `GZipMiddleware` 不壓縮 `text/event-stream`（Starlette 預設排除），`/events` 照樣一段一段即時送出；設計稿「沒有 GZip」
+  那句已不成立，但結論不變。慢請求記錄是純 ASGI middleware，SSE 只看到回應標頭的時間。
+- **測試的修正**（和這次的程式無關、合併後才看出來）：`test_events_endpoint.test_a_seventh_tab_replaces_the_oldest` 同時開 6 條串流，
+  伺服器登記的順序不一定是開的順序（被換掉的是最早登記的那條），偶爾失敗：改成一條連上再開下一條。
+  `tests/ai/test_answer_editor.py::test_the_editor_call_holds_no_pooled_connection`（API 速度工作）替換 `_editor_stream` 的函式少了
+  LangSearch 合併（7cc1a1e）加的 `copies=` 參數，在批次 4 上每次都失敗：改成照傳。
+- **兩個瀏覽器的實測**（`e2e-realtime.mjs`，合併後的程式；多了裝置 1 的匯入庫存、刪除這檔、清除所有持倉 → 裝置 2）：朋友加入 → 成員頁 207 ms、
+  動態 191 ms；成員買進 → 動態 182 ms；留言數 174 ms；討論串回覆 194 ms；背景回到前景 33 ms；串流被擋時備援 28.5 秒；另一台裝置記一筆 376 ms
+  （記帳的那台每個帳本查詢只重抓一次）；匯入庫存 441 ms；刪除這檔 347 ms；清除所有持倉 333 ms。
+- **沒有改的**：`sharing.purge_trade_threads(_bulk)`（Core 刪除動態項目的留言與表情）照即時更新分支原本的做法不另外送 `group.comments`：
+  動態重抓（`group.ledger` 的 feed）就會拿掉那一項；送 `group.comments` 給已經不分享交易的群組反而洩漏時間。`--timeout-graceful-shutdown 10`
+  也套用到 AI 對話：部署時超過 10 秒的對話串流會被切斷（之前沒有上限，由 Railway 決定）。

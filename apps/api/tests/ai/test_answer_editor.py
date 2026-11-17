@@ -71,9 +71,9 @@ def test_the_editor_call_holds_no_pooled_connection(client, pool, fake, engine, 
 
     real_editor = ChatTurn._editor_stream
 
-    def read_first(self, thread, body):
+    def read_first(self, thread, body, **kw):  # ``copies=`` since the LangSearch merge (7cc1a1e)
         self.db.scalar(select(AiMessage.id).limit(1))  # opens a read transaction on the turn's session
-        return real_editor(self, thread, body)
+        return real_editor(self, thread, body, **kw)
 
     monkeypatch.setattr(ChatTurn, "_editor_stream", read_first)
     ai_env(AI_ANSWER_EDITOR="true")

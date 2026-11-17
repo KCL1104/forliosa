@@ -15,7 +15,8 @@ One ``slow_request`` line (logger ``forliosa.perf``, INFO) for every request slo
   a thread of its own (``threading.Thread``: the AI why / analyst generation) is not counted: it does not inherit the
   request's context. The threadpool that runs sync endpoints copies the context, so its queries are counted.
 * ``inflight``: requests this process was serving when this one ended (queueing for the GIL or the pool vs one slow
-  endpoint).
+  endpoint). A server-sent event stream counts only until its headers are sent: the realtime streams
+  (``GET /events``, one per open tab, idle for minutes) would otherwise inflate every line by the number of open tabs.
 
 Every ``SUMMARY_SECONDS`` one ``request_summary`` line per route template seen (count, p50, p95, max), so the
 distribution is visible, not only the slow tail. A full garbage collection (generation 2) longer than
@@ -60,6 +61,11 @@ _inflight_lock = threading.Lock()
 
 def current_stats() -> RequestStats | None:
     return _current.get()
+
+
+def inflight() -> int:
+    """Requests being served now (open server-sent event streams not included)."""
+    return _inflight
 
 
 # -- SQL counters ------------------------------------------------------------------------------------------------
@@ -168,14 +174,19 @@ class SlowRequestMiddleware:
         stats = RequestStats()
         token = _current.set(stats)
         started = time.perf_counter()
-        meta: dict[str, Any] = {"status": 0, "ttfb": None, "sse": False}
+        meta: dict[str, Any] = {"status": 0, "ttfb": None, "sse": False, "counted": True}
 
         async def send_timed(message: Message) -> None:
+            global _inflight
             if message["type"] == "http.response.start":
                 meta["status"] = message.get("status", 0)
                 meta["ttfb"] = time.perf_counter()
                 ctype = next((v for k, v in message.get("headers", []) if k.lower() == b"content-type"), b"")
                 meta["sse"] = ctype.startswith(b"text/event-stream")
+                if meta["sse"] and meta["counted"]:  # a stream is not "in flight" once it streams (see above)
+                    with _inflight_lock:
+                        _inflight -= 1
+                    meta["counted"] = False
             await send(message)
 
         with _inflight_lock:
@@ -184,7 +195,8 @@ class SlowRequestMiddleware:
             await self.app(scope, receive, send_timed)
         finally:
             with _inflight_lock:
-                _inflight -= 1
+                if meta["counted"]:
+                    _inflight -= 1
                 inflight = _inflight + 1  # this request included
             _current.reset(token)
             ended = time.perf_counter()

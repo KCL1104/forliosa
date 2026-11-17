@@ -4,6 +4,8 @@
 //   2. 帳本：同一個人兩台裝置，裝置 1 用「記一筆」買進 2330 → 裝置 2 的持股 2 秒內出現；裝置 1 自己的事件略過（每個查詢只重抓一次）
 //   3. B 分享的交易進到 A 開著的動態（group.ledger）；B 留言 → A 的留言數；B 在 A 開著的群組討論串回覆 → A 看到回覆
 //   4. A 的分頁在背景時不重新讀，回到前景時才讀；A 的串流被擋（/events 連不上）→ 30 秒一次的備援仍然把變更帶進來
+//   5. 批次 4 的寫入（2026-11-17 合併）：裝置 1 匯入庫存（「以券商為準」換掉 2330、加一檔 2317）→ 裝置 2 的持股 2 秒內變；
+//      裝置 1 刪除這檔 2317 → 裝置 2 2 秒內不見；裝置 1 清除所有持倉 → 裝置 2 2 秒內變成空的（都是整批刪除，伺服器自己送事件）
 //
 // 1. 後端（全新的資料庫；dev 模式才有開發登入；示範資料讓 2330 查得到）：
 //      cd apps/api && export DATABASE_URL=sqlite:////tmp/forliosa-rt.db FORLIOSA_ENV=dev ADMIN_EMAILS=demo@forliosa.local \
@@ -101,6 +103,21 @@ async function arm(p, key, pattern, root = "main") {
       window.__seen ??= {}
       const check = () => {
         if (!window.__seen[key] && re.test(document.querySelector(root)?.innerText ?? "")) window.__seen[key] = Date.now()
+      }
+      new MutationObserver(check).observe(document.body, { subtree: true, childList: true, characterData: true })
+      check()
+    },
+    [key, pattern.source, root],
+  )
+}
+/** 等一段文字從頁面上消失，記下消失的那一刻 */
+async function armGone(p, key, pattern, root = "main") {
+  await p.evaluate(
+    ([key, src, root]) => {
+      const re = new RegExp(src)
+      window.__seen ??= {}
+      const check = () => {
+        if (!window.__seen[key] && !re.test(document.querySelector(root)?.innerText ?? "")) window.__seen[key] = Date.now()
       }
       new MutationObserver(check).observe(document.body, { subtree: true, childList: true, characterData: true })
       check()
@@ -283,7 +300,7 @@ try {
   const email = `ledger-${RUN}@forliosa.local`
   const d1ctx = await context(browserA, { email, name: "記帳的人" })
   const d2ctx = await context(browserB, { email, name: "記帳的人", video: true })
-  await step("the ledger owner has a broker account (API)", async () => post(d1ctx, "/accounts", { name: "國泰", broker: "國泰證券", currency: "TWD" }).then((a) => a.id))
+  const ledgerAccount = await step("the ledger owner has a broker account (API)", async () => post(d1ctx, "/accounts", { name: "國泰", broker: "國泰證券", currency: "TWD" }).then((a) => a.id))
   const d1 = await page(d1ctx, "device1")
   const d2 = await page(d2ctx, "device2")
   await step("device 2 opens the ledger, device 1 too; both streams open", async () => {
@@ -333,6 +350,45 @@ try {
     const own = d1.rt.filter((r) => r.at >= savedAt - 50 && /\(this tab\)/.test(r.text)).map((r) => r.text)
     if (!own.length) throw new Error(`no "(this tab)" skip logged: ${d1.rt.map((r) => r.text).join(" | ")}`)
     return `${Object.keys(counts).length} queries × 1; skipped: ${[...new Set(own)].join(", ")}`
+  })
+
+  // ── 5. 批次 4 的寫入：匯入庫存、刪除這檔、清除所有持倉（裝置 1 送出，裝置 2 開著帳本） ─────────
+  await arm(d2, "imported", /鴻海/)
+  await notYet(d2, "imported")
+  const importedAt = await step("device 1 imports positions: 2330 replaced (以券商為準), 2317 added (API)", async () => {
+    const res = await post(d1ctx, "/imports/positions/commit", { account_id: ledgerAccount, rows: [
+      { symbol: "2330", quantity: 2000, price: 990, replace: true }, { symbol: "2317", quantity: 1000, price: 200 }] })
+    if (!res.replaced?.[0]?.deleted) throw new Error(`nothing replaced: ${JSON.stringify(res.replaced)}`)
+    return Date.now()
+  })
+  await step("device 2's holdings show 2317 within 2 s (匯入庫存)", async () => {
+    const ms = (await seenAt(d2, "imported")) - importedAt
+    await stillMarked(d2, "D2")
+    await d2.screenshot({ path: `${out}/5-device2-imported.png` })
+    return record("positions import on device 1 → device 2", ms)
+  })
+  await armGone(d2, "deleted", /鴻海/)
+  await notYet(d2, "deleted")
+  const deletedAt = await step("device 1 deletes the 2317 holding (刪除這檔, API)", async () => {
+    await post(d1ctx, `/accounts/${ledgerAccount}/holdings/2317.TW`, undefined, "delete")
+    return Date.now()
+  })
+  await step("2317 leaves device 2's holdings within 2 s (刪除這檔: a bulk delete)", async () => {
+    const ms = (await seenAt(d2, "deleted")) - deletedAt
+    await stillMarked(d2, "D2")
+    return record("delete holding on device 1 → device 2", ms)
+  })
+  await armGone(d2, "cleared", /台積電/)
+  await notYet(d2, "cleared")
+  const clearedAt = await step("device 1 clears every record (清除所有持倉, API)", async () => {
+    await post(d1ctx, `/portfolio/records?all_accounts=true`, undefined, "delete")
+    return Date.now()
+  })
+  await step("device 2's ledger is empty within 2 s (清除所有持倉)", async () => {
+    const ms = (await seenAt(d2, "cleared")) - clearedAt
+    await stillMarked(d2, "D2")
+    await d2.screenshot({ path: `${out}/5-device2-cleared.png` })
+    return record("clear records on device 1 → device 2", ms)
   })
 
   if (errors.length) throw new Error(`page errors / 5xx: ${errors.slice(0, 5).join("; ")}`)

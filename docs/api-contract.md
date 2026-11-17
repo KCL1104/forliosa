@@ -2225,7 +2225,7 @@ data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
 
 | 事件 | payload | 誰會收到 | 什麼時候 |
 |---|---|---|---|
-| `ledger` | `account_id?` | 自己 | 交易新增／修改／刪除（含匯入一批只送一次、整檔刪除、股利自動入帳）、帳戶新增／修改／刪除、成本法改變（沒有 `account_id`）。唯讀查看別人時忽略 |
+| `ledger` | `account_id?` | 自己 | 交易新增／修改／刪除（含匯入一批只送一次、整檔刪除、股利自動入帳；合併批次 4 後也含清除所有持倉、匯入庫存，每個帳戶一次）、帳戶新增／修改／刪除、成本法改變（沒有 `account_id`）。唯讀查看別人時忽略 |
 | `ledger.viewas` | `delegation_id` | 授權給我看的人改了帳本、而且範圍涵蓋那個帳戶 | 同上；只在正在查看這個授權時重抓 |
 | `recurring` | — | 自己 | 定期定額新增／修改／刪除／暫停 |
 | `watchlist` | — | 自己 | 觀察清單 |
@@ -2248,7 +2248,7 @@ data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
 | `reports.seen` | — | 自己 | 市場報告已讀（未讀小圓點） |
 | `market.closes` | `market?`（`TWSE`／`TPEX`／`US`）, `date?` | 所有登入的人 | 新的收盤價存進來（當天下午的證交所檔、晚上的暫時收盤、清晨的 OpenAPI、美股）；排程把已經有的同一天再寫一次不送。伺服器先清掉 30 秒的報價快取，第一次重抓就是新的 |
 | `market.overview` | — | 所有登入的人 | 指數、漲跌排行、期貨、匯率存進來；市場頁 AI 摘要寫好 |
-| `market.reports` | `report_id?`, `kind?` | 公開的版本：所有登入的人；試跑：站方 | 新的一期或新版本發布、目前那一版就地更新（盤後重點的資料版 15:40 前每 10 分鐘重算）、模式切換（沒有 `report_id`） |
+| `market.reports` | `report_id?`, `kind?` | 公開的版本：所有登入的人；試跑：站方（盲測開給所有人時，盲測的那幾期也給所有登入的人；投票只給投票的人自己） | 新的一期或新版本發布、目前那一版就地更新（盤後重點的資料版 15:40 前每 10 分鐘重算）、模式或盲測對象切換（沒有 `report_id`）；盲測：一個版本寫好、揭曉（沒有 `report_id`）、自己在別的分頁投票（只有 `report_id`） |
 | `admin.reports` | — | 站方 | 市場報告後台（版本、投票、設定） |
 | `admin.discussions` | — | 站方 | 檢舉、處理、停權 |
 
@@ -2271,3 +2271,14 @@ data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
 - **畫面**：不顯示連線狀態、不跳通知（開發模式的 console 只印種類，不印內容）。
 - **實測**：`apps/web/scripts/e2e-realtime.mjs`（兩個瀏覽器、真實後端）。真實後端的 Playwright 腳本不能再用 `waitUntil: "networkidle"`（串流一直開著）：`e2e-discussions.mjs` 與 `screenshots.mjs --real` 把 `/events` 回成 503 `realtime_off`。
 
+### 即時更新 × 批次 4（2026-11-17 合併）
+
+- **新的寫入端點**：`DELETE /portfolio/records`（清除所有持倉）→ `ledger`（每個帳戶一次）、`group.ledger`、`ledger.viewas`，暫停計畫時 `recurring`；
+  `POST /imports/positions/commit`（匯入庫存）→ `ledger`、`group.ledger`、`ledger.viewas`（「以券商為準」刪掉的也算；試算不送）；
+  `POST /imports/positions` → `ai.usage`；`PUT /market/reports/{id}/vote` → 投票的人自己的 `market.reports{report_id}`（＋站方的 `admin.reports`）。
+  `DELETE /accounts/{id}/holdings/{symbol}`（刪除這檔）改成整批刪除後照樣送 `ledger`／`group.ledger`／`ledger.viewas`。
+- **盲測開給所有人**：盲測那幾期的 `market.reports` 在開放時送給所有登入的人（版本寫好、揭曉、揭曉後換撰寫設定），沒開放時只給站方；
+  改「盲測對象」一律送給所有人。前端的盲測頁（`["market","reports","trial",id]`）在 `["market","reports"]` 底下，跟著重抓；串流連著時
+  5 分鐘問一次當保險（寫失敗、不會來的版本沒有通知），斷著時 2 分鐘。
+- **不送**：LangSearch 新聞、舊日期的參考收盤（唯讀）。
+- **前端**：同一批事件裡好幾個動作對到同一個查詢時只重抓一次；等待中的 `resync` 再來一個就併成一次（部署後不會一個分頁重抓兩輪）。

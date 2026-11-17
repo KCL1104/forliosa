@@ -67,7 +67,7 @@ mock 的討論資料在記憶體裡（重新載入就回到示範資料）：8 �
 | `pnpm smoke` | Playwright 冒煙測試（需先 `pnpm dev`）：走過所有路由、記一筆交易、隱私模式、⌘K、出清紀錄、定期定額（設定與扣款日草稿）、公告、資料來源與授權 |
 | `pnpm screenshots` | 產生 `docs/screenshots/v2/` 的截圖（mock 商用模式；帳本、AI 草稿、交易、已出清、定期定額草稿、個股總覽／估值／籌碼、過去的持有、設定的定期定額、資料來源與授權、紀錄、手機問 AI；桌面 1440×900 @2x 與 iPhone 15，淺色／深色，共 50 張） |
 | `pnpm screenshots:real` | 產生 `docs/screenshots/real/` 的截圖（真實後端；需先啟動後端與 `pnpm dev:api`） |
-| `node scripts/e2e-realtime.mjs` | 即時更新的實測：兩個瀏覽器、真實後端（啟動方式寫在檔案開頭）；朋友加入群組、另一台裝置記一筆、留言、回覆、背景分頁、串流被擋時的備援，每一項量出幾毫秒出現 |
+| `node scripts/e2e-realtime.mjs` | 即時更新的實測：兩個瀏覽器、真實後端（啟動方式寫在檔案開頭）；朋友加入群組、另一台裝置記一筆、留言、回覆、背景分頁、串流被擋時的備援，以及另一台裝置的匯入庫存、刪除這檔、清除所有持倉（2026-11-17 合併），每一項量出幾毫秒出現 |
 | `pnpm design:detect` | Impeccable 偵測器掃描 `src/` |
 
 Playwright 使用環境裡預先安裝的版本（`/opt/node-tools/node_modules/playwright`），不需要 `playwright install`。

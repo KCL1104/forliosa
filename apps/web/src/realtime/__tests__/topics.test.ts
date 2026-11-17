@@ -267,3 +267,46 @@ describe("resync and fallback", () => {
     unsubscribe()
   })
 })
+
+describe("batch 4 keys (2026-11-17 merge)", () => {
+  const BATCH4: QueryKey[] = [
+    ["transactions", "count"], // GET /transactions/counts（帳本「紀錄」分頁的筆數）
+    ["transactions", "symbol-records", "2330.TW"], // 刪除這檔的確認框
+    ["portfolio", "records"], // 清除所有持倉的確認框
+    ["portfolio", "upcoming", 7, "recurring"], // AI 面板：只有定期定額扣款
+    ["market", "reports", "trial", "mrp_1"], // 盲測開給所有人：A／B／C 與我的票
+    ["market", "reports", "variant", "mrp_1", "A"],
+    ["market", "reports", "list", "all"],
+  ]
+  const fresh = () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    for (const k of BATCH4) qc.setQueryData(k, { seeded: true })
+    return qc
+  }
+  const stale = (qc: QueryClient) =>
+    BATCH4.filter((k) => qc.getQueryCache().find({ queryKey: k, exact: true })?.state.isInvalidated).map((k) => JSON.stringify(k)).sort()
+
+  it.each([
+    ["ledger (刪除這檔、清除所有持倉、匯入庫存、匯入對帳單)", "ledger", { account_id: "acc_1" }, BATCH4.filter((k) => k[0] !== "market")],
+    ["recurring (暫停的定期定額)", "recurring", {}, [["portfolio", "upcoming", 7, "recurring"]]],
+    ["market.reports (a variant ready, the reveal, my vote elsewhere)", "market.reports", { report_id: "mrp_1" }, BATCH4.filter((k) => k[0] === "market")],
+  ] as [string, string, Record<string, unknown>, QueryKey[]][])("%s", async (_name, topic, data, expected) => {
+    const qc = fresh()
+    await applyActions(qc, actionsFor(topic, data, { viewAs: null }), "none")
+    expect(stale(qc)).toEqual(keys(expected))
+  })
+
+  it("a query several actions of one batch match is refetched once, not once per action", async () => {
+    // 清除所有持倉＋暫停定期定額：同一批有 ledger 與 recurring，都對到本週事項；再加一個 resync 也對到
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } })
+    const fn = vi.fn(() => Promise.resolve({ at: Math.random() }))
+    const observer = new QueryObserver(qc, { queryKey: ["portfolio", "upcoming", 7, "recurring"], queryFn: fn, staleTime: Infinity })
+    const unsubscribe = observer.subscribe(() => {})
+    await vi.waitFor(() => expect(observer.getCurrentResult().data).toBeDefined())
+    expect(fn).toHaveBeenCalledTimes(1)
+    const batch = [...actionsFor("ledger", { account_id: "acc_1" }, { viewAs: null }), ...actionsFor("recurring", {}, { viewAs: null }), ...resyncActions()]
+    await applyActions(qc, batch, "active")
+    expect(fn).toHaveBeenCalledTimes(2)
+    unsubscribe()
+  })
+})

@@ -18,6 +18,7 @@ from sqlalchemy import delete as sql_delete
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
+from forliosa import realtime
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.domain.fees import (
     ZERO,
@@ -760,15 +761,27 @@ def delete_records(db: Session, user: User, account_ids: Collection[str],
     if symbol is not None:
         txn_scope.append(Transaction.symbol == symbol)
         skip_scope.append(AutoDividendSkip.symbol == symbol)
-    # only the columns the counts and the feed keys need (an account can hold thousands of rows)
-    rows = db.execute(select(Transaction.trade_date, Transaction.symbol, Transaction.type, Transaction.source)
-                      .where(*txn_scope)).all()
+    # only the columns the counts, the feed keys and the realtime fan-out need (an account can hold thousands of rows)
+    rows = db.execute(select(Transaction.account_id, Transaction.trade_date, Transaction.symbol, Transaction.type,
+                             Transaction.source, Transaction.note).where(*txn_scope)).all()
     if not rows:
         return DeletedRecords()
+    _announce_deleted(db, user, rows)
     db.execute(sql_delete(Transaction).where(*txn_scope))
     db.execute(sql_delete(AutoDividendSkip).where(*skip_scope))
     db.flush()
     return DeletedRecords(len(rows), len({r.symbol for r in rows if r.symbol}), sharing.trade_keys(rows))
+
+
+def _announce_deleted(db: Session, user: User, rows: Sequence[Any]) -> None:
+    """Realtime (2026-11-17 merge): the bulk ``DELETE`` is not seen by the ORM capture, so the same events a row-by-row
+    delete gives are emitted here — ``ledger{account_id}`` for each account that lost rows (the user's devices) and
+    the fan-out: groups that see positions (any row) or the feed (a row the feed showed), viewers whose delegation
+    covers those accounts. Sent with the commit; a rollback (a dry run) drops them."""
+    accounts = sorted({r.account_id for r in rows})
+    realtime.emit(db, *(realtime.event("ledger", {"account_id": a}, realtime.user(user.id)) for a in accounts),
+                  realtime.LedgerFanout(user.id, accounts, positions=True,
+                                        feed=any(realtime.feed_visible(lambda k, r=r: getattr(r, k)) for r in rows)))
 
 
 # -- a whole stock out of one account (產品負責人 2026-11-17：「還要有刪除股票的功能」) --------------------------------

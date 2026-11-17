@@ -227,29 +227,26 @@ export function fallbackActions(): Action[] {
  * 套用動作。`refetch`：
  * - `active`：畫面上有的馬上重新讀（分頁在前景）
  * - `none`：只標成過期（分頁在背景：回到前景時再一起讀，見 controller）
+ *
+ * 同一批裡好幾個動作對到同一個查詢（例如 `ledger`＋`recurring` 都對到本週事項、`resync`＋任何事件）時，那個查詢只重新讀一次：
+ * 先找出所有對到的查詢，再一次 `invalidateQueries`。逐一呼叫的話，第二次會取消第一次已經送出的請求再送一次，
+ * 伺服器照樣把第一次做完（2026-11-17 和 API 速度工作合併時發現：一批事件會變成兩倍的請求、佔兩倍的連線）。
  */
 export function applyActions(qc: QueryClient, actions: readonly Action[], refetch: "active" | "none"): Promise<unknown> {
-  const jobs: Promise<unknown>[] = []
+  const cache = qc.getQueryCache()
+  for (const a of actions) if (a.kind === "drop") qc.removeQueries({ queryKey: a.key, type: "inactive" })
+  const matched = new Set<Query>()
   for (const a of actions) {
-    if (a.kind === "drop") {
-      qc.removeQueries({ queryKey: a.key, type: "inactive" })
-      continue
-    }
+    if (a.kind !== "invalidate") continue
     const match = a.match
-    jobs.push(
-      qc
-        .invalidateQueries(
-          {
-            queryKey: a.key,
-            ...(a.exact ? { exact: true } : {}),
-            ...(match ? { predicate: (q: Query) => match(q.queryKey) } : {}),
-            refetchType: refetch,
-          },
-          // 正在讀的那一次可能是變更之前送出的：取消重讀（預設）。失敗的重新讀不往外丟（查詢自己記錯誤，401 由 QueryCache 處理）
-          { throwOnError: false },
-        )
-        .catch(() => undefined),
-    )
+    for (const q of cache.findAll({ queryKey: a.key, ...(a.exact ? { exact: true } : {}), ...(match ? { predicate: (q: Query) => match(q.queryKey) } : {}) })) matched.add(q)
   }
-  return Promise.all(jobs)
+  if (matched.size === 0) return Promise.resolve()
+  return qc
+    .invalidateQueries(
+      { predicate: (q: Query) => matched.has(q), refetchType: refetch },
+      // 正在讀的那一次可能是變更之前送出的：取消重讀（預設）。失敗的重新讀不往外丟（查詢自己記錯誤，401 由 QueryCache 處理）
+      { throwOnError: false },
+    )
+    .catch(() => undefined)
 }

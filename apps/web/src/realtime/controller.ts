@@ -7,8 +7,9 @@ import { actionsFor, applyActions, BROADCAST_TOPICS, fallbackActions, resyncActi
 /**
  * 一個分頁的即時更新：連線（`client.ts`）＋把事件變成重新讀（`topics.ts`）＋前景／背景的規則。
  *
- * - 收到事件先收集 150 毫秒，同樣的重新讀只做一次；行情這種每個人都會收到的，先隨機等 0–1.5 秒；
- *   「全部重新讀」（`resync`：部署後、伺服器的 LISTEN 重連後，大家同時收到）先隨機等 0–3 秒
+ * - 收到事件先收集 150 毫秒，同樣的重新讀只做一次（一批裡對到同一個查詢的也只讀一次，`applyActions`）；
+ *   行情這種每個人都會收到的，先隨機等 0–1.5 秒；「全部重新讀」（`resync`：部署後、伺服器的 LISTEN 重連後，大家同時收到）
+ *   先隨機等 0–3 秒，等的時候又來的 `resync` 併進同一次
  * - 自己這個分頁改的（事件的 `o` 是自己的分頁 id）略過：mutation 已經重新讀過了
  * - 分頁在前景：畫面上有的馬上重新讀；在背景：只標成過期，回到前景時一起讀
  * - 分頁在背景超過 2 分鐘：先關掉串流（保留最後的事件 id），回到前景時重連，伺服器補送錯過的（補不上就全部重新讀）
@@ -70,6 +71,7 @@ export class RealtimeController {
   private hiddenTimer: unknown = null
   private tickTimer: unknown = null
   private notOpenSince: number | null = null
+  private resyncPending = false
   private lastFallback = 0
   private unlisten: (() => void)[] = []
   private running = false
@@ -84,7 +86,10 @@ export class RealtimeController {
       onEvent: (e) => this.onEvent(e),
       onResync: () => {
         this.o.debug?.("realtime: resync")
-        this.spread(resyncActions(), RESYNC_SPREAD_MS)
+        // 已經有一次「全部重新讀」在等（重連時 `hello` 說 resync、接著又來一個 `resync`）：併成一次，不要每個都讀一輪
+        if (this.resyncPending) return
+        this.resyncPending = true
+        this.spread(resyncActions(), RESYNC_SPREAD_MS, () => (this.resyncPending = false))
       },
       onStatus: (s) => this.onStatus(s),
       onUnauthorized: () => (this.o.onUnauthorized ? this.o.onUnauthorized() : this.queue(resyncActions())),
@@ -119,6 +124,7 @@ export class RealtimeController {
     this.flushTimer = null
     for (const h of this.spreadTimers) this.t.clearTimeout(h)
     this.spreadTimers.clear()
+    this.resyncPending = false
     this.t.clearTimeout(this.hiddenTimer)
     this.t.clearTimeout(this.tickTimer)
     this.pending.clear()
@@ -144,9 +150,10 @@ export class RealtimeController {
   }
 
   /** 每個人都收到的：先隨機等一下，大家不要同一秒一起讀 */
-  private spread(actions: Action[], within = BROADCAST_SPREAD_MS): void {
+  private spread(actions: Action[], within = BROADCAST_SPREAD_MS, fired?: () => void): void {
     const h = this.t.setTimeout(() => {
       this.spreadTimers.delete(h)
+      fired?.()
       this.queue(actions)
     }, this.random() * within)
     this.spreadTimers.add(h)
