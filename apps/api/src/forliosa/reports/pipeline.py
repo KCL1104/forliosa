@@ -773,7 +773,7 @@ def _write_and_check(ctx: _Run, caller: Caller, writer: rs.Writer, pk: dict[str,
         raise _Stop("data_only", f"refusal:{draft.refusal}"[:200])
     if draft.output is None:
         raise _Stop("failed", draft.error or "write")
-    out = validate.tidy(draft.output, kind)
+    out = validate.tidy(draft.output, kind, pk)
     first = validate.validate(out, pk, kind, names)
     metrics["subject_mismatches"] = sum(p.code == "number_subject_mismatch" for p in first)
     metrics["inferred_dates"] = sum(p.code in ("date_not_sourced", "weekday_mismatch") for p in first)
@@ -801,17 +801,17 @@ def _write_and_check(ctx: _Run, caller: Caller, writer: rs.Writer, pk: dict[str,
             metrics["refusal_category"] = rev.refusal or None
             raise _Stop("data_only", f"refusal:{rev.refusal}"[:200])
         if rev.output is not None:
-            final_out, source = validate.tidy(rev.output, kind), rev.output
+            final_out, source = validate.tidy(rev.output, kind, pk), rev.output
         second = validate.validate(final_out, pk, kind, names)
         info["revised"] = [p.as_dict() for p in second]
-        dropped = validate.drop(final_out, [p for p in second if p.hard], kind)
+        dropped = validate.drop(final_out, [p for p in second if p.hard], kind, pk, names)
         if ctx.over_alarm:
             log.warning("market report run %s over the alarm", ctx.run.id)
             raise _Stop("data_only", "alarm")
         ctx.beat("check")
         issues2 = _check(ctx, caller, dropped.output, kind)  # what is left is read once more
         info["check_ran"] = True
-        dropped2 = validate.drop(dropped.output, issues2, kind)
+        dropped2 = validate.drop(dropped.output, issues2, kind, pk, names)
         info["revised"] += [p.as_dict() for p in issues2]
         sections = {**dropped.sections}
         for k, v in dropped2.sections.items():
@@ -819,6 +819,7 @@ def _write_and_check(ctx: _Run, caller: Caller, writer: rs.Writer, pk: dict[str,
         title_bad = dropped.title_bad or dropped2.title_bad
         highlights_bad = dropped.highlights_bad or dropped2.highlights_bad
         final_out = dropped2.output
+        info["dropped_sentences"] = [*dropped.sentences, *dropped2.sentences]  # taken out alone (paths of each pass)
         final_problems = [*[p for p in second if p.hard], *issues2]
     else:
         sections, title_bad, highlights_bad = {}, False, False

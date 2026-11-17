@@ -10,17 +10,18 @@ them (:mod:`.validate`). Its forward-looking sentences may take only three shape
 
 from __future__ import annotations
 
+import copy
 import json
 from typing import Any
 
-PROMPT_VERSION = "mr-2026-11-17b"
+PROMPT_VERSION = "mr-2026-11-17c"
 
 # The words no AI sentence may hold (validator §10.2 item 5); the time words are listed apart for the prompt.
 FORBIDDEN_WORDS = (
     "目標價", "合理價", "低估", "高估", "便宜", "昂貴", "支撐", "壓力", "停損", "停利", "進場", "出場", "買點", "賣點",
     "加碼", "減碼", "布局", "逢低", "逢高", "追價", "續抱", "獲利了結", "建議", "推薦", "首選", "口袋名單", "值得關注",
     "值得留意", "飆股", "強勢股", "潛力股", "補漲", "可望", "有望", "看好", "看淡", "看多", "看空", "偏多", "偏空",
-    "後市", "將會", "恐將", "機會", "勝率", "佈局", "評等", "評級",
+    "後市", "將會", "恐將", "機會", "勝率", "佈局", "評等", "評級", "利空出盡", "利多出盡",
 )
 TIME_WORDS = ("明天", "明日", "後天", "今天", "今日", "今晚", "今早", "今晨", "昨天", "昨日", "昨晚", "昨夜",
               "前天", "前一晚", "明晨", "明早", "明晚", "隔日", "隔天", "次日", "翌日", "下個交易日", "下一個交易日",
@@ -130,7 +131,7 @@ WRITER_SYSTEM = f"""\
 - 個股評等、目標價、別人預測的指數或股價區間（就算報導裡有也不寫）。
 - 美股指數或台指期的點數；美股只寫 ETF、ADR 與報導裡的百分比。
 - 沒有出處的原因：有「因為、由於、帶動、拖累、受…影響、主因、導致、受惠、推升、壓抑」的句子，refs 一定要有 X 或 W。找\
-不到報導就寫「未找到報導」。
+不到報導就不寫原因。
 
 # 講到之後的事，只能用三種句型（每一句都要是其中一種）
 1. 「已排定：…」，refs 放 C，或寫明時間的 X。
@@ -143,7 +144,8 @@ WRITER_SYSTEM = f"""\
 - 輸出以「句」為單位：每句是 {{"text": "…", "refs": ["F001", "X003"]}}。refs 列出這一句用到的所有編號，不能空。
 - 不自己算新的數字：不相加、不相減、不換算、不算平均或差距。資料包沒有的數字就不寫。
 - 漲跌用「▲」「▼」或「漲」「跌」，和數字的正負一致；照 display 的小數位數寫。
-- 股票只能寫 stocks 名單裡的公司，寫法「名稱（代號）」。名單外的公司與代號都不能出現。
+- 台股只能寫 stocks 名單裡的公司，寫法「名稱（代號）」。名單外的台股公司與代號都不能出現。
+- 海外公司（例如 Nvidia、三星）照報導（X）原文寫名稱，不加代號，也不要改寫成「美國 AI 晶片龍頭」這類代稱。
 - 法人買賣超和同一檔股票的漲跌不放在同一句。
 - 類股只能談 rules 指定的類股；談半導體時，同一段要帶它的集中度（「主要由台積電構成，約 77%」那一筆 F）。
 
@@ -151,6 +153,14 @@ WRITER_SYSTEM = f"""\
 - 只寫日期與星期，例如「11/18（三）」「11/23–11/27」。不寫{ "、".join(TIME_WORDS) }這類詞，也不要只寫星期。
 - 美股的數字一定寫是哪一天，例如「美股 11/17」。
 - 日期只能用資料包 dates 與 refs 裡出現的日期，不要自己推算。
+- 幾點幾分一律是台北時間：C 的 time_taipei 已經是台北時間，照寫。報導只給美國當地時間的，寫成「美東 11/18 14:00」（日\
+期加 24 小時制），伺服器會在後面補上台北時間；不要自己換算，也不要寫「美國時間下午 2:00」。
+
+# 缺的資料不寫進正文
+- 沒有的資料、沒有授權的行情、沒找到的報導，頁面會自己標示。正文不寫「這份未開放」「不列」「未取得」「授權未確\
+認」「資料包沒有」「只引用媒體報導」「未找到報導」這類說明，也不要提「資料包」。那一段沒有東西可寫就少寫或不寫。
+- 只有三個地方照規定寫：個股項目沒有原因時寫「未找到報導」；上週行事曆回顧沒有結果時寫「未找到報導」；盤後籌碼沒有上市\
+三大法人的報導時寫「上市三大法人尚未取得可引用的報導」。
 
 # 不重複
 - 數字欄（numbers）已經列出的數字，段落裡不要整串重抄；一段最多提兩個。
@@ -239,61 +249,63 @@ COUNTS: dict[str, dict[str, tuple[int, int]]] = {
 LENGTHS = {"premarket": (300, 1800), "close": (400, 2500), "weekly": (500, 4500)}
 
 
-def _sent() -> dict[str, Any]:
-    return {"type": "object", "properties": {"text": {"type": "string"},
-                                             "refs": {"type": "array", "items": {"type": "string"}}},
-            "required": ["text", "refs"], "additionalProperties": False}
-
-
-def _para() -> dict[str, Any]:
-    return {"type": "object", "properties": {"sentences": {"type": "array", "items": _sent()}},
-            "required": ["sentences"], "additionalProperties": False}
+# The shared shapes are written once under ``$defs`` and referenced with ``$ref``: the API compiles the schema into a
+# grammar, and the weekly schema with every paragraph spelled out inline (5.6 KB) was refused as "too large".
+def _ref(name: str) -> dict[str, Any]:
+    return {"$ref": f"#/$defs/{name}"}
 
 
 def _arr(item: dict[str, Any]) -> dict[str, Any]:
     return {"type": "array", "items": item}
 
 
-def _item() -> dict[str, Any]:
-    return {"type": "object", "properties": {"event": {"type": "string"}, "time_ref": {"type": "string"},
-                                             "sectors": _arr({"type": "string"}), "para": _para()},
-            "required": ["event", "time_ref", "sectors", "para"], "additionalProperties": False}
+def _obj(props: dict[str, Any]) -> dict[str, Any]:
+    return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
 
 
-def _stock() -> dict[str, Any]:
-    return {"type": "object", "properties": {"symbol": {"type": "string"}, "para": _para()},
-            "required": ["symbol", "para"], "additionalProperties": False}
+_DEFS: dict[str, dict[str, Any]] = {
+    "sent": _obj({"text": {"type": "string"}, "refs": _arr({"type": "string"})}),
+    "para": _obj({"sentences": _arr(_ref("sent"))}),
+    "item": _obj({"event": {"type": "string"}, "time_ref": {"type": "string"}, "sectors": _arr({"type": "string"}),
+                  "para": _ref("para")}),
+    "stock": _obj({"symbol": {"type": "string"}, "para": _ref("para")}),
+}
 
 
 def _chart(codes: list[str]) -> dict[str, Any]:
-    return {"type": "object", "properties": {
-        "code": {"type": "string", "enum": [*codes, "none"]},
-        "period": {"type": "string", "enum": ["day", "week", "none"]},
-        "set": {"type": "string", "enum": ["top5_weight", "gainers", "losers", "none"]},
-        "caption": _para()}, "required": ["code", "period", "set", "caption"], "additionalProperties": False}
+    return _obj({"code": {"type": "string", "enum": [*codes, "none"]},
+                 "period": {"type": "string", "enum": ["day", "week", "none"]},
+                 "set": {"type": "string", "enum": ["top5_weight", "gainers", "losers", "none"]},
+                 "caption": _ref("para")})
 
 
-def _obj(props: dict[str, Any]) -> dict[str, Any]:
-    return {"type": "object", "properties": props, "required": list(props), "additionalProperties": False}
+def _paras() -> dict[str, Any]:
+    return _arr(_ref("para"))
+
+
+def _root(props: dict[str, Any], *defs: str) -> dict[str, Any]:
+    out = _obj(props)
+    out["$defs"] = {k: copy.deepcopy(_DEFS[k]) for k in ("sent", "para", *defs)}
+    return out
 
 
 def schema(kind: str, chart_codes: list[str]) -> dict[str, Any]:
     """The writer's output schema of ``kind`` (counts are checked by the server, not the schema)."""
     title = {"type": "string"}
     if kind == "premarket":
-        return _obj({"title": title, "highlights": _arr(_para()), "overnight": _arr(_para()),
-                     "evening_notes": _arr(_para()), "watch": _arr(_item()), "chart_of_day": _chart(chart_codes)})
+        return _root({"title": title, "highlights": _paras(), "overnight": _paras(), "evening_notes": _paras(),
+                      "watch": _arr(_ref("item")), "chart_of_day": _chart(chart_codes)}, "item")
     if kind == "close":
-        return _obj({"title": title, "highlights": _arr(_para()), "what_happened": _arr(_para()),
-                     "sectors": _arr(_para()), "stocks": _arr(_stock()), "chips": _arr(_para()),
-                     "tonight": _arr(_item()), "chart_of_day": _chart(chart_codes)})
-    review = _obj({"ref": {"type": "string"}, "para": _para()})
-    theme = _obj({"theme": {"type": "string"}, "why": _para(), "events": _para(),
-                  "sectors": _arr({"type": "string"}), "relation": _para()})
-    return _obj({"title": title, "summary": _para(), "highlights": _arr(_para()), "market_week": _arr(_para()),
-                 "sectors_week": _arr(_para()), "stocks_week": _arr(_stock()), "chips_week": _arr(_para()),
-                 "global_week": _arr(_para()), "last_week_review": _arr(review), "themes": _arr(theme),
-                 "risks": _arr(_para()), "chart_of_day": _chart(chart_codes)})
+        return _root({"title": title, "highlights": _paras(), "what_happened": _paras(), "sectors": _paras(),
+                      "stocks": _arr(_ref("stock")), "chips": _paras(), "tonight": _arr(_ref("item")),
+                      "chart_of_day": _chart(chart_codes)}, "item", "stock")
+    review = _obj({"ref": {"type": "string"}, "para": _ref("para")})
+    theme = _obj({"theme": {"type": "string"}, "why": _ref("para"), "events": _ref("para"),
+                  "sectors": _arr({"type": "string"}), "relation": _ref("para")})
+    return _root({"title": title, "summary": _ref("para"), "highlights": _paras(), "market_week": _paras(),
+                  "sectors_week": _paras(), "stocks_week": _arr(_ref("stock")), "chips_week": _paras(),
+                  "global_week": _paras(), "last_week_review": _arr(review), "themes": _arr(theme),
+                  "risks": _paras(), "chart_of_day": _chart(chart_codes)}, "stock")
 
 
 def available_charts(pack: dict[str, Any]) -> list[str]:
@@ -335,10 +347,13 @@ def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
         *("- " + r for r in pack.get("rules") or []),
         "- 句型只能是：" + "；".join(OUTLOOK_PATTERNS),
     ]
+    lines.append("- 上面說的名單外股票指台股；海外公司照報導寫名稱。")
     if pack.get("missing"):
-        lines += ["", "# 缺的資料（照實說，不要猜）", *("- " + m["text"] for m in pack["missing"])]
+        lines += ["", "# 缺的資料（頁面會標示；正文不要寫這些，也不要說明缺了什麼，更不要猜）",
+                  *("- " + m["text"] for m in pack["missing"])]
     if not pack.get("web"):
-        lines += ["", "這份沒有已驗證的報導（X）：不要寫任何報導或原因，需要原因的地方寫「未找到報導」。"]
+        lines += ["", "這份沒有已驗證的報導（X）：不要寫任何報導或原因。個股項目的原因寫「未找到報導」，"
+                  "其他段落不寫原因。"]
     return "\n".join(lines)
 
 
@@ -348,7 +363,25 @@ def revise_message(problems: list[dict[str, Any]]) -> str:
              "沒有出處或對不上的數字就刪掉；不符合句型的句子改成三種句型之一或刪掉。", ""]
     for p in problems[:60]:
         lines.append(f"- {p['path']}：{p['code']}（{p.get('detail') or ''}）")
+    hints = []
+    for p in problems:
+        key = "time_ref" if str(p.get("path") or "").endswith(".time_ref") else str(p.get("code") or "")
+        if key in REVISE_HINTS and REVISE_HINTS[key] not in hints:
+            hints.append(REVISE_HINTS[key])
+    if hints:
+        lines += ["", "怎麼改：", *("- " + h for h in hints)]
     return "\n".join(lines)
+
+
+# What a revision should do about a problem whose code alone does not say it (keyed by code; ``time_ref`` for any
+# problem on an item's ``time_ref``)
+REVISE_HINTS = {
+    "time_ref": "time_ref 只能填 C 編號（例如 C001）或空字串；日期與時間寫在句子裡，不寫在 time_ref。",
+    "internal_gap": "缺的資料由頁面標示：刪掉說明缺了什麼、未開放、不列、未找到報導的句子或子句（個股項目與上週行事曆"
+                    "回顧的「未找到報導」、盤後籌碼的「上市三大法人尚未取得可引用的報導」除外）。",
+    "us_local_time": "美國當地時間寫成「美東 11/18 14:00」（日期加 24 小時制），伺服器會補上台北時間；不要自己換算。",
+    "stock_not_allowed": "名單外的台股不能出現；海外公司照報導原文寫名稱，不加代號。",
+}
 
 
 # -- compliance read (§11) ----------------------------------------------------------------------------------------

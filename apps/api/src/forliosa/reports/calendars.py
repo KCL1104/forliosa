@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
@@ -249,6 +250,85 @@ def earnings_label(report_date: date, timing: str, time_et: str | None = None) -
     if _hhmm(time_et):
         return f"美東 {md} {time_et}（台北 {tmd} {tp:%H:%M}）"
     return f"美東 {md} {_TIMING_TEXT.get(timing, '')}（台北 {tmd} {taipei_part(tp)}）"
+
+
+# -- US local times in the AI text -> Taipei (the program converts, never the model) ------------------------------
+# The writer is told to write a US-only time as 「美東 11/18 14:00」; :func:`us_times_to_taipei` also takes the forms a
+# report's wording leads to (「11/18 美國時間下午 2:00」「美東時間 11/18 下午 2 點半」) and writes
+# 「美東 11/18 14:00（台北 11/19 03:00）」, the form of :func:`earnings_label`.
+# 「美國」 alone names the country (「美國 CPI 11/18 21:30」 can be a Taipei time from the calendar): only with 時間
+_US_ZONE = r"(?:(?:美東|美國東部|紐約)(?:時間)?|美國時間)"
+_US_MD = r"(?P<mo>\d{1,2})/(?P<d>\d{1,2})(?:\s*[（(][一二三四五六日][)）])?"
+_US_CLOCK = (r"(?P<part>上午|下午|晚上|晚間|凌晨|清晨|早上|中午)?\s*(?P<h>\d{1,2})\s*"
+             r"(?:[:：]\s*(?P<m>\d{2})|點\s*(?:(?P<m2>\d{1,2})\s*分|(?P<half>半))?)"
+             r"(?!\d)(?!\s*[（(]\s*台北)(?P<trail>[ \t]*)")
+_US_TIMES = (re.compile(_US_ZONE + r"\s*" + _US_MD + r"\s*" + _US_CLOCK),
+             re.compile(_US_MD + r"\s*" + _US_ZONE + r"\s*" + _US_CLOCK))
+# a US local time with a clock (any form) — what is left of one after the conversion is a problem for the validator
+US_LOCAL_TIME = re.compile(_US_ZONE + r"[^，。；,;]{0,14}?(?<![\d/])\d{1,2}\s*(?:[:：]\s*\d{2}|點)")
+CONVERTED = re.compile(r"美東\s*(\d{1,2})/(\d{1,2})\s*(\d{2}):(\d{2})\s*[（(]\s*台北\s*(\d{1,2})/(\d{1,2})\s*"
+                       r"(\d{2}):(\d{2})\s*[)）]")
+
+
+def _near_year(month: int, day: int, ref: date) -> date | None:
+    best = None
+    for y in (ref.year - 1, ref.year, ref.year + 1):
+        try:
+            d = date(y, month, day)
+        except ValueError:
+            continue
+        if best is None or abs((d - ref).days) < abs((best - ref).days):
+            best = d
+    return best
+
+
+def _us_clock(m: re.Match[str]) -> tuple[int, int] | None:
+    h, part = int(m.group("h")), m.group("part") or ""
+    mm = int(m.group("m") or m.group("m2") or (30 if m.group("half") else 0))
+    if part in ("下午", "晚上", "晚間") and h < 12:
+        h += 12
+    elif part in ("上午", "凌晨", "清晨", "早上") and h == 12:
+        h = 0
+    elif part == "中午" and h < 11:
+        h += 12
+    return (h, mm) if 0 <= h <= 23 and 0 <= mm <= 59 else None
+
+
+def us_time_to_taipei(us_day: date, hh: int, mm: int) -> datetime:
+    return datetime.combine(us_day, time(hh, mm), NEW_YORK).astimezone(TAIPEI)
+
+
+def us_times_to_taipei(text: str, ref: date) -> str:
+    """Every US local time with a date in ``text`` written as 「美東 11/18 14:00（台北 11/19 03:00）」 (``ref``: the
+    edition date, for the year). Text that already has the Taipei time, or a US time without a date, is left as it
+    is."""
+    def sub(m: re.Match[str]) -> str:
+        day = _near_year(int(m.group("mo")), int(m.group("d")), ref)
+        clock = _us_clock(m)
+        if day is None or clock is None:
+            return m.group(0)
+        tp = us_time_to_taipei(day, *clock)
+        end = m.group("trail") if m.end() < len(m.string) and m.string[m.end()].isascii() else ""
+        return f"美東 {day.month}/{day.day} {clock[0]:02d}:{clock[1]:02d}（台北 {tp.month}/{tp.day} {tp:%H:%M}）{end}"
+
+    for rx in _US_TIMES:
+        text = rx.sub(sub, text)
+    return text
+
+
+def converted_spans(text: str, ref: date) -> list[tuple[int, int, int, int]]:
+    """The 「美東 M/D HH:MM（台北 M/D HH:MM）」 passages of ``text`` whose Taipei part is the exact conversion of the US
+    part: (start, end, start of the Taipei part, end of the Taipei part)."""
+    out = []
+    for m in CONVERTED.finditer(text):
+        mo, d, hh, mi, tmo, td, thh, tmi = (int(x) for x in m.groups())
+        day = _near_year(mo, d, ref)
+        if day is None or hh > 23 or mi > 59:
+            continue
+        tp = us_time_to_taipei(day, hh, mi)
+        if (tp.month, tp.day, tp.hour, tp.minute) == (tmo, td, thh, tmi):
+            out.append((m.start(), m.end(), m.start(5), m.end(8)))
+    return out
 
 
 # -- one list of dated rows ----------------------------------------------------------------------------------------

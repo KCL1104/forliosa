@@ -11,12 +11,17 @@ agrees with a signed fact; dates come from the pack or the refs; a weekday match
 no forbidden or time word; only listed stocks and allowed sectors (半導體 with its concentration in the same
 paragraph); no fund flow and price move of a stock in one sentence; causes need a report (X / W); forward-looking
 sentences take one of the three shapes; position numbers are never a reason; the premarket's headline does not
-repeat the previous session; no index points; the chart of the day is on the menu.
+repeat the previous session; no index points; the chart of the day is on the menu; no sentence about what the
+edition lacks (``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time.
+
+:func:`drop` takes out what still fails after the revision: given the pack, one sentence (or one item) at a time,
+the rest checked again; a section goes as a whole only when what is left still fails.
 """
 
 from __future__ import annotations
 
 import contextlib
+import copy
 import re
 import unicodedata
 from collections.abc import Iterable, Iterator
@@ -24,6 +29,7 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
+from forliosa.reports.calendars import US_LOCAL_TIME, converted_spans, us_times_to_taipei
 from forliosa.reports.marketcalc import SECTOR_NAMES
 from forliosa.reports.pack import OPTION_METRICS
 from forliosa.reports.prompts import COUNTS, FORBIDDEN_WORDS, LENGTHS, OUTPUT_KEYS, STYLE_WORDS, TIME_WORDS
@@ -46,7 +52,21 @@ OUTLOOK = re.compile(r"將(?!近|軍)|預計|預期|預估|可能|恐(?!慌)|展
 FORECAST = re.compile(r"走高|走低|走揚|走強|走弱|上攻|回檔|回落|漲勢|跌勢|反彈|續漲|續跌|上漲空間|下跌空間"
                       r"|震盪|樂觀|悲觀|可望|有望|看好|看淡|看多|看空|偏多|偏空|轉強|轉弱|止跌|築底|觸底|見頂"
                       r"|多頭|空頭")
-VIEW = re.compile(r"可望|有望|看好|看淡|看多|看空|偏多|偏空|樂觀|悲觀")
+VIEW = re.compile(r"可望|有望|看好|看淡|看多|看空|偏多|偏空|樂觀|悲觀|利空出盡|利多出盡")
+# A sentence about what this edition lacks (data not open, not licensed, not found): the page shows missing data
+# with its own empty states, so the text never says it (dry run 11/17: 「美股收盤價資料這份未開放」 would be daily)
+GAP = re.compile(
+    r"資料包|(?:這|本)份(?:報告)?(?:未|沒|不)|開放資料|授權(?:未|還沒|尚未|沒有)確認|需要授權|(?:暫不|不|未)列(?!入|為|出)"
+    r"|(?:未|尚未|沒有|還沒)取得(?:可引用的|相關的?)?(?:資料|數據|報導|消息|行情)|(?:沒有|無|缺少?)(?:相關的?)?資料"
+    r"|資料(?:不足|缺)|(?:這裡|這段|本段)只(?:引用|列|寫)|(?:未|沒有?|找不到|查無)(?:找到|查到)?(?:相關的?)?(?:報導|新聞)"
+    r"|(?:未|沒有?)(?:找到|查到)(?:相關的?)?消息|找不到(?:相關的?)?消息"
+    r"|(?:官方|證交所|櫃買中心|期交所|數字)[^，。；,;]{0,6}(?:尚未|還沒|未)(?:公布|發布)")
+# The fixed sentences the spec asks for where the page has a slot for them (contract §9.3)
+GAP_ALLOWED = {"stocks": ("未找到報導",), "stocks_week": ("未找到報導",), "last_week_review": ("未找到報導",),
+               "chips": ("上市三大法人尚未取得可引用的報導",)}
+# Reports about companies abroad or a dated theme: a name in them may be written as the report has it (the Taiwan
+# name check would otherwise flag a foreign company that shares a listed name, and the writer avoids the name)
+NAMED_KEYS = ("CO.", "US.", "ADR.", "THEME.")
 FLOW = re.compile(r"買賣超|買超|賣超|淨買|淨賣|持股增減")
 P1 = re.compile(r"^已排定[：:]")
 P2 = re.compile(r"^〔([^〕]{2,12})〕\s*報導[，,\s]*市場關注")  # the only approved shape: 〔媒體〕報導市場關注…
@@ -83,6 +103,7 @@ SIGNED_METRICS = frozenset({
 })
 # Sections whose every sentence must take one of the three shapes
 PATTERN_ONLY = ("watch", "tonight", "themes", "risks")
+STOCK_KEYS = ("stocks", "stocks_week")  # one item per stock (its first sentence names it)
 OPTION_REASON = ("watch", "themes", "risks")  # themes: only ``why``
 MULT = {"兆": 10 ** 12, "億": 10 ** 8, "萬": 10 ** 4}
 
@@ -111,14 +132,15 @@ class Sentence:
     text: str
     refs: list[str]
     sub: str = ""  # themes: why | events | relation
+    symbol: str = ""  # a stock item's symbol (its sentences are about that stock)
 
 
 # -- walking the output ---------------------------------------------------------------------------------------------
-def _para_sentences(para: Any, path: str, key: str, sub: str = "") -> Iterator[Sentence]:
+def _para_sentences(para: Any, path: str, key: str, sub: str = "", symbol: str = "") -> Iterator[Sentence]:
     for j, s in enumerate((para or {}).get("sentences") or [] if isinstance(para, dict) else []):
         if isinstance(s, dict):
             yield Sentence(f"{path}.sentences[{j}]", key, path, str(s.get("text") or ""),
-                           [str(r) for r in s.get("refs") or []], sub)
+                           [str(r) for r in s.get("refs") or []], sub, symbol)
 
 
 def sentences(output: dict[str, Any], kind: str) -> Iterator[Sentence]:
@@ -144,7 +166,8 @@ def sentences(output: dict[str, Any], kind: str) -> Iterator[Sentence]:
                 for sub in ("why", "events", "relation"):
                     yield from _para_sentences(item.get(sub), f"{base}.{sub}", key, sub)
             else:
-                yield from _para_sentences(item.get("para"), f"{base}.para", key)
+                symbol = str(item.get("symbol") or "") if key in STOCK_KEYS else ""
+                yield from _para_sentences(item.get("para"), f"{base}.para", key, symbol=symbol)
 
 
 def ai_text_chars(output: dict[str, Any], kind: str) -> int:
@@ -259,8 +282,10 @@ class Ctx:
     other_names: list[str] = field(default_factory=list)  # Taiwan names not on the list (≥3 characters)
     other_short: list[str] = field(default_factory=list)  # two-character ones (checked next to a stock's context)
     known: list[str] = field(default_factory=list)  # names blanked before the check (listed, subjects, outlets)
+    subjects: set[str] = field(default_factory=set)  # the facts' subjects and the listed names (normalized)
     strip: set[str] = field(default_factory=set)
     year: int = 2026
+    day: date = date(2026, 6, 30)  # the edition date (the year of a US date)
 
     def ref(self, rid: str) -> dict[str, Any] | None:
         for table in (self.facts, self.web, self.cal, self.filings, self.research):
@@ -291,8 +316,8 @@ def context(pack: dict[str, Any], kind: str, names: Iterable[str] = ()) -> Ctx:
         c.stock_symbols[str(s["symbol"])] = s
     c.sectors = {s["name"]: s for s in pack.get("sectors") or []}
     c.strip = set(pack.get("strip") or [])
-    with contextlib.suppress(KeyError, ValueError):
-        c.year = date.fromisoformat(pack["edition_date"]).year
+    c.day = edition_day(pack)
+    c.year = c.day.year
     for lst in (pack.get("dates") or {}).values():
         for iso in lst:
             if (md := _md(iso)) is not None:
@@ -316,27 +341,78 @@ def context(pack: dict[str, Any], kind: str, names: Iterable[str] = ()) -> Ctx:
     c.other_short = sorted({n for n in names if len(n) == 2 and n not in allowed and n not in known
                             and n not in TWO_CHAR_COMMON and not any(n in a for a in allowed)})
     c.known = sorted({k for k in known if k}, key=len, reverse=True)
+    c.subjects = {normalize(x) for x in (*c.stock_names.values(), *(f.get("subject") or "" for f in c.facts.values()))
+                  if len(x or "") >= 2}
     return c
 
 
-def other_stocks(c: Ctx, text: str) -> list[str]:
+def edition_day(pack: dict[str, Any] | None) -> date:
+    """The pack's edition date (today in Taipei without a pack): the year a written US date falls in."""
+    with contextlib.suppress(KeyError, ValueError, TypeError):
+        return date.fromisoformat(str((pack or {})["edition_date"])[:10])
+    from datetime import datetime
+
+    from forliosa.timeutil import TAIPEI
+
+    return datetime.now(TAIPEI).date()
+
+
+def other_stocks(c: Ctx, text: str, sources: Iterable[str] = ()) -> list[str]:
     """Taiwan names off the stock list in ``text`` (normalized): every one of three characters or more; a
     two-character one only next to a stock's context (股、漲、跌、法說、營收 …), once the listed names, the facts'
-    subjects, the outlets and the sector names are blanked."""
+    subjects, the outlets and the sector names are blanked. A name that the cited report of a company abroad or a
+    theme has in its own words (``sources``) is the report's: it may be written."""
     out: list[str] = []
+    said = [normalize(x) for x in sources if x]
     t = _blank(text, [*c.stock_names.values(), *(f.get("subject") or "" for f in c.facts.values()), *c.known,
                       *SECTOR_NAMES, *PLAIN_PHRASES])
     for name in c.other_names:
         if name in t:
-            out.append(name)
+            if not any(name in x for x in said):
+                out.append(name)
             t = t.replace(name, "＿" * len(name))
     for name in c.other_short:
+        if any(name in x for x in said):
+            continue
         for m in re.finditer(re.escape(name), t):
             around = t[max(0, m.start() - 4):m.start()] + t[m.end():m.end() + 8]
             if STOCK_CONTEXT.search(around):
                 out.append(name)
                 break
     return out
+
+
+def named_sources(c: Ctx, refs: Iterable[str]) -> list[str]:
+    """The words of the cited reports whose topic is a company abroad or a theme (:data:`NAMED_KEYS`)."""
+    out: list[str] = []
+    for r in refs:
+        x = c.web.get(r)
+        if x is not None and str(x.get("key") or "").startswith(NAMED_KEYS):
+            out += [str(x.get("claim") or ""), str(x.get("title") or "")]
+    return out
+
+
+def gap_phrase(key: str, text: str) -> str | None:
+    """A passage of ``text`` (normalized) that tells what the edition lacks, other than the fixed sentence the spec
+    asks for in ``key`` (:data:`GAP_ALLOWED`)."""
+    t = _blank(text, (normalize(x) for x in GAP_ALLOWED.get(key, ())))
+    m = GAP.search(t)
+    return m.group(0) if m else None
+
+
+def _blank_converted(c: Ctx, text: str, whole: bool) -> str:
+    """``text`` with the program's 「美東 …（台北 …）」 passages blanked: only their Taipei part (``whole=False``, the
+    date checks: that date is the conversion, not a sourced one) or all of it (the US local time check)."""
+    for start, end, ts, te in reversed(converted_spans(text, c.day)):
+        a, b = (start, end) if whole else (ts, te)
+        text = text[:a] + "＃" * (b - a) + text[b:]
+    return text
+
+
+def us_local_time(c: Ctx, text: str) -> str | None:
+    """A US local time with a clock left without its Taipei time (the page shows Taipei times)."""
+    m = US_LOCAL_TIME.search(_blank_converted(c, text, True))
+    return m.group(0) if m else None
 
 
 # -- sentence checks -----------------------------------------------------------------------------------------------
@@ -399,7 +475,8 @@ def _check_numbers(c: Ctx, s: Sentence, text: str, out: list[Problem]) -> None:
         clause = _clause_at(text, n.start)
         scope = clause if any(sub in clause for sub in subjects_here) else text
         if matched_f:
-            if not any(_subject_in(scope, f) for f in matched_f) and not matched_x:
+            if not any(_subject_in(scope, f) for f in matched_f) and not matched_x \
+                    and not _the_items_stock(c, s, matched_f, clause):
                 out.append(Problem(s.path, "number_subject_mismatch",
                                    f"{_num_text(s.text, n)} 對到 {matched_f[0].get('subject')}"))
                 continue
@@ -415,6 +492,18 @@ def _check_numbers(c: Ctx, s: Sentence, text: str, out: list[Problem]) -> None:
             subs = [c.web[r].get("subject") for r in pool if c.web[r].get("subject")]
             if subs and len(subs) == len(pool) and not any(normalize(x) in scope for x in subs):
                 out.append(Problem(s.path, "number_subject_mismatch", f"{_num_text(s.text, n)} 對到 {subs[0]}"))
+
+
+def _the_items_stock(c: Ctx, s: Sentence, facts: list[dict[str, Any]], clause: str) -> bool:
+    """In a stock item every sentence is about that stock: its number needs no name of its own (「成交金額 1,354.7
+    億元」 in 台積電's item), unless the clause names another subject."""
+    st = c.stock_symbols.get(s.symbol) if s.symbol else None
+    if st is None:
+        return False
+    name, code = normalize(str(st["name"])), str(st["code"])
+    if not any(normalize(str(f.get("subject") or "")) == name or code in (f.get("aliases") or []) for f in facts):
+        return False
+    return not any(o in clause for o in c.subjects - {name, code})
 
 
 def _num_text(text: str, n: Num) -> str:
@@ -467,7 +556,7 @@ def _weekday_of(c: Ctx, mo: int, d: int) -> int | None:
 
 
 def _check_dates(c: Ctx, s: Sentence, out: list[Problem]) -> None:
-    text = normalize(s.text)
+    text = _blank_converted(c, normalize(s.text), False)  # the server's Taipei date of a sourced US time
     allowed = c.allowed_dates | _ref_dates(c, s.refs)
     for md in _dates_in(text):
         if md not in allowed:
@@ -535,8 +624,12 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
     for m in re.finditer(r"[（(]\s*(\d{4,6}[A-Z]?)\s*[)）]", text):
         if m.group(1) not in c.stock_names:
             out.append(Problem(s.path, "stock_not_allowed", m.group(1)))
-    for name in other_stocks(c, text):
+    for name in other_stocks(c, text, named_sources(c, s.refs)):
         out.append(Problem(s.path, "stock_not_allowed", name))
+    if (gap := gap_phrase(s.key, text)) is not None:
+        out.append(Problem(s.path, "internal_gap", gap))
+    if (us := us_local_time(c, text)) is not None:
+        out.append(Problem(s.path, "us_local_time", us))
     # sectors
     for name in _sector_mentions(text):
         sec = c.sectors.get(name)
@@ -636,7 +729,7 @@ def _check_heading(c: Ctx, path: str, raw: str, own_refs: list[str] | None = Non
             if hits and all(f.get("group") == "prev_session" for f in hits):
                 out.append(Problem(path, "repeats_close_report", _num_text(raw, n)))
     allowed = c.allowed_dates | _ref_dates(c, own)
-    for md in _dates_in(text):
+    for md in _dates_in(_blank_converted(c, text, False)):
         if md not in allowed:
             out.append(Problem(path, "date_not_sourced", f"{md[0]}/{md[1]}"))
     for m in _LONE_WD.finditer(text):
@@ -644,8 +737,12 @@ def _check_heading(c: Ctx, path: str, raw: str, own_refs: list[str] | None = Non
     for m in re.finditer(r"[（(]\s*(\d{4,6}[A-Z]?)\s*[)）]", text):
         if m.group(1) not in c.stock_names:
             out.append(Problem(path, "stock_not_allowed", m.group(1)))
-    for name in other_stocks(c, text):
+    for name in other_stocks(c, text, named_sources(c, own)):
         out.append(Problem(path, "stock_not_allowed", name))
+    if (gap := GAP.search(text)) is not None:
+        out.append(Problem(path, "internal_gap", gap.group(0)))
+    if (us := us_local_time(c, text)) is not None:
+        out.append(Problem(path, "us_local_time", us))
     for name in _sector_mentions(text):
         sec = c.sectors.get(name)
         if sec is None or not sec.get("text_eligible"):
@@ -718,7 +815,7 @@ def _check_items(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
                     out.append(Problem(f"{key}[{i}].sectors", "sector_unknown", str(sec), hard=False))
             ref = (item or {}).get("time_ref")
             if key != "themes" and ref and ref not in c.cal:
-                out.append(Problem(f"{key}[{i}].time_ref", "bad_ref", str(ref)))
+                out.append(Problem(f"{key}[{i}].time_ref", "bad_ref", f"time_ref 只能填 C 編號或空字串，收到「{ref}」"))
     for i, item in enumerate(output.get("last_week_review") or []):
         ref = (item or {}).get("ref")
         if ref and ref not in c.cal:
@@ -758,71 +855,243 @@ def mentions_anthropic(output: dict[str, Any], kind: str) -> bool:
 
 
 # -- trimming and dropping -------------------------------------------------------------------------------------------
-def tidy(output: dict[str, Any], kind: str) -> dict[str, Any]:
-    """Soft fixes in a copy: extra items cut to the maximum, unknown sector names removed, ``time_ref`` that is not a
-    calendar id kept as given (the validator flags it)."""
-    import copy
+_C_ID = re.compile(r"C\d{3,}")
 
+
+def _sentence_dicts(node: Any) -> Iterator[dict[str, Any]]:
+    """Every sentence dict under ``node`` (paragraphs, items, the chart's caption)."""
+    if isinstance(node, dict):
+        for s in node["sentences"] if isinstance(node.get("sentences"), list) else []:
+            if isinstance(s, dict):
+                yield s
+        for k, v in node.items():
+            if k != "sentences":
+                yield from _sentence_dicts(v)
+    elif isinstance(node, list):
+        for v in node:
+            yield from _sentence_dicts(v)
+
+
+def tidy(output: dict[str, Any], kind: str, pack: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Soft fixes in a copy: extra items cut to the maximum; unknown sector names removed; an item's ``time_ref``
+    that is not a calendar id (a date or a time the writer put there) replaced by the calendar id its sentences cite,
+    else emptied; a US local time with a date written with its Taipei time (「美東 11/18 14:00（台北 11/19 03:00）」,
+    converted here, never by the model). ``pack``: the calendar ids and the edition date (without it, any ``C001``
+    form is taken as an id and today gives the year)."""
     out = copy.deepcopy(output)
     for key, (_lo, hi) in COUNTS[kind].items():
         if isinstance(out.get(key), list) and len(out[key]) > hi:
             out[key] = out[key][:hi]
+    cal = {str(x.get("id")) for x in pack.get("calendar") or []} if pack is not None else None
+
+    def is_cal(rid: str) -> bool:
+        return rid in cal if cal is not None else bool(_C_ID.fullmatch(rid))
+
     for key in ("watch", "tonight", "themes"):
         for item in out.get(key) or []:
-            if isinstance(item, dict):
-                item["sectors"] = [s for s in item.get("sectors") or [] if s in SECTOR_NAMES]
+            if not isinstance(item, dict):
+                continue
+            item["sectors"] = [s for s in item.get("sectors") or [] if s in SECTOR_NAMES]
+            ref = str(item.get("time_ref") or "").strip()
+            if key != "themes" and ref and not is_cal(ref):
+                cited = [str(r) for s in _sentence_dicts(item.get("para")) for r in s.get("refs") or []
+                         if is_cal(str(r))]
+                item["time_ref"] = cited[0] if cited else ""
+    day = edition_day(pack)
+    for s in _sentence_dicts(out):
+        if isinstance(s.get("text"), str):
+            s["text"] = us_times_to_taipei(s["text"], day)
+    if isinstance(out.get("title"), str):
+        out["title"] = us_times_to_taipei(out["title"], day)
+    for key, field_ in HEADING_KEYS.items():
+        for item in (out.get(key) or []) if key in OUTPUT_KEYS[kind] else []:
+            if isinstance(item, dict) and isinstance(item.get(field_), str):
+                item[field_] = us_times_to_taipei(item[field_], day)
     return out
 
 
 ITEM_LEVEL = {"stock_item_mismatch"}
+_SENT_PATH = re.compile(r"^(?P<key>\w+)(?:\[(?P<i>\d+)\])?(?:\.(?P<sub>para|why|events|relation|caption))?"
+                        r"\.sentences\[(?P<j>\d+)\]$")
+_ITEM_PATH = re.compile(r"^(?P<key>\w+)\[(?P<i>\d+)\]")
+NO_CHART = {"code": "none", "period": "none", "set": "none", "caption": {"sentences": []}}
 
 
 @dataclass
 class Dropped:
     output: dict[str, Any]
-    sections: dict[str, list[str]]  # output key -> reasons (codes)
+    sections: dict[str, list[str]]  # output key -> reasons (codes): the sections taken out as a whole
     title_bad: bool
     highlights_bad: bool
     chart_dropped: bool
     items_dropped: dict[str, list[int]]
+    sentences: list[dict[str, Any]] = field(default_factory=list)  # {path, codes, text} of each sentence taken alone
 
 
-def drop(output: dict[str, Any], problems: list[Problem], kind: str) -> Dropped:
-    """Remove what still has hard problems: a stock item alone, the chart of the day alone, otherwise the whole
-    section (output key). Title and highlights are only flagged (the caller puts the rule-made ones instead)."""
-    import copy
+def drop(output: dict[str, Any], problems: list[Problem], kind: str, pack: dict[str, Any] | None = None,
+         names: Iterable[str] = ()) -> Dropped:
+    """Remove what still has hard problems. Title and highlights are only flagged when they fail (the caller puts the
+    rule-made ones instead).
 
-    out = copy.deepcopy(output)
+    With the ``pack``: a failing sentence goes alone (a stock item's first sentence, an item's name or ``time_ref``
+    take their item with them; a paragraph or item left empty goes too), and what is left is checked again (the
+    sentence that went may have carried the semiconductor concentration another one needs), up to three rounds; a
+    section that still fails then goes as a whole. Highlights fail only when fewer than the minimum are left.
+
+    Without the pack (nothing could check what is left): a stock item alone, the chart of the day alone, otherwise the
+    whole section."""
+    d = Dropped(copy.deepcopy(output), {}, False, False, False, {})
+    hard = [p for p in problems if p.hard]
+    if pack is not None:
+        names = list(names)
+        for _ in range(3):
+            if not hard:
+                break
+            _drop_parts(d, hard, kind)
+            hard = [p for p in validate(d.output, pack, kind, names) if p.hard and not _replaced(d, p)]
+    _drop_sections(d, hard, kind)
+    return d
+
+
+def _replaced(d: Dropped, p: Problem) -> bool:
+    return (p.key == "title" and d.title_bad) or (p.key == "highlights" and d.highlights_bad) \
+        or (p.key == "chart_of_day" and d.chart_dropped)
+
+
+def _note_section(d: Dropped, key: str, codes: Iterable[str]) -> None:
+    reasons = d.sections.setdefault(key, [])
+    reasons += [c for c in dict.fromkeys(codes) if c not in reasons]
+
+
+def _drop_chart(d: Dropped) -> None:
+    d.chart_dropped = True
+    if isinstance(d.output.get("chart_of_day"), dict):
+        d.output["chart_of_day"] = copy.deepcopy(NO_CHART)
+
+
+def _drop_sections(d: Dropped, hard: list[Problem], kind: str) -> None:
+    """A stock item alone, the chart of the day alone, title and highlights flagged, otherwise the whole section."""
+    out = d.output
     sections: dict[str, list[str]] = {}
     items: dict[str, list[int]] = {}
-    title_bad = highlights_bad = chart_dropped = False
-    hard = [p for p in problems if p.hard]
     for p in hard:
         if p.code in ITEM_LEVEL:
-            m = re.match(r"(\w+)\[(\d+)\]", p.path)
-            if m:
-                items.setdefault(m.group(1), []).append(int(m.group(2)))
+            if (m := _ITEM_PATH.match(p.path)) is not None:
+                items.setdefault(m.group("key"), []).append(int(m.group("i")))
             continue
         if p.key == "title":
-            title_bad = True
+            d.title_bad = True
         elif p.key == "highlights":
-            highlights_bad = True
+            d.highlights_bad = True
         elif p.key == "chart_of_day":
-            chart_dropped = True
-        else:
-            sections.setdefault(p.key, [])
-            if p.code not in sections[p.key]:
-                sections[p.key].append(p.code)
+            _drop_chart(d)
+        elif p.key in OUTPUT_KEYS[kind]:
+            sections.setdefault(p.key, []).append(p.code)
     for key, idx in items.items():
         if key in sections:
             continue
-        keep = [x for i, x in enumerate(out.get(key) or []) if i not in set(idx)]
-        out[key] = keep
-    for key in sections:
+        out[key] = [x for i, x in enumerate(out.get(key) or []) if i not in set(idx)]
+        d.items_dropped.setdefault(key, []).extend(sorted(set(idx)))
+    for key, codes in sections.items():
         out[key] = {"sentences": []} if key == "summary" else []
-    if chart_dropped and isinstance(out.get("chart_of_day"), dict):
-        out["chart_of_day"] = {"code": "none", "period": "none", "set": "none", "caption": {"sentences": []}}
-    return Dropped(out, sections, title_bad, highlights_bad, chart_dropped, items)
+        _note_section(d, key, codes)
+
+
+def _empty(key: str, item: Any) -> bool:
+    if not isinstance(item, dict):
+        return False
+    if "sentences" in item:
+        return not item.get("sentences")
+    if key == "themes":  # a theme stands on its reason (why)
+        return not (item.get("why") or {}).get("sentences")
+    return not (item.get("para") or {}).get("sentences")
+
+
+def _drop_parts(d: Dropped, hard: list[Problem], kind: str) -> None:
+    """One round of :func:`drop` with the pack: sentences (and the items they take with them) out of ``d.output``."""
+    out = d.output
+    whole: dict[str, list[str]] = {}
+    items: dict[str, dict[int, list[str]]] = {}
+    sents: dict[str, dict[tuple[int | None, str | None], dict[int, list[str]]]] = {}
+    for p in hard:
+        if p.key == "title":
+            d.title_bad = True
+            continue
+        if p.key not in OUTPUT_KEYS[kind]:
+            continue
+        m = _SENT_PATH.match(p.path)
+        if m is not None and p.code not in ITEM_LEVEL:
+            i = int(m.group("i")) if m.group("i") is not None else None
+            j = int(m.group("j"))
+            if p.key in STOCK_KEYS and j == 0 and i is not None:  # the sentence that names the stock
+                items.setdefault(p.key, {}).setdefault(i, []).append(p.code)
+            else:
+                sents.setdefault(p.key, {}).setdefault((i, m.group("sub")), {}).setdefault(j, []).append(p.code)
+            continue
+        mi = _ITEM_PATH.match(p.path)
+        if mi is not None:  # an item's name or time_ref, a stock item's symbol, a review's ref
+            items.setdefault(p.key, {}).setdefault(int(mi.group("i")), []).append(p.code)
+            continue
+        whole.setdefault(p.key, []).append(p.code)
+
+    def take(container: Any, path: str, marks: dict[int, list[str]]) -> None:
+        if not isinstance(container, dict):
+            return
+        kept = []
+        for j, s in enumerate(container.get("sentences") or []):
+            if j in marks:
+                d.sentences.append({"path": f"{path}.sentences[{j}]", "codes": list(dict.fromkeys(marks[j])),
+                                    "text": str((s or {}).get("text") or "") if isinstance(s, dict) else ""})
+            else:
+                kept.append(s)
+        container["sentences"] = kept
+
+    for key in dict.fromkeys([*whole, *items, *sents]):
+        codes = [*whole.get(key, []), *(c for v in items.get(key, {}).values() for c in v),
+                 *(c for v in sents.get(key, {}).values() for cs in v.values() for c in cs)]
+        if key == "chart_of_day":
+            ch = out.get("chart_of_day")
+            if key in whole or not isinstance(ch, dict):
+                _drop_chart(d)
+                continue
+            for marks in sents.get(key, {}).values():
+                take(ch.get("caption"), "chart_of_day.caption", marks)
+            if not (ch.get("caption") or {}).get("sentences"):
+                _drop_chart(d)
+            continue
+        if key in whole:
+            out[key] = {"sentences": []} if key == "summary" else []
+            if key == "highlights":
+                d.highlights_bad = True
+            else:
+                _note_section(d, key, codes)
+            continue
+        if key == "summary":
+            for marks in sents.get(key, {}).values():
+                take(out.get("summary"), "summary", marks)
+            if not (out.get("summary") or {}).get("sentences"):
+                out["summary"] = {"sentences": []}
+                _note_section(d, key, codes)
+            continue
+        rows = out.get(key) if isinstance(out.get(key), list) else []
+        kept = []
+        for i, it in enumerate(rows):
+            if i in items.get(key, {}):
+                d.items_dropped.setdefault(key, []).append(i)
+                continue
+            for (ii, sub), marks in sents.get(key, {}).items():
+                if ii == i and isinstance(it, dict):
+                    take(it if sub is None else it.get(sub), f"{key}[{i}]" + (f".{sub}" if sub else ""), marks)
+            if _empty(key, it):
+                d.items_dropped.setdefault(key, []).append(i)
+                continue
+            kept.append(it)
+        out[key] = kept
+        if key == "highlights":
+            if len(kept) < COUNTS[kind]["highlights"][0]:
+                d.highlights_bad = True
+        elif rows and not kept:
+            _note_section(d, key, codes)
 
 
 def ai_sections_left(output: dict[str, Any], kind: str) -> int:
