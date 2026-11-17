@@ -1471,7 +1471,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `AI_MONTHLY_TOKEN_BUDGET` | 3,000,000 | 每人每月（台北月）計費 token，0＝不限（計法見下；產品負責人確認） |
 | `AI_MONTHLY_COST_BUDGET_USD` | 1 | 免費帳號每月（台北月）估計花費上限（美元：對話、法人觀點、收盤簡報；共用的工作不算到任何人），0＝不限（產品負責人 2026-11-15：從 US$2 降到 US$1）。一題要正常開始，得剩得下它的一般花費（一般提問 US$0.05、深度搜尋 US$0.15，`store.TURN_ESTIMATE_USD`）；剩不夠時進入**省錢模式**（`store.month_mode`）：提問照常，但這一題沒有 `web_search`／`web_fetch`（page context 多一行說明），深度搜尋、法人觀點、收盤簡報 429 `ai_monthly_budget`；`/ai/usage` 的 `economy` 為 true |
 | `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、8、0 | 會員（`users.plan = "member"` 到 `plan_until`；站方管理員也算）每天的題數、每月花費上限、每月 token（0＝不限）。每月花費上限 2026-11-16 從 3 改成 8（產品負責人） |
-| `AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` | `false`、`false` | 免費帳號也能用深度搜尋／收盤簡報（個人部署用）；預設只給會員：免費帳號 `mode: "deep"` → 403 `members_only`，打開收盤簡報 → 403 `members_only` |
+| `AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` | `true`、`false` | 會員和免費帳號只差每日收盤簡報與 AI 額度（題數、花費、token、省錢模式的倍數；產品負責人 2026-11-17）。**深度搜尋**預設所有帳號都有（2026-11-15～11-17 只給會員），一樣算自己的 `AI_DEEP_SEARCH_COST` 題；設 `false` 改回只給會員：免費帳號 `mode: "deep"` → 403 `members_only`、`/ai/usage` 的 `deep_search_members_only` true（預設一律 false，欄位留著給舊前端）。**收盤簡報**只給會員：免費帳號打開 → 403 `members_only`；設 `true` 開給所有人（個人部署用） |
 | `AI_ECONOMY_CAP_MULTIPLIER`、`AI_MEMBER_ECONOMY_CAP_MULTIPLIER` | 2、1.25 | 省錢模式一直到這個月花到上限的幾倍才完全停（前一個是免費帳號的，後一個是會員的：產品負責人 2026-11-16，`plans.Plan.economy_cap_multiplier`、`store.month_mode`）（429 `ai_monthly_budget`，`month_budget_reached` true）；1＝到上限直接停。省錢模式第一次在舊對話裡用時，工具清單和之前不同，回放的 thinking 會被拒一次，這一題改從純文字摘要接下去（`_THINKING_REJECTED`，和換金鑰槽同一條路） |
 | `AI_THREAD_MAX_CONTEXT_TOKENS` | 90,000 | 一段對話的提示超過這個大小就要求開新對話（Haiku 5.5 提示超過 10 萬 token 價格變 5 倍） |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES` | `true`、5 | 每輪最多 5 次搜尋（2026-11-16 從 3 提高：「為什麼漲跌」要查價格、大盤與公司消息三種） |
@@ -2843,7 +2843,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
-| `IMPORT_STATEMENTS` | `off` | 誰能讀檔：`off` 沒有人（入口不出現，`POST /imports/statement` 403）；`admins` 只有站方管理員（`ADMIN_EMAILS`，第一版）；`all` 所有登入的人，免費與會員一樣。決定 `/me` 的 `plan.statement_import`。只管 `POST /imports/statement`：`POST /transactions/batch` 與 `DELETE /transactions/batches/{id}` 不看它 |
+| `IMPORT_STATEMENTS` | `all` | 誰能讀檔：`all` 所有登入的人，免費與會員一樣（2026-11-17 起是預設：會員和免費帳號只差收盤簡報與 AI 額度；以前預設 `off`）；`admins` 只有站方管理員（`ADMIN_EMAILS`，第一版）；`off` 沒有人（入口不出現，`POST /imports/statement` 403）。決定 `/me` 的 `plan.statement_import`。只管 `POST /imports/statement`：`POST /transactions/batch` 與 `DELETE /transactions/batches/{id}` 不看它 |
 | `AI_MODEL_IMPORT` | 跟著 `AI_MODEL`（`claude-haiku-5-5`） | 讀檔的模型。設定早就有（`store.model_for("import")`），2026-11-16 才用到 |
 | `AI_MODEL_IMPORT_RETRY` | `claude-sonnet-5-5` | 驗算沒過時重讀一次的模型（effort `low`）；省錢模式不重讀 |
 | `AI_EFFORT_IMPORT` | `medium` | 讀檔的 `output_config.effort`（假資料實測：low 與 medium 都 30/30，medium 稍快稍便宜） |
@@ -3301,3 +3301,22 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   `notifications.signed(lines, kind, ai=True)` 組字，AI 寫的段落用 `notifications.ai_line(text, kind)`（開頭「AI 整理：」），不要自己 append 免責的字串
   （見 `docs/legal/README.md`「2026-11-17 的修改」）。
 
+
+## 2026-11-17 會員和一般帳號只差每日收盤簡報與問 AI 次數（`forliosa.plans`）
+
+產品負責人：「付費會員跟一般會員只差每日收盤簡報、問 AI 次數，那些一般的功能應該要是全體預設有的」。
+
+- **只給會員的（不變）**：每日收盤簡報（`AI_FREE_DAILY_BRIEFING=false`；免費帳號打開 → 403 `members_only`「每日收盤簡報是會員功能。」）；
+  AI 額度：每天的題數（免費 3、會員 30）、每月估計花費（約 US$1／US$8）、每月計費 token（300 萬／不限）、省錢模式的倍數（2／1.25）。
+- **所有登入的帳號預設都有**：
+  - 深度搜尋：`AI_FREE_DEEP_SEARCH` 預設改成 `true`（2026-11-15～11-17 只給會員；正式環境先設了 `true` 救急）。一樣算自己的
+    `AI_DEEP_SEARCH_COST` 題（不超過每天的題數：免費帳號一次就是當天的 3 題）。`GET /me` 的 `plan.deep_search` true；`/ai/usage` 的
+    `deep_search_cost` 是題數、`deep_search_members_only` false。設 `false` 改回只給會員（`mode: "deep"` → 403 `members_only`），欄位都留著。
+  - 匯入對帳單：`IMPORT_STATEMENTS` 預設改成 `all`（以前 `off`）；`admins`、`off` 留著當開關。
+- **全部的方案關卡**（掃過 `apps/api`、`apps/web`）：`plans.plan_of` 的 `deep_search`、`daily_briefing`、`statement_import` 三個欄位；
+  `POST /ai/chat`（深度搜尋）、`PATCH /me/preferences`（收盤簡報）、`ai/briefing.wanted`（worker 寫不寫簡報）、`services/imports.require_access`
+  （匯入）；其餘看 `Plan` 的都是額度（`store.check_quota`、`month_mode`、`deep_search_cost`、`usage_summary`）。沒有其他只給會員的功能。
+  群組加值（`services.group_plans`，人數上限與群組 AI 日報）是另一個產品，這次不動；站方管理（`/admin/*`、`GET /ai/admin/keys`）照舊只給站方。
+- **測試**：`tests/ai/test_plans.py`（免費帳號用預設值：深度搜尋 200、算 3 題，匯入打開，收盤簡報 403；`AI_FREE_DEEP_SEARCH=false` 時 403）、
+  `tests/ai/test_quota_defaults.py`、`tests/api/test_imports.py` 的預設值；前端 `apps/web/src/pages/transactions/import/__tests__/entry.test.tsx`
+  （免費帳號 `statement_import` true 時「＋」是記一筆／匯入對帳單的選單，false 或沒有欄位時直接記一筆；`deep_search_cost` 有數字就有切換鈕）。

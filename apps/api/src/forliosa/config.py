@@ -146,8 +146,11 @@ class Settings(BaseSettings):
     ai_member_daily_message_limit: int = Field(default=30, ge=0)
     ai_member_monthly_cost_budget_usd: float = Field(default=8.0, ge=0)
     ai_member_monthly_token_budget: int = Field(default=0, ge=0)
-    # 深度搜尋 and the daily closing briefing are for members; true = free accounts get them too (a personal deployment)
-    ai_free_deep_search: bool = False
+    # Members and free accounts differ only in the daily closing briefing and the AI quota above
+    # (產品負責人 2026-11-17). 深度搜尋 is every account's (it still takes ``ai_deep_search_cost`` of the account's
+    # own questions); false = members only, as before 2026-11-17. The briefing is members'; true = free accounts get
+    # it too (a personal deployment).
+    ai_free_deep_search: bool = True
     ai_free_daily_briefing: bool = False
     # 省錢模式: once the month's US$ budget is spent, questions still run, without Claude's web search and fetch (about
     # US$0.002 each instead of US$0.02), until the month's spending reaches this many times the budget. 深度搜尋,
@@ -223,12 +226,13 @@ class Settings(BaseSettings):
     ai_admin_emails: Annotated[list[str], NoDecode] = Field(default_factory=list)
     ai_model_news: str | None = None
     # 匯入對帳單 (POST /imports/statement, ``forliosa.ai.importer`` + ``services.imports``; 產品負責人 2026-11-16).
-    # Who may use it: off (nobody) | admins (site admins, ADMIN_EMAILS: the first version) | all (every signed-in
-    # account, free and members alike). ``AI_MODEL_IMPORT`` (above) reads the pages; when the server's checks fail,
+    # Who may use it: all (every signed-in account, free and members alike; the default since 2026-11-17, when the
+    # owner decided members differ only in the briefing and the AI quota) | admins (site admins, ADMIN_EMAILS: the
+    # first version) | off (nobody). ``AI_MODEL_IMPORT`` (above) reads the pages; when the server's checks fail,
     # the totals do not match, something was unreadable or the model refused, the failing pages are read once more
     # with ``AI_MODEL_IMPORT_RETRY`` (never in 省錢模式). Not one of the day's questions: billed to the month's budget,
     # at most ``IMPORT_DAILY_LIMIT`` reads a day per user (0 = no limit).
-    import_statements: Literal["off", "admins", "all"] = "off"
+    import_statements: Literal["off", "admins", "all"] = "all"
     ai_model_import_retry: str = "claude-sonnet-5-5"
     ai_effort_import: Literal["low", "medium", "high", "xhigh", "max"] = "medium"
     import_max_pages: int = Field(default=20, ge=1, le=100)

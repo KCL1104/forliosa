@@ -281,7 +281,7 @@ describe("設定：每日收盤簡報的開關（預設關）", () => {
     vi.spyOn(api, "getMe").mockResolvedValue({
       ...me,
       preferences: { ...me.preferences, daily_briefing: true }, // 方案出來以前打開的：照樣顯示關
-      plan: { tier: "free", until: null, deep_search: false, daily_briefing: false },
+      plan: { tier: "free", until: null, deep_search: true, daily_briefing: false, statement_import: true }, // 2026-11-17：只差收盤簡報與題數
     })
     renderApp("/settings")
     expect(await screen.findByText("收盤後依你的持股與觀察清單寫一則。這是會員功能。", undefined, T)).toBeInTheDocument()

@@ -159,7 +159,8 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 |---|---|---|
 | `AI_MODEL` | `claude-haiku-5-5` | `AI_MODEL_CHAT`／`AI_MODEL_WHY` 可個別覆寫 |
 | `AI_DAILY_MESSAGE_LIMIT`、`AI_MONTHLY_TOKEN_BUDGET`、`AI_MONTHLY_COST_BUDGET_USD` | 3、3,000,000、1 | 免費帳號每天提問數、每月計費 token、每月估計花費（美元）（0＝不限；產品負責人 2026-11-15） |
-| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、8、0 | 會員（站方在 `/admin/members` 開通；站方管理員也算；每月約 US$8 是 2026-11-16 起，以前 US$3）。深度搜尋與收盤簡報只給會員（`AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` 可以開給所有人） |
+| `AI_MEMBER_DAILY_MESSAGE_LIMIT`、`AI_MEMBER_MONTHLY_COST_BUDGET_USD`、`AI_MEMBER_MONTHLY_TOKEN_BUDGET` | 30、8、0 | 會員（站方在 `/admin/members` 開通；站方管理員也算；每月約 US$8 是 2026-11-16 起，以前 US$3）。會員和免費帳號只差這些題數與額度，以及每日收盤簡報（產品負責人 2026-11-17） |
+| `AI_FREE_DEEP_SEARCH`、`AI_FREE_DAILY_BRIEFING` | `true`、`false` | 免費帳號能不能用深度搜尋／收盤簡報。深度搜尋預設所有帳號都有（2026-11-17；算自己的題數），`false` 改回只給會員；收盤簡報只給會員，`true` 開給所有人（個人部署用） |
 | `AI_ECONOMY_CAP_MULTIPLIER`、`AI_MEMBER_ECONOMY_CAP_MULTIPLIER` | 2、1.25 | 花費上限用完後的省錢模式（不上網搜尋）一直到花了上限的幾倍才停（前一個是免費帳號的，後一個是會員的，2026-11-16）；1＝到上限就停 |
 | `AI_WEB_SEARCH`、`AI_WEB_SEARCH_MAX_USES`、`AI_WEB_SEARCH_ALLOWED_DOMAINS` | `true`、5、空 | 預設不限網域，由模型判斷何時搜尋、用哪些來源（只限財經資訊） |
 | `AI_DEEP_SEARCH_COST`、`AI_DEEP_SEARCH_MAX_USES`、`AI_DEEP_MAX_TOOL_ROUNDS` | 3（不超過每天的題數）、12、16 | 深度搜尋（`POST /ai/chat` 的 `mode: "deep"`）：一次算幾題、最多搜尋幾次、迴圈最多幾輪 |
@@ -172,7 +173,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `GROUP_FREE_MEMBER_CAP`、`GROUP_BOOSTED_MEMBER_CAP` | 5、50 | 群組加值包（產品負責人 2026-11-16）：免費群組最多幾位成員、加值的群組最多幾位；0023 部署當時已有的群組維持 50（`groups.grandfathered_member_cap`）。滿了只擋加入，不移除人。api 與 worker 設一樣的值 |
 | `GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD` | `true`、5 | 群組 AI 日報（只給加值的群組，每個交易日一則；不計入任何成員的額度）；全部群組合計每月的花費上限（美元，0＝不限） |
 | `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
-| `IMPORT_STATEMENTS` | `off` | 匯入對帳單（`POST /imports/statement`；產品負責人 2026-11-16）誰能用：`off` 沒有人、`admins` 只有站方管理員（`ADMIN_EMAILS`；第一版）、`all` 所有登入的人（免費與會員一樣）。`GET /me` 的 `plan.statement_import` 照它算 |
+| `IMPORT_STATEMENTS` | `all` | 匯入對帳單（`POST /imports/statement`；產品負責人 2026-11-16）誰能用：`all` 所有登入的人（免費與會員一樣；2026-11-17 起是預設）、`admins` 只有站方管理員（`ADMIN_EMAILS`；第一版）、`off` 沒有人。`GET /me` 的 `plan.statement_import` 照它算 |
 | `AI_MODEL_IMPORT`、`AI_EFFORT_IMPORT` | 空（＝`AI_MODEL`，`claude-haiku-5-5`）、`medium` | 讀對帳單的模型與 effort（結構化 JSON、沒有工具、一次最多 5 頁） |
 | `AI_MODEL_IMPORT_RETRY` | `claude-sonnet-5-5` | 驗算沒過、合計對不上、有沒讀清楚的地方或模型拒答時，那幾頁用這個模型再讀一次（effort low，一份約 US$0.08）；省錢模式不重讀；設成空字串＝不重讀 |
 | `IMPORT_DAILY_LIMIT` | 10 | 每人每天最多讀幾份（0＝不限）；不算每天的提問數，費用算進每月額度（`/ai/usage` 的 `imports_today`、`import_daily_limit`） |

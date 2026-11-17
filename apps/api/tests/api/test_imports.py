@@ -518,7 +518,8 @@ def test_economy_mode_reads_once_and_a_spent_month_stops(client, pool, fake, env
 
 
 # -- who, how many, how big -------------------------------------------------------------------------------------------
-def test_off_by_default_then_admins_then_everyone(app, client, pool, fake, monkeypatch, env):
+def test_off_then_admins_then_everyone(app, client, pool, fake, monkeypatch, env):
+    """``IMPORT_STATEMENTS``: everyone by default (2026-11-17, ``test_the_defaults``); admins and off stay switches."""
     env(IMPORT_STATEMENTS="off")
     account(client)
     assert client.get(f"{API}/me").json()["plan"]["statement_import"] is False
@@ -538,6 +539,18 @@ def test_off_by_default_then_admins_then_everyone(app, client, pool, fake, monke
     # read-only viewing (someone else's ledger) cannot import
     res = client.post(URL, json={"kind": "pdf", "pages": pages()}, headers={"X-Forliosa-View-As": "dlg_x"})
     assert res.status_code == 403 and res.json()["error"]["code"] == "read_only"
+
+
+def test_a_free_account_imports_by_default(client, pool, fake, monkeypatch, env):
+    """產品負責人 2026-11-17: members and free accounts differ only in the briefing and the AI quota, so with
+    ``IMPORT_STATEMENTS`` unset a free account (not a member, not a site admin) can import."""
+    monkeypatch.delenv("IMPORT_STATEMENTS")
+    env()
+    account(client)
+    plan = client.get(f"{API}/me").json()["plan"]
+    assert (plan["tier"], plan["statement_import"]) == ("free", True)
+    answer(fake, doc([r()]))
+    assert read(client).status_code == 200
 
 
 def test_ten_reads_a_day(client, pool, fake, env):
@@ -625,7 +638,7 @@ def test_the_defaults(monkeypatch):
         s = get_settings()
         assert (s.import_statements, s.ai_model_import_retry, s.ai_effort_import, s.import_max_pages,
                 s.import_max_body_mb, s.import_daily_limit, s.ai_import_max_tokens) == (
-            "off", SONNET, "medium", 20, 15.0, 10, 16000)
+            "all", SONNET, "medium", 20, 15.0, 10, 16000)
         from forliosa.ai import store
         assert store.model_for("import", s) == HAIKU
     finally:

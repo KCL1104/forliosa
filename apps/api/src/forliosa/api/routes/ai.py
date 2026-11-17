@@ -60,6 +60,7 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
     if deep and not settings.ai_web_search:
         raise ApiError(503, "ai_unavailable", "現在不能用深度搜尋。")
     plan = plans.plan_of(user, settings)
+    # every account's by default (產品負責人 2026-11-17); members only when a deployment sets AI_FREE_DEEP_SEARCH=false
     if deep and not plan.deep_search:
         raise ApiError(403, "members_only", "深度搜尋是會員功能。")
     # 省錢模式: the month's budget is spent; the turn runs without web search instead of being refused

@@ -612,7 +612,7 @@
 | `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
 | `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
 
-串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；403 `members_only`（`mode: "deep"` 而這個人的方案沒有深度搜尋）；429 `ai_daily_limit`（今天的提問數已達這個方案的上限；深度搜尋而今天剩下的題數不夠時也是這個代碼，訊息是「今天還剩 2 題，深度搜尋一次要 3 題。」，錯誤物件多 `remaining`、`cost`）／`ai_monthly_budget`（這個月連省錢模式的額度也用完了，或 token 上限；省錢模式時的深度搜尋也是這個代碼）。花費上限用完、還在省錢模式時，一般提問照常 200，只是這一題沒有 `web_search`／`web_fetch`；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完；`mode: "deep"` 而這個環境沒開網路搜尋時也是）。
+串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；403 `members_only`（`mode: "deep"` 而這個人的方案沒有深度搜尋：只在環境設了 `AI_FREE_DEEP_SEARCH=false` 時的免費帳號；預設所有帳號都有）；429 `ai_daily_limit`（今天的提問數已達這個方案的上限；深度搜尋而今天剩下的題數不夠時也是這個代碼，訊息是「今天還剩 2 題，深度搜尋一次要 3 題。」，錯誤物件多 `remaining`、`cost`）／`ai_monthly_budget`（這個月連省錢模式的額度也用完了，或 token 上限；省錢模式時的深度搜尋也是這個代碼）。花費上限用完、還在省錢模式時，一般提問照常 200，只是這一題沒有 `web_search`／`web_fetch`；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完；`mode: "deep"` 而這個環境沒開網路搜尋時也是）。
 
 後端有多把 API 金鑰（各在自己的 workspace）：每段對話固定用同一把；那把不能用時自動換到別把，並以先前對話的純文字接續（前端不需要處理，`ThreadDetail` 不變）。
 
@@ -671,13 +671,14 @@
 
 // Usage（上限都是這個人的方案的；null 表示不限制；messages_today 含今天觸發的法人觀點查詢，每次算一題）
 // plan：會員方案（"free" | "member"，見「會員方案」）
-// deep_search_cost：深度搜尋一次算幾題（null＝現在不能用：方案沒有、省錢模式，或這個環境沒開網路搜尋；前端不放切換鈕）；
-//   深度搜尋的那一題在 messages_today 裡算這麼多題。deep_search_members_only：這個環境有深度搜尋，但這個方案沒有
+// deep_search_cost：深度搜尋一次算幾題（所有帳號都能用，2026-11-17；null＝現在不能用：省錢模式、這個環境沒開網路搜尋，
+//   或 AI_FREE_DEEP_SEARCH=false 時的免費帳號；前端不放切換鈕）；深度搜尋的那一題在 messages_today 裡算這麼多題。
+//   deep_search_members_only：這個環境有深度搜尋，但這個方案沒有（只在 AI_FREE_DEEP_SEARCH=false 時的免費帳號是 true；預設一律 false）
 // monthly_cost_budget_usd：這個方案每月估計花費上限（美元，null＝不限）
 // economy：省錢模式（這個月的花費上限用完了；還能問，但不上網搜尋）；month_budget_reached：連省錢模式也用完了（不能再問）
 {"date": "2026-11-12", "month": "2026-11", "plan": "free", "messages_today": 1, "daily_message_limit": 3, "messages_remaining": 2,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
- "model": "claude-haiku-5-5", "available": true, "deep_search_cost": null, "deep_search_members_only": true,
+ "model": "claude-haiku-5-5", "available": true, "deep_search_cost": 3, "deep_search_members_only": false,
  "monthly_cost_budget_usd": 1.0, "economy": false, "month_budget_reached": false, "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"}
 
 // KeySlots（GET /ai/admin/keys；slot = CLAUDE_API_KEY_<n> 的 n；不含金鑰）
@@ -1441,6 +1442,8 @@
 ### 會員方案（2026-11-15）
 
 產品負責人 2026-11-15 決定。還沒有付款：會員由站方在 `/admin/members` 手動開通（之後接金流）。站方管理員（`ADMIN_EMAILS`）算會員。
+**2026-11-17 產品負責人：會員和一般帳號只差每日收盤簡報與問 AI 次數（下表的題數、花費、token、省錢模式倍數），其他功能所有登入的帳號預設都有**
+（深度搜尋、匯入對帳單等）。
 
 | | 免費 | 會員 |
 |---|---|---|
@@ -1448,13 +1451,14 @@
 | 每月估計花費上限 | 約 US$1（`AI_MONTHLY_COST_BUDGET_USD`） | 約 US$8（`AI_MEMBER_MONTHLY_COST_BUDGET_USD`；2026-11-16 以前 US$3） |
 | 省錢模式到上限的幾倍才停 | 2 倍（`AI_ECONOMY_CAP_MULTIPLIER`） | 1.25 倍（`AI_MEMBER_ECONOMY_CAP_MULTIPLIER`，2026-11-16） |
 | 每月計費 token | 300 萬（`AI_MONTHLY_TOKEN_BUDGET`） | 不限（`AI_MEMBER_MONTHLY_TOKEN_BUDGET=0`） |
-| 深度搜尋（3 題） | 沒有（`AI_FREE_DEEP_SEARCH=false`） | 有 |
 | 每日收盤簡報 | 沒有（`AI_FREE_DAILY_BRIEFING=false`） | 有 |
+| 深度搜尋（算自己的 3 題） | 有（`AI_FREE_DEEP_SEARCH=true`，2026-11-17；以前沒有） | 有 |
+| 匯入對帳單 | 有（`IMPORT_STATEMENTS=all`，2026-11-17 起預設） | 有 |
 
 - **省錢模式**：這個月的花費剩不到一般提問的 US$0.05 時，提問照常（每天的題數照算），但不上網搜尋（沒有 `web_search`／`web_fetch`，約 US$0.002 一題；站內的報價、財報、技術指標、`get_news` 的新聞都還在）；
   深度搜尋、法人觀點查詢、收盤簡報等下個月 1 日。花到上限的 `AI_ECONOMY_CAP_MULTIPLIER` 倍（免費帳號，預設 2）或 `AI_MEMBER_ECONOMY_CAP_MULTIPLIER` 倍（會員，預設 1.25，2026-11-16）才完全停（`month_budget_reached`）。設 1 就是到上限直接停。
-- `GET /me` 多 `plan: {"tier": "free" | "member", "until": "YYYY-MM-DD" | null, "deep_search": bool, "daily_briefing": bool}`（`until`：會員的最後一天，台北；null＝免費或沒有到期日）。2026-11-16 再多 `"statement_import": bool`（能不能匯入對帳單，見「匯入對帳單」）。
-- `GET /ai/usage` 多 `plan`、`economy`、`deep_search_members_only`（見上面的 `Usage`）。
+- `GET /me` 多 `plan: {"tier": "free" | "member", "until": "YYYY-MM-DD" | null, "deep_search": bool, "daily_briefing": bool}`（`until`：會員的最後一天，台北；null＝免費或沒有到期日）。2026-11-16 再多 `"statement_import": bool`（能不能匯入對帳單，見「匯入對帳單」）。2026-11-17 起預設免費帳號也是 `deep_search: true`、`statement_import: true`；欄位不變。
+- `GET /ai/usage` 多 `plan`、`economy`、`deep_search_members_only`（見上面的 `Usage`；`deep_search_members_only` 預設一律 false，留著給舊前端）。
 
 站方（權限同管理後台：沒登入 401、不是站方管理員 404、查看別人的資產時 403）：
 
@@ -1507,7 +1511,7 @@
 
 ### 每日收盤簡報（2026-11-14）
 
-開關是偏好 `daily_briefing`（`PATCH /me/preferences`，預設 `false`）。worker 在收盤資料存好之後，替打開的**會員**每個交易日寫一則；`AI_DAILY_BRIEFING_ENABLED=false` 整個停掉。
+開關是偏好 `daily_briefing`（`PATCH /me/preferences`，預設 `false`）。worker 在收盤資料存好之後，替打開的**會員**每個交易日寫一則（會員和一般帳號只差這個與問 AI 的額度，2026-11-17）；`AI_DAILY_BRIEFING_ENABLED=false` 整個停掉。
 免費帳號打開 → 403 `members_only`「每日收盤簡報是會員功能。」（關掉一律可以）；方案出來以前就打開的免費帳號不再收到（偏好留著，成為會員後恢復）。省錢模式時不寫（要上網搜尋）。
 
 ```json
@@ -1727,7 +1731,7 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 - **讀法**：預設 `claude-haiku-5-5`（`AI_MODEL_IMPORT`），結構化 JSON 輸出、沒有工具、不串流，一次最多 5 頁。AI 只照抄、不計算、不猜；不抄姓名、身分證字號與帳號。逐列驗算沒過、合計對不上、`unreadable` 不是空的或模型拒答時，用 `claude-sonnet-5-5`（`AI_MODEL_IMPORT_RETRY`）重讀一次（`retried: true`，一份約 US$0.08）；省錢模式不重讀，使用者按了取消（連線已經關掉）也不重讀。重讀時某幾頁又沒讀出來，那幾頁保留第一次讀到的列。
 - **不存**：檔案、頁面、文字層、讀出的列都不存、不寫 log；只記一列用量（`ai_usage` 的 `feature: "import"`，不含內容）。讀出的原文與名稱不會放進 `candidate.note`（對話的 AI 讀得到備註）。
 - **額度**：不算每天的題數（`/ai/usage` 的 `messages_today` 不變）；費用算進每月的額度。每人每天最多 `IMPORT_DAILY_LIMIT`（10）次。省錢模式照樣能讀，花到上限的兩倍才停。`GET /ai/usage` 多 `imports_today`（今天讀了幾次）、`import_daily_limit`（10）。
-- **誰能用**：`IMPORT_STATEMENTS`：`off`（預設，沒有人）｜`admins`（只有站方管理員；第一版）｜`all`（所有登入的人，免費與會員一樣）。`GET /me` 的 `plan.statement_import` 照它算；前端只在 `true` 時放入口。
+- **誰能用**：`IMPORT_STATEMENTS`：`all`（預設，2026-11-17 起：所有登入的人，免費與會員一樣）｜`admins`（只有站方管理員；第一版）｜`off`（沒有人；2026-11-16 的預設）。`GET /me` 的 `plan.statement_import` 照它算；前端只在 `true` 時放入口。
 - **錯誤**（暫定，照設計附錄）：403（`plan.statement_import` 是 `false`）；413（超過 20 頁或 15 MB，`IMPORT_MAX_BODY_MB`）；圖片的檔頭不是 JPEG／PNG／WebP 時拒絕（代碼以實作為準）；429 `ai_import_daily_limit`（今天的次數用完）；429 這個月連省錢模式的額度也用完（附錄寫 `ai_month_limit`，提問共用的檢查目前回 `ai_monthly_budget`）；503（沒有可用的 AI 金鑰）；422 `unreadable_file`：每一頁都沒讀出來（API 不收圖片、模型拒答、明細太多停在一半、回的不是約定的 JSON；明細太多時的句子是「明細太多，一次讀不完。分成幾張截圖，或把 PDF 分開再匯入。」）——已經呼叫過模型的照樣算一次。
 - **日期**：照印的抄，伺服器換算（民國年、`YYYY/MM/DD`、`MM/DD/YYYY`）；兩位數年份（`26/10/03` 或美式 `10/03/26`）照對帳單期間的年份判斷，判斷不出來就當沒讀清楚；1990 年以前或明年以後的年份也當沒讀清楚（`unreadable`）。
 

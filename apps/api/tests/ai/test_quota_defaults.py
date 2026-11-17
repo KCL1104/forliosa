@@ -1,6 +1,7 @@
 """The deployment's AI quota (產品負責人 2026-11-15): free accounts 3 questions a day and about US$1 a month, members
 30 a day and about US$8 (2026-11-16; US$3 before); over the month's budget questions go on without web search (省錢模式)
-up to twice the budget for free accounts, 1.25 times for members (2026-11-16)."""
+up to twice the budget for free accounts, 1.25 times for members (2026-11-16). Members and free accounts differ only in
+that quota and the daily closing briefing (2026-11-17): 深度搜尋 is every account's."""
 
 from __future__ import annotations
 
@@ -21,7 +22,7 @@ def test_the_defaults(monkeypatch):
     assert (s.ai_daily_message_limit, s.ai_monthly_cost_budget_usd, s.ai_monthly_token_budget) == (3, 1.0, 3_000_000)
     assert (s.ai_member_daily_message_limit, s.ai_member_monthly_cost_budget_usd,
             s.ai_member_monthly_token_budget) == (30, 8.0, 0)
-    assert (s.ai_free_deep_search, s.ai_free_daily_briefing) == (False, False)
+    assert (s.ai_free_deep_search, s.ai_free_daily_briefing) == (True, False)
     assert (s.ai_deep_search_cost, s.ai_economy_cap_multiplier, s.ai_member_economy_cap_multiplier) == (3, 2.0, 1.25)
     assert store.deep_search_cost(s) == 3
 

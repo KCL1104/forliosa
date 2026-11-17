@@ -1,5 +1,7 @@
-"""會員方案 (``forliosa.plans``; 產品負責人 2026-11-15): free accounts get 3 questions a day and no 深度搜尋 or daily
-briefing; members (granted until a day, or with no end date; site admins count) get 30, 深度搜尋 and the briefing."""
+"""會員方案 (``forliosa.plans``; 產品負責人 2026-11-15, 2026-11-17): members (granted until a day, or with no end date;
+site admins count) and free accounts differ only in the daily closing briefing and the AI quota (3 questions a day for
+free accounts, 30 for members). Everything else — 深度搜尋 (taking 3 of the account's own questions) and 匯入對帳單
+among them — is every account's by default."""
 
 from __future__ import annotations
 
@@ -22,10 +24,12 @@ DEMO = "demo@forliosa.local"
 
 
 @pytest.fixture(autouse=True)
-def plans_on(ai_env):
-    """The deployment's plans (the shared test fixture opens 深度搜尋 and the briefing to every account)."""
-    ai_env(AI_FREE_DEEP_SEARCH="false", AI_FREE_DAILY_BRIEFING="false", AI_DAILY_MESSAGE_LIMIT=3,
-           AI_MEMBER_DAILY_MESSAGE_LIMIT=30, AI_DEEP_SEARCH_COST=3)
+def plans_on(ai_env, monkeypatch):
+    """The deployment's plans: the defaults of AI_FREE_DEEP_SEARCH, AI_FREE_DAILY_BRIEFING and IMPORT_STATEMENTS (the
+    shared test fixture opens the briefing to every account), with the deployment's daily limits."""
+    for name in ("AI_FREE_DEEP_SEARCH", "AI_FREE_DAILY_BRIEFING", "IMPORT_STATEMENTS"):
+        monkeypatch.delenv(name, raising=False)
+    ai_env(AI_DAILY_MESSAGE_LIMIT=3, AI_MEMBER_DAILY_MESSAGE_LIMIT=30, AI_DEEP_SEARCH_COST=3)
 
 
 @pytest.fixture()
@@ -43,25 +47,44 @@ def usage(client) -> dict:
 
 
 def test_a_free_account(client, pool, fake):
+    """產品負責人 2026-11-17: only the briefing and the quota are members'. A free account has 深度搜尋 (3 of its own 3
+    questions) and 匯入對帳單 by default; the briefing is refused."""
     me = client.get(f"{API}/me").json()
-    assert me["plan"] == {"tier": "free", "until": None, "deep_search": False, "daily_briefing": False,
-                          "statement_import": False}  # IMPORT_STATEMENTS is off by default
+    assert me["plan"] == {"tier": "free", "until": None, "deep_search": True, "daily_briefing": False,
+                          "statement_import": True}
     u = usage(client)
     assert (u["plan"], u["daily_message_limit"], u["deep_search_cost"], u["deep_search_members_only"]) == (
-        "free", 3, None, True)
+        "free", 3, 3, False)
+    fake.reply(text("整理"))
+    assert chat(client, "深入研究台積電", mode="deep")[0] == 200
+    u = usage(client)
+    assert (u["messages_today"], u["messages_remaining"]) == (3, 0)  # the day's 3 questions, the free quota unchanged
+    status, body = chat(client, "再問一題")
+    assert status == 429 and body["error"]["code"] == "ai_daily_limit"
+    r = client.patch(f"{API}/me/preferences", json={"daily_briefing": True})
+    assert r.status_code == 403 and r.json()["error"] == {"code": "members_only", "message": "每日收盤簡報是會員功能。"}
+    assert client.patch(f"{API}/me/preferences", json={"daily_briefing": False}).status_code == 200
+    assert len(fake.requests) == 1
+
+
+def test_deep_search_can_be_members_only_again(client, pool, fake, ai_env, db):
+    """``AI_FREE_DEEP_SEARCH=false`` (a deployment's switch): the members-only 深度搜尋 of 2026-11-15 to 11-17."""
+    ai_env(AI_FREE_DEEP_SEARCH="false")
+    assert client.get(f"{API}/me").json()["plan"]["deep_search"] is False
+    u = usage(client)
+    assert (u["deep_search_cost"], u["deep_search_members_only"]) == (None, True)
     status, body = chat(client, "深入研究台積電", mode="deep")
     assert status == 403 and body["error"]["code"] == "members_only"
-    r = client.patch(f"{API}/me/preferences", json={"daily_briefing": True})
-    assert r.status_code == 403 and r.json()["error"]["message"] == "每日收盤簡報是會員功能。"
-    assert client.patch(f"{API}/me/preferences", json={"daily_briefing": False}).status_code == 200
     assert fake.requests == []
+    plans.grant(db, DEMO, None, None)
+    assert (usage(client)["deep_search_cost"], usage(client)["deep_search_members_only"]) == (3, False)
 
 
 def test_a_member(client, pool, fake, db):
     plans.grant(db, " Demo@Forliosa.local ", date(2099, 12, 31), "轉帳 NT$300")
     me = client.get(f"{API}/me").json()
     assert me["plan"] == {"tier": "member", "until": "2099-12-31", "deep_search": True, "daily_briefing": True,
-                          "statement_import": False}
+                          "statement_import": True}
     u = usage(client)
     assert (u["plan"], u["daily_message_limit"], u["deep_search_cost"], u["deep_search_members_only"]) == (
         "member", 30, 3, False)
@@ -88,7 +111,8 @@ def test_membership_ends_after_its_last_day(db, client):
 def test_site_admins_count_as_members(client, db, monkeypatch):
     monkeypatch.setattr(get_settings(), "admin_emails", [DEMO])
     plan = plans.plan_of(demo(db), get_settings())
-    assert (plan.tier, plan.until, plan.deep_search, plan.daily_briefing) == ("member", None, True, True)
+    assert (plan.tier, plan.until, plan.deep_search, plan.daily_briefing, plan.statement_import) == (
+        "member", None, True, True, True)
     assert client.get(f"{API}/me").json()["plan"]["tier"] == "member"
 
 

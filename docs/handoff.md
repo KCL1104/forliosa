@@ -43,14 +43,14 @@ handoff 上一版（2026-11-12）列的 §3.0–3.6 **全部完成並合併**：
 - **登入與首頁**：Google 登入（和 Discord 並列）；沒登入的 `/` 是介紹頁（標題「股票帳本」、三個示範畫面），登入頁在 `/login`。
 - **帳本只需要記買進**（方向 B）：分段「持倉・紀錄・績效」；「記一筆」照 Google 財經的輸入方式（選一檔 → 股數、日期、價格、選填的手續費（2026-11-16，不自動算），可再加一筆買進）；賣出用持股那一列的「減少持股／全部賣出」（只填股數，用最新收盤價記）。貼 CSV 的匯入（使用者自己整理表格再貼進來、對欄位）做過、負責人退掉，不要再做；2026-11-16 的「從對帳單匯入」是另一件事（AI 讀檔＋確認表，見下面 2026-11-16）。
 - **市場頁** `/market`：指數、AI 收盤重點（全站共用一則）、類股、排行、重大訊息。
-- **AI**：畫圖工具 `draw_chart`、`get_related_stocks`、查不到當天價格時改找當天報導與相關類股、深度搜尋（一次算 5 題）、每日收盤簡報（設定裡打開，預設關）。
+- **AI**：畫圖工具 `draw_chart`、`get_related_stocks`、查不到當天價格時改找當天報導與相關類股、深度搜尋（一次算 3 題，所有帳號都有）、每日收盤簡報（設定裡打開，預設關）。
 - **歷史日線**：用 Yahoo Finance 回補五年（`PRICE_HISTORY_SOURCE=yahoo`，api 與 worker 都設了）。不是授權來源，負責人知情決定；只給走勢圖、技術指標、走勢小圖讀，帳本與績效不讀。`uv run python -m forliosa.history_backfill status｜drop`。
 - **隱私權政策**照實揭露 Cloudflare Web Analytics（負責人決定不關）。
 
 2026-11-16 新增：**從對帳單匯入（第一版）**（產品負責人 11 項都照建議；決定在 `docs/pending-decisions.md`「2026-11-16 匯入對帳單」，產品與畫面在 `PRODUCT.md`「匯入對帳單」、`DESIGN.md`〈匯入對帳單〉，合約在 `docs/api-contract.md`「匯入對帳單（2026-11-16）」，後端細節在 `apps/api/CONTRACT_NOTES.md`「2026-11-16 匯入對帳單」）：
 
 - PDF 對帳單（有密碼的在瀏覽器裡用 pdf.js 解開，密碼與原始檔不離開裝置）與截圖、照片 → `POST /imports/statement`（Haiku 讀、伺服器逐列驗算，什麼都不存）→ 確認表 → `POST /transactions/batch`（全部或全不，`source: "import"`、`import_batch_id`）→ 復原是 `DELETE /transactions/batches/{id}`。Alembic `0021_import_batches`。
-- **只開給站方管理員**：`IMPORT_STATEMENTS`（`off` 預設｜`admins`｜`all`）。正式環境要在 Railway 的 api 設 `admins` 才會出現；負責人用自己的對帳單試過再開放（第二版）。
+- **誰能用**：`IMPORT_STATEMENTS`（`all` 預設｜`admins`｜`off`）。第一版只開給站方管理員；2026-11-17 產品負責人決定會員和一般帳號只差每日收盤簡報與問 AI 次數，預設改成所有登入的帳號（深度搜尋也是，`AI_FREE_DEEP_SEARCH` 預設開）。
 - 匯入的買賣不進群組動態、推播與週報（`services/sharing.py` 的 `FEED_SOURCES`）。不算每天的題數，花費算進每月額度，每人每天 10 份。
 - 隱私權政策與服務條款 §8 已照附錄改；律師要看的兩件（塗不掉時身分證字號會送到境外的 AI 廠商、Anthropic 的保存期間）在 `docs/legal/README.md` (d) 第 20 點。
 

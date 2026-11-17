@@ -31,7 +31,8 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
 /**
  * 會員（`/admin/members`）：還沒有付款，由站方用 email 開通（對方要先登入過一次）。標題右邊切換「個人會員｜群組加值」
  * （`?kind=group`；群組加值包第一階段，`AdminGroupPasses.tsx`）。
- * 個人會員每天 30 題、每月約 US$8（2026-11-16 起；省錢模式到 1.25 倍才停），另有深度搜尋與每日收盤簡報；免費每天 3 題、約 US$1（省錢模式到兩倍）。
+ * 個人會員和免費帳號只差 AI 額度與每日收盤簡報（產品負責人 2026-11-17；深度搜尋、匯入對帳單等其他功能大家都有）：
+ * 會員每天 30 題、每月約 US$8（2026-11-16 起；省錢模式到 1.25 倍才停）、有每日收盤簡報；免費每天 3 題、約 US$1（省錢模式到兩倍）。
  * 最後一天過完自動回到免費；過期的也列在下面，方便續期。
  */
 export function AdminMembersPage() {
@@ -118,7 +119,7 @@ function Members() {
             submit()
           }}
         >
-          <p className="max-w-prose text-md text-ink">會員每天 30 題、有深度搜尋與每日收盤簡報；最後一天過完自動回到免費。對方要先登入過一次。</p>
+          <p className="max-w-prose text-md text-ink">會員每天可以問 AI 30 題，還有每日收盤簡報；其他功能大家都有。最後一天過完自動回到免費。對方要先登入過一次。</p>
           <div className="flex flex-col gap-1.5">
             <label htmlFor={`${id}-email`} className="text-sm font-medium">
               Email
@@ -245,7 +246,7 @@ function RevokeDialog({ member, onClose }: { member: AdminMember; onClose: () =>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>取消 {member.display_name} 的會員？</AlertDialogTitle>
-          <AlertDialogDescription>馬上回到免費：每天 3 題，沒有深度搜尋與每日收盤簡報。之後可以再開通。</AlertDialogDescription>
+          <AlertDialogDescription>馬上回到免費：每天 3 題，沒有每日收盤簡報。之後可以再開通。</AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
           <AlertDialogCancel>保留</AlertDialogCancel>

@@ -1,17 +1,20 @@
-"""會員方案: who is a member and what each plan gets (產品負責人 2026-11-15).
+"""會員方案: who is a member and what each plan gets (產品負責人 2026-11-15; 2026-11-17).
 
-Free accounts: ``AI_DAILY_MESSAGE_LIMIT`` questions a day (3) and about ``AI_MONTHLY_COST_BUDGET_USD`` a month (US$1);
-no 深度搜尋 and no daily closing briefing. Members: ``AI_MEMBER_DAILY_MESSAGE_LIMIT`` (30), about
-``AI_MEMBER_MONTHLY_COST_BUDGET_USD`` (US$8 since 2026-11-16; US$3 before), both features. Over the month's budget
-either plan keeps asking without Claude's web search (省錢模式, ``store.month_mode``) until its spending reaches
-``Plan.economy_cap_multiplier`` × the budget: ``AI_ECONOMY_CAP_MULTIPLIER`` (2) for free accounts,
+Members and free accounts differ only in the daily closing briefing and the AI quota (產品負責人 2026-11-17); every
+other feature is every signed-in account's. Free accounts: ``AI_DAILY_MESSAGE_LIMIT`` questions a day (3) and about
+``AI_MONTHLY_COST_BUDGET_USD`` a month (US$1); no daily closing briefing. Members: ``AI_MEMBER_DAILY_MESSAGE_LIMIT``
+(30), about ``AI_MEMBER_MONTHLY_COST_BUDGET_USD`` (US$8 since 2026-11-16; US$3 before), and the briefing. Over the
+month's budget either plan keeps asking without Claude's web search (省錢模式, ``store.month_mode``) until its spending
+reaches ``Plan.economy_cap_multiplier`` × the budget: ``AI_ECONOMY_CAP_MULTIPLIER`` (2) for free accounts,
 ``AI_MEMBER_ECONOMY_CAP_MULTIPLIER`` (1.25, 產品負責人 2026-11-16) for members.
+
+深度搜尋 is for everyone (``AI_FREE_DEEP_SEARCH``, default true; members only from 2026-11-15 to 11-17) and takes
+``AI_DEEP_SEARCH_COST`` of the account's own questions. 匯入對帳單 (2026-11-16) does not depend on the tier:
+``IMPORT_STATEMENTS`` (default ``all``) opens it to everyone, site admins, or nobody (``Plan.statement_import``;
+``GET /me`` → ``plan.statement_import``).
 
 A member is ``users.plan = "member"`` until ``users.plan_until`` (NULL: no end date). Site admins (``ADMIN_EMAILS``)
 count as members. There are no payments yet: a site admin grants membership on /admin/members (``grant``).
-
-匯入對帳單 (2026-11-16) does not depend on the tier: ``IMPORT_STATEMENTS`` opens it to nobody, site admins, or everyone
-(``Plan.statement_import``; ``GET /me`` → ``plan.statement_import``).
 """
 
 from __future__ import annotations
@@ -42,9 +45,10 @@ class Plan:
     monthly_token_budget: int  # 0: no limit
     # 省錢模式 runs until the month's spending reaches this many times the US$ budget (1: stop at the budget)
     economy_cap_multiplier: float
-    deep_search: bool
-    daily_briefing: bool
-    # 匯入對帳單 (2026-11-16): ``IMPORT_STATEMENTS`` off | admins | all, the same for free accounts and members
+    deep_search: bool  # every account's unless ``AI_FREE_DEEP_SEARCH=false`` (then members only)
+    daily_briefing: bool  # members' (``AI_FREE_DAILY_BRIEFING=true``: every account's)
+    # 匯入對帳單 (2026-11-16): ``IMPORT_STATEMENTS`` all (default) | admins | off, the same for free accounts and
+    # members
     statement_import: bool = False
 
     @property
@@ -59,7 +63,7 @@ def is_member(user: User, now: datetime | None = None) -> bool:
 
 
 def statement_import_open(user: User, settings: Settings) -> bool:
-    """``IMPORT_STATEMENTS``: ``all`` opens 匯入對帳單 to every account, ``admins`` to site admins only."""
+    """``IMPORT_STATEMENTS``: ``all`` (default) opens 匯入對帳單 to every account, ``admins`` to site admins only."""
     mode = settings.import_statements
     return mode == "all" or (mode == "admins" and is_site_admin(user))
 

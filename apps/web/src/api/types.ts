@@ -45,12 +45,13 @@ export interface User {
   public_posting_suspended_until?: string | null
   /** 站方暫停時寫的原因（只有本人看得到；沒寫是 null） */
   public_posting_suspended_reason?: string | null
-  /** 會員方案（選填：舊版後端與 mock 沒有，當成功能全開） */
+  /** 會員方案（選填：舊版後端沒有，當成功能全開） */
   plan?: UserPlan | null
 }
 
 /**
- * 會員方案（產品負責人 2026-11-15）：免費每天 3 題、每月約 US$1；會員每天 30 題、約 US$8（2026-11-16 起；以前 US$3），另有深度搜尋與每日收盤簡報。
+ * 會員方案（產品負責人 2026-11-15）：會員和免費帳號只差問 AI 的額度與每日收盤簡報（2026-11-17），其他功能大家都有。
+ * 免費每天 3 題、每月約 US$1；會員每天 30 題、約 US$8（2026-11-16 起；以前 US$3），另有每日收盤簡報。
  * 這個月的上限用完後是省錢模式（不上網搜尋），免費帳號到上限的兩倍、會員到 1.25 倍才停。
  * 站方管理員算會員。還沒有付款：會員由站方在 `/admin/members` 手動開通。
  */
@@ -58,10 +59,12 @@ export interface UserPlan {
   tier: "free" | "member"
   /** 會員的最後一天（YYYY-MM-DD，台北）；null＝免費或沒有到期日 */
   until: string | null
+  /** 能不能用深度搜尋：所有帳號都可以（2026-11-17；後端設 `AI_FREE_DEEP_SEARCH=false` 時只有會員） */
   deep_search: boolean
+  /** 每日收盤簡報：只有會員 */
   daily_briefing: boolean
   /**
-   * 匯入對帳單（2026-11-16，後端的 IMPORT_STATEMENTS：off｜admins｜all）。選填：舊版後端沒有這個欄位時當成沒有，
+   * 匯入對帳單（2026-11-16，後端的 IMPORT_STATEMENTS：all（2026-11-17 起預設）｜admins｜off）。選填：舊版後端沒有這個欄位時當成沒有，
    * 入口一律不出現（和上面兩個「沒有就當全開」相反：這個功能要明確打開）
    */
   statement_import?: boolean
