@@ -404,7 +404,8 @@ class Archiver:
 
         Rows already present on the very first run of a dataset (nothing archived from it before) were
         filed before archiving started, so their date is unknown: they are stored with ``backlog: true`` and
-        the events endpoint shows the legal deadline (``estimated: true``) for them instead. Later rows keep
+        the events endpoint shows them as published on the legal deadline (with the numbers, saying the actual day
+        is not known). Later rows keep
         their first-seen date (``ON CONFLICT DO NOTHING``): the publisher's 出表日期 when it is not in the
         future, else the archive date.
         """
@@ -415,9 +416,7 @@ class Archiver:
         for r in rows:
             first = r["published"] if r["published"] is not None and r["published"] <= today else today
             month = int(r["period"][5:])
-            detail = f"{month} 月營收 {r['revenue']:,} 千元" if r["revenue"] is not None else f"{month} 月營收"
-            if r["yoy_pct"] is not None:
-                detail += f"，年增 {r['yoy_pct'] * 100:.1f}%"
+            detail = od.revenue_text(month, r["revenue"], r["yoy_pct"])
             out.append({"key": od.event_key("revenue", r["market"], r["code"], r["period"]),
                         "symbol": tw_symbol(r["code"], r["market"]), "date": first, "end_date": None,
                         "type": "revenue_release", "title": f"{month} 月營收公布", "detail": detail, "url": None,
@@ -670,8 +669,11 @@ class Archiver:
         return n
 
     # -- financial statements (latest quarter) --------------------------------------------------
-    def _reports(self, rows: list[dict[str, Any]], market: str, source: str) -> int:
+    def _reports(self, rows: list[dict[str, Any]], market: str, source: str, track: bool = False) -> int:
         """Upsert statements; a value the new response leaves blank never erases an archived one.
+
+        With ``track`` (``financials`` passes it once the source has archived statements before), a company's quarter
+        that was not archived yet is recorded as a release: see :meth:`_report_releases`.
 
         (Industries without TPEx companies return a single blank row: ``parse_statements`` skips it, so the job
         stores nothing and reports 0 rows instead of failing.)
@@ -687,23 +689,61 @@ class Archiver:
             old = existing.get((r["symbol"], r["period"], r["kind"]))
             if old:
                 r["values"] = {**old, **{k: v for k, v in r["values"].items() if v is not None}}
-        return upsert(self.db, FinancialReport, out, ["symbol", "period", "kind"], ["values", "source", "fetched_at"])
+        n = upsert(self.db, FinancialReport, out, ["symbol", "period", "kind"], ["values", "source", "fetched_at"])
+        if track:
+            self._report_releases(rows, market, source, {(s, p) for s, p, _ in existing})
+        return n
+
+    def _report_releases(self, rows: list[dict[str, Any]], market: str, source: str,
+                         known: set[tuple[str, str]]) -> int:
+        """Quarterly report release dates: the day a (company, quarter) first appears in the statement datasets.
+
+        Like monthly revenue (:meth:`_revenue`): a ``market_events`` row of type ``earnings`` (key
+        ``statements|market|code|period``, ``ON CONFLICT DO NOTHING`` so the first date stays), dated the file's
+        出表日期 when it is not in the future, else the archive date. Only for quarters not archived before, and never
+        on a source's first run: what is there then was filed before archiving started (the events endpoint shows
+        those on the legal deadline, saying the actual day is not known).
+        """
+        today = self.now_fn().astimezone(TAIPEI).date()
+        dataset = {"income_ytd": "income", "balance": "balance", "margins": "margins"}
+        out: dict[str, dict[str, Any]] = {}
+        for r in rows:
+            sym = tw_symbol(r["code"], market)
+            key = od.event_key("statements", market, r["code"], r["period"])
+            if (sym, r["period"]) in known or key in out:
+                continue
+            published = r.get("published")
+            first = published if published is not None and published <= today else today
+            eps = r["values"].get("eps") if r["kind"] == "income_ytd" else None
+            out[key] = {"key": key, "symbol": sym, "date": first, "end_date": None, "type": "earnings",
+                        "title": f"{r['period']} 財報公布", "detail": od.eps_text(r["period"], eps) or "",
+                        "url": None, "data": {"period": r["period"], "eps": eps, "first_seen": today.isoformat(),
+                                              "dataset": dataset.get(r["kind"], "income")},
+                        "source": source}
+        return upsert(self.db, MarketEvent, list(out.values()), ["key"], ())
 
     def financials(self) -> int:
+        # First-seen release dates only once a source has archived statements (its first run is the backlog)
+        track = {src: self.db.scalar(select(FinancialReport.symbol).where(FinancialReport.source == src).limit(1))
+                 is not None for src in ("twse-openapi", "tpex-openapi")}
         n = 0
         for ind in INDUSTRIES:
             n += self._run(f"twse t187ap06_L_{ind}", lambda ind=ind: self._reports(od.parse_statements(
-                self._list(f"{TWSE_OPENAPI}/opendata/t187ap06_L_{ind}"), "income_ytd"), "TWSE", "twse-openapi"))
+                self._list(f"{TWSE_OPENAPI}/opendata/t187ap06_L_{ind}"), "income_ytd"), "TWSE", "twse-openapi",
+                track["twse-openapi"]))
             n += self._run(f"twse t187ap07_L_{ind}", lambda ind=ind: self._reports(od.parse_statements(
-                self._list(f"{TWSE_OPENAPI}/opendata/t187ap07_L_{ind}"), "balance"), "TWSE", "twse-openapi"))
+                self._list(f"{TWSE_OPENAPI}/opendata/t187ap07_L_{ind}"), "balance"), "TWSE", "twse-openapi",
+                track["twse-openapi"]))
             n += self._run(f"tpex t187ap06_O_{ind}", lambda ind=ind: self._reports(od.parse_statements(
-                self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap06_O_{ind}"), "income_ytd"), "TPEX", "tpex-openapi"))
+                self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap06_O_{ind}"), "income_ytd"), "TPEX", "tpex-openapi",
+                track["tpex-openapi"]))
             n += self._run(f"tpex t187ap07_O_{ind}", lambda ind=ind: self._reports(od.parse_statements(
-                self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap07_O_{ind}"), "balance"), "TPEX", "tpex-openapi"))
+                self._list(f"{TPEX_OPENAPI}/mopsfin_t187ap07_O_{ind}"), "balance"), "TPEX", "tpex-openapi",
+                track["tpex-openapi"]))
         n += self._run("twse t187ap17_L", lambda: self._reports(od.parse_profit_analysis(
-            self._list(f"{TWSE_OPENAPI}/opendata/t187ap17_L")), "TWSE", "twse-openapi"))
+            self._list(f"{TWSE_OPENAPI}/opendata/t187ap17_L")), "TWSE", "twse-openapi", track["twse-openapi"]))
         n += self._run("tpex 187ap17_O", lambda: self._reports(od.parse_profit_analysis(
-            self._list(f"{TPEX_OPENAPI}/mopsfin_187ap17_O")), "TPEX", "tpex-openapi"))
+            self._list(f"{TPEX_OPENAPI}/mopsfin_187ap17_O")), "TPEX", "tpex-openapi", track["tpex-openapi"]))
         return n
 
     # -- TAIFEX OpenAPI (daily 21:40; open-data-inventory §12) -----------------------------------
