@@ -148,10 +148,43 @@ describe("記一筆：先選股票，再填股數、買進日期、價格（產�
     expect(buys.map((t) => [t.quantity, t.price])).toEqual([[1000, close]])
   })
 
-  it("存檔開始以前的日期沒有收盤價：價格下面什麼都不寫", async () => {
+  it("存檔開始以前的日期：價格下面是 Yahoo 回補的「參考收盤」，下一行寫不是官方資料；點一下一樣填入（產品負責人 2026-11-17）", async () => {
     mount()
-    expect((await api.getDailyClose("2330.TW", "2024-03-15")).close).toBeNull()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const dialog = await openQuickAdd()
+    await user.click(await within(dialog).findByRole("option", { name: /2330.*台積電/ }, T))
+    await user.click(within(dialog).getByRole("button", { name: "買進日期，還沒選" }))
+    await user.selectOptions(await screen.findByRole("combobox", { name: "年份" }, T), "2024")
+    await user.selectOptions(screen.getByRole("combobox", { name: "月份" }), "2")
+    await user.click(screen.getByRole("button", { name: /^2024 年 3 月 15 日/ }))
+
+    const ref = await api.getDailyClose("2330.TW", "2024-03-15")
+    expect(ref).toMatchObject({ reference: true, note: "來自 Yahoo Finance，不是官方資料" })
+    expect(ref.close).toBeGreaterThan(0)
+    const hint = await within(dialog).findByRole("button", { name: /^用 3\/15 參考收盤 .* 填入價格$/ }, T)
+    expect(hint).toHaveAccessibleDescription("來自 Yahoo Finance，不是官方資料")
+    // 來源那一行只在「，」後面換行（兩段各自不換行）
+    const source = (_: string, el: Element | null) => el?.tagName === "P" && el.textContent === "來自 Yahoo Finance，不是官方資料"
+    // 觸控時按鈕高 44px，來源往上收貼著它
+    expect(within(dialog).getByText(source)).toHaveClass("pointer-coarse:-mt-2")
+    await user.click(hint)
+    expect(within(dialog).getByRole("textbox", { name: "買進價格" })).toHaveValue(String(ref.close))
+    // 填好了就只是一行字，來源那一行還在
+    expect(within(dialog).queryByRole("button", { name: /參考收盤/ })).toBeNull()
+    expect(within(dialog).getByText(/^3\/15 參考收盤 /)).toBeInTheDocument()
+    // 上面只剩一行字：來源不往上收，不會壓到它
+    expect(within(dialog).getByText(source)).not.toHaveClass("pointer-coarse:-mt-2")
+  })
+
+  it("存檔有的日子是官方收盤（不是參考價）；回補沒有的更早日子、美股，和回補關掉或刪掉時，都和以前一樣什麼都不寫", async () => {
+    mount()
+    expect(await api.getDailyClose("2330.TW", "2026-11-10")).toMatchObject({ reference: false, note: null })
     expect((await api.getDailyClose("2330.TW", "2026-11-10")).close).toBeGreaterThan(0)
+    expect((await api.getDailyClose("2330.TW", "2020-03-16")).close).toBeNull()
+    expect((await api.getDailyClose("AAPL", "2024-06-28")).close).toBeNull()
+    mount({ historyBackfill: false })
+    expect(await api.getDailyClose("2330.TW", "2024-03-15")).toMatchObject({ close: null, reference: false })
   })
 
   it("持倉的「加碼」直接到第二步（那一檔選好），焦點在股數", async () => {

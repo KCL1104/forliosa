@@ -222,12 +222,17 @@ class History(BaseModel):
 
 
 class DayClose(BaseModel):
-    """GET /instruments/{symbol}/close: the archived official close of one day (None: no row for that day)."""
+    """GET /instruments/{symbol}/close: the archived official close of one day; for a day the archive does not have,
+    the history backfill's close as a reference (``reference``; 2026-11-17). None: neither has that day."""
 
     symbol: str
     date: date
     close: float | None
     currency: str
+    # True: not the official close but a reference from the history backfill (Yahoo Finance) — the buy form labels it
+    # 參考收盤 with ``note``; never used for the ledger
+    reference: bool = False
+    note: str | None = None
 
 
 class ValuationPoint(BaseModel):

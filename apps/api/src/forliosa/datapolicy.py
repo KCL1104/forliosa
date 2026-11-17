@@ -329,8 +329,8 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "demo": ("示範資料（模擬）", True),
     "finmind": ("FinMind" + NON_COMMERCIAL_SUFFIX, False),
     "yahoo": ("Yahoo Finance" + NON_COMMERCIAL_SUFFIX, False),
-    # Daily candles from before the archive began: an explicit owner opt-in (PRICE_HISTORY_SOURCE=yahoo), read only by
-    # charts — see :func:`history_backfill_enabled`.
+    # Daily candles from before the archive began: an explicit owner opt-in (PRICE_HISTORY_SOURCE=yahoo), read by
+    # charts, and as a reference close by the buy form and the import check — see :func:`history_backfill_enabled`.
     "yahoo-history": ("Yahoo Finance（歷史日線，非官方資料）", False),
     # News headline sources (forliosa.news; labelled through DATASETS where a dataset exists).
     "gdelt": ("", True),
@@ -381,7 +381,8 @@ def twse_opendata_on() -> bool:
 def history_backfill_enabled() -> bool:
     """PRICE_HISTORY_SOURCE=yahoo: the product owner's decision (2026-11-13) to fill the years before our archive
     with Yahoo Finance's daily candles. Not a licensed source — the rows keep their own key so they can be removed in
-    one statement, and only chart-like reads ask for them (``backfill=True``)."""
+    one statement, and only chart-like reads ask for them (``backfill=True``); since 2026-11-17 also the buy form's
+    and the statement import's reference close for days the archive lacks (``services.reference_close``)."""
     from forliosa.config import get_settings
 
     return get_settings().price_history_source == "yahoo"
@@ -579,7 +580,8 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
         items.append({
             "key": HISTORY_SOURCE, "agency": "Yahoo Finance", "dataset": "個股與 ETF 的歷史日線",
             "url": "https://finance.yahoo.com/",
-            "used_for": "走勢圖、技術指標與走勢小圖裡，Forliosa 開始每天存檔以前的日線",
+            "used_for": "走勢圖、技術指標與走勢小圖裡，Forliosa 開始每天存檔以前的日線；"
+                        "記一筆和匯入對帳單時，舊日期的參考收盤",
             "year": year, "license": "Yahoo 服務條款（非官方資料，沒有轉載授權）",
             "license_url": HISTORY_LICENSE_URL, "license_status": "non_commercial", "license_basis": None,
             "commercial": False, "served": True, "last_updated": hist.get("data_date"),

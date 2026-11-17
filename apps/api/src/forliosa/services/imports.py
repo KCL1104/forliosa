@@ -18,8 +18,11 @@ Checks (``flags[].code``; ``include`` is the default tick in the review table):
   0.15% for a day trade, 0.1% or 0 for an ETF), ``side_inconsistent`` (a buy with tax, or the sign of 應收付 against the
   side).
 * dates and price: ``not_trading_day``, ``outside_period``; ``price_far_from_close`` against our own archived
-  official close (``prices_daily`` under the data policy, never the Yahoo backfill): Taiwan ±10.5% of the previous
-  close (the daily limit is 10%), US ±20% of that day's close.
+  official close (``prices_daily`` under the data policy): Taiwan ±10.5% of the previous close (the daily limit is
+  10%), US ±20% of that day's close. A trade from before the archive began is compared with the history backfill's
+  close as a reference (product owner 2026-11-17, ``services.reference_close``), and the message says so
+  (「那天參考收盤 1,030（非官方資料），這裡是 103。」); the archive wins whenever it has a close in the lookback. A
+  known split between the previous day and the trade puts the previous close on the trade day's basis first.
 * the books, for the rows ticked by default (``services.transactions.check_batch``): ``oversell``,
   ``ledger_inconsistent``, ``duplicate``, ``possible_duplicate``.
 * the whole statement: ``totals_check`` (the rows added up against the statement's own 合計 row) and
@@ -59,6 +62,7 @@ from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiUsage, BrokerAccount, PriceDaily, User
 from forliosa.services import transactions as txn_svc
+from forliosa.services.reference_close import reference_closes, split_factor
 from forliosa.timeutil import is_tw_trading_day, today_taipei
 
 log = logging.getLogger(__name__)
@@ -78,6 +82,7 @@ FEE_MIN = Decimal(20)
 US_FEE_FLOOR, US_FEE_RATE = Decimal(50), Decimal("0.01")  # a US fee above both is probably NT$ (複委託)
 STOCK_TAX, DAY_TRADE_TAX, ETF_TAX = Decimal("0.003"), Decimal("0.0015"), Decimal("0.001")
 LOT = Decimal(1000)
+CENT = Decimal("0.01")
 CLOSE_LOOKBACK_DAYS = 15
 MISSED_ROW = 2  # comparing two readings: a row one of them missed
 WEEKDAYS = "一二三四五六日"
@@ -235,7 +240,7 @@ class _Ctx:
     account: BrokerAccount
     today: date
     period: tuple[date | None, date | None]
-    closes: dict[tuple[str, date], tuple[Decimal | None, Decimal | None]] = field(default_factory=dict)
+    closes: dict[tuple[str, date], tuple[Decimal | None, Decimal | None, bool]] = field(default_factory=dict)
 
     @property
     def year_hint(self) -> int | None:
@@ -260,8 +265,10 @@ class _Row:
         return not any(f["code"] in EXCLUDED or f["severity"] == "error" for f in self.flags)
 
 
-def _closes(ctx: _Ctx, symbol: str, d: date) -> tuple[Decimal | None, Decimal | None]:
-    """(that day's official close, the previous one) from our own archive."""
+def _closes(ctx: _Ctx, symbol: str, d: date) -> tuple[Decimal | None, Decimal | None, bool]:
+    """(that day's close, the previous one, whether they are reference closes): the official closes from our own
+    archive; when it has neither (a trade from before the archive began), the history backfill's closes as a
+    reference (product owner 2026-11-17, ``services.reference_close``)."""
     key = (symbol, d)
     if key not in ctx.closes:
         since = d - timedelta(days=CLOSE_LOOKBACK_DAYS)
@@ -270,7 +277,19 @@ def _closes(ctx: _Ctx, symbol: str, d: date) -> tuple[Decimal | None, Decimal | 
             source_clause(PriceDaily.source, ctx.md.policy)).order_by(PriceDaily.date.desc()).limit(2)).all()
         day = next((Decimal(c) for t, c in rows if t == d), None)
         prev = next((Decimal(c) for t, c in rows if t < d), None)
-        ctx.closes[key] = (day, prev)
+        reference = False
+        if day is None and prev is None:
+            refs = reference_closes(ctx.db, ctx.md, symbol, since, d)  # each day's close as traded
+            day = refs.get(d)
+            before = max((t for t in refs if t < d), default=None)
+            if before is not None:
+                # a known split in between (0050 resumed on 2025-06-18 at a quarter of 2025-06-10's 188): the
+                # previous close on the trade day's basis to compare with; with no close of the trade day to show,
+                # no comparison rather than a message whose two numbers look alike
+                k = split_factor(ctx.md, symbol, before, d)
+                prev = refs[before] / k if day is not None or k == 1 else None
+            reference = day is not None or prev is not None
+        ctx.closes[key] = (day, prev, reference)
     return ctx.closes[key]
 
 
@@ -318,14 +337,17 @@ def _arithmetic(row: _Row, info: InstrumentInfo, kind_day_trade: bool, t: str, q
 
 
 def _price_check(ctx: _Ctx, row: _Row, info: InstrumentInfo, d: date, price: Decimal) -> None:
-    day, prev = _closes(ctx, info.symbol, d)
+    day, prev, reference = _closes(ctx, info.symbol, d)
     tw = info.currency == "TWD"
     ref = (prev or day) if tw else (day or prev)
     if ref is None or ref <= 0:
         return
     if abs(price / ref - 1) > (TW_PRICE_BAND if tw else US_PRICE_BAND):
-        shown = f"那天收盤 {_num(day)}" if day is not None else f"前一個交易日收盤 {_num(prev or ref)}"
-        row.add(_flag("price_far_from_close", f"{shown}，這裡是 {_num(price)}。"))
+        # a reference close (the history backfill) says so: 「那天參考收盤 1,030（非官方資料），這裡是 103。」
+        what, tail = ("參考收盤", "（非官方資料）") if reference else ("收盤", "")
+        num = (lambda x: _num(x.quantize(CENT))) if reference else _num  # a split multiplied back: to the cent
+        shown = f"那天{what} {num(day)}" if day is not None else f"前一個交易日{what} {num(prev or ref)}"
+        row.add(_flag("price_far_from_close", f"{shown}{tail}，這裡是 {_num(price)}。"))
 
 
 def build_row(ctx: _Ctx, x: dict[str, Any], chunk: int) -> _Row:
