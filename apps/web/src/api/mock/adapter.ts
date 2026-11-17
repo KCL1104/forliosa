@@ -22,9 +22,11 @@ import { buildCompany, buildRelated } from "./company"
 import {
   accumulatingNote,
   ARCHIVE_START,
+  BACKFILL_START,
   hasUsCloses,
   INDEX_NOTE,
   NO_DATA_NOTE,
+  REFERENCE_NOTE,
   US_ARCHIVE_START,
   US_AS_OF,
   US_SESSION,
@@ -232,6 +234,12 @@ export interface MockOptions {
   history?: number
   /** 市場報告的情境（`?mreport=`，見 `mock/market-reports.ts`）；預設 trial（盲測中，只有站方管理員看得到） */
   reports?: MockReportsScenario
+
+  /**
+   * Yahoo 的歷史日線回補在不在（預設 true，和正式環境一樣）：在的話商用模式存檔開始以前的台股日期有「參考收盤」；
+   * false 模擬關掉或整批刪掉（`history_backfill drop`），和以前一樣什麼都不寫
+   */
+  historyBackfill?: boolean
 }
 
 /**
@@ -270,6 +278,7 @@ export function searchCatalog(items: MockInstrumentSpec[], q: string): MockInstr
 export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const scenario = options.scenario ?? "default"
   const commercial = (options.policy ?? "commercial") === "commercial"
+  const backfill = options.historyBackfill ?? true
   const demo = !commercial
   const [minLatency, maxLatency] = options.latency ?? [120, 320]
 
@@ -685,12 +694,15 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     // 批次報價：沒有報價的代號（商用模式還沒有收盤價的美股）直接略過
     getDailyClose: (symbol, date) =>
       wait(() => {
-        // 和後端一樣只看自己存檔的收盤：商用模式下存檔開始以前、還沒有收盤價的美股都是 null；
-        // 美股的收盤（Databento）從 2024-07-01 起，日期是紐約的交易日
+        // 和後端一樣先看自己存檔的官方收盤：商用模式下存檔開始以前、還沒有收盤價的美股都沒有；
+        // 美股的收盤（Databento）從 2024-07-01 起，日期是紐約的交易日。
+        // 存檔開始以前的台股日期：Yahoo 回補在的話是「參考收盤」（reference: true，產品負責人 2026-11-17）；回補沒有美股
         const s = spec(symbol)
         const archived = !commercial || (hasUsCloses(s) ? date >= US_ARCHIVE_START : s.market !== "US" && date >= ARCHIVE_START)
-        const close = archived ? (candlesOf(s).find((c) => c.t === date)?.c ?? null) : null
-        return { symbol: s.symbol, date, close, currency: s.market === "US" ? "USD" : "TWD" }
+        const backfilled = commercial && backfill && s.market !== "US" && date < ARCHIVE_START && date >= BACKFILL_START
+        const close = archived || backfilled ? (candlesOf(s).find((c) => c.t === date)?.c ?? null) : null
+        const reference = !archived && backfilled && close !== null
+        return { symbol: s.symbol, date, close, currency: s.market === "US" ? "USD" : "TWD", reference, note: reference ? REFERENCE_NOTE : null }
       }),
     getQuotes: (symbols) => wait(() => symbols.map((x) => spec(x)).filter((x) => !noQuote(x)).map(quoteOf)),
     getHistory: (symbol, range) =>

@@ -30,7 +30,8 @@ import { useCanImportStatements } from "./import/access"
  * 記一筆（預設的輸入方式；產品負責人 2026-11-14 第二次：照 Google 財經新增持有資產的做法，分兩步）：
  * ① 選股票：搜尋框，沒打字時列出持有的與觀察清單（現價、漲跌），一打字換成搜尋結果；這一步「新增」不能按。
  * ② 選好的股票（現價、漲跌、✕ 回到第一步）→ 每一筆的股數、買進日期（月曆，一開始空白、一定要選）、買進價格、手續費（選填）。
- *    選了日期，價格下面寫「那天收盤 1,085」，點一下才填進去（只用自己存檔的官方收盤，Yahoo 回補的日線不進帳本）。
+ *    選了日期，價格下面寫「那天收盤 1,085」，點一下才填進去（自己存檔的官方收盤）。存檔開始以前的日子是 Yahoo 回補的
+ *    「參考收盤」，下面一行寫來源、不是官方資料（產品負責人 2026-11-17）；記下的價格以使用者填的為準，帳本不讀 Yahoo。
  *    同一檔分好幾次買的，按「再加一筆買進」多一列（日期一樣空白）。
  * 手續費（產品負責人 2026-11-16）：每一筆自己填，不填就是 0、不自動算（2026-11-14）；幣別是這一檔的計價幣別（後端照商品記，
  * 美股是美元，不看帳戶）。沒有類型與備註；交易稅只有賣出，在完整表單。賣出、股利與其他類型走完整表單。
@@ -575,9 +576,12 @@ function DetailsStep({
 /**
  * 選了日期之後價格欄下面的「11/12 收盤 1,085」（美股「11/13 收盤（美東）US$356.27」，日期是紐約的交易日）：
  * 點一下填進價格（實際成交價常常不同，所以不自動填）。
- * 只用自己存檔的官方收盤；那天沒有（假日、存檔開始以前、美股 2024/07/01 以前、還沒有收盤價）就不顯示。
+ * 自己存檔的官方收盤；存檔開始以前的日子是 Yahoo 回補的參考價（`reference`，產品負責人 2026-11-17）：寫「3/15 參考收盤 650」，
+ * 下面一行淡墨寫來源（後端的 `note`：「來自 Yahoo Finance，不是官方資料」），點一下一樣填入、可以改。
+ * 那天都沒有（假日、回補也沒有的更早日子、美股 2024/07/01 以前、還沒有收盤價）就不顯示。
  */
 function CloseHint({ instrument, date, price, onFill }: { instrument: Instrument; date: string; price: string; onFill: (price: string) => void }) {
+  const noteId = useId()
   const q = useQuery({
     enabled: instrument.has_quote !== false,
     queryKey: ["daily-close", instrument.symbol, date],
@@ -587,16 +591,42 @@ function CloseHint({ instrument, date, price, onFill }: { instrument: Instrument
   })
   const close = q.data?.close
   if (close === null || close === undefined) return null
+  const reference = q.data?.reference === true
+  const day = formatDateShort(q.data?.date ?? date, false)
   // 美股：選的日期就是紐約的交易日，寫「11/13 收盤（美東）US$356.27」
   const label =
     instrument.market === "US"
-      ? `${usCloseLabel(q.data?.date ?? date)} ${usd(close)}`
-      : `${formatDateShort(date, false)} 收盤 ${formatPrice(close, instrument.market, instrument.type)}`
-  if (num(price) === close) return <p className="num text-sm text-ink-2">{label}</p>
-  return (
-    <button type="button" onClick={() => onFill(String(close))} aria-label={`用 ${label} 填入價格`} className={cn(textAction, "num self-start text-sm text-ink-2 hover:text-ink")}>
+      ? `${reference ? `${day} 參考收盤（美東）` : usCloseLabel(q.data?.date ?? date)} ${usd(close)}`
+      : `${formatDateShort(date, false)} ${reference ? "參考收盤" : "收盤"} ${formatPrice(close, instrument.market, instrument.type)}`
+  const filled = num(price) === close
+  const hint = filled ? (
+    <p className="num text-sm text-ink-2">{label}</p>
+  ) : (
+    <button
+      type="button"
+      onClick={() => onFill(String(close))}
+      aria-label={`用 ${label} 填入價格`}
+      aria-describedby={reference ? noteId : undefined}
+      className={cn(textAction, "num self-start text-sm text-ink-2 hover:text-ink")}
+    >
       {label}
     </button>
+  )
+  if (!reference) return hint
+  // 來源說明緊貼在參考收盤下面（觸控時那顆按鈕高 44px，字下面空了一截，往上收 8px；
+  // 已經填入時上面只剩一行字，不往上收，不然會壓到）；只在「，」後面換行（手機那一欄窄，不會斷成「…不是／官方資料」）
+  const note = q.data?.note ?? "不是官方資料"
+  return (
+    <div className="flex flex-col items-start gap-0.5">
+      {hint}
+      <p id={noteId} className={cn("text-sm text-ink-2", !filled && "pointer-coarse:-mt-2")}>
+        {note.split(/(?<=，)/).map((part) => (
+          <span key={part} className="whitespace-nowrap">
+            {part}
+          </span>
+        ))}
+      </p>
+    </div>
   )
 }
 

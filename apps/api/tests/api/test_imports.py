@@ -317,6 +317,85 @@ def test_price_far_from_the_archived_close(client, pool, fake, env, engine):
     assert flags(out["rows"][1]) == []
 
 
+def test_a_trade_before_the_archive_is_checked_against_the_reference_close(client, pool, fake, env, engine):
+    """No official close in the lookback (a trade from before the archive began): the history backfill's close is
+    the reference (product owner 2026-11-17), and the flag says so. Switched off: no check, as before."""
+    env(AI_MODEL_IMPORT_RETRY="")
+    account(client)
+    with Session(engine) as s:
+        s.add_all([PriceDaily(symbol="2330.TW", date=date(2026, 10, 1), close=Decimal("1020"), source="yahoo-history"),
+                   PriceDaily(symbol="2330.TW", date=date(2026, 10, 2), close=Decimal("1030"), source="yahoo-history")])
+        s.commit()
+    rows = [r(price="103", amount="103000", fee="146"), r(price="1035", amount="1035000", fee="1474")]
+    answer(fake, doc(rows))
+    out = read(client).json()
+    assert [flags(x) for x in out["rows"]] == [[], []]  # the backfill is off: nothing to compare with
+    env(PRICE_HISTORY_SOURCE="yahoo")
+    answer(fake, doc(rows))
+    out = read(client).json()
+    assert flags(out["rows"][0]) == ["price_far_from_close"] and out["rows"][0]["include"] is True
+    assert out["rows"][0]["flags"][0]["message"] == "那天參考收盤 1,030（非官方資料），這裡是 103。"
+    assert flags(out["rows"][1]) == []
+
+
+def test_the_archive_wins_over_the_reference_close(client, pool, fake, env, engine):
+    env(AI_MODEL_IMPORT_RETRY="", PRICE_HISTORY_SOURCE="yahoo")
+    account(client)
+    with Session(engine) as s:  # the archive's first day, with the backfill's day before it far off
+        s.add_all([PriceDaily(symbol="2330.TW", date=date(2026, 10, 1), close=Decimal("50"), source="yahoo-history"),
+                   PriceDaily(symbol="2330.TW", date=date(2026, 10, 2), close=Decimal("1030"), source="twse")])
+        s.commit()
+    answer(fake, doc([r(price="103", amount="103000", fee="146"), r(price="1035", amount="1035000", fee="1474")]))
+    out = read(client).json()
+    assert out["rows"][0]["flags"][0]["message"] == "那天收盤 1,030，這裡是 103。"  # official, not 參考
+    assert flags(out["rows"][1]) == []  # compared with the official 1,030, not the backfill's 50
+
+
+def test_a_reference_before_the_previous_day_uses_the_previous_reference(client, pool, fake, env, engine):
+    env(AI_MODEL_IMPORT_RETRY="", PRICE_HISTORY_SOURCE="yahoo")
+    account(client)
+    with Session(engine) as s:  # the backfill has no row for the trade day itself
+        s.add(PriceDaily(symbol="2330.TW", date=date(2026, 10, 1), close=Decimal("1020"), source="yahoo-history"))
+        s.commit()
+    answer(fake, doc([r(price="103", amount="103000", fee="146")]))
+    out = read(client).json()
+    assert out["rows"][0]["flags"][0]["message"] == "前一個交易日參考收盤 1,020（非官方資料），這裡是 103。"
+
+
+def test_a_split_between_the_previous_day_and_the_trade_is_divided_back_out(client, pool, fake, env, engine):
+    """0050 resumed on 2025-06-18 at a quarter of its price (1-to-4): the backfill's 2025-06-10 is 188 as traded, the
+    trade day's 47.2. A buy at 47.25 that day is fine and one at the old 188 is flagged; a 2024 buy typed at Yahoo's
+    adjusted price is flagged against the close as traded — the split multiplied back, to the cent."""
+    env(AI_MODEL_IMPORT_RETRY="", PRICE_HISTORY_SOURCE="yahoo")
+    account(client)
+
+    def close(d, c, source="yahoo-history"):
+        return PriceDaily(symbol="0050.TW", date=d, close=Decimal(c), source=source)
+
+    with Session(engine) as s:
+        s.add_all([close(date(2024, 3, 14), "37.4567"), close(date(2024, 3, 15), "37.6123"),
+                   close(date(2025, 6, 10), "47.0"), close(date(2025, 6, 18), "47.2"),
+                   close(date(2026, 11, 12), "60.5", "twse")])
+        s.commit()
+    etf = {"code": "0050", "name": "元大台灣50"}
+    rows = [r("2025/06/18", price="47.25", amount="47250", fee="67", **etf),
+            r("2025/06/18", price="188", amount="188000", fee="267", **etf),
+            r("2024/03/15", price="37.6", amount="37600", fee="53", **etf)]
+    answer(fake, doc(rows, period=("2024/03/01", "2025/06/30")))
+    out = read(client).json()
+    assert flags(out["rows"][0]) == []
+    assert out["rows"][1]["flags"][0]["message"] == "那天參考收盤 47.2（非官方資料），這裡是 188。"
+    assert out["rows"][2]["flags"][0]["message"] == "那天參考收盤 150.45（非官方資料），這裡是 37.6。"
+
+    # no close of the trade day itself and a split since the previous one: nothing to show both numbers alike with
+    with Session(engine) as s:
+        s.query(PriceDaily).filter(PriceDaily.date == date(2025, 6, 18)).delete()
+        s.commit()
+    answer(fake, doc(rows[:2], period=("2024/03/01", "2025/06/30")))
+    out = read(client).json()
+    assert [flags(x) for x in out["rows"]] == [[], []]
+
+
 def test_a_month_printed_alone_is_the_period(client, pool, fake, env):
     env(AI_MODEL_IMPORT_RETRY="")
     account(client)

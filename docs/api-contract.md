@@ -91,7 +91,7 @@
 | GET | `/instruments/{symbol}` | `InstrumentDetail` |
 | GET | `/instruments/{symbol}/quote` | `Quote` |
 | GET | `/quotes?symbols=2330.TW,0050.TW` | `Quote[]`（批次） |
-| GET | `/instruments/{symbol}/close?date=2026-11-12` | 那一天的官方收盤（記一筆買進時價格欄下的「那天收盤 1,085」）：`{"symbol": "2330.TW", "date": "2026-11-12", "close": 1085.0, "currency": "TWD"}`。只讀自建存檔（證交所／櫃買的收盤），**不讀 Yahoo Finance 的歷史回補**、不即時向上游查；那天沒有收盤（週末、休市、存檔開始以前、美股）時 `close` 是 `null`（仍是 200）。`date` 格式錯或晚於今天（台北）回 422；查不到商品 404（2026-11-14）。**2026-11-15 起美股也有**：讀 Databento 的收盤，2024-07-01 起，`date` 是紐約的交易日（見下方「美股收盤價（2026-11-15）」） |
+| GET | `/instruments/{symbol}/close?date=2026-11-12` | 那一天的官方收盤（記一筆買進時價格欄下的「那天收盤 1,085」）：`{"symbol": "2330.TW", "date": "2026-11-12", "close": 1085.0, "currency": "TWD", "reference": false, "note": null}`。讀自建存檔（證交所／櫃買的收盤），不即時向上游查；**2026-11-17 起**存檔沒有的舊日期改給 Yahoo Finance 歷史回補的參考價（`reference: true`、`note`，見下方「舊日期的參考收盤（2026-11-17）」）；兩邊都沒有那天（週末、休市、回補也沒有的更早日子或回補關著、美股）時 `close` 是 `null`（仍是 200）。`date` 格式錯或晚於今天（台北）回 422；查不到商品 404（2026-11-14）。**2026-11-15 起美股也有**：讀 Databento 的收盤，2024-07-01 起，`date` 是紐約的交易日（見下方「美股收盤價（2026-11-15）」） |
 | GET | `/instruments/{symbol}/history?range=1M` | `range`：`5D`、`1M`、`6M`、`YTD`、`1Y`、`5Y`、`MAX`；回傳 `History`。正式環境開了歷史回補（`PRICE_HISTORY_SOURCE=yahoo`）時，存檔開始以前的日線來自 Yahoo Finance：`sources` 會列出，`notes` 有一句說明哪一天以前是它的資料（`apps/api/CONTRACT_NOTES.md`「歷史日線回補」） |
 | GET | `/instruments/{symbol}/valuation?range=5Y` | `Valuation`（本益比、股價淨值比河流圖用） |
 | GET | `/instruments/{symbol}/revenue` | `MonthlyRevenue[]`（由舊到新） |
@@ -1730,9 +1730,9 @@ Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問�
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/instruments/{symbol}/close?date=YYYY-MM-DD` | `{"symbol", "date", "close": number \| null, "currency"}` |
+| GET | `/instruments/{symbol}/close?date=YYYY-MM-DD` | `{"symbol", "date", "close": number \| null, "currency", "reference": boolean, "note": string \| null}`（`reference`、`note` 是 2026-11-17 加的） |
 
-- 只讀自建存檔的官方收盤（證交所／櫃買開放資料，依資料政策），**不讀 Yahoo Finance 的歷史回補**（那批只給走勢圖、技術指標、走勢小圖）、
+- 只讀自建存檔的官方收盤（證交所／櫃買開放資料，依資料政策），~~不讀 Yahoo Finance 的歷史回補~~（2026-11-17 起存檔沒有的舊日期給回補的參考價，見「舊日期的參考收盤（2026-11-17）」）、
   不即時向上游查。那一天沒有收盤列時 `close` 是 `null`、仍回 200：週末、休市日、存檔開始以前、還沒存檔的今天、~~美股~~（2026-11-15 起美股收盤價開著時讀 Databento 的收盤，`date` 是紐約的交易日；2024-07-01 以前、還沒抓到收盤的美股仍是 `null`）。
 - `symbol` 可以只給代號（`2330`），回應是完整代號；查不到商品 404 `not_found`。`date` 缺少、格式錯或晚於今天（台北）回 422。
 - 要登入；查看別人資產（`X-Forliosa-View-As`）時忽略標頭（不讀使用者資料）。
@@ -1922,7 +1922,7 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 | `tax_out_of_range` | 買進有交易稅；賣出不是 0.3%（當沖 0.15%、ETF 0.1%） | 不變（標出來） |
 | `side_inconsistent` | 應收付的正負、有沒有交易稅和買賣對不上 | 不變（標出來） |
 | `not_trading_day`／`outside_period` | 不是交易日／不在對帳單的期間內 | 不變（標出來） |
-| `price_far_from_close` | 和那天自建存檔的官方收盤差太多（不讀 Yahoo 回補；門檻待定，台股暫定前一日收盤 ±10.5%） | `true`（標出來） |
+| `price_far_from_close` | 和那天自建存檔的官方收盤差太多（門檻待定，台股暫定前一日收盤 ±10.5%）。存檔開始以前的交易（往前 15 天都沒有官方收盤）改和 Yahoo 回補的收盤比，訊息寫「那天參考收盤 1,030（非官方資料），這裡是 103。」（2026-11-17） | `true`（標出來） |
 | `oversell` | 照這一批加上既有的帳本重播，賣出超過當時的持股 | `false` |
 | `duplicate` | 帳戶、日期、商品、買賣、股數、價格都和既有的一筆（或同一批的另一列）一樣 | `false` |
 | `possible_duplicate` | 同日期、商品、買賣、股數，價格不同（例如之前用「減少持股」以收盤價記的賣出） | `false` |
@@ -1997,3 +1997,15 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 
 - 錯誤：帳戶不是自己的 404 `not_found`「找不到帳戶」；這個帳戶沒有這一檔的紀錄 404 **`no_records`**「這個帳戶沒有這一檔的紀錄」（自己的代碼：前端把它當成「已經在別的分頁或裝置刪掉了」）；查看別人的資產時 403 `read_only`。
 - 前端：持倉的「⋯」最後一項「刪除這檔」（上面一條格線）、展開後最下面淡墨的「刪除這檔」（手機）→ 確認框寫出帳戶與筆數（「刪除台積電在「永豐－一般」的 7 筆紀錄？」，不只一種時「包括 5 筆買賣、2 筆股利。」），有定期定額時多一個預設勾著的「同時暫停這一檔的定期定額」。好幾個帳戶都有紀錄時預設是現在持有的帳戶（`Holding.account_ids`），已經賣光的帳戶要自己選。成功後和刪一筆交易重抓同樣的資料（暫停了計畫時定期定額也重抓）；`no_records` 也當成刪好了（重抓、關掉、通知「…的紀錄已經不在了」）；連不上伺服器時說「不確定有沒有刪除」，取消時重抓。
+
+## 舊日期的參考收盤（2026-11-17）
+
+產品負責人決定（選 A）：朋友很久以前買的股票，記一筆的「那天收盤」和匯入對帳單的價格核對只認得存檔開始（2026-11-12）以後的幾天。正式環境已有的 Yahoo Finance 五年日線回補（`yahoo-history`，`PRICE_HISTORY_SOURCE=yahoo`）可以**當參考價**用在這兩個地方；帳本的市值、損益、績效、股利、定期定額草稿照舊不讀，也不把它存成官方收盤。
+
+- **`GET /instruments/{symbol}/close`** 多兩個欄位（向下相容：舊的前端不看就和以前一樣；舊的後端沒有這兩個欄位，前端當成 `reference: false`）：
+  - `reference`（boolean）：`false` 是自建存檔的官方收盤（或 `close: null`）；`true` 是那天存檔沒有、回補有，`close` 是回補的收盤。
+  - `note`（string | null）：`reference: true` 時是「來自 Yahoo Finance，不是官方資料」（和走勢圖說明 Yahoo 那幾天的寫法一樣），畫面放在參考收盤下面；其他時候 `null`。
+  - 存檔有那一天時一律回官方收盤。回補關掉（`PRICE_HISTORY_SOURCE` 不是 `yahoo`）、整批刪除（`history_backfill drop`）或回補沒有那一天：`close: null`、`reference: false`，和以前一樣。回補只有台股；美股照舊。
+  - Yahoo 的價格已照股票分割換算：參考價把我們知道的分割（`MarketData.corporate_events`：內建的已知分割，例如 0050 在 2025-06-18 一拆四，加上存檔偵測到的美股分割）中，在那天之後、這一檔第一筆官方收盤以前的乘回去，還原成當時的成交價（0050 在 2024/03/01 的 35.6875 → 142.75）。不知道的分割還原不了，所以只當參考。
+  - 例：`{"symbol": "0050.TW", "date": "2024-03-01", "close": 142.75, "currency": "TWD", "reference": true, "note": "來自 Yahoo Finance，不是官方資料"}`
+- **`POST /imports/statement` 的 `price_far_from_close`**：往前 15 天都沒有官方收盤（存檔開始以前的交易）時，改拿回補的收盤（同樣乘回已知分割）比，門檻不變；訊息寫「那天參考收盤 1,030（非官方資料），這裡是 103。」，那天沒有時「前一個交易日參考收盤 1,020（非官方資料），這裡是 103。」。代碼不變。存檔裡有官方收盤時照舊只用官方的。前一個交易日和交易那天之間有已知分割時，先換算到交易那天的基準再比（0050 在 2025-06-18 以 47.25 買進不會被標）；訊息裡的數字是各自那天的成交價；交易那天沒有參考價又隔著分割時不比。

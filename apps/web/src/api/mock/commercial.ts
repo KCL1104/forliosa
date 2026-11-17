@@ -15,6 +15,13 @@ export type MockPolicy = "commercial" | "personal"
 export const ARCHIVE_START = "2026-06-01"
 /** 美股收盤價（Databento EQUS.SUMMARY）從這天開始：新追蹤的美股回補到這一天（和後端 `us_prices.FIRST_DAY` 相同） */
 export const US_ARCHIVE_START = "2024-07-01"
+/**
+ * Yahoo 的歷史日線回補（正式環境開著，`PRICE_HISTORY_SOURCE=yahoo`）：存檔開始以前五年的台股日線。
+ * mock 只拿它當記一筆的「參考收盤」（`GET /instruments/{symbol}/close` 的 `reference: true`；產品負責人 2026-11-17）。
+ */
+export const BACKFILL_START = "2021-11-12"
+/** 和後端 `services.reference_close.REFERENCE_NOTE` 相同 */
+export const REFERENCE_NOTE = "來自 Yahoo Finance，不是官方資料"
 
 /** 和後端 `coverage.ymd` 一樣：說明裡的日期寫成 2026/06/01 */
 export const ymd = (iso: string) => iso.replaceAll("-", "/")

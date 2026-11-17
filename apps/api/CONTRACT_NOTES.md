@@ -2412,7 +2412,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   - 進度記在 `price_backfill`（alembic 0015）：`done`、`not_found`、`mismatch` 不再問。
 - **讀取**：`MarketData.history(symbol, start, end, backfill=True)` 才會讀到這些列（`datapolicy.source_clause(..., backfill=True)`，而且開關要開著）。
   - 讀的：`GET /instruments/{symbol}/history`、個股頁關鍵數據的 52 週高低與 3 個月均量、「為什麼漲跌」的 20 日均量、觀察清單與相關股票的走勢小圖、AI 的 `get_stock_history`／`get_technicals`。
-  - **不讀的**：帳本市值與績效（`services/portfolio.py`）、群組排行（`services/sharing.py`）、定期定額的扣款價（`services/recurring.py`）、估值走勢、記一筆買進的「那天收盤」（`GET /instruments/{symbol}/close`，2026-11-14）。原因：Yahoo 的開高低收已經照股票分割換算（0050 在 2025 年分割前的價格是當時成交價的四分之一），而且不回傳分割紀錄，還原不回去；拿來乘上當時的股數會算錯。
+  - **不讀的**：帳本市值與績效（`services/portfolio.py`）、群組排行（`services/sharing.py`）、定期定額的扣款價（`services/recurring.py`）、估值走勢、~~記一筆買進的「那天收盤」（`GET /instruments/{symbol}/close`，2026-11-14）~~（2026-11-17 起存檔沒有的舊日期當參考價讀，見〈2026-11-17 舊日期的參考收盤〉）。原因：Yahoo 的開高低收已經照股票分割換算（0050 在 2025 年分割前的價格是當時成交價的四分之一），而且不回傳分割紀錄，還原不回去；拿來乘上當時的股數會算錯。
 - **`History` 回應**：`sources` 多一項「Yahoo Finance（歷史日線，非官方資料）」；`notes` 多一句「2026/11/11 以前的日線來自 Yahoo Finance，不是官方資料；股票分割前的價格已經換算」。序列比要求的區間短時，第一句是「資料從 YYYY/MM/DD 開始」（這檔在 Yahoo 的第一天）。
 - **`GET /meta/attributions`**：開關開著時 `datasets` 多一筆 `key: "yahoo-history"`（`commercial: false`、`license_status: "non_commercial"`），資料來源頁會列出來並標「非商用」。
 - 成交量：Yahoo 的單位也是股，但不含盤後與零股，比官方少幾個百分點到一成多（2330 在 2026-11-12：Yahoo 29,205,152，官方 34,359,285）；開高低收和官方完全相同。
@@ -2688,8 +2688,9 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 ### `GET /instruments/{symbol}/close?date=`
 
 - `services/instruments.close_on`：`prices_daily` 裡 `symbol`、`date` 剛好那一天的一列，條件是 `datapolicy.source_clause(PriceDaily.source,
-  policy)`（`backfill=False`，和帳本估值同一個條件）：`yahoo-history` 不論開關都不讀；commercial 下也不讀非商用來源的列。不經過
-  `MarketData` 取價（沒有任何上游請求、沒有示範資料）。沒有那一列 → `close: null`、HTTP 200。
+  policy)`（`backfill=False`，和帳本估值同一個條件）：commercial 下不讀非商用來源的列。不經過
+  `MarketData` 取價（沒有任何上游請求、沒有示範資料）。沒有那一列 → `close: null`、HTTP 200。~~`yahoo-history` 不論開關都不讀~~：
+  2026-11-17 起官方沒有那一天時讀回補的參考價（`reference: true`），見〈2026-11-17 舊日期的參考收盤〉。
 - 先檢查日期（晚於今天〔台北〕422「日期不能晚於今天」；格式錯、缺少是一般的 422 `validation_error`，欄位名「日期」），再查商品
   （`require_instrument`，查不到 404「找不到商品」，和 `/history` 等相同）。`currency` 是商品的幣別（~~存檔沒有美股，美股的 `close` 一律 `null`~~ 已改，2026-11-15：美股收盤價開著時讀 `databento-equs` 的列，`date` 是紐約的交易日）。
 - 要登入；`X-Forliosa-View-As` 時忽略標頭（`VIEW_AS_IGNORED_PATHS`）。
@@ -2872,7 +2873,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 - **名稱對代號**：`MarketData.resolve` 加上 `ai/tools.resolve_instrument` 的俗稱對照（法規只要求對帳單寫股票名稱，不一定有代號）。對不到 `unknown_symbol`、對到好幾檔 `ambiguous_symbol`。
 - **算術**：`amount_mismatch`（股數 × 價格和價金差超過 1；張、股弄錯也是它抓的）、`fee_out_of_range`（0～價金的 0.1425%＋最低手續費）、`tax_out_of_range`（買進 0；賣出 0.3%，當沖 0.15%、ETF 0.1%）、`side_inconsistent`（應收付的正負、有沒有交易稅和買賣對不上）。
-- **日期**：`not_trading_day`、`outside_period`。**價格**：`price_far_from_close`，和那天自建存檔的官方收盤比（和 `GET /instruments/{symbol}/close` 同一份；**不讀 Yahoo 回補**）；門檻還沒定，台股暫定前一日收盤 ±10.5%。
+- **日期**：`not_trading_day`、`outside_period`。**價格**：`price_far_from_close`，和那天自建存檔的官方收盤比（和 `GET /instruments/{symbol}/close` 同一份）；門檻還沒定，台股暫定前一日收盤 ±10.5%。~~不讀 Yahoo 回補~~：2026-11-17 起往前 15 天都沒有官方收盤時和回補的參考價比（〈2026-11-17 舊日期的參考收盤〉）。
 - **帳本**：`oversell`、`duplicate`、`possible_duplicate`、`ledger_inconsistent` 直接用 `services.transactions.check_batch`（和 `dry_run` 同一套，見下面）。
 - **不匯入**：`dividend_auto`（台股股利自動入帳，`services/auto_dividends.py`）、`short_sale`（融券）。**標籤**：`day_trade`（預設不勾，送出時 `is_day_trade: true`）、`margin`（勾著）。**其他**：`currency_mismatch`（美股卻是新台幣金額，複委託；或美股的手續費同時超過 US$50 與成交金額的 1%，多半是台幣交割印成新台幣的手續費——不放進重讀的條件，重讀也一樣）、`fractional_tw_qty`、`unreadable`（都預設不勾）。
 - 整份：`totals_check`（所有列加起來和 `printed_totals` 比）。
@@ -3686,3 +3687,31 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   不到兩個版本不推、`admins` 或不是試跑不推、送出時重新檢查、沒有連結與太長的文字）；`tests/reports/test_pipeline.py::test_trial_open_to_everyone_…`
   （用 tick 跑盲測：第一個版本寫好時填 `ai_published_at`、資料版還是 current、推播時間到了排一則、之後不再排）；`tests/test_migrations.py::
   test_mreport_trial_audience_both_ways`（補 `ai_published_at`、舊票標成管理員、downgrade）。
+
+## 2026-11-17 舊日期的參考收盤（`services/reference_close.py`）
+
+產品負責人選 A：朋友很久以前買的股票，記一筆的「那天收盤」（`instruments.close_on`）與匯入對帳單的價格核對（`imports._price_check`／`_closes`）只讀
+`prices_daily` 的官方收盤，存檔從 2026-11-12 開始，只認得最近幾天。正式環境已有的 Yahoo 五年回補（`yahoo-history`）現在也可以當**參考價**用在這兩個地方，
+其他地方一律不讀。
+
+- **讀法**：`reference_close.reference_closes(db, md, symbol, start, end) -> {date: Decimal}`。只在 `history_backfill_enabled()`（`PRICE_HISTORY_SOURCE=yahoo`）
+  時讀，條件是 `source == "yahoo-history"`，不經過 `source_clause`（那個條件照舊把回補排除在帳本外）。關掉、`history_backfill drop` 或沒有那幾天 → 空的，
+  兩個地方都和以前一樣。
+- **官方優先**：`close_on` 先查官方那一天，有就回官方（`reference: false`）；`prices_daily` 的主鍵是（symbol, date），回補本來就不會和官方同一天。
+  匯入核對先查往前 15 天的官方收盤（那天與前一個），**兩個都沒有**才讀回補，所以存檔開始那天（官方有當天、沒有前一天）照舊用官方的。
+- **股票分割**：Yahoo 的開高低收已照分割換算。回補只存這一檔第一筆官方收盤以前的日子，而且要和官方收盤對得上才存，所以存進來的價格折進去的分割，
+  是那天之後、第一筆官方收盤（含）以前的那些。`MarketData.corporate_events`（`catalog.KNOWN_SPLITS`＋存檔偵測到的美股分割）裡落在這段的，
+  比例乘回去（0050 在 2025-06-18 一拆四：2024/03/01 的 35.6875 → 142.75）。不在清單裡的分割還原不了——**待確認**：其他在 2021–2026 年分割過的台股
+  ETF／股票要不要補進 `KNOWN_SPLITS`（補之前要查證日期與比例）。
+- **`GET /instruments/{symbol}/close`**：`DayClose` 多 `reference: bool = False`、`note: str | None = None`。`reference: true` 時 `note` 是
+  `REFERENCE_NOTE`「來自 Yahoo Finance，不是官方資料」（和 `coverage.backfill_note` 說 Yahoo 那幾天的寫法一樣）；`close` 是乘回分割後的價格（`ser.price`，4 位小數）。
+- **`price_far_from_close`**：代碼、門檻、預設勾選都不變（也照舊算進重讀的條件）。訊息：官方「那天收盤 1,030，這裡是 103。」；參考
+  「那天參考收盤 1,030（非官方資料），這裡是 103。」／「前一個交易日參考收盤 1,020（非官方資料），這裡是 103。」，參考價四捨五入到分。
+  台股拿前一個交易日比；兩天之間有已知分割時（`reference_close.split_factor`），先把前一天的參考價除回交易那天的基準再比（0050：
+  2025-06-10 的 188 → 47，和 2025-06-18 的 47.25 比，不會誤報）。訊息裡的數字仍是各自那天的成交價；交易那天沒有參考價、又隔著分割時不比
+  （「前一個交易日參考收盤 188，這裡是 188」看不出問題在哪）。
+- **不讀的**（守門測試 `tests/api/test_yahoo_reference_guard.py`：回補開著、每一天都有 NT$1 的回補列）：持倉的價格與市值、`/portfolio/summary` 的市值與未實現損益、
+  `/portfolio/performance` 的序列（從第一筆官方收盤開始）、定期定額的扣款價（`recurring.close_on`）。群組排行、估值、股利照舊走 `source_clause(backfill=False)`。
+- **資料來源頁**：`/meta/attributions` 的 `yahoo-history.used_for` 多「記一筆和匯入對帳單時，舊日期的參考收盤」；前端授權條款那一句同步。
+- **測試**：`tests/api/test_day_close.py`（關著不讀、開著給參考價、官方優先、刪掉之後沒有、0050 分割乘回去、美股照舊）、`tests/api/test_imports.py`
+  （參考價的訊息、關著不核對、官方優先、前一個交易日的參考價、0050 分割前後與 2024 年的參考價四捨五入到分）、`tests/api/test_yahoo_reference_guard.py`。

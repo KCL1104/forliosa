@@ -122,12 +122,19 @@ export interface InstrumentDetail extends Instrument {
 }
 
 /** 報價：資料源沒有的欄位為 null（CONTRACT_NOTES「可能為 null」） */
-/** `GET /instruments/{symbol}/close?date=`：只讀自己存檔的官方收盤（不含 Yahoo 回補的日線），那天沒有資料時 `close` 是 null */
+/**
+ * `GET /instruments/{symbol}/close?date=`：自己存檔的官方收盤；存檔沒有的舊日期（存檔開始以前）用 Yahoo 回補的日線當參考價
+ * （`reference: true`，產品負責人 2026-11-17；只當參考，不進帳本）。兩邊都沒有那天時 `close` 是 null。
+ */
 export interface DailyClose {
   symbol: string
   date: string
   close: number | null
   currency: Currency
+  /** true：不是官方收盤，是歷史回補（Yahoo Finance）的參考價；舊版後端沒有這個欄位（當成 false） */
+  reference?: boolean
+  /** 參考價的來源說明（「來自 Yahoo Finance，不是官方資料」）；官方收盤是 null */
+  note?: string | null
 }
 
 export interface Quote {
@@ -2510,7 +2517,7 @@ export interface ForliosaApi {
   getQuote(symbol: string): Promise<Quote>
   getQuotes(symbols: string[]): Promise<Quote[]>
   getHistory(symbol: string, range: HistoryRange): Promise<History>
-  /** 某一天的收盤價（記一筆的「那天收盤」）：只來自自己存檔的官方收盤，沒有那天的資料時 `close` 是 null */
+  /** 某一天的收盤價（記一筆的「那天收盤」）：官方收盤；存檔以前的日子是 Yahoo 回補的參考價（`reference`），都沒有時 `close` 是 null */
   getDailyClose(symbol: string, date: string): Promise<DailyClose>
   getValuation(symbol: string, range?: "5Y" | "MAX"): Promise<Valuation>
   getRevenue(symbol: string): Promise<MonthlyRevenue[]>

@@ -84,7 +84,7 @@ def instrument_history(symbol: str, range: str = Query("1M"), _user: User = Depe
 
 
 @router.get("/instruments/{symbol}/close", response_model=DayClose,
-            summary="某一天的收盤價（只讀自建存檔的官方收盤；那天沒有收盤時 close 為 null）")
+            summary="某一天的收盤價（官方收盤；存檔以前的日子是歷史回補的參考價，reference 為 true）")
 def instrument_close(symbol: str, day: date = Query(alias="date", description="YYYY-MM-DD，不能晚於今天（台北）"),
                      _user: User = Depends(current_user), db: Session = Depends(get_db)):
     return svc.close_on(db, get_market_data(), symbol, day)

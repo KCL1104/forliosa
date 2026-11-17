@@ -22,6 +22,7 @@ from forliosa.marketdata.service import MarketData, dividend_sort_key
 from forliosa.models import PriceDaily
 from forliosa.services.coverage import series_notes
 from forliosa.services.portfolio import range_start
+from forliosa.services.reference_close import REFERENCE_NOTE, reference_closes
 from forliosa.timeutil import iso_taipei, today_taipei
 
 HISTORY_RANGES = ("5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX")
@@ -215,19 +216,28 @@ def _index_history(md: MarketData, symbol: str, range_: str) -> dict[str, Any]:
 
 
 def close_on(db: Session, md: MarketData, symbol: str, day: date) -> dict[str, Any]:
-    """The official close of ``symbol`` on exactly ``day``, for the buy form's 「那天收盤」 hint.
+    """The close of ``symbol`` on exactly ``day``, for the buy form's 「那天收盤」 hint.
 
-    Read from our own archive (``prices_daily``) only, under the data policy like the ledger's valuation: never the
-    history backfill's rows (``yahoo-history`` — product owner, 2026-11-13: Yahoo's data is for charts, technical
-    indicators and sparklines, never the ledger) and never a live request upstream. ``close`` is None when the
-    archive has no row for that very day (a weekend or holiday, before the archive began, a US stock).
+    The official close from our own archive (``prices_daily``) under the data policy, like the ledger's valuation, and
+    never a live request upstream. For a day the archive does not have (before it began on 2026-11-12), the history
+    backfill's close is offered as a *reference* (``reference: true`` with ``note``; product owner 2026-11-17 — see
+    ``services.reference_close``): never for the ledger, and the archive always wins when it has the day. ``close`` is
+    None when neither has that very day (a weekend or holiday, the backfill off or dropped, a US stock before
+    2024-07-01).
     """
     if day > today_taipei():
         raise unprocessable("日期不能晚於今天")
     info = require_instrument(md, symbol)
+    out = {"symbol": info.symbol, "date": day, "close": None, "currency": info.currency, "reference": False,
+           "note": None}
     close = db.scalar(select(PriceDaily.close).where(
         PriceDaily.symbol == info.symbol, PriceDaily.date == day, source_clause(PriceDaily.source, md.policy)))
-    return {"symbol": info.symbol, "date": day, "close": ser.price(close), "currency": info.currency}
+    if close is not None:
+        return {**out, "close": ser.price(close)}
+    ref = reference_closes(db, md, info.symbol, day, day).get(day)
+    if ref is not None:
+        return {**out, "close": ser.price(ref), "reference": True, "note": REFERENCE_NOTE}
+    return out
 
 
 _MANTISSAS = (1.0, 1.5, 2.0, 2.5, 3.0, 4.0, 5.0, 6.0, 8.0)
