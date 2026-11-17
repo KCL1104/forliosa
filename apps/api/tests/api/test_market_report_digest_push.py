@@ -9,6 +9,7 @@ from datetime import datetime, time, timedelta
 import pytest
 from sqlalchemy import select
 
+from forliosa import disclaimer
 from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.models import MarketReport, NotificationOutbox
@@ -57,6 +58,7 @@ def test_weekly_push_takes_in_the_digest(family, market, public):  # noqa: F811
         text = fake.discord[-1].body["content"]
         assert text.startswith(f"【市場週報 {ed.period[0].month}/{ed.period[0].day}–")
         assert "你的群組上週（" in text and "小明" in text and "下週行事曆" in text
+        assert text.count(disclaimer.SHORT) == 1 and text.endswith(disclaimer.SHORT)  # once, last
         db.refresh(row)
         assert row.status == "sent" and row.last_error == "merged"
         notifications.send_due(db, market, now=datetime.combine(sunday, time(21, 31), TAIPEI))

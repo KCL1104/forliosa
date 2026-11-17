@@ -11,6 +11,7 @@ from types import SimpleNamespace
 import pytest
 from sqlalchemy import select
 
+from forliosa import disclaimer
 from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.models import MarketReport, NotificationOutbox
@@ -86,12 +87,15 @@ def test_text_template_and_limits():
     lines = t.split("\n")
     assert lines[0] == "【盤前重點 11/18（三）】AI 依公開資料整理，報告本文人人相同，不是投資建議。"
     assert lines[2].endswith("（出處見全文）") and not lines[1].endswith("（出處見全文）")
-    assert lines[-1] == "全文與圖表：https://forliosa.trade/market/reports/mrp_1"
+    assert lines[-2] == "全文與圖表：https://forliosa.trade/market/reports/mrp_1"
+    # the site's last line, once (notifications.signed; 2026-11-17 disclaimers)
+    assert lines[-1] == disclaimer.AI_NOTE + disclaimer.SHORT and t.count(disclaimer.SHORT) == 1
     data = push.text(r, {**PAYLOAD, "has_ai": False}, "telegram", settings)
     assert data.split("\n")[0].endswith("依公開資料整理，這一版沒有 AI 段落，不是投資建議。")
+    assert data.split("\n")[-1] == disclaimer.SHORT
     long = {**PAYLOAD, "highlights": [{"sentences": [{"text": "長" * 900, "refs": ["F001"]}]}] * 3}
     cut = push.text(r, long, "discord", settings, ["昨日你的群組（11/17）", *("小明 +1.0%" for _ in range(10))])
-    assert len(cut) <= 1900 and "…" in cut
+    assert len(cut) <= 1900 and "…" in cut and cut.endswith(disclaimer.SHORT)
     w = SimpleNamespace(id="mrp_2", kind="weekly", edition_date=date(2026, 11, 22), period_start=date(2026, 11, 16),
                         period_end=date(2026, 11, 20), next_start=date(2026, 11, 23), next_end=date(2026, 11, 27))
     cal = {"groups": [{"rows": [{}, {}], "folded": [{"count": 3}]}]}
@@ -133,7 +137,9 @@ def test_premarket_push_takes_in_yesterdays_group(family, market, day, public): 
     text = fake.discord[-1].body["content"]
     assert text.startswith(f"【盤前重點 {nxt.month}/{nxt.day}（")
     assert f"昨日你的群組（{day.month}/{day.day}）" in text and "小明" in text and "示範使用者" not in text
-    assert text.rstrip().endswith(f"/market/reports/{rid}")
+    body = text.rstrip().split("\n")
+    assert body[-2].endswith(f"/market/reports/{rid}") and body[-1].endswith(disclaimer.SHORT)
+    assert text.count(disclaimer.SHORT) == 1  # the folded daily report's own last line is not repeated
     with session_factory()() as db:
         daily = db.scalar(select(NotificationOutbox).where(NotificationOutbox.kind == "daily"))
         mrow = db.scalar(select(NotificationOutbox).where(NotificationOutbox.kind == "mreport"))

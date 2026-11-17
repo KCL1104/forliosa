@@ -6,8 +6,10 @@
   time comes (:func:`enqueue`); re-checked when it is sent (:func:`send`: the mode, the channel and its switch, the
   report) — otherwise cancelled. The text is the report's current version at that moment.
 * **Text**: the kind and date, the one-line disclaimer, the highlights (footnotes removed; a sentence that cites a
-  report gets 「（出處見全文）」), a group section when there is one, the link. Discord ≤ 1,900 characters, Telegram
-  ≤ 4,000: the group section is cut first, then each highlight to 80 characters, then to two highlights.
+  report gets 「（出處見全文）」), a group section when there is one, the link, and the site's last line
+  (``notifications.signed``: 「AI 整理的部分可能有錯。」＋``disclaimer.SHORT``, once — the group section's own last
+  line is dropped). Discord ≤ 1,900 characters, Telegram ≤ 4,000 with that line: the group section is cut first,
+  then each highlight to 80 characters, then to two highlights.
 * **盤前重點 ＋「昨日你的群組」**: the group's 群組 AI 日報 of the previous session (boosted groups), with the same
   anonymity rules as the daily push (only members who push; the AI line only with ≥2 sharers…), whatever
   ``notify_daily`` says. A daily-report push of the same group and channel still waiting (it was held to 08:20 for
@@ -27,6 +29,7 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from forliosa import disclaimer
 from forliosa.config import Settings, get_settings
 from forliosa.ids import new_id
 from forliosa.models import (
@@ -40,7 +43,7 @@ from forliosa.models import (
 )
 from forliosa.reports import settings as rs
 from forliosa.reports.schedule import KIND_LABELS, md, md_wd, span
-from forliosa.services import pushers
+from forliosa.services import notifications, pushers
 from forliosa.timeutil import TAIPEI, last_tw_trading_day, now_utc
 
 log = logging.getLogger(__name__)
@@ -137,39 +140,44 @@ def text(report: MarketReport, payload: dict[str, Any], kind: str, settings: Set
     url = link(report.id, settings)
     group = list(group_lines or [])
 
-    def compose(hl: list[str], grp: list[str]) -> str:
+    def compose(hl: list[str], grp: list[str]) -> list[str]:
         lines = [first, *(f"・{h}" for h in hl), *extra, *grp]
         if url:
             lines.append(f"全文與圖表：{url}")
-        return "\n".join(lines)
+        return lines
 
-    limit = LIMITS.get(kind, 1900)
-    out = compose(highlights, group)
-    if len(out) > limit and len(group) > 2:
+    def ai_of(grp: list[str]) -> bool:
+        return bool(payload.get("has_ai")) or any(x.startswith(disclaimer.AI_LABEL) for x in grp)
+
+    # the site's last line (``notifications.signed``: 「AI 整理的部分可能有錯。」＋the short disclaimer) fits too
+    limit = LIMITS.get(kind, 1900) - len(disclaimer.AI_NOTE + disclaimer.SHORT) - 1
+    body = "\n".join(compose(highlights, group))
+    if len(body) > limit and len(group) > 2:
         group = group[:2]  # the group section's heading and its first line
-        out = compose(highlights, group)
-    if len(out) > limit:
+        body = "\n".join(compose(highlights, group))
+    if len(body) > limit:
         highlights = [h if len(h) <= HIGHLIGHT_CUT else h[:HIGHLIGHT_CUT - 1] + "…" for h in highlights]
-        out = compose(highlights, group)
-    if len(out) > limit:
-        out = compose(highlights[:2], group[:1])
-    return out[:limit]
+        body = "\n".join(compose(highlights, group))
+    if len(body) > limit:
+        group = group[:1]
+        body = "\n".join(compose(highlights[:2], group))
+    return notifications.signed(body[:limit].split("\n"), kind, ai=ai_of(group))
 
 
 # -- the group sections ---------------------------------------------------------------------------------------------
 def _body_lines(full: str, heading: str) -> list[str]:
-    """A daily / weekly push text without its title line, link line and disclaimer."""
-    from forliosa.services.notifications import DISCLAIMER
-
+    """A daily / weekly push text without its title line, link line and last line (the disclaimer that
+    ``notifications.signed`` adds: the report push ends with its own, once)."""
+    tails = {disclaimer.SHORT, disclaimer.AI_NOTE + disclaimer.SHORT, disclaimer.AI}
     lines = full.split("\n")[1:]
-    keep = [x for x in lines if x and not x.startswith(("完整日報：", "完整週報：")) and x != DISCLAIMER]
+    keep = [x for x in lines if x and not x.startswith(("完整日報：", "完整週報：")) and x not in tails]
     return [heading, *keep] if keep else []
 
 
 def premarket_group(db: Session, group: Group, ch: GroupChannel, report: MarketReport, kind: str,
                     settings: Settings) -> tuple[list[str], GroupDailyReport | None]:
     """「昨日你的群組」: the 群組 AI 日報 of the session before the edition, as a channel may show it."""
-    from forliosa.services import notifications, sharing
+    from forliosa.services import sharing
 
     prev = last_tw_trading_day(report.edition_date - timedelta(days=1))
     daily = db.scalar(select(GroupDailyReport).where(GroupDailyReport.group_id == group.id,
@@ -192,7 +200,7 @@ def premarket_group(db: Session, group: Group, ch: GroupChannel, report: MarketR
 def weekly_group(db: Session, group: Group, ch: GroupChannel, report: MarketReport, kind: str,
                  settings: Settings) -> tuple[list[str], NotificationOutbox | None]:
     """「你的群組上週」: the group's weekly digest of the reviewed week, when its push to this channel still waits."""
-    from forliosa.services import notifications, sharing
+    from forliosa.services import sharing
 
     row = db.scalar(select(NotificationOutbox).join(GroupDigest, GroupDigest.id == NotificationOutbox.digest_id).where(
         NotificationOutbox.group_id == group.id, NotificationOutbox.channel_kind == ch.kind,

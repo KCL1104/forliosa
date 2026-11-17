@@ -425,7 +425,7 @@ def test_correction_and_copy_are_independent(env):
         db.add(u)
         db.commit()
         out = service.correction(db, u, r.id, "加權指數的漲跌點數寫錯", ["what_happened"])
-    assert out["edition"] == "correction" and out["corrections"][0]["note"].startswith("已更正（")
+    assert out["edition"] == "correction" and out["corrections"][0]["note"] == "加權指數的漲跌點數寫錯"
     vs = versions(env, r.id)
     assert vs[-1].edition == "correction" and vs[-1].correction_note == "加權指數的漲跌點數寫錯"
     assert copy.deepcopy(vs[0].payload).get("corrections") == []

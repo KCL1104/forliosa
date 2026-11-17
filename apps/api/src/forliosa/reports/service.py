@@ -49,7 +49,6 @@ log = logging.getLogger(__name__)
 NOT_FOUND = "找不到這份報告"
 KIND_ORDER = {"weekly": 0, "close": 1, "premarket": 2}
 UNREAD_WINDOW = timedelta(hours=24)
-TIER_LABELS = {"normal": "正常", "medium": "已降為 medium", "sonnet": "已改用 Sonnet", "data_only": "只發資料版"}
 MODE_NOTICE = "之後的新報告會對所有登入的人公開，並推播到有開的群組。"
 
 
@@ -204,19 +203,31 @@ def mark_seen(db: Session, user: User, now: datetime | None = None) -> None:
 
 
 # -- admin: overview and settings --------------------------------------------------------------------------------
+# The shapes below are the web app's (``apps/web/src/api/types.ts``: AdminReportsOverview, ReportsConfigResult,
+# AdminTrial, TrialReveal, ReportValidation): the contract (§14.2) only said what each answer holds.
+KEY_STATUS = {"ok": "ok", "cooling": "cooldown", "disabled": "disabled", "exhausted": "exhausted",
+              "over_budget": "exhausted", "not_configured": "disabled"}
+
+
 def _revealed(cfg: MarketReportConfig) -> bool:
     return cfg.revealed_at is not None
 
 
 def trial_progress(db: Session, settings: Settings) -> dict[str, Any]:
+    """``days_done``: the trading days the blind test has editions for (第 3／5 個交易日); ``finished``: every daily
+    edition of those days and the weekly one are closed."""
     reports = list(db.scalars(select(MarketReport).where(MarketReport.trial.is_(True))))
     daily = [r for r in reports if r.kind != "weekly"]
     weekly = [r for r in reports if r.kind == "weekly"]
     days = sorted({r.edition_date for r in daily})
-    return {"daily_done": sum(1 for r in daily if r.closed_at is not None or r.state == "skipped"),
-            "daily_total": settings.ai_mreport_trial_days * 2,
-            "trading_days": len(days), "trading_days_total": settings.ai_mreport_trial_days,
-            "weekly_done": sum(1 for r in weekly if r.closed_at is not None), "weekly_total": 1}
+    total_days = settings.ai_mreport_trial_days
+    daily_done = sum(1 for r in daily if r.closed_at is not None or r.state == "skipped")
+    weekly_done = sum(1 for r in weekly if r.closed_at is not None)
+    daily_total = total_days * 2
+    return {"daily_done": daily_done, "daily_total": daily_total,
+            "days_done": min(len(days), total_days), "days_total": total_days,
+            "weekly_count": weekly_done, "weekly_total": 1, "weekly_done": weekly_done >= 1,
+            "finished": daily_done >= daily_total and weekly_done >= 1}
 
 
 def _run_row(db: Session, r: MarketReportRun, report: MarketReport | None, revealed: bool) -> dict[str, Any]:
@@ -229,8 +240,10 @@ def _run_row(db: Session, r: MarketReportRun, report: MarketReport | None, revea
         else None
     stops = [c.get("stop_reason") for c in r.calls or [] if "stop_reason" in c]
     return {"id": r.id, "report_id": r.report_id, "kind": report.kind if report else None,
-            "edition_date": report.edition_date.isoformat() if report else None, "variant": r.variant,
-            "purpose": r.purpose, "attempt": r.attempt, "status": r.status, "step": r.step,
+            "edition_date": report.edition_date.isoformat() if report else None,
+            "edition_label": assemble.edition_label(report.kind, report.edition_date,
+                                                    (report.period_start, report.period_end)) if report else "",
+            "variant": r.variant, "purpose": r.purpose, "attempt": r.attempt, "status": r.status, "step": r.step,
             "tier": None if hide else r.tier, "model": None if hide else (r.writer or {}).get("model"),
             "effort": None if hide else (r.writer or {}).get("effort"),
             "cost_usd": None if hide else float(r.cost_usd or 0),
@@ -251,37 +264,43 @@ def manual_status(db: Session, today: date) -> dict[str, Any]:
                                                                UsEarningsDate.report_date <= horizon))))
     return {"nyse_rows": nyse.get("rows", 0), "nyse_unverified": nyse.get("unverified", 0),
             "nyse_next": {"date": nxt.date.isoformat(), "name": nxt.name, "kind": nxt.kind} if nxt else None,
-            "macro_next_14_days": macro, "earnings_next_14_days": earn}
+            "macro_next_14d": macro, "earnings_next_14d": earn}
 
 
-def writers_view(db: Session, cfg: MarketReportConfig, settings: Settings, now: datetime) -> list[dict[str, Any]]:
-    out = []
+def writers_view(db: Session, cfg: MarketReportConfig, settings: Settings, now: datetime) \
+        -> dict[str, dict[str, Any] | None]:
+    """Per kind: the writer in use (``source``: picked in the back office or the env default) — ``None`` while the
+    blind test runs (盲測中, before the reveal no model is named). ``effective`` / ``tier``: after the budget tier."""
+    out: dict[str, dict[str, Any] | None] = {}
     in_trial = cfg.mode == "trial" and not _revealed(cfg)
     for kind in KINDS:
+        if in_trial:
+            out[kind] = None
+            continue
         tier = accounting.tier(db, kind, now, settings)
         chosen = rs.chosen_writer(db, kind, settings)
         effective = rs.apply_tier(chosen, tier)
-        out.append({"kind": kind, "kind_label": KIND_LABELS[kind], "trial": in_trial,
-                    "writer": None if in_trial else chosen.as_dict(),
-                    "picked": rs.Writer.parse((cfg.writers or {}).get(kind)) is not None,
-                    "effective": None if in_trial or effective is None else effective.as_dict(),
-                    "tier": tier, "tier_label": TIER_LABELS[tier]})
+        picked = rs.Writer.parse((cfg.writers or {}).get(kind)) is not None
+        out[kind] = {**chosen.as_dict(), "source": "admin" if picked else "default",
+                     "effective": None if effective is None else effective.as_dict(), "tier": tier}
     return out
 
 
 def slot_status(settings: Settings) -> dict[str, Any]:
+    """The reports' own key slot: ``slot`` None = none kept for them (the shared pool)."""
     from forliosa.ai.keypool import get_key_pool
     from forliosa.reports.calls import report_slot
 
     pool = get_key_pool()
     reserved = sorted(getattr(pool, "reserved", ()) or ())
     if not reserved:
-        return {"slot": None, "state": "shared", "text": "沒有專用金鑰，報告和會員共用金鑰池。"}
+        return {"slot": None, "status": "ok", "note": None}
     n = reserved[0]
     slot = pool.get(n)
     state = pool.state(slot) if slot is not None else "not_configured"
     usable = report_slot(pool) is not None
-    return {"slot": n, "state": state, "text": f"市場報告專用 #{n}" + ("" if usable else "（目前不能用，只發資料版）")}
+    return {"slot": n, "status": KEY_STATUS.get(state, "disabled"),
+            "note": None if usable else "目前不能用，只發資料版。"}
 
 
 def overview(db: Session, now: datetime | None = None, settings: Settings | None = None) -> dict[str, Any]:
@@ -293,24 +312,30 @@ def overview(db: Session, now: datetime | None = None, settings: Settings | None
     reports = {r.id: r for r in db.scalars(select(MarketReport).where(
         MarketReport.id.in_([r.report_id for r in runs])))} if runs else {}
     month = accounting.month_spend(db, now)
+    budget = Decimal(str(s.ai_mreport_monthly_budget_usd))
+    prog = trial_progress(db, s)
+    local = now.astimezone(TAIPEI)
     return {
-        "enabled": enabled(s), "mode": cfg.mode, "revealed_at": iso_taipei(_aware(cfg.revealed_at))
-        if cfg.revealed_at else None,
-        "trial_started_on": cfg.trial_started_on.isoformat() if cfg.trial_started_on else None,
+        "enabled": enabled(s), "mode": cfg.mode,
         "writers": writers_view(db, cfg, s, now),
-        "month": {"spent_usd": float(month), "budget_usd": s.ai_mreport_monthly_budget_usd,
-                  "tier": accounting.tier_of_spend(month, Decimal(str(s.ai_mreport_monthly_budget_usd))),
-                  "tier_label": TIER_LABELS[accounting.tier_of_spend(
-                      month, Decimal(str(s.ai_mreport_monthly_budget_usd)))]},
-        "trial": {"spent_usd": float(accounting.trial_spend(db)), "budget_usd": s.ai_mreport_trial_budget_usd,
-                  **trial_progress(db, s)},
+        "trial_running": cfg.mode == "trial" and not revealed and not prog["finished"],
+        "month": {"label": f"{local.year} 年 {local.month} 月", "spend_usd": round(float(month), 2),
+                  "budget_usd": float(s.ai_mreport_monthly_budget_usd),
+                  "tier": accounting.tier_of_spend(month, budget)},
+        "trial": {"spend_usd": round(float(accounting.trial_spend(db)), 2),
+                  "budget_usd": float(s.ai_mreport_trial_budget_usd),
+                  "days_done": prog["days_done"], "days_total": prog["days_total"],
+                  "weekly_done": prog["weekly_done"], "finished": prog["finished"],
+                  "started_on": cfg.trial_started_on.isoformat() if cfg.trial_started_on else None,
+                  "revealed_at": iso_taipei(_aware(cfg.revealed_at)) if cfg.revealed_at else None},
+        "key": slot_status(s),
         "runs": [_run_row(db, r, reports.get(r.report_id), revealed) for r in runs],
-        "manual": manual_status(db, now.astimezone(TAIPEI).date()),
-        "key_slot": slot_status(s),
+        "manual": manual_status(db, local.date()),
     }
 
 
 def put_config(db: Session, user: User, body: dict[str, Any], settings: Settings | None = None) -> dict[str, Any]:
+    """Answers the overview (it has ``mode`` and ``writers``) plus ``notice`` when switching to public."""
     s = settings or get_settings()
     cfg = rs.config(db, s)
     notice = None
@@ -347,57 +372,90 @@ def _variant_version(db: Session, report_id: str, label: str) -> MarketReportVer
                      .order_by(MarketReportVersion.version.desc()).limit(1))
 
 
-def _public_metrics(m: dict[str, Any], revealed: bool) -> dict[str, Any]:
-    keep = {k: v for k, v in (m or {}).items() if k not in ("cost_usd",)}
+METRIC_DEFAULTS: dict[str, Any] = {"policy_violations": 0, "subject_mismatches": 0, "inferred_dates": 0,
+                                   "dropped_sections": 0, "revised": False, "data_only": False, "on_time": False,
+                                   "seconds": None, "fallback_used": False, "refusal_category": None}
+
+
+def _public_metrics(m: dict[str, Any], revealed: bool) -> dict[str, Any] | None:
+    """TrialMetrics: every key there (a run that stopped early lacks some); ``cost_usd`` only after the reveal."""
+    if not m:
+        return None
+    keep = {**METRIC_DEFAULTS, **{k: v for k, v in m.items() if k != "cost_usd"}}
     if revealed:
-        keep["cost_usd"] = (m or {}).get("cost_usd")
+        keep["cost_usd"] = m.get("cost_usd")
     return keep
 
 
-def trial_list(db: Session, user: User) -> list[dict[str, Any]]:
-    cfg = rs.config(db)
+def _writer(w: dict[str, Any] | None) -> dict[str, Any] | None:
+    return {"model": w.get("model"), "effort": w.get("effort")} if w else None
+
+
+def trial_list(db: Session, user: User, settings: Settings | None = None) -> dict[str, Any]:
+    s = settings or get_settings()
+    cfg = rs.config(db, s)
     revealed = _revealed(cfg)
     out = []
-    for r in db.scalars(select(MarketReport).where(MarketReport.trial.is_(True))
-                        .order_by(MarketReport.edition_date.desc(), MarketReport.kind)):
+    for r in db.scalars(select(MarketReport).where(MarketReport.trial.is_(True))):
         vote = db.get(MarketReportVote, (r.id, user.id))
         variants = []
         for label in pipeline.VARIANTS:
-            runs = [x for x in pipeline.runs_of(db, r.id, label)]
+            runs = pipeline.runs_of(db, r.id, label)
             if not runs:
+                variants.append({"label": label, "status": "pending", "attempts": 0, "finished_at": None,
+                                 "on_time": None, "published": False, "problems": None, "metrics": None})
                 continue
             last = runs[-1]
+            running = last.status == "running"
             v = _variant_version(db, r.id, label)
             row = {"label": label, "status": last.status, "attempts": len(runs),
                    "finished_at": iso_taipei(_aware(last.finished_at)) if last.finished_at else None,
-                   "on_time": bool((last.metrics or {}).get("on_time")), "published": v is not None,
+                   "on_time": None if running else bool((last.metrics or {}).get("on_time")),
+                   "published": v is not None,
                    "problems": len((v.validation or {}).get("first") or []) if v else None,
-                   "metrics": _public_metrics(last.metrics or {}, revealed)}
+                   "metrics": None if running else _public_metrics(last.metrics or {}, revealed)}
             if revealed:
-                row["writer"] = last.writer
+                row["writer"] = _writer(last.writer)
             variants.append(row)
         out.append({"report_id": r.id, "kind": r.kind, "kind_label": KIND_LABELS[r.kind],
                     "edition_date": r.edition_date.isoformat(),
                     "edition_label": assemble.edition_label(r.kind, r.edition_date, (r.period_start, r.period_end)),
                     "closed": r.closed_at is not None, "variants": variants,
                     "my_vote": {"preferred": vote.preferred, "note": vote.note} if vote else None})
-    return out
+    out.sort(key=lambda x: (x["edition_date"], -KIND_ORDER[x["kind"]], x["report_id"]), reverse=True)
+    prog = trial_progress(db, s)
+    return {"days_done": prog["days_done"], "days_total": prog["days_total"], "weekly_done": prog["weekly_done"],
+            "finished": prog["finished"], "reports": out,
+            "reveal": _reveal_summary(db, cfg, prog) if revealed else None}
 
 
 def variant(db: Session, report_id: str, label: str) -> dict[str, Any]:
+    """The admin form of a variant; 409 ``variant_running`` while it is still being written."""
     r = db.get(MarketReport, report_id)
     v = _variant_version(db, report_id, label) if r else None
-    if r is None or v is None:
-        raise not_found("這個版本還沒有產生")
+    if r is None:
+        raise not_found(NOT_FOUND)
+    if v is None:
+        runs = pipeline.runs_of(db, report_id, label)
+        if runs and runs[-1].status == "running":
+            raise ApiError(409, "variant_running", "這個版本還在寫，寫好再來看。")
+        raise not_found("這個版本沒有產生（沒有跑，或只發了資料版）。")
     cfg = rs.config(db)
     out = dict(v.payload or {})
     out["variant"] = label
     val = v.validation or {}
-    out["validation"] = {"first": val.get("first") or [], "revised": val.get("revised") or [],
-                         "dropped": val.get("dropped") or {}, "check_ran": bool(val.get("check_ran")),
+    run = db.get(MarketReportRun, v.run_id) if v.run_id else None
+    revised = bool((run.metrics or {}).get("revised")) if run is not None else bool(val.get("revised"))
+    first = [{"code": p.get("code", ""), "path": p.get("path", "")} for p in val.get("first") or []]
+    final = [{"code": p.get("code", ""), "path": p.get("path", "")} for p in val.get("revised") or []] \
+        if revised else first
+    out["validation"] = {"first_problems": first, "final_problems": final,
+                         "dropped": [{"section": k, "reasons": list(x)} for k, x in (val.get("dropped") or {}).items()],
+                         "revised": revised, "compliance_ran": bool(val.get("check_ran")),
+                         "mentions_anthropic": bool(val.get("mentions_anthropic")),
                          "counts": val.get("counts") or {}}
     if _revealed(cfg):
-        out["writer"] = v.writer
+        out["writer"] = _writer(v.writer)
     return out
 
 
@@ -421,63 +479,68 @@ def vote(db: Session, user: User, report_id: str, preferred: str, note: str) -> 
 PASS = {"policy_violations": 0, "per_report_mismatch": 1, "dropped_avg": 1.0, "on_time": 0.8}
 
 
+def _reveal_summary(db: Session, cfg: MarketReportConfig, prog: dict[str, Any]) -> dict[str, Any]:
+    """Per report kind × writer setting (contract §17.4): the last attempt of each edition and variant."""
+    reports = {r.id: r for r in db.scalars(select(MarketReport).where(MarketReport.trial.is_(True)))}
+    votes = list(db.scalars(select(MarketReportVote).where(MarketReportVote.report_id.in_(list(reports)))))
+    final: dict[tuple[str, str | None], MarketReportRun] = {}
+    for run in db.scalars(select(MarketReportRun).where(MarketReportRun.report_id.in_(list(reports)),
+                                                        MarketReportRun.purpose == "trial")
+                          .order_by(MarketReportRun.attempt)):
+        final[(run.report_id, run.variant)] = run
+    kinds = []
+    for kind in KINDS:
+        order = [f"{m}|{e}" for m, e in (pipeline.TRIAL_WEEKLY if kind == "weekly" else pipeline.TRIAL_DAILY)]
+        groups: dict[str, list[MarketReportRun]] = {k: [] for k in order}
+        for (rid, _label), run in final.items():
+            if reports[rid].kind == kind:
+                groups.setdefault(f"{(run.writer or {}).get('model', '')}|{(run.writer or {}).get('effort', '')}",
+                                  []).append(run)
+        rows = []
+        for key, runs in groups.items():
+            model, effort = key.split("|", 1)
+            ms = [r.metrics or {} for r in runs if r.status not in ("skipped_budget", "running")]
+            n = len(ms) or 1
+            mine = {(r.report_id, r.variant) for r in runs}
+            row = {"writer": {"model": model, "effort": effort}, "reports": len(ms),
+                   "votes": sum(1 for v in votes if (v.report_id, v.preferred) in mine),
+                   "policy_violations": sum(int(m.get("policy_violations") or 0) for m in ms),
+                   "subject_mismatches": sum(int(m.get("subject_mismatches") or 0) for m in ms),
+                   "inferred_dates": sum(int(m.get("inferred_dates") or 0) for m in ms),
+                   "dropped_sections": sum(int(m.get("dropped_sections") or 0) for m in ms),
+                   "on_time_rate": round(sum(1 for m in ms if m.get("on_time")) / n, 2),
+                   "data_only": sum(1 for m in ms if m.get("data_only")),
+                   "avg_cost_usd": round(sum(float(m.get("cost_usd") or 0) for m in ms) / n, 3),
+                   "avg_seconds": round(sum(float(m.get("seconds") or 0) for m in ms) / n, 1),
+                   "fallbacks": sum(1 for m in ms if m.get("fallback_used"))}
+            row["passed"] = bool(ms) and row["policy_violations"] == 0 and all(
+                int(m.get("subject_mismatches") or 0) + int(m.get("inferred_dates") or 0)
+                <= PASS["per_report_mismatch"] for m in ms) \
+                and row["dropped_sections"] / n <= PASS["dropped_avg"] \
+                and row["on_time_rate"] >= PASS["on_time"] and row["data_only"] == 0
+            rows.append(row)
+        passing = [r for r in rows if r["passed"]]
+        best = min(passing, key=lambda r: r["avg_cost_usd"]) if passing else None
+        kinds.append({"kind": kind, "kind_label": KIND_LABELS[kind], "rows": rows,
+                      "suggested": dict(best["writer"]) if best else None})
+    return {"revealed_at": iso_taipei(_aware(cfg.revealed_at)) if cfg.revealed_at else None,
+            "complete": prog["finished"], "kinds": kinds,
+            "note": "建議：每種報告挑過關的設定裡平均花費最低的；票數列在旁邊。"
+                    "選好後在「撰寫設定」存下，再把模式切到對全站公開。"}
+
+
 def reveal(db: Session, user: User, force: bool = False, settings: Settings | None = None) -> dict[str, Any]:
     s = settings or get_settings()
     cfg = rs.config(db, s)
     prog = trial_progress(db, s)
-    done = prog["daily_done"] >= prog["daily_total"] and prog["weekly_done"] >= prog["weekly_total"]
-    if not done and not force:
+    if not prog["finished"] and not force:
         raise ApiError(409, "trial_not_done",
                        f"盲測還沒做完（{prog['daily_done']}/{prog['daily_total']} 份日報、"
-                       f"週報 {prog['weekly_done']}/{prog['weekly_total']}）。")
-    reports = {r.id: r for r in db.scalars(select(MarketReport).where(MarketReport.trial.is_(True)))}
-    votes = list(db.scalars(select(MarketReportVote).where(MarketReportVote.report_id.in_(list(reports)))))
-    groups: dict[tuple[str, str, str], list[MarketReportRun]] = {}
-    for run in db.scalars(select(MarketReportRun).where(MarketReportRun.report_id.in_(list(reports)),
-                                                        MarketReportRun.purpose == "trial")):
-        report = reports[run.report_id]
-        kind = "weekly" if report.kind == "weekly" else "daily"
-        groups.setdefault((kind, run.writer.get("model", ""), run.writer.get("effort", "")), []).append(run)
-    rows = []
-    for (kind, model, effort), runs in sorted(groups.items()):
-        final = {}
-        for run in runs:  # the last attempt of each edition and variant
-            final[(run.report_id, run.variant)] = run
-        runs = list(final.values())
-        ms = [r.metrics or {} for r in runs if r.status != "skipped_budget"]
-        n = len(ms) or 1
-        mine = {(r.report_id, r.variant) for r in runs}
-        vote_count = sum(1 for v in votes if (v.report_id, v.preferred) in mine)
-        row = {"kind": kind, "model": model, "effort": effort, "editions": len(ms), "votes": vote_count,
-               "policy_violations": sum(int(m.get("policy_violations") or 0) for m in ms),
-               "subject_mismatches": sum(int(m.get("subject_mismatches") or 0) for m in ms),
-               "inferred_dates": sum(int(m.get("inferred_dates") or 0) for m in ms),
-               "dropped_sections_avg": round(sum(int(m.get("dropped_sections") or 0) for m in ms) / n, 2),
-               "on_time_rate": round(sum(1 for m in ms if m.get("on_time")) / n, 2),
-               "data_only": sum(1 for m in ms if m.get("data_only")),
-               "cost_avg_usd": round(sum(float(m.get("cost_usd") or 0) for m in ms) / n, 3),
-               "seconds_avg": round(sum(float(m.get("seconds") or 0) for m in ms) / n, 1),
-               "fallbacks": sum(1 for m in ms if m.get("fallback_used"))}
-        row["passes"] = bool(ms) and row["policy_violations"] == 0 and all(
-            int(m.get("subject_mismatches") or 0) + int(m.get("inferred_dates") or 0) <= PASS["per_report_mismatch"]
-            for m in ms) and row["dropped_sections_avg"] <= PASS["dropped_avg"] \
-            and row["on_time_rate"] >= PASS["on_time"] and row["data_only"] == 0
-        rows.append(row)
-    suggestion = {}
-    for kind in ("daily", "weekly"):
-        passing = [r for r in rows if r["kind"] == kind and r["passes"]]
-        if passing:
-            best = min(passing, key=lambda r: r["cost_avg_usd"])
-            suggestion[kind] = {"model": best["model"], "effort": best["effort"]}
-        else:
-            suggestion[kind] = None
+                       f"週報 {prog['weekly_count']}/{prog['weekly_total']}）。")
     if cfg.revealed_at is None:
         cfg.revealed_at, cfg.updated_by = now_utc(), user.id
         db.commit()
-    return {"revealed_at": iso_taipei(_aware(cfg.revealed_at)), "complete": done, "rows": rows,
-            "suggestion": suggestion,
-            "note": "建議：每種報告挑過關的設定裡平均花費最低的；票數列在旁邊。"
-                    "選好後在「撰寫設定」存下，再把模式切到對全站公開。"}
+    return _reveal_summary(db, cfg, prog)
 
 
 # -- admin: corrections and rebuilding ----------------------------------------------------------------------------
@@ -498,9 +561,8 @@ def correction(db: Session, user: User, report_id: str, note: str, drop_sections
             sec = {**sec, "dropped": {"reasons": ["更正"]}}
         sections.append(sec)
     payload["sections"] = sections
-    t = now.astimezone(TAIPEI)
-    line = f"已更正（{t.month}/{t.day} {t:%H:%M}）：{note}"
-    payload["corrections"] = [*(payload.get("corrections") or []), {"at": iso_taipei(now), "note": line}]
+    # ``note`` is the note alone: the page writes 「已更正（11/18 09:10）：…」 from ``at``
+    payload["corrections"] = [*(payload.get("corrections") or []), {"at": iso_taipei(now), "note": note}]
     payload["edition"] = "correction"
     v = pipeline.new_version(db, r, edition="correction", payload=payload, now=now, writer=cur.writer,
                              run_id=cur.run_id, validation=cur.validation, based_on=cur.id, correction_note=note)

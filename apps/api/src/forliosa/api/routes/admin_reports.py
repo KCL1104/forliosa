@@ -50,8 +50,9 @@ def put_config(body: ReportsConfigIn, user: User = Depends(site_admin), db: Sess
     return svc.put_config(db, user, raw)
 
 
-@router.get("/market-reports/trial", summary="盲測：每一份的 A／B／C 狀態與我的票")
-def trial(user: User = Depends(site_admin), db: Session = Depends(get_db)) -> list[dict[str, Any]]:
+@router.get("/market-reports/trial",
+            summary="盲測：進度、每一份的 A／B／C 狀態與我的票；揭曉後附上彙總（reveal）")
+def trial(user: User = Depends(site_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
     return svc.trial_list(db, user)
 
 
@@ -67,7 +68,7 @@ def rebuild(body: RebuildIn, db: Session = Depends(get_db)) -> dict[str, Any]:
 
 @router.get("/market-reports/{report_id}/variants/{label}",
             summary="盲測的一個版本（管理員形式：MarketReport 加上每句 refs、被刪的段 dropped、檢查結果 validation；"
-                    "揭曉後才有 writer）")
+                    "揭曉後才有 writer）。還在寫時 409 variant_running")
 def variant(report_id: str, label: Literal["A", "B", "C"], db: Session = Depends(get_db)) -> dict[str, Any]:
     return svc.variant(db, report_id, label)
 
