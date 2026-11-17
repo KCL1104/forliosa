@@ -393,7 +393,9 @@
 | GET | `/meta/attributions` | `{policy, notice: [授權條款第 2、3 點], datasets: [{key, agency, dataset, url, used_for, year, license, license_url, commercial, attribution}], not_used: [...]}`（不需登入） |
 
 - `/portfolio/upcoming` 的 `type: "recurring"`：扣款日遇非交易日順延（證交所休市日），多 `plan_id`、`account_id`、`scheduled_date`；`amount_estimate` 為扣款金額。
-- `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集第一次出現的日期），查不到才用法定期限並標 `estimated: true`。
+- `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集或季報資料集第一次出現的日期；第一次出現只算已經存過這家公司較早期間、而且這一期比較新的情況，新上市、上櫃轉上市的公司帶進來的那一期不算），查不到才用法定期限：
+  - **還沒到的期限**：`estimated: true`，標題「2026Q4 財報公布期限（預估）」「11 月營收公布期限（預估）」。
+  - **已經過了的期限**（2026-11-17 起）**一律不是預估**：手上有那一期的資料（存檔的季報、月營收，或 shioaji-data 的官方檔）就當作已公布，`estimated: false`，標題和實際日期的一樣（「2026Q3 財報公布」「10 月營收公布」），日期放在法定期限，`detail` 寫數字並說明「（實際公布日不明，日期是法定期限）」，例如「前三季每股虧損 1.78 元（實際公布日不明，日期是法定期限）」「10 月營收 1,977 千元，年增 42.2%（實際公布日不明，日期是法定期限）」；`sources` 是 `Forliosa 規則計算`＋資料來源。沒有任何資料證明已公布的過去期限**不列出**。
 - `/instruments/{symbol}/news`：官方公告（重大訊息、證交所新聞），每筆多 `category: "material_info" | "exchange_news" | "media"`，官方公告的 `source` 是 `"公告"`。
   媒體新聞（`category: "media"`）見下方「新聞報導（2026-11-12）」。
 - `POST /transactions` 的 `source` 可為 `"ai_draft"`。

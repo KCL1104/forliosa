@@ -340,7 +340,10 @@ def _pick(r: dict[str, Any], fields: dict[str, tuple[str, ...]]) -> dict[str, st
 
 
 def parse_statements(rows: list[dict[str, Any]], kind: str) -> list[dict[str, Any]]:
-    """t187ap06 (kind income_ytd) / t187ap07 (kind balance) rows -> [{code, period, kind, values}]."""
+    """t187ap06 (kind income_ytd) / t187ap07 (kind balance) rows -> [{code, period, kind, values, published}].
+
+    ``published`` is the file's 出表日期 (TWSE) / Date (TPEx): the day the whole file was produced, the same for every
+    row — there is no per-company filing date (the archive records the day a company's quarter first appears)."""
     fields = _INCOME_FIELDS if kind == "income_ytd" else _BALANCE_FIELDS
     out = []
     for raw in rows:
@@ -352,8 +355,31 @@ def parse_statements(rows: list[dict[str, Any]], kind: str) -> list[dict[str, An
         values = _pick(r, fields)
         if all(v is None for v in values.values()):
             continue
-        out.append({"code": code, "period": period, "kind": kind, "values": values})
+        out.append({"code": code, "period": period, "kind": kind, "values": values,
+                    "published": parse_tw_date(r.get("出表日期") or r.get("Date"))})
     return out
+
+
+def revenue_text(month: int, revenue: int | None, yoy_pct: Decimal | None) -> str:
+    """「10 月營收 1,977 千元，年增 42.2%」(「年減 27.0%」 for a fall): the detail of a monthly revenue release."""
+    text = f"{month} 月營收 {revenue:,} 千元" if revenue is not None else f"{month} 月營收"
+    if yoy_pct is not None:
+        pct = (Decimal(str(yoy_pct)) * 100).quantize(Decimal("0.1"))
+        text += f"，年{'減' if pct < 0 else '增'} {abs(pct)}%"
+    return text
+
+
+_YTD_LABEL = {"1": "第一季", "2": "上半年", "3": "前三季", "4": "全年"}
+
+
+def eps_text(period: str, eps: Any) -> str | None:
+    """「前三季每股虧損 1.78 元」「全年每股盈餘 12.3 元」: the year-to-date basic EPS a quarterly report states
+    (``None`` without one). The OpenAPI statements and shioaji-data's ``income_ytd`` are both year-to-date."""
+    d = parse_decimal(eps)
+    label = _YTD_LABEL.get(period[-1:]) if len(period) == 6 else None
+    if d is None or not d.is_finite() or label is None:
+        return None
+    return f"{label}每股{'虧損' if d < 0 else '盈餘'} {abs(d).normalize():f} 元"
 
 
 def parse_profit_analysis(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
