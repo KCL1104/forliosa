@@ -183,6 +183,14 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
             "指數收盤（含發行量加權股價報酬指數，績效基準 ^TAIEXTR）"),
     Dataset("twse-openapi/total_return", TWSE, "發行量加權股價報酬指數", f"{TWSE_API}/indicesReport/MFI94U",
             "績效基準 ^TAIEXTR（第一次存檔回補本月）"),
+    # 市場報告 (2026-11-17): the same TWSE OpenAPI and licence basis as the datasets above (open-data-inventory: both
+    # licence columns ✓; the swagger lists all three).
+    Dataset("twse-openapi/turnover", TWSE, "集中市場每日市場成交資訊", f"{TWSE_API}/exchangeReport/FMTQIK",
+            "市場報告：上市成交量值、成交筆數（本月每日）"),
+    Dataset("twse-openapi/index_ohlc", TWSE, "發行量加權股價指數歷史資料", f"{TWSE_API}/indicesReport/MI_5MINS_HIST",
+            "加權指數每日開盤、最高、最低（本月）"),
+    Dataset("twse-openapi/altered_trading", TWSE, "集中市場證券變更交易", f"{TWSE_API}/exchangeReport/TWT85U",
+            "市場報告：排行排除變更交易（全額交割）的股票"),
     Dataset("twse-openapi/dividend_resolution", TWSE, "上市公司股利分派情形", f"{TWSE_API}/opendata/t187ap45_L",
             "董事會／股東會決議的股利（盈餘、法定盈餘公積、資本公積分列）"),
     Dataset("twse-openapi/company", TWSE, "上市公司基本資料", f"{TWSE_API}/opendata/t187ap03_L",
@@ -322,6 +330,9 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "archive": ("Forliosa 自建存檔（證交所、櫃買中心開放資料）", True),
     "ledger": ("帳本紀錄", True),
     "rules": ("Forliosa 規則計算", True),
+    # 市場報告's hand-kept tables (NYSE holidays, macro calendar, US earnings dates): every row links to the official
+    # page it was copied from; those pages are never fetched.
+    "manual-calendar": ("Forliosa 自行整理的行事曆（每列連回官方頁面）", True),
     "demo": ("示範資料（模擬）", True),
     "finmind": ("FinMind" + NON_COMMERCIAL_SUFFIX, False),
     "yahoo": ("Yahoo Finance" + NON_COMMERCIAL_SUFFIX, False),

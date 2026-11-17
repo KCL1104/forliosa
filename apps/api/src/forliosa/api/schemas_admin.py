@@ -38,6 +38,8 @@ class AdminKeySlot(BaseModel):
     monthly_budget_usd: float | None
     threads: int = Field(description="黏在這把金鑰上的對話數")
     last_error: str | None = Field(description="最近一次失敗的狀態碼與錯誤類型（例如 \"429 rate_limit_error\"）")
+    purpose: Literal["market_reports"] | None = Field(
+        default=None, description="保留給哪個工作：market_reports＝市場報告專用（AI_MREPORT_KEY_SLOT），null＝共用")
 
 
 class AdminAi(BaseModel):

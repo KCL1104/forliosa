@@ -143,11 +143,13 @@ def roomy_ai_quota(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def builtin_calendar():
-    """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests."""
-    from forliosa.timeutil import set_official_holidays
+    """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests (nor the NYSE
+    holidays a market-report test loads)."""
+    from forliosa.timeutil import set_official_holidays, set_us_calendar
 
     yield
     set_official_holidays([], [])
+    set_us_calendar([])
 
 
 @pytest.fixture(scope="session")

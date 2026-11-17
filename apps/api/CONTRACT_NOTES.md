@@ -2786,3 +2786,52 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 上櫃 6488）→ 已公布、每股盈餘；過去沒有證據 → 不列；還沒到 → 照舊預估；重大訊息的實際日期不受影響（2382）；shioaji-data 的季報與月營收也算證據；
 季報第一次出現（2026Q4，出表日期 3/30）→ 用那天、不是 3/31，重跑不改日期；第一次跑不寫；`revenue_text`／`eps_text` 的寫法。
 審查修正（2026-11-17）：新上市公司 12/4 才進季報資料集 → 不寫第一次出現、事件是 11/14＋實際公布日不明，下一季才有日期；上櫃轉上市（6488）→ 同上；第一次跑時券商業季報資料集失敗、隔天成功（6016）→ 不寫；新上市與轉上市公司的月營收 → `backlog`，下個月才有日期；舊寫法「年增 -27.0%」的列 → 事件顯示「年減 27.0%」。
+
+
+## 2026-11-17 市場報告第 0 階段（`forliosa.reports` 的資料包與基礎設施）
+
+依市場報告合約（scratchpad `market-reports/build/contract.md`）做第一部分：價格與記帳、呼叫方式、設定、資料表、
+手動表、資料補強、類股修正、三種報告的資料包與圖表資料。撰寫、檢查、發布、推播、API、前端是下一部分。和合約不同或合約沒寫清楚的地方：
+
+- **價格表**（`ai/pricing.py`）：照合約的 7 個模型。不認得的模型 `price_of` 會丟 `UnknownModelPrice`；記帳
+  （`store.record_usage`、smoke）改用 `pricing.charge`：照最貴的價錢（目前 Fable 5.2）記，並寫 error log。
+  `DEFAULT_PRICE` 已刪。
+- **呼叫方式放在新模組 `reports/calls.py`**（合約的檔案清單沒有）：`request()` 組參數（不送 `thinking`、不准 prefill、
+  effort 一律寫在 `output_config`、Haiku 不加 fallbacks）、`create()`／`stream()`、`web_search_tool()`（`web_search_20260318`＋
+  `allowed_callers:["direct"]`＋`REPORT_SEARCH_DOMAINS`）、`stop_info()`、`report_slot()`（合約放在 pipeline，這裡先做好給下一部分用）。
+  合約 §21 的退路已經寫好：API 對「fallbacks＋structured output」回 400 時，同一個請求拿掉 fallbacks 重送一次，之後同一模型的
+  structured 請求就不加（log warning）。已用 SDK 2.8.0＋假 API 驗證請求內容（`tests/reports/test_calls.py`）；真的 API 是否接受
+  兩者並用仍未確認。
+- **專用金鑰 slot**：只有在 `CLAUDE_API_KEY_4` 存在**而且還有別把 key** 時才保留給報告；只有一把 key 時不保留（不能讓會員沒 key 用）。
+  `KeyPool.status()` 每列多 `purpose`（`"market_reports"` 或 null），`/admin/overview` 的 AI 金鑰列表也多這個欄位。
+- **`timing.available_at` 的一個等價規則**：證交所 OpenAPI 的收盤與指數（隔天清晨）和當天下午下載檔（`twse-opendata`，14:00）
+  是同一份官方數字；`TWSE_OPENDATA_CLOSE` 開著時，OpenAPI 的列當成 14:00 可用，否則隔天補做的盤後報告會完全沒有上市收盤。
+  只有 OpenAPI 才有的資料（FMTQIK、MI_5MINS_HIST、MFI94U）照舊隔天 05:45。不認得的資料集一律當隔天清晨（並記 log）。
+- **TWT85U 的實際欄位**（2026-11-17 打過一次，swagger 一致）：`Code`、`Name`、`PeriodicCallAuctionTrading`（`**` 表示分盤集合競價），
+  **沒有日期也沒有原因**。所以 `market_events.altered_trading` 的 `date` 是第一次看到的那天、離開清單那天寫 `end_date`（不含當天）；
+  第一次存檔的列標 `backlog`（真正開始日不明，判斷「當天有效」時視為早就開始）。回空清單時不結束任何一列（怕是故障）。
+- **MI_5MINS_HIST**：欄位 `Date`、`OpeningIndex`、`HighestIndex`、`LowestIndex`、`ClosingIndex`（本月每天），只補已經存了的加權指數列的
+  開高低，不新增列、不改收盤與漲跌。
+- **FMTQIK**：`Date`、`TradeVolume`、`TradeValue`、`Transaction`、`TAIEX`、`Change`（本月每天）→ `market_turnover_daily`。G1 加權指數線
+  在 `index_daily` 缺的日子用 FMTQIK 的 `TAIEX` 補（同一份官方數字，隔天清晨可用）。
+- **晚上的融資與外資前 20 檔**（memo 第 0 階段要量的事）：2026-11-17 13:27 量到 MI_MARGN 與 MI_QFIIS_sort_20 的最後更新都是當天 05:2x，
+  和其他證交所 OpenAPI 一樣是清晨一批。還沒在晚上量過（要 21:00 後跑 `python -m forliosa.reports probe-dates`）。先做了保護：
+  晚上讀到、要標成當天的檔，若抽樣 50 列和前一個交易日已存的數字完全一樣，就不寫（`Archiver._still_previous`，log info）。
+  報告本身不用這兩個資料集（`missing.margin_amount`），`available_at` 也先用隔天 05:45。期交所晚上有沒有當天資料：檔案有日期欄，
+  存檔不會標錯；晚上沒更新的話，06:45 多跑的那一次（`premarket_archive` 含 `taifex`）會補進來，07:00 的盤前趕得上。
+- **SMH 與 TSM**：兩檔都在 `us_prices.REPORT_US_SYMBOLS`，一律向 Databento 抓。`catalog.py` 只加 SMH（標成 ETF）；TSM 沒加：
+  SEC 的代號表本來就有它，內建一列會讓「台積」的搜尋出現美股、讓「TS」排在台積電前面（既有測試擋下）。報告自己把它寫成「台積電 ADR」。
+- **`/admin/overview` 的 AI 金鑰列**多 `purpose`（`AdminKeySlot`；`market_reports` 或 null），前端可以先不顯示。
+- **商品類別**：`00…A`（主動式 ETF，例如 00981A）也算 ETF（合約的規則沒列 A）。存託憑證（產業別 91，例如 9110 越南控-DR）不算普通股。
+- **個股名單**：成交值前 10 照合約只限上市普通股，沒有排除創新板（合約只對漲跌幅排行列了排除項）。週報的週排行沒有「漲跌停很多時」的改寫。
+- **G5 比較線**用聊天的 `compare_chart`（會讀到今天），所以只畫最近 3 天內的報告；更早的回補報告不畫 G5（選單標 available:false）。
+- **週報**：「回顧週最後一天」用存檔裡最後一個有上市收盤的交易日；整週都沒有存檔時是短版（只有下週行事曆與國際），
+  `notes` 寫 `week_not_archived`。全週成交金額要每個交易日都有資料才寫（FMTQIK 優先，否則自己加總並標估算）。
+- **行事曆**只列股票、ETF、REIT、特別股的事件（可轉債、權證代號如 24552 不列）；名字從公司簡稱或商品主檔補。
+- **種子資料**：`www.nyse.com`、ICE 新聞稿與官方總經頁在這個沙盒都打不開。NYSE 表依 NYSE Group 2025-12-23 新聞稿在搜尋結果裡的內容
+  寫入 2026-11-26 到 2027 年底 15 列（2027 年 10 個休市日、1 個提早收盤；勞動節 9/6 與感恩節 11/25 依規則推算並符合列數），
+  **每一列 `verified_at` 都是空的**，管理員要在 NYSE 官網逐列核對。總經行事曆與美股財報日沒有核對過的列，種子是空的。
+- **CLI**：`seed`、`status`、`pack`、`probe-dates` 已有；`data`、`run`（要組裝與撰寫）留給下一部分。
+- **資料包形狀**和合約 §6.1 一致，另外多 `kind_label`、`edition_label`、`notes`、每個類股的 `rank` 與 `concentration_text`、
+  行事曆列的 `fold` 與 `note`；`blocks` 另外回傳 `charts`（G1–G7，盤前的前一日類股與漲跌家數是 `G2_prev`、`G4_prev`）、`tables`
+  （`T2_top10`、`T2_gainers`、`T2_losers`、`T2_value`、`T3`、`T_evening`）、`numbers`、`calendar`、`notes`。

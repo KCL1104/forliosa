@@ -272,3 +272,32 @@ def test_logs_and_status_never_contain_keys(caplog):
                                                          "month_calls": 3, "monthly_budget_usd": 20.0,
                                                          "budget_remaining_usd": 18.5, "retry_in_seconds": None}
     assert by_slot[3] == {**by_slot[3], "configured": False, "state": "not_configured", "monthly_budget_usd": 5.0}
+    assert all(row["purpose"] is None for row in status)
+
+
+def test_the_market_reports_slot_is_kept_out_of_routing(monkeypatch, ai_env):
+    """CLAUDE_API_KEY_4 (AI_MREPORT_KEY_SLOT, 2026-11-17): reserved for the market reports — never ranked or routed,
+    even for a thread pinned to it earlier; ``call(only=4)`` still uses it. Without that key nothing is reserved."""
+    for k in list(__import__("os").environ):
+        if k.upper().startswith("CLAUDE_API_KEY_") or k == "ANTHROPIC_API_KEY":
+            monkeypatch.delenv(k)
+    monkeypatch.chdir(__import__("tempfile").mkdtemp())  # no .env here
+    monkeypatch.setenv("CLAUDE_API_KEY_1", "sk-one")
+    monkeypatch.setenv("CLAUDE_API_KEY_4", "sk-four")
+    ai_env()
+    pool = build_pool()
+    assert pool.reserved == frozenset({4})
+    assert [s.index for s in pool.ranked()] == [1]
+    assert pool.route(pinned=4).slot.index == 1  # a thread pinned to 4 moves to a shared slot
+    fake = FakeAnthropic().reply(text("ok"))
+    reserved = KeyPool.from_keys([(1, "sk-one"), (4, "sk-four")], client_factory=fake.client,
+                                 reserved=frozenset({4}), sleep=lambda _s: None)
+    _, slot = reserved.call(lambda c: c.messages.create(model="claude-haiku-5-5", max_tokens=10,
+                                                             messages=[{"role": "user", "content": "hi"}]), only=4)
+    assert slot == 4 and fake.keys_used == ["sk-four"]
+    with pytest.raises(NoKeyAvailable):
+        KeyPool.from_keys([(4, "sk-four")], client_factory=fake.client, reserved=frozenset({4})).route(pinned=None)
+    status = {s["slot"]: s for s in reserved.status()}
+    assert status[4]["purpose"] == "market_reports" and status[1]["purpose"] is None
+    monkeypatch.delenv("CLAUDE_API_KEY_4")
+    assert build_pool().reserved == frozenset()

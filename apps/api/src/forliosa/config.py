@@ -7,11 +7,17 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
 
-from pydantic import Field, SecretStr, field_validator
+from pydantic import Field, SecretStr, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 API_ROOT = Path(__file__).resolve().parents[2]  # apps/api
 DEFAULT_SESSION_SECRET = "dev-insecure-session-secret-change-me"
+# 市場報告: the models each step may use (``Settings._report_model``; contract 2026-11-17 §3.1)
+MREPORT_MODELS: dict[str, tuple[str, ...]] = {
+    "ai_mreport_gather_model": ("claude-sonnet-5-5", "claude-haiku-5-5"),
+    "ai_mreport_write_model": ("claude-opus-5-5", "claude-sonnet-5-5"),
+    "ai_mreport_check_model": ("claude-haiku-5-5",),
+}
 # The private SearXNG (deploy/searxng): the Railway service named ``searxng`` / the local compose service.
 SEARXNG_URL_RAILWAY = "http://searxng.railway.internal:8080"
 SEARXNG_URL_LOCAL = "http://localhost:8080"
@@ -215,6 +221,35 @@ class Settings(BaseSettings):
     # paragraph until next month.
     group_daily_enabled: bool = True
     ai_group_daily_monthly_budget_usd: float = Field(default=5.0, ge=0)
+    # 市場報告 (盤前重點、盤後重點、市場週報; ``forliosa.reports``; 產品負責人 2026-11-17 照建議). One shared report
+    # per edition for signed-in users; a blind test with three writer settings for the first 5 trading days (site
+    # admins only). Off = the worker schedules nothing, the API says none is available, the admin page says it is off.
+    market_reports_enabled: bool = False
+    # Only used when the ``market_report_config`` row is first created; afterwards the admin page switches the mode.
+    market_reports_initial_mode: Literal["trial", "public", "paused"] = "trial"
+    # Models and effort (validated below: only these models, and each must have a price row).
+    ai_mreport_gather_model: str = "claude-sonnet-5-5"  # sonnet-5-5 | haiku-5-5 (web search, one call per topic)
+    ai_mreport_gather_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    ai_mreport_write_model: str = "claude-opus-5-5"  # opus-5-5 | sonnet-5-5
+    ai_mreport_write_effort: Literal["low", "medium", "high", "xhigh", "max"] = "high"  # 盤前、盤後
+    ai_mreport_write_effort_weekly: Literal["low", "medium", "high", "xhigh", "max"] = "high"  # 市場週報
+    ai_mreport_check_model: str = "claude-haiku-5-5"  # haiku-5-5 only (the compliance read)
+    ai_mreport_check_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
+    ai_mreport_fallbacks: bool = True  # server-side fallbacks (``fallbacks: "default"``) on gather and write calls
+    ai_mreport_timeout_seconds: float = Field(default=900.0, gt=0)  # one streamed write call
+    # The reports' own month (Taipei), charged to no member or group. NOTE: 0 here means "data-only editions, no model
+    # call" — the opposite of the other budgets, where 0 means no limit.
+    ai_mreport_monthly_budget_usd: float = Field(default=80.0, ge=0)
+    ai_mreport_trial_budget_usd: float = Field(default=45.0, ge=0)  # the whole blind test (every variant's calls)
+    ai_mreport_trial_days: int = Field(default=5, ge=1, le=20)  # Taiwan trading days of blind-test daily editions
+    ai_mreport_run_alarm_usd: float = Field(default=3.0, gt=0)  # one attempt above this: no further calls
+    ai_mreport_max_attempts: int = Field(default=2, ge=1, le=3)  # per report, per variant, per day
+    # A key slot only for the reports (``CLAUDE_API_KEY_4``): used only when that key exists; members' chat, why and
+    # group reports never use it, and the reports never borrow the shared slots while it exists.
+    ai_mreport_key_slot: int | None = Field(default=4, ge=0)
+    market_report_retention_days: int = Field(default=730, ge=1)  # by edition date (2 years)
+    market_report_premarket_archive: bool = True  # an extra archive run at 06:45 on trading days
+
     # Off-topic requests (coding, homework, role-play …) with no finance word are declined without a model call.
     ai_scope_precheck: bool = True
     # Threads, messages and drafts are deleted this many days after their last activity (0 = keep forever).
@@ -311,6 +346,24 @@ class Settings(BaseSettings):
     # Optional contact appended to the Wikimedia User-Agent ("Forliosa/1.0 (<contact>)"), per Wikimedia's
     # User-Agent policy. Its own variable: SEC_CONTACT_EMAIL is only ever sent to SEC.
     wikimedia_contact: str | None = None
+
+    @field_validator("ai_mreport_gather_model", "ai_mreport_write_model", "ai_mreport_check_model")
+    @classmethod
+    def _report_model(cls, v: str, info: ValidationInfo) -> str:
+        """Market-report models: only the ones listed in ``MREPORT_MODELS`` for that step, and each with a price row
+        (``ai.pricing.PRICES``) — a typo must stop the start, not be billed as a guess."""
+        from forliosa.ai.pricing import PRICES
+
+        v = (v or "").strip()
+        allowed = MREPORT_MODELS[info.field_name]
+        if v not in allowed or v not in PRICES:
+            raise ValueError(f"{info.field_name.upper()} must be one of {', '.join(allowed)} (got {v!r})")
+        return v
+
+    @field_validator("ai_mreport_key_slot", mode="before")
+    @classmethod
+    def _blank_slot(cls, v: object) -> object:
+        return None if isinstance(v, str) and not v.strip() else v
 
     @field_validator("news_blocked_domains", mode="before")
     @classmethod

@@ -31,6 +31,10 @@ tokens,input-tokens,output-tokens}-*`` headers (until their reset), and ``1 − 
 month cost, then fewest assignments in this process, then slot number; cooling slots last, soonest first.
 ``route()`` keeps a thread on its pinned slot while it is ``ok`` or recovers within the short sticky wait, and
 otherwise picks the best other slot (the caller then continues the thread from a plain-text recap).
+
+Reserved slots (``KeyPool.reserved``): the market reports' own key (``AI_MREPORT_KEY_SLOT``, default 4, only when
+``CLAUDE_API_KEY_4`` exists; 2026-11-17). ``ranked()`` and ``route()`` never hand it out, so members' chat, the why
+sentence and group reports never spend it; ``call(fn, only=4)`` (the reports) uses it as any pinned slot.
 """
 
 from __future__ import annotations
@@ -250,6 +254,7 @@ class KeyPool:
     clock: Callable[[], float] = time.monotonic
     wall: Callable[[], datetime] = now_utc
     sleep: Callable[[float], None] = time.sleep
+    reserved: frozenset[int] = frozenset()  # slots kept for one job (the market reports): never ranked or routed
     _lock: threading.RLock = field(default_factory=threading.RLock)
 
     @classmethod
@@ -318,7 +323,7 @@ class KeyPool:
         """Usable slots, best first (see the module docstring). Disabled, exhausted and over-budget slots are
         left out, so an empty list means there is no capacity at all."""
         costs = costs or {}
-        skip = set(exclude)
+        skip = set(exclude) | self.reserved
         with self._lock:
             ok: list[KeySlot] = []
             cooling: list[KeySlot] = []
@@ -344,9 +349,10 @@ class KeyPool:
         """The slot for a chat request. Sticky: the ``pinned`` slot while it is ``ok`` or recovers within
         ``max_wait`` seconds. Otherwise the best other slot by headroom; when every slot is cooling, the one that
         recovers first (waited for up to ``max_wait``, or probed right away when its cooldown is only a guess).
+        A reserved slot is never chosen, even for a thread pinned to it before it was reserved.
         Raises ``NoKeyAvailable`` (no capacity) or ``KeysBusy``."""
         costs = costs or {}
-        skip = set(exclude)
+        skip = set(exclude) | self.reserved
         with self._lock:
             slot = self.get(pinned)
             if slot is not None and slot.index not in skip:
@@ -485,7 +491,7 @@ class KeyPool:
                     "budget_remaining_usd": float(max(Decimal(0), budget - cost).quantize(Decimal("0.0001")))
                     if budget is not None else None,
                     "headroom": None, "rate_limits": {}, "threads": int(threads.get(n, 0)), "failures": 0,
-                    "last_error": None,
+                    "last_error": None, "purpose": "market_reports" if n in self.reserved else None,
                 }
                 if slot is not None:
                     wait = max(self.wait_seconds(slot), slot.exhausted_until - now, 0.0)
@@ -510,10 +516,23 @@ def build_pool() -> KeyPool:
     pairs = discover_slots()
     if not pairs and settings.ai_dev_dummy_key:
         pairs = [(FALLBACK_SLOT, DUMMY_KEY)]
-    pool = KeyPool.from_keys(pairs, cooldown_seconds=settings.ai_key_cooldown_seconds, budgets=discover_budgets())
-    log.info("AI key pool: %s%s", ", ".join(f"#{s.index}" for s in pool.slots) or "no keys",
-             " (placeholder)" if pairs == [(FALLBACK_SLOT, DUMMY_KEY)] else "")
+    reserved = reserved_slots(settings, [n for n, _ in pairs])
+    pool = KeyPool.from_keys(pairs, cooldown_seconds=settings.ai_key_cooldown_seconds, budgets=discover_budgets(),
+                             reserved=reserved)
+    log.info("AI key pool: %s%s%s", ", ".join(f"#{s.index}" for s in pool.slots) or "no keys",
+             " (placeholder)" if pairs == [(FALLBACK_SLOT, DUMMY_KEY)] else "",
+             "".join(f"; #{n} kept for the market reports" for n in sorted(reserved)))
     return pool
+
+
+def reserved_slots(settings: Any, configured: Iterable[int]) -> frozenset[int]:
+    """The market reports' own slot (``AI_MREPORT_KEY_SLOT``) when its key is configured and it is not the only key
+    (a single key must keep serving the members). Nothing otherwise: the reports then share the pool."""
+    slots = set(configured)
+    n = getattr(settings, "ai_mreport_key_slot", None)
+    if n is None or n not in slots or len(slots) < 2:
+        return frozenset()
+    return frozenset({n})
 
 
 def get_key_pool() -> KeyPool:

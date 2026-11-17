@@ -82,17 +82,41 @@ def is_tw_trading_day(d: date) -> bool:
     return d not in _OFFICIAL_HOLIDAYS.get(d.year, _TW_HOLIDAYS)
 
 
+# NYSE closures and early closes kept by hand (``nyse_holidays``, loaded with :func:`set_us_calendar` by
+# ``forliosa.reports.calendars.load_us_calendar``). Empty: every weekday is a session closing at 16:00.
+_US_CLOSED: frozenset[date] = frozenset()
+_US_EARLY: dict[date, time] = {}
+
+
+def set_us_calendar(closed: Iterable[date], early: dict[date, time] | None = None) -> None:
+    """Use these NYSE closures (weekdays) and early closes (date -> New York close time); empty restores weekdays."""
+    global _US_CLOSED, _US_EARLY
+    _US_CLOSED = frozenset(closed)
+    _US_EARLY = dict(early or {})
+
+
+def us_calendar() -> tuple[frozenset[date], dict[date, time]]:
+    return _US_CLOSED, dict(_US_EARLY)
+
+
 def is_us_trading_day(d: date) -> bool:
-    return d.weekday() < 5
+    """A weekday that is not a known NYSE closure (``set_us_calendar``)."""
+    return d.weekday() < 5 and d not in _US_CLOSED
 
 
 NEW_YORK = ZoneInfo("America/New_York")
 US_CLOSE = time(16, 0)
 
 
+def us_close_time(d: date) -> time:
+    """The NYSE close of session ``d``: 16:00, or the early close (13:00) when the calendar has one."""
+    return _US_EARLY.get(d, US_CLOSE)
+
+
 def us_close_dt(d: date) -> datetime:
-    """16:00 New York on session date ``d`` (04:00 or 05:00 the next morning in Taipei, by daylight saving)."""
-    return datetime.combine(d, US_CLOSE, NEW_YORK)
+    """16:00 New York on session date ``d`` (04:00 or 05:00 the next morning in Taipei, by daylight saving), or the
+    early close of that day (13:00) when the NYSE calendar has one."""
+    return datetime.combine(d, us_close_time(d), NEW_YORK)
 
 
 def close_dt(symbol: str, d: date) -> datetime:
@@ -103,12 +127,22 @@ def close_dt(symbol: str, d: date) -> datetime:
 
 
 def last_us_session(now: datetime, after: timedelta = timedelta(0)) -> date:
-    """The latest weekday (New York) whose close plus ``after`` has passed at ``now``. US holidays are not known
-    here: on one, the stored bars simply have no row for that date."""
+    """The latest US session (New York) whose close plus ``after`` has passed at ``now``: weekdays, skipping the NYSE
+    closures loaded with :func:`set_us_calendar` (without them a holiday simply has no stored bar)."""
     d = now.astimezone(NEW_YORK).date()
-    while d.weekday() >= 5 or us_close_dt(d) + after > now:
+    while not is_us_trading_day(d) or us_close_dt(d) + after > now:
         d -= timedelta(days=1)
     return d
+
+
+def us_trading_days(start: date, end: date) -> list[date]:
+    """US sessions from ``start`` to ``end`` (both included), by the loaded NYSE calendar."""
+    out, d = [], start
+    while d <= end:
+        if is_us_trading_day(d):
+            out.append(d)
+        d += timedelta(days=1)
+    return out
 
 
 @lru_cache(maxsize=64)

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import re
 from bisect import bisect_right
 from datetime import date, timedelta
 from decimal import Decimal
@@ -25,6 +26,31 @@ from forliosa.timeutil import iso_taipei, today_taipei
 
 HISTORY_RANGES = ("5D", "1M", "6M", "YTD", "1Y", "5Y", "MAX")
 VALUATION_RANGES = ("1Y", "3Y", "5Y", "10Y", "MAX")
+
+# Taiwan security classes by code (市場報告 2026-11-17: the sample counted a REIT, 01007T 兆豐國泰R2, as an ETF).
+_TW_CLASSES: tuple[tuple[re.Pattern[str], str], ...] = (
+    (re.compile(r"^01\d{3}T$"), "reit"),  # 不動產投資信託 (REIT): 01001T …
+    (re.compile(r"^00\d{2,4}B$"), "bond_etf"),  # 00679B …
+    (re.compile(r"^00\d{2,4}[LRUKA]?$"), "etf"),  # 0050, 00632R 反向, 00631L 槓桿, 00635U 期貨, 00981A 主動式 …
+    (re.compile(r"^02\d{4}$"), "etn"),  # 020011 …
+    (re.compile(r"^\d{4}[A-Z]$"), "preferred"),  # 2881A …
+)
+_TW_STOCK = re.compile(r"^(?!00)\d{4}$")
+
+
+def security_class(symbol: str, name: str | None = None, instrument_type: str | None = None) -> str:
+    """``stock`` | ``etf`` | ``bond_etf`` | ``reit`` | ``etn`` | ``preferred`` | ``other``. Taiwan symbols by their
+    code (``.TW`` / ``.TWO`` dropped); a four-digit code whose name has 「特」 (a preferred share) is ``other``. US
+    symbols by the instrument type (``etf`` -> ``etf``, anything else ``stock``)."""
+    if market_of_symbol(symbol) == "US":
+        return "etf" if (instrument_type or "").lower() == "etf" else "stock"
+    code = symbol.split(".", 1)[0].strip().upper()
+    for pattern, cls in _TW_CLASSES:
+        if pattern.match(code):
+            return cls
+    if _TW_STOCK.match(code):
+        return "other" if name and "特" in name else "stock"
+    return "other"
 
 
 def instrument_out(info: InstrumentInfo, md: MarketData) -> dict[str, Any]:

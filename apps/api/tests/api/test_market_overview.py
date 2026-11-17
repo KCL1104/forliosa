@@ -60,6 +60,8 @@ def seed(db: Session) -> None:
     index(db, "半導體類報酬指數", D12, "1900.00", "38.00", "0.0204")  # a total-return twin is not a sector row
     index(db, "未含金融指數", D12, "23000.00", "200.00", "0.0088")
     index(db, "機電類指數", D12, "500.00", "5.00", "0.0101")  # an old composite of sectors listed on their own
+    # 電子工業 is the sum of the eight electronics sectors (2026-11-17): not a row either
+    index(db, "電子工業類指數", D12, "1500.00", "30.00", "0.0204")
     db.add_all([FxRate(pair="USDTWD", date=D11, rate=D("31.500"), source="cbc-opendata"),
                 FxRate(pair="USDTWD", date=D12, rate=D("31.437"), source="cbc-opendata")])
     for sym, before, after, vol in (("2330.TW", "1000", "1050", 30_000_000), ("2317.TW", "200", "196", 50_000_000),

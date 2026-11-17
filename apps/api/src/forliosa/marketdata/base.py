@@ -72,6 +72,9 @@ class QuoteData:
     high: Decimal | None = None
     low: Decimal | None = None
     volume: int | None = None  # shares
+    # 成交金額 (NT$) from the exchanges' close files (TWSE TradeValue, TPEx TransactionAmount); archive-only, never
+    # merged from another provider (see _MERGEABLE)
+    value: int | None = None
     as_of: datetime | None = None
     trade_date: date | None = None
     is_realtime: bool = False

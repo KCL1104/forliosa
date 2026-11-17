@@ -14,6 +14,7 @@ from sqlalchemy import (
     ForeignKeyConstraint,
     Index,
     Integer,
+    LargeBinary,
     String,
     Text,
     UniqueConstraint,
@@ -163,6 +164,9 @@ class PriceDaily(Base):
     low: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
     close: Mapped[Decimal] = mapped_column(Money)
     volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    # 成交金額 (NT$): TWSE TradeValue (OpenAPI and the same-day download file), TPEx TransactionAmount. Null for rows
+    # written before 2026-11-17, for US closes and for the interim evening closes.
+    value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     source: Mapped[str] = mapped_column(String(32))
 
 
@@ -1085,6 +1089,11 @@ class GroupChannel(Base):
     notify_digest: Mapped[bool] = mapped_column(Boolean, default=True)
     # 群組 AI 日報 pushes (boosted groups): off unless the owner turns it on (2026-11-16)
     notify_daily: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    # 市場報告 pushes (2026-11-17; every group may switch them on; text and a link only): 盤前重點 and 盤後重點 off,
+    # 市場週報 on (also for channels that existed before)
+    notify_premarket: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    notify_close: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
+    notify_weekly: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
     configured_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     configured_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
@@ -1101,7 +1110,7 @@ class NotificationOutbox(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)
     group_id: Mapped[str] = mapped_column(ForeignKey("groups.id", ondelete="CASCADE"), index=True)
     channel_kind: Mapped[str] = mapped_column(String(10))
-    kind: Mapped[str] = mapped_column(String(10))  # trade | digest
+    kind: Mapped[str] = mapped_column(String(10))  # trade | digest | daily | mreport
     dedupe_key: Mapped[str] = mapped_column(String(160), unique=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), nullable=True)
     transaction_id: Mapped[str | None] = mapped_column(ForeignKey("transactions.id", ondelete="CASCADE"),
@@ -1110,6 +1119,8 @@ class NotificationOutbox(Base):
     # kind "daily": the 群組 AI 日報 (no foreign key: the column was added to an existing table; the report's purge
     # deletes its rows, and a row whose report is gone is cancelled)
     daily_report_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    # kind "mreport": a 市場報告 push (``market_reports.id``; no foreign key, like ``daily_report_id``)
+    market_report_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
     status: Mapped[str] = mapped_column(String(10), default="pending")
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     not_before: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
@@ -1487,3 +1498,218 @@ class DiscussionSuspensionCarryover(Base):
     until: Mapped[datetime] = mapped_column(TZDateTime)
     reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+# -- 市場報告 (盤前重點、盤後重點、市場週報; ``forliosa.reports``; 產品負責人 2026-11-17) --------------
+class MarketReport(Base):
+    """One edition: a kind (``premarket`` | ``close`` | ``weekly``) and its date (the trading day; a weekly's Sunday).
+    ``visibility`` admin | public is fixed when the row is made (trial mode and CLI backfills: admin). ``state``
+    pending | data | ai | skipped. ``current_version_id`` is what non-admins read; blind-test variants never become
+    current. No user column: every signed-in user reads the same text."""
+
+    __tablename__ = "market_reports"
+    __table_args__ = (UniqueConstraint("kind", "edition_date", name="uq_market_report_edition"),
+                      Index("ix_market_reports_visible", "visibility", "first_published_at"))
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # mrp_…
+    kind: Mapped[str] = mapped_column(String(12))
+    edition_date: Mapped[date] = mapped_column(Date)
+    period_start: Mapped[date] = mapped_column(Date)
+    period_end: Mapped[date] = mapped_column(Date)
+    next_start: Mapped[date | None] = mapped_column(Date, nullable=True)
+    next_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    state: Mapped[str] = mapped_column(String(12), default="pending")
+    visibility: Mapped[str] = mapped_column(String(8), default="admin")
+    trial: Mapped[bool] = mapped_column(Boolean, default=False)
+    backfill: Mapped[bool] = mapped_column(Boolean, default=False)
+    current_version_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    first_published_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    ai_published_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    pushed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    push_edition: Mapped[str | None] = mapped_column(String(8), nullable=True)  # ai | data
+    closed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)  # AI results no longer accepted
+    notes: Mapped[list] = mapped_column(JSON, default=list)  # e.g. ["official_index_missing"]
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class MarketReportVersion(Base):
+    """Every version of an edition (kept 2 years): the full report JSON in its admin form (each sentence's refs,
+    dropped sections). ``edition`` data | ai | tables | correction; ``variant`` A/B/C for the blind test (``writer``
+    is never returned before the reveal)."""
+
+    __tablename__ = "market_report_versions"
+    __table_args__ = (UniqueConstraint("report_id", "version", name="uq_market_report_version"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # mrv_…
+    report_id: Mapped[str] = mapped_column(ForeignKey("market_reports.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int] = mapped_column(Integer)
+    variant: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    edition: Mapped[str] = mapped_column(String(12))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    writer: Mapped[dict | None] = mapped_column(JSON, nullable=True)  # {"model", "effort", "tier"}
+    run_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    prompt_version: Mapped[str] = mapped_column(String(32), default="")
+    validation: Mapped[dict] = mapped_column(JSON, default=dict)
+    based_on: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    correction_note: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class MarketReportGather(Base):
+    """One web-search gathering for an edition (the blind test's three variants share it). ``facts`` keep the verified
+    quotes for the admin side only; the API never returns a quote."""
+
+    __tablename__ = "market_report_gathers"
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # mrg_…
+    report_id: Mapped[str] = mapped_column(ForeignKey("market_reports.id", ondelete="CASCADE"), index=True)
+    status: Mapped[str] = mapped_column(String(12), default="running")  # running | ok | failed
+    topics: Mapped[list] = mapped_column(JSON, default=list)
+    facts: Mapped[list] = mapped_column(JSON, default=list)
+    disagreements: Mapped[list] = mapped_column(JSON, default=list)
+    cost_usd: Mapped[Decimal] = mapped_column(Money, default=Decimal(0))
+    key_slot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    started_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class MarketReportRun(Base):
+    """One writing attempt (write, check, revise, assemble). ``id`` is also ``ai_usage.thread_id`` of its calls.
+    ``pack_gz``: the data pack it used (zlib JSON, for audits). ``calls``: per API call the step, requested and served
+    models, effort, stop reason, refusal category, fallback, usage, cost and seconds — never prompt or text."""
+
+    __tablename__ = "market_report_runs"
+    __table_args__ = (Index("ix_market_report_runs_report", "report_id", "variant"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # mrr_…
+    report_id: Mapped[str] = mapped_column(ForeignKey("market_reports.id", ondelete="CASCADE"))
+    variant: Mapped[str | None] = mapped_column(String(1), nullable=True)
+    purpose: Mapped[str] = mapped_column(String(8), default="live")  # live | trial
+    attempt: Mapped[int] = mapped_column(Integer, default=1)
+    status: Mapped[str] = mapped_column(String(12), default="running")
+    step: Mapped[str] = mapped_column(String(12), default="write")
+    tier: Mapped[str] = mapped_column(String(12), default="normal")  # normal | medium | sonnet | data_only
+    writer: Mapped[dict] = mapped_column(JSON, default=dict)
+    key_slot: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    gather_id: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    pack_gz: Mapped[bytes | None] = mapped_column(LargeBinary, nullable=True)
+    calls: Mapped[list] = mapped_column(JSON, default=list)
+    cost_usd: Mapped[Decimal] = mapped_column(Money, default=Decimal(0))
+    metrics: Mapped[dict] = mapped_column(JSON, default=dict)
+    error: Mapped[str | None] = mapped_column(String(200), nullable=True)  # a short label, never content
+    started_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    heartbeat_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    finished_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class MarketReportVote(Base):
+    """A site admin's blind-test pick for one edition (A/B/C) and an optional note."""
+
+    __tablename__ = "market_report_votes"
+
+    report_id: Mapped[str] = mapped_column(ForeignKey("market_reports.id", ondelete="CASCADE"), primary_key=True)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    preferred: Mapped[str] = mapped_column(String(1))
+    note: Mapped[str] = mapped_column(Text, default="")
+    created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class MarketReportConfig(Base):
+    """The one runtime-settings row (``id`` = 1): ``mode`` trial | public | paused (the admin page switches it;
+    created from MARKET_REPORTS_INITIAL_MODE), the writer chosen per kind after the blind test (null = env default)."""
+
+    __tablename__ = "market_report_config"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    mode: Mapped[str] = mapped_column(String(8), default="trial")
+    writers: Mapped[dict] = mapped_column(JSON, default=dict)  # {"premarket": {"model","effort"} | None, …}
+    trial_started_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    revealed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class MarketReportRead(Base):
+    """When a user last opened the reports (the unread dot next to 市場). Only the user id and a time."""
+
+    __tablename__ = "market_report_reads"
+
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    seen_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
+
+
+class NyseHoliday(Base):
+    """NYSE closures and early closes, kept by hand (admin page; seeds in ``reports/seeds``) and loaded into
+    ``timeutil`` (``reports.calendars.load_us_calendar``). ``verified_at``: someone checked the row on the NYSE page."""
+
+    __tablename__ = "nyse_holidays"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    name: Mapped[str] = mapped_column(String(80))
+    kind: Mapped[str] = mapped_column(String(12))  # closed | early_close
+    close_time_et: Mapped[str | None] = mapped_column(String(5), nullable=True)  # "13:00"
+    source_url: Mapped[str] = mapped_column(Text)
+    verified_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    updated_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class MacroCalendarEvent(Base):
+    """A scheduled macro release or central-bank meeting, kept by hand; every row links to the agency's own page
+    (``reports.calendars.OFFICIAL_CALENDAR_HOSTS``). Those pages are linked, never fetched."""
+
+    __tablename__ = "macro_calendar"
+    __table_args__ = (Index("ix_macro_calendar_date", "event_date"),)
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # mac_…
+    event_date: Mapped[date] = mapped_column(Date)  # local date at the agency
+    local_time: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    tz: Mapped[str] = mapped_column(String(32))  # America/New_York, Asia/Taipei …
+    country: Mapped[str] = mapped_column(String(2))
+    title: Mapped[str] = mapped_column(String(120))
+    agency: Mapped[str] = mapped_column(String(80))
+    official_url: Mapped[str] = mapped_column(Text)
+    sectors: Mapped[list] = mapped_column(JSON, default=list)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    created_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class UsEarningsDate(Base):
+    """A US company's earnings date (US Eastern date; ``timing`` bmo | amc | during | unknown), kept by hand, with the
+    Taiwan sectors it matters to."""
+
+    __tablename__ = "us_earnings"
+    __table_args__ = (UniqueConstraint("symbol", "report_date", name="uq_us_earnings_symbol_date"),
+                      Index("ix_us_earnings_date", "report_date"))
+
+    id: Mapped[str] = mapped_column(String(32), primary_key=True)  # use_…
+    symbol: Mapped[str] = mapped_column(String(20))
+    company: Mapped[str] = mapped_column(String(100))
+    report_date: Mapped[date] = mapped_column(Date)
+    timing: Mapped[str] = mapped_column(String(8), default="unknown")
+    time_et: Mapped[str | None] = mapped_column(String(5), nullable=True)
+    official_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    sectors: Mapped[list] = mapped_column(JSON, default=list)
+    note: Mapped[str] = mapped_column(String(200), default="")
+    verified_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    created_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
+
+
+class MarketTurnoverDaily(Base):
+    """TWSE FMTQIK 每日市場成交資訊 (the month so far, upserted daily): the market's official volume, value and
+    number of trades with the TAIEX close. Published with the 05:2x batch the next morning."""
+
+    __tablename__ = "market_turnover_daily"
+
+    date: Mapped[date] = mapped_column(Date, primary_key=True)
+    market: Mapped[str] = mapped_column(String(8), primary_key=True)  # TWSE
+    trade_volume: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # shares
+    trade_value: Mapped[int | None] = mapped_column(BigInteger, nullable=True)  # NT$
+    transactions: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    taiex: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    change: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    source: Mapped[str] = mapped_column(String(32))

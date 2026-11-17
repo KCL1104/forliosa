@@ -100,14 +100,14 @@ def test_backfill_then_update_store_unadjusted_closes_in_our_spelling(db):
                  ("2026-11-13", "356.27")],
         "BRK.B": [("2026-11-12", "589.83")],
         "SPY": [("2026-11-12", "757.12")], "DIA": [("2026-11-12", "470.00")], "ONEQ": [("2026-11-12", "88.10")],
-        "VOO": [("2026-11-12", "694.00")]})
-    # the market ETFs and the benchmark option first
-    assert us_prices.pending(db) == ["SPY", "DIA", "ONEQ", "VOO", "AAPL", "BRK-B", "ZZZZQ"]
+        "VOO": [("2026-11-12", "694.00")], "SMH": [("2026-11-12", "301.20")], "TSM": [("2026-11-12", "290.10")]})
+    # the market ETFs, the benchmark option and the market reports' SMH and TSM first
+    assert us_prices.pending(db) == ["SPY", "DIA", "ONEQ", "VOO", "SMH", "TSM", "AAPL", "BRK-B", "ZZZZQ"]
 
     res = us_prices.backfill(db, fake.fetcher())
-    assert (res.asked, res.stored, res.not_found, res.remaining) == (7, 6, ["ZZZZQ"], 0)
+    assert (res.asked, res.stored, res.not_found, res.remaining) == (9, 8, ["ZZZZQ"], 0)
     get = fake.ranges()[0]
-    assert get.url.params["symbols"] == "SPY,DIA,ONEQ,VOO,AAPL,BRK.B,ZZZZQ"  # Databento spelling on the wire
+    assert get.url.params["symbols"] == "SPY,DIA,ONEQ,VOO,SMH,TSM,AAPL,BRK.B,ZZZZQ"  # Databento spelling on the wire
     # Databento has through 11/12 (its range end 11/13 is exclusive): the request asks up to 11/13, exclusive
     assert get.url.params["start"] == "2024-07-01" and get.url.params["end"] == "2026-11-13"
     assert closes(db, "BRK-B") == [(date(2026, 11, 12), D("589.8300"))]  # our spelling in the archive
@@ -494,11 +494,12 @@ def test_sparklines_and_chart_notes_fold_a_split_in(engine, monkeypatch):
 
 def test_the_admin_summary_counts_untracked_symbols(db):
     watch(db, "TSLA")
-    fake = FakeDatabento("2026-11-13", {s: [("2026-11-12", "100")] for s in ("TSLA", "SPY", "DIA", "ONEQ", "VOO")})
+    symbols = ("TSLA", "SPY", "DIA", "ONEQ", "VOO", "SMH", "TSM")
+    fake = FakeDatabento("2026-11-13", {s: [("2026-11-12", "100")] for s in symbols})
     us_prices.backfill(db, fake.fetcher())
     db.delete(db.scalar(select(WatchlistItem).where(WatchlistItem.symbol == "TSLA")))
     db.commit()
     fake.bars = {s: [("2026-11-12", "100"), ("2026-11-13", "101")] for s in fake.bars}
     fake.end = "2026-11-14"
     us_prices.update(db, fake.fetcher())
-    assert us_prices.summary(db)["symbols"] == {"done": 4, "untracked": 1, "not_found": 0, "error": 0}
+    assert us_prices.summary(db)["symbols"] == {"done": 6, "untracked": 1, "not_found": 0, "error": 0}

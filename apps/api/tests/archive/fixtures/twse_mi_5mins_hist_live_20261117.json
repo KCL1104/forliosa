@@ -1,0 +1,58 @@
+[
+{
+"Date": "1151102",
+"OpeningIndex": "45034.53",
+"HighestIndex": "45156.17",
+"LowestIndex": "44399.10",
+"ClosingIndex": "44920.14"
+},
+{
+"Date": "1151103",
+"OpeningIndex": "44481.59",
+"HighestIndex": "44614.64",
+"LowestIndex": "43191.58",
+"ClosingIndex": "43307.54"
+},
+{
+"Date": "1151104",
+"OpeningIndex": "43449.45",
+"HighestIndex": "43741.54",
+"LowestIndex": "41855.82",
+"ClosingIndex": "42948.91"
+},
+{
+"Date": "1151105",
+"OpeningIndex": "42666.13",
+"HighestIndex": "42873.81",
+"LowestIndex": "41513.57",
+"ClosingIndex": "41574.72"
+},
+{
+"Date": "1151106",
+"OpeningIndex": "38915.76",
+"HighestIndex": "40435.83",
+"LowestIndex": "37837.05",
+"ClosingIndex": "39701.64"
+},
+{
+"Date": "1151109",
+"OpeningIndex": "40347.28",
+"HighestIndex": "42349.36",
+"LowestIndex": "40347.28",
+"ClosingIndex": "41661.70"
+},
+{
+"Date": "1151110",
+"OpeningIndex": "42130.33",
+"HighestIndex": "43135.92",
+"LowestIndex": "41930.03",
+"ClosingIndex": "42711.92"
+},
+{
+"Date": "1151111",
+"OpeningIndex": "43135.76",
+"HighestIndex": "44257.15",
+"LowestIndex": "42708.05",
+"ClosingIndex": "44257.15"
+}
+]

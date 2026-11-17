@@ -293,3 +293,24 @@ def test_off_day_archive_runs_on_weekends_and_holidays_only():
     # Friday 11/13 is a trading day: the twse / tpex groups already read the files, the off-day run stays quiet
     assert not off.due(at(2026, 11, 13, 8, 15), None) and morning.due(at(2026, 11, 13, 8, 15), None)
     assert not off.due(at(2026, 11, 14, 0, 30), at(2026, 11, 13, 8, 15))
+
+
+def test_premarket_archive_runs_at_0645_on_trading_days_and_follows_its_switch(monkeypatch):
+    """市場報告 (2026-11-17): one more archive run at 06:45 (after TWSE's 05:2x batch, before the 07:00 盤前重點)."""
+    from datetime import datetime
+
+    from forliosa.config import get_settings
+    from forliosa.timeutil import TAIPEI
+    from forliosa.worker import PREMARKET_GROUPS, Worker
+
+    assert PREMARKET_GROUPS == ["twse", "tpex", "taifex"]
+    at = lambda *a: datetime(*a, tzinfo=TAIPEI)  # noqa: E731
+    job = next(j for j in Worker(md=object()).jobs if j.name == "premarket_archive")  # type: ignore[arg-type]
+    assert job.due(at(2026, 11, 16, 6, 46), None) and not job.due(at(2026, 11, 16, 6, 40), None)
+    assert not job.due(at(2026, 11, 15, 6, 46), None)  # Sunday
+    monkeypatch.setenv("MARKET_REPORT_PREMARKET_ARCHIVE", "false")
+    get_settings.cache_clear()
+    try:
+        assert "premarket_archive" not in {j.name for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    finally:
+        get_settings.cache_clear()

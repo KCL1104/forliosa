@@ -64,6 +64,11 @@ US_TICKERS: list[InstrumentInfo] = [
     _us("SPY", "SPDR S&P 500 ETF Trust", "etf", "ETF", ("標普500", "S&P 500")),
     _us("DIA", "SPDR Dow Jones Industrial Average ETF Trust", "etf", "ETF", ("道瓊", "Dow Jones")),
     _us("ONEQ", "Fidelity Nasdaq Composite Index ETF", "etf", "ETF", ("那斯達克綜合", "Nasdaq Composite")),
+    # 市場報告 (2026-11-17; forliosa.us_prices.REPORT_US_SYMBOLS): the semiconductor ETF, typed as the ETF it is (SEC's
+    # ticker list calls every listing a stock). TSMC's ADR (TSM) is fetched too but not listed here: SEC's ticker list
+    # already has it, and a built-in row would rank it above 台積電 for 「TS」 or put it into 「台積」 searches; the
+    # reports label it 台積電 ADR themselves.
+    _us("SMH", "VanEck Semiconductor ETF", "etf", "ETF", ("VanEck Semiconductor",)),
 ]
 US_ETF_CODES = frozenset(i.code for i in US_TICKERS if i.type == "etf")
 

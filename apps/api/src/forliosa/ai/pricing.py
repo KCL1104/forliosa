@@ -1,16 +1,24 @@
 """Token usage numbers and a cost estimate (USD) per model call.
 
-Prices per million tokens as published on 2026-11-12 (``docs/research/claude-platform-fit.md``); re-check the
-pricing page before relying on the numbers. Cache reads and 5-minute cache writes are multiples of the input
-price. Claude Haiku 5.5 has a second rate card above 100K prompt tokens. Web search is US$10 per 1,000
+Prices per million tokens as published on 2026-11-17 (the platform's pricing page; re-check it before relying on the
+numbers, and again before the market reports go public). Cache reads and 5-minute cache writes are multiples of the
+input price. Claude Haiku 5.5 has a second rate card above 100K prompt tokens. Web search is US$10 per 1,000
 searches; web fetch has no charge beyond tokens.
+
+A model that is not in :data:`PRICES` is never priced as a cheaper one: :func:`price_of` raises
+:class:`UnknownModelPrice`, and :func:`charge` (what the usage records use) books such a call at the most expensive
+known price and logs an error. Pricing an unknown model as Haiku undercounted an Opus call about 40 times
+(server-side fallbacks can answer with a model the caller never named; 市場報告 memo 2026-11-17, phase 0).
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
+
+log = logging.getLogger(__name__)
 
 MTOK = Decimal(1_000_000)
 WEB_SEARCH_USD = Decimal("0.01")
@@ -27,12 +35,28 @@ class Price:
     long_output: Decimal | None = None
 
 
+class UnknownModelPrice(KeyError):
+    """A model id with no row in :data:`PRICES` (never guessed: see :func:`charge`)."""
+
+    def __init__(self, model: str):
+        super().__init__(model)
+        self.model = model
+
+
+# 2026-11-17 price list (USD per million tokens). Cache reads: Opus 5.5 / Sonnet 5.5 0.05×, Fable 5.2 0.025×, the
+# others 0.1× of the input price.
 PRICES: dict[str, Price] = {
     "claude-haiku-5-5": Price(Decimal("0.10"), Decimal("0.50"), Decimal("0.1"), Decimal("0.50"), Decimal("2.50")),
     "claude-sonnet-5-5": Price(Decimal("2"), Decimal("10"), Decimal("0.05")),
+    "claude-sonnet-5": Price(Decimal("2"), Decimal("10"), Decimal("0.1")),  # cache read US$0.20 (checked 2026-11-17)
     "claude-opus-5-5": Price(Decimal("4"), Decimal("20"), Decimal("0.05")),
+    "claude-opus-5": Price(Decimal("5"), Decimal("25"), Decimal("0.1")),
+    "claude-opus-4-8": Price(Decimal("5"), Decimal("25"), Decimal("0.1")),
+    "claude-fable-5-2": Price(Decimal("8"), Decimal("40"), Decimal("0.025")),
 }
-DEFAULT_PRICE = PRICES["claude-haiku-5-5"]
+# The most expensive known price: what a call of an unknown model is booked at (see :func:`charge`).
+MAX_PRICE_MODEL = max(PRICES, key=lambda m: (PRICES[m].output, PRICES[m].input))
+MAX_PRICE = PRICES[MAX_PRICE_MODEL]
 
 
 @dataclass
@@ -72,11 +96,14 @@ class CallUsage:
 
 
 def price_of(model: str) -> Price:
-    return PRICES.get(model, DEFAULT_PRICE)
+    """The price of ``model``; raises :class:`UnknownModelPrice` for a model not in :data:`PRICES`."""
+    try:
+        return PRICES[model]
+    except KeyError:
+        raise UnknownModelPrice(model) from None
 
 
-def estimate_cost(model: str, u: CallUsage) -> Decimal:
-    p = price_of(model)
+def _cost(p: Price, u: CallUsage) -> Decimal:
     long = u.prompt_tokens > LONG_PROMPT_TOKENS and p.long_input is not None
     inp = p.long_input if long and p.long_input is not None else p.input
     out = p.long_output if long and p.long_output is not None else p.output
@@ -86,6 +113,21 @@ def estimate_cost(model: str, u: CallUsage) -> Decimal:
             + Decimal(u.output_tokens) * out) / MTOK
     cost += WEB_SEARCH_USD * u.web_search_requests
     return cost.quantize(Decimal("0.000001"))
+
+
+def estimate_cost(model: str, u: CallUsage) -> Decimal:
+    """The cost of one call of ``model``; raises :class:`UnknownModelPrice` for an unknown model."""
+    return _cost(price_of(model), u)
+
+
+def charge(model: str, u: CallUsage) -> Decimal:
+    """What a call is booked at: its price, or — for a model with no price row — the most expensive known price, with
+    an error in the log (only the model id is logged). Never a cheaper guess."""
+    try:
+        return estimate_cost(model, u)
+    except UnknownModelPrice:
+        log.error("unknown model %s charged at the highest known price", model)
+        return _cost(MAX_PRICE, u)
 
 
 def billable_tokens(u: CallUsage) -> int:
