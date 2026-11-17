@@ -42,7 +42,7 @@ from typing import Any
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
-from forliosa import disclaimer
+from forliosa import disclaimer, realtime
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import Settings, get_settings
 from forliosa.crypto import decrypt_secret, encrypt_secret, token_hash
@@ -124,10 +124,12 @@ def _configured(db: Session, group_id: str, kind: str) -> GroupChannel | None:
 
 def _reset_others_push(db: Session, group_id: str, keep_user_id: str | None, now: datetime) -> None:
     """A new destination: every other member's ``push`` goes off until they turn it on again for this target."""
-    db.execute(update(GroupShareSetting).where(GroupShareSetting.group_id == group_id,
-                                               GroupShareSetting.user_id != (keep_user_id or ""),
-                                               GroupShareSetting.push.is_(True))
-               .values(push=False, updated_at=now))
+    res = db.execute(update(GroupShareSetting).where(GroupShareSetting.group_id == group_id,
+                                                     GroupShareSetting.user_id != (keep_user_id or ""),
+                                                     GroupShareSetting.push.is_(True))
+                     .values(push=False, updated_at=now))
+    if res.rowcount:  # members' 「推播」 switches went off
+        realtime.emit(db, realtime.event("group.members", {"group_id": group_id}, realtime.group(group_id)))
 
 
 def _webhook_id(ch: GroupChannel) -> str | None:

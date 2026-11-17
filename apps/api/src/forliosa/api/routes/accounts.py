@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
+from forliosa import realtime
 from forliosa.api import serialize as ser
 from forliosa.api.deps import current_user
 from forliosa.api.errors import ApiError, not_found, unprocessable
@@ -97,8 +98,13 @@ def update_account(account_id: str, body: AccountPatch, user: User = Depends(cur
 @router.delete("/{account_id}", status_code=204)
 def delete_account(account_id: str, user: User = Depends(current_user), db: Session = Depends(get_db)):
     acc = get_owned_account(db, user, account_id)
-    keys = sharing.trade_keys(db.scalars(select(Transaction).where(Transaction.account_id == acc.id,
-                                                                   Transaction.user_id == user.id)))
+    txns = list(db.scalars(select(Transaction).where(Transaction.account_id == acc.id, Transaction.user_id == user.id)))
+    keys = sharing.trade_keys(txns)
+    # Realtime: the transactions go with a Core delete the ORM does not see; groups hear of it only if it changes
+    # what they are shown (returns / holdings: any transaction; trades: one the feed shows)
+    realtime.emit(db, realtime.LedgerFanout(user.id, [acc.id], positions=bool(txns),
+                                            feed=any(realtime.feed_visible(lambda k, t=t: getattr(t, k))
+                                                     for t in txns)))
     db.execute(delete(Transaction).where(Transaction.account_id == acc.id, Transaction.user_id == user.id))
     sharing.purge_trade_threads(db, user.id, keys)  # a group feed item goes with its last transaction
     db.execute(delete(AutoDividendSkip).where(AutoDividendSkip.account_id == acc.id))

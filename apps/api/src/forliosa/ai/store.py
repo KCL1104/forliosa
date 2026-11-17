@@ -272,6 +272,9 @@ def delete_all_threads(db: Session, user: User) -> int:
                execution_options=bulk)
     db.execute(delete(AiMessage).where(AiMessage.thread_id.in_(owned)), execution_options=bulk)
     n = db.execute(delete(AiThread).where(AiThread.user_id == user.id), execution_options=bulk).rowcount
+    from forliosa import realtime
+
+    realtime.emit(db, realtime.event("ai.threads", {}, realtime.user(user.id)))  # Core deletes: told explicitly
     db.commit()
     return n or 0
 

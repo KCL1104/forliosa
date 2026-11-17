@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import { qk } from "@/api/queries"
 import type { MarketStatus, TwClose } from "@/api/types"
+import { markClosesEvent, useRealtime } from "@/realtime/store"
 import { CLOSE_REFETCH_AGAIN_MS, useCloseRefresh } from "../use-close"
 
 /**
@@ -16,7 +17,10 @@ const close = (market: TwClose["market"], o: Partial<TwClose> = {}): TwClose => 
 })
 const status = (closes: TwClose[]): MarketStatus => ({ tw: { date: "2026-11-16", is_trading_day: true, is_open: false, open: "09:00", close: "13:30", closes } })
 
-afterEach(() => vi.restoreAllMocks())
+afterEach(() => {
+  vi.restoreAllMocks()
+  useRealtime.setState({ closesAt: 0 })
+})
 
 function setup(first: MarketStatus) {
   let current = first
@@ -70,6 +74,16 @@ describe("useCloseRefresh", () => {
     await waitFor(() => expect(api.getMarketStatus).toHaveBeenCalled())
     await t.next(status([close("TWSE"), close("TPEX")]))
     await t.next(status([close("TWSE", { expected_from: "2026-11-16T20:30:00+08:00", expected_to: "2026-11-16T23:45:00+08:00" }), close("TPEX")]))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(t.invalidate).not.toHaveBeenCalled()
+  })
+
+  it("即時更新剛通知過收盤價（market.closes）：已經重新讀過，這裡不再重複（也不用 35 秒後再讀）", async () => {
+    const t = setup(status([close("TWSE"), close("TPEX")]))
+    await waitFor(() => expect(api.getMarketStatus).toHaveBeenCalled())
+    await new Promise((r) => setTimeout(r, 20))
+    markClosesEvent()
+    await t.next(status([close("TWSE", { stored: true, latest: "2026-11-16", expected_from: null, expected_to: null }), close("TPEX")]))
     await new Promise((r) => setTimeout(r, 20))
     expect(t.invalidate).not.toHaveBeenCalled()
   })

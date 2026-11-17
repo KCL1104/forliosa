@@ -662,9 +662,12 @@ for (const variant of VARIANTS) {
       if (shot.desktopOnly && variant.id !== "desktop") continue
       // 每張截圖用全新的瀏覽器狀態（AI 對話與草稿存在 localStorage）
       const context = await browser.newContext({ ...variant.ctx, colorScheme: scheme, reducedMotion: "reduce", locale: "zh-TW", timezoneId: "Asia/Taipei" })
+      // 真實後端：即時更新的串流（GET /events）一直開著，`networkidle` 就永遠等不到。截圖不需要即時更新：回 503（伺服器關掉即時更新的回應），前端 10 分鐘內不再連
+      if (real) await context.route("**/api/v1/events**", (r) => r.fulfill({ status: 503, headers: { "Retry-After": "600", "Content-Type": "application/json" }, body: JSON.stringify({ error: { code: "realtime_off", message: "即時更新目前關閉" } }) }))
       const page = await context.newPage()
       page.on("console", (m) => {
-        if (m.type() === "error" && !(real && EXPECTED.some((re) => re.test(m.text())))) errors.push(`[${variant.id}/${scheme}/${shot.name}] ${m.text()}`)
+        const expected = real && (EXPECTED.some((re) => re.test(m.text())) || m.location()?.url?.includes("/api/v1/events"))
+        if (m.type() === "error" && !expected) errors.push(`[${variant.id}/${scheme}/${shot.name}] ${m.text()}`)
       })
       page.on("requestfailed", (r) => {
         if (!r.failure()?.errorText.includes("ERR_ABORTED")) errors.push(`[${variant.id}/${scheme}/${shot.name}] request failed ${r.url()}`)

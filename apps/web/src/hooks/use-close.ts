@@ -6,6 +6,7 @@ import type { Market, TwClose } from "@/api/types"
 import { closeLine, closeNote, closesChanged, closeState, dayWord, indexNote, ledgerBoardDays, ledgerUsCloseDay, twClose, type CloseState, type TwBoard } from "@/lib/as-of"
 import { formatDateShort } from "@/lib/format"
 import { usCloseLabel } from "@/lib/labels"
+import { useRealtime } from "@/realtime/store"
 
 /** 台股的市場（上市／上櫃）；美股與不知道的是 null */
 export const twBoard = (market: Market | null | undefined): TwBoard | null => (market === "TWSE" || market === "TPEX" ? market : null)
@@ -71,9 +72,17 @@ const CLOSE_QUERIES = [["portfolio"], ["quote"], ["watchlist"], ["market"], ["hi
 export const CLOSE_REFETCH_AGAIN_MS = 35_000
 
 /**
+ * 即時更新的 `market.closes` 剛處理過（這段時間內）：伺服器已經先清掉報價快取、畫面也已經重新讀過，這裡不再重複
+ */
+export const CLOSE_EVENT_COVERS_MS = 2 * 60_000
+
+/**
  * 收盤價一進來就自己更新（不跳通知）：`market-status` 每分鐘問一次（分頁在背景時不問，回到分頁時馬上問），
  * 任何一個市場的收盤價進來了（`closesChanged`），就讓帳本、報價與市場頁重新讀，35 秒後再讀一次（後端報價快取過期後）。
  * 掛在外殼上，一個分頁一份。
+ *
+ * 即時更新連著時，收盤價一存進去伺服器就通知（`realtime/topics.ts` 的 `market.closes`，同時讓 `market-status` 重新讀）：
+ * 剛收到過通知就不再重新讀一次。沒有收到通知（即時更新斷著、mock 模式，或萬一哪一條路沒有通知）時照舊，這裡是保險。
  */
 export function useCloseRefresh(): void {
   const qc = useQueryClient()
@@ -82,7 +91,8 @@ export function useCloseRefresh(): void {
   const again = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   useEffect(() => {
     if (!closes) return
-    if (closesChanged(prev.current, closes)) {
+    const covered = Date.now() - useRealtime.getState().closesAt < CLOSE_EVENT_COVERS_MS
+    if (closesChanged(prev.current, closes) && !covered) {
       const refetch = () => {
         for (const queryKey of CLOSE_QUERIES) void qc.invalidateQueries({ queryKey: [...queryKey] })
       }

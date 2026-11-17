@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
+import signal
+import threading
+from collections.abc import AsyncIterator, Callable
+from contextlib import asynccontextmanager
 
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -10,6 +16,7 @@ from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
 
 from forliosa import logredact, perf
+from forliosa.api.deps import TAB_HEADER
 from forliosa.api.errors import install_error_handlers
 from forliosa.api.middleware import VIEW_AS_HEADER, OriginCheckMiddleware, ViewAsMiddleware
 from forliosa.api.routes import (
@@ -22,6 +29,7 @@ from forliosa.api.routes import (
     delegations,
     derivatives,
     discussions,
+    events,
     groups,
     imports,
     market,
@@ -98,6 +106,67 @@ def check_production_settings(settings) -> None:
         raise RuntimeError("DISCORD_REDIRECT_URI must be https in production")
 
 
+SHUTDOWN_SIGNALS = (signal.SIGTERM, signal.SIGINT)
+
+
+def close_streams_on_signal(hub, loop: asyncio.AbstractEventLoop) -> Callable[[], None]:
+    """End every realtime stream as soon as the process is told to stop; returns the function that undoes this.
+
+    uvicorn (0.54) handles SIGTERM by waiting up to ``--timeout-graceful-shutdown`` for open connections, cancelling
+    what is left, and only then running the lifespan shutdown. A stream never ends by itself, so without this every
+    deploy would wait the full grace period and cut each stream with an error instead of ``bye{rotate}``. uvicorn's
+    own handler (already installed when the lifespan starts) is chained, not replaced. Signals can only be handled on
+    the main thread: elsewhere (tests that run the server in a thread) this does nothing."""
+    if threading.current_thread() is not threading.main_thread():
+        return lambda: None
+    installed: dict[int, tuple[Callable, Callable]] = {}
+    for sig in SHUTDOWN_SIGNALS:
+        prev = signal.getsignal(sig)
+        if not callable(prev):  # nobody stops gracefully on this signal (default action or ignored): leave it
+            continue
+
+        def handler(signum, frame, prev=prev):
+            with contextlib.suppress(RuntimeError):  # the loop is already closed
+                loop.call_soon_threadsafe(hub.shutdown)
+            prev(signum, frame)
+
+        signal.signal(sig, handler)
+        installed[sig] = (handler, prev)
+
+    def restore() -> None:
+        for sig, (handler, prev) in installed.items():
+            if signal.getsignal(sig) is handler:
+                signal.signal(sig, prev)
+
+    return restore
+
+
+@asynccontextmanager
+async def realtime_lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """The realtime hub of this process (``forliosa.realtime.hub``): on PostgreSQL it LISTENs for the events every
+    process commits; on SQLite it hears this process's own commits. SIGTERM ends the open streams at once
+    (:func:`close_streams_on_signal`)."""
+    from forliosa.db import get_engine
+    from forliosa.realtime.hub import Hub, HubConfig
+
+    settings = get_settings()
+    hub = None
+    if settings.realtime_enabled:
+        engine = get_engine()
+        pg_url = engine.url.render_as_string(hide_password=False) if engine.dialect.name == "postgresql" else None
+        hub = Hub(HubConfig.from_settings(settings), postgres_url=pg_url)
+        await hub.start()
+    restore = close_streams_on_signal(hub, asyncio.get_running_loop()) if hub is not None else (lambda: None)
+    app.state.realtime_hub = hub
+    try:
+        yield
+    finally:
+        restore()
+        app.state.realtime_hub = None
+        if hub is not None:
+            await hub.stop()
+
+
 def create_app() -> FastAPI:
     settings = get_settings()
     if settings.forliosa_env == "prod":
@@ -118,6 +187,7 @@ def create_app() -> FastAPI:
         openapi_url=f"{API_PREFIX}/openapi.json",
         docs_url=f"{API_PREFIX}/docs",
         redoc_url=None,
+        lifespan=realtime_lifespan,
     )
     # Inner to outer: view-as allow-list, CSRF origin check, then CORS outermost (so 403s carry CORS headers).
     app.add_middleware(ViewAsMiddleware, prefix=API_PREFIX)
@@ -127,7 +197,10 @@ def create_app() -> FastAPI:
         allow_origins=settings.cors_origins,
         allow_credentials=True,
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Content-Type", "Accept", "Last-Event-ID", VIEW_AS_HEADER],
+        allow_headers=["Content-Type", "Accept", "Last-Event-ID", VIEW_AS_HEADER, TAB_HEADER],
+        # The web app reads the API from another origin: without this the browser hides Retry-After from it, and the
+        # realtime client could not wait as long as a 429 / 503 (realtime_off, realtime_busy) asks.
+        expose_headers=["Retry-After"],
     )
     # JSON over 1 KB is gzipped (the API's domain is DNS-only at Cloudflare, so nothing compressed it: the watchlist,
     # polled every minute, was 41 KB, 6 KB gzipped). Server-sent events are never compressed (Starlette's default).
@@ -154,7 +227,7 @@ def create_app() -> FastAPI:
         return market_status(db)
 
     for module in (users, auth, accounts, market, market_page, market_reports, stock, derivatives, transactions,
-                   portfolio, watchlist, recurring, ai, briefings, delegations, groups, discussions, imports):
+                   portfolio, watchlist, recurring, ai, briefings, delegations, groups, discussions, imports, events):
         api.include_router(module.router)
     api.include_router(discussions.admin_router)
     api.include_router(admin.router)  # the back office: overview, news takedown blocklist

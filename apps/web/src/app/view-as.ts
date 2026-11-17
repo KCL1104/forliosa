@@ -7,6 +7,7 @@ import { api } from "@/api"
 import { sk } from "@/api/sharing-queries"
 import { sameTarget, targetOf, useViewAs, useViewingAs, type ViewAsTarget } from "@/api/view-as"
 import { ApiError, type Delegation } from "@/api/types"
+import { useLiveInterval } from "@/realtime/store"
 import { useUi } from "./ui-store"
 
 /** 查看範圍：全部帳戶，或列出授權的帳戶 */
@@ -61,17 +62,19 @@ export function useViewAsControls() {
 
 /**
  * 查看中：進入時存的是授權的快照，授權者之後可能改了範圍、刪了帳戶或改了名稱（伺服器的投影立即跟著變）。
- * 以查看者自己的身分讀 `GET /delegations`（不帶標頭，見 sendsViewAs），每分鐘一次，內容變了就更新橫幅。
+ * 以查看者自己的身分讀 `GET /delegations`（不帶標頭，見 sendsViewAs），內容變了就更新橫幅。授權者改了範圍時伺服器會通知
+ * （即時更新的 `delegations`）；即時更新斷著時每分鐘讀一次。
  * 找不到這份授權（撤銷）時不在這裡處理：下一個帳本請求會收到 403 `delegation_revoked` 並退出查看模式。
  */
 export function useSyncViewAsTarget() {
   const target = useViewingAs()
+  const interval = useLiveInterval(60_000)
   const delegations = useQuery({
     enabled: target !== null,
     queryKey: sk.delegations,
     queryFn: () => api.listDelegations(),
     staleTime: 30_000,
-    refetchInterval: 60_000,
+    refetchInterval: interval,
   })
   useEffect(() => {
     if (!target || !delegations.data) return

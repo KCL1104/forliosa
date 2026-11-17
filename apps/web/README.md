@@ -26,6 +26,10 @@ pnpm dev:api            # 或在 repo 根目錄 pnpm dev:web:api
 （可用 `FORLIOSA_API_ORIGIN` 改位址），session cookie 是同源的，不需要 CORS。沒有 session 時會自動以
 `demo@forliosa.local` 開發登入（後端必須是 `FORLIOSA_ENV=dev`）；開發登入失敗時顯示登入說明頁與開發登入表單。
 
+登入後每個分頁和後端保持一條即時更新的連線（`GET /api/v1/events`，`src/realtime/`）：別人或另一台裝置改了資料，
+畫面上的那幾份自己重新讀（合約：`docs/api-contract.md`「即時更新（2026-11-17）」）。開發模式的 console 會印出收到的種類
+（`realtime: group.members`）。mock 模式沒有這條連線，各個查詢照原本的間隔重新讀。
+
 ### 只用 mock 示範資料
 
 `pnpm dev` 且沒有設定 `VITE_API_BASE_URL` 時，前端使用瀏覽器內的 **mock adapter**（`src/api/mock/`）：資料依 `docs/api-contract.md` 的格式產生、彼此一致（持股、損益、股利、績效、出清紀錄都由同一份示範交易紀錄算出）。
@@ -63,9 +67,12 @@ mock 的討論資料在記憶體裡（重新載入就回到示範資料）：8 �
 | `pnpm smoke` | Playwright 冒煙測試（需先 `pnpm dev`）：走過所有路由、記一筆交易、隱私模式、⌘K、出清紀錄、定期定額（設定與扣款日草稿）、公告、資料來源與授權 |
 | `pnpm screenshots` | 產生 `docs/screenshots/v2/` 的截圖（mock 商用模式；帳本、AI 草稿、交易、已出清、定期定額草稿、個股總覽／估值／籌碼、過去的持有、設定的定期定額、資料來源與授權、紀錄、手機問 AI；桌面 1440×900 @2x 與 iPhone 15，淺色／深色，共 50 張） |
 | `pnpm screenshots:real` | 產生 `docs/screenshots/real/` 的截圖（真實後端；需先啟動後端與 `pnpm dev:api`） |
+| `node scripts/e2e-realtime.mjs` | 即時更新的實測：兩個瀏覽器、真實後端（啟動方式寫在檔案開頭）；朋友加入群組、另一台裝置記一筆、留言、回覆、背景分頁、串流被擋時的備援，每一項量出幾毫秒出現 |
 | `pnpm design:detect` | Impeccable 偵測器掃描 `src/` |
 
 Playwright 使用環境裡預先安裝的版本（`/opt/node-tools/node_modules/playwright`），不需要 `playwright install`。
+連真實後端的 Playwright 腳本不要用 `waitUntil: "networkidle"`：即時更新的串流一直開著，網路不會閒下來（等畫面上的字，
+或像 `e2e-discussions.mjs`、`screenshots.mjs --real` 把 `/api/v1/events` 回成 503）。
 
 ## 環境變數
 
@@ -104,6 +111,7 @@ src/
   components/ui/  shadcn/ui（style base-nova、Base UI primitives），已依設計系統改寫
   lib/            格式化（format.ts）、升降單位與漲跌停（tick.ts）、標籤、估值／圖表的純函式
   pages/          帳本（ledger：持倉・交易・股利・績效）、個股頁（stock：六個分頁）、群組、紀錄、設定
+  realtime/       即時更新：串流連線（client.ts）、事件 → 要重新讀的查詢（topics.ts）、前景／背景與備援（controller.ts）
   stores/         zustand：顯示偏好
   styles/         globals.css（設計 token）
 ```

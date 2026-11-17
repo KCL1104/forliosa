@@ -15,6 +15,7 @@ from typing import Any
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
+from forliosa import realtime
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import get_settings
 from forliosa.crypto import random_token, token_hash
@@ -161,6 +162,14 @@ def purge(db: Session, group: Group) -> None:
     and memberships (no commit, no permission check: ``delete_group`` and account deletion call it)."""
     from forliosa.services import discussions  # imported here: discussions imports this module
 
+    # Realtime: who was in it is known only now (the memberships go below, with Core statements)
+    members = list(db.scalars(select(GroupMember.user_id).where(GroupMember.group_id == group.id)))
+    payers = list(db.scalars(select(GroupPass.payer_id).where(GroupPass.group_id == group.id,
+                                                              GroupPass.payer_id.is_not(None))))
+    to = tuple(f"u:{u}" for u in members)
+    realtime.emit(db, realtime.event("group.deleted", {"group_id": group.id}, to),
+                  realtime.event("groups.list", {}, to),
+                  *(realtime.event("me", {}, realtime.user(p)) for p in dict.fromkeys(payers)))
     discussions.purge_group(db, group.id)  # the group's topics with their replies, reactions and tags
     for model in (GroupComment, GroupReaction, GroupInvite, NotificationOutbox, TelegramLinkCode, GroupChannel,
                   GroupDigest, GroupDailyReport, GroupShareSetting):
@@ -217,6 +226,7 @@ def remove_member(db: Session, group: Group, m: GroupMember, user_id: str) -> No
             raise forbidden("管理員不能移除擁有者或其他管理員")
         db.execute(update(GroupInvite).where(GroupInvite.group_id == group.id, GroupInvite.multi_use.is_(True),
                                              GroupInvite.revoked_at.is_(None)).values(revoked_at=now_utc()))
+        realtime.emit(db, realtime.event("group.invites", {"group_id": group.id}, realtime.managers(group.id)))
     db.execute(delete(GroupShareSetting).where(GroupShareSetting.group_id == group.id,
                                                GroupShareSetting.user_id == target.user_id))
     db.delete(target)
@@ -434,8 +444,11 @@ def put_reaction(db: Session, md: MarketData, group: Group, me: GroupMember, tar
 def delete_reaction(db: Session, md: MarketData, group: Group, me: GroupMember, target: str,
                     emoji: str) -> dict[str, Any]:
     _require_target(db, md, group, sharing.members_of(db, group.id), target)
-    db.execute(delete(GroupReaction).where(GroupReaction.group_id == group.id, GroupReaction.target == target,
-                                           GroupReaction.user_id == me.user_id, GroupReaction.emoji == emoji))
+    res = db.execute(delete(GroupReaction).where(GroupReaction.group_id == group.id, GroupReaction.target == target,
+                                                 GroupReaction.user_id == me.user_id, GroupReaction.emoji == emoji))
+    if res.rowcount:
+        realtime.emit(db, realtime.event("group.comments", {"group_id": group.id, "target": target},
+                                         realtime.group(group.id)))
     db.commit()
     return {"target": target, "reactions": sharing.reactions_for(db, group.id, target, me.user_id)}
 
