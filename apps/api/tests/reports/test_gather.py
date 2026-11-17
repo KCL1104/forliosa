@@ -207,11 +207,15 @@ def check(page_age, w=W, *, url=UDN, cited=CITED, title="外資賣超千億",
 
 
 def test_a_premarket_keeps_a_page_of_0_days_ago_found_inside_its_window():
+    # the engine counts days in UTC (the third dry run): at 06:16 Taipei it is still 11/16 there, so "0 days ago" is
+    # the previous session's day and "1 days ago" (11/15 08:00 to 11/16 08:00 Taipei) is before the window
     fact, why = check("0 days ago", PRE)
+    assert why is None and fact["date_only"] and fact["published_at"] == "2026-11-16"
+    assert check("1 days ago", PRE) == (None, "outside_window")
+    # a page dated the cut-off's own day, found inside the window
+    fact, why = check("2026-11-17", PRE)
     assert why is None and fact["date_only"] and fact["published_at"] == "2026-11-17"
-    assert check("1 days ago", PRE)[1] is None  # the previous session's day, as before
-    assert check("2 days ago", PRE) == (None, "outside_window")
-    # a rebuild after the window (searched at 17:46): "0 days ago" may be after the cut-off
+    # a rebuild after the window (searched at 17:46, 09:46 UTC): "0 days ago" may be after the cut-off
     late = gather.Window(PRE.start, PRE.end, PRE.cutoff, PRE.us_sessions, ts(TUE, 17, 46))
     assert check("0 days ago", late) == (None, "no_publish_time")
     assert check("2026-11-17", late) == (None, "no_publish_time")
@@ -471,7 +475,7 @@ def test_a_slow_topic_does_not_drop_the_other_topics_same_day_pages():
     fake = FakeAnthropic()
     for _ in range(2):
         fake.reply(*gather_reply("TWSE_INST.foreign", "〔中央社〕報導，外資 11/16 賣超 1,234.5 億元。", CNA,
-                                 "外資賣超千億", CITED, page_age="0 days ago"))
+                                 "外資賣超千億", CITED, page_age="2026-11-17"))
     client = fake.client("sk-test")
     times = iter([ts(TUE, 6, 30), ts(TUE, 7, 10)])  # the first topic replied in time, the second after 07:00
     res = gather.run_topics([topic(), topic()], "claude-sonnet-5-5", "low",

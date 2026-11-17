@@ -1,10 +1,12 @@
 """The compliance read (contract §11): after every rule check passed, Claude Haiku 5.5 (effort low, no server-side
 fallback) reads each AI sentence — without refs or the data pack — for recommendations, price levels, direction calls,
-futures direction, personal advice, ratings and other advice — the title and the items' names (``event``, ``theme``)
-included. An issue on a path that exists counts even when its ``quote`` is not word for word a passage of that
-sentence (shortened with 「…」, other punctuation or spaces): this is the last gate, so it errs on the side of
-holding back; only an issue on an unknown path or category is ignored. A failed call is tried once more (on another
-slot when the pool has no reserved one); failing twice, the attempt publishes the data edition — compliance first.
+futures direction, personal advice, ratings, other advice and private-life details (an affair, a relationship, health
+or family, even as a named outlet reported it: the owner's decision of 2026-11-17) — the title and the items' names
+(``event``, ``theme``) included. An issue on a path that exists counts even when its ``quote`` is not word for word
+a passage of that sentence (shortened with 「…」, other punctuation or spaces): this is the last gate, so it errs on
+the side of holding back; only an issue on an unknown path or category is ignored. A failed call is tried once more
+(on another slot when the pool has no reserved one); failing twice, the attempt publishes the data edition —
+compliance first.
 
 If the API refuses structured output for the check model (contract §21), the request is sent again asking for plain
 JSON, and the reply is parsed and checked by the server; later checks skip the schema.
