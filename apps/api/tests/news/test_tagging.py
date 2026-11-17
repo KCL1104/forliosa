@@ -805,7 +805,7 @@ def test_an_industry_sector_adds_its_theme_so_a_theme_search_finds_it(engine, co
     """「金融股的新聞都選」 is not left to the model: a bank's outage filed under 事故／資安 and 金融保險業 (or
     美股金融) also gets 金融; 航運業 gets 航運. The model's own three themes stay."""
     with Session(engine) as db:
-        service.store(db, "2330.TW", [head(f"新聞 {i}", f"https://money.udn.com/f/{i}",
+        service.store(db, "2330.TW", [head(f"台積電新聞 {i}", f"https://money.udn.com/f/{i}",
                                            at=NOW - timedelta(minutes=10 - i)) for i in range(4)], NOW)
         reply(fake, entry(1, ["事故／資安"], ["金融保險業"]), entry(2, ["事故／資安"], ["美股金融"]),
               entry(3, ["事故／資安"], ["航運業"]), entry(4, ["AI 伺服器", "先進封裝", "財報／法說"], ["金融保險業"]))
@@ -814,7 +814,7 @@ def test_an_industry_sector_adds_its_theme_so_a_theme_search_finds_it(engine, co
         found = [x["title"] for x in tags.search(db, commercial_md, theme="finance", now=NOW, settings=settings)]
     assert themes == {0: {"incidents", "finance"}, 1: {"incidents", "finance"}, 2: {"incidents", "shipping"},
                       3: {"ai_server", "advanced_packaging", "earnings", "finance"}}
-    assert sorted(found) == ["新聞 0", "新聞 1", "新聞 3"]
+    assert sorted(found) == ["台積電新聞 0", "台積電新聞 1", "台積電新聞 3"]
 
 
 def test_by_topic_does_not_compare_every_pair_of_a_big_group(engine, commercial_md, settings, monkeypatch):
@@ -825,7 +825,8 @@ def test_by_topic_does_not_compare_every_pair_of_a_big_group(engine, commercial_
     with Session(engine) as db:
         for i in range(n):
             u = f"https://money.udn.com/money/story/{i}"
-            title = "".join(chr(rng.randrange(0x4E00, 0x9FA5)) for _ in range(20))
+            # the stock's name first: a Taiwan stock's row is shown only while its title names it (ReadMatch)
+            title = "台積電" + "".join(chr(rng.randrange(0x4E00, 0x9FA5)) for _ in range(20))
             db.add(NewsArticle(symbol="2330.TW", url_key=url_key(u), url=u, title=title, outlet="經濟日報",
                                domain="money.udn.com", published_at=NOW - timedelta(minutes=i), source="gdelt",
                                fetched_at=NOW))

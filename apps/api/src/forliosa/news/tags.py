@@ -7,12 +7,15 @@
   reports (盤前／盤後／週報) to compare sectors and themes.
 
 Every result passes the same filters as the stock page (:func:`forliosa.news.service.shown`: blocked domains, pages
-that are not news, robot flashes, sources the data policy does not serve; :func:`search` also skips Taiwan stocks'
-headlines tagged without a single theme, sector or related stock, :func:`forliosa.news.service.tagged_not_finance`)
-and is de-duplicated (same URL or near-identical title). Near-identical titles take a pairwise comparison
-(:func:`forliosa.news.normalize.dedupe`), so it only ever looks at the newest headlines it needs (:func:`_newest`),
-never at a whole week's group. Only ids of the current vocabulary are shown; untagged headlines are still found by
-stock and keyword. Headlines are metadata only (title, outlet, time, link).
+that are not news, robot flashes, sources the data policy does not serve; a Taiwan stock's row only while its stored
+title still names that stock by today's matching rule, :class:`forliosa.news.service.ReadMatch`: a headline whose
+every row fails is not shown, and an item's ``stocks`` lists only the rows that pass; :func:`search` also skips
+Taiwan stocks' headlines tagged without a single theme, sector or related stock,
+:func:`forliosa.news.service.tagged_not_finance`) and is de-duplicated (same URL or near-identical title).
+Near-identical titles take a pairwise comparison (:func:`forliosa.news.normalize.dedupe`), so it only ever looks at the
+newest headlines it needs (:func:`_newest`), never at a whole week's group. Only ids of the current vocabulary are
+shown; untagged headlines are still found by stock and keyword. Headlines are metadata only (title, outlet, time,
+link).
 """
 
 from __future__ import annotations
@@ -20,7 +23,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
 
 from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
@@ -31,6 +34,9 @@ from forliosa.models import NewsArticle, NewsTag
 from forliosa.news import taxonomy as tx
 from forliosa.news.normalize import Headline, dedupe, title_key, url_key
 from forliosa.timeutil import iso_taipei, now_utc
+
+if TYPE_CHECKING:
+    from forliosa.news.service import ReadMatch
 
 MAX_DAYS = 90
 SEARCH_LIMIT = 20
@@ -118,13 +124,21 @@ class _Shown:
     key_of: dict[str, str]  # headline url -> url_key
 
 
-def _shown(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings) -> _Shown:
-    from forliosa.news.service import blocked_domains, shown
+def _shown(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings,
+           check: ReadMatch | None = None) -> _Shown:
+    """Rows -> shown headlines. A Taiwan stock's row whose title no longer names it (:class:`ReadMatch`) is left out
+    first: a headline stored only under wrong stocks is not shown, one also stored under the right stock is shown with
+    that stock only."""
+    from forliosa.news.service import ReadMatch, blocked_domains, shown
 
     blocked = blocked_domains(db, settings)
+    if check is None:
+        check = ReadMatch(db, md)
+    check.prefetch(r.symbol for r in rows)
     groups: dict[str, list[NewsArticle]] = {}
     for r in rows:
-        groups.setdefault(r.url_key, []).append(r)
+        if check.keeps(r.symbol, r.title, r.url):
+            groups.setdefault(r.url_key, []).append(r)
     heads: dict[str, Headline] = {}
     key_of: dict[str, str] = {}
     for key, group in groups.items():
@@ -191,10 +205,10 @@ def _render(db: Session, md: MarketData, heads: Sequence[Headline], found: _Show
     return out
 
 
-def _items(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings, limit: int
-           ) -> list[dict[str, Any]]:
+def _items(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings, limit: int,
+           check: ReadMatch | None = None) -> list[dict[str, Any]]:
     """Article rows -> the newest ``limit`` stories: shown ones only, de-duplicated, with their tags."""
-    found = _shown(db, md, rows, settings)
+    found = _shown(db, md, rows, settings, check)
     return _render(db, md, _newest(list(found.heads.values()), limit), found)
 
 
@@ -213,7 +227,7 @@ def search(db: Session, md: MarketData, *, theme: str | None = None, sector: str
         return []
     now = now or now_utc()
     days = max(1, min(MAX_DAYS, int(days)))
-    from forliosa.news.service import tagged_not_finance
+    from forliosa.news.service import ReadMatch, kept_rows, tagged_not_finance
 
     q = select(NewsArticle).where(NewsArticle.published_at >= now - timedelta(days=days),
                                   ~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol))
@@ -229,22 +243,26 @@ def search(db: Session, md: MarketData, *, theme: str | None = None, sector: str
     if keyword and keyword.strip():
         pattern = f"%{_escape_like(keyword.strip().casefold())}%"
         q = q.where(func.lower(NewsArticle.title).like(pattern, escape="\\"))
-    rows = list(db.scalars(q.order_by(NewsArticle.published_at.desc(), NewsArticle.id).limit(limit * 8)))
+    # a Taiwan stock's row whose title no longer names it is passed over here already (ReadMatch), so that rows
+    # stored under the wrong stock before 2026-11-17 do not use up the list
+    check = ReadMatch(db, md)
+    rows = kept_rows(db, q.order_by(NewsArticle.published_at.desc(), NewsArticle.id), check, limit * 8)
     if symbol and rows:  # the other symbols the matching URLs are stored under (for the item's "stocks")
         keys = list({r.url_key for r in rows})
         seen = {(r.symbol, r.url_key) for r in rows}
         rows += [r for r in db.scalars(select(NewsArticle).where(NewsArticle.url_key.in_(keys)))
                  if (r.symbol, r.url_key) not in seen]
         rows.sort(key=lambda r: _aware(r.published_at), reverse=True)
-    return _items(db, md, rows, settings, limit)
+    return _items(db, md, rows, settings, limit, check)
 
 
 # -- grouped by topic (market reports) ----------------------------------------------------------------------------
 def by_topic(db: Session, md: MarketData, kind: Literal["theme", "sector"], since: datetime, until: datetime, *,
              per_group: int = 5, settings: Settings | None = None) -> list[dict[str, Any]]:
     """Headlines published in ``[since, until)`` grouped by their themes or sectors: ``[{id, label, count, items}]``,
-    the most headlines first (then the vocabulary's order); ``count`` is the number of distinct stories (shown; one
-    per URL, the same title counted once), ``items`` the newest ``per_group`` of them, near-identical titles merged
+    the most headlines first (then the vocabulary's order); ``count`` is the number of distinct stories (shown, a
+    Taiwan stock's row only while its title still names it: see the module docstring; one per URL, the same title
+    counted once), ``items`` the newest ``per_group`` of them, near-identical titles merged
     (see :func:`search` for an item's fields). A headline with two themes counts in both. Linear in the number of
     headlines: a week of a busy theme (thousands) takes well under a second."""
     settings = settings or get_settings()

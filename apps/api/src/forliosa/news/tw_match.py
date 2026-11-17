@@ -380,15 +380,17 @@ _OVERLAP_INDEX: list[tuple[Collection[str], dict[str, list[str]], int]] = []
 def _overlap_index(peers: Collection[str]) -> tuple[dict[str, list[str]], int]:
     """Listed names of two characters or more by first character, and the longest length (cached for the last
     ``peers`` collection)."""
-    if not _OVERLAP_INDEX or _OVERLAP_INDEX[0][0] is not peers:
+    entry = _OVERLAP_INDEX[0] if _OVERLAP_INDEX else None  # read once (request threads share it)
+    if entry is None or entry[0] is not peers:
         first: dict[str, list[str]] = {}
         longest = 1
         for p in peers:
             if len(p) >= 2 and has_han(p):
                 first.setdefault(p[0], []).append(p)
                 longest = max(longest, len(p))
-        _OVERLAP_INDEX[:] = [(peers, first, longest)]
-    return _OVERLAP_INDEX[0][1], _OVERLAP_INDEX[0][2]
+        entry = (peers, first, longest)
+        _OVERLAP_INDEX[:] = [entry]
+    return entry[1], entry[2]
 
 
 def _cue_near(text: str, start: int, end: int, window: int | None = None) -> bool:
@@ -452,15 +454,17 @@ _PEER_INDEX: list[tuple[Collection[str], dict[str, list[str]], dict[str, list[st
 def _peer_index(peers: Collection[str]) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
     """Names of two characters or more that are not everyday words, by first and by last character (cached for the
     last ``peers`` collection)."""
-    if not _PEER_INDEX or _PEER_INDEX[0][0] is not peers:
+    entry = _PEER_INDEX[0] if _PEER_INDEX else None  # read once (request threads share it)
+    if entry is None or entry[0] is not peers:
         first: dict[str, list[str]] = {}
         last: dict[str, list[str]] = {}
         for p in peers:
             if len(p) >= 2 and has_han(p) and p not in GENERIC_NAMES:  # 「大同、三星」 are two townships
                 first.setdefault(p[0], []).append(p)
                 last.setdefault(p[-1], []).append(p)
-        _PEER_INDEX[:] = [(peers, first, last)]
-    return _PEER_INDEX[0][1], _PEER_INDEX[0][2]
+        entry = (peers, first, last)
+        _PEER_INDEX[:] = [entry]
+    return entry[1], entry[2]
 
 
 def _strict_context(text: str, start: int, end: int, name: str, peers: Collection[str]) -> bool:
@@ -558,18 +562,22 @@ def catalog_names(master: Mapping[str, object]) -> frozenset[str]:
 
 def _master_entry(master: Mapping[str, object], forms: Mapping[str, tuple[str, ...]] | None = None
                   ) -> tuple[frozenset[str], frozenset[str], dict[str, tuple[str, ...]]]:
-    """(catalog names, catalog and official names, longer-name cache), cached per master and forms mapping."""
-    if not _LONGER or _LONGER[0][0] is not master or _LONGER[0][1] is not forms:  # rebuilt at most hourly
+    """(catalog names, catalog and official names, longer-name cache), cached per master and forms mapping. The entry
+    is read once: the stored-headline check at read time (``service.ReadMatch``) shares it across request threads."""
+    entry = _LONGER[0] if _LONGER else None
+    if entry is None or entry[0] is not master or entry[1] is not forms:  # rebuilt at most hourly
         names = catalog_names(master)
         everything = names | {f for fs in (forms or {}).values() for f in fs}
-        _LONGER[:] = [(master, forms, names, frozenset(everything), {})]
-    return _LONGER[0][2], _LONGER[0][3], _LONGER[0][4]
+        entry = (master, forms, names, frozenset(everything), {})
+        _LONGER[:] = [entry]
+    return entry[2], entry[3], entry[4]
 
 
 def names_in_master(master: Mapping[str, object]) -> frozenset[str]:
     """:func:`catalog_names`, cached per master."""
-    if _LONGER and _LONGER[0][0] is master:
-        return _LONGER[0][2]
+    entry = _LONGER[0] if _LONGER else None
+    if entry is not None and entry[0] is master:
+        return entry[2]
     return _master_entry(master)[0]
 
 
