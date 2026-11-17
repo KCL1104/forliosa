@@ -362,6 +362,7 @@ def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
     disposed = in_effect(db, "disposition", day.day)
     excluded: dict[str, int] = defaultdict(int)
     scope: list[Quote] = []
+    in_range: list[Quote] = []  # the scope before the move check: the turnover list's (a move is not needed there)
     for i, q in enumerate(ranked):
         if i >= SCOPE_RANK and (q.mcap or 0) < SCOPE_MCAP:
             continue
@@ -373,8 +374,10 @@ def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
             excluded["disposition"] += 1
         elif q.pct is None or abs(q.pct) > MAX_MOVE:
             excluded["bad_move"] += 1
+            in_range.append(q)
         else:
             scope.append(q)
+            in_range.append(q)
     order = {q.symbol: i for i, q in enumerate(ranked)}  # market-cap rank breaks ties
     up = sorted((q for q in scope if q.pct > 0), key=lambda q: (-q.pct, order[q.symbol]))
     down = sorted((q for q in scope if q.pct < 0), key=lambda q: (q.pct, order[q.symbol]))
@@ -382,10 +385,10 @@ def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
     lu = [q for q in scope if q.limit_hit() == 1] if limits else []
     losers = sorted(ld, key=lambda q: order[q.symbol])[:MOVERS_N] if len(ld) >= LIMIT_MANY else down[:MOVERS_N]
     gainers = sorted(lu, key=lambda q: order[q.symbol])[:MOVERS_N] if len(lu) >= LIMIT_MANY else up[:MOVERS_N]
-    commons = day.commons()
-    has_value = any(q.value for q in commons)
+    # the turnover list shares the scope (memo §2.4: top 200 or ≥ NT$30bn, no innovation board / altered / disposed)
+    has_value = any(q.value for q in day.commons())
     col = "value" if has_value else "volume"
-    by_value = sorted((q for q in commons if getattr(q, col)), key=lambda q: (-(getattr(q, col) or 0),
+    by_value = sorted((q for q in in_range if getattr(q, col)), key=lambda q: (-(getattr(q, col) or 0),
                                                                                order.get(q.symbol, 10**6)))[:TOP_N]
     return Lists(top10, gainers, losers, by_value, col, len(ld) if len(ld) >= LIMIT_MANY else None,
                  len(lu) if len(lu) >= LIMIT_MANY else None, SCOPE_RULE, dict(excluded))

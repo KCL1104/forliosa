@@ -472,9 +472,19 @@ def _filings(p: Pack, day: date, since_hhmm: str | None, top: set[str], names: d
         p.datasets.add(f"{e.source}/material_info")
 
 
+RESEARCH_SOURCES = 4  # W entries per stock at most
+
+
 def _research(p: Pack, symbols: Iterable[str], session: date) -> None:
-    """The shared 「為什麼漲跌」 research of listed stocks (sources and their snippets; snippets never reach a page)."""
+    """The shared 「為什麼漲跌」 research of listed stocks: one W per source with that source's own snippets (a W's
+    footnote is the page its text came from; snippets never reach a page). A source passes the gathering's checks
+    first: an allowed domain, published inside the edition's window, and its snippets without ratings or target
+    prices."""
+    from forliosa.ai.analyst import date_from_url, datetime_from_page_age
     from forliosa.ai.research import AFTER_CLOSE, INTRADAY
+    from forliosa.news.outlets import host_of, on_domain
+    from forliosa.reports.calls import REPORT_SEARCH_DOMAINS
+    from forliosa.reports.gather import RATING, Window, in_window
 
     syms = list(dict.fromkeys(symbols))
     if not syms:
@@ -491,12 +501,27 @@ def _research(p: Pack, symbols: Iterable[str], session: date) -> None:
         r = best.get(sym)
         if r is None:
             continue
-        sources = [{"outlet": s.get("outlet"), "title": s.get("title"), "url": s.get("url"),
-                    "published": s.get("page_age")} for s in (r.sources or [])[:8] if s.get("url")]
-        quotes = [q for s in (r.sources or [])[:8] for q in (s.get("snippets") or [])][:12]
-        if sources:
-            p.research.append({"id": p._id("W"), "symbol": sym, "session": session.isoformat(), "sources": sources,
-                               "quotes": quotes})
+        n = 0
+        for s in (r.sources or [])[:8]:
+            url = str(s.get("url") or "")
+            if not url or not any(on_domain(host_of(url), d) for d in REPORT_SEARCH_DOMAINS):
+                continue
+            try:
+                seen = _aware(datetime.fromisoformat(str(s.get("found_at"))) if s.get("found_at") else r.updated_at)
+            except ValueError:
+                seen = _aware(r.updated_at)
+            pub = datetime_from_page_age(s.get("page_age"), seen) or date_from_url(url)
+            if pub is None or not in_window(pub, Window(p.ed.web_from, p.ed.web_to, p.cutoff, set(), seen)):
+                continue
+            quotes = [str(q) for q in s.get("snippets") or [] if q and not RATING.search(str(q))][:3]
+            if not quotes or RATING.search(str(s.get("title") or "")):
+                continue
+            p.research.append({"id": p._id("W"), "symbol": sym, "session": session.isoformat(),
+                               "sources": [{"outlet": s.get("outlet"), "title": s.get("title"), "url": url,
+                                            "published": s.get("page_age")}], "quotes": quotes})
+            n += 1
+            if n >= RESEARCH_SOURCES:
+                break
 
 
 def _aware(dt: datetime) -> datetime:
@@ -780,8 +805,8 @@ def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, contrib: dict[str, Deci
                                                   else f"{q.volume or 0:,}")}) for q in lists.by_value]
     p.table(B.table("T2_value", f"{'成交值' if lists.value_column == 'value' else '成交量'}前 10（{md(d)}）",
                     [*B.STOCK_COLUMNS, ("value", col_label, "right", True)], value_rows,
-                    rule="上市普通股" + ("" if lists.value_column == "value"
-                                         else "；這天的資料沒有成交金額，改依成交量"),
+                    rule=lists.scope_rule + ("" if lists.value_column == "value"
+                                             else "；這天的資料沒有成交金額，改依成交量"),
                     sources=srcs))
 
 

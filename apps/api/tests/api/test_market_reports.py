@@ -104,7 +104,9 @@ def test_list_pages_and_versions(on, other_client):
     assert [x["id"] for x in first["items"]] == [ids[1]] and first["next_cursor"]
     second = other_client.get(f"{API}/market/reports?limit=1&cursor={first['next_cursor']}").json()
     assert [x["id"] for x in second["items"]] == [ids[0]] and second["next_cursor"] is None
-    assert other_client.get(f"{API}/market/reports?kind=premarket").json()["items"][0]["has_ai"] is False
+    pre = other_client.get(f"{API}/market/reports?kind=premarket").json()["items"][0]
+    assert pre["has_ai"] is False and pre["prev_session"] == MON.isoformat()  # the session 「昨日你的群組」 is about
+    assert second["items"][0]["prev_session"] is None
     assert other_client.get(f"{API}/market/reports?cursor=%%%").status_code == 422
     assert other_client.get(f"{API}/market/reports/{ids[0]}?version=1").json()["version"] == 1
     assert other_client.get(f"{API}/market/reports/{ids[0]}?version=9").status_code == 404

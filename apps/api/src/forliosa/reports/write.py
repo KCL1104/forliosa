@@ -8,7 +8,8 @@ AI_MREPORT_TIMEOUT_SECONDS), structured output, server-side fallbacks, no tools,
   user turn listing the problems; same slot, same model and effort.
 
 ``call(kw)`` runs one request on the attempt's key slot and returns a :class:`calls.CallResult`; the pipeline books
-every reply it gets back (:attr:`Written.msgs`).
+every reply it gets back (:attr:`Written.msgs`). A call that raises does not lose the replies before it: the error is
+kept in :attr:`Written.exc` (the pipeline books the replies, then ends the attempt as failed).
 """
 
 from __future__ import annotations
@@ -38,6 +39,7 @@ class Written:
     last: Any = None  # the reply the output came from
     refusal: str | None = None  # a refusal's category ("" when the API gave none)
     error: str | None = None  # a short label: parse | schema | max_tokens | exception name
+    exc: BaseException | None = None  # a call that raised (after the replies in ``msgs``)
 
 
 def system() -> list[dict[str, Any]]:
@@ -97,7 +99,12 @@ def _run(w: Written, step: str, kind: str, pack: dict[str, Any], writer: Writer,
          call: Callable[[dict[str, Any]], calls.CallResult], settings: Any) -> None:
     effort = writer.effort
     for again in (False, True):
-        res = call(request(kind, pack, writer, messages, settings, effort))
+        try:
+            res = call(request(kind, pack, writer, messages, settings, effort))
+        except Exception as exc:  # the replies so far stay in ``w.msgs`` to be booked
+            w.exc, w.error = exc, type(exc).__name__[:200]
+            log.warning("market report %s: the %s call failed (%s)", kind, step, w.error)
+            return
         w.msgs.append((step, writer.model, effort, res.msg, res.seconds))
         stop = getattr(res.msg, "stop_reason", None)
         if stop == "refusal":

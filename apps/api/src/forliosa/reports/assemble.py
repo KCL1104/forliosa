@@ -27,6 +27,10 @@ DISCLAIMER_DATA = "依公開資料整理，報告本文人人相同；Forliosa �
 DISCLAIMER_FULL = ("這份報告由 AI 依公開資料與媒體報導整理，報告本文人人相同，不針對任何人的持股或財務狀況。"
                    "Forliosa 只替你整理資訊，不是投資顧問；這份報告不是投資建議，也不推薦買賣任何股票。"
                    "內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。")
+# an edition without AI text (the data editions, a fallback, every AI section dropped): no AI or media wording
+DISCLAIMER_FULL_DATA = ("這份報告依公開資料整理，報告本文人人相同，不針對任何人的持股或財務狀況。"
+                        "Forliosa 只替你整理資訊，不是投資顧問；這份報告不是投資建議，也不推薦買賣任何股票。"
+                        "內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。")
 MODEL_LINE = "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。"
 MODEL_LINE_MENTION = "報告內容提到 Anthropic，撰寫的模型也是 Anthropic 的。"
 STATUS_WAITING = "AI 段落還在整理，這是只有資料的版本。"
@@ -436,6 +440,16 @@ def _all_sentences(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return out
 
 
+def refresh_ai_lines(payload: dict[str, Any]) -> None:
+    """After a correction took AI text out: ``has_ai``, the two disclaimers and the model line follow what is left."""
+    left = payload.get("title_origin") == "ai" or payload.get("highlights_origin") == "ai" or any(
+        s.get("origin") == "ai" and not s.get("dropped") for s in payload.get("sections") or [])
+    if left:
+        return
+    payload.update({"has_ai": False, "disclaimer_line": DISCLAIMER_DATA, "disclaimer_full": DISCLAIMER_FULL_DATA,
+                    "model_line": None})
+
+
 def number_footnotes(payload: dict[str, Any], pack: dict[str, Any]) -> None:
     idx: dict[str, dict[str, Any]] = {}
     for key in ("facts", "web", "calendar", "filings", "research"):
@@ -523,7 +537,7 @@ def build(*, kind: str, report_id: str, edition_date: date, period: tuple[date, 
         "sources": {"data": list(blocks.get("source_labels") or []), "web": [],
                     "disagreements": [{"text": d["text"]} for d in pack.get("disagreements") or []],
                     "manual": [MANUAL_SOURCES] if manual else []},
-        "disclaimer_full": DISCLAIMER_FULL,
+        "disclaimer_full": DISCLAIMER_FULL if ai_text_left else DISCLAIMER_FULL_DATA,
         "model_line": (MODEL_LINE + (MODEL_LINE_MENTION if mentions_anthropic else "")) if ai_text_left else None,
         "corrections": list(corrections or []),
         "notes": [NOTE_TEXT.get(n, n) for n in (notes if notes is not None else pack.get("notes") or [])

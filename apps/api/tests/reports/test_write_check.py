@@ -94,8 +94,10 @@ def test_check_request_and_issues(pk):
     first = out["what_happened"][0]["sentences"][0]["text"]
     fake = FakeAnthropic().reply(json_text({"issues": [
         {"path": "what_happened[0].sentences[0]", "category": "direction", "quote": first[:6]},
-        {"path": "what_happened[0].sentences[0]", "category": "direction", "quote": "模型自己編的"}]}))
+        {"path": "what_happened[9].sentences[0]", "category": "direction", "quote": "模型自己編的"},
+        {"path": "what_happened[0].sentences[0]", "category": "made_up", "quote": first[:6]}]}))
     res = compliance.check(out, "close", "claude-haiku-5-5", "low", checker(fake), Settings())
+    # an unknown path or category is ignored
     assert res.ok and len(res.issues) == 1 and res.issues[0]["category"] == "direction"
     body = fake.requests[0]["body"]
     assert body["model"] == "claude-haiku-5-5" and body["output_config"]["effort"] == "low"
@@ -119,3 +121,25 @@ def test_check_without_structured_output(pk):
     assert res.ok and res.issues == []
     body = fake.requests[1]["body"]
     assert "format" not in body["output_config"] and "只輸出一個 JSON" in body["system"]
+
+
+def test_a_quote_that_is_not_word_for_word_still_counts():
+    payload = [{"path": "sectors[0].sentences[0]", "text": "外資連三日買超半導體類股，類股仍有上漲空間。"}]
+
+    def reply(quote: str):
+        return FakeAnthropic().reply(json_text({"issues": [
+            {"path": "sectors[0].sentences[0]", "category": "direction", "quote": quote}]})).client("k")
+
+    for quote in ("類股仍有上漲空間…", "…類股仍有上漲空間", "類股 仍有上漲空間", "類股仍有上漲空間.", "完全不同的字"):
+        msg = reply(quote).beta.messages.create(model="claude-haiku-5-5", max_tokens=10, messages=[])
+        [issue] = compliance.parse(msg, payload)
+        assert issue["path"] == "sectors[0].sentences[0]" and issue["category"] == "direction"
+    msg = reply("類股仍有上漲空間").beta.messages.create(model="claude-haiku-5-5", max_tokens=10, messages=[])
+    assert compliance.parse(msg, payload)[0]["quote"] == "類股仍有上漲空間"
+
+
+def test_item_names_are_read_too(pk):
+    out = close_output(pk)
+    out["tonight"][0]["event"] = "台積電目標價上看 2,000 元"
+    paths = [x["path"] for x in compliance.items(out, "close")]
+    assert paths[:2] == ["title", "tonight[0].event"]

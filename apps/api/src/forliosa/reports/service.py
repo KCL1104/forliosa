@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import copy
 import logging
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -40,7 +41,7 @@ from forliosa.models import (
 )
 from forliosa.reports import accounting, assemble, calendars, pipeline
 from forliosa.reports import settings as rs
-from forliosa.reports.schedule import KIND_LABELS, KINDS, md, md_wd
+from forliosa.reports.schedule import KIND_LABELS, KINDS, edition_on, md, md_wd
 from forliosa.services.discussions import is_site_admin
 from forliosa.timeutil import TAIPEI, iso_taipei, now_utc
 
@@ -86,8 +87,12 @@ def _version(db: Session, report: MarketReport, number: int | None = None) -> Ma
 
 
 def summary(report: MarketReport, v: MarketReportVersion) -> dict[str, Any]:
+    """``prev_session``: a premarket edition's previous Taiwan session (holidays skipped: the day 「昨日你的群組」 is
+    about), else null."""
     p = v.payload or {}
+    ed = edition_on(report.kind, report.edition_date) if report.kind == "premarket" else None
     return {"id": report.id, "kind": report.kind, "kind_label": KIND_LABELS[report.kind],
+            "prev_session": ed.prev_session.isoformat() if ed is not None and ed.prev_session else None,
             "edition_date": report.edition_date.isoformat(),
             "edition_label": assemble.edition_label(report.kind, report.edition_date,
                                                     (report.period_start, report.period_end)),
@@ -205,8 +210,8 @@ def mark_seen(db: Session, user: User, now: datetime | None = None) -> None:
 # -- admin: overview and settings --------------------------------------------------------------------------------
 # The shapes below are the web app's (``apps/web/src/api/types.ts``: AdminReportsOverview, ReportsConfigResult,
 # AdminTrial, TrialReveal, ReportValidation): the contract (§14.2) only said what each answer holds.
-KEY_STATUS = {"ok": "ok", "cooling": "cooldown", "disabled": "disabled", "exhausted": "exhausted",
-              "over_budget": "exhausted", "not_configured": "disabled"}
+KEY_STALE = timedelta(minutes=15)
+KEY_STALE_NOTE = "背景工作超過 15 分鐘沒有回報，狀態可能不是最新的。"
 
 
 def _revealed(cfg: MarketReportConfig) -> bool:
@@ -215,7 +220,8 @@ def _revealed(cfg: MarketReportConfig) -> bool:
 
 def trial_progress(db: Session, settings: Settings) -> dict[str, Any]:
     """``days_done``: the trading days the blind test has editions for (第 3／5 個交易日); ``finished``: every daily
-    edition of those days and the weekly one are closed."""
+    edition of those days and the weekly one are closed. A blind test that started after the first day's premarket
+    (its first edition is that day's close) has one daily edition fewer: the sixth day's premarket is not in it."""
     reports = list(db.scalars(select(MarketReport).where(MarketReport.trial.is_(True))))
     daily = [r for r in reports if r.kind != "weekly"]
     weekly = [r for r in reports if r.kind == "weekly"]
@@ -223,7 +229,9 @@ def trial_progress(db: Session, settings: Settings) -> dict[str, Any]:
     total_days = settings.ai_mreport_trial_days
     daily_done = sum(1 for r in daily if r.closed_at is not None or r.state == "skipped")
     weekly_done = sum(1 for r in weekly if r.closed_at is not None)
-    daily_total = total_days * 2
+    first = days[0] if days else None
+    missed = first is not None and not any(r.kind == "premarket" and r.edition_date == first for r in daily)
+    daily_total = total_days * 2 - (1 if missed else 0)
     return {"daily_done": daily_done, "daily_total": daily_total,
             "days_done": min(len(days), total_days), "days_total": total_days,
             "weekly_count": weekly_done, "weekly_total": 1, "weekly_done": weekly_done >= 1,
@@ -286,21 +294,24 @@ def writers_view(db: Session, cfg: MarketReportConfig, settings: Settings, now: 
     return out
 
 
-def slot_status(settings: Settings) -> dict[str, Any]:
-    """The reports' own key slot: ``slot`` None = none kept for them (the shared pool)."""
+def slot_status(db: Session, cfg: MarketReportConfig, now: datetime) -> dict[str, Any]:
+    """The reports' own key slot as the worker last saw it (``cfg.key_state``: the worker is another process, and only
+    its pool uses the slot); before the worker has written it, this process's view."""
+    from forliosa.ai import store
     from forliosa.ai.keypool import get_key_pool
-    from forliosa.reports.calls import report_slot
+    from forliosa.reports.calls import slot_state
 
-    pool = get_key_pool()
-    reserved = sorted(getattr(pool, "reserved", ()) or ())
-    if not reserved:
-        return {"slot": None, "status": "ok", "note": None}
-    n = reserved[0]
-    slot = pool.get(n)
-    state = pool.state(slot) if slot is not None else "not_configured"
-    usable = report_slot(pool) is not None
-    return {"slot": n, "status": KEY_STATUS.get(state, "disabled"),
-            "note": None if usable else "目前不能用，只發資料版。"}
+    seen = cfg.key_state or None
+    if not seen:
+        return slot_state(get_key_pool(), store.slot_month_costs(db, now))
+    out = {"slot": seen.get("slot"), "status": seen.get("status") or "ok", "note": seen.get("note")}
+    try:
+        checked = datetime.fromisoformat(str(seen.get("checked_at")))
+    except ValueError:
+        checked = None
+    if checked is None or now - checked > KEY_STALE:
+        out["note"] = " ".join(x for x in (out["note"], KEY_STALE_NOTE) if x)
+    return out
 
 
 def overview(db: Session, now: datetime | None = None, settings: Settings | None = None) -> dict[str, Any]:
@@ -328,7 +339,7 @@ def overview(db: Session, now: datetime | None = None, settings: Settings | None
                   "weekly_done": prog["weekly_done"], "finished": prog["finished"],
                   "started_on": cfg.trial_started_on.isoformat() if cfg.trial_started_on else None,
                   "revealed_at": iso_taipei(_aware(cfg.revealed_at)) if cfg.revealed_at else None},
-        "key": slot_status(s),
+        "key": slot_status(db, cfg, now),
         "runs": [_run_row(db, r, reports.get(r.report_id), revealed) for r in runs],
         "manual": manual_status(db, local.date()),
     }
@@ -544,6 +555,23 @@ def reveal(db: Session, user: User, force: bool = False, settings: Settings | No
 
 
 # -- admin: corrections and rebuilding ----------------------------------------------------------------------------
+HEAD_KEYS = ("title", "highlights")  # a correction may also put the rule-made title / highlights back
+
+
+def _run_pack(db: Session, v: MarketReportVersion) -> dict[str, Any] | None:
+    """The data pack the version's attempt wrote from (``market_report_runs.pack_gz``)."""
+    import json
+    import zlib
+
+    run = db.get(MarketReportRun, v.run_id) if v.run_id else None
+    if run is None or not run.pack_gz:
+        return None
+    try:
+        return json.loads(zlib.decompress(run.pack_gz).decode("utf-8"))
+    except (zlib.error, ValueError):
+        return None
+
+
 def correction(db: Session, user: User, report_id: str, note: str, drop_sections: list[str]) -> dict[str, Any]:
     r = db.get(MarketReport, report_id)
     cur = pipeline.current(db, r) if r else None
@@ -553,14 +581,28 @@ def correction(db: Session, user: User, report_id: str, note: str, drop_sections
     if not 1 <= len(note) <= 200:
         raise unprocessable("更正說明要 1 到 200 字。", details={"field": "note"})
     now = now_utc()
-    payload = dict(cur.payload or {})
+    payload = copy.deepcopy(dict(cur.payload or {}))
     keys = set(drop_sections or [])
+    known = {sec["key"] for sec in payload.get("sections") or []} | set(HEAD_KEYS)
+    if keys - known:
+        raise unprocessable(f"沒有這個段落：{'、'.join(sorted(keys - known))}。", details={"field": "drop_sections"})
     sections = []
     for sec in payload.get("sections") or []:
         if sec["key"] in keys and not sec.get("dropped"):
             sec = {**sec, "dropped": {"reasons": ["更正"]}}
         sections.append(sec)
     payload["sections"] = sections
+    heads = [k for k in HEAD_KEYS if k in keys and payload.get(f"{k}_origin") == "ai"]
+    if heads:  # the AI title / highlights go back to the rule-made ones (from the attempt's own data pack)
+        pk = _run_pack(db, cur)
+        if pk is None:
+            raise ApiError(409, "no_pack", "這一版沒有留下資料包，標題和重點沒辦法換回規則寫的版本。")
+        if "title" in heads:
+            payload["title"], payload["title_origin"] = assemble.data_title(r.kind, pk), "rules"
+        if "highlights" in heads:
+            payload["highlights"], payload["highlights_origin"] = assemble.data_highlights(r.kind, pk), "rules"
+        assemble.number_footnotes(payload, pk)
+    assemble.refresh_ai_lines(payload)
     # ``note`` is the note alone: the page writes 「已更正（11/18 09:10）：…」 from ``at``
     payload["corrections"] = [*(payload.get("corrections") or []), {"at": iso_taipei(now), "note": note}]
     payload["edition"] = "correction"
@@ -596,6 +638,18 @@ def nyse_list(db: Session) -> list[dict[str, Any]]:
     return [_nyse_row(h) for h in db.scalars(select(NyseHoliday).order_by(NyseHoliday.date))]
 
 
+def nyse_url_ok(url: str) -> bool:
+    """An https page on nyse.com or one of its subdomains (the host, not a substring of the address)."""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url)
+    except ValueError:
+        return False
+    host = (parts.hostname or "").lower().rstrip(".")
+    return parts.scheme == "https" and not parts.username and (host == "nyse.com" or host.endswith(".nyse.com"))
+
+
 def nyse_put(db: Session, user: User, d: date, body: dict[str, Any]) -> dict[str, Any]:
     kind = body.get("kind")
     if kind not in ("closed", "early_close"):
@@ -604,7 +658,7 @@ def nyse_put(db: Session, user: User, d: date, body: dict[str, Any]) -> dict[str
     if kind == "early_close" and not (close and calendars._hhmm(close)):
         raise unprocessable("提早收盤要填美東收盤時間，例如 13:00。", details={"field": "close_time_et"})
     url = str(body.get("source_url") or "")
-    if not url.startswith("https://") or "nyse.com" not in url:
+    if not nyse_url_ok(url):
         raise unprocessable("來源要是 NYSE 官方頁面（https://www.nyse.com/…）。", details={"field": "source_url"})
     now = now_utc()
     h = db.get(NyseHoliday, d)

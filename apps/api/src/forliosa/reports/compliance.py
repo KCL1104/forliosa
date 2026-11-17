@@ -1,8 +1,10 @@
 """The compliance read (contract §11): after every rule check passed, Claude Haiku 5.5 (effort low, no server-side
 fallback) reads each AI sentence — without refs or the data pack — for recommendations, price levels, direction calls,
-futures direction, personal advice, ratings and other advice. An issue whose ``quote`` is not a passage of that
-sentence is ignored (the model made it up). A failed call is tried once more (on another slot when the pool has no
-reserved one); failing twice, the attempt publishes the data edition — compliance first.
+futures direction, personal advice, ratings and other advice — the title and the items' names (``event``, ``theme``)
+included. An issue on a path that exists counts even when its ``quote`` is not word for word a passage of that
+sentence (shortened with 「…」, other punctuation or spaces): this is the last gate, so it errs on the side of
+holding back; only an issue on an unknown path or category is ignored. A failed call is tried once more (on another
+slot when the pool has no reserved one); failing twice, the attempt publishes the data edition — compliance first.
 
 If the API refuses structured output for the check model (contract §21), the request is sent again asking for plain
 JSON, and the reply is parsed and checked by the server; later checks skip the schema.
@@ -12,6 +14,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import unicodedata
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
@@ -20,7 +24,7 @@ import anthropic
 
 from forliosa.reports import calls
 from forliosa.reports.prompts import CHECK_CATEGORIES, CHECK_SYSTEM, check_schema
-from forliosa.reports.validate import sentences
+from forliosa.reports.validate import headings, sentences
 
 log = logging.getLogger(__name__)
 
@@ -43,10 +47,18 @@ class Checked:
 
 
 def items(output: dict[str, Any], kind: str) -> list[dict[str, str]]:
-    """Every AI sentence (title included) as ``{"path", "text"}``."""
-    out = [{"path": "title", "text": str(output.get("title") or "")}] if output.get("title") else []
+    """Every AI text as ``{"path", "text"}``: the headings (title, the items' names), then every sentence."""
+    out = [{"path": path, "text": text} for path, text in headings(output, kind) if text]
     out += [{"path": s.path, "text": s.text} for s in sentences(output, kind) if s.text]
     return out
+
+
+_QUOTE_NOISE = re.compile(r"[\s…⋯.。，,、；;：:「」『』（）()〔〕\[\]\"'!！?？]+")
+
+
+def _loose(text: str) -> str:
+    """For comparing a quote with its sentence: NFKC, no 「…」, punctuation or spaces."""
+    return _QUOTE_NOISE.sub("", unicodedata.normalize("NFKC", text or ""))
 
 
 def request(model: str, effort: str, payload: list[dict[str, str]], settings: Any = None) -> dict[str, Any]:
@@ -73,8 +85,11 @@ def parse(msg: Any, payload: list[dict[str, str]]) -> list[dict[str, Any]] | Non
         if not isinstance(it, dict):
             continue
         path, quote, cat = str(it.get("path") or ""), str(it.get("quote") or ""), str(it.get("category") or "")
-        if cat not in CHECK_CATEGORIES or not quote or quote not in by_path.get(path, ""):
-            continue  # not a passage of that sentence: ignored
+        if cat not in CHECK_CATEGORIES or path not in by_path:
+            continue  # a path or category the read made up: ignored
+        text = by_path[path]
+        if not quote or (quote not in text and _loose(quote) not in _loose(text)):
+            quote = text[:120]  # not word for word: the issue still counts, on the whole sentence
         out.append({"path": path, "category": cat, "quote": quote})
     return out
 

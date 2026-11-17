@@ -28,15 +28,51 @@ from forliosa.reports.marketcalc import SECTOR_NAMES
 from forliosa.reports.pack import OPTION_METRICS
 from forliosa.reports.prompts import COUNTS, FORBIDDEN_WORDS, LENGTHS, OUTPUT_KEYS, STYLE_WORDS, TIME_WORDS
 
-# Index points (美股指數、台指期、夜盤) never appear, in a gathered report or a sentence (§8.5 item 7, §10.2 item 21)
-INDEX_POINTS = re.compile(r"(道瓊|標普|S&P|那斯達克|Nasdaq|費城半導體|費半|VIX|台指期|期指|夜盤)"
-                          r".{0,12}\d{1,3}(?:,?\d{3})+(?:\.\d+)?\s*點", re.IGNORECASE)
+# Index points (美股指數、台指期、夜盤) never appear, in a gathered report or a sentence (§8.5 item 7, §10.2 item 21):
+# any number of points whose closest name before it, in the same sentence, is one of these (any number of digits,
+# any distance). The Taiwan names (加權、櫃買 …) take the points after them: those come from the server's data.
+POINTS_BANNED = ("道瓊", "Dow", "標準普爾", "標普", "S&P", "那斯達克", "納斯達克", "Nasdaq", "那指", "納指",
+                 "費城半導體", "費半", "羅素", "Russell", "VIX", "台指期", "台指", "期指", "小台", "微台", "夜盤")
+POINTS_OK = ("加權報酬指數", "加權指數", "加權", "櫃買指數", "櫃買", "大盤", "台股", "集中市場", "上櫃", "類指數",
+             "TAIEX", "點數貢獻", "貢獻")
+_POINT_NAMES = re.compile("|".join(re.escape(n) for n in sorted((*POINTS_BANNED, *POINTS_OK), key=len,
+                                                                 reverse=True)), re.IGNORECASE)
+_BANNED_LOWER = {n.lower() for n in POINTS_BANNED}
+_POINTS_NUM = re.compile(r"\d[\d,]*(?:\.\d+)?\s*點")
+_SENTENCE_END = re.compile(r"[。；;！？!?\n]")
 CAUSE = re.compile(r"因為|由於|帶動|拖累|受.{0,10}影響|主因|導致|受惠|受累|推升|壓抑")
 OUTLOOK = re.compile(r"將(?!近|軍)|預計|預期|預估|可能|恐(?!慌)|展望|料將|估計|後續|接下來|未來")
+# A direction or a view of what comes next (a forward-looking sentence never holds one, whoever said it)
+FORECAST = re.compile(r"走高|走低|走揚|走強|走弱|上攻|回檔|回落|漲勢|跌勢|反彈|續漲|續跌|上漲空間|下跌空間"
+                      r"|震盪|樂觀|悲觀|可望|有望|看好|看淡|看多|看空|偏多|偏空|轉強|轉弱|止跌|築底|觸底|見頂"
+                      r"|多頭|空頭")
+VIEW = re.compile(r"可望|有望|看好|看淡|看多|看空|偏多|偏空|樂觀|悲觀")
 FLOW = re.compile(r"買賣超|買超|賣超|淨買|淨賣|持股增減")
 P1 = re.compile(r"^已排定[：:]")
-P2 = re.compile(r"^〔([^〕]{2,12})〕\s*(?:報導|指出)")
+P2 = re.compile(r"^〔([^〕]{2,12})〕\s*報導[，,\s]*市場關注")  # the only approved shape: 〔媒體〕報導市場關注…
 P3 = re.compile(r"^這件事和.{1,20}類股的關係是")
+# Two-character names (鴻海、廣達) are checked only next to a stock's context: many are also plain words
+TWO_CHAR_COMMON = frozenset({"統一", "大同", "中華", "台灣", "全新", "國產", "創意", "巨大", "聯合", "精華", "亞太",
+                             "全家", "大量", "新興", "國際", "美國", "日本", "中國", "香港", "上海", "世界", "信義",
+                             "正道", "大成", "台開", "一詮", "新光", "台火", "東陽", "南港", "永豐", "華南", "第一",
+                             "合庫"})
+STOCK_CONTEXT = re.compile(r"股|漲|跌|%|法說|除息|除權|營收|[（(]\d|點數|收盤|收在|買超|賣超|帶動|拖累|權值|市值|成交"
+                           r"|ADR|財報|EPS|獲利")
+
+
+def index_points(text: str) -> str | None:
+    """The first points figure of a US index, the TAIEX futures or the night session in ``text`` (else ``None``)."""
+    t = normalize(text)
+    for sent in _SENTENCE_END.split(t):
+        names = [(m.start(), m.group(0).lower()) for m in _POINT_NAMES.finditer(sent)]
+        if not names:
+            continue
+        for m in _POINTS_NUM.finditer(sent):
+            before = [n for pos, n in names if pos < m.start()]
+            if before and before[-1] in _BANNED_LOWER:
+                start = max(pos for pos, n in names if pos < m.start())
+                return sent[start:m.end()]
+    return None
 WEEKDAYS = "一二三四五六日"
 SIGNED_METRICS = frozenset({
     "index_change", "index_pct", "tr_pct", "otc_change", "otc_pct", "sector_pct", "stock_pct", "stock_contrib",
@@ -183,6 +219,18 @@ def _close_to(n: Num, candidate: float) -> bool:
     return abs(n.value - abs(candidate)) <= n.tol * (1 + 1e-9) + 1e-9 * max(1.0, abs(candidate))
 
 
+_UNIT_FAMILY = {"檔": "家"}
+
+
+def unit_ok(written: str, fact_unit: str | None) -> bool:
+    """The unit written after a number fits the fact's (億元 / 兆元 are 元 once 億 / 兆 scaled the number; 檔 = 家). A
+    number written without a unit, or a fact without one, is not judged here."""
+    base = re.sub(r"^[兆億萬]", "", str(fact_unit or ""))
+    if not written or not base:
+        return True
+    return _UNIT_FAMILY.get(written, written) == _UNIT_FAMILY.get(base, base)
+
+
 def _fact_candidates(f: dict[str, Any]) -> list[float]:
     vals = [x.value for x in numbers(str(f.get("display") or ""))]
     v = f.get("value")
@@ -207,6 +255,8 @@ class Ctx:
     allowed_dates: set[tuple[int, int]] = field(default_factory=set)
     blank: list[str] = field(default_factory=list)  # names with digits (元大台灣50, S&P 500 ETF)
     other_names: list[str] = field(default_factory=list)  # Taiwan names not on the list (≥3 characters)
+    other_short: list[str] = field(default_factory=list)  # two-character ones (checked next to a stock's context)
+    known: list[str] = field(default_factory=list)  # names blanked before the check (listed, subjects, outlets)
     strip: set[str] = field(default_factory=set)
     year: int = 2026
 
@@ -258,9 +308,33 @@ def context(pack: dict[str, Any], kind: str, names: Iterable[str] = ()) -> Ctx:
     c.blank = [t for t in tokens if t and re.search(r"\d", t)]
     known = set(tokens) | {x.get("outlet") or "" for x in c.web.values()}
     allowed = set(c.stock_names.values())
-    c.other_names = sorted({n for n in names if n and len(n) >= 3 and n not in allowed
+    names = [n for n in names if n]
+    c.other_names = sorted({n for n in names if len(n) >= 3 and n not in allowed
                             and not any(n in a for a in allowed) and n not in known}, key=len, reverse=True)
+    c.other_short = sorted({n for n in names if len(n) == 2 and n not in allowed and n not in known
+                            and n not in TWO_CHAR_COMMON and not any(n in a for a in allowed)})
+    c.known = sorted({k for k in known if k}, key=len, reverse=True)
     return c
+
+
+def other_stocks(c: Ctx, text: str) -> list[str]:
+    """Taiwan names off the stock list in ``text`` (normalized): every one of three characters or more; a
+    two-character one only next to a stock's context (股、漲、跌、法說、營收 …), once the listed names, the facts'
+    subjects, the outlets and the sector names are blanked."""
+    out: list[str] = []
+    t = _blank(text, [*c.stock_names.values(), *(f.get("subject") or "" for f in c.facts.values()), *c.known,
+                      *SECTOR_NAMES])
+    for name in c.other_names:
+        if name in t:
+            out.append(name)
+            t = t.replace(name, "＿" * len(name))
+    for name in c.other_short:
+        for m in re.finditer(re.escape(name), t):
+            around = t[max(0, m.start() - 4):m.start()] + t[m.end():m.end() + 8]
+            if STOCK_CONTEXT.search(around):
+                out.append(name)
+                break
+    return out
 
 
 # -- sentence checks -----------------------------------------------------------------------------------------------
@@ -308,10 +382,15 @@ def _check_numbers(c: Ctx, s: Sentence, text: str, out: list[Problem]) -> None:
         return
     subjects_here = _subjects(c, s.refs)
     for n in nums:
-        matched_f = [c.facts[r] for r in s.refs if r in c.facts
-                     and any(_close_to(n, v) for v in _fact_candidates(c.facts[r]))]
+        by_value = [c.facts[r] for r in s.refs if r in c.facts
+                    and any(_close_to(n, v) for v in _fact_candidates(c.facts[r]))]
+        matched_f = [f for f in by_value if unit_ok(n.unit, f.get("unit"))]
         matched_x = [r for r in s.refs if not r.startswith("F") and any(
             _close_to(n, m.value) for t in _ref_texts(c, r) for m in numbers(t, c.blank))]
+        if by_value and not matched_f and not matched_x:  # 4.67% written as 元, 6.03% as 點
+            out.append(Problem(s.path, "unit_mismatch",
+                               f"{_num_text(s.text, n)} 對到 {by_value[0].get('display') or by_value[0].get('unit')}"))
+            continue
         if not matched_f and not matched_x:
             out.append(Problem(s.path, "number_unsourced", _num_text(s.text, n)))
             continue
@@ -446,20 +525,16 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
             out.append(Problem(s.path, "style_word", w, hard=False))
     if re.search(r"[*_#`]|\[[^\]]*\]\(", s.text):
         out.append(Problem(s.path, "style_word", "markdown", hard=False))
-    if INDEX_POINTS.search(text):
-        out.append(Problem(s.path, "index_points", INDEX_POINTS.search(text).group(0)))  # type: ignore[union-attr]
+    if (pts := index_points(text)) is not None:
+        out.append(Problem(s.path, "index_points", pts))
     _check_numbers(c, s, text, out)
     _check_dates(c, s, out)
     # stocks: codes in parentheses and Taiwan names not on the list
     for m in re.finditer(r"[（(]\s*(\d{4,6}[A-Z]?)\s*[)）]", text):
         if m.group(1) not in c.stock_names:
             out.append(Problem(s.path, "stock_not_allowed", m.group(1)))
-    if c.other_names:
-        t = _blank(text, [*c.stock_names.values(), *(f.get("subject") or "" for f in c.facts.values())])
-        for name in c.other_names:
-            if name in t:
-                out.append(Problem(s.path, "stock_not_allowed", name))
-                t = t.replace(name, "＿")
+    for name in other_stocks(c, text):
+        out.append(Problem(s.path, "stock_not_allowed", name))
     # sectors
     for name in _sector_mentions(text):
         sec = c.sectors.get(name)
@@ -475,8 +550,12 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
     if CAUSE.search(text) and not any(r[0] in "XW" for r in s.refs):
         out.append(Problem(s.path, "cause_without_source", CAUSE.search(text).group(0)))  # type: ignore[union-attr]
     must = s.key in PATTERN_ONLY
-    if (must or OUTLOOK.search(text)) and not _pattern_ok(c, s, text):
-        out.append(Problem(s.path, "outlook_pattern", "句型不符" if must else OUTLOOK.search(text).group(0)))  # type: ignore[union-attr]
+    ahead = OUTLOOK.search(text)
+    if (must or ahead) and not _pattern_ok(c, s, text):
+        out.append(Problem(s.path, "outlook_pattern", "句型不符" if must or ahead is None else ahead.group(0)))
+    elif (must or ahead) and (fc := FORECAST.search(text)) is not None:
+        # the right shape, but a direction or a view inside it (轉述別人的看法也不行)
+        out.append(Problem(s.path, "outlook_pattern", f"方向：{fc.group(0)}"))
     if s.key in OPTION_REASON and (s.key != "themes" or s.sub == "why"):
         for r in s.refs:
             f = c.facts.get(r)
@@ -491,38 +570,73 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
 
 
 # -- whole output -------------------------------------------------------------------------------------------------
-def _check_title(c: Ctx, title: str) -> list[Problem]:
+HEADING_KEYS = {"watch": "event", "tonight": "event", "themes": "theme"}
+
+
+def headings(output: dict[str, Any], kind: str) -> Iterator[tuple[str, str]]:
+    """The AI's own headings with their paths: the title, and each item's name (``watch`` / ``tonight`` ``event``,
+    the weekly ``themes`` ``theme``) — shown in bold on the page, so checked like the title."""
+    if output.get("title") is not None:
+        yield "title", str(output.get("title") or "")
+    for key, field_ in HEADING_KEYS.items():
+        if key not in OUTPUT_KEYS[kind]:
+            continue
+        for i, item in enumerate(output.get(key) or []):
+            if isinstance(item, dict) and str(item.get(field_) or "").strip():
+                yield f"{key}[{i}].{field_}", str(item[field_])
+
+
+def _heading_refs(c: Ctx, raw: str) -> list[str]:
+    """A heading has no refs: the facts and verified reports its numbers match stand for them."""
+    refs: list[str] = []
+    for n in numbers(raw, c.blank):
+        refs += [fid for fid, f in c.facts.items() if any(_close_to(n, v) for v in _fact_candidates(f))]
+        refs += [xid for xid, x in c.web.items() if any(
+            _close_to(n, m.value) for t in (x.get("quote"), x.get("claim")) for m in numbers(str(t or ""), c.blank))]
+    return list(dict.fromkeys(refs))
+
+
+def _check_heading(c: Ctx, path: str, raw: str) -> list[Problem]:
+    """The title and the items' names: the sentence checks that apply without refs (words, index points, every
+    number against a fact or report with its subject, direction and unit, dates, stocks, sectors, causes) and no
+    forward-looking word at all."""
+    title = path == "title"
     out: list[Problem] = []
-    text = normalize(title)
+    text = normalize(raw)
     if not text:
-        return [Problem("title", "count_out_of_range", "沒有標題")]
+        return [Problem(path, "count_out_of_range", "沒有標題")] if title else []
     for w in (*FORBIDDEN_WORDS, *TIME_WORDS):
         if w in text:
-            out.append(Problem("title", "forbidden_word", w))
-    if INDEX_POINTS.search(text):
-        out.append(Problem("title", "index_points"))
-    pool = [f for f in c.facts.values()]
-    for n in numbers(title, c.blank):
-        hits = [f for f in pool if any(_close_to(n, v) for v in _fact_candidates(f))]
-        if not hits:
-            hits_x = [x for x in c.web.values() if any(_close_to(n, m.value)
-                                                       for m in numbers(str(x.get("quote") or ""), c.blank))]
-            if not hits_x:
-                out.append(Problem("title", "number_unsourced", _num_text(title, n)))
-            continue
-        if c.kind == "premarket" and all(f.get("group") == "prev_session" for f in hits):
-            out.append(Problem("title", "repeats_close_report", _num_text(title, n)))
+            out.append(Problem(path, "forbidden_word", w))
+    if (pts := index_points(text)) is not None:
+        out.append(Problem(path, "index_points", pts))
+    refs = _heading_refs(c, raw)
+    _check_numbers(c, Sentence(path, path.split("[", 1)[0], path, raw, refs), text, out)
+    if c.kind == "premarket" and title:
+        for n in numbers(raw, c.blank):
+            hits = [f for f in c.facts.values() if any(_close_to(n, v) for v in _fact_candidates(f))]
+            if hits and all(f.get("group") == "prev_session" for f in hits):
+                out.append(Problem(path, "repeats_close_report", _num_text(raw, n)))
     for md in _dates_in(text):
         if md not in c.allowed_dates:
-            out.append(Problem("title", "date_not_sourced", f"{md[0]}/{md[1]}"))
+            out.append(Problem(path, "date_not_sourced", f"{md[0]}/{md[1]}"))
     for m in _LONE_WD.finditer(text):
-        out.append(Problem("title", "weekday_mismatch", m.group(0)))
+        out.append(Problem(path, "weekday_mismatch", m.group(0)))
     for m in re.finditer(r"[（(]\s*(\d{4,6}[A-Z]?)\s*[)）]", text):
         if m.group(1) not in c.stock_names:
-            out.append(Problem("title", "stock_not_allowed", m.group(1)))
-    if not 12 <= len(title) <= 48:
-        out.append(Problem("title", "too_long" if len(title) > 48 else "count_out_of_range", str(len(title)),
-                           hard=False))
+            out.append(Problem(path, "stock_not_allowed", m.group(1)))
+    for name in other_stocks(c, text):
+        out.append(Problem(path, "stock_not_allowed", name))
+    for name in _sector_mentions(text):
+        sec = c.sectors.get(name)
+        if sec is None or not sec.get("text_eligible"):
+            out.append(Problem(path, "sector_not_allowed", name))
+    if (ahead := OUTLOOK.search(text) or FORECAST.search(text)) is not None:
+        out.append(Problem(path, "outlook_pattern", f"標題不寫之後的事：{ahead.group(0)}"))
+    if (cause := CAUSE.search(text)) is not None and not any(r[0] in "XW" for r in refs):
+        out.append(Problem(path, "cause_without_source", cause.group(0)))
+    if title and not 12 <= len(raw) <= 48:
+        out.append(Problem(path, "too_long" if len(raw) > 48 else "count_out_of_range", str(len(raw)), hard=False))
     return out
 
 
@@ -597,7 +711,10 @@ def validate(output: dict[str, Any], pack: dict[str, Any], kind: str, names: Ite
     """Every problem of ``output`` (the writer's JSON) against ``pack``."""
     c = context(pack, kind, names)
     out: list[Problem] = []
-    out += _check_title(c, str(output.get("title") or ""))
+    if output.get("title") is None:
+        out.append(Problem("title", "count_out_of_range", "沒有標題"))
+    for path, raw in headings(output, kind):
+        out += _check_heading(c, path, raw)
     para_refs: dict[str, set[str]] = {}
     sents = list(sentences(output, kind))
     for s in sents:
@@ -617,7 +734,7 @@ def validate(output: dict[str, Any], pack: dict[str, Any], kind: str, names: Ite
 
 
 def mentions_anthropic(output: dict[str, Any], kind: str) -> bool:
-    texts = [str(output.get("title") or ""), *(s.text for s in sentences(output, kind))]
+    texts = [*(t for _p, t in headings(output, kind)), *(s.text for s in sentences(output, kind))]
     return any(re.search(r"anthropic|claude", t, re.IGNORECASE) for t in texts)
 
 

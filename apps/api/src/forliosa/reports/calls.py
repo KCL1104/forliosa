@@ -12,7 +12,8 @@ category.
 * Web search: the repo's ``web_search_20260318`` with ``allowed_callers: ["direct"]`` (dynamic filtering off) and one
   ``allowed_domains`` list (:data:`REPORT_SEARCH_DOMAINS`) — never ``blocked_domains``.
 * Timeouts: the key pool's clients default to 120 s without SDK retries; a writing call gets
-  AI_MREPORT_TIMEOUT_SECONDS (900) through ``client.with_options``.
+  AI_MREPORT_TIMEOUT_SECONDS (900) through ``client.with_options`` (per read) and as the stream's total time
+  (:class:`StreamTooLong`).
 * Fallback (§21): if the API refuses ``fallbacks`` together with structured output (a 400 naming fallbacks), the same
   request is sent once more without them, and later structured requests skip them (logged; never silently).
 * The reports' own key slot (:func:`report_slot`): with ``CLAUDE_API_KEY_4`` configured the reports use only that slot
@@ -141,12 +142,22 @@ def create(client: Any, kw: dict[str, Any], timeout: float | None = None) -> Cal
     return _send(lambda k: c.beta.messages.create(**k), kw)
 
 
+class StreamTooLong(Exception):
+    """A streamed call ran past its total time (the client's ``timeout`` is per read: a stream that keeps sending
+    events never hits it)."""
+
+
 def stream(client: Any, kw: dict[str, Any], timeout: float | None = None) -> CallResult:
-    """A streamed call (writing; up to 15 minutes): the final message once the stream ends."""
+    """A streamed call (writing; up to ``timeout`` seconds in all, 15 minutes): the final message once the stream
+    ends. Past ``timeout`` the stream is closed and :class:`StreamTooLong` raised (never retried by the pool)."""
     c = client.with_options(timeout=timeout) if timeout else client
 
     def run(k: dict[str, Any]) -> Any:
+        started = time.monotonic()
         with c.beta.messages.stream(**k) as s:
+            for _event in s:
+                if timeout and time.monotonic() - started > timeout:
+                    raise StreamTooLong(f"stream longer than {timeout:.0f}s")
             return s.get_final_message()
 
     return _send(run, kw)
@@ -187,3 +198,24 @@ def report_slot(pool: Any) -> int | None:
 
 def has_reserved_slot(pool: Any) -> bool:
     return bool(getattr(pool, "reserved", None))
+
+
+# the admin page's key status (``AdminReportsOverview.key``) per pool state
+KEY_STATUS = {"ok": "ok", "cooling": "cooldown", "disabled": "disabled", "exhausted": "exhausted",
+              "over_budget": "exhausted", "not_configured": "disabled"}
+KEY_UNUSABLE_NOTE = "目前不能用，只發資料版。"
+
+
+def slot_state(pool: Any, costs: dict[int, Any] | None = None) -> dict[str, Any]:
+    """The reports' own key slot in ``pool`` (``slot`` None = none kept for them: the shared pool), without a key:
+    ``{"slot", "status", "note"}``. The worker's pool is the one that knows (the API process never uses the slot)."""
+    from decimal import Decimal
+
+    reserved = sorted(getattr(pool, "reserved", ()) or ())
+    if not reserved:
+        return {"slot": None, "status": "ok", "note": None}
+    n = reserved[0]
+    slot = pool.get(n)
+    state = pool.state(slot, Decimal(str((costs or {}).get(n) or 0))) if slot is not None else "not_configured"
+    usable = report_slot(pool) is not None
+    return {"slot": n, "status": KEY_STATUS.get(state, "disabled"), "note": None if usable else KEY_UNUSABLE_NOTE}

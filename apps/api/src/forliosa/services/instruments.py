@@ -40,8 +40,9 @@ _TW_STOCK = re.compile(r"^(?!00)\d{4}$")
 
 def security_class(symbol: str, name: str | None = None, instrument_type: str | None = None) -> str:
     """``stock`` | ``etf`` | ``bond_etf`` | ``reit`` | ``etn`` | ``preferred`` | ``other``. Taiwan symbols by their
-    code (``.TW`` / ``.TWO`` dropped); a four-digit code whose name has 「特」 (a preferred share) is ``other``. US
-    symbols by the instrument type (``etf`` -> ``etf``, anything else ``stock``)."""
+    code alone (``.TW`` / ``.TWO`` dropped): preferred shares carry a letter (2881A, 2002A 中鋼特), so a four-digit
+    code is a stock whatever its name (特力, 力特, 台特化 are common stocks). US symbols by the instrument type
+    (``etf`` -> ``etf``, anything else ``stock``). ``name`` is kept for the callers; it no longer decides."""
     if market_of_symbol(symbol) == "US":
         return "etf" if (instrument_type or "").lower() == "etf" else "stock"
     code = symbol.split(".", 1)[0].strip().upper()
@@ -49,7 +50,7 @@ def security_class(symbol: str, name: str | None = None, instrument_type: str | 
         if pattern.match(code):
             return cls
     if _TW_STOCK.match(code):
-        return "other" if name and "特" in name else "stock"
+        return "stock"
     return "other"
 
 

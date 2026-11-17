@@ -4,9 +4,11 @@ filtering) — one call per topic with a quota the server sets, up to four topic
 
 Each reply is cut into facts (``[KEY] 〔媒體〕報導，…`` paragraphs with their citations) and every fact is checked
 (:func:`verify`): the cited page was among this call's search results, on an allowed domain, published inside the
-edition's window (an undated page, or a page dated only by day on the cut-off's own day, is dropped), the citation is
-a passage of the article (not a 「相關新聞」 list), every number is in a cited passage, a US / ADR / night-session fact
-names its US trading day, no index points, no ratings or target prices. What is kept becomes an X fact for the writer
+edition's window — every citation on its own (an undated page, or a page dated only by day outside the window's days
+or on the cut-off's own day, is left out; the fact's source is the citation that holds its numbers) — the citation
+is a passage of the article (not a 「相關新聞」 list), every number is in a fresh cited passage, a US / ADR /
+night-session fact names its US trading day and has percentages only, no index points, no ratings or target prices,
+no one's view of where the market goes. What is kept becomes an X fact for the writer
 (its ``quote`` stays on the server side: the API never returns it). When outlets disagree on a number of the same
 key, one fixed outlet wins and the others are listed as a disagreement (:data:`OUTLET_PRIORITY`).
 """
@@ -26,7 +28,7 @@ from forliosa.ai.market_summary import _norm_url
 from forliosa.news.outlets import host_of, on_domain, outlet_name
 from forliosa.reports import calls
 from forliosa.reports.prompts import GATHER_SYSTEM, LONG_HOLIDAY_EXTRA, TOPICS, key_allowed, topic_brief
-from forliosa.reports.validate import INDEX_POINTS, numbers
+from forliosa.reports.validate import FORECAST, OUTLOOK, VIEW, index_points, numbers
 from forliosa.timeutil import TAIPEI, is_us_trading_day
 
 log = logging.getLogger(__name__)
@@ -46,7 +48,14 @@ SUBJECTS = {"TWSE_INST.foreign": "外資", "TWSE_INST.trust": "投信", "TWSE_IN
 LABELS = {"TWSE_INST.foreign": "上市外資買賣超", "TWSE_INST.trust": "上市投信買賣超",
           "TWSE_INST.dealer": "上市自營商買賣超", "TWSE_INST.total": "上市三大法人買賣超",
           "TW.turnover_media": "媒體報導的成交金額", "NIGHT.tx_pct": "台指期夜盤漲跌幅", "ADR.tsm": "台積電 ADR 漲跌幅"}
-RATING = re.compile(r"目標價|評等|調升至|調降至|買進評等")
+RATING = re.compile(r"目標價|評等|評級|調升至|調降至|調升.{0,8}評|調降.{0,8}評|優於大盤|劣於大盤|中立|加碼評|減碼評"
+                    r"|outperform|underperform|overweight|underweight|price target", re.IGNORECASE)
+# Keys whose facts may speak of what comes next (scheduled events, themes, company guidance): never with a direction
+SCHEDULE_KEYS = ("EVENT.", "THEME.", "RISK.", "US.earnings.", "MACRO.", "CO.")
+# Keys whose numbers are percentages only (US indices, the TAIEX futures' night session, the ADR: never points)
+PERCENT_KEYS = ("US.", "NIGHT.", "ADR.")
+INDEX_NAMES_WITH_DIGITS = ("S&P 500", "標普 500", "標普500", "標準普爾 500", "標準普爾500", "Nasdaq 100",
+                           "那斯達克 100", "納斯達克 100", "羅素 2000", "Russell 2000", "道瓊 30")
 US_DATE = re.compile(r"美股\s*(\d{1,2})/(\d{1,2})")
 KEY_LINE = re.compile(r"^\s*\[([A-Za-z0-9_.\-]+)\]\s*(.+)$", re.DOTALL)
 
@@ -223,6 +232,15 @@ def _published(url: str, page_age: str | None, now: datetime) -> datetime | date
     return date_from_url(url)
 
 
+def in_window(pub: datetime | date, w: Window) -> bool:
+    """A page dated to the minute inside [start, end]; a page dated by day alone on a day from the window's start
+    to the day before the cut-off (a premarket: the previous session's day; a close edition: none — its window is
+    that same day)."""
+    if isinstance(pub, datetime):
+        return w.start <= pub <= w.end
+    return w.start.date() <= pub < w.cutoff.date()
+
+
 def _us_date_ok(claim: str, w: Window) -> date | None:
     for m in US_DATE.finditer(claim):
         mo, d = int(m.group(1)), int(m.group(2))
@@ -262,30 +280,43 @@ def verify(key: str, claim: str, cites: list[dict[str, Any]], results: dict[str,
         valid.append((c, r))
     if not valid:
         return None, reason or "no_citation"
-    # freshness: the first valid citation's page
-    c0, r0 = valid[0]
-    pub = _published(str(c0.get("url")), r0.page_age, w.now)
-    if pub is None:
-        return None, "time_unknown"
-    if isinstance(pub, datetime):
-        if not w.start <= pub <= w.end:
-            return None, "outside_window"
-    elif not pub < w.cutoff.date():
-        return None, "outside_window"
-    quotes = " ".join(str(c.get("cited_text") or "") for c, _ in valid)
-    claim_nums = numbers(claim)
-    quote_nums = numbers(quotes)
-    if any(not any(abs(n.value - q.value) <= n.tol + 1e-9 for q in quote_nums) for n in claim_nums):
+    # freshness: every citation's own page (one outside the window, or of unknown time, is left out)
+    fresh: list[tuple[dict[str, Any], Any, datetime | date]] = []
+    stale = False
+    for c, r in valid:
+        pub = _published(str(c.get("url")), r.page_age, w.now)
+        if pub is not None and in_window(pub, w):
+            fresh.append((c, r, pub))
+        stale = stale or pub is not None
+    if not fresh:
+        return None, "outside_window" if stale else "time_unknown"
+    claim_nums = numbers(claim, INDEX_NAMES_WITH_DIGITS)
+    quote_nums = [numbers(str(c.get("cited_text") or ""), INDEX_NAMES_WITH_DIGITS) for c, _, _ in fresh]
+
+    def found(n: Any, qs: list[Any]) -> bool:
+        return any(abs(n.value - q.value) <= n.tol + 1e-9 for q in qs)
+
+    if any(not any(found(n, qs) for qs in quote_nums) for n in claim_nums):
         return None, "number_not_in_quote"
     us_session = None
     if key.startswith(("US.", "ADR.", "NIGHT.")):
         us_session = _us_date_ok(claim, w)
         if us_session is None:
             return None, "no_us_session_date"
-    if INDEX_POINTS.search(claim):
+    if index_points(claim) is not None:
         return None, "index_points"
+    if key.startswith(PERCENT_KEYS) and not key.startswith("US.earnings.") \
+            and any(n.unit != "%" for n in claim_nums):
+        return None, "index_points"  # US indices, the night session and the ADR: percentages only
     if RATING.search(claim):
         return None, "rating"
+    if VIEW.search(claim) or (OUTLOOK.search(claim) and (not key.startswith(SCHEDULE_KEYS) or FORECAST.search(claim))):
+        return None, "outlook"  # someone's view of where the market or a stock goes is not a fact to quote
+    # the source: the citation holding the claim's numbers (the first fresh one when it has none)
+    best = max(range(len(fresh)), key=lambda i: (sum(found(n, quote_nums[i]) for n in claim_nums), -i))
+    c0, r0, pub = fresh[best]
+    quotes = " ".join([str(c0.get("cited_text") or ""),
+                       *(str(c.get("cited_text") or "") for i, (c, _, _) in enumerate(fresh) if i != best)])
     url = str(c0.get("url"))
     return {"key": key, "subject": next((v for k, v in SUBJECTS.items() if key == k), None), "claim": claim,
             "outlet": outlet_name(url), "title": str(c0.get("title") or r0.title)[:200], "url": url,

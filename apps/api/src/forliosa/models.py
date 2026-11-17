@@ -1627,6 +1627,8 @@ class MarketReportConfig(Base):
     writers: Mapped[dict] = mapped_column(JSON, default=dict)  # {"premarket": {"model","effort"} | None, …}
     trial_started_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     revealed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    # the reports' own key slot as the worker last saw it: {"slot", "status", "note", "checked_at"} (never a key)
+    key_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(32), nullable=True)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
 

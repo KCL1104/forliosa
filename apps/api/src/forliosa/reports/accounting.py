@@ -162,10 +162,32 @@ def tier(db: Session, kind: str, now: datetime | None = None, settings: Settings
     return t
 
 
-def trial_fits(db: Session, kind: str, effort: str, settings: Settings | None = None) -> bool:
-    """A blind-test variant may start while the trial's spending plus its estimate stays within the trial cap."""
-    s = settings or get_settings()
+def trial_estimate(kind: str, effort: str | None) -> Decimal:
+    """The upper estimate of one blind-test variant (xhigh / max: :data:`XHIGH_FACTOR` above)."""
     est = Decimal(str(EST_MAX_USD[kind]["normal"]))
     if effort in ("xhigh", "max"):
         est *= Decimal(str(XHIGH_FACTOR))
-    return trial_spend(db) + est <= Decimal(str(s.ai_mreport_trial_budget_usd))
+    return est
+
+
+def trial_reserved(db: Session) -> Decimal:
+    """What the blind-test variants still running may yet spend: each one's estimate less what it has booked (its
+    booked calls are already in :func:`trial_spend`)."""
+    from forliosa.models import MarketReport, MarketReportRun
+
+    rows = db.execute(select(MarketReport.kind, MarketReportRun.writer, MarketReportRun.cost_usd)
+                      .join(MarketReport, MarketReport.id == MarketReportRun.report_id)
+                      .where(MarketReportRun.purpose == "trial", MarketReportRun.status == "running"))
+    total = Decimal(0)
+    for kind, writer, cost in rows:
+        total += max(trial_estimate(kind, (writer or {}).get("effort")) - Decimal(str(cost or 0)), Decimal(0))
+    return total
+
+
+def trial_fits(db: Session, kind: str, effort: str, settings: Settings | None = None) -> bool:
+    """A blind-test variant may start while the trial's spending, what the running variants may yet spend and its own
+    estimate stay within the trial cap (the three variants of an edition start one after the other: each sees the
+    ones queued before it)."""
+    s = settings or get_settings()
+    return trial_spend(db) + trial_reserved(db) + trial_estimate(kind, effort) \
+        <= Decimal(str(s.ai_mreport_trial_budget_usd))

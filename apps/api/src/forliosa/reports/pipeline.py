@@ -34,14 +34,15 @@ import logging
 import secrets
 import threading
 import zlib
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -67,6 +68,8 @@ from forliosa.timeutil import TAIPEI, now_taipei, now_utc, tw_trading_days
 log = logging.getLogger(__name__)
 
 STALE = timedelta(minutes=20)
+HEARTBEAT_SECONDS = 60.0  # a writing attempt's heartbeat while a model call runs (well inside STALE)
+PUSH_GRACE = timedelta(minutes=10)
 DATA_REBUILD = timedelta(minutes=10)
 TABLES_WINDOW = timedelta(hours=3)
 VARIANTS = ("A", "B", "C")
@@ -541,13 +544,42 @@ def _queue_run(db: Session, report: MarketReport, deps: Deps, *, variant: str | 
     return rid
 
 
+@contextmanager
+def heartbeat(deps: Deps, run_id: str, every: float | None = None) -> Iterator[None]:
+    """While an attempt runs, its heartbeat moves every HEARTBEAT_SECONDS from a thread of its own: one model call can
+    stream for many minutes (and be sent again at medium after ``max_tokens``), and a run without a heartbeat for
+    STALE is taken for dead. Only a run still ``running`` is touched."""
+    stop = threading.Event()
+    wait = HEARTBEAT_SECONDS if every is None else every
+
+    def loop() -> None:
+        while not stop.wait(wait):
+            try:
+                with deps.session() as db:
+                    db.execute(update(MarketReportRun).where(MarketReportRun.id == run_id,
+                                                             MarketReportRun.status == "running")
+                               .values(heartbeat_at=deps.clock()))
+                    db.commit()
+            except Exception:
+                log.warning("market report run %s: heartbeat not written", run_id, exc_info=True)
+
+    t = threading.Thread(target=loop, name="mreport-heartbeat", daemon=True)
+    t.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        t.join(timeout=5)
+
+
 def _write_job(deps: Deps, run_id: str) -> None:
     with deps.session() as db:
         run = db.get(MarketReportRun, run_id)
-        if run is None:
-            return
+        if run is None or run.status != "running":
+            return  # abandoned (or ended) before the job started
         try:
-            attempt(db, run, deps)
+            with heartbeat(deps, run_id):
+                attempt(db, run, deps)
         except Exception as exc:
             db.rollback()
             run = db.get(MarketReportRun, run_id)
@@ -643,6 +675,11 @@ def attempt(db: Session, run: MarketReportRun, deps: Deps, deadline: bool = True
     ctx.beat("assemble")
     finished = deps.clock()
     db.refresh(report)
+    db.refresh(run)
+    if run.status != "running":  # taken for dead meanwhile (another attempt may have started): never published
+        log.warning("market report run %s was %s before publishing; its result is dropped", run.id, run.status)
+        _finish(ctx, "abandoned", "stale", metrics, started=now)
+        return
     if deadline and (report.closed_at is not None or finished >= ed.close_at):
         _finish(ctx, "abandoned", "after_close", metrics, started=now)
         return
@@ -671,17 +708,25 @@ def attempt(db: Session, run: MarketReportRun, deps: Deps, deadline: bool = True
 
 
 def _finish(ctx: _Run, status: str, error: str | None, metrics: dict[str, Any], started: datetime) -> None:
-    run = ctx.run
-    run.status, run.error, run.step = status, error, "done"
-    run.finished_at = ctx.deps.clock()
-    metrics.setdefault("seconds", round((run.finished_at - started).total_seconds(), 1))
+    """The run's end, only while it is still ``running`` (a run abandoned meanwhile keeps that status; its calls and
+    cost are written all the same)."""
+    run, db = ctx.run, ctx.db
+    finished = ctx.deps.clock()
+    db.flush()
+    metrics.setdefault("seconds", round((finished - started).total_seconds(), 1))
     metrics.setdefault("on_time", False)
     metrics["data_only"] = metrics.get("data_only") or status == "data_only"
     metrics["fallback_used"] = any(c.get("fallback_used") for c in ctx.calls_)
     metrics["cost_usd"] = float(run.cost_usd or 0)
-    run.metrics = metrics
-    run.calls = [*ctx.calls_, *({"raw_output": r} for r in ctx.raw)]
-    ctx.db.commit()
+    kept = {"metrics": metrics, "calls": [*ctx.calls_, *({"raw_output": r} for r in ctx.raw)],
+            "cost_usd": Decimal(run.cost_usd or 0)}
+    rid = run.id
+    done = db.execute(update(MarketReportRun).where(MarketReportRun.id == rid, MarketReportRun.status == "running")
+                      .values(status=status, error=error, step="done", finished_at=finished, **kept))
+    if not done.rowcount:  # type: ignore[attr-defined]
+        db.execute(update(MarketReportRun).where(MarketReportRun.id == rid).values(**kept))
+        log.warning("market report run %s ended (%s) after it was no longer running", rid, status)
+    db.commit()
 
 
 def _close_line_if_done(db: Session, report: MarketReport, ed: Edition, deps: Deps) -> None:
@@ -719,7 +764,9 @@ def _write_and_check(ctx: _Run, caller: Caller, writer: rs.Writer, pk: dict[str,
             ctx.raw.append(w.output)
 
     draft = write.write(kind, pk, writer, caller.stream, s)
-    booked(draft)
+    booked(draft)  # every reply, also when a later call raised
+    if draft.exc is not None:
+        raise _Stop("failed", draft.error or "write")
     if draft.refusal is not None:
         metrics["refusal_category"] = draft.refusal or None
         raise _Stop("data_only", f"refusal:{draft.refusal}"[:200])
@@ -747,6 +794,8 @@ def _write_and_check(ctx: _Run, caller: Caller, writer: rs.Writer, pk: dict[str,
         metrics["revised"] = True
         rev = write.revise(kind, pk, writer, caller.stream, draft, [p.as_dict() for p in [*hard, *issues]], s)
         booked(rev)
+        if rev.exc is not None:
+            raise _Stop("failed", rev.error or "revise")
         if rev.refusal is not None:
             metrics["refusal_category"] = rev.refusal or None
             raise _Stop("data_only", f"refusal:{rev.refusal}"[:200])
@@ -838,18 +887,25 @@ def maybe_push(db: Session, report: MarketReport, ed: Edition, now: datetime, de
                res: TickResult) -> None:
     if report.pushed_at is not None or now < ed.push_at or not push.may_push(db, report, deps.s):
         return
-    if now >= ed.close_at:
-        return  # too late (the worker was down): not pushed at all
+    if now >= push_deadline(ed):
+        return  # too late (the worker was down past the deadline): not pushed at all
     if report.state == "ai":
         edition = "ai"
-    elif now >= ed.push_fallback_at or (not ai_expected(db, report, ed, now, cfg, deps.s) and not _running(db, report)):
-        edition = "data"
+    elif now >= ed.push_fallback_at or (not ai_expected(db, report, ed, now, cfg, deps.s, deps)
+                                        and not _running(db, report)):
+        edition = "data"  # the fallback time comes before the close (17:30 / 21:00 are both): it is pushed then
     else:
         return
     n = push.enqueue(db, report, now, deps.s)
     report.pushed_at, report.push_edition, report.updated_at = now, edition, now
     db.commit()
     res.add(report, f"push queued ({edition}, {n} channels)")
+
+
+def push_deadline(ed: Edition) -> datetime:
+    """After this nothing is pushed (the worker was down): the close, but never sooner than PUSH_GRACE after the push
+    fallback time (the close and the weekly have their fallback at the close itself)."""
+    return max(ed.close_at, ed.push_fallback_at + PUSH_GRACE)
 
 
 def _running(db: Session, report: MarketReport) -> bool:
@@ -917,6 +973,31 @@ def abandon_stale(db: Session, now: datetime) -> int:
     return n
 
 
+KEY_STATE_EVERY = timedelta(minutes=5)
+
+
+def record_key_state(db: Session, cfg: Any, deps: Deps, now: datetime) -> None:
+    """The reports' own key slot as this (the worker's) pool sees it, for the admin page (the API process never uses
+    the slot): written when it changes, else every KEY_STATE_EVERY. Never the key itself."""
+    from forliosa.ai import store
+
+    try:
+        state = calls.slot_state(deps.key_pool(), store.slot_month_costs(db, now))
+    except Exception:
+        log.warning("market reports: key state not read", exc_info=True)
+        return
+    old = dict(cfg.key_state or {})
+    checked = old.pop("checked_at", None)
+    try:
+        fresh = checked is not None and now - datetime.fromisoformat(str(checked)) < KEY_STATE_EVERY
+    except ValueError:
+        fresh = False
+    if old == state and fresh:
+        return
+    cfg.key_state = {**state, "checked_at": now.isoformat()}
+    db.commit()
+
+
 # -- tick ------------------------------------------------------------------------------------------------------------
 def editions(now: datetime) -> list[Edition]:
     """The editions a tick looks at: today's three kinds, and yesterday's close edition (its 06:40 tables)."""
@@ -942,6 +1023,7 @@ def tick(now: datetime | None = None, deps: Deps | None = None) -> TickResult:
         calendars.load_us_calendar(db)
         abandon_stale(db, now)
         cfg = rs.config(db, deps.s)
+        record_key_state(db, cfg, deps, now)
         for ed in editions(now):
             report = ensure_report(db, ed, now, cfg, deps.s)
             if report is None or report.backfill:

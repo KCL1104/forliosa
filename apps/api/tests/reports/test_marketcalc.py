@@ -21,7 +21,11 @@ def test_security_classes():
              "006208.TW": "etf", "00981A.TW": "etf", "020011.TW": "etn", "2330.TW": "stock", "2881A.TW": "preferred",
              "6488.TWO": "stock", "24552.TWO": "other"}
     assert {s: security_class(s) for s in cases} == cases
-    assert security_class("2888.TW", "新光金特") == "other"
+    # four-digit codes are stocks whatever the name; preferred shares carry a letter
+    assert [security_class(s, n) for s, n in (("2908.TW", "特力"), ("3051.TW", "力特"), ("4772.TWO", "台特化"))] \
+        == ["stock", "stock", "stock"]
+    assert security_class("2002A.TW", "中鋼特") == "preferred"
+    assert mc.is_common("2908", "特力", None) and mc.is_common("6706", "惠特", None)
     assert security_class("SPY", instrument_type="etf") == "etf" and security_class("TSM") == "stock"
 
 
