@@ -127,3 +127,39 @@ def test_group_passes_grandfather_existing_groups_and_keep_rows_both_ways(tmp_pa
             assert conn.execute(text("SELECT kind FROM group_channels")).scalars().all() == ["discord"]
     finally:
         engine.dispose()
+
+
+def test_news_tags_tables_and_url_key_index_both_ways(tmp_path):
+    """0024_news_tags (新聞標籤, 2026-11-17): ``news_tags`` (queryable by kind and value) and ``news_tag_state``, plus
+    an index on ``news_articles.url_key`` (plain CREATE INDEX: stored headlines survive both ways)."""
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'tags.db'}"
+    command.upgrade(_config(url), "0023")
+    engine = make_engine(url)
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "news_articles", {"symbol": "2330.TW", "url_key": "k1", "url": "https://x.tw/1",
+                                            "title": "台積電新聞", "outlet": "X", "domain": "x.tw", "source": "gdelt"})
+        command.upgrade(_config(url), "0024_news_tags")
+        inspector = inspect(engine)
+        assert {"news_tags", "news_tag_state"} <= set(inspector.get_table_names())
+        assert "ix_news_tags_kind_value" in {i["name"] for i in inspector.get_indexes("news_tags")}
+        assert "ix_news_articles_url_key" in {i["name"] for i in inspector.get_indexes("news_articles")}
+        assert "batch_limit" in {c["name"] for c in inspector.get_columns("news_tag_state")}
+        with engine.begin() as conn:
+            conn.execute(text("INSERT INTO news_tags (url_key, kind, value) VALUES ('k1', 'theme', 'ai_server')"))
+            _insert(conn, "news_tag_state", {"url_key": "k1", "status": "done"})
+            assert tuple(conn.execute(text(
+                "SELECT attempts, taxonomy_version, batch_limit FROM news_tag_state")).one()) == (0, 0, None)
+            assert conn.execute(text(
+                "SELECT a.title FROM news_tags t JOIN news_articles a ON a.url_key = t.url_key "
+                "WHERE t.kind = 'theme' AND t.value = 'ai_server'")).scalars().all() == ["台積電新聞"]
+        command.downgrade(_config(url), "0023")
+        inspector = inspect(engine)
+        assert not {"news_tags", "news_tag_state"} & set(inspector.get_table_names())
+        assert "ix_news_articles_url_key" not in {i["name"] for i in inspector.get_indexes("news_articles")}
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT title FROM news_articles")).scalars().all() == ["台積電新聞"]
+    finally:
+        engine.dispose()

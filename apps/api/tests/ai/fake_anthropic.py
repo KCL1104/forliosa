@@ -2,7 +2,8 @@
 
 Each request pops the next scripted reply: a message (streamed as real SSE events when the request has
 ``stream: true``, JSON otherwise) or an HTTP error, optionally with response headers (``anthropic-ratelimit-*``,
-``retry-after``, ``anthropic-workspace-id``) and an ``error.details.error_code``. Requests are recorded with the
+``retry-after``, ``anthropic-workspace-id``) and an ``error.details.error_code``. With nothing scripted, a
+``responder`` (``fake.responder = fn``) builds the reply from the request body. Requests are recorded with the
 API key that sent them, so tests can check key routing, the exact request body (tools, cache_control, replayed
 history) and that no network is used.
 """
@@ -11,6 +12,7 @@ from __future__ import annotations
 
 import json
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -126,6 +128,7 @@ class FakeAnthropic:
     def __init__(self) -> None:
         self.script: deque[Reply] = deque()
         self.requests: list[dict[str, Any]] = []
+        self.responder: Callable[[dict[str, Any]], Reply] | None = None  # used when nothing is scripted
 
     # scripting
     def reply(self, *blocks: dict, stop_reason: str = "end_turn", **kw: Any) -> FakeAnthropic:
@@ -143,10 +146,10 @@ class FakeAnthropic:
         body = json.loads(request.content)
         key = request.headers.get("authorization", "").removeprefix("Bearer ")
         self.requests.append({"key": key, "body": body, "headers": dict(request.headers)})
-        if not self.script:
+        if not self.script and self.responder is None:
             return httpx2.Response(500, json={"type": "error", "error": {"type": "api_error",
                                                                           "message": "fake: no scripted reply"}})
-        reply = self.script.popleft()
+        reply = self.script.popleft() if self.script else self.responder(body)  # type: ignore[misc]
         if reply.status != 200:
             error: dict[str, Any] = {"type": reply.error_type, "message": reply.error_message}
             if reply.error_code:

@@ -62,7 +62,7 @@ def test_schemas_are_strict_and_within_limits():
                      "get_stock_overview", "get_stock_history", "get_valuation", "get_chips", "get_financials",
                      "get_events", "get_news", "get_position", "search_instruments", "draft_transaction",
                      "get_derivatives_overview", "get_technicals", "get_related_stocks", "draw_chart",
-                     "get_analyst_views"}
+                     "get_analyst_views", "search_news"}
     deriv = next(d for d in defs if d["name"] == "get_derivatives_overview")
     assert deriv["input_schema"] == {"type": "object", "properties": {}, "required": [], "additionalProperties": False}
     st = server_tools(s)

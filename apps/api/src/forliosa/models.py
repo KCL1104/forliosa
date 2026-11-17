@@ -1183,7 +1183,8 @@ class NewsArticle(Base):
     __tablename__ = "news_articles"
     __table_args__ = (UniqueConstraint("symbol", "url_key", name="uq_news_articles_symbol_url"),
                       Index("ix_news_articles_symbol_published", "symbol", "published_at"),
-                      Index("ix_news_articles_published", "published_at"))
+                      Index("ix_news_articles_published", "published_at"),
+                      Index("ix_news_articles_url_key", "url_key"))  # news_tags join on it (migration 0024_news_tags)
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     symbol: Mapped[str] = mapped_column(String(20))
@@ -1233,6 +1234,42 @@ class NewsFetchState(Base):
     items: Mapped[int] = mapped_column(default=0)
     failures: Mapped[int] = mapped_column(default=0)
     backoff_until: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+
+
+class NewsTag(Base):
+    """One tag of one headline URL (產品負責人 2026-11-17; :mod:`forliosa.news.tagging`): ``kind`` theme | sector |
+    symbol, ``value`` an id of :mod:`forliosa.news.taxonomy` (a theme id, a 產業別 code such as ``"24"`` or
+    ``us_semis``) or a catalog symbol other than the ones the headline is stored under, ``relation`` (symbols only)
+    mentioned | supply_chain | peer. Keyed by ``url_key``: a URL stored for several symbols is tagged once. Deleted
+    with the headline (the tagging job removes tags whose URL is no longer in ``news_articles``)."""
+
+    __tablename__ = "news_tags"
+    __table_args__ = (Index("ix_news_tags_kind_value", "kind", "value"),)
+
+    url_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    kind: Mapped[str] = mapped_column(String(8), primary_key=True)
+    value: Mapped[str] = mapped_column(String(32), primary_key=True)
+    relation: Mapped[str | None] = mapped_column(String(16), nullable=True)
+
+
+class NewsTagState(Base):
+    """Whether a headline URL has been tagged: ``status`` done | split | failed | skipped (hidden: a blocked domain, a
+    page that is not news, a robot flash), the model and ``taxonomy_version`` that tagged it, ``attempts`` (a failed one
+    is tried again from ``retry_at`` until ``tagging.MAX_ATTEMPTS``), ``batch_limit`` (``split``: its batch got an
+    unusable answer, so it goes again at once in a batch of at most this many; only a headline sent alone counts an
+    attempt). No content: the headline itself stays in news_articles."""
+
+    __tablename__ = "news_tag_state"
+
+    url_key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    status: Mapped[str] = mapped_column(String(12))
+    model: Mapped[str] = mapped_column(String(64), default="")
+    taxonomy_version: Mapped[int] = mapped_column(Integer, default=0)
+    attempts: Mapped[int] = mapped_column(Integer, default=0)
+    tagged_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    retry_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    batch_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 
 # -- Stock page 2026-11-12 (decisions 4, 6, 7, 8): related stocks, company facts and description ------------------
