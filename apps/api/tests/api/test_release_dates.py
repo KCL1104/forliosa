@@ -13,12 +13,12 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from forliosa.archive import Archiver
+from forliosa.archive import Archiver, filed_now
 from forliosa.marketdata import opendata as od
 from forliosa.marketdata.base import BaseProvider, InstrumentInfo, RevenueRow
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
-from forliosa.models import MarketEvent
+from forliosa.models import FinancialReport, MarketEvent
 from forliosa.services import announcements as ann
 from forliosa.services import stock as stock_svc
 from forliosa.timeutil import TAIPEI
@@ -35,7 +35,8 @@ class Listed(BaseProvider):
     def instruments(self):
         return [InstrumentInfo(f"{c}.{'TWO' if m == 'TPEX' else 'TW'}", c, n, m, "stock", "TWD")
                 for c, n, m in (("2901", "欣欣", "TWSE"), ("2408", "南亞科", "TWSE"), ("5530", "龍巖", "TPEX"),
-                                ("4523", "永彰", "TPEX"), ("8924", "大田", "TPEX"), ("2314", "台揚", "TWSE"))]
+                                ("4523", "永彰", "TPEX"), ("8924", "大田", "TPEX"), ("2314", "台揚", "TWSE"),
+                                ("6016", "康和證", "TPEX"))]
 
 
 @pytest.fixture()
@@ -283,6 +284,159 @@ def test_report_first_seen_after_archiving_started(client, engine, market, monke
     set_market_data(market)
 
 
+STATEMENTS = ("t187ap06", "t187ap07", "187ap17")
+
+
+def _code(r):
+    return r.get("公司代號") or r.get("SecuritiesCompanyCode")
+
+
+def _as_company(row, code, name, published, period=None):
+    """A copy of a fixture row (statements or monthly revenue) for another company, with its 出表日期 (and 資料年月)."""
+    r = copy.deepcopy(row)
+    r["公司代號"], r["公司名稱"], r["出表日期"] = code, name, published
+    if period is not None:
+        r["資料年月"] = period
+    return r
+
+
+class Edited(FakeFetcher):
+    """The fixtures with rows added (``add``: URL suffix -> rows) or companies dropped (``drop``: URL suffix ->
+    codes), the statement datasets moved to another quarter (``season``, ``published``: 季別 and 出表日期), and
+    datasets failing (``fail``: URL suffixes)."""
+
+    def __init__(self, add=None, drop=None, season=None, published=None, fail=()):
+        super().__init__()
+        self.add, self.drop, self.season, self.published, self.fail = add or {}, drop or {}, season, published, fail
+
+    def get_json(self, url, params=None, headers=None):
+        if any(url.endswith(f) for f in self.fail):
+            raise RuntimeError("HTTP 307")
+        data = copy.deepcopy(super().get_json(url, params, headers))
+        data += [copy.deepcopy(r) for suffix, rows in self.add.items() if url.endswith(suffix) for r in rows]
+        data = [r for r in data if not any(url.endswith(s) and _code(r) in c for s, c in self.drop.items())]
+        if self.season and any(k in url for k in STATEMENTS):
+            for r in data:
+                for k, v in (("季別", self.season), ("Season", self.season), ("出表日期", self.published),
+                             ("Date", self.published)):
+                    if r.get(k):
+                        r[k] = v
+        return data
+
+
+def test_new_listing_brings_no_first_seen_report_date(client, engine, market, monkeypatch):
+    """2026-11-17 review: a company that joins the statement datasets after their first run (a new listing that filed
+    while on 興櫃) brings a quarter filed before we saw it. Its listing day is not the release date: the events show
+    the quarter published on the deadline, actual day unknown; its next quarter gets a first-seen date."""
+    xinxin = _as_company(load("twse_t187ap06_l_ci_live_20261112.json")[0], "2901", "欣欣", "1151204")
+    listed = datetime(2026, 12, 4, 21, 40, tzinfo=TAIPEI)
+    with Session(engine) as db:
+        Archiver(db, FakeFetcher(), "commercial", now_fn=lambda: NOW).run(["twse", "tpex", "financials"])
+        Archiver(db, Edited(add={"/opendata/t187ap06_L_ci": [xinxin]}), "commercial",
+                 now_fn=lambda: listed).run(["financials"])
+        assert db.scalar(select(FinancialReport.period).where(FinancialReport.symbol == "2901.TW")) == "2026Q3"
+        assert db.scalar(select(MarketEvent).where(MarketEvent.type == "earnings")) is None
+    monkeypatch.setattr(stock_svc, "today_taipei", lambda: date(2026, 12, 7))
+    set_market_data(MarketData([Listed(), DemoProvider()], policy="commercial"))
+    q3 = by_type(client.get(f"{API}/instruments/2901/events").json(), "earnings")
+    assert [(e["period"], e["date"], e["estimated"], e["title"], e["detail"]) for e in q3] == [
+        ("2026Q3", "2026-11-14", False, "2026Q3 財報公布", f"前三季每股盈餘 26.64 元{UNKNOWN}")]
+    set_market_data(market)
+
+    xinxin_q4 = {**xinxin, "季別": "4", "出表日期": "1160330"}
+    with Session(engine) as db:
+        Archiver(db, Edited(add={"/opendata/t187ap06_L_ci": [xinxin_q4]}, season="4", published="1160330"),
+                 "commercial", now_fn=lambda: datetime(2027, 3, 30, 21, 40, tzinfo=TAIPEI)).run(["financials"])
+        rows = db.scalars(select(MarketEvent).where(MarketEvent.type == "earnings", MarketEvent.symbol == "2901.TW"))
+        assert [(r.data["period"], r.date) for r in rows] == [("2026Q4", date(2027, 3, 30))]
+
+
+def test_company_moving_from_tpex_to_twse_brings_no_first_seen_report_date(engine):
+    """2026-11-17 review: 6488's 2026Q3 is held under 6488.TWO; when it moves to TWSE the quarter shows up in
+    t187ap06_L under a new symbol (and event key). Not a release: the quarters are compared by company code across
+    both markets. The next quarter, first seen in the TWSE files, is one."""
+    moved = _as_company(load("twse_t187ap06_l_ci_live_20261112.json")[0], "6488", "環球晶", "1151204")
+    gone = {"/mopsfin_t187ap06_O_ci": {"6488"}, "/mopsfin_187ap17_O": {"6488"}}
+    with Session(engine) as db:
+        Archiver(db, FakeFetcher(), "commercial", now_fn=lambda: NOW).run(["twse", "tpex", "financials"])
+        Archiver(db, Edited(add={"/opendata/t187ap06_L_ci": [moved]}, drop=gone), "commercial",
+                 now_fn=lambda: datetime(2026, 12, 4, 21, 40, tzinfo=TAIPEI)).run(["financials"])
+        assert db.scalar(select(FinancialReport.period).where(FinancialReport.symbol == "6488.TW")) == "2026Q3"
+        assert db.scalar(select(MarketEvent).where(MarketEvent.type == "earnings")) is None
+        Archiver(db, Edited(add={"/opendata/t187ap06_L_ci": [moved]}, drop=gone, season="4", published="1160330"),
+                 "commercial", now_fn=lambda: datetime(2027, 3, 30, 21, 40, tzinfo=TAIPEI)).run(["financials"])
+        rows = db.scalars(select(MarketEvent).where(MarketEvent.type == "earnings",
+                                                    MarketEvent.symbol.in_(["6488.TW", "6488.TWO"])))
+        assert [(r.symbol, r.data["period"], r.date) for r in rows] == [("6488.TW", "2026Q4", date(2027, 3, 30))]
+
+
+def test_dataset_failing_on_the_first_run_brings_no_first_seen_report_dates(client, engine, market, monkeypatch):
+    """2026-11-17 review: the securities firms' dataset (t187ap06_O_bd, the only one holding 6016 and 6021) fails on
+    the first run and works the next day. Their 2026Q3, filed before archiving started, is not dated that day."""
+    with Session(engine) as db:
+        Archiver(db, Edited(fail=("/mopsfin_t187ap06_O_bd",)), "commercial", now_fn=lambda: NOW).run(
+            ["twse", "tpex", "financials"])
+        assert db.scalar(select(FinancialReport).where(FinancialReport.symbol == "6016.TWO")) is None
+        Archiver(db, FakeFetcher(), "commercial",
+                 now_fn=lambda: datetime(2026, 11, 13, 21, 40, tzinfo=TAIPEI)).run(["financials"])
+        assert db.scalar(select(FinancialReport.period).where(FinancialReport.symbol == "6016.TWO")) == "2026Q3"
+        assert db.scalar(select(MarketEvent).where(MarketEvent.type == "earnings")) is None
+    monkeypatch.setattr(stock_svc, "today_taipei", lambda: AFTER_Q3)
+    set_market_data(MarketData([Listed(), DemoProvider()], policy="commercial"))
+    q3 = by_type(client.get(f"{API}/instruments/6016/events").json(), "earnings")
+    assert [(e["period"], e["date"], e["estimated"], e["title"]) for e in q3] == [
+        ("2026Q3", "2026-11-14", False, "2026Q3 財報公布")]
+    assert q3[0]["detail"].endswith(UNKNOWN)
+    set_market_data(market)
+
+
+def test_revenue_of_a_company_new_to_the_archive_is_backlog(archived):
+    """2026-11-17 review: a company we hold no month of (禾榮科 listing on 11/20) and one whose October is held under
+    the other market (6488 moving from TPEx to TWSE) bring a month filed before we saw them: stored as backlog (shown
+    on the deadline, actual day unknown), not dated the day they joined t187ap05_L. Their next month is dated."""
+    base = load("twse_t187ap05_l_live_20261112.json")[0]
+    oct_ = [_as_company(base, "7799", "禾榮科", "1151120", "11510"),
+            _as_company(base, "6488", "環球晶", "1151120", "11510")]
+    nov = [{**r, "資料年月": "11511", "出表日期": "1151202"} for r in oct_]
+    with Session(archived) as db:
+        Archiver(db, Edited(add={"/opendata/t187ap05_L": oct_}), "commercial",
+                 now_fn=lambda: datetime(2026, 11, 20, 8, 10, tzinfo=TAIPEI)).twse_revenue()
+        Archiver(db, Edited(add={"/opendata/t187ap05_L": nov}), "commercial",
+                 now_fn=lambda: datetime(2026, 12, 3, 8, 10, tzinfo=TAIPEI)).twse_revenue()
+        rows = db.scalars(select(MarketEvent).where(MarketEvent.type == "revenue_release",
+                                                    MarketEvent.symbol.in_(["7799.TW", "6488.TW", "6488.TWO"])))
+        assert sorted((r.symbol, r.data["period"], r.date, r.data["backlog"]) for r in rows) == [
+            ("6488.TW", "2026-10", date(2026, 11, 20), True),
+            ("6488.TW", "2026-11", date(2026, 12, 2), False),
+            ("6488.TWO", "2026-10", date(2026, 11, 11), True),
+            ("7799.TW", "2026-10", date(2026, 11, 20), True),
+            ("7799.TW", "2026-11", date(2026, 12, 2), False)]
+
+
+def test_old_revenue_text_is_rebuilt_from_the_numbers(client, archived, monkeypatch):
+    """2026-11-17 review: rows archived before the change say 「年增 -27.0%」 for a fall; the events rebuild the text
+    from the stored numbers so that it reads like the newer rows (「年減 27.0%」), for a backlog row and a dated one."""
+    with Session(archived) as db:
+        row = db.scalar(select(MarketEvent).where(MarketEvent.symbol == "2901.TW",
+                                                  MarketEvent.type == "revenue_release"))
+        row.detail, row.data = "10 月營收 11,445 千元，年增 -27.0%", {**row.data, "yoy_pct": "-0.270145"}
+        db.add(MarketEvent(key="n" * 40, symbol="2901.TW", date=date(2026, 12, 2), type="revenue_release",
+                           title="11 月營收公布", detail="11 月營收 11,017 千元，年增 -5.1%", url=None,
+                           data={"period": "2026-11", "revenue": 11017, "yoy_pct": "-0.0512", "mom_pct": None,
+                                 "backlog": False}, source="twse-openapi"))
+        db.add(MarketEvent(key="o" * 40, symbol="2901.TW", date=date(2026, 10, 9), type="revenue_release",
+                           title="9 月營收公布", detail="9 月營收", url=None,  # no numbers: the stored text
+                           data={"period": "2026-09", "revenue": None, "yoy_pct": None, "backlog": False},
+                           source="twse-openapi"))
+        db.commit()
+    monkeypatch.setattr(stock_svc, "today_taipei", lambda: date(2026, 12, 5))
+    rev = {e["period"]: e["detail"] for e in by_type(client.get(f"{API}/instruments/2901/events").json(),
+                                                     "revenue_release")}
+    assert rev["2026-10"] == f"10 月營收 11,445 千元，年減 27.0%{UNKNOWN}"
+    assert rev["2026-11"] == "11 月營收 11,017 千元，年減 5.1%"
+    assert rev["2026-09"] == "9 月營收"
+
+
 def test_release_texts():
     assert od.revenue_text(10, 1977, Decimal("0.422302")) == "10 月營收 1,977 千元，年增 42.2%"
     assert od.revenue_text(9, 1105, Decimal("-0.270145")) == "9 月營收 1,105 千元，年減 27.0%"
@@ -292,6 +446,15 @@ def test_release_texts():
     assert od.eps_text("2026Q1", "15.00") == "第一季每股盈餘 15 元"
     assert od.eps_text("2025Q4", "26.64") == "全年每股盈餘 26.64 元"
     assert od.eps_text("2026Q3", None) is None and od.eps_text("2026Q3", "--") is None
+
+
+def test_filed_now():
+    """Only a period newer than every period held of the company (either market) is dated by its first appearance."""
+    held = {"2330": {"2026Q2", "2026Q3"}, "6488": {"2026-09", "2026-10"}}
+    assert filed_now(held, "2330", "2026Q4") and filed_now(held, "6488", "2026-11")
+    assert not filed_now(held, "2330", "2026Q3")  # held already (another statement, or under the other market)
+    assert not filed_now(held, "2330", "2026Q1")  # older than what we hold
+    assert not filed_now(held, "2901", "2026Q3")  # nothing held: a new listing or a dataset that failed at first
 
 
 def test_events_under_both_policies(client, archived, market):

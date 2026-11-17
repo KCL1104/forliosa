@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -537,6 +537,21 @@ def _event_source(r: MarketEvent) -> str:
     return f"{r.source}/{_EVENT_KINDS.get(r.type, r.type)}"
 
 
+def _revenue_detail(r: MarketEvent) -> str:
+    """An archived monthly revenue row's text, rebuilt from its numbers with :func:`revenue_text`: rows stored before
+    2026-11-17 say 「年增 -27.0%」 for a fall, newer ones 「年減 27.0%」, and both show side by side in the events
+    (2026-11-17 review). The stored ``detail`` when the numbers are missing."""
+    data = r.data or {}
+    period, revenue, yoy = str(data.get("period") or ""), data.get("revenue"), data.get("yoy_pct")
+    if revenue is None or len(period) != 7 or not period[5:].isdigit():
+        return r.detail
+    try:
+        return revenue_text(int(period[5:]), int(Decimal(str(revenue))),
+                            Decimal(str(yoy)) if yoy not in (None, "") else None)
+    except (InvalidOperation, ValueError):
+        return r.detail
+
+
 class _Published:
     """Evidence that a period whose legal deadline has passed is published: its statements or monthly revenue are in
     data we hold (the archive, else shioaji-data's official files). Each source is read once, only when asked."""
@@ -732,7 +747,7 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
         else:
             month = int(period[5:])
             title = f"{month} 月營收公布"
-            detail = r.detail if r.type == "revenue_release" else r.title
+            detail = _revenue_detail(r) if r.type == "revenue_release" else r.title
         add(d, kind, title, detail[:600], r.url, mine=recent, sources=[_event_source(r)], period=period)
 
     if _is_tw_stock(info):  # legal deadlines only where no actual date is known
@@ -766,12 +781,12 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
                 if d >= today:
                     detail = "還不知道實際公布日；法定期限是每月 10 日前公布上個月營收"
                     if seen is not None:
-                        detail = f"{seen.detail}；實際公布日期不明，以法定期限顯示"
+                        detail = f"{_revenue_detail(seen)}；實際公布日期不明，以法定期限顯示"
                     add(d, "revenue_release", f"{prev_m} 月營收公布期限（預估）", detail, mine=recent,
                         sources=["rules", *([_event_source(seen)] if seen is not None else [])], estimated=True,
                         period=period)
                     continue
-                found = (seen.detail, [_event_source(seen)]) if seen is not None else held.revenue(period)
+                found = (_revenue_detail(seen), [_event_source(seen)]) if seen is not None else held.revenue(period)
                 if found is not None:
                     add(d, "revenue_release", f"{prev_m} 月營收公布", f"{found[0]}（{UNKNOWN_DAY}）", mine=recent,
                         sources=["rules", *found[1]], period=period)

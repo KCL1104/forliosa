@@ -148,6 +148,9 @@ TPEX_OPENAPI = "https://www.tpex.org.tw/openapi/v1"
 TDCC_URL = "https://opendata.tdcc.com.tw/getOD.ashx"
 TAIFEX_OPENAPI = tf.TAIFEX_OPENAPI
 INDUSTRIES = ("ci", "basi", "bd", "fh", "ins", "mim")
+# A company's monthly revenue rows read back to tell a newly filed month from one filed before we saw the company
+# (:func:`filed_now`): a little over a year of first-seen dates
+HELD_MONTHS_DAYS = 400
 # TWSE publishes the day's margin balances in the evening; before this time MI_MARGN is the previous day's.
 MARGIN_READY = time(21, 0)
 
@@ -198,6 +201,29 @@ def tracked_symbols(db: Session) -> list[str]:
     syms = set(db.scalars(select(Transaction.symbol).where(Transaction.symbol.is_not(None)).distinct()))
     syms |= set(db.scalars(select(WatchlistItem.symbol).distinct()))
     return sorted(s for s in syms if s)
+
+
+def filed_now(held: dict[str, set[str]], code: str, period: str) -> bool:
+    """Whether a company's month or quarter that appears in a dataset today was filed now, so that today (出表日期) is
+    its release date: only when we already hold earlier periods of the company, in either market, and this one is
+    newer than all of them. A company we hold nothing of (a new listing that filed while on 興櫃, a dataset that failed
+    on its first run) and a company moving between TPEx and TWSE (its periods held under the other market) bring
+    periods filed before we saw them: their actual day is unknown (2026-11-17 review). ``held``: code -> periods."""
+    periods = held.get(code)
+    return bool(periods) and period > max(periods)
+
+
+def _by_code(pairs: Iterable[tuple[str, str | None]]) -> dict[str, set[str]]:
+    """``[("2330.TW", "2026Q3"), ("6488.TWO", "2026Q3")]`` -> ``{"2330": {"2026Q3"}, "6488": {"2026Q3"}}``."""
+    held: dict[str, set[str]] = {}
+    for symbol, period in pairs:
+        if period:
+            held.setdefault(symbol.split(".")[0], set()).add(str(period))
+    return held
+
+
+def _both_markets(codes: Iterable[str]) -> list[str]:
+    return sorted({tw_symbol(c, m) for c in codes for m in ("TWSE", "TPEX")})
 
 
 def safe_error(exc: BaseException) -> str:
@@ -405,25 +431,33 @@ class Archiver:
         Rows already present on the very first run of a dataset (nothing archived from it before) were
         filed before archiving started, so their date is unknown: they are stored with ``backlog: true`` and
         the events endpoint shows them as published on the legal deadline (with the numbers, saying the actual day
-        is not known). Later rows keep
+        is not known). The same for a company's month that :func:`filed_now` does not take as filed today: a company
+        with no month archived in either market within :data:`HELD_MONTHS_DAYS` (a new listing, a company that
+        moved from TPEx to TWSE), or a month not newer than the ones held (2026-11-17 review). Later rows keep
         their first-seen date (``ON CONFLICT DO NOTHING``): the publisher's 出表日期 when it is not in the
         future, else the archive date.
         """
         today = self.now_fn().astimezone(TAIPEI).date()
         seen_before = self.db.scalar(select(MarketEvent.id).where(
             MarketEvent.type == "revenue_release", MarketEvent.source == source).limit(1)) is not None
+        held = _by_code((s, (d or {}).get("period")) for s, d in self.db.execute(
+            select(MarketEvent.symbol, MarketEvent.data).where(
+                MarketEvent.type == "revenue_release",
+                MarketEvent.symbol.in_(_both_markets({r["code"] for r in rows})),
+                MarketEvent.date >= today - timedelta(days=HELD_MONTHS_DAYS)))) if seen_before else {}
         out = []
         for r in rows:
             first = r["published"] if r["published"] is not None and r["published"] <= today else today
             month = int(r["period"][5:])
             detail = od.revenue_text(month, r["revenue"], r["yoy_pct"])
+            backlog = not seen_before or not filed_now(held, r["code"], r["period"])
             out.append({"key": od.event_key("revenue", r["market"], r["code"], r["period"]),
                         "symbol": tw_symbol(r["code"], r["market"]), "date": first, "end_date": None,
                         "type": "revenue_release", "title": f"{month} 月營收公布", "detail": detail, "url": None,
                         "data": {"period": r["period"], "revenue": r["revenue"],
                                  "yoy_pct": str(r["yoy_pct"]) if r["yoy_pct"] is not None else None,
                                  "mom_pct": str(r["mom_pct"]) if r["mom_pct"] is not None else None,
-                                 "first_seen": today.isoformat(), "backlog": not seen_before},
+                                 "first_seen": today.isoformat(), "backlog": backlog},
                         "source": source})
         return upsert(self.db, MarketEvent, out, ["key"], ())
 
@@ -673,7 +707,7 @@ class Archiver:
         """Upsert statements; a value the new response leaves blank never erases an archived one.
 
         With ``track`` (``financials`` passes it once the source has archived statements before), a company's quarter
-        that was not archived yet is recorded as a release: see :meth:`_report_releases`.
+        that :func:`filed_now` takes as filed today is recorded as a release: see :meth:`_report_releases`.
 
         (Industries without TPEx companies return a single blank row: ``parse_statements`` skips it, so the job
         stores nothing and reports 0 rows instead of failing.)
@@ -685,24 +719,30 @@ class Archiver:
         symbols = {r["symbol"] for r in out}
         existing = {(f.symbol, f.period, f.kind): f.values for f in self.db.scalars(
             select(FinancialReport).where(FinancialReport.symbol.in_(symbols)))}
+        # The companies' quarters held before this write, in either market (a company moving between TPEx and TWSE)
+        held = _by_code(self.db.execute(select(FinancialReport.symbol, FinancialReport.period).where(
+            FinancialReport.symbol.in_(_both_markets({r["code"] for r in rows}))).distinct())) if track else {}
         for r in out:
             old = existing.get((r["symbol"], r["period"], r["kind"]))
             if old:
                 r["values"] = {**old, **{k: v for k, v in r["values"].items() if v is not None}}
         n = upsert(self.db, FinancialReport, out, ["symbol", "period", "kind"], ["values", "source", "fetched_at"])
         if track:
-            self._report_releases(rows, market, source, {(s, p) for s, p, _ in existing})
+            self._report_releases(rows, market, source, held)
         return n
 
     def _report_releases(self, rows: list[dict[str, Any]], market: str, source: str,
-                         known: set[tuple[str, str]]) -> int:
+                         held: dict[str, set[str]]) -> int:
         """Quarterly report release dates: the day a (company, quarter) first appears in the statement datasets.
 
         Like monthly revenue (:meth:`_revenue`): a ``market_events`` row of type ``earnings`` (key
         ``statements|market|code|period``, ``ON CONFLICT DO NOTHING`` so the first date stays), dated the file's
-        出表日期 when it is not in the future, else the archive date. Only for quarters not archived before, and never
-        on a source's first run: what is there then was filed before archiving started (the events endpoint shows
-        those on the legal deadline, saying the actual day is not known).
+        出表日期 when it is not in the future, else the archive date. Only for a quarter newer than every quarter held
+        of the company in either market (``held``, :func:`filed_now`), and never on a source's first run: what is
+        there then was filed before archiving started. A company we hold no statements of (a new listing, a dataset
+        that failed on the first run) and a company moving between TPEx and TWSE bring quarters filed before we saw
+        them (2026-11-17 review). The events endpoint shows those on the legal deadline, saying the actual day is not
+        known.
         """
         today = self.now_fn().astimezone(TAIPEI).date()
         dataset = {"income_ytd": "income", "balance": "balance", "margins": "margins"}
@@ -710,7 +750,7 @@ class Archiver:
         for r in rows:
             sym = tw_symbol(r["code"], market)
             key = od.event_key("statements", market, r["code"], r["period"])
-            if (sym, r["period"]) in known or key in out:
+            if not filed_now(held, r["code"], r["period"]) or key in out:
                 continue
             published = r.get("published")
             first = published if published is not None and published <= today else today
