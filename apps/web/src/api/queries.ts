@@ -14,6 +14,7 @@ import type {
   FinancialsPeriod,
   HistoryRange,
   PerformanceRange,
+  PositionsCommitInput,
   Preferences,
   RecurringPlanInput,
   Transaction,
@@ -216,6 +217,11 @@ export function useDeleteTransaction() {
 export function useCreateTransactionBatch() {
   const invalidate = useInvalidatePortfolio()
   return useMutation({ mutationFn: (body: TransactionBatchInput) => api.createTransactionBatch(body), onSuccess: invalidate })
+}
+/** 匯入庫存：一次寫入（每一檔一筆買進；以券商為準的刪除在同一個交易裡）；寫進去之後持股、總資產、交易清單重抓 */
+export function useCommitPositions() {
+  const invalidate = useInvalidatePortfolio()
+  return useMutation({ mutationFn: (body: PositionsCommitInput) => api.commitPositions(body), onSuccess: invalidate })
 }
 /** 匯入的「復原」：整批刪掉（不是一筆一筆刪：有賣出的批次一筆一筆刪會被擋） */
 export function useDeleteTransactionBatch() {

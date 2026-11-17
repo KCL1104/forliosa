@@ -283,7 +283,7 @@ export function totalsLine(doc: Pick<StatementImport, "totals_check">, currency:
   return t.diff < 0 ? `比對帳單的合計少 ${amount}，可能漏讀了。` : `比對帳單的合計多 ${amount}，可能有一列讀了兩次。`
 }
 
-/** 庫存畫面、不是交易紀錄：第一版不能匯入，直接說 */
+/** 庫存畫面（請改用匯入庫存，2026-11-17）、不是交易紀錄：不出表格，直接說 */
 export function unsupportedLine(doc: Pick<StatementImport, "document_kind" | "rows" | "notice">): string | null {
   const own = defaultUnsupported(doc)
   // 伺服器寫了句子就用它的（同一件事只有一種說法）
@@ -291,7 +291,7 @@ export function unsupportedLine(doc: Pick<StatementImport, "document_kind" | "ro
 }
 
 function defaultUnsupported(doc: Pick<StatementImport, "document_kind" | "rows">): string | null {
-  if (doc.document_kind === "holdings_snapshot") return "這是庫存畫面，沒有買進日期，還不能匯入。請改用對帳單或成交明細。"
+  if (doc.document_kind === "holdings_snapshot") return "這是庫存畫面，沒有買進日期。請改用「匯入庫存」。"
   if (doc.document_kind === "not_a_trade_record") return "這個檔案裡沒有買賣紀錄。"
   if (doc.rows.length === 0) return "這個檔案裡沒有讀到買賣。"
   return null

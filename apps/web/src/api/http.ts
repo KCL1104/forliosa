@@ -68,6 +68,7 @@ import type {
 import type { AdminGroupPass, DailyReport, MyGroupPass } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
 import type { HoldingDeleted, RecordCounts, RecordsCleared, StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
+import type { PositionsCommitCheck, PositionsCommitResult, PositionsImport } from "./types"
 import type {
   AdminReportsOverview,
   AdminTrial,
@@ -201,6 +202,9 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     checkTransactionBatch: (body) => request<TransactionBatchCheck>("POST", "/transactions/batch", { body: { ...body, dry_run: true } }),
     createTransactionBatch: (body) => request<TransactionBatchResult>("POST", "/transactions/batch", { body: { ...body, dry_run: false } }),
     deleteTransactionBatch: (batchId) => request<{ batch_id: string; deleted: number }>("DELETE", `/transactions/batches/${enc(batchId)}`),
+    parsePositions: (body, opts) => request<PositionsImport>("POST", "/imports/positions", { body, signal: opts?.signal }),
+    checkPositions: (body) => request<PositionsCommitCheck>("POST", "/imports/positions/commit", { body: { ...body, dry_run: true } }),
+    commitPositions: (body) => request<PositionsCommitResult>("POST", "/imports/positions/commit", { body: { ...body, dry_run: false } }),
     deleteHolding: (accountId, symbol, opts) =>
       request<HoldingDeleted>("DELETE", `/accounts/${enc(accountId)}/holdings/${enc(symbol)}`, { query: { pause_plans: opts?.pausePlans ? "true" : undefined } }),
     getRecordCounts: () => request<RecordCounts>("GET", "/portfolio/records"),

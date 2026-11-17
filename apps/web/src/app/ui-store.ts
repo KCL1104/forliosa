@@ -13,7 +13,7 @@ export interface TradePrefill {
   fee?: number
 }
 
-/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股、刪除這檔、清除所有持倉、匯入對帳單 */
+/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股、刪除這檔、清除所有持倉、匯入 */
 interface UiState {
   searchOpen: boolean
   setSearchOpen: (open: boolean) => void
@@ -46,11 +46,18 @@ interface UiState {
   clearRecords: { open: boolean; n: number; returnTo?: HTMLElement | null }
   openClearRecords: (returnTo?: HTMLElement | null) => void
   closeClearRecords: () => void
-  /** 匯入對帳單（從記一筆的第一步、AI 輸入框的「＋」、空的帳本打開） */
+  /**
+   * 匯入（2026-11-17）：帳本工具列的「匯入」、記一筆第一步、AI 輸入框的「＋」、空的帳本都先打開選擇（匯入庫存／匯入對帳單）；
+   * `kind` 直接打開其中一種（測試與「改用匯入庫存」用）
+   */
   importOpen: boolean
-  openImport: () => void
+  importKind: ImportKind
+  openImport: (kind?: ImportKind) => void
   closeImport: () => void
 }
+
+/** 匯入對話框的第一步：`choose` 先選要匯入什麼 */
+export type ImportKind = "choose" | "positions" | "statement"
 
 export const useUi = create<UiState>((set) => ({
   searchOpen: false,
@@ -70,7 +77,8 @@ export const useUi = create<UiState>((set) => ({
   openClearRecords: (returnTo) => set((s) => ({ clearRecords: { open: true, n: s.clearRecords.n + 1, returnTo } })),
   closeClearRecords: () => set((s) => ({ clearRecords: { ...s.clearRecords, open: false } })),
   importOpen: false,
+  importKind: "choose",
   // 從記一筆打開時先把記一筆關掉（兩個對話框不疊在一起）
-  openImport: () => set((s) => ({ importOpen: true, tradeForm: { ...s.tradeForm, open: false } })),
+  openImport: (kind = "choose") => set((s) => ({ importOpen: true, importKind: kind, tradeForm: { ...s.tradeForm, open: false } })),
   closeImport: () => set({ importOpen: false }),
 }))

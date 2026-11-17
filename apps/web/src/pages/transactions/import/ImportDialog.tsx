@@ -1,14 +1,11 @@
 import { useQueryClient } from "@tanstack/react-query"
 import { Link } from "@tanstack/react-router"
-import { ChevronDownIcon } from "lucide-react"
 import { useEffect, useId, useRef, useState } from "react"
 import { toast } from "sonner"
 import { api } from "@/api"
 import { useAccounts, useDeleteTransactionBatch } from "@/api/queries"
-import { ApiError, type Account, type ImportPage, type StatementImport, type TransactionBatchResult } from "@/api/types"
-import { useAiUsage } from "@/ai/remote-hooks"
-import type { AiUsage } from "@/ai/remote"
-import { useUi } from "@/app/ui-store"
+import type { Account, ImportPage, PositionsCommitResult, StatementImport, TransactionBatchResult } from "@/api/types"
+import { useUi, type ImportKind } from "@/app/ui-store"
 import { FieldError } from "@/components/form-field"
 import { textAction } from "@/components/text-action"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -18,24 +15,38 @@ import { Input } from "@/components/ui/input"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
 import { accountForBroker, statementCurrency, unsupportedLine } from "./flags"
+import { ImportChooser } from "./ImportChooser"
 import { bodyClass, footerClass } from "./layout"
-import { ImageReadError, MAX_IMAGES, MAX_PAGES, prepareImage, sniffFile } from "./prepare-image"
+import { FileRow, Preview, QuotaLine, Reading } from "./parts"
+import { imageError, imageStatus, isAbort, readError, useImportsLeft, type PickedImage } from "./read-utils"
+import { PositionsFlow } from "./PositionsFlow"
+import type { ReplacedName } from "./PositionsReview"
+import { MAX_IMAGES, MAX_PAGES, prepareImage, sniffFile } from "./prepare-image"
 import { openPdf, PdfOpenError, PdfPasswordError, preparePdf } from "./prepare-pdf"
 import { ReviewTable } from "./ReviewTable"
+import { replacedText, runUndo, useImportUndo } from "./undo-store"
 
 /**
- * 匯入對帳單（產品負責人 2026-11-16，方案一：AI 讀檔＋確認表）。桌面是對話框、手機是抽屜。
- * 選檔案 →（PDF 有密碼就輸入）→ 開始讀（10–40 秒，可以取消）→ 確認表 → 簽名「匯入 N 筆」→ 通知「已匯入 N 筆」＋復原。
+ * 匯入（產品負責人 2026-11-16 匯入對帳單、11-17 匯入庫存）。桌面是對話框、手機是抽屜。
+ * 第一步先選要匯入什麼（`ImportChooser`）：匯入庫存（現有持股，最快）或匯入對帳單（交易明細）；選了之後在同一個對話框裡接下去。
  *
+ * 匯入對帳單：選檔案 →（PDF 有密碼就輸入）→ 開始讀（10–40 秒，可以取消）→ 確認表 → 簽名「匯入 N 筆」→ 通知「已匯入 N 筆」＋復原。
  * - PDF：在這台裝置上用 pdf.js 解密、畫成圖、塗掉找得到的個資，只送出圖和塗過的文字（密碼與原始檔不離開裝置）。
  * - 截圖、照片：JPEG／PNG／WebP，一次最多 5 張；很長的截圖切成好幾塊。截圖沒有文字層，塗不了，整張送出（畫面上說一句）。
  * - 不存檔案、不存讀出的結果；只有簽名匯入的交易進帳本（來源「匯入」），可以整批復原。
+ * 匯入庫存：見 `PositionsFlow`。讀出來是另一種的（庫存畫面丟進匯入對帳單、交易明細丟進匯入庫存），一個按鈕換過去、截圖帶著走。
  */
 export function ImportDialog() {
   const open = useUi((s) => s.importOpen)
+  const requested = useUi((s) => s.importKind)
   const close = useUi((s) => s.closeImport)
   const isDesktop = useIsDesktop()
+  const undo = useDeleteTransactionBatch()
+  const askUndo = useImportUndo((s) => s.ask)
   const [phase, setPhase] = useState<Phase>("pick")
+  const [kind, setKind] = useState<ImportKind>(requested)
+  /** 換到另一種匯入時帶過去的截圖 */
+  const [carry, setCarry] = useState<PickedImage[] | undefined>(undefined)
   // 每次打開都是新的一份（關掉時丟掉選的檔案、密碼與讀出來的表）
   const [session, setSession] = useState(0)
   const [wasOpen, setWasOpen] = useState(open)
@@ -44,23 +55,82 @@ export function ImportDialog() {
     if (open) {
       setSession((n) => n + 1)
       setPhase("pick")
+      setKind(requested)
+      setCarry(undefined)
     }
   }
+  /** 對話框裡現在這一步（換成另一種匯入時，焦點移到新的第一個控制項：按過的那一列已經不在了） */
+  const flowRef = useRef<HTMLDivElement>(null)
+  const choose = (k: "positions" | "statement", images?: PickedImage[]) => {
+    // 按過的那一列馬上會被拿掉。焦點還在它上面時被拿掉，對話框的焦點管理會在下一個畫面把焦點拉回對話框本身，
+    // 蓋掉下面移到第一個控制項的那一下：先把焦點放在這一步的外框（還在對話框裡），它就不會去拉
+    flowRef.current?.focus({ preventScroll: true })
+    setCarry(images)
+    setKind(k)
+    setPhase("pick")
+    setSession((n) => n + 1)
+    requestAnimationFrame(() =>
+      flowRef.current?.querySelector<HTMLElement>('button:not([disabled]):not([tabindex="-1"]), textarea, input:not([type=file]):not([tabindex="-1"])')?.focus(),
+    )
+  }
+
   const wide = phase === "review"
-  const title = "匯入對帳單"
-  const description = "選一份 PDF 對帳單或成交明細的截圖，AI 讀成一張表，你核對過、簽名之後才寫進帳本。"
-  const flow = (sheet: boolean) => open && <ImportFlow key={session} sheet={sheet} onClose={close} onPhase={setPhase} />
+  const title = kind === "choose" ? "匯入" : kind === "positions" ? "匯入庫存" : "匯入對帳單"
+  const description =
+    kind === "choose"
+      ? "選要匯入現有持股（庫存），還是交易明細（對帳單）。"
+      : kind === "positions"
+        ? "選券商 app 庫存頁的截圖，或貼上庫存的文字，AI 讀成一張表，你核對過、簽名之後，每一檔記成一筆買進。"
+        : "選一份 PDF 對帳單或成交明細的截圖，AI 讀成一張表，你核對過、簽名之後才寫進帳本。"
+  const width = kind === "choose" ? "sm:max-w-[520px]" : !wide ? "sm:max-w-[560px]" : kind === "positions" ? "sm:max-w-[min(880px,calc(100%-4rem))]" : "sm:max-w-[min(1000px,calc(100%-4rem))]"
+
+  const doneStatement = (res: TransactionBatchResult, count: number) => {
+    toast.success(`已匯入 ${count} 筆`, {
+      description: res.auto_dividends_added > 0 ? `另外自動記了 ${res.auto_dividends_added} 筆股利。` : undefined,
+      duration: 10_000,
+      action: { label: "復原", onClick: () => runUndo(undo.mutateAsync, res.batch_id) },
+    })
+    close()
+  }
+  // 以券商為準換掉了舊紀錄：通知照實寫，「復原」先問一次（舊紀錄回不來）
+  const donePositions = (res: PositionsCommitResult, count: number, replaced: ReplacedName[]) => {
+    const lines = [
+      replaced.length ? `以券商為準換掉了${replacedText(replaced)}舊紀錄。` : "",
+      res.auto_dividends_added > 0 ? `另外自動記了 ${res.auto_dividends_added} 筆股利。` : "",
+    ].filter(Boolean)
+    toast.success(`已匯入 ${count} 檔`, {
+      description: lines.length ? lines.join("") : undefined,
+      duration: 10_000,
+      action: {
+        label: "復原",
+        onClick: () => (replaced.length ? askUndo({ batchId: res.batch_id, count: res.created.length, replaced }) : runUndo(undo.mutateAsync, res.batch_id)),
+      },
+    })
+    close()
+  }
+
+  const flow = (sheet: boolean) =>
+    open &&
+    (kind === "choose" ? (
+      <ImportChooser key={session} sheet={sheet} onPick={(k) => choose(k)} onCancel={close} />
+    ) : kind === "positions" ? (
+      <PositionsFlow key={session} sheet={sheet} initialImages={carry} onClose={close} onPhase={setPhase} onDone={donePositions} onSwitch={(imgs) => choose("statement", imgs)} />
+    ) : (
+      <ImportFlow key={session} sheet={sheet} initialImages={carry} onClose={close} onPhase={setPhase} onDone={doneStatement} onSwitch={(imgs) => choose("positions", imgs)} />
+    ))
 
   if (isDesktop) {
     return (
       // 讀取中、核對中不因為點到外面就關掉（表格改到一半會不見）；Esc 與「取消」照常
       <Dialog open={open} onOpenChange={(o) => !o && close()} disablePointerDismissal={phase !== "pick"}>
-        <DialogContent className={cn("flex max-h-[calc(100dvh-4rem)] flex-col gap-0 overflow-hidden p-0", wide ? "sm:max-w-[min(1000px,calc(100%-4rem))]" : "sm:max-w-[560px]")}>
+        <DialogContent className={cn("flex max-h-[calc(100dvh-4rem)] flex-col gap-0 overflow-hidden p-0", width)}>
           <DialogHeader className="px-6 pt-5 pb-4">
             <DialogTitle>{title}</DialogTitle>
             <DialogDescription className="sr-only">{description}</DialogDescription>
           </DialogHeader>
-          {flow(false)}
+          <div ref={flowRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+            {flow(false)}
+          </div>
         </DialogContent>
       </Dialog>
     )
@@ -72,20 +142,15 @@ export function ImportDialog() {
           <DrawerTitle>{title}</DrawerTitle>
           <DrawerDescription className="sr-only">{description}</DrawerDescription>
         </DrawerHeader>
-        <div className="flex min-h-0 flex-1 flex-col">{flow(true)}</div>
+        <div ref={flowRef} tabIndex={-1} className="flex min-h-0 flex-1 flex-col outline-none">
+          {flow(true)}
+        </div>
       </DrawerContent>
     </Drawer>
   )
 }
 
 type Phase = "pick" | "reading" | "review"
-
-interface PickedImage {
-  id: number
-  file: File
-  pages?: ImportPage[]
-  error?: string
-}
 
 interface PickedPdf {
   file: File
@@ -102,28 +167,28 @@ interface PickedPdf {
 /** 讀檔時用哪個帳戶驗算賣超、重複：只有一個就是它；好幾個時先用第一個新台幣帳戶（讀完再照對帳單上的券商換） */
 const firstAccount = (accounts: Account[]) => (accounts.find((a) => a.currency === "TWD") ?? accounts[0])?.id ?? ""
 
-const isAbort = (e: unknown) => e instanceof DOMException && e.name === "AbortError"
-
-/** 讀檔失敗時的一句話（伺服器的句子照原文；沒有句子的照狀態碼說） */
-function readError(e: unknown): string {
-  if (e instanceof ApiError) {
-    if (!e.code.startsWith("http_")) return e.message
-    if (e.status === 413) return "檔案太大。PDF 分開匯入，或少選幾張截圖。"
-    if (e.status === 403) return "這個帳號還不能匯入對帳單。"
-    if (e.status === 503) return "AI 暫時無法使用，等一下再試。"
-    if (e.status === 429) return "今天的匯入次數用完了，明天再試。"
-    return `沒有讀成功（${e.status}），檔案還在，再試一次。`
-  }
-  return "沒有連上伺服器，檔案還在，再試一次。"
-}
-
-function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () => void; onPhase: (p: Phase) => void }) {
+function ImportFlow({
+  sheet,
+  initialImages,
+  onClose,
+  onPhase,
+  onDone,
+  onSwitch,
+}: {
+  sheet: boolean
+  /** 從匯入庫存換過來時帶著的截圖 */
+  initialImages?: PickedImage[]
+  onClose: () => void
+  onPhase: (p: Phase) => void
+  onDone: (result: TransactionBatchResult, count: number) => void
+  /** 讀出來是庫存畫面：改用匯入庫存（帶著截圖） */
+  onSwitch: (images: PickedImage[]) => void
+}) {
   const accounts = useAccounts()
   const qc = useQueryClient()
-  const undo = useDeleteTransactionBatch()
   const [phase, setPhaseState] = useState<Phase>("pick")
   const [pdf, setPdf] = useState<PickedPdf | null>(null)
-  const [images, setImages] = useState<PickedImage[]>([])
+  const [images, setImages] = useState<PickedImage[]>(initialImages ?? [])
   const [password, setPassword] = useState("")
   const [error, setError] = useState<string | null>(null)
   const [doc, setDoc] = useState<{ result: StatementImport; account: string } | null>(null)
@@ -131,11 +196,10 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
   const fileRef = useRef<HTMLInputElement>(null)
   const passwordRef = useRef<HTMLInputElement>(null)
   const controller = useRef<AbortController | null>(null)
-  const imageSeq = useRef(0)
+  const imageSeq = useRef(Math.max(0, ...(initialImages ?? []).map((x) => x.id)))
   /** 換了檔案或按了移除：還在打開、準備的那一份就不要再寫回畫面 */
   const pdfSeq = useRef(0)
-  const usage = useAiUsage().data as (AiUsage & { imports_today?: number; import_daily_limit?: number }) | undefined
-  const left = usage?.import_daily_limit != null && usage.imports_today != null ? Math.max(usage.import_daily_limit - usage.imports_today, 0) : null
+  const { left, limit } = useImportsLeft()
 
   const setPhase = (p: Phase) => {
     setPhaseState(p)
@@ -185,15 +249,7 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
         const pages = await prepareImage(p.file)
         setImages((xs) => xs.map((x) => (x.id === p.id ? { ...x, pages } : x)))
       } catch (e) {
-        const msg =
-          e instanceof ImageReadError
-            ? e.reason === "heic"
-              ? "這張是 HEIC 格式，這個瀏覽器讀不了。請改存成 JPEG，或改用截圖。"
-              : e.reason === "unsupported"
-                ? "只收 PDF、JPEG、PNG、WebP。"
-                : "這張圖打不開。"
-            : "這張圖打不開。"
-        setImages((xs) => xs.map((x) => (x.id === p.id ? { ...x, error: msg } : x)))
+        setImages((xs) => xs.map((x) => (x.id === p.id ? { ...x, error: imageError(e) } : x)))
       }
     }
   }
@@ -286,22 +342,6 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
     else void start()
   }
 
-  const done = (res: TransactionBatchResult, count: number) => {
-    toast.success(`已匯入 ${count} 筆`, {
-      description: res.auto_dividends_added > 0 ? `另外自動記了 ${res.auto_dividends_added} 筆股利。` : undefined,
-      duration: 10_000,
-      action: {
-        label: "復原",
-        onClick: () =>
-          void undo.mutateAsync(res.batch_id).then(
-            () => toast("已復原這次匯入"),
-            (err) => toast.error("沒有復原成功。", { description: err instanceof Error ? err.message : undefined }),
-          ),
-      },
-    })
-    onClose()
-  }
-
   if (accounts.data && accounts.data.length === 0) {
     return (
       <div className={cn(bodyClass(sheet), "flex flex-col items-start gap-3")}>
@@ -314,23 +354,30 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
   }
 
   if (phase === "reading") {
-    return <Reading count={readingPages.count} unit={readingPages.unit} sheet={sheet} onCancel={() => controller.current?.abort()} />
+    return <Reading label={`正在讀 ${readingPages.count} ${readingPages.unit}…`} sheet={sheet} onCancel={() => controller.current?.abort()} />
   }
 
   if (phase === "review" && doc) {
     const unsupported = unsupportedLine(doc.result)
     if (unsupported) {
+      // 庫存畫面：改用匯入庫存（截圖帶過去，不用再選一次）
+      const toPositions = doc.result.document_kind === "holdings_snapshot"
       return (
         <>
           <div className={bodyClass(sheet)}>
             <p className="border-y border-rule py-5 text-base text-ink">{unsupported}</p>
           </div>
           <div className={footerClass(sheet)}>
+            {toPositions && (
+              <button type="button" onClick={reset} className={cn(textAction, "text-sm text-ink-2 hover:text-ink")}>
+                換一個檔案
+              </button>
+            )}
             <div className="ml-auto flex gap-2.5">
               <Button variant="outline" onClick={onClose}>
                 取消
               </Button>
-              <Button onClick={reset}>換一個檔案</Button>
+              {toPositions ? <Button onClick={() => onSwitch(pdf ? [] : images)}>改用匯入庫存</Button> : <Button onClick={reset}>換一個檔案</Button>}
             </div>
           </div>
         </>
@@ -345,7 +392,7 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
         initialAccountId={initial}
         checkedAccountId={doc.account}
         sheet={sheet}
-        onDone={done}
+        onDone={(res, count) => onDone(res, count)}
         onCancel={onClose}
         onRestart={reset}
       />
@@ -388,13 +435,7 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
         {images.length > 0 && (
           <ul className="border-y border-rule">
             {images.map((x) => (
-              <FileRow
-                key={x.id}
-                name={x.file.name}
-                status={x.error ? null : x.pages ? (x.pages.length > 1 ? `切成 ${x.pages.length} 張` : "1 張") : "讀取中…"}
-                error={x.error}
-                onRemove={() => setImages((xs) => xs.filter((y) => y.id !== x.id))}
-              />
+              <FileRow key={x.id} name={x.file.name} status={imageStatus(x)} error={x.error} onRemove={() => setImages((xs) => xs.filter((y) => y.id !== x.id))} />
             ))}
           </ul>
         )}
@@ -415,11 +456,7 @@ function ImportFlow({ sheet, onClose, onPhase }: { sheet: boolean; onClose: () =
             {error}
           </p>
         )}
-        {outOfImports ? (
-          <p className="text-base text-ink">今天的 {usage?.import_daily_limit} 份用完了，明天再匯入。</p>
-        ) : left !== null && left <= 3 ? (
-          <p className="text-sm text-ink-2">今天還可以匯入 {left} 份。</p>
-        ) : null}
+        <QuotaLine left={left} limit={limit} />
       </div>
       <div className={footerClass(sheet)}>
         <div className={cn("ml-auto flex gap-2.5", sheet && "w-full")}>
@@ -449,19 +486,6 @@ function maskLine(p: PickedPdf): string {
   return "沒有找到可以塗掉的個資，會整頁送給 AI 讀。"
 }
 
-function FileRow({ name, status, error, onRemove }: { name: string; status: string | null; error?: string; onRemove: () => void }) {
-  return (
-    <li className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-rule py-2 last:border-b-0">
-      <span className="min-w-0 flex-1 truncate text-base text-ink">{name}</span>
-      {status && <span className="num text-sm text-ink-2">{status}</span>}
-      <button type="button" onClick={onRemove} className={textAction} aria-label={`移除 ${name}`}>
-        移除
-      </button>
-      {error && <FieldError className="w-full">{error}</FieldError>}
-    </li>
-  )
-}
-
 function PasswordField({ value, onChange, wrong, inputRef }: { value: string; onChange: (v: string) => void; wrong: boolean; inputRef: React.RefObject<HTMLInputElement | null> }) {
   const id = useId()
   const hintId = useId()
@@ -489,58 +513,5 @@ function PasswordField({ value, onChange, wrong, inputRef }: { value: string; on
         通常是身分證字號，英文大寫。密碼只在這台裝置上用，不會送出。
       </p>
     </div>
-  )
-}
-
-/** 「看要送出的 2 頁」：塗過之後、實際送出去的圖 */
-function Preview({ pages, unit }: { pages: ImportPage[]; unit: string }) {
-  const [open, setOpen] = useState(false)
-  const id = useId()
-  return (
-    <div>
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-controls={id}
-        onClick={() => setOpen(!open)}
-        className="inline-flex min-h-9 items-center gap-1 text-md text-ink underline decoration-ctl underline-offset-4 hover:decoration-ink pointer-coarse:min-h-11"
-      >
-        看要送出的 {pages.length} {unit}
-        <ChevronDownIcon aria-hidden className={cn("size-3.5 transition-transform", open && "rotate-180")} />
-      </button>
-      {open && (
-        <div id={id} className="mt-2 flex max-h-[50dvh] flex-col gap-2 overflow-y-auto">
-          {pages.map((p, i) => (
-            <img key={i} src={`data:${p.media_type};base64,${p.data}`} alt={`要送出的第 ${i + 1} ${unit}`} className="w-full border border-rule" />
-          ))}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** 讀取中：「正在讀 2 頁…」、已經過了幾秒、取消 */
-function Reading({ count, unit, sheet, onCancel }: { count: number; unit: string; sheet: boolean; onCancel: () => void }) {
-  const [seconds, setSeconds] = useState(0)
-  useEffect(() => {
-    const t = window.setInterval(() => setSeconds((s) => s + 1), 1000)
-    return () => window.clearInterval(t)
-  }, [])
-  return (
-    <>
-      <div className={cn(bodyClass(sheet), "flex flex-col items-start gap-1.5 py-6")} aria-busy="true">
-        <p className="text-lg font-medium text-ink" role="status">
-          正在讀 {count} {unit}…
-        </p>
-        <p className="num text-sm text-ink-2">
-          通常要 10 到 40 秒{seconds >= 3 ? `，已經 ${seconds} 秒` : ""}。
-        </p>
-      </div>
-      <div className={footerClass(sheet)}>
-        <Button type="button" variant="outline" className={cn("ml-auto", sheet ? "flex-1" : "min-w-24")} onClick={onCancel}>
-          取消
-        </Button>
-      </div>
-    </>
   )
 }

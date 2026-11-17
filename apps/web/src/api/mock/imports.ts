@@ -6,6 +6,11 @@ import {
   type ImportFlagCode,
   type ImportRaw,
   type ImportRow,
+  type PositionsCommitCheck,
+  type PositionsCommitInput,
+  type PositionsCommitResult,
+  type PositionsImport,
+  type PositionsImportInput,
   type StatementImport,
   type StatementImportInput,
   type Transaction,
@@ -15,6 +20,7 @@ import {
 } from "../types"
 import { findInstrument } from "./instruments"
 import { closeOn, parseDay } from "./market"
+import { heldIn, holdingsFixture, parsePastedHoldings, readPositions } from "./positions"
 
 /**
  * 匯入對帳單的 mock（和後端 `services/imports.py`、`POST /transactions/batch` 同一套代碼與規則，只做示範用得到的部分）：
@@ -23,6 +29,8 @@ import { closeOn, parseDay } from "./market"
  * - `POST /transactions/batch`：dry_run 重新驗算帳本（賣超、重複，和後端一樣不算金額、日期、價格）；
  *   寫入時有一列不行就整批不寫（422 `rows`）。
  * - `DELETE /transactions/batches/{id}`：整批刪掉；之後的賣出用到這批買進時 422 `ledger_inconsistent`。
+ * - 匯入庫存（2026-11-17）：`POST /imports/positions` 讀（`./positions`）、`POST /imports/positions/commit`
+ *   每一檔寫一筆買進（手續費 0），以券商為準先刪掉那個帳戶裡那一檔的紀錄；每天的次數和匯入對帳單合計。
  */
 
 /** 預設不匯入的檢查結果（其他的照樣勾著、只標出來）——和後端相同 */
@@ -296,7 +304,86 @@ export function createImportStore(deps: {
     if (bad.length) throw new ApiError(422, "batch_rejected", `有 ${bad.length} 筆不能匯入。`, { rows: bad })
   }
 
+  /** 匯入庫存寫入：每一列的檢查（和後端的 `commit` 一樣：找不到股票、日期、台股整數股、已在帳本） */
+  const checkPositions = (body: PositionsCommitInput): PositionsCommitCheck & { account: Account; day: string; replacing: Set<string> } => {
+    const account = accountFor(body.account_id)
+    if (body.rows.length === 0 || body.rows.length > 200) throw new ApiError(422, "validation_error", "一次 1 到 200 檔。")
+    for (const r of body.rows) {
+      if ((r.price == null) === (r.total_cost == null)) throw new ApiError(422, "validation_error", "每一列要有均價或總成本其中一個。")
+      if (!(r.quantity > 0) || (r.price != null && !(r.price > 0)) || (r.total_cost != null && !(r.total_cost > 0))) {
+        throw new ApiError(422, "validation_error", "股數、均價、總成本要大於 0。")
+      }
+    }
+    const day = body.trade_date ?? deps.today
+    const txns = deps.txns()
+    const held = heldIn(txns, account.id, deps.today)
+    const specs = body.rows.map((r) => findInstrument(r.symbol))
+    const replacing = new Set(body.rows.flatMap((r, i) => (r.replace && specs[i] ? [specs[i]!.symbol] : [])))
+    const rows = body.rows.map((r, index) => {
+      const spec = specs[index]
+      const flags: ImportFlag[] = []
+      const h = spec ? (held.get(spec.symbol) ?? null) : null
+      const date = r.trade_date ?? day
+      if (!spec) flags.push(flag("unknown_symbol", `找不到「${r.symbol}」。`, "error"))
+      else {
+        if (h && !replacing.has(spec.symbol)) flags.push(flag("in_ledger", `帳本裡已經有 ${n0(h.quantity)} 股。勾「以券商為準」才會換掉，不然這一列不要匯入。`, "error"))
+        if (spec.market !== "US" && !Number.isInteger(r.quantity)) flags.push(flag("validation_error", "台股的股數要是整數。", "error"))
+      }
+      if (date > deps.today || date < "1990-01-01") flags.push(flag("bad_date", "日期要在 1990/1/1 到今天之間。", "error"))
+      return { index, flags, in_ledger: h }
+    })
+    const replaced = [...replacing].map((symbol) => ({ symbol, deleted: txns.filter((t) => t.account_id === account.id && t.symbol === symbol).length }))
+    const ok = !rows.some((r) => r.flags.some((f) => f.severity === "error"))
+    return { dry_run: true, ok, trade_date: day, rows, replaced, problems: [], account, day, replacing }
+  }
+
   return {
+    parsePositions(body: PositionsImportInput): PositionsImport {
+      const pages = body.pages ?? []
+      if (body.kind === "images" ? pages.length === 0 || body.text != null : !body.text?.trim() || pages.length > 0) {
+        throw new ApiError(422, "validation_error", "沒有截圖或文字。", { details: { fields: [body.kind === "images" ? "pages" : "text"] } })
+      }
+      if (pages.length > 20) throw new ApiError(413, "too_large", "一次最多 20 張。")
+      if (body.text && ID_RE.test(body.text)) throw new ApiError(422, "unmasked_pii", "送出的文字裡還有身分證字號。")
+      if (importsToday >= MOCK_IMPORT_DAILY_LIMIT) throw new ApiError(429, "ai_import_daily_limit", `今天已經匯入 ${MOCK_IMPORT_DAILY_LIMIT} 次，明天再匯入。`)
+      importsToday++
+      const account = accountFor(body.account_id)
+      const txns = deps.txns()
+      const accounts = deps.accounts()
+      const held = new Map(accounts.map((a) => [a.id, heldIn(txns, a.id, deps.today)]))
+      const ctx = { account, accounts, held, brokerName: "永豐金證券", today: deps.today }
+      if (body.kind === "text" && /買進|賣出|成交/.test(body.text!) && /\d{4}[/-]\d{1,2}[/-]\d{1,2}/.test(body.text!)) {
+        return { ...readPositions([], ctx, "text"), document_kind: "trade_records", notice: "這是交易明細，不是庫存。請改用「匯入對帳單」。" }
+      }
+      const read = body.kind === "images" ? holdingsFixture(held.get(account.id) ?? new Map()) : parsePastedHoldings(body.text!)
+      return readPositions(read, ctx, body.kind)
+    },
+    checkPositions(body: PositionsCommitInput): PositionsCommitCheck {
+      const { account: _a, day: _d, replacing: _r, ...check } = checkPositions(body)
+      return check
+    },
+    commitPositions(body: PositionsCommitInput): PositionsCommitResult {
+      const { account, day, replacing, rows, replaced } = checkPositions(body)
+      const failing = rows.flatMap((r) => r.flags.filter((f) => f.severity === "error").map((f) => ({ index: r.index, code: f.code, message: f.message })))
+      if (failing.length) throw new ApiError(422, "batch_rejected", `有 ${new Set(failing.map((f) => f.index)).size} 筆不能匯入，整批都沒有寫入。`, { rows: failing })
+      const batchId = `imp_${String(++nextBatch).padStart(4, "0")}`
+      const now = new Date().toISOString()
+      const created: Transaction[] = body.rows.map((r) => {
+        const spec = findInstrument(r.symbol)!
+        const price = r.price ?? Math.round((r.total_cost! / r.quantity) * 1e8) / 1e8
+        return {
+          id: `txn_${++nextTxn}`, account_id: account.id, symbol: spec.symbol, type: "buy", trade_date: r.trade_date ?? day,
+          quantity: r.quantity, price, amount: r.total_cost ?? Math.round(r.quantity * price * 100) / 100, fee: 0, tax: 0, health_insurance: 0,
+          currency: spec.currency, is_day_trade: false, note: "", source: "import", created_at: now, import_batch_id: batchId,
+        }
+      })
+      // 以券商為準：這個帳戶裡這一檔的所有紀錄（含自動入帳的股利）先刪掉，和寫入同一次
+      const kept = deps.txns().filter((t) => !(t.account_id === account.id && t.symbol && replacing.has(t.symbol)))
+      const before = new Set(kept.filter((t) => t.source === "auto").map((t) => t.id))
+      const next = deps.commit([...kept, ...created])
+      const added = next.filter((t) => t.source === "auto" && !before.has(t.id)).length
+      return { dry_run: false, batch_id: batchId, trade_date: day, created: created.map((t) => t.id), replaced, auto_dividends_added: added }
+    },
     parse(body: StatementImportInput): StatementImport {
       if (body.pages.length === 0) throw new ApiError(422, "validation_error", "沒有檔案")
       if (body.pages.length > 20) throw new ApiError(413, "too_large", "一次最多 20 頁。")

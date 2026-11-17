@@ -10,7 +10,7 @@ import { aiKeys } from "@/ai/remote-hooks"
 import { useUi } from "@/app/ui-store"
 
 /**
- * 會員和一般帳號只差每日收盤簡報與問 AI 次數（產品負責人 2026-11-17）：免費帳號也有匯入對帳單與深度搜尋。
+ * 會員和一般帳號只差每日收盤簡報與問 AI 次數（產品負責人 2026-11-17）：免費帳號也有匯入（匯入庫存、匯入對帳單）與深度搜尋。
  * 匯入的入口照 `/me` 的 `plan.statement_import`（不看 tier）；深度搜尋的切換鈕照 `/ai/usage` 的 `deep_search_cost`（不看 plan）。
  */
 const T = { timeout: 8000 }
@@ -48,15 +48,16 @@ async function renderComposer(plan: UserPlan | null | undefined, usage?: Partial
   return { onForm }
 }
 
-describe("免費帳號的匯入對帳單入口（「＋」）", () => {
-  it("plan.statement_import 是 true：「＋」是兩項的選單（記一筆、匯入對帳單），匯入那一項打開匯入", async () => {
+describe("免費帳號的匯入入口（「＋」：匯入庫存或對帳單）", () => {
+  it("plan.statement_import 是 true：「＋」是兩項的選單（記一筆、匯入庫存或對帳單），匯入那一項打開匯入的選擇", async () => {
     const user = userEvent.setup()
     await renderComposer(FREE)
-    await user.click(await screen.findByRole("button", { name: "記一筆或匯入對帳單" }, T))
+    await user.click(await screen.findByRole("button", { name: "記一筆或匯入" }, T))
     const menu = await screen.findByRole("menu", undefined, T)
-    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["記一筆", "匯入對帳單"])
-    await user.click(within(menu).getByRole("menuitem", { name: "匯入對帳單" }))
+    expect(within(menu).getAllByRole("menuitem").map((i) => i.textContent)).toEqual(["記一筆", "匯入庫存或對帳單"])
+    await user.click(within(menu).getByRole("menuitem", { name: "匯入庫存或對帳單" }))
     expect(useUi.getState().importOpen).toBe(true)
+    expect(useUi.getState().importKind).toBe("choose")
   })
 
   it.each([
@@ -66,7 +67,7 @@ describe("免費帳號的匯入對帳單入口（「＋」）", () => {
     const user = userEvent.setup()
     const { onForm } = await renderComposer(plan)
     const plus = await screen.findByRole("button", { name: "用表單記一筆" }, T)
-    expect(screen.queryByRole("button", { name: "記一筆或匯入對帳單" })).toBeNull()
+    expect(screen.queryByRole("button", { name: "記一筆或匯入" })).toBeNull()
     await user.click(plus)
     expect(onForm).toHaveBeenCalledOnce()
     expect(screen.queryByRole("menu")).toBeNull()
@@ -88,7 +89,7 @@ describe("免費帳號的深度搜尋", () => {
 
   it("後端說現在不能用（null：省錢模式或沒開網路搜尋）：沒有切換鈕，也沒有「會員功能」的字", async () => {
     await renderComposer(FREE, usage(null))
-    await screen.findByRole("button", { name: "記一筆或匯入對帳單" }, T)
+    await screen.findByRole("button", { name: "記一筆或匯入" }, T)
     expect(screen.queryByRole("button", { name: "深度搜尋" })).toBeNull()
     expect(screen.queryByText(/會員/)).toBeNull()
   })
