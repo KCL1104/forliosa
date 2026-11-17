@@ -13,7 +13,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-PROMPT_VERSION = "mr-2026-11-17b"
+PROMPT_VERSION = "mr-2026-11-17c"
 
 # The words no AI sentence may hold (validator §10.2 item 5); the time words are listed apart for the prompt.
 FORBIDDEN_WORDS = (
@@ -37,48 +37,59 @@ GATHER_SYSTEM = """\
 你替財經編輯找具名媒體的報導，只找「已經發生的事」與「已排定的事」。你不評論、不推論、不預測。
 
 做法
-- 用 web_search 查。中文媒體用中文關鍵字，外電用英文關鍵字。只採用使用者訊息寫的時間窗之內發布的報導。
+- 用 web_search 查，次數用到使用者訊息寫的上限：一次查不完整，就換關鍵字再查。中文媒體用中文關鍵字，外電用英文關鍵字。\
+只採用使用者訊息寫的時間窗之內發布的報導。
+- 只引用新聞報導頁（有標題、記者或發布時間的文章）。報價頁、行情頁、指數頁、排行頁（個股或指數的即時報價、走勢圖、\
+排行）不要引用。
 - 每則事實寫成一段，段落之間空一行。每段開頭是方括號 KEY，例如 [US.market]；KEY 只能用使用者訊息列出的那幾個。
-- 句子寫成「〔媒體名稱〕報導，…」。要用到的數字照原文寫，不換算、不四捨五入。每一段都必須引用搜尋結果。
-- 美股、台積電 ADR、台指期夜盤的事實，句子裡一定要寫美股交易日，例如「美股 11/17」。
+- 句子寫成「〔媒體名稱〕報導，…」。要用到的數字照原文寫，不換算、不四捨五入。
+- 每一段都必須引用搜尋結果（引用那篇報導裡寫這件事的原句）。沒有引用的段落一律丟掉，所以找不到出處的事不要寫。
+- 美股、台積電 ADR、台指期夜盤的事實，句子裡一定要寫美股交易日，例如「美股 11/16」；美股交易日是美國當地的日期，\
+不是台灣的日期。
 - 找不到就少寫，不要湊。
 
 不收
 - 個股評等、目標價、調升調降評等。
 - 指數或股價的預測區間、點位預測。
 - 指數點數：美股指數、台指期、夜盤只收百分比，不收點數。
+- 對市場的判讀，例如「利空出盡」「利多出盡」「錯殺」；就算是報導引述別人的話也不收。
 - 論壇、社群、部落格、個股報價頁。
 - 你自己的看法。
 
 最後只輸出這些段落，不加前言或結語。"""
+# The one more turn of a topic whose [KEY] paragraphs came mostly without citations (gather.call_topic)
+CITE_AGAIN = ("上面的段落大多沒有引用搜尋結果，沒有引用的段落都會被丟掉。"
+              "請用已經搜到的結果，把所有要保留的事實重寫一次：每段開頭是 [KEY]，"
+              "每一段都要引用搜尋結果裡寫這件事的原句；找不到出處的就不要寫。只輸出這些段落。")
 
-# per kind: topic -> (quota, what to find, allowed KEY prefixes / keys)
+# per kind: topic -> (quota, what to find, allowed KEY prefixes / keys). Quotas: 2–3 searches a topic (the
+# 2026-11-17 dry run: one search a topic, its ten results often quote pages or older stories)
 TOPICS: dict[str, dict[str, tuple[int, str, tuple[str, ...]]]] = {
     "premarket": {
-        "US_MARKET": (2, "美股與半導體類股、台積電 ADR 的隔夜漲跌與報導寫的原因（只收百分比）",
+        "US_MARKET": (3, "美股與半導體類股、台積電 ADR 的隔夜漲跌與報導寫的原因（只收百分比）",
                       ("US.market", "US.semis", "ADR.tsm")),
-        "MACRO": (1, "昨晚公布的美國或主要國家總經數據結果、Fed 官員談話", ("MACRO.",)),
-        "OVERSEAS_COS": (2, "和台股供應鏈相關的海外公司消息（財報、營運、產品）", ("CO.",)),
-        "NIGHT": (1, "台指期夜盤：只取具名媒體寫的漲跌幅（百分比），不收點數", ("NIGHT.tx_pct",)),
-        "EVENT_TIMES": (1, "今天已排定的事件與公布時間（台北時間），例如法說會、數據公布", ("EVENT.",)),
-        "SPARE": (1, "以上主題不夠時補充（同樣只收已發生或已排定的事）",
+        "MACRO": (2, "昨晚公布的美國或主要國家總經數據結果、Fed 官員談話", ("MACRO.",)),
+        "OVERSEAS_COS": (3, "和台股供應鏈相關的海外公司消息（財報、營運、產品）", ("CO.",)),
+        "NIGHT": (2, "台指期夜盤：只取具名媒體寫的漲跌幅（百分比），不收點數", ("NIGHT.tx_pct",)),
+        "EVENT_TIMES": (2, "今天已排定的事件與公布時間（台北時間），例如法說會、數據公布", ("EVENT.",)),
+        "SPARE": (2, "以上主題不夠時補充（同樣只收已發生或已排定的事）",
                   ("US.market", "US.semis", "ADR.tsm", "MACRO.", "CO.", "NIGHT.tx_pct", "EVENT.")),
     },
     "close": {
-        "MARKET_TODAY": (1, "今天台股大盤的報導原因；報導寫的成交金額", ("TW.reason", "TW.turnover_media")),
-        "TWSE_INST": (1, "今天上市三大法人買賣超金額（外資、投信、自營商、合計），約 15:30 的新聞",
+        "MARKET_TODAY": (3, "今天台股大盤的報導原因；報導寫的成交金額", ("TW.reason", "TW.turnover_media")),
+        "TWSE_INST": (2, "今天上市三大法人買賣超金額（外資、投信、自營商、合計），約 15:30 的新聞",
                       ("TWSE_INST.foreign", "TWSE_INST.trust", "TWSE_INST.dealer", "TWSE_INST.total")),
-        "STOCK_REASONS": (2, "下列個股今天漲跌的報導原因", ("STOCK.",)),
-        "TONIGHT": (1, "今晚（台北時間）已排定的美股財報與數據公布", ("EVENT.", "US.earnings.")),
+        "STOCK_REASONS": (3, "下列個股今天漲跌的報導原因", ("STOCK.",)),
+        "TONIGHT": (2, "今晚（台北時間）已排定的美股財報與數據公布", ("EVENT.", "US.earnings.")),
     },
     "weekly": {
-        "WEEK_MARKET": (2, "上週台股大盤的報導原因與成交量能", ("WEEK.market",)),
-        "TWSE_INST_WEEK": (1, "上週上市三大法人買賣超合計", ("TWSE_INST.",)),
-        "SECTORS_WEEK": (2, "下列類股上週漲跌的報導原因", ("WEEK.sector.",)),
-        "US_WEEK": (2, "上週美股與半導體類股、台積電 ADR 的漲跌與原因（只收百分比）", ("US.",)),
-        "MACRO_RESULTS": (1, "上週公布的總經數據結果、央行決議", ("MACRO.",)),
+        "WEEK_MARKET": (3, "上週台股大盤的報導原因與成交量能", ("WEEK.market",)),
+        "TWSE_INST_WEEK": (2, "上週上市三大法人買賣超合計", ("TWSE_INST.",)),
+        "SECTORS_WEEK": (3, "下列類股上週漲跌的報導原因", ("WEEK.sector.",)),
+        "US_WEEK": (3, "上週美股與半導體類股、台積電 ADR 的漲跌與原因（只收百分比）", ("US.",)),
+        "MACRO_RESULTS": (2, "上週公布的總經數據結果、央行決議", ("MACRO.",)),
         "THEMES": (3, "媒體報導市場關注、而且有日期的主題（下週要公布的數據、會議、財報、政策）", ("THEME.",)),
-        "RISKS": (1, "媒體報導可能讓市場關注點改變的事（具名來源，不收預測）", ("RISK.",)),
+        "RISKS": (2, "媒體報導可能讓市場關注點改變的事（具名來源，不收預測）", ("RISK.",)),
     },
 }
 LONG_HOLIDAY_EXTRA = {"US_MARKET": 2, "MACRO": 2}  # the first premarket after ≥3 weekday closures
@@ -95,12 +106,19 @@ def key_allowed(key: str, allowed: tuple[str, ...]) -> bool:
 
 
 def topic_brief(kind: str, topic: str, *, window: tuple[str, str], edition_label: str,
-                us_sessions: list[str], names: list[str] | None = None) -> str:
-    """The user message of one gathering call: what to find, the window, the KEYs it may use."""
-    _quota, what, keys = TOPICS[kind][topic]
+                us_sessions: list[str], names: list[str] | None = None, quota: int | None = None) -> str:
+    """The user message of one gathering call: what to find, the window, the searches it may make, the KEYs it may
+    use."""
+    default_quota, what, keys = TOPICS[kind][topic]
+    quota = default_quota if quota is None else quota
     lines = [f"報告：{ {'premarket': '盤前重點', 'close': '盤後重點', 'weekly': '市場週報'}[kind]} {edition_label}",
              f"時間窗（台北時間）：{window[0]} 到 {window[1]}；時間窗外的報導不要用。",
              f"要找：{what}。"]
+    if quota > 1:
+        lines.append(f"搜尋最多 {quota} 次：第一次查完先看結果，再換關鍵字補查還缺的部分。")
+    if kind == "close":
+        lines.append("今天的報導要看得出發布時間：請一併引用報導裡寫發布日期與時間的那一句"
+                     f"（例如「{window[0][:10]} 15:32」）；只寫日期、看不出今天幾點發布的報導不會被採用。")
     if us_sessions:
         lines.append("涵蓋的美股交易日：" + "、".join(us_sessions) + "（美股的事實要寫是哪一天）。")
     if names:

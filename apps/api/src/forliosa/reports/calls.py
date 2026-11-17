@@ -39,9 +39,11 @@ FALLBACK_BETA = "server-side-fallback-2026-07-01"
 NO_SERVER_FALLBACK = frozenset({"claude-haiku-5-5"})
 WEB_SEARCH_TYPE = "web_search_20260318"  # the repo's version (ai.tools.server_tools)
 
-# allowed_domains for the gathering (one list; never blocked_domains)
+# allowed_domains for the gathering (one list; never blocked_domains). 鉅亨 only as news.cnyes.com: its other hosts
+# are quote pages (www.cnyes.com/twstock, invest.cnyes.com) and 鉅亨號 posts (hao.cnyes.com); in the 2026-11-17 dry
+# run they took 7 of a search's 10 results.
 REPORT_SEARCH_DOMAINS = (
-    "money.udn.com", "ctee.com.tw", "moneydj.com", "cnyes.com", "cna.com.tw", "focustaiwan.tw", "ec.ltn.com.tw",
+    "money.udn.com", "ctee.com.tw", "moneydj.com", "news.cnyes.com", "cna.com.tw", "focustaiwan.tw", "ec.ltn.com.tw",
     "cnbc.com", "bloomberg.com", "technews.tw", "digitimes.com.tw", "digitimes.com", "businesstoday.com.tw",
     "wealth.com.tw", "cbc.gov.tw", "dgbas.gov.tw", "stat.gov.tw", "mof.gov.tw", "moea.gov.tw", "ndc.gov.tw",
     "fsc.gov.tw", "federalreserve.gov", "bls.gov", "bea.gov", "treasury.gov",
