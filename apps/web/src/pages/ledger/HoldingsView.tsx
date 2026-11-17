@@ -10,7 +10,7 @@ import { DemoTag } from "@/components/section"
 import { Sparkline } from "@/components/sparkline"
 import { EmptyState, ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { direction, formatMoney, formatPercent, formatPrice, formatQuantity, toneClass } from "@/lib/format"
 import { codeOf, formatQuote, marketOf } from "@/lib/tick"
@@ -234,7 +234,8 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
   return (
     // 欄位跟著容器的寬度排（@container，不是視窗）：主欄窄於 52rem（開著 AI 面板、視窗不到約 1350px；平板）時見 stacksDay
     <div className="@container max-md:hidden">
-      <table className="w-full border-collapse" aria-label="持倉">
+      {/* data-holdings-focus：刪除一檔之後那一列不在了，焦點回到這張表裡第一個可以按的（DeleteHoldingDialog 的 afterDeleteFocus） */}
+      <table className="w-full border-collapse" aria-label="持倉" data-holdings-focus>
         <thead className="form-head">
           <tr>
             <th scope="col" className="h-10 text-left">
@@ -314,9 +315,14 @@ const avgCostText = (h: Holding) => `${h.market === "US" ? "US$" : ""}${formatPr
 /** 名稱欄（列標題）：窄的時候 max-width 0，讓名稱欄不撐寬表格，拿數字欄剩下的寬度 */
 const NAME_CELL = "h-[60px] py-1.5 pr-3 text-left font-normal @max-[52rem]:max-w-0"
 
-/** 這一檔的動作：加碼、減少持股、全部賣出（賣出不用開表單：只填股數，用最新的收盤價記） */
+/**
+ * 這一檔的動作：加碼、減少持股、全部賣出（賣出不用開表單：只填股數，用最新的收盤價記）；一條格線隔開，最後是「刪除這檔」
+ * （產品負責人 2026-11-17：記錯、匯入錯的整檔刪掉，不記成賣出；確認框見 `DeleteHoldingDialog`）。刪除不用紅色（紅色是「漲」），
+ * 和群組成員的「移出群組」同一個寫法：放在最後、上面一條格線。
+ */
 function RowMenu({ h }: { h: Holding }) {
   const openTradeForm = useUi((s) => s.openTradeForm)
+  const openDelete = useUi((s) => s.openDeleteHolding)
   const reduce = useStartReduce()
   return (
     <DropdownMenu>
@@ -335,6 +341,8 @@ function RowMenu({ h }: { h: Holding }) {
         <DropdownMenuItem onClick={() => openTradeForm({ symbol: h.code })}>加碼</DropdownMenuItem>
         <DropdownMenuItem onClick={() => reduce(h.symbol)}>減少持股</DropdownMenuItem>
         <DropdownMenuItem onClick={() => reduce(h.symbol, true)}>全部賣出</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem onClick={() => openDelete(h.symbol)}>刪除這檔</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -595,7 +603,7 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
         <span>持有 {rows.length} 檔</span>
         <PhoneLineToggle />
       </div>
-      <ul aria-label="持倉">
+      <ul aria-label="持倉" data-holdings-focus>
         {rows.map((h) => (
           // 整列可點（名稱連結的 ::after 蓋滿整列）；定期定額標記與右邊的展開鈕浮在上面
           <li key={h.symbol}>

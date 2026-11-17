@@ -448,6 +448,19 @@ export interface TransactionBatchResult {
   auto_dividends_added: number
 }
 
+/**
+ * `DELETE /accounts/{account_id}/holdings/{symbol}`：一個帳戶裡一檔股票的全部紀錄刪掉（不是賣出；產品負責人 2026-11-17）。
+ * `plans_running`：這一檔在這個帳戶還在進行的定期定額（沒有一起暫停的），下次扣款日仍會提出草稿
+ */
+export interface HoldingDeleted {
+  account_id: string
+  symbol: string
+  /** 刪掉幾筆：買賣、股利（含自動入帳的）、分割、減資等所有類型 */
+  deleted: number
+  plans_paused: number
+  plans_running: number
+}
+
 /** 422 `batch_rejected` 的每一列 */
 export interface BatchRejectedRow {
   index: number | null
@@ -2071,6 +2084,12 @@ export interface ForliosaApi {
   createTransactionBatch(body: TransactionBatchInput): Promise<TransactionBatchResult>
   /** `DELETE /transactions/batches/{id}`：整批復原；之後記的賣出用到這批買進時 422 `ledger_inconsistent` */
   deleteTransactionBatch(batchId: string): Promise<{ batch_id: string; deleted: number }>
+  /**
+   * `DELETE /accounts/{accountId}/holdings/{symbol}`：這個帳戶裡這一檔的每一筆紀錄都刪掉（不記成賣出）。
+   * `pausePlans`：這一檔在這個帳戶的定期定額一起暫停。帳戶不是自己的 404 `not_found`；沒有這一檔的紀錄 404 `no_records`
+   * （已經在別處刪掉了）；查看別人的資產時 403 `read_only`
+   */
+  deleteHolding(accountId: string, symbol: string, opts?: { pausePlans?: boolean }): Promise<HoldingDeleted>
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>

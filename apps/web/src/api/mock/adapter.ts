@@ -905,6 +905,22 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     checkTransactionBatch: (body) => wait(() => imports.check(body)),
     createTransactionBatch: (body) => wait(() => imports.create(body)),
     deleteTransactionBatch: (batchId) => wait(() => imports.remove(batchId)),
+    // 和後端相同：這個帳戶這一檔的每一筆（買賣、股利含自動入帳的…）都刪掉，略過紀錄跟著清掉；定期定額只在要求時暫停
+    deleteHolding: (accountId, symbol, opts) =>
+      wait(() => {
+        if (!accounts.some((a) => a.id === accountId)) throw new ApiError(404, "not_found", "找不到帳戶")
+        const sym = txns.some((t) => t.symbol === symbol) ? symbol : (findInstrument(symbol)?.symbol ?? symbol.toUpperCase())
+        const gone = txns.filter((t) => t.account_id === accountId && t.symbol === sym)
+        if (gone.length === 0) throw new ApiError(404, "no_records", "這個帳戶沒有這一檔的紀錄")
+        txns = txns.filter((t) => !(t.account_id === accountId && t.symbol === sym))
+        for (const k of [...skips]) if (k.startsWith(`${accountId}|${sym}|`)) skips.delete(k)
+        // 還在進行：和後端、前端的 planStatus 同一個判斷（啟用中、結束日沒過、還有下一次扣款日）
+        const running = recurring.list(accountId).filter((p) => p.symbol === sym && p.active && (!p.end_date || p.end_date >= today) && p.next_date)
+        const pause = !!opts?.pausePlans
+        if (pause) for (const p of running) recurring.update(p.id, { active: false })
+        resync()
+        return { account_id: accountId, symbol: sym, deleted: gone.length, plans_paused: pause ? running.length : 0, plans_running: pause ? 0 : running.length }
+      }),
 
     getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
@@ -1086,7 +1102,7 @@ export const VIEW_AS_READS = new Set<MethodName>([
 const WRITES = new Set<MethodName>([
   "deleteAiThreads",
   "createAccount", "updateAccount", "deleteAccount", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
-  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
+  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "deleteHolding", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
   "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",

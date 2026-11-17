@@ -1,4 +1,4 @@
-"""Broker accounts CRUD.
+"""Broker accounts CRUD, and deleting one stock's records out of an account (``DELETE …/holdings/{symbol}``).
 
 「只記持股」 (holdings-only tracking with a snapshot) was removed on 2026-11-14 (product owner: every buy has a date;
 migration ``0018`` turned each snapshot into dated buys). A request that still carries ``tracking_mode`` is accepted
@@ -9,19 +9,21 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Query, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.api.deps import current_user
 from forliosa.api.errors import ApiError, not_found, unprocessable
-from forliosa.api.schemas import Account, AccountIn, AccountPatch
+from forliosa.api.schemas import Account, AccountIn, AccountPatch, HoldingDeleted
 from forliosa.db import get_db
 from forliosa.domain.fees import COMMISSION_RATE, DEFAULT_MIN_FEE
 from forliosa.ids import new_id
+from forliosa.marketdata.service import get_market_data
 from forliosa.models import AutoDividendSkip, BrokerAccount, Transaction, User
 from forliosa.services import scope, sharing
+from forliosa.services import transactions as txn_svc
 from forliosa.timeutil import iso_taipei
 
 router = APIRouter(prefix="/accounts", tags=["accounts"])
@@ -103,3 +105,18 @@ def delete_account(account_id: str, user: User = Depends(current_user), db: Sess
     db.delete(acc)
     db.commit()
     return Response(status_code=204)
+
+
+@router.delete("/{account_id}/holdings/{symbol}", response_model=HoldingDeleted,
+               summary="刪除這個帳戶裡一檔股票的全部紀錄（不是賣出）")
+def delete_holding(account_id: str, symbol: str,
+                   pause_plans: bool = Query(default=False, description="同時暫停這一檔在這個帳戶的定期定額"),
+                   user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """Every record of the stock in the account goes (``services.transactions.delete_holding``); 404 ``not_found``
+    when the account is not the user's, 404 ``no_records`` when it has no record of the stock; 403 ``read_only`` while
+    viewing someone's ledger (``api.middleware``)."""
+    acc = get_owned_account(db, user, account_id)
+    md = get_market_data()
+    res = txn_svc.delete_holding(db, user, acc.id, txn_svc.holding_symbol(md, symbol), md, pause_plans=pause_plans)
+    return {"account_id": res.account_id, "symbol": res.symbol, "deleted": res.deleted,
+            "plans_paused": res.plans_paused, "plans_running": res.plans_running}
