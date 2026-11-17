@@ -174,6 +174,8 @@ interface Position {
   qty: number
   cost: number // 原幣，含買進手續費
   costTwd: number
+  /** 成本裡的買進手續費（原幣）：和成本一起照比例扣（示範帳本只用移動平均，帳戶合在一起算） */
+  fee: number
 }
 
 export interface LedgerState {
@@ -201,7 +203,7 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
     const fx = fxFor(x.currency, x.trade_date)
     let pos = positions.get(x.symbol)
     if (!pos) {
-      pos = { symbol: x.symbol, accounts: new Set(), qty: 0, cost: 0, costTwd: 0 }
+      pos = { symbol: x.symbol, accounts: new Set(), qty: 0, cost: 0, costTwd: 0, fee: 0 }
       positions.set(x.symbol, pos)
     }
     pos.accounts.add(x.account_id)
@@ -211,6 +213,7 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
         pos.qty += q
         pos.cost += x.amount + x.fee
         pos.costTwd += (x.amount + x.fee) * fx
+        pos.fee += x.fee
         break
       case "sell": {
         if (pos.qty <= 0) break
@@ -224,6 +227,7 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
         pos.qty -= q
         pos.cost -= pos.cost * ratio
         pos.costTwd -= pos.costTwd * ratio
+        pos.fee -= pos.fee * ratio
         break
       }
       case "split":
@@ -262,7 +266,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
       rows.push({
         symbol: spec.symbol, code: spec.code, name: spec.name, market: spec.market, type: spec.type,
         currency: spec.currency, industry: spec.industry, quantity: pos.qty, avg_cost: r4(pos.cost / pos.qty),
-        cost_basis: r2(pos.costTwd), price: null, prev_close: null, price_date: null, market_value: r2(pos.costTwd), day_change: 0,
+        cost_basis: r2(pos.costTwd), fees_in_cost: r2(pos.fee), price: null, prev_close: null, price_date: null, market_value: r2(pos.costTwd), day_change: 0,
         day_change_pct: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0, weight: 0, account_ids: [...pos.accounts], is_demo: false,
       })
       continue
@@ -276,6 +280,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
       quantity: pos.qty,
       avg_cost: r4(pos.cost / pos.qty),
       cost_basis: r2(pos.costTwd),
+      fees_in_cost: r2(pos.fee),
       price: spec.price,
       prev_close: spec.prev_close,
       ...(commercial ? { price_date: spec.market === "US" ? US_SESSION : MOCK_TODAY } : {}),

@@ -272,9 +272,11 @@ function RecordRow({
  * 每一筆的「⋯」：整個按鈕（滑過的底色、焦點框）都在這一列裡面——不再用負的右邊距把圖示推到列的右緣
  * （2026-11-17 負責人：「三個點點的 hover 好像超過整個框框了」：底色比列與表格的右緣多出 8px）。
  * 觸控裝置 44px（比最後一欄的 40px 寬：`shrink-0` 不被擠回 40px，靠右對齊所以往左多佔一點間隔，右緣還是對齊列的右緣）。
+ * 滑過是 `bg-sel`（比列的 `--hov` 深一階，和群組成員列的「⋯」、secondary 按鈕同一個慣例）：按鈕在格線列裡，滑過按鈕時
+ * 整列也是 `--hov`，用同一個顏色就看不出按鈕的方塊（2026-11-17 審查）。
  */
 export const ROW_MENU_BUTTON =
-  "press grid size-9 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11"
+  "press grid size-9 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-sel hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11"
 
 /** 一筆的動作：修改（完整表單，日期也能改）、刪除（確認框在清單那一層） */
 function RecordMenu({ t, date, label, onDelete }: { t: Transaction; date: string; label: string; onDelete: () => void }) {

@@ -3146,7 +3146,17 @@ await check("持倉展開每一筆買賣（2026-11-14）：日期（不是今年
 })
 
 // 均價（產品負責人 2026-11-17）：收盤價下面一行「均價」、展開那一檔最上面「均價 … 含手續費・持有・成本」、每一筆買進的價格下面「均價」（含那一筆的手續費）；
-// 每一列的「⋯」與展開鈕（滑過時的底色）整顆在列與表格裡面，不再往右多出 8px
+// 每一列的「⋯」與展開鈕（滑過時的底色）整顆在列與表格裡面，不再往右多出 8px。
+// 審查（2026-11-17）：「含手續費」照後端的 fees_in_cost，展開的那一刻就在（不等每一筆讀完、整行不跳）；
+// 滑過「⋯」與展開鈕時按鈕的底色和那一列不同（列是 --hov，按鈕是 --sel），看得到方塊
+const hoverDiffers = async (p, button) => {
+  await button.hover()
+  await p.waitForTimeout(250) // 列的底色有 120ms 的轉場
+  return button.evaluate((b) => {
+    const row = b.closest(".ruled-row")
+    return { button: getComputedStyle(b).backgroundColor, row: row ? getComputedStyle(row).backgroundColor : null }
+  })
+}
 const buttonsInside = (p, root) =>
   root.evaluate((box) => {
     const edge = box.getBoundingClientRect().right
@@ -3159,7 +3169,7 @@ const buttonsInside = (p, root) =>
       })
   })
 for (const [vw, panel, scheme] of [[1440, false, "dark"], [1280, true, "light"], [1024, true, "dark"], [768, false, "light"]]) {
-  await check(`持倉表的均價（2026-11-17，${vw}px${panel ? "＋AI 面板" : ""}）：收盤價下面「均價 692.61」；展開台積電「均價 692.61 含手續費・持有・成本」、每一筆買進的價格下面「均價 815.32」；「⋯」與展開鈕在列與表格的右緣之內；不橫向捲動`, async () => {
+  await check(`持倉表的均價（2026-11-17，${vw}px${panel ? "＋AI 面板" : ""}）：收盤價下面「均價 692.61」；展開台積電「均價 692.61 含手續費・持有・成本」、每一筆買進的價格下面「均價 815.32」；「含手續費」一展開就在、讀完每一筆不跳；「⋯」與展開鈕在列與表格的右緣之內、滑過的底色和列不同；不橫向捲動`, async () => {
     await fresh({ viewport: { width: vw, height: 900 }, colorScheme: scheme }, async (p) => {
       await p.goto(base + "/", { waitUntil: "networkidle" })
       const toggle = p.getByRole("button", { name: panel ? /展開 AI 面板/ : /收起 AI 面板/ })
@@ -3169,17 +3179,30 @@ for (const [vw, panel, scheme] of [[1440, false, "dark"], [1280, true, "light"],
       const row = table.getByRole("row").filter({ has: p.getByRole("link", { name: "台積電", exact: true }) })
       const price = (await row.getByRole("cell").first().innerText()).replace(/\s+/g, " ").trim()
       if (price !== "1,085 均價 692.61") throw new Error(`price cell: ${price}`)
-      await table.getByRole("button", { name: "展開台積電的每一筆買賣" }).click()
+      const expandBtn = table.getByRole("button", { name: "展開台積電的每一筆買賣" })
+      const ex = await hoverDiffers(p, expandBtn)
+      if (!ex.row || ex.button === ex.row) throw new Error(`expand hover invisible: ${JSON.stringify(ex)}`)
+      await expandBtn.click()
+      const line = table.getByLabel("台積電的均價與成本")
+      await line.waitFor({ timeout: 8000 })
+      // 一出現就是完整的一行（「含手續費」不晚到）；之後讀完每一筆，位置不變
+      const first = (await line.innerText()).replace(/\s+/g, " ").trim()
+      const at = await line.locator("dd").evaluateAll((dds) => dds.map((d) => Math.round(d.getBoundingClientRect().x)))
       const list = table.getByRole("list", { name: "台積電的每一筆買賣" })
       await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
-      const line = table.getByLabel("台積電的均價與成本")
-      await line.getByText("含手續費", { exact: true }).waitFor({ timeout: 8000 })
       const summary = (await line.innerText()).replace(/\s+/g, " ").trim()
+      if (first !== summary) throw new Error(`summary changed after the records loaded: ${first} -> ${summary}`)
       if (!/^均價 692\.61 含手續費 持有 1 張 500 股 成本 NT\$1,038,913$/.test(summary)) throw new Error(`summary: ${summary}`)
+      const after = await line.locator("dd").evaluateAll((dds) => dds.map((d) => Math.round(d.getBoundingClientRect().x)))
+      if (at.join() !== after.join()) throw new Error(`summary shifted: ${at} -> ${after}`)
       const lot = (await list.getByRole("listitem").first().innerText()).replace(/\s+/g, " ")
       if (!/815 均價 815\.32/.test(lot) && !/500 股 × 815 均價 815\.32/.test(lot)) throw new Error(`first lot: ${lot}`)
-      // 滑過第一筆的「⋯」：按鈕（底色）的右緣不超過那一列、也不超過表格
+      // 滑過第一筆的「⋯」：按鈕（底色）的右緣不超過那一列、也不超過表格；底色和列不同
       const menu = list.getByRole("button", { name: /的動作$/ }).first()
+      const mh = await hoverDiffers(p, menu)
+      if (!mh.row || mh.button === mh.row) throw new Error(`row menu hover invisible: ${JSON.stringify(mh)}`)
+      const rh = await hoverDiffers(p, table.getByRole("button", { name: "台積電的動作" }))
+      if (!rh.row || rh.button === rh.row) throw new Error(`holding menu hover invisible: ${JSON.stringify(rh)}`)
       await menu.hover()
       const m = await buttonsInside(p, table)
       const bad = m.filter((b) => b.overRow > 0 || b.overBox > 0)
@@ -3188,16 +3211,20 @@ for (const [vw, panel, scheme] of [[1440, false, "dark"], [1280, true, "light"],
     })
   })
 }
-await check("持倉表的均價（手機）：展開台積電，「均價 692.61 含手續費」、每一筆第二行「500 股 × 815」「均價 815.32」；展開鈕與每一筆的「⋯」 ≥ 44px、在清單的右緣之內；不橫向捲動", async () => {
+await check("持倉表的均價（手機）：展開台積電，「均價 692.61 含手續費」、每一筆第二行「500 股 × 815」「均價 815.32」；「含手續費」一展開就在、那一行高度不變；展開鈕與每一筆的「⋯」 ≥ 44px、在清單的右緣之內；不橫向捲動", async () => {
   await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
     await p.goto(base + "/", { waitUntil: "networkidle" })
     const phone = p.getByRole("list", { name: "持倉" })
     await phone.getByRole("button", { name: "展開台積電的每一筆買賣" }).click()
+    const line = phone.getByLabel("台積電的均價與成本")
+    await line.waitFor({ timeout: 8000 })
+    // 一出現就有「含手續費」，讀完每一筆之後高度不變（原本晚到，從一行變兩行）
+    const h0 = (await line.boundingBox()).height
+    if (!/^均價 692\.61 含手續費/.test((await line.innerText()).replace(/\s+/g, " ").trim())) throw new Error(`summary at first paint: ${await line.innerText()}`)
     const list = p.getByRole("list", { name: "台積電的每一筆買賣" })
     await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
-    const line = phone.getByLabel("台積電的均價與成本")
-    await line.getByText("含手續費", { exact: true }).waitFor({ timeout: 8000 })
-    if (!/^均價 692\.61 含手續費/.test((await line.innerText()).replace(/\s+/g, " ").trim())) throw new Error(`summary: ${await line.innerText()}`)
+    const h1 = (await line.boundingBox()).height
+    if (Math.abs(h1 - h0) > 0.5) throw new Error(`summary height ${h0} -> ${h1}`)
     const lot = (await list.getByRole("listitem").first().innerText()).replace(/\s+/g, " ")
     if (!/500 股 × 815 均價 815\.32/.test(lot)) throw new Error(`first lot: ${lot}`)
     const m = await buttonsInside(p, phone)

@@ -29,7 +29,6 @@ import { useCanImportStatements } from "@/pages/transactions/import/access"
 import { textAction } from "@/components/text-action"
 import { useUsClosesServed } from "@/pages/stock/text"
 import { ROW_MENU_BUTTON, SymbolRecords } from "./SymbolRecords"
-import { feeInHolding, useSymbolTransactions } from "./symbol-records"
 
 type SortKey = "value" | "day_pct" | "day_change" | "pnl" | "unrealized" | "unrealized_pct" | "name"
 
@@ -355,7 +354,10 @@ function useOpenRows(): [Set<string>, (symbol: string) => void] {
 }
 const recordsId = (h: Holding) => `records-${h.code}`
 
-/** 展開這一檔的每一筆買賣（日期、股數、價格、金額、買進後漲跌；每一筆可以修改、刪除） */
+/**
+ * 展開這一檔的每一筆買賣（日期、股數、價格、金額、買進後漲跌；每一筆可以修改、刪除）。
+ * 滑過是 `bg-sel`：按鈕在格線列裡，列滑過時已經是 `--hov`（和「⋯」的 `ROW_MENU_BUTTON` 同一個理由）。
+ */
 function ExpandButton({ h, open, onToggle, className }: { h: Holding; open: boolean; onToggle: () => void; className?: string }) {
   return (
     <button
@@ -364,7 +366,7 @@ function ExpandButton({ h, open, onToggle, className }: { h: Holding; open: bool
       aria-controls={recordsId(h)}
       aria-label={open ? `收起${h.name}的每一筆買賣` : `展開${h.name}的每一筆買賣`}
       onClick={onToggle}
-      className={cn("press grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink pointer-coarse:size-11", className)}
+      className={cn("press grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-sel hover:text-ink pointer-coarse:size-11", className)}
     >
       <ChevronDownIcon aria-hidden className={cn("size-5 transition-transform duration-200", open && "rotate-180")} />
     </button>
@@ -462,14 +464,16 @@ function Cell({ c, h, maxWeight, stackDay = false, stackAvg = false }: { c: Hold
  * 後端的 `avg_cost`（原幣，美股是美元）＝目前持股的成本 ÷ 股數，`cost_basis`（新台幣，各筆買進當天的匯率）＝目前持股的成本：
  * 都含買進時填的手續費（沒填的存 0，不自動估）；賣出照成本法（預設移動平均、可換先進先出）扣掉賣掉那幾股的成本，
  * 現金股利不扣成本、配股與分割只加股數（均價跟著變低），減資退款扣成本。
- * 「含手續費」只在這一批持股裡真的有填了手續費的買進時才寫（`feeInHolding`；讀的是下面每一筆買賣那一份，同一個快取）：
- * 沒填的以 0 計，不寫一個不存在的費用。隱私模式三個數字都遮（股數照帳本的規則也遮）。
+ * 「含手續費」只在後端說這一批持股的成本裡真的有手續費時才寫（`fees_in_cost` > 0；2026-11-17 審查）：後端照帳本算
+ * （每個帳戶各自、照成本法，當沖、減資的捨去、出清都和均價同一套），前端不自己重算——原本照日期走一遍交易，
+ * 兩個帳戶、先進先出、當沖、減資時會在不含手續費的均價旁寫「含手續費」。沒填的以 0 計，不寫一個不存在的費用。
+ * 和持倉同一份資料，展開的那一刻就定了，不等下面每一筆讀完（原本晚出現，整行往右跳、手機上換行）。
+ * 隱私模式三個數字都遮（股數照帳本的規則也遮）。
  */
 function CostLine({ h }: { h: Holding }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
-  const records = useSymbolTransactions(h.symbol)
-  const withFee = records.data ? feeInHolding(records.data.items) : false
+  const withFee = (h.fees_in_cost ?? 0) > 0
   const hide = (s: string) => (privacy ? <Masked /> : s)
   // 窄的時候（手機、開著 AI 面板）下面每一筆是沒有表頭的格線列：這一行自己底下也畫一條，不和第一筆黏在一起（和 SymbolRecords 同一個 43rem 斷點）
   return (

@@ -9,7 +9,7 @@ import { formatMoney, formatPrice, formatQuantity } from "@/lib/format"
 import { createAppRouter } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { COLUMN_HINT, DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
-import { buyAverage, feeInHolding } from "../symbol-records"
+import { buyAverage } from "../symbol-records"
 import { LOT_AVG_HINT, ROW_MENU_BUTTON } from "../SymbolRecords"
 
 /**
@@ -17,9 +17,10 @@ import { LOT_AVG_HINT, ROW_MENU_BUTTON } from "../SymbolRecords"
  * 持倉也要顯示全部的均價（也一樣把手續費幫我算進去），然後右邊那三個點點的 hover 好像超過整個框框了」；
  * 「如果沒有填手續費就用 0 去計算吧」）：
  * - 收盤價那一格的第二行是 13px 淡墨「均價 692.61」，表頭「收盤價・均價」；「自訂」打開「均價」那一欄時不重複。
- * - 展開一檔：最上面一行「均價 692.61 含手續費・持有・成本」（有填手續費的買進才寫「含手續費」），桌面與手機都有。
+ * - 展開一檔：最上面一行「均價 692.61 含手續費・持有・成本」，桌面與手機都有。「含手續費」只在後端說目前持股的成本裡有手續費時寫
+ *   （`Holding.fees_in_cost` > 0；2026-11-17 審查：前端自己重播會在兩個帳戶、先進先出、當沖、減資時寫錯），展開的那一刻就定了。
  * - 每一筆買進：價格下面一行「均價」＝（股數 × 成交價＋這一筆的手續費）÷ 股數；沒填手續費就是成交價。
- * - 每一列的「⋯」與展開鈕整顆在列裡面（不用負的右邊距），觸控 44px。
+ * - 每一列的「⋯」與展開鈕整顆在列裡面（不用負的右邊距），觸控 44px；滑過是 `bg-sel`（比列的 hover 深一階，看得到）。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -182,8 +183,9 @@ describe("展開一檔：均價・持有・成本一行", { timeout: 20_000 }, (
     expect(line.tagName).toBe("DL")
     // 順序：均價在最前面（負責人要的是均價）
     expect(within(line).getAllByRole("term").map((dt) => dt.textContent)).toEqual(["均價", "持有", "成本"])
-    // 示範帳本的兩筆買進都有手續費（162、251）：「含手續費」13px 淡墨，跟在均價後面
-    expect(await within(line).findByText("含手續費", {}, T)).toHaveClass("text-sm", "text-ink-2")
+    // 示範帳本的兩筆買進都有手續費（162、251），後端（示範是 mock）回 fees_in_cost 413：「含手續費」13px 淡墨，跟在均價後面
+    expect(tsmc.fees_in_cost).toBe(162 + 251)
+    expect(within(line).getByText("含手續費")).toHaveClass("text-sm", "text-ink-2")
     expect(itemOf(line, "均價").textContent).toBe("692.61 含手續費")
     expect(itemOf(line, "持有").textContent).toBe(formatQuantity(tsmc.quantity, "lot", "TWSE"))
     expect(itemOf(line, "持有").textContent).toBe("1 張 500 股")
@@ -209,7 +211,7 @@ describe("展開一檔：均價・持有・成本一行", { timeout: 20_000 }, (
     const records = await expand(phone, "NVIDIA")
     const line = costLine(records.closest("li")!, "NVIDIA")
     expect(itemOf(line, "持有").textContent).toBe("40 股")
-    await within(line).findByText("含手續費", {}, T)
+    expect(nvda.fees_in_cost).toBeGreaterThan(0)
     expect(itemOf(line, "均價").textContent).toBe(`US$${formatPrice(nvda.avg_cost, "US")} 含手續費`)
     expect(itemOf(line, "成本").textContent).toBe(formatMoney(nvda.cost_basis))
     // 窄的時候下面每一筆沒有表頭：這一行自己底下有一條格線（和每一筆買賣同一個 43rem 斷點）
@@ -227,7 +229,54 @@ describe("展開一檔：均價・持有・成本一行", { timeout: 20_000 }, (
     const line = costLine(records.closest("td")!, "台積電")
     for (const label of ["持有", "均價", "成本"]) expect(within(itemOf(line, label)).getByLabelText("已隱藏")).toBeInTheDocument()
     expect(line).not.toHaveTextContent(/\d/)
-    await within(line).findByText("含手續費", {}, T)
+    expect(within(line).getByText("含手續費")).toBeInTheDocument()
+  })
+
+  it("「含手續費」展開的那一刻就定了，不等下面每一筆讀完（原本晚出現，整行往右跳、手機上換行）", async () => {
+    // 每一筆買賣一直讀不完：上面那一行照樣完整（含「含手續費」），下面是骨架
+    vi.spyOn(api, "listTransactions").mockReturnValue(new Promise(() => {}))
+    renderApp("/")
+    const table = await holdingsTable()
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    await user.click(within(table).getByRole("button", { name: "展開台積電的每一筆買賣" }))
+    const box = within(table).getByLabelText("台積電的紀錄載入中").closest("td")!
+    const line = costLine(box, "台積電")
+    expect(itemOf(line, "均價").textContent).toBe("692.61 含手續費")
+    expect(itemOf(line, "成本")).toHaveTextContent(/^NT\$1,038,913$/)
+  })
+
+  it("後端說成本裡沒有手續費（fees_in_cost 0）就不寫，即使下面有一筆填了手續費的買進（兩個帳戶，填了手續費的那個已經全部賣掉）", async () => {
+    // 審查的例子：帳戶 A 買 1000 股 @100、手續費 40；帳戶 B 買 1000 股 @120、沒填；A 全部賣掉。後端：均價 120、不含手續費
+    const base = await byCode("2330")
+    const holding: Holding = { ...base, quantity: 1000, avg_cost: 120, cost_basis: 120000, fees_in_cost: 0, account_ids: ["acc_B"] }
+    vi.spyOn(api, "getHoldings").mockResolvedValue([holding])
+    const row = (p: Partial<Transaction>): Transaction => ({
+      id: "t", account_id: "acc_A", symbol: "2330.TW", type: "buy", trade_date: "2026-01-02", quantity: 1000, price: 100, amount: 100000,
+      fee: 0, tax: 0, health_insurance: 0, currency: "TWD", is_day_trade: false, note: "", source: "manual", created_at: "2026-01-02T00:00:00Z", ...p,
+    })
+    const items = [
+      row({ id: "3", type: "sell", trade_date: "2026-03-02", price: 130, amount: 130000, created_at: "2026-03-02T00:00:00Z" }),
+      row({ id: "2", account_id: "acc_B", trade_date: "2026-02-02", price: 120, amount: 120000, created_at: "2026-02-02T00:00:00Z" }),
+      row({ id: "1", fee: 40 }),
+    ]
+    vi.spyOn(api, "listTransactions").mockResolvedValue({ items, next_cursor: null })
+    renderApp("/")
+    const table = await holdingsTable()
+    const records = await expand(table, "台積電")
+    const line = costLine(records.closest("td")!, "台積電")
+    expect(itemOf(line, "均價").textContent).toBe("120")
+    expect(line).not.toHaveTextContent("手續費")
+    // 那一筆自己的均價照樣含它的手續費（(1000 × 100＋40) ÷ 1000）
+    expect(within(records).getAllByRole("listitem").map((li) => lotAvg(priceCell(li))?.textContent ?? null)).toEqual([null, "均價 120", "均價 100.04"])
+
+    // 舊的後端沒有 fees_in_cost：不寫（不暗示一個不知道的費用）
+    cleanup()
+    const { fees_in_cost: _drop, ...old } = holding
+    vi.spyOn(api, "getHoldings").mockResolvedValue([old as Holding])
+    renderApp("/")
+    const again = await holdingsTable()
+    const records2 = await expand(again, "台積電")
+    expect(costLine(records2.closest("td")!, "台積電")).not.toHaveTextContent("手續費")
   })
 })
 
@@ -293,7 +342,7 @@ describe("每一筆買進的均價（含這一筆的手續費）", { timeout: 20
   })
 })
 
-describe("算法（buyAverage、feeInHolding）", () => {
+describe("算法（buyAverage）", () => {
   const txn = (p: Partial<Transaction>): Transaction => ({
     id: "t", account_id: "a", symbol: "2330.TW", type: "buy", trade_date: "2026-01-02", quantity: 1000, price: 100, amount: 100000,
     fee: 0, tax: 0, health_insurance: 0, currency: "TWD", is_day_trade: false, note: "", source: "manual", created_at: "2026-01-02T00:00:00Z", ...p,
@@ -309,29 +358,6 @@ describe("算法（buyAverage、feeInHolding）", () => {
     expect(buyAverage(txn({ quantity: null }))).toBeNull()
     expect(buyAverage(txn({ price: null }))).toBeNull()
   })
-  it("「含手續費」：這一批持股裡有填了手續費的買進才算；出清過就重新算；配股、分割照比例算股數", () => {
-    expect(feeInHolding([])).toBe(false)
-    expect(feeInHolding([txn({ fee: 0 }), txn({ id: "2", trade_date: "2026-02-02", fee: 0 })])).toBe(false)
-    expect(feeInHolding([txn({ fee: 20 }), txn({ id: "2", trade_date: "2026-02-02", fee: 0 })])).toBe(true)
-    // 先買（有手續費）→ 全部賣掉 → 再買（沒填）：現在的均價裡沒有手續費
-    const round = [
-      txn({ id: "1", trade_date: "2025-01-02", fee: 20 }),
-      txn({ id: "2", trade_date: "2025-06-02", type: "sell", quantity: 1000, price: 120 }),
-      txn({ id: "3", trade_date: "2026-01-05", fee: 0 }),
-    ]
-    expect(feeInHolding(round)).toBe(false)
-    // 只賣一部分：還有有手續費的那一筆留在成本裡
-    expect(feeInHolding([round[0]!, txn({ id: "2", trade_date: "2025-06-02", type: "sell", quantity: 400, price: 120 }), round[2]!])).toBe(true)
-    // 分割（1 拆 10）之後賣掉原本的 10 倍才算出清；配股加股數
-    const split = [
-      txn({ id: "1", trade_date: "2024-01-02", quantity: 4, fee: 3, currency: "USD" }),
-      txn({ id: "2", trade_date: "2024-06-10", type: "split", quantity: 10, price: null }),
-      txn({ id: "3", trade_date: "2024-07-01", type: "sell", quantity: 4, price: 100 }),
-    ]
-    expect(feeInHolding(split)).toBe(true)
-    expect(feeInHolding([...split.slice(0, 2), txn({ id: "3", trade_date: "2024-07-01", type: "sell", quantity: 40, price: 100 })])).toBe(false)
-    expect(feeInHolding([txn({ fee: 5 }), txn({ id: "2", trade_date: "2026-07-01", type: "stock_dividend", quantity: 100, price: null }), txn({ id: "3", trade_date: "2026-08-01", type: "sell", quantity: 1000 })])).toBe(true)
-  })
 })
 
 /** 往上到那一列（tr／li）為止，沒有任何一層用負的右邊距把按鈕推出去 */
@@ -346,6 +372,9 @@ describe("「⋯」與展開鈕整顆在列裡面（滑過的底色不超出框�
     // 觸控 44px：每一筆的最後一欄只有 40px，不能被擠小（shrink-0）
     expect(ROW_MENU_BUTTON).toContain("pointer-coarse:size-11")
     expect(ROW_MENU_BUTTON).toContain("shrink-0")
+    // 滑過看得到方塊：列滑過時是 --hov，按鈕用深一階的 --sel（不是同一個 hover:bg-hov）
+    expect(ROW_MENU_BUTTON.split(" ")).toContain("hover:bg-sel")
+    expect(ROW_MENU_BUTTON).not.toContain("hover:bg-hov")
     renderApp("/")
     const table = await holdingsTable()
     const records = await expand(table, "台積電")
@@ -354,7 +383,10 @@ describe("「⋯」與展開鈕整顆在列裡面（滑過的底色不超出框�
     insideRow(rowMenu)
     const collapse = within(table).getByRole("button", { name: "收起台積電的每一筆買賣" })
     insideRow(collapse)
-    expect(collapse).toHaveClass("pointer-coarse:size-11")
+    expect(collapse).toHaveClass("pointer-coarse:size-11", "hover:bg-sel")
+    expect(collapse).not.toHaveClass("hover:bg-hov")
+    // 兩顆都在格線列裡（列滑過是 --hov）
+    expect(rowMenu.closest("tr")).toHaveClass("ruled-row")
     for (const b of within(records).getAllByRole("button", { name: /的動作$/ })) {
       expect(b.className).toBe(ROW_MENU_BUTTON)
       insideRow(b)
@@ -369,7 +401,9 @@ describe("「⋯」與展開鈕整顆在列裡面（滑過的底色不超出框�
     const phone = await screen.findByRole("list", { name: "持倉" }, T)
     await within(phone).findByRole("link", { name: "台積電" }, T)
     const records = await expand(phone, "台積電")
-    insideRow(within(phone).getByRole("button", { name: "收起台積電的每一筆買賣" }))
+    const collapse = within(phone).getByRole("button", { name: "收起台積電的每一筆買賣" })
+    insideRow(collapse)
+    expect(collapse).toHaveClass("hover:bg-sel")
     for (const b of within(records).getAllByRole("button", { name: /的動作$/ })) insideRow(b)
     const toggle = screen.getByRole("button", { name: /（改看損益）$/ })
     expect(toggle.className).not.toMatch(NEG_RIGHT)
@@ -410,7 +444,9 @@ describe("沒填手續費（以 0 計）", { timeout: 20_000 }, () => {
     expect(lotAvg(priceCell(buy2!))!.textContent).toBe("均價 310.1")
     expect(lotAvg(priceCell(buy1!))!.textContent).toBe("均價 300")
     line = costLine(records.closest("td")!, "廣達")
-    await within(line).findByText("含手續費", {}, T)
+    // 移動平均賣掉四分之一：成本裡的手續費也剩 75
+    expect((await byCode("2382")).fees_in_cost).toBe(75)
+    expect(within(line).getByText("含手續費")).toBeInTheDocument()
     // 移動平均：(300,000＋310,100) ÷ 2,000 ＝ 305.05，賣掉 500 股之後均價不變
     expect(itemOf(line, "均價").textContent).toBe("305.05 含手續費")
     expect(itemOf(line, "持有").textContent).toBe("1 張 500 股")

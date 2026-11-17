@@ -13,6 +13,7 @@
 | 位置 | 新增 | 用途 |
 |---|---|---|
 | `Holding` | `is_demo` | 這一檔的報價是否含模擬資料（`PortfolioSummary.is_demo` 是整體） |
+| `Holding` | `fees_in_cost`（2026-11-17） | 目前持股的成本裡含多少買進手續費（原幣）；大於 0 時前端在均價旁寫「含手續費」。`domain/ledger.py` 的 `Lot.fee` 跟著成本一起走（成本法、當沖、減資、出清），見合約〈持倉的均價與手續費〉 |
 | `DividendRecord` | `is_demo` | 陣列型回應沒有地方放整體的 `is_demo`，所以逐筆標示 |
 | `Valuation` | `notes: string[]` | 河流圖的說明，例如「EPS ≤ 0，本益比區間留白」、「ETF 沒有 EPS」、資料來源 |
 | `PortfolioSummary.allocation` | `by_account` | 依帳戶配置（規格 4.4 有列） |
