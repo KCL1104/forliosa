@@ -35,7 +35,9 @@ function Sentence({ s, ai }: { s: ReportSentence; ai: boolean }) {
 }
 
 /**
- * 出處號碼：觸控時每個號碼的可按範圍用看不見的 `::before` 放大到 44×44 以上（字的位置不變）。
+ * 出處號碼：觸控時每個號碼的可按範圍用看不見的 `::before` 放大（字的位置不變）。
+ * 只有一個號碼時向左右各放大 18px（44×44 以上）；好幾個號碼並排時，各號碼左右多一點間距，
+ * 放大的範圍只到自己的邊（第一個向左、最後一個向右再放大），所以相鄰的號碼不會互相蓋住、點哪個就是哪個。
  * 號碼本身是連到註腳的連結；回到原句的連結在註腳那一邊。
  */
 export function Cites({ cites }: { cites: number[] }) {
@@ -54,7 +56,16 @@ export function Cites({ cites }: { cites: number[] }) {
               e.preventDefault()
               jumpTo(`${prefix}fn-${n}`)
             }}
-            className="relative rounded-xs px-px no-underline hover:text-ink focus-visible:outline-offset-1 pointer-coarse:before:absolute pointer-coarse:before:-inset-x-[1.125rem] pointer-coarse:before:-inset-y-3.5 pointer-coarse:before:content-['']"
+            className={cn(
+              "relative rounded-xs px-px no-underline hover:text-ink focus-visible:outline-offset-1 pointer-coarse:before:absolute pointer-coarse:before:-inset-y-3.5 pointer-coarse:before:content-['']",
+              cites.length === 1
+                ? "pointer-coarse:before:-inset-x-[1.125rem]"
+                : cn(
+                    "pointer-coarse:px-2",
+                    i === 0 ? "pointer-coarse:before:-left-[1.125rem]" : "pointer-coarse:before:left-0",
+                    i === cites.length - 1 ? "pointer-coarse:before:-right-[1.125rem]" : "pointer-coarse:before:right-0",
+                  ),
+            )}
           >
             {n}
           </a>

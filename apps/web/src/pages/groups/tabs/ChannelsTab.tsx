@@ -135,11 +135,25 @@ function NotifyToggles({
       </div>
     )
   }
+  // 報告對全站公開時，群組的週報、日報會併進市場報告的推播（後端 push.digest_hold／daily_hold）：說明照實際的送法寫
+  const weeklyMerged = reports && (value.notify_weekly ?? true)
+  const dailyMerged = reports && (value.notify_premarket ?? false)
   return (
     <div className="mt-2 border-t border-rule">
       {row("notify_trades", "交易動態", "成員的買賣，交易建立 15 分鐘後送出。")}
-      {row("notify_digest", "週報", "每週六晚上的群組 AI 週報。")}
-      {daily && row("notify_daily", "日報", "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送。")}
+      {row(
+        "notify_digest",
+        "週報",
+        weeklyMerged ? "群組 AI 週報併在週日 18:00 的市場週報裡送；那天沒有市場週報時，21:30 單獨送。" : "每週六晚上的群組 AI 週報。",
+      )}
+      {daily &&
+        row(
+          "notify_daily",
+          "日報",
+          dailyMerged
+            ? "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，併在交易日 7:30 的盤前重點裡送。"
+            : "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送。",
+        )}
       {reports && (
         <div data-report-toggles="">
           <p className="pt-4 pb-1 text-sm text-ink-2">推到頻道的是文字與連結，報告本文人人相同。</p>

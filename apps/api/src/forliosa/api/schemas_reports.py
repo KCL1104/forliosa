@@ -227,6 +227,8 @@ class ReportSummary(_Out):
     has_ai: bool
     published_at: str
     corrected: bool
+    # premarket: the previous Taiwan session (holidays skipped), the day 「昨日你的群組」 is about; else null
+    prev_session: str | None = None
 
 
 class ReportsStatus(_Out):

@@ -8,6 +8,7 @@ import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { titleBody } from "./report-context"
 import { ReportView } from "./ReportView"
 import { useMarkReportsSeenOnOpen } from "./use-reports-unread"
 
@@ -77,7 +78,7 @@ function EarlierRow({ r }: { r: ReportSummary }) {
       <span className="num text-sm text-ink-2">{r.edition_label}</span>
       <span className="min-w-0">
         <InternalLink href={`/market/reports/${r.id}`} className="rounded-xs text-base text-ink after:absolute after:inset-0 after:content-[''] focus-visible:outline-offset-4">
-          {r.title}
+          {titleBody(r.kind_label, r.title)}
         </InternalLink>
         <span className="num block text-sm text-ink-2">
           {formatDateTime(r.published_at)}

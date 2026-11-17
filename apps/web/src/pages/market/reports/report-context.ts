@@ -15,13 +15,31 @@ export interface ReportCtx {
 export const ReportContext = createContext<ReportCtx>({ prefix: "", admin: false, openSection: () => {} })
 export const useReport = () => useContext(ReportContext)
 
-/** 捲到報告裡的某個元素（置中、不改網址）並把焦點放過去：上面有 sticky 的頂部列與分頁列，置中才看得到 */
+/**
+ * 捲到報告裡的某個元素（置中、不改網址）並把焦點放過去：上面有 sticky 的頂部列與分頁列，置中才看得到。
+ * 本來就能用 Tab 走到的元素（原句的出處連結）不動它的 tabindex；不能的（註腳的那一條）暫時加 `tabindex=-1`，
+ * 離開時拿掉，所以來回跳過以後 Tab 的順序不變。
+ */
 export function jumpTo(id: string) {
   const el = document.getElementById(id)
   if (!el) return
   el.scrollIntoView({ block: "center", behavior: window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" })
-  if (!el.hasAttribute("tabindex")) el.setAttribute("tabindex", "-1")
+  if (!el.hasAttribute("tabindex") && !el.matches("a[href], button, input, select, textarea")) {
+    el.setAttribute("tabindex", "-1")
+    el.addEventListener("blur", () => el.removeAttribute("tabindex"), { once: true })
+  }
   el.focus({ preventScroll: true })
+}
+
+/**
+ * 規則寫的標題以「盤前重點 11/18（三）：」「市場週報 11/16–11/20：」開頭（推播要用）；畫面上前面已經有報告名稱與日期，
+ * 拿掉這一段不重複。只認「報告名稱＋空格＋日期＋全形冒號」，AI 寫的標題不會這樣開頭。
+ */
+export function titleBody(kindLabel: string, title: string): string {
+  if (!title.startsWith(`${kindLabel} `)) return title
+  const m = /^[\d/（）()一二三四五六日–-]+：/.exec(title.slice(kindLabel.length + 1))
+  const rest = m ? title.slice(kindLabel.length + 1 + m[0].length) : title
+  return rest.trim() ? rest : title
 }
 
 /** 驗證器的問題代碼 → 白話（管理員檢視；認不得的照原文） */

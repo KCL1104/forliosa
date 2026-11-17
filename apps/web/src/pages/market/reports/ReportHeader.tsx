@@ -3,6 +3,7 @@ import { KaiText } from "@/ai/kai-text"
 import type { MarketReport } from "@/api/types"
 import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { titleBody } from "./report-context"
 import { ReportText } from "./ReportText"
 
 /**
@@ -16,9 +17,7 @@ export function ReportHeader({ report: r, headingLevel = 2 }: { report: MarketRe
   const H = headingLevel === 1 ? "h1" : "h2"
   const aiTitle = r.title_origin === "ai"
   const aiPoints = r.highlights_origin === "ai"
-  // 規則寫的標題以「盤前重點 11/18（三）：」開頭（推播與清單要用）；這裡上面已經是報告名稱與日期，不重複
-  const prefix = `${r.kind_label} ${r.edition_label}：`
-  const title = !aiTitle && r.title.startsWith(prefix) ? r.title.slice(prefix.length) : r.title
+  const title = aiTitle ? r.title : titleBody(r.kind_label, r.title)
   return (
     <header className="flex flex-col">
       <p className="text-sm text-ink-2">

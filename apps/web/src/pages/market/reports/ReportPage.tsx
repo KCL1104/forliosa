@@ -9,6 +9,7 @@ import { textAction } from "@/components/text-action"
 import { buttonVariants } from "@/components/ui/button"
 import type { ReportSearch } from "@/router"
 import { MarketTabs } from "./MarketTabs"
+import { ReportCorrection } from "./ReportCorrection"
 import { ReportView } from "./ReportView"
 import { useMarkReportsSeenOnOpen } from "./use-reports-unread"
 
@@ -55,6 +56,8 @@ export function ReportPage() {
               </p>
             )}
             <ReportView report={q.data} />
+            {/* 站方管理員（`status.mode` 只給管理員）：最新的一版可以更正 */}
+            {status.data?.mode && !version && <ReportCorrection report={q.data} />}
           </div>
         )}
       </div>

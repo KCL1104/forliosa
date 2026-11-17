@@ -2208,6 +2208,8 @@ export interface ReportSummary {
   has_ai: boolean
   published_at: string
   corrected: boolean
+  /** 盤前重點：前一個台股交易日（跳過休市日；推播「昨日你的群組」說的那一天）。其他種類是 null */
+  prev_session?: string | null
 }
 /** `GET /market/reports/status` */
 export interface ReportsStatus {

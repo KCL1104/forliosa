@@ -74,20 +74,13 @@ function DailyReports({
 /**
  * 今天的盤前重點已經出來、最新一則日報是前一個交易日的：那一則就是推播裡的「昨日你的群組」（2026-11-17 市場報告；
  * 盤前推播把它接在盤前重點後面）。群組頁同樣這樣叫它，旁邊連到那一份盤前重點。報告本身人人相同，群組的數字只在這裡與推播裡。
+ * 「前一個交易日」用伺服器給的 `prev_session`（跳過週末與台股休市日，和推播同一個算法），前端不自己推算。
  */
 function useYesterdayPremarket(day: string | undefined): ReportSummary | null {
   const status = useMarketReportStatus()
   const pre = status.data?.available ? status.data.latest.find((s) => s.kind === "premarket") : undefined
-  if (!day || !pre) return null
-  // 盤前重點是日報那一天的下一個平日（休市日不出盤前，所以中間隔了假日時不叫「昨日」）
-  return nextWeekday(day) === pre.edition_date ? pre : null
-}
-/** 下一個平日（YYYY-MM-DD） */
-function nextWeekday(day: string): string {
-  const d = new Date(`${day}T00:00:00Z`)
-  do d.setUTCDate(d.getUTCDate() + 1)
-  while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
-  return d.toISOString().slice(0, 10)
+  if (!day || !pre?.prev_session) return null
+  return pre.prev_session === day ? pre : null
 }
 
 function DailyList({ items, boosted, query }: { items: DailyReport[]; boosted: boolean; query: ReturnType<typeof useDailyReports> }) {

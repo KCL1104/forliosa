@@ -1331,7 +1331,7 @@
 | kind | 名稱 | 出刊與推播（台北） |
 |---|---|---|
 | `premarket` | 盤前重點 | 台股交易日：06:55 資料版、AI 版目標 07:25、07:30 推播（AI 版 08:15 前出來就那時推，否則 08:15 推資料版）、08:40 截止 |
-| `close` | 盤後重點 | 台股交易日：14:10 資料版（每 10 分鐘更新到 15:40）、AI 版目標 15:55、16:00 推播（等到 17:30）、23:45 與隔天 06:40 補表（不推播） |
+| `close` | 盤後重點 | 台股交易日：14:10 資料版（每 10 分鐘更新到 15:40）、AI 版目標 15:55、16:00 推播（等到 17:30，那時推資料版）、23:45 與隔天 06:40 補表（不推播） |
 | `weekly` | 市場週報 | 週日：16:30 資料版、AI 版目標 18:00、18:00 推播（等到 21:00）。回顧週一到週五，加上下週行事曆 |
 
 ### 誰看得到
@@ -1351,7 +1351,8 @@
 | GET | `/market/reports/{id}?version=` | `MarketReport`（`version` 看舊版；盲測的 A／B／C 版本不從這裡給） |
 | POST | `/market/reports/seen` | 204：記下「看過了」 |
 
-`ReportSummary`：`{id, kind, kind_label, edition_date, edition_label, title, has_ai, published_at, corrected}`。
+`ReportSummary`：`{id, kind, kind_label, edition_date, edition_label, title, has_ai, published_at, corrected, prev_session}`；
+`prev_session` 只有盤前重點有值（前一個台股交易日，跳過休市日；群組頁的「昨日你的群組」用它，和盤前推播一致），其他是 `null`。
 
 **未讀**：最新一份看得到的報告 `first_published_at` 晚於 `seen` 的時間；從沒按過 `seen` 的人，只有 24 小時內發布的才算未讀。前端打開「報告」分頁或報告頁 1.2 秒後呼叫 `seen`（唯讀查看時不呼叫）。
 
@@ -1395,7 +1396,7 @@
               "web": [{"n": 3, "outlet": "中央社", "title": "外資賣超千億", "url": "https://…", "published_label": "11/16 15:32"}],
               "disagreements": [{"text": "鉅亨網寫 179.62 億元，中央社寫 179.63 億元；本報告以中央社為準。"}],
               "manual": ["美股休市、總經行事曆與美股財報日：Forliosa 自行整理，每列連回官方頁面"]},
-  "disclaimer_full": "這份報告由 AI 依公開資料與媒體報導整理，…",
+  "disclaimer_full": "這份報告由 AI 依公開資料與媒體報導整理，…",      // 沒有 AI 文字時：「這份報告依公開資料整理，…」（不提 AI 與媒體報導）
   "model_line": "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。",     // 沒有 AI 文字時 null
   "corrections": [],                                                       // [{"at", "note"}]：note 只有說明，頁面自己寫「已更正（11/18 09:10）：」
   "notes": [],                                                             // 例：官方加權指數尚未取得
@@ -1415,13 +1416,13 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/market-reports/overview` | `{enabled, mode, writers: {premarket\|close\|weekly: {model, effort, source: "admin"\|"default", effective, tier} \| null（盲測中）}, trial_running, month: {label, spend_usd, budget_usd, tier: normal\|medium\|sonnet\|data_only}, trial: {spend_usd, budget_usd, days_done, days_total, weekly_done, finished, started_on, revealed_at}, key: {slot, status: ok\|cooldown\|disabled\|exhausted, note}, runs: [{id, report_id, kind, edition_date, edition_label, variant, purpose, attempt, status, step, started_at, seconds, stop_reason, fallback_used, problems, cost_usd, model, effort, tier, error}]（最近 20 次；揭曉前盲測的 `cost_usd`／`model`／`effort`／`tier` 是 `null`）, manual: {nyse_next, nyse_unverified, nyse_rows, macro_next_14d, earnings_next_14d}}`（形狀照前端 `AdminReportsOverview`） |
+| GET | `/admin/market-reports/overview` | `{enabled, mode, writers: {premarket\|close\|weekly: {model, effort, source: "admin"\|"default", effective, tier} \| null（盲測中）}, trial_running, month: {label, spend_usd, budget_usd, tier: normal\|medium\|sonnet\|data_only}, trial: {spend_usd, budget_usd, days_done, days_total, weekly_done, finished, started_on, revealed_at}, key: {slot, status: ok\|cooldown\|disabled\|exhausted, note}（worker 寫下的報告專用 key 狀態；超過 15 分鐘沒更新時 note 多一句）, runs: [{id, report_id, kind, edition_date, edition_label, variant, purpose, attempt, status, step, started_at, seconds, stop_reason, fallback_used, problems, cost_usd, model, effort, tier, error}]（最近 20 次；揭曉前盲測的 `cost_usd`／`model`／`effort`／`tier` 是 `null`）, manual: {nyse_next, nyse_unverified, nyse_rows, macro_next_14d, earnings_next_14d}}`（形狀照前端 `AdminReportsOverview`） |
 | PUT | `/admin/market-reports/config` | `{mode?, writers?: {premarket?: {model, effort} \| null, …}}`；model 只能 `claude-opus-5-5`／`claude-sonnet-5-5`，effort `low`–`xhigh`；回應是 overview 加 `notice`（切到 `public` 時「之後的新報告會對所有登入的人公開…」，其他是 `null`） |
 | GET | `/admin/market-reports/trial` | `{days_done, days_total, weekly_done, finished, reports: [{report_id, kind, kind_label, edition_date, edition_label, closed, variants: [{label, status（還沒跑是 `pending`）, attempts, finished_at, on_time（還在寫或還沒跑是 null）, published, problems, metrics（TrialMetrics；還在寫是 null）, writer?（揭曉後）}], my_vote}], reveal: TrialReveal \| null（揭曉後）}`；揭曉前沒有花費與模型 |
 | GET | `/admin/market-reports/{id}/variants/{A\|B\|C}` | 那個版本的管理員形式：每句多 `refs`、被刪的段多 `dropped: {reasons}`、`validation: {first_problems, final_problems: [{code, path}], dropped: [{section, reasons}], revised, compliance_ran, mentions_anthropic, counts}`；揭曉後多 `writer: {model, effort}`。還在寫：409 `variant_running`；沒有產生（沒跑、只發了資料版）：404 |
 | PUT | `/admin/market-reports/{id}/vote` | `{preferred: "A"\|"B"\|"C", note?}` |
 | POST | `/admin/market-reports/trial/reveal` | `{force?}`；沒做完且沒有 force：409 `trial_not_done`「盲測還沒做完（n/10 份日報、週報 0/1）。」回應 TrialReveal：`{revealed_at, complete, kinds: [{kind（premarket／close／weekly）, kind_label, rows: [{writer: {model, effort}, reports, votes, policy_violations, subject_mismatches, inferred_dates, dropped_sections, on_time_rate, data_only, avg_cost_usd, avg_seconds, fallbacks, passed}], suggested: {model, effort} \| null}], note}`（建議＝過關裡平均花費最低的） |
-| POST | `/admin/market-reports/{id}/corrections` | `{note: 1–200 字, drop_sections?: [key]}`：新的一版 `edition="correction"`，頁首多「已更正（11/18 09:10）：…」，不推播 |
+| POST | `/admin/market-reports/{id}/corrections` | `{note: 1–200 字, drop_sections?: [key]}`：新的一版 `edition="correction"`，頁首多「已更正（11/18 09:10）：…」，不推播。`drop_sections` 是段落的 key，另外可以有 `title`、`highlights`（AI 寫的換回規則寫的）；不認得的 key 422 `details.field="drop_sections"`；AI 文字全拿掉時 `has_ai`、免責與模型行改成資料版 |
 | POST | `/admin/market-reports/rebuild-data` | `{kind, edition_date}`：重建資料版（不呼叫 AI；過去的日期是回補，只有管理員看得到） |
 | GET／PUT／DELETE | `/admin/market-calendar/nyse`（`/{date}`） | 美股休市與提早收盤：`{name, kind: closed\|early_close, close_time_et?, source_url（NYSE 官網）, verified}` |
 | GET／POST／DELETE | `/admin/market-calendar/macro`（`?from=&to=`、`/{id}`） | 總經行事曆：`{event_date, local_time?, tz, country, title, agency, official_url, sectors?, note?}`；網址只能是官方網站（422，`details.field="official_url"`） |

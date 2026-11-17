@@ -207,7 +207,7 @@ def test_blind_test_votes_and_reveal(on, client, other_client, monkeypatch):
         {"report_id": rid, "preferred": "B", "note": "比較清楚"}
     assert client.put(f"{API}/admin/market-reports/{rid}/vote", json={"preferred": "D"}).status_code == 422
     r = client.post(f"{API}/admin/market-reports/trial/reveal", json={})
-    assert r.status_code == 409 and "盲測還沒做完（1/10 份日報、週報 0/1）" in r.json()["error"]["message"]
+    assert r.status_code == 409 and "盲測還沒做完（1/9 份日報、週報 0/1）" in r.json()["error"]["message"]
     out = client.post(f"{API}/admin/market-reports/trial/reveal", json={"force": True}).json()
     assert out["complete"] is False and [k["kind"] for k in out["kinds"]] == ["premarket", "close", "weekly"]
     close = next(k for k in out["kinds"] if k["kind"] == "close")
@@ -263,6 +263,8 @@ def test_corrections(on, client, other_client, monkeypatch):
     assert wh["origin"] == "data" and all(b["type"] != "text" for b in wh["blocks"])
     assert other_client.get(f"{API}/market/reports").json()["items"][0]["corrected"] is True
     assert client.post(f"{API}/admin/market-reports/{rid}/corrections", json={"note": ""}).status_code == 422
+    typo = client.post(f"{API}/admin/market-reports/{rid}/corrections", json={"note": "x", "drop_sections": ["typo"]})
+    assert typo.status_code == 422 and typo.json()["error"]["details"] == {"field": "drop_sections"}
 
 
 def test_rebuild_data(on, client, monkeypatch):
@@ -285,6 +287,9 @@ def test_hand_kept_tables(on, client, monkeypatch):
     early = client.put(f"{API}/admin/market-calendar/nyse/2026-11-27", json={**ok, "kind": "early_close"})
     assert early.status_code == 422 and early.json()["error"]["details"] == {"field": "close_time_et"}
     bad_url = client.put(f"{API}/admin/market-calendar/nyse/2026-12-25", json={**ok, "source_url": "https://x.com"})
+    lookalike = client.put(f"{API}/admin/market-calendar/nyse/2026-12-25",
+                           json={**ok, "source_url": "https://example.org/nyse.com"})
+    assert lookalike.status_code == 422
     assert bad_url.status_code == 422
     assert client.delete(f"{API}/admin/market-calendar/nyse/2026-11-26").status_code == 204
     macro = {"event_date": "2026-11-25", "local_time": "08:30", "tz": "America/New_York", "country": "US",

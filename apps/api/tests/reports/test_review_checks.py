@@ -300,3 +300,18 @@ def test_a_data_edition_never_says_ai_wrote_it(market_db, us_on):
 ])
 def test_the_nyse_source_must_be_on_nyse_com(url, ok):
     assert service.nyse_url_ok(url) is ok
+
+
+def test_an_item_name_may_use_its_own_refs(pre_pack):
+    out = premarket_output(pre_pack)
+    out["watch"][0]["event"] = "鴻海 11/17（二）法說會"
+    assert not [x for x in validate.validate(out, pre_pack, "premarket") if x.hard and x.path == "watch[0].event"]
+    out["watch"][0]["event"] = "鴻海 12/03 法說會"  # a date neither the pack nor the item has
+    assert ("watch[0].event", "date_not_sourced") in {
+        (x.path, x.code) for x in validate.validate(out, pre_pack, "premarket") if x.hard}
+
+
+def test_a_plain_word_holding_a_short_name_is_not_a_stock(close_pack):
+    text = "〔中央社〕報導，東南亞股市下跌，外資賣超 1,234.5 億元。"
+    out = with_sentence(close_output(close_pack), "chips", text, "X001")
+    assert "stock_not_allowed" not in codes(out, close_pack, names=["南亞"])

@@ -56,6 +56,8 @@ TWO_CHAR_COMMON = frozenset({"統一", "大同", "中華", "台灣", "全新", "
                              "全家", "大量", "新興", "國際", "美國", "日本", "中國", "香港", "上海", "世界", "信義",
                              "正道", "大成", "台開", "一詮", "新光", "台火", "東陽", "南港", "永豐", "華南", "第一",
                              "合庫"})
+# Plain words that hold a two-character stock name (東南亞 holds 南亞): blanked before the check
+PLAIN_PHRASES = ("東南亞", "南亞洲", "中華民國", "台灣地區")
 STOCK_CONTEXT = re.compile(r"股|漲|跌|%|法說|除息|除權|營收|[（(]\d|點數|收盤|收在|買超|賣超|帶動|拖累|權值|市值|成交"
                            r"|ADR|財報|EPS|獲利")
 
@@ -323,7 +325,7 @@ def other_stocks(c: Ctx, text: str) -> list[str]:
     subjects, the outlets and the sector names are blanked."""
     out: list[str] = []
     t = _blank(text, [*c.stock_names.values(), *(f.get("subject") or "" for f in c.facts.values()), *c.known,
-                      *SECTOR_NAMES])
+                      *SECTOR_NAMES, *PLAIN_PHRASES])
     for name in c.other_names:
         if name in t:
             out.append(name)
@@ -596,10 +598,25 @@ def _heading_refs(c: Ctx, raw: str) -> list[str]:
     return list(dict.fromkeys(refs))
 
 
-def _check_heading(c: Ctx, path: str, raw: str) -> list[Problem]:
+def item_refs(output: dict[str, Any], path: str) -> list[str]:
+    """An item's own refs (its ``time_ref`` and every sentence's), for the checks of its name."""
+    m = re.match(r"(\w+)\[(\d+)\]", path)
+    if m is None:
+        return []
+    items = output.get(m.group(1)) or []
+    item = items[int(m.group(2))] if int(m.group(2)) < len(items) and isinstance(items[int(m.group(2))], dict) else {}
+    refs = [str(item.get("time_ref") or "")]
+    for sub in ("para", "why", "events", "relation"):
+        for s in ((item.get(sub) or {}).get("sentences") or []) if isinstance(item.get(sub), dict) else []:
+            refs += [str(r) for r in (s or {}).get("refs") or []]
+    return [r for r in dict.fromkeys(refs) if r]
+
+
+def _check_heading(c: Ctx, path: str, raw: str, own_refs: list[str] | None = None) -> list[Problem]:
     """The title and the items' names: the sentence checks that apply without refs (words, index points, every
     number against a fact or report with its subject, direction and unit, dates, stocks, sectors, causes) and no
-    forward-looking word at all."""
+    forward-looking word at all. An item's name may also use its item's own refs (``own_refs``: its date, its
+    report)."""
     title = path == "title"
     out: list[Problem] = []
     text = normalize(raw)
@@ -610,15 +627,17 @@ def _check_heading(c: Ctx, path: str, raw: str) -> list[Problem]:
             out.append(Problem(path, "forbidden_word", w))
     if (pts := index_points(text)) is not None:
         out.append(Problem(path, "index_points", pts))
-    refs = _heading_refs(c, raw)
+    own = [r for r in own_refs or [] if c.ref(r) is not None]
+    refs = list(dict.fromkeys([*_heading_refs(c, raw), *own]))
     _check_numbers(c, Sentence(path, path.split("[", 1)[0], path, raw, refs), text, out)
     if c.kind == "premarket" and title:
         for n in numbers(raw, c.blank):
             hits = [f for f in c.facts.values() if any(_close_to(n, v) for v in _fact_candidates(f))]
             if hits and all(f.get("group") == "prev_session" for f in hits):
                 out.append(Problem(path, "repeats_close_report", _num_text(raw, n)))
+    allowed = c.allowed_dates | _ref_dates(c, own)
     for md in _dates_in(text):
-        if md not in c.allowed_dates:
+        if md not in allowed:
             out.append(Problem(path, "date_not_sourced", f"{md[0]}/{md[1]}"))
     for m in _LONE_WD.finditer(text):
         out.append(Problem(path, "weekday_mismatch", m.group(0)))
@@ -714,7 +733,7 @@ def validate(output: dict[str, Any], pack: dict[str, Any], kind: str, names: Ite
     if output.get("title") is None:
         out.append(Problem("title", "count_out_of_range", "沒有標題"))
     for path, raw in headings(output, kind):
-        out += _check_heading(c, path, raw)
+        out += _check_heading(c, path, raw, item_refs(output, path))
     para_refs: dict[str, set[str]] = {}
     sents = list(sentences(output, kind))
     for s in sents:

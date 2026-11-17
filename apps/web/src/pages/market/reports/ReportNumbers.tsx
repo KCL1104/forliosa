@@ -43,7 +43,9 @@ export function ReportNumbers({ items }: { items: ReportNumberItem[] }) {
               <p className="num text-sm leading-5 text-ink-2">{n.date_label}</p>
             </div>
             <div className="min-w-0 text-right @2xl:mt-1 @2xl:text-left">
-              <p className={cn("num font-medium", long ? "text-base leading-6 @2xl:text-lg" : "text-lg leading-6 @2xl:text-2xl @2xl:leading-8")}>{n.value}</p>
+              <p className={cn("num font-medium", long ? "text-base leading-6 @2xl:text-lg" : "text-lg leading-6 @2xl:text-2xl @2xl:leading-8")}>
+                <ValueText value={n.value} />
+              </p>
               {n.change && (
                 <p className={cn("num text-base leading-5 whitespace-nowrap", n.tone === "rise" ? "text-rise" : n.tone === "fall" ? "text-fall" : "text-ink-2")}>
                   {n.change}
@@ -56,5 +58,23 @@ export function ReportNumbers({ items }: { items: ReportNumberItem[] }) {
         )
       })}
     </ul>
+  )
+}
+
+/**
+ * 一串名稱（「半導體業、電腦及週邊設備業、電子零組件業」）只在「、」「・」之後換行：每個名稱是一個 inline-block，
+ * 放得下就整個留在同一行，不會斷成「電子零／組件」。
+ */
+function ValueText({ value }: { value: string }) {
+  const parts = value.split(/(?<=[、・])/)
+  if (parts.length < 2) return <>{value}</>
+  return (
+    <>
+      {parts.map((part, i) => (
+        <span key={i} className="inline-block">
+          {part}
+        </span>
+      ))}
+    </>
   )
 }

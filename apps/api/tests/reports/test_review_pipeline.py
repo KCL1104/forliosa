@@ -21,11 +21,12 @@ from forliosa.models import AiUsage, MarketReport, MarketReportRun, User
 from forliosa.reports import accounting, assemble, calls, pipeline, service
 from forliosa.reports import settings as rs
 from tests.ai.fake_anthropic import text
+from tests.reports import test_pipeline
 from tests.reports.conftest import MON, TUE, ts
 from tests.reports.helpers import close_output, json_text, with_web
-from tests.reports.test_pipeline import env as env_fixture  # noqa: F401  (the fixture ``env``)
 from tests.reports.test_pipeline import pk_close, report, runs, script_gather, tick, versions
 
+env = test_pipeline.env  # the state machine tests' fixture (sessions, the fake model, the clock)
 SUN = date(2026, 11, 22)
 
 

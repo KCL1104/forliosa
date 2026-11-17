@@ -169,3 +169,26 @@ def test_market_reports_tables_and_columns_both_ways(tmp_path):
             assert conn.execute(text("SELECT symbol FROM prices_daily")).scalars().all() == ["2330.TW"]
     finally:
         engine.dispose()
+
+
+def test_market_report_key_state_both_ways(tmp_path):
+    """0025_mreport_key_state (市場報告審查, 2026-11-17): the config row keeps its mode and writers, gets an empty
+    ``key_state`` (the worker writes it), and loses it again on the downgrade."""
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'key_state.db'}"
+    command.upgrade(_config(url), "0024_market_reports")
+    engine = make_engine(url)
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "market_report_config", {"id": 1, "mode": "trial", "writers": "{}"})
+        command.upgrade(_config(url), "0025_mreport_key_state")
+        assert "key_state" in {c["name"] for c in inspect(engine).get_columns("market_report_config")}
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT mode, key_state FROM market_report_config")).one() == ("trial", None)
+        command.downgrade(_config(url), "0024_market_reports")
+        assert "key_state" not in {c["name"] for c in inspect(engine).get_columns("market_report_config")}
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT mode FROM market_report_config")).scalar_one() == "trial"
+    finally:
+        engine.dispose()

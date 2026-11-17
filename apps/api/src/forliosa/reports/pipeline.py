@@ -53,6 +53,7 @@ from forliosa.models import (
     IndexDaily,
     Instrument,
     MarketReport,
+    MarketReportConfig,
     MarketReportGather,
     MarketReportRun,
     MarketReportVersion,
@@ -982,7 +983,8 @@ def record_key_state(db: Session, cfg: Any, deps: Deps, now: datetime) -> None:
     from forliosa.ai import store
 
     try:
-        state = calls.slot_state(deps.key_pool(), store.slot_month_costs(db, now))
+        pool = deps.key_pool()
+        state = calls.slot_state(pool, store.slot_month_costs(db, now) if calls.has_reserved_slot(pool) else None)
     except Exception:
         log.warning("market reports: key state not read", exc_info=True)
         return
@@ -994,7 +996,9 @@ def record_key_state(db: Session, cfg: Any, deps: Deps, now: datetime) -> None:
         fresh = False
     if old == state and fresh:
         return
-    cfg.key_state = {**state, "checked_at": now.isoformat()}
+    # only this column (``updated_at`` / ``updated_by`` stay the admin's last change)
+    db.execute(update(MarketReportConfig).where(MarketReportConfig.id == cfg.id)
+               .values(key_state={**state, "checked_at": now.isoformat()}, updated_at=MarketReportConfig.updated_at))
     db.commit()
 
 
@@ -1108,5 +1112,6 @@ def run_once(db: Session, kind: str, d: date, writer: rs.Writer, deps: Deps, now
                           calls=[], cost_usd=Decimal(0), metrics={}, started_at=now, heartbeat_at=now)
     db.add(run)
     db.commit()
-    attempt(db, run, deps, deadline=False)
+    with heartbeat(deps, run.id):  # the worker's tick would take a long run for dead otherwise
+        attempt(db, run, deps, deadline=False)
     return run

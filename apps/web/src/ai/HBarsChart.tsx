@@ -39,12 +39,12 @@ export function HBarsChart({ chart }: { chart: AiChart }) {
   const axis = pos && neg ? 50 : neg ? 100 : 0
   const span = pos && neg ? 50 : 100
   return (
-    <ul className="mt-2" data-chart-bars="">
+    <ul className="mt-2 grid grid-cols-[minmax(0,max-content)_minmax(2.5rem,1fr)_minmax(4.5rem,auto)] gap-x-3" data-chart-bars="">
       {bars.map((b, i) => {
         const width = b.value === 0 ? 0 : Math.max(1.5, (Math.abs(b.value) / max) * span)
         const row = (
           <>
-            <span className="min-w-0 truncate text-base">{b.label}</span>
+            <span className="max-w-[10em] min-w-0 truncate text-base">{b.label}</span>
             <span aria-hidden className="relative h-2">
               <span className="absolute -inset-y-1 w-px bg-ctl" style={axis === 100 ? { right: 0 } : { left: `${axis}%` }} />
               {width > 0 && (
@@ -60,9 +60,11 @@ export function HBarsChart({ chart }: { chart: AiChart }) {
             {b.sub && <span className="col-span-2 -mt-1 text-sm leading-5 text-ink-2">{b.sub}</span>}
           </>
         )
-        const grid = "grid min-h-10 grid-cols-[minmax(5.5em,10em)_minmax(2.5rem,1fr)_minmax(4.5rem,auto)] items-center gap-x-3 py-1.5"
+        // 每列用整張圖的欄（subgrid）：名稱欄是最長的名稱那麼寬（最多 10em，再長就截斷），剩下的都給橫條，
+        // 手機上橫條才比得出大小；各列的零軸對齊。可以按的列在觸控時至少 44px 高。
+        const grid = cn("col-span-full grid min-h-10 grid-cols-subgrid items-center py-1.5", b.href && "pointer-coarse:min-h-11")
         return (
-          <li key={`${b.label}-${i}`} className="border-b border-rule last:border-b-0">
+          <li key={`${b.label}-${i}`} className="col-span-full grid grid-cols-subgrid border-b border-rule last:border-b-0">
             {b.href ? (
               <InternalLink href={b.href} className={cn(grid, "ruled-row -mb-px rounded-xs border-b-0 focus-visible:outline-offset-[-2px]")}>
                 {row}

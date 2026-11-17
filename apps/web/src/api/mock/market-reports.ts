@@ -109,6 +109,9 @@ const DISCLAIMER_AI = "AI 依公開資料與媒體報導整理，報告本文人
 const DISCLAIMER_DATA = "依公開資料整理，報告本文人人相同；Forliosa 不是投資顧問，不提供投資建議。"
 const DISCLAIMER_FULL =
   "這份報告由 AI 依公開資料與媒體報導整理，報告本文人人相同，不針對任何人的持股或財務狀況。Forliosa 只替你整理資訊，不是投資顧問；這份報告不是投資建議，也不推薦買賣任何股票。內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。"
+/** 沒有 AI 段落的版本（資料版、退回資料版、AI 段落全被拿掉）：不提 AI 與媒體報導 */
+const DISCLAIMER_FULL_DATA =
+  "這份報告依公開資料整理，報告本文人人相同，不針對任何人的持股或財務狀況。Forliosa 只替你整理資訊，不是投資顧問；這份報告不是投資建議，也不推薦買賣任何股票。內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。"
 const MODEL_LINE = "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。"
 const ORIGIN = { data: "資料", ai: "AI 依資料與報導整理" } as const
 const PENDING_LINE = "AI 段落還在整理，這是只有資料的版本。"
@@ -471,7 +474,7 @@ function frame(b: Build, rest: Omit<MarketReport, "id" | "kind" | "kind_label" |
   return {
     id: b.id, kind: b.kind, kind_label: REPORT_KIND_LABEL[b.kind], edition_date: b.d, version: b.version, edition: b.edition, has_ai: b.ai,
     published_at: b.published, first_published_at: b.first,
-    disclaimer_line: b.ai ? DISCLAIMER_AI : DISCLAIMER_DATA, disclaimer_full: DISCLAIMER_FULL, model_line: b.ai ? MODEL_LINE : null,
+    disclaimer_line: b.ai ? DISCLAIMER_AI : DISCLAIMER_DATA, disclaimer_full: b.ai ? DISCLAIMER_FULL : DISCLAIMER_FULL_DATA, model_line: b.ai ? MODEL_LINE : null,
     corrections: b.corrections ?? [], status_line: b.statusLine ?? null, is_demo: b.demo, footnotes: [],
     ...rest,
     sections,
@@ -1067,9 +1070,8 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
         const seconds = running ? null : Math.round(between(rng(`${id}:${label}`), sonnet ? 140 : writer.effort === "medium" ? 210 : 330, sonnet ? 260 : writer.effort === "medium" ? 420 : 760, 0))
         const finished = running ? null : new Date(Date.parse(aiTime) - 600_000 + (seconds ?? 0) * 1000).toISOString().replace(/\.\d+Z$/, "Z")
         const onTime = !running && (seconds ?? 0) < 700
-        const report = running
-          ? null
-          : BUILDERS[kind]({ ...base, version: 1, first, ai: !dataOnly, edition: dataOnly ? "data" : "ai", published: aiTime, dropped, flavor: i, statusLine: dataOnly ? NO_AI_LINE : null })
+        // 只發了資料版的那一個沒有自己的版本（和後端一樣：看不了，清單上 published: false）
+        const report = running || dataOnly ? null : BUILDERS[kind]({ ...base, version: 1, first, ai: true, edition: "ai", published: aiTime, dropped, flavor: i })
         variants[label] = {
           writer, status: running ? "running" : dataOnly ? "data_only" : "ok", finished_at: finished, on_time: onTime, seconds,
           cost: sonnet ? 0.62 : writer.effort === "medium" ? 1.08 : writer.effort === "high" ? 1.46 : 2.31,
@@ -1141,7 +1143,10 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
   const order = (a: MockReport, b: MockReport) => b.d.localeCompare(a.d) || KIND_ORDER[b.kind] - KIND_ORDER[a.kind] || b.id.localeCompare(a.id)
   const summary = (r: MockReport): ReportSummary => {
     const c = r.versions[r.current]!
-    return { id: r.id, kind: r.kind, kind_label: c.kind_label, edition_date: r.d, edition_label: c.edition_label, title: c.title, has_ai: c.has_ai, published_at: c.published_at, corrected: c.corrections.length > 0 }
+    return {
+      id: r.id, kind: r.kind, kind_label: c.kind_label, edition_date: r.d, edition_label: c.edition_label, title: c.title, has_ai: c.has_ai,
+      published_at: c.published_at, corrected: c.corrections.length > 0, prev_session: r.kind === "premarket" ? prevTrading(r.d) : null,
+    }
   }
   const find = (id: string) => {
     const r = visible().find((x) => x.id === id)
@@ -1290,7 +1295,7 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
           variants: LABELS.map((label) => {
             const v = r.variants[label]!
             return {
-              label, status: v.status, finished_at: v.finished_at, on_time: v.status === "running" ? null : v.on_time,
+              label, status: v.status, finished_at: v.finished_at, on_time: v.status === "running" ? null : v.on_time, published: !!v.report,
               metrics: v.metrics ? { ...v.metrics, ...(revealedAt ? { cost_usd: v.cost } : {}) } : null,
               ...(revealedAt ? { writer: v.writer } : {}),
             }
@@ -1305,7 +1310,8 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       const r = reports.find((x) => x.id === reportId && x.trial)
       const v = r?.variants[label]
       if (!r || !v) throw new ApiError(404, "not_found", "找不到這個版本")
-      if (!v.report) throw new ApiError(409, "variant_running", "這個版本還在寫。")
+      if (v.status === "running") throw new ApiError(409, "variant_running", "這個版本還在寫。")
+      if (!v.report) throw new ApiError(404, "not_found", "這個版本沒有產生（沒有跑，或只發了資料版）。")
       return v.report
     },
     vote(reportId: string, body: { preferred: ReportVariant; note?: string }): void {
@@ -1328,10 +1334,17 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       const note = body.note.trim()
       if (note.length < 1 || note.length > 200) throw field("note", "更正說明要 1 到 200 個字。")
       const c = r.versions[r.current]!
+      const drop = body.drop_sections ?? []
+      const unknown = drop.filter((k) => k !== "title" && k !== "highlights" && !c.sections.some((s) => s.key === k))
+      if (unknown.length) throw field("drop_sections", `沒有這個段落：${unknown.join("、")}。`)
+      // 標題與重點換回規則寫的（第一版就是只有資料的版本）
+      const rules = r.versions[0]!
       const next: MarketReport = {
         ...c, version: r.versions.length + 1, edition: "correction", published_at: nowAt,
         corrections: [...c.corrections, { at: nowAt, note }],
-        sections: c.sections.filter((s) => !(body.drop_sections ?? []).includes(s.key)),
+        sections: c.sections.map((s) => (drop.includes(s.key) && s.origin === "ai" ? { ...s, dropped: { reasons: ["更正"] } } : s)),
+        ...(drop.includes("title") && c.title_origin === "ai" ? { title: rules.title, title_origin: "rules" as const } : {}),
+        ...(drop.includes("highlights") && c.highlights_origin === "ai" ? { highlights: rules.highlights, highlights_origin: "rules" as const } : {}),
       }
       r.versions.push(next)
       r.current = r.versions.length - 1

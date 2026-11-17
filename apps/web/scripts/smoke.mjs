@@ -3764,7 +3764,7 @@ await check("市場報告（桌面）：試跑期間管理員看得到「行情�
     if ((await p.evaluate(() => document.activeElement?.getAttribute("data-fn-ref"))) !== n) throw new Error("the back link did not return to the sentence")
   })
 })
-await check("市場報告（手機）：iPhone 15 與 320px 不橫向溢出；預設收合的段標題是 44px 的按鈕、打開才看得到內容；報告的按鈕可按範圍 ≥ 44px", async () => {
+await check("市場報告（手機）：iPhone 15 與 320px 不橫向溢出；預設收合的段標題是 44px 的按鈕、打開才看得到內容；報告的按鈕可按範圍 ≥ 44px；並排的出處號碼點哪個就是哪個；橫條圖的橫條不被名稱欄擠到最小", async () => {
   for (const [name, options] of [["iPhone 15", pw.devices["iPhone 15"]], ["320px", { viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }]]) {
     await fresh(options, async (p) => {
       await p.goto(base + "/market?tab=reports&kind=close&mreport=public", { waitUntil: "networkidle" })
@@ -3784,6 +3784,33 @@ await check("市場報告（手機）：iPhone 15 與 320px 不橫向溢出；�
       if (small.length) throw new Error(`${name}: small targets ${JSON.stringify(small.slice(0, 6))}`)
       const flow = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, vw: innerWidth }))
       if (flow.sw > flow.vw) throw new Error(`${name}: horizontal overflow ${JSON.stringify(flow)}`)
+      // 出處號碼：好幾個並排時，點每個號碼的中間拿到的是它自己（觸控放大的範圍不互相蓋住）
+      const wrong = await p.evaluate(() => {
+        const out = []
+        for (const sup of document.querySelectorAll("article[data-report-id] sup")) {
+          const cites = [...sup.querySelectorAll("a[data-fn-ref]")]
+          if (cites.length < 2) continue
+          sup.scrollIntoView({ block: "center" })
+          for (const a of cites) {
+            const r = a.getBoundingClientRect()
+            const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2)?.closest("a[data-fn-ref]")
+            if (hit !== a) out.push(`${a.dataset.fnRef}→${hit?.getAttribute("data-fn-ref") ?? "none"}`)
+          }
+        }
+        return out
+      })
+      if (wrong.length) throw new Error(`${name}: tapping a cite hits another one ${JSON.stringify(wrong.slice(0, 6))}`)
+      // 橫條圖：名稱欄依名稱的寬度，橫條那一欄至少佔圖寬的四分之一（以前名稱欄固定 10em，320px 時橫條只剩 40px）
+      const narrowBars = await p.evaluate(() =>
+        [...document.querySelectorAll("article[data-report-id] [data-chart-bars]")]
+          .map((ul) => {
+            const row = ul.querySelector("li > *")
+            const bar = row?.children[1]?.getBoundingClientRect().width ?? 0
+            return { w: Math.round(ul.getBoundingClientRect().width), bar: Math.round(bar) }
+          })
+          .filter((x) => x.w > 0 && x.bar < x.w * 0.25),
+      )
+      if (narrowBars.length) throw new Error(`${name}: bar track too narrow ${JSON.stringify(narrowBars)}`)
     })
   }
 })
