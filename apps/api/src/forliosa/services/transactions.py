@@ -13,7 +13,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import delete as sql_delete
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.api.errors import ApiError, not_found, unprocessable
@@ -777,3 +777,120 @@ def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: Ma
     sharing.purge_trade_threads(db, user.id, feed_keys)  # their group feed items (and comments) go with them
     db.commit()
     return HoldingDeleted(account.id, symbol, len(rows), paused, len(plans) - paused)
+
+
+# -- 清除所有持倉: every record of one account, or of every account (產品負責人 2026-11-17) ------------------------
+TRADE_TYPES = frozenset({TxnType.BUY, TxnType.SELL})
+DIVIDEND_TYPES = frozenset({TxnType.CASH_DIVIDEND, TxnType.STOCK_DIVIDEND})
+
+
+@dataclass
+class RecordCount:
+    records: int = 0  # every type: buys, sells, dividends (automatic ones included), splits, deposits…
+    trades: int = 0  # buys and sells
+    dividends: int = 0  # cash and stock dividends
+    symbols: int = 0  # distinct stocks in those records (the same stock in two accounts counts once)
+    plans_running: int = 0  # 定期定額 with a debit ahead (``_running``)
+
+
+@dataclass
+class RecordCounts:
+    total: RecordCount
+    accounts: list[tuple[str, RecordCount]]  # every account of the user, in the order of ``GET /accounts``
+
+
+def record_counts(db: Session, user: User) -> RecordCounts:
+    """What 清除所有持倉 would delete, per account and in total (``GET /portfolio/records``): one grouped count over
+    the user's transactions, and the 定期定額 still running (the same test as ``delete_holding``)."""
+    account_ids = list(db.scalars(select(BrokerAccount.id).where(BrokerAccount.user_id == user.id)
+                                  .order_by(BrokerAccount.created_at, BrokerAccount.id)))
+    per: dict[str, RecordCount] = {a: RecordCount() for a in account_ids}
+    symbols: dict[str, set[str]] = {a: set() for a in account_ids}
+    rows = db.execute(select(Transaction.account_id, Transaction.type, Transaction.symbol, func.count())
+                      .where(Transaction.user_id == user.id)
+                      .group_by(Transaction.account_id, Transaction.type, Transaction.symbol))
+    for account_id, kind, symbol, n in rows:
+        c = per.get(account_id)
+        if c is None:
+            continue
+        c.records += n
+        c.trades += n if kind in TRADE_TYPES else 0
+        c.dividends += n if kind in DIVIDEND_TYPES else 0
+        if symbol:
+            symbols[account_id].add(symbol)
+    today = today_taipei()
+    for p in db.scalars(select(RecurringPlan).where(RecurringPlan.user_id == user.id)):
+        if p.account_id in per and _running(p, today):
+            per[p.account_id].plans_running += 1
+    total = RecordCount()
+    for a in account_ids:
+        c = per[a]
+        c.symbols = len(symbols[a])
+        total.records += c.records
+        total.trades += c.trades
+        total.dividends += c.dividends
+        total.plans_running += c.plans_running
+    total.symbols = len(set().union(*symbols.values())) if symbols else 0
+    return RecordCounts(total, [(a, per[a]) for a in account_ids])
+
+
+@dataclass
+class RecordsCleared:
+    account_id: str | None  # None: every account
+    deleted: int
+    symbols: int
+    plans_paused: int
+    plans_running: int
+
+
+def clear_records(db: Session, user: User, account_id: str | None, pause_plans: bool = False) -> RecordsCleared:
+    """清除所有持倉: delete every record of one account (``account_id``) or of every account of the user (None), in one
+    transaction — buys, sells, dividends (automatic ones included), splits, capital reductions and the cash rows
+    (deposits, fees…), whether or not they carry a symbol. Like ``delete_holding`` for each stock, and nothing is
+    booked: the accounts stay, empty, as if nothing had ever been recorded in them.
+
+    * The same rules as ``delete_holding``: no ledger check (books that were already inconsistent are what this is
+      for); the automatic-dividend skips of those accounts go too (recorded again later, the dividends are booked
+      afresh), and with no row left the sync has nothing to book from, so no automatic dividend comes back (no
+      ``after_user_change`` needed); group feed items and their comments and reactions go with the trades
+      (``sharing.purge_trade_threads_bulk``: one query, not one per feed item); 定期定額 in the scope are only paused
+      with ``pause_plans`` (``active = false``, never deleted), otherwise ``plans_running`` says how many still run.
+    * Kept: the accounts themselves, the watchlist, groups and share settings, delegations, AI conversations,
+      preferences, other users. 404 ``not_found`` when the account is not the user's; 404 ``no_records`` when the
+      scope holds no record (already cleared in another tab or device). The pause still happens then: the records
+      the user asked to clear are gone either way, and the plans they asked to pause should not keep proposing
+      drafts — so ``pause_plans`` is honoured and committed before the 404, whose error carries ``plans_paused``
+      and ``plans_running`` like the 200.
+    """
+    if account_id is None:
+        ids = list(db.scalars(select(BrokerAccount.id).where(BrokerAccount.user_id == user.id)))
+    else:
+        ids = [_get_account(db, user, account_id).id]
+    auto_dividends.lock_accounts(db, ids)
+    in_scope = (Transaction.user_id == user.id, Transaction.account_id.in_(ids))
+    # only the columns the counts and the feed keys need (an account can hold thousands of rows)
+    rows = db.execute(select(Transaction.trade_date, Transaction.symbol, Transaction.type, Transaction.source)
+                      .where(*in_scope)).all() if ids else []
+    today = today_taipei()
+    plans = [p for p in db.scalars(select(RecurringPlan).where(
+        RecurringPlan.user_id == user.id, RecurringPlan.account_id.in_(ids))) if _running(p, today)] if ids else []
+    paused = 0
+    if pause_plans:
+        for p in plans:
+            p.active = False
+            p.updated_at = now_utc()
+            paused += 1
+    if not rows:
+        if paused:
+            db.commit()
+        raise ApiError(404, "no_records", "這個帳戶沒有任何紀錄" if account_id else "沒有任何紀錄",
+                       extra={"plans_paused": paused, "plans_running": len(plans) - paused})
+    feed_keys = sharing.trade_keys(rows)
+    db.execute(sql_delete(Transaction).where(*in_scope))  # pending group pushes go with them (ON DELETE CASCADE)
+    db.execute(sql_delete(AutoDividendSkip).where(AutoDividendSkip.user_id == user.id,
+                                                  AutoDividendSkip.account_id.in_(ids)))
+    db.flush()
+    sharing.purge_trade_threads_bulk(db, user.id, feed_keys)
+    db.commit()
+    return RecordsCleared(account_id, len(rows), len({r.symbol for r in rows if r.symbol}), paused,
+                          len(plans) - paused)

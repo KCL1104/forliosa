@@ -67,7 +67,7 @@ import type {
 } from "./types"
 import type { AdminGroupPass, DailyReport, MyGroupPass } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
-import type { HoldingDeleted, StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
+import type { HoldingDeleted, RecordCounts, RecordsCleared, StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
 import type {
   AdminReportsOverview,
   AdminTrial,
@@ -203,6 +203,12 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     deleteTransactionBatch: (batchId) => request<{ batch_id: string; deleted: number }>("DELETE", `/transactions/batches/${enc(batchId)}`),
     deleteHolding: (accountId, symbol, opts) =>
       request<HoldingDeleted>("DELETE", `/accounts/${enc(accountId)}/holdings/${enc(symbol)}`, { query: { pause_plans: opts?.pausePlans ? "true" : undefined } }),
+    getRecordCounts: () => request<RecordCounts>("GET", "/portfolio/records"),
+    // 範圍一定寫清楚：一個帳戶（account_id）或全部帳戶（all_accounts=true）；兩個都沒有時後端回 422，不會全部清掉
+    clearRecords: (accountId, opts) =>
+      request<RecordsCleared>("DELETE", "/portfolio/records", {
+        query: { ...(accountId === null ? { all_accounts: "true" } : { account_id: accountId }), pause_plans: opts?.pausePlans ? "true" : undefined },
+      }),
 
     getPortfolioSummary: (accountId) =>
       request<PortfolioSummary>("GET", "/portfolio/summary", { query: { account_id: accountId } }),

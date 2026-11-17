@@ -3715,3 +3715,35 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **資料來源頁**：`/meta/attributions` 的 `yahoo-history.used_for` 多「記一筆和匯入對帳單時，舊日期的參考收盤」；前端授權條款那一句同步。
 - **測試**：`tests/api/test_day_close.py`（關著不讀、開著給參考價、官方優先、刪掉之後沒有、0050 分割乘回去、美股照舊）、`tests/api/test_imports.py`
   （參考價的訊息、關著不核對、官方優先、前一個交易日的參考價、0050 分割前後與 2024 年的參考價四捨五入到分）、`tests/api/test_yahoo_reference_guard.py`。
+
+
+## 2026-11-17 清除所有持倉（`GET`／`DELETE /portfolio/records`；`services.transactions.record_counts`／`clear_records`）
+
+產品負責人：「也要有清除所有持倉的功能」（刪除這檔做好之後）。一個帳戶或全部帳戶整個清空、重新記。
+
+- **範圍不會是預設**：`DELETE` 要 `account_id`（一個帳戶，`get_owned_account` 檢查）或 `all_accounts=true`（使用者的每一個帳戶）二選一，
+  兩個都沒有或兩個都有 → 422 `scope_required`。光是 `DELETE /portfolio/records` 不會全部清掉。
+- **刪什麼**：範圍裡 `user_id` 對上的每一列 `transactions`，不分 `type`、`source`、有沒有 `symbol`（存提款、沒有代號的手續費也刪：清完的帳戶
+  和剛建立的一樣）。一列都沒有 → 404 `no_records`（一個帳戶「這個帳戶沒有任何紀錄」、全部「沒有任何紀錄」），和刪除這檔一樣前端當成已經清掉。
+  `no_records` 時 `pause_plans=true` **照樣暫停**範圍裡還在進行的計畫、先 commit 再回 404，錯誤物件帶 `plans_paused`、`plans_running`
+  （`ApiError(extra=…)`）：別的分頁沒勾暫停就清了、這裡勾著再按一次時，使用者要的暫停不會被默默丟掉
+  （`test_nothing_left_to_clear_still_pauses_the_plans_when_asked`）。刪除這檔的 `no_records` 沒有這樣做（範圍是一檔，沒改）。
+  一個交易：PostgreSQL 先鎖範圍裡的帳戶列（`auto_dividends.lock_accounts`），再整批 `DELETE`（只讀日期、代號、類型、來源四欄算筆數與群組動態的鍵，
+  不載入整列）；待送的群組推播跟著交易 `ON DELETE CASCADE`。
+- **和刪除這檔同一套規則**：不先重播帳本（`test_books_that_were_already_inconsistent_can_be_cleared`）；範圍裡帳戶的 `auto_dividend_skips`
+  全部刪；不需要 `after_user_change`——帳戶裡一列都不剩，同步沒有東西可以補（每天的 `sync_all_users` 也一樣，測試驗證 `changed is False`）。
+- **群組動態**：`sharing.purge_trade_threads_bulk`——和 `purge_trade_threads` 同一個規則（沒有交易撐著的動態項目連同留言、表情刪掉），但先用一個
+  查詢拿到使用者剩下的、還撐著動態的（日期, 代號, 買或賣），再一批 500 個刪留言與表情，不是一個項目一個 count。只清一個帳戶時，另一個帳戶同一天
+  買同一檔的動態項目留著（`test_group_feed_threads_go_unless_another_account_backs_them`）。
+- **定期定額**：範圍裡（不分代號）還在進行的計畫（和刪除這檔同一個 `_running`：`active`、結束日沒過、`next_debit` 找得到下一次）只在
+  `pause_plans=true` 時 `active=false`（不刪）；沒暫停的數在 `plans_running`。範圍外的帳戶的計畫不動。
+- **`GET /portfolio/records`**：一個 `GROUP BY (account_id, type, symbol)` 的計數＋計畫，給確認框的範圍選項與「會刪除」用；每個帳戶都列（沒有紀錄
+  的也列，筆數 0），加總的 `symbols` 是不同代號的數量（不同帳戶的同一檔算一次）。不在 `VIEW_AS_READ_PATHS`：查看別人的資產時
+  403 `view_as_not_allowed`；`DELETE` 一樣被中介層擋成 403 `read_only`。
+- 回應 `RecordsCleared`：`{account_id（null＝全部）, deleted, symbols, plans_paused, plans_running}`。沒有 migration。
+- 測試：`tests/api/test_clear_records.py`（一個帳戶只清那個帳戶、存提款也算、帳戶與觀察清單留著；全部帳戶；範圍沒寫或兩個都寫是 422；
+  別的使用者不動；每個帳戶的筆數；唯讀 403；定期定額只在範圍裡、只在要求時暫停，暫停後計畫內容不變；結束日在下一次扣款日之前的計畫不算；
+  自動股利不會回來、略過紀錄清掉、之後重新記照常入帳；對不起來的帳可以清；群組動態的留言與表情；`no_records` 時要求的暫停照樣做）。
+- 前端（審查後）：確認框的範圍第一次讀到筆數時定下來，筆數重抓不會讓它變成「全部帳戶」或換成沒選的帳戶（`useRecordCounts` 也關掉
+  `refetchOnReconnect`）；閘道回的非 JSON 5xx（`http_<status>`）和連不上一樣當成「不確定有沒有清除」，不寫「紀錄都還在」。
+

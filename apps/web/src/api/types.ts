@@ -472,6 +472,35 @@ export interface HoldingDeleted {
   plans_running: number
 }
 
+/**
+ * `GET /portfolio/records`：清除所有持倉的確認框用的筆數（全部帳戶加總，和每個帳戶各自；產品負責人 2026-11-17）。
+ * `plans_running`：還在進行的定期定額（有下一次扣款日；和 `planStatus(...) === "active"` 同一個判斷）
+ */
+export interface RecordCount {
+  /** 所有類型：買賣、股利（含自動入帳的）、分割、減資、存提款… */
+  records: number
+  trades: number
+  dividends: number
+  /** 紀錄裡有幾檔股票（不同帳戶的同一檔算一檔） */
+  symbols: number
+  plans_running: number
+}
+export interface RecordCounts extends RecordCount {
+  /** 每個帳戶（和 `GET /accounts` 同一個順序，沒有紀錄的帳戶也列） */
+  accounts: (RecordCount & { account_id: string })[]
+}
+
+/** `DELETE /portfolio/records`：一個帳戶或全部帳戶的每一筆紀錄都刪掉（清除所有持倉；帳戶留著） */
+export interface RecordsCleared {
+  /** null：全部帳戶 */
+  account_id: string | null
+  deleted: number
+  symbols: number
+  plans_paused: number
+  /** 範圍裡還在進行、沒有暫停的定期定額：下次扣款日仍會提出草稿 */
+  plans_running: number
+}
+
 /** 422 `batch_rejected` 的每一列 */
 export interface BatchRejectedRow {
   index: number | null
@@ -2561,6 +2590,14 @@ export interface ForliosaApi {
    * （已經在別處刪掉了）；查看別人的資產時 403 `read_only`
    */
   deleteHolding(accountId: string, symbol: string, opts?: { pausePlans?: boolean }): Promise<HoldingDeleted>
+  /** `GET /portfolio/records`：每個帳戶有幾筆紀錄（清除所有持倉的確認框）；查看別人的資產時 403 `view_as_not_allowed` */
+  getRecordCounts(): Promise<RecordCounts>
+  /**
+   * `DELETE /portfolio/records`：清除所有持倉——`accountId` 這個帳戶，或 `null` 全部帳戶的每一筆紀錄（不記成賣出、不能復原；帳戶留著）。
+   * `pausePlans`：範圍裡的定期定額一起暫停。帳戶不是自己的 404 `not_found`；沒有任何紀錄 404 `no_records`（已經在別處清掉了；
+   * 要求的暫停照樣做，`extra` 帶 `plans_paused`、`plans_running`）；查看別人的資產時 403 `read_only`
+   */
+  clearRecords(accountId: string | null, opts?: { pausePlans?: boolean }): Promise<RecordsCleared>
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>

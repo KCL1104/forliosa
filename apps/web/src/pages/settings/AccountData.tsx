@@ -1,9 +1,10 @@
 import { useMutation } from "@tanstack/react-query"
 import { useId, useState } from "react"
 import { toast } from "sonner"
-import { api, appToday } from "@/api"
+import { api } from "@/api"
 import { ACCOUNT_DELETE_CONFIRMATION, ApiError } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
+import { useUi } from "@/app/ui-store"
 import { FieldError } from "@/components/form-field"
 import { Section } from "@/components/section"
 import { textAction } from "@/components/text-action"
@@ -12,47 +13,20 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { hardNavigate } from "@/lib/hard-nav"
 import { clearLocalUserData } from "@/lib/local-data"
-import { retryText } from "@/pages/discussions/labels"
 import { LegalLinks } from "@/pages/legal/LegalLinks"
-
-/** 把匯出的資料存成檔案（`forliosa-export-YYYYMMDD.json`）：在瀏覽器裡做一個暫時的下載連結按下去 */
-function saveAsFile(data: unknown, filename: string) {
-  const url = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: "application/json" }))
-  const a = document.createElement("a")
-  a.href = url
-  a.download = filename
-  document.body.appendChild(a)
-  a.click()
-  a.remove()
-  // 下載開始之後再釋放（馬上釋放的話有些瀏覽器會存到空檔）
-  window.setTimeout(() => URL.revokeObjectURL(url), 10_000)
-}
-
-function exportErrorText(err: unknown): string {
-  if (!(err instanceof ApiError)) return "沒有匯出成功，請檢查網路後再試一次。"
-  if (err.code === "rate_limited") {
-    const seconds = typeof err.extra.retry_after_seconds === "number" ? err.extra.retry_after_seconds : null
-    return seconds === null ? "匯出太頻繁，請稍後再試。" : `匯出太頻繁，${retryText(seconds)}可以再試。`
-  }
-  if (err.status === 401) return "登入已過期，請重新登入後再試一次。"
-  return err.message
-}
+import { exportErrorText, useExportMe } from "./export-me"
 
 /**
- * 設定頁最下面的「帳號與資料」：匯出我的資料、服務條款與隱私權政策、刪除帳號。
+ * 設定頁最下面的「帳號與資料」：匯出我的資料、服務條款與隱私權政策、清除所有持倉、刪除帳號。
  * 列的樣子和設定頁其他區塊相同（標題＋一句說明在左、動作在右）；這裡的動作都是外框按鈕——
- * 匯出只是下載一個檔，刪除要到對話框裡輸入一句話才會真的執行。查看別人的資產時不出現（這些是自己帳號的事）。
+ * 匯出只是下載一個檔，清除與刪除要到對話框裡輸入一句話才會真的執行。查看別人的資產時不出現（這些是自己帳號的事）。
+ * 清除所有持倉（產品負責人 2026-11-17）的確認框掛在 AppShell（`ClearRecordsHost`）：帳本的「自訂」也打得開。
  */
 export function AccountData() {
   const readOnly = useReadOnly()
   const [deleting, setDeleting] = useState(false)
-  const exportMe = useMutation({
-    mutationFn: () => api.exportMe(),
-    onSuccess: (data) => {
-      saveAsFile(data, `forliosa-export-${appToday().replaceAll("-", "")}.json`)
-      toast.success("已下載匯出檔")
-    },
-  })
+  const openClear = useUi((s) => s.openClearRecords)
+  const exportMe = useExportMe(() => toast.success("已下載匯出檔"))
   if (readOnly) return null
   return (
     <Section id="account" title="帳號與資料" titleId="set-account" bodyClassName="pt-0" className="scroll-mt-20">
@@ -74,6 +48,23 @@ export function AccountData() {
           <p className="flex shrink-0 flex-wrap gap-x-5">
             <LegalLinks className={textAction} />
           </p>
+        </div>
+        <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
+          <div className="min-w-0">
+            <p className="font-medium">清除所有持倉</p>
+            <p className="mt-0.5 text-base text-ink">刪掉一個帳戶或全部帳戶的每一筆紀錄，帳戶留著，可以重新記。</p>
+          </div>
+          <Button
+            variant="outline"
+            className="shrink-0 self-start sm:self-auto"
+            onClick={(e) => {
+              // 剛按過「匯出」的通知還在的話先收掉：不要蓋在對話框上
+              toast.dismiss()
+              openClear(e.currentTarget)
+            }}
+          >
+            清除…
+          </Button>
         </div>
         <div className="flex flex-col gap-3 py-4 sm:flex-row sm:items-center sm:justify-between sm:gap-6">
           <div className="min-w-0">

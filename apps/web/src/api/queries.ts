@@ -53,6 +53,8 @@ export const qk = {
   upcoming: (days: number) => ["portfolio", "upcoming", days] as const,
   // 放在 portfolio 底下：交易改了就跟著重新計算
   closed: (accountId?: string) => ["portfolio", "closed", accountId ?? "all"] as const,
+  /** 清除所有持倉的筆數：放在 portfolio 底下，記了、刪了紀錄就跟著重新數 */
+  recordCounts: ["portfolio", "records"] as const,
   positionHistory: (symbol: string) => ["portfolio", "position-history", symbol] as const,
   recurring: ["recurring"] as const,
   attributions: ["meta", "attributions"] as const,
@@ -233,6 +235,33 @@ export function useDeleteHolding() {
     onSuccess: (res) => {
       invalidate()
       if (res.plans_paused > 0) void qc.invalidateQueries({ queryKey: qk.recurring })
+    },
+  })
+}
+/**
+ * 清除所有持倉的確認框：每個帳戶有幾筆紀錄（打開時重新數，不拿舊的）。網路恢復時不自己重抓：確認框裡的範圍是使用者選的，
+ * 筆數在打字確認的中途變來變去沒有幫助（範圍本身不會跟著變，見 `ClearRecordsDialog`）
+ */
+export function useRecordCounts(enabled = true) {
+  return useQuery({ enabled, queryKey: qk.recordCounts, queryFn: () => api.getRecordCounts(), staleTime: 0, refetchOnReconnect: false })
+}
+/**
+ * 清除所有持倉：一個帳戶（`accountId`）或全部帳戶（`null`）的每一筆紀錄。和刪除這檔一樣重抓持股、總資產、紀錄與個股事件；
+ * 一起暫停了定期定額時，定期定額也重抓（本週事項在 portfolio 底下，已經跟著重抓）。404 `no_records`（別的分頁已經清掉了）
+ * 也一樣重抓：後端照樣做了要求的暫停（`extra.plans_paused`）
+ */
+export function useClearRecords() {
+  const qc = useQueryClient()
+  const invalidate = useInvalidatePortfolio()
+  const settle = (plansPaused: unknown) => {
+    invalidate()
+    if (typeof plansPaused === "number" && plansPaused > 0) void qc.invalidateQueries({ queryKey: qk.recurring })
+  }
+  return useMutation({
+    mutationFn: ({ accountId, pausePlans }: { accountId: string | null; pausePlans?: boolean }) => api.clearRecords(accountId, { pausePlans }),
+    onSuccess: (res) => settle(res.plans_paused),
+    onError: (err) => {
+      if (err instanceof ApiError && err.code === "no_records") settle(err.extra.plans_paused)
     },
   })
 }

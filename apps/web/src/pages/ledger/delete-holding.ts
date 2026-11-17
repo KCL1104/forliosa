@@ -2,16 +2,23 @@ import type { RecurringPlan, Transaction } from "@/api/types"
 import { formatNumber } from "@/lib/format"
 import { planStatus } from "@/lib/ledger-display"
 
-/** 「刪除這檔」確認框（`DeleteHoldingDialog`）用的小工具 */
+/** 「刪除這檔」確認框（`DeleteHoldingDialog`）用的小工具；「包括…」那一句清除所有持倉（`ClearRecordsDialog`）也用 */
 
 const TRADE_TYPES = new Set(["buy", "sell"])
 const DIVIDEND_TYPES = new Set(["cash_dividend", "stock_dividend"])
 
 /** 「包括 5 筆買賣、2 筆股利。」：只有一種時不寫（標題的筆數就是那一種） */
 export function recordBreakdown(rows: Pick<Transaction, "type">[]): string | null {
-  const trades = rows.filter((t) => TRADE_TYPES.has(t.type)).length
-  const dividends = rows.filter((t) => DIVIDEND_TYPES.has(t.type)).length
-  const other = rows.length - trades - dividends
+  return breakdownText({
+    records: rows.length,
+    trades: rows.filter((t) => TRADE_TYPES.has(t.type)).length,
+    dividends: rows.filter((t) => DIVIDEND_TYPES.has(t.type)).length,
+  })
+}
+
+/** 同一句，從筆數算（清除所有持倉用後端數好的 `GET /portfolio/records`） */
+export function breakdownText({ records, trades, dividends }: { records: number; trades: number; dividends: number }): string | null {
+  const other = records - trades - dividends
   const parts = [
     trades > 0 && `${formatNumber(trades)} 筆買賣`,
     dividends > 0 && `${formatNumber(dividends)} 筆股利`,

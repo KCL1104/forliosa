@@ -8,6 +8,7 @@ import {
   type Performance,
   type Preferences,
   type Quote,
+  type RecurringPlan,
   type Transaction,
   type User,
 } from "../types"
@@ -234,7 +235,6 @@ export interface MockOptions {
   history?: number
   /** 市場報告的情境（`?mreport=`，見 `mock/market-reports.ts`）；預設 trial（盲測中，只有站方管理員看得到） */
   reports?: MockReportsScenario
-
   /**
    * Yahoo 的歷史日線回補在不在（預設 true，和正式環境一樣）：在的話商用模式存檔開始以前的台股日期有「參考收盤」；
    * false 模擬關掉或整批刪掉（`history_backfill drop`），和以前一樣什麼都不寫
@@ -382,6 +382,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
 
   /** 示範的「今天」：平常是最後一個收盤日；`?market=open|pending` 是它的下一個交易日（本週事項從這一天起算） */
   const today = mockToday(options.market)
+  /** 還在進行的定期定額：和後端、前端的 planStatus 同一個判斷（啟用中、結束日沒過、還有下一次扣款日） */
+  const runningPlan = (p: RecurringPlan) => p.active && (!p.end_date || p.end_date >= today) && !!p.next_date
 
   // ── 討論串：時間從示範資料的「現在」起算，加上開啟後實際經過的時間（10 秒間隔、7 天冷卻都照真的時間） ──
   const clock = options.clock ?? Date.now
@@ -936,12 +938,47 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         if (gone.length === 0) throw new ApiError(404, "no_records", "這個帳戶沒有這一檔的紀錄")
         txns = txns.filter((t) => !(t.account_id === accountId && t.symbol === sym))
         for (const k of [...skips]) if (k.startsWith(`${accountId}|${sym}|`)) skips.delete(k)
-        // 還在進行：和後端、前端的 planStatus 同一個判斷（啟用中、結束日沒過、還有下一次扣款日）
-        const running = recurring.list(accountId).filter((p) => p.symbol === sym && p.active && (!p.end_date || p.end_date >= today) && p.next_date)
+        const running = recurring.list(accountId).filter((p) => p.symbol === sym && runningPlan(p))
         const pause = !!opts?.pausePlans
         if (pause) for (const p of running) recurring.update(p.id, { active: false })
         resync()
         return { account_id: accountId, symbol: sym, deleted: gone.length, plans_paused: pause ? running.length : 0, plans_running: pause ? 0 : running.length }
+      }),
+    // 清除所有持倉（和後端相同）：每個帳戶的筆數；還在進行的定期定額和 deleteHolding 同一個判斷
+    getRecordCounts: () =>
+      wait(() => {
+        const count = (list: Transaction[], plans: RecurringPlan[]) => ({
+          records: list.length,
+          trades: list.filter((t) => t.type === "buy" || t.type === "sell").length,
+          dividends: list.filter((t) => t.type === "cash_dividend" || t.type === "stock_dividend").length,
+          symbols: new Set(list.flatMap((t) => (t.symbol ? [t.symbol] : []))).size,
+          plans_running: plans.filter((p) => runningPlan(p)).length,
+        })
+        return {
+          ...count(txns.filter((t) => accounts.some((a) => a.id === t.account_id)), recurring.list()),
+          accounts: accounts.map((a) => ({ account_id: a.id, ...count(txns.filter((t) => t.account_id === a.id), recurring.list(a.id)) })),
+        }
+      }),
+    // 一個帳戶或全部帳戶的每一筆紀錄都刪掉（帳戶、觀察清單留著），略過紀錄跟著清掉；定期定額只在要求時暫停
+    clearRecords: (accountId, opts) =>
+      wait(() => {
+        if (accountId !== null && !accounts.some((a) => a.id === accountId)) throw new ApiError(404, "not_found", "找不到帳戶")
+        const inScope = (t: { account_id: string }) => (accountId === null ? accounts.some((a) => a.id === t.account_id) : t.account_id === accountId)
+        const gone = txns.filter(inScope)
+        const running = recurring.list(accountId ?? undefined).filter(runningPlan)
+        const pause = !!opts?.pausePlans
+        // 沒有紀錄可以清（別的分頁已經清掉）時，要求的暫停照樣做，404 裡帶暫停了幾個、還有幾個在進行
+        if (pause) for (const p of running) recurring.update(p.id, { active: false })
+        const plans = { plans_paused: pause ? running.length : 0, plans_running: pause ? 0 : running.length }
+        if (gone.length === 0) throw new ApiError(404, "no_records", accountId === null ? "沒有任何紀錄" : "這個帳戶沒有任何紀錄", plans)
+        txns = txns.filter((t) => !inScope(t))
+        for (const k of [...skips]) if (accountId === null || k.startsWith(`${accountId}|`)) skips.delete(k)
+        return {
+          account_id: accountId,
+          deleted: gone.length,
+          symbols: new Set(gone.flatMap((t) => (t.symbol ? [t.symbol] : []))).size,
+          ...plans,
+        }
       }),
 
     getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
@@ -1153,7 +1190,7 @@ export const VIEW_AS_READS = new Set<MethodName>([
 const WRITES = new Set<MethodName>([
   "deleteAiThreads",
   "createAccount", "updateAccount", "deleteAccount", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
-  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "deleteHolding", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
+  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "deleteHolding", "clearRecords", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
   "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
