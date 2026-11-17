@@ -192,7 +192,7 @@ describe("歷史短（正式存檔 2026/11/12 才開始）", { timeout: 20_000 }
     const region = await trend()
     expect(within(region).queryByRole("radiogroup")).toBeNull()
     expect(region.querySelectorAll('[data-point="close"]')).toHaveLength(3)
-    expect(region.textContent).toMatch(/績效從 2026\/11\/10 收盤開始算，之前沒有資料・目前 3 個收盤日/)
+    expect(region.textContent).toMatch(/績效從 2026\/11\/10 收盤開始算，之前沒有資料。目前 3 個收盤日/)
     // 上次選的 1 月撐不起來：畫全部（標題寫「11/10 起」）
     expect(within(region).getByText("11/10 起")).toBeInTheDocument()
   })
@@ -202,7 +202,7 @@ describe("歷史短（正式存檔 2026/11/12 才開始）", { timeout: 20_000 }
     renderApp("/?view=performance")
     await screen.findByText("最大回撤", undefined, T)
     const region = await trend()
-    expect(region.textContent).toMatch(/績效從 2026\/11\/10 收盤開始算，之前沒有資料・目前 3 個收盤日/)
+    expect(region.textContent).toMatch(/績效從 2026\/11\/10 收盤開始算，之前沒有資料。目前 3 個收盤日/)
     expect(screen.getAllByText(/績效從 2026\/11\/10 收盤開始算/)).toHaveLength(1)
     // 走勢沒有區間按鈕（不到 7 個收盤）：績效分段也沒有
     expect(screen.queryByRole("radiogroup")).toBeNull()

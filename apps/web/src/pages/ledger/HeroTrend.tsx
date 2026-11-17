@@ -131,12 +131,13 @@ export function HeroTrend({ view }: { view: LedgerView }) {
   const shortNote =
     state === "short" ? (
       <>
-        {clipNote?.split(/(?<=，)/).map((part) => (
+        {/* 句號跟著前一段（折行時留在行尾，不會有「・」掛在行尾或開頭） */}
+        {clipNote?.split(/(?<=，)/).map((part, i, parts) => (
           <span key={part} className="whitespace-nowrap">
             {part}
+            {i === parts.length - 1 && "。"}
           </span>
         ))}
-        {clipNote && "・"}
         <span className="whitespace-nowrap">目前 {series.length} 個收盤日</span>
       </>
     ) : null
