@@ -3924,12 +3924,19 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   （`auto_dividends.shared_events`），`lock_accounts` 會丟掉鎖之前讀的。
 - **新的寫入路徑照同一個做法**：`positions_import.commit`（匯入庫存，含以券商為準）與 `transactions.delete_holding`（刪除這檔）加上
   `@auto_dividends.shared_events`，和記一筆、修改、刪除、匯入對帳單（`create_batch`）、整批復原一樣：先 `lock_accounts`，之後每檔的公告只讀一次。
-  匯入庫存 5 檔（其中 2 檔以券商為準）原本會讀 25 次公告（檢查、嚴格重算、重新同步各讀一次），現在 5 次（測試的 SQLite 存檔上：SQL 54 → 24 句、取連線 12 → 2 次）。`clear_records`（清除所有持倉）
+  匯入庫存 5 檔（其中 2 檔以券商為準）原本會讀 25 次公告~~（檢查、嚴格重算、重新同步各讀一次）~~（算法見下方更正），現在 5 次（測試的 SQLite 存檔上：SQL 54 → 24 句、取連線 12 → 2 次）。`clear_records`（清除所有持倉）
   不重算股利、不讀公告，不用加。匯入對帳單的寫入本來就是 `create_batch`（合併後改由 `write_batch` 寫入，仍在 `create_batch` 的同一個範圍裡）。
   Yahoo 參考收盤只讀不寫；盲測投票只寫投票表，API 速度沒有快取報告。
 - **前端**：API 速度加的兩個查詢（`qk.upcomingRecurring`＝`["portfolio","upcoming",days,"recurring"]`、紀錄分頁筆數 `["transactions","count"]`）
   都在 `["portfolio"]`、`["transactions"]` 底下；刪除這檔、清除所有持倉（含 404 `no_records`）、匯入庫存、匯入對帳單、整批復原都用
   `useInvalidatePortfolio`，所以一起重讀。
 - 測試：`tests/test_api_speed.py`（先讀帳本再寫、每一種新的寫入之後 holdings／summary／upcoming／recurring／counts／performance 都是新的；
-  匯入庫存每檔公告只讀一次；刪除這檔不重讀公告）、`test_yahoo_reference_guard.py`（之後才存的回補日馬上是參考收盤，帳本數字不動）、
+  匯入庫存每檔公告只讀一次；~~刪除這檔不重讀公告~~ 刪除這檔最多讀一次，見下方更正）、`test_yahoo_reference_guard.py`（之後才存的回補日馬上是參考收盤，帳本數字不動）、
   `test_market_report_trial_open.py`（投票、改票之後馬上讀得到，投票的人的帳本不動）、前端 `src/api/__tests__/write-invalidation.test.tsx`。
+- **更正（合併後審查，2026-11-17）**：
+  - 25 次的算法：檢查（`check_batch`，它自己有 `shared_events`）5 次；嚴格重算（`validate_ledger`）和重新同步（`after_user_change`）
+    在沒有共用範圍時每檔各讀兩次，各 10 次；合計 25（拿掉 `positions_import.commit` 的 decorator 實測）。不是「各讀一次」。
+  - 刪除這檔的 `@auto_dividends.shared_events` 只是和其他寫入一致的寫法，省不到讀取：它只重新同步一個帳戶的一檔一次，
+    `after_user_change` 自己的快取就讓那檔最多讀一次（實測 0 次：那檔的紀錄都刪了，沒有東西可以算股利）。測試改名為
+    `test_deleting_a_holding_reads_its_stocks_notices_at_most_once`，只檢查最多讀一次、不讀別檔；拿掉這個 decorator 不會讓任何測試失敗。
+    會因為拿掉 decorator 而失敗的只有匯入庫存的 `test_a_positions_import_reads_each_stocks_notices_once`（25 次，不是 5 次）。

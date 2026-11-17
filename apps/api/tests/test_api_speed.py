@@ -638,9 +638,13 @@ def test_a_positions_import_reads_each_stocks_notices_once(client, archive, monk
     assert sorted(asked) == sorted(TW[:5]), asked
 
 
-def test_deleting_a_holding_reads_no_notice_twice(client, archive, monkeypatch):
+def test_deleting_a_holding_reads_its_stocks_notices_at_most_once(client, archive, monkeypatch):
+    """刪除這檔 re-syncs one stock of one account once, under ``after_user_change``'s own cache: at most one read of
+    that stock's notices, and none of the account's other stocks. That holds with or without its ``shared_events``
+    decorator (kept for a consistent pattern), so this test bounds the reads; it does not detect the decorator — only
+    ``test_a_positions_import_reads_each_stocks_notices_once`` fails when 匯入庫存's is removed (25 reads, not 5)."""
     account = client.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD"}).json()["id"]
     _buy(client, account, TW[:3])
     asked = _notice_reads(archive, monkeypatch)
     assert client.delete(f"{API}/accounts/{account}/holdings/{TW[0]}").status_code == 200
-    assert set(asked) <= {TW[0]} and len(asked) == len(set(asked)), asked
+    assert set(asked) <= {TW[0]} and len(asked) <= 1, asked

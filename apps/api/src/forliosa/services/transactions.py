@@ -797,7 +797,9 @@ def _running(plan: RecurringPlan, today: date) -> bool:
     return recurring.next_debit(plan, today) is not None
 
 
-# like every other write of the books: the request's ex-dividend notices are read after the lock, once per stock
+# Decorated like every other write of the books, for one consistent pattern only: its single re-sync of one stock
+# reads that stock's notices at most once with or without it (none, in fact: no row of the stock is left to book a
+# dividend from). No test can tell it is here; 匯入庫存's (``positions_import.commit``) is the one that saves reads.
 @auto_dividends.shared_events
 def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: MarketData,
                    pause_plans: bool = False) -> HoldingDeleted:
