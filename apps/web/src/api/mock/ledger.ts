@@ -170,7 +170,11 @@ function quantityOn(txns: Transaction[], symbol: string, day: string): number {
 // ── 持股與損益（移動平均成本） ────────────────────────────
 interface Position {
   symbol: string
-  accounts: Set<string>
+  /**
+   * 每個帳戶目前的股數：`account_ids` 只列還持有的帳戶（和後端 `open_positions` 相同；一個帳戶賣光了就不算，
+   * 「刪除這檔」的預設帳戶靠它）
+   */
+  held: Map<string, number>
   qty: number
   cost: number // 原幣，含買進手續費
   costTwd: number
@@ -203,10 +207,11 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
     const fx = fxFor(x.currency, x.trade_date)
     let pos = positions.get(x.symbol)
     if (!pos) {
-      pos = { symbol: x.symbol, accounts: new Set(), qty: 0, cost: 0, costTwd: 0, fee: 0 }
+      pos = { symbol: x.symbol, held: new Map(), qty: 0, cost: 0, costTwd: 0, fee: 0 }
       positions.set(x.symbol, pos)
     }
-    pos.accounts.add(x.account_id)
+    const before = pos.qty
+    const mine = pos.held.get(x.account_id) ?? 0
     const q = x.quantity ?? 0
     switch (x.type) {
       case "buy":
@@ -244,9 +249,17 @@ export function replay(txns: Transaction[], until = MOCK_TODAY, accountId?: stri
         dividendsTwd += (x.amount - x.tax - x.health_insurance) * fx
         break
     }
+    // 這個帳戶的股數跟著變：買進、配股加上去，賣出扣掉；分割、減資照整檔的比例
+    if (x.type === "buy" || x.type === "stock_dividend") pos.held.set(x.account_id, mine + (pos.qty - before))
+    else if (x.type === "sell") pos.held.set(x.account_id, Math.max(mine - q, 0))
+    else if (x.type === "split" || x.type === "capital_reduction") pos.held.set(x.account_id, before > 0 ? mine * (pos.qty / before) : mine)
+    else pos.held.set(x.account_id, mine)
   }
   return { positions, realizedTwd, realizedByYear, realizedEvents, dividendsTwd }
 }
+
+/** 還持有這一檔的帳戶（第一次記這一檔的順序） */
+const holdingAccounts = (pos: Position) => [...pos.held].filter(([, q]) => q > 0.0001).map(([id]) => id)
 
 const r2 = (n: number) => Math.round(n * 100) / 100
 const r4 = (n: number) => Math.round(n * 10000) / 10000
@@ -267,7 +280,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
         symbol: spec.symbol, code: spec.code, name: spec.name, market: spec.market, type: spec.type,
         currency: spec.currency, industry: spec.industry, quantity: pos.qty, avg_cost: r4(pos.cost / pos.qty),
         cost_basis: r2(pos.costTwd), fees_in_cost: r2(pos.fee), price: null, prev_close: null, price_date: null, market_value: r2(pos.costTwd), day_change: 0,
-        day_change_pct: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0, weight: 0, account_ids: [...pos.accounts], is_demo: false,
+        day_change_pct: 0, unrealized_pnl: 0, unrealized_pnl_pct: 0, weight: 0, account_ids: holdingAccounts(pos), is_demo: false,
       })
       continue
     }
@@ -290,7 +303,7 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
       unrealized_pnl: r2(mv - pos.costTwd),
       unrealized_pnl_pct: r4(mv / pos.costTwd - 1),
       weight: 0,
-      account_ids: [...pos.accounts],
+      account_ids: holdingAccounts(pos),
       is_demo: !commercial,
     })
   }

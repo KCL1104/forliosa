@@ -47,7 +47,8 @@ export const LOT_AVG_HINT = "均價：（股數 × 成交價＋這一筆的手�
  * 與價格下面一行的「均價」（含這一筆的手續費，產品負責人 2026-11-17；`buyAverage`）。金額照舊是成交金額（股數 × 價格）。
  * 配過股、分割過或減資過的那一檔不列漲跌（股價被稀釋，直接比會錯），最下面寫一句。
  * 每一筆的 ⋯：修改（打開完整表單，日期、股數、價格都能改）、刪除（先確認）。查看別人的資產時只能看。
- * `actions`：最下面的「再加一筆買進」「減少持股」（持倉表展開時有；個股頁的標題列已經有這兩顆，不重複）。
+ * `actions`：最下面的「再加一筆買進」「減少持股」（持倉表展開時有；個股頁的標題列已經有這兩顆，不重複），
+ * 和那一列最後、淡墨的「刪除這檔」（整檔的紀錄都刪掉，確認框見 `DeleteHoldingDialog`；手機的持倉沒有「⋯」，從這裡刪）。
  * 「只記持股」的帳戶沒有逐筆交易：那個帳戶目前的持股（快照）是一列「持股」，日期是快照的日期、價格是均價；
  * ⋯ 只有「修改」（打開那個帳戶的持股輸入）。
  * 股利不列在這裡（自動入帳，在「紀錄」的股利裡）。
@@ -79,6 +80,7 @@ export function SymbolRecords({
   const accounts = useAccounts()
   const readOnly = useReadOnly()
   const openTradeForm = useUi((s) => s.openTradeForm)
+  const openDeleteHolding = useUi((s) => s.openDeleteHolding)
   const reduce = useStartReduce()
   const remove = useDeleteTransaction()
   // 刪除的確認框放在清單這一層（不放在列裡）：那一列刪掉時確認框不會跟著卸載、關到一半
@@ -165,6 +167,16 @@ export function SymbolRecords({
             </Link>
           )}
           {diluted && entries.length > 0 && <span className="text-sm text-ink-2 @[43rem]:ml-auto">配過股或分割過，不列每一筆的漲跌。</span>}
+          {/* 最重的動作放最後、淡墨（不用紅色：紅色是「漲」）；寬的時候靠右，和上面每一筆的「⋯」同一邊 */}
+          {actions && !readOnly && all.length > 0 && (
+            <button
+              type="button"
+              className={cn(textAction, "text-ink-2 hover:text-ink", !(diluted && entries.length > 0) && "@[43rem]:ml-auto")}
+              onClick={() => openDeleteHolding(symbol)}
+            >
+              刪除這檔
+            </button>
+          )}
         </div>
       )}
       <AlertDialog open={deleting !== null} onOpenChange={(o) => !o && setDeleting(null)}>

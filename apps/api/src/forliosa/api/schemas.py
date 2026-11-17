@@ -481,6 +481,16 @@ class TransactionBatchDeleted(BaseModel):
     deleted: int
 
 
+class HoldingDeleted(BaseModel):
+    """``DELETE /accounts/{account_id}/holdings/{symbol}``: every record of one stock in one account deleted."""
+
+    account_id: str
+    symbol: str
+    deleted: int = Field(description="刪掉的紀錄筆數（買賣、股利含自動入帳的、分割、減資等，所有類型）")
+    plans_paused: int = Field(description="這一檔在這個帳戶的定期定額，這次暫停了幾個（pause_plans=true 時）")
+    plans_running: int = Field(description="還在進行的定期定額（沒有暫停）：下次扣款還會提出這一檔的草稿")
+
+
 # -- portfolio ----------------------------------------------------------------------------------
 class AllocationItem(BaseModel):
     key: str

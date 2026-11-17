@@ -12,6 +12,7 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,8 +30,8 @@ from forliosa.domain.fees import (
 from forliosa.domain.ledger import SECURITY_TYPES, CostMethod, LedgerError, LedgerTxn, TxnType, replay
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
-from forliosa.models import BrokerAccount, Transaction, User
-from forliosa.services import auto_dividends, sharing
+from forliosa.models import AutoDividendSkip, BrokerAccount, RecurringPlan, Transaction, User
+from forliosa.services import auto_dividends, recurring, sharing
 from forliosa.services.ledger_io import LedgerInput, instrument_ref, load_ledger_input, shares_held
 from forliosa.timeutil import now_utc, today_taipei
 
@@ -702,3 +703,77 @@ def delete_batch(db: Session, user: User, batch_id: str, md: MarketData) -> int:
     sharing.purge_trade_threads(db, user.id, feed_keys)
     db.commit()
     return len(rows)
+
+
+# -- a whole stock out of one account (產品負責人 2026-11-17：「還要有刪除股票的功能」) --------------------------------
+@dataclass
+class HoldingDeleted:
+    account_id: str
+    symbol: str
+    deleted: int  # records deleted: every type, the automatic dividends included
+    plans_paused: int  # 定期定額 of this stock in this account paused by this request (``pause_plans``)
+    plans_running: int  # those still running afterwards: they would offer this stock again at the next debit
+
+
+def holding_symbol(md: MarketData, text: str) -> str:
+    """The stored symbol ``text`` names, resolved the way ``GET /transactions?symbol=`` filters (2330 → 2330.TW), so
+    the records listed for a stock are exactly the ones its deletion removes."""
+    return md.resolve(text) or text.upper()
+
+
+def _running(plan: RecurringPlan, today: date) -> bool:
+    """Still has a debit ahead: active, not past its end date, and ``recurring.next_debit`` finds one (the
+    ``next_date`` of ``GET /recurring``). The web's ``planStatus(...) === "active"`` is the same test, so the
+    confirmation's 「同時暫停」 and the response's ``plans_running`` agree — a plan whose end date comes before its
+    next debit day offers nothing more and is not counted."""
+    if plan.end_date is not None and plan.end_date < today:
+        return False
+    return recurring.next_debit(plan, today) is not None
+
+
+def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: MarketData,
+                   pause_plans: bool = False) -> HoldingDeleted:
+    """Delete every record of ``symbol`` in one account: buys, sells, dividends (automatic ones included), splits,
+    capital reductions and any cash row tagged with the stock — what ``GET /transactions?account_id=&symbol=`` lists.
+    Unlike 全部賣出 nothing is booked: the stock is as if it had never been recorded there.
+
+    * No ledger check: the strict replay only checks a stock against its own rows (oversell, a stock dividend without
+      shares), so removing all of one stock's rows cannot make another one inconsistent — and books that were already
+      inconsistent (a wrong import) are exactly what this is for.
+    * The automatic-dividend skips of the stock in this account go with its records (they describe edits to those
+      rows; recorded again later, the dividends are booked afresh — as deleting the account does). With no row left
+      the sync has nothing to book the stock from, so no automatic dividend comes back.
+    * 定期定額 of the stock in this account are only paused with ``pause_plans`` (``active = false``, undone in 設定);
+      otherwise the response says how many still run. Other accounts, other stocks, the watchlist and other users are
+      not touched. 404 ``not_found`` when the account is not the user's, 404 ``no_records`` when it holds no record
+      of the stock.
+    """
+    account = _get_account(db, user, account_id)
+    auto_dividends.lock_accounts(db, [account.id])
+    rows = list(db.scalars(select(Transaction).where(
+        Transaction.user_id == user.id, Transaction.account_id == account.id, Transaction.symbol == symbol)))
+    if not rows:
+        # its own code (not ``not_found``): the web reads it as "already gone" (deleted in another tab or device) and
+        # refreshes, while 「找不到帳戶」 and an unknown route stay errors
+        raise ApiError(404, "no_records", "這個帳戶沒有這一檔的紀錄")
+    today = today_taipei()
+    plans = [p for p in db.scalars(select(RecurringPlan).where(
+        RecurringPlan.user_id == user.id, RecurringPlan.account_id == account.id, RecurringPlan.symbol == symbol))
+        if _running(p, today)]
+    feed_keys = sharing.trade_keys(rows)
+    for t in rows:
+        db.delete(t)
+    db.execute(sql_delete(AutoDividendSkip).where(
+        AutoDividendSkip.user_id == user.id, AutoDividendSkip.account_id == account.id,
+        AutoDividendSkip.symbol == symbol))
+    paused = 0
+    if pause_plans:
+        for p in plans:
+            p.active = False
+            p.updated_at = now_utc()
+            paused += 1
+    auto_dividends.after_user_change(db, user, md, [(account.id, symbol)])
+    db.flush()
+    sharing.purge_trade_threads(db, user.id, feed_keys)  # their group feed items (and comments) go with them
+    db.commit()
+    return HoldingDeleted(account.id, symbol, len(rows), paused, len(plans) - paused)

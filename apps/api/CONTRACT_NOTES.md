@@ -3604,3 +3604,33 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **測試**：`tests/ai/test_plans.py`（免費帳號用預設值：深度搜尋 200、算 3 題，匯入打開，收盤簡報 403；`AI_FREE_DEEP_SEARCH=false` 時 403）、
   `tests/ai/test_quota_defaults.py`、`tests/api/test_imports.py` 的預設值；前端 `apps/web/src/pages/transactions/import/__tests__/entry.test.tsx`
   （免費帳號 `statement_import` true 時「＋」是記一筆／匯入對帳單的選單，false 或沒有欄位時直接記一筆；`deep_search_cost` 有數字就有切換鈕）。
+
+
+## 2026-11-17 刪除這檔（`DELETE /accounts/{account_id}/holdings/{symbol}`；`services.transactions.delete_holding`）
+
+產品負責人：「還要有刪除股票的功能」。持倉的一檔記錯、匯入錯時整檔刪掉；「全部賣出」會記一筆賣出（已實現損益留著），這個什麼都不記。
+
+- **刪什麼**：`user_id`、`account_id`、`symbol` 都對上的每一列 `transactions`，不分 `type` 與 `source`（買賣、`auto`／`auto_edited` 的股利、
+  分割、減資、標了代號的現金類）。`symbol` 用 `holding_symbol`（`md.resolve(text) or text.upper()`）解析，和 `GET /transactions?symbol=` 的篩選
+  同一個寫法，所以展開、「紀錄」看得到的就是會刪的（`Transaction.symbol == symbol` 精確比對：`2330R.TW`、沒有後綴的 `2330` 不會跟著刪）。
+  一列都沒有 → 404 `no_records`「這個帳戶沒有這一檔的紀錄」（自己的代碼，前端當成已經在別處刪掉：重抓、關掉）；帳戶不是自己的（或查看範圍外）
+  → 404 `not_found`「找不到帳戶」；路徑不存在的 404 也是 `not_found`，所以前端不會把它們當成「已經刪掉」。
+- **不重播帳本**：`Ledger` 的嚴格檢查只有「賣超」與「沒有持股的配股」，都只看同一個（帳戶, 代號）的部位；整檔拿掉不會讓別的部位出錯。
+  帳本原本就對不起來（匯入錯、或舊資料）時單筆的新增／修改／刪除都會 422，這個端點正是清掉它的路，所以不能先 `validate_ledger`。
+  測試 `test_books_that_were_already_inconsistent_can_be_cleaned`。
+- **自動股利**：`auto_dividend_skips` 裡這個（帳戶, 代號）的列一起刪（它們記的是對這些列的修改與刪除；和刪除帳戶一樣），之後重新記這一檔時股利照規則
+  重新入帳。`after_user_change` 照常呼叫，但 `_Scope.symbols` 只取還有交易的代號，所以沒有紀錄的代號什麼都不會補；每天的 `sync_all_users` 也一樣。
+- **定期定額**：只看同一個帳戶、同一個代號、**還在進行**的計畫：`active`、`end_date` 沒過（或沒有），而且 `recurring.next_debit(plan, today)`
+  找得到下一次扣款（＝`plan_out` 的 `next_date` 不是 null）。和前端 `planStatus(...) === "active"` 同一個判斷：結束日在下一個扣款日之前
+  （今天 11/17、每月 6 日、結束日 11/30）的計畫不算，確認框不給「同時暫停」，回應也不會說「下次扣款日會再提出草稿」。`pause_plans=true` 把它們設成 `active=false`
+  （不刪：設定頁可以恢復，金額、日期、附註都還在）；沒有暫停的數在 `plans_running`（定期定額不會自己建立交易，但下次扣款日 AI 會提出草稿、
+  本週事項會列出扣款）。前端預設勾「同時暫停」。
+- **其他不動**：觀察清單、別的帳戶、別的代號、別的使用者、匯入的批次（剩下的列照樣可以整批復原；這一檔的列已經不在）。群組動態照刪一筆交易的規則：
+  `sharing.trade_keys` → `purge_trade_threads`（沒有別的交易撐著的動態項目連同留言、表情刪掉）；`notification_outbox` 的待送推播跟著交易
+  `ON DELETE CASCADE`。
+- **唯讀查看**：`DELETE` 不在 `ViewAsMiddleware` 的白名單 → 403 `read_only`（中介層就擋下，沒有讀寫）。
+- 回應 `HoldingDeleted`：`{account_id, symbol, deleted, plans_paused, plans_running}`。一個交易（commit 一次）；PostgreSQL 先鎖帳戶列
+  （`auto_dividends.lock_accounts`），不會和 worker 的股利同步交錯。
+- 測試：`tests/api/test_delete_holding.py`（筆數與只刪那個帳戶那一檔、別的使用者、唯讀、定期定額暫停與不暫停、暫停／已結束的計畫不算、
+  結束日在下一次扣款日之前的計畫不算、自動股利不會回來與略過紀錄清掉、對不起來的帳可以清、群組動態的留言、暫停後計畫內容不變、
+  代號相近的列（`2330R.TW`、`2330`）留著、美股整檔刪除、標了代號的手續費／稅算進筆數一起刪）。

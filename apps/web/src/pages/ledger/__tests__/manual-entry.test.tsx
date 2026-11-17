@@ -312,12 +312,12 @@ describe("減少持股（賣出不用開表單）", () => {
     expect(within(dialog).getByText(`最多 ${new Intl.NumberFormat("zh-TW").format(held.quantity)} 股`)).toBeInTheDocument()
   })
 
-  it("持倉的每一列有動作選單：加碼、減少持股、全部賣出", async () => {
+  it("持倉的每一列有動作選單：加碼、減少持股、全部賣出，最後是刪除這檔", async () => {
     renderApp("/")
     const table = await screen.findByRole("table", { name: "持倉" }, T)
     await userEvent.click(await within(table).findByRole("button", { name: "鴻海的動作" }, T))
     const menu = await screen.findByRole("menu", {}, T)
-    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["加碼", "減少持股", "全部賣出"])
+    expect(within(menu).getAllByRole("menuitem").map((m) => m.textContent)).toEqual(["加碼", "減少持股", "全部賣出", "刪除這檔"])
     await userEvent.click(within(menu).getByRole("menuitem", { name: "全部賣出" }))
     expect(useUi.getState().reduce).toMatchObject({ open: true, symbol: "2317.TW", all: true })
   })

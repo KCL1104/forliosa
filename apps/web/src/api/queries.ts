@@ -180,7 +180,8 @@ export function useInstrumentSearch(q: string) {
   })
 }
 
-function useInvalidatePortfolio() {
+/** 記了、改了、刪了紀錄之後重抓：持股與總資產、紀錄、個股事件（「刪除這檔」不知道刪了沒有時也用） */
+export function useInvalidatePortfolio() {
   const qc = useQueryClient()
   return () => {
     void qc.invalidateQueries({ queryKey: ["portfolio"] })
@@ -214,6 +215,22 @@ export function useCreateTransactionBatch() {
 export function useDeleteTransactionBatch() {
   const invalidate = useInvalidatePortfolio()
   return useMutation({ mutationFn: (batchId: string) => api.deleteTransactionBatch(batchId), onSuccess: invalidate })
+}
+/**
+ * 刪除這檔：一個帳戶裡這一檔的每一筆紀錄（不是賣出）。和刪一筆交易一樣重抓持股、總資產、紀錄與個股事件；
+ * 一起暫停了定期定額時，定期定額與本週事項（每一次扣款）也重抓
+ */
+export function useDeleteHolding() {
+  const qc = useQueryClient()
+  const invalidate = useInvalidatePortfolio()
+  return useMutation({
+    mutationFn: ({ accountId, symbol, pausePlans }: { accountId: string; symbol: string; pausePlans?: boolean }) =>
+      api.deleteHolding(accountId, symbol, { pausePlans }),
+    onSuccess: (res) => {
+      invalidate()
+      if (res.plans_paused > 0) void qc.invalidateQueries({ queryKey: qk.recurring })
+    },
+  })
 }
 export function useUpdatePreferences() {
   const qc = useQueryClient()

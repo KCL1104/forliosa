@@ -15,6 +15,7 @@ import { useReportsUnread } from "@/pages/market/reports/use-reports-unread"
 import { useBriefingUnread } from "@/ai/use-briefing-unread"
 import { ReduceHost } from "@/pages/transactions/ReduceDialog"
 import { ImportHost } from "@/pages/transactions/import/ImportHost"
+import { DeleteHoldingHost } from "@/pages/ledger/DeleteHoldingDialog"
 import { TradeFormHost } from "@/pages/transactions/TradeForm"
 import { usePrefs } from "@/stores/prefs"
 import { AvatarMenu } from "./AvatarMenu"
@@ -68,6 +69,7 @@ export function AppShell() {
       <TradeFormHost />
       <ReduceHost />
       {!readOnly && <ImportHost />}
+      {!readOnly && <DeleteHoldingHost />}
     </div>
   )
 }

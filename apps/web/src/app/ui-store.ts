@@ -13,7 +13,7 @@ export interface TradePrefill {
   fee?: number
 }
 
-/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股、匯入對帳單 */
+/** 跨元件的暫時 UI 狀態（不存檔）：⌘K 搜尋、記一筆、減少持股、刪除這檔、匯入對帳單 */
 interface UiState {
   searchOpen: boolean
   setSearchOpen: (open: boolean) => void
@@ -32,6 +32,13 @@ interface UiState {
   reduce: { open: boolean; symbol?: string; all?: boolean }
   openReduce: (symbol: string, all?: boolean) => void
   closeReduce: () => void
+  /**
+   * 刪除這檔：一個帳戶裡這一檔的每一筆紀錄（確認框；從持倉的「⋯」或展開後的文字動作打開）。
+   * `n` 每打開一次加一：確認框裡選的帳戶、勾選、錯誤訊息每次都從頭開始
+   */
+  deleteHolding: { open: boolean; symbol?: string; n: number }
+  openDeleteHolding: (symbol: string) => void
+  closeDeleteHolding: () => void
   /** 匯入對帳單（從記一筆的第一步、AI 輸入框的「＋」、空的帳本打開） */
   importOpen: boolean
   openImport: () => void
@@ -48,6 +55,10 @@ export const useUi = create<UiState>((set) => ({
   reduce: { open: false },
   openReduce: (symbol, all) => set({ reduce: { open: true, symbol, all } }),
   closeReduce: () => set((s) => ({ reduce: { ...s.reduce, open: false } })),
+  deleteHolding: { open: false, n: 0 },
+  openDeleteHolding: (symbol) => set((s) => ({ deleteHolding: { open: true, symbol, n: s.deleteHolding.n + 1 } })),
+  // 關的時候留著 symbol：確認框淡出時內容不會先變空
+  closeDeleteHolding: () => set((s) => ({ deleteHolding: { ...s.deleteHolding, open: false } })),
   importOpen: false,
   // 從記一筆打開時先把記一筆關掉（兩個對話框不疊在一起）
   openImport: () => set((s) => ({ importOpen: true, tradeForm: { ...s.tradeForm, open: false } })),
