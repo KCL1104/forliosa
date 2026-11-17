@@ -332,22 +332,27 @@ def _ascii_name_pattern(name: str) -> re.Pattern[str]:
 class Terms:
     """What makes a headline about this company: its Chinese short name, its code and its English short name
     (台積電 / 2330 / TSMC; US: NVIDIA / NVDA / 輝達). ``taiwan``: a Taiwan stock, matched by the stricter rules of
-    :mod:`forliosa.news.tw_match` (2026-11-17); ``longer``: other listed names that contain its Chinese name (聯合再生
-    for 聯合: the longest name wins); ``peers``: every listed company's Chinese name (a short name listed next to one
-    is a stock: 「信驊、創意等」)."""
+    :mod:`forliosa.news.tw_match` (2026-11-17); ``longer``: other listed and official names that contain its Chinese
+    name (聯合再生 for 聯合, 台灣大車隊 for 台灣大: the longest name wins); ``peers``: every listed company's Chinese
+    name (a short name listed next to one is a stock: 「信驊、創意等」); ``forms``: its official name's forms
+    (:func:`forliosa.news.tw_match.official_forms`: 統一企業, 台灣大哥大); ``own``: its short name as listed (a Latin
+    one, GOGOLOOK, counts in Chinese headlines too)."""
 
     names: tuple[str, ...]  # matched as substrings (Chinese names) or whole words (ASCII)
     codes: tuple[str, ...]  # matched with digit / letter boundaries
     taiwan: bool = False
     longer: tuple[str, ...] = ()
     peers: frozenset[str] = field(default=frozenset(), compare=False, repr=False)
+    forms: tuple[str, ...] = ()
+    own: str = ""
 
     def all(self) -> list[str]:
         return [*self.names, *self.codes]
 
 
 def make_terms(name: str, code: str, english: Iterable[str] = (), extra_names: Iterable[str] = (), *,
-               taiwan: bool = False, longer: Iterable[str] = (), peers: frozenset[str] = frozenset()) -> Terms:
+               taiwan: bool = False, longer: Iterable[str] = (), peers: frozenset[str] = frozenset(),
+               forms: Iterable[str] = ()) -> Terms:
     names: list[str] = []
     for n in (name, *english, *extra_names):
         n = collapse_spaces(n or "")
@@ -359,7 +364,9 @@ def make_terms(name: str, code: str, english: Iterable[str] = (), extra_names: I
             continue
         names.append(n)
     codes = [c for c in (code or "",) if c]
-    return Terms(tuple(dict.fromkeys(names)), tuple(dict.fromkeys(codes)), taiwan, tuple(dict.fromkeys(longer)), peers)
+    own = collapse_spaces(name or "") if taiwan else ""
+    return Terms(tuple(dict.fromkeys(names)), tuple(dict.fromkeys(codes)), taiwan, tuple(dict.fromkeys(longer)), peers,
+                 tuple(dict.fromkeys(f for f in forms if f)), own)
 
 
 _NUMBER_UNITS = "(?:\\s*(?:元|點|億|萬|張|股|倍|年|月|日|人|家|%|" + chr(0xFF05) + "))"
@@ -372,12 +379,13 @@ def _english_name_in(name: str, text: str) -> bool:
 def is_relevant(title: str, terms: Terms, *, url: str = "", raw_title: str = "") -> bool:
     """The headline (after ``clean_title``) names the company, its code or its English short name (English names
     by the case rules of :func:`_ascii_name_pattern`, so an everyday word is not taken for the company). A Taiwan
-    stock (``terms.taiwan``) follows :func:`forliosa.news.tw_match.relevant`: its code only with stock context, a short
-    or everyday name only with the code, a finance word next to it or on a finance page (``url``, ``raw_title``: the
-    title as published, with its section), never inside a longer word or name."""
+    stock (``terms.taiwan``) follows :func:`forliosa.news.tw_match.relevant`: its code only with stock context, its
+    official name, a short or everyday name only with the code, a finance word next to it or on a finance page
+    (``url``, ``raw_title``: the title as published, with its section), never inside a longer word or name."""
     if terms.taiwan:
         return tw_match.relevant(title, terms.names, terms.codes[0] if terms.codes else "", longer=terms.longer,
-                                 url=url, raw_title=raw_title, english=_english_name_in, peers=terms.peers)
+                                 url=url, raw_title=raw_title, english=_english_name_in, peers=terms.peers,
+                                 forms=terms.forms, own=terms.own)
     text = title.casefold()
     for n in terms.names:
         if n.isascii():

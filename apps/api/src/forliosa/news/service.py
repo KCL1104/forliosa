@@ -39,8 +39,8 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 Read (``GET /instruments/{symbol}/news``)
 ----------------------------------------
 :func:`media_items`: the symbol's stored headlines of the retention window, Yahoo RSS rows only under
-``personal``, blocked domains, pages that are not news, robot flashes and headlines tagged as not finance
-(:func:`tagged_not_finance`, 2026-11-17) hidden, de-duplicated (same URL or
+``personal``, blocked domains, pages that are not news, robot flashes and Taiwan stocks' headlines tagged as not
+finance (:func:`tagged_not_finance`, 2026-11-17) hidden, de-duplicated (same URL or
 near-identical title; the original outlet beats an aggregator copy, a reputable outlet another copy), the newest day
 first and within a day the reputable outlets first (:func:`normalize.rank`; the stock page sorts by time itself), at
 most ``MEDIA_LIMIT``. :func:`record_view` notes that the symbol was viewed.
@@ -50,12 +50,12 @@ from __future__ import annotations
 
 import logging
 import time as _time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, exists, func, select
+from sqlalchemy import and_, delete, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
@@ -228,18 +228,43 @@ def english_names(db: Session, info: InstrumentInfo) -> list[str]:
     return result
 
 
+_OFFICIAL: list[tuple[object, object, dict[str, tuple[str, ...]]]] = []
+
+
+def official_forms(db: Session, master: Mapping[str, InstrumentInfo]) -> dict[str, tuple[str, ...]]:
+    """symbol -> the forms of its official name (:func:`tw_match.official_forms` of the company profile's 公司名稱:
+    統一企業, 台灣大哥大, 台灣大車隊) for every Taiwan stock of ``master`` with a profile; read once per master and
+    database (MarketData rebuilds its master at most hourly)."""
+    bind = db.get_bind()
+    if _OFFICIAL and _OFFICIAL[0][0] is master and _OFFICIAL[0][1] is bind:
+        return _OFFICIAL[0][2]
+    out: dict[str, tuple[str, ...]] = {}
+    for symbol, values in db.execute(select(CompanyProfile.symbol, CompanyProfile.values)):
+        info = master.get(symbol)
+        if info is None or info.market == "US":
+            continue
+        forms = tw_match.official_forms(info.name, str((values or {}).get("name") or ""))
+        if forms:
+            out[symbol] = forms
+    _OFFICIAL[:] = [(master, bind, out)]
+    return out
+
+
 def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datetime,
                 md: MarketData | None = None) -> Query:
     """The query and title test of one symbol. A Taiwan stock's terms follow :mod:`forliosa.news.tw_match`; with
-    ``md``, the other listed names that contain its name (聯合再生 for 聯合) take their headlines (the longest name
-    wins) and a short name listed next to another listed name counts (「信驊、創意等」)."""
+    ``md``, its official name counts (統一企業), the other listed and official names that contain its name (聯合再生
+    for 聯合, 台灣大車隊 for 台灣大) take their headlines (the longest name wins) and a short name listed next to
+    another listed name counts (「信驊、創意等」)."""
     english = english_names(db, info)
     taiwan = info.market != "US"
     extra = [] if taiwan else [a for a in info.aliases if not a.isascii()]
     master = md.master() if taiwan and md is not None else None
-    longer = tw_match.longer_in_master(info.name, master) if master is not None else ()
+    official = official_forms(db, master) if master is not None else {}
+    longer = tw_match.longer_in_master(info.name, master, official) if master is not None else ()
     peers = tw_match.names_in_master(master) if master is not None else frozenset()
-    terms = make_terms(info.name, info.code, english, extra, taiwan=taiwan, longer=longer, peers=peers)
+    terms = make_terms(info.name, info.code, english, extra, taiwan=taiwan, longer=longer, peers=peers,
+                       forms=official.get(info.symbol, ()))
     return Query(symbol=info.symbol, code=info.code, name=info.name, market=info.market, english=tuple(english),
                  terms=terms, since=since, until=until)
 
@@ -343,16 +368,22 @@ def shown(h: Headline, policy: Policy, blocked: Sequence[str]) -> bool:
             and not is_bot_flash(h.title))
 
 
-def tagged_not_finance(url_key: ColumnElement[str]) -> ColumnElement[bool]:
-    """Whether the news tagging (:mod:`forliosa.news.tagging`) finished this URL (``news_tag_state.status = "done"``)
-    without a single theme, sector or related stock: clearly not finance news (a sports, entertainment or weather story
-    under a stock whose name it shares). 產品負責人 2026-11-17: hidden on the stock page, in ``get_news`` and
-    ``search_news`` and not counted by :func:`recent_count`; kept in ``news_articles``. A headline not tagged yet is
-    shown (the tagging is not waited for); official announcements (公告) are not news_articles rows and are never
-    hidden. A correlated ``EXISTS`` (an anti-join on both primary keys), used as
-    ``~tagged_not_finance(NewsArticle.url_key)`` in a ``WHERE``."""
-    return exists().where(NewsTagState.url_key == url_key, NewsTagState.status == "done",
-                          ~exists().where(NewsTag.url_key == NewsTagState.url_key))
+def tagged_not_finance(url_key: ColumnElement[str], symbol: ColumnElement[str]) -> ColumnElement[bool]:
+    """Whether a Taiwan stock's headline was finished by the news tagging (:mod:`forliosa.news.tagging`,
+    ``news_tag_state.status = "done"``) without a single theme, sector or related stock: clearly not finance news (a
+    sports, entertainment or weather story under a stock whose name it shares: 「大洋洲」 under 大洋). 產品負責人
+    2026-11-17: hidden on the stock page, in ``get_news`` and ``search_news`` and not counted by :func:`recent_count`;
+    kept in ``news_articles``. A headline not tagged yet is shown (the tagging is not waited for); official
+    announcements (公告) are not news_articles rows and are never hidden.
+
+    Only Taiwan stocks' rows (``symbol`` ``.TW`` / ``.TWO``, review of 2026-11-17): a US stock's headlines are matched
+    by ticker and company name (:mod:`forliosa.news.us_match`), and a media or consumer company's own story can come
+    back without tags (「Netflix commissions new Harlan Coben thriller The Innocent」 under NFLX in the live test: the
+    model took it for entertainment), so for them an empty answer says nothing. A correlated ``EXISTS`` (an anti-join
+    on both primary keys), used as ``~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol)`` in a ``WHERE``."""
+    return and_(or_(symbol.like("%.TW"), symbol.like("%.TWO")),
+                exists().where(NewsTagState.url_key == url_key, NewsTagState.status == "done",
+                               ~exists().where(NewsTag.url_key == NewsTagState.url_key)))
 
 
 def item_out(h: Headline) -> dict[str, Any]:
@@ -437,7 +468,7 @@ def media_items(db: Session, md: MarketData, info: InstrumentInfo, *, settings: 
     since = now - timedelta(days=settings.news_retention_days)
     blocked = blocked_domains(db, settings)
     rows = db.scalars(select(NewsArticle).where(NewsArticle.symbol == info.symbol, NewsArticle.published_at >= since,
-                                                ~tagged_not_finance(NewsArticle.url_key))
+                                                ~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol))
                       .order_by(NewsArticle.published_at.desc()).limit(limit * 4))
     heads = [Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
                       source=r.source, date_only=bool(r.date_only)) for r in rows]
@@ -630,11 +661,11 @@ def _mark_open(db: Session, source: str, now: datetime) -> None:
 def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str] | None = None) -> int:
     """Stored headlines of ``symbol`` published since ``since`` (from ``sources``, else any), not counting rows the
     reading side hides (quote pages, forums, robot flashes stored before 2026-11-16: ``is_not_news``,
-    ``is_bot_flash``; headlines tagged as not finance: :func:`tagged_not_finance`), so that they do not hold the AI
-    fallback back."""
-    q = select(NewsArticle.url, NewsArticle.title).where(NewsArticle.symbol == symbol,
-                                                         NewsArticle.published_at >= since,
-                                                         ~tagged_not_finance(NewsArticle.url_key))
+    ``is_bot_flash``; Taiwan stocks' headlines tagged as not finance: :func:`tagged_not_finance`), so that they do not
+    hold the AI fallback back."""
+    q = select(NewsArticle.url, NewsArticle.title).where(
+        NewsArticle.symbol == symbol, NewsArticle.published_at >= since,
+        ~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol))
     if sources is not None:
         q = q.where(NewsArticle.source.in_(list(sources)))
     return sum(1 for url, title in db.execute(q) if not is_not_news(url) and not is_bot_flash(title))

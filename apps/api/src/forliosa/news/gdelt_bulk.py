@@ -39,9 +39,9 @@ Matching
 * **Taiwan stocks**: only rows from Taiwanese sites (:func:`forliosa.news.outlets.is_taiwan_outlet`: a ``.tw`` host or
   ``TAIWAN_DOMAINS``, standing in for the DOC API's ``sourcecountry:taiwan``), both feeds. A headline must name the
   company in its title (:func:`forliosa.news.normalize.is_relevant`, the rule every source follows; since 2026-11-17
-  :mod:`forliosa.news.tw_match`: the code only with stock context, a short or everyday name only with the code, a
-  finance word or a finance page, never inside a longer word or listed name — the page's URL and title as published
-  are passed for the finance-page test).
+  :mod:`forliosa.news.tw_match`: the code only with stock context, the official name, a short or everyday name only
+  with the code, a finance word or a finance page, never inside a longer word or listed name — the page's URL and
+  title as published are passed for the finance-page test).
 * **US stocks and the US market** (``us``: symbol -> a test of the title and URL, :mod:`forliosa.news.us_match`):
   only the ``english`` feed, only pages of US and UK news outlets (:func:`forliosa.news.outlets.is_us_outlet`,
   standing in for the DOC API's ``(sourcecountry:US OR sourcecountry:UK) sourcelang:english``; the files carry no
@@ -168,8 +168,8 @@ def match(rows: Iterable[GkgRow], queries: Mapping[str, Query],
           us: Mapping[str, UsTest] | None = None) -> dict[str, list[RawItem]]:
     """symbol -> the rows whose cleaned title names that company: Taiwanese sites' rows against the Taiwan stocks of
     ``queries`` (cheap substring test first, then :func:`is_relevant`), US and UK outlets' pages against ``us``."""
-    prepared = [(sym, q.terms, [n.casefold() for n in q.terms.names], q.terms.codes) for sym, q in queries.items()
-                if q.taiwan]
+    prepared = [(sym, q.terms, [n.casefold() for n in (*q.terms.names, *q.terms.forms)], q.terms.codes)
+                for sym, q in queries.items() if q.taiwan]
     out: dict[str, list[RawItem]] = {}
     for row in rows:
         title = clean_title(row.title, row.url, outlet_name(row.url, row.domain))
