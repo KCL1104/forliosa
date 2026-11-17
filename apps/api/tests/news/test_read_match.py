@@ -276,3 +276,85 @@ def test_the_check_builds_each_stocks_terms_once_and_leaves_us_rows_alone(engine
         assert check.keeps("^US", "Stocks fall", "https://example.com/b")  # synthetic
         assert check.keeps("9999.TW", "2027台海不平靜？", "https://example.com/c")  # synthetic, unknown symbol
         assert check.terms("9999.TW") is None and check.terms("NVDA") is None
+
+
+def _profile_reads(engine, run) -> tuple[int, int]:
+    """(queries reading many company profiles at once, queries reading one stock's profile) while ``run()`` runs."""
+    statements: list[str] = []
+
+    def record(conn, cursor, statement, *args):
+        statements.append(statement)
+
+    event.listen(engine, "before_cursor_execute", record)
+    try:
+        run()
+    finally:
+        event.remove(engine, "before_cursor_execute", record)
+    reads = [s for s in statements if "company_profiles" in s]
+    return sum(" IN " in s.upper() for s in reads), sum("company_profiles.symbol = " in s for s in reads)
+
+
+def test_search_news_reads_its_stocks_profiles_in_one_query_per_page(engine, catalog_md, settings):
+    """2026-11-17 review: ``search_news`` without a symbol (a theme, a sector, a keyword) read each stock's company
+    profile on its own (60 to 100 round trips to Postgres for a list of 160 rows). The rows of a page read are
+    prefetched in one query before they are checked; nothing is prefetched by hand here."""
+    now = datetime.now(UTC)
+    with Session(engine) as db:
+        _store(db, now)
+    found: list[list[dict]] = []
+
+    def every_stock():
+        with Session(engine) as db:
+            found.append(tags.search(db, catalog_md, now=now, settings=settings))
+
+    many, one = _profile_reads(engine, every_stock)
+    assert (many, one) == (1, 0)  # the 10 stocks of the 17 rows: one page, one query
+    assert {s["symbol"] for n in found[-1] for s in n["stocks"]} == {s for s, *_ in RIGHT}
+
+    def keyword():  # 中華電信 is stored under 2204 中華 (wrong) and 2412 中華電 (right)
+        with Session(engine) as db:
+            found.append(tags.search(db, catalog_md, keyword="中華電信", now=now, settings=settings))
+
+    assert _profile_reads(engine, keyword) == (1, 0)
+    assert [n["stocks"] for n in found[-1]] == [[{"symbol": "2412.TW", "name": "中華電"}]]
+
+    def short_list():  # pages of 8: the newest 8 rows are wrong ones, the next page fills the list
+        with Session(engine) as db:
+            found.append(tags.search(db, catalog_md, limit=1, now=now, settings=settings))
+
+    many, one = _profile_reads(engine, short_list)
+    assert (many, one) == (2, 0)  # 3 pages read; the third holds no stock not read yet
+    assert [n["title"] for n in found[-1]] == [RIGHT[0][1]]
+
+
+class _FindsNothing:
+    """An AI fallback that finds nothing: what is counted is the refresh's own reading."""
+
+    def __init__(self) -> None:
+        self.asked: list[str] = []
+
+    def run(self, q, now, blocked, record):
+        self.asked.append(q.symbol)
+        return []
+
+
+def test_refresh_reads_its_batchs_profiles_in_one_query(engine, catalog_md, settings):
+    """2026-11-17 review: the refresh counted each stock's stored rows (``_ai_due``, ``ai_window``) with a check that
+    read the stock's company profile on its own, on top of ``build_query``'s read. The batch's profiles are read in one
+    query when the check is made."""
+    now = datetime.now(UTC)
+    symbols = [s for s, *_ in STOCKS]
+    runner = _FindsNothing()
+    with Session(engine) as db:
+        _store(db, now)
+
+    def refresh():
+        with Session(engine) as db:
+            service.refresh(db, catalog_md, settings=settings, sources=[], ai=lambda _db: runner, symbols=symbols,
+                            bulk=None, now_fn=lambda: now)
+
+    many, one = _profile_reads(engine, refresh)
+    # every stock holds fewer than NEWS_AI_MIN_ITEMS rows that still match: each was counted (and searched)
+    assert runner.asked == symbols
+    assert many == 1
+    assert one == len(symbols)  # build_query's own read of each stock, none from the check

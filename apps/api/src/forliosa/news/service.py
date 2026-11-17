@@ -429,9 +429,11 @@ class ReadMatch:
       the catalog (nothing to check it against), FinMind's per-request headlines (``personal`` only, not stored,
       FinMind's own per-stock list) and official announcements (``market_events``, not news rows).
 
-    One per request (or refresh run): each stock's terms are built once (:meth:`prefetch` reads the company profiles
-    of many stocks in one query); the official names and the catalog's names are cached per catalog
-    (:func:`official_forms`, :func:`tw_match.longer_in_master`)."""
+    One per request (or refresh run): each stock's terms are built once; the company profiles (English short names)
+    of many stocks are read in one query by :meth:`prefetch`, which every caller runs before checking: :func:`kept_rows`
+    per page read, :func:`forliosa.news.tags.search`'s and :func:`forliosa.news.tags.by_topic`'s rows, :func:`refresh`
+    for its batch (:meth:`terms` reads a stock not prefetched on its own, one query). The official names and the
+    catalog's names are cached per catalog (:func:`official_forms`, :func:`tw_match.longer_in_master`)."""
 
     def __init__(self, db: Session, md: MarketData | None) -> None:
         self.db, self.md = db, md
@@ -472,11 +474,13 @@ def kept_rows(db: Session, query: Any, check: ReadMatch, want: int, *, most: int
               ) -> list[NewsArticle]:
     """The first ``want`` rows of ``query`` (a ``select(NewsArticle)`` with a total order) that ``check`` keeps, read
     in pages of ``want`` until enough are kept, the rows run out or ``most`` rows were looked at (a stock with many
-    wrong matches stored before 2026-11-17, 統一 or 全新, still fills its list)."""
+    wrong matches stored before 2026-11-17, 統一 or 全新, still fills its list). The company profiles of a page's
+    stocks are read in one query before it is checked (:meth:`ReadMatch.prefetch`), not one stock at a time."""
     out: list[NewsArticle] = []
     offset = 0
     while len(out) < want and offset < most:
         page = list(db.scalars(query.offset(offset).limit(want)))
+        check.prefetch(r.symbol for r in page)
         out += [r for r in page if check.keeps(r.symbol, r.title, r.url)]
         if len(page) < want:
             break
@@ -911,6 +915,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         report.blocked_sources.append(gdelt.key)
     gdelt_on = any(s.key == "gdelt" for s in sources)
     check = ReadMatch(db, md)  # what the reading side shows counts (rows stored before 2026-11-17 checked again)
+    check.prefetch(symbols)  # the batch's company profiles in one query (per 500), not one per stock in the loop
     failures: dict[str, int] = {}
     ai_runner: Any = None
     ai_checked = False
