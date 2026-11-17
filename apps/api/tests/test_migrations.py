@@ -228,3 +228,20 @@ def test_market_report_key_state_both_ways(tmp_path):
             assert conn.execute(text("SELECT mode FROM market_report_config")).scalar_one() == "trial"
     finally:
         engine.dispose()
+
+
+def test_market_events_type_date_index_both_ways(tmp_path):
+    """0026_mevents_type_date (API 速度, 2026-11-17): the (type, date) index the market page's 重大訊息 reads by, gone
+    again on the downgrade; the model declares the same index."""
+    url = f"sqlite:///{tmp_path / 'mevents.db'}"
+    command.upgrade(_config(url), "0026_mevents_type_date")
+    engine = make_engine(url)
+    try:
+        indexes = {i["name"]: i["column_names"] for i in inspect(engine).get_indexes("market_events")}
+        assert indexes["ix_market_events_type_date"] == ["type", "date"]
+        declared = {i.name: [c.name for c in i.columns] for i in Base.metadata.tables["market_events"].indexes}
+        assert declared["ix_market_events_type_date"] == ["type", "date"]
+        command.downgrade(_config(url), "0025_mreport_key_state")
+        assert "ix_market_events_type_date" not in {i["name"] for i in inspect(engine).get_indexes("market_events")}
+    finally:
+        engine.dispose()

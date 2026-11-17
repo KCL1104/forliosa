@@ -369,7 +369,8 @@
 ### 帳本
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/portfolio/upcoming?days=7` | `[{date, type: "ex_dividend"\|"dividend_payment"\|"recurring", symbol, title, amount_estimate}]`（「本週事項」） |
+| GET | `/portfolio/upcoming?days=7` | `[{date, type: "ex_dividend"\|"dividend_payment"\|"recurring", symbol, title, amount_estimate}]`（「本週事項」）。`types=recurring`：只回定期定額扣款（同樣的項目與順序，不算持股與股利；AI 面板在每一頁都讀，2026-11-17） |
+| GET | `/transactions/counts` | `{transactions, dividends, by_type}`：交易筆數、股利筆數（現金股利＋配股）、各類型筆數（帳本「紀錄」分頁上的數字；唯讀查看時只算授權的帳戶，2026-11-17） |
 
 ### AI（M4 前為規則版，前端可先用）
 - 「買 0050 2 張 52.4」這類記帳指令：前端（或之後的 AI）解析後呼叫 `POST /transactions/preview` 取得草稿，使用者簽名確認後再 `POST /transactions`（帶 `source: "ai_draft"`）。

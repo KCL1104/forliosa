@@ -15,6 +15,7 @@ import json
 import logging
 import threading
 import time
+from collections import OrderedDict
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import Path
@@ -51,6 +52,7 @@ MANIFEST_TTL_SECONDS = 600
 # for the 0.6 MB file once it has been read (a release changes about once a day; 2026-11-16: 0.1–0.8 s per AI turn).
 MANIFEST_STALE_SECONDS = 86400
 _MISSING = object()
+PARSED_MAX = 64  # parsed files kept in memory (company files of the stock pages visited, cards, daily closes)
 
 
 def pct_to_fraction(value: object) -> Decimal | None:
@@ -161,7 +163,8 @@ class ShioajiDataProvider(BaseProvider):
         self._manifest: dict[str, Any] | None = None
         self._manifest_at = 0.0
         self._refreshing = False  # a background manifest download is running
-        self._parsed: dict[str, Any] = {}  # sha256 -> parsed object
+        # sha256 (or a derived key) -> parsed object, least recently used first; at most PARSED_MAX entries
+        self._parsed: OrderedDict[str, Any] = OrderedDict()
         # One download per file at a time (the manifest, a company's file): requests that need it meanwhile wait for it
         self._flight = SingleFlight()
 
@@ -212,15 +215,33 @@ class ShioajiDataProvider(BaseProvider):
             self._manifest, self._manifest_at = doc, time.monotonic()
         return doc
 
+    def _parsed_get(self, key: str | None) -> Any:
+        if not key:
+            return _MISSING
+        with self._lock:
+            hit = self._parsed.get(key, _MISSING)
+            if hit is not _MISSING:
+                self._parsed.move_to_end(key)
+        return hit
+
+    def _parsed_put(self, key: str, doc: Any) -> None:
+        """Keep a parsed file; past ``PARSED_MAX`` the least recently used one goes (2026-11-17: the whole cache was
+        cleared at 65 entries, the instrument cards and the latest closes with it)."""
+        with self._lock:
+            self._parsed[key] = doc
+            self._parsed.move_to_end(key)
+            while len(self._parsed) > PARSED_MAX:
+                self._parsed.popitem(last=False)
+
     def _load(self, path: str, sha: str | None) -> Any:
         """Fetch a manifest-listed file, using the sha256-keyed disk cache."""
-        hit = self._parsed.get(sha, _MISSING) if sha else _MISSING
+        hit = self._parsed_get(sha)
         if hit is not _MISSING:
             return hit
         return self._flight.do(("file", sha or path), lambda: self._load_once(path, sha))
 
     def _load_once(self, path: str, sha: str | None) -> Any:
-        hit = self._parsed.get(sha, _MISSING) if sha else _MISSING  # loaded just before this call started
+        hit = self._parsed_get(sha)  # loaded just before this call started
         if hit is not _MISSING:
             return hit
         raw = self.cache.read("files", sha) if sha else None
@@ -233,10 +254,7 @@ class ShioajiDataProvider(BaseProvider):
             sha = sha or actual
         doc = json.loads(raw)
         if sha:
-            with self._lock:
-                if len(self._parsed) > 64:
-                    self._parsed.clear()
-                self._parsed[sha] = doc
+            self._parsed_put(sha, doc)
         return doc
 
     def _file(self, key: str) -> Any:
@@ -257,12 +275,18 @@ class ShioajiDataProvider(BaseProvider):
         meta = (self.manifest().get("files") or {}).get("tw/market") or {}
         sha = meta.get("sha256")
         key = f"daily:{sha}"
-        if key in self._parsed:
-            return self._parsed[key]
+        hit = self._parsed_get(key)
+        if hit is not _MISSING:
+            return hit
         parsed = parse_daily(self._file("tw/market"))
         self._remember_closes(parsed)
-        self._parsed[key] = parsed
+        self._parsed_put(key, parsed)
         return parsed
+
+    def warm_up(self) -> None:
+        """At start-up (``MarketData.warm_up``): the latest closes (daily.json) are read and parsed before a request
+        needs them (the instrument cards come with the master)."""
+        self._daily()
 
     # -- previous-close snapshots (daily.json only carries the latest close) --------------------
     def _remember_closes(self, parsed: dict[str, dict[str, Any]]) -> None:
@@ -295,9 +319,11 @@ class ShioajiDataProvider(BaseProvider):
 
     def _theme_names(self) -> dict[str, str]:
         key = "theme-names"
-        if key not in self._parsed:
-            self._parsed[key] = parse_theme_names(self._file("tw/themes"))
-        return self._parsed[key]
+        hit = self._parsed_get(key)
+        if hit is _MISSING:
+            hit = parse_theme_names(self._file("tw/themes"))
+            self._parsed_put(key, hit)
+        return hit
 
     def profile(self, symbol: str) -> InstrumentProfile | None:
         if market_of_symbol(symbol) == "US":

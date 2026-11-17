@@ -206,11 +206,17 @@ def run_batch(db: Session, http: HttpFetcher, years: int = 5, limit: int | None 
     return out
 
 
-def summary(db: Session) -> dict[str, int]:
+def price_rows(db: Session, source: str) -> int:
+    """``prices_daily`` rows of one source (a full count: on 3M rows ~0.25 s on PostgreSQL)."""
+    return db.scalar(select(func.count()).select_from(PriceDaily).where(PriceDaily.source == source)) or 0
+
+
+def summary(db: Session, rows_fn: Callable[[Session, str], int] = price_rows) -> dict[str, int]:
+    """Symbols by backfill status, ``rows`` stored and ``pending``. ``rows_fn``: how the rows are counted (the admin
+    page passes a cached count)."""
     counts = dict(db.execute(select(PriceBackfill.status, func.count()).where(PriceBackfill.source == HISTORY_SOURCE)
                              .group_by(PriceBackfill.status)).all())
-    counts["rows"] = db.scalar(select(func.count()).select_from(PriceDaily)
-                               .where(PriceDaily.source == HISTORY_SOURCE)) or 0
+    counts["rows"] = rows_fn(db, HISTORY_SOURCE)
     counts["pending"] = len(pending(db))
     return counts
 

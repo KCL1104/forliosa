@@ -28,7 +28,7 @@ from forliosa.marketdata.base import InstrumentInfo, QuoteData, code_of_symbol, 
 from forliosa.marketdata.indices import is_index
 from forliosa.marketdata.service import MarketData
 from forliosa.models import User
-from forliosa.services.ledger_io import FxBook, LedgerInput, load_ledger_input, preferences_of
+from forliosa.services.ledger_io import FxBook, FxLoader, LedgerInput, load_ledger_input, preferences_of
 from forliosa.timeutil import iso_taipei, last_tw_trading_day, now_taipei, today_taipei, tw_trading_days
 
 MARKET_LABELS = {"TWSE": "上市", "TPEX": "上櫃", "US": "美股"}
@@ -93,16 +93,20 @@ class LedgerView:
     fx: FxBook
 
 
-def ledger_view(db: Session, user: User, md: MarketData, account_id: str | None = None) -> LedgerView:
-    inp = load_ledger_input(db, user, account_id)
+def ledger_view(db: Session, user: User, md: MarketData, account_id: str | None = None,
+                inp: LedgerInput | None = None, fx_loader: FxLoader | None = None) -> LedgerView:
+    """``inp`` / ``fx_loader``: a ledger already read and an FX loader shared within one request (the group pages
+    compute every member's ledger twice)."""
+    inp = inp if inp is not None else load_ledger_input(db, user, account_id)
     if account_id and not inp.accounts:
         raise not_found("找不到帳戶")
-    fx = FxBook.load(md, inp.first_date or today_taipei())
+    fx = (fx_loader or FxBook.load)(md, inp.first_date or today_taipei())
     return LedgerView(inp, replay(inp.ledger_txns(fx), inp.method).ledger, fx)
 
 
-def compute_state(db: Session, user: User, md: MarketData, account_id: str | None = None) -> PortfolioState:
-    view = ledger_view(db, user, md, account_id)
+def compute_state(db: Session, user: User, md: MarketData, account_id: str | None = None,
+                  inp: LedgerInput | None = None, fx_loader: FxLoader | None = None) -> PortfolioState:
+    view = ledger_view(db, user, md, account_id, inp, fx_loader)
     inp, fx, led = view.inp, view.fx, view.ledger
 
     grouped: dict[str, HoldingRow] = {}
@@ -219,8 +223,9 @@ def summary(state: PortfolioState, md: MarketData) -> dict[str, Any]:
     today = today_taipei()
     horizon = today + timedelta(days=UPCOMING_DAYS)
     is_demo = state.is_demo
+    answers = md.dividends_many([r.symbol for r in rows]) if rows else {}
     for r in rows:
-        ans = md.dividends(r.symbol)
+        ans = answers[r.symbol]
         for ev in ans.value:
             if ev.ex_dividend_date and today < ev.ex_dividend_date <= horizon and ev.cash_dividend > 0:
                 upcoming.append({
@@ -380,7 +385,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     hist_start = inception - timedelta(days=14)
     # one batched quote call warms the cache used by history()
     md.quotes([*symbols] if bench_is_index else [*symbols, bench_symbol])
-    histories = {s: md.history(s, hist_start, today) for s in symbols}
+    histories = md.histories(symbols, hist_start, today)
     bench_hist = (md.index_history if bench_is_index else md.history)(bench_symbol, hist_start, today)
     is_demo = any(h.is_demo for h in histories.values())
 
@@ -581,6 +586,24 @@ def fx_tool_notes(fx: FxBook, today: date | None = None) -> list[str]:
 UPCOMING_MAX_DAYS = 90
 
 
+def upcoming_recurring(db: Session, user: User, md: MarketData, days: int,
+                       account_id: str | None = None) -> list[dict[str, Any]]:
+    """:func:`upcoming`'s recurring-plan debits alone (``types=recurring``): the same rows in the same order, without
+    replaying the ledger or reading any dividend."""
+    from forliosa.services import recurring
+    from forliosa.services.ledger_io import accounts_in_scope
+
+    accounts = accounts_in_scope(db, user, account_id)
+    if account_id and not accounts:
+        raise not_found("找不到帳戶")
+    if not 1 <= days <= UPCOMING_MAX_DAYS:
+        raise unprocessable(f"days 必須介於 1 與 {UPCOMING_MAX_DAYS} 之間")
+    today = today_taipei()
+    out = recurring.upcoming_items(db, user, md, [a.id for a in accounts], today, today + timedelta(days=days))
+    out.sort(key=lambda u: (u["date"], u["type"], u["symbol"] or ""))
+    return out
+
+
 def upcoming(state: PortfolioState, md: MarketData, days: int,
              recurring: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     """Ex-dividend dates and dividend payments of current holdings in [today, today + days], plus the
@@ -601,8 +624,9 @@ def upcoming(state: PortfolioState, md: MarketData, days: int,
         if t.type == "cash_dividend" and t.symbol:
             recorded[(t.symbol, t.trade_date)] += t.amount or ZERO
     out = []
+    answers = md.dividends_many([r.symbol for r in state.rows]) if state.rows else {}
     for r in state.rows:
-        ans = md.dividends(r.symbol)
+        ans = answers[r.symbol]
         name = r.info.name if r.info else r.symbol
         sources = labels(["demo"] if ans.is_demo else tagged(ans.source, "ex_dividend"))
         for ev in ans.value:

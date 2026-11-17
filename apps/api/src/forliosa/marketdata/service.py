@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, timedelta
+from datetime import time as day_time
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -41,7 +42,7 @@ from forliosa.marketdata.catalog import KNOWN_SPLITS
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.http import HttpFetcher, SingleFlight
 from forliosa.marketdata.indices import INDICES, resolve_index
-from forliosa.timeutil import close_dt, last_tw_trading_day
+from forliosa.timeutil import TAIPEI, close_dt, is_tw_trading_day, last_tw_trading_day
 
 INTERIM_CLOSE_SOURCE = "shioaji-data"  # forliosa.archive.INTERIM_CLOSE_SOURCE: the archive's interim evening closes
 
@@ -50,8 +51,10 @@ T = TypeVar("T")
 
 COOLDOWN_SECONDS = 300
 MASTER_TTL_SECONDS = 3600
+MASTER_STALE_SECONDS = 6 * 3600  # an expired master still answers (rebuilt in the background) for this long
 LISTINGS_RETRY_SECONDS = 60  # the master missed a provider's listings (database down): rebuild it this soon
 QUOTE_TTL_SECONDS = 30
+ARCHIVE_START_TTL_SECONDS = 3600  # where the Taiwan archive begins (``MarketData.archive_since``)
 # Instruments only the archive's listings name (``InstrumentInfo.source`` -> the dataset their name comes from): every
 # ETF in the official close files, SEC's US tickers.
 LISTING_DATASETS = {"twse-openapi": "twse-openapi/price", "tpex-openapi": "tpex-openapi/price",
@@ -64,6 +67,38 @@ LISTING_DATASETS = {"twse-openapi": "twse-openapi/price", "tpex-openapi": "tpex-
 ARCHIVED_NOTICES = {"twse_openapi": "twse-openapi/price", "tpex_openapi": "tpex-openapi/price"}
 # Trading days run both groups at 08:10, 14:40 and 21:40: the longest gap (21:40 → 08:10) is 10.5 h.
 NOTICES_FRESH_SECONDS = 12 * 3600
+# Weekends and holidays run neither group, so from Saturday ~09:40 to Monday 08:10 (and through a long holiday) the
+# notices looked old and every summary downloaded TWT48U_ALL and tpex_exright_prepost inside the request (2026-11-17:
+# +2.6 s, again every 10 minutes). The exchanges only post them on trading days: the run expected last is what counts.
+# forliosa.worker daily_archive_morning / _close / _evening (the twse and tpex groups)
+NOTICE_RUN_TIMES = (day_time(8, 10), day_time(14, 40), day_time(21, 40))
+NOTICE_RUN_GRACE = timedelta(minutes=90)  # a run has stored its notices this long after its time (as 21:40 → 09:40)
+NOTICE_RUN_TOLERANCE = timedelta(minutes=5)
+NOTICE_STATUS_TTL_SECONDS = 60  # the notices runs' status rows are read again after this long
+
+
+def last_notice_run(at: datetime) -> datetime | None:
+    """The last scheduled notices run (a trading day's 08:10, 14:40 or 21:40 Taipei) at or before ``at``."""
+    local = at.astimezone(TAIPEI)
+    d = local.date()
+    for _ in range(40):  # longer than any closure (Lunar New Year)
+        if is_tw_trading_day(d):
+            for t in reversed(NOTICE_RUN_TIMES):
+                run = datetime.combine(d, t, tzinfo=TAIPEI)
+                if run <= local:
+                    return run
+        d -= timedelta(days=1)
+    return None
+
+
+def notices_trusted_since(now: datetime) -> datetime:
+    """Archived notices stored at or after this time answer instead of the live files: younger than
+    ``NOTICES_FRESH_SECONDS`` as before, or — when the worker had no run since (weekends, holidays) — stored by the
+    last scheduled run (``NOTICE_RUN_GRACE`` after its time). A run the worker missed on a trading day still sends
+    requests to the live files, as before."""
+    by_age = now - timedelta(seconds=NOTICES_FRESH_SECONDS)
+    last = last_notice_run(now - NOTICE_RUN_GRACE)
+    return min(by_age, last - NOTICE_RUN_TOLERANCE) if last is not None else by_age
 
 
 @dataclass
@@ -115,6 +150,9 @@ class MarketData:
         self._index: list[_Entry] = []
         self._quote_cache: dict[str, tuple[float, QuoteData]] = {}
         self._flight = SingleFlight()
+        self._archive_start_cache: tuple[float, date] | None = None  # (valid until, first archived day)
+        self._master_refreshing = False
+        self._notice_status: tuple[float, dict[str, datetime]] | None = None  # (valid until, notices runs' times)
 
     # -- provider plumbing -----------------------------------------------------------------------
     @property
@@ -127,10 +165,21 @@ class MarketData:
         demo_ok = self.demo_data_allowed if include_demo is None else include_demo
         return [p for p in self.providers if self._down_until.get(p.name, 0) <= now and (demo_ok or not p.is_demo)]
 
-    def _call(self, provider: BaseProvider, fn: Callable[[], T]) -> T | None:
+    def _call(self, provider: BaseProvider, fn: Callable[[], T], failed: set[str] | None = None) -> T | None:
+        """``fn()``, or None when it raised: the provider then cools down (not after a pool timeout), and either way
+        its name goes into ``failed``: the caller's record of who did not answer in this call (``_archived_notices``).
+        """
         try:
             return fn()
         except Exception as exc:  # any upstream failure -> fall back to the next provider
+            if failed is not None:
+                failed.add(provider.name)
+            if _pool_exhausted(exc):
+                # Every pooled connection was busy for the pool timeout: the database is fine, this call just could
+                # not get a connection in time. No cool-down — 30 s without the archive meant answering from live
+                # downloads inside requests (2026-11-17 burst test). It still did not answer this call (``failed``).
+                log.warning("market data provider %s: no free database connection (%s)", provider.name, exc)
+                return None
             log.warning("market data provider %s failed: %s", provider.name, exc)
             cooldown = getattr(provider, "cooldown_seconds", COOLDOWN_SECONDS)
             with self._lock:
@@ -157,11 +206,12 @@ class MarketData:
                         "serves_data": self.demo_data_allowed or not p.is_demo})
         return out
 
-    def _archived_notices(self) -> set[str]:
+    def _archived_notices(self, failed: set[str]) -> set[str]:
         """Live notice providers (``ARCHIVED_NOTICES``) the archive has answered for: it comes before them, did not fail
-        in this call (a failure puts it on cool-down) and the worker archived that market's notices recently."""
+        in this call (``failed``, filled by :meth:`_call`; a pool timeout leaves it off cool-down but it still did not
+        answer), is not cooling down and the worker archived that market's notices recently."""
         names = [p.name for p in self.providers]
-        if "archive" not in names or self._down_until.get("archive", 0) > time.monotonic():
+        if "archive" not in names or "archive" in failed or self._down_until.get("archive", 0) > time.monotonic():
             return set()
         first = names.index("archive")
         keys = {name: key for name, key in ARCHIVED_NOTICES.items() if name in names[first + 1:]}
@@ -172,15 +222,21 @@ class MarketData:
 
         from forliosa.models import DatasetStatus
 
-        try:
-            with session_fn() as db:
-                rows = db.execute(select(DatasetStatus.key, DatasetStatus.fetched_at).where(
-                    DatasetStatus.key.in_(list(keys.values())))).all()
-            fetched = {key: at for key, at in rows}
-        except Exception as exc:  # the live endpoints answer instead
-            log.warning("archive status unavailable: %s", exc)
-            return set()
-        since = datetime.now(UTC) - timedelta(seconds=NOTICES_FRESH_SECONDS)
+        hit = self._notice_status
+        if hit is not None and time.monotonic() < hit[0]:
+            fetched = hit[1]
+        else:
+            try:
+                with session_fn() as db:
+                    rows = db.execute(select(DatasetStatus.key, DatasetStatus.fetched_at).where(
+                        DatasetStatus.key.in_(list(keys.values())))).all()
+                fetched = {key: at for key, at in rows}
+            except Exception as exc:  # the live endpoints answer instead
+                log.warning("archive status unavailable: %s", exc)
+                return set()
+            # read again after NOTICE_STATUS_TTL_SECONDS (2026-11-17: once per holding on a ledger summary)
+            self._notice_status = (time.monotonic() + NOTICE_STATUS_TTL_SECONDS, fetched)
+        since = notices_trusted_since(datetime.now(UTC))
         return {name for name, key in keys.items() if (at := fetched.get(key)) is not None and at >= since}
 
     def _real_anchor(self, symbol: str) -> tuple[date, Decimal] | None:
@@ -201,13 +257,56 @@ class MarketData:
         """Every known instrument by symbol, rebuilt at most hourly. Providers' own lists come first (shioaji-data's
         cards, then the built-in catalog of the demo provider: names, Chinese aliases); a provider's ``listings()``
         (the archive: every ETF in the official close files, SEC's US tickers) only adds symbols nobody else named.
-        If a listing cannot be read (database down), the master is rebuilt again after ``LISTINGS_RETRY_SECONDS``."""
+        If a listing cannot be read (database down), the master is rebuilt again after ``LISTINGS_RETRY_SECONDS``.
+
+        An expired master (up to ``MASTER_STALE_SECONDS`` past its time) is still answered while a background thread
+        rebuilds it (2026-11-17: the hourly rebuild took 0.1–0.8 s of whichever request came first); only a request
+        with no master at all, or a much older one, waits for the rebuild."""
+        now = time.monotonic()
         with self._lock:
-            if self._master is not None and time.monotonic() < self._master_until:
-                return self._master
+            master, until = self._master, self._master_until
+        if master is not None and now < until:
+            return master
+        if master is not None and now < until + MASTER_STALE_SECONDS:
+            self._refresh_master()
+            return master
         # One rebuild at a time: requests that need the master meanwhile wait for it instead of each downloading
         # shioaji-data's cards (2.8 MB) and reading the listings again (2026-11-16: three at once on a cold start)
         return self._flight.do("master", self._rebuild_master)
+
+    def _refresh_master(self) -> None:
+        """Rebuild the master in a background thread (one at a time); the old one answers meanwhile."""
+        with self._lock:
+            if self._master_refreshing:
+                return
+            self._master_refreshing = True
+
+        def run() -> None:
+            try:
+                self._flight.do("master", self._rebuild_master)
+            except Exception as exc:  # the old master stays; the next request after expiry tries again
+                log.warning("instrument master refresh failed: %s", exc)
+            finally:
+                with self._lock:
+                    self._master_refreshing = False
+
+        threading.Thread(target=run, name="instrument-master", daemon=True).start()
+
+    def warm_up(self) -> None:
+        """Build what the first requests after a start would otherwise build themselves: the instrument master and
+        the providers' own warm-up (shioaji-data's latest closes). Failures are logged; requests retry as before."""
+        try:
+            self.master()
+        except Exception as exc:  # pragma: no cover - logged; the first request builds it
+            log.warning("instrument master warm-up failed: %s", exc)
+        for p in self.providers:
+            fn = getattr(p, "warm_up", None)
+            if fn is None or self._down_until.get(p.name, 0) > time.monotonic():
+                continue
+            try:
+                fn()
+            except Exception as exc:  # pragma: no cover - logged
+                log.warning("market data provider %s warm-up failed: %s", p.name, exc)
 
     def _rebuild_master(self) -> dict[str, InstrumentInfo]:
         with self._lock:
@@ -240,7 +339,6 @@ class MarketData:
         with self._lock:
             self._master, self._by_code, self._index = merged, by_code, index
             self._master_until = time.monotonic() + ttl
-        # hourly, inside whichever request needs it first: its time shows in that request (2026-11-16 AI latency)
         log.info("instrument master rebuilt: %d instruments in %.2f s", len(merged), time.monotonic() - started)
         return merged
 
@@ -401,7 +499,8 @@ class MarketData:
     # -- reference price (平盤) and limits ---------------------------------------------------------
     def _provider_map(self, method: str, symbols: list[str], d: date) -> dict[str, Any]:
         out: dict[str, Any] = {}
-        archived = functools.cache(self._archived_notices)  # read once, after the archive has answered
+        failed: set[str] = set()
+        archived = functools.cache(lambda: self._archived_notices(failed))  # read once, after the archive was asked
         for p in self._available():
             fn = getattr(p, method, None)
             if fn is None:
@@ -411,7 +510,7 @@ class MarketData:
                 break
             if method == "ex_rights_on" and p.name in ARCHIVED_NOTICES and p.name in archived():
                 continue  # the archive's copy of the same notices answered already
-            got = self._call(p, lambda fn=fn, need=need: fn(need, d)) or {}
+            got = self._call(p, lambda fn=fn, need=need: fn(need, d), failed) or {}
             for s, v in got.items():
                 out.setdefault(s, v)
         return out
@@ -485,6 +584,62 @@ class MarketData:
             candles = self._with_today(symbol, candles, end)
         return HistoryResult(symbol, candles, is_demo, "+".join(dict.fromkeys(names)))
 
+    def histories(self, symbols: list[str], start: date, end: date, backfill: bool = False) -> dict[str, HistoryResult]:
+        """:meth:`history` of many symbols, the same answer for each: a provider with ``histories`` (the archive) is
+        asked once for all of them, the others one symbol at a time as before; the quotes that complete today's candle
+        are read in one batch first (2026-11-17: one archive query, one pooled connection and one quote lookup per
+        symbol on the performance page, the watchlist and the group pages)."""
+        syms = list(dict.fromkeys(symbols))
+        collected: dict[str, dict[date, Candle]] = {s: {} for s in syms}
+        names: dict[str, list[str]] = {s: [] for s in syms}
+        demo: dict[str, bool] = dict.fromkeys(syms, False)
+        open_: set[str] = set(syms)  # still asking the next provider (history() stops after a full provider)
+        for p in self._available():
+            need = [s for s in syms if s in open_ and not (p.is_demo and collected[s])]
+            if p.is_demo:
+                open_ -= {s for s in syms if collected[s]}  # history() stops before demo once it has candles
+            if not need:
+                continue
+            wants = backfill and getattr(p, "accepts_backfill", False)
+            batch = _batch_method(p, "histories", "history")
+            if batch is not None:
+                got = self._call(p, lambda batch=batch, need=need, wants=wants: (
+                    batch(need, start, end, backfill=True) if wants else batch(need, start, end))) or {}
+            else:
+                got = {}
+                for s in need:
+                    if self._down_until.get(p.name, 0) > time.monotonic():
+                        break  # failed for an earlier symbol: history() would skip it for the rest
+                    got[s] = self._call(p, lambda p=p, s=s, wants=wants: (
+                        p.history(s, start, end, backfill=True) if wants else p.history(s, start, end)))
+            for s in need:
+                value = got.get(s)
+                if not value:
+                    continue
+                added = False
+                for c in value:
+                    if c.t not in collected[s]:
+                        collected[s][c.t] = c
+                        added = True
+                if added:
+                    names[s].extend(_row_sources(p, "history", s))
+                    demo[s] |= p.is_demo
+                if not getattr(p, "partial_history", False):
+                    open_.discard(s)
+        today = [s for s in syms if collected[s] and not demo[s]]
+        if today:
+            self.quotes(today)  # one batch: _with_today's quote() of each symbol is then a cache hit
+        out: dict[str, HistoryResult] = {}
+        for s in syms:
+            if not collected[s]:
+                out[s] = HistoryResult(s, [], False, "")
+                continue
+            candles = [collected[s][d] for d in sorted(collected[s])]
+            if not demo[s]:
+                candles = self._with_today(s, candles, end)
+            out[s] = HistoryResult(s, candles, demo[s], "+".join(dict.fromkeys(names[s])))
+        return out
+
     def _with_today(self, symbol: str, candles: list[Candle], end: date) -> list[Candle]:
         """Daily sources publish after the close; append the latest day from a complete real quote."""
         q = self.quote(symbol)
@@ -553,48 +708,87 @@ class MarketData:
 
     def dividends(self, symbol: str) -> Answer[list[DividendEvent]]:
         """Dividends merged from every real provider (by ex-date); demo only when none has any."""
-        merged: dict[Any, DividendEvent] = {}
-        names: list[str] = []
-        archived = functools.cache(self._archived_notices)  # read once, after the archive has answered
+        return self.dividends_many([symbol])[symbol]
+
+    def dividends_many(self, symbols: list[str]) -> dict[str, Answer[list[DividendEvent]]]:
+        """:meth:`dividends` of many symbols, the same answer for each: a provider with ``dividends_many`` (the
+        archive) is asked once for all of them, the live notice files one symbol at a time as before and only when the
+        archive's copy is not recent; the archive's status is read once (2026-11-17: ~130 queries for a 40-holding
+        ledger summary)."""
+        syms = list(dict.fromkeys(symbols))
+        merged: dict[str, dict[Any, DividendEvent]] = {s: {} for s in syms}
+        names: dict[str, list[str]] = {s: [] for s in syms}
+        failed: set[str] = set()
+        archived = functools.cache(lambda: self._archived_notices(failed))  # read once, after the archive was asked
         for p in self._available():
             if p.is_demo:
                 continue
             if p.name in ARCHIVED_NOTICES and p.name in archived():
                 continue  # the archive's copy of the same notices answered already
-            value = self._call(p, lambda p=p: p.dividends(symbol))
-            if not value:
-                continue
-            names.extend(_row_sources(p, "dividends", symbol))
-            for e in value:
-                key = e.ex_dividend_date or (e.year, e.period)
-                cur = merged.get(key)
-                if cur is None or (not cur.cash_dividend and not cur.stock_dividend
-                                   and (e.cash_dividend or e.stock_dividend)):
-                    merged[key] = e if cur is None or e.payment_date else replace(e, payment_date=cur.payment_date)
-                elif cur.payment_date is None and e.payment_date is not None:
-                    merged[key] = replace(cur, payment_date=e.payment_date, period=e.period, year=e.year)
-        if merged:
-            from forliosa.marketdata.archive_provider import attach_resolutions
+            batch = _batch_method(p, "dividends_many", "dividends")
+            if batch is not None:
+                got = self._call(p, lambda batch=batch: batch(syms), failed) or {}
+            else:
+                got = {}
+                for s in syms:
+                    if p.name in failed or self._down_until.get(p.name, 0) > time.monotonic():
+                        break  # failed for an earlier symbol: dividends() would skip it for the rest
+                    got[s] = self._call(p, lambda p=p, s=s: p.dividends(s), failed)
+            for s in syms:
+                value = got.get(s)
+                if not value:
+                    continue
+                names[s].extend(_row_sources(p, "dividends", s))
+                into = merged[s]
+                for e in value:
+                    key = e.ex_dividend_date or (e.year, e.period)
+                    cur = into.get(key)
+                    if cur is None or (not cur.cash_dividend and not cur.stock_dividend
+                                       and (e.cash_dividend or e.stock_dividend)):
+                        into[key] = e if cur is None or e.payment_date else replace(e, payment_date=cur.payment_date)
+                    elif cur.payment_date is None and e.payment_date is not None:
+                        into[key] = replace(cur, payment_date=e.payment_date, period=e.period, year=e.year)
+        out: dict[str, Answer[list[DividendEvent]]] = {}
+        for s in syms:
+            if merged[s]:
+                from forliosa.marketdata.archive_provider import attach_resolutions
 
-            events = sorted(attach_resolutions(list(merged.values())), key=dividend_sort_key, reverse=True)
-            return Answer(events, False, "+".join(dict.fromkeys(names)))
-        if self.demo is not None and self.demo in self._available():
-            value = self._call(self.demo, lambda: self.demo.dividends(symbol))
-            if value:
-                return Answer(list(value), True, self.demo.name)
-        return Answer([], False, "")
+                events = sorted(attach_resolutions(list(merged[s].values())), key=dividend_sort_key, reverse=True)
+                out[s] = Answer(events, False, "+".join(dict.fromkeys(names[s])))
+                continue
+            out[s] = Answer([], False, "")
+            if self.demo is not None and self.demo in self._available():
+                value = self._call(self.demo, lambda s=s: self.demo.dividends(s))
+                if value:
+                    out[s] = Answer(list(value), True, self.demo.name)
+        return out
 
     def corporate_events(self, symbol: str) -> list[CorporateEvent]:
         """Known real splits (reference data) plus any a real provider reports."""
-        events = [CorporateEvent(symbol, d, "split", r) for d, r in KNOWN_SPLITS.get(symbol, ())]
+        return self.corporate_events_many([symbol])[symbol]
+
+    def corporate_events_many(self, symbols: list[str]) -> dict[str, list[CorporateEvent]]:
+        """:meth:`corporate_events` of many symbols, the same answer for each (the archive is asked once)."""
+        syms = list(dict.fromkeys(symbols))
+        out = {s: [CorporateEvent(s, d, "split", r) for d, r in KNOWN_SPLITS.get(s, ())] for s in syms}
         for p in self._available():
             if p.is_demo:
                 continue
-            more = self._call(p, lambda p=p: p.corporate_events(symbol))
-            for e in more or []:
-                if all((e.date, e.kind) != (x.date, x.kind) for x in events):
-                    events.append(e)
-        return sorted(events, key=lambda e: e.date)
+            batch = _batch_method(p, "corporate_events_many", "corporate_events")
+            if batch is not None:
+                got = self._call(p, lambda batch=batch: batch(syms)) or {}
+            else:
+                got = {}
+                for s in syms:
+                    if self._down_until.get(p.name, 0) > time.monotonic():
+                        break  # failed for an earlier symbol: corporate_events() would skip it for the rest
+                    got[s] = self._call(p, lambda p=p, s=s: p.corporate_events(s))
+            for s in syms:
+                events = out[s]
+                for e in got.get(s) or []:
+                    if all((e.date, e.kind) != (x.date, x.kind) for x in events):
+                        events.append(e)
+        return {s: sorted(v, key=lambda e: e.date) for s, v in out.items()}
 
     def monthly_revenue(self, symbol: str) -> Answer[list[RevenueRow]]:
         ans = self._first("monthly_revenue", symbol)
@@ -665,9 +859,23 @@ class MarketData:
             own = fn(symbol) if symbol else None
             if own is None and symbol and market_of_symbol(symbol) == "US":
                 return None
-            return own or fn(None)
+            return own or self._archive_start(fn)
         except Exception:  # the archive is optional (e.g. no database yet)
             return None
+
+    def _archive_start(self, fn: Callable[[str | None], date | None]) -> date | None:
+        """Where the Taiwan archive begins, remembered for ``ARCHIVE_START_TTL_SECONDS``: the query skips every
+        history-backfill row before the first official close (2026-11-17: 3.0M rows, 1–3 s per group leaderboard /
+        member page). It only moves if an older official close is stored; ``None`` (no archive yet) is not
+        remembered."""
+        now = time.monotonic()
+        hit = self._archive_start_cache
+        if hit is not None and now < hit[0]:
+            return hit[1]
+        value = fn(None)
+        if value is not None:
+            self._archive_start_cache = (now + ARCHIVE_START_TTL_SECONDS, value)
+        return value
 
     def fx_series(self, pair: str, start: date, end: date) -> tuple[dict[date, Decimal], bool]:
         series, is_demo, _source = self.fx_series_with_source(pair, start, end)
@@ -680,6 +888,31 @@ class MarketData:
             if value:
                 return dict(value), p.is_demo, "+".join(_row_sources(p, "fx_history", pair))
         return {}, False, ""
+
+
+def _batch_method(provider: BaseProvider, batch: str, single: str) -> Callable[..., Any] | None:
+    """``provider``'s batch method (``histories``, ``dividends_many``, ``corporate_events_many``), unless a subclass
+    overrides the one-symbol method below where the batch method is defined: then the one-symbol method is what that
+    provider means, and it is asked one symbol at a time, as before."""
+    fn = getattr(provider, batch, None)
+    if fn is None:
+        return None
+    mro = type(provider).__mro__
+    owner_batch = next((k for k in mro if batch in vars(k)), None)
+    owner_single = next((k for k in mro if single in vars(k)), None)
+    if owner_batch is not None and owner_single is not None and owner_single is not owner_batch \
+            and issubclass(owner_single, owner_batch):
+        return None
+    return fn
+
+
+def _pool_exhausted(exc: BaseException) -> bool:
+    """SQLAlchemy's pool timeout (``QueuePool limit … reached, connection timed out``), not a database failure."""
+    try:
+        from sqlalchemy.exc import TimeoutError as PoolTimeout
+    except ImportError:  # pragma: no cover - SQLAlchemy is a dependency
+        return False
+    return isinstance(exc, PoolTimeout)
 
 
 def dividend_sort_key(e: DividendEvent) -> date:

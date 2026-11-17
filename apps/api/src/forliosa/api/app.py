@@ -7,8 +7,9 @@ import logging
 from fastapi import APIRouter, Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from starlette.middleware.gzip import GZipMiddleware
 
-from forliosa import logredact
+from forliosa import logredact, perf
 from forliosa.api.errors import install_error_handlers
 from forliosa.api.middleware import VIEW_AS_HEADER, OriginCheckMiddleware, ViewAsMiddleware
 from forliosa.api.routes import (
@@ -57,6 +58,25 @@ def dataset_status() -> dict[str, dict]:
     except Exception:  # an old database without the table: attributions still work
         logging.getLogger(__name__).warning("dataset_status unavailable", exc_info=True)
         return {}
+
+
+def warm_up_in_background() -> None:
+    """At start-up (``forliosa.main``, not the tests): build the instrument master and shioaji-data's latest closes
+    before the first request needs them, then freeze the long-lived objects out of the garbage collector's full
+    collections (``forliosa.perf.freeze_heap``) — once: a freeze pins whatever is alive at that moment, in-flight
+    requests included, so repeating it (it ran after every hourly master rebuild) kept their cyclic garbage forever."""
+    import threading
+
+    def run() -> None:
+        log = logging.getLogger(__name__)
+        try:
+            get_market_data().warm_up()
+        except Exception:  # requests build what is missing themselves, as before
+            log.warning("warm-up failed", exc_info=True)
+        perf.freeze_heap()
+        log.info("warm-up done")
+
+    threading.Thread(target=run, name="warm-up", daemon=True).start()
 
 
 def check_production_settings(settings) -> None:
@@ -109,6 +129,12 @@ def create_app() -> FastAPI:
         allow_methods=["GET", "POST", "PATCH", "PUT", "DELETE", "OPTIONS"],
         allow_headers=["Content-Type", "Accept", "Last-Event-ID", VIEW_AS_HEADER],
     )
+    # JSON over 1 KB is gzipped (the API's domain is DNS-only at Cloudflare, so nothing compressed it: the watchlist,
+    # polled every minute, was 41 KB, 6 KB gzipped). Server-sent events are never compressed (Starlette's default).
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=5)
+    # Outermost: the slow-request log times the whole request, CORS and compression included (``forliosa.perf``).
+    app.add_middleware(perf.SlowRequestMiddleware, prefix=API_PREFIX)
+    perf.install_gc_log()
     install_error_handlers(app)
 
     api = APIRouter(prefix=API_PREFIX)

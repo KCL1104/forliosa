@@ -908,6 +908,18 @@ class ChatTurn:
             return True
         return False
 
+    def _release_connection(self) -> None:
+        """End the turn session's read transaction before waiting on the model, so its pooled connection serves other
+        requests while the answer streams (2026-11-17: a chat held its connections for the whole turn). Every write of
+        a turn commits on the spot, so only reads are open here; ``expire_on_commit=False`` keeps the loaded objects,
+        and the next query takes a connection again. A session with unflushed changes is left alone."""
+        db = self.db
+        try:
+            if db.in_transaction() and not (db.new or db.dirty or db.deleted):
+                db.commit()
+        except Exception:  # pragma: no cover - the next query reports a broken connection itself
+            log.warning("AI turn: could not release the session's connection", exc_info=True)
+
     def _tid(self) -> str:
         """The thread in a timing log line: its id's prefix only."""
         return self.thread.id[:16] if self.thread is not None else "-"
@@ -925,6 +937,7 @@ class ChatTurn:
             params = self.params(model, self.history + new)
             emitted = False
             state.round_start = None
+            self._release_connection()
             span = self.timing.call()
             try:
                 with slot.client.messages.stream(**params) as stream:
@@ -1299,6 +1312,7 @@ class ChatTurn:
         head: str | None = "" if first_cjk else None
         head_max = EDITOR_HEAD_CHARS + (first_cjk.start() if first_cjk else 0)
         headings = None if _HEADING.search(body) else _HeadingFilter()
+        self._release_connection()
         with client.messages.stream(model=model, max_tokens=4000, system=EDITOR_SYSTEM,
                                     output_config={"effort": "low"}, **_editor_thinking(model),
                                     messages=[{"role": "user", "content": body}]) as stream:

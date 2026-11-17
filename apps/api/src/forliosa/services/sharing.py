@@ -59,7 +59,7 @@ from forliosa.models import (
     User,
 )
 from forliosa.services.coverage import ymd
-from forliosa.services.ledger_io import FxBook, load_ledger_input
+from forliosa.services.ledger_io import FxBook, FxLoader, FxMemo, LedgerInput, load_ledger_input
 from forliosa.services.portfolio import PortfolioState, compute_state
 from forliosa.services.scope import ViewScope, set_view_scope
 from forliosa.timeutil import (
@@ -247,8 +247,9 @@ def member_period_returns(db: Session, md: MarketData, user: User, window: Perio
     return member_period_returns_ex(db, md, user, window)[0]
 
 
-def member_period_returns_ex(db: Session, md: MarketData, user: User,
-                             window: PeriodWindow) -> tuple[dict[str, float | None], bool]:
+def member_period_returns_ex(db: Session, md: MarketData, user: User, window: PeriodWindow,
+                             inp: LedgerInput | None = None,
+                             fx_loader: FxLoader | None = None) -> tuple[dict[str, float | None], bool]:
     """Time-weighted returns of all of ``user``'s accounts combined (TWD, closes) for every period of the window
     (leaderboard: day / month / year; weekly digest: week), from the window's common start dates. A member who starts
     holding during a period counts from the first day with holdings.
@@ -257,16 +258,16 @@ def member_period_returns_ex(db: Session, md: MarketData, user: User,
     ledger's 今日 and the performance page: the second value says so (product owner 2026-11-14 — before this the
     member's every period was None, so someone with a 複委託 account never got a rank). Any other gap → None."""
     none = dict.fromkeys(window.starts)
-    inp = load_ledger_input(db, user)
+    inp = inp if inp is not None else load_ledger_input(db, user)
     if inp.first_date is None or inp.first_date > window.end:
         return none, False
     axis = _axis(window)
     symbols = sorted({t.symbol for t in inp.transactions if t.symbol and t.type in (
         "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")})
     lookback = axis[0] - timedelta(days=14)
-    closes = {s: _forward_filled(axis, {c.t: c.c for c in md.history(s, lookback, window.end).candles})
-              for s in symbols}
-    fx = FxBook.load(md, inp.first_date, window.end)
+    histories = md.histories(symbols, lookback, window.end)
+    closes = {s: _forward_filled(axis, {c.t: c.c for c in histories[s].candles}) for s in symbols}
+    fx = (fx_loader or FxBook.load)(md, inp.first_date, window.end)
     txns = inp.ledger_txns(fx)
 
     def run(skip: set[str]):
@@ -329,6 +330,14 @@ class Projector:
         self._returns: dict[str, dict[str, float | None]] = {}
         self._excluded: dict[str, bool] = {}
         self._window = window  # default: the leaderboard's day / month / year window
+        # each member's ledger is read once and the FX series once per range, for both of its uses (2026-11-17)
+        self._inputs: dict[str, LedgerInput] = {}
+        self._fx = FxMemo()
+
+    def ledger_input(self, user: User) -> LedgerInput:
+        if user.id not in self._inputs:
+            self._inputs[user.id] = load_ledger_input(self.db, user)
+        return self._inputs[user.id]
 
     @property
     def window(self) -> PeriodWindow:
@@ -338,13 +347,14 @@ class Projector:
 
     def state(self, user: User) -> PortfolioState:
         if user.id not in self._states:
-            self._states[user.id] = compute_state(self.db, user, self.md)
+            self._states[user.id] = compute_state(self.db, user, self.md, inp=self.ledger_input(user),
+                                                  fx_loader=self._fx)
         return self._states[user.id]
 
     def period_returns(self, user: User) -> dict[str, float | None]:
         if user.id not in self._returns:
-            self._returns[user.id], self._excluded[user.id] = member_period_returns_ex(self.db, self.md, user,
-                                                                                       self.window)
+            self._returns[user.id], self._excluded[user.id] = member_period_returns_ex(
+                self.db, self.md, user, self.window, inp=self.ledger_input(user), fx_loader=self._fx)
         return self._returns[user.id]
 
     def excludes_unpriced(self, user: User) -> bool:
@@ -902,13 +912,15 @@ def _day_moves(md: MarketData, symbols: list[str], day: date) -> dict[str, float
     tw = [s for s in symbols if market_of_symbol(s) != "US"]
     quotes = md.quotes(tw) if tw else {}
     out: dict[str, float | None] = {s: None for s in symbols}
+    older = [s for s in tw if (q := quotes.get(s)) is None or q.trade_date != day]
+    histories = md.histories(older, day - timedelta(days=14), day) if older else {}
     for s in tw:
         q = quotes.get(s)
         value: float | None = None
         if q is not None and q.trade_date == day:
             value = quote_out(q)["change_pct"]
         else:
-            candles = md.history(s, day - timedelta(days=14), day).candles
+            candles = histories[s].candles
             if len(candles) >= 2 and candles[-1].t == day and candles[-2].c:
                 value = float(candles[-1].c / candles[-2].c - 1)
         out[s] = pct(value) if value is not None else None

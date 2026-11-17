@@ -110,9 +110,12 @@ def instrument_dividends(symbol: str, _user: User = Depends(current_user)):
 async def stream_quotes(request: Request, symbols: str = Query(max_length=2000),
                         interval: float | None = Query(default=None, ge=1, le=60),
                         once: bool = Query(default=False, description="送出一輪後結束（測試用）"),
-                        _user: User = Depends(current_user)):
+                        _user: User = Depends(current_user), db: Session = Depends(get_db)):
     syms = _symbols(symbols)
     md = get_market_data()
+    # The sign-in check's session: the stream reads quotes only, so its pooled connection goes back now, not when the
+    # stream ends. In the thread pool: returning it rolls back on the database (a round trip off the event loop).
+    await run_in_threadpool(db.close)
     every = interval or get_settings().stream_interval_seconds
 
     async def events():

@@ -162,6 +162,17 @@ def roomy_ai_quota(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def fresh_process_caches():
+    """The in-process read caches (``forliosa.perfcache``: related stocks' company pool, admin row counts) start empty
+    in every test: each test has its own database."""
+    from forliosa import perfcache
+
+    perfcache.clear_all()
+    yield
+    perfcache.clear_all()
+
+
+@pytest.fixture(autouse=True)
 def builtin_calendar():
     """Tests that archive TWSE's holiday schedule must not leak the official calendar into other tests (nor the NYSE
     holidays a market-report test loads)."""

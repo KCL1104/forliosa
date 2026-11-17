@@ -64,6 +64,34 @@ def test_a_web_answer_is_edited_before_it_is_shown(client, pool, fake, engine, a
         assert db.scalar(select(AiUsage).order_by(AiUsage.id.desc()).limit(1)).feature == "chat"  # charged as chat
 
 
+def test_the_editor_call_holds_no_pooled_connection(client, pool, fake, engine, ai_env, monkeypatch):
+    """Like the answer's own model calls, the editor's stream starts with the turn's connection back in the pool, even
+    when the turn read the database just before it."""
+    from forliosa.ai.chat import ChatTurn
+
+    real_editor = ChatTurn._editor_stream
+
+    def read_first(self, thread, body):
+        self.db.scalar(select(AiMessage.id).limit(1))  # opens a read transaction on the turn's session
+        return real_editor(self, thread, body)
+
+    monkeypatch.setattr(ChatTurn, "_editor_stream", read_first)
+    ai_env(AI_ANSWER_EDITOR="true")
+    web_turn(fake)
+    fake.reply(text(EDITED))
+    replies, checked_out = list(fake.script), []
+    fake.script.clear()
+
+    def respond(_body):
+        checked_out.append(engine.pool.checkedout())
+        return replies.pop(0)
+
+    fake.responder = respond
+    status, events = chat(client, "台積電今天怎麼了？", page={"route": "/stock/2330.TW", "symbol": "2330.TW"})
+    assert status == 200 and shown(events) == EDITED
+    assert checked_out == [0, 0]  # the answer, then the editor
+
+
 def test_the_draft_is_shown_when_the_editor_fails_or_drops_a_number(client, pool, fake, ai_env):
     ai_env(AI_ANSWER_EDITOR="true")
     web_turn(fake)

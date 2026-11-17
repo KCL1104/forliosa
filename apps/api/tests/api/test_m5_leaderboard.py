@@ -147,6 +147,13 @@ def test_member_without_prices_has_no_periods_and_ranks_last(client, other_clien
         return real(symbol, start, end)
 
     monkeypatch.setattr(market, "history", no_tsmc)
+    real_many = market.histories
+
+    def no_tsmc_many(symbols, start, end, backfill=False):  # the group pages read their members' closes in a batch
+        return {s: (h if s != "2330.TW" else HistoryResult(s, [], False, ""))
+                for s, h in real_many(symbols, start, end, backfill).items()}
+
+    monkeypatch.setattr(market, "histories", no_tsmc_many)
     lb = other_client.get(f"{API}/groups/{board['gid']}/leaderboard", params={"period": "day"}).json()
     assert [(e["user_id"], e["rank"], e["return_pct"]) for e in lb["entries"]][-1] == (board["a"], None, None)
     assert lb["entries"][0]["rank"] == 1
@@ -169,6 +176,13 @@ def test_holdings_without_closes_are_left_out_of_the_periods(client, other_clien
         return real(symbol, start, end)
 
     monkeypatch.setattr(market, "history", no_hon_hai)
+    real_many = market.histories
+
+    def no_hon_hai_many(symbols, start, end, backfill=False):  # the group pages read their members' closes in a batch
+        return {s: (h if s != "2317.TW" else HistoryResult(s, [], False, ""))
+                for s, h in real_many(symbols, start, end, backfill).items()}
+
+    monkeypatch.setattr(market, "histories", no_hon_hai_many)
     lb = client.get(f"{API}/groups/{board['gid']}/leaderboard", params={"period": "month"}).json()
     me = next(e for e in lb["entries"] if e["is_me"])
     assert me["return_pct"] is not None and me["rank"] is not None and me["excludes_unpriced"] is True

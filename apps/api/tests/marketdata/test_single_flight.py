@@ -15,7 +15,7 @@ import httpx
 from forliosa.marketdata import http
 from forliosa.marketdata.base import BaseProvider, InstrumentInfo, ProviderUnavailable, tw_symbol
 from forliosa.marketdata.http import RateLimiter, SingleFlight, sha256_hex
-from forliosa.marketdata.service import MarketData
+from forliosa.marketdata.service import MASTER_STALE_SECONDS, MarketData
 from forliosa.marketdata.shioaji_data import MANIFEST_STALE_SECONDS, MANIFEST_TTL_SECONDS, ShioajiDataProvider
 from forliosa.marketdata.tpex import TpexOpenApiProvider
 from forliosa.marketdata.twse import TwseOpenApiProvider
@@ -272,5 +272,7 @@ def test_master_is_rebuilt_once_for_concurrent_requests(caplog):
         results, errors = run_threads(5, lambda: md.resolve("2308"))
     assert results == ["2308.TW"] * 5 and not errors and catalog.calls == 1
     assert caplog.text.count("instrument master rebuilt: 1 instruments in") == 1  # its time, for slow requests
-    md._master_until = 0.0  # expired: the next request rebuilds it again
+    # long expired (an expired master younger than MASTER_STALE_SECONDS answers while a background rebuild runs):
+    # the next request rebuilds it again and waits for it
+    md._master_until = time.monotonic() - MASTER_STALE_SECONDS - 1
     assert md.instrument("2308").name == "台達電" and catalog.calls == 2

@@ -1,6 +1,6 @@
 import { useQuery } from "@tanstack/react-query"
 import { appToday } from "@/api"
-import { listTransactionsUpTo, useRecurringPlans, useUpcoming } from "@/api/queries"
+import { listTransactionsUpTo, useRecurringPlans, useUpcomingRecurring } from "@/api/queries"
 import type { Draft, Suggestion } from "./types"
 import type { RecurringPlan, Transaction, UpcomingItem } from "@/api/types"
 import { codeOf } from "@/lib/tick"
@@ -113,7 +113,7 @@ export function missedDebits(plans: RecurringPlan[], today: string, buys: Transa
 export function useRecurringOffers(): Suggestion[] {
   const today = appToday()
   const from = addDays(today, -MISSED_WINDOW_DAYS)
-  const upcoming = useUpcoming(7)
+  const upcoming = useUpcomingRecurring(7)
   const plans = useRecurringPlans()
   const drafts = useAi((s) => s.drafts)
   const due = (upcoming.data ?? []).some((u) => u.type === "recurring" && u.date === today)

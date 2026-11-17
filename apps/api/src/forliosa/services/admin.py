@@ -14,7 +14,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from forliosa import history_backfill
+from forliosa import history_backfill, perfcache
 from forliosa.ai import store
 from forliosa.ai.keypool import get_key_pool
 from forliosa.api.errors import ApiError, not_found, unprocessable
@@ -84,8 +84,17 @@ def datasets_summary(db: Session, today: date | None = None) -> list[dict[str, A
     return out
 
 
+# The admin overview counted prices_daily rows of two sources on every load: two full scans of 3M rows, ~0.5 s
+# (2026-11-17). The counts are kept 10 minutes (exact, at most 10 minutes old).
+_PRICE_ROWS = perfcache.TtlCache("admin.price_rows", ttl=600, maxsize=8)
+
+
+def cached_price_rows(db: Session, source: str) -> int:
+    return _PRICE_ROWS.get_or_compute(source, lambda: history_backfill.price_rows(db, source))
+
+
 def backfill_summary(db: Session) -> dict[str, Any]:
-    counts = history_backfill.summary(db)
+    counts = history_backfill.summary(db, rows_fn=cached_price_rows)
     return {"enabled": history_backfill_enabled(), "rows": int(counts.get("rows", 0)),
             "pending": int(counts.get("pending", 0)),
             "symbols": {s: int(counts.get(s, 0)) for s in BACKFILL_STATUSES}}
@@ -161,7 +170,8 @@ def overview(db: Session) -> dict[str, Any]:
     from forliosa import us_prices
 
     return {"users": users_summary(db), "ai": ai_summary(db), "datasets": datasets_summary(db),
-            "history_backfill": backfill_summary(db), "us_prices": us_prices.summary(db), "news": news_summary(db)}
+            "history_backfill": backfill_summary(db), "us_prices": us_prices.summary(db, rows_fn=cached_price_rows),
+            "news": news_summary(db)}
 
 
 # -- news takedown blocklist --------------------------------------------------------------------------------

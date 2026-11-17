@@ -121,6 +121,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `AI_DAILY_BRIEFING_ENABLED` | 選用（worker） | `true` | 每日收盤簡報的總開關（預設開）。每個人另外在設定頁打開才會產生（預設關）。worker 在 22:20、23:50、06:10、08:20 看一次：兩個交易所當天的收盤價都存好了才寫，每人每天一則，30 天後刪除。有開的人每天約 US$0.03–0.05 |
 | `PRICE_HISTORY_SOURCE` | 選用（api 與 worker 都要設） | `yahoo` | 存檔開始以前的日線用 Yahoo Finance 回補（產品負責人 2026-11-13 決定；不是授權來源）。worker 每 10 分鐘回補一批（每檔一個請求，持有與觀察中的先做），全部問過一次就停，之後每天看一次有沒有新掛牌的；api 的走勢圖、技術指標、走勢小圖才會讀這些列。沒設＝不抓也不讀。看進度：`uv run python -m forliosa.history_backfill status`；整批刪除：`uv run python -m forliosa.history_backfill drop`（刪完把這個變數拿掉） |
 | `PRICE_HISTORY_YEARS` | 選用 | `5` | 回補幾年（1–10，預設 5） |
+| `SLOW_REQUEST_MS` | 選用（api） | `800` | 慢請求記錄的門檻（毫秒，預設 800）：比這慢的請求在 log 寫一行 `slow_request`（路由樣板、毫秒、SQL 句數、連線取用、同時請求數；不寫使用者、代號或參數）。`0` 每個請求都記。在 Railway 的 Logs 搜尋 `slow_request`、`request_summary`、`gc_pause` |
 | `CLAUDE_API_KEY_1`、`_2`、`_3` | AI 用 | Claude API 金鑰（三把，分屬三個 workspace） | **機密**：只放在 Railway Variables。「問 AI」、為什麼、法人觀點都在 api 服務執行，沒設時這些功能顯示「AI 暫時無法使用」。worker 也要設同樣三把（群組週報、新聞補缺、公司簡介）。建議同時在 Anthropic Console 替每個 workspace 設每月花費上限 |
 | `SEC_CONTACT_EMAIL` | 美股基本面用 | 一個聯絡用 email | 只放在對 SEC EDGAR 請求的 User-Agent（SEC 要求自動化存取要留聯絡方式）；沒設時不抓美股基本面與申報。api 與 worker 都要設 |
 | `COOKIE_DOMAIN` | | 留空或 `.example.com` | 見第 1 節 |

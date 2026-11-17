@@ -50,6 +50,8 @@ export const qk = {
   why: (symbol: string) => ["why", symbol] as const,
   watchlist: ["watchlist"] as const,
   upcoming: (days: number) => ["portfolio", "upcoming", days] as const,
+  /** 只有定期定額扣款（`types=recurring`）：AI 面板在每一頁都讀，不算持股與股利 */
+  upcomingRecurring: (days: number) => ["portfolio", "upcoming", days, "recurring"] as const,
   // 放在 portfolio 底下：交易改了就跟著重新計算
   closed: (accountId?: string) => ["portfolio", "closed", accountId ?? "all"] as const,
   positionHistory: (symbol: string) => ["portfolio", "position-history", symbol] as const,
@@ -306,6 +308,14 @@ export function useWatchlist() {
 }
 export function useUpcoming(days = 7) {
   return useQuery({ queryKey: qk.upcoming(days), queryFn: () => api.getUpcoming(days), staleTime: 10 * 60_000 })
+}
+/** 本週事項裡的定期定額扣款（和 `useUpcoming` 的 recurring 項目相同；後端不重算帳本、不讀股利） */
+export function useUpcomingRecurring(days = 7) {
+  return useQuery({
+    queryKey: qk.upcomingRecurring(days),
+    queryFn: () => api.getUpcoming(days, { types: "recurring" }),
+    staleTime: 10 * 60_000,
+  })
 }
 export function useToggleWatch() {
   const qc = useQueryClient()
