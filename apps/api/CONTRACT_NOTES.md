@@ -3634,3 +3634,55 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 測試：`tests/api/test_delete_holding.py`（筆數與只刪那個帳戶那一檔、別的使用者、唯讀、定期定額暫停與不暫停、暫停／已結束的計畫不算、
   結束日在下一次扣款日之前的計畫不算、自動股利不會回來與略過紀錄清掉、對不起來的帳可以清、群組動態的留言、暫停後計畫內容不變、
   代號相近的列（`2330R.TW`、`2330`）留著、美股整檔刪除、標了代號的手續費／稅算進筆數一起刪）。
+
+## 2026-11-17 市場報告：盲測開給所有登入的人（`MREPORT_TRIAL_AUDIENCE`）
+
+產品負責人 2026-11-17：「可以你直接切公開吧 我讓我的朋友們一起選」。把模式切到 `public` 會結束選擇（一個寫法給所有人），所以改成**誰參加盲測**的設定，
+合約 §14–§17 原本「盲測只有站方管理員」的規則多一個開關。API 形狀見 `docs/api-contract.md`「市場報告」。
+
+- **設定**：`MREPORT_TRIAL_AUDIENCE=admins|all`（`config.Settings.mreport_trial_audience`，預設 `admins`）；管理後台可以改，存在
+  `market_report_config.trial_audience`（`null`＝照環境變數；`PUT /admin/market-reports/config {"trial_audience": "all"|"admins"|null}`）。
+  `reports.settings.trial_audience()`／`trial_open()`（`MARKET_REPORTS_ENABLED` 也要開）。Migration `0026_mreport_trial_audience` 加這一欄與
+  `market_report_votes.by_admin`（投票時是不是站方管理員；這一版以前的票都是管理員投的，標 true），並替已經寫好的盲測報告補
+  `market_reports.ai_published_at`（最早一個 variant 版本的 `created_at`；這一版以前的程式不會替盲測填這一欄，部署當下正在盲測的那幾份才會有未讀小圓點）。
+- **看得到什麼**（`service._visible_q`／`_can_read`）：開給所有人時，一般使用者多看得到 `trial=True` 的報告（不管 `visibility`、模式）；
+  試跑模式其他 `visibility="admin"` 的報告（盲測做完以後、回補）照舊只有管理員。切到 public 以後，盲測的報告和結果照樣看得到（只要還開給所有人）。
+  `ReportSummary.trial`／`my_vote`、`MarketReport.trial`、`ReportsStatus.trial_open` 是新欄位；`trial` 只在開給所有人時是 true，
+  所以 `admins` 時管理員看到的也和以前一樣（報告頁是資料版、可以更正）。
+- **三個端點**（`api/routes/market_reports.py`，都要登入）：`GET /{id}/trial`、`GET /{id}/variants/{label}`、`PUT /{id}/vote`。只有「盲測的一份＋開給所有人」
+  才回，其他一律 404「找不到這份報告」（`admins` 時管理員也是 404：他們用管理員端點，什麼都不變）。版本是 `assemble.public` 的一般形式（沒有 refs、
+  被拿掉的段、編號、報導摘錄）加 `variant`、`trial`；`writer`、花費從來不回。**寫完的先後也不露**：每個版本自己的 `published_at`（寫完的時間）與
+  `version`（依寫完的順序編號）會讓人猜出哪個是 Sonnet（通常最先寫完），所以 `member_variant` 三個版本都回 `published_at`＝`ai_published_at`
+  （第一個寫好的時間）、`version`＝資料版的號碼；`as_of` 三個本來就一樣（寫作在截止時間之後才開始，`cutoff=min(ed.cutoff, now)`）。管理員的
+  `variant()` 不改：後台的盲測清單本來就列每個版本的 `finished_at` 與秒數。
+  版本狀態（`_variant_state`）：`ready`（有 AI 版）；`writing` 只在有 `running` 的 run，或 worker 之後還會開始或重試（`_writes_may_start`：
+  和 `pipeline.start_writes` 同樣的條件——不是 `paused`、還沒到 `push_fallback_at`、報告沒截止、worker 記下的報告專用 key 狀態 `key_state` 能用；
+  加上次數還沒用完）；其他都是 `none`（只發了資料版、`skipped_budget`、次數用完、暫停、key 不能用、過了改推資料版的時間、截止了）。以前只要沒有
+  完成的 run 就算 `writing`，暫停或 key 停用的那天會一直寫「還在寫」到收盤。三個都不是 `ready` 時前端放資料版。
+  投票只能投 `ready` 的（422），揭曉後 409 `trial_revealed`；一般的票沒有備註（`note` 只有管理員的後台有），
+  管理員在一般頁面改票時保留他的備註。同一個人兩個請求同時進來：第二個改第一個建的那一列（`_save_vote`）。
+- **計票**：每人每份一張票（主鍵 `report_id, user_id`），管理員與會員一起算。揭曉的彙總每列多 `votes_admins`、`votes_members`；
+  `GET /admin/market-reports/trial` 每份多 `votes: {all, admins, members}`，最外層多 `audience`、`voters: {admins, members}`（投過票的人數）。
+  揭曉前管理員看得到大家的票（負責人要看朋友怎麼選）；一般使用者揭曉前看不到票數。揭曉後管理員的投票端點（`service.vote`）也回 409
+  `trial_revealed`（揭曉後的票數與「最多人選」會給所有人看，不能再改）；只有和原本相同的選擇可以改備註。
+- **揭曉後一般使用者看到的**：每個標籤是哪個設定（`variants[].writer`）、這一份的票（`votes`）、這一種報告整個盲測的票數與最多人選的（`result.top`，
+  同票不只一個）、後台存了的話之後用哪個（`result.chosen`＝`market_report_config.writers[kind]`）。之後切到 public，報告照 `writers` 寫（原本的流程）。
+- **未讀**：開給所有人時，盲測的報告用 `ai_published_at`（第一個版本寫好的時間；`pipeline.attempt` 在盲測 variant 發布時填，以前只有一般 AI 版會填）算，
+  不用資料版的 `first_published_at`——資料版出來時還沒有東西可以投。其他報告照舊。
+- **推播**（`push.trial_pushing`／`may_push_trial`／`trial_text`，`pipeline.maybe_push_trial`）：只在 `MARKET_REPORTS_ENABLED`、模式 `trial`、開給所有人時。
+  推播時間到了以後，有兩個版本能看（`TRIAL_PUSH_MIN`）而且沒有還在寫（`_running`：variant 或蒐集）就排；到了改推資料版的時間有兩個就排；推播截止
+  （`push_deadline`）前一直不到兩個就不推。`report.pushed_at` 記下、`push_edition="trial"`，一份只排一次；outbox、`dedupe_key`、送出時的重新檢查
+  （不是試跑或不再開給所有人：`trial_closed`；頻道或開關關了：`channel_off`）和一般的一樣，`send` 裡分到 `_send_trial`。
+  **文字只有一則**：第一行「【盤後重點 11/16（一）】AI 依公開資料整理，報告本文人人相同，不是投資建議。」、資料版的規則標題（去掉「盤後重點 11/16（一）：」；
+  `title_origin` 是 ai 時不放；超過 120 字截斷，投票那一行一定放得下）、「盲測中：三種寫法，看完選一個。」、「投票：{frontend}/market/reports/{id}」（沒有 `FRONTEND_URL` 時「到 Forliosa 的「市場 → 報告」投票。」）、
+  最後一行 `disclaimer.SHORT`（`notifications.signed(…, ai=False)`：推播本身沒有 AI 寫的字）。**不放 A 的重點**：A 是每份重新打亂的標籤，但推播只引用一個版本，
+  等於讓大家先讀到它；少數幾十票的盲測裡這個先後會影響選擇，所以只寫標題與日期。**不接群組的日報與週報**：`daily_hold`／`digest_hold` 只看 `pushing()`（模式 public），
+  盲測期間群組的日報、週報照平常的時間自己送。`Channels.market_reports_trial`（新）讓前端在盲測期間也顯示三個開關（`market_reports_available` 還是只看 public）。
+- **授權查看**：兩個讀的端點在 `VIEW_AS_IGNORED_PATHS`（以登入者本人回答，`my_vote` 是他自己的票）；投票是寫入，403 `read_only`。
+- **刪帳號**：票跟著 `users` 的 `ON DELETE CASCADE` 刪掉（和管理員的票一樣）。
+- 測試：`tests/api/test_market_report_trial_open.py`（`admins` 時一切照舊、開給所有人時一般使用者看清單與版本／沒有 refs、編號、模型、花費／
+  三個版本的 `published_at`、`version` 一樣／「還在寫」只在還會來的時候／投票改票、不能揭曉與看管理員端點、票數分開、揭曉後關閉投票（管理員端點也是）
+  與公布設定、後台切換、只打開盲測的報告、未讀從第一個版本算、唯讀不能投、刪帳號、推播只給開著的頻道一則與投票連結、經過 `maybe_push`、過了推播截止不推、
+  不到兩個版本不推、`admins` 或不是試跑不推、送出時重新檢查、沒有連結與太長的文字）；`tests/reports/test_pipeline.py::test_trial_open_to_everyone_…`
+  （用 tick 跑盲測：第一個版本寫好時填 `ai_published_at`、資料版還是 current、推播時間到了排一則、之後不再排）；`tests/test_migrations.py::
+  test_mreport_trial_audience_both_ways`（補 `ai_published_at`、舊票標成管理員、downgrade）。

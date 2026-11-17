@@ -230,6 +230,11 @@ class Settings(BaseSettings):
     market_reports_enabled: bool = False
     # Only used when the ``market_report_config`` row is first created; afterwards the admin page switches the mode.
     market_reports_initial_mode: Literal["trial", "public", "paused"] = "trial"
+    # Who takes part in the blind test (產品負責人 2026-11-17: 盲測開給所有登入的人一起選): ``admins`` = site admins
+    # only (read, vote, nothing pushed); ``all`` = every signed-in user reads the A / B / C editions and votes, and
+    # group channels with the kind's switch on get one message per edition with the vote link. The admin page can
+    # override it (``market_report_config.trial_audience``; null there = this value). The reveal stays admin-only.
+    mreport_trial_audience: Literal["admins", "all"] = "admins"
     # Models and effort (validated below: only these models, and each must have a price row).
     ai_mreport_gather_model: str = "claude-sonnet-5-5"  # sonnet-5-5 | haiku-5-5 (web search, one call per topic)
     ai_mreport_gather_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"

@@ -374,7 +374,10 @@ export function useVoteReport() {
   const qc = useQueryClient()
   return useMutation({
     mutationFn: ({ id, preferred, note }: { id: string; preferred: ReportVariant; note?: string }) => api.voteReport(id, { preferred, note }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: rk.trial }),
+    onSuccess: (_r, { id }) => {
+      void qc.invalidateQueries({ queryKey: rk.trial })
+      void qc.invalidateQueries({ queryKey: qk.reportTrial(id) }) // 盲測開給所有人時，報告頁上「你選了」也跟著變
+    },
   })
 }
 export function useRevealTrial() {

@@ -56,7 +56,7 @@ def admin_on(monkeypatch, email="demo@forliosa.local"):
 
 def test_switched_off(app, client):
     assert client.get(f"{API}/market/reports/status").json() == {"available": False, "mode": None, "unread": False,
-                                                                 "latest": []}
+                                                                 "latest": [], "trial_open": False}
     assert client.get(f"{API}/market/reports").json() == {"items": [], "next_cursor": None}
     assert client.get(f"{API}/market/reports/latest").json() is None
 

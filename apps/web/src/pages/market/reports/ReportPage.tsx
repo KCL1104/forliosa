@@ -11,19 +11,22 @@ import type { ReportSearch } from "@/router"
 import { MarketTabs } from "./MarketTabs"
 import { ReportCorrection } from "./ReportCorrection"
 import { ReportView } from "./ReportView"
+import { TrialEdition } from "./TrialEdition"
 import { useMarkReportsSeenOnOpen } from "./use-reports-unread"
 
 /**
  * 一份市場報告（`/market/reports/<id>`；推播的連結打開這一頁）：外框和市場頁一樣，分頁列選在「報告」。
  * 要登入才看得到（沒有公開網址）；試跑期間只有站方管理員看得到，其他人是「找不到這份報告」。
  * `?version=` 看舊版（例如更正之前的那一版），上面一行說這是舊版、連到最新的一版。
+ * 盲測開給所有人時，盲測的一份（推播的投票連結）顯示 A／B／C 與投票（`TrialEdition`）。
  */
 export function ReportPage() {
   const { reportId } = useParams({ from: "/market/reports/$reportId" })
   const { version } = useSearch({ from: "/market/reports/$reportId" }) as ReportSearch
   const q = useMarketReport(reportId, version)
   const status = useMarketReportStatus()
-  usePageTitle(q.data ? `${q.data.kind_label} ${q.data.edition_label}` : "市場報告")
+  const trial = !!q.data?.trial && !version
+  usePageTitle(q.data ? `${q.data.kind_label} ${q.data.edition_label}${trial ? "・盲測" : ""}` : "市場報告")
   useMarkReportsSeenOnOpen(!!q.data)
   const missing = q.error instanceof ApiError && q.error.status === 404
   return (
@@ -55,9 +58,9 @@ export function ReportPage() {
                 </Link>
               </p>
             )}
-            <ReportView report={q.data} />
-            {/* 站方管理員（`status.mode` 只給管理員）：最新的一版可以更正 */}
-            {status.data?.mode && !version && <ReportCorrection report={q.data} />}
+            {trial ? <TrialEdition reportId={reportId} report={q.data} /> : <ReportView report={q.data} />}
+            {/* 站方管理員（`status.mode` 只給管理員）：最新的一版可以更正（盲測的 A／B／C 不在這裡更正） */}
+            {status.data?.mode && !version && !trial && <ReportCorrection report={q.data} />}
           </div>
         )}
       </div>

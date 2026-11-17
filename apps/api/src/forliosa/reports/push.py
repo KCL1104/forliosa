@@ -17,7 +17,14 @@
 * **市場週報 ＋ 群組週報**: the group's weekly digest of the reviewed week, when its push is still waiting (held to Su\
 nday
   21:30 for this), is folded in the same way.
-* Never pushed: corrections, table refreshes, blind-test and backfilled editions, anything personal.
+* Never pushed: corrections, table refreshes, backfilled editions, anything personal; blind-test editions only as
+  below.
+* **盲測開給所有人** (``MREPORT_TRIAL_AUDIENCE=all``, mode ``trial``; 產品負責人 2026-11-17): a blind-test edition
+  is pushed once, when at least two of A / B / C can be read (:func:`pipeline.maybe_push`), to the channels whose
+  switch for the kind is on — one message (:func:`trial_text`): the kind and date with the disclaimer line, the data
+  edition's rule-made title (never a variant's text: quoting one of the three first would favour it), 「盲測中：三種
+  寫法，看完選一個。」 and the link to the vote page. Same outbox rows and dedupe keys; nothing is folded in (the
+  group's daily and weekly pushes go on their own, as before).
 """
 
 from __future__ import annotations
@@ -54,6 +61,8 @@ HIGHLIGHT_CUT = 80
 LINE_AI = "AI 依公開資料整理，報告本文人人相同，不是投資建議。"
 LINE_DATA = "依公開資料整理，這一版沒有 AI 段落，不是投資建議。"
 SOURCE_NOTE = "（出處見全文）"
+LINE_TRIAL = "盲測中：三種寫法，看完選一個。"
+TRIAL_TITLE_CUT = 120
 
 
 def pushing(db: Session, settings: Settings | None = None) -> bool:
@@ -67,14 +76,26 @@ def may_push(db: Session, report: MarketReport, settings: Settings | None = None
             and report.state != "skipped" and report.current_version_id is not None)
 
 
+def trial_pushing(db: Session, settings: Settings | None = None) -> bool:
+    """Blind-test editions may be pushed: switched on, the mode is trial and the blind test is open to everyone."""
+    s = settings or get_settings()
+    return bool(s.market_reports_enabled) and rs.mode(db, s) == "trial" and rs.trial_audience(db, s) == "all"
+
+
+def may_push_trial(db: Session, report: MarketReport, settings: Settings | None = None) -> bool:
+    return (bool(report.trial) and not report.backfill and report.state != "skipped"
+            and report.current_version_id is not None and trial_pushing(db, settings))
+
+
 def dedupe_key(report_id: str, group_id: str, kind: str) -> str:
     return f"mreport:{report_id}:{group_id}:{kind}"
 
 
 def enqueue(db: Session, report: MarketReport, now: datetime | None = None, settings: Settings | None = None) -> int:
-    """One outbox row per active channel whose switch for this kind is on (due now)."""
+    """One outbox row per active channel whose switch for this kind is on (due now); a blind-test edition only while
+    the blind test is open to everyone."""
     now = now or now_utc()
-    if not may_push(db, report, settings):
+    if not (may_push_trial(db, report, settings) if report.trial else may_push(db, report, settings)):
         return 0
     flag = getattr(GroupChannel, FLAG[report.kind])
     added = 0
@@ -164,6 +185,31 @@ def text(report: MarketReport, payload: dict[str, Any], kind: str, settings: Set
     return notifications.signed(body[:limit].split("\n"), kind, ai=ai_of(group))
 
 
+def title_body(title: str, label: str) -> str:
+    """The title without its 「盤後重點 11/16（一）：」 head (the first line already says the kind and date)."""
+    t = " ".join(str(title or "").split())
+    if t.startswith(label) and "：" in t:
+        return t.split("：", 1)[1].strip()
+    return "" if t.startswith(label) else t
+
+
+def trial_text(report: MarketReport, payload: dict[str, Any], kind: str, settings: Settings) -> str:
+    """The blind-test message: the kind and date with the disclaimer line, the rule-made title of the data edition
+    (an AI title — never the case for the data edition — is left out), the blind-test line and the vote link."""
+    label = KIND_LABELS[report.kind]
+    when = f"{span(report.period_start, report.period_end)} 回顧" if report.kind == "weekly" \
+        else md_wd(report.edition_date)
+    lines = [f"【{label} {when}】{LINE_AI}"]
+    title = title_body(payload.get("title") or "", label) if payload.get("title_origin") != "ai" else ""
+    if title:  # a rule-made title is one short line; cut a freak one so the vote link always fits
+        title = _t(title, kind)
+        lines.append(title if len(title) <= TRIAL_TITLE_CUT else title[:TRIAL_TITLE_CUT - 1] + "…")
+    lines.append(LINE_TRIAL)
+    url = link(report.id, settings)
+    lines.append(f"投票：{url}" if url else "到 Forliosa 的「市場 → 報告」投票。")
+    return notifications.signed(lines, kind)
+
+
 # -- the group sections ---------------------------------------------------------------------------------------------
 def _body_lines(full: str, heading: str) -> list[str]:
     """A daily / weekly push text without its title line, link line and last line (the disclaimer that
@@ -232,6 +278,9 @@ def send(db: Session, settings: Settings, row: NotificationOutbox, now: datetime
     if report is None or group is None:
         _cancel([row], "gone")
         return
+    if report.trial:
+        _send_trial(db, settings, row, report, ch, now)
+        return
     if not may_push(db, report, settings):
         _cancel([row], "not_public")
         return
@@ -264,6 +313,25 @@ def send(db: Session, settings: Settings, row: NotificationOutbox, now: datetime
         merged.append(merged_digest)
     for r in merged:
         r.status, r.last_error, r.sent_at = "sent", "merged", now
+
+
+def _send_trial(db: Session, settings: Settings, row: NotificationOutbox, report: MarketReport,
+                ch: GroupChannel | None, now: datetime) -> None:
+    """A blind-test edition's one message (re-checked: still open to everyone, the channel and its switch on)."""
+    from forliosa.services.notifications import _apply, _cancel, _channel_ok, _deliver
+
+    if not may_push_trial(db, report, settings):
+        _cancel([row], "trial_closed")
+        return
+    if ch is None or not _channel_ok(ch, FLAG[report.kind]):
+        _cancel([row], "channel_off")
+        return
+    version = db.get(MarketReportVersion, report.current_version_id) if report.current_version_id else None
+    if version is None:
+        _cancel([row], "not_ready")
+        return
+    _apply(db, ch, [row], _deliver(db, ch, trial_text(report, version.payload or {}, ch.kind, settings), settings),
+           now)
 
 
 # -- holding the group pushes for a merge ------------------------------------------------------------------------

@@ -366,6 +366,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       dadAccounts: DAD_ACCOUNTS,
       origin: () => (typeof window === "undefined" ? "http://localhost:5173" : window.location.origin),
       marketReportsPublic: () => reports.publicMode(),
+      marketReportsTrial: () => reports.trialPushMode(),
     },
     scenario,
   )
@@ -1093,6 +1094,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getLatestMarketReport: (kind) => wait(() => reports.latest(kind)),
     getMarketReport: (id, version) => wait(() => reports.get(id, version)),
     markMarketReportsSeen: () => wait(() => reports.seen()),
+    getMarketReportTrial: (id) => wait(() => reports.memberTrial(id)),
+    getMarketReportVariant: (id, label) => wait(() => reports.memberVariant(id, label)),
+    voteMarketReport: (id, preferred) => wait(() => reports.memberVote(id, preferred)),
     getAdminReportsOverview: () => wait(() => reports.overview()),
     putReportsConfig: (body) => wait(() => reports.config(body)),
     getAdminReportsTrial: () => wait(() => reports.trial()),
@@ -1126,7 +1130,7 @@ const IGNORES_VIEW_AS = new Set<MethodName>([
   // 討論串的讀取一律以登入者本人回答（前端在查看模式擋下討論頁）
   "listTopics", "getTopic", "listReplies",
   // 市場報告沒有個人資料：以登入者本人回答（`POST /market/reports/seen` 照規則 read_only）
-  "getMarketReportStatus", "listMarketReports", "getLatestMarketReport", "getMarketReport",
+  "getMarketReportStatus", "listMarketReports", "getLatestMarketReport", "getMarketReport", "getMarketReportTrial", "getMarketReportVariant",
 ])
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([
@@ -1143,7 +1147,7 @@ const WRITES = new Set<MethodName>([
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
   "createTopic", "deleteTopic", "createReply", "deleteReply", "addDiscussionReaction", "removeDiscussionReaction", "reportDiscussion",
   "moderateDiscussion", "createSuspension", "liftSuspension", "blockDomain", "unblockDomain", "grantMember", "revokeMember",
-  "markMarketReportsSeen", "putReportsConfig", "voteReport", "revealTrial", "addReportCorrection", "rebuildReportData",
+  "markMarketReportsSeen", "voteMarketReport", "putReportsConfig", "voteReport", "revealTrial", "addReportCorrection", "rebuildReportData",
   "putNyseHoliday", "deleteNyseHoliday", "addMacroEvent", "deleteMacroEvent", "addUsEarning", "deleteUsEarning",
 ])
 

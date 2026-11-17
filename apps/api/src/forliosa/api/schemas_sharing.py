@@ -532,6 +532,9 @@ class Channels(BaseModel):
     telegram_available: bool
     market_reports_available: bool = Field(
         default=False, description="市場報告已對全站公開：前端才顯示盤前、盤後、週報三個推播開關")
+    market_reports_trial: bool = Field(
+        default=False,
+        description="盲測開給所有人（模式 trial）：也顯示三個開關，每份推一則投票連結，不併群組日報、週報")
 
 
 class TelegramLink(BaseModel):

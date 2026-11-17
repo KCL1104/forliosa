@@ -1,5 +1,6 @@
 """The market reports' settings: the environment (``config.Settings``, contract §3.1) and the one database row an admin
-changes at run time (``market_report_config``: the mode and the writer chosen per kind after the blind test, §3.2).
+changes at run time (``market_report_config``: the mode and the writer chosen per kind after the blind test, §3.2; who
+takes part in the blind test, :func:`trial_audience`).
 
 Writer resolution (§3.2, §4.5): ``writers[kind]`` from the database → the environment default (``AI_MREPORT_WRITE_*``;
 the weekly has its own effort) → the month's budget tier (:func:`apply_tier`): ``medium`` lowers high / xhigh / max to
@@ -19,6 +20,7 @@ from forliosa.models import MarketReportConfig
 from forliosa.timeutil import now_utc
 
 MODES = ("trial", "public", "paused")
+AUDIENCES = ("admins", "all")  # who takes part in the blind test (2026-11-17)
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 WRITER_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5")  # what an admin may pick per kind (§14.2)
 ADMIN_EFFORTS = ("low", "medium", "high", "xhigh")
@@ -63,6 +65,19 @@ def config(db: Session, settings: Settings | None = None) -> MarketReportConfig:
 
 def mode(db: Session, settings: Settings | None = None) -> str:
     return config(db, settings).mode
+
+
+def trial_audience(db: Session, settings: Settings | None = None) -> str:
+    """``admins`` | ``all``: the admin page's choice, else ``MREPORT_TRIAL_AUDIENCE``."""
+    s = settings or get_settings()
+    picked = config(db, s).trial_audience
+    return picked if picked in AUDIENCES else s.mreport_trial_audience
+
+
+def trial_open(db: Session, settings: Settings | None = None) -> bool:
+    """Every signed-in user reads and votes on the blind-test editions (reports switched on, audience ``all``)."""
+    s = settings or get_settings()
+    return bool(s.market_reports_enabled) and trial_audience(db, s) == "all"
 
 
 def default_writer(kind: str, settings: Settings | None = None) -> Writer:

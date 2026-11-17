@@ -8,6 +8,7 @@ import {
   type MacroEvent,
   type MacroEventInput,
   type MarketReport,
+  type MemberTrial,
   type NyseHoliday,
   type NyseHolidayInput,
   type Paged,
@@ -31,8 +32,10 @@ import {
   type ReportTone,
   type ReportVariant,
   type TrialMetrics,
+  type TrialAudience,
   type TrialReveal,
   type TrialRevealRow,
+  type TrialVoteCounts,
   type UsEarning,
   type UsEarningInput,
   type WriterSetting,
@@ -49,17 +52,19 @@ import { addDays, parseDay } from "./market"
  * - `public`：盲測做完、揭曉、對全站公開；三種報告都有 AI 版。最新的盤後重點有一則更正、有一份只有資料、有一份官方加權指數沒進來
  * - `pending`：public，但最新的盤前重點 AI 段落還在整理（只有資料的版本）
  * - `off`：伺服器沒有開市場報告
+ * - `trial-open`：和 trial 一樣，但盲測開給所有登入的人（`MREPORT_TRIAL_AUDIENCE=all`）：一般帳號（`?discuss=member`）
+ *   也看得到 A／B／C 並投票，群組頻道有三個推播開關
  */
-export type MockReportsScenario = "trial" | "public" | "pending" | "off"
+export type MockReportsScenario = "trial" | "trial-open" | "public" | "pending" | "off"
 
 export function readMockReports(): MockReportsScenario | undefined {
   if (typeof window === "undefined") return undefined
   try {
     const fromUrl = new URLSearchParams(window.location.search).get("mreport")
     if (fromUrl === "trial") window.sessionStorage.removeItem("forliosa:mock-mreport")
-    else if (fromUrl === "public" || fromUrl === "pending" || fromUrl === "off") window.sessionStorage.setItem("forliosa:mock-mreport", fromUrl)
+    else if (fromUrl === "public" || fromUrl === "pending" || fromUrl === "off" || fromUrl === "trial-open") window.sessionStorage.setItem("forliosa:mock-mreport", fromUrl)
     const saved = window.sessionStorage.getItem("forliosa:mock-mreport")
-    return saved === "public" || saved === "pending" || saved === "off" ? saved : undefined
+    return saved === "public" || saved === "pending" || saved === "off" || saved === "trial-open" ? saved : undefined
   } catch {
     return undefined
   }
@@ -1018,7 +1023,27 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
   const trialStart = pub ? "2026-10-26" : prevTrading(prevTrading(today))
   let revealedAt: string | null = pub ? "2026-11-02T10:12:00+08:00" : null
   let seenAt: string | null = null
+  /** 示範使用者自己的票（管理員或一般帳號都是這一個人） */
   const votes = new Map<string, { preferred: ReportVariant; note: string }>()
+  // 盲測開給所有人（trial-open 情境；後台也可以切）：其他人的票是固定的示範數字
+  let audience: TrialAudience = scenario === "trial-open" ? "all" : "admins"
+  let audienceSource: "admin" | "default" = "default"
+  const trialOpen = () => enabled && audience === "all"
+  const othersVotes = (id: string): { admins: TrialVoteCounts; members: TrialVoteCounts } => {
+    const r = rng(`votes:${id}`)
+    const n = (lo: number, hi: number) => Math.floor(lo + r() * (hi - lo + 1))
+    return audience === "all" || pub ? { admins: { A: 0, B: n(0, 1), C: 0 }, members: { A: n(1, 4), B: n(2, 6), C: n(0, 3) } } : { admins: { A: 0, B: 0, C: 0 }, members: { A: 0, B: 0, C: 0 } }
+  }
+  /** 這一份大家的票（管理員、會員分開，與合計），算進示範使用者自己的那一票 */
+  const voteCounts = (id: string) => {
+    const base = othersVotes(id)
+    const mine = votes.get(id)?.preferred
+    const admins = { ...base.admins }
+    const members = { ...base.members }
+    if (mine) (deps.isAdmin() ? admins : members)[mine] += 1
+    const all = { A: admins.A + members.A, B: admins.B + members.B, C: admins.C + members.C }
+    return { all, admins, members }
+  }
   const reports: MockReport[] = []
   const live: Live[] = []
 
@@ -1139,13 +1164,15 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
     requireSignedIn()
     if (!deps.isAdmin()) throw new ApiError(404, "not_found", "找不到這個頁面")
   }
-  const visible = () => (enabled ? reports.filter((r) => r.visibility === "public" || deps.isAdmin()) : [])
+  const visible = () => (enabled ? reports.filter((r) => r.visibility === "public" || deps.isAdmin() || (r.trial && trialOpen())) : [])
+  const openTrial = (r: MockReport) => r.trial && trialOpen()
   const order = (a: MockReport, b: MockReport) => b.d.localeCompare(a.d) || KIND_ORDER[b.kind] - KIND_ORDER[a.kind] || b.id.localeCompare(a.id)
   const summary = (r: MockReport): ReportSummary => {
     const c = r.versions[r.current]!
     return {
       id: r.id, kind: r.kind, kind_label: c.kind_label, edition_date: r.d, edition_label: c.edition_label, title: c.title, has_ai: c.has_ai,
       published_at: c.published_at, corrected: c.corrections.length > 0, prev_session: r.kind === "premarket" ? prevTrading(r.d) : null,
+      trial: openTrial(r), my_vote: openTrial(r) ? (votes.get(r.id)?.preferred ?? null) : null,
     }
   }
   const find = (id: string) => {
@@ -1179,6 +1206,14 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
           dropped_sections: sum((m) => m.dropped_sections), on_time_rate: done.filter((x) => x.v.on_time).length / n,
           avg_cost_usd: Number((done.reduce((a, x) => a + x.v.cost, 0) / n).toFixed(2)), avg_seconds: Math.round(sum((m) => m.seconds ?? 0) / n),
         }
+        const picked = vs.filter((x) => votes.get(x.r.id)?.preferred === x.label)
+        const others = vs.reduce((a, x) => {
+          const o = othersVotes(x.r.id)
+          const l = x.label as ReportVariant
+          return { admins: a.admins + o.admins[l], members: a.members + o.members[l] }
+        }, { admins: 0, members: 0 })
+        const mineAdmin = deps.isAdmin() ? picked.length : 0
+        Object.assign(row, { votes: picked.length + others.admins + others.members, votes_admins: others.admins + mineAdmin, votes_members: others.members + picked.length - mineAdmin })
         const passed = done.length > 0 && row.policy_violations === 0 && (row.subject_mismatches + row.inferred_dates) / n <= 1 && row.dropped_sections / n <= 1 && row.on_time_rate >= 0.8 && !done.some((x) => x.v.metrics!.data_only)
         return { ...row, passed }
       })
@@ -1203,6 +1238,8 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
   return {
     /** 群組頻道的三個開關只在對全站公開時出現 */
     publicMode: () => enabled && mode === "public",
+    /** …或盲測開給所有人時（模式 trial）：每份推一則投票連結 */
+    trialPushMode: () => enabled && mode === "trial" && audience === "all",
 
     status(): ReportsStatus {
       requireSignedIn()
@@ -1213,7 +1250,7 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       })
       const newest = [...vis].sort((a, b) => b.first.localeCompare(a.first))[0]
       const unread = !!newest && (seenAt ? newest.first > seenAt : Date.parse(nowAt) - Date.parse(newest.first) < 24 * 3_600_000)
-      return { available: vis.length > 0, mode: deps.isAdmin() && enabled ? mode : null, unread, latest }
+      return { available: vis.length > 0, mode: deps.isAdmin() && enabled ? mode : null, unread, latest, trial_open: trialOpen() }
     },
     list(query: { kind?: ReportKind; limit?: number; cursor?: string | null } = {}): Paged<ReportSummary> {
       requireSignedIn()
@@ -1226,14 +1263,55 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
     latest(kind?: ReportKind): MarketReport | null {
       requireSignedIn()
       const r = visible().filter((x) => !kind || x.kind === kind).sort(order)[0]
-      return r ? publicView(r.versions[r.current]!) : null
+      return r ? { ...publicView(r.versions[r.current]!), trial: openTrial(r) } : null
     },
     get(id: string, version?: number): MarketReport {
       requireSignedIn()
       const r = find(id)
       const v = version ? r.versions.find((x) => x.version === version) : r.versions[r.current]
       if (!v) throw new ApiError(404, "not_found", "找不到這一版")
-      return publicView(v)
+      return { ...publicView(v), trial: openTrial(r) }
+    },
+    // ── 盲測開給所有人：一份的狀態、一個版本、投票 ──
+    memberTrial(id: string): MemberTrial {
+      requireSignedIn()
+      const r = reports.find((x) => x.id === id && x.trial)
+      if (!r || !trialOpen()) throw new ApiError(404, "not_found", "找不到這份報告")
+      const revealed = !!revealedAt
+      const variants = LABELS.map((label) => {
+        const v = r.variants[label]
+        const state = v?.report ? ("ready" as const) : v?.status === "running" ? ("writing" as const) : ("none" as const)
+        return { label, state, ...(revealed && v ? { writer: v.writer } : {}) }
+      })
+      const kindRows = revealed ? reveal().kinds.find((k) => k.kind === r.kind) : undefined
+      const most = Math.max(0, ...(kindRows?.rows.map((x) => x.votes) ?? []))
+      return {
+        report_id: r.id, kind: r.kind, kind_label: REPORT_KIND_LABEL[r.kind], edition_date: r.d, edition_label: r.versions[0]!.edition_label,
+        variants, my_vote: votes.get(r.id)?.preferred ?? null, can_vote: !revealed && variants.some((v) => v.state === "ready"), revealed,
+        votes: revealed ? voteCounts(r.id).all : null,
+        result: kindRows
+          ? { kind: r.kind, kind_label: kindRows.kind_label, rows: kindRows.rows.map((x) => ({ writer: x.writer, votes: x.votes })), top: most > 0 ? kindRows.rows.filter((x) => x.votes === most).map((x) => x.writer) : [], chosen: writers[r.kind] }
+          : null,
+      }
+    },
+    memberVariant(id: string, label: ReportVariant): MarketReport {
+      requireSignedIn()
+      const r = reports.find((x) => x.id === id && x.trial)
+      if (!r || !trialOpen()) throw new ApiError(404, "not_found", "找不到這份報告")
+      const v = r.variants[label]
+      if (v?.status === "running") throw new ApiError(409, "variant_running", "這個版本還在寫，寫好再來看。")
+      if (!v?.report) throw new ApiError(404, "not_found", "這個版本沒有寫成，看看另外兩個。")
+      return { ...publicView(v.report), trial: true, variant: label }
+    },
+    memberVote(id: string, preferred: ReportVariant): MemberTrial {
+      requireSignedIn()
+      const r = reports.find((x) => x.id === id && x.trial)
+      if (!r || !trialOpen()) throw new ApiError(404, "not_found", "找不到這份報告")
+      if (revealedAt) throw new ApiError(409, "trial_revealed", "盲測已經揭曉，不能再投票或改票。")
+      if (!LABELS.includes(preferred)) throw field("preferred", "只能選 A、B 或 C。")
+      if (!r.variants[preferred]?.report) throw field("preferred", `${preferred} 還沒有可以看的版本，先看別的。`)
+      votes.set(id, { preferred, note: votes.get(id)?.note ?? "" })
+      return this.memberTrial(id)
     },
     seen(): void {
       requireSignedIn()
@@ -1260,7 +1338,7 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       const upcoming = nyse.filter((h) => h.date >= today).sort((a, b) => a.date.localeCompare(b.date))[0]
       const in14 = (d: string) => d >= today && d <= addDays(today, 14)
       return {
-        enabled, mode,
+        enabled, mode, trial_audience: audience, trial_audience_source: audienceSource,
         writers: Object.fromEntries((["premarket", "close", "weekly"] as const).map((k) => [k, !revealedAt ? null : writers[k] ? { ...writers[k]!, source: "admin" as const } : { ...DEFAULT_WRITER, source: "default" as const }])) as AdminReportsOverview["writers"],
         trial_running: !revealedAt && !p.finished,
         month: { label: `${today.slice(0, 4)} 年 ${Number(today.slice(5, 7))} 月`, spend_usd: Number(spend.toFixed(2)), budget_usd: 80, tier },
@@ -1281,9 +1359,18 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
         if (w && (!MODELS.has(w.model) || !EFFORTS.has(w.effort))) throw field(`writers.${k}`, "模型只能選 Opus 5.5 或 Sonnet 5.5，effort 只能選 low 到 xhigh。")
       }
       const switching = patch.mode === "public" && mode !== "public"
+      const before = audience
+      if (patch.trial_audience !== undefined) {
+        audience = patch.trial_audience ?? (scenario === "trial-open" ? "all" : "admins")
+        audienceSource = patch.trial_audience ? "admin" : "default"
+      }
       if (patch.mode) mode = patch.mode
       if (patch.writers) writers = { ...writers, ...patch.writers }
-      return { mode, writers, notice: switching ? "之後的新報告會對所有登入的人公開，並推播到有開的群組。" : null }
+      const notices = [
+        audience !== before ? (audience === "all" ? "盲測開給所有登入的人：大家都能看 A、B、C 三種寫法並投票，有開推播的群組會收到投票連結。" : "盲測只給站方管理員：其他人看不到盲測的報告，也不會推播。") : null,
+        switching ? "之後的新報告會對所有登入的人公開，並推播到有開的群組。" : null,
+      ].filter(Boolean)
+      return { mode, writers, trial_audience: audience, notice: notices.length ? notices.join(" ") : null }
     },
     trial(): AdminTrial {
       requireAdmin()
@@ -1301,8 +1388,11 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
             }
           }),
           my_vote: votes.get(r.id) ?? null,
+          votes: voteCounts(r.id),
         })),
         reveal: revealedAt ? reveal() : null,
+        audience,
+        voters: { admins: 1 + (trialReports().some((r) => votes.has(r.id)) && deps.isAdmin() ? 1 : 0), members: audience === "all" || pub ? 7 : 0 },
       }
     },
     variant(reportId: string, label: ReportVariant): MarketReport {

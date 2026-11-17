@@ -7,6 +7,13 @@ backfills) by site admins only — anyone else gets 404 「找不到這份報告
 available. A member always reads the public form (:func:`assemble.public`: no refs, no dropped text, no quotes); the
 admin form with refs and dropped sections only comes from the admin variant endpoint. Before the reveal, the admin API
 never names a blind-test variant's model or cost.
+
+The blind test open to everyone (``MREPORT_TRIAL_AUDIENCE=all`` or the admin page; 產品負責人 2026-11-17): every
+signed-in user also reads the blind-test editions (``trial: true`` in the list and the report; the A / B / C variants
+in the public form from :func:`member_variant`, never a model, a cost, refs or ids before the reveal) and votes once
+per edition, changing the vote until the reveal (:func:`member_vote`). Admins' and members' votes are counted
+together; the admin page shows them apart (``by_admin``). The reveal stays admin-only; afterwards members see which
+label was which setting and the votes per setting (:func:`trial_view`). Other admin-only editions stay admin-only.
 """
 
 from __future__ import annotations
@@ -19,7 +26,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -51,6 +58,9 @@ NOT_FOUND = "找不到這份報告"
 KIND_ORDER = {"weekly": 0, "close": 1, "premarket": 2}
 UNREAD_WINDOW = timedelta(hours=24)
 MODE_NOTICE = "之後的新報告會對所有登入的人公開，並推播到有開的群組。"
+AUDIENCE_NOTICE = {"all": "盲測開給所有登入的人：大家都能看 A、B、C 三種寫法並投票，有開推播的群組會收到投票連結。",
+                   "admins": "盲測只給站方管理員：其他人看不到盲測的報告，也不會推播。"}
+REVEALED = "盲測已經揭曉，不能再投票或改票。"
 
 
 def _aware(dt: datetime | None) -> datetime | None:
@@ -65,13 +75,23 @@ def enabled(settings: Settings | None = None) -> bool:
     return bool((settings or get_settings()).market_reports_enabled)
 
 
-def _visibilities(user: User) -> tuple[str, ...]:
-    return ("public", "admin") if is_site_admin(user) else ("public",)
+def _trial_open(db: Session) -> bool:
+    return rs.trial_open(db)
 
 
-def _visible_q(user: User, kind: str | None = None) -> Any:
-    q = select(MarketReport).where(MarketReport.visibility.in_(_visibilities(user)),
-                                   MarketReport.current_version_id.is_not(None),
+def _can_read(db: Session, user: User, r: MarketReport) -> bool:
+    """A public edition: everyone; an admin one: site admins, and a blind-test one also everyone when it is open."""
+    return r.visibility == "public" or is_site_admin(user) or (bool(r.trial) and _trial_open(db))
+
+
+def _visible_q(db: Session, user: User, kind: str | None = None) -> Any:
+    if is_site_admin(user):
+        seen = MarketReport.visibility.in_(("public", "admin"))
+    elif _trial_open(db):
+        seen = or_(MarketReport.visibility == "public", MarketReport.trial.is_(True))
+    else:
+        seen = MarketReport.visibility == "public"
+    q = select(MarketReport).where(seen, MarketReport.current_version_id.is_not(None),
                                    MarketReport.state.in_(("data", "ai")))
     if kind:
         q = q.where(MarketReport.kind == kind)
@@ -86,32 +106,47 @@ def _version(db: Session, report: MarketReport, number: int | None = None) -> Ma
                                                        MarketReportVersion.variant.is_(None)))
 
 
-def summary(report: MarketReport, v: MarketReportVersion) -> dict[str, Any]:
+def summary(report: MarketReport, v: MarketReportVersion, open_trial: bool = False,
+            my_vote: str | None = None) -> dict[str, Any]:
     """``prev_session``: a premarket edition's previous Taiwan session (holidays skipped: the day 「昨日你的群組」 is
-    about), else null."""
+    about), else null. ``trial``: a blind-test edition open to everyone (``open_trial``): its title is the data
+    edition's (rule-made, the same for A / B / C), ``published_at`` the first variant's time, ``my_vote`` the
+    viewer's pick."""
     p = v.payload or {}
     ed = edition_on(report.kind, report.edition_date) if report.kind == "premarket" else None
+    trial = bool(report.trial and open_trial)
+    published = p.get("published_at") or iso_taipei(_aware(v.created_at) or now_utc())
+    if trial and report.ai_published_at is not None:
+        published = iso_taipei(_aware(report.ai_published_at))
     return {"id": report.id, "kind": report.kind, "kind_label": KIND_LABELS[report.kind],
             "prev_session": ed.prev_session.isoformat() if ed is not None and ed.prev_session else None,
             "edition_date": report.edition_date.isoformat(),
             "edition_label": assemble.edition_label(report.kind, report.edition_date,
                                                     (report.period_start, report.period_end)),
             "title": p.get("title") or "", "has_ai": bool(p.get("has_ai")),
-            "published_at": p.get("published_at") or iso_taipei(_aware(v.created_at) or now_utc()),
-            "corrected": bool(p.get("corrections"))}
+            "published_at": published, "corrected": bool(p.get("corrections")),
+            "trial": trial, "my_vote": my_vote if trial else None}
+
+
+def _my_vote(db: Session, user: User, report: MarketReport) -> str | None:
+    row = db.get(MarketReportVote, (report.id, user.id)) if report.trial else None
+    return row.preferred if row is not None else None
 
 
 def _readable(db: Session, user: User, report_id: str) -> MarketReport:
     r = db.get(MarketReport, report_id)
-    if r is None or not enabled() or r.visibility not in _visibilities(user) or r.current_version_id is None \
+    if r is None or not enabled() or not _can_read(db, user, r) or r.current_version_id is None \
             or r.state not in ("data", "ai"):
         raise not_found(NOT_FOUND)
     return r
 
 
-def _payload(report: MarketReport, v: MarketReportVersion) -> dict[str, Any]:
+def _payload(report: MarketReport, v: MarketReportVersion, open_trial: bool = False) -> dict[str, Any]:
+    """``trial``: a blind-test edition open to everyone — the page shows A / B / C and the vote, not this data
+    edition."""
     out = assemble.public(v.payload or {})
     out["first_published_at"] = iso_taipei(_aware(report.first_published_at) or _aware(v.created_at) or now_utc())
+    out["trial"] = bool(report.trial and open_trial)
     return out
 
 
@@ -119,7 +154,7 @@ def _payload(report: MarketReport, v: MarketReportVersion) -> dict[str, Any]:
 def latest_by_kind(db: Session, user: User) -> list[tuple[MarketReport, MarketReportVersion]]:
     out = []
     for kind in KINDS:
-        r = db.scalar(_visible_q(user, kind).order_by(MarketReport.edition_date.desc()).limit(1))
+        r = db.scalar(_visible_q(db, user, kind).order_by(MarketReport.edition_date.desc()).limit(1))
         v = _version(db, r) if r else None
         if r is not None and v is not None:
             out.append((r, v))
@@ -127,12 +162,25 @@ def latest_by_kind(db: Session, user: User) -> list[tuple[MarketReport, MarketRe
 
 
 def unread(db: Session, user: User, now: datetime | None = None) -> bool:
+    """The newest visible edition came after the user last looked. A blind-test edition open to everyone counts from
+    its first variant (``ai_published_at``: when there is something to vote on), not its data edition."""
     now = now or now_utc()
-    newest = db.scalar(_visible_q(user).where(MarketReport.first_published_at.is_not(None))
-                       .order_by(MarketReport.first_published_at.desc()).limit(1))
-    if newest is None:
+    open_trial = _trial_open(db)
+    q = _visible_q(db, user).where(MarketReport.first_published_at.is_not(None))
+    if open_trial:
+        q = q.where(MarketReport.trial.is_(False))
+    newest = db.scalar(q.order_by(MarketReport.first_published_at.desc()).limit(1))
+    times = [_aware(newest.first_published_at)] if newest is not None else []
+    if open_trial:
+        tr = db.scalar(_visible_q(db, user).where(MarketReport.trial.is_(True),
+                                                  MarketReport.ai_published_at.is_not(None))
+                       .order_by(MarketReport.ai_published_at.desc()).limit(1))
+        if tr is not None:
+            times.append(_aware(tr.ai_published_at))
+    times = [t for t in times if t is not None]
+    if not times:
         return False
-    published = _aware(newest.first_published_at)
+    published = max(times)
     seen = db.get(MarketReportRead, user.id)
     if seen is None:
         return published is not None and published > now - UNREAD_WINDOW
@@ -144,9 +192,11 @@ def status(db: Session, user: User, now: datetime | None = None) -> dict[str, An
     if not enabled():
         return {"available": False, "mode": None, "unread": False, "latest": []}
     latest = latest_by_kind(db, user)
+    open_trial = _trial_open(db)
     return {"available": bool(latest), "mode": rs.mode(db) if admin else None,
             "unread": unread(db, user, now) if latest else False,
-            "latest": [summary(r, v) for r, v in latest]}
+            "latest": [summary(r, v, open_trial, _my_vote(db, user, r) if open_trial else None) for r, v in latest],
+            "trial_open": open_trial}
 
 
 def _cursor(r: MarketReport) -> str:
@@ -157,7 +207,7 @@ def _cursor(r: MarketReport) -> str:
 def list_reports(db: Session, user: User, kind: str | None, limit: int, cursor: str | None) -> dict[str, Any]:
     if not enabled():
         return {"items": [], "next_cursor": None}
-    rows = list(db.scalars(_visible_q(user, kind).order_by(MarketReport.edition_date.desc())))
+    rows = list(db.scalars(_visible_q(db, user, kind).order_by(MarketReport.edition_date.desc())))
     rows.sort(key=lambda r: (-r.edition_date.toordinal(), KIND_ORDER[r.kind], [-ord(c) for c in r.id]))
     if cursor:
         try:
@@ -169,21 +219,22 @@ def list_reports(db: Session, user: User, kind: str | None, limit: int, cursor: 
         rows = [r for r in rows if (-r.edition_date.toordinal(), KIND_ORDER[r.kind], [-ord(c) for c in r.id]) > key]
     page = rows[:limit]
     items = []
+    open_trial = _trial_open(db)
     for r in page:
         v = _version(db, r)
         if v is not None:
-            items.append(summary(r, v))
+            items.append(summary(r, v, open_trial, _my_vote(db, user, r) if open_trial else None))
     return {"items": items, "next_cursor": _cursor(page[-1]) if len(rows) > limit and page else None}
 
 
 def latest(db: Session, user: User, kind: str | None) -> dict[str, Any] | None:
     if not enabled():
         return None
-    q = _visible_q(user, kind).order_by(MarketReport.first_published_at.desc() if kind is None
-                                        else MarketReport.edition_date.desc())
+    q = _visible_q(db, user, kind).order_by(MarketReport.first_published_at.desc() if kind is None
+                                            else MarketReport.edition_date.desc())
     r = db.scalar(q.limit(1))
     v = _version(db, r) if r else None
-    return _payload(r, v) if r is not None and v is not None else None
+    return _payload(r, v, _trial_open(db)) if r is not None and v is not None else None
 
 
 def one(db: Session, user: User, report_id: str, version: int | None = None) -> dict[str, Any]:
@@ -191,7 +242,7 @@ def one(db: Session, user: User, report_id: str, version: int | None = None) -> 
     v = _version(db, r, version)
     if v is None:
         raise not_found("找不到這一版")
-    return _payload(r, v)
+    return _payload(r, v, _trial_open(db))
 
 
 def mark_seen(db: Session, user: User, now: datetime | None = None) -> None:
@@ -328,6 +379,8 @@ def overview(db: Session, now: datetime | None = None, settings: Settings | None
     local = now.astimezone(TAIPEI)
     return {
         "enabled": enabled(s), "mode": cfg.mode,
+        "trial_audience": rs.trial_audience(db, s),
+        "trial_audience_source": "admin" if cfg.trial_audience in rs.AUDIENCES else "default",
         "writers": writers_view(db, cfg, s, now),
         "trial_running": cfg.mode == "trial" and not revealed and not prog["finished"],
         "month": {"label": f"{local.year} 年 {local.month} 月", "spend_usd": round(float(month), 2),
@@ -346,16 +399,26 @@ def overview(db: Session, now: datetime | None = None, settings: Settings | None
 
 
 def put_config(db: Session, user: User, body: dict[str, Any], settings: Settings | None = None) -> dict[str, Any]:
-    """Answers the overview (it has ``mode`` and ``writers``) plus ``notice`` when switching to public."""
+    """Answers the overview (it has ``mode``, ``trial_audience`` and ``writers``) plus ``notice`` when switching to
+    public or changing who takes part in the blind test."""
     s = settings or get_settings()
     cfg = rs.config(db, s)
     notice = None
+    if "trial_audience" in body:
+        aud = body["trial_audience"]
+        if aud is not None and aud not in rs.AUDIENCES:
+            raise unprocessable("盲測對象只能是 admins 或 all。", details={"field": "trial_audience"})
+        before = rs.trial_audience(db, s)
+        cfg.trial_audience = aud
+        after = aud or s.mreport_trial_audience
+        if after != before:
+            notice = AUDIENCE_NOTICE[after]
     mode = body.get("mode")
     if mode is not None:
         if mode not in rs.MODES:
             raise unprocessable("模式只能是 trial、public 或 paused。", details={"field": "mode"})
         if mode == "public" and cfg.mode != "public":
-            notice = MODE_NOTICE
+            notice = " ".join(x for x in (notice, MODE_NOTICE) if x)
         cfg.mode = mode
     if "writers" in body and body["writers"] is not None:
         writers = dict(cfg.writers or {})
@@ -372,7 +435,8 @@ def put_config(db: Session, user: User, body: dict[str, Any], settings: Settings
         cfg.writers = writers
     cfg.updated_by, cfg.updated_at = user.id, now_utc()
     db.commit()
-    log.info("market reports: settings changed by %s (mode %s)", user.id, cfg.mode)
+    log.info("market reports: settings changed by %s (mode %s, blind test for %s)", user.id, cfg.mode,
+             rs.trial_audience(db, s))
     return {**overview(db, settings=s), "notice": notice}
 
 
@@ -402,12 +466,35 @@ def _writer(w: dict[str, Any] | None) -> dict[str, Any] | None:
     return {"model": w.get("model"), "effort": w.get("effort")} if w else None
 
 
+def vote_counts(votes: list[MarketReportVote]) -> dict[str, dict[str, int]]:
+    """``{"all" | "admins" | "members": {"A": n, "B": n, "C": n}}``: admins' and members' votes, and together."""
+    out = {k: dict.fromkeys(pipeline.VARIANTS, 0) for k in ("all", "admins", "members")}
+    for v in votes:
+        if v.preferred not in pipeline.VARIANTS:
+            continue
+        out["all"][v.preferred] += 1
+        out["admins" if v.by_admin else "members"][v.preferred] += 1
+    return out
+
+
+def _votes_by_report(db: Session, report_ids: list[str]) -> dict[str, list[MarketReportVote]]:
+    out: dict[str, list[MarketReportVote]] = {rid: [] for rid in report_ids}
+    if report_ids:
+        for v in db.scalars(select(MarketReportVote).where(MarketReportVote.report_id.in_(report_ids))):
+            out.setdefault(v.report_id, []).append(v)
+    return out
+
+
 def trial_list(db: Session, user: User, settings: Settings | None = None) -> dict[str, Any]:
+    """Every blind-test edition with its A / B / C, the admin's own vote and everyone's votes (``votes``: admins and
+    members apart, and together); ``audience``: who takes part."""
     s = settings or get_settings()
     cfg = rs.config(db, s)
     revealed = _revealed(cfg)
     out = []
-    for r in db.scalars(select(MarketReport).where(MarketReport.trial.is_(True))):
+    trial_reports = list(db.scalars(select(MarketReport).where(MarketReport.trial.is_(True))))
+    all_votes = _votes_by_report(db, [r.id for r in trial_reports])
+    for r in trial_reports:
         vote = db.get(MarketReportVote, (r.id, user.id))
         variants = []
         for label in pipeline.VARIANTS:
@@ -432,11 +519,15 @@ def trial_list(db: Session, user: User, settings: Settings | None = None) -> dic
                     "edition_date": r.edition_date.isoformat(),
                     "edition_label": assemble.edition_label(r.kind, r.edition_date, (r.period_start, r.period_end)),
                     "closed": r.closed_at is not None, "variants": variants,
-                    "my_vote": {"preferred": vote.preferred, "note": vote.note} if vote else None})
+                    "my_vote": {"preferred": vote.preferred, "note": vote.note} if vote else None,
+                    "votes": vote_counts(all_votes.get(r.id, []))})
     out.sort(key=lambda x: (x["edition_date"], -KIND_ORDER[x["kind"]], x["report_id"]), reverse=True)
     prog = trial_progress(db, s)
+    voters = [v for vs in all_votes.values() for v in vs]
     return {"days_done": prog["days_done"], "days_total": prog["days_total"], "weekly_done": prog["weekly_done"],
-            "finished": prog["finished"], "reports": out,
+            "finished": prog["finished"], "reports": out, "audience": rs.trial_audience(db, s),
+            "voters": {"admins": len({v.user_id for v in voters if v.by_admin}),
+                       "members": len({v.user_id for v in voters if not v.by_admin})},
             "reveal": _reveal_summary(db, cfg, prog) if revealed else None}
 
 
@@ -476,15 +567,162 @@ def vote(db: Session, user: User, report_id: str, preferred: str, note: str) -> 
         raise not_found(NOT_FOUND)
     if preferred not in pipeline.VARIANTS:
         raise unprocessable("只能選 A、B 或 C。", details={"field": "preferred"})
-    row = db.get(MarketReportVote, (report_id, user.id))
-    now = now_utc()
-    if row is None:
-        db.add(MarketReportVote(report_id=report_id, user_id=user.id, preferred=preferred, note=note or "",
-                                created_at=now, updated_at=now))
-    else:
-        row.preferred, row.note, row.updated_at = preferred, note or "", now
-    db.commit()
+    if _revealed(rs.config(db)):
+        # members see the votes and the result after the reveal: no new or changed pick (the note of the same pick
+        # may still be written)
+        mine = db.get(MarketReportVote, (report_id, user.id))
+        if mine is None or mine.preferred != preferred:
+            raise ApiError(409, "trial_revealed", REVEALED)
+    _save_vote(db, user, report_id, preferred, note or "", by_admin=True)
     return {"report_id": report_id, "preferred": preferred, "note": note or ""}
+
+
+def _save_vote(db: Session, user: User, report_id: str, preferred: str, note: str | None, *, by_admin: bool) -> None:
+    """One vote per user and edition (insert, or change the pick); ``note`` None keeps the stored note. Two requests
+    at once: the second updates the row the first made."""
+    now = now_utc()
+    for _ in range(2):
+        row = db.get(MarketReportVote, (report_id, user.id))
+        if row is None:
+            db.add(MarketReportVote(report_id=report_id, user_id=user.id, preferred=preferred, note=note or "",
+                                    by_admin=by_admin, created_at=now, updated_at=now))
+        else:
+            row.preferred, row.updated_at, row.by_admin = preferred, now, by_admin
+            if note is not None:
+                row.note = note
+        try:
+            db.commit()
+            return
+        except IntegrityError:
+            db.rollback()
+    raise ApiError(409, "conflict", "投票沒有存成功，重新整理後再試一次。")
+
+
+# -- members: the blind test open to everyone (MREPORT_TRIAL_AUDIENCE=all) -------------------------------------
+def _open_trial_report(db: Session, report_id: str) -> MarketReport:
+    """A blind-test edition while the test is open to everyone; 404 otherwise (also for admins: with the audience
+    ``admins`` they use the admin endpoints, nothing changes)."""
+    r = db.get(MarketReport, report_id)
+    if r is None or not enabled() or not r.trial or not _trial_open(db) or r.current_version_id is None \
+            or r.state not in ("data", "ai"):
+        raise not_found(NOT_FOUND)
+    return r
+
+
+def _writes_may_start(db: Session, r: MarketReport, settings: Settings, now: datetime | None = None) -> bool:
+    """Whether the worker may still start (or retry) a variant of ``r`` — :func:`pipeline.start_writes`' own checks:
+    the mode is not paused, it is before the push fallback time, the edition is open and the reports' key slot was
+    usable when the worker last looked (``key_state``; not written yet = usable)."""
+    now = now or now_utc()
+    ed = edition_on(r.kind, r.edition_date)
+    cfg = rs.config(db, settings)
+    if ed is None or r.closed_at is not None or cfg.mode == "paused" or now >= ed.push_fallback_at:
+        return False
+    key = cfg.key_state or {}
+    return not key.get("note") and key.get("status") not in ("disabled", "exhausted")
+
+
+def _variant_state(db: Session, r: MarketReport, label: str, settings: Settings,
+                   may_start: bool | None = None) -> tuple[str, Any]:
+    """(``ready`` | ``writing`` | ``none``, the published version or None). ``writing`` only while a run is being
+    written or one may still start (:func:`_writes_may_start`, with attempts left); else ``none`` = this variant will
+    not come (only a data edition, over the trial budget, out of attempts, paused, no usable key, past the fallback
+    time, or the edition closed)."""
+    v = _variant_version(db, r.id, label)
+    if v is not None:
+        return "ready", v
+    runs = pipeline.runs_of(db, r.id, label)
+    if r.closed_at is not None or any(x.status in pipeline.DONE_STATUSES for x in runs):
+        return "none", None
+    if any(x.status == "running" for x in runs):
+        return "writing", None
+    if len(runs) >= settings.ai_mreport_max_attempts:
+        return "none", None
+    if not (_writes_may_start(db, r, settings) if may_start is None else may_start):
+        return "none", None
+    return "writing", None
+
+
+def _member_result(db: Session, cfg: MarketReportConfig, kind: str, settings: Settings) -> dict[str, Any]:
+    """After the reveal, for members: the votes per setting of this kind (admins' and members' together), the
+    setting(s) with the most votes, and the setting the reports continue with (``chosen``: picked in the back
+    office; null until then)."""
+    summ = _reveal_summary(db, cfg, trial_progress(db, settings))
+    k = next(x for x in summ["kinds"] if x["kind"] == kind)
+    rows = [{"writer": dict(x["writer"]), "votes": int(x["votes"])} for x in k["rows"]]
+    most = max((x["votes"] for x in rows), default=0)
+    chosen = rs.Writer.parse((cfg.writers or {}).get(kind))
+    return {"kind": kind, "kind_label": KIND_LABELS[kind], "rows": rows,
+            "top": [x["writer"] for x in rows if most > 0 and x["votes"] == most],
+            "chosen": chosen.as_dict() if chosen else None}
+
+
+def trial_view(db: Session, user: User, report_id: str, settings: Settings | None = None) -> dict[str, Any]:
+    """One blind-test edition for any signed-in user: which of A / B / C can be read, the viewer's vote and whether
+    it may still change. Before the reveal nothing names a model, a cost or the votes so far; after it, each label's
+    setting, this edition's votes and the kind's result."""
+    s = settings or get_settings()
+    r = _open_trial_report(db, report_id)
+    cfg = rs.config(db, s)
+    revealed = _revealed(cfg)
+    mine = db.get(MarketReportVote, (r.id, user.id))
+    may_start = _writes_may_start(db, r, s)
+    variants = []
+    for label in pipeline.VARIANTS:
+        state, v = _variant_state(db, r, label, s, may_start)
+        row: dict[str, Any] = {"label": label, "state": state}
+        if revealed:
+            runs = pipeline.runs_of(db, r.id, label)
+            row["writer"] = _writer(v.writer if v is not None else (runs[-1].writer if runs else None))
+        variants.append(row)
+    counts = vote_counts(list(db.scalars(select(MarketReportVote).where(MarketReportVote.report_id == r.id))))
+    return {"report_id": r.id, "kind": r.kind, "kind_label": KIND_LABELS[r.kind],
+            "edition_date": r.edition_date.isoformat(),
+            "edition_label": assemble.edition_label(r.kind, r.edition_date, (r.period_start, r.period_end)),
+            "variants": variants, "my_vote": mine.preferred if mine else None,
+            "can_vote": not revealed and any(v["state"] == "ready" for v in variants),
+            "revealed": revealed, "votes": counts["all"] if revealed else None,
+            "result": _member_result(db, cfg, r.kind, s) if revealed else None}
+
+
+def member_variant(db: Session, user: User, report_id: str, label: str) -> dict[str, Any]:
+    """A variant as every signed-in user reads it: the public form (no refs, no dropped text, no ids), never the
+    model or the cost. 409 ``variant_running`` while it is being written; 404 when it did not come."""
+    r = _open_trial_report(db, report_id)
+    if label not in pipeline.VARIANTS:
+        raise not_found("找不到這個版本")
+    s = get_settings()
+    state, v = _variant_state(db, r, label, s)
+    if v is None:
+        if state == "writing":
+            raise ApiError(409, "variant_running", "這個版本還在寫，寫好再來看。")
+        raise not_found("這個版本沒有寫成，看看另外兩個。")
+    out = assemble.public(v.payload or {})
+    # Nothing may tell the three apart but their text: each variant's own ``published_at`` (when it finished) and
+    # ``version`` (numbered in the order they finished) would hint which setting wrote it (Sonnet is usually done
+    # first), so all three carry the edition's: the time the first variant was ready and the data edition's number.
+    # (``as_of`` is the edition's cut-off for all three: the writes start after it.)
+    first = _aware(r.first_published_at) or _aware(v.created_at) or now_utc()
+    data = db.get(MarketReportVersion, r.current_version_id) if r.current_version_id else None
+    out["published_at"] = iso_taipei(_aware(r.ai_published_at) or first)
+    out["first_published_at"] = iso_taipei(first)
+    out["version"] = data.version if data is not None else 1
+    out["trial"], out["variant"] = True, label
+    return out
+
+
+def member_vote(db: Session, user: User, report_id: str, preferred: str) -> dict[str, Any]:
+    """Pick A, B or C for one edition (one vote per user; changing it replaces it) until the reveal. Answers the
+    edition's :func:`trial_view`."""
+    r = _open_trial_report(db, report_id)
+    if _revealed(rs.config(db)):
+        raise ApiError(409, "trial_revealed", REVEALED)
+    if preferred not in pipeline.VARIANTS:
+        raise unprocessable("只能選 A、B 或 C。", details={"field": "preferred"})
+    if _variant_version(db, r.id, preferred) is None:
+        raise unprocessable(f"{preferred} 還沒有可以看的版本，先看別的。", details={"field": "preferred"})
+    _save_vote(db, user, r.id, preferred, None, by_admin=is_site_admin(user))
+    return trial_view(db, user, r.id)
 
 
 PASS = {"policy_violations": 0, "per_report_mismatch": 1, "dropped_avg": 1.0, "on_time": 0.8}
@@ -513,8 +751,10 @@ def _reveal_summary(db: Session, cfg: MarketReportConfig, prog: dict[str, Any]) 
             ms = [r.metrics or {} for r in runs if r.status not in ("skipped_budget", "running")]
             n = len(ms) or 1
             mine = {(r.report_id, r.variant) for r in runs}
+            picked = [v for v in votes if (v.report_id, v.preferred) in mine]
             row = {"writer": {"model": model, "effort": effort}, "reports": len(ms),
-                   "votes": sum(1 for v in votes if (v.report_id, v.preferred) in mine),
+                   "votes": len(picked), "votes_admins": sum(1 for v in picked if v.by_admin),
+                   "votes_members": sum(1 for v in picked if not v.by_admin),
                    "policy_violations": sum(int(m.get("policy_violations") or 0) for m in ms),
                    "subject_mismatches": sum(int(m.get("subject_mismatches") or 0) for m in ms),
                    "inferred_dates": sum(int(m.get("inferred_dates") or 0) for m in ms),
