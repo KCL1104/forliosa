@@ -209,7 +209,7 @@ def check_tw_news(db, user, md, pool, settings) -> int:
                     errors.append(data["code"])
                 elif name == "done":
                     u = CallUsage(**data["usage"])
-                    cost = float(estimate_cost(data["model"], u))
+                    cost = float(charge(data["model"], u))
                     total += cost
             ok = (called > 0 or follow_up) and not leaks and not errors
             failed = failed or not ok
