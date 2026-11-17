@@ -159,6 +159,10 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             "notify_digest": bool(ch.notify_digest) if ch else True,
             # 群組 AI 日報 (boosted groups): off until the owner turns it on
             "notify_daily": bool(ch.notify_daily) if ch else False,
+            # 市場報告 (every group): 盤前、盤後 off, 週報 on until the owner changes them
+            "notify_premarket": bool(ch.notify_premarket) if ch else False,
+            "notify_close": bool(ch.notify_close) if ch else False,
+            "notify_weekly": bool(ch.notify_weekly) if ch else True,
         }
         if kind == "discord":
             hint = ch.webhook_hint if ch is not None and me.role == "owner" else None
@@ -167,6 +171,9 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             row["chat_title"] = ch.chat_title if ch else None
         out[kind] = row
     out["telegram_available"] = settings.telegram_available
+    from forliosa.reports.push import pushing
+
+    out["market_reports_available"] = pushing(db, settings)  # the three switches show only once reports are public
     return out
 
 
@@ -177,8 +184,12 @@ def connect_message(group: Group) -> str:
             "打開「推播」的成員，他們開放的交易動態與週報才會送到這裡。\n" + disclaimer.SHORT)
 
 
+REPORT_FLAGS = {"notify_premarket": False, "notify_close": False, "notify_weekly": True}  # a new channel's defaults
+
+
 def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, notify_trades: bool,
-                notify_digest: bool, notify_daily: bool | None = None) -> None:
+                notify_digest: bool, notify_daily: bool | None = None,
+                reports: dict[str, bool | None] | None = None) -> None:
     owner_only(m)
     url = pushers.parse_webhook_url(webhook_url)
     if url is None:
@@ -206,6 +217,12 @@ def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, not
         ch.notify_daily = notify_daily
     elif fresh:  # a new destination starts with the daily report off
         ch.notify_daily = False
+    for flag, default in REPORT_FLAGS.items():  # 市場報告: given, else unchanged (a new destination: the defaults)
+        value = (reports or {}).get(flag)
+        if value is not None:
+            setattr(ch, flag, bool(value))
+        elif fresh:
+            setattr(ch, flag, default)
     ch.configured_by, ch.configured_at, ch.updated_at = m.user_id, now, now
     db.commit()
 
@@ -225,6 +242,9 @@ def patch_channel(db: Session, group: Group, m: GroupMember, kind: str, changes:
         ch.notify_digest = bool(changes["notify_digest"])
     if "notify_daily" in changes:
         ch.notify_daily = bool(changes["notify_daily"])
+    for flag in REPORT_FLAGS:
+        if flag in changes:
+            setattr(ch, flag, bool(changes[flag]))
     ch.updated_at = now
     db.commit()
 
@@ -290,13 +310,15 @@ def link_chat(db: Session, code: str, chat_id: int, chat_title: str, now: dateti
     ch = _channel(db, group.id, "telegram")
     if ch is None:
         ch = GroupChannel(group_id=group.id, kind="telegram", notify_trades=True, notify_digest=True,
-                          notify_daily=False)
+                          notify_daily=False, **REPORT_FLAGS)
         db.add(ch)
     else:
         if ch.telegram_chat_id != chat_id:  # another chat, or set up again after it was removed
             _reset_others_push(db, group.id, row.created_by, now)
         if ch.status == REMOVED:
             ch.notify_trades, ch.notify_digest, ch.notify_daily = True, True, False
+            for flag, default in REPORT_FLAGS.items():
+                setattr(ch, flag, default)
     _cancel_pending(db, group.id, "telegram")
     ch.status, ch.disabled_reason = "active", None
     ch.telegram_chat_id, ch.chat_title = chat_id, (one_line(chat_title) or "Telegram 群組")[:255]

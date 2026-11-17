@@ -15,7 +15,8 @@ What is archived, and from where (field names: ``forliosa.marketdata.opendata``)
 ==========================  =========================================================
 table                       source (official open data, 政府資料開放授權條款第 1 版)
 ==========================  =========================================================
-prices_daily                TWSE STOCK_DAY_ALL, TPEx daily_close_quotes
+prices_daily                TWSE STOCK_DAY_ALL, TPEx daily_close_quotes (with each security's 成交金額 in ``value``)
+market_turnover_daily       TWSE FMTQIK 每日市場成交資訊 (the month so far; group ``twse``)
 instruments (ETFs)          the same two files: code and short name of every listed ``00…`` ETF (NT$ lines only), so
                             the instrument list has every ETF (``marketdata.archive_provider.ArchiveProvider.listings``)
 valuation_daily             TWSE BWIBBU_ALL, TPEx peratio_analysis
@@ -26,12 +27,14 @@ foreign_holding_daily       TPEx 3insti_qfii (TWSE has no per-stock OpenAPI data
 shareholding_distribution   TDCC open data 1-5 (weekly, current week only)
 market_events               TWT48U_ALL / exright_prepost (除權息), notice / warning (注意),
                             punish / disposal (處置), t187ap04 (重大訊息), t187ap41 (股東會),
-                            t187ap05 (營收公布日: first seen), TWSE news/newsList (證交所新聞)
+                            t187ap05 (營收公布日: first seen), TWSE news/newsList (證交所新聞), TWT85U
+                            (變更交易 ``altered_trading``: from the day first seen until the day it leaves the list)
 financial_reports           t187ap06 (income, YTD), t187ap07 (balance), t187ap17; blank rows are skipped and
                             a null value never overwrites an archived one
 fund_profiles               TWSE t187ap47_L 基金基本資料彙總表 (ETF basics)
 market_holidays             TWSE holidaySchedule (official calendar, current year)
-index_daily                 TWSE MI_INDEX (all indices, daily) + MFI94U (current month of 發行量加權股價報酬指數),
+index_daily                 TWSE MI_INDEX (all indices, daily) + MFI94U (current month of 發行量加權股價報酬指數)
+                            + MI_5MINS_HIST (the TAIEX's open / high / low of the month, onto stored rows only),
                             TPEx tpex_index + tpex_reward_index (current month): benchmarks ^TAIEXTR / ^TPEXTR
 dividend_resolutions        TWSE t187ap45_L 股利分派情形 (board / AGM resolutions; TPEx mopsfin_t187ap39_O is dead
                             since 2021-08, so TPEx dividends only come from the ex-dividend notices)
@@ -123,6 +126,7 @@ from forliosa.models import (
     MarginDaily,
     MarketEvent,
     MarketHoliday,
+    MarketTurnoverDaily,
     PriceDaily,
     ReferencePrice,
     ShareholdingDistribution,
@@ -169,6 +173,8 @@ OFFICIAL_CLOSE_SOURCES = (*OPENAPI_CLOSE_SOURCES, "twse-opendata")
 INTERIM_CLOSE_SOURCE = "shioaji-data"
 TPEX50 = "TPEX50"
 SEC_DISABLED = "sec edgar（未設定 SEC_CONTACT_EMAIL，略過）"
+TAIEX_NAME = "發行量加權股價指數"  # index_daily name of the TAIEX (MI_INDEX)
+ALTERED_TRADING = "altered_trading"  # market_events.type of TWT85U rows (變更交易)
 
 
 def upsert(db: Session, model: Any, rows: list[dict[str, Any]], keys: list[str],
@@ -358,7 +364,7 @@ class Archiver:
         raw = self._list(f"{TWSE_OPENAPI}/exchangeReport/STOCK_DAY_ALL")
         quotes = parse_stock_day_all(raw)
         rows = [{"symbol": s, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low, "close": q.price,
-                 "volume": q.volume, "source": "twse-openapi"}
+                 "volume": q.volume, "value": q.value, "source": "twse-openapi"}
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
         self._close_status("twse-openapi/price", rows)
@@ -397,11 +403,30 @@ class Archiver:
             d = last_tw_trading_day(d - timedelta(days=1))
         return d
 
+    def _still_previous(self, d: date, model: Any, fields: tuple[str, ...], rows: list[dict[str, Any]]) -> bool:
+        """Whether a file without a date field, read for day ``d``, still holds the previous trading day's numbers:
+        every one of (up to) 50 of its rows equals the row stored for that day. The TWSE OpenAPI was seen to change
+        only in its 05:2x morning batch (2026-11-17 probe): an evening read would otherwise stamp yesterday's numbers
+        with today's date (市場報告 memo, phase 0). Only asked about an evening stamp (``d`` is today)."""
+        if d != self.now_fn().astimezone(TAIPEI).date() or not rows:
+            return False
+        prev = last_tw_trading_day(d - timedelta(days=1))
+        sample = rows[:50]
+        stored = {r.symbol: r for r in self.db.scalars(select(model).where(
+            model.date == prev, model.symbol.in_([r["symbol"] for r in sample])))}
+        if len(stored) < min(len(sample), 20):
+            return False
+        return all(r["symbol"] in stored and all(getattr(stored[r["symbol"]], f) == r[f] for f in fields)
+                   for r in sample)
+
     def twse_margin(self) -> int:
         d = self.margin_date()
         rows = [{"symbol": tw_symbol(r["code"], "TWSE"), "date": d, "margin_balance": r["margin_balance"],
                  "short_balance": r["short_balance"], "margin_limit": r["margin_limit"], "source": "twse-openapi"}
                 for r in od.parse_mi_margn(self._list(f"{TWSE_OPENAPI}/exchangeReport/MI_MARGN"))]
+        if self._still_previous(d, MarginDaily, ("margin_balance", "short_balance"), rows):
+            log.info("MI_MARGN still holds the previous session: not stamped as %s", d)
+            return 0
         return upsert(self.db, MarginDaily, rows, ["symbol", "date"])
 
     def twse_events(self) -> int:
@@ -501,6 +526,64 @@ class Archiver:
         self._status("twse-openapi/index", max((r["date"] for r in mi), default=None), len(mi))
         return n
 
+    # -- 市場報告 (2026-11-17): FMTQIK, MI_5MINS_HIST, TWT85U ------------------------------------------------------
+    def twse_turnover(self) -> int:
+        """FMTQIK 集中市場每日市場成交資訊 (the month so far) -> ``market_turnover_daily``: the official value the
+        reports use instead of their own sum of the day's closes once it is out (the 05:2x batch, next morning)."""
+        rows = [{**r, "market": "TWSE", "source": "twse-openapi"}
+                for r in od.parse_fmtqik(self._list(f"{TWSE_OPENAPI}/exchangeReport/FMTQIK"))]
+        n = upsert(self.db, MarketTurnoverDaily, rows, ["date", "market"])
+        self._status("twse-openapi/turnover", max((r["date"] for r in rows), default=None), n)
+        return n
+
+    def twse_index_ohlc(self) -> int:
+        """MI_5MINS_HIST 發行量加權股價指數歷史資料 (the month so far): fills ``open`` / ``high`` / ``low`` of the TAIEX
+        rows already stored; the close and change stay MI_INDEX's (or the same-day file's). A day without a TAIEX
+        row is left for the next run (the file holds the whole month)."""
+        parsed = od.parse_mi_5mins_hist(self._list(f"{TWSE_OPENAPI}/indicesReport/MI_5MINS_HIST"))
+        by_day = {r["date"]: r for r in parsed}
+        n = 0
+        if by_day:
+            for row in self.db.scalars(select(IndexDaily).where(IndexDaily.name == TAIEX_NAME,
+                                                                IndexDaily.date.in_(list(by_day)))):
+                r = by_day[row.date]
+                row.open, row.high, row.low = r["open"], r["high"], r["low"]
+                n += 1
+            self.db.commit()
+        self._status("twse-openapi/index_ohlc", max(by_day, default=None), n)
+        return n
+
+    def twse_altered_trading(self) -> int:
+        """TWT85U 集中市場證券變更交易 (全額交割 and the like; today's list, no date or reason in the file) ->
+        ``market_events`` type ``altered_trading``: a security's row starts the day it is first seen (``date``) and
+        ends (``end_date``, exclusive) the day it is no longer listed. On the dataset's first run every row is marked
+        ``backlog`` (its real start is unknown). An empty answer closes nothing (an outage must not lift them all)."""
+        parsed = od.parse_twt85u(self._list(f"{TWSE_OPENAPI}/exchangeReport/TWT85U"))
+        today = self.now_fn().astimezone(TAIPEI).date()
+        base = (MarketEvent.type == ALTERED_TRADING, MarketEvent.source == "twse-openapi")
+        seen_before = self.db.scalar(select(MarketEvent.id).where(*base).limit(1)) is not None
+        open_rows = {e.symbol: e for e in self.db.scalars(select(MarketEvent).where(*base,
+                                                                                     MarketEvent.end_date.is_(None)))}
+        listed = {tw_symbol(r["code"], "TWSE"): r for r in parsed}
+        new = []
+        for symbol, r in listed.items():
+            if symbol in open_rows:
+                continue
+            new.append({"key": od.event_key(ALTERED_TRADING, "TWSE", r["code"], today.isoformat()), "symbol": symbol,
+                        "date": today, "end_date": None, "type": ALTERED_TRADING, "title": "變更交易",
+                        "detail": "分盤集合競價" if r["periodic_call_auction"] else "", "url": None,
+                        "data": {"name": r["name"], "periodic_call_auction": r["periodic_call_auction"],
+                                 "first_seen": today.isoformat(), "backlog": not seen_before},
+                        "source": "twse-openapi"})
+        n = upsert(self.db, MarketEvent, new, ["key"], ())
+        if listed:
+            for symbol, e in open_rows.items():
+                if symbol not in listed:
+                    e.end_date = today
+            self.db.commit()
+        self._status("twse-openapi/altered_trading", today if listed else None, len(listed))
+        return n + len(listed)
+
     # -- TWSE same-day download files and interim closes (forliosa.closes polls; these only store) ------------------
     def store_twse_opendata_prices(self, raw: list[dict[str, Any]]) -> int:
         """STOCK_DAY_ALL from the data.gov.tw download link (rows already in the OpenAPI's field names, one session,
@@ -511,7 +594,7 @@ class Archiver:
 
         quotes = parse_stock_day_all(raw)
         rows = [{"symbol": s, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low, "close": q.price,
-                 "volume": q.volume, "source": SOURCE}
+                 "volume": q.volume, "value": q.value, "source": SOURCE}
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"], where=PriceDaily.source.not_in(OPENAPI_CLOSE_SOURCES))
         self._close_status(PRICE_DATASET, rows)
@@ -602,6 +685,9 @@ class Archiver:
                 for r in cd.parse_qfii_top20(self._list(f"{TWSE_OPENAPI}/fund/MI_QFIIS_sort_20"))]
         if not rows:
             return 0
+        if self._still_previous(d, ForeignHoldingTop20, ("pct", "shares"), rows):
+            log.info("MI_QFIIS_sort_20 still holds the previous session: not stamped as %s", d)
+            return 0
         n = upsert(self.db, ForeignHoldingTop20, rows, ["date", "symbol"])
         # a stock that left the list since an earlier stamp of the same day is removed (the list is the top 20)
         listed = {r["symbol"] for r in rows}
@@ -656,7 +742,7 @@ class Archiver:
         raw = self._list(f"{TPEX_OPENAPI}/tpex_mainboard_daily_close_quotes")
         quotes = parse_daily_close_quotes(raw)
         rows = [{"symbol": s, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low, "close": q.price,
-                 "volume": q.volume, "source": "tpex-openapi"}
+                 "volume": q.volume, "value": q.value, "source": "tpex-openapi"}
                 for s, q in quotes.items() if od.is_listed_code(s.split(".")[0])]
         n = upsert(self.db, PriceDaily, rows, ["symbol", "date"])
         self._close_status("tpex-openapi/price", rows)
@@ -1044,7 +1130,11 @@ class Archiver:
                              ("twse holidays", self.twse_holidays),
                              ("twse foreign top 20 MI_QFIIS_sort_20", self.twse_foreign_top20),
                              ("twse total return MFI94U", self.twse_total_return),
-                             ("twse indices MI_INDEX", self.twse_indices)):
+                             ("twse indices MI_INDEX", self.twse_indices),
+                             # after MI_INDEX: the OHLC fills the TAIEX rows it wrote
+                             ("twse index OHLC MI_5MINS_HIST", self.twse_index_ohlc),
+                             ("twse turnover FMTQIK", self.twse_turnover),
+                             ("twse altered trading TWT85U", self.twse_altered_trading)):
                 self._run(name, fn)
         if "tpex" in groups:
             for name, fn in (("tpex prices", self.tpex_prices), ("tpex valuation", self.tpex_valuation),

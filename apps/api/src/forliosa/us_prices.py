@@ -4,7 +4,8 @@
 Off unless US_PRICE_SOURCE=databento and DATABENTO_API_KEY are set (``Settings.us_prices_enabled``).
 
 Which symbols: every US symbol in a ledger or a watchlist, plus SPY, DIA and ONEQ for the market page's US row
-(``MARKET_ETFS``; shown as ETFs, never as the indices they track).
+(``MARKET_ETFS``; shown as ETFs, never as the indices they track), VOO (the benchmark option) and SMH and TSM for the
+market reports (``REPORT_US_SYMBOLS``, 2026-11-17).
 
 Two jobs (``forliosa.worker``):
 
@@ -49,6 +50,9 @@ MARKET_ETFS = ("SPY", "DIA", "ONEQ")  # the market page's US row: S&P 500, Dow J
 # The performance page's US benchmark option (VOO, apps/web lib/labels.ts BENCHMARK_OPTIONS): fetched whether or not
 # anyone holds it, so picking it always has closes (2026-11-15 review)
 BENCHMARK_ETFS = ("VOO",)
+# 市場報告 (2026-11-17): the semiconductor ETF and TSMC's ADR for the 盤前重點 / 市場週報 (ETF and ADR moves, never
+# index points); fetched whether or not anyone holds them. Licence risk as decided on 2026-11-15.
+REPORT_US_SYMBOLS = ("SMH", "TSM")
 FIRST_DAY = databento.FIRST_DAY
 # Re-read the last few sessions on every update: a late correction to a summary replaces the stored bar.
 OVERLAP_DAYS = 5
@@ -85,8 +89,9 @@ def http() -> HttpFetcher | None:
 
 
 def wanted(db: Session) -> list[str]:
-    """Every US symbol to keep: the market page's ETFs, the benchmark option, then the tracked ones."""
-    return databento.us_symbols([*MARKET_ETFS, *BENCHMARK_ETFS, *tracked_symbols(db)])
+    """Every US symbol to keep: the market page's ETFs, the benchmark option, the market reports' SMH and TSM, then the
+    tracked ones."""
+    return databento.us_symbols([*MARKET_ETFS, *BENCHMARK_ETFS, *REPORT_US_SYMBOLS, *tracked_symbols(db)])
 
 
 def stored_through(db: Session) -> date | None:

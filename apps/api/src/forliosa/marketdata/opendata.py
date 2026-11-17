@@ -654,6 +654,49 @@ def parse_mfi94u(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return out
 
 
+def parse_fmtqik(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """FMTQIK 集中市場每日市場成交資訊 (the current month; swagger and a live answer of 2026-11-17: Date (ROC),
+    TradeVolume, TradeValue (NT$), Transaction, TAIEX, Change (signed)) -> [{date, trade_volume, trade_value,
+    transactions, taiex, change}]."""
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("Date"))
+        if d is None:
+            continue
+        out.append({"date": d, "trade_volume": parse_int(r.get("TradeVolume")),
+                    "trade_value": parse_int(r.get("TradeValue")), "transactions": parse_int(r.get("Transaction")),
+                    "taiex": _positive(r.get("TAIEX")), "change": parse_decimal(r.get("Change"))})
+    return out
+
+
+def parse_mi_5mins_hist(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """MI_5MINS_HIST 發行量加權股價指數歷史資料 (the current month; Date (ROC), OpeningIndex, HighestIndex, LowestIndex,
+    ClosingIndex; live 2026-11-17) -> [{date, open, high, low, close}]."""
+    out = []
+    for r in rows:
+        d = parse_tw_date(r.get("Date"))
+        close = _positive(r.get("ClosingIndex"))
+        if d is None or close is None:
+            continue
+        out.append({"date": d, "open": _positive(r.get("OpeningIndex")), "high": _positive(r.get("HighestIndex")),
+                    "low": _positive(r.get("LowestIndex")), "close": close})
+    return out
+
+
+def parse_twt85u(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """TWT85U 集中市場證券變更交易 (today's list; swagger and a live answer of 2026-11-17: Code, Name,
+    PeriodicCallAuctionTrading — "**" when the security trades by periodic call auction 分盤集合競價). No date and no
+    reason in the file. -> [{code, name, periodic_call_auction}]."""
+    out = []
+    for r in rows:
+        code = _text(r.get("Code"))
+        if not code:
+            continue
+        out.append({"code": code, "name": _text(r.get("Name")),
+                    "periodic_call_auction": "*" in str(r.get("PeriodicCallAuctionTrading") or "")})
+    return out
+
+
 def parse_tpex_index(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """tpex_index (the current month of 櫃買指數 OHLC) -> [{name, date, open, high, low, close, change}]."""
     out = []

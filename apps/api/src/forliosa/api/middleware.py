@@ -72,6 +72,11 @@ VIEW_AS_IGNORED_PATHS = (
     "/derivatives/{seg}",
     "/derivatives/futures/{seg}/history",
     "/market/overview",  # the market page: no user data
+    # 市場報告: the same text for everyone, read as the signed-in viewer (「seen」 is a write: refused)
+    "/market/reports",
+    "/market/reports/status",
+    "/market/reports/latest",
+    "/market/reports/{seg}",
     # Discussions never act as the delegation's owner: reads answer as the signed-in viewer (writes stay refused).
     "/users/me",
     "/discussions/topics",

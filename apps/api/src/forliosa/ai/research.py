@@ -692,3 +692,26 @@ def seed_from_why(db: Session, symbol: str, day: date, text: str, citations: lis
     if not sources:
         return None
     return _upsert(db, key, now, settings, sources=sources, one_liner=text, research=False)
+
+
+def remember_report_sources(db: Session, symbol: str, session: date, sources: list[dict[str, Any]], now: datetime,
+                            settings: Settings) -> AiWhyResearch | None:
+    """市場報告 (2026-11-17): the verified reports a 盤後重點 cited about a listed stock join that session's after-close
+    entry (made when there is none), after the entry's own sources — sources only (URL, title, outlet, the cited
+    passages, page age): never a sentence the report's AI wrote. Nothing once the next session has opened."""
+    key = Key(symbol, market_of_symbol(symbol), session, AFTER_CLOSE)
+    if next_open(key) <= now:
+        return None
+    found_at = now.astimezone(TAIPEI).isoformat(timespec="minutes")
+    clean = []
+    for s in sources[:MAX_SOURCES]:
+        url = str(s.get("url") or "")
+        if not url.startswith("http"):
+            continue
+        clean.append({"url": url, "title": _clean(s.get("title"))[:TITLE_CHARS],
+                      "snippets": [t for t in (_clean(x)[:SNIPPET_CHARS] for x in s.get("snippets") or []) if t]
+                      [:MAX_SNIPPETS], "outlet": s.get("outlet"), "page_age": s.get("page_age"),
+                      "found_at": s.get("found_at") or found_at})
+    if not clean:
+        return None
+    return _upsert(db, key, now, settings, sources=clean, research=False)

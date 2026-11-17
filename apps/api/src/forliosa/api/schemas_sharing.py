@@ -486,12 +486,18 @@ class DiscordIn(StrictModel):
     notify_trades: bool = True
     notify_digest: bool = True
     notify_daily: bool | None = Field(default=None, description="群組 AI 日報；省略＝不變（新的頻道是關的）")
+    notify_premarket: bool | None = Field(default=None, description="盤前重點；省略＝不變（新的頻道是關的）")
+    notify_close: bool | None = Field(default=None, description="盤後重點；省略＝不變（新的頻道是關的）")
+    notify_weekly: bool | None = Field(default=None, description="市場週報；省略＝不變（新的頻道是開的）")
 
 
 class ChannelPatch(StrictModel):
     notify_trades: bool | None = None
     notify_digest: bool | None = None
     notify_daily: bool | None = None
+    notify_premarket: bool | None = None
+    notify_close: bool | None = None
+    notify_weekly: bool | None = None
 
 
 class DiscordChannel(BaseModel):
@@ -502,6 +508,9 @@ class DiscordChannel(BaseModel):
     notify_trades: bool
     notify_digest: bool
     notify_daily: bool = Field(description="群組 AI 日報（加值的群組；預設關）")
+    notify_premarket: bool = Field(description="盤前重點推播（預設關）")
+    notify_close: bool = Field(description="盤後重點推播（預設關）")
+    notify_weekly: bool = Field(description="市場週報推播（預設開）")
 
 
 class TelegramChannel(BaseModel):
@@ -512,12 +521,17 @@ class TelegramChannel(BaseModel):
     notify_trades: bool
     notify_digest: bool
     notify_daily: bool = Field(description="群組 AI 日報（加值的群組；預設關）")
+    notify_premarket: bool = Field(description="盤前重點推播（預設關）")
+    notify_close: bool = Field(description="盤後重點推播（預設關）")
+    notify_weekly: bool = Field(description="市場週報推播（預設開）")
 
 
 class Channels(BaseModel):
     discord: DiscordChannel
     telegram: TelegramChannel
     telegram_available: bool
+    market_reports_available: bool = Field(
+        default=False, description="市場報告已對全站公開：前端才顯示盤前、盤後、週報三個推播開關")
 
 
 class TelegramLink(BaseModel):

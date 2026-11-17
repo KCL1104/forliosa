@@ -82,6 +82,9 @@ uv run python -m forliosa.worker
 | 13:45–23:59，最多每 10 分鐘（`TWSE_OPENDATA_CLOSE`，預設開） | **上市當天收盤** `twse_sameday_close`（`forliosa.closes`）：證交所在政府資料開放平臺登記的兩個下載網址（個股日成交資訊、大盤統計），收盤後約 13:50 就有。只抓這兩個完整網址、不帶日期參數，拿到當天的就停；被擋（轉址、403、429）當天不再抓；上次請求的時間記在 `dataset_status`，重啟也不會提早。資料日期看檔案裡每一列的「日期」和檔名，不看時鐘。存成 `twse-opendata`（官方資料，帳本市值與績效照用），隔天清晨 OpenAPI 的檔案整列取代 |
 | 20:30 到隔天 02:00，每 15 分鐘（`SHIOAJI_EVENING_CLOSE`，預設開） | **晚上的暫時收盤價** `evening_closes`：shioaji-data 的 `daily.json`（多半 20:20–23:40 更新）先讀前 512 bytes 看 `as_of`，官方收盤還沒進來的市場才下載整個檔，存成只有收盤價的 `shioaji-data` 列（暫時資料），官方檔案進來後取代 |
 | 13:35 到下一個交易日 08:30，每 15 分鐘 | `close_watch`：問兩個 OpenAPI 的收盤檔換成那一天了沒（條件式請求前 1 KB）；換了就跑那個市場的存檔。櫃買約 23:30、證交所約隔天 05:20。週五的收盤一路看到週一 08:30（以前到週六 08:30 就停）；已經存進來的市場不再問。兩個市場的官方收盤都進來後馬上寫每日收盤簡報 |
+| 06:45（`MARKET_REPORT_PREMARKET_ARCHIVE`，預設開） | `premarket_archive`：證交所、櫃買、期交所再存一次（證交所 05:2x 的 OpenAPI 整批進來以後），讓 07:00 的盤前重點讀得到前一個交易日的官方收盤、FMTQIK 與加權指數開高低 |
+| 每分鐘，自己的迴圈（`MARKET_REPORTS_ENABLED`，預設關） | **市場報告** `market_reports`（`forliosa.reports.pipeline.tick`）：盤前重點（06:15 蒐集、06:55 資料版、07:00 撰寫、07:30 推播、08:15 改推資料版、08:40 截止）、盤後重點（14:10 資料版、15:40 蒐集、15:50 撰寫、16:00 推播、17:30 截止、23:45 與隔天 06:40 補表）、市場週報（週日 16:30 資料版與蒐集、16:50 撰寫、18:00 推播、21:00 截止）。模型呼叫在四個執行緒的池子裡跑，不卡排程；跑了 20 分鐘沒有動靜的視為放棄。試跑模式只給站方管理員看、不推播。狀態：`uv run python -m forliosa.reports status` |
+| 每天 04:40 | 市場報告保存 `MARKET_REPORT_RETENTION_DAYS`（730）天，依報告日期刪除（連同版本、產生紀錄、蒐集、投票與推播紀錄） |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
 | 每分鐘、每 20 秒 | 群組推播：排入並送出到期的交易動態推播（Discord webhook／Telegram）；有設 Telegram bot 時以 `getUpdates` 處理 `/link` 連結 |
@@ -95,6 +98,22 @@ uv run python -m forliosa.worker
 
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
+
+### 市場報告（2026-11-17）
+
+盤前重點、盤後重點、市場週報（`forliosa.reports`；合約與差異見 `CONTRACT_NOTES.md`「2026-11-17 市場報告」）。`MARKET_REPORTS_ENABLED=true` 才排程；
+第一份報告建立後先盲測 5 個台股交易日（三組撰寫設定 A／B／C，只給站方管理員看，試跑上限 `AI_MREPORT_TRIAL_BUDGET_USD`＝US$45），
+管理後台「市場報告」揭曉、選好設定，再把模式切到「對全站公開」。站方月上限 `AI_MREPORT_MONTHLY_BUDGET_USD`（US$80；70%／90%／100% 依序降級，0＝只發資料版）。
+有 `CLAUDE_API_KEY_4`（而且還有別把 key）時報告只用 4 號 key。
+
+```bash
+uv run python -m forliosa.reports status                       # 模式、本月花費與層級、盲測進度、最近的產生紀錄（不印金鑰）
+uv run python -m forliosa.reports seed                         # 美股休市表等手動表的初始資料（worker 啟動時表是空的也會自動跑）
+uv run python -m forliosa.reports pack --kind close --date 2026-11-16      # 只建資料包，不呼叫模型
+uv run python -m forliosa.reports data --kind close --date 2026-11-16      # 建資料版（過去的日期是回補，只有管理員看得到）
+uv run python -m forliosa.reports run --kind close --date 2026-11-16 --writer sonnet-high --yes   # 一次完整的 AI 流程（沒有 --yes 只印預估）
+uv run python -m forliosa.reports probe-dates                  # 晚上的融資、外資前 20、期交所檔案是哪一天的
+```
 
 ### 資料存檔
 

@@ -33,7 +33,7 @@ from sqlalchemy import select
 
 from forliosa.ai.chat import ChatTurn
 from forliosa.ai.keypool import build_pool, discover_keys
-from forliosa.ai.pricing import CallUsage, estimate_cost
+from forliosa.ai.pricing import CallUsage, charge
 from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.marketdata.service import get_market_data
@@ -132,7 +132,7 @@ def check_analyst(pool, settings, symbols: list[str]) -> int:
         for i in out.items:
             print(f"  ✓ {i['date']} {i['institution']} {i['action']}「{i['rating_text'] or ''}」"
                   f" 目標價 {i['target_price']} {i['currency']}｜{i['source_title']}｜{i['url']}")
-        cost = sum(float(estimate_cost(model or settings.ai_model, u)) for _, model, u in calls)
+        cost = sum(float(charge(model or settings.ai_model, u)) for _, model, u in calls)
         total = CallUsage()
         for _, _, u in calls:
             total.add(u)
@@ -210,7 +210,7 @@ def main(argv: list[str] | None = None) -> int:
                     model = data["model"]
                     u = CallUsage(**data["usage"])
                     grand.add(u)
-                    cost = float(estimate_cost(model, u))
+                    cost = float(charge(model, u))
                     grand_cost += cost
                     print(f"\n--- 用量：輸入 {u.input_tokens}、快取寫入 {u.cache_creation_input_tokens}、快取讀取 "
                           f"{u.cache_read_input_tokens}、輸出 {u.output_tokens}、搜尋 {u.web_search_requests} 次、"

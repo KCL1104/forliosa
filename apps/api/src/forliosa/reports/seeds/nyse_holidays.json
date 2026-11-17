@@ -1,0 +1,20 @@
+{
+  "note": "NYSE closures and early closes from 2026-11-26 to the end of 2027. Compiled 2026-11-17 from NYSE Group's press release 'NYSE Group Announces 2026, 2027 and 2028 Holiday and Early Closings Calendar' (2025-12-23) as quoted by search results; www.nyse.com could not be opened from the build sandbox, so verified_at is empty on every row: a site admin checks each row on the NYSE page and marks it (admin page). Labor Day 2027-09-06 and Thanksgiving 2027-11-25 follow the holiday rules and the stated count of 10 weekday closures with one early close in 2027.",
+  "rows": [
+    {"date": "2026-11-26", "name": "感恩節", "kind": "closed", "close_time_et": null},
+    {"date": "2026-11-27", "name": "感恩節翌日（提早收盤）", "kind": "early_close", "close_time_et": "13:00"},
+    {"date": "2026-12-24", "name": "聖誕夜（提早收盤）", "kind": "early_close", "close_time_et": "13:00"},
+    {"date": "2026-12-25", "name": "聖誕節", "kind": "closed", "close_time_et": null},
+    {"date": "2027-01-01", "name": "元旦", "kind": "closed", "close_time_et": null},
+    {"date": "2027-01-18", "name": "馬丁路德金恩紀念日", "kind": "closed", "close_time_et": null},
+    {"date": "2027-02-15", "name": "華盛頓誕辰紀念日", "kind": "closed", "close_time_et": null},
+    {"date": "2027-03-26", "name": "耶穌受難日", "kind": "closed", "close_time_et": null},
+    {"date": "2027-05-31", "name": "陣亡將士紀念日", "kind": "closed", "close_time_et": null},
+    {"date": "2027-06-18", "name": "六月節（補假）", "kind": "closed", "close_time_et": null},
+    {"date": "2027-07-05", "name": "獨立紀念日（補假）", "kind": "closed", "close_time_et": null},
+    {"date": "2027-09-06", "name": "勞動節", "kind": "closed", "close_time_et": null},
+    {"date": "2027-11-25", "name": "感恩節", "kind": "closed", "close_time_et": null},
+    {"date": "2027-11-26", "name": "感恩節翌日（提早收盤）", "kind": "early_close", "close_time_et": "13:00"},
+    {"date": "2027-12-24", "name": "聖誕節（補假）", "kind": "closed", "close_time_et": null}
+  ]
+}

@@ -29,6 +29,15 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   holds the latest NAV) on trading days: ``forliosa.archive`` (official open data only;
   idempotent upserts). The official TWSE calendar is reloaded after each run. TAIFEX books the night session to
   the next trading day, so one evening run covers it (no early-morning job).
+* ``premarket_archive`` — 06:45 on trading days (MARKET_REPORT_PREMARKET_ARCHIVE, default on): groups ``twse``, ``tpex``
+  and ``taifex`` once more, after TWSE's 05:2x OpenAPI batch, so the 07:00 盤前重點 (``forliosa.reports``) reads the
+  previous session's official closes, FMTQIK and the TAIEX OHLC without racing the close watch.
+* ``market_reports`` — MARKET_REPORTS_ENABLED (default off), every minute in a loop of its own: the 市場報告
+  (盤前重點、盤後重點、市場週報; ``forliosa.reports.pipeline.tick``) — the data edition, the gathering and the writing
+  (in a thread pool of four, never holding up the loop), the pushes, the 08:40 / 17:30 / 21:00 closes and the close
+  edition's table versions at 23:45 and 06:40. A run left running 20 minutes (a restart) is abandoned.
+* ``market_report_retention`` — every day 04:40: editions older than MARKET_REPORT_RETENTION_DAYS (730, by edition
+  date) with their versions, runs, gatherings, votes and push rows.
 * ``weekly_archive`` — Saturday 10:00: TDCC 集保股權分散 (only the latest week is downloadable), TAIFEX final
   settlement prices and SSF / SSO lists, and the stale-endpoint check (twtazu_od, t187ap09_L).
 * ``sec_archive`` — every day 07:50 Taipei (after the US close, when the day's 8-Ks and 10-Qs are in): SEC EDGAR
@@ -139,6 +148,8 @@ MORNING_GROUPS = ["twse", "tpex", "nav"]
 # Non-trading days (weekends, holidays) at 08:10 and 21:40: the announcement files change every calendar day and
 # Friday's indices are posted after the 21:40 run (see ``Archiver.run``, group "everyday").
 OFF_DAY_GROUPS = ["everyday"]
+# 06:45 on trading days (MARKET_REPORT_PREMARKET_ARCHIVE): before the 07:00 盤前重點, after TWSE's 05:2x batch
+PREMARKET_GROUPS = ["twse", "tpex", "taifex"]
 PRICE_BACKFILL_SECONDS = 600
 PRICE_BACKFILL_REFUSED_SECONDS = 1800
 WEEKLY_GROUPS = ["tdcc", "weekly"]
@@ -215,7 +226,7 @@ def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
         if q.is_demo or q.price is None or q.trade_date is None:
             continue
         rows.append({"symbol": sym, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low,
-                     "close": q.price, "volume": q.volume, "source": q.source[:32]})
+                     "close": q.price, "volume": q.volume, "value": q.value, "source": q.source[:32]})
     if not rows:
         return 0
     dialect = get_engine().dialect.name
@@ -227,7 +238,7 @@ def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
     official = allowed_sources("commercial")
     stmt = stmt.on_conflict_do_update(
         index_elements=["symbol", "date"],
-        set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close", "volume", "source")},
+        set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close", "volume", "value", "source")},
         where=PriceDaily.source.not_in(official),
     )
     db.execute(stmt)
@@ -294,6 +305,17 @@ class Worker:
                 lambda: self.archive(MONTHLY_GROUPS)),
         ]
         settings = get_settings()
+        # 市場報告 (2026-11-17): one more archive run at 06:45 on trading days, so the 07:00 盤前重點 reads the 05:2x
+        # OpenAPI batch (the previous session's official closes, FMTQIK, MI_5MINS_HIST) without racing the close watch.
+        if settings.market_report_premarket_archive:
+            self.jobs.append(Job("premarket_archive",
+                                 daily_at(time(6, 45), only_if=lambda n: is_tw_trading_day(n.date())),
+                                 lambda: self.archive(PREMARKET_GROUPS)))
+        # 市場報告: the state machine every minute in its own loop (the model calls run in its thread pool), and the
+        # two-year retention.
+        if settings.market_reports_enabled:
+            self.jobs.append(Job("market_reports", every(60), self.market_reports, background=True))
+        self.jobs.append(Job("market_report_retention", daily_at(time(4, 40)), self.market_report_retention))
         # Same-day closes (forliosa.closes): the job is due every minute in its window; how often TWSE is actually asked
         # (at most every 10 minutes) is decided from dataset_status, so a restart cannot ask sooner.
         if settings.twse_opendata_close:
@@ -522,6 +544,27 @@ class Worker:
         if n:
             log.info("sharing retention: %d rows deleted", n)
 
+    async def market_reports(self) -> None:
+        from forliosa.reports import pipeline
+
+        def run() -> pipeline.TickResult:
+            deps = pipeline.default_deps()
+            deps.md = self.md
+            return pipeline.tick(self.now_fn(), deps)
+
+        await asyncio.to_thread(run)
+
+    async def market_report_retention(self) -> None:
+        from forliosa.reports import pipeline
+
+        def run() -> int:
+            with session_factory()() as db:
+                return pipeline.purge_old(db)
+
+        n = await asyncio.to_thread(run)
+        if n:
+            log.info("market reports: %d editions past retention deleted", n)
+
     async def session_purge(self) -> None:
         from forliosa.api.deps import purge_expired_sessions
 
@@ -711,8 +754,17 @@ class Worker:
         """The scheduled jobs in one loop; each ``background`` job in a loop of its own (jobs run in threads, so the
         loops really run side by side)."""
         log.info("worker started: %s", ", ".join(j.name for j in self.jobs))
+        from forliosa.reports import calendars
+
         with session_factory()() as db:
             load_official_calendar(db)
+            # NYSE closures and early closes (市場報告 2026-11-17; the seeds once, on a fresh table) -> timeutil, so
+            # the US jobs and the reports skip Thanksgiving and know the 13:00 closes. Never stops the start.
+            try:
+                calendars.ensure_seeded(db)
+                calendars.load_us_calendar(db)
+            except Exception as exc:
+                log.warning("NYSE calendar not loaded: %s", type(exc).__name__)
         side = [asyncio.create_task(self._loop([j], tick_seconds), name=j.name) for j in self.jobs if j.background]
         await self._loop([j for j in self.jobs if not j.background], tick_seconds)
         await asyncio.gather(*side, return_exceptions=True)

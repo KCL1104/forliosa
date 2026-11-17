@@ -59,7 +59,8 @@ def test_discord_tests_first_encrypts_and_shows_the_hint_only_to_the_owner(app, 
     out = r.json()
     assert out["discord"] == {"configured": True, "status": "active", "disabled_reason": None,
                               "webhook_hint": "…/WXYZ", "notify_trades": True, "notify_digest": False,
-                              "notify_daily": False}
+                              "notify_daily": False, "notify_premarket": False, "notify_close": False,
+                              "notify_weekly": True}
     assert TOKEN not in r.text
     # the test message went to the canonical URL before saving, with mentions disabled
     assert len(fake.discord) == 1
@@ -309,7 +310,8 @@ def test_link_through_get_updates(app, client, fake, telegram_env):
     assert reply["chat_id"] == -100123 and "家族投資" in reply["text"] and "parse_mode" not in reply
     seen = client.get(f"{API}/groups/{g['id']}/channels").json()["telegram"]
     assert seen == {"configured": True, "status": "active", "disabled_reason": None, "chat_title": "家族投資群",
-                    "notify_trades": True, "notify_digest": True, "notify_daily": False}
+                    "notify_trades": True, "notify_digest": True, "notify_daily": False,
+                    "notify_premarket": False, "notify_close": False, "notify_weekly": True}
     assert client.get(f"{API}/groups/{g['id']}").json()["push_targets"] == [{"kind": "telegram",
                                                                             "label": "家族投資群"}]
     # single use

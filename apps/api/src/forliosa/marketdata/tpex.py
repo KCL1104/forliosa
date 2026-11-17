@@ -47,7 +47,8 @@ def parse_daily_close_quotes(rows: list[dict[str, Any]]) -> dict[str, QuoteData]
         out[symbol] = QuoteData(
             symbol=symbol, price=close, prev_close=(close - change) if change is not None else None,
             open=parse_decimal(r.get("Open")), high=parse_decimal(r.get("High")), low=parse_decimal(r.get("Low")),
-            volume=parse_int(r.get("TradingShares")), as_of=market_close_dt(d), trade_date=d,
+            volume=parse_int(r.get("TradingShares")), value=parse_int(r.get("TransactionAmount")),
+            as_of=market_close_dt(d), trade_date=d,
             source="tpex-openapi",
         )
     return out

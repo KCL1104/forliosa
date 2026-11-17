@@ -2813,3 +2813,96 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   `notifications.signed(lines, kind, ai=True)` 組字，AI 寫的段落用 `notifications.ai_line(text, kind)`（開頭「AI 整理：」），不要自己 append 免責的字串
   （見 `docs/legal/README.md`「2026-11-17 的修改」）。
 
+## 2026-11-17 市場報告第 0 階段（`forliosa.reports` 的資料包與基礎設施）
+
+依市場報告合約（scratchpad `market-reports/build/contract.md`）做第一部分：價格與記帳、呼叫方式、設定、資料表、
+手動表、資料補強、類股修正、三種報告的資料包與圖表資料。撰寫、檢查、發布、推播、API、前端是下一部分。和合約不同或合約沒寫清楚的地方：
+
+- **價格表**（`ai/pricing.py`）：照合約的 7 個模型。不認得的模型 `price_of` 會丟 `UnknownModelPrice`；記帳
+  （`store.record_usage`、smoke）改用 `pricing.charge`：照最貴的價錢（目前 Fable 5.2）記，並寫 error log。
+  `DEFAULT_PRICE` 已刪。
+- **呼叫方式放在新模組 `reports/calls.py`**（合約的檔案清單沒有）：`request()` 組參數（不送 `thinking`、不准 prefill、
+  effort 一律寫在 `output_config`、Haiku 不加 fallbacks）、`create()`／`stream()`、`web_search_tool()`（`web_search_20260318`＋
+  `allowed_callers:["direct"]`＋`REPORT_SEARCH_DOMAINS`）、`stop_info()`、`report_slot()`（合約放在 pipeline，這裡先做好給下一部分用）。
+  合約 §21 的退路已經寫好：API 對「fallbacks＋structured output」回 400 時，同一個請求拿掉 fallbacks 重送一次，之後同一模型的
+  structured 請求就不加（log warning）。已用 SDK 2.8.0＋假 API 驗證請求內容（`tests/reports/test_calls.py`）；真的 API 是否接受
+  兩者並用仍未確認。
+- **專用金鑰 slot**：只有在 `CLAUDE_API_KEY_4` 存在**而且還有別把 key** 時才保留給報告；只有一把 key 時不保留（不能讓會員沒 key 用）。
+  `KeyPool.status()` 每列多 `purpose`（`"market_reports"` 或 null），`/admin/overview` 的 AI 金鑰列表也多這個欄位。
+- **`timing.available_at` 的一個等價規則**：證交所 OpenAPI 的收盤與指數（隔天清晨）和當天下午下載檔（`twse-opendata`，14:00）
+  是同一份官方數字；`TWSE_OPENDATA_CLOSE` 開著時，OpenAPI 的列當成 14:00 可用，否則隔天補做的盤後報告會完全沒有上市收盤。
+  只有 OpenAPI 才有的資料（FMTQIK、MI_5MINS_HIST、MFI94U）照舊隔天 05:45。不認得的資料集一律當隔天清晨（並記 log）。
+- **TWT85U 的實際欄位**（2026-11-17 打過一次，swagger 一致）：`Code`、`Name`、`PeriodicCallAuctionTrading`（`**` 表示分盤集合競價），
+  **沒有日期也沒有原因**。所以 `market_events.altered_trading` 的 `date` 是第一次看到的那天、離開清單那天寫 `end_date`（不含當天）；
+  第一次存檔的列標 `backlog`（真正開始日不明，判斷「當天有效」時視為早就開始）。回空清單時不結束任何一列（怕是故障）。
+- **MI_5MINS_HIST**：欄位 `Date`、`OpeningIndex`、`HighestIndex`、`LowestIndex`、`ClosingIndex`（本月每天），只補已經存了的加權指數列的
+  開高低，不新增列、不改收盤與漲跌。
+- **FMTQIK**：`Date`、`TradeVolume`、`TradeValue`、`Transaction`、`TAIEX`、`Change`（本月每天）→ `market_turnover_daily`。G1 加權指數線
+  在 `index_daily` 缺的日子用 FMTQIK 的 `TAIEX` 補（同一份官方數字，隔天清晨可用）。
+- **晚上的融資與外資前 20 檔**（memo 第 0 階段要量的事）：2026-11-17 13:27 量到 MI_MARGN 與 MI_QFIIS_sort_20 的最後更新都是當天 05:2x，
+  和其他證交所 OpenAPI 一樣是清晨一批。還沒在晚上量過（要 21:00 後跑 `python -m forliosa.reports probe-dates`）。先做了保護：
+  晚上讀到、要標成當天的檔，若抽樣 50 列和前一個交易日已存的數字完全一樣，就不寫（`Archiver._still_previous`，log info）。
+  報告本身不用這兩個資料集（`missing.margin_amount`），`available_at` 也先用隔天 05:45。期交所晚上有沒有當天資料：檔案有日期欄，
+  存檔不會標錯；晚上沒更新的話，06:45 多跑的那一次（`premarket_archive` 含 `taifex`）會補進來，07:00 的盤前趕得上。
+- **SMH 與 TSM**：兩檔都在 `us_prices.REPORT_US_SYMBOLS`，一律向 Databento 抓。`catalog.py` 只加 SMH（標成 ETF）；TSM 沒加：
+  SEC 的代號表本來就有它，內建一列會讓「台積」的搜尋出現美股、讓「TS」排在台積電前面（既有測試擋下）。報告自己把它寫成「台積電 ADR」。
+- **`/admin/overview` 的 AI 金鑰列**多 `purpose`（`AdminKeySlot`；`market_reports` 或 null），前端可以先不顯示。
+- **商品類別**：`00…A`（主動式 ETF，例如 00981A）也算 ETF（合約的規則沒列 A）。存託憑證（產業別 91，例如 9110 越南控-DR）不算普通股。
+- **個股名單**：成交值前 10 照合約只限上市普通股，沒有排除創新板（合約只對漲跌幅排行列了排除項）。週報的週排行沒有「漲跌停很多時」的改寫。
+- **G5 比較線**用聊天的 `compare_chart`（會讀到今天），所以只畫最近 3 天內的報告；更早的回補報告不畫 G5（選單標 available:false）。
+- **週報**：「回顧週最後一天」用存檔裡最後一個有上市收盤的交易日；整週都沒有存檔時是短版（只有下週行事曆與國際），
+  `notes` 寫 `week_not_archived`。全週成交金額要每個交易日都有資料才寫（FMTQIK 優先，否則自己加總並標估算）。
+- **行事曆**只列股票、ETF、REIT、特別股的事件（可轉債、權證代號如 24552 不列）；名字從公司簡稱或商品主檔補。
+- **種子資料**：`www.nyse.com`、ICE 新聞稿與官方總經頁在這個沙盒都打不開。NYSE 表依 NYSE Group 2025-12-23 新聞稿在搜尋結果裡的內容
+  寫入 2026-11-26 到 2027 年底 15 列（2027 年 10 個休市日、1 個提早收盤；勞動節 9/6 與感恩節 11/25 依規則推算並符合列數），
+  **每一列 `verified_at` 都是空的**，管理員要在 NYSE 官網逐列核對。總經行事曆與美股財報日沒有核對過的列，種子是空的。
+- **CLI**：`seed`、`status`、`pack`、`probe-dates` 已有；`data`、`run`（要組裝與撰寫）留給下一部分。
+- **資料包形狀**和合約 §6.1 一致，另外多 `kind_label`、`edition_label`、`notes`、每個類股的 `rank` 與 `concentration_text`、
+  行事曆列的 `fold` 與 `note`；`blocks` 另外回傳 `charts`（G1–G7，盤前的前一日類股與漲跌家數是 `G2_prev`、`G4_prev`）、`tables`
+  （`T2_top10`、`T2_gainers`、`T2_losers`、`T2_value`、`T3`、`T_evening`）、`numbers`、`calendar`、`notes`。
+
+## 2026-11-17 市場報告第 1 部分（產生流程、盲測、排程、API、群組推播）
+
+照合約做完蒐集、撰寫、檢查、組裝、狀態機、盲測、預算、worker、API、推播、CLI 的 `data` 與 `run`。全部測試用假的模型（`tests/ai/fake_anthropic.py`），
+沒有呼叫真的 API。和合約不同或合約沒寫清楚的地方：
+
+- **模組**：多了 `reports/calls.py`（第 0 階段）；`pack.data_report` 放在 `assemble.data_title`／`data_highlights`／`build(output=None)`。
+  `schedule.due_steps` 沒有做成獨立函式，每一步的條件寫在 `pipeline` 的 `build_data`、`start_gather`、`start_writes`、`maybe_push`、
+  `maybe_close`、`maybe_tables`。
+- **資料版更新**：盤後的資料版每 10 分鐘重建（到 15:40），是**改寫同一版**（版本號不變），不是每次一個新版本。
+- **盤後休市判斷**：14:10–15:00 只有上市收盤進來才建資料版；15:00 以後有櫃買指數也建（上市缺的照 `missing` 寫）；兩者都沒有就 `skipped`。
+- **撰寫的退路順序**：初稿 → 規則 → （規則全過才）Haiku → 有問題就修正一次 → 規則（刪掉還有問題的段）→ **剩下的段再給 Haiku 讀一次**（刪掉被判的段）。
+  合約寫「規則全部過了才叫 Haiku」；刪段之後剩下的部分若不再讀一次，就有沒被 Haiku 看過的句子上線，所以多讀一次（約 US$0.002）。
+- **超過單次警報（US$3）**：初稿還沒經過 Haiku 時一律發資料版（「初稿已全數通過」解讀成規則與 Haiku 都通過）。
+- **CLI `run`**：不受截止時間限制（手動跑的一次），過去日期是回補（只有管理員看得到、不推播）。
+- **推播時間太晚**：worker 停到截止時間（08:40／17:30／21:00）以後才恢復的那一份不推播。
+- **段落**：`next_calendar` 沒有做成一段，下週行事曆放在報告最外層的 `calendar`（Block 沒有行事曆型別）；週報第一段叫 `summary`（「這一週」）。
+  盤後多一張表 `T_filings`（市值前 100 名 14:00 以後的重大訊息）放在 `tonight` 段。
+- **23:45 與 06:40 的補表**（`T5_top10`、`T5_gainers`、`T5_losers`、`T6`、`T7`、`T8`、`T8_buy`、`T8_sell`）：在 `pack._close_evening`，資料包的截止時間
+  是「現在」，所以 15:40 的資料包不會有。AI 版只換伺服器的區塊（`assemble.retable`），AI 文字、註腳、報導來源不動；只有資料版的就重建資料版。
+- **註腳**：同一個授權顯名＋同一天的 F 合成一個（`rules:*` 都叫「Forliosa 規則計算」，合成一個），不是「同一個資料集」。
+- **被刪的段**：管理員形式保留整段（`dropped.reasons`）；一般使用者看到那一段的伺服器區塊（圖、表），AI 文字拿掉；沒有伺服器區塊就整段不出現。
+- **公開回應**：`Sentence` 沒有 `refs` 欄位、`Section` 沒有 `dropped`（pydantic 回應模型）。管理員的 variant 端點直接回 dict（多 `refs`、`dropped`、`validation`、
+  揭曉後的 `writer`）。
+- **驗證器的判斷細節**：
+  - 數字對 F 時比 `display` 抽出的數字與 `value`（`%` 的 value×100），用文字的小數位數四捨五入（沒有「約」也可以少寫位數；只擋錯的數字）。
+  - 主體檢查以「數字所在的子句」為準（以 ，；、。： 切）；子句裡沒有任何主體名稱時才看整句。對到報導（X）時，以那則報導自己的句子（claim）
+    有這個數字的為準（同一篇摘錄常同時有外資與投信的數字）。
+  - 方向只檢查帶正負的 metric（漲跌點數、漲跌幅、點數貢獻、週漲跌、期貨未平倉變化、上櫃法人估算金額等），家數之類不檢查。「漲停」「跌停」「漲跌」不算方向詞。
+  - 類股的提及以「名稱＋類／股／族群」為準（「半導體 ETF」不算提到半導體類股）。
+  - 名單外的台股名稱：用 `instruments` 的上市櫃名稱（3 字以上），先遮掉名單內的名稱、各 F 的主體與媒體名。
+  - 「已排定：」句型要 refs 有 C 或 X；「〔媒體〕報導／指出」要 refs 有那家媒體的 X（「鉅亨」＝「鉅亨網」這類簡稱也算）。
+- **蒐集**：媒體名稱用 `news.outlets.outlet_name`（例如「鉅亨網」「自由時報」），`OUTLET_PRIORITY` 用這些名字。`pause_turn` 續寫時
+  `calls.request(continuation=True)` 允許最後一則是 assistant（只有這個情況）。結果裡有時間的 `page_age` 用新的 `analyst.datetime_from_page_age`。
+- **Haiku 不支援 structured output 時**（合約 §21）：同一個請求改成要純 JSON 再送一次，之後這個模型都不帶 schema（log warning）。
+- **盲測**：試跑花費會超過上限時，新的一份就不算盲測（照一般方式產生，只有管理員看得到）；已經是盲測的那一份，放不下的 variant 記 `skipped_budget`。
+  揭曉的「完成」條件：盲測日報都過了截止時間（或 skipped）且週報過了截止時間。
+- **群組推播的合併**：
+  - 盤前把群組日報延到 08:20，只在 07:30 那天是台股交易日、頻道開了盤前、而且報告已對全站公開時；週五晚上寫好的日報照舊週六 07:30 送（週一的盤前仍會帶上它，
+    但那時它已送出，不會重複送）。
+  - 盤前推播成功才把日報那一列標 `merged`；失敗就照原時間自己送。
+  - 週報合併只在那份群組週報的推播還在等（`pending`）時。
+- **頻道**：`Channels.market_reports_available` 只在 `MARKET_REPORTS_ENABLED` 開、模式是 public 時為 true；Telegram 新連結與重新設定的頻道，三個開關回到預設。
+- **寫回共用研究**：用 `research.remember_report_sources`（只存網址、標題、媒體、摘錄、page_age；過了下一次開盤就不寫）。
+- **沒做**：會員「每日收盤簡報」裡加一個連到當天報告的連結（memo §4「和現有方案的關係」）——前端與簡報的程式這次沒動，留給前端那一部分；
+  `services/account.py` 的匯出與刪除不用改（`market_report_reads`、`market_report_votes` 都是 FK cascade，沒有使用者內容）。

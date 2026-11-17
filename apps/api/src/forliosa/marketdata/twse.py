@@ -49,6 +49,7 @@ def parse_stock_day_all(rows: list[dict[str, Any]]) -> dict[str, QuoteData]:
             symbol=symbol, price=close, prev_close=(close - change) if change is not None else None,
             open=parse_decimal(r.get("OpeningPrice")), high=parse_decimal(r.get("HighestPrice")),
             low=parse_decimal(r.get("LowestPrice")), volume=parse_int(r.get("TradeVolume")),
+            value=parse_int(r.get("TradeValue")),
             as_of=market_close_dt(d), trade_date=d, source="twse-openapi",
         )
     return out

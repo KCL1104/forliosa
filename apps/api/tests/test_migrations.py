@@ -127,3 +127,45 @@ def test_group_passes_grandfather_existing_groups_and_keep_rows_both_ways(tmp_pa
             assert conn.execute(text("SELECT kind FROM group_channels")).scalars().all() == ["discord"]
     finally:
         engine.dispose()
+
+
+def test_market_reports_tables_and_columns_both_ways(tmp_path):
+    """0024_market_reports (市場報告, 2026-11-17): the report tables, the three hand-kept tables and FMTQIK's table
+    appear; existing channels get the weekly push on and the daily ones off; prices keep their rows; the downgrade
+    removes the
+    tables and columns again (plain ALTER TABLE, no batch copy)."""
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'reports.db'}"
+    command.upgrade(_config(url), "0023")
+    engine = make_engine(url)
+    new_tables = {"market_reports", "market_report_versions", "market_report_gathers", "market_report_runs",
+                  "market_report_votes", "market_report_config", "market_report_reads", "nyse_holidays",
+                  "macro_calendar", "us_earnings", "market_turnover_daily"}
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "users", {"id": "usr_1", "email": "a@b.c"})
+            _insert(conn, "groups", {"id": "grp_1", "name": "大學同學"})
+            _insert(conn, "group_channels", {"group_id": "grp_1", "kind": "discord", "status": "active"})
+            _insert(conn, "prices_daily", {"symbol": "2330.TW", "date": "2026-11-16", "close": "1430",
+                                           "source": "twse-openapi"})
+        command.upgrade(_config(url), "0024_market_reports")
+        inspector = inspect(engine)
+        assert new_tables <= set(inspector.get_table_names())
+        assert "value" in {c["name"] for c in inspector.get_columns("prices_daily")}
+        assert "market_report_id" in {c["name"] for c in inspector.get_columns("notification_outbox")}
+        with engine.begin() as conn:
+            row = conn.execute(text("SELECT notify_premarket, notify_close, notify_weekly FROM group_channels")).one()
+            assert [bool(v) for v in row] == [False, False, True]
+            assert conn.execute(text("SELECT value FROM prices_daily")).scalar_one() is None
+        command.downgrade(_config(url), "0023")
+        inspector = inspect(engine)
+        assert not new_tables & set(inspector.get_table_names())
+        assert "value" not in {c["name"] for c in inspector.get_columns("prices_daily")}
+        assert not {"notify_premarket", "notify_close", "notify_weekly"} & {
+            c["name"] for c in inspector.get_columns("group_channels")}
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT kind FROM group_channels")).scalars().all() == ["discord"]
+            assert conn.execute(text("SELECT symbol FROM prices_daily")).scalars().all() == ["2330.TW"]
+    finally:
+        engine.dispose()

@@ -64,6 +64,10 @@ ROUTES = {
     "/opendata/t187ap11_L": "twse_t187ap11_l_live_20261112.json",
     "/mopsfin_t187ap11_O": "tpex_t187ap11_o_live_20261112.json",
     "/opendata/t187ap46_L_14": "twse_t187ap46_l_14_live_20261112.json",
+    # 市場報告 2026-11-17: FMTQIK and MI_5MINS_HIST trimmed to the days up to 11/11; TWT85U as served (10 rows)
+    "/exchangeReport/FMTQIK": "twse_fmtqik_live_20261117.json",
+    "/indicesReport/MI_5MINS_HIST": "twse_mi_5mins_hist_live_20261117.json",
+    "/exchangeReport/TWT85U": "twse_twt85u_live_20261117.json",
     "/t187ap46_O_14": "tpex_t187ap46_o_14_live_20261112.json",
 }
 TDCC_FILES = {"1-5": "tdcc_1-5_live_20261106.csv", "2-22": "tdcc_2-22_live_20261112.csv",

@@ -99,7 +99,7 @@ def test_overview_counts_users_and_never_returns_keys_or_emails(engine, client, 
     assert set(slots) == {1, 2, 3}
     assert slots[1] == {"slot": 1, "configured": True, "state": "ok", "retry_in_seconds": None,
                         "workspace_id": "wrkspc_test_one", "month_cost_usd": 0.75, "month_calls": 2,
-                        "monthly_budget_usd": None, "threads": 1, "last_error": None}
+                        "monthly_budget_usd": None, "threads": 1, "last_error": None, "purpose": None}
     assert slots[2]["month_cost_usd"] == 0.1 and slots[2]["month_calls"] == 1 and slots[2]["threads"] == 0
     assert slots[3]["state"] == "not_configured" and slots[3]["configured"] is False
     # the stalest first: no date at all, then the oldest

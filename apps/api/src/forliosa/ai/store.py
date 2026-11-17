@@ -26,7 +26,7 @@ from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.orm import Session
 
 from forliosa import plans
-from forliosa.ai.pricing import CallUsage, billable_tokens, estimate_cost
+from forliosa.ai.pricing import CallUsage, billable_tokens, charge
 from forliosa.ai.prompts import DISCLAIMER
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import Settings
@@ -37,7 +37,10 @@ from forliosa.plans import Plan
 from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
 FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news",  # news: system-paid (user_id NULL)
-            "briefing")  # 每日收盤簡報 (``ai.briefing``): charged to the user's month, not to the day's questions
+            "briefing",  # 每日收盤簡報 (``ai.briefing``): charged to the user's month, not to the day's questions
+            # 市場報告 (``forliosa.reports``, 2026-11-17): site-paid (user_id NULL), counted against the reports' own
+            # monthly budget; every call of a blind-test edition is ``mreport_trial`` (the trial has its own cap)
+            "mreport_gather", "mreport_write", "mreport_check", "mreport_trial")
 TITLE_MAX = 40
 BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard token prices
 
@@ -311,8 +314,10 @@ def update_draft(db: Session, user: User, draft_id: str, status: str, transactio
 def record_usage(db: Session, *, user_id: str | None, thread_id: str | None, feature: str, model: str,
                  key_slot: int | None, usage: CallUsage, stop_reason: str | None, batch: bool = False) -> AiUsage:
     """One row per model call: counts, slot and cost only — never message content. ``batch``: a Message Batches
-    result (half price). ``user_id`` None: a system job, charged to nobody's quota (e.g. group digests)."""
-    cost = estimate_cost(model, usage)
+    result (half price). ``user_id`` None: a system job, charged to nobody's quota (e.g. group digests). A model with no
+    price row is booked at the most expensive known price (``pricing.charge``, with an error in the log), never as a
+    cheaper one."""
+    cost = charge(model, usage)
     if batch:
         cost = (cost * BATCH_PRICE_FACTOR).quantize(Decimal("0.000001"))
     row = AiUsage(user_id=user_id, thread_id=thread_id, feature=feature, model=model, key_slot=key_slot,

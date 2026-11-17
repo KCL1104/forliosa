@@ -50,8 +50,9 @@ def ai_summary(db: Session) -> dict[str, Any]:
     one from the pool's status, so nothing else it may carry can reach the response."""
     costs, calls = store.slot_month_usage(db)
     slots = get_key_pool().status(costs, calls, store.slot_thread_counts(db))
+    # ``purpose``: "market_reports" on the market reports' own slot (``AI_MREPORT_KEY_SLOT``), else null
     keep = ("slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls",
-            "monthly_budget_usd", "threads", "last_error")
+            "monthly_budget_usd", "threads", "last_error", "purpose")
     return {"month": store.utc_month_start().strftime("%Y-%m"), "slots": [{k: s.get(k) for k in keep} for s in slots]}
 
 

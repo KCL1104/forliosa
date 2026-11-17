@@ -5,8 +5,8 @@ there is no intraday data, no overseas index, no US stock, no crypto.
 * **indices** — 加權指數 and 櫃買指數 (``index_daily``), 台指期近月 when its licence gate is open
   (``derivatives``; a conditional TAIFEX dataset) and 美元兌新台幣 (the central bank's close, ``fx_rates``). Each
   carries its own date and up to 20 earlier closes for a sparkline (the index archive begins 2026-11-12).
-* **sectors** — the TWSE 「…類指數」 of the TAIEX's latest day, best first (the four old composite groups whose
-  members are listed on their own are left out).
+* **sectors** — the TWSE 「…類指數」 of the TAIEX's latest day, best first (the composite groups whose members are
+  listed on their own — the four old ones and 電子工業 — are left out: 32 sectors).
 * **movers** — common stocks only (four-digit codes that do not start with ``00``): the 10 biggest gains, the 10
   biggest falls and the 10 largest volumes of the latest day **both** exchanges have published (TWSE and TPEx post
   at different hours; ranking half a market would mislead). The change is measured from the official reference
@@ -47,8 +47,10 @@ SPARK_POINTS = 20
 TOP_N = 10
 ANNOUNCEMENTS_MAX = 30
 SECTOR_SUFFIX = "類指數"
-# TWSE's older composite groups: each is the sum of sectors that are listed on their own, so they are not rows.
-SECTOR_COMPOSITES = frozenset({"機電", "塑膠化工", "水泥窯製", "化學生技醫療"})
+# TWSE's composite groups: each is the sum of sectors that are listed on their own, so they are not rows — the four
+# older composites and 電子工業 (the eight electronics sub-industries together; counting it made the 2026-11-16 sample
+# say 5 up and 28 down instead of 5 and 27 of 32). The market reports import this same set.
+SECTOR_COMPOSITES = frozenset({"機電", "塑膠化工", "水泥窯製", "化學生技醫療", "電子工業"})
 _COMMON_STOCK = re.compile(r"^(?!00)\d{4}$")
 # A close further than this from its base is a data problem or a symbol without a price limit on its first days,
 # not a ranking entry (the daily limit is ±10 %).
