@@ -29,7 +29,7 @@ beforeAll(() => {
 })
 const resetPrefs = () => {
   localStorage.removeItem("forliosa:ledger")
-  useLedgerPrefs.setState({ columns: DEFAULT_COLUMNS, showTrend: true, pinned: [], showClosed: false })
+  useLedgerPrefs.setState({ columns: DEFAULT_COLUMNS, showTrend: true, pinned: [], showClosed: false, phoneLine: "day" })
   usePrefs.setState({ privacyMode: false })
 }
 beforeEach(() => act(resetPrefs))
@@ -278,5 +278,122 @@ describe("持倉表的「損益」欄", { timeout: 20_000 }, () => {
     await user.click(within(table).getByRole("button", { name: "漲跌" }))
     expect(rowOrder(table)).toEqual([...byPct].reverse())
     expect(within(wrap).getByText("（照漲跌由小到大排）")).toHaveClass("sr-only")
+  })
+})
+
+/**
+ * 手機持倉列右下那一行（產品負責人 2026-11-17 選 A）：表頭「收盤價・今日漲跌」是切換鈕，按一下變「收盤價・損益」，
+ * 每一列的今日漲跌換成這一檔的報酬率（和桌面「損益」欄的第二行同一個數字）；版面不變、記在這台瀏覽器；桌面不受影響。
+ */
+async function phoneList() {
+  const list = await screen.findByRole("list", { name: "持倉" }, T)
+  await within(list).findByRole("link", { name: "台積電" }, T)
+  return list
+}
+const DAY_WORD = "(今日|當日|\\d+/\\d+ )"
+const dayToggle = () => screen.getByRole("button", { name: new RegExp(`^收盤價・${DAY_WORD}漲跌\\s*（改看損益）$`) })
+const pnlToggle = () => screen.getByRole("button", { name: new RegExp(`^收盤價・損益\\s*（改看${DAY_WORD}漲跌）$`) })
+/** 這一列收盤價下面那一行（看得到的百分比＋只給螢幕報讀器的欄名） */
+function phoneLineOf(list: HTMLElement, name: string) {
+  const row = within(list).getByRole("link", { name }).closest("li")!.firstElementChild as HTMLElement
+  const line = row.querySelector<HTMLElement>(":scope > .col-start-2")
+  expect(line).not.toBeNull()
+  return line!
+}
+const pctText = (v: number | null) => formatPercent(v === null ? null : Math.abs(v), { signed: false })
+const stored = () => JSON.parse(localStorage.getItem("forliosa:ledger") ?? "null") as { state: Record<string, unknown>; version: number } | null
+
+describe("手機持倉：表頭切換今日漲跌與報酬率", { timeout: 20_000 }, () => {
+  it("預設是今日漲跌；按表頭換成報酬率（▲▼、漲跌色），再按一次換回來；記在這台瀏覽器；桌面的表不變", async () => {
+    const holdings = await api.getHoldings()
+    const tsmc = holdings.find((h) => h.code === "2330")!
+    const loser = holdings.find((h) => h.price !== null && h.unrealized_pnl_pct !== null && h.unrealized_pnl_pct < 0)!
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const list = await phoneList()
+    const table = await holdingsTable()
+    const desktopHeads = headerNames(table)
+
+    // 真的按鈕、和表頭一樣高（44px）；名稱是看得到的字＋要換成什麼
+    const toggle = dayToggle()
+    expect(toggle.tagName).toBe("BUTTON")
+    expect(toggle).toHaveAttribute("type", "button")
+    expect(toggle).toHaveClass("h-11")
+    expect(within(toggle).getByText(/（改看損益）/)).toHaveClass("sr-only")
+    let line = phoneLineOf(list, "台積電")
+    expect(line).toHaveTextContent(pctText(tsmc.day_change_pct))
+    expect(within(line).getByText(new RegExp(`^${DAY_WORD}漲跌$`))).toHaveClass("sr-only")
+
+    await user.click(toggle)
+    expect(pnlToggle()).toBe(toggle)
+    line = phoneLineOf(list, "台積電")
+    expect(line).not.toHaveTextContent(pctText(tsmc.day_change_pct))
+    const pct = within(line).getByText(pctText(tsmc.unrealized_pnl_pct)).closest(".num")!
+    expect(pct).toHaveClass("text-rise")
+    expect(pct).toHaveTextContent("▲")
+    expect(within(line).getByText("損益")).toHaveClass("sr-only")
+    const lossLine = phoneLineOf(list, loser.name)
+    expect(lossLine).toHaveTextContent(`▼${pctText(loser.unrealized_pnl_pct)}`)
+    expect(within(lossLine).getByText(pctText(loser.unrealized_pnl_pct)).closest(".num")).toHaveClass("text-fall")
+    // 每一列的數字和桌面「損益」欄的第二行一樣
+    expect(cellOf(table, "台積電", "損益")).toHaveTextContent(pctText(tsmc.unrealized_pnl_pct))
+    expect(stored()).toMatchObject({ version: 2, state: { phoneLine: "pnl", columns: DEFAULT_COLUMNS } })
+    expect(headerNames(table)).toEqual(desktopHeads)
+
+    await user.click(pnlToggle())
+    expect(dayToggle()).toBe(toggle)
+    expect(phoneLineOf(list, "台積電")).toHaveTextContent(pctText(tsmc.day_change_pct))
+    expect(stored()?.state.phoneLine).toBe("day")
+  })
+
+  it("沒有收盤價的持股：兩種都只有「—」", async () => {
+    vi.spyOn(api, "getHoldings").mockResolvedValue(await holdingsWithUnpriced())
+    const user = userEvent.setup({ pointerEventsCheck: 0 })
+    renderApp("/")
+    const list = await phoneList()
+    await within(list).findByRole("link", { name: "Apple" }, T)
+    expect(within(phoneLineOf(list, "Apple")).getByTitle("沒有報價")).toBeInTheDocument()
+    await user.click(dayToggle())
+    const line = phoneLineOf(list, "Apple")
+    expect(within(line).getByTitle("沒有報價")).toBeInTheDocument()
+    expect(line).not.toHaveTextContent("%")
+  })
+
+  it("隱私模式：報酬率照常顯示（百分比不是金額），股數遮起來", async () => {
+    const tsmc = (await api.getHoldings()).find((h) => h.code === "2330")!
+    act(() => usePrefs.setState({ privacyMode: true }))
+    act(() => useLedgerPrefs.setState({ phoneLine: "pnl" }))
+    renderApp("/")
+    const list = await phoneList()
+    pnlToggle()
+    expect(phoneLineOf(list, "台積電")).toHaveTextContent(`▲${pctText(tsmc.unrealized_pnl_pct)}`)
+    const row = within(list).getByRole("link", { name: "台積電" }).closest("li")!
+    expect(within(row).getAllByLabelText("已隱藏").length).toBeGreaterThan(0)
+  })
+
+  it("從瀏覽器讀回來：舊的設定（第 1、2 版）沒有這一項 → 今日漲跌，其他設定照舊；存了「損益」→ 一打開就是報酬率", async () => {
+    const custom: HoldingColumn[] = ["price", "day_pct", "value"]
+    localStorage.setItem("forliosa:ledger", JSON.stringify({ state: { columns: custom, showTrend: false, pinned: ["2317.TW"], showClosed: true }, version: 2 }))
+    await act(() => useLedgerPrefs.persist.rehydrate())
+    expect(useLedgerPrefs.getState()).toMatchObject({ phoneLine: "day", columns: custom, showTrend: false, pinned: ["2317.TW"], showClosed: true })
+
+    localStorage.setItem("forliosa:ledger", JSON.stringify({ state: { columns: OLD_DEFAULT, showTrend: true, pinned: [], showClosed: false }, version: 1 }))
+    await act(() => useLedgerPrefs.persist.rehydrate())
+    expect(useLedgerPrefs.getState()).toMatchObject({ phoneLine: "day", columns: DEFAULT_COLUMNS })
+
+    localStorage.setItem("forliosa:ledger", JSON.stringify({ state: { columns: DEFAULT_COLUMNS, showTrend: true, pinned: [], showClosed: false, phoneLine: "pnl" }, version: 2 }))
+    await act(() => useLedgerPrefs.persist.rehydrate())
+    expect(useLedgerPrefs.getState().phoneLine).toBe("pnl")
+    renderApp("/")
+    const tsmc = (await api.getHoldings()).find((h) => h.code === "2330")!
+    const list = await phoneList()
+    pnlToggle()
+    expect(phoneLineOf(list, "台積電")).toHaveTextContent(pctText(tsmc.unrealized_pnl_pct))
+  })
+
+  it("存的值不認得（手改過）：當成今日漲跌，按一下換成報酬率", () => {
+    act(() => useLedgerPrefs.setState({ phoneLine: "weird" as never }))
+    act(() => useLedgerPrefs.getState().togglePhoneLine())
+    expect(useLedgerPrefs.getState().phoneLine).toBe("pnl")
   })
 })

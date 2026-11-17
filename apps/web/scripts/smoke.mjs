@@ -1747,6 +1747,54 @@ await check("手機：主數字是平的（沒有卡片、沒有展開鈕），�
   const heights = await m.getByRole("tablist", { name: "帳本內容" }).getByRole("tab").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))
   if (heights.some((h) => h < 44)) throw new Error(`segments under 44px: ${heights.join(", ")}`)
 })
+await check("手機：持倉表頭「收盤價・今日漲跌」是切換鈕（44px、字對齊收盤價那一欄）：按一下變「收盤價・損益」、每一列第二行換成報酬率（和桌面「損益」欄同一個數字），列高不變；重新整理後還記得；再按一下換回來（2026-11-17 選 A）", async () => {
+  await m.goto(base + "/", { waitUntil: "networkidle" })
+  const toDay = m.getByRole("button", { name: /^收盤價・(今日|當日|\d+\/\d+ )漲跌\s*（改看損益）$/ })
+  const toPnl = m.getByRole("button", { name: /^收盤價・損益\s*（改看(今日|當日|\d+\/\d+ )漲跌）$/ })
+  await toDay.waitFor({ timeout: 8000 })
+  // 每一列：收盤價下面那一行（第二行的右邊）、列高、收盤價的右緣；表頭：按鈕大小與字的右緣。桌面的表（手機上藏起來）拿來對照「損益」欄的報酬率
+  const read = () =>
+    m.evaluate(() => {
+      const ul = document.querySelector('ul[aria-label="持倉"]')
+      const btn = ul.previousElementSibling.querySelector("button")
+      const b = btn.getBoundingClientRect()
+      const table = document.querySelector('table[aria-label="持倉"]')
+      const heads = [...table.querySelectorAll("thead th")].map((th) => th.textContent.trim())
+      const at = heads.indexOf("損益")
+      const pnlOf = (name) => {
+        const tr = [...table.querySelectorAll("tbody tr")].find((r) => r.querySelector("th a")?.textContent === name)
+        return tr?.children[at]?.querySelector(".text-sm")?.textContent ?? null
+      }
+      return {
+        btn: { w: b.width, h: b.height, textRight: Math.round(btn.querySelector(".num").getBoundingClientRect().right) },
+        rows: [...ul.children].map((li) => {
+          const row = li.firstElementChild
+          const name = row.querySelector("a").textContent
+          return { name, h: row.getBoundingClientRect().height, priceRight: Math.round(row.children[1].getBoundingClientRect().right), line: row.children[3].textContent, pnl: pnlOf(name) }
+        }),
+      }
+    })
+  const before = await read()
+  if (before.btn.h < 44 || before.btn.w < 44) throw new Error(`toggle under 44px: ${JSON.stringify(before.btn)}`)
+  if (before.rows.some((r) => r.priceRight !== before.btn.textRight)) throw new Error(`header text is not over the price column: ${JSON.stringify(before)}`)
+  await toDay.click()
+  await toPnl.waitFor({ timeout: 4000 })
+  const after = await read()
+  const priced = after.rows.filter((r) => r.pnl && r.pnl !== "—")
+  if (priced.length === 0) throw new Error(`no priced holdings: ${JSON.stringify(after.rows)}`)
+  for (const r of priced) {
+    const prev = before.rows.find((x) => x.name === r.name)
+    if (!r.line.includes(r.pnl) || r.line === prev.line) throw new Error(`${r.name}: "${r.line}" should show 損益 ${r.pnl} (was "${prev.line}")`)
+  }
+  if (after.rows.some((r) => Math.round(r.h) !== 72) || after.btn.h !== before.btn.h) throw new Error(`layout changed: ${JSON.stringify(after)}`)
+  await m.reload({ waitUntil: "networkidle" })
+  await toPnl.waitFor({ timeout: 8000 })
+  // 換回來，後面的手機檢查照預設
+  await toPnl.click()
+  await toDay.waitFor({ timeout: 4000 })
+  const back = await read()
+  if (back.rows.some((r, i) => r.line !== before.rows[i].line)) throw new Error(`not back to 今日漲跌: ${JSON.stringify(back.rows)}`)
+})
 await check("手機：股利清單整列都可以按（按在金額上也到個股頁）", async () => {
   await m.goto(base + "/?view=dividends", { waitUntil: "networkidle" })
   const received = m.locator("section", { has: m.locator("#div-received") })

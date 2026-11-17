@@ -1,7 +1,7 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
 
-/** 帳本的自訂（取代「簡易版／專業版」）：欄位、走勢圖、釘選持股。存在這台瀏覽器。 */
+/** 帳本的自訂（取代「簡易版／專業版」）：欄位、走勢圖、釘選持股、手機持倉列的第二行。存在這台瀏覽器。 */
 export type HoldingColumn = "price" | "day_pct" | "day_change" | "pnl" | "value" | "avg_cost" | "unrealized" | "unrealized_pct"
 
 export const COLUMN_LABEL: Record<HoldingColumn, string> = {
@@ -24,6 +24,12 @@ export const COLUMN_HINT: Partial<Record<HoldingColumn, string>> = {
 /** 這個順序就是表格的欄位順序，也是「自訂」選單的順序 */
 export const ALL_COLUMNS: HoldingColumn[] = ["price", "day_pct", "day_change", "pnl", "value", "avg_cost", "unrealized", "unrealized_pct"]
 export const DEFAULT_COLUMNS: HoldingColumn[] = ["price", "day_pct", "day_change", "pnl", "value"]
+/**
+ * 手機持倉列右下那一行（產品負責人 2026-11-17 選 A）：「day」今日漲跌（預設），「pnl」這一檔的報酬率——
+ * 和桌面「損益」欄的第二行同一個數字（未實現損益÷成本，不含股利）。按手機的表頭「收盤價・今日漲跌」切換。
+ */
+export type PhoneLine = "day" | "pnl"
+
 /** 第 1 版的預設欄位（沒有「損益」） */
 const DEFAULT_COLUMNS_V1: HoldingColumn[] = ["price", "day_pct", "day_change", "value"]
 
@@ -47,6 +53,9 @@ interface LedgerPrefs {
   pinned: string[]
   /** 持倉底下的「已出清」是否展開 */
   showClosed: boolean
+  /** 手機持倉列右下那一行看今日漲跌還是報酬率（見 `PhoneLine`） */
+  phoneLine: PhoneLine
+  togglePhoneLine: () => void
   setShowClosed: (v: boolean) => void
   setColumns: (c: HoldingColumn[]) => void
   toggleColumn: (c: HoldingColumn) => void
@@ -62,7 +71,10 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       showTrend: true,
       pinned: [],
       showClosed: false,
+      phoneLine: "day",
       setShowClosed: (showClosed) => set({ showClosed }),
+      // 存的值不認得時（手改過、以後的版本）當成今日漲跌，按一下換成報酬率
+      togglePhoneLine: () => set((s) => ({ phoneLine: s.phoneLine === "pnl" ? "day" : "pnl" })),
       setColumns: (columns) => set({ columns }),
       toggleColumn: (c) =>
         set((s) => {
@@ -77,10 +89,11 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
     }),
     {
       name: "forliosa:ledger",
-      // 第 2 版（2026-11-16）：預設欄位多了「損益」
+      // 第 2 版（2026-11-16）：預設欄位多了「損益」。
+      // 之後加的 phoneLine（2026-11-17）不用升版：存的設定裡沒有這一項時，讀回來用預設（persist 把存的值蓋在預設上），其他設定照舊
       version: 2,
       migrate: migrateLedgerPrefs as (persisted: unknown, version: number) => LedgerPrefs,
-      partialize: ({ columns, showTrend, pinned, showClosed }) => ({ columns, showTrend, pinned, showClosed }),
+      partialize: ({ columns, showTrend, pinned, showClosed, phoneLine }) => ({ columns, showTrend, pinned, showClosed, phoneLine }),
       storage: createJSONStorage(() => localStorage),
     },
   ),

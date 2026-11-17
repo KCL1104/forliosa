@@ -1,5 +1,5 @@
 import { Link, useNavigate } from "@tanstack/react-router"
-import { ArrowDownIcon, ArrowUpIcon, ChevronDownIcon, EllipsisIcon, PinIcon } from "lucide-react"
+import { ArrowDownIcon, ArrowLeftRightIcon, ArrowUpIcon, ChevronDownIcon, EllipsisIcon, PinIcon } from "lucide-react"
 import { Fragment, useMemo, useState } from "react"
 import { useHoldings, useIntraday, useWatchlist } from "@/api/queries"
 import type { Holding, WatchItem } from "@/api/types"
@@ -32,7 +32,7 @@ import { SymbolRecords } from "./SymbolRecords"
 
 type SortKey = "value" | "day_pct" | "day_change" | "pnl" | "unrealized" | "unrealized_pct" | "name"
 
-/** 持倉：桌面表格（預設 名稱・收盤價・今日漲跌・今日損益・損益・市值；可自訂、可排序）；手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌） */
+/** 持倉：桌面表格（預設 名稱・收盤價・今日漲跌・今日損益・損益・市值；可自訂、可排序）；手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌或報酬率——按表頭切換） */
 export function HoldingsView() {
   const holdings = useHoldings()
   const pinned = useLedgerPrefs((s) => s.pinned)
@@ -490,20 +490,19 @@ function WatchEmpty() {
   return <EmptyState className="border-t-0" title="還沒有觀察的股票" description="在個股頁按「加入觀察」。" />
 }
 
-/** 手機：兩行列 */
+/** 手機：兩行列。右下那一行是今日漲跌或報酬率（表頭的 `PhoneLineToggle` 切換） */
 function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
   const watch = useWatchlist()
   const readOnly = useReadOnly()
   const plans = useActivePlans()
   const label = useColumnLabel()
+  const pnl = useLedgerPrefs((s) => s.phoneLine === "pnl")
   const [open, toggle] = useOpenRows()
   return (
     <div className="md:hidden">
       <div className="form-head flex h-11 items-end justify-between pb-2">
         <span>持有 {rows.length} 檔</span>
-        <span className="num">
-          {label("price")}・{label("day_pct")}
-        </span>
+        <PhoneLineToggle />
       </div>
       <ul aria-label="持倉">
         {rows.map((h) => (
@@ -528,7 +527,9 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
                 {h.code} ・ <QtyText h={h} />
               </span>
               <span className="col-start-2 text-right text-base leading-5">
-                {h.price === null ? <Dash /> : <Pct value={h.day_change_pct} />}
+                {/* 表頭是切換鈕，螢幕報讀器在每一列也聽得到這個數字是什麼 */}
+                <span className="sr-only">{pnl ? label("pnl") : label("day_pct")}</span>
+                {h.price === null ? <Dash /> : <Pct value={pnl ? h.unrealized_pnl_pct : h.day_change_pct} />}
               </span>
               <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} className="relative z-10 col-start-3 row-span-2 row-start-1 -mr-2.5 ml-1 self-center" />
             </div>
@@ -558,6 +559,32 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
         </>
       )}
     </div>
+  )
+}
+
+/**
+ * 手機持倉的表頭「收盤價・今日漲跌」本身是切換鈕（產品負責人 2026-11-17 選 A）：按一下變「收盤價・損益」，
+ * 每一列右下那一行換成這一檔的報酬率（和桌面「損益」欄的第二行同一個數字、同一個 ▲▼ 與漲跌色），再按一下換回來。
+ * 版面與列高不變；記在這台瀏覽器（`ledger-prefs` 的 `phoneLine`）。隱私模式照常顯示百分比。
+ * 看得出能按：右邊一個 ⇄，放在下面每一列展開鈕的那一欄（同寬、同一個右緣），字的右緣就對齊收盤價那一欄。
+ * 按鈕和表頭一樣高（44px，往下蓋到表頭的雙線，雙線不接收點按）；名稱是看得到的字＋「（改看損益）」。
+ */
+function PhoneLineToggle() {
+  const pnl = useLedgerPrefs((s) => s.phoneLine === "pnl")
+  const toggle = useLedgerPrefs((s) => s.togglePhoneLine)
+  const label = useColumnLabel()
+  const [now, next] = pnl ? [label("pnl"), label("day_pct")] : [label("day_pct"), label("pnl")]
+  return (
+    <button type="button" onClick={toggle} className="press -mr-2.5 -mb-2 flex h-11 items-end rounded-sm pb-2 hover:text-ink">
+      <span className="num">
+        {label("price")}・{now}
+      </span>
+      <span className="sr-only">（改看{next}）</span>
+      {/* 和 ExpandButton 同寬（觸控 44px、滑鼠 36px）、同一個左距 */}
+      <span aria-hidden className="ml-1 grid h-5 w-9 place-items-center pointer-coarse:w-11">
+        <ArrowLeftRightIcon className="size-4" />
+      </span>
+    </button>
   )
 }
 
