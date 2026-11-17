@@ -3145,6 +3145,68 @@ await check("持倉展開每一筆買賣（2026-11-14）：日期（不是今年
   })
 })
 
+// 均價（產品負責人 2026-11-17）：收盤價下面一行「均價」、展開那一檔最上面「均價 … 含手續費・持有・成本」、每一筆買進的價格下面「均價」（含那一筆的手續費）；
+// 每一列的「⋯」與展開鈕（滑過時的底色）整顆在列與表格裡面，不再往右多出 8px
+const buttonsInside = (p, root) =>
+  root.evaluate((box) => {
+    const edge = box.getBoundingClientRect().right
+    return [...box.querySelectorAll('button[aria-label$="的動作"], button[aria-label^="展開"], button[aria-label^="收起"]')]
+      .filter((b) => b.getBoundingClientRect().width > 0)
+      .map((b) => {
+        const r = b.getBoundingClientRect()
+        const row = b.closest("li.ruled-row, tr, li") ?? b.parentElement
+        return { label: b.getAttribute("aria-label"), w: Math.round(r.width), overRow: Math.round(r.right - row.getBoundingClientRect().right), overBox: Math.round(r.right - edge) }
+      })
+  })
+for (const [vw, panel, scheme] of [[1440, false, "dark"], [1280, true, "light"], [1024, true, "dark"], [768, false, "light"]]) {
+  await check(`持倉表的均價（2026-11-17，${vw}px${panel ? "＋AI 面板" : ""}）：收盤價下面「均價 692.61」；展開台積電「均價 692.61 含手續費・持有・成本」、每一筆買進的價格下面「均價 815.32」；「⋯」與展開鈕在列與表格的右緣之內；不橫向捲動`, async () => {
+    await fresh({ viewport: { width: vw, height: 900 }, colorScheme: scheme }, async (p) => {
+      await p.goto(base + "/", { waitUntil: "networkidle" })
+      const toggle = p.getByRole("button", { name: panel ? /展開 AI 面板/ : /收起 AI 面板/ })
+      if (await toggle.count()) await toggle.first().click()
+      const table = p.getByRole("table", { name: "持倉" })
+      await table.getByRole("columnheader", { name: "收盤價・均價" }).waitFor({ timeout: 8000 })
+      const row = table.getByRole("row").filter({ has: p.getByRole("link", { name: "台積電", exact: true }) })
+      const price = (await row.getByRole("cell").first().innerText()).replace(/\s+/g, " ").trim()
+      if (price !== "1,085 均價 692.61") throw new Error(`price cell: ${price}`)
+      await table.getByRole("button", { name: "展開台積電的每一筆買賣" }).click()
+      const list = table.getByRole("list", { name: "台積電的每一筆買賣" })
+      await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
+      const line = table.getByLabel("台積電的均價與成本")
+      await line.getByText("含手續費", { exact: true }).waitFor({ timeout: 8000 })
+      const summary = (await line.innerText()).replace(/\s+/g, " ").trim()
+      if (!/^均價 692\.61 含手續費 持有 1 張 500 股 成本 NT\$1,038,913$/.test(summary)) throw new Error(`summary: ${summary}`)
+      const lot = (await list.getByRole("listitem").first().innerText()).replace(/\s+/g, " ")
+      if (!/815 均價 815\.32/.test(lot) && !/500 股 × 815 均價 815\.32/.test(lot)) throw new Error(`first lot: ${lot}`)
+      // 滑過第一筆的「⋯」：按鈕（底色）的右緣不超過那一列、也不超過表格
+      const menu = list.getByRole("button", { name: /的動作$/ }).first()
+      await menu.hover()
+      const m = await buttonsInside(p, table)
+      const bad = m.filter((b) => b.overRow > 0 || b.overBox > 0)
+      if (bad.length) throw new Error(`buttons stick out: ${JSON.stringify(bad)}`)
+      if ((await overflowX(p)) > 0) throw new Error(`horizontal scroll ${await overflowX(p)}px`)
+    })
+  })
+}
+await check("持倉表的均價（手機）：展開台積電，「均價 692.61 含手續費」、每一筆第二行「500 股 × 815」「均價 815.32」；展開鈕與每一筆的「⋯」 ≥ 44px、在清單的右緣之內；不橫向捲動", async () => {
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    const phone = p.getByRole("list", { name: "持倉" })
+    await phone.getByRole("button", { name: "展開台積電的每一筆買賣" }).click()
+    const list = p.getByRole("list", { name: "台積電的每一筆買賣" })
+    await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
+    const line = phone.getByLabel("台積電的均價與成本")
+    await line.getByText("含手續費", { exact: true }).waitFor({ timeout: 8000 })
+    if (!/^均價 692\.61 含手續費/.test((await line.innerText()).replace(/\s+/g, " ").trim())) throw new Error(`summary: ${await line.innerText()}`)
+    const lot = (await list.getByRole("listitem").first().innerText()).replace(/\s+/g, " ")
+    if (!/500 股 × 815 均價 815\.32/.test(lot)) throw new Error(`first lot: ${lot}`)
+    const m = await buttonsInside(p, phone)
+    const bad = m.filter((b) => b.overRow > 0 || b.overBox > 0 || b.w < 44)
+    if (bad.length) throw new Error(`buttons: ${JSON.stringify(bad)}`)
+    if ((await overflowX(p)) > 0) throw new Error(`horizontal scroll ${await overflowX(p)}px`)
+  })
+})
+
 await check("管理後台（桌面）：自己的外殼（總覽・討論・新聞下架、回到帳本；沒有頭像選單）、總覽的四個區塊、新聞下架的封鎖與解除都先確認", async () => {
   await fresh(DESKTOP, async (p) => {
     await p.goto(base + "/admin", { waitUntil: "networkidle" })

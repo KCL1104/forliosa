@@ -480,7 +480,13 @@ function CostLine({ h }: { h: Holding }) {
           value={
             <>
               {hide(avgCostText(h))}
-              {withFee && <span className="ml-1.5 text-sm font-normal text-ink-2">含手續費</span>}
+              {/* 真的空白（不是只有邊距）：複製出來、報讀器念起來是「692.61 含手續費」 */}
+              {withFee && (
+                <>
+                  {" "}
+                  <span className="ml-0.5 text-sm font-normal text-ink-2">含手續費</span>
+                </>
+              )}
             </>
           }
         />
