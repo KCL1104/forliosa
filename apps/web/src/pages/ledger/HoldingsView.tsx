@@ -1,6 +1,6 @@
 import { Link, useNavigate } from "@tanstack/react-router"
 import { ArrowDownIcon, ArrowLeftRightIcon, ArrowUpIcon, ChevronDownIcon, EllipsisIcon, PinIcon } from "lucide-react"
-import { Fragment, useMemo, useState } from "react"
+import { Fragment, useMemo, useState, type ReactNode } from "react"
 import { useHoldings, useIntraday, useWatchlist } from "@/api/queries"
 import type { Holding, WatchItem } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
@@ -32,7 +32,10 @@ import { SymbolRecords } from "./SymbolRecords"
 
 type SortKey = "value" | "day_pct" | "day_change" | "pnl" | "unrealized" | "unrealized_pct" | "name"
 
-/** 持倉：桌面表格（預設 名稱・收盤價・今日漲跌・今日損益・損益・市值；可自訂、可排序）；手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌或報酬率——按表頭切換） */
+/**
+ * 持倉：桌面表格（預設 名稱・收盤價・均價（同一格兩行）・今日漲跌・今日損益・損益・市值；可自訂、可排序）；
+ * 手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌或報酬率——按表頭切換）。展開一檔：持有・均價・成本一行，再來是每一筆買賣
+ */
 export function HoldingsView() {
   const holdings = useHoldings()
   const pinned = useLedgerPrefs((s) => s.pinned)
@@ -198,9 +201,12 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
       </button>
     )
   }
+  const stackAvg = stacksAvg(columns)
   const header = (c: HoldingColumn) => {
     const key = SORTABLE[c]
     const active = key && sort.key === key
+    // 均價沒有自己一欄時寫在收盤價下面一行：表頭和「市值・佔比」同一個寫法
+    const text = c === "price" && stackAvg ? `${label("price")}・${label("avg_cost")}` : label(c)
     return (
       <th
         key={c}
@@ -208,9 +214,9 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
         // 數字欄之間至少留 12px（pl-3）：欄寬被擠到只剩內容寬時，數字也不會連在一起
         className={cn("h-10 pl-3 text-right @max-[52rem]:w-px", WIDTH[c], stackDay && c === "day_pct" && "@max-[52rem]:hidden")}
         aria-sort={active ? (sort.dir === "asc" ? "ascending" : "descending") : undefined}
-        title={COLUMN_HINT[c]}
+        title={c === "price" && stackAvg ? COLUMN_HINT.avg_cost : COLUMN_HINT[c]}
       >
-        {key ? sortButton(key, label(c), "-mr-1") : label(c)}
+        {key ? sortButton(key, text, "-mr-1") : text}
         {/* 窄的時候今日漲跌併進這一格：表頭也多一個「漲跌」可以照漲跌幅排。主欄更窄（< 46rem）時只在正照它排的時候出現，省下名稱的寬度 */}
         {stackDay && c === "day_change" && (
           <span className={cn("@min-[52rem]:hidden", sort.key !== "day_pct" && "@max-[46rem]:hidden")}>
@@ -260,7 +266,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
                 </th>
                 {columns.map((c) => (
                   <td key={c} className={cn("num pl-3 text-right text-lg whitespace-nowrap", stackDay && c === "day_pct" && "@max-[52rem]:hidden")}>
-                    <Cell c={c} h={h} maxWeight={maxWeight} stackDay={stackDay} />
+                    <Cell c={c} h={h} maxWeight={maxWeight} stackDay={stackDay} stackAvg={stackAvg} />
                   </td>
                 ))}
                 <td className="text-right" onClick={(e) => e.stopPropagation()}>
@@ -273,6 +279,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
               {open.has(h.symbol) && (
                 <tr>
                   <td id={recordsId(h)} colSpan={columns.length + 2} className="border-b border-rule pb-3 pl-6">
+                    <CostLine h={h} />
                     <SymbolRecords symbol={h.symbol} code={h.code} name={h.name} market={h.market} type={h.type} price={h.price} actions />
                   </td>
                 </tr>
@@ -293,6 +300,15 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
  * 這時數字欄只佔自己需要的寬度，名稱欄拿剩下的、放不下就截斷（滑過看全名），列高維持 60px。
  */
 const stacksDay = (columns: HoldingColumn[]) => columns.includes("day_pct") && columns.includes("day_change")
+
+/**
+ * 均價預設寫在收盤價下面一行（產品負責人 2026-11-17：「好像應該要幫我列出平均成本價？」）：13px 淡墨「均價 612.5」，
+ * 和「損益」「市值・佔比」的第二行同一個樣子，列高不變。「自訂」裡打開「均價」那一欄時，收盤價下面不再重複。
+ */
+const stacksAvg = (columns: HoldingColumn[]) => !columns.includes("avg_cost")
+
+/** 均價：和收盤價同一套價格寫法（算出來的數字不藏精度，最多 2 位）；美股前面寫 US$（價格是美元，帳本的金額才是新台幣） */
+const avgCostText = (h: Holding) => `${h.market === "US" ? "US$" : ""}${formatPrice(h.avg_cost, h.market, h.type)}`
 
 /** 名稱欄（列標題）：窄的時候 max-width 0，讓名稱欄不撐寬表格，拿數字欄剩下的寬度 */
 const NAME_CELL = "h-[60px] py-1.5 pr-3 text-left font-normal @max-[52rem]:max-w-0"
@@ -361,14 +377,14 @@ function QtyText({ h }: { h: Holding }) {
 
 const Dash = () => <span className="text-ink-2" title="沒有報價">—</span>
 
-function Cell({ c, h, maxWeight, stackDay = false }: { c: HoldingColumn; h: Holding; maxWeight: number; stackDay?: boolean }) {
+function Cell({ c, h, maxWeight, stackDay = false, stackAvg = false }: { c: HoldingColumn; h: Holding; maxWeight: number; stackDay?: boolean; stackAvg?: boolean }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const money = (n: number, signed = false) => (privacy ? <Masked /> : formatMoney(n, { signed, bare: true }))
   // 沒有報價（商用模式的美股）：今日與未實現不是真的 0，顯示「—」
   const unpriced = h.price === null
   switch (c) {
-    case "price":
-      return unpriced ? (
+    case "price": {
+      const close = unpriced ? (
         <Dash />
       ) : (
         <>
@@ -376,6 +392,17 @@ function Cell({ c, h, maxWeight, stackDay = false }: { c: HoldingColumn; h: Hold
           {formatQuote(h.price, h.market, h.type)}
         </>
       )
+      if (!stackAvg) return close
+      // 收盤價一行、均價一行（沒有收盤價時均價照樣寫：成本是知道的）；隱私模式只遮均價，收盤價是公開的
+      return (
+        <span className="flex flex-col items-end">
+          <span className="leading-tight">{close}</span>
+          <span className="mt-0.5 text-sm leading-tight text-ink-2">
+            均價 {privacy ? <Masked /> : avgCostText(h)}
+          </span>
+        </span>
+      )
+    }
     case "day_pct":
       return unpriced ? <Dash /> : <Pct value={h.day_change_pct} />
     case "day_change":
@@ -411,12 +438,59 @@ function Cell({ c, h, maxWeight, stackDay = false }: { c: HoldingColumn; h: Hold
         </span>
       )
     case "avg_cost":
-      return <>{privacy ? <Masked /> : formatPrice(h.avg_cost, h.market)}</>
+      // 自己一欄時和收盤價那一欄同一個樣子：美股的 US$ 小一號、淡墨
+      return privacy ? (
+        <Masked />
+      ) : (
+        <>
+          {h.market === "US" && <span className="mr-0.5 text-sm text-ink-2">US$</span>}
+          {formatPrice(h.avg_cost, h.market, h.type)}
+        </>
+      )
     case "unrealized":
       return unpriced ? <Dash /> : <span className={toneClass(direction(h.unrealized_pnl))}>{money(h.unrealized_pnl, true)}</span>
     case "unrealized_pct":
       return unpriced ? <Dash /> : <Pct value={h.unrealized_pnl_pct} />
   }
+}
+
+/**
+ * 展開一檔時最上面一行（桌面與手機都有）：持有・均價・成本（產品負責人 2026-11-17）。和個股頁「我的部位」同樣的名稱與寫法。
+ * 後端的 `avg_cost`（原幣）＝目前持股的成本 ÷ 股數，`cost_basis`（新台幣，各筆買進當天的匯率）＝目前持股的成本：
+ * 都含買進手續費（下面每一筆的價格不含，所以均價會比只用價格算的高一點，寫出來）；賣出照成本法（預設移動平均、可換 FIFO）扣掉賣掉那幾股的成本，
+ * 現金股利不扣成本、配股與分割只加股數（均價跟著變低），減資退款扣成本。隱私模式三個數字都遮（股數照帳本的規則也遮）。
+ */
+function CostLine({ h }: { h: Holding }) {
+  const privacy = usePrefs((s) => s.privacyMode)
+  const unit = usePrefs((s) => s.quantityUnit)
+  const hide = (s: string) => (privacy ? <Masked /> : s)
+  // 窄的時候（手機、個股頁那種寬度）下面每一筆是沒有表頭的格線列：這一行自己底下也畫一條，不和第一筆黏在一起
+  return (
+    <div className="@container">
+      <dl aria-label={`${h.name}的持有與成本`} className="num flex flex-wrap items-baseline gap-x-5 gap-y-1 py-2.5 text-base @max-2xl:border-b @max-2xl:border-rule">
+        <CostItem label="持有" value={hide(formatQuantity(h.quantity, unit, h.market))} />
+        <CostItem label="均價" value={hide(avgCostText(h))} />
+        <CostItem
+          label="成本"
+          value={
+            <>
+              {hide(formatMoney(h.cost_basis))}
+              <span className="ml-2 text-sm font-normal text-ink-2">含買進手續費</span>
+            </>
+          }
+        />
+      </dl>
+    </div>
+  )
+}
+
+function CostItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="flex items-baseline gap-2 whitespace-nowrap">
+      <dt className="text-sm text-ink-2">{label}</dt>
+      <dd className="font-medium">{value}</dd>
+    </div>
+  )
 }
 
 function WatchBody({ items, columns, loading }: { items?: WatchItem[]; columns: number; loading: boolean }) {
@@ -535,6 +609,7 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
             </div>
             {open.has(h.symbol) && (
               <div id={recordsId(h)} className="border-b border-rule pb-3">
+                <CostLine h={h} />
                 <SymbolRecords symbol={h.symbol} code={h.code} name={h.name} market={h.market} type={h.type} price={h.price} actions />
               </div>
             )}

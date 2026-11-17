@@ -12,6 +12,7 @@ export const COLUMN_LABEL: Record<HoldingColumn, string> = {
   // 未實現損益的金額，下面一行報酬率（產品負責人 2026-11-16 選 A：預設就看得到每一檔賺賠多少）
   pnl: "損益",
   value: "市值・佔比",
+  // 預設寫在「收盤價」那一格的第二行（表頭「收盤價・均價」，產品負責人 2026-11-17）；在「自訂」打開就自己一欄，收盤價下面不再重複
   avg_cost: "均價",
   unrealized: "未實現損益",
   unrealized_pct: "報酬率",
@@ -20,6 +21,8 @@ export const COLUMN_LABEL: Record<HoldingColumn, string> = {
 /** 欄名看不出算法的欄位：表頭與「自訂」選單滑過時的說明（「損益」和主數字的「總損益（含股利）」對不起來，寫清楚不含股利） */
 export const COLUMN_HINT: Partial<Record<HoldingColumn, string>> = {
   pnl: "未實現損益與報酬率：市值減成本，不含股利",
+  // 每一筆買賣的價格不含手續費，均價含，所以會比只用價格算的高一點
+  avg_cost: "均價：每股的平均成本，含買進手續費",
 }
 
 /** 這個順序就是表格的欄位順序，也是「自訂」選單的順序 */
