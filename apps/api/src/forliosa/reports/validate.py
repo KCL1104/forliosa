@@ -598,7 +598,18 @@ def _sector_mentions(text: str) -> list[str]:
     return found
 
 
-_OUTLET_ALIASES = {"自由財經": "自由時報", "鉅亨": "鉅亨網", "anue": "鉅亨網", "cna": "中央社"}
+# The written outlet (lower case) -> the outlet name the gathering stores. International outlets are often written
+# with their Chinese names (〔彭博〕 for a Bloomberg page: the 2026-11-17 second dry run dropped two sentences).
+_OUTLET_ALIASES = {
+    "自由財經": "自由時報", "鉅亨": "鉅亨網", "anue": "鉅亨網", "cna": "中央社", "中央通訊社": "中央社",
+    "彭博": "Bloomberg", "彭博社": "Bloomberg", "彭博新聞社": "Bloomberg", "彭博資訊": "Bloomberg",
+    "路透": "Reuters", "路透社": "Reuters", "美聯社": "AP", "美國聯合通訊社": "AP",
+    "華爾街日報": "The Wall Street Journal", "金融時報": "Financial Times", "英國金融時報": "Financial Times",
+    "紐約時報": "The New York Times", "日經": "Nikkei Asia", "日經亞洲": "Nikkei Asia", "日本經濟新聞": "Nikkei Asia",
+    "南華早報": "South China Morning Post", "富比世": "Forbes", "財星": "Fortune", "財星雜誌": "Fortune",
+    "巴倫週刊": "Barron's", "巴倫周刊": "Barron's", "霸榮週刊": "Barron's", "霸榮周刊": "Barron's",
+    "市場觀察": "MarketWatch", "商業內幕": "Business Insider", "美國有線電視新聞網": "CNN",
+}
 
 
 def _same_outlet(written: str, outlet: str) -> bool:

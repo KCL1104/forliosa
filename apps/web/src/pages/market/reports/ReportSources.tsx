@@ -68,6 +68,9 @@ export function ReportSources({ report }: { report: MarketReport }) {
   )
 }
 
+/** 資料與重大訊息的註腳，名稱本身就帶日期（「證交所〈每日收盤行情－大盤統計〉11/16」），不再接一次日期 */
+const DATED_LABEL: ReadonlySet<ReportFootnote["kind"]> = new Set(["data", "filing"])
+
 /** 一條出處：號碼（回到原句）＋內容 */
 function Footnote({ f }: { f: ReportFootnote }) {
   const { prefix, openSection } = useReport()
@@ -105,7 +108,7 @@ function Footnote({ f }: { f: ReportFootnote }) {
         ) : (
           <span className="text-ink">{f.label}</span>
         )}
-        {f.date_label && <span className="num text-ink-2">・{f.date_label}</span>}
+        {f.date_label && !DATED_LABEL.has(f.kind) && <span className="num text-ink-2">・{f.date_label}</span>}
       </span>
     </li>
   )

@@ -14,10 +14,11 @@ export function ReportCalendar({ calendar }: { calendar: Spec }) {
   return (
     <section aria-labelledby={titleId} data-section-key="calendar" className="flex flex-col">
       <header className="flex min-h-11 items-end gap-3 border-b border-print pb-2">
-        <h3 id={titleId} className="text-lg font-semibold">
+        <h3 id={titleId} className="min-w-0 flex-1 text-lg font-semibold">
           {calendar.title}
         </h3>
-        <span className="ml-auto text-sm text-ink-2">資料</span>
+        {/* 手機上長標題（「盤後與下個交易日行事曆（11/17–11/18）」）不能把「資料」擠成直排 */}
+        <span className="shrink-0 text-sm text-ink-2">資料</span>
       </header>
       {calendar.groups.length === 0 ? (
         <p className="py-3 text-base text-ink">{calendar.empty_text ?? "這段期間沒有已排定的事件。"}</p>

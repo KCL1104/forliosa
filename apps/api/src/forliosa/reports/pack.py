@@ -958,8 +958,9 @@ def _premarket(p: Pack, md_: Any) -> None:
         evening_rows.append({"cells": {"item": B.cell("P/C 未平倉比"), "value": B.cell(f"{pc.oi_ratio * 100:.2f}%"),
                                        "change": B.cell("")}})
     if fx and fx[-1][0] == prev:
+        # the same change as the number strip's (the second dry run had it there and an empty cell here)
         evening_rows.append({"cells": {"item": B.cell("美元兌新台幣（央行）"), "value": B.cell(f"{fx[-1][1]:.3f}"),
-                                       "change": B.cell("")}})
+                                       "change": B.cell(f"{fx[-1][1] - fx[-2][1]:+.3f}" if len(fx) > 1 else "")}})
     p.table(B.table("T_evening", f"昨晚才到的資料（{md(prev)}）",
                     [("item", "項目", "left", False), ("value", "數字", "right", True),
                      ("change", "變化", "right", True)], evening_rows,
