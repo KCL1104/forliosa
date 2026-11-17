@@ -228,3 +228,48 @@ def test_market_report_key_state_both_ways(tmp_path):
             assert conn.execute(text("SELECT mode FROM market_report_config")).scalar_one() == "trial"
     finally:
         engine.dispose()
+
+
+def test_mreport_trial_audience_both_ways(tmp_path):
+    """0026_mreport_trial_audience (盲測開給所有人, 2026-11-17): the config row gets an empty ``trial_audience``; every
+    vote so far was an admin's; a blind-test edition already written gets ``ai_published_at`` from its first variant
+    version (one with no variant yet, a public one and one already set are left alone); the downgrade drops the two
+    columns again."""
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'trial_audience.db'}"
+    command.upgrade(_config(url), "0025_mreport_key_state")
+    engine = make_engine(url)
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "users", {"id": "usr_1", "email": "a@b.c"})
+            _insert(conn, "market_report_config", {"id": 1, "mode": "trial", "writers": "{}"})
+            for rid, d, trial, ai in (("mrp_t", "2026-11-16", True, None), ("mrp_w", "2026-11-17", True, None),
+                                      ("mrp_p", "2026-11-18", False, None),
+                                      ("mrp_s", "2026-11-19", True, "2026-11-19 07:58:00")):
+                _insert(conn, "market_reports", {"id": rid, "kind": "close", "edition_date": d, "trial": trial,
+                                                 "ai_published_at": ai})
+            for vid, rid, n, variant, at in (("mrv_1", "mrp_t", 1, None, "2026-11-16 06:11:00"),
+                                             ("mrv_2", "mrp_t", 2, "B", "2026-11-16 07:52:00"),
+                                             ("mrv_3", "mrp_t", 3, "A", "2026-11-16 07:55:00"),
+                                             ("mrv_4", "mrp_w", 1, None, "2026-11-17 06:11:00"),
+                                             ("mrv_5", "mrp_p", 1, None, "2026-11-18 06:11:00"),
+                                             ("mrv_6", "mrp_p", 2, "A", "2026-11-18 07:50:00"),
+                                             ("mrv_7", "mrp_s", 1, "A", "2026-11-19 07:50:00")):
+                _insert(conn, "market_report_versions", {"id": vid, "report_id": rid, "version": n,
+                                                         "variant": variant, "created_at": at})
+            _insert(conn, "market_report_votes", {"report_id": "mrp_t", "user_id": "usr_1", "preferred": "A"})
+        command.upgrade(_config(url), "0026_mreport_trial_audience")
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT mode, trial_audience FROM market_report_config")).one() == ("trial", None)
+            assert [bool(v) for v in conn.execute(text("SELECT by_admin FROM market_report_votes")).scalars()] == [True]
+            got = dict(conn.execute(text("SELECT id, ai_published_at FROM market_reports")).all())
+            assert {k: (str(v)[:19] if v else None) for k, v in got.items()} == {
+                "mrp_t": "2026-11-16 07:52:00", "mrp_w": None, "mrp_p": None, "mrp_s": "2026-11-19 07:58:00"}
+        command.downgrade(_config(url), "0025_mreport_key_state")
+        assert "trial_audience" not in {c["name"] for c in inspect(engine).get_columns("market_report_config")}
+        assert "by_admin" not in {c["name"] for c in inspect(engine).get_columns("market_report_votes")}
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT preferred FROM market_report_votes")).scalar_one() == "A"
+    finally:
+        engine.dispose()

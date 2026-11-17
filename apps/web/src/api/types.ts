@@ -1449,6 +1449,8 @@ export interface Channels {
   telegram_available: boolean
   /** 市場報告對全站公開（模式 public）時才為 true：這時才有三個報告的推播開關。選填：舊版後端沒有 */
   market_reports_available?: boolean
+  /** 盲測開給所有人（模式 trial）：也有三個開關，每份推一則投票連結，不併群組的日報、週報 */
+  market_reports_trial?: boolean
 }
 
 export interface ChannelNotify {
@@ -2213,6 +2215,13 @@ export interface MarketReport {
   is_demo: boolean
   /** 只在管理員檢視 */
   validation?: ReportValidation | null
+  /**
+   * 盲測開給所有登入的人時的一份（2026-11-17）：頁面顯示 A／B／C 三種寫法與投票（`TrialEdition`），不是這一版（只有資料）。
+   * 選填：舊版後端沒有
+   */
+  trial?: boolean
+  /** 盲測的一個版本（`/market/reports/<id>/variants/<A|B|C>`） */
+  variant?: ReportVariant | null
 }
 export interface ReportSummary {
   id: string
@@ -2226,6 +2235,10 @@ export interface ReportSummary {
   corrected: boolean
   /** 盤前重點：前一個台股交易日（跳過休市日；推播「昨日你的群組」說的那一天）。其他種類是 null */
   prev_session?: string | null
+  /** 盲測（三種寫法，大家一起選）的一份；只在盲測開給所有人時 */
+  trial?: boolean
+  /** 盲測的一份：我投了哪一個（還沒投是 null） */
+  my_vote?: ReportVariant | null
 }
 /** `GET /market/reports/status` */
 export interface ReportsStatus {
@@ -2236,7 +2249,40 @@ export interface ReportsStatus {
   unread: boolean
   /** 每種最新一份（看得到的） */
   latest: ReportSummary[]
+  /** 盲測開給所有登入的人（伺服器 `MREPORT_TRIAL_AUDIENCE=all` 或管理後台切換）。選填：舊版後端沒有 */
+  trial_open?: boolean
 }
+
+/** 盲測的一個版本能不能看：ready 可以看；writing 還在寫；none 這個版本不會有（只發了資料版、預算不夠、截止了） */
+export type TrialVariantState = "ready" | "writing" | "none"
+/** 揭曉後：這一種報告每個設定的票數（管理員與會員合計）、票數最多的（同票不只一個）、之後用哪個（後台存了才有） */
+export interface MemberTrialResult {
+  kind: ReportKind
+  kind_label: string
+  rows: { writer: WriterSetting; votes: number }[]
+  top: WriterSetting[]
+  chosen: WriterSetting | null
+}
+/** `GET /market/reports/<id>/trial`：盲測的一份（所有登入的人；揭曉前不寫模型、花費與票數） */
+export interface MemberTrial {
+  report_id: string
+  kind: ReportKind
+  kind_label: string
+  edition_date: string
+  edition_label: string
+  /** A、B、C 的順序；`writer` 揭曉後才有 */
+  variants: { label: ReportVariant; state: TrialVariantState; writer?: WriterSetting | null }[]
+  my_vote: ReportVariant | null
+  /** 揭曉前、至少有一個版本可以看 */
+  can_vote: boolean
+  revealed: boolean
+  /** 揭曉後：這一份 A／B／C 各幾票 */
+  votes: Record<ReportVariant, number> | null
+  result: MemberTrialResult | null
+}
+/** 誰參加盲測：admins＝只有站方管理員；all＝所有登入的人（看、投票，有開推播的群組收到投票連結） */
+export type TrialAudience = "admins" | "all"
+export type TrialVoteCounts = Record<ReportVariant, number>
 
 // 管理後台「市場報告」
 export type ReportEffort = "low" | "medium" | "high" | "xhigh" | "max"
@@ -2276,6 +2322,9 @@ export interface AdminReportsOverview {
   /** 伺服器的總開關 */
   enabled: boolean
   mode: ReportsMode
+  /** 誰參加盲測；`trial_audience_source`：admin＝後台切的、default＝伺服器的 MREPORT_TRIAL_AUDIENCE。選填：舊版後端沒有 */
+  trial_audience?: TrialAudience
+  trial_audience_source?: "admin" | "default"
   /** 每種報告的撰寫設定；盲測中（揭曉前）是 null。`effective`／`tier`：套上預算層級之後的設定 */
   writers: Record<ReportKind, (WriterSetting & { source: "admin" | "default"; effective?: WriterSetting | null; tier?: ReportTier }) | null>
   trial_running: boolean
@@ -2304,10 +2353,13 @@ export interface AdminReportsOverview {
 export interface ReportsConfigPatch {
   mode?: ReportsMode
   writers?: Partial<Record<ReportKind, WriterSetting | null>>
+  /** null：回到伺服器的設定（MREPORT_TRIAL_AUDIENCE） */
+  trial_audience?: TrialAudience | null
 }
 export interface ReportsConfigResult {
   mode: ReportsMode
   writers: Record<ReportKind, WriterSetting | null>
+  trial_audience?: TrialAudience
   /** 切到 public 時：「之後的新報告會對所有登入的人公開，並推播到有開的群組。」 */
   notice?: string | null
 }
@@ -2345,6 +2397,8 @@ export interface TrialReport {
   edition_label: string
   variants: TrialVariant[]
   my_vote: { preferred: ReportVariant; note: string } | null
+  /** 大家的票：管理員、會員分開，與合計。選填：舊版後端沒有 */
+  votes?: { all: TrialVoteCounts; admins: TrialVoteCounts; members: TrialVoteCounts }
 }
 export interface TrialRevealRow {
   writer: WriterSetting
@@ -2358,6 +2412,9 @@ export interface TrialRevealRow {
   avg_cost_usd: number
   avg_seconds: number
   passed: boolean
+  /** 票數裡管理員、會員各幾票 */
+  votes_admins?: number
+  votes_members?: number
   /** 退回資料版的份數 */
   data_only?: number
   fallbacks?: number
@@ -2378,6 +2435,9 @@ export interface AdminTrial {
   reports: TrialReport[]
   /** 揭曉後才有 */
   reveal: TrialReveal | null
+  /** 誰參加盲測、投過票的人數（管理員、會員）。選填：舊版後端沒有 */
+  audience?: TrialAudience
+  voters?: { admins: number; members: number }
 }
 export interface NyseHoliday {
   date: string
@@ -2632,6 +2692,12 @@ export interface ForliosaApi {
   getMarketReport(id: string, version?: number): Promise<MarketReport>
   /** 看過了（未讀的小圓點消失）；查看別人的資產時 403 `read_only` */
   markMarketReportsSeen(): Promise<void>
+  /** 盲測的一份（盲測開給所有人時；否則 404） */
+  getMarketReportTrial(id: string): Promise<MemberTrial>
+  /** 盲測的一個版本（一般形式）；還在寫 409 `variant_running`；沒有寫成 404 */
+  getMarketReportVariant(id: string, label: ReportVariant): Promise<MarketReport>
+  /** 投票／改票（每人每份一票）；揭曉後 409 `trial_revealed`；那個版本還不能看 422 */
+  voteMarketReport(id: string, preferred: ReportVariant): Promise<MemberTrial>
   // 管理後台「市場報告」（不是管理員 → 404）
   getAdminReportsOverview(): Promise<AdminReportsOverview>
   putReportsConfig(body: ReportsConfigPatch): Promise<ReportsConfigResult>

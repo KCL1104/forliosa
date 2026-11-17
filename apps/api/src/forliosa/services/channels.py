@@ -171,9 +171,11 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             row["chat_title"] = ch.chat_title if ch else None
         out[kind] = row
     out["telegram_available"] = settings.telegram_available
-    from forliosa.reports.push import pushing
+    from forliosa.reports.push import pushing, trial_pushing
 
     out["market_reports_available"] = pushing(db, settings)  # the three switches show only once reports are public
+    # …or while the blind test is open to everyone (one message per edition with the vote link; nothing folded in)
+    out["market_reports_trial"] = not out["market_reports_available"] and trial_pushing(db, settings)
     return out
 
 

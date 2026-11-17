@@ -10,7 +10,7 @@ from datetime import date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.ai.keypool import KeyPool
@@ -18,10 +18,13 @@ from forliosa.config import Settings, get_settings
 from forliosa.models import (
     AiUsage,
     AiWhyResearch,
+    Group,
+    GroupChannel,
     MarketReport,
     MarketReportGather,
     MarketReportRun,
     MarketReportVersion,
+    NotificationOutbox,
 )
 from forliosa.reports import accounting, assemble, calls, compliance, gather, pack, pipeline
 from forliosa.reports import settings as rs
@@ -196,6 +199,46 @@ def test_trial_writes_three_variants_for_admins_only(env, monkeypatch):
         assert accounting.month_spend(db) == 0 and accounting.trial_spend(db) > 0
     tick(env, ts(MON, 16, 1))
     assert report(env).pushed_at is None  # never pushed in the trial
+
+
+def test_trial_open_to_everyone_opens_the_vote_and_the_tick_pushes_it_once(env, monkeypatch):
+    """MREPORT_TRIAL_AUDIENCE=all (產品負責人 2026-11-17): the first variant written sets ``ai_published_at`` (the
+    members' unread dot and list time) while the data edition stays current; from the push time the tick queues one
+    push per channel whose switch for the kind is on (``push_edition`` trial), never again."""
+    monkeypatch.setenv("MARKET_REPORTS_INITIAL_MODE", "trial")
+    monkeypatch.setenv("MREPORT_TRIAL_AUDIENCE", "all")
+    get_settings.cache_clear()
+    with Session(env["engine"]) as db:
+        db.add_all([Group(id="grp_on", name="開了"), Group(id="grp_off", name="沒開")])
+        db.flush()
+        db.add_all([GroupChannel(group_id="grp_on", kind="discord", status="active", notify_close=True),
+                    GroupChannel(group_id="grp_off", kind="discord", status="active", notify_close=False)])
+        db.commit()
+    fake = env["fake"]
+    tick(env, ts(MON, 14, 11))
+    r = report(env)
+    data_id = r.current_version_id
+    assert r.trial and data_id is not None and r.ai_published_at is None
+    script_gather(fake)
+    tick(env, ts(MON, 15, 41))
+    out = close_output(with_web(pk_close(env)))
+    for _ in range(3):
+        fake.reply(json_text(out)).reply(json_text({"issues": []}))
+    tick(env, ts(MON, 15, 51))
+    r = report(env)
+    assert sorted(v.variant for v in versions(env, r.id) if v.variant) == ["A", "B", "C"]
+    assert r.ai_published_at == ts(MON, 15, 51)  # the first variant's time
+    assert r.current_version_id == data_id and r.state == "data"  # a variant never becomes current
+    tick(env, ts(MON, 15, 59))
+    assert report(env).pushed_at is None  # before the push time
+    tick(env, ts(MON, 16, 1))
+    r = report(env)
+    assert r.pushed_at == ts(MON, 16, 1) and r.push_edition == "trial"
+    tick(env, ts(MON, 16, 11))
+    with Session(env["engine"]) as db:
+        rows = list(db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "mreport")))
+        assert [(x.group_id, x.dedupe_key) for x in rows] == [("grp_on", f"mreport:{r.id}:grp_on:discord")]
+        assert db.scalar(select(func.count()).select_from(NotificationOutbox)) == 1
 
 
 def test_trial_variants_beyond_the_cap_are_skipped(env, monkeypatch):

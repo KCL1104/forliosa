@@ -41,7 +41,7 @@ export function ChannelsTab({ group }: { group: Group }) {
         {c.discord.configured ? (
           <>
             {owner && c.discord.webhook_hint && <p className="num text-md text-ink-2">Webhook 網址結尾 {c.discord.webhook_hint}</p>}
-            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} daily={boosted || !!c.discord.notify_daily} reports={!!c.market_reports_available} />
+            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} daily={boosted || !!c.discord.notify_daily} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
             {owner && (
               // 「換一個 webhook」和「解除 Discord」同一列、中間留 24px（原本兩個行內元素直接貼在一起；2026-11-15 產品負責人回報）。
               // 展開成表單時表單佔滿一列，「解除」換到下一列
@@ -71,7 +71,7 @@ export function ChannelsTab({ group }: { group: Group }) {
               </p>
             )}
             {c.telegram.configured && (
-              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} daily={boosted || !!c.telegram.notify_daily} reports={!!c.market_reports_available} />
+              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} daily={boosted || !!c.telegram.notify_daily} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
             )}
             {owner && (!c.telegram.configured || c.telegram.status === "disabled") && (
               <TelegramLink groupId={group.id} code={linked ? null : linking} onCode={setLinking} />
@@ -105,6 +105,7 @@ function NotifyToggles({
   editable,
   daily,
   reports,
+  trial = false,
 }: {
   groupId: string
   kind: "discord" | "telegram"
@@ -114,6 +115,11 @@ function NotifyToggles({
   daily: boolean
   /** 市場報告對全站公開時才有三個報告的開關（所有群組都能開；盤前、盤後預設關，週報預設開） */
   reports: boolean
+  /**
+   * 盲測開給所有人（試跑中）：也有三個開關，每份推一則投票連結（2026-11-17）。
+   * 這時不併群組的日報、週報（`reports` 是 false），日報、週報的說明照平常寫。
+   */
+  trial?: boolean
 }) {
   const patch = usePatchChannel(groupId, kind)
   const row = (key: keyof ChannelNotify, label: string, detail: string | null, fallback = false) => {
@@ -154,9 +160,9 @@ function NotifyToggles({
             ? "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，併在交易日 7:30 的盤前重點裡送。"
             : "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送。",
         )}
-      {reports && (
+      {(reports || trial) && (
         <div data-report-toggles="">
-          <p className="pt-4 pb-1 text-sm text-ink-2">推到頻道的是文字與連結，報告本文人人相同。</p>
+          <p className="pt-4 pb-1 text-sm text-ink-2">{trial ? "盲測期間每份報告推一則投票連結：三種寫法，看完選一個。" : "推到頻道的是文字與連結，報告本文人人相同。"}</p>
           {row("notify_premarket", "盤前重點（交易日 7:30）", null)}
           {row("notify_close", "盤後重點（交易日 16:00）", null)}
           {row("notify_weekly", "市場週報（週日 18:00）", null, true)}

@@ -18,7 +18,9 @@ Per edition (times in :mod:`.schedule`):
    edition. A run past AI_MREPORT_RUN_ALARM_USD makes no further call. A result after the edition closed is
    ``abandoned``.
 4. **Push** (mode public, a public edition only): the AI edition at the push time, or as soon as it comes until the
-   fallback time, then the data edition (:mod:`.push`).
+   fallback time, then the data edition (:mod:`.push`). A blind-test edition only while the blind test is open to
+   everyone: once, from the push time, when two of A / B / C can be read and none is still being written (or at
+   the fallback time with two).
 5. **Close** at 08:40 / 17:30 / 21:00; the close edition gets table versions at 23:45 and 06:40 the next day (AI text
    unchanged, the server's blocks rebuilt from everything stored by then; never pushed).
 
@@ -701,6 +703,8 @@ def attempt(db: Session, run: MarketReportRun, deps: Deps, deadline: bool = True
         report.ai_published_at = finished
         report.first_published_at = report.first_published_at or finished
         report.updated_at = finished
+    else:  # a blind-test variant never becomes current; the first one opens the vote (the members' unread dot)
+        report.ai_published_at = report.ai_published_at or finished
     metrics["on_time"] = finished <= ed.publish_target
     metrics["seconds"] = round((finished - now).total_seconds(), 1)
     _finish(ctx, "ok", None, metrics, started=now)
@@ -888,6 +892,9 @@ def _write_back(db: Session, report: MarketReport, pk: dict[str, Any], deps: Dep
 # -- push, close, tables ------------------------------------------------------------------------------------------
 def maybe_push(db: Session, report: MarketReport, ed: Edition, now: datetime, deps: Deps, cfg: Any,
                res: TickResult) -> None:
+    if report.trial:
+        maybe_push_trial(db, report, ed, now, deps, res)
+        return
     if report.pushed_at is not None or now < ed.push_at or not push.may_push(db, report, deps.s):
         return
     if now >= push_deadline(ed):
@@ -903,6 +910,31 @@ def maybe_push(db: Session, report: MarketReport, ed: Edition, now: datetime, de
     report.pushed_at, report.push_edition, report.updated_at = now, edition, now
     db.commit()
     res.add(report, f"push queued ({edition}, {n} channels)")
+
+
+TRIAL_PUSH_MIN = 2  # variants that can be read before the blind-test push (a vote needs a choice)
+
+
+def readable_variants(db: Session, report: MarketReport) -> int:
+    return len(set(db.scalars(select(MarketReportVersion.variant).where(
+        MarketReportVersion.report_id == report.id, MarketReportVersion.variant.is_not(None)))))
+
+
+def maybe_push_trial(db: Session, report: MarketReport, ed: Edition, now: datetime, deps: Deps,
+                     res: TickResult) -> None:
+    """A blind-test edition open to everyone: one push with the vote link, from the push time, once two variants can be
+    read and none is still being written (from the fallback time: with two, whatever is still running)."""
+    if report.pushed_at is not None or now < ed.push_at or not push.may_push_trial(db, report, deps.s):
+        return
+    if now >= push_deadline(ed):
+        return
+    ready = readable_variants(db, report)
+    if ready < TRIAL_PUSH_MIN or (_running(db, report) and now < ed.push_fallback_at):
+        return
+    n = push.enqueue(db, report, now, deps.s)
+    report.pushed_at, report.push_edition, report.updated_at = now, "trial", now
+    db.commit()
+    res.add(report, f"blind-test push queued ({ready} variants, {n} channels)")
 
 
 def push_deadline(ed: Edition) -> datetime:

@@ -18,8 +18,10 @@ import {
   type ReportsMode,
   type ReportTier,
   type ReportVariant,
+  type TrialAudience,
   type TrialReport,
   type TrialReveal,
+  type TrialVoteCounts,
   type WriterSetting,
 } from "@/api/types"
 import { RangeChips } from "@/components/segmented"
@@ -55,6 +57,14 @@ const MODE_TEXT: Record<ReportsMode, { label: string; detail: string }> = {
   public: { label: "對全站公開", detail: "之後的新報告所有登入的人都看得到，並推播到有開的群組。" },
   paused: { label: "暫停", detail: "不產生新報告、不推播；已公開的照常可以讀。" },
 }
+/** 誰參加盲測（`MREPORT_TRIAL_AUDIENCE`，後台也可以切；2026-11-17） */
+const AUDIENCE_TEXT: Record<TrialAudience, { label: string; detail: string }> = {
+  admins: { label: "只有站方管理員", detail: "其他人看不到盲測的報告，不推播。" },
+  all: { label: "所有登入的人", detail: "大家都能看 A、B、C 並投票；有開推播的群組收到投票連結。" },
+}
+/** 試跑時的說明：盲測開給所有人時，盲測的報告大家看得到 */
+const modeDetail = (mode: ReportsMode, audience: TrialAudience | undefined) =>
+  mode === "trial" && audience === "all" ? "照常產生。盲測的報告所有登入的人都能看、投票；其他的只有站方管理員看得到。" : MODE_TEXT[mode].detail
 const TIER_TEXT: Record<ReportTier, string> = { normal: "正常", medium: "已降為 medium", sonnet: "已改用 Sonnet", data_only: "只發資料版" }
 const STATUS_TEXT: Record<string, string> = {
   running: "還在寫",
@@ -103,15 +113,23 @@ export function AdminReportsPage() {
 
 // ── 狀態 ────────────────────────────────────────────
 function Status({ o }: { o: AdminReportsOverview }) {
-  const [editing, setEditing] = useState<"mode" | ReportKind | null>(null)
+  const [editing, setEditing] = useState<"mode" | "audience" | ReportKind | null>(null)
+  const audience = o.trial_audience ?? "admins"
   const trialLine = `${usd(o.trial.spend_usd)}／${usd(o.trial.budget_usd)}・第 ${o.trial.days_done}／${o.trial.days_total} 個交易日・週報${o.trial.weekly_done ? "做了" : "未做"}`
   return (
     <Section title="狀態" titleId="mr-status" bodyClassName="pt-0">
       <dl className="flex flex-col">
         <Row label="模式" action={<Button variant="outline" size="sm" onClick={() => setEditing("mode")}>切換</Button>}>
           <span className="font-medium">{MODE_TEXT[o.mode].label}</span>
-          <span className="block text-sm text-ink-2">{MODE_TEXT[o.mode].detail}</span>
+          <span className="block text-sm text-ink-2">{modeDetail(o.mode, o.trial_audience)}</span>
         </Row>
+        {o.trial_audience && (
+          <Row label="盲測對象" action={<Button variant="outline" size="sm" aria-label="切換盲測對象" onClick={() => setEditing("audience")}>切換</Button>}>
+            <span className="font-medium">{AUDIENCE_TEXT[audience].label}</span>
+            {o.trial_audience_source === "default" && <span className="text-sm text-ink-2">（預設）</span>}
+            <span className="block text-sm text-ink-2">{AUDIENCE_TEXT[audience].detail}</span>
+          </Row>
+        )}
         {KINDS.map((k) => {
           const w = o.writers[k]
           return (
@@ -159,7 +177,8 @@ function Status({ o }: { o: AdminReportsOverview }) {
         </Row>
       </dl>
       {editing === "mode" && <ModeDialog current={o.mode} onClose={() => setEditing(null)} />}
-      {editing && editing !== "mode" && o.writers[editing] && <WriterDialog kind={editing} current={o.writers[editing]!} onClose={() => setEditing(null)} />}
+      {editing === "audience" && <AudienceDialog current={audience} onClose={() => setEditing(null)} />}
+      {editing && editing !== "mode" && editing !== "audience" && o.writers[editing] && <WriterDialog kind={editing} current={o.writers[editing]!} onClose={() => setEditing(null)} />}
     </Section>
   )
 }
@@ -239,6 +258,56 @@ function ModeDialog({ current, onClose }: { current: ReportsMode; onClose: () =>
   )
 }
 
+/** 誰參加盲測：兩個選項；開給所有人時，盲測的報告大家都能看、投票，有開推播的群組收到投票連結 */
+function AudienceDialog({ current, onClose }: { current: TrialAudience; onClose: () => void }) {
+  const put = usePutReportsConfig()
+  const [value, setValue] = useState<TrialAudience>(current)
+  return (
+    <Dialog open onOpenChange={(o) => !o && !put.isPending && onClose()}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>誰參加盲測</DialogTitle>
+          <DialogDescription>揭曉只有站方管理員能按。</DialogDescription>
+        </DialogHeader>
+        <div role="radiogroup" aria-label="誰參加盲測" className="flex flex-col border-t border-rule">
+          {(["admins", "all"] as const).map((a) => (
+            <label key={a} className="flex min-h-14 cursor-pointer items-start gap-3 border-b border-rule py-3">
+              <input type="radio" name="mr-audience" value={a} checked={value === a} onChange={() => setValue(a)} className="mt-1 size-4 accent-[var(--ink)]" />
+              <span>
+                <span className="block font-medium">{AUDIENCE_TEXT[a].label}</span>
+                <span className="block text-base text-ink">{AUDIENCE_TEXT[a].detail}</span>
+              </span>
+            </label>
+          ))}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            取消
+          </Button>
+          <Button
+            variant="sign"
+            disabled={value === current || put.isPending}
+            onClick={() =>
+              put.mutate(
+                { trial_audience: value },
+                {
+                  onSuccess: (r) => {
+                    toast.success(`盲測：${AUDIENCE_TEXT[r.trial_audience ?? value].label}`, r.notice ? { description: r.notice } : undefined)
+                    onClose()
+                  },
+                  onError: (err) => toast.error("沒有切換", { description: errText(err) }),
+                },
+              )
+            }
+          >
+            切換
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 /** 改一種報告的撰寫設定（模型只能 Opus 5.5／Sonnet 5.5，effort low 到 xhigh） */
 function WriterDialog({ kind, current, onClose }: { kind: ReportKind; current: WriterSetting; onClose: () => void }) {
   const put = usePutReportsConfig()
@@ -308,9 +377,14 @@ function Trial() {
         <EmptyState flush title="還沒有盲測的報告" description="試跑開始後，前 5 個交易日的盤前與盤後、第一份週報，每份各寫 A、B、C 三個版本。" />
       ) : (
         <>
+          {t.audience === "all" && t.voters && (
+            <p className="num border-b border-rule py-2.5 text-md text-ink-2" data-trial-voters="">
+              開給所有登入的人：會員 {t.voters.members} 人、管理員 {t.voters.admins} 人投過票。
+            </p>
+          )}
           <ul aria-label="盲測的報告">
             {t.reports.map((r) => (
-              <TrialRow key={r.report_id} r={r} revealed={!!t.reveal} />
+              <TrialRow key={r.report_id} r={r} revealed={!!t.reveal} everyone={t.audience === "all"} />
             ))}
           </ul>
           {t.reveal ? <RevealSummary reveal={t.reveal} /> : <RevealButton t={t} />}
@@ -320,7 +394,8 @@ function Trial() {
   )
 }
 
-function TrialRow({ r, revealed }: { r: TrialReport; revealed: boolean }) {
+/** `everyone`：盲測開給所有人（這時每份多寫大家的票；只給管理員時照舊只有「我的票」，除非已經有會員投過） */
+function TrialRow({ r, revealed, everyone }: { r: TrialReport; revealed: boolean; everyone: boolean }) {
   const vote = useVoteReport()
   const [note, setNote] = useState(r.my_vote?.note ?? "")
   const id = useId()
@@ -364,6 +439,7 @@ function TrialRow({ r, revealed }: { r: TrialReport; revealed: boolean }) {
           )
         })}
       </ul>
+      {r.votes && (everyone || LABELS.some((l) => r.votes!.members[l] > 0)) && <Votes votes={r.votes} />}
       <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
         <span className="text-md text-ink-2">我的票</span>
         <div role="group" aria-label={`${REPORT_KIND_LABEL[r.kind]} ${r.edition_label} 投給哪一個`} className="flex gap-1">
@@ -395,6 +471,24 @@ function TrialRow({ r, revealed }: { r: TrialReport; revealed: boolean }) {
         />
       </div>
     </li>
+  )
+}
+
+/** 大家的票：合計一行，下面一行會員、管理員分開（管理員與會員的票一起算） */
+function Votes({ votes }: { votes: { all: TrialVoteCounts; admins: TrialVoteCounts; members: TrialVoteCounts } }) {
+  const line = (c: TrialVoteCounts) => LABELS.map((l) => `${l} ${c[l]}`).join("・")
+  const total = LABELS.reduce((a, l) => a + votes.all[l], 0)
+  return (
+    <div className="num flex flex-col text-md" data-trial-votes="">
+      <p>
+        <span className="text-ink-2">大家的票</span> {total === 0 ? "還沒有人投" : line(votes.all)}
+      </p>
+      {total > 0 && (
+        <p className="text-sm text-ink-2">
+          會員 {line(votes.members)}；管理員 {line(votes.admins)}
+        </p>
+      )}
+    </div>
   )
 }
 
@@ -470,7 +564,10 @@ function RevealSummary({ reveal }: { reveal: TrialReveal }) {
                 {k.rows.map((r) => (
                   <tr key={writerText(r.writer)} className="border-b border-rule">
                     <td className="num h-11 pr-3">{writerText(r.writer)}</td>
-                    <td className="num pl-3 text-right">{r.votes}</td>
+                    <td className="num pl-3 text-right whitespace-nowrap">
+                      {r.votes}
+                      {!!r.votes_members && <span className="block text-sm text-ink-2">會員 {r.votes_members}</span>}
+                    </td>
                     <td className="num pl-3 text-right">{Math.round(r.on_time_rate * 100)}%</td>
                     <td className="num pl-3 text-right">{usd(r.avg_cost_usd)}</td>
                     <td className="num pl-3 text-right">{r.avg_seconds}</td>

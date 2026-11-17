@@ -1346,22 +1346,49 @@
 - 都要登入（401）。報告沒有個人資料：授權查看別人資產（`X-Forliosa-View-As`）時，讀取照常以登入者本人回應；`POST /market/reports/seen` 是寫入，回 403 `read_only`。
 - `visibility="admin"` 的報告（盲測、試跑模式、CLI 回補）只有站方管理員（`ADMIN_EMAILS`）看得到，其他人一律 404「找不到這份報告」。
 - 站方把模式切到「對全站公開」（`public`）以後新建的報告才是 `public`。試跑期間一般使用者 `status.available=false`、市場頁不出現「報告」分頁、群組頻道看不到三個開關、不推播。
+- **盲測開給所有登入的人**（產品負責人 2026-11-17：「我讓我的朋友們一起選」）：伺服器 `MREPORT_TRIAL_AUDIENCE=all`（預設 `admins`），或管理後台「盲測對象」切成「所有登入的人」
+  （存在 `market_report_config.trial_audience`，`null`＝照伺服器的值）。這時**只有盲測的報告**（`trial`）對所有登入的人打開：清單、`status.latest`、未讀都算進去，
+  `ReportSummary.trial`、`MarketReport.trial` 是 `true`；A／B／C 從下面三個盲測端點讀、投票。試跑模式其他只給管理員的報告（盲測做完以後、回補）照舊只有管理員。
+  揭曉只有管理員能按。`admins`（預設）時一切照舊：一般使用者 404，三個盲測端點對所有人（包括管理員）都是 404，不推播。
 - `MARKET_REPORTS_ENABLED=false`：`available:false`、清單空、單篇 404。
 
 ### 端點
 
 | 方法 | 路徑 | 回應 |
 |---|---|---|
-| GET | `/market/reports/status` | `{available, mode, unread, latest: ReportSummary[]}`；`mode` 只有管理員看得到（`trial`／`public`／`paused`），其他人 `null`；`latest` 是每種最新一份 |
+| GET | `/market/reports/status` | `{available, mode, unread, latest: ReportSummary[], trial_open}`；`mode` 只有管理員看得到（`trial`／`public`／`paused`），其他人 `null`；`latest` 是每種最新一份；`trial_open`：盲測開給所有登入的人 |
 | GET | `/market/reports?kind=&limit=20&cursor=` | `{items: ReportSummary[], next_cursor}`：新到舊，同一天依週報、盤後、盤前；`limit` 1–50；壞的游標 422 |
 | GET | `/market/reports/latest?kind=` | `MarketReport` 或 `null`（`kind` 省略＝任一種最新發布的） |
-| GET | `/market/reports/{id}?version=` | `MarketReport`（`version` 看舊版；盲測的 A／B／C 版本不從這裡給） |
+| GET | `/market/reports/{id}?version=` | `MarketReport`（`version` 看舊版；盲測的 A／B／C 版本不從這裡給：盲測的一份這裡是只有資料的那一版，`trial: true` 時頁面改讀下面三個端點） |
 | POST | `/market/reports/seen` | 204：記下「看過了」 |
+| GET | `/market/reports/{id}/trial` | 盲測開給所有人時：`TrialView`（下面）；其他情況 404「找不到這份報告」 |
+| GET | `/market/reports/{id}/variants/{A\|B\|C}` | 盲測的一個版本，**一般形式**的 `MarketReport`（和一般報告一樣沒有 `refs`、被拿掉的段、編號、報導摘錄；**沒有模型與花費**），多 `variant`、`trial: true`。三個版本的 `published_at` 都是第一個版本寫好的時間、`version` 都是資料版的號碼（各自寫完的時間與號碼會透露先後，等於透露是哪個設定）。還在寫 409 `variant_running`「這個版本還在寫，寫好再來看。」；不會有了 404「這個版本沒有寫成，看看另外兩個。」 |
+| PUT | `/market/reports/{id}/vote` | `{preferred: "A"\|"B"\|"C"}` → `TrialView`。每人每份一票，再投一次就是改票；那個版本還不能看 422（`details.field="preferred"`）；揭曉後 409 `trial_revealed`「盲測已經揭曉，不能再投票或改票。」；授權查看時 403 `read_only` |
 
-`ReportSummary`：`{id, kind, kind_label, edition_date, edition_label, title, has_ai, published_at, corrected, prev_session}`；
+`ReportSummary`：`{id, kind, kind_label, edition_date, edition_label, title, has_ai, published_at, corrected, prev_session, trial, my_vote}`；
 `prev_session` 只有盤前重點有值（前一個台股交易日，跳過休市日；群組頁的「昨日你的群組」用它，和盤前推播一致），其他是 `null`。
+`trial`：盲測開給所有人時的盲測報告（`title` 是資料版的規則標題，A／B／C 都一樣；`published_at` 是第一個版本寫好的時間）；`my_vote`：我投了哪一個（只有 `trial` 才有值）。
+
+`TrialView`：
+
+```jsonc
+{
+  "report_id": "mrp_…", "kind": "close", "kind_label": "盤後重點", "edition_date": "2026-11-16", "edition_label": "11/16（一）",
+  "variants": [{"label": "A", "state": "ready"}, {"label": "B", "state": "ready"}, {"label": "C", "state": "writing"}],  // ready | writing | none（下面）
+  "my_vote": "B",            // 還沒投 null
+  "can_vote": true,          // 揭曉前、至少一個版本 ready
+  "revealed": false,
+  "votes": null,             // 揭曉後：這一份 {"A": 3, "B": 5, "C": 1}（管理員與會員合計）
+  "result": null             // 揭曉後：{kind, kind_label, rows: [{writer: {model, effort}, votes}], top: [{model, effort}]（票數最多的，同票不只一個）, chosen: {model, effort} | null（後台存了之後用哪個）}
+}
+```
+
+揭曉後 `variants[].writer` 是 `{model, effort}`。揭曉前沒有任何模型、花費、票數。
+`state`：`ready` 可以看；`writing` 正在寫，或之後還會開始寫或重試（不是暫停、還沒到改推資料版的時間、報告專用的 key 能用、次數還沒用完）；
+`none` 不會有了（只發了資料版、預算不夠、次數用完、暫停、key 不能用、過了改推資料版的時間、截止了）。三個都不是 `ready` 時，頁面放資料版（`GET /market/reports/{id}`）。
 
 **未讀**：最新一份看得到的報告 `first_published_at` 晚於 `seen` 的時間；從沒按過 `seen` 的人，只有 24 小時內發布的才算未讀。前端打開「報告」分頁或報告頁 1.2 秒後呼叫 `seen`（唯讀查看時不呼叫）。
+盲測開給所有人時，盲測的報告從**第一個版本寫好**（`ai_published_at`，可以投票的時候）算，不是從資料版。
 
 ### `MarketReport`（數字是假的）
 
@@ -1423,12 +1450,12 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/market-reports/overview` | `{enabled, mode, writers: {premarket\|close\|weekly: {model, effort, source: "admin"\|"default", effective, tier} \| null（盲測中）}, trial_running, month: {label, spend_usd, budget_usd, tier: normal\|medium\|sonnet\|data_only}, trial: {spend_usd, budget_usd, days_done, days_total, weekly_done, finished, started_on, revealed_at}, key: {slot, status: ok\|cooldown\|disabled\|exhausted, note}（worker 寫下的報告專用 key 狀態；超過 15 分鐘沒更新時 note 多一句）, runs: [{id, report_id, kind, edition_date, edition_label, variant, purpose, attempt, status, step, started_at, seconds, stop_reason, fallback_used, problems, cost_usd, model, effort, tier, error}]（最近 20 次；揭曉前盲測的 `cost_usd`／`model`／`effort`／`tier` 是 `null`）, manual: {nyse_next, nyse_unverified, nyse_rows, macro_next_14d, earnings_next_14d}}`（形狀照前端 `AdminReportsOverview`） |
-| PUT | `/admin/market-reports/config` | `{mode?, writers?: {premarket?: {model, effort} \| null, …}}`；model 只能 `claude-opus-5-5`／`claude-sonnet-5-5`，effort `low`–`xhigh`；回應是 overview 加 `notice`（切到 `public` 時「之後的新報告會對所有登入的人公開…」，其他是 `null`） |
-| GET | `/admin/market-reports/trial` | `{days_done, days_total, weekly_done, finished, reports: [{report_id, kind, kind_label, edition_date, edition_label, closed, variants: [{label, status（還沒跑是 `pending`）, attempts, finished_at, on_time（還在寫或還沒跑是 null）, published, problems, metrics（TrialMetrics；還在寫是 null）, writer?（揭曉後）}], my_vote}], reveal: TrialReveal \| null（揭曉後）}`；揭曉前沒有花費與模型 |
+| GET | `/admin/market-reports/overview` | `{enabled, mode, trial_audience: admins\|all, trial_audience_source: admin\|default（後台切的／伺服器的 MREPORT_TRIAL_AUDIENCE）, writers: {premarket\|close\|weekly: {model, effort, source: "admin"\|"default", effective, tier} \| null（盲測中）}, trial_running, month: {label, spend_usd, budget_usd, tier: normal\|medium\|sonnet\|data_only}, trial: {spend_usd, budget_usd, days_done, days_total, weekly_done, finished, started_on, revealed_at}, key: {slot, status: ok\|cooldown\|disabled\|exhausted, note}（worker 寫下的報告專用 key 狀態；超過 15 分鐘沒更新時 note 多一句）, runs: [{id, report_id, kind, edition_date, edition_label, variant, purpose, attempt, status, step, started_at, seconds, stop_reason, fallback_used, problems, cost_usd, model, effort, tier, error}]（最近 20 次；揭曉前盲測的 `cost_usd`／`model`／`effort`／`tier` 是 `null`）, manual: {nyse_next, nyse_unverified, nyse_rows, macro_next_14d, earnings_next_14d}}`（形狀照前端 `AdminReportsOverview`） |
+| PUT | `/admin/market-reports/config` | `{mode?, writers?: {premarket?: {model, effort} \| null, …}, trial_audience?: "admins"\|"all"\|null}`；model 只能 `claude-opus-5-5`／`claude-sonnet-5-5`，effort `low`–`xhigh`；`trial_audience: null` 回到伺服器的值；回應是 overview 加 `notice`（切到 `public` 時「之後的新報告會對所有登入的人公開…」；盲測對象改了時「盲測開給所有登入的人：…」或「盲測只給站方管理員：…」；兩個都有時接在一起；其他是 `null`） |
+| GET | `/admin/market-reports/trial` | `{days_done, days_total, weekly_done, finished, reports: [{report_id, kind, kind_label, edition_date, edition_label, closed, variants: [{label, status（還沒跑是 `pending`）, attempts, finished_at, on_time（還在寫或還沒跑是 null）, published, problems, metrics（TrialMetrics；還在寫是 null）, writer?（揭曉後）}], my_vote, votes: {all, admins, members: {A, B, C}}}], audience: admins\|all, voters: {admins, members}（投過票的人數）, reveal: TrialReveal \| null（揭曉後）}`；揭曉前沒有花費與模型。`votes` 是大家的票（管理員與會員一起算，也分開列） |
 | GET | `/admin/market-reports/{id}/variants/{A\|B\|C}` | 那個版本的管理員形式：每句多 `refs`、被刪的段多 `dropped: {reasons}`、`validation: {first_problems, final_problems: [{code, path}], dropped: [{section, reasons}], revised, compliance_ran, mentions_anthropic, counts}`；揭曉後多 `writer: {model, effort}`。還在寫：409 `variant_running`；沒有產生（沒跑、只發了資料版）：404 |
-| PUT | `/admin/market-reports/{id}/vote` | `{preferred: "A"\|"B"\|"C", note?}` |
-| POST | `/admin/market-reports/trial/reveal` | `{force?}`；沒做完且沒有 force：409 `trial_not_done`「盲測還沒做完（n/10 份日報、週報 0/1）。」回應 TrialReveal：`{revealed_at, complete, kinds: [{kind（premarket／close／weekly）, kind_label, rows: [{writer: {model, effort}, reports, votes, policy_violations, subject_mismatches, inferred_dates, dropped_sections, on_time_rate, data_only, avg_cost_usd, avg_seconds, fallbacks, passed}], suggested: {model, effort} \| null}], note}`（建議＝過關裡平均花費最低的） |
+| PUT | `/admin/market-reports/{id}/vote` | `{preferred: "A"\|"B"\|"C", note?}`（和一般的投票是同一張票：每人每份一票，管理員的票記 `by_admin`）；揭曉後 409 `trial_revealed`（只能改同一個選擇的備註） |
+| POST | `/admin/market-reports/trial/reveal` | `{force?}`；沒做完且沒有 force：409 `trial_not_done`「盲測還沒做完（n/10 份日報、週報 0/1）。」回應 TrialReveal：`{revealed_at, complete, kinds: [{kind（premarket／close／weekly）, kind_label, rows: [{writer: {model, effort}, reports, votes, votes_admins, votes_members, policy_violations, subject_mismatches, inferred_dates, dropped_sections, on_time_rate, data_only, avg_cost_usd, avg_seconds, fallbacks, passed}], suggested: {model, effort} \| null}], note}`（建議＝過關裡平均花費最低的） |
 | POST | `/admin/market-reports/{id}/corrections` | `{note: 1–200 字, drop_sections?: [key]}`：新的一版 `edition="correction"`，頁首多「已更正（11/18 09:10）：…」，不推播。`drop_sections` 是段落的 key，另外可以有 `title`、`highlights`（AI 寫的換回規則寫的）；不認得的 key 422 `details.field="drop_sections"`；AI 文字全拿掉時 `has_ai`、免責與模型行改成資料版 |
 | POST | `/admin/market-reports/rebuild-data` | `{kind, edition_date}`：重建資料版（不呼叫 AI；過去的日期是回補，只有管理員看得到） |
 | GET／PUT／DELETE | `/admin/market-calendar/nyse`（`/{date}`） | 美股休市與提早收盤：`{name, kind: closed\|early_close, close_time_et?, source_url（NYSE 官網）, verified}` |
@@ -1440,7 +1467,8 @@
 ### 群組頻道的三個開關
 
 `GET/PUT/PATCH /groups/{id}/channels…` 的 Discord、Telegram 各多 `notify_premarket`（預設關）、`notify_close`（預設關）、`notify_weekly`（預設開，既有頻道也是開）；
-`Channels` 多 `market_reports_available`（報告對全站公開時才 true，前端才顯示三個開關）。只有群主能改。所有群組都能開（不分有沒有加值）。
+`Channels` 多 `market_reports_available`（報告對全站公開時才 true，前端才顯示三個開關）與 `market_reports_trial`（盲測開給所有人、模式還是試跑時 true：一樣顯示三個開關，
+推的是投票連結）。只有群主能改。所有群組都能開（不分有沒有加值）。
 
 推播只有文字與連結（不帶圖）：
 
@@ -1458,7 +1486,22 @@ AI 整理的部分可能有錯。Forliosa 只替你整理公開資訊與你自�
   這種頻道的日報推播延到 08:20，盤前送出後標成已送（不重複）；盤前一直沒送時，日報 08:20 自己送。
 - 市場週報：頻道開了週報時，群組週報延到週日 21:30；18:00 的市場週報推播接上「你的群組上週（11/16–11/20）」，週報那一列標成已送。週報開關關著的頻道，群組週報照舊週六送。
 - 最後一行是全站的免責（`notifications.signed(…, ai=True)`；只有資料的版本只有 `disclaimer.SHORT`），只出現一次：接進來的群組日報、週報自己的最後一行拿掉。
-- 不推：更正、補表、盲測、回補的報告，以及任何個人化內容。Discord 1,900 字、Telegram 4,000 字以內（含最後一行；太長時先縮群組段落，再縮重點）。
+- 不推：更正、補表、回補的報告，以及任何個人化內容；盲測的報告只在下面的情形推。Discord 1,900 字、Telegram 4,000 字以內（含最後一行；太長時先縮群組段落，再縮重點）。
+
+**盲測開給所有人時的推播**（模式 `trial`、`MREPORT_TRIAL_AUDIENCE=all` 或後台切成所有人）：盲測的每一份推**一則**，推給那一種開關開著的頻道（同樣的 outbox、
+`dedupe_key=mreport:{report_id}:{group_id}:{channel}`，一個頻道一份只排一次）。推播時間到了以後，A／B／C 有兩個能看、而且沒有還在寫的就推；到了改推資料版的時間
+（盤前 08:15、盤後 17:30、週報 21:00）只要有兩個能看就推；不到兩個就不推。送出前再檢查一次（還是試跑、還開給所有人、頻道與開關還開著），否則 `cancelled`（`trial_closed`／`channel_off`）。
+不接群組的日報、週報（那兩種照平常自己送）。不放任何一個版本的重點：三個版本裡只引用一個（例如 A）等於先讓大家看到它，不公平；只寫資料版的規則標題與日期。
+
+```
+【盤後重點 11/16（一）】AI 依公開資料整理，報告本文人人相同，不是投資建議。
+加權指數 ▼6.03%，收 41,040.08 點
+盲測中：三種寫法，看完選一個。
+投票：https://forliosa.trade/market/reports/mrp_…
+Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。
+```
+
+沒有設定 `FRONTEND_URL`（也不是開發環境）時，連結那一行是「到 Forliosa 的「市場 → 報告」投票。」。
 
 ## 討論串（2026-11-13）
 

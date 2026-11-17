@@ -8,6 +8,7 @@ import type {
   AccountInput,
   ReportKind,
   ReportsStatus,
+  ReportVariant,
   Briefing,
   ChipsRange,
   FinancialsPeriod,
@@ -65,6 +66,9 @@ export const qk = {
   reportLatest: (kind?: ReportKind) => ["market", "reports", "latest", kind ?? "any"] as const,
   report: (id: string, version?: number) => ["market", "reports", "one", id, version ?? "current"] as const,
   reportList: (kind?: ReportKind) => ["market", "reports", "list", kind ?? "all"] as const,
+  // 盲測開給所有人時：一份的 A／B／C 狀態與我的票、一個版本的全文
+  reportTrial: (id: string) => ["market", "reports", "trial", id] as const,
+  reportVariant: (id: string, label: ReportVariant) => ["market", "reports", "variant", id, label] as const,
 }
 
 /** 後端每頁最多 200 筆：依 cursor 一頁一頁讀，最多讀到 `max` 筆（回傳是否還有更多） */
@@ -444,6 +448,27 @@ export function useMarketReports(kind?: ReportKind, enabled = true) {
     getNextPageParam: (last) => last.next_cursor,
     placeholderData: keepPreviousData,
     staleTime: 60_000,
+  })
+}
+/** 盲測的一份：A／B／C 哪些能看、我的票（盲測開給所有人時；否則 404，不重試） */
+export function useMarketReportTrial(id: string, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.reportTrial(id), queryFn: () => api.getMarketReportTrial(id), staleTime: 30_000, refetchInterval: 2 * 60_000, retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 1 })
+}
+/** 盲測的一個版本（一般形式）；還在寫是 409、沒有寫成是 404 */
+export function useMarketReportVariant(id: string, label: ReportVariant, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.reportVariant(id, label), queryFn: () => api.getMarketReportVariant(id, label), staleTime: 5 * 60_000, retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 1 })
+}
+/** 投票／改票：回來的就是這一份最新的狀態；清單與「每種最新一份」上的「你選了」也重新讀 */
+export function useVoteMarketReport(id: string) {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (preferred: ReportVariant) => api.voteMarketReport(id, preferred),
+    onSuccess: (t) => {
+      qc.setQueryData(qk.reportTrial(id), t)
+      void qc.invalidateQueries({ queryKey: qk.reportsStatus })
+      void qc.invalidateQueries({ queryKey: ["market", "reports", "list"] })
+      void qc.invalidateQueries({ queryKey: ["admin", "market-reports", "trial"] }) // 管理員也是投票的人：後台的票數
+    },
   })
 }
 /** 看過了：未讀的小圓點馬上消失（伺服器記下來，別的裝置也不再標未讀）；查看別人的資產時不呼叫 */

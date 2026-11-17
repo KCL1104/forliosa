@@ -1641,7 +1641,9 @@ class MarketReportRun(Base):
 
 
 class MarketReportVote(Base):
-    """A site admin's blind-test pick for one edition (A/B/C) and an optional note."""
+    """A blind-test pick for one edition (A/B/C): one per user and edition, changeable until the reveal. Site admins
+    always vote (with an optional note); every signed-in user does too while the blind test is open to all
+    (``MREPORT_TRIAL_AUDIENCE=all``)."""
 
     __tablename__ = "market_report_votes"
 
@@ -1649,6 +1651,8 @@ class MarketReportVote(Base):
     user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     preferred: Mapped[str] = mapped_column(String(1))
     note: Mapped[str] = mapped_column(Text, default="")
+    # The voter was a site admin when voting (the admin page shows admins' and members' votes apart; counted together)
+    by_admin: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     created_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)
 
@@ -1664,6 +1668,8 @@ class MarketReportConfig(Base):
     writers: Mapped[dict] = mapped_column(JSON, default=dict)  # {"premarket": {"model","effort"} | None, …}
     trial_started_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     revealed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    # who takes part in the blind test: admins | all; null = MREPORT_TRIAL_AUDIENCE
+    trial_audience: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # the reports' own key slot as the worker last saw it: {"slot", "status", "note", "checked_at"} (never a key)
     key_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)
     updated_by: Mapped[str | None] = mapped_column(String(32), nullable=True)

@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from forliosa.api.schemas import StrictModel
 
 Kind = Literal["premarket", "close", "weekly"]
+Label = Literal["A", "B", "C"]
 
 
 class _Out(BaseModel):
@@ -215,6 +216,8 @@ class MarketReport(_Out):
     notes: list[str] = Field(default_factory=list)
     status_line: str | None = None
     is_demo: bool = False
+    trial: bool = Field(default=False, description="盲測開給所有人時的一份：頁面顯示 A／B／C 與投票，不是這一版")
+    variant: Label | None = Field(default=None, description="盲測的一個版本（/variants/{label}）")
 
 
 class ReportSummary(_Out):
@@ -229,6 +232,8 @@ class ReportSummary(_Out):
     corrected: bool
     # premarket: the previous Taiwan session (holidays skipped), the day 「昨日你的群組」 is about; else null
     prev_session: str | None = None
+    trial: bool = Field(default=False, description="盲測（三種寫法，大家一起選）的一份；只在盲測開給所有人時")
+    my_vote: Label | None = Field(default=None, description="盲測的一份：我投了哪一個（還沒投是 null）")
 
 
 class ReportsStatus(_Out):
@@ -236,6 +241,51 @@ class ReportsStatus(_Out):
     mode: Literal["trial", "public", "paused"] | None = None
     unread: bool
     latest: list[ReportSummary]
+    trial_open: bool = Field(default=False, description="盲測開給所有登入的人（MREPORT_TRIAL_AUDIENCE=all）")
+
+
+class WriterOut(_Out):
+    model: str
+    effort: str
+
+
+class TrialVariantState(_Out):
+    label: Label
+    state: Literal["ready", "writing", "none"] = Field(description="ready 可以看；writing 還在寫；none 這個版本不會有")
+    writer: WriterOut | None = Field(default=None, description="揭曉後才有")
+
+
+class TrialResultRow(_Out):
+    writer: WriterOut
+    votes: int
+
+
+class TrialResult(_Out):
+    kind: Kind
+    kind_label: str
+    rows: list[TrialResultRow]
+    top: list[WriterOut] = Field(description="票數最多的設定（同票時不只一個；沒有人投是空的）")
+    chosen: WriterOut | None = Field(description="之後的報告用哪個設定（後台存了才有）")
+
+
+class TrialView(_Out):
+    """``GET /market/reports/{id}/trial``：盲測的一份（所有登入的人；盲測開給所有人時）。"""
+
+    report_id: str
+    kind: Kind
+    kind_label: str
+    edition_date: str
+    edition_label: str
+    variants: list[TrialVariantState]
+    my_vote: Label | None = None
+    can_vote: bool
+    revealed: bool
+    votes: dict[str, int] | None = Field(default=None, description="揭曉後：這一份 A／B／C 各幾票（管理員與會員合計）")
+    result: TrialResult | None = Field(default=None, description="揭曉後：這一種報告每個設定的票數與結果")
+
+
+class MemberVoteIn(StrictModel):
+    preferred: Label
 
 
 class ReportsPage(_Out):
@@ -262,6 +312,8 @@ class WritersIn(StrictModel):
 class ReportsConfigIn(StrictModel):
     mode: Literal["trial", "public", "paused"] | None = None
     writers: WritersIn | None = None
+    # who takes part in the blind test; null = back to MREPORT_TRIAL_AUDIENCE
+    trial_audience: Literal["admins", "all"] | None = None
 
 
 class VoteIn(StrictModel):
