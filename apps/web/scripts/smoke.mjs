@@ -31,8 +31,9 @@ const ROUTES = [
   ["/", "總資產"],
   ["/?view=transactions", "稅費"],
   ["/?view=dividends", "已入帳"],
-  // 美股也有收盤價（Databento，2026-11-15）：含美股的「全部帳戶」照常算得出績效
-  ["/?view=performance", "績效從 2026/06/01 收盤開始算"],
+  // 美股也有收盤價（Databento，2026-11-15）：含美股的「全部帳戶」照常算得出績效。
+  // 區間和首頁的總資產走勢共用（2026-11-17，預設 1 月，不會碰到存檔起點），所以一打開沒有「績效從 … 開始算」
+  ["/?view=performance", "最大回撤"],
   ["/stock/2330.TW", "近四季 EPS"],
   ["/stock/2330.TW?tab=valuation", "各倍數對應的股價"],
   // 友達虧損的年份在商用模式的存檔起點之前：用示範資料（personal）看「本益比沒有意義」
@@ -587,8 +588,10 @@ await check("績效：含美股的「全部帳戶」照常算（不自動改看�
   // 美股也有收盤價（Databento，2026-11-15）：一打開就是「全部帳戶」的績效，沒有「只算…」那一行、不提美股沒有報價
   await page.goto(base + "/?view=performance", { waitUntil: "networkidle" })
   await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
-  await page.getByText(/績效從 2026\/06\/01 收盤開始算，之前沒有資料/).first().waitFor()
   await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
+  // 區間和首頁的總資產走勢共用（預設 1 月）：選「全部」才碰到存檔起點；這一項最後換回 1 月（選擇記在這台瀏覽器）
+  await page.getByRole("radiogroup", { name: "績效區間" }).getByRole("radio", { name: "全部" }).click()
+  await page.getByText(/績效從 2026\/06\/01 收盤開始算，之前沒有資料/).first().waitFor()
   await page.getByRole("combobox", { name: "績效比較基準" }).waitFor()
   const account = page.getByRole("combobox", { name: "帳戶" })
   if (!/^全部帳戶/.test(((await account.textContent()) ?? "").trim())) throw new Error(`performance switched account on its own: ${await account.textContent()}`)
@@ -623,6 +626,7 @@ await check("績效：含美股的「全部帳戶」照常算（不自動改看�
   if (await page.locator("main").getByText(/可商用|起存檔|資料累積中：/).count()) throw new Error("performance notes still talk about licensing or archiving")
   await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
   await page.getByRole("combobox", { name: "績效比較基準" }).waitFor()
+  await page.getByRole("radiogroup", { name: "績效區間" }).getByRole("radio", { name: "1月" }).click()
 })
 await check("扣款日：AI 面板提出定期定額草稿，簽名入帳後不再提出", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
@@ -3387,6 +3391,112 @@ await check("匯入對帳單：沒開放的帳號（不是站方管理員）沒�
     await p.getByRole("dialog", { name: "匯入對帳單" }).getByText("還沒有券商帳戶，先到設定建立一個。").waitFor({ timeout: 8000 })
   })
 })
+
+// ── 總資產走勢（方案 B，2026-11-17）────────────────────────────
+// 主數字正下方、和主欄一樣寬：讀數（兩行）→ 圖 → 區間。滑過不改大數字；歷史短時不放區間；和績效分段共用一排區間。
+// `?hist=N` 只留最後 N 個收盤（mock，記在 sessionStorage；每一項用新的 context）。
+{
+  const trendRegion = (p) => p.getByRole("region", { name: "總資產走勢" })
+  const trendChart = (p) => trendRegion(p).getByRole("group", { name: /^總資產走勢：/ })
+  await check("總資產走勢：大數字下方滿版、預設近 1 個月、區間只放撐得起來的（沒有 1日）；滑過讀數換成那一天、大數字不變、讀數高度不變；換區間記住；不橫向捲動", async () => {
+    await fresh(DESKTOP, async (p) => {
+      await p.goto(base + "/?hist=all", { waitUntil: "networkidle" })
+      const region = trendRegion(p)
+      await region.waitFor({ timeout: 8000 })
+      const chips = region.getByRole("radiogroup", { name: "走勢區間" })
+      const labels = await chips.getByRole("radio").allTextContents()
+      if (labels.join("・") !== "5日・1月・3月・全部") throw new Error(`trend ranges: ${labels.join("・")}`)
+      if ((await chips.getByRole("radio", { name: "1月" }).getAttribute("aria-checked")) !== "true") throw new Error("1M is not the default")
+      // 和主欄一樣寬（主欄的寬度＝本週事項那一列）
+      const [rw, ww] = [await region.boundingBox(), await p.getByRole("link", { name: /^本週 \d+ 件事/ }).boundingBox()]
+      if (Math.abs(rw.width - ww.width) > 1) throw new Error(`trend ${rw.width}px vs main column ${ww.width}px`)
+      const svg = await region.getByRole("img").boundingBox()
+      if (Math.abs(svg.height - 160) > 1) throw new Error(`desktop chart height ${svg.height}`)
+      const big = await p.locator(".hero-figure").textContent()
+      const reading = region.locator(":scope > div").first()
+      const h0 = (await reading.boundingBox()).height
+      const box = await trendChart(p).boundingBox()
+      await p.mouse.move(box.x + box.width * 0.5, box.y + box.height / 2)
+      await region.getByText(/^\d+\/\d+（.）收盤$/).waitFor()
+      await region.getByText(/^投入本金 NT\$[\d,]+$/).waitFor()
+      if ((await reading.boundingBox()).height !== h0) throw new Error("the reading changed height on hover")
+      if ((await p.locator(".hero-figure").textContent()) !== big) throw new Error("the big number changed on hover")
+      await p.mouse.move(box.x + box.width * 0.5, box.y - 200)
+      await region.getByText("近 1 個月").waitFor()
+      await chips.getByRole("radio", { name: "3月" }).click()
+      await region.getByText("近 3 個月").waitFor()
+      await p.reload({ waitUntil: "networkidle" })
+      await trendRegion(p).getByText("近 3 個月").waitFor({ timeout: 8000 })
+      if ((await overflowX(p)) > 0) throw new Error("the page scrolls sideways")
+    })
+  })
+  await check("總資產走勢（手機）：圖高 120px、按住橫拖逐點看、直向照常捲動；區間按鈕 44px；不橫向捲動", async () => {
+    await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+      await p.goto(base + "/?hist=all", { waitUntil: "networkidle" })
+      const region = trendRegion(p)
+      await region.waitFor({ timeout: 8000 })
+      const svg = await region.getByRole("img").boundingBox()
+      if (Math.abs(svg.height - 120) > 1) throw new Error(`phone chart height ${svg.height}`)
+      if ((await trendChart(p).evaluate((el) => getComputedStyle(el).touchAction)) !== "pan-y") throw new Error("the chart blocks vertical scrolling")
+      const heights = await region.getByRole("radio").evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))
+      if (heights.some((h) => h < 44)) throw new Error(`range chips under 44px: ${heights.join(", ")}`)
+      await trendChart(p).evaluate((el) => el.scrollIntoView({ block: "center" }))
+      const box = await trendChart(p).boundingBox()
+      const cdp = await p.context().newCDPSession(p)
+      const y = box.y + box.height / 2
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: box.x + box.width * 0.8, y }] })
+      for (let i = 1; i <= 6; i++) await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: box.x + box.width * (0.8 - i * 0.06), y }] })
+      await region.getByText(/^\d+\/\d+（.）收盤$/).waitFor({ timeout: 4000 })
+      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] })
+      await region.getByText("近 1 個月").waitFor()
+      if ((await overflowX(p)) > 0) throw new Error("the page scrolls sideways")
+    })
+  })
+  await check("總資產走勢（歷史短）：2 個收盤每天一個圓點、不放區間、寫說明＋目前幾個收盤日；1 個收盤不畫、手機也看得到原因（44px）", async () => {
+    await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+      await p.goto(base + "/?hist=2", { waitUntil: "networkidle" })
+      const region = trendRegion(p)
+      await region.waitFor({ timeout: 8000 })
+      if (await region.getByRole("radiogroup").count()) throw new Error("range chips with 2 closes")
+      if ((await region.locator('[data-point="close"]').count()) !== 2) throw new Error("no dot on every close")
+      await region.getByText(/目前 2 個收盤日/).waitFor()
+      await region.getByText(/績效從 \d{4}\/\d{2}\/\d{2} 收盤開始算/).waitFor()
+    })
+    await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+      await p.goto(base + "/?hist=1", { waitUntil: "networkidle" })
+      const link = p.getByRole("link", { name: "總資產走勢：資料還不夠" })
+      await link.waitFor({ timeout: 8000 })
+      const b = await link.boundingBox()
+      if (b.height < 44) throw new Error(`reason link ${b.height}px`)
+      if (await trendRegion(p).count()) throw new Error("a chart with 1 close")
+    })
+  })
+  await check("總資產走勢（隱私模式）：照樣畫線、沒有金額刻度，讀數遮金額、% 照常", async () => {
+    await fresh(DESKTOP, async (p) => {
+      await p.goto(base + "/?hist=all", { waitUntil: "networkidle" })
+      await trendRegion(p).waitFor({ timeout: 8000 })
+      await p.getByRole("button", { name: "隱私模式：遮蔽金額" }).first().click()
+      const ticks = await trendRegion(p).getByRole("img").locator("text").allTextContents()
+      if (ticks.some((t) => /萬|億/.test(t))) throw new Error(`money ticks in privacy mode: ${ticks.join(" ")}`)
+      const label = await trendRegion(p).getByRole("img").getAttribute("aria-label")
+      if (/NT\$/.test(label)) throw new Error(`amounts in the chart label: ${label}`)
+      await trendRegion(p).getByText(/%/).first().waitFor()
+      await p.getByRole("button", { name: /^隱私模式開啟中/ }).first().click()
+    })
+  })
+  await check("總資產走勢與績效分段：整頁只有一排區間（在績效分段的工具列，沒有 1日）、上面的走勢跟著換；績效分段沒有「市值與投入本金」", async () => {
+    await fresh(DESKTOP, async (p) => {
+      await p.goto(base + "/?view=performance&hist=all", { waitUntil: "networkidle" })
+      await p.getByText("最大回撤").first().waitFor({ timeout: 8000 })
+      if ((await p.getByRole("radiogroup").count()) !== 1) throw new Error(`${await p.getByRole("radiogroup").count()} rows of range chips`)
+      const chips = p.getByRole("radiogroup", { name: "績效區間" })
+      if (await chips.getByRole("radio", { name: "1日" }).count()) throw new Error("1D is still offered")
+      if (await p.getByText("市值與投入本金").count()) throw new Error("the duplicate value chart is still there")
+      await chips.getByRole("radio", { name: "3月" }).click()
+      await trendRegion(p).getByText("近 3 個月").waitFor()
+    })
+  })
+}
 
 await browser.close()
 if (errors.length) {

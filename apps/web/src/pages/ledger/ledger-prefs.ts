@@ -1,7 +1,8 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
+import { DEFAULT_TREND_RANGE, type TrendRange } from "@/lib/trend-range"
 
-/** 帳本的自訂（取代「簡易版／專業版」）：欄位、走勢圖、釘選持股、手機持倉列的第二行。存在這台瀏覽器。 */
+/** 帳本的自訂（取代「簡易版／專業版」）：欄位、走勢圖與區間、釘選持股、手機持倉列的第二行。存在這台瀏覽器。 */
 export type HoldingColumn = "price" | "day_pct" | "day_change" | "pnl" | "value" | "avg_cost" | "unrealized" | "unrealized_pct"
 
 export const COLUMN_LABEL: Record<HoldingColumn, string> = {
@@ -56,6 +57,9 @@ interface LedgerPrefs {
   /** 手機持倉列右下那一行看今日漲跌還是報酬率（見 `PhoneLine`） */
   phoneLine: PhoneLine
   togglePhoneLine: () => void
+  /** 總資產走勢（和績效分段共用）上次選的區間 */
+  trendRange: TrendRange
+  setTrendRange: (r: TrendRange) => void
   setShowClosed: (v: boolean) => void
   setColumns: (c: HoldingColumn[]) => void
   toggleColumn: (c: HoldingColumn) => void
@@ -72,6 +76,8 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       pinned: [],
       showClosed: false,
       phoneLine: "day",
+      trendRange: DEFAULT_TREND_RANGE,
+      setTrendRange: (trendRange) => set({ trendRange }),
       setShowClosed: (showClosed) => set({ showClosed }),
       // 存的值不認得時（手改過、以後的版本）當成今日漲跌，按一下換成報酬率
       togglePhoneLine: () => set((s) => ({ phoneLine: s.phoneLine === "pnl" ? "day" : "pnl" })),
@@ -90,10 +96,17 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
     {
       name: "forliosa:ledger",
       // 第 2 版（2026-11-16）：預設欄位多了「損益」。
-      // 之後加的 phoneLine（2026-11-17）不用升版：存的設定裡沒有這一項時，讀回來用預設（persist 把存的值蓋在預設上），其他設定照舊
+      // 之後加的 phoneLine、trendRange（2026-11-17）不用升版：存的設定裡沒有這兩項時，讀回來用預設（persist 把存的值蓋在預設上），其他設定照舊
       version: 2,
       migrate: migrateLedgerPrefs as (persisted: unknown, version: number) => LedgerPrefs,
-      partialize: ({ columns, showTrend, pinned, showClosed, phoneLine }) => ({ columns, showTrend, pinned, showClosed, phoneLine }),
+      partialize: ({ columns, showTrend, pinned, showClosed, phoneLine, trendRange }) => ({
+        columns,
+        showTrend,
+        pinned,
+        showClosed,
+        phoneLine,
+        trendRange,
+      }),
       storage: createJSONStorage(() => localStorage),
     },
   ),

@@ -3,7 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { lazy, Suspense, useEffect } from "react"
 import { api } from "@/api"
-import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
+import { useHoldings, useSummary, useUpcoming } from "@/api/queries"
 import type { PortfolioSummary } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { latestPendingDraftId, usePendingCount } from "@/ai/store"
@@ -11,7 +11,6 @@ import { Masked } from "@/components/finance"
 import { DateCell } from "@/components/date-cell"
 import { DemoTag } from "@/components/section"
 import { Segmented } from "@/components/segmented"
-import { Sparkline } from "@/components/sparkline"
 import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,7 +20,6 @@ import { usePrefs } from "@/stores/prefs"
 import type { LedgerSearch, LedgerView } from "@/router"
 import { CustomizeButton } from "./CustomizeButton"
 import { HoldingsView } from "./HoldingsView"
-import { useLedgerPrefs } from "./ledger-prefs"
 import { useLedgerCounts } from "./use-ledger-counts"
 import { useLedgerClose } from "@/hooks/use-close"
 import { SourcesFooter } from "@/components/data-notes"
@@ -29,8 +27,8 @@ import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
 import { PlainLink } from "@/app/links"
 import { PageFrame } from "@/app/PageFrame"
-import { trendMissingReason } from "./trend-reason"
 import { usePageTitle } from "@/app/page-title"
+import { HeroTrend } from "./HeroTrend"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -46,7 +44,7 @@ const SEGMENT_KEYS: readonly Segment[] = ["holdings", "records", "performance"]
 const segmentOf = (view: LedgerView): Segment => (view === "transactions" || view === "dividends" ? "records" : view)
 const viewOf = (segment: Segment): LedgerView => (segment === "records" ? "transactions" : segment)
 
-/** 帳本（首頁）：主數字 → 本週事項 → 分段（持倉・紀錄・績效）→ 清單 */
+/** 帳本（首頁）：主數字 → 總資產走勢 → 本週事項 → 分段（持倉・紀錄・績效）→ 清單 */
 export function LedgerPage() {
   const search = useSearch({ from: "/" }) as LedgerSearch
   const navigate = useNavigate()
@@ -85,8 +83,10 @@ export function LedgerPage() {
       {summary.isError ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : (
-        <Hero summary={summary.data} view={view} />
+        <Hero summary={summary.data} />
       )}
+      {/* 總資產走勢：主數字正下方、和主欄一樣寬（產品負責人 2026-11-17 選方案 B）；「自訂」可以整塊關掉 */}
+      {summary.data && <HeroTrend view={view} />}
       <WeekLine />
 
       <div className="mt-5 flex items-center gap-4 lg:mt-11">
@@ -222,100 +222,51 @@ function Delta({ amount, pct, className }: { amount: number; pct: number | null;
   )
 }
 
-function useTrend() {
-  const perf = usePerformance("1M")
-  const values = (perf.data?.series ?? []).map((p) => p.market_value)
-  return { values, loading: perf.isLoading, isError: perf.isError, notes: perf.data?.notes ?? [] }
-}
-
-/** 走勢畫不出來、而且後端說了原因時：右半邊一行說明，連到績效（那裡有完整說明，以及只看每一檔都有收盤價的帳戶）。 */
-function TrendMissing({ reason }: { reason: string }) {
-  return (
-    <PlainLink
-      to="/"
-      search={{ view: "performance" }}
-      className="mb-1.5 shrink-0 text-right text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink max-lg:hidden"
-    >
-      近 1 個月走勢：{reason}
-    </PlainLink>
-  )
-}
-
 /**
  * 主數字（手機與桌面同一套）：標籤一行 → 總資產大字 → 今日、總損益（含股利）。沒有卡片、沒有展開鈕。
- * 桌面：今日與總損益排成一行，右邊是近 1 個月走勢（畫不出來時是一行原因）。
- * 手機：兩行、標籤對齊成一欄；有走勢時是第三行。
+ * 桌面：今日與總損益排成一行；手機：兩行、標籤對齊成一欄。走勢在下面（`HeroTrend`），滑過走勢時這裡的數字不變。
  */
-function Hero({ summary, view }: { summary?: PortfolioSummary; view: LedgerView }) {
-  const showTrend = useLedgerPrefs((s) => s.showTrend)
+function Hero({ summary }: { summary?: PortfolioSummary }) {
   const holdings = useHoldings()
-  const trend = useTrend()
-  const privacy = usePrefs((s) => s.privacyMode)
   // 沒有盤中即時報價：總資產旁寫的是收盤價的日期（上市、上櫃日期不同時分開寫）；盤中多半句「盤中不更新」，
   // 收盤價還沒進來時多一句預計幾點更新。「今日」只在每個市場的收盤價都是今天的時候寫。
   // 只有美股有價格時是紐約的交易日（「11/13 收盤（美東）」「11/13」），不套台股的說明
   const close = useLedgerClose()
   if (!summary) return <HeroSkeleton />
-  const up = (trend.values.at(-1) ?? 0) >= (trend.values[0] ?? 0)
-  const missingReason = trendMissingReason(trend.notes)
-  const hasTrend = showTrend && trend.values.length > 1
-  const trendLabel = `近 1 個月總資產走勢：${up ? "上升" : "下降"}`
   // 手機：dt／dd 直接是格線的格子（display: contents），標籤一欄、數字一欄；桌面：一項一組排成一行
   const item = "contents lg:flex lg:items-baseline lg:gap-2.5"
   return (
-    <div className="flex items-end justify-between gap-8 max-lg:mt-1.5">
-      <div className="min-w-0">
-        <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
-          <b className="text-base font-medium text-ink">總資產</b>
-          <span className="num whitespace-nowrap">{close.label}</span>
-          {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
-          {/* 在等的收盤價預計幾點進來（只在需要時）：桌面接在日期後面（「11/12 收盤・今天的預計下午 2:00–2:30 更新」），
-              手機自己一行，日期那一行不會被擠到換行 */}
-          {close.note && (
-            <span className="num whitespace-nowrap max-sm:basis-full sm:-ml-2.5">
-              <span aria-hidden className="max-sm:hidden">
-                ・
-              </span>
-              {close.note}
+    <div className="min-w-0 max-lg:mt-1.5">
+      <p className="flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm text-ink-2">
+        <b className="text-base font-medium text-ink">總資產</b>
+        <span className="num whitespace-nowrap">{close.label}</span>
+        {summary.is_demo && <DemoTag title={demoTitle(holdings.data)} />}
+        {/* 在等的收盤價預計幾點進來（只在需要時）：桌面接在日期後面（「11/12 收盤・今天的預計下午 2:00–2:30 更新」），
+            手機自己一行，日期那一行不會被擠到換行 */}
+        {close.note && (
+          <span className="num whitespace-nowrap max-sm:basis-full sm:-ml-2.5">
+            <span aria-hidden className="max-sm:hidden">
+              ・
             </span>
-          )}
-        </p>
-        <BigTotal value={summary.market_value} />
-        <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3.5 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2">
-          <div className={item}>
-            <dt className="num text-sm text-ink-2">{close.day}</dt>
-            <dd className="text-lg font-medium">
-              <Delta amount={summary.day_change} pct={summary.day_change_pct} />
-            </dd>
-          </div>
-          <div className={item}>
-            <dt className="text-sm text-ink-2">總損益（含股利）</dt>
-            <dd className="text-lg font-medium">
-              <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
-            </dd>
-          </div>
-          {hasTrend && !privacy && (
-            <div className="contents lg:hidden">
-              <dt className="text-sm text-ink-2">近 1 個月</dt>
-              <dd className="self-center">
-                <Sparkline values={trend.values} baseline={trend.values[0]} width={120} height={28} tone="ink" dot label={trendLabel} />
-              </dd>
-            </div>
-          )}
-        </dl>
-      </div>
-      {/* 走勢畫不出來的原因連到績效；已經在績效分段時不重複（那裡有完整的說明） */}
-      {showTrend && view !== "performance" && trend.values.length < 2 && !trend.loading && !trend.isError && missingReason && <TrendMissing reason={missingReason} />}
-      {hasTrend && (
-        <figure className="mb-1.5 text-right max-lg:hidden" aria-label={trendLabel}>
-          {privacy ? (
-            <div className="grid h-10 w-[168px] place-items-center text-sm text-ink-2">走勢已隱藏</div>
-          ) : (
-            <Sparkline values={trend.values} baseline={trend.values[0]} width={168} height={40} tone="ink" dot label={trendLabel} />
-          )}
-          <figcaption className="mt-1.5 text-sm text-ink-2">近 1 個月</figcaption>
-        </figure>
-      )}
+            {close.note}
+          </span>
+        )}
+      </p>
+      <BigTotal value={summary.market_value} />
+      <dl className="mt-2 grid grid-cols-[auto_minmax(0,1fr)] items-baseline gap-x-3 gap-y-1 lg:mt-3.5 lg:flex lg:flex-wrap lg:gap-x-12 lg:gap-y-2">
+        <div className={item}>
+          <dt className="num text-sm text-ink-2">{close.day}</dt>
+          <dd className="text-lg font-medium">
+            <Delta amount={summary.day_change} pct={summary.day_change_pct} />
+          </dd>
+        </div>
+        <div className={item}>
+          <dt className="text-sm text-ink-2">總損益（含股利）</dt>
+          <dd className="text-lg font-medium">
+            <Delta amount={summary.total_pnl} pct={summary.total_return_pct} />
+          </dd>
+        </div>
+      </dl>
     </div>
   )
 }

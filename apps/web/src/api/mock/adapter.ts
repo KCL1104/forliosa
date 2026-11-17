@@ -5,6 +5,7 @@ import {
   type ForliosaApi,
   type History,
   type HistoryRange,
+  type Performance,
   type Preferences,
   type Quote,
   type Transaction,
@@ -116,6 +117,67 @@ export function readMockTerms(): MockOptions["terms"] {
   }
 }
 
+/**
+ * mock 的帳本歷史長短（總資產走勢與績效）：網址 `?hist=N` 只留最後 N 個收盤（和正式環境存檔剛開始時一樣：
+ * 「績效從 … 收盤開始算，之前沒有資料」；N = 1 是算不出來），`?hist=all` 切回全部。記在 sessionStorage。
+ */
+export function readMockHistory(): number | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("hist")
+    if (fromUrl === "all") window.sessionStorage.removeItem("forliosa:mock-hist")
+    else if (fromUrl && /^\d+$/.test(fromUrl) && Number(fromUrl) > 0) window.sessionStorage.setItem("forliosa:mock-hist", fromUrl)
+    const saved = Number(window.sessionStorage.getItem("forliosa:mock-hist") ?? "")
+    return saved > 0 ? saved : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * 只留 `first` 那天以後的收盤（`?hist=N`）：和後端存檔晚於持股期間時一樣，第一點是基準收盤（twr_index 1），
+ * 說明換成「績效從 … 收盤開始算，之前沒有資料」；剩不到兩點時算不出來（series 空的＋「資料從 … 開始」）。
+ */
+export function limitHistory(p: Performance, first: string): Performance {
+  const series = p.series.filter((x) => x.t >= first)
+  if (series.length === p.series.length) return p
+  const others = (p.notes ?? []).filter((n) => !n.startsWith("績效從 "))
+  if (series.length < 2) {
+    return {
+      ...p, start_date: null, end_date: null, twr: null, xirr: null, max_drawdown: null, volatility: null, series: [],
+      benchmark: p.benchmark ? { ...p.benchmark, twr: null } : null, dividends_by_month: [], realized_by_year: [],
+      notes: [`${accumulatingNote(first)}；持股期間有幾天沒有收盤價，績效算不出來`],
+    }
+  }
+  const base = series[0]!
+  const rebased = series.map((x) => ({
+    ...x,
+    twr_index: Number((x.twr_index / (base.twr_index || 1)).toFixed(6)),
+    benchmark_index: x.benchmark_index !== null && base.benchmark_index ? Number((x.benchmark_index / base.benchmark_index).toFixed(6)) : null,
+  }))
+  const lastPoint = rebased[rebased.length - 1]!
+  let peak = 0
+  let mdd = 0
+  for (const x of rebased) {
+    peak = Math.max(peak, x.twr_index)
+    mdd = Math.min(mdd, x.twr_index / peak - 1)
+  }
+  return {
+    ...p,
+    start_date: base.t,
+    twr: lastPoint.twr_index - 1,
+    // 幾天的現金流不年化；波動度示範時不重算
+    xirr: null,
+    max_drawdown: Number(mdd.toFixed(4)),
+    volatility: null,
+    benchmark: p.benchmark ? { ...p.benchmark, twr: lastPoint.benchmark_index !== null ? lastPoint.benchmark_index - 1 : null } : null,
+    series: rebased,
+    dividends_by_month: p.dividends_by_month.filter((d) => d.month >= first.slice(0, 7)),
+    realized_by_year: p.realized_by_year.filter((r) => r.year >= Number(first.slice(0, 4))),
+    notes: [`績效從 ${ymd(base.t)} 收盤開始算，之前沒有資料`, ...others],
+  }
+}
+
 export function readMockDiscussion(): DiscussionOptions {
   if (typeof window === "undefined") return {}
   let mode: string | null = null
@@ -164,6 +226,8 @@ export interface MockOptions {
    * 兩個不同時登入後會看到「服務條款與隱私權政策已更新」。
    */
   terms?: { current: string; accepted?: string | null; effectiveDate?: string | null; summary?: string | null }
+  /** 帳本的歷史只留最後幾個收盤（`?hist=N`，看存檔剛開始時的走勢與績效）；預設全部 */
+  history?: number
 }
 
 /**
@@ -850,7 +914,12 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         const l = ledger(account_id)
         // 查看模式的基準用授權者的（示範：0050）
         const bench = benchmark ?? (l.viewing ? "0050.TW" : user.preferences.benchmark)
-        return commercial ? commercialPerformance(l.txns, range, account_id, bench) : buildPerformance(l.txns, range, account_id, bench)
+        const perf = (r: typeof range) => (commercial ? commercialPerformance(l.txns, r, account_id, bench) : buildPerformance(l.txns, r, account_id, bench))
+        const p = perf(range)
+        if (!options.history) return p
+        // ?hist=N：從「全部」的最後 N 個收盤開始
+        const days = (range === "ALL" ? p : perf("ALL")).series.map((x) => x.t)
+        return days.length > options.history ? limitHistory(p, days[days.length - options.history]!) : p
       }),
     getClosedPositions: (accountId) => wait(() => closedRounds(ledger(accountId).txns, { accountId })),
 
