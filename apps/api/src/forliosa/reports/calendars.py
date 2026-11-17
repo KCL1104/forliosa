@@ -481,7 +481,8 @@ def _holiday_name(name: str) -> str:
     out = name.split("（")[0].strip()
     for word, plain in _NAME_TIME_WORDS.items():
         out = out.replace(word, plain)
-    if any(w in out for w in (*TIME_WORDS, *FORBIDDEN_WORDS)) or re.search(r"(?:週|周|星期|禮拜)[一二三四五六日天]", out):
+    lone_weekday = re.search(r"(?:週|周|星期|禮拜)[一二三四五六日天]", out)
+    if lone_weekday or any(w in out for w in (*TIME_WORDS, *FORBIDDEN_WORDS)):
         return ""  # an admin's name that would fail the checks: the date and the kind say enough
     return out
 

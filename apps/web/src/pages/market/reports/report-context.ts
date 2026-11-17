@@ -62,6 +62,9 @@ const PROBLEM_TEXT: Record<string, string> = {
   chart_invalid: "今日圖不在選單裡",
   index_points: "寫了指數點數",
   stock_item_mismatch: "個股段落開頭不是那一檔",
+  item_not_event: "項目不是行事曆或報導裡的事件",
+  internal_gap: "正文寫了這份缺什麼資料",
+  us_local_time: "美國時間沒有附台北時間",
 }
 export function problemText(code: string): string {
   if (code.startsWith("compliance:")) return `合規判讀：${code.slice("compliance:".length)}`

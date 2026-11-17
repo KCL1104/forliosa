@@ -77,19 +77,19 @@ QUOTE_PAGE_PATHS = {"cnyes.com": ("/archive/twstock", "/archive/usstock"), "mone
 STAMP = re.compile(r"(?<!\d)(?:(\d{4}|1\d{2})\s*[-/.年]\s*)?(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?[\sT]*"
                    r"(\d{1,2})\s*[:：]\s*(\d{2})(?!\d)")
 # A stamp is a publish time only where pages put one (:func:`publish_stamp`): right before the byline (an outlet,
-# 記者, 報導, 「台北17日電」, 更新), right after a label (發布時間：), at the start of a passage or a line, or at the end
-# of a title — and never next to the words of a scheduled event (「台積電訂 2026/11/17 14:00 召開法說會」「將於 11/17
-# 13:30 結算」: an old preview names a time of the day it is about).
+# 記者, 報導, 「台北17日電」, 更新), right after a label (發布時間：) or a byline, at the start of a passage or a
+# line, or at the end of a title — and never next to the words of a scheduled event (「台積電訂 2026/11/17 14:00
+# 召開法說會」「將於 11/17 13:30 結算」: an old preview names a time of the day it is about).
 _OUTLET_WORDS = sorted({w for o in OUTLETS.values() for w in (o.name, *o.aliases) if len(w) >= 2}, key=len,
                        reverse=True)
 BYLINE = re.compile(r"(?:記者(?!會)|(?:即時|綜合|特稿|專題)?報導|\d{1,2}日(?:專)?電|(?:最後)?更新|編輯|撰文|撰稿|作者|"
                     r"文\s*[／/]|" + "|".join(re.escape(w) for w in _OUTLET_WORDS) + ")", re.IGNORECASE)
 PUBLISH_LABEL = re.compile(r"(?:發布|發佈|發稿|更新|刊出|刊登|出版|上稿)(?:時間|日期)?\s*[:：]?\s*$")
 # a byline just before the stamp (「鉅亨網記者王小明 台北 2026/11/17 14:05」): the story may follow the stamp
-BYLINE_BEFORE = re.compile(r"記者(?!會)|新聞中心|編譯|\d{1,2}日(?:專)?電|" + "|".join(re.escape(w) for w in _OUTLET_WORDS),
-                           re.IGNORECASE)
-EVENT_WORDS = re.compile(r"召開|舉行|舉辦|登場|公布|公佈|揭曉|結算|開盤|收盤|開市|收市|休市|將於|將在|訂於|訂在|預計|預定"
-                         r"|排定|法說|說明會|記者會|會議|截止|演講|致詞|訂\s*$")
+BYLINE_BEFORE = re.compile(r"記者(?!會)|新聞中心|編譯|\d{1,2}日(?:專)?電|"
+                           + "|".join(re.escape(w) for w in _OUTLET_WORDS), re.IGNORECASE)
+EVENT_WORDS = re.compile(r"召開|舉行|舉辦|登場|公布|公佈|揭曉|結算|開盤|收盤|開市|收市|休市|將於|將在|訂於|訂在"
+                         r"|預計|預定|排定|法說|說明會|記者會|會議|截止|演講|致詞|訂\s*$")
 EVENT_AFTER = re.compile(r"^\s*(?:起|開始|前|止|為止|截止)")
 _SEPARATORS = " \t\u3000|｜/／-–—·•,，:：()（）[]【】〔〕「」"
 _STAMP_SPAN = 12  # characters around a stamp that tell what it is

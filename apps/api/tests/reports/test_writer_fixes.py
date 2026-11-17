@@ -145,7 +145,7 @@ def _abroad(market_db, key, claim):
                   INST_X, TRUST_X, x)
     out = close_output(pk)
     out["chips"].append(p(s(f"〔鉅亨網〕報導，{claim}。", "X003")))
-    names = ["三星", "國泰金", "英業達", "廣達", "台積電"]  # Taiwan names: two characters a company abroad shares, longer
+    names = ["三星", "國泰金", "英業達", "廣達", "台積電"]  # Taiwan names (三星 is also Samsung's)
     return [x.detail for x in validate.validate(out, pk, "close", names) if x.code == "stock_not_allowed"]
 
 

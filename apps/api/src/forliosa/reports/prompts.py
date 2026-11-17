@@ -402,8 +402,8 @@ REVISE_HINTS = {
     "stock_not_allowed": "名單外的台股不能出現；海外公司照報導原文寫名稱，不加代號。",
     "item_not_event": "watch／tonight 每一項都要是行事曆（C）或報導（X）裡的事件，time_ref 或 refs 要有那個 C 或 X；"
                       "沒有就拿掉這一項（都沒有就給空陣列）。",
-    "repeats_close_report": "前一個交易日的收盤數字（group=prev_session 的 F）上一份盤後重點已經寫過：不放進標題、重點與"
-                            "「前一晚才到的資料」。",
+    "repeats_close_report": "前一個交易日的收盤數字（group=prev_session 的 F）上一份盤後重點已經寫過：不放進標題、"
+                            "重點與「前一晚才到的資料」。",
 }
 
 

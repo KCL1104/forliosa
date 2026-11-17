@@ -313,6 +313,23 @@ def test_hand_kept_tables(on, client, monkeypatch):
     assert client.get(f"{API}/admin/market-calendar/us-earnings").json() == []
 
 
+def test_a_one_digit_hour_is_stored_with_two(on, client, monkeypatch):
+    # 「9:30」 would make 「美東 11/19 9:30（台北 …）」, which the US-time check does not read as converted
+    admin_on(monkeypatch)
+    earn = {"symbol": "nvda", "company": "NVIDIA", "report_date": "2026-11-19", "timing": "bmo", "time_et": "9:30",
+            "sectors": ["半導體"]}
+    r = client.post(f"{API}/admin/market-calendar/us-earnings", json=earn)
+    assert r.status_code == 201 and r.json()["time_et"] == "09:30"
+    assert r.json()["taipei_label"] == "美東 11/19 09:30（台北 11/19 22:30）"
+    early = {"name": "感恩節後一天", "kind": "early_close", "close_time_et": "9:30",
+             "source_url": "https://www.nyse.com/markets/hours-calendars"}
+    r = client.put(f"{API}/admin/market-calendar/nyse/2026-11-27", json=early)
+    assert r.status_code == 200 and r.json()["close_time_et"] == "09:30"
+    from forliosa.timeutil import set_us_calendar
+
+    set_us_calendar([])
+
+
 def test_tz_time_is_today():
     assert datetime(2026, 11, 16, tzinfo=TAIPEI).date() == MON
 

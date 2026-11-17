@@ -414,7 +414,8 @@ def test_a_short_dateline_cited_on_its_own_dates_its_page():
     res = {_norm_url(UDN): SearchResult(UDN, "外資賣超千億", "0 days ago"),
            _norm_url(other): SearchResult(other, "台股收盤", "0 days ago")}
     cites = [{"type": "web_search_result_location", "url": UDN, "title": "外資賣超千億", "cited_text": CITED},
-             {"type": "web_search_result_location", "url": other, "title": "台股收盤", "cited_text": "2026/11/16 14:05"}]
+             {"type": "web_search_result_location", "url": other, "title": "台股收盤",
+              "cited_text": "2026/11/16 14:05"}]
     assert gather.verify("TWSE_INST.foreign", "〔經濟日報〕報導，外資賣超 1,234.5 億元。", cites, res, W,
                          ("TWSE_INST.",)) == (None, "no_publish_time")
 
@@ -447,7 +448,8 @@ def test_an_edition_with_no_us_session_takes_no_us_fact_but_earnings_dates():
     assert check("0 days ago", none, claim="〔CNBC〕報導，美股 11/16 費城半導體指數跌 5.28%。", **SEMIS) == \
         (None, "no_us_session_date")
     nvda = {**SEMIS, "key": "US.earnings.nvda",
-            "cited": "Nvidia is scheduled to report quarterly results after the bell on Monday, Nov. 16, analysts said."}
+            "cited": "Nvidia is scheduled to report quarterly results after the bell on Monday, Nov. 16, "
+                     "analysts said."}
     fact, why = check("0 days ago", none, claim="〔CNBC〕報導，輝達排定美股 11/16 盤後公布財報。", **nvda)
     assert why is None and fact["us_session"] == "2026-11-16"
     # a pack stored before ``web_window.us_sessions`` and without US closes: any session before the cut-off day
