@@ -458,7 +458,10 @@
 - **順序**：先官方公告（台股；最近 90 天、最多 30 則，新的在前），再新聞報導（最近 30 天、最多 40 則，新的那天在前；2026-11-16 起同一天裡可信媒體——
   經濟日報、工商時報、MoneyDJ、鉅亨、中央社、自由財經、Reuters、CNBC 等——排在前面，再依時間）。前端照時間重排，畫面不變。美股只有新聞報導。
 - **美股新聞只收美國與英國媒體的英文報導**（2026-11-14，產品負責人照建議；GDELT 查詢見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」）：外國的轉載
-  （印度、澳洲、新加坡的地方報）不列。回應形狀不變。
+  （印度、澳洲、新加坡的地方報）不列。回應形狀不變。2026-11-17 起（產品負責人選 A）`source: "GDELT"` 的美股新聞改從 GDELT 英文整批檔來：
+  只收美國、英國主要新聞媒體的白名單（Reuters、CNBC、NYT、BBC、The Guardian、IBD、Morningstar、TechCrunch 等，見 `CONTRACT_NOTES.md`「2026-11-17 美股新聞改讀
+  GDELT 英文整批檔」），**標題要點名這家公司**（DOC API 是比對全文），所以則數會比以前少、但不會混進別家公司或同名一般字（Apple 派、Target 價格目標）的新聞。
+  形狀、`source`、顯名都不變。
 - **新聞報導**（`category: "media"`）：`title` 是媒體原標題（去掉 GDELT 插入的空白與「| 財經」「- 自由財經」這類重複媒體或版名的尾巴）；
   `outlet` 是媒體名稱（依網域：udn.com 聯合新聞網、money.udn.com 經濟日報、cna.com.tw 中央社…；不認得的顯示網域）；
   `url` 是原文連結（去掉 `utm_*`、`fbclid`、`gclid` 這類追蹤參數；AMP 快取連結換成媒體自己的網址）；`source` 是怎麼找到的：`"GDELT"`、
@@ -1623,7 +1626,7 @@
 - 這三檔是 **ETF**，不是指數：畫面寫「SPY（追蹤 S&P 500 的 ETF）」，不寫成「S&P 500」。指數點數要另外向指數公司取得授權，沒有。
 - 最上層的 `as_of` 仍然只看台股（加權指數與排行），不看 `us`。
 - `sources` 有美股 ETF 時多上面的 Databento 顯名，有美股新聞時多 GDELT 的顯名。
-- **美股新聞**：worker 每次整理新聞（`NEWS_REFRESH_MINUTES`，45 分鐘）多問 GDELT 一次（關鍵字 Wall Street、S&P 500、Dow Jones、Nasdaq；只收美國與英國媒體的英文報導），存在代號 `^US` 底下（不是商品）；回應取最近 3 天、最多 6 則，下架封鎖清單照樣適用。`NEWS_US_MARKET=false` 關掉。和個股新聞一樣只有標題、媒體、時間、連結。
+- **美股新聞**：存在代號 `^US` 底下（不是商品）；回應取最近 3 天、最多 6 則，下架封鎖清單照樣適用。`NEWS_US_MARKET=false` 關掉。和個股新聞一樣只有標題、媒體、時間、連結。2026-11-17 起從 GDELT 英文整批檔來（美國、英國媒體白名單，標題講 Wall Street、S&P 500、Dow Jones、Nasdaq、美股漲跌或聯準會利率的），英文整批檔超過 2 小時沒更新時才改回每次整理新聞多問 GDELT 查詢 API 一次（關鍵字 Wall Street、S&P 500、Dow Jones、Nasdaq）。形狀不變。
 
 **管理後台 `GET /admin/overview` 的 `us_prices`**
 

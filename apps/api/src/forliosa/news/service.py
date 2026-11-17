@@ -8,9 +8,13 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 * **GDELT bulk files first** (:mod:`forliosa.news.gdelt_bulk`, 2026-11-16): the new 15-minute GKG files are read once
   and matched against every tracked Taiwan stock, not only the batch's (Taiwanese sites only, the title naming the
   company), and stored as ``gdelt`` headlines. While they are current, the DOC API is not asked for Taiwan stocks.
-* **Sources** (:mod:`forliosa.news.sources`): GDELT's DOC API (US stocks; Taiwan stocks only while the bulk files are
-  not current), then our private SearXNG (:mod:`forliosa.news.searxng`, on by default), then Yahoo股市 RSS (only under
-  ``DATA_POLICY=personal``). One request per symbol per source; the HTTP
+  Since 2026-11-17 (option A) the English files are matched against every tracked US stock and the US market too (US
+  and UK news outlets only, :mod:`forliosa.news.us_match`); while the English feed is current, the DOC API is not
+  asked for US stocks or the US market either.
+* **Sources** (:mod:`forliosa.news.sources`): GDELT's DOC API (only while the bulk feed a stock leans on is not
+  current: ``translation`` for Taiwan stocks, ``english`` for US stocks and the US market), then our private SearXNG
+  (:mod:`forliosa.news.searxng`, on by default), then Yahoo股市 RSS (only under ``DATA_POLICY=personal``). One request
+  per symbol per source; the HTTP
   limiter spaces GDELT requests ≥ ``NEWS_GDELT_INTERVAL_SECONDS`` (≥ 5 s). A 429 / block stops that source for the
   run and backs it off (15 min, doubling to 4 h; SearXNG from ``NEWS_SEARXNG_BACKOFF_MINUTES``; ``news_fetch_state``
   row ``symbol = "*"``); an unreachable source (:class:`SourceDown`) is paused the same way from 15 min; three
@@ -60,7 +64,7 @@ from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.http import HttpFetcher, RateLimiter
 from forliosa.marketdata.service import MarketData
 from forliosa.models import CompanyProfile, NewsArticle, NewsBlockedDomain, NewsFetchState, NewsTrackedView
-from forliosa.news.gdelt_bulk import GdeltBulk
+from forliosa.news.gdelt_bulk import US_FEED, GdeltBulk, UsTest
 from forliosa.news.normalize import (
     Headline,
     clean_title,
@@ -86,6 +90,7 @@ from forliosa.news.sources import (
     SourceDown,
     YahooRssSource,
 )
+from forliosa.news.us_match import market_matches, us_terms
 from forliosa.timeutil import iso_taipei, now_utc
 
 log = logging.getLogger(__name__)
@@ -220,9 +225,12 @@ def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datet
 
 
 # -- normalising and storing --------------------------------------------------------------------------------
-def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Sequence[str]) -> list[Headline]:
+def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Sequence[str],
+                 relevant: UsTest | None = None) -> list[Headline]:
     """Raw items -> normalised, relevant, unblocked headlines inside the query window. Never a page that is not news
-    (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (``盤中速報``)."""
+    (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (``盤中速報``).
+    ``relevant`` (title, URL) replaces :func:`is_relevant` (the GDELT bulk files' US stocks and US market:
+    :mod:`forliosa.news.us_match`)."""
     out: list[Headline] = []
     for it in items:
         url = clean_url(it.url)
@@ -233,7 +241,9 @@ def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Seque
         outlet = it.outlet or outlet_name(url, it.domain)
         title = clean_title(it.title, url, outlet)
         published = _aware(it.published_at)
-        if not title or not is_relevant(title, q.terms) or is_bot_flash(title):
+        if not title or is_bot_flash(title):
+            continue
+        if not (relevant(title, url) if relevant is not None else is_relevant(title, q.terms)):
             continue
         if published > q.until + timedelta(minutes=30):
             continue
@@ -319,8 +329,9 @@ def item_out(h: Headline) -> dict[str, Any]:
 
 
 # -- the US market's headlines (the market page's US row) ------------------------------------------------------------
-# One GDELT request per refresh for US market news, stored under this key (not a symbol: it never resolves to an
-# instrument) and shown on the market page (產品負責人 2026-11-15). US and UK English outlets, like US stocks.
+# US market news, stored under this key (not a symbol: it never resolves to an instrument) and shown on the market page
+# (產品負責人 2026-11-15). US and UK English outlets, like US stocks. Since 2026-11-17 (option A) matched in GDELT's
+# English bulk files (us_match.market_matches); one DOC API request per refresh only while that feed is not current.
 US_MARKET_KEY = "^US"
 US_MARKET_TERMS = ("Wall Street", "S&P 500", "Dow Jones", "Nasdaq")
 US_MARKET_LIMIT = 6
@@ -350,7 +361,8 @@ def market_items(db: Session, md: MarketData, *, settings: Settings | None = Non
 
 def _refresh_market(db: Session, src: NewsSource, now: datetime, report: RefreshReport,
                     blocked: Sequence[str], settings: Settings) -> bool:
-    """One GDELT request for US market news. False when GDELT refused (paused like any other refusal)."""
+    """One GDELT DOC API request for US market news (only while the English bulk feed is not current). False when
+    GDELT refused (paused like any other refusal)."""
     st = _state(db, src.key, US_MARKET_KEY)
     since = max(now - WINDOW, _aware(st.last_success_at) - OVERLAP) if st.last_success_at else now - WINDOW
     q = market_query(since, now)
@@ -461,7 +473,8 @@ def default_sources(settings: Settings, policy: Policy, fetcher: HttpFetcher | N
 
 
 def gdelt_bulk_source(settings: Settings) -> GdeltBulk | None:
-    """GDELT's 15-minute bulk files for Taiwan stocks (on unless NEWS_GDELT_ENABLED or NEWS_GDELT_BULK is false)."""
+    """GDELT's 15-minute bulk files for Taiwan stocks, US stocks and the US market (on unless NEWS_GDELT_ENABLED or
+    NEWS_GDELT_BULK is false)."""
     if not (settings.news_gdelt_enabled and settings.news_gdelt_bulk and settings.news_gdelt_bulk_feeds):
         return None
     return GdeltBulk(feeds=settings.news_gdelt_bulk_feeds, max_files=settings.news_gdelt_bulk_max_files)
@@ -473,7 +486,9 @@ class RefreshReport:
     fetched: dict[str, int] = field(default_factory=dict)  # source -> requests made (gdelt_bulk: files read)
     stored: int = 0
     bulk_rows: int = 0  # Taiwanese headlines in the GDELT bulk files read
+    bulk_us_rows: int = 0  # pages of US and UK outlets in the English bulk files read
     bulk_ok: bool = False  # the bulk files are current: the DOC API is not asked for Taiwan stocks
+    bulk_us_ok: bool = False  # the English bulk feed is current: the DOC API is not asked for US stocks / the market
     blocked_sources: list[str] = field(default_factory=list)
     ai_searches: int = 0
     ai_skipped: str | None = None  # why the AI fallback did not run at all (budget, off, no keys)
@@ -599,46 +614,69 @@ def ai_window(db: Session, symbol: str, now: datetime) -> timedelta:
     return AI_WINDOW if recent_count(db, symbol, now - AI_WINDOW) else AI_WINDOW_EMPTY
 
 
+def _book_bulk(db: Session, symbols: Iterable[str], covered: datetime, found: dict[str, int]) -> None:
+    """Book each symbol's ``gdelt`` row as answered up to ``covered`` (never moved back)."""
+    for sym in symbols:
+        st = _state(db, "gdelt", sym)
+        before = _aware(st.last_success_at) if st.last_success_at else None
+        st.last_success_at, st.failures = max(covered, before) if before else covered, 0
+        st.items = found.get(sym, 0)
+        st.last_status = "ok" if st.items else "empty"
+    db.commit()
+
+
 def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequence[str], now: datetime,
-                  report: RefreshReport, blocked: Sequence[str]) -> bool:
-    """Read GDELT's new bulk files once for every tracked Taiwan stock (not only the batch's: ``tracked(limit=False)``)
-    and store the matches as GDELT headlines, each file's before it is booked as read (``GdeltBulk.run``'s
-    ``keep``). While the files are current, each stock's ``gdelt`` row is booked as answered up to the end of the
-    newest file read (``last_success_at``, never moved back: the AI fallback's gate and
-    the DOC API fallback's window read it, so once the files stop the DOC API starts an hour before what they covered;
-    ``last_attempt_at`` stays the rotation's, set when the batch reaches the stock). Returns whether the files are
-    current."""
+                  report: RefreshReport, blocked: Sequence[str], *, market: bool = False) -> tuple[bool, bool]:
+    """Read GDELT's new bulk files once for every tracked stock (not only the batch's: ``tracked(limit=False)``) —
+    Taiwan stocks in both feeds, US stocks (and with ``market`` the US market, key ``^US``) in the English feed — and
+    store the matches as GDELT headlines, each file's before it is booked as read (``GdeltBulk.run``'s ``keep``). While
+    a stock's feed is current (Taiwan: ``translation``; US and the market: ``english``), its ``gdelt`` row is booked
+    as answered up to the end of that feed's newest file read (``last_success_at``, never moved back: the AI
+    fallback's gate and the DOC API fallback's window read it, so once the files stop the DOC API starts an hour
+    before what they covered; ``last_attempt_at`` stays the rotation's, set when the batch reaches the stock).
+    Returns whether the Taiwan feed and the English feed are current."""
     queries: dict[str, Query] = {}
+    us_queries: dict[str, Query] = {}
+    us_tests: dict[str, UsTest] = {}
     for sym in symbols:
         info = md.instrument(sym)
-        if info is not None and info.market != "US":
-            queries[info.symbol] = build_query(db, info, now - WINDOW, now)
-    if not queries:
-        return False
+        if info is None:
+            continue
+        q = build_query(db, info, now - WINDOW, now)
+        if info.market != "US":
+            queries[info.symbol] = q
+        else:
+            us_queries[info.symbol] = q
+            us_tests[info.symbol] = us_terms(db, info).matches
+    if market:
+        us_queries[US_MARKET_KEY] = market_query(now - WINDOW, now)
+        us_tests[US_MARKET_KEY] = market_matches
+    if not queries and not us_tests:
+        return False, False
     found: dict[str, int] = {}
 
     def keep(matches: dict[str, list[RawItem]]) -> None:  # each file's matches, stored before it is booked as read
         for sym, items in matches.items():
-            heads = to_headlines(items, queries[sym], "gdelt", blocked)
+            if sym in queries:
+                heads = to_headlines(items, queries[sym], "gdelt", blocked)
+            else:
+                heads = to_headlines(items, us_queries[sym], "gdelt", blocked, relevant=us_tests[sym])
             found[sym] = found.get(sym, 0) + len(heads)
             report.stored += store(db, sym, heads, now)
 
-    res = bulk.run(db, queries, now, keep)
+    res = bulk.run(db, queries, now, keep, us=us_tests)
     report.fetched[bulk.key] = report.fetched.get(bulk.key, 0) + res.files
     report.bulk_rows += res.rows
+    report.bulk_us_rows += res.us_rows
     report.errors += res.errors
     report.blocked_sources += [f"{bulk.key}:{f}" for f in res.paused]
-    ok = bulk.healthy(db, now)
+    ok = bool(queries) and bulk.healthy(db, now)
     if ok:
-        covered = min(now, bulk.covered_until(db) or now)
-        for sym in queries:
-            st = _state(db, "gdelt", sym)
-            before = _aware(st.last_success_at) if st.last_success_at else None
-            st.last_success_at, st.failures = max(covered, before) if before else covered, 0
-            st.items = found.get(sym, 0)
-            st.last_status = "ok" if st.items else "empty"
-        db.commit()
-    return ok
+        _book_bulk(db, queries, min(now, bulk.covered_until(db) or now), found)
+    us_ok = bool(us_tests) and bulk.healthy(db, now, US_FEED)
+    if us_ok:
+        _book_bulk(db, us_tests, min(now, bulk.covered_until(db, US_FEED) or now), found)
+    return ok, us_ok
 
 
 def default_ai(settings: Settings) -> AiFactory:
@@ -691,12 +729,16 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     blocked = blocked_domains(db, settings)
     open_sources = [s for s in sources if _source_open(db, s.key, now)]
     report.blocked_sources = [s.key for s in sources if s not in open_sources]
+    if isinstance(bulk, GdeltBulk):
+        # the US market's headlines are matched whenever the files are read (also on a CLI run for given symbols: a
+        # file is read once), the DOC API's market request below only on the worker's run
+        report.bulk_ok, report.bulk_us_ok = _refresh_bulk(db, md, bulk, every, now, report, blocked,
+                                                          market=settings.news_us_market)
     gdelt = next((s for s in open_sources if s.key == "gdelt"), None)
-    if market_run and gdelt is not None and not _refresh_market(db, gdelt, now, report, blocked, settings):
+    if market_run and gdelt is not None and not report.bulk_us_ok \
+            and not _refresh_market(db, gdelt, now, report, blocked, settings):
         open_sources.remove(gdelt)
         report.blocked_sources.append(gdelt.key)
-    if isinstance(bulk, GdeltBulk):
-        report.bulk_ok = _refresh_bulk(db, md, bulk, every, now, report, blocked)
     gdelt_on = any(s.key == "gdelt" for s in sources)
     failures: dict[str, int] = {}
     ai_runner: Any = None
@@ -714,7 +756,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         for src in list(open_sources):
             if not src.supports(base):
                 continue
-            if src.key == "gdelt" and report.bulk_ok and base.taiwan:  # the bulk files covered it
+            if src.key == "gdelt" and _bulk_covers(report, base):  # the bulk files covered it
                 report.skipped["gdelt_bulk"] = report.skipped.get("gdelt_bulk", 0) + 1
                 _state(db, "gdelt", info.symbol).last_attempt_at = now  # keeps the stalest-first rotation turning
                 db.commit()
@@ -779,7 +821,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
             continue
         # A paused or unreachable source does not hold the AI back (2026-11-16: GDELT's DOC API is paused after a 429
         # most of the day, and the AI step waited for it): only the sources answering in this run must have answered.
-        gdelt_answering = (report.bulk_ok and base.taiwan) or any(s.key == "gdelt" for s in open_sources)
+        gdelt_answering = _bulk_covers(report, base) or any(s.key == "gdelt" for s in open_sources)
         if not _ai_due(db, settings, info.symbol, now, gdelt_on=gdelt_answering,
                        searxng_on=any(s.key == "searxng" for s in open_sources)):
             continue
@@ -817,12 +859,18 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         db.commit()
     log.info("news refresh: %d symbols, requests %s, %d new headlines, %d AI searches%s%s%s%s", report.symbols,
              report.fetched, report.stored, report.ai_searches,
-             f", GDELT bulk {'current' if report.bulk_ok else 'not current'} ({report.bulk_rows} Taiwanese rows)"
-             if "gdelt_bulk" in report.fetched or report.bulk_ok else "",
+             f", GDELT bulk {'current' if report.bulk_ok else 'not current'} ({report.bulk_rows} Taiwanese rows), "
+             f"English feed {'current' if report.bulk_us_ok else 'not current'} ({report.bulk_us_rows} US/UK pages)"
+             if "gdelt_bulk" in report.fetched or report.bulk_ok or report.bulk_us_ok else "",
              f", skipped {report.skipped}" if report.skipped else "",
              f", paused {report.blocked_sources}" if report.blocked_sources else "",
              f", paused SearXNG engines {report.paused_engines}" if report.paused_engines else "")
     return report
+
+
+def _bulk_covers(report: RefreshReport, q: Query) -> bool:
+    """The bulk feed this stock leans on is current (Taiwan: ``translation``; US: ``english``): no DOC API request."""
+    return report.bulk_ok if q.taiwan else report.bulk_us_ok
 
 
 def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdelt_on: bool,

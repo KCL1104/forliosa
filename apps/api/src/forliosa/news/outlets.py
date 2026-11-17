@@ -114,6 +114,43 @@ OUTLETS: dict[str, Outlet] = {
     "247wallst.com": Outlet("24/7 Wall St.", ("24/7 wall st", "247wallst")),
     "iheart.com": Outlet("iHeartRadio", ("iheartradio", "iheart"), aggregator=True),
     "aol.com": Outlet("AOL", ("aol",), aggregator=True),
+    # -- US / UK outlets of US_NEWS_DOMAINS not named above (2026-11-17)
+    "washingtonpost.com": Outlet("The Washington Post", ("the washington post", "washington post")),
+    "bbc.co.uk": Outlet("BBC", ("bbc", "bbc news")),
+    "theguardian.com": Outlet("The Guardian", ("the guardian", "guardian")),
+    "foxbusiness.com": Outlet("Fox Business", ("fox business", "foxbusiness")),
+    "foxnews.com": Outlet("Fox News", ("fox news",)),
+    "investors.com": Outlet("Investor's Business Daily", ("investor's business daily", "investors business daily",
+                                                          "ibd")),
+    "axios.com": Outlet("Axios", ("axios",)),
+    "latimes.com": Outlet("Los Angeles Times", ("los angeles times", "la times")),
+    "npr.org": Outlet("NPR", ("npr",)),
+    "cbsnews.com": Outlet("CBS News", ("cbs news",)),
+    "nbcnews.com": Outlet("NBC News", ("nbc news",)),
+    "abcnews.go.com": Outlet("ABC News", ("abc news",)),
+    "usatoday.com": Outlet("USA Today", ("usa today",)),
+    "economist.com": Outlet("The Economist", ("the economist", "economist")),
+    "politico.com": Outlet("Politico", ("politico",)),
+    "time.com": Outlet("TIME", ("time",)),
+    "newsweek.com": Outlet("Newsweek", ("newsweek",)),
+    "wired.com": Outlet("WIRED", ("wired",)),
+    "arstechnica.com": Outlet("Ars Technica", ("ars technica",)),
+    "engadget.com": Outlet("Engadget", ("engadget",)),
+    "cnet.com": Outlet("CNET", ("cnet",)),
+    "zdnet.com": Outlet("ZDNET", ("zdnet",)),
+    "morningstar.com": Outlet("Morningstar", ("morningstar",)),
+    "kiplinger.com": Outlet("Kiplinger", ("kiplinger",)),
+    "marketplace.org": Outlet("Marketplace", ("marketplace",)),
+    "bostonglobe.com": Outlet("The Boston Globe", ("the boston globe", "boston globe")),
+    "chicagotribune.com": Outlet("Chicago Tribune", ("chicago tribune",)),
+    "independent.co.uk": Outlet("The Independent", ("the independent", "independent")),
+    "standard.co.uk": Outlet("Evening Standard", ("evening standard", "the standard")),
+    "cityam.com": Outlet("City A.M.", ("city a.m.", "city am", "cityam")),
+    "telegraph.co.uk": Outlet("The Telegraph", ("the telegraph", "telegraph")),
+    "thetimes.com": Outlet("The Times", ("the times",)),
+    "thetimes.co.uk": Outlet("The Times", ("the times",)),
+    "sky.com": Outlet("Sky News", ("sky news",)),
+    "semafor.com": Outlet("Semafor", ("semafor",)),
 }
 
 
@@ -152,6 +189,60 @@ NOT_NEWS_PATHS: dict[str, tuple[str, ...]] = {
     "money-link.com.tw": ("/twstock",),  # quote and per-stock list pages; /realtimenews/ are articles
     "ww2.money-link.com.tw": ("/twstock",),
 }
+# The same by a path pattern: Morningstar's quote and analysis pages (``/stocks/xnys/tu/quote``, 「TU Stock Price
+# (XNYS) & Analyst Rating」, measured 2026-11-17 in GDELT's English files); its articles (``/stocks/7-new-4-star-…``,
+# ``/news/…``) stay.
+NOT_NEWS_PATTERNS: dict[str, re.Pattern[str]] = {
+    "morningstar.com": re.compile(r"^/(?:stocks|funds|etfs|cefs|indexes|bonds)/x[a-z]{3}/", re.IGNORECASE),
+}
+
+# US and UK news outlets (產品負責人 2026-11-17, option A): the only sites whose headlines in GDELT's English bulk files
+# are matched to US stocks and to the US market's headlines — the bulk files carry no source country, so this list
+# stands in for the DOC API's ``(sourcecountry:US OR sourcecountry:UK) sourcelang:english``, much stricter (no local TV
+# sites, no syndication networks, no auto-written stock pages such as the MarketBeat network's). A host matches with its
+# subdomains (``finance.yahoo.com`` only Yahoo's finance site, not Yahoo's other editions). It holds every US outlet of
+# REPUTABLE_DOMAINS; none of NOT_NEWS_DOMAINS. Measured 2026-11-17 (48 English files, 12 h): Reuters, AP, MarketWatch,
+# WSJ, Barron's, Bloomberg, FT, The Washington Post, Axios, USA Today, Politico, The Economist, ABC News, Sky News, The
+# Telegraph and Semafor are not in GDELT's English files at all, CNN only with its press room and Forbes only with its
+# paid Councils posts (kept in the list in case GDELT reads them again); CNBC, The New York Times, BBC, The Guardian,
+# CBS, NBC, Los Angeles Times, Business Insider, Fortune, Investor's Business Daily, Morningstar (which carries
+# MarketWatch and Dow Jones Newswires), The Verge and TechCrunch are (``CONTRACT_NOTES.md``, 2026-11-17).
+US_NEWS_DOMAINS = frozenset({
+    # wire services, business papers and business TV
+    "reuters.com", "apnews.com", "bloomberg.com", "wsj.com", "barrons.com", "marketwatch.com", "ft.com", "cnbc.com",
+    "foxbusiness.com", "investors.com", "morningstar.com", "kiplinger.com", "fortune.com", "businessinsider.com",
+    "forbes.com", "finance.yahoo.com", "economist.com", "marketplace.org", "cityam.com", "axios.com", "semafor.com",
+    # national papers, networks and magazines
+    "nytimes.com", "washingtonpost.com", "latimes.com", "usatoday.com", "bostonglobe.com", "chicagotribune.com",
+    "cnn.com", "cbsnews.com", "nbcnews.com", "abcnews.go.com", "npr.org", "foxnews.com", "politico.com", "time.com",
+    "newsweek.com", "bbc.com", "bbc.co.uk", "theguardian.com", "independent.co.uk", "standard.co.uk",
+    "telegraph.co.uk", "thetimes.com", "thetimes.co.uk", "news.sky.com",
+    # technology
+    "techcrunch.com", "theverge.com", "wired.com", "arstechnica.com", "engadget.com", "cnet.com", "zdnet.com",
+})
+# Of those, the business and technology outlets: every story there is business context, so an everyday-word company
+# name (Target, Visa) needs no other finance cue in a sentence-case title (:mod:`forliosa.news.us_match`).
+US_BUSINESS_DOMAINS = frozenset({
+    "reuters.com", "bloomberg.com", "wsj.com", "barrons.com", "marketwatch.com", "ft.com", "cnbc.com",
+    "foxbusiness.com", "investors.com", "morningstar.com", "kiplinger.com", "fortune.com", "businessinsider.com",
+    "forbes.com", "finance.yahoo.com", "economist.com", "marketplace.org", "cityam.com",
+    "techcrunch.com", "theverge.com", "wired.com", "arstechnica.com", "engadget.com", "cnet.com", "zdnet.com",
+})
+# A business section of a general outlet (``latimes.com/business/…``, ``theguardian.com/technology/…``).
+_BUSINESS_SECTION = re.compile(r"^/(?:[a-z]{2}/)?(?:business|markets?|money|moneywatch|finance|economy|investing|"
+                               r"technology|tech|companies|stocks|earnings)(?:/|$)", re.IGNORECASE)
+# Not news on those sites (measured 2026-11-17), by the URL's first path segment: shopping and reviews (Wirecutter, NBC
+# Select, CNBC Select, CNN Underscored, The Guardian's Filter), paid posts (Forbes Councils, NYT paid posts, CNET paid
+# content, Business Insider's ``/sc/``, The Guardian's partner pages, the Los Angeles Times' B2B and studio pages),
+# recipes, audio and video players, press offices, events, weather, sport and betting.
+US_NOT_NEWS_HOSTS = ("cooking.nytimes.com", "cnnpressroom.blogs.cnn.com")
+_US_NOT_NEWS_SECTIONS = frozenset({
+    "wirecutter", "paidpost", "recipes", "recipe", "select", "shopping", "deals", "coupons", "councils",
+    "cnn-underscored", "underscored", "reviews", "sponsored", "partner", "brandvoice", "sounds", "iplayer", "sport",
+    "athletic", "food", "games", "crosswords", "puzzles", "horoscopes", "paid-content", "thefilter", "thefilter-us",
+    "quince", "worth-going-further", "b2b", "doctors-scientists", "sc", "mediacentre", "events", "app", "weather",
+    "outkick", "outkick-betting", "outkick-culture",
+})
 
 
 def host_of(url: str) -> str:
@@ -208,6 +299,47 @@ def is_taiwan_outlet(url_or_host: str) -> bool:
     return any(on_domain(host, d) for d in TAIWAN_DOMAINS)
 
 
+def _first_segment(url: str) -> str:
+    try:
+        path = urlsplit(url.strip()).path or "/"
+    except ValueError:
+        return ""
+    return path.lstrip("/").split("/", 1)[0].lower()
+
+
+def is_us_outlet(url: str) -> bool:
+    """A page of a US or UK news outlet (:data:`US_NEWS_DOMAINS`, by the URL's host) that is news: not a shopping,
+    paid, recipe, audio or sport page (``_US_NOT_NEWS_SECTIONS``, ``US_NOT_NEWS_HOSTS``) nor a quote page
+    (:func:`is_not_news`)."""
+    host = _host(url)
+    if not host or not any(on_domain(host, d) for d in US_NEWS_DOMAINS):
+        return False
+    if any(on_domain(host, h) for h in US_NOT_NEWS_HOSTS) or is_not_news(url):
+        return False
+    return "://" not in url or _first_segment(url) not in _US_NOT_NEWS_SECTIONS
+
+
+def us_outlet_site(domain: str) -> bool:
+    """GDELT's site name (``SourceCommonName``) may hold a page of :data:`US_NEWS_DOMAINS`: the outlet's domain, a
+    subdomain, or the site it is part of (``yahoo.com`` for ``finance.yahoo.com``, ``go.com`` for ``abcnews.go.com``).
+    A cheap first filter; :func:`is_us_outlet` then checks the page's own URL."""
+    host = _host(domain)
+    return bool(host) and any(on_domain(host, d) or on_domain(d, host) for d in US_NEWS_DOMAINS)
+
+
+def is_us_business_page(url: str) -> bool:
+    """A page of a business or technology outlet (:data:`US_BUSINESS_DOMAINS`) or in a business / markets / technology
+    section of another US outlet."""
+    host = _host(url)
+    if host and any(on_domain(host, d) for d in US_BUSINESS_DOMAINS):
+        return True
+    try:
+        path = urlsplit(url.strip()).path or "/"
+    except ValueError:
+        return False
+    return bool(_BUSINESS_SECTION.match(path))
+
+
 def is_reputable(url_or_host: str) -> bool:
     host = _host(url_or_host)
     return bool(host) and any(on_domain(host, d) for d in REPUTABLE_DOMAINS)
@@ -221,12 +353,13 @@ def is_not_news(url: str) -> bool:
     if any(on_domain(host, d) for d in NOT_NEWS_DOMAINS):
         return True
     prefixes = NOT_NEWS_PATHS.get(host)
-    if prefixes and "://" in url:
+    pattern = NOT_NEWS_PATTERNS.get(host)
+    if (prefixes or pattern) and "://" in url:
         try:
             path = (urlsplit(url.strip()).path or "/").lower()
         except ValueError:
             return False
-        return path.startswith(prefixes)
+        return bool(prefixes and path.startswith(prefixes)) or bool(pattern and pattern.match(path))
     return False
 
 

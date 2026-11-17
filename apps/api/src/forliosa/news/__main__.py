@@ -6,15 +6,15 @@
     uv run python -m forliosa.news blocked
     uv run python -m forliosa.news purge
     uv run python -m forliosa.news searxng-check "台積電" [--language en] [--url http://localhost:8080]
-    uv run python -m forliosa.news gdelt-bulk-check [--symbol 2330 …] [--feed translation]
+    uv run python -m forliosa.news gdelt-bulk-check [--symbol 2330 --symbol NVDA …] [--feed translation]
 
 ``block`` deletes the domain's stored headlines at once (subdomains included); the list also takes
 ``NEWS_BLOCKED_DOMAINS`` (comma-separated) from the environment. ``searxng-check`` asks our SearXNG once (its
 ``/healthz``, then one news query) and prints how many results each engine gave and which engines did not answer;
 it prints only the instance's scheme, host and port, never a secret, and changes nothing in the database.
 ``gdelt-bulk-check`` downloads the newest GDELT bulk file of each feed once (:mod:`forliosa.news.gdelt_bulk`) and
-prints its size, its rows from Taiwanese sites by site, and the headlines that name the given stocks; it writes
-nothing.
+prints its size, its rows from Taiwanese sites by site (the English file: also its US and UK outlets' pages), the
+headlines that name the given stocks (Taiwan or US) and the US market's headlines (``^US``); it writes nothing.
 """
 
 from __future__ import annotations
@@ -82,14 +82,22 @@ def gdelt_bulk_check(symbols: list[str], feeds: list[str]) -> int:
     """One look at the newest file of each feed; nothing is stored. 0 = every feed answered."""
     from collections import Counter
 
+    from forliosa.news.outlets import host_of, is_taiwan_outlet, is_us_outlet
+    from forliosa.news.us_match import market_matches, us_terms
+
     md = get_market_data()
     queries = {}
+    us: dict[str, gdelt_bulk.UsTest] = {service.US_MARKET_KEY: market_matches}
     with session_factory()() as db:
         for s in symbols:
             info = md.instrument(s)
-            if info is not None and info.market != "US":
+            if info is None:
+                continue
+            if info.market != "US":
                 queries[info.symbol] = service.build_query(db, info, service.now_utc() - service.WINDOW,
                                                            service.now_utc())
+            else:
+                us[info.symbol] = us_terms(db, info).matches
     fetcher = gdelt_bulk.bulk_fetcher()
     status = 0
     for feed in feeds:
@@ -103,11 +111,17 @@ def gdelt_bulk_check(symbols: list[str], feeds: list[str]) -> int:
             print(f"{feed}：讀不到（{exc}）")
             status = 1
             continue
-        rows = list(gdelt_bulk.gkg_rows(data))
-        sites = Counter(r.domain for r in rows)
-        print(f"{feed}：{gdelt_bulk.slot_name(latest)}（UTC）{len(data) / 1e6:.1f} MB，台灣網站 {len(rows)} 則："
+        feed_us = us if feed == gdelt_bulk.US_FEED else None
+        rows = list(gdelt_bulk.gkg_rows(data, gdelt_bulk.taiwan_or_us_site if feed_us else is_taiwan_outlet))
+        taiwan = [r for r in rows if is_taiwan_outlet(r.domain)]
+        sites = Counter(r.domain for r in taiwan)
+        print(f"{feed}：{gdelt_bulk.slot_name(latest)}（UTC）{len(data) / 1e6:.1f} MB，台灣網站 {len(taiwan)} 則："
               + "、".join(f"{d} {n}" for d, n in sites.most_common(12)))
-        for sym, items in gdelt_bulk.match(rows, queries).items():
+        if feed_us:
+            us_sites = Counter(host_of(r.url) for r in rows if is_us_outlet(r.url))
+            print(f"  美國、英國媒體 {sum(us_sites.values())} 則："
+                  + "、".join(f"{d} {n}" for d, n in us_sites.most_common(12)))
+        for sym, items in gdelt_bulk.match(rows, queries, feed_us).items():
             for it in items:
                 print(f"  {sym}  {it.domain}  {it.title[:80]}")
     return status
@@ -133,8 +147,9 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--time-range", default="week", choices=["day", "week", "month", "year"])
     c.add_argument("--url", default=None, help="SearXNG 網址（預設用 NEWS_SEARXNG_URL）")
     g = sub.add_parser("gdelt-bulk-check",
-                       help="下載 GDELT 最新一份整批檔，列出台灣網站的則數與點名這些股票的標題（不寫資料庫）")
-    g.add_argument("--symbol", action="append", default=[], help="比對這些代號（可重複）")
+                       help="下載 GDELT 最新一份整批檔，列出台灣網站與美國、英國媒體的則數，"
+                            "點名這些股票的標題與美股市場新聞（不寫資料庫）")
+    g.add_argument("--symbol", action="append", default=[], help="比對這些代號（可重複，台股或美股）")
     g.add_argument("--feed", action="append", choices=sorted(gdelt_bulk.FEEDS), help="預設兩種都看")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -153,8 +168,9 @@ def main(argv: list[str] | None = None) -> int:
                 settings = settings.model_copy(update={"news_ai_enabled": False})
             rep = service.refresh(db, md, settings=settings, symbols=symbols)
             print(f"{rep.symbols} 檔，請求 {rep.fetched}，新增 {rep.stored} 則，AI 搜尋 {rep.ai_searches} 次"
-                  + (f"，GDELT 整批檔{'可用' if rep.bulk_ok else '不是最新'}（台灣網站 {rep.bulk_rows} 則）"
-                     if "gdelt_bulk" in rep.fetched or rep.bulk_ok else "")
+                  + (f"，GDELT 整批檔：台股{'可用' if rep.bulk_ok else '不是最新'}（台灣網站 {rep.bulk_rows} 則）、"
+                     f"美股{'可用' if rep.bulk_us_ok else '不是最新'}（美國、英國媒體 {rep.bulk_us_rows} 則）"
+                     if "gdelt_bulk" in rep.fetched or rep.bulk_ok or rep.bulk_us_ok else "")
                   + (f"，略過 {rep.skipped}" if rep.skipped else "")
                   + (f"，暫停的來源 {rep.blocked_sources}" if rep.blocked_sources else "")
                   + (f"，暫停的 SearXNG 引擎 {rep.paused_engines}" if rep.paused_engines else ""))

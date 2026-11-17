@@ -792,7 +792,7 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
     停機太久時更早的略過並記 log。403／429 → 那種檔暫停 15 分鐘起、加倍到 4 小時；連不上也暫停；某一份 404（GDELT 偶爾跳過）就略過；壞檔略過不重試。
   - 比對：**只收台灣網站**（`outlets.is_taiwan_outlet`：`.tw` 主機或 `TAIWAN_DOMAINS`——代替 DOC API 的 `sourcecountry:taiwan`；GDELT 2018 的網域國別表把 cnyes、moneydj 算中國、storm.mg 算馬達加斯加，所以不用它），
     標題要點名公司（同 `is_relevant`）；中國網站寫「台积电」、東森美洲（ettvamerica.com）都不收。
-  - **美股不用整批檔**：整批檔沒有來源國家，做不到「只收美國、英國媒體」（2026-11-14 決定），美股照舊用 DOC API。
+  - ~~**美股不用整批檔**~~：2026-11-17 起美股也用英文整批檔（用美國、英國媒體白名單代替來源國家），見下一節。
   - **DOC API 變成台股的備用**：主要的 `translation` 檔最新讀到的那份在 2 小時內（`gdelt_bulk.FRESH`）就不問 DOC API（`skipped.gdelt_bulk`）；
     超過就恢復一檔一檔問，起點是整批檔最後涵蓋的時間前 1 小時（每檔的 `last_success_at` 記成最新一份檔的時段結束，不記批次時間；
     2026-11-16 審查前記的是批次時間，整批檔停住後改回 DOC API 時會漏掉約 40 分鐘）。整批檔比對**全部追蹤中的台股**，不只這一批的
@@ -829,6 +829,77 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
 - 改之後（整批檔讀 12 小時＝每種 48 份，約 4 分鐘；正式環境每次只讀新的 3 份左右）：台積電存 35 則、去重後顯示 32 則（最新 20:45，DOC API 以前最新的是 4 天前）、
   台達電 1 則整批檔＋6 則 AI（11/09–11/16）、禾榮科 4 則 AI（11/05–11/11，MoneyDJ 2、Yahoo股市 2）、M31 與訊聯 0 則（AI 搜 30 天也沒有，老實顯示空的）。
   AI 4 次共 US$0.093（約 0.023／次）。存下來的快訊與非新聞網頁 0 則。
+
+### 2026-11-17 美股新聞改讀 GDELT 英文整批檔（產品負責人選 A）
+
+原因：正式環境 worker 的 log 顯示 GDELT DOC API（`api.gdeltproject.org`）幾乎每個請求都回 429，即使每 45 分鐘只問 1–2 次——
+限制是每個 IP 約 5 秒一次，Railway 的出口 IP 和其他租戶共用。台股 11-16 已改讀整批檔；這一節把美股個股新聞與市場頁的美股新聞（`^US`）也搬過去。
+這一節取代上一節的「美股不用整批檔」。
+
+- **只讀英文整批檔、不多下載**（`news/gdelt_bulk.py`）：`english` 檔原本就為台灣的英文網站下載；現在同一份檔同時比對台股（台灣網站）和美股（美國、英國媒體），
+  一次下載兩邊用。只有美股、沒有台股時，`translation` 檔不下載；禮貌、退避、`NEWS_GDELT_BULK_MAX_FILES` 照舊（同一個 fetcher、同一份進度
+  `news_fetch_state(gdelt_bulk, @english)`）。`GdeltBulk.run(..., us=…)`、`gdelt_bulk.match(rows, queries, us)`；`RefreshReport.bulk_us_ok`／`bulk_us_rows`。
+- **來源：美國、英國新聞媒體白名單**（`outlets.US_NEWS_DOMAINS`，代替 DOC API 的 `(sourcecountry:US OR sourcecountry:UK) sourcelang:english`；整批檔沒有來源國家）：
+  通訊社與財經媒體（Reuters、AP、Bloomberg、WSJ、Barron's、MarketWatch、FT、CNBC、Fox Business、Investor's Business Daily、Morningstar、Kiplinger、Fortune、
+  Business Insider、Forbes、Yahoo Finance（只有 `finance.yahoo.com`）、The Economist、Marketplace、City A.M.、Axios、Semafor）、全國性報紙與電視網
+  （NYT、Washington Post、LA Times、USA Today、Boston Globe、Chicago Tribune、CNN、CBS、NBC、ABC、NPR、Fox News、Politico、TIME、Newsweek、BBC、
+  The Guardian、The Independent、Evening Standard、The Telegraph、The Times、Sky News）、科技媒體（TechCrunch、The Verge、WIRED、Ars Technica、Engadget、CNET、ZDNET）。
+  包含 `REPUTABLE_DOMAINS` 的所有美國媒體，不含 `NOT_NEWS_DOMAINS`（MarketBeat、TipRanks 等）；地方電視台、轉載網（AOL、Yahoo 其他版、MSN）都不收，比 DOC API 的國家條件嚴。
+  這些網站上不是新聞的頁面也不收（`outlets.is_us_outlet`，依網址第一段）：Wirecutter、各家購物／評測（NBC Select、CNN Underscored、The Guardian 的 The Filter）、
+  業配（NYT paidpost、Forbes Councils、CNET paid-content、Business Insider `/sc/`、The Guardian 的合作頁、LA Times `/b2b/`）、食譜、播放器、新聞稿室、活動、天氣、體育與博彩；
+  Morningstar 的報價／分析頁（`/stocks/xnys/tu/quote`，「TU Stock Price (XNYS) & Analyst Rating」）加進 `NOT_NEWS_PATTERNS`，所以已存的也會藏起來。
+- **比對：只看標題**（`news/us_match.py`；DOC API 是比對全文）。精確優先：寧可少一則，不要放錯公司的新聞。
+  - **代號要有財經語境**：`$NVDA`、`(NVDA)`、`(Nasdaq: NVDA)`、`NYSE: F`、`NVDA stock／shares`；單一字母代號只認 `$F`、`NYSE: F`；
+    代號同時是常見縮寫的（AI、ESG、IPO…，`us_words.ABBREVIATIONS`）不認「AI stock」「(AI)」。只有代號本身（「META」「SNAP」）不算。
+  - **名稱**從商品主檔（SEC `company_tickers.json` 的公司名、內建名稱、英文別名）去掉 Inc.／Corp 等字尾而來；多字名稱的第一個字在沒有其他 SEC 公司用同一個字開頭時
+    也算（Palantir Technologies → Palantir，同 `ai.analyst.us_brand` 的規則）；`US_HINTS` 補新聞常用的叫法（Google、Disney、JPMorgan、TSMC）與每個一般字名稱的「自己的字」。
+    名稱要是專有名詞（整個字、第一個字母大寫：「Nvidia's」算、「nvidia」不算），連字號接小寫字或「-backed」這類字尾不算（「Nvidia-backed」「Snap-on」）。
+  - 四種名稱：**特徵名**（Nvidia、Palantir、Coca-Cola）直接算；**我們整理過的一般字名稱**（Apple、Amazon、Meta、Target、Visa、Snap、Block、Gap、Ford）要有公司語境——
+    後面接 stock／shares／earnings／CEO／Inc.、公司自己的字（iPhone、Tim Cook；AWS、Bezos；Zuckerberg、Instagram），或在一般句型標題裡（句中大寫才代表專有名詞）
+    有財經字或是財經／科技媒體、財經版的頁面；Title Case 標題（NYT、IBD、Engadget 每個字都大寫）看不出專有名詞，只認前兩種；
+    **其他一般字的單字名稱**（Outlook、Track、Here、Bill、Fold、Hub 等，`us_words.EVERYDAY_NAME_WORDS`，實測產生；另含 Dow Inc. 與 Nasdaq, Inc. 的「Dow」「Nasdaq」）
+    只認「後面接 stock／shares／earnings／CEO／Inc.」或公司自己的字；**其他單字名稱**（Hasbro、Amgen、Navan）要有財經字，或在一般句型標題裡是財經／科技頁面，
+    且前面緊接的不是另一個大寫字（「Serena Williams」不是 Williams Companies）。
+  - 一律不算：連字號複合字裡的非特徵名（「Williams-Sonoma」不是 Sonoma）、「the X of」比喻（「the Ferrari of AI」）、其他 SEC 公司名稱的開頭
+    （Apple Hospitality、Target Hospitality、Coca-Cola Consolidated）、`US_HINTS` 的片語（Big Apple、apple pie、Amazon rainforest、Doug Ford、H-1B visa、
+    snap election、Oracle of Omaha、price target、Uber driver）；銀行與券商（`us_match.BROKERAGES`：Goldman、Morgan Stanley、JPMorgan、Citi、Mizuho、
+    Jefferies…，和 `ai.analyst._NOT_A_BRAND` 同一批）當研究報告的出處時不算那家公司的新聞（「Morgan Stanley S&P 500 target」「Goldman says…」
+    「double upgrade from Mizuho」「… raises its Nvidia price target」）。長名稱被排除時，裡面的短名稱不會再把它算回來（「Goldman Sachs raises…」的「Goldman」）。
+  - 指數 ETF 照舊用指數名稱（VOO／SPY「S&P 500」、QQQ「Nasdaq 100」、DIA「Dow Jones」，和 DOC API 查詢一樣），DIA 不收 Dow Jones Newswires 的「Top … Headlines」。
+- **市場頁美股新聞**（`us_match.market_matches`，存在同一個 `^US`）：和 DOC API 查詢同一個意思——Wall Street、S&P 500、Dow Jones／the Dow、Nasdaq——
+  另加 Russell 2000、stock market、US stocks／stock futures、「stocks」加漲跌字（不是「5 Stocks to Buy」這種選股清單）、Fed 加利率字（Fed holds rates、Fed minutes、Fed Chairman）；
+  不收新聞稿的「(Nasdaq: XYZ)」與上市消息、「The Wall Street Journal」「The Wolf of Wall Street」、Dow Jones Newswires 的公司新聞摘要、IBD 的「Dow Jones Biotech Giant…」（道瓊成分股，不是道瓊），
+  也不收只講其他市場的（FTSE、Nikkei、ECB…，同時提到美國指數的才收）。
+- **DOC API 只當備用**：`english` 檔最新讀到的那份在 2 小時內（`gdelt_bulk.FRESH`），美股個股與 `^US` 都不問 DOC API（`skipped.gdelt_bulk`）；
+  超過 2 小時才恢復（暫停與退避照舊），起點是英文檔最後涵蓋的時間前 1 小時（整批檔可用時每檔與 `^US` 的 `news_fetch_state(gdelt, …)` 記成已回應到最新一份檔的時段結束）。
+  `NEWS_GDELT_BULK_FEEDS` 不含 `english`、或 `NEWS_GDELT_BULK=false` 時，美股照舊用 DOC API。台股仍看 `translation` 檔。
+- **存的形狀不變**：`source = "gdelt"`（顯名、引用不變），依網址去重（同一網址只存一列），下架封鎖清單、非新聞網頁、機器人快訊照舊不存不顯示；
+  時間是 GDELT 看到的檔案時段（同台股）。The Guardian 的版名尾巴（「| NHS」「| US news」）和 DOC API 一樣保留。
+- CLI：`gdelt-bulk-check --symbol NVDA --symbol 2330` 讀最新一份，英文檔另印美國、英國媒體各幾則、點名這些股票（台股或美股）的標題與 `^US` 市場新聞（不寫資料庫）。
+- 測試：`tests/news/test_us_news_bulk.py`（白名單與非新聞頁、英文檔只留美國／英國與台灣網站、NVDA／AAPL／AMZN／MSFT 等比對、15 個實測誤判逐一排除、名稱種類、
+  代號與片語、券商研究報告、市場新聞、refresh：英文檔可用時美股與 `^US` 不問 DOC API、封鎖網域不存、重跑不重複；英文檔停超過 2 小時改回 DOC API 且從整批檔涵蓋處接起；
+  一份英文檔同時給台股與美股、只有美股時不下載翻譯檔；沒設 `english` 檔時美股用 DOC API）。fixture `gdelt_gkg_english_us_live_20261117.csv.zip`
+  是 2026-11-16／17 英文檔的 38 列真實資料裁短（同上一節的裁法，時段統一成 02:15 UTC）。
+
+**實測（2026-11-17，沙盒連得到 storage.googleapis.com；英文檔 48 份＝12 小時，11-16 14:30 到 11-17 02:15 UTC，每份 3.8–7.3 MB、共 274 MB，
+每份間隔 ≥ 2 秒，沒有 403／429）**：
+- 每份 905–1,804 篇（平均 1,355）；白名單媒體不重複網址 1,125 頁，扣掉非新聞頁後 1,086 頁（平均每份 23 頁，美國深夜 2 頁、白天最多 49 頁）。出現的媒體（頁數）：The Guardian 85、NYT 84、BBC（.co.uk 79＋.com 34）、
+  Evening Standard 79、Chicago Tribune 68、Fox News 67（＋Fox News Radio 6）、Newsweek 63、LA Times 47、Business Insider 45、CBS 42、CNBC 40、Fortune 38、
+  The Verge 37、NBC 36、Morningstar 35（含 Dow Jones Newswires 與 MarketWatch 轉載）、IBD 33、The Independent 32、Engadget 26、TechCrunch 21、Boston Globe 16、
+  CNET 15、NPR 15、Ars Technica 12、TIME 12、City A.M. 12、Marketplace 10、ZDNET 10、Fox Business 8、Kiplinger 8、WIRED 7、The Times 2、Yahoo Finance 1。
+  **Reuters、AP、MarketWatch、WSJ、Barron's、Bloomberg、FT、Washington Post、Axios、USA Today、Politico、The Economist、ABC News、Sky News、
+  The Telegraph、Semafor 這 12 小時都不在 GDELT 英文檔裡**；CNN 只有新聞稿室一頁、Forbes 的 27 頁全是付費的 Councils 文章（都不收）。
+  這些留在白名單裡，GDELT 之後收錄就會用到；MarketWatch 與 Dow Jones Newswires 的稿子會經 Morningstar 進來。
+- 每檔比對到的標題（不重複網址）：NVDA 59（黃仁勳事件那週）、AAPL 10、AMZN 11、GOOGL 8、MSFT 7、TSLA 6、VOO 3（S&P 500）、PLTR 1、META 0、ASAN 0；
+  另外 UBER 3、BRK-B 5、JPM 3、INTC 2、AMD 2、MU 2、NFLX 2、SPY 3、QQQ 2、DIA 3、GS 0、MS 0；`^US` 市場新聞 18。
+- 用全部 10,404 個 SEC 代號跑同一批頁面找誤判，排除了：Dow Inc.（「Dow Jones Futures」）、Nasdaq, Inc.（指數）、News Corp（「…Jensen Huang News」）、
+  Track Group（「Nvidia on Track」）、HERE（「Here's What…」）、BILL（「Bill Ackman」）、Outlook Therapeutics（「Outlook outage」）、Williams Companies（「Serena Williams」）、
+  Sonoma Pharmaceuticals（「Williams-Sonoma」）、Ferrari（「the Ferrari of AI」）、C3.ai（「AI stock boom」）、NOV（「Nov. 16」）、Hub Group（「Smart Home Hub」）、
+  Align（「Can Align Your Investments」）、Fold、Bullish、Star Group（「4-Star Stocks」）、Solo Brands、ESG 開頭的公司、Hyperscale Data（「Hyperscale Data Centers」）、
+  Uber（「Uber driver」的社會新聞）、Target（「S&P 500 target」「Cognition Target the ROI」）、Visa（「visa change」）、
+  Morgan Stanley（策略師的「S&P 500 target」）、Goldman（「Goldman says it's just delayed」）、Mizuho（「double upgrade from Mizuho」），
+  以及比對到的 8 頁 Morningstar 報價與分析頁。之後還留下的 167 頁比對逐一看過都是那家公司（同一公司的特別股、ETN 代號一起出現，例如 WFC-PL、JPM 的 VYLD）。
+- 為了精確而少收的（設計如此）：IBD Title Case 標題沒有公司字的（「ULA Loses Amazon Payload」）、一般字名稱在句首又沒有財經字的。
 
 ### 待產品負責人確認
 

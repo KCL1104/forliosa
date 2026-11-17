@@ -1,4 +1,5 @@
-"""GDELT's 15-minute bulk files for Taiwan stocks (產品負責人 2026-11-16, decision 7: 照建議).
+"""GDELT's 15-minute bulk files for Taiwan stocks (產品負責人 2026-11-16, decision 7: 照建議), US stocks and the US
+market (2026-11-17, option A).
 
 Why
 ---
@@ -35,14 +36,20 @@ news sites themselves are never fetched.
 
 Matching
 --------
-Only rows from Taiwanese sites (:func:`forliosa.news.outlets.is_taiwan_outlet`: a ``.tw`` host or
-``TAIWAN_DOMAINS``, standing in for the DOC API's ``sourcecountry:taiwan``) and only for Taiwan stocks. A headline
-must name the company in its title (:func:`forliosa.news.normalize.is_relevant`: 中文簡稱, code, English short
-name), the rule every source follows. US stocks keep the DOC API, whose ``sourcecountry:US OR UK`` filter the bulk
-files cannot express (they carry no source country).
+* **Taiwan stocks**: only rows from Taiwanese sites (:func:`forliosa.news.outlets.is_taiwan_outlet`: a ``.tw`` host or
+  ``TAIWAN_DOMAINS``, standing in for the DOC API's ``sourcecountry:taiwan``), both feeds. A headline must name the
+  company in its title (:func:`forliosa.news.normalize.is_relevant`: 中文簡稱, code, English short name), the rule
+  every source follows.
+* **US stocks and the US market** (``us``: symbol -> a test of the title and URL, :mod:`forliosa.news.us_match`):
+  only the ``english`` feed, only pages of US and UK news outlets (:func:`forliosa.news.outlets.is_us_outlet`,
+  standing in for the DOC API's ``(sourcecountry:US OR sourcecountry:UK) sourcelang:english``; the files carry no
+  source country). Measured 2026-11-17 (48 files, 12 h, 3.8–7.3 MB each): 905–1,804 articles per file (1,355 on
+  average), 23 news pages of those outlets on average (2 in the US night, up to 49).
 
 State: ``news_fetch_state`` rows ``source = "gdelt_bulk"``, ``symbol = "@translation"`` / ``"@english"``;
-``last_success_at`` is the time slot of the newest file read (UTC), ``items`` the matches in the last run.
+``last_success_at`` is the time slot of the newest file read (UTC), ``items`` the matches in the last run. Taiwan
+stocks lean on the ``translation`` feed (:data:`PRIMARY_FEED`), US stocks and the US market on ``english``
+(:data:`US_FEED`): each is current (its DOC API not asked) while its feed's newest file read is within :data:`FRESH`.
 """
 
 from __future__ import annotations
@@ -62,7 +69,7 @@ from sqlalchemy.orm import Session
 from forliosa.marketdata.http import HttpFetcher, HttpStatusError, RateLimiter
 from forliosa.models import NewsFetchState
 from forliosa.news.normalize import clean_title, is_relevant
-from forliosa.news.outlets import is_taiwan_outlet, outlet_name
+from forliosa.news.outlets import is_taiwan_outlet, is_us_outlet, outlet_name, us_outlet_site
 from forliosa.news.sources import BLOCK_STATUSES, Query, RawItem
 
 log = logging.getLogger(__name__)
@@ -75,6 +82,7 @@ FEEDS: dict[str, tuple[str, str]] = {
     "english": ("lastupdate.txt", ".gkg.csv.zip"),
 }
 PRIMARY_FEED = "translation"  # nearly every Taiwanese headline is in it
+US_FEED = "english"  # US stocks and the US market: English pages only
 SLOT = timedelta(minutes=15)
 FRESH = timedelta(hours=2)  # the bulk files stand in for the DOC API while the newest file read is this recent
 INTERVAL_SECONDS = 2.0
@@ -85,6 +93,7 @@ GKG_COLUMNS = 27
 _TITLE = re.compile(r"<PAGE_TITLE>(.*?)</PAGE_TITLE>", re.S)
 _DATA_NAME = re.compile(r"/(\d{14})\.(?:translation\.)?gkg\.csv\.zip\s*$")
 USER_AGENT = "forliosa/0.1 (portfolio tracker; news headline index; GDELT bulk files)"
+UsTest = Callable[[str, str], bool]  # (cleaned title, URL) -> the headline is about this US stock / the US market
 
 
 def bulk_fetcher() -> HttpFetcher:
@@ -149,20 +158,32 @@ def gkg_rows(data: bytes, keep_domain=is_taiwan_outlet) -> Iterator[GkgRow]:
                 yield GkgRow(seen=seen, domain=domain, url=url, title=title)
 
 
-def match(rows: Iterable[GkgRow], queries: Mapping[str, Query]) -> dict[str, list[RawItem]]:
-    """symbol -> the rows whose cleaned title names that company (cheap substring test first, then
-    :func:`is_relevant`)."""
-    prepared = [(sym, q.terms, [n.casefold() for n in q.terms.names], q.terms.codes) for sym, q in queries.items()]
+def taiwan_or_us_site(domain: str) -> bool:
+    return is_taiwan_outlet(domain) or us_outlet_site(domain)
+
+
+def match(rows: Iterable[GkgRow], queries: Mapping[str, Query],
+          us: Mapping[str, UsTest] | None = None) -> dict[str, list[RawItem]]:
+    """symbol -> the rows whose cleaned title names that company: Taiwanese sites' rows against the Taiwan stocks of
+    ``queries`` (cheap substring test first, then :func:`is_relevant`), US and UK outlets' pages against ``us``."""
+    prepared = [(sym, q.terms, [n.casefold() for n in q.terms.names], q.terms.codes) for sym, q in queries.items()
+                if q.taiwan]
     out: dict[str, list[RawItem]] = {}
     for row in rows:
         title = clean_title(row.title, row.url, outlet_name(row.url, row.domain))
-        low = title.casefold()
-        for sym, terms, names, codes in prepared:
-            if not (any(n in low for n in names) or any(c in title for c in codes)):
-                continue
-            if is_relevant(title, terms):
-                out.setdefault(sym, []).append(
-                    RawItem(title=row.title, url=row.url, published_at=row.seen, domain=row.domain))
+        if is_taiwan_outlet(row.domain):
+            low = title.casefold()
+            for sym, terms, names, codes in prepared:
+                if not (any(n in low for n in names) or any(c in title for c in codes)):
+                    continue
+                if is_relevant(title, terms):
+                    out.setdefault(sym, []).append(
+                        RawItem(title=row.title, url=row.url, published_at=row.seen, domain=row.domain))
+        elif us and is_us_outlet(row.url):
+            for sym, test in us.items():
+                if test(title, row.url):
+                    out.setdefault(sym, []).append(
+                        RawItem(title=row.title, url=row.url, published_at=row.seen, domain=row.domain))
     return out
 
 
@@ -172,6 +193,7 @@ class BulkResult:
     files: int = 0
     bytes: int = 0
     rows: int = 0  # rows from Taiwanese sites with a title
+    us_rows: int = 0  # pages of US and UK news outlets with a title (english feed, when US stocks are matched)
     skipped_slots: int = 0  # files left out after a long outage
     paused: list[str] = field(default_factory=list)
     errors: int = 0
@@ -203,21 +225,25 @@ class GdeltBulk:
         self.max_files = max(1, max_files)
         self.fetcher = fetcher or bulk_fetcher()
 
-    def healthy(self, db: Session, now: datetime) -> bool:
-        """The primary feed (else any configured feed) has a file read within :data:`FRESH`."""
-        feeds = [PRIMARY_FEED] if PRIMARY_FEED in self.feeds else list(self.feeds)
-        for feed in feeds:
-            row = db.get(NewsFetchState, (SOURCE, "@" + feed))
+    def _lead(self, feed: str | None) -> list[str]:
+        if feed is not None:
+            return [feed] if feed in self.feeds else []
+        return [PRIMARY_FEED] if PRIMARY_FEED in self.feeds else list(self.feeds)
+
+    def healthy(self, db: Session, now: datetime, feed: str | None = None) -> bool:
+        """``feed`` (default: the primary feed, else any configured feed) has a file read within :data:`FRESH`; a
+        feed that is not configured never has (US stocks: ``healthy(db, now, US_FEED)``)."""
+        for f in self._lead(feed):
+            row = db.get(NewsFetchState, (SOURCE, "@" + f))
             done = _aware(row.last_success_at) if row is not None else None
             if done is not None and now - done <= FRESH:
                 return True
         return False
 
-    def covered_until(self, db: Session) -> datetime | None:
-        """Up to when the bulk files were read: the end of the primary feed's newest file read (else any configured
-        feed's), or ``None``."""
-        feeds = [PRIMARY_FEED] if PRIMARY_FEED in self.feeds else list(self.feeds)
-        done = [d for f in feeds if (row := db.get(NewsFetchState, (SOURCE, "@" + f))) is not None
+    def covered_until(self, db: Session, feed: str | None = None) -> datetime | None:
+        """Up to when the bulk files were read: the end of ``feed``'s newest file read (default: the primary feed's,
+        else any configured feed's), or ``None``."""
+        done = [d for f in self._lead(feed) if (row := db.get(NewsFetchState, (SOURCE, "@" + f))) is not None
                 and (d := _aware(row.last_success_at)) is not None]
         return max(done) + SLOT if done else None
 
@@ -247,13 +273,21 @@ class GdeltBulk:
                     st.backoff_until.isoformat())
 
     def run(self, db: Session, queries: Mapping[str, Query], now: datetime,
-            keep: Callable[[dict[str, list[RawItem]]], None] | None = None) -> BulkResult:
-        """Read the new files of each feed and match them against ``queries``. ``keep`` gets each file's matches
-        before the file is booked as read (its slot written to ``last_success_at``), so they are stored by then: a
-        run cut off between the two reads the file again (2026-11-16 review: the matches were stored only after the
-        whole run, and a worker stopped meanwhile lost the files already booked)."""
+            keep: Callable[[dict[str, list[RawItem]]], None] | None = None,
+            us: Mapping[str, UsTest] | None = None) -> BulkResult:
+        """Read the new files of each feed and match them against ``queries`` (Taiwan stocks) and ``us`` (US stocks
+        and the US market: the ``english`` feed only). A feed is read only when something is matched in it: the
+        ``translation`` feed for Taiwan stocks, ``english`` for either (one download serves both). ``keep`` gets each
+        file's matches before the file is booked as read (its slot written to ``last_success_at``), so they are stored
+        by then: a run cut off between the two reads the file again (2026-11-16 review: the matches were stored only
+        after the whole run, and a worker stopped meanwhile lost the files already booked)."""
         res = BulkResult()
+        taiwan = any(q.taiwan for q in queries.values())
         for feed in self.feeds:
+            feed_us = us if feed == US_FEED and us else None
+            if not (taiwan or feed_us):
+                continue
+            keep_site = taiwan_or_us_site if feed_us else is_taiwan_outlet
             index_name, suffix = FEEDS[feed]
             st = _state(db, feed)
             until = _aware(st.backoff_until)
@@ -313,13 +347,14 @@ class GdeltBulk:
                 try:
                     if len(data) > MAX_BYTES:
                         raise ValueError(f"{len(data)} bytes")
-                    rows = list(gkg_rows(data))
+                    rows = list(gkg_rows(data, keep_site))
                 except (zipfile.BadZipFile, zlib.error, EOFError, ValueError, OSError) as exc:  # skipped, not retried
                     res.errors += 1
                     log.warning("GDELT bulk %s not readable: %s", url.rsplit("/", 1)[-1], str(exc)[:200])
                     rows = []
-                res.rows += len(rows)
-                found = match(rows, queries)
+                res.rows += sum(1 for r in rows if is_taiwan_outlet(r.domain))
+                res.us_rows += sum(1 for r in rows if feed_us and is_us_outlet(r.url))
+                found = match(rows, queries, feed_us)
                 if keep is not None:
                     keep(found)
                 for sym, items in found.items():
