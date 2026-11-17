@@ -28,13 +28,14 @@ import { useStartReduce } from "@/pages/transactions/use-start-reduce"
 import { useCanImportStatements } from "@/pages/transactions/import/access"
 import { textAction } from "@/components/text-action"
 import { useUsClosesServed } from "@/pages/stock/text"
-import { SymbolRecords } from "./SymbolRecords"
+import { ROW_MENU_BUTTON, SymbolRecords } from "./SymbolRecords"
+import { feeInHolding, useSymbolTransactions } from "./symbol-records"
 
 type SortKey = "value" | "day_pct" | "day_change" | "pnl" | "unrealized" | "unrealized_pct" | "name"
 
 /**
  * 持倉：桌面表格（預設 名稱・收盤價・均價（同一格兩行）・今日漲跌・今日損益・損益・市值；可自訂、可排序）；
- * 手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌或報酬率——按表頭切換）。展開一檔：持有・均價・成本一行，再來是每一筆買賣
+ * 手機兩行列（左名稱、代號・股數；右收盤價、今日漲跌或報酬率——按表頭切換）。展開一檔：均價・持有・成本一行，再來是每一筆買賣
  */
 export function HoldingsView() {
   const holdings = useHoldings()
@@ -242,7 +243,8 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
             </th>
             {columns.map(header)}
             {/* 最右邊：動作選單（查看別人的資產時沒有）＋展開每一筆買賣 */}
-            <th scope="col" className={readOnly ? "w-10" : "w-[76px]"}>
+            {/* 兩顆 36px 的鈕（觸控 44px）放在格子裡面，不用負的右邊距伸出表格（滑過的底色不超過表格的右緣） */}
+            <th scope="col" className={readOnly ? "w-10 pointer-coarse:w-11" : "w-[76px] pointer-coarse:w-[92px]"}>
               <span className="sr-only">動作</span>
             </th>
           </tr>
@@ -270,7 +272,7 @@ function HoldingsTable({ rows, sort, onSort, pinned }: { rows: Holding[]; sort: 
                   </td>
                 ))}
                 <td className="text-right" onClick={(e) => e.stopPropagation()}>
-                  <span className="-mr-2 flex items-center justify-end">
+                  <span className="flex items-center justify-end">
                     {!readOnly && <RowMenu h={h} />}
                     <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} />
                   </span>
@@ -324,7 +326,7 @@ function RowMenu({ h }: { h: Holding }) {
           <button
             type="button"
             aria-label={`${h.name}的動作`}
-            className="press grid size-9 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink"
+            className={ROW_MENU_BUTTON}
           />
         }
       >
@@ -455,30 +457,35 @@ function Cell({ c, h, maxWeight, stackDay = false, stackAvg = false }: { c: Hold
 }
 
 /**
- * 展開一檔時最上面一行（桌面與手機都有）：持有・均價・成本（產品負責人 2026-11-17）。和個股頁「我的部位」同樣的名稱與寫法。
- * 後端的 `avg_cost`（原幣）＝目前持股的成本 ÷ 股數，`cost_basis`（新台幣，各筆買進當天的匯率）＝目前持股的成本：
- * 都含買進手續費（下面每一筆的價格不含，所以均價會比只用價格算的高一點，寫出來）；賣出照成本法（預設移動平均、可換 FIFO）扣掉賣掉那幾股的成本，
- * 現金股利不扣成本、配股與分割只加股數（均價跟著變低），減資退款扣成本。隱私模式三個數字都遮（股數照帳本的規則也遮）。
+ * 展開一檔時最上面一行（桌面與手機都有）：均價・持有・成本（產品負責人 2026-11-17：「持倉也要顯示全部的均價（也一樣把手續費幫我算進去）」）。
+ * 和個股頁「我的部位」同樣的名稱與寫法（13px 淡墨的名稱、15px 500 的數字）。
+ * 後端的 `avg_cost`（原幣，美股是美元）＝目前持股的成本 ÷ 股數，`cost_basis`（新台幣，各筆買進當天的匯率）＝目前持股的成本：
+ * 都含買進時填的手續費（沒填的存 0，不自動估）；賣出照成本法（預設移動平均、可換先進先出）扣掉賣掉那幾股的成本，
+ * 現金股利不扣成本、配股與分割只加股數（均價跟著變低），減資退款扣成本。
+ * 「含手續費」只在這一批持股裡真的有填了手續費的買進時才寫（`feeInHolding`；讀的是下面每一筆買賣那一份，同一個快取）：
+ * 沒填的以 0 計，不寫一個不存在的費用。隱私模式三個數字都遮（股數照帳本的規則也遮）。
  */
 function CostLine({ h }: { h: Holding }) {
   const privacy = usePrefs((s) => s.privacyMode)
   const unit = usePrefs((s) => s.quantityUnit)
+  const records = useSymbolTransactions(h.symbol)
+  const withFee = records.data ? feeInHolding(records.data.items) : false
   const hide = (s: string) => (privacy ? <Masked /> : s)
-  // 窄的時候（手機、個股頁那種寬度）下面每一筆是沒有表頭的格線列：這一行自己底下也畫一條，不和第一筆黏在一起
+  // 窄的時候（手機、開著 AI 面板）下面每一筆是沒有表頭的格線列：這一行自己底下也畫一條，不和第一筆黏在一起（和 SymbolRecords 同一個 43rem 斷點）
   return (
     <div className="@container">
-      <dl aria-label={`${h.name}的持有與成本`} className="num flex flex-wrap items-baseline gap-x-5 gap-y-1 py-2.5 text-base @max-2xl:border-b @max-2xl:border-rule">
-        <CostItem label="持有" value={hide(formatQuantity(h.quantity, unit, h.market))} />
-        <CostItem label="均價" value={hide(avgCostText(h))} />
+      <dl aria-label={`${h.name}的均價與成本`} className="num flex flex-wrap items-baseline gap-x-5 gap-y-1 py-2.5 text-base @max-[43rem]:border-b @max-[43rem]:border-rule">
         <CostItem
-          label="成本"
+          label="均價"
           value={
             <>
-              {hide(formatMoney(h.cost_basis))}
-              <span className="ml-2 text-sm font-normal text-ink-2">含買進手續費</span>
+              {hide(avgCostText(h))}
+              {withFee && <span className="ml-1.5 text-sm font-normal text-ink-2">含手續費</span>}
             </>
           }
         />
+        <CostItem label="持有" value={hide(formatQuantity(h.quantity, unit, h.market))} />
+        <CostItem label="成本" value={hide(formatMoney(h.cost_basis))} />
       </dl>
     </div>
   )
@@ -605,7 +612,7 @@ function HoldingsList({ rows, pinned }: { rows: Holding[]; pinned: string[] }) {
                 <span className="sr-only">{pnl ? label("pnl") : label("day_pct")}</span>
                 {h.price === null ? <Dash /> : <Pct value={pnl ? h.unrealized_pnl_pct : h.day_change_pct} />}
               </span>
-              <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} className="relative z-10 col-start-3 row-span-2 row-start-1 -mr-2.5 ml-1 self-center" />
+              <ExpandButton h={h} open={open.has(h.symbol)} onToggle={() => toggle(h.symbol)} className="relative z-10 col-start-3 row-span-2 row-start-1 ml-1 self-center" />
             </div>
             {open.has(h.symbol) && (
               <div id={recordsId(h)} className="border-b border-rule pb-3">
@@ -650,7 +657,7 @@ function PhoneLineToggle() {
   const label = useColumnLabel()
   const [now, next] = pnl ? [label("pnl"), label("day_pct")] : [label("day_pct"), label("pnl")]
   return (
-    <button type="button" onClick={toggle} className="press -mr-2.5 -mb-2 flex h-11 items-end rounded-sm pb-2 hover:text-ink">
+    <button type="button" onClick={toggle} className="press -mb-2 flex h-11 items-end rounded-sm pb-2 hover:text-ink">
       <span className="num">
         {label("price")}・{now}
       </span>
