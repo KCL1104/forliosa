@@ -303,6 +303,7 @@ def _dividend_scope(t: Transaction | dict[str, Any]) -> list[tuple[str, str | No
     return [(get("account_id"), symbol)]
 
 
+@auto_dividends.shared_events
 def create(db: Session, user: User, data: dict[str, Any], md: MarketData) -> Transaction:
     comp = compute(db, user, data, md)
     txn = Transaction(id=new_id("txn"), user_id=user.id, created_at=now_utc(), updated_at=now_utc(), **comp.values)
@@ -315,6 +316,7 @@ def create(db: Session, user: User, data: dict[str, Any], md: MarketData) -> Tra
     return txn
 
 
+@auto_dividends.shared_events
 def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md: MarketData) -> Transaction:
     data = {f: getattr(txn, f) for f in FIELDS}
     old_scope = _dividend_scope(txn)
@@ -357,6 +359,7 @@ def update(db: Session, user: User, txn: Transaction, patch: dict[str, Any], md:
     return txn
 
 
+@auto_dividends.shared_events
 def delete(db: Session, user: User, txn: Transaction, md: MarketData) -> None:
     """Delete a transaction. Deleting an automatic dividend keeps a skip so the sync never books it again."""
     account = _get_account(db, user, txn.account_id)
@@ -578,6 +581,7 @@ def _flag_ledger(db: Session, user: User, md: MarketData, account: BrokerAccount
     return problems
 
 
+@auto_dividends.shared_events
 def check_batch(db: Session, user: User, account_id: str, rows: Sequence[Mapping[str, Any]],
                 md: MarketData) -> BatchCheck:
     """Check importing ``rows`` into ``account_id`` without writing anything (``POST /transactions/batch`` with
@@ -617,6 +621,7 @@ def check_batch(db: Session, user: User, account_id: str, rows: Sequence[Mapping
     check = BatchCheck(account, flags, candidates=candidates, ordered=ordered)
     if not ordered:
         return check
+    auto_dividends.prefetch_events(md, (t.symbol for t in ordered))  # one read for every stock of the batch
     inp = load_ledger_input(db, user, accounts=[account])
     _flag_duplicates(inp.transactions, candidates, flags)
     inp.transactions = [*inp.transactions, *ordered]
@@ -633,6 +638,7 @@ def batch_rejected(check: BatchCheck) -> ApiError:
     return ApiError(422, "batch_rejected", message, extra={"rows": rows})
 
 
+@auto_dividends.shared_events
 def create_batch(db: Session, user: User, account_id: str, rows: Sequence[Mapping[str, Any]],
                  md: MarketData) -> BatchResult:
     """Write ``rows`` into ``account_id`` as one import: every row or none.
@@ -688,6 +694,7 @@ def _first_refusal(db: Session, user: User, account: BrokerAccount, removing: Se
     return refused[0].message if refused and refused[0].txn is not None else None
 
 
+@auto_dividends.shared_events
 def delete_batch(db: Session, user: User, batch_id: str, md: MarketData) -> int:
     """Undo an import: delete every row of the batch that is still there, after one replay of the account without
     them (an account each, should rows have been moved to another account since). 422 ``ledger_inconsistent`` when
@@ -790,6 +797,8 @@ def _running(plan: RecurringPlan, today: date) -> bool:
     return recurring.next_debit(plan, today) is not None
 
 
+# like every other write of the books: the request's ex-dividend notices are read after the lock, once per stock
+@auto_dividends.shared_events
 def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: MarketData,
                    pause_plans: bool = False) -> HoldingDeleted:
     """Delete every record of ``symbol`` in one account (:func:`delete_records`): buys, sells, dividends (automatic

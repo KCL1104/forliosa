@@ -892,6 +892,13 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         const items = filtered.slice(offset, offset + limit)
         return { items, next_cursor: offset + limit < filtered.length ? String(offset + limit) : null }
       }),
+    getTransactionCounts: () =>
+      wait(() => {
+        const by_type: Record<string, number> = {}
+        for (const t of ledger().txns) by_type[t.type] = (by_type[t.type] ?? 0) + 1
+        const transactions = Object.values(by_type).reduce((a, b) => a + b, 0)
+        return { transactions, dividends: (by_type.cash_dividend ?? 0) + (by_type.stock_dividend ?? 0), by_type }
+      }),
     createTransaction: (body) =>
       wait(() => {
         const account = accounts.find((a) => a.id === body.account_id)
@@ -1034,8 +1041,12 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
     // 查看模式：授權者沒有定期定額（示範），本週事項只有除息與入帳
-    getUpcoming: (days = 7) =>
-      wait(() => buildUpcoming(holdingsNow(), findInstrument, days, ledger().viewing ? [] : recurring.upcoming(today, addDays(today, days)), commercial, today)),
+    getUpcoming: (days = 7, opts) =>
+      wait(() => {
+        const items = buildUpcoming(holdingsNow(), findInstrument, days, ledger().viewing ? [] : recurring.upcoming(today, addDays(today, days)), commercial, today)
+        // 與後端相同：types=recurring 只回定期定額扣款（順序不變）
+        return opts?.types === "recurring" ? items.filter((u) => u.type === "recurring") : items
+      }),
     getPerformance: ({ range, account_id, benchmark }) =>
       wait(() => {
         const l = ledger(account_id)
@@ -1233,7 +1244,7 @@ const IGNORES_VIEW_AS = new Set<MethodName>([
 ])
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([
-  "listAccounts", "getPortfolioSummary", "getHoldings", "getPerformance", "getClosedPositions", "getUpcoming", "listTransactions",
+  "listAccounts", "getPortfolioSummary", "getHoldings", "getPerformance", "getClosedPositions", "getUpcoming", "listTransactions", "getTransactionCounts",
   "getPosition", "getPositionHistory", "getEvents",
 ])
 /** 非 GET 的方法（查看模式一律 read_only） */

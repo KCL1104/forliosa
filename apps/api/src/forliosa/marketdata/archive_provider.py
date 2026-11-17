@@ -12,6 +12,7 @@ facade keeps asking the next real provider for the days the archive does not hav
 from __future__ import annotations
 
 import re
+import time
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import replace
@@ -88,6 +89,8 @@ def detect_splits(rows: list[tuple]) -> list[tuple[date, Decimal]]:
     return out
 
 
+SPLITS_CACHE_SECONDS = 3600  # a US symbol's detected splits are kept this long while its series is unchanged
+SPLITS_CACHE_MAX = 2048
 # A listing nobody has named for this long (newest row minus this) is taken as delisted and leaves the instrument list.
 LISTING_DAYS = 365
 # SEC tickers as company_tickers.json spells them (BRK-B): a letter first, so never a Taiwan code.
@@ -95,9 +98,11 @@ _US_TICKER = re.compile(r"^[A-Z][A-Z0-9-]{0,9}$")
 
 
 def _default_session() -> Session:
-    from forliosa.db import session_factory
+    """A session on the archive's own connection pool (``forliosa.db.archive_session_factory``): the request that
+    asks already holds a connection of the request pool."""
+    from forliosa.db import archive_session_factory
 
-    return session_factory()()
+    return archive_session_factory()()
 
 
 class ArchiveProvider(BaseProvider):
@@ -117,6 +122,8 @@ class ArchiveProvider(BaseProvider):
         # (method, symbol) -> source keys of the rows the last answer used (twse-openapi, finmind …),
         # so responses can list the real sources instead of "archive".
         self._last_sources: dict[tuple[str, str], list[str]] = {}
+        # US symbol -> ((newest day, rows) of its stored series, valid until, splits found in it)
+        self._splits: dict[str, tuple[tuple, float, list[CorporateEvent]]] = {}
 
     def sources_for(self, method: str, symbol: str) -> list[str]:
         return self._last_sources.get((method, symbol), [])
@@ -175,15 +182,35 @@ class ArchiveProvider(BaseProvider):
         if not self._answers(symbol):
             return None
         with self.session_fn() as db:
-            stmt = select(PriceDaily).where(PriceDaily.symbol == symbol, PriceDaily.date >= start,
-                                            PriceDaily.date <= end).order_by(PriceDaily.date)
-            rows = list(db.scalars(self._filter(stmt, PriceDaily, backfill)))
+            stmt = select(*_candle_columns()).where(PriceDaily.symbol == symbol, PriceDaily.date >= start,
+                                                  PriceDaily.date <= end).order_by(PriceDaily.date)
+            rows = list(db.execute(self._filter(stmt, PriceDaily, backfill)).all())
         self._remember("history", symbol, rows)
-        out = []
-        for r in rows:
-            c = r.close
-            out.append(Candle(r.date, r.open or c, r.high or c, r.low or c, c, r.volume or 0))
-        return out or None
+        return _candles(rows)
+
+    def histories(self, symbols: list[str], start: date, end: date,
+                  backfill: bool = False) -> dict[str, list[Candle] | None]:
+        """:meth:`history` of many symbols in one query per ``IN_CHUNK`` symbols (2026-11-17: one query and one pooled
+        connection per symbol on the performance page, the watchlist's sparklines and the group pages). Each symbol's
+        answer, and the sources it remembers, are the same as :meth:`history`'s."""
+        from forliosa.models import PriceDaily
+
+        wanted = [s for s in dict.fromkeys(symbols) if self._answers(s)]
+        out: dict[str, list[Candle] | None] = {s: None for s in dict.fromkeys(symbols)}
+        if not wanted:
+            return out
+        by_symbol: dict[str, list[Any]] = {s: [] for s in wanted}
+        with self.session_fn() as db:
+            for chunk in _chunks(wanted):
+                stmt = select(*_candle_columns()).where(PriceDaily.symbol.in_(chunk), PriceDaily.date >= start,
+                                                      PriceDaily.date <= end).order_by(PriceDaily.symbol,
+                                                                                       PriceDaily.date)
+                for r in db.execute(self._filter(stmt, PriceDaily, backfill)):
+                    by_symbol[r.symbol].append(r)
+        for s, rows in by_symbol.items():
+            self._remember("history", s, rows)
+            out[s] = _candles(rows)
+        return out
 
     def quotes(self, symbols: list[str]) -> dict[str, QuoteData] | None:
         from forliosa.models import PriceDaily
@@ -217,15 +244,49 @@ class ArchiveProvider(BaseProvider):
     def corporate_events(self, symbol: str) -> list[CorporateEvent] | None:
         """US splits found in the stored (unadjusted) closes (:func:`detect_splits`); Databento's corporate-action
         data may not be redistributed, so the price series itself is the evidence."""
+        return self.corporate_events_many([symbol]).get(symbol)
+
+    def corporate_events_many(self, symbols: list[str]) -> dict[str, list[CorporateEvent] | None]:
+        """:meth:`corporate_events` of many symbols. The detection reads and scans a whole series (2024-07 on: 60 ms of
+        a 30-stock watchlist per US stock): its answer is kept while the series has the same newest day and length (a
+        new close, a backfill), checked for every symbol in one grouped query."""
         from forliosa.models import PriceDaily
 
-        if market_of_symbol(symbol) != "US" or not self.us_served():
-            return None
+        out: dict[str, list[CorporateEvent] | None] = {s: None for s in dict.fromkeys(symbols)}
+        us = [s for s in out if market_of_symbol(s) == "US"]
+        if not us or not self.us_served():
+            return out
+        now = time.monotonic()
         with self.session_fn() as db:
-            stmt = select(PriceDaily.date, PriceDaily.open, PriceDaily.close, PriceDaily.volume).where(
-                PriceDaily.symbol == symbol, PriceDaily.source == US_SOURCE).order_by(PriceDaily.date)
-            rows = list(db.execute(self._filter(stmt, PriceDaily)).all())
-        return [CorporateEvent(symbol, d, "split", r) for d, r in detect_splits(rows)] or None
+            versions: dict[str, tuple] = {}
+            for chunk in _chunks(us):
+                stmt = (select(PriceDaily.symbol, func.max(PriceDaily.date), func.count())
+                        .where(PriceDaily.symbol.in_(chunk), PriceDaily.source == US_SOURCE)
+                        .group_by(PriceDaily.symbol))
+                versions.update({sym: (newest, n) for sym, newest, n in db.execute(self._filter(stmt, PriceDaily))})
+            fresh: dict[str, list[CorporateEvent]] = {}
+            stale: list[str] = []
+            for s in us:
+                hit = self._splits.get(s)
+                if hit is not None and hit[0] == versions.get(s, (None, 0)) and now < hit[1]:
+                    fresh[s] = hit[2]
+                else:
+                    stale.append(s)
+            rows: dict[str, list[tuple]] = {s: [] for s in stale}
+            for chunk in _chunks(stale):
+                stmt = (select(PriceDaily.symbol, PriceDaily.date, PriceDaily.open, PriceDaily.close, PriceDaily.volume)
+                        .where(PriceDaily.symbol.in_(chunk), PriceDaily.source == US_SOURCE)
+                        .order_by(PriceDaily.symbol, PriceDaily.date))
+                for sym, d, o, c, v in db.execute(self._filter(stmt, PriceDaily)):
+                    rows[sym].append((d, o, c, v))
+        if len(self._splits) + len(stale) > SPLITS_CACHE_MAX:
+            self._splits.clear()
+        for s in stale:
+            fresh[s] = [CorporateEvent(s, d, "split", r) for d, r in detect_splits(rows[s])]
+            self._splits[s] = (versions.get(s, (None, 0)), now + SPLITS_CACHE_SECONDS, fresh[s])
+        for s in us:
+            out[s] = list(fresh[s]) or None
+        return out
 
     def latest_close(self, symbol: str) -> tuple[date, Decimal] | None:
         q = (self.quotes([symbol]) or {}).get(symbol)
@@ -372,17 +433,44 @@ class ArchiveProvider(BaseProvider):
         resolutions without a notice yet are returned with ``ex_dividend_date=None``. TPEx has no resolution
         dataset (mopsfin_t187ap39_O stopped in 2021-08), so TPEx dividends only appear once the notice is out.
         """
-        from forliosa.models import DividendResolution, ExRightsResult, MarketEvent
-
         if market_of_symbol(symbol) == "US":
             return None
+        return self.dividends_many([symbol])[symbol]
+
+    def dividends_many(self, symbols: list[str]) -> dict[str, list[DividendEvent] | None]:
+        """:meth:`dividends` of many symbols: three queries per ``IN_CHUNK`` symbols on one session instead of three
+        queries and a pooled connection per symbol (2026-11-17: the ledger's summary and 本週事項 read 40 holdings one
+        by one). Rows are read in key order (symbol, date, id), so each symbol's answer does not depend on the
+        others asked with it; US symbols get ``None`` (no archived dividends)."""
+        from forliosa.models import DividendResolution, ExRightsResult, MarketEvent
+
+        out: dict[str, list[DividendEvent] | None] = {s: None for s in dict.fromkeys(symbols)}
+        wanted = [s for s in out if market_of_symbol(s) != "US"]
+        if not wanted:
+            return out
+        notices: dict[str, list[Any]] = {s: [] for s in wanted}
+        computed: dict[str, list[Any]] = {s: [] for s in wanted}
+        resolved: dict[str, list[Any]] = {s: [] for s in wanted}
         with self.session_fn() as db:
-            stmt = select(MarketEvent).where(MarketEvent.symbol == symbol, MarketEvent.type == "ex_dividend")
-            rows = list(db.scalars(self._filter(stmt, MarketEvent)))
-            ex_rows = list(db.scalars(self._filter(select(ExRightsResult).where(ExRightsResult.symbol == symbol),
-                                                   ExRightsResult)))
-            resolutions = list(db.scalars(self._filter(
-                select(DividendResolution).where(DividendResolution.symbol == symbol), DividendResolution)))
+            for chunk in _chunks(wanted):
+                stmt = (select(MarketEvent).where(MarketEvent.symbol.in_(chunk), MarketEvent.type == "ex_dividend")
+                        .order_by(MarketEvent.symbol, MarketEvent.date, MarketEvent.id))
+                for r in db.scalars(self._filter(stmt, MarketEvent)):
+                    notices[r.symbol].append(r)
+                stmt = (select(ExRightsResult).where(ExRightsResult.symbol.in_(chunk))
+                        .order_by(ExRightsResult.symbol, ExRightsResult.date))
+                for r in db.scalars(self._filter(stmt, ExRightsResult)):
+                    computed[r.symbol].append(r)
+                stmt = (select(DividendResolution).where(DividendResolution.symbol.in_(chunk))
+                        .order_by(DividendResolution.symbol, DividendResolution.period_start, DividendResolution.seq))
+                for r in db.scalars(self._filter(stmt, DividendResolution)):
+                    resolved[r.symbol].append(r)
+        for s in wanted:
+            out[s] = self._dividend_events(s, notices[s], computed[s], resolved[s])
+        return out
+
+    def _dividend_events(self, symbol: str, rows: list[Any], ex_rows: list[Any],
+                         resolutions: list[Any]) -> list[DividendEvent] | None:
         self._remember("dividends", symbol, rows + ex_rows + resolutions)
         official_cash = {r.date: r.cash_dividend for r in ex_rows if r.cash_dividend}
         # Notices whose amount is not announced yet ("尚未公告", blank) are kept with zero amounts so the
@@ -396,6 +484,29 @@ class ArchiveProvider(BaseProvider):
                                      amount_pending=pending))
         out.extend(resolution_event(symbol, r) for r in resolutions)
         return attach_resolutions(out) or None
+
+
+IN_CHUNK = 500  # symbols per ``IN (…)`` list (SQLite's and psycopg's parameter limits are far above it)
+
+
+def _candle_columns() -> tuple:
+    """The columns a candle needs (no ORM objects: a 40-symbol performance page built 10k of them)."""
+    from forliosa.models import PriceDaily
+
+    return (PriceDaily.symbol, PriceDaily.date, PriceDaily.open, PriceDaily.high, PriceDaily.low, PriceDaily.close,
+            PriceDaily.volume, PriceDaily.source)
+
+
+def _chunks(items: list[str], size: int = IN_CHUNK) -> list[list[str]]:
+    return [items[i:i + size] for i in range(0, len(items), size)]
+
+
+def _candles(rows: list[Any]) -> list[Candle] | None:
+    out = []
+    for r in rows:
+        c = r.close
+        out.append(Candle(r.date, r.open or c, r.high or c, r.low or c, c, r.volume or 0))
+    return out or None
 
 
 def resolution_event(symbol: str, r: Any) -> DividendEvent:

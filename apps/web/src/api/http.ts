@@ -67,7 +67,7 @@ import type {
 } from "./types"
 import type { AdminGroupPass, DailyReport, MyGroupPass } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
-import type { HoldingDeleted, RecordCounts, RecordsCleared, StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
+import type { HoldingDeleted, RecordCounts, RecordsCleared, StatementImport, TransactionBatchCheck, TransactionBatchResult, TransactionCounts } from "./types"
 import type { PositionsCommitCheck, PositionsCommitResult, PositionsImport } from "./types"
 import type {
   AdminReportsOverview,
@@ -193,6 +193,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
 
     listTransactions: (query: TransactionQuery) =>
       request<Page<Transaction>>("GET", "/transactions", { query: query as Query }),
+    getTransactionCounts: () => request<TransactionCounts>("GET", "/transactions/counts"),
     createTransaction: (body: TransactionInput) => request<Transaction>("POST", "/transactions", { body }),
     updateTransaction: (id, patch) => request<Transaction>("PATCH", `/transactions/${enc(id)}`, { body: patch }),
     deleteTransaction: (id) => request<void>("DELETE", `/transactions/${enc(id)}`),
@@ -217,7 +218,7 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getPortfolioSummary: (accountId) =>
       request<PortfolioSummary>("GET", "/portfolio/summary", { query: { account_id: accountId } }),
     getHoldings: (accountId) => request<Holding[]>("GET", "/portfolio/holdings", { query: { account_id: accountId } }),
-    getUpcoming: (days = 7) => request<UpcomingItem[]>("GET", "/portfolio/upcoming", { query: { days } }),
+    getUpcoming: (days = 7, opts) => request<UpcomingItem[]>("GET", "/portfolio/upcoming", { query: { days, types: opts?.types } }),
     getPerformance: (params) => request<Performance>("GET", "/portfolio/performance", { query: params }),
     getClosedPositions: (accountId) => request<ClosedRound[]>("GET", "/portfolio/closed", { query: { account_id: accountId } }),
 

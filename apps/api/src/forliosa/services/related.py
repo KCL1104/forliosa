@@ -33,6 +33,7 @@ from typing import Any
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
+from forliosa import perfcache
 from forliosa.api import serialize as ser
 from forliosa.datapolicy import labels, source_clause, tagged
 from forliosa.marketdata.base import InstrumentInfo, market_of_symbol
@@ -103,6 +104,23 @@ def _with_caps(db: Session, md: MarketData, companies: Iterable[Company]) -> Non
     for sym, c in pool.items():
         if sym in closes and c.shares:
             c.cap = Decimal(c.shares) * closes[sym]
+
+
+# Every company with its market cap, for the peer rows: ~2,000 profiles (JSON) and two queries with ~2,000 symbols
+# each, 150–440 ms per stock page (2026-11-17). They change only when the archive stores something (company profiles,
+# closes): kept per archive version (``perfcache.archive_version``), at most 10 minutes.
+_POOL = perfcache.TtlCache("related.companies", ttl=600, maxsize=4)
+
+
+def _company_pool(db: Session, md: MarketData) -> dict[str, Company]:
+    """:func:`_companies` with :func:`_with_caps` applied; shared by requests (callers only read it)."""
+
+    def build() -> dict[str, Company]:
+        companies = _companies(db, md)
+        _with_caps(db, md, companies.values())
+        return companies
+
+    return _POOL.get_or_compute((md.policy, perfcache.archive_version(db)), build)
 
 
 def _distance(a: Decimal | None, b: Decimal | None) -> float:
@@ -317,9 +335,8 @@ def related(db: Session, md: MarketData, user: User, symbol: str) -> dict[str, A
     if info.type == "etf":
         take(_etf_candidates(db, md, info), MAX_CARDS)
     else:
-        companies = _companies(db, md)
+        companies = _company_pool(db, md)
         me = companies.get(sym)
-        _with_caps(db, md, companies.values())
         bench = _benchmark(db, md, user, info)
         affiliates = _affiliates(db, md, info, companies, me.short_name if me else info.name) if me else []
         peers = _peers(db, md, user, info, me, companies) if me else []

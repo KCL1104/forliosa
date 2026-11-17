@@ -3891,3 +3891,45 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   （`createImportStore` 的 `dropSkips`，寫入重算股利之前；這個帳戶沒有這一檔任何紀錄時不刪，和 `delete_records` 一樣）。
   mock 也有和 `IMPORT_STATEMENTS` 一樣的開關：網址 `?import=admins`、`?import=off`（`?import=all` 切回預設），`/me` 的
   `plan.statement_import` 跟著變，兩種讀檔沒開放時 403 `import_not_enabled`；smoke 的入口檢查改成「一般帳號也有入口，開關沒開、唯讀查看時沒有」。
+
+## API 速度（2026-11-17）
+
+- **回應壓縮**：超過 1 KB 的 JSON 以 gzip 回傳（瀏覽器自動解壓，`Accept-Encoding` 沒有 gzip 就照舊）；SSE（`/ai/chat`、
+  `/stream/quotes`）不壓縮。
+- **`GET /portfolio/upcoming?types=recurring`**：只回定期定額扣款，項目和順序和完整清單裡的 `recurring` 相同；不重算帳本、不讀股利。
+  `types` 只接受 `recurring`（其他值 422）；`days`、`account_id` 規則照舊。
+- **`GET /transactions/counts`**：`{transactions, dividends, by_type}`，一句 GROUP BY；唯讀查看時只算授權的帳戶（和 `/transactions` 一樣）。
+- **慢請求記錄**：`SLOW_REQUEST_MS`（預設 800；`0` 每個請求都記）以上的請求寫一行 `slow_request`（logger `forliosa.perf`）：
+  路由樣板（`/api/v1/groups/{group_id}/leaderboard`，不寫實際路徑、query、header、body 或任何 id／代號）、狀態、總毫秒、到回應標頭的毫秒、
+  SQL 句數與毫秒、連線取用次數、當時同時處理的請求數。SSE 只看到回應標頭的時間。每 15 分鐘每個路由樣板一行 `request_summary`
+  （筆數、p50、p95、最大）；完整 GC 超過 100 ms 寫 `gc_pause`。
+- **存檔讀取用自己的連線池**（`forliosa.db.archive_session_factory`，同一個 `DATABASE_URL`，5＋10 條）：請求本身占一條、存檔再拿一條時不會
+  再互等到 30 秒逾時。連線池逾時不再讓存檔「冷卻」，但那一次查詢仍當作存檔沒回答：股利、除權息參考價照舊改問官方的公告檔，
+  不會變成空的。API 最多約 30 條連線（請求池 15＋存檔池 15），worker 另計。
+- **串流不占連線**：`/ai/chat` 與 `/stream/quotes` 在開始串流前就把請求的連線還回連線池（報價串流在 thread pool 裡還，不擋事件迴圈）；
+  AI 對話每次等模型回覆（含整理回答）前也先還，下一次查資料庫再拿。
+- **GC**：api 啟動、預熱完商品主檔後做一次 `gc.freeze()`（只在啟動時一次；每小時重做會把當時進行中請求的循環垃圾永遠留住）。
+- **非交易日的除權息公告**：存檔的公告在「上一次排定的存檔執行」（交易日 08:10、14:40、21:40，給 90 分鐘跑完）之後存過就採用，
+  週末與連假不再在請求裡下載 `TWT48U_ALL`、`tpex_exright_prepost`；交易日漏跑一次仍照舊改抓官方檔案。
+- 其餘都是同樣的回應、更少的查詢：股利、歷史價、美股分割偵測改成整批查詢；群組頁每位成員的帳本只讀一次；存檔起始日記 1 小時；
+  相關股票的公司母體依存檔版本（`dataset_status`）記 10 分鐘；管理後台兩個筆數記 10 分鐘。
+
+## 2026-11-17 API 速度合併進部署分支（和匯入庫存、刪除這檔、清除所有持倉、Yahoo 參考收盤、盲測開放一起）
+
+- **Migration**：兩個分支都有接在 `0025_mreport_key_state` 後面的 `0026_*`。照往例，後合併的 `0026_mevents_type_date` 的 `down_revision`
+  改接 `0026_mreport_trial_audience`（id 不變）：順序是 `0025_mreport_key_state` → `0026_mreport_trial_audience` → `0026_mevents_type_date`。
+- **API 速度沒有跨請求的帳本快取**：summary、holdings、upcoming（含 `types=recurring`）、performance、`/transactions/counts` 每次都從資料庫
+  重算，所以任何寫入之後的下一次讀取都是新的。跨請求的快取都在市場資料上（存檔起始日、除權息公告的存檔狀態、美股分割偵測、相關股票的公司母體、
+  管理後台的筆數），鍵是存檔的版本或時間，新的寫入路徑都不寫這些表。寫入這一側唯一的快取是同一個請求裡的除權息公告
+  （`auto_dividends.shared_events`），`lock_accounts` 會丟掉鎖之前讀的。
+- **新的寫入路徑照同一個做法**：`positions_import.commit`（匯入庫存，含以券商為準）與 `transactions.delete_holding`（刪除這檔）加上
+  `@auto_dividends.shared_events`，和記一筆、修改、刪除、匯入對帳單（`create_batch`）、整批復原一樣：先 `lock_accounts`，之後每檔的公告只讀一次。
+  匯入庫存 5 檔（其中 2 檔以券商為準）原本會讀 25 次公告（檢查、嚴格重算、重新同步各讀一次），現在 5 次（測試的 SQLite 存檔上：SQL 54 → 24 句、取連線 12 → 2 次）。`clear_records`（清除所有持倉）
+  不重算股利、不讀公告，不用加。匯入對帳單的寫入本來就是 `create_batch`（合併後改由 `write_batch` 寫入，仍在 `create_batch` 的同一個範圍裡）。
+  Yahoo 參考收盤只讀不寫；盲測投票只寫投票表，API 速度沒有快取報告。
+- **前端**：API 速度加的兩個查詢（`qk.upcomingRecurring`＝`["portfolio","upcoming",days,"recurring"]`、紀錄分頁筆數 `["transactions","count"]`）
+  都在 `["portfolio"]`、`["transactions"]` 底下；刪除這檔、清除所有持倉（含 404 `no_records`）、匯入庫存、匯入對帳單、整批復原都用
+  `useInvalidatePortfolio`，所以一起重讀。
+- 測試：`tests/test_api_speed.py`（先讀帳本再寫、每一種新的寫入之後 holdings／summary／upcoming／recurring／counts／performance 都是新的；
+  匯入庫存每檔公告只讀一次；刪除這檔不重讀公告）、`test_yahoo_reference_guard.py`（之後才存的回補日馬上是參考收盤，帳本數字不動）、
+  `test_market_report_trial_open.py`（投票、改票之後馬上讀得到，投票的人的帳本不動）、前端 `src/api/__tests__/write-invalidation.test.tsx`。

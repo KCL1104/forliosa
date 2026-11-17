@@ -169,12 +169,13 @@ def split_how(ratio: Decimal) -> str:
     return f"1 股拆成 {_whole(ratio)} 股" if ratio > 1 else f"{_whole(1 / ratio)} 股合成 1 股"
 
 
-def chart_candles(md: MarketData, symbol: str, candles: list[Candle]) -> list[Candle]:
+def chart_candles(md: MarketData, symbol: str, candles: list[Candle], events: list[Any] | None = None) -> list[Candle]:
     """Candles for a picture (chart, sparkline, 52-week range, average volume): a US series' splits folded in, like
-    the stock chart. The ledger and performance keep the prices as traded."""
+    the stock chart. The ledger and performance keep the prices as traded. ``events``: the symbol's corporate events
+    when the caller read them in a batch (``MarketData.corporate_events_many``)."""
     if not candles or market_of_symbol(symbol) != "US":
         return candles
-    return split_adjusted(candles, md.corporate_events(symbol))[0]
+    return split_adjusted(candles, md.corporate_events(symbol) if events is None else events)[0]
 
 
 def split_adjusted(candles: list[Candle], events: list[Any]) -> tuple[list[Candle], list[str]]:

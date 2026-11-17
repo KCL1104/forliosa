@@ -7,7 +7,7 @@ import binascii
 from datetime import date
 
 from fastapi import APIRouter, Depends, Query, Response
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
@@ -20,6 +20,7 @@ from forliosa.api.schemas import (
     TransactionBatchCreated,
     TransactionBatchDeleted,
     TransactionBatchIn,
+    TransactionCounts,
     TransactionIn,
     TransactionPage,
     TransactionPatch,
@@ -108,6 +109,18 @@ def list_transactions(
     has_more = len(rows) > limit
     rows = rows[:limit]
     return {"items": [txn_out(t) for t in rows], "next_cursor": _encode_cursor(rows[-1]) if has_more else None}
+
+
+@router.get("/counts", response_model=TransactionCounts, summary="交易筆數與股利筆數（帳本「紀錄」分頁上的數字）")
+def transaction_counts(user: User = Depends(current_user), db: Session = Depends(get_db)):
+    """One grouped count (2026-11-17: the ledger read up to three pages of 200 transactions one after the other just
+    to show these two numbers). Under read-only viewing only the delegated accounts count, like the list."""
+    q = select(TxnModel.type, func.count()).where(TxnModel.user_id == user.id)
+    if scope.account_filter(db, user.id) is not None:
+        q = q.where(TxnModel.account_id.in_(scope.account_ids(db, user.id)))
+    by_type = {t: int(n) for t, n in db.execute(q.group_by(TxnModel.type)).all()}
+    return {"transactions": sum(by_type.values()),
+            "dividends": by_type.get("cash_dividend", 0) + by_type.get("stock_dividend", 0), "by_type": by_type}
 
 
 @router.post("", response_model=Transaction, status_code=201)

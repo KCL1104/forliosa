@@ -280,6 +280,8 @@ class MarketEvent(Base):
     __table_args__ = (
         UniqueConstraint("key", name="uq_market_events_key"),
         Index("ix_market_events_symbol_date", "symbol", "date"),
+        # the market page's 重大訊息 and a stock's exchange news filter by type and date (migration 0026)
+        Index("ix_market_events_type_date", "type", "date"),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

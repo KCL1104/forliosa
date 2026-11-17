@@ -482,3 +482,17 @@ def test_trial_text_without_a_link_and_cut_to_the_limit():
     long = push.trial_text(r, {"title": "長" * 3000, "title_origin": "rules"}, "discord", settings)
     assert len(long) <= 1900 and long.endswith(disclaimer.SHORT)
     assert long.split("\n")[1].endswith("…") and push.LINE_TRIAL in long and "投票。" in long  # the vote line stays
+
+
+def test_a_vote_is_read_back_at_once_and_leaves_the_ledger_alone(everyone, other_client):
+    """Merged with the API speed work (2026-11-17), which caches nothing about reports or the ledger between requests:
+    the trial page and the status read the vote just cast or changed, and the voter's ledger reads do not move."""
+    rid = make_trial()
+    ledger = [other_client.get(f"{API}/portfolio/holdings").json(),
+              other_client.get(f"{API}/portfolio/summary").json()["market_value"]]
+    for pick in ("A", "B", "A"):
+        assert other_client.put(f"{API}/market/reports/{rid}/vote", json={"preferred": pick}).status_code == 200
+        assert other_client.get(f"{API}/market/reports/{rid}/trial").json()["my_vote"] == pick
+        assert other_client.get(f"{API}/market/reports/status").json()["latest"][0]["my_vote"] == pick
+    assert [other_client.get(f"{API}/portfolio/holdings").json(),
+            other_client.get(f"{API}/portfolio/summary").json()["market_value"]] == ledger

@@ -1,7 +1,7 @@
 import { HistoryIcon, PanelRightCloseIcon, SquarePenIcon } from "lucide-react"
 import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import { Link } from "@tanstack/react-router"
-import { useBriefings, useUpcoming } from "@/api/queries"
+import { useBriefings, useUpcomingRecurring } from "@/api/queries"
 import { cn } from "@/lib/utils"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { AskAiIcon } from "./ask-icon"
@@ -79,7 +79,8 @@ function PanelBody({ composerRef, onCollapse }: { composerRef: React.RefObject<C
   const suggestions = useAiSuggestions(ctx)
   const route = useRouteKind()
   const [view, setView] = useState<"chat" | "history">("chat")
-  useUpcoming(7)
+  // 今天有沒有定期定額要扣款（記下定期定額的建議）：只讀扣款，不讓每一頁都重算一次帳本與股利
+  useUpcomingRecurring(7)
 
   // 還沒有對話：輸入框在最上面，建議接在它下面（面板不再是上面一大片空白、東西全擠在底部）。
   // 有對話之後輸入框在底部，對話往上長。

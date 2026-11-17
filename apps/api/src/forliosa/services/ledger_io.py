@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import bisect
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date, timedelta
 from decimal import Decimal
@@ -100,6 +100,26 @@ class FxBook:
         return (self._dates[-1], self._rates[-1]) if self._dates else None
 
 
+FxLoader = Callable[..., FxBook]  # FxBook.load's signature: (md, start, end=None) -> FxBook
+
+
+class FxMemo:
+    """:meth:`FxBook.load` for one request that loads the same range more than once (a group page computes each
+    member's ledger and period returns, each with its own FxBook): one read per (start, end), a fresh FxBook each time
+    (an FxBook remembers whether USD was used)."""
+
+    def __init__(self) -> None:
+        self._series: dict[tuple[date, date | None], tuple[dict[date, Decimal], bool, str]] = {}
+
+    def __call__(self, md: MarketData, start: date, end: date | None = None) -> FxBook:
+        key = (start, end or today_taipei())
+        if key not in self._series:
+            book = FxBook.load(md, start, end)
+            self._series[key] = (dict(zip(book._dates, book._rates, strict=True)), book.is_demo, book.source)
+        series, is_demo, source = self._series[key]
+        return FxBook(series, is_demo, source)
+
+
 @dataclass
 class LedgerInput:
     accounts: list[BrokerAccount]
@@ -125,18 +145,25 @@ def to_ledger_txn(t: Transaction, fx: FxBook | None, seq: int = 0) -> LedgerTxn:
     )
 
 
+def accounts_in_scope(db: Session, user: User, account_id: str | None = None) -> list[BrokerAccount]:
+    """``user``'s accounts (one with ``account_id``) in creation order, limited to the request's view scope (read-only
+    viewing: the delegated accounts only)."""
+    allowed = account_filter(db, user.id)
+    q = select(BrokerAccount).where(BrokerAccount.user_id == user.id)
+    if account_id:
+        q = q.where(BrokerAccount.id == account_id)
+    if allowed is not None:
+        q = q.where(BrokerAccount.id.in_(sorted(allowed)))
+    return list(db.scalars(q.order_by(BrokerAccount.created_at)))
+
+
 def load_ledger_input(db: Session, user: User, account_id: str | None = None,
                       accounts: Iterable[BrokerAccount] | None = None) -> LedgerInput:
     """``user``'s ledger (one account with ``account_id``). Under read-only viewing the request's view scope limits
     it to the delegated accounts (``services.scope``): an account outside the scope is as if it did not exist."""
     allowed = account_filter(db, user.id)
     if accounts is None:
-        q = select(BrokerAccount).where(BrokerAccount.user_id == user.id)
-        if account_id:
-            q = q.where(BrokerAccount.id == account_id)
-        if allowed is not None:
-            q = q.where(BrokerAccount.id.in_(sorted(allowed)))
-        accounts = list(db.scalars(q.order_by(BrokerAccount.created_at)))
+        accounts = accounts_in_scope(db, user, account_id)
     accounts = [a for a in accounts if allowed is None or a.id in allowed]
     ids = [a.id for a in accounts]
     if not ids:

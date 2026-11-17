@@ -27,6 +27,7 @@ from __future__ import annotations
 import logging
 import threading
 import time as clock
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -249,13 +250,17 @@ def backfill(db: Session, fetcher: HttpFetcher, deadline_seconds: float | None =
     return out
 
 
-def summary(db: Session) -> dict[str, Any]:
-    """For the admin overview: whether it is on, rows stored, symbols by status, the newest session."""
+def summary(db: Session, rows_fn: Callable[[Session, str], int] | None = None) -> dict[str, Any]:
+    """For the admin overview: whether it is on, rows stored, symbols by status, the newest session. ``rows_fn``: how
+    the rows are counted (the admin page passes a cached count)."""
     from forliosa.config import get_settings
 
     counts = dict(db.execute(select(PriceBackfill.status, func.count()).where(PriceBackfill.source == SOURCE)
                              .group_by(PriceBackfill.status)).all())
-    rows = db.scalar(select(func.count()).select_from(PriceDaily).where(PriceDaily.source == SOURCE)) or 0
+    if rows_fn is not None:
+        rows = rows_fn(db, SOURCE)
+    else:
+        rows = db.scalar(select(func.count()).select_from(PriceDaily).where(PriceDaily.source == SOURCE)) or 0
     have = stored_through(db)
     return {"enabled": get_settings().us_prices_served, "rows": rows, "pending": len(pending(db)),
             "first_day": FIRST_DAY.isoformat(), "stored_through": have.isoformat() if have else None,

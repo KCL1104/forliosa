@@ -429,6 +429,9 @@ class CommitRow:
         return None
 
 
+# one read of each stock's ex-dividend notices for the check, the strict replay and the re-sync together, replaced
+# stocks included (``auto_dividends.shared_events``, as the statement import's ``create_batch``)
+@auto_dividends.shared_events
 def commit(db: Session, user: User, account_id: str, rows: Sequence[CommitRow], md: MarketData,
            trade_date: date | None = None, dry_run: bool = False) -> dict[str, Any]:
     """Write ``rows`` into ``account_id`` as one buy each (fee 0) on ``trade_date`` (default today, Taipei; a row's

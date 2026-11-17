@@ -71,9 +71,11 @@ def chat(body: ChatIn, user: User = Depends(current_user), db: Session = Depends
         if thread.context_tokens >= settings.ai_thread_max_context_tokens:
             raise ApiError(409, "thread_too_long", "這段對話太長了，開一段新對話再問。")
     user_id = user.id
+    # The stream runs on a session of its own: the request's session (the sign-in check, the quota) goes back to the
+    # pool now instead of when the stream ends (2026-11-17: each chat held 2–3 pooled connections for the whole turn).
+    db.close()
 
     def events() -> Iterator[str]:
-        # Own session: the request-scoped one is closed once streaming starts.
         with session_factory()() as sdb:
             me = sdb.get(User, user_id)
             turn = ChatTurn(sdb, me, get_market_data(), pool, settings, economy=economy)

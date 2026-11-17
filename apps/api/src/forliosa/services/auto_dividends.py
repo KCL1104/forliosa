@@ -24,9 +24,11 @@ delete, and the worker after each daily archive run.
 
 from __future__ import annotations
 
+import functools
 import logging
 from collections import defaultdict
 from collections.abc import Callable, Iterable
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -112,6 +114,59 @@ def _archive_provider(md: MarketData) -> Any | None:
     return next((p for p in md.providers if p.name == "archive"), None)
 
 
+# One write request (a create, an edit, an import of 200 rows) asks for the same symbols' notices in each of its checks
+# (the row's computation, the strict replay, the re-sync): within ``shared_events`` they are read once per symbol
+# (2026-11-17: an import of 20 rows of 5 stocks read each stock's notices three times). ``lock_accounts`` drops what was
+# read before the lock (the worker stores notices and books their rows under the same lock), so the checks after it
+# read each symbol once more.
+_shared: ContextVar[EventCache | None] = ContextVar("forliosa_auto_dividend_events", default=None)
+
+
+def shared_events[F: Callable[..., Any]](fn: F) -> F:
+    """Decorator: the calls inside ``fn`` share one :data:`EventCache` (the outermost decorated call owns it)."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: Any, **kwargs: Any) -> Any:
+        if _shared.get() is not None:
+            return fn(*args, **kwargs)
+        token = _shared.set({})
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            _shared.reset(token)
+
+    return wrapper  # type: ignore[return-value]
+
+
+def prefetch_events(md: MarketData, symbols: Iterable[str | None]) -> None:
+    """Read the notices of every Taiwan symbol in ``symbols`` in one batch into the active :func:`shared_events`
+    cache (nothing without one, or without an archive that reads in batches). A failed read leaves them to be read
+    one by one, as before."""
+    from forliosa.marketdata.service import _batch_method
+
+    shared = _shared.get()
+    provider = _archive_provider(md)
+    batch = _batch_method(provider, "dividends_many", "dividends") if provider is not None else None
+    wanted = [s for s in dict.fromkeys(symbols) if s and is_tw(s)]
+    if shared is None or batch is None:
+        return
+    wanted = [s for s in wanted if s not in shared]
+    if not wanted:
+        return
+    try:
+        got = batch(wanted)
+    except Exception:  # read one by one later (each failure is reported there)
+        log.warning("archived dividends unavailable for a batch of %d symbols", len(wanted), exc_info=True)
+        return
+    for s in wanted:
+        shared[s] = _usable_events(got.get(s) or [])
+
+
+def _usable_events(events: list[DividendEvent]) -> list[DividendEvent]:
+    return sorted((e for e in events if e.ex_dividend_date is not None and not e.is_demo),
+                  key=lambda e: e.ex_dividend_date or date.min)
+
+
 def ex_dividend_events(md: MarketData, symbol: str, cache: EventCache | None = None) -> list[DividendEvent] | None:
     """Archived ex-dividend notices of a Taiwan symbol (TWT48U_ALL / tpex_exright_prepost), oldest first.
 
@@ -125,6 +180,11 @@ def ex_dividend_events(md: MarketData, symbol: str, cache: EventCache | None = N
         return []
     if cache is not None and symbol in cache:
         return cache[symbol]
+    shared = _shared.get()
+    if shared is not None and symbol in shared:
+        if cache is not None:
+            cache[symbol] = shared[symbol]
+        return shared[symbol]
     provider = _archive_provider(md)
     out: list[DividendEvent] | None
     if provider is None:
@@ -135,11 +195,11 @@ def ex_dividend_events(md: MarketData, symbol: str, cache: EventCache | None = N
         except Exception:  # an unreadable archive is "unknown", never "no dividends"
             log.warning("archived dividends for %s unavailable", symbol, exc_info=True)
             events = None
-        out = None if events is None else sorted(
-            (e for e in events if e.ex_dividend_date is not None and not e.is_demo),
-            key=lambda e: e.ex_dividend_date or date.min)
+        out = None if events is None else _usable_events(events)
     if cache is not None:
         cache[symbol] = out
+    if shared is not None:
+        shared[symbol] = out
     return out
 
 
@@ -359,7 +419,14 @@ def _scope(db: Session, user: User, inp: LedgerInput) -> _Scope:
 
 def lock_accounts(db: Session, account_ids: Iterable[str]) -> None:
     """Serialize writers of the same accounts (the worker's sync vs a user's change): row locks on PostgreSQL.
-    SQLite already serializes writes and has no ``FOR UPDATE`` (SQLAlchemy omits it there)."""
+    SQLite already serializes writes and has no ``FOR UPDATE`` (SQLAlchemy omits it there).
+
+    Notices a :func:`shared_events` request read before the lock are dropped: the worker may have stored new ones and
+    booked their rows meanwhile, and a re-sync with the older list would delete those rows. The checks after the lock
+    read each symbol's notices once again."""
+    shared = _shared.get()
+    if shared is not None:
+        shared.clear()
     ids = sorted(set(account_ids))
     if ids and db.get_bind().dialect.name == "postgresql":
         db.execute(select(BrokerAccount.id).where(BrokerAccount.id.in_(ids)).with_for_update())

@@ -400,6 +400,15 @@ class TransactionPage(BaseModel):
     next_cursor: str | None
 
 
+class TransactionCounts(BaseModel):
+    """How many transactions there are (the ledger's 「紀錄」 tabs): all of them, the dividends (cash and stock), and
+    by type."""
+
+    transactions: int
+    dividends: int
+    by_type: dict[str, int]
+
+
 class TradePreview(BaseModel):
     gross: float
     fee: float

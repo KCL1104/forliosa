@@ -368,17 +368,24 @@ export function useAiRunner(ctx: AiContext) {
         return
       case "dividend": {
         push({ role: "user", text: "股利入帳" }, { title: "股利入帳" })
-        const upcoming = qc.getQueryData<{ type: string; symbol: string | null; title: string; amount_estimate: number | null; date: string }[]>(qk.upcoming(7)) ?? []
-        // 台股股利在除息日自動入帳：只提美股的入帳
-        const follow = upcoming
-          .filter((u) => u.type === "dividend_payment" && u.symbol && u.amount_estimate && marketOf(u.symbol) === "US")
-          .map((u) => `${u.title.split(" ")[0]} 配息 ${Math.round(u.amount_estimate!)}`)
-        say({
-          text: dividendAsk(opts.code),
-          followUps: follow.slice(0, 2),
-          instruction: true,
-        })
-        seedComposer(opts.code ? `${opts.code} 配息 ` : "")
+        type Upcoming = { type: string; symbol: string | null; title: string; amount_estimate: number | null; date: string }
+        const reply = (upcoming: Upcoming[]) => {
+          // 台股股利在除息日自動入帳：只提美股的入帳
+          const follow = upcoming
+            .filter((u) => u.type === "dividend_payment" && u.symbol && u.amount_estimate && marketOf(u.symbol) === "US")
+            .map((u) => `${u.title.split(" ")[0]} 配息 ${Math.round(u.amount_estimate!)}`)
+          say({
+            text: dividendAsk(opts.code),
+            followUps: follow.slice(0, 2),
+            instruction: true,
+          })
+          seedComposer(opts.code ? `${opts.code} 配息 ` : "")
+        }
+        // AI 面板只讀定期定額扣款（每一頁都讀，要輕）：完整的本週事項到這時才讀。帳本頁讀過、還新的就直接用；
+        // 記了交易之後（失效）或放太久，重讀一次，不提已經賣掉的持股。讀不到就不提入帳
+        void qc
+          .fetchQuery({ queryKey: qk.upcoming(7), queryFn: () => api.getUpcoming(7), staleTime: 10 * 60_000 })
+          .then(reply, () => reply([]))
         return
       }
       case "alert":

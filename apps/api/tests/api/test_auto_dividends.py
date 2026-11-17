@@ -428,6 +428,35 @@ def test_unreadable_archive_keeps_the_automatic_rows(client, notices, engine, mo
     assert [r["amount"] for r in autos(client, acc["id"])] == [5000]
 
 
+def test_a_write_reads_the_notices_again_after_taking_the_lock(client, notices, engine, monkeypatch):
+    """A cash dividend by per-share amount reads the notices before ``lock_accounts``; the worker stores a new notice
+    and books its row in between. The re-sync after the lock must see that notice, not the list read before it."""
+    import contextvars
+
+    notices("2317.TW", date(2026, 7, 16), cash="5.00000000")
+    acc = make_account(client)
+    buy(client, acc, "2317.TW", "2026-07-01", 1000, "200")
+    assert [(r["trade_date"], r["source"]) for r in autos(client, acc["id"])] == [("2026-07-16", "auto")]
+    real_lock, fired = auto_dividends.lock_accounts, []
+
+    def worker_runs_before_the_lock(db, ids):
+        if not fired:
+            fired.append(True)
+
+            def worker():  # another process: no request context
+                notices("2317.TW", date(2026, 10, 16), cash="3.00000000")
+                sync_all_users(lambda: Session(engine), notices.md)
+
+            contextvars.Context().run(worker)
+        return real_lock(db, ids)
+
+    monkeypatch.setattr(auto_dividends, "lock_accounts", worker_runs_before_the_lock)
+    add_txn(client, account_id=acc["id"], symbol="2317.TW", type="cash_dividend", trade_date="2026-08-10",
+            price="5")  # the user's own record of July's dividend: replaces the automatic one
+    assert fired
+    assert [(r["trade_date"], r["source"]) for r in autos(client, acc["id"])] == [("2026-10-16", "auto")]
+
+
 def test_record_of_an_unannounced_dividend_does_not_cover_the_previous_one(client, notices):
     notices("00878.TW", date(2026, 8, 18), cash="0.40000000")
     notices("00878.TW", date(2026, 10, 20))  # 金額尚未公告

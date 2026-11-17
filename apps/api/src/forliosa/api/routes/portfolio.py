@@ -63,9 +63,13 @@ def portfolio_performance(
 
 
 @router.get("/upcoming", response_model=list[UpcomingItem], summary="本週事項：持股的除息、股利入帳、定期定額扣款")
-def portfolio_upcoming(days: int = Query(7), account_id: str | None = None, user: User = Depends(current_user),
-                       db: Session = Depends(get_db)):
+def portfolio_upcoming(days: int = Query(7), account_id: str | None = None,
+                       types: str | None = Query(None, pattern="^recurring$",
+                                                 description="recurring：只回定期定額扣款（不算持股與股利，快很多）"),
+                       user: User = Depends(current_user), db: Session = Depends(get_db)):
     md = get_market_data()
+    if types == "recurring":  # the AI panel on every page only needs today's debits (2026-11-17 API speed)
+        return svc.upcoming_recurring(db, user, md, days, account_id)
     state = svc.compute_state(db, user, md, account_id)
     today = today_taipei()
     plans = recurring.upcoming_items(db, user, md, [a.id for a in state.inp.accounts], today,

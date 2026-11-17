@@ -7,6 +7,26 @@ import { closeOn } from "@/api/mock/market"
 describe("mock adapter 與後端一致", () => {
   const api = createMockAdapter({ latency: [0, 0], policy: "personal" })
 
+  it("GET /transactions/counts：和逐頁讀交易數出來的一樣（API 速度 2026-11-17）", async () => {
+    const counts = await api.getTransactionCounts()
+    const all: { type: string }[] = []
+    let cursor: string | null = null
+    do {
+      const page = await api.listTransactions({ limit: 200, cursor })
+      all.push(...page.items)
+      cursor = page.next_cursor
+    } while (cursor)
+    expect(counts.transactions).toBe(all.length)
+    expect(counts.dividends).toBe(all.filter((t) => t.type === "cash_dividend" || t.type === "stock_dividend").length)
+    expect(Object.values(counts.by_type).reduce((a, b) => a + b, 0)).toBe(all.length)
+  })
+
+  it("本週事項 types=recurring：就是完整清單裡的定期定額扣款，順序不變", async () => {
+    const full = await api.getUpcoming(30)
+    const only = await api.getUpcoming(30, { types: "recurring" })
+    expect(only).toEqual(full.filter((u) => u.type === "recurring"))
+  })
+
   it("1D／5D 以交易日計：第一點是基準收盤（指數 1.0），不算 XIRR", async () => {
     const all = await api.getPerformance({ range: "ALL" })
     const one = await api.getPerformance({ range: "1D" })

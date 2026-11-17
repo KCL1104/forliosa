@@ -386,3 +386,28 @@ def test_one_key_per_turn_round_robin_across_turns(client, pool, fake):
         chat(client, "持股？")
     # both calls of a turn use the same key (prompt cache / thinking stay valid); the next turn rotates
     assert fake.keys_used == [KEYS[0], KEYS[0], KEYS[1], KEYS[1]]
+
+
+def test_a_turn_holds_no_pooled_connection_while_the_model_answers(client, pool, fake, engine):
+    """The request's session goes back to the pool before the stream starts, and the turn's own session before each
+    model call (and before the answer editor's): waiting on the model ties up no database connection (2026-11-17: a
+    few chats at once held the pool's connections for 30 s and the ledger's requests timed out)."""
+    from tests.ai.fake_anthropic import Reply
+
+    acc = make_account(client)
+    buy(client, acc, "2330", 1000, 600)
+    replies = [Reply([text("我查一下。"), tool_use("toolu_c", "get_holdings", {})], "tool_use"),
+               Reply([text("你持有台積電 1 張。")])]
+    checked_out = []
+
+    def respond(_body):
+        checked_out.append(engine.pool.checkedout())
+        return replies.pop(0)
+
+    fake.responder = respond
+    status, events = chat(client, "我有哪些持股？")
+    assert status == 200 and text_of(events).endswith("你持有台積電 1 張。")
+    tools = [(d["name"], d["status"]) for n, d in events if n == "tool"]
+    assert tools == [("get_holdings", "running"), ("get_holdings", "done")]  # the tool read the database in between
+    assert checked_out == [0, 0]
+    assert engine.pool.checkedout() == 0

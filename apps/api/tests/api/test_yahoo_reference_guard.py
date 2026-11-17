@@ -78,3 +78,26 @@ def test_recurring_debit_price_ignores_the_backfill(setup):
     md = setup["md"]
     assert rec.close_on(md, "2330.TW", setup["yahoo"][-1]) is None
     assert rec.close_on(md, "2330.TW", setup["official"][0])[0] == D(1000)
+
+
+def test_a_day_stored_later_is_a_fresh_reference_and_still_not_the_ledger(client, setup, engine):
+    """With the API speed work's caches warm (2026-11-17: they sit on the archive's official rows and versions, never on
+    these): a day the backfill stores after the close and the ledger were read is a reference close at once, and the
+    ledger's numbers do not move."""
+    from forliosa.timeutil import last_tw_trading_day as last_day
+
+    day = last_day(setup["yahoo"][0] - timedelta(days=1))
+    url = f"{API}/instruments/2330.TW/close"
+    assert client.get(url, params={"date": day.isoformat()}).json()["close"] is None
+    ledger = [client.get(f"{API}/portfolio/holdings").json(),
+              client.get(f"{API}/portfolio/summary").json()["market_value"],
+              client.get(f"{API}/portfolio/performance?range=1Y").json()["series"]]
+    with Session(engine) as db:
+        db.add(PriceDaily(symbol="2330.TW", date=day, open=D(2), high=D(2), low=D(2), close=D(2), volume=1,
+                          source="yahoo-history"))
+        db.commit()
+    ref = client.get(url, params={"date": day.isoformat()}).json()
+    assert (ref["close"], ref["reference"]) == (2.0, True)
+    assert [client.get(f"{API}/portfolio/holdings").json(),
+            client.get(f"{API}/portfolio/summary").json()["market_value"],
+            client.get(f"{API}/portfolio/performance?range=1Y").json()["series"]] == ledger

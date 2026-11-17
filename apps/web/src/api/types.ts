@@ -650,6 +650,14 @@ export interface PositionsCommitResult {
   auto_dividends_added: number
 }
 
+/** `GET /transactions/counts` */
+export interface TransactionCounts {
+  transactions: number
+  /** 現金股利＋配股 */
+  dividends: number
+  by_type: Record<string, number>
+}
+
 export interface Page<T> {
   items: T[]
   next_cursor: string | null
@@ -2710,6 +2718,8 @@ export interface ForliosaApi {
   removeWatch(symbol: string): Promise<void>
   // 交易
   listTransactions(query: TransactionQuery): Promise<Page<Transaction>>
+  /** `GET /transactions/counts`：交易筆數與股利筆數（一句 GROUP BY；帳本「紀錄」分頁上的數字） */
+  getTransactionCounts(): Promise<TransactionCounts>
   createTransaction(body: TransactionInput): Promise<Transaction>
   updateTransaction(id: string, patch: Partial<TransactionInput>): Promise<Transaction>
   deleteTransaction(id: string): Promise<void>
@@ -2750,7 +2760,8 @@ export interface ForliosaApi {
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>
-  getUpcoming(days?: number): Promise<UpcomingItem[]>
+  /** `types: "recurring"`：只回定期定額扣款（不算持股與股利，AI 面板在每一頁都讀） */
+  getUpcoming(days?: number, opts?: { types?: "recurring" }): Promise<UpcomingItem[]>
   getClosedPositions(accountId?: string): Promise<ClosedRound[]>
   getPerformance(params: {
     range: PerformanceRange
