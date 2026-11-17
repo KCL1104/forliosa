@@ -461,7 +461,10 @@
 - **順序**：先官方公告（台股；最近 90 天、最多 30 則，新的在前），再新聞報導（最近 30 天、最多 40 則，新的那天在前；2026-11-16 起同一天裡可信媒體——
   經濟日報、工商時報、MoneyDJ、鉅亨、中央社、自由財經、Reuters、CNBC 等——排在前面，再依時間）。前端照時間重排，畫面不變。美股只有新聞報導。
 - **美股新聞只收美國與英國媒體的英文報導**（2026-11-14，產品負責人照建議；GDELT 查詢見 `apps/api/CONTRACT_NOTES.md`「2026-11-12 新聞報導」）：外國的轉載
-  （印度、澳洲、新加坡的地方報）不列。回應形狀不變。
+  （印度、澳洲、新加坡的地方報）不列。回應形狀不變。2026-11-17 起（產品負責人選 A）`source: "GDELT"` 的美股新聞改從 GDELT 英文整批檔來：
+  只收美國、英國主要新聞媒體的白名單（Reuters、CNBC、NYT、BBC、The Guardian、IBD、Morningstar、TechCrunch 等，見 `CONTRACT_NOTES.md`「2026-11-17 美股新聞改讀
+  GDELT 英文整批檔」），**標題要點名這家公司**（DOC API 是比對全文），所以則數會比以前少、但不會混進別家公司或同名一般字（Apple 派、Target 價格目標）的新聞。
+  形狀、`source`、顯名都不變。
 - **新聞報導**（`category: "media"`）：`title` 是媒體原標題（去掉 GDELT 插入的空白與「| 財經」「- 自由財經」這類重複媒體或版名的尾巴）；
   `outlet` 是媒體名稱（依網域：udn.com 聯合新聞網、money.udn.com 經濟日報、cna.com.tw 中央社…；不認得的顯示網域）；
   `url` 是原文連結（去掉 `utm_*`、`fbclid`、`gclid` 這類追蹤參數；AMP 快取連結換成媒體自己的網址）；`source` 是怎麼找到的：`"GDELT"`、
@@ -479,6 +482,7 @@
   `source: "Yahoo股市"` 要同時顯示「Yahoo股市」與原始媒體。
   總覽的「事件」表（官方公告與接下來的事依日期合成一張表）與事件分頁只放官方公告（`category` 不是 `media`）。
 - `/meta/attributions` 多了 `gdelt/doc`（`license_status: "open"`，可商用、需引用），personal 另有 `yahoo-rss/stock`（`license_status: "non_commercial"`）；
+  2026-11-16 起另有 `gdelt/gkg`（每 15 分鐘的整批檔，同樣的條款與引用）。2026-11-17 起 `gdelt/gkg` 的 `used_for` 是台股、美股與市場頁美股新聞，`gdelt/doc` 寫成整批檔超過 2 小時沒更新時的備用來源；
   `notice` 多一行 GDELT 條款，commercial 的 `not_used` 多「新聞網站本身」與「Yahoo股市 RSS」兩行。
 
 ### 相關股票、關於〈公司〉、上市股票外資持股前 20 名（2026-11-12）
@@ -698,6 +702,7 @@
 - `foreign_flow`「最近外資對這檔的動向？」（`lines: ["最近外資", "對這檔的動向？"]`）：只在**上市個股**（TWSE、`type: "stock"`）出現，排在 `why_move` 之後。上市股票沒有逐檔三大法人與外資持股，AI 用 `web_search` 找最近的新聞與公開資訊回答，每一點附來源與日期（系統提示與 `get_chips` 的說明都這樣要求）；上櫃股票的法人資料在籌碼分頁，不出這題。
 - **圖卡（2026-11-13）**：使用者要求畫圖或比較走勢時，模型呼叫 `draw_chart`（`kind`＋`symbols`（最多 5 檔）＋`range`）。`price` 一檔的收盤價；`compare` 2–5 檔的漲跌幅（從共同的第一天起算，分割與減資已調整，不含股利）；`revenue` 月營收（近 24 個月）；`eps` 每季每股盈餘（近 8 季，台股和美股不放在同一張）；`performance` 使用者自己的時間加權報酬率和基準（只有百分比，任何模式都沒有金額、成本、股數）。每張圖所有線合計最多 480 個點（長的區間平均取樣，頭尾都留）。資料畫不出來（收盤價不到兩天、沒有營收…）時工具回 `status: "no_data"` 與原因，不送 `chart`。前端：日期軸畫折線；月份／季別的柱子總數 ≤ 24 畫柱狀、再多改畫折線；一個縱軸；兩條線以上有圖例，線尾標代號。
 - 新工具 `get_related_stocks`（個股頁「相關股票」那一列，不含走勢小圖）：模型查不到某一檔當天的消息時，用它找同產業與相關個股，再搜尋類股與大盤的消息。
+- **新聞標籤與新工具 `search_news`（2026-11-17，產品負責人同意）**：worker 用 Haiku 替每一則存下來的新聞標題（同一個網址一次）貼上主題（40 個固定主題）、類股（台股官方產業別、12 個美股類股）與相關股票（商品清單裡有的，最多 5 檔），只看標題，不抓內文。`get_news` 的媒體標題有標籤時，那則 `search_result` 多一段「主題：…；類股：…；相關：…」文字（第一段標題文字不變）。`search_news`（`theme`、`sector`、`symbol`、`keyword`、`days` 五個都必填，空字串＝不限；`days` 1–90）搜站內存的新聞標題，結果和 `get_news` 一樣是可引用的 `search_result`，`citation` 事件與出處的顯示不變。API 回應與前端都沒有改。細節：`apps/api/CONTRACT_NOTES.md`「2026-11-17 新聞標籤」。
 - 伺服器工具 `web_fetch` 一律帶 `blocked_domains: ["www.twse.com.tw", "mis.twse.com.tw"]`（不自動擷取證交所網站與 MIS；`web_search` 的結果不受影響）。API 的 `allowed_domains` 與 `blocked_domains` 只能二選一：設定了 `AI_WEB_FETCH_ALLOWED_DOMAINS` 時改成從允許清單拿掉這兩個主機，涵蓋它們的上層網域（`twse.com.tw`）換成 `openapi.twse.com.tw`；清單只剩被封鎖的主機時不提供 `web_fetch`。
 - 伺服器工具 `web_search`（對話與法人觀點）2026-11-16 起一律帶 `blocked_domains`：評等彙整站、報價／資料頁、AI 產生的頁面（例如 CMoney 的 AI 問答、富果的 AI 法說會摘要）、論壇與部落格（對話 `tools.CHAT_BLOCKED_DOMAINS`；法人觀點 `tools.SEARCH_BLOCKED_DOMAINS`＝對話的再加 Benzinga、Zacks、MarketScreener 這三個也發新聞的評等網站；台灣的報價／AI／論壇網域和新聞那邊共用 `news.outlets.NOT_NEWS_DOMAINS`，清單見 `apps/api/CONTRACT_NOTES.md`「法人觀點」）；新聞媒體不擋。對話的清單每一題都一樣（工具清單每題不同會讓提示快取失效）。設定了 `AI_WEB_SEARCH_ALLOWED_DOMAINS` 時改用那份允許清單（API 只能二選一）。
 
@@ -1555,7 +1560,7 @@ AI 整理的部分可能有錯。Forliosa 只替你整理公開資訊與你自�
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd"}}` |
+| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd", "langsearch": {"enabled", "configured", "day_utc", "requests", "request_cap", "tokens", "token_cap", "first_fills", "stopped", "level", "paused_until", "warning", "tiers"}}}` |
 | GET | `/admin/news/blocked-domains` | `[{"domain", "reason", "created_at", "from_env"}]`：存在資料庫的（新的在前），再來是只寫在 `NEWS_BLOCKED_DOMAINS` 的（`created_at` null、`from_env` true） |
 | POST | `/admin/news/blocked-domains` | `{"domain", "reason"?: ≤200 字}` → 201 `{"domain", "deleted_headlines"}`：網域正規化（小寫、網址只取主機、去掉 `www.`），封鎖它與子網域並刪掉已存的標題；不是網域 → 422 |
 | DELETE | `/admin/news/blocked-domains/{domain}` | 解除 → 204；寫在 `NEWS_BLOCKED_DOMAINS` 的 → 409 `set_in_environment`；不在清單 → 404。刪掉的標題不會回來 |
@@ -1709,6 +1714,11 @@ AI 整理的部分可能有錯。Forliosa 只替你整理公開資訊與你自�
 （最近一次有回答）、`new_24h`（過去 24 小時存進來的新標題數）；另有暫停中的 SearXNG 上游引擎、本月新聞 AI 搜尋的費用與預算、
 多久整理一次與最近一次整理的時間。只有數字與時間。
 
+2026-11-17：`sources` 多一列 `langsearch`（LangSearch 台股新聞；`NEWS_LANGSEARCH_ENABLED` 而且有金鑰才算開，暫停原因沿用上面三種），
+另有 `news.langsearch`：今天（UTC）的請求數與上限（`requests`、`request_cap`）、token 與上限、第一次查的檔數、今天停下的原因
+（`stopped`：`quota`／`contract`／`blocked`）、降級等級（`level` 0–2）、整個來源暫停到幾點、`warning`（`contents_cap_ignored`：回應的
+token 遠超過上限、字數限制沒有生效，今天停用）與各分級的檔數（`tiers`）。舊版後端沒有這個欄位。
+
 ## 美股收盤價（2026-11-15）
 
 產品負責人決定（`PRODUCT.md`「美股收盤價」）：美股改用 Databento 的 EQUS.SUMMARY——Nasdaq NLS Plus 的官方合併收盤，日線、**沒有還原股票分割與股利**，從 **2024-07-01** 開始。負責人沒有先寫信問 Databento 能不能顯示給會員，知道這個授權風險。
@@ -1761,8 +1771,8 @@ AI 整理的部分可能有錯。Forliosa 只替你整理公開資訊與你自�
 
 - 這三檔是 **ETF**，不是指數：畫面寫「SPY（追蹤 S&P 500 的 ETF）」，不寫成「S&P 500」。指數點數要另外向指數公司取得授權，沒有。
 - 最上層的 `as_of` 仍然只看台股（加權指數與排行），不看 `us`。
-- `sources` 有美股 ETF 時多上面的 Databento 顯名，有美股新聞時多 GDELT 的顯名。
-- **美股新聞**：worker 每次整理新聞（`NEWS_REFRESH_MINUTES`，45 分鐘）多問 GDELT 一次（關鍵字 Wall Street、S&P 500、Dow Jones、Nasdaq；只收美國與英國媒體的英文報導），存在代號 `^US` 底下（不是商品）；回應取最近 3 天、最多 6 則，下架封鎖清單照樣適用。`NEWS_US_MARKET=false` 關掉。和個股新聞一樣只有標題、媒體、時間、連結。
+- `sources` 有美股 ETF 時多上面的 Databento 顯名，有美股新聞時多 GDELT 的顯名（2026-11-17 起兩個：GKG 整批檔與 DOC 查詢 API——新聞主要來自整批檔、查詢 API 只當備用，存起來分不出是哪個）。
+- **美股新聞**：存在代號 `^US` 底下（不是商品）；回應取最近 3 天、最多 6 則，下架封鎖清單照樣適用。`NEWS_US_MARKET=false` 關掉。和個股新聞一樣只有標題、媒體、時間、連結。2026-11-17 起從 GDELT 英文整批檔來（美國、英國媒體白名單，標題講 Wall Street、S&P 500、Dow Jones、Nasdaq、美股漲跌或聯準會利率的），英文整批檔超過 2 小時沒更新時才改回每次整理新聞多問 GDELT 查詢 API 一次（關鍵字 Wall Street、S&P 500、Dow Jones、Nasdaq）。形狀不變。
 
 **管理後台 `GET /admin/overview` 的 `us_prices`**
 

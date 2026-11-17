@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, time
 from functools import lru_cache
 from pathlib import Path
 from typing import Annotated, Literal
@@ -333,6 +333,53 @@ class Settings(BaseSettings):
     # Takedown blocklist by domain (a domain blocks its subdomains), on top of the news_blocked_domains table
     # that ``python -m forliosa.news block <domain>`` maintains.
     news_blocked_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # 新聞標籤 (forliosa.news.tagging; 產品負責人 2026-11-17): the worker gives every stored headline (once per URL) up
+    # to 3 themes, its sectors and up to 5 related stocks from a fixed vocabulary (forliosa.news.taxonomy), assigned by
+    # the model (AI_MODEL_NEWS_TAGGING, default AI_MODEL: Haiku) every NEWS_TAGGING_MINUTES, at most
+    # NEWS_TAGGING_MAX_BATCHES requests of NEWS_TAGGING_BATCH_SIZE headlines per run, oldest first, only headlines
+    # published in the last NEWS_TAGGING_DAYS. For the AI tools (get_news, search_news) and the market reports.
+    # System-paid (feature "news_tagging" in ai_usage); stopped for the rest of the UTC month once
+    # NEWS_TAGGING_MONTHLY_BUDGET_USD is spent (0 = nothing is tagged). Off: no job, untagged headlines stay untagged.
+    # A run with fewer than NEWS_TAGGING_MIN_BATCH headlines waiting sends nothing until the oldest of them has waited
+    # NEWS_TAGGING_MAX_WAIT_MINUTES (each request has a fixed cost: the cached prompt and the model's thinking).
+    news_tagging_enabled: bool = True
+    news_tagging_minutes: int = Field(default=5, ge=1)
+    news_tagging_min_batch: int = Field(default=20, ge=1, le=50)
+    news_tagging_max_wait_minutes: int = Field(default=30, ge=0, le=55)
+    news_tagging_monthly_budget_usd: float = Field(default=3.0, ge=0)
+    news_tagging_batch_size: int = Field(default=50, ge=1, le=50)
+    news_tagging_max_batches: int = Field(default=4, ge=1, le=40)
+    news_tagging_days: int = Field(default=7, ge=1, le=90)
+    ai_model_news_tagging: str | None = None
+    # LangSearch web search for Taiwan stocks' headlines (forliosa.news.langsearch; 產品負責人 2026-11-17, the exception
+    # in CLAUDE.md): title, outlet, time and link only, never the snippet, summary or text. OFF by default: turned on
+    # only in the production Railway worker's variables, with LANGSEARCH_API_KEY (Bearer; never logged). Inside the free
+    # daily allowance: at most NEWS_LANGSEARCH_MAX_REQUESTS_PER_DAY requests and NEWS_LANGSEARCH_MAX_TOKENS_PER_DAY
+    # tokens per UTC day; a 429, 401/403 or redirect stops it until the next 00:00 UTC. US stocks never use it.
+    news_langsearch_enabled: bool = False
+    langsearch_api_key: SecretStr | None = None
+    news_langsearch_url: str = "https://api.langsearch.com/v1/web-search"
+    news_langsearch_interval_seconds: float = Field(default=1.5, ge=1.2)  # process-wide gap between requests
+    news_langsearch_timeout_seconds: float = Field(default=20.0, ge=5.0, le=60.0)
+    news_langsearch_stocks_after: time = time(18, 30)  # Taipei: the daily stock pass (overdue ones from 08:00)
+    news_langsearch_topics_at: time = time(16, 0)  # Taipei, trading days: the market topics (stored under "^TW")
+    news_langsearch_topics: Annotated[list[str], NoDecode] = Field(
+        default_factory=lambda: ["台股 盤後", "外資 買賣超", "台股 大盤"])
+    news_langsearch_count_large: int = Field(default=50, ge=1, le=50)
+    news_langsearch_count: int = Field(default=20, ge=1, le=50)  # mid, small, topics
+    news_langsearch_large_rank: int = Field(default=50, ge=0)  # market-cap rank of the initial large tier
+    news_langsearch_large_min_avg: float = Field(default=5.0, ge=0)  # headlines kept per run (~14-day average)
+    news_langsearch_mid_min_avg: float = Field(default=1.0, ge=0)  # below this: small
+    news_langsearch_every_days: Annotated[dict[str, int], NoDecode] = Field(
+        default_factory=lambda: {"large": 1, "mid": 2, "small": 4, "quiet": 7})
+    news_langsearch_quiet_after_empty: int = Field(default=4, ge=1)
+    news_langsearch_max_requests_per_day: int = Field(default=250, ge=0)
+    news_langsearch_max_first_fill_per_day: int = Field(default=100, ge=0)
+    news_langsearch_max_tokens_per_day: int = Field(default=50_000, ge=0)
+    news_langsearch_token_guard: int = Field(default=1000, ge=1)  # one answer above this: stopped for the UTC day
+    # Taiwan-looking sites that are not news (foreign ones are dropped by the Taiwan-outlet check anyway)
+    news_langsearch_junk_domains: Annotated[list[str], NoDecode] = Field(default_factory=lambda: [
+        "tainan-estate-et.com.tw", "interview.tw", "pokem.tw", "the-frequent-traveler.com.tw"])
 
     # -- 「關於」 description (decision 7): a zh.wikipedia excerpt (CC BY-SA 4.0) or, without an article, an AI-written
     # 2–3 sentence description from official facts (feature "company", system-paid, at most COMPANY_AI_PER_RUN per
@@ -389,6 +436,39 @@ class Settings(BaseSettings):
             raise ValueError("NEWS_GDELT_BULK_FEEDS: translation and/or english")
         return v
 
+    @field_validator("news_langsearch_topics", "news_langsearch_junk_domains", mode="before")
+    @classmethod
+    def _split_langsearch_lists(cls, v: object) -> object:
+        if isinstance(v, str):
+            return [" ".join(s.split()) for s in v.split(",") if s.strip()]
+        return v
+
+    @field_validator("news_langsearch_every_days", mode="before")
+    @classmethod
+    def _langsearch_every_days(cls, v: object) -> object:
+        """``large=1,mid=2,small=4,quiet=7`` (days between two runs of a tier); a tier left out keeps its default."""
+        out = {"large": 1, "mid": 2, "small": 4, "quiet": 7}
+        if isinstance(v, str):
+            pairs = [p.split("=", 1) for p in v.split(",") if p.strip()]
+            if any(len(p) != 2 for p in pairs):
+                raise ValueError("NEWS_LANGSEARCH_EVERY_DAYS: large=1,mid=2,small=4,quiet=7")
+            v = {k.strip().lower(): int(n) for k, n in pairs}
+        if isinstance(v, dict):
+            if set(v) - set(out) or any(int(n) < 1 for n in v.values()):
+                raise ValueError("NEWS_LANGSEARCH_EVERY_DAYS: tiers large, mid, small, quiet; at least 1 day each")
+            out.update({k: int(n) for k, n in v.items()})
+            return out
+        return v
+
+    @field_validator("news_langsearch_url")
+    @classmethod
+    def _langsearch_url(cls, v: str) -> str:
+        """Only LangSearch's own web-search endpoint (the key is sent there and nowhere else)."""
+        v = v.strip().rstrip("/")
+        if not v.startswith("https://api.langsearch.com/"):
+            raise ValueError("NEWS_LANGSEARCH_URL must be on https://api.langsearch.com/")
+        return v
+
     @field_validator("news_searxng_engines", mode="before")
     @classmethod
     def _split_searxng_engines(cls, v: object) -> object:
@@ -439,7 +519,7 @@ class Settings(BaseSettings):
         return v.rstrip("/") if v else v
 
     @field_validator("discord_client_secret", "google_client_secret", "telegram_bot_token", "databento_api_key",
-                     mode="before")
+                     "langsearch_api_key", mode="before")
     @classmethod
     def _blank_secret(cls, v: object) -> object:
         return None if isinstance(v, str) and not v.strip() else v
@@ -524,6 +604,12 @@ class Settings(BaseSettings):
         if self.news_searxng_url is None:
             return SEARXNG_URL_RAILWAY if self.forliosa_env == "prod" else SEARXNG_URL_LOCAL
         return self.news_searxng_url or None
+
+    @property
+    def langsearch_on(self) -> bool:
+        """LangSearch may be asked: news on, NEWS_LANGSEARCH_ENABLED and a key."""
+        return bool(self.news_enabled and self.news_langsearch_enabled and self.langsearch_api_key
+                    and self.langsearch_api_key.get_secret_value().strip())
 
     @property
     def jitter_enabled(self) -> bool:

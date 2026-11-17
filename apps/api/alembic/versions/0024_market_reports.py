@@ -14,7 +14,7 @@ and ``tests/test_migrations.py::test_single_head`` fails: relink the later-merge
 ``Revises:`` line) to the other; the ids stay.
 
 Revision ID: 0024_market_reports
-Revises: 0023
+Revises: 0024_news_tags
 Create Date: 2026-11-17 14:00:00.000000
 """
 
@@ -26,7 +26,7 @@ from alembic import op
 import forliosa.db
 
 revision: str = '0024_market_reports'
-down_revision: str | None = '0023'
+down_revision: str | None = '0024_news_tags'
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

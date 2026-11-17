@@ -393,6 +393,7 @@ describe("資料來源與授權", () => {
       const special: Record<string, string> = {
         "databento-equs/price": "資料由 Databento 提供",
         "gdelt/doc": "依 GDELT 使用條款引用：https://www.gdeltproject.org/",
+        "gdelt/gkg": "依 GDELT 使用條款引用：https://www.gdeltproject.org/",
         "wikipedia/zh": "依 CC BY-SA 4.0 節錄（不改寫）",
         "wikidata/entities": "CC0 1.0（公眾領域）",
       }

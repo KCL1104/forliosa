@@ -38,6 +38,7 @@ from forliosa.timeutil import TAIPEI, iso_taipei, now_taipei, now_utc
 
 FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news",  # news: system-paid (user_id NULL)
             "briefing",  # 每日收盤簡報 (``ai.briefing``): charged to the user's month, not to the day's questions
+            "news_tagging",  # 新聞標籤 (``news.tagging``): system-paid, NEWS_TAGGING_MONTHLY_BUDGET_USD
             # 市場報告 (``forliosa.reports``, 2026-11-17): site-paid (user_id NULL), counted against the reports' own
             # monthly budget; every call of a blind-test edition is ``mreport_trial`` (the trial has its own cap)
             "mreport_gather", "mreport_write", "mreport_check", "mreport_trial")
@@ -49,7 +50,7 @@ def model_for(feature: str, settings: Settings) -> str:
     override = {"chat": settings.ai_model_chat, "why": settings.ai_model_why, "import": settings.ai_model_import,
                 "report": settings.ai_model_report, "analyst": settings.ai_model_analyst,
                 "group_digest": settings.ai_model_digest, "news": settings.ai_model_news,
-                "company": settings.ai_model_company}.get(feature)
+                "company": settings.ai_model_company, "news_tagging": settings.ai_model_news_tagging}.get(feature)
     return (override or settings.ai_model).strip()
 
 

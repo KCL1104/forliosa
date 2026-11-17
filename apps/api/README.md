@@ -92,7 +92,9 @@ uv run python -m forliosa.worker
 | 每天 04:35 | 群組推播紀錄 30 天、Telegram 連結碼、26 週前的週報 |
 | 每月 10、25 日 10:20 | 群組 `monthly`：董監事持股餘額明細（只留公司擔任法人董事或大股東的列，給「相關股票」的關係企業）、集保股東戶數（2-22／2-23）、ESG 產品類別 |
 | 每小時 :35 | 「關於」公司簡介：追蹤中的股票先用 Wikidata 找中文維基百科條目並節錄（每月一次、一次一個請求、429 就停 6 小時），沒有條目才用 AI 依官方資料寫 2–3 句（資料變了才重寫）。`uv run python -m forliosa.services.company refresh [代號…]` |
-| 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）。台股用 **GDELT 每 15 分鐘的整批檔**（GKG；翻譯串流保留中文原標題，一次下載給所有股票用，只取台灣網站、標題點名公司的；每次最多讀 `NEWS_GDELT_BULK_MAX_FILES` 份，兩份間隔 ≥ 2 秒，被拒就暫停），整批檔超過 2 小時沒更新時才改回一檔一檔問 GDELT 查詢 API（美股一直用查詢 API：每次間隔 ≥ 6 秒，429 就暫停）；免費來源 7 天內少於 3 則才用 AI 搜尋補（找 14 天內，14 天內完全沒有就找 30 天；GDELT 或 SearXNG 暫停時照樣補；每月上限 US$30）。機器人快訊（鉅亨「盤中速報」「營收速報」）、報價頁、論壇、AI 寫的頁面不收也不顯示。只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`gdelt-bulk-check --symbol 2330` 看最新一份整批檔（不寫資料庫），`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」）。每次另外多問 GDELT 一次美股市場新聞（市場頁，存在 `^US`；`NEWS_US_MARKET`） |
+| 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）。台股用 **GDELT 每 15 分鐘的整批檔**（GKG；翻譯串流保留中文原標題，一次下載給所有股票用，只取台灣網站、標題點名公司的；每次最多讀 `NEWS_GDELT_BULK_MAX_FILES` 份，兩份間隔 ≥ 2 秒，被拒就暫停），美股與市場頁的美股新聞（`^US`）2026-11-17 起也用同一份**英文整批檔**（不多下載；只取美國、英國新聞媒體白名單、標題點名公司的，見 `CONTRACT_NOTES.md`「2026-11-17 美股新聞改讀 GDELT 英文整批檔」）；整批檔超過 2 小時沒更新時才改回一檔一檔問 GDELT 查詢 API（每次間隔 ≥ 6 秒，429 就暫停）；免費來源 7 天內少於 3 則才用 AI 搜尋補（找 14 天內，14 天內完全沒有就找 30 天；GDELT 或 SearXNG 暫停時照樣補；每月上限 US$30）。機器人快訊（鉅亨「盤中速報」「營收速報」）、報價頁、論壇、AI 寫的頁面不收也不顯示。只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`gdelt-bulk-check --symbol 2330 --symbol NVDA` 看最新一份整批檔（不寫資料庫），`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」）。美股市場新聞存在 `^US`（市場頁；`NEWS_US_MARKET`），英文整批檔停住時才每次多問 GDELT 查詢 API 一次 |
+| 每 5 分鐘（`NEWS_TAGGING_MINUTES`；`NEWS_TAGGING_ENABLED=false` 關掉） | **新聞標籤** `news_tagging`（`forliosa.news.tagging`，產品負責人 2026-11-17）：最近 7 天還沒貼過的新聞標題（同一個網址一次），最舊的先，每次最多 4 個請求、每個 50 則，交給 Haiku（effort low、結構化輸出）貼主題、類股、相關股票；只送標題、媒體與歸在哪幾檔。新標題不到 20 則（`NEWS_TAGGING_MIN_BATCH`）時先累積，最舊的一則存進來 30 分鐘（`NEWS_TAGGING_MAX_WAIT_MINUTES`）後才送；系統提示快取 1 小時、沿用上一次的金鑰槽。回答不能用（拒答、截斷）的那批對半切開立刻再送，只有單獨送還失敗的那一則算嘗試（15 分鐘起再試、最多 3 次；單獨被拒就直接放棄）；模型名稱或參數錯（404、400）、金鑰忙碌都只是這次先停、不算嘗試（設定錯的 WARNING 每小時最多一次）。這個 UTC 月份花到 `NEWS_TAGGING_MONTHLY_BUDGET_USD`（US$3）就停到下個月（log 寫一次）。新聞刪除時標籤一起刪。`uv run python -m forliosa.news.tagging run`／`status`／`retry-failed`（放棄的重新給嘗試次數）。估計一天 500 則約 US$1.7–2.5／月、1,000 則約 US$2.7–4.1／月（`CONTRACT_NOTES.md`「2026-11-17 新聞標籤」） |
+| 每 10 分鐘看一次（只在 `NEWS_LANGSEARCH_ENABLED=true`；正式環境 worker） | **LangSearch 台股新聞** `news_langsearch`（`forliosa.news.langsearch`，產品負責人 2026-11-17 決定，`CLAUDE.md` 的例外）：交易日 16:00 起查大盤 3 個主題（存在 `^TW`，每個 UTC 日一次）；18:30 起查追蹤中的台股，依分級大型股每天、中型股每 2 天、小型股每 4 天、連 4 次 0 則的每 7 天（錯過的隔天 08:00 起補，第一次的隨時、每天最多 100 檔）。查詢是簡稱加引號（`"台積電"`），每次帶 `contents.text.max_characters=1`（約 40 token）、不篩網域；只存標題、媒體、時間、網址，過 `tw_match` 比對、只收台灣網站、去重，30 天後刪除，之後照常貼標籤。每個 UTC 日最多 250 次請求、5 萬 token；單次超過 1,000 token 當天停用；429／401／403／轉址停到下一個 00:00 UTC（台北 08:00），5xx／逾時連 2 次（跨輪計算）從失敗那一刻起暫停 15 分鐘、之後加倍；不換帳號、不偽裝。超過保存期限（30 天）的標題不存。美股不用。`uv run python -m forliosa.news langsearch-refresh`（照排程跑一次）、`langsearch-status`、`langsearch-smoke`（照 worker 的規則送一次：關閉、暫停中、到上限、worker 正在跑時不送，算進當天用量，被擋時 worker 也停；見 `CONTRACT_NOTES.md`「2026-11-17 LangSearch 台股新聞」） |
 | 美股收盤後一小時起（紐約 17:00＝台北冬令 06:00、夏令 05:00），每小時到那天存進來為止；不看台股交易日 | 美股收盤價 `us_closes`（`US_PRICE_SOURCE=databento`＋`DATABENTO_API_KEY` 才有）：Databento 有新的一天才買，重讀最後 5 天；美國放假那天 20 小時後不再等 |
 | 每 10 分鐘 | 美股回補 `us_backfill`（同上）：新出現在帳本或觀察清單的美股（和 SPY、DIA、ONEQ、VOO）補 2024-07-01 以來的日線，每 100 檔一個請求。Databento 拒絕（401／402／403）時兩個美股工作暫停 30 分鐘起、最長 6 小時 |
 
@@ -284,10 +286,11 @@ src/forliosa/
 | shioaji-data（GitHub raw） | 商品主檔、每日收盤與市值、月營收、季 EPS／淨值；**晚上的暫時收盤價**（2026-11-16 起，worker `evening_closes`，`SHIOAJI_EVENING_CLOSE`）：`v1/tw/market/daily.json` 大多當天 20:20–23:40 更新（19 天裡 3 天拖到隔天 00:05–01:29），官方收盤還沒進來的市場先存只有收盤價的列（`source = 'shioaji-data'`，開高低與成交量是 null；`dataset_status` `shioaji-data/interim_twse`、`…_tpex`）。官方的檔（證交所下載檔或 OpenAPI、櫃買 OpenAPI）進來後整列取代，暫時的列從不蓋掉官方的列；每日收盤簡報與市場頁排行不用它 | 官方資料部分為政府資料開放授權條款第 1 版（它本身是從證交所、櫃買在 data.gov.tw 登記的網址轉存的）；沒有保證更新時間；AI 整理的簡介、產業鏈、題材授權「待定」，commercial 不顯示 |
 | FinMind v4 | personal 明確開啟時：回補、新聞標題、匯率、`^TAIEXTR` | ⚠️ 不可商用（付費版也不包含原機關授權），預設不建立 |
 | Databento 歷史 API（`hist.databento.com`，資料集 `EQUS.SUMMARY`） | 美股收盤價（`US_PRICE_SOURCE=databento` 時）：Nasdaq NLS Plus 的官方合併收盤，日線、未還原分割與股利，2024-07-01 起；只抓帳本或觀察清單裡的美股與 SPY、DIA、ONEQ、VOO → 報價、走勢、帳本市值、`/close`、市場頁美股、AI。`prices_daily.source = 'databento-equs'` | 付費、按量計費（先用註冊送的 US$125 額度）；顯名「Databento〈US Equities Summary（EQUS.SUMMARY，Nasdaq NLS Plus 官方合併收盤）〉（2026），資料由 Databento 提供」。產品負責人沒有先確認能不能顯示給會員（2026-11-15，知道風險）；分割與股利資料不能轉載，沒有用 |
-| GDELT 整批檔（GKG 2.1，`storage.googleapis.com/data.gdeltproject.org/gdeltv2/`） | 台股的「新聞報導」：每 15 分鐘一份（翻譯串流 4–13 MB、英文 2–5 MB 壓縮檔；兩種合計每天約 1 GB 下載，不收費），只取台灣網站、標題點名公司的原標題、媒體、時間、連結 | 同 GDELT：免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
-| GDELT DOC 2.0（`api.gdeltproject.org`） | 美股的「新聞報導」與市場頁的美股新聞；台股只在整批檔沒更新時當備用：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
+| GDELT 整批檔（GKG 2.1，`storage.googleapis.com/data.gdeltproject.org/gdeltv2/`） | 台股與美股的「新聞報導」、市場頁的美股新聞：每 15 分鐘一份（翻譯串流 4–13 MB、英文 2–7 MB 壓縮檔；兩種合計每天約 1 GB 下載，不收費），台股只取台灣網站、美股只取美國與英國新聞媒體白名單，標題點名公司的原標題、媒體、時間、連結 | 同 GDELT：免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
+| GDELT DOC 2.0（`api.gdeltproject.org`） | 只在整批檔超過 2 小時沒更新時當備用（台股看翻譯檔、美股與市場新聞看英文檔）：媒體原標題、媒體、時間、原文連結（不存內文與圖片） | 免費、可商用，須引用 GDELT 並連到 gdeltproject.org |
 | AI 網路搜尋（Claude `web_search`） | 新聞報導補缺（免費來源 7 天內少於 3 則時，找 14–30 天）；標題與連結取自搜尋結果；封鎖報價頁、論壇、AI 寫的頁面 | 系統付費，每次約 US$0.023，每月上限 `NEWS_AI_BUDGET_USD`（30） |
 | SearXNG（自架） | 新聞報導的備用來源，**預設關**（`NEWS_SEARXNG_URL`） | 自動查詢上游搜尋引擎違反它們的條款，由營運者承擔 |
+| LangSearch 網路搜尋（`api.langsearch.com/v1/web-search`） | 台股的「新聞報導」與台股大盤（`^TW`）：只取標題、媒體、時間、網址（`NEWS_LANGSEARCH_ENABLED`，預設關，只在正式環境 worker 開） | 條款沒寫清楚能不能保存結果、經營者不明，產品負責人 2026-11-17 決定採用（`CLAUDE.md`）；在免費每日額度內、被擋就停到隔天 |
 | Yahoo股市 RSS | personal 明確開啟時：新聞報導 | ⚠️ 條款限個人、非商業使用；保留「Yahoo股市」與原始媒體 |
 | 示範資料（demo） | personal 的缺資料備援；commercial 只提供商品名稱清單 | 模擬資料，`is_demo: true` |
 | ~~證交所 MIS、證交所網站 T86／MI_QFIIS、櫃買網站 peQryDate~~ | 已移除（2026-11-12） | 網站條款禁止程式下載 |
@@ -318,10 +321,21 @@ src/forliosa/
 |---|---|---|---|
 | `US_PRICE_SOURCE` | **api 與 worker** | 空 | `databento`：api 讀已存的美股收盤並列出顯名（不需要金鑰）；worker 有金鑰時才抓。空：不抓也不讀，已存的列留著但不讀、不列來源，美股回到「美股沒有報價」 |
 | `DATABENTO_API_KEY` | **只放 worker** | 空 | Databento 的金鑰（HTTP Basic：金鑰當使用者名稱、密碼空白）。按量計費；不會寫進 log |
-| `NEWS_US_MARKET` | worker | `true` | 市場頁的美股新聞：每次整理新聞多問 GDELT 一次 |
-| `NEWS_GDELT_BULK` | worker | `true` | 台股新聞用 GDELT 每 15 分鐘的整批檔（`false`：回到一檔一檔問查詢 API） |
-| `NEWS_GDELT_BULK_FEEDS` | worker | `translation,english` | 讀哪幾種整批檔：`translation`（中文等非英文網站，台灣新聞幾乎都在這裡）、`english` |
+| `NEWS_US_MARKET` | worker | `true` | 市場頁的美股新聞（`^US`）：從英文整批檔比對；整批檔停住時每次整理新聞多問 GDELT 查詢 API 一次 |
+| `NEWS_GDELT_BULK` | worker | `true` | 台股、美股與市場頁美股新聞用 GDELT 每 15 分鐘的整批檔（`false`：回到一檔一檔問查詢 API） |
+| `NEWS_GDELT_BULK_FEEDS` | worker | `translation,english` | 讀哪幾種整批檔：`translation`（中文等非英文網站，台灣新聞幾乎都在這裡）、`english`（美股與市場頁美股新聞；拿掉時美股改回查詢 API） |
 | `NEWS_GDELT_BULK_MAX_FILES` | worker | `8` | 每種整批檔每次最多讀幾份（8 份＝2 小時）；停機太久時更早的會略過 |
+| `NEWS_TAGGING_ENABLED`、`NEWS_TAGGING_MINUTES` | worker | `true`、`5` | 新聞標籤（主題、類股、相關股票；2026-11-17）：關掉就沒有這個工作，已貼的標籤留著 |
+| `NEWS_TAGGING_MIN_BATCH`、`NEWS_TAGGING_MAX_WAIT_MINUTES` | worker | `20`、`30` | 新標題不到這麼多則時先累積，最舊的一則等到這麼久才送（每個請求有固定成本：系統提示與 thinking）；等待最多 55 分鐘（快取 1 小時） |
+| `NEWS_TAGGING_MONTHLY_BUDGET_USD` | worker | `3` | 新聞標籤每個 UTC 月份的上限（`ai_usage.feature = 'news_tagging'`，不算任何人的額度）；0＝不貼 |
+| `NEWS_TAGGING_BATCH_SIZE`、`NEWS_TAGGING_MAX_BATCHES`、`NEWS_TAGGING_DAYS`、`AI_MODEL_NEWS_TAGGING` | worker | `50`、`4`、`7`、空 | 一個請求幾則（最多 50）、每次最多幾個請求、只貼最近幾天的（最多 90）、模型（空＝`AI_MODEL`） |
+| `NEWS_LANGSEARCH_ENABLED` | **只放 worker** | `false` | LangSearch 台股新聞（2026-11-17）：只在正式環境 Railway worker 設成 `true`；關著時沒有這個工作，什麼都不送 |
+| `LANGSEARCH_API_KEY` | **只放 worker** | 空 | LangSearch 的金鑰（`Authorization: Bearer`）；沒有就不跑；不會寫進 log。雲端沙盒手動測試時設成 `proxy-injected`（proxy 代入真正的憑證） |
+| `NEWS_LANGSEARCH_MAX_REQUESTS_PER_DAY`、`NEWS_LANGSEARCH_MAX_TOKENS_PER_DAY`、`NEWS_LANGSEARCH_MAX_FIRST_FILL_PER_DAY`、`NEWS_LANGSEARCH_TOKEN_GUARD` | worker | `250`、`50000`、`100`、`1000` | 每個 UTC 日的請求數、token、第一次查的檔數上限；單次回應超過 `TOKEN_GUARD` 個 output token 就當天停用 |
+| `NEWS_LANGSEARCH_TOPICS_AT`、`NEWS_LANGSEARCH_STOCKS_AFTER`、`NEWS_LANGSEARCH_TOPICS` | worker | `16:00`、`18:30`、`台股 盤後,外資 買賣超,台股 大盤` | 台北時間：交易日查大盤的時間、每天查個股的開始時間；大盤的查詢句（不加引號） |
+| `NEWS_LANGSEARCH_EVERY_DAYS`、`NEWS_LANGSEARCH_QUIET_AFTER_EMPTY` | worker | `large=1,mid=2,small=4,quiet=7`、`4` | 各分級幾天查一次；小型股連續幾次 0 則改成安靜（每 7 天） |
+| `NEWS_LANGSEARCH_COUNT_LARGE`、`NEWS_LANGSEARCH_COUNT`、`NEWS_LANGSEARCH_LARGE_RANK`、`NEWS_LANGSEARCH_LARGE_MIN_AVG`、`NEWS_LANGSEARCH_MID_MIN_AVG` | worker | `50`、`20`、`50`、`5`、`1` | 大型股與其他（含大盤）每次要幾筆；市值前幾名起始為大型股；每週重分時平均每次入庫幾則算大型、中型 |
+| `NEWS_LANGSEARCH_INTERVAL_SECONDS`、`NEWS_LANGSEARCH_TIMEOUT_SECONDS`、`NEWS_LANGSEARCH_URL`、`NEWS_LANGSEARCH_JUNK_DOMAINS` | worker | `1.5`、`20`、`https://api.langsearch.com/v1/web-search`、四個台灣垃圾站 | 兩次請求的間隔（最少 1.2，跨程序也算）、逾時、網址（只能是 api.langsearch.com）、不收的台灣網站（逗號分隔） |
 
 - 進度：管理後台總覽的「美股收盤價」（`GET /admin/overview` 的 `us_prices`）：存到紐約的哪一天、日線筆數、還沒回補與找不到的檔數。
 - 收盤價沒有還原分割與股利；Databento 的分割、股利資料不能轉載，所以沒有用。帳本照使用者記的分割；走勢圖從開盤價偵測分割並換算。

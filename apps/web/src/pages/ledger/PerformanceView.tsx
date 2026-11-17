@@ -16,7 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { direction, formatCompact, formatDate, formatMoney, formatNumber, formatPercent, MASK, toneClass } from "@/lib/format"
-import { TREND_RANGES } from "@/lib/trend-range"
+import { responseExceedsData, TREND_RANGES, trendState } from "@/lib/trend-range"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { niceTicks } from "@/ai/chart-geometry"
@@ -24,7 +24,6 @@ import { inText } from "@/lib/cjk"
 import { useHowToRead } from "@/pages/stock/tabs/how-to-read"
 import { useReadOnly, useWho } from "@/api/view-as"
 import { isUnpricedNote, trendClipNote } from "./trend-reason"
-import { useLedgerPrefs } from "./ledger-prefs"
 import { useTrendChipsShown, useTrendRange } from "./use-trend-range"
 
 /**
@@ -38,20 +37,25 @@ function isBlocked(p: Performance | undefined, isError: boolean): boolean {
 /**
  * 績效分段：報酬率與基準（總資產與投入本金的走勢在主數字下方，這裡不重複畫；產品負責人 2026-11-17）。
  * 區間和主數字下方的總資產走勢是同一個選擇（`useTrendRange`），整頁只有一排區間按鈕：
- * - 走勢下面有按鈕時（平常）就用那一排，這裡不放——每個分段都是同一排、同一個位置，換分段時分段列不會上下跳。
- *   只看某個帳戶、而那個帳戶的資料比較短時，後端從那個帳戶的第一天（或「績效從 … 收盤開始算」）算起，期間照實寫。
- * - 走勢沒有按鈕時（「自訂」關掉走勢、歷史短、讀不到）才在這裡的工具列放「績效區間」：資料撐得起來的才放
- *   （看這個帳戶「全部」的序列），沒有「1日」。
+ * - 走勢下面有按鈕時（畫得出走勢就有，歷史短也有）就用那一排，這裡不放——每個分段都是同一排、同一個位置，
+ *   換分段時分段列不會上下跳。
+ * - 走勢沒有按鈕時（「自訂」關掉走勢、主數字或走勢讀不到、不到 2 個收盤）才在這裡的工具列放「績效區間」：七顆一律放，
+ *   這個帳戶算得出績效（「全部」的序列有 2 個收盤以上）或讀不到時才放（讀不到時不讓區間沒辦法換），沒有「1日」。
+ * - 區間比資料長（存檔才開始、或這個帳戶比較新）：後端從第一個收盤算起（「績效從 … 收盤開始算」），數字和走勢的一樣；
+ *   期間照實寫「只有 2026/11/12 – 2026/11/17 的資料」（看這個帳戶「全部」的序列，而且回應真的從它的第一個收盤開始：
+ *   `responseExceedsData`）。
  */
 export function PerformanceView() {
   // undefined＝全部帳戶
   const [account, setAccount] = useState<string | undefined>()
   const shared = useTrendChipsShown()
-  const home = useTrendRange()
+  // 首頁走勢的「全部」序列（全部帳戶）與這個帳戶的；兩個的區間是同一個選擇
+  const home = useTrendRange().perf
   const own = useTrendRange(account)
-  const range = shared ? home.range : own.range
-  // 工具列的區間（走勢下面沒有按鈕時）：讀到這個帳戶「全部」的序列才知道；讀不到時全部列出（不讓區間沒辦法換）
-  const rangeOptions = shared ? [] : own.known ? TREND_RANGES.filter((r) => own.ranges.includes(r.value)) : own.perf.isError ? TREND_RANGES : []
+  const range = own.range
+  const ownSeries = own.perf.data?.series
+  // 工具列的區間（走勢下面沒有按鈕時）：這個帳戶畫得出績效才放；讀不到時也放（不讓區間沒辦法換）
+  const rangeOptions = shared ? [] : own.perf.isError || (ownSeries && trendState(ownSeries.length) !== "missing") ? TREND_RANGES : []
   const accounts = useAccounts()
   // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
   const readOnly = useReadOnly()
@@ -66,9 +70,12 @@ export function PerformanceView() {
   const p = perf.data
   // 算不出來、而且換區間或基準也沒有用（有持股還沒有收盤價）：區間與比較基準不放，只留帳戶——那是唯一有用的控制項
   const blocked = isBlocked(p, perf.isError)
-  // 歷史短時走勢圖下面已經寫了後端那一句（「績效從 … 收盤開始算」，每個分段都寫）：這裡不再寫一次
-  const showTrend = useLedgerPrefs((s) => s.showTrend)
-  const trendNote = showTrend && !home.perf.isError ? trendClipNote(home.perf.data) : undefined
+  // 歷史短時走勢的區間按鈕下面已經寫了後端那一句（「績效從 … 收盤開始算」，每個分段都寫）：這裡不再寫一次。
+  // 走勢真的畫出來才算（`shared`：主數字讀不到時走勢不在，這一句就留在這裡）
+  const trendNote = shared ? trendClipNote(home.data) : undefined
+  // 期間：看回應自己的區間（換區間時先留著上一個區間的數字，期間也跟著上一個）。回應真的從這個帳戶的第一個收盤開始才寫「只有」：
+  // 切換帳戶時兩個查詢回來的先後不同，不會把新帳戶的「全部」和舊帳戶的區間湊在一起寫錯（`responseExceedsData`）
+  const exceeds = !!p && responseExceedsData(p, ownSeries)
 
   return (
     <div className="flex flex-col gap-5">
@@ -97,7 +104,7 @@ export function PerformanceView() {
         {/* 期間（計算方式在最下面的「計算方式」） */}
         {(p?.start_date && p.end_date) || p?.is_demo ? (
           <p className="num flex items-center gap-2 text-sm text-ink-2 lg:ml-auto">
-            {p.start_date && p.end_date && `${formatDate(p.start_date)} – ${formatDate(p.end_date)}`}
+            {p.start_date && p.end_date && (exceeds ? `只有 ${formatDate(p.start_date)} – ${formatDate(p.end_date)} 的資料` : `${formatDate(p.start_date)} – ${formatDate(p.end_date)}`)}
             {p.is_demo && <DemoTag title={holdings.data?.some((h) => h.is_demo) ? "含示範資料" : undefined} />}
           </p>
         ) : null}

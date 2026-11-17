@@ -8,9 +8,13 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 * **GDELT bulk files first** (:mod:`forliosa.news.gdelt_bulk`, 2026-11-16): the new 15-minute GKG files are read once
   and matched against every tracked Taiwan stock, not only the batch's (Taiwanese sites only, the title naming the
   company), and stored as ``gdelt`` headlines. While they are current, the DOC API is not asked for Taiwan stocks.
-* **Sources** (:mod:`forliosa.news.sources`): GDELT's DOC API (US stocks; Taiwan stocks only while the bulk files are
-  not current), then our private SearXNG (:mod:`forliosa.news.searxng`, on by default), then Yahoo股市 RSS (only under
-  ``DATA_POLICY=personal``). One request per symbol per source; the HTTP
+  Since 2026-11-17 (option A) the English files are matched against every tracked US stock and the US market too (US
+  and UK news outlets only, :mod:`forliosa.news.us_match`); while the English feed is current, the DOC API is not
+  asked for US stocks or the US market either.
+* **Sources** (:mod:`forliosa.news.sources`): GDELT's DOC API (only while the bulk feed a stock leans on is not
+  current: ``translation`` for Taiwan stocks, ``english`` for US stocks and the US market), then our private SearXNG
+  (:mod:`forliosa.news.searxng`, on by default), then Yahoo股市 RSS (only under ``DATA_POLICY=personal``). One request
+  per symbol per source; the HTTP
   limiter spaces GDELT requests ≥ ``NEWS_GDELT_INTERVAL_SECONDS`` (≥ 5 s). A 429 / block stops that source for the
   run and backs it off (15 min, doubling to 4 h; SearXNG from ``NEWS_SEARXNG_BACKOFF_MINUTES``; ``news_fetch_state``
   row ``symbol = "*"``); an unreachable source (:class:`SourceDown`) is paused the same way from 15 min; three
@@ -26,7 +30,8 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
   symbol, at most ``AI_MAX_PER_RUN`` per run, while the month's budget lasts.
 * **Every headline** goes through :mod:`forliosa.news.normalize`: GDELT spacing removed, outlet / section suffix
   removed, the outlet named from its domain, kept only when the title names the company (Chinese short name,
-  code or English short name), never from a blocked domain, a search-engine redirect, a page that is not news
+  code or English short name; Taiwan stocks by the stricter rules of :mod:`forliosa.news.tw_match`, 2026-11-17), never
+  from a blocked domain, a search-engine redirect, a page that is not news
   (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (鉅亨「盤中速報」),
   newer than the query window; stored once per (symbol, canonical URL: tracking parameters, ``www.`` / ``m.`` /
   AMP variants and ``http`` vs ``https`` folded together). Deleted ``NEWS_RETENTION_DAYS`` after publication.
@@ -34,7 +39,10 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 Read (``GET /instruments/{symbol}/news``)
 ----------------------------------------
 :func:`media_items`: the symbol's stored headlines of the retention window, Yahoo RSS rows only under
-``personal``, blocked domains, pages that are not news and robot flashes hidden, de-duplicated (same URL or
+``personal``, blocked domains, pages that are not news, robot flashes, Taiwan stocks' headlines tagged as not
+finance (:func:`tagged_not_finance`, 2026-11-17) and Taiwan stocks' headlines whose stored title no longer names the
+stock by today's matching rule (:class:`ReadMatch`: the wrong matches stored before 2026-11-17, kept in the database)
+hidden, de-duplicated (same URL or
 near-identical title; the original outlet beats an aggregator copy, a reputable outlet another copy), the newest day
 first and within a day the reputable outlets first (:func:`normalize.rank`; the stock page sorts by time itself), at
 most ``MEDIA_LIMIT``. :func:`record_view` notes that the symbol was viewed.
@@ -44,25 +52,36 @@ from __future__ import annotations
 
 import logging
 import time as _time
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import and_, delete, exists, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ColumnElement
 
 from forliosa.config import Settings, get_settings
 from forliosa.datapolicy import Policy, labels
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.http import HttpFetcher, RateLimiter
 from forliosa.marketdata.service import MarketData
-from forliosa.models import CompanyProfile, NewsArticle, NewsBlockedDomain, NewsFetchState, NewsTrackedView
-from forliosa.news.gdelt_bulk import GdeltBulk
+from forliosa.models import (
+    CompanyProfile,
+    NewsArticle,
+    NewsBlockedDomain,
+    NewsFetchState,
+    NewsTag,
+    NewsTagState,
+    NewsTrackedView,
+)
+from forliosa.news import tw_match
+from forliosa.news.gdelt_bulk import US_FEED, GdeltBulk, UsTest
 from forliosa.news.normalize import (
     Headline,
+    Terms,
     clean_title,
     clean_url,
     dedupe,
@@ -86,6 +105,7 @@ from forliosa.news.sources import (
     SourceDown,
     YahooRssSource,
 )
+from forliosa.news.us_match import market_matches, us_terms
 from forliosa.timeutil import iso_taipei, now_utc
 
 log = logging.getLogger(__name__)
@@ -112,7 +132,9 @@ SOURCE_WIDE = "*"
 ENGINE_PREFIX = "@"
 ENGINE_BACKOFF_MAX = timedelta(hours=24)
 ENGINE_ERRORS_BEFORE_PAUSE = 3  # timeouts / errors in a row before an engine is paused (a refusal pauses at once)
-FREE_SOURCES = ("gdelt", "searxng", "yahoo_rss")
+# Sources that cost nothing per request: what they hold decides whether the paid AI fallback runs (LangSearch,
+# 2026-11-17: its headlines count too, so a stock it covers is not searched again at the system's cost)
+FREE_SOURCES = ("gdelt", "searxng", "yahoo_rss", "langsearch")
 # news_articles.source -> (label shown with the headline, attribution key for ``sources``)
 SOURCE_INFO: dict[str, tuple[str, str]] = {
     "gdelt": ("GDELT", "gdelt/doc"),
@@ -120,6 +142,7 @@ SOURCE_INFO: dict[str, tuple[str, str]] = {
     "searxng": ("SearXNG", "searxng"),
     "yahoo_rss": ("Yahoo股市", "yahoo-rss/stock"),
     "finmind": ("FinMind", "finmind"),
+    "langsearch": ("LangSearch", "langsearch"),  # Taiwan stocks and ^TW only (forliosa.news.langsearch)
 }
 PERSONAL_ONLY_SOURCES = frozenset({"yahoo_rss", "finmind"})
 
@@ -190,17 +213,18 @@ def tracked(db: Session, settings: Settings, now: datetime, *, limit: bool = Tru
 
 
 # -- queries ------------------------------------------------------------------------------------------------
-def english_names(db: Session, info: InstrumentInfo) -> list[str]:
-    """English short names: the archived company profile's 英文簡稱 / ``Symbol`` (「TSMC」「Gudeng」), then ASCII
-    aliases; US stocks: the company name."""
+def english_names(db: Session, info: InstrumentInfo, profile_english: str | None = None) -> list[str]:
+    """English short names: the archived company profile's 英文簡稱 / ``Symbol`` (「TSMC」「Gudeng」; read here unless
+    ``profile_english`` already holds it), then ASCII aliases; US stocks: the company name."""
     out: list[str] = []
     if info.market == "US":
         out.append(info.name)
     else:
-        prof = db.get(CompanyProfile, info.symbol)
-        value = ((prof.values or {}).get("english_short_name") if prof is not None else None) or ""
-        if value.strip():
-            out.append(" ".join(value.split()))
+        if profile_english is None:
+            prof = db.get(CompanyProfile, info.symbol)
+            profile_english = str(((prof.values or {}).get("english_short_name") if prof is not None else None) or "")
+        if profile_english.strip():
+            out.append(" ".join(profile_english.split()))
     out += [a for a in info.aliases if a.isascii()]
     seen: set[str] = set()
     result = []
@@ -211,18 +235,66 @@ def english_names(db: Session, info: InstrumentInfo) -> list[str]:
     return result
 
 
-def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datetime) -> Query:
+_OFFICIAL: list[tuple[object, object, dict[str, tuple[str, ...]]]] = []
+
+
+def official_forms(db: Session, master: Mapping[str, InstrumentInfo]) -> dict[str, tuple[str, ...]]:
+    """symbol -> the forms of its official name (:func:`tw_match.official_forms` of the company profile's 公司名稱:
+    統一企業, 台灣大哥大, 台灣大車隊) for every Taiwan stock of ``master`` with a profile; read once per master and
+    database (MarketData rebuilds its master at most hourly)."""
+    bind = db.get_bind()
+    entry = _OFFICIAL[0] if _OFFICIAL else None  # read once: the web process's request threads share the cache
+    if entry is not None and entry[0] is master and entry[1] is bind:
+        return entry[2]
+    out: dict[str, tuple[str, ...]] = {}
+    for symbol, values in db.execute(select(CompanyProfile.symbol, CompanyProfile.values)):
+        info = master.get(symbol)
+        if info is None or info.market == "US":
+            continue
+        forms = tw_match.official_forms(info.name, str((values or {}).get("name") or ""))
+        if forms:
+            out[symbol] = forms
+    _OFFICIAL[:] = [(master, bind, out)]
+    return out
+
+
+def query_terms(db: Session, info: InstrumentInfo, md: MarketData | None = None,
+                english: Sequence[str] | None = None) -> Terms:
+    """The title test of one symbol (:func:`build_query`'s; the read-time check :class:`ReadMatch` builds the same).
+    A Taiwan stock's terms follow :mod:`forliosa.news.tw_match`; with ``md``, its official name counts (統一企業), the
+    other listed and official names that contain its name (聯合再生 for 聯合, 台灣大車隊 for 台灣大) take their
+    headlines (the longest name wins) and a short name listed next to another listed name counts (「信驊、創意等」).
+    ``english``: its :func:`english_names` when already known."""
+    english = english_names(db, info) if english is None else list(english)
+    taiwan = info.market != "US"
+    # Taiwan: the short forms headlines use (tw_match.ALIASES: 台積, 禾榮); US: the Chinese aliases (輝達)
+    extra = list(tw_match.ALIASES.get(info.code, ())) if taiwan else [a for a in info.aliases if not a.isascii()]
+    master = md.master() if taiwan and md is not None else None
+    official = official_forms(db, master) if master is not None else {}
+    longer: tuple[str, ...] = ()
+    if master is not None:
+        longer = tuple(dict.fromkeys(w for n in (info.name, *extra)
+                                     for w in tw_match.longer_in_master(n, master, official)))
+    peers = tw_match.names_in_master(master) if master is not None else frozenset()
+    forms = (*official.get(info.symbol, ()), *(tw_match.ALIAS_FORMS.get(info.code, ()) if taiwan else ()))
+    return make_terms(info.name, info.code, english, extra, taiwan=taiwan, longer=longer, peers=peers, forms=forms)
+
+
+def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datetime,
+                md: MarketData | None = None) -> Query:
+    """The query and title test of one symbol (:func:`query_terms`)."""
     english = english_names(db, info)
-    extra = [a for a in info.aliases if not a.isascii()] if info.market == "US" else []
-    terms = make_terms(info.name, info.code, english, extra)
     return Query(symbol=info.symbol, code=info.code, name=info.name, market=info.market, english=tuple(english),
-                 terms=terms, since=since, until=until)
+                 terms=query_terms(db, info, md, english), since=since, until=until)
 
 
 # -- normalising and storing --------------------------------------------------------------------------------
-def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Sequence[str]) -> list[Headline]:
+def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Sequence[str],
+                 relevant: UsTest | None = None) -> list[Headline]:
     """Raw items -> normalised, relevant, unblocked headlines inside the query window. Never a page that is not news
-    (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (``盤中速報``)."""
+    (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (``盤中速報``).
+    ``relevant`` (title, URL) replaces :func:`is_relevant` (the GDELT bulk files' US stocks and US market:
+    :mod:`forliosa.news.us_match`)."""
     out: list[Headline] = []
     for it in items:
         url = clean_url(it.url)
@@ -233,7 +305,10 @@ def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Seque
         outlet = it.outlet or outlet_name(url, it.domain)
         title = clean_title(it.title, url, outlet)
         published = _aware(it.published_at)
-        if not title or not is_relevant(title, q.terms) or is_bot_flash(title):
+        if not title or is_bot_flash(title):
+            continue
+        if not (relevant(title, url) if relevant is not None
+                else is_relevant(title, q.terms, url=url, raw_title=it.title)):
             continue
         if published > q.until + timedelta(minutes=30):
             continue
@@ -312,6 +387,114 @@ def shown(h: Headline, policy: Policy, blocked: Sequence[str]) -> bool:
             and not is_bot_flash(h.title))
 
 
+def tagged_not_finance(url_key: ColumnElement[str], symbol: ColumnElement[str]) -> ColumnElement[bool]:
+    """Whether a Taiwan stock's headline was finished by the news tagging (:mod:`forliosa.news.tagging`,
+    ``news_tag_state.status = "done"``) without a single theme, sector or related stock: clearly not finance news (a
+    sports, entertainment or weather story under a stock whose name it shares: 「大洋洲」 under 大洋). 產品負責人
+    2026-11-17: hidden on the stock page, in ``get_news`` and ``search_news`` and not counted by :func:`recent_count`;
+    kept in ``news_articles``. A headline not tagged yet is shown (the tagging is not waited for); official
+    announcements (公告) are not news_articles rows and are never hidden.
+
+    Only Taiwan stocks' rows (``symbol`` ``.TW`` / ``.TWO``, review of 2026-11-17): a US stock's headlines are matched
+    by ticker and company name (:mod:`forliosa.news.us_match`), and a media or consumer company's own story can come
+    back without tags (「Netflix commissions new Harlan Coben thriller The Innocent」 under NFLX in the live test: the
+    model took it for entertainment), so for them an empty answer says nothing. A correlated ``EXISTS`` (an anti-join
+    on both primary keys), used as ``~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol)`` in a ``WHERE``."""
+    return and_(or_(symbol.like("%.TW"), symbol.like("%.TWO")),
+                exists().where(NewsTagState.url_key == url_key, NewsTagState.status == "done",
+                               ~exists().where(NewsTag.url_key == NewsTagState.url_key)))
+
+
+# -- the matching rule again when reading (產品負責人 2026-11-17, 「好」) ---------------------------------------------
+READ_SCAN_MAX = 1000  # rows of one list looked at, at most, to fill it with rows that still match (~30 µs a row)
+
+
+def is_taiwan_symbol(symbol: str) -> bool:
+    return symbol.endswith((".TW", ".TWO"))
+
+
+class ReadMatch:
+    """Taiwan stocks' stored headlines checked again when they are read: a ``.TW`` / ``.TWO`` row is shown only when
+    its stored title still names that row's stock by the rule every source is matched by when storing
+    (:func:`is_relevant` with :func:`query_terms`: :mod:`forliosa.news.tw_match`, the catalog's names, official names
+    and the longest name first). So the wrong matches stored before the tightened rule went live (up to
+    ``NEWS_RETENTION_DAYS`` old: the year in 「2027台海」 under 2027 大成鋼, 「大洋洲」 under 1321 大洋, APEC under
+    8261 富鼎) are no longer shown, and words added to the lists later hide the rows they would have kept out; the
+    rows stay in ``news_articles`` (deleted on schedule). Used by :func:`media_items` (the stock page's /news and
+    ``get_news``), :func:`recent_count` (SearXNG skip, AI fallback), :func:`forliosa.news.tags.search`
+    (``search_news``) and :func:`forliosa.news.tags.by_topic` (the market reports).
+
+    * Every source of ``news_articles`` (GDELT bulk files and DOC API, SearXNG, Yahoo RSS, the AI fallback) was stored
+      through the same title test, so every row is checked the same way. The AI fallback's rows are no exception: the
+      model only picks links, their title is the search result's and it passed :func:`is_relevant` when stored (the
+      old rule before 2026-11-17, like everyone's).
+    * Only the stored title (cleaned: the published title's section tail, 「| 財經」, is not kept) and the link are
+      known now, so a finance page is judged by its link alone. Measured on 6 sets of GDELT bulk files (2026-11-12
+      to 17): of 867 matches the rule keeps when storing, 1 fails here (setn.com, finance only by its 「| 財經」
+      tail); all 2,289 matches only the old rule made fail.
+    * Not checked: US stocks and the US market (their own rule, :mod:`forliosa.news.us_match`), a symbol no longer in
+      the catalog (nothing to check it against), FinMind's per-request headlines (``personal`` only, not stored,
+      FinMind's own per-stock list) and official announcements (``market_events``, not news rows).
+
+    One per request (or refresh run): each stock's terms are built once; the company profiles (English short names)
+    of many stocks are read in one query by :meth:`prefetch`, which every caller runs before checking: :func:`kept_rows`
+    per page read, :func:`forliosa.news.tags.search`'s and :func:`forliosa.news.tags.by_topic`'s rows, :func:`refresh`
+    for its batch (:meth:`terms` reads a stock not prefetched on its own, one query). The official names and the
+    catalog's names are cached per catalog (:func:`official_forms`, :func:`tw_match.longer_in_master`)."""
+
+    def __init__(self, db: Session, md: MarketData | None) -> None:
+        self.db, self.md = db, md
+        self._terms: dict[str, Terms | None] = {}
+        self._english: dict[str, str] = {}  # symbol -> the company profile's English short name ("" without one)
+
+    def prefetch(self, symbols: Iterable[str]) -> None:
+        """Read the company profiles (English short names) of these Taiwan stocks in one query per 500."""
+        todo = [s for s in dict.fromkeys(symbols) if is_taiwan_symbol(s) and s not in self._english]
+        for i in range(0, len(todo), 500):
+            chunk = todo[i:i + 500]
+            got = dict(self.db.execute(select(CompanyProfile.symbol, CompanyProfile.values)
+                                       .where(CompanyProfile.symbol.in_(chunk))).all())
+            for s in chunk:
+                self._english[s] = str((got.get(s) or {}).get("english_short_name") or "")
+
+    def terms(self, symbol: str) -> Terms | None:
+        """The stock's title test, ``None`` for a symbol that is not a Taiwan stock in the catalog."""
+        if symbol not in self._terms:
+            info = self.md.master().get(symbol) if self.md is not None and is_taiwan_symbol(symbol) else None
+            if info is None or info.market == "US":
+                self._terms[symbol] = None
+            else:
+                self.prefetch([symbol])
+                self._terms[symbol] = query_terms(self.db, info, self.md,
+                                                  english_names(self.db, info, self._english.get(symbol, "")))
+        return self._terms[symbol]
+
+    def keeps(self, symbol: str, title: str, url: str) -> bool:
+        """The row is shown: not a Taiwan stock's, or its title still names that stock."""
+        if not is_taiwan_symbol(symbol):
+            return True
+        terms = self.terms(symbol)
+        return terms is None or is_relevant(title, terms, url=url)
+
+
+def kept_rows(db: Session, query: Any, check: ReadMatch, want: int, *, most: int = READ_SCAN_MAX
+              ) -> list[NewsArticle]:
+    """The first ``want`` rows of ``query`` (a ``select(NewsArticle)`` with a total order) that ``check`` keeps, read
+    in pages of ``want`` until enough are kept, the rows run out or ``most`` rows were looked at (a stock with many
+    wrong matches stored before 2026-11-17, 統一 or 全新, still fills its list). The company profiles of a page's
+    stocks are read in one query before it is checked (:meth:`ReadMatch.prefetch`), not one stock at a time."""
+    out: list[NewsArticle] = []
+    offset = 0
+    while len(out) < want and offset < most:
+        page = list(db.scalars(query.offset(offset).limit(want)))
+        check.prefetch(r.symbol for r in page)
+        out += [r for r in page if check.keeps(r.symbol, r.title, r.url)]
+        if len(page) < want:
+            break
+        offset += want
+    return out[:want]
+
+
 def item_out(h: Headline) -> dict[str, Any]:
     label, key = SOURCE_INFO.get(h.source, (h.source, h.source))
     return {"published_at": iso_taipei(h.published_at), "title": h.title, "source": label, "outlet": h.outlet,
@@ -319,8 +502,9 @@ def item_out(h: Headline) -> dict[str, Any]:
 
 
 # -- the US market's headlines (the market page's US row) ------------------------------------------------------------
-# One GDELT request per refresh for US market news, stored under this key (not a symbol: it never resolves to an
-# instrument) and shown on the market page (產品負責人 2026-11-15). US and UK English outlets, like US stocks.
+# US market news, stored under this key (not a symbol: it never resolves to an instrument) and shown on the market page
+# (產品負責人 2026-11-15). US and UK English outlets, like US stocks. Since 2026-11-17 (option A) matched in GDELT's
+# English bulk files (us_match.market_matches); one DOC API request per refresh only while that feed is not current.
 US_MARKET_KEY = "^US"
 US_MARKET_TERMS = ("Wall Street", "S&P 500", "Dow Jones", "Nasdaq")
 US_MARKET_LIMIT = 6
@@ -350,7 +534,8 @@ def market_items(db: Session, md: MarketData, *, settings: Settings | None = Non
 
 def _refresh_market(db: Session, src: NewsSource, now: datetime, report: RefreshReport,
                     blocked: Sequence[str], settings: Settings) -> bool:
-    """One GDELT request for US market news. False when GDELT refused (paused like any other refusal)."""
+    """One GDELT DOC API request for US market news (only while the English bulk feed is not current). False when
+    GDELT refused (paused like any other refusal)."""
     st = _state(db, src.key, US_MARKET_KEY)
     since = max(now - WINDOW, _aware(st.last_success_at) - OVERLAP) if st.last_success_at else now - WINDOW
     q = market_query(since, now)
@@ -391,8 +576,10 @@ def media_items(db: Session, md: MarketData, info: InstrumentInfo, *, settings: 
     now = now or now_utc()
     since = now - timedelta(days=settings.news_retention_days)
     blocked = blocked_domains(db, settings)
-    rows = db.scalars(select(NewsArticle).where(NewsArticle.symbol == info.symbol, NewsArticle.published_at >= since)
-                      .order_by(NewsArticle.published_at.desc()).limit(limit * 4))
+    query = (select(NewsArticle).where(NewsArticle.symbol == info.symbol, NewsArticle.published_at >= since,
+                                       ~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol))
+             .order_by(NewsArticle.published_at.desc(), NewsArticle.id.desc()))
+    rows = kept_rows(db, query, ReadMatch(db, md), limit * 4)
     heads = [Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
                       source=r.source, date_only=bool(r.date_only)) for r in rows]
     heads += list(extra)
@@ -461,7 +648,8 @@ def default_sources(settings: Settings, policy: Policy, fetcher: HttpFetcher | N
 
 
 def gdelt_bulk_source(settings: Settings) -> GdeltBulk | None:
-    """GDELT's 15-minute bulk files for Taiwan stocks (on unless NEWS_GDELT_ENABLED or NEWS_GDELT_BULK is false)."""
+    """GDELT's 15-minute bulk files for Taiwan stocks, US stocks and the US market (on unless NEWS_GDELT_ENABLED or
+    NEWS_GDELT_BULK is false)."""
     if not (settings.news_gdelt_enabled and settings.news_gdelt_bulk and settings.news_gdelt_bulk_feeds):
         return None
     return GdeltBulk(feeds=settings.news_gdelt_bulk_feeds, max_files=settings.news_gdelt_bulk_max_files)
@@ -473,7 +661,9 @@ class RefreshReport:
     fetched: dict[str, int] = field(default_factory=dict)  # source -> requests made (gdelt_bulk: files read)
     stored: int = 0
     bulk_rows: int = 0  # Taiwanese headlines in the GDELT bulk files read
+    bulk_us_rows: int = 0  # pages of US and UK outlets in the English bulk files read
     bulk_ok: bool = False  # the bulk files are current: the DOC API is not asked for Taiwan stocks
+    bulk_us_ok: bool = False  # the English bulk feed is current: the DOC API is not asked for US stocks / the market
     blocked_sources: list[str] = field(default_factory=list)
     ai_searches: int = 0
     ai_skipped: str | None = None  # why the AI fallback did not run at all (budget, off, no keys)
@@ -558,7 +748,7 @@ def record_searxng_engines(db: Session, src: SearxngSource, now: datetime, setti
 
 
 def _searxng_skip(db: Session, src: SearxngSource, symbol: str, now: datetime, settings: Settings,
-                  gdelt_on: bool) -> str | None:
+                  gdelt_on: bool, check: ReadMatch | None = None) -> str | None:
     """Why SearXNG is not asked for this symbol now: it answered within NEWS_SEARXNG_CACHE_MINUTES (that answer is
     stored; a query that failed caches nothing — the source-wide pause paces those), or GDELT already holds
     NEWS_SEARXNG_SKIP_GDELT_ITEMS headlines from the last 24 hours."""
@@ -566,7 +756,8 @@ def _searxng_skip(db: Session, src: SearxngSource, symbol: str, now: datetime, s
     if st is not None and st.last_success_at is not None and \
             now - _aware(st.last_success_at) < timedelta(minutes=settings.news_searxng_cache_minutes):
         return "searxng_cache"
-    if gdelt_on and recent_count(db, symbol, now - GDELT_FRESH, ("gdelt",)) >= settings.news_searxng_skip_gdelt_items:
+    if gdelt_on and recent_count(db, symbol, now - GDELT_FRESH, ("gdelt",), check=check) \
+            >= settings.news_searxng_skip_gdelt_items:
         return "searxng_gdelt"
     return None
 
@@ -578,67 +769,95 @@ def _mark_open(db: Session, source: str, now: datetime) -> None:
         db.commit()
 
 
-def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str] | None = None) -> int:
+def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str] | None = None, *,
+                 check: ReadMatch | None = None) -> int:
     """Stored headlines of ``symbol`` published since ``since`` (from ``sources``, else any), not counting rows the
     reading side hides (quote pages, forums, robot flashes stored before 2026-11-16: ``is_not_news``,
-    ``is_bot_flash``), so that they do not hold the AI fallback back."""
-    q = select(NewsArticle.url, NewsArticle.title).where(NewsArticle.symbol == symbol,
-                                                         NewsArticle.published_at >= since)
+    ``is_bot_flash``; Taiwan stocks' headlines tagged as not finance: :func:`tagged_not_finance`; with ``check``,
+    Taiwan stocks' rows whose title no longer matches: :class:`ReadMatch`), so that they do not hold the AI fallback
+    back. :func:`refresh` always passes ``check``."""
+    q = select(NewsArticle.url, NewsArticle.title).where(
+        NewsArticle.symbol == symbol, NewsArticle.published_at >= since,
+        ~tagged_not_finance(NewsArticle.url_key, NewsArticle.symbol))
     if sources is not None:
         q = q.where(NewsArticle.source.in_(list(sources)))
-    return sum(1 for url, title in db.execute(q) if not is_not_news(url) and not is_bot_flash(title))
+    return sum(1 for url, title in db.execute(q) if not is_not_news(url) and not is_bot_flash(title)
+               and (check is None or check.keeps(symbol, title, url)))
 
 
-def recent_free_count(db: Session, symbol: str, now: datetime) -> int:
+def recent_free_count(db: Session, symbol: str, now: datetime, *, check: ReadMatch | None = None) -> int:
     """Headlines from the free sources (GDELT, SearXNG, Yahoo RSS) in the last 7 days."""
-    return recent_count(db, symbol, now - WINDOW, FREE_SOURCES)
+    return recent_count(db, symbol, now - WINDOW, FREE_SOURCES, check=check)
 
 
-def ai_window(db: Session, symbol: str, now: datetime) -> timedelta:
+def ai_window(db: Session, symbol: str, now: datetime, *, check: ReadMatch | None = None) -> timedelta:
     """How far back the AI fallback searches: 14 days, or 30 when nothing at all is stored from the last 14 days."""
-    return AI_WINDOW if recent_count(db, symbol, now - AI_WINDOW) else AI_WINDOW_EMPTY
+    return AI_WINDOW if recent_count(db, symbol, now - AI_WINDOW, check=check) else AI_WINDOW_EMPTY
+
+
+def _book_bulk(db: Session, symbols: Iterable[str], covered: datetime, found: dict[str, int]) -> None:
+    """Book each symbol's ``gdelt`` row as answered up to ``covered`` (never moved back)."""
+    for sym in symbols:
+        st = _state(db, "gdelt", sym)
+        before = _aware(st.last_success_at) if st.last_success_at else None
+        st.last_success_at, st.failures = max(covered, before) if before else covered, 0
+        st.items = found.get(sym, 0)
+        st.last_status = "ok" if st.items else "empty"
+    db.commit()
 
 
 def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequence[str], now: datetime,
-                  report: RefreshReport, blocked: Sequence[str]) -> bool:
-    """Read GDELT's new bulk files once for every tracked Taiwan stock (not only the batch's: ``tracked(limit=False)``)
-    and store the matches as GDELT headlines, each file's before it is booked as read (``GdeltBulk.run``'s
-    ``keep``). While the files are current, each stock's ``gdelt`` row is booked as answered up to the end of the
-    newest file read (``last_success_at``, never moved back: the AI fallback's gate and
-    the DOC API fallback's window read it, so once the files stop the DOC API starts an hour before what they covered;
-    ``last_attempt_at`` stays the rotation's, set when the batch reaches the stock). Returns whether the files are
-    current."""
+                  report: RefreshReport, blocked: Sequence[str], *, market: bool = False) -> tuple[bool, bool]:
+    """Read GDELT's new bulk files once for every tracked stock (not only the batch's: ``tracked(limit=False)``) —
+    Taiwan stocks in both feeds, US stocks (and with ``market`` the US market, key ``^US``) in the English feed — and
+    store the matches as GDELT headlines, each file's before it is booked as read (``GdeltBulk.run``'s ``keep``). While
+    a stock's feed is current (Taiwan: ``translation``; US and the market: ``english``), its ``gdelt`` row is booked
+    as answered up to the end of that feed's newest file read (``last_success_at``, never moved back: the AI
+    fallback's gate and the DOC API fallback's window read it, so once the files stop the DOC API starts an hour
+    before what they covered; ``last_attempt_at`` stays the rotation's, set when the batch reaches the stock).
+    Returns whether the Taiwan feed and the English feed are current."""
     queries: dict[str, Query] = {}
+    us_queries: dict[str, Query] = {}
+    us_tests: dict[str, UsTest] = {}
     for sym in symbols:
         info = md.instrument(sym)
-        if info is not None and info.market != "US":
-            queries[info.symbol] = build_query(db, info, now - WINDOW, now)
-    if not queries:
-        return False
+        if info is None:
+            continue
+        q = build_query(db, info, now - WINDOW, now, md)
+        if info.market != "US":
+            queries[info.symbol] = q
+        else:
+            us_queries[info.symbol] = q
+            us_tests[info.symbol] = us_terms(db, info).matches
+    if market:
+        us_queries[US_MARKET_KEY] = market_query(now - WINDOW, now)
+        us_tests[US_MARKET_KEY] = market_matches
+    if not queries and not us_tests:
+        return False, False
     found: dict[str, int] = {}
 
     def keep(matches: dict[str, list[RawItem]]) -> None:  # each file's matches, stored before it is booked as read
         for sym, items in matches.items():
-            heads = to_headlines(items, queries[sym], "gdelt", blocked)
+            if sym in queries:
+                heads = to_headlines(items, queries[sym], "gdelt", blocked)
+            else:
+                heads = to_headlines(items, us_queries[sym], "gdelt", blocked, relevant=us_tests[sym])
             found[sym] = found.get(sym, 0) + len(heads)
             report.stored += store(db, sym, heads, now)
 
-    res = bulk.run(db, queries, now, keep)
+    res = bulk.run(db, queries, now, keep, us=us_tests)
     report.fetched[bulk.key] = report.fetched.get(bulk.key, 0) + res.files
     report.bulk_rows += res.rows
+    report.bulk_us_rows += res.us_rows
     report.errors += res.errors
     report.blocked_sources += [f"{bulk.key}:{f}" for f in res.paused]
-    ok = bulk.healthy(db, now)
+    ok = bool(queries) and bulk.healthy(db, now)
     if ok:
-        covered = min(now, bulk.covered_until(db) or now)
-        for sym in queries:
-            st = _state(db, "gdelt", sym)
-            before = _aware(st.last_success_at) if st.last_success_at else None
-            st.last_success_at, st.failures = max(covered, before) if before else covered, 0
-            st.items = found.get(sym, 0)
-            st.last_status = "ok" if st.items else "empty"
-        db.commit()
-    return ok
+        _book_bulk(db, queries, min(now, bulk.covered_until(db) or now), found)
+    us_ok = bool(us_tests) and bulk.healthy(db, now, US_FEED)
+    if us_ok:
+        _book_bulk(db, us_tests, min(now, bulk.covered_until(db, US_FEED) or now), found)
+    return ok, us_ok
 
 
 def default_ai(settings: Settings) -> AiFactory:
@@ -691,13 +910,19 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
     blocked = blocked_domains(db, settings)
     open_sources = [s for s in sources if _source_open(db, s.key, now)]
     report.blocked_sources = [s.key for s in sources if s not in open_sources]
+    if isinstance(bulk, GdeltBulk):
+        # the US market's headlines are matched whenever the files are read (also on a CLI run for given symbols: a
+        # file is read once), the DOC API's market request below only on the worker's run
+        report.bulk_ok, report.bulk_us_ok = _refresh_bulk(db, md, bulk, every, now, report, blocked,
+                                                          market=settings.news_us_market)
     gdelt = next((s for s in open_sources if s.key == "gdelt"), None)
-    if market_run and gdelt is not None and not _refresh_market(db, gdelt, now, report, blocked, settings):
+    if market_run and gdelt is not None and not report.bulk_us_ok \
+            and not _refresh_market(db, gdelt, now, report, blocked, settings):
         open_sources.remove(gdelt)
         report.blocked_sources.append(gdelt.key)
-    if isinstance(bulk, GdeltBulk):
-        report.bulk_ok = _refresh_bulk(db, md, bulk, every, now, report, blocked)
     gdelt_on = any(s.key == "gdelt" for s in sources)
+    check = ReadMatch(db, md)  # what the reading side shows counts (rows stored before 2026-11-17 checked again)
+    check.prefetch(symbols)  # the batch's company profiles in one query (per 500), not one per stock in the loop
     failures: dict[str, int] = {}
     ai_runner: Any = None
     ai_checked = False
@@ -710,18 +935,18 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
             continue
         report.symbols += 1
         now = now_fn()
-        base = build_query(db, info, now - WINDOW, now)
+        base = build_query(db, info, now - WINDOW, now, md)
         for src in list(open_sources):
             if not src.supports(base):
                 continue
-            if src.key == "gdelt" and report.bulk_ok and base.taiwan:  # the bulk files covered it
+            if src.key == "gdelt" and _bulk_covers(report, base):  # the bulk files covered it
                 report.skipped["gdelt_bulk"] = report.skipped.get("gdelt_bulk", 0) + 1
                 _state(db, "gdelt", info.symbol).last_attempt_at = now  # keeps the stalest-first rotation turning
                 db.commit()
                 continue
             searx = src if isinstance(src, SearxngSource) else None
             if searx is not None:
-                why = _searxng_skip(db, searx, info.symbol, now, settings, gdelt_on)
+                why = _searxng_skip(db, searx, info.symbol, now, settings, gdelt_on, check)
                 if why is not None:
                     report.skipped[why] = report.skipped.get(why, 0) + 1
                     continue
@@ -779,9 +1004,9 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
             continue
         # A paused or unreachable source does not hold the AI back (2026-11-16: GDELT's DOC API is paused after a 429
         # most of the day, and the AI step waited for it): only the sources answering in this run must have answered.
-        gdelt_answering = (report.bulk_ok and base.taiwan) or any(s.key == "gdelt" for s in open_sources)
+        gdelt_answering = _bulk_covers(report, base) or any(s.key == "gdelt" for s in open_sources)
         if not _ai_due(db, settings, info.symbol, now, gdelt_on=gdelt_answering,
-                       searxng_on=any(s.key == "searxng" for s in open_sources)):
+                       searxng_on=any(s.key == "searxng" for s in open_sources), check=check):
             continue
         if not ai_search.budget_left(db, settings, now):
             report.ai_skipped = "budget"
@@ -797,7 +1022,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         st = _state(db, "ai_search", info.symbol)
         st.last_attempt_at = now
         db.commit()
-        q = replace(base, since=now - ai_window(db, info.symbol, now))
+        q = replace(base, since=now - ai_window(db, info.symbol, now, check=check))
         gen = ai_search.new_generation_id()
         report.ai_searches += 1
         try:
@@ -817,16 +1042,22 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
         db.commit()
     log.info("news refresh: %d symbols, requests %s, %d new headlines, %d AI searches%s%s%s%s", report.symbols,
              report.fetched, report.stored, report.ai_searches,
-             f", GDELT bulk {'current' if report.bulk_ok else 'not current'} ({report.bulk_rows} Taiwanese rows)"
-             if "gdelt_bulk" in report.fetched or report.bulk_ok else "",
+             f", GDELT bulk {'current' if report.bulk_ok else 'not current'} ({report.bulk_rows} Taiwanese rows), "
+             f"English feed {'current' if report.bulk_us_ok else 'not current'} ({report.bulk_us_rows} US/UK pages)"
+             if "gdelt_bulk" in report.fetched or report.bulk_ok or report.bulk_us_ok else "",
              f", skipped {report.skipped}" if report.skipped else "",
              f", paused {report.blocked_sources}" if report.blocked_sources else "",
              f", paused SearXNG engines {report.paused_engines}" if report.paused_engines else "")
     return report
 
 
+def _bulk_covers(report: RefreshReport, q: Query) -> bool:
+    """The bulk feed this stock leans on is current (Taiwan: ``translation``; US: ``english``): no DOC API request."""
+    return report.bulk_ok if q.taiwan else report.bulk_us_ok
+
+
 def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdelt_on: bool,
-            searxng_on: bool = False) -> bool:
+            searxng_on: bool = False, check: ReadMatch | None = None) -> bool:
     """GDELT and SearXNG together hold fewer than NEWS_AI_MIN_ITEMS headlines from the last 7 days, each of them
     answered for this symbol in the last 24 hours while it is answering in this run (GDELT: its bulk files are current
     or its DOC API is not paused; SearXNG: on and not paused — a paused source does not hold the AI back), and no AI
@@ -838,7 +1069,7 @@ def _ai_due(db: Session, settings: Settings, symbol: str, now: datetime, *, gdel
         g = db.get(NewsFetchState, (source, symbol))
         if g is None or g.last_success_at is None or now - _aware(g.last_success_at) > GDELT_FRESH:
             return False
-    if recent_free_count(db, symbol, now) >= settings.news_ai_min_items:
+    if recent_free_count(db, symbol, now, check=check) >= settings.news_ai_min_items:
         return False
     st = db.get(NewsFetchState, ("ai_search", symbol))
     if st is None or st.last_attempt_at is None:

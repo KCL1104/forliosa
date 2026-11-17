@@ -667,6 +667,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | **GDELT DOC 2.0**（`api.gdeltproject.org/api/v2/doc/doc`，預設） | 每檔每次 worker 批次 | **英文**關鍵字：英文簡稱（`t187ap03_L`「英文簡稱」／`mopsfin_t187ap03_O` 的 `Symbol`，存在 `company_profiles`；沒有時用商品主檔的英文別名）＋代號，台股 `sourcecountry:taiwan`、美股只收美國與英國媒體的英文報導 `(sourcecountry:US OR sourcecountry:UK) sourcelang:english`（2026-11-14 起；例：`(TSMC OR 2330) sourcecountry:taiwan`、`(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK) sourcelang:english`）。台股的英文簡稱是一般英文單字時（穩懋「WIN」、台達電「DELTA」；`news/normalize.py` 的 `COMMON_WORDS`）不放進查詢、只用代號（`3105 sourcecountry:taiwan`）：GDELT 比對機器翻譯後的全文、不分大小寫，這種字會讓 75 筆全被無關新聞佔滿；`mode=artlist`、`format=json`、`maxrecords=75`、`startdatetime` = 上次成功前 1 小時（最多 7 天） | 429／403、或 200 回「Please limit requests…」→ 這次批次不再問，整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（`news_fetch_state` 的 `symbol="*"`）；連線錯誤連 3 次 → 這次批次略過 |
 | **AI 網路搜尋**（`news/ai_search.py`） | 只在 GDELT 與 SearXNG 這 24 小時內都對這檔有回應（關掉或暫停中的不算）、且兩者（加 personal 的 Yahoo RSS）最近 7 天合計少於 `NEWS_AI_MIN_ITEMS`（3）則時；同一檔 `NEWS_AI_INTERVAL_HOURS`（24）內最多一次，上一次什麼都沒找到時 72 小時一次（`AI_EMPTY_INTERVAL`，2026-11-16 審查）；每批最多 10 次。計數不算畫面會藏起來的列（報價頁、論壇、機器人快訊） | `web_search`（最多 2 次，封鎖行情／論壇／交易所網站；**沒有** `web_fetch`）＋ strict 工具 `report_news`（只回網址清單）。**模型只負責挑選**：標題、網址、日期都取自 `web_search_result`（網址不在搜尋結果、行情頁、沒有日期的都丟掉） | 本月（UTC）`ai_usage.feature = "news"` 的估計費用 + US$0.05 超過 `NEWS_AI_BUDGET_USD`（30）就整月不跑；沒有金鑰、`AI_WEB_SEARCH=false`、`NEWS_AI_ENABLED=false` 也不跑 |
 | **SearXNG**（`news/searxng.py`；自架、只對內，`deploy/searxng`） | **預設開啟**（2026-11-12 第三輪）。網址：`NEWS_SEARXNG_URL`，不設時 prod 是 `http://searxng.railway.internal:8080`、dev／test 是 `http://localhost:8080`；`NEWS_SEARXNG_ENABLED=false` 或 `NEWS_SEARXNG_URL=`（空字串）關掉。每檔在 GDELT 之後問；這檔 `NEWS_SEARXNG_CACHE_MINUTES`（60）內回應過、或 GDELT 已有 ≥ `NEWS_SEARXNG_SKIP_GDELT_ITEMS`（8）則 24 小時內的標題就不問 | 中文查詢：台股 `q=台積電 2330&language=zh-TW`，美股 `q=NVIDIA NVDA&language=en`（英文簡稱＋代號）；都加 `categories=news&time_range=week&format=json&safesearch=0`。有引擎暫停時改用 `engines=<其他引擎>`（同時送 `categories` 會把全部新聞引擎加回來）。只讀 `title`、`url`、時間（`publishedDate`；沒有時用 `pubdate`／`metadata` 裡的「3 小時前」「3 hours ago」「昨天」，以天計的只標日期）與 `engines`；`content`、縮圖不讀；沒有時間的不收；**以週、月、年計的相對時間（「3 weeks ago」「2 週前」）也當作沒有時間、不收**：Brave News 與 DuckDuckGo News 不理 `time_range=week`，這種結果一定超過一週、而且日期可能差到 6 天（2026-11-12 審查後）；搜尋引擎轉址丟掉 | 一次只查一個、上一次查完到下一次開始 ≥ `NEWS_SEARXNG_INTERVAL_SECONDS`（10，最少 10）。**連不上**（拒絕連線、DNS、逾時、5xx、不是 JSON）→ 整個來源暫停 15 分鐘起、加倍到 4 小時（`last_status: "unreachable"`，不算錯誤）；我們自己的 SearXNG 回 403／429 → 暫停 `NEWS_SEARXNG_BACKOFF_MINUTES`（120）起。**上游引擎**（`unresponsive_engines`）：CAPTCHA／too many requests／access denied（含 `Suspended: …`）→ 那個引擎暫停 120 分鐘起、加倍到 24 小時；逾時等其他錯誤連 3 次 → 暫停 15 分鐘起；問的引擎全部失敗 → 整個 SearXNG 暫停；引擎全部暫停中 → SearXNG 暫停到最早恢復的那個。不換 IP、不用代理 |
+| **LangSearch**（`news/langsearch.py`，2026-11-17 產品負責人決定） | 只在 `NEWS_LANGSEARCH_ENABLED`（正式環境 worker）；**只有台股**與大盤 `^TW`，依分級每天到每 7 天一次（見「2026-11-17 LangSearch 台股新聞」） | 簡稱加引號（`"台積電"`）、`contents.text.max_characters=1`、`summary=false`，不篩網域；只讀標題、網址、時間 | 429／401／403／轉址 → 停到下一個 00:00 UTC；5xx／逾時連 2 次（跨輪計算）→ 暫停 15 分鐘起；每天 250 次、5 萬 token（手動 smoke 也算） |
 | **Yahoo股市 RSS** | 只有 `DATA_POLICY=personal`（條款限非商用；`NEWS_YAHOO_RSS=false` 可關） | `tw.stock.yahoo.com/rss?s=<代號>`。2026-11-12 實測這個參數回的是「最新新聞」頻道，所以靠下面的相關性篩選只留這檔的標題；原始媒體從描述開頭判斷（「MoneyDJ新聞」「【財訊快報／」「（中央社記者」），**描述本身不存** | 同上 |
 
 HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (portfolio tracker; news headline index)`），GDELT 每次間隔 ≥ `NEWS_GDELT_INTERVAL_SECONDS`（6，最少 5），
@@ -793,7 +794,7 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
     停機太久時更早的略過並記 log。403／429 → 那種檔暫停 15 分鐘起、加倍到 4 小時；連不上也暫停；某一份 404（GDELT 偶爾跳過）就略過；壞檔略過不重試。
   - 比對：**只收台灣網站**（`outlets.is_taiwan_outlet`：`.tw` 主機或 `TAIWAN_DOMAINS`——代替 DOC API 的 `sourcecountry:taiwan`；GDELT 2018 的網域國別表把 cnyes、moneydj 算中國、storm.mg 算馬達加斯加，所以不用它），
     標題要點名公司（同 `is_relevant`）；中國網站寫「台积电」、東森美洲（ettvamerica.com）都不收。
-  - **美股不用整批檔**：整批檔沒有來源國家，做不到「只收美國、英國媒體」（2026-11-14 決定），美股照舊用 DOC API。
+  - ~~**美股不用整批檔**~~：2026-11-17 起美股也用英文整批檔（用美國、英國媒體白名單代替來源國家），見下一節。
   - **DOC API 變成台股的備用**：主要的 `translation` 檔最新讀到的那份在 2 小時內（`gdelt_bulk.FRESH`）就不問 DOC API（`skipped.gdelt_bulk`）；
     超過就恢復一檔一檔問，起點是整批檔最後涵蓋的時間前 1 小時（每檔的 `last_success_at` 記成最新一份檔的時段結束，不記批次時間；
     2026-11-16 審查前記的是批次時間，整批檔停住後改回 DOC API 時會漏掉約 40 分鐘）。整批檔比對**全部追蹤中的台股**，不只這一批的
@@ -830,6 +831,365 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
 - 改之後（整批檔讀 12 小時＝每種 48 份，約 4 分鐘；正式環境每次只讀新的 3 份左右）：台積電存 35 則、去重後顯示 32 則（最新 20:45，DOC API 以前最新的是 4 天前）、
   台達電 1 則整批檔＋6 則 AI（11/09–11/16）、禾榮科 4 則 AI（11/05–11/11，MoneyDJ 2、Yahoo股市 2）、M31 與訊聯 0 則（AI 搜 30 天也沒有，老實顯示空的）。
   AI 4 次共 US$0.093（約 0.023／次）。存下來的快訊與非新聞網頁 0 則。
+
+### 2026-11-17 美股新聞改讀 GDELT 英文整批檔（產品負責人選 A）
+
+原因：正式環境 worker 的 log 顯示 GDELT DOC API（`api.gdeltproject.org`）幾乎每個請求都回 429，即使每 45 分鐘只問 1–2 次——
+限制是每個 IP 約 5 秒一次，Railway 的出口 IP 和其他租戶共用。台股 11-16 已改讀整批檔；這一節把美股個股新聞與市場頁的美股新聞（`^US`）也搬過去。
+這一節取代上一節的「美股不用整批檔」。
+
+- **只讀英文整批檔、不多下載**（`news/gdelt_bulk.py`）：`english` 檔原本就為台灣的英文網站下載；現在同一份檔同時比對台股（台灣網站）和美股（美國、英國媒體），
+  一次下載兩邊用。只有美股、沒有台股時，`translation` 檔不下載；禮貌、退避、`NEWS_GDELT_BULK_MAX_FILES` 照舊（同一個 fetcher、同一份進度
+  `news_fetch_state(gdelt_bulk, @english)`）。`GdeltBulk.run(..., us=…)`、`gdelt_bulk.match(rows, queries, us)`；`RefreshReport.bulk_us_ok`／`bulk_us_rows`。
+- **來源：美國、英國新聞媒體白名單**（`outlets.US_NEWS_DOMAINS`，代替 DOC API 的 `(sourcecountry:US OR sourcecountry:UK) sourcelang:english`；整批檔沒有來源國家）：
+  通訊社與財經媒體（Reuters、AP、Bloomberg、WSJ、Barron's、MarketWatch、FT、CNBC、Fox Business、Investor's Business Daily、Morningstar、Kiplinger、Fortune、
+  Business Insider、Forbes、Yahoo Finance（只有 `finance.yahoo.com`）、The Economist、Marketplace、City A.M.、Axios、Semafor）、全國性報紙與電視網
+  （NYT、Washington Post、LA Times、USA Today、Boston Globe、Chicago Tribune、CNN、CBS、NBC、ABC、NPR、Fox News、Politico、TIME、Newsweek、BBC、
+  The Guardian、The Independent、Evening Standard、The Telegraph、The Times、Sky News）、科技媒體（TechCrunch、The Verge、WIRED、Ars Technica、Engadget、CNET、ZDNET）。
+  包含 `REPUTABLE_DOMAINS` 的所有美國媒體，不含 `NOT_NEWS_DOMAINS`（MarketBeat、TipRanks 等）；地方電視台、轉載網（AOL、Yahoo 其他版、MSN）都不收，比 DOC API 的國家條件嚴。
+  這些網站上不是新聞的頁面也不收（`outlets.is_us_outlet`，依網址第一段）：Wirecutter、各家購物／評測（NBC Select、CNN Underscored、The Guardian 的 The Filter）、
+  業配（NYT paidpost、Forbes Councils、CNET paid-content、Business Insider `/sc/`、The Guardian 的合作頁、LA Times `/b2b/`）、食譜、播放器、新聞稿室、活動、天氣、體育與博彩；
+  Morningstar 的報價／分析頁（`/stocks/xnys/tu/quote`，「TU Stock Price (XNYS) & Analyst Rating」）加進 `NOT_NEWS_PATTERNS`，所以已存的也會藏起來。
+- **比對：只看標題**（`news/us_match.py`；DOC API 是比對全文）。精確優先：寧可少一則，不要放錯公司的新聞。
+  - **代號要有財經語境**：`$NVDA`、`(NVDA)`、`(Nasdaq: NVDA)`、`NYSE: F`、`NVDA stock／shares`；單一字母代號只認 `$F`、`NYSE: F`；
+    代號同時是常見縮寫的（AI、ESG、IPO…，`us_words.ABBREVIATIONS`）不認「AI stock」「(AI)」。只有代號本身（「META」「SNAP」）不算。
+  - **名稱**從商品主檔（SEC `company_tickers.json` 的公司名、內建名稱、英文別名）去掉 Inc.／Corp 等字尾而來；多字名稱的第一個字在沒有其他 SEC 公司用同一個字開頭時
+    也算（Palantir Technologies → Palantir，同 `ai.analyst.us_brand` 的規則）；`US_HINTS` 補新聞常用的叫法（Google、Disney、JPMorgan、TSMC）與每個一般字名稱的「自己的字」。
+    名稱要是專有名詞（整個字、第一個字母大寫：「Nvidia's」算、「nvidia」不算），連字號接小寫字或「-backed」這類字尾不算（「Nvidia-backed」「Snap-on」）。
+  - 四種名稱：**特徵名**（Nvidia、Palantir、Coca-Cola）直接算；**我們整理過的一般字名稱**（Apple、Amazon、Meta、Target、Visa、Snap、Block、Gap、Ford）要有公司語境——
+    後面接 stock／shares／earnings／CEO／Inc.、公司自己的字（iPhone、Tim Cook；AWS、Bezos；Zuckerberg、Instagram），或在一般句型標題裡（句中大寫才代表專有名詞）
+    有財經字或是財經／科技媒體、財經版的頁面；Title Case 標題（NYT、IBD、Engadget 每個字都大寫）看不出專有名詞，只認前兩種；
+    **其他一般字的單字名稱**（Outlook、Track、Here、Bill、Fold、Hub 等，`us_words.EVERYDAY_NAME_WORDS`，實測產生；另含 Dow Inc. 與 Nasdaq, Inc. 的「Dow」「Nasdaq」）
+    只認「後面接 stock／shares／earnings／CEO／Inc.」或公司自己的字；**其他單字名稱**（Hasbro、Amgen、Navan）要有財經字，或在一般句型標題裡是財經／科技頁面，
+    且前面緊接的不是另一個大寫字（「Serena Williams」不是 Williams Companies）。
+  - 一律不算：連字號複合字裡的非特徵名（「Williams-Sonoma」不是 Sonoma）、「the X of」比喻（「the Ferrari of AI」）、其他 SEC 公司名稱的開頭
+    （Apple Hospitality、Target Hospitality、Coca-Cola Consolidated）、`US_HINTS` 的片語（Big Apple、apple pie、Amazon rainforest、Doug Ford、H-1B visa、
+    snap election、Oracle of Omaha、price target、Uber driver）；銀行與券商（`us_match.BROKERAGES`：Goldman、Morgan Stanley、JPMorgan、Citi、Mizuho、
+    Jefferies…，和 `ai.analyst._NOT_A_BRAND` 同一批）當研究報告的出處時不算那家公司的新聞（「Morgan Stanley S&P 500 target」「Goldman says…」
+    「double upgrade from Mizuho」「… raises its Nvidia price target」）。長名稱被排除時，裡面的短名稱不會再把它算回來（「Goldman Sachs raises…」的「Goldman」）。
+    另外**其他 SEC 公司名稱裡、排在名稱前面的字**也不算（2026-11-17 審查：「H&R Block」不是 Block；`us_match._other_companies_prev_words`，同一家公司自己的
+    「Eli Lilly」「Walt Disney」與 the／of 這類虛字除外）。
+  - **有歧義的名稱**（2026-11-17 審查補的，`US_HINTS`；Title Case 標題裡一般名詞也大寫，所以要靠前後的字）：
+    Intel 也是「情報」——前面是國家、機關、國會（Iran、U.S.、Senate、House、Pentagon…）或後面是 Committee、chair、briefing、leak 這類字時不算，
+    除非標題有公司自己的字（Intel stock／shares／stake／CEO、Lip-Bu Tan、Xeon、18A…：「US Intel stake」是政府持股）；
+    「Goldman」單獨出現也是姓氏，改成一般字名稱（要公司語境），前面是名字或頭銜（Ron、Dan、Rep.…）不算，「Goldman Sachs」照舊直接算；
+    Citi Bike、Citi Field 不是 Citigroup；Merck KGaA（德國 Merck）不是 MRK；「Berkshire」單獨出現也是英國的郡，改成和 Dow、Nasdaq 一樣的嚴格名稱
+    （要接 shares／stock 等，或有 Buffett、Greg Abel、GEICO、BNSF 這類字），「Berkshire Hathaway」照舊直接算。
+    審查看過的 66 份英文檔裡，這些名稱出現在白名單媒體的標題原本就都是那家公司，誤判是在其他網站與合成標題上重現的；
+    用全部 10,404 個 SEC 代號在 60 份英文檔（實測的 48 份＋審查另下載的 12 份）的 1,373 頁上重跑，改動前後只差 ABC News 新增的 5 頁
+    （NVDA 2、AMZN、MSFT、UAL 各 1），其他比對與 `^US` 都沒變。
+    代價：「Berkshire lowers Bank of America, Capital One stakes」這類只寫 Berkshire、沒有公司字的標題不收（精確優先）。
+  - 指數 ETF 照舊用指數名稱（VOO／SPY「S&P 500」、QQQ「Nasdaq 100」、DIA「Dow Jones」，和 DOC API 查詢一樣），DIA 不收 Dow Jones Newswires 的「Top … Headlines」。
+- **市場頁美股新聞**（`us_match.market_matches`，存在同一個 `^US`）：和 DOC API 查詢同一個意思——Wall Street、S&P 500、Dow Jones／the Dow、Nasdaq——
+  另加 Russell 2000、stock market、US stocks／stock futures、「stocks」加漲跌字（不是「5 Stocks to Buy」這種選股清單）、Fed 加利率字（Fed holds rates、Fed minutes、Fed Chairman）；
+  不收新聞稿的「(Nasdaq: XYZ)」與上市消息、「The Wall Street Journal」「The Wolf of Wall Street」、Dow Jones Newswires 的公司新聞摘要、IBD 的「Dow Jones Biotech Giant…」（道瓊成分股，不是道瓊），
+  也不收只講其他市場的（FTSE、Nikkei、ECB…，同時提到美國指數的才收）。
+- **DOC API 只當備用**：`english` 檔最新讀到的那份在 2 小時內（`gdelt_bulk.FRESH`），美股個股與 `^US` 都不問 DOC API（`skipped.gdelt_bulk`）；
+  超過 2 小時才恢復（暫停與退避照舊），起點是英文檔最後涵蓋的時間前 1 小時（整批檔可用時每檔與 `^US` 的 `news_fetch_state(gdelt, …)` 記成已回應到最新一份檔的時段結束）。
+  `NEWS_GDELT_BULK_FEEDS` 不含 `english`、或 `NEWS_GDELT_BULK=false` 時，美股照舊用 DOC API。台股仍看 `translation` 檔。
+- **資料來源登記**（`datapolicy.py`，`GET /meta/attributions` 的 `used_for`，2026-11-17 審查）：`gdelt/gkg` 改成「個股頁「新聞報導」（台股、美股）與市場頁美股新聞」，
+  `gdelt/doc` 改成「…的備用來源（GDELT 整批檔超過 2 小時沒更新時才用）」；市場頁 `sources` 見下方「市場頁的美股」。
+- **存的形狀不變**：`source = "gdelt"`（顯名、引用不變），依網址去重（同一網址只存一列），下架封鎖清單、非新聞網頁、機器人快訊照舊不存不顯示；
+  時間是 GDELT 看到的檔案時段（同台股）。The Guardian 的版名尾巴（「| NHS」「| US news」）和 DOC API 一樣保留。
+- CLI：`gdelt-bulk-check --symbol NVDA --symbol 2330` 讀最新一份，英文檔另印美國、英國媒體各幾則、點名這些股票（台股或美股）的標題與 `^US` 市場新聞（不寫資料庫）。
+- 測試：`tests/news/test_us_news_bulk.py`（白名單與非新聞頁、英文檔只留美國／英國與台灣網站、NVDA／AAPL／AMZN／MSFT 等比對、15 個實測誤判逐一排除、名稱種類、
+  代號與片語、券商研究報告、市場新聞、refresh：英文檔可用時美股與 `^US` 不問 DOC API、封鎖網域不存、重跑不重複；英文檔停超過 2 小時改回 DOC API 且從整批檔涵蓋處接起；
+  一份英文檔同時給台股與美股、只有美股時不下載翻譯檔；沒設 `english` 檔時美股用 DOC API）。fixture `gdelt_gkg_english_us_live_20261117.csv.zip`
+  是 2026-11-16／17 英文檔的 38 列真實資料裁短（同上一節的裁法，時段統一成 02:15 UTC）。
+  審查修正另加（2026-11-17）：`gdelt_gkg_english_abcnews_live_20261117.csv.zip`（同一批檔的 6 列真實資料：ABC News 5 列＋`abcnews4.com` 1 列，同樣裁法）
+  測 `abcnews.com` 在白名單、購物頁不收、NVDA 與 AMZN 比對得到、refresh 存成「ABC News」；有歧義名稱的合成標題（Intel 情報、Goldman 姓氏、Citi Bike／Field、
+  Merck KGaA、H&R Block、Berkshire 郡）與公司本身的標題；SEC 名稱前一個字的規則（不靠 `US_HINTS` 也擋 H&R Block、不擋自己的「Eli Lilly」）；
+  `gdelt/gkg`／`gdelt/doc` 的 `used_for` 與市場頁 `sources` 兩個 GDELT 顯名。
+
+**實測（2026-11-17，沙盒連得到 storage.googleapis.com；英文檔 48 份＝12 小時，11-16 14:30 到 11-17 02:15 UTC，每份 3.8–7.3 MB、共 274 MB，
+每份間隔 ≥ 2 秒，沒有 403／429）**：
+- 每份 905–1,804 篇（平均 1,355）；白名單媒體不重複網址 1,125 頁，扣掉非新聞頁後 1,086 頁（平均每份 23 頁，美國深夜 2 頁、白天最多 49 頁）。出現的媒體（頁數）：The Guardian 85、NYT 84、BBC（.co.uk 79＋.com 34）、
+  Evening Standard 79、Chicago Tribune 68、Fox News 67（＋Fox News Radio 6）、Newsweek 63、LA Times 47、Business Insider 45、CBS 42、CNBC 40、Fortune 38、
+  The Verge 37、NBC 36、Morningstar 35（含 Dow Jones Newswires 與 MarketWatch 轉載）、IBD 33、The Independent 32、Engadget 26、TechCrunch 21、Boston Globe 16、
+  CNET 15、NPR 15、Ars Technica 12、TIME 12、City A.M. 12、Marketplace 10、ZDNET 10、Fox Business 8、Kiplinger 8、WIRED 7、The Times 2、Yahoo Finance 1。
+  **Reuters、AP、MarketWatch、WSJ、Barron's、Bloomberg、FT、Washington Post、Axios、USA Today、Politico、The Economist、Sky News、
+  The Telegraph、Semafor 這 12 小時都不在 GDELT 英文檔裡**；CNN 只有新聞稿室一頁、Forbes 的 27 頁全是付費的 Councils 文章（都不收）。
+  這些留在白名單裡，GDELT 之後收錄就會用到；MarketWatch 與 Dow Jones Newswires 的稿子會經 Morningstar 進來。
+  **更正（2026-11-17 審查）**：原本寫 ABC News 也不在檔裡，不對——白名單當時只有舊網域 `abcnews.go.com`，GDELT 記的是 `abcnews.com`（48 份檔 46 列，`abcnews.go.com` 0 列；
+  另外 41 列 `abcnews4.com` 是查爾斯頓地方台，不收）。`abcnews.com` 已加進白名單與媒體名稱表，購物頁 `/GMA/Shop/`、`/GMA/Deals/` 加進 `NOT_NEWS_PATTERNS`（實際有一列
+  「'GMA' Deals & Steals…」）。扣掉購物頁是 45 頁新聞，所以白名單新聞頁是 1,131 頁（平均每份 24 頁）；`/Business/wireStory/` 是 AP 商業電稿進來的管道
+  （apnews.com 本身不在檔裡）。
+- 每檔比對到的標題（不重複網址）：NVDA 61（黃仁勳事件那週；含 ABC News 2 則）、AAPL 10、AMZN 12（含 ABC 轉的 AP 電稿「Amazon vows to fight… union contract at a Canadian
+  warehouse」）、GOOGL 8、MSFT 8（含 ABC 1 則）、TSLA 6、VOO 3（S&P 500）、PLTR 1、META 0、ASAN 0；
+  另外 UBER 3、BRK-B 5、JPM 3、INTC 2、AMD 2、MU 2、NFLX 2、SPY 3、QQQ 2、DIA 3、GS 0、MS 0；`^US` 市場新聞 18。
+- 用全部 10,404 個 SEC 代號跑同一批頁面找誤判，排除了：Dow Inc.（「Dow Jones Futures」）、Nasdaq, Inc.（指數）、News Corp（「…Jensen Huang News」）、
+  Track Group（「Nvidia on Track」）、HERE（「Here's What…」）、BILL（「Bill Ackman」）、Outlook Therapeutics（「Outlook outage」）、Williams Companies（「Serena Williams」）、
+  Sonoma Pharmaceuticals（「Williams-Sonoma」）、Ferrari（「the Ferrari of AI」）、C3.ai（「AI stock boom」）、NOV（「Nov. 16」）、Hub Group（「Smart Home Hub」）、
+  Align（「Can Align Your Investments」）、Fold、Bullish、Star Group（「4-Star Stocks」）、Solo Brands、ESG 開頭的公司、Hyperscale Data（「Hyperscale Data Centers」）、
+  Uber（「Uber driver」的社會新聞）、Target（「S&P 500 target」「Cognition Target the ROI」）、Visa（「visa change」）、
+  Morgan Stanley（策略師的「S&P 500 target」）、Goldman（「Goldman says it's just delayed」）、Mizuho（「double upgrade from Mizuho」），
+  以及比對到的 8 頁 Morningstar 報價與分析頁。之後還留下的 167 頁比對逐一看過都是那家公司（同一公司的特別股、ETN 代號一起出現，例如 WFC-PL、JPM 的 VYLD）。
+- 為了精確而少收的（設計如此）：IBD Title Case 標題沒有公司字的（「ULA Loses Amazon Payload」）、一般字名稱在句首又沒有財經字的。
+
+### 2026-11-17 台股新聞比對收緊（產品負責人同意）
+
+新聞標籤實測（上一節之後的「新聞標籤」）發現：GDELT 整批檔存下的台灣媒體標題，約三分之一歸錯股票。原本的規則是「標題裡出現
+中文簡稱或代號就算」，對 1,997 檔中只有 2 個字的 1,251 檔幾乎沒有篩選力。改成兩道關卡：
+
+**一、比對（`news/tw_match.py`；`normalize.is_relevant` 遇到台股的 `Terms(taiwan=True)` 就交給它；`service.build_query` 對台股都打開，
+所以 GDELT 整批檔、DOC API、SearXNG、Yahoo RSS、AI 補缺都是同一套）**
+
+- **只看標題本身**（`headline`）：「 | 」之後是版名、專欄、作者或標籤（udn 的「| 大台北」「| 雲嘉南」「| 縣市長議員選戰」，風傳媒的
+  作者），不比對；但 10 個字以上的一段是摘要裡的另一則新聞（「DIGITIMES Today：… | 韓廠憂心南亞科、華邦電積極導入EUV」），照樣比對。
+  自由時報「 - 臺南市」這種短尾巴、開頭的欄名（「早安世界》」）也不算。存下來與顯示的標題不變。
+- **代號要有股票的上下文**（`code_mentioned`）：括號裡（「台積電(2330)」「（2330）」「(2330.TW)」「(2330、2317)」）、緊鄰公司名稱
+  （「2330台積電」「台積電 2330」）、「股票代號」後面、交易所字尾（「2330.TW」）。00 開頭的 ETF 代號（0050、00878）不用括號，後面接
+  股、月、年也算（「0050股價」「00919月配息」「0056年化報酬率」，審查修正：ETF 代號不會是股數、月份或年份），只有接金額或比例
+  （元、點、億、萬、%）才當數字。年份、金額、百分比、日期、時間、較長數字的一部分一律不算（「2027年」「2027台海」「3000點」「1500元」
+  「2,330」「2026-2030」）。原本只擋「緊接著單位」的數字，所以「2027台海」「2027最低工資」「2022黃珊珊選票」「1259班次」都被當成代號。
+- **公司全名（審查修正）**（`tw_match.official_forms`、`service.official_forms`）：`build_query` 從 `company_profiles` 的公司名稱
+  （t187ap03_L／mopsfin_t187ap03_O，每次跑歸檔都更新）做出全名的寫法：去掉「股份有限公司」「(股)公司」、註冊地（「英屬開曼群島商」）
+  與括號，得到全名（統一企業、台灣大哥大、華電聯網、台灣大車隊）；開頭就是簡稱的，再加「簡稱＋後兩個字」（南亞塑膠、世界先進、全家
+  便利）。標題出現**自己的全名就算**，不用其他證據；**別家的全名照「最長名稱優先」**（台灣大車隊不是台灣大、華電聯網不是華電、能率
+  亞洲不是能率、統一超商不是統一）。四個字以下的全名不用（6902 GOGOLOOK 的公司名稱是「走著瞧」）；「地名＋產業」的全名是一般說法，
+  只拿來蓋掉短名稱、不單獨算（台灣半導體、中國鋼鐵、亞洲航空、全國加油站）。1,996 家公司裡 1,741 家有全名寫法；六段資料 1.8 萬則
+  台灣媒體標題裡，全名出現 49 次，錯的只有「台灣半導體」3 次（地名＋產業，已排除）與「日本全家便利商店」1 次。全名表跟著主檔快取
+  （主檔每小時最多重建一次），每次重建讀一次資料庫。
+- **名稱要獨立出現**（`free_positions`）：
+  - 不在較長的上市櫃名稱或全名裡（最長的名稱優先：聯合再生不是聯合、南亞科不是南亞、中華電不是中華、聯發科不是聯發、長榮航不是
+    長榮）。`build_query` 帶入商品主檔（`md`）時，從主檔所有中文名稱（含美股中文別名，例如輝達）與全名找出包含這個名稱的。
+  - **不和另一個上市櫃名稱重疊**（審查修正）：「台灣大車隊」裡台灣大與大車隊各占一半，兩個都不從簡稱算（大車隊由全名算）；重疊的
+    那個名稱本身若跨在 `WORDS` 的詞上就不算數（「常廣明年」的廣明跨在明年上，所以常廣照算）。
+  - 不在 `WORDS` 的一般詞、地名、片語裡（大洋洲、大洋流、東南亞、九合一、房地合一、京華城、聯合國、聯合航空、聯合報、海力士、
+    金融時報、台灣大學、陽明山、信義區、三星電子、三星晶圓、三商巧福、鼎泰豐、大華銀、台達能源、新產品、聯合利華、宏泰人壽…），也不
+    跨在它們中間（「常廣明年」的廣明跨在「明年」上、「輝達新加坡」的達新、「怡安集團」的安集、「中和大車掃」的和大、「從平台端」的台端、
+    「致員工信」的工信、「祖國統一」的國統、「中美晶片」的中美晶、「統一實施」的統一實、「台中銀髮」的台中銀、「第一金牌」的第一金、
+    「先進光子」的先進光、「衛星通訊」的星通、「下台亞股」的台亞、「美國建廠」的國建）。這份清單是用真實資料跑全部名稱、逐一看比對
+    結果整理出來的（先用 24 小時，審查後再加另外 24 小時與最後 12 小時看到的）；**清單裡的詞不能是某家上市櫃公司自己的全名**（中華電信
+    是中華電的、長榮航空是長榮航的），有測試檢查。
+- **2 個字以內的簡稱要多一個證據**（`needs_context`；「-KY」「*」不算字數）：標題裡有代號（照上面的規則）、名稱前後 8 個字內有財經字眼
+  （`FINANCE_CUES`：股、漲停、跌停、營收、EPS、每股、法說、除息、外資、投信、目標價、股東、董事、訂單、獲利、上市、上櫃、檔、公司、
+  集團、旗下、施工、金控、證券…；名稱後面緊接的期間「前3季」「10月」「Q3」不算距離）、緊鄰另一家上市櫃公司的名稱（「信驊、創意等逾
+  10檔跌停」「長榮.陽明」，用頓號、逗號、斜線、「與」「和」「及」連起來，**審查修正後也包含一個空白**：「緯創 廣達 鴻海大比較」），或在
+  財經版（`is_finance_page`：自由財經、ETtoday財經雲、經濟日報、鉅亨、MoneyDJ、工商時報、非凡、TVBS 財經、中時 260410、中央社產經／
+  證券／**財經訊息平台**（`cna.com.tw/business/`，審查修正）、udn 產經與股市分類、數位時代、科技新報，或標題尾巴寫著「| 財經」「| 股市」
+  「| 產經」「- 財經」）。3 個字以上的名稱（台積電、玉山金）照舊，不用額外證據。科技網站（科技新報、數位時代、DIGITIMES）留在財經網站：
+  審查時試過拿掉，四段資料少了 3 則對的（訊連、康舒、漢測），錯的一則也沒少（那幾則錯的已由一般詞清單處理）。
+- **一般詞、地名、人名**（`GENERIC_NAMES`，82 個，任何長度：台南、全國、世界、全台、聯合、統一、冠軍、全新、建國、三星、創意、合一、
+  安心、大洋、全家、南亞、信義、國產、幸福、大台北、雲嘉南、台灣大、新天地；審查後加上光環、海灣、神準、太空梭、創業家、新零售、地心
+  引力、尼克森、第一店、第一銅、第一金、所羅門、全國電、大武山，拿掉華城：它的錯誤全是京華城，已由 `WORDS` 擋掉）更嚴（審查修正）：
+  只有代號、全名、**名稱後面緊接的財經字眼**（中間可隔一個期間：「統一前3季EPS」「第一金前10月賺」）、**前面隔著標記的財經字眼**
+  （「焦點股》南亞」「《鋼鐵股》三星」「千金股8檔漲停！創意」）或「股王／股后」（「新科股后創意」）才算；前面沒有標記的財經字眼屬於前
+  一個詞，不算（「集團幸福職場」「品牌冠軍」「五股五福」），後面隔一個字的也不算（「大華銀投信」）。緊鄰另一家公司名稱時，還要 8 個字內
+  有財經字眼（「信驊、創意等逾10檔跌停」算，「台積電、三星合作料不變」的三星是 Samsung，不算）。**財經版不夠**（實測「兩岸統一貨幣」
+  「全台預售屋」「全新電動車接單」都在財經版）。兩個一般詞並列（「大同、三星車隊」是宜蘭兩個鄉）也不算。
+- **英文簡稱**：英文標題照舊（大小寫規則：TSMC、THSRC）；**中文標題裡的英文別名不單獨算**（APEC＝富鼎 43 則、TOP、Alpha、USI、
+  AGV、AIDC 都是別的東西）。**審查修正**：簡稱本身就是英文字母的 12 檔（GOGOLOOK、TPK-KY、M31、GIS-KY、IET-KY、AES-KY、91APP*-KY、
+  LINEPAY、AMAX-KY、ABC-KY、IKKA-KY、jpp-KY）在中文標題照中文簡稱處理：去掉「-KY」「*」後不分大小寫找（「Gogolook第三季EPS」
+  「TPK-KY 10月營收」），5 個字母以上（GOGOLOOK、LINEPAY、91APP）不用其他證據，4 個以下（TPK、M31、IET）要代號、財經字眼、緊鄰的
+  公司名稱或財經版。`Terms.own` 記著這一檔的簡稱，只有它（和大小寫不同的同一個字）走這條，英文別名不走。
+- 美股不受影響（`Terms(taiwan=False)` 走原本的規則；英文整批檔的美股比對是 `us_match`，沒有改）。
+
+**實測（GDELT 整批檔，台灣媒體標題，全部 1,997 檔台股加 7 檔 ETF；用專案自己的入庫程式 `build_query`（帶主檔與公司資料）→
+`gdelt_bulk.match` → `to_headlines` 跑；舊規則的每一筆比對、新規則多出來的每一筆，都人工判定「是不是這家公司或它的業務」）**
+
+| 資料 | 舊規則 準確率 | 收緊（e177a34） 準確率／正確保留 | 審查修正後 準確率／正確保留 |
+|---|---:|---:|---:|
+| 24 小時 11-16 04:00 到 11-17 04:00 UTC（整理清單用） | 294/883＝33.3% | 261/261＝100%／88.2% | 263/263＝100%／88.9% |
+| 12 小時 11-15 16:00 到 11-16 04:00（收緊時的保留資料） | 71/244＝29.1% | 63/64＝98.4%／88.7% | 63/64＝98.4%／88.7% |
+| 12 小時 11-13 00:00 到 11:45（審查者的資料，審查修正參考過） | 248/718＝34.5% | 209/223＝93.7%／83.6% | 223/224＝99.6%／89.2% |
+| 2.25 小時 11-17 04:00 到 06:15 | 38/144＝26.4% | 33/33＝100%／86.8% | 33/33＝100%／86.8% |
+| **12 小時 11-14 00:00 到 11:45（週六，修正後第一次看）** | 51/383＝13.3% | 38/43＝88.4%／74.5% | **41/43＝95.3%**（看完後把「股」放寬到只認「股王／股后」，變成 41/42＝97.6%）／80.4% |
+| **12 小時 11-12 00:00 到 11:45（週四，最後才看的資料）** | 272/779＝34.9% | 221/240＝92.1%／81.0% | **234/252＝92.9%**／85.7%（看完後加了 8 個詞，變成 234/241＝97.1%） |
+
+- **沒看過的資料上，準確率約九成三到九成五**（最後兩段 12 小時，第一次跑的數字），不是整理清單那段的 100%；正確新聞保留約八成到
+  八成六。收緊時文件寫的「100%」「98.5%」是在整理清單的資料或樣本很小的 12 小時量的，高估了。審查修正和 e177a34 比，六段資料多留
+  34 則對的（英文字母簡稱 4 檔 10 則、公司全名 19 則、空白隔開的清單 4 則、中央社財經訊息平台 1 則）、少留 30 則錯的；多留 1 則錯的
+  （「日本全家便利商店」）、誤刪 2 則對的（「聯發科、創意領軍反彈」旁邊 8 個字內沒有財經字眼；「大亞、南亞材料」的南亞是一般詞）。逐筆清單：`tw-news-precision/fix/changes_vs_head.txt`。
+- 最後一段（週四 12 小時）第一次跑留下的 18 筆錯誤：一般詞或嵌在詞裡、清單沒有的 9 筆（大武山 ×2、新產品、美國建廠、下台亞股、先進光子、
+  衛星通訊、聯合利華、大量出貨，之後已加進清單）、宏泰人壽（未上市的同名公司，已加）、英文標題的英文縮寫 3 筆（CEC＝中選會之於中宇、
+  APEC ×2 之於富鼎；英文標題照舊用大小寫規則，沒有處理）、0050 當比較基準 3 筆（「美股版0050」「績效勝0050」「元大台灣50正2」）、
+  「日本全家便利商店」（日本的 FamilyMart，用全名比到 5903）。**清單一定會一直缺新詞**：第二道標籤篩選與定期用真實資料補清單是必要的。
+- 漏掉的真新聞主要是 2 個字的簡稱、不在財經版、標題沒有財經字眼的品牌活動與政治新聞（基泰大直案、王品與全家的優惠、遠百、雄獅新餐廳、
+  華航機長），以及一般詞名稱的公司新聞（「全家冰品新品」「統一新市園區」）。設計如此：個股頁寧可少一則品牌活動，也不要混進別的東西。
+- 收緊前後每一檔的數字、移除的每一筆與判定、保留的抽樣：沙盒 scratchpad `tw-news-precision/out/`（`per_stock.md`、`report.md`、
+  `measure.txt`；另外 12 小時是 `_holdout`）。審查修正：`tw-news-precision/fix/`（`summary.txt` 各段數字、`changes_vs_head.txt` 和
+  e177a34 不一樣的每一筆與判定、`labels.json` 全部判定、`ev.py` 量測程式、`lab.py` 判定與計分）。
+
+**二、新聞標籤當第二道篩選（`service.tagged_not_finance`）**
+
+- **台股**的新聞標籤已經貼完（`news_tag_state.status = "done"`）、而且**主題、類股、相關股票一個都沒有**的網址，視為非財經新聞
+  （體育、娛樂、天氣這類剛好和股票同名的）：**個股頁的新聞報導（`GET /instruments/{symbol}/news`）、AI 工具 `get_news`、`search_news`
+  都不顯示**，`recent_count`（SearXNG 略過、AI 補缺門檻）也不算它；資料庫裡照樣保留（30 天後照常刪）。
+- **只對台股（`.TW`／`.TWO`）的列**（審查修正）：新聞標籤實測裡 NFLX 的「Netflix commissions new Harlan Coben thriller The Innocent」
+  貼完卻沒有任何標籤（模型當成娛樂新聞），原本會被藏起來。美股是用代號與公司名稱比對（`us_match`），不是同名誤配；媒體、消費公司
+  自己的消息又容易被當成娛樂或生活。同一批實測裡被藏的台股全部是誤配。要讓美股也套用，得先讓模型逐檔回答「標題是不是在講這家公司」
+  並實測（這個沙盒沒有 Claude 金鑰，沒有做）。
+- **還沒貼標籤的照常顯示**（不等標籤）；貼標籤失敗、切開重送中、略過的也照常顯示。只有相關股票、沒有主題與類股的不隱藏。
+- **公告不受影響**：重大訊息與交易所公告（`market_events`）不是 `news_articles` 的列，永遠顯示。美股市場頁的「美股新聞」列沒有套用
+  （不是個股頁；要套用再說）。
+- 新聞標籤實測的 71 則裡，台股的 52 個「標題—股票」配對中，沒有任何標籤的 22 個，新的比對規則也全部不會再存進來；所以這一道主要是
+  保險，擋規則漏掉的。
+
+**三、讀取時再比對一次（`service.ReadMatch`；產品負責人 2026-11-17「好」）**
+
+- 收緊以前存下的錯誤配對（最多 `NEWS_RETENTION_DAYS` 30 天：「2027台海」在大成鋼 2027、「大洋洲」在大洋 1321、APEC 在富鼎 8261、
+  「九合一」在合一 4743、「中華電信」在中華 2204）還在資料庫裡，原本照樣顯示。現在讀取時，台股（`.TW`／`.TWO`）的每一列都用入庫
+  同一套規則（`is_relevant`＋`service.query_terms`，`build_query` 也改用它：`tw_match`、商品主檔所有名稱、公司全名、最長名稱優先、
+  代號規則），拿**存下來的標題**對**那一列的股票**再比一次，對不上的不顯示。**資料不刪**（照常 30 天後刪）。
+- **套用的地方**：個股頁新聞報導（`GET /instruments/{symbol}/news`，`media_items`）、AI 工具 `get_news`（同一份清單）、`search_news`
+  （`tags.search`）、市場報告用的主題／類股分組（`tags.by_topic`）、`recent_count`（SearXNG 略過與 AI 補缺的門檻與搜尋天數；`refresh`
+  每一批建一個 `ReadMatch` 傳給 `_searxng_skip`、`_ai_due`、`ai_window`；不傳 `check` 時照舊不比對）。同一個網址存在好幾檔底下時，只留
+  對得上的那幾檔：`search_news`／`by_topic` 的 `stocks` 只列它們，全部對不上的那一則就不出現（「星宇航空進軍大洋洲」只歸星宇航空
+  2646，不再歸大洋 1321；只歸富鼎的 APEC 新聞從「地緣政治」分組消失）。
+- **所有台股的列都重新比對，不只收緊以前存的**（不設時間切點）：入庫時所有來源（GDELT 整批檔、DOC API、SearXNG、Yahoo RSS、AI 補缺）都
+  過同一套 `is_relevant`，所以每一列用同一套檢查；之後一般詞清單補了新詞，已經存下的錯誤配對也會跟著不顯示，也不用知道正式環境換版
+  的確切時間。代價：存下來的標題已經去掉版名尾巴（「| 財經」），讀取時財經版只能看網址。**實測**（六段 GDELT 整批檔 11-12 到 11-17，
+  用 `ReadMatch` 本身跑）：新規則入庫的 867 筆裡，讀取時多藏 1 筆（三立「黃仁勳去職輝達會怎樣？華碩許先越這樣說」：華碩只靠標題尾巴
+  「| 財經」算財經版）；只有舊規則才會存的 2,289 筆全部不顯示。量測程式與結果：沙盒 scratchpad `news-readtime/`
+  （`measure_readmatch.py`、`measure_readmatch.txt`）。
+- **AI 補缺的列一樣重新比對**，不另外放寬：模型只挑網址，標題、連結、日期取自搜尋結果，入庫時也過同一套標題比對（收緊以前是舊規則，
+  和其他來源一樣）。實測 APEC 新聞也有 AI 補缺存到富鼎底下的。
+- **不重新比對的**：美股與美股大盤（`us_match` 自己的規則，入庫時就是現在的規則）；商品主檔裡已經沒有的代號（沒有東西可比，照常顯示）；
+  FinMind（只在 `DATA_POLICY=personal`，每次請求即時取得、不存，是 FinMind 自己的個股新聞清單）；公告（`market_events`，不是新聞列）。
+- **效能**：每個請求（或每批 refresh）建一個 `ReadMatch`，每檔的比對條件只建一次；公司基本資料的英文簡稱一次查詢讀好多檔（`prefetch`）：
+  `kept_rows`（個股頁、`get_news`、`search_news`）每讀一頁、比對以前先讀這一頁的股票，一頁一次查詢；`_shown`（`by_topic`，以及
+  `search_news` 帶股票時同一個網址的其他股票）比對以前先讀全部列的股票；`refresh` 建好 `ReadMatch` 就讀這一批的股票（每 500 檔一次查詢；
+  `build_query` 本來就有的每檔一次 `db.get` 照舊）。只有沒先讀過的單一檔才會由 `terms` 自己查一次。（審查修正 2026-11-17：原本只有
+  `_shown` 先讀，而 `search_news` 不帶股票時 `kept_rows` 已經一列一列查完，一頁 160 列可能跨 60 到 100 檔就多 60 到 100 次查詢；
+  `refresh` 的 `_ai_due`、`ai_window` 也是每檔多查一次。）全名表與主檔名稱表照舊跟著主檔快取（每小時最多重建一次，web 與 worker
+  各自一份；web 的請求執行緒共用，快取改成一次讀完整筆，不會讀到兩個版本混在一起）。實測每列約 30 微秒（212 檔、885 列連同建條件 29 毫秒）。
+  個股頁照舊先取最新 160 列（`MEDIA_LIMIT` 40 × 4），被藏掉的太多時再往下讀一頁，最多看 1,000 列（`READ_SCAN_MAX`），所以統一、全新這類舊錯誤很多的股票，
+  清單也補得滿；`search_news` 同樣（20 × 8 列）。
+- **沒有改的**：新聞標籤（`tagging.pending`）只看最近 7 天，收緊以前的那幾天在標籤上線時已經貼完；貼標籤時附給模型的「存在哪幾檔」仍
+  包含錯誤配對的代號（要的話之後一起套用）。
+
+**測試**：`tests/news/test_tw_match.py`。`gdelt_gkg_tw_precision_live_20261117.csv.zip` 是 24 小時裡 38 列真實資料（兩種整批檔、台灣媒體，
+和其他 fixture 一樣只留識別欄位與 `<PAGE_TITLE>`、時間移到 03:15）：舊規則存了 49 筆，新規則留下 22 筆全對、去掉 27 筆（25 筆錯的、
+2 筆基泰大直案）。審查修正另加 `gdelt_gkg_tw_precision_review_20261117.csv.zip`（11-12/13/14/16 的 35 列真實資料，同樣修剪）：英文
+簡稱（Gogolook、TPK-KY、IET-KY）、公司全名（統一企業、信義房屋、台灣大哥大、台灣大車隊、華電聯網、金洲海洋、台灣半導體不算）、空白
+隔開的清單（緯創 廣達 鴻海、聯電 創意）、一般詞（集團幸福、品牌冠軍、大華銀投信、台積電、三星合作、千金股8檔漲停！創意、新科股后
+創意、五股五福）、審查後加的詞（新產品、美國建廠、下台亞股、先進光子、衛星通訊、聯合利華、宏泰人壽、大量出貨）、中央社財經訊息平台；
+另有全名寫法、重疊名稱、三個字以上的一般詞（中美晶片、全國電價、第一銅、第一金牌、台中銀髮、統一實施、太空梭…）、ETF 代號後面接股／
+月／年的測試。代號規則、短名稱與一般詞、嵌入與最長名稱、版名、摘要、財經版判斷、`WORDS` 不含公司全名、美股規則不變；隱藏：標籤完成
+但沒有任何標籤的台股新聞不出現在 `/news`、`news()`、`search`，也不算進 `recent_count`，資料庫還在，公告照樣在最前面，還沒貼的、只有
+相關股票的照常顯示；**美股（NFLX）同樣的情況照常顯示**。`tests/news/test_tagging.py` 的 `get_news` 測試改成「沒有任何標籤的不出現」。
+
+讀取時再比對（第三段）的測試：`tests/news/test_read_match.py`，全部是 GDELT 整批檔 11-12 到 11-17 舊規則存下的真實標題與網址（存錯的：
+「2027台海不平靜？…」「美選後關稅不確定性降 紡纖業看好2027回溫」（財經網站也不讓年份變代號）、英文的「Budgets show effort to beat 2027
+warning」在 2027；「星宇航空進軍大洋洲！…」在大洋；「11/28九合一大選放假嗎？…」在合一 4743.TWO；「中華電信帳單一夕翻4倍！…」在中華；
+「陽明山山藥季…」在陽明；兩則 APEC（一則 AI 補缺存的）在富鼎；「藍營大老拋「統一十年進程」…」在統一。存對的：「八大官股》…狂買大成鋼
+2.3萬張…」、同一個網址在星宇航空與中華電、「陽明Q3EPS5.32元…」、「華紙法說會／…」與 AI 補缺存的「華紙售觀音廠予元太科技…」、靠公司全名的
+「台南市長黃偉哲參訪統一企業智慧物流園區…」）：個股頁 `/news`、`news()`、`get_news` 只剩對的，公告照樣在最前面，資料庫列數不變；
+`recent_count`／`recent_free_count`／`ai_window` 帶 `check` 時不算錯的；`search_news`（關鍵字、股票、主題）找不到只存錯的那幾則，
+「大洋洲」那則的 `stocks` 只有星宇航空；`by_topic` 的地緣政治分組消失；30 則政治新聞擋在前面時，統一的清單往下讀到對的那一則；每檔
+條件只建一次、公司資料一次查詢、100 列遠低於 1 秒；直接呼叫 `tags.search`（不帶股票、關鍵字、清單短到要讀三頁）與 `refresh`
+（十檔各跑 AI 補缺的計數）數 `company_profiles` 的查詢：一頁一次、一批一次，沒有一檔一次（修正前分別是 10 次與 9 次）；美股、美股大盤、
+主檔沒有的代號不比對。`tests/news/test_tagging.py` 兩個測試原本存在台積電底下的標題沒有台積電（「新聞 0」、隨機字），改成以「台積電」
+開頭。
+
+### 2026-11-17 LangSearch 台股新聞（產品負責人決定，`news/langsearch.py`）
+
+產品負責人 2026-11-17 決定用 LangSearch 網路搜尋（`POST https://api.langsearch.com/v1/web-search`）補台股新聞，知道它的條款沒寫清楚能不能
+保存結果、經營者不明（`CLAUDE.md` 的例外）。只存**標題、媒體、時間、網址**（`news_articles.source = "langsearch"`，和其他來源一樣刊出 30 天後
+刪除），snippet、summary、內文都不讀、不存、不寫進 log。**美股不用**（`LangSearchSource.supports` 只收台股與 `^TW`）。研究：2026-11-17 的
+最佳化實驗（178 次請求、1,617 列人工標註，另一位標註者複核 120 列）。
+
+- **開關**：`NEWS_LANGSEARCH_ENABLED`（預設 `false`），只在正式環境 Railway **worker** 打開，並設 `LANGSEARCH_API_KEY`（Bearer；不寫進 log）。
+  沒開或沒有金鑰時 worker 沒有這個工作、什麼都不送；其他新聞來源不受影響。沙盒的 proxy 會代入真正的憑證，手動測試時金鑰設成 `proxy-injected`。
+- **請求**（`request_body`）：`{"query": "\"台積電\"", "freshness": …, "summary": false, "count": 50|20, "contents": {"text": {"max_characters": 1}}}`。
+  - 查詢：交易所簡稱加半形雙引號，去掉 `-KY`、`*` 與名稱裡的引號（`stock_query`）；不加代號、不加「股價／新聞」、不用簡體、不用代號查。
+  - `contents.text.max_characters = 1`：每次約 40 token（不加時約 7,000），回傳的網址與排序不變。**不送** `includeDomains`／`excludeDomains`
+    （候選先被抓、再套網域，篩完只剩更少：家登加黑名單只剩 1 筆；下架封鎖清單在我們這邊比對）、不用 `noLimit`、不呼叫 `/v1/rerank`。
+  - `freshness`：上次成功那天（UTC 日期）到今天，例如每天跑就是 `D-1..D`（＝oneDay），最多往前 6 天（錯過很多天時）；每 7 天跑一次的（安靜、
+    降級第 1 級的小型股）往前 7 天，從上次成功那天開始，所以那天收盤後的新聞不會漏（2026-11-17 審查）。第一次：大、中型 `oneWeek`、小型
+    `oneMonth`；大盤 `D..D`（今天的 UTC 日期）。
+- **只讀** `data.webPages.value[]` 的 `name`、`url`、`datePublished`（`parse`）；沒有網址、標題或可用日期的略過（日期超出曆法範圍，例如
+  `0001-01-01T00:00:00+08:00`、`9999-12-31T23:59:59-05:00`，也只略過那一筆，不會整個回應丟掉）；只有日期的當台北那天 00:00、標 `date_only`。
+  `code` 200 卻沒有 `data.webPages.value` 清單的回應算「回應不能用」（只跳過那一檔、當天不再問），不當成「沒有新聞」：不更新上次成功、不算進
+  連續 0 則（真的沒有結果時是 `value: []`）。
+- **入庫前的過濾（照實驗量出來的順序，`filter_items`）**：可用的網址（搜尋轉址丟掉）→ 不是新聞的頁面、下架封鎖清單、
+  `NEWS_LANGSEARCH_JUNK_DOMAINS`（`tainan-estate-et.com.tw`、`interview.tw`、`pokem.tw`、`the-frequent-traveler.com.tw`；外國垃圾站不用列）→
+  只收台灣網站（`outlets.is_taiwan_outlet`）→ `service.to_headlines`（整理標題、機器人快訊、`tw_match` 名稱比對：條件用 `build_query`，和
+  GDELT 一樣有全名、較長名稱、同業名稱；時間窗：起點往前 12 小時，晚於送出 30 分鐘以上的丟掉）→ 去重（原始媒體優先於 Yahoo、LINE 轉載）。
+  **超過 `NEWS_RETENTION_DAYS`（30 天）的不存**：時間窗的起點往後夾到保存期限內，只有日期的（多一天寬限）也照 `service.purge` 的標準再擋一次，
+  所以小型股第一次查 `oneMonth` 時不會存進一進來就該刪的標題（2026-11-17 審查）。
+  大盤（`^TW`）不比對公司名稱，改看標題關鍵字（`TOPIC_KEYWORDS`：台股、加權、大盤、外資、法人、投信、自營商、盤、指數、台指、櫃買、千點、
+  N點、國安基金、權值、ETF、0050、新台幣、台幣；實驗精確率 0.98、召回 0.92）。實驗中入庫的標題寬鬆標準 0.97–1.00 有用。
+- **之後和其他來源一樣**：存進 `news_articles` 後，新聞標籤工作（`news_tagging`）照常貼標籤；個股頁、`get_news`、`search_news` 讀取時照常
+  重新比對（`ReadMatch`）、藏起沒有財經標籤的；`/news` 的來源標示「LangSearch」（`datapolicy` 的 `langsearch`）。它不花錢，所以算進「免費來源
+  7 天內的則數」（`service.FREE_SOURCES`）：LangSearch 已經找到 3 則以上的股票不再用付費的 AI 補缺。`^TW` 在標籤裡是「台股大盤」（和 `^US` 一樣
+  不是股票）；市場頁還沒有顯示 `^TW`（只給標籤、市場報告依主題分組用）。
+- **排程**（worker 工作 `news_langsearch`，每 10 分鐘看一次有什麼到期；台北時間；自己的迴圈）：
+  - 大盤 3 個查詢（`NEWS_LANGSEARCH_TOPICS`，不加引號）：交易日 16:00（`NEWS_LANGSEARCH_TOPICS_AT`）以後，每個 UTC 日一次，count 20。
+  - 追蹤中的台股（持有、觀察、最近 `NEWS_VIEW_DAYS` 天看過）依分級：大型股每天、中型股每 2 天、小型股每 4 天、安靜（小型股連續
+    `NEWS_LANGSEARCH_QUIET_AFTER_EMPTY`（4）次 0 則）每 7 天（`NEWS_LANGSEARCH_EVERY_DAYS`）；18:30（`NEWS_LANGSEARCH_STOCKS_AFTER`）以後跑；
+    錯過該跑那天的，隔天 08:00 起就補（時間範圍從它自己上次成功那天算，不會漏）。大型股 count 50（`NEWS_LANGSEARCH_COUNT_LARGE`），其他 20。
+  - 第一次（從沒成功過）的股票隨時都可以跑，排在當天該跑的後面，每天最多 `NEWS_LANGSEARCH_MAX_FIRST_FILL_PER_DAY`（100）次。
+  - 台北 00:00–08:00 什麼都不跑（UTC 日期還是前一天）。同一個 UTC 日裡回其他 4xx 的那一檔當天不再問。
+  - **順序**：大盤 → 有人持有或觀察的股票（最久沒成功的先）→ 大型 → 中型 → 小型（同一級最久沒成功的先）→ 第一次的（有人持有或觀察的先，
+    再依分級與市值排名）。被擋或到上限時，重要的已經先跑完；沒跑到的下一次自動補。
+  - **分級**：第一次依市值排名（`company_profiles` 的發行股數 × 最近 14 天內最新的收盤；前 `NEWS_LANGSEARCH_LARGE_RANK`（50）名大型，其他中型）；
+    之後每 7 天依「每次入庫幾則」的平均重分：≥ `NEWS_LANGSEARCH_LARGE_MIN_AVG`（5）大型、≥ `NEWS_LANGSEARCH_MID_MIN_AVG`（1）中型、其他小型。
+    平均是指數平均，權重依分級的間隔換算成約 14 天份的次數（沒有歷史表，見下面「與規格的差異」）。小型股連 4 次 0 則改安靜、有新聞就回小型。
+- **每天的上限（UTC 日，00:00 UTC＝台北 08:00 重算）**：請求 `NEWS_LANGSEARCH_MAX_REQUESTS_PER_DAY`（250）次、token
+  `NEWS_LANGSEARCH_MAX_TOKENS_PER_DAY`（50,000）；到了就停，沒跑到的下一次補。單次回應的 output token 超過 `NEWS_LANGSEARCH_TOKEN_GUARD`（1,000）
+  表示字數上限沒生效：當天停用、log 寫 WARNING、管理後台 `news.langsearch.warning = "contents_cap_ignored"`。
+- **被擋就停，不重試、不換帳號、不偽裝**：
+  | 回應 | 做法 |
+  |---|---|
+  | HTTP 429、body `code` 429、或 `msg` 提到額度（quota、limit、额度、額度、余额） | 停到下一個 00:00 UTC（`news_fetch_state(langsearch, "*")` 的 `backoff_until`，重開 worker 也記得），管理後台「限流中」 |
+  | HTTP 401／403、轉址（3xx，不跟） | 一樣停到下一個 00:00 UTC，管理後台「被拒」 |
+  | HTTP 5xx、逾時、連不上、body `code` 5xx、不是 JSON | 連續 2 次 → 整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（沿用 `BACKOFF_START`／`BACKOFF_MAX`）；1 次只跳過那一檔，下次再問。「連續」跨輪計算（`@down` 列），直到 LangSearch 再有任何回應（成功、4xx、被擋）才歸零：一輪只有一檔到期時也會暫停，暫停過後再失敗 1 次就再暫停（加倍）。暫停從失敗那一刻（牆上時間）算起，不是從這一輪開始算，所以一輪跑很久時暫停不會一寫進去就過期（2026-11-17 審查） |
+  | 其他 4xx、回應不能用（含 `code` 200 但沒有 `data.webPages.value`） | 只跳過那一檔（當天不再問），連 3 次停這一輪；log 只寫狀態碼，不寫內容 |
+- **降級（`ladder`）**：連 2 個 UTC 日碰到額度 → 每天上限改成前一天被擋前成功次數的 80%，中型股改每 3 天、小型股改每 7 天；連 3 天、或上限不到
+  30 次 → 只跑大盤和有人持有或觀察的大型股；每一級連 3 天沒碰到額度就退回一級。上限和「不到 30 次」只看這一次連續碰到額度的日子：退回第 0
+  級時舊的上限就清掉，之後只碰到一次額度不會直接跳到第 2 級（2026-11-17 審查）。永遠不關掉字數上限、不重試 429、不用第二把金鑰。
+- **間隔與一次只跑一個**：同一個程序裡兩次請求間隔 ≥ `NEWS_LANGSEARCH_INTERVAL_SECONDS`（1.5，最少 1.2；共用的 `RateLimiter`）；最後一次請求的
+  時間存在資料庫，新的程序先等滿間隔（實驗時每次都是新程序，有一次只隔 0.8 秒）。PostgreSQL 用 `pg_try_advisory_lock` 確保同時只有一個在跑
+  （另一個直接跳過），SQLite 用程序內的鎖。
+- **log**：只寫狀態碼、耗時、筆數、token；不寫請求標頭、金鑰、回應內容或 `msg`。
+- **資料（不用新 migration）**：都放在 `news_fetch_state`（source `langsearch`）：
+  - `<代號>`：每檔的最後嘗試／成功、入庫則數；`^TW/<雜湊>`：每個大盤查詢；`*`：整個來源的暫停。
+  - `@use:<UTC 日期>`：當天用量（`items` 請求數、`failures` token 數、`last_attempt_at` 最後一次請求、`last_status`／`last_success_at` 被擋的原因
+    與時間）；`@new:<UTC 日期>`（`items`）：第一次的次數；保留 35 天。
+  - `@tier:<代號>`：分級（`last_status` 等級、`items` 平均 ×100、`failures` 連續 0 則次數、`last_attempt_at` 上次重分的時間）。
+  - `@down`：連續幾次 5xx／逾時（`failures`，跨輪計算，LangSearch 一有回應就歸零）與最後一次的時間（`last_attempt_at`）。
+  - `@` 開頭的列不算進管理後台的「上次有回答」與「上次執行」。
+- **管理後台**（`/admin/overview` 的 `news`）：`sources` 多一列 `langsearch`（沒開時 `state: "off"`；暫停原因沿用 `rate_limited`／`blocked`／
+  `unreachable`），另有 `news.langsearch`：今天的請求數與上限、token 與上限、第一次的次數、今天停下的原因、降級等級、暫停到幾點、
+  `warning`、各分級的檔數。前端還沒顯示 `news.langsearch`（只顯示來源列）。
+- **手動**：`cd apps/api && uv run python -m forliosa.news langsearch-refresh`（照排程跑一次：只跑到期的、守上限、暫停中不送）；`langsearch-status`
+  （今天的用量、降級、暫停、分級）；`langsearch-smoke`（送一次「台積電」oneDay count 20，只印筆數與 token，20 筆且少於 200 token 算通過；不存標題）。
+  smoke 照 worker 的規則（`langsearch.smoke`，2026-11-17 審查）：`NEWS_ENABLED`／`NEWS_LANGSEARCH_ENABLED` 關著、暫停中（印出暫停到幾點）、今天的請求數
+  或 token 已到上限、worker 正在跑一輪（同一把鎖）時都不送；送之前等滿和上一次請求（任何程序）的間隔；這次請求與 token 算進當天用量；收到
+  429／401／403／轉址或 token 超量時和 worker 一樣記下來，worker 也停到下一個 00:00 UTC；5xx／逾時算進「連續」次數。沙盒裡要先設
+  `NEWS_LANGSEARCH_ENABLED=true`、`LANGSEARCH_API_KEY=proxy-injected`。
+- **順便補進比對器（建議 §3.2，負責人同意照建議）**：`tw_match.ALIASES`（台積 → 2330、禾榮 → 7799，照 2 個字簡稱的規則要多一個證據）、
+  `tw_match.ALIAS_FORMS`（富邦金控、富邦人壽、富邦銀行、富邦董座 → 2881，當全名用；「富邦」單獨不算）、udn 分類 7255（個股期貨）算財經版、
+  `blocktempo.com`（動區動趨）算台灣網站。「台達」沒有加（它在 `WORDS` 裡擋「台達能源」）。這些對所有來源與讀取時的重新比對都有效。
+  影響既有測試：GDELT 測試資料裡的「南華大學邀請台積公司辦實習徵才說明會」現在歸台積電（「公司」是財經字眼；它講的就是台積電），
+  `test_service.py`／`test_searxng_service.py` 的筆數各加 1，AI 補缺的那個測試改用不提台積的兩則。
+- **與規格（建議 §9）的差異**：
+  1. 規格表寫 401／403 是「沒有期限的暫停」；照 `CLAUDE.md`（被擋：429、403、轉址就停到隔天）改成和 429 一樣停到下一個 00:00 UTC。
+  2. 「14 天平均」不用另外的歷史表：用指數平均近似（權重 2／(14 天內的次數＋1)），存在 `@tier:` 列。
+  3. 分級的優先順序裡「有人持有、觀察或最近看過」：追蹤清單本來就只有這三種，所以第 2 組只放「有人持有或觀察」，只是最近看過的照分級排。
+  4. `news.taiwannet.com.tw`（疑似 AI 改寫站）還沒確認，沒有放進垃圾名單（要加就設 `NEWS_LANGSEARCH_JUNK_DOMAINS`）。
+  5. 規格 §9.2 寫時間窗「不早於今天 − 6」，但每 7 天跑一次的股票這樣會漏掉上次成功那天的晚上（和 §5.2「兩次之間不會有空檔」矛盾）：
+     照 §5.2，間隔比 6 天長的往前到間隔天數（`freshness(..., every=)`）。
+  6. §9.7 把 smoke 定為只送一次的手動檢查；它照樣守開關、暫停、上限與跨程序間隔，也算進當天用量（§9.1「all LangSearch requests」、§9.5）。
+- **還沒驗證**（建議 §7）：每日額度與每秒上限看不到、沒看過真的 429；隔天結果會不會變；每天跑 oneDay 的實際累積量；分級門檻是推估。上線第一週看
+  `langsearch-status` 與 worker log 的每檔入庫則數。
+- **實測**（2026-11-17 台北 19:37，暫存 SQLite，`refresh_langsearch` 真的跑一輪，不是另寫的程式）：大盤 1 個查詢（`台股 盤後`）＋9 檔
+  （大型 台積電、鴻海、長榮；中型 亞德客-KY、智邦、信驊、華城；小型 訊聯、禾榮科第一次），共 **10 次請求、528 token**（count 50 每次 86–92、
+  count 20 每次 31–42），全部 HTTP 200，沒有 429／403／轉址；兩次請求間隔至少 1.52 秒，一輪 19 秒。290 筆結果入庫 67 則：大盤 15、台積電 23、
+  信驊 13、鴻海 7、禾榮科 5、智邦 2、長榮 1、訊聯 1，華城、亞德客 0。剔除：標題沒點名這家 163（華城全是「京華城」、長榮多是長榮大學與榮家）、
+  非台灣網站 44、垃圾名單 6（pokem.tw、the-frequent-traveler.com.tw）、非新聞 2（vocus.cc）、大盤關鍵字不符 3、重複 5。入庫的 67 則
+  沒有看到配錯公司的，讀取時的重新比對也全部保留；漏掉的主要是暗稱標題（「股王」「這檔」「網通大廠」）。log 沒有金鑰。馬上再跑一輪：
+  沒有到期的，0 次請求。
+
+測試：`tests/news/test_langsearch.py`（不連網：請求內容永遠有字數上限、沒有網域參數；查詢句；時間範圍與 08:00 換日；只讀標題網址日期；429／
+quota 訊息／403／401／轉址／token 超量停到 00:00 UTC、重開也記得；5xx 連 2 次暫停 15 分鐘；其他 4xx 只跳過一檔；實驗的真實標題逐步過濾；
+大盤關鍵字不呼叫名稱比對；封鎖清單不送出、在本地擋；排程順序與上限、隔天從停下的地方接；第一次與 token 上限；分級；降級；跨程序的間隔；
+log 沒有金鑰與內容；入庫後進標籤佇列、個股頁、AI 補缺計數；worker 只在開啟時有這個工作；smoke 只印數字）。2026-11-17 審查後加上：smoke 守開關、
+暫停、上限、鎖與間隔、算進用量、被擋時 worker 也停；一輪一檔時逾時跨輪累計、暫停後再失敗就加倍；暫停從失敗那一刻算；不存超過保存期限的標題；
+安靜股的時間窗從上次成功那天開始；降級退回 0 級後舊上限清掉；日期超出範圍只略過那一筆；`code` 200 沒有結果清單不算「沒有新聞」；個股頁的
+API 測試固定時鐘（原本 2026-12-17 以後一定失敗）。
 
 ### 待產品負責人確認
 
@@ -2372,6 +2732,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - `last_success_at`：那個來源各代號列（不含 `*` 與 `@引擎`）最新的 `last_success_at`；`last_run_at`：各代號列最新的 `last_attempt_at`。
 - `new_24h`：`news_articles.fetched_at` 在 24 小時內、依 `source` 分組的筆數。
 - 暫停的引擎：SearXNG 的 `@引擎` 列 `backoff_until` 還沒到的。
+- 2026-11-17：多一列 `langsearch`（`NEWS_LANGSEARCH_ENABLED` 而且有 `LANGSEARCH_API_KEY` 才算開），另有 `news.langsearch`（今天的用量與上限、降級、
+  `warning: "contents_cap_ignored"`），見「2026-11-17 LangSearch 台股新聞」。
 
 ## 2026-11-15 美股收盤價（Databento）
 
@@ -2394,7 +2756,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 |---|---|---|
 | `US_PRICE_SOURCE` | **api 與 worker** | `""`（預設）：不抓也不讀，`databento-equs` 的列留著但沒有人讀，也不列在 `sources` 與 `/meta/attributions`。`databento`：api 讀已存的收盤（`Settings.us_prices_served`），worker 有金鑰時才抓（`us_prices_enabled`） |
 | `DATABENTO_API_KEY` | **只放 worker** | Databento 的金鑰（`SecretStr`）。api 不需要 |
-| `NEWS_US_MARKET` | worker | 預設 `true`：每次整理新聞多問 GDELT 一次美股新聞（市場頁） |
+| `NEWS_US_MARKET` | worker | 預設 `true`：市場頁的美股新聞（`^US`）。2026-11-17 起從英文整批檔比對；英文檔超過 2 小時沒更新時，每次整理新聞才多問 GDELT 查詢 API 一次 |
 
 `FORLIOSA_ENV=test` 一律不連 Databento（測試用假的 fetcher）。
 
@@ -2432,10 +2794,13 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 - `us.items`：SPY（S&P 500）、DIA（道瓊工業指數）、ONEQ（那斯達克綜合指數），各取最近 21 個收盤算漲跌與 20 點的走勢小圖；`name` 是基金的名稱
   （`marketdata/catalog.py` 的內建清單把這三檔標成 ETF），`tracks` 是追蹤的指數。**不顯示指數點數**：S&P 道瓊指數公司與 Nasdaq 的指數資料要另外授權。
-- `us.news`：`news.service.US_MARKET_KEY = "^US"`。worker 每次 `news_refresh`（以及 `python -m forliosa.news refresh`）在個股之前多問 GDELT 一次
-  （`Wall Street`、`S&P 500`、`Dow Jones`、`Nasdaq`；和美股個股一樣只收美國、英國媒體的英文報導），存在 `news_articles.symbol = '^US'`；被 GDELT 拒絕時照一般的暫停規則，
-  這一輪的個股也不問 GDELT。回應取最近 3 天、去重後最多 6 則，封鎖的網域不列。`NEWS_US_MARKET=false` 不問。
-- 最上層的 `as_of` 只看台股；`sources` 有美股 ETF 時加 `databento-equs/price`，有美股新聞時加 `gdelt/doc`。
+- `us.news`：`news.service.US_MARKET_KEY = "^US"`，存在 `news_articles.symbol = '^US'`。回應取最近 3 天、去重後最多 6 則，封鎖的網域不列。`NEWS_US_MARKET=false` 不收。
+  ~~worker 每次 `news_refresh` 在個股之前多問 GDELT 一次~~ **2026-11-17 起**（見「2026-11-17 美股新聞改讀 GDELT 英文整批檔」）：從 GDELT 英文整批檔比對
+  （`us_match.market_matches`），英文檔 2 小時內有新的一份時不問 DOC API；超過 2 小時沒更新，worker 每次 `news_refresh`（以及 `python -m forliosa.news refresh`）
+  才在個股之前多問 DOC API 一次（`Wall Street`、`S&P 500`、`Dow Jones`、`Nasdaq`；只收美國、英國媒體的英文報導），被 GDELT 拒絕時照一般的暫停規則，
+  這一輪的個股也不問 DOC API。
+- 最上層的 `as_of` 只看台股；`sources` 有美股 ETF 時加 `databento-equs/price`，有美股新聞時加 `gdelt/gkg` 與 `gdelt/doc`
+  （2026-11-17 審查：這些列主要來自整批檔，DOC API 只當備用，兩種都存成 `source = "gdelt"`、分不出來，所以兩個都列；以前只列 `gdelt/doc`）。
 
 ### 管理後台（`services/admin.overview` → `us_prices.summary`）
 
@@ -2725,6 +3090,129 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 2. `group_passes` 沒有保存期限（隱私 §7 寫「持續保留」）；收費以後配合稅法的憑證保存年限再定。
 3. 管理後台總覽的 AI 花費是每把金鑰的合計，沒有分開列群組日報（`ai_usage.feature = 'group_daily'` 查得到）；用量大了再加。
 4. `apps/api/.env.example` 沒有列上面四個設定（都有預設值，不設也能跑）。
+
+## 2026-11-17 新聞標籤（`news.tagging`、`news.tags`、`news.taxonomy`；AI 工具 `search_news`）
+
+產品負責人 2026-11-17 同意「入庫時用 Haiku 貼主題與類股標籤」：每一則存下來的新聞標題（同一個網址只貼一次）貼上主題、類股與相關股票，
+讓 AI 對話與之後以市場為主的報告（盤前／盤後／週報，要比較類股與主題）能依主題分組、找新聞，不用 embeddings／RAG。只送標題、媒體與
+「歸在哪幾檔」給模型；**不抓、不存內文**（資料政策不變）。前端沒有改。
+
+- **詞彙（`news/taxonomy.py`，`TAXONOMY_VERSION = 1`）**：固定清單，模型只能從中選（結構化輸出的 JSON schema 用 enum 列出標籤，伺服器
+  再檢查一次，清單外的丟掉）；存 id，不存標籤文字。
+  - **主題 40 個**：AI 伺服器、先進製程、先進封裝、半導體設備、記憶體、PC／手機、網通／光通訊、PCB／零組件、雲端／軟體、電動車、
+    低軌衛星／太空、機器人、國防／無人機、重電／電網、綠能／儲能、生技醫療、航運、原物料、油價／能源、金融、營建／房市、消費／觀光、
+    加密貨幣；關稅／貿易、利率／匯率、經濟數據、地緣政治、大盤行情；營收公告、財報／法說、股利／庫藏股、併購／投資、擴產／資本支出、
+    法規／訴訟、事故／資安、人事、資金流向／ETF、評等／目標價、上市／籌資、個股異動。每個主題有一句範圍說明（給模型看）。實測後調整：
+    匯率併進利率（「利率／匯率」）、新增「事故／資安」（當機、停電、火災、資安攻擊、召回：實測美國航空、摩根大通、微軟的當機新聞原本被
+    硬塞進營收公告、大盤行情或雲端）；營收公告、人事、個股異動、資金流向的範圍寫得更窄（「標題寫到股價」才是個股異動、勞資不算人事）。
+  - **類股**：台股用證交所／櫃買的官方**產業別**（`company_profiles.industry_code`、`opendata.INDUSTRY_CODES`），存代號（`"24"`＝半導體業），
+    可以直接和公司資料、類股指數對；不收綜合（19）、其他業（20）、管理股票（80）、存託憑證（91）。美股用 12 個類 GICS 類股（GICS 本身要
+    授權）：美股半導體、科技、通訊服務、非必需消費、必需消費、醫療保健、金融、工業、能源、原物料、公用事業、房地產（`us_semis` …）。
+    一家美國公司的類股是 `taxonomy.us_sector`：先查 `US_SECTOR_BY_TICKER`（類股說明裡點名的公司，加上 SIC 和 GICS 對不上的大型股：
+    Alphabet、Meta、Trump Media 等在 SIC 7370，Visa、Mastercard、PayPal 在 7389，UnitedHealth 在 6324，Thermo Fisher 在 3826，
+    Walmart、Costco、Target 在 5331，Nike 在 3021，Booking 在 4700），查不到才用 `us_sector_for_sic`（SIC 範圍也照這些修過）。
+    測試檢查類股說明點名的每一家都對到那個類股，提示裡括號寫的類股和說明不會互相矛盾。
+  - **主題由類股補上**（`THEMES_OF_SECTOR`）：類股是金融保險業／美股金融的一律加「金融」、航運業加「航運」、生技醫療業／美股醫療保健加
+    「生技醫療」、建材營造業／美股房地產加「營建／房市」、油電燃氣業／美股能源加「油價／能源」、汽車工業加「電動車」、綠能環保加
+    「綠能／儲能」。原本只寫在提示裡（「金融股的新聞都選」），模型有時不照做（摩根大通的當機只標事故／資安和美股金融），用主題找就漏掉。
+    補上的主題不算在模型的 3 個裡。
+  - **相關股票**：最多 5 檔，必須是商品清單裡有的台股或美股，而且模型給的名稱要和那個代號的名稱對得上（台股簡稱、目錄別名、公司資料的
+    簡稱與英文簡稱、SEC 名稱；包含關係也算，台積／台積電）；代號錯但名稱剛好等於一檔股票的名稱時用那一檔（同一個市場內：「聯合」配
+    UAL 不會變成台股的聯合）。只靠包含關係對上時，先看同一個市場有沒有更貼切的股票：名稱剛好等於另一檔（南亞科配 1303 南亞 → 2408
+    南亞科；台塑化配 1301 → 6505；中華電配 2204 中華 → 2412；中鋼構配 2002 → 2013），或另一檔的名稱被包含得更長（中華電信配 2204 →
+    2412 中華電）。台灣同一個集團的公司名稱開頭相同，原本這種錯代號會照收。
+    這則新聞本來就歸在底下的股票不列。關係：`mentioned`（標題點名，老闆的名字也算）、`supply_chain`（上下游）、
+    `peer`（競爭對手）；後兩種只在標題講訂單、供貨或競爭、而且很確定時才列。
+- **資料表（migration `0024_news_tags`）**：`news_tags`（`url_key`, `kind` theme|sector|symbol, `value`, `relation`；主鍵三欄，索引
+  `(kind, value)`）與 `news_tag_state`（`url_key` 主鍵, `status` done|split|failed|skipped, `model`, `taxonomy_version`, `attempts`,
+  `tagged_at`, `retry_at`, `batch_limit`, `updated_at`）；
+  `news_articles` 加 `url_key` 索引（join 用）。PostgreSQL 與 SQLite 都一樣。revision id 用 `0024_news_tags`
+  不用 `0024`：同時進行的分支（events-past-fix、us-news-bulk）可能各自加一個 `0024`，id 不同就不會撞；合併後 `test_single_head` 會指出
+  要把哪一個的 `down_revision` 接到另一個後面。
+- **工作（worker `news_tagging`，每 `NEWS_TAGGING_MINUTES`（5）分鐘，自己的迴圈）**：`news.tagging.run`：最近 `NEWS_TAGGING_DAYS`（7）天、
+  還沒貼過（或失敗後到了重試時間、或詞彙版本較舊）的網址，**最舊的先**，一次最多 `NEWS_TAGGING_BATCH_SIZE`（50）則、每次最多
+  `NEWS_TAGGING_MAX_BATCHES`（4）個請求。畫面不顯示的列（下架網域、不是新聞的網頁、機器人快訊、資料政策不提供的來源）不送，記成
+  `skipped`。不改新聞入庫的程式（`news/service.py`、`gdelt_bulk.py` 沒有動）：入庫幾分鐘後就貼好。2026-11-17 起，貼完卻沒有任何
+  標籤的台股新聞不顯示在個股頁與 `get_news`／`search_news`（美股照常顯示；見「2026-11-17 台股新聞比對收緊」）。
+  - **請求**：`AI_MODEL_NEWS_TAGGING`（預設 `AI_MODEL`＝`claude-haiku-5-5`）、`output_config.effort: "low"`、`output_config.format`
+    （JSON schema，主題與類股是 enum；Haiku 5.5 支援結構化輸出，沒有用強制 `tool_choice`）、adaptive thinking（預設；實測關掉 thinking 省
+    約 35% 但錯得多，見下）。不送 `temperature`。`stop_reason` 是 `refusal`／`max_tokens`、回的不是 JSON 都當「回答不能用」。
+  - **累積成大批再送（審查修正）**：每個請求都有固定成本（約 5.9K token 的系統提示、模型的 thinking：5–7 則的小請求每 100 則要
+    US$0.017–0.021，50 則的只要 US$0.006–0.012）。所以新標題不到 `NEWS_TAGGING_MIN_BATCH`（20）則時先不送，等最舊的一則存進來
+    `NEWS_TAGGING_MAX_WAIT_MINUTES`（30，最多 55）分鐘後才送；重試和切開的批次不等。系統提示的快取改成 1 小時（`ttl: "1h"`，寫入 2 倍、
+    讀取 0.1 倍；原本 5 分鐘的快取在兩次執行之間一定過期，每個請求都重寫一次），而且每次執行從上一個標籤請求用的金鑰槽開始（快取依
+    workspace 分開；原本依月花費挑槽，三個槽輪流，快取永遠讀不到），那個槽在冷卻時才換。`pricing` 也改成 1 小時快取的寫入算 2 倍
+    （`usage.cache_creation.ephemeral_1h_input_tokens`）。
+  - **回答不能用時切開重送（審查修正）**：一批（超過一則）的回答不能用時，不算這批任何一則的嘗試，改成 `status = "split"`、
+    `batch_limit` 為一半，立刻（同一次或下一次執行）以較小的批次再送，一直切到出問題的那一則單獨送出；只有單獨送還不能用的那一則
+    算一次嘗試，`RETRY_AFTER`（15 分鐘）× 次數後再試，最多 `MAX_ATTEMPTS`（3）次。單獨送被拒答（`refusal`）就直接放棄：同一個請求再送
+    一樣會被拒（Haiku 5.5 的安全分類器沒有伺服器端備援，skill 文件說不要原封不動重送）。原本一則被拒的標題會讓同批 49 則一起重試三次後
+    永久放棄。截斷（`max_tokens`）的批次也是切小就好。回答裡漏掉的那幾則照舊算一次嘗試。
+  - **請求本身的錯誤不算嘗試（審查修正）**：模型名稱錯（404）、參數或 schema 模型不收（400）等跟哪一則新聞無關的錯誤，和金鑰忙碌、
+    429／529／5xx、連不上、401／403 一樣，只停下這次執行、不算嘗試；log 是 WARNING，同一種錯誤每小時最多一次（只寫狀態碼與錯誤類型）。
+    原本這種錯誤每 5 分鐘燒掉 50 則的嘗試，一兩個小時內整個視窗的新聞都放棄，修好設定也救不回來。萬一真的有某一則標題造成 400
+    （想不到實際的例子），標籤會停在那裡，每小時一次的 WARNING 會一直出現。
+  - **指令 `retry-failed`**：`uv run python -m forliosa.news.tagging retry-failed` 把所有 `failed` 的嘗試次數歸零，下一次執行再送。
+  - 失敗只會讓新聞暫時沒有標籤，不影響入庫。
+  - **預算**：`ai_usage.feature = "news_tagging"`（`user_id` NULL，不算任何人的額度）。這個 UTC 月份的估計花費加 US$0.01 超過
+    `NEWS_TAGGING_MONTHLY_BUDGET_USD`（3）就停到下個月 1 日，log 只寫一次（WARNING）；設 0＝不貼。`NEWS_TAGGING_ENABLED=false`：沒有這個工作。
+  - **保存**：網址不在 `news_articles` 了（30 天保存期限、下架）的標籤與狀態，每次執行時刪掉。詞彙改版（`TAXONOMY_VERSION` 加一）時，視窗內
+    的新聞會依舊到新重新貼過，舊標籤整組換掉。
+  - **指令**：`uv run python -m forliosa.news.tagging run`（跑一次）、`… status`（各狀態數量、視窗內還沒貼的、放棄的、這個月花費）、
+    `… retry-failed`（見上）。
+- **讀取（`news.tags`）**：`tags_for_urls`（`get_news` 用）、`search(theme, sector, symbol, keyword, days)`（`search_news` 用；股票同時找
+  「歸在它底下」與「被標成相關」的；關鍵字不分大小寫、`%`／`_` 會跳脫）、`by_topic(kind, since, until, per_group)`（給之後的盤前／盤後／
+  週報：依主題或類股分組，則數多的在前，每組附最新幾則）。都套用和個股頁一樣的篩選（下架、非新聞、機器人快訊、資料政策）與去重，
+  只顯示目前詞彙裡的 id。近似標題的去重要兩兩比對，所以只拿最新的幾則去比（不夠才加倍）；`by_topic` 的 `count` 是「不同網址、標題
+  完全相同的算一則」的則數，不做兩兩比對（審查修正：原本整組兩兩比對，一組 1,000 則要 8 秒、2,000 則 30 秒；現在和則數成正比）。
+- **AI 工具**：
+  - `get_news`：媒體標題有標籤時，`search_result` 多一個第二段文字「主題：…；類股：…；相關：…」（第一段標題文字不變，引用的還是標題）。
+    公告沒有標籤。工具說明：標籤是分類器從標題判斷的，只用來分組或挑新聞，不是事實，不要照抄。
+  - 新工具 **`search_news`**：`theme`、`sector`（enum：空字串＝不限＋全部標籤）、`symbol`、`keyword`、`days`（1–90，預設 7；超過保存的 30 天
+    時回答會說只保留 30 天）**五個都必填、空字串表示不限**——strict 工具全部的選填參數上限 24 個，現在用了 18 個，所以不新增選填參數
+    （`ToolSpec.blank_ok` 讓這幾個欄位可以是空字串）。結果最多 15 則，和 `get_news` 一樣是可引用的 `search_result`（第二段寫「歸在」的股票
+    與標籤）；沒有符合的回 `{filters, days, headlines: [], note}`；不存在的主題或類股回錯誤並列出可用的標籤。工具清單固定（照名稱排序），
+    每一題都一樣，不影響提示快取。**strict 工具現在是 20 個（上限 20）**：之後再加工具要先合併或拿掉一個。
+  - 系統提示「自己決定用哪些工具」加一句：問某個主題、產業或類股最近的新聞，或要找提到某一檔的其他新聞時用 `search_news`；標籤是分類，
+    不寫進回答。
+- **實測（2026-11-17，真的 Haiku 5.5，`effort: low`）**：從 GDELT 下載 4 份 GKG 整批檔（3 份 translation、1 份 english，間隔 ≥ 3 秒），
+  用專案自己的入庫程式（`gdelt_bulk.match` → `service.to_headlines` → `service.store`，比對 1,997 檔台股與 22 檔美股）存下 60 個網址，
+  再從同一批檔案手動補 11 則財經標題（歸在標題點名的那一檔），共 71 則；6 次執行合計 US$0.0254（每次 US$0.003–0.0055）。
+  - **最後的提示（第 6 次）**：71 則 2 個請求，US$0.0048，**每 100 則 US$0.0068**（第 4–6 次同一個設定：每 100 則 US$0.0041–0.0077；
+    差在 adaptive thinking 想多久，50 則的輸出 2K–6.7K token）。輸入：第一個請求 4,391 token＋寫入快取 5,911，第二個 1,781＋讀快取 5,911。
+  - **人工檢查**：主題 62 個標記錯 6 個（約 90% 正確：AI 伺服器標在黃仁勳醜聞、法規標在川普持股、資金流向標在報稅問答與川普交易、評等標在
+    網紅喊盤）；類股 44 個全對；相關股票 6 個全對（聯合航空→UAL、黃仁勳→NVDA×2、富邦→2881、超微→AMD、谷歌→GOOGL），沒有錯的代號。
+    71 則裡 25 則沒有任何標籤，都是入庫時比錯的非財經新聞（「2027 年」被當成大成鋼 2027、「大洋洲」當成大洋、「聯合航空」當成聯合、
+    「全新」當成全新光電，選舉、娛樂、天氣）——**入庫的名稱／代號比對約 1/3 是誤判**，交給負責新聞入庫的分支參考。
+  - **調整過程**：第 1 次把「歸在」的股票類股自動加上去，結果誤判的列全被標成鋼鐵、生技、塑膠…，改成類股一律由模型判斷（提示裡寫出每一檔
+    的產業別，並說明歸在的股票可能比錯）；第 3 次試關掉 thinking：便宜約 35%，但主題錯得明顯多（併購標在台積電合約、勞資標成人事、
+    當機標成非必需消費），所以維持 adaptive。
+  - **每月估計（審查後重算）**：原本寫的「每 100 則 US$0.004–0.008、一天 500 則約 US$0.9／月、1,500 則約 US$2.7／月」偏低：只算了大批次，
+    沒算每個請求的固定成本，而且第 4 次（輸出 2K token）剛好想得少。實測一個 50 則的請求 US$0.003–0.006（輸出 5K–9K token，每 100 則
+    US$0.006–0.012），5–7 則的小請求每 100 則 US$0.017–0.021。照現在的做法（滿 20 則或等 30 分鐘才送、快取 1 小時），每天約 40–64 個請求，
+    每個固定約 1,000–1,650 個輸出 token 加讀快取，每則約 90–150 個輸出 token：**一天 500 則約 US$1.7–2.5／月、1,000 則約 US$2.7–4.1／月、
+    1,500 則約 US$3.7–5.7／月**。US$3 的上限大約夠一天 700–1,000 則；到了會停到下個月並寫 log，量大時調高
+    `NEWS_TAGGING_MONTHLY_BUDGET_USD`。
+- **設定**：`NEWS_TAGGING_ENABLED`（true）、`NEWS_TAGGING_MINUTES`（5）、`NEWS_TAGGING_MIN_BATCH`（20）、`NEWS_TAGGING_MAX_WAIT_MINUTES`
+  （30，最多 55）、`NEWS_TAGGING_MONTHLY_BUDGET_USD`（3）、`NEWS_TAGGING_BATCH_SIZE`（50，最多 50）、`NEWS_TAGGING_MAX_BATCHES`（4）、
+  `NEWS_TAGGING_DAYS`（7，最多 90）、`AI_MODEL_NEWS_TAGGING`（空＝`AI_MODEL`）。只有 worker 用。
+- **測試**：`tests/news/test_tagging.py`（假的 Messages API）：詞彙與 SIC 對照、請求形狀（結構化輸出、effort、快取、沒有 temperature）、
+  清單外的標籤丟掉與上限、相關股票的代號／名稱檢查與上限、同網址只貼一次、批次與最舊先、每次最多幾批、隱藏的列不送、壞回答與重試上限、
+  拒答／截斷、漏掉的 id、金鑰忙碌不算嘗試、用量紀錄與月預算（log 一次、下個月恢復）、預算 0、關閉設定與 worker 工作、
+  沒有金鑰、詞彙改版重貼與標籤跟著新聞刪除、`search` 各種篩選與天數、隱藏與重複不出現、`by_topic`、`search_news` 工具、`get_news` 的標籤、
+  `status`；審查修正：一則被拒的標題只放棄它自己（120 則裡 119 則貼好，被拒的批次依序是 50、25、13、7、4、2、1 則）、截斷的批次切小、
+  請求層級的 404／400 不算嘗試且每小時只警告一次、`retry-failed`、少量新標題先累積、跨執行沿用同一個金鑰槽、1 小時快取的價格、
+  集團名稱（南亞科／南亞等）的代號檢查、類股說明點名的公司都對到那個類股、SIC 修正、類股補主題、`by_topic` 大組不做兩兩比對；
+  `tests/test_migrations.py` 的 `0024_news_tags` 升降級（含 `batch_limit`）。
+
+### 待確認（新聞標籤）
+
+1. 每天實際有多少則新聞要貼（決定月預算夠不夠：US$3 約夠一天 700–1,000 則）：上線一週後看 `python -m forliosa.news.tagging status` 與
+   `ai_usage`。
+2. ~~入庫比錯的非財經新聞（約 1/3）現在只是沒有標籤，個股頁照樣顯示~~ **已做（2026-11-17，產品負責人同意）**：比對收緊，而且標籤貼完卻
+   沒有任何標籤的新聞不放進個股頁、`get_news`、`search_news`（見「2026-11-17 台股新聞比對收緊」）。
+3. 管理後台總覽沒有列標籤的狀態與花費（`ai_usage.feature = 'news_tagging'` 查得到）。
+4. 主題清單已經 40 個（任務說 25–40）；再加主題時考慮拿掉一個或合併。
 
 ## 2026-11-17 過去的財報與營收期限不再寫成「預估」（`services/stock.events`、`archive._report_releases`）
 

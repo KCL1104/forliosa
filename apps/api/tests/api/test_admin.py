@@ -243,7 +243,9 @@ def test_overview_shows_each_news_source(engine, admin):
         db.commit()
     news = admin.get(f"{ADMIN}/overview").json()["news"]
     by = {s["key"]: s for s in news["sources"]}
-    assert [s["key"] for s in news["sources"]] == ["gdelt", "searxng", "ai_search"]  # Yahoo RSS: personal only
+    # Yahoo RSS: personal only; LangSearch listed, off unless NEWS_LANGSEARCH_ENABLED and a key (production only)
+    assert [s["key"] for s in news["sources"]] == ["gdelt", "searxng", "ai_search", "langsearch"]
+    assert by["langsearch"]["state"] == "off" and news["langsearch"]["requests"] == 0
     assert by["gdelt"]["state"] == "paused" and by["gdelt"]["reason"] == "rate_limited"
     assert by["gdelt"]["paused_until"].endswith("+08:00")
     assert by["gdelt"]["last_success_at"].startswith("2026-11-10T09:00")

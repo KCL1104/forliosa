@@ -81,7 +81,7 @@ NewsSourceState = Literal["ok", "paused", "off"]
 class AdminNewsSource(BaseModel):
     """One news source: on or off, paused after a refusal (until when, why), when it last answered, what it added."""
 
-    key: str = Field(description="gdelt | searxng | ai_search | yahoo_rss")
+    key: str = Field(description="gdelt | searxng | ai_search | yahoo_rss | langsearch")
     name: str
     state: NewsSourceState = Field(description="ok：照常問；paused：暫停中（paused_until 或預算）；off：沒有開")
     paused_until: str | None = Field(description="暫停到什麼時候（+08:00）；不是暫停或沒有期限時是 null")
@@ -96,6 +96,27 @@ class AdminNewsEngine(BaseModel):
     until: str = Field(description="暫停到什麼時候（+08:00）")
 
 
+class AdminLangSearch(BaseModel):
+    """LangSearch's UTC day (``forliosa.news.langsearch.status``; 2026-11-17): counts only."""
+
+    enabled: bool = Field(description="NEWS_LANGSEARCH_ENABLED")
+    configured: bool = Field(description="開著而且有 LANGSEARCH_API_KEY")
+    day_utc: str = Field(description="這些數字的 UTC 日期（台北 08:00 換日）")
+    requests: int = Field(description="今天送出的請求數")
+    request_cap: int = Field(description="今天的請求上限（降級時是前一天被擋前成功次數的 80%）")
+    tokens: int = Field(description="今天用掉的 token（input + output）")
+    token_cap: int = Field(description="NEWS_LANGSEARCH_MAX_TOKENS_PER_DAY")
+    first_fills: int = Field(description="今天第一次查的檔數")
+    stopped: Literal["quota", "contract", "blocked"] | None = Field(
+        description="今天為什麼停下：quota（額度，429）、contract（回應超過 token 上限）、blocked（401／403／轉址）")
+    level: int = Field(
+        description="降級：0 正常；1 連 2 天碰到額度（上限 80%、中小型股放慢）；2 只跑大盤和有人持有的大型股")
+    paused_until: str | None = Field(description="整個來源暫停到什麼時候（+08:00）")
+    warning: Literal["contents_cap_ignored"] | None = Field(
+        description="contents_cap_ignored：回應的 token 遠超過上限，字數限制沒有生效，今天停用")
+    tiers: dict[str, int] = Field(description="各分級的檔數：large、mid、small、quiet")
+
+
 class AdminNews(BaseModel):
     enabled: bool = Field(description="NEWS_ENABLED")
     refresh_minutes: int = Field(description="多久整理一次（分鐘）")
@@ -105,6 +126,7 @@ class AdminNews(BaseModel):
     paused_engines: list[AdminNewsEngine] = Field(description="暫停中的 SearXNG 上游引擎")
     ai_month_cost_usd: float = Field(description="本月（UTC）新聞 AI 搜尋的估計費用")
     ai_budget_usd: float = Field(description="NEWS_AI_BUDGET_USD")
+    langsearch: AdminLangSearch | None = Field(default=None, description="LangSearch 今天（UTC）的用量與狀態")
 
 
 class AdminOverview(BaseModel):

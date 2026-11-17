@@ -34,12 +34,13 @@ from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.api.errors import ApiError
-from forliosa.config import Settings
+from forliosa.config import Settings, get_settings
 from forliosa.ids import new_id
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiDraft, BrokerAccount, User
 from forliosa.models import Transaction as TxnModel
+from forliosa.news import taxonomy as news_taxonomy
 from forliosa.news.outlets import NOT_NEWS_DOMAINS
 from forliosa.timeutil import (
     TAIPEI,
@@ -125,7 +126,7 @@ class Citable:
     and the answer lists it under 「出處」 with its outlet. The API takes a tool result made only of search results
     (no text block beside them), so what the model needs to know about them is in the tool's description."""
 
-    items: list[dict[str, Any]]  # {url, title, outlet, text}
+    items: list[dict[str, Any]]  # {url, title, outlet, text, note?}; note: a second text block (the news tags)
 
 
 @dataclass
@@ -138,8 +139,12 @@ class ToolOutcome:
 
 
 def citable_content(result: Citable) -> list[dict[str, Any]]:
+    """One ``search_result`` per item; an item's ``note`` (the news tags of ``get_news`` / ``search_news``) is a second
+    text block, so the headline block a sentence cites stays the headline."""
     return [{"type": "search_result", "source": it["url"], "title": it["title"][:300],
-             "content": [{"type": "text", "text": it["text"][:1000]}], "citations": {"enabled": True}}
+             "content": [{"type": "text", "text": it["text"][:1000]},
+                         *([{"type": "text", "text": it["note"][:400]}] if it.get("note") else [])],
+             "citations": {"enabled": True}}
             for it in result.items]
 
 
@@ -151,6 +156,9 @@ class ToolSpec:
     required: tuple[str, ...]
     handler: Callable[[ToolContext, dict[str, Any]], Any]
     label: Callable[[dict[str, Any]], str]
+    # required in the schema but "" means "not given" (strict schemas allow at most 24 optional parameters in all, so a
+    # tool with several filters takes them as required strings: search_news)
+    blank_ok: tuple[str, ...] = ()
 
     def definition(self, eager: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -833,6 +841,13 @@ def _news_time(n: dict[str, Any], today: date) -> str:
     return f"{rel}{at.month}/{at.day}{clock}"
 
 
+def _news_tags(ctx: ToolContext, items: list[dict[str, Any]]) -> dict[str, Any]:
+    """url -> the media headline's tags (:mod:`forliosa.news.tags`; 公告 have none)."""
+    from forliosa.news.tags import tags_for_urls
+
+    return tags_for_urls(ctx.db, [str(n["url"]) for n in items if n.get("category") == "media" and n.get("url")])
+
+
 def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
     from forliosa.services import stock as svc
 
@@ -840,11 +855,14 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
     now = now_utc()
     today = now.astimezone(TAIPEI).date()
     items = news_for_ai(svc.news(ctx.db, ctx.md, info.symbol), now)
+    tags = _news_tags(ctx, items)
     linked = [n for n in items if str(n.get("url") or "").startswith("http") and n.get("title")]
     if not linked:  # nothing to cite: the headlines (if any) as data
         out: dict[str, Any] = {
             "symbol": info.symbol, "name": info.name,
-            "headlines": [_pick(n, "published_at", "title", "category", "outlet", "source") for n in items],
+            "headlines": [{**_pick(n, "published_at", "title", "category", "outlet", "source"),
+                           **({k: v for k, v in tags[n["url"]].view().items() if k != "related" and v}
+                              if n.get("url") in tags else {})} for n in items],
             "sources": list(dict.fromkeys(x for n in items for x in n.get("sources") or [])),
         }
         if not items:
@@ -864,8 +882,54 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
         return "公司公告" if n.get("category") == "material_info" else "交易所公告"
 
     return Citable([{"url": n["url"], "title": n["title"], "outlet": outlet(n),
-                     "text": "，".join(x for x in (kind(n), _news_time(n, today)) if x) + f"：{n['title']}"}
+                     "text": "，".join(x for x in (kind(n), _news_time(n, today)) if x) + f"：{n['title']}",
+                     "note": tags[n["url"]].note(ctx.md) if n["url"] in tags else ""}
                     for n in linked])
+
+
+SEARCH_NEWS_MAX = 15
+SEARCH_NEWS_DEFAULT_DAYS = 7
+
+
+def search_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """Our stored media headlines by theme, sector, stock and/or keyword (``forliosa.news.tags.search``)."""
+    from forliosa.news import taxonomy as tx
+    from forliosa.news.tags import search
+
+    theme_text, sector_text = (args.get("theme") or "").strip(), (args.get("sector") or "").strip()
+    theme = tx.theme_id(theme_text) if theme_text else None
+    if theme_text and theme is None:
+        raise ToolError(f"沒有「{theme_text}」這個主題；可用的主題：{'、'.join(t.label for t in tx.THEMES)}")
+    sector = tx.sector_id(sector_text) if sector_text else None
+    if sector_text and sector is None:
+        raise ToolError(f"沒有「{sector_text}」這個類股；可用的類股：{'、'.join(t.label for t in tx.SECTORS)}")
+    info = resolve_instrument(ctx.md, args["symbol"]) if (args.get("symbol") or "").strip() else None
+    keyword = (args.get("keyword") or "").strip()[:40]
+    try:
+        days = int(args.get("days") or SEARCH_NEWS_DEFAULT_DAYS)
+    except (TypeError, ValueError):
+        days = SEARCH_NEWS_DEFAULT_DAYS
+    days = max(1, min(90, days))
+    settings = get_settings()
+    now = now_utc()
+    today = now.astimezone(TAIPEI).date()
+    found = search(ctx.db, ctx.md, theme=theme, sector=sector, symbol=info.symbol if info else None,
+                   keyword=keyword or None, days=days, limit=SEARCH_NEWS_MAX, now=now, settings=settings)
+    if not found:
+        filters = {k: v for k, v in (("theme", tx.theme_label(theme) if theme else None),
+                                     ("sector", tx.sector_label(sector) if sector else None),
+                                     ("symbol", info.symbol if info else None), ("keyword", keyword or None)) if v}
+        kept = settings.news_retention_days
+        return {"filters": filters, "days": days, "headlines": [],
+                "note": "站內存的新聞標題裡沒有符合的" + (f"（新聞標題只保留 {kept} 天）" if days > kept else "")
+                + "；需要時改用 web_search"}
+    return Citable([{"url": n["url"], "title": n["title"], "outlet": n["outlet"],
+                     "text": "，".join(x for x in (n["outlet"], _news_time(n, today)) if x) + f"：{n['title']}",
+                     "note": "；".join(x for x in (
+                         "歸在：" + "、".join(f"{s['symbol'].split('.')[0]} {s['name'] or ''}".strip()
+                                            for s in n["stocks"]) if n["stocks"] else n.get("market", ""),
+                         n["tag_note"]) if x)}
+                    for n in found])
 
 
 # 「禾榮科 機構給出的評級與目標價為何?」 (2026-11-16) was answered from web search alone (a forum post, an AI-written
@@ -1192,6 +1256,18 @@ def _sym_label(prefix: str, suffix: str = "") -> Callable[[dict[str, Any]], str]
     return lambda a: f"{prefix}{(a.get('symbol') or '').upper()}{suffix}"
 
 
+# search_news: the vocabulary of the news tags (forliosa.news.taxonomy), fixed per deployment (the tool list is part of
+# the cached prefix)
+_NEWS_THEMES = [t.label for t in news_taxonomy.THEMES]
+_NEWS_SECTORS = [t.label for t in news_taxonomy.SECTORS]
+
+
+def _search_news_label(a: dict[str, Any]) -> str:
+    what = "、".join(str(x) for x in (a.get("theme"), a.get("sector"), (a.get("symbol") or "").upper() or None,
+                                     a.get("keyword")) if x)
+    return f"搜尋新聞「{what}」" if what else "搜尋新聞"
+
+
 TOOLS: list[ToolSpec] = sorted([
     ToolSpec("get_portfolio_summary",
              "The signed-in user's portfolio totals: market value, cost, unrealized/realized P&L, dividends, today's "
@@ -1295,9 +1371,29 @@ TOOLS: list[ToolSpec] = sorted([
              "今天/昨天 or the date, with the time when known. Headlines with a link come back as "
              "search results: cite the one a sentence relies on and the app lists its link under the answer; do not "
              "name the outlet or the website (公開資訊觀測站) in the sentence, do not copy that opening "
-             "(「公司公告，11/10 15:02：」) or the title, write it in your own words (「11/10 公告…」). Search the web "
-             "when the question needs more than these headlines.",
+             "(「公司公告，11/10 15:02：」) or the title, write it in your own words (「11/10 公告…」). A media "
+             "headline may carry a second line of tags (主題、類股、相關 stocks) given by a classifier from the "
+             "title alone: use them to group or pick headlines, never as facts, and do not copy them. Search the "
+             "web when the question needs more than these headlines.",
              {"symbol": _SYMBOL}, ("symbol",), get_news, _sym_label("查看 ", " 新聞")),
+    ToolSpec("search_news",
+             "Search the media headlines Forliosa stored (Taiwan and US stocks and the US market; title, outlet, time "
+             "and link only, kept 30 days) by theme, sector, stock and/or keyword, newest first, up to 15. Each "
+             "headline was tagged from its title by a classifier: 主題 (theme), 類股 (sector: Taiwan's official "
+             "industry or a US sector) and related stocks; a stock filter also finds headlines stored under it. Call "
+             "this for news about a theme, industry or sector (「AI 伺服器最近有什麼消息」「航運股新聞」"
+             "「這週關稅的新聞」), to find other news that mentions a stock, or before writing about a sector's or "
+             "theme's week. Results come back as search results like get_news (cite the one a sentence relies on; "
+             "tags are hints, not facts); none found means search the web if needed. Untagged headlines are found "
+             "only by stock or keyword.",
+             {"theme": {"type": "string", "enum": ["", *_NEWS_THEMES], "description": "A theme, or \"\" for any"},
+              "sector": {"type": "string", "enum": ["", *_NEWS_SECTORS],
+                         "description": "A Taiwan industry (半導體業) or a US sector (美股半導體), or \"\" for any"},
+              "symbol": {"type": "string", "description": "Stock code or name (2330, NVDA), or \"\" for any"},
+              "keyword": {"type": "string", "description": "A word the headline must contain (CoWoS), or \"\""},
+              "days": {"type": "integer", "description": "How many days back, 1-90; 7 unless the user names a period"}},
+             ("theme", "sector", "symbol", "keyword", "days"), search_news, _search_news_label,
+             blank_ok=("theme", "sector", "symbol", "keyword", "days")),
     ToolSpec("get_analyst_views",
              "Third-party ratings and target prices of one stock, as the stock page's 法人觀點 card collected them "
              "(read-only: nothing is searched here): each item is one broker or investment bank's rating and/or "
@@ -1508,7 +1604,7 @@ def execute(ctx: ToolContext, name: str, args: Any) -> ToolOutcome:
         return ToolOutcome(json.dumps({"INVALID_JSON": json.dumps(args, ensure_ascii=False)}, ensure_ascii=False),
                            is_error=True)
     unknown = set(args) - set(spec.properties)
-    missing = [k for k in spec.required if args.get(k) in (None, "") and k != "symbol"]
+    missing = [k for k in spec.required if args.get(k) in (None, "") and k != "symbol" and k not in spec.blank_ok]
     if unknown or missing:
         parts = [f"不認得的參數 {', '.join(sorted(unknown))}"] if unknown else []
         parts += [f"缺少 {', '.join(missing)}"] if missing else []

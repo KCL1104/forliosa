@@ -68,12 +68,25 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).
   Requests already refuse an expired session; nothing else removes its row.
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
-  watched, or viewed in the last 3 days): Taiwan stocks from GDELT's new 15-minute bulk files (one download for every
-  symbol, ``forliosa.news.gdelt_bulk``), US stocks — and Taiwan stocks while the bulk files are not current — one
-  GDELT DOC request per symbol spaced ≥ 5 s, backing off after a 429; AI web search fills gaps within the monthly
-  budget; headlines older than 30 days are deleted
+  watched, or viewed in the last 3 days) and the market page's US headlines (``^US``): Taiwan stocks, US stocks and
+  ``^US`` from GDELT's new 15-minute bulk files (one download per feed for every symbol, ``forliosa.news.gdelt_bulk``:
+  the ``translation`` feed for Taiwan, the ``english`` feed for the US); the GDELT DOC API only while the feed a stock
+  leans on is more than 2 h old — one request per symbol (and one for ``^US``) spaced ≥ 5 s, backing off after a 429;
+  AI web search fills gaps within the monthly budget; headlines older than 30 days are deleted
   (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only. Its own loop
   (``Job.background``): a batch can take most of the 45 minutes and must not hold up the other jobs.
+* ``news_tagging`` — every ``NEWS_TAGGING_MINUTES`` (5; off with ``NEWS_TAGGING_ENABLED=false``): themes, sectors and
+  related stocks for the headlines stored since the last run (``forliosa.news.tagging``; 產品負責人 2026-11-17), once
+  per URL, oldest first, up to 4 requests of 50 headlines to Claude Haiku; fewer than ``NEWS_TAGGING_MIN_BATCH`` (20)
+  new headlines wait until the oldest was stored ``NEWS_TAGGING_MAX_WAIT_MINUTES`` (30) ago; stopped for the month once
+  ``NEWS_TAGGING_MONTHLY_BUDGET_USD`` (US$3) is spent. Its own loop: it never waits for a news batch, and a failure only
+  leaves headlines untagged.
+* ``news_langsearch`` — only with NEWS_LANGSEARCH_ENABLED (production; 產品負責人 2026-11-17): every 10 minutes a
+  look at what LangSearch should be asked (``forliosa.news.langsearch``): on trading days from 16:00 the market topics
+  (``^TW``), from 18:30 the tracked Taiwan stocks that are due by tier (large daily, mid every 2 days, small every 4,
+  quiet every 7; a stock that missed its day from 08:00; a new one any time, at most 100 a day). At most 250 requests
+  and 50,000 tokens per UTC day; a 429, 401/403 or redirect stops it until 00:00 UTC. Headline, outlet, time and link
+  only. Its own loop; US stocks never.
 
 * ``company_refresh`` — every hour at :35: the 「關於」 description of tracked symbols (``forliosa.services.company``):
   a zh.wikipedia excerpt found through Wikidata (one request at a time, monthly per company, paused 6 h after a 429),
@@ -161,6 +174,8 @@ US_CLOSE_DELAY = timedelta(hours=1)
 US_CLOSE_POLL_SECONDS = 3600
 US_CLOSE_GIVE_UP = timedelta(hours=20)
 US_BACKFILL_SECONDS = 600
+LANGSEARCH_SECONDS = 600  # how often the LangSearch job looks at what is due
+LANGSEARCH_DEADLINE_SECONDS = 45 * 60  # a pass stops after this long (the next one picks up where it stopped)
 
 
 @dataclass
@@ -331,6 +346,14 @@ class Worker:
         if settings.news_enabled:
             self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh,
                                  background=True))
+        # 新聞標籤 (產品負責人 2026-11-17): a few minutes after headlines are stored, in a loop of its own
+        if settings.news_enabled and settings.news_tagging_enabled:
+            self.jobs.append(Job("news_tagging", every(settings.news_tagging_minutes * 60), self.news_tagging,
+                                 background=True))
+        # LangSearch (台股新聞, 產品負責人 2026-11-17; off unless NEWS_LANGSEARCH_ENABLED): a look every 10 minutes at
+        # what is due (the topics from 16:00 on trading days, the stocks from 18:30), in a loop of its own
+        if settings.news_enabled and settings.news_langsearch_enabled:
+            self.jobs.append(Job("news_langsearch", every(LANGSEARCH_SECONDS), self.news_langsearch, background=True))
         if settings.company_descriptions_enabled:
             self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh,
                                  background=True))
@@ -583,6 +606,24 @@ class Worker:
             with session_factory()() as db:
                 # A batch never holds the scheduler for longer than the refresh interval.
                 return refresh(db, self.md, deadline_seconds=get_settings().news_refresh_minutes * 60 * 0.8)
+
+        await asyncio.to_thread(run)
+
+    async def news_tagging(self) -> None:
+        from forliosa.news import tagging
+
+        def run() -> tagging.RunResult:
+            with session_factory()() as db:
+                return tagging.run(db, self.md)
+
+        await asyncio.to_thread(run)
+
+    async def news_langsearch(self) -> None:
+        from forliosa.news import langsearch
+
+        def run() -> langsearch.LangSearchReport:
+            with session_factory()() as db:
+                return langsearch.refresh_langsearch(db, self.md, deadline_seconds=LANGSEARCH_DEADLINE_SECONDS)
 
         await asyncio.to_thread(run)
 

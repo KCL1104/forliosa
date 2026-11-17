@@ -1,5 +1,5 @@
 import type { MarketAnnouncement, MarketIndex, MarketMover, MarketOverview, MarketSector, MarketUs, MarketUsEtf, NewsItem } from "../types"
-import { DATABENTO_ATTRIBUTION, GDELT_ATTRIBUTION } from "./attributions"
+import { DATABENTO_ATTRIBUTION, GDELT_ATTRIBUTION, GDELT_GKG_ATTRIBUTION } from "./attributions"
 import { INSTRUMENTS } from "./instruments"
 import { addDays, MOCK_TODAY, parseDay } from "./market"
 
@@ -160,6 +160,7 @@ export function buildMarketOverview(demo: boolean, today = MOCK_TODAY): MarketOv
       "證券櫃檯買賣中心〈上櫃股票行情〉（2026），依政府資料開放授權條款第 1 版",
       "臺灣證券交易所〈上市公司每日重大訊息〉（2026），依政府資料開放授權條款第 1 版",
       DATABENTO_ATTRIBUTION,
+      GDELT_GKG_ATTRIBUTION, // 美股新聞：英文整批檔為主、查詢 API 備用（後端兩個都列）
       GDELT_ATTRIBUTION,
     ],
   }

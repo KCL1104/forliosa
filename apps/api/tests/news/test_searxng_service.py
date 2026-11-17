@@ -71,7 +71,7 @@ def test_unreachable_instance_pauses_searxng_and_the_rest_continues(engine, clie
         assert rep.blocked_sources == ["searxng"] and rep.errors == 0
         wide = state(db, service.SOURCE_WIDE)
         assert wide.last_status == "unreachable" and aware(wide.backoff_until) == NOW + timedelta(minutes=15)
-        assert len(rows(db, source="gdelt")) == 1
+        assert len(rows(db, source="gdelt")) == 2  # 台積電 and 「台積公司」 (the alias 台積, 2026-11-17)
         # inside the pause: not asked at all
         run(db, commercial_md, settings, [gdelt, make_searx(clock, NOW + timedelta(minutes=10))], ["2317.TW"],
             NOW + timedelta(minutes=10))
@@ -184,7 +184,7 @@ def test_merged_with_gdelt_canonical_urls_and_no_redirects(engine, client, comme
     gdelt = FakeSource(items={"2330.TW": gdelt_items()})
     with Session(engine) as db:
         rep = run(db, commercial_md, settings, [gdelt, make_searx(clock)], ["2330.TW"])
-        assert rep.fetched == {"gdelt": 1, "searxng": 1} and rep.stored == 13 + 4
+        assert rep.fetched == {"gdelt": 1, "searxng": 1} and rep.stored == 14 + 4
         searx = {r.url: r for r in rows(db, source="searxng")}
         assert sorted(searx) == [
             "https://money.udn.com/money/story/5612/9100001",  # fbclid removed
@@ -250,11 +250,11 @@ def test_us_stocks_are_asked_in_english(engine, commercial_md, settings, fake_se
 def test_no_ai_search_when_gdelt_and_searxng_together_have_three(engine, commercial_md, settings, pool, fake,
                                                                   fake_searx, clock):
     fake_searx.answers = [searx_fixture("searxng_tsmc_zh_tw_synthetic.json")]
-    gdelt = FakeSource(items={"2330.TW": gdelt_items()[:4]})  # 1 relevant headline from GDELT alone
+    gdelt = FakeSource(items={"2330.TW": gdelt_items()[:4]})  # 2 relevant headlines from GDELT alone
     with Session(engine) as db:
         rep = run(db, commercial_md, settings, [gdelt, make_searx(clock)], ["2330.TW"], ai="default")
         assert rep.ai_searches == 0 and fake.requests == []
-        assert service.recent_free_count(db, "2330.TW", NOW) == 1 + 5  # GDELT 1, SearXNG 5 (incl. the CNA story)
+        assert service.recent_free_count(db, "2330.TW", NOW) == 2 + 5  # GDELT 2, SearXNG 5 (incl. the CNA story)
 
 
 def test_ai_search_when_both_have_too_few(engine, commercial_md, settings, pool, fake, fake_searx, clock):
