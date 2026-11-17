@@ -162,3 +162,24 @@ export function maskTextBoxes(items: TextBox[]): MaskResult {
   }
   return { rects, text: lines.join("\n"), masked }
 }
+
+/**
+ * 貼上的文字（匯入庫存，2026-11-17）：一行一行找，和 PDF 的文字層同一套規則（身分證字號、分公司代碼-帳號、
+ * 個資標籤後面的值），換成「〔已遮蔽〕」。伺服器送出前會再塗一次；這裡先塗，個資不離開這台裝置。
+ */
+export function maskPlainText(text: string): { text: string; masked: number } {
+  let masked = 0
+  const lines = text.split(/\r?\n/).map((line) => {
+    const ranges = findSensitiveRanges(line)
+    if (ranges.length === 0) return line
+    masked += ranges.length
+    let out = ""
+    let cursor = 0
+    for (const [s, e] of ranges) {
+      out += line.slice(cursor, s) + MASK_TOKEN
+      cursor = e
+    }
+    return out + line.slice(cursor)
+  })
+  return { text: lines.join("\n"), masked }
+}

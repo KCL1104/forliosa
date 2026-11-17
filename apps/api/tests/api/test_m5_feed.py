@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from forliosa.db import session_factory
 from forliosa.ids import new_id
 from forliosa.models import GroupComment, GroupDigest, GroupReaction, Transaction
-from forliosa.timeutil import now_utc, today_taipei
+from forliosa.timeutil import last_tw_trading_day, now_utc, today_taipei
 from tests.api.m5 import API, account, join, login, make_group, me_id, set_share, trade, trading_day
 
 
@@ -185,7 +185,9 @@ def test_deleting_the_last_trade_deletes_its_thread(client, other_client, setup)
     assert other_client.delete(f"{API}/transactions/{t1['id']}").status_code == 204
     assert thread_rows() == 2  # the item still exists (one trade left)
     # Moving the last trade to another day empties the old item: its thread goes.
-    r = other_client.patch(f"{API}/transactions/{t2['id']}", json={"trade_date": trading_day(5).isoformat()})
+    # (the trading day before ``d``: trading_day(5) is ``d`` itself on a Wednesday in Taipei)
+    earlier = last_tw_trading_day(d - timedelta(days=1))
+    r = other_client.patch(f"{API}/transactions/{t2['id']}", json={"trade_date": earlier.isoformat()})
     assert r.status_code == 200
     assert thread_rows() == 0
     t3 = trade(other_client, acc, "2317.TW", "buy", d, 1000, 100)

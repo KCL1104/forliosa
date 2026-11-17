@@ -67,7 +67,7 @@ import type {
 } from "./types"
 import type { AdminGroupPass, DailyReport, MyGroupPass } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
-import type { StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
+import type { PositionsCommitCheck, PositionsCommitResult, PositionsImport, StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
 
 type Query = Record<string, string | number | null | undefined>
@@ -188,6 +188,9 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     checkTransactionBatch: (body) => request<TransactionBatchCheck>("POST", "/transactions/batch", { body: { ...body, dry_run: true } }),
     createTransactionBatch: (body) => request<TransactionBatchResult>("POST", "/transactions/batch", { body: { ...body, dry_run: false } }),
     deleteTransactionBatch: (batchId) => request<{ batch_id: string; deleted: number }>("DELETE", `/transactions/batches/${enc(batchId)}`),
+    parsePositions: (body, opts) => request<PositionsImport>("POST", "/imports/positions", { body, signal: opts?.signal }),
+    checkPositions: (body) => request<PositionsCommitCheck>("POST", "/imports/positions/commit", { body: { ...body, dry_run: true } }),
+    commitPositions: (body) => request<PositionsCommitResult>("POST", "/imports/positions/commit", { body: { ...body, dry_run: false } }),
 
     getPortfolioSummary: (accountId) =>
       request<PortfolioSummary>("GET", "/portfolio/summary", { query: { account_id: accountId } }),

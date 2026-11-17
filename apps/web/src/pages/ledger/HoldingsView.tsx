@@ -25,7 +25,7 @@ import { useColumnLabel } from "./use-column-label"
 import { useReadOnly } from "@/api/view-as"
 import { useUi } from "@/app/ui-store"
 import { useStartReduce } from "@/pages/transactions/use-start-reduce"
-import { useCanImportStatements } from "@/pages/transactions/import/access"
+import { useCanImport } from "@/pages/transactions/import/access"
 import { textAction } from "@/components/text-action"
 import { useUsClosesServed } from "@/pages/stock/text"
 import { ROW_MENU_BUTTON, SymbolRecords } from "./SymbolRecords"
@@ -114,10 +114,10 @@ function UnpricedNote({ rows }: { rows: Holding[] }) {
 function EmptyLedger() {
   const ask = useAskAi()
   const readOnly = useReadOnly()
-  const canImport = useCanImportStatements()
+  const canImport = useCanImport()
   const openImport = useUi((s) => s.openImport)
   if (readOnly) return <EmptyState title="目前沒有持股" />
-  // 空狀態兩條路：自己填，或跟 AI 說一句；開了匯入對帳單的帳號多一個文字連結（補以前的交易最快）
+  // 空狀態兩條路：自己填，或跟 AI 說一句；開了匯入的帳號多一個文字連結（先選匯入庫存或對帳單；已經有持股的話匯入庫存最快）
   return (
     <EmptyState
       title="帳本還是空的"
@@ -129,8 +129,8 @@ function EmptyLedger() {
             試試「買 0050 2 張 52.4」
           </Button>
           {canImport && (
-            <button type="button" onClick={openImport} className={textAction}>
-              從對帳單匯入
+            <button type="button" onClick={() => openImport()} className={textAction}>
+              匯入庫存或對帳單
             </button>
           )}
         </div>

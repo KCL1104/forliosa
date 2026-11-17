@@ -544,7 +544,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     }
   }
 
-  // 匯入對帳單：讀檔回示範的對帳單；一次寫入、整批復原（和後端一樣排序、重算自動入帳的股利）
+  // 匯入對帳單與匯入庫存：讀檔回示範的對帳單、庫存畫面；一次寫入、整批復原（和後端一樣排序、重算自動入帳的股利）
   const imports = createImportStore({
     accounts: () => accounts,
     txns: () => txns,
@@ -556,6 +556,27 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     },
     today,
   })
+
+  /** AI 讀檔（匯入對帳單、匯入庫存）：示範縮短成 1.5 秒左右；取消時照真的 fetch 一樣丟 AbortError */
+  const aiRead = <T,>(run: () => T, signal?: AbortSignal): Promise<T> =>
+    new Promise((resolve, reject) => {
+      const abort = () => reject(new DOMException("讀取已取消", "AbortError"))
+      if (signal?.aborted) return abort()
+      const ms = minLatency === 0 && maxLatency === 0 ? 0 : 1200 + Math.random() * 600
+      const t = setTimeout(() => {
+        signal?.removeEventListener("abort", onAbort)
+        try {
+          resolve(run())
+        } catch (e) {
+          reject(e)
+        }
+      }, ms)
+      const onAbort = () => {
+        clearTimeout(t)
+        abort()
+      }
+      signal?.addEventListener("abort", onAbort, { once: true })
+    })
 
   const base: ForliosaApi = {
     kind: "mock",
@@ -882,29 +903,14 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     previewTransaction: (body) =>
       wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined, { auto: false })),
     // 讀檔要 10–40 秒（實測）；示範縮短成 1.5 秒左右。取消時照真的 fetch 一樣丟 AbortError
-    parseStatement: (body, opts) =>
-      new Promise((resolve, reject) => {
-        const signal = opts?.signal
-        const abort = () => reject(new DOMException("讀取已取消", "AbortError"))
-        if (signal?.aborted) return abort()
-        const ms = minLatency === 0 && maxLatency === 0 ? 0 : 1200 + Math.random() * 600
-        const t = setTimeout(() => {
-          signal?.removeEventListener("abort", onAbort)
-          try {
-            resolve(imports.parse(body))
-          } catch (e) {
-            reject(e)
-          }
-        }, ms)
-        const onAbort = () => {
-          clearTimeout(t)
-          abort()
-        }
-        signal?.addEventListener("abort", onAbort, { once: true })
-      }),
+    parseStatement: (body, opts) => aiRead(() => imports.parse(body), opts?.signal),
     checkTransactionBatch: (body) => wait(() => imports.check(body)),
     createTransactionBatch: (body) => wait(() => imports.create(body)),
     deleteTransactionBatch: (batchId) => wait(() => imports.remove(batchId)),
+    // 匯入庫存（2026-11-17）：讀和匯入對帳單一樣慢；寫入、檢查、復原和一般的請求一樣
+    parsePositions: (body, opts) => aiRead(() => imports.parsePositions(body), opts?.signal),
+    checkPositions: (body) => wait(() => imports.checkPositions(body)),
+    commitPositions: (body) => wait(() => imports.commitPositions(body)),
 
     getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
@@ -1086,7 +1092,7 @@ export const VIEW_AS_READS = new Set<MethodName>([
 const WRITES = new Set<MethodName>([
   "deleteAiThreads",
   "createAccount", "updateAccount", "deleteAccount", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
-  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
+  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "parsePositions", "checkPositions", "commitPositions", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
   "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",

@@ -327,12 +327,12 @@ def test_a_month_printed_alone_is_the_period(client, pool, fake, env):
     assert [flags(x) for x in out["rows"]] == [[], ["outside_period"]]
 
 
-def test_holdings_screenshots_are_not_supported_yet(client, pool, fake, env):
+def test_holdings_screenshots_are_pointed_to_the_holdings_import(client, pool, fake, env):
     account(client)
     answer(fake, doc([r()], kind="holdings_snapshot", period=("", "")))
     out = client.post(URL, json={"kind": "images", "pages": pages(1, data=JPEG, media_type="image/jpeg")}).json()
     assert (out["document_kind"], out["rows"], out["period"], out["retried"]) == ("holdings_snapshot", [], None, False)
-    assert out["notice"] == "這是庫存畫面，沒有買進日期，還不能匯入。請改用對帳單或成交明細。"
+    assert out["notice"] == "這是庫存畫面，沒有買進日期。請改用「匯入庫存」。"
     assert len(fake.requests) == 1
 
 

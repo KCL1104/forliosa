@@ -275,7 +275,8 @@ export function ReviewTable({
             <table className="w-full table-fixed border-collapse text-md">
               <caption className="sr-only">讀出來的交易：勾選的會匯入</caption>
               <colgroup>
-                <col className="w-11" />
+                {/* 勾選欄 56px：pl-3 之後還有 44px，觸控的平板（桌面版面）也按得到整格 */}
+                <col className="w-14" />
                 <col className="w-[7rem]" />
                 <col className="w-[4.75rem]" />
                 <col />
@@ -363,7 +364,8 @@ function DesktopRow({ row: r, n, errors, onPatch, onInclude, onShortfall }: RowP
   const off = !r.include
   const errorText = Object.values(errors).filter(Boolean)
   return (
-    <tbody className={cn("border-b border-rule last:border-b-0", off && "[&_input]:text-ink-2 [&_select]:text-ink-2")}>
+    // 沒勾的列退回紙色（不在草稿裡、不會寫入），字是淡墨；勾著的留在石墨淡底上
+    <tbody className={cn("border-b border-rule last:border-b-0", off && "bg-paper [&_input]:text-ink-2 [&_select]:text-ink-2")}>
       <tr className="align-middle">
         <td className="py-1.5 pl-3">
           <IncludeBox row={r} onInclude={onInclude} />
@@ -414,7 +416,7 @@ function MobileRow({ row: r, n, errors, onPatch, onInclude, onShortfall }: RowPr
   // 有沒填好的格子時直接打開欄位
   const open = editing || errorText.length > 0
   return (
-    <li className="flex gap-1 border-b border-rule py-2.5 pr-3 pl-1 last:border-b-0">
+    <li className={cn("flex gap-1 border-b border-rule py-2.5 pr-3 pl-1 last:border-b-0", off && "bg-paper")}>
       <IncludeBox row={r} onInclude={onInclude} />
       <div className="min-w-0 flex-1 pt-2.5">
         <div className="flex items-baseline justify-between gap-3">
@@ -559,7 +561,7 @@ function StockCell({ row: r, n, invalid, onPatch, boxed }: { row: DraftRow; n: n
       aria-label={`第 ${n} 筆的股票：${r.symbol.name} ${r.symbol.code}，按一下換一檔`}
       className={cn(
         "flex w-full min-w-0 flex-col items-start rounded-sm border text-left outline-none focus-visible:border-ink",
-        boxed ? "h-11 justify-center border-input bg-raised px-3" : "border-transparent px-1.5 py-0.5 hover:border-ctl",
+        boxed ? "h-11 justify-center border-input bg-raised px-3" : "justify-center border-transparent px-1.5 py-0.5 hover:border-ctl pointer-coarse:min-h-11",
       )}
     >
       <span className={cn("w-full truncate leading-snug", tone(r, "symbol"))}>{r.symbol.name}</span>

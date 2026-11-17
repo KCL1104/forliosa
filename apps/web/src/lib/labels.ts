@@ -92,7 +92,7 @@ export const TYPE_LABEL: Record<TransactionType, string> = {
  */
 export const SOURCE_TAG: Record<TransactionSource, { label: string; title?: string; ai?: boolean } | null> = {
   manual: null,
-  import: { label: "匯入", title: "從對帳單匯入" },
+  import: { label: "匯入", title: "從券商的對帳單或庫存匯入" },
   ai_draft: { label: "由 AI 建立", ai: true },
   auto: { label: "自動", title: "系統在除息日依前一天收盤的持股自動入帳" },
   auto_edited: { label: "自動・已修改", title: "自動入帳後你改過，系統不會再更新這筆" },

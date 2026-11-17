@@ -308,7 +308,7 @@ export interface TradePreview {
 
 // ── 匯入對帳單（v1，產品負責人 2026-11-16；docs/api-contract.md「匯入對帳單」） ──
 /**
- * AI 讀出來的是哪一種檔案。`holdings_snapshot`（庫存畫面，沒有買進日期）第一版還不能匯入；
+ * AI 讀出來的是哪一種檔案。`holdings_snapshot`（庫存畫面，沒有買進日期）這裡不匯入，請使用者改用匯入庫存；
  * `not_a_trade_record`：檔案裡沒有買賣紀錄。
  */
 export type ImportDocumentKind = "monthly_statement" | "trade_confirmation" | "app_screenshot" | "holdings_snapshot" | "not_a_trade_record"
@@ -337,6 +337,18 @@ export type ImportFlagCode =
   | "currency_mismatch"
   | "fractional_tw_qty"
   | "unreadable"
+  // 匯入庫存（2026-11-17）
+  | "in_ledger"
+  | "in_other_account"
+  | "not_whole_lots"
+  | "cost_mismatch"
+  | "value_mismatch"
+  | "unit_fixed"
+  | "currency_guess"
+  | "same_symbol_twice"
+  // 寫入前的檢查（`check_batch`）
+  | "bad_date"
+  | "validation_error"
 
 export interface ImportFlag {
   /** 新版伺服器可能多出前端還不認得的代碼：照樣顯示訊息 */
@@ -453,6 +465,136 @@ export interface BatchRejectedRow {
   index: number | null
   code: string
   message: string
+}
+
+// ── 匯入庫存（產品負責人 2026-11-17；docs/api-contract.md「匯入庫存」） ──
+/** `holdings` 庫存畫面；`trade_records` 交易明細或對帳單（請改用匯入對帳單）；`other` 都不是 */
+export type PositionsDocumentKind = "holdings" | "trade_records" | "other"
+
+/** 這個帳戶現在已經有這一檔：帳本的股數、均價（原幣，含買進手續費）、「以券商為準」會刪掉的紀錄筆數 */
+export interface LedgerHolding {
+  quantity: number
+  avg_cost: number
+  currency: Currency
+  /** 這個帳戶裡這一檔的紀錄筆數（以券商為準時會刪掉的） */
+  records: number
+  /** 其中的股利（現金、股票股利，自動記的也算） */
+  dividends: number
+  /** 其中的賣出 */
+  sells: number
+}
+
+/** AI 照抄的原文（全部是字串；沒讀到是空字串） */
+export interface PositionRaw {
+  symbol_code?: string
+  name?: string
+  /** cash 現股｜margin 融資｜short 融券｜other */
+  kind?: string
+  quantity?: string
+  /** lots 張｜shares 股 */
+  quantity_unit?: string
+  avg_cost?: string
+  total_cost?: string
+  market_price?: string
+  market_value?: string
+  currency?: string
+  page?: number | string | null
+  raw_line?: string
+}
+
+export interface PositionRow {
+  row_id: string
+  /** 找不到或對到好幾檔時是 null */
+  symbol: string | null
+  /** 我們的名稱；找不到時是畫面上的 */
+  name: string
+  currency: Currency
+  /** 股數（印的是張時已經乘 1,000）；沒讀到是 null */
+  quantity: number | null
+  /** 每股成本：券商的均價；沒有均價時是總成本 ÷ 股數；沒讀到是 null */
+  price: number | null
+  /** `total_cost`：price 是總成本 ÷ 股數，寫入時送 `total_cost` */
+  price_basis: "average_cost" | "total_cost" | null
+  /** 畫面印的總成本；沒印是 null */
+  total_cost: number | null
+  raw: PositionRaw
+  flags: ImportFlag[]
+  /** 預設要不要匯入（已在帳本、找不到股票、沒讀清楚、融券…是 false） */
+  include: boolean
+  in_ledger: LedgerHolding | null
+}
+
+export interface PositionsImportInput {
+  /** 對哪個帳戶檢查「已在帳本」（不給就用第一個帳戶） */
+  account_id?: string
+  kind: "images" | "text"
+  /** kind=images：庫存畫面的截圖 */
+  pages?: ImportPage[]
+  /** kind=text：貼上的文字（瀏覽器先塗過個資，伺服器送出前再塗一次） */
+  text?: string
+}
+
+export interface PositionsImport {
+  account_id: string
+  document_kind: PositionsDocumentKind
+  broker_name: string
+  /** 預設的買進日期：今天（台北） */
+  trade_date: string
+  rows: PositionRow[]
+  /** 截圖重疊、完全一樣的列只算一次：合併了幾列 */
+  merged_duplicates: number
+  unreadable: string[]
+  embedded_instructions: string[]
+  model_used: string
+  retried: boolean
+  /** 一列都沒有時的一句話（交易明細、不是庫存） */
+  notice?: string | null
+}
+
+/** 一檔：`price`（券商的均價）或 `total_cost`（伺服器算總成本 ÷ 股數），二選一 */
+export interface PositionsCommitRow {
+  symbol: string
+  quantity: number
+  price?: number
+  total_cost?: number
+  /** 這一列自己的買進日期；不給就用整批的 */
+  trade_date?: string
+  currency?: Currency
+  /** 以券商為準：先刪掉這個帳戶裡這一檔的所有紀錄 */
+  replace?: boolean
+}
+
+export interface PositionsCommitInput {
+  account_id: string
+  /** 整批的買進日期；不給是今天（台北） */
+  trade_date?: string
+  rows: PositionsCommitRow[]
+}
+
+/** 以券商為準刪掉（dry_run：會刪掉）的舊紀錄筆數；整批復原不會還原它們 */
+export interface PositionsReplaced {
+  symbol: string
+  deleted: number
+}
+
+/** `dry_run: true`：每一列重新檢查（不呼叫 AI、什麼都不寫不刪） */
+export interface PositionsCommitCheck {
+  dry_run: true
+  ok: boolean
+  trade_date: string
+  rows: { index: number; flags: ImportFlag[]; in_ledger: LedgerHolding | null }[]
+  replaced: PositionsReplaced[]
+  problems: { code: string; message: string }[]
+}
+
+/** `dry_run: false`：一次寫入（全部或全不）；復原用 `DELETE /transactions/batches/{batch_id}` */
+export interface PositionsCommitResult {
+  dry_run: false
+  batch_id: string
+  trade_date: string
+  created: string[]
+  replaced: PositionsReplaced[]
+  auto_dividends_added: number
 }
 
 export interface Page<T> {
@@ -2071,6 +2213,13 @@ export interface ForliosaApi {
   createTransactionBatch(body: TransactionBatchInput): Promise<TransactionBatchResult>
   /** `DELETE /transactions/batches/{id}`：整批復原；之後記的賣出用到這批買進時 422 `ledger_inconsistent` */
   deleteTransactionBatch(batchId: string): Promise<{ batch_id: string; deleted: number }>
+  // 匯入庫存（2026-11-17；和匯入對帳單同一個開關 `plan.statement_import`）
+  /** `POST /imports/positions`：AI 讀庫存截圖或貼上的文字＋伺服器檢查，什麼都不存。錯誤和 `parseStatement` 一樣 */
+  parsePositions(body: PositionsImportInput, opts?: { signal?: AbortSignal }): Promise<PositionsImport>
+  /** `POST /imports/positions/commit {dry_run: true}`：換帳戶、改股票或日期後重新檢查（不呼叫 AI） */
+  checkPositions(body: PositionsCommitInput): Promise<PositionsCommitCheck>
+  /** `POST /imports/positions/commit {dry_run: false}`：一次寫入（全部或全不），以券商為準的刪除在同一個交易裡 */
+  commitPositions(body: PositionsCommitInput): Promise<PositionsCommitResult>
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>

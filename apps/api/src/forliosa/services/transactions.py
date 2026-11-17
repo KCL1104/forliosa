@@ -1,7 +1,9 @@
 """Create/update/preview transactions: fill in fees and taxes, validate against the ledger.
 
 The statement import writes its rows as one batch (:func:`check_batch`, :func:`create_batch`, :func:`delete_batch`):
-all rows or none, one strict replay, one automatic-dividend sync, one commit, and one undo for the whole batch.
+all rows or none, one strict replay, one automatic-dividend sync, one commit, and one undo for the whole batch. The
+holdings import (匯入庫存) writes through :func:`write_batch` too, after deleting the records of the stocks it replaces
+(:func:`delete_symbol_records`) in the same transaction.
 """
 
 from __future__ import annotations
@@ -12,6 +14,7 @@ from datetime import date, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
+from sqlalchemy import delete as sql_delete
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -29,7 +32,7 @@ from forliosa.domain.fees import (
 from forliosa.domain.ledger import SECURITY_TYPES, CostMethod, LedgerError, LedgerTxn, TxnType, replay
 from forliosa.ids import new_id
 from forliosa.marketdata.service import MarketData
-from forliosa.models import BrokerAccount, Transaction, User
+from forliosa.models import AutoDividendSkip, BrokerAccount, Transaction, User
 from forliosa.services import auto_dividends, sharing
 from forliosa.services.ledger_io import LedgerInput, instrument_ref, load_ledger_input, shares_held
 from forliosa.timeutil import now_utc, today_taipei
@@ -648,13 +651,27 @@ def create_batch(db: Session, user: User, account_id: str, rows: Sequence[Mappin
     check = check_batch(db, user, account.id, rows, md)
     if not check.ok:
         raise batch_rejected(check)
+    return write_batch(db, user, check, md)
+
+
+def write_batch(db: Session, user: User, check: BatchCheck, md: MarketData,
+                also_sync: Sequence[tuple[str, str | None]] = (),
+                purge_feed_keys: Sequence[sharing.TradeKey] = ()) -> BatchResult:
+    """Write a batch :func:`check_batch` passed (``check.ok``; the account locked by the caller): a new
+    ``import_batch_id`` (``imp_…``), one strict replay with every row (``validate_ledger`` with ``md``), the rows
+    added, the automatic dividends re-synced once for every stock they touch (and ``also_sync``: stocks whose records
+    the caller deleted in this transaction), the group-feed threads of ``purge_feed_keys`` purged when no row backs
+    them any more, and one commit."""
     batch_id = new_id("imp")
     for t in check.ordered:
         t.import_batch_id = batch_id
-    validate_ledger(db, user, account, check.ordered, md=md)
+    validate_ledger(db, user, check.account, check.ordered, md=md)
     db.add_all(check.ordered)
-    scopes = list(dict.fromkeys(s for t in check.ordered for s in _dividend_scope(t)))
+    scopes = list(dict.fromkeys([*(s for t in check.ordered for s in _dividend_scope(t)), *also_sync]))
     synced = auto_dividends.after_user_change(db, user, md, scopes)
+    if purge_feed_keys:
+        db.flush()
+        sharing.purge_trade_threads(db, user.id, purge_feed_keys)
     db.commit()
     return BatchResult(batch_id, [t for t in check.candidates if t is not None], synced.created)
 
@@ -702,3 +719,26 @@ def delete_batch(db: Session, user: User, batch_id: str, md: MarketData) -> int:
     sharing.purge_trade_threads(db, user.id, feed_keys)
     db.commit()
     return len(rows)
+
+
+# -- every record of one stock in one account (匯入庫存「以券商為準」, 產品負責人 2026-11-17) -------------------------
+def delete_symbol_records(db: Session, user: User, account: BrokerAccount, symbol: str) -> list[Transaction]:
+    """Delete every record of ``symbol`` (the stored symbol, e.g. ``2330.TW``) in ``account``: buys, sells, dividends
+    (the automatic ones too), splits, capital reductions and any cash row tagged with the stock — what
+    ``GET /transactions?account_id=&symbol=`` lists — and the account's automatic-dividend skips for it (they describe
+    edits to those rows). Flushed, **not committed**, and nothing else: the caller locks the account first
+    (``auto_dividends.lock_accounts``), takes the returned rows' group-feed keys (``sharing.trade_keys``), re-syncs the
+    stock's automatic dividends and commits, all in one transaction with whatever else it writes. No ledger check is
+    needed: a strict replay only checks a stock against its own rows. 定期定額, other stocks, other accounts and other
+    users are not touched. Returns the deleted rows (none: nothing was recorded)."""
+    if account.user_id != user.id:
+        raise not_found("找不到帳戶")
+    rows = list(db.scalars(select(Transaction).where(
+        Transaction.user_id == user.id, Transaction.account_id == account.id, Transaction.symbol == symbol)))
+    for t in rows:
+        db.delete(t)
+    db.execute(sql_delete(AutoDividendSkip).where(
+        AutoDividendSkip.user_id == user.id, AutoDividendSkip.account_id == account.id,
+        AutoDividendSkip.symbol == symbol))
+    db.flush()
+    return rows

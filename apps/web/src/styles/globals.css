@@ -531,8 +531,9 @@
     white-space: nowrap;
   }
 
-  /* 示範資料：細框小字，資料狀態而不是品牌 */
-  .demo-tag {
+  /* 示範資料：細框小字，資料狀態而不是品牌（匯入庫存的「已在帳本」同一種，`status-tag`） */
+  .demo-tag,
+  .status-tag {
     display: inline-flex;
     align-items: center;
     height: 20px;
