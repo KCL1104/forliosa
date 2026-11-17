@@ -78,7 +78,7 @@ def test_taiwan_points_are_not_index_points(text):
 
 
 def test_night_and_us_facts_take_percentages_only():
-    w = gather.Window(ts(MON, 13, 30), ts(TUE, 7), ts(TUE, 6, 55), set(), ts(TUE, 6, 56))
+    w = gather.Window(ts(MON, 13, 30), ts(TUE, 7), ts(TUE, 6, 55), {MON}, ts(TUE, 6, 56))  # covers 美股 11/16
     url = "https://news.cnyes.com/news/id/6000001"
     res = {_norm_url(url): SearchResult(url, "夜盤收低", "2026-11-16T23:30:00+08:00")}
     cite = [{"type": "web_search_result_location", "url": url, "title": "夜盤收低",

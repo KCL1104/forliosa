@@ -14,7 +14,7 @@ import copy
 import json
 from typing import Any
 
-PROMPT_VERSION = "mr-2026-11-17c"
+PROMPT_VERSION = "mr-2026-11-17d"
 
 # The words no AI sentence may hold (validator §10.2 item 5); the time words are listed apart for the prompt.
 FORBIDDEN_WORDS = (
@@ -204,9 +204,10 @@ SPEC: dict[str, dict[str, Any]] = {
 - highlights：3 點，每點一段（1–2 句）。不能用前一個交易日上市的數字（group=prev_session 的 F）。
 - overnight：隔夜要聞 3–5 段，每段 1–3 句：美股 ETF 與台積電 ADR（F，寫美股日期）、半導體、總經與 Fed、和台股相關的海\
 外公司（X）。
-- evening_notes：前一晚才到的資料 0–3 段（櫃買、上櫃法人估算金額、外資台指期未平倉、P/C 比、匯率；F）。只寫數字與比較\
-，不寫方向。
-- watch：這一天市場在看什麼，2–4 項。每項：event（事件名稱，只寫事件本身，例如「鴻海法說會」；和標題一樣會\
+- evening_notes：前一晚才到的資料 0–3 段（上櫃漲跌家數、上櫃法人估算金額、外資台指期未平倉、P/C 比、匯率；F）。只寫數\
+字與比較，不寫方向。不能用前一個交易日的收盤數字（group=prev_session 的 F，例如櫃買指數、加權指數）。
+- watch：這一天市場在看什麼，2–4 項。每一項都要是行事曆（C）或報導（X）裡的事件，time_ref 或 refs 要有那個 C 或 X\
+（開盤、收盤、前一個交易日的漲跌都不是事件）。每項：event（事件名稱，只寫事件本身，例如「鴻海法說會」；和標題一樣會\
 檢查）、time_ref（C 編號，沒有就空字串）、sectors（相關類股，必須\
 是 32 類之一，沒有就空陣列）、para（每一句都要是三種句型之一）。
 - chart_of_day：從可用選單挑一張今日圖，caption 寫 2–3 句；不需要就 code 填 "none"。""",
@@ -223,8 +224,8 @@ SPEC: dict[str, dict[str, Any]] = {
 漲跌幅、（權值股）點數貢獻「約 ▼1,070 點（估算）」；有 X 或 W 就加一句原因，沒有就寫「未找到報導」。
 - chips：籌碼 1–2 段。上市三大法人只能引用報導（X）；沒有就寫「上市三大法人尚未取得可引用的報導」。期交所與櫃買中心晚\
 上公布的法人資料由伺服器 23:45 補表，你不用寫。
-- tonight：這份報告日期當天晚上，與下一個台股交易日已排定的事 0–3 項（ITEM，同 watch 的寫法；時間寫日期，例如\
-「11/18（三）晚間」）。
+- tonight：這份報告日期當天晚上，與下一個台股交易日已排定的事 0–3 項（ITEM，同 watch 的寫法，每一項也要有 C 或 X；時間\
+寫日期，例如「11/18（三）晚間」）。
 - chart_of_day：從可用選單挑一張今日圖，caption 寫 2–3 句；不需要就 code 填 "none"。""",
     },
     "weekly": {
@@ -399,6 +400,10 @@ REVISE_HINTS = {
                     "回顧的「未找到報導」、盤後籌碼的「上市三大法人尚未取得可引用的報導」除外）。",
     "us_local_time": "美國當地時間寫成「美東 11/18 14:00」（日期加 24 小時制），伺服器會補上台北時間；不要自己換算。",
     "stock_not_allowed": "名單外的台股不能出現；海外公司照報導原文寫名稱，不加代號。",
+    "item_not_event": "watch／tonight 每一項都要是行事曆（C）或報導（X）裡的事件，time_ref 或 refs 要有那個 C 或 X；"
+                      "沒有就拿掉這一項（都沒有就給空陣列）。",
+    "repeats_close_report": "前一個交易日的收盤數字（group=prev_session 的 F）上一份盤後重點已經寫過：不放進標題、重點與"
+                            "「前一晚才到的資料」。",
 }
 
 

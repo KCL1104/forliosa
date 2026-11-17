@@ -247,8 +247,8 @@ def earnings_label(report_date: date, timing: str, time_et: str | None = None) -
     if tp is None:
         return f"美東 {md}"
     tmd = f"{tp.month}/{tp.day}"
-    if _hhmm(time_et):
-        return f"美東 {md} {time_et}（台北 {tmd} {tp:%H:%M}）"
+    if (t := _hhmm(time_et)) is not None:  # 「9:30」 written as 09:30, the form :data:`CONVERTED` reads
+        return f"美東 {md} {t:%H:%M}（台北 {tmd} {tp:%H:%M}）"
     return f"美東 {md} {_TIMING_TEXT.get(timing, '')}（台北 {tmd} {taipei_part(tp)}）"
 
 
@@ -266,8 +266,8 @@ _US_TIMES = (re.compile(_US_ZONE + r"\s*" + _US_MD + r"\s*" + _US_CLOCK),
              re.compile(_US_MD + r"\s*" + _US_ZONE + r"\s*" + _US_CLOCK))
 # a US local time with a clock (any form) — what is left of one after the conversion is a problem for the validator
 US_LOCAL_TIME = re.compile(_US_ZONE + r"[^，。；,;]{0,14}?(?<![\d/])\d{1,2}\s*(?:[:：]\s*\d{2}|點)")
-CONVERTED = re.compile(r"美東\s*(\d{1,2})/(\d{1,2})\s*(\d{2}):(\d{2})\s*[（(]\s*台北\s*(\d{1,2})/(\d{1,2})\s*"
-                       r"(\d{2}):(\d{2})\s*[)）]")
+CONVERTED = re.compile(r"美東\s*(\d{1,2})/(\d{1,2})\s*(\d{1,2}):(\d{2})\s*[（(]\s*台北\s*(\d{1,2})/(\d{1,2})\s*"
+                       r"(\d{1,2}):(\d{2})\s*[)）]")
 
 
 def _near_year(month: int, day: int, ref: date) -> date | None:
@@ -465,11 +465,38 @@ def events_between(db: Session, start: date, end: date, *, cutoff: datetime, pol
     for h in db.scalars(select(NyseHoliday).where(NyseHoliday.date >= start, NyseHoliday.date <= end)):
         if _aware(h.updated_at) > cutoff_utc:
             continue
-        what = "休市" if h.kind == "closed" else f"提早收盤（美東 {h.close_time_et or '13:00'}）"
-        out.append(CalEvent(h.date, f"美股 {h.date.month}/{h.date.day} {h.name.split('（')[0]}{what}", "us_holiday",
+        out.append(CalEvent(h.date, nyse_title(h.date, h.name, h.kind, h.close_time_et), "us_holiday",
                             "manual-calendar", url=h.source_url))
     out.sort(key=lambda c: (c.date, c.time_taipei or "99:99", c.fold or "", c.kind, c.title))
     return out
+
+
+# A holiday name the writer copies is checked like its own words: no time word (「感恩節翌日」 reads 「感恩節後一天」)
+_NAME_TIME_WORDS = {"翌日": "後一天", "次日": "後一天", "隔日": "後一天", "隔天": "後一天"}
+
+
+def _holiday_name(name: str) -> str:
+    from forliosa.reports.prompts import FORBIDDEN_WORDS, TIME_WORDS
+
+    out = name.split("（")[0].strip()
+    for word, plain in _NAME_TIME_WORDS.items():
+        out = out.replace(word, plain)
+    if any(w in out for w in (*TIME_WORDS, *FORBIDDEN_WORDS)) or re.search(r"(?:週|周|星期|禮拜)[一二三四五六日天]", out):
+        return ""  # an admin's name that would fail the checks: the date and the kind say enough
+    return out
+
+
+def nyse_title(d: date, name: str, kind: str, close_time_et: str | None) -> str:
+    """The calendar title of a NYSE closure or early close. An early close carries its time the way the AI text
+    must write a US time: 「美股 11/27 感恩節後一天提早於美東 11/27 13:00（台北 11/28 02:00）收盤」 (the validator
+    reads it as converted, so a sentence copying the title passes)."""
+    md = f"{d.month}/{d.day}"
+    plain = _holiday_name(name or "")
+    if kind == "closed":
+        return f"美股 {md} {plain}休市"
+    t = _hhmm(close_time_et) or time(13, 0)
+    tp = us_time_to_taipei(d, t.hour, t.minute)
+    return f"美股 {md} {plain}提早於美東 {md} {t:%H:%M}（台北 {tp.month}/{tp.day} {tp:%H:%M}）收盤"
 
 
 def _aware(dt: datetime) -> datetime:

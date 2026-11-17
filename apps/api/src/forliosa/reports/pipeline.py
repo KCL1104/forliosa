@@ -455,13 +455,13 @@ def run_gather(db: Session, g: MarketReportGather, report: MarketReport, deps: D
     def call(kw: dict[str, Any], only: int | None) -> tuple[Any, int]:
         return caller.create(kw, timeout=gather.TIMEOUT, only=only)
 
-    results = gather.run_topics(topics, model, effort, call, s)
+    results = gather.run_topics(topics, model, effort, call, s, clock=deps.clock)
     total = Decimal(0)
     for r in results:
         for msg in r.msgs:
             total += accounting.book_call(db, msg, requested=model, feature=feature, thread_id=g.id,
                                           key_slot=r.slot).cost_usd
-    out = gather.collect(results, gather.window(built.pack, deps.clock()))
+    out = gather.collect(results, gather.window(built.pack, deps.clock()))  # each topic: its own last reply
     g.topics, g.facts, g.disagreements = out.topics, out.facts, out.disagreements
     g.cost_usd, g.key_slot = total, next((r.slot for r in results if r.slot), None)
     g.status = "ok" if any(r.error is None for r in results) and results else "failed"

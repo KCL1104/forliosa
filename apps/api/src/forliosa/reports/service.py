@@ -666,7 +666,7 @@ def nyse_put(db: Session, user: User, d: date, body: dict[str, Any]) -> dict[str
         h = NyseHoliday(date=d)
         db.add(h)
     h.name, h.kind = str(body.get("name") or "")[:80] or "休市", kind
-    h.close_time_et = close if kind == "early_close" else None
+    h.close_time_et = f"{calendars._hhmm(close):%H:%M}" if kind == "early_close" else None  # 「9:30」 -> 09:30
     h.source_url, h.updated_by, h.updated_at = url, user.id, now
     h.verified_at = now if body.get("verified") else None
     db.commit()
@@ -760,6 +760,7 @@ def earnings_add(db: Session, user: User, body: dict[str, Any]) -> dict[str, Any
     t = body.get("time_et")
     if t and not calendars._hhmm(t):
         raise unprocessable("時間要寫成 HH:MM，例如 16:05。", details={"field": "time_et"})
+    t = f"{calendars._hhmm(t):%H:%M}" if t else None  # 「9:30」 is stored as 09:30
     sym = str(body["symbol"]).strip().upper()[:20]
     existing = db.scalar(select(UsEarningsDate).where(UsEarningsDate.symbol == sym,
                                                       UsEarningsDate.report_date == body["report_date"]))

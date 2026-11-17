@@ -489,7 +489,9 @@ def number_footnotes(payload: dict[str, Any], pack: dict[str, Any]) -> None:
             if k not in notes:
                 notes[k] = {"n": len(notes) + 1, **fn, "_x": r if r.startswith("X") else None}
             elif r.startswith("X") and notes[k]["_x"] is None:
-                notes[k]["_x"] = r  # a page first cited as shared research: still a verified report in the sources
+                # a page first cited as shared research: the verified report's shape (its outlet, title and publish
+                # time) from here on, under the same number — whichever sentence came first
+                notes[k] = {"n": notes[k]["n"], **fn, "_x": r}
             cites.append(notes[k]["n"])
         s["cites"] = sorted(set(cites))
     payload["footnotes"] = [{k: v for k, v in n.items() if k != "_x"} for n in notes.values()]

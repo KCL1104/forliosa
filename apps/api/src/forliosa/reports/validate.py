@@ -10,9 +10,10 @@ subject is named next to it (``number_subject_mismatch``: 外資 and 自營商 s
 agrees with a signed fact; dates come from the pack or the refs; a weekday matches its date and never stands alone;
 no forbidden or time word; only listed stocks and allowed sectors (半導體 with its concentration in the same
 paragraph); no fund flow and price move of a stock in one sentence; causes need a report (X / W); forward-looking
-sentences take one of the three shapes; position numbers are never a reason; the premarket's headline does not
-repeat the previous session; no index points; the chart of the day is on the menu; no sentence about what the
-edition lacks (``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time.
+sentences take one of the three shapes; position numbers are never a reason; the premarket's headline and its
+evening notes do not repeat the previous session; no index points; the chart of the day is on the menu; every watch /
+tonight item is an event of the calendar or a report (``item_not_event``); no sentence about what the edition lacks
+(``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time.
 
 :func:`drop` takes out what still fails after the revision: given the pack, one sentence (or one item) at a time,
 the rest checked again; a section goes as a whole only when what is left still fails.
@@ -54,19 +55,26 @@ FORECAST = re.compile(r"走高|走低|走揚|走強|走弱|上攻|回檔|回落|
                       r"|多頭|空頭")
 VIEW = re.compile(r"可望|有望|看好|看淡|看多|看空|偏多|偏空|樂觀|悲觀|利空出盡|利多出盡")
 # A sentence about what this edition lacks (data not open, not licensed, not found): the page shows missing data
-# with its own empty states, so the text never says it (dry run 11/17: 「美股收盤價資料這份未開放」 would be daily)
-GAP = re.compile(
-    r"資料包|(?:這|本)份(?:報告)?(?:未|沒|不)|開放資料|授權(?:未|還沒|尚未|沒有)確認|需要授權|(?:暫不|不|未)列(?!入|為|出)"
+# with its own empty states, so the text never says it (dry run 11/17: 「美股收盤價資料這份未開放」 would be daily).
+# In the edition's own voice (這份、資料包、授權未確認、未找到報導…): always a gap.
+GAP_EDITION = re.compile(
+    r"資料包|(?:這|本)份(?:報告)?(?:未|沒|不)|授權(?:未|還沒|尚未|沒有)確認|需要授權|(?:這裡|這段|本段)只(?:引用|列|寫)"
+    r"|(?:未|沒有?|找不到|查無)(?:找到|查到)?(?:相關的?)?(?:報導|新聞)"
+    r"|(?:未|沒有?)(?:找到|查到)(?:相關的?)?消息|找不到(?:相關的?)?消息")
+# Words a named source may also say (「〔鉅亨網〕報導，該公司官方尚未公布投資金額」「主管機關表示尚無相關資料」): a gap
+# unless a report the sentence cites (X / W) says something of the kind too
+GAP_SOURCED = re.compile(
+    r"(?:沒有|未|尚未|還沒|不)開放|(?<!大)(?:暫不|不|未)列(?!入|為|出|於|顛|管|席|車|表|舉|印|隊)"
     r"|(?:未|尚未|沒有|還沒)取得(?:可引用的|相關的?)?(?:資料|數據|報導|消息|行情)|(?:沒有|無|缺少?)(?:相關的?)?資料"
-    r"|資料(?:不足|缺)|(?:這裡|這段|本段)只(?:引用|列|寫)|(?:未|沒有?|找不到|查無)(?:找到|查到)?(?:相關的?)?(?:報導|新聞)"
-    r"|(?:未|沒有?)(?:找到|查到)(?:相關的?)?消息|找不到(?:相關的?)?消息"
-    r"|(?:官方|證交所|櫃買中心|期交所|數字)[^，。；,;]{0,6}(?:尚未|還沒|未)(?:公布|發布)")
+    r"|資料(?:不足|缺)|(?:官方|證交所|櫃買中心|期交所|數字)[^，。；,;]{0,6}(?:尚未|還沒|未)(?:公布|發布)")
+GAP = re.compile(f"{GAP_EDITION.pattern}|{GAP_SOURCED.pattern}")
 # The fixed sentences the spec asks for where the page has a slot for them (contract §9.3)
 GAP_ALLOWED = {"stocks": ("未找到報導",), "stocks_week": ("未找到報導",), "last_week_review": ("未找到報導",),
                "chips": ("上市三大法人尚未取得可引用的報導",)}
-# Reports about companies abroad or a dated theme: a name in them may be written as the report has it (the Taiwan
-# name check would otherwise flag a foreign company that shares a listed name, and the writer avoids the name)
-NAMED_KEYS = ("CO.", "US.", "ADR.", "THEME.")
+# Reports about companies abroad: a two-character name in them may be written as the report has it (三星 is Samsung
+# there, not the listed 三星; the writer would otherwise avoid the name). Never a theme's report (its 概念股 are Taiwan
+# stocks), never a longer Taiwan name.
+NAMED_KEYS = ("CO.", "US.", "ADR.")
 FLOW = re.compile(r"買賣超|買超|賣超|淨買|淨賣|持股增減")
 P1 = re.compile(r"^已排定[：:]")
 P2 = re.compile(r"^〔([^〕]{2,12})〕\s*報導[，,\s]*市場關注")  # the only approved shape: 〔媒體〕報導市場關注…
@@ -360,16 +368,15 @@ def edition_day(pack: dict[str, Any] | None) -> date:
 def other_stocks(c: Ctx, text: str, sources: Iterable[str] = ()) -> list[str]:
     """Taiwan names off the stock list in ``text`` (normalized): every one of three characters or more; a
     two-character one only next to a stock's context (股、漲、跌、法說、營收 …), once the listed names, the facts'
-    subjects, the outlets and the sector names are blanked. A name that the cited report of a company abroad or a
-    theme has in its own words (``sources``) is the report's: it may be written."""
+    subjects, the outlets and the sector names are blanked. A two-character name that the cited report of a company
+    abroad has in its own words (``sources``: 三星 in a Samsung story) is that company: it may be written."""
     out: list[str] = []
     said = [normalize(x) for x in sources if x]
     t = _blank(text, [*c.stock_names.values(), *(f.get("subject") or "" for f in c.facts.values()), *c.known,
                       *SECTOR_NAMES, *PLAIN_PHRASES])
     for name in c.other_names:
         if name in t:
-            if not any(name in x for x in said):
-                out.append(name)
+            out.append(name)
             t = t.replace(name, "＿" * len(name))
     for name in c.other_short:
         if any(name in x for x in said):
@@ -383,7 +390,7 @@ def other_stocks(c: Ctx, text: str, sources: Iterable[str] = ()) -> list[str]:
 
 
 def named_sources(c: Ctx, refs: Iterable[str]) -> list[str]:
-    """The words of the cited reports whose topic is a company abroad or a theme (:data:`NAMED_KEYS`)."""
+    """The words of the cited reports whose topic is a company abroad (:data:`NAMED_KEYS`)."""
     out: list[str] = []
     for r in refs:
         x = c.web.get(r)
@@ -392,12 +399,22 @@ def named_sources(c: Ctx, refs: Iterable[str]) -> list[str]:
     return out
 
 
-def gap_phrase(key: str, text: str) -> str | None:
+def gap_phrase(key: str, text: str, sourced: Iterable[str] = ()) -> str | None:
     """A passage of ``text`` (normalized) that tells what the edition lacks, other than the fixed sentence the spec
-    asks for in ``key`` (:data:`GAP_ALLOWED`)."""
+    asks for in ``key`` (:data:`GAP_ALLOWED`). ``sourced``: the texts of the reports the sentence cites — when one of
+    them says something of the kind (:data:`GAP_SOURCED`), those words are the report's, not the edition's."""
     t = _blank(text, (normalize(x) for x in GAP_ALLOWED.get(key, ())))
-    m = GAP.search(t)
-    return m.group(0) if m else None
+    if (m := GAP_EDITION.search(t)) is not None:
+        return m.group(0)
+    m = GAP_SOURCED.search(t)
+    if m is None or any(GAP_SOURCED.search(normalize(x)) for x in sourced if x):
+        return None
+    return m.group(0)
+
+
+def report_texts(c: Ctx, refs: Iterable[str]) -> list[str]:
+    """The words of the cited reports (X claims and quotes, W quotes)."""
+    return [t for r in refs if r[:1] in ("X", "W") for t in _ref_texts(c, r)]
 
 
 def _blank_converted(c: Ctx, text: str, whole: bool) -> str:
@@ -409,9 +426,11 @@ def _blank_converted(c: Ctx, text: str, whole: bool) -> str:
     return text
 
 
-def us_local_time(c: Ctx, text: str) -> str | None:
-    """A US local time with a clock left without its Taipei time (the page shows Taipei times)."""
-    m = US_LOCAL_TIME.search(_blank_converted(c, text, True))
+def us_local_time(c: Ctx, text: str, refs: Iterable[str] = ()) -> str | None:
+    """A US local time with a clock left without its Taipei time (the page shows Taipei times). The title of a cited
+    calendar row is the server's own (its row carries the Taipei time): copied as it is, it is not one."""
+    own = [normalize(str(c.cal[r].get("title") or "")) for r in refs if r in c.cal]
+    m = US_LOCAL_TIME.search(_blank_converted(c, _blank(text, own), True))
     return m.group(0) if m else None
 
 
@@ -626,9 +645,9 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
             out.append(Problem(s.path, "stock_not_allowed", m.group(1)))
     for name in other_stocks(c, text, named_sources(c, s.refs)):
         out.append(Problem(s.path, "stock_not_allowed", name))
-    if (gap := gap_phrase(s.key, text)) is not None:
+    if (gap := gap_phrase(s.key, text, report_texts(c, s.refs))) is not None:
         out.append(Problem(s.path, "internal_gap", gap))
-    if (us := us_local_time(c, text)) is not None:
+    if (us := us_local_time(c, text, s.refs)) is not None:
         out.append(Problem(s.path, "us_local_time", us))
     # sectors
     for name in _sector_mentions(text):
@@ -656,7 +675,8 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
             f = c.facts.get(r)
             if f and f.get("metric") in OPTION_METRICS:
                 out.append(Problem(s.path, "options_as_reason", r))
-    if c.kind == "premarket" and s.key == "highlights":
+    if c.kind == "premarket" and s.key in ("highlights", "evening_notes"):
+        # the previous session's numbers were in the close report; 「昨晚才到的資料」 holds only what came after it
         for r in s.refs:
             f = c.facts.get(r)
             if f and f.get("group") == "prev_session":
@@ -739,9 +759,9 @@ def _check_heading(c: Ctx, path: str, raw: str, own_refs: list[str] | None = Non
             out.append(Problem(path, "stock_not_allowed", m.group(1)))
     for name in other_stocks(c, text, named_sources(c, own)):
         out.append(Problem(path, "stock_not_allowed", name))
-    if (gap := GAP.search(text)) is not None:
-        out.append(Problem(path, "internal_gap", gap.group(0)))
-    if (us := us_local_time(c, text)) is not None:
+    if (gap := gap_phrase("", text, report_texts(c, own))) is not None:
+        out.append(Problem(path, "internal_gap", gap))
+    if (us := us_local_time(c, text, own)) is not None:
         out.append(Problem(path, "us_local_time", us))
     for name in _sector_mentions(text):
         sec = c.sectors.get(name)
@@ -808,6 +828,13 @@ def _check_items(c: Ctx, output: dict[str, Any], kind: str) -> list[Problem]:
             elif not text.startswith(normalize(f"{st['name']}（{st['code']}）")):
                 out.append(Problem(f"{key}[{i}]", "stock_item_mismatch",
                                    f"第一句要以「{st['name']}（{st['code']}）」開頭"))
+    for key in ("watch", "tonight"):
+        if key not in OUTPUT_KEYS[kind]:
+            continue
+        for i, item in enumerate(output.get(key) or []):
+            # an item is a real event: the calendar's (C) or a report's (X), not 「台股 11/17（二）開盤」 made up from F
+            if isinstance(item, dict) and not any(r in c.cal or r in c.web for r in item_refs(output, f"{key}[{i}]")):
+                out.append(Problem(f"{key}[{i}]", "item_not_event", "time_ref 或 refs 要有行事曆（C）或報導（X）"))
     for key in ("watch", "tonight", "themes"):
         for i, item in enumerate(output.get(key) or []):
             for sec in (item or {}).get("sectors") or []:
@@ -910,7 +937,7 @@ def tidy(output: dict[str, Any], kind: str, pack: dict[str, Any] | None = None) 
     return out
 
 
-ITEM_LEVEL = {"stock_item_mismatch"}
+ITEM_LEVEL = {"stock_item_mismatch", "item_not_event"}  # the item goes, never its section
 _SENT_PATH = re.compile(r"^(?P<key>\w+)(?:\[(?P<i>\d+)\])?(?:\.(?P<sub>para|why|events|relation|caption))?"
                         r"\.sentences\[(?P<j>\d+)\]$")
 _ITEM_PATH = re.compile(r"^(?P<key>\w+)\[(?P<i>\d+)\]")
