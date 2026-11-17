@@ -2801,9 +2801,14 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   （`store.py` 讀取時才放）。`GET /me/export` 多一個 `disclaimer`（`SHORT`），`format_version` 仍是 1（只是加欄位）。
 - **推播**（`notifications.trade_text`／`digest_text`／`daily_text`）：最後一行一律是 `SHORT`，只出現一次；以前週報與日報只在附 AI 摘要時加
   「AI 分析僅供參考，不構成投資建議。」，現在不管有沒有摘要都有。設定 Discord 時的測試訊息（`channels.connect_message`）與 Telegram 連結成功的
-  回覆（`channels.linked_message`）也接這一句。Discord（2,000 字）與 Telegram（4,096 字）會從後面截斷太長的訊息：訊息太長時先把前面的內容截短（結尾「…」）再接這一句（`notifications._signed`），這一句一定送得到。
+  回覆（`channels.linked_message`）也接這一句。Discord（2,000 字）與 Telegram（4,096 字）會從後面截斷太長的訊息：訊息太長時先把前面的內容截短（結尾「…」）再接這一句（`notifications.signed`），這一句一定送得到。
+  審查修正（2026-11-17）：週報與日報附 AI 摘要時，摘要那一行開頭是「AI 整理：」（`notifications.ai_line`，`disclaimer.AI_LABEL`），最後一行是
+  「AI 整理的部分可能有錯。」＋`SHORT`（`signed(lines, kind, ai=True)`，`disclaimer.AI_NOTE`）——改版前有摘要時最後一行是「AI 分析僅供參考…」，
+  只剩 `SHORT` 的話看不出哪一段是 AI 寫的。`SHORT` 仍然只出現一次、在最後。組推播的公開函式是 `notifications.signed`（原本的 `_signed` 留著當別名）。
 - **AI 提示**：`CHAT_SYSTEM`「只做分析與整理…」那一條後面多一條：Forliosa 只替使用者整理資訊、不是投資顧問，回答不要寫成替使用者做的投資建議或推薦
   （不寫「建議買進」「可以加碼」「適合長期持有」「現在是進場時機」），也不自稱投資顧問或分析師。其他規則與其他提示（收盤重點、收盤簡報、
   「為什麼」、週報、日報、法人觀點）不變——它們本來就寫了不給建議、不預測、只轉述報導。
-- **市場報告（盤前重點、盤後重點、市場週報）**要用同一套：最上面一句 `AI`，推播最後一行 `SHORT`（見 `docs/legal/README.md`「2026-11-17 的修改」）。
+- **市場報告（盤前重點、盤後重點、市場週報）**要用同一套：API 的 `disclaimer` 欄位是 `disclaimer.AI`（頁面最上面一句）；推播用
+  `notifications.signed(lines, kind, ai=True)` 組字，AI 寫的段落用 `notifications.ai_line(text, kind)`（開頭「AI 整理：」），不要自己 append 免責的字串
+  （見 `docs/legal/README.md`「2026-11-17 的修改」）。
 

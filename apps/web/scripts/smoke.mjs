@@ -2530,10 +2530,12 @@ await check("討論（沒登入）：公開清單與主題不用登入就能讀�
     // 免責旁邊一行：Forliosa 是什麼＋「登入」
     const about = p.locator("main p", { hasText: "Forliosa 是股票帳本" })
     await about.waitFor({ timeout: 8000 })
-    // 連結在句子下面自己一列（「登入」「服務條款」「隱私權政策」），不夾在句子裡
+    // 連結在句子下面自己一列（只有「登入」），不夾在句子裡；「服務條款」「隱私權政策」在頁尾那一列（不疊兩列法律連結）
     const aboutLinks = about.locator("xpath=following-sibling::p[1]")
     if (!/^\/login/.test((await aboutLinks.getByRole("link", { name: "登入", exact: true }).getAttribute("href")) ?? "")) throw new Error("the about line has no 登入 link")
     if (await about.getByRole("link").count()) throw new Error("links are back inside the about sentence")
+    const guestFooter = (await p.locator("[data-site-footer] a").allTextContents()).join(",")
+    if (guestFooter !== "服務條款,隱私權政策,免責聲明,資料來源與授權" || (await aboutLinks.getByRole("link").count()) !== 1) throw new Error(`guest legal links: footer ${guestFooter}`)
     // 主題頁（站內導覽）：內文、回覆、被隱藏的回覆只有說明、表情只有計數、股票是純文字
     await p.getByRole("link", { name: "台積電法說會前，大家怎麼配置？" }).click()
     await p.getByRole("heading", { level: 1, name: "台積電法說會前，大家怎麼配置？" }).waitFor({ timeout: 8000 })
@@ -3601,6 +3603,17 @@ await check("匯入對帳單：沒開放的帳號（不是站方管理員）沒�
     await page.locator("article [data-disclaimer='ai']").first().waitFor({ timeout: 8000 })
     await page.goto(base + "/groups/grp_family?tab=digests&report=weekly", { waitUntil: "networkidle" })
     await page.locator("article [data-disclaimer='ai']").first().waitFor({ timeout: 8000 })
+  })
+  await check("個股頁：全站那一句只在頁尾（規則判斷的「為什麼漲跌」下面不另加）；AI 寫的公司簡介下面是 AI 那一句", async () => {
+    await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+    await page.locator("[data-site-footer]").waitFor({ timeout: 10000 })
+    const shorts = await page.locator("[data-disclaimer='short']").count()
+    const inFooter = await page.locator("[data-site-footer] [data-disclaimer='short']").count()
+    if (shorts !== 1 || inFooter !== 1) throw new Error(`the site line appears ${shorts} times (${inFooter} in the footer)`)
+    await page.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
+    const about = page.getByRole("region", { name: "關於「環球晶」" })
+    await about.getByText("AI 依公開資料整理").waitFor({ timeout: 10000 })
+    if ((await about.locator("[data-disclaimer]").allTextContents()).join("|") !== AI_LINE) throw new Error("the AI company description has no AI line under it")
   })
   await check("手機：頁尾不橫向捲動、在底部列上面看得到", async () => {
     await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {

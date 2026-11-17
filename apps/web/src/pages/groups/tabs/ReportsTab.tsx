@@ -179,7 +179,8 @@ export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean })
           )}
         </div>
       </div>
-      <Disclaimer kind="ai" text={r.disclaimer} />
+      {/* AI 寫了段落才是 `ai` 那一句（後端的字）；沒有段落時只有伺服器算的數字：全站那一句 */}
+      {r.summary ? <Disclaimer kind="ai" text={r.disclaimer} /> : <Disclaimer kind="short" />}
     </article>
   )
 }

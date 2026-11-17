@@ -13,7 +13,7 @@ import { textAction } from "@/components/text-action"
 import { buttonVariants } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import type { DiscussionsSearch } from "@/router"
-import { TopicRows } from "./TopicRows"
+import { GuestLegalLinks, TopicRows } from "./TopicRows"
 import { usePageTitle } from "@/app/page-title"
 
 const SORTS: readonly { value: TopicSort; label: string }[] = [
@@ -109,7 +109,9 @@ function Discussions() {
               : { title: "還沒有主題", description: signedIn ? "開第一個主題，問問大家怎麼看。" : "登入後就能開第一個主題。" }
           }
         />
-        <SourcesFooter />
+        <SourcesFooter>
+          <GuestLegalLinks />
+        </SourcesFooter>
       </div>
     </PageFrame>
   )

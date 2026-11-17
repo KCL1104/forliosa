@@ -38,7 +38,7 @@ import { BackLink } from "./OriginLink"
 import { PlainText } from "./PlainText"
 import { ReplyComposer } from "./ReplyComposer"
 import { ReportDialog } from "./ReportDialog"
-import { DATE_COL, Disclaimer, MetaLine, StockTags } from "./TopicRows"
+import { DATE_COL, Disclaimer, GuestLegalLinks, MetaLine, StockTags } from "./TopicRows"
 import { usePageTitle } from "@/app/page-title"
 
 type Reporting = { target: DiscussionTarget; what: string }
@@ -98,7 +98,9 @@ function TopicView() {
           // 換到另一個主題時整個重建（開著的檢舉框、選單不會留到下一個主題）
           <Loaded key={topic.data.id} topic={topic.data} origin={origin} />
         )}
-        <SourcesFooter />
+        <SourcesFooter>
+          <GuestLegalLinks />
+        </SourcesFooter>
       </div>
     </PageFrame>
   )

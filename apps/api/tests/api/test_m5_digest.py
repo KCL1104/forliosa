@@ -435,6 +435,8 @@ def test_digest_push_includes_the_summary_when_everyone_pushes(family, market):
     text = fake.discord[-1].body["content"]
     assert SUMMARY in text and "台積電（2 人）" in text and text.count(disclaimer.SHORT) == 1
     assert text.endswith(disclaimer.SHORT)
+    # the AI paragraph is marked as AI-written and the last line says it may be wrong (2026-11-17 review)
+    assert text.count(disclaimer.AI_LABEL) == 1 and text.split("\n")[-1] == disclaimer.AI_NOTE + disclaimer.SHORT
     assert all(n in text for n in ("示範使用者", "小明", "小華"))
 
 

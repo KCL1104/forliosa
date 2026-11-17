@@ -416,7 +416,8 @@ function UsNoClose({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
  * 「為什麼漲跌」：只在異常時出現，點了交給 AI 展開。
  * 句子是規則判斷的（漲跌幅、量、漲跌停…），所以是墨色 Noto Sans、數字 600；
  * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是黑體（墨色，`.ai-voice`）。
- * 下面緊接一句 13px 淡墨的免責：模型寫的是 `ai`，規則判斷的是 `short`（只是整理公開資料，不是投資建議）。
+ * 模型寫的句子下面緊接一句 13px 淡墨的 `ai` 免責；規則判斷的句子是算出來的事實（漲跌幅、量），不加——頁尾的 `short` 已經涵蓋，
+ * 最常看的頁首不重複同一句（2026-11-17 審查）。
  */
 function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
@@ -436,7 +437,7 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const text = modelWritten ? <KaiText text={headline} /> : withFigures(headline)
   const voice = modelWritten ? cn("ai-voice", kaiSize.line) : "text-base text-ink"
   // 觸控時按鈕的可按範圍往下多 10px：免責那一句離遠一點，不會被按成提問
-  const note = <Disclaimer kind={modelWritten ? "ai" : "short"} className="mt-1 pointer-coarse:mt-3" />
+  const note = modelWritten ? <Disclaimer kind="ai" className="mt-1 pointer-coarse:mt-3" /> : null
   if (readOnly)
     return (
       <>

@@ -132,6 +132,11 @@ describe("沒登入：公開討論在精簡的外殼裡（字標、討論、登�
     // 連結在句子下面自己一列（不夾在句子裡撐開行距）
     expect(within(about.parentElement!).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions")
     expect(within(about).queryByRole("link")).toBeNull()
+    // 法律連結只有頁尾一列（服務條款・隱私權政策・免責聲明・資料來源與授權），討論區那一行只有「登入」（2026-11-17 審查：不疊兩列）
+    expect(within(about.parentElement!).getAllByRole("link").map((a) => a.textContent)).toEqual(["登入"])
+    const footer = document.querySelector<HTMLElement>("[data-site-footer]")!
+    expect(within(footer).getAllByRole("link").map((a) => a.textContent)).toEqual(["服務條款", "隱私權政策", "免責聲明", "資料來源與授權"])
+    expect(screen.getAllByRole("link", { name: "服務條款" })).toHaveLength(1)
     // 沒登入時不問要登入的端點（不會 401、不會把整頁重新載入）
     expect(api.listGroups).not.toHaveBeenCalled()
     expect(vi.mocked(api.listTopics).mock.calls.every(([q]) => q?.scope === "public")).toBe(true)
@@ -158,6 +163,8 @@ describe("沒登入：公開討論在精簡的外殼裡（字標、討論、登�
     expect(screen.getByRole("link", { name: "登入後發言" })).toHaveAttribute("href", "/login?next=%2Fdiscussions%2Ftop_p_tsmc")
     expect(screen.getByText(DISCLAIMER)).toBeInTheDocument()
     expect(within(screen.getByText(ABOUT_FORLIOSA).parentElement!).getByRole("link", { name: "登入" })).toHaveAttribute("href", "/login?next=%2Fdiscussions%2Ftop_p_tsmc")
+    expect(screen.getAllByRole("link", { name: "服務條款" })).toHaveLength(1)
+    expect(screen.getAllByRole("link", { name: "隱私權政策" })[0]!.closest("[data-site-footer]")).not.toBeNull()
     // 沒登入：沒有「更多動作」（刪除、檢舉都要登入）
     expect(screen.queryByRole("button", { name: /更多動作/ })).toBeNull()
     // 主題頁也在「討論」底下：外殼的導覽只有它，選取中

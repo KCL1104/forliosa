@@ -199,16 +199,17 @@ describe("個股頁：為什麼漲跌、法人觀點、新聞報導", { timeout:
     expect(note).toHaveClass("text-sm", "text-ink-2")
   })
 
-  it("為什麼漲跌（規則判斷的句子）下面一句 `short`；有報導的新聞清單下面一句 `news`；頁尾一個", async () => {
+  it("為什麼漲跌（規則判斷的句子）下面不另加（頁尾的 `short` 涵蓋，頁首不重複）；有報導的新聞清單下面一句 `news`；頁尾一個", async () => {
     mount()
     vi.spyOn(api, "getWhy").mockResolvedValue({ show: true, headline: "台積電今天漲 4.8%，成交量是平常的 2 倍", reasons: [], as_of: "2026-11-12T14:30:00+08:00", trade_date: "2026-11-12", sources: [] })
     renderApp("/stock/2330.TW")
     const why = await screen.findByRole("button", { name: /台積電今天漲 4.8%/ }, T)
-    const next = why.nextElementSibling as HTMLElement
-    expect(next).toHaveAttribute("data-disclaimer", "short")
-    expect(next).toHaveTextContent(DISCLAIMER.short)
+    expect(why.nextElementSibling?.hasAttribute("data-disclaimer") ?? false).toBe(false)
     await waitFor(() => expect(document.querySelector("[data-disclaimer='news']")).not.toBeNull(), T)
-    expect(document.querySelectorAll("[data-site-footer]")).toHaveLength(1)
+    const footers = document.querySelectorAll<HTMLElement>("[data-site-footer]")
+    expect(footers).toHaveLength(1)
+    // 全站那一句整頁只在頁尾
+    expect(notes().filter((n) => n.dataset.disclaimer === "short")).toEqual(notes(footers[0]!))
   })
 
   it("模型寫的「為什麼」（`ai: true`）下面是 `ai` 那一句", async () => {
@@ -251,10 +252,40 @@ describe("每一頁的頁尾；/disclaimer 不用登入", { timeout: 30_000 }, (
     await waitFor(() => expect(document.title).toBe("免責聲明｜Forliosa"))
   })
 
-  it("群組週報：每一份下面一句 `ai`（後端的字）", async () => {
+  it("群組週報：每一份下面一句；有 AI 摘要的是 `ai`（後端的字），沒有摘要的是全站那一句", async () => {
     mount()
     renderApp("/groups/grp_family?tab=digests&report=weekly")
     await waitFor(() => expect(document.querySelectorAll("[data-disclaimer='ai']").length).toBeGreaterThan(0), T)
-    for (const n of document.querySelectorAll("article [data-disclaimer]")) expect(n).toHaveTextContent(DISCLAIMER.ai)
+    for (const article of document.querySelectorAll("article")) {
+      const all = notes(article)
+      expect(all).toHaveLength(1)
+      expect(all[0]).toHaveTextContent(article.querySelector(".ai-voice") ? DISCLAIMER.ai : DISCLAIMER.short)
+    }
+  })
+
+  it("群組週報與日報沒有 AI 摘要時（還在寫、失敗、沒開 AI）：不寫「AI 只替你整理…」，改用全站那一句", async () => {
+    const adapter = mount()
+    const real = adapter.listDigests.bind(adapter)
+    vi.spyOn(api, "listDigests").mockImplementation(async (...args: Parameters<typeof real>) => {
+      const page = await real(...args)
+      return { ...page, items: page.items.map((d) => ({ ...d, summary: null })) }
+    })
+    renderApp("/groups/grp_family?tab=digests&report=weekly")
+    await waitFor(() => expect(document.querySelectorAll("article [data-disclaimer]").length).toBeGreaterThan(0), T)
+    for (const n of document.querySelectorAll<HTMLElement>("article [data-disclaimer]")) {
+      expect(n.dataset.disclaimer).toBe("short")
+      expect(n).toHaveTextContent(DISCLAIMER.short)
+    }
+    cleanup()
+    const realDaily = adapter.listDailyReports.bind(adapter)
+    vi.spyOn(api, "listDailyReports").mockImplementation(async (...args: Parameters<typeof realDaily>) => {
+      const page = await realDaily(...args)
+      return { ...page, items: page.items.map((r) => ({ ...r, summary: "" })) }
+    })
+    renderApp("/groups/grp_family?tab=digests")
+    await waitFor(() => expect(document.querySelectorAll("article").length).toBeGreaterThan(0), T)
+    await waitFor(() => expect(document.querySelectorAll("article [data-disclaimer]").length).toBe(document.querySelectorAll("article").length), T)
+    for (const n of document.querySelectorAll<HTMLElement>("article [data-disclaimer]")) expect(n.dataset.disclaimer).toBe("short")
+    expect(document.querySelector("article [data-disclaimer='ai']")).toBeNull()
   })
 })

@@ -85,13 +85,28 @@ def test_trade_push_ends_with_the_line(kind):
     once_at_the_end(text)
 
 
+def ai_marked(text: str, summary: str | None) -> None:
+    """With an AI paragraph: that line starts with 「AI 整理：」 and the last line says it may be wrong, then the site's
+    line (still once, still last). Without one: no AI marks at all."""
+    lines = text.split("\n")
+    if summary:
+        assert lines[1] == disclaimer.AI_LABEL + summary, text
+        assert lines[-1] == disclaimer.AI_NOTE + disclaimer.SHORT, text
+        assert text.count(disclaimer.AI_LABEL) == 1 and text.count(disclaimer.AI_NOTE) == 1
+    else:
+        assert "AI" not in text, text
+        assert lines[-1] == disclaimer.SHORT
+    assert disclaimer.AI not in text  # one line at the end, not the web's AI line as well
+
+
 @pytest.mark.parametrize("summary", ["這週四個人都上漲。", None])
-def test_digest_push_has_the_line_with_or_without_the_ai_summary(summary):
+@pytest.mark.parametrize("kind", ["discord", "telegram"])
+def test_digest_push_has_the_line_with_or_without_the_ai_summary(summary, kind):
     digest = SimpleNamespace(week_start=date(2026, 11, 9), week_end=date(2026, 11, 13))
     view = {**NO_RETURNS, "returns": [{"display_name": "小明", "week_return_pct": 0.012}], "trades_count": 2}
-    text = notifications.digest_text(GROUP, digest, view, summary, "discord", get_settings())
+    text = notifications.digest_text(GROUP, digest, view, summary, kind, get_settings())
     once_at_the_end(text)
-    assert disclaimer.AI not in text  # the push carries the site's line, not a second one
+    ai_marked(text, summary)
 
 
 @pytest.mark.parametrize("summary", ["今天有分享報酬的 2 個人，都漲。", None])
@@ -102,6 +117,19 @@ def test_daily_push_has_the_line_with_or_without_the_ai_paragraph(summary, same_
     text = notifications.daily_text(GROUP, report, view, summary, "telegram", get_settings(), same_day)
     assert text.startswith("Forliosa 群組「大學同學」日報")
     once_at_the_end(text)
+    ai_marked(text, summary)
+
+
+def test_signed_is_the_public_helper_for_other_pushes():
+    """Other features' pushes (market reports) build their lines and call ``signed``; ``_signed`` stays as an alias."""
+    assert notifications._signed is notifications.signed
+    plain = notifications.signed(["盤後重點 11/17"], "discord")
+    assert plain == "盤後重點 11/17\n" + disclaimer.SHORT
+    body = ["盤後重點 11/17", notifications.ai_line("加權指數收漲 1.2%。", "telegram")]
+    with_ai = notifications.signed(body, "telegram", ai=True)
+    assert with_ai.split("\n") == [*body, disclaimer.AI_NOTE + disclaimer.SHORT]
+    assert body[1] == "AI 整理：加權指數收漲 1.2%。"
+    once_at_the_end(with_ai)
 
 
 def test_channel_connected_messages_have_the_line():
@@ -120,3 +148,4 @@ def test_a_long_message_is_shortened_before_the_line_not_after(kind):
     assert len(text) <= limit
     once_at_the_end(text)
     assert text.split("\n")[-2].endswith("…")
+    assert text.split("\n")[-1] == disclaimer.AI_NOTE + disclaimer.SHORT  # the AI note survives the cut too

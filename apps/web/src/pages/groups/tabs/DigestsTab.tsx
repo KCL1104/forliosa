@@ -111,7 +111,8 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
           )}
         </>
       )}
-      <Disclaimer kind="ai" text={d.disclaimer} />
+      {/* AI 寫了摘要才是 `ai` 那一句（後端的字）；沒有摘要（還在寫、失敗、沒開 AI）時只有伺服器算的數字：全站那一句 */}
+      {d.summary ? <Disclaimer kind="ai" text={d.disclaimer} /> : <Disclaimer kind="short" />}
       <div className="flex flex-wrap items-center gap-x-4">
         <Reactions groupId={groupId} target={`digest:${d.id}`} reactions={d.reactions} />
         <CommentsToggle count={d.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />
