@@ -90,6 +90,7 @@ uv run python -m forliosa.worker
 | 每月 10、25 日 10:20 | 群組 `monthly`：董監事持股餘額明細（只留公司擔任法人董事或大股東的列，給「相關股票」的關係企業）、集保股東戶數（2-22／2-23）、ESG 產品類別 |
 | 每小時 :35 | 「關於」公司簡介：追蹤中的股票先用 Wikidata 找中文維基百科條目並節錄（每月一次、一次一個請求、429 就停 6 小時），沒有條目才用 AI 依官方資料寫 2–3 句（資料變了才重寫）。`uv run python -m forliosa.services.company refresh [代號…]` |
 | 每 45 分鐘 | 新聞報導：追蹤中的股票（持有、自選、最近 3 天有人看過）。台股用 **GDELT 每 15 分鐘的整批檔**（GKG；翻譯串流保留中文原標題，一次下載給所有股票用，只取台灣網站、標題點名公司的；每次最多讀 `NEWS_GDELT_BULK_MAX_FILES` 份，兩份間隔 ≥ 2 秒，被拒就暫停），整批檔超過 2 小時沒更新時才改回一檔一檔問 GDELT 查詢 API（美股一直用查詢 API：每次間隔 ≥ 6 秒，429 就暫停）；免費來源 7 天內少於 3 則才用 AI 搜尋補（找 14 天內，14 天內完全沒有就找 30 天；GDELT 或 SearXNG 暫停時照樣補；每月上限 US$30）。機器人快訊（鉅亨「盤中速報」「營收速報」）、報價頁、論壇、AI 寫的頁面不收也不顯示。只存標題、媒體、時間、連結，30 天後刪除。`uv run python -m forliosa.news refresh` 可立即執行，`gdelt-bulk-check --symbol 2330` 看最新一份整批檔（不寫資料庫），`block <網域>` 處理下架（見 `CONTRACT_NOTES.md`「2026-11-12 新聞報導」）。每次另外多問 GDELT 一次美股市場新聞（市場頁，存在 `^US`；`NEWS_US_MARKET`） |
+| 每 5 分鐘（`NEWS_TAGGING_MINUTES`；`NEWS_TAGGING_ENABLED=false` 關掉） | **新聞標籤** `news_tagging`（`forliosa.news.tagging`，產品負責人 2026-11-17）：最近 7 天還沒貼過的新聞標題（同一個網址一次），最舊的先，每次最多 4 個請求、每個 50 則，交給 Haiku（effort low、結構化輸出）貼主題、類股、相關股票；只送標題、媒體與歸在哪幾檔。失敗的 15 分鐘起再試、最多 3 次；金鑰忙碌只是這次先停。這個 UTC 月份花到 `NEWS_TAGGING_MONTHLY_BUDGET_USD`（US$3）就停到下個月（log 寫一次）。新聞刪除時標籤一起刪。`uv run python -m forliosa.news.tagging run`／`status`。實測每 100 則約 US$0.004–0.008（`CONTRACT_NOTES.md`「2026-11-17 新聞標籤」） |
 | 美股收盤後一小時起（紐約 17:00＝台北冬令 06:00、夏令 05:00），每小時到那天存進來為止；不看台股交易日 | 美股收盤價 `us_closes`（`US_PRICE_SOURCE=databento`＋`DATABENTO_API_KEY` 才有）：Databento 有新的一天才買，重讀最後 5 天；美國放假那天 20 小時後不再等 |
 | 每 10 分鐘 | 美股回補 `us_backfill`（同上）：新出現在帳本或觀察清單的美股（和 SPY、DIA、ONEQ、VOO）補 2024-07-01 以來的日線，每 100 檔一個請求。Databento 拒絕（401／402／403）時兩個美股工作暫停 30 分鐘起、最長 6 小時 |
 
@@ -303,6 +304,9 @@ src/forliosa/
 | `NEWS_GDELT_BULK` | worker | `true` | 台股新聞用 GDELT 每 15 分鐘的整批檔（`false`：回到一檔一檔問查詢 API） |
 | `NEWS_GDELT_BULK_FEEDS` | worker | `translation,english` | 讀哪幾種整批檔：`translation`（中文等非英文網站，台灣新聞幾乎都在這裡）、`english` |
 | `NEWS_GDELT_BULK_MAX_FILES` | worker | `8` | 每種整批檔每次最多讀幾份（8 份＝2 小時）；停機太久時更早的會略過 |
+| `NEWS_TAGGING_ENABLED`、`NEWS_TAGGING_MINUTES` | worker | `true`、`5` | 新聞標籤（主題、類股、相關股票；2026-11-17）：關掉就沒有這個工作，已貼的標籤留著 |
+| `NEWS_TAGGING_MONTHLY_BUDGET_USD` | worker | `3` | 新聞標籤每個 UTC 月份的上限（`ai_usage.feature = 'news_tagging'`，不算任何人的額度）；0＝不貼 |
+| `NEWS_TAGGING_BATCH_SIZE`、`NEWS_TAGGING_MAX_BATCHES`、`NEWS_TAGGING_DAYS`、`AI_MODEL_NEWS_TAGGING` | worker | `50`、`4`、`7`、空 | 一個請求幾則（最多 50）、每次最多幾個請求、只貼最近幾天的（最多 90）、模型（空＝`AI_MODEL`） |
 
 - 進度：管理後台總覽的「美股收盤價」（`GET /admin/overview` 的 `us_prices`）：存到紐約的哪一天、日線筆數、還沒回補與找不到的檔數。
 - 收盤價沒有還原分割與股利；Databento 的分割、股利資料不能轉載，所以沒有用。帳本照使用者記的分割；走勢圖從開盤價偵測分割並換算。

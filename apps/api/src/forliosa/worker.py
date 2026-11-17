@@ -65,6 +65,11 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   budget; headlines older than 30 days are deleted
   (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only. Its own loop
   (``Job.background``): a batch can take most of the 45 minutes and must not hold up the other jobs.
+* ``news_tagging`` — every ``NEWS_TAGGING_MINUTES`` (5; off with ``NEWS_TAGGING_ENABLED=false``): themes, sectors and
+  related stocks for the headlines stored since the last run (``forliosa.news.tagging``; 產品負責人 2026-11-17), once
+  per URL, oldest first, up to 4 requests of 50 headlines to Claude Haiku; stopped for the month once
+  ``NEWS_TAGGING_MONTHLY_BUDGET_USD`` (US$3) is spent. Its own loop: it never waits for a news batch, and a failure only
+  leaves headlines untagged.
 
 * ``company_refresh`` — every hour at :35: the 「關於」 description of tracked symbols (``forliosa.services.company``):
   a zh.wikipedia excerpt found through Wikidata (one request at a time, monthly per company, paused 6 h after a 429),
@@ -309,6 +314,10 @@ class Worker:
         if settings.news_enabled:
             self.jobs.append(Job("news_refresh", every(settings.news_refresh_minutes * 60), self.news_refresh,
                                  background=True))
+        # 新聞標籤 (產品負責人 2026-11-17): a few minutes after headlines are stored, in a loop of its own
+        if settings.news_enabled and settings.news_tagging_enabled:
+            self.jobs.append(Job("news_tagging", every(settings.news_tagging_minutes * 60), self.news_tagging,
+                                 background=True))
         if settings.company_descriptions_enabled:
             self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh,
                                  background=True))
@@ -540,6 +549,15 @@ class Worker:
             with session_factory()() as db:
                 # A batch never holds the scheduler for longer than the refresh interval.
                 return refresh(db, self.md, deadline_seconds=get_settings().news_refresh_minutes * 60 * 0.8)
+
+        await asyncio.to_thread(run)
+
+    async def news_tagging(self) -> None:
+        from forliosa.news import tagging
+
+        def run() -> tagging.RunResult:
+            with session_factory()() as db:
+                return tagging.run(db, self.md)
 
         await asyncio.to_thread(run)
 

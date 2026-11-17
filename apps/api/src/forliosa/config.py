@@ -298,6 +298,20 @@ class Settings(BaseSettings):
     # Takedown blocklist by domain (a domain blocks its subdomains), on top of the news_blocked_domains table
     # that ``python -m forliosa.news block <domain>`` maintains.
     news_blocked_domains: Annotated[list[str], NoDecode] = Field(default_factory=list)
+    # 新聞標籤 (forliosa.news.tagging; 產品負責人 2026-11-17): the worker gives every stored headline (once per URL) up
+    # to 3 themes, its sectors and up to 5 related stocks from a fixed vocabulary (forliosa.news.taxonomy), assigned by
+    # the model (AI_MODEL_NEWS_TAGGING, default AI_MODEL: Haiku) every NEWS_TAGGING_MINUTES, at most
+    # NEWS_TAGGING_MAX_BATCHES requests of NEWS_TAGGING_BATCH_SIZE headlines per run, oldest first, only headlines
+    # published in the last NEWS_TAGGING_DAYS. For the AI tools (get_news, search_news) and the market reports.
+    # System-paid (feature "news_tagging" in ai_usage); stopped for the rest of the UTC month once
+    # NEWS_TAGGING_MONTHLY_BUDGET_USD is spent (0 = nothing is tagged). Off: no job, untagged headlines stay untagged.
+    news_tagging_enabled: bool = True
+    news_tagging_minutes: int = Field(default=5, ge=1)
+    news_tagging_monthly_budget_usd: float = Field(default=3.0, ge=0)
+    news_tagging_batch_size: int = Field(default=50, ge=1, le=50)
+    news_tagging_max_batches: int = Field(default=4, ge=1, le=40)
+    news_tagging_days: int = Field(default=7, ge=1, le=90)
+    ai_model_news_tagging: str | None = None
 
     # -- 「關於」 description (decision 7): a zh.wikipedia excerpt (CC BY-SA 4.0) or, without an article, an AI-written
     # 2–3 sentence description from official facts (feature "company", system-paid, at most COMPANY_AI_PER_RUN per
