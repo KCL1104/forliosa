@@ -86,6 +86,20 @@ def test_limiter_reserves_each_hosts_slots_interval_apart():
     assert slept == [3.0, 6.0, 2.0]
 
 
+def test_limiter_turn_past_a_deadline_is_not_taken():
+    """``wait_until``: a turn that would start at or after the deadline is not reserved (2026-11-17 review: an AI
+    LangSearch request past its deadline held the next one up for an interval it never used)."""
+    limiter = RateLimiter(per_host={"twse.com.tw": 3.0})
+    limiter._clock = lambda: 100.0
+    slept: list[float] = []
+    limiter._sleep = slept.append
+    assert limiter.wait_until(TWSE, 101.0) == 0.0  # 100: now
+    assert limiter.wait_until(TWSE, 103.0) is None  # the next turn, 103, is not before 103: not taken
+    assert limiter.wait_until(TWSE, 104.0) == 3.0  # ... so it is still free
+    assert limiter.wait(TWSE) == 6.0
+    assert slept == [3.0, 6.0]
+
+
 def test_limiter_spacing_from_many_threads_is_exactly_the_interval():
     limiter = RateLimiter(per_host={"twse.com.tw": 3.0})
     limiter._clock = lambda: 0.0

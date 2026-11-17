@@ -28,6 +28,7 @@ os.environ.pop("COOKIE_DOMAIN", None)
 os.environ.pop("SESSION_SECRET", None)
 os.environ.pop("NEWS_LANGSEARCH_ENABLED", None)
 os.environ.pop("LANGSEARCH_API_KEY", None)
+os.environ.pop("AI_LANGSEARCH_ENABLED", None)
 
 import pytest
 from fastapi.testclient import TestClient
@@ -101,9 +102,11 @@ def no_searxng_network():
 @pytest.fixture(autouse=True)
 def no_langsearch_network():
     """No test may reach LangSearch: every request fails unless a test installs a mock transport with
-    ``forliosa.news.langsearch.set_transport`` (or gives the client its own). The shared limiters start fresh."""
+    ``forliosa.news.langsearch.set_transport`` (or gives the client its own). The shared limiters start fresh, and
+    no reply that came after an AI request's deadline is carried into another test."""
     import httpx
 
+    from forliosa.ai import tw_news
     from forliosa.news import langsearch
 
     def refuse(request: httpx.Request) -> httpx.Response:
@@ -111,9 +114,13 @@ def no_langsearch_network():
 
     langsearch.set_transport(httpx.MockTransport(refuse))
     langsearch.reset_limiters()
+    langsearch.reset_late()
+    tw_news.reset_caches()
     yield
     langsearch.set_transport(None)
     langsearch.reset_limiters()
+    langsearch.reset_late()
+    tw_news.reset_caches()
 
 
 @pytest.fixture(autouse=True)

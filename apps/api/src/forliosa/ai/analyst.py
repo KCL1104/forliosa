@@ -43,6 +43,19 @@ could not be checked (``UNSURE_DROPS``), when a search failed (``search_errors``
 when a search left out the stock's name, code and aliases (``query_terms``: an M31 card was searched as 晶心科), the
 entry is ``unavailable`` (retried after 10 minutes).
 
+LangSearch first (產品負責人 2026-11-17, ``AI_LANGSEARCH_ENABLED`` with a key, Taiwan stocks only: ``from_langsearch``):
+before the web search, the measured 法人 queries go to LangSearch (``tw_news.plan("analyst_targets")``: a large cap
+``"簡稱" 調升目標價`` and ``"簡稱" 調降目標價``, every other ``簡稱 目標價``; 90 days, 600 characters a result), shared
+with the chat's daily cap and the key's stop state (``langsearch.chat_search``); the results pass the v2.1 filter with
+its date checks (``tw_news.filter_items``: a URL date, or an engine-only date that passes the three stale-article
+checks; an unknown date is dropped). Up to ``LS_ARTICLES`` kept articles go, as search results with their excerpt
+(at most 300 characters, for this request only), to one cheap extraction call (``AI_MODEL``, low effort, no web
+search) that answers with the same ``report_analyst_views``; ``verify`` then keeps an item only when its URL is one of
+those articles, dated by that article's checked date, shown with its title. At least ``LS_MIN_NAMED`` named
+institutions → the card is ``ready`` from it; anything less (nothing kept, LangSearch stopped or over its cap, the
+call failed) → the web search below, unchanged. The card stores only the extracted institution, action, rating,
+target price, date, the article's title and link: never an excerpt.
+
 Grounding (``verify``): an item is kept only when its URL is one of the ``web_search_result`` URLs the model
 actually received in this generation (compared without scheme, ``www.``, trailing slash, fragment or
 percent-encoding; the shown URL and title are the search result's own), the page is an article (not an aggregator,
@@ -68,7 +81,7 @@ import math
 import re
 import threading
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from urllib.parse import unquote, urlsplit, urlunsplit
@@ -78,18 +91,28 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from forliosa.ai import store
+from forliosa.ai import store, tw_news
 from forliosa.ai.keypool import KeyPool, get_key_pool
 from forliosa.ai.pricing import CallUsage
 from forliosa.ai.prompts import (
     ANALYST_DISCLAIMER,
+    ANALYST_LS_SYSTEM,
     ANALYST_NUDGE,
     ANALYST_SYSTEM,
     ANALYST_TOOL,
     ANALYST_TOOL_NAME,
+    analyst_ls_question,
     analyst_question,
 )
-from forliosa.ai.tools import SEARCH_BLOCKED_DOMAINS, block_search, exclude_tool, rejected_tool, server_tools
+from forliosa.ai.tools import (
+    SEARCH_BLOCKED_DOMAINS,
+    Citable,
+    block_search,
+    citable_content,
+    exclude_tool,
+    rejected_tool,
+    server_tools,
+)
 from forliosa.api.errors import ApiError, not_found
 from forliosa.config import Settings, get_settings
 from forliosa.db import session_factory
@@ -97,6 +120,7 @@ from forliosa.ids import new_id
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.service import MarketData
 from forliosa.models import AiAnalystViews, MarketEvent, SecTicker, User
+from forliosa.news import langsearch
 from forliosa.news.outlets import is_not_news
 from forliosa.services.announcements import classify
 from forliosa.timeutil import TAIPEI, iso_taipei, last_tw_trading_day, next_tw_trading_day, now_utc
@@ -169,6 +193,14 @@ RATING_PAGE_SEGMENTS = frozenset({"quote", "quotes", "analyst-ratings", "analyst
 RATING_PAGE_SUFFIXES = ("-consensus-estimates", "-stock-forecast", "-price-target", "-price-targets",
                         "-analyst-ratings", "-analyst-estimates")
 NOTE_OFF = "現在查不到法人觀點。"
+# LangSearch first (``from_langsearch``): how many kept articles the extraction reads (one excerpt often names several
+# brokers: 2026-11-17 Part A, up to 12 in one), how many named institutions make the card (fewer → web search), and the
+# extraction call's output cap (12 items of the strict tool) and effort.
+LS_ARTICLES = 12
+LS_MIN_NAMED = 2
+LS_MAX_TOKENS = 6000
+LS_EFFORT = "low"
+LS_MAX_CALLS = 2  # the call + one nudge
 
 
 @dataclass(frozen=True)
@@ -694,6 +726,7 @@ class Outcome:
     reason: str | None = None  # why it is unavailable: no_report | stopped | empty_despite_headlines | unverified
     #                            | search_error | off_target
     covered: bool = False  # empty, but a result has a rating headline of it within COVERED_DAYS: not kept longer
+    source: str = "web_search"  # web_search | langsearch (``from_langsearch``)
 
 
 def search_tools(settings: Settings) -> list[dict[str, Any]]:
@@ -795,6 +828,94 @@ def run_model(info: InstrumentInfo, today: date, generation_id: str, pool: KeyPo
                    covered=covered)
 
 
+def from_langsearch(db: Session, md: MarketData, info: InstrumentInfo, today: date, generation_id: str,
+                    pool: KeyPool, settings: Settings, record: Callable[[int, Any], None], costs: Any = None,
+                    reference: float | None = None, now: datetime | None = None) -> Outcome | None:
+    """The card from LangSearch (see the module docstring), or ``None`` for the web search: LangSearch could not be
+    asked (off, stopped, over the AI's daily cap), kept nothing, the extraction call failed or reported nothing, or
+    fewer than ``LS_MIN_NAMED`` named institutions survived ``verify``. Best effort: never raises. The excerpts go into
+    this one request only; nothing of them is logged or returned (the outcome's results are titles, links and dates)."""
+    now = now or now_utc()
+    try:
+        tier = tw_news.tier_for(db, md, info, settings)
+        p = tw_news.plan("analyst_targets", info, tier, 0, now)
+    except ValueError:  # a name LangSearch cannot be asked with (digits only)
+        p = None
+    except Exception:
+        log.warning("analyst views %s for %s: no LangSearch plan", generation_id, info.symbol, exc_info=True)
+        db.rollback()
+        p = None
+    if p is None:
+        return None
+    p = replace(p, limit=LS_ARTICLES)
+    try:
+        found = tw_news.fetch(db, md, settings, p, info, now=now, label="analyst card")
+    except langsearch.ChatUnavailable as exc:
+        log.info("analyst views %s for %s: LangSearch not asked (%s); web search", generation_id, info.symbol,
+                 exc.reason)
+        return None
+    except Exception as exc:  # LangSearch is a first try: the web search stays
+        log.warning("analyst views %s for %s: LangSearch failed (%s); web search", generation_id, info.symbol,
+                    type(exc).__name__)
+        db.rollback()
+        return None
+    if not found.items:
+        log.info("analyst views %s for %s: LangSearch kept nothing (%s); web search", generation_id, info.symbol,
+                 found.status)
+        return None
+    results = [SearchResult(x.url, x.title, x.date.astimezone(TAIPEI).date().isoformat()) for x in found.items]
+    question = analyst_ls_question(info.name, info.symbol, info.market, today.isoformat())
+    messages: list[dict[str, Any]] = [{"role": "user", "content": [
+        *citable_content(Citable(tw_news.blocks(found.items, today))), {"type": "text", "text": question}]}]
+    params: dict[str, Any] = {"model": settings.ai_model.strip(), "max_tokens": LS_MAX_TOKENS,
+                              "system": ANALYST_LS_SYSTEM, "tools": [ANALYST_TOOL],
+                              "output_config": {"effort": LS_EFFORT}}
+    content: list[Any] = []
+    usage = CallUsage()
+    slot: int | None = None
+    calls = 0
+    reported: list[dict[str, Any]] | None = None
+    stop: str | None = None
+
+    def ask(m: list[dict[str, Any]]) -> Callable[[Any], Any]:
+        return lambda client: client.messages.with_raw_response.create(messages=m, **params)
+
+    try:
+        while calls < LS_MAX_CALLS:
+            raw, slot = pool.call(ask(messages), costs=costs if slot is None else None, only=slot)
+            calls += 1
+            pool.observe(slot, raw.headers)
+            msg = raw.parse()
+            record(slot, msg)
+            usage.add(CallUsage.from_sdk(msg.usage))
+            content.extend(msg.content)
+            stop = msg.stop_reason
+            reported = reported_items(msg.content)
+            if reported is not None or stop not in ("end_turn", "stop_sequence"):
+                break
+            # ended with text only: ask once for the tool call
+            messages = [*messages, {"role": "assistant", "content": [b.to_dict(mode="json") for b in msg.content]},
+                        {"role": "user", "content": ANALYST_NUDGE}]
+    except Exception as exc:  # the web search stays (its own call reports its own failure)
+        log.warning("analyst views %s for %s: the LangSearch extraction failed (%s); web search", generation_id,
+                    info.symbol, type(exc).__name__)
+        db.rollback()
+        return None
+    if reported is None or stop in ("refusal", "max_tokens"):
+        log.info("analyst views %s for %s: no LangSearch report (stop=%s); web search", generation_id, info.symbol,
+                 stop)
+        return None
+    items, dropped = verify(reported, results, info, today, reference)
+    named = {institution_key(i["institution"]) for i in items if not i["unnamed"]}
+    if len(named) < LS_MIN_NAMED:
+        log.info("analyst views %s for %s: LangSearch gave %d named institutions of %d articles (dropped: %s); web "
+                 "search", generation_id, info.symbol, len(named), len(found.items),
+                 ", ".join(d.reason for d in dropped) or "none")
+        return None
+    return Outcome("ready", items, dropped, reported, results, usage, calls, list(p.queries), stop,
+                   _transcript(content), source="langsearch")
+
+
 def reference_price(md: MarketData, symbol: str) -> float | None:
     """The last real price (never a demo quote), only for ``verify``'s internal currency check; ``None`` when
     there is none (the check is then skipped)."""
@@ -818,15 +939,25 @@ def generate(db: Session, md: MarketData, info: InstrumentInfo, day: date, gener
         store.record_usage(db, user_id=user_id, thread_id=generation_id, feature="analyst", model=msg.model or model,
                            key_slot=slot, usage=CallUsage.from_sdk(msg.usage), stop_reason=msg.stop_reason)
 
-    today = now_utc().astimezone(TAIPEI).date()
+    now = now_utc()
+    today = now.astimezone(TAIPEI).date()
     covered = False
+    used: dict[str, Any] = {}  # the extraction model, when the card came from LangSearch
     try:
-        outcome = run_model(info, today, generation_id, pool, settings, record, store.slot_month_costs(db),
-                            reference=reference_price(md, info.symbol), hints=query_hints(db, info, today))
+        reference = reference_price(md, info.symbol)
+        outcome = None
+        if tw_news.usable_for(settings, info):  # LangSearch first; None: the web search, as before
+            outcome = from_langsearch(db, md, info, today, generation_id, pool, settings, record,
+                                      store.slot_month_costs(db), reference=reference, now=now)
+        if outcome is None:
+            outcome = run_model(info, today, generation_id, pool, settings, record, store.slot_month_costs(db),
+                                reference=reference, hints=query_hints(db, info, today))
+        else:
+            used = {"model": settings.ai_model.strip()}
         status, items, notes, covered = outcome.status, outcome.items, [], outcome.covered
         if outcome.dropped:
-            log.info("analyst views %s for %s: %s, kept %d, dropped %s", generation_id, info.symbol, status,
-                     len(items), ", ".join(d.reason for d in outcome.dropped))
+            log.info("analyst views %s for %s: %s from %s, kept %d, dropped %s", generation_id, info.symbol, status,
+                     outcome.source, len(items), ", ".join(d.reason for d in outcome.dropped))
     except Exception:
         log.exception("analyst views generation %s for %s failed", generation_id, info.symbol)
         db.rollback()
@@ -837,7 +968,7 @@ def generate(db: Session, md: MarketData, info: InstrumentInfo, day: date, gener
     db.execute(update(AiAnalystViews).where(
         AiAnalystViews.symbol == info.symbol, AiAnalystViews.trading_day == day,
         AiAnalystViews.generation_id == generation_id).values(
-        status=status, items=items, notes=notes, finished_at=now_utc(), **keep))
+        status=status, items=items, notes=notes, finished_at=now_utc(), **keep, **used))
     db.commit()
     return db.get(AiAnalystViews, (info.symbol, day))
 

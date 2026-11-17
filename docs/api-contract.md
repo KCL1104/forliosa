@@ -597,7 +597,7 @@
 | GET | `/ai/briefings?limit=14` | 最近的簡報 `Briefing[]`（新的在前，最多 30 則） |
 | POST | `/ai/briefings/{id}/read` | 標示看過（204）；別人的或不存在的 404 |
 | GET | `/ai/admin/keys` | `KeySlots`（API 金鑰槽狀態，不含金鑰；只在 `FORLIOSA_ENV=dev`／`test` 或 `AI_ADMIN_EMAILS` 列出的帳號，其他人 404） |
-| GET | `/instruments/{symbol}/why` | 原有欄位＋`ai`、`citations`、`rule_headline`（見下方；AI 句預設開啟） |
+| GET | `/instruments/{symbol}/why` | 原有欄位＋`ai`、`citations`、`rule_headline`（見下方；AI 句預設開啟）。2026-11-17：`AI_LANGSEARCH_ENABLED` 打開時台股的句子先由 LangSearch 找到的台灣新聞寫，這時 `citations[].cited_text` 是「媒體，11/17：標題」，不是內文；欄位不變 |
 
 ### `POST /ai/chat` 的事件
 
@@ -609,7 +609,7 @@
 | `text` | `{"delta": "台積電今天"}` | 回答文字片段，依序串接；換到下一輪（查完工具）時會先送 `"\n\n"`。**回答是 Markdown**（2026-11-15 起：`- ` 清單、**粗體**、`###` 小標題、小表格；不放網址與大標題），前端用 Markdown 顯示；舊的回答可能是用「・」條列的純文字 |
 | `text_reset` | `{"text": "這一輪回答的全文"}` | 用 `text` **取代**這一輪目前顯示的回答文字（不是接在後面；之後不會再有 `text`）。只在整理回答（`edit_answer`）邊寫邊送之後出現（2026-11-16）：送出一部分後又改回原本寫的回答時，或整理完之後又修正了日期、拿掉公開資訊觀測站的制式文字與「具名」這類篩選字眼、把變成條列的第一句改回句子時（留下的和送出的不一樣）。`text` 是整則回答，包括查網路之前已經送出的字；之後的 `grounding` 位置以它為準，也和 `ThreadMessage.text` 相同 |
 | `tool` | `{"id": "toolu_…", "name": "get_holdings", "status": "running" \| "done" \| "error", "label": "查看持股"}` | 進度細線；`web_search` 的 label 是「搜尋網路：<關鍵字>」，`web_fetch` 是「讀取 <網域>」。用到網路搜尋或個股新聞工具的回答，寫完先不送 `text`，多一個 `{"id": "edit", "name": "edit_answer", "label": "整理回答"}` 的步驟（2026-11-15：一次不用工具的編輯呼叫，改掉照抄的原文、句子裡的媒體名稱、說到工具的話，不改事實與數字）；2026-11-16 起整理過的 `text` 在 `running` 之後邊寫邊送，`done` 在整理完時。編輯失敗、太慢、被截斷、太長、少了數字、加了原稿沒有的單位或「相當於」這類換算時改顯示原本寫的（句子後面貼上的工具原文會拿掉）：還沒送出整理過的字就送原本的 `text`，已經送出一部分就送 `text_reset`。整理過的字要等開頭幾個字確定是中文才開始送；不是中文（例如編輯呼叫用英文回答）就直接改顯示原本寫的，不會先閃一段英文。同一輪裡 `tool` 可以先送好幾個 `running` 再依序送 `done`（2026-11-16 起同一輪的唯讀工具同時查）。問「X 今天為什麼漲／跌」而同一檔同一個交易時段已經有人查過時，`thread` 之後先送一個 `{"id": "research", "name": "shared_research", "status": "done", "label": "沿用 10:05 查好的資料"}`：這一輪用全站共用的研究回答，不再搜尋；它的引用和網路搜尋的一樣用 `citation` 送（2026-11-16） |
-| `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字", "outlet"?: "PChome 新聞"}` | 來源引用（已去重），顯示在回答下方。網路搜尋的引用，以及個股新聞工具（`get_news`）的公告與媒體標題（2026-11-15：工具把每則有連結的標題當成可引用的 `search_result` 交給模型）；後者多 `outlet`（媒體名稱，公告是「公開資訊觀測站」），出處寫媒體名稱而不是網域 |
+| `citation` | `{"url": "https://…" \| null, "title": "中央社", "cited_text": "最多 150 字", "outlet"?: "PChome 新聞"}` | 來源引用（已去重），顯示在回答下方。網路搜尋的引用，以及個股新聞工具（`get_news`）的公告與媒體標題（2026-11-15：工具把每則有連結的標題當成可引用的 `search_result` 交給模型）；後者多 `outlet`（媒體名稱，公告是「公開資訊觀測站」），出處寫媒體名稱而不是網域。2026-11-17：台灣新聞搜尋工具（`tw_news_search`，LangSearch）的引用，`cited_text` 一律是「媒體，11/16：標題」（日期不明的是「媒體，日期未確認：標題」），不是內文（內文只在當次交給模型，不送到瀏覽器、不存；對話紀錄的 `citations` 也一樣）；它的 `tool` 事件 label 是「搜尋台灣新聞：2330 目標價」 |
 | `draft` | `DraftCard` | `draft_transaction` 產生的草稿卡；按「確認」後前端用 `input` 呼叫 `POST /transactions`，再 `PATCH /ai/drafts/{id}` 標示已簽名 |
 | `chart` | `ChartCard` | `draw_chart` 畫出來的圖卡（一則回答最多 3 張）：每條線的點都在裡面，前端照著畫；資料不足沒有畫時不送這個事件（同一份也存在 `ThreadMessage.charts`） |
 | `grounding` | `{"items": [GroundingItem]}` | 只在這一輪用了 `web_search`／`web_fetch` 時、最後一個 `text` 之後送：沒有引用又像新聞敘述的句子，前端在該句標「無來源」（同一份也存在 `ThreadMessage.grounding`） |
@@ -708,6 +708,7 @@
 - **圖卡（2026-11-13）**：使用者要求畫圖或比較走勢時，模型呼叫 `draw_chart`（`kind`＋`symbols`（最多 5 檔）＋`range`）。`price` 一檔的收盤價；`compare` 2–5 檔的漲跌幅（從共同的第一天起算，分割與減資已調整，不含股利）；`revenue` 月營收（近 24 個月）；`eps` 每季每股盈餘（近 8 季，台股和美股不放在同一張）；`performance` 使用者自己的時間加權報酬率和基準（只有百分比，任何模式都沒有金額、成本、股數）。每張圖所有線合計最多 480 個點（長的區間平均取樣，頭尾都留）。資料畫不出來（收盤價不到兩天、沒有營收…）時工具回 `status: "no_data"` 與原因，不送 `chart`。前端：日期軸畫折線；月份／季別的柱子總數 ≤ 24 畫柱狀、再多改畫折線；一個縱軸；兩條線以上有圖例，線尾標代號。
 - 新工具 `get_related_stocks`（個股頁「相關股票」那一列，不含走勢小圖）：模型查不到某一檔當天的消息時，用它找同產業與相關個股，再搜尋類股與大盤的消息。
 - **新聞標籤與新工具 `search_news`（2026-11-17，產品負責人同意）**：worker 用 Haiku 替每一則存下來的新聞標題（同一個網址一次）貼上主題（40 個固定主題）、類股（台股官方產業別、12 個美股類股）與相關股票（商品清單裡有的，最多 5 檔），只看標題，不抓內文。`get_news` 的媒體標題有標籤時，那則 `search_result` 多一段「主題：…；類股：…；相關：…」文字（第一段標題文字不變）。`search_news`（`theme`、`sector`、`symbol`、`keyword`、`days` 五個都必填，空字串＝不限；`days` 1–90）搜站內存的新聞標題，結果和 `get_news` 一樣是可引用的 `search_result`，`citation` 事件與出處的顯示不變。API 回應與前端都沒有改。細節：`apps/api/CONTRACT_NOTES.md`「2026-11-17 新聞標籤」。
+- **新工具 `tw_news_search`（2026-11-17，產品負責人決定；`AI_LANGSEARCH_ENABLED`，預設關）**：查台灣新聞網站上某一檔台股（或 `intent: "market"` 的台股大盤）最近的報導（LangSearch）。參數 `symbol`、`intent`（news、why_move、analyst_targets、earnings_call、revenue、dividend、market）、`days`（只有 news 用，1–30，0＝預設）；不是 strict 工具，伺服器自己檢查參數。查詢句由伺服器組，結果是可引用的 `search_result`（「媒體，日期：摘錄」，最多 10 則），台股問題先用它、查不到才用網路搜尋。摘錄只在當次交給模型：`citation` 的 `cited_text`、對話紀錄與共用研究只有「媒體，日期：標題」。用過這個工具的回答一律寫完才送 `text`（`AI_ANSWER_EDITOR` 關著也一樣，那時沒有 `edit_answer` 步驟）：回答裡逐字照抄摘錄說法的部分（轉述的數字不算）在送出與存檔前拿掉，`text`、`text_reset` 與 `ThreadMessage.text` 都沒有；草稿有這種照抄時，`edit_answer` 整理完、檢查過才一次送出（不邊寫邊送）。關著時工具清單和以前一樣。前端沒有改。細節：`apps/api/CONTRACT_NOTES.md`「2026-11-17 AI 對話的 tw_news_search」。
 - 伺服器工具 `web_fetch` 一律帶 `blocked_domains: ["www.twse.com.tw", "mis.twse.com.tw"]`（不自動擷取證交所網站與 MIS；`web_search` 的結果不受影響）。API 的 `allowed_domains` 與 `blocked_domains` 只能二選一：設定了 `AI_WEB_FETCH_ALLOWED_DOMAINS` 時改成從允許清單拿掉這兩個主機，涵蓋它們的上層網域（`twse.com.tw`）換成 `openapi.twse.com.tw`；清單只剩被封鎖的主機時不提供 `web_fetch`。
 - 伺服器工具 `web_search`（對話與法人觀點）2026-11-16 起一律帶 `blocked_domains`：評等彙整站、報價／資料頁、AI 產生的頁面（例如 CMoney 的 AI 問答、富果的 AI 法說會摘要）、論壇與部落格（對話 `tools.CHAT_BLOCKED_DOMAINS`；法人觀點 `tools.SEARCH_BLOCKED_DOMAINS`＝對話的再加 Benzinga、Zacks、MarketScreener 這三個也發新聞的評等網站；台灣的報價／AI／論壇網域和新聞那邊共用 `news.outlets.NOT_NEWS_DOMAINS`，清單見 `apps/api/CONTRACT_NOTES.md`「法人觀點」）；新聞媒體不擋。對話的清單每一題都一樣（工具清單每題不同會讓提示快取失效）。設定了 `AI_WEB_SEARCH_ALLOWED_DOMAINS` 時改用那份允許清單（API 只能二選一）。
 
@@ -717,7 +718,7 @@
 | 方法 | 路徑 | 說明 |
 |---|---|---|
 | GET | `/instruments/{symbol}/analyst-views` | 讀取當日共用結果；沒有時回 `status: "none"`。查不到（`unavailable`）超過 10 分鐘後也回 `none`，讓畫面重新出現查詢按鈕 |
-| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋並立刻回 `pending`（在背景產生，實測約 20–30 秒）；之後用 GET 輪詢。今天已經有 `pending`／`ready`（或 10 分鐘內的 `unavailable`，或還在保留期的「查無」）時直接回那一份，**不重查、不計費** |
+| POST | `/instruments/{symbol}/analyst-views` | 觸發 AI 網路搜尋並立刻回 `pending`（在背景產生，實測約 20–30 秒；2026-11-17 起 `AI_LANGSEARCH_ENABLED` 打開時台股先查 LangSearch，找到至少 2 家具名機構就用它，回應欄位不變）；之後用 GET 輪詢。今天已經有 `pending`／`ready`（或 10 分鐘內的 `unavailable`，或還在保留期的「查無」）時直接回那一份，**不重查、不計費** |
 
 ```json
 {
@@ -1608,7 +1609,7 @@ Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問�
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd", "langsearch": {"enabled", "configured", "day_utc", "requests", "request_cap", "tokens", "token_cap", "first_fills", "stopped", "level", "paused_until", "warning", "tiers"}}}` |
+| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd", "langsearch": {"enabled", "configured", "day_utc", "requests", "request_cap", "tokens", "token_cap", "first_fills", "stopped", "level", "paused_until", "warning", "tiers", "ai_enabled", "ai_requests", "ai_request_cap", "ai_tokens", "ai_token_cap", "ai_stopped"}}}` |
 | GET | `/admin/news/blocked-domains` | `[{"domain", "reason", "created_at", "from_env"}]`：存在資料庫的（新的在前），再來是只寫在 `NEWS_BLOCKED_DOMAINS` 的（`created_at` null、`from_env` true） |
 | POST | `/admin/news/blocked-domains` | `{"domain", "reason"?: ≤200 字}` → 201 `{"domain", "deleted_headlines"}`：網域正規化（小寫、網址只取主機、去掉 `www.`），封鎖它與子網域並刪掉已存的標題；不是網域 → 422 |
 | DELETE | `/admin/news/blocked-domains/{domain}` | 解除 → 204；寫在 `NEWS_BLOCKED_DOMAINS` 的 → 409 `set_in_environment`；不在清單 → 404。刪掉的標題不會回來 |
@@ -1769,6 +1770,9 @@ Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問�
 另有 `news.langsearch`：今天（UTC）的請求數與上限（`requests`、`request_cap`）、token 與上限、第一次查的檔數、今天停下的原因
 （`stopped`：`quota`／`contract`／`blocked`）、降級等級（`level` 0–2）、整個來源暫停到幾點、`warning`（`contents_cap_ignored`：回應的
 token 遠超過上限、字數限制沒有生效，今天停用）與各分級的檔數（`tiers`）。舊版後端沒有這個欄位。
+2026-11-17（AI 先查 LangSearch）：`news.langsearch` 再多 AI 自己的一天（和新聞排程分開算）：`ai_enabled`（`AI_LANGSEARCH_ENABLED` 而且有金鑰）、
+`ai_requests`／`ai_request_cap`、`ai_tokens`／`ai_token_cap`、`ai_stopped`（`contract`：單次回應超過 `AI_LANGSEARCH_TOKEN_GUARD`，AI 當天停用；
+`quota`／`blocked`：AI 的請求被擋，整把金鑰停到 00:00 UTC）。額度或 401／403 看 `stopped`（排程或 AI 哪一邊被擋都會顯示），兩邊一起停。舊版後端沒有這些欄位。
 
 ## 美股收盤價（2026-11-15）
 

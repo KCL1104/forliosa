@@ -78,16 +78,18 @@ import math
 import re
 import threading
 import time as _time
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from datetime import UTC, date, datetime, timedelta
 from datetime import time as dtime
 from typing import Any
 
 import httpx
-from sqlalchemy import delete, func, or_, select, text
+from sqlalchemy import delete, func, or_, select, text, update
 from sqlalchemy.engine import Connection
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from forliosa.config import Settings, get_settings
@@ -126,6 +128,7 @@ TOPIC_KEYWORDS = re.compile(r"台股|加權|大盤|外資|法人|投信|自營�
 _QUOTA_WORDS = ("quota", "limit", "额度", "額度", "余额", "餘額")
 _QUOTES = re.compile("[\"'“”„‟＂「」『』]")
 USAGE_PREFIX = "@use:"
+CHAT_PREFIX = "@chat:"  # the AI's UTC day (chat, the 法人觀點 card, 為什麼漲跌): its own caps
 FIRST_FILL_PREFIX = "@new:"
 TIER_PREFIX = "@tier:"
 TOPIC_PREFIX = TW_MARKET_KEY + "/"
@@ -161,13 +164,19 @@ def _midnight(d: date) -> datetime:
 
 
 # -- the request --------------------------------------------------------------------------------------------------
-def stock_query(short_name: str) -> str:
-    """``台積電`` -> ``"台積電"``: the exchange short name without its market suffix (``永冠-KY`` -> ``"永冠"``,
-    :func:`forliosa.news.tw_match.core_name`) and without quotes of its own. Never a code."""
+def query_name(short_name: str) -> str:
+    """``台積電`` -> ``台積電``, ``永冠-KY`` -> ``永冠``: the exchange short name without its market suffix
+    (:func:`forliosa.news.tw_match.core_name`), quotes of its own or extra spaces — all of a stock that ever goes into
+    a query (never a code, never the user's words)."""
     name = " ".join(_QUOTES.sub("", tw_match.core_name((short_name or "").strip())).split())
     if not name or name.isdigit():
         raise ValueError("a stock query needs the company's short name")
-    return f'"{name}"'
+    return name
+
+
+def stock_query(short_name: str) -> str:
+    """``台積電`` -> ``"台積電"``: :func:`query_name` in double quotes. Never a code."""
+    return f'"{query_name(short_name)}"'
 
 
 def freshness(last_success: datetime | None, now: datetime, tier: str, *, first_fill: bool, every: int = 1) -> str:
@@ -258,10 +267,33 @@ def _values(payload: Mapping[str, Any]) -> list[Any] | None:
     return values if isinstance(values, list) else None
 
 
-def parse(payload: Mapping[str, Any], now: datetime | None = None) -> list[RawItem]:
+@dataclass(frozen=True)
+class TextItem(RawItem):
+    """A raw item with LangSearch's text of the page, for the AI's requests only (:mod:`forliosa.ai.tw_news`): handed
+    to Claude inside one answer, never stored, logged or shown (not even in its repr). The news sources' ``RawItem``
+    has no text at all."""
+
+    text: str = field(default="", repr=False, compare=False)
+
+
+def text_of(value: Mapping[str, Any]) -> str:
+    """The page text of one result, for the AI only (:mod:`forliosa.ai.tw_news`): ``snippet``, else ``summary``, else
+    ``text``, else ``contents.text``; "" when there is none."""
+    for k in ("snippet", "summary", "text"):
+        v = value.get(k)
+        if isinstance(v, str) and v.strip():
+            return v
+    c = value.get("contents") or value.get("content")
+    if isinstance(c, dict) and isinstance(c.get("text"), str):
+        return c["text"]
+    return ""
+
+
+def parse(payload: Mapping[str, Any], now: datetime | None = None, *, with_text: bool = False) -> list[RawItem]:
     """``data.webPages.value[]`` -> raw items (title = ``name``, ``url``, ``datePublished``). No other field is read
-    (``snippet``, ``summary``, ``text`` never). Items without a link, a title or a usable date are skipped. A body
-    ``code`` other than 200 raises (:func:`body_error`); so does a 200 without a ``data.webPages.value`` list
+    (``snippet``, ``summary``, ``text`` never) — except with ``with_text`` (the AI's requests only: :class:`TextItem`
+    with :func:`text_of`, which nothing stores). Items without a link, a title or a usable date are skipped. A
+    body ``code`` other than 200 raises (:func:`body_error`); so does a 200 without a ``data.webPages.value`` list
     (:class:`LangSearchError`: that query only — never booked as an answer without news)."""
     if not isinstance(payload, Mapping):
         raise LangSearchError("LangSearch answered something that is not a JSON object")
@@ -280,7 +312,10 @@ def parse(payload: Mapping[str, Any], now: datetime | None = None) -> list[RawIt
         when = parse_published(v.get("datePublished"))
         if not title or not url or when is None:
             continue
-        out.append(RawItem(title=title, url=url, published_at=when[0], date_only=when[1]))
+        if with_text:
+            out.append(TextItem(title=title, url=url, published_at=when[0], date_only=when[1], text=text_of(v)))
+        else:
+            out.append(RawItem(title=title, url=url, published_at=when[0], date_only=when[1]))
     return out
 
 
@@ -301,6 +336,15 @@ class Reply:
 
 def interpret(reply: Reply, now: datetime, guard: int) -> list[RawItem]:
     """The raw items of a reply, or the error it stands for (see the module docstring)."""
+    _check_status(reply, now)
+    if reply.output_tokens > guard:
+        raise LangSearchContract(f"LangSearch answer of {reply.output_tokens} output tokens: contents cap ignored",
+                                 until=next_utc_midnight(now))
+    return parse(reply.payload or {}, now)
+
+
+def _check_status(reply: Reply, now: datetime) -> None:
+    """The error an HTTP status (or an answer that is not JSON) stands for."""
     s = reply.status
     if s == 429:
         raise LangSearchQuota("LangSearch HTTP 429", until=next_utc_midnight(now))
@@ -312,10 +356,6 @@ def interpret(reply: Reply, now: datetime, guard: int) -> list[RawItem]:
         raise LangSearchError(f"LangSearch HTTP {s}")
     if reply.payload is None:
         raise SourceDown("LangSearch answered something that is not JSON")
-    if reply.output_tokens > guard:
-        raise LangSearchContract(f"LangSearch answer of {reply.output_tokens} output tokens: contents cap ignored",
-                                 until=next_utc_midnight(now))
-    return parse(reply.payload, now)
 
 
 # -- the client ---------------------------------------------------------------------------------------------------
@@ -359,6 +399,7 @@ class LangSearchClient:
             raise ValueError("LangSearch requests go to https://api.langsearch.com/ only")
         self.url = url
         self._key = api_key
+        self._timeout = timeout
         self.limiter = limiter or shared_limiter(interval)
         self._http = httpx.Client(timeout=timeout, follow_redirects=False, transport=transport or _TRANSPORT[0],
                                   headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
@@ -374,13 +415,30 @@ class LangSearchClient:
     def __repr__(self) -> str:  # never the key
         return f"LangSearchClient({self.url!r})"
 
-    def post(self, body: Mapping[str, Any]) -> Reply:
-        """One request. A timeout or a connection error raises :class:`SourceDown` (its message names no header)."""
-        self.limiter.wait(HOST)
+    def post(self, body: Mapping[str, Any], *, deadline: float | None = None) -> Reply:
+        """One request. A timeout or a connection error raises :class:`SourceDown` (its message names no header).
+        ``deadline`` (a ``time.monotonic()`` instant; the AI's requests only, :func:`chat_search`): a turn of the
+        limiter that would start after it is not taken (:meth:`RateLimiter.wait_until`: the next request does not wait
+        for one never sent) and nothing is sent — :class:`LangSearchDeadline` with ``sent=False``; a connect or a read
+        waits at most what is left of it — :class:`LangSearchDeadline` past it."""
+        timeout: Any = httpx.USE_CLIENT_DEFAULT
+        if deadline is None:
+            self.limiter.wait(HOST)
+        else:
+            if self.limiter.wait_until(HOST, deadline) is None:
+                raise LangSearchDeadline("LangSearch not asked: its turn comes after the AI's deadline", sent=False)
+            left = deadline - _time.monotonic()
+            if left <= 0:
+                raise LangSearchDeadline("LangSearch not asked: the AI's deadline passed while waiting its turn",
+                                         sent=False)
+            timeout = httpx.Timeout(min(self._timeout, left))
         started = _time.monotonic()
         try:
-            resp = self._http.post(self.url, json=dict(body), headers={"Authorization": f"Bearer {self._key}"})
+            resp = self._http.post(self.url, json=dict(body), headers={"Authorization": f"Bearer {self._key}"},
+                                   timeout=timeout)
         except httpx.TimeoutException:
+            if deadline is not None and _time.monotonic() >= deadline:
+                raise LangSearchDeadline("LangSearch: no answer within the AI's deadline") from None
             raise SourceDown("LangSearch timed out") from None
         except httpx.HTTPError as exc:
             raise SourceDown(f"LangSearch unreachable ({type(exc).__name__})") from None
@@ -528,9 +586,10 @@ def _usage_history(db: Session, today: date, days: int = LADDER_HISTORY_DAYS) ->
 
 
 def last_request_at(db: Session) -> datetime | None:
-    """When the last LangSearch request was sent, by any process (the newest usage row)."""
+    """When the last LangSearch request was sent, by any process (the newest usage row: the worker's or the AI's)."""
     newest = db.scalar(select(func.max(NewsFetchState.last_attempt_at)).where(
-        NewsFetchState.source == SOURCE_KEY, NewsFetchState.symbol.like(USAGE_PREFIX + "%")))
+        NewsFetchState.source == SOURCE_KEY,
+        or_(NewsFetchState.symbol.like(USAGE_PREFIX + "%"), NewsFetchState.symbol.like(CHAT_PREFIX + "%"))))
     return _aware(newest)
 
 
@@ -586,6 +645,44 @@ def down_in_a_row(db: Session) -> int:
     return row.failures or 0 if row is not None else 0
 
 
+REFUSED = ("rate_limited", "blocked")  # the source-wide row's status while a refusal stops the key until 00:00 UTC
+KEY_STOPS = ("quota", "blocked")  # a day's ``stopped`` that stops the whole key (``contract`` stops one side only)
+
+
+def _refused_now(db: Session, at: datetime) -> bool:
+    """A refusal (429, a quota message, 401 / 403, a redirect) stops the key at ``at``."""
+    row = db.get(NewsFetchState, (SOURCE_KEY, service.SOURCE_WIDE))
+    until = _aware(row.backoff_until) if row is not None else None
+    return row is not None and row.last_status in REFUSED and until is not None and until > at
+
+
+def _mark_answered(db: Session, at: datetime) -> None:
+    """LangSearch answered: an outage pause (``unreachable``) and a refusal that has run out are cleared, like
+    ``service._mark_open``. A refusal's stop until 00:00 UTC is not: the AI's requests run side by side with each
+    other and with the worker's, so a reply to a request sent before another one was refused comes back after that
+    refusal was booked, and must not lift it (2026-11-17 review). One conditional UPDATE: a refusal booked meanwhile by
+    another process is not overwritten either."""
+    row = db.get(NewsFetchState, (SOURCE_KEY, service.SOURCE_WIDE))
+    if row is None or not (row.failures or row.backoff_until) or _refused_now(db, at):
+        return
+    db.execute(update(NewsFetchState).where(
+        NewsFetchState.source == SOURCE_KEY, NewsFetchState.symbol == service.SOURCE_WIDE,
+        NewsFetchState.last_status == row.last_status, NewsFetchState.failures == row.failures,
+    ).values(failures=0, backoff_until=None, last_status="ok", last_success_at=at))
+    db.commit()
+
+
+def key_stopped(db: Session, today: date) -> str | None:
+    """Why the key is not used again before 00:00 UTC: the worker's day stopped (``quota``, ``blocked``, ``contract``)
+    or the AI's day stopped for a refusal (``quota``, ``blocked``; the AI's own token guard, ``contract``, stops only
+    the AI). Read before every request of a pass, beside the source-wide pause."""
+    worker = read_usage(db, today).stopped
+    if worker in (*KEY_STOPS, "contract"):
+        return worker
+    ai = read_chat_usage(db, today).stopped
+    return ai if ai in KEY_STOPS else None
+
+
 def _wait_gap(db: Session, interval: float, clock: Callable[[], datetime], sleep: Callable[[float], None]) -> None:
     """Wait out the gap since the last request of any process (the limiter keeps it within this one)."""
     last = last_request_at(db)
@@ -603,7 +700,7 @@ def purge_bookkeeping(db: Session, today: date, keep_days: int = LADDER_HISTORY_
     """Delete usage and first-fill rows older than ``keep_days``."""
     cut = (today - timedelta(days=keep_days)).isoformat()
     n = 0
-    for prefix in (USAGE_PREFIX, FIRST_FILL_PREFIX):
+    for prefix in (USAGE_PREFIX, FIRST_FILL_PREFIX, CHAT_PREFIX):
         n += db.execute(delete(NewsFetchState).where(
             NewsFetchState.source == SOURCE_KEY, NewsFetchState.symbol.like(prefix + "%"),
             NewsFetchState.symbol < prefix + cut)).rowcount or 0
@@ -907,7 +1004,7 @@ def refresh_langsearch(db: Session, md: MarketData, settings: Settings | None = 
             if not got:
                 rep.skipped = "busy"
                 return rep
-            if not service._source_open(db, SOURCE_KEY, now):
+            if not service._source_open(db, SOURCE_KEY, now) or key_stopped(db, _utc_day(now)):
                 rep.skipped = "paused"
                 return rep
             _run_pass(db, md, settings, now, client, rep, ranks=ranks, held=held, clock=clock, sleep=sleep,
@@ -934,6 +1031,9 @@ def _run_pass(db: Session, md: MarketData, settings: Settings, now: datetime, cl
     tasks = plan(db, md, settings, now, lad, ranks=ranks, held=held)
     if not tasks:
         return
+    if lad.level >= 2:  # level 2 keeps the topics and the held or watched large caps, whatever the cap came to
+        rep.cap = max(rep.cap, min(read_usage(db, today).requests + len(tasks),
+                                   settings.news_langsearch_max_requests_per_day))
     blocked = service.blocked_domains(db, settings)
     junk = [d.lower().removeprefix("www.") for d in settings.news_langsearch_junk_domains]
     guard = settings.news_langsearch_token_guard
@@ -946,6 +1046,10 @@ def _run_pass(db: Session, md: MarketData, settings: Settings, now: datetime, cl
     for task in tasks:
         if deadline_seconds is not None and _time.monotonic() - started > deadline_seconds:
             rep.stopped = "deadline"
+            break
+        # a refusal or an outage booked meanwhile — by the AI's requests too — stops the pass before its next request
+        if (why := key_stopped(db, today)) or not service._source_open(db, SOURCE_KEY, clock()):
+            rep.stopped = why or "paused"
             break
         usage = read_usage(db, today)
         if usage.requests >= rep.cap:
@@ -1012,7 +1116,7 @@ def _run_pass(db: Session, md: MarketData, settings: Settings, now: datetime, cl
         row = _row(db, task.key)
         row.last_success_at, row.last_status, row.items, row.failures = now, "ok" if heads else "empty", len(heads), 0
         db.commit()
-        service._mark_open(db, SOURCE_KEY, clock())
+        _mark_answered(db, clock())
         if task.topic:
             rep.topics += 1
             continue
@@ -1022,16 +1126,21 @@ def _run_pass(db: Session, md: MarketData, settings: Settings, now: datetime, cl
         write_tier(db, task.key, after_run(st, len(heads), now, settings), now)
 
 
-def _book_outcome(db: Session, today: date, at: datetime, err: Exception | None, guard: int) -> str | None:
+def _book_outcome(db: Session, today: date, at: datetime, err: Exception | None, guard: int, *,
+                  side: str = "news") -> str | None:
     """What one request's outcome means for the whole source — the worker's pass and the manual check alike. A
     5xx / timeout is one more in a row (:func:`_note_down`, kept across passes): :data:`DOWN_IN_A_ROW` in a row pause
     the source 15 minutes from ``at``, doubling up to 4 hours (``unreachable``). Anything else is an answer and ends
     that run; a refusal — the contents cap ignored, the quota, 401 / 403 / a redirect — stops the source until the
-    next 00:00 UTC and the day's row says why (``contract`` / ``quota`` / ``blocked``). ``None``: nothing to stop
-    for."""
+    next 00:00 UTC and the day's row of the side that was refused says why (``contract`` / ``quota`` / ``blocked``):
+    the worker's ``@use:`` row (its ladder reads only that one) or, with ``side="chat"``, the AI's ``@chat:`` row —
+    the worker stops all the same (:func:`key_stopped`), but its ladder is not lowered for a refusal it never got
+    (2026-11-17 review). An outage booked while a refusal stops the key does not shorten that stop. ``None``: nothing
+    to stop for."""
     if isinstance(err, SourceDown):
         if _note_down(db, at) >= DOWN_IN_A_ROW:
-            service._mark_blocked(db, SOURCE_KEY, at, str(err), service.BACKOFF_START, status="unreachable")
+            if not _refused_now(db, at):
+                service._mark_blocked(db, SOURCE_KEY, at, str(err), service.BACKOFF_START, status="unreachable")
             return "unreachable"
         return None
     _note_answered(db)
@@ -1043,10 +1152,448 @@ def _book_outcome(db: Session, today: date, at: datetime, err: Exception | None,
     if why == "contract":
         log.warning("LangSearch: an answer of more than %d output tokens — the contents cap was ignored; stopped "
                     "until 00:00 UTC", guard)
-    _mark_day(db, today, why, at)
+    if side == "chat":
+        _bump_chat(db, today, stopped=why, at=at)
+    else:
+        _mark_day(db, today, why, at)
     service._mark_blocked(db, SOURCE_KEY, at, str(err), status="rate_limited" if why == "quota" else "blocked",
                           until=err.until or next_utc_midnight(at))
     return why
+
+
+# -- the AI's requests (forliosa.ai.tw_news) -----------------------------------------------------------------------
+CHAT_CHARACTERS = (300, 600)  # contents caps the AI may ask for (600: the 法人 intent, trimmed to 300 before Claude)
+CHAT_COUNT = 20
+EMPTY_RETRY_SECONDS = 8.0  # 0 results after this long is LangSearch's occasional empty answer: asked once more
+# ... but only when this much of AI_LANGSEARCH_DEADLINE_SECONDS is still left after the gap before it (about one
+# ordinary answer, 2026-11-17 eval: ~3 s). So it needs a deadline of 8 + 1.5 + 3 = 12.5 s at least: with the 12 s
+# default a slow empty answer is never asked again — it is no result, and the web search runs (2026-11-17 review).
+EMPTY_RETRY_MIN_LEFT = 3.0
+_NO_RANGE = ("noLimit", "oneYear")
+
+
+class LangSearchDeadline(Exception):
+    """One of the AI's requests had no answer within ``AI_LANGSEARCH_DEADLINE_SECONDS`` (2026-11-17 eval: one took
+    37 s; httpx's timeout bounds each read, not the request): no result, the web search runs. ``sent``: it went out
+    (``False``: its turn of the limiter came too late, nothing was sent). A call of :func:`chat_search` in which a sent
+    request got no answer at all within the deadline counts as one outage toward the pause of :func:`_book_outcome`
+    (2026-11-17 review: LangSearch hanging must still pause it); one slow call alone does not pause."""
+
+    def __init__(self, message: str, *, sent: bool = True):
+        super().__init__(message)
+        self.sent = sent
+
+
+class ChatUnavailable(Exception):
+    """The AI may not ask LangSearch now. ``reason``: off | paused (a refusal or an outage stopped the key, shared with
+    the news worker) | quota | blocked | requests_cap | tokens_cap | contract (an answer above the AI's token guard)
+    | unreachable | error. Nothing of an answer is in it."""
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+        self.reason = reason
+
+
+def chat_request_body(query: str, fresh: str, max_characters: int) -> dict[str, Any]:
+    """The AI's web-search body: always ``summary: false``, 20 results and a contents cap of 300 or 600 characters;
+    a bounded time range (never ``noLimit`` or ``oneYear``); never ``includeDomains`` / ``excludeDomains``."""
+    if max_characters not in CHAT_CHARACTERS:
+        raise ValueError("the AI asks LangSearch for 300 or 600 characters of text")
+    if not fresh or fresh in _NO_RANGE:
+        raise ValueError("LangSearch is always asked for a bounded time range")
+    return {"query": query, "freshness": fresh, "summary": False, "count": CHAT_COUNT,
+            "contents": {"text": {"max_characters": max_characters}}}
+
+
+def interpret_chat(reply: Reply, now: datetime) -> list[RawItem]:
+    """The raw items of an AI request's reply, each with its text (:func:`parse` ``with_text``), or the error the
+    reply stands for. The token guard is the caller's (:func:`chat_search`)."""
+    _check_status(reply, now)
+    return parse(reply.payload or {}, now, with_text=True)
+
+
+def chat_usage_key(day: date) -> str:
+    return CHAT_PREFIX + day.isoformat()
+
+
+def read_chat_usage(db: Session, day: date) -> DayUsage:
+    """The AI's UTC day (row ``@chat:<date>``: ``items`` requests, ``failures`` tokens, ``last_status`` why it
+    stopped, ``last_attempt_at`` the last request)."""
+    row = db.get(NewsFetchState, (SOURCE_KEY, chat_usage_key(day)))
+    if row is None:
+        return DayUsage(day)
+    return DayUsage(day, row.items or 0, row.failures or 0, _aware(row.last_attempt_at), row.last_status or "",
+                    _aware(row.last_success_at))
+
+
+def _bump_chat(db: Session, day: date, *, requests: int = 0, tokens: int = 0, at: datetime | None = None,
+               stopped: str | None = None) -> None:
+    """Add to the AI's day in one UPDATE (several chat turns count at once, each on a session of its own); the row
+    is made on the day's first request."""
+    key = chat_usage_key(day)
+    values: dict[str, Any] = {"items": NewsFetchState.items + requests, "failures": NewsFetchState.failures + tokens}
+    if at is not None:
+        values["last_attempt_at"] = at
+    if stopped is not None:
+        values["last_status"], values["last_success_at"] = stopped, at or now_utc()
+    for _ in range(2):
+        done = db.execute(update(NewsFetchState).where(NewsFetchState.source == SOURCE_KEY,
+                                                       NewsFetchState.symbol == key).values(**values)).rowcount
+        if done:
+            db.commit()
+            return
+        db.add(NewsFetchState(source=SOURCE_KEY, symbol=key, last_status=stopped or "", items=requests,
+                              failures=tokens, last_attempt_at=at,
+                              last_success_at=(at or now_utc()) if stopped else None))
+        try:
+            db.commit()
+            return
+        except IntegrityError:  # another turn made it meanwhile: add to it
+            db.rollback()
+
+
+def _reserve_chat(db: Session, day: date, n: int, cap: int) -> int:
+    """Take ``n`` of the AI's requests of the UTC day — or 1 when ``n`` do not fit — before they are sent, in one
+    conditional UPDATE (``items + n <= cap``): chat turns, the 法人觀點 card and 為什麼漲跌 send side by side, in API
+    threads and processes, so a count read earlier is no basis for sending (2026-11-17 review). Returns how many were
+    taken (0: the day's cap is used)."""
+    key = chat_usage_key(day)
+    _bump_chat(db, day)  # the day's row exists
+    for k in dict.fromkeys((n, 1)):
+        if k <= 0:
+            continue
+        items = func.coalesce(NewsFetchState.items, 0)
+        done = db.execute(update(NewsFetchState).where(
+            NewsFetchState.source == SOURCE_KEY, NewsFetchState.symbol == key, items + k <= cap,
+        ).values(items=items + k).execution_options(synchronize_session=False)).rowcount
+        db.commit()
+        if done:
+            return k
+    return 0
+
+
+@dataclass
+class ChatAnswer:
+    """One query's outcome: its raw items (with their text, in memory only) or why it failed."""
+
+    query: str
+    items: list[RawItem] = field(default_factory=list)
+    # error | unreachable | quota | blocked | contract | deadline (this query brought nothing)
+    error: str | None = None
+    latency: float = 0.0
+    requests: int = 0  # 1, or 2 with the empty-result retry
+    tokens: int = 0
+
+
+@dataclass
+class ChatBatch:
+    answers: list[ChatAnswer] = field(default_factory=list)
+    stopped: str | None = None  # the key or the AI's day stopped part-way (a ChatUnavailable reason)
+
+    @property
+    def requests(self) -> int:
+        return sum(a.requests for a in self.answers)
+
+    @property
+    def tokens(self) -> int:
+        return sum(a.tokens for a in self.answers)
+
+    @property
+    def cut(self) -> int:
+        """Requests that had no answer within the deadline."""
+        return sum(a.error == "deadline" for a in self.answers)
+
+
+_PENDING: Any = object()
+
+
+class _Handoff:
+    """One request's outcome, passed from its thread under a lock: the caller takes it within the deadline, or gives
+    up on it — then the thread hands a reply that comes after all to ``late`` (never both, never neither)."""
+
+    __slots__ = ("abandoned", "done", "lock", "value")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.done = threading.Event()
+        self.value: Any = _PENDING
+        self.abandoned = False
+
+
+def _post_all(client: LangSearchClient, bodies: list[dict[str, Any]], deadline: float | None = None,
+              late: Callable[[Reply], None] | None = None,
+              running: list[_Handoff] | None = None) -> list[Reply | Exception]:
+    """Send the bodies; more than one go out side by side, so the second starts one interval after the first starts
+    (the client's limiter), not after it returns. Only HTTP happens off this thread: the bookkeeping stays here.
+
+    With ``deadline`` (a ``time.monotonic()`` instant) every request runs on a thread of its own and is waited for
+    until then at most, whatever the transport does (a read that trickles in never ends a per-read timeout): a request
+    still running is left to end on its thread — its connect and reads wait no longer than the deadline did — and
+    stands as a :class:`LangSearchDeadline`; a reply it brings after all goes to ``late`` (:func:`_keep_late`: booked
+    at the next :func:`chat_search`, its items never read), and its handoff to ``running`` (the client is closed only
+    once it has ended: :func:`_close_after`)."""
+    def one(body: dict[str, Any]) -> Reply | Exception:
+        try:
+            return client.post(body, deadline=deadline) if deadline is not None else client.post(body)
+        except Exception as exc:  # SourceDown (timeout, connection), LangSearchDeadline: booked by the caller
+            return exc
+
+    if deadline is None:
+        if len(bodies) == 1:
+            return [one(bodies[0])]
+        with ThreadPoolExecutor(max_workers=len(bodies), thread_name_prefix="langsearch") as pool:
+            return list(pool.map(one, bodies))
+
+    def run(body: dict[str, Any], hand: _Handoff) -> None:
+        out = one(body)
+        with hand.lock:
+            taken = not hand.abandoned
+            if taken:
+                hand.value = out
+        hand.done.set()
+        if not taken and late is not None and isinstance(out, Reply):
+            late(out)
+
+    hands = [_Handoff() for _ in bodies]
+    pool = ThreadPoolExecutor(max_workers=len(bodies), thread_name_prefix="langsearch")
+    try:
+        for body, hand in zip(bodies, hands, strict=True):
+            pool.submit(run, body, hand)
+        out: list[Reply | Exception] = []
+        for hand in hands:
+            hand.done.wait(max(0.0, deadline - _time.monotonic()))
+            with hand.lock:
+                if hand.value is _PENDING:
+                    hand.abandoned = True
+                    out.append(LangSearchDeadline("LangSearch: no answer within the AI's deadline"))
+                    if running is not None:
+                        running.append(hand)
+                else:
+                    out.append(hand.value)
+        return out
+    finally:
+        pool.shutdown(wait=False)  # never waits for a request past the deadline
+
+
+LATE_CLOSE_SECONDS = 120.0  # an own client still in use past the deadline is closed once that request ends, or then
+
+
+def _close_after(client: LangSearchClient, running: list[_Handoff]) -> None:
+    """Close a client of the call's own now — or, while a request cut by the deadline is still running on it, once
+    the last such request has ended (on a thread of its own, at most :data:`LATE_CLOSE_SECONDS`): closing it under a
+    running request would end that request with an error, and its late reply (a refusal) would never be booked."""
+    left = [h for h in running if not h.done.is_set()]
+    if not left:
+        client.close()
+        return
+
+    def close() -> None:
+        until = _time.monotonic() + LATE_CLOSE_SECONDS
+        for h in left:
+            h.done.wait(max(0.0, until - _time.monotonic()))
+        client.close()
+
+    threading.Thread(target=close, name="langsearch-close", daemon=True).start()
+
+
+# Replies that came after the AI's deadline (their threads end on their own): booked at the next chat_search
+_LATE: deque[tuple[date, Reply]] = deque(maxlen=64)
+_LATE_LOCK = threading.Lock()
+_LATE_ROUND = [0]
+
+
+def reset_late() -> None:
+    """Tests: forget the late replies; one still on its way from an earlier round is dropped when it comes."""
+    with _LATE_LOCK:
+        _LATE.clear()
+        _LATE_ROUND[0] += 1
+
+
+def _keep_late(day: date) -> Callable[[Reply], None]:
+    """Where a reply to one of ``day``'s AI requests goes when it comes after the deadline."""
+    with _LATE_LOCK:
+        round_ = _LATE_ROUND[0]
+
+    def keep(reply: Reply) -> None:
+        with _LATE_LOCK:
+            if _LATE_ROUND[0] == round_:
+                _LATE.append((day, reply))
+
+    return keep
+
+
+def _book_late(db: Session, settings: Settings, clock: Callable[[], datetime]) -> int:
+    """Book the replies that came after the deadline (2026-11-17 review: they were never read): their tokens on the
+    AI's day of the request; an answer above ``AI_LANGSEARCH_TOKEN_GUARD`` stops the AI's use for the day; a refusal
+    (429, 401 / 403, a redirect) stops the key until 00:00 UTC for both sides (:func:`_book_outcome`) — found only now,
+    so the request that finds it is not sent. A late answer is not one within the deadline: it does not end a run of
+    outages, and its items are never read; a late 5xx is not booked again (its call counted already). Logs status,
+    latency and tokens only. Returns how many were booked."""
+    with _LATE_LOCK:
+        late = list(_LATE)
+        _LATE.clear()
+    for day, r in late:
+        log.info("LangSearch (AI): a reply after the deadline, HTTP %d in %.1f s, %d+%d tokens", r.status, r.latency,
+                 r.input_tokens, r.output_tokens)
+        if r.tokens:
+            _bump_chat(db, day, tokens=r.tokens)
+        at = clock()
+        if r.status == 200 and r.tokens > settings.ai_langsearch_token_guard:
+            log.warning("LangSearch (AI): a late answer of %d tokens, more than AI_LANGSEARCH_TOKEN_GUARD %d — the "
+                        "contents cap was ignored; the AI's use stops until 00:00 UTC", r.tokens,
+                        settings.ai_langsearch_token_guard)
+            _bump_chat(db, _utc_day(at), stopped="contract", at=at)
+            continue
+        try:
+            _check_status(r, at)
+        except SourceBlocked as exc:
+            _book_outcome(db, _utc_day(at), at, exc, settings.news_langsearch_token_guard, side="chat")
+        except Exception:  # a 5xx or an answer that is not JSON: no more than its call's no-answer
+            pass
+    return len(late)
+
+
+def chat_search(db: Session, settings: Settings, queries: Sequence[str], fresh: str, *, max_characters: int,
+                client: LangSearchClient | None = None, clock: Callable[[], datetime] = now_utc,
+                sleep: Callable[[float], None] = _time.sleep) -> ChatBatch:
+    """The AI's LangSearch requests (one or two queries): ``AI_LANGSEARCH_ENABLED`` and a key; not while the key is
+    stopped or paused (a 429, 401 / 403, a redirect or an outage, booked by either side); at most
+    ``AI_LANGSEARCH_MAX_REQUESTS_PER_DAY`` requests and ``AI_LANGSEARCH_MAX_TOKENS_PER_DAY`` tokens per UTC day of its
+    own (the news worker's caps are apart). Each request is taken from the day's cap before it is sent, in one
+    conditional UPDATE (:func:`_reserve_chat`: callers run side by side); the gap to the last request of any process is
+    waited out. Every outcome is booked like the worker's (:func:`_book_outcome`, on the AI's day): a refusal stops the
+    key until 00:00 UTC for both, and a later reply never lifts it (:func:`_mark_answered`). An answer above
+    ``AI_LANGSEARCH_TOKEN_GUARD`` tokens stops the AI's use for the UTC day (logged) and is not used. 0 results after
+    :data:`EMPTY_RETRY_SECONDS` is asked once more (one more request taken from the cap) when the deadline leaves time
+    for it (:data:`EMPTY_RETRY_MIN_LEFT` after the gap: never with the 12 s default). ``AI_LANGSEARCH_DEADLINE_SECONDS``
+    (12) is the whole call's deadline from the gap's wait on — connect, read and that retry (:func:`_post_all`): a
+    request without an answer by then is no result (``error`` ``deadline``; counted toward the day), and one line says
+    so with the time it took. A call in which LangSearch answered nothing within it (a request was sent and cut, no
+    reply under 500 came) is one outage in a row (:func:`_book_outcome`): two such calls, or one and a 5xx / timeout,
+    with no answer between pause the source like any outage (2026-11-17 review: a LangSearch that hangs made every
+    call wait the deadline out); one slow call alone does not. The replies that came after an earlier call's deadline
+    are booked first (:func:`_book_late`): their tokens, and a refusal's stop before anything is sent. Raises
+    :class:`ChatUnavailable` when nothing may be sent; logs status, latency, result count and tokens only."""
+    if not settings.ai_langsearch_on:
+        raise ChatUnavailable("off")
+    _book_late(db, settings, clock)
+    now = clock()
+    today = _utc_day(now)
+    if not service._source_open(db, SOURCE_KEY, now):
+        raise ChatUnavailable("paused")
+    worker = read_usage(db, today)
+    if worker.stopped in KEY_STOPS:
+        raise ChatUnavailable(worker.stopped)
+    use = read_chat_usage(db, today)
+    if use.stopped:
+        raise ChatUnavailable(use.stopped)
+    cap = settings.ai_langsearch_max_requests_per_day
+    if use.requests >= cap:
+        raise ChatUnavailable("requests_cap")
+    if use.tokens >= settings.ai_langsearch_max_tokens_per_day:
+        raise ChatUnavailable("tokens_cap")
+    bodies = [chat_request_body(q, fresh, max_characters) for q in list(queries)[:max(0, cap - use.requests)]]
+    if not bodies:
+        return ChatBatch()
+    own = client is None
+    if client is None:
+        client = LangSearchClient.from_settings(settings)
+        if client is None:
+            raise ChatUnavailable("off")
+    batch = ChatBatch()
+    gap = settings.news_langsearch_interval_seconds
+    started = _time.monotonic()
+    deadline = started + settings.ai_langsearch_deadline_seconds
+    late = _keep_late(today)
+    running: list[_Handoff] = []  # requests cut by the deadline, still running on the client
+    try:
+        # counted before they are sent, and only as many as still fit (the count read above may be stale)
+        bodies = bodies[:_reserve_chat(db, today, len(bodies), cap)]
+        if not bodies:
+            raise ChatUnavailable("requests_cap")
+        _wait_gap(db, gap, clock, sleep)
+        _bump_chat(db, today, at=clock())  # the time sent: the gap of the next request of any process
+        sent = _post_all(client, bodies, deadline, late, running)
+        _bump_chat(db, today, at=clock())  # after the limiter's wait: the next process measures its gap from here
+        outs: list[Reply | Exception] = list(sent)
+        for body, out in zip(bodies, sent, strict=True):
+            ans = ChatAnswer(body["query"], requests=1)
+            batch.answers.append(ans)
+            if batch.stopped:  # sent side by side with one that stopped the key: counted, not used
+                ans.error = batch.stopped
+                if isinstance(out, Reply) and out.tokens:
+                    ans.tokens = out.tokens
+                    _bump_chat(db, today, tokens=out.tokens)
+                continue
+            why = _chat_outcome(db, settings, today, clock, out, ans)
+            # the answer's own time is spent at least (what a scripted reply says it took counts too)
+            left = deadline - max(_time.monotonic(), started + ans.latency)
+            if (why is None and ans.error is None and not ans.items and ans.latency >= EMPTY_RETRY_SECONDS
+                    and left >= gap + EMPTY_RETRY_MIN_LEFT and _reserve_chat(db, today, 1, cap)):
+                _wait_gap(db, gap, clock, sleep)
+                _bump_chat(db, today, at=clock())
+                again = _post_all(client, [body], deadline, late, running)[0]
+                outs.append(again)
+                _bump_chat(db, today, at=clock())
+                ans.requests += 1
+                why = _chat_outcome(db, settings, today, clock, again, ans)
+            if why is not None:
+                batch.stopped = why
+        if batch.cut:
+            down = ""
+            if (not batch.stopped and any(isinstance(o, LangSearchDeadline) and o.sent for o in outs)
+                    and not any(isinstance(o, Reply) and o.status < 500 for o in outs)):
+                stop = _book_outcome(db, today, clock(), SourceDown("LangSearch: no answer within the AI's deadline"),
+                                     settings.news_langsearch_token_guard, side="chat")
+                batch.stopped = stop
+                down = f"; no answer: {down_in_a_row(db)} in a row" + (" (paused)" if stop else "")
+            log.warning("LangSearch (AI): %d of %d requests had no answer within the %g s deadline (%.1f s); "
+                        "treated as no result%s", batch.cut, len(batch.answers),
+                        settings.ai_langsearch_deadline_seconds, _time.monotonic() - started, down)
+    finally:
+        if own:
+            _close_after(client, running)
+    return batch
+
+
+def _chat_outcome(db: Session, settings: Settings, today: date, clock: Callable[[], datetime],
+                  out: Reply | Exception, ans: ChatAnswer) -> str | None:
+    """Book one reply of the AI's (tokens, the guard, the key's state) into ``ans``; the reason the rest of the batch
+    must not be asked, or None. A request cut off by the deadline is not an answer: nothing is booked for it here but
+    the request (taken before it was sent); :func:`chat_search` books its call's outage once."""
+    err: Exception | None = out if isinstance(out, Exception) else None
+    ans.items, ans.error = [], None
+    if isinstance(out, LangSearchDeadline):
+        ans.error = "deadline"
+        return None
+    if isinstance(out, Reply):
+        ans.latency = out.latency
+        ans.tokens += out.tokens
+        if out.tokens:
+            _bump_chat(db, today, tokens=out.tokens)
+        log.info("LangSearch (AI): HTTP %d in %.1f s, %d results, %d+%d tokens", out.status, out.latency,
+                 len(_values(out.payload or {}) or []), out.input_tokens, out.output_tokens)
+        if out.status == 200 and out.tokens > settings.ai_langsearch_token_guard:
+            log.warning("LangSearch (AI): an answer of %d tokens, more than AI_LANGSEARCH_TOKEN_GUARD %d — the "
+                        "contents cap was ignored; the AI's use stops until 00:00 UTC", out.tokens,
+                        settings.ai_langsearch_token_guard)
+            _bump_chat(db, today, stopped="contract", at=clock())
+            ans.error = "contract"
+            return "contract"
+        try:
+            ans.items = interpret_chat(out, clock())
+        except Exception as exc:
+            err = exc
+    elif err is not None:
+        log.info("LangSearch (AI): %s", type(err).__name__)
+    why = _book_outcome(db, today, clock(), err, settings.news_langsearch_token_guard, side="chat")
+    if err is not None:
+        ans.error = why or ("unreachable" if isinstance(err, SourceDown) else "error")
+        if not why:
+            log.warning("LangSearch (AI) query failed: %s", str(err)[:160])
+        return why
+    _mark_answered(db, clock())
+    return None
 
 
 # -- the manual check ---------------------------------------------------------------------------------------------
@@ -1085,7 +1632,7 @@ def smoke(db: Session, settings: Settings, client: LangSearchClient, *, clock: C
             return res
         now = clock()
         today = _utc_day(now)
-        if not service._source_open(db, SOURCE_KEY, now):
+        if not service._source_open(db, SOURCE_KEY, now) or key_stopped(db, today):
             wide = db.get(NewsFetchState, (SOURCE_KEY, service.SOURCE_WIDE))
             res.skipped, res.paused_until = "paused", _aware(wide.backoff_until) if wide is not None else None
             return res
@@ -1112,13 +1659,13 @@ def smoke(db: Session, settings: Settings, client: LangSearchClient, *, clock: C
             _count_tokens(db, today, res.reply.tokens)
         res.stopped = _book_outcome(db, today, clock(), err, settings.news_langsearch_token_guard)
         if err is None:
-            service._mark_open(db, SOURCE_KEY, clock())
+            _mark_answered(db, clock())
     return res
 
 
 # -- status (CLI, /admin) -----------------------------------------------------------------------------------------
 def status(db: Session, settings: Settings | None = None, now: datetime | None = None) -> dict[str, Any]:
-    """Today's usage, the ladder, the pause and the tiers (counts only)."""
+    """Today's usage, the ladder, the pause and the tiers (counts only); the AI's day apart (``ai_*``)."""
     settings = settings or get_settings()
     now = now or now_utc()
     today = _utc_day(now)
@@ -1128,12 +1675,17 @@ def status(db: Session, settings: Settings | None = None, now: datetime | None =
     until = _aware(wide.backoff_until) if wide is not None else None
     tiers = Counter(r.last_status for r in db.scalars(select(NewsFetchState).where(
         NewsFetchState.source == SOURCE_KEY, NewsFetchState.symbol.like(TIER_PREFIX + "%"))))
+    chat = read_chat_usage(db, today)
     return {
         "enabled": settings.news_langsearch_enabled, "configured": settings.langsearch_on, "day_utc": today.isoformat(),
         "requests": usage.requests, "request_cap": cap, "tokens": usage.tokens,
         "token_cap": settings.news_langsearch_max_tokens_per_day, "first_fills": first_fills_on(db, today),
-        "stopped": usage.stopped or None, "level": lad.level,
+        "stopped": usage.stopped or (chat.stopped if chat.stopped in KEY_STOPS else "") or None, "level": lad.level,
         "paused_until": until if until is not None and until > now else None,
         "warning": "contents_cap_ignored" if usage.stopped == "contract" else None,
         "tiers": {t: tiers.get(t, 0) for t in TIERS},
+        # the AI's own day (chat, the 法人觀點 card, 為什麼漲跌: forliosa.ai.tw_news)
+        "ai_enabled": settings.ai_langsearch_on, "ai_requests": chat.requests,
+        "ai_request_cap": settings.ai_langsearch_max_requests_per_day, "ai_tokens": chat.tokens,
+        "ai_token_cap": settings.ai_langsearch_max_tokens_per_day, "ai_stopped": chat.stopped or None,
     }

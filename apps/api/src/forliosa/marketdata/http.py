@@ -60,12 +60,23 @@ class RateLimiter:
         the lock is released: requests to one host still start ``interval`` apart, in the order they asked, but a wait
         for TWSE's 3 s no longer holds up requests to every other host (2026-11-16: shioaji-data downloads sat 3–6 s
         behind TWSE waits while an AI turn and the stock page loaded at once)."""
+        return self._reserve(host, None) or 0.0  # never None without a deadline
+
+    def wait_until(self, host: str, deadline: float) -> float | None:
+        """:meth:`wait`, only for a slot that starts before ``deadline`` (on this limiter's clock,
+        ``time.monotonic()``): a later slot is not reserved — the caller sends nothing, so nobody after it waits for
+        that request — and ``None`` comes back at once."""
+        return self._reserve(host, deadline)
+
+    def _reserve(self, host: str, deadline: float | None) -> float | None:
         interval = self.interval_for(host)
         key = self.bucket(host)
         with self._lock:
             now = self._clock()
             last = self._last.get(key)
             start = now if last is None or interval <= 0 else max(now, last + interval)
+            if deadline is not None and start >= deadline:
+                return None
             self._last[key] = start
         slept = start - now
         if slept > 0:

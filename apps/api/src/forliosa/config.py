@@ -389,6 +389,27 @@ class Settings(BaseSettings):
     # Taiwan-looking sites that are not news (foreign ones are dropped by the Taiwan-outlet check anyway)
     news_langsearch_junk_domains: Annotated[list[str], NoDecode] = Field(default_factory=lambda: [
         "tainan-estate-et.com.tw", "interview.tw", "pokem.tw", "the-frequent-traveler.com.tw"])
+    # LangSearch for the AI (forliosa.ai.tw_news; 產品負責人 2026-11-17, the same exception in CLAUDE.md): the chat tool
+    # tw_news_search (Taiwan stocks and the Taiwan market), the 法人觀點 card and the 為什麼漲跌 sentence (all in the
+    # API service) ask it before Claude's web search, which stays the fallback. Its text (at most 600 characters a
+    # result) reaches Claude inside that one answer only: never stored, cached, logged or shown. OFF by default (with
+    # it off, or without LANGSEARCH_API_KEY, everything works as before); turned on only in the production Railway
+    # variables. The caps are its own, apart from the news worker's (one key: a 429, 401/403 or redirect stops both
+    # until the next 00:00 UTC).
+    ai_langsearch_enabled: bool = False
+    ai_langsearch_max_requests_per_day: int = Field(default=300, ge=0)  # chat + card + why, per UTC day
+    ai_langsearch_max_tokens_per_day: int = Field(default=3_000_000, ge=0)  # input + output, per UTC day
+    ai_langsearch_max_requests_per_turn: int = Field(default=3, ge=0)  # one chat turn (the empty-result retry aside)
+    ai_langsearch_in_economy: bool = True  # 省錢模式 (no web search) keeps tw_news_search
+    # One answer above this many tokens means the contents cap was ignored (measured maximum 12,587 at 600 characters
+    # × 20 results): the AI's use stops for the UTC day, with a warning in the log.
+    ai_langsearch_token_guard: int = Field(default=20_000, ge=1)
+    # The whole of one AI LangSearch call (the chat tool, the 法人觀點 card, 為什麼漲跌; not the news worker), from its
+    # turn to send through connect, read and the slow empty answer's retry: past it the call is no result and the web
+    # search runs (2026-11-17 eval: one request took 37 s, and NEWS_LANGSEARCH_TIMEOUT_SECONDS bounds each read only).
+    # A call with no answer at all is one outage in a row (two pause LangSearch, as a 5xx / timeout does). The slow
+    # empty answer's retry needs 12.5 s at least (8 s + the 1.5 s gap + 3 s): with 12 it never happens.
+    ai_langsearch_deadline_seconds: float = Field(default=12.0, gt=0, le=60)
 
     # -- 「關於」 description (decision 7): a zh.wikipedia excerpt (CC BY-SA 4.0) or, without an article, an AI-written
     # 2–3 sentence description from official facts (feature "company", system-paid, at most COMPANY_AI_PER_RUN per
@@ -618,6 +639,12 @@ class Settings(BaseSettings):
     def langsearch_on(self) -> bool:
         """LangSearch may be asked: news on, NEWS_LANGSEARCH_ENABLED and a key."""
         return bool(self.news_enabled and self.news_langsearch_enabled and self.langsearch_api_key
+                    and self.langsearch_api_key.get_secret_value().strip())
+
+    @property
+    def ai_langsearch_on(self) -> bool:
+        """The AI may ask LangSearch: AI_LANGSEARCH_ENABLED and a key (the news worker's switch is its own)."""
+        return bool(self.ai_langsearch_enabled and self.langsearch_api_key
                     and self.langsearch_api_key.get_secret_value().strip())
 
     @property
