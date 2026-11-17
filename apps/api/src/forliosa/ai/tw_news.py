@@ -27,8 +27,10 @@ stale-article checks), then an excerpt of the sentences that match the intent.
 Requests: ``forliosa.news.langsearch.chat_search`` (the same key, client, gap and refusal handling as the news worker,
 with caps of its own, shared by the chat, the card and 為什麼漲跌: ``AI_LANGSEARCH_MAX_REQUESTS_PER_DAY`` /
 ``AI_LANGSEARCH_MAX_TOKENS_PER_DAY``), at most
-``AI_LANGSEARCH_MAX_REQUESTS_PER_TURN`` per chat turn; the same arguments twice in a turn send one. When LangSearch
-cannot be asked, or finds nothing, the tool says what to do next (web search, or in 省錢模式 to say there is no data).
+``AI_LANGSEARCH_MAX_REQUESTS_PER_TURN`` per chat turn; the same arguments twice in a turn send one. Each call has
+``AI_LANGSEARCH_DEADLINE_SECONDS`` (12) in all: without an answer by then it is no result and the web search runs
+(the tool's ``error`` note; the turn's log says ``error:deadline``). When LangSearch cannot be asked, or finds nothing,
+the tool says what to do next (web search, or in 省錢模式 to say there is no data).
 """
 
 from __future__ import annotations
@@ -85,6 +87,7 @@ INTENT_WORD = {"earnings_call": "法說會", "revenue": "營收", "dividend": "�
 INTENT_LABEL = {"news": "新聞", "why_move": "漲跌原因", "analyst_targets": "目標價", "earnings_call": "法說會",
                 "revenue": "營收", "dividend": "配息", "market": "大盤"}
 LIMIT = {"news": 10, "why_move": 10, "market": 10}
+WRAP_QUERY = "台股 盤後"  # the trading day's market wrap (為什麼漲跌 when the stock moved with the market)
 DEFAULT_LIMIT = 8
 EXCERPT_MAX = 300
 ANALYST_FETCH_CHARS = 600  # the 法人 intent reads 600 characters and keeps the 300 that name brokers and targets
@@ -206,6 +209,16 @@ def plan(intent: str, info: InstrumentInfo | None, tier: str, days: int, now: da
         return Plan(intent, queries, fresh, start, ANALYST_FETCH_CHARS, limit, n, strict, short)
     query = f'"{short}" {INTENT_WORD.get(intent, "")}'.strip()
     return Plan(intent, (query,), fresh, start, EXCERPT_MAX, limit, n, strict, short)
+
+
+def wrap_plan(day: date, now: datetime) -> Plan:
+    """Pure. The market's after-close reports of the trading day ``day``, for 為什麼漲跌 when the stock moved with
+    its market (``why.market_wraps``): :data:`WRAP_QUERY` (fixed words only, whatever the hour), from the UTC date
+    ``day`` (Taipei's trading day: its reports come out after 13:30 Taipei, the same UTC date) to today."""
+    today = now.astimezone(UTC).date()
+    first = min(day, today)
+    fresh, start = freshness_for(0, now, first)
+    return Plan("market", (WRAP_QUERY,), fresh, start, EXCERPT_MAX, LIMIT["market"], (today - first).days, False)
 
 
 _RANKS: dict[str, Any] = {"at": None, "ranks": {}}
@@ -577,6 +590,7 @@ class Found:
     results: int = 0
     stopped: str | None = None  # the key or the AI's day stopped part-way (``langsearch.ChatUnavailable`` reasons)
     failed: bool = False  # every reply failed
+    cut: int = 0  # requests without an answer within AI_LANGSEARCH_DEADLINE_SECONDS (no result)
 
     @property
     def status(self) -> str:
@@ -607,7 +621,7 @@ def fetch(db: Session, md: MarketData, settings: Settings, p: Plan, info: Instru
                              now=now, stats=stats, calib=calib, blocked=blocked, junk=junk)
     found = Found(p, dedupe_items(kept)[:p.limit], len(batch.answers), batch.requests, batch.tokens,
                   sum(len(a.items) for a in batch.answers), batch.stopped,
-                  bool(batch.stopped) or all(a.error for a in batch.answers))
+                  bool(batch.stopped) or all(a.error for a in batch.answers), batch.cut)
     log.info("%s %s %s: %d requests, %d tokens, %d results, %d kept, %s in %.1f s; dropped %s", label, p.intent,
              info.symbol if info is not None else "^TW", found.requests, found.tokens, found.results,
              len(found.items), found.status if not found.stopped else f"{found.status} (stopped: {found.stopped})",
@@ -621,19 +635,19 @@ def _md(when: datetime, today: date) -> str:
     return f"{d.month}/{d.day}" if d.year == today.year else f"{d.year}/{d.month}/{d.day}"
 
 
-def blocks(items: Sequence[Item], today: date) -> list[dict[str, Any]]:
+def blocks(items: Sequence[Item], today: date, label: str = "") -> list[dict[str, Any]]:
     """The items of a ``Citable`` (``forliosa.ai.tools``), one search result per article: ``text`` 「媒體，11/10：
     摘錄」 (「，日期依搜尋引擎」 after an engine-only date; an unknown one has no date at all, 「媒體，日期未確認：」:
     its day is the window's first or a re-indexing burst's, so the model must not write it; 「（只有標題）」 without an
-    excerpt), ``safe_text`` the title line 「媒體，11/10：標題」 (「媒體，日期未確認：標題」; what a citation, the
-    stored turn and the shared research carry instead), ``private``. No 「[n]」 numbering (the model copied
-    「（[4-1]）」 into answers)."""
+    excerpt; ``label`` before it, 「【台股盤後】」 for 為什麼漲跌's market wraps), ``safe_text`` the title line
+    「媒體，11/10：標題」 (「媒體，日期未確認：標題」; what a citation, the stored turn and the shared research carry
+    instead), ``private``. No 「[n]」 numbering (the model copied 「（[4-1]）」 into answers)."""
     out = []
     for x in items:
         when = "日期未確認" if x.unknown_date else _md(x.date, today)
         suffix = "" if x.date_src == "url" or x.unknown_date else "，日期依搜尋引擎"
         out.append({"url": x.url, "title": x.title[:300], "outlet": x.outlet,
-                    "text": f"{x.outlet}，{when}{suffix}：{x.excerpt or '（只有標題）'}",
+                    "text": f"{label}{x.outlet}，{when}{suffix}：{x.excerpt or '（只有標題）'}",
                     "safe_text": f"{x.outlet}，{when}：{x.title}"[:400], "private": True})
     return out
 
@@ -868,8 +882,9 @@ def tw_news_search(ctx: Any, args: dict[str, Any]) -> Any:
         return turn.done(key, intent, f"error:{exc.reason}", {"status": "error", "note": error_note(economy)})
     turn.release(allowed - found.answers)
     status = found.status
-    if status == "error":
-        return turn.done(key, intent, status, {"status": "error", "note": error_note(economy)}, found.tokens)
+    if status == "error":  # failed, stopped, or no answer within the deadline: the web search
+        return turn.done(key, intent, "error:deadline" if found.cut else status,
+                         {"status": "error", "note": error_note(economy)}, found.tokens)
     if status == "none":
         return turn.done(key, intent, status, {"status": "none", "note": none_note(intent, p.short, p.days, economy)},
                          found.tokens)

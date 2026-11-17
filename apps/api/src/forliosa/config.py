@@ -360,6 +360,12 @@ class Settings(BaseSettings):
     # One answer above this many tokens means the contents cap was ignored (measured maximum 12,587 at 600 characters
     # × 20 results): the AI's use stops for the UTC day, with a warning in the log.
     ai_langsearch_token_guard: int = Field(default=20_000, ge=1)
+    # The whole of one AI LangSearch call (the chat tool, the 法人觀點 card, 為什麼漲跌; not the news worker), from its
+    # turn to send through connect, read and the slow empty answer's retry: past it the call is no result and the web
+    # search runs (2026-11-17 eval: one request took 37 s, and NEWS_LANGSEARCH_TIMEOUT_SECONDS bounds each read only).
+    # A call with no answer at all is one outage in a row (two pause LangSearch, as a 5xx / timeout does). The slow
+    # empty answer's retry needs 12.5 s at least (8 s + the 1.5 s gap + 3 s): with 12 it never happens.
+    ai_langsearch_deadline_seconds: float = Field(default=12.0, gt=0, le=60)
 
     # -- 「關於」 description (decision 7): a zh.wikipedia excerpt (CC BY-SA 4.0) or, without an article, an AI-written
     # 2–3 sentence description from official facts (feature "company", system-paid, at most COMPANY_AI_PER_RUN per

@@ -9,7 +9,10 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from datetime import UTC, date, datetime
+from decimal import Decimal as D
 from typing import Any
 
 import pytest
@@ -18,12 +21,24 @@ from sqlalchemy.orm import Session
 from forliosa.ai import analyst, research
 from forliosa.ai import tw_news as tw
 from forliosa.ai import why as why_mod
-from forliosa.ai.prompts import ANALYST_LS_SYSTEM, ANALYST_SYSTEM, WHY_SYSTEM, WHY_SYSTEM_TW, WHY_SYSTEM_TW_NO_INDEX
+from forliosa.ai.prompts import (
+    ANALYST_LS_SYSTEM,
+    ANALYST_SYSTEM,
+    WHY_SYSTEM,
+    WHY_SYSTEM_TW,
+    WHY_SYSTEM_TW_NO_INDEX,
+    WHY_SYSTEM_TW_WRAPS,
+)
+from forliosa.config import get_settings
 from forliosa.db import Base
-from forliosa.models import AiAnalystViews, AiUsage, AiWhyCache, AiWhyResearch
+from forliosa.marketdata.base import InstrumentInfo, QuoteData
+from forliosa.marketdata.service import MarketData
+from forliosa.models import AiAnalystViews, AiUsage, AiWhyCache, AiWhyResearch, IndexDaily
 from forliosa.news import langsearch as ls
+from forliosa.news import service
 from forliosa.news.outlets import outlet_name
 from forliosa.services import stock as stock_svc
+from forliosa.timeutil import TAIPEI
 from tests.ai.conftest import API
 from tests.ai.fake_anthropic import search_citation, server_tool_use, text, tool_use, web_search_result
 
@@ -60,6 +75,14 @@ def reply(*pages: dict[str, Any], status: int = 200) -> ls.Reply:
 
 ANALYST_REPLY = reply(page(T1, A1, S1), page(T2, A2, S2, "2026-11-10T03:00:00.000Z"))
 WHY_REPLY = reply(page(WT1, W1, WS1, "2026-11-17T05:00:00.000Z"))
+# -- LangSearch: the day's 台股盤後 reports (為什麼漲跌 when the stock moved with the market) ------------------------
+M1 = "https://www.cna.com.tw/news/afe/202611170210.aspx"
+MT1 = "台股盤後 外資賣超擴大 加權指數跌逾500點"
+MMARK = "美債殖利率走高壓抑科技股評價"
+MS1 = f"台股今天收盤下跌，外資賣超擴大，{MMARK}，權值股走弱。"
+M0 = "https://www.cna.com.tw/news/afe/202611160330.aspx"  # the evening before: another day's report
+WRAP_REPLY = reply(page(MT1, M1, MS1, "2026-11-17T06:40:00.000Z"),
+                   page("台股盤後 加權指數小漲", M0, "台股昨天小漲。", "2026-11-16T13:00:00.000Z"))
 NOTHING = reply(page("美股收盤 道瓊上漲", "https://www.example.com/us/markets/202611170001", "道瓊工業指數上漲。"))
 
 
@@ -68,7 +91,7 @@ class FakeClient:
         self.replies = list(replies)
         self.bodies: list[dict[str, Any]] = []
 
-    def post(self, body: dict[str, Any]) -> ls.Reply:
+    def post(self, body: dict[str, Any], deadline: float | None = None) -> ls.Reply:
         self.bodies.append(dict(body))
         return self.replies[min(len(self.bodies) - 1, len(self.replies) - 1)]
 
@@ -370,14 +393,225 @@ def test_why_from_langsearch_gets_the_days_index_close(client, pool, fake, langs
                           change_pct=D("0.0210"), source="twse-openapi"))
         db.query(AiWhyCache).delete()
         db.commit()
-    langsearch(WHY_REPLY)
+    second = langsearch(WHY_REPLY)
     fake.reply(text("外資賣壓擴大，股價走低。", [location(W1, WT1, f"中央社，11/17：{WS1}")]))
     assert client.get(WHY).json()["ai"] is True
+    # 1 point from the TAIEX: the day's market reports were asked too (here only the stock's own article came back)
+    assert second.queries == ['"台積電"', "台股 盤後"]
     req = fake.requests[-1]["body"]
     question = req["messages"][0]["content"][-1]["text"]
     assert req["system"] == WHY_SYSTEM_TW and "2 個百分點" in WHY_SYSTEM_TW and "附上的那個數字" in WHY_SYSTEM_TW
     assert "加權指數：跌 2.10%（11/17 收盤）" in question and "這一檔：跌 3.10%（11/17）" in question
     assert "2 個百分點" not in WHY_SYSTEM_TW_NO_INDEX and "不要寫大盤漲跌多少" in WHY_SYSTEM_TW_NO_INDEX
+
+
+TAIEX = "發行量加權股價指數"
+TPEX_INDEX = "櫃買指數"
+
+
+def day_of(monkeypatch, engine, price: str, *, symbol: str = "2330.TW",
+           index: tuple[str, str, str] | None = (TAIEX, "-583.8", "0.0210")) -> None:
+    """The stock's quote of DAY (from a 1,500 reference) and an index's official close of DAY (name, change, %)."""
+    real_quote = MarketData.quote
+    q = QuoteData(symbol=symbol, price=D(price), prev_close=D("1500"), open=D("1500"), high=D("1500"), low=D(price),
+                  volume=None, as_of=datetime(2026, 11, 17, 13, 30, tzinfo=TAIPEI), trade_date=DAY,
+                  is_realtime=False, is_demo=True, source="demo")
+    monkeypatch.setattr(MarketData, "quote", lambda self, sym, *a, **k: q if sym == symbol else
+                        real_quote(self, sym, *a, **k))
+    if index is not None:
+        name, change, pct = index
+        with Session(engine) as db:
+            db.add(IndexDaily(name=name, date=DAY, market="TPEX" if name == TPEX_INDEX else "TWSE", close=D("27216.2"),
+                              change=D(change), change_pct=D(pct), source="twse-openapi"))
+            db.commit()
+
+
+def test_why_moved_with_the_market_cites_the_days_market_report(client, pool, fake, langsearch, rule_why, engine,
+                                                                monkeypatch, caplog):
+    """2026-11-17 eval item 1, option A: within 2 points of the TAIEX (跌 3.10% against 跌 2.10%) one more request
+    asks for the day's 台股盤後 reports, from the same daily cap; they go to the writer beside the stock's own, marked,
+    and the "moved with the market" sentence cites one. Another day's report is left out; nothing of the excerpts
+    persists."""
+    day_of(monkeypatch, engine, "1453.5")
+    ls_client = langsearch(WHY_REPLY, WRAP_REPLY)
+    sentence = "台積電跟著大盤走低，外資賣超、美債殖利率上升壓抑科技股。"
+    fake.reply(text(sentence, [location(M1, MT1, f"中央社，11/17：{MS1}")]))
+    deployment_logs(caplog)
+    w = client.get(WHY).json()
+    assert w["ai"] is True and w["headline"] == sentence
+    assert w["citations"] == [{"url": M1, "title": MT1, "cited_text": line(M1, MT1, "11/17")}]
+    assert ls_client.queries == ['"台積電"', "台股 盤後"]
+    assert ls_client.bodies[1]["freshness"] == "2026-11-17..2026-11-17"
+    assert ls_client.bodies[1]["contents"]["text"]["max_characters"] == 300
+    req = fake.requests[0]["body"]
+    assert "tools" not in req and req["system"] == WHY_SYSTEM_TW_WRAPS and "【台股盤後】" in WHY_SYSTEM_TW_WRAPS
+    content = req["messages"][0]["content"]
+    assert [(b["type"], b.get("source")) for b in content] == [("search_result", W1), ("search_result", M1),
+                                                              ("text", None)]
+    wrap = content[1]["content"][0]["text"]
+    assert wrap.startswith("【台股盤後】中央社，11/17") and MMARK in wrap
+    assert not content[0]["content"][0]["text"].startswith("【")
+    question = content[-1]["text"]
+    assert "加權指數：跌 2.10%（11/17 收盤）" in question and "這一檔：跌 3.10%（11/17）" in question
+    with Session(engine) as db:
+        assert ls.read_chat_usage(db, DAY).requests == 2  # the AI's one daily cap
+        assert db.get(AiWhyCache, ("2330.TW", DAY)).citations == w["citations"]
+    for where in (every_row(engine), json.dumps(w, ensure_ascii=False), caplog.text):
+        assert MMARK not in where and WMARK not in where
+    assert MT1 not in caplog.text
+
+
+def test_why_moved_apart_from_the_market_asks_only_for_the_stock(client, pool, fake, langsearch, rule_why, engine,
+                                                                 monkeypatch):
+    day_of(monkeypatch, engine, "1425")  # 跌 5.00% against 跌 2.10%: 2.9 points apart
+    ls_client = langsearch(WHY_REPLY, WRAP_REPLY)
+    fake.reply(text("外資賣壓擴大，股價走低。", [location(W1, WT1, f"中央社，11/17：{WS1}")]))
+    assert client.get(WHY).json()["ai"] is True
+    assert ls_client.queries == ['"台積電"']
+    req = fake.requests[0]["body"]
+    assert req["system"] == WHY_SYSTEM_TW and len(req["messages"][0]["content"]) == 2
+    with Session(engine) as db:
+        assert ls.read_chat_usage(db, DAY).requests == 1
+
+
+def test_why_with_the_market_and_no_company_news_cites_the_market(client, pool, fake, langsearch, rule_why, engine,
+                                                                   monkeypatch):
+    """The stock's own request kept nothing: the day's market report alone can carry the sentence."""
+    day_of(monkeypatch, engine, "1453.5")
+    langsearch(NOTHING, WRAP_REPLY)
+    fake.reply(text("跟著大盤下跌，外資賣超擴大。", [location(M1, MT1, MS1)]))
+    w = client.get(WHY).json()
+    assert w["ai"] is True and [c["url"] for c in w["citations"]] == [M1]
+    content = fake.requests[0]["body"]["messages"][0]["content"]
+    assert [b.get("source") for b in content] == [M1, None]
+    assert fake.requests[0]["body"]["system"] == WHY_SYSTEM_TW_WRAPS
+
+
+@pytest.mark.parametrize("kind", ["nothing_kept", "none"])
+def test_why_with_the_market_still_falls_back_to_the_web(client, pool, fake, langsearch, rule_why, engine, monkeypatch,
+                                                         kind):
+    day_of(monkeypatch, engine, "1453.5")
+    if kind == "nothing_kept":  # neither the stock's nor the market's request kept anything
+        ls_client = langsearch(NOTHING, NOTHING)
+    else:  # the writer finds nothing citable in either
+        ls_client = langsearch(WHY_REPLY, WRAP_REPLY)
+        fake.reply(text("NONE"))
+    web_why(fake)
+    w = client.get(WHY).json()
+    assert w["ai"] is True and w["citations"][0]["url"] == "https://www.cna.com.tw/n1"
+    assert ls_client.queries == ['"台積電"', "台股 盤後"]
+    web = fake.requests[-1]["body"]
+    assert web["system"] == WHY_SYSTEM and [t["name"] for t in web["tools"]] == ["web_search"]
+    assert MMARK not in json.dumps(web, ensure_ascii=False) and MMARK not in every_row(engine)
+
+
+def test_why_market_request_takes_from_the_same_cap(client, pool, fake, langsearch, rule_why, engine, monkeypatch,
+                                                    ai_env):
+    """One request left of the AI's day: the stock's own goes, the market's is not asked, the sentence is written
+    from the stock's articles."""
+    ai_env(AI_LANGSEARCH_MAX_REQUESTS_PER_DAY=1)
+    day_of(monkeypatch, engine, "1453.5")
+    ls_client = langsearch(WHY_REPLY, WRAP_REPLY)
+    fake.reply(text("外資賣壓擴大，股價走低。", [location(W1, WT1, f"中央社，11/17：{WS1}")]))
+    w = client.get(WHY).json()
+    assert w["ai"] is True and [c["url"] for c in w["citations"]] == [W1]
+    assert ls_client.queries == ['"台積電"'] and fake.requests[0]["body"]["system"] == WHY_SYSTEM_TW
+
+
+def test_why_failed_stock_request_skips_the_market(client, pool, fake, langsearch, rule_why, engine, monkeypatch):
+    """The stock's own request failed (an outage): no second LangSearch request, straight to the web search."""
+    day_of(monkeypatch, engine, "1453.5")
+    ls_client = langsearch(reply(status=503), WRAP_REPLY)
+    web_why(fake)
+    assert client.get(WHY).json()["ai"] is True
+    assert ls_client.queries == ['"台積電"'] and fake.requests[0]["body"]["system"] == WHY_SYSTEM
+
+
+def test_day_moves_uses_the_otc_index_when_it_is_in(engine, market, monkeypatch):
+    """An OTC stock is compared with the TPEx index of the day; before that close is in, with the TAIEX (as before) —
+    but then no market report is asked for (2026-11-17 review: the two indexes often differ by 1–2 points or more, and
+    the sentence is shared site-wide and not rewritten when the TPEx close comes in)."""
+    otc = InstrumentInfo("6488.TWO", "6488", "環球晶", "TPEX", "stock", "TWD")
+    day_of(monkeypatch, engine, "1470", symbol="6488.TWO")  # 跌 2.00%
+    with Session(engine) as db:
+        moves = why_mod.day_moves(db, market, otc, DAY)
+        assert (moves.index_name, moves.index_text, moves.stock_text) == ("加權指數", "跌 2.10%（11/17 收盤）",
+                                                                          "跌 2.00%（11/17）")
+        assert moves.own_index is False and not moves.with_market  # 0.1 point from the TAIEX: not its own index
+        db.add(IndexDaily(name=TPEX_INDEX, date=DAY, market="TPEX", close=D("260.5"), change=D("-13.1"),
+                          change_pct=D("0.0479"), source="tpex-openapi"))
+        db.commit()
+        moves = why_mod.day_moves(db, market, otc, DAY)
+        assert (moves.index_name, moves.index_text) == ("櫃買指數", "跌 4.79%（11/17 收盤）") and moves.own_index
+        assert not moves.with_market  # 2.79 points from its own index
+        listed = why_mod.day_moves(db, market, InstrumentInfo("2330.TW", "2330", "台積電", "TWSE", "stock", "TWD"),
+                                   DAY)
+        assert (listed.index_name, listed.index, listed.own_index) == ("加權指數", -0.021, True)  # listed: the TAIEX
+    assert not why_mod.DayMoves(DAY, -0.031, None).with_market and not why_mod.DayMoves(DAY, None, -0.02).with_market
+    assert why_mod.DayMoves(DAY, -0.048, -0.0479, "櫃買指數").with_market
+    assert not why_mod.DayMoves(DAY, -0.021, -0.021, "加權指數", own_index=False).with_market
+    assert why_mod.DayMoves(DAY, -0.031, -0.0111).with_market is True
+    assert why_mod.DayMoves(DAY, -0.031, -0.011).with_market is False  # 2 points apart: not "less than"
+
+
+def test_otc_stock_without_its_index_asks_for_no_market_report(engine, market, monkeypatch):
+    """The TAIEX standing in for an OTC stock's TPEx index not in yet: within 2 points of it, still no 台股盤後
+    request (the sentence is written from the stock's own articles, compared with the TAIEX as before)."""
+    otc = InstrumentInfo("6488.TWO", "6488", "環球晶", "TPEX", "stock", "TWD")
+    day_of(monkeypatch, engine, "1470", symbol="6488.TWO")  # 跌 2.00% against the TAIEX's 跌 2.10%
+    asked: list[Any] = []
+    monkeypatch.setattr(tw, "fetch", lambda *a, **k: asked.append(a))
+    found = tw.Found(tw.wrap_plan(DAY, NOW), [])
+    with Session(engine) as db:
+        moves = why_mod.day_moves(db, market, otc, DAY)
+        settings = get_settings()
+        assert why_mod.market_wraps(db, market, settings, otc, DAY, NOW, found, moves) == [] and asked == []
+        assert moves.index_text == "跌 2.10%（11/17 收盤）"  # the prompt still compares with the TAIEX
+
+
+# -- the deadline (2026-11-17 eval item 2, option A) ------------------------------------------------------------
+class Stalled(FakeClient):
+    """A LangSearch that answers only when released (after the deadline)."""
+
+    def __init__(self, *replies: ls.Reply) -> None:
+        super().__init__(*replies)
+        self.release = threading.Event()
+
+    def post(self, body: dict[str, Any], deadline: float | None = None) -> ls.Reply:
+        self.release.wait(10)
+        return super().post(body)
+
+
+@pytest.fixture()
+def stalled(langsearch, monkeypatch, ai_env):
+    ai_env(AI_LANGSEARCH_DEADLINE_SECONDS=0.3)
+    holder = Stalled(WHY_REPLY, WRAP_REPLY)
+    monkeypatch.setattr(ls.LangSearchClient, "from_settings", lambda settings: holder)
+    yield holder
+    holder.release.set()
+
+
+def test_why_past_the_deadline_goes_to_the_web(client, pool, fake, rule_why, engine, monkeypatch, stalled):
+    """No answer within AI_LANGSEARCH_DEADLINE_SECONDS: no result, no market request after it, the web search."""
+    day_of(monkeypatch, engine, "1453.5")
+    web_why(fake)
+    started = time.monotonic()
+    w = client.get(WHY).json()
+    assert time.monotonic() - started < 5.0
+    assert w["ai"] is True and len(fake.requests) == 1 and fake.requests[0]["body"]["system"] == WHY_SYSTEM
+    with Session(engine) as db:
+        assert ls.read_chat_usage(db, DAY).requests == 1
+
+
+def test_card_past_the_deadline_goes_to_the_web(client, pool, fake, clock, stalled, engine):
+    web_card(fake)
+    started = time.monotonic()
+    out = run_card(client, clock)
+    assert time.monotonic() - started < 5.0
+    assert out["status"] == "ready" and [i["institution"] for i in out["items"]] == ["摩根士丹利", "瑞銀"]
+    assert len(fake.requests) == 1 and fake.requests[0]["body"]["system"] == ANALYST_SYSTEM
+    with Session(engine) as db:  # its two requests had no answer: one outage in a row (one call), no pause yet
+        assert ls.down_in_a_row(db) == 1 and service._source_open(db, ls.SOURCE_KEY, NOW)
 
 
 @pytest.mark.parametrize("kind", ["none", "no_citation", "pasted"])

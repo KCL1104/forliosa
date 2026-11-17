@@ -8,10 +8,13 @@ from __future__ import annotations
 
 import json
 import logging
+import threading
+import time
 from collections import Counter
 from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
+import httpx
 import pytest
 from pydantic import SecretStr
 from sqlalchemy.orm import Session
@@ -59,7 +62,7 @@ class FakeClient:
         self.replies = list(replies) or [reply()]
         self.bodies: list[dict[str, Any]] = []
 
-    def post(self, body: dict[str, Any]) -> ls.Reply:
+    def post(self, body: dict[str, Any], deadline: float | None = None) -> ls.Reply:
         self.bodies.append(dict(body))
         r = self.replies[min(len(self.bodies) - 1, len(self.replies) - 1)]
         if isinstance(r, Exception):
@@ -566,7 +569,9 @@ def good(n: int = 2) -> ls.Reply:
                    for i in range(n)])
 
 
-def test_retry_on_a_slow_empty_answer(ctx, lsfake):
+def test_retry_on_a_slow_empty_answer(ctx, lsfake, aiset):
+    # a deadline long enough for the retry (with the 12 s default it never fits: see the deadline tests)
+    ctx.tw_news.settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 30.0})
     fake = lsfake(reply(latency=9.0), good())
     _out, data = run(ctx, symbol="2330", intent="news")
     assert len(fake.bodies) == 2 and isinstance(data, list) and len(data) == 2
@@ -668,7 +673,8 @@ def test_the_ai_cap_is_taken_in_one_update(engine, aiset, monkeypatch):
     """2026-11-17 review: the day's count was read, and the requests added only after the gap, so callers side by side
     (chat turns, the card, 為什麼漲跌) all saw room and together went over the cap. What is sent now is what one
     conditional UPDATE took: here every caller reads a stale count of 0."""
-    settings = aiset.model_copy(update={"ai_langsearch_max_requests_per_day": 3})
+    # a deadline that leaves room for the slow empty answer's retry (it is the cap that stops it below)
+    settings = aiset.model_copy(update={"ai_langsearch_max_requests_per_day": 3, "ai_langsearch_deadline_seconds": 30})
     pair = ['"台積電" 調升目標價', '"台積電" 調降目標價']
 
     def ask(db: Session, client: FakeClient, queries: list[str], chars: int = 600) -> ls.ChatBatch:
@@ -717,6 +723,304 @@ def test_the_analysts_two_requests_start_one_interval_apart(engine, aiset):
         batch = ls.chat_search(db, aiset, ['"台積電" 調升目標價', '"台積電" 調降目標價'], "2026-08-19..2026-11-17",
                                max_characters=600, client=client, clock=lambda: NOW, sleep=lambda s: None)
     assert batch.requests == 2 and sorted(starts) == [0.0, 1.5]
+
+
+# -- 9. the deadline (2026-11-17 eval item 2, option A) --------------------------------------------------------------
+class Stalled:
+    """A LangSearch that does not answer its first ``stall`` requests until released (the test releases it when it is
+    done); the others it answers at once."""
+
+    def __init__(self) -> None:
+        self.release = threading.Event()
+        self.calls = 0
+        self.stall = 1_000
+
+    def handler(self, request: httpx.Request) -> httpx.Response:
+        self.calls += 1
+        if self.calls <= self.stall:
+            self.release.wait(10)
+        return httpx.Response(200, json=answer())
+
+
+@pytest.fixture()
+def stalled():
+    s = Stalled()
+    yield s
+    s.release.set()
+
+
+def ask(db: Session, settings: Any, client: Any) -> ls.ChatBatch:
+    return ls.chat_search(db, settings, ['"台積電"'], "2026-11-16..2026-11-17", max_characters=300, client=client,
+                          clock=lambda: NOW, sleep=lambda s: None)
+
+
+def wait_late(n: int) -> None:
+    """Until ``n`` replies that came after their deadline are waiting to be booked."""
+    until = time.monotonic() + 5
+    while len(ls._LATE) < n and time.monotonic() < until:
+        time.sleep(0.01)
+    assert len(ls._LATE) == n
+
+
+def test_a_slow_answer_is_cut_at_the_deadline(engine, aiset, stalled, caplog):
+    """The AI's call waits AI_LANGSEARCH_DEADLINE_SECONDS in all, whatever the transport does (httpx's timeout bounds
+    one read, not the request: the eval's 37 s request), then stands as no result, counted toward the day. A call with
+    no answer at all is one outage in a row (2026-11-17 review: before, a LangSearch that hangs never paused, and every
+    chat call, card and sentence waited the deadline out): the second pauses the source — the worker's too — and the
+    next call sends nothing. One log line each, with the time it took."""
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    # no gap between the calls here (the shared limiter's 1.5 s would hold the second past its deadline)
+    client = ls.LangSearchClient(KEY, limiter=ls.RateLimiter(), transport=httpx.MockTransport(stalled.handler))
+    try:
+        with Session(engine) as db, caplog.at_level(logging.DEBUG):
+            for n in (1, 2):
+                started = time.monotonic()
+                batch = ask(db, settings, client)
+                assert time.monotonic() - started < 3.0
+                assert [(a.error, a.items, a.requests) for a in batch.answers] == [("deadline", [], 1)]
+                assert batch.cut == 1 and ls.read_chat_usage(db, NOW.date()).requests == n
+                assert ls.down_in_a_row(db) == n
+            assert batch.stopped == "unreachable" and not service._source_open(db, ls.SOURCE_KEY, NOW)
+            wide = db.get(NewsFetchState, (ls.SOURCE_KEY, service.SOURCE_WIDE))
+            assert wide.last_status == "unreachable" and wide.backoff_until.replace(tzinfo=UTC) < MIDNIGHT
+            assert ls.key_stopped(db, NOW.date()) is None  # an outage's pause, not a refusal's stop until 00:00 UTC
+            with pytest.raises(ls.ChatUnavailable) as paused:
+                ask(db, settings, client)
+            assert paused.value.reason == "paused" and stalled.calls == 2
+    finally:
+        stalled.release.set()
+        client.close()
+    cut = [r.getMessage() for r in caplog.records if "deadline (" in r.getMessage()]
+    assert len(cut) == 2 and all("1 of 1 requests had no answer within the 0.3 s deadline (" in m for m in cut)
+    assert cut[0].endswith("; no answer: 1 in a row") and cut[1].endswith("; no answer: 2 in a row (paused)")
+    assert KEY not in caplog.text and "台積電" not in caplog.text
+
+
+def test_one_slow_call_alone_does_not_pause(engine, aiset, stalled):
+    """A call cut by the deadline and then an answer: the run of outages is over, LangSearch stays open."""
+    stalled.stall = 1
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    client = ls.LangSearchClient(KEY, limiter=ls.RateLimiter(), transport=httpx.MockTransport(stalled.handler))
+    try:
+        with Session(engine) as db:
+            assert ask(db, settings, client).cut == 1 and ls.down_in_a_row(db) == 1
+            batch = ask(db, settings, client)
+            assert batch.cut == 0 and batch.answers[0].error is None
+            assert ls.down_in_a_row(db) == 0 and service._source_open(db, ls.SOURCE_KEY, NOW)
+    finally:
+        stalled.release.set()
+        client.close()
+
+
+def test_a_request_never_sent_is_no_outage(engine, aiset, stalled):
+    """Its turn of the limiter comes after the deadline: nothing is sent, at once — no result, and no outage (the
+    AI's own queue, not LangSearch)."""
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    limiter = ls.RateLimiter(per_host={ls.HOST: 5.0})
+    limiter.wait(ls.HOST)  # another request just took the turn: the next is 5 s away
+    client = ls.LangSearchClient(KEY, limiter=limiter, transport=httpx.MockTransport(stalled.handler))
+    with Session(engine) as db:
+        for _ in range(2):
+            started = time.monotonic()
+            batch = ask(db, settings, client)
+            assert time.monotonic() - started < 1.0 and batch.cut == 1 and batch.stopped is None
+        assert stalled.calls == 0 and ls.down_in_a_row(db) == 0 and service._source_open(db, ls.SOURCE_KEY, NOW)
+    client.close()
+
+
+def test_a_request_past_the_deadline_takes_no_turn_of_the_limiter(stalled):
+    """2026-11-17 review: a request whose turn of the limiter would come after its deadline is not sent, and does not
+    take that turn either (the next request waited 1.5 s for nothing, out of its own deadline)."""
+    stalled.stall = 0
+    client = ls.LangSearchClient(KEY, limiter=ls.RateLimiter(per_host={ls.HOST: 0.4}),
+                                 transport=httpx.MockTransport(stalled.handler))
+    body = ls.chat_request_body('"台積電"', "oneWeek", 300)
+    with pytest.raises(ls.LangSearchDeadline) as cut:
+        client.post(body, deadline=time.monotonic() - 0.01)
+    assert cut.value.sent is False
+    started = time.monotonic()
+    assert client.post(body, deadline=time.monotonic() + 5).status == 200
+    assert time.monotonic() - started < 0.3  # the turn the late one did not take: no wait
+    started = time.monotonic()
+    with pytest.raises(ls.LangSearchDeadline) as cut:  # the next turn is 0.4 s away, past a 0.1 s deadline
+        client.post(body, deadline=time.monotonic() + 0.1)
+    assert cut.value.sent is False and time.monotonic() - started < 0.1  # refused at once, without sleeping
+    started = time.monotonic()
+    assert client.post(body, deadline=time.monotonic() + 5).status == 200
+    assert time.monotonic() - started < 0.55  # that turn (0.4 s after the first), not one interval more
+    client.close()
+    assert stalled.calls == 2
+
+
+class Held(FakeClient):
+    """Each request waits until the test lets it go (10 s at most), then answers as scripted."""
+
+    def __init__(self, *replies: ls.Reply | Exception) -> None:
+        super().__init__(*replies)
+        self.gates = [threading.Event() for _ in range(4)]
+
+    def post(self, body: dict[str, Any], deadline: float | None = None) -> ls.Reply:
+        n = len(self.bodies)
+        self.bodies.append(dict(body))
+        self.gates[n].wait(10)
+        r = self.replies[min(n, len(self.replies) - 1)]
+        if isinstance(r, Exception):
+            raise r
+        return r
+
+    def let_go(self) -> None:
+        for g in self.gates:
+            g.set()
+
+
+def test_a_late_refusal_stops_the_key_before_the_next_request(engine, aiset, caplog):
+    """2026-11-17 review: a reply that came after the deadline was never read, so a late 429 did not stop the key and
+    its tokens were not counted. Its thread hands it on and the next AI call books it first: the key stops until
+    00:00 UTC for both sides, and that call sends nothing."""
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    held = Held(reply(status=429, tokens=(5, 0)))
+    try:
+        with Session(engine) as db, caplog.at_level(logging.DEBUG):
+            assert ask(db, settings, held).cut == 1
+            held.gates[0].set()
+            wait_late(1)
+            with pytest.raises(ls.ChatUnavailable) as stopped:
+                ask(db, settings, held)
+            assert stopped.value.reason == "paused" and len(held.bodies) == 1 and not ls._LATE
+            db.expire_all()
+            use = ls.read_chat_usage(db, NOW.date())
+            assert (use.stopped, use.tokens, use.requests) == ("quota", 5, 1)
+            assert ls.key_stopped(db, NOW.date()) == "quota" and ls.read_usage(db, NOW.date()).stopped == ""
+            wide = db.get(NewsFetchState, (ls.SOURCE_KEY, service.SOURCE_WIDE))
+            assert wide.last_status == "rate_limited" and wide.backoff_until.replace(tzinfo=UTC) == MIDNIGHT
+    finally:
+        held.let_go()
+    assert "a reply after the deadline, HTTP 429" in caplog.text and KEY not in caplog.text
+
+
+def test_the_calls_own_client_stays_open_for_a_late_reply(engine, aiset, stalled, monkeypatch):
+    """The real client a call makes for itself is closed only once its cut request has ended (closing it under the
+    running request would end that with an error, and a late refusal would never be booked); then the late 429 stops
+    the key at the next call."""
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        stalled.calls += 1
+        stalled.release.wait(10)
+        return httpx.Response(429, json={"code": 429, "msg": "rate limited"})
+
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    made: list[ls.LangSearchClient] = []
+
+    def own(_settings: Any) -> ls.LangSearchClient:
+        made.append(ls.LangSearchClient(KEY, limiter=ls.RateLimiter(), transport=httpx.MockTransport(handler)))
+        return made[-1]
+
+    monkeypatch.setattr(ls.LangSearchClient, "from_settings", own)
+    with Session(engine) as db:
+        assert ask(db, settings, None).cut == 1
+        assert not made[0]._http.is_closed  # its request is still running
+        stalled.release.set()
+        wait_late(1)
+        until = time.monotonic() + 5
+        while not made[0]._http.is_closed and time.monotonic() < until:
+            time.sleep(0.01)
+        assert made[0]._http.is_closed
+        with pytest.raises(ls.ChatUnavailable):
+            ask(db, settings, None)
+        assert ls.key_stopped(db, NOW.date()) == "quota" and stalled.calls == 1 and len(made) == 1
+
+
+def test_a_late_answer_counts_its_tokens_but_ends_no_run_of_outages(engine, aiset):
+    """A 200 that came after the deadline: its tokens count toward the AI's day; it is not an answer within the
+    deadline, so it does not end the run (LangSearch that answers in 20 s is paused like one that hangs), and its
+    items are never read."""
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    held = Held(good())
+    try:
+        with Session(engine) as db:
+            assert ask(db, settings, held).cut == 1 and ls.down_in_a_row(db) == 1
+            held.gates[0].set()
+            wait_late(1)
+            batch = ask(db, settings, held)  # books the late one, then is cut itself
+            assert batch.cut == 1 and batch.stopped == "unreachable" and batch.tokens == 0
+            db.expire_all()
+            assert ls.read_chat_usage(db, NOW.date()).tokens == 910 and ls.down_in_a_row(db) == 2
+            assert not service._source_open(db, ls.SOURCE_KEY, NOW)
+            with pytest.raises(ls.ChatUnavailable):
+                ask(db, settings, held)
+            assert len(held.bodies) == 2
+    finally:
+        held.let_go()
+
+
+def test_a_late_answer_over_the_token_guard_stops_the_ai(engine, aiset):
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    held = Held(reply(*good().payload["data"]["webPages"]["value"], tokens=(10, 25_000)))
+    try:
+        with Session(engine) as db:
+            ask(db, settings, held)
+            held.gates[0].set()
+            wait_late(1)
+            with pytest.raises(ls.ChatUnavailable) as stopped:
+                ask(db, settings, held)
+            assert stopped.value.reason == "contract" and len(held.bodies) == 1
+            assert ls.read_chat_usage(db, NOW.date()).tokens == 25_010
+            assert service._source_open(db, ls.SOURCE_KEY, NOW)  # the news worker goes on
+    finally:
+        held.let_go()
+
+
+def test_a_reply_from_an_earlier_round_is_dropped(engine, aiset):
+    """``reset_late`` (between tests): a reply still on its way from before is not booked when it comes."""
+    settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    held = Held(reply(status=429))
+    try:
+        with Session(engine) as db:
+            ask(db, settings, held)
+            ls.reset_late()
+            held.gates[0].set()
+            time.sleep(0.2)
+            assert not ls._LATE
+    finally:
+        held.let_go()
+
+
+def test_the_tool_points_to_the_web_search_at_the_deadline(ctx, lsfake, aiset, monkeypatch):
+    release = threading.Event()
+
+    class Slow(FakeClient):
+        def post(self, body: dict[str, Any], deadline: float | None = None) -> ls.Reply:
+            self.bodies.append(dict(body))
+            release.wait(10)
+            return good()
+
+    slow = Slow()
+    monkeypatch.setattr(ls.LangSearchClient, "from_settings", lambda settings: slow)
+    ctx.tw_news.settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 0.3})
+    started = time.monotonic()
+    try:
+        _, data = run(ctx, symbol="2330", intent="news")
+    finally:
+        release.set()
+    assert time.monotonic() - started < 3.0 and len(slow.bodies) == 1
+    assert data["status"] == "error" and "web_search" in data["note"]
+    assert ctx.tw_news.calls == ["news:error:deadline"] and ctx.tw_news.requests == 1
+
+
+def test_the_slow_empty_retry_needs_more_than_the_default_deadline(ctx, lsfake, aiset):
+    """0 results after 8 s is asked once more only when the deadline leaves the gap and about one answer (1.5 + 3 s).
+    2026-11-17 review: with the 12 s default that is never — 12 - 8 < 4.5 — so a slow empty answer is no result and
+    the web search runs; the retry needs AI_LANGSEARCH_DEADLINE_SECONDS of 12.5 at least. (What the scripted reply
+    says it took counts as spent.)"""
+    need = ls.EMPTY_RETRY_SECONDS + aiset.news_langsearch_interval_seconds + ls.EMPTY_RETRY_MIN_LEFT
+    assert (aiset.ai_langsearch_deadline_seconds, need) == (12.0, 12.5)
+    fake = lsfake(reply(latency=8.0), good())
+    _, data = run(ctx, symbol="2330", intent="news")
+    assert len(fake.bodies) == 1 and data["status"] == "none"
+    ctx.tw_news.settings = aiset.model_copy(update={"ai_langsearch_deadline_seconds": 13.0})
+    fake = lsfake(reply(latency=8.0), good())
+    run(ctx, symbol="2330", intent="dividend")
+    assert len(fake.bodies) == 2
 
 
 def test_no_text_or_key_in_logs(ctx, lsfake, caplog):

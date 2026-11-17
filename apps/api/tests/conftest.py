@@ -102,7 +102,8 @@ def no_searxng_network():
 @pytest.fixture(autouse=True)
 def no_langsearch_network():
     """No test may reach LangSearch: every request fails unless a test installs a mock transport with
-    ``forliosa.news.langsearch.set_transport`` (or gives the client its own). The shared limiters start fresh."""
+    ``forliosa.news.langsearch.set_transport`` (or gives the client its own). The shared limiters start fresh, and
+    no reply that came after an AI request's deadline is carried into another test."""
     import httpx
 
     from forliosa.ai import tw_news
@@ -113,10 +114,12 @@ def no_langsearch_network():
 
     langsearch.set_transport(httpx.MockTransport(refuse))
     langsearch.reset_limiters()
+    langsearch.reset_late()
     tw_news.reset_caches()
     yield
     langsearch.set_transport(None)
     langsearch.reset_limiters()
+    langsearch.reset_late()
     tw_news.reset_caches()
 
 

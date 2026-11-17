@@ -58,7 +58,7 @@ class FakeClient:
         self.replies = list(replies) or [GOOD]
         self.bodies: list[dict[str, Any]] = []
 
-    def post(self, body: dict[str, Any]) -> ls.Reply:
+    def post(self, body: dict[str, Any], deadline: float | None = None) -> ls.Reply:
         self.bodies.append(dict(body))
         return self.replies[min(len(self.bodies) - 1, len(self.replies) - 1)]
 

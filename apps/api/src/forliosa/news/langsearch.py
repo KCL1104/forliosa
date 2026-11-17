@@ -78,7 +78,7 @@ import math
 import re
 import threading
 import time as _time
-from collections import Counter
+from collections import Counter, deque
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
@@ -399,6 +399,7 @@ class LangSearchClient:
             raise ValueError("LangSearch requests go to https://api.langsearch.com/ only")
         self.url = url
         self._key = api_key
+        self._timeout = timeout
         self.limiter = limiter or shared_limiter(interval)
         self._http = httpx.Client(timeout=timeout, follow_redirects=False, transport=transport or _TRANSPORT[0],
                                   headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
@@ -414,13 +415,30 @@ class LangSearchClient:
     def __repr__(self) -> str:  # never the key
         return f"LangSearchClient({self.url!r})"
 
-    def post(self, body: Mapping[str, Any]) -> Reply:
-        """One request. A timeout or a connection error raises :class:`SourceDown` (its message names no header)."""
-        self.limiter.wait(HOST)
+    def post(self, body: Mapping[str, Any], *, deadline: float | None = None) -> Reply:
+        """One request. A timeout or a connection error raises :class:`SourceDown` (its message names no header).
+        ``deadline`` (a ``time.monotonic()`` instant; the AI's requests only, :func:`chat_search`): a turn of the
+        limiter that would start after it is not taken (:meth:`RateLimiter.wait_until`: the next request does not wait
+        for one never sent) and nothing is sent — :class:`LangSearchDeadline` with ``sent=False``; a connect or a read
+        waits at most what is left of it — :class:`LangSearchDeadline` past it."""
+        timeout: Any = httpx.USE_CLIENT_DEFAULT
+        if deadline is None:
+            self.limiter.wait(HOST)
+        else:
+            if self.limiter.wait_until(HOST, deadline) is None:
+                raise LangSearchDeadline("LangSearch not asked: its turn comes after the AI's deadline", sent=False)
+            left = deadline - _time.monotonic()
+            if left <= 0:
+                raise LangSearchDeadline("LangSearch not asked: the AI's deadline passed while waiting its turn",
+                                         sent=False)
+            timeout = httpx.Timeout(min(self._timeout, left))
         started = _time.monotonic()
         try:
-            resp = self._http.post(self.url, json=dict(body), headers={"Authorization": f"Bearer {self._key}"})
+            resp = self._http.post(self.url, json=dict(body), headers={"Authorization": f"Bearer {self._key}"},
+                                   timeout=timeout)
         except httpx.TimeoutException:
+            if deadline is not None and _time.monotonic() >= deadline:
+                raise LangSearchDeadline("LangSearch: no answer within the AI's deadline") from None
             raise SourceDown("LangSearch timed out") from None
         except httpx.HTTPError as exc:
             raise SourceDown(f"LangSearch unreachable ({type(exc).__name__})") from None
@@ -1147,7 +1165,23 @@ def _book_outcome(db: Session, today: date, at: datetime, err: Exception | None,
 CHAT_CHARACTERS = (300, 600)  # contents caps the AI may ask for (600: the 法人 intent, trimmed to 300 before Claude)
 CHAT_COUNT = 20
 EMPTY_RETRY_SECONDS = 8.0  # 0 results after this long is LangSearch's occasional empty answer: asked once more
+# ... but only when this much of AI_LANGSEARCH_DEADLINE_SECONDS is still left after the gap before it (about one
+# ordinary answer, 2026-11-17 eval: ~3 s). So it needs a deadline of 8 + 1.5 + 3 = 12.5 s at least: with the 12 s
+# default a slow empty answer is never asked again — it is no result, and the web search runs (2026-11-17 review).
+EMPTY_RETRY_MIN_LEFT = 3.0
 _NO_RANGE = ("noLimit", "oneYear")
+
+
+class LangSearchDeadline(Exception):
+    """One of the AI's requests had no answer within ``AI_LANGSEARCH_DEADLINE_SECONDS`` (2026-11-17 eval: one took
+    37 s; httpx's timeout bounds each read, not the request): no result, the web search runs. ``sent``: it went out
+    (``False``: its turn of the limiter came too late, nothing was sent). A call of :func:`chat_search` in which a sent
+    request got no answer at all within the deadline counts as one outage toward the pause of :func:`_book_outcome`
+    (2026-11-17 review: LangSearch hanging must still pause it); one slow call alone does not pause."""
+
+    def __init__(self, message: str, *, sent: bool = True):
+        super().__init__(message)
+        self.sent = sent
 
 
 class ChatUnavailable(Exception):
@@ -1244,7 +1278,8 @@ class ChatAnswer:
 
     query: str
     items: list[RawItem] = field(default_factory=list)
-    error: str | None = None  # error | unreachable | quota | blocked | contract (this query brought nothing)
+    # error | unreachable | quota | blocked | contract | deadline (this query brought nothing)
+    error: str | None = None
     latency: float = 0.0
     requests: int = 0  # 1, or 2 with the empty-result retry
     tokens: int = 0
@@ -1263,20 +1298,159 @@ class ChatBatch:
     def tokens(self) -> int:
         return sum(a.tokens for a in self.answers)
 
+    @property
+    def cut(self) -> int:
+        """Requests that had no answer within the deadline."""
+        return sum(a.error == "deadline" for a in self.answers)
 
-def _post_all(client: LangSearchClient, bodies: list[dict[str, Any]]) -> list[Reply | Exception]:
+
+_PENDING: Any = object()
+
+
+class _Handoff:
+    """One request's outcome, passed from its thread under a lock: the caller takes it within the deadline, or gives
+    up on it — then the thread hands a reply that comes after all to ``late`` (never both, never neither)."""
+
+    __slots__ = ("abandoned", "done", "lock", "value")
+
+    def __init__(self) -> None:
+        self.lock = threading.Lock()
+        self.done = threading.Event()
+        self.value: Any = _PENDING
+        self.abandoned = False
+
+
+def _post_all(client: LangSearchClient, bodies: list[dict[str, Any]], deadline: float | None = None,
+              late: Callable[[Reply], None] | None = None,
+              running: list[_Handoff] | None = None) -> list[Reply | Exception]:
     """Send the bodies; more than one go out side by side, so the second starts one interval after the first starts
-    (the client's limiter), not after it returns. Only HTTP happens off this thread: the bookkeeping stays here."""
+    (the client's limiter), not after it returns. Only HTTP happens off this thread: the bookkeeping stays here.
+
+    With ``deadline`` (a ``time.monotonic()`` instant) every request runs on a thread of its own and is waited for
+    until then at most, whatever the transport does (a read that trickles in never ends a per-read timeout): a request
+    still running is left to end on its thread — its connect and reads wait no longer than the deadline did — and
+    stands as a :class:`LangSearchDeadline`; a reply it brings after all goes to ``late`` (:func:`_keep_late`: booked
+    at the next :func:`chat_search`, its items never read), and its handoff to ``running`` (the client is closed only
+    once it has ended: :func:`_close_after`)."""
     def one(body: dict[str, Any]) -> Reply | Exception:
         try:
-            return client.post(body)
-        except Exception as exc:  # SourceDown (timeout, connection): booked by the caller
+            return client.post(body, deadline=deadline) if deadline is not None else client.post(body)
+        except Exception as exc:  # SourceDown (timeout, connection), LangSearchDeadline: booked by the caller
             return exc
 
-    if len(bodies) == 1:
-        return [one(bodies[0])]
-    with ThreadPoolExecutor(max_workers=len(bodies), thread_name_prefix="langsearch") as pool:
-        return list(pool.map(one, bodies))
+    if deadline is None:
+        if len(bodies) == 1:
+            return [one(bodies[0])]
+        with ThreadPoolExecutor(max_workers=len(bodies), thread_name_prefix="langsearch") as pool:
+            return list(pool.map(one, bodies))
+
+    def run(body: dict[str, Any], hand: _Handoff) -> None:
+        out = one(body)
+        with hand.lock:
+            taken = not hand.abandoned
+            if taken:
+                hand.value = out
+        hand.done.set()
+        if not taken and late is not None and isinstance(out, Reply):
+            late(out)
+
+    hands = [_Handoff() for _ in bodies]
+    pool = ThreadPoolExecutor(max_workers=len(bodies), thread_name_prefix="langsearch")
+    try:
+        for body, hand in zip(bodies, hands, strict=True):
+            pool.submit(run, body, hand)
+        out: list[Reply | Exception] = []
+        for hand in hands:
+            hand.done.wait(max(0.0, deadline - _time.monotonic()))
+            with hand.lock:
+                if hand.value is _PENDING:
+                    hand.abandoned = True
+                    out.append(LangSearchDeadline("LangSearch: no answer within the AI's deadline"))
+                    if running is not None:
+                        running.append(hand)
+                else:
+                    out.append(hand.value)
+        return out
+    finally:
+        pool.shutdown(wait=False)  # never waits for a request past the deadline
+
+
+LATE_CLOSE_SECONDS = 120.0  # an own client still in use past the deadline is closed once that request ends, or then
+
+
+def _close_after(client: LangSearchClient, running: list[_Handoff]) -> None:
+    """Close a client of the call's own now — or, while a request cut by the deadline is still running on it, once
+    the last such request has ended (on a thread of its own, at most :data:`LATE_CLOSE_SECONDS`): closing it under a
+    running request would end that request with an error, and its late reply (a refusal) would never be booked."""
+    left = [h for h in running if not h.done.is_set()]
+    if not left:
+        client.close()
+        return
+
+    def close() -> None:
+        until = _time.monotonic() + LATE_CLOSE_SECONDS
+        for h in left:
+            h.done.wait(max(0.0, until - _time.monotonic()))
+        client.close()
+
+    threading.Thread(target=close, name="langsearch-close", daemon=True).start()
+
+
+# Replies that came after the AI's deadline (their threads end on their own): booked at the next chat_search
+_LATE: deque[tuple[date, Reply]] = deque(maxlen=64)
+_LATE_LOCK = threading.Lock()
+_LATE_ROUND = [0]
+
+
+def reset_late() -> None:
+    """Tests: forget the late replies; one still on its way from an earlier round is dropped when it comes."""
+    with _LATE_LOCK:
+        _LATE.clear()
+        _LATE_ROUND[0] += 1
+
+
+def _keep_late(day: date) -> Callable[[Reply], None]:
+    """Where a reply to one of ``day``'s AI requests goes when it comes after the deadline."""
+    with _LATE_LOCK:
+        round_ = _LATE_ROUND[0]
+
+    def keep(reply: Reply) -> None:
+        with _LATE_LOCK:
+            if _LATE_ROUND[0] == round_:
+                _LATE.append((day, reply))
+
+    return keep
+
+
+def _book_late(db: Session, settings: Settings, clock: Callable[[], datetime]) -> int:
+    """Book the replies that came after the deadline (2026-11-17 review: they were never read): their tokens on the
+    AI's day of the request; an answer above ``AI_LANGSEARCH_TOKEN_GUARD`` stops the AI's use for the day; a refusal
+    (429, 401 / 403, a redirect) stops the key until 00:00 UTC for both sides (:func:`_book_outcome`) — found only now,
+    so the request that finds it is not sent. A late answer is not one within the deadline: it does not end a run of
+    outages, and its items are never read; a late 5xx is not booked again (its call counted already). Logs status,
+    latency and tokens only. Returns how many were booked."""
+    with _LATE_LOCK:
+        late = list(_LATE)
+        _LATE.clear()
+    for day, r in late:
+        log.info("LangSearch (AI): a reply after the deadline, HTTP %d in %.1f s, %d+%d tokens", r.status, r.latency,
+                 r.input_tokens, r.output_tokens)
+        if r.tokens:
+            _bump_chat(db, day, tokens=r.tokens)
+        at = clock()
+        if r.status == 200 and r.tokens > settings.ai_langsearch_token_guard:
+            log.warning("LangSearch (AI): a late answer of %d tokens, more than AI_LANGSEARCH_TOKEN_GUARD %d — the "
+                        "contents cap was ignored; the AI's use stops until 00:00 UTC", r.tokens,
+                        settings.ai_langsearch_token_guard)
+            _bump_chat(db, _utc_day(at), stopped="contract", at=at)
+            continue
+        try:
+            _check_status(r, at)
+        except SourceBlocked as exc:
+            _book_outcome(db, _utc_day(at), at, exc, settings.news_langsearch_token_guard, side="chat")
+        except Exception:  # a 5xx or an answer that is not JSON: no more than its call's no-answer
+            pass
+    return len(late)
 
 
 def chat_search(db: Session, settings: Settings, queries: Sequence[str], fresh: str, *, max_characters: int,
@@ -1290,10 +1464,19 @@ def chat_search(db: Session, settings: Settings, queries: Sequence[str], fresh: 
     waited out. Every outcome is booked like the worker's (:func:`_book_outcome`, on the AI's day): a refusal stops the
     key until 00:00 UTC for both, and a later reply never lifts it (:func:`_mark_answered`). An answer above
     ``AI_LANGSEARCH_TOKEN_GUARD`` tokens stops the AI's use for the UTC day (logged) and is not used. 0 results after
-    :data:`EMPTY_RETRY_SECONDS` is asked once more (one more request taken from the cap). Raises
+    :data:`EMPTY_RETRY_SECONDS` is asked once more (one more request taken from the cap) when the deadline leaves time
+    for it (:data:`EMPTY_RETRY_MIN_LEFT` after the gap: never with the 12 s default). ``AI_LANGSEARCH_DEADLINE_SECONDS``
+    (12) is the whole call's deadline from the gap's wait on — connect, read and that retry (:func:`_post_all`): a
+    request without an answer by then is no result (``error`` ``deadline``; counted toward the day), and one line says
+    so with the time it took. A call in which LangSearch answered nothing within it (a request was sent and cut, no
+    reply under 500 came) is one outage in a row (:func:`_book_outcome`): two such calls, or one and a 5xx / timeout,
+    with no answer between pause the source like any outage (2026-11-17 review: a LangSearch that hangs made every
+    call wait the deadline out); one slow call alone does not. The replies that came after an earlier call's deadline
+    are booked first (:func:`_book_late`): their tokens, and a refusal's stop before anything is sent. Raises
     :class:`ChatUnavailable` when nothing may be sent; logs status, latency, result count and tokens only."""
     if not settings.ai_langsearch_on:
         raise ChatUnavailable("off")
+    _book_late(db, settings, clock)
     now = clock()
     today = _utc_day(now)
     if not service._source_open(db, SOURCE_KEY, now):
@@ -1318,15 +1501,21 @@ def chat_search(db: Session, settings: Settings, queries: Sequence[str], fresh: 
         if client is None:
             raise ChatUnavailable("off")
     batch = ChatBatch()
+    gap = settings.news_langsearch_interval_seconds
+    started = _time.monotonic()
+    deadline = started + settings.ai_langsearch_deadline_seconds
+    late = _keep_late(today)
+    running: list[_Handoff] = []  # requests cut by the deadline, still running on the client
     try:
         # counted before they are sent, and only as many as still fit (the count read above may be stale)
         bodies = bodies[:_reserve_chat(db, today, len(bodies), cap)]
         if not bodies:
             raise ChatUnavailable("requests_cap")
-        _wait_gap(db, settings.news_langsearch_interval_seconds, clock, sleep)
+        _wait_gap(db, gap, clock, sleep)
         _bump_chat(db, today, at=clock())  # the time sent: the gap of the next request of any process
-        sent = _post_all(client, bodies)
+        sent = _post_all(client, bodies, deadline, late, running)
         _bump_chat(db, today, at=clock())  # after the limiter's wait: the next process measures its gap from here
+        outs: list[Reply | Exception] = list(sent)
         for body, out in zip(bodies, sent, strict=True):
             ans = ChatAnswer(body["query"], requests=1)
             batch.answers.append(ans)
@@ -1337,28 +1526,46 @@ def chat_search(db: Session, settings: Settings, queries: Sequence[str], fresh: 
                     _bump_chat(db, today, tokens=out.tokens)
                 continue
             why = _chat_outcome(db, settings, today, clock, out, ans)
+            # the answer's own time is spent at least (what a scripted reply says it took counts too)
+            left = deadline - max(_time.monotonic(), started + ans.latency)
             if (why is None and ans.error is None and not ans.items and ans.latency >= EMPTY_RETRY_SECONDS
-                    and _reserve_chat(db, today, 1, cap)):
-                _wait_gap(db, settings.news_langsearch_interval_seconds, clock, sleep)
+                    and left >= gap + EMPTY_RETRY_MIN_LEFT and _reserve_chat(db, today, 1, cap)):
+                _wait_gap(db, gap, clock, sleep)
                 _bump_chat(db, today, at=clock())
-                again = _post_all(client, [body])[0]
+                again = _post_all(client, [body], deadline, late, running)[0]
+                outs.append(again)
                 _bump_chat(db, today, at=clock())
                 ans.requests += 1
                 why = _chat_outcome(db, settings, today, clock, again, ans)
             if why is not None:
                 batch.stopped = why
+        if batch.cut:
+            down = ""
+            if (not batch.stopped and any(isinstance(o, LangSearchDeadline) and o.sent for o in outs)
+                    and not any(isinstance(o, Reply) and o.status < 500 for o in outs)):
+                stop = _book_outcome(db, today, clock(), SourceDown("LangSearch: no answer within the AI's deadline"),
+                                     settings.news_langsearch_token_guard, side="chat")
+                batch.stopped = stop
+                down = f"; no answer: {down_in_a_row(db)} in a row" + (" (paused)" if stop else "")
+            log.warning("LangSearch (AI): %d of %d requests had no answer within the %g s deadline (%.1f s); "
+                        "treated as no result%s", batch.cut, len(batch.answers),
+                        settings.ai_langsearch_deadline_seconds, _time.monotonic() - started, down)
     finally:
         if own:
-            client.close()
+            _close_after(client, running)
     return batch
 
 
 def _chat_outcome(db: Session, settings: Settings, today: date, clock: Callable[[], datetime],
                   out: Reply | Exception, ans: ChatAnswer) -> str | None:
     """Book one reply of the AI's (tokens, the guard, the key's state) into ``ans``; the reason the rest of the batch
-    must not be asked, or None."""
+    must not be asked, or None. A request cut off by the deadline is not an answer: nothing is booked for it here but
+    the request (taken before it was sent); :func:`chat_search` books its call's outage once."""
     err: Exception | None = out if isinstance(out, Exception) else None
     ans.items, ans.error = [], None
+    if isinstance(out, LangSearchDeadline):
+        ans.error = "deadline"
+        return None
     if isinstance(out, Reply):
         ans.latency = out.latency
         ans.tokens += out.tokens
