@@ -71,6 +71,14 @@ FINANCE_CUES: tuple[str, ...] = (
     "掛牌", "下市", "停止買賣", "重訊", "併購", "收購", "合併", "入股", "持股", "子公司", "集團", "公司",
     "旗下", "品牌", "商機", "市占", "檔", "族群", "概念", "金控", "證券",
 )
+# Short forms headlines use for a company (LangSearch recommendation 2026-11-17 §3.2, measured: 「台積10月營收飆 月增14%
+# 創高」 missed 4 headlines, 「禾榮」 2): code -> forms that count like its short name (two characters: only with a
+# finance word, the code, another listed name next to them or on a finance page). Not 「台達」: it is one of
+# :data:`WORDS`, keeping 台達能源 out.
+ALIASES: dict[str, tuple[str, ...]] = {"2330": ("台積",), "7799": ("禾榮",)}
+# Phrases that name a company only as a whole (「富邦」 alone is a family of companies; followed by 金控, 人壽, 銀行 or
+# 董座 it is 富邦金's): code -> phrases that count like its official name.
+ALIAS_FORMS: dict[str, tuple[str, ...]] = {"2881": ("富邦金控", "富邦人壽", "富邦銀行", "富邦董座")}
 CUE_WINDOW = 8  # characters between a short name and the finance word
 HEADLINE_PART = 10  # a part after 「 | 」 this long is a headline (a digest's story), not a section or column
 LATIN_FREE = 5  # a Latin-letter own name this long (GOGOLOOK, LINEPAY, 91APP) needs no more evidence
@@ -83,7 +91,7 @@ FINANCE_SECTIONS = frozenset({
 })
 # Sites that are finance or industry news throughout, and finance sections by URL (中央社 afe 產經, asc 證券,
 # business 財經訊息平台; TVBS /money/; 中時 realtimenews …-260410 財經; udn story categories 7238–7241 產經,
-# 7251/7252/12806/123006 股市).
+# 7251/7252/12806/123006 股市, 7255 個股期貨: 「智邦期 動能轉強」, LangSearch recommendation 2026-11-17 §3.2).
 FINANCE_DOMAINS = (
     "ec.ltn.com.tw", "finance.ettoday.net", "money.udn.com", "ctee.com.tw", "cnyes.com", "moneydj.com",
     "tw.stock.yahoo.com", "news.ustv.com.tw", "wealth.com.tw", "businesstoday.com.tw", "businessweekly.com.tw",
@@ -91,7 +99,7 @@ FINANCE_DOMAINS = (
 )
 _FINANCE_PATH = re.compile(
     r"(?:cna\.com\.tw/(?:news/(?:afe|asc)|business)/|tvbs\.com\.tw/money/|chinatimes\.com/\w+/\d+-260410\b"
-    r"|udn\.com/news/story/(?:7238|7239|7240|7241|7251|7252|12806|123006)/)", re.IGNORECASE)
+    r"|udn\.com/news/story/(?:7238|7239|7240|7241|7251|7252|7255|12806|123006)/)", re.IGNORECASE)
 # Everyday words, places and phrases that contain or straddle a stock's name (measured 2026-11-17: each one matched a
 # stock that the headline was not about). Longer listed and official names need not be listed: every one is checked.
 # A word here must not be a listed company's own full name (中華電信 is 中華電's, 長榮航空 長榮航's).

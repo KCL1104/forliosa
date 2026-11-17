@@ -7,6 +7,9 @@
     uv run python -m forliosa.news purge
     uv run python -m forliosa.news searxng-check "台積電" [--language en] [--url http://localhost:8080]
     uv run python -m forliosa.news gdelt-bulk-check [--symbol 2330 --symbol NVDA …] [--feed translation]
+    uv run python -m forliosa.news langsearch-refresh
+    uv run python -m forliosa.news langsearch-status
+    uv run python -m forliosa.news langsearch-smoke
 
 ``block`` deletes the domain's stored headlines at once (subdomains included); the list also takes
 ``NEWS_BLOCKED_DOMAINS`` (comma-separated) from the environment. ``searxng-check`` asks our SearXNG once (its
@@ -15,6 +18,15 @@ it prints only the instance's scheme, host and port, never a secret, and changes
 ``gdelt-bulk-check`` downloads the newest GDELT bulk file of each feed once (:mod:`forliosa.news.gdelt_bulk`) and
 prints its size, its rows from Taiwanese sites by site (the English file: also its US and UK outlets' pages), the
 headlines that name the given stocks (Taiwan or US) and the US market's headlines (``^US``); it writes nothing.
+
+LangSearch (:mod:`forliosa.news.langsearch`, only with NEWS_LANGSEARCH_ENABLED and LANGSEARCH_API_KEY):
+``langsearch-refresh`` runs one pass now, exactly as the worker's job would (only what is due, inside the day's caps,
+nothing while it is paused) and prints the counts; ``langsearch-status`` prints the UTC day's requests, tokens, the
+degradation level, the pause and the tiers; ``langsearch-smoke`` sends one request (「"台積電"」, oneDay, count 20)
+and passes with 20 results and fewer than 200 tokens — it prints counts only and keeps the worker's rules
+(:func:`forliosa.news.langsearch.smoke`): nothing while switched off, paused or past the day's caps, or while a pass
+runs; the gap to the last request is waited out; the request and its tokens count in the day's usage; a refusal
+(429, 401 / 403, a redirect) stops the worker until 00:00 UTC too. No headline is stored.
 """
 
 from __future__ import annotations
@@ -127,6 +139,88 @@ def gdelt_bulk_check(symbols: list[str], feeds: list[str]) -> int:
     return status
 
 
+def langsearch_refresh() -> int:
+    from forliosa.news import langsearch
+
+    settings = get_settings()
+    if not settings.news_langsearch_enabled:
+        print("LangSearch 已關閉（NEWS_LANGSEARCH_ENABLED=false）")
+        return 1
+    with session_factory()() as db:
+        rep = langsearch.refresh_langsearch(db, get_market_data(), settings)
+    why = {"off": "已關閉", "no_key": "沒有設定 LANGSEARCH_API_KEY",
+           "night": "台北 00:00–08:00 不跑（UTC 日期還是前一天）", "busy": "另一個程序正在跑",
+           "paused": "暫停中（langsearch-status 看到幾點）"}
+    if rep.skipped:
+        print(f"沒有送出請求：{why.get(rep.skipped, rep.skipped)}")
+        return 0 if rep.skipped in ("night", "busy", "paused") else 1
+    print(f"請求 {rep.requests} 次（{rep.tokens} token），大盤 {rep.topics} 個查詢，個股 {rep.symbols} 檔"
+          f"（第一次 {rep.first_fills} 檔），留下 {rep.kept} 則、新增 {rep.stored} 則；"
+          f"降級 {rep.level}、今天上限 {rep.cap} 次"
+          + (f"；停下：{rep.stopped}" if rep.stopped else "")
+          + (f"；剔除 {dict(rep.drops)}" if rep.drops else ""))
+    return 0
+
+
+def langsearch_status() -> int:
+    from forliosa.news import langsearch
+    from forliosa.timeutil import iso_taipei
+
+    with session_factory()() as db:
+        st = langsearch.status(db)
+    until = st["paused_until"]
+    print(f"LangSearch：{'開' if st['enabled'] else '關'}（{'有' if st['configured'] else '沒有'}可用的設定與金鑰）")
+    stopped = f"、今天停下：{st['stopped']}" if st["stopped"] else ""
+    print(f"UTC {st['day_utc']}：請求 {st['requests']}／{st['request_cap']} 次、"
+          f"token {st['tokens']}／{st['token_cap']}、第一次填入 {st['first_fills']} 檔{stopped}")
+    print(f"降級：{st['level']}" + (f"；暫停到 {iso_taipei(until)}" if until is not None else ""))
+    if st["warning"]:
+        print("警告：回應超過 token 上限（contents 的字數上限沒有生效），今天停用")
+    print("分級：" + "、".join(f"{k} {v}" for k, v in st["tiers"].items()))
+    return 0
+
+
+def langsearch_smoke(client=None, settings=None, *, clock=None, sleep=None) -> int:
+    """One request under the worker's rules (:func:`forliosa.news.langsearch.smoke`); counts only."""
+    from forliosa.news import langsearch
+    from forliosa.timeutil import iso_taipei
+
+    settings = settings or get_settings()
+    if not (settings.news_enabled and settings.news_langsearch_enabled):
+        print("LangSearch 已關閉（NEWS_ENABLED 或 NEWS_LANGSEARCH_ENABLED 為 false），沒有送出請求")
+        return 1
+    own = client is None
+    if client is None:
+        client = langsearch.LangSearchClient.from_settings(settings)
+    if client is None:
+        print("沒有設定 LANGSEARCH_API_KEY（沙盒：設成 proxy-injected，由 proxy 代入），沒有送出請求")
+        return 1
+    extra = {k: v for k, v in (("clock", clock), ("sleep", sleep)) if v is not None}
+    try:
+        with session_factory()() as db:
+            res = langsearch.smoke(db, settings, client, **extra)
+    finally:
+        if own:
+            client.close()
+    if res.skipped:
+        until = f"暫停到 {iso_taipei(res.paused_until)}" if res.paused_until is not None else "暫停中"
+        why = {"off": "已關閉", "busy": "worker 正在跑一輪，等它跑完再試",
+               "paused": f"{until}（被擋或連不上，langsearch-status 看原因）",
+               "requests_cap": "今天（UTC）的請求數已到上限", "tokens_cap": "今天（UTC）的 token 已到上限"}
+        print(f"沒有送出請求：{why.get(res.skipped, res.skipped)}")
+        return 1
+    stopped = {"quota": "碰到額度，worker 也停到下一個 00:00 UTC（台北 08:00）",
+               "blocked": "被拒（401／403／轉址），worker 也停到下一個 00:00 UTC",
+               "contract": "回應超過 token 上限，今天停用", "unreachable": "連續連不上，整個來源暫停 15 分鐘起"}
+    if res.error is not None or res.reply is None:
+        print(f"失敗：{res.error}" + (f"；{stopped[res.stopped]}" if res.stopped in stopped else ""))
+        return 1
+    reply = res.reply
+    print(f"HTTP {reply.status}，{res.items} 筆有標題、網址、時間，token {reply.input_tokens}+{reply.output_tokens}，"
+          f"{reply.latency:.1f} 秒（算進今天的用量）：{'通過' if res.passed else '不通過（要 20 筆、少於 200 token）'}")
+    return 0 if res.passed else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m forliosa.news",
                                      description="新聞報導：更新、下架封鎖清單、清除過期")
@@ -151,12 +245,22 @@ def main(argv: list[str] | None = None) -> int:
                             "點名這些股票的標題與美股市場新聞（不寫資料庫）")
     g.add_argument("--symbol", action="append", default=[], help="比對這些代號（可重複，台股或美股）")
     g.add_argument("--feed", action="append", choices=sorted(gdelt_bulk.FEEDS), help="預設兩種都看")
+    sub.add_parser("langsearch-refresh", help="LangSearch：照排程跑一次（只跑到期的，守每天上限）")
+    sub.add_parser("langsearch-status", help="LangSearch：今天（UTC）的請求數、token、降級、暫停與分級")
+    sub.add_parser("langsearch-smoke", help="LangSearch：照 worker 的規則送一次「台積電」，只印筆數與 token"
+                                            "（算進今天的用量；關閉、暫停、到上限時不送）")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     if args.cmd == "searxng-check":
         return searxng_check(args.query, language=args.language, url=args.url, time_range=args.time_range)
     if args.cmd == "gdelt-bulk-check":
         return gdelt_bulk_check(args.symbol, args.feed or ["translation", "english"])
+    if args.cmd == "langsearch-refresh":
+        return langsearch_refresh()
+    if args.cmd == "langsearch-status":
+        return langsearch_status()
+    if args.cmd == "langsearch-smoke":
+        return langsearch_smoke()
     settings = get_settings()
     with session_factory()() as db:
         if args.cmd == "refresh":

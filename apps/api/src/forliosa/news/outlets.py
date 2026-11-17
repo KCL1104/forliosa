@@ -38,6 +38,7 @@ OUTLETS: dict[str, Outlet] = {
     "setn.com": Outlet("三立", ("三立新聞網", "三立", "setn", "setn.com")),
     "tvbs.com.tw": Outlet("TVBS", ("tvbs", "tvbs新聞網")),
     "newtalk.tw": Outlet("新頭殼", ("新頭殼", "newtalk")),
+    "blocktempo.com": Outlet("動區動趨", ("動區動趨", "blocktempo")),
     "yam.com": Outlet("蕃薯藤", ("蕃薯藤", "yam", "yam蕃薯藤新聞")),
     "ustv.com.tw": Outlet("非凡新聞", ("非凡新聞", "非凡", "ustv")),
     "cnyes.com": Outlet("鉅亨網", ("鉅亨網", "鉅亨", "anue", "cnyes")),
@@ -162,6 +163,7 @@ TAIWAN_DOMAINS = frozenset({
     "udn.com", "chinatimes.com", "ettoday.net", "setn.com", "storm.mg", "yam.com", "cnyes.com", "moneydj.com",
     "nownews.com", "mirrormedia.mg", "upmedia.mg", "thenewslens.com", "ctwant.com", "ctinews.com", "taisounds.com",
     "taipeitimes.com", "digitimes.com",
+    "blocktempo.com",  # 動區動趨 (LangSearch recommendation 2026-11-17 §3.2)
 })
 # Reputable business news (產品負責人 2026-11-16, memo §2 item 5): preferred, never required — a story found in one
 # of them wins over a copy elsewhere, and within a day they come first in the order the server returns.

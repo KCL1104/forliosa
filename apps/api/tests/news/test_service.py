@@ -71,9 +71,10 @@ def test_refresh_stores_normalised_relevant_headlines_once(engine, commercial_md
     with Session(engine) as db:
         rep = service.refresh(db, commercial_md, settings=settings, sources=[src], ai=None, symbols=["2330.TW"],
                               now_fn=lambda: NOW)
-        assert rep.symbols == 1 and rep.fetched == {"gdelt": 1} and rep.stored == 13
+        # 14: 「台積公司」 counts since the alias 台積 (tw_match.ALIASES, 2026-11-17)
+        assert rep.symbols == 1 and rep.fetched == {"gdelt": 1} and rep.stored == 14
         rows = stored(db)
-        assert len(rows) == 13 and rows[0].title == "台積電CPO霸主地位穩了？法人看好2027年EPS估達151元"
+        assert len(rows) == 14 and rows[0].title == "台積電CPO霸主地位穩了？法人看好2027年EPS估達151元"
         assert rows[0].outlet == "新頭殼" and rows[0].source == "gdelt" and not rows[0].date_only
         # metadata only: no column could hold article text, a description or an image
         assert set(NewsArticle.__table__.columns.keys()) == {
@@ -82,12 +83,12 @@ def test_refresh_stores_normalised_relevant_headlines_once(engine, commercial_md
         q = src.calls[0]
         assert q.english == ("TSMC",) and q.since == NOW - timedelta(days=7)  # the master's alias
         st = db.get(NewsFetchState, ("gdelt", "2330.TW"))
-        assert st.last_status == "ok" and st.items == 13 and st.last_success_at is not None
+        assert st.last_status == "ok" and st.items == 14 and st.last_success_at is not None
         # second run: asks only since the last success (minus an hour) and stores nothing twice
         later = NOW + timedelta(minutes=45)
         rep2 = service.refresh(db, commercial_md, settings=settings, sources=[src], ai=None, symbols=["2330.TW"],
                                now_fn=lambda: later)
-        assert rep2.stored == 0 and len(stored(db)) == 13
+        assert rep2.stored == 0 and len(stored(db)) == 14
         assert src.calls[1].since == NOW - timedelta(hours=1)
 
 
@@ -259,7 +260,7 @@ AI_RESULTS = [
 
 
 def test_ai_fills_gaps_only_from_search_results(engine, commercial_md, settings, pool, fake):
-    gdelt = FakeSource(items={"2330.TW": gdelt_items()[:3]})  # none of them names 台積電: nothing stored
+    gdelt = FakeSource(items={"2330.TW": gdelt_items()[1:3]})  # neither names 台積電 / 台積: nothing stored
     ai_answer(fake, AI_RESULTS, [u for u, _, _ in AI_RESULTS] + ["https://made-up.example.com/台積電"])
     with Session(engine) as db:
         rep = service.refresh(db, commercial_md, settings=settings, sources=[gdelt], symbols=["2330.TW"],

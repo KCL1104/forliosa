@@ -667,6 +667,7 @@ commercial 從不顯示示範資料；③定期定額；④財報、月營收、
 | **GDELT DOC 2.0**（`api.gdeltproject.org/api/v2/doc/doc`，預設） | 每檔每次 worker 批次 | **英文**關鍵字：英文簡稱（`t187ap03_L`「英文簡稱」／`mopsfin_t187ap03_O` 的 `Symbol`，存在 `company_profiles`；沒有時用商品主檔的英文別名）＋代號，台股 `sourcecountry:taiwan`、美股只收美國與英國媒體的英文報導 `(sourcecountry:US OR sourcecountry:UK) sourcelang:english`（2026-11-14 起；例：`(TSMC OR 2330) sourcecountry:taiwan`、`(NVIDIA OR NVDA) (sourcecountry:US OR sourcecountry:UK) sourcelang:english`）。台股的英文簡稱是一般英文單字時（穩懋「WIN」、台達電「DELTA」；`news/normalize.py` 的 `COMMON_WORDS`）不放進查詢、只用代號（`3105 sourcecountry:taiwan`）：GDELT 比對機器翻譯後的全文、不分大小寫，這種字會讓 75 筆全被無關新聞佔滿；`mode=artlist`、`format=json`、`maxrecords=75`、`startdatetime` = 上次成功前 1 小時（最多 7 天） | 429／403、或 200 回「Please limit requests…」→ 這次批次不再問，整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（`news_fetch_state` 的 `symbol="*"`）；連線錯誤連 3 次 → 這次批次略過 |
 | **AI 網路搜尋**（`news/ai_search.py`） | 只在 GDELT 與 SearXNG 這 24 小時內都對這檔有回應（關掉或暫停中的不算）、且兩者（加 personal 的 Yahoo RSS）最近 7 天合計少於 `NEWS_AI_MIN_ITEMS`（3）則時；同一檔 `NEWS_AI_INTERVAL_HOURS`（24）內最多一次，上一次什麼都沒找到時 72 小時一次（`AI_EMPTY_INTERVAL`，2026-11-16 審查）；每批最多 10 次。計數不算畫面會藏起來的列（報價頁、論壇、機器人快訊） | `web_search`（最多 2 次，封鎖行情／論壇／交易所網站；**沒有** `web_fetch`）＋ strict 工具 `report_news`（只回網址清單）。**模型只負責挑選**：標題、網址、日期都取自 `web_search_result`（網址不在搜尋結果、行情頁、沒有日期的都丟掉） | 本月（UTC）`ai_usage.feature = "news"` 的估計費用 + US$0.05 超過 `NEWS_AI_BUDGET_USD`（30）就整月不跑；沒有金鑰、`AI_WEB_SEARCH=false`、`NEWS_AI_ENABLED=false` 也不跑 |
 | **SearXNG**（`news/searxng.py`；自架、只對內，`deploy/searxng`） | **預設開啟**（2026-11-12 第三輪）。網址：`NEWS_SEARXNG_URL`，不設時 prod 是 `http://searxng.railway.internal:8080`、dev／test 是 `http://localhost:8080`；`NEWS_SEARXNG_ENABLED=false` 或 `NEWS_SEARXNG_URL=`（空字串）關掉。每檔在 GDELT 之後問；這檔 `NEWS_SEARXNG_CACHE_MINUTES`（60）內回應過、或 GDELT 已有 ≥ `NEWS_SEARXNG_SKIP_GDELT_ITEMS`（8）則 24 小時內的標題就不問 | 中文查詢：台股 `q=台積電 2330&language=zh-TW`，美股 `q=NVIDIA NVDA&language=en`（英文簡稱＋代號）；都加 `categories=news&time_range=week&format=json&safesearch=0`。有引擎暫停時改用 `engines=<其他引擎>`（同時送 `categories` 會把全部新聞引擎加回來）。只讀 `title`、`url`、時間（`publishedDate`；沒有時用 `pubdate`／`metadata` 裡的「3 小時前」「3 hours ago」「昨天」，以天計的只標日期）與 `engines`；`content`、縮圖不讀；沒有時間的不收；**以週、月、年計的相對時間（「3 weeks ago」「2 週前」）也當作沒有時間、不收**：Brave News 與 DuckDuckGo News 不理 `time_range=week`，這種結果一定超過一週、而且日期可能差到 6 天（2026-11-12 審查後）；搜尋引擎轉址丟掉 | 一次只查一個、上一次查完到下一次開始 ≥ `NEWS_SEARXNG_INTERVAL_SECONDS`（10，最少 10）。**連不上**（拒絕連線、DNS、逾時、5xx、不是 JSON）→ 整個來源暫停 15 分鐘起、加倍到 4 小時（`last_status: "unreachable"`，不算錯誤）；我們自己的 SearXNG 回 403／429 → 暫停 `NEWS_SEARXNG_BACKOFF_MINUTES`（120）起。**上游引擎**（`unresponsive_engines`）：CAPTCHA／too many requests／access denied（含 `Suspended: …`）→ 那個引擎暫停 120 分鐘起、加倍到 24 小時；逾時等其他錯誤連 3 次 → 暫停 15 分鐘起；問的引擎全部失敗 → 整個 SearXNG 暫停；引擎全部暫停中 → SearXNG 暫停到最早恢復的那個。不換 IP、不用代理 |
+| **LangSearch**（`news/langsearch.py`，2026-11-17 產品負責人決定） | 只在 `NEWS_LANGSEARCH_ENABLED`（正式環境 worker）；**只有台股**與大盤 `^TW`，依分級每天到每 7 天一次（見「2026-11-17 LangSearch 台股新聞」） | 簡稱加引號（`"台積電"`）、`contents.text.max_characters=1`、`summary=false`，不篩網域；只讀標題、網址、時間 | 429／401／403／轉址 → 停到下一個 00:00 UTC；5xx／逾時連 2 次（跨輪計算）→ 暫停 15 分鐘起；每天 250 次、5 萬 token（手動 smoke 也算） |
 | **Yahoo股市 RSS** | 只有 `DATA_POLICY=personal`（條款限非商用；`NEWS_YAHOO_RSS=false` 可關） | `tw.stock.yahoo.com/rss?s=<代號>`。2026-11-12 實測這個參數回的是「最新新聞」頻道，所以靠下面的相關性篩選只留這檔的標題；原始媒體從描述開頭判斷（「MoneyDJ新聞」「【財訊快報／」「（中央社記者」），**描述本身不存** | 同上 |
 
 HTTP：`news.service.news_fetcher` 用誠實的 User-Agent（`forliosa/0.1 (portfolio tracker; news headline index)`），GDELT 每次間隔 ≥ `NEWS_GDELT_INTERVAL_SECONDS`（6，最少 5），
@@ -1075,6 +1076,114 @@ warning」在 2027；「星宇航空進軍大洋洲！…」在大洋；「11/28
 「大洋洲」那則的 `stocks` 只有星宇航空；`by_topic` 的地緣政治分組消失；30 則政治新聞擋在前面時，統一的清單往下讀到對的那一則；每檔
 條件只建一次、公司資料一次查詢、100 列遠低於 1 秒；美股、美股大盤、主檔沒有的代號不比對。`tests/news/test_tagging.py` 兩個測試原本存在
 台積電底下的標題沒有台積電（「新聞 0」、隨機字），改成以「台積電」開頭。
+
+### 2026-11-17 LangSearch 台股新聞（產品負責人決定，`news/langsearch.py`）
+
+產品負責人 2026-11-17 決定用 LangSearch 網路搜尋（`POST https://api.langsearch.com/v1/web-search`）補台股新聞，知道它的條款沒寫清楚能不能
+保存結果、經營者不明（`CLAUDE.md` 的例外）。只存**標題、媒體、時間、網址**（`news_articles.source = "langsearch"`，和其他來源一樣刊出 30 天後
+刪除），snippet、summary、內文都不讀、不存、不寫進 log。**美股不用**（`LangSearchSource.supports` 只收台股與 `^TW`）。研究：2026-11-17 的
+最佳化實驗（178 次請求、1,617 列人工標註，另一位標註者複核 120 列）。
+
+- **開關**：`NEWS_LANGSEARCH_ENABLED`（預設 `false`），只在正式環境 Railway **worker** 打開，並設 `LANGSEARCH_API_KEY`（Bearer；不寫進 log）。
+  沒開或沒有金鑰時 worker 沒有這個工作、什麼都不送；其他新聞來源不受影響。沙盒的 proxy 會代入真正的憑證，手動測試時金鑰設成 `proxy-injected`。
+- **請求**（`request_body`）：`{"query": "\"台積電\"", "freshness": …, "summary": false, "count": 50|20, "contents": {"text": {"max_characters": 1}}}`。
+  - 查詢：交易所簡稱加半形雙引號，去掉 `-KY`、`*` 與名稱裡的引號（`stock_query`）；不加代號、不加「股價／新聞」、不用簡體、不用代號查。
+  - `contents.text.max_characters = 1`：每次約 40 token（不加時約 7,000），回傳的網址與排序不變。**不送** `includeDomains`／`excludeDomains`
+    （候選先被抓、再套網域，篩完只剩更少：家登加黑名單只剩 1 筆；下架封鎖清單在我們這邊比對）、不用 `noLimit`、不呼叫 `/v1/rerank`。
+  - `freshness`：上次成功那天（UTC 日期）到今天，例如每天跑就是 `D-1..D`（＝oneDay），最多往前 6 天（錯過很多天時）；每 7 天跑一次的（安靜、
+    降級第 1 級的小型股）往前 7 天，從上次成功那天開始，所以那天收盤後的新聞不會漏（2026-11-17 審查）。第一次：大、中型 `oneWeek`、小型
+    `oneMonth`；大盤 `D..D`（今天的 UTC 日期）。
+- **只讀** `data.webPages.value[]` 的 `name`、`url`、`datePublished`（`parse`）；沒有網址、標題或可用日期的略過（日期超出曆法範圍，例如
+  `0001-01-01T00:00:00+08:00`、`9999-12-31T23:59:59-05:00`，也只略過那一筆，不會整個回應丟掉）；只有日期的當台北那天 00:00、標 `date_only`。
+  `code` 200 卻沒有 `data.webPages.value` 清單的回應算「回應不能用」（只跳過那一檔、當天不再問），不當成「沒有新聞」：不更新上次成功、不算進
+  連續 0 則（真的沒有結果時是 `value: []`）。
+- **入庫前的過濾（照實驗量出來的順序，`filter_items`）**：可用的網址（搜尋轉址丟掉）→ 不是新聞的頁面、下架封鎖清單、
+  `NEWS_LANGSEARCH_JUNK_DOMAINS`（`tainan-estate-et.com.tw`、`interview.tw`、`pokem.tw`、`the-frequent-traveler.com.tw`；外國垃圾站不用列）→
+  只收台灣網站（`outlets.is_taiwan_outlet`）→ `service.to_headlines`（整理標題、機器人快訊、`tw_match` 名稱比對：條件用 `build_query`，和
+  GDELT 一樣有全名、較長名稱、同業名稱；時間窗：起點往前 12 小時，晚於送出 30 分鐘以上的丟掉）→ 去重（原始媒體優先於 Yahoo、LINE 轉載）。
+  **超過 `NEWS_RETENTION_DAYS`（30 天）的不存**：時間窗的起點往後夾到保存期限內，只有日期的（多一天寬限）也照 `service.purge` 的標準再擋一次，
+  所以小型股第一次查 `oneMonth` 時不會存進一進來就該刪的標題（2026-11-17 審查）。
+  大盤（`^TW`）不比對公司名稱，改看標題關鍵字（`TOPIC_KEYWORDS`：台股、加權、大盤、外資、法人、投信、自營商、盤、指數、台指、櫃買、千點、
+  N點、國安基金、權值、ETF、0050、新台幣、台幣；實驗精確率 0.98、召回 0.92）。實驗中入庫的標題寬鬆標準 0.97–1.00 有用。
+- **之後和其他來源一樣**：存進 `news_articles` 後，新聞標籤工作（`news_tagging`）照常貼標籤；個股頁、`get_news`、`search_news` 讀取時照常
+  重新比對（`ReadMatch`）、藏起沒有財經標籤的；`/news` 的來源標示「LangSearch」（`datapolicy` 的 `langsearch`）。它不花錢，所以算進「免費來源
+  7 天內的則數」（`service.FREE_SOURCES`）：LangSearch 已經找到 3 則以上的股票不再用付費的 AI 補缺。`^TW` 在標籤裡是「台股大盤」（和 `^US` 一樣
+  不是股票）；市場頁還沒有顯示 `^TW`（只給標籤、市場報告依主題分組用）。
+- **排程**（worker 工作 `news_langsearch`，每 10 分鐘看一次有什麼到期；台北時間；自己的迴圈）：
+  - 大盤 3 個查詢（`NEWS_LANGSEARCH_TOPICS`，不加引號）：交易日 16:00（`NEWS_LANGSEARCH_TOPICS_AT`）以後，每個 UTC 日一次，count 20。
+  - 追蹤中的台股（持有、觀察、最近 `NEWS_VIEW_DAYS` 天看過）依分級：大型股每天、中型股每 2 天、小型股每 4 天、安靜（小型股連續
+    `NEWS_LANGSEARCH_QUIET_AFTER_EMPTY`（4）次 0 則）每 7 天（`NEWS_LANGSEARCH_EVERY_DAYS`）；18:30（`NEWS_LANGSEARCH_STOCKS_AFTER`）以後跑；
+    錯過該跑那天的，隔天 08:00 起就補（時間範圍從它自己上次成功那天算，不會漏）。大型股 count 50（`NEWS_LANGSEARCH_COUNT_LARGE`），其他 20。
+  - 第一次（從沒成功過）的股票隨時都可以跑，排在當天該跑的後面，每天最多 `NEWS_LANGSEARCH_MAX_FIRST_FILL_PER_DAY`（100）次。
+  - 台北 00:00–08:00 什麼都不跑（UTC 日期還是前一天）。同一個 UTC 日裡回其他 4xx 的那一檔當天不再問。
+  - **順序**：大盤 → 有人持有或觀察的股票（最久沒成功的先）→ 大型 → 中型 → 小型（同一級最久沒成功的先）→ 第一次的（有人持有或觀察的先，
+    再依分級與市值排名）。被擋或到上限時，重要的已經先跑完；沒跑到的下一次自動補。
+  - **分級**：第一次依市值排名（`company_profiles` 的發行股數 × 最近 14 天內最新的收盤；前 `NEWS_LANGSEARCH_LARGE_RANK`（50）名大型，其他中型）；
+    之後每 7 天依「每次入庫幾則」的平均重分：≥ `NEWS_LANGSEARCH_LARGE_MIN_AVG`（5）大型、≥ `NEWS_LANGSEARCH_MID_MIN_AVG`（1）中型、其他小型。
+    平均是指數平均，權重依分級的間隔換算成約 14 天份的次數（沒有歷史表，見下面「與規格的差異」）。小型股連 4 次 0 則改安靜、有新聞就回小型。
+- **每天的上限（UTC 日，00:00 UTC＝台北 08:00 重算）**：請求 `NEWS_LANGSEARCH_MAX_REQUESTS_PER_DAY`（250）次、token
+  `NEWS_LANGSEARCH_MAX_TOKENS_PER_DAY`（50,000）；到了就停，沒跑到的下一次補。單次回應的 output token 超過 `NEWS_LANGSEARCH_TOKEN_GUARD`（1,000）
+  表示字數上限沒生效：當天停用、log 寫 WARNING、管理後台 `news.langsearch.warning = "contents_cap_ignored"`。
+- **被擋就停，不重試、不換帳號、不偽裝**：
+  | 回應 | 做法 |
+  |---|---|
+  | HTTP 429、body `code` 429、或 `msg` 提到額度（quota、limit、额度、額度、余额） | 停到下一個 00:00 UTC（`news_fetch_state(langsearch, "*")` 的 `backoff_until`，重開 worker 也記得），管理後台「限流中」 |
+  | HTTP 401／403、轉址（3xx，不跟） | 一樣停到下一個 00:00 UTC，管理後台「被拒」 |
+  | HTTP 5xx、逾時、連不上、body `code` 5xx、不是 JSON | 連續 2 次 → 整個來源暫停 15 分鐘起、每次加倍、最多 4 小時（沿用 `BACKOFF_START`／`BACKOFF_MAX`）；1 次只跳過那一檔，下次再問。「連續」跨輪計算（`@down` 列），直到 LangSearch 再有任何回應（成功、4xx、被擋）才歸零：一輪只有一檔到期時也會暫停，暫停過後再失敗 1 次就再暫停（加倍）。暫停從失敗那一刻（牆上時間）算起，不是從這一輪開始算，所以一輪跑很久時暫停不會一寫進去就過期（2026-11-17 審查） |
+  | 其他 4xx、回應不能用（含 `code` 200 但沒有 `data.webPages.value`） | 只跳過那一檔（當天不再問），連 3 次停這一輪；log 只寫狀態碼，不寫內容 |
+- **降級（`ladder`）**：連 2 個 UTC 日碰到額度 → 每天上限改成前一天被擋前成功次數的 80%，中型股改每 3 天、小型股改每 7 天；連 3 天、或上限不到
+  30 次 → 只跑大盤和有人持有或觀察的大型股；每一級連 3 天沒碰到額度就退回一級。上限和「不到 30 次」只看這一次連續碰到額度的日子：退回第 0
+  級時舊的上限就清掉，之後只碰到一次額度不會直接跳到第 2 級（2026-11-17 審查）。永遠不關掉字數上限、不重試 429、不用第二把金鑰。
+- **間隔與一次只跑一個**：同一個程序裡兩次請求間隔 ≥ `NEWS_LANGSEARCH_INTERVAL_SECONDS`（1.5，最少 1.2；共用的 `RateLimiter`）；最後一次請求的
+  時間存在資料庫，新的程序先等滿間隔（實驗時每次都是新程序，有一次只隔 0.8 秒）。PostgreSQL 用 `pg_try_advisory_lock` 確保同時只有一個在跑
+  （另一個直接跳過），SQLite 用程序內的鎖。
+- **log**：只寫狀態碼、耗時、筆數、token；不寫請求標頭、金鑰、回應內容或 `msg`。
+- **資料（不用新 migration）**：都放在 `news_fetch_state`（source `langsearch`）：
+  - `<代號>`：每檔的最後嘗試／成功、入庫則數；`^TW/<雜湊>`：每個大盤查詢；`*`：整個來源的暫停。
+  - `@use:<UTC 日期>`：當天用量（`items` 請求數、`failures` token 數、`last_attempt_at` 最後一次請求、`last_status`／`last_success_at` 被擋的原因
+    與時間）；`@new:<UTC 日期>`（`items`）：第一次的次數；保留 35 天。
+  - `@tier:<代號>`：分級（`last_status` 等級、`items` 平均 ×100、`failures` 連續 0 則次數、`last_attempt_at` 上次重分的時間）。
+  - `@down`：連續幾次 5xx／逾時（`failures`，跨輪計算，LangSearch 一有回應就歸零）與最後一次的時間（`last_attempt_at`）。
+  - `@` 開頭的列不算進管理後台的「上次有回答」與「上次執行」。
+- **管理後台**（`/admin/overview` 的 `news`）：`sources` 多一列 `langsearch`（沒開時 `state: "off"`；暫停原因沿用 `rate_limited`／`blocked`／
+  `unreachable`），另有 `news.langsearch`：今天的請求數與上限、token 與上限、第一次的次數、今天停下的原因、降級等級、暫停到幾點、
+  `warning`、各分級的檔數。前端還沒顯示 `news.langsearch`（只顯示來源列）。
+- **手動**：`cd apps/api && uv run python -m forliosa.news langsearch-refresh`（照排程跑一次：只跑到期的、守上限、暫停中不送）；`langsearch-status`
+  （今天的用量、降級、暫停、分級）；`langsearch-smoke`（送一次「台積電」oneDay count 20，只印筆數與 token，20 筆且少於 200 token 算通過；不存標題）。
+  smoke 照 worker 的規則（`langsearch.smoke`，2026-11-17 審查）：`NEWS_ENABLED`／`NEWS_LANGSEARCH_ENABLED` 關著、暫停中（印出暫停到幾點）、今天的請求數
+  或 token 已到上限、worker 正在跑一輪（同一把鎖）時都不送；送之前等滿和上一次請求（任何程序）的間隔；這次請求與 token 算進當天用量；收到
+  429／401／403／轉址或 token 超量時和 worker 一樣記下來，worker 也停到下一個 00:00 UTC；5xx／逾時算進「連續」次數。沙盒裡要先設
+  `NEWS_LANGSEARCH_ENABLED=true`、`LANGSEARCH_API_KEY=proxy-injected`。
+- **順便補進比對器（建議 §3.2，負責人同意照建議）**：`tw_match.ALIASES`（台積 → 2330、禾榮 → 7799，照 2 個字簡稱的規則要多一個證據）、
+  `tw_match.ALIAS_FORMS`（富邦金控、富邦人壽、富邦銀行、富邦董座 → 2881，當全名用；「富邦」單獨不算）、udn 分類 7255（個股期貨）算財經版、
+  `blocktempo.com`（動區動趨）算台灣網站。「台達」沒有加（它在 `WORDS` 裡擋「台達能源」）。這些對所有來源與讀取時的重新比對都有效。
+  影響既有測試：GDELT 測試資料裡的「南華大學邀請台積公司辦實習徵才說明會」現在歸台積電（「公司」是財經字眼；它講的就是台積電），
+  `test_service.py`／`test_searxng_service.py` 的筆數各加 1，AI 補缺的那個測試改用不提台積的兩則。
+- **與規格（建議 §9）的差異**：
+  1. 規格表寫 401／403 是「沒有期限的暫停」；照 `CLAUDE.md`（被擋：429、403、轉址就停到隔天）改成和 429 一樣停到下一個 00:00 UTC。
+  2. 「14 天平均」不用另外的歷史表：用指數平均近似（權重 2／(14 天內的次數＋1)），存在 `@tier:` 列。
+  3. 分級的優先順序裡「有人持有、觀察或最近看過」：追蹤清單本來就只有這三種，所以第 2 組只放「有人持有或觀察」，只是最近看過的照分級排。
+  4. `news.taiwannet.com.tw`（疑似 AI 改寫站）還沒確認，沒有放進垃圾名單（要加就設 `NEWS_LANGSEARCH_JUNK_DOMAINS`）。
+  5. 規格 §9.2 寫時間窗「不早於今天 − 6」，但每 7 天跑一次的股票這樣會漏掉上次成功那天的晚上（和 §5.2「兩次之間不會有空檔」矛盾）：
+     照 §5.2，間隔比 6 天長的往前到間隔天數（`freshness(..., every=)`）。
+  6. §9.7 把 smoke 定為只送一次的手動檢查；它照樣守開關、暫停、上限與跨程序間隔，也算進當天用量（§9.1「all LangSearch requests」、§9.5）。
+- **還沒驗證**（建議 §7）：每日額度與每秒上限看不到、沒看過真的 429；隔天結果會不會變；每天跑 oneDay 的實際累積量；分級門檻是推估。上線第一週看
+  `langsearch-status` 與 worker log 的每檔入庫則數。
+- **實測**（2026-11-17 台北 19:37，暫存 SQLite，`refresh_langsearch` 真的跑一輪，不是另寫的程式）：大盤 1 個查詢（`台股 盤後`）＋9 檔
+  （大型 台積電、鴻海、長榮；中型 亞德客-KY、智邦、信驊、華城；小型 訊聯、禾榮科第一次），共 **10 次請求、528 token**（count 50 每次 86–92、
+  count 20 每次 31–42），全部 HTTP 200，沒有 429／403／轉址；兩次請求間隔至少 1.52 秒，一輪 19 秒。290 筆結果入庫 67 則：大盤 15、台積電 23、
+  信驊 13、鴻海 7、禾榮科 5、智邦 2、長榮 1、訊聯 1，華城、亞德客 0。剔除：標題沒點名這家 163（華城全是「京華城」、長榮多是長榮大學與榮家）、
+  非台灣網站 44、垃圾名單 6（pokem.tw、the-frequent-traveler.com.tw）、非新聞 2（vocus.cc）、大盤關鍵字不符 3、重複 5。入庫的 67 則
+  沒有看到配錯公司的，讀取時的重新比對也全部保留；漏掉的主要是暗稱標題（「股王」「這檔」「網通大廠」）。log 沒有金鑰。馬上再跑一輪：
+  沒有到期的，0 次請求。
+
+測試：`tests/news/test_langsearch.py`（不連網：請求內容永遠有字數上限、沒有網域參數；查詢句；時間範圍與 08:00 換日；只讀標題網址日期；429／
+quota 訊息／403／401／轉址／token 超量停到 00:00 UTC、重開也記得；5xx 連 2 次暫停 15 分鐘；其他 4xx 只跳過一檔；實驗的真實標題逐步過濾；
+大盤關鍵字不呼叫名稱比對；封鎖清單不送出、在本地擋；排程順序與上限、隔天從停下的地方接；第一次與 token 上限；分級；降級；跨程序的間隔；
+log 沒有金鑰與內容；入庫後進標籤佇列、個股頁、AI 補缺計數；worker 只在開啟時有這個工作；smoke 只印數字）。2026-11-17 審查後加上：smoke 守開關、
+暫停、上限、鎖與間隔、算進用量、被擋時 worker 也停；一輪一檔時逾時跨輪累計、暫停後再失敗就加倍；暫停從失敗那一刻算；不存超過保存期限的標題；
+安靜股的時間窗從上次成功那天開始；降級退回 0 級後舊上限清掉；日期超出範圍只略過那一筆；`code` 200 沒有結果清單不算「沒有新聞」；個股頁的
+API 測試固定時鐘（原本 2026-12-17 以後一定失敗）。
 
 ### 待產品負責人確認
 
@@ -2617,6 +2726,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - `last_success_at`：那個來源各代號列（不含 `*` 與 `@引擎`）最新的 `last_success_at`；`last_run_at`：各代號列最新的 `last_attempt_at`。
 - `new_24h`：`news_articles.fetched_at` 在 24 小時內、依 `source` 分組的筆數。
 - 暫停的引擎：SearXNG 的 `@引擎` 列 `backoff_until` 還沒到的。
+- 2026-11-17：多一列 `langsearch`（`NEWS_LANGSEARCH_ENABLED` 而且有 `LANGSEARCH_API_KEY` 才算開），另有 `news.langsearch`（今天的用量與上限、降級、
+  `warning: "contents_cap_ignored"`），見「2026-11-17 LangSearch 台股新聞」。
 
 ## 2026-11-15 美股收盤價（Databento）
 

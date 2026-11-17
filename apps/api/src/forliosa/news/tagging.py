@@ -92,7 +92,8 @@ RESERVE_USD = Decimal("0.01")
 MAX_TITLE_CHARS = 200
 CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}  # requests come up to NEWS_TAGGING_MAX_WAIT_MINUTES apart
 WARN_EVERY = timedelta(hours=1)  # a request-level API error is logged at most this often
-MARKET_KEYS = {"^US": "美股大盤"}  # news_articles.symbol values that are not stocks (news.service.US_MARKET_KEY)
+# news_articles.symbol values that are not stocks (news.service.US_MARKET_KEY, news.langsearch.TW_MARKET_KEY)
+MARKET_KEYS = {"^US": "美股大盤", "^TW": "台股大盤"}
 
 SYSTEM = """你替 Forliosa 的新聞標題貼標籤。Forliosa 是以台股為主的投資帳本，標籤用來把新聞依主題、類股、相關股票分組與搜尋。你只看得到標題、媒體和這則新聞歸在哪幾檔股票底下（stocks），沒有內文，所以只依標題判斷，不要猜標題沒寫的事。
 

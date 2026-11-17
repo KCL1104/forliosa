@@ -1195,7 +1195,7 @@ class NewsArticle(Base):
     domain: Mapped[str] = mapped_column(String(253))
     published_at: Mapped[datetime] = mapped_column(TZDateTime)
     date_only: Mapped[bool] = mapped_column(Boolean, default=False)  # the source gave a date without a time
-    source: Mapped[str] = mapped_column(String(16))  # gdelt | ai_search | searxng | yahoo_rss
+    source: Mapped[str] = mapped_column(String(16))  # gdelt | ai_search | searxng | yahoo_rss | langsearch
     fetched_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 

@@ -72,6 +72,12 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   new headlines wait until the oldest was stored ``NEWS_TAGGING_MAX_WAIT_MINUTES`` (30) ago; stopped for the month once
   ``NEWS_TAGGING_MONTHLY_BUDGET_USD`` (US$3) is spent. Its own loop: it never waits for a news batch, and a failure only
   leaves headlines untagged.
+* ``news_langsearch`` — only with NEWS_LANGSEARCH_ENABLED (production; 產品負責人 2026-11-17): every 10 minutes a
+  look at what LangSearch should be asked (``forliosa.news.langsearch``): on trading days from 16:00 the market topics
+  (``^TW``), from 18:30 the tracked Taiwan stocks that are due by tier (large daily, mid every 2 days, small every 4,
+  quiet every 7; a stock that missed its day from 08:00; a new one any time, at most 100 a day). At most 250 requests
+  and 50,000 tokens per UTC day; a 429, 401/403 or redirect stops it until 00:00 UTC. Headline, outlet, time and link
+  only. Its own loop; US stocks never.
 
 * ``company_refresh`` — every hour at :35: the 「關於」 description of tracked symbols (``forliosa.services.company``):
   a zh.wikipedia excerpt found through Wikidata (one request at a time, monthly per company, paused 6 h after a 429),
@@ -157,6 +163,8 @@ US_CLOSE_DELAY = timedelta(hours=1)
 US_CLOSE_POLL_SECONDS = 3600
 US_CLOSE_GIVE_UP = timedelta(hours=20)
 US_BACKFILL_SECONDS = 600
+LANGSEARCH_SECONDS = 600  # how often the LangSearch job looks at what is due
+LANGSEARCH_DEADLINE_SECONDS = 45 * 60  # a pass stops after this long (the next one picks up where it stopped)
 
 
 @dataclass
@@ -320,6 +328,10 @@ class Worker:
         if settings.news_enabled and settings.news_tagging_enabled:
             self.jobs.append(Job("news_tagging", every(settings.news_tagging_minutes * 60), self.news_tagging,
                                  background=True))
+        # LangSearch (台股新聞, 產品負責人 2026-11-17; off unless NEWS_LANGSEARCH_ENABLED): a look every 10 minutes at
+        # what is due (the topics from 16:00 on trading days, the stocks from 18:30), in a loop of its own
+        if settings.news_enabled and settings.news_langsearch_enabled:
+            self.jobs.append(Job("news_langsearch", every(LANGSEARCH_SECONDS), self.news_langsearch, background=True))
         if settings.company_descriptions_enabled:
             self.jobs.append(Job("company_refresh", daily_at(*(time(h, 35) for h in range(24))), self.company_refresh,
                                  background=True))
@@ -560,6 +572,15 @@ class Worker:
         def run() -> tagging.RunResult:
             with session_factory()() as db:
                 return tagging.run(db, self.md)
+
+        await asyncio.to_thread(run)
+
+    async def news_langsearch(self) -> None:
+        from forliosa.news import langsearch
+
+        def run() -> langsearch.LangSearchReport:
+            with session_factory()() as db:
+                return langsearch.refresh_langsearch(db, self.md, deadline_seconds=LANGSEARCH_DEADLINE_SECONDS)
 
         await asyncio.to_thread(run)
 

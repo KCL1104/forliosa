@@ -155,6 +155,7 @@ uvicorn（已開 `--proxy-headers`，Railway 的 HTTPS 終止在代理）。
 | `CLAUDE_API_KEY_1..3` | 週報用 | 群組 AI 週報（每週六 20:00）；沒設時週報只有數字、標成失敗。可用 `AI_DIGEST_ENABLED=false` 關掉 AI |
 | `TELEGRAM_BOT_TOKEN`、`TELEGRAM_BOT_USERNAME` | Telegram 推播用 | 和 api 相同（見 2.5 節） |
 | `NEWS_SEARXNG_URL` | 建議 | `http://searxng.railway.internal:8080`（見 2.6 節）。新聞 worker 用它查 SearXNG；不設時 prod 預設就是這個值，服務名稱不是 `searxng` 時一定要設。設成空字串或 `NEWS_SEARXNG_ENABLED=false` 會關掉 SearXNG |
+| `NEWS_LANGSEARCH_ENABLED`、`LANGSEARCH_API_KEY` | LangSearch 台股新聞用 | `true` 與 LangSearch 的金鑰（**機密**，只放 worker）。產品負責人 2026-11-17 決定的例外（`CLAUDE.md`）：只存標題、媒體、時間、網址；每個 UTC 日最多 250 次請求、5 萬 token，被擋（429／401／403／轉址）就停到下一個 00:00 UTC。沒設就不跑，其他新聞來源照常。上線後用 `uv run python -m forliosa.news langsearch-status` 看用量（`apps/api/CONTRACT_NOTES.md`「2026-11-17 LangSearch 台股新聞」） |
 | `DATA_POLICY` | | `commercial`（預設） |
 | `RAILWAY_RUN_UID` | 掛 volume 時 | `0`，搭配自己的 volume |
 

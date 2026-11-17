@@ -336,6 +336,8 @@ _SOURCES: dict[str, tuple[str, bool]] = {
     "gdelt": ("", True),
     "ai-search": ("AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）", True),
     "searxng": ("SearXNG 自架元搜尋（只取標題、媒體、時間與連結）", True),
+    # 產品負責人 2026-11-17 decided to use it (CLAUDE.md); Taiwan stocks only
+    "langsearch": ("LangSearch 網路搜尋（只取標題、媒體、時間與連結）", True),
     "yahoo-rss": ("", False),
     "wikipedia": ("", True),  # labelled through DATASETS["wikipedia/zh"]
     "wikidata": ("", True),

@@ -132,7 +132,9 @@ SOURCE_WIDE = "*"
 ENGINE_PREFIX = "@"
 ENGINE_BACKOFF_MAX = timedelta(hours=24)
 ENGINE_ERRORS_BEFORE_PAUSE = 3  # timeouts / errors in a row before an engine is paused (a refusal pauses at once)
-FREE_SOURCES = ("gdelt", "searxng", "yahoo_rss")
+# Sources that cost nothing per request: what they hold decides whether the paid AI fallback runs (LangSearch,
+# 2026-11-17: its headlines count too, so a stock it covers is not searched again at the system's cost)
+FREE_SOURCES = ("gdelt", "searxng", "yahoo_rss", "langsearch")
 # news_articles.source -> (label shown with the headline, attribution key for ``sources``)
 SOURCE_INFO: dict[str, tuple[str, str]] = {
     "gdelt": ("GDELT", "gdelt/doc"),
@@ -140,6 +142,7 @@ SOURCE_INFO: dict[str, tuple[str, str]] = {
     "searxng": ("SearXNG", "searxng"),
     "yahoo_rss": ("Yahoo股市", "yahoo-rss/stock"),
     "finmind": ("FinMind", "finmind"),
+    "langsearch": ("LangSearch", "langsearch"),  # Taiwan stocks and ^TW only (forliosa.news.langsearch)
 }
 PERSONAL_ONLY_SOURCES = frozenset({"yahoo_rss", "finmind"})
 
@@ -264,13 +267,17 @@ def query_terms(db: Session, info: InstrumentInfo, md: MarketData | None = None,
     ``english``: its :func:`english_names` when already known."""
     english = english_names(db, info) if english is None else list(english)
     taiwan = info.market != "US"
-    extra = [] if taiwan else [a for a in info.aliases if not a.isascii()]
+    # Taiwan: the short forms headlines use (tw_match.ALIASES: 台積, 禾榮); US: the Chinese aliases (輝達)
+    extra = list(tw_match.ALIASES.get(info.code, ())) if taiwan else [a for a in info.aliases if not a.isascii()]
     master = md.master() if taiwan and md is not None else None
     official = official_forms(db, master) if master is not None else {}
-    longer = tw_match.longer_in_master(info.name, master, official) if master is not None else ()
+    longer: tuple[str, ...] = ()
+    if master is not None:
+        longer = tuple(dict.fromkeys(w for n in (info.name, *extra)
+                                     for w in tw_match.longer_in_master(n, master, official)))
     peers = tw_match.names_in_master(master) if master is not None else frozenset()
-    return make_terms(info.name, info.code, english, extra, taiwan=taiwan, longer=longer, peers=peers,
-                      forms=official.get(info.symbol, ()))
+    forms = (*official.get(info.symbol, ()), *(tw_match.ALIAS_FORMS.get(info.code, ()) if taiwan else ()))
+    return make_terms(info.name, info.code, english, extra, taiwan=taiwan, longer=longer, peers=peers, forms=forms)
 
 
 def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datetime,

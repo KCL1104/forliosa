@@ -40,7 +40,7 @@ if TYPE_CHECKING:
 
 MAX_DAYS = 90
 SEARCH_LIMIT = 20
-MARKET_LABELS = {"^US": "美股大盤"}
+MARKET_LABELS = {"^US": "美股大盤", "^TW": "台股大盤"}
 
 
 @dataclass

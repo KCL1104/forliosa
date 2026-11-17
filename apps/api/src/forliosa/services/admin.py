@@ -114,6 +114,7 @@ def news_summary(db: Session, now: datetime | None = None, policy: str | None = 
     configured = [("gdelt", settings.news_gdelt_enabled), ("searxng", searxng_on), ("ai_search", ai_on)]
     if policy == "personal":
         configured.append(("yahoo_rss", settings.news_yahoo_rss))
+    configured.append(("langsearch", settings.langsearch_on))
     sources = []
     for key, on in configured:
         row = wide.get(key)
@@ -136,7 +137,18 @@ def news_summary(db: Session, now: datetime | None = None, policy: str | None = 
     return {"enabled": settings.news_enabled, "refresh_minutes": settings.news_refresh_minutes,
             "last_run_at": iso_taipei(max(attempts)) if attempts else None,
             "new_24h": int(sum(stored.values())), "sources": sources, "paused_engines": engines,
-            "ai_month_cost_usd": float(round(ai_spent, 4)), "ai_budget_usd": float(settings.news_ai_budget_usd)}
+            "ai_month_cost_usd": float(round(ai_spent, 4)), "ai_budget_usd": float(settings.news_ai_budget_usd),
+            "langsearch": langsearch_summary(db, now)}
+
+
+def langsearch_summary(db: Session, now: datetime | None = None) -> dict[str, Any]:
+    """LangSearch's UTC day (counts only): requests and tokens against the caps, what stopped it, the degradation
+    level, the tiers, and ``warning: "contents_cap_ignored"`` when an answer came back far above the token guard."""
+    from forliosa.news import langsearch
+
+    st = langsearch.status(db, now=now)
+    until = st.pop("paused_until")
+    return {**st, "paused_until": iso_taipei(until) if until is not None else None}
 
 
 def _aware(dt: datetime) -> datetime:

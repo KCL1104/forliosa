@@ -1429,7 +1429,7 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd"}}` |
+| GET | `/admin/overview` | `{"users": {"total", "new_7d"}, "ai": {"month": "2026-11", "slots": [{"slot", "configured", "state", "retry_in_seconds", "workspace_id", "month_cost_usd", "month_calls", "monthly_budget_usd", "threads", "last_error"}]}, "datasets": [{"key", "name", "agency", "data_date", "fetched_at", "days_behind", "stale"}], "history_backfill": {"enabled", "rows", "pending", "symbols": {"done", "not_found", "mismatch", "no_overlap", "error"}}, "news": {"enabled", "refresh_minutes", "last_run_at", "new_24h", "sources": [{"key", "name", "state", "paused_until", "reason", "last_success_at", "new_24h"}], "paused_engines": [{"engine", "until"}], "ai_month_cost_usd", "ai_budget_usd", "langsearch": {"enabled", "configured", "day_utc", "requests", "request_cap", "tokens", "token_cap", "first_fills", "stopped", "level", "paused_until", "warning", "tiers"}}}` |
 | GET | `/admin/news/blocked-domains` | `[{"domain", "reason", "created_at", "from_env"}]`：存在資料庫的（新的在前），再來是只寫在 `NEWS_BLOCKED_DOMAINS` 的（`created_at` null、`from_env` true） |
 | POST | `/admin/news/blocked-domains` | `{"domain", "reason"?: ≤200 字}` → 201 `{"domain", "deleted_headlines"}`：網域正規化（小寫、網址只取主機、去掉 `www.`），封鎖它與子網域並刪掉已存的標題；不是網域 → 422 |
 | DELETE | `/admin/news/blocked-domains/{domain}` | 解除 → 204；寫在 `NEWS_BLOCKED_DOMAINS` 的 → 409 `set_in_environment`；不在清單 → 404。刪掉的標題不會回來 |
@@ -1582,6 +1582,11 @@
 （`rate_limited` 限流、`blocked` 被拒、`unreachable` 連不上、`budget` 本月 AI 預算用完）、`last_success_at`
 （最近一次有回答）、`new_24h`（過去 24 小時存進來的新標題數）；另有暫停中的 SearXNG 上游引擎、本月新聞 AI 搜尋的費用與預算、
 多久整理一次與最近一次整理的時間。只有數字與時間。
+
+2026-11-17：`sources` 多一列 `langsearch`（LangSearch 台股新聞；`NEWS_LANGSEARCH_ENABLED` 而且有金鑰才算開，暫停原因沿用上面三種），
+另有 `news.langsearch`：今天（UTC）的請求數與上限（`requests`、`request_cap`）、token 與上限、第一次查的檔數、今天停下的原因
+（`stopped`：`quota`／`contract`／`blocked`）、降級等級（`level` 0–2）、整個來源暫停到幾點、`warning`（`contents_cap_ignored`：回應的
+token 遠超過上限、字數限制沒有生效，今天停用）與各分級的檔數（`tiers`）。舊版後端沒有這個欄位。
 
 ## 美股收盤價（2026-11-15）
 
