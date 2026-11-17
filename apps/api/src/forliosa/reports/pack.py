@@ -222,7 +222,9 @@ class Pack:
             "next_period": {"start": ed.next_period[0].isoformat(), "end": ed.next_period[1].isoformat()}
             if ed.next_period else None,
             "cutoff": iso_taipei(self.cutoff), "publish_target": iso_taipei(ed.publish_target),
-            "web_window": {"from": iso_taipei(ed.web_from), "to": iso_taipei(ed.web_to)},
+            # the gathering's window and the US sessions it covers (known even when no US close is stored)
+            "web_window": {"from": iso_taipei(ed.web_from), "to": iso_taipei(ed.web_to),
+                           "us_sessions": [d.isoformat() for d in ed.us_sessions]},
             "dates": {k: sorted(v) for k, v in self.dates.items()},
             "facts": self.facts, "calendar": self.calendar, "filings": self.filings, "research": self.research,
             "web": [], "stocks": list(self.stocks.values()), "sectors": self.sectors, "missing": self.missing,

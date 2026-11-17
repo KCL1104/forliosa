@@ -1,14 +1,19 @@
 """The gathering (contract §8): named media reports of what happened and what is scheduled, found by web search
 (Claude Sonnet 5.5 at low effort, the report's allowed domains only, the repo's ``web_search_20260318`` without dynamic
-filtering) — one call per topic with a quota the server sets, up to four topics at a time.
+filtering) — one call per topic with a quota the server sets, up to four topics at a time. A reply whose ``[KEY]``
+paragraphs are mostly uncited gets one more turn asking for them again with citations (the better of the two answers
+is kept).
 
 Each reply is cut into facts (``[KEY] 〔媒體〕報導，…`` paragraphs with their citations) and every fact is checked
-(:func:`verify`): the cited page was among this call's search results, on an allowed domain, published inside the
-edition's window — every citation on its own (an undated page, or a page dated only by day outside the window's days
-or on the cut-off's own day, is left out; the fact's source is the citation that holds its numbers) — the citation
-is a passage of the article (not a 「相關新聞」 list), every number is in a fresh cited passage, a US / ADR /
-night-session fact names its US trading day and has percentages only, no index points, no ratings or target prices,
-no one's view of where the market goes. What is kept becomes an X fact for the writer
+(:func:`verify`): the cited page was among this call's search results, on an allowed domain, a news article (not a
+quote, index or data page), published inside the edition's window — every citation on its own (an undated page is
+left out; a page dated only by day counts from the window's first day; on the cut-off's own day it is kept only when
+the search ran inside the window and the window covers that whole day up to the search, or when the cited passage or
+title gives its publish time inside the window — the close edition's window starts the same morning; the fact's source
+is the citation that holds its numbers) — the citation is a passage of the article (not a 「相關新聞」 list), every
+number is in a fresh cited passage, a US / ADR / night-session fact names a US trading day that ended before the
+cut-off day and has percentages only, no index points, no ratings or target prices, no one's view of where the market
+goes. What is kept becomes an X fact for the writer
 (its ``quote`` stays on the server side: the API never returns it). When outlets disagree on a number of the same
 key, one fixed outlet wins and the others are listed as a disagreement (:data:`OUTLET_PRIORITY`).
 """
@@ -20,14 +25,16 @@ import re
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, time
+from itertools import pairwise
 from typing import Any
+from urllib.parse import urlsplit
 
-from forliosa.ai.analyst import date_from_url, datetime_from_page_age, search_results
+from forliosa.ai.analyst import date_from_url, datetime_from_page_age, is_article, search_results
 from forliosa.ai.market_summary import _norm_url
 from forliosa.news.outlets import host_of, on_domain, outlet_name
 from forliosa.reports import calls
-from forliosa.reports.prompts import GATHER_SYSTEM, LONG_HOLIDAY_EXTRA, TOPICS, key_allowed, topic_brief
+from forliosa.reports.prompts import CITE_AGAIN, GATHER_SYSTEM, LONG_HOLIDAY_EXTRA, TOPICS, key_allowed, topic_brief
 from forliosa.reports.validate import FORECAST, OUTLOOK, VIEW, index_points, numbers
 from forliosa.timeutil import TAIPEI, is_us_trading_day
 
@@ -58,6 +65,19 @@ INDEX_NAMES_WITH_DIGITS = ("S&P 500", "標普 500", "標普500", "標準普爾 5
                            "那斯達克 100", "納斯達克 100", "羅素 2000", "Russell 2000", "道瓊 30")
 US_DATE = re.compile(r"美股\s*(\d{1,2})/(\d{1,2})")
 KEY_LINE = re.compile(r"^\s*\[([A-Za-z0-9_.\-]+)\]\s*(.+)$", re.DOTALL)
+# A reading of the market quoted as if it were a fact (「短線利空出盡」): someone's view, never gathered
+JUDGEMENT = re.compile(r"利空出盡|利多出盡|利空鈍化|利多鈍化|賣壓出盡|錯殺")
+# Quote, index and data pages of the report's domains that ``analyst.is_article`` does not already know (it covers
+# cnyes.com/twstock, invest.cnyes.com, cnbc.com/quotes, bloomberg.com/quote…): their numbers keep changing and their
+# page_age is an update time, so they are never a source.
+QUOTE_PAGE_PATHS = {"cnyes.com": ("/archive/twstock", "/archive/usstock"), "moneydj.com": ("/z/", "/etf/")}
+# A publish time written in a cited passage or a title: 2026-11-17 15:32, 2026/11/17 15:32, 2026年11月17日 15:32,
+# 115/11/17 15:32 (ROC year), 11/17 15:32
+STAMP = re.compile(r"(?<!\d)(?:(\d{4}|1\d{2})\s*[-/.年]\s*)?(\d{1,2})\s*[-/.月]\s*(\d{1,2})\s*日?[\sT]*"
+                   r"(\d{1,2})\s*[:：]\s*(\d{2})(?!\d)")
+# One more turn when at least this share of an answer's [KEY] paragraphs came without a citation
+CITE_RETRY_SHARE = 0.5
+CITE_RETRY_SEARCHES = 1
 
 
 @dataclass
@@ -75,6 +95,7 @@ class TopicResult:
     slot: int | None = None
     error: str | None = None
     seconds: float = 0.0
+    answers: list[int] = field(default_factory=lambda: [0])  # where each answer starts in msgs (a 2nd: the retry)
 
 
 @dataclass
@@ -102,10 +123,19 @@ def stock_reason_names(pack: dict[str, Any]) -> list[str]:
     return [f"{s['name']}（{s['code']}）" for s in sorted(cands, key=size)[:STOCK_REASON_MAX]]
 
 
+def us_sessions_of(pack: dict[str, Any]) -> list[str]:
+    """The US sessions the edition covers (ISO dates): ``web_window.us_sessions`` is known even when no US close is
+    stored; a pack built before it only has the sessions with stored closes (``dates.us_sessions``)."""
+    w = pack.get("web_window") or {}
+    if "us_sessions" in w:
+        return list(w.get("us_sessions") or [])
+    return list((pack.get("dates") or {}).get("us_sessions") or [])
+
+
 def topics_for(kind: str, pack: dict[str, Any], *, long_holiday: bool = False) -> list[Topic]:
     w = pack.get("web_window") or {}
     window = (str(w.get("from") or ""), str(w.get("to") or ""))
-    us = [f"{d[5:7].lstrip('0')}/{d[8:10].lstrip('0')}" for d in (pack.get("dates") or {}).get("us_sessions") or []]
+    us = [f"{d[5:7].lstrip('0')}/{d[8:10].lstrip('0')}" for d in us_sessions_of(pack)]
     out = []
     for name, (quota, _what, keys) in TOPICS[kind].items():
         names: list[str] | None = None
@@ -119,36 +149,69 @@ def topics_for(kind: str, pack: dict[str, Any], *, long_holiday: bool = False) -
                 continue
         q = quota + (LONG_HOLIDAY_EXTRA.get(name, 0) if long_holiday else 0)
         out.append(Topic(name, q, topic_brief(kind, name, window=window, edition_label=str(pack.get("edition_label")),
-                                              us_sessions=us, names=names), keys))
+                                              us_sessions=us, names=names, quota=q), keys))
     return out
 
 
 # -- calling ------------------------------------------------------------------------------------------------------
 def request_for(topic: Topic, model: str, effort: str, messages: list[dict[str, Any]], settings: Any = None,
-                continuation: bool = False) -> dict[str, Any]:
+                continuation: bool = False, searches: int | None = None) -> dict[str, Any]:
     return calls.request(model=model, max_tokens=MAX_TOKENS, effort=effort, system=GATHER_SYSTEM, messages=messages,
-                         tools=[calls.web_search_tool(topic.quota)], settings=settings, continuation=continuation)
+                         tools=[calls.web_search_tool(topic.quota if searches is None else searches)],
+                         settings=settings, continuation=continuation)
+
+
+def _sent_back(msg: Any) -> dict[str, Any]:
+    return {"role": "assistant", "content": [b.to_dict(mode="json") if hasattr(b, "to_dict") else b
+                                             for b in msg.content]}
+
+
+def citation_counts(content: list[Any]) -> tuple[int, int]:
+    """``(cited, uncited)``: the answer's ``[KEY]`` paragraphs with and without a citation."""
+    cited = uncited = 0
+    for text, cites in paragraphs(content):
+        if KEY_LINE.match(text):
+            cited, uncited = (cited + 1, uncited) if cites else (cited, uncited + 1)
+    return cited, uncited
+
+
+def needs_citations(content: list[Any]) -> bool:
+    """At least :data:`CITE_RETRY_SHARE` of the answer's ``[KEY]`` paragraphs came without a citation (they would all
+    be dropped)."""
+    cited, uncited = citation_counts(content)
+    return uncited > 0 and uncited >= CITE_RETRY_SHARE * (cited + uncited)
 
 
 def call_topic(topic: Topic, model: str, effort: str, call: Callable[[dict[str, Any], int | None], tuple[Any, int]],
                settings: Any = None) -> TopicResult:
     """One topic: the first call, then up to three ``pause_turn`` continuations on the same slot (the reply sent back
-    as it came). ``call(kw, only)`` runs the request on a key slot and returns ``(CallResult, slot)``."""
+    as it came). An answer whose ``[KEY]`` paragraphs are mostly uncited (:func:`needs_citations`) gets one more turn
+    (:data:`prompts.CITE_AGAIN`, at most :data:`CITE_RETRY_SEARCHES` new search); :func:`collect` keeps the better of
+    the two answers. ``call(kw, only)`` runs the request on a key slot and returns ``(CallResult, slot)``."""
     res = TopicResult(topic)
     messages: list[dict[str, Any]] = [{"role": "user", "content": topic.brief}]
     try:
-        for i in range(MAX_CONTINUATIONS + 1):
-            kw = request_for(topic, model, effort, messages, settings, continuation=i > 0)
-            out, slot = call(kw, res.slot)
-            res.slot = slot
-            res.msgs.append(out.msg)
-            res.seconds += out.seconds
-            if getattr(out.msg, "stop_reason", None) != "pause_turn":
+        for retry in (False, True):
+            for i in range(MAX_CONTINUATIONS + 1):
+                kw = request_for(topic, model, effort, messages, settings, continuation=i > 0,
+                                 searches=CITE_RETRY_SEARCHES if retry else None)
+                out, slot = call(kw, res.slot)
+                res.slot = slot
+                res.msgs.append(out.msg)
+                res.seconds += out.seconds
+                if getattr(out.msg, "stop_reason", None) != "pause_turn":
+                    break
+                messages = [*messages, _sent_back(out.msg)]
+            answer = [b for m in res.msgs[res.answers[-1]:] for b in (getattr(m, "content", None) or [])]
+            if retry or getattr(res.msgs[-1], "stop_reason", None) == "pause_turn" or not needs_citations(answer):
                 break
-            messages = [*messages, {"role": "assistant",
-                                    "content": [b.to_dict(mode="json") if hasattr(b, "to_dict") else b
-                                                for b in out.msg.content]}]
+            res.answers.append(len(res.msgs))
+            messages = [*messages, _sent_back(res.msgs[-1]), {"role": "user", "content": CITE_AGAIN}]
     except Exception as exc:  # one topic failing never stops the others
+        if len(res.answers) > 1:  # the retry failed: the first answer stands
+            log.warning("market report gathering: topic %s, asking again for citations failed (%s)", topic.name,
+                        type(exc).__name__)
+            return res
         res.error = type(exc).__name__
         log.warning("market report gathering: topic %s failed (%s)", topic.name, res.error)
     return res
@@ -205,8 +268,8 @@ class Window:
     start: datetime
     end: datetime
     cutoff: datetime
-    us_sessions: set[date]
-    now: datetime
+    us_sessions: set[date]  # the US sessions the edition covers (with or without stored closes)
+    now: datetime  # when the searches were done (after them): no page found can be newer
 
 
 def _related_headline(cited: str, titles: list[str], own: str) -> bool:
@@ -233,24 +296,61 @@ def _published(url: str, page_age: str | None, now: datetime) -> datetime | date
 
 
 def in_window(pub: datetime | date, w: Window) -> bool:
-    """A page dated to the minute inside [start, end]; a page dated by day alone on a day from the window's start
-    to the day before the cut-off (a premarket: the previous session's day; a close edition: none — its window is
-    that same day)."""
+    """A page dated to the minute inside [start, end]. A page dated by day alone: a day from the window's start to
+    the day before the cut-off (a premarket: the previous session's day); or the cut-off's own day when that whole day
+    up to the search is inside the window — the page was found by the search, so it is no later than ``w.now``
+    (taken when the searches were done): a premarket searched at 06:15 or a weekly at 16:30 keeps "0 days ago", a
+    rebuild after the window does not, and a close edition (its window starts that morning) needs a publish time
+    (:func:`stamped`)."""
     if isinstance(pub, datetime):
         return w.start <= pub <= w.end
-    return w.start.date() <= pub < w.cutoff.date()
+    if w.start.date() <= pub < w.cutoff.date():
+        return True
+    return pub == w.cutoff.date() and w.start <= datetime.combine(pub, time(0), TAIPEI) <= w.now <= w.end
 
 
-def _us_date_ok(claim: str, w: Window) -> date | None:
-    for m in US_DATE.finditer(claim):
-        mo, d = int(m.group(1)), int(m.group(2))
-        for y in (w.cutoff.year, w.cutoff.year - 1):
+def stamped(day: date, texts: list[str], w: Window) -> datetime | None:
+    """The publish time a page dated only by ``day`` writes in its cited passages or title (:data:`STAMP`), when it is
+    on that day, inside the window and no later than the search."""
+    for t in texts:
+        for m in STAMP.finditer(t or ""):
+            y, mo, d, hh, mm = m.groups()
+            year = day.year if y is None else int(y) + (1911 if len(y) == 3 else 0)
             try:
-                x = date(y, mo, d)
+                at = datetime(year, int(mo), int(d), int(hh), int(mm), tzinfo=TAIPEI)
             except ValueError:
                 continue
-            if x <= w.cutoff.date() and is_us_trading_day(x):
-                return x
+            if at.date() == day and w.start <= at <= min(w.end, w.now):
+                return at
+    return None
+
+
+def quote_page(url: str) -> bool:
+    """A quote, index, ranking or data page (``analyst.is_article`` plus :data:`QUOTE_PAGE_PATHS`), not a report."""
+    if not is_article(url):
+        return True
+    try:
+        path = urlsplit(url).path.lower()
+    except ValueError:
+        return False
+    host = host_of(url)
+    return any(on_domain(host, h) and path.startswith(prefixes) for h, prefixes in QUOTE_PAGE_PATHS.items())
+
+
+def _us_date_ok(claim: str, w: Window, scheduled: bool = False) -> date | None:
+    """The US trading day the claim names (「美股 11/16」): one that ended before the cut-off's day (a premarket at
+    06:55 on 11/17 reports the 11/16 session, never 「美股 11/17」); a scheduled US earnings date may be the cut-off's
+    own day (tonight)."""
+    for m in US_DATE.finditer(claim):
+        mo, d = int(m.group(1)), int(m.group(2))
+        try:  # the latest such date up to the cut-off's day (12/31 in a January edition is last year's)
+            x = date(w.cutoff.year, mo, d)
+            if x > w.cutoff.date():
+                x = date(w.cutoff.year - 1, mo, d)
+        except ValueError:
+            continue
+        if (x <= w.cutoff.date() if scheduled else x < w.cutoff.date()) and is_us_trading_day(x):
+            return x
     return None
 
 
@@ -274,6 +374,9 @@ def verify(key: str, claim: str, cites: list[dict[str, Any]], results: dict[str,
         if not any(on_domain(host, d) for d in calls.REPORT_SEARCH_DOMAINS):
             reason = reason or "domain"
             continue
+        if quote_page(url):
+            reason = reason or "quote_page"
+            continue
         if _related_headline(str(c.get("cited_text") or ""), titles, str(c.get("title") or r.title)):
             reason = reason or "related_headline"
             continue
@@ -281,15 +384,26 @@ def verify(key: str, claim: str, cites: list[dict[str, Any]], results: dict[str,
     if not valid:
         return None, reason or "no_citation"
     # freshness: every citation's own page (one outside the window, or of unknown time, is left out)
+    texts: dict[str, list[str]] = {}
+    for c, r in valid:
+        texts.setdefault(_norm_url(str(c.get("url"))), [r.title]).extend(
+            [str(c.get("cited_text") or ""), str(c.get("title") or "")])
     fresh: list[tuple[dict[str, Any], Any, datetime | date]] = []
-    stale = False
+    why = "time_unknown"
     for c, r in valid:
         pub = _published(str(c.get("url")), r.page_age, w.now)
+        if pub is not None and not isinstance(pub, datetime) and pub == w.cutoff.date() and not in_window(pub, w):
+            # the cut-off's own day, dated by day alone: kept only with a publish time inside the window
+            pub = stamped(pub, texts[_norm_url(str(c.get("url")))], w) or pub
+            if not isinstance(pub, datetime):
+                why = "no_publish_time"
+                continue
         if pub is not None and in_window(pub, w):
             fresh.append((c, r, pub))
-        stale = stale or pub is not None
+        elif pub is not None and why == "time_unknown":
+            why = "outside_window"
     if not fresh:
-        return None, "outside_window" if stale else "time_unknown"
+        return None, why
     claim_nums = numbers(claim, INDEX_NAMES_WITH_DIGITS)
     quote_nums = [numbers(str(c.get("cited_text") or ""), INDEX_NAMES_WITH_DIGITS) for c, _, _ in fresh]
 
@@ -300,7 +414,7 @@ def verify(key: str, claim: str, cites: list[dict[str, Any]], results: dict[str,
         return None, "number_not_in_quote"
     us_session = None
     if key.startswith(("US.", "ADR.", "NIGHT.")):
-        us_session = _us_date_ok(claim, w)
+        us_session = _us_date_ok(claim, w, scheduled=key.startswith("US.earnings."))
         if us_session is None:
             return None, "no_us_session_date"
     if index_points(claim) is not None:
@@ -310,7 +424,8 @@ def verify(key: str, claim: str, cites: list[dict[str, Any]], results: dict[str,
         return None, "index_points"  # US indices, the night session and the ADR: percentages only
     if RATING.search(claim):
         return None, "rating"
-    if VIEW.search(claim) or (OUTLOOK.search(claim) and (not key.startswith(SCHEDULE_KEYS) or FORECAST.search(claim))):
+    if VIEW.search(claim) or JUDGEMENT.search(claim) \
+            or (OUTLOOK.search(claim) and (not key.startswith(SCHEDULE_KEYS) or FORECAST.search(claim))):
         return None, "outlook"  # someone's view of where the market or a stock goes is not a fact to quote
     # the source: the citation holding the claim's numbers (the first fresh one when it has none)
     best = max(range(len(fresh)), key=lambda i: (sum(found(n, quote_nums[i]) for n in claim_nums), -i))
@@ -370,31 +485,49 @@ def disagreements(facts: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], li
     return [f for f in facts if id(f) not in drop_ids], out
 
 
+def _check_answer(content: list[Any], found: dict[str, Any], w: Window, topic: Topic) \
+        -> tuple[list[dict[str, Any]], dict[str, int]]:
+    dropped: dict[str, int] = {}
+    kept: list[dict[str, Any]] = []
+    for text, cites in paragraphs(content):
+        m = KEY_LINE.match(text)
+        if m is None:
+            continue
+        fact, why = verify(m.group(1), m.group(2).strip(), cites, found, w, topic.keys)
+        if fact is None:
+            dropped[why or "other"] = dropped.get(why or "other", 0) + 1
+            continue
+        if len(kept) >= MAX_PER_TOPIC:
+            dropped["limit"] = dropped.get("limit", 0) + 1
+            continue
+        fact["topic"] = topic.name
+        kept.append(fact)
+    return kept, dropped
+
+
 def collect(results: list[TopicResult], w: Window) -> Outcome:
-    """Parse and check every topic's replies; number the kept facts X001… by topic, in order."""
+    """Parse and check every topic's replies; number the kept facts X001… by topic, in order. A topic asked again
+    for citations keeps the answer with more facts (on a tie the later one, when it wrote any [KEY] paragraph); the
+    searches of both answers count."""
     facts: list[dict[str, Any]] = []
     topics: list[dict[str, Any]] = []
     for res in results:
         content = [b for m in res.msgs for b in (getattr(m, "content", None) or [])]
         found = {_norm_url(r.url): r for r in search_results(content)}
-        dropped: dict[str, int] = {}
+        bounds = [*res.answers, len(res.msgs)]
         kept: list[dict[str, Any]] = []
-        for text, cites in paragraphs(content):
-            m = KEY_LINE.match(text)
-            if m is None:
-                continue
-            fact, why = verify(m.group(1), m.group(2).strip(), cites, found, w, res.topic.keys)
-            if fact is None:
-                dropped[why or "other"] = dropped.get(why or "other", 0) + 1
-                continue
-            if len(kept) >= MAX_PER_TOPIC:
-                dropped["limit"] = dropped.get("limit", 0) + 1
-                continue
-            fact["topic"] = res.topic.name
-            kept.append(fact)
+        dropped: dict[str, int] = {}
+        for a, b in pairwise(bounds):
+            answer = [x for m in res.msgs[a:b] for x in (getattr(m, "content", None) or [])]
+            k, d = _check_answer(answer, found, w, res.topic)
+            if a == 0 or len(k) > len(kept) or (len(k) == len(kept) and (k or d)):
+                kept, dropped = k, d
         facts.extend(kept)
-        topics.append({"topic": res.topic.name, "quota": res.topic.quota, "results": len(found), "kept": len(kept),
-                       "dropped": dropped, "error": res.error, "seconds": round(res.seconds, 1)})
+        row = {"topic": res.topic.name, "quota": res.topic.quota, "results": len(found), "kept": len(kept),
+               "dropped": dropped, "error": res.error, "seconds": round(res.seconds, 1)}
+        if len(res.answers) > 1:
+            row["asked_again"] = True  # the first answer was mostly uncited (call_topic)
+        topics.append(row)
     facts, disagree = disagreements(facts)
     for i, f in enumerate(facts, start=1):
         f["id"] = f"X{i:03d}"
@@ -403,7 +536,7 @@ def collect(results: list[TopicResult], w: Window) -> Outcome:
 
 def window(pack: dict[str, Any], now: datetime) -> Window:
     w = pack.get("web_window") or {}
-    sessions = {date.fromisoformat(d) for d in (pack.get("dates") or {}).get("us_sessions") or []}
+    sessions = {date.fromisoformat(d) for d in us_sessions_of(pack)}
     return Window(datetime.fromisoformat(w["from"]).astimezone(TAIPEI),
                   datetime.fromisoformat(w["to"]).astimezone(TAIPEI),
                   datetime.fromisoformat(pack["cutoff"]).astimezone(TAIPEI), sessions, now)
