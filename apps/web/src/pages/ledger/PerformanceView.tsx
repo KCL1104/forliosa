@@ -1,7 +1,7 @@
 import { useState } from "react"
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Line, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts"
 import { useAccounts, useHoldings, usePerformance } from "@/api/queries"
-import type { Holding, Performance, PerformanceRange } from "@/api/types"
+import type { Holding, Performance } from "@/api/types"
 import { BenchmarkSelect } from "@/components/benchmark-select"
 import { usePrefSetter } from "@/hooks/use-pref-setter"
 import { ChartTooltipBox, Legend, RangeChips } from "@/components/charts/chart-kit"
@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip as Tip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { direction, formatCompact, formatDate, formatMoney, formatMoneyCompact, formatNumber, formatPercent, MASK, toneClass } from "@/lib/format"
+import { direction, formatCompact, formatDate, formatMoney, formatNumber, formatPercent, MASK, toneClass } from "@/lib/format"
+import { TREND_RANGES } from "@/lib/trend-range"
 import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { niceTicks } from "@/ai/chart-geometry"
@@ -23,17 +24,7 @@ import { inText } from "@/lib/cjk"
 import { useHowToRead } from "@/pages/stock/tabs/how-to-read"
 import { useReadOnly, useWho } from "@/api/view-as"
 import { isUnpricedNote } from "./trend-reason"
-
-const RANGES: { value: PerformanceRange; label: string }[] = [
-  { value: "1D", label: "1日" },
-  { value: "5D", label: "5日" },
-  { value: "1M", label: "1月" },
-  { value: "3M", label: "3月" },
-  { value: "6M", label: "6月" },
-  { value: "YTD", label: "今年" },
-  { value: "1Y", label: "1年" },
-  { value: "ALL", label: "全部" },
-]
+import { useTrendRange } from "./use-trend-range"
 
 /**
  * 算不出來、而且換區間或基準也沒有用：有持股還沒有收盤價（剛加入、還沒抓到收盤價的美股；後端的說明是
@@ -43,10 +34,18 @@ function isBlocked(p: Performance | undefined, isError: boolean): boolean {
   return !!p && !isError && p.series.length < 2 && (p.notes ?? []).some(isUnpricedNote)
 }
 
+/**
+ * 績效分段：報酬率與基準（總資產與投入本金的走勢在主數字下方，這裡不重複畫；產品負責人 2026-11-17）。
+ * 區間和主數字下方的總資產走勢是同一個選擇（`useTrendRange`）：整頁只有一排區間按鈕——在這個分段時放在這裡的工具列，
+ * 上面的走勢跟著換、自己不放按鈕。可以選的區間也一樣：資料撐得起來的才放（看這個帳戶「全部」的序列），沒有「1日」。
+ */
 export function PerformanceView() {
-  const [range, setRange] = useState<PerformanceRange>("1Y")
   // undefined＝全部帳戶
   const [account, setAccount] = useState<string | undefined>()
+  const trend = useTrendRange(account)
+  const range = trend.range
+  // 可以選的區間：讀到「全部」的序列才知道；讀不到時全部列出（不讓區間沒辦法換）
+  const rangeOptions = trend.known ? TREND_RANGES.filter((r) => trend.ranges.includes(r.value)) : trend.perf.isError ? TREND_RANGES : []
   const accounts = useAccounts()
   // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
   const readOnly = useReadOnly()
@@ -65,7 +64,7 @@ export function PerformanceView() {
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        {!blocked && <RangeChips label="績效區間" value={range} options={RANGES} onChange={setRange} />}
+        {!blocked && rangeOptions.length > 0 && <RangeChips label="績效區間" value={range} options={rangeOptions} onChange={trend.setRange} />}
         <Select
           value={account ?? "all"}
           onValueChange={(v) => setAccount(v === "all" ? undefined : (v as string))}
@@ -123,7 +122,6 @@ export function PerformanceView() {
             )}
             <ReturnChart series={p.series} showBenchmark benchmarkName={p.benchmark?.name ?? "基準"} mineLabel={`${me}的報酬`} height={300} />
           </Panel>
-          <ValuePanel p={p} />
           <div className="grid gap-10 xl:grid-cols-2">
             <DividendsByMonth p={p} />
             <RealizedByYear p={p} />
@@ -138,7 +136,7 @@ export function PerformanceView() {
 /**
  * 算不出績效時（空狀態，全站同一種）：標題＋後端 notes 的原文說明為什麼（商用模式：存檔不足、有持股還沒有收盤價），
  * 最多一個現在能做的事——有持股還沒有收盤價時，只看一個沒有那幾檔的帳戶（有持股、每一檔都有收盤價的第一個帳戶）；
- * 其他帳戶從上面的帳戶選單選。原因在這一頁只說這一次（主數字列右邊的「近 1 個月走勢：…」在績效分段不出現）。
+ * 其他帳戶從上面的帳戶選單選。原因在這一頁只說這一次（主數字下方的「總資產走勢：…」在績效分段不出現）。
  */
 function NotEnough({ p, blocked, account, accounts, holdings, onAccount }: { p: Performance; blocked: boolean; account?: string; accounts: { id: string; name: string }[]; holdings?: Holding[]; onAccount: (id: string) => void }) {
   const notes = p.notes ?? []
@@ -228,61 +226,6 @@ function Metrics({ p }: { p: Performance }) {
         </div>
       ))}
     </dl>
-  )
-}
-
-function ValuePanel({ p }: { p: Performance }) {
-  const privacy = usePrefs((s) => s.privacyMode)
-  const last = p.series.at(-1)!
-  return (
-    <Panel
-      title="市值與投入本金"
-      titleId="value-title"
-      aside={
-        <span className="text-md text-ink-2">
-          {privacy ? MASK : `市值 ${formatMoneyCompact(last.market_value)}・投入本金 ${formatMoneyCompact(last.net_invested)}`}
-        </span>
-      }
-    >
-      <Legend
-        className="mb-2"
-        items={[
-          { label: "市值", color: "var(--chart-mine)" },
-          { label: "投入本金", color: "var(--chart-bench)", shape: "line" },
-        ]}
-      />
-      {privacy ? (
-        <p className="py-10 text-center text-base text-ink">隱私模式開啟中，金額圖表已隱藏。</p>
-      ) : (
-        <div className="h-[220px] w-full">
-          <ResponsiveContainer width="100%" height="100%">
-            <AreaChart data={p.series} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
-              <CartesianGrid vertical={false} stroke={GRID_STROKE} />
-              {/* 三個月以上：刻度只放在每個月的第一個交易日（「2026/06」不會出現兩次）；更短的期間寫「6/11」 */}
-              <XAxis dataKey="t" tick={AXIS_TICK} tickLine={false} axisLine={false} minTickGap={40} {...valueAxis(p.series.map((r) => r.t))} />
-              <YAxis tick={AXIS_TICK} tickLine={false} axisLine={false} width={64} tickFormatter={(n: number) => formatCompact(n, 0)} />
-              <Tooltip
-                cursor={{ stroke: "var(--muted-foreground)", strokeWidth: 1 }}
-                content={({ active, payload }) => {
-                  const r = active ? (payload?.[0]?.payload as Performance["series"][number] | undefined) : undefined
-                  return r ? (
-                    <ChartTooltipBox
-                      title={formatDate(r.t)}
-                      rows={[
-                        { label: "市值", value: formatMoney(r.market_value), color: "var(--chart-mine)" },
-                        { label: "投入本金", value: formatMoney(r.net_invested), color: "var(--chart-bench)", shape: "line" },
-                      ]}
-                    />
-                  ) : null
-                }}
-              />
-              <Area dataKey="market_value" type="monotone" stroke="var(--chart-mine)" strokeWidth={2} fill="var(--chart-mine)" fillOpacity={0.1} isAnimationActive={false} />
-              <Line dataKey="net_invested" type="stepAfter" stroke="var(--chart-bench)" strokeWidth={1.75} dot={false} isAnimationActive={false} />
-            </AreaChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-    </Panel>
   )
 }
 
@@ -388,16 +331,6 @@ function Definitions() {
       )}
     </div>
   )
-}
-
-/** 市值圖的橫軸：三個月以上只在每個月第一個交易日放刻度（「2026/06」），更短寫「6/11」 */
-function valueAxis(days: string[]): { ticks?: string[]; tickFormatter: (t: string) => string } {
-  const first = days[0]
-  const last = days.at(-1)
-  const long = !!first && !!last && Date.parse(last) - Date.parse(first) >= 90 * 86_400_000
-  if (!long) return { tickFormatter: (t) => `${Number(t.slice(5, 7))}/${Number(t.slice(8, 10))}` }
-  const ticks = days.filter((t, i) => i > 0 && t.slice(0, 7) !== days[i - 1]!.slice(0, 7))
-  return { ticks, tickFormatter: (t) => t.slice(0, 7).replace("-", "/") }
 }
 
 /** 金額的縱軸：整齊的刻度（1、2、2.5、5 × 10ⁿ）；同一條軸只用一種寫法——10 萬以下寫整數，以上寫「萬」 */

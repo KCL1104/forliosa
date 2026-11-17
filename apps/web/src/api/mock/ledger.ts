@@ -11,6 +11,7 @@ import type {
 import { syncAutoDividends } from "./auto-dividends"
 import { hasUsCloses, US_AS_OF, US_SESSION } from "./commercial"
 import { computePreview } from "./fees"
+import { minusMonths } from "@/lib/trend-range"
 import { findInstrument, type MockInstrumentSpec } from "./instruments"
 import {
   addDays,
@@ -444,14 +445,14 @@ function dailyRows(txns: Transaction[], accountId?: string, benchmark = "0050.TW
   return rows
 }
 
-/** 1D／5D 以交易日計（見 rangeRows），這裡只處理日曆區間 */
+/** 1D／5D 以交易日計（見 rangeRows），這裡只處理日曆區間：和後端 `range_start` 一樣往前推日曆月（月底對齊） */
 function rangeStart(range: Exclude<PerformanceRange, "1D" | "5D" | "MTD">): string {
   switch (range) {
-    case "1M": return addDays(MOCK_TODAY, -31)
-    case "3M": return addDays(MOCK_TODAY, -92)
-    case "6M": return addDays(MOCK_TODAY, -183)
+    case "1M": return minusMonths(MOCK_TODAY, 1)
+    case "3M": return minusMonths(MOCK_TODAY, 3)
+    case "6M": return minusMonths(MOCK_TODAY, 6)
     case "YTD": return `${MOCK_TODAY.slice(0, 4)}-01-01`
-    case "1Y": return addDays(MOCK_TODAY, -365)
+    case "1Y": return minusMonths(MOCK_TODAY, 12)
     case "ALL": return "0000-01-01"
   }
 }
@@ -509,8 +510,12 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
       dividends_by_month: [], realized_by_year: [], is_demo: isDemo,
     }
   }
-  const base = rows[0]!.twr_index
-  const bBase = rows[0]!.benchmark_index ?? 1
+  // 指數的 1.0：1D／5D、MTD 與從存檔起點開始算（minStart）時是第一點（基準收盤）；1M…1Y 和後端一樣，
+  // 第一個收盤那天的漲跌也算進區間，1.0 是它前一個收盤（首頁走勢在前端切區間時，同一個區間的報酬才對得起來）
+  const before = days === null && range !== "MTD" ? all[all.indexOf(rows[0]!) - 1] : undefined
+  const prev = before && !(opts.minStart && before.t < opts.minStart) ? before : undefined
+  const base = (prev ?? rows[0]!).twr_index
+  const bBase = (prev ?? rows[0]!).benchmark_index ?? 1
   const series: PerformancePoint[] = rows.map((x) => ({
     t: x.t,
     market_value: x.market_value,

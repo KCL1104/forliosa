@@ -10,7 +10,7 @@ export function isUnpricedNote(note: string): boolean {
 }
 
 /**
- * 帳本主數字列：近 1 個月走勢畫不出來的原因。
+ * 帳本主數字下方的總資產走勢畫不出來的原因（`HeroTrend` 的一行說明）。
  * 只取後端 notes 明講的兩種——有持股還沒有收盤價、資料還不夠；
  * 其他情況（載入失敗、沒有持股、notes 沒說）回傳 null，畫面不寫原因。
  */

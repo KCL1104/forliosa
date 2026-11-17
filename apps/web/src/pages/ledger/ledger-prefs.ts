@@ -1,5 +1,6 @@
 import { create } from "zustand"
 import { createJSONStorage, persist } from "zustand/middleware"
+import { DEFAULT_TREND_RANGE, type TrendRange } from "@/lib/trend-range"
 
 /** 帳本的自訂（取代「簡易版／專業版」）：欄位、走勢圖、釘選持股。存在這台瀏覽器。 */
 export type HoldingColumn = "price" | "day_pct" | "day_change" | "pnl" | "value" | "avg_cost" | "unrealized" | "unrealized_pct"
@@ -47,6 +48,9 @@ interface LedgerPrefs {
   pinned: string[]
   /** 持倉底下的「已出清」是否展開 */
   showClosed: boolean
+  /** 總資產走勢（和績效分段共用）上次選的區間 */
+  trendRange: TrendRange
+  setTrendRange: (r: TrendRange) => void
   setShowClosed: (v: boolean) => void
   setColumns: (c: HoldingColumn[]) => void
   toggleColumn: (c: HoldingColumn) => void
@@ -62,6 +66,8 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       showTrend: true,
       pinned: [],
       showClosed: false,
+      trendRange: DEFAULT_TREND_RANGE,
+      setTrendRange: (trendRange) => set({ trendRange }),
       setShowClosed: (showClosed) => set({ showClosed }),
       setColumns: (columns) => set({ columns }),
       toggleColumn: (c) =>
@@ -80,7 +86,7 @@ export const useLedgerPrefs = create<LedgerPrefs>()(
       // 第 2 版（2026-11-16）：預設欄位多了「損益」
       version: 2,
       migrate: migrateLedgerPrefs as (persisted: unknown, version: number) => LedgerPrefs,
-      partialize: ({ columns, showTrend, pinned, showClosed }) => ({ columns, showTrend, pinned, showClosed }),
+      partialize: ({ columns, showTrend, pinned, showClosed, trendRange }) => ({ columns, showTrend, pinned, showClosed, trendRange }),
       storage: createJSONStorage(() => localStorage),
     },
   ),
