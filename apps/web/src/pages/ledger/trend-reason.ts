@@ -23,7 +23,7 @@ export function trendMissingReason(notes: readonly string[]): string | null {
 }
 
 /**
- * 歷史短（2～6 個收盤）時，走勢圖下面那一行引用的後端原文（「績效從 2026/11/12 收盤開始算，之前沒有資料」）。
+ * 歷史短（2～6 個收盤）時，走勢的區間按鈕下面那一行引用的後端原文（「績效從 2026/11/12 收盤開始算，之前沒有資料」）。
  * 每個分段都寫（高度不跟著分段變）；績效分段的說明就不再重複同一句（`PerformanceView`）。
  */
 export function trendClipNote(p: Pick<Performance, "series" | "notes"> | undefined): string | undefined {

@@ -5,7 +5,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import { limitHistory } from "@/api/mock/adapter"
-import type { Performance, PerformancePoint } from "@/api/types"
+import { ApiError, type Performance, type PerformancePoint } from "@/api/types"
 import { createAppRouter } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
@@ -13,6 +13,7 @@ import { DEFAULT_COLUMNS, useLedgerPrefs } from "../ledger-prefs"
 /**
  * 總資產走勢（產品負責人 2026-11-17 選方案 B）：主數字下方滿版的走勢、滑過看那一天、區間在前端切；
  * 和績效分段共用一個區間，整頁只有一排區間按鈕；績效分段不再畫「市值與投入本金」。
+ * 區間按鈕一律七顆（2026-11-17 負責人要求）：比資料長的區間畫全部的資料，期間寫「只有 … 的資料」。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -51,6 +52,10 @@ function renderApp(path: string) {
 }
 const trend = () => screen.findByRole("region", { name: "總資產走勢" }, T)
 const chart = (region: HTMLElement) => within(region).getByRole("group", { name: /^總資產走勢：/ })
+const ALL_CHIPS = ["5日", "1月", "3月", "6月", "今年", "1年", "全部"]
+const chipLabels = (group: HTMLElement) => within(group).getAllByRole("radio").map((r) => r.textContent)
+/** 讀數第一行的報酬（「報酬 ▲1.23%上漲」） */
+const headlineReturn = (region: HTMLElement) => within(region).getByText(/^報酬/, { selector: "span" }).textContent
 
 /** 「全部」的序列只留最後 n 個收盤（和正式環境存檔剛開始時一樣） */
 async function withHistory(n: number) {
@@ -61,12 +66,12 @@ async function withHistory(n: number) {
 }
 
 describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
-  it("預設近 1 個月；區間按鈕只放資料撐得起來的（示範資料：5日・1月・3月・全部，沒有 1日）；換區間不再問伺服器、記住選的", async () => {
+  it("預設近 1 個月；區間按鈕一律七顆（沒有 1日）；換區間不再問伺服器、記住選的", async () => {
     const spy = vi.spyOn(api, "getPerformance")
     renderApp("/")
     const region = await trend()
     const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
-    expect(within(chips).getAllByRole("radio").map((r) => r.textContent)).toEqual(["5日", "1月", "3月", "全部"])
+    expect(chipLabels(chips)).toEqual(ALL_CHIPS)
     expect(within(chips).getByRole("radio", { name: "1月" })).toHaveAttribute("aria-checked", "true")
     expect(within(region).getByText("近 1 個月")).toBeInTheDocument()
     expect(within(region).getByRole("img", { name: /^近 1 個月，總資產從 NT\$[\d,]+ 到 NT\$[\d,]+，報酬(上漲|下跌|持平)/ })).toBeInTheDocument()
@@ -80,6 +85,28 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     expect(within(region).getByText("近 3 個月")).toBeInTheDocument()
     expect(spy.mock.calls.length).toBe(before)
     expect(useLedgerPrefs.getState().trendRange).toBe("3M")
+  })
+
+  it("比資料長的區間（示範資料 6/1 起，選 1年）：畫全部的資料，標題照樣寫「近 1 年」，期間寫「只有 … 的資料」、不寫年份；報酬和「全部」一樣", async () => {
+    const all = await api.getPerformance({ range: "ALL" })
+    const first = all.series[0]!.t
+    const start = `${Number(first.slice(5, 7))}/${Number(first.slice(8, 10))}`
+    renderApp("/")
+    const region = await trend()
+    const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
+    await userEvent.click(within(chips).getByRole("radio", { name: "全部" }))
+    const allReturn = headlineReturn(region)
+    expect(within(region).getByText(`${start} – 11/12`)).toBeInTheDocument()
+    await userEvent.click(within(chips).getByRole("radio", { name: "1年" }))
+    expect(within(chips).getByRole("radio", { name: "1年" })).toHaveAttribute("aria-checked", "true")
+    expect(within(region).getByText("近 1 年")).toBeInTheDocument()
+    expect(within(region).getByText(`只有 ${start} – 11/12 的資料`)).toBeInTheDocument()
+    expect(headlineReturn(region)).toBe(allReturn)
+    expect(within(region).getByRole("img", { name: new RegExp(`^近 1 年，只有 ${start} – 11/12 的資料，總資產從`) })).toBeInTheDocument()
+    // 3 月撐得起來：期間不加「只有」
+    await userEvent.click(within(chips).getByRole("radio", { name: "3月" }))
+    expect(within(region).getByText("8/12 – 11/12")).toBeInTheDocument()
+    expect(within(region).queryByText(/^只有 /)).toBeNull()
   })
 
   it("鍵盤：End 到最後一個收盤、← 前一天、Esc 收起；讀數寫那一天的總資產、投入本金、報酬；大數字不變", async () => {
@@ -186,42 +213,104 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
 })
 
 describe("歷史短（正式存檔 2026/11/12 才開始）", { timeout: 20_000 }, () => {
-  it("2～6 個收盤：照畫、每個收盤一個圓點、不放區間；圖下面寫後端的說明＋目前幾個收盤日", async () => {
+  it("2～6 個收盤：照畫、每個收盤一個圓點、七顆區間照放（上次選的 1 月）；按鈕下面寫後端的說明＋目前幾個收盤日", async () => {
     await withHistory(3)
     renderApp("/")
     const region = await trend()
-    expect(within(region).queryByRole("radiogroup")).toBeNull()
+    const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
+    expect(chipLabels(chips)).toEqual(ALL_CHIPS)
+    expect(within(chips).getByRole("radio", { name: "1月" })).toHaveAttribute("aria-checked", "true")
     expect(region.querySelectorAll('[data-point="close"]')).toHaveLength(3)
-    expect(region.textContent).toMatch(/績效從 2026\/11\/10 收盤開始算，之前沒有資料。目前 3 個收盤日/)
-    // 上次選的 1 月撐不起來：畫全部（標題寫「11/10 起」）
+    const note = within(region).getByText(/目前 3 個收盤日/).closest("p")!
+    expect(note.textContent).toMatch(/^績效從 2026\/11\/10 收盤開始算，之前沒有資料。目前 3 個收盤日$/)
+    // 說明在區間按鈕下面（按鈕的位置和歷史夠長以後一樣）
+    expect(chips.compareDocumentPosition(note) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy()
+    // 比資料長：標題照樣寫近 1 個月，期間照實寫
+    expect(within(region).getByText("近 1 個月")).toBeInTheDocument()
+    expect(within(region).getByText("只有 11/10 – 11/12 的資料")).toBeInTheDocument()
+    const oneMonth = headlineReturn(region)
+    // 全部：標題寫「11/10 起」、期間不加「只有」；報酬一樣（都從第一個收盤算起）
+    await userEvent.click(within(chips).getByRole("radio", { name: "全部" }))
     expect(within(region).getByText("11/10 起")).toBeInTheDocument()
+    expect(within(region).getByText("11/10 – 11/12")).toBeInTheDocument()
+    expect(headlineReturn(region)).toBe(oneMonth)
+    // 1 年：比資料長時不寫年份（畫的是實際那幾天）
+    await userEvent.click(within(chips).getByRole("radio", { name: "1年" }))
+    expect(within(region).getByText("近 1 年")).toBeInTheDocument()
+    expect(within(region).getByText("只有 11/10 – 11/12 的資料")).toBeInTheDocument()
+    expect(useLedgerPrefs.getState().trendRange).toBe("1Y")
   })
 
-  it("2～6 個收盤：績效分段也寫同一句（高度不跟著分段變），績效分段的說明不再重複那一句", async () => {
+  it("2～6 個收盤：績效分段也是同一排按鈕＋同一句（高度不跟著分段變），工具列不放自己的；說明不重複；期間照實寫", async () => {
     await withHistory(3)
     renderApp("/?view=performance")
     await screen.findByText("最大回撤", undefined, T)
     const region = await trend()
     expect(region.textContent).toMatch(/績效從 2026\/11\/10 收盤開始算，之前沒有資料。目前 3 個收盤日/)
     expect(screen.getAllByText(/績效從 2026\/11\/10 收盤開始算/)).toHaveLength(1)
-    // 走勢沒有區間按鈕（不到 7 個收盤）：績效分段也沒有
-    expect(screen.queryByRole("radiogroup")).toBeNull()
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(1)
+    expect(chipLabels(within(region).getByRole("radiogroup", { name: "走勢區間" }))).toEqual(ALL_CHIPS)
+    expect(screen.queryByRole("radiogroup", { name: "績效區間" })).toBeNull()
+    expect(await screen.findByText("只有 2026/11/10 – 2026/11/12 的資料", undefined, T)).toBeInTheDocument()
+    expect(within(region).getByText("只有 11/10 – 11/12 的資料")).toBeInTheDocument()
   })
 
-  it("少於 2 個收盤：不畫圖，一行原因連到績效（手機也看得到）", async () => {
+  it("2～6 個收盤：持倉和績效分段的走勢一模一樣（按鈕和說明都在，換分段時分段列不跳）", async () => {
+    await withHistory(3)
+    renderApp("/")
+    const holdings = await trend()
+    const shape = (r: HTMLElement) => [!!within(r).queryByRole("radiogroup", { name: "走勢區間" }), !!within(r).queryByText(/目前 3 個收盤日/)]
+    expect(shape(holdings)).toEqual([true, true])
+    await userEvent.click(screen.getByRole("tab", { name: /績效/ }))
+    await screen.findByText("最大回撤", undefined, T)
+    expect(shape(await trend())).toEqual([true, true])
+  })
+
+  it("少於 2 個收盤：不畫圖、沒有區間按鈕，一行原因連到績效（手機也看得到）", async () => {
     await withHistory(1)
     renderApp("/")
     const link = await screen.findByRole("link", { name: "總資產走勢：資料還不夠" }, T)
     expect(link.className).not.toMatch(/max-lg:hidden/)
     expect(screen.queryByRole("region", { name: "總資產走勢" })).toBeNull()
+    expect(screen.queryByRole("radiogroup")).toBeNull()
   })
 
-  it("少於 2 個收盤：績效分段也放同一行（一樣高，換分段時分段列不跳），但不連到自己", async () => {
+  it("少於 2 個收盤：績效分段也放同一行（一樣高，換分段時分段列不跳），但不連到自己；換區間也算不出來，不放區間", async () => {
     await withHistory(1)
     renderApp("/?view=performance")
     await screen.findByText("算不出績效", undefined, T)
     expect(await screen.findByText("總資產走勢：資料還不夠", undefined, T)).toBeInTheDocument()
     expect(screen.queryByRole("link", { name: "總資產走勢：資料還不夠" })).toBeNull()
+    expect(screen.queryByRole("radiogroup")).toBeNull()
+  })
+
+  it("「自訂」關掉走勢、2～6 個收盤：績效分段的工具列放七顆「績效區間」（整頁只有一排），期間照實寫", async () => {
+    await withHistory(3)
+    act(() => useLedgerPrefs.setState({ showTrend: false }))
+    renderApp("/?view=performance")
+    const chips = await screen.findByRole("radiogroup", { name: "績效區間" }, T)
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(1)
+    expect(chipLabels(chips)).toEqual(ALL_CHIPS)
+    expect(within(chips).getByRole("radio", { name: "1月" })).toHaveAttribute("aria-checked", "true")
+    expect(await screen.findByText("只有 2026/11/10 – 2026/11/12 的資料", undefined, T)).toBeInTheDocument()
+    // 走勢關掉時說明照樣寫在績效分段（只寫一次）
+    expect(screen.getAllByText(/績效從 2026\/11\/10 收盤開始算/)).toHaveLength(1)
+  })
+
+  it("比資料長的區間：首頁走勢和績效分段（後端）同一個報酬、同一個起始日，都和「全部」一樣從第一個收盤算起", async () => {
+    await withHistory(4)
+    const all = await api.getPerformance({ range: "ALL" })
+    const { rangeReturn, trendWindow } = await import("@/lib/trend-range")
+    for (const range of ["5D", "1M", "3M", "6M", "YTD", "1Y"] as const) {
+      const p = await api.getPerformance({ range })
+      const win = trendWindow(all.series, range)
+      expect(win.exceeds).toBe(true)
+      expect(win.points).toHaveLength(4)
+      // 示範資料的短區間 twr_index 只留 4 位小數，比到 0.1% 以內（和上面「1 月、3 月、全部」那一則一樣）
+      expect(rangeReturn(win)!).toBeCloseTo(p.twr!, 3)
+      expect(rangeReturn(win)!).toBeCloseTo(all.twr!, 6)
+      expect(win.points[win.from]!.t).toBe(p.start_date)
+    }
   })
 })
 
@@ -234,7 +323,7 @@ describe("和績效分段分工：整頁只有一排區間按鈕", { timeout: 20
     expect(screen.getAllByRole("radiogroup")).toHaveLength(1)
     expect(screen.queryByRole("radiogroup", { name: "績效區間" })).toBeNull()
     const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
-    expect(within(chips).getAllByRole("radio").map((r) => r.textContent)).toEqual(["5日", "1月", "3月", "全部"])
+    expect(chipLabels(chips)).toEqual(ALL_CHIPS)
     expect(within(chips).getByRole("radio", { name: "1月" })).toHaveAttribute("aria-checked", "true")
     expect(screen.queryByText("市值與投入本金")).toBeNull()
     // 工具列的期間和走勢的起訖是同一天
@@ -253,7 +342,51 @@ describe("和績效分段分工：整頁只有一排區間按鈕", { timeout: 20
     renderApp("/?view=performance")
     const chips = await screen.findByRole("radiogroup", { name: "績效區間" }, T)
     expect(screen.getAllByRole("radiogroup")).toHaveLength(1)
-    expect(within(chips).getAllByRole("radio").map((r) => r.textContent)).toEqual(["5日", "1月", "3月", "全部"])
+    expect(chipLabels(chips)).toEqual(ALL_CHIPS)
+  })
+
+  it("主數字讀不到（走勢也就不放）、2～6 個收盤：績效分段的工具列放七顆「績效區間」，說明寫在績效分段（只寫一次）", async () => {
+    await withHistory(3)
+    vi.spyOn(api, "getPortfolioSummary").mockRejectedValue(new ApiError(500, "internal", "伺服器錯誤"))
+    renderApp("/?view=performance")
+    const chips = await screen.findByRole("radiogroup", { name: "績效區間" }, T)
+    expect(screen.getAllByRole("radiogroup")).toHaveLength(1)
+    expect(chipLabels(chips)).toEqual(ALL_CHIPS)
+    expect(screen.queryByRole("region", { name: "總資產走勢" })).toBeNull()
+    expect(await screen.findAllByText(/績效從 2026\/11\/10 收盤開始算/, undefined, T)).toHaveLength(1)
+  })
+
+  it.each([
+    ["新帳戶的「全部」先回來", "ALL"],
+    ["新帳戶的區間先回來", "range"],
+  ] as const)("切換帳戶時兩個查詢回來的先後不同（%s）：舊帳戶真的 1 個月不會寫成「只有」；新帳戶的回來以後才寫", async (_, early) => {
+    const real = api.getPerformance.bind(api)
+    const all = (await real({ range: "ALL" })).series
+    const first = all[all.length - 4]!.t
+    const acct = (await api.listAccounts())[0]!
+    let release = () => {}
+    const gate = new Promise<void>((r) => (release = r))
+    let earlyDone = () => {}
+    const earlyBack = new Promise<void>((r) => (earlyDone = r))
+    vi.spyOn(api, "getPerformance").mockImplementation(async (q) => {
+      if (q.account_id !== acct.id) return real(q)
+      const p = limitHistory(await real(q), first)
+      if ((q.range === "ALL") === (early === "ALL")) {
+        setTimeout(earlyDone, 0)
+        return p
+      }
+      await gate
+      return p
+    })
+    renderApp("/?view=performance")
+    await screen.findByText("2026/10/12 – 2026/11/12", undefined, T)
+    await userEvent.click(screen.getByRole("combobox", { name: "帳戶" }))
+    await userEvent.click(await screen.findByRole("option", { name: acct.name }, T))
+    await earlyBack
+    await act(() => new Promise((r) => setTimeout(r, 50)))
+    expect(screen.queryByText(/^只有 /)).toBeNull()
+    act(release)
+    expect(await screen.findByText(`只有 ${first.replaceAll("-", "/")} – 2026/11/12 的資料`, undefined, T)).toBeInTheDocument()
   })
 
   it("首頁走勢的區間報酬和績效分段同一個區間的時間加權報酬是同一個數字（1 月、3 月、全部）", async () => {

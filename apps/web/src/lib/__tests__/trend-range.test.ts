@@ -1,15 +1,16 @@
 import { describe, expect, it } from "vitest"
 import {
-  availableRanges,
   compactTicks,
   dateAxis,
-  effectiveRange,
   investedVisible,
   minusMonths,
   needsYear,
+  rangeExceedsData,
   rangeReturn,
   rangeStartIndex,
+  responseExceedsData,
   sliceRange,
+  TREND_RANGES,
   trendDomain,
   trendState,
   trendWindow,
@@ -58,33 +59,35 @@ describe("sliceRange：區間的第一點是基準收盤（和後端的 TWR 同�
   })
 })
 
-describe("availableRanges：資料撐得起來的區間才放", () => {
-  it("2～6 點：不放任何區間", () => {
-    expect(availableRanges(weekdays("2026-11-12", "2026-11-13"))).toEqual([])
-    expect(availableRanges(weekdays("2026-11-12", "2026-11-16"))).toEqual([])
-    expect(availableRanges(weekdays("2026-11-12", "2026-11-19"))).toEqual([])
-  })
-  it("第 7 個收盤（11/20）：5日・全部", () => {
-    expect(availableRanges(weekdays("2026-11-12", "2026-11-20"))).toEqual(["5D", "ALL"])
-  })
-  it("12/14 出現 1月；2027-01-04 出現今年；2027-02 出現 3月", () => {
-    expect(availableRanges(weekdays("2026-11-12", "2026-12-11"))).toEqual(["5D", "ALL"])
-    expect(availableRanges(weekdays("2026-11-12", "2026-12-14"))).toEqual(["5D", "1M", "ALL"])
-    expect(availableRanges(weekdays("2026-11-12", "2027-01-04"))).toEqual(["5D", "1M", "YTD", "ALL"])
-    expect(availableRanges(weekdays("2026-11-12", "2027-02-15"))).toEqual(["5D", "1M", "3M", "YTD", "ALL"])
-  })
-  it("示範資料（2026-06-01 起到 11/12）：5日・1月・3月・全部（沒有 6月、今年、1年）", () => {
-    expect(availableRanges(weekdays("2026-06-01", "2026-11-12"))).toEqual(["5D", "1M", "3M", "ALL"])
+describe("區間按鈕一律七顆（2026-11-17 負責人要求）", () => {
+  it("5日・1月・3月・6月・今年・1年・全部，沒有 1日", () => {
+    expect(TREND_RANGES.map((r) => r.label)).toEqual(["5日", "1月", "3月", "6月", "今年", "1年", "全部"])
   })
 })
 
-describe("effectiveRange：上次選的撐不起來時畫全部", () => {
-  it("撐得起來就用上次選的", () => {
-    expect(effectiveRange("3M", ["5D", "1M", "3M", "ALL"])).toBe("3M")
+describe("rangeExceedsData：區間比資料長（畫全部的資料，期間要照實寫）", () => {
+  const exceeding = (s: { t: string }[]) => TREND_RANGES.map((r) => r.value).filter((r) => rangeExceedsData(s, r))
+  it("存檔才開始（11/12 起 4 個收盤）：全部的區間都比資料長，「全部」不算", () => {
+    expect(exceeding(weekdays("2026-11-12", "2026-11-17"))).toEqual(["5D", "1M", "3M", "6M", "YTD", "1Y"])
   })
-  it("撐不起來（或一顆按鈕都沒有）用全部", () => {
-    expect(effectiveRange("1Y", ["5D", "1M", "3M", "ALL"])).toBe("ALL")
-    expect(effectiveRange("1M", [])).toBe("ALL")
+  it("5日：不到 6 個收盤（基準收盤＋5 個交易日）才算；第 6 個收盤起是真的 5 日", () => {
+    expect(rangeExceedsData(weekdays("2026-11-12", "2026-11-18"), "5D")).toBe(true)
+    expect(rangeExceedsData(weekdays("2026-11-12", "2026-11-19"), "5D")).toBe(false)
+  })
+  it("1月：名目起始日當天或之前沒有收盤才算（12/11 的一個月前是 11/11，還沒有資料；12/14 的是 11/14，11/12、11/13 有）", () => {
+    expect(rangeExceedsData(weekdays("2026-11-12", "2026-12-11"), "1M")).toBe(true)
+    expect(rangeExceedsData(weekdays("2026-11-12", "2026-12-14"), "1M")).toBe(false)
+    // 名目起始日之前只有第一個收盤（11/13 休市）：它就是基準收盤，不算
+    expect(rangeExceedsData(weekdays("2026-11-12", "2026-12-14").filter((p) => p.t !== "2026-11-13"), "1M")).toBe(false)
+    // 名目起始日剛好是第一個收盤：沒有基準收盤，那一天的漲跌算不到，算比資料長
+    expect(rangeExceedsData([{ t: "2026-11-12" }, { t: "2026-12-11" }, { t: "2026-12-12" }], "1M")).toBe(true)
+  })
+  it("今年：2027 年以後去年底有收盤，不算；示範資料（6/1 起）只有 6月以上算", () => {
+    expect(rangeExceedsData(weekdays("2026-11-12", "2027-01-04"), "YTD")).toBe(false)
+    expect(exceeding(weekdays("2026-06-01", "2026-11-12"))).toEqual(["6M", "YTD", "1Y"])
+  })
+  it("沒有資料：不算", () => {
+    expect(rangeExceedsData([], "1M")).toBe(false)
   })
 })
 
@@ -121,6 +124,36 @@ describe("rangeReturn", () => {
   })
 })
 
+describe("responseExceedsData：績效分段的期間什麼時候寫「只有 … 的資料」", () => {
+  const newAcct = weekdays("2026-11-12", "2026-11-17")
+  const resp = (range: string, series: { t: string }[], start_date = series[0]?.t ?? null) => ({ range, start_date, series })
+  it("區間比這個帳戶的資料長、回應從它的第一個收盤開始：寫", () => {
+    expect(responseExceedsData(resp("3M", newAcct), newAcct)).toBe(true)
+    expect(responseExceedsData(resp("1M", newAcct), newAcct)).toBe(true)
+  })
+  it("切換帳戶、新帳戶的「全部」先回來，區間的回應還是舊帳戶真的 3 個月：不寫（舊帳戶的期間照樣是它自己的）", () => {
+    const old3M = weekdays("2026-08-12", "2026-11-17")
+    expect(responseExceedsData(resp("3M", old3M), newAcct)).toBe(false)
+    // 舊帳戶真的 5 日（6 個收盤）、新帳戶 4 個收盤
+    expect(responseExceedsData(resp("5D", weekdays("2026-11-10", "2026-11-17")), newAcct)).toBe(false)
+  })
+  it("反過來：區間的回應先回來（新帳戶），「全部」還是舊帳戶的長序列：區間沒有比那個序列長，不寫", () => {
+    expect(responseExceedsData(resp("3M", newAcct), weekdays("2026-06-01", "2026-11-17"))).toBe(false)
+  })
+  it("5日：第一筆錢前一天的收盤是基準（市值 0），第二點才是第一個收盤：照樣寫", () => {
+    const acct = weekdays("2026-11-16", "2026-11-17")
+    expect(responseExceedsData(resp("5D", weekdays("2026-11-13", "2026-11-17")), acct)).toBe(true)
+    // 第二點不是第一個收盤：湊不起來，不寫
+    expect(responseExceedsData(resp("5D", weekdays("2026-11-12", "2026-11-17")), acct)).toBe(false)
+  })
+  it("「全部」、不是走勢的區間、沒有起始日、還沒讀到「全部」：不寫", () => {
+    expect(responseExceedsData(resp("ALL", newAcct), newAcct)).toBe(false)
+    expect(responseExceedsData(resp("1D", newAcct), newAcct)).toBe(false)
+    expect(responseExceedsData(resp("3M", newAcct, null), newAcct)).toBe(false)
+    expect(responseExceedsData(resp("3M", newAcct), undefined)).toBe(false)
+  })
+})
+
 describe("trendWindow 的起始日：和後端的 start_date（績效分段寫的期間）同一天", () => {
   const s = weekdays("2026-06-01", "2026-11-12")
   it("1M／3M：第一點是基準收盤（10/9），起始日是下一個收盤（10/12）", () => {
@@ -144,8 +177,40 @@ describe("trendWindow 的起始日：和後端的 start_date（績效分段寫�
   })
 })
 
+describe("trendWindow：區間比資料長時畫全部、報酬從第一個收盤算起（和後端、「全部」同一個數字）", () => {
+  const s = weekdays("2026-11-12", "2026-11-17")
+  it("4 個收盤選 1月、3月、1年、5日：整段、分母 1、起始日是第一個收盤，報酬和「全部」一樣", () => {
+    const all = trendWindow(s, "ALL")
+    for (const r of ["5D", "1M", "3M", "1Y"] as const) {
+      const w = trendWindow(s, r)
+      expect(w.exceeds).toBe(true)
+      expect(w.points).toHaveLength(4)
+      expect(w.base).toBe(1)
+      expect(w.points[w.from]!.t).toBe("2026-11-12")
+      expect(rangeReturn(w)).toBeCloseTo(rangeReturn(all)!, 12)
+    }
+    expect(all.exceeds).toBe(false)
+  })
+  it("基準收盤剛好是資料的第一天（不是比資料長）：分母是它的 twr_index，起始日是下一個收盤（和後端一樣不含第一天的漲跌）", () => {
+    // 11/13 休市：12/14 的一個月前是 11/14，之前只有 11/12 一個收盤，它就是基準
+    const t = weekdays("2026-11-12", "2026-12-14").filter((p) => p.t !== "2026-11-13")
+    const w = trendWindow(t, "1M")
+    expect(w.exceeds).toBe(false)
+    expect(w.points[0]!.t).toBe("2026-11-12")
+    expect(w.base).toBe(t[0]!.twr_index)
+    expect(w.points[w.from]!.t).toBe("2026-11-16")
+  })
+  it("5日剛好 6 個收盤：第一個收盤是基準，分母是它的 twr_index", () => {
+    const six = weekdays("2026-11-12", "2026-11-19")
+    const w = trendWindow(six, "5D")
+    expect(w.exceeds).toBe(false)
+    expect(w.base).toBe(six[0]!.twr_index)
+    expect(w.from).toBe(0)
+  })
+})
+
 describe("trendState：歷史短的三種樣子", () => {
-  it("少於 2 點不畫；2～6 點畫圓點、不放區間；7 點以上照常", () => {
+  it("少於 2 點不畫；2～6 點畫圓點、寫說明（區間照樣放）；7 點以上照常", () => {
     expect(trendState(0)).toBe("missing")
     expect(trendState(1)).toBe("missing")
     expect(trendState(2)).toBe("short")
