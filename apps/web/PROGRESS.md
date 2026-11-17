@@ -28,7 +28,7 @@
 | 公告與事件 | ✅ 總覽「新聞」改為「公告」（重大訊息・證交所公告，連到原文）；事件分頁把公告併入時間軸（同一則重大訊息去重）、「預估」標記、財報／營收／法說會分開 | `src/lib/events.ts`、`src/pages/stock/tabs/` |
 | 商用模式的空狀態 | ✅ 1 日走勢「盤中走勢需要授權行情，目前提供收盤後資料」＋後端 notes＋「看 5 日走勢」；日線與績效的 notes 放在圖旁；績效算不出來時說明原因並可「只看台幣帳戶」；美股持股現價「—」與說明；美股個股頁不放大大的「—」 | `src/pages/stock/PriceChart.tsx`、`src/pages/ledger/PerformanceView.tsx`、`HoldingsView.tsx` |
 | 資料來源與授權 | ✅ `/data-sources`：授權條款固定文字、每個資料集的完整顯名聲明（不改寫）、沒有使用的來源；頭像選單與帳本、個股頁頁尾連結 | `src/pages/data-sources/DataSourcesPage.tsx` |
-| AI | ✅ 每則回答下方固定免責（`done.disclaimer` → `/ai/usage.disclaimer` → 常數「AI 回答僅供參考，非投資建議。」），模型最後一行若寫了同樣的話就不重複；`grounding` 事件（與 `ThreadMessage.grounding`）標「無來源」（淡墨細框，按下展開「這段沒有附來源，請自行查證。」）；503 `ai_unavailable` 顯示「AI 暫時無法使用」（記帳指令仍在本機寫成草稿）；紀錄「對話紀錄保留 30 天」（本機紀錄也只留 30 天） | `src/ai/answer-text.ts`、`Conversation.tsx`、`remote.ts`、`runner.ts`、`HistoryList.tsx` |
+| AI | ✅ 每則回答下方固定免責（`done.disclaimer` → `/ai/usage.disclaimer` → 常數「AI 回答僅供參考，非投資建議。」；2026-11-17 起是「AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。」），模型最後一行若寫了同樣的話就不重複；`grounding` 事件（與 `ThreadMessage.grounding`）標「無來源」（淡墨細框，按下展開「這段沒有附來源，請自行查證。」）；503 `ai_unavailable` 顯示「AI 暫時無法使用」（記帳指令仍在本機寫成草稿）；紀錄「對話紀錄保留 30 天」（本機紀錄也只留 30 天） | `src/ai/answer-text.ts`、`Conversation.tsx`、`remote.ts`、`runner.ts`、`HistoryList.tsx` |
 
 ## 第三批（2026-11-12）：法人觀點、定期定額標記與補記、已出清依年份
 

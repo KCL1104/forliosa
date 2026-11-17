@@ -12,6 +12,7 @@ import re
 from datetime import datetime, time
 from typing import Any
 
+from forliosa import disclaimer
 from forliosa.timeutil import NEW_YORK, US_CLOSE, is_tw_market_open, is_tw_trading_day, last_us_session
 
 CHAT_SYSTEM = """你是 Forliosa 裡的投資助理。Forliosa 是以台股為主的持倉帳本：使用者在這裡記錄自己的交易、看持股與績效、研究個股。你替使用者查資料、整理重點、起草交易，所有回答使用繁體中文（台灣用語），語氣直接、平實、不誇大。
@@ -105,6 +106,7 @@ CHAT_SYSTEM = """你是 Forliosa 裡的投資助理。Forliosa 是以台股為�
 - 美股的收盤寫紐約的交易日期（工具結果的 trade_date，例如「11/13 收盤（美東）」），不要寫台北時間的 as_of。
 - 回答用 Markdown，畫面會照格式顯示：條列用 `- `（有先後順序時用 `1.`）；最重要的一兩個數字或結論可以用 **粗體**；比較兩三檔或幾個數字時可以用小表格（最多 4 欄、6 列）；較長的整理可以用 `###` 小標題分段（最多 3 個），一般的回答不用標題。不用 `#`、`##` 大標題，也不在文中放網址或 [連結](網址)：來源由畫面自動列出。要畫圖只能呼叫 draw_chart，不要用文字或符號拼出圖表。
 - 只做分析與整理，不保證報酬，不下買進或賣出的指令，也不給你自己的目標價（轉述具名機構已發表的目標價可以，寫出機構並附引用）；可以列出值得注意的面向，讓使用者自己判斷。
+- Forliosa 只替使用者整理資訊，不是投資顧問：回答不要寫成替使用者做的投資建議或推薦（不寫「建議買進」「可以加碼」「適合長期持有」「現在是進場時機」這類句子），也不自稱投資顧問或分析師。
 - 提到價格、漲跌、報酬或估值時，順帶寫出資料時間（例如「11/12 收盤」「11/12 13:30」），時間取自工具結果。
 - 不要自己寫免責聲明或「僅供參考」「非投資建議」這類句子：畫面會在每則回答下方固定顯示。
 - 對話中由 App 提供的「頁面情境」系統訊息會告訴你現在時間、使用者正在看的頁面與隱私模式。使用者說「這檔」「它」時，指的是頁面上的那一檔。頁面情境寫「深度搜尋」的那一題，回答的長度、格式與搜尋的做法照那裡的指示，其餘規則不變。
@@ -133,7 +135,8 @@ WHY_SYSTEM = """你是台股新聞編輯。任務：用一句繁體中文（45 �
 - 如果找不到明確、可靠的原因，只輸出 NONE。"""  # noqa: E501
 
 # Shown by the UI under every AI answer (``done`` event, ``GET /ai/usage``); the model is told not to write one.
-DISCLAIMER = "AI 回答僅供參考，非投資建議。"
+# The text is shared with the rest of the site (``forliosa.disclaimer``).
+DISCLAIMER = disclaimer.AI
 # Appended to the page context of a turn that continues the thread from a plain-text recap (``chat``): after a
 # move to another key slot (workspace), or when replayed thinking blocks were rejected.
 MOVED_NOTE = "- 先前的對話只保留文字（沒有工具結果與網路搜尋內容），需要數字或最新資訊時請重新查詢"
@@ -217,7 +220,7 @@ ANALYST_TOOL: dict = {
     },
 }
 # Fixed text shown above the analyst views (``GET/POST /instruments/{symbol}/analyst-views``).
-ANALYST_DISCLAIMER = "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。"
+ANALYST_DISCLAIMER = disclaimer.ANALYST
 # Sent once when the model ended its turn without calling ``report_analyst_views``.
 ANALYST_NUDGE = "請用 report_analyst_views 回報整理結果；沒有符合條件的報導就給空清單。不要寫其他文字。"
 

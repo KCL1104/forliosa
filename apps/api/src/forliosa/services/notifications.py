@@ -22,7 +22,8 @@ numbers went into it still pushes and every trade it counted is still sent. Sent
 
 **Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
 :func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,
-a masked link or other formatting to a message.
+a masked link or other formatting to a message. Every message ends with the site's short disclaimer
+(:data:`forliosa.disclaimer.SHORT`, product owner 2026-11-17), exactly once.
 
 **Delivery**: up to 5 attempts with exponential backoff (1, 2, 4, 8 minutes, or Discord's / Telegram's
 ``retry_after`` when longer); 401 / 404 from a Discord webhook, 403 or "chat not found" from Telegram → the channel is
@@ -39,6 +40,7 @@ from typing import Any
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from forliosa import disclaimer
 from forliosa.config import Settings, get_settings
 from forliosa.crypto import decrypt_secret
 from forliosa.ids import new_id
@@ -64,7 +66,10 @@ SEND_BATCH = 200
 OUTBOX_RETENTION = timedelta(days=30)
 LINK_CODE_RETENTION = timedelta(days=1)
 SIDE_LABEL = {"buy": "買進", "sell": "賣出"}
-DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
+# The ``disclaimer`` field of weekly digests and daily reports (under their AI summary on the group page).
+DISCLAIMER = disclaimer.AI
+# The last line of every push (trades, digests, daily reports): what Forliosa is and is not.
+PUSH_DISCLAIMER = disclaimer.SHORT
 
 
 # -- queueing --------------------------------------------------------------------------------------------------
@@ -162,6 +167,38 @@ def _link(settings: Settings) -> str | None:
     return None
 
 
+def signed(lines: list[str], kind: str, *, ai: bool = False) -> str:
+    """A push / channel message: ``lines`` joined by newlines, then the site's disclaimer (:data:`PUSH_DISCLAIMER`,
+    ``disclaimer.SHORT``) as the last line, exactly once.
+
+    * ``kind``: ``"discord"`` or ``"telegram"`` (sets the length limit).
+    * ``ai``: the message carries an AI-written paragraph. Start that line with ``disclaimer.AI_LABEL``
+      (「AI 整理：」, see :func:`ai_line`); the last line then starts with ``disclaimer.AI_NOTE``
+      (「AI 整理的部分可能有錯。」).
+    * Discord (2,000) and Telegram (4,096) cut a long message at the end (``pushers``): a body too long for the
+      channel is shortened first (ending in …), so the last line always arrives.
+
+    Every push uses this (trades, weekly digests, daily reports; other features' pushes too, e.g. market reports):
+    never append a disclaimer string by hand.
+    """
+    limit = pushers.DISCORD_MAX_CHARS if kind == "discord" else pushers.TELEGRAM_MAX_CHARS
+    last = disclaimer.AI_NOTE + PUSH_DISCLAIMER if ai else PUSH_DISCLAIMER
+    body = "\n".join(lines)
+    room = limit - len(last) - 1
+    if len(body) > room:
+        body = body[:room - 1] + "…"
+    return f"{body}\n{last}"
+
+
+_signed = signed  # the name before the 2026-11-17 review; kept for branches that started from it — use ``signed``
+
+
+def ai_line(text: str, kind: str) -> str:
+    """An AI-written paragraph in a push: 「AI 整理：」 then the text (one line, escaped like other dynamic text).
+    Pass ``ai=True`` to :func:`signed` for the same message."""
+    return disclaimer.AI_LABEL + _t(text, kind)
+
+
 def _t(text: Any, kind: str) -> str:
     """Names and other text from users or data sources (not the numbers formatted here): one line, Discord markdown
     escaped, Telegram ＠."""
@@ -175,12 +212,12 @@ def trade_text(group: Group, view: dict[str, Any], kind: str, settings: Settings
         line2.append(f"共 {view['count']} 筆")
     if "price" in view and view["price"] is not None:
         line2.append(f"成交均價 {_price(view['price'])} {view['currency']}")
-    return "\n".join([
+    return signed([
         f"{_t(view['display_name'], kind)} {SIDE_LABEL.get(view['side'], view['side'])} "
         f"{_t(view['name'], kind)}（{_t(_code(view['symbol']), kind)}）",
         "・".join(line2),
         " ".join(x for x in (f"— Forliosa 群組「{_t(group.name, kind)}」", _link(settings)) if x),
-    ])
+    ], kind)
 
 
 def digest_text(group: Group, digest: GroupDigest, view: dict[str, Any], summary: str | None, kind: str,
@@ -188,7 +225,7 @@ def digest_text(group: Group, digest: GroupDigest, view: dict[str, Any], summary
     ws, we = digest.week_start, digest.week_end
     lines = [f"Forliosa 群組「{_t(group.name, kind)}」週報（{ws.month}/{ws.day}–{we.month}/{we.day}）"]
     if summary:
-        lines.append(_t(summary, kind))
+        lines.append(ai_line(summary, kind))
     if view["returns"]:
         lines.append("本週報酬：" + "、".join(f"{_t(r['display_name'], kind)} {_pct(r['week_return_pct'])}"
                                          for r in view["returns"]))
@@ -203,9 +240,7 @@ def digest_text(group: Group, digest: GroupDigest, view: dict[str, Any], summary
     link = _link(settings)
     if link:
         lines.append(f"完整週報：{link}")
-    if summary:
-        lines.append(DISCLAIMER)
-    return "\n".join(lines)
+    return signed(lines, kind, ai=bool(summary))
 
 
 DAILY_MAX_RETURNS = 20  # a channel message lists this many members' returns (Discord cuts at 2,000 characters)
@@ -222,7 +257,7 @@ def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], sum
     day_word, trades_word = ("今日", "今天") if same_day else ("當日", "那天")
     lines = [f"Forliosa 群組「{_t(group.name, kind)}」日報　{d.month}/{d.day}（{weekday(d)}）收盤"]
     if summary:
-        lines.append(_t(summary, kind))
+        lines.append(ai_line(summary, kind))
     returns = view["returns"]
     if returns:
         shown = "、".join(f"{_t(r['display_name'], kind)} {pct1(r['day_return_pct'], '−')}"
@@ -245,9 +280,7 @@ def daily_text(group: Group, report: GroupDailyReport, view: dict[str, Any], sum
     link = _link(settings)
     if link:
         lines.append(f"完整日報：{link}")
-    if summary:
-        lines.append(DISCLAIMER)
-    return "\n".join(lines)
+    return signed(lines, kind, ai=bool(summary))
 
 
 # -- sending --------------------------------------------------------------------------------------------------------

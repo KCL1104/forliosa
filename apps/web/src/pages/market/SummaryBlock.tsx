@@ -2,13 +2,14 @@ import type { MarketSummary } from "@/api/types"
 import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
 import { CitedSources } from "@/components/cited-sources"
+import { Disclaimer } from "@/components/disclaimer"
 import { Section } from "@/components/section"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 
 /**
  * AI 整理的收盤重點：每個交易日一則、所有人看到同一則。模型寫的字是鉛筆（黑體（墨色，`.ai-voice`），`.ai-voice`＋`KaiText`，
- * 和對話裡的回答同一套排法）；每一點下面列出它依據的報導（媒體名稱，連到原文）。沒有就整塊不出現。
+ * 和對話裡的回答同一套排法）；每一點下面列出它依據的報導（媒體名稱，連到原文），最後一句免責（`ai`）。沒有就整塊不出現。
  */
 export function SummaryBlock({ summary }: { summary: MarketSummary }) {
   return (
@@ -28,7 +29,7 @@ export function SummaryBlock({ summary }: { summary: MarketSummary }) {
           </li>
         ))}
       </ul>
-      <p className="mt-3 text-xs text-ink-2">AI 依這些報導整理，內容以原報導為準。</p>
+      <Disclaimer kind="ai" className="mt-3" />
     </Section>
   )
 }

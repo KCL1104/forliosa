@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest"
 import type { AnalystView, AnalystViews } from "@/api/types"
 import { createMockAdapter } from "@/api/mock/adapter"
+import { DISCLAIMER } from "@/lib/disclaimer"
 import {
   ANALYST_INITIAL,
   ANALYST_TIMEOUT_MS,
@@ -145,7 +146,8 @@ describe("mock：法人觀點（GET/POST /instruments/{symbol}/analyst-views）"
     expect(tsmc.items!.filter((v) => v.unnamed).map((v) => v.institution)).toEqual(["未具名外資（日系）"])
     expect(tsmc.items!.at(-1)?.old).toBe(true)
     expect(tsmc.conference?.url).toMatch(/^https:\/\/mops\.twse\.com\.tw\//)
-    expect(tsmc.disclaimer).toMatch(/非 Forliosa 建議/)
+    expect(tsmc.disclaimer).toBe(DISCLAIMER.analyst)
+    expect(tsmc.disclaimer).toMatch(/Forliosa 只替你整理，不代表本站意見，也不是投資建議/)
     for (const v of tsmc.items!) expect(v).toMatchObject({ currency: "TWD", url: expect.stringMatching(/^https:\/\/example\.com\//) })
     // 新到舊
     expect(tsmc.items!.map((v) => v.date)).toEqual([...tsmc.items!.map((v) => v.date)].sort().reverse())

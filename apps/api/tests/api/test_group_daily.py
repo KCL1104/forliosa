@@ -17,7 +17,7 @@ import httpx2
 import pytest
 from sqlalchemy import select
 
-from forliosa import closes
+from forliosa import closes, disclaimer
 from forliosa.ai.keypool import KeyPool
 from forliosa.config import get_settings
 from forliosa.db import session_factory
@@ -201,7 +201,7 @@ def test_reading_shows_names_to_members_and_filters_on_read(app, family, market,
     assert [(h["symbol"], h["holder_count"]) for h in facts["common_holdings"]] == [("2330.TW", 2)]
     assert sorted((t["side"], t["symbol"], t["count"]) for t in facts["trades"]) == [
         ("buy", "2317.TW", 1), ("buy", "2454.TW", 1)]
-    assert facts["trades_count"] == 2 and item["disclaimer"].startswith("AI 分析僅供參考")
+    assert facts["trades_count"] == 2 and item["disclaimer"] == disclaimer.AI
     assert item["market_summary"] is False and item["notes"] == []
     assert a.get(f"{API}/groups/{family['free']['id']}/daily-reports").json()["items"] == []
     assert login(app, "z@x.tw", "路人").get(url).status_code == 404  # not a member
@@ -478,7 +478,8 @@ def test_finished_at_night_is_pushed_at_0730_with_only_pushing_members(family, m
     assert text.startswith("Forliosa 群組「大學同學」日報") and f"{day.month}/{day.day}（" in text
     assert "小明" in text and "示範使用者" not in text and "小華" not in text
     [r] = reports(family["g"]["id"])
-    assert r.summary not in text and "AI 分析僅供參考" not in text  # 示範使用者 and 小華 contributed, do not push
+    assert r.summary not in text  # 示範使用者 and 小華 contributed, do not push
+    assert text.count(disclaimer.SHORT) == 1  # the site's line goes out with or without the AI paragraph
     assert "台積電" not in text  # one pushing member shares holdings: nothing is common
     # sent the morning after: 當日／那天, not 今日／今天
     assert "當日報酬：" in text and "今日報酬" not in text and "今天的買賣" not in text

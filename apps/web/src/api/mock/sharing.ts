@@ -40,6 +40,7 @@ import { ARCHIVE_START, ymd } from "./commercial"
 import { findInstrument } from "./instruments"
 import { addDays, closeOn, MOCK_TODAY, parseDay } from "./market"
 import { PEOPLE, STATIC_PROFILES, type PeriodReturns, type RawTrade } from "./members"
+import { DISCLAIMER as DISCLAIMERS } from "@/lib/disclaimer"
 
 /**
  * 分享（M5）的 mock：群組、授權查看、動態、留言與表情、週報、日報、頻道、群組加值。
@@ -160,7 +161,8 @@ interface MockGroup {
   telegramLink: { code: string; expires_at: string; linkAt: number } | null
 }
 
-const DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
+/** 週報與日報的 `disclaimer`（和後端相同：`lib/disclaimer.ts` 的 `ai`） */
+const DISCLAIMER = DISCLAIMERS.ai
 /** 加權報酬指數的存檔起點（後端 CONTRACT_NOTES：證交所 2026-11-02 起） */
 const INDEX_ARCHIVE_START = "2026-11-02"
 /** 群組加值包（後端 GROUP_FREE_MEMBER_CAP、GROUP_BOOSTED_MEMBER_CAP）：免費 5 人、加值 50 人；以前建立的群組 50 人 */

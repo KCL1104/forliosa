@@ -8,6 +8,7 @@ import { ApiError } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
 import { AuthFrame } from "@/app/AuthGate"
 import { DiscordMark, GoogleMark } from "@/components/brand-marks"
+import { Disclaimer } from "@/components/disclaimer"
 import { ErrorState } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -105,6 +106,8 @@ export function LoginPage() {
         </PlainLink>
         。
       </p>
+      {/* 登入前就說清楚 Forliosa 是什麼、不是什麼（產品負責人 2026-11-17）：一行，和上面那一行同一種字 */}
+      <Disclaimer link className="-mt-3" />
     </AuthFrame>
   )
 }

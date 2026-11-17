@@ -42,6 +42,7 @@ from typing import Any
 from sqlalchemy import delete, select, update
 from sqlalchemy.orm import Session
 
+from forliosa import disclaimer
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import Settings, get_settings
 from forliosa.crypto import decrypt_secret, encrypt_secret, token_hash
@@ -171,8 +172,9 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
 
 # -- Discord ------------------------------------------------------------------------------------------------------
 def connect_message(group: Group) -> str:
+    """The Discord test message (sent before the webhook is saved; the first message the channel gets)."""
     return (f"Forliosa 群組「{pushers.user_text(group.name, 'discord')}」的推播已連結到這個頻道。之後只有在 Forliosa "
-            "打開「推播」的成員，他們開放的交易動態與週報才會送到這裡。")
+            "打開「推播」的成員，他們開放的交易動態與週報才會送到這裡。\n" + disclaimer.SHORT)
 
 
 def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, notify_trades: bool,
@@ -366,8 +368,13 @@ def handle_update(db: Session, token: str, bot_username: str, update_: dict[str,
             pushers.send_telegram(token, chat_id, "連結碼無效或已過期，請在 Forliosa 的群組設定重新產生。")
         return
     log.info("group %s: Telegram channel linked", group.id)
-    pushers.send_telegram(token, chat_id, f"已連結 Forliosa 群組「{pushers.user_text(group.name, 'telegram')}」。"
-                                          "只有在 Forliosa 打開「推播」的成員，他們開放的交易動態與週報才會送到這裡。")
+    pushers.send_telegram(token, chat_id, linked_message(group))
+
+
+def linked_message(group: Group) -> str:
+    """The bot's reply once a Telegram chat is linked (the first message the chat gets from Forliosa)."""
+    return (f"已連結 Forliosa 群組「{pushers.user_text(group.name, 'telegram')}」。"
+            "只有在 Forliosa 打開「推播」的成員，他們開放的交易動態與週報才會送到這裡。\n" + disclaimer.SHORT)
 
 
 class TelegramPoller:

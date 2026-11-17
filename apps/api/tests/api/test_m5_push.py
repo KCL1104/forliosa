@@ -8,6 +8,7 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 
+from forliosa import disclaimer
 from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.models import GroupChannel, NotificationOutbox
@@ -247,7 +248,8 @@ def test_names_cannot_add_lines_links_or_markdown_to_a_discord_message(app, clie
     body = fake.discord[0].body
     text = body["content"]
     lines = text.split("\n")
-    assert len(lines) == 3, text  # name, date line, group line: nothing added
+    # name, date line, group line, the site's disclaimer (2026-11-17): nothing added
+    assert len(lines) == 4 and lines[3] == disclaimer.SHORT, text
     assert lines[0].startswith("明 \\[群組頁\\]\\(https\\://ev.il/g\\) 買進 ")
     assert "[群組頁](" not in text and "](https://" not in text and "https://ev.il" not in text
     assert "「家」 \\[重新登入 Forliosa\\]\\(https\\://ev.il\\)」" in lines[2]
@@ -266,7 +268,8 @@ def test_names_are_one_line_on_telegram_too(app, client, fake, market, telegram_
     run(market, now_utc() + LATER)
     text = fake.telegram()[-1].body["text"]
     lines = text.split("\n")
-    assert len(lines) == 3 and lines[0].startswith("爸爸 賣出 台積電（2330） ＠everyone 買進 ")
+    assert len(lines) == 4 and lines[0].startswith("爸爸 賣出 台積電（2330） ＠everyone 買進 ")
+    assert lines[3] == disclaimer.SHORT
     assert "群組「家族 投資」" in lines[2] and "parse_mode" not in fake.telegram()[-1].body
 
 

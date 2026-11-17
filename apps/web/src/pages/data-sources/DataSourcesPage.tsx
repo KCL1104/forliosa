@@ -4,6 +4,7 @@ import { api } from "@/api"
 import { useAttributions } from "@/api/queries"
 import type { AttributionDataset } from "@/api/types"
 import { PageFrame } from "@/app/PageFrame"
+import { SourcesFooter } from "@/components/sources"
 import { PageHeader, Section } from "@/components/section"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
@@ -163,6 +164,8 @@ export function DataSourcesPage() {
           </>
         )}
       </div>
+      {/* 這一頁就是「資料來源與授權」：頁尾只有免責的一句與「免責聲明」 */}
+      <SourcesFooter className="max-w-measure" omit="sources" />
     </PageFrame>
   )
 }

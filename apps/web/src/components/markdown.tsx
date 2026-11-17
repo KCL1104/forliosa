@@ -43,8 +43,8 @@ interface Ctx {
 
 /** 一行的寬度：約 40 個中文字（表格例外，可以用到整個欄寬） */
 const LINE = "max-w-[40em]"
-/** 草稿裡還沒填、還沒確認的地方（【待填：…】【待確認：…】）：淡底標出來，看得出這裡還是空的 */
-const BLANK = /(【(?:待填|待確認)[^】]*】)/
+/** 草稿裡還沒填、還沒確認的地方（【待填：…】【待確認：…】【待律師確認】）：淡底標出來，看得出這裡還是空的 */
+const BLANK = /(【(?:待填|待確認|待律師確認)[^】]*】)/
 const LINK = "text-ink underline decoration-ctl decoration-1 underline-offset-4 hover:decoration-ink"
 
 function blocks(tokens: Token[], ctx: Ctx, beforeFirstSection?: React.ReactNode): React.ReactNode {
@@ -231,7 +231,7 @@ function span(t: Token, ctx: Ctx): React.ReactNode {
 function text(raw: string, ctx: Ctx): React.ReactNode {
   const s = decode(raw)
   const names = Object.keys(ctx.docLinks)
-  const pattern = new RegExp(`(【(?:待填|待確認)[^】]*】${names.length ? `|〈(?:${names.join("|")})〉(?:\\s*第 \\d+(?:\\.\\d+)? 節)?` : ""}|第 \\d+(?:\\.\\d+)? 節)`)
+  const pattern = new RegExp(`(【(?:待填|待確認|待律師確認)[^】]*】${names.length ? `|〈(?:${names.join("|")})〉(?:\\s*第 \\d+(?:\\.\\d+)? 節)?` : ""}|第 \\d+(?:\\.\\d+)? 節)`)
   if (!pattern.test(s)) return s
   return s.split(pattern).map((part, i) => {
     if (i % 2 === 0) return part

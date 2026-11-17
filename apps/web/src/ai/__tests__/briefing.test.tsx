@@ -165,7 +165,8 @@ describe("面板首頁的收盤簡報", () => {
     expect(within(block).queryByText("總資產")).toBeNull()
     expect(within(block).queryByText("當日")).toBeNull()
     expect(within(block).getByText("觀察清單")).toBeInTheDocument()
-    expect(within(block).queryByText(/AI 依這些報導整理/)).toBeNull()
+    // 面板裡的簡報不另外寫免責：面板首頁最下面已經有一句（PanelHome）
+    expect(block.querySelector("[data-disclaimer]")).toBeNull()
     expect(block.querySelector(".ai-voice")).toBeNull()
   })
 

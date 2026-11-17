@@ -15,6 +15,7 @@ import { KaiText } from "@/ai/kai-text"
 import { useAskAi } from "@/ai/use-ask"
 import { ScrollRow } from "@/components/scroll-row"
 import { DemoTag } from "@/components/section"
+import { Disclaimer } from "@/components/disclaimer"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { ErrorState } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -415,6 +416,8 @@ function UsNoClose({ inst, held }: { inst: InstrumentDetail; held: boolean }) {
  * 「為什麼漲跌」：只在異常時出現，點了交給 AI 展開。
  * 句子是規則判斷的（漲跌幅、量、漲跌停…），所以是墨色 Noto Sans、數字 600；
  * 只有後端標 `ai: true`（模型改寫過的句子，見 api-contract「/why 新增欄位」）時才是黑體（墨色，`.ai-voice`）。
+ * 模型寫的句子下面緊接一句 13px 淡墨的 `ai` 免責；規則判斷的句子是算出來的事實（漲跌幅、量），不加——頁尾的 `short` 已經涵蓋，
+ * 最常看的頁首不重複同一句（2026-11-17 審查）。
  */
 function WhyLine({ inst }: { inst: InstrumentDetail }) {
   const why = useWhy(inst.symbol)
@@ -433,24 +436,35 @@ function WhyLine({ inst }: { inst: InstrumentDetail }) {
   // 模型寫的句子和對話裡的回答同一套排版（`KaiText`：數字和單位不拆行）；只有一行，所以用 20px
   const text = modelWritten ? <KaiText text={headline} /> : withFigures(headline)
   const voice = modelWritten ? cn("ai-voice", kaiSize.line) : "text-base text-ink"
-  if (readOnly) return <p className={cn("mt-3 max-w-prose", voice)}>{text}</p>
+  // 觸控時按鈕的可按範圍往下多 10px：免責那一句離遠一點，不會被按成提問
+  const note = modelWritten ? <Disclaimer kind="ai" className="mt-1 pointer-coarse:mt-3" /> : null
+  if (readOnly)
+    return (
+      <>
+        <p className={cn("mt-3 max-w-prose", voice)}>{text}</p>
+        {note}
+      </>
+    )
   // 換行交給 text-wrap: balance（兩行一樣長，最後一行不會只剩「漲 ›」）；› 前面的 word joiner（U+2060）讓 › 不會自己掉到下一行。
   // › 是淡墨：規則句和模型寫的句子現在同一種字、同一個顏色（黑體、墨色）
   return (
-    <button
-      type="button"
-      onClick={() => ask.submit(`${lead}為什麼${d === "down" ? "跌" : "漲"}？`)}
-      className={cn(
-        // 觸控時可按範圍上下各多 10px（合計 44px 以上）：看不見的 ::before，字的位置不動
-        "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-2.5 pointer-coarse:before:content-['']",
-        "hover:decoration-ctl",
-        voice,
-      )}
-    >
-      {text}
-      {"⁠"}
-      <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em] text-ink-2" />
-    </button>
+    <>
+      <button
+        type="button"
+        onClick={() => ask.submit(`${lead}為什麼${d === "down" ? "跌" : "漲"}？`)}
+        className={cn(
+          // 觸控時可按範圍上下各多 10px（合計 44px 以上）：看不見的 ::before，字的位置不動
+          "press mt-3 block max-w-prose text-left text-balance underline-offset-4 hover:underline pointer-coarse:relative pointer-coarse:before:absolute pointer-coarse:before:inset-x-0 pointer-coarse:before:-inset-y-2.5 pointer-coarse:before:content-['']",
+          "hover:decoration-ctl",
+          voice,
+        )}
+      >
+        {text}
+        {"⁠"}
+        <ChevronRightIcon aria-hidden className="ml-0.5 inline size-[1em] align-[-0.125em] text-ink-2" />
+      </button>
+      {note}
+    </>
   )
 }
 

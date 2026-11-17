@@ -1180,7 +1180,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
   英文名稱、「」）的句子列在 `grounding` 事件，也存在該則回答（`ThreadMessage.grounding`），讓前端標「無來源」。工具給的數字本來就沒有引用，
   所以單純的價格、持股句子不會被標。位置是 Unicode code point（中文都在 BMP，與 JS 字串索引相同；保險起見也附上句子本身）。
 - **免責聲明由畫面顯示（產品負責人決定）**：系統提示不再要求模型寫「僅供參考，非投資建議」，反而要求不要寫；固定文字
-  「AI 回答僅供參考，非投資建議。」放在 `done.disclaimer` 與 `GET /ai/usage` 的 `disclaimer`。提到價格、報酬時模型仍會順帶寫資料時間。
+  「AI 回答僅供參考，非投資建議。」放在 `done.disclaimer` 與 `GET /ai/usage` 的 `disclaimer`（2026-11-17 起改成「AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。」，見下方〈2026-11-17 全站免責〉）。提到價格、報酬時模型仍會順帶寫資料時間。
 - **工具**：16 個 client tools（2026-11-12 加 `get_derivatives_overview`，見「第三批」；2026-11-13 加 `get_technicals`，見「AI 技術分析與盤中價格」），全部 `strict: true`、
   `additionalProperties: false`、沒有使用者 id 欄位（伺服器帶入登入者）；可選參數合計 18 個（上限 24）。結果是精簡 JSON（例如 K 線只給統計與最多 30 個取樣點、籌碼只給最近 10 日與區間合計），保留 `as_of`、`is_demo`、`sources`。
   其他使用者的帳戶 id 會回錯誤，不會被當成篩選條件。伺服器工具：`web_search_20260318`（`user_location` 台北／TW、`max_uses` 3、預設不限網域）、
@@ -2787,3 +2787,29 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 上櫃 6488）→ 已公布、每股盈餘；過去沒有證據 → 不列；還沒到 → 照舊預估；重大訊息的實際日期不受影響（2382）；shioaji-data 的季報與月營收也算證據；
 季報第一次出現（2026Q4，出表日期 3/30）→ 用那天、不是 3/31，重跑不改日期；第一次跑不寫；`revenue_text`／`eps_text` 的寫法。
 審查修正（2026-11-17）：新上市公司 12/4 才進季報資料集 → 不寫第一次出現、事件是 11/14＋實際公布日不明，下一季才有日期；上櫃轉上市（6488）→ 同上；第一次跑時券商業季報資料集失敗、隔天成功（6016）→ 不寫；新上市與轉上市公司的月營收 → `backlog`，下個月才有日期；舊寫法「年增 -27.0%」的列 → 事件顯示「年減 27.0%」。
+
+## 2026-11-17 全站免責（`forliosa/disclaimer.py`）
+
+產品負責人：「你記得幫我加滿免責聲明的部分，和不提供投資建議，清楚標示我們只是替 user 整理資訊而已不是在為他們做投顧服務」。
+
+- **字只有一份**：`forliosa/disclaimer.py` 的 `SHORT`（全站的一句）、`AI`（AI 寫的內容下面）、`ANALYST`（法人觀點）；前端
+  `apps/web/src/lib/disclaimer.ts` 是同樣的字，`tests/test_disclaimer.py` 比對兩邊（前端不在這個 checkout 時跳過）。完整的聲明是
+  `docs/legal/disclaimer.md`（前端 `/disclaimer`），條文在服務條款 §2。
+  - `SHORT`：「Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。」
+  - `AI`：「AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。」
+- **API 欄位**：`done.disclaimer`、`GET /ai/usage` 的 `disclaimer`（`prompts.DISCLAIMER`）、群組週報與日報的 `disclaimer`
+  （`notifications.DISCLAIMER`）都是 `AI`；`/instruments/{symbol}/analyst-views` 的 `disclaimer` 是 `ANALYST`。以前存下來的對話重新讀取時也是新字
+  （`store.py` 讀取時才放）。`GET /me/export` 多一個 `disclaimer`（`SHORT`），`format_version` 仍是 1（只是加欄位）。
+- **推播**（`notifications.trade_text`／`digest_text`／`daily_text`）：最後一行一律是 `SHORT`，只出現一次；以前週報與日報只在附 AI 摘要時加
+  「AI 分析僅供參考，不構成投資建議。」，現在不管有沒有摘要都有。設定 Discord 時的測試訊息（`channels.connect_message`）與 Telegram 連結成功的
+  回覆（`channels.linked_message`）也接這一句。Discord（2,000 字）與 Telegram（4,096 字）會從後面截斷太長的訊息：訊息太長時先把前面的內容截短（結尾「…」）再接這一句（`notifications.signed`），這一句一定送得到。
+  審查修正（2026-11-17）：週報與日報附 AI 摘要時，摘要那一行開頭是「AI 整理：」（`notifications.ai_line`，`disclaimer.AI_LABEL`），最後一行是
+  「AI 整理的部分可能有錯。」＋`SHORT`（`signed(lines, kind, ai=True)`，`disclaimer.AI_NOTE`）——改版前有摘要時最後一行是「AI 分析僅供參考…」，
+  只剩 `SHORT` 的話看不出哪一段是 AI 寫的。`SHORT` 仍然只出現一次、在最後。組推播的公開函式是 `notifications.signed`（原本的 `_signed` 留著當別名）。
+- **AI 提示**：`CHAT_SYSTEM`「只做分析與整理…」那一條後面多一條：Forliosa 只替使用者整理資訊、不是投資顧問，回答不要寫成替使用者做的投資建議或推薦
+  （不寫「建議買進」「可以加碼」「適合長期持有」「現在是進場時機」），也不自稱投資顧問或分析師。其他規則與其他提示（收盤重點、收盤簡報、
+  「為什麼」、週報、日報、法人觀點）不變——它們本來就寫了不給建議、不預測、只轉述報導。
+- **市場報告（盤前重點、盤後重點、市場週報）**要用同一套：API 的 `disclaimer` 欄位是 `disclaimer.AI`（頁面最上面一句）；推播用
+  `notifications.signed(lines, kind, ai=True)` 組字，AI 寫的段落用 `notifications.ai_line(text, kind)`（開頭「AI 整理：」），不要自己 append 免責的字串
+  （見 `docs/legal/README.md`「2026-11-17 的修改」）。
+

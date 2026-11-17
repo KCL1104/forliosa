@@ -27,6 +27,7 @@ from typing import Any
 from sqlalchemy import delete, inspect, or_, select
 from sqlalchemy.orm import Session
 
+from forliosa import disclaimer
 from forliosa.api.errors import ApiError
 from forliosa.config import get_settings
 from forliosa.ids import new_id
@@ -160,6 +161,8 @@ def export_user(db: Session, user: User) -> dict[str, Any]:
     return {
         "exported_at": iso_utc(now_utc()),
         "format_version": EXPORT_FORMAT_VERSION,
+        # what the numbers and AI texts in this file are (and are not): the same line as every page footer
+        "disclaimer": disclaimer.SHORT,
         "profile": {
             "id": user.id, "email": user.email, "display_name": user.display_name, "avatar_url": user.avatar_url,
             "public_name": user.public_name, "preferences": preferences_of(user),

@@ -13,6 +13,7 @@ import httpx2
 import pytest
 from sqlalchemy import select
 
+from forliosa import disclaimer
 from forliosa.ai.keypool import KeyPool
 from forliosa.db import session_factory
 from forliosa.models import AiUsage, GroupComment, GroupDigest
@@ -289,7 +290,7 @@ def test_reading_filters_by_current_settings_and_paginates(family, market):
     assert [x["display_name"] for x in facts["returns"]] == ["示範使用者", "小明", "小華"]
     assert facts["common_holdings"] == [{"symbol": "2330.TW", "name": "台積電", "holder_count": 2}]
     assert facts["trades_count"] == 2
-    assert items[0]["disclaimer"].startswith("AI 分析僅供參考")
+    assert items[0]["disclaimer"] == disclaimer.AI
     if old is not None:
         assert items[1]["id"] == old.id and items[1]["status"] == "failed" and items[1]["summary"] == ""
         assert items[1]["comment_count"] == 0 and items[1]["facts"]["returns"]
@@ -432,7 +433,10 @@ def test_digest_push_includes_the_summary_when_everyone_pushes(family, market):
     with session_factory()() as db:
         notifications.send_due(db, market, now=due_time(family["sat"]))
     text = fake.discord[-1].body["content"]
-    assert SUMMARY in text and "台積電（2 人）" in text and "AI 分析僅供參考" in text
+    assert SUMMARY in text and "台積電（2 人）" in text and text.count(disclaimer.SHORT) == 1
+    assert text.endswith(disclaimer.SHORT)
+    # the AI paragraph is marked as AI-written and the last line says it may be wrong (2026-11-17 review)
+    assert text.count(disclaimer.AI_LABEL) == 1 and text.split("\n")[-1] == disclaimer.AI_NOTE + disclaimer.SHORT
     assert all(n in text for n in ("示範使用者", "小明", "小華"))
 
 

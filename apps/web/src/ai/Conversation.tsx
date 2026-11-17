@@ -6,6 +6,7 @@ import { closeDay } from "@/lib/as-of"
 import { formatDateShort } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { appToday } from "@/api"
+import { Disclaimer } from "@/components/disclaimer"
 import { AiMarkdown } from "./ai-markdown"
 import { DISCLAIMER, displayAnswer, groundingReason, markNeedle, stripDisclaimer, type TidyOptions, type UngroundedPassage } from "./answer-text"
 import { useAiUsage } from "./remote-hooks"
@@ -110,7 +111,7 @@ export function Conversation({ thread, runner, size = "panel", onNavigate }: { t
               ) : null,
             )}
             {!m.streaming && m.citations && m.citations.length > 0 && <Footnotes items={m.citations} />}
-            {i === latestAnswer && !m.streaming && <p className="mt-3 text-xs text-ink-2">{m.disclaimer ?? fallbackDisclaimer}</p>}
+            {i === latestAnswer && !m.streaming && <Disclaimer kind="ai" text={m.disclaimer ?? fallbackDisclaimer} className="mt-3" />}
           </div>
         ),
       )}
