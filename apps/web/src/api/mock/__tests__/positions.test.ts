@@ -68,6 +68,28 @@ describe("mock：讀庫存", () => {
   })
 })
 
+describe("mock：匯入的開關（`?import=`，和後端的 IMPORT_STATEMENTS 一樣）", () => {
+  it.each([
+    ["all（預設）", undefined, true, true],
+    ["admins", "admins" as const, true, false],
+    ["off", "off" as const, false, false],
+  ])("%s：/me 的 plan.statement_import 與兩種讀檔照開關，沒開放的 403 import_not_enabled", async (_label, importStatements, admin, member) => {
+    for (const [isAdmin, open] of [[true, admin], [false, member]] as const) {
+      const api = createMockAdapter({ latency: [0, 0], importStatements, discussion: { admin: isAdmin } })
+      expect((await api.getMe()).plan?.statement_import).toBe(open)
+      const read = api.parsePositions({ account_id: TW, kind: "text", text: "0056 元大高股息 2 張 均價 36.5" })
+      const statement = api.parseStatement({ account_id: TW, kind: "images", pages: [shot] })
+      if (open) {
+        await expect(read).resolves.toMatchObject({ document_kind: "holdings" })
+        await expect(statement).resolves.toMatchObject({ document_kind: "app_screenshot" })
+      } else {
+        await expect(read).rejects.toMatchObject({ status: 403, code: "import_not_enabled", message: "這個帳號還不能匯入庫存。" })
+        await expect(statement).rejects.toMatchObject({ status: 403, code: "import_not_enabled", message: "這個帳號還不能匯入對帳單。" })
+      }
+    }
+  })
+})
+
 describe("mock：寫入庫存", () => {
   it("每一檔一筆買進（手續費 0）；只給總成本的照總成本 ÷ 股數；整批復原", async () => {
     const api = mk()
@@ -124,5 +146,24 @@ describe("mock：寫入庫存", () => {
     await api.deleteTransactionBatch(res.batch_id)
     const undone = await all()
     expect(undone.filter((t) => t.account_id === TW && t.symbol === "2330.TW" && t.source !== "auto")).toEqual([])
+  })
+
+  it("以券商為準也清掉這個帳戶這一檔的略過紀錄（和後端、刪除這檔一樣）：刪掉的自動股利照新的持股再記；別檔的略過紀錄不動", async () => {
+    const api = mk()
+    const autos = (await txnsOf(api, TW)).filter((t) => t.source === "auto")
+    const target = autos[0]!
+    const other = autos.find((t) => t.symbol !== target.symbol)!
+    expect(other).toBeDefined()
+    // 使用者刪掉兩檔的自動股利：之後不再產生
+    await api.deleteTransaction(target.id)
+    await api.deleteTransaction(other.id)
+    const gone = (t: Transaction) => (x: Transaction) => x.source === "auto" && x.symbol === t.symbol && x.trade_date === t.trade_date
+    expect((await txnsOf(api, TW)).some(gone(target))).toBe(false)
+    // 以券商為準換掉 target 那一檔，買進日期在那次除息之前：那次股利照券商的股數重新自動入帳
+    await api.commitPositions({ account_id: TW, rows: [{ symbol: target.symbol!, quantity: 1000, price: 100, trade_date: "2024-01-02", replace: true }] })
+    const after = await txnsOf(api, TW)
+    expect(after.find(gone(target))).toMatchObject({ source: "auto", quantity: 1000 })
+    // 別檔的略過紀錄還在
+    expect(after.some(gone(other))).toBe(false)
   })
 })

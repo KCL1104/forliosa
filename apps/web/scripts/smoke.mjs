@@ -13,7 +13,8 @@
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 // 市場報告（2026-11-17）：市場頁的「報告」分頁與報告頁（順序、註腳、手機收合）、未讀圓點、試跑期間只有管理員、管理後台的盲測並排、群組頻道的三個推播開關。
 // 匯入對帳單（2026-11-16）：有密碼的 PDF（scripts/fixtures/statement-locked.pdf：合成的假資料，密碼是假的身分證字號 A123456789）
-// → 在瀏覽器裡解開、塗掉個資 → 確認表（每一種檢查結果）→ 補一筆買進、選股票 → 簽名匯入 → 復原；截圖；手機的抽屜；沒開放的帳號沒有入口。
+// → 在瀏覽器裡解開、塗掉個資 → 確認表（每一種檢查結果）→ 補一筆買進、選股票 → 簽名匯入 → 復原；截圖；手機的抽屜；
+// 一般帳號也有入口（預設 IMPORT_STATEMENTS=all），開關沒開（mock 的 `?import=admins`、`?import=off`）與唯讀查看時沒有入口。
 // 全站免責（2026-11-17）：每一頁的頁尾一句＋「免責聲明」、/disclaimer 不用登入、AI 回答與群組報告下面的那一句、登入頁與介紹頁。
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
@@ -466,7 +467,7 @@ for (const [vw, tier] of [[1024, "narrow"], [1280, "mid"]]) {
 
 await check("手動記帳表單（備援路徑）：手續費選填、合計照填的算，並儲存", async () => {
   await page.goto(base + "/", { waitUntil: "networkidle" })
-  // 「＋」：開了匯入的帳號（mock 的示範使用者是站方管理員）是兩項的選單——記一筆、匯入庫存或對帳單（2026-11-16、11-17）
+  // 「＋」：開了匯入的帳號（預設所有登入的帳號）是兩項的選單——記一筆、匯入庫存或對帳單（2026-11-16、11-17）
   await page.getByRole("button", { name: "記一筆或匯入" }).click()
   await page.getByRole("menuitem", { name: "記一筆" }).click()
   // 預設是簡單的買進輸入；賣出、股利與選填的手續費在完整表單裡
@@ -1344,6 +1345,8 @@ await check("授權查看：查看爸爸 → 唯讀橫幅、沒有記一筆／�
   await page.getByText("總資產").first().waitFor({ timeout: 8000 })
   if (await page.getByRole("complementary", { name: "問 AI" }).count()) throw new Error("AI panel visible in view-as")
   if (await page.getByText("觀察", { exact: true }).count()) throw new Error("watchlist visible in view-as")
+  // 查看中一律唯讀：開關有開也沒有匯入（useCanImport）
+  if (await page.getByRole("button", { name: "匯入", exact: true }).count()) throw new Error("the toolbar 匯入 visible in view-as")
   await page.getByRole("tab", { name: /紀錄/ }).click()
   await page.locator(".form-head").filter({ hasText: "商品" }).getByText("數量", { exact: true }).waitFor({ timeout: 8000 })
   if (await page.getByRole("button", { name: "記一筆" }).count()) throw new Error("記一筆 visible in view-as")
@@ -3486,18 +3489,28 @@ await check("匯入對帳單（手機 iPhone 15）：記一筆的抽屜 → 匯�
   })
 })
 
-await check("匯入：沒開放的帳號（不是站方管理員）沒有任何入口——工具列沒有「匯入」、記一筆第一步沒有連結、「＋」直接打開表單；空的帳本有「匯入庫存或對帳單」", async () => {
+await check("匯入：一般帳號（不是站方管理員）也有入口——工具列的「匯入」、記一筆第一步的連結、「＋」是選單；開關沒開（?import=admins 的一般帳號、?import=off）時都沒有、「＋」直接打開表單；空的帳本有「匯入庫存或對帳單」", async () => {
   await fresh(DESKTOP, async (p) => {
+    // 預設（和後端的 IMPORT_STATEMENTS=all 一樣）：一般帳號也看得到三個入口
     await p.goto(base + "/?discuss=member", { waitUntil: "networkidle" })
-    await p.getByRole("button", { name: "記一筆", exact: true }).waitFor()
-    if (await p.getByRole("button", { name: "匯入", exact: true }).count()) throw new Error("the toolbar 匯入 shown to a non-admin")
+    await p.getByRole("button", { name: "匯入", exact: true }).waitFor({ timeout: 8000 })
     await p.getByRole("button", { name: "記一筆", exact: true }).click()
-    await p.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).waitFor()
-    if (await p.getByRole("button", { name: "匯入庫存或對帳單" }).count()) throw new Error("import entry shown to a non-admin")
+    await p.getByRole("dialog").getByRole("button", { name: "匯入庫存或對帳單" }).waitFor({ timeout: 8000 })
     await p.keyboard.press("Escape")
-    await p.getByRole("button", { name: "用表單記一筆" }).waitFor()
-    if (await p.getByRole("button", { name: "記一筆或匯入" }).count()) throw new Error("the ＋ became a menu for a non-admin")
-    await p.goto(base + "/?discuss=default&mock=empty", { waitUntil: "networkidle" })
+    await p.getByRole("button", { name: "記一筆或匯入" }).waitFor({ timeout: 8000 })
+    // 開關沒開：只開給站方管理員時的一般帳號、整個關掉時的站方管理員，都沒有任何入口
+    for (const off of ["/?import=admins&discuss=member", "/?import=off&discuss=default"]) {
+      await p.goto(base + off, { waitUntil: "networkidle" })
+      await p.getByRole("button", { name: "記一筆", exact: true }).waitFor()
+      if (await p.getByRole("button", { name: "匯入", exact: true }).count()) throw new Error(`${off}: the toolbar 匯入 shown while imports are not open`)
+      await p.getByRole("button", { name: "記一筆", exact: true }).click()
+      await p.getByRole("dialog").getByRole("button", { name: "賣出、股利或其他" }).waitFor()
+      if (await p.getByRole("button", { name: "匯入庫存或對帳單" }).count()) throw new Error(`${off}: import entry shown while imports are not open`)
+      await p.keyboard.press("Escape")
+      await p.getByRole("button", { name: "用表單記一筆" }).waitFor()
+      if (await p.getByRole("button", { name: "記一筆或匯入" }).count()) throw new Error(`${off}: the ＋ became a menu while imports are not open`)
+    }
+    await p.goto(base + "/?import=all&discuss=default&mock=empty", { waitUntil: "networkidle" })
     await p.getByText("帳本還是空的").waitFor({ timeout: 8000 })
     await p.getByRole("button", { name: "匯入庫存或對帳單" }).click()
     await p.getByRole("dialog", { name: "匯入" }).getByRole("button", { name: /^匯入庫存/ }).click()

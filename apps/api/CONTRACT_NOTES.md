@@ -2946,7 +2946,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 - **帳戶**：`account_id` 必填（schema `min_length=1`），用 `transactions._get_account` 找（一定要有 id）；不用讀的時候的 `imports._account`（沒給就退回使用者的第一個帳戶）——寫入會刪紀錄，空字串不能悄悄落到沒指名的帳戶（2026-11-17 審查）。空字串或沒給是 422 `validation_error`。
 - 每一列變成 `check_batch` 的一列：`type: "buy"`、日期（列自己的或整批的，預設今天台北）、股數、價格（`price`，或 `total_cost` ÷ 股數）、`fee: 0`、`tax: 0`、`note: ""`。所以列的錯誤和 `POST /transactions/batch` 一樣（`unknown_symbol`、`bad_date`、`validation_error`…），再加上 `in_ledger`：帳戶現在有這一檔、這一列又沒有 `replace`（多記一筆買進會變兩倍）。
-- **順序**：`lock_accounts`（PostgreSQL 的 FOR UPDATE）→ 整本帳本重播一次（誰已在帳本）→ 要換掉的每一檔 `delete_symbol_records`（刪掉、flush、不 commit）→ `check_batch`（看到的是刪掉以後的帳本）→ `dry_run` 或有錯誤就 `rollback`（刪掉的都回來）→ 否則 `write_batch`：新的 `import_batch_id`、嚴格重播、`add_all`、自動股利重算（這一批碰到的股票，加上換掉的股票）、清掉沒有交易撐著的群組動態留言、**一次 commit**。中間任何一步失敗，session 關掉時整個 rollback。
+- **順序**：`lock_accounts`（PostgreSQL 的 FOR UPDATE）→ 整本帳本重播一次（誰已在帳本）→ 要換掉的每一檔 `delete_records(db, user, [account.id], symbol)`（合併前叫 `delete_symbol_records`；刪掉、flush、不 commit）→ `check_batch`（看到的是刪掉以後的帳本）→ `dry_run` 或有錯誤就 `rollback`（刪掉的都回來）→ 否則 `write_batch`：新的 `import_batch_id`、嚴格重播、`add_all`、自動股利重算（這一批碰到的股票，加上換掉的股票）、清掉沒有交易撐著的群組動態留言、**一次 commit**。中間任何一步失敗，session 關掉時整個 rollback。
 - **刪掉一檔的紀錄**（`services/transactions.py`；合併進開發分支時和「刪除這檔」「清除所有持倉」併成一個 `delete_records(db, user, account_ids, symbol)`，見最後「匯入庫存合併進開發分支」；這裡呼叫 `delete_records(db, user, [account.id], symbol)`）：刪掉這個帳戶裡這一檔的每一筆紀錄（`Transaction.symbol == symbol`：買、賣、股利含自動入帳的、分割、減資、標了這一檔的現金列——就是 `GET /transactions?account_id=&symbol=` 列出來的），以及這個帳戶這一檔的自動股利略過紀錄（`auto_dividend_skips`：它們說的是那些列被改過或刪過）。只 flush、不 commit、不重算自動股利、不鎖：呼叫的人先鎖帳戶、拿回傳的群組動態 key（`feed_keys`）、重算、commit。不用重播檢查：嚴格重播只拿一檔跟它自己的紀錄比，拿掉一整檔不會讓別檔對不上。定期定額、別檔、別的帳戶、別的使用者都不動（每一句都以 `user_id` 篩選，別人的帳戶什麼都刪不到；帳戶是不是自己的由呼叫的人先查，`commit` 用 `_get_account`，不是自己的 404）。
 - **`write_batch(db, user, check, md, also_sync=(), purge_feed_keys=())`**：`create_batch` 檢查完以後的那一段抽出來，兩種匯入共用。
 - **復原**：`DELETE /transactions/batches/{id}`（`delete_batch`，沒有改）刪掉這一批寫入的買進；**以券商為準刪掉的舊紀錄不會回來**——沒有地方存它們（不加資料表）。回應的 `replaced: [{symbol, deleted}]` 讓前端在確認復原時照實說（復原之後，這個帳戶裡就沒有那一檔了）。
@@ -2959,7 +2959,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 每一種旗標與預設勾選、張換股、只有總成本時的價格、重疊截圖合併、整股零股兩列、別的帳戶也有、什麼都不存、用量算一次、送出的請求（schema、系統提示、頁的標記）。
 - 貼上的文字：個資在送出前塗掉、只有文字沒有圖片；`mask_text` 的規則。
 - 重讀模型、不是庫存畫面、都沒讀出來、權限（`IMPORT_STATEMENTS`）、每天的次數和對帳單合計、查看別人的資產時不能讀也不能寫、請求格式。
-- 寫入：每一檔一筆買進、手續費 0、總成本到元、帳本均價等於券商的、每列自己的日期、整批復原；已在帳本沒勾以券商為準 → 整批不寫；以券商為準的 `dry_run` 不刪、有一列錯就什麼都不刪、寫入後這一檔只剩新的一筆、別檔／別的帳戶／別人／定期定額／自動股利略過紀錄（刪掉的是這一檔的）都照預期、復原後舊紀錄不回來；請求的規則；已經賣光的照常加買進；`delete_symbol_records` 不 commit、別人的帳戶 404。
+- 寫入：每一檔一筆買進、手續費 0、總成本到元、帳本均價等於券商的、每列自己的日期、整批復原；已在帳本沒勾以券商為準 → 整批不寫；以券商為準的 `dry_run` 不刪、有一列錯就什麼都不刪、寫入後這一檔只剩新的一筆、別檔／別的帳戶／別人／定期定額／自動股利略過紀錄（刪掉的是這一檔的）都照預期、復原後舊紀錄不回來；請求的規則；已經賣光的照常加買進；`delete_records` 不 commit、別的使用者刪不到（筆數 0、什麼都沒刪；合併前的 `delete_symbol_records` 測的是別人的帳戶 404）。
 - 實測之後（2026-11-17）：貼上的文字圍起來、文字裡的結束標籤拿掉、問題那一句不會被當成指令抄回來（`instruction_quotes`，對帳單也用）；只有總成本的畫面讀成張時照市值換成股、`unit_fixed`、不重讀；沒印的欄位與金額對得上的單位標了 `unclear` 不算；金額說法不一樣時照舊標 `cost_mismatch` 加提示。
 - 審查之後（2026-11-17）：`in_ledger` 的股利與賣出筆數；`account_id` 空字串或沒給是 422、什麼都不刪；美股的台幣市值不標 `value_mismatch`、不重讀（美元的市值對不上照樣標）、系統提示有這一條。
 
@@ -3826,3 +3826,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **開關**：開發分支已經把 `IMPORT_STATEMENTS` 的預設改成 `all`（會員和一般帳號只差收盤簡報與 AI 次數），匯入庫存跟著同一個開關，所以預設也是所有登入的人。
 - 測試：`test_delete_holding.py`、`test_clear_records.py` 不變；`test_positions_import.py` 的單元測試改成測 `delete_records`
   （只刪那個帳戶那一檔、不 commit、別的使用者刪不到）。
+- 前端 mock（合併後的審查）：「以券商為準」和 mock 的刪除這檔、清除所有持倉一樣，連同這個帳戶這幾檔的自動股利略過紀錄一起刪掉
+  （`createImportStore` 的 `dropSkips`，寫入重算股利之前；這個帳戶沒有這一檔任何紀錄時不刪，和 `delete_records` 一樣）。
+  mock 也有和 `IMPORT_STATEMENTS` 一樣的開關：網址 `?import=admins`、`?import=off`（`?import=all` 切回預設），`/me` 的
+  `plan.statement_import` 跟著變，兩種讀檔沒開放時 403 `import_not_enabled`；smoke 的入口檢查改成「一般帳號也有入口，開關沒開、唯讀查看時沒有」。

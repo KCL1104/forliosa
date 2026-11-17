@@ -278,6 +278,8 @@ export function createImportStore(deps: {
   txns: () => Transaction[]
   /** 寫入一批（已經排好序、重算過自動入帳的股利）；回傳新的交易清單 */
   commit: (next: Transaction[]) => Transaction[]
+  /** 以券商為準：刪掉這個帳戶這幾檔的自動股利略過紀錄（和後端的 `delete_records`、mock 的刪除這檔一樣），在 `commit` 重算股利之前呼叫 */
+  dropSkips: (accountId: string, symbols: Iterable<string>) => void
   today: string
 }) {
   let importsToday = 0
@@ -377,8 +379,11 @@ export function createImportStore(deps: {
           currency: spec.currency, is_day_trade: false, note: "", source: "import", created_at: now, import_batch_id: batchId,
         }
       })
-      // 以券商為準：這個帳戶裡這一檔的所有紀錄（含自動入帳的股利）先刪掉，和寫入同一次
+      // 以券商為準：這個帳戶裡這一檔的所有紀錄（含自動入帳的股利）和略過紀錄先刪掉，和寫入同一次
       const kept = deps.txns().filter((t) => !(t.account_id === account.id && t.symbol && replacing.has(t.symbol)))
+      // 和後端一樣：這個帳戶裡沒有這一檔任何紀錄時什麼都不刪（略過紀錄也留著）
+      const present = [...replacing].filter((symbol) => deps.txns().some((t) => t.account_id === account.id && t.symbol === symbol))
+      if (present.length) deps.dropSkips(account.id, present)
       const before = new Set(kept.filter((t) => t.source === "auto").map((t) => t.id))
       const next = deps.commit([...kept, ...created])
       const added = next.filter((t) => t.source === "auto" && !before.has(t.id)).length

@@ -183,6 +183,24 @@ export function limitHistory(p: Performance, first: string): Performance {
   }
 }
 
+/**
+ * mock 的匯入開關（和後端的 `IMPORT_STATEMENTS` 一樣，兩種匯入同一個開關）：網址 `?import=admins`（只有站方管理員）、
+ * `?import=off`（誰都沒有）；`?import=all` 切回預設（所有登入的帳號）。記在 sessionStorage。
+ */
+export function readMockImport(): MockImportStatements {
+  if (typeof window === "undefined") return "all"
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("import")
+    if (fromUrl === "all") window.sessionStorage.removeItem("forliosa:mock-import")
+    else if (fromUrl === "admins" || fromUrl === "off") window.sessionStorage.setItem("forliosa:mock-import", fromUrl)
+    const saved = window.sessionStorage.getItem("forliosa:mock-import")
+    if (saved === "admins" || saved === "off") return saved
+  } catch {
+    // sessionStorage 不可用時使用預設（all）
+  }
+  return "all"
+}
+
 export function readMockDiscussion(): DiscussionOptions {
   if (typeof window === "undefined") return {}
   let mode: string | null = null
@@ -209,6 +227,9 @@ const DEFAULT_PREFS: Preferences = {
   benchmark: "0050.TW",
   daily_briefing: false,
 }
+
+/** 後端 `IMPORT_STATEMENTS` 的三個值：all（預設，所有登入的帳號）、admins（只有站方管理員）、off */
+export type MockImportStatements = "all" | "admins" | "off"
 
 export interface MockOptions {
   scenario?: MockScenario
@@ -240,6 +261,8 @@ export interface MockOptions {
    * false 模擬關掉或整批刪掉（`history_backfill drop`），和以前一樣什麼都不寫
    */
   historyBackfill?: boolean
+  /** 匯入（匯入對帳單、匯入庫存）開給誰（`?import=`）；預設 all，和後端的 `IMPORT_STATEMENTS` 預設一樣 */
+  importStatements?: MockImportStatements
 }
 
 /**
@@ -414,15 +437,24 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   )
   /**
    * `User`：個人資料多了 public_name、is_admin、public_posting_suspended_until（`GET /me`、開發登入、PATCH 都有）。
-   * 方案：示範使用者是會員；匯入對帳單和後端預設的 `IMPORT_STATEMENTS=all` 一樣所有人都有（2026-11-17：會員和免費帳號只差 AI 額度與收盤簡報）
+   * 方案：示範使用者是會員；兩種匯入照 `importStatements`（`?import=`），預設和後端的 `IMPORT_STATEMENTS=all` 一樣所有人都有
+   * （2026-11-17：會員和免費帳號只差 AI 額度與收盤簡報）
    */
+  const importOpen = () => {
+    const mode = options.importStatements ?? "all"
+    return mode === "all" || (mode === "admins" && discussions.meFields().is_admin)
+  }
+  /** 和後端的 `require_access` 一樣：讀檔（匯入對帳單、匯入庫存）前先看開關，沒開放 403 */
+  const requireImport = (message: string) => {
+    if (!importOpen()) throw new ApiError(403, "import_not_enabled", message)
+  }
   const me = (): User => {
     const fields = discussions.meFields()
     return {
       ...user,
       ...fields,
       // 站方管理員算會員、沒有到期日；`?discuss=member`（不是管理員）是開通到 12/31 的會員（設定頁「會員，到 12/31」）
-      plan: { tier: "member", until: fields.is_admin ? null : "2026-12-31", deep_search: true, daily_briefing: true, statement_import: true },
+      plan: { tier: "member", until: fields.is_admin ? null : "2026-12-31", deep_search: true, daily_briefing: true, statement_import: importOpen() },
     }
   }
 
@@ -574,6 +606,10 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       sortTxns()
       resync()
       return txns
+    },
+    // 以券商為準：和 deleteHolding 同一個寫法，刪掉這個帳戶這幾檔的略過紀錄
+    dropSkips: (accountId, symbols) => {
+      for (const sym of symbols) for (const k of [...skips]) if (k.startsWith(`${accountId}|${sym}|`)) skips.delete(k)
     },
     today,
   })
@@ -927,12 +963,20 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     previewTransaction: (body) =>
       wait(() => computePreview(body, accounts.find((a) => a.id === body.account_id), body.symbol ? findInstrument(body.symbol) : undefined, { auto: false })),
     // 讀檔要 10–40 秒（實測）；示範縮短成 1.5 秒左右。取消時照真的 fetch 一樣丟 AbortError
-    parseStatement: (body, opts) => aiRead(() => imports.parse(body), opts?.signal),
+    parseStatement: (body, opts) =>
+      aiRead(() => {
+        requireImport("這個帳號還不能匯入對帳單。")
+        return imports.parse(body)
+      }, opts?.signal),
     checkTransactionBatch: (body) => wait(() => imports.check(body)),
     createTransactionBatch: (body) => wait(() => imports.create(body)),
     deleteTransactionBatch: (batchId) => wait(() => imports.remove(batchId)),
     // 匯入庫存（2026-11-17）：讀和匯入對帳單一樣慢；寫入、檢查、復原和一般的請求一樣
-    parsePositions: (body, opts) => aiRead(() => imports.parsePositions(body), opts?.signal),
+    parsePositions: (body, opts) =>
+      aiRead(() => {
+        requireImport("這個帳號還不能匯入庫存。")
+        return imports.parsePositions(body)
+      }, opts?.signal),
     checkPositions: (body) => wait(() => imports.checkPositions(body)),
     commitPositions: (body) => wait(() => imports.commitPositions(body)),
     // 和後端相同：這個帳戶這一檔的每一筆（買賣、股利含自動入帳的…）都刪掉，略過紀錄跟著清掉；定期定額只在要求時暫停
