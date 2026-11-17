@@ -342,7 +342,8 @@ function TrialRow({ r, revealed }: { r: TrialReport; revealed: boolean }) {
           ].filter(Boolean)
           return (
             <li key={v.label} className="flex items-baseline gap-2 text-md">
-              {v.status === "running" || v.status === "pending" ? (
+              {/* 還在寫、還沒跑、或沒有 AI 版（只發了資料版、預算不夠沒跑）：沒有可以看的版本 */}
+              {v.status === "running" || v.status === "pending" || v.published === false ? (
                 <span className="num w-5 font-medium text-ink-2">{v.label}</span>
               ) : (
                 <Link

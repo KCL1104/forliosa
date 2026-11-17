@@ -20,11 +20,13 @@ from forliosa.datapolicy import label as source_label
 from forliosa.reports.schedule import KIND_LABELS, md, md_wd, span
 from forliosa.timeutil import TAIPEI, iso_taipei
 
-DISCLAIMER_AI = "AI 依公開資料與媒體報導整理，報告本文人人相同，不是投資建議。"
-DISCLAIMER_DATA = "依公開資料整理，報告本文人人相同，不是投資建議。"
-DISCLAIMER_FULL = ("這份報告由 AI 依公開資料與媒體報導整理，報告本文人人相同，不針對任何人的持股或財務狀況；"
-                   "不是投資建議，"
-                   "也不推薦買賣任何股票。內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。")
+# The site's rule (2026-11-17 disclaimers, ``forliosa.disclaimer``): say plainly that Forliosa only organises
+# information and is not an investment adviser — the report's own lines keep 「報告本文人人相同」 (contract §12.2).
+DISCLAIMER_AI = "AI 依公開資料與媒體報導整理，報告本文人人相同，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"
+DISCLAIMER_DATA = "依公開資料整理，報告本文人人相同；Forliosa 不是投資顧問，不提供投資建議。"
+DISCLAIMER_FULL = ("這份報告由 AI 依公開資料與媒體報導整理，報告本文人人相同，不針對任何人的持股或財務狀況。"
+                   "Forliosa 只替你整理資訊，不是投資顧問；這份報告不是投資建議，也不推薦買賣任何股票。"
+                   "內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。")
 MODEL_LINE = "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。"
 MODEL_LINE_MENTION = "報告內容提到 Anthropic，撰寫的模型也是 Anthropic 的。"
 STATUS_WAITING = "AI 段落還在整理，這是只有資料的版本。"

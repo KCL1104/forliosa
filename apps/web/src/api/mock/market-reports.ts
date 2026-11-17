@@ -105,10 +105,10 @@ const tone = (v: number): ReportTone => (v > 0 ? "rise" : v < 0 ? "fall" : "flat
 const cellTone = (v: number) => (v > 0 ? ("rise" as const) : v < 0 ? ("fall" as const) : null)
 const rise = (v: number) => (v >= 0 ? "上漲" : "下跌")
 
-const DISCLAIMER_AI = "AI 依公開資料與媒體報導整理，報告本文人人相同，不是投資建議。"
-const DISCLAIMER_DATA = "依公開資料整理，報告本文人人相同，不是投資建議。"
+const DISCLAIMER_AI = "AI 依公開資料與媒體報導整理，報告本文人人相同，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"
+const DISCLAIMER_DATA = "依公開資料整理，報告本文人人相同；Forliosa 不是投資顧問，不提供投資建議。"
 const DISCLAIMER_FULL =
-  "這份報告由 AI 依公開資料與媒體報導整理，報告本文人人相同，不針對任何人的持股或財務狀況；不是投資建議，也不推薦買賣任何股票。內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。"
+  "這份報告由 AI 依公開資料與媒體報導整理，報告本文人人相同，不針對任何人的持股或財務狀況。Forliosa 只替你整理資訊，不是投資顧問；這份報告不是投資建議，也不推薦買賣任何股票。內容可能有錯，請以原始來源為準。標「估算」的數字是 Forliosa 自己算的。"
 const MODEL_LINE = "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。"
 const ORIGIN = { data: "資料", ai: "AI 依資料與報導整理" } as const
 const PENDING_LINE = "AI 段落還在整理，這是只有資料的版本。"
@@ -1192,7 +1192,8 @@ export function createMarketReportsStore(deps: MarketReportsDeps, scenario: Mock
       return false
     }
   }
-  const field = (name: string, message: string) => new ApiError(422, "validation_error", message, { field: name })
+  // 和伺服器一樣：欄位名在 `error.details.field`
+  const field = (name: string, message: string) => new ApiError(422, "validation_error", message, { details: { field: name } })
 
   return {
     /** 群組頻道的三個開關只在對全站公開時出現 */

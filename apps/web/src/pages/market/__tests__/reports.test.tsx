@@ -117,7 +117,7 @@ describe("報告頁", () => {
     const article = await report()
     const text = article.textContent ?? ""
     const order = [
-      "AI 依公開資料與媒體報導整理，報告本文人人相同，不是投資建議。",
+      "AI 依公開資料與媒體報導整理，報告本文人人相同，可能有錯；Forliosa 不是投資顧問，不提供投資建議。",
       "資料截至",
       "已更正（",
       "盤後重點 11/11（三）",
@@ -180,7 +180,7 @@ describe("報告頁", () => {
     renderApp("/market?tab=reports&kind=premarket")
     const article = await report()
     expect(within(article).getByText("AI 段落還在整理，這是只有資料的版本。")).toBeInTheDocument()
-    expect(within(article).getByText(/^依公開資料整理，報告本文人人相同，不是投資建議。/)).toBeInTheDocument()
+    expect(within(article).getByText(/^依公開資料整理，報告本文人人相同；Forliosa 不是投資顧問，不提供投資建議。/)).toBeInTheDocument()
     expect(within(article).queryByText("這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。")).toBeNull()
     // 規則寫的標題不重複上面的名稱與日期
     expect(article.querySelector("[data-report-title]")!.textContent).toMatch(/^美股 11\/11 收盤與今日行事曆$/)

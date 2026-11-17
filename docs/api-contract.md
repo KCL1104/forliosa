@@ -1366,7 +1366,7 @@
   "has_ai": true,
   "published_at": "2026-11-16T15:53:10+08:00", "first_published_at": "2026-11-16T14:10:05+08:00",
   "as_of": "2026-11-16T15:40:00+08:00", "as_of_label": "資料截至 11/16 15:40",
-  "disclaimer_line": "AI 依公開資料與媒體報導整理，報告本文人人相同，不是投資建議。",   // 資料版：「依公開資料整理，…」
+  "disclaimer_line": "AI 依公開資料與媒體報導整理，報告本文人人相同，可能有錯；Forliosa 不是投資顧問，不提供投資建議。",   // 資料版：「依公開資料整理，報告本文人人相同；Forliosa 不是投資顧問，不提供投資建議。」
   "title": "加權指數跌 6.03%，收 41,040.08 點", "title_origin": "ai",     // rules：規則產生的標題
   "highlights": [{"sentences": [{"text": "加權指數收 41,040.08 點，跌 2,635.04 點（▼6.03%）。", "cites": [1]}]}],
   "highlights_origin": "ai",
@@ -1397,7 +1397,7 @@
               "manual": ["美股休市、總經行事曆與美股財報日：Forliosa 自行整理，每列連回官方頁面"]},
   "disclaimer_full": "這份報告由 AI 依公開資料與媒體報導整理，…",
   "model_line": "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。",     // 沒有 AI 文字時 null
-  "corrections": [],                                                       // [{"at", "note": "已更正（11/18 09:10）：…"}]
+  "corrections": [],                                                       // [{"at", "note"}]：note 只有說明，頁面自己寫「已更正（11/18 09:10）：」
   "notes": [],                                                             // 例：官方加權指數尚未取得
   "status_line": null,                                                     // 資料版：「AI 段落還在整理，這是只有資料的版本。」或「這一份沒有 AI 段落，只有資料。」
   "is_demo": false
@@ -1415,12 +1415,12 @@
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
-| GET | `/admin/market-reports/overview` | 模式、每種報告的撰寫設定（盲測中不寫模型）、本月花費／上限／層級、試跑花費／上限與進度、最近 20 次產生（揭曉前盲測的模型與花費是 `null`）、手動表狀態、專用金鑰 |
-| PUT | `/admin/market-reports/config` | `{mode?, writers?: {premarket?: {model, effort} \| null, …}}`；model 只能 `claude-opus-5-5`／`claude-sonnet-5-5`，effort `low`–`xhigh`；切到 `public` 時回應多 `notice` |
-| GET | `/admin/market-reports/trial` | 盲測的每一份：A／B／C 的狀態、是否準時、問題數、我的票（揭曉前沒有花費與模型） |
-| GET | `/admin/market-reports/{id}/variants/{A\|B\|C}` | 那個版本的管理員形式：每句多 `refs`、被刪的段多 `dropped: {reasons}`、`validation`；揭曉後多 `writer` |
+| GET | `/admin/market-reports/overview` | `{enabled, mode, writers: {premarket\|close\|weekly: {model, effort, source: "admin"\|"default", effective, tier} \| null（盲測中）}, trial_running, month: {label, spend_usd, budget_usd, tier: normal\|medium\|sonnet\|data_only}, trial: {spend_usd, budget_usd, days_done, days_total, weekly_done, finished, started_on, revealed_at}, key: {slot, status: ok\|cooldown\|disabled\|exhausted, note}, runs: [{id, report_id, kind, edition_date, edition_label, variant, purpose, attempt, status, step, started_at, seconds, stop_reason, fallback_used, problems, cost_usd, model, effort, tier, error}]（最近 20 次；揭曉前盲測的 `cost_usd`／`model`／`effort`／`tier` 是 `null`）, manual: {nyse_next, nyse_unverified, nyse_rows, macro_next_14d, earnings_next_14d}}`（形狀照前端 `AdminReportsOverview`） |
+| PUT | `/admin/market-reports/config` | `{mode?, writers?: {premarket?: {model, effort} \| null, …}}`；model 只能 `claude-opus-5-5`／`claude-sonnet-5-5`，effort `low`–`xhigh`；回應是 overview 加 `notice`（切到 `public` 時「之後的新報告會對所有登入的人公開…」，其他是 `null`） |
+| GET | `/admin/market-reports/trial` | `{days_done, days_total, weekly_done, finished, reports: [{report_id, kind, kind_label, edition_date, edition_label, closed, variants: [{label, status（還沒跑是 `pending`）, attempts, finished_at, on_time（還在寫或還沒跑是 null）, published, problems, metrics（TrialMetrics；還在寫是 null）, writer?（揭曉後）}], my_vote}], reveal: TrialReveal \| null（揭曉後）}`；揭曉前沒有花費與模型 |
+| GET | `/admin/market-reports/{id}/variants/{A\|B\|C}` | 那個版本的管理員形式：每句多 `refs`、被刪的段多 `dropped: {reasons}`、`validation: {first_problems, final_problems: [{code, path}], dropped: [{section, reasons}], revised, compliance_ran, mentions_anthropic, counts}`；揭曉後多 `writer: {model, effort}`。還在寫：409 `variant_running`；沒有產生（沒跑、只發了資料版）：404 |
 | PUT | `/admin/market-reports/{id}/vote` | `{preferred: "A"\|"B"\|"C", note?}` |
-| POST | `/admin/market-reports/trial/reveal` | `{force?}`；沒做完且沒有 force：409「盲測還沒做完（n/10 份日報、週報 0/1）。」回應：每種報告 × 設定的彙總（票數、違反資料政策、主體配錯、自己推的日期、被刪的段、準時率、平均花費與秒數、是否過關）與建議 |
+| POST | `/admin/market-reports/trial/reveal` | `{force?}`；沒做完且沒有 force：409 `trial_not_done`「盲測還沒做完（n/10 份日報、週報 0/1）。」回應 TrialReveal：`{revealed_at, complete, kinds: [{kind（premarket／close／weekly）, kind_label, rows: [{writer: {model, effort}, reports, votes, policy_violations, subject_mismatches, inferred_dates, dropped_sections, on_time_rate, data_only, avg_cost_usd, avg_seconds, fallbacks, passed}], suggested: {model, effort} \| null}], note}`（建議＝過關裡平均花費最低的） |
 | POST | `/admin/market-reports/{id}/corrections` | `{note: 1–200 字, drop_sections?: [key]}`：新的一版 `edition="correction"`，頁首多「已更正（11/18 09:10）：…」，不推播 |
 | POST | `/admin/market-reports/rebuild-data` | `{kind, edition_date}`：重建資料版（不呼叫 AI；過去的日期是回補，只有管理員看得到） |
 | GET／PUT／DELETE | `/admin/market-calendar/nyse`（`/{date}`） | 美股休市與提早收盤：`{name, kind: closed\|early_close, close_time_et?, source_url（NYSE 官網）, verified}` |
@@ -1443,12 +1443,14 @@
 昨日你的群組（11/17）
 當日報酬：小明 +1.2%
 全文與圖表：https://forliosa.trade/market/reports/mrp_…
+AI 整理的部分可能有錯。Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。
 ```
 
 - 盤前重點：有群組 AI 日報的群組（加值群組）在重點後面接「昨日你的群組」，規則和日報推播一樣（只算開了推播的成員，分享報酬率的人少於 2 位就沒有 AI 那一行）。
   這種頻道的日報推播延到 08:20，盤前送出後標成已送（不重複）；盤前一直沒送時，日報 08:20 自己送。
 - 市場週報：頻道開了週報時，群組週報延到週日 21:30；18:00 的市場週報推播接上「你的群組上週（11/16–11/20）」，週報那一列標成已送。週報開關關著的頻道，群組週報照舊週六送。
-- 不推：更正、補表、盲測、回補的報告，以及任何個人化內容。Discord 1,900 字、Telegram 4,000 字以內（太長時先縮群組段落，再縮重點）。
+- 最後一行是全站的免責（`notifications.signed(…, ai=True)`；只有資料的版本只有 `disclaimer.SHORT`），只出現一次：接進來的群組日報、週報自己的最後一行拿掉。
+- 不推：更正、補表、盲測、回補的報告，以及任何個人化內容。Discord 1,900 字、Telegram 4,000 字以內（含最後一行；太長時先縮群組段落，再縮重點）。
 
 ## 討論串（2026-11-13）
 

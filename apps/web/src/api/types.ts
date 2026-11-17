@@ -2156,6 +2156,7 @@ export interface ReportValidation {
   revised: boolean
   compliance_ran: boolean
   mentions_anthropic: boolean
+  counts?: Record<string, number>
 }
 export interface MarketReport {
   id: string
@@ -2247,13 +2248,18 @@ export interface AdminReportRun {
   cost_usd: number | null
   model: string | null
   effort: string | null
+  edition_date?: string | null
+  /** 預算層級（揭曉前的盲測 run 是 null） */
+  tier?: ReportTier | null
+  /** 失敗或放棄的原因（短標籤，例 `no_key`、`after_close`） */
+  error?: string | null
 }
 export interface AdminReportsOverview {
   /** 伺服器的總開關 */
   enabled: boolean
   mode: ReportsMode
-  /** 每種報告的撰寫設定；盲測中（揭曉前）是 null */
-  writers: Record<ReportKind, (WriterSetting & { source: "admin" | "default" }) | null>
+  /** 每種報告的撰寫設定；盲測中（揭曉前）是 null。`effective`／`tier`：套上預算層級之後的設定 */
+  writers: Record<ReportKind, (WriterSetting & { source: "admin" | "default"; effective?: WriterSetting | null; tier?: ReportTier }) | null>
   trial_running: boolean
   month: { label: string; spend_usd: number; budget_usd: number; tier: ReportTier }
   trial: {
@@ -2272,6 +2278,7 @@ export interface AdminReportsOverview {
   manual: {
     nyse_next: { date: string; name: string; kind: "closed" | "early_close" } | null
     nyse_unverified: number
+    nyse_rows?: number
     macro_next_14d: number
     earnings_next_14d: number
   }
@@ -2308,6 +2315,10 @@ export interface TrialVariant {
   metrics: TrialMetrics | null
   /** 揭曉後才有 */
   writer?: WriterSetting | null
+  attempts?: number
+  /** 有沒有 AI 版（沒有：只發了資料版或沒跑，看不了） */
+  published?: boolean
+  problems?: number | null
 }
 export interface TrialReport {
   report_id: string
@@ -2329,10 +2340,16 @@ export interface TrialRevealRow {
   avg_cost_usd: number
   avg_seconds: number
   passed: boolean
+  /** 退回資料版的份數 */
+  data_only?: number
+  fallbacks?: number
 }
 export interface TrialReveal {
   revealed_at: string
   kinds: { kind: ReportKind; kind_label: string; rows: TrialRevealRow[]; suggested: WriterSetting | null }[]
+  /** 盲測全部做完才揭曉的是 true（提前揭曉是 false） */
+  complete?: boolean
+  note?: string
 }
 /** `GET /admin/market-reports/trial` */
 export interface AdminTrial {

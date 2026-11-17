@@ -36,11 +36,20 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
 const NYSE_URL = "https://www.nyse.com/markets/hours-calendars"
 type Errors = Record<string, string>
 
-/** 伺服器的 422 寫在那一欄下面（`extra.field`）；認不得的欄位寫在 `fallback` 那一欄 */
+/**
+ * 伺服器的 422 寫在那一欄下面：欄位名在 `error.details.field`（伺服器自己檢查的）或 `error.details[0].field`
+ * （格式不對，例如日期）；認不得的欄位寫在 `fallback` 那一欄
+ */
 function fieldError(err: unknown, fallback: string): Errors | null {
   if (!(err instanceof ApiError) || err.status !== 422) return null
-  const field = typeof err.extra.field === "string" ? err.extra.field : fallback
-  return { [field]: err.message }
+  return { [errorField(err.extra) ?? fallback]: err.message }
+}
+function errorField(extra: Record<string, unknown>): string | null {
+  const details = extra.details
+  const raw = Array.isArray(details) ? (details[0] as { field?: unknown } | undefined)?.field : (details as { field?: unknown } | undefined)?.field
+  const field = typeof raw === "string" ? raw : typeof extra.field === "string" ? extra.field : null
+  // 「sectors.0」這類路徑：寫在那一欄
+  return field ? field.split(".")[0]! : null
 }
 /** 新增失敗：欄位不對就寫在那一欄下面，其他的（連不上、伺服器錯誤）跳通知 */
 const failWith = (setErrors: (e: Errors) => void, fallback: string) => (err: unknown) => {

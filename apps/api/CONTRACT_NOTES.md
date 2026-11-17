@@ -2906,3 +2906,34 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **寫回共用研究**：用 `research.remember_report_sources`（只存網址、標題、媒體、摘錄、page_age；過了下一次開盤就不寫）。
 - **沒做**：會員「每日收盤簡報」裡加一個連到當天報告的連結（memo §4「和現有方案的關係」）——前端與簡報的程式這次沒動，留給前端那一部分；
   `services/account.py` 的匯出與刪除不用改（`market_report_reads`、`market_report_votes` 都是 FK cascade，沒有使用者內容）。
+
+## 2026-11-17 市場報告：前後端合併時對齊的地方
+
+合併 `market-reports-api`、`market-reports-web` 到開發分支時，拿真的 API 回應（測試資料庫）逐一對前端 `apps/web/src/api/types.ts`
+做型別檢查，並和同一天合併的全站免責對齊。改了這些：
+
+- **管理後台的回應形狀改成前端的型別**（合約 §14.2 只寫了「回什麼內容」，前端照 §18.5 定了形狀）：
+  - `GET /admin/market-reports/overview`：`writers` 改成 `{premarket|close|weekly: {model, effort, source: "admin"|"default", effective, tier} | null}`
+    （盲測中是 `null`）；`month` 是 `{label, spend_usd, budget_usd, tier}`；`trial` 是 `{spend_usd, budget_usd, days_done, days_total,
+    weekly_done: bool, finished, started_on, revealed_at}`；`key` 是 `{slot, status: ok|cooldown|disabled|exhausted, note}`（原本的 `key_slot`）；
+    多 `trial_running`；`runs[*]` 多 `edition_label`；`manual` 的鍵是 `macro_next_14d`、`earnings_next_14d`。`PUT …/config` 回 overview 加 `notice`。
+  - `GET /admin/market-reports/trial`：原本是清單，改成 `{days_done, days_total, weekly_done, finished, reports: [...], reveal}`；
+    每份一定有 A、B、C 三個 variant（還沒跑的 `status: "pending"`），還在寫的 `on_time`、`metrics` 是 `null`，`metrics` 一定有 §17.4 的每個鍵；
+    揭曉後 `reveal` 是彙總（和 `POST …/trial/reveal` 一樣）。
+  - `POST /admin/market-reports/trial/reveal`：原本把盤前、盤後併成 `daily`，改成**每種報告**（premarket、close、weekly，合約 §14.2「每種報告
+    × 每個設定」）各一組：`{revealed_at, complete, kinds: [{kind, kind_label, rows: [{writer, reports, votes, policy_violations,
+    subject_mismatches, inferred_dates, dropped_sections（合計）, on_time_rate, data_only, avg_cost_usd, avg_seconds, fallbacks, passed}],
+    suggested}], note}`。過關標準不變（每份問題 ≤ 1、平均刪段 ≤ 1、準時 ≥ 80%、沒有資料版、沒有違反資料政策）。
+  - `GET /admin/market-reports/{id}/variants/{label}`：`validation` 改成 `{first_problems, final_problems: [{code, path}], dropped:
+    [{section, reasons}], revised, compliance_ran, mentions_anthropic, counts}`；`writer` 只回 `{model, effort}`。還在寫回 409
+    `variant_running`（原本 404），沒有產生（沒跑、只發了資料版）仍是 404。前端只在有 AI 版（`published`）時才給連結。
+- **更正**：`corrections[*].note` 只放說明（原本是「已更正（11/18 09:10）：…」整行）；頁面用 `at` 自己寫「已更正（時間）：」，原本會重複兩次。
+- **422 的欄位**：照 api-contract（`error.details.field`；pydantic 的格式錯誤是 `error.details[0].field`）。前端原本讀 `error.field`，改成讀這兩個；
+  mock 也照伺服器的形狀。
+- **免責（和 `forliosa.disclaimer` 對齊）**：
+  - 報告頁最上面那一句（`disclaimer_line`）與最下面的完整說明（`disclaimer_full`）加上「Forliosa 不是投資顧問，不提供投資建議」
+    （AI 版另有「可能有錯」），保留合約的「報告本文人人相同」。前端 mock 與測試同樣的字。
+  - 推播：最後一行改用 `notifications.signed(…, ai=True)`（「AI 整理的部分可能有錯。」＋`disclaimer.SHORT`；只有資料的版本只有 `SHORT`），
+    整則只出現一次；接進來的群組日報、群組週報自己的最後一行拿掉（`push._body_lines`）。1,900／4,000 字的上限含這一行。第一行
+    「AI 依公開資料整理，報告本文人人相同，不是投資建議。」照合約留著。
+- **條款**：免責聲明那次新增的 §2.8、§2.9 不動，市場報告條改成 §2.10（§2.1、§7.4 的引用一起改），§2.9 的畫面標示加上市場報告。
