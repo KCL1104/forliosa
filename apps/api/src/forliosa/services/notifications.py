@@ -20,6 +20,11 @@ there and created after the member's push start (like trade pushes), and the AI 
 numbers went into it still pushes and every trade it counted is still sent. Sent after the trading day (most are, at
 07:30) it says 當日報酬／那天的買賣 instead of 今日／今天.
 
+**Market reports** (``kind="mreport"``, 市場報告 2026-11-17; ``forliosa.reports.push``): channels with
+``notify_premarket`` / ``notify_close`` / ``notify_weekly``, only while the reports' mode is public. Sent before the
+group's other rows of the same run: the 盤前重點 push takes in the group's daily report of the previous session (a
+daily push held to 08:20 for it is then marked ``merged``), the 市場週報 push the weekly digest (held to Sunday 21:30).
+
 **Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
 :func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,
 a masked link or other formatting to a message.
@@ -105,17 +110,21 @@ def enqueue_trades(db: Session, now: datetime | None = None) -> int:
 
 def enqueue_digest(db: Session, digest: GroupDigest, now: datetime | None = None) -> int:
     """Queue a ready digest for the group's channels that take digests."""
+    from forliosa.reports.push import digest_hold, pushing
+
     now = now or now_utc()
     added = 0
+    reports_on = pushing(db)
     for ch in db.scalars(select(GroupChannel).where(GroupChannel.group_id == digest.group_id,
                                                     GroupChannel.status == "active",
                                                     GroupChannel.notify_digest.is_(True))):
         key = f"digest:{digest.id}:{ch.kind}"
         if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key)):
             continue
+        # held for the 市場週報 push of the same channel (it takes the digest in), or sent at once
         db.add(NotificationOutbox(id=new_id("ntf"), group_id=digest.group_id, channel_kind=ch.kind, kind="digest",
                                   dedupe_key=key, digest_id=digest.id, status="pending", attempts=0,
-                                  not_before=now, created_at=now))
+                                  not_before=digest_hold(ch, now, reports_on), created_at=now))
         added += 1
     db.commit()
     return added
@@ -124,10 +133,12 @@ def enqueue_digest(db: Session, digest: GroupDigest, now: datetime | None = None
 def enqueue_daily(db: Session, report: GroupDailyReport, now: datetime | None = None) -> int:
     """Queue a finished daily report for the group's channels that take daily reports (due at once, or at 07:30 when
     it finished during the night)."""
+    from forliosa.reports.push import daily_hold, pushing
     from forliosa.services.group_daily import push_at
 
     now = now or now_utc()
     added = 0
+    reports_on = pushing(db)
     for ch in db.scalars(select(GroupChannel).where(GroupChannel.group_id == report.group_id,
                                                     GroupChannel.status == "active",
                                                     GroupChannel.notify_daily.is_(True))):
@@ -136,7 +147,8 @@ def enqueue_daily(db: Session, report: GroupDailyReport, now: datetime | None = 
             continue
         db.add(NotificationOutbox(id=new_id("ntf"), group_id=report.group_id, channel_kind=ch.kind, kind="daily",
                                   dedupe_key=key, daily_report_id=report.id, status="pending", attempts=0,
-                                  not_before=push_at(report.finished_at or now), created_at=now))
+                                  not_before=daily_hold(ch, push_at(report.finished_at or now), reports_on),
+                                  created_at=now))
         added += 1
     db.commit()
     return added
@@ -370,7 +382,11 @@ def send_due(db: Session, md: MarketData, settings: Settings | None = None, now:
     trades: dict[tuple, list[tuple[NotificationOutbox, Transaction]]] = defaultdict(list)
     digests: list[NotificationOutbox] = []
     dailies: list[NotificationOutbox] = []
+    mreports: list[NotificationOutbox] = []
     for r in rows:
+        if r.kind == "mreport":
+            mreports.append(r)
+            continue
         if r.kind == "digest":
             digests.append(r)
             continue
@@ -382,10 +398,17 @@ def send_due(db: Session, md: MarketData, settings: Settings | None = None, now:
             _cancel([r], "gone")
             continue
         trades[(r.group_id, r.channel_kind, t.user_id, t.trade_date, t.symbol, t.type)].append((r, t))
+    if mreports:  # first: a market report push takes the group's waiting daily or weekly push in
+        from forliosa.reports import push as mreport_push
+
+        for r in mreports:
+            if r.status == "pending":
+                mreport_push.send(db, settings, r, now)
+        db.flush()
     for (group_id, kind, *_), items in trades.items():
         if all(r.status == "pending" for r, _ in items):  # a channel disabled meanwhile cancelled its rows
             _send_trades(db, md, settings, group_id, kind, items, now)
-    for r in digests:
+    for r in digests:  # a merged one is already marked sent (the same object)
         if r.status == "pending":
             _send_digest(db, settings, r, now)
     for r in dailies:

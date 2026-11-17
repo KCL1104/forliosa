@@ -901,6 +901,28 @@ def date_from_page_age(page_age: str | None, today: date) -> date | None:
     return None
 
 
+def datetime_from_page_age(page_age: str | None, now: datetime) -> datetime | date | None:
+    """Like :func:`date_from_page_age`, but keeps the time when ``page_age`` has one (an aware Taipei datetime: ISO
+    with a time, ``3 hours ago``); a date-only value stays a ``date`` (the market reports' freshness rule treats the
+    two differently, contract §8.5)."""
+    s = (page_age or "").strip()
+    if not s:
+        return None
+    try:
+        dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        if "T" in s or " " in s.strip():
+            return (dt if dt.tzinfo else dt.replace(tzinfo=TAIPEI)).astimezone(TAIPEI)
+        return dt.date()
+    except ValueError:
+        pass
+    m = _RELATIVE.search(s)
+    if m and m.group(2).lower() in ("minute", "hour"):
+        n = int(m.group(1))
+        delta = timedelta(minutes=n) if m.group(2).lower() == "minute" else timedelta(hours=n)
+        return (now - delta).astimezone(TAIPEI)
+    return date_from_page_age(s, now.astimezone(TAIPEI).date())
+
+
 def _norm_url(url: str) -> str:
     try:
         parts = urlsplit(url.strip())

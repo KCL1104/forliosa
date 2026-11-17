@@ -3,9 +3,12 @@
     seed                                  NYSE holidays, macro calendar and US earnings seeds -> the three tables
     status                                mode, this month's spending and tier, the blind test, the latest runs
     pack --kind K --date YYYY-MM-DD       build a data pack only (prints counts and what is missing; --out writes it)
+    data --kind K --date YYYY-MM-DD       the data edition (a past date: a backfill, admins only, never pushed)
+    run --kind K --date D [--writer W] --yes   one full AI attempt (gathering, writing, checks); without --yes only
+                                          the estimate is printed. W: opus-high | opus-medium | sonnet-high | opus-xhigh
     probe-dates                           when the evening files really change (MI_MARGN, foreign top 20, TAIFEX)
 
-Never prints a key or an environment value (key slots only as ``#4``).
+Never prints a key or an environment value (key slots only as ``#4``). Only ``run --yes`` calls a model.
 """
 
 from __future__ import annotations
@@ -92,6 +95,50 @@ def cmd_pack(kind: str, day: date, out: str | None) -> int:
     return 0
 
 
+WRITERS = {"opus-high": ("claude-opus-5-5", "high"), "opus-medium": ("claude-opus-5-5", "medium"),
+           "sonnet-high": ("claude-sonnet-5-5", "high"), "opus-xhigh": ("claude-opus-5-5", "xhigh")}
+
+
+def cmd_data(kind: str, day: date) -> int:
+    from forliosa.marketdata.service import get_market_data
+    from forliosa.reports import pipeline
+
+    deps = pipeline.default_deps()
+    deps.md = get_market_data()
+    with session_factory()() as db:
+        load_official_calendar(db)
+        report = pipeline.backfill_data(db, kind, day, deps)
+        v = pipeline.current(db, report)
+        print(f"{report.id}：{report.kind} {report.edition_date}，第 {v.version if v else '?'} 版（資料版），"
+              f"{'回補，只有管理員看得到' if report.backfill else report.visibility}")
+    return 0
+
+
+def cmd_run(kind: str, day: date, writer_key: str, yes: bool) -> int:
+    from forliosa.config import get_settings
+    from forliosa.marketdata.service import get_market_data
+    from forliosa.reports import accounting, pipeline
+    from forliosa.reports import settings as rs
+
+    model, effort = WRITERS[writer_key]
+    est = accounting.EST_MAX_USD[kind]["normal"] * (accounting.XHIGH_FACTOR if effort == "xhigh" else 1)
+    print(f"{kind} {day}：撰寫 {model} {effort}，蒐集 {rs.gather_model()[0]}，檢查 {rs.check_model()[0]}；"
+          f"預估上限 US${est:.2f}")
+    if not yes:
+        print("沒有 --yes：只印預估，不呼叫模型。")
+        return 0
+    if not get_settings().market_reports_enabled:
+        print("提醒：MARKET_REPORTS_ENABLED 是關的；這次照樣跑（只有管理員看得到）。")
+    deps = pipeline.default_deps()
+    deps.md = get_market_data()
+    with session_factory()() as db:
+        load_official_calendar(db)
+        run = pipeline.run_once(db, kind, day, rs.Writer(model, effort), deps)
+        print(f"{run.id}：{run.status}/{run.step}，US${float(run.cost_usd or 0):.3f}，"
+              f"slot {'#' + str(run.key_slot) if run.key_slot else '-'}{'，' + run.error if run.error else ''}")
+    return 0
+
+
 # -- probe-dates -----------------------------------------------------------------------------------------------------
 # (dataset, url, whole file?): the small files are read whole (their newest date); MI_MARGN (≈500 KB, no date field)
 # only by a ranged, conditional request for its validators
@@ -167,7 +214,7 @@ def cmd_probe_dates() -> int:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m forliosa.reports", description="市場報告（不呼叫模型的工具）")
+    ap = argparse.ArgumentParser(prog="python -m forliosa.reports", description="市場報告（只有 run --yes 會呼叫模型）")
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("seed", help="手動表的初始資料")
     sub.add_parser("status", help="模式、花費、層級、最近的產生紀錄")
@@ -175,8 +222,20 @@ def main(argv: list[str] | None = None) -> int:
     pk.add_argument("--kind", required=True, choices=("premarket", "close", "weekly"))
     pk.add_argument("--date", required=True, type=date.fromisoformat)
     pk.add_argument("--out")
+    dt = sub.add_parser("data", help="建資料版（過去的日期＝回補，只有管理員看得到）")
+    dt.add_argument("--kind", required=True, choices=("premarket", "close", "weekly"))
+    dt.add_argument("--date", required=True, type=date.fromisoformat)
+    rn = sub.add_parser("run", help="跑一次完整 AI 流程（要 --yes 才會呼叫模型）")
+    rn.add_argument("--kind", required=True, choices=("premarket", "close", "weekly"))
+    rn.add_argument("--date", required=True, type=date.fromisoformat)
+    rn.add_argument("--writer", default="opus-high", choices=tuple(WRITERS))
+    rn.add_argument("--yes", action="store_true")
     sub.add_parser("probe-dates", help="量融資、外資前 20、期交所晚上檔案的日期")
     args = ap.parse_args(argv)
+    if args.cmd == "data":
+        return cmd_data(args.kind, args.date)
+    if args.cmd == "run":
+        return cmd_run(args.kind, args.date, args.writer, args.yes)
     if args.cmd == "seed":
         return cmd_seed()
     if args.cmd == "status":

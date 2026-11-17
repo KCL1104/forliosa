@@ -83,9 +83,11 @@ def output_config(effort: str, schema: dict[str, Any] | None = None) -> dict[str
 
 def request(*, model: str, max_tokens: int, messages: list[dict[str, Any]], effort: str,
             system: Any = None, tools: list[dict[str, Any]] | None = None, schema: dict[str, Any] | None = None,
-            settings: Settings | None = None) -> dict[str, Any]:
-    """The keyword arguments of one ``beta.messages.create`` / ``.stream`` call (no ``thinking``, no prefill)."""
-    if messages and messages[-1].get("role") == "assistant":
+            settings: Settings | None = None, continuation: bool = False) -> dict[str, Any]:
+    """The keyword arguments of one ``beta.messages.create`` / ``.stream`` call (no ``thinking``, no prefill).
+    ``continuation``: a ``pause_turn`` reply sent back as it came (the server resumes it) — the only trailing
+    assistant message allowed."""
+    if messages and messages[-1].get("role") == "assistant" and not continuation:
         raise ValueError("no assistant prefill: the last message must be the user's")
     kw: dict[str, Any] = {"model": model, "max_tokens": max_tokens, "messages": messages,
                           "output_config": output_config(effort, schema)}

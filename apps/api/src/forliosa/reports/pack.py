@@ -631,6 +631,79 @@ def _close(p: Pack, md_: Any) -> None:
     # tonight and the next session's scheduled events
     nxt = next_tw_trading_day(d + timedelta(days=1))
     _calendar(p, d, nxt, f"盤後與下個交易日行事曆（{md(d)}–{md(nxt)}）", top100=top100, names=names)
+    _close_evening(p, d)
+
+
+def _close_evening(p: Pack, d: date) -> None:
+    """The tables the 23:45 and 06:40 runs add (contract §13.3): T5 上櫃排行, T6 上櫃類股 (Forliosa's own),
+    T7 期貨三大法人, T8 上櫃三大法人 (estimated amounts). Each only once its data existed at the cut-off (TPEx closes
+    about 23:30, TAIFEX about 21:45), so the 15:40 pack has none of them."""
+    tpex = mc.load_day(p.db, "TPEX", d, p.cutoff, p.policy)
+    if tpex is not None and tpex.day == d and any(q.pct is not None for q in tpex.commons()):
+        p.datasets |= tpex.datasets
+        srcs = p.labels(tpex.datasets)
+        lists = mc.rule_lists(p.db, tpex)
+        p.table(B.table("T5_top10", f"上櫃市值前 10（{md(d)}）",
+                        [*B.STOCK_COLUMNS, ("mcap", "市值", "right", True)],
+                        [B.stock_row(q, {"mcap": B.cell(B.zhao_text(q.mcap) if q.mcap else "—")}) for q in lists.top10],
+                        rule="上櫃普通股，依收盤市值（收盤 × 已發行股數）", sources=[*srcs, label("rules")]))
+        p.table(B.table("T5_gainers", f"上櫃漲幅前 5（{md(d)}）" if lists.limit_up_many is None
+                        else f"上櫃漲停 {lists.limit_up_many} 家，其中市值最大的 5 檔（{md(d)}）", B.STOCK_COLUMNS,
+                        [B.stock_row(q) for q in lists.gainers], rule=lists.scope_rule,
+                        empty_text="範圍內沒有上漲的股票。", sources=srcs))
+        p.table(B.table("T5_losers", f"上櫃跌幅前 5（{md(d)}）" if lists.limit_down_many is None
+                        else f"上櫃跌停 {lists.limit_down_many} 家，其中市值最大的 5 檔（{md(d)}）", B.STOCK_COLUMNS,
+                        [B.stock_row(q) for q in lists.losers], rule=lists.scope_rule,
+                        empty_text="範圍內沒有下跌的股票。", sources=srcs))
+        secs = mc.otc_sectors(tpex)
+        p.table(B.table("T6", f"上櫃類股（Forliosa 依產業別計算，不是官方指數，{md(d)}）",
+                        [("name", "產業", "left", False), ("pct", "漲跌幅", "right", True),
+                         ("members", "家數", "right", True)],
+                        [{"cells": {"name": B.cell(s.name), "pct": B.cell(B.pct_text(s.pct), B.tone(s.pct)),
+                                    "members": B.cell(f"{s.members}")}} for s in secs],
+                        rule="上櫃普通股依產業別分組，以前一日市值加權；2 家以下的產業不列", fold_after=10,
+                        empty_text="上櫃類股還算不出來。", sources=[*srcs, label("rules")]))
+        inst = mc.otc_institutional(p.db, tpex, p.cutoff)
+        if inst is not None:
+            sums, per = inst
+            ds = p.labels(["tpex-openapi/institutional", *tpex.datasets])
+            p.datasets.add("tpex-openapi/institutional")
+
+            def amount(v: Decimal) -> dict[str, Any]:
+                return B.cell(f"{'買超' if v >= 0 else '賣超'} {B.yi_text(abs(v), 1)}", B.tone(v))
+
+            p.table(B.table("T8", f"上櫃三大法人買賣超（估算金額，{md(d)}）",
+                            [("who", "法人", "left", False), ("amount", "估算金額", "right", True)],
+                            [{"cells": {"who": B.cell(name), "amount": amount(sums[k])}}
+                             for k, name in (("foreign", "外資"), ("trust", "投信"), ("dealer", "自營商"),
+                                             ("total", "合計"))],
+                            rule="估算金額＝股數 × 收盤價；不是官方數字", sources=ds))
+            buys = sorted((x for x in per if x.amount > 0), key=lambda x: -x.amount)[:10]
+            sells = sorted((x for x in per if x.amount < 0), key=lambda x: x.amount)[:10]
+            for tid, title, rows in (("T8_buy", "上櫃三大法人買超前 10（估算金額）", buys),
+                                     ("T8_sell", "上櫃三大法人賣超前 10（估算金額）", sells)):
+                p.table(B.table(tid, f"{title}（{md(d)}）",
+                                [("stock", "股票", "left", False), ("amount", "估算金額", "right", True)],
+                                [{"cells": {"stock": B.cell(B.stock_label(x.name, x.symbol.split('.')[0])),
+                                            "amount": amount(x.amount)},
+                                  "href": B.STOCK_HREF.format(symbol=x.symbol)} for x in rows],
+                                rule="估算金額＝合計買賣超股數 × 收盤價", empty_text="沒有資料。", sources=ds))
+    rows7 = []
+    for investor in mc.INVESTORS:
+        series = mc.futures_oi_series(p.db, d, p.cutoff, investor, limit=2)
+        if not series or series[-1][0] != d:
+            continue
+        net = series[-1][1]
+        ch = net - series[-2][1] if len(series) > 1 else None
+        rows7.append({"cells": {"who": B.cell(investor),
+                                "net": B.cell(f"{'淨多' if net > 0 else '淨空'} {abs(net):,} 口", B.tone(net)),
+                                "change": B.cell(f"{ch:+,} 口" if ch is not None else "—", B.tone(ch))}})
+    if rows7 and p.ok("taifex-openapi/institutional_futures"):
+        p.datasets.add("taifex-openapi/institutional_futures")
+        p.table(B.table("T7", f"期貨三大法人：台指期淨未平倉（{md(d)}）",
+                        [("who", "法人", "left", False), ("net", "淨未平倉", "right", True),
+                         ("change", "較前一日", "right", True)], rows7,
+                        sources=p.labels(["taifex-openapi/institutional_futures"])))
 
 
 def _taiex_series(p: Pack, upto: date, since: date | None = None,

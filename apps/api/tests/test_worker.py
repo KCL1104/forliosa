@@ -314,3 +314,22 @@ def test_premarket_archive_runs_at_0645_on_trading_days_and_follows_its_switch(m
         assert "premarket_archive" not in {j.name for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
     finally:
         get_settings.cache_clear()
+
+
+def test_market_report_jobs_follow_their_switch(monkeypatch):
+    """市場報告: the state machine every minute in its own loop (only with MARKET_REPORTS_ENABLED); retention 04:40."""
+    from forliosa.config import get_settings
+    from forliosa.worker import Worker
+
+    names = {j.name: j for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+    assert "market_reports" not in names and "market_report_retention" in names
+    monkeypatch.setenv("MARKET_REPORTS_ENABLED", "true")
+    get_settings.cache_clear()
+    try:
+        jobs = {j.name: j for j in Worker(md=object()).jobs}  # type: ignore[arg-type]
+        assert jobs["market_reports"].background and not jobs["market_report_retention"].background
+        ret = jobs["market_report_retention"]
+        assert not ret.due(datetime(2026, 11, 17, 4, 39, tzinfo=TAIPEI), None)
+        assert ret.due(datetime(2026, 11, 17, 4, 41, tzinfo=TAIPEI), None)
+    finally:
+        get_settings.cache_clear()

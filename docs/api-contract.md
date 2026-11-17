@@ -1316,6 +1316,134 @@
 - **AI 收盤重點**：每個交易日一則、所有人看到同一則，不計入任何人的 AI 額度。每一點的 `sources` 都是模型實際收到的搜尋結果，而且至少一則的日期是那個交易日（或之後三天內）；通過檢查的不到兩點就整塊不提供。沒有金鑰、關掉網路搜尋或 `AI_MARKET_SUMMARY_ENABLED=false` 時一律 `null`。
 - 台指期近月是期交所「授權待確認」的資料集：`TAIFEX_CONDITIONAL_CONFIRMED=true` 才會出現在 `indices`。
 
+## 市場報告（2026-11-17）
+
+盤前重點、盤後重點、市場週報（產品負責人 2026-11-17 照建議）。每一種、每一天只有一份，**所有登入的人看到的內容都一樣**，沒有公開網址。
+內容界線 A1：只寫事實、已排定的事件、具名來源的說法、類股過去的比較、依規則挑出的個股；不寫 AI 自己的展望、方向、目標價、支撐壓力、買賣建議。
+每個數字都來自伺服器的資料包或已驗證的報導，每一句都有註腳；圖表只由伺服器從存檔畫。後端：`forliosa.reports`（`apps/api/CONTRACT_NOTES.md`「2026-11-17 市場報告」）。
+
+| kind | 名稱 | 出刊與推播（台北） |
+|---|---|---|
+| `premarket` | 盤前重點 | 台股交易日：06:55 資料版、AI 版目標 07:25、07:30 推播（AI 版 08:15 前出來就那時推，否則 08:15 推資料版）、08:40 截止 |
+| `close` | 盤後重點 | 台股交易日：14:10 資料版（每 10 分鐘更新到 15:40）、AI 版目標 15:55、16:00 推播（等到 17:30）、23:45 與隔天 06:40 補表（不推播） |
+| `weekly` | 市場週報 | 週日：16:30 資料版、AI 版目標 18:00、18:00 推播（等到 21:00）。回顧週一到週五，加上下週行事曆 |
+
+### 誰看得到
+
+- 都要登入（401）。報告沒有個人資料：授權查看別人資產（`X-Forliosa-View-As`）時，讀取照常以登入者本人回應；`POST /market/reports/seen` 是寫入，回 403 `read_only`。
+- `visibility="admin"` 的報告（盲測、試跑模式、CLI 回補）只有站方管理員（`ADMIN_EMAILS`）看得到，其他人一律 404「找不到這份報告」。
+- 站方把模式切到「對全站公開」（`public`）以後新建的報告才是 `public`。試跑期間一般使用者 `status.available=false`、市場頁不出現「報告」分頁、群組頻道看不到三個開關、不推播。
+- `MARKET_REPORTS_ENABLED=false`：`available:false`、清單空、單篇 404。
+
+### 端點
+
+| 方法 | 路徑 | 回應 |
+|---|---|---|
+| GET | `/market/reports/status` | `{available, mode, unread, latest: ReportSummary[]}`；`mode` 只有管理員看得到（`trial`／`public`／`paused`），其他人 `null`；`latest` 是每種最新一份 |
+| GET | `/market/reports?kind=&limit=20&cursor=` | `{items: ReportSummary[], next_cursor}`：新到舊，同一天依週報、盤後、盤前；`limit` 1–50；壞的游標 422 |
+| GET | `/market/reports/latest?kind=` | `MarketReport` 或 `null`（`kind` 省略＝任一種最新發布的） |
+| GET | `/market/reports/{id}?version=` | `MarketReport`（`version` 看舊版；盲測的 A／B／C 版本不從這裡給） |
+| POST | `/market/reports/seen` | 204：記下「看過了」 |
+
+`ReportSummary`：`{id, kind, kind_label, edition_date, edition_label, title, has_ai, published_at, corrected}`。
+
+**未讀**：最新一份看得到的報告 `first_published_at` 晚於 `seen` 的時間；從沒按過 `seen` 的人，只有 24 小時內發布的才算未讀。前端打開「報告」分頁或報告頁 1.2 秒後呼叫 `seen`（唯讀查看時不呼叫）。
+
+### `MarketReport`（數字是假的）
+
+```jsonc
+{
+  "id": "mrp_01J…", "kind": "close", "kind_label": "盤後重點",
+  "edition_date": "2026-11-16", "edition_label": "11/16（一）",          // 週報 "11/16–11/20 回顧"
+  "period": {"start": "2026-11-16", "end": "2026-11-16"}, "next_period": null,
+  "version": 2, "edition": "ai",                                          // data | ai | tables | correction
+  "has_ai": true,
+  "published_at": "2026-11-16T15:53:10+08:00", "first_published_at": "2026-11-16T14:10:05+08:00",
+  "as_of": "2026-11-16T15:40:00+08:00", "as_of_label": "資料截至 11/16 15:40",
+  "disclaimer_line": "AI 依公開資料與媒體報導整理，報告本文人人相同，不是投資建議。",   // 資料版：「依公開資料整理，…」
+  "title": "加權指數跌 6.03%，收 41,040.08 點", "title_origin": "ai",     // rules：規則產生的標題
+  "highlights": [{"sentences": [{"text": "加權指數收 41,040.08 點，跌 2,635.04 點（▼6.03%）。", "cites": [1]}]}],
+  "highlights_origin": "ai",
+  "numbers": [{"key": "taiex", "label": "加權指數", "value": "41,040.08", "change": "▼2,635.04（▼6.03%）", "tone": "fall",
+               "date_label": "11/16", "estimate": false, "note": null}],
+  "sections": [
+    {"key": "what_happened", "title": "今天發生什麼", "origin": "ai", "origin_label": "AI 依資料與報導整理",
+     "collapsed_mobile": false,
+     "blocks": [{"type": "text", "paragraphs": [{"sentences": [{"text": "〔中央社〕報導，外資賣超 1,234.5 億元。", "cites": [3]}]}]},
+                {"type": "chart", "chart": {"id": "G1", "kind": "line", "unit": "index", "…": "…"}, "caption": null,
+                 "chart_of_day": false}]},
+    {"key": "stocks", "title": "權值股與個股", "origin": "ai", "origin_label": "AI 依資料與報導整理", "collapsed_mobile": true,
+     "blocks": [{"type": "chart", "chart": {"id": "G3", "kind": "bars", "…": "…"}, "caption": null, "chart_of_day": false},
+                {"type": "table", "table": {"id": "T2_top10", "title": "市值前 10（11/16）", "rule": "上市普通股，依收盤市值…",
+                                            "columns": [], "rows": [], "fold_after": null, "empty_text": null,
+                                            "note": null, "source_labels": []}}]}
+  ],
+  "calendar": {"title": "盤後與下個交易日行事曆（11/16–11/17）", "groups": [{"date": "2026-11-17", "date_label": "11/17（二）",
+               "rows": [{"time_label": "13:30", "title": "…", "kind": "settlement", "kind_label": "結算日", "sectors": [],
+                         "symbol": null, "href": null, "url": null, "source_label": "…"}],
+               "folded": [{"label": "ETF 除息 25 檔", "count": 25, "rows": []}]}],
+               "empty_text": null, "source_labels": []},
+  "footnotes": [{"n": 3, "kind": "web", "label": "外資賣超千億", "outlet": "中央社", "url": "https://www.cna.com.tw/…",
+                 "date_label": "11/16 15:32"}],
+  "sources": {"data": ["臺灣證券交易所〈…〉（2026），依政府資料開放授權條款第 1 版"],
+              "web": [{"n": 3, "outlet": "中央社", "title": "外資賣超千億", "url": "https://…", "published_label": "11/16 15:32"}],
+              "disagreements": [{"text": "鉅亨網寫 179.62 億元，中央社寫 179.63 億元；本報告以中央社為準。"}],
+              "manual": ["美股休市、總經行事曆與美股財報日：Forliosa 自行整理，每列連回官方頁面"]},
+  "disclaimer_full": "這份報告由 AI 依公開資料與媒體報導整理，…",
+  "model_line": "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。",     // 沒有 AI 文字時 null
+  "corrections": [],                                                       // [{"at", "note": "已更正（11/18 09:10）：…"}]
+  "notes": [],                                                             // 例：官方加權指數尚未取得
+  "status_line": null,                                                     // 資料版：「AI 段落還在整理，這是只有資料的版本。」或「這一份沒有 AI 段落，只有資料。」
+  "is_demo": false
+}
+```
+
+- `Block` 的 `type`：`text`（`paragraphs`）、`items`（`[{title, meta, paragraphs}]`，例如「今天市場在看什麼」）、`chart`（`AiChart`，多了 `line`／`columns`／`bars` 三種）、
+  `table`（`TableSpec`）、`note`（空狀態或伺服器說明）。每一句只有 `text` 與 `cites`（註腳號碼）；畫面上不會出現資料包編號（F001、X003）、報導摘錄。
+- 段落順序：盤前 `overnight` 隔夜要聞、`evening` 昨晚才到的資料、`watch` 今天市場在看什麼、`charts` 圖；盤後 `what_happened`、`sectors`、`stocks`、`chips`、`tonight`、
+  `chart_of_day`、`otc`（23:45 起）；週報 `summary`、`market_week`、`returns`、`sectors_week`、`stocks_week`、`chips_week`、`global_week`、`last_week_review`、`themes`、`risks`、
+  `chart_of_day`。下週行事曆在最外層的 `calendar`。
+- 某一段的 AI 文字沒通過檢查時，一般使用者只看到那一段的圖與表（沒有就整段不出現）；`origin` 變 `data`。
+
+### 管理員（`ADMIN_EMAILS`；其他人 404，在驗證 body 之前；授權查看時 403）
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| GET | `/admin/market-reports/overview` | 模式、每種報告的撰寫設定（盲測中不寫模型）、本月花費／上限／層級、試跑花費／上限與進度、最近 20 次產生（揭曉前盲測的模型與花費是 `null`）、手動表狀態、專用金鑰 |
+| PUT | `/admin/market-reports/config` | `{mode?, writers?: {premarket?: {model, effort} \| null, …}}`；model 只能 `claude-opus-5-5`／`claude-sonnet-5-5`，effort `low`–`xhigh`；切到 `public` 時回應多 `notice` |
+| GET | `/admin/market-reports/trial` | 盲測的每一份：A／B／C 的狀態、是否準時、問題數、我的票（揭曉前沒有花費與模型） |
+| GET | `/admin/market-reports/{id}/variants/{A\|B\|C}` | 那個版本的管理員形式：每句多 `refs`、被刪的段多 `dropped: {reasons}`、`validation`；揭曉後多 `writer` |
+| PUT | `/admin/market-reports/{id}/vote` | `{preferred: "A"\|"B"\|"C", note?}` |
+| POST | `/admin/market-reports/trial/reveal` | `{force?}`；沒做完且沒有 force：409「盲測還沒做完（n/10 份日報、週報 0/1）。」回應：每種報告 × 設定的彙總（票數、違反資料政策、主體配錯、自己推的日期、被刪的段、準時率、平均花費與秒數、是否過關）與建議 |
+| POST | `/admin/market-reports/{id}/corrections` | `{note: 1–200 字, drop_sections?: [key]}`：新的一版 `edition="correction"`，頁首多「已更正（11/18 09:10）：…」，不推播 |
+| POST | `/admin/market-reports/rebuild-data` | `{kind, edition_date}`：重建資料版（不呼叫 AI；過去的日期是回補，只有管理員看得到） |
+| GET／PUT／DELETE | `/admin/market-calendar/nyse`（`/{date}`） | 美股休市與提早收盤：`{name, kind: closed\|early_close, close_time_et?, source_url（NYSE 官網）, verified}` |
+| GET／POST／DELETE | `/admin/market-calendar/macro`（`?from=&to=`、`/{id}`） | 總經行事曆：`{event_date, local_time?, tz, country, title, agency, official_url, sectors?, note?}`；網址只能是官方網站（422，`details.field="official_url"`） |
+| GET／POST／DELETE | `/admin/market-calendar/us-earnings`（`/{id}`） | 美股財報日：`{symbol, company, report_date, timing: bmo\|amc\|during\|unknown, time_et?, official_url?, sectors?, note?}`；同一檔同一天重複 409 |
+
+驗證失敗是 422，`error.details.field` 寫是哪個欄位。
+
+### 群組頻道的三個開關
+
+`GET/PUT/PATCH /groups/{id}/channels…` 的 Discord、Telegram 各多 `notify_premarket`（預設關）、`notify_close`（預設關）、`notify_weekly`（預設開，既有頻道也是開）；
+`Channels` 多 `market_reports_available`（報告對全站公開時才 true，前端才顯示三個開關）。只有群主能改。所有群組都能開（不分有沒有加值）。
+
+推播只有文字與連結（不帶圖）：
+
+```
+【盤前重點 11/18（三）】AI 依公開資料整理，報告本文人人相同，不是投資建議。
+・美股 ETF（美股 11/17 收盤）：SPY ▲0.42%、SMH ▼1.20%
+・…（出處見全文）
+昨日你的群組（11/17）
+當日報酬：小明 +1.2%
+全文與圖表：https://forliosa.trade/market/reports/mrp_…
+```
+
+- 盤前重點：有群組 AI 日報的群組（加值群組）在重點後面接「昨日你的群組」，規則和日報推播一樣（只算開了推播的成員，分享報酬率的人少於 2 位就沒有 AI 那一行）。
+  這種頻道的日報推播延到 08:20，盤前送出後標成已送（不重複）；盤前一直沒送時，日報 08:20 自己送。
+- 市場週報：頻道開了週報時，群組週報延到週日 21:30；18:00 的市場週報推播接上「你的群組上週（11/16–11/20）」，週報那一列標成已送。週報開關關著的頻道，群組週報照舊週六送。
+- 不推：更正、補表、盲測、回補的報告，以及任何個人化內容。Discord 1,900 字、Telegram 4,000 字以內（太長時先縮群組段落，再縮重點）。
+
 ## 討論串（2026-11-13）
 
 產品負責人的決定見 `PRODUCT.md`「討論與彈幕」。討論串有：**範圍**（公開／群組）、**公開暱稱**、**檢舉與站方管理**、**發言頻率限制**。

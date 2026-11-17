@@ -14,6 +14,7 @@ from forliosa.api.middleware import VIEW_AS_HEADER, OriginCheckMiddleware, ViewA
 from forliosa.api.routes import (
     accounts,
     admin,
+    admin_reports,
     ai,
     auth,
     briefings,
@@ -24,6 +25,7 @@ from forliosa.api.routes import (
     imports,
     market,
     market_page,
+    market_reports,
     portfolio,
     recurring,
     stock,
@@ -125,10 +127,11 @@ def create_app() -> FastAPI:
     def meta_market_status(db: Session = Depends(get_db)):
         return market_status(db)
 
-    for module in (users, auth, accounts, market, market_page, stock, derivatives, transactions, portfolio, watchlist,
-                   recurring, ai, briefings, delegations, groups, discussions, imports):
+    for module in (users, auth, accounts, market, market_page, market_reports, stock, derivatives, transactions,
+                   portfolio, watchlist, recurring, ai, briefings, delegations, groups, discussions, imports):
         api.include_router(module.router)
     api.include_router(discussions.admin_router)
     api.include_router(admin.router)  # the back office: overview, news takedown blocklist
+    api.include_router(admin_reports.router)  # the back office: 市場報告 (blind test, settings, hand-kept tables)
     app.include_router(api)
     return app
