@@ -1253,9 +1253,11 @@ class NewsTag(Base):
 
 
 class NewsTagState(Base):
-    """Whether a headline URL has been tagged: ``status`` done | failed | skipped (hidden: a blocked domain, a page that
-    is not news, a robot flash), the model and ``taxonomy_version`` that tagged it, ``attempts`` (a failed one is tried
-    again from ``retry_at`` until ``tagging.MAX_ATTEMPTS``). No content: the headline itself stays in news_articles."""
+    """Whether a headline URL has been tagged: ``status`` done | split | failed | skipped (hidden: a blocked domain, a
+    page that is not news, a robot flash), the model and ``taxonomy_version`` that tagged it, ``attempts`` (a failed one
+    is tried again from ``retry_at`` until ``tagging.MAX_ATTEMPTS``), ``batch_limit`` (``split``: its batch got an
+    unusable answer, so it goes again at once in a batch of at most this many; only a headline sent alone counts an
+    attempt). No content: the headline itself stays in news_articles."""
 
     __tablename__ = "news_tag_state"
 
@@ -1266,6 +1268,7 @@ class NewsTagState(Base):
     attempts: Mapped[int] = mapped_column(Integer, default=0)
     tagged_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
     retry_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
+    batch_limit: Mapped[int | None] = mapped_column(Integer, nullable=True)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
 
 

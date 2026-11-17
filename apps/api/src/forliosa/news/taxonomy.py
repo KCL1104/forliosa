@@ -18,11 +18,16 @@ Sectors
   stored as the code (``"24"``) so a tag joins the company profiles and the sector indices directly. Left out: 綜合
   (19), 其他業 (20), 管理股票 (80) and 存託憑證 (91) — they say nothing about what a story is about.
 * US: twelve GICS-like sectors (GICS itself is licensed), the eleven sectors plus semiconductors on their own (they
-  matter most to Taiwan's supply chain). :func:`us_sector_for_sic` maps an SEC SIC code onto them (approximate: SIC
-  puts Alphabet and Meta under 7370 services, GICS under communication services).
+  matter most to Taiwan's supply chain). :func:`us_sector` gives a company's: :data:`US_SECTOR_BY_TICKER` for the
+  companies the sector hints name and the large ones whose SEC SIC code says otherwise (SIC 7370 holds Alphabet and
+  Meta next to IT services, 7389 Visa and PayPal next to business services), else :func:`us_sector_for_sic`.
+  ``tests/news/test_tagging.py`` checks that every company a hint names gets that hint's sector, so the prompt never
+  says two things about one company.
 
 The prompt names the sector of each stock a headline is stored under (the Taiwan company's 官方產業別, a US company's
-SIC sector; :meth:`forliosa.news.tagging.Catalog.sector`); the model picks it when the story is about that company.
+:func:`us_sector`; :meth:`forliosa.news.tagging.Catalog.sector`); the model picks it when the story is about that
+company. :data:`THEMES_OF_SECTOR`: a headline given an industry's sector also gets that industry's theme (金融 for a
+bank's news), added by the server, so a search by theme finds what the model filed only under the sector.
 """
 
 from __future__ import annotations
@@ -97,21 +102,53 @@ THEMES: tuple[Tag, ...] = (
 _TW_SECTORS_LEFT_OUT = frozenset({"19", "20", "80", "91"})
 TW_SECTORS: tuple[Tag, ...] = tuple(Tag(code, label) for code, label in INDUSTRY_CODES.items()
                                     if code not in _TW_SECTORS_LEFT_OUT)
+# The companies each US sector's hint names: (ticker, name in the hint). They are all in US_SECTOR_BY_TICKER.
+US_SECTOR_EXAMPLES: dict[str, tuple[tuple[str, str], ...]] = {
+    "us_semis": (("NVDA", "Nvidia"), ("AMD", "AMD"), ("AVGO", "Broadcom"), ("MU", "Micron"),
+                 ("AMAT", "Applied Materials")),
+    "us_tech": (("AAPL", "Apple"), ("MSFT", "Microsoft"), ("ORCL", "Oracle"), ("DELL", "Dell")),
+    "us_comm": (("GOOGL", "Alphabet"), ("META", "Meta"), ("NFLX", "Netflix"), ("T", "AT&T")),
+    "us_consumer_disc": (("AMZN", "Amazon"), ("TSLA", "Tesla"), ("NKE", "Nike")),
+    "us_staples": (("WMT", "Walmart"), ("COST", "Costco"), ("KO", "Coca-Cola")),
+    "us_health": (("LLY", "Eli Lilly"), ("PFE", "Pfizer"), ("UNH", "UnitedHealth")),
+    "us_financials": (("JPM", "JPMorgan"), ("V", "Visa")),
+    "us_industrials": (("BA", "Boeing"), ("CAT", "Caterpillar")),
+    "us_energy": (("XOM", "Exxon Mobil"), ("CVX", "Chevron")),
+}
+
+
+def _us(sector_id: str, label: str, hint: str) -> Tag:
+    names = "、".join(name for _, name in US_SECTOR_EXAMPLES.get(sector_id, ()))
+    return Tag(sector_id, label, f"{hint}：{names}" if names else hint)
+
+
 US_SECTORS: tuple[Tag, ...] = (
-    Tag("us_semis", "美股半導體", "半導體與半導體設備：Nvidia、AMD、Broadcom、Micron、Applied Materials"),
-    Tag("us_tech", "美股科技", "軟體、電腦與硬體、IT 服務：Apple、Microsoft、Oracle、Dell"),
-    Tag("us_comm", "美股通訊服務", "網路平台、媒體、電信：Alphabet、Meta、Netflix、AT&T"),
-    Tag("us_consumer_disc", "美股非必需消費", "電商、汽車、零售、餐飲、旅遊：Amazon、Tesla、Nike"),
-    Tag("us_staples", "美股必需消費", "食品、飲料、日用品、量販：Walmart、Costco、Coca-Cola"),
-    Tag("us_health", "美股醫療保健", "藥廠、生技、醫材、醫療服務：Eli Lilly、Pfizer"),
-    Tag("us_financials", "美股金融", "銀行、券商、保險、支付：JPMorgan、Visa"),
-    Tag("us_industrials", "美股工業", "航太國防、機械、運輸、工程：Boeing、Caterpillar"),
-    Tag("us_energy", "美股能源", "石油、天然氣：Exxon Mobil、Chevron"),
-    Tag("us_materials", "美股原物料", "化工、金屬、礦業"),
-    Tag("us_utilities", "美股公用事業", "電力、天然氣、水"),
-    Tag("us_real_estate", "美股房地產", "REITs、不動產"),
+    _us("us_semis", "美股半導體", "半導體與半導體設備"),
+    _us("us_tech", "美股科技", "軟體、電腦與硬體、IT 服務"),
+    _us("us_comm", "美股通訊服務", "網路平台、媒體、電信、遊戲"),
+    _us("us_consumer_disc", "美股非必需消費", "電商、汽車、零售、餐飲、旅遊"),
+    _us("us_staples", "美股必需消費", "食品、飲料、日用品、量販"),
+    _us("us_health", "美股醫療保健", "藥廠、生技、醫材、醫療服務與健保、實驗儀器"),
+    _us("us_financials", "美股金融", "銀行、券商、保險、支付"),
+    _us("us_industrials", "美股工業", "航太國防、機械、運輸、工程"),
+    _us("us_energy", "美股能源", "石油、天然氣"),
+    _us("us_materials", "美股原物料", "化工、金屬、礦業"),
+    _us("us_utilities", "美股公用事業", "電力、天然氣、水"),
+    _us("us_real_estate", "美股房地產", "REITs、不動產"),
 )
 SECTORS: tuple[Tag, ...] = (*TW_SECTORS, *US_SECTORS)
+
+# A headline given one of these sectors also gets the industry's theme (the hints say 「金融股的新聞都選」, but the
+# model sometimes files a bank's outage only under 事故／資安 and the sector).
+THEMES_OF_SECTOR: dict[str, str] = {
+    "17": "finance", "us_financials": "finance",
+    "15": "shipping",
+    "22": "biotech", "us_health": "biotech",
+    "14": "property", "us_real_estate": "property",
+    "23": "oil_energy", "us_energy": "oil_energy",
+    "12": "ev_auto",
+    "35": "green_energy",
+}
 
 THEME_BY_ID = {t.id: t for t in THEMES}
 SECTOR_BY_ID = {t.id: t for t in SECTORS}
@@ -163,7 +200,12 @@ def tw_sector_for_industry(code: str | None = None, label: str | None = None) ->
 _SIC_SECTORS: tuple[tuple[int, int, str], ...] = (
     (3674, 3674, "us_semis"),
     (2830, 2836, "us_health"), (3841, 3851, "us_health"), (5122, 5122, "us_health"), (8000, 8099, "us_health"),
+    (6324, 6324, "us_health"),  # hospital & medical service plans: UnitedHealth, Elevance, Cigna
+    (3826, 3826, "us_health"),  # laboratory analytical instruments: Thermo Fisher, Agilent, Waters
     (2840, 2844, "us_staples"), (5400, 5499, "us_staples"), (5912, 5912, "us_staples"),
+    (5331, 5331, "us_staples"), (5399, 5399, "us_staples"),  # variety / general merchandise: Walmart, Costco, Target
+    (3021, 3021, "us_consumer_disc"),  # footwear: Nike, Crocs
+    (4700, 4700, "us_consumer_disc"), (4724, 4724, "us_consumer_disc"),  # travel: Booking, Expedia
     (1300, 1399, "us_energy"), (2900, 2999, "us_energy"),
     (3570, 3579, "us_tech"), (3600, 3699, "us_tech"), (3820, 3829, "us_tech"), (7370, 7379, "us_tech"),
     (4800, 4899, "us_comm"), (2700, 2799, "us_comm"), (7800, 7899, "us_comm"),
@@ -190,3 +232,24 @@ def us_sector_for_sic(sic: str | int | None) -> str | None:
     except (TypeError, ValueError):
         return None
     return next((sector for lo, hi, sector in _SIC_SECTORS if lo <= n <= hi), None)
+
+
+# Companies whose SIC code puts them in another sector than the vocabulary's (GICS-like) one: the companies the hints
+# name, and the large ones where SIC and GICS disagree (interactive media and games in 7370 / 7372, payments in 7374 /
+# 7389, health plans and lab tools, discount stores, travel sites, equipment makers outside 3674).
+US_SECTOR_BY_TICKER: dict[str, str] = {
+    **{ticker: sector for sector, examples in US_SECTOR_EXAMPLES.items() for ticker, _ in examples},
+    **dict.fromkeys(("GOOG", "DJT", "SNAP", "PINS", "RDDT", "DIS", "EA", "TTWO", "RBLX", "MTCH", "WBD"), "us_comm"),
+    **dict.fromkeys(("MA", "PYPL", "FI", "FIS", "GPN", "XYZ", "COIN", "AXP"), "us_financials"),
+    **dict.fromkeys(("ELV", "CI", "HUM", "CNC", "MOH", "TMO", "DHR", "A", "WAT", "IQV"), "us_health"),
+    **dict.fromkeys(("TGT", "DG", "DLTR"), "us_staples"),
+    **dict.fromkeys(("BKNG", "EXPE", "ABNB", "DASH", "EBAY"), "us_consumer_disc"),
+    **dict.fromkeys(("LRCX", "KLAC", "TER", "ASML", "TSM"), "us_semis"),
+    **dict.fromkeys(("ACN", "IBM"), "us_tech"),
+    **dict.fromkeys(("UBER", "LYFT", "ADP", "PAYX"), "us_industrials"),
+}
+
+
+def us_sector(ticker: str | None, sic: str | int | None = None) -> str | None:
+    """A US company's sector id: :data:`US_SECTOR_BY_TICKER` first, else its SIC code's."""
+    return US_SECTOR_BY_TICKER.get((ticker or "").upper()) or us_sector_for_sic(sic)

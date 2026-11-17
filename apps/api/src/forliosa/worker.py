@@ -67,7 +67,8 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   (``Job.background``): a batch can take most of the 45 minutes and must not hold up the other jobs.
 * ``news_tagging`` — every ``NEWS_TAGGING_MINUTES`` (5; off with ``NEWS_TAGGING_ENABLED=false``): themes, sectors and
   related stocks for the headlines stored since the last run (``forliosa.news.tagging``; 產品負責人 2026-11-17), once
-  per URL, oldest first, up to 4 requests of 50 headlines to Claude Haiku; stopped for the month once
+  per URL, oldest first, up to 4 requests of 50 headlines to Claude Haiku; fewer than ``NEWS_TAGGING_MIN_BATCH`` (20)
+  new headlines wait until the oldest was stored ``NEWS_TAGGING_MAX_WAIT_MINUTES`` (30) ago; stopped for the month once
   ``NEWS_TAGGING_MONTHLY_BUDGET_USD`` (US$3) is spent. Its own loop: it never waits for a news batch, and a failure only
   leaves headlines untagged.
 

@@ -2741,15 +2741,26 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
     硬塞進營收公告、大盤行情或雲端）；營收公告、人事、個股異動、資金流向的範圍寫得更窄（「標題寫到股價」才是個股異動、勞資不算人事）。
   - **類股**：台股用證交所／櫃買的官方**產業別**（`company_profiles.industry_code`、`opendata.INDUSTRY_CODES`），存代號（`"24"`＝半導體業），
     可以直接和公司資料、類股指數對；不收綜合（19）、其他業（20）、管理股票（80）、存託憑證（91）。美股用 12 個類 GICS 類股（GICS 本身要
-    授權）：美股半導體、科技、通訊服務、非必需消費、必需消費、醫療保健、金融、工業、能源、原物料、公用事業、房地產（`us_semis` …），
-    `us_sector_for_sic` 把 SEC 的 SIC 代碼對到這 12 類（近似：SIC 把 Alphabet、Meta 放在 7370 服務業，GICS 是通訊服務）。
+    授權）：美股半導體、科技、通訊服務、非必需消費、必需消費、醫療保健、金融、工業、能源、原物料、公用事業、房地產（`us_semis` …）。
+    一家美國公司的類股是 `taxonomy.us_sector`：先查 `US_SECTOR_BY_TICKER`（類股說明裡點名的公司，加上 SIC 和 GICS 對不上的大型股：
+    Alphabet、Meta、Trump Media 等在 SIC 7370，Visa、Mastercard、PayPal 在 7389，UnitedHealth 在 6324，Thermo Fisher 在 3826，
+    Walmart、Costco、Target 在 5331，Nike 在 3021，Booking 在 4700），查不到才用 `us_sector_for_sic`（SIC 範圍也照這些修過）。
+    測試檢查類股說明點名的每一家都對到那個類股，提示裡括號寫的類股和說明不會互相矛盾。
+  - **主題由類股補上**（`THEMES_OF_SECTOR`）：類股是金融保險業／美股金融的一律加「金融」、航運業加「航運」、生技醫療業／美股醫療保健加
+    「生技醫療」、建材營造業／美股房地產加「營建／房市」、油電燃氣業／美股能源加「油價／能源」、汽車工業加「電動車」、綠能環保加
+    「綠能／儲能」。原本只寫在提示裡（「金融股的新聞都選」），模型有時不照做（摩根大通的當機只標事故／資安和美股金融），用主題找就漏掉。
+    補上的主題不算在模型的 3 個裡。
   - **相關股票**：最多 5 檔，必須是商品清單裡有的台股或美股，而且模型給的名稱要和那個代號的名稱對得上（台股簡稱、目錄別名、公司資料的
     簡稱與英文簡稱、SEC 名稱；包含關係也算，台積／台積電）；代號錯但名稱剛好等於一檔股票的名稱時用那一檔（同一個市場內：「聯合」配
-    UAL 不會變成台股的聯合）。這則新聞本來就歸在底下的股票不列。關係：`mentioned`（標題點名，老闆的名字也算）、`supply_chain`（上下游）、
+    UAL 不會變成台股的聯合）。只靠包含關係對上時，先看同一個市場有沒有更貼切的股票：名稱剛好等於另一檔（南亞科配 1303 南亞 → 2408
+    南亞科；台塑化配 1301 → 6505；中華電配 2204 中華 → 2412；中鋼構配 2002 → 2013），或另一檔的名稱被包含得更長（中華電信配 2204 →
+    2412 中華電）。台灣同一個集團的公司名稱開頭相同，原本這種錯代號會照收。
+    這則新聞本來就歸在底下的股票不列。關係：`mentioned`（標題點名，老闆的名字也算）、`supply_chain`（上下游）、
     `peer`（競爭對手）；後兩種只在標題講訂單、供貨或競爭、而且很確定時才列。
 - **資料表（migration `0024_news_tags`）**：`news_tags`（`url_key`, `kind` theme|sector|symbol, `value`, `relation`；主鍵三欄，索引
-  `(kind, value)`）與 `news_tag_state`（`url_key` 主鍵, `status` done|failed|skipped, `model`, `taxonomy_version`, `attempts`, `tagged_at`,
-  `retry_at`, `updated_at`）；`news_articles` 加 `url_key` 索引（join 用）。PostgreSQL 與 SQLite 都一樣。revision id 用 `0024_news_tags`
+  `(kind, value)`）與 `news_tag_state`（`url_key` 主鍵, `status` done|split|failed|skipped, `model`, `taxonomy_version`, `attempts`,
+  `tagged_at`, `retry_at`, `batch_limit`, `updated_at`）；
+  `news_articles` 加 `url_key` 索引（join 用）。PostgreSQL 與 SQLite 都一樣。revision id 用 `0024_news_tags`
   不用 `0024`：同時進行的分支（events-past-fix、us-news-bulk）可能各自加一個 `0024`，id 不同就不會撞；合併後 `test_single_head` 會指出
   要把哪一個的 `down_revision` 接到另一個後面。
 - **工作（worker `news_tagging`，每 `NEWS_TAGGING_MINUTES`（5）分鐘，自己的迴圈）**：`news.tagging.run`：最近 `NEWS_TAGGING_DAYS`（7）天、
@@ -2758,20 +2769,35 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   `skipped`。不改新聞入庫的程式（`news/service.py`、`gdelt_bulk.py` 沒有動）：入庫幾分鐘後就貼好。
   - **請求**：`AI_MODEL_NEWS_TAGGING`（預設 `AI_MODEL`＝`claude-haiku-5-5`）、`output_config.effort: "low"`、`output_config.format`
     （JSON schema，主題與類股是 enum；Haiku 5.5 支援結構化輸出，沒有用強制 `tool_choice`）、adaptive thinking（預設；實測關掉 thinking 省
-    約 35% 但錯得多，見下）、系統提示加 `cache_control`（約 5.9K token；同一次執行的後續批次固定用第一個請求的金鑰槽，讀到快取）。
-    不送 `temperature`。`stop_reason` 是 `refusal`／`max_tokens`、回的不是 JSON 都當失敗。
-  - **失敗與重試**：一批失敗（回答不能用、400 等）時這批每一則算一次嘗試，`RETRY_AFTER`（15 分鐘）× 次數後再試，最多 `MAX_ATTEMPTS`（3）次；
-    回答裡漏掉的那幾則同樣算一次。金鑰忙碌、429／529／5xx、連不上、401／403（`KeysBusy`、`NoKeyAvailable`、可換金鑰的錯誤）只停下這次執行、
-    不算嘗試。失敗只會讓新聞暫時沒有標籤，不影響入庫。
+    約 35% 但錯得多，見下）。不送 `temperature`。`stop_reason` 是 `refusal`／`max_tokens`、回的不是 JSON 都當「回答不能用」。
+  - **累積成大批再送（審查修正）**：每個請求都有固定成本（約 5.9K token 的系統提示、模型的 thinking：5–7 則的小請求每 100 則要
+    US$0.017–0.021，50 則的只要 US$0.006–0.012）。所以新標題不到 `NEWS_TAGGING_MIN_BATCH`（20）則時先不送，等最舊的一則存進來
+    `NEWS_TAGGING_MAX_WAIT_MINUTES`（30，最多 55）分鐘後才送；重試和切開的批次不等。系統提示的快取改成 1 小時（`ttl: "1h"`，寫入 2 倍、
+    讀取 0.1 倍；原本 5 分鐘的快取在兩次執行之間一定過期，每個請求都重寫一次），而且每次執行從上一個標籤請求用的金鑰槽開始（快取依
+    workspace 分開；原本依月花費挑槽，三個槽輪流，快取永遠讀不到），那個槽在冷卻時才換。`pricing` 也改成 1 小時快取的寫入算 2 倍
+    （`usage.cache_creation.ephemeral_1h_input_tokens`）。
+  - **回答不能用時切開重送（審查修正）**：一批（超過一則）的回答不能用時，不算這批任何一則的嘗試，改成 `status = "split"`、
+    `batch_limit` 為一半，立刻（同一次或下一次執行）以較小的批次再送，一直切到出問題的那一則單獨送出；只有單獨送還不能用的那一則
+    算一次嘗試，`RETRY_AFTER`（15 分鐘）× 次數後再試，最多 `MAX_ATTEMPTS`（3）次。單獨送被拒答（`refusal`）就直接放棄：同一個請求再送
+    一樣會被拒（Haiku 5.5 的安全分類器沒有伺服器端備援，skill 文件說不要原封不動重送）。原本一則被拒的標題會讓同批 49 則一起重試三次後
+    永久放棄。截斷（`max_tokens`）的批次也是切小就好。回答裡漏掉的那幾則照舊算一次嘗試。
+  - **請求本身的錯誤不算嘗試（審查修正）**：模型名稱錯（404）、參數或 schema 模型不收（400）等跟哪一則新聞無關的錯誤，和金鑰忙碌、
+    429／529／5xx、連不上、401／403 一樣，只停下這次執行、不算嘗試；log 是 WARNING，同一種錯誤每小時最多一次（只寫狀態碼與錯誤類型）。
+    原本這種錯誤每 5 分鐘燒掉 50 則的嘗試，一兩個小時內整個視窗的新聞都放棄，修好設定也救不回來。萬一真的有某一則標題造成 400
+    （想不到實際的例子），標籤會停在那裡，每小時一次的 WARNING 會一直出現。
+  - **指令 `retry-failed`**：`uv run python -m forliosa.news.tagging retry-failed` 把所有 `failed` 的嘗試次數歸零，下一次執行再送。
+  - 失敗只會讓新聞暫時沒有標籤，不影響入庫。
   - **預算**：`ai_usage.feature = "news_tagging"`（`user_id` NULL，不算任何人的額度）。這個 UTC 月份的估計花費加 US$0.01 超過
     `NEWS_TAGGING_MONTHLY_BUDGET_USD`（3）就停到下個月 1 日，log 只寫一次（WARNING）；設 0＝不貼。`NEWS_TAGGING_ENABLED=false`：沒有這個工作。
   - **保存**：網址不在 `news_articles` 了（30 天保存期限、下架）的標籤與狀態，每次執行時刪掉。詞彙改版（`TAXONOMY_VERSION` 加一）時，視窗內
     的新聞會依舊到新重新貼過，舊標籤整組換掉。
-  - **指令**：`uv run python -m forliosa.news.tagging run`（跑一次）、`… status`（各狀態數量、視窗內還沒貼的、放棄的、這個月花費）。
+  - **指令**：`uv run python -m forliosa.news.tagging run`（跑一次）、`… status`（各狀態數量、視窗內還沒貼的、放棄的、這個月花費）、
+    `… retry-failed`（見上）。
 - **讀取（`news.tags`）**：`tags_for_urls`（`get_news` 用）、`search(theme, sector, symbol, keyword, days)`（`search_news` 用；股票同時找
   「歸在它底下」與「被標成相關」的；關鍵字不分大小寫、`%`／`_` 會跳脫）、`by_topic(kind, since, until, per_group)`（給之後的盤前／盤後／
   週報：依主題或類股分組，則數多的在前，每組附最新幾則）。都套用和個股頁一樣的篩選（下架、非新聞、機器人快訊、資料政策）與去重，
-  只顯示目前詞彙裡的 id。
+  只顯示目前詞彙裡的 id。近似標題的去重要兩兩比對，所以只拿最新的幾則去比（不夠才加倍）；`by_topic` 的 `count` 是「不同網址、標題
+  完全相同的算一則」的則數，不做兩兩比對（審查修正：原本整組兩兩比對，一組 1,000 則要 8 秒、2,000 則 30 秒；現在和則數成正比）。
 - **AI 工具**：
   - `get_news`：媒體標題有標籤時，`search_result` 多一個第二段文字「主題：…；類股：…；相關：…」（第一段標題文字不變，引用的還是標題）。
     公告沒有標籤。工具說明：標籤是分類器從標題判斷的，只用來分組或挑新聞，不是事實，不要照抄。
@@ -2794,18 +2820,28 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   - **調整過程**：第 1 次把「歸在」的股票類股自動加上去，結果誤判的列全被標成鋼鐵、生技、塑膠…，改成類股一律由模型判斷（提示裡寫出每一檔
     的產業別，並說明歸在的股票可能比錯）；第 3 次試關掉 thinking：便宜約 35%，但主題錯得明顯多（併購標在台積電合約、勞資標成人事、
     當機標成非必需消費），所以維持 adaptive。
-  - 每月估計：一天 500 則約 US$0.9／月、1,500 則約 US$2.7／月（上限 US$3，到了會停並寫 log；量大時調高 `NEWS_TAGGING_MONTHLY_BUDGET_USD`）。
-- **設定**：`NEWS_TAGGING_ENABLED`（true）、`NEWS_TAGGING_MINUTES`（5）、`NEWS_TAGGING_MONTHLY_BUDGET_USD`（3）、`NEWS_TAGGING_BATCH_SIZE`
-  （50，最多 50）、`NEWS_TAGGING_MAX_BATCHES`（4）、`NEWS_TAGGING_DAYS`（7，最多 90）、`AI_MODEL_NEWS_TAGGING`（空＝`AI_MODEL`）。只有 worker 用。
+  - **每月估計（審查後重算）**：原本寫的「每 100 則 US$0.004–0.008、一天 500 則約 US$0.9／月、1,500 則約 US$2.7／月」偏低：只算了大批次，
+    沒算每個請求的固定成本，而且第 4 次（輸出 2K token）剛好想得少。實測一個 50 則的請求 US$0.003–0.006（輸出 5K–9K token，每 100 則
+    US$0.006–0.012），5–7 則的小請求每 100 則 US$0.017–0.021。照現在的做法（滿 20 則或等 30 分鐘才送、快取 1 小時），每天約 40–64 個請求，
+    每個固定約 1,000–1,650 個輸出 token 加讀快取，每則約 90–150 個輸出 token：**一天 500 則約 US$1.7–2.5／月、1,000 則約 US$2.7–4.1／月、
+    1,500 則約 US$3.7–5.7／月**。US$3 的上限大約夠一天 700–1,000 則；到了會停到下個月並寫 log，量大時調高
+    `NEWS_TAGGING_MONTHLY_BUDGET_USD`。
+- **設定**：`NEWS_TAGGING_ENABLED`（true）、`NEWS_TAGGING_MINUTES`（5）、`NEWS_TAGGING_MIN_BATCH`（20）、`NEWS_TAGGING_MAX_WAIT_MINUTES`
+  （30，最多 55）、`NEWS_TAGGING_MONTHLY_BUDGET_USD`（3）、`NEWS_TAGGING_BATCH_SIZE`（50，最多 50）、`NEWS_TAGGING_MAX_BATCHES`（4）、
+  `NEWS_TAGGING_DAYS`（7，最多 90）、`AI_MODEL_NEWS_TAGGING`（空＝`AI_MODEL`）。只有 worker 用。
 - **測試**：`tests/news/test_tagging.py`（假的 Messages API）：詞彙與 SIC 對照、請求形狀（結構化輸出、effort、快取、沒有 temperature）、
   清單外的標籤丟掉與上限、相關股票的代號／名稱檢查與上限、同網址只貼一次、批次與最舊先、每次最多幾批、隱藏的列不送、壞回答與重試上限、
-  拒答／截斷、漏掉的 id、金鑰忙碌不算嘗試、400 算一次並停止、用量紀錄與月預算（log 一次、下個月恢復）、預算 0、關閉設定與 worker 工作、
+  拒答／截斷、漏掉的 id、金鑰忙碌不算嘗試、用量紀錄與月預算（log 一次、下個月恢復）、預算 0、關閉設定與 worker 工作、
   沒有金鑰、詞彙改版重貼與標籤跟著新聞刪除、`search` 各種篩選與天數、隱藏與重複不出現、`by_topic`、`search_news` 工具、`get_news` 的標籤、
-  `status`；`tests/test_migrations.py` 的 `0024_news_tags` 升降級。
+  `status`；審查修正：一則被拒的標題只放棄它自己（120 則裡 119 則貼好，被拒的批次依序是 50、25、13、7、4、2、1 則）、截斷的批次切小、
+  請求層級的 404／400 不算嘗試且每小時只警告一次、`retry-failed`、少量新標題先累積、跨執行沿用同一個金鑰槽、1 小時快取的價格、
+  集團名稱（南亞科／南亞等）的代號檢查、類股說明點名的公司都對到那個類股、SIC 修正、類股補主題、`by_topic` 大組不做兩兩比對；
+  `tests/test_migrations.py` 的 `0024_news_tags` 升降級（含 `batch_limit`）。
 
 ### 待確認（新聞標籤）
 
-1. 每天實際有多少則新聞要貼（決定月預算夠不夠）：上線一週後看 `python -m forliosa.news.tagging status` 與 `ai_usage`。
+1. 每天實際有多少則新聞要貼（決定月預算夠不夠：US$3 約夠一天 700–1,000 則）：上線一週後看 `python -m forliosa.news.tagging status` 與
+   `ai_usage`。
 2. 入庫比錯的非財經新聞（約 1/3）現在只是沒有標籤，個股頁照樣顯示；要不要用「沒有任何標籤」當作入庫的第二道篩選，等入庫分支一起看。
 3. 管理後台總覽沒有列標籤的狀態與花費（`ai_usage.feature = 'news_tagging'` 查得到）。
 4. 主題清單已經 40 個（任務說 25–40）；再加主題時考慮拿掉一個或合併。

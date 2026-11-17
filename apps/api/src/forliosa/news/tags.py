@@ -8,8 +8,10 @@
 
 Every result passes the same filters as the stock page (:func:`forliosa.news.service.shown`: blocked domains, pages
 that are not news, robot flashes, sources the data policy does not serve) and is de-duplicated (same URL or
-near-identical title). Only ids of the current vocabulary are shown; untagged headlines are still found by stock and
-keyword. Headlines are metadata only (title, outlet, time, link).
+near-identical title). Near-identical titles take a pairwise comparison (:func:`forliosa.news.normalize.dedupe`), so
+it only ever looks at the newest headlines it needs (:func:`_newest`), never at a whole week's group. Only ids of the
+current vocabulary are shown; untagged headlines are still found by stock and keyword. Headlines are metadata only
+(title, outlet, time, link).
 """
 
 from __future__ import annotations
@@ -26,7 +28,7 @@ from forliosa.config import Settings, get_settings
 from forliosa.marketdata.service import MarketData
 from forliosa.models import NewsArticle, NewsTag
 from forliosa.news import taxonomy as tx
-from forliosa.news.normalize import Headline, dedupe, url_key
+from forliosa.news.normalize import Headline, dedupe, title_key, url_key
 from forliosa.timeutil import iso_taipei, now_utc
 
 MAX_DAYS = 90
@@ -106,32 +108,71 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo is not None else dt.replace(tzinfo=UTC)
 
 
-def _items(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings, limit: int
-           ) -> list[dict[str, Any]]:
-    """Article rows (newest first) -> one item per story: shown ones only, de-duplicated, with their tags."""
-    from forliosa.news.service import SOURCE_INFO, blocked_domains, shown
+@dataclass
+class _Shown:
+    """The shown headlines of some article rows: one per URL, with the rows each URL is stored under."""
+
+    heads: dict[str, Headline]  # url_key -> headline (shown ones only)
+    groups: dict[str, list[NewsArticle]]  # url_key -> its rows
+    key_of: dict[str, str]  # headline url -> url_key
+
+
+def _shown(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings) -> _Shown:
+    from forliosa.news.service import blocked_domains, shown
 
     blocked = blocked_domains(db, settings)
     groups: dict[str, list[NewsArticle]] = {}
     for r in rows:
         groups.setdefault(r.url_key, []).append(r)
-    heads: list[Headline] = []
+    heads: dict[str, Headline] = {}
     key_of: dict[str, str] = {}
     for key, group in groups.items():
         r = group[0]
         h = Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
                      source=r.source, date_only=bool(r.date_only))
         if shown(h, md.policy, blocked):
-            heads.append(h)
+            heads[key] = h
             key_of[h.url] = key
-    heads = dedupe(heads)
-    heads.sort(key=lambda h: h.published_at, reverse=True)
-    heads = heads[:limit]
-    tags = tags_for(db, (key_of[h.url] for h in heads))
+    return _Shown(heads, groups, key_of)
+
+
+def _newest(heads: Sequence[Headline], limit: int) -> list[Headline]:
+    """The newest ``limit`` stories of ``heads``, newest first, near-identical titles merged. ``dedupe`` compares
+    every pair, so it gets only the newest few times ``limit`` headlines, more only when those merge into fewer than
+    ``limit`` stories (a story copied many times: its copies merge in a single pass)."""
+    ordered = sorted(heads, key=lambda h: h.published_at, reverse=True)
+    window = max(limit * 3, 10)
+    while True:
+        out = dedupe(ordered[:window])
+        if len(out) >= limit or window >= len(ordered):
+            return out[:limit]
+        window *= 2
+
+
+def _story_count(heads: Iterable[Headline]) -> int:
+    """How many stories: one per URL, the same title (title_key) counted once (no pairwise comparison)."""
+    seen: set[str] = set()
+    n = 0
+    for h in heads:
+        k = title_key(h.title)
+        if not k:
+            n += 1
+        elif k not in seen:
+            seen.add(k)
+            n += 1
+    return n
+
+
+def _render(db: Session, md: MarketData, heads: Sequence[Headline], found: _Shown) -> list[dict[str, Any]]:
+    """Headlines -> items with the stocks they are stored under and their tags."""
+    from forliosa.news.service import SOURCE_INFO
+
+    groups = found.groups
+    tags = tags_for(db, (found.key_of[h.url] for h in heads))
     master = md.master()
     out = []
     for h in heads:
-        key = key_of[h.url]
+        key = found.key_of[h.url]
         ts = tags.get(key, TagSet())
         stored = list(dict.fromkeys(r.symbol for r in groups[key]))
         item: dict[str, Any] = {
@@ -147,6 +188,13 @@ def _items(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: S
         item["tag_note"] = ts.note(md)
         out.append(item)
     return out
+
+
+def _items(db: Session, md: MarketData, rows: Sequence[NewsArticle], settings: Settings, limit: int
+           ) -> list[dict[str, Any]]:
+    """Article rows -> the newest ``limit`` stories: shown ones only, de-duplicated, with their tags."""
+    found = _shown(db, md, rows, settings)
+    return _render(db, md, _newest(list(found.heads.values()), limit), found)
 
 
 def _escape_like(text: str) -> str:
@@ -191,9 +239,10 @@ def search(db: Session, md: MarketData, *, theme: str | None = None, sector: str
 def by_topic(db: Session, md: MarketData, kind: Literal["theme", "sector"], since: datetime, until: datetime, *,
              per_group: int = 5, settings: Settings | None = None) -> list[dict[str, Any]]:
     """Headlines published in ``[since, until)`` grouped by their themes or sectors: ``[{id, label, count, items}]``,
-    the most headlines first (then the vocabulary's order); ``count`` is the number of distinct stories (shown, after
-    de-duplication), ``items`` the newest ``per_group`` of them (see :func:`search` for an item's fields). A headline
-    with two themes counts in both."""
+    the most headlines first (then the vocabulary's order); ``count`` is the number of distinct stories (shown; one
+    per URL, the same title counted once), ``items`` the newest ``per_group`` of them, near-identical titles merged
+    (see :func:`search` for an item's fields). A headline with two themes counts in both. Linear in the number of
+    headlines: a week of a busy theme (thousands) takes well under a second."""
     settings = settings or get_settings()
     if not settings.news_enabled:
         return []
@@ -214,11 +263,12 @@ def by_topic(db: Session, md: MarketData, kind: Literal["theme", "sector"], sinc
         rows += db.scalars(select(NewsArticle).where(NewsArticle.url_key.in_(all_keys[i:i + 500]),
                                                      NewsArticle.published_at >= since,
                                                      NewsArticle.published_at < until))
-    rows.sort(key=lambda r: _aware(r.published_at), reverse=True)
+    found = _shown(db, md, rows, settings)  # once for every group
     out = []
     for value, keys in keys_by_value.items():
-        items = _items(db, md, [r for r in rows if r.url_key in keys], settings, limit=len(keys))
-        if items:
-            out.append({"id": value, "label": label(value), "count": len(items), "items": items[:per_group]})
+        heads = [found.heads[k] for k in keys if k in found.heads]
+        if heads:
+            out.append({"id": value, "label": label(value), "count": _story_count(heads),
+                        "items": _render(db, md, _newest(heads, per_group), found)})
     out.sort(key=lambda g: (-g["count"], order.get(g["id"], 999)))
     return out

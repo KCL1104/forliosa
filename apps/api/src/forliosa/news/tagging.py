@@ -19,25 +19,37 @@ The job (worker ``news_tagging``, every ``NEWS_TAGGING_MINUTES``; ``python -m fo
 --------------------------------------------------------------------------------------------------------------
 * Up to ``NEWS_TAGGING_MAX_BATCHES`` requests of up to ``NEWS_TAGGING_BATCH_SIZE`` (50) headlines, each answered in a
   JSON schema whose enums are the vocabulary of :mod:`forliosa.news.taxonomy` (structured outputs). The model is
-  ``AI_MODEL_NEWS_TAGGING`` (default ``AI_MODEL``: Claude Haiku 5.5) at effort ``low``; the system prompt is cached.
+  ``AI_MODEL_NEWS_TAGGING`` (default ``AI_MODEL``: Claude Haiku 5.5) at effort ``low``.
+* Every request has a fixed cost (the ~5.9K-token system prompt and the model's thinking), so a trickle is batched:
+  with fewer than ``NEWS_TAGGING_MIN_BATCH`` (20) headlines waiting, nothing is sent until the oldest of them was
+  stored ``NEWS_TAGGING_MAX_WAIT_MINUTES`` (30) ago. The system prompt is cached for an hour (``ttl: 1h``: requests
+  come up to 30 minutes apart, past the 5-minute cache) and every request goes to the key slot of the previous one
+  while that slot is usable (caches are per workspace).
 * The answer is checked again: unknown themes and sectors are dropped, at most 3 themes, 3 sectors and 5 related
-  stocks. The prompt names each stored stock with its sector (Taiwan 產業別 from the company profile, a US company's
-  SIC sector); the model decides whether the story is about it (ingestion matches names, so 「大洋洲」 can land under
-  大洋): the 2026-11-17 live test showed that adding the stored stocks' sectors without the model mislabels those.
-  A related stock must resolve to a catalog symbol whose name agrees with the name the model gave (a made-up or
-  mismatched code is dropped) and is never one of the symbols the headline is stored under.
-* A batch that fails (bad answer, refusal, cut off, an API error other than a busy or unreachable key) counts an
-  attempt for its headlines; they are asked again after ``RETRY_AFTER`` × attempts, at most ``MAX_ATTEMPTS`` times. A
-  busy, rate-limited or unreachable key stops the run without counting. Nothing here touches ingestion: a failure only
-  leaves headlines untagged.
+  stocks; a sector of :data:`taxonomy.THEMES_OF_SECTOR` adds its industry theme (金融股 -> 金融). The prompt names
+  each stored stock with its sector (Taiwan 產業別 from the company profile, a US company's :func:`taxonomy.us_sector`);
+  the model decides whether the story is about it (ingestion matches names, so 「大洋洲」 can land under 大洋): the
+  2026-11-17 live test showed that adding the stored stocks' sectors without the model mislabels those. A related
+  stock must resolve to a catalog symbol whose name agrees with the name the model gave (a made-up or mismatched code
+  is dropped; a name that is exactly another stock's name wins over a code whose stock only shares part of it:
+  南亞科 with 1303 is 2408) and is never one of the symbols the headline is stored under.
+* An unusable answer (refusal, cut off, not the schema) is about the headlines, not the request: a batch of several is
+  split — its headlines go again at once, in batches of at most half as many (``status = "split"``,
+  ``batch_limit``) — until the headline that causes it is sent alone; only a headline sent alone counts an attempt
+  (asked again after ``RETRY_AFTER`` × attempts, at most ``MAX_ATTEMPTS`` times; a refusal of one headline alone gives
+  up at once: the same request would be refused again). One bad headline never takes its batch down with it.
+* An API error that no headline causes — a wrong model (404), a parameter or schema the model does not take (400) —
+  stops the run without counting an attempt, like a busy, rate-limited or unreachable key; it is logged as a WARNING
+  at most once an hour. ``python -m forliosa.news.tagging retry-failed`` gives every headline that failed its attempts
+  back. Nothing here touches ingestion: a failure only leaves headlines untagged.
 * Budget: the UTC month's cost of ``feature = "news_tagging"`` (``ai_usage``, nobody's quota). Once it reaches
   ``NEWS_TAGGING_MONTHLY_BUDGET_USD`` (US$3) the job stops until the 1st and says so in the log once.
 * Each run also deletes tags whose headline is gone (30-day retention, takedowns).
 
-Cost, measured 2026-11-17 (Claude Haiku 5.5, effort low, 71 live headlines in two requests): US$0.004–0.008 per 100
-headlines, most of it output (adaptive thinking); the ~5.9K-token system prompt is cached and later batches of a run
-stay on the first request's key slot to read it. Turning thinking off saved about a third but mislabelled clearly more
-(apps/api/CONTRACT_NOTES.md 「2026-11-17 新聞標籤」).
+Cost, measured 2026-11-17 (Claude Haiku 5.5, effort low, live headlines): a full request of about 50 headlines
+US$0.003–0.006 (US$0.006–0.012 per 100), most of it output (adaptive thinking, 5K–9K tokens); small requests cost more
+per headline (5–7 headlines: US$0.0008–0.0015). Turning thinking off saved about a third but mislabelled clearly more.
+Monthly estimate and the numbers behind it: apps/api/CONTRACT_NOTES.md 「2026-11-17 新聞標籤」.
 """
 
 from __future__ import annotations
@@ -74,8 +86,12 @@ EFFORT = "low"
 MAX_TOKENS = 16000  # 50 headlines need about 3K output tokens; the rest is room for thinking
 MAX_ATTEMPTS = 3
 RETRY_AFTER = timedelta(minutes=15)
-RESERVE_USD = Decimal("0.01")  # a batch of 50 costs about US$0.002: one starts only while this much budget is left
+# A request of 50 headlines measured US$0.004–0.006 (at most about US$0.009 with all 16K output tokens): one starts only
+# while this much of the month's budget is left.
+RESERVE_USD = Decimal("0.01")
 MAX_TITLE_CHARS = 200
+CACHE_CONTROL = {"type": "ephemeral", "ttl": "1h"}  # requests come up to NEWS_TAGGING_MAX_WAIT_MINUTES apart
+WARN_EVERY = timedelta(hours=1)  # a request-level API error is logged at most this often
 MARKET_KEYS = {"^US": "美股大盤"}  # news_articles.symbol values that are not stocks (news.service.US_MARKET_KEY)
 
 SYSTEM = """你替 Forliosa 的新聞標題貼標籤。Forliosa 是以台股為主的投資帳本，標籤用來把新聞依主題、類股、相關股票分組與搜尋。你只看得到標題、媒體和這則新聞歸在哪幾檔股票底下（stocks），沒有內文，所以只依標題判斷，不要猜標題沒寫的事。
@@ -85,7 +101,7 @@ stocks 是程式依公司名稱或代號比對出來的，可能比錯（例如�
 ## 每一則要回的
 - id：照抄。
 - themes：0 到 3 個主題，只能從下面的主題表選，最貼切的放前面。標題主要在講的才選，順帶提到的不選；照每個主題後面寫的範圍判斷，沒把握就少選。產業類的主題（AI 伺服器、金融、航運…）和事件類的主題（財報／法說、人事、個股異動…）可以一起選。
-- sectors：0 到 3 個類股，只能從下面的台股產業別與美股類股選。講個別公司的新聞，選那家公司的類股：stocks 裡的公司括號寫著它的台股產業別，照用；美國公司（例如 United Airlines）一律選美股類股，不選台股產業別。講一整個產業的新聞選那個產業。只講大盤、總經或政策、沒有特定產業的新聞不選。stocks 比錯、和標題無關的公司，不選它的類股。
+- sectors：0 到 3 個類股，只能從下面的台股產業別與美股類股選。講個別公司的新聞，選那家公司的類股：stocks 裡的公司括號寫著它的類股（台灣公司是台股產業別，美國公司是美股類股），照用；不在 stocks 裡的美國公司（例如 United Airlines）照下面美股類股的說明選，不選台股產業別。講一整個產業的新聞選那個產業。只講大盤、總經或政策、沒有特定產業的新聞不選。stocks 比錯、和標題無關的公司，不選它的類股。
 - companies：標題點名、而且是台股或美股上市櫃公司的其他公司，最多 5 家，不含 stocks 裡的公司。
   - name：台灣公司寫股票簡稱（台積電、鴻海、南亞）；美國公司寫英文公司名（Nvidia、Advanced Micro Devices、Alphabet、Micron Technology、United Airlines）。
   - code：台股寫四到六碼的股票代號，美股寫代號（NVDA）。不確定就寫空字串，不要猜。
@@ -142,6 +158,8 @@ class Item:
     title: str
     outlet: str
     symbols: tuple[str, ...]  # stored under (market keys such as ^US included)
+    stored_at: datetime | None = None  # when the URL was first stored (news_articles.fetched_at)
+    fresh: bool = True  # never sent before (no news_tag_state row): only these wait for a fuller batch
 
 
 @dataclass
@@ -160,9 +178,9 @@ def _aware(dt: datetime) -> datetime:
 
 
 def _due(now: datetime):
-    """URLs to (re)tag: never looked at, failed and due again (fewer than MAX_ATTEMPTS tries), or tagged with an older
-    vocabulary."""
-    return or_(NewsTagState.url_key.is_(None),
+    """URLs to (re)tag: never looked at, split off a batch that got an unusable answer, failed and due again (fewer
+    than MAX_ATTEMPTS tries), or tagged with an older vocabulary."""
+    return or_(NewsTagState.url_key.is_(None), NewsTagState.status == "split",
                and_(NewsTagState.status == "failed", NewsTagState.attempts < MAX_ATTEMPTS,
                     or_(NewsTagState.retry_at.is_(None), NewsTagState.retry_at <= now)),
                and_(NewsTagState.status == "done", NewsTagState.taxonomy_version < tx.TAXONOMY_VERSION))
@@ -170,7 +188,8 @@ def _due(now: datetime):
 
 def pending(db: Session, md: MarketData, settings: Settings, now: datetime, limit: int) -> tuple[list[Item], int]:
     """Up to ``limit`` headline URLs to tag, oldest first, from the last ``NEWS_TAGGING_DAYS``, and how many hidden ones
-    were found on the way (marked ``skipped`` and committed instead)."""
+    were found on the way (marked ``skipped`` and committed instead). A ``split`` URL's ``batch_limit`` caps the batch
+    it joins (and the batch ends before a URL whose limit it would exceed)."""
     from forliosa.news.service import blocked_domains, shown
 
     since = now - timedelta(days=settings.news_tagging_days)
@@ -185,9 +204,13 @@ def pending(db: Session, md: MarketData, settings: Settings, now: datetime, limi
     rows: dict[str, list[NewsArticle]] = {}
     for r in db.scalars(select(NewsArticle).where(NewsArticle.url_key.in_(keys)).order_by(NewsArticle.id)):
         rows.setdefault(r.url_key, []).append(r)
+    states = {k: (st, cap) for k, st, cap in db.execute(
+        select(NewsTagState.url_key, NewsTagState.status, NewsTagState.batch_limit)
+        .where(NewsTagState.url_key.in_(keys)))}
     blocked = blocked_domains(db, settings)
     out: list[Item] = []
     hidden: list[str] = []
+    full = False
     for key in keys:
         group = rows.get(key)
         if not group:
@@ -198,9 +221,18 @@ def pending(db: Session, md: MarketData, settings: Settings, now: datetime, limi
         if not shown(h, md.policy, blocked):
             hidden.append(key)
             continue
-        if len(out) < limit:
-            out.append(Item(url_key=key, title=r.title[:MAX_TITLE_CHARS], outlet=r.outlet or r.domain,
-                            symbols=tuple(dict.fromkeys(x.symbol for x in group))))
+        if full:
+            continue
+        status, cap = states.get(key, (None, None))
+        if status == "split" and cap:
+            limit = min(limit, max(1, cap))
+        if len(out) >= limit:
+            full = True
+            continue
+        out.append(Item(url_key=key, title=r.title[:MAX_TITLE_CHARS], outlet=r.outlet or r.domain,
+                        symbols=tuple(dict.fromkeys(x.symbol for x in group)),
+                        stored_at=min((_aware(x.fetched_at) for x in group if x.fetched_at), default=None),
+                        fresh=key not in states))
     if hidden:
         mark(db, hidden, "skipped", now)
     return out, len(hidden)
@@ -227,7 +259,8 @@ class Catalog:
 
     def sector(self, symbol: str) -> str | None:
         """The sector id of a stock: a Taiwan company's 產業別 (company profile, else the catalog's industry name), a
-        US company's SIC sector (SEC submissions). None for ETFs, market keys and unknown symbols."""
+        US company's :func:`taxonomy.us_sector` (the vocabulary's own list, else its SEC SIC code). None for ETFs,
+        market keys and unknown symbols."""
         if symbol in self._sectors:
             return self._sectors[symbol]
         out: str | None = None
@@ -237,7 +270,7 @@ class Catalog:
         elif market_of_symbol(symbol) == "US":
             cik = self.db.scalar(select(SecTicker.cik).where(SecTicker.ticker == symbol))
             company = self.db.get(SecCompany, cik) if cik is not None else None
-            out = tx.us_sector_for_sic((company.profile or {}).get("sic") if company is not None else None)
+            out = tx.us_sector(symbol, (company.profile or {}).get("sic") if company is not None else None)
         else:
             prof = self.db.get(CompanyProfile, symbol)
             out = tx.tw_sector_for_industry(prof.industry_code if prof else None, info.industry if info else None)
@@ -292,10 +325,49 @@ def names_agree(given: str, names: Iterable[str]) -> bool:
     return any(g == n or (len(n) >= 2 and (g in n or n in g)) for n in names)
 
 
+def _by_exact_name(cat: Catalog, name: str, us_only: bool | None) -> str | None:
+    """The one stock (in the US or the Taiwan market when ``us_only`` says which) one of whose names is exactly
+    ``name``, else None."""
+    key = name_key(name)
+    if len(key) < 2:
+        return None
+    found = {info.symbol for info in cat.md.search(name, limit=10)
+             if (us_only is None or (info.market == "US") == us_only)
+             and (key in {name_key(n) for n in (info.name, *info.aliases)} or key in cat.names(info.symbol))}
+    return found.pop() if len(found) == 1 else None
+
+
+def _closer_name(cat: Catalog, name: str, sym: str, us_only: bool) -> str | None:
+    """Another stock of the code's market that ``name`` fits better than ``sym``, when ``name`` only shares part of
+    ``sym``'s names: one named exactly ``name`` (南亞科 vs 1303 南亞), else the one stock with the longest name that is
+    part of ``name`` or contains it, longer than ``sym``'s (中華電信 vs 2204 中華: 2412 中華電)."""
+    exact = _by_exact_name(cat, name, us_only)
+    if exact is not None:
+        return exact if exact != sym else None
+    key = name_key(name)
+    own = max((len(n) for n in cat.names(sym) if len(n) >= 2 and n in key), default=0)
+    if not own or own >= len(key):
+        return None  # the given name is part of sym's name (台積 / 台積電), not the other way round
+    best: dict[str, int] = {}
+    for info in cat.md.search(key[:own + 1], limit=20):
+        if info.symbol == sym or (info.market == "US") != us_only:
+            continue
+        fit = max((len(key) if key in n else len(n) for n in cat.names(info.symbol) if n in key or key in n),
+                  default=0)
+        if fit > own:
+            best[info.symbol] = fit
+    top = max(best.values(), default=0)
+    winners = [s for s, fit in best.items() if fit == top]
+    return winners[0] if len(winners) == 1 else None
+
+
 def resolve_company(cat: Catalog, name: str, code: str) -> str | None:
     """A catalog symbol for a company the model named, or None. The code must resolve to a stock whose names (or code)
-    agree with ``name``; otherwise the name must equal exactly one stock's name — in the code's market when the code
-    resolved (「聯合」 written for United Airlines with UAL must not become the Taiwan stock 聯合)."""
+    agree with ``name`` — exactly, or by containment when no other stock of that market fits ``name`` better
+    (:func:`_closer_name`: 南亞科 with 1303 南亞 is 2408 南亞科, 中華電 with 2204 中華 is 2412: in Taiwan a family's
+    companies share the start of their names); otherwise the name must equal exactly one stock's name — in the code's
+    market when the code resolved (「聯合」 written for United Airlines with UAL must not become the Taiwan stock
+    聯合)."""
     name, code = (name or "").strip(), (code or "").strip()
     if not name:
         return None
@@ -304,16 +376,14 @@ def resolve_company(cat: Catalog, name: str, code: str) -> str | None:
         sym = cat.md.resolve(code)
         if sym and sym not in MARKET_KEYS:
             info = cat.info(sym)
-            if names_agree(name, cat.names(sym) | ({name_key(info.code)} if info else set())):
-                return sym
             us_only = market_of_symbol(sym) == "US"
-    key = name_key(name)
-    if len(key) < 2:
-        return None
-    found = {info.symbol for info in cat.md.search(name, limit=10)
-             if (us_only is None or (info.market == "US") == us_only)
-             and (key in {name_key(n) for n in (info.name, *info.aliases)} or key in cat.names(info.symbol))}
-    return found.pop() if len(found) == 1 else None
+            names = cat.names(sym) | ({name_key(info.code)} if info else set())
+            if name_key(name) in names:
+                return sym
+            if names_agree(name, names):
+                other = _closer_name(cat, name, sym, us_only)
+                return other if other is not None else sym
+    return _by_exact_name(cat, name, us_only)
 
 
 # -- the model call --------------------------------------------------------------------------------------------
@@ -327,7 +397,7 @@ def user_message(items: Sequence[Item], cat: Catalog) -> str:
 def request_params(items: Sequence[Item], cat: Catalog, settings: Settings) -> dict[str, Any]:
     return {
         "model": store.model_for(FEATURE, settings), "max_tokens": MAX_TOKENS,
-        "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": {"type": "ephemeral"}}],
+        "system": [{"type": "text", "text": SYSTEM_PROMPT, "cache_control": CACHE_CONTROL}],
         "messages": [{"role": "user", "content": user_message(items, cat)}],
         "output_config": {"effort": EFFORT, "format": {"type": "json_schema", "schema": OUTPUT_SCHEMA}},
     }
@@ -336,12 +406,16 @@ def request_params(items: Sequence[Item], cat: Catalog, settings: Settings) -> d
 class BadAnswer(Exception):
     """The answer cannot be used (refused, cut off, not the schema)."""
 
+    def __init__(self, reason: str, refused: bool = False):
+        super().__init__(reason)
+        self.refused = refused
+
 
 def parse_answer(msg: Any) -> list[dict[str, Any]]:
     """The ``items`` of a structured answer; raises :class:`BadAnswer`."""
     stop = getattr(msg, "stop_reason", None)
     if stop in ("refusal", "max_tokens"):
-        raise BadAnswer(f"stop_reason {stop}")
+        raise BadAnswer(f"stop_reason {stop}", refused=stop == "refusal")
     text = "".join(getattr(b, "text", "") for b in msg.content if getattr(b, "type", None) == "text")
     try:
         data = json.loads(text)
@@ -363,9 +437,14 @@ def _ids(values: Any, lookup: Callable[[str | None], str | None], cap: int) -> l
 
 
 def validate(entry: Mapping[str, Any], item: Item, cat: Catalog) -> Tags:
-    """One answer entry -> the tags kept (see the module docstring)."""
+    """One answer entry -> the tags kept (see the module docstring). A sector of :data:`taxonomy.THEMES_OF_SECTOR`
+    adds its industry theme (on top of the model's three at most)."""
     themes = _ids(entry.get("themes"), tx.theme_id, tx.MAX_THEMES)
     sectors = _ids(entry.get("sectors"), tx.sector_id, tx.MAX_SECTORS)
+    for sector in sectors:
+        implied = tx.THEMES_OF_SECTOR.get(sector)
+        if implied and implied not in themes:
+            themes.append(implied)
     symbols: list[tuple[str, str]] = []
     for c in entry.get("companies") if isinstance(entry.get("companies"), list) else []:
         if not isinstance(c, dict) or len(symbols) >= tx.MAX_SYMBOLS:
@@ -396,17 +475,33 @@ def save(db: Session, item: Item, tags: Tags, model: str, now: datetime) -> None
     st = _state(db, item.url_key)
     st.status, st.model, st.taxonomy_version = "done", model[:64], tx.TAXONOMY_VERSION
     st.attempts, st.tagged_at, st.retry_at, st.updated_at = (st.attempts or 0) + 1, now, None, now
+    st.batch_limit = None
 
 
-def mark(db: Session, keys: Iterable[str], status: str, now: datetime) -> None:
-    """``skipped`` (hidden) or ``failed`` (one more attempt; asked again after RETRY_AFTER × attempts). Committed."""
+def mark(db: Session, keys: Iterable[str], status: str, now: datetime, *, batch_limit: int | None = None,
+         give_up: bool = False) -> None:
+    """``skipped`` (hidden), ``split`` (asked again at once in batches of at most ``batch_limit``; no attempt counted)
+    or ``failed`` (one more attempt — all of them with ``give_up`` —; asked again after RETRY_AFTER × attempts).
+    Committed."""
     for key in keys:
         st = _state(db, key)
         st.status, st.updated_at = status, now
-        if status == "failed":
-            st.attempts = (st.attempts or 0) + 1
+        if status == "split":
+            st.batch_limit, st.retry_at = batch_limit, None
+        elif status == "failed":
+            st.attempts = MAX_ATTEMPTS if give_up else (st.attempts or 0) + 1
             st.retry_at = now + RETRY_AFTER * st.attempts if st.attempts < MAX_ATTEMPTS else None
     db.commit()
+
+
+def retry_failed(db: Session) -> int:
+    """Give every failed URL its attempts back (``retry-failed``: after an outage or a fix). It is asked again at the
+    next run, alone if it failed alone. Returns how many."""
+    rows = db.scalars(select(NewsTagState).where(NewsTagState.status == "failed")).all()
+    for st in rows:
+        st.attempts, st.retry_at = 0, None
+    db.commit()
+    return len(rows)
 
 
 def purge_orphans(db: Session) -> int:
@@ -448,10 +543,11 @@ class RunResult:
     untagged: int = 0  # of those: no tag at all (not financial news)
     skipped: int = 0  # hidden headlines marked skipped
     failed: int = 0  # headlines that counted a failed attempt
+    split: int = 0  # headlines of a batch with an unusable answer, asked again at once in smaller batches
     calls: int = 0
     cost_usd: Decimal = Decimal(0)
     purged: int = 0
-    stopped: str | None = None  # disabled | budget | no_key | busy | error
+    stopped: str | None = None  # disabled | budget | waiting | no_key | busy | error
     slot: int | None = None  # the key slot of the run's first call: later batches stay on it (its prompt cache)
 
 
@@ -462,22 +558,54 @@ def _transient(exc: BaseException) -> bool:
         or is_failover_error(exc)
 
 
+def _error_label(exc: BaseException) -> str:
+    """「404 not_found_error」 — status and error type only (safe to log: no key, no request)."""
+    if isinstance(exc, anthropic.APIStatusError):
+        return f"{exc.status_code} {getattr(exc, 'type', None) or type(exc).__name__}"
+    return type(exc).__name__
+
+
+_warned: dict[str, datetime] = {}
+_warn_lock = threading.Lock()
+
+
+def _warn_request_error(now: datetime, exc: BaseException, n: int) -> None:
+    """A request-level error, logged at most once per WARN_EVERY per kind of error."""
+    label = _error_label(exc)
+    with _warn_lock:
+        last = _warned.get(label)
+        if last is not None and now - last < WARN_EVERY:
+            return
+        _warned[label] = now
+    log.warning("news tagging stopped: the request was refused (%s) — the model setting (AI_MODEL_NEWS_TAGGING / "
+                "AI_MODEL) or the request does not work; %d headlines wait, no attempt counted (logged at most "
+                "hourly)", label, n)
+
+
+def _first_slot(db: Session, pool: KeyPool, costs: Mapping[int, Decimal]) -> int | None:
+    """The key slot of the last tagging request while it is usable: its workspace holds the cached prompt."""
+    last = db.scalar(select(AiUsage.key_slot).where(AiUsage.feature == FEATURE, AiUsage.key_slot.is_not(None))
+                     .order_by(AiUsage.created_at.desc(), AiUsage.id.desc()).limit(1))
+    slot = pool.get(last)
+    return last if slot is not None and pool.state(slot, costs.get(last, Decimal(0))) == "ok" else None
+
+
 def tag_batch(db: Session, items: Sequence[Item], cat: Catalog, pool: KeyPool, settings: Settings,
               now: datetime, result: RunResult) -> None:
-    """One request for ``items``; stores the tags and marks what failed. Raises transient errors untouched."""
+    """One request for ``items``; stores the tags, splits a batch whose answer cannot be used and marks what failed.
+    Raises transient errors untouched; a request-level error sets ``result.stopped = "error"`` (nothing counted)."""
     params = request_params(items, cat, settings)
     model = params["model"]
+    costs = store.slot_month_costs(db) if result.slot is None else None
+    only = result.slot if result.slot is not None else _first_slot(db, pool, costs or {})
     try:
-        raw, slot = pool.call(lambda client: client.messages.with_raw_response.create(**params),
-                              costs=store.slot_month_costs(db) if result.slot is None else None, only=result.slot)
+        raw, slot = pool.call(lambda client: client.messages.with_raw_response.create(**params), costs=costs,
+                              only=only)
     except Exception as exc:
         db.rollback()
         if _transient(exc):
             raise
-        log.warning("news tagging: request failed (%s); %d headlines count an attempt", type(exc).__name__,
-                    len(items))
-        mark(db, [it.url_key for it in items], "failed", now)
-        result.failed += len(items)
+        _warn_request_error(now, exc, len(items))
         result.stopped = "error"
         return
     pool.observe(slot, raw.headers)
@@ -490,9 +618,18 @@ def tag_batch(db: Session, items: Sequence[Item], cat: Catalog, pool: KeyPool, s
     try:
         entries = parse_answer(msg)
     except BadAnswer as exc:
-        log.warning("news tagging: unusable answer (%s) for %d headlines (key #%s)", exc, len(items), slot)
-        mark(db, [it.url_key for it in items], "failed", now)
-        result.failed += len(items)
+        keys = [it.url_key for it in items]
+        if len(items) > 1:
+            half = (len(items) + 1) // 2
+            log.warning("news tagging: unusable answer (%s) for %d headlines (key #%s): asked again in batches of %d",
+                        exc, len(items), slot, half)
+            mark(db, keys, "split", now, batch_limit=half)
+            result.split += len(items)
+        else:
+            log.warning("news tagging: unusable answer (%s) for a headline sent alone (key #%s)%s", exc, slot,
+                        ": given up" if exc.refused else "")
+            mark(db, keys, "failed", now, give_up=exc.refused)
+            result.failed += 1
         return
     by_id: dict[int, Mapping[str, Any]] = {}
     for e in entries:
@@ -527,6 +664,9 @@ def run(db: Session, md: MarketData, *, settings: Settings | None = None, pool: 
     result.purged = purge_orphans(db)
     budget = Decimal(str(settings.news_tagging_monthly_budget_usd))
     cat = Catalog(db, md)
+    min_batch = min(settings.news_tagging_min_batch, settings.news_tagging_batch_size)
+    wait = timedelta(minutes=settings.news_tagging_max_wait_minutes)
+    sent = 0
     for _ in range(settings.news_tagging_max_batches):
         spent = month_spend(db, now)
         if budget <= 0 or spent + RESERVE_USD > budget:
@@ -540,10 +680,15 @@ def run(db: Session, md: MarketData, *, settings: Settings | None = None, pool: 
             if hidden:
                 continue  # a page of hidden rows: look again
             break
+        if not sent and len(items) < min_batch and all(it.fresh for it in items) \
+                and all(it.stored_at is not None and it.stored_at > now - wait for it in items):
+            result.stopped = "waiting"  # a trickle: wait for more headlines (or for the oldest to wait long enough)
+            break
         pool = pool or get_key_pool()
         if not pool.available:
             result.stopped = "no_key"
             break
+        sent += 1
         try:
             tag_batch(db, items, cat, pool, settings, now, result)
         except Exception as exc:  # transient (tag_batch re-raises only those)
@@ -553,8 +698,8 @@ def run(db: Session, md: MarketData, *, settings: Settings | None = None, pool: 
         if result.stopped == "error":
             break
     if result.calls or result.failed:
-        log.info("news tagging: %d tagged (%d without tags), %d failed, %d skipped, %d calls, US$%s%s",
-                 result.tagged, result.untagged, result.failed, result.skipped, result.calls,
+        log.info("news tagging: %d tagged (%d without tags), %d failed, %d split, %d skipped, %d calls, US$%s%s",
+                 result.tagged, result.untagged, result.failed, result.split, result.skipped, result.calls,
                  result.cost_usd.quantize(Decimal("0.0001")), f", stopped: {result.stopped}" if result.stopped else "")
     return result
 
@@ -580,7 +725,7 @@ def status(db: Session, now: datetime | None = None, settings: Settings | None =
 
 
 def main(argv: list[str] | None = None) -> int:
-    """``python -m forliosa.news.tagging run|status``."""
+    """``python -m forliosa.news.tagging run|status|retry-failed``."""
     import argparse
     import sys
 
@@ -588,15 +733,18 @@ def main(argv: list[str] | None = None) -> int:
     from forliosa.marketdata.service import get_market_data
 
     p = argparse.ArgumentParser(prog="python -m forliosa.news.tagging", description="新聞標籤（主題、類股、相關股票）")
-    p.add_argument("command", choices=["run", "status"])
+    p.add_argument("command", choices=["run", "status", "retry-failed"])
     args = p.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
     with session_factory()() as db:
         if args.command == "status":
             print(json.dumps(status(db), ensure_ascii=False, indent=2))
             return 0
+        if args.command == "retry-failed":
+            print(json.dumps({"reset": retry_failed(db)}, ensure_ascii=False))
+            return 0
         res = run(db, get_market_data())
-        print(json.dumps({"tagged": res.tagged, "untagged": res.untagged, "failed": res.failed,
+        print(json.dumps({"tagged": res.tagged, "untagged": res.untagged, "failed": res.failed, "split": res.split,
                           "skipped": res.skipped, "calls": res.calls, "cost_usd": float(res.cost_usd),
                           "purged": res.purged, "stopped": res.stopped}, ensure_ascii=False))
     sys.stdout.flush()

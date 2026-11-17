@@ -5,17 +5,31 @@ from __future__ import annotations
 
 import json
 import logging
-from datetime import UTC, datetime, timedelta
+import random
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from forliosa.models import AiUsage, NewsArticle, NewsBlockedDomain, NewsTag, NewsTagState, User
-from forliosa.news import service, tagging, tags, taxonomy
+from forliosa.marketdata.catalog import _tw, _us
+from forliosa.marketdata.demo import DemoProvider
+from forliosa.marketdata.service import MarketData, set_market_data
+from forliosa.models import (
+    AiUsage,
+    CompanyProfile,
+    NewsArticle,
+    NewsBlockedDomain,
+    NewsTag,
+    NewsTagState,
+    SecCompany,
+    SecTicker,
+    User,
+)
+from forliosa.news import normalize, service, tagging, tags, taxonomy
 from forliosa.news.normalize import Headline, url_key
-from tests.ai.fake_anthropic import text, thinking
+from tests.ai.fake_anthropic import Reply, text, thinking
 
 NOW = datetime(2026, 11, 17, 4, 0, tzinfo=UTC)
 
@@ -40,7 +54,7 @@ def reply(fake, *items: dict, **kw) -> None:
 
 def cfg(settings, **kw):
     base = {"news_tagging_enabled": True, "news_tagging_monthly_budget_usd": 3.0, "news_tagging_batch_size": 50,
-            "news_tagging_max_batches": 4, "news_tagging_days": 7}
+            "news_tagging_max_batches": 4, "news_tagging_days": 7, "news_tagging_min_batch": 1}
     return settings.model_copy(update={**base, **kw})
 
 
@@ -77,7 +91,9 @@ def test_taxonomy_is_fixed_versioned_and_uses_the_official_industries():
                                              ("6022", "us_financials"), ("4512", "us_industrials"),
                                              ("3711", "us_consumer_disc"), ("1311", "us_energy"),
                                              ("6798", "us_real_estate"), ("4911", "us_utilities"),
-                                             ("4813", "us_comm"), ("", None), ("x", None)])
+                                             ("4813", "us_comm"), ("5331", "us_staples"), ("6324", "us_health"),
+                                             ("3826", "us_health"), ("3021", "us_consumer_disc"),
+                                             ("4700", "us_consumer_disc"), ("", None), ("x", None)])
 def test_sic_codes_map_to_the_us_sectors(sic, sector):
     assert taxonomy.us_sector_for_sic(sic) == sector
 
@@ -98,7 +114,8 @@ def test_the_request_uses_structured_outputs_haiku_low_effort_and_a_cached_promp
     assert item["properties"]["themes"]["items"]["enum"] == [t.label for t in taxonomy.THEMES]
     assert item["properties"]["sectors"]["items"]["enum"] == [t.label for t in taxonomy.SECTORS]
     assert item["additionalProperties"] is False and set(item["required"]) == {"id", "themes", "sectors", "companies"}
-    assert body["system"][0]["cache_control"] == {"type": "ephemeral"}
+    # cached for an hour: requests come up to NEWS_TAGGING_MAX_WAIT_MINUTES (30) apart
+    assert body["system"][0]["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
     assert not {"temperature", "top_p", "top_k", "tool_choice", "tools", "thinking"} & set(body)
     assert sent(fake) == [{"id": 1, "title": "台積電法說會釋利多 CoWoS 產能倍增", "outlet": "經濟日報",
                            "stocks": ["2330 台積電（半導體業）"]}]
@@ -237,14 +254,16 @@ def test_a_bad_answer_counts_an_attempt_and_gives_up_after_three(engine, commerc
     assert later.calls == 0 and len(fake.requests) == 3
 
 
-@pytest.mark.parametrize("stop", ["refusal", "max_tokens"])
-def test_a_refused_or_cut_off_answer_is_not_used(engine, commercial_md, settings, fake, pool, stop):
+@pytest.mark.parametrize(("stop", "attempts"), [("refusal", tagging.MAX_ATTEMPTS), ("max_tokens", 1)])
+def test_a_refused_or_cut_off_answer_is_not_used(engine, commercial_md, settings, fake, pool, stop, attempts):
     url = "https://money.udn.com/a/6"
     with Session(engine) as db:
         service.store(db, "2330.TW", [head("台積電新聞", url)], NOW)
         reply(fake, entry(1, ["財報／法說"]), stop_reason=stop)
         res = tagging.run(db, commercial_md, settings=cfg(settings), pool=pool, now=NOW)
-        assert state(db, url).status == "failed" and not tag_rows(db, url)
+        st = state(db, url)
+        # a headline sent alone and refused gives up at once: the same request would be refused again
+        assert st.status == "failed" and st.attempts == attempts and not tag_rows(db, url)
     assert res.failed == 1 and res.tagged == 0
 
 
@@ -270,13 +289,30 @@ def test_busy_keys_stop_the_run_without_counting_an_attempt(engine, commercial_m
     assert res.stopped == "busy" and res.failed == 0
 
 
-def test_a_bad_request_counts_an_attempt_and_stops_the_run(engine, commercial_md, settings, fake, pool):
+@pytest.mark.parametrize(("status", "etype"), [(404, "not_found_error"), (400, "invalid_request_error")])
+def test_a_request_level_error_counts_no_attempt_and_is_logged_hourly(engine, commercial_md, settings, fake, pool,
+                                                                      caplog, status, etype):
+    """A wrong model (404) or a parameter / schema the model does not take (400) is the request's fault, not the
+    headlines': the run stops, nothing is counted, and once the setting is fixed everything is tagged."""
+    tagging._warned.clear()
+    s = cfg(settings)
     with Session(engine) as db:
         service.store(db, "2330.TW", [head(f"台積電新聞 {i}", f"https://money.udn.com/e/{i}") for i in range(3)], NOW)
-        fake.error(400, "invalid_request_error", "schema too complex")
-        res = tagging.run(db, commercial_md, settings=cfg(settings, news_tagging_batch_size=1), pool=pool, now=NOW)
-        failed = db.scalars(select(NewsTagState).where(NewsTagState.status == "failed")).all()
-    assert res.stopped == "error" and res.calls == 0 and len(failed) == 1 and len(fake.requests) == 1
+        with caplog.at_level(logging.WARNING, logger="forliosa.news.tagging"):
+            for minutes in (0, 5, 10, 30, 61):  # every run for an hour fails the same way
+                fake.error(status, etype, "model: claude-haiku-5-x")
+                res = tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(minutes=minutes))
+                assert res.stopped == "error" and res.calls == 0 and res.failed == 0 and res.split == 0
+        assert db.scalars(select(NewsTagState)).all() == []  # no attempt counted, nothing given up
+        assert len(fake.requests) == 5  # one request per run: the error is not retried on the other key
+        # logged at the first run and again an hour later, not every five minutes; never the key
+        warnings = [r.getMessage() for r in caplog.records if "news tagging stopped" in r.getMessage()]
+        assert len(warnings) == 2 and f"{status} {etype}" in warnings[0]
+        assert not any("sk-test" in w for w in warnings)
+        # the setting is fixed: everything is tagged
+        reply(fake, entry(1, ["財報／法說"]), entry(2), entry(3))
+        res = tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(minutes=65))
+    assert res.tagged == 3 and res.stopped is None
 
 
 def test_usage_is_recorded_and_the_month_budget_stops_the_job(engine, commercial_md, settings, fake, pool, caplog):
@@ -512,3 +548,301 @@ def test_status_counts(engine, commercial_md, settings):
         service.store(db, "2330.TW", [head("台積電還沒標", "https://money.udn.com/st/1")], NOW)
         out = tagging.status(db, now=NOW, settings=cfg(settings))
     assert out["states"] == {"done": 2} and out["never_tagged_in_window"] == 1 and out["tags"]["theme"] == 2
+
+
+# -- review fixes (2026-11-17): splitting a failed batch, request errors, cost, family names, US sectors -------------
+def _answering(poison: str | None = None, cut_off_over: int | None = None):
+    """A responder for the fake: refuses any request holding a headline with ``poison`` in its title, cuts off any
+    request of more than ``cut_off_over`` headlines, and otherwise tags every headline 財報／法說."""
+
+    def respond(body: dict) -> Reply:
+        content = body["messages"][0]["content"]
+        rows = json.loads(content[content.index("["):])
+        if poison and any(poison in r["title"] for r in rows):
+            return Reply([], "refusal")
+        if cut_off_over and len(rows) > cut_off_over:
+            return Reply([thinking(), text('{"items": [{"id": 1, "themes": [')], "max_tokens")
+        return Reply(answer(*[entry(r["id"], ["財報／法說"]) for r in rows])["blocks"])
+
+    return respond
+
+
+def test_one_refused_headline_does_not_take_its_batch_down(engine, commercial_md, settings, fake, pool):
+    """The batch is halved until the refused headline is sent alone (and given up); the other 119 are all tagged."""
+    fake.responder = _answering(poison="POISON")
+    s = cfg(settings)
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [
+            head(("POISON " if i == 5 else "") + f"台積電新聞 {i:03d}", f"https://money.udn.com/p/{i}",
+                 at=NOW - timedelta(minutes=600 - i)) for i in range(120)], NOW)
+        at, results = NOW, []
+        for _ in range(12):  # an hour of runs
+            results.append(tagging.run(db, commercial_md, settings=s, pool=pool, now=at))
+            at += timedelta(minutes=5)
+        later = tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(days=1))
+        states = {st.url_key: (st.status, st.attempts, st.batch_limit) for st in db.scalars(select(NewsTagState))}
+        assert tagging.status(db, now=NOW, settings=s)["gave_up"] == 1
+    poison = states.pop(url_key("https://money.udn.com/p/5"))
+    assert len(states) == 119 and set(states.values()) == {("done", 1, None)}
+    assert poison[:2] == ("failed", tagging.MAX_ATTEMPTS)
+    refused = [len(sent(fake, i)) for i in range(len(fake.requests))
+               if any("POISON" in r["title"] for r in sent(fake, i))]
+    assert refused == [50, 25, 13, 7, 4, 2, 1]  # halved until it is alone; refused alone: given up at once
+    assert len(fake.requests) <= 16 and later.calls == 0
+    assert sum(r.split for r in results) > 0 and sum(r.failed for r in results) == 1
+
+
+def test_a_cut_off_batch_is_split_until_the_answers_fit(engine, commercial_md, settings, fake, pool):
+    fake.responder = _answering(cut_off_over=20)
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [head(f"台積電新聞 {i:03d}", f"https://money.udn.com/m/{i}",
+                                           at=NOW - timedelta(minutes=100 - i)) for i in range(50)], NOW)
+        first = tagging.run(db, commercial_md, settings=cfg(settings), pool=pool, now=NOW)
+        second = tagging.run(db, commercial_md, settings=cfg(settings), pool=pool, now=NOW + timedelta(minutes=5))
+        states = {(st.status, st.attempts) for st in db.scalars(select(NewsTagState))}
+    # run 1: 50 cut off -> halves of 25; 25 cut off -> 13 + 12; 13 tagged; 12 + one of the other half tagged.
+    # run 2: the other 24 cut off -> 12 + 12, both tagged
+    assert [len(sent(fake, i)) for i in range(len(fake.requests))] == [50, 25, 13, 13, 24, 12, 12]
+    assert (first.tagged, first.split, second.tagged, second.split) == (26, 75, 24, 24)
+    assert first.failed == second.failed == 0
+    assert states == {("done", 1)}  # a split never counts an attempt
+
+
+def test_retry_failed_gives_the_attempts_back(engine, commercial_md, settings, fake, pool, capsys):
+    url = "https://money.udn.com/a/20"
+    s = cfg(settings)
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [head("台積電新聞", url)], NOW)
+        reply(fake, entry(1), stop_reason="refusal")
+        tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW)
+        assert state(db, url).attempts == tagging.MAX_ATTEMPTS
+        assert tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(hours=1)).calls == 0
+    assert tagging.main(["retry-failed"]) == 0
+    assert json.loads(capsys.readouterr().out.strip().splitlines()[-1]) == {"reset": 1}
+    with Session(engine) as db:
+        st = state(db, url)
+        assert st.status == "failed" and st.attempts == 0 and st.retry_at is None
+        reply(fake, entry(1, ["財報／法說"]))
+        res = tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(hours=2))
+        assert res.tagged == 1 and state(db, url).status == "done"
+
+
+def test_a_trickle_waits_for_a_fuller_batch(engine, commercial_md, settings, fake, pool):
+    """Fewer than NEWS_TAGGING_MIN_BATCH fresh headlines wait until the oldest was stored NEWS_TAGGING_MAX_WAIT_MINUTES
+    ago; a full batch goes at once; a retry never waits."""
+    s = cfg(settings, news_tagging_min_batch=20, news_tagging_max_wait_minutes=30)
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [head(f"台積電新聞 {i}", f"https://money.udn.com/w/{i}") for i in range(3)], NOW)
+        for minutes in (0, 5, 29):
+            res = tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(minutes=minutes))
+            assert res.stopped == "waiting" and res.calls == 0
+        assert not fake.requests
+        reply(fake, entry(1), entry(2), entry(3))
+        assert tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(minutes=31)).tagged == 3
+        # 20 new ones: no waiting
+        later = NOW + timedelta(minutes=40)
+        service.store(db, "2330.TW", [head(f"台積電新聞二 {i}", f"https://money.udn.com/w2/{i}", at=later)
+                                      for i in range(20)], later)
+        reply(fake, *[entry(i) for i in range(1, 21)])
+        assert tagging.run(db, commercial_md, settings=s, pool=pool, now=later).tagged == 20
+        # a failed one is asked again when due, alone
+        service.store(db, "2330.TW", [head("台積電新聞三", "https://money.udn.com/w3/1", at=later)], later)
+        fake.reply(thinking(), text("not json"))
+        assert tagging.run(db, commercial_md, settings=s, pool=pool, now=later + timedelta(minutes=31)).failed == 1
+        reply(fake, entry(1))
+        res = tagging.run(db, commercial_md, settings=s, pool=pool, now=later + timedelta(minutes=47))
+    assert res.tagged == 1 and len(sent(fake)) == 1
+
+
+def test_runs_stay_on_the_key_slot_that_holds_the_cached_prompt(engine, commercial_md, settings, fake, pool):
+    """Caches are per workspace: a run starts on the slot of the last tagging request (not the cheapest slot this
+    month), unless that slot is cooling down."""
+    s = cfg(settings)
+    with Session(engine) as db:
+        for n in range(3):
+            service.store(db, "2330.TW", [head(f"台積電新聞 {n}", f"https://money.udn.com/k/{n}")], NOW)
+            if n == 2:  # the slot hit a rate limit: the next run moves
+                first = pool.get(db.scalar(select(AiUsage.key_slot).where(AiUsage.feature == "news_tagging")))
+                first.cooldown_until, first.cooldown_hard = pool.clock() + 60, True
+            reply(fake, entry(1), usage={"input_tokens": 500, "output_tokens": 3000})
+            tagging.run(db, commercial_md, settings=s, pool=pool, now=NOW + timedelta(minutes=30 * n))
+    keys = fake.keys_used
+    assert keys[0] == keys[1] != keys[2]
+    assert all(r["body"]["system"][0]["cache_control"]["ttl"] == "1h" for r in fake.requests)
+
+
+def test_one_hour_cache_writes_cost_twice_the_input_price(engine, commercial_md, settings, fake, pool):
+    from anthropic.types import Usage
+
+    from forliosa.ai.pricing import CallUsage, estimate_cost
+
+    m = "claude-haiku-5-5"
+    assert estimate_cost(m, CallUsage(cache_creation_input_tokens=10_000)) == Decimal("0.00125")
+    assert estimate_cost(m, CallUsage(cache_creation_input_tokens=10_000,
+                                      cache_creation_1h_input_tokens=10_000)) == Decimal("0.002")
+    usage = Usage.model_validate({"input_tokens": 1, "output_tokens": 1, "cache_creation_input_tokens": 5911,
+                                  "cache_read_input_tokens": 0,
+                                  "cache_creation": {"ephemeral_1h_input_tokens": 5911,
+                                                     "ephemeral_5m_input_tokens": 0}})
+    assert CallUsage.from_sdk(usage).cache_creation_1h_input_tokens == 5911
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [head("台積電新聞", "https://money.udn.com/a/21")], NOW)
+        reply(fake, entry(1), usage={"input_tokens": 0, "output_tokens": 0, "cache_creation_input_tokens": 5911,
+                                     "cache_creation": {"ephemeral_1h_input_tokens": 5911,
+                                                        "ephemeral_5m_input_tokens": 0}})
+        tagging.run(db, commercial_md, settings=cfg(settings), pool=pool, now=NOW)
+        row = db.scalars(select(AiUsage).where(AiUsage.feature == "news_tagging")).one()
+    assert Decimal(row.cost_usd) == Decimal("0.001182")  # 5,911 × US$0.10 / 1M × 2
+
+
+class _FamilyProvider(DemoProvider):
+    """Taiwan companies of one family share the start of their names (南亞 / 南亞科, 台塑 / 台塑化, 中華 / 中華電)."""
+
+    def instruments(self):
+        return [*super().instruments(),
+                _tw("1303", "南亞", "TWSE", "stock", "塑膠工業"), _tw("2408", "南亞科", "TWSE", "stock", "半導體業"),
+                _tw("1301", "台塑", "TWSE", "stock", "塑膠工業"), _tw("6505", "台塑化", "TWSE", "stock", "油電燃氣業"),
+                _tw("2204", "中華", "TWSE", "stock", "汽車工業"), _tw("2002", "中鋼", "TWSE", "stock", "鋼鐵工業"),
+                _tw("2013", "中鋼構", "TWSE", "stock", "鋼鐵工業")]
+
+
+@pytest.fixture()
+def family_md(market):
+    md = MarketData([_FamilyProvider()], policy="commercial")
+    set_market_data(md)
+    yield md
+    set_market_data(market)
+
+
+def test_a_family_name_beats_a_code_whose_stock_only_shares_its_start(engine, family_md, settings, fake, pool):
+    cases = {
+        ("南亞科", "1303"): "2408.TW", ("台塑化", "1301"): "6505.TW", ("中華電", "2204"): "2412.TW",
+        ("中鋼構", "2002"): "2013.TW", ("南亞", "2408"): "1303.TW",
+        # right codes, short names and other mismatches keep working
+        ("南亞科", "2408"): "2408.TW", ("南亞", "1303"): "1303.TW", ("台積", "2330"): "2330.TW",
+        ("聯發科", "2317"): "2454.TW", ("南亞科", ""): "2408.TW",
+    }
+    with Session(engine) as db:
+        cat = tagging.Catalog(db, family_md)
+        assert {c: tagging.resolve_company(cat, *c) for c in cases} == cases
+        # with the company profiles' full names (production): 中華電信 written with 2204 中華汽車 is 2412
+        for sym, short, full in (("2204.TW", "中華", "中華汽車工業股份有限公司"),
+                                 ("2412.TW", "中華電", "中華電信股份有限公司")):
+            db.add(CompanyProfile(symbol=sym, date=date(2026, 11, 16), source="twse", fetched_at=NOW,
+                                  values={"short_name": short, "name": full}))
+        db.flush()
+        cat = tagging.Catalog(db, family_md)
+        assert tagging.resolve_company(cat, "中華電信", "2204") == "2412.TW"
+        assert tagging.resolve_company(cat, "中華汽車", "2204") == "2204.TW"
+        # end to end: a DRAM story naming 南亞科 with 1303 is stored with 2408
+        url = "https://money.udn.com/fam/1"
+        service.store(db, "2330.TW", [head("記憶體報價大漲 南亞科受惠", url)], NOW)
+        reply(fake, entry(1, ["記憶體"], ["半導體業"], [{"name": "南亞科", "code": "1303", "relation": "mentioned"}]))
+        tagging.run(db, family_md, settings=cfg(settings), pool=pool, now=NOW)
+        assert ("symbol", "2408.TW", "mentioned") in tag_rows(db, url)
+
+
+# The companies the US sector hints name, with their SEC SIC codes (EDGAR submissions, 2026-11): several sit in an
+# SIC range of another sector, which US_SECTOR_BY_TICKER overrides.
+REAL_SIC = {"NVDA": "3674", "AMD": "3674", "AVGO": "3674", "MU": "3674", "AMAT": "3674", "AAPL": "3571",
+            "MSFT": "7372", "ORCL": "7372", "DELL": "3571", "GOOGL": "7370", "META": "7370", "NFLX": "7841",
+            "T": "4813", "AMZN": "5961", "TSLA": "3711", "NKE": "3021", "WMT": "5331", "COST": "5331", "KO": "2080",
+            "LLY": "2834", "PFE": "2834", "UNH": "6324", "JPM": "6021", "V": "7389", "BA": "3721", "CAT": "3531",
+            "XOM": "2911", "CVX": "2911"}
+
+
+def test_every_company_a_us_sector_hint_names_gets_that_sector():
+    """The prompt's brackets (a stock's sector) and the sector hints never disagree about a company."""
+    named = [t for examples in taxonomy.US_SECTOR_EXAMPLES.values() for t, _ in examples]
+    assert len(named) == len(set(named))  # no company in two hints
+    for sector, examples in taxonomy.US_SECTOR_EXAMPLES.items():
+        hint = taxonomy.SECTOR_BY_ID[sector].hint
+        for ticker, name in examples:
+            assert name in hint
+            assert taxonomy.us_sector(ticker, REAL_SIC[ticker]) == sector, ticker
+            assert taxonomy.us_sector(ticker) == sector  # without SEC data too
+
+
+@pytest.mark.parametrize(("ticker", "sic", "sector"), [
+    ("GOOGL", "7370", "us_comm"), ("META", "7370", "us_comm"), ("DJT", "7370", "us_comm"), ("DIS", "7990", "us_comm"),
+    ("WMT", "5331", "us_staples"), ("TGT", "5331", "us_staples"), ("V", "7389", "us_financials"),
+    ("MA", "7389", "us_financials"), ("PYPL", "7389", "us_financials"), ("NKE", "3021", "us_consumer_disc"),
+    ("UNH", "6324", "us_health"), ("TMO", "3826", "us_health"), ("BKNG", "4700", "us_consumer_disc"),
+    ("UAL", "4512", "us_industrials"), ("ZZZZ", "5331", "us_staples"), ("ZZZZ", None, None)])
+def test_us_sectors_follow_the_vocabulary_not_raw_sic(ticker, sic, sector):
+    assert taxonomy.us_sector(ticker, sic) == sector
+
+
+class _UsProvider(DemoProvider):
+    def instruments(self):
+        return [*super().instruments(), _us("GOOGL", "Alphabet Inc.", "stock", "通訊服務", ("谷歌",)),
+                _us("V", "Visa Inc.", "stock", "金融", ())]
+
+
+def test_the_prompt_names_a_us_stocks_vocabulary_sector(engine, market):
+    md = MarketData([_UsProvider()], policy="commercial")
+    set_market_data(md)
+    try:
+        with Session(engine) as db:
+            for ticker, cik, sic in (("GOOGL", 1652044, "7370"), ("V", 1403161, "7389")):
+                db.add(SecTicker(ticker=ticker, cik=cik, title=ticker))
+                db.add(SecCompany(cik=cik, name=ticker, facts={}, profile={"sic": sic}))
+            db.commit()
+            cat = tagging.Catalog(db, md)
+            assert cat.describe("GOOGL") == "GOOGL Alphabet Inc.（美股通訊服務）"
+            assert cat.describe("V") == "V Visa Inc.（美股金融）"
+    finally:
+        set_market_data(market)
+    assert "美國公司是美股類股" in tagging.SYSTEM_PROMPT
+
+
+def test_an_industry_sector_adds_its_theme_so_a_theme_search_finds_it(engine, commercial_md, settings, fake, pool):
+    """「金融股的新聞都選」 is not left to the model: a bank's outage filed under 事故／資安 and 金融保險業 (or
+    美股金融) also gets 金融; 航運業 gets 航運. The model's own three themes stay."""
+    with Session(engine) as db:
+        service.store(db, "2330.TW", [head(f"新聞 {i}", f"https://money.udn.com/f/{i}",
+                                           at=NOW - timedelta(minutes=10 - i)) for i in range(4)], NOW)
+        reply(fake, entry(1, ["事故／資安"], ["金融保險業"]), entry(2, ["事故／資安"], ["美股金融"]),
+              entry(3, ["事故／資安"], ["航運業"]), entry(4, ["AI 伺服器", "先進封裝", "財報／法說"], ["金融保險業"]))
+        tagging.run(db, commercial_md, settings=cfg(settings), pool=pool, now=NOW)
+        themes = {i: {v for k, v, _ in tag_rows(db, f"https://money.udn.com/f/{i}") if k == "theme"} for i in range(4)}
+        found = [x["title"] for x in tags.search(db, commercial_md, theme="finance", now=NOW, settings=settings)]
+    assert themes == {0: {"incidents", "finance"}, 1: {"incidents", "finance"}, 2: {"incidents", "shipping"},
+                      3: {"ai_server", "advanced_packaging", "earnings", "finance"}}
+    assert sorted(found) == ["新聞 0", "新聞 1", "新聞 3"]
+
+
+def test_by_topic_does_not_compare_every_pair_of_a_big_group(engine, commercial_md, settings, monkeypatch):
+    """A week of a busy theme: counting and picking the newest few must not run the pairwise near-duplicate check
+    over the whole group (1,500 headlines took ~15 s that way)."""
+    rng = random.Random(7)
+    n = 1500
+    with Session(engine) as db:
+        for i in range(n):
+            u = f"https://money.udn.com/money/story/{i}"
+            title = "".join(chr(rng.randrange(0x4E00, 0x9FA5)) for _ in range(20))
+            db.add(NewsArticle(symbol="2330.TW", url_key=url_key(u), url=u, title=title, outlet="經濟日報",
+                               domain="money.udn.com", published_at=NOW - timedelta(minutes=i), source="gdelt",
+                               fetched_at=NOW))
+            db.add(NewsTag(url_key=url_key(u), kind="theme", value="market_moves"))
+        # an exact copy under another URL counts once
+        u = "https://money.udn.com/money/story/copy"
+        db.add(NewsArticle(symbol="2330.TW", url_key=url_key(u), url=u, title=title, outlet="經濟日報",
+                           domain="money.udn.com", published_at=NOW - timedelta(minutes=n), source="gdelt",
+                           fetched_at=NOW))
+        db.add(NewsTag(url_key=url_key(u), kind="theme", value="market_moves"))
+        db.commit()
+        calls = 0
+        real = normalize.similar_titles
+
+        def counting(a: str, b: str) -> bool:
+            nonlocal calls
+            calls += 1
+            return real(a, b)
+
+        monkeypatch.setattr(normalize, "similar_titles", counting)
+        groups = tags.by_topic(db, commercial_md, "theme", NOW - timedelta(days=7), NOW + timedelta(minutes=1),
+                               settings=settings)
+    assert [(g["label"], g["count"], len(g["items"])) for g in groups] == [("大盤行情", n, 5)]
+    assert groups[0]["items"][0]["url"] == "https://money.udn.com/money/story/0"
+    assert calls < 500  # the whole group pairwise would be about n² / 2 ≈ 1.1 million

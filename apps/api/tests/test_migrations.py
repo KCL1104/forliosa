@@ -146,10 +146,12 @@ def test_news_tags_tables_and_url_key_index_both_ways(tmp_path):
         assert {"news_tags", "news_tag_state"} <= set(inspector.get_table_names())
         assert "ix_news_tags_kind_value" in {i["name"] for i in inspector.get_indexes("news_tags")}
         assert "ix_news_articles_url_key" in {i["name"] for i in inspector.get_indexes("news_articles")}
+        assert "batch_limit" in {c["name"] for c in inspector.get_columns("news_tag_state")}
         with engine.begin() as conn:
             conn.execute(text("INSERT INTO news_tags (url_key, kind, value) VALUES ('k1', 'theme', 'ai_server')"))
             _insert(conn, "news_tag_state", {"url_key": "k1", "status": "done"})
-            assert tuple(conn.execute(text("SELECT attempts, taxonomy_version FROM news_tag_state")).one()) == (0, 0)
+            assert tuple(conn.execute(text(
+                "SELECT attempts, taxonomy_version, batch_limit FROM news_tag_state")).one()) == (0, 0, None)
             assert conn.execute(text(
                 "SELECT a.title FROM news_tags t JOIN news_articles a ON a.url_key = t.url_key "
                 "WHERE t.kind = 'theme' AND t.value = 'ai_server'")).scalars().all() == ["台積電新聞"]
