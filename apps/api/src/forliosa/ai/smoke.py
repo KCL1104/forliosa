@@ -12,6 +12,12 @@ printed with the usage.
 ``--keys`` only sends one tiny request (``max_tokens=1``) through every key slot and prints each slot's workspace id,
 to check that ``CLAUDE_API_KEY_1..3`` really belong to three different workspaces (cost: a few millionths of a USD).
 
+``--tw-news`` (needs ``AI_LANGSEARCH_ENABLED`` and ``LANGSEARCH_API_KEY``; in the sandbox ``proxy-injected``) asks
+「台積電最新的目標價」, 「智邦最近有什麼消息」 and 「今天台股為什麼漲跌」, then one follow-up in the first thread, and
+checks that every Taiwan answer called ``tw_news_search``, that no citation carries a LangSearch excerpt (its title
+line instead) and that the follow-up succeeds on the scrubbed history (or through the recap). It prints counts,
+statuses, cost and slot numbers only — no answer text, no excerpt.
+
 ``--analyst 2330.TW NVDA`` runs the analyst-views generation (``forliosa.ai.analyst.run_model``: web search,
 ``report_analyst_views``, grounding) for each symbol (at most 2) without touching the database, and prints the
 searches, every search result's ``page_age``, the model's candidates, the verified items, the dropped ones with
@@ -144,6 +150,79 @@ def check_analyst(pool, settings, symbols: list[str]) -> int:
     return 1 if failed else 0
 
 
+TW_NEWS_QUESTIONS = [("台積電最新的目標價", "/stock/2330.TW", "2330.TW"),
+                     ("智邦最近有什麼消息", "/stock/2345.TW", "2345.TW"),
+                     ("今天台股為什麼漲跌", "/", None)]
+
+
+def cites_excerpt(cited_text: str, excerpts: list[str], lines: set[str]) -> bool:
+    """A citation carries a LangSearch excerpt: its text is not one of the title lines (「媒體，11/10：標題」, what a
+    redacted citation carries) and repeats an excerpt word for word (12 characters or more). Only the excerpts
+    count, not the 「媒體，日期：」 before them: a title line starts the same way (2026-11-17 review:
+    「Yahoo股市，11/10：」 alone is 14 characters)."""
+    from forliosa.ai import tw_news
+    from forliosa.ai.chat import copied_spans
+
+    return cited_text not in lines and bool(copied_spans(cited_text, tw_news.excerpt_texts(excerpts)))
+
+
+def check_tw_news(db, user, md, pool, settings) -> int:
+    """The manual live check of tw_news_search (round-2 recommendation §9.9). Counts only. 1 when a check failed."""
+    from forliosa.ai import tools as tools_mod
+    from forliosa.ai import tw_news
+
+    if not settings.ai_langsearch_on:
+        print("AI_LANGSEARCH_ENABLED 沒開或沒有 LANGSEARCH_API_KEY（沙盒：設成 proxy-injected），沒有執行")
+        return 2
+    excerpts: list[str] = []
+    lines: set[str] = set()
+    real = tw_news.tw_news_search
+
+    def spy(ctx, args):  # the excerpts stay in this process's memory, to check the citations against
+        out = real(ctx, args)
+        if isinstance(out, tools_mod.Citable):
+            excerpts.extend(it["text"] for it in out.items if it.get("private"))
+            lines.update(it["safe_text"] for it in out.items if it.get("private"))
+        return out
+
+    tw_news.tw_news_search = spy
+    failed = False
+    total = 0.0
+    first_thread = None
+    try:
+        asked = [*TW_NEWS_QUESTIONS, ("那法說會呢？", "/stock/2330.TW", "2330.TW")]
+        for n, (question, route, symbol) in enumerate(asked, start=1):
+            follow_up = n == len(asked)
+            turn = ChatTurn(db, user, md, pool, settings)
+            called, statuses, cites, leaks, errors, cost = 0, [], 0, 0, [], 0.0
+            for name, data in turn.run(thread_id=first_thread if follow_up else None, message=question, route=route,
+                                       symbol=symbol, privacy=False):
+                if name == "thread" and n == 1:
+                    first_thread = data["id"]
+                elif name == "tool" and data["name"] == "tw_news_search" and data["status"] != "running":
+                    called += 1
+                    statuses.append(data["status"])
+                elif name == "citation":
+                    cites += 1
+                    leaks += cites_excerpt(data.get("cited_text") or "", excerpts, lines)
+                elif name == "error":
+                    errors.append(data["code"])
+                elif name == "done":
+                    u = CallUsage(**data["usage"])
+                    cost = float(estimate_cost(data["model"], u))
+                    total += cost
+            ok = (called > 0 or follow_up) and not leaks and not errors
+            failed = failed or not ok
+            which = "（同一段對話的追問）" if follow_up else ""
+            print(f"{'✓' if ok else '✗'} 第 {n} 題{which}：tw_news_search {called} 次"
+                  f"（{'、'.join(statuses) or '—'}）、引用 {cites} 個、含摘錄的引用 {leaks} 個、錯誤 "
+                  f"{'、'.join(errors) or '無'}；估計 US${cost:.5f}；金鑰槽 #{turn.slot.index if turn.slot else '?'}")
+    finally:
+        tw_news.tw_news_search = real
+    print(f"合計估計 US${total:.5f}；摘錄 {len(excerpts)} 則（只在記憶體）")
+    return 1 if failed else 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Forliosa AI live smoke test (real API, small cost)")
     parser.add_argument("--only", type=int, choices=[1, 2, 3], help="run only question 1, 2 or 3")
@@ -153,6 +232,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--keys", action="store_true", help="only check which workspace each key slot belongs to")
     parser.add_argument("--analyst", nargs="+", metavar="SYMBOL",
                         help="only run the analyst-views generation for these stocks (at most 2)")
+    parser.add_argument("--tw-news", action="store_true",
+                        help="only run the live check of tw_news_search (three questions and a follow-up)")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING, format="%(levelname)s %(name)s: %(message)s")
     settings = get_settings()
@@ -171,6 +252,9 @@ def main(argv: list[str] | None = None) -> int:
     failed = False
     grand = CallUsage()
     grand_cost = 0.0
+    if args.tw_news:
+        with session_factory()() as db:
+            return check_tw_news(db, _demo_user(db), get_market_data(), pool, settings)
     with session_factory()() as db:
         user = _demo_user(db)
         md = get_market_data()

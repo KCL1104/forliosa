@@ -113,6 +113,15 @@ class AdminLangSearch(BaseModel):
     warning: Literal["contents_cap_ignored"] | None = Field(
         description="contents_cap_ignored：回應的 token 遠超過上限，字數限制沒有生效，今天停用")
     tiers: dict[str, int] = Field(description="各分級的檔數：large、mid、small、quiet")
+    ai_enabled: bool = Field(False, description="AI_LANGSEARCH_ENABLED 開著而且有 LANGSEARCH_API_KEY（AI 對話等先查 "
+                                                "LangSearch）")
+    ai_requests: int = Field(0, description="AI 今天送出的請求數（和新聞排程分開算）")
+    ai_request_cap: int = Field(0, description="AI_LANGSEARCH_MAX_REQUESTS_PER_DAY")
+    ai_tokens: int = Field(0, description="AI 今天用掉的 token（input + output）")
+    ai_token_cap: int = Field(0, description="AI_LANGSEARCH_MAX_TOKENS_PER_DAY")
+    ai_stopped: Literal["quota", "contract", "blocked"] | None = Field(
+        None, description="AI 今天為什麼停下：contract（回應超過 AI_LANGSEARCH_TOKEN_GUARD，只停 AI）；quota／blocked"
+                          "（AI 的請求被擋，整把金鑰和新聞排程一起停到 00:00 UTC，stopped 也會顯示）")
 
 
 class AdminNews(BaseModel):

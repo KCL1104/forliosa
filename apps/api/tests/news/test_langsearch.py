@@ -714,6 +714,87 @@ def test_degradation_ladder(engine, commercial_md, lset):
         assert rep.level == 2 and fake.queries == ["台股 盤後", "外資 買賣超", "台股 大盤", '"聯發科"']
 
 
+# -- the AI's requests beside the worker's (2026-11-17 review) -------------------------------------------------------
+def test_a_late_reply_does_not_lift_a_refusal(engine, commercial_md, lset):
+    """Two AI requests in flight (chat turns, the card, 為什麼漲跌): B is refused (429) and booked first, then A's 200
+    comes back. A's booking must not lift the stop until 00:00 UTC, and the worker's next pass stays held back."""
+    with Session(engine) as db:
+        view(db, "2330.TW", "2317.TW")
+        b = ls.ChatAnswer("q")
+        assert ls._chat_outcome(db, lset, NOW.date(), lambda: NOW, ls.Reply(429, {}, 0, 0, 1.0), b) == "quota"
+        a = ls.ChatAnswer("q")
+        later = NOW + timedelta(seconds=3)
+        assert ls._chat_outcome(db, lset, NOW.date(), lambda: later, ls.Reply(200, answer(), 5, 30, 4.0), a) is None
+        assert a.error is None and not service._source_open(db, ls.SOURCE_KEY, later)
+        assert wide(db).last_status == "rate_limited" and aware(wide(db).backoff_until) == MIDNIGHT
+        # timeouts booked after it (two in a row would pause 15 minutes) do not shorten the stop either
+        ls._note_down(db, later)
+        timed_out = ls.ChatAnswer("q")
+        assert ls._chat_outcome(db, lset, NOW.date(), lambda: later, SourceDown("timeout"), timed_out) == "unreachable"
+        assert wide(db).last_status == "rate_limited" and aware(wide(db).backoff_until) == MIDNIGHT
+        fake = FakeLangSearch()
+        rep = run(db, commercial_md, lset, fake, now=NOW + timedelta(minutes=10))
+        assert rep.skipped == "paused" and fake.requests == []
+        # the next UTC day: open again, and the first answer clears what is left of it
+        rep = run(db, commercial_md, lset, FakeLangSearch(), now=datetime(2026, 11, 18, 8, 5, tzinfo=TAIPEI))
+        assert rep.requests >= 1 and wide(db).backoff_until is None
+
+
+def test_an_ai_refusal_during_a_pass_stops_it(engine, commercial_md, lset):
+    """The worker's pass checks the key before each request: an AI request refused while the pass's first request
+    was out stops the pass (it went on for the rest of its tasks), and the pass's own answer does not lift it."""
+    def refused_meanwhile(request: httpx.Request) -> httpx.Response:
+        with Session(engine) as other:  # an AI request of the API process, refused while this one is out
+            ls._book_outcome(other, NOW.date(), NOW, ls.LangSearchQuota("LangSearch HTTP 429"), 1000, side="chat")
+        return httpx.Response(200, json=answer())
+
+    fake = FakeLangSearch(refused_meanwhile, answer())
+    with Session(engine) as db:
+        view(db, "2330.TW", "2317.TW", "2454.TW")  # 3 topics + 3 stocks
+        rep = run(db, commercial_md, lset, fake)
+        assert len(fake.requests) == 1 and rep.stopped == "quota"
+        assert not service._source_open(db, ls.SOURCE_KEY, NOW) and wide(db).last_status == "rate_limited"
+        # the worker was not refused: its day (and so its ladder) has no hit; the key is stopped all the same
+        assert ls.read_usage(db, NOW.date()).stopped == "" and ls.key_stopped(db, NOW.date()) == "quota"
+        assert ls.status(db, lset, NOW)["stopped"] == "quota"
+
+
+def test_ai_refusals_leave_the_workers_ladder_alone(engine, commercial_md, lset):
+    """2026-11-17 review: an AI 429 was written on the worker's day, and the ladder took the worker's own count
+    (requests − 1) as what went through: two such days set its cap to 0 for a week. The worker's ladder now counts
+    only its own refusals; the stop until 00:00 UTC is still shared."""
+    today = NOW.date()
+    with Session(engine) as db:
+        for n in (1, 2):
+            day, at = today - timedelta(days=n), NOW - timedelta(days=n)
+            ls._bump_chat(db, day, requests=150, at=at)
+            ls._book_outcome(db, day, at, ls.LangSearchQuota("LangSearch HTTP 429"), 1000, side="chat")
+            assert ls.read_usage(db, day).stopped == "" and ls.read_chat_usage(db, day).stopped == "quota"
+        assert ls.day_cap(db, lset, today) == (ls.Ladder(0, None), lset.news_langsearch_max_requests_per_day)
+        view(db, "2330.TW")
+        rep = run(db, commercial_md, lset, FakeLangSearch())
+        assert (rep.level, rep.cap, rep.requests, rep.stopped) == (0, 250, 4, None)  # 3 topics + 1 stock
+
+
+def test_level_two_keeps_its_topics_and_held_large_caps(engine, commercial_md, lset):
+    """The worker refused at its first request two days in a row: 80 % of nothing is a cap of 0. Level 2 is meant
+    to keep the topics and the held or watched large caps: they still run."""
+    today = NOW.date()
+    with Session(engine) as db:
+        for n in (1, 2):
+            row = ls._row(db, ls.usage_key(today - timedelta(days=n)))
+            row.items, row.last_status, row.last_success_at = 1, "quota", NOW - timedelta(days=n)
+        db.commit()
+        assert ls.day_cap(db, lset, today) == (ls.Ladder(2, 0), 0)
+        view(db, "2330.TW", "2454.TW")
+        booked(db, "2454.TW", "large", NOW - timedelta(days=1))
+        booked(db, "2330.TW", "large", NOW - timedelta(days=1))
+        fake = FakeLangSearch()
+        rep = run(db, commercial_md, lset, fake, held={"2454.TW"})
+        assert rep.level == 2 and rep.stopped is None and rep.cap == 4
+        assert fake.queries == ["台股 盤後", "外資 買賣超", "台股 大盤", '"聯發科"']
+
+
 # -- 12. the gap between requests -----------------------------------------------------------------------------------
 def test_interval_across_processes(engine, commercial_md, lset):
     settings = lset.model_copy(update={"news_langsearch_topics": []})

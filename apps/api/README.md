@@ -311,7 +311,10 @@ src/forliosa/
 | `NEWS_TAGGING_MONTHLY_BUDGET_USD` | worker | `3` | 新聞標籤每個 UTC 月份的上限（`ai_usage.feature = 'news_tagging'`，不算任何人的額度）；0＝不貼 |
 | `NEWS_TAGGING_BATCH_SIZE`、`NEWS_TAGGING_MAX_BATCHES`、`NEWS_TAGGING_DAYS`、`AI_MODEL_NEWS_TAGGING` | worker | `50`、`4`、`7`、空 | 一個請求幾則（最多 50）、每次最多幾個請求、只貼最近幾天的（最多 90）、模型（空＝`AI_MODEL`） |
 | `NEWS_LANGSEARCH_ENABLED` | **只放 worker** | `false` | LangSearch 台股新聞（2026-11-17）：只在正式環境 Railway worker 設成 `true`；關著時沒有這個工作，什麼都不送 |
-| `LANGSEARCH_API_KEY` | **只放 worker** | 空 | LangSearch 的金鑰（`Authorization: Bearer`）；沒有就不跑；不會寫進 log。雲端沙盒手動測試時設成 `proxy-injected`（proxy 代入真正的憑證） |
+| `LANGSEARCH_API_KEY` | worker；開 `AI_LANGSEARCH_ENABLED` 時 API 也要 | 空 | LangSearch 的金鑰（`Authorization: Bearer`）；沒有就不跑；不會寫進 log。雲端沙盒手動測試時設成 `proxy-injected`（proxy 代入真正的憑證） |
+| `AI_LANGSEARCH_ENABLED` | **只放 API**（對話、法人卡片、為什麼漲跌都在 API 服務產生） | `false` | AI 先查 LangSearch（2026-11-17 產品負責人決定）：對話的 `tw_news_search`（台股新聞、為什麼漲跌、法人目標價、法說會、營收、配息、大盤）、個股頁的法人觀點卡片（至少 2 家具名機構才用）與「為什麼漲跌」一句話；沒有可用的結果才用 Claude 的網路搜尋。內文只在當次交給 Claude，不存、不顯示（引用只帶「媒體，日期：標題」；卡片只存整理後的欄位與連結）。只在正式環境 Railway 打開；關著或沒有金鑰時和以前一樣 |
+| `AI_LANGSEARCH_MAX_REQUESTS_PER_DAY`、`AI_LANGSEARCH_MAX_TOKENS_PER_DAY` | API | `300`、`3000000` | AI 每個 UTC 日的請求數與 token 上限（對話、法人卡片、為什麼漲跌合用；和新聞排程的上限分開算）。到了以後對話的工具叫模型改用網路搜尋，卡片與為什麼漲跌直接用網路搜尋 |
+| `AI_LANGSEARCH_MAX_REQUESTS_PER_TURN`、`AI_LANGSEARCH_IN_ECONOMY`、`AI_LANGSEARCH_TOKEN_GUARD` | API | `3`、`true`、`20000` | 每一題最多幾次請求（慢的空結果重送不算）；省錢模式保留工具；單次回應超過幾個 token 就當天停用 AI 的部分（新聞排程照常） |
 | `NEWS_LANGSEARCH_MAX_REQUESTS_PER_DAY`、`NEWS_LANGSEARCH_MAX_TOKENS_PER_DAY`、`NEWS_LANGSEARCH_MAX_FIRST_FILL_PER_DAY`、`NEWS_LANGSEARCH_TOKEN_GUARD` | worker | `250`、`50000`、`100`、`1000` | 每個 UTC 日的請求數、token、第一次查的檔數上限；單次回應超過 `TOKEN_GUARD` 個 output token 就當天停用 |
 | `NEWS_LANGSEARCH_TOPICS_AT`、`NEWS_LANGSEARCH_STOCKS_AFTER`、`NEWS_LANGSEARCH_TOPICS` | worker | `16:00`、`18:30`、`台股 盤後,外資 買賣超,台股 大盤` | 台北時間：交易日查大盤的時間、每天查個股的開始時間；大盤的查詢句（不加引號） |
 | `NEWS_LANGSEARCH_EVERY_DAYS`、`NEWS_LANGSEARCH_QUIET_AFTER_EMPTY` | worker | `large=1,mid=2,small=4,quiet=7`、`4` | 各分級幾天查一次；小型股連續幾次 0 則改成安靜（每 7 天） |

@@ -177,6 +177,9 @@ def langsearch_status() -> int:
     if st["warning"]:
         print("警告：回應超過 token 上限（contents 的字數上限沒有生效），今天停用")
     print("分級：" + "、".join(f"{k} {v}" for k, v in st["tiers"].items()))
+    ai_stop = f"、今天停下：{st['ai_stopped']}" if st["ai_stopped"] else ""
+    print(f"AI（對話、法人觀點、為什麼漲跌）：{'開' if st['ai_enabled'] else '關'}；請求 {st['ai_requests']}／"
+          f"{st['ai_request_cap']} 次、token {st['ai_tokens']}／{st['ai_token_cap']}{ai_stop}")
     return 0
 
 

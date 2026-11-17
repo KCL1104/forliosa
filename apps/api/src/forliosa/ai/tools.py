@@ -117,6 +117,10 @@ class ToolContext:
     # AI test: the model re-sent one sell three times when it could not see how to change its date)
     drafted: dict[str, dict[str, Any]] = field(default_factory=dict)
     message: str = ""  # the user's message this turn: a day it names fills a draft's omitted trade_date
+    economy: bool = False  # 省錢模式: no web search this turn (notes never point to it)
+    # tw_news_search's use this turn (``forliosa.ai.tw_news.TwNewsTurn``: requests, the per-turn cap, results by
+    # arguments); None when the tool is not offered. One object shared by the tools that run side by side.
+    tw_news: Any = None
 
 
 @dataclass
@@ -126,7 +130,10 @@ class Citable:
     and the answer lists it under 「出處」 with its outlet. The API takes a tool result made only of search results
     (no text block beside them), so what the model needs to know about them is in the tool's description."""
 
-    items: list[dict[str, Any]]  # {url, title, outlet, text, note?}; note: a second text block (the news tags)
+    # {url, title, outlet, text, note?, safe_text?, private?}; note: a second text block (the news tags). A
+    # ``private`` item's text (a LangSearch excerpt) reaches the model in this turn only: citations, the stored turn and
+    # the shared research carry its ``safe_text`` (the title line) instead (``forliosa.ai.tw_news``)
+    items: list[dict[str, Any]]
 
 
 @dataclass
@@ -136,6 +143,8 @@ class ToolOutcome:
     draft: dict[str, Any] | None = None
     chart: dict[str, Any] | None = None
     outlets: dict[str, str] = field(default_factory=dict)  # url -> outlet of the citable items (出處 shows the outlet)
+    redact: dict[str, str] = field(default_factory=dict)  # url -> title line of the private items (tw_news_search)
+    private_texts: list[str] = field(default_factory=list)  # their texts: this turn's paste check only, never stored
 
 
 def citable_content(result: Citable) -> list[dict[str, Any]]:
@@ -159,6 +168,9 @@ class ToolSpec:
     # required in the schema but "" means "not given" (strict schemas allow at most 24 optional parameters in all, so a
     # tool with several filters takes them as required strings: search_news)
     blank_ok: tuple[str, ...] = ()
+    # The API takes at most 20 strict tools in a request: a tool past those is not strict and checks its own arguments
+    # (tw_news_search; 2026-11-17: a 21st strict tool was answered with a 400)
+    strict: bool = True
 
     def definition(self, eager: bool = False) -> dict[str, Any]:
         d: dict[str, Any] = {
@@ -166,8 +178,9 @@ class ToolSpec:
             "description": self.description,
             "input_schema": {"type": "object", "properties": self.properties, "required": list(self.required),
                              "additionalProperties": False},
-            "strict": True,
         }
+        if self.strict:
+            d["strict"] = True
         if eager:
             d["eager_input_streaming"] = True
         return d
@@ -866,7 +879,9 @@ def get_news(ctx: ToolContext, args: dict[str, Any]) -> Any:
             "sources": list(dict.fromkeys(x for n in items for x in n.get("sources") or [])),
         }
         if not items:
-            out["note"] = "最近沒有公告或媒體標題；需要新聞時請改用 web_search"
+            out["note"] = ("最近沒有公告或媒體標題；台股的新聞報導用 tw_news_search（intent news）找"
+                           if ctx.tw_news is not None and info.market != "US"
+                           else "最近沒有公告或媒體標題；需要新聞時請改用 web_search")
         return out
 
     def outlet(n: dict[str, Any]) -> str:
@@ -941,6 +956,19 @@ _ANALYST_NOTES = {"none": f"個股頁的法人觀點今天還沒有人查；{_AN
                   "pending": f"個股頁的法人觀點還在整理；{_ANALYST_SEARCH}",
                   "unavailable": f"個股頁的法人觀點這次沒有查到；{_ANALYST_SEARCH}"}
 _UNNAMED_LABEL = re.compile(r"^未具名外資(?:（(.+?)）)?$")
+_ANALYST_WHEN = {"none": "個股頁的法人觀點今天還沒有人查", "pending": "個股頁的法人觀點還在整理",
+                 "unavailable": "個股頁的法人觀點這次沒有查到"}
+
+
+def _analyst_note(ctx: ToolContext, info: InstrumentInfo, status: str) -> str:
+    """Where to look when the card has nothing yet: a Taiwan stock with tw_news_search offered asks it first (the
+    round-2 A/B's wording), then the web — or, in 省錢模式, says there is no data; otherwise the web, as before."""
+    if ctx.tw_news is None or info.market == "US":
+        return _ANALYST_NOTES.get(status, _ANALYST_NOTES["none"])
+    then = ("這一題沒有網路搜尋，回答目前沒有機構評等與目標價的資料" if ctx.economy
+            else "再用 web_search 找新聞報導裡機構最新的評等與目標價")
+    return (f"{_ANALYST_WHEN.get(status, _ANALYST_WHEN['none'])}；台股先用 tw_news_search（intent analyst_targets）找，"
+            f"它回 status none 時，{then}")
 
 
 def _price_text(x: float) -> str:
@@ -980,7 +1008,7 @@ def get_analyst_views(ctx: ToolContext, args: dict[str, Any]) -> Any:
     items = [it for it in views["items"] if str(it.get("url") or "").startswith("http")] \
         if views["status"] == "ready" else []
     if not items:
-        note = _ANALYST_NOTES.get(views["status"], _ANALYST_NOTES["none"])
+        note = _analyst_note(ctx, info, views["status"])
         if views["status"] == "ready":  # looked recently and found none: the chat says so, like the card
             asked = datetime.fromisoformat(views["as_of"]) if views.get("as_of") else None
             when = f"{asked.month}/{asked.day} " if asked else ""
@@ -990,6 +1018,26 @@ def get_analyst_views(ctx: ToolContext, args: dict[str, Any]) -> Any:
     today = today_taipei()
     return Citable([{"url": it["url"], "title": it.get("source_title") or info.name, "outlet": "",
                      "text": _analyst_line(it, today)} for it in items])
+
+
+TW_NEWS_TOOL = "tw_news_search"
+_TW_NEWS_WORDS = {"news": "新聞", "why_move": "漲跌原因", "analyst_targets": "目標價", "earnings_call": "法說會",
+                  "revenue": "營收", "dividend": "配息"}
+
+
+def tw_news_search(ctx: ToolContext, args: dict[str, Any]) -> Any:
+    """LangSearch for one Taiwan stock or the Taiwan market (``forliosa.ai.tw_news``)."""
+    from forliosa.ai import tw_news
+
+    return tw_news.tw_news_search(ctx, args)
+
+
+def _tw_news_label(a: dict[str, Any]) -> str:
+    intent = a.get("intent")
+    if intent == "market":
+        return "搜尋台灣新聞：大盤"
+    sym = str(a.get("symbol") or "").strip().upper()[:20]
+    return " ".join(x for x in (f"搜尋台灣新聞：{sym}", _TW_NEWS_WORDS.get(str(intent), "新聞")) if x)
 
 
 def get_position(ctx: ToolContext, args: dict[str, Any]) -> Any:
@@ -1406,6 +1454,35 @@ TOOLS: list[ToolSpec] = sorted([
              "the web for news articles instead. Call this first when the user asks about a stock's ratings, "
              "target prices or what brokers think of it.",
              {"symbol": _SYMBOL}, ("symbol",), get_analyst_views, _sym_label("查看 ", " 法人觀點")),
+    ToolSpec(TW_NEWS_TOOL,
+             "Search Taiwan news sites for one Taiwan-listed stock (or, with intent market, today's Taiwan market "
+             "wrap). Returns up to 10 recent articles as search results: title, outlet, a checked report date and a "
+             "short excerpt (at most 300 characters) of the part of the article that matches the intent. The server "
+             "writes the search query itself (the company's short name plus the intent's words) and keeps only "
+             "Taiwan news outlets; it drops quote, warrant and forum pages and articles not about this company, and "
+             "checks each date against the URL where it can (an item marked 日期依搜尋引擎 has only the search "
+             "engine's date; one marked 日期未確認 has no reliable date: write no date for it and do not present it "
+             "as recent). Intents: news (latest company news), why_move (the company's news since the day before the "
+             "last trading day, for why a stock moved), analyst_targets (brokers' ratings and target prices of the "
+             "last 90 days), earnings_call (法說會 and guidance), revenue (how the media read the monthly revenue), "
+             "dividend (dividend decisions), market (no symbol: today's Taiwan market wrap). days: only for intent "
+             "news, 1-30; 0 uses the default. Cite the item a sentence relies on and write its facts in your own words "
+             "(never copy the excerpt or the title); give each fact the item's date. For analyst_targets: one "
+             "excerpt may list several brokers, write one line per broker; keep only each broker's newest report; a "
+             "broker named only by region (美系外資) is 一家美系外資; leave out 本土投顧, 國內投顧 and 法人 without "
+             "a firm name; when a newer report says brokers cut targets without numbers, do not present an older "
+             "number as the latest; a figure the excerpt dates to an earlier year is not current; unless the user "
+             "asked about one broker, list every broker the results name (one line each, newest first), not only the "
+             "newest. Official figures (closing prices, monthly revenue, EPS, dividends, announcements) come from "
+             "the other tools; use this for what the media reported and how the market read it. Taiwan stocks only: "
+             "US stocks, foreign news and macro use web_search. Call it once per intent; status none means nothing "
+             "was found: do not retry it with other words, follow its note.",
+             {"symbol": {"type": "string",
+                         "description": "Taiwan stock code or name, e.g. 2330, 台積電; \"\" for intent market"},
+              "intent": {"type": "string", "enum": ["news", "why_move", "analyst_targets", "earnings_call", "revenue",
+                                                    "dividend", "market"]},
+              "days": {"type": "integer", "description": "Only for intent news: days back, 1-30; 0 for the default"}},
+             ("symbol", "intent", "days"), tw_news_search, _tw_news_label, blank_ok=("days",), strict=False),
     ToolSpec("get_position",
              "The user's own position in one stock: shares, average cost, cost basis, market value, unrealized and "
              "realized P&L, dividends received, today's change, the next dividend estimate and recent trades. Call "
@@ -1468,8 +1545,17 @@ TOOLS: list[ToolSpec] = sorted([
 TOOLS_BY_NAME = {t.name: t for t in TOOLS}
 
 
-def client_tool_definitions(settings: Settings) -> list[dict[str, Any]]:
-    return [t.definition(eager=settings.ai_eager_tool_streaming) for t in TOOLS]
+def tw_news_offered(settings: Settings, *, economy: bool = False, deep: bool = False) -> bool:
+    """tw_news_search is in the tool list: AI_LANGSEARCH_ENABLED with a key, not in 深度搜尋 (left as it was), and
+    in 省錢模式 only with AI_LANGSEARCH_IN_ECONOMY. The same answer for every turn of a kind (the cached prefix)."""
+    return settings.ai_langsearch_on and not deep and (not economy or settings.ai_langsearch_in_economy)
+
+
+def client_tool_definitions(settings: Settings, *, economy: bool = False, deep: bool = False) -> list[dict[str, Any]]:
+    """The client tools, sorted by name (a deterministic list: part of the cached prefix); tw_news_search only when
+    offered (``tw_news_offered``)."""
+    tw = tw_news_offered(settings, economy=economy, deep=deep)
+    return [t.definition(eager=settings.ai_eager_tool_streaming) for t in TOOLS if t.name != TW_NEWS_TOOL or tw]
 
 
 def _domains(values: list[str], defaults: dict[str, list[str]]) -> list[str]:
@@ -1627,5 +1713,8 @@ def execute(ctx: ToolContext, name: str, args: Any) -> ToolOutcome:
     chart = ctx.charts[-1] if len(ctx.charts) > charts_before else None
     if isinstance(result, Citable):
         outlets = {it["url"]: it["outlet"] for it in result.items if it.get("outlet")}
-        return ToolOutcome(citable_content(result), draft=draft, chart=chart, outlets=outlets)
+        private = [it for it in result.items if it.get("private")]
+        return ToolOutcome(citable_content(result), draft=draft, chart=chart, outlets=outlets,
+                           redact={it["url"]: it["safe_text"] for it in private},
+                           private_texts=[it["text"] for it in private])
     return ToolOutcome(dump(result), draft=draft, chart=chart)

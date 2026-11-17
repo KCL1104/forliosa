@@ -64,7 +64,7 @@ import logging
 import math
 import re
 import time
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
@@ -77,10 +77,10 @@ from sqlalchemy import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from forliosa import plans
-from forliosa.ai import grounding, research, scope, store
+from forliosa.ai import grounding, research, scope, store, tw_news
 from forliosa.ai.keypool import Failure, KeyPool, KeysBusy, KeySlot, NoKeyAvailable, classify_failure
 from forliosa.ai.pricing import CallUsage
-from forliosa.ai.prompts import CHAT_SYSTEM, DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, page_context
+from forliosa.ai.prompts import DISCLAIMER, EDITOR_SYSTEM, OFF_TOPIC_REPLY, chat_system, page_context
 from forliosa.ai.tools import (
     CHAT_BLOCKED_DOMAINS,
     ToolContext,
@@ -92,6 +92,7 @@ from forliosa.ai.tools import (
     rejected_tool,
     server_tools,
     tool_label,
+    tw_news_offered,
 )
 from forliosa.config import Settings
 from forliosa.ids import new_id
@@ -160,6 +161,12 @@ class TurnState:
     # Where the held-back answer starts in ``display.text``: after web search or the news tool the answer is not
     # streamed as it is written; ``ChatTurn._edit`` rewrites it once and streams the result (None: nothing held)
     held_from: int | None = None
+    # tw_news_search's results (``forliosa.ai.tw_news``): url -> title line, which a citation, the stored turn and the
+    # shared research carry instead of the excerpt; and the excerpts' texts, for the answer editor's paste and number
+    # checks and the removal of a copy of their wording (``drop_wording_copies``) in this turn only (in memory, never
+    # logged, sent or stored)
+    redact: dict[str, str] = field(default_factory=dict)
+    private_texts: list[str] = field(default_factory=list)
 
     def add_text(self, s: str) -> None:
         self.display.text += s
@@ -345,6 +352,113 @@ def strip_pastes(text: str, sources: Iterable[str]) -> str:
             cut.append((a, b))
     for a, b in reversed(cut):
         text = text[:a] + text[b:]
+    return text
+
+
+# A LangSearch excerpt's own wording copied into the answer (2026-11-17 review; 產品負責人: the excerpt is 不存、不顯示
+# 原文): the sentence holding it is left out of what is shown, stored (``ai_messages.text`` and ``content``) and
+# replayed (``copied_sentences``), after the editor was asked to rewrite it (``EDITOR_COPIES``). A copy that restates
+# figures — 「目標價調升至 1,500 元，維持加碼評等」, 「10 月營收 3,367.6 億元，月增 7.1%，年增 16.9%」 — is the fact
+# itself and stays, or the next turn replays an answer without its facts; a copy with a stretch of at least this many
+# of the source's words between two figures (「先進製程需求強勁，維持買進評等」: 14) is its wording and goes.
+_WORDING_COPY = 14
+_FIGURE = re.compile(r"\d+(?:[.,]\d+)*")
+_SENTENCE_END = "。！？!?"
+_CLOSERS = "」』）)】》〉”’\"'"
+# A line's list marker (or heading marks) before its first sentence, and a line left with nothing else
+_MARKER = re.compile(r"[ \t]*(?:(?:[-*+•]|\d+[.)、]|#{1,6})[ \t]+)?")
+_BARE = re.compile(r"[ \t]*(?:[-*+•]|\d+[.)、]|#{1,6})?[ \t]*[。！？!?，,、；;：:*]*[ \t]*")
+# Shown (and stored) when every sentence of an answer copied an excerpt's wording, the editor's rewrite included
+COPY_REMOVED = "回答照抄了報導的原文，所以沒有顯示，請再問一次。"
+# The editor gets the draft's copies marked (``mark_copies``) and this rule beside EDITOR_SYSTEM
+COPY_OPEN, COPY_CLOSE = "⟦", "⟧"
+EDITOR_COPIES = (f"- 用 {COPY_OPEN} {COPY_CLOSE} 括起來的字是照抄新聞報導原文的：每一處都要改寫成你自己的說法（意思、"
+                 f"事實、數字與日期保留，句子結構和用字都換掉），輸出裡不要出現 {COPY_OPEN} {COPY_CLOSE}。")
+
+
+def wording_copies(text: str, excerpts: Iterable[str]) -> list[tuple[int, int]]:
+    """Where ``text`` copies an excerpt word for word (``copied_spans``) with a stretch of at least ``_WORDING_COPY``
+    words (Chinese characters or Latin letters) between figures."""
+    return [(a, b) for a, b in copied_spans(text, excerpts)
+            if any(len(_OWN_WORD.findall(part)) >= _WORDING_COPY for part in _FIGURE.split(text[a:b]))]
+
+
+def _sentences(line: str) -> list[tuple[int, int]]:
+    """The sentences of one line after its list marker, each up to and including its end (。！？!?, the closing
+    quotes or brackets and the spaces after it); a last one without an end runs to the end of the line."""
+    i = start = _MARKER.match(line).end()  # type: ignore[union-attr]  # it matches the empty string too
+    out, n = [], len(line)
+    while i < n:
+        if line[i] in _SENTENCE_END:
+            i += 1
+            while i < n and (line[i] in _CLOSERS or line[i] in _SENTENCE_END):
+                i += 1
+            while i < n and line[i] in " \t":
+                i += 1
+            out.append((start, i))
+            start = i
+        else:
+            i += 1
+    if start < n:
+        out.append((start, n))
+    return out
+
+
+def copied_sentences(text: str, excerpts: Sequence[str]) -> list[tuple[int, int]]:
+    """The whole sentences of ``text`` (never across a line; never a list marker) that hold a copy of an excerpt's
+    wording (``wording_copies``), in order. A whole sentence, not the copied words alone: cutting only those left
+    「-在論壇上表示…」 and lines ending in 「，將」 (2026-11-17 live check)."""
+    spans = wording_copies(text, excerpts) if excerpts else []
+    if not spans:
+        return []
+    out: list[tuple[int, int]] = []
+    lo = 0
+    for line in text.split("\n"):
+        hi = lo + len(line)
+        if any(a < hi and b > lo for a, b in spans):
+            out += [(lo + s, lo + e) for s, e in _sentences(line) if any(a < lo + e and b > lo + s for a, b in spans)]
+        lo = hi + 1
+    return out
+
+
+def drop_wording_copies(text: str, excerpts: Sequence[str]) -> str:
+    """``text`` without the sentences that copy an excerpt's wording (``copied_sentences``); a line left with nothing
+    but its list marker or punctuation goes too, and so do the blank lines it leaves in a row. Leading and trailing
+    white space stay as they were."""
+    spans = copied_sentences(text, excerpts)
+    if not spans:
+        return text
+    out: list[str] = []
+    lo = 0
+    for line in text.split("\n"):
+        hi = lo + len(line)
+        mine = [(a - lo, b - lo) for a, b in spans if lo <= a < hi]
+        lo = hi + 1
+        if not mine:
+            out.append(line)
+            continue
+        for a, b in reversed(mine):
+            line = line[:a] + line[b:]
+        if not _BARE.fullmatch(line):
+            out.append(line.rstrip())
+    body = re.sub(r"\n{3,}", "\n\n", "\n".join(out)).strip()
+    lead = text[: len(text) - len(text.lstrip())]
+    trail = text[len(text.rstrip()):]
+    return lead + body + trail if body else ""
+
+
+def answer_without_copies(text: str, excerpts: Sequence[str]) -> str:
+    """``drop_wording_copies``, and :data:`COPY_REMOVED` when that leaves no word of an answer that had some."""
+    clean = drop_wording_copies(text, excerpts)
+    if clean != text and not _OWN_WORD.search(clean) and _OWN_WORD.search(text):
+        return text[: len(text) - len(text.lstrip())] + COPY_REMOVED
+    return clean
+
+
+def mark_copies(text: str, spans: Iterable[tuple[int, int]]) -> str:
+    """``text`` with each span in ⟦ ⟧ (what the editor must rewrite: ``EDITOR_COPIES``)."""
+    for a, b in sorted(spans, reverse=True):
+        text = text[:a] + COPY_OPEN + text[a:b] + COPY_CLOSE + text[b:]
     return text
 
 
@@ -791,14 +905,20 @@ class ChatTurn:
         max_uses = self.settings.ai_deep_search_max_uses if self.deep else None
         web = [] if self.economy else block_search(server_tools(self.settings, max_uses=max_uses),
                                                    CHAT_BLOCKED_DOMAINS)
-        return client_tool_definitions(self.settings) + web
+        return client_tool_definitions(self.settings, economy=self.economy, deep=self.deep) + web
+
+    @property
+    def tw_news_on(self) -> bool:
+        """tw_news_search is offered this turn (``tools.tw_news_offered``): the tool, ``CHAT_SYSTEM_TW`` and the
+        省錢模式 note that names it go together."""
+        return tw_news_offered(self.settings, economy=self.economy, deep=self.deep)
 
     def params(self, model: str, messages: list[dict[str, Any]]) -> dict[str, Any]:
         return {
             "model": model,
             # 深度搜尋 thinks and searches far more: at medium effort 8000 tokens ran out before the report (2026-11-15)
             "max_tokens": self.settings.ai_max_tokens_chat * (2 if self.deep else 1),
-            "system": [{"type": "text", "text": CHAT_SYSTEM, "cache_control": {"type": "ephemeral"}}],
+            "system": [{"type": "text", "text": chat_system(self.tw_news_on), "cache_control": {"type": "ephemeral"}}],
             "tools": self.tools(),
             "messages": render_messages(messages, model not in _NO_SYSTEM_ROLE),
             "output_config": {"effort": self.settings.ai_effort_chat},
@@ -810,9 +930,9 @@ class ChatTurn:
         moved = self.recap is not None and self.history is self.recap
         now = self.now_fn()
         text = page_context(now, route, sym, name, privacy, moved=moved, deep=self.deep, economy=self.economy,
-                            closes=self._tw_closes(now))
+                            closes=self._tw_closes(now), tw_news=self.tw_news_on)
         if self.why is not None and self.why.entry is not None:  # the shared research this turn answers from
-            text += "\n" + research.note(self.why)
+            text += "\n" + research.note(self.why, tw_news=self.tw_news_on)
         return text
 
     def _find_research(self, message: str, symbol: str | None) -> research.Lookup | None:
@@ -833,9 +953,9 @@ class ChatTurn:
         """Store what this why-turn's web search found, for the next asker (``research.remember``); best effort."""
         if self.why is None or not ok or self.deep:
             return
-        try:
-            research.remember(self.db, self.why, new, state.display.citations, state.outlets, self.now_fn(),
-                              self.settings)
+        try:  # never a LangSearch excerpt: its title line instead (the citations are already so)
+            research.remember(self.db, self.why, tw_news.scrub_messages(new, state.redact, state.private_texts),
+                              state.display.citations, state.outlets, self.now_fn(), self.settings)
         except Exception:  # the answer is out already; sharing it is a nicety
             log.warning("AI why research not stored", exc_info=True)
             self.db.rollback()
@@ -1009,8 +1129,10 @@ class ChatTurn:
         t = getattr(ev, "type", None)
         if t == "text":
             # after web search or the news tool the answer is held back and edited before it is shown (``_edit``)
-            # (a 深度搜尋 searches the web anyway: held from its first word, a plan written before searching included)
-            hold = self.settings.ai_answer_editor and (state.used_web or self.deep)
+            # (a 深度搜尋 searches the web anyway: held from its first word, a plan written before searching included);
+            # after tw_news_search it is held with the editor off too: a copy of an excerpt's wording goes before
+            # anything is shown (``drop_wording_copies``)
+            hold = (self.settings.ai_answer_editor and (state.used_web or self.deep)) or bool(state.private_texts)
             if hold and state.held_from is None:
                 state.held_from = len(state.display.text)
             if first_text_of_round[0] and state.display.text and not state.display.text.endswith("\n"):
@@ -1057,8 +1179,10 @@ class ChatTurn:
         cited = getattr(c, "cited_text", "") or ""
         if ctype == "web_search_result_location":
             url, title = c.url, c.title
-        elif ctype == "search_result_location":  # a citable tool result (get_news)
+        elif ctype == "search_result_location":  # a citable tool result (get_news, tw_news_search)
             url, title = getattr(c, "source", None), getattr(c, "title", None)
+            if url in state.redact:  # a LangSearch excerpt is never shown or stored: its title line instead
+                cited = state.redact[url]
         elif ctype in ("char_location", "page_location", "content_block_location"):
             title = getattr(c, "document_title", None)
             match = next((f for f in state.fetched if title and f["title"] == title), None)
@@ -1146,7 +1270,9 @@ class ChatTurn:
             yield "done", self._done(thread, turn_id, state)
             return
 
-        ctx = ToolContext(db=db, user=self.user, md=self.md, thread_id=thread.id, message=message)
+        ctx = ToolContext(db=db, user=self.user, md=self.md, thread_id=thread.id, message=message,
+                          economy=self.economy,
+                          tw_news=tw_news.TwNewsTurn.for_settings(settings) if self.tw_news_on else None)
         ok = False
         try:
             self.costs = store.slot_month_costs(db)
@@ -1155,7 +1281,8 @@ class ChatTurn:
             ok = yield from self._loop(thread, new, state, ctx)
             flagged = grounding.check(state.display.text, state.segments) if ok and state.used_web else []
             if state.held_from is not None:
-                flagged = yield from self._edit(thread, state, flagged, edit=ok and state.display.error is None)
+                flagged = yield from self._edit(thread, state, flagged, edit=ok and state.display.error is None
+                                                and settings.ai_answer_editor)
             if flagged:
                 state.display.grounding = flagged
                 yield "grounding", {"items": flagged}
@@ -1173,16 +1300,31 @@ class ChatTurn:
             yield "error", state.display.error
         finally:
             self._persist(thread, turn_id, new, ok, message, state)
+            self._log_tw_news(ctx.tw_news, state)
         self._share_research(new, state, ok)
         yield "done", self._done(thread, turn_id, state)
 
     # -- the answer editor ------------------------------------------------------------------------------------
     def _release(self, state: TurnState) -> Iterator[Event]:
-        """Show the held-back text as it was written (the turn failed, or editing is off for it)."""
+        """Show the held-back text as it was written (the turn failed, or editing is off for it), without what it
+        copied of a LangSearch excerpt's wording (``_without_copies``)."""
         if state.held_from is None:
             return
+        self._without_copies(state, state.held_from, [])
         held, state.held_from = state.display.text[state.held_from:], None
         yield from _stream(held)
+
+    @staticmethod
+    def _without_copies(state: TurnState, start: int, flagged: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """``state.display.text`` from ``start`` without what it copied of this turn's LangSearch excerpts' wording
+        (``drop_wording_copies``: never shown, stored or replayed), the flags moved with it."""
+        excerpts = tw_news.excerpt_texts(state.private_texts)
+        held = state.display.text[start:]
+        clean = answer_without_copies(held, excerpts)
+        if clean != held:
+            flagged = remap_flags(flagged, held, clean, start)
+            state.display.text = state.display.text[:start] + clean
+        return flagged
 
     def _edit(self, thread: AiThread, state: TurnState, flagged: list[dict[str, Any]], edit: bool):
         """Rewrite the held-back answer once (產品負責人 2026-11-15: answers built on search results copied source
@@ -1198,7 +1340,9 @@ class ChatTurn:
         number a scale the draft did not (``added_scales``: 「6,806」 → 「6,806 萬元」) or made a conversion it did not
         (``added_conversions``: 「相當於 1,000 美元」) is dropped as well. An edit is held back until its first
         characters show it is in Chinese (``_chinese_head``); the answer shown as written leaves out the source
-        text pasted after its own sentences (``strip_pastes``)."""
+        text pasted after its own sentences (``strip_pastes``). After tw_news_search (2026-11-17 review) what the
+        answer copied of an excerpt's wording goes from whatever is shown (``drop_wording_copies``), and an edit of a
+        draft that copied some is shown only once it is complete and checked."""
         start = state.held_from
         assert start is not None
         today = self.now_fn().date()
@@ -1208,37 +1352,48 @@ class ChatTurn:
             flagged = remap_flags(flagged, held, fixed, start)
             state.display.text = state.display.text[:start] + fixed
         if not edit or not state.display.text[start:].strip():
+            flagged = self._without_copies(state, start, flagged)
             yield from self._release(state)
             return flagged
         draft = state.display.text[start:]
         body = draft.lstrip()
         lead = draft[: len(draft) - len(body)]
+        excerpts = tw_news.excerpt_texts(state.private_texts)
+        # the draft copied an excerpt's wording: the editor gets the copies marked, to rewrite them (``EDITOR_COPIES``),
+        # and its edit is not streamed as it is written (it may keep a copy: checked once it is complete)
+        copies = wording_copies(body, excerpts) if excerpts else []
+        quiet = bool(copies)
         timing = self.timing
         began, first = timing.at(), None
         yield "tool", {"id": "edit", "name": "edit_answer", "status": "running", "label": "整理回答"}
         edited: str | None = None
         shown = ""  # the edit streamed so far (after ``lead``)
-        pieces = self._editor_stream(thread, body)
+        pieces = self._editor_stream(thread, mark_copies(body, copies) if copies else body, copies=bool(copies))
         try:
             while True:
                 try:
                     piece = next(pieces)
                 except StopIteration as stop:
                     edited = stop.value
+                    if edited is not None and copies:  # a mark the editor left in
+                        edited = edited.replace(COPY_OPEN, "").replace(COPY_CLOSE, "")
                     break
                 if first is None:
                     first = timing.at()
-                yield "text", {"delta": (lead if not shown else "") + piece}
-                shown += piece
+                if not quiet:
+                    yield "text", {"delta": (lead if not shown else "") + piece}
+                    shown += piece
         except _EditorGaveUp as exc:
             log.warning("AI answer editor: %s; showing the answer as written", exc)
         except Exception:  # the answer as written is fine to show; editing is a nicety
             log.warning("AI answer editor failed; showing the answer as written", exc_info=True)
         finally:
             pieces.close()  # the browser went away: the editor call stops too (its usage is recorded)
-        # the cited texts the draft may have pasted (their numbers need not stay; ``missing_numbers``)
+        # the cited texts the draft may have pasted (their numbers need not stay; ``missing_numbers``); a LangSearch
+        # result's citation carries its title line, so its excerpt (this turn's memory only) is checked as well
         sources = [normalize_dates(x, today) for c in state.display.citations
                    for x in (c.get("cited_text"), c.get("title")) if x]
+        sources += [normalize_dates(x, today) for x in state.private_texts]
         if edited is not None:
             if missing := missing_numbers(body, edited, today, sources):
                 # the count only: the numbers may be the user's own amounts
@@ -1256,7 +1411,7 @@ class ChatTurn:
         state.held_from = None
         if edited is None:
             # shown as written, but without the source text pasted after its own sentences (``strip_pastes``)
-            bare = lead + strip_pastes(body, sources)
+            bare = answer_without_copies(lead + strip_pastes(body, sources), excerpts)
             if bare != draft:
                 flagged = remap_flags(flagged, draft, bare, start)
                 state.display.text = state.display.text[:start] + bare
@@ -1266,14 +1421,16 @@ class ChatTurn:
             else:
                 yield from _stream(draft)
             return flagged
-        final = tidy_answer(lead + keep_opening(body, edited), today)
+        final = answer_without_copies(tidy_answer(lead + keep_opening(body, edited), today), excerpts)
         state.display.text = state.display.text[:start] + final
+        if quiet:  # nothing of the edit is on screen yet
+            yield from _stream(final)
         # the edit as streamed is not what is kept (its opening restored, a date or boilerplate fixed): show the kept
-        if final != lead + edited:
+        elif final != lead + edited:
             yield "text_reset", {"text": state.display.text}
         return remap_flags(flagged, draft, final, start)
 
-    def _editor_stream(self, thread: AiThread, body: str) -> Iterator[str]:
+    def _editor_stream(self, thread: AiThread, body: str, copies: bool = False) -> Iterator[str]:
         """The editor call, streamed: yields the edited answer as it is written, without leading or trailing white
         space (what it yields is exactly what it returns), and returns it, or None when the call stopped for anything
         but ``end_turn`` or wrote nothing. Raises ``_EditorGaveUp`` when no word came within
@@ -1299,7 +1456,9 @@ class ChatTurn:
         head: str | None = "" if first_cjk else None
         head_max = EDITOR_HEAD_CHARS + (first_cjk.start() if first_cjk else 0)
         headings = None if _HEADING.search(body) else _HeadingFilter()
-        with client.messages.stream(model=model, max_tokens=4000, system=EDITOR_SYSTEM,
+        system = EDITOR_SYSTEM.replace("\n只輸出改寫後的回答", f"\n{EDITOR_COPIES}\n只輸出改寫後的回答") if copies \
+            else EDITOR_SYSTEM  # ``copies``: the draft's copies of LangSearch excerpts are marked (``mark_copies``)
+        with client.messages.stream(model=model, max_tokens=4000, system=system,
                                     output_config={"effort": "low"}, **_editor_thinking(model),
                                     messages=[{"role": "user", "content": body}]) as stream:
             try:
@@ -1455,6 +1614,9 @@ class ChatTurn:
     def _tool_done(tu: Any, label: str, outcome: ToolOutcome, state: TurnState) -> Iterator[Event]:
         if outcome.outlets:
             state.outlets.update(outcome.outlets)
+        if outcome.redact:
+            state.redact.update(outcome.redact)
+            state.private_texts.extend(outcome.private_texts)
         if isinstance(outcome.content, list):  # citable news: check the answer like a web search's
             state.used_web = True
         yield "tool", {"id": tu.id, "name": tu.name, "status": "error" if outcome.is_error else "done", "label": label}
@@ -1471,12 +1633,27 @@ class ChatTurn:
         recap = self.recap if served and self.recap is not None and self.history is self.recap else None
         try:
             self.db.rollback()  # discard anything a failed tool left pending
+            # stored (and replayed next turn) with the title lines of tw_news_search's results, never their excerpts;
+            # the answer (``ai_messages.text``, shown in the thread and re-sent in a recap) and the model's own text
+            # without what they copied of an excerpt's wording, by the same rule (a turn cut off before its answer was
+            # released included)
+            new = tw_news.scrub_messages(new, state.redact, state.private_texts)
+            if state.private_texts:
+                state.display.text = answer_without_copies(state.display.text,
+                                                           tw_news.excerpt_texts(state.private_texts))
             store.save_turn(self.db, thread, self.user, turn_id, new, in_context=ok, user_text=message,
                             display=state.display, context_tokens=state.context_tokens if ok else None,
                             key_slot=self.slot.index if served and self.slot is not None else None, recap=recap,
                             user_meta=self._user_meta())
         except Exception:  # pragma: no cover - persistence must never break the stream's shutdown
             log.exception("could not save AI turn %s", turn_id)
+
+    def _log_tw_news(self, use: tw_news.TwNewsTurn | None, state: TurnState) -> None:
+        """One line per turn that used tw_news_search, for the first week's review: its requests, tokens and each
+        call's outcome, and the web searches beside it (counts only)."""
+        if use is not None and use.calls:
+            log.info("AI turn %s tw_news_search: %d requests, %d tokens, %s; web_search %d", self._tid(),
+                     use.requests, use.tokens, ", ".join(use.calls), state.usage.web_search_requests)
 
     def _user_meta(self) -> dict[str, Any]:
         """What the user's row remembers about the turn. A 深度搜尋 counts as ``AI_DEEP_SEARCH_COST`` questions once
