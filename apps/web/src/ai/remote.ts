@@ -173,16 +173,16 @@ export interface AiUsage {
   month_budget_reached?: boolean
   model: string
   available: boolean
-  /** 深度搜尋一次算幾題（不超過每天的題數）；`null`＝現在不能用（方案沒有、省錢模式，或這個環境沒開網路搜尋），
-   * 切換鈕不出現（選填：舊版後端沒有，當成 3） */
+  /** 深度搜尋一次算幾題（不超過每天的題數；所有帳號都能用，算自己的題數）；`null`＝現在不能用（省錢模式、這個環境沒開網路搜尋，
+   * 或後端設了 `AI_FREE_DEEP_SEARCH=false` 時的免費帳號），切換鈕不出現（選填：舊版後端沒有，當成 3） */
   deep_search_cost?: number | null
-  /** 這個環境有深度搜尋，但這個方案沒有（會員功能） */
+  /** 這個環境有深度搜尋，但這個方案沒有：只在後端設 `AI_FREE_DEEP_SEARCH=false` 時才會是 true（2026-11-17 起預設大家都有）；前端不讀 */
   deep_search_members_only?: boolean
   /** 固定顯示的免責聲明（後端提供） */
   disclaimer?: string
 }
 
-/** 深度搜尋一次算幾題（後端沒說時的預設，也是 mock 模式用的數字）：會員每天 30 題裡的 3 題（產品負責人 2026-11-15） */
+/** 深度搜尋一次算幾題（後端沒說時的預設，也是 mock 模式用的數字）：每天的題數裡算 3 題（產品負責人 2026-11-15；2026-11-17 起所有帳號都能用） */
 export const DEEP_SEARCH_COST = 3
 
 function prefix(): string {

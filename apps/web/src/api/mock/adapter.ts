@@ -402,7 +402,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   )
   /**
    * `User`：個人資料多了 public_name、is_admin、public_posting_suspended_until（`GET /me`、開發登入、PATCH 都有）。
-   * 方案：示範使用者是會員；匯入對帳單和後端預設的 `IMPORT_STATEMENTS=admins` 一樣只開給站方管理員（`?discuss=member` 就沒有入口）
+   * 方案：示範使用者是會員；匯入對帳單和後端預設的 `IMPORT_STATEMENTS=all` 一樣所有人都有（2026-11-17：會員和免費帳號只差 AI 額度與收盤簡報）
    */
   const me = (): User => {
     const fields = discussions.meFields()
@@ -410,7 +410,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       ...user,
       ...fields,
       // 站方管理員算會員、沒有到期日；`?discuss=member`（不是管理員）是開通到 12/31 的會員（設定頁「會員，到 12/31」）
-      plan: { tier: "member", until: fields.is_admin ? null : "2026-12-31", deep_search: true, daily_briefing: true, statement_import: fields.is_admin },
+      plan: { tier: "member", until: fields.is_admin ? null : "2026-12-31", deep_search: true, daily_briefing: true, statement_import: true },
     }
   }
 

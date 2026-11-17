@@ -202,9 +202,12 @@ class Usage(BaseModel):
     available: bool
     deep_search_cost: int | None = Field(
         default=None,
-        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`，不超過每天的題數）；`null`＝現在不能用深度搜尋（方案沒有、"
-                    "省錢模式，或這個環境沒開網路搜尋）")
-    deep_search_members_only: bool = Field(default=False, description="這個環境有深度搜尋，但這個方案沒有（會員功能）")
+        description="深度搜尋一次算幾題（`AI_DEEP_SEARCH_COST`，不超過每天的題數；所有帳號都能用，"
+                    "算自己的題數）；`null`＝現在不能用深度搜尋（省錢模式、這個環境沒開網路搜尋，"
+                    "或 `AI_FREE_DEEP_SEARCH=false` 時的免費帳號）")
+    deep_search_members_only: bool = Field(
+        default=False, description="這個環境有深度搜尋，但這個方案沒有：只在 `AI_FREE_DEEP_SEARCH=false` "
+                                   "時的免費帳號是 true（預設所有帳號都有深度搜尋，2026-11-17）")
     imports_today: int = Field(default=0,
                                description="今天（台北）讀了幾份對帳單（`POST /imports/statement`；不算提問數）")
     import_daily_limit: int | None = Field(

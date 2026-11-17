@@ -321,7 +321,7 @@ describe("設定頁的方案（決定 14）", () => {
     cleanup()
     const adapter = mount({ discussion: { admin: false } })
     vi.spyOn(api, "listMyGroupPasses").mockResolvedValue([])
-    vi.spyOn(api, "getMe").mockImplementation(async () => ({ ...(await adapter.getMe()), plan: { tier: "free", until: null, deep_search: false, daily_briefing: false } }))
+    vi.spyOn(api, "getMe").mockImplementation(async () => ({ ...(await adapter.getMe()), plan: { tier: "free", until: null, deep_search: true, daily_briefing: false, statement_import: true } }))
     renderApp("/settings")
     const free = (await screen.findByRole("heading", { name: "方案" }, T)).closest("section")!
     expect(await within(free).findByText("免費", undefined, T)).toBeInTheDocument()

@@ -496,9 +496,10 @@ def usage_summary(db: Session, user: User, settings: Settings, available: bool) 
         "month_budget_reached": mode == "stopped",
         "model": model_for("chat", settings),
         "available": available,
-        # None: no 深度搜尋 for this user now (not their plan, 省錢模式, or no web search in this deployment)
+        # None: no 深度搜尋 for this user now (省錢模式, no web search in this deployment, or a free account while
+        # AI_FREE_DEEP_SEARCH=false; by default every account has it, 產品負責人 2026-11-17)
         "deep_search_cost": deep_search_cost(settings, plan) if deep else None,
-        # 深度搜尋 exists here but this plan does not include it (the client may say it is a members' feature)
+        # 深度搜尋 exists here but this plan does not include it: only with AI_FREE_DEEP_SEARCH=false (kept for clients)
         "deep_search_members_only": settings.ai_web_search and not plan.deep_search,
         "disclaimer": DISCLAIMER,
     }

@@ -150,8 +150,8 @@ def roomy_ai_quota(monkeypatch):
     monkeypatch.setenv("AI_MONTHLY_COST_BUDGET_USD", "0")
     monkeypatch.setenv("AI_MEMBER_DAILY_MESSAGE_LIMIT", "50")
     monkeypatch.setenv("AI_MEMBER_MONTHLY_COST_BUDGET_USD", "0")
-    # 深度搜尋 and the briefing are members' features (``forliosa.plans``); tests about them run as any account.
-    # tests/ai/test_plans.py checks the plans with these off.
+    # The briefing is a members' feature (``forliosa.plans``; 深度搜尋 is every account's by default, members only with
+    # AI_FREE_DEEP_SEARCH=false); tests about them run as any account. tests/ai/test_plans.py checks the defaults.
     monkeypatch.setenv("AI_FREE_DEEP_SEARCH", "true")
     monkeypatch.setenv("AI_FREE_DAILY_BRIEFING", "true")
     # the answer editor (one more model call after web search) has its own tests: tests/ai/test_answer_editor.py
