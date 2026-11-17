@@ -17,6 +17,7 @@ from datetime import date, datetime
 from typing import Any
 
 from forliosa.datapolicy import label as source_label
+from forliosa.reports.prompts import STOCKS_NOT_FOUND
 from forliosa.reports.schedule import KIND_LABELS, md, md_wd, span
 from forliosa.timeutil import TAIPEI, iso_taipei
 
@@ -114,9 +115,17 @@ def _first(pack: dict[str, Any], metric: str, group: str | None = None, subject:
 def data_title(kind: str, pack: dict[str, Any]) -> str:
     ed = _d(pack.get("edition_date")) or date.today()
     if kind == "premarket":
+        # what the data edition has: the US close, the day's calendar (never named when it is empty), else the
+        # evening's numbers
         us = (pack.get("dates") or {}).get("us_sessions") or []
         last = _d(us[-1]) if us else None
-        return f"盤前重點 {md_wd(ed)}：" + (f"美股 {md(last)} 收盤與今日行事曆" if last else "今日行事曆")
+        parts = [f"美股 {md(last)} 收盤"] if last else []
+        if any(c.get("date") == pack.get("edition_date") for c in pack.get("calendar") or []):
+            parts.append("今日行事曆")
+        if not parts:
+            evening = any(f.get("group") == "evening" for f in pack.get("facts") or [])
+            parts.append("昨晚才到的資料" if evening else "隔夜沒有新的資料")
+        return f"盤前重點 {md_wd(ed)}：" + "與".join(parts)
     if kind == "close":
         pct = _first(pack, "index_pct", "today", "加權指數")
         close = _first(pack, "index_close", "today", "加權指數")
@@ -300,7 +309,16 @@ def _blocks_for(kind: str, section: str, pack: dict[str, Any], blocks: dict[str,
         return rows
 
     def stock_paras(key: str) -> list[dict[str, Any]]:
-        return [p for p in (_para_from((it or {}).get("para")) for it in o.get(key) or []) if p]
+        rows = [p for p in (_para_from((it or {}).get("para")) for it in o.get(key) or []) if p]
+        if rows and not any(str(r)[:1] in ("X", "W") for p in rows for s in p["sentences"] for r in s["refs"]):
+            # no stock has a reason: said once for the section (owner 2026-11-17), not 「未找到報導」 in every item —
+            # ``validate.tidy`` took those out of a checked output, but ``validate.drop`` may have taken out the last
+            # reason after it: the same cut here (a sentence of its own, or the clause ending one)
+            from forliosa.reports.validate import without_not_found
+
+            rows = [{"sentences": without_not_found(p["sentences"])} for p in rows]
+            rows.append(_para(_sent(STOCKS_NOT_FOUND, [])))
+        return rows
 
     out: list[dict[str, Any] | None] = []
     if kind == "premarket":

@@ -185,7 +185,9 @@ def test_deleting_the_last_trade_deletes_its_thread(client, other_client, setup)
     assert other_client.delete(f"{API}/transactions/{t1['id']}").status_code == 204
     assert thread_rows() == 2  # the item still exists (one trade left)
     # Moving the last trade to another day empties the old item: its thread goes.
-    r = other_client.patch(f"{API}/transactions/{t2['id']}", json={"trade_date": trading_day(5).isoformat()})
+    # the trading day before ``d`` (``trading_day(5)`` is ``d`` itself on a Wednesday: both are the Friday before)
+    earlier = trading_day((today_taipei() - d).days + 1)
+    r = other_client.patch(f"{API}/transactions/{t2['id']}", json={"trade_date": earlier.isoformat()})
     assert r.status_code == 200
     assert thread_rows() == 0
     t3 = trade(other_client, acc, "2317.TW", "buy", d, 1000, 100)

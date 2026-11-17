@@ -65,6 +65,10 @@ const PROBLEM_TEXT: Record<string, string> = {
   item_not_event: "項目不是行事曆或報導裡的事件",
   internal_gap: "正文寫了這份缺什麼資料",
   us_local_time: "美國時間沒有附台北時間",
+  private_life: "寫了私生活細節",
+  repeated_fact: "同一件事在同一段重複",
+  risk_not_ahead: "風險不是之後才會發生的事",
+  chips_off_topic: "籌碼段寫了法人與資金以外的事",
 }
 export function problemText(code: string): string {
   if (code.startsWith("compliance:")) return `合規判讀：${code.slice("compliance:".length)}`

@@ -13,7 +13,10 @@ paragraph); no fund flow and price move of a stock in one sentence; causes need 
 sentences take one of the three shapes; position numbers are never a reason; the premarket's headline and its
 evening notes do not repeat the previous session; no index points; the chart of the day is on the menu; every watch /
 tonight item is an event of the calendar or a report (``item_not_event``); no sentence about what the edition lacks
-(``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time.
+(``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time; no private-life
+detail, whoever reported it (``private_life``); the chips hold institutional investors and fund flows only
+(``chips_off_topic``); the weekly uses a calendar row or a report once per section of highlights, this week, themes
+and risks (``repeated_fact``), and its risks are still ahead (``risk_not_ahead``).
 
 :func:`drop` takes out what still fails after the revision: given the pack, one sentence (or one item) at a time,
 the rest checked again; a section goes as a whole only when what is left still fails.
@@ -27,13 +30,14 @@ import re
 import unicodedata
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from forliosa.reports.calendars import US_LOCAL_TIME, converted_spans, us_times_to_taipei
 from forliosa.reports.marketcalc import SECTOR_NAMES
 from forliosa.reports.pack import OPTION_METRICS
 from forliosa.reports.prompts import COUNTS, FORBIDDEN_WORDS, LENGTHS, OUTPUT_KEYS, STYLE_WORDS, TIME_WORDS
+from forliosa.timeutil import TAIPEI
 
 # Index points (美股指數、台指期、夜盤) never appear, in a gathered report or a sentence (§8.5 item 7, §10.2 item 21):
 # any number of points whose closest name before it, in the same sentence, is one of these (any number of digits,
@@ -88,6 +92,46 @@ TWO_CHAR_COMMON = frozenset({"統一", "大同", "中華", "台灣", "全新", "
 PLAIN_PHRASES = ("東南亞", "南亞洲", "中華民國", "台灣地區")
 STOCK_CONTEXT = re.compile(r"股|漲|跌|%|法說|除息|除權|營收|[（(]\d|點數|收盤|收在|買超|賣超|帶動|拖累|權值|市值|成交"
                            r"|ADR|財報|EPS|獲利")
+# Private life (owner 2026-11-17, N5 option A): an affair, a relationship, health or family is never written, even when
+# a named outlet reported it — only the business fact (「黃仁勳辭去輝達執行長」, not 「傳出婚外情後辭去…」).
+# These words are always someone's private life:
+PRIVATE_LIFE = re.compile(
+    r"婚外情|外遇|緋聞|劈腿|不倫|小三|情婦|情夫|戀情|戀愛|交往對象|女友|男友|性醜聞|感情(?:生活|糾紛|問題|狀況|風波)"
+    r"|私生活|私人生活|私事|婚變|病情|病況|病倒|家務事|家暴|家庭因素|家庭(?:糾紛|問題|狀況)"
+    r"|(?<!財務)(?<!營運)(?<!體質)健康(?:狀況|因素|問題|欠佳|亮紅燈)|身體(?:狀況|不適|因素|微恙)"
+    r"|妻子|太太|丈夫|老公|老婆|前妻|前夫|兒子|女兒")
+# These are someone's private life unless their clause is about a business or the economy (「住院醫療險」「就醫人次」
+# 「結婚率」「配偶扣除額」「收案對象為罹患肥胖症的患者」: :data:`NOT_PRIVATE`)
+PRIVATE_IF_PERSONAL = re.compile(r"罹患|罹癌|住院|就醫|開刀|動手術|離婚|再婚|結婚|訂婚|婚姻|懷孕|配偶|子女")
+NOT_PRIVATE = re.compile(r"患者|病患|病人|族群|人數|人次|新藥|藥證|藥物|臨床|適應症|收案|試驗|醫療險|保險|壽險"
+                         r"|保單|理賠|給付|健保|醫材|醫療院所|市場|產業|商機|扣除額|免稅額|稅|[婚院醫孕育]率|對數|登記|津貼|補助"
+                         r"|開刀房|手術房|設備|需求|件數|少子化|人口")
+_PRIVATE_CLAUSE = re.compile(r"[，,；;。！？!?\n]")
+
+
+def private_life(text: str) -> str | None:
+    """The private-life detail ``text`` writes (:data:`PRIVATE_LIFE`, or :data:`PRIVATE_IF_PERSONAL` in a clause
+    without :data:`NOT_PRIVATE`); ``None`` when it writes none."""
+    if (m := PRIVATE_LIFE.search(text)) is not None:
+        return m.group(0)
+    for clause in _PRIVATE_CLAUSE.split(text):
+        if (m := PRIVATE_IF_PERSONAL.search(clause)) is not None and not NOT_PRIVATE.search(clause):
+            return m.group(0)
+    return None
+
+
+# The weekly's sections where one calendar row or report is used once at most (N3: one fact repeated in the
+# highlights, this week and three themes); the unit is an item (a highlight, a theme, a risk) or a summary sentence
+ONCE_PER_SECTION = ("highlights", "summary", "themes", "risks")
+# A report that speaks of what is still ahead or pending (the weekly's risks list only those, N3)
+AHEAD = re.compile(r"將(?!近|軍)|預計|預定|排定|即將|仍待|待(?:審|議|表決|決定|公布|裁決|批准)|審議|審理中|研議"
+                   r"|擬(?!定)|可能|恐(?!慌)|若(?!干)|是否|屆時|下週|下周|下個?月|明年|年底前|月底前|考驗|計畫於"
+                   r"|規劃於|訂於|訂在")
+# The chips section is about institutional investors and fund flows only (N3): no exchange rate, no settlement day
+CHIPS_KEYS = ("chips", "chips_week")
+CHIPS_OFF_METRICS = frozenset({"fx_close", "fx_change", "pc_ratio_oi", "pc_ratio_vol"})
+CHIPS_OFF = re.compile(r"匯率|兌新台幣|新台幣兌|美元兌|升值|貶值|結算日|結算價|最後結算|P\s*/\s*C|賣權買權比"
+                       r"|未平倉比(?:率|值)?(?![前上較])")
 
 
 def index_points(text: str) -> str | None:
@@ -358,10 +402,6 @@ def edition_day(pack: dict[str, Any] | None) -> date:
     """The pack's edition date (today in Taipei without a pack): the year a written US date falls in."""
     with contextlib.suppress(KeyError, ValueError, TypeError):
         return date.fromisoformat(str((pack or {})["edition_date"])[:10])
-    from datetime import datetime
-
-    from forliosa.timeutil import TAIPEI
-
     return datetime.now(TAIPEI).date()
 
 
@@ -660,6 +700,10 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
         out.append(Problem(s.path, "internal_gap", gap))
     if (us := us_local_time(c, text, s.refs)) is not None:
         out.append(Problem(s.path, "us_local_time", us))
+    if (private := private_life(text)) is not None:
+        out.append(Problem(s.path, "private_life", private))
+    if s.key in CHIPS_KEYS and (off := chips_off_topic(c, text, s.refs)) is not None:
+        out.append(Problem(s.path, "chips_off_topic", off))
     # sectors
     for name in _sector_mentions(text):
         sec = c.sectors.get(name)
@@ -692,6 +736,112 @@ def check_sentence(c: Ctx, s: Sentence, para_refs: set[str]) -> list[Problem]:
             f = c.facts.get(r)
             if f and f.get("group") == "prev_session":
                 out.append(Problem(s.path, "repeats_close_report", r))
+    return out
+
+
+def chips_off_topic(c: Ctx, text: str, refs: Iterable[str]) -> str | None:
+    """What a chips sentence holds besides institutional investors and fund flows: the exchange rate, the options'
+    P/C ratio or the futures' settlement day (a fact, a calendar row or the words of one)."""
+    for r in refs:
+        f = c.facts.get(r)
+        if f is not None and f.get("metric") in CHIPS_OFF_METRICS:
+            return f"{r} {f.get('subject') or f.get('metric')}"
+        row = c.cal.get(r)
+        if row is not None and row.get("kind") == "settlement":
+            return f"{r} 結算日"
+    m = CHIPS_OFF.search(text)
+    return m.group(0) if m else None
+
+
+def _units(output: dict[str, Any], key: str) -> Iterator[tuple[str, list[Sentence]]]:
+    """The units of :data:`ONCE_PER_SECTION`: each highlight, theme or risk with its sentences; each summary
+    sentence alone."""
+    if key == "summary":
+        for s in _para_sentences(output.get("summary"), "summary", key):
+            yield s.path, [s]
+        return
+    for i, item in enumerate(output.get(key) or []):
+        if not isinstance(item, dict):
+            continue
+        base = f"{key}[{i}]"
+        if key == "themes":
+            yield base, [s for sub in ("why", "events", "relation")
+                         for s in _para_sentences(item.get(sub), f"{base}.{sub}", key, sub)]
+        else:
+            yield base, list(_para_sentences(item, base, key))
+
+
+def _repeated_facts(output: dict[str, Any]) -> list[Problem]:
+    """The weekly: a calendar row (C) or a report (X) in more than one highlight, summary sentence, theme or risk — the
+    repeats after its first unit in that section (``repeated_fact``; each section may use it once)."""
+    out: list[Problem] = []
+    for key in ONCE_PER_SECTION:
+        first: dict[str, str] = {}
+        for unit, sents in _units(output, key):
+            used = {r for s in sents for r in s.refs if r[:1] in ("C", "X")}
+            for r in sorted(used):
+                if r not in first:
+                    first[r] = unit
+                    continue
+                for s in sents:
+                    if r in s.refs:
+                        out.append(Problem(s.path, "repeated_fact", f"{r} 已在 {first[r]} 用過"))
+    return out
+
+
+def _row_ahead(c: Ctx, row: dict[str, Any]) -> bool:
+    """A calendar row still ahead when the edition is published: a day after the edition's (a weekly's Sunday), or
+    that day after its cut-off (16:30) — a row of the reviewed week or of the weekend before the edition is past."""
+    try:
+        day = date.fromisoformat(str(row.get("date"))[:10])
+    except (ValueError, TypeError):
+        return False
+    if day != c.day:
+        return day > c.day
+    m = re.match(r"\s*(\d{1,2}):(\d{2})", str(row.get("time_taipei") or ""))
+    with contextlib.suppress(KeyError, ValueError, TypeError):
+        cut = datetime.fromisoformat(str(c.pack["cutoff"])).astimezone(TAIPEI)
+        return m is not None and (int(m.group(1)), int(m.group(2))) > (cut.hour, cut.minute)
+    return False
+
+
+def _later(c: Ctx, text: str, after: date) -> bool:
+    """``text`` names a date (M/D, M月D日, ISO) after ``after`` (the year nearest the edition date)."""
+    for mo, d in _dates_in(text):
+        best = None
+        for y in (c.year - 1, c.year, c.year + 1):
+            with contextlib.suppress(ValueError):
+                x = date(y, mo, d)
+                if best is None or abs((x - c.day).days) < abs((best - c.day).days):
+                    best = x
+        if best is not None and best > after:
+            return True
+    return False
+
+
+def _risks_not_ahead(c: Ctx, output: dict[str, Any]) -> list[Problem]:
+    """The weekly's risks list only what is still ahead or pending when the edition is published (N3): each risk
+    needs a calendar row after the edition's cut-off (:func:`_row_ahead`), or a report that speaks of something ahead
+    (:data:`AHEAD`), or a date after the edition's day in the sentence or the report — an already published CPI, a
+    ground stop already ordered (美股 11/20 收盤後, 台北 11/21: the weekend before a Sunday edition is past too) is news
+    of the week, not a risk (``risk_not_ahead``, the item goes)."""
+    out: list[Problem] = []
+    for unit, sents in _units(output, "risks"):
+        refs = [r for s in sents for r in s.refs]
+        ahead = any(_later(c, normalize(s.text), c.day) for s in sents)
+        for r in refs:
+            if ahead:
+                break
+            row = c.cal.get(r)
+            if row is not None:
+                ahead = _row_ahead(c, row)
+                continue
+            x = c.web.get(r)
+            if x is not None:
+                claim = normalize(str(x.get("claim") or ""))
+                ahead = bool(AHEAD.search(claim)) or _later(c, claim, c.day)
+        if sents and not ahead:
+            out.append(Problem(unit, "risk_not_ahead", "只放之後才會發生或還沒有結果的事"))
     return out
 
 
@@ -774,6 +924,8 @@ def _check_heading(c: Ctx, path: str, raw: str, own_refs: list[str] | None = Non
         out.append(Problem(path, "internal_gap", gap))
     if (us := us_local_time(c, text, own)) is not None:
         out.append(Problem(path, "us_local_time", us))
+    if (private := private_life(text)) is not None:
+        out.append(Problem(path, "private_life", private))
     for name in _sector_mentions(text):
         sec = c.sectors.get(name)
         if sec is None or not sec.get("text_eligible"):
@@ -884,6 +1036,9 @@ def validate(output: dict[str, Any], pack: dict[str, Any], kind: str, names: Ite
     out += _check_lengths(output, kind)
     out += _check_chart(c, output)
     out += _check_items(c, output, kind)
+    if kind == "weekly":
+        out += _repeated_facts(output)
+        out += _risks_not_ahead(c, output)
     return out
 
 
@@ -910,12 +1065,104 @@ def _sentence_dicts(node: Any) -> Iterator[dict[str, Any]]:
             yield from _sentence_dicts(v)
 
 
+# A number of four digits or more without thousands separators (「43675.12 點」「9997.16 億元」, copied from a report):
+# written with them (the house format, as the server's numbers are) when it has decimals or a unit after it — never a
+# year, a date, a time, a code (0050, 2330) or a name's digits (羅素 2000)
+_BARE_NUMBER = re.compile(r"(?<![\d.,/:\-A-Za-z&＿])(?P<int>[1-9]\d{3,})(?P<dec>\.\d+)?(?!\.?\d|[,/:\-A-Za-z])")
+# The unit after it, never the first character of another word (元旦、元月、元宇宙、人形、人工、人力、家電、筆電、
+# 萬聖節、兆豐、張忠謀、口罩: 「2026人形機器人展」 stays as it is): 人、家、筆、件、張、口 only before a character
+# that is not Chinese (or as 人次、家公司), the others unless such a word starts there
+_NUMBER_UNIT = re.compile(r"\s*(?:%|％|個百分點|(?:兆|億|萬)(?=美元|元|張|股|人|口|家|戶|[^\u3400-\u9fff]|$)"
+                          r"|點(?![燈名評])|美元|元(?![旦月宇年素老首帥氣件宵]|大(?!關))|檔(?![期案])|倍"
+                          r"|人次|家(?:公司|企業|廠商|業者)|筆交易|[人家筆件張口](?![\u3400-\u9fff]))")
+# Clauses of a headline are separated with 「，」 (the house style of the rule-made headlines: 「加權指數 ▼2.31%，收
+# 40,092.11 點」), never with a space between two Chinese characters (「…週漲3,973.48點 黃仁勳…」)
+_CLAUSE_SPACE = re.compile(r"(?<=[\u3400-\u9fff」』])[ \u3000]+(?=[\u3400-\u9fff「『〔])")
+_NOT_FOUND_ONLY = re.compile(r"^(?:個股的?)?(?:漲跌)?(?:原因)?(?:皆|都|仍|目前)?(?:未|沒有?)找到"
+                             r"(?:相關的?)?(?:報導|新聞)[。.]?$")
+_NOT_FOUND_CLAUSE = re.compile(r"[，,；;]\s*(?:漲跌)?(?:原因)?(?:未|沒有?)找到(?:相關的?)?(?:報導|新聞)"
+                               r"(?=[。.]?$)")
+
+
+def house_numbers(text: str, codes: Iterable[str] = ()) -> str:
+    """``text`` with :data:`_BARE_NUMBER` numbers written with thousands separators, decimals kept (43675.12 →
+    43,675.12; 9997.16 億元 → 9,997.16 億元): one without decimals only before a unit (:data:`_NUMBER_UNIT`), a year
+    and month (「2026.11」) only before one; ``codes``: stock codes left as they are."""
+    skip = {str(x) for x in codes}
+
+    def fix(m: re.Match[str]) -> str:
+        whole, dec = m.group("int"), m.group("dec") or ""
+        unit = _NUMBER_UNIT.match(m.string, m.end()) is not None
+        if not dec and (whole in skip or not unit):
+            return m.group(0)
+        if dec and not unit and 1900 <= int(whole) <= 2100 and len(dec) <= 3 and 1 <= int(dec[1:]) <= 12:
+            return m.group(0)  # a year and a month (「2026.11營收」)
+        return f"{int(whole):,}{dec}"
+
+    return _BARE_NUMBER.sub(fix, text)
+
+
+def headline_clauses(text: str) -> str:
+    """A headline's clauses separated with 「，」 instead of a space (:data:`_CLAUSE_SPACE`)."""
+    return _CLAUSE_SPACE.sub("，", text)
+
+
+def _stock_items_cite_reports(output: dict[str, Any], key: str) -> bool:
+    return any(str(r)[:1] in ("X", "W") for it in output.get(key) or [] if isinstance(it, dict)
+               for s in _sentence_dicts(it.get("para")) for r in s.get("refs") or [])
+
+
+def stocks_without_reasons(output: dict[str, Any], kind: str) -> str | None:
+    """The stock section's key when it has items and none of them gives a reason (no report, X or W, cited): the page
+    then says it once for the section (:data:`prompts.STOCKS_NOT_FOUND`), not in every item."""
+    for key in STOCK_KEYS:
+        if key not in OUTPUT_KEYS[kind]:
+            continue
+        items = [it for it in output.get(key) or [] if isinstance(it, dict) and any(_sentence_dicts(it.get("para")))]
+        if items and not _stock_items_cite_reports(output, key):
+            return key
+    return None
+
+
+def not_found_only(text: str) -> bool:
+    """A sentence that only says no report was found (「未找到報導。」「漲跌原因未找到報導。」)."""
+    return bool(_NOT_FOUND_ONLY.match(normalize(text).strip()))
+
+
+def without_not_found(sentences: list[Any]) -> list[Any]:
+    """A stock item's sentences without 「未找到報導」: a sentence of its own after the first goes, the clause ending a
+    sentence (「…跌 4.00%，未找到報導。」) is cut (that sentence copied). For a stock section where no item gives a
+    reason: :func:`tidy` and the page (``assemble``, after :func:`drop` took the last reason out) both use it."""
+    kept = []
+    for j, sent in enumerate(sentences):
+        text = str(sent.get("text") or "") if isinstance(sent, dict) else ""
+        if j > 0 and not_found_only(text):
+            continue
+        if text:
+            cut = _NOT_FOUND_CLAUSE.sub("", text.rstrip())
+            if cut != text.rstrip():
+                sent = {**sent, "text": cut if cut.endswith(("。", ".")) else f"{cut}。"}
+        kept.append(sent)
+    return kept
+
+
+def _drop_not_found(output: dict[str, Any], key: str) -> None:
+    """No stock has a reason: each item's 「未找到報導」 goes (:func:`without_not_found`)."""
+    for it in output.get(key) or []:
+        para = it.get("para") if isinstance(it, dict) else None
+        if isinstance(para, dict) and isinstance(para.get("sentences"), list):
+            para["sentences"] = without_not_found(para["sentences"])
+
+
 def tidy(output: dict[str, Any], kind: str, pack: dict[str, Any] | None = None) -> dict[str, Any]:
     """Soft fixes in a copy: extra items cut to the maximum; unknown sector names removed; an item's ``time_ref``
     that is not a calendar id (a date or a time the writer put there) replaced by the calendar id its sentences cite,
     else emptied; a US local time with a date written with its Taipei time (「美東 11/18 14:00（台北 11/19 03:00）」,
-    converted here, never by the model). ``pack``: the calendar ids and the edition date (without it, any ``C001``
-    form is taken as an id and today gives the year)."""
+    converted here, never by the model); numbers copied from a report written in the house format with thousands
+    separators (:func:`house_numbers`); the title's clauses separated with 「，」 (:func:`headline_clauses`); when no
+    stock item gives a reason, their 「未找到報導」 taken out (the page says it once for the section,
+    :func:`stocks_without_reasons`). ``pack``: the calendar ids, the stock codes and the edition date (without it, any
+    ``C001`` form is taken as an id and today gives the year)."""
     out = copy.deepcopy(output)
     for key, (_lo, hi) in COUNTS[kind].items():
         if isinstance(out.get(key), list) and len(out[key]) > hi:
@@ -936,19 +1183,22 @@ def tidy(output: dict[str, Any], kind: str, pack: dict[str, Any] | None = None) 
                          if is_cal(str(r))]
                 item["time_ref"] = cited[0] if cited else ""
     day = edition_day(pack)
+    codes = [str(x.get("code") or "") for x in (pack or {}).get("stocks") or []]
     for s in _sentence_dicts(out):
         if isinstance(s.get("text"), str):
-            s["text"] = us_times_to_taipei(s["text"], day)
+            s["text"] = house_numbers(us_times_to_taipei(s["text"], day), codes)
     if isinstance(out.get("title"), str):
-        out["title"] = us_times_to_taipei(out["title"], day)
+        out["title"] = headline_clauses(house_numbers(us_times_to_taipei(out["title"], day), codes))
     for key, field_ in HEADING_KEYS.items():
         for item in (out.get(key) or []) if key in OUTPUT_KEYS[kind] else []:
             if isinstance(item, dict) and isinstance(item.get(field_), str):
-                item[field_] = us_times_to_taipei(item[field_], day)
+                item[field_] = house_numbers(us_times_to_taipei(item[field_], day), codes)
+    if (key := stocks_without_reasons(out, kind)) is not None:
+        _drop_not_found(out, key)
     return out
 
 
-ITEM_LEVEL = {"stock_item_mismatch", "item_not_event"}  # the item goes, never its section
+ITEM_LEVEL = {"stock_item_mismatch", "item_not_event", "risk_not_ahead"}  # the item goes, never its section
 _SENT_PATH = re.compile(r"^(?P<key>\w+)(?:\[(?P<i>\d+)\])?(?:\.(?P<sub>para|why|events|relation|caption))?"
                         r"\.sentences\[(?P<j>\d+)\]$")
 _ITEM_PATH = re.compile(r"^(?P<key>\w+)\[(?P<i>\d+)\]")
