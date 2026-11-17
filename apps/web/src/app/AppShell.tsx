@@ -10,7 +10,8 @@ import { Kbd } from "@/components/ui/kbd"
 import { useCloseRefresh } from "@/hooks/use-close"
 import { useIsDesktop } from "@/hooks/use-media-query"
 import { cn } from "@/lib/utils"
-import { BriefingDot } from "@/ai/Briefing"
+import { BriefingDot, UnreadDot } from "@/ai/Briefing"
+import { useReportsUnread } from "@/pages/market/reports/use-reports-unread"
 import { useBriefingUnread } from "@/ai/use-briefing-unread"
 import { ReduceHost } from "@/pages/transactions/ReduceDialog"
 import { ImportHost } from "@/pages/transactions/import/ImportHost"
@@ -95,9 +96,25 @@ function PrivacyButton({ size = "desktop" }: { size?: "desktop" | "mobile" }) {
   )
 }
 
+/**
+ * 導覽分頁的字：「市場」有還沒看過的市場報告時，字的右上角一個石墨灰小圓點（和收盤簡報同一種），
+ * 連結的名稱多「（有新的市場報告）」；看得到的字不變。
+ */
+function NavLabel({ item, reportsUnread }: { item: (typeof NAV_ITEMS)[number]; reportsUnread: boolean }) {
+  const dot = item.to === "/market" && reportsUnread
+  return (
+    <span className="relative">
+      {item.label}
+      {dot && <UnreadDot data-reports-dot="" className="absolute -top-0.5 -right-2.5" />}
+    </span>
+  )
+}
+const navAria = (item: (typeof NAV_ITEMS)[number], reportsUnread: boolean) => (item.to === "/market" && reportsUnread ? `${item.label}（有新的市場報告）` : undefined)
+
 function TopBar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const setSearchOpen = useUi((s) => s.setSearchOpen)
+  const reportsUnread = useReportsUnread()
   return (
     <div className="sticky top-0 z-30">
       <header className="flex h-16 items-center border-b border-rule bg-paper pr-7 pl-14">
@@ -112,9 +129,10 @@ function TopBar() {
                 key={n.to}
                 to={n.to}
                 aria-current={active ? "page" : undefined}
+                aria-label={navAria(n, reportsUnread)}
                 className="sel-tab -mb-px flex items-center px-3.5 text-base text-ink-2"
               >
-                {n.label}
+                <NavLabel item={n} reportsUnread={reportsUnread} />
               </Link>
             )
           })}
@@ -178,6 +196,7 @@ function Dock() {
   const setOpen = useAi((s) => s.setMobileOpen)
   const pending = usePendingCount()
   const briefingUnread = useBriefingUnread()
+  const reportsUnread = useReportsUnread()
   const viewing = useViewingAs()
   const { exit } = useViewAsControls()
   // 帳本頁自己有「待簽名 N 筆」那一條（LedgerPage），格子裡不再寫一次筆數
@@ -195,10 +214,11 @@ function Dock() {
                 key={t.to}
                 to={t.to}
                 aria-current={active ? "page" : undefined}
+                aria-label={navAria(t, reportsUnread)}
                 className="relative flex items-stretch px-2 text-[1rem] whitespace-nowrap text-ink-2 focus-visible:-outline-offset-2 active:bg-hov min-[360px]:px-3 min-[360px]:text-lg min-[390px]:px-4"
               >
                 <span data-active={active ? "" : undefined} className="sel-tab-top flex items-center pb-0.5">
-                  {t.label}
+                  <NavLabel item={t} reportsUnread={reportsUnread} />
                 </span>
               </Link>
             )

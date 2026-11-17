@@ -68,6 +68,18 @@ import type {
 import type { AdminGroupPass, DailyReport, MyGroupPass } from "./types"
 import type { AdminMember, AdminOverview, AdminReport, BlockDomainResult, BlockedDomain, Reply, Suspension, Topic, TopicSummary } from "./types"
 import type { StatementImport, TransactionBatchCheck, TransactionBatchResult } from "./types"
+import type {
+  AdminReportsOverview,
+  AdminTrial,
+  MacroEvent,
+  MarketReport,
+  NyseHoliday,
+  ReportsConfigResult,
+  ReportsStatus,
+  ReportSummary,
+  TrialReveal,
+  UsEarning,
+} from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
 
 type Query = Record<string, string | number | null | undefined>
@@ -296,5 +308,29 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
       request<AdminGroupPass>("POST", "/admin/group-passes", { body: { email, until, ...(note ? { note } : {}), ...(group_id ? { group_id } : {}) } }),
     updateGroupPass: (id, patch) => request<AdminGroupPass>("PATCH", `/admin/group-passes/${enc(id)}`, { body: patch }),
     revokeGroupPass: (id) => request<void>("DELETE", `/admin/group-passes/${enc(id)}`),
+
+    // ── 市場報告（docs/api-contract.md「市場報告（2026-11-17）」） ──
+    getMarketReportStatus: () => request<ReportsStatus>("GET", "/market/reports/status"),
+    listMarketReports: (query = {}) => request<Paged<ReportSummary>>("GET", "/market/reports", { query }),
+    getLatestMarketReport: (kind) => request<MarketReport | null>("GET", "/market/reports/latest", { query: { kind } }),
+    getMarketReport: (id, version) => request<MarketReport>("GET", `/market/reports/${enc(id)}`, { query: { version } }),
+    markMarketReportsSeen: () => request<void>("POST", "/market/reports/seen"),
+    getAdminReportsOverview: () => request<AdminReportsOverview>("GET", "/admin/market-reports/overview"),
+    putReportsConfig: (body) => request<ReportsConfigResult>("PUT", "/admin/market-reports/config", { body }),
+    getAdminReportsTrial: () => request<AdminTrial>("GET", "/admin/market-reports/trial"),
+    getAdminReportVariant: (reportId, label) => request<MarketReport>("GET", `/admin/market-reports/${enc(reportId)}/variants/${enc(label)}`),
+    voteReport: (reportId, body) => request<void>("PUT", `/admin/market-reports/${enc(reportId)}/vote`, { body }),
+    revealTrial: (body = {}) => request<TrialReveal>("POST", "/admin/market-reports/trial/reveal", { body }),
+    addReportCorrection: (reportId, body) => request<MarketReport>("POST", `/admin/market-reports/${enc(reportId)}/corrections`, { body }),
+    rebuildReportData: (body) => request<void>("POST", "/admin/market-reports/rebuild-data", { body }),
+    listNyseHolidays: () => request<NyseHoliday[]>("GET", "/admin/market-calendar/nyse"),
+    putNyseHoliday: (date, body) => request<NyseHoliday>("PUT", `/admin/market-calendar/nyse/${enc(date)}`, { body }),
+    deleteNyseHoliday: (date) => request<void>("DELETE", `/admin/market-calendar/nyse/${enc(date)}`),
+    listMacroEvents: (query = {}) => request<MacroEvent[]>("GET", "/admin/market-calendar/macro", { query }),
+    addMacroEvent: (body) => request<MacroEvent>("POST", "/admin/market-calendar/macro", { body }),
+    deleteMacroEvent: (id) => request<void>("DELETE", `/admin/market-calendar/macro/${enc(id)}`),
+    listUsEarnings: () => request<UsEarning[]>("GET", "/admin/market-calendar/us-earnings"),
+    addUsEarning: (body) => request<UsEarning>("POST", "/admin/market-calendar/us-earnings", { body }),
+    deleteUsEarning: (id) => request<void>("DELETE", `/admin/market-calendar/us-earnings/${enc(id)}`),
   }
 }

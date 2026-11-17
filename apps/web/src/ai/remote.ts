@@ -55,15 +55,32 @@ export interface ServerDraft {
 /** `draw_chart` 畫出來的圖卡（SSE `chart` 事件、對話紀錄的 `charts`）：每個點都是伺服器讀的資料，不是模型寫的 */
 export interface AiChart {
   id: string
-  kind: "price" | "compare" | "revenue" | "eps" | "performance"
+  /**
+   * 對話的 `draw_chart`：price、compare、revenue、eps、performance。
+   * 市場報告（2026-11-17，伺服器從存檔畫，模型只能從固定的選單挑）：line（加權指數）、columns（交易日一根柱，
+   * 外資台指期淨未平倉）、bars（以零為軸的雙向橫條：類股、點數貢獻、漲跌家數、美股 ETF；畫 `bars`，`series` 是空的）
+   */
+  kind: "price" | "compare" | "revenue" | "eps" | "performance" | "line" | "columns" | "bars"
   title: string
-  /** price＝收盤價（原幣）；pct＝分數（0.0123＝1.23%）；amount_k＝新台幣千元；eps＝每股盈餘（元） */
-  unit: "price" | "pct" | "amount_k" | "eps"
+  /**
+   * price＝收盤價（原幣）；pct＝分數（0.0123＝1.23%）；amount_k＝新台幣千元；eps＝每股盈餘（元）；
+   * index＝指數（2 位小數）；points＝點數；count＝家數；lots＝口數；yi＝億元
+   */
+  unit: "price" | "pct" | "amount_k" | "eps" | "index" | "points" | "count" | "lots" | "yi"
   currency: string | null
-  /** 橫軸：日期 YYYY-MM-DD、月份 YYYY-MM、季別 2026Q3 */
-  x: "date" | "month" | "quarter"
+  /** 橫軸：日期 YYYY-MM-DD、月份 YYYY-MM、季別 2026Q3、交易日（一天一根，日期當類別）、類別（bars） */
+  x: "date" | "month" | "quarter" | "day" | "category"
   range: string | null
-  series: { name: string; symbol: string | null; points: { t: string; v: number }[] }[]
+  /** `hidden` 的線不畫，只出現在讀數（提示框、螢幕報讀） */
+  series: { name: string; symbol: string | null; points: { t: string; v: number }[]; hidden?: boolean }[]
+  /** bars：每一條的值（和 unit 同一個尺度）、印出來的字、顏色（漲跌色／墨色／鉛筆灰）、名稱下面一行、站內連結 */
+  bars?: { label: string; value: number; display: string; tone: "rise" | "fall" | "ink" | "pencil"; sub?: string | null; href?: string | null }[] | null
+  /** 圖下面一行（點數貢獻的「官方漲跌 −2,635.04 點」） */
+  reference?: { label: string; display: string } | null
+  /** 標題旁「估算」 */
+  estimate?: boolean
+  /** 標題旁「11/12 起」（存檔從哪一天開始） */
+  since?: string | null
   notes: string[]
   sources: string[]
   is_demo: boolean

@@ -627,7 +627,7 @@ describe("管理後台：只有站方管理員", () => {
     expect(screen.queryByRole("option", { name: "管理後台" })).toBeNull()
   })
 
-  it("管理員：管理後台自己的外殼（字標｜管理後台、總覽・討論・新聞下架・會員、回到帳本），沒有頭像選單、底部列與問 AI", async () => {
+  it("管理員：管理後台自己的外殼（字標｜管理後台、總覽・討論・新聞下架・會員・市場報告、回到帳本），沒有頭像選單、底部列與問 AI", async () => {
     const user = userEvent.setup()
     mount()
     const router = renderApp("/admin")
@@ -638,6 +638,7 @@ describe("管理後台：只有站方管理員", () => {
       "討論:/admin/discussions:null",
       "新聞下架:/admin/news:null",
       "會員:/admin/members:null",
+      "市場報告:/admin/reports:null",
     ])
     expect(screen.getByRole("link", { name: "回到帳本" })).toHaveAttribute("href", "/")
     expect(screen.queryByRole("button", { name: /帳號選單/ })).toBeNull()
@@ -658,6 +659,8 @@ describe("管理後台：只有站方管理員", () => {
       "金鑰 1正常US$3.84／預算 US$50.001,284 次呼叫・41 段對話・wrkspc_01JD7Q2M4X8V",
       "金鑰 2冷卻中，38 秒後再試US$2.91／預算 US$50.00966 次呼叫・33 段對話・wrkspc_01JD7Q9K2B5N最近的錯誤：429 rate_limit_error",
       "金鑰 3沒有設定",
+      // 市場報告專用的 slot（2026-11-17）：一般對話、為什麼漲跌、群組日報都不會用到
+      "金鑰 4市場報告專用正常US$12.40／預算 US$90.0096 次呼叫・0 段對話・wrkspc_01JDREPORTS4",
     ])
     expect(screen.getByText("2026 年 11 月（UTC）")).toBeInTheDocument()
     const users = screen.getByRole("region", { name: "使用者" })
@@ -755,7 +758,7 @@ describe("管理後台：只有站方管理員", () => {
     expect([...list.children].map((li) => li.textContent)).toEqual(["阿明friend@forliosa.local到 2026/12/14・11/15 轉帳 NT$490續期取消會員"])
     // 分頁只有「會員」是目前頁（總覽不跟著畫線）
     const nav = screen.getByRole("navigation", { name: "管理後台" })
-    expect(within(nav).getAllByRole("link").map((a) => a.getAttribute("aria-current"))).toEqual([null, null, null, "page"])
+    expect(within(nav).getAllByRole("link").map((a) => a.getAttribute("aria-current"))).toEqual([null, null, null, "page", null])
     // 空的不送出，就地說明
     await user.click(screen.getByRole("button", { name: "開通" }))
     expect(screen.getByRole("alert")).toHaveTextContent("請輸入對方登入用的 email。")

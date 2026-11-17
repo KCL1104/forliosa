@@ -2,8 +2,10 @@ import {
   ApiError,
   REACTION_EMOJIS,
   type Account,
+  type ChannelNotify,
   type Channels,
   type Comment,
+  type DiscordInput,
   type DailyReport,
   type DailyReportFacts,
   type Delegation,
@@ -71,6 +73,8 @@ export interface SharingDeps {
   dadAccounts: Account[]
   /** 邀請連結的網址前綴 */
   origin(): string
+  /** 市場報告對全站公開（頻道才有三個報告的推播開關） */
+  marketReportsPublic?(): boolean
 }
 
 interface MockMember {
@@ -110,6 +114,9 @@ interface MockDiscord {
   notify_trades: boolean
   notify_digest: boolean
   notify_daily: boolean
+  notify_premarket: boolean
+  notify_close: boolean
+  notify_weekly: boolean
 }
 interface MockTelegram {
   chat_title: string
@@ -118,6 +125,9 @@ interface MockTelegram {
   notify_trades: boolean
   notify_digest: boolean
   notify_daily: boolean
+  notify_premarket: boolean
+  notify_close: boolean
+  notify_weekly: boolean
 }
 /**
  * 一則日報：寫好時有分享報酬的人（`contributors`）與開著持股、交易動態的人（`parts`，後端 `prompt_contributors`）；
@@ -285,7 +295,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
         }),
       ),
       grandfathered: true,
-      discord: { hint: "…/x9Kd", status: "active", disabled_reason: null, notify_trades: true, notify_digest: true, notify_daily: false },
+      discord: { hint: "…/x9Kd", status: "active", disabled_reason: null, notify_trades: true, notify_digest: true, notify_daily: false, notify_premarket: false, notify_close: false, notify_weekly: true },
       telegram: null,
       telegramLink: null,
     }
@@ -309,7 +319,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       })),
       grandfathered: true,
       discord: null,
-      telegram: { chat_title: "大學同學投資群", status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", notify_trades: true, notify_digest: true, notify_daily: false },
+      telegram: { chat_title: "大學同學投資群", status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", notify_trades: true, notify_digest: true, notify_daily: false, notify_premarket: false, notify_close: false, notify_weekly: true },
       telegramLink: null,
     }
     const club: MockGroup = {
@@ -1130,21 +1140,22 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const { g, me } = memberGroup(groupId)
       // 示範：產生連結碼約 6 秒後，當作 owner 已在 Telegram 群組傳了 /link
       if (g.telegramLink && Date.now() >= g.telegramLink.linkAt) {
-        g.telegram = { chat_title: `${g.name}群`, status: "active", disabled_reason: null, notify_trades: true, notify_digest: true, notify_daily: false }
+        g.telegram = { chat_title: `${g.name}群`, status: "active", disabled_reason: null, notify_trades: true, notify_digest: true, notify_daily: false, notify_premarket: false, notify_close: false, notify_weekly: true }
         g.telegramLink = null
       }
       const owner = me.role === "owner"
       return {
         discord: g.discord
-          ? { configured: true, status: g.discord.status, disabled_reason: g.discord.disabled_reason, ...(owner ? { webhook_hint: g.discord.hint } : {}), notify_trades: g.discord.notify_trades, notify_digest: g.discord.notify_digest, notify_daily: g.discord.notify_daily }
-          : { configured: false, status: null, disabled_reason: null, ...(owner ? { webhook_hint: null } : {}), notify_trades: true, notify_digest: true, notify_daily: false },
+          ? { configured: true, status: g.discord.status, disabled_reason: g.discord.disabled_reason, ...(owner ? { webhook_hint: g.discord.hint } : {}), notify_trades: g.discord.notify_trades, notify_digest: g.discord.notify_digest, notify_daily: g.discord.notify_daily, notify_premarket: g.discord.notify_premarket, notify_close: g.discord.notify_close, notify_weekly: g.discord.notify_weekly }
+          : { configured: false, status: null, disabled_reason: null, ...(owner ? { webhook_hint: null } : {}), notify_trades: true, notify_digest: true, notify_daily: false, notify_premarket: false, notify_close: false, notify_weekly: true },
         telegram: g.telegram
-          ? { configured: true, status: g.telegram.status, disabled_reason: g.telegram.disabled_reason, chat_title: g.telegram.chat_title, notify_trades: g.telegram.notify_trades, notify_digest: g.telegram.notify_digest, notify_daily: g.telegram.notify_daily }
-          : { configured: false, status: null, disabled_reason: null, chat_title: null, notify_trades: true, notify_digest: true, notify_daily: false },
+          ? { configured: true, status: g.telegram.status, disabled_reason: g.telegram.disabled_reason, chat_title: g.telegram.chat_title, notify_trades: g.telegram.notify_trades, notify_digest: g.telegram.notify_digest, notify_daily: g.telegram.notify_daily, notify_premarket: g.telegram.notify_premarket, notify_close: g.telegram.notify_close, notify_weekly: g.telegram.notify_weekly }
+          : { configured: false, status: null, disabled_reason: null, chat_title: null, notify_trades: true, notify_digest: true, notify_daily: false, notify_premarket: false, notify_close: false, notify_weekly: true },
         telegram_available: true,
+        market_reports_available: deps.marketReportsPublic?.() ?? false,
       }
     },
-    putDiscord(groupId: string, body: { webhook_url: string; notify_trades: boolean; notify_digest: boolean; notify_daily?: boolean }): void {
+    putDiscord(groupId: string, body: DiscordInput): void {
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       let url: URL
@@ -1159,9 +1170,14 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       }
       // 示範：token 含 fail 時當作測試訊息送不出去
       if (m[2]!.includes("fail")) throw new ApiError(422, "webhook_failed", "測試訊息送不出去，請確認 webhook 網址還有效")
-      g.discord = { hint: `…/${m[2]!.slice(-4)}`, status: "active", disabled_reason: null, notify_trades: !!body.notify_trades, notify_digest: !!body.notify_digest, notify_daily: body.notify_daily ?? g.discord?.notify_daily ?? false }
+      g.discord = { hint: `…/${m[2]!.slice(-4)}`, status: "active", disabled_reason: null, notify_trades: !!body.notify_trades, notify_digest: !!body.notify_digest, notify_daily: body.notify_daily ?? g.discord?.notify_daily ?? false,
+        // 市場報告：沒給就是預設（盤前、盤後關，週報開）
+        notify_premarket: body.notify_premarket ?? g.discord?.notify_premarket ?? false,
+        notify_close: body.notify_close ?? g.discord?.notify_close ?? false,
+        notify_weekly: body.notify_weekly ?? g.discord?.notify_weekly ?? true,
+      }
     },
-    patchDiscord(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean; notify_daily?: boolean }): void {
+    patchDiscord(groupId: string, patch: ChannelNotify): void {
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       if (!g.discord) throw new ApiError(404, "not_found", "還沒有設定 Discord 頻道")
@@ -1180,7 +1196,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       g.telegramLink = { code, expires_at, linkAt: Date.now() + 6000 }
       return { code, bot_username: "forliosa_bot", expires_at }
     },
-    patchTelegram(groupId: string, patch: { notify_trades?: boolean; notify_digest?: boolean; notify_daily?: boolean }): void {
+    patchTelegram(groupId: string, patch: ChannelNotify): void {
       const { g, me } = memberGroup(groupId)
       atLeast(me, "owner")
       if (!g.telegram) throw new ApiError(404, "not_found", "還沒有連結 Telegram 群組")

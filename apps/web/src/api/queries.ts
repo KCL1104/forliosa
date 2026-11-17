@@ -1,4 +1,4 @@
-import { keepPreviousData, queryOptions, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
+import { keepPreviousData, queryOptions, useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api, DEV_LOGIN } from "./index"
 import {
   ApiError,
@@ -6,6 +6,8 @@ import {
 } from "./types"
 import type {
   AccountInput,
+  ReportKind,
+  ReportsStatus,
   Briefing,
   ChipsRange,
   FinancialsPeriod,
@@ -57,6 +59,12 @@ export const qk = {
   marketOverview: ["market", "overview"] as const,
   briefingLatest: ["ai", "briefings", "latest"] as const,
   briefings: ["ai", "briefings", "list"] as const,
+  // 市場報告：都在 ["market", "reports"] 底下（管理員改了模式、加了更正就整組重新讀）
+  reports: ["market", "reports"] as const,
+  reportsStatus: ["market", "reports", "status"] as const,
+  reportLatest: (kind?: ReportKind) => ["market", "reports", "latest", kind ?? "any"] as const,
+  report: (id: string, version?: number) => ["market", "reports", "one", id, version ?? "current"] as const,
+  reportList: (kind?: ReportKind) => ["market", "reports", "list", kind ?? "all"] as const,
 }
 
 /** 後端每頁最多 200 筆：依 cursor 一頁一頁讀，最多讀到 `max` 筆（回傳是否還有更多） */
@@ -386,4 +394,46 @@ export function useMarkBriefingRead() {
  */
 export function useMarketStatus() {
   return useQuery({ queryKey: qk.marketStatus, queryFn: () => api.getMarketStatus(), staleTime: 30_000, refetchInterval: 60_000, refetchOnWindowFocus: true, retry: false })
+}
+
+// ── 市場報告（盤前重點、盤後重點、市場週報；2026-11-17） ──────────────
+/** 報告一頁 10 份（「再看 10 份」） */
+export const REPORT_PAGE_SIZE = 10
+/**
+ * 有沒有報告可看、有沒有新的（市場頁的「報告」分頁、導覽的未讀小圓點）。外殼一直掛著，所以 5 分鐘問一次；
+ * 失敗就當作沒有（不重試、不報錯：市場頁照舊）。
+ */
+export function useMarketReportStatus(enabled = true) {
+  return useQuery<ReportsStatus>({ enabled, queryKey: qk.reportsStatus, queryFn: () => api.getMarketReportStatus(), staleTime: 60_000, refetchInterval: 5 * 60_000, retry: false })
+}
+/** 某一種最新的一份（沒有就是 null） */
+export function useMarketReportLatest(kind: ReportKind, enabled = true) {
+  return useQuery({ enabled, queryKey: qk.reportLatest(kind), queryFn: () => api.getLatestMarketReport(kind), staleTime: 60_000, retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 1 })
+}
+/** 一份報告（`version` 看舊版）；看不到是 404 */
+export function useMarketReport(id: string, version?: number) {
+  return useQuery({ queryKey: qk.report(id, version), queryFn: () => api.getMarketReport(id, version), staleTime: 60_000, retry: (n, e) => !(e instanceof ApiError && e.status < 500) && n < 1 })
+}
+/**
+ * 更早的報告（新到舊；「再看 10 份」＝下一頁）。第一頁多讀一份：最新的那一份已經整份顯示在上面，清單不再列它，
+ * 先看到的還是 10 份。
+ */
+export function useMarketReports(kind?: ReportKind, enabled = true) {
+  return useInfiniteQuery({
+    enabled,
+    queryKey: qk.reportList(kind),
+    queryFn: ({ pageParam }) => api.listMarketReports({ kind, limit: pageParam ? REPORT_PAGE_SIZE : REPORT_PAGE_SIZE + 1, cursor: pageParam }),
+    initialPageParam: null as string | null,
+    getNextPageParam: (last) => last.next_cursor,
+    placeholderData: keepPreviousData,
+    staleTime: 60_000,
+  })
+}
+/** 看過了：未讀的小圓點馬上消失（伺服器記下來，別的裝置也不再標未讀）；查看別人的資產時不呼叫 */
+export function useMarkReportsSeen() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: () => api.markMarketReportsSeen(),
+    onMutate: () => qc.setQueryData<ReportsStatus>(qk.reportsStatus, (s) => (s ? { ...s, unread: false } : s)),
+  })
 }
