@@ -491,6 +491,36 @@ class HoldingDeleted(BaseModel):
     plans_running: int = Field(description="還在進行的定期定額（沒有暫停）：下次扣款還會提出這一檔的草稿")
 
 
+class RecordCount(BaseModel):
+    """One account's records, or every account's (``GET /portfolio/records``): what 清除所有持倉 would delete."""
+
+    records: int = Field(description="紀錄筆數（買賣、股利含自動入帳的、分割、減資、存提款等，所有類型）")
+    trades: int = Field(description="其中的買進與賣出")
+    dividends: int = Field(description="其中的現金股利與配股")
+    symbols: int = Field(description="紀錄裡有幾檔股票（不同帳戶的同一檔算一檔）")
+    plans_running: int = Field(description="還在進行的定期定額（有下一次扣款日）")
+
+
+class AccountRecordCount(RecordCount):
+    account_id: str
+
+
+class RecordCounts(RecordCount):
+    """``GET /portfolio/records``: the totals, and each account (in the order of ``GET /accounts``, empty ones too)."""
+
+    accounts: list[AccountRecordCount]
+
+
+class RecordsCleared(BaseModel):
+    """``DELETE /portfolio/records``: every record of one account, or of every account, deleted (清除所有持倉)."""
+
+    account_id: str | None = Field(description="清除的帳戶；null 是全部帳戶")
+    deleted: int = Field(description="刪掉的紀錄筆數（所有類型）")
+    symbols: int = Field(description="刪掉的紀錄裡有幾檔股票")
+    plans_paused: int = Field(description="這次暫停的定期定額（pause_plans=true 時）")
+    plans_running: int = Field(description="範圍裡還在進行的定期定額（沒有暫停）：下次扣款日還會提出草稿")
+
+
 # -- portfolio ----------------------------------------------------------------------------------
 class AllocationItem(BaseModel):
     key: str

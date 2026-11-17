@@ -1,11 +1,18 @@
 import { PinIcon, SlidersHorizontalIcon } from "lucide-react"
+import { useRef, useState } from "react"
 import { useHoldings } from "@/api/queries"
+import { useReadOnly } from "@/api/view-as"
+import { useUi } from "@/app/ui-store"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cn } from "@/lib/utils"
 import { ALL_COLUMNS, COLUMN_HINT, useLedgerPrefs } from "./ledger-prefs"
 import { useColumnLabel } from "./use-column-label"
 
-/** 自訂：選欄位、隱藏走勢圖、釘選持股（存在這台瀏覽器） */
+/**
+ * 自訂：選欄位、隱藏走勢圖、釘選持股（存在這台瀏覽器）。最下面一條格線之後是「清除所有持倉…」（產品負責人 2026-11-17；
+ * 確認框見 `ClearRecordsDialog`，主要入口在設定「帳號與資料」）：選單裡的破壞性動作放最後、上面一條格線、淡墨、不用紅色
+ * （和「刪除這檔」「移出群組」同一套）。查看別人的資產時沒有。
+ */
 export function CustomizeButton({ className }: { className?: string }) {
   const columns = useLedgerPrefs((s) => s.columns)
   const toggleColumn = useLedgerPrefs((s) => s.toggleColumn)
@@ -16,11 +23,16 @@ export function CustomizeButton({ className }: { className?: string }) {
   const reset = useLedgerPrefs((s) => s.reset)
   const holdings = useHoldings()
   const label = useColumnLabel()
+  const readOnly = useReadOnly()
+  const openClear = useUi((s) => s.openClearRecords)
+  const [open, setOpen] = useState(false)
+  const trigger = useRef<HTMLButtonElement>(null)
   return (
-    <Popover>
+    <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger
         render={
           <button
+            ref={trigger}
             type="button"
             aria-label="自訂欄位與顯示"
             title="自訂"
@@ -72,6 +84,21 @@ export function CustomizeButton({ className }: { className?: string }) {
             還原預設
           </button>
         </div>
+        {!readOnly && (
+          <div className="border-t border-rule px-4 py-2">
+            <button
+              type="button"
+              onClick={() => {
+                // 先關選單（連結跟著卸載），確認框關掉後焦點回到「自訂」
+                setOpen(false)
+                openClear(trigger.current)
+              }}
+              className="flex min-h-9 w-full items-center text-left text-md text-ink-2 hover:text-ink pointer-coarse:min-h-11"
+            >
+              清除所有持倉…
+            </button>
+          </div>
+        )}
       </PopoverContent>
     </Popover>
   )

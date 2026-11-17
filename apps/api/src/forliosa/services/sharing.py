@@ -702,6 +702,27 @@ def purge_trade_threads(db: Session, user_id: str, keys: Iterable[TradeKey]) -> 
         db.execute(delete(GroupReaction).where(GroupReaction.target == target))
 
 
+PURGE_CHUNK = 500
+
+
+def purge_trade_threads_bulk(db: Session, user_id: str, keys: Iterable[TradeKey]) -> None:
+    """:func:`purge_trade_threads` for a whole account at once (清除所有持倉): one query for the feed items the user's
+    remaining rows still back (another account's buys the same day), then the comments and reactions of the rest in
+    chunks — not one count per feed item."""
+    keys = set(keys)
+    if not keys:
+        return
+    backed = {(d, s, side) for d, s, side in db.execute(
+        select(Transaction.trade_date, Transaction.symbol, Transaction.type).where(
+            Transaction.user_id == user_id, Transaction.type.in_(FEED_SIDES), Transaction.source.in_(FEED_SOURCES),
+            Transaction.note != CONVERTED_NOTE, Transaction.symbol.is_not(None)).distinct())}
+    targets = sorted(f"trade:{feed_item_id(user_id, d, symbol, side)}" for d, symbol, side in keys - backed)
+    for i in range(0, len(targets), PURGE_CHUNK):
+        chunk = targets[i:i + PURGE_CHUNK]
+        db.execute(delete(GroupComment).where(GroupComment.target.in_(chunk)))
+        db.execute(delete(GroupReaction).where(GroupReaction.target.in_(chunk)))
+
+
 # -- push to group channels (``services.notifications``) ------------------------------------------------------
 PUSH_TRADE_DAYS = 3  # the trade date must be one of the last 3 calendar days (Taipei), today included
 PUSH_DELAY = timedelta(minutes=15)

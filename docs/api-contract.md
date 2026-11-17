@@ -255,6 +255,8 @@
 |---|---|---|
 | GET | `/portfolio/summary?account_id=` | `PortfolioSummary`（不帶 `account_id` 為全部帳戶） |
 | GET | `/portfolio/holdings?account_id=` | `Holding[]` |
+| GET | `/portfolio/records` | 每個帳戶有幾筆紀錄（清除所有持倉的確認框；2026-11-17，見下方「清除所有持倉」） |
+| DELETE | `/portfolio/records?account_id=`｜`?all_accounts=true`＆`pause_plans=` | 清除所有持倉：一個帳戶或全部帳戶的**每一筆紀錄**（不能復原；帳戶留著） |
 | GET | `/portfolio/performance?range=1Y&benchmark=0050.TW&account_id=` | `Performance`；`range`：`1D`、`5D`、`MTD`、`1M`、`3M`、`6M`、`YTD`、`1Y`、`ALL`（`1D`／`5D` 以交易日計，第一點是基準收盤；`MTD` 從上月最後收盤起，M5 新增）；`benchmark` 省略時用使用者偏好，可為任何商品或 `^TAIEXTR` |
 
 ```json
@@ -1954,3 +1956,39 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 
 - 錯誤：帳戶不是自己的 404 `not_found`「找不到帳戶」；這個帳戶沒有這一檔的紀錄 404 **`no_records`**「這個帳戶沒有這一檔的紀錄」（自己的代碼：前端把它當成「已經在別的分頁或裝置刪掉了」）；查看別人的資產時 403 `read_only`。
 - 前端：持倉的「⋯」最後一項「刪除這檔」（上面一條格線）、展開後最下面淡墨的「刪除這檔」（手機）→ 確認框寫出帳戶與筆數（「刪除台積電在「永豐－一般」的 7 筆紀錄？」，不只一種時「包括 5 筆買賣、2 筆股利。」），有定期定額時多一個預設勾著的「同時暫停這一檔的定期定額」。好幾個帳戶都有紀錄時預設是現在持有的帳戶（`Holding.account_ids`），已經賣光的帳戶要自己選。成功後和刪一筆交易重抓同樣的資料（暫停了計畫時定期定額也重抓）；`no_records` 也當成刪好了（重抓、關掉、通知「…的紀錄已經不在了」）；連不上伺服器時說「不確定有沒有刪除」，取消時重抓。
+
+## 清除所有持倉（2026-11-17）
+
+產品負責人 2026-11-17：「也要有清除所有持倉的功能」（刪除這檔做好之後）。一個帳戶或全部帳戶整個清空，重新記；規則和「刪除這檔」一樣，只是範圍是整個帳戶。
+
+**`GET /portfolio/records`**（已實作）：確認框用的筆數。
+
+```json
+{"records": 185, "trades": 122, "dividends": 48, "symbols": 14, "plans_running": 2,
+ "accounts": [{"account_id": "acc_01J...", "records": 171, "trades": 118, "dividends": 41, "symbols": 11, "plans_running": 2},
+              {"account_id": "acc_01K...", "records": 14, "trades": 4, "dividends": 7, "symbols": 3, "plans_running": 0}]}
+```
+
+- `records` 是所有類型（買賣、股利含自動入帳的、分割、減資、存提款、手續費…）；`trades` 是買進與賣出、`dividends` 是現金股利與配股，其餘是「其他紀錄」。`symbols` 是紀錄裡有幾檔股票（加總時不同帳戶的同一檔算一檔）。`plans_running` 和「刪除這檔」同一個「還在進行」（`active`、結束日沒過、還有下一次扣款日）。
+- `accounts` 是每一個帳戶（和 `GET /accounts` 同一個順序，沒有紀錄的帳戶也列，筆數是 0）。查看別人的資產時 403 `view_as_not_allowed`（不在唯讀白名單：清除是自己帳號的事）。
+
+**`DELETE /portfolio/records?account_id=…&pause_plans=true|false`** 或 **`DELETE /portfolio/records?all_accounts=true&pause_plans=…`**（已實作）
+
+- 範圍一定要寫：`account_id`（一個帳戶）和 `all_accounts=true`（全部帳戶）二選一；兩個都沒有、或兩個都有 → 422 `scope_required`「要指定一個帳戶，或是全部帳戶」——**光是 `DELETE /portfolio/records` 不會全部清掉**。
+- 刪掉範圍裡的**每一筆**紀錄（有沒有股票代號都刪，存提款也刪），一個交易、一次 commit。不記賣出、不留已實現損益：帳戶像剛建立一樣是空的。帳戶本身、觀察清單、群組與分享設定、授權查看、AI 對話、偏好、別人的資料都不動。
+- 和「刪除這檔」同一套規則：不先重播帳本（對不起來的帳也能清）；範圍裡帳戶的股利略過紀錄一起清（之後重新記，股利照規則重新入帳），沒有紀錄的帳戶不會被自動入帳補回股利；群組動態裡這些交易的項目（沒有別的帳戶的交易撐著時）連同留言與表情一起清掉；待送的群組推播跟著交易刪掉。
+- **定期定額**：範圍裡還在進行的計畫（不管是哪一檔）只在 `pause_plans=true` 時**暫停**（`active: false`，在設定可以恢復），不會刪除；沒有暫停的數在 `plans_running`。
+- 回 200：
+
+```json
+{"account_id": null, "deleted": 185, "symbols": 14, "plans_paused": 2, "plans_running": 0}
+```
+
+  `account_id` 是清除的帳戶，`null` 是全部帳戶。
+- 錯誤：帳戶不是自己的 404 `not_found`「找不到帳戶」；範圍裡一筆紀錄都沒有 404 **`no_records`**（一個帳戶：「這個帳戶沒有任何紀錄」；全部：「沒有任何紀錄」；前端當成已經在別的分頁或裝置清掉了）；查看別人的資產時 403 `read_only`。
+- `no_records` 時**要求的暫停照樣做**（例如別的分頁沒勾暫停就清了，這裡勾著再按一次）：範圍裡還在進行的計畫在 `pause_plans=true` 時一樣暫停、commit，錯誤物件和 200 一樣帶 `plans_paused`、`plans_running`：
+
+```json
+{"error": {"code": "no_records", "message": "這個帳戶沒有任何紀錄", "plans_paused": 2, "plans_running": 0}}
+```
+- 前端：設定「帳號與資料」的「清除所有持倉」＋外框按鈕「清除…」（刪除帳號的上面一列）；帳本「自訂」選單最下面（一條格線之後）淡墨的「清除所有持倉…」。確認框：選範圍（全部帳戶在最上面、預設選它；每個有紀錄的帳戶一列，附筆數；範圍第一次讀到筆數時定下來，之後只有使用者點選才會換）→「會刪除」「會留下」（有加入群組時「會刪除」多一項群組動態裡這些交易與上面的留言、表情）→ 有還在進行的定期定額時預設勾著的「同時暫停 N 個定期定額」→「要留一份的話，先匯出資料。」（就地下載）→ 要輸入「清除」→ 簽名格「清除 185 筆紀錄」。成功後通知筆數，持股、總資產、紀錄、本週事項重抓（暫停了計畫時定期定額也重抓）；`no_records` 當成清好了（通知裡說暫停了幾個定期定額）；連不上伺服器、或閘道回了不是 JSON 的 5xx（`http_502` 等，後端可能已經 commit）時說「不確定有沒有清除」，範圍定在送出的那一個，取消時重抓。

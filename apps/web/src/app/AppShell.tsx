@@ -16,6 +16,7 @@ import { useBriefingUnread } from "@/ai/use-briefing-unread"
 import { ReduceHost } from "@/pages/transactions/ReduceDialog"
 import { ImportHost } from "@/pages/transactions/import/ImportHost"
 import { DeleteHoldingHost } from "@/pages/ledger/DeleteHoldingDialog"
+import { ClearRecordsHost } from "@/pages/settings/ClearRecordsDialog"
 import { TradeFormHost } from "@/pages/transactions/TradeForm"
 import { usePrefs } from "@/stores/prefs"
 import { AvatarMenu } from "./AvatarMenu"
@@ -70,6 +71,7 @@ export function AppShell() {
       <ReduceHost />
       {!readOnly && <ImportHost />}
       {!readOnly && <DeleteHoldingHost />}
+      {!readOnly && <ClearRecordsHost />}
     </div>
   )
 }
