@@ -229,14 +229,39 @@ def test_budget_tiers_change_the_writer(env):
         assert accounting.tier(db, "close", ts(MON, 16), get_settings()) == "data_only"
 
 
-def test_a_hard_problem_is_revised_then_its_section_dropped(env):
+def test_a_hard_problem_is_revised_then_its_sentence_dropped(env):
     tick(env, ts(MON, 14, 11))
     script_gather(env["fake"])
     tick(env, ts(MON, 15, 41))
     pk = with_web(pk_close(env))
     bad = close_output(pk)
     pct = fid(pk, "index_pct", group="today")
+    kept_text = bad["what_happened"][1]["sentences"][0]["text"]
     bad["what_happened"] = [p(s("加權指數跌 6.03%，明天可能反彈。", pct)), bad["what_happened"][1]]
+    env["fake"].reply(json_text(bad))  # draft: a hard problem, no check
+    env["fake"].reply(json_text(bad))  # the revision still has it
+    env["fake"].reply(json_text({"issues": []}))  # the check of what is left
+    tick(env, ts(MON, 15, 51))
+    [run] = runs(env, report(env).id)
+    # only the failing sentence goes: the section keeps its other paragraph (dry run 11/17: one sentence took the
+    # whole section)
+    assert run.status == "ok" and run.metrics["revised"] and run.metrics["dropped_sections"] == 0
+    v = versions(env, report(env).id)[-1]
+    assert [x["path"] for x in v.validation["dropped_sentences"]] == ["what_happened[0].sentences[0]"]
+    public = assemble.public(v.payload)
+    sec = next(sec for sec in public["sections"] if sec["key"] == "what_happened")
+    assert sec["origin"] == "ai" and kept_text in str(sec) and "明天" not in str(public)
+
+
+def test_a_section_whose_every_sentence_fails_is_dropped(env):
+    tick(env, ts(MON, 14, 11))
+    script_gather(env["fake"])
+    tick(env, ts(MON, 15, 41))
+    pk = with_web(pk_close(env))
+    bad = close_output(pk)
+    pct = fid(pk, "index_pct", group="today")
+    bad["what_happened"] = [p(s("加權指數跌 6.03%，明天可能反彈。", pct)),
+                            p(s("加權指數跌 6.03%，後續可能反彈。", pct))]  # every paragraph fails
     env["fake"].reply(json_text(bad))  # draft: a hard problem, no check
     env["fake"].reply(json_text(bad))  # the revision still has it
     env["fake"].reply(json_text({"issues": []}))  # the check of what is left
