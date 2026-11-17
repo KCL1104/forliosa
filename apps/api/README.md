@@ -123,6 +123,9 @@ uv run python -m forliosa.worker
 - 日誌只有數字（每 10 分鐘：幾條串流、幾個人、送了幾個事件），不記 payload、使用者 id 或 session。
 - 連線池（和 API 速度工作一起）：開著的串流不佔請求的連線池（5＋10）也不佔存檔的連線池（5＋10），LISTEN 是第三種、自己的一條；
   部署後所有分頁同時重抓時兩個池子都撐得住（`tests/realtime/test_merge_batch4.py`）。慢請求記錄的 `inflight` 不算開著的串流。
+  **（合併後審查更正：原本並不是每次都撐得住——請求在兩次 threadpool 呼叫之間拿著連線，高峰時 40 個 token 和 15 條連線互等到連線池逾時。
+  現在登入檢查與每個同步端點做完就把只讀的交易結束、連線還回去（`forliosa.db.release_connection`、`api.routing.Router`），
+  同時 500 個請求也撐得住；`inflight` 只不算 `GET /events`，AI 對話與報價串流照算。）**
 - 測試：`tests/realtime/`；PostgreSQL 的部分要一個可以清空的資料庫：`FORLIOSA_TEST_PG_URL=postgresql+psycopg://…/rt_test uv run pytest tests/realtime`。
 
 ### 市場報告（2026-11-17）

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Iterator
 from datetime import UTC, datetime
@@ -91,10 +92,71 @@ def make_engine(url: str, **options) -> Engine:
 
 
 def _watch_writes() -> None:
-    """Realtime updates: every session's writes are announced with its commit (``forliosa.realtime.capture``)."""
+    """Realtime updates: every session's writes are announced with its commit (``forliosa.realtime.capture``); a
+    session's own writes are noted for :func:`release_connection`."""
     from forliosa.realtime import capture
 
     capture.install()
+    _track_writes()
+
+
+# -- a request's connection between two threadpool calls ----------------------------------------------------------
+# A sync request runs in several threadpool calls (the sign-in dependency, the endpoint, the response's validation),
+# each taking one of anyio's 40 tokens. A session that read keeps its pooled connection until its transaction ends, so
+# a request used to hold one between those calls, waiting for a token without one. Under a burst (2026-11-17, a deploy's
+# resync: every open tab refetching at once) the 40 tokens all went to requests waiting for a connection while the 15
+# connections sat with requests waiting for a token, until the pool timed out (500 ``QueuePool limit``). The sign-in
+# dependencies (``api.deps``) and every sync endpoint (``api.routing.Router``) therefore end a read-only transaction
+# before they return; the next query takes a connection again (``pool_pre_ping``: one ``SELECT 1`` more per request).
+WROTE_KEY = "forliosa.wrote"
+_writes_tracked = False
+
+
+def _note_flush(session: Session, _ctx) -> None:
+    session.info[WROTE_KEY] = True
+
+
+def _note_statement(state) -> None:
+    if not state.is_select:  # Core insert / update / delete, text(): anything but a SELECT counts as a write
+        state.session.info[WROTE_KEY] = True
+
+
+def _forget_writes(session: Session, transaction) -> None:
+    if transaction.parent is None:
+        session.info.pop(WROTE_KEY, None)
+
+
+def _track_writes() -> None:
+    global _writes_tracked
+    if _writes_tracked:
+        return
+    event.listen(Session, "after_flush", _note_flush)
+    event.listen(Session, "do_orm_execute", _note_statement)
+    event.listen(Session, "after_transaction_end", _forget_writes)
+    _writes_tracked = True
+
+
+def release_connection(db: Session) -> bool:
+    """End ``db``'s transaction when it has only read, so its pooled connection goes back to the pool; the loaded
+    objects stay usable (``expire_on_commit=False``) and the next query takes a connection again. Left alone (and
+    False): no transaction, a savepoint open, unflushed changes, a write this transaction made and did not commit
+    (a dry run rolls back itself; anything else is rolled back by ``close()`` as before), realtime events waiting for
+    a commit, or a session that would expire its objects on commit. Never raises: a broken transaction is reported by
+    the next query or rolled back by ``close()``."""
+    if not db.in_transaction() or db.in_nested_transaction() or db.expire_on_commit:
+        return False
+    if db.new or db.dirty or db.deleted or db.info.get(WROTE_KEY):
+        return False
+    from forliosa.realtime import capture
+
+    if capture.has_pending(db):
+        return False
+    try:
+        db.commit()
+    except Exception:  # pragma: no cover - e.g. a transaction that already failed: close() rolls it back
+        logging.getLogger(__name__).debug("release_connection: commit failed", exc_info=True)
+        return False
+    return True
 
 
 def get_engine() -> Engine:
@@ -122,7 +184,8 @@ def session_factory() -> sessionmaker[Session]:
 
 
 # -- the market-data archive's own pool ---------------------------------------------------------------------------
-# A request holds one pooled connection from its first query (the sign-in check) to its response; the archive's reads
+# A request holds one pooled connection while its endpoint runs (until the 2026-11-17 merge review: from its first
+# query, the sign-in check, to its response; see ``release_connection`` above); the archive's reads
 # (``marketdata.archive_provider``) open sessions of their own. On one pool, 15 requests that each held a connection and
 # waited for a second one waited for each other until the 30 s pool timeout (2026-11-17: three ledger pages at once,
 # 3 of 3 runs). The archive therefore reads through a pool of its own on the same database: an archive session never

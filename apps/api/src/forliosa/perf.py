@@ -15,8 +15,10 @@ One ``slow_request`` line (logger ``forliosa.perf``, INFO) for every request slo
   a thread of its own (``threading.Thread``: the AI why / analyst generation) is not counted: it does not inherit the
   request's context. The threadpool that runs sync endpoints copies the context, so its queries are counted.
 * ``inflight``: requests this process was serving when this one ended (queueing for the GIL or the pool vs one slow
-  endpoint). A server-sent event stream counts only until its headers are sent: the realtime streams
-  (``GET /events``, one per open tab, idle for minutes) would otherwise inflate every line by the number of open tabs.
+  endpoint). The realtime stream (``GET /events``, one per open tab, idle for minutes) counts only until its headers
+  are sent: it would otherwise inflate every line by the number of open tabs. Every other server-sent event stream
+  (``POST /ai/chat``: a threadpool thread, Claude calls and database writes for the whole answer; ``GET
+  /stream/quotes``) is real work and counts until it ends.
 
 Every ``SUMMARY_SECONDS`` one ``request_summary`` line per route template seen (count, p50, p95, max), so the
 distribution is visible, not only the slow tail. A full garbage collection (generation 2) longer than
@@ -64,8 +66,11 @@ def current_stats() -> RequestStats | None:
 
 
 def inflight() -> int:
-    """Requests being served now (open server-sent event streams not included)."""
+    """Requests being served now (open realtime streams, ``GET /events``, not included)."""
     return _inflight
+
+
+IDLE_STREAMS = ("/events",)  # route templates (under the middleware's prefix) not counted in flight once streaming
 
 
 # -- SQL counters ------------------------------------------------------------------------------------------------
@@ -164,6 +169,7 @@ class SlowRequestMiddleware:
         self.app = app
         self.threshold_ms = slow_threshold_ms() if threshold_ms is None else threshold_ms
         self.prefix = prefix
+        self.idle_streams = frozenset(prefix + p for p in IDLE_STREAMS)
         self.summary = _Summary()
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
@@ -183,7 +189,8 @@ class SlowRequestMiddleware:
                 meta["ttfb"] = time.perf_counter()
                 ctype = next((v for k, v in message.get("headers", []) if k.lower() == b"content-type"), b"")
                 meta["sse"] = ctype.startswith(b"text/event-stream")
-                if meta["sse"] and meta["counted"]:  # a stream is not "in flight" once it streams (see above)
+                # the realtime stream is not "in flight" once it streams (see above); other streams are
+                if meta["sse"] and meta["counted"] and route_template(scope, self.prefix) in self.idle_streams:
                     with _inflight_lock:
                         _inflight -= 1
                     meta["counted"] = False

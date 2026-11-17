@@ -4,18 +4,19 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import Depends, Query, Request
 from fastapi.responses import RedirectResponse
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import rotate_session
+from forliosa.api.routing import Router
 from forliosa.config import get_settings
 from forliosa.db import get_db
 from forliosa.services import discord_oauth as oauth
 from forliosa.services import google_oauth as google
 
-router = APIRouter(prefix="/auth", tags=["auth"])
+router = Router(prefix="/auth", tags=["auth"])
 log = logging.getLogger("forliosa.oauth")
 
 

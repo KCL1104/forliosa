@@ -7,16 +7,17 @@ The worker writes them; these endpoints only read them and record that one was r
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from forliosa.ai import briefing
 from forliosa.api.deps import current_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas import Briefing
 from forliosa.db import get_db
 from forliosa.models import User
 
-router = APIRouter(prefix="/ai/briefings", tags=["ai"])
+router = Router(prefix="/ai/briefings", tags=["ai"])
 
 
 @router.get("/latest", response_model=Briefing | None,

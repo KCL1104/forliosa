@@ -12,10 +12,11 @@ from __future__ import annotations
 from datetime import date
 from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, Path, Query, Response
+from fastapi import Depends, Path, Query, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.routes.admin import site_admin
+from forliosa.api.routing import Router
 from forliosa.api.schemas_reports import (
     CorrectionIn,
     EarningsIn,
@@ -31,7 +32,7 @@ from forliosa.db import get_db
 from forliosa.models import User
 from forliosa.reports import service as svc
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(site_admin)])
+router = Router(prefix="/admin", tags=["admin"], dependencies=[Depends(site_admin)])
 
 
 @router.get("/market-reports/overview",

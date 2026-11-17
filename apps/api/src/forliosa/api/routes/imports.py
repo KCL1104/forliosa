@@ -17,7 +17,7 @@ import json
 import threading
 from collections.abc import Callable
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import Depends, Request, Response
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, ValidationError
 from sqlalchemy.orm import Session
@@ -25,6 +25,7 @@ from sqlalchemy.orm import Session
 from forliosa.ai.importer import Page, mask_text, scrub
 from forliosa.api.deps import current_user
 from forliosa.api.errors import ApiError
+from forliosa.api.routing import Router
 from forliosa.api.schemas_imports import (
     ImportPageIn,
     PositionsCommitCheck,
@@ -43,7 +44,7 @@ from forliosa.models import User
 from forliosa.services import imports as svc
 from forliosa.services import positions_import as pos_svc
 
-router = APIRouter(prefix="/imports", tags=["imports"])
+router = Router(prefix="/imports", tags=["imports"])
 
 TOO_LARGE = "檔案太大。PDF 分開匯入，或少選幾張截圖。"
 _MAGIC = {"image/jpeg": (b"\xff\xd8\xff",), "image/png": (b"\x89PNG\r\n\x1a\n",)}

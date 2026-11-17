@@ -4283,6 +4283,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **頻道分頁**：`group.channels` 改成送給所有成員（每個成員都看得到「頻道」分頁）。
 - **盤後重點的資料版就地更新**：目前那一版的 `payload` 變了（`build_data` 15:40 前每 10 分鐘重算）就送 `market.reports`
   （`capture.ReportVersionFanout`；公開且已發布的給所有人，其他給站方）。
+  **（和批次 4 合併後補充：盲測開給所有登入的人時，盲測那幾期的就地更新也送給所有登入的人——`ReportVersionFanout` 讀寫入那個交易裡的
+  `trial_open`；沒開放時照舊只給站方。）**
 - **查看橫幅的名稱**：改名、換頭像時授權的另一方收到 `delegations`（不在同一個群組也一樣）；前端 `ledger.viewas`、`group.members`
   也讓授權清單（`["delegations"]`）重新讀。
 - **`market.closes` 太常送**：存檔只在官方收盤的最新一天往前進時送（排程把同一天再寫一次不送）；`after_close_refresh` 只在有新的或
@@ -4334,7 +4336,10 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
     所以前端多做兩件事：同一批事件裡好幾個動作對到同一個查詢時只重新讀一次（`applyActions` 先收集再一次 `invalidateQueries`；之前逐一呼叫，
     第二次會取消第一次已送出的請求再送一次，伺服器兩次都做——例如清除所有持倉並暫停定期定額的 `ledger`＋`recurring`、`resync`＋任何事件）；
     等待中的 `resync` 再來一個就併成一次。
+    **（合併後審查更正：「全部 200、沒有連線池逾時」並不是每次都成立——這個測試單獨跑 31 次失敗 7 次，請求池與 threadpool 互等到逾時，
+    回 500 `QueuePool limit … timed out`。原因與修正見下方「合併後審查：重抓高峰時請求連線池和 threadpool 互等」。）**
   - 慢請求記錄的 `inflight`：開著的 SSE 串流在送出回應標頭後就不算「處理中」（不然每一行都多了開著的分頁數）；`perf.inflight()`。
+    **（合併後審查更正：只有即時更新的 `GET /events` 不算；AI 對話 `POST /ai/chat`、報價 `GET /stream/quotes` 是真的在處理，算到結束。）**
 - **和 API 速度工作的快取**：`market.closes` 進來時 hub 照舊先清 30 秒報價快取與市場頁排行快取；`test_a_stored_close_is_in_the_next_read_after_its_event`
   先證明沒有事件時報價快取確實會把新收盤藏住，再證明事件之後下一次讀就是新的（事件到讀完 < 2 秒）。速度工作新增的快取不會藏住收盤：
   存檔起始日（1 小時）只在存進更早的官方收盤時才會變（測試確認新收盤不改它）；相關股票母體依 `dataset_status` 的版本當 key；美股分割偵測依
@@ -4351,3 +4356,47 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **沒有改的**：`sharing.purge_trade_threads(_bulk)`（Core 刪除動態項目的留言與表情）照即時更新分支原本的做法不另外送 `group.comments`：
   動態重抓（`group.ledger` 的 feed）就會拿掉那一項；送 `group.comments` 給已經不分享交易的群組反而洩漏時間。`--timeout-graceful-shutdown 10`
   也套用到 AI 對話：部署時超過 10 秒的對話串流會被切斷（之前沒有上限，由 Railway 決定）。
+
+## 2026-11-17 合併後審查：重抓高峰時請求連線池和 threadpool 互等
+
+- **問題**：同步的登入檢查（`current_user`／`signed_in_user`／`optional_user`）在自己的一次 threadpool 呼叫裡查 session 和使用者，
+  交易沒有結束就回傳，連線一直拿著；端點本身是另一次 threadpool 呼叫，要再拿 anyio 的 token（預設 40 個）。高峰時 40 個 token 全被
+  「等連線的請求」拿走，15 條連線（5＋10）全在「做完登入檢查、等 token 的請求」手上，互等到連線池逾時（正式環境 30 秒）才回 500
+  `QueuePool limit … timed out`，下一批又卡住。即時更新讓高峰固定出現：每次部署（`bye{rotate}` → 重連 → `resync`，0–3 秒內所有分頁一起重抓）、
+  LISTEN 重連、每個 `market.closes`／`market.overview`／`market.reports` 廣播（0–1.5 秒）。合併時加的 `test_a_resync_storm_is_served_without_a_pool_timeout`
+  單獨跑 31 次失敗 7 次（審查實測），上面合併段「全部 200、沒有連線池逾時」與 `apps/api/README.md`「兩個池子都撐得住」因此不成立（已標註）。
+- **第二個空檔**（修的時候發現）：端點做完、FastAPI 驗證回應（`response_model`）也是另一次 threadpool 呼叫，請求的 session 在
+  `get_db` 收尾（回應送出之後）才關，這段時間同樣拿著連線等 token。只修登入檢查時，同時 500 個請求還是 5 次有 3 次逾時。
+- **修正**：
+  - `forliosa.db.release_connection(db)`：交易只讀過就 `commit()` 結束、連線還回連線池；`expire_on_commit=False`，已載入的物件照樣能用，
+    下一次查詢再拿連線（和 AI 對話的 `ChatTurn._release_connection` 一樣的做法）。不動的情況：沒有交易、savepoint 開著、有還沒 flush 的變更、
+    這個交易寫過還沒 commit（`after_flush`／非 SELECT 的 `execute` 會記下來，交易結束時清掉；試算自己會 rollback，其他照舊由 `close()` rollback）、
+    即時更新有等著 commit 才送的事件、`expire_on_commit=True` 的 session。不會丟例外。
+  - `api.deps`：三個登入檢查做完（含 401／403）都呼叫它；`current_user` 在唯讀查看（`enter_view_as`）讀完授權之後才還。
+  - `api.routing.Router`：API 的 23 個 router 都改用它；一般的同步端點包一層，正常回傳時把拿到的 session 只讀的交易結束，再交給 FastAPI
+    驗證回應。拋出例外時不動（錯誤處理都是 async、不用 token，`close()` 照舊 rollback）；async 端點與產生器端點不包。回應驗證時才讀的
+    lazy 關聯會在那次呼叫裡（手上有 token）再拿一條，`get_db` 收尾時還（FastAPI 收尾用自己的 limiter，不用 token）。
+  - 代價：每個請求多一次從連線池拿連線（`pool_pre_ping` 的 `SELECT 1`）和一個只讀交易的 `COMMIT`；PostgreSQL 上是多兩次來回。本機 SQLite
+    連續 300 次 `/me`、`/accounts`、`/portfolio/summary` 的平均，修正前 4.3–5.4 毫秒、修正後 4.6–6.9 毫秒（差異和雜訊差不多）。只讀的交易用 COMMIT
+    結束和原本的 ROLLBACK 結果一樣；PostgreSQL 預設 READ COMMITTED，每句本來就看到最新已提交的資料，分兩個交易讀不改變看到的東西。
+- **測試**：
+  - `tests/test_db_release.py`：`release_connection` 的每個條件；app 裡每一個同步路由都是包過的（之後新增 router 忘了用 `Router` 會失敗）；
+    真的 app 上一個請求在端點開始時與回應驗證時，請求池都是 0 條借出。
+  - `tests/realtime/test_merge_batch4.py::test_a_burst_beyond_threadpool_tokens_plus_connections_is_served`：同時 500 個同步請求
+    （token 40＋連線 15 的好幾倍；確認 token 確實是 40、請求池 5＋10），連線池逾時調成 8 秒：全部 200。修正前 240 個 4 次 4 次失敗、
+    500 個在沒修之前的程式 2 次 2 次失敗；只修登入檢查時 500 個 5 次 3 次失敗。修正後：500 個 8 次 8 次通過、800 個 3 次 3 次通過，最慢 3.4–4.2 秒（本機 SQLite）。
+  - `tests/realtime/test_pg_notify.py::test_a_burst_on_postgresql_is_served_and_still_announced`（PostgreSQL）：同時 300 個請求全部 200、
+    結束後沒有借出的連線，高峰中新增的帳戶照樣經 NOTIFY 送到開著的串流。3 次 3 次通過，最慢 2.2–3.1 秒；同一個測試在沒修之前的程式上失敗（有 500）。
+  - 原本的 `test_a_resync_storm_is_served_without_a_pool_timeout` 不變：連跑 15 次 15 次通過，156 個請求最慢 1.2–3.0 秒（從每個分頁隨機等完 0–3 秒才開始算）、
+    請求池最高 15/15、存檔池 10–15/15。比修正前偶爾通過時的 1.5 秒慢一點：一個請求現在登入檢查和端點各排一次連線池。
+- **慢請求記錄的 `inflight`**：只有即時更新的 `GET /events`（閒置的長串流）在送出回應標頭後不算；`POST /ai/chat`（整個回答都佔著
+  threadpool、呼叫 Claude、寫資料庫）與 `GET /stream/quotes` 算到結束（`perf.IDLE_STREAMS`；`test_only_the_realtime_stream_leaves_the_in_flight_count`）。
+- **前端沒有改**（審查說可以考慮）：每個分頁限制同時重抓幾個、或把 `resync`／廣播的隨機等待拉長。伺服器這一側的互等修掉之後，高峰只是
+  排隊（同時 500 個最慢約 4 秒），在瀏覽器裡再排一次只會讓部署後畫面的數字更晚出來；`resync` 已經錯開 0–3 秒、同一批對到同一個查詢只讀一次、
+  等待中的 `resync` 併成一次。之後正式環境的 `slow_request` 若顯示部署後的排隊太久再加。
+- **文件**：上面合併段的高峰測試與 `inflight` 兩句、即時更新「審查後的修正」裡盤後重點資料版就地更新的收件人
+  （盲測開放時，盲測那幾期也送給所有登入的人，`capture.ReportVersionFanout` 讀 `trial_open`）、`apps/api/README.md` 的連線池一句都加了標註；
+  `docs/api-contract.md` 事件表的 `ai.usage` 補上匯入庫存（`POST /imports/positions`）。
+- 兩個瀏覽器的實測（`e2e-realtime.mjs`，合併後的程式＋這次的修正，全部通過、後端沒有 500）：朋友加入 → 成員頁 236 ms、動態 205 ms；
+  成員買進 → 動態 189 ms；留言數 164 ms；討論串回覆 183 ms；背景回到前景 30 ms；串流被擋時備援 28.5 秒；另一台裝置記一筆 263 ms；
+  匯入庫存 338 ms；刪除這檔 299 ms；清除所有持倉 263 ms。

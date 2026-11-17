@@ -173,6 +173,53 @@ def test_the_listen_connection_and_open_streams_stay_outside_both_pools(pg_serve
             s.close()
 
 
+def test_a_burst_on_postgresql_is_served_and_still_announced(pg_server, pg_engine):
+    """Merge review (2026-11-17): a request gives its pooled connection back between FastAPI's threadpool calls
+    (``forliosa.db.release_connection``; before, 40 tokens and 15 connections waited for each other under a burst).
+    On PostgreSQL: 300 simultaneous requests (more than tokens + connections) all 200 with the pool timeout lowered to
+    8 s, nothing left checked out, and a write made during the burst still reaches an open stream through NOTIFY."""
+    from concurrent.futures import ThreadPoolExecutor
+
+    import httpx
+
+    base, _hub = pg_server
+    users = [browser(base, f"burst{i}@forliosa.local", f"使用者{i}") for i in range(4)]
+    for u in users:
+        assert u.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD"}).status_code == 201
+    stream = Stream(base, users[0].token)
+    n = 300
+    barrier = threading.Barrier(n + 1)
+    paths = ["/accounts", "/me", "/portfolio/summary", "/watchlist", "/transactions/counts"]
+
+    def one(i: int):
+        u = users[i % len(users)]
+        with httpx.Client(base_url=base, cookies={"forliosa_session": u.token}, timeout=60) as c:
+            barrier.wait()
+            t = time.monotonic()
+            try:
+                return c.get(f"{API}{paths[i % len(paths)]}").status_code, time.monotonic() - t
+            except httpx.HTTPError as exc:
+                return type(exc).__name__, time.monotonic() - t
+
+    timeout, pg_engine.pool._timeout = pg_engine.pool._timeout, 8.0
+    try:
+        stream.next("hello")
+        with ThreadPoolExecutor(n) as ex:
+            futures = [ex.submit(one, i) for i in range(n)]
+            barrier.wait()
+            acc = users[0].post(f"{API}/accounts", json={"name": "高峰時新增", "currency": "TWD"})
+            results = [f.result() for f in futures]
+        assert acc.status_code == 201, acc.text
+        assert stream.next("ledger", timeout=10.0, live=True)["data"]["account_id"] == acc.json()["id"]
+    finally:
+        pg_engine.pool._timeout = timeout
+        stream.close()
+    codes = [c for c, _ in results]
+    print(f"postgresql burst: {n} simultaneous requests, slowest {max(t for _, t in results):.2f} s")
+    assert codes == [200] * n, sorted(set(map(str, codes)))
+    assert pg_engine.pool.checkedout() == 0
+
+
 def test_notify_happens_inside_the_transaction(pg_engine):
     """The payload is sent with the commit, and a large audience is split under Postgres's 8000-byte limit."""
     import psycopg

@@ -10,7 +10,7 @@ import threading
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 
-from fastapi import APIRouter, Depends, FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
@@ -42,6 +42,7 @@ from forliosa.api.routes import (
     users,
     watchlist,
 )
+from forliosa.api.routing import Router
 from forliosa.api.schemas import MarketStatus
 from forliosa.config import DEFAULT_SESSION_SECRET, get_settings
 from forliosa.datapolicy import attributions
@@ -210,7 +211,7 @@ def create_app() -> FastAPI:
     perf.install_gc_log()
     install_error_handlers(app)
 
-    api = APIRouter(prefix=API_PREFIX)
+    api = Router(prefix=API_PREFIX)
 
     @api.get("/health", tags=["meta"], summary="健康檢查")
     def health():

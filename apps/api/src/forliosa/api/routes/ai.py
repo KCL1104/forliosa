@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Iterator
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -27,13 +27,14 @@ from forliosa.ai.suggestions import suggestions as build_suggestions
 from forliosa.ai.tools import excluded_tools, server_tools
 from forliosa.api.deps import current_user
 from forliosa.api.errors import ApiError, not_found
+from forliosa.api.routing import Router
 from forliosa.config import get_settings
 from forliosa.db import get_db, session_factory
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import imports
 
-router = APIRouter(prefix="/ai", tags=["ai"])
+router = Router(prefix="/ai", tags=["ai"])
 
 SSE_HEADERS = {"Cache-Control": "no-cache", "X-Accel-Buffering": "no"}
 

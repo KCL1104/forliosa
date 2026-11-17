@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import Depends, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas import WatchlistEntry, WatchlistIn
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import watchlist as svc
 
-router = APIRouter(prefix="/watchlist", tags=["watchlist"])
+router = Router(prefix="/watchlist", tags=["watchlist"])
 
 
 @router.get("", response_model=list[WatchlistEntry])

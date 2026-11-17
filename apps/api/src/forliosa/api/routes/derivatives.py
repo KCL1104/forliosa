@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas import DerivativesOverview, FuturesHistory
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import derivatives as svc
 
-router = APIRouter(prefix="/derivatives", tags=["derivatives"])
+router = Router(prefix="/derivatives", tags=["derivatives"])
 
 
 @router.get("/overview", response_model=DerivativesOverview,

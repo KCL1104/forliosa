@@ -6,13 +6,14 @@ import asyncio
 import json
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import Depends, Query, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from starlette.concurrency import run_in_threadpool
 
 from forliosa.api.deps import current_user
 from forliosa.api.errors import not_found, unprocessable
+from forliosa.api.routing import Router
 from forliosa.api.schemas import (
     DayClose,
     DividendRecord,
@@ -29,7 +30,7 @@ from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import instruments as svc
 
-router = APIRouter(tags=["market"])
+router = Router(tags=["market"])
 
 MAX_SYMBOLS = 100
 

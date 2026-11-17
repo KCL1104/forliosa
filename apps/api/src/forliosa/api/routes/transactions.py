@@ -6,13 +6,14 @@ import base64
 import binascii
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.orm import Session
 
 from forliosa.api import serialize as ser
 from forliosa.api.deps import current_user
 from forliosa.api.errors import not_found, unprocessable
+from forliosa.api.routing import Router
 from forliosa.api.schemas import (
     TradePreview,
     Transaction,
@@ -34,7 +35,7 @@ from forliosa.services import scope
 from forliosa.services import transactions as svc
 from forliosa.timeutil import iso_taipei
 
-router = APIRouter(prefix="/transactions", tags=["transactions"])
+router = Router(prefix="/transactions", tags=["transactions"])
 
 
 # Fields a transaction type does not use are null in responses (stored as 0), per CONTRACT_NOTES.

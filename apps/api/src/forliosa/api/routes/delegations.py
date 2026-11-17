@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import Depends, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import signed_in_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas_sharing import (
     DelegationCandidate,
     DelegationIn,
@@ -17,7 +18,7 @@ from forliosa.db import get_db
 from forliosa.models import User
 from forliosa.services import delegations as svc
 
-router = APIRouter(prefix="/delegations", tags=["delegations"])
+router = Router(prefix="/delegations", tags=["delegations"])
 
 
 @router.get("", response_model=Delegations, summary="我授權給別人的（granted）與別人授權給我的（received）")

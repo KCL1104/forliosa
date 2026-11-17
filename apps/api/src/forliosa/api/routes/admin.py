@@ -9,11 +9,12 @@ the signed-in admin. Under ``X-Forliosa-View-As`` none of these paths is allow-l
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Path, Response
+from fastapi import Depends, Path, Response
 from sqlalchemy.orm import Session
 
 from forliosa import plans
 from forliosa.api.deps import signed_in_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas_admin import (
     AdminGroupPass,
     AdminMember,
@@ -37,7 +38,7 @@ def site_admin(user: User = Depends(signed_in_user)) -> User:
     return user
 
 
-router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(site_admin)])
+router = Router(prefix="/admin", tags=["admin"], dependencies=[Depends(site_admin)])
 
 
 @router.get("/overview", response_model=AdminOverview,

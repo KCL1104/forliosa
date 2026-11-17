@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 from forliosa import realtime
 from forliosa.api.errors import ApiError
 from forliosa.config import get_settings
-from forliosa.db import get_db
+from forliosa.db import get_db, release_connection
 from forliosa.models import User, UserSession
 from forliosa.timeutil import now_utc
 
@@ -88,13 +88,18 @@ def session_user(request: Request, db: Session) -> User | None:
     return _record_origin(request, db, db.get(User, sess.user_id))
 
 
+# The sign-in dependencies run in a threadpool call of their own, before the endpoint's: each gives its connection back
+# when it is done, 401 / 403 included (``forliosa.db.release_connection``: the request would otherwise wait for the
+# endpoint's thread while holding it — 2026-11-17, a resync burst ran the request pool dry for the 30 s pool timeout).
 def optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
     """The signed-in user, or None without a valid session: for endpoints anyone may read (public discussions)."""
-    return session_user(request, db)
+    try:
+        return session_user(request, db)
+    finally:
+        release_connection(db)
 
 
-def signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
-    """The signed-in user, never a delegation's owner (for endpoints that must act as the viewer themselves)."""
+def _signed_in(request: Request, db: Session) -> User:
     token = request.cookies.get(COOKIE_NAME)
     if not token:
         raise ApiError(401, "unauthorized", "請先登入")
@@ -107,6 +112,14 @@ def signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
     return _record_origin(request, db, user)
 
 
+def signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
+    """The signed-in user, never a delegation's owner (for endpoints that must act as the viewer themselves)."""
+    try:
+        return _signed_in(request, db)
+    finally:
+        release_connection(db)
+
+
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     """The user whose data this request reads.
 
@@ -115,13 +128,16 @@ def current_user(request: Request, db: Session = Depends(get_db)) -> User:
     write (``services.scope``); a delegation that does not exist, was revoked or is not the viewer's → 403
     ``delegation_revoked``.
     """
-    viewer = signed_in_user(request, db)
-    delegation_id = request.scope.get("state", {}).get("view_as")
-    if not delegation_id:
-        return viewer
-    from forliosa.services import sharing
+    try:
+        viewer = _signed_in(request, db)
+        delegation_id = request.scope.get("state", {}).get("view_as")
+        if not delegation_id:
+            return viewer
+        from forliosa.services import sharing
 
-    return sharing.enter_view_as(db, viewer, delegation_id)
+        return sharing.enter_view_as(db, viewer, delegation_id)
+    finally:
+        release_connection(db)
 
 
 def purge_expired_sessions(db: Session) -> int:
@@ -130,5 +146,5 @@ def purge_expired_sessions(db: Session) -> int:
     return res.rowcount or 0
 
 
-__all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "optional_user", "select",
-           "session_key", "session_user", "signed_in_user"]
+__all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "optional_user",
+           "release_connection", "select", "session_key", "session_user", "signed_in_user"]

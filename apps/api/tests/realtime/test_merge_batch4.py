@@ -9,14 +9,19 @@ streams.
   user while the blind test is open, the site admins only otherwise; a vote reaches the voter's own tabs only.
 * Silent by design: LangSearch's news rows (no news source announces anything), the Yahoo reference close (a read).
 * Pools: N open streams leave every request-pool and archive-pool connection free (5 + 10 each, the speed work's
-  sizes); the slow-request log does not count open streams as requests in flight; a resync of every open tab
-  followed by every tab refetching its ledger page at once is served without a pool timeout.
+  sizes); the slow-request log does not count open realtime streams as requests in flight (other streams it does);
+  a resync of every open tab followed by every tab refetching its ledger page at once is served without a pool
+  timeout, and so is a burst of 500 simultaneous requests — far more than anyio's 40 threadpool tokens plus the 15
+  connections, the condition under which the two waited for each other until the pool timed out (review of the
+  merge: a request held its connection between the sign-in dependency, the endpoint and the response's validation;
+  ``forliosa.db.release_connection``, ``tests/test_db_release.py``).
 * Caches: a close the worker stores is in the very next read after its ``market.closes`` (the 30-second quote cache
   would hide it otherwise); the speed work's caches are keyed on the archive's version or do not hold closes.
 """
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import random
 import threading
@@ -379,6 +384,98 @@ def test_a_resync_storm_is_served_without_a_pool_timeout(server, engine, archive
     assert slowest < 10.0  # nobody waited for the pool timeout
     assert not [r for r in caplog.records if "no free database connection" in r.getMessage()
                 or "QueuePool limit" in r.getMessage()]
+
+
+def _tokens(app) -> int:
+    """anyio's threadpool tokens in the server's event loop (sync dependencies, endpoints and response validation)."""
+    async def read() -> int:
+        import anyio.to_thread
+
+        return int(anyio.to_thread.current_default_thread_limiter().total_tokens)
+
+    return asyncio.run_coroutine_threadsafe(read(), app.state.realtime_hub.loop).result(5)
+
+
+BURST_PATHS = ["/accounts", "/me", "/portfolio/summary", "/watchlist", "/transactions/counts"]
+
+
+def test_a_burst_beyond_threadpool_tokens_plus_connections_is_served(server, engine, app, caplog):  # noqa: F811
+    """500 sync requests at the same moment: far more than anyio's 40 tokens plus the request pool's 15 connections.
+    Before the fix, a request kept its pooled connection while it waited for a token between its threadpool calls
+    (sign-in dependency → endpoint → response validation), so the 40 tokens went to requests waiting for a connection
+    and the 15 connections to requests waiting for a token: every such burst ended in 500 ``QueuePool limit … timed
+    out`` (4 of 4 runs at 240 requests; with the sign-in dependencies fixed alone, 3 of 5 runs at 500). Now each
+    threadpool call gives the connection back before it returns: all 200, nobody near the (lowered) pool timeout."""
+    main = engine.pool
+    assert _tokens(app) == 40 and (main.size(), main._max_overflow) == (5, 10)
+    users = [browser(server, f"burst{i}@forliosa.local", f"使用者{i}") for i in range(4)]
+    for u in users:
+        assert u.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD"}).status_code == 201
+    n = 500
+    barrier = threading.Barrier(n)
+
+    def one(i: int) -> tuple[int | str, float]:
+        u = users[i % len(users)]
+        with httpx.Client(base_url=server, cookies={"forliosa_session": u.token}, timeout=60) as c:
+            barrier.wait()
+            t = time.monotonic()
+            try:
+                return c.get(f"{API}{BURST_PATHS[i % len(BURST_PATHS)]}").status_code, time.monotonic() - t
+            except httpx.HTTPError as exc:
+                return type(exc).__name__, time.monotonic() - t
+
+    timeout, main._timeout = main._timeout, 8.0
+    try:
+        started = time.monotonic()
+        with caplog.at_level(logging.WARNING), ThreadPoolExecutor(n) as ex:
+            results = list(ex.map(one, range(n)))
+        elapsed = time.monotonic() - started
+    finally:
+        main._timeout = timeout
+    codes = [c for c, _ in results]
+    slowest = max(t for _, t in results)
+    print(f"burst: {n} simultaneous requests in {elapsed:.1f} s, slowest {slowest:.2f} s")
+    assert codes == [200] * n, sorted(set(map(str, codes)))
+    assert slowest < 8.0
+    assert not [r for r in caplog.records if "QueuePool limit" in r.getMessage()]
+    assert main.checkedout() == 0
+
+
+def test_only_the_realtime_stream_leaves_the_in_flight_count():
+    """The slow-request log's ``inflight``: an open ``/events`` stream stops counting once its headers are sent; an
+    AI chat or a quote stream is real work (a threadpool thread, Claude calls, writes) and counts until it ends."""
+    from types import SimpleNamespace
+
+    async def scenario(route: str) -> tuple[int, int]:
+        streaming, finish = asyncio.Event(), asyncio.Event()
+
+        async def endpoint(scope, receive, send):
+            scope["route"] = SimpleNamespace(path=route)  # what the router puts in the scope
+            await send({"type": "http.response.start", "status": 200,
+                        "headers": [(b"content-type", b"text/event-stream; charset=utf-8")]})
+            await send({"type": "http.response.body", "body": b"data: x\n\n", "more_body": True})
+            streaming.set()
+            await finish.wait()
+            await send({"type": "http.response.body", "body": b"", "more_body": False})
+
+        async def receive():
+            await asyncio.sleep(3600)
+
+        async def send(_message):
+            return None
+
+        mw = perf.SlowRequestMiddleware(endpoint, threshold_ms=1e9, prefix="/api/v1")
+        before = perf.inflight()
+        task = asyncio.create_task(mw({"type": "http", "method": "GET", "path": f"/api/v1{route}"}, receive, send))
+        await streaming.wait()
+        during = perf.inflight() - before
+        finish.set()
+        await task
+        return during, perf.inflight() - before
+
+    assert asyncio.run(scenario("/events")) == (0, 0)
+    assert asyncio.run(scenario("/ai/chat")) == (1, 0)
+    assert asyncio.run(scenario("/stream/quotes")) == (1, 0)
 
 
 # -- the speed work's caches --------------------------------------------------------------------------------------

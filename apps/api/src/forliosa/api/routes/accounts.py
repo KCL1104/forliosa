@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from sqlalchemy import delete, func, select
 from sqlalchemy.orm import Session
 
@@ -17,6 +17,7 @@ from forliosa import realtime
 from forliosa.api import serialize as ser
 from forliosa.api.deps import current_user
 from forliosa.api.errors import ApiError, not_found, unprocessable
+from forliosa.api.routing import Router
 from forliosa.api.schemas import Account, AccountIn, AccountPatch, HoldingDeleted
 from forliosa.db import get_db
 from forliosa.domain.fees import COMMISSION_RATE, DEFAULT_MIN_FEE
@@ -27,7 +28,7 @@ from forliosa.services import scope, sharing
 from forliosa.services import transactions as txn_svc
 from forliosa.timeutil import iso_taipei
 
-router = APIRouter(prefix="/accounts", tags=["accounts"])
+router = Router(prefix="/accounts", tags=["accounts"])
 
 HOLDINGS_MODE_REMOVED = "「只記持股」已經取消，每一筆買進都要記日期。"
 

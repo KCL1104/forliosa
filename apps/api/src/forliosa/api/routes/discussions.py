@@ -10,10 +10,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import optional_user, signed_in_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas_discussions import (
     TARGET_PATTERN,
     AdminReportPage,
@@ -35,8 +36,8 @@ from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import discussions as svc
 
-router = APIRouter(tags=["discussions"])
-admin_router = APIRouter(prefix="/admin/discussions", tags=["discussions-admin"])
+router = Router(tags=["discussions"])
+admin_router = Router(prefix="/admin/discussions", tags=["discussions-admin"])
 
 
 def site_admin(user: User = Depends(signed_in_user)) -> User:

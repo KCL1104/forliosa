@@ -2242,7 +2242,7 @@ data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
 | `group.deleted` | `group_id` | 刪除前的成員 | 群組被刪除 |
 | `discussions.topic` | `topic_id` | 公開：所有登入的人；群組：成員 | 回覆、表情、刪除、隱藏／取消隱藏 |
 | `discussions.list` | `scope`（`public`／`group`）, `group_id?` | 同上 | 新主題、刪除主題、回覆數與最新活動改變 |
-| `ai.usage` | — | 自己 | AI 用量（提問、匯入對帳單） |
+| `ai.usage` | — | 自己 | AI 用量（提問、匯入對帳單、匯入庫存 `POST /imports/positions`） |
 | `ai.briefings` | — | 自己 | 收盤簡報寫好、已讀、開關改變 |
 | `ai.threads` | — | 自己 | 對話與草稿 |
 | `reports.seen` | — | 自己 | 市場報告已讀（未讀小圓點） |

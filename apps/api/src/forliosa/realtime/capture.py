@@ -106,6 +106,13 @@ def set_origin(session: Session, user_id: str | None, tab: str | None) -> None:
     session.info[ORIGIN_KEY] = (user_id, tab if tab and TAB_RE.match(tab) else None)
 
 
+def has_pending(session: Session) -> bool:
+    """Events this session collected that its next commit would send (``forliosa.db.release_connection`` leaves such a
+    session alone: committing them is the writer's call)."""
+    st = session.info.get(STATE_KEY)
+    return st is not None and bool(st.items or st.resolvers or st.ready)
+
+
 def emit(session: Session, *items: Event | Resolver) -> None:
     """Events of a write the ORM cannot see (Core ``delete`` / ``update``), sent with the session's next commit."""
     if not _enabled():

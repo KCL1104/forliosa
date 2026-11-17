@@ -3,13 +3,14 @@ analyst views."""
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from forliosa.ai import analyst
 from forliosa.ai.schemas import AIWhy, AnalystViews
 from forliosa.ai.why import enhance_why
 from forliosa.api.deps import current_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas import (
     Chips,
     CompanyAbout,
@@ -29,7 +30,7 @@ from forliosa.services import company as company_svc
 from forliosa.services import related as related_svc
 from forliosa.services import stock as svc
 
-router = APIRouter(prefix="/instruments/{symbol}", tags=["stock"])
+router = Router(prefix="/instruments/{symbol}", tags=["stock"])
 
 
 @router.get("/overview", response_model=Overview, summary="關鍵數據：開高低、參考價、漲跌停、本益比、52 週…")

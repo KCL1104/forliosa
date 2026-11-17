@@ -13,16 +13,17 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import signed_in_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas_reports import MarketReport, MemberVoteIn, ReportsPage, ReportsStatus, TrialView
 from forliosa.db import get_db
 from forliosa.models import User
 from forliosa.reports import service as svc
 
-router = APIRouter(prefix="/market/reports", tags=["market-reports"])
+router = Router(prefix="/market/reports", tags=["market-reports"])
 KindQ = Literal["premarket", "close", "weekly"]
 LabelP = Literal["A", "B", "C"]
 

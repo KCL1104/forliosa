@@ -5,12 +5,13 @@ from __future__ import annotations
 
 from datetime import timedelta
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import Depends, Query
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
 from forliosa.api.errors import unprocessable
 from forliosa.api.routes.accounts import get_owned_account
+from forliosa.api.routing import Router
 from forliosa.api.schemas import (
     ClosedRound,
     Holding,
@@ -28,7 +29,7 @@ from forliosa.services import recurring
 from forliosa.services import transactions as txn_svc
 from forliosa.timeutil import today_taipei
 
-router = APIRouter(prefix="/portfolio", tags=["portfolio"])
+router = Router(prefix="/portfolio", tags=["portfolio"])
 
 
 @router.get("/summary", response_model=PortfolioSummary)

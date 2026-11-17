@@ -2,17 +2,18 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import Depends
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas import MarketOverview
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import market_overview as svc
 
-router = APIRouter(prefix="/market", tags=["market"])
+router = Router(prefix="/market", tags=["market"])
 
 
 @router.get("/overview", response_model=MarketOverview,

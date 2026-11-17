@@ -4,17 +4,18 @@ from __future__ import annotations
 
 from datetime import date
 
-from fastapi import APIRouter, Depends, Query, Response
+from fastapi import Depends, Query, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import current_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas import RecurringDraft, RecurringPlanIn, RecurringPlanOut, RecurringPlanPatch
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
 from forliosa.services import recurring as svc
 
-router = APIRouter(prefix="/recurring", tags=["recurring"])
+router = Router(prefix="/recurring", tags=["recurring"])
 
 # Explicit null clears only end_date; null on any other field means "unchanged".
 _NULLABLE = frozenset({"end_date"})

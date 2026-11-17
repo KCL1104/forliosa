@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Request, Response
+from fastapi import Depends, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session
 from forliosa import plans
 from forliosa.api.deps import create_session, current_user, destroy_session, signed_in_user
 from forliosa.api.errors import ApiError
+from forliosa.api.routing import Router
 from forliosa.api.schemas import AccountDeleteIn, DevLoginIn, MePatch, PreferencesPatch, TermsAcceptIn, User
 from forliosa.api.schemas_discussions import PublicNameIn
 from forliosa.config import get_settings
@@ -21,7 +22,7 @@ from forliosa.services import account, discussions
 from forliosa.services.ledger_io import DEFAULT_PREFERENCES, preferences_of
 from forliosa.timeutil import now_utc
 
-router = APIRouter(tags=["auth"])
+router = Router(tags=["auth"])
 
 
 def user_out(db: Session, user: UserModel) -> dict:

@@ -11,13 +11,14 @@ from __future__ import annotations
 import logging
 from datetime import UTC
 
-from fastapi import APIRouter, Query, Request
+from fastapi import Query, Request
 from starlette.concurrency import run_in_threadpool
 from starlette.responses import StreamingResponse
 from starlette.types import Receive, Scope, Send
 
 from forliosa.api.deps import COOKIE_NAME, _token_hash, session_key
 from forliosa.api.errors import ApiError
+from forliosa.api.routing import Router
 from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.models import User, UserSession
@@ -25,7 +26,7 @@ from forliosa.realtime.hub import Conn, Hub, Refused
 from forliosa.timeutil import now_utc
 
 log = logging.getLogger(__name__)
-router = APIRouter(tags=["realtime"])
+router = Router(tags=["realtime"])
 
 OFF_RETRY_AFTER = 600  # seconds: REALTIME_ENABLED=false (the web app polls meanwhile)
 REFUSED_MESSAGES = {

@@ -6,10 +6,11 @@ from __future__ import annotations
 
 from typing import Literal
 
-from fastapi import APIRouter, Depends, Query, Request, Response
+from fastapi import Depends, Query, Request, Response
 from sqlalchemy.orm import Session
 
 from forliosa.api.deps import session_user, signed_in_user
+from forliosa.api.routing import Router
 from forliosa.api.schemas_sharing import (
     TARGET_PATTERN,
     AcceptIn,
@@ -48,7 +49,7 @@ from forliosa.models import User
 from forliosa.services import channels, digests, group_daily, group_plans, sharing
 from forliosa.services import groups as svc
 
-router = APIRouter(tags=["groups"])
+router = Router(tags=["groups"])
 
 
 # -- groups -------------------------------------------------------------------------------------------------
