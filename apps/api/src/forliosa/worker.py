@@ -59,10 +59,11 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
 * ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).
   Requests already refuse an expired session; nothing else removes its row.
 * ``news_refresh`` — every ``NEWS_REFRESH_MINUTES`` (45): media headlines for the tracked symbols (held,
-  watched, or viewed in the last 3 days): Taiwan stocks from GDELT's new 15-minute bulk files (one download for every
-  symbol, ``forliosa.news.gdelt_bulk``), US stocks — and Taiwan stocks while the bulk files are not current — one
-  GDELT DOC request per symbol spaced ≥ 5 s, backing off after a 429; AI web search fills gaps within the monthly
-  budget; headlines older than 30 days are deleted
+  watched, or viewed in the last 3 days) and the market page's US headlines (``^US``): Taiwan stocks, US stocks and
+  ``^US`` from GDELT's new 15-minute bulk files (one download per feed for every symbol, ``forliosa.news.gdelt_bulk``:
+  the ``translation`` feed for Taiwan, the ``english`` feed for the US); the GDELT DOC API only while the feed a stock
+  leans on is more than 2 h old — one request per symbol (and one for ``^US``) spaced ≥ 5 s, backing off after a 429;
+  AI web search fills gaps within the monthly budget; headlines older than 30 days are deleted
   (``forliosa.news.service.refresh``; also ``python -m forliosa.news refresh``). Metadata only. Its own loop
   (``Job.background``): a batch can take most of the 45 minutes and must not hold up the other jobs.
 

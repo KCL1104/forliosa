@@ -5,16 +5,20 @@ allowlist, the title tests of :mod:`forliosa.news.us_match`, and the refresh usi
 ``gdelt_gkg_english_us_live_20261117.csv.zip`` holds 38 real rows of the English GKG files of 2026-11-16/17 (the 12 h
 measured for ``CONTRACT_NOTES.md``), trimmed like the batch-3 fixtures (record id, site, URL and ``<PAGE_TITLE>`` as
 published; the analysis columns emptied; every row moved to the 02:15 UTC slot): the true matches and the false
-positives the measurement found. Titles written into a test by hand are marked ``synthetic``."""
+positives the measurement found. ``gdelt_gkg_english_abcnews_live_20261117.csv.zip`` holds 6 more real rows of the
+same files, trimmed the same way (2026-11-17 review): five of ABC News, filed by GDELT as ``abcnews.com``, and one of
+``abcnews4.com`` (a Charleston TV station). Titles written into a test by hand are marked ``synthetic``."""
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from forliosa.datapolicy import DATASETS, label
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.http import HttpStatusError
 from forliosa.models import NewsArticle, NewsBlockedDomain, NewsFetchState, SecTicker
@@ -32,12 +36,14 @@ from forliosa.news.outlets import (
     us_outlet_site,
 )
 from forliosa.news.us_match import EVERYDAY, PLAIN, STRICT, STRONG, market_matches, us_terms
+from forliosa.services import market_overview
 from tests.news.conftest import FakeSource, fixture_bytes
 from tests.news.test_gdelt_bulk import FakeFetcher, gkg_zip, index, index_url, url
 
 SLOT = datetime(2026, 11, 17, 2, 15, tzinfo=UTC)
 NOW = SLOT + timedelta(minutes=20)
 US_FILE = fixture_bytes("gdelt_gkg_english_us_live_20261117.csv.zip")
+ABC_FILE = fixture_bytes("gdelt_gkg_english_abcnews_live_20261117.csv.zip")
 # SEC's company_tickers.json titles (2026-11-17) of the companies the tests name
 SEC = {
     "AAPL": (320193, "Apple Inc."), "APLE": (1418121, "Apple Hospitality REIT, Inc."),
@@ -52,6 +58,8 @@ SEC = {
     "F": (37996, "FORD MOTOR CO"), "META": (1326801, "Meta Platforms, Inc."),
     "MS": (895421, "MORGAN STANLEY"), "GS": (886982, "GOLDMAN SACHS GROUP INC"),
     "MFG": (1335730, "MIZUHO FINANCIAL GROUP INC"), "JPM": (19617, "JPMORGAN CHASE & CO"),
+    "INTC": (50863, "INTEL CORP"), "C": (831001, "CITIGROUP INC"), "MRK": (310158, "Merck & Co., Inc."),
+    "XYZ": (1512673, "Block, Inc."), "HRB": (12659, "H&R BLOCK INC"), "LLY": (59478, "ELI LILLY & Co"),
 }
 
 
@@ -66,15 +74,15 @@ def info(code: str) -> InstrumentInfo:
     return InstrumentInfo(code, code, SEC[code][1], "US", "stock", "USD")
 
 
-def us_rows() -> list[gb.GkgRow]:
-    return list(gb.gkg_rows(US_FILE, gb.taiwan_or_us_site))
+def us_rows(data: bytes = US_FILE) -> list[gb.GkgRow]:
+    return list(gb.gkg_rows(data, gb.taiwan_or_us_site))
 
 
-def titles_for(db: Session, code: str) -> list[str]:
+def titles_for(db: Session, code: str, data: bytes = US_FILE) -> list[str]:
     """The fixture's US-outlet headlines (cleaned) that ``code``'s terms match."""
     terms = us_terms(db, info(code))
     out = []
-    for r in us_rows():
+    for r in us_rows(data):
         if is_us_outlet(r.url):
             title = clean_title(r.title, r.url, outlet_name(r.url, r.domain))
             if terms.matches(title, r.url):
@@ -237,6 +245,89 @@ def test_us_market_headlines():
     assert not market_matches("The Wolf of Wall Street star joins new series")
 
 
+def test_abc_news_under_the_address_gdelt_records(engine):
+    """2026-11-17 review: the list held only ABC News' old address ``abcnews.go.com``; GDELT files it as ``abcnews.com``
+    (46 rows in the 48 files, none ``abcnews.go.com``), and its ``/Business/wireStory/`` pages carry AP's business wire
+    (apnews.com itself is not in the files). GMA's shopping pages are not news."""
+    rows = us_rows(ABC_FILE)
+    assert len(rows) == 5 and {r.domain for r in rows} == {"abcnews.com"}  # abcnews4.com is a local station
+    assert us_outlet_site("abcnews.com") and not us_outlet_site("abcnews4.com")
+    assert {outlet_name(r.url, r.domain) for r in rows} == {"ABC News"}
+    shop = [r.url for r in rows if not is_us_outlet(r.url)]
+    assert len(shop) == 1 and "/GMA/Shop/" in shop[0] and is_not_news(shop[0])  # hidden if stored before
+    assert is_not_news("https://abcnews.go.com/GMA/Deals/story?id=1")
+    assert is_us_outlet("https://abcnews.com/GMA/Culture/x/story?id=1")  # GMA's stories stay
+    with Session(engine) as db:
+        add_sec(db)
+        assert titles_for(db, "NVDA", ABC_FILE) == [
+            "Nvidia set to issue earnings report, days after Jensen Huang stepped down",
+            "Trump says he 'would not mind' if Jensen Huang is reinstated as Nvidia CEO",
+        ]  # not abcnews4.com's 「Uber co-founder and Elon Musk call for Jensen Huang to come back to Nvidia」
+        assert titles_for(db, "AMZN", ABC_FILE) == [  # AP's wire story (「warehouse」: Amazon's own word)
+            "Amazon vows to fight the company's first North American union contract at a Canadian warehouse"]
+        assert titles_for(db, "BRK-B", ABC_FILE) == []  # 「Warren Buffett says kindness…」 names no company
+
+
+def test_ambiguous_names_found_in_the_review(engine):
+    """2026-11-17 review, synthetic titles on allowlisted outlets (the intelligence ones as Newsweek and Fox News
+    write them): Intel as intelligence, Goldman the surname, Citi Bike and Citi Field, the German Merck KGaA, H&R Block
+    and the English county of Berkshire are not those companies; the company's own stories still count."""
+    with Session(engine) as db:
+        add_sec(db)
+        intc, gs, c, mrk, xyz, brk = (us_terms(db, info(code)) for code in ("INTC", "GS", "C", "MRK", "XYZ", "BRK-B"))
+    nw, fox, cnbc = "https://www.newsweek.com/x-1", "https://www.foxnews.com/politics/x", "https://www.cnbc.com/2026/x"
+    ibd, nyt = "https://www.investors.com/news/x/", "https://www.nytimes.com/2026/11/17/nyregion/x.html"
+    not_about = [
+        (intc, "Pentagon Scrambles After Hegseth Accused of Ignoring Key Iran Intel", nw),
+        (intc, "U.S. Intel Warns Iran Plotting Dirty Bomb Or Chemical Attack On Top Trump Officials", fox),
+        (intc, "Senate Intel Committee Opens Probe Into Nvidia Spy Scandal", fox),
+        (intc, "Trump Says Ukraine Will Get More US Intel", nw),
+        (intc, "House Intel chair says China threat is growing", "https://www.cbsnews.com/news/x/"),
+        (gs, "Ron Goldman's father sues O.J. Simpson estate", "https://www.nbcnews.com/news/us-news/x"),
+        (gs, "Rep. Dan Goldman launches bid for New York governor", "https://www.politico.com/news/2026/11/17/x"),
+        (gs, "Dan Goldman's stock trades draw scrutiny from watchdog", cnbc),
+        (c, "Citi Bike e-bike rider killed in Manhattan crash", nyt),
+        (c, "Mets fans pack Citi Field for playoff opener", "https://www.nytimes.com/2026/11/17/sports/x.html"),
+        (mrk, "Merck KGaA to buy SpringWorks in $3.9 billion deal", cnbc),
+        (xyz, "H&R Block shares jump after tax-season earnings beat", cnbc),
+        (xyz, "H&R Block Stock Falls After Earnings Miss", ibd),
+        (brk, "Reading, Berkshire: house prices and sales slump", "https://www.theguardian.com/money/2026/nov/17/x"),
+        (brk, "Berkshire council approves sale of £40m housing estate as profits soar at builder",
+         "https://www.bbc.co.uk/news/articles/x"),
+    ]
+    for terms, title, page in not_about:
+        assert is_us_outlet(page) and not terms.matches(title, page), title
+    about = [
+        (intc, "Intel says it will cut 15% of staff", cnbc),
+        (intc, "Intel warns of weak PC demand", cnbc),
+        (intc, "Trump Touts US Intel Stake Gains", nw),  # the company's own words win over 「US Intel」
+        (intc, "Nvidia Overtakes Intel In Data Center Sales", ibd),
+        (gs, "Goldman Sachs shares rise after trading revenue beats estimates", cnbc),
+        (gs, "Goldman to cut 1,000 jobs in annual review", cnbc),
+        (c, "Citi to cut 20,000 jobs as Fraser reshapes bank", cnbc),
+        (mrk, "Merck to buy Verona Pharma for $10 billion", cnbc),
+        (xyz, "Block shares jump as Cash App profit beats", cnbc),
+        (brk, "Warren Buffett's Berkshire sells more Apple stock", cnbc),
+        (brk, "Berkshire shares slip after Abel's first letter", cnbc),
+        (brk, "Here's What Berkshire Hathaway Bought and Sold in Q3", "https://www.kiplinger.com/investing/x"),
+    ]
+    for terms, title, page in about:
+        assert terms.matches(title, page), title
+
+
+def test_the_word_before_a_name_in_another_companys_name(engine):
+    """SEC's 「H&R BLOCK INC」 makes 「H&R Block」 another company for Block (XYZ) by itself, without the curated
+    phrase; the company's own name (「ELI LILLY」 for Lilly) does not count."""
+    with Session(engine) as db:
+        add_sec(db)
+        xyz, lly = us_terms(db, info("XYZ")), us_terms(db, info("LLY"))
+    block = next(n for n in xyz.names if n.text == "Block")
+    assert block.not_before == {"h&r"} and next(n for n in lly.names if n.text == "Lilly").not_before == set()
+    bare = dataclasses.replace(xyz, not_before=frozenset())  # without US_HINTS' 「H&R」
+    assert not bare.matches("H&R Block shares jump after tax-season earnings beat", "https://www.cnbc.com/2026/x")
+    assert us_terms(None, info("XYZ")).matches("H&R Block to cut jobs", "https://www.cnbc.com/2026/x") is False
+
+
 # -- the refresh ------------------------------------------------------------------------------------------------------
 def english_bulk(answers: dict | None = None, feeds=("english",)) -> tuple[gb.GdeltBulk, FakeFetcher]:
     f = FakeFetcher(answers or {index_url("english"): index(SLOT, "english"), url(SLOT, "english"): US_FILE})
@@ -324,3 +415,33 @@ def test_without_the_english_feed_us_stocks_keep_the_doc_api(engine, commercial_
         rep = service.refresh(db, commercial_md, settings=settings, sources=[doc], ai=None, bulk=bulk,
                               symbols=["NVDA"], now_fn=lambda: NOW)
     assert not rep.bulk_us_ok and [q.symbol for q in doc.calls] == ["NVDA"]
+
+
+def test_refresh_stores_abc_news_and_not_its_shopping_page(engine, commercial_md, settings):
+    bulk, _ = english_bulk({index_url("english"): index(SLOT, "english"), url(SLOT, "english"): ABC_FILE})
+    with Session(engine) as db:
+        service.record_view(db, "NVDA", NOW)
+        rep = service.refresh(db, commercial_md, settings=settings, sources=[FakeSource(items={})], ai=None,
+                              bulk=bulk, now_fn=lambda: NOW)
+        assert rep.bulk_us_ok and rep.bulk_us_rows == 4  # five ABC News rows less the shopping page
+        stored = list(db.scalars(select(NewsArticle)))
+    assert sorted((a.symbol, a.outlet, a.domain) for a in stored) == [("NVDA", "ABC News", "abcnews.com")] * 2
+    assert not any("/GMA/Shop/" in a.url for a in stored)
+
+
+def test_the_source_register_names_the_bulk_files_for_us_news(engine, commercial_md, settings):
+    """2026-11-17 review: ``/meta/attributions`` said the bulk files served Taiwan stocks only, and the market page
+    credited its US headlines to the DOC API alone; both kinds are stored as ``gdelt`` rows, so both are named."""
+    gkg, doc = DATASETS["gdelt/gkg"].used_for, DATASETS["gdelt/doc"].used_for
+    assert "台股、美股" in gkg and "市場頁美股新聞" in gkg
+    assert "備用" in doc and "2 小時" in doc
+    bulk, _ = english_bulk()
+    with Session(engine) as db:
+        service.record_view(db, "NVDA", NOW)
+        service.refresh(db, commercial_md, settings=settings, sources=[FakeSource(items={})], ai=None, bulk=bulk,
+                        now_fn=lambda: NOW)
+        market_overview.clear_cache()
+        o = market_overview.overview(db, commercial_md, now=NOW)
+    market_overview.clear_cache()
+    assert o["us"]["news"]
+    assert label("gdelt/gkg") in o["sources"] and label("gdelt/doc") in o["sources"]

@@ -865,6 +865,18 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
     snap election、Oracle of Omaha、price target、Uber driver）；銀行與券商（`us_match.BROKERAGES`：Goldman、Morgan Stanley、JPMorgan、Citi、Mizuho、
     Jefferies…，和 `ai.analyst._NOT_A_BRAND` 同一批）當研究報告的出處時不算那家公司的新聞（「Morgan Stanley S&P 500 target」「Goldman says…」
     「double upgrade from Mizuho」「… raises its Nvidia price target」）。長名稱被排除時，裡面的短名稱不會再把它算回來（「Goldman Sachs raises…」的「Goldman」）。
+    另外**其他 SEC 公司名稱裡、排在名稱前面的字**也不算（2026-11-17 審查：「H&R Block」不是 Block；`us_match._other_companies_prev_words`，同一家公司自己的
+    「Eli Lilly」「Walt Disney」與 the／of 這類虛字除外）。
+  - **有歧義的名稱**（2026-11-17 審查補的，`US_HINTS`；Title Case 標題裡一般名詞也大寫，所以要靠前後的字）：
+    Intel 也是「情報」——前面是國家、機關、國會（Iran、U.S.、Senate、House、Pentagon…）或後面是 Committee、chair、briefing、leak 這類字時不算，
+    除非標題有公司自己的字（Intel stock／shares／stake／CEO、Lip-Bu Tan、Xeon、18A…：「US Intel stake」是政府持股）；
+    「Goldman」單獨出現也是姓氏，改成一般字名稱（要公司語境），前面是名字或頭銜（Ron、Dan、Rep.…）不算，「Goldman Sachs」照舊直接算；
+    Citi Bike、Citi Field 不是 Citigroup；Merck KGaA（德國 Merck）不是 MRK；「Berkshire」單獨出現也是英國的郡，改成和 Dow、Nasdaq 一樣的嚴格名稱
+    （要接 shares／stock 等，或有 Buffett、Greg Abel、GEICO、BNSF 這類字），「Berkshire Hathaway」照舊直接算。
+    審查看過的 66 份英文檔裡，這些名稱出現在白名單媒體的標題原本就都是那家公司，誤判是在其他網站與合成標題上重現的；
+    用全部 10,404 個 SEC 代號在 60 份英文檔（實測的 48 份＋審查另下載的 12 份）的 1,373 頁上重跑，改動前後只差 ABC News 新增的 5 頁
+    （NVDA 2、AMZN、MSFT、UAL 各 1），其他比對與 `^US` 都沒變。
+    代價：「Berkshire lowers Bank of America, Capital One stakes」這類只寫 Berkshire、沒有公司字的標題不收（精確優先）。
   - 指數 ETF 照舊用指數名稱（VOO／SPY「S&P 500」、QQQ「Nasdaq 100」、DIA「Dow Jones」，和 DOC API 查詢一樣），DIA 不收 Dow Jones Newswires 的「Top … Headlines」。
 - **市場頁美股新聞**（`us_match.market_matches`，存在同一個 `^US`）：和 DOC API 查詢同一個意思——Wall Street、S&P 500、Dow Jones／the Dow、Nasdaq——
   另加 Russell 2000、stock market、US stocks／stock futures、「stocks」加漲跌字（不是「5 Stocks to Buy」這種選股清單）、Fed 加利率字（Fed holds rates、Fed minutes、Fed Chairman）；
@@ -873,6 +885,8 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
 - **DOC API 只當備用**：`english` 檔最新讀到的那份在 2 小時內（`gdelt_bulk.FRESH`），美股個股與 `^US` 都不問 DOC API（`skipped.gdelt_bulk`）；
   超過 2 小時才恢復（暫停與退避照舊），起點是英文檔最後涵蓋的時間前 1 小時（整批檔可用時每檔與 `^US` 的 `news_fetch_state(gdelt, …)` 記成已回應到最新一份檔的時段結束）。
   `NEWS_GDELT_BULK_FEEDS` 不含 `english`、或 `NEWS_GDELT_BULK=false` 時，美股照舊用 DOC API。台股仍看 `translation` 檔。
+- **資料來源登記**（`datapolicy.py`，`GET /meta/attributions` 的 `used_for`，2026-11-17 審查）：`gdelt/gkg` 改成「個股頁「新聞報導」（台股、美股）與市場頁美股新聞」，
+  `gdelt/doc` 改成「…的備用來源（GDELT 整批檔超過 2 小時沒更新時才用）」；市場頁 `sources` 見下方「市場頁的美股」。
 - **存的形狀不變**：`source = "gdelt"`（顯名、引用不變），依網址去重（同一網址只存一列），下架封鎖清單、非新聞網頁、機器人快訊照舊不存不顯示；
   時間是 GDELT 看到的檔案時段（同台股）。The Guardian 的版名尾巴（「| NHS」「| US news」）和 DOC API 一樣保留。
 - CLI：`gdelt-bulk-check --symbol NVDA --symbol 2330` 讀最新一份，英文檔另印美國、英國媒體各幾則、點名這些股票（台股或美股）的標題與 `^US` 市場新聞（不寫資料庫）。
@@ -880,6 +894,10 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
   代號與片語、券商研究報告、市場新聞、refresh：英文檔可用時美股與 `^US` 不問 DOC API、封鎖網域不存、重跑不重複；英文檔停超過 2 小時改回 DOC API 且從整批檔涵蓋處接起；
   一份英文檔同時給台股與美股、只有美股時不下載翻譯檔；沒設 `english` 檔時美股用 DOC API）。fixture `gdelt_gkg_english_us_live_20261117.csv.zip`
   是 2026-11-16／17 英文檔的 38 列真實資料裁短（同上一節的裁法，時段統一成 02:15 UTC）。
+  審查修正另加（2026-11-17）：`gdelt_gkg_english_abcnews_live_20261117.csv.zip`（同一批檔的 6 列真實資料：ABC News 5 列＋`abcnews4.com` 1 列，同樣裁法）
+  測 `abcnews.com` 在白名單、購物頁不收、NVDA 與 AMZN 比對得到、refresh 存成「ABC News」；有歧義名稱的合成標題（Intel 情報、Goldman 姓氏、Citi Bike／Field、
+  Merck KGaA、H&R Block、Berkshire 郡）與公司本身的標題；SEC 名稱前一個字的規則（不靠 `US_HINTS` 也擋 H&R Block、不擋自己的「Eli Lilly」）；
+  `gdelt/gkg`／`gdelt/doc` 的 `used_for` 與市場頁 `sources` 兩個 GDELT 顯名。
 
 **實測（2026-11-17，沙盒連得到 storage.googleapis.com；英文檔 48 份＝12 小時，11-16 14:30 到 11-17 02:15 UTC，每份 3.8–7.3 MB、共 274 MB，
 每份間隔 ≥ 2 秒，沒有 403／429）**：
@@ -887,10 +905,15 @@ SearXNG 的 fixture 是**合成的**（沙盒連不到上游搜尋引擎）：�
   Evening Standard 79、Chicago Tribune 68、Fox News 67（＋Fox News Radio 6）、Newsweek 63、LA Times 47、Business Insider 45、CBS 42、CNBC 40、Fortune 38、
   The Verge 37、NBC 36、Morningstar 35（含 Dow Jones Newswires 與 MarketWatch 轉載）、IBD 33、The Independent 32、Engadget 26、TechCrunch 21、Boston Globe 16、
   CNET 15、NPR 15、Ars Technica 12、TIME 12、City A.M. 12、Marketplace 10、ZDNET 10、Fox Business 8、Kiplinger 8、WIRED 7、The Times 2、Yahoo Finance 1。
-  **Reuters、AP、MarketWatch、WSJ、Barron's、Bloomberg、FT、Washington Post、Axios、USA Today、Politico、The Economist、ABC News、Sky News、
+  **Reuters、AP、MarketWatch、WSJ、Barron's、Bloomberg、FT、Washington Post、Axios、USA Today、Politico、The Economist、Sky News、
   The Telegraph、Semafor 這 12 小時都不在 GDELT 英文檔裡**；CNN 只有新聞稿室一頁、Forbes 的 27 頁全是付費的 Councils 文章（都不收）。
   這些留在白名單裡，GDELT 之後收錄就會用到；MarketWatch 與 Dow Jones Newswires 的稿子會經 Morningstar 進來。
-- 每檔比對到的標題（不重複網址）：NVDA 59（黃仁勳事件那週）、AAPL 10、AMZN 11、GOOGL 8、MSFT 7、TSLA 6、VOO 3（S&P 500）、PLTR 1、META 0、ASAN 0；
+  **更正（2026-11-17 審查）**：原本寫 ABC News 也不在檔裡，不對——白名單當時只有舊網域 `abcnews.go.com`，GDELT 記的是 `abcnews.com`（48 份檔 46 列，`abcnews.go.com` 0 列；
+  另外 41 列 `abcnews4.com` 是查爾斯頓地方台，不收）。`abcnews.com` 已加進白名單與媒體名稱表，購物頁 `/GMA/Shop/`、`/GMA/Deals/` 加進 `NOT_NEWS_PATTERNS`（實際有一列
+  「'GMA' Deals & Steals…」）。扣掉購物頁是 45 頁新聞，所以白名單新聞頁是 1,131 頁（平均每份 24 頁）；`/Business/wireStory/` 是 AP 商業電稿進來的管道
+  （apnews.com 本身不在檔裡）。
+- 每檔比對到的標題（不重複網址）：NVDA 61（黃仁勳事件那週；含 ABC News 2 則）、AAPL 10、AMZN 12（含 ABC 轉的 AP 電稿「Amazon vows to fight… union contract at a Canadian
+  warehouse」）、GOOGL 8、MSFT 8（含 ABC 1 則）、TSLA 6、VOO 3（S&P 500）、PLTR 1、META 0、ASAN 0；
   另外 UBER 3、BRK-B 5、JPM 3、INTC 2、AMD 2、MU 2、NFLX 2、SPY 3、QQQ 2、DIA 3、GS 0、MS 0；`^US` 市場新聞 18。
 - 用全部 10,404 個 SEC 代號跑同一批頁面找誤判，排除了：Dow Inc.（「Dow Jones Futures」）、Nasdaq, Inc.（指數）、News Corp（「…Jensen Huang News」）、
   Track Group（「Nvidia on Track」）、HERE（「Here's What…」）、BILL（「Bill Ackman」）、Outlook Therapeutics（「Outlook outage」）、Williams Companies（「Serena Williams」）、
@@ -2464,7 +2487,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 |---|---|---|
 | `US_PRICE_SOURCE` | **api 與 worker** | `""`（預設）：不抓也不讀，`databento-equs` 的列留著但沒有人讀，也不列在 `sources` 與 `/meta/attributions`。`databento`：api 讀已存的收盤（`Settings.us_prices_served`），worker 有金鑰時才抓（`us_prices_enabled`） |
 | `DATABENTO_API_KEY` | **只放 worker** | Databento 的金鑰（`SecretStr`）。api 不需要 |
-| `NEWS_US_MARKET` | worker | 預設 `true`：每次整理新聞多問 GDELT 一次美股新聞（市場頁） |
+| `NEWS_US_MARKET` | worker | 預設 `true`：市場頁的美股新聞（`^US`）。2026-11-17 起從英文整批檔比對；英文檔超過 2 小時沒更新時，每次整理新聞才多問 GDELT 查詢 API 一次 |
 
 `FORLIOSA_ENV=test` 一律不連 Databento（測試用假的 fetcher）。
 
@@ -2502,10 +2525,13 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 - `us.items`：SPY（S&P 500）、DIA（道瓊工業指數）、ONEQ（那斯達克綜合指數），各取最近 21 個收盤算漲跌與 20 點的走勢小圖；`name` 是基金的名稱
   （`marketdata/catalog.py` 的內建清單把這三檔標成 ETF），`tracks` 是追蹤的指數。**不顯示指數點數**：S&P 道瓊指數公司與 Nasdaq 的指數資料要另外授權。
-- `us.news`：`news.service.US_MARKET_KEY = "^US"`。worker 每次 `news_refresh`（以及 `python -m forliosa.news refresh`）在個股之前多問 GDELT 一次
-  （`Wall Street`、`S&P 500`、`Dow Jones`、`Nasdaq`；和美股個股一樣只收美國、英國媒體的英文報導），存在 `news_articles.symbol = '^US'`；被 GDELT 拒絕時照一般的暫停規則，
-  這一輪的個股也不問 GDELT。回應取最近 3 天、去重後最多 6 則，封鎖的網域不列。`NEWS_US_MARKET=false` 不問。
-- 最上層的 `as_of` 只看台股；`sources` 有美股 ETF 時加 `databento-equs/price`，有美股新聞時加 `gdelt/doc`。
+- `us.news`：`news.service.US_MARKET_KEY = "^US"`，存在 `news_articles.symbol = '^US'`。回應取最近 3 天、去重後最多 6 則，封鎖的網域不列。`NEWS_US_MARKET=false` 不收。
+  ~~worker 每次 `news_refresh` 在個股之前多問 GDELT 一次~~ **2026-11-17 起**（見「2026-11-17 美股新聞改讀 GDELT 英文整批檔」）：從 GDELT 英文整批檔比對
+  （`us_match.market_matches`），英文檔 2 小時內有新的一份時不問 DOC API；超過 2 小時沒更新，worker 每次 `news_refresh`（以及 `python -m forliosa.news refresh`）
+  才在個股之前多問 DOC API 一次（`Wall Street`、`S&P 500`、`Dow Jones`、`Nasdaq`；只收美國、英國媒體的英文報導），被 GDELT 拒絕時照一般的暫停規則，
+  這一輪的個股也不問 DOC API。
+- 最上層的 `as_of` 只看台股；`sources` 有美股 ETF 時加 `databento-equs/price`，有美股新聞時加 `gdelt/gkg` 與 `gdelt/doc`
+  （2026-11-17 審查：這些列主要來自整批檔，DOC API 只當備用，兩種都存成 `source = "gdelt"`、分不出來，所以兩個都列；以前只列 `gdelt/doc`）。
 
 ### 管理後台（`services/admin.overview` → `us_prices.summary`）
 

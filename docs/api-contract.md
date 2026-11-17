@@ -479,6 +479,7 @@
   `source: "Yahoo股市"` 要同時顯示「Yahoo股市」與原始媒體。
   總覽的「事件」表（官方公告與接下來的事依日期合成一張表）與事件分頁只放官方公告（`category` 不是 `media`）。
 - `/meta/attributions` 多了 `gdelt/doc`（`license_status: "open"`，可商用、需引用），personal 另有 `yahoo-rss/stock`（`license_status: "non_commercial"`）；
+  2026-11-16 起另有 `gdelt/gkg`（每 15 分鐘的整批檔，同樣的條款與引用）。2026-11-17 起 `gdelt/gkg` 的 `used_for` 是台股、美股與市場頁美股新聞，`gdelt/doc` 寫成整批檔超過 2 小時沒更新時的備用來源；
   `notice` 多一行 GDELT 條款，commercial 的 `not_used` 多「新聞網站本身」與「Yahoo股市 RSS」兩行。
 
 ### 相關股票、關於〈公司〉、上市股票外資持股前 20 名（2026-11-12）
@@ -1625,7 +1626,7 @@
 
 - 這三檔是 **ETF**，不是指數：畫面寫「SPY（追蹤 S&P 500 的 ETF）」，不寫成「S&P 500」。指數點數要另外向指數公司取得授權，沒有。
 - 最上層的 `as_of` 仍然只看台股（加權指數與排行），不看 `us`。
-- `sources` 有美股 ETF 時多上面的 Databento 顯名，有美股新聞時多 GDELT 的顯名。
+- `sources` 有美股 ETF 時多上面的 Databento 顯名，有美股新聞時多 GDELT 的顯名（2026-11-17 起兩個：GKG 整批檔與 DOC 查詢 API——新聞主要來自整批檔、查詢 API 只當備用，存起來分不出是哪個）。
 - **美股新聞**：存在代號 `^US` 底下（不是商品）；回應取最近 3 天、最多 6 則，下架封鎖清單照樣適用。`NEWS_US_MARKET=false` 關掉。和個股新聞一樣只有標題、媒體、時間、連結。2026-11-17 起從 GDELT 英文整批檔來（美國、英國媒體白名單，標題講 Wall Street、S&P 500、Dow Jones、Nasdaq、美股漲跌或聯準會利率的），英文整批檔超過 2 小時沒更新時才改回每次整理新聞多問 GDELT 查詢 API 一次（關鍵字 Wall Street、S&P 500、Dow Jones、Nasdaq）。形狀不變。
 
 **管理後台 `GET /admin/overview` 的 `us_prices`**

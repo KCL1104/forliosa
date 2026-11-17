@@ -330,8 +330,8 @@ def overview(db: Session, md: MarketData, now: datetime | None = None) -> dict[s
         sources += announcements.pop("sources")
     if us and us["items"]:
         sources.append(f"{US_SOURCE}/price")
-    if us and us["news"]:
-        sources.append("gdelt/doc")
+    if us and us["news"]:  # GDELT's English bulk files; the DOC API only while they are > 2 h old (both "gdelt" rows)
+        sources += ["gdelt/gkg", "gdelt/doc"]
     as_of = max((d for d in (taiex_day, movers["date"] if movers else None) if d is not None), default=None)
     empty = not indices and not movers and not announcements
     return {

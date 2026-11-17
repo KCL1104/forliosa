@@ -98,9 +98,10 @@ export const DATABENTO_ATTRIBUTION = `Databento〈${DATABENTO_DATASET}〉（${YE
 /** 管理後台「資料」的那一列（key、提供機關、名稱） */
 export const DATABENTO_ROW = { key: DATABENTO_KEY, agency: "Databento", name: DATABENTO_DATASET } as const
 
-/** 新聞報導的來源（後端 datapolicy.py 的 gdelt/doc、yahoo-rss/stock） */
+/** 新聞報導的來源（後端 datapolicy.py 的 gdelt/gkg、gdelt/doc、yahoo-rss/stock） */
 const GDELT_TERMS_URL = "https://www.gdeltproject.org/about.html#termsofuse"
 export const GDELT_ATTRIBUTION = `The GDELT Project〈GDELT DOC 2.0 新聞索引〉（${YEAR}），依 GDELT 使用條款引用：https://www.gdeltproject.org/`
+export const GDELT_GKG_ATTRIBUTION = `The GDELT Project〈GDELT GKG 2.1 每 15 分鐘整批檔〉（${YEAR}），依 GDELT 使用條款引用：https://www.gdeltproject.org/`
 export const YAHOO_RSS_ATTRIBUTION = `Yahoo股市〈個股新聞 RSS〉（${YEAR}），保留「Yahoo股市」與原始媒體標示（非商用）`
 export const AI_SEARCH_ATTRIBUTION = "AI 網路搜尋補充（只取搜尋結果的標題、媒體、時間與連結）"
 /** 自架、只對內的 SearXNG 元搜尋（後端 datapolicy.py 的 searxng；預設開啟） */
@@ -136,8 +137,16 @@ export function buildAttributions(policy: "commercial" | "personal"): Attributio
   }
   datasets.push({
     key: "gdelt/doc", agency: "The GDELT Project", dataset: "GDELT DOC 2.0 新聞索引", url: "https://api.gdeltproject.org/api/v2/doc/doc",
-    used_for: "個股頁「新聞報導」：媒體標題、媒體名稱、時間與原文連結", year: YEAR, license: "GDELT 使用條款（免費、可商用，需引用 GDELT）",
+    used_for: "個股頁「新聞報導」與市場頁美股新聞的備用來源（GDELT 整批檔超過 2 小時沒更新時才用）：媒體標題、媒體名稱、時間與原文連結",
+    year: YEAR, license: "GDELT 使用條款（免費、可商用，需引用 GDELT）",
     license_url: GDELT_TERMS_URL, commercial: true, attribution: GDELT_ATTRIBUTION,
+  })
+  datasets.push({
+    key: "gdelt/gkg", agency: "The GDELT Project", dataset: "GDELT GKG 2.1 每 15 分鐘整批檔",
+    url: "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/",
+    used_for: "個股頁「新聞報導」（台股、美股）與市場頁美股新聞：媒體標題、媒體名稱、時間與原文連結", year: YEAR,
+    license: "GDELT 使用條款（免費、可商用，需引用 GDELT）", license_url: GDELT_TERMS_URL, commercial: true,
+    attribution: GDELT_GKG_ATTRIBUTION,
   })
   datasets.push({
     key: "wikipedia/zh", agency: "維基百科", dataset: "中文維基百科條目（開頭節錄）", url: "https://zh.wikipedia.org/",

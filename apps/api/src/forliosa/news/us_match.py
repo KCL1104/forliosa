@@ -20,7 +20,8 @@ When a title is about the company (:meth:`UsTerms.matches`)
   words (Palantir Technologies, Advanced Micro Devices, Coca-Cola), as a proper noun: a whole word, its first letter a
   capital (「Nvidia's」 counts, 「nvidia」 does not), not joined by a hyphen to a lower-case word or a compound tail
   (「Nvidia-backed」; 「Tesla-SpaceX」「Nvidia-Anthropic Week」 and 「ex-Nvidia」 count).
-* **An everyday-word name we curated** (``everyday``: Apple, Amazon, Meta, Target, Visa, Snap, Block, Gap, Ford) only
+* **An everyday-word name we curated** (``everyday``: Apple, Amazon, Meta, Target, Visa, Snap, Block, Gap, Ford; the
+  surname Goldman) only
   with company context in the same title: the name followed by stock / shares / earnings / CEO / Inc. / Holdings
   (「Target Stock Falls」); the company's own words (iPhone, Tim Cook; AWS, Bezos; Zuckerberg, Instagram); the ticker;
   or, in a sentence-case title — where a capital letter in mid-sentence marks a proper noun — a finance word in the
@@ -29,19 +30,22 @@ When a title is about the company (:meth:`UsTerms.matches`)
   forecast…」 yes, 「Strategy shift at…」 no). A Title Case title (most words capitalised: NYT, IBD, Engadget) gives no
   such hint, so there only the first three count (「Nvidia Stock Fills Gap」 is not about Gap).
 * **Any other everyday single word** (``strict``: from SEC's name and in the measured list
-  :data:`~forliosa.news.us_words.EVERYDAY_NAME_WORDS` — Outlook, Track, Here, Bill, Fold, Hub — and the market's own
-  names Dow and Nasdaq for Dow Inc. and Nasdaq, Inc.): only the company context of the first two (「Here's why」「Bill
-  Ackman」「Outlook outage」「Dow Jones futures」 are not those companies).
+  :data:`~forliosa.news.us_words.EVERYDAY_NAME_WORDS` — Outlook, Track, Here, Bill, Fold, Hub — the market's own names
+  Dow and Nasdaq for Dow Inc. and Nasdaq, Inc., and the English county Berkshire): only the company context of the
+  first two (「Here's why」「Bill Ackman」「Outlook outage」「Dow Jones futures」「Reading, Berkshire」 are not those
+  companies).
 * **A distinctive single word from SEC's name** (``plain``: 「Hasbro」「Amgen」「Navan」): a finance word, or a business
   page in a sentence-case title; not right after another capitalised word in a sentence-case title (「Serena Williams」
   is not the Williams Companies).
 * Never inside a phrase that names something else: a hyphenated word for any name but a distinctive one
   (「Williams-Sonoma」 is not Sonoma), 「the … of」 (「the Ferrari of AI」), the next word of another SEC company's name
-  (Apple Hospitality, Target Hospitality, Meta Critical Minerals, Coca-Cola Consolidated) and the curated phrases of
-  :data:`US_HINTS` (Big Apple, Apple pie, Amazon rainforest, Doug Ford, H-1B visa, snap election, Oracle of Omaha,
-  price target, Uber driver); for a bank or brokerage (:data:`BROKERAGES`), never as the source of a research call
-  (「Morgan Stanley S&P 500 target」「Goldman says…」「double upgrade from Mizuho」). A longer name left out this way is
-  not rescued by a shorter one inside it (「Goldman Sachs raises its Nvidia target」 is not saved by 「Goldman」).
+  (Apple Hospitality, Target Hospitality, Meta Critical Minerals, Coca-Cola Consolidated) or the word before the name in
+  one (H&R Block), and the curated phrases of :data:`US_HINTS` (Big Apple, Apple pie, Amazon rainforest, Doug Ford,
+  H-1B visa, snap election, Oracle of Omaha, price target, Uber driver; Intel as intelligence — 「Key Iran Intel」
+  「Senate Intel Committee」 —, Ron or Rep. Dan Goldman, Citi Bike, Merck KGaA); for a bank or brokerage
+  (:data:`BROKERAGES`), never as the source of a research call (「Morgan Stanley S&P 500 target」「Goldman says…」
+  「double upgrade from Mizuho」). A longer name left out this way is not rescued by a shorter one inside it
+  (「Goldman Sachs raises its Nvidia target」 is not saved by 「Goldman」).
 
 Names come from the catalog (SEC's ``company_tickers.json`` title, built-in names and ASCII aliases), corporate
 suffixes removed (「AMAZON COM INC」→ Amazon, 「Palantir Technologies Inc.」→ Palantir Technologies and its first word
@@ -136,6 +140,7 @@ _VISA_NOT_AFTER = ("rules", "rule", "fee", "fees", "applications", "application"
                    "restrictions", "interview", "interviews", "appointment", "appointments", "overstay", "overstays",
                    "free", "bulletin", "lottery", "processing", "status", "denial", "denials", "cap", "caps",
                    "sponsorship", "system", "regime", "scheme", "route", "routes", "changes", "crackdown", "pause")
+_BERKSHIRE_CUES = ("Buffett", "Greg Abel", "Ajit Jain", "Munger", "Omaha", "GEICO", "BNSF")
 # Curated: the stocks Taiwanese investors hold most (by the 2026-11 watchlists and holdings) and every everyday-word
 # name the measurement of 2026-11-17 met. Keys are tickers as the catalog spells them.
 US_HINTS: dict[str, Hint] = {
@@ -170,9 +175,22 @@ US_HINTS: dict[str, Hint] = {
     "AVGO": Hint(strong=("Broadcom",)),
     "TSM": Hint(strong=("TSMC", "Taiwan Semiconductor Manufacturing", "Taiwan Semiconductor")),
     "NFLX": Hint(strong=("Netflix",)),
-    "INTC": Hint(strong=("Intel",), not_after=("agencies", "community", "officials", "report", "reports", "chief",
-                                               "sources", "assessment", "assessments", "sharing", "failure",
-                                               "failures", "gathering"),
+    # 「Intel」 is also intelligence, capitalised in Title Case: 「…Ignoring Key Iran Intel」「U.S. Intel Warns Iran
+    # Plotting…」「Senate Intel Committee…」「House Intel chair…」 (newsweek, foxnews; 2026-11-17 review). A country, an
+    # agency or a chamber before it, or an intelligence word after it, makes it intelligence unless the company's own
+    # words are in the title (「US Intel stake」 is the government's shareholding).
+    "INTC": Hint(strong=("Intel",),
+                 cues=("Intel stock", "Intel shares", "Intel stake", "Intel CEO", "Intel chips", "Intel Foundry",
+                       "Lip-Bu Tan", "Gelsinger", "Xeon", "Core Ultra", "18A"),
+                 not_before=("iran", "iranian", "us", "u.s.", "american", "ukraine", "ukrainian", "russia", "russian",
+                             "israel", "israeli", "british", "uk", "u.k.", "western", "allied", "senate", "house",
+                             "congressional", "military", "pentagon", "secret", "classified", "fresh", "faulty", "raw",
+                             "actionable", "sensitive", "cia", "fbi", "nsa", "defense", "defence", "battlefield"),
+                 not_after=("agencies", "agency", "community", "officials", "report", "reports", "chief", "chiefs",
+                            "sources", "assessment", "assessments", "sharing", "failure", "failures", "gathering",
+                            "committee", "committees", "panel", "panels", "chair", "chairman", "chairwoman",
+                            "briefing", "briefings", "leak", "leaks", "leaked", "dossier", "operative", "operatives",
+                            "officer", "officers", "suggests", "indicates", "gap", "gaps", "lapse", "lapses"),
                  not_with=("intelligence agencies",)),
     "MU": Hint(strong=("Micron",)),
     "QCOM": Hint(strong=("Qualcomm",)),
@@ -198,16 +216,24 @@ US_HINTS: dict[str, Hint] = {
     "MA": Hint(strong=("Mastercard",)),
     "PYPL": Hint(strong=("PayPal",)),
     "XYZ": Hint(weak=("Block",), strong=("Cash App", "Afterpay"), cues=("Dorsey", "Square", "bitcoin", "Bitcoin"),
-                not_before=("the", "city", "voting", "trade", "Soviet", "Eastern", "a", "building", "apartment"),
+                not_before=("the", "city", "voting", "trade", "Soviet", "Eastern", "a", "building", "apartment",
+                            "H&R"),  # H&R Block, the tax firm (also by SEC's name, see us_terms)
                 not_after=("Island", "party", "grant", "grants", "vote", "votes", "letters", "chain")),
     "JPM": Hint(strong=("JPMorgan", "JPMorgan Chase", "JP Morgan", "J.P. Morgan"), cues=("Dimon",)),
     "BAC": Hint(strong=("Bank of America", "BofA")),
     "WFC": Hint(strong=("Wells Fargo",)),
-    "GS": Hint(strong=("Goldman Sachs", "Goldman")),
+    # 「Goldman」 alone is also a surname (「Ron Goldman's father…」「Rep. Dan Goldman…」, 2026-11-17 review): an
+    # everyday-word name, never right after a first name or a title.
+    "GS": Hint(strong=("Goldman Sachs",), weak=("Goldman",), cues=("David Solomon",),
+               not_before=("ron", "fred", "dan", "daniel", "emma", "william", "bill", "jason", "bruce", "kim", "nicole",
+                           "lisa", "rep", "rep.", "sen", "sen.", "mr", "mr.", "ms", "ms.", "mrs", "mrs.", "dr", "dr.",
+                           "judge", "rabbi")),
     "MS": Hint(strong=("Morgan Stanley",)),
-    "C": Hint(strong=("Citigroup", "Citi")),
-    "BRK-B": Hint(strong=("Berkshire Hathaway",), weak=("Berkshire",), cues=("Buffett", "Greg Abel")),
-    "BRK-A": Hint(strong=("Berkshire Hathaway",), weak=("Berkshire",), cues=("Buffett", "Greg Abel")),
+    "C": Hint(strong=("Citigroup", "Citi"), not_after=("bike", "bikes", "field")),  # NYC's bike share, the Mets' park
+    # 「Berkshire」 alone is also an English county (「Reading, Berkshire: house prices…」「Berkshire council…」,
+    # 2026-11-17 review): only with the company's own words or 「Berkshire shares」-like context, as the market's names.
+    "BRK-B": Hint(strong=("Berkshire Hathaway",), strict=("Berkshire",), cues=_BERKSHIRE_CUES),
+    "BRK-A": Hint(strong=("Berkshire Hathaway",), strict=("Berkshire",), cues=_BERKSHIRE_CUES),
     "KO": Hint(strong=("Coca-Cola", "Coca Cola", "Coke")),
     "PEP": Hint(strong=("PepsiCo", "Pepsi")),
     "MCD": Hint(strong=("McDonald's", "McDonalds")),
@@ -243,7 +269,7 @@ US_HINTS: dict[str, Hint] = {
                                                               "weight-loss", "GLP-1")),
     "NVO": Hint(strong=("Novo Nordisk",), cues=("Wegovy", "Ozempic")),
     "PFE": Hint(strong=("Pfizer",)),
-    "MRK": Hint(strong=("Merck",)),
+    "MRK": Hint(strong=("Merck",), not_after=("KGaA", "Serono")),  # the German Merck (Darmstadt), not MRK
     "JNJ": Hint(strong=("Johnson & Johnson", "J&J")),
     "UNH": Hint(strong=("UnitedHealth", "UnitedHealthcare")),
     "XOM": Hint(strong=("Exxon", "ExxonMobil", "Exxon Mobil")),
@@ -450,6 +476,7 @@ class UsName:
     text: str
     kind: str  # strong | everyday | strict | plain
     not_after: frozenset[str] = frozenset()  # next words that make it another company (Apple Hospitality)
+    not_before: frozenset[str] = frozenset()  # previous words that make it another company (H&R Block)
 
 
 @dataclass(frozen=True)
@@ -475,7 +502,7 @@ class UsTerms:
         makes it something else unless the company's own words are in the title too (「Zuckerberg says the Meta AI
         app…」)."""
         before, after = _word_before(title, m.start()), _word_after(title, m.end())
-        if after in name.not_after or (before == "the" and after == "of"):
+        if after in name.not_after or before in name.not_before or (before == "the" and after == "of"):
             return True
         if name.text.casefold() in BROKERAGES and not cue and _research(title, m):
             return True
@@ -546,6 +573,31 @@ def _other_companies_next_words(db: Session | None, name: str, own_cik: int | No
     return frozenset(out - own)
 
 
+# Words before a name in another company's name that do not make it that company (「Bank of…」「The…」).
+_PREV_FUNCTION_WORDS = frozenset({"the", "a", "an", "of", "and", "&", "for", "de", "du", "la", "le", "y", "in", "on",
+                                  "at", "to", "by"})
+
+
+def _other_companies_prev_words(db: Session | None, name: str, own_cik: int | None) -> frozenset[str]:
+    """The word before ``name`` in every other SEC company's name that holds it after its first word (「Block」→
+    h&r, for H&R Block), except the company's own (「Lilly」 after 「Eli」) and function words."""
+    if db is None or not name:
+        return frozenset()
+    from forliosa.models import SecTicker
+
+    key = _words(name.casefold())
+    n = len(key)
+    rows = db.execute(select(SecTicker.cik, SecTicker.title).where(func.lower(SecTicker.title).like(f"% {key[0]}%")))
+    out: set[str] = set()
+    own: set[str] = set()
+    for cik, title in rows:
+        words = _words(strip_corporate(title or "").casefold().replace(",", " "))
+        for i in range(1, len(words) - n + 1):
+            if words[i:i + n] == key and words[i - 1] not in _PREV_FUNCTION_WORDS:
+                (own if own_cik is not None and cik == own_cik else out).add(words[i - 1].strip("'’"))
+    return frozenset(out - own)
+
+
 def _sec(db: Session | None, ticker: str) -> tuple[int | None, str]:
     if db is None:
         return None, ""
@@ -608,7 +660,7 @@ def us_terms(db: Session | None, info: InstrumentInfo) -> UsTerms:
             continue
         seen.add(key)
         kind = _kind(c, hint)
-        names.append(UsName(c, kind, _other_companies_next_words(db, c, cik)))
+        names.append(UsName(c, kind, _other_companies_next_words(db, c, cik), _other_companies_prev_words(db, c, cik)))
     return UsTerms(symbol=info.symbol, ticker=info.code, names=tuple(names), cues=hint.cues,
                    not_before=frozenset(w.casefold() for w in hint.not_before),
                    not_after=frozenset(w.casefold() for w in hint.not_after), not_with=hint.not_with)

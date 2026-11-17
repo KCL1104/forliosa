@@ -127,6 +127,7 @@ OUTLETS: dict[str, Outlet] = {
     "npr.org": Outlet("NPR", ("npr",)),
     "cbsnews.com": Outlet("CBS News", ("cbs news",)),
     "nbcnews.com": Outlet("NBC News", ("nbc news",)),
+    "abcnews.com": Outlet("ABC News", ("abc news",)),  # GDELT's English files: only this address (2026-11-17)
     "abcnews.go.com": Outlet("ABC News", ("abc news",)),
     "usatoday.com": Outlet("USA Today", ("usa today",)),
     "economist.com": Outlet("The Economist", ("the economist", "economist")),
@@ -192,8 +193,13 @@ NOT_NEWS_PATHS: dict[str, tuple[str, ...]] = {
 # The same by a path pattern: Morningstar's quote and analysis pages (``/stocks/xnys/tu/quote``, 「TU Stock Price
 # (XNYS) & Analyst Rating」, measured 2026-11-17 in GDELT's English files); its articles (``/stocks/7-new-4-star-…``,
 # ``/news/…``) stay.
+# ABC News' shopping pages sit under its Good Morning America section (``/GMA/Shop/gma-deals-steals-…``, measured
+# 2026-11-17); GMA's other pages (``/GMA/Culture/…``) are stories.
+_ABC_SHOP = re.compile(r"^/gma/(?:shop|deals)(?:/|$)", re.IGNORECASE)
 NOT_NEWS_PATTERNS: dict[str, re.Pattern[str]] = {
     "morningstar.com": re.compile(r"^/(?:stocks|funds|etfs|cefs|indexes|bonds)/x[a-z]{3}/", re.IGNORECASE),
+    "abcnews.com": _ABC_SHOP,
+    "abcnews.go.com": _ABC_SHOP,
 }
 
 # US and UK news outlets (產品負責人 2026-11-17, option A): the only sites whose headlines in GDELT's English bulk files
@@ -202,10 +208,11 @@ NOT_NEWS_PATTERNS: dict[str, re.Pattern[str]] = {
 # sites, no syndication networks, no auto-written stock pages such as the MarketBeat network's). A host matches with its
 # subdomains (``finance.yahoo.com`` only Yahoo's finance site, not Yahoo's other editions). It holds every US outlet of
 # REPUTABLE_DOMAINS; none of NOT_NEWS_DOMAINS. Measured 2026-11-17 (48 English files, 12 h): Reuters, AP, MarketWatch,
-# WSJ, Barron's, Bloomberg, FT, The Washington Post, Axios, USA Today, Politico, The Economist, ABC News, Sky News, The
-# Telegraph and Semafor are not in GDELT's English files at all, CNN only with its press room and Forbes only with its
-# paid Councils posts (kept in the list in case GDELT reads them again); CNBC, The New York Times, BBC, The Guardian,
-# CBS, NBC, Los Angeles Times, Business Insider, Fortune, Investor's Business Daily, Morningstar (which carries
+# WSJ, Barron's, Bloomberg, FT, The Washington Post, Axios, USA Today, Politico, The Economist, Sky News, The Telegraph
+# and Semafor are not in GDELT's English files at all, CNN only with its press room and Forbes only with its paid
+# Councils posts (kept in the list in case GDELT reads them again); CNBC, The New York Times, BBC, The Guardian, CBS,
+# NBC, ABC News (as ``abcnews.com``, 46 rows; no ``abcnews.go.com``; its ``/Business/wireStory/`` pages carry AP's
+# business wire), Los Angeles Times, Business Insider, Fortune, Investor's Business Daily, Morningstar (which carries
 # MarketWatch and Dow Jones Newswires), The Verge and TechCrunch are (``CONTRACT_NOTES.md``, 2026-11-17).
 US_NEWS_DOMAINS = frozenset({
     # wire services, business papers and business TV
@@ -214,8 +221,8 @@ US_NEWS_DOMAINS = frozenset({
     "forbes.com", "finance.yahoo.com", "economist.com", "marketplace.org", "cityam.com", "axios.com", "semafor.com",
     # national papers, networks and magazines
     "nytimes.com", "washingtonpost.com", "latimes.com", "usatoday.com", "bostonglobe.com", "chicagotribune.com",
-    "cnn.com", "cbsnews.com", "nbcnews.com", "abcnews.go.com", "npr.org", "foxnews.com", "politico.com", "time.com",
-    "newsweek.com", "bbc.com", "bbc.co.uk", "theguardian.com", "independent.co.uk", "standard.co.uk",
+    "cnn.com", "cbsnews.com", "nbcnews.com", "abcnews.com", "abcnews.go.com", "npr.org", "foxnews.com", "politico.com",
+    "time.com", "newsweek.com", "bbc.com", "bbc.co.uk", "theguardian.com", "independent.co.uk", "standard.co.uk",
     "telegraph.co.uk", "thetimes.com", "thetimes.co.uk", "news.sky.com",
     # technology
     "techcrunch.com", "theverge.com", "wired.com", "arstechnica.com", "engadget.com", "cnet.com", "zdnet.com",

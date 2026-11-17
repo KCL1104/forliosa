@@ -277,15 +277,19 @@ DATASETS: dict[str, Dataset] = {d.key: d for d in (
     Dataset("sfb-opendata/nav", SFB, "證券投資信託基金每日淨值", "https://www.sitca.org.tw/MemberK0000/F/03/nav.csv",
             "ETF 淨值、盤後折溢價（同一天的收盤價 ÷ 淨值 − 1）", basis="data.gov.tw 11109"),
     # -- News headlines (forliosa.news): title, outlet, time and link only — never text, descriptions or images.
+    # Since the bulk files (gdelt/gkg) carry Taiwan stocks (2026-11-16), US stocks and the market page's US headlines
+    # (2026-11-17), the DOC API is their fallback: only while the bulk feed a stock leans on is more than 2 h old.
     Dataset("gdelt/doc", GDELT, "GDELT DOC 2.0 新聞索引", "https://api.gdeltproject.org/api/v2/doc/doc",
-            "個股頁「新聞報導」：媒體標題、媒體名稱、時間與原文連結", "open",
+            "個股頁「新聞報導」與市場頁美股新聞的備用來源（GDELT 整批檔超過 2 小時沒更新時才用）："
+            "媒體標題、媒體名稱、時間與原文連結", "open",
             "GDELT Terms of Use：unlimited and unrestricted use … without fee（需引用並連回 gdeltproject.org）",
             "GDELT 使用條款（免費、可商用，需引用 GDELT）", GDELT_TERMS_URL, f"依 GDELT 使用條款引用：{GDELT_SITE}"),
-    # The same GDELT index as 15-minute files (news.gdelt_bulk): Taiwan stocks' headlines, stored as ``gdelt`` rows
-    # and attributed like the DOC API's (same terms, same citation).
+    # The same GDELT index as 15-minute files (news.gdelt_bulk): the headlines of Taiwan stocks (translation feed),
+    # US stocks and the market page's US news (English feed), stored as ``gdelt`` rows and attributed like the DOC
+    # API's (same terms, same citation).
     Dataset("gdelt/gkg", GDELT, "GDELT GKG 2.1 每 15 分鐘整批檔",
             "https://storage.googleapis.com/data.gdeltproject.org/gdeltv2/",
-            "個股頁「新聞報導」（台股）：媒體標題、媒體名稱、時間與原文連結", "open",
+            "個股頁「新聞報導」（台股、美股）與市場頁美股新聞：媒體標題、媒體名稱、時間與原文連結", "open",
             "GDELT Terms of Use：unlimited and unrestricted use … without fee（需引用並連回 gdeltproject.org）",
             "GDELT 使用條款（免費、可商用，需引用 GDELT）", GDELT_TERMS_URL, f"依 GDELT 使用條款引用：{GDELT_SITE}"),
     Dataset("yahoo-rss/stock", "Yahoo股市", "個股新聞 RSS", YAHOO_RSS_TERMS_URL,
