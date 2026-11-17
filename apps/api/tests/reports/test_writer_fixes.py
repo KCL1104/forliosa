@@ -138,18 +138,32 @@ def test_the_writer_is_told_the_list_is_for_taiwan_stocks():
     assert "名單外的公司與代號都不能出現" not in prompts.WRITER_SYSTEM
 
 
-@pytest.mark.parametrize("key,ok", [("CO.samsung", True), ("THEME.memory", True), ("US.earnings.nvda", True),
-                                    ("TW.reason", False)])
-def test_a_name_from_a_report_abroad_is_not_an_off_list_stock(market_db, us_on, key, ok):
+def _abroad(market_db, key, claim):
     x = {**INST_X, "id": "X003", "key": key, "subject": None, "outlet": "鉅亨網", "title": "三星財報",
-         "claim": "〔鉅亨網〕報導，三星與國泰金 11/16 公布財報。", "quote": "三星與國泰金 11/16 公布財報",
-         "numbers": []}
+         "claim": f"〔鉅亨網〕報導，{claim}。", "quote": claim, "numbers": []}
     pk = with_web(pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16)).pack,
                   INST_X, TRUST_X, x)
     out = close_output(pk)
-    out["chips"].append(p(s("〔鉅亨網〕報導，三星與國泰金 11/16 公布財報。", "X003")))
-    names = ["三星", "國泰金", "台積電"]  # a Taiwan two-character name a company abroad shares, and a longer one
-    assert ("stock_not_allowed" not in codes(out, pk, names=names)) is ok
+    out["chips"].append(p(s(f"〔鉅亨網〕報導，{claim}。", "X003")))
+    names = ["三星", "國泰金", "英業達", "廣達", "台積電"]  # Taiwan names: two characters a company abroad shares, longer
+    return [x.detail for x in validate.validate(out, pk, "close", names) if x.code == "stock_not_allowed"]
+
+
+@pytest.mark.parametrize("key,ok", [("CO.samsung", True), ("US.earnings.nvda", True), ("ADR.tsm", True),
+                                    ("THEME.memory", False), ("TW.reason", False)])
+def test_a_two_character_name_from_a_report_abroad_is_that_company(market_db, us_on, key, ok):
+    # 三星 in a Samsung story is Samsung; a theme's report names Taiwan 概念股, so it never vouches for a name
+    assert (_abroad(market_db, key, "三星財報 11/16 公布") == []) is ok
+
+
+@pytest.mark.parametrize("key", ["CO.samsung", "US.earnings.nvda", "THEME.memory", "TW.reason"])
+def test_a_longer_off_list_taiwan_name_is_never_the_report_s(market_db, us_on, key):
+    assert "國泰金" in _abroad(market_db, key, "三星與國泰金財報 11/16 公布")
+
+
+def test_a_theme_s_concept_stocks_stay_off_the_text(market_db, us_on):
+    found = _abroad(market_db, "THEME.ai_server", "市場關注英業達、廣達等概念股")
+    assert "英業達" in found and "廣達" in found
 
 
 # -- P2-7: a stock item's own numbers need no name ----------------------------------------------------------------

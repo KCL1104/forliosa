@@ -374,3 +374,107 @@ def test_a_us_fact_names_a_session_that_ended_before_the_cut_off_day():
                       cited=tonight, title="Nvidia earnings", key="US.earnings.nvda",
                       claim="〔CNBC〕報導，輝達排定美股 11/17 盤後公布財報。")
     assert why is None and fact["us_session"] == "2026-11-17"
+
+
+# -- review of the dry-run fixes: a publish time is where pages put one (P0-2) ---------------------------------------
+@pytest.mark.parametrize("passage", [
+    "台積電訂 2026/11/16 14:00 召開法說會，會中將說明第四季營運展望與資本支出。",
+    "台指期 11 月合約將於 11/16 13:30 結算，結算價以最後 15 分鐘的成交價計算。",
+    "2026/11/16 13:30 台指期結算，外資空單部位成為市場焦點。",
+    "鴻海科技日 11/16 14:00 登場，外資賣超 1,234.5 億元。",
+    "市場收盤 11/16 13:35 (UTC+8) 加權指數下跌。",
+])
+def test_the_time_of_a_scheduled_event_is_not_a_publish_time(passage):
+    assert check("0 days ago", extra=(passage,)) == (None, "no_publish_time")
+
+
+@pytest.mark.parametrize("passage,kept", [
+    ("2026/11/16 14:35\n台股今天量縮下跌，外資賣超。", "14:35"),  # the date line of the page
+    ("發布時間：2026-11-16 14:20", "14:20"),
+    ("鉅亨網記者王小明 台北 2026/11/16 14:05", "14:05"),
+    ("2026-11-16 15:10 鉅亨網新聞中心", "15:10"),
+    ("2026/11/16 15:01 記者王小明／台北報導", "15:01"),
+])
+def test_a_byline_or_a_dateline_is_a_publish_time(passage, kept):
+    fact, why = check("0 days ago", extra=(passage,))
+    assert why is None and fact["published_at"] == f"2026-11-16T{kept}:00+08:00" and not fact["date_only"]
+
+
+def test_an_event_time_in_a_title_is_not_a_publish_time():
+    assert check("0 days ago", title="台積電法說會 2026-11-16 14:00") == (None, "no_publish_time")
+
+
+def test_a_short_dateline_cited_on_its_own_dates_its_page():
+    # 「2026/11/16 14:05」 is under 20 characters: never a source of the fact, but it still dates the page
+    fact, why = check("0 days ago", extra=("2026/11/16 14:05",))
+    assert why is None and fact["published_at"] == "2026-11-16T14:05:00+08:00" and fact["quote"] == CITED
+    assert check("0 days ago", extra=("外資賣超",)) == (None, "no_publish_time")
+    # a short passage of another page dates nothing here
+    other = "https://money.udn.com/money/story/5607/9882231"
+    res = {_norm_url(UDN): SearchResult(UDN, "外資賣超千億", "0 days ago"),
+           _norm_url(other): SearchResult(other, "台股收盤", "0 days ago")}
+    cites = [{"type": "web_search_result_location", "url": UDN, "title": "外資賣超千億", "cited_text": CITED},
+             {"type": "web_search_result_location", "url": other, "title": "台股收盤", "cited_text": "2026/11/16 14:05"}]
+    assert gather.verify("TWSE_INST.foreign", "〔經濟日報〕報導，外資賣超 1,234.5 億元。", cites, res, W,
+                         ("TWSE_INST.",)) == (None, "no_publish_time")
+
+
+# -- the US sessions the edition covers (P2-13) ----------------------------------------------------------------------
+SEMIS = {"url": "https://www.cnbc.com/2026/11/16/chip-stocks.html", "title": "Chip stocks", "key": "US.semis",
+         "cited": "The Philadelphia semiconductor index fell 5.28% while the chip stocks slid 2.10% in the session."}
+
+
+def test_a_us_fact_of_an_older_session_is_not_overnight_news():
+    assert check("0 days ago", PRE, claim="〔CNBC〕報導，美股 11/13 費城半導體指數跌 5.28%。", **SEMIS) == \
+        (None, "no_us_session_date")
+    fact, why = check("0 days ago", PRE, claim="〔CNBC〕報導，美股 11/16 費城半導體指數跌 5.28%。", **SEMIS)
+    assert why is None and fact["us_session"] == "2026-11-16"
+    # every US date of the claim is one the edition covers
+    assert check("0 days ago", PRE, claim="〔CNBC〕報導，美股 11/16 費半跌 5.28%，美股 11/13 跌 2.10%。", **SEMIS) == \
+        (None, "no_us_session_date")
+
+
+def test_a_weekly_takes_the_us_sessions_of_its_week():
+    week = gather.Window(WEEK.start, WEEK.end, WEEK.cutoff, {date(2026, 11, d) for d in range(16, 21)}, WEEK.now)
+    fact, why = check("1 days ago", week, claim="〔CNBC〕報導，美股 11/20 費城半導體指數跌 5.28%。", **SEMIS)
+    assert why is None and fact["us_session"] == "2026-11-20"
+    assert check("1 days ago", week, claim="〔CNBC〕報導，美股 11/13 費城半導體指數跌 5.28%。", **SEMIS) == \
+        (None, "no_us_session_date")
+
+
+def test_an_edition_with_no_us_session_takes_no_us_fact_but_earnings_dates():
+    none = gather.Window(PRE.start, PRE.end, PRE.cutoff, set(), PRE.now)  # the day after a US holiday
+    assert check("0 days ago", none, claim="〔CNBC〕報導，美股 11/16 費城半導體指數跌 5.28%。", **SEMIS) == \
+        (None, "no_us_session_date")
+    nvda = {**SEMIS, "key": "US.earnings.nvda",
+            "cited": "Nvidia is scheduled to report quarterly results after the bell on Monday, Nov. 16, analysts said."}
+    fact, why = check("0 days ago", none, claim="〔CNBC〕報導，輝達排定美股 11/16 盤後公布財報。", **nvda)
+    assert why is None and fact["us_session"] == "2026-11-16"
+    # a pack stored before ``web_window.us_sessions`` and without US closes: any session before the cut-off day
+    old = gather.Window(PRE.start, PRE.end, PRE.cutoff, None, PRE.now)
+    assert check("0 days ago", old, claim="〔CNBC〕報導，美股 11/13 費城半導體指數跌 5.28%。", **SEMIS)[1] is None
+
+
+def test_the_window_knows_when_the_edition_covers_no_us_session():
+    base = {"web_window": {"from": "2026-11-16T13:30:00+08:00", "to": "2026-11-17T07:00:00+08:00"},
+            "cutoff": "2026-11-17T06:55:00+08:00", "dates": {"us_sessions": []}}
+    assert gather.window({**base, "web_window": {**base["web_window"], "us_sessions": []}}, PRE.now).us_sessions \
+        == set()
+    assert gather.window(base, PRE.now).us_sessions is None  # an old pack without US closes
+    assert gather.window({**base, "dates": {"us_sessions": ["2026-11-16"]}}, PRE.now).us_sessions == {MON}
+
+
+# -- each topic is checked at the time of its own searches (P0-2) --------------------------------------------------
+def test_a_slow_topic_does_not_drop_the_other_topics_same_day_pages():
+    fake = FakeAnthropic()
+    for _ in range(2):
+        fake.reply(*gather_reply("TWSE_INST.foreign", "〔中央社〕報導，外資 11/16 賣超 1,234.5 億元。", CNA,
+                                 "外資賣超千億", CITED, page_age="0 days ago"))
+    client = fake.client("sk-test")
+    times = iter([ts(TUE, 6, 30), ts(TUE, 7, 10)])  # the first topic replied in time, the second after 07:00
+    res = gather.run_topics([topic(), topic()], "claude-sonnet-5-5", "low",
+                            lambda kw, only: (calls.create(client, kw), 1), Settings(), clock=lambda: next(times))
+    assert [r.replied_at for r in res] == [ts(TUE, 6, 30), ts(TUE, 7, 10)]
+    out = gather.collect(res, gather.Window(PRE.start, PRE.end, PRE.cutoff, PRE.us_sessions, ts(TUE, 7, 12)))
+    assert [t["kept"] for t in out.topics] == [1, 0] and out.topics[1]["dropped"] == {"no_publish_time": 1}
+    assert out.facts[0]["published_at"] == "2026-11-17"
