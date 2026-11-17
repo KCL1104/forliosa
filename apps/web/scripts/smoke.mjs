@@ -588,9 +588,11 @@ await check("績效：含美股的「全部帳戶」照常算（不自動改看�
   // 美股也有收盤價（Databento，2026-11-15）：一打開就是「全部帳戶」的績效，沒有「只算…」那一行、不提美股沒有報價
   await page.goto(base + "/?view=performance", { waitUntil: "networkidle" })
   await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
-  await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
-  // 區間和首頁的總資產走勢共用（預設 1 月）：選「全部」才碰到存檔起點；這一項最後換回 1 月（選擇記在這台瀏覽器）
-  await page.getByRole("radiogroup", { name: "績效區間" }).getByRole("radio", { name: "全部" }).click()
+  // 區間和首頁的總資產走勢共用、整頁只有一排（在走勢下面；預設 1 月）：選「全部」才碰到存檔起點；這一項最後換回 1 月（選擇記在這台瀏覽器）
+  const shared = page.getByRole("radiogroup", { name: "走勢區間" })
+  await shared.waitFor()
+  if (await page.getByRole("radiogroup", { name: "績效區間" }).count()) throw new Error("two rows of range chips")
+  await shared.getByRole("radio", { name: "全部" }).click()
   await page.getByText(/績效從 2026\/06\/01 收盤開始算，之前沒有資料/).first().waitFor()
   await page.getByRole("combobox", { name: "績效比較基準" }).waitFor()
   const account = page.getByRole("combobox", { name: "帳戶" })
@@ -601,7 +603,7 @@ await check("績效：含美股的「全部帳戶」照常算（不自動改看�
   await page.getByRole("option", { name: "國泰・複委託" }).click()
   await page.getByText("最大回撤").first().waitFor({ timeout: 8000 })
   if (await page.getByText("算不出績效", { exact: true }).count()) throw new Error("the US account has no performance")
-  await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
+  await shared.waitFor()
   // 持有還沒有收盤價的美股（SEC 才認得的 MSFT，用 AI 記一筆、站內不重新載入）：選「全部帳戶」才是空狀態——
   // 算不出來、換區間或基準也沒有用，不放那兩個控制項，只留帳戶；原因在這一頁只說一次
   const box = page.getByLabel("提出問題或下指令")
@@ -612,10 +614,11 @@ await check("績效：含美股的「全部帳戶」照常算（不自動改看�
   await account.click()
   await page.getByRole("option", { name: "全部帳戶" }).click()
   await page.getByText("算不出績效", { exact: true }).waitFor({ timeout: 8000 })
-  if (await page.getByRole("radiogroup", { name: "績效區間" }).count()) throw new Error("range chips shown while nothing can be computed")
+  if (await page.getByRole("radiogroup").count()) throw new Error("range chips shown while nothing can be computed")
   if (await page.getByRole("combobox", { name: "績效比較基準" }).count()) throw new Error("benchmark select shown while nothing can be computed")
   await page.getByRole("combobox", { name: "帳戶" }).waitFor()
-  const reasons = await page.locator("main").getByText(/還沒有收盤價/).count()
+  // 後端的原文在績效分段只說一次（主數字下方那一行「總資產走勢：有持股還沒有收盤價」說的是走勢，每個分段都在）
+  const reasons = await page.locator("#ledger-view").getByText(/還沒有收盤價/).count()
   if (reasons !== 1) throw new Error(`the reason should appear once, got ${reasons}`)
   await page.getByRole("button", { name: /^只看「/ }).first().waitFor({ timeout: 8000 })
   if ((await page.getByRole("button", { name: /^只看「/ }).count()) !== 1) throw new Error("the empty state should offer exactly one action")
@@ -624,6 +627,7 @@ await check("績效：含美股的「全部帳戶」照常算（不自動改看�
   await page.getByText(/績效從 2026\/06\/01 收盤開始算，之前沒有資料/).first().waitFor()
   // 畫面上不講授權或系統怎麼存資料
   if (await page.locator("main").getByText(/可商用|起存檔|資料累積中：/).count()) throw new Error("performance notes still talk about licensing or archiving")
+  // 全部帳戶的走勢畫不出來（沒有區間按鈕）：區間回到績效分段的工具列（整頁還是只有一排）
   await page.getByRole("radiogroup", { name: "績效區間" }).waitFor()
   await page.getByRole("combobox", { name: "績效比較基準" }).waitFor()
   await page.getByRole("radiogroup", { name: "績效區間" }).getByRole("radio", { name: "1月" }).click()
@@ -3484,16 +3488,62 @@ await check("匯入對帳單：沒開放的帳號（不是站方管理員）沒�
       await p.getByRole("button", { name: /^隱私模式開啟中/ }).first().click()
     })
   })
-  await check("總資產走勢與績效分段：整頁只有一排區間（在績效分段的工具列，沒有 1日）、上面的走勢跟著換；績效分段沒有「市值與投入本金」", async () => {
+  await check("總資產走勢與績效分段：整頁只有一排區間（每個分段都在走勢下面，沒有 1日）、績效跟著換、起始日和績效的期間同一天；績效分段沒有「市值與投入本金」", async () => {
     await fresh(DESKTOP, async (p) => {
       await p.goto(base + "/?view=performance&hist=all", { waitUntil: "networkidle" })
       await p.getByText("最大回撤").first().waitFor({ timeout: 8000 })
       if ((await p.getByRole("radiogroup").count()) !== 1) throw new Error(`${await p.getByRole("radiogroup").count()} rows of range chips`)
-      const chips = p.getByRole("radiogroup", { name: "績效區間" })
+      const chips = trendRegion(p).getByRole("radiogroup", { name: "走勢區間" })
       if (await chips.getByRole("radio", { name: "1日" }).count()) throw new Error("1D is still offered")
       if (await p.getByText("市值與投入本金").count()) throw new Error("the duplicate value chart is still there")
-      await chips.getByRole("radio", { name: "3月" }).click()
-      await trendRegion(p).getByText("近 3 個月").waitFor()
+      // 同一個區間只有一個起始日：走勢的起訖和績效的期間（後端的 start_date）同一天
+      for (const [label, trend, perf] of [["1月", "10/12 – 11/12", "2026/10/12 – 2026/11/12"], ["3月", "8/12 – 11/12", "2026/08/12 – 2026/11/12"]]) {
+        await chips.getByRole("radio", { name: label }).click()
+        await trendRegion(p).getByText(trend, { exact: true }).waitFor()
+        await p.getByText(perf, { exact: true }).waitFor()
+      }
+    })
+  })
+  // 分段列（「帳本內容」）在每個分段同一個位置：手指剛按的「績效」不會跑掉
+  const segmentY = (p) => p.getByRole("tablist", { name: "帳本內容" }).evaluate((el) => Math.round(el.getBoundingClientRect().top + window.scrollY))
+  await check("換分段時分段列不動（走勢的區間、歷史短的說明、畫不出來的原因每個分段都一樣）：手機與桌面，歷史 all／2／1", async () => {
+    for (const device of [DESKTOP, { ...pw.devices["iPhone 15"] }]) {
+      for (const hist of ["all", "2", "1"]) {
+        await fresh(device, async (p) => {
+          await p.goto(base + `/?hist=${hist}`, { waitUntil: "networkidle" })
+          await p.getByRole("tablist", { name: "帳本內容" }).waitFor({ timeout: 8000 })
+          await p.waitForTimeout(300)
+          const ys = { holdings: await segmentY(p) }
+          for (const [name, wait] of [["績效", /最大回撤|算不出績效/], ["紀錄", /^交易/], ["持倉", null]]) {
+            await p.getByRole("tab", { name: new RegExp(`^${name}`) }).click()
+            if (wait) await p.getByText(wait).first().waitFor({ timeout: 8000 })
+            await p.waitForTimeout(250)
+            ys[name] = await segmentY(p)
+          }
+          if (new Set(Object.values(ys)).size !== 1) throw new Error(`hist=${hist} ${device.viewport.width}px: segment row moved ${JSON.stringify(ys)}`)
+        })
+      }
+    }
+  })
+  await check("載入時走勢不先放一塊整張圖大的骨架再收掉：少於 2 個收盤時，分段列出現之後不往上跳", async () => {
+    await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+      // 記下分段列每一幀的位置（出現之後只能往下長、不能往上收）
+      await p.addInitScript(() => {
+        window.__segY = []
+        const tick = () => {
+          const el = document.querySelector('[role="tablist"][aria-label="帳本內容"]')
+          if (el) window.__segY.push(Math.round(el.getBoundingClientRect().top))
+          if (window.__segY.length < 2000) requestAnimationFrame(tick)
+        }
+        requestAnimationFrame(tick)
+      })
+      await p.goto(base + "/?hist=1", { waitUntil: "networkidle" })
+      await p.getByRole("link", { name: "總資產走勢：資料還不夠" }).waitFor({ timeout: 8000 })
+      await p.waitForTimeout(300)
+      const ys = await p.evaluate(() => window.__segY)
+      const last = ys.at(-1)
+      const peak = Math.max(...ys)
+      if (peak > last + 2) throw new Error(`the segment row jumped up from ${peak} to ${last}`)
     })
   })
 }

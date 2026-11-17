@@ -14,17 +14,17 @@ import {
   needsYear,
   RANGE_TITLE,
   rangeReturn,
-  sliceRange,
   TREND_RANGES,
   trendDomain,
   trendState,
+  trendWindow,
   type TrendRange,
 } from "@/lib/trend-range"
 import { cn } from "@/lib/utils"
 import type { LedgerView } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { useLedgerPrefs } from "./ledger-prefs"
-import { trendMissingReason } from "./trend-reason"
+import { trendClipNote, trendMissingReason } from "./trend-reason"
 import { useTrendRange } from "./use-trend-range"
 
 /**
@@ -35,7 +35,8 @@ import { useTrendRange } from "./use-trend-range"
  * - 滑過、按住橫拖、方向鍵：讀數換成那一天的值；上面的大數字不變（永遠是最新收盤）。
  * - 自己畫 SVG（照 `ai/ChartCard.tsx`）：總資產 2px 墨色線、最後一點 8px 圓點＋2px 紙色外圈；
  *   投入本金 1.5px 鉛筆灰階梯線，縱軸只看總資產，投入本金不在範圍裡就不畫。
- * - 在績效分段時區間按鈕不放：整頁只有一排，在績效分段的工具列（同一個選擇，`useTrendRange`）。
+ * - 區間按鈕每個分段都放在這裡（整頁只有一排，績效分段跟著這一排；`useTrendChipsShown`）：
+ *   這一塊的高度不跟著分段變，切分段時分段列不會上下跳。
  */
 
 const TOP = 8
@@ -92,17 +93,21 @@ function retSpeech(r: number | null): string {
   return r === null ? "算不出來" : d === "up" ? `上漲 ${pctText(r)}` : d === "down" ? `下跌 ${pctText(r)}` : "持平"
 }
 
-/** 走勢畫不出來、而且後端說了原因時：一行淡墨原因，連到績效（手機也看得到；觸控 44px） */
-function TrendMissing({ reason }: { reason: string }) {
+/**
+ * 走勢畫不出來、而且後端說了原因時：一行淡墨原因，連到績效（手機也看得到；觸控 44px）。
+ * 每個分段都放、一樣高（換分段時分段列不跳）；已經在績效分段時不連到自己，只是一行字。
+ */
+function TrendMissing({ reason, linked }: { reason: string; linked: boolean }) {
+  const box = "inline-flex items-center text-sm text-ink-2 max-lg:min-h-11 pointer-coarse:min-h-11"
   return (
     <p className="mt-4 lg:mt-6">
-      <PlainLink
-        to="/"
-        search={{ view: "performance" }}
-        className="inline-flex items-center text-sm text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink max-lg:min-h-11 pointer-coarse:min-h-11"
-      >
-        總資產走勢：{reason}
-      </PlainLink>
+      {linked ? (
+        <PlainLink to="/" search={{ view: "performance" }} className={cn(box, "underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink")}>
+          總資產走勢：{reason}
+        </PlainLink>
+      ) : (
+        <span className={box}>總資產走勢：{reason}</span>
+      )}
     </p>
   )
 }
@@ -117,12 +122,12 @@ export function HeroTrend({ view }: { view: LedgerView }) {
   const notes = perf.data.notes ?? []
   const state = trendState(series.length)
   if (state === "missing") {
-    // 已經在績效分段時不重複（那裡有完整的說明）
     const reason = trendMissingReason(notes)
-    return reason && view !== "performance" ? <TrendMissing reason={reason} /> : null
+    return reason ? <TrendMissing reason={reason} linked={view !== "performance"} /> : null
   }
-  // 2～6 個收盤：圖下面一行說明（後端的原文＋目前幾個收盤日）；在績效分段時後端那句已經寫在分段裡，只寫幾個收盤日
-  const clipNote = view === "performance" ? undefined : notes.find((n) => /^績效從 .+ 收盤開始算/.test(n))
+  // 2～6 個收盤：圖下面一行說明（後端的原文＋目前幾個收盤日）。每個分段都寫同一句（高度不跟著分段變）；
+  // 績效分段的說明因此不再重複這一句
+  const clipNote = trendClipNote(perf.data)
   const shortNote =
     state === "short" ? (
       <>
@@ -139,7 +144,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
     <TrendBand
       series={series}
       range={range}
-      chips={view === "performance" ? [] : ranges}
+      chips={ranges}
       onRange={setRange}
       height={desktop ? 160 : 120}
       desktop={desktop}
@@ -177,15 +182,18 @@ function TrendBand({
   const [fromKeys, setFromKeys] = useState(false)
   const drag = useRef<{ id: number; x: number; y: number; on: boolean } | null>(null)
 
-  const slice = useMemo(() => sliceRange(series, range), [series, range])
+  const win = useMemo(() => trendWindow(series, range), [series, range])
+  const slice = win.points
   const n = slice.length
   const first = slice[0]!
   const last = slice[n - 1]!
+  // 區間的起始日：和績效分段寫的期間同一天（1 月以上的第一點是前一個收盤，當基準畫，不算起始日）
+  const from = slice[win.from]!
   const days = slice.map((p) => p.t)
   const withYear = range === "1Y" || needsYear(days)
   const day = (t: string, weekday = false) => (withYear ? `${t.slice(0, 4)}/` : "") + formatDateShort(t, weekday)
-  const title = range === "ALL" ? `${day(first.t)} 起` : RANGE_TITLE[range]
-  const total = rangeReturn(slice)
+  const title = range === "ALL" ? `${day(from.t)} 起` : RANGE_TITLE[range]
+  const total = rangeReturn(win)
 
   const model = useMemo(() => {
     const { ticks, min, max } = trendDomain(slice.map((p) => p.market_value))
@@ -206,13 +214,14 @@ function TrendBand({
   }, [slice, n, width, height, privacy])
   const { ticks, labels, left, plotW, plotH, y, x } = model
 
-  // 橫軸：短區間只標頭尾；三個月以上每月第一個交易日，放不下的跳過
+  // 橫軸：短區間只標起訖（起始日和讀數第二行同一天，基準收盤那一點不標）；三個月以上每月第一個交易日，放不下的跳過
   const axis = dateAxis(days)
   const xLabels: { i: number; text: string; anchor: "start" | "middle" | "end"; at: number }[] = []
   if (!axis.long) {
-    for (const i of axis.ticks) {
+    const ends = [...new Set(axis.ticks.map((i) => (i === 0 ? win.from : i)))]
+    for (const i of ends) {
       const text = withYear ? `${days[i]!.slice(0, 4)}/${axis.format(days[i]!)}` : axis.format(days[i]!)
-      xLabels.push({ i, text, anchor: i === 0 ? "start" : "end", at: x(i) })
+      xLabels.push({ i, text, anchor: i === ends[0] && ends.length > 1 ? "start" : "end", at: x(i) })
     }
   } else {
     let lastEnd = -Infinity
@@ -249,7 +258,7 @@ function TrendBand({
   // 最後一點：上市、上櫃的收盤日不同時照主數字列的寫法（「上市 11/16・上櫃 11/13 收盤」）
   const splitLabel = /上市.*上櫃|上櫃.*上市/.test(close.label) ? close.label.replace(/・盤中不更新$/, "") : null
   const activeDay = a ? (active === n - 1 && splitLabel ? splitLabel : `${day(a.t, true)}收盤`) : ""
-  const activeRet = active !== null ? rangeReturn(slice, active) : null
+  const activeRet = active !== null ? rangeReturn(win, active) : null
   const svgLabel = privacy
     ? `${title}，總資產報酬${retSpeech(total)}`
     : `${title}，總資產從 ${formatMoney(first.market_value)} 到 ${formatMoney(last.market_value)}，報酬${retSpeech(total)}`
@@ -260,9 +269,10 @@ function TrendBand({
       <div className="h-11">
         {a ? (
           <>
+            {/* 320px、上市與上櫃收盤日不同（「上市 11/17・上櫃 11/14 收盤」）時放不下：截斷的是日期，金額一定完整 */}
             <p className="num flex items-baseline gap-x-4 overflow-hidden text-base leading-6 whitespace-nowrap text-ink-2">
-              <span>{activeDay}</span>
-              {privacy ? <Masked className="text-ink" /> : <span className="font-semibold text-ink">{formatMoney(a.market_value)}</span>}
+              <span className="min-w-0 truncate">{activeDay}</span>
+              {privacy ? <Masked className="shrink-0 text-ink" /> : <span className="shrink-0 font-semibold text-ink">{formatMoney(a.market_value)}</span>}
             </p>
             {/* 隱私模式：遮住的「••••」和「・」連在一起分不開，改用空白隔開 */}
             <p className={cn("num flex items-baseline overflow-hidden text-sm leading-5 whitespace-nowrap text-ink-2", privacy && "gap-x-4")}>
@@ -283,7 +293,7 @@ function TrendBand({
             </p>
             <p className="num flex items-baseline gap-3 text-sm leading-5 whitespace-nowrap text-ink-2">
               <span className="min-w-0 truncate">
-                {day(first.t)} – {day(last.t)}
+                {day(from.t)} – {day(last.t)}
               </span>
               {model.invested && (
                 // 圖例只有一項：鉛筆灰階梯線是投入本金（墨色線就是總資產）

@@ -23,8 +23,9 @@ import { niceTicks } from "@/ai/chart-geometry"
 import { inText } from "@/lib/cjk"
 import { useHowToRead } from "@/pages/stock/tabs/how-to-read"
 import { useReadOnly, useWho } from "@/api/view-as"
-import { isUnpricedNote } from "./trend-reason"
-import { useTrendRange } from "./use-trend-range"
+import { isUnpricedNote, trendClipNote } from "./trend-reason"
+import { useLedgerPrefs } from "./ledger-prefs"
+import { useTrendChipsShown, useTrendRange } from "./use-trend-range"
 
 /**
  * 算不出來、而且換區間或基準也沒有用：有持股還沒有收盤價（剛加入、還沒抓到收盤價的美股；後端的說明是
@@ -36,16 +37,21 @@ function isBlocked(p: Performance | undefined, isError: boolean): boolean {
 
 /**
  * 績效分段：報酬率與基準（總資產與投入本金的走勢在主數字下方，這裡不重複畫；產品負責人 2026-11-17）。
- * 區間和主數字下方的總資產走勢是同一個選擇（`useTrendRange`）：整頁只有一排區間按鈕——在這個分段時放在這裡的工具列，
- * 上面的走勢跟著換、自己不放按鈕。可以選的區間也一樣：資料撐得起來的才放（看這個帳戶「全部」的序列），沒有「1日」。
+ * 區間和主數字下方的總資產走勢是同一個選擇（`useTrendRange`），整頁只有一排區間按鈕：
+ * - 走勢下面有按鈕時（平常）就用那一排，這裡不放——每個分段都是同一排、同一個位置，換分段時分段列不會上下跳。
+ *   只看某個帳戶、而那個帳戶的資料比較短時，後端從那個帳戶的第一天（或「績效從 … 收盤開始算」）算起，期間照實寫。
+ * - 走勢沒有按鈕時（「自訂」關掉走勢、歷史短、讀不到）才在這裡的工具列放「績效區間」：資料撐得起來的才放
+ *   （看這個帳戶「全部」的序列），沒有「1日」。
  */
 export function PerformanceView() {
   // undefined＝全部帳戶
   const [account, setAccount] = useState<string | undefined>()
-  const trend = useTrendRange(account)
-  const range = trend.range
-  // 可以選的區間：讀到「全部」的序列才知道；讀不到時全部列出（不讓區間沒辦法換）
-  const rangeOptions = trend.known ? TREND_RANGES.filter((r) => trend.ranges.includes(r.value)) : trend.perf.isError ? TREND_RANGES : []
+  const shared = useTrendChipsShown()
+  const home = useTrendRange()
+  const own = useTrendRange(account)
+  const range = shared ? home.range : own.range
+  // 工具列的區間（走勢下面沒有按鈕時）：讀到這個帳戶「全部」的序列才知道；讀不到時全部列出（不讓區間沒辦法換）
+  const rangeOptions = shared ? [] : own.known ? TREND_RANGES.filter((r) => own.ranges.includes(r.value)) : own.perf.isError ? TREND_RANGES : []
   const accounts = useAccounts()
   // 查看別人的資產：基準用授權者的（伺服器決定），不送自己的偏好
   const readOnly = useReadOnly()
@@ -60,11 +66,14 @@ export function PerformanceView() {
   const p = perf.data
   // 算不出來、而且換區間或基準也沒有用（有持股還沒有收盤價）：區間與比較基準不放，只留帳戶——那是唯一有用的控制項
   const blocked = isBlocked(p, perf.isError)
+  // 歷史短時走勢圖下面已經寫了後端那一句（「績效從 … 收盤開始算」，每個分段都寫）：這裡不再寫一次
+  const showTrend = useLedgerPrefs((s) => s.showTrend)
+  const trendNote = showTrend && !home.perf.isError ? trendClipNote(home.perf.data) : undefined
 
   return (
     <div className="flex flex-col gap-5">
       <div className="flex flex-wrap items-center gap-3">
-        {!blocked && rangeOptions.length > 0 && <RangeChips label="績效區間" value={range} options={rangeOptions} onChange={trend.setRange} />}
+        {!blocked && rangeOptions.length > 0 && <RangeChips label="績效區間" value={range} options={rangeOptions} onChange={own.setRange} />}
         <Select
           value={account ?? "all"}
           onValueChange={(v) => setAccount(v === "all" ? undefined : (v as string))}
@@ -107,7 +116,7 @@ export function PerformanceView() {
         <NotEnough p={p} blocked={blocked} account={account} accounts={accountOptions} holdings={holdings.data} onAccount={setAccount} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
-          <DataNotes notes={p.notes} />
+          <DataNotes notes={p.notes?.filter((n) => n !== trendNote)} />
           <Metrics p={p} />
           <Panel title="與基準比較" titleId="cmp-title">
             <Legend
@@ -136,7 +145,8 @@ export function PerformanceView() {
 /**
  * 算不出績效時（空狀態，全站同一種）：標題＋後端 notes 的原文說明為什麼（商用模式：存檔不足、有持股還沒有收盤價），
  * 最多一個現在能做的事——有持股還沒有收盤價時，只看一個沒有那幾檔的帳戶（有持股、每一檔都有收盤價的第一個帳戶）；
- * 其他帳戶從上面的帳戶選單選。原因在這一頁只說這一次（主數字下方的「總資產走勢：…」在績效分段不出現）。
+ * 其他帳戶從上面的帳戶選單選。後端的原文在這個分段只說這一次（主數字下方那一行「總資產走勢：…」說的是走勢，
+ * 每個分段都在、一樣高，在這個分段時不是連結）。
  */
 function NotEnough({ p, blocked, account, accounts, holdings, onAccount }: { p: Performance; blocked: boolean; account?: string; accounts: { id: string; name: string }[]; holdings?: Holding[]; onAccount: (id: string) => void }) {
   const notes = p.notes ?? []

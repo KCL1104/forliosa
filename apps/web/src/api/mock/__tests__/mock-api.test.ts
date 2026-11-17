@@ -18,6 +18,12 @@ describe("mock adapter 與後端一致", () => {
     expect(five.twr).toBeCloseTo(five.series.at(-1)!.twr_index - 1, 4)
   })
 
+  it("ALL（從第一筆交易開始）：第一點是 1＋第一天的報酬、不是 1.0，twr＝最後一點 − 1", async () => {
+    const all = await api.getPerformance({ range: "ALL" })
+    expect(all.series[0]!.twr_index).not.toBe(1)
+    expect(all.twr).toBeCloseTo(all.series.at(-1)!.twr_index - 1, 4)
+  })
+
   it("基準可以是加權報酬指數（mock 以 0050 示範走勢代替）", async () => {
     const p = await api.getPerformance({ range: "1M", benchmark: "^TAIEXTR" })
     expect(p.benchmark).toMatchObject({ symbol: "^TAIEXTR", name: "發行量加權股價報酬指數" })

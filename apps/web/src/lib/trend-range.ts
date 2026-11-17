@@ -3,8 +3,9 @@ import type { PerformancePoint } from "@/api/types"
 /**
  * 帳本主數字下方的總資產走勢（產品負責人 2026-11-17 選方案 B）：一次讀「全部」的績效序列（`usePerformance("ALL")`），
  * 區間在前端切。每一天的 market_value、net_invested 和區間無關，換區間不用再問伺服器。
- * 區間的起點和後端 `services/portfolio.py` 的 `range_start` 一樣，區間報酬也和後端的 TWR 一樣（見 `rangeStartIndex`），
- * 所以首頁的「近 1 個月 報酬 ▲1.2%」和績效分段選「1月」的時間加權報酬是同一個數字。
+ * 區間的起點和後端 `services/portfolio.py` 的 `range_start` 一樣，區間報酬、起始日也和後端的 TWR、`start_date` 一樣
+ * （見 `rangeStartIndex`、`trendWindow`），所以首頁的「近 1 個月 報酬 ▲1.2%」「10/12 – 11/12」和績效分段選「1月」的
+ * 時間加權報酬、期間是同一個數字、同一天。
  */
 export type TrendRange = "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "ALL"
 
@@ -91,6 +92,36 @@ export function sliceRange<T extends Pick<PerformancePoint, "t">>(series: readon
   return series.slice(rangeStartIndex(series, range))
 }
 
+/** 名目起始日之前的那個收盤當基準的區間（5D 的基準收盤後端也算在區間裡，見 `trendWindow` 的 `from`） */
+const CALENDAR: readonly TrendRange[] = ["1M", "3M", "6M", "YTD", "1Y"]
+
+export interface TrendWindow<T> {
+  /** 要畫的點（第一點可能是基準收盤） */
+  points: T[]
+  /**
+   * 報酬的分母。區間從序列的第一天開始時（「全部」、資料比區間短）是 1：後端「全部」的 `twr_index` 第一點是
+   * 1＋第一天的報酬（`apps/api/CONTRACT_NOTES.md`〈績效計算的解讀〉；從存檔起點開始算的才剛好是 1.0），
+   * 用第一點當分母會少算第一天。其他時候是第一點（基準收盤）的 `twr_index`。
+   */
+  base: number
+  /**
+   * 區間的起始日（和後端的 `start_date`、績效分段寫的期間一樣）在 `points` 裡的位置：
+   * 1M…1Y 的第一點是名目起始日之前的基準收盤，起始日是下一個收盤（1）；5D 的起始日就是基準收盤、整段時是第一天（0）。
+   */
+  from: number
+}
+
+/** 切出一個區間，連同報酬的分母與起始日（見 `TrendWindow`） */
+export function trendWindow<T extends Pick<PerformancePoint, "t" | "twr_index">>(series: readonly T[], range: TrendRange): TrendWindow<T> {
+  const start = rangeStartIndex(series, range)
+  const points = series.slice(start)
+  return {
+    points,
+    base: start === 0 ? 1 : points[0]!.twr_index,
+    from: start > 0 && CALENDAR.includes(range) && points.length > 1 ? 1 : 0,
+  }
+}
+
 /**
  * 資料撐得起來的區間：這個區間真的會切掉一段（第一點不是序列的第一天）才放；有任何一個時再加「全部」。
  * 不到 7 個收盤一律不放（回傳空陣列）。
@@ -106,12 +137,14 @@ export function effectiveRange(stored: TrendRange, available: readonly TrendRang
   return available.includes(stored) ? stored : "ALL"
 }
 
-/** 區間報酬：twr_index 從區間的第一點重新起算（扣掉新買進的影響） */
-export function rangeReturn(slice: readonly Pick<PerformancePoint, "twr_index">[], upto = slice.length - 1): number | null {
-  const first = slice[0]
-  const at = slice[upto]
-  if (!first || !at || !first.twr_index) return null
-  return at.twr_index / first.twr_index - 1
+/**
+ * 區間報酬（時間加權，扣掉新買進的影響）：從區間開始到第 `upto` 點，`twr_index ÷ 分母 − 1`。
+ * 分母見 `TrendWindow.base`——區間從序列第一天開始時第一天的報酬也算進去，和後端同一個區間的 TWR 一樣。
+ */
+export function rangeReturn(win: Pick<TrendWindow<Pick<PerformancePoint, "twr_index">>, "points" | "base">, upto = win.points.length - 1): number | null {
+  const at = win.points[upto]
+  if (!at || !win.base) return null
+  return at.twr_index / win.base - 1
 }
 
 /** 走勢的狀態：少於 2 點不畫；2～6 點畫、每一點一個圓點、不放區間；7 點以上照常 */

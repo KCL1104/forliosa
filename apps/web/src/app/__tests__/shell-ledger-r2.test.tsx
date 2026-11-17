@@ -6,6 +6,7 @@ import { afterEach, beforeAll, describe, expect, it } from "vitest"
 import { api } from "@/api"
 import { useViewAs, type ViewAsTarget } from "@/api/view-as"
 import { Segmented } from "@/components/segmented"
+import { useLedgerPrefs } from "@/pages/ledger/ledger-prefs"
 import { PerformanceView } from "@/pages/ledger/PerformanceView"
 import { TransactionsView } from "@/pages/ledger/TransactionsView"
 import { createAppRouter } from "@/router"
@@ -32,6 +33,7 @@ beforeAll(() => {
 afterEach(() => {
   cleanup()
   useViewAs.getState().set(null)
+  useLedgerPrefs.setState({ showTrend: true })
 })
 
 const T = { timeout: 4000 }
@@ -186,6 +188,8 @@ describe("帳本主數字與分段", () => {
 
 describe("績效：美股也有收盤價（2026-11-15）", () => {
   it("全部帳戶照常算：一打開就有區間、比較基準與圖，不再自動只看新台幣帳戶", async () => {
+    // 區間平常在主數字下方的走勢下面（整頁一排，見 hero-trend.test）；這裡只畫績效分段，所以關掉走勢、讓按鈕回到工具列
+    useLedgerPrefs.setState({ showTrend: false })
     renderInRouter(<PerformanceView />)
     expect(await screen.findByRole("radiogroup", { name: "績效區間" }, T)).toBeInTheDocument()
     expect(await screen.findByText("與基準比較", undefined, T)).toBeInTheDocument()

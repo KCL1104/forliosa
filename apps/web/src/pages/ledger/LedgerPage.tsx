@@ -3,7 +3,7 @@ import { useNavigate, useSearch } from "@tanstack/react-router"
 import { PlusIcon } from "lucide-react"
 import { lazy, Suspense, useEffect } from "react"
 import { api } from "@/api"
-import { useHoldings, useSummary, useUpcoming } from "@/api/queries"
+import { useHoldings, usePerformance, useSummary, useUpcoming } from "@/api/queries"
 import type { PortfolioSummary } from "@/api/types"
 import { useAskAi } from "@/ai/use-ask"
 import { latestPendingDraftId, usePendingCount } from "@/ai/store"
@@ -29,6 +29,7 @@ import { PlainLink } from "@/app/links"
 import { PageFrame } from "@/app/PageFrame"
 import { usePageTitle } from "@/app/page-title"
 import { HeroTrend } from "./HeroTrend"
+import { useLedgerPrefs } from "./ledger-prefs"
 
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
@@ -52,6 +53,11 @@ export function LedgerPage() {
   const segment = segmentOf(view)
   usePageTitle("帳本")
   const summary = useSummary()
+  // 總資產走勢的序列（「全部」、不帶基準，和 HeroTrend 同一個查詢）和主數字同時開始讀，兩個都回來才一起換掉主數字的骨架：
+  // 走勢一出現就是最後的大小（一張圖、或歷史短時的一行原因），不會先放一塊整張圖大的骨架再收成一行、把下面整片往上拉
+  const showTrend = useLedgerPrefs((s) => s.showTrend)
+  const trendPerf = usePerformance("ALL")
+  const heroReady = !!summary.data && (!showTrend || !!trendPerf.data || trendPerf.isError)
   const counts = useLedgerCounts()
   const pending = usePendingCount()
   const ask = useAskAi()
@@ -83,10 +89,10 @@ export function LedgerPage() {
       {summary.isError ? (
         <ErrorState error={summary.error} onRetry={() => void summary.refetch()} />
       ) : (
-        <Hero summary={summary.data} />
+        <Hero summary={heroReady ? summary.data : undefined} />
       )}
       {/* 總資產走勢：主數字正下方、和主欄一樣寬（產品負責人 2026-11-17 選方案 B）；「自訂」可以整塊關掉 */}
-      {summary.data && <HeroTrend view={view} />}
+      {heroReady && <HeroTrend view={view} />}
       <WeekLine />
 
       <div className="mt-5 flex items-center gap-4 lg:mt-11">

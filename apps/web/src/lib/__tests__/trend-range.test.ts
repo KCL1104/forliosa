@@ -12,6 +12,7 @@ import {
   sliceRange,
   trendDomain,
   trendState,
+  trendWindow,
 } from "../trend-range"
 
 /** 從 from 到 to 的每一個週一到週五（示範用的交易日，不管國定假日） */
@@ -88,12 +89,58 @@ describe("effectiveRange：上次選的撐不起來時畫全部", () => {
 })
 
 describe("rangeReturn", () => {
-  it("twr_index 從區間的第一點重新起算", () => {
+  it("切過的區間：twr_index 從第一點（基準收盤）重新起算", () => {
     const s = [{ twr_index: 1.1 }, { twr_index: 1.21 }, { twr_index: 1.155 }]
-    expect(rangeReturn(s)).toBeCloseTo(0.05)
-    expect(rangeReturn(s, 1)).toBeCloseTo(0.1)
-    expect(rangeReturn(s, 0)).toBe(0)
-    expect(rangeReturn([])).toBeNull()
+    const win = { points: s, base: s[0]!.twr_index }
+    expect(rangeReturn(win)).toBeCloseTo(0.05)
+    expect(rangeReturn(win, 1)).toBeCloseTo(0.1)
+    expect(rangeReturn(win, 0)).toBe(0)
+    expect(rangeReturn({ points: [], base: 1 })).toBeNull()
+  })
+  it("沒切過的「全部」：第一點是 1＋第一天的報酬（後端合約），區間報酬＝最後一點 − 1，和後端的 TWR 一樣", () => {
+    // 11/20 買 1,000 股、每股 1,000 元加手續費 1,425，三天收盤 1010／1005／1020（後端 daily_return／twr_index 算的）
+    const s = [
+      { t: "2026-11-20", twr_index: 1.008563 },
+      { t: "2026-11-23", twr_index: 1.00357 },
+      { t: "2026-11-24", twr_index: 1.018549 },
+    ]
+    const win = trendWindow(s, "ALL")
+    expect(win.base).toBe(1)
+    expect(rangeReturn(win)).toBeCloseTo(0.018549, 6)
+    // 滑到第一天：那一天自己的報酬（績效圖那一點是 +0.86%），不是 0
+    expect(rangeReturn(win, 0)).toBeCloseTo(0.008563, 6)
+    // 資料比區間短、整段時也一樣（後端從第一天算、含第一天的漲跌）
+    expect(rangeReturn(trendWindow(s, "1M"))).toBeCloseTo(0.018549, 6)
+  })
+  it("切過的區間：分母是基準收盤，報酬不含它自己那天", () => {
+    const s = weekdays("2026-06-01", "2026-11-12")
+    const win = trendWindow(s, "1M")
+    expect(win.points[0]!.t).toBe("2026-10-09")
+    expect(win.base).toBe(win.points[0]!.twr_index)
+    expect(rangeReturn(win)).toBeCloseTo(s.at(-1)!.twr_index / win.points[0]!.twr_index - 1, 9)
+  })
+})
+
+describe("trendWindow 的起始日：和後端的 start_date（績效分段寫的期間）同一天", () => {
+  const s = weekdays("2026-06-01", "2026-11-12")
+  it("1M／3M：第一點是基準收盤（10/9），起始日是下一個收盤（10/12）", () => {
+    const m = trendWindow(s, "1M")
+    expect(m.points[m.from]!.t).toBe("2026-10-12")
+    const q = trendWindow(s, "3M")
+    expect(q.points[0]!.t).toBe("2026-08-11")
+    expect(q.points[q.from]!.t).toBe("2026-08-12")
+  })
+  it("5D：後端的起始日就是基準收盤；全部、資料比區間短：第一天", () => {
+    const d = trendWindow(s, "5D")
+    expect(d.from).toBe(0)
+    expect(d.points[0]!.t).toBe("2026-11-05")
+    expect(trendWindow(s, "ALL").from).toBe(0)
+    expect(trendWindow(s, "1Y").from).toBe(0)
+  })
+  it("今年：基準是去年最後一個收盤，起始日是今年第一個收盤", () => {
+    const y = trendWindow(weekdays("2026-11-12", "2027-01-05"), "YTD")
+    expect(y.points[0]!.t).toBe("2026-12-31")
+    expect(y.points[y.from]!.t).toBe("2027-01-01")
   })
 })
 

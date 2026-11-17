@@ -511,10 +511,12 @@ export function buildPerformance(txns: Transaction[], range: PerformanceRange, a
     }
   }
   // 指數的 1.0：1D／5D、MTD 與從存檔起點開始算（minStart）時是第一點（基準收盤）；1M…1Y 和後端一樣，
-  // 第一個收盤那天的漲跌也算進區間，1.0 是它前一個收盤（首頁走勢在前端切區間時，同一個區間的報酬才對得起來）
+  // 第一個收盤那天的漲跌也算進區間，1.0 是它前一個收盤（首頁走勢在前端切區間時，同一個區間的報酬才對得起來）。
+  // 區間從第一筆交易開始（ALL、資料比區間短）時照合約：第一點是 1＋第一天的報酬，不是 1.0（CONTRACT_NOTES〈績效計算的解讀〉）
   const before = days === null && range !== "MTD" ? all[all.indexOf(rows[0]!) - 1] : undefined
   const prev = before && !(opts.minStart && before.t < opts.minStart) ? before : undefined
-  const base = (prev ?? rows[0]!).twr_index
+  const fromInception = days === null && range !== "MTD" && !before
+  const base = prev ? prev.twr_index : fromInception ? 1 : rows[0]!.twr_index
   const bBase = (prev ?? rows[0]!).benchmark_index ?? 1
   const series: PerformancePoint[] = rows.map((x) => ({
     t: x.t,
