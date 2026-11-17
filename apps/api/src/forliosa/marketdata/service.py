@@ -349,6 +349,11 @@ class MarketData:
         )
 
     # -- quotes ----------------------------------------------------------------------------------
+    def forget_quotes(self) -> None:
+        """Drop the 30-second quote cache (realtime: new closes were stored; the next read must see them)."""
+        with self._lock:
+            self._quote_cache.clear()
+
     def quotes(self, symbols: list[str], use_cache: bool = True) -> dict[str, QuoteData]:
         now = time.monotonic()
         out: dict[str, QuoteData] = {}

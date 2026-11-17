@@ -86,11 +86,19 @@ def make_engine(url: str) -> Engine:
     return engine
 
 
+def _watch_writes() -> None:
+    """Realtime updates: every session's writes are announced with its commit (``forliosa.realtime.capture``)."""
+    from forliosa.realtime import capture
+
+    capture.install()
+
+
 def get_engine() -> Engine:
     global _engine, _SessionLocal
     if _engine is None:
         _engine = make_engine(get_settings().database_url)
         _SessionLocal = sessionmaker(_engine, expire_on_commit=False)
+        _watch_writes()
     return _engine
 
 
@@ -99,6 +107,7 @@ def set_engine(engine: Engine) -> None:
     global _engine, _SessionLocal
     _engine = engine
     _SessionLocal = sessionmaker(engine, expire_on_commit=False)
+    _watch_writes()
 
 
 def session_factory() -> sessionmaker[Session]:

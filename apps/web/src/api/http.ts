@@ -81,6 +81,7 @@ import type {
   UsEarning,
 } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
+import { withTab } from "@/realtime/tab"
 
 type Query = Record<string, string | number | null | undefined>
 
@@ -114,7 +115,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     const res = await fetch(`${prefix}${path}${toQueryString(opts.query)}`, {
       method,
       credentials: "include",
-      headers,
+      // 寫入帶上分頁 id（即時更新：自己這個分頁改的，伺服器的事件會標出來，不再重抓一次）；頁面關掉時送的不用
+      headers: opts.keepalive ? headers : withTab(method, headers),
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       // 頁面卸載時送出的請求（延後的刪除）：瀏覽器在頁面關掉後照樣送完
       ...(opts.keepalive ? { keepalive: true } : {}),
@@ -148,6 +150,9 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
 
   return {
     kind: "http",
+    // 即時更新：cookie 登入；`last` 放網址參數（不帶自訂標頭，仍是不用預檢的簡單請求）；查看別人時也是自己的串流（不帶查看標頭）
+    openEvents: (last, signal) =>
+      fetch(`${prefix}/events${toQueryString({ last })}`, { credentials: "include", headers: { Accept: "text/event-stream" }, cache: "no-store", signal }),
     devLogin: (body) => request<User>("POST", "/auth/dev-login", { body }),
     logout: () => request<void>("POST", "/auth/logout"),
     getMe: () => request<User>("GET", "/me"),

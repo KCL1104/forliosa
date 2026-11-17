@@ -11,6 +11,7 @@ from fastapi import Depends, Request, Response
 from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
+from forliosa import realtime
 from forliosa.api.errors import ApiError
 from forliosa.config import get_settings
 from forliosa.db import get_db
@@ -18,11 +19,17 @@ from forliosa.models import User, UserSession
 from forliosa.timeutil import now_utc
 
 COOKIE_NAME = "forliosa_session"
+TAB_HEADER = "x-forliosa-tab"  # the browser tab that sent a write (realtime: its own echo is skipped)
 
 
 def _token_hash(token: str) -> str:
     key = get_settings().session_secret.encode()
     return hmac.new(key, token.encode(), hashlib.sha256).hexdigest()
+
+
+def session_key(session_id: str) -> str:
+    """How realtime names a login session (a prefix of its stored id; never sent to a browser or logged)."""
+    return session_id[:24]
 
 
 def create_session(db: Session, user: User, response: Response) -> None:
@@ -41,14 +48,18 @@ def rotate_session(db: Session, request: Request, user: User, response: Response
     """Sign ``user`` in with a fresh session id; a session the browser already had is deleted first."""
     token = request.cookies.get(COOKIE_NAME)
     if token:
-        db.execute(delete(UserSession).where(UserSession.id == _token_hash(token)))
+        sid = _token_hash(token)
+        db.execute(delete(UserSession).where(UserSession.id == sid))
+        realtime.emit(db, realtime.event("_session.gone", {"s": session_key(sid)}))
     create_session(db, user, response)
 
 
 def destroy_session(db: Session, request: Request, response: Response) -> None:
     token = request.cookies.get(COOKIE_NAME)
     if token:
-        db.execute(delete(UserSession).where(UserSession.id == _token_hash(token)))
+        sid = _token_hash(token)
+        db.execute(delete(UserSession).where(UserSession.id == sid))
+        realtime.emit(db, realtime.event("_session.gone", {"s": session_key(sid)}))  # its open streams close
         db.commit()
     settings = get_settings()
     response.delete_cookie(COOKIE_NAME, path="/", domain=settings.cookie_domain,
@@ -59,6 +70,13 @@ def _aware(dt: datetime) -> datetime:
     return dt if dt.tzinfo else dt.replace(tzinfo=UTC)
 
 
+def _record_origin(request: Request, db: Session, user: User | None) -> User | None:
+    """Realtime: the writes of this request are announced as this user's, from this browser tab."""
+    if user is not None:
+        realtime.set_origin(db, user.id, request.headers.get(TAB_HEADER))
+    return user
+
+
 def session_user(request: Request, db: Session) -> User | None:
     """The signed-in user of this request's session cookie, or None."""
     token = request.cookies.get(COOKIE_NAME)
@@ -67,7 +85,7 @@ def session_user(request: Request, db: Session) -> User | None:
     sess = db.get(UserSession, _token_hash(token))
     if sess is None or _aware(sess.expires_at) <= now_utc():
         return None
-    return db.get(User, sess.user_id)
+    return _record_origin(request, db, db.get(User, sess.user_id))
 
 
 def optional_user(request: Request, db: Session = Depends(get_db)) -> User | None:
@@ -86,7 +104,7 @@ def signed_in_user(request: Request, db: Session = Depends(get_db)) -> User:
     user = db.get(User, sess.user_id)
     if user is None:
         raise ApiError(401, "unauthorized", "請先登入")
-    return user
+    return _record_origin(request, db, user)
 
 
 def current_user(request: Request, db: Session = Depends(get_db)) -> User:
@@ -113,4 +131,4 @@ def purge_expired_sessions(db: Session) -> int:
 
 
 __all__ = ["COOKIE_NAME", "create_session", "current_user", "destroy_session", "get_db", "optional_user", "select",
-           "session_user", "signed_in_user"]
+           "session_key", "session_user", "signed_in_user"]

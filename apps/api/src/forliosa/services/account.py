@@ -27,7 +27,7 @@ from typing import Any
 from sqlalchemy import delete, inspect, or_, select
 from sqlalchemy.orm import Session
 
-from forliosa import disclaimer
+from forliosa import disclaimer, realtime
 from forliosa.api.errors import ApiError
 from forliosa.config import get_settings
 from forliosa.ids import new_id
@@ -291,6 +291,22 @@ def _hand_over_groups(db: Session, user: User) -> None:
     db.flush()
 
 
+def _announce_departure(db: Session, uid: str) -> None:
+    """Realtime (the rows go with Core statements the ORM does not see): the other members of each remaining group
+    (the audience is resolved at commit, after the membership is gone), the other side of each delegation, and the
+    account's own open streams, which close."""
+    gids = list(db.scalars(select(GroupMember.group_id).where(GroupMember.user_id == uid)))
+    others = db.execute(select(Delegation.owner_id, Delegation.viewer_id)
+                        .where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid))).all()
+    counterparts = {o if o != uid else v for o, v in others}
+    realtime.emit(db, *(realtime.event("group.members", {"group_id": g}, realtime.group(g), echo=False)
+                        for g in gids))
+    if counterparts:
+        realtime.emit(db, realtime.event("delegations", {}, tuple(f"u:{u}" for u in sorted(counterparts)),
+                                         echo=False))
+    realtime.emit(db, realtime.event("_user.gone", {"u": uid}))
+
+
 def delete_user(db: Session, user: User) -> None:
     """Delete the account and everything that is only the user's; one transaction (the caller's session), committed
     here. Anything raised rolls the whole deletion back."""
@@ -299,6 +315,7 @@ def delete_user(db: Session, user: User) -> None:
     try:
         _carry_suspension(db, user, now)
         _hand_over_groups(db, user)
+        _announce_departure(db, uid)
         # The user's own rows, children first (explicit, so it does not depend on each database's cascade order).
         db.execute(delete(DiscussionReport).where(DiscussionReport.reporter_id == uid))  # reports I filed
         for model in (DiscussionReaction, DiscussionPostLog, DiscussionSuspension, GroupReaction, GroupShareSetting,

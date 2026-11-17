@@ -3634,3 +3634,96 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 測試：`tests/api/test_delete_holding.py`（筆數與只刪那個帳戶那一檔、別的使用者、唯讀、定期定額暫停與不暫停、暫停／已結束的計畫不算、
   結束日在下一次扣款日之前的計畫不算、自動股利不會回來與略過紀錄清掉、對不起來的帳可以清、群組動態的留言、暫停後計畫內容不變、
   代號相近的列（`2330R.TW`、`2330`）留著、美股整檔刪除、標了代號的手續費／稅算進筆數一起刪）。
+
+
+## 2026-11-17 即時更新（`GET /api/v1/events`；`forliosa.realtime`）
+
+產品負責人：「前端大部分資訊要可以實時更新，我朋友進我的群組就沒有實時更新」。原因：群組頁只在打開時、資料超過 30 秒才重讀，全站關掉了
+「回到分頁時重讀」，群組、討論、帳本也沒有定時重讀。合約見 `docs/api-contract.md`「即時更新」；設計稿的取捨如下。
+
+- **只送 invalidation**：事件是一個種類和幾個收件人本來就看得到的 id（每個種類一份欄位白名單，`realtime.events.TOPICS`；不在名單上的欄位建事件時
+  就丟掉、記 ERROR（只記欄位名）；送出前 `wire_data` 再過一次）。資料一律由前端用原本的端點重抓，所以授權、分享投影、唯讀查看範圍都不用在這裡重寫。
+- **收件人在寫入的交易裡算好**（和設計稿不同：設計稿讓 hub 在記憶體裡維護成員索引）。`g:<群組>`（成員）、`gm:<群組>`（擁有者與管理員）在
+  `before_commit` 用同一個交易查 `group_members`；帳本的擴散（有分享報酬／持股／交易的群組 → `group.ledger`，範圍涵蓋那個帳戶的授權 →
+  `ledger.viewas{delegation_id}` 給被授權的人）也在這裡算。好處：收件人和 commit 後的狀態完全一致（剛加入的人收得到、剛離開的人收不到，離開的人
+  另外直接告訴他）、hub 沒有要同步的快取、連線時不會和加入／離開搶先後、worker 寫的事件和 API 寫的走同一套規則、重連後補送和即時送一樣精準。
+  代價：有群組事件的 commit 多一兩個有索引的查詢；成員多時 NOTIFY 的 payload 比較長（超過 7,000 bytes 就拆成幾則，`split_for_notify`）。
+- **ORM 自動擷取＋少數手動**：`after_flush` 看新增／修改（只算值真的變了的欄位）／刪除的列，對照表 `capture.HANDLERS`；Core 的大量刪改
+  ORM 看不到，由服務自己 `realtime.emit`：`groups.purge`（刪群組：先記下成員）、`remove_member` 撤回多次邀請、`delete_reaction`（群組與討論）、
+  `discussions.delete_topic`、`moderate` 處理檢舉、`channels._reset_others_push`、`account.delete_user`（剩下的群組、授權的對方、`_user.gone`）、
+  `ai.store.delete_all_threads`、`api.deps.destroy_session`／`rotate_session`（`_session.gone`：關掉那個登入的串流）。
+  `tests/realtime/test_route_coverage.py` 要求每個寫入端點都寫下會送什麼（或刻意不送）。
+- **送出**：PostgreSQL 在 `before_commit` 裡 `SELECT pg_notify('forliosa_rt_v1', p) FROM unnest(:payloads)`，包在 savepoint 裡（送事件失敗
+  只會讓事件不見，寫入照樣 commit；`test_a_failure_while_announcing_never_fails_the_write`）。rollback 的寫入什麼都不送。SQLite 在
+  `after_commit` 交給同一個程序的 hub（`realtime.bus`）。worker 的市場資料用 Core upsert 寫，工作結束時自己 `notify_now`：存檔的
+  `twse prices`／`tpex prices` 存進**新的一天**（`closes.official_close_dates` 前後比較）→ `market.closes{market,date}`；`twse`、`tpex`、
+  `taifex`、`cbc`、`everyday` 群組有存到東西 → `market.overview`；證交所當天檔、晚上的暫時收盤、美股收盤同理；`after_close_refresh` 只在
+  有新的或不一樣的收盤（`worker.store_closes` 數出來）才送。沒存到東西、或只是把同一天再寫一次，就不送。
+- **hub**（api 程序，`realtime.hub`）：事件 id `<boot>.<16 位十六進位>`（流水號加密過，見下面「審查後的修正」）；最近 4,096 個、5 分鐘內的事件留著給重連補送（補送的不帶 id，`hello` 的 id
+  已經涵蓋）；LISTEN 斷過就記一個斷點，斷點以前的 `last` 一律 `resync`。每條串流有上限 256 個待送事件（滿了清掉、送一個 `resync`）、
+  同樣的事件合併、20 秒心跳、約 10 分鐘換一條（`bye{rotate}`）、每 5 分鐘查一次登入還有沒有效。LISTEN 斷著的時候新串流回 503
+  `realtime_busy`（`Retry-After: 15`），斷超過 60 秒開著的串流也送 `bye{rotate}`，讓頁面改用輪詢，不會以為自己是即時的。`market.closes` 進來時先清 30 秒報價快取與
+  市場頁漲跌排行快取，前端不必再隔 35 秒抓第二次。
+- **端點不佔資源**：`async def`、不用 `Depends(get_db)`（FastAPI 0.162 的 yield 依賴在回應送完才結束，串流期間會一直佔著連線池），登入用自己的
+  短 session 在 threadpool 查完就還；`test_the_stream_holds_no_database_connection` 確認串流開著時 `pool.checkedout() == 0`。
+- **另外看到的（沒有修）**：`GET /stream/quotes` 和 `POST /ai/chat` 用 `Depends(get_db)`，串流期間一直佔著一條連線（`routes/ai.py` 的註解說
+  串流開始就關，這個 FastAPI 版本並不是）；可以改成 `Depends(get_db, scope="function")` 或自己開短 session。
+- **測試**：`tests/realtime/test_capture.py`（各寫入路徑送什麼給誰：朋友接受邀請 → 擁有者與他自己；只分享給有分享的群組；匯入一批一個事件；
+  授權範圍；討論公開／群組；登出、刪除帳號；市場報告公開／試跑；rollback 不送；同值不算改；關掉開關）、`test_hub.py`、`test_events_endpoint.py`
+  （TestClient 跑短串流；真的 uvicorn 跑朋友加入群組 2 秒內收到、另一台裝置的交易、別人看不到我的 tab 與帳本、不佔連線、登出關串流、第 7 條、
+  關掉分頁就被移除）、`test_worker_events.py`、`test_pg_notify.py`（要 `FORLIOSA_TEST_PG_URL`：API 與 worker 式寫入經 NOTIFY 到串流、
+  另一個程序送的 `market.closes`、LISTEN 被切斷後重連並 `resync`、payload 拆分、savepoint）。
+- **前端**（`apps/web/src/realtime/`；合約「即時更新」的「前端」一節）和設計稿不同的地方：
+  - 401 不直接重設 `me`：停 10 分鐘、把畫面上的資料重抓一次，session 真的沒了就由那些請求的 401 帶到登入頁
+    （直接重設的話，萬一 `/me` 還有效，登入閘門會卸載再掛回、又連一次、又 401，一直重來）。`bye{unauthorized}` 先在 1–2 秒後再連一次，
+    回 401 才這樣處理。
+  - `X-Forliosa-Tab` 等這個分頁的串流第一次連上才開始帶：前端比後端先部署時，舊版後端的 CORS 不允許這個標頭，每個寫入都會在預檢被擋。
+  - 報價、個股總覽、觀察清單在串流連著時仍然 5 分鐘問一次（設計稿是完全不問）：報價鏈裡有不是經由存檔進來的資料源時的保險。
+  - `useCloseRefresh` 留著當保險（不是只在斷線時才動）：2 分鐘內收到過 `market.closes` 就跳過，否則照舊重抓、35 秒後再抓一次。
+  - 一個分頁一條串流，沒有用 BroadcastChannel 共用（要選出負責連線的分頁、處理它進背景或關掉，複雜度不划算）；分頁在背景 2 分鐘就關掉串流，
+    同時開著的通常只有前景的那一兩個。`api.forliosa.trade` 若是 HTTP/1.1，每條串流佔瀏覽器對那台主機 6 條連線中的一條（沒有在正式環境確認）。
+  - 測試：`src/lib/__tests__/sse.test.ts`、`src/realtime/__tests__/`（topics：每個種類重新讀哪些 key；client：退避、`Retry-After`、401、
+    `bye`、心跳逾時、暫停與恢復；controller：去抖動、自己分頁的略過、查看模式、背景只標過期與 2 分鐘關掉、`resync`、30 秒備援；http adapter）。
+    兩個瀏覽器的實測 `apps/web/scripts/e2e-realtime.mjs`：朋友加入 → 擁有者開著的成員頁 0.2 秒、動態 0.2 秒；成員買進 → 動態 0.05 秒；
+    留言數 0.2 秒；討論串回覆 0.2 秒；背景時 0 次重抓、回到前景 0.05 秒；串流被擋時備援 28 秒；同一個人兩台裝置記一筆 → 另一台 0.3 秒，
+    記帳的那台每個帳本查詢只重抓一次（略過自己的事件）。
+
+### 2026-11-17 即時更新：審查後的修正
+
+對抗式審查找到的 16 項（15 項修正，1 項是原本就有、和這次無關的測試）：
+
+- **LISTEN 連線默默死掉**（`realtime/pg.py`）：閒置時的 `SELECT 1` 沒有逾時，資料庫或 TCP proxy 不再回應又不斷線時，hub 一直以為自己在聽，
+  頁面也不輪詢。現在探測（和 `LISTEN` 本身）限 `PROBE_TIMEOUT` 10 秒，逾時就當作斷線（關掉、`listening = False`、退避、重連、`resync`）；
+  連線另外設 `keepalives_interval=10`、`keepalives_count=3`、`tcp_user_timeout=20000`。psycopg 取消逾時的查詢自己還會再等最多約 10 秒。
+  測試：`test_hub.test_a_silent_listen_connection_counts_as_lost`（假連線）、`test_pg_notify.test_a_frozen_listen_connection_is_replaced`
+  （真的 PostgreSQL 16 加一個會凍住的 TCP proxy：凍住後約 12 秒內換掉連線並重新收到 NOTIFY）。
+- **跨網域讀不到 `Retry-After`**：CORS 加上 `expose_headers=["Retry-After"]`；429／503 的 JSON 也帶 `error.retry_after_seconds`
+  （`realtime_off` 也有）；前端讀不到標頭時讀 JSON，`realtime_off` 一律停 10 分鐘（之前跨網域時一律 30 秒，關掉開關反而每 30 秒打一次）。
+- **事件 id 洩漏全站事件數**：id 裡的流水號用每次啟動隨機的鑰匙加密（64 位元 Feistel 置換，`hub.OpaqueIds`），`hello` 的位置也一樣；
+  兩個 id 之間看不出別人做了幾件事、什麼時候。重連的 `last` 解密回流水號照舊補送。
+- **只分享交易的成員**：`group.ledger` 只在群組看得到的變動才送（`capture.LedgerFanout` 的 `positions`／`feed`）：分享報酬或持股的，
+  部位或績效變了（只改備註、來源不算；帳戶改名不算）；只分享交易的，動態會顯示的那幾筆（`capture.feed_visible`：手動或確認過的 AI 草稿、
+  90 天內的買賣）新增、修改（改前或改後看得到）、刪除。刪除帳戶的路由（交易是 Core 刪除）自己算這兩個旗標。
+- **部署時串流被硬切**：uvicorn 收到 SIGTERM 先等連線結束（最多 `--timeout-graceful-shutdown`）才跑 lifespan 的關閉，所以 `bye{rotate}`
+  從來送不出去。現在 lifespan 開始時把 uvicorn 的 SIGTERM／SIGINT 處理串上 `hub.shutdown()`（`api.app.close_streams_on_signal`，
+  只在主執行緒；結束時還原）：訊號一到所有串流馬上收到 `bye{rotate}`，新的串流回 503 `realtime_busy`（`Retry-After: 5`）。
+  測試：`test_events_endpoint.test_sigterm_ends_every_stream_with_a_bye_at_once`（真的 uvicorn CLI 子行程）。
+- **部署或 LISTEN 重連後大家同一秒重抓**：前端的 `resync` 先隨機等 0–3 秒；斷線後第一次重連的範圍 0–3 秒。
+- **市場頁的美股新聞標題**：串流連著時照樣 5 分鐘問一次（新聞排程沒有通知）。
+- **頻道分頁**：`group.channels` 改成送給所有成員（每個成員都看得到「頻道」分頁）。
+- **盤後重點的資料版就地更新**：目前那一版的 `payload` 變了（`build_data` 15:40 前每 10 分鐘重算）就送 `market.reports`
+  （`capture.ReportVersionFanout`；公開且已發布的給所有人，其他給站方）。
+- **查看橫幅的名稱**：改名、換頭像時授權的另一方收到 `delegations`（不在同一個群組也一樣）；前端 `ledger.viewas`、`group.members`
+  也讓授權清單（`["delegations"]`）重新讀。
+- **`market.closes` 太常送**：存檔只在官方收盤的最新一天往前進時送（排程把同一天再寫一次不送）；`after_close_refresh` 只在有新的或
+  不一樣的收盤時送。
+- **群組刪除、成員離開後的討論**：`group.deleted` 讓討論清單與開著的主題重新讀；`group.members` 也讓「全部」清單與開著的主題重新讀。
+- **同一個瀏覽器重新登入**：`bye{unauthorized}` 先在 1–2 秒後再連一次，連得上就照常（之前其他分頁會停 10 分鐘改輪詢）。
+- **第一次連上之前的空檔**：頁面第一批請求讀資料庫、和串流登記之間進來的事件會漏掉。沒帶 `last` 的串流現在補送最近 10 秒內給這個人的事件
+  （不帶 id；那段時間伺服器漏接過就回 `resync`）。
+- **路由檢查表變成真的測試**：`tests/realtime/test_route_coverage.py` 的 `ANNOUNCES` 列出每個寫入端點會送的種類，
+  `test_the_route_announces_what_the_table_says` 逐一實際呼叫並確認都送了（64 個端點；呼叫 Claude API 或要整套報告流程的 6 個在
+  `NOT_DRIVEN`，由寫入那些列的測試代替）。`delegations.update`、`discussions.moderate`、`accounts.delete_holding`（暫停定期定額）、
+  `groups.put_discord`（重設其他人的推播）、`groups.remove_member`（撤回邀請）也檢查收件人。
+- **沒有修的**：`tests/api/test_m5_feed.py::test_deleting_the_last_trade_deletes_its_thread` 在某些日期會失敗（`trading_day(3)` 和
+  `trading_day(5)` 落在同一天時；基底 99f45b6 一樣），和即時更新無關，另外處理。

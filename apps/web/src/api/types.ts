@@ -2427,6 +2427,11 @@ export type UsEarningInput = Omit<UsEarning, "id" | "time_et" | "official_url" |
 
 export interface ForliosaApi {
   readonly kind: "http" | "mock"
+  /**
+   * 即時更新的串流（`GET /events`，Server-Sent Events；docs/api-contract.md「即時更新（2026-11-17）」）：回傳還沒讀 body 的回應。
+   * `last`：上次收到的事件 id（伺服器補送錯過的）。只有真實後端有；mock 沒有（不開即時更新，頁面照原本的間隔重新讀）。
+   */
+  openEvents?(last: string | null, signal: AbortSignal): Promise<Response>
   // 認證與使用者
   devLogin(body: DevLoginBody): Promise<User>
   logout(): Promise<void>

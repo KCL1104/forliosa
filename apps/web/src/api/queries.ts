@@ -21,6 +21,7 @@ import type {
   TransactionQuery,
 } from "./types"
 import { useReadOnly } from "@/api/view-as"
+import { useLiveInterval } from "@/realtime/store"
 
 export const qk = {
   me: ["me"] as const,
@@ -148,12 +149,19 @@ export function useInstrument(symbol: string, enabled = true) {
 /** 4xx：問了也一樣（例如沒有報價的 404），不重試、不再問 */
 const isClientError = (e: unknown) => !!(e as { status?: number } | null)?.status?.toString().startsWith("4")
 
+/**
+ * 即時更新連著時，報價、個股總覽、觀察清單改成 5 分鐘才自己問一次（收盤價進來時伺服器會通知，`market.closes`）；
+ * 5 分鐘那次是保險：萬一有哪個資料源的價格不是經由存檔進來的
+ */
+const LIVE_SAFETY_MS = 5 * 60_000
+
 export function useQuote(symbol: string, enabled = true) {
   // 沒有報價（還沒有收盤價的美股，或美股收盤價沒開）回 404：不重試，也不要每分鐘再問。
   // 暫時的錯誤（5xx、網路斷了）照樣每分鐘再問：不然第一次就遇到的話，台股整頁一直停在「沒有報價」
+  const interval = useLiveInterval(60_000, LIVE_SAFETY_MS)
   return useQuery({
     enabled, queryKey: qk.quote(symbol), queryFn: () => api.getQuote(symbol), staleTime: 15_000,
-    refetchInterval: (q) => (isClientError(q.state.error) ? false : 60_000),
+    refetchInterval: (q) => (isClientError(q.state.error) ? false : interval),
     retry: (n, e) => !isClientError(e) && n < 2,
   })
 }
@@ -284,7 +292,8 @@ export function useDeleteAccount() {
 const notFound = (n: number, e: unknown) => !(e as { status?: number }).status?.toString().startsWith("4") && n < 2
 
 export function useOverview(symbol: string, enabled = true) {
-  return useQuery({ enabled, queryKey: qk.overview(symbol), queryFn: () => api.getOverview(symbol), staleTime: 60_000, refetchInterval: 60_000, retry: notFound })
+  const interval = useLiveInterval(60_000, LIVE_SAFETY_MS)
+  return useQuery({ enabled, queryKey: qk.overview(symbol), queryFn: () => api.getOverview(symbol), staleTime: 60_000, refetchInterval: interval, retry: notFound })
 }
 /** 盤中走勢：持股與自選每 30–60 秒輪詢 */
 export function useIntraday(symbol: string, enabled = true) {
@@ -319,7 +328,8 @@ export function useWhy(symbol: string, enabled = true) {
 /** 自選：查看別人的資產時不讀（不在授權查看的白名單） */
 export function useWatchlist() {
   const readOnly = useReadOnly()
-  return useQuery({ enabled: !readOnly, queryKey: qk.watchlist, queryFn: () => api.getWatchlist(), staleTime: 30_000, refetchInterval: 60_000 })
+  const interval = useLiveInterval(60_000, LIVE_SAFETY_MS)
+  return useQuery({ enabled: !readOnly, queryKey: qk.watchlist, queryFn: () => api.getWatchlist(), staleTime: 30_000, refetchInterval: interval })
 }
 export function useUpcoming(days = 7) {
   return useQuery({ queryKey: qk.upcoming(days), queryFn: () => api.getUpcoming(days), staleTime: 10 * 60_000 })
@@ -378,17 +388,22 @@ export function useAttributions() {
  * 台股現在是不是盤中、今天是不是交易日：大約每分鐘問一次（開盤、收盤的那一刻不用重新整理也會換）。
  * 只用來決定價格旁要不要加一行說明；載入失敗就當作沒有說明，不重試、不報錯。
  */
-/** 市場頁：收盤後的資料，一天只變幾次；AI 整理產生後下一次重新整理就看得到 */
+/**
+ * 市場頁：收盤後的資料，一天只變幾次；AI 整理產生、收盤價進來時伺服器通知。美股新聞標題沒有通知（新聞排程一直在更新），
+ * 所以即時更新連著時照樣每 5 分鐘問一次
+ */
 export function useMarketOverview() {
-  return useQuery({ queryKey: qk.marketOverview, queryFn: () => api.getMarketOverview(), staleTime: 60_000, refetchInterval: 5 * 60_000 })
+  const interval = useLiveInterval(5 * 60_000, LIVE_SAFETY_MS)
+  return useQuery({ queryKey: qk.marketOverview, queryFn: () => api.getMarketOverview(), staleTime: 60_000, refetchInterval: interval })
 }
 
 /**
  * 每日收盤簡報：最新一則（過了兩個交易日、沒開、還沒產生都是 null）。一天只產生一次，不用常問。
- * `enabled`：查看別人的資產時不問（那是登入者自己的 AI 內容）。
+ * `enabled`：查看別人的資產時不問（那是登入者自己的 AI 內容）。產生了伺服器會通知（`ai.briefings`）；即時更新斷著時每 15 分鐘問一次。
  */
 export function useLatestBriefing(enabled = true) {
-  return useQuery({ enabled, queryKey: qk.briefingLatest, queryFn: () => api.getLatestBriefing(), staleTime: 5 * 60_000, refetchInterval: 15 * 60_000 })
+  const interval = useLiveInterval(15 * 60_000)
+  return useQuery({ enabled, queryKey: qk.briefingLatest, queryFn: () => api.getLatestBriefing(), staleTime: 5 * 60_000, refetchInterval: interval })
 }
 export function useBriefings(enabled = true) {
   return useQuery({ enabled, queryKey: qk.briefings, queryFn: () => api.listBriefings(14), staleTime: 5 * 60_000 })
@@ -417,11 +432,12 @@ export function useMarketStatus() {
 /** 報告一頁 10 份（「再看 10 份」） */
 export const REPORT_PAGE_SIZE = 10
 /**
- * 有沒有報告可看、有沒有新的（市場頁的「報告」分頁、導覽的未讀小圓點）。外殼一直掛著，所以 5 分鐘問一次；
- * 失敗就當作沒有（不重試、不報錯：市場頁照舊）。
+ * 有沒有報告可看、有沒有新的（市場頁的「報告」分頁、導覽的未讀小圓點）。新的一份出來時伺服器會通知（`market.reports`）；
+ * 即時更新斷著時外殼每 5 分鐘問一次。失敗就當作沒有（不重試、不報錯：市場頁照舊）。
  */
 export function useMarketReportStatus(enabled = true) {
-  return useQuery<ReportsStatus>({ enabled, queryKey: qk.reportsStatus, queryFn: () => api.getMarketReportStatus(), staleTime: 60_000, refetchInterval: 5 * 60_000, retry: false })
+  const interval = useLiveInterval(5 * 60_000)
+  return useQuery<ReportsStatus>({ enabled, queryKey: qk.reportsStatus, queryFn: () => api.getMarketReportStatus(), staleTime: 60_000, refetchInterval: interval, retry: false })
 }
 /** 某一種最新的一份（沒有就是 null） */
 export function useMarketReportLatest(kind: ReportKind, enabled = true) {

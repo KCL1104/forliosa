@@ -1954,3 +1954,89 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 
 - 錯誤：帳戶不是自己的 404 `not_found`「找不到帳戶」；這個帳戶沒有這一檔的紀錄 404 **`no_records`**「這個帳戶沒有這一檔的紀錄」（自己的代碼：前端把它當成「已經在別的分頁或裝置刪掉了」）；查看別人的資產時 403 `read_only`。
 - 前端：持倉的「⋯」最後一項「刪除這檔」（上面一條格線）、展開後最下面淡墨的「刪除這檔」（手機）→ 確認框寫出帳戶與筆數（「刪除台積電在「永豐－一般」的 7 筆紀錄？」，不只一種時「包括 5 筆買賣、2 筆股利。」），有定期定額時多一個預設勾著的「同時暫停這一檔的定期定額」。好幾個帳戶都有紀錄時預設是現在持有的帳戶（`Holding.account_ids`），已經賣光的帳戶要自己選。成功後和刪一筆交易重抓同樣的資料（暫停了計畫時定期定額也重抓）；`no_records` 也當成刪好了（重抓、關掉、通知「…的紀錄已經不在了」）；連不上伺服器時說「不確定有沒有刪除」，取消時重抓。
+
+## 即時更新（2026-11-17）
+
+產品負責人 2026-11-17：「前端大部分資訊要可以實時更新，我朋友進我的群組就沒有實時更新」。伺服器上的資料一改（別人、自己的另一台裝置、或 worker），打開的頁面約 2 秒內重抓，不用重新整理。
+
+**原則**：伺服器只送「什麼變了」的小訊號（種類＋幾個收件人本來就看得到的 id），**從來不送資料**；前端收到後用原本的端點重抓，所以分享設定、唯讀查看範圍、隱藏的討論內容、站方限定的報告等規則都照舊。
+
+### `GET /api/v1/events`（Server-Sent Events，已實作）
+
+- **認證**：登入 cookie（`credentials: "include"`）。永遠是登入者自己的串流：`X-Forliosa-View-As` 會被忽略（唯讀查看時帳本變動另有 `ledger.viewas`）。`Origin` 不在 `CORS_ORIGINS` 時 403。
+- **參數**：`last`（選填，上次收到的事件 id，格式 `<boot>.<16 位十六進位>`，前端當成不透明的字串）；也接受 `Last-Event-ID` 標頭。建議用 `?last=`（保持 CORS simple request，不用 preflight）。id 裡的流水號是加密過的（每次伺服器啟動換一把鑰匙）：兩個 id 之間看不出別人的事件有幾個、什麼時候發生。
+- **回應** `200 text/event-stream`，`Cache-Control: no-cache`、`X-Accel-Buffering: no`。第一個區塊是 `retry: 5000`，接著 `hello`：
+
+```
+retry: 5000
+
+id: k3f9q2.8c1e57a0d93b42f6
+event: hello
+data: {"v":1,"boot":"k3f9q2","heartbeat":20,"replay":"none"}
+
+: ping
+
+id: k3f9q2.3fa90b16e4c2d781
+event: group.members
+data: {"group_id":"grp_01J..."}
+
+id: k3f9q2.e07d4c9a15b3f628
+event: ledger
+data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
+```
+
+- `hello.replay`：`none`（沒帶 `last`：頁面的第一條；最近 10 秒內給這個人的事件會補送在 `hello` 後面——頁面第一批請求可能剛好在一個變更之前讀資料庫、而那個變更的事件在串流登記之前就到了）、`replayed`（帶了 `last`，中間漏掉的事件已經補送在 `hello` 後面，補送的不帶 id）、`resync`（補不了：伺服器重啟、太久、伺服器漏接過）→ 前端把畫面上的資料全部重抓一次。
+- **心跳**：每 20 秒一行 `: ping`（註解）。
+- **控制事件**：`resync` `{}`（伺服器可能漏了事件，全部重抓）；`bye` `{"reason": "rotate" | "replaced" | "unauthorized"}`，送完就關。`rotate`：串流每約 10 分鐘（±1 分鐘）換一條，立刻帶 `last` 重連；`replaced`：同一個人開了第 7 條，最舊的讓位，等分頁再被看到時才重連；`unauthorized`：這條串流的登入 session 沒了（登出、登入過期〔每 5 分鐘檢查〕、帳號刪除，或同一個瀏覽器重新登入、舊的 session 被換掉）→ 1–2 秒後再連一次，回 401 才停止並當成登出。伺服器要關（部署、SIGTERM）時所有串流馬上收到 `bye{rotate}`，不等 uvicorn 的 10 秒寬限。
+- **錯誤**（JSON，和其他端點一樣）：401 `unauthorized`（停止 10 分鐘，把畫面上的資料重抓一次：session 真的沒了的話，那些請求的 401 照全站的規則帶到登入頁；不直接重設 `me`，免得 `/me` 還有效時登入閘門一直重掛）；403 `forbidden`（Origin 不對）；429 `too_many_streams`（同一人一分鐘連超過 30 次；`Retry-After`）；503 `realtime_off`（`REALTIME_ENABLED=false`，`Retry-After: 600`，前端停 10 分鐘）或 `realtime_busy`（伺服器滿了 `Retry-After: 30`；伺服器暫時收不到資料庫的通知 `Retry-After: 15`，收不到超過 1 分鐘時開著的串流也會收到 `bye{rotate}`，重連就是這個 503；伺服器正在關 `Retry-After: 5`）。429／503 的 JSON 也有 `error.retry_after_seconds`；`Retry-After` 標頭有列在 CORS 的 `Access-Control-Expose-Headers`（跨網域的前端讀得到）。連不上時前端改用輪詢（每 30 秒）。
+- **自己這個分頁的回音**：寫入的請求（POST／PUT／PATCH／DELETE）帶 `X-Forliosa-Tab: <每個分頁隨機的 id>`（`[A-Za-z0-9_-]{8,32}`，其他格式會被忽略）。這個分頁的寫入造成的事件，送到**同一個人**的串流時會多一個 `o`（那個 tab id）；分頁看到 `o` 等於自己的 id 就可以跳過（mutation 自己已經 invalidate 過）。別人永遠看不到 `o`。衍生的事件（`group.ledger`、`ledger.viewas`、改名造成的 `group.members`、市場資料）不帶 `o`，因為原分頁的 mutation 沒有處理那些畫面。
+
+### 事件種類（payload 只會有表裡的欄位）
+
+| 事件 | payload | 誰會收到 | 什麼時候 |
+|---|---|---|---|
+| `ledger` | `account_id?` | 自己 | 交易新增／修改／刪除（含匯入一批只送一次、整檔刪除、股利自動入帳）、帳戶新增／修改／刪除、成本法改變（沒有 `account_id`）。唯讀查看別人時忽略 |
+| `ledger.viewas` | `delegation_id` | 授權給我看的人改了帳本、而且範圍涵蓋那個帳戶 | 同上；只在正在查看這個授權時重抓 |
+| `recurring` | — | 自己 | 定期定額新增／修改／刪除／暫停 |
+| `watchlist` | — | 自己 | 觀察清單 |
+| `me` | — | 自己 | 顯示名稱、頭像、偏好、公開暱稱、條款、會員方案、群組加值包（付款人）、討論停權 |
+| `delegations` | — | 授權的雙方 | 授權新增／修改範圍／撤銷；帳戶刪除使授權範圍變動；對方改名、換頭像、刪除帳號 |
+| `groups.list` | — | 自己 | 自己加入、離開、被移除、建立的群組；群組被刪除 |
+| `group.meta` | `group_id` | 成員 | 群組名稱、排行開關、加值包、推播頻道狀態（群組頁顯示的推播目標） |
+| `group.members` | `group_id` | 成員（離開／被移除的人也會收到） | 加入、離開、移除、角色、轉移擁有者、任何成員的分享設定、成員改名或換頭像、推播設定被重設 |
+| `group.ledger` | `group_id` | 成員 | 成員的帳本有群組看得到的變動（不說是誰）：分享報酬或持股的，部位或績效變了（只改備註不算）；只分享交易的，動態會顯示的那幾筆（手動或確認過的 AI 草稿、90 天內的買賣）新增、修改、刪除。群組看不到的變動不送（不洩漏時間） |
+| `group.comments` | `group_id`, `target` | 成員 | 留言、表情（`target` 例如 `trade:gfi_…`、`digest:…`、`leaderboard:2026-11-17`） |
+| `group.reports` | `group_id` | 成員 | 週報、日報產生或狀態改變 |
+| `group.channels` | `group_id` | 成員（「頻道」分頁每個成員都看得到） | 推播頻道設定（含 Telegram `/link` 連上、推播失敗被停用） |
+| `group.invites` | `group_id` | 擁有者與管理員 | 邀請連結新增、撤回（移除成員時自動撤回的多次邀請也算） |
+| `group.deleted` | `group_id` | 刪除前的成員 | 群組被刪除 |
+| `discussions.topic` | `topic_id` | 公開：所有登入的人；群組：成員 | 回覆、表情、刪除、隱藏／取消隱藏 |
+| `discussions.list` | `scope`（`public`／`group`）, `group_id?` | 同上 | 新主題、刪除主題、回覆數與最新活動改變 |
+| `ai.usage` | — | 自己 | AI 用量（提問、匯入對帳單） |
+| `ai.briefings` | — | 自己 | 收盤簡報寫好、已讀、開關改變 |
+| `ai.threads` | — | 自己 | 對話與草稿 |
+| `reports.seen` | — | 自己 | 市場報告已讀（未讀小圓點） |
+| `market.closes` | `market?`（`TWSE`／`TPEX`／`US`）, `date?` | 所有登入的人 | 新的收盤價存進來（當天下午的證交所檔、晚上的暫時收盤、清晨的 OpenAPI、美股）；排程把已經有的同一天再寫一次不送。伺服器先清掉 30 秒的報價快取，第一次重抓就是新的 |
+| `market.overview` | — | 所有登入的人 | 指數、漲跌排行、期貨、匯率存進來；市場頁 AI 摘要寫好 |
+| `market.reports` | `report_id?`, `kind?` | 公開的版本：所有登入的人；試跑：站方 | 新的一期或新版本發布、目前那一版就地更新（盤後重點的資料版 15:40 前每 10 分鐘重算）、模式切換（沒有 `report_id`） |
+| `admin.reports` | — | 站方 | 市場報告後台（版本、投票、設定） |
+| `admin.discussions` | — | 站方 | 檢舉、處理、停權 |
+
+同一個事件在短時間內重複時伺服器會合併（保留最後一個 id）。
+
+### 限制
+
+每人同時最多 6 條（第 7 條開啟時最舊的收到 `bye{replaced}`）；每個伺服器程序最多 2,000 條；每人每分鐘最多連 30 次。都可以用環境變數調（`apps/api/README.md`「即時更新」）。
+
+### 前端（`apps/web/src/realtime/`）
+
+- **連線**：`RealtimeBridge` 掛在登入閘門裡（帳本的外殼與管理後台都有；沒登入看公開討論的精簡外殼、登入頁、邀請預覽沒有），換了登入的人就重連，登出時關掉。一個分頁一條。用 `fetch` 讀串流（`api.openEvents`，`credentials: "include"`，只帶 `Accept: text/event-stream`，`last` 放網址參數：不用預檢），不用 `EventSource`：要看得到狀態碼、自己決定退避、可以中斷。查看別人的資產時也是自己的串流（不帶 `X-Forliosa-View-As`）。SSE 的解析和 AI 對話共用 `lib/sse.ts`。
+- **mock 模式**沒有 `openEvents`：不開即時更新，狀態一直是 `off`，各個查詢照原本的間隔重新讀（和這次以前一樣）。
+- **事件 → 重新讀**：`realtime/topics.ts` 的 `actionsFor`，和各個 mutation 的 invalidate 用同一組 key（例如 `group.members` → `["groups", g]` 整組、`["groups"]` 本身、那個群組的討論清單；`ledger` → `portfolio`、`transactions`、`events`、`accounts`、`holdings`）。不認得的種類不做事。收到後先收集 150 毫秒、同樣的只做一次；`market.*` 與公開討論的清單（每個人都會收到）先隨機等 0–1.5 秒；全部重抓（`resync`）先隨機等 0–3 秒（部署或伺服器重連後大家同時收到）。`o` 等於自己的分頁 id 就略過。`ledger` 在查看別人時略過；`ledger.viewas` 只在正在查看那個授權時才做。
+- **前景／背景**：分頁在前景，畫面上有的查詢馬上重新讀；在背景只標成過期，回到前景時一起讀。背景超過 2 分鐘先關掉串流（保留最後的 id），回到前景時帶 `last` 重連（補送；補不了就全部重抓）。`bye{replaced}` 的分頁等回到前景或取得焦點才重連。
+- **重連**：第一次 0–3 秒、之後加倍到 30 秒、完全隨機（至少 250 毫秒）；連上超過 30 秒才歸零；`bye{rotate}` 0–1 秒內重連；`bye{unauthorized}` 1–2 秒後再試一次；429／503 照 `Retry-After`（讀不到就看 `error.retry_after_seconds`），`realtime_off` 停 10 分鐘；401、403、404（還沒有 `/events` 的舊版後端）停 10 分鐘；網路恢復（`online`）或回到前景時，在等重試的馬上重連。50 秒（心跳的 2.5 倍）沒有任何資料就當作斷線；網路恢復或回到前景時超過 30 秒（1.5 倍）沒有資料就不等，馬上重連（電腦睡過一覺）。第一次連上之前斷過（或重連時伺服器回 `resync`）就把畫面上「活的」資料全部重抓一次。
+- **串流斷著時**（分頁在前景）：每 30 秒把沒有自己定時重讀的「活的」資料重抓一次（群組、討論、帳本、帳戶、定期定額、AI 用量／簡報／對話、授權、個人資料、市場報告）。
+- **原本的定時重讀**：串流連著時，報價、個股總覽、觀察清單、市場頁改成 5 分鐘一次（保險：萬一有價格不是經由存檔進來；市場頁的美股新聞標題沒有通知）；市場報告狀態、收盤簡報、查看橫幅的授權、等 Telegram `/link` 的頻道不再定時問；斷著時照原本的間隔。市場狀態（`/meta/market-status`）照舊每分鐘（「盤中」是時間決定的）。`useCloseRefresh` 照舊是保險，但 2 分鐘內收到過 `market.closes` 就不再重抓、也不用 35 秒後再抓。
+- **`X-Forliosa-Tab`**：這個分頁的串流第一次連上之後，寫入（不是 GET、不是頁面關掉時送的 keepalive）才帶上——還沒有 `/events` 的舊版後端 CORS 不允許這個標頭，前端先部署的那幾分鐘寫入才不會在預檢被擋。
+- **畫面**：不顯示連線狀態、不跳通知（開發模式的 console 只印種類，不印內容）。
+- **實測**：`apps/web/scripts/e2e-realtime.mjs`（兩個瀏覽器、真實後端）。真實後端的 Playwright 腳本不能再用 `waitUntil: "networkidle"`（串流一直開著）：`e2e-discussions.mjs` 與 `screenshots.mjs --real` 把 `/events` 回成 503 `realtime_off`。

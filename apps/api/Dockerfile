@@ -31,4 +31,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
 EXPOSE 8000
 
 # API: migrate, then serve on $PORT. The worker service overrides this with `python -m forliosa.worker`.
-CMD ["sh", "-c", "alembic upgrade head && exec uvicorn forliosa.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*'"]
+# --timeout-graceful-shutdown: how long a deploy waits for requests in flight. Open realtime streams (GET /api/v1/events)
+# end at the SIGTERM itself with bye{rotate} (forliosa.api.app.close_streams_on_signal); the browsers reconnect to the
+# new process.
+CMD ["sh", "-c", "alembic upgrade head && exec uvicorn forliosa.main:app --host 0.0.0.0 --port ${PORT:-8000} --proxy-headers --forwarded-allow-ips='*' --timeout-graceful-shutdown 10"]

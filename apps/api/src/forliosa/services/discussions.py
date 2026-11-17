@@ -28,6 +28,7 @@ from sqlalchemy import and_, case, delete, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from forliosa import realtime
 from forliosa.api.errors import ApiError, not_found, unprocessable
 from forliosa.config import get_settings
 from forliosa.ids import new_id
@@ -45,6 +46,7 @@ from forliosa.models import (
     GroupMember,
     User,
 )
+from forliosa.realtime.capture import topic_events
 from forliosa.services.groups import MANAGERS
 from forliosa.services.sharing import LEFT_MEMBER, REACTION_EMOJI
 from forliosa.textsafe import name_key, one_line
@@ -481,6 +483,7 @@ def delete_topic(db: Session, me: User, topic_id: str) -> None:
     topic = _visible_topic(db, viewer, topic_id)
     if not _can_delete(viewer, topic, topic.user_id):
         raise ApiError(403, "forbidden", "只有作者或群組管理員可以刪除主題")
+    realtime.emit(db, *topic_events(topic.id, topic.scope, topic.group_id))  # Core deletes: the ORM sees nothing
     _purge_topics(db, [topic.id])
     db.commit()
 
@@ -552,8 +555,11 @@ def put_reaction(db: Session, me: User, target: str, emoji: str) -> None:
 def delete_reaction(db: Session, me: User, target: str, emoji: str) -> None:
     kind, topic, reply = _target(db, viewer_of(db, me), target)
     rx = DiscussionReaction
-    db.execute(delete(rx).where(rx.target_kind == kind, rx.target_id == (reply.id if reply is not None else topic.id),
-                                rx.user_id == me.id, rx.emoji == emoji))
+    res = db.execute(delete(rx).where(rx.target_kind == kind,
+                                      rx.target_id == (reply.id if reply is not None else topic.id),
+                                      rx.user_id == me.id, rx.emoji == emoji))
+    if res.rowcount:
+        realtime.emit(db, *topic_events(topic.id, topic.scope, topic.group_id, with_list=False))
     db.commit()
 
 
@@ -663,6 +669,7 @@ def moderate(db: Session, target: str, action: str) -> None:
         rp = DiscussionReport
         db.execute(update(rp).where(rp.target_kind == kind, rp.target_id == content.id, rp.status == "open")
                    .values(status="resolved", resolved_at=now()))
+        realtime.emit(db, realtime.event("admin.discussions", {}, (realtime.ADMINS,)))
     db.commit()
 
 

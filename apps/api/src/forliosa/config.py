@@ -116,6 +116,19 @@ class Settings(BaseSettings):
     http_timeout_seconds: float = 20.0
     finmind_token: str | None = None
     stream_interval_seconds: float = 5.0
+    # -- realtime updates (``forliosa.realtime``; GET /api/v1/events; 2026-11-17) ---------------------------------
+    # Every database write announces *that* something changed (a topic and ids, never data) to the open pages that
+    # show it; they refetch. PostgreSQL NOTIFY carries the events between the worker and the API (SQLite: this process
+    # only). REALTIME_ENABLED=false turns it off (GET /events answers 503 realtime_off and the web app falls back to
+    # polling). The defaults suit production; nothing needs to be set.
+    realtime_enabled: bool = True
+    realtime_max_streams_per_user: int = Field(default=6, ge=1, le=100)  # the oldest is replaced by a new one
+    realtime_max_streams: int = Field(default=2000, ge=1)  # in this process; more: 503 realtime_busy
+    realtime_heartbeat_seconds: float = Field(default=20.0, gt=0, le=120)
+    realtime_stream_max_seconds: float = Field(default=600.0, gt=0)  # then bye{rotate}; the client reconnects at once
+    realtime_replay_events: int = Field(default=4096, ge=1)  # kept for a reconnect's Last-Event-ID replay …
+    realtime_replay_seconds: float = Field(default=300.0, ge=0)  # … for at most this long
+    realtime_connects_per_minute: int = Field(default=30, ge=1)  # per user; more: 429 too_many_streams
     demo_jitter: bool | None = None  # None -> on in dev
 
     # -- AI (M4) ------------------------------------------------------------------------------------

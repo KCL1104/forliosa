@@ -17,7 +17,9 @@ mkdirSync(out, { recursive: true })
 const step = async (name, fn) => { try { const r = await fn(); console.log("✓", name, r ?? ""); return r } catch (e) { console.log("✗", name, "—", String(e.message).split("\n")[0]); throw e } }
 const b = await pw.chromium.launch()
 const errors = []
-const mk = async () => { const c = await b.newContext({ viewport: { width: 1280, height: 900 }, locale: "zh-TW" }); const p = await c.newPage(); p.on("pageerror", (e) => errors.push(String(e))); p.on("response", (r) => { if (r.status() >= 500) errors.push(`${r.status()} ${r.url()}`) }); return [c, p] }
+// 即時更新的串流（GET /events）一直開著，`networkidle` 就永遠等不到：這支實測不看即時更新，回 503（伺服器關掉即時更新的回應），前端 10 分鐘內不再連
+const noRealtime = (c) => c.route("**/api/v1/events**", (r) => r.fulfill({ status: 503, headers: { "Retry-After": "600", "Content-Type": "application/json" }, body: JSON.stringify({ error: { code: "realtime_off", message: "即時更新目前關閉" } }) }))
+const mk = async () => { const c = await b.newContext({ viewport: { width: 1280, height: 900 }, locale: "zh-TW" }); await noRealtime(c); const p = await c.newPage(); p.on("pageerror", (e) => errors.push(String(e))); p.on("response", (r) => { if (r.status() >= 500) errors.push(`${r.status()} ${r.url()}`) }); return [c, p] }
 try {
   // A: the dev-login demo user (site admin via ADMIN_EMAILS)
   const [, a] = await mk()
@@ -68,7 +70,9 @@ try {
     await reply.waitFor({ timeout: 8000 })
     await reply.getByRole("textbox").fill("我覺得可以，費用率比較低")
     await reply.getByRole("button", { name: "回覆" }).click()
-    await pb.getByText("我覺得可以，費用率比較低").waitFor({ timeout: 10000 })
+    // 等回覆真的送出：清單裡出現、回覆框清空（只等那段字的話，框裡自己打的字就符合，第二次回覆會被第一次的「清空」蓋掉）
+    await pb.locator("main li p", { hasText: "我覺得可以，費用率比較低" }).first().waitFor({ timeout: 10000 })
+    await pb.waitForFunction(() => document.querySelector('form[aria-label="回覆這個主題"] textarea')?.value === "", null, { timeout: 10000 })
   })
   await step("B replies again at once and gets the rate-limit message", async () => {
     const reply = pb.getByRole("form", { name: "回覆這個主題" })

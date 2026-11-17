@@ -101,6 +101,28 @@ uv run python -m forliosa.worker
 盤中沒有輪詢：證交所 MIS 的條款不允許程式下載，即時／延遲行情要付費授權，所以 `/intraday` 目前一律沒有點。
 每次存檔後 worker 會重新載入證交所公布的休市日（`market_holidays`），交易日判斷與定期定額順延都以它為準。
 
+### 即時更新（2026-11-17）
+
+`GET /api/v1/events`（Server-Sent Events）：資料一改，打開的頁面就收到「什麼變了」的小訊號（種類＋id，不含資料），自己重抓
+（合約見 `docs/api-contract.md`「即時更新」，實作見 `src/forliosa/realtime/`）。
+
+- 每個資料庫寫入都會被看到（`realtime.capture`：SQLAlchemy session 的 flush／commit 事件；Core 的大量刪改由服務自己 `realtime.emit`），
+  收件人在**同一個交易裡**算好（群組成員、授權範圍），commit 時送出。
+- **PostgreSQL**（正式環境）：寫入交易裡 `pg_notify('forliosa_rt_v1', …)`，commit 了才送、照 commit 順序；api 程序用一條自己的連線
+  `LISTEN`（不佔連線池；`pg_stat_activity` 裡的 `application_name` 是 `forliosa-realtime`）。worker 寫的資料（收盤價、股利自動入帳、
+  週報、日報、市場報告）也是這條路。連線斷掉會自己重連，並叫所有頁面全部重抓一次。
+- **SQLite**（本機、測試）：只有同一個程序聽得到；本機另外跑的 worker 寫的東西（收盤價、簡報、週報、Telegram `/link`）不會通知瀏覽器，
+  而串流連著時頁面不再定時重讀這些（重新整理或換頁才看得到）。本機要測 worker 時可以設 `REALTIME_ENABLED=false`，頁面照舊定時重讀。
+- 手動送一個市場事件（需要 PostgreSQL）：`uv run python -m forliosa.realtime notify market.closes --market TWSE`。
+- 設定（預設就適合正式環境，不用設）：`REALTIME_ENABLED`（`true`；`false` 時 `/events` 回 503 `realtime_off`、寫入不送事件）、
+  `REALTIME_MAX_STREAMS_PER_USER`（6）、`REALTIME_MAX_STREAMS`（2000）、`REALTIME_HEARTBEAT_SECONDS`（20）、`REALTIME_STREAM_MAX_SECONDS`（600）、
+  `REALTIME_REPLAY_EVENTS`（4096）、`REALTIME_REPLAY_SECONDS`（300）、`REALTIME_CONNECTS_PER_MINUTE`（30）。
+- 部署（SIGTERM）：訊號一到所有串流馬上收到 `bye{rotate}`（`api.app.close_streams_on_signal` 串上 uvicorn 自己的處理），瀏覽器在 0–1 秒內
+  重連到新的程序；Dockerfile 的 `--timeout-graceful-shutdown 10` 只剩一般請求在用。
+- LISTEN 連線默默死掉（不回應也不斷線）時，閒置探測 10 秒沒回就換一條連線並叫所有頁面重抓（`realtime/pg.py`）。
+- 日誌只有數字（每 10 分鐘：幾條串流、幾個人、送了幾個事件），不記 payload、使用者 id 或 session。
+- 測試：`tests/realtime/`；PostgreSQL 的部分要一個可以清空的資料庫：`FORLIOSA_TEST_PG_URL=postgresql+psycopg://…/rt_test uv run pytest tests/realtime`。
+
 ### 市場報告（2026-11-17）
 
 盤前重點、盤後重點、市場週報（`forliosa.reports`；合約與差異見 `CONTRACT_NOTES.md`「2026-11-17 市場報告」）。`MARKET_REPORTS_ENABLED=true` 才排程；

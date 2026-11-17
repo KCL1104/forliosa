@@ -6,6 +6,8 @@
 import { api, apiBaseUrl } from "@/api"
 import { ApiError, type Currency, type Market, type TradePreview, type TransactionInput } from "@/api/types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "@/api/view-as"
+import { createSseReader } from "@/lib/sse"
+import { withTab } from "@/realtime/tab"
 import { parseGrounding, type UngroundedPassage } from "./answer-text"
 import type { Draft, DraftInstrument, Message, Thread } from "./types"
 
@@ -219,7 +221,8 @@ async function request<T>(method: string, path: string, body?: unknown, opts: { 
   const res = await fetch(`${prefix()}${path}`, {
     method,
     credentials: "include",
-    headers: withViewAs(path.split("?")[0]!, method, headers),
+    // 寫入帶上分頁 id（即時更新：自己這個分頁改的，不再重抓一次；頁面關掉時送的不用）
+    headers: withViewAs(path.split("?")[0]!, method, opts.keepalive ? headers : withTab(method, headers)),
     body: body === undefined ? undefined : JSON.stringify(body),
     ...(opts.keepalive ? { keepalive: true } : {}),
   })
@@ -243,33 +246,15 @@ export const aiApi = {
 
 /** SSE 解析器：餵入任意切段的文字，每收到完整事件就呼叫 onEvent（忽略無法解析的事件） */
 export function createSseParser(onEvent: (e: ChatEvent) => void): (chunk: string) => void {
-  let buffer = ""
-  return (chunk: string) => {
-    buffer += chunk
-    // CRLF / CR → LF; a trailing \r may be the first half of a \r\n split across chunks
-    const tail = buffer.endsWith("\r") ? "\r" : ""
-    buffer = (tail ? buffer.slice(0, -1) : buffer).replace(/\r\n?/g, "\n")
-    let cut = buffer.indexOf("\n\n")
-    while (cut !== -1) {
-      const block = buffer.slice(0, cut)
-      buffer = buffer.slice(cut + 2)
-      let name = ""
-      const data: string[] = []
-      for (const line of block.split("\n")) {
-        if (line.startsWith("event:")) name = line.slice(6).trim()
-        else if (line.startsWith("data:")) data.push(line.slice(5).replace(/^ /, ""))
-      }
-      if (name && data.length > 0) {
-        try {
-          onEvent({ event: name, data: JSON.parse(data.join("\n")) } as ChatEvent)
-        } catch {
-          // 壞掉的事件：略過，串流繼續
-        }
-      }
-      cut = buffer.indexOf("\n\n")
+  // 切段、換行與欄位的解析和即時更新共用（lib/sse.ts）；這裡只收有名稱、內容是 JSON 的事件
+  return createSseReader(({ event, data }) => {
+    if (!event.trim()) return
+    try {
+      onEvent({ event: event.trim(), data: JSON.parse(data) } as ChatEvent)
+    } catch {
+      // 壞掉的事件：略過，串流繼續
     }
-    buffer += tail
-  }
+  })
 }
 
 /** 送出一句話並逐事件回呼；HTTP 錯誤（額度、未登入…）以 ApiError 拋出 */
@@ -277,7 +262,7 @@ export async function streamChat(body: ChatBody, onEvent: (e: ChatEvent) => void
   const res = await fetch(`${prefix()}/ai/chat`, {
     method: "POST",
     credentials: "include",
-    headers: withViewAs("/ai/chat", "POST", { Accept: "text/event-stream", "Content-Type": "application/json" }),
+    headers: withViewAs("/ai/chat", "POST", withTab("POST", { Accept: "text/event-stream", "Content-Type": "application/json" })),
     body: JSON.stringify(body),
     signal,
   })

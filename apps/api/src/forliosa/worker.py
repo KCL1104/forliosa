@@ -234,7 +234,15 @@ def weekend_evening(at: time):
 
 
 def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
-    """Store the latest *real* close of each symbol in prices_daily (demo prices are never stored)."""
+    """Store the latest *real* close of each symbol in prices_daily (demo prices are never stored); the number of rows
+    written."""
+    return store_closes(db, md, symbols)[0]
+
+
+def store_closes(db: Session, md: MarketData, symbols: list[str]) -> tuple[int, int]:
+    """:func:`upsert_closes`, also counting the rows that really changed (a new session, or a different close in a row
+    that is not an official one): realtime announces only those (the same session's closes are written again several
+    times a day)."""
     quotes = md.quotes(symbols, use_cache=False)
     rows = []
     for sym, q in quotes.items():
@@ -243,14 +251,22 @@ def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
         rows.append({"symbol": sym, "date": q.trade_date, "open": q.open, "high": q.high, "low": q.low,
                      "close": q.price, "volume": q.volume, "value": q.value, "source": q.source[:32]})
     if not rows:
-        return 0
-    dialect = get_engine().dialect.name
-    insert = pg_insert if dialect == "postgresql" else sqlite_insert
-    stmt = insert(PriceDaily).values(rows)
+        return 0, 0
     # Never overwrite a row the archive wrote from an official source: a provider-chain quote can carry a merged label
     # ("twse-openapi+shioaji-data") that commercial mode does not serve, which hid that day from history and quotes,
     # and a close-only quote wiped open/high/low/volume (2026-11-14 review).
     official = allowed_sources("commercial")
+    have = {(sym, d): (close, src) for sym, d, close, src in db.execute(
+        select(PriceDaily.symbol, PriceDaily.date, PriceDaily.close, PriceDaily.source)
+        .where(PriceDaily.symbol.in_({r["symbol"] for r in rows}), PriceDaily.date.in_({r["date"] for r in rows})))}
+    changed = 0
+    for r in rows:
+        old = have.get((r["symbol"], r["date"]))
+        if old is None or (old[1] not in official and (old[0] is None or float(old[0]) != float(r["close"]))):
+            changed += 1
+    dialect = get_engine().dialect.name
+    insert = pg_insert if dialect == "postgresql" else sqlite_insert
+    stmt = insert(PriceDaily).values(rows)
     stmt = stmt.on_conflict_do_update(
         index_elements=["symbol", "date"],
         set_={k: stmt.excluded[k] for k in ("open", "high", "low", "close", "volume", "value", "source")},
@@ -258,7 +274,7 @@ def upsert_closes(db: Session, md: MarketData, symbols: list[str]) -> int:
     )
     db.execute(stmt)
     db.commit()
-    return len(rows)
+    return len(rows), changed
 
 
 def refresh_instruments(db: Session, md: MarketData) -> int:
@@ -275,6 +291,42 @@ def refresh_instruments(db: Session, md: MarketData) -> int:
         db.add(row)
     db.commit()
     return len(master)
+
+
+# Realtime (``forliosa.realtime``): what a market-data run stored, as invalidations for every open page. The rows are
+# written with Core upserts the ORM capture does not see, so the jobs announce them themselves.
+CLOSE_JOBS = {"twse prices": "TWSE", "tpex prices": "TPEX"}  # ``Archiver.run`` job → market of its closes
+OVERVIEW_GROUPS = frozenset({"twse", "tpex", "taifex", "cbc", "everyday"})  # indices, movers, futures, FX
+
+
+def market_events(closes: list[tuple[str | None, date | None]] = (), overview: bool = False) -> list:
+    """``market.closes`` per (market, session) stored (market None: some tracked symbols' closes), ``market.overview``
+    when indices / movers / futures / FX were stored."""
+    from forliosa import realtime
+
+    out = [realtime.event("market.closes", {"market": m, "date": d.isoformat() if d else None}, (realtime.ALL,))
+           for m, d in dict.fromkeys(closes)]
+    if overview:
+        out.append(realtime.event("market.overview", {}, (realtime.ALL,)))
+    return out
+
+
+def stored_close_dates() -> dict[str, date | None]:
+    """Newest official session stored per market (``closes.official_close_dates``); empty when unreadable."""
+    try:
+        with session_factory()() as db:
+            return closes.official_close_dates(db)
+    except Exception as exc:  # never fail the archive run over an announcement
+        log.warning("realtime: close dates not read (%s)", type(exc).__name__)
+        return {}
+
+
+async def announce(events: list) -> None:
+    """Send the events from a thread (a short database round trip); never fails the job."""
+    if events:
+        from forliosa import realtime
+
+        await asyncio.to_thread(realtime.notify_now, *events)
 
 
 class Worker:
@@ -390,11 +442,19 @@ class Worker:
             with session_factory()() as db:
                 return Archiver(db, self.fetcher_fn(), self.md.policy, now_fn=self.now_fn).run(groups)
 
+        before = await asyncio.to_thread(stored_close_dates)
         results = await asyncio.to_thread(run)
         with session_factory()() as db:
             load_official_calendar(db)
         failed = [r.name for r in results if r.error]
         log.info("archive %s: %d datasets, %d failed %s", ",".join(groups), len(results), len(failed), failed or "")
+        stored = [r for r in results if not r.error and r.rows]
+        # market.closes only when a market's newest official session moved: the scheduled runs (06:45, 08:10, 14:40,
+        # 21:40) mostly write the session already stored again, and every open page would refetch for nothing
+        after = await asyncio.to_thread(stored_close_dates) if stored else before
+        new = [(m, after[m]) for m in dict.fromkeys(CLOSE_JOBS[r.name] for r in stored if r.name in CLOSE_JOBS)
+               if after.get(m) is not None and (before.get(m) is None or after[m] > before[m])]
+        await announce(market_events(new, overview=bool(stored) and bool(OVERVIEW_GROUPS & set(groups))))
         if {"twse", "tpex", "everyday"} & set(groups):  # ex-dividend notices are refreshed with these groups
             await self.auto_dividends()
 
@@ -408,8 +468,10 @@ class Worker:
         with session_factory()() as db:
             n_inst = await asyncio.to_thread(refresh_instruments, db, self.md)
             symbols = tracked_symbols(db)
-            n_px = await asyncio.to_thread(upsert_closes, db, self.md, symbols) if symbols else 0
-        log.info("after close: %d instruments, %d closes stored", n_inst, n_px)
+            n_px, n_new = await asyncio.to_thread(store_closes, db, self.md, symbols) if symbols else (0, 0)
+        log.info("after close: %d instruments, %d closes stored, %d new or changed", n_inst, n_px, n_new)
+        if n_new:
+            await announce(market_events([(None, None)]))
 
     async def close_watch(self) -> None:
         """One check of the close watch (see the module docstring). Whether a market still has to be asked is read
@@ -450,6 +512,8 @@ class Worker:
 
         res = await asyncio.to_thread(run)
         if res.prices or res.indices:
+            await announce(market_events([("TWSE", res.found or res.day)] if res.prices else [],
+                                         overview=bool(res.indices)))
             await self.after_close_refresh()
             await self.briefings_when_closes_are_in()
 
@@ -470,6 +534,7 @@ class Worker:
             log.warning("evening closes: shioaji-data not read: %s", exc)
             return
         if res.stored:
+            await announce(market_events([(m, res.day) for m, n in res.stored.items() if n]))
             await self.after_close_refresh()
 
     async def briefings_when_closes_are_in(self) -> None:
@@ -693,6 +758,8 @@ class Worker:
         self._us_stored = res.stored
         if not res.skipped:
             log.info("US closes: %d rows of %d symbols, newest session %s", res.rows, res.symbols, res.stored)
+        if res.rows:
+            await announce(market_events([("US", res.stored)]))
 
     async def us_backfill(self) -> None:
         from forliosa import us_prices

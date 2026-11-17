@@ -1,6 +1,7 @@
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "./index"
 import { qk } from "./queries"
+import { useRealtimeOpen } from "@/realtime/store"
 import type {
   ChannelNotify,
   CommentTarget,
@@ -325,13 +326,17 @@ export function useDailyReports(id: string) {
 }
 
 // ── 頻道 ──────────────────────────────────────────────────
-/** `poll`：等 Telegram 群組傳 /link 時每 3 秒看一次，連結好了就停 */
+/**
+ * `poll`：等 Telegram 群組傳 /link 時每 3 秒看一次，連結好了就停。
+ * 即時更新連著時不用問：連結好了伺服器會通知（`group.channels`）
+ */
 export function useChannels(id: string, opts: { poll?: boolean } = {}) {
+  const live = useRealtimeOpen()
   return useQuery({
     queryKey: sk.channels(id),
     queryFn: () => api.getChannels(id),
     staleTime: 30_000,
-    refetchInterval: (q) => (opts.poll && q.state.data?.telegram.status !== "active" ? 3000 : false),
+    refetchInterval: (q) => (opts.poll && !live && q.state.data?.telegram.status !== "active" ? 3000 : false),
   })
 }
 function useInvalidateChannels(id: string) {

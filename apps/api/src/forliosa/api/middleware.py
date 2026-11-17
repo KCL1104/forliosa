@@ -69,6 +69,7 @@ VIEW_AS_IGNORED_PATHS = (
     "/instruments/{seg}/why",
     "/quotes",
     "/stream/quotes",
+    "/events",  # realtime: always the signed-in viewer's own stream
     "/derivatives/{seg}",
     "/derivatives/futures/{seg}/history",
     "/market/overview",  # the market page: no user data

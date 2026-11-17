@@ -1,6 +1,7 @@
 import { Outlet, useRouterState } from "@tanstack/react-router"
 import { lazy, Suspense } from "react"
 import { isHomePath, isPublicPath, isPublicReadPath } from "@/lib/next-path"
+import { RealtimeBridge } from "@/realtime/RealtimeBridge"
 import { AdminGate } from "./AdminShell"
 import { AppShell } from "./AppShell"
 import { AuthGate } from "./AuthGate"
@@ -16,6 +17,7 @@ const HomePage = lazy(() => import("@/pages/home/HomePage").then((m) => ({ defau
  * - 公開討論的清單與主題頁、服務條款、隱私權政策不用登入就能讀。
  * 這兩種都不導到登入頁，改用精簡的外殼（字標、討論、登入）；其他頁面照舊導到 `/login?next=…`。
  * `/admin*` 是管理後台：站方管理員用自己的外殼（`AdminShell`），其他人照一般的外殼（頁面是「找不到這個頁面」）。
+ * 登入後（兩種外殼都是）掛上即時更新（`RealtimeBridge`）：別人或排程改了資料，畫面自己重新讀。
  */
 export function RootLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
@@ -31,6 +33,7 @@ export function RootLayout() {
   ) : undefined
   return (
     <AuthGate signedOut={signedOut}>
+      <RealtimeBridge />
       {isAdminPath(pathname) ? <AdminGate /> : <AppShell />}
     </AuthGate>
   )
