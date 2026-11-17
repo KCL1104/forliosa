@@ -4,11 +4,12 @@
  * 規則（產品負責人）：照原文列出，不算平均、上漲空間，不排名、不寫買賣提示，評等不上色。
  */
 import type { AnalystView, AnalystViews, Currency } from "@/api/types"
+import { DISCLAIMER } from "@/lib/disclaimer"
 import { formatDate, formatDateShort, formatNumber } from "@/lib/format"
 import { formatQuote } from "@/lib/tick"
 
-/** 後端沒有附免責文字時用的常數（和合約範例相同） */
-export const ANALYST_DISCLAIMER_FALLBACK = "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。"
+/** 後端沒有附免責文字時用的常數（字在 `lib/disclaimer.ts` 的 `analyst`，和後端 `analyst-views` 的 `disclaimer` 相同） */
+export const ANALYST_DISCLAIMER_FALLBACK = DISCLAIMER.analyst
 /** 最多 8 筆（產品負責人 2026-11-16：台積電有 7 筆查證過的資料，5 筆時被截掉 2 筆） */
 export const ANALYST_MAX_ITEMS = 8
 /** 後端實測（2026-11-12，2–3 次網路搜尋）一次生成約 20–30 秒；每 2.5 秒問一次 */

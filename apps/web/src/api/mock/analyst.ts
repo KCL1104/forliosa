@@ -11,8 +11,9 @@
 import { ApiError, type AnalystView, type AnalystViews } from "../types"
 import { findInstrument } from "./instruments"
 import { addDays, MOCK_TODAY, nextTradingDay, rng, twTick } from "./market"
+import { DISCLAIMER } from "@/lib/disclaimer"
 
-export const ANALYST_DISCLAIMER = "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。"
+export const ANALYST_DISCLAIMER = DISCLAIMER.analyst
 export const MOPS_CONFERENCE_URL = "https://mops.twse.com.tw/mops/#/web/t100sb07_1"
 
 /** 台股：示範的法說會（最近一次，2881 是受邀參加券商舉辦的）；美股沒有 */

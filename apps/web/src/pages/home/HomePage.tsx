@@ -1,12 +1,16 @@
+import { PlainLink } from "@/app/links"
 import { usePageTitle } from "@/app/page-title"
+import { Disclaimer, disclaimerLink } from "@/components/disclaimer"
 import { DemoTag } from "@/components/section"
 import { ABOUT_SHORT } from "@/lib/about"
+import { DISCLAIMER_PATH, DISCLAIMER_TITLE } from "@/lib/disclaimer"
 import { LegalLinks } from "@/pages/legal/LegalLinks"
 import { DraftSpecimen, LedgerSpecimen, StockSpecimen } from "./specimens"
 
 /**
  * 沒登入的首頁（`/`）：簡短的介紹頁。登入後同一個網址是帳本（`app/RootLayout.tsx`）。
- * 只有四樣東西：外殼的頁首（字標、討論、登入——`PublicShell`）、標題「股票帳本」、三個用示範資料畫的畫面、頁尾的條款連結。
+ * 只有四樣東西：外殼的頁首（字標、討論、登入——`PublicShell`）、標題「股票帳本」、三個用示範資料畫的畫面、
+ * 頁尾（免責的一句＋條款與免責聲明的連結）。
  * 沒有副標、賣點清單、標語或第二顆登入按鈕：產品是什麼，由三個畫面自己交代。
  *
  * 三個畫面是一張印好的表：桌面三欄並排，三個標題坐在同一條印刷線上（欄與欄之間不留縫，線是連續的）；
@@ -40,8 +44,15 @@ export function HomePage() {
         ))}
       </div>
 
-      <footer className="mt-12 flex flex-wrap gap-x-5 border-t border-rule pt-3 text-sm lg:mt-16">
-        <LegalLinks className="inline-flex min-h-11 items-center text-ink-2 underline decoration-ctl underline-offset-3 hover:text-ink hover:decoration-ink" />
+      {/* 頁尾：免責的一句（Forliosa 只替你整理資訊，不是投資顧問），下面一列條款與免責聲明的連結 */}
+      <footer className="mt-12 border-t border-rule pt-3 lg:mt-16">
+        <Disclaimer />
+        <p className="flex flex-wrap gap-x-5">
+          <LegalLinks className={disclaimerLink} />
+          <PlainLink to={DISCLAIMER_PATH} className={disclaimerLink}>
+            {DISCLAIMER_TITLE}
+          </PlainLink>
+        </p>
       </footer>
     </div>
   )

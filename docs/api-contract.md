@@ -290,8 +290,9 @@
   "currency": "TWD",
   "industry": "半導體業",
   "quantity": 1500,
-  "avg_cost": 612.5,              // 原幣，含買進手續費
+  "avg_cost": 612.5,              // 原幣，含買進手續費（沒填的存 0）
   "cost_basis": 918750,           // TWD
+  "fees_in_cost": 0,              // 原幣：目前持股的成本裡含多少買進手續費（2026-11-17）
   "price": 1085.0,                // 原幣
   "prev_close": 1070.0,
   "market_value": 1627500,        // TWD
@@ -393,7 +394,9 @@
 | GET | `/meta/attributions` | `{policy, notice: [授權條款第 2、3 點], datasets: [{key, agency, dataset, url, used_for, year, license, license_url, commercial, attribution}], not_used: [...]}`（不需登入） |
 
 - `/portfolio/upcoming` 的 `type: "recurring"`：扣款日遇非交易日順延（證交所休市日），多 `plan_id`、`account_id`、`scheduled_date`；`amount_estimate` 為扣款金額。
-- `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集第一次出現的日期），查不到才用法定期限並標 `estimated: true`。
+- `/instruments/{symbol}/events`：每筆多 `estimated`、`period`；`type` 多 `investor_conference`（法說會，日期是開會當天）。`earnings`／`revenue_release` 用實際日期（重大訊息、月營收資料集或季報資料集第一次出現的日期；第一次出現只算已經存過這家公司較早期間、而且這一期比較新的情況，新上市、上櫃轉上市的公司帶進來的那一期不算），查不到才用法定期限：
+  - **還沒到的期限**：`estimated: true`，標題「2026Q4 財報公布期限（預估）」「11 月營收公布期限（預估）」。
+  - **已經過了的期限**（2026-11-17 起）**一律不是預估**：手上有那一期的資料（存檔的季報、月營收，或 shioaji-data 的官方檔）就當作已公布，`estimated: false`，標題和實際日期的一樣（「2026Q3 財報公布」「10 月營收公布」），日期放在法定期限，`detail` 寫數字並說明「（實際公布日不明，日期是法定期限）」，例如「前三季每股虧損 1.78 元（實際公布日不明，日期是法定期限）」「10 月營收 1,977 千元，年增 42.2%（實際公布日不明，日期是法定期限）」；`sources` 是 `Forliosa 規則計算`＋資料來源。沒有任何資料證明已公布的過去期限**不列出**。
 - `/instruments/{symbol}/news`：官方公告（重大訊息、證交所新聞），每筆多 `category: "material_info" | "exchange_news" | "media"`，官方公告的 `source` 是 `"公告"`。
   媒體新聞（`category: "media"`）見下方「新聞報導（2026-11-12）」。
 - `POST /transactions` 的 `source` 可為 `"ai_draft"`。
@@ -573,7 +576,7 @@
 ## AI（M4）
 
 後端用 Anthropic Claude（預設 `claude-haiku-5-5`）＋我們自己的工具回答；細節與待決事項見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「AI（M4）」。
-規則：AI 只讀**目前登入者**自己的資料（工具由伺服器帶入使用者，模型無法指定別人）；只回答投資理財、台美股、使用者的持股與 Forliosa 用法，其他要求一句話婉拒；數字與事實只來自工具結果或附引用的網路來源；**AI 從不寫入帳本**，記帳一律先產生草稿，使用者簽名後前端才 `POST /transactions`（`source: "ai_draft"`）；**免責聲明由前端固定顯示**在每則 AI 回答下方（文字取 `done.disclaimer` 或 `GET /ai/usage` 的 `disclaimer`，模型不會自己寫）；引用來源必須顯示給使用者，`grounding` 標出的句子要標「無來源」。對話、訊息與草稿在最後活動 30 天後刪除（`AI_RETENTION_DAYS`）；用量紀錄保留但不含內容。
+規則：AI 只讀**目前登入者**自己的資料（工具由伺服器帶入使用者，模型無法指定別人）；只回答投資理財、台美股、使用者的持股與 Forliosa 用法，其他要求一句話婉拒；數字與事實只來自工具結果或附引用的網路來源；**AI 從不寫入帳本**，記帳一律先產生草稿，使用者簽名後前端才 `POST /transactions`（`source: "ai_draft"`）；**免責聲明由前端固定顯示**在最新一則 AI 回答下方（一段對話一次，涵蓋同一段對話的每一則；文字取 `done.disclaimer` 或 `GET /ai/usage` 的 `disclaimer`，模型不會自己寫）；引用來源必須顯示給使用者，`grounding` 標出的句子要標「無來源」。對話、訊息與草稿在最後活動 30 天後刪除（`AI_RETENTION_DAYS`）；用量紀錄保留但不含內容。
 
 | 方法 | 路徑 | 說明 |
 |---|---|---|
@@ -607,7 +610,7 @@
 | `chart` | `ChartCard` | `draw_chart` 畫出來的圖卡（一則回答最多 3 張）：每條線的點都在裡面，前端照著畫；資料不足沒有畫時不送這個事件（同一份也存在 `ThreadMessage.charts`） |
 | `grounding` | `{"items": [GroundingItem]}` | 只在這一輪用了 `web_search`／`web_fetch` 時、最後一個 `text` 之後送：沒有引用又像新聞敘述的句子，前端在該句標「無來源」（同一份也存在 `ThreadMessage.grounding`） |
 | `error` | `{"code": "…", "message": "zh-TW 說明"}` | `refusal`（模型拒答；前端應**丟棄這一輪已串流的文字**，改顯示 message）、`ai_busy`、`ai_unavailable`、`ai_unreachable`、`ai_error`、`too_many_steps`、`max_tokens`、`truncated`（文字太長被截斷，已顯示的部分保留）、`internal_error` |
-| `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 回答僅供參考，非投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
+| `done` | `{"thread_id", "turn_id", "model": "claude-haiku-5-5", "stop_reason": "end_turn", "usage": {"input_tokens", "output_tokens", "cache_creation_input_tokens", "cache_read_input_tokens", "web_search_requests", "web_fetch_requests"}, "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"}` | `usage` 是這一輪所有模型呼叫的合計；`disclaimer` 由前端固定顯示在回答下方。`stop_reason: "off_topic"`＝明顯離題、沒有呼叫模型就婉拒（`usage` 全為 0，算一則提問） |
 
 串流開始前的錯誤用一般 JSON 錯誤格式：401；422（body 格式）；404 `not_found`（別人的或不存在的 `thread_id`）；409 `thread_too_long`（對話太長，請開新對話）；403 `members_only`（`mode: "deep"` 而這個人的方案沒有深度搜尋）；429 `ai_daily_limit`（今天的提問數已達這個方案的上限；深度搜尋而今天剩下的題數不夠時也是這個代碼，訊息是「今天還剩 2 題，深度搜尋一次要 3 題。」，錯誤物件多 `remaining`、`cost`）／`ai_monthly_budget`（這個月連省錢模式的額度也用完了，或 token 上限；省錢模式時的深度搜尋也是這個代碼）。花費上限用完、還在省錢模式時，一般提問照常 200，只是這一題沒有 `web_search`／`web_fetch`；503 `ai_unavailable`（沒有設定 API 金鑰，或所有金鑰都失效／額度用完；`mode: "deep"` 而這個環境沒開網路搜尋時也是）。
 
@@ -675,7 +678,7 @@
 {"date": "2026-11-12", "month": "2026-11", "plan": "free", "messages_today": 1, "daily_message_limit": 3, "messages_remaining": 2,
  "tokens_month": 41200, "monthly_token_budget": 3000000, "tokens_remaining": 2958800, "cost_usd_month": 0.0123,
  "model": "claude-haiku-5-5", "available": true, "deep_search_cost": null, "deep_search_members_only": true,
- "monthly_cost_budget_usd": 1.0, "economy": false, "month_budget_reached": false, "disclaimer": "AI 回答僅供參考，非投資建議。"}
+ "monthly_cost_budget_usd": 1.0, "economy": false, "month_budget_reached": false, "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"}
 
 // KeySlots（GET /ai/admin/keys；slot = CLAUDE_API_KEY_<n> 的 n；不含金鑰）
 {"month": "2026-11",                  // UTC 月（預算以 UTC 月計）
@@ -725,7 +728,7 @@
     {"institution": "範例投顧", "action": "首評", "rating_text": "買進", "target_price": 1100, "currency": "TWD",
      "date": "2026-07-20", "source_title": "報導標題", "url": "https://…", "unnamed": false, "old": true}
   ],
-  "disclaimer": "以下為媒體報導的第三方觀點，可能不完整或未經授權轉載，非 Forliosa 建議。",
+  "disclaimer": "以下是媒體報導的第三方機構看法，可能不完整或未經授權轉載；Forliosa 只替你整理，不代表本站意見，也不是投資建議。",
   "notes": [],                        // unavailable 時例如 "14:20 之後可以再查一次。"
   "conference": {                     // 台股才有（美股 null）；只放連結，不抓簡報
     "last": {"date": "2026-11-11", "host": "永豐金證券匯立分公司"},   // 近 180 天最近一次舉行的法說會（重大訊息存檔）；沒有為 null
@@ -1047,7 +1050,7 @@
     "trades_count": 7                          // 只算開了 trades 的成員
   },
   "notes": [],                                 // 例如「資料從 2026/06/01 開始，…」；摘要不再顯示時加一則說明
-  "disclaimer": "AI 分析僅供參考，不構成投資建議。",
+  "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。",
   "sources": ["…"], "is_demo": false,
   "comment_count": 0, "reactions": []          // 只有 ready 的週報能留言、按表情
 }
@@ -1132,7 +1135,7 @@
            "common_holdings": [{"symbol": "2330.TW", "name": "台積電", "holder_count": 3, "day_change_pct": -0.006}],
            "trades": [{"side": "buy", "symbol": "2330.TW", "name": "台積電", "count": 1}], "trades_count": 3,
            "why": [{"symbol": "2454.TW", "name": "聯發科", "day_change_pct": 0.035}]},
- "notes": [], "market_summary": true, "disclaimer": "AI 分析僅供參考，不構成投資建議。", "sources": ["…"], "is_demo": false}
+ "notes": [], "market_summary": true, "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。", "sources": ["…"], "is_demo": false}
 ```
 
 **推播**
@@ -1141,6 +1144,10 @@
   建立時間晚於頻道設定與他打開 `push`／`trades` 的時間；建立 15 分鐘後才送，期間刪除或關閉就不送；送出後的修改不重送；有開 `trade_prices`
   才附價格；同一則動態裡同時到期的交易合併成一則訊息）與週報（`notify_digest`；只含 `push` 為 true 的成員的數字；AI 摘要只在寫進摘要的
   每一位成員都還開著 `push` 時才附上）。訊息只有顯示名稱、買賣、商品、日期、筆數（與價格），附群組頁連結但不含群組 id。
+- **每一則推播的最後一行**（交易、週報、日報，以及設定頻道時的測試訊息與 Telegram 的「已連結」回覆）是全站的免責那一句，只出現一次
+  （2026-11-17，產品負責人）：「Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。」。週報與日報不管有沒有附 AI 摘要都有這一行。
+  附 AI 摘要時，摘要那一行開頭是「AI 整理：」，最後一行前面多「AI 整理的部分可能有錯。」（看得出哪一段是 AI 寫的、可能有錯；和網頁上同一份報告下面的
+  AI 那一句同一個意思）。
 - **訊息裡的名稱**（顯示名稱、群組名稱、商品名稱、AI 摘要）一律先變成一行（去掉換行與控制字元），Discord 再把 Markdown 符號加上反斜線
   （名稱不能變成連結、標題、引用、劇透或程式碼），Telegram 把 `@` 換成全形 `＠`。Discord 訊息另外帶 `flags: 4`（`SUPPRESS_EMBEDS`，
   不產生連結預覽）。
@@ -1175,6 +1182,7 @@
 - 內容只有這個帳號自己的資料，一個 JSON 物件：
   ```jsonc
   { "exported_at": "2026-11-13T08:00:00Z", "format_version": 1,
+    "disclaimer": "Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。",
     "profile": { /* 顯示名稱、email、公開暱稱、偏好設定、建立時間、同意的條款版本 */ },
     "accounts": [...], "transactions": [...], "recurring_plans": [...], "watchlist": [...],
     "auto_dividend_skips": [...],
@@ -1779,3 +1787,9 @@
 
 - `Transaction` 多 `import_batch_id`（見上面「交易」）。
 - 從對帳單匯入的買賣（`source: "import"`）**不出現在群組的交易動態、推播與週報**（見「親友群組」的交易動態）。
+
+## 持倉的均價與手續費（2026-11-17）
+
+- **`Holding.fees_in_cost`**（number，原幣，2 位小數；舊的後端沒有這個欄位，前端當成 0）：目前持股的成本裡含多少買進手續費。`avg_cost`（＝成本 ÷ 股數）是不是「含手續費」看它是否大於 0。
+- 和 `avg_cost` 同一個帳本算：每個（帳戶, 代號）各自一個部位、照使用者的成本法。賣出時跟著賣掉的那幾股出去（移動平均照比例；先進先出先扣最早那一筆）；當沖的那一批連同手續費一起配對賣掉；配股、分割只加股數，手續費不動；減資退款照比例扣（退到成本 0 時手續費也是 0）；股數歸零（含減資、反分割捨去到 0）就整個清掉。出清了的帳戶不算，所以兩個帳戶各買一次、一個全部賣掉時，只看剩下那個帳戶。
+- 買進沒填手續費存的是 0（不照帳戶費率估；產品負責人 2026-11-17：「如果沒有填手續費就用 0 去計算吧」），所以這一批都沒填時是 0。賣出的手續費與稅不在裡面（那是已實現損益）。

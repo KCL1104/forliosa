@@ -2,6 +2,7 @@ import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
 import { useCompany } from "@/api/queries"
 import type { CompanyAbout, InstrumentDetail } from "@/api/types"
+import { Disclaimer } from "@/components/disclaimer"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSourceNote } from "@/hooks/use-source-note"
 import { displayHost, fiscalYearEnd, formatCapital } from "@/lib/company"
@@ -63,7 +64,7 @@ function aboutRows(c: CompanyAbout | undefined, inst: InstrumentDetail, extra: R
 /**
  * 關於〈公司〉（Google 財經的「資料」＋「關於」）：
  * - 簡介：中文維基百科節錄（原文、不改寫，標「節錄」並連到條目與 CC BY-SA 4.0——授權要求標在內容旁），
- *   沒有條目時是 AI 依官方資料寫的 2–3 句（模型寫的字：黑體（墨色，`.ai-voice`）、標「AI 依公開資料整理」）。
+ *   沒有條目時是 AI 依官方資料寫的 2–3 句（模型寫的字：黑體（墨色，`.ai-voice`）、標「AI 依公開資料整理」，下面一句 `ai` 免責）。
  * - 緊湊的兩欄鍵值格：產業別、成立日期（成立 N 年）、上市／上櫃日期、總部、網站、實收資本額、董事長、總經理…
  * - 資料日期留在格子下面；資料來源登記到頁尾。
  * - `extra`：總覽第一層只剩一兩格時（例如還沒有收盤價的美股，只有近四季 EPS）併到這張鍵值格，不在分頁列下面單獨畫一條細帶。
@@ -107,6 +108,7 @@ export function AboutCompany({ inst, extra }: { inst: InstrumentDetail; extra?: 
               </>
             ) : null}
           </p>
+          {d.kind === "ai" && <Disclaimer kind="ai" className="mt-1" />}
         </div>
       )}
       {summary && <p className="max-w-prose pt-2 text-base">{summary}</p>}

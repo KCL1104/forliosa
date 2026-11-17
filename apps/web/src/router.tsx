@@ -229,7 +229,7 @@ const legacy = (path: string, to: string, search?: LedgerSearch) =>
     },
   })
 
-// 服務條款、隱私權政策：不用登入就能讀（`lib/next-path.ts` 的 `isPublicReadPath`）
+// 服務條款、隱私權政策、免責聲明：不用登入就能讀（`lib/next-path.ts` 的 `isPublicReadPath`）
 const termsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/terms",
@@ -239,6 +239,11 @@ const privacyRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/privacy",
   component: lazyRouteComponent(() => import("@/pages/legal/routes"), "PrivacyPage"),
+})
+const disclaimerRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/disclaimer",
+  component: lazyRouteComponent(() => import("@/pages/legal/routes"), "DisclaimerPage"),
 })
 
 const routeTree = rootRoute.addChildren([
@@ -262,6 +267,7 @@ const routeTree = rootRoute.addChildren([
   dataSourcesRoute,
   termsRoute,
   privacyRoute,
+  disclaimerRoute,
   legacy("/holdings", "/"),
   legacy("/transactions", "/", { view: "transactions" }),
   legacy("/performance", "/", { view: "performance" }),

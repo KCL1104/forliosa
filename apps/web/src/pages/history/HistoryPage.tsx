@@ -5,6 +5,7 @@ import { useReadOnly } from "@/api/view-as"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageFrame } from "@/app/PageFrame"
 import { PageHeader } from "@/components/section"
+import { SourcesFooter } from "@/components/sources"
 import { usePageTitle } from "@/app/page-title"
 
 /**
@@ -31,6 +32,7 @@ function History() {
         <div className="mt-10">
           <BriefingHistory />
         </div>
+        <SourcesFooter />
       </div>
     </PageFrame>
   )

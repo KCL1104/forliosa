@@ -124,7 +124,7 @@ const seedModelThread = async (page, mobile, twoTurns) => {
           { url: "https://mops.twse.com.tw/", title: "公開資訊觀測站", cited_text: "台積電 115 年 10 月營收" },
           { url: "https://money.udn.com/money/story/5612/0000001", title: "台積電法說會前夕 外資連三買", cited_text: "外資連續三個交易日買超台積電" },
         ],
-        disclaimer: "AI 回答僅供參考，非投資建議。",
+        disclaimer: "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。",
         at,
       },
     ]
@@ -136,7 +136,7 @@ const seedModelThread = async (page, mobile, twoTurns) => {
         model: true,
         text: "我不替你決定買賣。以現價 1,085 元再加碼 1 張，台積電占總資產會從 43.9% 升到大約 57%，帳本會更集中在一檔。",
         citations: [],
-        disclaimer: "AI 回答僅供參考，非投資建議。",
+        disclaimer: "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。",
         at,
       },
     ]

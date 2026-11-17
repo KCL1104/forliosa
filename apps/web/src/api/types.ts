@@ -509,8 +509,14 @@ export interface Holding {
   currency: Currency
   industry: string | null
   quantity: number
+  /** 原幣，含買進時填的手續費（沒填的存 0） */
   avg_cost: number
   cost_basis: number
+  /**
+   * 目前持股的成本裡含多少買進手續費（原幣；2026-11-17）：大於 0 才在均價旁寫「含手續費」。
+   * 後端照帳本算（每個帳戶各自、照成本法、當沖與減資都處理）；舊的後端沒有這個欄位，當成 0。
+   */
+  fees_in_cost?: number
   /** 沒有報價時為 null（以成本計值，並標示 is_demo） */
   price: number | null
   prev_close: number | null

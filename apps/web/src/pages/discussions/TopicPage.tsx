@@ -13,6 +13,7 @@ import { UserAvatar } from "@/components/avatar"
 import { DateCell } from "@/components/date-cell"
 import { ReactionChips } from "@/components/reaction-chips"
 import { Section } from "@/components/section"
+import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import {
   AlertDialog,
@@ -37,7 +38,7 @@ import { BackLink } from "./OriginLink"
 import { PlainText } from "./PlainText"
 import { ReplyComposer } from "./ReplyComposer"
 import { ReportDialog } from "./ReportDialog"
-import { DATE_COL, Disclaimer, MetaLine, StockTags } from "./TopicRows"
+import { DATE_COL, Disclaimer, GuestLegalLinks, MetaLine, StockTags } from "./TopicRows"
 import { usePageTitle } from "@/app/page-title"
 
 type Reporting = { target: DiscussionTarget; what: string }
@@ -97,6 +98,9 @@ function TopicView() {
           // 換到另一個主題時整個重建（開著的檢舉框、選單不會留到下一個主題）
           <Loaded key={topic.data.id} topic={topic.data} origin={origin} />
         )}
+        <SourcesFooter>
+          <GuestLegalLinks />
+        </SourcesFooter>
       </div>
     </PageFrame>
   )
@@ -357,6 +361,7 @@ function ContentActions({
   return (
     <div className={cn("flex min-h-9 flex-wrap items-center gap-x-4 gap-y-1", className)}>
       <ReactionChips reactions={reactions} onToggle={onToggle} readOnly={!canReact} />
+      {/* 「⋯」整顆在這一列裡面：不用負的右邊距伸出回覆的格線（滑過的底色會超出框線；2026-11-17，和帳本每一筆的 ⋯ 一起改） */}
       {more && (
         <DropdownMenu>
           <Tooltip>
@@ -367,7 +372,7 @@ function ContentActions({
                     <button
                       type="button"
                       aria-label={`${what}的更多動作`}
-                      className="press -mr-2 ml-auto grid size-9 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11"
+                      className="press ml-auto grid size-9 shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-sel aria-expanded:text-ink pointer-coarse:size-11"
                     />
                   }
                 />

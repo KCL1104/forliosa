@@ -13,6 +13,7 @@
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
 // 匯入對帳單（2026-11-16）：有密碼的 PDF（scripts/fixtures/statement-locked.pdf：合成的假資料，密碼是假的身分證字號 A123456789）
 // → 在瀏覽器裡解開、塗掉個資 → 確認表（每一種檢查結果）→ 補一筆買進、選股票 → 簽名匯入 → 復原；截圖；手機的抽屜；沒開放的帳號沒有入口。
+// 全站免責（2026-11-17）：每一頁的頁尾一句＋「免責聲明」、/disclaimer 不用登入、AI 回答與群組報告下面的那一句、登入頁與介紹頁。
 import { readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 
@@ -26,6 +27,9 @@ try {
 const base = (process.argv.find((a) => a.startsWith("--base="))?.slice(7) ?? "http://localhost:5173").replace(/\/$/, "")
 // 開發時只跑名稱含某段字的檢查：--only=討論；好幾段用「|」隔開：--only="AI 圖卡|商用模式"（有些檢查接著上一個檢查的畫面，交付前要整份跑過）
 const onlyCheck = process.argv.find((a) => a.startsWith("--only="))?.slice(7)
+// 免責的字（和 src/lib/disclaimer.ts 相同）
+const SHORT_LINE = "Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。"
+const AI_LINE = "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"
 
 const ROUTES = [
   ["/", "總資產"],
@@ -54,7 +58,7 @@ const ROUTES = [
   ["/groups/grp_family", "元大台灣50"],
   ["/groups/grp_family?tab=feed", "加入了群組"],
   ["/groups/grp_family?tab=holdings", "共同持股"],
-  ["/groups/grp_family?tab=digests", "AI 分析僅供參考，不構成投資建議。"],
+  ["/groups/grp_family?tab=digests", AI_LINE],
   ["/groups/grp_family?tab=members", "邀請連結"],
   ["/groups/grp_friends?tab=channels", "已停用"],
   ["/groups/grp_club", "找不到這個群組"],
@@ -72,6 +76,7 @@ const ROUTES = [
   ["/admin/news", "封鎖中"],
   ["/terms", "服務條款"],
   ["/privacy", "隱私權政策"],
+  ["/disclaimer", "我們不做什麼"],
   ["/stock/2330.TW?tab=discussions", "台積電法說會前，大家怎麼配置？"],
   ["/groups/grp_family?tab=discussions", "過年的紅包，要不要一起存 0056？"],
   ["/settings", "券商帳戶"],
@@ -197,7 +202,9 @@ await check("每日收盤簡報：設定打開 → 面板最上面一塊、問 A
   await page.locator("[data-briefing-dot]").first().waitFor({ state: "attached", timeout: 2000 }).catch(() => {
     throw new Error("no unread dot for a new briefing")
   })
-  await panel.getByText(/AI 依這些報導整理/).waitFor()
+  // 展開的簡報（AI 補充的那幾點）；免責是面板首頁最下面的一句，不在簡報裡
+  await panel.locator("section[aria-label='收盤簡報'] .ai-voice").first().waitFor()
+  await panel.locator("[data-disclaimer='ai']").first().waitFor()
   await page.waitForFunction(() => !document.querySelector("[data-briefing-dot]"), null, { timeout: 6000 })
   // 站內換到紀錄頁（⌘K 的頁面清單）
   await page.getByRole("button", { name: /搜尋股票/ }).first().click()
@@ -325,8 +332,9 @@ await check("有捲軸的長頁面和沒有捲軸的短頁面，頂部列與右�
       }))
     }
     const long = await edges("/market")
-    const short = await edges("/groups")
-    if (!long.scrolls || short.scrolls) throw new Error(`expected /market to scroll and /groups not to: ${JSON.stringify({ long, short })}`)
+    // 短頁面：找不到頁面（2026-11-17 起每一頁都有頁尾，群組清單在 900px 高的視窗裡會捲動）
+    const short = await edges("/does-not-exist")
+    if (!long.scrolls || short.scrolls) throw new Error(`expected /market to scroll and /does-not-exist not to: ${JSON.stringify({ long, short })}`)
     if (long.header !== short.header || long.aside !== short.aside) throw new Error(`the layout moves with the scrollbar: ${JSON.stringify({ long, short })}`)
   } finally {
     await visible.close()
@@ -710,7 +718,7 @@ await check("法人觀點：預設收合；2330 展開就有 5 筆（日期・�
   await table.getByText("範例證券 A", { exact: true }).waitFor({ timeout: 8000 })
   if ((await table.locator("tbody tr").count()) !== 5) throw new Error("expected 5 rows")  // 示範資料 2026-11-16 起 5 筆
   await table.getByText("1,350 元").waitFor()
-  await page.getByText("非 Forliosa 建議").first().waitFor()
+  await page.getByText("不代表本站意見，也不是投資建議").first().waitFor()
   for (const banned of ["平均", "上漲空間", "建議買進"]) if (await page.locator("#ov-analyst-body").getByText(banned).count()) throw new Error(`found ${banned}`)
 })
 await check("法人觀點：2454 沒人查過 → 查詢 → 搜尋中（AI 的話）→ 1–2 筆", async () => {
@@ -1005,7 +1013,7 @@ await check("AI 面板：設定頁（展開後）沒有建議 → 輸入框在�
   await box.press("Enter")
   await panel.getByText("這題要查網路資料，現在沒辦法。").last().waitFor({ timeout: 8000 })
   await page.waitForTimeout(300)
-  const disclaimers = await panel.getByText("AI 回答僅供參考，非投資建議。").count()
+  const disclaimers = await panel.getByText(AI_LINE).count()
   if (disclaimers !== 1) throw new Error(`expected one disclaimer per conversation, got ${disclaimers}`)
   // 新對話：輸入框回到最上面，打到一半的字還在
   await box.fill("打到一半")
@@ -1832,7 +1840,7 @@ await check("手機：法人觀點三行列＋免責", async () => {
   await m.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
   await m.getByRole("button", { name: /法人觀點/ }).click()
   await m.getByRole("list", { name: "法人觀點" }).getByText("範例證券 A", { exact: true }).waitFor({ timeout: 8000 })
-  await m.getByText("非 Forliosa 建議").first().waitFor()
+  await m.getByText("不代表本站意見，也不是投資建議").first().waitFor()
 })
 await check("手機：查看爸爸時「問 AI」換成「結束查看」；橫幅往下捲也在頂端，個股分頁列排在它下面", async () => {
   await m.goto(base + "/settings", { waitUntil: "networkidle" })
@@ -2522,10 +2530,12 @@ await check("討論（沒登入）：公開清單與主題不用登入就能讀�
     // 免責旁邊一行：Forliosa 是什麼＋「登入」
     const about = p.locator("main p", { hasText: "Forliosa 是股票帳本" })
     await about.waitFor({ timeout: 8000 })
-    // 連結在句子下面自己一列（「登入」「服務條款」「隱私權政策」），不夾在句子裡
+    // 連結在句子下面自己一列（只有「登入」），不夾在句子裡；「服務條款」「隱私權政策」在頁尾那一列（不疊兩列法律連結）
     const aboutLinks = about.locator("xpath=following-sibling::p[1]")
     if (!/^\/login/.test((await aboutLinks.getByRole("link", { name: "登入", exact: true }).getAttribute("href")) ?? "")) throw new Error("the about line has no 登入 link")
     if (await about.getByRole("link").count()) throw new Error("links are back inside the about sentence")
+    const guestFooter = (await p.locator("[data-site-footer] a").allTextContents()).join(",")
+    if (guestFooter !== "服務條款,隱私權政策,免責聲明,資料來源與授權" || (await aboutLinks.getByRole("link").count()) !== 1) throw new Error(`guest legal links: footer ${guestFooter}`)
     // 主題頁（站內導覽）：內文、回覆、被隱藏的回覆只有說明、表情只有計數、股票是純文字
     await p.getByRole("link", { name: "台積電法說會前，大家怎麼配置？" }).click()
     await p.getByRole("heading", { level: 1, name: "台積電法說會前，大家怎麼配置？" }).waitFor({ timeout: 8000 })
@@ -2829,8 +2839,9 @@ await check("首頁（沒登入）：是簡短的介紹頁，不是登入頁—�
     })
     if (home.h1 !== 1 || home.titles !== "帳本|個股|問 AI" || home.tags !== "111" || !home.described || !home.hidden || home.controls) throw new Error(`home specimens: ${JSON.stringify(home)}`)
     if (home.tops !== 1 || home.seams !== "0,0" || home.widths !== 1) throw new Error(`the three specimens are not one ruled sheet: ${JSON.stringify(home)}`)
-    // 頁首：字標、討論、登入（這一頁唯一的動作：墨色的主要按鈕，只有一顆）；頁尾只有兩份條款；沒有其他說明的段落
-    if (home.wordmark !== "/" || home.nav !== "討論:/discussions:" || home.login !== "登入:/login:true" || home.footer !== "服務條款:/terms,隱私權政策:/privacy" || home.shell || home.paragraphs || home.wide > 0) throw new Error(`home page chrome: ${JSON.stringify(home)}`)
+    // 頁首：字標、討論、登入（這一頁唯一的動作：墨色的主要按鈕，只有一顆）；頁尾是免責的一句＋兩份條款與免責聲明（2026-11-17）；沒有其他說明的段落
+    if (home.wordmark !== "/" || home.nav !== "討論:/discussions:" || home.login !== "登入:/login:true" || home.footer !== "服務條款:/terms,隱私權政策:/privacy,免責聲明:/disclaimer" || home.shell || home.paragraphs || home.wide > 0) throw new Error(`home page chrome: ${JSON.stringify(home)}`)
+    if ((await p.locator("#main footer [data-disclaimer='short']").textContent()) !== SHORT_LINE) throw new Error("the home page footer has no disclaimer line")
     // 「登入」→ 登入頁（沒有 next）→ 登入後是帳本
     await p.getByRole("banner").getByRole("link", { name: "登入", exact: true }).click()
     await p.waitForURL(/\/login$/, { timeout: 8000 })
@@ -2916,8 +2927,8 @@ await check("帳號：條款頁不用登入就能讀（草稿標示、一行不�
     })
     if (page1.width > 400) throw new Error(`the login page should be one narrow column, main is ${page1.width}px wide`)
     if (page1.off.some((d) => d > 2)) throw new Error(`the login page is not centred: ${JSON.stringify(page1)}`)
-    // 畫面上唯一的一行字是同意條款
-    if (page1.paragraphs.length !== 1 || !page1.paragraphs[0].startsWith("登入即表示你同意")) throw new Error(`extra sentences on the login page: ${JSON.stringify(page1.paragraphs)}`)
+    // 畫面上只有兩行字：同意條款，和免責的一句（2026-11-17：登入前就說清楚 Forliosa 不是投資顧問）
+    if (page1.paragraphs.length !== 2 || !page1.paragraphs[0].startsWith("登入即表示你同意") || page1.paragraphs[1] !== `${SHORT_LINE} 免責聲明`) throw new Error(`extra sentences on the login page: ${JSON.stringify(page1.paragraphs)}`)
     await p.goto(base + "/login", { waitUntil: "networkidle" })
     const consent = p.locator("p", { hasText: "登入即表示你同意" })
     await consent.waitFor({ timeout: 8000 })
@@ -3142,6 +3153,95 @@ await check("持倉展開每一筆買賣（2026-11-14）：日期（不是今年
     await p.getByRole("list", { name: "台積電的每一筆買賣" }).getByRole("listitem").first().waitFor({ timeout: 8000 })
     const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
     if (over > 0) throw new Error(`horizontal scroll ${over}px`)
+  })
+})
+
+// 均價（產品負責人 2026-11-17）：收盤價下面一行「均價」、展開那一檔最上面「均價 … 含手續費・持有・成本」、每一筆買進的價格下面「均價」（含那一筆的手續費）；
+// 每一列的「⋯」與展開鈕（滑過時的底色）整顆在列與表格裡面，不再往右多出 8px。
+// 審查（2026-11-17）：「含手續費」照後端的 fees_in_cost，展開的那一刻就在（不等每一筆讀完、整行不跳）；
+// 滑過「⋯」與展開鈕時按鈕的底色和那一列不同（列是 --hov，按鈕是 --sel），看得到方塊
+const hoverDiffers = async (p, button) => {
+  await button.hover()
+  await p.waitForTimeout(250) // 列的底色有 120ms 的轉場
+  return button.evaluate((b) => {
+    const row = b.closest(".ruled-row")
+    return { button: getComputedStyle(b).backgroundColor, row: row ? getComputedStyle(row).backgroundColor : null }
+  })
+}
+const buttonsInside = (p, root) =>
+  root.evaluate((box) => {
+    const edge = box.getBoundingClientRect().right
+    return [...box.querySelectorAll('button[aria-label$="的動作"], button[aria-label^="展開"], button[aria-label^="收起"]')]
+      .filter((b) => b.getBoundingClientRect().width > 0)
+      .map((b) => {
+        const r = b.getBoundingClientRect()
+        const row = b.closest("li.ruled-row, tr, li") ?? b.parentElement
+        return { label: b.getAttribute("aria-label"), w: Math.round(r.width), overRow: Math.round(r.right - row.getBoundingClientRect().right), overBox: Math.round(r.right - edge) }
+      })
+  })
+for (const [vw, panel, scheme] of [[1440, false, "dark"], [1280, true, "light"], [1024, true, "dark"], [768, false, "light"]]) {
+  await check(`持倉表的均價（2026-11-17，${vw}px${panel ? "＋AI 面板" : ""}）：收盤價下面「均價 692.61」；展開台積電「均價 692.61 含手續費・持有・成本」、每一筆買進的價格下面「均價 815.32」；「含手續費」一展開就在、讀完每一筆不跳；「⋯」與展開鈕在列與表格的右緣之內、滑過的底色和列不同；不橫向捲動`, async () => {
+    await fresh({ viewport: { width: vw, height: 900 }, colorScheme: scheme }, async (p) => {
+      await p.goto(base + "/", { waitUntil: "networkidle" })
+      const toggle = p.getByRole("button", { name: panel ? /展開 AI 面板/ : /收起 AI 面板/ })
+      if (await toggle.count()) await toggle.first().click()
+      const table = p.getByRole("table", { name: "持倉" })
+      await table.getByRole("columnheader", { name: "收盤價・均價" }).waitFor({ timeout: 8000 })
+      const row = table.getByRole("row").filter({ has: p.getByRole("link", { name: "台積電", exact: true }) })
+      const price = (await row.getByRole("cell").first().innerText()).replace(/\s+/g, " ").trim()
+      if (price !== "1,085 均價 692.61") throw new Error(`price cell: ${price}`)
+      const expandBtn = table.getByRole("button", { name: "展開台積電的每一筆買賣" })
+      const ex = await hoverDiffers(p, expandBtn)
+      if (!ex.row || ex.button === ex.row) throw new Error(`expand hover invisible: ${JSON.stringify(ex)}`)
+      await expandBtn.click()
+      const line = table.getByLabel("台積電的均價與成本")
+      await line.waitFor({ timeout: 8000 })
+      // 一出現就是完整的一行（「含手續費」不晚到）；之後讀完每一筆，位置不變
+      const first = (await line.innerText()).replace(/\s+/g, " ").trim()
+      const at = await line.locator("dd").evaluateAll((dds) => dds.map((d) => Math.round(d.getBoundingClientRect().x)))
+      const list = table.getByRole("list", { name: "台積電的每一筆買賣" })
+      await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
+      const summary = (await line.innerText()).replace(/\s+/g, " ").trim()
+      if (first !== summary) throw new Error(`summary changed after the records loaded: ${first} -> ${summary}`)
+      if (!/^均價 692\.61 含手續費 持有 1 張 500 股 成本 NT\$1,038,913$/.test(summary)) throw new Error(`summary: ${summary}`)
+      const after = await line.locator("dd").evaluateAll((dds) => dds.map((d) => Math.round(d.getBoundingClientRect().x)))
+      if (at.join() !== after.join()) throw new Error(`summary shifted: ${at} -> ${after}`)
+      const lot = (await list.getByRole("listitem").first().innerText()).replace(/\s+/g, " ")
+      if (!/815 均價 815\.32/.test(lot) && !/500 股 × 815 均價 815\.32/.test(lot)) throw new Error(`first lot: ${lot}`)
+      // 滑過第一筆的「⋯」：按鈕（底色）的右緣不超過那一列、也不超過表格；底色和列不同
+      const menu = list.getByRole("button", { name: /的動作$/ }).first()
+      const mh = await hoverDiffers(p, menu)
+      if (!mh.row || mh.button === mh.row) throw new Error(`row menu hover invisible: ${JSON.stringify(mh)}`)
+      const rh = await hoverDiffers(p, table.getByRole("button", { name: "台積電的動作" }))
+      if (!rh.row || rh.button === rh.row) throw new Error(`holding menu hover invisible: ${JSON.stringify(rh)}`)
+      await menu.hover()
+      const m = await buttonsInside(p, table)
+      const bad = m.filter((b) => b.overRow > 0 || b.overBox > 0)
+      if (bad.length) throw new Error(`buttons stick out: ${JSON.stringify(bad)}`)
+      if ((await overflowX(p)) > 0) throw new Error(`horizontal scroll ${await overflowX(p)}px`)
+    })
+  })
+}
+await check("持倉表的均價（手機）：展開台積電，「均價 692.61 含手續費」、每一筆第二行「500 股 × 815」「均價 815.32」；「含手續費」一展開就在、那一行高度不變；展開鈕與每一筆的「⋯」 ≥ 44px、在清單的右緣之內；不橫向捲動", async () => {
+  await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+    await p.goto(base + "/", { waitUntil: "networkidle" })
+    const phone = p.getByRole("list", { name: "持倉" })
+    await phone.getByRole("button", { name: "展開台積電的每一筆買賣" }).click()
+    const line = phone.getByLabel("台積電的均價與成本")
+    await line.waitFor({ timeout: 8000 })
+    // 一出現就有「含手續費」，讀完每一筆之後高度不變（原本晚到，從一行變兩行）
+    const h0 = (await line.boundingBox()).height
+    if (!/^均價 692\.61 含手續費/.test((await line.innerText()).replace(/\s+/g, " ").trim())) throw new Error(`summary at first paint: ${await line.innerText()}`)
+    const list = p.getByRole("list", { name: "台積電的每一筆買賣" })
+    await list.getByRole("listitem").first().waitFor({ timeout: 8000 })
+    const h1 = (await line.boundingBox()).height
+    if (Math.abs(h1 - h0) > 0.5) throw new Error(`summary height ${h0} -> ${h1}`)
+    const lot = (await list.getByRole("listitem").first().innerText()).replace(/\s+/g, " ")
+    if (!/500 股 × 815 均價 815\.32/.test(lot)) throw new Error(`first lot: ${lot}`)
+    const m = await buttonsInside(p, phone)
+    const bad = m.filter((b) => b.overRow > 0 || b.overBox > 0 || b.w < 44)
+    if (bad.length) throw new Error(`buttons: ${JSON.stringify(bad)}`)
+    if ((await overflowX(p)) > 0) throw new Error(`horizontal scroll ${await overflowX(p)}px`)
   })
 })
 
@@ -3544,6 +3644,75 @@ await check("匯入對帳單：沒開放的帳號（不是站方管理員）沒�
       const last = ys.at(-1)
       const peak = Math.max(...ys)
       if (peak > last + 2) throw new Error(`the segment row jumped up from ${peak} to ${last}`)
+    })
+  })
+}
+
+// ── 全站免責（2026-11-17）：只替使用者整理資訊，不是投資顧問，不提供投資建議 ─────────────
+// 每一頁最下面一個頁尾（一句＋「免責聲明」＋「資料來源與授權」）；/disclaimer 不用登入；一個區塊最多一句、不用對話框。
+{
+  const footerOk = async (p, path) => {
+    await p.goto(base + path, { waitUntil: "networkidle" })
+    const footer = p.locator("[data-site-footer]")
+    await footer.first().waitFor({ timeout: 10000 })
+    const n = await footer.count()
+    if (n !== 1) throw new Error(`${path}: expected one site footer, got ${n}`)
+    if (!(await footer.getByText(SHORT_LINE).count())) throw new Error(`${path}: the footer has no disclaimer line`)
+    const link = footer.getByRole("link", { name: "免責聲明" })
+    if ((await link.getAttribute("href")) !== "/disclaimer") throw new Error(`${path}: 免責聲明 does not link to /disclaimer`)
+    if (await p.getByRole("dialog").count()) throw new Error(`${path}: a dialog is open`)
+    // 13px 淡墨：和頁尾其他字同一級
+    const size = await footer.locator("[data-disclaimer]").evaluate((el) => getComputedStyle(el).fontSize)
+    if (size !== "13px") throw new Error(`${path}: the disclaimer line is ${size}, not 13px`)
+  }
+  await check("頁尾：每一頁一個（一句＋免責聲明＋資料來源與授權），13px", async () => {
+    for (const path of ["/", "/stock/2330.TW", "/market", "/groups", "/groups/grp_family", "/discussions", "/history", "/settings", "/data-sources", "/terms", "/does-not-exist"]) await footerOk(page, path)
+  })
+  await check("/disclaimer：沒登入也讀得到；開頭是那一句、我們做什麼與不做什麼；從頁尾點進去", async () => {
+    await fresh(DESKTOP, async (p) => {
+      await p.goto(base + "/disclaimer?auth=signed-out", { waitUntil: "networkidle" })
+      await p.getByRole("heading", { level: 1, name: "免責聲明" }).waitFor({ timeout: 10000 })
+      // 沒登入的精簡外殼（字標、討論、登入），不是導到登入頁
+      await p.getByRole("link", { name: "登入" }).first().waitFor()
+      if (p.url().includes("/login")) throw new Error("/disclaimer redirected to the login page")
+      await p.getByText(SHORT_LINE).first().waitFor()
+      for (const h of ["我們做什麼", "我們不做什麼", "投資決定由你負責"]) await p.getByRole("heading", { level: 2, name: h }).waitFor()
+      if (await p.getByText(/待律師確認/).count()) throw new Error("the review note is on the page")
+    })
+    await page.goto(base + "/market", { waitUntil: "networkidle" })
+    await page.locator("[data-site-footer]").getByRole("link", { name: "免責聲明" }).click()
+    await page.waitForURL(/\/disclaimer$/)
+    await page.getByRole("heading", { level: 2, name: "我們不做什麼" }).waitFor({ timeout: 8000 })
+  })
+  await check("AI 與群組報告：回答下面、收盤重點下面、週報與日報下面都是 AI 那一句", async () => {
+    await page.goto(base + "/market", { waitUntil: "networkidle" })
+    await page.locator("#market-summary").waitFor({ timeout: 8000 })
+    await page.locator("section[aria-labelledby='market-summary'] [data-disclaimer='ai']").waitFor()
+    await page.goto(base + "/groups/grp_family?tab=digests", { waitUntil: "networkidle" })
+    await page.locator("article [data-disclaimer='ai']").first().waitFor({ timeout: 8000 })
+    await page.goto(base + "/groups/grp_family?tab=digests&report=weekly", { waitUntil: "networkidle" })
+    await page.locator("article [data-disclaimer='ai']").first().waitFor({ timeout: 8000 })
+  })
+  await check("個股頁：全站那一句只在頁尾（規則判斷的「為什麼漲跌」下面不另加）；AI 寫的公司簡介下面是 AI 那一句", async () => {
+    await page.goto(base + "/stock/2330.TW", { waitUntil: "networkidle" })
+    await page.locator("[data-site-footer]").waitFor({ timeout: 10000 })
+    const shorts = await page.locator("[data-disclaimer='short']").count()
+    const inFooter = await page.locator("[data-site-footer] [data-disclaimer='short']").count()
+    if (shorts !== 1 || inFooter !== 1) throw new Error(`the site line appears ${shorts} times (${inFooter} in the footer)`)
+    await page.goto(base + "/stock/6488.TWO", { waitUntil: "networkidle" })
+    const about = page.getByRole("region", { name: "關於「環球晶」" })
+    await about.getByText("AI 依公開資料整理").waitFor({ timeout: 10000 })
+    if ((await about.locator("[data-disclaimer]").allTextContents()).join("|") !== AI_LINE) throw new Error("the AI company description has no AI line under it")
+  })
+  await check("手機：頁尾不橫向捲動、在底部列上面看得到", async () => {
+    await fresh({ ...pw.devices["iPhone 15"] }, async (p) => {
+      await footerOk(p, "/market")
+      const over = await p.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)
+      if (over > 0) throw new Error(`horizontal scroll ${over}px`)
+      await p.locator("[data-site-footer]").scrollIntoViewIfNeeded()
+      const box = await p.locator("[data-site-footer] [data-disclaimer]").boundingBox()
+      const dock = await p.locator(".dock").boundingBox()
+      if (box.y + box.height > dock.y + 1) throw new Error("the footer line is under the dock")
     })
   })
 }

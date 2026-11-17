@@ -4,6 +4,7 @@ import { usePageTitle } from "@/app/page-title"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageHeader } from "@/components/section"
+import { SourcesFooter } from "@/components/sources"
 import { NotFoundPage } from "@/pages/NotFoundPage"
 
 /**
@@ -23,6 +24,7 @@ export function AdminPage({ title, actions, children }: { title: string; actions
         <PageHeader title={title} actions={actions} className="mb-0" />
         {children}
       </div>
+      <SourcesFooter className="max-w-measure" />
     </PageFrame>
   )
 }

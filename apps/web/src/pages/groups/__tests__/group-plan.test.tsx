@@ -11,6 +11,7 @@ import { Toaster } from "@/components/ui/sonner"
 import { groupFull, groupPlanLabel, untilDay, userPlanLabel } from "@/lib/plan"
 import { createAppRouter } from "@/router"
 import { limitText } from "../labels"
+import { DISCLAIMER } from "@/lib/disclaimer"
 
 /**
  * 群組加值包第一階段（產品負責人 2026-11-16）的畫面：「報告」分頁的日報｜週報、頻道的「日報」開關、群組設定的方案與加值、
@@ -107,7 +108,9 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
     expect(within(latest).getByRole("link", { name: "收盤重點 →" })).toHaveAttribute("href", "/market#market-summary")
     expect(within(latest).getByText("為什麼漲跌")).toBeInTheDocument()
     expect(within(latest).getByRole("link", { name: "台積電" })).toHaveAttribute("href", "/stock/2330.TW")
-    expect(within(latest).getByText("AI 分析僅供參考，不構成投資建議。")).toBeInTheDocument()
+    // 免責：全站同一句（AI 寫的內容下面是 `ai` 那一句），13px 淡墨
+    expect(within(latest).getByText(DISCLAIMER.ai)).toHaveAttribute("data-disclaimer", "ai")
+    expect(within(older).getByText(DISCLAIMER.ai)).toHaveClass("text-sm", "text-ink-2")
     expect(within(older).getByText("當日報酬")).toBeInTheDocument()
     expect(within(older).getByText("那天的買賣")).toBeInTheDocument()
     expect(within(older).queryByRole("link")).toBeNull()

@@ -3,6 +3,7 @@ import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
 import { useDigests } from "@/api/sharing-queries"
 import type { Digest, Group } from "@/api/types"
+import { Disclaimer } from "@/components/disclaimer"
 import { Pct } from "@/components/finance"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
@@ -11,8 +12,6 @@ import { formatDateShort, formatDateTime } from "@/lib/format"
 import { codeOf } from "@/lib/tick"
 import { cn } from "@/lib/utils"
 import { CommentsToggle, CommentThread, Reactions } from "../Discussion"
-
-const FALLBACK_DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 
 /**
  * 群組 AI 週報（新到舊）：AI 寫的群組整體摘要（黑體（墨色，`.ai-voice`），和對話裡的回答同一套排版：`.ai-voice`＋`KaiText`）
@@ -112,7 +111,8 @@ function DigestArticle({ d, groupId }: { d: Digest; groupId: string }) {
           )}
         </>
       )}
-      <p className="text-xs text-ink-2">{d.disclaimer || FALLBACK_DISCLAIMER}</p>
+      {/* AI 寫了摘要才是 `ai` 那一句（後端的字）；沒有摘要（還在寫、失敗、沒開 AI）時只有伺服器算的數字：全站那一句 */}
+      {d.summary ? <Disclaimer kind="ai" text={d.disclaimer} /> : <Disclaimer kind="short" />}
       <div className="flex flex-wrap items-center gap-x-4">
         <Reactions groupId={groupId} target={`digest:${d.id}`} reactions={d.reactions} />
         <CommentsToggle count={d.comment_count} open={open} onToggle={() => setOpen(!open)} controls={threadId} />

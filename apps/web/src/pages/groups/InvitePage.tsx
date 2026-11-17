@@ -7,6 +7,7 @@ import { useAcceptInvite, useInvitePreview } from "@/api/sharing-queries"
 import { ApiError, type ShareSettings } from "@/api/types"
 import { useViewAs } from "@/api/view-as"
 import { AuthFrame } from "@/app/AuthGate"
+import { Disclaimer } from "@/components/disclaimer"
 import { switchViewAs } from "@/app/view-as"
 import { ErrorState, SkeletonLines } from "@/components/states"
 import { Button, buttonVariants } from "@/components/ui/button"
@@ -72,6 +73,8 @@ export function InvitePage() {
           )}
         </>
       ) : null}
+      {/* 加入群組前就讀得到：群組裡的排行、動態與 AI 日報只是整理，不是投資建議 */}
+      <Disclaimer link />
     </AuthFrame>
   )
 }

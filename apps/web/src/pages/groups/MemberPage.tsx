@@ -9,6 +9,7 @@ import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { UserAvatar } from "@/components/avatar"
 import { Money, Pct } from "@/components/finance"
 import { DemoTag, Section } from "@/components/section"
+import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { buttonVariants } from "@/components/ui/button"
@@ -62,6 +63,7 @@ function Member() {
       ) : (
         <SharedPortfolioView p={shared.data} groupId={groupId} role={member ? ROLE_LABEL[member.role] : undefined} isMe={member?.is_me ?? false} />
       )}
+      <SourcesFooter />
     </PageFrame>
   )
 }

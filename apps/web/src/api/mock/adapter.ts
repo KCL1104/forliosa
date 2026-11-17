@@ -43,6 +43,7 @@ import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
 import { createSharingStore, type MemberSource } from "./sharing"
 import { createDiscussionStore, type DiscussionOptions } from "./discussions"
 import { createAdminStore } from "./admin"
+import { DISCLAIMER } from "@/lib/disclaimer"
 import { todayInTaipei } from "@/lib/format"
 import { closedRounds, positionHistory } from "./rounds"
 import {
@@ -581,6 +582,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         return {
           exported_at: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
           format_version: 1,
+          disclaimer: DISCLAIMER.short,
           profile: { id: user.id, email: user.email, display_name: user.display_name, public_name: me().public_name ?? null, preferences: user.preferences, terms_version_accepted: user.terms_version_accepted ?? null },
           accounts,
           transactions: txns,

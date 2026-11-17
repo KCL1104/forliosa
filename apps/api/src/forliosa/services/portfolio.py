@@ -49,6 +49,7 @@ class HoldingRow:
     quote: QuoteData | None = None
     fx: Decimal = Decimal(1)
     by_account_value: dict[str, Decimal] = field(default_factory=dict)
+    fees: Decimal = ZERO  # buy fees inside ``cost`` (trade currency; per account and cost method, see Lot.fee)
 
     @property
     def price(self) -> Decimal | None:
@@ -113,6 +114,7 @@ def compute_state(db: Session, user: User, md: MarketData, account_id: str | Non
         row.quantity += pos.quantity
         row.cost += pos.cost
         row.cost_twd += pos.cost_twd
+        row.fees += pos.fee
         row.account_ids.append(pos.account_id)
     quotes = md.quotes(list(grouped)) if grouped else {}
     is_demo = False
@@ -160,6 +162,8 @@ def holdings(state: PortfolioState) -> list[dict[str, Any]]:
             "quantity": ser.qty(r.quantity),
             "avg_cost": ser.price(r.cost / r.quantity) if r.quantity else 0.0,
             "cost_basis": ser.money(r.cost_twd),
+            # the buy fees inside the cost of the shares held (trade currency): > 0 means avg_cost includes a fee
+            "fees_in_cost": ser.money(max(r.fees, ZERO)),
             "price": ser.price(r.price),
             "prev_close": ser.price(q.prev_close) if q else None,
             # the session of the price (a US close: the New York date)

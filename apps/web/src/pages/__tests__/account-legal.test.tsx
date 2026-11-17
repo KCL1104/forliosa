@@ -17,6 +17,7 @@ import { isPublicReadPath } from "@/lib/next-path"
 import { termsNoticeText } from "@/lib/terms-notice"
 import { isDraft, stripReviewNote } from "@/pages/legal/legal-text"
 import { createAppRouter } from "@/router"
+import { DISCLAIMER } from "@/lib/disclaimer"
 
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 vi.mock("@/lib/hard-nav", () => ({ hardNavigate: vi.fn() }))
@@ -211,16 +212,19 @@ describe("服務條款與隱私權政策的頁面", () => {
     renderApp("/login")
     const consent = (await screen.findByText(/登入即表示你同意/, undefined, T)).closest("p")!
     // 只有登入：字標、「登入」、兩種登入方式（一樣重的外框按鈕，Google 在前），全部置中；沒有說明的句子、沒有示範畫面。
-    // 唯一的一行字是同意條款（條款靠它成立）
+    // 兩行字：同意條款（條款靠它成立），和免責的一句（產品負責人 2026-11-17：登入前就說清楚 Forliosa 不是投資顧問）
     const buttons = await screen.findAllByRole("button", { name: /登入$/ }, T)
     expect(buttons.map((b) => b.textContent)).toEqual(["用 Google 登入", "用 Discord 登入"])
     for (const b of buttons) expect(b.className).toMatch(/border-ctl/)
     const main = screen.getByRole("main")
     expect(main).toHaveClass("items-center", "text-center")
     expect(screen.queryByRole("figure")).toBeNull()
-    expect(main.querySelectorAll("p")).toHaveLength(1)
+    expect(main.querySelectorAll("p")).toHaveLength(2)
     expect(main.querySelector("p")).toBe(consent)
-    expect(main.textContent).toBe("Forliosa登入用 Google 登入用 Discord 登入登入即表示你同意服務條款與隱私權政策。")
+    expect(main.textContent).toBe(`Forliosa登入用 Google 登入用 Discord 登入登入即表示你同意服務條款與隱私權政策。${DISCLAIMER.short} 免責聲明`)
+    const note = main.querySelector("[data-disclaimer]")!
+    expect(note).toHaveClass("text-sm", "text-ink-2")
+    expect(within(note as HTMLElement).getByRole("link", { name: "免責聲明" })).toHaveAttribute("href", "/disclaimer")
     await waitFor(() => expect(document.title).toBe("登入｜Forliosa"))
     expect(within(consent).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(consent).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
@@ -248,13 +252,23 @@ describe("服務條款與隱私權政策的頁面", () => {
     }
   })
 
-  it("沒登入的公開討論頁尾：Forliosa 是什麼那一行後面有兩份文件的連結", async () => {
+  it("沒登入的公開討論頁尾：兩份文件的連結在頁尾那一列（和免責聲明、資料來源同一列），Forliosa 是什麼那一行只有「登入」", async () => {
     mount({ signedIn: false })
     renderApp("/discussions")
     await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
     const about = screen.getByText(/Forliosa 是股票帳本/).closest("p")!.parentElement!
-    expect(within(about).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
-    expect(within(about).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
+    expect(within(about).queryByRole("link", { name: "服務條款" })).toBeNull()
+    const footer = document.querySelector<HTMLElement>("[data-site-footer]")!
+    expect(within(footer).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
+    expect(within(footer).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")
+  })
+
+  it("登入後的討論頁尾：不另放兩份文件的連結（設定頁有）", async () => {
+    mount()
+    renderApp("/discussions")
+    await screen.findByText("台積電法說會前，大家怎麼配置？", undefined, T)
+    const footer = await waitFor(() => document.querySelector<HTMLElement>("[data-site-footer]")!, T)
+    expect(within(footer).getAllByRole("link").map((a) => a.textContent)).toEqual(["免責聲明", "資料來源與授權"])
   })
 })
 
@@ -321,8 +335,9 @@ describe("設定：帳號與資料", () => {
     expect(clicks[0]!.href).toBe("blob:forliosa-export")
     const blob = createUrl.mock.calls[0]![0]
     expect(blob.type).toBe("application/json")
-    const data = JSON.parse(await blob.text()) as { format_version: number; profile: { email: string }; transactions: unknown[] }
+    const data = JSON.parse(await blob.text()) as { format_version: number; disclaimer: string; profile: { email: string }; transactions: unknown[] }
     expect(data.format_version).toBe(1)
+    expect(data.disclaimer).toBe(DISCLAIMER.short) // 和後端同一個形狀：匯出檔也說清楚 Forliosa 不是投資顧問
     expect(data.profile.email).toBe("demo@forliosa.local")
     expect(data.transactions.length).toBeGreaterThan(0)
     expect(await screen.findByText("已下載匯出檔", undefined, T)).toBeInTheDocument()

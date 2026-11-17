@@ -1,5 +1,6 @@
 """Hand-calculated ledger replay checks: cost methods, corporate actions, day trades."""
 
+from dataclasses import replace
 from datetime import date
 from decimal import Decimal as D
 
@@ -282,3 +283,101 @@ def test_us_splits_keep_fractional_shares():
         tx("split", date(2025, 3, 3), symbol="AAPL", qty=3, currency="USD", fx=32),
     ], CostMethod.AVERAGE).ledger
     assert _pos(led, "AAPL").quantity == D("7.5")
+
+
+# -- the buy fees inside the cost (Lot.fee; 2026-11-17 review: 「含手續費」 only when the average has a fee) -----
+
+
+def _fees(led, symbol="2330.TW"):
+    """Buy fees inside the cost of the shares still held, over every account (what the holdings row reports)."""
+    return sum((p.fee for p in led.open_positions() if p.symbol == symbol), D(0))
+
+
+def test_lot_fee_follows_the_shares_sold_under_each_cost_method():
+    led = replay(two_buys_one_sell(), CostMethod.AVERAGE).ledger
+    # moving average: half the pool is sold, half of the fees (40 + 48) stay in the cost
+    assert _pos(led).fee == D(44) and _pos(led).cost == D(110044)
+    led = replay(two_buys_one_sell(), CostMethod.FIFO).ledger
+    assert _pos(led).fee == D(48)  # the first lot (fee 40) went out whole
+    # FIFO with the only fee on the lot sold first: nothing left
+    led = replay([
+        tx("buy", date(2025, 1, 2), qty=1000, price=100, fee=40),
+        tx("buy", date(2025, 2, 3), qty=1000, price=120),  # no fee entered: stored 0
+        tx("sell", date(2025, 3, 3), qty=1000, price=130),
+    ], CostMethod.FIFO).ledger
+    assert (_pos(led).fee, _pos(led).avg_cost) == (D(0), D(120))
+    # a partial sell leaves the fee share of the shares kept
+    led = replay([
+        tx("buy", date(2025, 1, 2), qty=1000, price=100, fee=40),
+        tx("sell", date(2025, 3, 3), qty=400, price=130),
+    ], CostMethod.FIFO).ledger
+    assert _pos(led).fee == D(24)
+
+
+def test_lot_fee_is_per_account_a_closed_out_account_takes_its_fee_along():
+    other = "acc_2"
+    sell_a = tx("sell", date(2025, 3, 3), qty=1000, price=130)
+    txns = [
+        tx("buy", date(2025, 1, 2), qty=1000, price=100, fee=40),
+        replace(tx("buy", date(2025, 2, 3), qty=1000, price=120), account_id=other),  # account B, no fee entered
+        sell_a,  # account A sells everything
+    ]
+    for method in CostMethod:
+        led = replay(txns, method).ledger
+        assert _fees(led) == 0
+        held = [p for p in led.open_positions() if p.symbol == "2330.TW" and p.quantity > 0]
+        assert [(p.account_id, p.avg_cost) for p in held] == [(other, D(120))]
+
+
+def test_lot_fee_of_a_day_trade_leaves_with_the_day_trade():
+    txns = [
+        tx("buy", date(2025, 1, 2), symbol="2317.TW", qty=1000, price=100),  # no fee
+        tx("buy", date(2025, 1, 6), symbol="2317.TW", qty=1000, price=110, fee=40),  # unflagged, paired below
+        tx("sell", date(2025, 1, 6), symbol="2317.TW", qty=1000, price=112, fee=44, tax=168, day_trade=True),
+    ]
+    for method in CostMethod:
+        pos = _pos(replay(txns, method).ledger, "2317.TW")
+        assert (pos.quantity, pos.avg_cost, pos.fee) == (D(1000), D(100), D(0))
+    # an unsold day-trade buy joins the inventory at the end of the day with its fee
+    pos = _pos(replay(txns[:2]).ledger, "2317.TW")
+    assert pos.fee == D(40)
+
+
+def test_lot_fee_through_corporate_actions():
+    # stock dividends and splits add shares only: the fee stays in the cost
+    led = replay([
+        tx("buy", date(2025, 1, 2), qty=1000, price=100, fee=40),
+        tx("stock_dividend", date(2025, 7, 1), qty=100),
+        tx("split", date(2025, 8, 1), qty=2),
+    ]).ledger
+    assert (_pos(led).quantity, _pos(led).fee) == (D(2200), D(40))
+    # a capital reduction truncates the shares like the broker; selling them all closes the round, and a later buy
+    # without a fee starts with none (the front end's old replay kept 0.65 share and carried the fee over)
+    led = replay([
+        tx("buy", date(2025, 1, 2), symbol="1101.TW", qty=1001, price=100, fee=40),
+        tx("capital_reduction", date(2025, 3, 3), symbol="1101.TW", qty="0.35"),  # 650.65 -> 650
+        tx("sell", date(2025, 4, 1), symbol="1101.TW", qty=650, price=150),
+        tx("buy", date(2025, 5, 2), symbol="1101.TW", qty=1000, price=90),
+    ]).ledger
+    pos = _pos(led, "1101.TW")
+    assert (pos.quantity, pos.avg_cost, pos.fee) == (D(1000), D(90), D(0))
+    # a capital refund lowers the cost and the fee share with it; a refund beyond the cost leaves no fee
+    led = replay([
+        tx("buy", date(2025, 1, 2), symbol="1101.TW", qty=1000, price=10, fee=20),  # cost 10,020
+        tx("capital_reduction", date(2025, 3, 3), symbol="1101.TW", qty="0.5", price="5.01"),  # 5,010 back
+    ]).ledger
+    assert _pos(led, "1101.TW").fee == D(10) and _pos(led, "1101.TW").cost == D(5010)
+    led = replay([
+        tx("buy", date(2025, 1, 2), symbol="1101.TW", qty=1000, price=10, fee=20),
+        tx("capital_reduction", date(2025, 3, 3), symbol="1101.TW", qty="0.5", price=20),  # 20,000 back
+    ]).ledger
+    assert (_pos(led, "1101.TW").cost, _pos(led, "1101.TW").fee) == (D(0), D(0))
+
+
+def test_lot_fee_of_a_us_buy_is_in_dollars():
+    led = replay([
+        tx("buy", date(2025, 1, 2), symbol="AAPL", qty=4, price="273.8", fee=3, currency="USD", fx=32),
+        tx("buy", date(2025, 2, 3), symbol="AAPL", qty=4, price=280, currency="USD", fx=31),
+    ]).ledger
+    pos = _pos(led, "AAPL")
+    assert pos.fee == D(3) and pos.cost == D("2218.2")

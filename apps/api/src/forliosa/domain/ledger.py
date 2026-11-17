@@ -5,6 +5,10 @@ Conventions
 * Quantities are shares (``Decimal``; Taiwan trades are whole shares, odd lots allowed).
 * A position's cost includes buy commissions. It is tracked in the trade currency and, in
   parallel, in TWD at each transaction's FX rate (``fx_rate`` = TWD per 1 unit of currency).
+  Each lot also carries the part of its cost that is buy fees (``Lot.fee``, trade currency; a buy without a fee
+  entered stores 0): it leaves with the shares sold exactly as the cost does (cost method, day-trade pairing), is
+  untouched by splits and stock dividends, shrinks with the cost on a capital refund and goes with a close-out, so
+  the holdings can say whether the average cost of the shares still held includes any fee (2026-11-17 review).
 * Realized P&L on a sell = (gross - fee - tax) - cost of the shares sold.
 * Two cost methods: moving average (``average``, the Taiwan broker default) and ``fifo``.
 * Day-trade sells (``is_day_trade``) are matched first against the same day's buys of that account and symbol
@@ -103,6 +107,7 @@ class Lot:
     cost_twd: Decimal  # total, TWD
     acquired: date
     day_trade: bool = False
+    fee: Decimal = ZERO  # the buy fees inside ``cost`` (trade currency)
 
 
 @dataclass
@@ -130,6 +135,11 @@ class Position:
         q = self.quantity
         return self.cost / q if q else ZERO
 
+    @property
+    def fee(self) -> Decimal:
+        """Buy fees inside the cost of the shares still held (trade currency)."""
+        return sum((lot.fee for lot in self.lots), ZERO)
+
     # -- mutations ---------------------------------------------------------------------------
     def add(self, lot: Lot) -> None:
         if self.method is CostMethod.AVERAGE and not lot.day_trade:
@@ -140,6 +150,7 @@ class Position:
                 pool.quantity += lot.quantity
                 pool.cost += lot.cost
                 pool.cost_twd += lot.cost_twd
+                pool.fee += lot.fee
                 pool.acquired = min(pool.acquired, lot.acquired)
         else:
             self.lots.append(lot)
@@ -165,13 +176,15 @@ class Position:
                 break
             take = min(lot.quantity, remaining)
             if take == lot.quantity:
-                c, ct = lot.cost, lot.cost_twd
+                c, ct, f = lot.cost, lot.cost_twd, lot.fee
             else:
                 c = lot.cost * take / lot.quantity
                 ct = lot.cost_twd * take / lot.quantity
+                f = lot.fee * take / lot.quantity
             lot.quantity -= take
             lot.cost -= c
             lot.cost_twd -= ct
+            lot.fee -= f
             cost += c
             cost_twd += ct
             remaining -= take
@@ -198,7 +211,10 @@ class Position:
         take_twd = min(amount_twd, cost_twd)
         for lot in self.lots:
             if cost > 0:
-                lot.cost -= take * lot.cost / cost
+                cut = take * lot.cost / cost
+                if lot.cost > 0:
+                    lot.fee -= lot.fee * cut / lot.cost  # the fee share of the cost shrinks with it (all gone at 0)
+                lot.cost -= cut
             if cost_twd > 0:
                 lot.cost_twd -= take_twd * lot.cost_twd / cost_twd
         return amount - take, amount_twd - take_twd
@@ -363,7 +379,7 @@ class Ledger:
                 cost = gross + t.fee
                 pos = self.position(t.account_id, t.symbol, t.currency)
                 day_trade = t.is_day_trade or (t.account_id, t.symbol) in self._day_trading
-                pos.add(Lot(t.quantity, cost, cost * fx, t.trade_date, day_trade=day_trade))
+                pos.add(Lot(t.quantity, cost, cost * fx, t.trade_date, day_trade=day_trade, fee=t.fee))
                 self._cash(t.account_id, t.currency, -cost)
                 flows.inflow += cost * fx
                 self.effective[t.id] = EffectiveTxn(t.id, t.quantity, -cost)

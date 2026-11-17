@@ -531,6 +531,9 @@ class Holding(BaseModel):
     quantity: float
     avg_cost: float
     cost_basis: float
+    # buy fees (trade currency) inside the cost of the shares held: per (account, symbol) and the cost method, so a
+    # fee sold off, day-traded away or in an account closed out is not counted; 0 = avg_cost includes no fee
+    fees_in_cost: float = 0.0
     price: float | None
     prev_close: float | None
     price_date: str | None = None  # the session of ``price`` (YYYY-MM-DD; a US close: the New York date)

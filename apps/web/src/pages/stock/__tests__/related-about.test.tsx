@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from "vitest"
 import { api } from "@/api"
 import { SourcesFooter, SourcesProvider } from "@/components/sources"
 import { displayHost, fiscalYearEnd, formatCapital } from "@/lib/company"
+import { DISCLAIMER } from "@/lib/disclaimer"
 import { AboutCompany } from "../AboutCompany"
 import { RelatedStocks } from "../RelatedStocks"
 
@@ -82,6 +83,7 @@ describe("總覽的「關於〈公司〉」", () => {
     withSourcesFooter(<AboutCompany inst={tsmc} />)
     const section = await screen.findByRole("region", { name: "關於「台積電」" }, { timeout: 3000 })
     expect(within(section).getByText("節錄")).toBeInTheDocument()
+    expect(section.querySelector("[data-disclaimer]")).toBeNull() // 維基百科節錄不是 AI 寫的：不加 `ai` 那一句
     const article = within(section).getByRole("link", { name: /維基百科「台積電」條目/ })
     expect(article).toHaveAttribute("href", "https://zh.wikipedia.org/zh-tw/%E5%8F%B0%E7%A9%8D%E9%9B%BB")
     expect(within(section).getByRole("link", { name: /CC BY-SA 4.0/ })).toHaveAttribute("href", expect.stringContaining("creativecommons.org/licenses/by-sa/4.0"))
@@ -101,6 +103,10 @@ describe("總覽的「關於〈公司〉」", () => {
     const section = await screen.findByRole("region", { name: "關於「環球晶」" }, { timeout: 3000 })
     expect(within(section).getByText("AI 依公開資料整理")).toBeInTheDocument()
     expect(section.querySelector(".ai-voice")).not.toBeNull()
+    // 模型寫的簡介下面一句 `ai` 免責（13px 淡墨）
+    const notes = section.querySelectorAll("[data-disclaimer]")
+    expect([...notes].map((n) => n.getAttribute("data-disclaimer"))).toEqual(["ai"])
+    expect(notes[0]).toHaveTextContent(DISCLAIMER.ai)
     expect(within(section).getAllByRole("term").map((t) => t.textContent)).toContain("上櫃日期")
   })
 })

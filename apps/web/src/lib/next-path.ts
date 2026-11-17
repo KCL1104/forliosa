@@ -35,11 +35,12 @@ export function isHomePath(path: string): boolean {
 }
 
 /**
- * 不用登入就能讀的頁面：公開討論的清單（`/discussions`）與主題頁（`/discussions/<id>`）、服務條款（`/terms`）與隱私權政策（`/privacy`）。
+ * 不用登入就能讀的頁面：公開討論的清單（`/discussions`）與主題頁（`/discussions/<id>`）、服務條款（`/terms`）、隱私權政策（`/privacy`）
+ * 與免責聲明（`/disclaimer`）。
  * 沒登入時用精簡的外殼（字標＋登入）顯示，登入後是一般的外殼。開新主題（`/discussions/new`）要登入。
  */
 export function isPublicReadPath(path: string): boolean {
-  if (/^\/(terms|privacy)\/?$/.test(path)) return true
+  if (/^\/(terms|privacy|disclaimer)\/?$/.test(path)) return true
   const m = /^\/discussions(?:\/([^/]+))?\/?$/.exec(path)
   return !!m && m[1] !== "new"
 }

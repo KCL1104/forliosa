@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from sqlalchemy import and_, func, or_, select
@@ -22,7 +22,7 @@ from forliosa.datapolicy import labels, source_clause, tagged
 from forliosa.marketdata.base import InstrumentInfo, QuoteData, market_of_symbol
 from forliosa.marketdata.demo import report_publication_date
 from forliosa.marketdata.fund_nav import NAV_DATASET
-from forliosa.marketdata.opendata import TDCC_LEVELS
+from forliosa.marketdata.opendata import TDCC_LEVELS, eps_text, revenue_text
 from forliosa.marketdata.service import MarketData
 from forliosa.models import (
     ForeignHoldingDaily,
@@ -525,11 +525,83 @@ def _annual(table: dict[str, dict[str, Decimal | None]]) -> dict[str, dict[str, 
 
 # -- events ---------------------------------------------------------------------------------------------
 _EVENT_KINDS = {"revenue_release": "revenue", "exchange_news": "news"}
+# The statutory deadline stands in for a release day we do not know (the period is published: we hold its data)
+UNKNOWN_DAY = "實際公布日不明，日期是法定期限"
 
 
 def _event_source(r: MarketEvent) -> str:
-    """An archived event row's dataset key, e.g. ``twse-openapi/material_info``."""
+    """An archived event row's dataset key, e.g. ``twse-openapi/material_info``; a first-seen statements row
+    (type ``earnings``) names the statement dataset it was first seen in (``twse-openapi/income``)."""
+    if r.type == "earnings":
+        return f"{r.source}/{(r.data or {}).get('dataset') or 'income'}"
     return f"{r.source}/{_EVENT_KINDS.get(r.type, r.type)}"
+
+
+def _revenue_detail(r: MarketEvent) -> str:
+    """An archived monthly revenue row's text, rebuilt from its numbers with :func:`revenue_text`: rows stored before
+    2026-11-17 say 「年增 -27.0%」 for a fall, newer ones 「年減 27.0%」, and both show side by side in the events
+    (2026-11-17 review). The stored ``detail`` when the numbers are missing."""
+    data = r.data or {}
+    period, revenue, yoy = str(data.get("period") or ""), data.get("revenue"), data.get("yoy_pct")
+    if revenue is None or len(period) != 7 or not period[5:].isdigit():
+        return r.detail
+    try:
+        return revenue_text(int(period[5:]), int(Decimal(str(revenue))),
+                            Decimal(str(yoy)) if yoy not in (None, "") else None)
+    except (InvalidOperation, ValueError):
+        return r.detail
+
+
+class _Published:
+    """Evidence that a period whose legal deadline has passed is published: its statements or monthly revenue are in
+    data we hold (the archive, else shioaji-data's official files). Each source is read once, only when asked."""
+
+    def __init__(self, db: Session, md: MarketData, sym: str):
+        self.db, self.md, self.sym = db, md, sym
+        self._reports: dict[str, dict[str, Any]] | None = None
+        self._statements: tuple[dict[str, Any], str] | None = None
+        self._statements_read = False
+        self._revenue: tuple[dict[str, Any], list[str]] | None = None
+
+    def report(self, period: str) -> tuple[str | None, list[str]] | None:
+        """``(「前三季每股虧損 1.78 元」 or None, dataset keys)`` when the quarter's statements are held."""
+        from forliosa.models import FinancialReport
+
+        if self._reports is None:
+            self._reports = defaultdict(dict)
+            stmt = select(FinancialReport).where(FinancialReport.symbol == self.sym)
+            for r in self.db.scalars(_filtered(stmt, FinancialReport, self.md)):
+                self._reports[r.period][r.kind] = r
+        kinds = self._reports.get(period)
+        if kinds:
+            kind = next(k for k in ("income_ytd", "balance", "margins", *kinds) if k in kinds)
+            row = kinds[kind]
+            eps = (row.values or {}).get("eps") if kind == "income_ytd" else None
+            return eps_text(period, eps), [f"{row.source}/{'income' if kind == 'income_ytd' else kind}"]
+        if not self._statements_read:
+            self._statements_read = True
+            ans = self.md.statements(self.sym)  # shioaji-data: quarterly statements, official MOPS data
+            self._statements = (ans.value, ans.source) if ans else None
+        if self._statements is not None:
+            st, source = self._statements
+            periods = [str(p) for p in st.get("periods") or []]
+            if period in periods:
+                eps = _series(st.get("income_ytd") or {}, "eps", len(periods))[periods.index(period)]
+                return eps_text(period, eps), [source]
+        return None
+
+    def revenue(self, period: str) -> tuple[str, list[str]] | None:
+        """``(「9 月營收 1,105 千元，年減 27.0%」, dataset keys)`` when the month's revenue is held."""
+        if self._revenue is None:
+            ans = self.md.monthly_revenue(self.sym)
+            rows = {} if ans.is_demo else {r.period: r for r in ans.value}
+            self._revenue = (rows, tagged(ans.source, "revenue"))
+        rows, sources = self._revenue
+        row = rows.get(period)
+        if row is None:
+            return None
+        return revenue_text(int(period[5:]), row.revenue, row.yoy_pct), sources
+
 
 def _resolution_title(e) -> str:
     progress = e.progress or ""
@@ -570,8 +642,10 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
     ``earnings`` / ``revenue_release`` / ``investor_conference`` dates are **actual** dates read from the
     archive: 重大訊息 (board approval of a financial report, 法人說明會, monthly revenue announcements; see
     :mod:`forliosa.services.announcements`) and the first day a company's month appeared in the monthly
-    revenue datasets (t187ap05). Only when no actual date is known is the legal deadline shown, with
-    ``estimated: true``.
+    revenue datasets (t187ap05) or of a company's quarter in the statement datasets (t187ap06 / 07 / 17). Without
+    an actual date the legal deadline stands in: a coming one with ``estimated: true``; a past one only when we hold
+    the period's data (archived statements or revenue, shioaji-data's official files), shown as published on the
+    deadline with the numbers and 「實際公布日不明」 — without such evidence a past deadline is left out.
     """
     info = require_instrument(md, symbol)
     sym = info.symbol
@@ -647,6 +721,10 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
             elif period:
                 release("revenue_release", period, r.date, r)
             continue
+        if r.type == "earnings":  # first seen in the quarterly statement datasets (t187ap06 / 07 / 17)
+            if period := (r.data or {}).get("period"):
+                release("earnings", period, r.date, r)
+            continue
         if r.type == "material_info":
             rel = classify(r.title, r.detail, r.data, r.date)
             if rel is not None and rel.kind == "investor_conference":
@@ -665,36 +743,53 @@ def events(db: Session, md: MarketData, user: User, symbol: str, mine_only: bool
 
     for (kind, period), (d, r) in releases.items():
         if kind == "earnings":
-            title, detail = f"{period} 財報公布", r.title
+            title, detail = f"{period} 財報公布", r.detail if r.type == "earnings" else r.title
         else:
             month = int(period[5:])
             title = f"{month} 月營收公布"
-            detail = r.detail if r.type == "revenue_release" else r.title
+            detail = _revenue_detail(r) if r.type == "revenue_release" else r.title
         add(d, kind, title, detail[:600], r.url, mine=recent, sources=[_event_source(r)], period=period)
 
     if _is_tw_stock(info):  # legal deadlines only where no actual date is known
+        # A coming deadline is an estimate (「預估」). A past one never is (2026-11-17): the period is shown as
+        # published on the deadline, the actual day unknown, when we hold its data; without that evidence it is
+        # left out.
+        held = _Published(db, md, sym)
         dlo, dhi = today - timedelta(days=DEADLINE_PAST_DAYS), today + timedelta(days=DEADLINE_FUTURE_DAYS)
         for y in (today.year - 1, today.year, today.year + 1):
             for q in (1, 2, 3, 4):
                 period = f"{y}Q{q}"
                 d = report_publication_date(period)
-                if dlo <= d <= dhi and ("earnings", period) not in releases:
+                if not dlo <= d <= dhi or ("earnings", period) in releases:
+                    continue
+                if d >= today:
                     add(d, "earnings", f"{period} 財報公布期限（預估）",
                         "還不知道實際公布日，先照季報的法定期限顯示（以公司公告為準）",
                         mine=recent, sources=["rules"], estimated=True, period=period)
+                elif (report := held.report(period)) is not None:
+                    numbers, sources = report
+                    detail = f"{numbers}（{UNKNOWN_DAY}）" if numbers else f"已公布；{UNKNOWN_DAY}"
+                    add(d, "earnings", f"{period} 財報公布", detail, mine=recent, sources=["rules", *sources],
+                        period=period)
             for m in range(1, 13):
                 d = date(y, m, 10)
                 prev_y, prev_m = (y - 1, 12) if m == 1 else (y, m - 1)
                 period = f"{prev_y}-{prev_m:02d}"
                 if not dlo <= d <= dhi or ("revenue_release", period) in releases:
                     continue
-                detail = "還不知道實際公布日；法定期限是每月 10 日前公布上個月營收"
                 seen = backlog_revenue.get(period)
-                if seen is not None:
-                    detail = f"{seen.detail}；實際公布日期不明，以法定期限顯示"
-                add(d, "revenue_release", f"{prev_m} 月營收公布期限（預估）", detail, mine=recent,
-                    sources=["rules", *([_event_source(seen)] if seen is not None else [])], estimated=True,
-                    period=period)
+                if d >= today:
+                    detail = "還不知道實際公布日；法定期限是每月 10 日前公布上個月營收"
+                    if seen is not None:
+                        detail = f"{_revenue_detail(seen)}；實際公布日期不明，以法定期限顯示"
+                    add(d, "revenue_release", f"{prev_m} 月營收公布期限（預估）", detail, mine=recent,
+                        sources=["rules", *([_event_source(seen)] if seen is not None else [])], estimated=True,
+                        period=period)
+                    continue
+                found = (_revenue_detail(seen), [_event_source(seen)]) if seen is not None else held.revenue(period)
+                if found is not None:
+                    add(d, "revenue_release", f"{prev_m} 月營收公布", f"{found[0]}（{UNKNOWN_DAY}）", mine=recent,
+                        sources=["rules", *found[1]], period=period)
     if mine_only:
         out = [e for e in out if e["mine"]]
     out.sort(key=lambda e: (e["date"], e["type"]), reverse=True)

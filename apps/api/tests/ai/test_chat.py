@@ -44,7 +44,7 @@ def check_shapes(events):
         assert set(data) == EVENT_KEYS[name], (name, data)
     done = events[-1][1]
     assert set(done["usage"]) == USAGE_KEYS
-    assert done["disclaimer"] == "AI 回答僅供參考，非投資建議。"
+    assert done["disclaimer"] == "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"
     dumped = json.dumps(events, ensure_ascii=False)
     assert "key_index" not in dumped and "key_slot" not in dumped and "sk-test" not in dumped
 

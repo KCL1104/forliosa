@@ -324,6 +324,67 @@ def test_portfolio_performance_shape(client, seeded):
     assert client.get(f"{API}/portfolio/performance", params={"range": "2W"}).status_code == 422
 
 
+def test_holdings_avg_cost_includes_typed_buy_fees_and_a_blank_fee_is_zero(client):
+    """2026-11-17 (product owner): the holdings table shows 均價 including fees; a buy without a fee counts it as 0.
+    ``avg_cost`` (trade currency) = cost of the shares held ÷ shares, cost = Σ(quantity × price + typed fee); a sell
+    takes out the cost of the shares sold (moving average keeps the average; FIFO drops the oldest lot first)."""
+    tw = make_account(client)
+    us = make_account(client, name="國泰－複委託", broker="國泰證券", currency="USD", fee_discount=1)
+    d1, d2, d3 = trading_day(60), trading_day(40), trading_day(20)
+    add_txn(client, account_id=tw["id"], symbol="2330.TW", type="buy", trade_date=d1.isoformat(), quantity=1000,
+            price=100, fee=40)
+    blank = add_txn(client, account_id=tw["id"], symbol="2330.TW", type="buy", trade_date=d2.isoformat(),
+                    quantity=1000, price=120)
+    assert blank["fee"] == 0  # nothing estimated from the account's fee schedule
+    add_txn(client, account_id=tw["id"], symbol="2330.TW", type="sell", trade_date=d3.isoformat(), quantity=500,
+            price=130, fee=20, tax=195)
+    add_txn(client, account_id=us["id"], symbol="AAPL", type="buy", trade_date=d1.isoformat(), quantity=10,
+            price=200, fee=3)
+    add_txn(client, account_id=us["id"], symbol="AAPL", type="buy", trade_date=d2.isoformat(), quantity=10,
+            price=210)
+
+    by = {h["symbol"]: h for h in client.get(f"{API}/portfolio/holdings").json()}
+    tsmc, aapl = by["2330.TW"], by["AAPL"]
+    # moving average: (100,040 + 120,000) ÷ 2,000 = 110.02; selling 500 keeps it
+    assert (tsmc["quantity"], tsmc["avg_cost"], tsmc["cost_basis"]) == (1500, 110.02, 165030)
+    # fees_in_cost: the fee share of the shares kept (40 × 1,500 ÷ 2,000); the sell's own fee and tax are not in it
+    assert tsmc["fees_in_cost"] == 30
+    # US: the fee is in dollars like the price — (2,003 + 2,100) ÷ 20 = 205.15; cost_basis is TWD at each buy's rate
+    assert (aapl["quantity"], aapl["avg_cost"], aapl["fees_in_cost"]) == (20, 205.15, 3)
+    assert 20 * 205.15 * 25 < aapl["cost_basis"] < 20 * 205.15 * 40
+
+    client.patch(f"{API}/me/preferences", json={"cost_method": "fifo"})
+    fifo = {h["symbol"]: h for h in client.get(f"{API}/portfolio/holdings").json()}["2330.TW"]
+    # FIFO: the 500 sold come out of the first lot (100.04 a share): (500 × 100.04 + 120,000) ÷ 1,500
+    assert fifo["cost_basis"] == 170020 and fifo["avg_cost"] == pytest.approx(170020 / 1500, abs=1e-4)
+    assert fifo["fees_in_cost"] == 20
+
+
+def test_holdings_fees_in_cost_is_per_account_and_zero_when_no_fee_is_left(client):
+    """2026-11-17 review: 「含手續費」 appeared next to an average with no fee in it. The flag now comes from the
+    ledger: fees_in_cost counts the buy fees inside the cost of the shares still held, per (account, symbol) and
+    cost method."""
+    a = make_account(client)
+    b = make_account(client, name="元大", broker="元大證券")
+    d1, d2, d3 = trading_day(60), trading_day(40), trading_day(20)
+    add_txn(client, account_id=a["id"], symbol="2330.TW", type="buy", trade_date=d1.isoformat(), quantity=1000,
+            price=100, fee=40)
+    add_txn(client, account_id=b["id"], symbol="2330.TW", type="buy", trade_date=d2.isoformat(), quantity=1000,
+            price=120)  # no fee entered
+    holding = {h["symbol"]: h for h in client.get(f"{API}/portfolio/holdings").json()}["2330.TW"]
+    assert (holding["avg_cost"], holding["fees_in_cost"]) == (110.02, 40)
+    # account A sells everything: only B's position is left, its average (120) has no fee in it
+    add_txn(client, account_id=a["id"], symbol="2330.TW", type="sell", trade_date=d3.isoformat(), quantity=1000,
+            price=130)
+    for method in ("average", "fifo"):
+        client.patch(f"{API}/me/preferences", json={"cost_method": method})
+        holding = {h["symbol"]: h for h in client.get(f"{API}/portfolio/holdings").json()}["2330.TW"]
+        assert (holding["quantity"], holding["avg_cost"], holding["fees_in_cost"]) == (1000, 120, 0)
+    # one account's view says the same
+    only_a = client.get(f"{API}/portfolio/holdings", params={"account_id": a["id"]}).json()
+    assert [h["symbol"] for h in only_a] == []
+
+
 def test_empty_portfolio(client):
     s = client.get(f"{API}/portfolio/summary").json()
     assert s["market_value"] == 0 and s["upcoming_dividends"] == []

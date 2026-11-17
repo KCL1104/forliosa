@@ -66,7 +66,7 @@ def test_usage_shape(client, pool, ai_env):
                  "monthly_token_budget": None, "tokens_remaining": None, "cost_usd_month": 0.0,
                  "model": "claude-haiku-5-5", "available": True, "deep_search_cost": 5,
                  "monthly_cost_budget_usd": None, "month_budget_reached": False,
-                 "disclaimer": "AI 回答僅供參考，非投資建議。"}
+                 "disclaimer": "AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。"}
     assert set(u) == {"date", "month", "messages_today", "daily_message_limit", "messages_remaining",
                       "tokens_month", "monthly_token_budget", "tokens_remaining", "cost_usd_month", "model",
                       "available", "deep_search_cost", "monthly_cost_budget_usd", "month_budget_reached",

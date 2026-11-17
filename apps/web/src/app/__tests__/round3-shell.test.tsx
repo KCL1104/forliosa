@@ -78,10 +78,10 @@ describe("導覽設定（nav.ts）：一個地方", () => {
     for (const p of ["/", "/groups", "/admin/discussions", "/discussionsx"]) expect(discussions.match(p)).toBe(false)
   })
 
-  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、管理後台、設定、對話紀錄、資料來源、條款與隱私權政策、市場；帳本與個股頁不是", () => {
-    expect([...QUIET_ROUTES]).toEqual(["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy", "/market"])
+  it("安靜的頁面：群組（清單、群組、成員）、討論（清單、主題、開新主題）、管理後台、設定、對話紀錄、資料來源、條款、隱私權政策與免責聲明、市場；帳本與個股頁不是", () => {
+    expect([...QUIET_ROUTES]).toEqual(["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy", "/disclaimer", "/market"])
     expect(isQuietRoute("/market")).toBe(true)
-    for (const p of ["/terms", "/privacy"]) expect(isQuietRoute(p)).toBe(true)
+    for (const p of ["/terms", "/privacy", "/disclaimer"]) expect(isQuietRoute(p)).toBe(true)
     expect(isQuietRoute("/termsx")).toBe(false)
     for (const p of ["/groups", "/groups/grp_family", "/groups/grp_family/members/usr_dad", "/discussions", "/discussions/new", "/discussions/top_p_tsmc", "/admin/discussions", "/settings", "/history", "/data-sources"]) expect(isQuietRoute(p)).toBe(true)
     for (const p of ["/", "/stock/2330.TW", "/marketx", "/groupsx", "/settings-old", "/administrator"]) expect(isQuietRoute(p)).toBe(false)
