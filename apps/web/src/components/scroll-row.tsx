@@ -41,8 +41,17 @@ export function ScrollRow({ className, children, ref, ...props }: React.Componen
       const sel = row.querySelector(SELECTED)
       if (sel) reveal(row, sel, smooth)
     }
+    // 只有鍵盤移過來的焦點才馬上捲：用滑鼠或手指按住淡出區裡的那一顆時，按下就捲的話放開時手指下面已經是別顆，
+    // 那一下就沒按到（320px 的帳本區間按鈕，2026-11-17）。按到的那一顆在選取改變時再捲進畫面（下面的 MutationObserver）。
     const onFocus = (e: FocusEvent) => {
-      if (e.target instanceof Element && e.target !== row) reveal(row, e.target, false)
+      if (!(e.target instanceof Element) || e.target === row) return
+      let keyboard = true
+      try {
+        keyboard = e.target.matches(":focus-visible")
+      } catch {
+        // 不認得 :focus-visible 的瀏覽器：照舊捲
+      }
+      if (keyboard) reveal(row, e.target, false)
     }
 
     revealSelected(false)

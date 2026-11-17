@@ -6,6 +6,8 @@ import type { PerformancePoint } from "@/api/types"
  * 區間的起點和後端 `services/portfolio.py` 的 `range_start` 一樣，區間報酬、起始日也和後端的 TWR、`start_date` 一樣
  * （見 `rangeStartIndex`、`trendWindow`），所以首頁的「近 1 個月 報酬 ▲1.2%」「10/12 – 11/12」和績效分段選「1月」的
  * 時間加權報酬、期間是同一個數字、同一天。
+ * 區間按鈕一律七顆（產品負責人 2026-11-17：存檔從 2026/11/12 才開始，原本「只放資料撐得起來的、不到 7 個收盤不放」
+ * 讓每個人都看不到按鈕）。比資料長的區間照樣可以選，畫全部的資料、報酬從第一個收盤算起，期間照實寫（`rangeExceedsData`）。
  */
 export type TrendRange = "5D" | "1M" | "3M" | "6M" | "YTD" | "1Y" | "ALL"
 
@@ -22,8 +24,11 @@ export const TREND_RANGES: readonly { value: TrendRange; label: string }[] = [
 
 export const DEFAULT_TREND_RANGE: TrendRange = "1M"
 
-/** 至少這麼多個收盤才放區間按鈕（第 7 個收盤時，「5日」才真的會切掉一段） */
-export const MIN_POINTS_FOR_RANGES = 7
+/**
+ * 少於這麼多個收盤算「歷史短」：每個收盤畫一個圓點、區間按鈕下面寫績效從哪天開始算（第 7 個收盤時「5日」才切得掉一段，
+ * 之前選哪個區間都是整段資料）。區間按鈕和這個無關，畫得出走勢（2 個收盤以上）就放。
+ */
+export const FULL_HISTORY_POINTS = 7
 
 export function isTrendRange(v: unknown): v is TrendRange {
   return TREND_RANGES.some((r) => r.value === v)
@@ -73,7 +78,7 @@ function nominalStart(lastDay: string, range: TrendRange): string | null {
  * - 1M…1Y、今年：名目起始日「之前」的最後一個收盤。後端從起始日當天或之後的第一個收盤開始、那一天的漲跌也算進去，
  *   所以報酬的起點其實是前一個收盤；這裡把那個收盤畫成第一點，`rangeReturn` 就和後端的 TWR 一樣。
  *   今年的起點因此是去年最後一個收盤。
- * - 資料比區間短（起始日之前沒有收盤）：0，整段。ALL：0。
+ * - 資料比區間短（起始日之前沒有收盤；5D 不到 6 點）：0，整段（`rangeExceedsData`）。ALL：0。
  */
 export function rangeStartIndex(series: readonly Pick<PerformancePoint, "t">[], range: TrendRange): number {
   if (series.length === 0 || range === "ALL") return 0
@@ -85,6 +90,34 @@ export function rangeStartIndex(series: readonly Pick<PerformancePoint, "t">[], 
     else break
   }
   return idx
+}
+
+/**
+ * 區間比資料長：區間的基準收盤之前已經沒有資料——1M…1Y、今年是名目起始日當天或之前沒有收盤，5D 是不到 6 個收盤
+ * （一個基準收盤＋5 個交易日）。這時畫的是全部的資料，報酬從第一個收盤算起（和後端同一個區間的 TWR 一樣：
+ * 後端也是從第一個收盤開始），標題照樣寫「近 3 個月」，期間要照實寫是從哪天到哪天。
+ * 「全部」本來就是全部的資料，不算。
+ */
+export function rangeExceedsData(series: readonly Pick<PerformancePoint, "t">[], range: TrendRange): boolean {
+  if (series.length === 0 || range === "ALL") return false
+  if (range === "5D") return series.length < 6
+  return series[0]!.t >= nominalStart(series[series.length - 1]!.t, range)!
+}
+
+/**
+ * 績效分段的工具列要不要寫「只有 … 的資料」：區間比這個帳戶的資料長（`rangeExceedsData`，看這個帳戶「全部」的序列 `all`），
+ * 而且後端這個區間的回應真的從那個帳戶的第一個收盤開始——後端在區間比資料長時，`start_date` 就是「全部」的第一個收盤；
+ * 只有 5日例外：帳戶的第一筆錢前一天還有收盤時，第一點是那一天（市值 0，當基準），第二點才是第一個收盤。
+ * 後一個條件是防切換帳戶時兩個查詢回來的先後不同（兩個都留著上一個帳戶的資料直到新的回來）：新帳戶的「全部」序列先回來、
+ * 區間的回應還是舊帳戶真的有 3 個月的，就不能寫「只有」。湊不起來時只是少寫「只有」，期間的日期照樣是回應自己的。
+ */
+export function responseExceedsData(
+  resp: { range: string; start_date: string | null; series: readonly Pick<PerformancePoint, "t">[] },
+  all: readonly Pick<PerformancePoint, "t">[] | undefined,
+): boolean {
+  if (!all?.length || !resp.start_date || !isTrendRange(resp.range) || !rangeExceedsData(all, resp.range)) return false
+  const first = all[0]!.t
+  return resp.start_date === first || (resp.range === "5D" && resp.start_date < first && resp.series[1]?.t === first)
 }
 
 /** 切出一個區間 */
@@ -99,9 +132,9 @@ export interface TrendWindow<T> {
   /** 要畫的點（第一點可能是基準收盤） */
   points: T[]
   /**
-   * 報酬的分母。區間從序列的第一天開始時（「全部」、資料比區間短）是 1：後端「全部」的 `twr_index` 第一點是
+   * 報酬的分母。區間從資料的第一天開始時（「全部」、區間比資料長）是 1：後端「全部」的 `twr_index` 第一點是
    * 1＋第一天的報酬（`apps/api/CONTRACT_NOTES.md`〈績效計算的解讀〉；從存檔起點開始算的才剛好是 1.0），
-   * 用第一點當分母會少算第一天。其他時候是第一點（基準收盤）的 `twr_index`。
+   * 用第一點當分母會少算第一天。其他時候是第一點（基準收盤）的 `twr_index`——基準收盤剛好是資料的第一天時也是。
    */
   base: number
   /**
@@ -109,37 +142,27 @@ export interface TrendWindow<T> {
    * 1M…1Y 的第一點是名目起始日之前的基準收盤，起始日是下一個收盤（1）；5D 的起始日就是基準收盤、整段時是第一天（0）。
    */
   from: number
+  /** 區間比資料長：畫的是全部的資料，期間要照實寫（`rangeExceedsData`） */
+  exceeds: boolean
 }
 
-/** 切出一個區間，連同報酬的分母與起始日（見 `TrendWindow`） */
+/** 切出一個區間，連同報酬的分母、起始日、是不是比資料長（見 `TrendWindow`） */
 export function trendWindow<T extends Pick<PerformancePoint, "t" | "twr_index">>(series: readonly T[], range: TrendRange): TrendWindow<T> {
-  const start = rangeStartIndex(series, range)
-  const points = series.slice(start)
+  const points = series.slice(rangeStartIndex(series, range))
+  const exceeds = rangeExceedsData(series, range)
+  const whole = range === "ALL" || exceeds
   return {
     points,
-    base: start === 0 ? 1 : points[0]!.twr_index,
-    from: start > 0 && CALENDAR.includes(range) && points.length > 1 ? 1 : 0,
+    base: whole ? 1 : (points[0]?.twr_index ?? 1),
+    from: !whole && CALENDAR.includes(range) && points.length > 1 ? 1 : 0,
+    exceeds,
   }
 }
 
 /**
- * 資料撐得起來的區間：這個區間真的會切掉一段（第一點不是序列的第一天）才放；有任何一個時再加「全部」。
- * 不到 7 個收盤一律不放（回傳空陣列）。
- */
-export function availableRanges(series: readonly Pick<PerformancePoint, "t">[]): TrendRange[] {
-  if (series.length < MIN_POINTS_FOR_RANGES) return []
-  const cut = TREND_RANGES.map((r) => r.value).filter((r) => r !== "ALL" && rangeStartIndex(series, r) > 0)
-  return cut.length ? [...cut, "ALL"] : []
-}
-
-/** 上次選的區間現在撐得起來就用它；撐不起來（或還沒有任何按鈕）畫全部 */
-export function effectiveRange(stored: TrendRange, available: readonly TrendRange[]): TrendRange {
-  return available.includes(stored) ? stored : "ALL"
-}
-
-/**
  * 區間報酬（時間加權，扣掉新買進的影響）：從區間開始到第 `upto` 點，`twr_index ÷ 分母 − 1`。
- * 分母見 `TrendWindow.base`——區間從序列第一天開始時第一天的報酬也算進去，和後端同一個區間的 TWR 一樣。
+ * 分母見 `TrendWindow.base`：區間從資料的第一個收盤算起時（「全部」、區間比資料長）分母是 1，第一天的報酬也算進去；
+ * 其他時候（包含基準收盤剛好是資料的第一天）分母是基準收盤的 `twr_index`。這樣和後端同一個區間的 TWR 一樣。
  */
 export function rangeReturn(win: Pick<TrendWindow<Pick<PerformancePoint, "twr_index">>, "points" | "base">, upto = win.points.length - 1): number | null {
   const at = win.points[upto]
@@ -147,9 +170,12 @@ export function rangeReturn(win: Pick<TrendWindow<Pick<PerformancePoint, "twr_in
   return at.twr_index / win.base - 1
 }
 
-/** 走勢的狀態：少於 2 點不畫；2～6 點畫、每一點一個圓點、不放區間；7 點以上照常 */
+/**
+ * 走勢的狀態：少於 2 點不畫（也不放區間按鈕）；2～6 點畫、每一點一個圓點、區間按鈕下面寫績效從哪天開始算；7 點以上照常。
+ * 畫得出來（short、full）就放七顆區間按鈕。
+ */
 export function trendState(points: number): "missing" | "short" | "full" {
-  return points < 2 ? "missing" : points < MIN_POINTS_FOR_RANGES ? "short" : "full"
+  return points < 2 ? "missing" : points < FULL_HISTORY_POINTS ? "short" : "full"
 }
 
 const NICE = [1, 2, 2.5, 5]

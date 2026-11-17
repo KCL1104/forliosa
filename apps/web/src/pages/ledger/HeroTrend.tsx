@@ -29,7 +29,7 @@ import { useTrendRange } from "./use-trend-range"
 
 /**
  * 總資產走勢（產品負責人 2026-11-17 選方案 B）：主數字正下方、和主欄一樣寬，手機與桌面同一個元件。
- * 由上到下：讀數（固定兩行）→ 圖（桌面 160px、手機 120px）→ 區間（靠左）。
+ * 由上到下：讀數（固定兩行）→ 圖（桌面 160px、手機 120px）→ 區間（靠左）→ 歷史短（2～6 個收盤）時的一行說明。
  * - 資料：一次 `usePerformance("ALL")`（不帶基準），區間在前端切（`lib/trend-range.ts`），換區間不再問伺服器。
  *   只用官方收盤價（存檔從 2026/11/12 起），不用 Yahoo 回補。
  * - 滑過、按住橫拖、方向鍵：讀數換成那一天的值；上面的大數字不變（永遠是最新收盤）。
@@ -37,6 +37,8 @@ import { useTrendRange } from "./use-trend-range"
  *   投入本金 1.5px 鉛筆灰階梯線，縱軸只看總資產，投入本金不在範圍裡就不畫。
  * - 區間按鈕每個分段都放在這裡（整頁只有一排，績效分段跟著這一排；`useTrendChipsShown`）：
  *   這一塊的高度不跟著分段變，切分段時分段列不會上下跳。
+ * - 畫得出走勢就放七顆區間按鈕（2026-11-17 負責人要求；歷史短時也放）。比資料長的區間畫全部的資料，標題照樣寫
+ *   「近 3 個月」，第二行寫「只有 11/12 – 11/17 的資料」（`rangeExceedsData`），不讓人以為那是三個月的報酬。
  */
 
 const TOP = 8
@@ -114,7 +116,7 @@ function TrendMissing({ reason, linked }: { reason: string; linked: boolean }) {
 
 export function HeroTrend({ view }: { view: LedgerView }) {
   const showTrend = useLedgerPrefs((s) => s.showTrend)
-  const { perf, range, ranges, setRange } = useTrendRange()
+  const { perf, range, setRange } = useTrendRange()
   const desktop = useIsDesktop()
   if (!showTrend || perf.isError) return null
   if (!perf.data) return <Skeleton aria-label="總資產走勢載入中" className="mt-6 h-[224px] w-full rounded-sm lg:mt-8 lg:h-[252px]" />
@@ -125,7 +127,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
     const reason = trendMissingReason(notes)
     return reason ? <TrendMissing reason={reason} linked={view !== "performance"} /> : null
   }
-  // 2～6 個收盤：圖下面一行說明（後端的原文＋目前幾個收盤日）。每個分段都寫同一句（高度不跟著分段變）；
+  // 2～6 個收盤：區間按鈕下面一行說明（後端的原文＋目前幾個收盤日）。每個分段都寫同一句（高度不跟著分段變）；
   // 績效分段的說明因此不再重複這一句
   const clipNote = trendClipNote(perf.data)
   const shortNote =
@@ -145,7 +147,6 @@ export function HeroTrend({ view }: { view: LedgerView }) {
     <TrendBand
       series={series}
       range={range}
-      chips={ranges}
       onRange={setRange}
       height={desktop ? 160 : 120}
       desktop={desktop}
@@ -158,7 +159,6 @@ export function HeroTrend({ view }: { view: LedgerView }) {
 function TrendBand({
   series,
   range,
-  chips,
   onRange,
   height,
   desktop,
@@ -167,8 +167,6 @@ function TrendBand({
 }: {
   series: PerformancePoint[]
   range: TrendRange
-  /** 要放的區間按鈕（空的就不放） */
-  chips: TrendRange[]
   onRange: (r: TrendRange) => void
   height: number
   desktop: boolean
@@ -191,9 +189,13 @@ function TrendBand({
   // 區間的起始日：和績效分段寫的期間同一天（1 月以上的第一點是前一個收盤，當基準畫，不算起始日）
   const from = slice[win.from]!
   const days = slice.map((p) => p.t)
-  const withYear = range === "1Y" || needsYear(days)
+  // 1 年的起始日是去年的同一天，要寫年份；比資料長時畫的是實際的那幾天，跨了年才寫
+  const withYear = (range === "1Y" && !win.exceeds) || needsYear(days)
   const day = (t: string, weekday = false) => (withYear ? `${t.slice(0, 4)}/` : "") + formatDateShort(t, weekday)
   const title = range === "ALL" ? `${day(from.t)} 起` : RANGE_TITLE[range]
+  // 第二行的期間。比資料長：照實寫只有哪幾天的資料（「只有」放最前面，320px 放不下被截斷時也還看得到）
+  const span = `${day(from.t)} – ${day(last.t)}`
+  const period = win.exceeds ? `只有 ${span} 的資料` : span
   const total = rangeReturn(win)
 
   const model = useMemo(() => {
@@ -260,9 +262,10 @@ function TrendBand({
   const splitLabel = /上市.*上櫃|上櫃.*上市/.test(close.label) ? close.label.replace(/・盤中不更新$/, "") : null
   const activeDay = a ? (active === n - 1 && splitLabel ? splitLabel : `${day(a.t, true)}收盤`) : ""
   const activeRet = active !== null ? rangeReturn(win, active) : null
+  const svgTitle = win.exceeds ? `${title}，${period}` : title
   const svgLabel = privacy
-    ? `${title}，總資產報酬${retSpeech(total)}`
-    : `${title}，總資產從 ${formatMoney(first.market_value)} 到 ${formatMoney(last.market_value)}，報酬${retSpeech(total)}`
+    ? `${svgTitle}，總資產報酬${retSpeech(total)}`
+    : `${svgTitle}，總資產從 ${formatMoney(first.market_value)} 到 ${formatMoney(last.market_value)}，報酬${retSpeech(total)}`
 
   return (
     <section aria-label="總資產走勢" className="mt-6 lg:mt-8">
@@ -293,9 +296,7 @@ function TrendBand({
               </span>
             </p>
             <p className="num flex items-baseline gap-3 text-sm leading-5 whitespace-nowrap text-ink-2">
-              <span className="min-w-0 truncate">
-                {day(from.t)} – {day(last.t)}
-              </span>
+              <span className="min-w-0 truncate">{period}</span>
               {model.invested && (
                 // 圖例只有一項：鉛筆灰階梯線是投入本金（墨色線就是總資產）
                 <span className="ml-auto inline-flex shrink-0 items-center gap-1.5">
@@ -380,11 +381,9 @@ function TrendBand({
         </p>
       </div>
 
-      {shortNote ? (
-        <p className="mt-2 text-sm text-ink-2">{shortNote}</p>
-      ) : chips.length > 0 ? (
-        <RangeChips className="mt-2" label="走勢區間" value={range} options={TREND_RANGES.filter((r) => chips.includes(r.value))} onChange={onRange} />
-      ) : null}
+      {/* 七顆一律放（比資料長的也可以選）；歷史短時說明在按鈕下面——按鈕的位置和歷史夠長以後一樣 */}
+      <RangeChips className="mt-2" label="走勢區間" value={range} options={TREND_RANGES} onChange={onRange} />
+      {shortNote && <p className="mt-1.5 text-sm text-ink-2">{shortNote}</p>}
     </section>
   )
 }
