@@ -11,6 +11,7 @@ import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { ErrorState, SkeletonLines } from "@/components/states"
+import { SourcesFooter } from "@/components/sources"
 import { SymbolPicker } from "@/components/symbol-picker"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -76,6 +77,7 @@ function NewTopic() {
         ) : (
           <SkeletonLines rows={6} className="mt-6" />
         )}
+        <SourcesFooter />
       </div>
     </PageFrame>
   )

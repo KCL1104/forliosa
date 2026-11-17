@@ -13,6 +13,7 @@ import { UserAvatar } from "@/components/avatar"
 import { DateCell } from "@/components/date-cell"
 import { ReactionChips } from "@/components/reaction-chips"
 import { Section } from "@/components/section"
+import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import {
   AlertDialog,
@@ -97,6 +98,7 @@ function TopicView() {
           // 換到另一個主題時整個重建（開著的檢舉框、選單不會留到下一個主題）
           <Loaded key={topic.data.id} topic={topic.data} origin={origin} />
         )}
+        <SourcesFooter />
       </div>
     </PageFrame>
   )

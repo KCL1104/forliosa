@@ -4,6 +4,7 @@ import { useState } from "react"
 import { appNow } from "@/api"
 import { useNews } from "@/api/queries"
 import type { InstrumentDetail } from "@/api/types"
+import { Disclaimer } from "@/components/disclaimer"
 import { NewsRow } from "@/components/news-row"
 import { ErrorState } from "@/components/states"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -17,7 +18,7 @@ const NEWS_FIRST = 3
 
 /**
  * 新聞報導（像 Google 財經／Goodinfo）：媒體原標題＋媒體名稱＋時間，標題連到原文（另開新視窗）。
- * 不放圖片、不轉載內文；先列 3 則，「看更多」每次再加 8 則。
+ * 不放圖片、不轉載內文；先列 3 則，「看更多」每次再加 8 則；最下面一句免責（`news`）。
  * 收集方式（GDELT，使用條款要求連回 gdeltproject.org；SearXNG、AI 網路搜尋）登記到頁尾的資料來源。
  */
 export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
@@ -59,6 +60,8 @@ export function NewsCoverage({ inst }: { inst: InstrumentDetail }) {
               <ChevronDownIcon aria-hidden className="size-3.5" />
             </button>
           )}
+          {/* 有報導時最下面一句：標題與內容由各媒體負責，Forliosa 只整理連結 */}
+          <Disclaimer kind="news" className="mt-2" />
         </>
       )}
     </QuietSection>

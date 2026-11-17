@@ -6,6 +6,7 @@ import { useReadOnly } from "@/api/view-as"
 import { Masked, Pct } from "@/components/finance"
 import { CitedSources } from "@/components/cited-sources"
 import { DateCell } from "@/components/date-cell"
+import { Disclaimer } from "@/components/disclaimer"
 import { DemoTag, Section } from "@/components/section"
 import { direction, formatDateShort, formatMoney, toneClass } from "@/lib/format"
 import { upcomingText } from "@/lib/ledger-display"
@@ -74,14 +75,28 @@ export function BriefingBlock({ size, besideLedger = false }: { size: "panel" | 
         </button>
       </h3>
       <div id={bodyId} hidden={!open}>
-        <BriefingBody briefing={briefing} size={size} omitLedger={besideLedger} />
+        {/* 免責的一句在面板首頁最下面（`PanelHome`），這裡不再寫一次 */}
+        <BriefingBody briefing={briefing} size={size} omitLedger={besideLedger} disclaimer={false} />
       </div>
     </section>
   )
 }
 
-/** 一則簡報的內容：事實（印刷）＋AI 補充（鉛筆） */
-export function BriefingBody({ briefing, size, omitLedger = false }: { briefing: Briefing; size: "panel" | "screen" | "page"; omitLedger?: boolean }) {
+/**
+ * 一則簡報的內容：事實（印刷）＋AI 補充（鉛筆）＋免責的一句（有 AI 補充時是 `ai`，只有事實時是 `short`）。
+ * `disclaimer={false}`：外面已經有一句（面板首頁）。
+ */
+export function BriefingBody({
+  briefing,
+  size,
+  omitLedger = false,
+  disclaimer = true,
+}: {
+  briefing: Briefing
+  size: "panel" | "screen" | "page"
+  omitLedger?: boolean
+  disclaimer?: boolean
+}) {
   const privacy = usePrefs((s) => s.privacyMode)
   const f = briefing.facts
   return (
@@ -128,20 +143,18 @@ export function BriefingBody({ briefing, size, omitLedger = false }: { briefing:
       </dl>
       {f.unpriced > 0 && !omitLedger && <p className="mt-2 text-sm text-ink-2">{f.unpriced} 檔沒有收盤價，不算在當日。</p>}
       {briefing.points.length > 0 && (
-        <>
-          <ul className="mt-1">
-            {briefing.points.map((p, n) => (
-              <li key={n} className="border-t border-rule py-2.5 first:border-t-0">
-                <p className={cn("ai-voice", size === "page" ? kaiSize.page : kaiSize[size])}>
-                  <KaiText text={p.text} />
-                </p>
-                <CitedSources sources={p.sources} />
-              </li>
-            ))}
-          </ul>
-          <p className="text-xs text-ink-2">AI 依這些報導整理，內容以原報導為準。</p>
-        </>
+        <ul className="mt-1">
+          {briefing.points.map((p, n) => (
+            <li key={n} className="border-t border-rule py-2.5 first:border-t-0">
+              <p className={cn("ai-voice", size === "page" ? kaiSize.page : kaiSize[size])}>
+                <KaiText text={p.text} />
+              </p>
+              <CitedSources sources={p.sources} />
+            </li>
+          ))}
+        </ul>
       )}
+      {disclaimer && <Disclaimer kind={briefing.points.length > 0 ? "ai" : "short"} className="mt-2" />}
     </div>
   )
 }

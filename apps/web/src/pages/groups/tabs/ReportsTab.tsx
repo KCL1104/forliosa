@@ -4,6 +4,7 @@ import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
 import { useDailyReports } from "@/api/sharing-queries"
 import type { DailyReport, Group } from "@/api/types"
+import { Disclaimer } from "@/components/disclaimer"
 import { Pct } from "@/components/finance"
 import { RangeChips } from "@/components/segmented"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
@@ -18,7 +19,6 @@ import { cn } from "@/lib/utils"
 import type { GroupSearch, GroupReport } from "@/router"
 import { DigestsTab } from "./DigestsTab"
 
-const FALLBACK_DISCLAIMER = "AI 分析僅供參考，不構成投資建議。"
 const KINDS = [
   { value: "daily", label: "日報" },
   { value: "weekly", label: "週報" },
@@ -179,7 +179,7 @@ export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean })
           )}
         </div>
       </div>
-      <p className="text-xs text-ink-2">{r.disclaimer || FALLBACK_DISCLAIMER}</p>
+      <Disclaimer kind="ai" text={r.disclaimer} />
     </article>
   )
 }

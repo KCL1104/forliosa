@@ -10,6 +10,7 @@ import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageHeader, Section } from "@/components/section"
+import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -56,6 +57,7 @@ function Groups() {
       )}
       {creating && <CreateGroupDialog onClose={() => setCreating(false)} />}
       <ShareCard />
+      <SourcesFooter />
     </PageFrame>
   )
 }

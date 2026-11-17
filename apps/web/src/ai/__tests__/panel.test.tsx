@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { act, fireEvent, render, screen, within } from "@testing-library/react"
 import { afterEach, beforeAll, describe, expect, it, vi } from "vitest"
 import { Composer } from "@/ai/Composer"
-import { kaiRuns } from "@/ai/answer-text"
+import { DISCLAIMER, kaiRuns } from "@/ai/answer-text"
 import { AiText, Conversation } from "@/ai/Conversation"
 import { PanelHome } from "@/ai/Home"
 import { composerPlaceholder, quickActions } from "@/ai/panel-helpers"
@@ -112,7 +112,7 @@ describe("免責只跟著回答，一段對話只出現一次：在最新一則�
       { id: "a2", role: "ai", model: true, text: "寫到一半", streaming: true, at },
     ])
     expect(screen.queryByText("第一則的免責。")).not.toBeInTheDocument()
-    expect(screen.queryByText("AI 回答僅供參考，非投資建議。")).not.toBeInTheDocument()
+    expect(screen.queryByText(DISCLAIMER)).not.toBeInTheDocument()
   })
 })
 

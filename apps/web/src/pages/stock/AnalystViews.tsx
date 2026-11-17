@@ -6,11 +6,11 @@ import { ApiError, api, appToday } from "@/api"
 import type { AnalystView, AnalystViews, InstrumentDetail } from "@/api/types"
 import { aiKeys, useAiUsage } from "@/ai/remote-hooks"
 import { DataNotes } from "@/components/data-notes"
+import { Disclaimer } from "@/components/disclaimer"
 import { SkeletonLines } from "@/components/states"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
 import {
-  ANALYST_DISCLAIMER_FALLBACK,
   ANALYST_INITIAL,
   ANALYST_POLL_MS,
   analystReducer,
@@ -110,7 +110,7 @@ export function AnalystViewsCard({ inst }: { inst: InstrumentDetail }) {
             <SkeletonLines rows={3} className="py-2" />
           ) : (
             <>
-              <p className="max-w-prose text-sm text-ink-2">{state.data?.disclaimer || ANALYST_DISCLAIMER_FALLBACK}</p>
+              <Disclaimer kind="analyst" text={state.data?.disclaimer} />
               {/* 只念一句狀態，不把整張表念出來 */}
               <p role="status" className="sr-only">
                 {announce(state)}

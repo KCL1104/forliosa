@@ -12,7 +12,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from forliosa import models
+from forliosa import disclaimer, models
 from forliosa.config import get_settings
 from forliosa.services import account as account_service
 from forliosa.services import discord_oauth
@@ -74,7 +74,9 @@ def test_export_is_a_json_attachment_with_only_my_own_data(client, other_client,
     assert r.headers["cache-control"] == "no-store"
     data = r.json()
     assert data["format_version"] == 1 and data["exported_at"].endswith("Z")
-    assert set(data) == {"exported_at", "format_version", "profile", "accounts", "transactions", "recurring_plans",
+    assert data["disclaimer"] == disclaimer.SHORT  # 2026-11-17: what the file is (and is not)
+    assert set(data) == {"exported_at", "format_version", "disclaimer", "profile", "accounts", "transactions",
+                         "recurring_plans",
                          "watchlist", "auto_dividend_skips", "ai", "groups", "group_comments", "group_reactions",
                          "delegations", "discussions"}
     assert data["profile"]["email"] == "demo@forliosa.local" and data["profile"]["public_name"] == "阿土伯"

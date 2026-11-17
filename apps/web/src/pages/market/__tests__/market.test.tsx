@@ -9,6 +9,7 @@ import { buildMarketOverview } from "@/api/mock/market-overview"
 import type { ForliosaApi, MarketOverview } from "@/api/types"
 import { DOCK_TABS, NAV_ITEMS } from "@/app/nav"
 import { createAppRouter } from "@/router"
+import { DISCLAIMER } from "@/lib/disclaimer"
 
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
@@ -110,7 +111,7 @@ describe("市場頁的內容", () => {
       expect(a).toHaveAttribute("target", "_blank")
       expect(a).toHaveAttribute("rel", "noopener noreferrer")
     }
-    expect(within(section).getByText("AI 依這些報導整理，內容以原報導為準。")).toBeInTheDocument()
+    expect(within(section).getByText(DISCLAIMER.ai)).toHaveAttribute("data-disclaimer", "ai")
   })
 
   it("沒有 AI 整理時整塊不出現，其他區塊照常", async () => {

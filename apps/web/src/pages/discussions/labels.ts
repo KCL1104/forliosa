@@ -1,9 +1,10 @@
 import { appNow } from "@/api"
 import { ApiError, PERMANENT_UNTIL, type DiscussionAuthor, type ReportReason, type User } from "@/api/types"
+import { DISCLAIMER as DISCLAIMERS } from "@/lib/disclaimer"
 import { formatDateShort, todayInTaipei, TZ } from "@/lib/format"
 
-/** 每個公開討論頁底部固定的一行（合約） */
-export const DISCLAIMER = "使用者言論，不代表本站立場，也不是投資建議。"
+/** 每個公開討論頁底部固定的一行（合約；字在 `lib/disclaimer.ts` 的 `userContent`） */
+export const DISCLAIMER = DISCLAIMERS.userContent
 
 export { ABOUT_FORLIOSA } from "@/lib/about"
 

@@ -45,7 +45,7 @@ export const isAdminPath = under("/admin")
  * AI 不讀討論、也不替人發言，所以討論頁也在這裡。帳本與個股頁不在這裡：面板照記住的開合狀態（預設開）。
  */
 // 市場頁（2026-11-14 第六次評分）：面板開著只有三列最近的對話、下面一大片空白，預設收成窄欄
-export const QUIET_ROUTES: readonly string[] = ["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy", "/market"]
+export const QUIET_ROUTES: readonly string[] = ["/groups", "/discussions", "/admin", "/settings", "/history", "/data-sources", "/terms", "/privacy", "/disclaimer", "/market"]
 export const isQuietRoute = (pathname: string) => QUIET_ROUTES.some((r) => under(r)(pathname))
 
 /**

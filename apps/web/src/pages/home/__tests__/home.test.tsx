@@ -9,6 +9,7 @@ import type { ForliosaApi } from "@/api/types"
 import { ABOUT_FORLIOSA, ABOUT_SHORT } from "@/lib/about"
 import { isHomePath, isPublicReadPath } from "@/lib/next-path"
 import { createAppRouter } from "@/router"
+import { DISCLAIMER } from "@/lib/disclaimer"
 
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
@@ -108,9 +109,14 @@ describe("沒登入的首頁：簡短的介紹頁", () => {
     expect(draft.querySelector(".sign-box")).toHaveTextContent("簽名確認入帳")
     // 畫面上沒有日期（寫死的日期會過期）
     expect(document.querySelector("main")!.textContent).not.toMatch(/\d{1,2}\/\d{1,2}|20\d\d/)
-    // 頁尾：兩份條款
+    // 頁尾：免責的一句（只替你整理資訊，不是投資顧問），下面是兩份條款與免責聲明
     const footer = document.querySelector("main footer")!
-    expect([...footer.querySelectorAll("a")].map((a) => `${a.textContent}:${a.getAttribute("href")}`)).toEqual(["服務條款:/terms", "隱私權政策:/privacy"])
+    expect(footer.querySelector("[data-disclaimer='short']")).toHaveTextContent(DISCLAIMER.short)
+    expect([...footer.querySelectorAll("a")].map((a) => `${a.textContent}:${a.getAttribute("href")}`)).toEqual([
+      "服務條款:/terms",
+      "隱私權政策:/privacy",
+      "免責聲明:/disclaimer",
+    ])
     // 沒有登入後才有的東西，也沒有登入頁的按鈕；沒登入時不去問帳本的資料
     expect(screen.queryByRole("button", { name: /問 AI/ })).toBeNull()
     expect(screen.queryByRole("button", { name: /^用 (Google|Discord) 登入$/ })).toBeNull()

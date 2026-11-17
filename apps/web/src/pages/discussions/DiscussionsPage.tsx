@@ -5,6 +5,7 @@ import { useGroups } from "@/api/sharing-queries"
 import type { TopicSort } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
+import { SourcesFooter } from "@/components/sources"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { PageHeader } from "@/components/section"
 import { RangeChips } from "@/components/segmented"
@@ -108,6 +109,7 @@ function Discussions() {
               : { title: "還沒有主題", description: signedIn ? "開第一個主題，問問大家怎麼看。" : "登入後就能開第一個主題。" }
           }
         />
+        <SourcesFooter />
       </div>
     </PageFrame>
   )

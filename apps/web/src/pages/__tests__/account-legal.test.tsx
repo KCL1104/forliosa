@@ -17,6 +17,7 @@ import { isPublicReadPath } from "@/lib/next-path"
 import { termsNoticeText } from "@/lib/terms-notice"
 import { isDraft, stripReviewNote } from "@/pages/legal/legal-text"
 import { createAppRouter } from "@/router"
+import { DISCLAIMER } from "@/lib/disclaimer"
 
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 vi.mock("@/lib/hard-nav", () => ({ hardNavigate: vi.fn() }))
@@ -211,16 +212,19 @@ describe("服務條款與隱私權政策的頁面", () => {
     renderApp("/login")
     const consent = (await screen.findByText(/登入即表示你同意/, undefined, T)).closest("p")!
     // 只有登入：字標、「登入」、兩種登入方式（一樣重的外框按鈕，Google 在前），全部置中；沒有說明的句子、沒有示範畫面。
-    // 唯一的一行字是同意條款（條款靠它成立）
+    // 兩行字：同意條款（條款靠它成立），和免責的一句（產品負責人 2026-11-17：登入前就說清楚 Forliosa 不是投資顧問）
     const buttons = await screen.findAllByRole("button", { name: /登入$/ }, T)
     expect(buttons.map((b) => b.textContent)).toEqual(["用 Google 登入", "用 Discord 登入"])
     for (const b of buttons) expect(b.className).toMatch(/border-ctl/)
     const main = screen.getByRole("main")
     expect(main).toHaveClass("items-center", "text-center")
     expect(screen.queryByRole("figure")).toBeNull()
-    expect(main.querySelectorAll("p")).toHaveLength(1)
+    expect(main.querySelectorAll("p")).toHaveLength(2)
     expect(main.querySelector("p")).toBe(consent)
-    expect(main.textContent).toBe("Forliosa登入用 Google 登入用 Discord 登入登入即表示你同意服務條款與隱私權政策。")
+    expect(main.textContent).toBe(`Forliosa登入用 Google 登入用 Discord 登入登入即表示你同意服務條款與隱私權政策。${DISCLAIMER.short} 免責聲明`)
+    const note = main.querySelector("[data-disclaimer]")!
+    expect(note).toHaveClass("text-sm", "text-ink-2")
+    expect(within(note as HTMLElement).getByRole("link", { name: "免責聲明" })).toHaveAttribute("href", "/disclaimer")
     await waitFor(() => expect(document.title).toBe("登入｜Forliosa"))
     expect(within(consent).getByRole("link", { name: "服務條款" })).toHaveAttribute("href", "/terms")
     expect(within(consent).getByRole("link", { name: "隱私權政策" })).toHaveAttribute("href", "/privacy")

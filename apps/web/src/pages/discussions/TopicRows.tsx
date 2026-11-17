@@ -8,12 +8,13 @@ import type { TopicSearch } from "@/router"
 import { PlainLink } from "@/app/links"
 import { DateCell } from "@/components/date-cell"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
+import { Disclaimer as Note } from "@/components/disclaimer"
 import { textAction } from "@/components/text-action"
 import { Button } from "@/components/ui/button"
 import { safeNext } from "@/lib/next-path"
 import { LegalLinks } from "@/pages/legal/LegalLinks"
 import { cn } from "@/lib/utils"
-import { ABOUT_FORLIOSA, authorName, clockTime, DISCLAIMER, taipeiDay } from "./labels"
+import { ABOUT_FORLIOSA, authorName, clockTime, taipeiDay } from "./labels"
 import { topicSearchFrom, type Origin } from "./origin"
 
 /** 日期格那一欄：手機是窄的三行（日期／星期／時間，和交易列表同寬），標題才有地方寫；桌面一行日期＋一行時間。主題頁用同一欄 */
@@ -32,7 +33,7 @@ export function MetaLine({ className, children }: { className?: string; children
 }
 
 /**
- * 每個公開討論頁底部固定的一行（12px 淡墨）。沒登入的訪客在它下面多一行：Forliosa 是什麼＋「登入」
+ * 每個公開討論頁底部固定的一行（`lib/disclaimer.ts` 的 `userContent`，13px 淡墨，和全站的免責同一個樣子）。沒登入的訪客在它下面多一行：Forliosa 是什麼＋「登入」
  * （登入後回到現在這一頁）——不然從搜尋或別人貼的連結進來的人，整頁沒有一句話說這是什麼地方。
  */
 export function Disclaimer({ className }: { className?: string }) {
@@ -40,7 +41,7 @@ export function Disclaimer({ className }: { className?: string }) {
   const next = safeNext(useRouterState({ select: (s) => s.location.href }))
   return (
     <div className={className}>
-      <p className="text-xs text-ink-2">{DISCLAIMER}</p>
+      <Note kind="userContent" />
       {!signedIn && (
         <>
           <p className="mt-1 text-sm text-ink-2">{ABOUT_FORLIOSA}</p>

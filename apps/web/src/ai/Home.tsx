@@ -1,4 +1,5 @@
 import { Fragment } from "react"
+import { Disclaimer } from "@/components/disclaimer"
 import { cn } from "@/lib/utils"
 import { BriefingBlock } from "./Briefing"
 import { ThreadRows } from "./HistoryList"
@@ -30,6 +31,8 @@ const RECENT = 3
  * - 最上面：打開了「每日收盤簡報」的人，最新的一則（`Briefing.tsx`；還沒看過時展開，看過收成一列）。
  * - 沒有建議也沒有動作的頁面（設定、資料來源、紀錄）：最近 3 段對話（標題＋相對時間），按下接著那段對話。
  *   桌面的紀錄頁不列（`hideRecent`）：那一頁本身就是完整的對話清單，旁邊的面板不重複一次。
+ * - 最下面一句免責（`lib/disclaimer.ts` 的 `ai`，13px 淡墨）：還沒問之前就看得到 AI 只是替你整理資訊、不是投資顧問。
+ *   上面收盤簡報的內容不另外再寫一句（一個區塊一句）。開始對話後換成回答下方那一句（`Conversation`）。
  */
 export function PanelHome({
   ctx,
@@ -118,6 +121,7 @@ export function PanelHome({
           />
         </div>
       )}
+      <Disclaimer kind="ai" className="mt-4" />
     </div>
   )
 }

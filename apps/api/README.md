@@ -184,7 +184,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 用一句繁體中文婉拒並把話題帶回投資。明顯的情況（例如「幫我寫 Python 爬蟲」）在伺服器端就婉拒、不花模型費用；只要提到任何財經字詞或股票代號就交給模型判斷。
 
 **有根據才寫**：數字與事實只能來自工具結果或附引用的網路來源；用了網路搜尋的回答中，沒有引用又像新聞敘述的句子會在 `grounding` 事件列出，
-前端標「無來源」。**免責聲明**「AI 回答僅供參考，非投資建議。」由前端固定顯示（`done.disclaimer`、`/ai/usage.disclaimer`），模型不寫。
+前端標「無來源」。**免責聲明**「AI 只替你整理資訊，可能有錯；Forliosa 不是投資顧問，不提供投資建議。」（全站的字在 `forliosa/disclaimer.py`，和前端 `apps/web/src/lib/disclaimer.ts` 相同）由前端固定顯示（`done.disclaimer`、`/ai/usage.disclaimer`），模型不寫。
 
 **保存期限**：對話與訊息（含網路搜尋的加密內容）、草稿在最後活動 30 天後由 worker 每天刪除；`ai_usage`（token、槽號、估計費用，不含內容）保留做帳。
 
