@@ -7,11 +7,12 @@
   reports (盤前／盤後／週報) to compare sectors and themes.
 
 Every result passes the same filters as the stock page (:func:`forliosa.news.service.shown`: blocked domains, pages
-that are not news, robot flashes, sources the data policy does not serve) and is de-duplicated (same URL or
-near-identical title). Near-identical titles take a pairwise comparison (:func:`forliosa.news.normalize.dedupe`), so
-it only ever looks at the newest headlines it needs (:func:`_newest`), never at a whole week's group. Only ids of the
-current vocabulary are shown; untagged headlines are still found by stock and keyword. Headlines are metadata only
-(title, outlet, time, link).
+that are not news, robot flashes, sources the data policy does not serve; :func:`search` also skips headlines
+tagged without a single theme, sector or related stock, :func:`forliosa.news.service.tagged_not_finance`) and is
+de-duplicated (same URL or near-identical title). Near-identical titles take a pairwise comparison
+(:func:`forliosa.news.normalize.dedupe`), so it only ever looks at the newest headlines it needs (:func:`_newest`),
+never at a whole week's group. Only ids of the current vocabulary are shown; untagged headlines are still found by
+stock and keyword. Headlines are metadata only (title, outlet, time, link).
 """
 
 from __future__ import annotations
@@ -212,7 +213,10 @@ def search(db: Session, md: MarketData, *, theme: str | None = None, sector: str
         return []
     now = now or now_utc()
     days = max(1, min(MAX_DAYS, int(days)))
-    q = select(NewsArticle).where(NewsArticle.published_at >= now - timedelta(days=days))
+    from forliosa.news.service import tagged_not_finance
+
+    q = select(NewsArticle).where(NewsArticle.published_at >= now - timedelta(days=days),
+                                  ~tagged_not_finance(NewsArticle.url_key))
     if theme:
         q = q.where(NewsArticle.url_key.in_(select(NewsTag.url_key).where(NewsTag.kind == "theme",
                                                                          NewsTag.value == theme)))

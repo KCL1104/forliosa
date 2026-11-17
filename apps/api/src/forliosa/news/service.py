@@ -30,7 +30,8 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
   symbol, at most ``AI_MAX_PER_RUN`` per run, while the month's budget lasts.
 * **Every headline** goes through :mod:`forliosa.news.normalize`: GDELT spacing removed, outlet / section suffix
   removed, the outlet named from its domain, kept only when the title names the company (Chinese short name,
-  code or English short name), never from a blocked domain, a search-engine redirect, a page that is not news
+  code or English short name; Taiwan stocks by the stricter rules of :mod:`forliosa.news.tw_match`, 2026-11-17), never
+  from a blocked domain, a search-engine redirect, a page that is not news
   (``outlets.NOT_NEWS_DOMAINS``: quote pages, forums, AI-written pages) or a robot quote flash (鉅亨「盤中速報」),
   newer than the query window; stored once per (symbol, canonical URL: tracking parameters, ``www.`` / ``m.`` /
   AMP variants and ``http`` vs ``https`` folded together). Deleted ``NEWS_RETENTION_DAYS`` after publication.
@@ -38,7 +39,8 @@ Refresh (worker job ``news_refresh``, every ``NEWS_REFRESH_MINUTES``; also ``pyt
 Read (``GET /instruments/{symbol}/news``)
 ----------------------------------------
 :func:`media_items`: the symbol's stored headlines of the retention window, Yahoo RSS rows only under
-``personal``, blocked domains, pages that are not news and robot flashes hidden, de-duplicated (same URL or
+``personal``, blocked domains, pages that are not news, robot flashes and headlines tagged as not finance
+(:func:`tagged_not_finance`, 2026-11-17) hidden, de-duplicated (same URL or
 near-identical title; the original outlet beats an aggregator copy, a reputable outlet another copy), the newest day
 first and within a day the reputable outlets first (:func:`normalize.rank`; the stock page sorts by time itself), at
 most ``MEDIA_LIMIT``. :func:`record_view` notes that the symbol was viewed.
@@ -53,17 +55,27 @@ from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, exists, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import Session
+from sqlalchemy.sql import ColumnElement
 
 from forliosa.config import Settings, get_settings
 from forliosa.datapolicy import Policy, labels
 from forliosa.marketdata.base import InstrumentInfo
 from forliosa.marketdata.http import HttpFetcher, RateLimiter
 from forliosa.marketdata.service import MarketData
-from forliosa.models import CompanyProfile, NewsArticle, NewsBlockedDomain, NewsFetchState, NewsTrackedView
+from forliosa.models import (
+    CompanyProfile,
+    NewsArticle,
+    NewsBlockedDomain,
+    NewsFetchState,
+    NewsTag,
+    NewsTagState,
+    NewsTrackedView,
+)
+from forliosa.news import tw_match
 from forliosa.news.gdelt_bulk import US_FEED, GdeltBulk, UsTest
 from forliosa.news.normalize import (
     Headline,
@@ -216,10 +228,18 @@ def english_names(db: Session, info: InstrumentInfo) -> list[str]:
     return result
 
 
-def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datetime) -> Query:
+def build_query(db: Session, info: InstrumentInfo, since: datetime, until: datetime,
+                md: MarketData | None = None) -> Query:
+    """The query and title test of one symbol. A Taiwan stock's terms follow :mod:`forliosa.news.tw_match`; with
+    ``md``, the other listed names that contain its name (聯合再生 for 聯合) take their headlines (the longest name
+    wins) and a short name listed next to another listed name counts (「信驊、創意等」)."""
     english = english_names(db, info)
-    extra = [a for a in info.aliases if not a.isascii()] if info.market == "US" else []
-    terms = make_terms(info.name, info.code, english, extra)
+    taiwan = info.market != "US"
+    extra = [] if taiwan else [a for a in info.aliases if not a.isascii()]
+    master = md.master() if taiwan and md is not None else None
+    longer = tw_match.longer_in_master(info.name, master) if master is not None else ()
+    peers = tw_match.names_in_master(master) if master is not None else frozenset()
+    terms = make_terms(info.name, info.code, english, extra, taiwan=taiwan, longer=longer, peers=peers)
     return Query(symbol=info.symbol, code=info.code, name=info.name, market=info.market, english=tuple(english),
                  terms=terms, since=since, until=until)
 
@@ -243,7 +263,8 @@ def to_headlines(items: Iterable[RawItem], q: Query, source: str, blocked: Seque
         published = _aware(it.published_at)
         if not title or is_bot_flash(title):
             continue
-        if not (relevant(title, url) if relevant is not None else is_relevant(title, q.terms)):
+        if not (relevant(title, url) if relevant is not None
+                else is_relevant(title, q.terms, url=url, raw_title=it.title)):
             continue
         if published > q.until + timedelta(minutes=30):
             continue
@@ -320,6 +341,18 @@ def shown(h: Headline, policy: Policy, blocked: Sequence[str]) -> bool:
     return (_source_served(h.source, policy) and not is_blocked(h.url, blocked)
             and not (h.domain and is_blocked(h.domain, blocked)) and not is_not_news(h.url)
             and not is_bot_flash(h.title))
+
+
+def tagged_not_finance(url_key: ColumnElement[str]) -> ColumnElement[bool]:
+    """Whether the news tagging (:mod:`forliosa.news.tagging`) finished this URL (``news_tag_state.status = "done"``)
+    without a single theme, sector or related stock: clearly not finance news (a sports, entertainment or weather story
+    under a stock whose name it shares). 產品負責人 2026-11-17: hidden on the stock page, in ``get_news`` and
+    ``search_news`` and not counted by :func:`recent_count`; kept in ``news_articles``. A headline not tagged yet is
+    shown (the tagging is not waited for); official announcements (公告) are not news_articles rows and are never
+    hidden. A correlated ``EXISTS`` (an anti-join on both primary keys), used as
+    ``~tagged_not_finance(NewsArticle.url_key)`` in a ``WHERE``."""
+    return exists().where(NewsTagState.url_key == url_key, NewsTagState.status == "done",
+                          ~exists().where(NewsTag.url_key == NewsTagState.url_key))
 
 
 def item_out(h: Headline) -> dict[str, Any]:
@@ -403,7 +436,8 @@ def media_items(db: Session, md: MarketData, info: InstrumentInfo, *, settings: 
     now = now or now_utc()
     since = now - timedelta(days=settings.news_retention_days)
     blocked = blocked_domains(db, settings)
-    rows = db.scalars(select(NewsArticle).where(NewsArticle.symbol == info.symbol, NewsArticle.published_at >= since)
+    rows = db.scalars(select(NewsArticle).where(NewsArticle.symbol == info.symbol, NewsArticle.published_at >= since,
+                                                ~tagged_not_finance(NewsArticle.url_key))
                       .order_by(NewsArticle.published_at.desc()).limit(limit * 4))
     heads = [Headline(title=r.title, url=r.url, outlet=r.outlet, domain=r.domain, published_at=_aware(r.published_at),
                       source=r.source, date_only=bool(r.date_only)) for r in rows]
@@ -596,9 +630,11 @@ def _mark_open(db: Session, source: str, now: datetime) -> None:
 def recent_count(db: Session, symbol: str, since: datetime, sources: Sequence[str] | None = None) -> int:
     """Stored headlines of ``symbol`` published since ``since`` (from ``sources``, else any), not counting rows the
     reading side hides (quote pages, forums, robot flashes stored before 2026-11-16: ``is_not_news``,
-    ``is_bot_flash``), so that they do not hold the AI fallback back."""
+    ``is_bot_flash``; headlines tagged as not finance: :func:`tagged_not_finance`), so that they do not hold the AI
+    fallback back."""
     q = select(NewsArticle.url, NewsArticle.title).where(NewsArticle.symbol == symbol,
-                                                         NewsArticle.published_at >= since)
+                                                         NewsArticle.published_at >= since,
+                                                         ~tagged_not_finance(NewsArticle.url_key))
     if sources is not None:
         q = q.where(NewsArticle.source.in_(list(sources)))
     return sum(1 for url, title in db.execute(q) if not is_not_news(url) and not is_bot_flash(title))
@@ -642,7 +678,7 @@ def _refresh_bulk(db: Session, md: MarketData, bulk: GdeltBulk, symbols: Sequenc
         info = md.instrument(sym)
         if info is None:
             continue
-        q = build_query(db, info, now - WINDOW, now)
+        q = build_query(db, info, now - WINDOW, now, md)
         if info.market != "US":
             queries[info.symbol] = q
         else:
@@ -752,7 +788,7 @@ def refresh(db: Session, md: MarketData, *, settings: Settings | None = None, so
             continue
         report.symbols += 1
         now = now_fn()
-        base = build_query(db, info, now - WINDOW, now)
+        base = build_query(db, info, now - WINDOW, now, md)
         for src in list(open_sources):
             if not src.supports(base):
                 continue

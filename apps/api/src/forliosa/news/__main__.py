@@ -95,7 +95,7 @@ def gdelt_bulk_check(symbols: list[str], feeds: list[str]) -> int:
                 continue
             if info.market != "US":
                 queries[info.symbol] = service.build_query(db, info, service.now_utc() - service.WINDOW,
-                                                           service.now_utc())
+                                                           service.now_utc(), md)
             else:
                 us[info.symbol] = us_terms(db, info).matches
     fetcher = gdelt_bulk.bulk_fetcher()

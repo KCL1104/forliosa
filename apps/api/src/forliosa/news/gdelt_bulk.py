@@ -38,8 +38,10 @@ Matching
 --------
 * **Taiwan stocks**: only rows from Taiwanese sites (:func:`forliosa.news.outlets.is_taiwan_outlet`: a ``.tw`` host or
   ``TAIWAN_DOMAINS``, standing in for the DOC API's ``sourcecountry:taiwan``), both feeds. A headline must name the
-  company in its title (:func:`forliosa.news.normalize.is_relevant`: 中文簡稱, code, English short name), the rule
-  every source follows.
+  company in its title (:func:`forliosa.news.normalize.is_relevant`, the rule every source follows; since 2026-11-17
+  :mod:`forliosa.news.tw_match`: the code only with stock context, a short or everyday name only with the code, a
+  finance word or a finance page, never inside a longer word or listed name — the page's URL and title as published
+  are passed for the finance-page test).
 * **US stocks and the US market** (``us``: symbol -> a test of the title and URL, :mod:`forliosa.news.us_match`):
   only the ``english`` feed, only pages of US and UK news outlets (:func:`forliosa.news.outlets.is_us_outlet`,
   standing in for the DOC API's ``(sourcecountry:US OR sourcecountry:UK) sourcelang:english``; the files carry no
@@ -176,7 +178,7 @@ def match(rows: Iterable[GkgRow], queries: Mapping[str, Query],
             for sym, terms, names, codes in prepared:
                 if not (any(n in low for n in names) or any(c in title for c in codes)):
                     continue
-                if is_relevant(title, terms):
+                if is_relevant(title, terms, url=row.url, raw_title=row.title):
                     out.setdefault(sym, []).append(
                         RawItem(title=row.title, url=row.url, published_at=row.seen, domain=row.domain))
         elif us and is_us_outlet(row.url):

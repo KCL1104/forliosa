@@ -532,13 +532,18 @@ def test_get_news_shows_each_media_headlines_tags(client, engine, commercial_md)
         _tagged(db, [("2330.TW", "台積電 CoWoS 擴產", "https://money.udn.com/g/1", now - timedelta(hours=1),
                       {("theme", "advanced_packaging", None), ("sector", "24", None)}),
                      ("2330.TW", "台積電沒有標籤的新聞", "https://money.udn.com/g/2", now - timedelta(hours=2), set())])
+        service.store(db, "2330.TW", [head("台積電還沒標的新聞", "https://money.udn.com/g/3",
+                                           at=now - timedelta(hours=3))], now)
         out = tools.execute(_ctx(db, commercial_md), "get_news", {"symbol": "2330"})
     assert not out.is_error
     by_url = {b["source"]: b for b in out.content}
     tagged = by_url["https://money.udn.com/g/1"]["content"]
     assert len(tagged) == 2 and tagged[1]["text"] == "主題：先進封裝；類股：半導體業"
     assert tagged[0]["text"].endswith("：台積電 CoWoS 擴產")  # the headline block a sentence cites is unchanged
-    assert len(by_url["https://money.udn.com/g/2"]["content"]) == 1
+    # tagged without a single theme, sector or related stock: not finance news, hidden (2026-11-17); not yet tagged:
+    # shown without a note
+    assert "https://money.udn.com/g/2" not in by_url
+    assert len(by_url["https://money.udn.com/g/3"]["content"]) == 1
     assert "classifier" in tools.TOOLS_BY_NAME["get_news"].description
 
 
