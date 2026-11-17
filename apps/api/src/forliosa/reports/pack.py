@@ -76,6 +76,13 @@ FIXED_MISSING = ("twse_institutional", "margin_amount", "us_index_points", "tx_q
 ARCHIVE_START = date(2026, 11, 12)  # the index archive's first day (the 「11/12 起」 column)
 HISTORY_ENOUGH = date(2026, 12, 12)  # from here a month back is inside the archive (``missing.history_short`` ends)
 RULE_STOCKS = "股票只能寫 stocks 名單裡的公司（依規則挑選，規則寫在表頭）；名單外的股票不能出現。"
+# premarket 「今天市場在看什麼」: real events only (the dry run of 11/17 made up 「台股 11/17（二）開盤」 items)
+RULE_WATCH = ("watch 的每一項都要是行事曆（C）或報導（X）裡有日期的事件，refs 要有那個 C 或 X；開盤、收盤、"
+              "前一個交易日的漲跌都不是事件。")
+RULE_WATCH_EMPTY = ("今天的行事曆沒有已排定的事件：watch 只寫報導（X）裡寫明日期的事件；都沒有就給空陣列"
+                    "（這時不受 2–4 項的限制），不要湊數。")
+# the number strip's 漲停／跌停 when a movers table counts only its scope (「範圍內跌停 17 家」 beside 「6／30 家」)
+LIMITS_NOTE = "全部上市普通股；排行表只算範圍內"
 
 
 @dataclass
@@ -115,6 +122,7 @@ class Pack:
                                            "prev_session": set()}
         self.blocks: dict[str, Any] = {"charts": {}, "tables": {}, "numbers": [], "calendar": None, "notes": {}}
         self.already: list[dict[str, Any]] = []
+        self.through = data_through(edition)
 
     # -- ids --------------------------------------------------------------------------------------------------------
     def _id(self, prefix: str) -> str:
@@ -159,6 +167,7 @@ class Pack:
         self.blocks["numbers"].append(item)
 
     def chart(self, c: dict[str, Any] | None, key: str | None = None) -> None:
+        c = clip_chart(c, self.through)
         if c is not None:
             self.blocks["charts"][key or c["id"]] = c
 
@@ -222,6 +231,7 @@ class Pack:
             "next_period": {"start": ed.next_period[0].isoformat(), "end": ed.next_period[1].isoformat()}
             if ed.next_period else None,
             "cutoff": iso_taipei(self.cutoff), "publish_target": iso_taipei(ed.publish_target),
+            "data_through": self.through.isoformat(),
             "web_window": {"from": iso_taipei(ed.web_from), "to": iso_taipei(ed.web_to)},
             "dates": {k: sorted(v) for k, v in self.dates.items()},
             "facts": self.facts, "calendar": self.calendar, "filings": self.filings, "research": self.research,
@@ -239,6 +249,34 @@ def _label(key: str) -> str:
     if key.startswith("rules:"):
         return label("rules")
     return label(key)
+
+
+def data_through(ed: Edition) -> date:
+    """The last Taiwan session an edition's charts and tables may show: the previous session for the premarket (its
+    cut-off comes before the day's close), the edition's day for the close, the week's end for the weekly. A rebuild,
+    a rerun or a correction never draws a later day."""
+    if ed.kind == "premarket" and ed.prev_session is not None:
+        return ed.prev_session
+    return ed.period[1]
+
+
+def clip_chart(c: dict[str, Any] | None, through: date) -> dict[str, Any] | None:
+    """``c`` without the points after ``through`` (every dated series); ``None`` when a line or a comparison keeps
+    fewer than two points (nothing left to draw)."""
+    if not isinstance(c, dict) or not c.get("series"):
+        return c
+    last = through.isoformat()
+    series = []
+    for s in c["series"]:
+        pts = [pt for pt in s.get("points") or [] if str(pt.get("t"))[:10] <= last]
+        if pts:
+            series.append({**s, "points": pts})
+    drawn = [s for s in series if not s.get("hidden")]
+    if c.get("kind") in ("line", "compare", "price"):
+        drawn = [s for s in drawn if len(s["points"]) >= 2]
+    if len(drawn) < (2 if c.get("kind") == "compare" else 1):
+        return None
+    return {**c, "series": series}
 
 
 # -- entry point -----------------------------------------------------------------------------------------------------
@@ -534,19 +572,23 @@ def _menu(p: Pack, code: str, available: bool, periods: list[str], sets: list[st
     p.menu.append({"code": code, "available": available, "periods": periods, "sets": sets or []})
 
 
-def _g5(p: Pack, md_: Any, symbols: list[str], title: str, end: date) -> dict[str, Any] | None:
-    """G5 through the chat's compare chart (archive closes, the history backfill only for the lines). Only for an
-    edition of the last few days: the chart reads up to today, so a past edition would see later closes."""
-    if md_ is None or len(symbols) < 2 or (now_taipei().date() - end).days > 3:
+def g5_card(md_: Any, symbols: list[str], title: str, through: date) -> dict[str, Any] | None:
+    """G5 through the chat's compare chart (archive closes, the history backfill only for the lines): a month up to
+    ``through`` (the edition's data day, never a later close, so a rebuild of a past edition draws what it saw)."""
+    if md_ is None or len(symbols) < 2:
         return None
     from forliosa.ai.charts import compare_chart
 
     infos = [i for i in (md_.instrument(s) for s in symbols[:5]) if i is not None]
-    card = compare_chart(md_, infos, "1M")
+    card = compare_chart(md_, infos, "1M", until=through)
     if not isinstance(card, dict):
         return None
-    card = dict(card, id="G5", title=title)
-    return card
+    series = [{**s, "name": mc.clean_name(str(s.get("name") or ""))} for s in card.get("series") or []]
+    return clip_chart(dict(card, id="G5", title=title, series=series), through)
+
+
+def _g5(p: Pack, md_: Any, symbols: list[str], title: str) -> dict[str, Any] | None:
+    return g5_card(md_, symbols, title, p.through)
 
 
 def _top5_weight_symbols(day: mc.Day | None) -> list[str]:
@@ -647,7 +689,7 @@ def _close(p: Pack, md_: Any) -> None:
         p.chart(B.g1_index_line(pts, sources=p.labels(ds), title=f"加權指數收盤（至 {md(d)}）"))
     else:
         p.blocks["notes"]["G1"] = "官方加權指數尚未取得"
-    g5 = _g5(p, md_, _top5_weight_symbols(twse), f"權值前 5 檔一個月比較（至 {md(d)}）", d)
+    g5 = _g5(p, md_, _top5_weight_symbols(twse), f"權值前 5 檔一個月比較（至 {md(d)}）")
     p.chart(g5)
     _menu(p, "G4", twse is not None, ["day"])
     _menu(p, "G5", g5 is not None, ["day"], ["top5_weight", "gainers", "losers"] if g5 is not None else [])
@@ -673,11 +715,11 @@ def _close_evening(p: Pack, d: date) -> None:
                         [B.stock_row(q, {"mcap": B.cell(B.zhao_text(q.mcap) if q.mcap else "—")}) for q in lists.top10],
                         rule="上櫃普通股，依收盤市值（收盤 × 已發行股數）", sources=[*srcs, label("rules")]))
         p.table(B.table("T5_gainers", f"上櫃漲幅前 5（{md(d)}）" if lists.limit_up_many is None
-                        else f"上櫃漲停 {lists.limit_up_many} 家，其中市值最大的 5 檔（{md(d)}）", B.STOCK_COLUMNS,
+                        else f"上櫃{_many_title(lists.limit_up_many, '漲停')}（{md(d)}）", B.STOCK_COLUMNS,
                         [B.stock_row(q) for q in lists.gainers], rule=lists.scope_rule,
                         empty_text="範圍內沒有上漲的股票。", sources=srcs))
         p.table(B.table("T5_losers", f"上櫃跌幅前 5（{md(d)}）" if lists.limit_down_many is None
-                        else f"上櫃跌停 {lists.limit_down_many} 家，其中市值最大的 5 檔（{md(d)}）", B.STOCK_COLUMNS,
+                        else f"上櫃{_many_title(lists.limit_down_many, '跌停')}（{md(d)}）", B.STOCK_COLUMNS,
                         [B.stock_row(q) for q in lists.losers], rule=lists.scope_rule,
                         empty_text="範圍內沒有下跌的股票。", sources=srcs))
         secs = mc.otc_sectors(tpex)
@@ -782,6 +824,12 @@ def _event_stocks(p: Pack, days: list[mc.Day | None], start: date, end: date, to
             p.stock(q, "事件股（市值前 100）", group)
 
 
+def _many_title(n: int, what: str) -> str:
+    """The movers table when ten or more stocks in its scope hit the limit: the count is the scope's (市值前 200 名或
+    300 億元以上), not the market's — the number strip counts every listed common."""
+    return f"範圍內{what} {n} 家，其中市值最大的 5 檔"
+
+
 def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, contrib: dict[str, Decimal], d: date) -> None:
     srcs = p.labels([*day.datasets])
     top_rows = [B.stock_row(q, {"mcap": B.cell(B.zhao_text(q.mcap) if q.mcap else "—"),
@@ -793,9 +841,14 @@ def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, contrib: dict[str, Deci
                     top_rows, rule="上市普通股，依收盤市值（收盤 × 已發行股數）；點數貢獻是 Forliosa 估算",
                     sources=[*srcs, label("rules")]))
     up_title = f"漲幅前 5（{md(d)}）" if lists.limit_up_many is None else \
-        f"漲停 {lists.limit_up_many} 家，其中市值最大的 5 檔（{md(d)}）"
+        f"{_many_title(lists.limit_up_many, '漲停')}（{md(d)}）"
     down_title = f"跌幅前 5（{md(d)}）" if lists.limit_down_many is None else \
-        f"跌停 {lists.limit_down_many} 家，其中市值最大的 5 檔（{md(d)}）"
+        f"{_many_title(lists.limit_down_many, '跌停')}（{md(d)}）"
+    if lists.limit_up_many is not None or lists.limit_down_many is not None:
+        # the strip counts every listed common; the lists only their scope: both say which one they count
+        for n in p.blocks["numbers"]:
+            if n["key"] == "limits":
+                n["note"] = LIMITS_NOTE
     p.table(B.table("T2_gainers", up_title, B.STOCK_COLUMNS, [B.stock_row(q) for q in lists.gainers],
                     rule=lists.scope_rule, empty_text="範圍內沒有上漲的股票。", sources=srcs))
     p.table(B.table("T2_losers", down_title, B.STOCK_COLUMNS, [B.stock_row(q) for q in lists.losers],
@@ -864,18 +917,17 @@ def _premarket(p: Pack, md_: Any) -> None:
                      f"{pc.oi_ratio * 100:.2f}%", unit="%", day=prev, dataset="taifex-openapi/put_call_ratio",
                      aliases=["P/C", "賣買權"])
         p.number(fid, B.number("pc", "P/C 未平倉比", f"{pc.oi_ratio * 100:.2f}%", date_label=md(prev)))
-    # the previous session's TPEx data (published the evening before)
+    # the previous session's TPEx data (published the evening before). The TPEx index closes at 14:30 and was in the
+    # previous close report: a previous-session number (never the headline), not one of the evening's
     tpex = mc.load_day(p.db, "TPEX", prev, p.cutoff, p.policy)
     evening_rows: list[dict[str, Any]] = []
     o = mc.index_on(p.db, TPEX_INDEX, prev, p.cutoff, p.policy)
     if o is not None:
-        p.fact(f"櫃買指數 {md(prev)} 收盤", "櫃買指數", "otc_close", "evening", o.close, B.number_text(o.close),
+        p.fact(f"櫃買指數 {md(prev)} 收盤", "櫃買指數", "otc_close", "prev_session", o.close, B.number_text(o.close),
                unit="點", day=prev, dataset=o.dataset, aliases=OTC_ALIASES)
         if o.pct is not None:
-            p.fact(f"櫃買指數 {md(prev)} 漲跌幅", "櫃買指數", "otc_pct", "evening", o.pct, B.pct_text(o.pct),
+            p.fact(f"櫃買指數 {md(prev)} 漲跌幅", "櫃買指數", "otc_pct", "prev_session", o.pct, B.pct_text(o.pct),
                    unit="%", day=prev, dataset=o.dataset, aliases=OTC_ALIASES)
-            evening_rows.append({"cells": {"item": B.cell("櫃買指數"), "value": B.cell(B.number_text(o.close)),
-                                           "change": B.cell(B.pct_text(o.pct), B.tone(o.pct))}})
     if tpex is not None:
         br = _breadth_facts(p, tpex, "evening", prefix="上櫃普通股")
         if br is not None:
@@ -910,7 +962,7 @@ def _premarket(p: Pack, md_: Any) -> None:
                     [("item", "項目", "left", False), ("value", "數字", "right", True),
                      ("change", "變化", "right", True)], evening_rows,
                     empty_text="前一個交易日晚上的資料還沒有進來。",
-                    sources=p.labels(["tpex-openapi/index", "tpex-openapi/price", "tpex-openapi/institutional",
+                    sources=p.labels(["tpex-openapi/price", "tpex-openapi/institutional",
                                       "taifex-openapi/institutional_futures", "taifex-openapi/put_call_ratio",
                                       "cbc-opendata/fx"])))
     # the previous session's listed numbers: reference only (never the headline: validator §10.2 item 16)
@@ -925,7 +977,7 @@ def _premarket(p: Pack, md_: Any) -> None:
         p.chart(B.g4_breadth_bars(br.up, br.flat, br.down, br.limit_up, br.limit_down,
                                   title=f"上市普通股漲跌家數（{md(prev)}）", sources=p.labels(twse_prev.datasets)),
                 "G4_prev")
-    g5 = _g5(p, md_, _top5_weight_symbols(twse_prev), f"權值前 5 檔一個月比較（至 {md(prev)}）", prev)
+    g5 = _g5(p, md_, _top5_weight_symbols(twse_prev), f"權值前 5 檔一個月比較（至 {md(prev)}）")
     p.chart(g5)
     _menu(p, "G2", bool(secs), ["day"])
     _menu(p, "G4", twse_prev is not None, ["day"])
@@ -939,6 +991,9 @@ def _premarket(p: Pack, md_: Any) -> None:
     _filings(p, prev, "14:00", set(top100), names)
     _filings(p, d, None, set(top100), names)
     p.rules.append(RULE_STOCKS)
+    p.rules.append(RULE_WATCH)
+    if not p.calendar:  # a thin day: nothing scheduled, so nothing may be made up to fill the list
+        p.rules.append(RULE_WATCH_EMPTY)
     # stocks the edition may name: today's events among the 100 largest (by the previous session's market caps)
     _event_stocks(p, [twse_prev, tpex], d, nxt - timedelta(days=1), set(top100), group="prev_session")
     # the previous close edition's title and highlights (not to be repeated)
@@ -1105,7 +1160,7 @@ def _weekly(p: Pack, md_: Any) -> None:
         if ed.next_period:
             _event_stocks(p, [twse_last, tpex_last], ed.next_period[0], ed.next_period[1], set(top100))
         p.rules.append(RULE_STOCKS)
-        g5 = _g5(p, md_, _top5_weight_symbols(twse_last), f"權值前 5 檔一個月比較（至 {md(last)}）", end)
+        g5 = _g5(p, md_, _top5_weight_symbols(twse_last), f"權值前 5 檔一個月比較（至 {md(last)}）")
         p.chart(g5)
         _menu(p, "G5", g5 is not None, ["week"], ["gainers", "losers"] if g5 is not None else [])
     else:

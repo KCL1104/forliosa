@@ -251,6 +251,19 @@ def _cal_meta(pack: dict[str, Any], time_ref: str, sectors: list[str]) -> str | 
     return text or None
 
 
+def _ai_block(b: dict[str, Any]) -> bool:
+    return b["type"] in ("text", "items") or (b["type"] == "chart" and bool(b.get("caption")))
+
+
+def origin_label(origin: str, blocks: list[dict[str, Any]]) -> str:
+    """The label beside a section's title. A section with the server's tables or charts says 「資料」 even when AI text
+    sits under them (the page marks that text where it starts); only a section of AI text alone says 「AI 依資料與報導
+    整理」. ``origin`` stays ``ai`` whenever there is AI text (corrections and the table versions go by it)."""
+    if origin == "ai" and not any(b["type"] in ("table", "chart") for b in blocks):
+        return ORIGIN_LABEL["ai"]
+    return ORIGIN_LABEL["data"]
+
+
 def _filings_table(pack: dict[str, Any]) -> dict[str, Any] | None:
     rows = [{"cells": {"time": {"text": f.get("time") or "—"},
                        "who": {"text": f"{f.get('name') or ''}（{str(f.get('symbol') or '').split('.')[0]}）"},
@@ -399,8 +412,9 @@ def _footnote_for(pack: dict[str, Any], rid: str, idx: dict[str, dict[str, Any]]
         when = None
         if d:
             when = md(d) if x.get("date_only") else f"{md(d)} {pub[11:16]}"
-        return f"X:{rid}", {"kind": "web", "label": str(x.get("title") or ""), "outlet": x.get("outlet"),
-                            "url": x.get("url"), "date_label": when}
+        # several facts from one article (or the same page as a shared-research source): one footnote
+        return _page_key(x.get("url"), rid), {"kind": "web", "label": str(x.get("title") or ""),
+                                              "outlet": x.get("outlet"), "url": x.get("url"), "date_label": when}
     if kind == "C":
         src = str(x.get("source") or "")
         if src.startswith("rules:"):
@@ -420,9 +434,18 @@ def _footnote_for(pack: dict[str, Any], rid: str, idx: dict[str, dict[str, Any]]
             "date_label": md(d) if d else None}
     if kind == "W":
         s = next(iter(x.get("sources") or []), {}) or {}
-        return f"W:{rid}", {"kind": "research", "label": str(s.get("title") or "共用研究的報導"),
-                            "outlet": s.get("outlet"), "url": s.get("url"), "date_label": None}
+        return _page_key(s.get("url"), rid), {"kind": "research", "label": str(s.get("title") or "共用研究的報導"),
+                                              "outlet": s.get("outlet"), "url": s.get("url"), "date_label": None}
     return None
+
+
+def _page_key(url: Any, rid: str) -> str:
+    """The footnote key of a web page: its normalised address (https, no www., no tracking parameters, no fragment,
+    no trailing slash), so the same article cited through several X (or an X and a W) is one footnote."""
+    from forliosa.news.normalize import normalize_url
+
+    u = str(url or "").strip()
+    return f"U:{normalize_url(u)}" if u else f"{rid[0]}:{rid}"
 
 
 def _all_sentences(payload: dict[str, Any]) -> list[dict[str, Any]]:
@@ -465,6 +488,8 @@ def number_footnotes(payload: dict[str, Any], pack: dict[str, Any]) -> None:
             k, fn = got
             if k not in notes:
                 notes[k] = {"n": len(notes) + 1, **fn, "_x": r if r.startswith("X") else None}
+            elif r.startswith("X") and notes[k]["_x"] is None:
+                notes[k]["_x"] = r  # a page first cited as shared research: still a verified report in the sources
             cites.append(notes[k]["n"])
         s["cites"] = sorted(set(cites))
     payload["footnotes"] = [{k: v for k, v in n.items() if k != "_x"} for n in notes.values()]
@@ -503,16 +528,15 @@ def build(*, kind: str, report_id: str, edition_date: date, period: tuple[date, 
         if out_key and out_key in dropped:
             # the admin view keeps the dropped text (and the server's charts and tables, which members still see)
             blocks_ = _blocks_for(kind, key, pack, blocks, dropped_output or {}, None)
-            sections.append({"key": key, "title": stitle, "origin": "ai", "origin_label": ORIGIN_LABEL["ai"],
+            sections.append({"key": key, "title": stitle, "origin": "ai", "origin_label": origin_label("ai", blocks_),
                              "collapsed_mobile": collapsed, "blocks": blocks_,
                              "dropped": {"reasons": list(dropped[out_key])}})
             continue
         bl = _blocks_for(kind, key, pack, blocks, output, cod)
         if not bl:
             continue
-        ai = any(b["type"] in ("text", "items") or (b["type"] == "chart" and b.get("caption")) for b in bl)
-        origin = "ai" if ai else "data"
-        sections.append({"key": key, "title": stitle, "origin": origin, "origin_label": ORIGIN_LABEL[origin],
+        origin = "ai" if any(_ai_block(b) for b in bl) else "data"
+        sections.append({"key": key, "title": stitle, "origin": origin, "origin_label": origin_label(origin, bl),
                          "collapsed_mobile": collapsed, "blocks": bl})
     ai_text_left = has_ai_text and (title_origin == "ai" or highlights_origin == "ai" or any(
         s["origin"] == "ai" and not s.get("dropped") for s in sections))
@@ -586,7 +610,7 @@ def retable(payload: dict[str, Any], kind: str, pack: dict[str, Any], blocks: di
                 used = True
         if not used:
             merged += data_blocks
-        sections.append({**sec, "blocks": merged})
+        sections.append({**sec, "blocks": merged, "origin_label": origin_label(sec["origin"], merged)})
     order = [k for k, *_ in SECTIONS[kind]]
     for key, new in fresh_by_key.items():
         if key not in seen:

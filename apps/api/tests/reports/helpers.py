@@ -87,7 +87,8 @@ def premarket_output(pk: dict[str, Any]) -> dict[str, Any]:
             p(s("台積電 ADR 美股 11/16 跌 1.00%。", us("台積電 ADR"))),
             p(s("ONEQ 美股 11/16 漲 1.12%。", us("ONEQ"))),
         ],
-        "evening_notes": [p(s("櫃買指數 11/16 收 319.12 點。", fid(pk, "otc_close", group="evening")))],
+        "evening_notes": [p(s("上櫃普通股 11/16 上漲 1 家、下跌 2 家。", fid(pk, "otc_adv_up", group="evening"),
+                              fid(pk, "otc_adv_down", group="evening")))],
         "watch": [
             {"event": "鴻海法說會", "time_ref": cid(pk, "鴻海"), "sectors": ["其他電子"],
              "para": p(s("已排定：鴻海（2317）11/17（二）法說會。", cid(pk, "鴻海")))},

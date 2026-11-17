@@ -63,7 +63,7 @@ from forliosa.reports import accounting, assemble, calls, compliance, gather, pu
 from forliosa.reports import pack as packmod
 from forliosa.reports import settings as rs
 from forliosa.reports.prompts import PROMPT_VERSION
-from forliosa.reports.schedule import Edition, edition_on
+from forliosa.reports.schedule import Edition, edition_on, md
 from forliosa.timeutil import TAIPEI, now_taipei, now_utc, tw_trading_days
 
 log = logging.getLogger(__name__)
@@ -620,6 +620,8 @@ class _Run:
             -> None:
         booked = accounting.book_call(self.db, msg, requested=model, feature=feature, thread_id=self.run.id,
                                       key_slot=slot)
+        if slot is not None and self.run.key_slot is None:
+            self.run.key_slot = slot  # the attempt's slot (the shared pool's pick is known after the first reply)
         info = calls.stop_info(msg)
         usage = getattr(msg, "usage", None)
         self.calls_.append({"step": step, "model_requested": model, "served_models": list(booked.by_model),
@@ -847,17 +849,16 @@ def _extra_charts(kind: str, output: dict[str, Any], pk: dict[str, Any], deps: D
     symbols = [s["symbol"] for s in pk.get("stocks") or [] if set(s.get("lists") or []) & set(want)][:5]
     if len(symbols) < 2:
         return {}
-    try:
-        from forliosa.ai.charts import compare_chart
-
-        infos = [i for i in (deps.md.instrument(sym) for sym in symbols) if i is not None]
-        card = compare_chart(deps.md, infos, "1M")
-    except Exception:
-        return {}
-    if not isinstance(card, dict):
+    try:  # the pack's data day: never a close after it (contract §13.2, the dry run of 11/17)
+        through = date.fromisoformat(str(pk["data_through"]))
+    except (KeyError, TypeError, ValueError):
         return {}
     title = {"gainers": "漲幅前 5 檔一個月比較", "losers": "跌幅前 5 檔一個月比較"}[str(ch["set"])]
-    return {f"G5:{ch['set']}": dict(card, id="G5", title=title)}
+    try:
+        card = packmod.g5_card(deps.md, symbols, f"{title}（至 {md(through)}）", through)
+    except Exception:
+        return {}
+    return {f"G5:{ch['set']}": card} if card is not None else {}
 
 
 def _write_back(db: Session, report: MarketReport, pk: dict[str, Any], deps: Deps) -> None:

@@ -149,8 +149,10 @@ def price_chart(md: MarketData, info: InstrumentInfo, range_: str) -> dict[str, 
                  c["sources"], c["is_demo"], range_=range_, currency=info.currency)
 
 
-def compare_chart(md: MarketData, infos: list[InstrumentInfo], range_: str) -> dict[str, Any] | list[str]:
-    today = today_taipei()
+def compare_chart(md: MarketData, infos: list[InstrumentInfo], range_: str, *,
+                  until: date | None = None) -> dict[str, Any] | list[str]:
+    """``until``: the last day drawn (default today; a market report passes its own data day)."""
+    today = until or today_taipei()
     notes: list[str] = []
     sources: list[str] = []
     is_demo = False

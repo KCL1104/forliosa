@@ -199,6 +199,11 @@ def session_dates(db: Session, market: str, upto: date, cutoff: datetime, policy
     return days[-limit:]
 
 
+def clean_name(name: str) -> str:
+    """A short name as readers know it: without TWSE's 「*」 marker (國巨*, 材料*-KY: shares without a NT$10 par)."""
+    return name.replace("*", "").replace("＊", "").strip() or name
+
+
 def names_for(db: Session, symbols: Iterable[str]) -> dict[str, str]:
     """Short names: the company profile's 公司簡稱, else the instrument list. Never any other profile field."""
     syms = list(dict.fromkeys(symbols))
@@ -209,13 +214,13 @@ def names_for(db: Session, symbols: Iterable[str]) -> dict[str, str]:
                                       .where(CompanyProfile.symbol.in_(chunk))):
             short = (values or {}).get("short_name")
             if short:
-                out[sym] = str(short)
+                out[sym] = clean_name(str(short))
         missing = [s for s in chunk if s not in out]
         if missing:
             for sym, name in db.execute(select(Instrument.symbol, Instrument.name).where(
                     Instrument.symbol.in_(missing))):
                 if name:
-                    out[sym] = name
+                    out[sym] = clean_name(name)
     return out
 
 

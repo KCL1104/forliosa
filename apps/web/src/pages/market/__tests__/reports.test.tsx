@@ -141,8 +141,9 @@ describe("報告頁", () => {
     // 編號（F001、X003、C001…）只在管理員檢視；一般的頁面絕不出現
     expect(text).not.toMatch(/\b[FXCNW]\d{3}\b/)
     expect(article.querySelector("[data-refs]")).toBeNull()
-    // AI 寫的段標「AI 依資料與報導整理」，資料的段標「資料」
+    // 有圖的段標「資料」，段裡的 AI 文字開始的地方標「AI 依資料與報導整理」
     const sectors = within(article).getByRole("heading", { level: 3, name: "類股" }).closest("section")!
+    expect(within(sectors.querySelector("header")!).getByText("資料")).toBeInTheDocument()
     expect(within(sectors).getByText("AI 依資料與報導整理")).toBeInTheDocument()
     // 註腳是上標的號碼，連到來源的那一條；那一條的號碼連回原句
     const cite = article.querySelector<HTMLAnchorElement>("sup a[data-fn-ref]")!
