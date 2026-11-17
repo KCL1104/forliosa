@@ -76,6 +76,7 @@ function KeySlots({ ai }: { ai: AdminOverview["ai"] }) {
         {ai.slots.map((s) => (
           <li key={s.slot} className="flex flex-wrap items-baseline gap-x-4 gap-y-0.5 border-b border-rule py-3">
             <span className="font-medium">金鑰 {s.slot}</span>
+            {s.purpose === "market_reports" && <span className="text-md text-ink">市場報告專用</span>}
             <span className={cn("text-md", s.state === "ok" || s.state === "not_configured" ? "text-ink-2" : "font-medium text-ink")}>{stateText(s)}</span>
             {s.configured && (
               <span className="num ml-auto text-ink">

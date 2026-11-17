@@ -312,6 +312,8 @@ describe("手機持倉：表頭切換今日漲跌與報酬率", { timeout: 20_00
     renderApp("/")
     const list = await phoneList()
     const table = await holdingsTable()
+    // 觀察清單的表頭（同一張表的第二個 tbody）比持股晚一點進來：等它出現再記下桌面的表頭，之後才比得起來
+    await within(table).findByRole("columnheader", { name: /^觀察/ }, { timeout: 5000 })
     const desktopHeads = headerNames(table)
 
     // 真的按鈕、和表頭一樣高（44px）；名稱是看得到的字＋要換成什麼

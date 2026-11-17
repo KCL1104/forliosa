@@ -121,16 +121,17 @@ describe("市場頁的內容", () => {
     expect(document.querySelector(".ai-voice")).toBeNull()
   })
 
-  it("類股由高到低；窄畫面按了才列出全部", async () => {
+  it("類股由高到低（32 類：沒有電子工業合計與 4 個舊的綜合類）；窄畫面按了才列出全部", async () => {
     mount()
     renderApp()
     const section = (await screen.findByRole("heading", { name: "類股" }, T)).closest("section")!
     const rows = within(section).getAllByRole("listitem").filter((li) => !li.hasAttribute("aria-hidden"))
-    expect(rows).toHaveLength(33)
+    expect(rows).toHaveLength(32)
     expect(rows[0]).toHaveTextContent("半導體")
     expect(rows[0]).toHaveTextContent("3.12%")
     expect(rows.at(-1)).toHaveTextContent("玻璃陶瓷")
-    const toggle = within(section).getByRole("button", { name: "全部 33 個類股" })
+    for (const name of ["電子工業", "機電", "塑膠化工", "水泥窯製", "化學生技醫療"]) expect(within(section).queryByText(name)).toBeNull()
+    const toggle = within(section).getByRole("button", { name: "全部 32 個類股" })
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     fireEvent.click(toggle)
     expect(within(section).getByRole("button", { name: "只看漲跌最多的" })).toHaveAttribute("aria-expanded", "true")

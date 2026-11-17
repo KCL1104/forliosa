@@ -8,12 +8,13 @@ import { cn } from "@/lib/utils"
 import { AppShell } from "./AppShell"
 import { PlainLink } from "./links"
 
-/** 管理後台的分頁：總覽・討論・新聞下架・會員 */
+/** 管理後台的分頁：總覽・討論・新聞下架・會員・市場報告 */
 const ADMIN_TABS = [
   { to: "/admin", label: "總覽", match: (p: string) => p === "/admin" || p === "/admin/" },
   { to: "/admin/discussions", label: "討論", match: (p: string) => p.startsWith("/admin/discussions") },
   { to: "/admin/news", label: "新聞下架", match: (p: string) => p.startsWith("/admin/news") },
   { to: "/admin/members", label: "會員", match: (p: string) => p.startsWith("/admin/members") },
+  { to: "/admin/reports", label: "市場報告", match: (p: string) => p.startsWith("/admin/reports") },
 ] as const
 
 /**
@@ -28,7 +29,7 @@ export function AdminGate() {
 
 /**
  * 管理後台（站方管理員；2026-11-14 從頭像選單移出來）：和帳本分開的一個小外殼。
- * 頁首：字標｜管理後台、分頁（總覽・討論・新聞下架・會員；選取語法 (a)）、外框按鈕「回到帳本」。
+ * 頁首：字標｜管理後台、分頁（總覽・討論・新聞下架・會員・市場報告；選取語法 (a)）、外框按鈕「回到帳本」。
  * 桌面分頁在頁首那一列；手機頁首下面再一列分頁。沒有 AI 面板、搜尋、隱私與底部列。
  */
 function AdminShell() {

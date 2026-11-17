@@ -12,10 +12,16 @@ export type ChartForm = "line" | "bar"
 /** 類別軸（月份、季別）的柱子總數不超過這個數才畫柱狀；再多就太細，改畫折線 */
 const MAX_BARS = 24
 
+/** 要畫的線：`hidden` 的（例如「較前一日」）只出現在讀數 */
+export function visibleSeries(chart: AiChart): AiChart["series"] {
+  return chart.series.filter((s) => !s.hidden)
+}
+
 export function chartForm(chart: AiChart): ChartForm {
+  if (chart.kind === "columns") return "bar"
   if (chart.x === "date") return "line"
   const cats = categories(chart).length
-  return cats * chart.series.length <= MAX_BARS ? "bar" : "line"
+  return cats * visibleSeries(chart).length <= MAX_BARS ? "bar" : "line"
 }
 
 /** 類別軸的刻度：所有系列出現過的月份／季別，照時間排 */
@@ -42,7 +48,7 @@ export function niceTicks(lo: number, hi: number, count = 4): number[] {
 
 /** 縱軸的範圍：報酬率與柱狀圖一定包含 0（柱子從 0 長出來；報酬率要看得出正負） */
 export function valueDomain(chart: AiChart, form: ChartForm): { ticks: number[]; min: number; max: number } {
-  const values = chart.series.flatMap((s) => s.points.map((p) => p.v))
+  const values = visibleSeries(chart).flatMap((s) => s.points.map((p) => p.v))
   let lo = Math.min(...values)
   let hi = Math.max(...values)
   if (chart.unit === "pct" || form === "bar") {
@@ -62,20 +68,33 @@ function stepDecimals(step: number, cap = 2): number {
   return cap
 }
 
-/** 縱軸刻度的字（短）：報酬率 +10%、價格 1,050、營收 2,500 億、EPS 12.5 */
+/**
+ * 縱軸刻度的字（短）：報酬率 +10%、價格 1,050、營收 2,500 億、EPS 12.5；
+ * 市場報告的單位：指數 27,000、點數 −1,000、家數 300、口數 −3萬（1 萬以上縮寫）、億元 4,500
+ */
 export function tickLabel(chart: AiChart, v: number, step: number): string {
   switch (chart.unit) {
     case "pct":
       return formatPercent(v, { decimals: stepDecimals(step * 100, 1) })
     case "amount_k":
       return formatCompact(v * 1000, 0)
+    case "lots":
+      return Math.abs(v) >= 10_000 ? formatCompact(v, stepDecimals(step / 10_000, 1)) : formatNumber(v, 0)
+    case "points":
+    case "count":
+    case "yi":
+      return formatNumber(v, stepDecimals(step, 0))
     default:
       return formatNumber(v, stepDecimals(step))
   }
 }
 
-/** 讀數（提示框、圖例、線尾）：和頁面上同一套格式 */
-export function valueLabel(chart: AiChart, v: number, symbol: string | null): string {
+/**
+ * 讀數（提示框、圖例、線尾）：和頁面上同一套格式。
+ * 市場報告：指數 2 位小數、點數整數加「點」、家數加「家」、口數千分位加「口」、億元加「億」；`signed` 時正數也加「+」（「較前一日」）
+ */
+export function valueLabel(chart: AiChart, v: number, symbol: string | null, opts: { signed?: boolean } = {}): string {
+  const sign = opts.signed && v > 0 ? "+" : ""
   switch (chart.unit) {
     case "pct":
       return formatPercent(v)
@@ -83,15 +102,26 @@ export function valueLabel(chart: AiChart, v: number, symbol: string | null): st
       return formatCompact(v * 1000)
     case "eps":
       return formatNumber(v, 2)
+    case "index":
+      return `${sign}${formatNumber(v, 2)}`
+    case "points":
+      return `${sign}${formatNumber(v, 0)} 點`
+    case "count":
+      return `${sign}${formatNumber(v, 0)} 家`
+    case "lots":
+      return `${sign}${formatNumber(v, 0)} 口`
+    case "yi":
+      return `${sign}${formatNumber(v, 0)} 億`
     default:
       return formatPrice(v, symbol ? marketOf(symbol) : "TWSE")
   }
 }
 
-/** 橫軸的字：日期 5/13（跨年或超過約十個月寫 2025/11）、月份 2025/11、季別 25Q3 */
+/** 橫軸的字：日期 5/13（跨年或超過約十個月寫 2025/11）、月份 2025/11、季別 25Q3、交易日 11/12、類別照原文 */
 export function timeLabel(chart: AiChart, t: string, long = false): string {
   if (chart.x === "quarter") return long ? t.replace("Q", " Q") : t.replace(/^(?:FY)?20/, "")
   if (chart.x === "month") return t.replace("-", "/")
+  if (chart.x === "category") return t
   const [y, m, d] = t.split("-")
   return long ? `${y}/${m}/${d}` : `${Number(m)}/${Number(d)}`
 }
@@ -147,7 +177,8 @@ export function valueAt(points: AiChart["series"][number]["points"], t: string):
 
 /** 給螢幕報讀器的一句話：每條線的起訖 */
 export function chartSummary(chart: AiChart): string {
-  const parts = chart.series
+  if (chart.kind === "bars") return `${chart.title}。${(chart.bars ?? []).map((b) => `${b.label} ${b.display}`).join("、")}`
+  const parts = visibleSeries(chart)
     .filter((s) => s.points.length > 0)
     .map((s) => {
       const first = s.points[0]!

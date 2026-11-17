@@ -105,11 +105,36 @@ const stockRoute = createRoute({
   component: lazyRouteComponent(() => import("@/pages/stock/StockPage"), "StockPage"),
 })
 
-// 市場：收盤後的指數、類股、排行與重大訊息（登入後；首頁仍是帳本）
+/** 市場報告的三種（盤前重點、盤後重點、市場週報） */
+export const MARKET_REPORT_KINDS = ["premarket", "close", "weekly"] as const
+export type MarketReportKind = (typeof MARKET_REPORT_KINDS)[number]
+/** 市場頁：預設是「行情」（不寫進網址）；`tab=reports` 是「報告」分頁，`kind` 是選哪一種 */
+export interface MarketSearch {
+  tab?: "reports"
+  kind?: MarketReportKind
+}
+const reportKind = (v: unknown): MarketReportKind | undefined => (MARKET_REPORT_KINDS.includes(v as MarketReportKind) ? (v as MarketReportKind) : undefined)
+
+// 市場：收盤後的指數、類股、排行與重大訊息（登入後；首頁仍是帳本）；「報告」分頁是市場報告（2026-11-17）
 const marketRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/market",
+  validateSearch: (s: Record<string, unknown>): MarketSearch => (s.tab === "reports" ? { tab: "reports", kind: reportKind(s.kind) } : {}),
   component: lazyRouteComponent(() => import("@/pages/market/MarketPage"), "MarketPage"),
+})
+
+/** 一份市場報告（登入才看得到；沒有公開網址）：`version` 看舊版 */
+export interface ReportSearch {
+  version?: number
+}
+const marketReportRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/market/reports/$reportId",
+  validateSearch: (s: Record<string, unknown>): ReportSearch => {
+    const v = Number(s.version)
+    return Number.isInteger(v) && v > 0 ? { version: v } : {}
+  },
+  component: lazyRouteComponent(() => import("@/pages/market/reports/ReportPage"), "ReportPage"),
 })
 
 const groupsRoute = createRoute({
@@ -200,6 +225,24 @@ const adminMembersRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): AdminMembersSearch => ({ kind: s.kind === "group" ? "group" : undefined }),
   component: lazyRouteComponent(() => import("@/pages/admin/AdminMembersPage"), "AdminMembersPage"),
 })
+// 管理後台「市場報告」：狀態、盲測、最近的產生紀錄、三張手動維護的表
+const adminReportsRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/reports",
+  component: lazyRouteComponent(() => import("@/pages/admin/AdminReportsPage"), "AdminReportsPage"),
+})
+/** 盲測一份報告的 A／B／C：`v` 是左邊（或手機上）看的那一個，`vs` 是寬螢幕右邊並排的那一個 */
+export interface AdminTrialSearch {
+  v?: "A" | "B" | "C"
+  vs?: "A" | "B" | "C"
+}
+const variantLabel = (v: unknown) => (v === "A" || v === "B" || v === "C" ? v : undefined)
+const adminTrialRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/admin/reports/$reportId",
+  validateSearch: (s: Record<string, unknown>): AdminTrialSearch => ({ v: variantLabel(s.v), vs: variantLabel(s.vs) }),
+  component: lazyRouteComponent(() => import("@/pages/admin/AdminTrialComparePage"), "AdminTrialComparePage"),
+})
 const adminDiscussionsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/discussions",
@@ -245,6 +288,7 @@ const routeTree = rootRoute.addChildren([
   ledgerRoute,
   stockRoute,
   marketRoute,
+  marketReportRoute,
   groupsRoute,
   groupRoute,
   memberRoute,
@@ -258,6 +302,8 @@ const routeTree = rootRoute.addChildren([
   adminDiscussionsRoute,
   adminNewsRoute,
   adminMembersRoute,
+  adminReportsRoute,
+  adminTrialRoute,
   settingsRoute,
   dataSourcesRoute,
   termsRoute,

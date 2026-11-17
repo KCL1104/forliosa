@@ -16,7 +16,9 @@ import {
   valueAt,
   valueDomain,
   valueLabel,
+  visibleSeries,
 } from "./chart-geometry"
+import { HBarsChart } from "./HBarsChart"
 import type { AiChart } from "./remote"
 
 /** 多條線的分類色：固定順序（series.css，兩個主題各自驗過色弱可分辨） */
@@ -29,7 +31,7 @@ const SERIES_COLORS = ["var(--series-1)", "var(--series-2)", "var(--series-3)", 
  * - 幾檔互相比較：分類色 1～5，照使用者說的順序。
  */
 function seriesStyle(chart: AiChart, i: number): { color: string; dash?: string } {
-  if (chart.series.length === 1) return { color: "var(--chart-mine)" }
+  if (visibleSeries(chart).length === 1) return { color: "var(--chart-mine)" }
   if (chart.kind === "performance") return i === 0 ? { color: "var(--chart-mine)" } : { color: "var(--chart-bench)", dash: "5 4" }
   return { color: SERIES_COLORS[i % SERIES_COLORS.length]! }
 }
@@ -71,17 +73,21 @@ export function ChartCard({ chart }: { chart: AiChart }) {
   const titleId = useId()
   const [wrapRef, width] = useWidth(340)
   const [active, setActive] = useState<number | null>(null)
-  const drawable = chart.series.filter((s) => s.points.length > 0)
+  // `hidden` 的線（市場報告 G7 的「較前一日」）不畫，只出現在讀數
+  const shown = visibleSeries(chart)
+  const drawable = shown.filter((s) => s.points.length > 0)
   const form = chartForm(chart)
-  const multi = chart.series.length > 1
+  const multi = shown.length > 1
+  // 交易日一根柱（外資台指期淨未平倉）：正值墨色、負值鉛筆灰（法人用色，不是漲跌）
+  const columns = chart.kind === "columns"
 
   const model = useMemo(() => {
-    if (drawable.length === 0) return null
+    if (drawable.length === 0 || chart.kind === "bars") return null
     const { ticks, min, max } = valueDomain(chart, form)
     const step = ticks.length > 1 ? ticks[1]! - ticks[0]! : 1
     const labels = ticks.map((v) => tickLabel(chart, v, step))
     const left = Math.max(...labels.map(textWidth)) + 10
-    const ends = form === "line" && multi ? chart.series.map(endLabel) : []
+    const ends = form === "line" && multi ? shown.map(endLabel) : []
     const right = ends.length ? Math.max(...ends.map(textWidth)) + 14 : 10
     const plotW = Math.max(40, width - left - right)
     const plotH = HEIGHT - TOP - BOTTOM
@@ -100,10 +106,16 @@ export function ChartCard({ chart }: { chart: AiChart }) {
       x = (t) => left + (xs.length === 1 ? plotW / 2 : (xs.indexOf(t) / (xs.length - 1)) * plotW)
     }
     return { ticks, labels, step, left, right, plotW, plotH, y, x, xs, ends, min, max }
-  }, [chart, drawable.length, form, multi, width])
+  }, [chart, drawable.length, form, multi, shown, width])
 
   const note = (
     <>
+      {/* 點數貢獻的「官方漲跌 −2,635.04 點」：和圖上的估算對照 */}
+      {chart.reference && (
+        <p className="num mt-2 text-sm text-ink-2">
+          {chart.reference.label} <span className="text-ink">{chart.reference.display}</span>
+        </p>
+      )}
       {chart.notes.length > 0 && (
         <ul className="mt-2 flex flex-col gap-0.5 text-sm text-ink-2">
           {chart.notes.map((n) => (
@@ -116,13 +128,28 @@ export function ChartCard({ chart }: { chart: AiChart }) {
   )
 
   const head = (
-    <figcaption className="flex items-baseline gap-2 text-md font-semibold text-ink">
+    <figcaption className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 text-md font-semibold text-ink">
       <span id={titleId} className="min-w-0">
         {chart.title}
       </span>
+      {/* Forliosa 自己算的（點數貢獻、市值）：和「預估」同一種細框 */}
+      {chart.estimate && <span className="demo-tag font-normal">估算</span>}
+      {/* 存檔從哪一天開始（「11/12 起」）：歷史還短時讀的人知道為什麼線這麼短 */}
+      {chart.since && <span className="num text-sm font-normal text-ink-2">{chart.since}</span>}
       {chart.is_demo && <DemoTag className="ml-auto shrink-0 font-normal" />}
     </figcaption>
   )
+
+  // 以零為軸的雙向橫條：數字是主角，沒有縱軸與提示框
+  if (chart.kind === "bars") {
+    return (
+      <figure aria-labelledby={titleId} className="mt-4 border-y border-rule py-3">
+        {head}
+        <HBarsChart chart={chart} />
+        {note}
+      </figure>
+    )
+  }
 
   if (!model) {
     return (
@@ -143,7 +170,7 @@ export function ChartCard({ chart }: { chart: AiChart }) {
   const lastOf = (s: AiChart["series"][number]) => s.points[s.points.length - 1]
   const endYs = model.ends.length
     ? spreadLabels(
-        chart.series.map((s) => (lastOf(s) ? y(lastOf(s)!.v) : TOP)),
+        shown.map((s) => (lastOf(s) ? y(lastOf(s)!.v) : TOP)),
         14,
         TOP + 4,
         TOP + plotH - 2,
@@ -180,17 +207,22 @@ export function ChartCard({ chart }: { chart: AiChart }) {
     }
   }
 
+  /** 柱子的顏色：交易日柱是正墨負鉛筆灰；其他照「是誰」 */
+  const barColor = (i: number, v: number) => (columns ? (v >= 0 ? "var(--chart-mine)" : "var(--chart-bench)") : seriesStyle(chart, i).color)
+  // 讀數列出每一條（包括只在讀數出現的 hidden，例如「較前一日 +1,234 口」：沒有記號）
   const rows =
     activeT === undefined
       ? []
-      : chart.series.flatMap((s, i) => {
+      : chart.series.flatMap((s) => {
           const v = chart.x === "date" ? valueAt(s.points, activeT) : (s.points.find((p) => p.t === activeT)?.v ?? null)
-          return v === null ? [] : [{ label: s.name, value: valueLabel(chart, v, s.symbol), color: seriesStyle(chart, i).color, shape: form === "bar" ? ("square" as const) : ("line" as const) }]
+          if (v === null) return []
+          const i = shown.indexOf(s)
+          return [{ label: s.name, value: valueLabel(chart, v, s.symbol, { signed: !!s.hidden }), color: i < 0 ? undefined : barColor(i, v), shape: form === "bar" ? ("square" as const) : ("line" as const) }]
         })
 
   // 柱狀：每個類別一組，柱寬最多 24px，組內留 2px 的紙色間隔
   const band = form === "bar" ? plotW / xs.length : 0
-  const barW = form === "bar" ? Math.max(3, Math.min(24, (band * 0.76) / chart.series.length - 2)) : 0
+  const barW = form === "bar" ? Math.max(3, Math.min(24, (band * 0.76) / shown.length - 2)) : 0
 
   return (
     <figure aria-labelledby={titleId} className="mt-4 border-y border-rule py-3">
@@ -198,7 +230,7 @@ export function ChartCard({ chart }: { chart: AiChart }) {
       {multi && (
         <Legend
           className="mt-1.5"
-          items={chart.series.map((s, i) => ({
+          items={shown.map((s, i) => ({
             label: s.name,
             color: seriesStyle(chart, i).color,
             shape: form === "bar" ? "square" : "line",
@@ -242,11 +274,10 @@ export function ChartCard({ chart }: { chart: AiChart }) {
           {form === "line" && activeT !== undefined && <line x1={x(activeT)} x2={x(activeT)} y1={TOP} y2={TOP + plotH} stroke="var(--ctl)" strokeWidth={1} />}
 
           {form === "bar"
-            ? chart.series.map((s, i) => {
-                const { color } = seriesStyle(chart, i)
-                const offset = (i - (chart.series.length - 1) / 2) * (barW + 2)
+            ? shown.map((s, i) => {
+                const offset = (i - (shown.length - 1) / 2) * (barW + 2)
                 return (
-                  <g key={s.name} fill={color}>
+                  <g key={s.name} fill={columns ? undefined : seriesStyle(chart, i).color}>
                     {s.points.map((p) => {
                       const base = y(0)
                       const top = y(p.v)
@@ -258,12 +289,12 @@ export function ChartCard({ chart }: { chart: AiChart }) {
                         p.v >= 0
                           ? `M${bx} ${base}V${top + r}Q${bx} ${top} ${bx + r} ${top}H${bx + barW - r}Q${bx + barW} ${top} ${bx + barW} ${top + r}V${base}Z`
                           : `M${bx} ${base}V${top - r}Q${bx} ${top} ${bx + r} ${top}H${bx + barW - r}Q${bx + barW} ${top} ${bx + barW} ${top - r}V${base}Z`
-                      return <path key={p.t} d={d} />
+                      return <path key={p.t} d={d} fill={columns ? barColor(i, p.v) : undefined} />
                     })}
                   </g>
                 )
               })
-            : chart.series.map((s, i) => {
+            : shown.map((s, i) => {
                 const { color, dash } = seriesStyle(chart, i)
                 const d = s.points.map((p, k) => `${k === 0 ? "M" : "L"}${x(p.t).toFixed(1)} ${y(p.v).toFixed(1)}`).join("")
                 const last = lastOf(s)
@@ -278,7 +309,7 @@ export function ChartCard({ chart }: { chart: AiChart }) {
               })}
 
           {model.ends.map((label, i) => {
-            const s = chart.series[i]!
+            const s = shown[i]!
             const last = lastOf(s)
             if (!last) return null
             const ex = x(last.t)
@@ -296,7 +327,7 @@ export function ChartCard({ chart }: { chart: AiChart }) {
 
           {form === "line" &&
             activeT !== undefined &&
-            chart.series.map((s, i) => {
+            shown.map((s, i) => {
               const v = chart.x === "date" ? valueAt(s.points, activeT) : (s.points.find((p) => p.t === activeT)?.v ?? null)
               return v === null ? null : <circle key={s.name} cx={x(activeT)} cy={y(v)} r={4} fill={seriesStyle(chart, i).color} stroke="var(--background)" strokeWidth={2} />
             })}

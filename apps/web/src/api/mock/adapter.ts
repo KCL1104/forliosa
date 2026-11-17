@@ -43,6 +43,7 @@ import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
 import { createSharingStore, type MemberSource } from "./sharing"
 import { createDiscussionStore, type DiscussionOptions } from "./discussions"
 import { createAdminStore } from "./admin"
+import { createMarketReportsStore, type MockReportsScenario } from "./market-reports"
 import { todayInTaipei } from "@/lib/format"
 import { closedRounds, positionHistory } from "./rounds"
 import {
@@ -228,6 +229,8 @@ export interface MockOptions {
   terms?: { current: string; accepted?: string | null; effectiveDate?: string | null; summary?: string | null }
   /** 帳本的歷史只留最後幾個收盤（`?hist=N`，看存檔剛開始時的走勢與績效）；預設全部 */
   history?: number
+  /** 市場報告的情境（`?mreport=`，見 `mock/market-reports.ts`）；預設 trial（盲測中，只有站方管理員看得到） */
+  reports?: MockReportsScenario
 }
 
 /**
@@ -361,6 +364,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       dad,
       dadAccounts: DAD_ACCOUNTS,
       origin: () => (typeof window === "undefined" ? "http://localhost:5173" : window.location.origin),
+      marketReportsPublic: () => reports.publicMode(),
     },
     scenario,
   )
@@ -390,6 +394,11 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       if (!discussions.meFields().is_admin) throw new ApiError(404, "not_found", "找不到這個頁面")
     },
   })
+  // ── 市場報告：試跑期間只有站方管理員看得到（和討論串的站方管理同一個判斷） ──
+  const reports = createMarketReportsStore(
+    { now: () => mockMarketNow(options.market), isAdmin: () => discussions.meFields().is_admin, signedIn: () => signedIn, demo },
+    options.reports,
+  )
   /**
    * `User`：個人資料多了 public_name、is_admin、public_posting_suspended_until（`GET /me`、開發登入、PATCH 都有）。
    * 方案：示範使用者是會員；匯入對帳單和後端預設的 `IMPORT_STATEMENTS=admins` 一樣只開給站方管理員（`?discuss=member` 就沒有入口）
@@ -1059,6 +1068,30 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         admin.requireAdmin()
         sharing.adminRevokePass(id)
       }),
+
+    // ── 市場報告 ──
+    getMarketReportStatus: () => wait(() => reports.status()),
+    listMarketReports: (query) => wait(() => reports.list(query)),
+    getLatestMarketReport: (kind) => wait(() => reports.latest(kind)),
+    getMarketReport: (id, version) => wait(() => reports.get(id, version)),
+    markMarketReportsSeen: () => wait(() => reports.seen()),
+    getAdminReportsOverview: () => wait(() => reports.overview()),
+    putReportsConfig: (body) => wait(() => reports.config(body)),
+    getAdminReportsTrial: () => wait(() => reports.trial()),
+    getAdminReportVariant: (reportId, label) => wait(() => reports.variant(reportId, label)),
+    voteReport: (reportId, body) => wait(() => reports.vote(reportId, body)),
+    revealTrial: (body) => wait(() => reports.reveal(body)),
+    addReportCorrection: (reportId, body) => wait(() => reports.correction(reportId, body)),
+    rebuildReportData: (body) => wait(() => reports.rebuild(body)),
+    listNyseHolidays: () => wait(() => reports.nyseList()),
+    putNyseHoliday: (date, body) => wait(() => reports.nysePut(date, body)),
+    deleteNyseHoliday: (date) => wait(() => reports.nyseDelete(date)),
+    listMacroEvents: () => wait(() => reports.macroList()),
+    addMacroEvent: (body) => wait(() => reports.macroAdd(body)),
+    deleteMacroEvent: (id) => wait(() => reports.macroDelete(id)),
+    listUsEarnings: () => wait(() => reports.earningsList()),
+    addUsEarning: (body) => wait(() => reports.earningsAdd(body)),
+    deleteUsEarning: (id) => wait(() => reports.earningsDelete(id)),
   }
 
   return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)
@@ -1074,6 +1107,8 @@ const IGNORES_VIEW_AS = new Set<MethodName>([
   "getIntraday", "getChips", "getFinancials", "getNews", "getWhy", "getAttributions", "getMarketStatus", "getMarketOverview",
   // 討論串的讀取一律以登入者本人回答（前端在查看模式擋下討論頁）
   "listTopics", "getTopic", "listReplies",
+  // 市場報告沒有個人資料：以登入者本人回答（`POST /market/reports/seen` 照規則 read_only）
+  "getMarketReportStatus", "listMarketReports", "getLatestMarketReport", "getMarketReport",
 ])
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([
@@ -1090,6 +1125,8 @@ const WRITES = new Set<MethodName>([
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",
   "createTopic", "deleteTopic", "createReply", "deleteReply", "addDiscussionReaction", "removeDiscussionReaction", "reportDiscussion",
   "moderateDiscussion", "createSuspension", "liftSuspension", "blockDomain", "unblockDomain", "grantMember", "revokeMember",
+  "markMarketReportsSeen", "putReportsConfig", "voteReport", "revealTrial", "addReportCorrection", "rebuildReportData",
+  "putNyseHoliday", "deleteNyseHoliday", "addMacroEvent", "deleteMacroEvent", "addUsEarning", "deleteUsEarning",
 ])
 
 function guardViewAs(base: ForliosaApi, validate: (id: string) => unknown, wait: <T>(value: T | (() => T)) => Promise<T>): ForliosaApi {

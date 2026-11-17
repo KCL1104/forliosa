@@ -1,5 +1,9 @@
-import { useMarketOverview } from "@/api/queries"
+import { useSearch } from "@tanstack/react-router"
+import { useMarketOverview, useMarketReportStatus } from "@/api/queries"
 import type { MarketOverview } from "@/api/types"
+import type { MarketSearch } from "@/router"
+import { MarketTabs, type MarketTab } from "./reports/MarketTabs"
+import { ReportsTab } from "./reports/ReportsTab"
 import { PageFrame } from "@/app/PageFrame"
 import { usePageTitle } from "@/app/page-title"
 import { DataNotes } from "@/components/data-notes"
@@ -20,6 +24,7 @@ import { UsBlock } from "./UsBlock"
 /**
  * 市場：收盤後的市場資訊（產品負責人 2026-11-13；登入後另開一頁，首頁仍是帳本）。
  * 由上到下：指數 → AI 收盤重點（有才出現）→ 類股漲跌 → 排行 → 美股（SPY、DIA、ONEQ 與美股新聞；有才出現）→ 重大訊息。
+ * 有市場報告可看時（2026-11-17；試跑期間只有站方管理員），標題下面多一列分頁「行情｜報告」（`?tab=reports&kind=`）。
  * 只有收盤後的資料：沒有盤中、沒有海外指數本身（美股只列追蹤指數的 ETF）、沒有加密貨幣。
  * 每一塊自己帶日期（各交易所公布的時間不同；美股是紐約的日期）。上市或上櫃的收盤價還沒進來時，標題旁寫預計幾點更新。
  * 查看別人的資產時照常可看：這一頁沒有個人資料。
@@ -34,6 +39,11 @@ export function MarketPage() {
 }
 
 function Market() {
+  const search = useSearch({ from: "/market" }) as MarketSearch
+  const status = useMarketReportStatus()
+  // 「報告」分頁只在有報告可看的時候出現（試跑期間只有站方管理員）；沒有時整頁和以前一樣，沒有分頁列
+  const available = !!status.data?.available
+  const tab: MarketTab = available && search.tab === "reports" ? "reports" : "quotes"
   const q = useMarketOverview()
   const data = q.data
   return (
@@ -42,6 +52,7 @@ function Market() {
         title="市場"
         className="mb-4 lg:mb-6"
         meta={
+          tab === "quotes" &&
           data && (
             <>
               {data.as_of && <span className="num text-sm text-ink-2">{formatDateShort(data.as_of, false)} 收盤</span>}
@@ -51,13 +62,18 @@ function Market() {
           )
         }
       />
-      {q.isError ? (
-        <ErrorState error={q.error} onRetry={() => void q.refetch()} />
-      ) : !data ? (
-        <MarketSkeleton />
-      ) : (
-        <MarketBody data={data} />
-      )}
+      {available && <MarketTabs tab={tab} kind={search.kind} />}
+      <div id="market-tabpanel" role={available ? "tabpanel" : undefined} aria-labelledby={available ? `market-tab-${tab}` : undefined}>
+        {tab === "reports" ? (
+          <ReportsTab kind={search.kind} />
+        ) : q.isError ? (
+          <ErrorState error={q.error} onRetry={() => void q.refetch()} />
+        ) : !data ? (
+          <MarketSkeleton />
+        ) : (
+          <MarketBody data={data} />
+        )}
+      </div>
       <SourcesFooter />
     </PageFrame>
   )

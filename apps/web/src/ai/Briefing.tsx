@@ -22,9 +22,16 @@ import { bleed, bleedPad } from "./panel-helpers"
  * 這個檔案有三個出口：面板首頁最上面的那一塊、對話紀錄頁的「收盤簡報」、還沒看過時的小圓點（要不要顯示看 `use-briefing-unread.ts`）。
  */
 
-/** 未讀的小圓點（不是數字徽章）：放在「問 AI」的按鈕與面板標題旁邊 */
+/**
+ * 未讀的小圓點（不是數字徽章）：收盤簡報放在「問 AI」的按鈕與面板標題旁邊；市場報告放在導覽的「市場」旁邊（2026-11-17）。
+ * 兩個都是 AI 寫好、等你看的東西，所以是石墨灰。圓點本身對螢幕報讀器隱藏：按鈕或連結的名稱另外寫「（有新的…）」。
+ */
+export function UnreadDot({ className, ...data }: { className?: string } & Record<`data-${string}`, string | boolean | undefined>) {
+  return <span aria-hidden data-unread-dot="" {...data} className={cn("inline-block size-2 shrink-0 rounded-full bg-ai", className)} />
+}
+/** 收盤簡報的未讀圓點（舊名，`data-briefing-dot` 給測試找） */
 export function BriefingDot({ className }: { className?: string }) {
-  return <span aria-hidden data-briefing-dot className={cn("inline-block size-2 shrink-0 rounded-full bg-ai", className)} />
+  return <UnreadDot data-briefing-dot="" className={className} />
 }
 
 const MARK_READ_AFTER_MS = 1200

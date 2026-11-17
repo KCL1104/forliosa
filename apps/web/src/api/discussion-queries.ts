@@ -7,7 +7,13 @@ import {
   type DiscussionTarget,
   type GroupPassGrantBody,
   type GroupPassPatch,
+  type MacroEventInput,
   type MemberGrantBody,
+  type NyseHolidayInput,
+  type ReportKind,
+  type ReportsConfigPatch,
+  type ReportVariant,
+  type UsEarningInput,
   type ModerationAction,
   type Paged,
   type Reaction,
@@ -329,4 +335,103 @@ export function useUpdateGroupPass() {
 export function useRevokeGroupPass() {
   const invalidate = useInvalidatePasses()
   return useMutation({ mutationFn: (id: string) => api.revokeGroupPass(id), onSuccess: invalidate })
+}
+
+// ── 管理後台：市場報告（2026-11-17；盲測、模式、手動維護的三張表） ─────────
+export const rk = {
+  all: ["admin", "market-reports"] as const,
+  overview: ["admin", "market-reports", "overview"] as const,
+  trial: ["admin", "market-reports", "trial"] as const,
+  variant: (id: string, label: ReportVariant) => ["admin", "market-reports", "variant", id, label] as const,
+  nyse: ["admin", "market-reports", "nyse"] as const,
+  macro: ["admin", "market-reports", "macro"] as const,
+  earnings: ["admin", "market-reports", "earnings"] as const,
+}
+/** 狀態、花費、最近的產生紀錄：管理員自己按「重新載入」或換頁回來才重抓 */
+export function useAdminReportsOverview() {
+  return useQuery({ queryKey: rk.overview, queryFn: () => api.getAdminReportsOverview(), staleTime: 60_000, retry: no4xxRetry })
+}
+export function useAdminReportsTrial() {
+  return useQuery({ queryKey: rk.trial, queryFn: () => api.getAdminReportsTrial(), staleTime: 60_000, retry: no4xxRetry })
+}
+/** 盲測一個版本（管理員形式）；還在寫是 409 */
+export function useAdminReportVariant(id: string, label: ReportVariant, enabled = true) {
+  return useQuery({ enabled, queryKey: rk.variant(id, label), queryFn: () => api.getAdminReportVariant(id, label), staleTime: 5 * 60_000, retry: no4xxRetry })
+}
+/** 改模式或撰寫設定：後台、報告（看得到的範圍變了）與群組頻道（三個推播開關）都重新讀 */
+export function usePutReportsConfig() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: ReportsConfigPatch) => api.putReportsConfig(body),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: rk.all })
+      void qc.invalidateQueries({ queryKey: qk.reports })
+      void qc.invalidateQueries({ queryKey: ["groups"] })
+    },
+  })
+}
+export function useVoteReport() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, preferred, note }: { id: string; preferred: ReportVariant; note?: string }) => api.voteReport(id, { preferred, note }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: rk.trial }),
+  })
+}
+export function useRevealTrial() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (force: boolean) => api.revealTrial({ force }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }),
+  })
+}
+/** 更正：新的一版（不推播）；報告頁與清單重新讀 */
+export function useAddCorrection() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, note, drop_sections }: { id: string; note: string; drop_sections?: string[] }) => api.addReportCorrection(id, { note, drop_sections }),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.reports }),
+  })
+}
+export function useRebuildData() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (body: { kind: ReportKind; edition_date: string }) => api.rebuildReportData(body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: qk.reports }),
+  })
+}
+export function useNyseHolidays() {
+  return useQuery({ queryKey: rk.nyse, queryFn: () => api.listNyseHolidays(), staleTime: 60_000, retry: no4xxRetry })
+}
+export function usePutNyseHoliday() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: ({ date, body }: { date: string; body: NyseHolidayInput }) => api.putNyseHoliday(date, body),
+    onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }),
+  })
+}
+export function useDeleteNyseHoliday() {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: (date: string) => api.deleteNyseHoliday(date), onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }) })
+}
+export function useMacroEvents() {
+  return useQuery({ queryKey: rk.macro, queryFn: () => api.listMacroEvents(), staleTime: 60_000, retry: no4xxRetry })
+}
+export function useAddMacroEvent() {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: (body: MacroEventInput) => api.addMacroEvent(body), onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }) })
+}
+export function useDeleteMacroEvent() {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: (id: string) => api.deleteMacroEvent(id), onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }) })
+}
+export function useUsEarnings() {
+  return useQuery({ queryKey: rk.earnings, queryFn: () => api.listUsEarnings(), staleTime: 60_000, retry: no4xxRetry })
+}
+export function useAddUsEarning() {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: (body: UsEarningInput) => api.addUsEarning(body), onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }) })
+}
+export function useDeleteUsEarning() {
+  const qc = useQueryClient()
+  return useMutation({ mutationFn: (id: string) => api.deleteUsEarning(id), onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }) })
 }

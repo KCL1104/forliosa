@@ -11,6 +11,7 @@
 // 群組主題只在全部與群組的篩選裡、個股與群組的討論分頁、手機的底部列（帳本・市場・群組・討論）與從「問 AI」的時鐘到紀錄。
 // mock 的狀態在記憶體裡：同一個流程用站內導覽（不重新載入），重新載入就回到示範資料。
 // mock 預設模擬商用模式（DATA_POLICY=commercial）；`?policy=personal` 的頁面會記在 sessionStorage，下一個路由用 `?policy=commercial` 切回。
+// 市場報告（2026-11-17）：市場頁的「報告」分頁與報告頁（順序、註腳、手機收合）、未讀圓點、試跑期間只有管理員、管理後台的盲測並排、群組頻道的三個推播開關。
 // 匯入對帳單（2026-11-16）：有密碼的 PDF（scripts/fixtures/statement-locked.pdf：合成的假資料，密碼是假的身分證字號 A123456789）
 // → 在瀏覽器裡解開、塗掉個資 → 確認表（每一種檢查結果）→ 補一筆買進、選股票 → 簽名匯入 → 復原；截圖；手機的抽屜；沒開放的帳號沒有入口。
 import { readFileSync } from "node:fs"
@@ -50,6 +51,9 @@ const ROUTES = [
   ["/stock/NVDA?tab=chips", "美股沒有法人與融資融券資料"],
   ["/stock/NOPE.TW", "找不到"],
   ["/market", "收盤重點"],
+  // 市場報告（2026-11-17）：mock 預設是試跑，示範使用者是站方管理員，看得到只有資料的版本
+  ["/market/reports/mrp_premarket_20261112", "盤前重點 11/12（四）"],
+  ["/admin/reports", "美股休市表"],
   ["/groups", "家族投資"],
   ["/groups/grp_family", "元大台灣50"],
   ["/groups/grp_family?tab=feed", "加入了群組"],
@@ -3151,7 +3155,7 @@ await check("管理後台（桌面）：自己的外殼（總覽・討論・新�
     await p.getByRole("heading", { level: 1, name: "總覽" }).waitFor({ timeout: 8000 })
     const nav = p.getByRole("navigation", { name: "管理後台" })
     const tabs = await nav.getByRole("link").allTextContents()
-    if (tabs.join("|") !== "總覽|討論|新聞下架|會員") throw new Error(`admin tabs: ${tabs.join("|")}`)
+    if (tabs.join("|") !== "總覽|討論|新聞下架|會員|市場報告") throw new Error(`admin tabs: ${tabs.join("|")}`)
     if (await p.getByRole("button", { name: /帳號選單/ }).count()) throw new Error("avatar menu inside the admin shell")
     for (const name of ["使用者", "AI 金鑰", "資料", "歷史日線回補"]) await p.getByRole("heading", { level: 2, name, exact: true }).waitFor({ timeout: 5000 })
     await p.getByText("冷卻中，38 秒後再試").waitFor({ timeout: 5000 })
@@ -3547,6 +3551,109 @@ await check("匯入對帳單：沒開放的帳號（不是站方管理員）沒�
     })
   })
 }
+
+// ── 市場報告（2026-11-17）：市場頁的「報告」分頁、報告頁、未讀圓點、管理後台的盲測、群組頻道的推播開關 ──
+// mock 預設是試跑（只有站方管理員看得到；目前那一版是只有資料的版本）；`?mreport=public` 對全站公開、三種報告都有 AI 版。
+await check("市場報告（桌面）：試跑期間管理員看得到「行情｜報告」與只有資料的版本、打開後未讀圓點消失；公開後三種報告由上到下照順序、畫面上沒有 F001／X003、註腳跳到來源再跳回原句、沒有橫向溢出", async () => {
+  await fresh({ viewport: { width: 1280, height: 900 } }, async (p) => {
+    await p.goto(base + "/market?mreport=trial", { waitUntil: "networkidle" })
+    const tabs = p.getByRole("tablist", { name: "市場內容" })
+    await tabs.waitFor({ timeout: 8000 })
+    const nav = p.getByRole("navigation", { name: "主要" })
+    if (!(await nav.getByRole("link", { name: "市場（有新的市場報告）" }).count())) throw new Error("no unread dot on 市場")
+    if ((await nav.getByRole("link", { name: "市場（有新的市場報告）" }).innerText()).trim() !== "市場") throw new Error("the nav label changed")
+    await tabs.getByRole("tab", { name: "報告" }).click()
+    await p.getByText("盲測中：AI 段落的三個版本在管理後台比較。").waitFor({ timeout: 8000 })
+    await p.waitForTimeout(1600)
+    if (await p.locator("[data-reports-dot]").count()) throw new Error("the unread dot stays after opening the reports tab")
+    const order = ["資料截至", "重點", "數字", "來源", "這份報告由 AI 依公開資料與媒體報導整理", "這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。"]
+    for (const kind of ["premarket", "close", "weekly"]) {
+      await p.goto(base + `/market?tab=reports&kind=${kind}&mreport=public`, { waitUntil: "networkidle" })
+      const article = p.locator("article[data-report-id]")
+      await article.waitFor({ timeout: 8000 })
+      const text = await article.innerText()
+      if (/\b[FXCNW]\d{3}\b/.test(text)) throw new Error(`${kind}: raw ids on the page`)
+      const pos = order.map((s) => (s === "重點" || s === "數字" ? null : text.indexOf(s)))
+      const listPos = await article.evaluate((el) => {
+        const all = el.innerText
+        const at = (sel) => { const n = el.querySelector(sel); return n ? all.indexOf(n.innerText.slice(0, 12)) : -1 }
+        return { heading: at("[data-report-heading]"), points: at('ul[aria-label="重點"]'), numbers: at('ul[aria-label="數字"]') }
+      })
+      const seq = [pos[0], listPos.heading, listPos.points, listPos.numbers, pos[3], pos[4], pos[5]]
+      if (seq.some((v) => v < 0) || seq.some((v, i) => i > 0 && v <= seq[i - 1])) throw new Error(`${kind}: report order ${JSON.stringify(seq)}`)
+      const labels = await article.locator("section header > span").allInnerTexts()
+      if (!labels.length || labels.some((l) => l !== "資料" && l !== "AI 依資料與報導整理")) throw new Error(`${kind}: section origin labels ${JSON.stringify(labels)}`)
+      const flow = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
+      if (flow.sw > flow.cw) throw new Error(`${kind}: horizontal overflow ${JSON.stringify(flow)}`)
+    }
+    // 註腳：按上標的號碼 → 焦點到來源的那一條；按那一條的號碼 → 回到原句
+    const sup = p.locator("article sup a[data-fn-ref]").first()
+    const n = await sup.getAttribute("data-fn-ref")
+    await sup.click()
+    if ((await p.evaluate(() => document.activeElement?.id)) !== `fn-${n}`) throw new Error("the footnote link did not move to the source")
+    await p.locator(`#fn-${n}`).getByRole("link", { name: `回到出處 ${n} 的原句` }).click()
+    await p.waitForTimeout(200)
+    if ((await p.evaluate(() => document.activeElement?.getAttribute("data-fn-ref"))) !== n) throw new Error("the back link did not return to the sentence")
+  })
+})
+await check("市場報告（手機）：iPhone 15 與 320px 不橫向溢出；預設收合的段標題是 44px 的按鈕、打開才看得到內容；報告的按鈕可按範圍 ≥ 44px", async () => {
+  for (const [name, options] of [["iPhone 15", pw.devices["iPhone 15"]], ["320px", { viewport: { width: 320, height: 640 }, hasTouch: true, isMobile: true, deviceScaleFactor: 2 }]]) {
+    await fresh(options, async (p) => {
+      await p.goto(base + "/market?tab=reports&kind=close&mreport=public", { waitUntil: "networkidle" })
+      const article = p.locator("article[data-report-id]")
+      await article.waitFor({ timeout: 8000 })
+      const toggle = article.getByRole("button", { name: "類股", exact: true })
+      if ((await toggle.getAttribute("aria-expanded")) !== "false") throw new Error(`${name}: 類股 is not collapsed`)
+      const box = await toggle.boundingBox()
+      if (!box || box.height < 44) throw new Error(`${name}: the section toggle is ${box?.height}px tall`)
+      await toggle.click()
+      await article.getByText(/^上市類股漲跌/).waitFor({ timeout: 4000 })
+      const small = await p.evaluate(() =>
+        [...document.querySelectorAll("article[data-report-id] button, #main [role=tablist] button, #main [role=radiogroup] button")]
+          .filter((el) => { const r = el.getBoundingClientRect(); return r.width > 0 && (r.height < 44 || r.width < 44) })
+          .map((el) => `${el.textContent.trim().slice(0, 10)} ${Math.round(el.getBoundingClientRect().width)}×${Math.round(el.getBoundingClientRect().height)}`),
+      )
+      if (small.length) throw new Error(`${name}: small targets ${JSON.stringify(small.slice(0, 6))}`)
+      const flow = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, vw: innerWidth }))
+      if (flow.sw > flow.vw) throw new Error(`${name}: horizontal overflow ${JSON.stringify(flow)}`)
+    })
+  }
+})
+await check("市場報告：不是站方管理員時試跑的報告看不到（沒有分頁列、報告頁找不到）；群組頻道的三個開關只在對全站公開時出現", async () => {
+  await fresh(DESKTOP, async (p) => {
+    await p.goto(base + "/market?discuss=member&mreport=trial", { waitUntil: "networkidle" })
+    await p.getByRole("heading", { name: "類股" }).waitFor({ timeout: 8000 })
+    if (await p.getByRole("tablist", { name: "市場內容" }).count()) throw new Error("a member sees the reports tab during the trial")
+    await p.goto(base + "/market/reports/mrp_premarket_20261112", { waitUntil: "networkidle" })
+    await p.getByText("找不到這份報告").waitFor({ timeout: 8000 })
+    await p.goto(base + "/groups/grp_family?tab=channels&discuss=default", { waitUntil: "networkidle" })
+    await p.getByRole("switch", { name: "交易動態" }).first().waitFor({ timeout: 8000 })
+    if (await p.getByRole("switch", { name: /盤前重點/ }).count()) throw new Error("report toggles during the trial")
+    await p.goto(base + "/groups/grp_family?tab=channels&mreport=public", { waitUntil: "networkidle" })
+    await p.getByRole("switch", { name: "市場週報（週日 18:00）" }).waitFor({ timeout: 8000 })
+    if ((await p.getByRole("switch", { name: "市場週報（週日 18:00）" }).getAttribute("aria-checked")) !== "true") throw new Error("weekly push is not on by default")
+    if ((await p.getByRole("switch", { name: "盤前重點（交易日 7:30）" }).getAttribute("aria-checked")) !== "false") throw new Error("premarket push is not off by default")
+  })
+})
+await check("管理後台「市場報告」：狀態、盲測（揭曉前沒有模型與花費）、最近的產生紀錄、三張手動表；A／B／C 在寬螢幕兩欄並排、較窄一次一個", async () => {
+  await fresh({ viewport: { width: 1440, height: 900 } }, async (p) => {
+    await p.goto(base + "/admin/reports?mreport=trial", { waitUntil: "networkidle" })
+    for (const h of ["狀態", "盲測", "最近的產生紀錄", "美股休市表", "總經行事曆", "美股財報日"]) await p.getByRole("heading", { level: 2, name: h }).waitFor({ timeout: 8000 })
+    const trial = p.locator("section", { has: p.getByRole("heading", { level: 2, name: "盲測" }) })
+    await trial.locator("[data-trial-report]").first().waitFor({ timeout: 8000 })
+    if (/Opus|Sonnet|US\$/.test(await trial.innerText())) throw new Error("the blind test shows models or costs before the reveal")
+    await trial.locator("[data-trial-report]").first().getByRole("link", { name: "看 A 版" }).click()
+    await p.waitForURL(/\/admin\/reports\/mrp_/, { timeout: 8000 })
+    await p.locator("article[data-report-id]").nth(1).waitFor({ timeout: 8000 })
+    if ((await p.locator("article[data-report-id]").count()) !== 2) throw new Error("two variants are not side by side at 1440px")
+    if (!(await p.locator("[data-refs]").count())) throw new Error("the admin view has no refs")
+    await p.setViewportSize({ width: 1100, height: 900 })
+    await p.waitForTimeout(300)
+    if ((await p.locator("article[data-report-id]").count()) !== 1) throw new Error("narrow admin view should show one variant")
+    const flow = await p.evaluate(() => ({ sw: document.documentElement.scrollWidth, cw: document.documentElement.clientWidth }))
+    if (flow.sw > flow.cw) throw new Error(`horizontal overflow: ${JSON.stringify(flow)}`)
+  })
+})
 
 await browser.close()
 if (errors.length) {

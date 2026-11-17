@@ -2,8 +2,10 @@ import { Link, useNavigate, useSearch } from "@tanstack/react-router"
 import { appToday } from "@/api"
 import { kaiSize } from "@/ai/kai-size"
 import { KaiText } from "@/ai/kai-text"
+import { useMarketReportStatus } from "@/api/queries"
 import { useDailyReports } from "@/api/sharing-queries"
-import type { DailyReport, Group } from "@/api/types"
+import type { DailyReport, Group, ReportSummary } from "@/api/types"
+import { InternalLink } from "@/components/internal-link"
 import { Pct } from "@/components/finance"
 import { RangeChips } from "@/components/segmented"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
@@ -66,11 +68,35 @@ function DailyReports({
   if (items.length === 0) {
     return <EmptyState title="還沒有日報" description={boosted ? "每個交易日收盤價進來以後，整理當天的群組表現。" : undefined} />
   }
+  return <DailyList items={items} boosted={boosted} query={query} />
+}
+
+/**
+ * 今天的盤前重點已經出來、最新一則日報是前一個交易日的：那一則就是推播裡的「昨日你的群組」（2026-11-17 市場報告；
+ * 盤前推播把它接在盤前重點後面）。群組頁同樣這樣叫它，旁邊連到那一份盤前重點。報告本身人人相同，群組的數字只在這裡與推播裡。
+ */
+function useYesterdayPremarket(day: string | undefined): ReportSummary | null {
+  const status = useMarketReportStatus()
+  const pre = status.data?.available ? status.data.latest.find((s) => s.kind === "premarket") : undefined
+  if (!day || !pre) return null
+  // 盤前重點是日報那一天的下一個平日（休市日不出盤前，所以中間隔了假日時不叫「昨日」）
+  return nextWeekday(day) === pre.edition_date ? pre : null
+}
+/** 下一個平日（YYYY-MM-DD） */
+function nextWeekday(day: string): string {
+  const d = new Date(`${day}T00:00:00Z`)
+  do d.setUTCDate(d.getUTCDate() + 1)
+  while (d.getUTCDay() === 0 || d.getUTCDay() === 6)
+  return d.toISOString().slice(0, 10)
+}
+
+function DailyList({ items, boosted, query }: { items: DailyReport[]; boosted: boolean; query: ReturnType<typeof useDailyReports> }) {
+  const premarket = useYesterdayPremarket(items[0]?.trading_day)
   return (
     <div className="flex flex-col gap-12">
       {!boosted && <p className="text-base text-ink">這個群組已經沒有加值，不會再有新的日報。</p>}
       {items.map((r, i) => (
-        <DailyArticle key={r.id} r={r} latest={i === 0} />
+        <DailyArticle key={r.id} r={r} latest={i === 0} premarket={i === 0 ? premarket : null} />
       ))}
       {query.hasNextPage && (
         <Button variant="outline" className="self-start" disabled={query.isFetchingNextPage} onClick={() => void query.fetchNextPage()}>
@@ -87,7 +113,7 @@ function DailyReports({
  * 站內的連結（只有最新一則：個股頁的「為什麼漲跌」與市場頁的收盤重點都是最新一天的）→ 免責。
  * 數字由伺服器依目前的成員與分享設定過濾，前端照樣畫，不自己推算。
  */
-export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean }) {
+export function DailyArticle({ r, latest, premarket = null }: { r: DailyReport; latest: boolean; premarket?: ReportSummary | null }) {
   const titleId = `daily-${r.id}`
   const f = r.facts
   // 「今日」只在那一天就是今天時寫（DESIGN.md：「今日」只在收盤價是今天的時候寫）
@@ -97,10 +123,18 @@ export function DailyArticle({ r, latest }: { r: DailyReport; latest: boolean })
     <article aria-labelledby={titleId} className="flex flex-col gap-4">
       <header className="flex flex-wrap items-end gap-x-3 gap-y-1 border-b border-rule pb-2">
         <h2 id={titleId} className="num text-xl font-bold">
-          {formatDateShort(r.trading_day)} 日報
+          {premarket ? "昨日你的群組" : `${formatDateShort(r.trading_day)} 日報`}
         </h2>
-        <span className="num text-sm text-ink-2">{formatDateTime(r.finished_at ?? r.created_at)}</span>
+        <span className="num text-sm text-ink-2">
+          {premarket && `${formatDateShort(r.trading_day)}・`}
+          {formatDateTime(r.finished_at ?? r.created_at)}
+        </span>
         {r.is_demo && <DemoTag />}
+        {premarket && (
+          <InternalLink href={`/market/reports/${premarket.id}`} className={cn(textAction, "ml-auto")}>
+            {premarket.kind_label} {premarket.edition_label} →
+          </InternalLink>
+        )}
       </header>
       {r.summary && (
         <p className={cn("ai-voice max-w-prose", kaiSize.page)}>

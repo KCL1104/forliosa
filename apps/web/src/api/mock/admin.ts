@@ -129,6 +129,8 @@ export function createAdminStore(deps: AdminDeps) {
             { slot: 1, configured: true, state: "ok", retry_in_seconds: null, workspace_id: "wrkspc_01JD7Q2M4X8V", month_cost_usd: 3.8412, month_calls: 1284, monthly_budget_usd: 50, threads: 41, last_error: null },
             { slot: 2, configured: true, state: "cooling", retry_in_seconds: 38, workspace_id: "wrkspc_01JD7Q9K2B5N", month_cost_usd: 2.9077, month_calls: 966, monthly_budget_usd: 50, threads: 33, last_error: "429 rate_limit_error" },
             { slot: 3, configured: false, state: "not_configured", retry_in_seconds: null, workspace_id: null, month_cost_usd: 0, month_calls: 0, monthly_budget_usd: null, threads: 0, last_error: null },
+            // 市場報告專用（2026-11-17）：一般對話、為什麼漲跌、群組日報都不會用到這一把
+            { slot: 4, configured: true, state: "ok", retry_in_seconds: null, workspace_id: "wrkspc_01JDREPORTS4", month_cost_usd: 12.4, month_calls: 96, monthly_budget_usd: 90, threads: 0, last_error: null, purpose: "market_reports" },
           ],
         },
         datasets: datasets(),

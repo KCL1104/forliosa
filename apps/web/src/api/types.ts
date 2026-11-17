@@ -3,6 +3,7 @@
  * 可為 null 的欄位與後端新增的欄位依 apps/api/CONTRACT_NOTES.md（以真實後端驗證過）。
  * 後端改由 FastAPI 的 OpenAPI 產生型別後，這個檔案應改為自動產生的版本。
  */
+import type { AiChart } from "@/ai/remote"
 
 export type ColorConvention = "tw" | "us"
 export type ThemePreference = "light" | "dark" | "system"
@@ -1399,6 +1400,10 @@ export interface DiscordChannel {
   notify_digest: boolean
   /** 群組 AI 日報（加值群組；預設關，擁有者決定）。選填：舊版後端沒有 */
   notify_daily?: boolean
+  /** 市場報告的推播（2026-11-17；所有群組都能開）：盤前、盤後預設關，週報預設開。選填：舊版後端沒有 */
+  notify_premarket?: boolean
+  notify_close?: boolean
+  notify_weekly?: boolean
 }
 
 export interface TelegramChannel {
@@ -1410,6 +1415,9 @@ export interface TelegramChannel {
   notify_digest: boolean
   /** 群組 AI 日報（加值群組；預設關，擁有者決定）。選填：舊版後端沒有 */
   notify_daily?: boolean
+  notify_premarket?: boolean
+  notify_close?: boolean
+  notify_weekly?: boolean
 }
 
 export interface Channels {
@@ -1417,12 +1425,17 @@ export interface Channels {
   telegram: TelegramChannel
   /** 伺服器有設定 bot 時才為 true */
   telegram_available: boolean
+  /** 市場報告對全站公開（模式 public）時才為 true：這時才有三個報告的推播開關。選填：舊版後端沒有 */
+  market_reports_available?: boolean
 }
 
 export interface ChannelNotify {
   notify_trades?: boolean
   notify_digest?: boolean
   notify_daily?: boolean
+  notify_premarket?: boolean
+  notify_close?: boolean
+  notify_weekly?: boolean
 }
 
 /** 設定 Discord：webhook 網址＋要送哪些（日報選填：舊版後端沒有） */
@@ -1431,6 +1444,10 @@ export interface DiscordInput {
   notify_trades: boolean
   notify_digest: boolean
   notify_daily?: boolean
+  /** 市場報告：省略＝伺服器的預設（盤前、盤後關，週報開） */
+  notify_premarket?: boolean
+  notify_close?: boolean
+  notify_weekly?: boolean
 }
 
 export interface TelegramLinkCode {
@@ -1629,6 +1646,8 @@ export interface AdminKeySlot {
   threads: number
   /** 最近一次失敗的狀態碼與錯誤類型（例如 "429 rate_limit_error"） */
   last_error: string | null
+  /** 保留給哪個工作：market_reports＝市場報告專用；null＝共用。選填：舊版後端沒有 */
+  purpose?: "market_reports" | null
 }
 export interface AdminDataset {
   key: string
@@ -2002,6 +2021,369 @@ export interface TwIndexClose {
 /** 刪除帳號時要輸入的字（和後端相同） */
 export const ACCOUNT_DELETE_CONFIRMATION = "刪除我的帳號"
 
+// ── 市場報告（2026-11-17；docs/api-contract.md「市場報告」、合約 §12、§14） ─────────────
+/** 三種報告：盤前重點、盤後重點、市場週報（名稱只能用這三個） */
+export type ReportKind = "premarket" | "close" | "weekly"
+export const REPORT_KINDS: readonly ReportKind[] = ["premarket", "close", "weekly"]
+export const REPORT_KIND_LABEL: Record<ReportKind, "盤前重點" | "盤後重點" | "市場週報"> = { premarket: "盤前重點", close: "盤後重點", weekly: "市場週報" }
+/** 站方的模式：試跑（只有管理員看得到）／對全站公開／暫停 */
+export type ReportsMode = "trial" | "public" | "paused"
+/** 一份報告的一版：只有資料、AI 版、補表（23:45 與隔天 06:40）、更正 */
+export type ReportEdition = "data" | "ai" | "tables" | "correction"
+export type ReportTone = "rise" | "fall" | "flat"
+export type ReportVariant = "A" | "B" | "C"
+
+/** 一句：`cites` 是畫面上的註腳號碼；`refs`（F001、X003）只在管理員檢視 */
+export interface ReportSentence {
+  text: string
+  cites: number[]
+  refs?: string[]
+}
+export interface ReportParagraph {
+  sentences: ReportSentence[]
+}
+/** 數字欄的一格（伺服器寫好的字：值、漲跌、日期） */
+export interface ReportNumberItem {
+  key: string
+  label: string
+  value: string
+  change: string | null
+  tone: ReportTone | null
+  /** 「11/18」或「美股 11/17」 */
+  date_label: string
+  estimate: boolean
+  note: string | null
+}
+/** 一項（今天市場在看什麼、今晚要看的、主題）：`meta` 例「台北 21:30・半導體」 */
+export interface ReportItem {
+  title: string
+  meta: string | null
+  paragraphs: ReportParagraph[]
+}
+export interface ReportTableCell {
+  text: string
+  tone?: "rise" | "fall" | null
+  sub?: string | null
+}
+export interface ReportTable {
+  id: string
+  title: string
+  /** 表頭的規則（「範圍：市值前 200 名或 300 億元以上；排除創新板、全額交割、處置股」） */
+  rule: string | null
+  columns: { key: string; label: string; align: "left" | "right"; num: boolean }[]
+  rows: { cells: Record<string, ReportTableCell>; href?: string | null }[]
+  /** 這一列以後收合（「全部 N 列」） */
+  fold_after: number | null
+  empty_text: string | null
+  note: string | null
+  source_labels: string[]
+}
+export type ReportBlock =
+  | { type: "text"; paragraphs: ReportParagraph[] }
+  | { type: "items"; items: ReportItem[] }
+  | { type: "chart"; chart: AiChart; caption: ReportParagraph | null; chart_of_day: boolean }
+  | { type: "table"; table: ReportTable }
+  /** 空狀態或伺服器的說明（「官方加權指數尚未取得」） */
+  | { type: "note"; text: string }
+export interface ReportSection {
+  key: string
+  /** 伺服器的字（「今天發生什麼」） */
+  title: string
+  /** 有任何 AI 文字就是 ai */
+  origin: "data" | "ai"
+  origin_label: "資料" | "AI 依資料與報導整理"
+  /** 手機上預設收合 */
+  collapsed_mobile: boolean
+  blocks: ReportBlock[]
+  /** 只在管理員檢視：這一段被拿掉的原因（一般人看不到這一段） */
+  dropped?: { reasons: string[] }
+}
+export interface ReportFootnote {
+  n: number
+  kind: "data" | "web" | "calendar" | "filing" | "research"
+  /** data：「證交所〈每日收盤行情－大盤統計〉11/16」；web：報導標題 */
+  label: string
+  outlet: string | null
+  url: string | null
+  date_label: string | null
+}
+export interface ReportSources {
+  /** 授權顯名 */
+  data: string[]
+  web: { n: number; outlet: string; title: string; url: string; published_label: string }[]
+  /** 媒體數字不一致（「鉅亨寫 179.62 億元，中央社寫 179.63 億元；本報告以中央社為準。」） */
+  disagreements: { text: string }[]
+  manual: string[]
+}
+export interface ReportCalendarRow {
+  /** 「13:30」「台北 21:30」「美東 11/19 盤後（台北 11/20 清晨）」 */
+  time_label: string | null
+  title: string
+  kind: string
+  kind_label: string
+  sectors: string[]
+  symbol: string | null
+  /** 站內（`/stock/2330.TW`） */
+  href: string | null
+  /** 官方頁面（另開視窗） */
+  url: string | null
+  source_label: string
+}
+export interface ReportCalendar {
+  /** 「今日行事曆」「下週行事曆 11/23–11/27」 */
+  title: string
+  groups: {
+    date: string
+    date_label: string
+    rows: ReportCalendarRow[]
+    /** 收成一列的（「ETF 除息 25 檔」），可以展開 */
+    folded: { label: string; count: number; rows: ReportCalendarRow[] }[]
+  }[]
+  empty_text: string | null
+  source_labels: string[]
+}
+/** 管理員檢視：規則驗證與合規判讀的摘要（合約 §10.6） */
+export interface ReportValidation {
+  first_problems: { code: string; path: string }[]
+  final_problems: { code: string; path: string }[]
+  dropped: { section: string; reasons: string[] }[]
+  revised: boolean
+  compliance_ran: boolean
+  mentions_anthropic: boolean
+}
+export interface MarketReport {
+  id: string
+  kind: ReportKind
+  kind_label: "盤前重點" | "盤後重點" | "市場週報"
+  edition_date: string
+  /** 「11/18（三）」；週報「11/16–11/20 回顧」 */
+  edition_label: string
+  period: { start: string; end: string }
+  next_period: { start: string; end: string } | null
+  version: number
+  edition: ReportEdition
+  has_ai: boolean
+  /** 這一版的時間（台北 ISO） */
+  published_at: string
+  first_published_at: string
+  as_of: string
+  /** 「資料截至 11/18 07:20」 */
+  as_of_label: string
+  disclaimer_line: string
+  title: string
+  title_origin: "ai" | "rules"
+  highlights: ReportParagraph[]
+  highlights_origin: "ai" | "rules"
+  numbers: ReportNumberItem[]
+  sections: ReportSection[]
+  calendar: ReportCalendar | null
+  footnotes: ReportFootnote[]
+  sources: ReportSources
+  disclaimer_full: string
+  /** 有 AI 文字時才有（「這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。」） */
+  model_line: string | null
+  corrections: { at: string; note: string }[]
+  /** 伺服器的說明（官方加權指數尚未取得…） */
+  notes: string[]
+  /** 「AI 段落還在整理，這是只有資料的版本。」 */
+  status_line: string | null
+  is_demo: boolean
+  /** 只在管理員檢視 */
+  validation?: ReportValidation | null
+}
+export interface ReportSummary {
+  id: string
+  kind: ReportKind
+  kind_label: string
+  edition_date: string
+  edition_label: string
+  title: string
+  has_ai: boolean
+  published_at: string
+  corrected: boolean
+}
+/** `GET /market/reports/status` */
+export interface ReportsStatus {
+  /** 這個人有沒有報告可看（一般人：模式 public 且已有公開報告；管理員：試跑也算） */
+  available: boolean
+  /** 只有管理員看得到值，其他人 null */
+  mode: ReportsMode | null
+  unread: boolean
+  /** 每種最新一份（看得到的） */
+  latest: ReportSummary[]
+}
+
+// 管理後台「市場報告」
+export type ReportEffort = "low" | "medium" | "high" | "xhigh" | "max"
+export interface WriterSetting {
+  model: string
+  effort: ReportEffort
+}
+/** 預算層級：正常／effort 降為 medium／改用 Sonnet／只發資料版（合約 §4.5） */
+export type ReportTier = "normal" | "medium" | "sonnet" | "data_only"
+export type ReportRunStatus = "running" | "ok" | "data_only" | "failed" | "abandoned" | "skipped_budget"
+export interface AdminReportRun {
+  id: string
+  report_id: string
+  kind: ReportKind
+  edition_label: string
+  variant: ReportVariant | null
+  purpose: "live" | "trial"
+  attempt: number
+  status: ReportRunStatus
+  step: string
+  started_at: string
+  seconds: number | null
+  stop_reason: string | null
+  fallback_used: boolean
+  problems: number
+  /** 揭曉前的盲測 run 是 null（不回花費與模型） */
+  cost_usd: number | null
+  model: string | null
+  effort: string | null
+}
+export interface AdminReportsOverview {
+  /** 伺服器的總開關 */
+  enabled: boolean
+  mode: ReportsMode
+  /** 每種報告的撰寫設定；盲測中（揭曉前）是 null */
+  writers: Record<ReportKind, (WriterSetting & { source: "admin" | "default" }) | null>
+  trial_running: boolean
+  month: { label: string; spend_usd: number; budget_usd: number; tier: ReportTier }
+  trial: {
+    spend_usd: number
+    budget_usd: number
+    days_done: number
+    days_total: number
+    weekly_done: boolean
+    started_on: string | null
+    revealed_at: string | null
+    finished: boolean
+  }
+  /** 報告專用的金鑰 slot（`slot` 是 null：沒有專用的，用一般的 key） */
+  key: { slot: number | null; status: "ok" | "cooldown" | "disabled" | "exhausted"; note: string | null }
+  runs: AdminReportRun[]
+  manual: {
+    nyse_next: { date: string; name: string; kind: "closed" | "early_close" } | null
+    nyse_unverified: number
+    macro_next_14d: number
+    earnings_next_14d: number
+  }
+}
+export interface ReportsConfigPatch {
+  mode?: ReportsMode
+  writers?: Partial<Record<ReportKind, WriterSetting | null>>
+}
+export interface ReportsConfigResult {
+  mode: ReportsMode
+  writers: Record<ReportKind, WriterSetting | null>
+  /** 切到 public 時：「之後的新報告會對所有登入的人公開，並推播到有開的群組。」 */
+  notice?: string | null
+}
+export interface TrialMetrics {
+  policy_violations: number
+  subject_mismatches: number
+  inferred_dates: number
+  dropped_sections: number
+  revised: boolean
+  data_only: boolean
+  on_time: boolean
+  seconds: number | null
+  fallback_used: boolean
+  refusal_category: string | null
+  /** 揭曉後才有 */
+  cost_usd?: number | null
+}
+export interface TrialVariant {
+  label: ReportVariant
+  status: ReportRunStatus | "pending"
+  finished_at: string | null
+  on_time: boolean | null
+  metrics: TrialMetrics | null
+  /** 揭曉後才有 */
+  writer?: WriterSetting | null
+}
+export interface TrialReport {
+  report_id: string
+  kind: ReportKind
+  edition_date: string
+  edition_label: string
+  variants: TrialVariant[]
+  my_vote: { preferred: ReportVariant; note: string } | null
+}
+export interface TrialRevealRow {
+  writer: WriterSetting
+  reports: number
+  votes: number
+  policy_violations: number
+  subject_mismatches: number
+  inferred_dates: number
+  dropped_sections: number
+  on_time_rate: number
+  avg_cost_usd: number
+  avg_seconds: number
+  passed: boolean
+}
+export interface TrialReveal {
+  revealed_at: string
+  kinds: { kind: ReportKind; kind_label: string; rows: TrialRevealRow[]; suggested: WriterSetting | null }[]
+}
+/** `GET /admin/market-reports/trial` */
+export interface AdminTrial {
+  days_done: number
+  days_total: number
+  weekly_done: boolean
+  finished: boolean
+  reports: TrialReport[]
+  /** 揭曉後才有 */
+  reveal: TrialReveal | null
+}
+export interface NyseHoliday {
+  date: string
+  name: string
+  kind: "closed" | "early_close"
+  close_time_et: string | null
+  source_url: string
+  verified_at: string | null
+}
+export interface NyseHolidayInput {
+  name: string
+  kind: "closed" | "early_close"
+  close_time_et?: string | null
+  source_url: string
+  verified: boolean
+}
+export interface MacroEvent {
+  id: string
+  event_date: string
+  local_time: string | null
+  tz: string
+  country: string
+  title: string
+  agency: string
+  official_url: string
+  sectors: string[]
+  note: string
+}
+export type MacroEventInput = Omit<MacroEvent, "id" | "local_time" | "sectors" | "note"> & { local_time?: string | null; sectors?: string[]; note?: string }
+export interface UsEarning {
+  id: string
+  symbol: string
+  company: string
+  report_date: string
+  timing: "bmo" | "amc" | "during" | "unknown"
+  time_et: string | null
+  official_url: string | null
+  sectors: string[]
+  note: string
+}
+export type UsEarningInput = Omit<UsEarning, "id" | "time_et" | "official_url" | "sectors" | "note"> & {
+  time_et?: string | null
+  official_url?: string | null
+  sectors?: string[]
+  note?: string
+}
+
 export interface ForliosaApi {
   readonly kind: "http" | "mock"
   // 認證與使用者
@@ -2194,4 +2576,36 @@ export interface ForliosaApi {
   updateGroupPass(id: string, patch: GroupPassPatch): Promise<AdminGroupPass>
   /** 馬上停止（不踢人，群組回到免費的上限） */
   revokeGroupPass(id: string): Promise<void>
+  // ── 市場報告（登入才看得到；試跑期間只有站方管理員） ──
+  getMarketReportStatus(): Promise<ReportsStatus>
+  listMarketReports(query?: { kind?: ReportKind; limit?: number; cursor?: string | null }): Promise<Paged<ReportSummary>>
+  /** `kind` 省略＝任一種最新的一份；沒有就是 null */
+  getLatestMarketReport(kind?: ReportKind): Promise<MarketReport | null>
+  /** `version` 看舊版；看不到（試跑中的非管理員、找不到）→ 404 */
+  getMarketReport(id: string, version?: number): Promise<MarketReport>
+  /** 看過了（未讀的小圓點消失）；查看別人的資產時 403 `read_only` */
+  markMarketReportsSeen(): Promise<void>
+  // 管理後台「市場報告」（不是管理員 → 404）
+  getAdminReportsOverview(): Promise<AdminReportsOverview>
+  putReportsConfig(body: ReportsConfigPatch): Promise<ReportsConfigResult>
+  getAdminReportsTrial(): Promise<AdminTrial>
+  /** 盲測一個 variant 的管理員形式（每句 refs、被拿掉的段、validation） */
+  getAdminReportVariant(reportId: string, label: ReportVariant): Promise<MarketReport>
+  voteReport(reportId: string, body: { preferred: ReportVariant; note?: string }): Promise<void>
+  /** 盲測沒做完且沒有 `force` → 409 `trial_unfinished` */
+  revealTrial(body?: { force?: boolean }): Promise<TrialReveal>
+  /** 新版本 edition=correction，不推播 */
+  addReportCorrection(reportId: string, body: { note: string; drop_sections?: string[] }): Promise<MarketReport>
+  /** 重建資料版（快，不呼叫 AI） */
+  rebuildReportData(body: { kind: ReportKind; edition_date: string }): Promise<void>
+  listNyseHolidays(): Promise<NyseHoliday[]>
+  putNyseHoliday(date: string, body: NyseHolidayInput): Promise<NyseHoliday>
+  deleteNyseHoliday(date: string): Promise<void>
+  listMacroEvents(query?: { from?: string; to?: string }): Promise<MacroEvent[]>
+  /** 網址不是官方網站 → 422（欄位 `official_url`） */
+  addMacroEvent(body: MacroEventInput): Promise<MacroEvent>
+  deleteMacroEvent(id: string): Promise<void>
+  listUsEarnings(): Promise<UsEarning[]>
+  addUsEarning(body: UsEarningInput): Promise<UsEarning>
+  deleteUsEarning(id: string): Promise<void>
 }

@@ -18,6 +18,7 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
  * 頻道：群組的 Discord（webhook）與 Telegram（bot）。每位成員都看得到推播到哪裡；只有擁有者可以設定。
  * 只會送出開了「推播」的成員所分享的內容。webhook 網址不顯示，只有最後 4 碼。
  * 「日報」開關只在加值的群組出現（預設關，擁有者決定；群組加值包第一階段）；到期後已經打開的照樣列出，方便關掉。
+ * 市場報告（2026-11-17）對全站公開時，每個頻道多三個開關（所有群組都能開）：盤前重點、盤後重點（預設關）、市場週報（預設開）。
  */
 export function ChannelsTab({ group }: { group: Group }) {
   const [linking, setLinking] = useState<TelegramLinkCode | null>(null)
@@ -40,7 +41,7 @@ export function ChannelsTab({ group }: { group: Group }) {
         {c.discord.configured ? (
           <>
             {owner && c.discord.webhook_hint && <p className="num text-md text-ink-2">Webhook 網址結尾 {c.discord.webhook_hint}</p>}
-            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} daily={boosted || !!c.discord.notify_daily} />
+            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} daily={boosted || !!c.discord.notify_daily} reports={!!c.market_reports_available} />
             {owner && (
               // 「換一個 webhook」和「解除 Discord」同一列、中間留 24px（原本兩個行內元素直接貼在一起；2026-11-15 產品負責人回報）。
               // 展開成表單時表單佔滿一列，「解除」換到下一列
@@ -70,7 +71,7 @@ export function ChannelsTab({ group }: { group: Group }) {
               </p>
             )}
             {c.telegram.configured && (
-              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} daily={boosted || !!c.telegram.notify_daily} />
+              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} daily={boosted || !!c.telegram.notify_daily} reports={!!c.market_reports_available} />
             )}
             {owner && (!c.telegram.configured || c.telegram.status === "disabled") && (
               <TelegramLink groupId={group.id} code={linked ? null : linking} onCode={setLinking} />
@@ -103,6 +104,7 @@ function NotifyToggles({
   value,
   editable,
   daily,
+  reports,
 }: {
   groupId: string
   kind: "discord" | "telegram"
@@ -110,21 +112,23 @@ function NotifyToggles({
   editable: boolean
   /** 有沒有「日報」這一列（加值群組，或已經打開的） */
   daily: boolean
+  /** 市場報告對全站公開時才有三個報告的開關（所有群組都能開；盤前、盤後預設關，週報預設開） */
+  reports: boolean
 }) {
   const patch = usePatchChannel(groupId, kind)
-  const row = (key: keyof ChannelNotify, label: string, detail: string) => {
+  const row = (key: keyof ChannelNotify, label: string, detail: string | null, fallback = false) => {
     const id = `${kind}-${key}`
     return (
-      <div className="flex items-start justify-between gap-6 border-b border-rule py-3">
+      <div className="flex min-h-12 items-start justify-between gap-6 border-b border-rule py-3">
         <div>
           <label htmlFor={id} className="font-medium">
             {label}
           </label>
-          <p className="text-base text-ink">{detail}</p>
+          {detail && <p className="text-base text-ink">{detail}</p>}
         </div>
         <Switch
           id={id}
-          checked={value[key] ?? false}
+          checked={value[key] ?? fallback}
           disabled={!editable || patch.isPending}
           onCheckedChange={(on) => patch.mutate({ [key]: on }, { onError: (err) => toast.error("沒有改成功", { description: errText(err) }) })}
         />
@@ -136,6 +140,14 @@ function NotifyToggles({
       {row("notify_trades", "交易動態", "成員的買賣，交易建立 15 分鐘後送出。")}
       {row("notify_digest", "週報", "每週六晚上的群組 AI 週報。")}
       {daily && row("notify_daily", "日報", "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送。")}
+      {reports && (
+        <div data-report-toggles="">
+          <p className="pt-4 pb-1 text-sm text-ink-2">推到頻道的是文字與連結，報告本文人人相同。</p>
+          {row("notify_premarket", "盤前重點（交易日 7:30）", null)}
+          {row("notify_close", "盤後重點（交易日 16:00）", null)}
+          {row("notify_weekly", "市場週報（週日 18:00）", null, true)}
+        </div>
+      )}
     </div>
   )
 }
