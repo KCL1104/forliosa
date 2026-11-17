@@ -1,7 +1,7 @@
 # API 介面合約（v1 草稿）
 
 前端（`apps/web`）與後端（`apps/api`）共用的介面定義。M1、M2 的端點在前半部；AI（M4）與分享（M5：Discord 登入、授權唯讀查看、親友群組）
-在後面的章節；匯入對帳單（M3 的第一版）在最後一節「匯入對帳單（2026-11-16）」。
+在後面的章節；匯入對帳單（M3 的第一版）在「匯入對帳單（2026-11-16）」，匯入庫存在接著的「匯入庫存（2026-11-17）」。
 後端完成後會以 FastAPI 自動產生的 OpenAPI（`/api/v1/openapi.json`）為準，這份文件是開發初期的共同約定。
 後端實作與本文件的差異（新增欄位、可為 null 的欄位、各交易類型的欄位用法）記錄在 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)。
 
@@ -1630,11 +1630,11 @@ Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問�
 | 每月計費 token | 300 萬（`AI_MONTHLY_TOKEN_BUDGET`） | 不限（`AI_MEMBER_MONTHLY_TOKEN_BUDGET=0`） |
 | 每日收盤簡報 | 沒有（`AI_FREE_DAILY_BRIEFING=false`） | 有 |
 | 深度搜尋（算自己的 3 題） | 有（`AI_FREE_DEEP_SEARCH=true`，2026-11-17；以前沒有） | 有 |
-| 匯入對帳單 | 有（`IMPORT_STATEMENTS=all`，2026-11-17 起預設） | 有 |
+| 匯入對帳單、匯入庫存 | 有（`IMPORT_STATEMENTS=all`，2026-11-17 起預設） | 有 |
 
 - **省錢模式**：這個月的花費剩不到一般提問的 US$0.05 時，提問照常（每天的題數照算），但不上網搜尋（沒有 `web_search`／`web_fetch`，約 US$0.002 一題；站內的報價、財報、技術指標、`get_news` 的新聞都還在）；
   深度搜尋、法人觀點查詢、收盤簡報等下個月 1 日。花到上限的 `AI_ECONOMY_CAP_MULTIPLIER` 倍（免費帳號，預設 2）或 `AI_MEMBER_ECONOMY_CAP_MULTIPLIER` 倍（會員，預設 1.25，2026-11-16）才完全停（`month_budget_reached`）。設 1 就是到上限直接停。
-- `GET /me` 多 `plan: {"tier": "free" | "member", "until": "YYYY-MM-DD" | null, "deep_search": bool, "daily_briefing": bool}`（`until`：會員的最後一天，台北；null＝免費或沒有到期日）。2026-11-16 再多 `"statement_import": bool`（能不能匯入對帳單，見「匯入對帳單」）。2026-11-17 起預設免費帳號也是 `deep_search: true`、`statement_import: true`；欄位不變。
+- `GET /me` 多 `plan: {"tier": "free" | "member", "until": "YYYY-MM-DD" | null, "deep_search": bool, "daily_briefing": bool}`（`until`：會員的最後一天，台北；null＝免費或沒有到期日）。2026-11-16 再多 `"statement_import": bool`（能不能匯入對帳單，見「匯入對帳單」；2026-11-17 起也管匯入庫存，見「匯入庫存」）。2026-11-17 起預設免費帳號也是 `deep_search: true`、`statement_import: true`；欄位不變。
 - `GET /ai/usage` 多 `plan`、`economy`、`deep_search_members_only`（見上面的 `Usage`；`deep_search_members_only` 預設一律 false，留著給舊前端）。
 
 站方（權限同管理後台：沒登入 401、不是站方管理員 404、查看別人的資產時 403）：
@@ -1879,7 +1879,7 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 {
   "document_kind": "monthly_statement",
   // "monthly_statement" 月對帳單 | "trade_confirmation" 買賣報告書、成交明細 | "app_screenshot" app 的交易畫面
-  // | "holdings_snapshot" 庫存畫面（沒有買進日期：第一版不能匯入，前端直接說）| "not_a_trade_record" 沒有買賣紀錄
+  // | "holdings_snapshot" 庫存畫面（沒有買進日期：這裡不匯入，`notice` 請使用者改用「匯入庫存」，見下一節）| "not_a_trade_record" 沒有買賣紀錄
   "broker_name": "永豐金證券",       // 對帳單上的券商名稱；沒有是 ""
   "period": { "from": "2026-10-01", "to": "2026-10-31" },   // 對帳單的期間；沒有時是 null
   "rows": [
@@ -1961,7 +1961,7 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 - 伺服器把每一列寫成 `source: "import"`、同一個 `import_batch_id`。列的 `account_id` 可以不給（就是這一批的帳戶；給了別的帳戶是那一列的 `account_mismatch`）。**只收 `buy`、`sell`**（其他是那一列的 `unsupported_type`）；日期不在 1990-01-01 到今天（台北）之間是那一列的 `bad_date`，不是整個請求的 422。整個請求的 422 `validation_error`：0 列或超過 200 列、`origin` 不是 `import`、列裡帶了 `source` 或其他不認得的欄位、負的數字。買賣的手續費與稅只用送來的（不自動算，和 `POST /transactions` 一樣）。
 - 驗算：每一列照單筆建立的規則算；算得出來的列照（交易日、同一天先買後賣、再照送來的順序）接在帳本後面**重播一次**，自動股利一起重算。賣超是那一列的 `oversell`；重複是 `warning` 的 `duplicate`／`possible_duplicate`（和讀檔時同一套）。
 - **全部或全不**：`dry_run: false` 有任何 `error` → 422 `batch_rejected`，`message`「有 N 筆不能匯入，整批都沒有寫入。」，錯誤物件多 `rows: [{"index", "code", "message"}]`（`index` 是 `null` 的是整批的問題），**什麼都不寫**。都過了才一次寫入、自動股利重算一次。`auto_dividends_added`：補記的買進在除息日以前時，這次多記的自動股利筆數。
-- 帳戶不是自己的 404；查看別人的資產時 403 `read_only`。這兩個端點不看 `plan.statement_import`。
+- 帳戶不是自己的 404；查看別人的資產時 403 `read_only`。這兩個端點不看 `plan.statement_import`。匯入庫存寫入用自己的 `POST /imports/positions/commit`（見「匯入庫存」），復原一樣用下面的端點。
 
 **`DELETE /transactions/batches/{batch_id}`**（已實作）
 
@@ -1973,6 +1973,138 @@ token 遠超過上限、字數限制沒有生效，今天停用）與各分級�
 
 - `Transaction` 多 `import_batch_id`（見上面「交易」）。
 - 從對帳單匯入的買賣（`source: "import"`）**不出現在群組的交易動態、推播與週報**（見「親友群組」的交易動態）。
+
+## 匯入庫存（2026-11-17）
+
+產品負責人決定（2026-11-17，四項照建議；`PRODUCT.md` 決定紀錄）：上傳一張或幾張券商 app「庫存」頁的截圖，或貼上庫存的文字；AI 讀出每一檔的股票、股數、均價（只有總成本時用總成本 ÷ 股數），使用者在確認表上改過以後，**每一檔記一筆買進**，整批寫入、整批復原。
+讀的部分和匯入對帳單同一套（圖片準備與塗個資、結構化 JSON、重讀模型、每天上限、算進每月額度、什麼都不存不寫 log）。實作細節見 [`apps/api/CONTRACT_NOTES.md`](../apps/api/CONTRACT_NOTES.md)「2026-11-17 匯入庫存」。
+
+**流程**
+
+1. 前端準備截圖（和匯入對帳單同一套：JPEG／PNG／WebP，長圖切塊，HEIC 先轉）；貼上的文字前端先塗個資（伺服器送出前會再塗一次）。
+2. `POST /imports/positions`：AI 讀＋伺服器逐列檢查，回每一列與旗標。**什麼都不存**。
+3. 使用者在確認表上改；換帳戶、改股票或日期後，`POST /imports/positions/commit`（`dry_run: true`）重新檢查（不呼叫 AI）。
+4. `POST /imports/positions/commit`（`dry_run: false`）：一次寫入，全部或全不，回 `batch_id`。
+5. 復原：`DELETE /transactions/batches/{batch_id}`（和匯入對帳單同一個端點）。
+
+| 方法 | 路徑 | 說明 |
+|---|---|---|
+| POST | `/imports/positions` | 讀：`PositionsImportIn` → `PositionsImport`（200）。只有 `/me` 的 `plan.statement_import` 是 `true` 的帳號能用（同一個 `IMPORT_STATEMENTS` 設定，預設 `all`） |
+| POST | `/imports/positions/commit` | 寫入：`dry_run: true` → 200 `PositionsCommitCheck`；`dry_run: false`（預設）→ 201 `PositionsCommitCreated` |
+| DELETE | `/transactions/batches/{batch_id}` | 整批復原（見「匯入對帳單」） |
+
+都要登入；查看別人的資產（`X-Forliosa-View-As`）時是寫入，一律 403 `read_only`，前端在查看中不放入口。
+
+**`POST /imports/positions`**
+
+```jsonc
+// PositionsImportIn（JSON；圖片是 base64）
+{
+  "account_id": "acc_…",            // 選填：對哪個帳戶檢查「已在帳本」（沒給就用第一個帳戶）
+  "kind": "images",                 // "images" | "text"
+  "pages": [                        // kind=images：1–20 張（IMPORT_MAX_PAGES）；kind=text 不能有
+    { "media_type": "image/png", "data": "<base64，不含 data: 前綴>" }
+  ],
+  "text": null                      // kind=text：貼上的文字，最多 20,000 字；kind=images 不能有
+}
+
+// PositionsImport
+{
+  "account_id": "acc_…",
+  "document_kind": "holdings",      // "holdings" 庫存畫面 | "trade_records" 交易明細或對帳單（請改用匯入對帳單）| "other"
+  "broker_name": "永豐金證券",
+  "trade_date": "2026-11-17",       // 預設的買進日期：今天（台北）
+  "rows": [
+    {
+      "row_id": "p1",
+      "symbol": "0050.TW",          // 找不到或對到好幾檔時是 null
+      "name": "元大台灣50",          // 我們的名稱；找不到時是畫面上的
+      "currency": "TWD",            // "TWD" | "USD"
+      "quantity": 3000,             // 股數；印的是「張」時已經乘 1,000；沒讀到是 null
+      "price": 150,                 // 每股成本：券商的均價；沒有均價時＝總成本 ÷ 股數（最多 4 位小數）；沒讀到是 null
+      "price_basis": "average_cost",// "average_cost" | "total_cost" | null（price 從哪裡來）
+      "total_cost": 450000,         // 畫面印的總成本；沒印是 null
+      "raw": { "symbol_code": "0050", "name": "元大台灣50", "kind": "cash", "quantity": "3", "quantity_unit": "lots",
+               "avg_cost": "150", "total_cost": "450000", "market_price": "", "market_value": "", "currency": "TWD",
+               "page": 1, "raw_line": "0050 | 元大台灣50 | 3 | 150" },   // AI 照抄的字串，給畫面對照用
+      "flags": [ { "code": "in_ledger", "message": "帳本裡已經有 2,000 股，均價 480。", "severity": "warning" } ],
+      "include": true,              // 預設要不要匯入（見下面的旗標表）
+      "in_ledger": null             // 這個帳戶現在已經有這一檔時：{"quantity": 2000, "avg_cost": 480, "currency": "TWD", "records": 3,
+                                    //   "dividends": 1, "sells": 1}
+                                    // （avg_cost 是帳本的均價，含買進手續費；records 是「以券商為準」會刪掉的紀錄筆數，
+                                    //  dividends、sells 是其中的股利（現金、股票股利，自動記的也算）與賣出：刪掉之後領過的股利、
+                                    //  賣出的已實現損益都不再算進損益，畫面要照實說）
+    }
+  ],
+  "merged_duplicates": 1,           // 截圖重疊、完全一樣的列（同一檔、種類、股數、成本）只算一次：合併了幾列
+  "unreadable": [],
+  "embedded_instructions": [],      // 圖片或文字裡像指令的字：照抄、沒有照做
+  "model_used": "claude-haiku-5-5",
+  "retried": false,
+  "notice": null                    // 一列都沒有時的一句話：「這是交易明細，不是庫存。請改用「匯入對帳單」。」「這裡面沒有看到庫存。」「畫面上沒有讀到持股。」
+}
+```
+
+- **讀法、不存、額度、誰能用**：和 `POST /imports/statement` 一樣（同一個模型與重讀模型、`ai_usage` 的 `feature: "import"`）。**每天的次數和匯入對帳單合計**（`IMPORT_DAILY_LIMIT`，`/ai/usage` 的 `imports_today`），超過是 429 `ai_import_daily_limit`「今天已經匯入 10 次，明天再匯入。」。
+- **錯誤**：403 `import_not_enabled`「這個帳號還不能匯入庫存。」；413（超過 20 張或 15 MB）；422 `validation_error`（`details.fields`：`kind=images` 沒有 `pages` 或帶了 `text` 是 `["pages"]`，`kind=text` 沒有文字或帶了 `pages` 是 `["text"]`）；422 `unsupported_file`（不是 JPEG／PNG／WebP）；422 `no_account`（沒有任何帳戶）；404（帳戶不是自己的）；429 `ai_monthly_budget`；503 `ai_unavailable`；422 `unreadable_file`（都沒讀出來：「讀不出來。換一張清楚的截圖，或改貼文字再試。」；一次太多停在一半：「一次太多檔，讀不完。分成幾次匯入。」）。
+- **重讀**：有 `unreadable`、`cost_mismatch`、`value_mismatch`、`fractional_tw_qty` 的列，或 AI 說有沒讀清楚的地方、模型拒答時，那幾頁用重讀模型再讀一次（省錢模式不重讀）。美股的台幣市值不算 `value_mismatch`（見旗標表），不會為它多花一次重讀。
+
+**旗標（`flags[].code`）與預設**
+
+`message` 是伺服器寫好的句子，前端照原文顯示；不認得的代碼照樣顯示句子。
+
+| 代碼 | 什麼時候 | 預設 `include` |
+|---|---|---|
+| `in_ledger` | 這個帳戶現在已經有這一檔（股數 > 0）：「帳本裡已經有 2,000 股，均價 480。」（一樣時「帳本裡已經有，股數和均價都一樣。」）。標「已在帳本」，給一個「以券商為準」的勾選 | `false` |
+| `in_other_account` | 別的帳戶也有這一檔：「「富邦－複委託」帳戶也有 1,000 股。」 | 不變 |
+| `unknown_symbol`／`ambiguous_symbol` | 對不到股票／對到好幾檔、代號和名稱對不上 | `false` |
+| `unreadable` | 代號與名稱、股數或成本（均價和總成本都沒有）沒讀到，或 AI 說印出來的格子看不清楚（沒印的欄位不算；張／股被印出來的金額對上了也不算） | `false` |
+| `fractional_tw_qty` | 台股的股數不是整數 | `false` |
+| `not_whole_lots` | 印的是「張」但不是整張（例如 2.5 張＝2,500 股）：零股算在裡面，或讀錯 | 不變 |
+| `unit_fixed` | 台股的張、股和 AI 讀的相反：照讀的單位，均價 × 股數＝總成本、現價 × 股數＝市值一個都對不上，換成另一個單位每一個都對得上，就照另一個單位算（「照畫面上的金額算，數量是股數，不是張數。」或「…數量是張數（1 張＝1,000 股），已經換成股數。」）；只提醒，不重讀 | 不變 |
+| `cost_mismatch` | 股數 × 均價和印的總成本差超過 0.5%（張、股弄錯、但市值和總成本說的不一樣時多一句「股數可能是張數」） | 不變 |
+| `value_mismatch` | 股數 × 現價和印的市值差超過 1%（同上，張股提示）。美股的市值是台幣（複委託的「參考市值」，約股數 × 現價的 20–50 倍）時不比：AI 被要求現價、市值都抄和成本同一種幣別、只有台幣市值時留空，伺服器再擋一次，不因為這個重讀 | 不變 |
+| `currency_mismatch` | 美股的成本寫的是新台幣（複委託的台幣成本），或台股寫美元 | `false` |
+| `currency_guess` | 美股、畫面沒寫幣別：當成美元 | 不變 |
+| `margin` | 融資的庫存：當一般持股匯入 | 不變 |
+| `short_sale` | 融券：不匯入 | `false` |
+| `same_symbol_twice` | 合併完全一樣的列以後，同一檔還有兩列以上（例如整股和零股分開列、現股和融資）：都匯入會加在一起 | 不變 |
+
+**`POST /imports/positions/commit`**
+
+```jsonc
+// PositionsCommitIn
+{
+  "account_id": "acc_…",            // 必填（1–40 字）：寫進哪個帳戶；空字串是 422，不像讀的時候退回第一個帳戶（以券商為準會刪紀錄）
+  "trade_date": "2026-11-17",       // 選填：整批的買進日期，不給是今天（台北）。每一檔記成這一天、照券商均價的買進：
+                                    // 均價到這天收盤的漲跌會算進這一天的報酬，這一天之前沒有走勢
+  "dry_run": false,
+  "rows": [                         // 1–200 列；只送要匯入的列
+    { "symbol": "0050.TW", "quantity": 3000, "price": 150 },
+    { "symbol": "2412", "quantity": 1500, "total_cost": 180000 },          // price 或 total_cost 二選一
+    { "symbol": "2330.TW", "quantity": 1500, "price": 560.25, "replace": true },   // 以券商為準
+    { "symbol": "AAPL", "quantity": 10.5, "price": 230.5, "trade_date": "2026-10-17", "currency": "USD" }  // 這一列自己的日期
+  ]
+}
+
+// dry_run: true → 200 PositionsCommitCheck（什麼都不寫、不刪）
+{ "dry_run": true, "ok": false, "trade_date": "2026-11-17",
+  "rows": [ { "index": 0, "flags": [ { "code": "in_ledger", "message": "帳本裡已經有 1,500 股。勾「以券商為準」才會換掉，不然這一列不要匯入。", "severity": "error" } ],
+              "in_ledger": { "quantity": 1500, "avg_cost": 550, "currency": "TWD", "records": 3, "dividends": 0, "sells": 1 } } ],
+  "replaced": [ { "symbol": "2330.TW", "deleted": 3 } ],   // 以券商為準會刪掉的舊紀錄
+  "problems": [] }
+
+// dry_run: false → 201 PositionsCommitCreated
+{ "dry_run": false, "batch_id": "imp_…", "trade_date": "2026-11-17", "created": ["txn_…"],
+  "replaced": [ { "symbol": "2330.TW", "deleted": 3 } ], "auto_dividends_added": 0 }
+```
+
+- **每一列寫一筆買進**：`price`（券商的均價）或 `total_cost`（伺服器算總成本 ÷ 股數，存 8 位小數，帳本的總成本就和券商一樣；讀的時候 `price_basis` 是 `total_cost` 的列請送 `total_cost`），**手續費 0、稅 0**（券商的均價多半已含手續費），所以帳本的均價等於券商的。`source: "import"`、同一個 `import_batch_id`：不出現在群組動態、推播與週報（和匯入對帳單一樣）。`note` 是空的。
+- **日期**：整批一個 `trade_date`（預設今天），列可以自己帶；未來或 1990 年以前是那一列的 `bad_date`。
+- **已在帳本**：這個帳戶現在有這一檔（股數 > 0）而這一列沒有 `replace` → 那一列的 `in_ledger` 錯誤（多買一筆會變兩倍）。以前有、已經賣光的不算，照常加一筆買進。
+- **以券商為準（`replace: true`）**：先刪掉**這個帳戶裡這一檔的所有紀錄**（買、賣、股利含自動入帳的、分割、減資，和帳戶的自動股利略過紀錄），再寫入這一批——**同一個交易**：這一批有任何錯誤就什麼都不刪、不寫。同一檔有好幾列時，任一列勾了就算整檔換掉。定期定額、別的股票、別的帳戶、別人的資料都不動。領過的股利與賣出的已實現損益跟著刪掉（自動股利只會從新的買進日以後重新補），`in_ledger.dividends`／`sells` 讓畫面在勾之前就說。`replace` 是對 `account_id` 這個帳戶說的：前端換帳戶時會把它拿掉、要使用者對新的帳戶重新勾（伺服器沒辦法知道使用者是對哪個帳戶勾的）。
+- **全部或全不**：`dry_run: false` 有任何 `error` → 422 `batch_rejected`，`rows: [{"index", "code", "message"}]`（和 `POST /transactions/batch` 一樣）。其他列的錯誤是 `check_batch` 的：`unknown_symbol`、`bad_date`、`validation_error`（例如台股的股數不是整數、幣別不對）。整個請求的 422 `validation_error`：`account_id` 沒給或是空字串、0 列或超過 200 列、`price` 與 `total_cost` 都給或都沒給、數字不是正的、不認得的欄位。帳戶不是自己的 404。這個端點不看 `plan.statement_import`（和 `POST /transactions/batch` 一樣）。
+- **復原**：`DELETE /transactions/batches/{batch_id}` 刪掉這一批寫入的買進。**以券商為準刪掉的舊紀錄不會回來**（`replaced` 告訴前端有幾筆，確認復原時要照實說）。
 
 ## 持倉的均價與手續費（2026-11-17）
 

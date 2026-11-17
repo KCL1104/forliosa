@@ -193,10 +193,10 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `GROUP_FREE_MEMBER_CAP`、`GROUP_BOOSTED_MEMBER_CAP` | 5、50 | 群組加值包（產品負責人 2026-11-16）：免費群組最多幾位成員、加值的群組最多幾位；0023 部署當時已有的群組維持 50（`groups.grandfathered_member_cap`）。滿了只擋加入，不移除人。api 與 worker 設一樣的值 |
 | `GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD` | `true`、5 | 群組 AI 日報（只給加值的群組，每個交易日一則；不計入任何成員的額度）；全部群組合計每月的花費上限（美元，0＝不限） |
 | `AI_KEY_STICKY_WAIT_SECONDS`、`AI_KEY_COOLDOWN_SECONDS` | 5、60 | 見上 |
-| `IMPORT_STATEMENTS` | `all` | 匯入對帳單（`POST /imports/statement`；產品負責人 2026-11-16）誰能用：`all` 所有登入的人（免費與會員一樣；2026-11-17 起是預設）、`admins` 只有站方管理員（`ADMIN_EMAILS`；第一版）、`off` 沒有人。`GET /me` 的 `plan.statement_import` 照它算 |
-| `AI_MODEL_IMPORT`、`AI_EFFORT_IMPORT` | 空（＝`AI_MODEL`，`claude-haiku-5-5`）、`medium` | 讀對帳單的模型與 effort（結構化 JSON、沒有工具、一次最多 5 頁） |
+| `IMPORT_STATEMENTS` | `all` | 匯入對帳單（`POST /imports/statement`；產品負責人 2026-11-16）與匯入庫存（`POST /imports/positions`；2026-11-17）誰能用：`all` 所有登入的人（免費與會員一樣；2026-11-17 起是預設）、`admins` 只有站方管理員（`ADMIN_EMAILS`；第一版）、`off` 沒有人。`GET /me` 的 `plan.statement_import` 照它算 |
+| `AI_MODEL_IMPORT`、`AI_EFFORT_IMPORT` | 空（＝`AI_MODEL`，`claude-haiku-5-5`）、`medium` | 讀對帳單與庫存截圖的模型與 effort（結構化 JSON、沒有工具、一次最多 5 頁） |
 | `AI_MODEL_IMPORT_RETRY` | `claude-sonnet-5-5` | 驗算沒過、合計對不上、有沒讀清楚的地方或模型拒答時，那幾頁用這個模型再讀一次（effort low，一份約 US$0.08）；省錢模式不重讀；設成空字串＝不重讀 |
-| `IMPORT_DAILY_LIMIT` | 10 | 每人每天最多讀幾份（0＝不限）；不算每天的提問數，費用算進每月額度（`/ai/usage` 的 `imports_today`、`import_daily_limit`） |
+| `IMPORT_DAILY_LIMIT` | 10 | 每人每天最多讀幾次，對帳單與庫存合計（0＝不限）；不算每天的提問數，費用算進每月額度（`/ai/usage` 的 `imports_today`、`import_daily_limit`） |
 | `IMPORT_MAX_PAGES`、`IMPORT_MAX_BODY_MB` | 20、15 | 一次最多幾頁（圖片）、request body 最大幾 MB；超過回 413 |
 | `AI_IMPORT_MAX_TOKENS` | 16000 | 每次呼叫的 `max_tokens`（不串流；約 50 列）；答不完時把頁數切半重讀 |
 | `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |
@@ -213,6 +213,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 **保存期限**：對話與訊息（含網路搜尋的加密內容）、草稿在最後活動 30 天後由 worker 每天刪除；`ai_usage`（token、槽號、估計費用，不含內容）保留做帳。
 
 **AI 從不寫入帳本**：記帳一律先產生草稿，使用者在畫面上確認後前端才 `POST /transactions`（`source: "ai_draft"`）。
+匯入也一樣：AI 只讀對帳單或庫存截圖、伺服器逐列檢查，使用者在確認表上按下寫入，前端才 `POST /transactions/batch`（對帳單）或 `POST /imports/positions/commit`（庫存：每一檔一筆買進；`account_id` 必填、不退回第一個帳戶；「以券商為準」在同一個交易裡先刪掉那個帳戶那一檔的舊紀錄，股利與賣出也在內），兩種都能用 `DELETE /transactions/batches/{id}` 整批復原（換掉的舊紀錄不會回來）。
 
 ## 專案結構
 

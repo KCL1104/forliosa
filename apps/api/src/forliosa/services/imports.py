@@ -42,7 +42,7 @@ from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import ROUND_FLOOR, Decimal, InvalidOperation
-from typing import Any
+from typing import Any, Protocol
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -89,18 +89,20 @@ WEEKDAYS = "一二三四五六日"
 FIELD_LABELS = {"trade_date": "日期", "symbol_code": "代號", "name": "名稱", "side": "買賣", "kind": "種類",
                 "quantity": "股數", "quantity_unit": "單位", "price": "價格", "amount": "價金", "fee": "手續費",
                 "tax": "交易稅", "currency": "幣別"}
-NOTICE = {"holdings_snapshot": "這是庫存畫面，沒有買進日期，還不能匯入。請改用對帳單或成交明細。",
+NOTICE = {"holdings_snapshot": "這是庫存畫面，沒有買進日期。請改用「匯入庫存」。",
           "not_a_trade_record": "這個檔案裡沒有買賣紀錄。"}
 
 
 # -- who may import, and how many today -----------------------------------------------------------------------------
-def require_access(user: User, settings: Settings) -> None:
+def require_access(user: User, settings: Settings, message: str = "這個帳號還不能匯入對帳單。") -> None:
+    """``IMPORT_STATEMENTS`` (``plan.statement_import``) opens both imports: 匯入對帳單 and 匯入庫存."""
     if not plans.statement_import_open(user, settings):
-        raise ApiError(403, "import_not_enabled", "這個帳號還不能匯入對帳單。")
+        raise ApiError(403, "import_not_enabled", message)
 
 
 def imports_today(db: Session, user: User) -> int:
-    """Statements read today (Taipei): one ``ai_usage.thread_id`` per read, counted when its first call starts."""
+    """Reads today (Taipei), statements and holdings alike: one ``ai_usage.thread_id`` per read, counted when its
+    first call starts."""
     return db.scalar(select(func.count(func.distinct(AiUsage.thread_id))).where(
         AiUsage.user_id == user.id, AiUsage.feature == FEATURE, AiUsage.created_at >= store.day_start())) or 0
 
@@ -209,14 +211,15 @@ def _name_matches(md: MarketData, info: InstrumentInfo, name: str) -> bool:
     return any(i.symbol == info.symbol for i in md.search(name, 10))
 
 
-def resolve_symbol(md: MarketData, code: str, name: str, currency: str
+def resolve_symbol(md: MarketData, code: str, name: str, currency: str, where: str = "對帳單"
                    ) -> tuple[InstrumentInfo | None, dict[str, str] | None]:
-    """The printed code (checked against the printed name for Taiwan stocks), else the name; or a flag."""
+    """The printed code (checked against the printed name for Taiwan stocks), else the name; or a flag. ``where``:
+    what the name was printed on (對帳單, 畫面)."""
     code, name = _nfkc(code), _nfkc(name)
     info = md.instrument(code) if code else None
     if info is not None:
         if name and not name.isascii() and not _name_matches(md, info, name):
-            return info, _flag("ambiguous_symbol", f"代號 {code} 是{info.name}，對帳單上寫的是「{name}」。", "error")
+            return info, _flag("ambiguous_symbol", f"代號 {code} 是{info.name}，{where}上寫的是「{name}」。", "error")
         return info, None
     if name:
         found = md.search(name, 8)
@@ -435,6 +438,9 @@ class _Reading:
         s += len(self.extraction.unreadable)
         return s + (3 if self.totals and self.totals["ok"] is False else 0)
 
+    def retry_chunks(self) -> list[int]:
+        return _needs_retry(self)
+
 
 def parse_month(text: Any, last: bool) -> date | None:
     """A month as printed (2026/10, 2026 年 10 月, 115/10 民國): its first day, or its last with ``last``."""
@@ -522,20 +528,68 @@ def _lock_user(db: Session, user: User) -> None:
         db.execute(select(User.id).where(User.id == user.id).with_for_update())
 
 
-def read_statement(db: Session, user: User, account_id: str | None, pages: Sequence[Page], md: MarketData,
-                   settings: Settings, pool: KeyPool | None = None,
-                   cancelled: Callable[[], bool] | None = None) -> dict[str, Any]:
-    """Read ``pages`` and check every row against ``account_id``'s books (default: the user's first account).
+# -- reading with the import model, then once more with the retry model (both imports) ------------------------------
+class Reading(Protocol):
+    """What :func:`read_with_retry` needs from an import's evaluated reading."""
 
-    429 ``ai_import_daily_limit`` after ``IMPORT_DAILY_LIMIT`` reads today; 429 ``ai_monthly_budget`` once the month's
-    budget and 省錢模式's allowance are spent (in 省錢模式 the pages are read once, with no second reading); 503
-    ``ai_unavailable`` without a usable key; 422 ``unreadable_file`` when no page could be read (refused by the API,
-    cut off, refused by the model). ``cancelled``: true once the client has gone (no second reading then; the first
-    one still counts as one of today's reads, it was billed)."""
-    account = _account(db, user, account_id)
+    results: list[ChunkResult]
+    rows: Sequence[Any]
+
+    def score(self) -> int:
+        """Reading problems (lower is better)."""
+        ...
+
+    def retry_chunks(self) -> list[int]:
+        """The chunks (indexes into ``results``) worth reading again with the retry model."""
+        ...
+
+
+@dataclass(frozen=True)
+class ReadMessages:
+    """An import's own words for the read errors (``daily_limit`` takes ``{limit}``)."""
+
+    daily_limit: str
+    too_long: str
+    unreadable: str
+
+
+STATEMENT_MESSAGES = ReadMessages("今天已經匯入 {limit} 份，明天再匯入。",
+                                  "明細太多，一次讀不完。分成幾張截圖，或把 PDF 分開再匯入。",
+                                  "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。")
+
+
+@dataclass
+class ReadOutcome[R: Reading]:
+    reading: R
+    model: str  # the model whose reading was kept
+    retried: bool
+    calls: int  # model calls billed
+    read_id: str
+    began: float  # time.monotonic() when the first call was about to start
+
+
+def _daily_limit_error(limit: int, messages: ReadMessages) -> ApiError:
+    return ApiError(429, "ai_import_daily_limit", messages.daily_limit.format(limit=limit), extra={"limit": limit})
+
+
+def read_with_retry[R: Reading](db: Session, user: User, pages: Sequence[Page], settings: Settings,
+                                pool: KeyPool | None, cancelled: Callable[[], bool] | None, *,
+                                spec: importer.ReadSpec, evaluate: Callable[[list[ChunkResult]], R], id_prefix: str,
+                                messages: ReadMessages = STATEMENT_MESSAGES) -> ReadOutcome[R]:
+    """Read ``pages`` with the import model (``AI_MODEL_IMPORT``) and, when the evaluated reading asks for it, read
+    those chunks once more with ``AI_MODEL_IMPORT_RETRY``; the better reading is kept (``evaluate`` turns chunk
+    results into an import's reading).
+
+    429 ``ai_import_daily_limit`` after ``IMPORT_DAILY_LIMIT`` reads today (statements and holdings together);
+    429 ``ai_monthly_budget`` once the month's budget and 省錢模式's allowance are spent (in 省錢模式 the pages are
+    read once, with no second reading); 503 ``ai_unavailable`` without a usable key; 422 ``unreadable_file`` when
+    no chunk could be read (refused by the API, cut off, refused by the model). ``cancelled``: true once the client
+    has gone (no second reading then; the first one still counts as one of today's reads, it was billed). Every
+    call is recorded
+    in ``ai_usage`` (``feature="import"``, counts and cost only) under one ``read_id``."""
     limit = settings.import_daily_limit
     if limit > 0 and imports_today(db, user) >= limit:
-        raise ApiError(429, "ai_import_daily_limit", f"今天已經匯入 {limit} 份，明天再匯入。", extra={"limit": limit})
+        raise _daily_limit_error(limit, messages)
     economy = store.check_month_budget(db, user, settings, economy_ok=True)
     pool = pool or get_key_pool()
     if not pool.available:
@@ -544,14 +598,14 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
     if not pool.ranked(costs):
         raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
     model, retry_model = store.model_for(FEATURE, settings), settings.ai_model_import_retry.strip()
-    read_id = new_id("stm")
+    read_id = new_id(id_prefix)
     user_id = user.id
     # Counts toward today's reads from the start. The count is taken again with the user's row locked until the
     # 'started' row is committed, so two reads sent at once are counted one after the other (PostgreSQL; SQLite, used
     # in development, has no row locks).
     _lock_user(db, user)
     if limit > 0 and imports_today(db, user) >= limit:
-        raise ApiError(429, "ai_import_daily_limit", f"今天已經匯入 {limit} 份，明天再匯入。", extra={"limit": limit})
+        raise _daily_limit_error(limit, messages)
     started = store.record_usage(db, user_id=user_id, thread_id=read_id, feature=FEATURE, model=model, key_slot=None,
                                  usage=CallUsage(), stop_reason="started")  # commits: the lock is released
     began = time.monotonic()
@@ -566,19 +620,18 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
                 billed += 1
 
     by_number = {p.number: p for p in pages}
-    first = importer.read_pages(pool, pages, model, settings.ai_effort_import, settings.ai_import_max_tokens, costs)
+    first = importer.read_pages(pool, pages, model, settings.ai_effort_import, settings.ai_import_max_tokens, costs,
+                                spec=spec)
     record(first)
-    load_official_calendar(db)
-    ctx = _Ctx(db, md, account, today_taipei(), (None, None))
-    reading = _evaluate(ctx, first)
+    reading = evaluate(first)
     retried, used = False, model
     # no second reading in 省錢模式, or once the user has cancelled (closed the request): nobody would see it
     gone = cancelled is not None and cancelled()
-    need = [] if economy or not retry_model or gone else _needs_retry(reading)
+    need = [] if economy or not retry_model or gone else reading.retry_chunks()
     if need:
         groups = [[by_number[n] for n in first[i].pages] for i in need]
         second = importer.read_groups(pool, groups, retry_model, importer.RETRY_EFFORT,
-                                      settings.ai_import_max_tokens, costs)
+                                      settings.ai_import_max_tokens, costs, spec=spec)
         record(second)
         retried = True
         combined: list[ChunkResult] = []
@@ -588,7 +641,7 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
             # a part that failed again must not take the rows the first reading had with it
             retry_used = i in need and parts and (all(s.ok for s in parts) or not r.ok)
             combined += parts if retry_used else [r]
-        other = _evaluate(ctx, combined)
+        other = evaluate(combined)
         n_first, n_other = len(reading.rows), len(other.rows)
         # a row one reading has and the other does not counts against the shorter one (a missed row is worse than a
         # flagged one: nobody sees it); ties go to the retry model
@@ -602,16 +655,37 @@ def read_statement(db: Session, user: User, account_id: str | None, pages: Seque
             db.commit()
         if failures <= {"unavailable"}:
             raise ApiError(503, "ai_unavailable", "AI 暫時不能用，晚一點再試。")
-        # nothing was read (cut off, refused, not the schema's JSON): say so, not "no trades in this file"
+        # nothing was read (cut off, refused, not the schema's JSON): say so, not "nothing in this file"
         if "max_tokens" in failures:
-            raise ApiError(422, "unreadable_file", "明細太多，一次讀不完。分成幾張截圖，或把 PDF 分開再匯入。")
-        raise ApiError(422, "unreadable_file", "這個檔案讀不了。換成截圖，或重新匯出 PDF 再試。")
+            raise ApiError(422, "unreadable_file", messages.too_long)
+        raise ApiError(422, "unreadable_file", messages.unreadable)
+    return ReadOutcome(reading, used, retried, billed, read_id, began)
+
+
+def read_statement(db: Session, user: User, account_id: str | None, pages: Sequence[Page], md: MarketData,
+                   settings: Settings, pool: KeyPool | None = None,
+                   cancelled: Callable[[], bool] | None = None) -> dict[str, Any]:
+    """Read ``pages`` and check every row against ``account_id``'s books (default: the user's first account); the
+    errors are :func:`read_with_retry`'s."""
+    account = _account(db, user, account_id)
+    ctx = _Ctx(db, md, account, today_taipei(), (None, None))
+    calendar: list[bool] = []
+
+    def evaluate(results: list[ChunkResult]) -> _Reading:
+        if not calendar:
+            load_official_calendar(db)
+            calendar.append(True)
+        return _evaluate(ctx, results)
+
+    run = read_with_retry(db, user, pages, settings, pool, cancelled, spec=importer.STATEMENT, evaluate=evaluate,
+                          id_prefix="stm")
+    reading = run.reading
     ctx.period = _period(reading.extraction, ctx.today)
     problems = _check_books(db, user, md, account, reading.rows)
     db.rollback()  # the books check writes nothing; make sure nothing is left pending
-    out = _response(reading, ctx, used, retried, problems)
-    log.info("statement import %s: %d pages, %d rows, %d calls, retried=%s, %.1f s", read_id, len(pages),
-             len(out["rows"]), billed, retried, time.monotonic() - began)
+    out = _response(reading, ctx, run.model, run.retried, problems)
+    log.info("statement import %s: %d pages, %d rows, %d calls, retried=%s, %.1f s", run.read_id, len(pages),
+             len(out["rows"]), run.calls, run.retried, time.monotonic() - run.began)
     return out
 
 

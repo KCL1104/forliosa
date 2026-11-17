@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils"
 import { usePrefs } from "@/stores/prefs"
 import { otherUnit, parseNumber as num, quantityError, toShares } from "./quantity-input"
 import { AccountSelect, StampLine } from "./TradeForm"
-import { useCanImportStatements } from "./import/access"
+import { useCanImport } from "./import/access"
 
 /**
  * 記一筆（預設的輸入方式；產品負責人 2026-11-14 第二次：照 Google 財經新增持有資產的做法，分兩步）：
@@ -162,7 +162,7 @@ function PickStep({
   const inputRef = useRef<HTMLInputElement>(null)
   const listId = useId()
   const query = q.trim()
-  const canImport = useCanImportStatements()
+  const canImport = useCanImport()
   const openImport = useUi((s) => s.openImport)
   const holdings = useHoldings()
   const watch = useWatchlist()
@@ -285,8 +285,8 @@ function PickStep({
         toFull={
           <>
             <ToFull onClick={onFull} />
-            {/* 匯入對帳單（2026-11-16）：第一步的左下角，和「賣出、股利或其他」同一種連結 */}
-            {canImport && <FooterLink onClick={openImport}>從對帳單匯入</FooterLink>}
+            {/* 匯入（2026-11-16；11-17 改成先選匯入庫存或對帳單）：第一步的左下角，和「賣出、股利或其他」同一種連結 */}
+            {canImport && <FooterLink onClick={() => openImport()}>匯入庫存或對帳單</FooterLink>}
           </>
         }
       />
@@ -670,7 +670,7 @@ function ToFull({ onClick }: { onClick: () => void }) {
   return <FooterLink onClick={onClick}>賣出、股利或其他</FooterLink>
 }
 
-/** 動作列左邊的淡墨連結（「賣出、股利或其他」「從對帳單匯入」） */
+/** 動作列左邊的淡墨連結（「賣出、股利或其他」「匯入庫存或對帳單」） */
 function FooterLink({ onClick, children }: { onClick: () => void; children: React.ReactNode }) {
   return (
     <button

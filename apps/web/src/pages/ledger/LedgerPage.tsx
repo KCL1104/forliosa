@@ -26,6 +26,8 @@ import { SourcesFooter } from "@/components/data-notes"
 import { upcomingShort, upcomingText } from "@/lib/ledger-display"
 import { useReadOnly } from "@/api/view-as"
 import { PlainLink } from "@/app/links"
+import { useUi } from "@/app/ui-store"
+import { useCanImport } from "@/pages/transactions/import/access"
 import { PageFrame } from "@/app/PageFrame"
 import { usePageTitle } from "@/app/page-title"
 import { HeroTrend } from "./HeroTrend"
@@ -63,6 +65,8 @@ export function LedgerPage() {
   const ask = useAskAi()
   // 查看別人的資產（唯讀）：沒有待簽名的草稿（那是自己的 AI）
   const readOnly = useReadOnly()
+  const canImport = useCanImport()
+  const openImport = useUi((s) => s.openImport)
 
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
 
@@ -121,20 +125,28 @@ export function LedgerPage() {
             待簽名 {pending} 筆
           </button>
         )}
-        {/* 手動記一筆：直接開輸入框（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」 */}
+        {/* 手動記一筆：直接開輸入框（用一句話記的入口在 AI 面板）。手機放在分段旁邊的「＋」。
+            匯入（2026-11-17）：開了匯入的帳號在記一筆左邊多一顆「匯入」，先選匯入庫存或對帳單（原本藏在記一筆、AI「＋」裡，朋友找不到） */}
         {!readOnly && (
           <>
-            <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => ask.action("form")}>
+            {canImport && (
+              <Button variant="outline" className="ml-auto max-lg:hidden" onClick={() => openImport()}>
+                匯入
+              </Button>
+            )}
+            <Button variant="outline" className={cn("max-lg:hidden", !canImport && "ml-auto")} onClick={() => ask.action("form")}>
               記一筆
             </Button>
-            <button
-              type="button"
-              aria-label="記一筆"
-              onClick={() => ask.action("form")}
-              className="press grid w-11 shrink-0 place-items-center self-stretch rounded-sm border border-ctl text-ink hover:bg-hov lg:hidden"
-            >
-              <PlusIcon aria-hidden className="size-5" />
-            </button>
+            <div className="flex shrink-0 gap-2 self-stretch lg:hidden">
+              {canImport && (
+                <button type="button" onClick={() => openImport()} className="press grid place-items-center rounded-sm border border-ctl px-3 text-base text-ink hover:bg-hov">
+                  匯入
+                </button>
+              )}
+              <button type="button" aria-label="記一筆" onClick={() => ask.action("form")} className="press grid w-11 place-items-center rounded-sm border border-ctl text-ink hover:bg-hov">
+                <PlusIcon aria-hidden className="size-5" />
+              </button>
+            </div>
           </>
         )}
         {view === "holdings" && <CustomizeButton className={cn("max-lg:hidden", readOnly && "ml-auto")} />}

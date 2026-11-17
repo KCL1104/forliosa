@@ -155,8 +155,8 @@ describe("整份的句子", () => {
     expect(totalsLine({ totals_check: null })).toBeNull()
   })
 
-  it("庫存畫面第一版不能匯入；不是交易紀錄、沒有讀到買賣都直接說", () => {
-    expect(unsupportedLine({ document_kind: "holdings_snapshot", rows: [row()] })).toMatch(/^這是庫存畫面，沒有買進日期，還不能匯入。/)
+  it("庫存畫面請改用匯入庫存；不是交易紀錄、沒有讀到買賣都直接說", () => {
+    expect(unsupportedLine({ document_kind: "holdings_snapshot", rows: [row()] })).toBe("這是庫存畫面，沒有買進日期。請改用「匯入庫存」。")
     expect(unsupportedLine({ document_kind: "not_a_trade_record", rows: [] })).toBe("這個檔案裡沒有買賣紀錄。")
     expect(unsupportedLine({ document_kind: "monthly_statement", rows: [] })).toBe("這個檔案裡沒有讀到買賣。")
     expect(unsupportedLine({ document_kind: "app_screenshot", rows: [row()] })).toBeNull()

@@ -5,7 +5,7 @@ import { useUi } from "@/app/ui-store"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { cn } from "@/lib/utils"
-import { useCanImportStatements } from "@/pages/transactions/import/access"
+import { useCanImport } from "@/pages/transactions/import/access"
 import { deepSearchCost, deepSearchHint } from "./deep-search"
 import { useAiUsage } from "./remote-hooks"
 import { currentThreadStreaming, useAi } from "./store"
@@ -40,7 +40,7 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   const setDeep = useAi((s) => s.setDeepNext)
   // 一次算幾題（後端說的；mock 模式用預設）。null＝這個環境沒有深度搜尋，不放切換鈕
   const deepCost = deepSearchCost(useAiUsage().data)
-  const canImport = useCanImportStatements()
+  const canImport = useCanImport()
   const openImport = useUi((s) => s.openImport)
   useImperativeHandle(ref, () => ({ focus: () => (variant === "panel" ? area.current : line.current)?.focus() }), [variant])
 
@@ -72,7 +72,8 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   }
   const empty = text.trim().length === 0
 
-  // 「＋」：開了匯入對帳單的帳號是兩項的選單（記一筆、匯入對帳單；2026-11-16）；沒開的只有一件事，直接打開表單記一筆（只有一項就不做成選單）
+  // 「＋」：開了匯入的帳號是兩項的選單（記一筆、匯入庫存或對帳單；2026-11-16，11-17 第二項改成先選要匯入什麼）；
+  // 沒開的只有一件事，直接打開表單記一筆（只有一項就不做成選單）
   const plusClass = cn(
     "press grid shrink-0 place-items-center rounded-sm text-ink-2 hover:bg-hov hover:text-ink aria-expanded:bg-hov aria-expanded:text-ink",
     variant === "panel" ? "size-9 pointer-coarse:size-11" : "size-11",
@@ -80,13 +81,13 @@ export const Composer = forwardRef<ComposerHandle, Props>(function Composer({ on
   const plusIcon = <PlusIcon aria-hidden className={variant === "panel" ? "size-[18px]" : "size-5"} />
   const attach = canImport ? (
     <DropdownMenu>
-      <DropdownMenuTrigger render={<button type="button" aria-label="記一筆或匯入對帳單" className={plusClass} />}>{plusIcon}</DropdownMenuTrigger>
-      <DropdownMenuContent side="top" align="start" className="w-40">
+      <DropdownMenuTrigger render={<button type="button" aria-label="記一筆或匯入" className={plusClass} />}>{plusIcon}</DropdownMenuTrigger>
+      <DropdownMenuContent side="top" align="start" className="w-44">
         <DropdownMenuItem onClick={onForm} className="min-h-9 text-md pointer-coarse:min-h-11 pointer-coarse:text-base">
           記一筆
         </DropdownMenuItem>
-        <DropdownMenuItem onClick={openImport} className="min-h-9 text-md pointer-coarse:min-h-11 pointer-coarse:text-base">
-          匯入對帳單
+        <DropdownMenuItem onClick={() => openImport()} className="min-h-9 text-md pointer-coarse:min-h-11 pointer-coarse:text-base">
+          匯入庫存或對帳單
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

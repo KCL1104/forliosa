@@ -83,7 +83,7 @@ function renderApp() {
 async function openImport() {
   renderApp()
   await screen.findByText("總資產", {}, T)
-  act(() => useUi.getState().openImport())
+  act(() => useUi.getState().openImport("statement"))
   return screen.findByRole("dialog", { name: "匯入對帳單" }, T)
 }
 
@@ -206,7 +206,7 @@ describe("匯入對帳單", () => {
     expect(within(dialog).getByRole("button", { name: "簽名：匯入 1 筆" })).toBeInTheDocument()
   })
 
-  it("庫存畫面：直接說還不能匯入，給「換一個檔案」", async () => {
+  it("庫存畫面：請改用匯入庫存——一個按鈕換過去，截圖帶著走；也可以換一個檔案", async () => {
     const doc: StatementImport = {
       document_kind: "holdings_snapshot", broker_name: "", period: null, rows: [], printed_totals: null, totals_check: null,
       unreadable: [], embedded_instructions: [], model_used: "claude-haiku-5-5", retried: false,
@@ -217,9 +217,17 @@ describe("匯入對帳單", () => {
     await user.upload(fileInput(dialog), pngFile())
     await within(dialog).findByText("1 張", {}, T)
     await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
-    expect(await within(dialog).findByText(/^這是庫存畫面，沒有買進日期，還不能匯入。/, {}, T)).toBeInTheDocument()
+    expect(await within(dialog).findByText("這是庫存畫面，沒有買進日期。請改用「匯入庫存」。", {}, T)).toBeInTheDocument()
     await user.click(within(dialog).getByRole("button", { name: "換一個檔案" }))
     expect(await within(dialog).findByRole("button", { name: "選檔案" }, T)).toBeInTheDocument()
+    // 再讀一次，這次按「改用匯入庫存」：同一個對話框換成匯入庫存，截圖已經選好
+    await user.upload(fileInput(dialog), pngFile())
+    await within(dialog).findByText("1 張", {}, T)
+    await user.click(within(dialog).getByRole("button", { name: "開始讀" }))
+    await user.click(await within(dialog).findByRole("button", { name: "改用匯入庫存" }, T))
+    const positions = await screen.findByRole("dialog", { name: "匯入庫存" }, T)
+    expect(within(positions).getByText("成交明細.png")).toBeInTheDocument()
+    expect(within(positions).getByRole("button", { name: "開始讀" })).toBeEnabled()
   })
 
   it("今天的份數用完（429）：照伺服器的句子說，檔案還在", async () => {

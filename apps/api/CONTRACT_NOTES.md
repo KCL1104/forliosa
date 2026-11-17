@@ -2844,13 +2844,13 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 
 | 變數 | 預設 | 說明 |
 |---|---|---|
-| `IMPORT_STATEMENTS` | `all` | 誰能讀檔：`all` 所有登入的人，免費與會員一樣（2026-11-17 起是預設：會員和免費帳號只差收盤簡報與 AI 額度；以前預設 `off`）；`admins` 只有站方管理員（`ADMIN_EMAILS`，第一版）；`off` 沒有人（入口不出現，`POST /imports/statement` 403）。決定 `/me` 的 `plan.statement_import`。只管 `POST /imports/statement`：`POST /transactions/batch` 與 `DELETE /transactions/batches/{id}` 不看它 |
+| `IMPORT_STATEMENTS` | `all` | 誰能讀檔：`all` 所有登入的人，免費與會員一樣（2026-11-17 起是預設：會員和免費帳號只差收盤簡報與 AI 額度；以前預設 `off`）；`admins` 只有站方管理員（`ADMIN_EMAILS`，第一版）；`off` 沒有人（入口不出現，`POST /imports/statement` 403）。決定 `/me` 的 `plan.statement_import`。只管讀檔（`POST /imports/statement`，2026-11-17 起也管 `POST /imports/positions`）：`POST /transactions/batch`、`POST /imports/positions/commit` 與 `DELETE /transactions/batches/{id}` 不看它 |
 | `AI_MODEL_IMPORT` | 跟著 `AI_MODEL`（`claude-haiku-5-5`） | 讀檔的模型。設定早就有（`store.model_for("import")`），2026-11-16 才用到 |
 | `AI_MODEL_IMPORT_RETRY` | `claude-sonnet-5-5` | 驗算沒過時重讀一次的模型（effort `low`）；省錢模式不重讀 |
 | `AI_EFFORT_IMPORT` | `medium` | 讀檔的 `output_config.effort`（假資料實測：low 與 medium 都 30/30，medium 稍快稍便宜） |
 | `IMPORT_MAX_PAGES` | 20 | 一次最多幾頁（圖）；超過 413 |
 | `IMPORT_MAX_BODY_MB` | 15 | 請求最多幾 MB；超過 413 |
-| `IMPORT_DAILY_LIMIT` | 10 | 每人每天（台北）最多讀幾次；超過 429 `ai_import_daily_limit` |
+| `IMPORT_DAILY_LIMIT` | 10 | 每人每天（台北）最多讀幾次（2026-11-17 起對帳單與庫存合計）；超過 429 `ai_import_daily_limit` |
 | `AI_IMPORT_MAX_TOKENS` | 16000 | 一次呼叫的 `max_tokens`（有 `raw_line` 時一列約 200–270 個輸出 token，約 50 列） |
 
 ### 讀檔（`POST /imports/statement`）
@@ -2915,6 +2915,64 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 3. **瀏覽器裡的 pdf.js 解密與塗黑還沒在真的瀏覽器裡實測**；伺服器上同樣的做法（pikepdf 解密、pypdfium2 畫圖與塗黑）用合成檔測過，可以當備案——但那樣密碼就會送到伺服器，隱私權政策要跟著改。
 4. **真的對帳單**：準確度、塗黑要認的頁首欄位、退佣與定期定額的寫法、複委託的幣別欄位、哪幾家的 PDF 文字層是壞的——都要負責人用自己的對帳單試過才知道。
 5. **Anthropic 的保存規定**：API 文件說對話內容預設不保存、被安全機制標記的最多保存 2 年；商用條款與隱私中心的頁面被沙盒擋住，沒能核對（`docs/legal/README.md` (d) 第 20 點）。
+
+## 2026-11-17 匯入庫存
+
+產品負責人決定（2026-11-17，四項照建議）：(1) 上傳券商 app 庫存頁的截圖（一張或幾張）或貼上文字，AI 讀出股票、股數、均價（只有總成本時 price＝總成本 ÷ 股數），使用者在確認表上核對；台股（張／股、零股）與複委託的美股（美元）。(2) 整批一個買進日期，預設今天（台北），每列可改。(3) 每一檔記一筆買進，價格＝券商均價、手續費 0，帳本的均價就等於券商的。(4) 帳戶裡已經有的股票預設略過、標「已在帳本」；每列的「以券商為準」把這個帳戶裡這一檔的紀錄**在同一個交易裡**換成這一筆。整批可以像匯入對帳單一樣復原。
+合約見 [`docs/api-contract.md`](../../docs/api-contract.md)「匯入庫存（2026-11-17）」。程式：`ai/positions.py`（提示詞與 schema）、`services/positions_import.py`、`api/routes/imports.py`、`services/transactions.py`（`delete_records`——合併前叫 `delete_symbol_records`，見最後「匯入庫存合併進開發分支」——、`write_batch`）。
+
+### 和匯入對帳單共用的部分
+
+- **呼叫**：`ai/importer.py` 的 `read_pages`／`read_groups`／`read_chunk` 多一個 `ReadSpec`（系統提示、schema、最後一句問題、log 用的名字），預設是對帳單的 `STATEMENT`；庫存用 `positions.SPEC`。一次最多 5 頁、結構化 JSON、沒有工具、不串流、`max_tokens` 停下就對半切。
+- **重讀與次數**：`services/imports.read_with_retry` 是從 `read_statement` 抽出來的（每天上限、使用者那一列的鎖、`started` 列、月額度與省錢模式、重讀模型、重讀那一段要整段讀出來才換、都沒讀出來的錯誤），兩種匯入各自給 `evaluate`（把讀到的段落變成自己的列）與錯誤句子（`ReadMessages`）。`thread_id` 前綴：對帳單 `stm_`、庫存 `pos_`；**兩種都是 `feature="import"`，每天的次數合計**（`IMPORT_DAILY_LIMIT`）。
+- **設定**：沒有新的環境變數。`IMPORT_STATEMENTS` 同時管兩種讀檔（`plan.statement_import`），`AI_MODEL_IMPORT`、`AI_MODEL_IMPORT_RETRY`、`AI_EFFORT_IMPORT`、`IMPORT_MAX_PAGES`、`IMPORT_MAX_BODY_MB`、`IMPORT_DAILY_LIMIT`、`AI_IMPORT_MAX_TOKENS` 一樣用。
+- **不存、不寫 log**：圖片、貼上的文字、讀出的列都不存、不進 log；log 只有次數、列數、合併幾列、呼叫幾次、秒數。
+
+### 讀（`POST /imports/positions`）
+
+- **輸入**：`kind: "images"`（`pages`，和對帳單同樣的檔頭檢查、413 上限）或 `kind: "text"`（`text`，最多 20,000 字）。貼上的文字當成一頁沒有圖片的頁送出，前後用 `<貼上的文字>`、`</貼上的文字>` 圍起來（`importer.pasted_block`；文字裡的結束標籤先拿掉；實測時沒圍起來，AI 把伺服器最後那一句問題當成文字的最後一行，抄進了 `embedded_instructions`），**送出前伺服器先塗一次個資**（`importer.mask_text`：身分證字號、「分公司代碼-帳號」、姓名／戶名／地址／帳號等標籤後面的值，規則和瀏覽器的 `mask.ts` 一樣，一行一行做）；截圖的文字層（如果有）也用它。
+- **schema**（每個欄位必填、沒有就是 `""`）：每一列 `symbol_code`、`name`、`kind`（cash／margin／short／other）、`quantity`、`quantity_unit`（shares／lots）、`avg_cost`、`total_cost`、`market_price`、`market_value`、`currency`（TWD／USD／other／not_shown）、`page`、`raw_line`、`unclear`；整份 `document_kind`（holdings／trade_records／other）、`broker_name`、`unreadable`、`embedded_instructions`。系統提示：只抄庫存、不算不猜；重疊的截圖各抄各的（伺服器合併）；均價不是損益平衡價、總成本不是市值；複委託有原幣與台幣兩種成本時抄美元的；**現價與市值也抄和成本同一種幣別的**，美股只印了台幣市值（參考市值）時 `market_value` 留空。
+- **價格**：有均價用均價（`price_basis: "average_cost"`），只有總成本用總成本 ÷ 股數（`"total_cost"`，8 位小數，和資料庫的 `NUMERIC(24, 8)` 一樣）；回應的 `price` 是 4 位小數，所以這種列寫入時前端送 `total_cost`。
+- **合併**：同一檔（對不到股票時用代號＋名稱）、同一種類、同股數、同成本的列只留第一列（`merged_duplicates`）；合併後同一檔還有好幾列的標 `same_symbol_twice`（整股與零股分開列、現股與融資都是正常的，都匯入會加在一起）。
+- **帳本**（讀之前把使用者整本帳本重播一次，不嚴格）：這個帳戶現在有股數的是 `in_ledger`（附帳本的股數、均價、紀錄筆數，以及其中的股利 `dividends`——`cash_dividend`、`stock_dividend`，自動記的也算——與賣出 `sells` 筆數：以券商為準會連它們一起刪掉，領過的股利與已實現損益跟著不見，前端在勾之前照實說；預設不勾），別的帳戶有的是 `in_other_account`（只提醒）。已經賣光的不算「已在帳本」。
+- **算術**：`cost_mismatch`（股數 × 均價和總成本差超過 0.5%、或股數 × 0.005，至少 NT$1／US$0.02）、`value_mismatch`（股數 × 現價和市值差超過 1%；**美股的市值是股數 × 現價的 20–50 倍時不比**——那是複委託畫面的台幣參考市值，不是讀錯，`TWD_PER_USD`；2026-11-17 審查：不然每一列都標、每次都多花一次重讀）；兩個都會看張股弄錯（台股沒標張、乘 1,000 就對得上 →「股數可能是張數」；標了張、不乘就對得上 →「數量可能是股數，不是張數」）。**張股由印出來的金額決定**（`_unit_by_arithmetic`，2026-11-17 實測後）：台股照 AI 讀的單位，均價 × 股數＝總成本、現價 × 股數＝市值一個都對不上，換成另一個單位每一個都對得上，就換過來、標 `unit_fixed`（提醒、預設勾、不重讀；實測時第一次讀的模型把只有總成本的畫面上「庫存股數」那一欄讀成張，原本要靠重讀模型改正，一次多花約 US$0.02，省錢模式不重讀就是四列錯的）。兩個說法不一樣時不換，照舊標 `cost_mismatch`／`value_mismatch` 加提示。`not_whole_lots`（印的是張但不是整張，只提醒）、`fractional_tw_qty`（台股股數不是整數，錯誤）。
+- **看不清楚**：AI 的 `unclear` 只算印出來的格子——值是空字串（或幣別 `not_shown`）的欄位是沒印，不算；張股被印出來的金額對上了，`quantity_unit` 的 `unclear` 也不算（實測時 AI 把只有總成本的畫面上沒印的均價、幣別都標成看不清楚，每一列都變成 `unreadable`、預設不勾）。系統提示也說：沒印的欄位不要放進 `unclear`、不用寫進 `unreadable`；欄名寫「股數」「庫存股數」的是股。
+- **幣別**：`currency_mismatch`（美股的成本是新台幣、台股的是美元：錯誤，預設不勾；幣別換算不做）、`currency_guess`（美股沒寫幣別：當美元，只提醒）。
+- **其他**：`margin`（融資：當一般持股匯入）、`short_sale`（融券：不匯入）。旗標的 `message` 都是伺服器寫好的繁體中文句子。
+- **重讀**：`RETRY_CODES` = `unreadable`、`cost_mismatch`、`value_mismatch`、`fractional_tw_qty`，加上 AI 自己的 `unreadable` 與失敗的段落；不是庫存畫面（`trade_records`、`other`）不重讀（失敗的段落除外）。分數＝有這些旗標的列數＋`unreadable` 的數目，漏列的那一次多算 2（和對帳單一樣）。
+- **對帳單那邊**：`POST /imports/statement` 認出庫存畫面（`holdings_snapshot`）時的 `notice` 改成「這是庫存畫面，沒有買進日期。請改用「匯入庫存」。」。
+
+### 寫入（`POST /imports/positions/commit`；`services/positions_import.commit`）
+
+- **帳戶**：`account_id` 必填（schema `min_length=1`），用 `transactions._get_account` 找（一定要有 id）；不用讀的時候的 `imports._account`（沒給就退回使用者的第一個帳戶）——寫入會刪紀錄，空字串不能悄悄落到沒指名的帳戶（2026-11-17 審查）。空字串或沒給是 422 `validation_error`。
+- 每一列變成 `check_batch` 的一列：`type: "buy"`、日期（列自己的或整批的，預設今天台北）、股數、價格（`price`，或 `total_cost` ÷ 股數）、`fee: 0`、`tax: 0`、`note: ""`。所以列的錯誤和 `POST /transactions/batch` 一樣（`unknown_symbol`、`bad_date`、`validation_error`…），再加上 `in_ledger`：帳戶現在有這一檔、這一列又沒有 `replace`（多記一筆買進會變兩倍）。
+- **順序**：`lock_accounts`（PostgreSQL 的 FOR UPDATE）→ 整本帳本重播一次（誰已在帳本）→ 要換掉的每一檔 `delete_records(db, user, [account.id], symbol)`（合併前叫 `delete_symbol_records`；刪掉、flush、不 commit）→ `check_batch`（看到的是刪掉以後的帳本）→ `dry_run` 或有錯誤就 `rollback`（刪掉的都回來）→ 否則 `write_batch`：新的 `import_batch_id`、嚴格重播、`add_all`、自動股利重算（這一批碰到的股票，加上換掉的股票）、清掉沒有交易撐著的群組動態留言、**一次 commit**。中間任何一步失敗，session 關掉時整個 rollback。
+- **刪掉一檔的紀錄**（`services/transactions.py`；合併進開發分支時和「刪除這檔」「清除所有持倉」併成一個 `delete_records(db, user, account_ids, symbol)`，見最後「匯入庫存合併進開發分支」；這裡呼叫 `delete_records(db, user, [account.id], symbol)`）：刪掉這個帳戶裡這一檔的每一筆紀錄（`Transaction.symbol == symbol`：買、賣、股利含自動入帳的、分割、減資、標了這一檔的現金列——就是 `GET /transactions?account_id=&symbol=` 列出來的），以及這個帳戶這一檔的自動股利略過紀錄（`auto_dividend_skips`：它們說的是那些列被改過或刪過）。只 flush、不 commit、不重算自動股利、不鎖：呼叫的人先鎖帳戶、拿回傳的群組動態 key（`feed_keys`）、重算、commit。不用重播檢查：嚴格重播只拿一檔跟它自己的紀錄比，拿掉一整檔不會讓別檔對不上。定期定額、別檔、別的帳戶、別的使用者都不動（每一句都以 `user_id` 篩選，別人的帳戶什麼都刪不到；帳戶是不是自己的由呼叫的人先查，`commit` 用 `_get_account`，不是自己的 404）。
+- **`write_batch(db, user, check, md, also_sync=(), purge_feed_keys=())`**：`create_batch` 檢查完以後的那一段抽出來，兩種匯入共用。
+- **復原**：`DELETE /transactions/batches/{id}`（`delete_batch`，沒有改）刪掉這一批寫入的買進；**以券商為準刪掉的舊紀錄不會回來**——沒有地方存它們（不加資料表）。回應的 `replaced: [{symbol, deleted}]` 讓前端在確認復原時照實說（復原之後，這個帳戶裡就沒有那一檔了）。
+- **`replace` 是對 `account_id` 說的**：伺服器分不出使用者是對哪個帳戶勾的，所以前端換帳戶時把以券商為準拿掉（新的帳戶也有這一檔時連勾選一起），要使用者對新的帳戶重新勾（2026-11-17 審查：原本在 A 勾的、換到也有這一檔的 B 會直接刪 B 的紀錄）。
+- **績效**：每一檔是那一天、照券商均價的一筆普通買進，績效的日報酬 r = (V + O)/(V₋₁ + I) − 1 裡 I 是買進成本，所以**均價到那天收盤的漲跌全部算在那一天**，那一天之前沒有走勢。畫面照實說（不再寫「績效從這一天起算」）；要不要讓績效把匯入那天當成基準日（跳過那一天的報酬）是待負責人決定的事（`PRODUCT.md`）。
+- **不需要 migration**：沒有新的表或欄位（`import_batch_id`、`source="import"` 是 0021 就有的）。
+
+### 測試（不連網，`tests/api/test_positions_import.py`，用 `fake_anthropic.py`）
+
+- 每一種旗標與預設勾選、張換股、只有總成本時的價格、重疊截圖合併、整股零股兩列、別的帳戶也有、什麼都不存、用量算一次、送出的請求（schema、系統提示、頁的標記）。
+- 貼上的文字：個資在送出前塗掉、只有文字沒有圖片；`mask_text` 的規則。
+- 重讀模型、不是庫存畫面、都沒讀出來、權限（`IMPORT_STATEMENTS`）、每天的次數和對帳單合計、查看別人的資產時不能讀也不能寫、請求格式。
+- 寫入：每一檔一筆買進、手續費 0、總成本到元、帳本均價等於券商的、每列自己的日期、整批復原；已在帳本沒勾以券商為準 → 整批不寫；以券商為準的 `dry_run` 不刪、有一列錯就什麼都不刪、寫入後這一檔只剩新的一筆、別檔／別的帳戶／別人／定期定額／自動股利略過紀錄（刪掉的是這一檔的）都照預期、復原後舊紀錄不回來；請求的規則；已經賣光的照常加買進；`delete_records` 不 commit、別的使用者刪不到（筆數 0、什麼都沒刪；合併前的 `delete_symbol_records` 測的是別人的帳戶 404）。
+- 實測之後（2026-11-17）：貼上的文字圍起來、文字裡的結束標籤拿掉、問題那一句不會被當成指令抄回來（`instruction_quotes`，對帳單也用）；只有總成本的畫面讀成張時照市值換成股、`unit_fixed`、不重讀；沒印的欄位與金額對得上的單位標了 `unclear` 不算；金額說法不一樣時照舊標 `cost_mismatch` 加提示。
+- 審查之後（2026-11-17）：`in_ledger` 的股利與賣出筆數；`account_id` 空字串或沒給是 422、什麼都不刪；美股的台幣市值不標 `value_mismatch`、不重讀（美元的市值對不上照樣標）、系統提示有這一條。
+
+### 實測（真的 Claude API，2026-11-17；拋棄式 SQLite、示範行情，不碰正式環境）
+
+- 自己做的 3 張假庫存截圖（Playwright 把簡單的 HTML 表格存成 1170×2532 的 JPEG，中性樣式、沒有真的券商名稱）：台股有張有零股有成本均價（5 檔，含融資一檔）、台股只有總成本（4 檔）、複委託美元（4 檔，含 3.5 股、台幣參考市值）；一段貼上的文字（4 檔，含假的姓名、身分證字號、帳號與一句想指揮 AI 的備註）；再加同一張截圖送兩次。
+- 修正後最後一輪（正式環境的設定，會重讀）：**22／22 列每一欄都對**（股數、張換股、價格、只有總成本時的總成本 ÷ 股數、幣別、融資），沒有重讀；每張 3.2–7.1 秒（貼上的文字 4.7 秒），一次約 US$0.001–0.0016。回應裡沒有姓名、身分證字號、帳號；那句備註照抄在 `embedded_instructions`、沒有照做。寫入一批（9 檔，台積電勾以券商為準）、整批復原都照設計：舊的 2 筆刪掉、帳本均價等於券商的、別的帳戶與定期定額沒動、復原後舊紀錄不回來。
+- 找到並修好的三件事見上面「看不清楚」、張股與貼上的文字（測試在 `test_positions_import.py`）。整個實測（修正前後 4 輪、13 次讀取、14 次呼叫）共花 US$0.038。
+
+### 待確認
+
+1. **真的截圖**：各家 app 的庫存頁（永豐、富邦、國泰、元大、凱基、複委託）欄位名稱與張／股的寫法，要用真的截圖試過才知道準確度；`cost_mismatch` 的 0.5% 是猜的（成本含不含手續費各家不同）。
+2. **以券商為準不能復原舊紀錄**：負責人接受「照實說」；要真的能復原得另外存一份被刪的列（要加資料表）。
 
 ## 2026-11-16 台股當天收盤價提早進來、預計更新時間（`forliosa.closes`）
 
@@ -3808,3 +3866,28 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **媒體數字不一致的比較（第三次試跑發現）**：原本比的是兩則報導各自的第一個數字，「台股今（17）日…成交量9,618億元」和「台股今上下振盪
   1747.39點…成交值9617.95億元」會變成「鉅亨網寫 1747.39 億元，經濟日報寫 17 億元」。現在法人與成交金額比的是第一個「億元」金額，夜盤與
   ADR 比第一個百分比（事實多一個 `main`，不送給寫手）；沒有這種數字的事實不比。四捨五入後相同的（9,617.95 與 9,618）算一致，不列。
+
+## 2026-11-17 匯入庫存合併進開發分支（`services.transactions.delete_records`）
+
+匯入庫存（`positions-import`）是在比較舊的開發分支上做的；合併時開發分支已經有「刪除這檔」與「清除所有持倉」，三個功能都要「刪掉一個範圍的紀錄」。
+合併後只有一個低階函式，三個呼叫的人各自保留原本的行為：
+
+- **`delete_records(db, user, account_ids, symbol=None) -> DeletedRecords(count, symbols, feed_keys)`**：刪掉使用者在 `account_ids` 裡的紀錄——
+  全部（`symbol=None`，存提款等沒有代號的列也刪），或只有 `symbol` 那一檔（`Transaction.symbol == symbol` 精確比對）——以及同一個範圍的
+  `auto_dividend_skips`。只讀日期、代號、類型、來源四欄（算筆數、不同代號數與群組動態的 key），再整批 `DELETE`（待送的群組推播
+  `ON DELETE CASCADE`）；flush、不 commit、不鎖、不重算股利、不清群組動態。**範圍裡一列都沒有時什麼都不刪**（略過紀錄也不刪），回傳 0。
+  每一句都以 `user_id` 篩選：別人的帳戶什麼都刪不到；帳戶是不是自己的由呼叫的人先查（`_get_account`）。
+- **刪除這檔**（`delete_holding`）：查帳戶 → 鎖 → `delete_records(…, [account.id], symbol)` → 0 筆就 404 `no_records`（什麼都沒改）→
+  暫停定期定額（`pause_plans`）→ `after_user_change` → `purge_trade_threads` → commit。原本是一列一列 ORM 刪除，現在是整批 `DELETE`；回應不變。
+- **清除所有持倉**（`clear_records`）：查帳戶 → 鎖 → 暫停定期定額（`pause_plans`）→ `delete_records(…, ids)` → 0 筆時照舊先 commit 暫停再 404
+  `no_records`（帶 `plans_paused`、`plans_running`）→ `purge_trade_threads_bulk` → commit。
+- **匯入庫存「以券商為準」**（`positions_import.commit`）：`delete_records(…, [account.id], symbol)` 的 `count` 就是 `replaced[].deleted`，
+  `feed_keys` 交給 `write_batch(purge_feed_keys=…)`，同一個交易寫入新的買進；`dry_run` 照舊 rollback。和合併前唯一的差別：勾了以券商為準、
+  但這個帳戶裡沒有這一檔任何紀錄時，不再順手刪掉這一檔殘留的略過紀錄（前端只在「已在帳本」的列給這個勾選，實際上碰不到）。
+- **開關**：開發分支已經把 `IMPORT_STATEMENTS` 的預設改成 `all`（會員和一般帳號只差收盤簡報與 AI 次數），匯入庫存跟著同一個開關，所以預設也是所有登入的人。
+- 測試：`test_delete_holding.py`、`test_clear_records.py` 不變；`test_positions_import.py` 的單元測試改成測 `delete_records`
+  （只刪那個帳戶那一檔、不 commit、別的使用者刪不到）。
+- 前端 mock（合併後的審查）：「以券商為準」和 mock 的刪除這檔、清除所有持倉一樣，連同這個帳戶這幾檔的自動股利略過紀錄一起刪掉
+  （`createImportStore` 的 `dropSkips`，寫入重算股利之前；這個帳戶沒有這一檔任何紀錄時不刪，和 `delete_records` 一樣）。
+  mock 也有和 `IMPORT_STATEMENTS` 一樣的開關：網址 `?import=admins`、`?import=off`（`?import=all` 切回預設），`/me` 的
+  `plan.statement_import` 跟著變，兩種讀檔沒開放時 403 `import_not_enabled`；smoke 的入口檢查改成「一般帳號也有入口，開關沒開、唯讀查看時沒有」。

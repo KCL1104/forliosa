@@ -1,7 +1,9 @@
 """Create/update/preview transactions: fill in fees and taxes, validate against the ledger.
 
 The statement import writes its rows as one batch (:func:`check_batch`, :func:`create_batch`, :func:`delete_batch`):
-all rows or none, one strict replay, one automatic-dividend sync, one commit, and one undo for the whole batch.
+all rows or none, one strict replay, one automatic-dividend sync, one commit, and one undo for the whole batch. The
+holdings import (匯入庫存) writes through :func:`write_batch` too, after deleting the records of the stocks it replaces
+(:func:`delete_records`, the step 刪除這檔 and 清除所有持倉 share) in the same transaction.
 """
 
 from __future__ import annotations
@@ -649,13 +651,27 @@ def create_batch(db: Session, user: User, account_id: str, rows: Sequence[Mappin
     check = check_batch(db, user, account.id, rows, md)
     if not check.ok:
         raise batch_rejected(check)
+    return write_batch(db, user, check, md)
+
+
+def write_batch(db: Session, user: User, check: BatchCheck, md: MarketData,
+                also_sync: Sequence[tuple[str, str | None]] = (),
+                purge_feed_keys: Sequence[sharing.TradeKey] = ()) -> BatchResult:
+    """Write a batch :func:`check_batch` passed (``check.ok``; the account locked by the caller): a new
+    ``import_batch_id`` (``imp_…``), one strict replay with every row (``validate_ledger`` with ``md``), the rows
+    added, the automatic dividends re-synced once for every stock they touch (and ``also_sync``: stocks whose records
+    the caller deleted in this transaction), the group-feed threads of ``purge_feed_keys`` purged when no row backs
+    them any more, and one commit."""
     batch_id = new_id("imp")
     for t in check.ordered:
         t.import_batch_id = batch_id
-    validate_ledger(db, user, account, check.ordered, md=md)
+    validate_ledger(db, user, check.account, check.ordered, md=md)
     db.add_all(check.ordered)
-    scopes = list(dict.fromkeys(s for t in check.ordered for s in _dividend_scope(t)))
+    scopes = list(dict.fromkeys([*(s for t in check.ordered for s in _dividend_scope(t)), *also_sync]))
     synced = auto_dividends.after_user_change(db, user, md, scopes)
+    if purge_feed_keys:
+        db.flush()
+        sharing.purge_trade_threads(db, user.id, purge_feed_keys)
     db.commit()
     return BatchResult(batch_id, [t for t in check.candidates if t is not None], synced.created)
 
@@ -705,6 +721,49 @@ def delete_batch(db: Session, user: User, batch_id: str, md: MarketData) -> int:
     return len(rows)
 
 
+# -- deleting records: one stock in one account, or whole accounts -----------------------------------------------
+@dataclass
+class DeletedRecords:
+    count: int = 0  # rows deleted, every type (the automatic dividends included)
+    symbols: int = 0  # distinct stocks among them
+    feed_keys: list[sharing.TradeKey] = field(default_factory=list)  # for ``sharing.purge_trade_threads(_bulk)``
+
+
+def delete_records(db: Session, user: User, account_ids: Collection[str],
+                   symbol: str | None = None) -> DeletedRecords:
+    """Delete the user's records in ``account_ids`` — all of them, or only ``symbol``'s (the stored symbol, e.g.
+    ``2330.TW``: what ``GET /transactions?account_id=&symbol=`` lists): buys, sells, dividends (automatic ones
+    included), splits, capital reductions and cash rows (with ``symbol``, only those tagged with the stock) — and the
+    automatic-dividend skips of the same scope (they describe edits to those rows: recorded again later, the dividends
+    are booked afresh). One bulk ``DELETE`` (pending group pushes go with the rows: ON DELETE CASCADE), flushed, **not
+    committed**. With no record in the scope nothing is deleted, the skips included, and the counts are 0. Every
+    statement filters on the user, so another user's account deletes nothing.
+
+    The one low-level step of 刪除這檔 (:func:`delete_holding`), 清除所有持倉 (:func:`clear_records`) and 匯入庫存's
+    「以券商為準」 (``services.positions_import.commit``). The caller checks the accounts are the user's and locks them
+    first (``auto_dividends.lock_accounts``), then — in the same transaction as whatever else it writes — pauses
+    定期定額 if asked, re-syncs the automatic dividends where rows remain or are added, purges the group-feed threads
+    of the returned ``feed_keys`` and commits (or rolls back: a dry run). No ledger check: a strict replay only checks
+    a stock against its own rows, so removing all of a stock's rows cannot make another one inconsistent."""
+    ids = list(account_ids)
+    if not ids:
+        return DeletedRecords()
+    txn_scope = [Transaction.user_id == user.id, Transaction.account_id.in_(ids)]
+    skip_scope = [AutoDividendSkip.user_id == user.id, AutoDividendSkip.account_id.in_(ids)]
+    if symbol is not None:
+        txn_scope.append(Transaction.symbol == symbol)
+        skip_scope.append(AutoDividendSkip.symbol == symbol)
+    # only the columns the counts and the feed keys need (an account can hold thousands of rows)
+    rows = db.execute(select(Transaction.trade_date, Transaction.symbol, Transaction.type, Transaction.source)
+                      .where(*txn_scope)).all()
+    if not rows:
+        return DeletedRecords()
+    db.execute(sql_delete(Transaction).where(*txn_scope))
+    db.execute(sql_delete(AutoDividendSkip).where(*skip_scope))
+    db.flush()
+    return DeletedRecords(len(rows), len({r.symbol for r in rows if r.symbol}), sharing.trade_keys(rows))
+
+
 # -- a whole stock out of one account (產品負責人 2026-11-17：「還要有刪除股票的功能」) --------------------------------
 @dataclass
 class HoldingDeleted:
@@ -733,9 +792,10 @@ def _running(plan: RecurringPlan, today: date) -> bool:
 
 def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: MarketData,
                    pause_plans: bool = False) -> HoldingDeleted:
-    """Delete every record of ``symbol`` in one account: buys, sells, dividends (automatic ones included), splits,
-    capital reductions and any cash row tagged with the stock — what ``GET /transactions?account_id=&symbol=`` lists.
-    Unlike 全部賣出 nothing is booked: the stock is as if it had never been recorded there.
+    """Delete every record of ``symbol`` in one account (:func:`delete_records`): buys, sells, dividends (automatic
+    ones included), splits, capital reductions and any cash row tagged with the stock — what
+    ``GET /transactions?account_id=&symbol=`` lists. Unlike 全部賣出 nothing is booked: the stock is as if it had
+    never been recorded there.
 
     * No ledger check: the strict replay only checks a stock against its own rows (oversell, a stock dividend without
       shares), so removing all of one stock's rows cannot make another one inconsistent — and books that were already
@@ -746,13 +806,12 @@ def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: Ma
     * 定期定額 of the stock in this account are only paused with ``pause_plans`` (``active = false``, undone in 設定);
       otherwise the response says how many still run. Other accounts, other stocks, the watchlist and other users are
       not touched. 404 ``not_found`` when the account is not the user's, 404 ``no_records`` when it holds no record
-      of the stock.
+      of the stock (nothing changed).
     """
     account = _get_account(db, user, account_id)
     auto_dividends.lock_accounts(db, [account.id])
-    rows = list(db.scalars(select(Transaction).where(
-        Transaction.user_id == user.id, Transaction.account_id == account.id, Transaction.symbol == symbol)))
-    if not rows:
+    gone = delete_records(db, user, [account.id], symbol)
+    if not gone.count:
         # its own code (not ``not_found``): the web reads it as "already gone" (deleted in another tab or device) and
         # refreshes, while 「找不到帳戶」 and an unknown route stay errors
         raise ApiError(404, "no_records", "這個帳戶沒有這一檔的紀錄")
@@ -760,12 +819,6 @@ def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: Ma
     plans = [p for p in db.scalars(select(RecurringPlan).where(
         RecurringPlan.user_id == user.id, RecurringPlan.account_id == account.id, RecurringPlan.symbol == symbol))
         if _running(p, today)]
-    feed_keys = sharing.trade_keys(rows)
-    for t in rows:
-        db.delete(t)
-    db.execute(sql_delete(AutoDividendSkip).where(
-        AutoDividendSkip.user_id == user.id, AutoDividendSkip.account_id == account.id,
-        AutoDividendSkip.symbol == symbol))
     paused = 0
     if pause_plans:
         for p in plans:
@@ -774,9 +827,9 @@ def delete_holding(db: Session, user: User, account_id: str, symbol: str, md: Ma
             paused += 1
     auto_dividends.after_user_change(db, user, md, [(account.id, symbol)])
     db.flush()
-    sharing.purge_trade_threads(db, user.id, feed_keys)  # their group feed items (and comments) go with them
+    sharing.purge_trade_threads(db, user.id, gone.feed_keys)  # their group feed items (and comments) go with them
     db.commit()
-    return HoldingDeleted(account.id, symbol, len(rows), paused, len(plans) - paused)
+    return HoldingDeleted(account.id, symbol, gone.count, paused, len(plans) - paused)
 
 
 # -- 清除所有持倉: every record of one account, or of every account (產品負責人 2026-11-17) ------------------------
@@ -853,7 +906,8 @@ def clear_records(db: Session, user: User, account_id: str | None, pause_plans: 
       for); the automatic-dividend skips of those accounts go too (recorded again later, the dividends are booked
       afresh), and with no row left the sync has nothing to book from, so no automatic dividend comes back (no
       ``after_user_change`` needed); group feed items and their comments and reactions go with the trades
-      (``sharing.purge_trade_threads_bulk``: one query, not one per feed item); 定期定額 in the scope are only paused
+      (``sharing.purge_trade_threads_bulk``: one query, not one per feed item); the deletion itself is
+      :func:`delete_records` with no symbol (cash rows included); 定期定額 in the scope are only paused
       with ``pause_plans`` (``active = false``, never deleted), otherwise ``plans_running`` says how many still run.
     * Kept: the accounts themselves, the watchlist, groups and share settings, delegations, AI conversations,
       preferences, other users. 404 ``not_found`` when the account is not the user's; 404 ``no_records`` when the
@@ -867,10 +921,6 @@ def clear_records(db: Session, user: User, account_id: str | None, pause_plans: 
     else:
         ids = [_get_account(db, user, account_id).id]
     auto_dividends.lock_accounts(db, ids)
-    in_scope = (Transaction.user_id == user.id, Transaction.account_id.in_(ids))
-    # only the columns the counts and the feed keys need (an account can hold thousands of rows)
-    rows = db.execute(select(Transaction.trade_date, Transaction.symbol, Transaction.type, Transaction.source)
-                      .where(*in_scope)).all() if ids else []
     today = today_taipei()
     plans = [p for p in db.scalars(select(RecurringPlan).where(
         RecurringPlan.user_id == user.id, RecurringPlan.account_id.in_(ids))) if _running(p, today)] if ids else []
@@ -880,17 +930,12 @@ def clear_records(db: Session, user: User, account_id: str | None, pause_plans: 
             p.active = False
             p.updated_at = now_utc()
             paused += 1
-    if not rows:
+    gone = delete_records(db, user, ids)  # every record of the scope, symbol or not; nothing when there is none
+    if not gone.count:
         if paused:
             db.commit()
         raise ApiError(404, "no_records", "這個帳戶沒有任何紀錄" if account_id else "沒有任何紀錄",
                        extra={"plans_paused": paused, "plans_running": len(plans) - paused})
-    feed_keys = sharing.trade_keys(rows)
-    db.execute(sql_delete(Transaction).where(*in_scope))  # pending group pushes go with them (ON DELETE CASCADE)
-    db.execute(sql_delete(AutoDividendSkip).where(AutoDividendSkip.user_id == user.id,
-                                                  AutoDividendSkip.account_id.in_(ids)))
-    db.flush()
-    sharing.purge_trade_threads_bulk(db, user.id, feed_keys)
+    sharing.purge_trade_threads_bulk(db, user.id, gone.feed_keys)
     db.commit()
-    return RecordsCleared(account_id, len(rows), len({r.symbol for r in rows if r.symbol}), paused,
-                          len(plans) - paused)
+    return RecordsCleared(account_id, gone.count, gone.symbols, paused, len(plans) - paused)
