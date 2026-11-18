@@ -24,7 +24,8 @@ export function DigestsTab({ group }: { group: Group }) {
   if (digests.isError) return <ErrorState error={digests.error} onRetry={() => void digests.refetch()} />
   if (digests.isLoading) return <SkeletonLines rows={6} />
   if (items.length === 0) {
-    return <EmptyState title="還沒有週報" description="每週六晚上整理這一週（週一到週五）的群組表現。" />
+    // 2026-11-18：群組週報改在週日 18:00 出來（頁面和頻道的週報同時；後端 digests.publish_at）
+    return <EmptyState title="還沒有週報" description="每週日 18:00 整理好這一週（週一到週五）的群組表現。" />
   }
   return (
     <div className="flex flex-col gap-12">

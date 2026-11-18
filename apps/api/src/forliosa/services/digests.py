@@ -3,6 +3,10 @@
 * **When**: the worker runs :func:`create_week` on Saturday from 20:00 (Taipei; catch-up until Sunday ends) for the
   week Monday–Friday that just ended. Weeks without a Taiwan trading day and groups where fewer than 2 members share
   ``returns`` get no digest. One digest per group and week (``uq_group_digest_week``).
+* **Out on Sunday 18:00** (產品負責人 2026-11-18): the digest is written on Saturday evening (the batch has a day to
+  finish) but shows on the group page — and goes to the channels with 週報 on, inside the 市場週報 message or alone
+  — from Sunday 18:00 after its week (:func:`publish_at`; :func:`published_through` filters the page, the group list's
+  ``latest_digest_at`` and comment targets).
 * **Facts**: computed by the server from the sharing projection (``sharing.digest_week_facts``), stored by user_id
   and filtered by the *current* memberships and toggles on every read (:func:`digest_out`).
 * **Summary on read**: the AI summary was written from the numbers of the members whose facts went into the prompt
@@ -30,7 +34,7 @@ import logging
 import re
 import secrets
 from collections.abc import Callable
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
 
 import anthropic
@@ -56,6 +60,7 @@ GIVE_UP_AFTER = timedelta(hours=26)  # batches end within 24 hours
 RETENTION_WEEKS = 26
 MAX_TOKENS = 2048
 MAX_SUMMARY_CHARS = 400
+PUBLISH_TIME = time(18, 0)  # Sunday after the week (2026-11-18): on the page and in the channels' 週報
 DIRECT = "direct"
 DISCLAIMER = notifications.DISCLAIMER
 LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
@@ -85,6 +90,20 @@ def digest_week(today: date) -> tuple[date, date]:
     """Monday and Friday of the latest week whose Friday is on or before ``today``."""
     friday = today - timedelta(days=(today.weekday() - 4) % 7)
     return friday - timedelta(days=4), friday
+
+
+def publish_at(week_end: date) -> datetime:
+    """When a week's digest comes out: the Sunday after its Friday (``week_end``), 18:00 Taipei."""
+    return datetime.combine(week_end + timedelta(days=(6 - week_end.weekday()) % 7), PUBLISH_TIME, TAIPEI)
+
+
+def published_through(now: datetime | None = None) -> date:
+    """The last ``week_end`` whose digest is out at ``now``: the Friday before the latest Sunday 18:00."""
+    t = (now or now_utc()).astimezone(TAIPEI)
+    sunday = t.date() - timedelta(days=(t.weekday() - 6) % 7)  # the latest Sunday on or before today
+    if t < datetime.combine(sunday, PUBLISH_TIME, TAIPEI):
+        sunday -= timedelta(days=7)
+    return sunday - timedelta(days=2)
 
 
 def create_week(db: Session, md: MarketData, today: date | None = None,
@@ -356,10 +375,11 @@ def _cursor(d: GroupDigest) -> str:
     return base64.urlsafe_b64encode(f"{d.week_start.isoformat()}|{d.id}".encode()).decode().rstrip("=")
 
 
-def digests_page(db: Session, group: Group, me_id: str, limit: int, cursor: str | None) -> dict[str, Any]:
-    """The group's digests, newest week first; facts (and whether the summary is shown) by the current memberships and
-    toggles."""
-    q = select(GroupDigest).where(GroupDigest.group_id == group.id)
+def digests_page(db: Session, group: Group, me_id: str, limit: int, cursor: str | None,
+                 now: datetime | None = None) -> dict[str, Any]:
+    """The group's digests that are out (:func:`published_through`), newest week first; facts (and whether the summary
+    is shown) by the current memberships and toggles."""
+    q = select(GroupDigest).where(GroupDigest.group_id == group.id, GroupDigest.week_end <= published_through(now))
     if cursor:
         try:
             raw = base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode()

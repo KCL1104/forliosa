@@ -18,7 +18,7 @@ from forliosa.ai.keypool import KeyPool
 from forliosa.db import session_factory
 from forliosa.models import AiUsage, GroupComment, GroupDigest
 from forliosa.services import digests, notifications
-from forliosa.timeutil import TAIPEI, now_utc, today_taipei, tw_trading_days
+from forliosa.timeutil import TAIPEI, now_utc, tw_trading_days
 from forliosa.worker import weekend_evening
 from tests.api.m5 import (
     API,
@@ -113,9 +113,10 @@ class FakeClaude:
 
 
 def last_saturday() -> date:
-    """The latest Saturday on or before today whose Monday–Friday had a Taiwan trading day."""
-    d = today_taipei()
-    d -= timedelta(days=(d.weekday() - 5) % 7)
+    """The latest Saturday whose digest is out (2026-11-18: from Sunday 18:00 after its week, on the page and in the
+    channels) and whose Monday–Friday had a Taiwan trading day. On a Saturday, or a Sunday before 18:00, that is the
+    Saturday before: the page would not show this week's digest yet."""
+    d = digests.published_through() + timedelta(days=1)
     while not tw_trading_days(d - timedelta(days=5), d - timedelta(days=1)):
         d -= timedelta(days=7)
     return d
@@ -126,9 +127,8 @@ def at_saturday_evening(sat: date) -> datetime:
 
 
 def due_time(sat: date) -> datetime:
-    """A clock at which the digest written on ``sat`` evening is due. The real clock alone is earlier than that on a
-    Saturday before 20:00 Taipei (``last_saturday`` is then today), which left the push unsent."""
-    return max(now_utc(), at_saturday_evening(sat) + timedelta(minutes=10))
+    """A clock at which the digest written on ``sat`` evening is due: from Sunday 18:00 (2026-11-18)."""
+    return max(now_utc(), digests.publish_at(sat - timedelta(days=1)) + timedelta(minutes=1))
 
 
 @pytest.fixture()

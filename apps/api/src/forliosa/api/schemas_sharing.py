@@ -7,7 +7,7 @@ field whose share toggle is off is **absent** from the JSON, not ``null``.
 from __future__ import annotations
 
 from datetime import date
-from typing import Annotated, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -479,25 +479,43 @@ class DailyReportPage(BaseModel):
 
 
 # -- push channels ------------------------------------------------------------------------------------------------
+# 2026-11-18 (產品負責人選 A): four switches per channel — 交易動態, 盤前, 盤後, 週報
+PREMARKET = "盤前（交易日 7:30）：盤前重點＋昨日你的群組（加值群組的群組 AI 日報）"
+CLOSE = "盤後（交易日 16:00）：盤後重點"
+WEEKLY = "週報（週日 18:00）：市場週報＋這週的群組週報"
+UNCHANGED_OFF, UNCHANGED_ON = "；省略＝不變（新的頻道是關的）", "；省略＝不變（新的頻道是開的）"
+OLD = {"deprecated": True}
+
+
+def _old_in(new: str) -> Any:
+    """A switch removed on 2026-11-18, still accepted from older frontends: written as ``new`` (``new`` wins)."""
+    text = f"已不使用（2026-11-18）：舊版前端用，寫入時當作 {new}（同時給了 {new} 以它為準）"
+    return Field(default=None, description=text, json_schema_extra=OLD)
+
+
+def _old_out(new: str) -> Any:
+    return Field(description=f"已不使用（2026-11-18）：和 {new} 相同，給舊版前端", json_schema_extra=OLD)
+
+
 class DiscordIn(StrictModel):
     """The webhook URL is checked strictly and tested before it is saved; it is never echoed back."""
 
     webhook_url: str = Field(min_length=1, max_length=300)
     notify_trades: bool = True
-    notify_digest: bool = True
-    notify_daily: bool | None = Field(default=None, description="群組 AI 日報；省略＝不變（新的頻道是關的）")
-    notify_premarket: bool | None = Field(default=None, description="盤前重點；省略＝不變（新的頻道是關的）")
-    notify_close: bool | None = Field(default=None, description="盤後重點；省略＝不變（新的頻道是關的）")
-    notify_weekly: bool | None = Field(default=None, description="市場週報；省略＝不變（新的頻道是開的）")
+    notify_premarket: bool | None = Field(default=None, description=PREMARKET + UNCHANGED_OFF)
+    notify_close: bool | None = Field(default=None, description=CLOSE + UNCHANGED_OFF)
+    notify_weekly: bool | None = Field(default=None, description=WEEKLY + UNCHANGED_ON)
+    notify_digest: bool | None = _old_in("notify_weekly")
+    notify_daily: bool | None = _old_in("notify_premarket")
 
 
 class ChannelPatch(StrictModel):
     notify_trades: bool | None = None
-    notify_digest: bool | None = None
-    notify_daily: bool | None = None
-    notify_premarket: bool | None = None
-    notify_close: bool | None = None
-    notify_weekly: bool | None = None
+    notify_premarket: bool | None = Field(default=None, description=PREMARKET)
+    notify_close: bool | None = Field(default=None, description=CLOSE)
+    notify_weekly: bool | None = Field(default=None, description=WEEKLY)
+    notify_digest: bool | None = _old_in("notify_weekly")
+    notify_daily: bool | None = _old_in("notify_premarket")
 
 
 class DiscordChannel(BaseModel):
@@ -505,12 +523,12 @@ class DiscordChannel(BaseModel):
     status: Literal["active", "disabled"] | None = None
     disabled_reason: str | None = None
     webhook_hint: str | None = Field(default=None, description="只有擁有者看得到（…/最後 4 碼）")
-    notify_trades: bool
-    notify_digest: bool
-    notify_daily: bool = Field(description="群組 AI 日報（加值的群組；預設關）")
-    notify_premarket: bool = Field(description="盤前重點推播（預設關）")
-    notify_close: bool = Field(description="盤後重點推播（預設關）")
-    notify_weekly: bool = Field(description="市場週報推播（預設開）")
+    notify_trades: bool = Field(description="交易動態（預設開）")
+    notify_premarket: bool = Field(description=PREMARKET + "（預設關）")
+    notify_close: bool = Field(description=CLOSE + "（預設關）")
+    notify_weekly: bool = Field(description=WEEKLY + "（預設開）")
+    notify_digest: bool = _old_out("notify_weekly")
+    notify_daily: bool = _old_out("notify_premarket")
 
 
 class TelegramChannel(BaseModel):
@@ -518,12 +536,12 @@ class TelegramChannel(BaseModel):
     status: Literal["active", "disabled"] | None = None
     disabled_reason: str | None = None
     chat_title: str | None = None
-    notify_trades: bool
-    notify_digest: bool
-    notify_daily: bool = Field(description="群組 AI 日報（加值的群組；預設關）")
-    notify_premarket: bool = Field(description="盤前重點推播（預設關）")
-    notify_close: bool = Field(description="盤後重點推播（預設關）")
-    notify_weekly: bool = Field(description="市場週報推播（預設開）")
+    notify_trades: bool = Field(description="交易動態（預設開）")
+    notify_premarket: bool = Field(description=PREMARKET + "（預設關）")
+    notify_close: bool = Field(description=CLOSE + "（預設關）")
+    notify_weekly: bool = Field(description=WEEKLY + "（預設開）")
+    notify_digest: bool = _old_out("notify_weekly")
+    notify_daily: bool = _old_out("notify_premarket")
 
 
 class Channels(BaseModel):
@@ -531,10 +549,11 @@ class Channels(BaseModel):
     telegram: TelegramChannel
     telegram_available: bool
     market_reports_available: bool = Field(
-        default=False, description="市場報告已對全站公開：前端才顯示盤前、盤後、週報三個推播開關")
+        default=False,
+        description="市場報告已對全站公開：盤前、盤後、週報有市場報告的部分（沒公開也沒開盲測時，盤前、週報只送群組的部分）")
     market_reports_trial: bool = Field(
         default=False,
-        description="盲測開給所有人（模式 trial）：也顯示三個開關，每份推一則投票連結，不併群組日報、週報")
+        description="盲測開給所有人（模式 trial）：盤前、盤後、週報送投票連結（盤前、週報後面接群組的部分）")
 
 
 class TelegramLink(BaseModel):

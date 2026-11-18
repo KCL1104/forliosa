@@ -178,6 +178,8 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
     mount()
     renderApp("/groups/grp_hiking?tab=digests")
     expect(await screen.findByText("還沒有週報", undefined, T)).toBeInTheDocument()
+    // 2026-11-18：群組週報週日 18:00 出來（和頻道的週報同時）
+    expect(screen.getByText("每週日 18:00 整理好這一週（週一到週五）的群組表現。")).toBeInTheDocument()
     expect(screen.queryByRole("radiogroup", { name: "報告" })).toBeNull()
   })
 
@@ -191,23 +193,19 @@ describe("報告分頁：日報｜週報（不加第九個分頁）", () => {
   })
 })
 
-describe("頻道的「日報」開關", () => {
-  it("加值群組才有；預設關，擁有者打開時送 notify_daily", async () => {
+describe("頻道沒有「日報」開關（2026-11-18：併進盤前）", () => {
+  it("加值群組：群組 AI 日報跟著盤前送（昨日你的群組），沒有另外的「日報」「週報」列", async () => {
     const user = userEvent.setup()
     mount()
     renderApp("/groups/grp_family?tab=channels")
-    const sw = await screen.findByRole("switch", { name: "日報" }, T)
+    const sw = await screen.findByRole("switch", { name: "盤前（交易日 7:30）" }, T)
     expect(sw).toHaveAttribute("aria-checked", "false")
-    expect(screen.getByText(/晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送/)).toBeInTheDocument()
-    await user.click(sw)
-    await waitFor(() => expect(api.patchDiscord).toHaveBeenCalledWith("grp_family", { notify_daily: true }))
-    await waitFor(() => expect(screen.getByRole("switch", { name: "日報" })).toHaveAttribute("aria-checked", "true"), T)
-  })
-  it("免費群組沒有「日報」這一列", async () => {
-    mount()
-    renderApp("/groups/grp_friends?tab=channels")
-    await screen.findByRole("switch", { name: "週報" }, T)
+    expect(screen.getByText("盤前重點，加上昨日你的群組（加值群組）。")).toBeInTheDocument()
     expect(screen.queryByRole("switch", { name: "日報" })).toBeNull()
+    expect(screen.queryByRole("switch", { name: "週報" })).toBeNull()
+    await user.click(sw)
+    await waitFor(() => expect(api.patchDiscord).toHaveBeenCalledWith("grp_family", { notify_premarket: true }))
+    await waitFor(() => expect(screen.getByRole("switch", { name: "盤前（交易日 7:30）" })).toHaveAttribute("aria-checked", "true"), T)
   })
 })
 

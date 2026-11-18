@@ -1087,15 +1087,18 @@ class GroupChannel(Base):
     webhook_hint: Mapped[str | None] = mapped_column(String(8), nullable=True)
     telegram_chat_id: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
     chat_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    # Four switches (產品負責人 2026-11-18, option A): 交易動態; 盤前 = 盤前重點 ＋「昨日你的群組」 (the group's
+    # daily report, boosted groups) in one message, off; 盤後 = 盤後重點, off; 週報 = 市場週報 ＋ the group's weekly
+    # digest, on.
+    # Without a market part (reports not public, no open blind test) 盤前 and 週報 send the group part alone.
     notify_trades: Mapped[bool] = mapped_column(Boolean, default=True)
-    notify_digest: Mapped[bool] = mapped_column(Boolean, default=True)
-    # 群組 AI 日報 pushes (boosted groups): off unless the owner turns it on (2026-11-16)
-    notify_daily: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
-    # 市場報告 pushes (2026-11-17; every group may switch them on; text and a link only): 盤前重點 and 盤後重點 off,
-    # 市場週報 on (also for channels that existed before)
     notify_premarket: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     notify_close: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     notify_weekly: Mapped[bool] = mapped_column(Boolean, default=True, server_default="1")
+    # Deprecated 2026-11-18, no longer read: the old 週報 (group digest) and 日報 (group daily report) switches, folded
+    # into notify_weekly / notify_premarket by 0027_channel_four_switches; kept so the downgrade is safe
+    notify_digest: Mapped[bool] = mapped_column(Boolean, default=True)
+    notify_daily: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     configured_by: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     configured_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc)
     updated_at: Mapped[datetime] = mapped_column(TZDateTime, default=now_utc, onupdate=now_utc)

@@ -1,7 +1,7 @@
-"""市場報告 pushes to group channels (contract §15): the three switches (盤前、盤後 off, 週報 on) and when
-they show; the text (disclaimer line, highlights, 「出處見全文」, the link, the limits); the 盤前重點 push takes in the
-group's daily report of the previous session (「昨日你的群組」) and the held daily push is marked merged; paused or
-turned-off pushes are cancelled."""
+"""市場報告 pushes to group channels (contract §15): the switches (盤前、盤後 off, 週報 on); the text (disclaimer
+line, highlights, 「出處見全文」, the link, the limits); the 盤前 push takes in the group's daily report of the previous
+session (「昨日你的群組」) and the held daily push is marked merged; paused or turned-off pushes are cancelled. The
+combinations of the four switches (2026-11-18) are in ``test_channel_four_switches``."""
 
 from __future__ import annotations
 
@@ -105,31 +105,29 @@ def test_text_template_and_limits():
     assert "全文與圖表" not in push.text(r, PAYLOAD, "discord", nolink)
 
 
-def test_holds():
-    ch = SimpleNamespace(notify_premarket=True, notify_weekly=True)
-    tue_0730 = datetime(2026, 11, 17, 7, 30, tzinfo=TAIPEI)
-    assert push.daily_hold(ch, tue_0730, True) == datetime(2026, 11, 17, 8, 20, tzinfo=TAIPEI)
-    assert push.daily_hold(ch, tue_0730, False) == tue_0730  # reports not public
-    sat = datetime(2026, 11, 21, 7, 30, tzinfo=TAIPEI)
-    assert push.daily_hold(ch, sat, True) == sat  # no premarket on a Saturday
-    assert push.digest_hold(ch, datetime(2026, 11, 21, 20, 5, tzinfo=TAIPEI), True) == \
-        datetime(2026, 11, 22, 21, 30, tzinfo=TAIPEI)
-    off = SimpleNamespace(notify_premarket=False, notify_weekly=False)
-    assert push.daily_hold(off, tue_0730, True) == tue_0730
-    assert push.digest_hold(off, sat, True) == sat
+def test_when_the_group_parts_are_due():
+    """盤前 07:30 of the next trading day (held to 08:20 while a market part may take it in), 週報 Sunday 18:00 (held
+    to 21:30); finished later than that: at once."""
+    mon, fri = date(2026, 11, 16), date(2026, 11, 20)
+    at = lambda d, h, m=0: datetime.combine(d, time(h, m), TAIPEI)  # noqa: E731
+    tue, sat, sun = date(2026, 11, 17), date(2026, 11, 21), date(2026, 11, 22)
+    assert push.daily_due(mon, at(mon, 23, 40), True) == at(tue, 8, 20)
+    assert push.daily_due(mon, at(mon, 23, 40), False) == at(tue, 7, 30)  # no market part: alone at 07:30
+    assert push.daily_due(fri, at(fri, 19), False) == at(date(2026, 11, 23), 7, 30)  # no 盤前 on the weekend
+    assert push.daily_due(mon, at(tue, 9), True) == at(tue, 9)
+    assert push.digest_due(fri, at(sat, 20, 5), True) == at(sun, 21, 30)
+    assert push.digest_due(fri, at(sat, 20, 5), False) == at(sun, 18)
+    assert push.digest_due(fri, at(sun, 19), False) == at(sun, 19)
 
 
 def test_premarket_push_takes_in_yesterdays_group(family, market, day, public):  # noqa: F811
-    fake = _channel(family)  # notify_daily on
-    g, a = family["g"], family["a"]
-    assert a.patch(f"{API}/groups/{g['id']}/channels/discord",
-                   json={"notify_premarket": True}).json()["discord"]["notify_premarket"] is True
+    fake = _channel(family)  # 盤前 on: it carries 「昨日你的群組」
+    g = family["g"]
     run(market, evening(day, time(23, 40)))
     nxt = next_tw_trading_day(day + timedelta(days=1))
     with session_factory()() as db:
         [row] = db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "daily")).all()
-        if nxt == day + timedelta(days=1):
-            assert row.not_before == datetime.combine(nxt, time(8, 20), TAIPEI)  # held for the premarket push
+        assert row.not_before == datetime.combine(nxt, time(7, 30), TAIPEI)  # the slot; held then if a push comes
     before = len(fake.discord)
     rid = make("premarket", nxt)
     assert queue_and_send(rid, datetime.combine(nxt, time(7, 30), TAIPEI), market) == 1

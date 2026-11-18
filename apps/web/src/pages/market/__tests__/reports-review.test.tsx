@@ -189,13 +189,13 @@ describe("管理員更正", () => {
 })
 
 describe("群組", () => {
-  it("報告公開、週報與盤前推播都開：週報與日報的說明寫併在市場報告裡送", async () => {
+  it("報告公開：週報一個開關，說明寫市場週報加上這週的群組週報（2026-11-18；不再有「每週六晚上」）", async () => {
     mount({ reports: "public" })
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
-    await within(discord).findByRole("switch", { name: "市場週報（週日 18:00）" }, T)
-    expect(within(discord).getByText("群組 AI 週報併在週日 18:00 的市場週報裡送；那天沒有市場週報時，21:30 單獨送。")).toBeInTheDocument()
-    expect(within(discord).queryByText("每週六晚上的群組 AI 週報。")).toBeNull()
+    await within(discord).findByRole("switch", { name: "週報（週日 18:00）" }, T)
+    expect(within(discord).getByText("市場週報，加上這週的群組週報。")).toBeInTheDocument()
+    expect(within(discord).queryByText(/每週六晚上/)).toBeNull()
   })
 
   it("「昨日你的群組」依伺服器的 prev_session，不用前端推算平日", async () => {

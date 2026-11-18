@@ -17,14 +17,13 @@ const errText = (err: unknown) => (err instanceof ApiError ? err.message : "請�
 /**
  * 頻道：群組的 Discord（webhook）與 Telegram（bot）。每位成員都看得到推播到哪裡；只有擁有者可以設定。
  * 只會送出開了「推播」的成員所分享的內容。webhook 網址不顯示，只有最後 4 碼。
- * 「日報」開關只在加值的群組出現（預設關，擁有者決定；群組加值包第一階段）；到期後已經打開的照樣列出，方便關掉。
- * 市場報告（2026-11-17）對全站公開時，每個頻道多三個開關（所有群組都能開）：盤前重點、盤後重點（預設關）、市場週報（預設開）。
+ * 每個頻道只有四個開關（產品負責人 2026-11-18 選 A；原本「週報」和「市場週報」、「日報」和「盤前重點」是兩個一樣的開關）：
+ * 交易動態、盤前（盤前重點＋昨日你的群組，一則）、盤後、週報（市場週報＋這週的群組週報，一則）。
  */
 export function ChannelsTab({ group }: { group: Group }) {
   const [linking, setLinking] = useState<TelegramLinkCode | null>(null)
   const channels = useChannels(group.id, { poll: !!linking })
   const owner = group.my_role === "owner"
-  const boosted = group.plan?.tier === "boosted"
   if (channels.isError) return <ErrorState error={channels.error} onRetry={() => void channels.refetch()} />
   if (!channels.data) return <SkeletonLines rows={6} />
   const c = channels.data
@@ -41,18 +40,18 @@ export function ChannelsTab({ group }: { group: Group }) {
         {c.discord.configured ? (
           <>
             {owner && c.discord.webhook_hint && <p className="num text-md text-ink-2">Webhook 網址結尾 {c.discord.webhook_hint}</p>}
-            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} daily={boosted || !!c.discord.notify_daily} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
+            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
             {owner && (
               // 「換一個 webhook」和「解除 Discord」同一列、中間留 24px（原本兩個行內元素直接貼在一起；2026-11-15 產品負責人回報）。
               // 展開成表單時表單佔滿一列，「解除」換到下一列
               <div className="mt-4 flex flex-wrap items-center gap-x-6 gap-y-3">
-                <DiscordForm groupId={group.id} replacing daily={boosted} />
+                <DiscordForm groupId={group.id} replacing current={c.discord} />
                 <Unlink groupId={group.id} kind="discord" className="" />
               </div>
             )}
           </>
         ) : owner ? (
-          <DiscordForm groupId={group.id} daily={boosted} />
+          <DiscordForm groupId={group.id} />
         ) : (
           <EmptyState flush title="還沒有設定" />
         )}
@@ -71,7 +70,7 @@ export function ChannelsTab({ group }: { group: Group }) {
               </p>
             )}
             {c.telegram.configured && (
-              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} daily={boosted || !!c.telegram.notify_daily} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
+              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
             )}
             {owner && (!c.telegram.configured || c.telegram.status === "disabled") && (
               <TelegramLink groupId={group.id} code={linked ? null : linking} onCode={setLinking} />
@@ -98,92 +97,85 @@ function Disabled({ reason, owner }: { reason: string | null; owner: boolean }) 
   )
 }
 
+/** 一個頻道的四個開關：預設 交易動態 開、盤前 關、盤後 關、週報 開 */
+const SWITCHES: { key: keyof ChannelNotify; label: string; detail: string; on: boolean }[] = [
+  { key: "notify_trades", label: "交易動態", detail: "成員的買賣，交易建立 15 分鐘後送出。", on: true },
+  { key: "notify_premarket", label: "盤前（交易日 7:30）", detail: "盤前重點，加上昨日你的群組（加值群組）。", on: false },
+  { key: "notify_close", label: "盤後（交易日 16:00）", detail: "盤後重點。", on: false },
+  { key: "notify_weekly", label: "週報（週日 18:00）", detail: "市場週報，加上這週的群組週報。", on: true },
+]
+
 function NotifyToggles({
   groupId,
   kind,
   value,
   editable,
-  daily,
   reports,
   trial = false,
 }: {
   groupId: string
   kind: "discord" | "telegram"
-  value: ChannelNotify & { notify_trades: boolean; notify_digest: boolean }
+  value: ChannelNotify
   editable: boolean
-  /** 有沒有「日報」這一列（加值群組，或已經打開的） */
-  daily: boolean
-  /** 市場報告對全站公開時才有三個報告的開關（所有群組都能開；盤前、盤後預設關，週報預設開） */
+  /** 市場報告對全站公開：盤前、盤後、週報有市場報告的部分 */
   reports: boolean
-  /**
-   * 盲測開給所有人（試跑中）：也有三個開關，每份推一則投票連結（2026-11-17）。
-   * 這時不併群組的日報、週報（`reports` 是 false），日報、週報的說明照平常寫。
-   */
+  /** 盲測開給所有人：市場報告的部分是一則投票連結（後面照樣接群組的部分） */
   trial?: boolean
 }) {
   const patch = usePatchChannel(groupId, kind)
-  const row = (key: keyof ChannelNotify, label: string, detail: string | null, fallback = false) => {
-    const id = `${kind}-${key}`
-    return (
-      <div className="flex min-h-12 items-start justify-between gap-6 border-b border-rule py-3">
-        <div>
-          <label htmlFor={id} className="font-medium">
-            {label}
-          </label>
-          {detail && <p className="text-base text-ink">{detail}</p>}
-        </div>
-        <Switch
-          id={id}
-          checked={value[key] ?? fallback}
-          disabled={!editable || patch.isPending}
-          onCheckedChange={(on) => patch.mutate({ [key]: on }, { onError: (err) => toast.error("沒有改成功", { description: errText(err) }) })}
-        />
-      </div>
-    )
-  }
-  // 報告對全站公開時，群組的週報、日報會併進市場報告的推播（後端 push.digest_hold／daily_hold）：說明照實際的送法寫
-  const weeklyMerged = reports && (value.notify_weekly ?? true)
-  const dailyMerged = reports && (value.notify_premarket ?? false)
+  // 報告還沒開放時，盤前、週報照樣在同一個時間送群組的部分（後端 reports/push.py），盤後沒有東西可送
+  const note = reports
+    ? "推到頻道的是文字與連結，報告本文人人相同。"
+    : trial
+      ? "盲測期間每份報告推一則投票連結：三種寫法，看完選一個。"
+      : "市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。"
   return (
-    <div className="mt-2 border-t border-rule">
-      {row("notify_trades", "交易動態", "成員的買賣，交易建立 15 分鐘後送出。")}
-      {row(
-        "notify_digest",
-        "週報",
-        weeklyMerged ? "群組 AI 週報併在週日 18:00 的市場週報裡送；那天沒有市場週報時，21:30 單獨送。" : "每週六晚上的群組 AI 週報。",
-      )}
-      {daily &&
-        row(
-          "notify_daily",
-          "日報",
-          dailyMerged
-            ? "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，併在交易日 7:30 的盤前重點裡送。"
-            : "每個交易日收盤後的群組 AI 日報。晚上 11 點到早上 7:30 之間寫好的，早上 7:30 再送。",
-        )}
-      {(reports || trial) && (
-        <div data-report-toggles="">
-          <p className="pt-4 pb-1 text-sm text-ink-2">{trial ? "盲測期間每份報告推一則投票連結：三種寫法，看完選一個。" : "推到頻道的是文字與連結，報告本文人人相同。"}</p>
-          {row("notify_premarket", "盤前重點（交易日 7:30）", null)}
-          {row("notify_close", "盤後重點（交易日 16:00）", null)}
-          {row("notify_weekly", "市場週報（週日 18:00）", null, true)}
-        </div>
-      )}
+    <div className="mt-2 border-t border-rule" data-channel-switches="">
+      {SWITCHES.map(({ key, label, detail, on }) => {
+        const id = `${kind}-${key}`
+        return (
+          <div key={key} className="flex min-h-12 items-start justify-between gap-6 border-b border-rule py-3">
+            <div>
+              <label htmlFor={id} className="font-medium">
+                {label}
+              </label>
+              <p className="text-base text-ink">{detail}</p>
+            </div>
+            <Switch
+              id={id}
+              checked={value[key] ?? on}
+              disabled={!editable || patch.isPending}
+              onCheckedChange={(checked) => patch.mutate({ [key]: checked }, { onError: (err) => toast.error("沒有改成功", { description: errText(err) }) })}
+            />
+          </div>
+        )
+      })}
+      <p className="pt-3 text-sm text-ink-2" data-report-note="">
+        {note}
+      </p>
     </div>
   )
 }
 
-/** 貼上 Discord 頻道的 webhook 網址；儲存前伺服器先送一則測試訊息。日報（加值群組）預設不送 */
-function DiscordForm({ groupId, replacing, daily = false }: { groupId: string; replacing?: boolean; daily?: boolean }) {
+/** 貼上 Discord 頻道的 webhook 網址；儲存前伺服器先送一則測試訊息。四個開關：新的頻道照預設，換 webhook 時照現在的 */
+function DiscordForm({ groupId, replacing, current }: { groupId: string; replacing?: boolean; current?: ChannelNotify }) {
   const put = usePutDiscord(groupId)
   const [open, setOpen] = useState(!replacing)
   const [url, setUrl] = useState("")
-  const [trades, setTrades] = useState(true)
-  const [digest, setDigest] = useState(true)
-  const [dailyOn, setDailyOn] = useState(false)
+  // 換 webhook：打開表單時才照現在的值（表單收著時開關可能改過）
+  const initial = () => Object.fromEntries(SWITCHES.map((s) => [s.key, current?.[s.key] ?? s.on])) as Record<keyof ChannelNotify, boolean>
+  const [switches, setSwitches] = useState(initial)
   const [error, setError] = useState<string | null>(null)
   if (!open) {
     return (
-      <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+      <Button
+        variant="outline"
+        size="sm"
+        onClick={() => {
+          setSwitches(initial())
+          setOpen(true)
+        }}
+      >
         換一個 webhook
       </Button>
     )
@@ -200,7 +192,13 @@ function DiscordForm({ groupId, replacing, daily = false }: { groupId: string; r
         }
         setError(null)
         put.mutate(
-          { webhook_url: url.trim(), notify_trades: trades, notify_digest: digest, ...(daily ? { notify_daily: dailyOn } : {}) },
+          {
+            webhook_url: url.trim(),
+            notify_trades: switches.notify_trades,
+            notify_premarket: switches.notify_premarket,
+            notify_close: switches.notify_close,
+            notify_weekly: switches.notify_weekly,
+          },
           {
             onSuccess: () => {
               setUrl("")
@@ -238,20 +236,12 @@ function DiscordForm({ groupId, replacing, daily = false }: { groupId: string; r
         )}
       </div>
       <div className="flex flex-wrap gap-x-6 gap-y-2">
-        <label className="flex items-center gap-2.5">
-          <Switch checked={trades} onCheckedChange={setTrades} />
-          送交易動態
-        </label>
-        <label className="flex items-center gap-2.5">
-          <Switch checked={digest} onCheckedChange={setDigest} />
-          送週報
-        </label>
-        {daily && (
-          <label className="flex items-center gap-2.5">
-            <Switch checked={dailyOn} onCheckedChange={setDailyOn} />
-            送日報
+        {SWITCHES.map(({ key, label }) => (
+          <label key={key} className="flex items-center gap-2.5">
+            <Switch checked={switches[key]} onCheckedChange={(on) => setSwitches((prev) => ({ ...prev, [key]: on }))} />
+            送{label.replace(/（.*）$/, "")}
           </label>
-        )}
+        ))}
       </div>
       <div className="flex gap-2">
         <Button type="submit" variant="sign" disabled={put.isPending || !url.trim()}>

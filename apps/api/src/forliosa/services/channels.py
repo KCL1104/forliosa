@@ -18,6 +18,16 @@
 Setting a channel up again (or turning ``notify_trades`` back on) moves ``configured_at``: trades created before it are
 never pushed.
 
+**Four switches** (產品負責人 2026-11-18, option A): ``notify_trades`` 交易動態 (on), ``notify_premarket`` 盤前 —
+盤前重點 with 「昨日你的群組」 (off), ``notify_close`` 盤後 (off), ``notify_weekly`` 週報 — 市場週報 with the group
+digest (on). The columns ``notify_digest`` / ``notify_daily`` stay in the table, unread; writes of them from a frontend
+older than the change are mapped onto ``notify_weekly`` / ``notify_premarket`` (:func:`switch_changes`, a given new
+field wins) — except when such a frontend only replaces the webhook of a channel that is set up (its form sends
+the old fields with the form's defaults, not the channel's values: they are ignored, the switches stay) — and
+responses still carry them as copies of the new switches, so a frontend and backend deployed in either order agree.
+Every write of the switches also lowers the old columns to ``old AND new`` (:func:`_lower_deprecated`): a switch the
+owner turned off after the change stays off if the code is rolled back to read the old columns, and none is turned on.
+
 **A new destination needs everyone's consent again**: when the owner points a channel somewhere else — a Discord webhook
 with a different id, a different Telegram chat, or any destination after the channel was removed — every *other*
 member's ``push`` toggle is turned off (the owner who set it keeps theirs); they see the new target in
@@ -139,12 +149,19 @@ def _webhook_id(ch: GroupChannel) -> str | None:
     return pushers.webhook_id(url) if url else None
 
 
+# the group parts of 盤前 / 週報: queued when written, they wait for 07:30 / Sunday 18:00 (a day or more)
+KEPT_KINDS = ("daily", "digest")
+
+
 def _cancel_pending(db: Session, group_id: str, kind: str, reason: str = "channel_changed") -> None:
     """Pending pushes of a channel that was set up again, removed or disabled are never sent (the rows stay as
-    ``cancelled`` until the retention purge, so the same trade is not queued twice)."""
+    ``cancelled`` until the retention purge, so the same trade is not queued twice). The group parts that wait for
+    盤前 / 週報 (``daily`` / ``digest``) stay pending: they are queued once, when written, and when they go the channel,
+    its switch and who pushes are checked again (a new destination has turned the others' push off)."""
     db.execute(update(NotificationOutbox).where(NotificationOutbox.group_id == group_id,
                                                 NotificationOutbox.channel_kind == kind,
-                                                NotificationOutbox.status == "pending")
+                                                NotificationOutbox.status == "pending",
+                                                NotificationOutbox.kind.not_in(KEPT_KINDS))
                .values(status="cancelled", last_error=reason))
 
 
@@ -158,14 +175,11 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             "configured": ch is not None, "status": ch.status if ch else None,
             "disabled_reason": ch.disabled_reason if ch else None,
             "notify_trades": bool(ch.notify_trades) if ch else True,
-            "notify_digest": bool(ch.notify_digest) if ch else True,
-            # 群組 AI 日報 (boosted groups): off until the owner turns it on
-            "notify_daily": bool(ch.notify_daily) if ch else False,
-            # 市場報告 (every group): 盤前、盤後 off, 週報 on until the owner changes them
-            "notify_premarket": bool(ch.notify_premarket) if ch else False,
-            "notify_close": bool(ch.notify_close) if ch else False,
-            "notify_weekly": bool(ch.notify_weekly) if ch else True,
+            # 盤前（＋昨日你的群組）、盤後 off, 週報（＋群組週報） on until the owner changes them
+            **{flag: bool(getattr(ch, flag)) if ch else default for flag, default in SWITCH_DEFAULTS.items()},
         }
+        # deprecated copies for frontends older than 2026-11-18 (their 週報 / 日報 rows show the same switch)
+        row["notify_digest"], row["notify_daily"] = row["notify_weekly"], row["notify_premarket"]
         if kind == "discord":
             hint = ch.webhook_hint if ch is not None and me.role == "owner" else None
             row["webhook_hint"] = f"…/{hint}" if hint else None
@@ -173,11 +187,12 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             row["chat_title"] = ch.chat_title if ch else None
         out[kind] = row
     out["telegram_available"] = settings.telegram_available
-    from forliosa.reports.push import pushing, trial_pushing
+    from forliosa.reports.push import pushing, trial_editions_left
 
-    out["market_reports_available"] = pushing(db, settings)  # the three switches show only once reports are public
-    # …or while the blind test is open to everyone (one message per edition with the vote link; nothing folded in)
-    out["market_reports_trial"] = not out["market_reports_available"] and trial_pushing(db, settings)
+    out["market_reports_available"] = pushing(db, settings)  # the market part of 盤前、盤後、週報 is sent
+    # …or the blind test open to everyone still has editions to push (their message has the vote link, then the
+    # group part); once they are used up, until the mode is public, the group parts go alone like reports off
+    out["market_reports_trial"] = not out["market_reports_available"] and trial_editions_left(db, settings)
     return out
 
 
@@ -188,12 +203,39 @@ def connect_message(group: Group) -> str:
             "打開「推播」的成員，他們開放的交易動態與週報才會送到這裡。\n" + disclaimer.SHORT)
 
 
-REPORT_FLAGS = {"notify_premarket": False, "notify_close": False, "notify_weekly": True}  # a new channel's defaults
+SWITCH_DEFAULTS = {"notify_premarket": False, "notify_close": False, "notify_weekly": True}  # a new channel's
+# writes of the switches removed on 2026-11-18 (from a frontend deployed before the backend): onto the new ones
+DEPRECATED_SWITCHES = {"notify_digest": "notify_weekly", "notify_daily": "notify_premarket"}
 
 
-def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, notify_trades: bool,
-                notify_digest: bool, notify_daily: bool | None = None,
-                reports: dict[str, bool | None] | None = None) -> None:
+def switch_changes(given: dict[str, Any], deprecated: bool = True) -> dict[str, bool]:
+    """The switches to change: the four of today, with ``notify_digest`` / ``notify_daily`` (frontends older than
+    2026-11-18) read as ``notify_weekly`` / ``notify_premarket`` unless those are given too (``deprecated=False``:
+    ignored). ``None`` = unchanged."""
+    out = {k: bool(v) for k, v in given.items() if k in ("notify_trades", *SWITCH_DEFAULTS) and v is not None}
+    for old, new in DEPRECATED_SWITCHES.items():
+        if deprecated and given.get(old) is not None and new not in out:
+            out[new] = bool(given[old])
+    return out
+
+
+DEPRECATED_DEFAULTS = {"notify_digest": True, "notify_daily": False}  # what the old code gave a new destination
+
+
+def _lower_deprecated(ch: GroupChannel, fresh: bool = False) -> None:
+    """``notify_digest := notify_digest AND notify_weekly``, ``notify_daily := notify_daily AND notify_premarket``
+    (like the downgrade of 0027): the old columns, read again only if the code is rolled back, never send more than
+    the owner's switches of today. ``fresh`` (a new destination): from the old code's defaults (週報 on, 日報 off)."""
+    for old, new in DEPRECATED_SWITCHES.items():
+        was = getattr(ch, old)
+        was = DEPRECATED_DEFAULTS[old] if fresh or was is None else bool(was)
+        setattr(ch, old, was and bool(getattr(ch, new)))
+
+
+def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, notify_trades: bool = True,
+                switches: dict[str, Any] | None = None) -> None:
+    """Set the group's Discord webhook. ``switches``: ``notify_premarket`` / ``notify_close`` / ``notify_weekly`` (and
+    the deprecated names, :func:`switch_changes`); one not given stays as it is (a new destination: the defaults)."""
     owner_only(m)
     url = pushers.parse_webhook_url(webhook_url)
     if url is None:
@@ -216,17 +258,16 @@ def put_discord(db: Session, group: Group, m: GroupMember, webhook_url: str, not
     _cancel_pending(db, group.id, "discord")
     ch.status, ch.disabled_reason = "active", None
     ch.webhook_encrypted, ch.webhook_hint = encrypt_secret(url), pushers.webhook_hint(url)
-    ch.notify_trades, ch.notify_digest = notify_trades, notify_digest
-    if notify_daily is not None:
-        ch.notify_daily = notify_daily
-    elif fresh:  # a new destination starts with the daily report off
-        ch.notify_daily = False
-    for flag, default in REPORT_FLAGS.items():  # 市場報告: given, else unchanged (a new destination: the defaults)
-        value = (reports or {}).get(flag)
-        if value is not None:
-            setattr(ch, flag, bool(value))
+    ch.notify_trades = notify_trades
+    # an older frontend's form sends 週報 / 日報 with its own defaults, not the channel's: only a new destination
+    # takes them (replacing the webhook keeps the switches)
+    given = switch_changes(switches or {}, deprecated=fresh)
+    for flag, default in SWITCH_DEFAULTS.items():  # given, else unchanged (a new destination: the defaults)
+        if flag in given:
+            setattr(ch, flag, given[flag])
         elif fresh:
             setattr(ch, flag, default)
+    _lower_deprecated(ch, fresh)
     ch.configured_by, ch.configured_at, ch.updated_at = m.user_id, now, now
     db.commit()
 
@@ -237,18 +278,16 @@ def patch_channel(db: Session, group: Group, m: GroupMember, kind: str, changes:
     if ch is None:
         raise not_found("這個頻道還沒有設定")
     now = now_utc()
+    changes = switch_changes(changes)
     if "notify_trades" in changes:
-        on = bool(changes["notify_trades"])
+        on = changes["notify_trades"]
         if on and not ch.notify_trades:
             ch.configured_at = now  # trades created while it was off are never pushed
         ch.notify_trades = on
-    if "notify_digest" in changes:
-        ch.notify_digest = bool(changes["notify_digest"])
-    if "notify_daily" in changes:
-        ch.notify_daily = bool(changes["notify_daily"])
-    for flag in REPORT_FLAGS:
+    for flag in SWITCH_DEFAULTS:
         if flag in changes:
-            setattr(ch, flag, bool(changes[flag]))
+            setattr(ch, flag, changes[flag])
+    _lower_deprecated(ch)
     ch.updated_at = now
     db.commit()
 
@@ -312,17 +351,18 @@ def link_chat(db: Session, code: str, chat_id: int, chat_title: str, now: dateti
     if not used.rowcount:
         return None
     ch = _channel(db, group.id, "telegram")
+    fresh = ch is None or ch.status == REMOVED
     if ch is None:
-        ch = GroupChannel(group_id=group.id, kind="telegram", notify_trades=True, notify_digest=True,
-                          notify_daily=False, **REPORT_FLAGS)
+        ch = GroupChannel(group_id=group.id, kind="telegram", notify_trades=True, **SWITCH_DEFAULTS)
         db.add(ch)
     else:
         if ch.telegram_chat_id != chat_id:  # another chat, or set up again after it was removed
             _reset_others_push(db, group.id, row.created_by, now)
         if ch.status == REMOVED:
-            ch.notify_trades, ch.notify_digest, ch.notify_daily = True, True, False
-            for flag, default in REPORT_FLAGS.items():
+            ch.notify_trades = True
+            for flag, default in SWITCH_DEFAULTS.items():
                 setattr(ch, flag, default)
+    _lower_deprecated(ch, fresh)
     _cancel_pending(db, group.id, "telegram")
     ch.status, ch.disabled_reason = "active", None
     ch.telegram_chat_id, ch.chat_title = chat_id, (one_line(chat_title) or "Telegram 群組")[:255]

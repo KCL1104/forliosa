@@ -657,8 +657,10 @@ def latest_activity(db: Session, md: MarketData, group: Group, members: list[Mem
     newest = [max(i["_key"][1] for i in items)] if items else []
     targets = [f"trade:{i['id']}" for i in items if i["type"] == "trade"]
     q = select(func.max(GroupComment.created_at)).where(GroupComment.group_id == group.id)
-    ready = [f"digest:{d}" for d in db.scalars(select(GroupDigest.id).where(GroupDigest.group_id == group.id,
-                                                                           GroupDigest.status == "ready"))]
+    from forliosa.services.digests import published_through
+
+    ready = [f"digest:{d}" for d in db.scalars(select(GroupDigest.id).where(
+        GroupDigest.group_id == group.id, GroupDigest.status == "ready", GroupDigest.week_end <= published_through()))]
     c = db.scalar(q.where(GroupComment.target.in_(targets + ready) | GroupComment.target.like("leaderboard:%")))
     if c is not None:
         newest.append(c)
@@ -671,9 +673,12 @@ def target_visible(db: Session, md: MarketData, group: Group, members: list[Memb
     kind, _, ref = target.partition(":")
     if kind == "trade":
         return ref.startswith("gfi_") and ref in visible_trade_ids(db, md, group, members)
-    if kind == "digest":
+    if kind == "digest":  # a digest is out from Sunday 18:00 after its week (2026-11-18)
+        from forliosa.services.digests import published_through
+
         d = db.get(GroupDigest, ref)
-        return d is not None and d.group_id == group.id and d.status == "ready"
+        return (d is not None and d.group_id == group.id and d.status == "ready"
+                and d.week_end <= published_through())
     if kind == "leaderboard":
         try:
             day = date.fromisoformat(ref)

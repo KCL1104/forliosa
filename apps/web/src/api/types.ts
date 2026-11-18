@@ -1605,13 +1605,17 @@ export interface DiscordChannel {
   /** 只有 owner 看得到（webhook 網址最後 4 碼） */
   webhook_hint?: string | null
   notify_trades: boolean
-  notify_digest: boolean
-  /** 群組 AI 日報（加值群組；預設關，擁有者決定）。選填：舊版後端沒有 */
-  notify_daily?: boolean
-  /** 市場報告的推播（2026-11-17；所有群組都能開）：盤前、盤後預設關，週報預設開。選填：舊版後端沒有 */
+  /**
+   * 四個開關（產品負責人 2026-11-18 選 A）：交易動態；盤前＝盤前重點＋昨日你的群組（預設關）；盤後＝盤後重點（預設關）；
+   * 週報＝市場週報＋這週的群組週報（預設開）。選填：更舊的後端沒有
+   */
   notify_premarket?: boolean
   notify_close?: boolean
   notify_weekly?: boolean
+  /** @deprecated 2026-11-18 起和 notify_weekly 相同（給舊版前端）；不要用 */
+  notify_digest?: boolean
+  /** @deprecated 2026-11-18 起和 notify_premarket 相同（給舊版前端）；不要用 */
+  notify_daily?: boolean
 }
 
 export interface TelegramChannel {
@@ -1620,12 +1624,14 @@ export interface TelegramChannel {
   disabled_reason: string | null
   chat_title: string | null
   notify_trades: boolean
-  notify_digest: boolean
-  /** 群組 AI 日報（加值群組；預設關，擁有者決定）。選填：舊版後端沒有 */
-  notify_daily?: boolean
+  /** 四個開關，同 `DiscordChannel` */
   notify_premarket?: boolean
   notify_close?: boolean
   notify_weekly?: boolean
+  /** @deprecated 2026-11-18 起和 notify_weekly 相同（給舊版前端）；不要用 */
+  notify_digest?: boolean
+  /** @deprecated 2026-11-18 起和 notify_premarket 相同（給舊版前端）；不要用 */
+  notify_daily?: boolean
 }
 
 export interface Channels {
@@ -1633,28 +1639,24 @@ export interface Channels {
   telegram: TelegramChannel
   /** 伺服器有設定 bot 時才為 true */
   telegram_available: boolean
-  /** 市場報告對全站公開（模式 public）時才為 true：這時才有三個報告的推播開關。選填：舊版後端沒有 */
+  /** 市場報告對全站公開（模式 public）：盤前、盤後、週報有市場報告的部分。選填：舊版後端沒有 */
   market_reports_available?: boolean
-  /** 盲測開給所有人（模式 trial）：也有三個開關，每份推一則投票連結，不併群組的日報、週報 */
+  /** 盲測開給所有人（模式 trial）：市場報告的部分是一則投票連結，盤前、週報後面照樣接群組的部分 */
   market_reports_trial?: boolean
 }
 
+/** 頻道的四個開關（2026-11-18） */
 export interface ChannelNotify {
   notify_trades?: boolean
-  notify_digest?: boolean
-  notify_daily?: boolean
   notify_premarket?: boolean
   notify_close?: boolean
   notify_weekly?: boolean
 }
 
-/** 設定 Discord：webhook 網址＋要送哪些（日報選填：舊版後端沒有） */
+/** 設定 Discord：webhook 網址＋四個開關（省略＝伺服器的預設：交易動態、週報開，盤前、盤後關；換 webhook 時是不變） */
 export interface DiscordInput {
   webhook_url: string
   notify_trades: boolean
-  notify_digest: boolean
-  notify_daily?: boolean
-  /** 市場報告：省略＝伺服器的預設（盤前、盤後關，週報開） */
   notify_premarket?: boolean
   notify_close?: boolean
   notify_weekly?: boolean

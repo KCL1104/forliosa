@@ -54,13 +54,14 @@ def test_discord_tests_first_encrypts_and_shows_the_hint_only_to_the_owner(app, 
     member = login(app, "b@x.tw", "小明")
     join(client, member, g["id"])
 
-    r = put_discord(client, g["id"], notify_trades=True, notify_digest=False)
+    r = put_discord(client, g["id"], notify_trades=True, notify_weekly=False)
     assert r.status_code == 200, r.text
     out = r.json()
+    # the four switches (2026-11-18), plus notify_digest / notify_daily as copies for older frontends
     assert out["discord"] == {"configured": True, "status": "active", "disabled_reason": None,
-                              "webhook_hint": "…/WXYZ", "notify_trades": True, "notify_digest": False,
-                              "notify_daily": False, "notify_premarket": False, "notify_close": False,
-                              "notify_weekly": True}
+                              "webhook_hint": "…/WXYZ", "notify_trades": True, "notify_premarket": False,
+                              "notify_close": False, "notify_weekly": False, "notify_digest": False,
+                              "notify_daily": False}
     assert TOKEN not in r.text
     # the test message went to the canonical URL before saving, with mentions disabled
     assert len(fake.discord) == 1
@@ -142,7 +143,7 @@ def test_patch_and_delete_discord(client, fake):
     before = channel_row(g["id"], "discord").configured_at
     r = client.patch(f"{API}/groups/{g['id']}/channels/discord", json={"notify_trades": False})
     assert r.status_code == 200 and r.json()["discord"]["notify_trades"] is False
-    assert r.json()["discord"]["notify_digest"] is True
+    assert r.json()["discord"]["notify_weekly"] is True
     r = client.patch(f"{API}/groups/{g['id']}/channels/discord", json={"notify_trades": True})
     assert r.json()["discord"]["notify_trades"] is True
     assert channel_row(g["id"], "discord").configured_at > before  # trades made while it was off are never pushed
@@ -218,7 +219,7 @@ def test_a_new_destination_turns_the_other_members_push_off(app, client, fake):
 
     assert put_discord(client, g["id"]).status_code == 200  # the group's first destination: consent stands
     assert share(b) is True
-    assert put_discord(client, g["id"], notify_digest=False).status_code == 200  # the same webhook again
+    assert put_discord(client, g["id"], notify_weekly=False).status_code == 200  # the same webhook again
     assert share(b) is True
     assert put_discord(client, g["id"], url=other).status_code == 200  # somewhere else
     assert share(b) is False and share(client) is True  # the owner who set it keeps theirs
@@ -310,8 +311,8 @@ def test_link_through_get_updates(app, client, fake, telegram_env):
     assert reply["chat_id"] == -100123 and "家族投資" in reply["text"] and "parse_mode" not in reply
     seen = client.get(f"{API}/groups/{g['id']}/channels").json()["telegram"]
     assert seen == {"configured": True, "status": "active", "disabled_reason": None, "chat_title": "家族投資群",
-                    "notify_trades": True, "notify_digest": True, "notify_daily": False,
-                    "notify_premarket": False, "notify_close": False, "notify_weekly": True}
+                    "notify_trades": True, "notify_premarket": False, "notify_close": False, "notify_weekly": True,
+                    "notify_digest": True, "notify_daily": False}
     assert client.get(f"{API}/groups/{g['id']}").json()["push_targets"] == [{"kind": "telegram",
                                                                             "label": "家族投資群"}]
     # single use
@@ -378,7 +379,7 @@ def test_relinking_another_chat_turns_the_other_members_push_off(app, client, fa
     poll(fake, tg_message(5, -2002, f"/link {link_code(client, g['id'])['code']}"))
     assert share() is False  # set up again after removal
     ch = channel_row(g["id"], "telegram")
-    assert ch.status == "active" and ch.notify_trades and ch.notify_digest
+    assert ch.status == "active" and ch.notify_trades and ch.notify_weekly and not ch.notify_premarket
 
 
 def test_poller_drains_the_backlog_and_throttles_answers(client, fake, telegram_env):

@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from forliosa.db import session_factory
 from forliosa.ids import new_id
 from forliosa.models import GroupComment, GroupDigest, GroupReaction, Transaction
+from forliosa.services.digests import published_through
 from forliosa.timeutil import last_tw_trading_day, now_utc, today_taipei
 from tests.api.m5 import API, account, join, login, make_group, me_id, set_share, trade, trading_day
 
@@ -129,17 +130,21 @@ def test_comments_on_trades_leaderboard_and_digests(app, client, other_client, s
     for bad in (f"leaderboard:{future}", "leaderboard:2026-13-40", "digest:gdg_nope", "trade:gfi_nope"):
         r = client.post(f"{API}/groups/{gid}/comments", json={"target": bad, "body": "x"})
         assert r.status_code == 404 and r.json()["error"] == {"code": "not_found", "message": "找不到討論對象"}, bad
-    # digests: only ready digests of this group
+    # digests: only ready digests of this group that are out (from Sunday 18:00 after their week; 2026-11-18)
+    out_end, next_end = published_through(), published_through() + timedelta(days=7)
     with session_factory()() as db:
-        db.add(GroupDigest(id="gdg_ready1", group_id=gid, week_start=today_taipei(), week_end=today_taipei(),
+        db.add(GroupDigest(id="gdg_ready1", group_id=gid, week_start=out_end - timedelta(days=4), week_end=out_end,
                            status="ready"))
-        db.add(GroupDigest(id="gdg_pending1", group_id=gid, week_start=today_taipei() - timedelta(days=7),
-                           week_end=today_taipei(), status="pending"))
+        db.add(GroupDigest(id="gdg_pending1", group_id=gid, week_start=out_end - timedelta(days=11),
+                           week_end=out_end - timedelta(days=7), status="pending"))
+        db.add(GroupDigest(id="gdg_notyet1", group_id=gid, week_start=next_end - timedelta(days=4), week_end=next_end,
+                           status="ready"))
         db.commit()
     assert client.post(f"{API}/groups/{gid}/comments", json={"target": "digest:gdg_ready1", "body": "讚"}
                        ).status_code == 201
-    assert client.post(f"{API}/groups/{gid}/comments", json={"target": "digest:gdg_pending1", "body": "讚"}
-                       ).status_code == 404
+    for not_open in ("gdg_pending1", "gdg_notyet1"):
+        assert client.post(f"{API}/groups/{gid}/comments", json={"target": f"digest:{not_open}", "body": "讚"}
+                           ).status_code == 404
     # a target of another group is 404 too
     third = login(app, "third@forliosa.local", "老三")
     g2 = make_group(third, "別的群組")

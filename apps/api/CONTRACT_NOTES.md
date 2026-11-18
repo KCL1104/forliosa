@@ -2192,7 +2192,7 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 | `Digest` | 多 `notes`（例如 commercial 下「資料累積中：自 … 起存檔；本週從 … 收盤開始計算」）與 `is_demo` |
 | `Digest.facts` | `returns` 依加入順序；`common_holdings` 要兩人以上；`industries` 是持有該產業任何一檔的人數（1 人也列，同 `GroupHoldings`）；`trades_count` 是那一週 `trade_date` 在週一到週五、可出現在動態裡的買賣筆數（每筆交易算一筆，不是合併後的則數） |
 | `Channels` | 非 owner 的 `webhook_hint` 為 `null`；沒設定的頻道 `notify_*` 回 `true`（預設值） |
-| `PUT /groups/{id}/channels/discord` | `notify_trades`、`notify_digest` 可省略（預設 `true`）。重新設定（換網址）會取消還沒送出的推播，`configured_at` 重設。webhook id 和原本的不同（或解除後再設定、舊網址解不開）→ 其他成員的 `push` 改成關閉（設定的 owner 不變）。網址格式正確才計次：同一人或同一群組 10 分鐘內第 6 次 → 429 `rate_limited`（不送出；計數在 API 程序的記憶體裡，重啟歸零）；circuit breaker 開著時也是 429 `rate_limited` |
+| `PUT /groups/{id}/channels/discord` | `notify_trades` 可省略（預設 `true`）；2026-11-18 起另外三個開關是 `notify_premarket`／`notify_close`／`notify_weekly`（省略＝不變，見文末「頻道只留四個開關」），舊的 `notify_digest`／`notify_daily` 寫成 `notify_weekly`／`notify_premarket`。重新設定（換網址）會取消還沒送出的推播（等著盤前／週報的群組日報、週報除外，2026-11-18），`configured_at` 重設。webhook id 和原本的不同（或解除後再設定、舊網址解不開）→ 其他成員的 `push` 改成關閉（設定的 owner 不變）。網址格式正確才計次：同一人或同一群組 10 分鐘內第 6 次 → 429 `rate_limited`（不送出；計數在 API 程序的記憶體裡，重啟歸零）；circuit breaker 開著時也是 429 `rate_limited` |
 | `PATCH /groups/{id}/channels/{kind}` | 回整個 `Channels`；`notify_trades` 由關到開時 `configured_at` 重設（關著那段時間的交易不補送） |
 | `DELETE /groups/{id}/channels/{kind}` | 204；Telegram 一併刪除還沒用的連結碼。資料列留著、`status = "removed"`（網址、chat id、`chat_title` 清掉），`Channels` 顯示為沒設定、`PATCH` 404；之後再設定算新的目的地 |
 | `POST /groups/{id}/channels/telegram/link` | 只有 owner（403 優先於 409）；沒設 bot → 409 `telegram_unavailable`。連結碼 12 字（`A–Z`、`2–9`，去掉 `0 O 1 I`；60 bits），只存 SHA-256，大小寫不拘；再產生一組會刪掉群組還沒用的舊碼 |
@@ -2254,7 +2254,8 @@ AI 工具（`get_stock_overview` 等）與所有提示（含 AI 簡介的提示�
 ### 群組 AI 週報（`services/digests.py`）
 
 - **何時**：worker `group_digests` 週六 20:00（台北）建立上週一到週五的週報（`weekend_evening`：週六晚上沒跑到時週日任何時間補做，週一起
-  不補）；`group_digest_poll` 每 5 分鐘送出還沒送的、收 Batches 結果、重試一般呼叫。同一群組同一週只有一份。
+  不補）；`group_digest_poll` 每 5 分鐘送出還沒送的、收 Batches 結果、重試一般呼叫。同一群組同一週只有一份。2026-11-18 起週報**週日 18:00 才出來**
+  （群組頁與頻道的「週報」同時；見文末「頻道只留四個開關」）。
 - **facts**（`sharing.digest_week_facts`）：只用每位成員**當時**在這個群組開放的項目：`returns` → 週報酬（和排行同一套 TWR，起點為週一前最後
   收盤、終點為那一週最後一個交易日收盤，commercial 下起點不早於存檔第一天）；`holdings` → 持有的代號清單（只存代號；名稱與產業另外存一份
   `symbols` 對照）；`trades` → 那一週的買賣筆數。以 `user_id` 存在 `group_digests.facts`（JSON，`v: 1`），讀取時再依**目前**的成員身分與
@@ -3385,6 +3386,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   漲 0.4%，台積電跌 0.6%。今天有 3 筆買賣。」展示資料沒有發行量加權股價報酬指數，所以那一句自動略過。
 - **推播**：`notification_outbox.kind = "daily"`、`daily_report_id`（加在舊表上，所以沒有外鍵：日報刪除時一起刪 outbox 列，找不到日報的列取消）。
   `not_before` = `group_daily.push_at`（23:00–07:30 寫好的延到 07:30）。Discord 一則最多 2,000 字：報酬最多列 20 人、買賣最多 10 項。
+  （2026-11-18 起改了：沒有 `push_at`，跟著頻道的「盤前」在下一個交易日 07:30 送，見後面「頻道只留四個開關」。）
 - **保存**：日報 30 天（`sharing_retention` 04:35）。
 - **設定**：`GROUP_FREE_MEMBER_CAP`（5）、`GROUP_BOOSTED_MEMBER_CAP`（50）、`GROUP_DAILY_ENABLED`、`AI_GROUP_DAILY_MONTHLY_BUDGET_USD`（5）。
   價格（群組加值 NT$300／月、NT$3,000／年；個人會員 NT$490／月、NT$4,900／年）只寫在文件，沒有付款的程式。加值多出來的 AI 成本只有日報，每個群組每月不到 NT$1。
@@ -3710,7 +3712,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - **Haiku 不支援 structured output 時**（合約 §21）：同一個請求改成要純 JSON 再送一次，之後這個模型都不帶 schema（log warning）。
 - **盲測**：試跑花費會超過上限時，新的一份就不算盲測（照一般方式產生，只有管理員看得到）；已經是盲測的那一份，放不下的 variant 記 `skipped_budget`。
   揭曉的「完成」條件：盲測日報都過了截止時間（或 skipped）且週報過了截止時間。
-- **群組推播的合併**：
+- **群組推播的合併**（2026-11-18 改了，見文末「頻道只留四個開關」；下面是那之前的做法）：
   - 盤前把群組日報延到 08:20，只在 07:30 那天是台股交易日、頻道開了盤前、而且報告已對全站公開時；週五晚上寫好的日報照舊週六 07:30 送（週一的盤前仍會帶上它，
     但那時它已送出，不會重複送）。
   - 盤前推播成功才把日報那一列標 `merged`；失敗就照原時間自己送。
@@ -3999,7 +4001,7 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   **文字只有一則**：第一行「【盤後重點 11/16（一）】AI 依公開資料整理，報告本文人人相同，不是投資建議。」、資料版的規則標題（去掉「盤後重點 11/16（一）：」；
   `title_origin` 是 ai 時不放；超過 120 字截斷，投票那一行一定放得下）、「盲測中：三種寫法，看完選一個。」、「投票：{frontend}/market/reports/{id}」（沒有 `FRONTEND_URL` 時「到 Forliosa 的「市場 → 報告」投票。」）、
   最後一行 `disclaimer.SHORT`（`notifications.signed(…, ai=False)`：推播本身沒有 AI 寫的字）。**不放 A 的重點**：A 是每份重新打亂的標籤，但推播只引用一個版本，
-  等於讓大家先讀到它；少數幾十票的盲測裡這個先後會影響選擇，所以只寫標題與日期。**不接群組的日報與週報**：`daily_hold`／`digest_hold` 只看 `pushing()`（模式 public），
+  等於讓大家先讀到它；少數幾十票的盲測裡這個先後會影響選擇，所以只寫標題與日期。**不接群組的日報與週報**（2026-11-18 起改成接：投票連結後面接群組的部分，見文末「頻道只留四個開關」）：`daily_hold`／`digest_hold` 只看 `pushing()`（模式 public），
   盲測期間群組的日報、週報照平常的時間自己送。`Channels.market_reports_trial`（新）讓前端在盲測期間也顯示三個開關（`market_reports_available` 還是只看 public）。
 - **授權查看**：兩個讀的端點在 `VIEW_AS_IGNORED_PATHS`（以登入者本人回答，`my_vote` 是他自己的票）；投票是寫入，403 `read_only`。
 - **刪帳號**：票跟著 `users` 的 `ON DELETE CASCADE` 刪掉（和管理員的票一樣）。
@@ -4400,3 +4402,74 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
 - 兩個瀏覽器的實測（`e2e-realtime.mjs`，合併後的程式＋這次的修正，全部通過、後端沒有 500）：朋友加入 → 成員頁 236 ms、動態 205 ms；
   成員買進 → 動態 189 ms；留言數 164 ms；討論串回覆 183 ms；背景回到前景 30 ms；串流被擋時備援 28.5 秒；另一台裝置記一筆 263 ms；
   匯入庫存 338 ms；刪除這檔 299 ms；清除所有持倉 263 ms。
+
+## 2026-11-18 頻道只留四個開關（產品負責人選 A；`reports/push.py`、`services/notifications.py`、`services/channels.py`、alembic `0027_channel_four_switches`）
+
+負責人在群組「頻道」分頁問「為啥要有兩個一樣功能的按鈕」：Discord／Telegram 各有 交易動態、週報（群組 AI 週報，週六晚上）、日報（群組 AI 日報，晚上 11 點到
+早上 7:30 寫好的 7:30 送），再加盤前重點、盤後重點、市場週報。選 A：每個頻道只留四個，一個開關管一則訊息的兩個部分。
+
+| 開關 | 欄位 | 預設 | 時間 | 一則訊息裡 |
+|---|---|---|---|---|
+| 交易動態 | `notify_trades` | 開 | 交易建立 15 分鐘後 | 不變 |
+| 盤前 | `notify_premarket` | 關 | 交易日 07:30 | 盤前重點＋「昨日你的群組」（前一個交易日的群組 AI 日報；加值群組才有） |
+| 盤後 | `notify_close` | 關 | 交易日 16:00 | 盤後重點 |
+| 週報 | `notify_weekly` | 開 | 週日 18:00 | 市場週報＋「你的群組上週」（群組週報） |
+
+**送法**（`push.daily_due`／`digest_due`，`notifications.enqueue_daily`／`enqueue_digest`／`_send_daily`／`_send_digest`、`push.send`）：
+
+| 情形 | 盤前 07:30 | 週報 週日 18:00 |
+|---|---|---|
+| 報告對全站公開 | 盤前重點的推播把昨日你的群組併進去；那一份還沒推時群組那一列延到 08:20（市場報告 08:15 改推資料版），一直沒併到就 08:20 自己送 | 市場週報併群組週報；那一份還沒推時延到 21:30（週報 21:00 結束） |
+| 盲測開給所有人（模式 trial、對象 all），這一份是盲測版 | 投票訊息在投票連結後面接昨日你的群組（同樣延到 08:20） | 投票訊息後面接你的群組上週（同樣延到 21:30） |
+| 盲測開給所有人，但這一份不是盲測版（前 `AI_MREPORT_TRIAL_DAYS` 個交易日以後、第一個週日以後、預算放不下） | 07:30 只送昨日你的群組（不等：只給管理員的那一份不會推） | 18:00 只送群組週報 |
+| 報告關著／暫停／試跑只給管理員 | 07:30 只送昨日你的群組 | 18:00 只送群組週報 |
+| 不是加值群組（沒有日報） | 只有市場的部分（報告沒開放時什麼都不送） | — |
+| 群組的部分比時間晚寫好 | 那一份已經推過就寫好就送；還沒推、還會推時等到 08:20 | 同左（21:30） |
+| 非交易日 | 沒有；週五的日報在下一個交易日（通常週一）07:30 | 每個週日都有 |
+
+- **要不要等，看的是「那一份報告」，不是只看模式**（`push.market_coming(db, kind, 日期, channel)`，2026-11-18 審查後改）：排進 outbox 時 `not_before`
+  一律是 07:30／週日 18:00（寫好得更晚就是寫好的時間）；**到了那個時間才問**那一份（`premarket` 是 `push.premarket_of(交易日)`＝下一個交易日，`weekly` 是
+  `push.weekly_of(週五)`＝那個週日）會不會來併：
+  - 還沒建立：模式 public，或盲測開給所有人且 `pipeline.is_trial_edition(...)` 成立 → 會來；
+  - 建立了、還沒推（`pushed_at` 空）：public 的那一份（模式 public），或盲測版（盲測開給所有人）；補跑的、跳過的不算 → 會來；
+  - 已經推了：只有這個頻道那一則還在等（`mreport` 列 pending，例如送失敗等重試）才等；
+  - 其他（只給管理員的那一份、模式 paused、報告關著）→ 不等，馬上送。
+  會來就把 `not_before` 改成 08:20／21:30（最晚到這時，到了就自己送）。改版前排好的列（日報當晚就送、週報週六就送）到時間時照新的時間重排（不送）。
+  `send_due` 一輪裡同一份報告只查一次（`cache`）。
+- 頻道分頁的 `market_reports_trial`＝盲測開給所有人**而且盲測版還沒跑完**（`push.trial_editions_left`：`service.trial_progress(...)["finished"]` 為假）；
+  跑完、管理員還沒切成 public 的這段時間是 false，前端那一行改回「市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。」（照實際送法）。
+- **換 webhook、重新連 Telegram、頻道被停用時，等著的群組部分不取消**（`channels._cancel_pending` 不動 `kind` 為 `daily`／`digest` 的列）：它們寫好時只排一次，
+  改版後要等十幾到二十幾個小時；送出前本來就會重新檢查頻道、開關與誰開著推播（換到新的目的地時其他人的推播已經被關掉）。頻道刪除後到時間會因為頻道不在而取消。
+  改版前被這樣取消的列（`cancelled`＋`channel_changed`／`channel_disabled`）市場報告的推播也不會併（`push._sent`）。
+- **一個頻道一份只送一次**：群組的部分每個頻道一列 outbox（`daily:{report}:{kind}`／`digest:{digest}:{kind}`，`dedupe_key` 唯一）。市場報告的推播把它併進去後
+  （`push.mark_merged`）那一列標 `sent`＋`last_error="merged"`；還沒排進去的（例如盤前是日報寫好以後才打開的）補一列已送，之後 `enqueue_daily`／`enqueue_digest` 不會再排。
+  市場報告的推播不併已經 `sent` 的（`push._sent`）：改版前一晚已經自己送出的日報、週六已經送出的週報，週一的盤前／週日的週報只有市場的部分。
+- **週報週日 18:00 出來**：群組週報照舊週六 20:00 開始寫（Batches 有一天的時間），群組頁（`digests_page`）、`GroupSummary.latest_digest_at`、留言與表情的對象
+  （`sharing.target_visible`、`latest_activity`）都只算 `week_end <= digests.published_through(now)` 的（週日 18:00 以後才有那一週）。前端「報告」分頁空狀態改成
+  「每週日 18:00 整理好這一週（週一到週五）的群組表現。」。
+- `group_daily.push_at`（晚上 11 點到早上 7:30 的安靜時段）拿掉：日報一律跟下一個交易日的盤前走。
+- **API**：`Channels` 的兩種頻道是四個開關；`notify_digest`／`notify_daily` 還在回應裡，值等於 `notify_weekly`／`notify_premarket`（舊版前端照樣顯示得對）。
+  `PUT`／`PATCH` 照收 `notify_digest`／`notify_daily`，寫成 `notify_weekly`／`notify_premarket`（`channels.switch_changes`；同時給了新的以新的為準）。
+  **例外**：舊版前端的 Discord 表單一定帶 `notify_digest`（表單預設開）與 `notify_daily`（預設關），值是表單的預設、不是頻道現在的值；所以頻道已經設定好、
+  只是「換一個 webhook」（不是新的目的地）時 `PUT` 不理會這兩個舊欄位，四個開關照舊（不然會把關著的週報打開、開著的盤前關掉）。新的目的地（第一次設定、刪除後再設定）照樣對應。
+  資料庫的 `notify_digest`／`notify_daily` 兩欄不再讀；每次寫開關時把它們**往下調**成 `舊 AND 新`（`channels._lower_deprecated`；新的目的地從舊程式的預設
+  週報開、日報關開始）：擁有者改版後關掉的週報／盤前，就算程式退回舊版（不論有沒有跑 downgrade）也不會再送群組週報／日報；也不會因此多開任何一個。
+  前後端哪一個先部署都不會壞：舊前端寫舊欄位會落到新開關，新前端遇到舊後端時四個欄位舊後端也都認得
+  （語意差在舊後端的日報、週報還是自己的開關，部署完就一致）。之後確定沒有舊前端再移除這兩個欄位與資料庫的兩欄。
+- **migration `0027_channel_four_switches`**（接在 `0026_mevents_type_date` 後面）：`notify_premarket := notify_premarket OR notify_daily`、
+  `notify_weekly := notify_weekly OR notify_digest`（誰開過都保留；只開了日報的頻道從此也收盤前重點，只開了群組週報的也收市場週報——負責人選 A 的意思）。
+  舊的兩欄不動。downgrade 不刪任何東西、不打開任何開關：新的兩欄留著合併後的值（OR 拆不回去），舊的兩欄改成 `notify_digest := notify_digest AND notify_weekly`、
+  `notify_daily := notify_daily AND notify_premarket`——升級後沒動過的頻道不會變（OR 讓新開關在舊開關開著的地方都是開的），升級後關掉週報／盤前的頻道，舊程式不會再往那裡送群組週報／日報。
+- **推播文字太長**：盲測訊息與市場報告訊息先縮群組的段落（標題＋第一行），還放不下就硬切，被切到的那一行結尾加「…」（`push._cut`）；投票連結在群組段落前面，一定送得到，最後一行一定是免責聲明。
+- 前端 `ChannelsTab`：四列（交易動態／盤前（交易日 7:30）／盤後（交易日 16:00）／週報（週日 18:00）），每列一行說明；下面一行 13px 淡墨：公開時「推到頻道的是文字與連結，報告本文人人相同。」、
+  盲測開放時「盲測期間每份報告推一則投票連結：三種寫法，看完選一個。」、都不是時「市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。」。設定 Discord 的表單也是這四個開關
+  （換 webhook 時照現在的值）。
+- 測試：`tests/api/test_channel_four_switches.py`（盤前的每種情形、改版前後不重複、API 舊欄位、舊表單換 webhook 不動開關、舊欄位只往下調）、
+  `tests/api/test_channel_weekly_switch.py`（週報的每種情形、週六排好的列、盲測對象是所有人但不是盲測版的週日 18:00 單獨送、週六換 webhook 照樣送、
+  停用後重設只併一次、改版前因換頻道取消的不併、群組頁週日 18:00 才出現）、`tests/api/test_channel_switch_timing.py`（盲測版用完後 07:30 單獨送、
+  只給管理員的那一份不等、頻道分頁不再寫投票連結、盤前已推後才寫好的日報馬上送、週五日報用 `send_due` 跑到週一 07:30、Discord 與 Telegram 各併各的、
+  Telegram 一直失敗時 08:20 單獨送且重試不再帶、換 webhook 照樣送、投票訊息群組段落太長時在上限內）、
+  `tests/test_migrations.py::test_channel_four_switches_keep_every_opt_in_both_ways`（16 種舊值組合，上去、下來、再上去；升級後關掉的開關降級時舊欄位跟著關）；
+  前端 `channels-reports.test.tsx` 等。
+- **對外文件**（2026-11-18 審查後補）：隱私 §2.3、§6.2 與條款 §7.4、§7.9 改成四個開關（`/privacy`、`/terms` 直接讀這兩份）；特別寫出「只開盤前的頻道也會收到
+  昨日你的群組，報告沒公開時也照樣送」。`docs/legal/README.md` P51 改對照新的程式。兩份仍是草稿、`TERMS_VERSION` 還沒設，這次不換版本（定稿時一起算；請負責人確認）。

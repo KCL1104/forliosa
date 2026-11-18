@@ -163,7 +163,7 @@ describe("空狀態與錯誤：全站同一種樣子", () => {
     let retried = 0
     render(
       <>
-        <EmptyState title="還沒有週報" description="每週六晚上整理。" />
+        <EmptyState title="還沒有週報" description="每週日 18:00 整理好。" />
         <ErrorState error={new Error("x")} onRetry={() => retried++} />
       </>,
     )
@@ -175,7 +175,7 @@ describe("空狀態與錯誤：全站同一種樣子", () => {
     }
     expect(screen.getByText("還沒有週報")).toHaveClass("text-base", "font-semibold", "text-ink")
     // 原因是要讀的句子：15px 墨色（淡墨小字只給日期、單位這類標註）
-    expect(screen.getByText("每週六晚上整理。")).toHaveClass("text-base", "text-ink")
+    expect(screen.getByText("每週日 18:00 整理好。")).toHaveClass("text-base", "text-ink")
     const retry = within(alert).getByRole("button", { name: "重新載入" })
     expect(retry.querySelector("svg")).toBeNull()
     await user.click(retry)
