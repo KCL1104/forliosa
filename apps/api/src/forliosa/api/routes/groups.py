@@ -273,9 +273,8 @@ def get_channels(group_id: str, user: User = Depends(signed_in_user), db: Sessio
             summary="設定 Discord webhook（擁有者；先送測試訊息，失敗 422 webhook_failed）")
 def put_discord(group_id: str, body: DiscordIn, user: User = Depends(signed_in_user), db: Session = Depends(get_db)):
     g, m = svc.require_member(db, group_id, user)
-    channels.put_discord(db, g, m, body.webhook_url, body.notify_trades, body.notify_digest, body.notify_daily,
-                         {"notify_premarket": body.notify_premarket, "notify_close": body.notify_close,
-                          "notify_weekly": body.notify_weekly})
+    channels.put_discord(db, g, m, body.webhook_url, body.notify_trades,
+                         body.model_dump(exclude={"webhook_url", "notify_trades"}))
     return channels.channels_out(db, g, m)
 
 

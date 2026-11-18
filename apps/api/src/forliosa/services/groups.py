@@ -106,8 +106,10 @@ def summary_out(db: Session, md: MarketData, group: Group, me: User) -> dict[str
     members = sharing.members_of(db, group.id)
     mine = next(m for m in members if m.user_id == me.id)
     activity = sharing.latest_activity(db, md, group, members)
-    digest = db.scalar(select(func.max(GroupDigest.created_at)).where(GroupDigest.group_id == group.id,
-                                                                     GroupDigest.status == "ready"))
+    from forliosa.services.digests import published_through
+
+    digest = db.scalar(select(func.max(GroupDigest.created_at)).where(  # digests out on Sunday 18:00 (2026-11-18)
+        GroupDigest.group_id == group.id, GroupDigest.status == "ready", GroupDigest.week_end <= published_through()))
     daily = db.scalar(select(func.max(GroupDailyReport.finished_at)).where(
         GroupDailyReport.group_id == group.id, GroupDailyReport.status.in_(("ready", "failed"))))
     return {"id": group.id, "name": group.name, "my_role": mine.role, "member_count": len(members),

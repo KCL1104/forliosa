@@ -1,6 +1,6 @@
-"""市場週報 push takes in the group's weekly digest (contract §15.3): with the weekly report push on and the reports
-public, the digest push waits until Sunday 21:30; the 18:00 weekly push carries 「你的群組上週」 and the digest row is
-marked merged. With the weekly push off the digest goes on Saturday as before."""
+"""市場週報 push takes in the group's weekly digest (contract §15.3): with 週報 on and the reports public, the digest
+push waits until Sunday 21:30; the 18:00 weekly push carries 「你的群組上週」 and the digest row is marked merged. With
+週報 off (2026-11-18: one switch for both) the digest is not pushed at all."""
 
 from __future__ import annotations
 
@@ -45,7 +45,7 @@ def test_weekly_push_takes_in_the_digest(family, market, public):  # noqa: F811
     sunday = sat + timedelta(days=1)
     with session_factory()() as db:
         [row] = db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "digest")).all()
-        assert row.not_before == datetime.combine(sunday, time(21, 30), TAIPEI)
+        assert row.not_before == datetime.combine(sunday, time(18), TAIPEI)  # the slot; held then if a push comes
         ed = pipeline.edition_on("weekly", sunday)
         r = pipeline.make_report(db, ed, ed.push_at, visibility="public")
         v = pipeline.new_version(db, r, edition="ai", payload=PAYLOAD, now=ed.push_at)
@@ -65,7 +65,7 @@ def test_weekly_push_takes_in_the_digest(family, market, public):  # noqa: F811
         assert len(fake.discord) == before + 1
 
 
-def test_digest_goes_on_saturday_when_the_weekly_push_is_off(family, market, public):  # noqa: F811
+def test_no_digest_push_when_the_weekly_switch_is_off(family, market, public):  # noqa: F811
     g, a, sat = family["g"], family["a"], family["sat"]
     PushFake().install()
     assert a.put(f"{API}/groups/{g['id']}/channels/discord",
@@ -73,5 +73,4 @@ def test_digest_goes_on_saturday_when_the_weekly_push_is_off(family, market, pub
     create(market, sat)
     run_ai(FakeClaude(), sat)
     with session_factory()() as db:
-        [row] = db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "digest")).all()
-        assert row.not_before.astimezone(TAIPEI).date() == sat
+        assert db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "digest")).all() == []

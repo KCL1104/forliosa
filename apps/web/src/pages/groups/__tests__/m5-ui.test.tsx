@@ -260,8 +260,8 @@ describe("邀請：加入前先選分享", () => {
 
 describe("頻道：Telegram 停用後重新連結", () => {
   const disabled: Channels = {
-    discord: { configured: false, status: null, disabled_reason: null, webhook_hint: null, notify_trades: true, notify_digest: true },
-    telegram: { configured: true, status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", chat_title: "家族投資群", notify_trades: true, notify_digest: true },
+    discord: { configured: false, status: null, disabled_reason: null, webhook_hint: null, notify_trades: true, notify_weekly: true },
+    telegram: { configured: true, status: "disabled", disabled_reason: "Bot 已被移出 Telegram 群組", chat_title: "家族投資群", notify_trades: true, notify_weekly: true },
     telegram_available: true,
   }
   const active: Channels = { ...disabled, telegram: { ...disabled.telegram, status: "active", disabled_reason: null, chat_title: "家族投資群" } }

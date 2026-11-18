@@ -9,21 +9,35 @@ member gone, channel off → ``cancelled``). One outbox row per transaction and 
 never pushed twice — editing it after it was sent does not send it again. Due rows of the same feed item (member,
 day, symbol, side) go out as one message; the price (share-weighted average, no fees) only with ``trade_prices``.
 
-**Digests** (channels with ``notify_digest``): sent once the AI summary is ``ready``, with only the numbers of members
-who push (:func:`sharing.digest_facts_view` with ``pushing_only``); the summary itself only while every member whose
-numbers went into it still pushes (:func:`sharing.digest_summary_pushable`).
+**Four switches per channel** (產品負責人 2026-11-18, option A; ``forliosa.reports.push``): 交易動態
+(``notify_trades``), 盤前 (``notify_premarket``), 盤後 (``notify_close``) and 週報 (``notify_weekly``). The group's
+daily report rides on 盤前 and its weekly digest on 週報 — in the market report's message when there is one, else
+alone at the same time. ``notify_digest`` / ``notify_daily`` are no longer read (kept in the table for a safe
+downgrade; the API maps writes of them onto ``notify_weekly`` / ``notify_premarket``).
 
-**Daily reports** (群組 AI 日報 of boosted groups; channels with ``notify_daily``, off by default): queued when a report
-is finished, due at once — or at 07:30 when it finished between 23:00 and 07:30 (``group_daily.push_at``). The text
-has only the numbers of members who push (:func:`sharing.daily_facts_view` with ``pushing_only``), only trades still
-there and created after the member's push start (like trade pushes), and the AI paragraph only while every member whose
-numbers went into it still pushes and every trade it counted is still sent. Sent after the trading day (most are, at
-07:30) it says 當日報酬／那天的買賣 instead of 今日／今天.
+**Digests** (channels with ``notify_weekly``): due on Sunday 18:00 after their week (``push.digest_due``; held to 21:30
+only while that Sunday's 市場週報 push may still come for the channel, ``push.market_coming``), once the AI summary is
+``ready``, with only the numbers of members who push (:func:`sharing.digest_facts_view` with ``pushing_only``); the
+summary itself only while every member whose numbers went into it still pushes
+(:func:`sharing.digest_summary_pushable`).
+
+**Daily reports** (群組 AI 日報 of boosted groups; channels with ``notify_premarket``): queued when a report is
+finished, due at 07:30 of the next Taiwan trading day (``push.daily_due``; held to 08:20 only while that day's 盤前重點
+push may still come for the channel; at once when it finished later). The text has only the numbers of members who push
+(:func:`sharing.daily_facts_view` with ``pushing_only``), only trades still there and created after the member's push
+start (like trade pushes), and the AI paragraph only while every member whose numbers went into it still pushes and
+every trade it counted is still sent. Sent after the trading day it says 當日報酬／那天的買賣 instead of 今日／今天.
+
+Both are re-timed when they come due (rows queued before 2026-11-18 under the old times follow the new ones); whether
+to hold them is asked at 07:30 / 18:00 about that one edition, so an admin-only edition (the blind-test ones used up),
+a push that already went or reports off never hold them. A group part that a market push already took in (its row
+marked ``merged``) is never sent again. Setting a channel up again or a channel disabled does not cancel them (the
+pushing members are checked again when they go).
 
 **Market reports** (``kind="mreport"``, 市場報告 2026-11-17; ``forliosa.reports.push``): channels with
-``notify_premarket`` / ``notify_close`` / ``notify_weekly``, only while the reports' mode is public. Sent before the
-group's other rows of the same run: the 盤前重點 push takes in the group's daily report of the previous session (a
-daily push held to 08:20 for it is then marked ``merged``), the 市場週報 push the weekly digest (held to Sunday 21:30).
+``notify_premarket`` / ``notify_close`` / ``notify_weekly``, only while the reports' mode is public (or a blind test is
+open to everyone). Sent before the group's other rows of the same run: the 盤前 push takes in the group's daily report
+of the previous session, the 週報 push the weekly digest.
 
 **Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
 :func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,
@@ -114,46 +128,46 @@ def enqueue_trades(db: Session, now: datetime | None = None) -> int:
 
 
 def enqueue_digest(db: Session, digest: GroupDigest, now: datetime | None = None) -> int:
-    """Queue a ready digest for the group's channels that take digests."""
-    from forliosa.reports.push import digest_hold, pushing
+    """Queue a ready digest for the group's channels with 週報 on: due on Sunday 18:00 after its week (then held to
+    21:30 when that Sunday's 市場週報 push may still take it in, :func:`_send_digest`); a row the market push already
+    added as ``merged`` is not queued again."""
+    from forliosa.reports.push import digest_due, digest_key
 
     now = now or now_utc()
     added = 0
-    reports_on = pushing(db)
+    due = digest_due(digest.week_end, digest.finished_at or now, False)
     for ch in db.scalars(select(GroupChannel).where(GroupChannel.group_id == digest.group_id,
                                                     GroupChannel.status == "active",
-                                                    GroupChannel.notify_digest.is_(True))):
-        key = f"digest:{digest.id}:{ch.kind}"
+                                                    GroupChannel.notify_weekly.is_(True))):
+        key = digest_key(digest.id, ch.kind)
         if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key)):
             continue
-        # held for the 市場週報 push of the same channel (it takes the digest in), or sent at once
         db.add(NotificationOutbox(id=new_id("ntf"), group_id=digest.group_id, channel_kind=ch.kind, kind="digest",
                                   dedupe_key=key, digest_id=digest.id, status="pending", attempts=0,
-                                  not_before=digest_hold(ch, now, reports_on), created_at=now))
+                                  not_before=due, created_at=now))
         added += 1
     db.commit()
     return added
 
 
 def enqueue_daily(db: Session, report: GroupDailyReport, now: datetime | None = None) -> int:
-    """Queue a finished daily report for the group's channels that take daily reports (due at once, or at 07:30 when
-    it finished during the night)."""
-    from forliosa.reports.push import daily_hold, pushing
-    from forliosa.services.group_daily import push_at
+    """Queue a finished daily report for the group's channels with 盤前 on: due at 07:30 of the next trading day (then
+    held to 08:20 when that day's 盤前重點 push may still take it in, :func:`_send_daily`), at once when it finished
+    later than that."""
+    from forliosa.reports.push import daily_due, daily_key
 
     now = now or now_utc()
     added = 0
-    reports_on = pushing(db)
+    due = daily_due(report.trading_day, report.finished_at or now, False)
     for ch in db.scalars(select(GroupChannel).where(GroupChannel.group_id == report.group_id,
                                                     GroupChannel.status == "active",
-                                                    GroupChannel.notify_daily.is_(True))):
-        key = f"daily:{report.id}:{ch.kind}"
+                                                    GroupChannel.notify_premarket.is_(True))):
+        key = daily_key(report.id, ch.kind)
         if db.scalar(select(NotificationOutbox.id).where(NotificationOutbox.dedupe_key == key)):
             continue
         db.add(NotificationOutbox(id=new_id("ntf"), group_id=report.group_id, channel_kind=ch.kind, kind="daily",
                                   dedupe_key=key, daily_report_id=report.id, status="pending", attempts=0,
-                                  not_before=daily_hold(ch, push_at(report.finished_at or now), reports_on),
-                                  created_at=now))
+                                  not_before=due, created_at=now))
         added += 1
     db.commit()
     return added
@@ -360,15 +374,28 @@ def _send_trades(db: Session, md: MarketData, settings: Settings, group_id: str,
     _apply(db, ch, [r for r, _ in ok], _deliver(db, ch, text, settings), now)
 
 
-def _send_digest(db: Session, settings: Settings, row: NotificationOutbox, now: datetime) -> None:
+def _send_digest(db: Session, settings: Settings, row: NotificationOutbox, now: datetime,
+                 cache: dict | None = None) -> None:
+    """The weekly digest alone (no 市場週報 push took it in): from Sunday 18:00 — held to 21:30 only while that
+    Sunday's 市場週報 push may still come for this channel (``push.market_coming``; ``cache``: per run)."""
+    from forliosa.reports.push import digest_due, market_coming, weekly_of
+
     ch = db.get(GroupChannel, (row.group_id, row.channel_kind))
     group = db.get(Group, row.group_id)
     digest = db.get(GroupDigest, row.digest_id) if row.digest_id else None
-    if group is None or ch is None or not _channel_ok(ch, "notify_digest"):
+    if group is None or ch is None or not _channel_ok(ch, "notify_weekly"):
         _cancel([row], "channel_off")
         return
     if digest is None or digest.status != "ready":
         _cancel([row], "not_ready")
+        return
+    finished = digest.finished_at or row.created_at
+    due = digest_due(digest.week_end, finished, False)
+    if now >= due:  # asked at the slot, so the answer is about the edition as it is then
+        due = digest_due(digest.week_end, finished,
+                         market_coming(db, "weekly", weekly_of(digest.week_end), ch, settings, cache))
+    if now < due:  # queued under the old times (Saturday), or the 市場週報 push may still take it in
+        row.not_before = due
         return
     members = sharing.members_of(db, group.id)
     if not any(m.shares("push") for m in members):
@@ -380,15 +407,28 @@ def _send_digest(db: Session, settings: Settings, row: NotificationOutbox, now: 
     _apply(db, ch, [row], _deliver(db, ch, text, settings), now)
 
 
-def _send_daily(db: Session, settings: Settings, row: NotificationOutbox, now: datetime) -> None:
+def _send_daily(db: Session, settings: Settings, row: NotificationOutbox, now: datetime,
+                cache: dict | None = None) -> None:
+    """「昨日你的群組」 alone (no 盤前重點 push took it in): from 07:30 of the next trading day — held to 08:20 only
+    while that day's 盤前重點 push may still come for this channel (``push.market_coming``; ``cache``: per run)."""
+    from forliosa.reports.push import daily_due, market_coming, premarket_of
+
     ch = db.get(GroupChannel, (row.group_id, row.channel_kind))
     group = db.get(Group, row.group_id)
     report = db.get(GroupDailyReport, row.daily_report_id) if row.daily_report_id else None
-    if group is None or ch is None or not _channel_ok(ch, "notify_daily"):
+    if group is None or ch is None or not _channel_ok(ch, "notify_premarket"):
         _cancel([row], "channel_off")
         return
     if report is None or report.status not in ("ready", "failed"):
         _cancel([row], "not_ready")
+        return
+    finished = report.finished_at or row.created_at
+    due = daily_due(report.trading_day, finished, False)
+    if now >= due:  # asked at the slot, so the answer is about the edition as it is then
+        due = daily_due(report.trading_day, finished,
+                        market_coming(db, "premarket", premarket_of(report.trading_day), ch, settings, cache))
+    if now < due:  # queued under the old times (the same evening), or the 盤前重點 push may still take it in
+        row.not_before = due
         return
     members = sharing.members_of(db, group.id)
     facts = report.facts or {}
@@ -441,12 +481,13 @@ def send_due(db: Session, md: MarketData, settings: Settings | None = None, now:
     for (group_id, kind, *_), items in trades.items():
         if all(r.status == "pending" for r, _ in items):  # a channel disabled meanwhile cancelled its rows
             _send_trades(db, md, settings, group_id, kind, items, now)
+    editions: dict = {}  # each market edition's verdict, asked once per run
     for r in digests:  # a merged one is already marked sent (the same object)
         if r.status == "pending":
-            _send_digest(db, settings, r, now)
+            _send_digest(db, settings, r, now, editions)
     for r in dailies:
         if r.status == "pending":
-            _send_daily(db, settings, r, now)
+            _send_daily(db, settings, r, now, editions)
     db.commit()
     return len(rows)
 

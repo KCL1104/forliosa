@@ -290,3 +290,62 @@ def test_market_events_type_date_index_both_ways(tmp_path):
         assert "ix_market_events_type_date" not in {i["name"] for i in inspect(engine).get_indexes("market_events")}
     finally:
         engine.dispose()
+
+
+def test_channel_four_switches_keep_every_opt_in_both_ways(tmp_path):
+    """0027_channel_four_switches (頻道只留四個開關, 2026-11-18): ``notify_premarket := notify_premarket OR
+    notify_daily`` and ``notify_weekly := notify_weekly OR notify_digest`` for every mix of old values; the old
+    columns stay as they were (deprecated, no longer read). The downgrade keeps every row and changes nothing that
+    was not touched; a 週報 / 盤前 turned off after the upgrade lowers the old column (old AND new), so the old code
+    does not send the group digest / daily report there again — and nothing is ever turned on."""
+    from itertools import product
+
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'switches.db'}"
+    command.upgrade(_config(url), "0026_mevents_type_date")
+    engine = make_engine(url)
+    cols = ("notify_premarket", "notify_daily", "notify_weekly", "notify_digest")
+    mixes = list(product((False, True), repeat=4))  # every combination of the four old values
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "users", {"id": "usr_1", "email": "a@b.c"})
+            for i, values in enumerate(mixes):
+                _insert(conn, "groups", {"id": f"grp_{i}", "name": f"群組 {i}"})
+                for kind in ("discord", "telegram"):
+                    _insert(conn, "group_channels", {"group_id": f"grp_{i}", "kind": kind, "status": "active",
+                                                     "notify_trades": True, "notify_close": i % 2 == 0,
+                                                     **dict(zip(cols, values, strict=True))})
+        command.upgrade(_config(url), "0027_channel_four_switches")
+        select_all = f"SELECT group_id, kind, notify_close, {', '.join(cols)} FROM group_channels"
+        with engine.begin() as conn:
+            got = {(r[0], r[1]): tuple(bool(v) for v in r[2:]) for r in conn.execute(text(select_all))}
+        assert len(got) == 2 * len(mixes)
+        for i, (pre, daily, weekly, digest) in enumerate(mixes):
+            for kind in ("discord", "telegram"):
+                assert got[(f"grp_{i}", kind)] == (i % 2 == 0, pre or daily, daily, weekly or digest, digest)
+        command.downgrade(_config(url), "0026_mevents_type_date")
+        assert set(cols) <= {c["name"] for c in inspect(engine).get_columns("group_channels")}
+        with engine.begin() as conn:
+            after = {(r[0], r[1]): tuple(bool(v) for v in r[2:]) for r in conn.execute(text(select_all))}
+        assert after == got  # untouched rows: the merged switches and the old columns stay as they are
+        command.upgrade(_config(url), "head")  # and up again
+        with engine.begin() as conn:
+            again = {(r[0], r[1]): tuple(bool(v) for v in r[2:]) for r in conn.execute(text(select_all))}
+        assert again == got
+        # after the upgrade the owner turns 週報 off on every discord channel and 盤前 off on every telegram one
+        with engine.begin() as conn:
+            conn.execute(text("UPDATE group_channels SET notify_weekly = :f WHERE kind = 'discord'"), {"f": False})
+            conn.execute(text("UPDATE group_channels SET notify_premarket = :f WHERE kind = 'telegram'"), {"f": False})
+        command.downgrade(_config(url), "0026_mevents_type_date")
+        with engine.begin() as conn:
+            low = {(r[0], r[1]): tuple(bool(v) for v in r[2:]) for r in conn.execute(text(select_all))}
+        assert len(low) == 2 * len(mixes)
+        for i, (pre, daily, weekly, digest) in enumerate(mixes):
+            close = i % 2 == 0
+            # discord: 週報 off → notify_digest off; 盤前 (merged) and notify_daily as they were
+            assert low[(f"grp_{i}", "discord")] == (close, pre or daily, daily, False, False)
+            # telegram: 盤前 off → notify_daily off; 週報 (merged) and notify_digest as they were
+            assert low[(f"grp_{i}", "telegram")] == (close, False, False, weekly or digest, digest)
+    finally:
+        engine.dispose()

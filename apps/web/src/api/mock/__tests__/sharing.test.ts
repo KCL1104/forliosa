@@ -163,7 +163,7 @@ describe("群組：存在與權限", () => {
   })
   it("Discord webhook：主機與路徑不對是 422 validation_error；測試訊息失敗是 422 webhook_failed", async () => {
     const api = fresh()
-    const put = (url: string) => api.putDiscord("grp_family", { webhook_url: url, notify_trades: true, notify_digest: true })
+    const put = (url: string) => api.putDiscord("grp_family", { webhook_url: url, notify_trades: true, notify_weekly: true })
     expect(await codeOf(put("https://evil.example.com/api/webhooks/1/abc"))).toBe("422 validation_error")
     expect(await codeOf(put("https://discord.com:8443/api/webhooks/1/abc"))).toBe("422 validation_error")
     expect(await codeOf(put("https://discord.com/api/webhooks/1/fail-token"))).toBe("422 webhook_failed")

@@ -1,8 +1,9 @@
 """群組 AI 日報 (群組加值包, 產品負責人 2026-11-16): boosted groups only; facts only from what members share (stored by
 user, filtered on read); an anonymous prompt with server-computed numbers; answers that name, advise, predict, explain
 or invent numbers are rewritten once, then dropped; the paragraph is withdrawn when a contributor stops sharing; the
-report waits for the day's closes (with a cut-off); pushes go out at once or at 07:30, with only pushing members; the
-model call is charged to nobody. The Messages API is faked behind the real SDK (no network)."""
+report waits for the day's closes (with a cut-off); pushes go out with the channel's 盤前 at 07:30 of the next trading
+day (2026-11-18), with only pushing members; the model call is charged to nobody. The Messages API is faked behind the
+real SDK (no network)."""
 
 from __future__ import annotations
 
@@ -23,7 +24,7 @@ from forliosa.config import get_settings
 from forliosa.db import session_factory
 from forliosa.models import AiUsage, DatasetStatus, GroupDailyReport, GroupPass, NotificationOutbox, Transaction
 from forliosa.services import group_daily, notifications, sharing
-from forliosa.timeutil import TAIPEI, last_tw_trading_day, market_close_dt, now_utc
+from forliosa.timeutil import TAIPEI, last_tw_trading_day, market_close_dt, next_tw_trading_day, now_utc
 from tests.api.m5 import (
     API,
     SHARE_ALL,
@@ -416,13 +417,17 @@ def test_closes_in_means_written_at_once(family, market, day):
     assert run(market, evening(day, time(23, 35))).created == 1
 
 
-def test_push_at_quiet_hours():
-    d = date(2026, 11, 16)
-    assert group_daily.push_at(evening(d, time(22, 59))) == evening(d, time(22, 59))
-    assert group_daily.push_at(evening(d, time(23, 0))) == datetime.combine(d + timedelta(days=1), time(7, 30), TAIPEI)
-    assert group_daily.push_at(evening(d, time(3, 10))) == evening(d, time(7, 30))
-    assert group_daily.push_at(evening(d, time(7, 30))) == evening(d, time(7, 30))
-    assert group_daily.push_at(evening(d, time(14, 5))) == evening(d, time(14, 5))
+def test_pushed_with_the_next_premarket():
+    """2026-11-18: no quiet hours any more — a session's report goes with 盤前, 07:30 of the next trading day."""
+    from forliosa.reports.push import daily_due, daily_slot
+
+    mon, fri = date(2026, 11, 16), date(2026, 11, 20)
+    assert daily_slot(mon) == datetime.combine(date(2026, 11, 17), time(7, 30), TAIPEI)
+    assert daily_slot(fri) == datetime.combine(date(2026, 11, 23), time(7, 30), TAIPEI)  # Friday's: on Monday
+    assert daily_due(mon, evening(mon, time(19, 0)), False) == daily_slot(mon)
+    assert daily_due(mon, evening(mon, time(23, 40)), False) == daily_slot(mon)
+    late = datetime.combine(date(2026, 11, 17), time(7, 50), TAIPEI)
+    assert daily_due(mon, late, False) == late  # finished after its slot: at once
 
 
 # -- expiry and retention ----------------------------------------------------------------------------------------------
@@ -450,14 +455,15 @@ def test_retention_after_30_days(family, market, day):
 
 # -- push --------------------------------------------------------------------------------------------------------------
 def _channel(family, daily: bool = True) -> PushFake:
+    """The boosted group's Discord channel; ``daily``: 盤前 on (it carries 「昨日你的群組」; off by default)."""
     fake = PushFake().install()
     g, a = family["g"], family["a"]
     assert a.put(f"{API}/groups/{g['id']}/channels/discord", json={"webhook_url": WEBHOOK}).status_code == 200
     ch = a.get(f"{API}/groups/{g['id']}/channels").json()["discord"]
-    assert ch["notify_daily"] is False  # off by default
+    assert ch["notify_premarket"] is False  # off by default
     if daily:
-        r = a.patch(f"{API}/groups/{g['id']}/channels/discord", json={"notify_daily": True})
-        assert r.status_code == 200 and r.json()["discord"]["notify_daily"] is True
+        r = a.patch(f"{API}/groups/{g['id']}/channels/discord", json={"notify_premarket": True})
+        assert r.status_code == 200 and r.json()["discord"]["notify_premarket"] is True
     return fake
 
 
@@ -466,13 +472,14 @@ def test_finished_at_night_is_pushed_at_0730_with_only_pushing_members(family, m
     trade(family["b"], family["acc"]["b"]["id"], "2303", "buy", day, 1000, 50)  # after the channel was set up
     sent_before = len(fake.discord)
     run(market, evening(day, time(23, 40)))
+    nxt = next_tw_trading_day(day + timedelta(days=1))
     with session_factory()() as db:
         [row] = db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "daily")).all()
-        assert row.not_before == datetime.combine(day + timedelta(days=1), time(7, 30), TAIPEI)
-        notifications.send_due(db, market, now=datetime.combine(day + timedelta(days=1), time(7, 0), TAIPEI))
+        assert row.not_before == datetime.combine(nxt, time(7, 30), TAIPEI)  # reports not public: alone at 07:30
+        notifications.send_due(db, market, now=datetime.combine(nxt, time(7, 0), TAIPEI))
     assert len(fake.discord) == sent_before  # not yet
     with session_factory()() as db:
-        notifications.send_due(db, market, now=datetime.combine(day + timedelta(days=1), time(7, 31), TAIPEI))
+        notifications.send_due(db, market, now=datetime.combine(nxt, time(7, 31), TAIPEI))
     text = fake.discord[-1].body["content"]
     assert len(fake.discord) == sent_before + 1
     assert text.startswith("Forliosa 群組「大學同學」日報") and f"{day.month}/{day.day}（" in text
@@ -487,21 +494,25 @@ def test_finished_at_night_is_pushed_at_0730_with_only_pushing_members(family, m
     assert "那天的買賣：買進 聯電" in text and "鴻海" not in text and "聯發科" not in text
 
 
-def test_finished_in_the_evening_is_pushed_at_once_and_not_when_off(family, market, day):
+def test_nothing_is_queued_with_premarket_off(family, market, day):
     _channel(family, daily=False)
     run(market, evening(day, time(19, 0)))
     with session_factory()() as db:
         assert db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "daily")).all() == []
 
 
-def test_finished_in_the_evening_is_due_at_once(family, market, day):
+def test_finished_in_the_evening_waits_for_the_next_premarket(family, market, day):
+    """2026-11-18: not the same evening any more — with 盤前 at 07:30 of the next trading day."""
     fake = _channel(family)
     n = len(fake.discord)
     run(market, evening(day, time(19, 0)))
+    nxt = next_tw_trading_day(day + timedelta(days=1))
     with session_factory()() as db:
         notifications.send_due(db, market, now=evening(day, time(19, 1)))
+        assert len(fake.discord) == n
+        notifications.send_due(db, market, now=datetime.combine(nxt, time(7, 30), TAIPEI))
     text = fake.discord[-1].body["content"]
-    assert len(fake.discord) == n + 1 and "日報" in text and "今日報酬：" in text  # sent the same evening
+    assert len(fake.discord) == n + 1 and "日報" in text and "當日報酬：" in text  # the morning after
 
 
 def test_the_daily_job_is_scheduled(monkeypatch):

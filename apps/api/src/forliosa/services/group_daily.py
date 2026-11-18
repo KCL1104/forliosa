@@ -1,6 +1,6 @@
 """群組 AI 日報 (產品負責人 2026-11-16, the group subscription memo, decisions 4–6 and 9): a short report of each
 **boosted** group's trading day (``services.group_plans``), on the group page (``GET /groups/{id}/daily-reports``) and,
-when the owner turns 「日報」 on for a channel, pushed there.
+when the owner turns 「盤前」 on for a channel, pushed there as 「昨日你的群組」 (2026-11-18: no 「日報」 switch).
 
 * **Inputs**: only what members already share with the group, the same rules as the weekly digest
   (``sharing.digest_day_facts``): the day return (the leaderboard's 今日) of members who share ``returns``, the symbols
@@ -28,8 +28,9 @@ when the owner turns 「日報」 on for a channel, pushed there.
   official file is late (with a note), no 加權報酬指數 comparison while TWSE's index file is missing. The worker looks
   every 10 minutes (``Worker.group_daily``); one report per group and day, and per boost and day (a boost moved to
   another group after its report was written does not write a second one that day).
-* **Push**: channels with ``notify_daily`` (default off). A report finished between 23:00 and 07:30 is sent at 07:30
-  (:func:`push_at`); only members who push contribute to the pushed text.
+* **Push**: channels with ``notify_premarket`` (盤前, default off; 產品負責人 2026-11-18). The report of session D goes
+  out at 07:30 of the next trading day, inside the 盤前重點 message when there is one, else alone
+  (``reports.push.daily_due``); only members who push contribute to the pushed text.
 * **When a boost ends** no new report is written; earlier ones stay readable until they are 30 days old.
 """
 
@@ -70,7 +71,6 @@ DIGEST_MODEL_FEATURE = "group_digest"  # the same model as the weekly digest (AI
 MIN_RETURN_SHARERS = 2
 MAX_AGE_DAYS = 4  # a session older than this is not reported any more (e.g. after a long outage)
 CUTOFF = time(6, 30)  # the morning after the session: write with whatever closes are in (before the 07:30 push)
-QUIET_FROM, QUIET_UNTIL = time(23, 0), time(7, 30)
 RETENTION_DAYS = 30
 MAX_ATTEMPTS = 3  # model calls that failed on a key, a connection or a busy pool before the report keeps facts only
 MAX_TOKENS = 1500
@@ -154,16 +154,6 @@ def closes_ready(db: Session, day: date, now: datetime) -> tuple[bool, list[str]
     if (index is None or index < day) and not late:
         return False, []
     return True, notes
-
-
-def push_at(finished: datetime) -> datetime:
-    """When a report finished at ``finished`` is pushed: at once, or 07:30 when it finished between 23:00 and 07:30."""
-    t = finished.astimezone(TAIPEI)
-    if t.time() >= QUIET_FROM:
-        return datetime.combine(t.date() + timedelta(days=1), QUIET_UNTIL, TAIPEI)
-    if t.time() < QUIET_UNTIL:
-        return datetime.combine(t.date(), QUIET_UNTIL, TAIPEI)
-    return finished
 
 
 # -- the model's input: labels and numbers only ----------------------------------------------------------------------

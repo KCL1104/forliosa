@@ -936,16 +936,16 @@
 | DELETE | `/groups/{id}/comments/{comment_id}` | 作者或管理員 | 刪除留言 |
 | PUT | `/groups/{id}/reactions` | 成員 | `{"target", "emoji"}` 加表情（重複呼叫不重複計） |
 | DELETE | `/groups/{id}/reactions?target=&emoji=` | 成員 | 收回自己的表情 |
-| GET | `/groups/{id}/digests?limit=8&cursor=` | 成員 | 群組 AI 週報，新到舊（`limit` 1–52），`{"items": Digest[], "next_cursor"}` |
+| GET | `/groups/{id}/digests?limit=8&cursor=` | 成員 | 群組 AI 週報，新到舊（`limit` 1–52），`{"items": Digest[], "next_cursor"}`；一週的週報從那之後的週日 18:00 起才列出（2026-11-18） |
 | GET | `/groups/{id}/daily-reports?limit=10&cursor=` | 成員 | 群組 AI 日報，新到舊（`limit` 1–31），`{"items": DailyReport[], "next_cursor"}`；加值結束後以前的照樣列出（見群組加值包） |
 | PUT | `/groups/{id}/plan` | owner | `{"pass_id"}` 把自己的一個群組加值包用在這個群組 → `Group`；不是 owner 403；不是自己的加值包 404；已到期 409 `pass_expired`；用在另一個群組而自己已不是那個群組的 owner 409 `pass_in_use`（同時擁有兩個群組時可以移過來） |
 | GET | `/me/group-passes` | 登入 | 我（付款人）拿到的群組加值包：`[{"id", "until", "active", "attached", "group": {"id", "name", "my_role"} \| null}]`（`group` 只在我還是成員時有） |
 | GET | `/groups/{id}/channels` | 成員 | `Channels`（`webhook_hint` 只有 owner 看得到，其他人為 `null`） |
-| PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades"?, "notify_digest"?}`（兩個開關預設 `true`）→ `Channels`；儲存前送一則測試訊息，失敗 422 `webhook_failed`；網址格式不符 422 `validation_error`（錯誤訊息不含網址）；同一人或同一群組 10 分鐘內超過 5 次 → 429 `rate_limited`（不送出）；換成另一個 webhook 時，其他成員的 `push` 自動關閉（見推播） |
-| PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_digest"?, "notify_daily"?}` → `Channels`；還沒設定 404。`notify_daily`（群組 AI 日報）預設關；`PUT` 也可以帶，省略＝不變（新的目的地是關的） |
+| PUT | `/groups/{id}/channels/discord` | owner | `{"webhook_url", "notify_trades"?, "notify_premarket"?, "notify_close"?, "notify_weekly"?}`（四個開關，見「群組頻道的四個開關」；`notify_trades` 預設 `true`，其他省略＝不變，新的目的地是 盤前、盤後 關、週報 開）→ `Channels`；儲存前送一則測試訊息，失敗 422 `webhook_failed`；網址格式不符 422 `validation_error`（錯誤訊息不含網址）；同一人或同一群組 10 分鐘內超過 5 次 → 429 `rate_limited`（不送出）；換成另一個 webhook 時，其他成員的 `push` 自動關閉（見推播） |
+| PATCH | `/groups/{id}/channels/discord` | owner | `{"notify_trades"?, "notify_premarket"?, "notify_close"?, "notify_weekly"?}` → `Channels`；還沒設定 404。舊版前端的 `notify_digest`、`notify_daily` 暫時照收，寫成 `notify_weekly`、`notify_premarket`（同時給了新的以新的為準；2026-11-18） |
 | DELETE | `/groups/{id}/channels/discord` | owner | 解除（204；還沒送出的推播取消；之後再設定算新的目的地） |
 | POST | `/groups/{id}/channels/telegram/link` | owner | → `{"code", "bot_username", "expires_at"}`：把 bot 加進 Telegram 群組，在群組裡傳 `/link <code>`（10 分鐘內、一次性；再產生一組會讓舊的失效）；伺服器沒有 bot 時 409 `telegram_unavailable` |
-| PATCH | `/groups/{id}/channels/telegram` | owner | `{"notify_trades"?, "notify_digest"?, "notify_daily"?}` → `Channels`；還沒連結 404 |
+| PATCH | `/groups/{id}/channels/telegram` | owner | 同 Discord 的 PATCH → `Channels`；還沒連結 404 |
 | DELETE | `/groups/{id}/channels/telegram` | owner | 解除（204） |
 
 ```json
@@ -1064,10 +1064,14 @@
 // Channels
 {
   "discord": {"configured": true, "status": "active", "disabled_reason": null, "webhook_hint": "…/a1b2",
-              "notify_trades": true, "notify_digest": true},
+              "notify_trades": true, "notify_premarket": false, "notify_close": false, "notify_weekly": true,
+              "notify_digest": true, "notify_daily": false},   // 後兩個已不使用：和 notify_weekly、notify_premarket 相同（給舊版前端）
   "telegram": {"configured": false, "status": null, "disabled_reason": null, "chat_title": null,
-               "notify_trades": true, "notify_digest": true},
-  "telegram_available": true            // 伺服器有設定 bot 時才為 true
+               "notify_trades": true, "notify_premarket": false, "notify_close": false, "notify_weekly": true,
+               "notify_digest": true, "notify_daily": false},
+  "telegram_available": true,           // 伺服器有設定 bot 時才為 true
+  "market_reports_available": false,    // 見「群組頻道的四個開關」
+  "market_reports_trial": false
 }
 // disabled_reason："webhook_invalid"（Discord 回 401／404）、"webhook_unreadable"（SESSION_SECRET 換過，解不開）、
 //                  "bot_removed"（bot 被移出 Telegram 群組）、"chat_not_found"；owner 重新設定即恢復
@@ -1089,8 +1093,9 @@
 **群組 AI 週報**
 
 - 一週 = 台北的週一到週五；`week_return_pct` = 週一前最後收盤到週五（或之前最後一個交易日）收盤。沒有交易日的週、開了 `returns` 的成員少於 2 位
-  的群組不產生。worker 每週六 20:00（台北）以 Message Batches API 送出（週六晚上沒跑到時，週日補做），結果回來（`ready`）後才推播；
-  Batches 不能用或單筆失敗時改用一般呼叫。
+  的群組不產生。worker 每週六 20:00（台北）以 Message Batches API 送出（週六晚上沒跑到時，週日補做）；Batches 不能用或單筆失敗時改用一般呼叫。
+- **週日 18:00 出來**（產品負責人 2026-11-18）：週六晚上寫好，但群組頁（`GET /groups/{id}/digests`、`GroupSummary.latest_digest_at`、留言與表情）
+  和頻道的「週報」都從那一週之後的週日 18:00 起（`digests.publish_at`）；頻道的推播和市場週報併成一則，見「群組頻道的四個開關」。
 - `facts` 由伺服器從分享投影計算，以 `user_id` 儲存，讀取時依目前的成員身分與開關過濾（關掉或離開的人從過去的週報消失）。
   AI 只拿到匿名代號（成員 A、B…，每份週報隨機排序）與數字，`summary` 只描述群組整體；顯示名稱、群組名稱不進 prompt。
   回答裡出現成員代號或目標價的不採用（`failed`）。週報不計入成員的 AI 額度。
@@ -1102,7 +1107,7 @@
 **群組加值包與群組 AI 日報**（產品負責人 2026-11-16，第一階段：還沒有付款，站方手動開通試用）
 
 - `Group` 與 `GroupSummary` 多 `plan: {"tier": "free" | "boosted", "until": "YYYY-MM-DD" | null, "member_cap": 5 | 50, "grandfathered": bool,
-  "daily_report": bool}`（每位成員都看得到）；`GroupSummary` 另多 `latest_daily_at`。`Channels` 的兩種頻道都多 `notify_daily`（預設 `false`）。
+  "daily_report": bool}`（每位成員都看得到）；`GroupSummary` 另多 `latest_daily_at`。（`Channels` 的 `notify_daily` 2026-11-18 起不使用：日報跟著「盤前」送。）
 - **加值包**：站方用付款人的 email 開通（`/admin/group-passes`，見會員方案），到 `until` 那一天（台北）為止；付款人（群組的 owner）在群組設定用
   `PUT /groups/{id}/plan` 選要用在哪個群組，或站方開通時直接給 `group_id`。群組轉給別人、付款人刪除帳號，加值照樣用到到期；群組刪除時加值回到
   付款人手上（沒有用在任何群組）。站方只看得到付款人的 email、日期、備註與群組編號，看不到群組名稱、成員與內容。
@@ -1126,7 +1131,8 @@
     所有群組加起來每月的上限。收回規則和週報一樣：寫進段落的成員有人離開或關掉當時分享的項目，或段落算進去的交易有一筆刪掉、改掉了，
     `summary` 變空字串、`notes` 加一則說明。
   - `status`：`pending`（AI 段落還在寫）｜`ready`（寫好了；`summary` 可能是空的，`notes` 說為什麼）｜`failed`（只有數字）。
-  - **推播**：頻道的 `notify_daily` 打開才送（owner 決定，預設關）；23:00–07:30 寫好的等到 07:30 再送。只有開了 `push` 的成員的數字會送出；
+  - **推播**：跟著頻道的「盤前」（`notify_premarket`，owner 決定，預設關；2026-11-18 起沒有另外的「日報」開關）：那個交易日的日報在下一個交易日 07:30
+    和盤前重點併成一則送（「昨日你的群組」）；報告沒有對全站公開、也沒有開放盲測時 07:30 單獨送（見「群組頻道的四個開關」）。只有開了 `push` 的成員的數字會送出；
     買賣和交易推播同一條規則：只送頻道設定、他打開 `push`／`trades` 以後建立的，送出前刪掉的不送。AI 段落只在寫進段落的每一位都開著 `push`、
     段落算進去的交易也都會送出時才附上。不是在那個交易日當天送出的（大多是隔天 07:30）寫「當日報酬」「那天的買賣」。連結和週報一樣只到
     `/groups`（推播訊息不含群組 id）。
@@ -1148,7 +1154,7 @@
 
 - 只推播 `push` 為 true 的成員所開放的內容：交易動態（`notify_trades`；`trades` 開啟、交易日在 3 個日曆日內（今天與前兩天，台北）、
   建立時間晚於頻道設定與他打開 `push`／`trades` 的時間；建立 15 分鐘後才送，期間刪除或關閉就不送；送出後的修改不重送；有開 `trade_prices`
-  才附價格；同一則動態裡同時到期的交易合併成一則訊息）與週報（`notify_digest`；只含 `push` 為 true 的成員的數字；AI 摘要只在寫進摘要的
+  才附價格；同一則動態裡同時到期的交易合併成一則訊息）與週報（頻道的「週報」`notify_weekly`，週日 18:00；只含 `push` 為 true 的成員的數字；AI 摘要只在寫進摘要的
   每一位成員都還開著 `push` 時才附上）。訊息只有顯示名稱、買賣、商品、日期、筆數（與價格），附群組頁連結但不含群組 id。
 - **每一則推播的最後一行**（交易、週報、日報，以及設定頻道時的測試訊息與 Telegram 的「已連結」回覆）是全站的免責那一句，只出現一次
   （2026-11-17，產品負責人）：「Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。」。週報與日報不管有沒有附 AI 摘要都有這一行。
@@ -1349,7 +1355,7 @@
 
 - 都要登入（401）。報告沒有個人資料：授權查看別人資產（`X-Forliosa-View-As`）時，讀取照常以登入者本人回應；`POST /market/reports/seen` 是寫入，回 403 `read_only`。
 - `visibility="admin"` 的報告（盲測、試跑模式、CLI 回補）只有站方管理員（`ADMIN_EMAILS`）看得到，其他人一律 404「找不到這份報告」。
-- 站方把模式切到「對全站公開」（`public`）以後新建的報告才是 `public`。試跑期間一般使用者 `status.available=false`、市場頁不出現「報告」分頁、群組頻道看不到三個開關、不推播。
+- 站方把模式切到「對全站公開」（`public`）以後新建的報告才是 `public`。試跑期間一般使用者 `status.available=false`、市場頁不出現「報告」分頁、不推播市場報告（頻道的盤前、週報只送群組的部分，見「群組頻道的四個開關」）。
 - **盲測開給所有登入的人**（產品負責人 2026-11-17：「我讓我的朋友們一起選」）：伺服器 `MREPORT_TRIAL_AUDIENCE=all`（預設 `admins`），或管理後台「盲測對象」切成「所有登入的人」
   （存在 `market_report_config.trial_audience`，`null`＝照伺服器的值）。這時**只有盲測的報告**（`trial`）對所有登入的人打開：清單、`status.latest`、未讀都算進去，
   `ReportSummary.trial`、`MarketReport.trial` 是 `true`；A／B／C 從下面三個盲測端點讀、投票。試跑模式其他只給管理員的報告（盲測做完以後、回補）照舊只有管理員。
@@ -1468,11 +1474,33 @@
 
 驗證失敗是 422，`error.details.field` 寫是哪個欄位。
 
-### 群組頻道的三個開關
+### 群組頻道的四個開關
 
-`GET/PUT/PATCH /groups/{id}/channels…` 的 Discord、Telegram 各多 `notify_premarket`（預設關）、`notify_close`（預設關）、`notify_weekly`（預設開，既有頻道也是開）；
-`Channels` 多 `market_reports_available`（報告對全站公開時才 true，前端才顯示三個開關）與 `market_reports_trial`（盲測開給所有人、模式還是試跑時 true：一樣顯示三個開關，
-推的是投票連結）。只有群主能改。所有群組都能開（不分有沒有加值）。
+**產品負責人 2026-11-18（選 A）**：原本「週報」（群組週報）和「市場週報」、「日報」（群組日報）和「盤前重點」是兩個一樣的開關。每個頻道（Discord、Telegram）
+只留四個，所有群組都一樣（不分有沒有加值），只有群主能改：
+
+| 開關 | 欄位 | 預設 | 送什麼 |
+|---|---|---|---|
+| 交易動態 | `notify_trades` | 開 | 成員的買賣，交易建立 15 分鐘後（不變） |
+| 盤前（交易日 7:30） | `notify_premarket` | 關 | 盤前重點＋「昨日你的群組」（前一個交易日的群組 AI 日報，加值群組才有），**一則** |
+| 盤後（交易日 16:00） | `notify_close` | 關 | 盤後重點 |
+| 週報（週日 18:00） | `notify_weekly` | 開 | 市場週報＋「你的群組上週」（這週的群組週報），**一則** |
+
+- 那一天（那個週日）沒有市場報告的推播時——報告關著、暫停、試跑只給管理員，或盲測開給所有人但那一份不是盲測版（盲測版只有前幾個交易日與第一個週日）——
+  開關照樣在同一個時間送群組的部分：盤前 07:30 只送「昨日你的群組」，週報週日 18:00 只送群組週報；盤後沒有東西可送。沒有群組日報（不是加值群組、沒有人開推播）時，
+  盤前只有盤前重點。非交易日沒有盤前、盤後；週報每個週日都有。
+- 要不要等是到了 07:30／18:00 時看**那一份報告**：還沒推、之後會推（公開的那一份，或盲測版）時，群組的部分延到 08:20（盤前）／21:30（週報）等市場報告把它併進去；
+  那一份已經推過、或不會推時馬上送；一直沒推（跳過、worker 停了）時在 08:20／21:30 自己送。換 webhook、重新連結、頻道被停用不會取消等著的群組部分（送出前會重新檢查）。
+- 不重複：群組的部分每個頻道一列 outbox（`daily:{report}:{channel}`／`digest:{digest}:{channel}`）。不管是併進市場報告（`last_error="merged"`；還沒排進去的會補一列已送）
+  還是自己送，送過就不再送；市場報告不併已經送過的（例如改版前前一晚已經自己送出的日報、週六已經送出的週報）。改版前排好的列到時間時照新的時間重排。
+- `GET/PUT/PATCH /groups/{id}/channels…`：四個欄位如上；`notify_digest`、`notify_daily` 已不使用——寫入時當作 `notify_weekly`、`notify_premarket`（同時給了新的以新的為準；
+  只有已經設定好的頻道「換一個 webhook」的 `PUT` 不理會它們，因為舊版表單送的是表單的預設、不是頻道的值），
+  回應裡還有，值和 `notify_weekly`、`notify_premarket` 相同（讓前後端哪一個先部署都不會壞；之後移除）。資料庫的這兩欄保留但不讀，0027 把它們併進新的開關
+  （`notify_premarket := notify_premarket OR notify_daily`、`notify_weekly := notify_weekly OR notify_digest`，誰開過都保留）；之後每次寫開關時、以及 downgrade 時，
+  舊的兩欄改成 `舊 AND 新`（只會關、不會開），程式退回舊版也不會往已經關掉的頻道送群組的日報、週報。
+- `Channels.market_reports_available`：報告對全站公開（盤前、盤後、週報有市場報告的部分）；`market_reports_trial`：盲測開給所有人、模式還是試跑，而且盲測版還沒跑完
+  （市場報告的部分是投票連結；跑完以後、切成公開以前是 false）。
+  兩個都是 false 時，前端在四個開關下面寫「市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。」
 
 推播只有文字與連結（不帶圖）：
 
@@ -1486,16 +1514,15 @@
 AI 整理的部分可能有錯。Forliosa 只替你整理公開資訊與你自己的紀錄，不是投資顧問，不提供投資建議；投資決定請自己判斷。
 ```
 
-- 盤前重點：有群組 AI 日報的群組（加值群組）在重點後面接「昨日你的群組」，規則和日報推播一樣（只算開了推播的成員，分享報酬率的人少於 2 位就沒有 AI 那一行）。
-  這種頻道的日報推播延到 08:20，盤前送出後標成已送（不重複）；盤前一直沒送時，日報 08:20 自己送。
-- 市場週報：頻道開了週報時，群組週報延到週日 21:30；18:00 的市場週報推播接上「你的群組上週（11/16–11/20）」，週報那一列標成已送。週報開關關著的頻道，群組週報照舊週六送。
+- 盤前：有群組 AI 日報的群組（加值群組）在重點後面接「昨日你的群組」，規則和日報推播一樣（只算開了推播的成員，分享報酬率的人少於 2 位就沒有 AI 那一行）。
+- 週報：18:00 的市場週報推播接上「你的群組上週（11/16–11/20）」。
 - 最後一行是全站的免責（`notifications.signed(…, ai=True)`；只有資料的版本只有 `disclaimer.SHORT`），只出現一次：接進來的群組日報、週報自己的最後一行拿掉。
 - 不推：更正、補表、回補的報告，以及任何個人化內容；盲測的報告只在下面的情形推。Discord 1,900 字、Telegram 4,000 字以內（含最後一行；太長時先縮群組段落，再縮重點）。
 
 **盲測開給所有人時的推播**（模式 `trial`、`MREPORT_TRIAL_AUDIENCE=all` 或後台切成所有人）：盲測的每一份推**一則**，推給那一種開關開著的頻道（同樣的 outbox、
 `dedupe_key=mreport:{report_id}:{group_id}:{channel}`，一個頻道一份只排一次）。推播時間到了以後，A／B／C 有兩個能看、而且沒有還在寫的就推；到了改推資料版的時間
 （盤前 08:15、盤後 17:30、週報 21:00）只要有兩個能看就推；不到兩個就不推。送出前再檢查一次（還是試跑、還開給所有人、頻道與開關還開著），否則 `cancelled`（`trial_closed`／`channel_off`）。
-不接群組的日報、週報（那兩種照平常自己送）。不放任何一個版本的重點：三個版本裡只引用一個（例如 A）等於先讓大家看到它，不公平；只寫資料版的規則標題與日期。
+盤前、週報的投票訊息在投票連結後面照樣接群組的部分（「昨日你的群組」／「你的群組上週」，太長時先縮它，投票連結一定在；2026-11-18 起）。不放任何一個版本的重點：三個版本裡只引用一個（例如 A）等於先讓大家看到它，不公平；只寫資料版的規則標題與日期。
 
 ```
 【盤後重點 11/16（一）】AI 依公開資料整理，報告本文人人相同，不是投資建議。

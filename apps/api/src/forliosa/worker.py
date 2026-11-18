@@ -59,10 +59,13 @@ A small asyncio scheduler (no extra dependency) runs these jobs:
   the other jobs, and a long archive run must not leave ``/link`` codes waiting until they expire.
 * ``group_digests`` — Saturday 20:00 Taipei (catch-up until Sunday ends): the weekly AI digest of every group for the
   week Monday–Friday that just ended, sent as one Message Batches request (``forliosa.services.digests``);
-  ``group_digest_poll`` (every 5 minutes) collects the results, falls back to normal calls, and queues the pushes.
+  ``group_digest_poll`` (every 5 minutes) collects the results, falls back to normal calls, and queues the pushes. The
+  digest comes out on Sunday 18:00 (2026-11-18): on the group page, and in the channels' 週報 — inside the 市場週報
+  message, or alone when there is none (``forliosa.reports.push``).
 * ``group_daily`` — every 10 minutes (off with ``GROUP_DAILY_ENABLED=false``): the 群組 AI 日報 of boosted groups
   (``forliosa.services.group_daily``) for the latest session, once both markets' official closes and TWSE's indices
-  are stored (from 06:30 the next morning with whatever is in); one per group and day, pushed at once or at 07:30.
+  are stored (from 06:30 the next morning with whatever is in); one per group and day, pushed with the channels' 盤前
+  at 07:30 of the next trading day (inside the 盤前重點 message, or alone when there is none; 2026-11-18).
 * ``sharing_retention`` — every day 04:35: finished push rows after 30 days, Telegram link codes a day after they
   expired, digests 26 weeks after their week, daily reports after 30 days.
 * ``session_purge`` — every day 04:50: deletes login sessions that have expired (``api.deps.purge_expired_sessions``).

@@ -216,13 +216,13 @@ describe("管理後台：誰參加盲測、會員與管理員的票", () => {
 })
 
 describe("群組頻道：盲測開給所有人時", () => {
-  it("有三個報告開關，說明寫投票連結", async () => {
+  it("一樣是四個開關，下面一行說投票連結（2026-11-18：盤前、週報的投票訊息後面照樣接群組的部分）", async () => {
     mount({ reports: "trial-open" })
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
-    expect(await within(discord).findByRole("switch", { name: "盤後重點（交易日 16:00）" }, T)).toBeInTheDocument()
+    expect(await within(discord).findByRole("switch", { name: "盤後（交易日 16:00）" }, T)).toBeInTheDocument()
     expect(within(discord).getByText("盲測期間每份報告推一則投票連結：三種寫法，看完選一個。")).toBeInTheDocument()
-    // 不併群組的週報：週報那一列的說明照平常寫
-    expect(within(discord).getByText("每週六晚上的群組 AI 週報。")).toBeInTheDocument()
+    expect(within(discord).getByText("市場週報，加上這週的群組週報。")).toBeInTheDocument()
+    expect(within(discord).getAllByRole("switch")).toHaveLength(4)
   })
 })

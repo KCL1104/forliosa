@@ -12,8 +12,9 @@ import { createAppRouter } from "@/router"
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
 /**
- * 群組頻道的市場報告推播（2026-11-17）：對全站公開時每個頻道多三個開關（所有群組都能開；盤前、盤後預設關，週報預設開），
- * 只有擁有者能改；試跑期間看不到。群組「報告」分頁：今天的盤前重點出來了、最新的日報是前一個交易日的，那一則就是「昨日你的群組」。
+ * 群組頻道的推播開關（2026-11-18 產品負責人選 A）：每個頻道只有四個——交易動態、盤前（盤前重點＋昨日你的群組）、盤後、
+ * 週報（市場週報＋這週的群組週報）；所有群組都一樣，只有擁有者能改。群組「報告」分頁：今天的盤前重點出來了、最新的日報是
+ * 前一個交易日的，那一則就是「昨日你的群組」。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -60,37 +61,99 @@ function renderApp(path: string) {
   return router
 }
 
-describe("頻道的三個報告開關", () => {
-  it("對全站公開：擁有者看到三個開關（盤前、盤後關，週報開）＋一行說明，改了送出；試跑期間沒有", async () => {
+const SWITCH_NAMES = ["交易動態", "盤前（交易日 7:30）", "盤後（交易日 16:00）", "週報（週日 18:00）"]
+
+/** 一個頻道裡的開關（照畫面順序）是四個開關裡的哪一個；不是四個之一的寫「?」 */
+const switchNames = (section: HTMLElement) =>
+  within(section)
+    .getAllByRole("switch")
+    .map((sw) => SWITCH_NAMES.find((name) => within(section).queryByRole("switch", { name }) === sw) ?? "?")
+
+describe("頻道的四個開關（2026-11-18 產品負責人選 A）", () => {
+  it("對全站公開：交易動態、盤前、盤後、週報四列（各一行說明），沒有重複的「日報」「市場週報」；擁有者改了送出", async () => {
     const user = userEvent.setup()
     const spies = mount({ reports: "public" })
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
-    const pre = await within(discord).findByRole("switch", { name: "盤前重點（交易日 7:30）" }, T)
+    const pre = await within(discord).findByRole("switch", { name: "盤前（交易日 7:30）" }, T)
+    expect(switchNames(discord)).toEqual(SWITCH_NAMES)
     expect(pre).toHaveAttribute("aria-checked", "false")
-    expect(within(discord).getByRole("switch", { name: "盤後重點（交易日 16:00）" })).toHaveAttribute("aria-checked", "false")
-    expect(within(discord).getByRole("switch", { name: "市場週報（週日 18:00）" })).toHaveAttribute("aria-checked", "true")
-    expect(within(discord).getByText("推到頻道的是文字與連結，報告本文人人相同。")).toBeInTheDocument()
+    expect(within(discord).getByRole("switch", { name: "交易動態" })).toHaveAttribute("aria-checked", "true")
+    expect(within(discord).getByRole("switch", { name: "盤後（交易日 16:00）" })).toHaveAttribute("aria-checked", "false")
+    expect(within(discord).getByRole("switch", { name: "週報（週日 18:00）" })).toHaveAttribute("aria-checked", "true")
+    for (const line of [
+      "成員的買賣，交易建立 15 分鐘後送出。",
+      "盤前重點，加上昨日你的群組（加值群組）。",
+      "盤後重點。",
+      "市場週報，加上這週的群組週報。",
+      "推到頻道的是文字與連結，報告本文人人相同。",
+    ]) {
+      expect(within(discord).getByText(line)).toBeInTheDocument()
+    }
+    for (const gone of ["日報", "市場週報（週日 18:00）", "盤前重點（交易日 7:30）", "週報"]) {
+      expect(within(discord).queryByRole("switch", { name: gone })).toBeNull()
+    }
     await user.click(pre)
     await waitFor(() => expect(spies.patchDiscord).toHaveBeenCalledWith("grp_family", { notify_premarket: true }), T)
-    await waitFor(() => expect(within(discord).getByRole("switch", { name: "盤前重點（交易日 7:30）" })).toHaveAttribute("aria-checked", "true"), T)
+    await waitFor(() => expect(within(discord).getByRole("switch", { name: "盤前（交易日 7:30）" })).toHaveAttribute("aria-checked", "true"), T)
   })
 
-  it("試跑期間（管理員也一樣）：沒有報告的開關", async () => {
+  it("試跑期間（只有站方管理員看得到報告）：照樣四列，說明盤前、週報先只送群組的部分", async () => {
     mount()
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
     await within(discord).findByRole("switch", { name: "交易動態" }, T)
-    expect(within(discord).queryByRole("switch", { name: /盤前重點/ })).toBeNull()
-    expect(document.querySelector("[data-report-toggles]")).toBeNull()
+    expect(switchNames(discord)).toEqual(SWITCH_NAMES)
+    expect(within(discord).getByText("市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。")).toBeInTheDocument()
+  })
+
+  it("免費群組也是同樣四列（沒有另外的「日報」）", async () => {
+    mount({ reports: "public" })
+    renderApp("/groups/grp_friends?tab=channels")
+    const telegram = (await screen.findByRole("heading", { name: "Telegram" }, T)).closest("section")!
+    await within(telegram).findByRole("switch", { name: "週報（週日 18:00）" }, T)
+    expect(switchNames(telegram)).toEqual(SWITCH_NAMES)
   })
 
   it("不是擁有者：看得到，不能改", async () => {
     mount({ reports: "public" })
     renderApp("/groups/grp_friends?tab=channels")
     const telegram = (await screen.findByRole("heading", { name: "Telegram" }, T)).closest("section")!
-    const weekly = await within(telegram).findByRole("switch", { name: "市場週報（週日 18:00）" }, T)
+    const weekly = await within(telegram).findByRole("switch", { name: "週報（週日 18:00）" }, T)
     expect(weekly).toHaveAttribute("aria-disabled", "true")
+  })
+
+  it("設定 Discord：表單也是四個開關（交易動態、週報開，盤前、盤後關），一起送出", async () => {
+    const user = userEvent.setup()
+    const spies = mount({ reports: "public" })
+    renderApp("/groups/grp_hiking?tab=channels")
+    const input = await screen.findByLabelText("Webhook 網址", undefined, T)
+    const form = input.closest("form")!
+    const labels = within(form).getAllByRole("switch").map((s) => s.closest("label")!.textContent)
+    expect(labels).toEqual(["送交易動態", "送盤前", "送盤後", "送週報"])
+    await user.click(within(form).getAllByRole("switch")[1]!)
+    await user.type(input, "https://discord.com/api/webhooks/123/abcDEF")
+    await user.click(within(form).getByRole("button", { name: "儲存並送測試訊息" }))
+    await waitFor(() => expect(spies.putDiscord).toHaveBeenCalledWith("grp_hiking", {
+      webhook_url: "https://discord.com/api/webhooks/123/abcDEF", notify_trades: true, notify_premarket: true, notify_close: false, notify_weekly: true,
+    }), T)
+  })
+})
+
+describe("換一個 webhook", () => {
+  it("表單的四個開關照現在的值（收著時改過的也算），不會把剛打開的盤前改回去", async () => {
+    const user = userEvent.setup()
+    const spies = mount({ reports: "public" })
+    renderApp("/groups/grp_family?tab=channels")
+    const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
+    await user.click(await within(discord).findByRole("switch", { name: "盤前（交易日 7:30）" }, T))
+    await waitFor(() => expect(within(discord).getByRole("switch", { name: "盤前（交易日 7:30）" })).toHaveAttribute("aria-checked", "true"), T)
+    await user.click(within(discord).getByRole("button", { name: "換一個 webhook" }))
+    const form = (await within(discord).findByLabelText("Webhook 網址", undefined, T)).closest("form")!
+    expect(within(form).getAllByRole("switch").map((s) => s.getAttribute("aria-checked"))).toEqual(["true", "true", "false", "true"])
+    await user.type(within(form).getByLabelText("Webhook 網址"), "https://discord.com/api/webhooks/123/abcDEF")
+    await user.click(within(form).getByRole("button", { name: "儲存並送測試訊息" }))
+    await waitFor(() => expect(spies.putDiscord).toHaveBeenCalledWith("grp_family", expect.objectContaining({ notify_premarket: true, notify_weekly: true })), T)
   })
 })
 
