@@ -79,7 +79,7 @@ def test_premarket_g5_stops_at_the_previous_session(later_closes, us_on, monkeyp
     md_ = FakeMd(later_closes)
     built = pack.build(later_closes, "premarket", TUE, cutoff=ts(TUE, 6, 55), now=ts(TUE, 6, 55), md_=md_)
     g5 = built.blocks["charts"]["G5"]
-    assert g5["title"] == "權值前 5 檔一個月比較（至 11/16）"
+    assert g5["title"] == "權值前 5 檔近 3 個交易日比較（至 11/16）"  # three sessions archived: not 「一個月」
     # the dry run's chart 「至 11/16」 ended on 11/17 (台積電 ▼2.03% that day)
     assert {pt["t"] for s_ in g5["series"] for pt in s_["points"]} <= {THU.isoformat(), FRI.isoformat(),
                                                                       MON.isoformat()}
@@ -127,7 +127,7 @@ def test_the_extra_g5_of_the_writer_uses_the_pack_s_data_day(later_closes, us_on
                          md=md_)
     out = pipeline._extra_charts("premarket", {"chart_of_day": {"code": "G5", "set": "losers"}}, pk, deps)
     card = out["G5:losers"]
-    assert card["title"] == "跌幅前 5 檔一個月比較（至 11/16）"
+    assert card["title"] == "跌幅前 5 檔近 3 個交易日比較（至 11/16）"
     assert max(pt["t"] for s_ in card["series"] for pt in s_["points"]) == MON.isoformat()
 
 
@@ -166,7 +166,7 @@ def test_many_limit_downs_say_they_are_counted_in_the_scope(market_db):
     day = marketcalc.load_day(market_db, "TWSE", MON, ts(MON, 15, 40))
     lists = marketcalc.rule_lists(market_db, day)
     lists.limit_down_many = 17
-    pack._close_tables(pk, day, lists, {}, MON)
+    pack._close_tables(pk, day, lists, MON, None)
     assert pk.blocks["tables"]["T2_losers"]["title"] == "範圍內跌停 17 家，其中市值最大的 5 檔（11/16）"
     assert pk.blocks["tables"]["T2_gainers"]["title"] == "漲幅前 5（11/16）"
     assert pk.blocks["numbers"][0]["note"] == pack.LIMITS_NOTE
@@ -177,8 +177,8 @@ def test_premarket_tpex_index_is_a_previous_session_number(market_db, us_on):
     built = pack.build(market_db, "premarket", TUE, cutoff=ts(TUE, 6, 55), now=ts(TUE, 7))
     otc = [f for f in built.pack["facts"] if f["metric"] in ("otc_close", "otc_pct")]
     assert otc and {f["group"] for f in otc} == {"prev_session"}
-    items = [r["cells"]["item"]["text"] for r in built.blocks["tables"]["T_evening"]["rows"]]
-    assert "櫃買指數" not in items and "上櫃漲跌家數" in items
+    evening = {f["metric"] for f in built.pack["facts"] if f["group"] == "evening"}
+    assert "otc_adv_up" in evening and not evening & {"otc_close", "otc_pct"}
     # so a title or a highlight that leads with it goes back for a revision
     out = premarket_output(built.pack)
     out["title"] = "櫃買指數 11/16 跌 6.80%，美元兌新台幣收 32.886 元"
@@ -224,7 +224,6 @@ def test_section_labels_say_data_where_the_server_s_tables_or_charts_are(market_
     # AI text under the server's chart or tables: still an AI section, labelled as data
     assert by["what_happened"]["origin"] == "ai" and by["what_happened"]["origin_label"] == "資料"
     assert by["stocks"]["origin"] == "ai" and by["stocks"]["origin_label"] == "資料"
-    assert by["chart_of_day"]["origin"] == "ai" and by["chart_of_day"]["origin_label"] == "資料"
     # AI text alone
     assert by["chips"]["origin_label"] == "AI 依資料與報導整理"
     pre = pack.build(market_db, "premarket", TUE, cutoff=ts(TUE, 6, 55), now=ts(TUE, 7))
@@ -234,7 +233,8 @@ def test_section_labels_say_data_where_the_server_s_tables_or_charts_are(market_
                           output=premarket_output(ppk), published_at=ts(TUE, 7), first_published_at=None,
                           as_of=ts(TUE, 6, 55), title_origin="ai", highlights_origin="ai")
     pby = {sec["key"]: sec for sec in ppay["sections"]}
-    assert pby["evening"]["origin"] == "ai" and pby["evening"]["origin_label"] == "資料"
+    assert pby["chips"]["origin"] == "ai" and pby["chips"]["origin_label"] == "資料"
+    assert pby["yesterday"]["origin"] == "data" and pby["yesterday"]["origin_label"] == "資料"
     assert pby["watch"]["origin_label"] == "AI 依資料與報導整理"
     # a table version keeps the label right
     again = assemble.retable(pay, "close", built.pack, built.blocks, version=2, published_at=ts(MON, 23, 46),

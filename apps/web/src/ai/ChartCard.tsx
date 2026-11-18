@@ -2,6 +2,7 @@ import { useEffect, useId, useMemo, useRef, useState } from "react"
 import "@/components/charts/series.css"
 import { ChartTooltipBox, Legend } from "@/components/charts/chart-kit"
 import { DemoTag } from "@/components/section"
+import { RangeChips } from "@/components/segmented"
 import { cn } from "@/lib/utils"
 import {
   axisTicks,
@@ -69,8 +70,18 @@ function useWidth(fallback: number): [React.RefObject<HTMLDivElement | null>, nu
  * 上下各一條格線（帳本不包卡片）；標題、圖例（兩條線以上）、圖、後端的說明與資料來源。
  * 滑過或用方向鍵看每一天的讀數；每條線的起訖另外給螢幕報讀器一句話。
  */
-export function ChartCard({ chart }: { chart: AiChart }) {
+export function ChartCard({ chart: given }: { chart: AiChart }) {
   const titleId = useId()
+  // 期間切換（市場報告 v2 的類股圖「1 日｜近 1 週｜近 1 月」）：第一組就是圖本身；其他組換掉標題（寫出這一期的起訖，
+  // 一週的漲跌不會掛在一天的日期下面）、橫條、基準線與說明。
+  // 圖下面的 `reference`（盤前的「上市普通股 上漲 234・下跌 789…」）只講那一天，換到別的期間時不放。
+  const views = given.views && given.views.length > 1 ? given.views : null
+  const [viewKey, setViewKey] = useState<string>(views?.[0]?.key ?? "")
+  const view = views?.find((v) => v.key === viewKey)
+  const chart = useMemo<AiChart>(
+    () => (view && view !== views![0] ? { ...given, title: view.title || given.title, bars: view.bars, bench: view.bench ?? null, notes: view.notes, reference: null } : given),
+    [given, view, views],
+  )
   const [wrapRef, width] = useWidth(340)
   const [active, setActive] = useState<number | null>(null)
   // `hidden` 的線（市場報告 G7 的「較前一日」）不畫，只出現在讀數
@@ -145,7 +156,17 @@ export function ChartCard({ chart }: { chart: AiChart }) {
     return (
       <figure aria-labelledby={titleId} className="mt-4 border-y border-rule py-3">
         {head}
-        <HBarsChart chart={chart} />
+        {views && (
+          <RangeChips
+            label={`${given.title}的期間`}
+            className="mt-2"
+            value={view?.key ?? views[0]!.key}
+            options={views.map((v) => ({ value: v.key, label: v.label }))}
+            onChange={setViewKey}
+          />
+        )}
+        {/* 換期間時從收合的樣子重新開始（每一期依自己的漲跌排序，展開的是另一批） */}
+        <HBarsChart key={view?.key ?? "bars"} chart={chart} />
         {note}
       </figure>
     )

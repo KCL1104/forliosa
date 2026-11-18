@@ -49,10 +49,10 @@ def test_known_chinese_names_map_to_the_stored_outlet_names():
     assert not validate._same_outlet("彭博", "Reuters")
 
 
-def test_the_evening_table_shows_the_usd_twd_change(market_db, us_on):
+def test_the_usd_twd_change_is_in_the_number_strip_only(market_db, us_on):
+    """v2 (D6): the evening table repeated the strip's exchange rate, foreign futures and P/C; it is gone and the
+    strip keeps the change (the second dry run had it there and an empty cell in the table)."""
     built = pack.build(market_db, "premarket", TUE, cutoff=ts(TUE, 6, 55), now=ts(TUE, 7))
-    rows = {r["cells"]["item"]["text"]: r["cells"] for r in built.blocks["tables"]["T_evening"]["rows"]}
-    fx = rows["美元兌新台幣（央行）"]
-    assert fx["value"]["text"] == "32.886" and fx["change"]["text"] == "+0.048"
+    assert "T_evening" not in built.blocks["tables"]
     strip = next(n for n in built.blocks["numbers"] if n["key"] == "usdtwd")
-    assert strip["change"] == fx["change"]["text"]
+    assert strip["value"] == "32.886" and strip["change"] == "+0.048"

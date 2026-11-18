@@ -1,4 +1,4 @@
-import type { AiChart } from "@/ai/remote"
+import type { AiChart, AiChartBar, AiChartView } from "@/ai/remote"
 import {
   ApiError,
   REPORT_KIND_LABEL,
@@ -17,6 +17,7 @@ import {
   type ReportCalendarRow,
   type ReportEdition,
   type ReportFootnote,
+  type ReportHeat,
   type ReportItem,
   type ReportKind,
   type ReportNumberItem,
@@ -130,6 +131,7 @@ const LIC = {
   taifex: lic("臺灣期貨交易所〈三大法人期貨與選擇權部位〉"),
   fx: lic("中央銀行〈銀行間新臺幣對美元收盤匯率〉"),
   filings: lic("臺灣證券交易所〈上市公司每日重大訊息〉"),
+  margin: lic("臺灣證券交易所〈融資融券餘額〉、證券櫃檯買賣中心〈上櫃股票融資融券餘額〉"),
   us: "美股收盤價：Databento（Nasdaq NLS Plus 官方合併收盤）",
 }
 const MANUAL_LINE = "美股休市、總經數據與美股財報的時間：Forliosa 自行整理，每列連回官方頁面"
@@ -242,6 +244,16 @@ const SECTOR_NAMES = [
 ]
 /** 主要由一檔構成的類股（不進前 3／後 3 的文字排名，圖上寫集中度） */
 const CONCENTRATED: Record<string, string> = { 半導體: "主要由台積電構成（約 77%）", 玻璃陶瓷: "主要由台玻構成（約 92%）", 油電燃氣: "主要由台塑化構成（約 89%）" }
+/** 32 類在加權指數的權重（示範，約略；下面正規化成合計 1）與上市普通股家數（類股點數貢獻、類股內漲跌家數） */
+const SECTOR_SIZE: Record<string, [w: number, n: number]> = {
+  水泥: [0.004, 7], 食品: [0.006, 23], 塑膠: [0.023, 21], 紡織纖維: [0.005, 44], 電機機械: [0.012, 75], 電器電纜: [0.004, 16],
+  化學: [0.006, 30], 生技醫療: [0.006, 63], 玻璃陶瓷: [0.001, 5], 造紙: [0.001, 7], 鋼鐵: [0.01, 29], 橡膠: [0.002, 10], 汽車: [0.009, 41],
+  半導體: [0.558, 91], 電腦及週邊設備: [0.051, 63], 光電: [0.02, 66], 通信網路: [0.025, 45], 電子零組件: [0.086, 102], 電子通路: [0.006, 21],
+  資訊服務: [0.003, 11], 其他電子: [0.037, 44], 建材營造: [0.006, 50], 航運: [0.012, 26], 觀光餐旅: [0.002, 19], 金融保險: [0.085, 30],
+  貿易百貨: [0.005, 17], 油電燃氣: [0.006, 7], 綠能環保: [0.003, 12], 數位雲端: [0.002, 13], 運動休閒: [0.003, 18], 居家生活: [0.001, 12], 其他: [0.007, 46],
+}
+const SECTOR_W_SUM = Object.values(SECTOR_SIZE).reduce((a, [w]) => a + w, 0)
+const sectorW = (name: string) => SECTOR_SIZE[name]![0] / SECTOR_W_SUM
 interface Stock {
   code: string
   name: string
@@ -285,7 +297,6 @@ interface Day {
   pc: number
   usd: number
   usdChg: number
-  otcInst: number
 }
 
 /** 一個交易日的假數字（同一天每次一樣） */
@@ -299,7 +310,11 @@ function day(d: string): Day {
   const breadthUp = taiexPct > 0
   const up = Math.round(breadthUp ? between(r, 520, 760, 0) : between(r, 220, 420, 0))
   const down = Math.round(breadthUp ? between(r, 220, 420, 0) : between(r, 520, 760, 0))
-  const sectors = SECTOR_NAMES.map((name) => ({ name, pct: Number((taiexPct * 0.8 + between(r, -0.012, 0.012)).toFixed(4)) })).sort((a, b) => b.pct - a.pct)
+  const sectors = SECTOR_NAMES.map((name) => ({ name, pct: Number((taiexPct * 0.8 + between(r, -0.012, 0.012)).toFixed(4)) }))
+  // 半導體依權重補到和加權指數一致：類股點數貢獻（估算）的加總才對得上官方漲跌
+  const others = sectors.reduce((a, s) => (s.name === "半導體" ? a : a + sectorW(s.name) * s.pct), 0)
+  sectors.find((s) => s.name === "半導體")!.pct = Number(((taiexPct - others) / sectorW("半導體")).toFixed(4))
+  sectors.sort((a, b) => b.pct - a.pct)
   const top10 = TOP10.map(([code, name, close, w]) => {
     const p = Number((taiexPct + between(r, -0.01, 0.01)).toFixed(4))
     return { code, name, close: Math.round(close * (1 + p) * 100) / 100, pct: p, contrib: Math.round(prev * w * p), value: Math.round(between(r, 40, 900, 0)) }
@@ -316,7 +331,6 @@ function day(d: string): Day {
     gainers: sorted.slice(0, 5).map((s) => ({ ...s, pct: Math.abs(s.pct) })),
     losers: sorted.slice(-5).reverse().map((s) => ({ ...s, pct: -Math.abs(s.pct) })),
     oi, oiChg: Math.round(between(r, -3000, 3000, 0)), pc: between(r, 0.92, 1.28, 4), usd: between(r, 31.1, 31.6, 3), usdChg: between(r, -0.08, 0.08, 3),
-    otcInst: between(r, -45, 45, 1),
   }
 }
 
@@ -347,14 +361,6 @@ function g1(d: string, title: string): AiChart {
     sources: [LIC.index],
   })
 }
-/** G2：上市 32 類的漲跌幅（集中度高的寫在名稱下面） */
-function g2(sectors: { name: string; pct: number }[], title: string): AiChart {
-  return chart({
-    id: "G2", kind: "bars", title, unit: "pct", x: "category",
-    bars: sectors.map((s) => ({ label: s.name, value: s.pct, display: pct(s.pct), tone: s.pct > 0 ? "rise" : s.pct < 0 ? "fall" : "ink", sub: CONCENTRATED[s.name] ?? null })),
-    notes: ["證交所的類股指數；不含電子工業與 4 個舊的綜合類股"], sources: [LIC.index],
-  })
-}
 /** G3：市值前 10 的點數貢獻（估算）＋其餘合計，官方漲跌點數在下面一行 */
 function g3(x: Day, title: string): AiChart {
   const top = x.top10.reduce((a, s) => a + s.contrib, 0)
@@ -369,16 +375,10 @@ function g3(x: Day, title: string): AiChart {
     notes: ["Forliosa 估算：前一日加權指數 × 前一日市值權重 × 漲跌幅"], sources: [LIC.index, LIC.price],
   })
 }
-function g4(x: Day, title: string): AiChart {
-  const rows: [string, number, "rise" | "fall" | "ink"][] = [["上漲", x.up, "rise"], ["平盤", x.flat, "ink"], ["下跌", x.down, "fall"], ["漲停", x.lu, "rise"], ["跌停", x.ld, "fall"]]
-  return chart({
-    id: "G4", kind: "bars", title, unit: "count", x: "category",
-    bars: rows.map(([label, n, t]) => ({ label, value: n, display: `${fmt(n, 0)} 家`, tone: t })),
-    notes: ["上市普通股；漲跌以當天參考價計，漲跌停以官方漲跌停價計"], sources: [LIC.price],
-  })
-}
-function g5(d: string, stocks: Stock[], title: string): AiChart {
+/** G5（今日圖／本週圖的選單）：權值前 5 檔一個月比較；存檔不到 10 個交易日時標題寫實際天數（稽核 §2.5-3） */
+function g5(d: string, stocks: Stock[]): AiChart {
   const days = tradingDays(d, 22)
+  const title = days.length < 10 ? `權值前 5 檔近 ${days.length} 個交易日比較（至 ${md(d)}）` : `權值前 5 檔一個月比較（至 ${md(d)}）`
   return chart({
     id: "G5", kind: "compare", title, unit: "pct", x: "date", range: "1M",
     series: stocks.slice(0, 5).map((s, i) => {
@@ -412,20 +412,398 @@ function g7(d: string, title: string): AiChart {
 const STOCK_COLS = [col("stock", "股票", "left"), col("close", "收盤"), col("pct", "漲跌幅")]
 const stockCells = (s: Stock) => ({ stock: { text: `${s.name}（${s.code}）` }, close: { text: fmt(s.close, s.close >= 500 ? 0 : 2) }, pct: { text: pct(s.pct), tone: cellTone(s.pct) } })
 const RULE_MOVERS = "範圍：市值前 200 名或 300 億元以上；排除創新板、全額交割、處置股"
-function t2(x: Day, period: string): ReportTable[] {
+/** 排行三張（漲幅｜跌幅｜成交值；週報是一週的）：同一個 `tab_group`，窄的主欄一次看一張 */
+function t2(x: Day, period: string, week = false): ReportTable[] {
+  const w = week ? "週" : ""
+  const row = (s: Stock) => ({ cells: stockCells(s), href: stockHref(s.code) })
+  return [
+    table({ id: "T2_gainers", title: `${w}漲幅前 5（${period}）`, rule: RULE_MOVERS, columns: STOCK_COLS, rows: x.gainers.map(row), source_labels: [LIC.price], tab_group: "movers", tab_label: `${w}漲幅` }),
+    table({ id: "T2_losers", title: `${w}跌幅前 5（${period}）`, rule: RULE_MOVERS, columns: STOCK_COLS, rows: x.losers.map(row), source_labels: [LIC.price], tab_group: "movers", tab_label: `${w}跌幅` }),
+    table({
+      id: "T2_value", title: `${w}成交值前 10（${period}）`, rule: RULE_MOVERS, columns: [...STOCK_COLS, col("value", week ? "週成交金額" : "成交金額")],
+      rows: [...x.top10].sort((a, b) => b.value - a.value).map((s) => ({ cells: { ...stockCells(s), value: { text: `${fmt(week ? s.value * 4.6 : s.value, 1)} 億元` } }, href: stockHref(s.code) })),
+      source_labels: [LIC.price], tab_group: "movers", tab_label: `${w}成交值`,
+    }),
+  ]
+}
+
+// ── v2（2026-11-18）：類股與個股的數據圖 ──────────────────────────────
+// G17 類股點數貢獻、G15 規模與風格、G2 v2（基準線、類股內家數、期間切換、收合）、G2_otc、G8 成交比重、G16 上櫃法人依產業別、
+// T2_top10 v2（大方向、熱度格）、T3（週報 9 個指數）、T7、T9（週報籌碼）、T10（融資增減）、T5（上櫃排行）。形狀和後端一樣，數字是假的。
+const RULES = "Forliosa 規則計算"
+/** 一段期間的漲跌：每天的漲跌連乘 */
+const chain = (pcts: number[]) => Number((pcts.reduce((a, p) => a * (1 + p), 1) - 1).toFixed(4))
+const bar = (label: string, value: number, display: string, t: AiChartBar["tone"], sub: string | null = null, extra: Partial<AiChartBar> = {}): AiChartBar => ({
+  label, value, display, tone: t, sub, href: null, ...extra,
+})
+const moveBar = (label: string, v: number, sub: string | null = null, extra: Partial<AiChartBar> = {}) => bar(label, v, pct(v), v > 0 ? "rise" : v < 0 ? "fall" : "ink", sub, extra)
+const points = (v: number) => signed(Math.round(v), 0, " 點")
+const benchOf = (v: number) => ({ value: v, label: `加權 ${pct(v)}` })
+/** 比重的變化（百分點）：「+2.2」「−0.7」 */
+const ppText = (v: number) => {
+  const q = Math.round(v * 1000) / 10
+  return q === 0 ? "0.0" : `${q > 0 ? "+" : "−"}${fmt(q, 1)}`
+}
+/** 依比例分配整數，加總剛好是 total（最大餘數法） */
+function alloc(total: number, weights: number[]): number[] {
+  const sum = weights.reduce((a, w) => a + w, 0) || 1
+  const raw = weights.map((w) => (total * w) / sum)
+  const out = raw.map((v) => Math.floor(v))
+  let left = total - out.reduce((a, v) => a + v, 0)
+  for (const [, i] of raw.map((v, i) => [v - Math.floor(v), i] as const).sort((a, b) => b[0] - a[0])) {
+    if (left <= 0) break
+    out[i] = out[i]! + 1
+    left--
+  }
+  return out
+}
+/** 存檔起到 d（含）的交易日 */
+const archivedTo = (d: string) => tradingDays(d, 400)
+/** 存檔滿 n 個交易日是哪一天（「近 1 月 11/25 起才有」） */
+const readyFrom = (n: number) => {
+  let d = ARCHIVE_FROM
+  for (let i = 1; i < n; i++) d = nextTrading(d)
+  return d
+}
+
+/** G17：各類股對加權指數的點數貢獻（估算）。拉低、拉高各最多 5 類（±0.5 點以上），跌的日子拉低的排前面；其餘合計鉛筆灰 */
+const CONTRIB_NOTE = "Forliosa 估算：每檔前一日市值權重 × 前一日加權指數 × 漲跌幅，依產業別加總。權重以上市普通股的已發行股數 × 收盤計，和官方的權重略有差異。"
+function g17(days: string[], title: string, official = true): AiChart {
+  const xs = days.map(day)
+  const change = xs.reduce((a, x) => a + x.taiexChg, 0)
+  const rows = SECTOR_NAMES.map((name) => {
+    const pts = xs.reduce((a, x) => a + (x.taiex - x.taiexChg) * sectorW(name) * x.sectors.find((s) => s.name === name)!.pct, 0)
+    const move = chain(xs.map((x) => x.sectors.find((s) => s.name === name)!.pct))
+    return { name, pts, sub: `權重約 ${(sectorW(name) * 100).toFixed(1)}%・類股${days.length > 1 ? "一週" : ""} ${pct(move)}` }
+  })
+  const total = rows.reduce((a, r) => a + r.pts, 0)
+  const down = rows.filter((r) => r.pts <= -0.5).sort((a, b) => a.pts - b.pts).slice(0, 5)
+  const up = rows.filter((r) => r.pts >= 0.5).sort((a, b) => b.pts - a.pts).slice(0, 5)
+  const listed = change < 0 ? [...down, ...up] : [...up, ...down]
+  const rest = rows.filter((r) => !listed.includes(r))
+  const restPts = rest.reduce((a, r) => a + r.pts, 0)
+  return chart({
+    id: "G17", kind: "bars", title, unit: "points", x: "category", estimate: true,
+    bars: [
+      ...listed.map((r) => bar(r.name, r.pts, points(r.pts), Math.round(r.pts) > 0 ? "rise" : Math.round(r.pts) < 0 ? "fall" : "ink", r.sub)),
+      ...(rest.length ? [bar(`其餘 ${rest.length} 類`, restPts, points(restPts), "pencil", "合計")] : []),
+    ],
+    reference: official ? { label: "官方漲跌", display: `${signed(change, 2, " 點")}・${rows.length} 類估算加總 ${points(total)}` } : { label: "估算加總", display: `${rows.length} 類 ${points(total)}` },
+    notes: [CONTRIB_NOTE], sources: [LIC.price, ...(official ? [LIC.index] : []), RULES],
+  })
+}
+
+/** G15：規模與風格（8 列三組），虛線是加權指數 */
+const STYLE: [group: string, label: string, beta: number][] = [
+  ["大小型股", "臺灣50", 1.0], ["大小型股", "中型100", 0.9], ["大小型股", "小型股300", 0.75],
+  ["電子與非電子", "電子工業", 1.2], ["電子與非電子", "未含電子", 0.45], ["電子與非電子", "金融保險", 0],
+  ["高股息與上櫃", "臺灣高股息", 0.55], ["高股息與上櫃", "櫃買指數", 0],
+]
+function styleMoves(d: string): number[] {
+  const x = day(d)
+  const r = rng(`style:${d}`)
+  return STYLE.map(([, label, beta]) =>
+    label === "櫃買指數" ? x.tpexPct : label === "金融保險" ? x.sectors.find((s) => s.name === "金融保險")!.pct : Number((x.taiexPct * beta + between(r, -0.003, 0.003)).toFixed(4)),
+  )
+}
+function g15(d: string, title: string): AiChart {
+  const m = styleMoves(d)
+  return chart({
+    id: "G15", kind: "bars", title, unit: "pct", x: "category",
+    bars: STYLE.map(([group, label], i) => moveBar(label, m[i]!, null, { group })),
+    bench: benchOf(day(d).taiexPct),
+    notes: ["虛線是加權指數的漲跌；電子工業是電子類股的合計。"], sources: [LIC.tpex, LIC.index],
+  })
+}
+
+/** 類股內的上漲、下跌家數（32 類加總等於上市普通股的上漲、下跌家數） */
+function sectorBreadth(x: Day): Map<string, { up: number; down: number }> {
+  const r = rng(`breadth:${x.d}`)
+  const tilt = x.sectors.map((s) => Math.min(0.95, Math.max(0.05, 0.5 + s.pct * 30 + between(r, -0.12, 0.12))))
+  const ups = alloc(x.up, x.sectors.map((s, i) => SECTOR_SIZE[s.name]![1] * tilt[i]!))
+  const downs = alloc(x.down, x.sectors.map((s, i) => SECTOR_SIZE[s.name]![1] * (1 - tilt[i]!)))
+  return new Map(x.sectors.map((s, i) => [s.name, { up: ups[i]!, down: downs[i]! }]))
+}
+/** 一段期間各類與加權指數的漲跌（每天連乘） */
+function periodSectors(days: string[]): { sectors: { name: string; pct: number }[]; taiex: number } {
+  const xs = days.map(day)
+  const sectors = SECTOR_NAMES.map((name) => ({ name, pct: chain(xs.map((x) => x.sectors.find((s) => s.name === name)!.pct)) })).sort((a, b) => b.pct - a.pct)
+  return { sectors, taiex: chain(xs.map((x) => x.taiexPct)) }
+}
+/**
+ * G2 v2：上市 32 類，虛線是加權指數同一期間的漲跌；第一組（一天，週報是一週）每列第二行是類股內的上漲、下跌家數；
+ * 期間切換：近 1 週（存檔滿 6 個交易日）、近 1 月（滿 23 個），不夠時是「10/26 起」；窄的主欄收成前 5、半導體、後 5。
+ */
+function g2v2(d: string, title: string, opts: { reference?: { label: string; display: string }; week?: string[] } = {}): AiChart {
+  const archived = archivedTo(d)
+  const breadth = opts.week ? null : sectorBreadth(day(d))
+  // 每一期自己的標題寫出起訖（「上市類股指數漲跌（11/10 收盤至 11/17）」）；第一組就是圖的標題
+  const view = (key: AiChartView["key"], label: string, p: { sectors: { name: string; pct: number }[]; taiex: number }, first = false, base?: string): AiChartView => {
+    const sub = (name: string) => {
+      const b = first ? breadth?.get(name) : undefined
+      return [b ? `漲 ${b.up}・跌 ${b.down}` : null, CONCENTRATED[name] ?? null].filter(Boolean).join("・") || null
+    }
+    const above = p.sectors.filter((s) => s.pct > p.taiex).length
+    const below = p.sectors.filter((s) => s.pct < p.taiex).length
+    return {
+      key, label, title: first || !base ? title : `上市類股指數漲跌（${md(base)} 收盤至 ${md(d)}）`,
+      bars: p.sectors.map((s) => moveBar(s.name, s.pct, sub(s.name))), bench: benchOf(p.taiex),
+      notes: [`虛線是加權指數同一期間的漲跌：${above} 類高於加權指數、${below} 類低於。`, ...(first && breadth ? ["每列第二行是這一類上市普通股的上漲、下跌家數。"] : [])],
+    }
+  }
+  const views = [opts.week ? view("1w", "近 1 週", periodSectors(opts.week), true) : view("1d", "1 日", { sectors: day(d).sectors, taiex: day(d).taiexPct }, true)]
+  if (!opts.week && archived.length >= 6) views.push(view("1w", "近 1 週", periodSectors(archived.slice(-5)), false, archived.at(-6)))
+  if (archived.length >= 23) views.push(view("1m", "近 1 月", periodSectors(archived.slice(-22)), false, archived.at(-23)))
+  else if (archived.length >= 3 && !(opts.week && archived.length <= 6)) views.push(view("since", `${md(archived[0]!)} 起`, periodSectors(archived.slice(1)), false, archived[0]))
+  const main = views[0]!
+  return chart({
+    id: "G2", kind: "bars", title, unit: "pct", x: "category",
+    bars: main.bars, bench: main.bench, notes: main.notes, views: views.length > 1 ? views : null,
+    fold: { head: 5, tail: 5, keep: ["半導體"] }, reference: opts.reference ?? null, sources: [LIC.index, LIC.price],
+  })
+}
+
+/** 上櫃的產業（Forliosa 依產業別計算，2 家以下不列）與家數 */
+const OTC_INDUSTRIES: [string, number][] = [
+  ["半導體", 52], ["電子零組件", 88], ["光電", 45], ["電腦及週邊設備", 30], ["通信網路", 40], ["生技醫療", 120], ["其他電子", 35], ["電機機械", 38],
+  ["化學", 15], ["文化創意", 22], ["觀光餐旅", 14], ["建材營造", 26], ["資訊服務", 33], ["綠能環保", 18], ["數位雲端", 20], ["食品", 6],
+  ["鋼鐵", 16], ["航運", 7], ["電子通路", 12], ["居家生活", 9], ["金融保險", 4], ["紡織纖維", 9],
+]
+/** 上櫃一天：各產業的漲跌與三大法人估算金額（億元）、上櫃的漲跌家數 */
+function otcDay(d: string) {
+  const x = day(d)
+  const r = rng(`otc:${d}`)
+  const sectors = OTC_INDUSTRIES.map(([name, n]) => ({ name, n, pct: Number((x.tpexPct * 0.9 + between(r, -0.02, 0.02)).toFixed(4)), flow: between(r, -9, 12, 2) })).sort((a, b) => b.pct - a.pct)
+  return { sectors, up: Math.round(x.up * 0.62), down: Math.round(x.down * 0.6), flat: Math.round(x.flat * 0.7) }
+}
+/** G2_otc（取代上櫃類股表 T6）：和上市一樣的橫條，Forliosa 計算（估算）；窄的主欄收成前 5、後 5 */
+function g2Otc(d: string, title: string): AiChart {
+  const o = otcDay(d)
+  return chart({
+    id: "G2_otc", kind: "bars", title, unit: "pct", x: "category", estimate: true,
+    bars: o.sectors.map((s) => moveBar(s.name, s.pct, `${s.n} 家`)),
+    fold: { head: 5, tail: 5, keep: [] },
+    reference: { label: "上櫃普通股", display: `上漲 ${fmt(o.up, 0)}・下跌 ${fmt(o.down, 0)}・平盤 ${o.flat} 家` },
+    notes: ["上櫃普通股依產業別分組，以前一日市值加權；2 家以下的產業不列。不是官方指數。"], sources: [LIC.tpex, RULES],
+  })
+}
+/** 上櫃三大法人一段期間的估算金額（億元）：各產業與合計 */
+function otcFlows(days: string[]): { rows: { name: string; v: number }[]; total: number } {
+  const sum = new Map<string, number>()
+  for (const t of days) for (const s of otcDay(t).sectors) sum.set(s.name, (sum.get(s.name) ?? 0) + s.flow)
+  const rows = [...sum].map(([name, v]) => ({ name, v: Number(v.toFixed(2)) }))
+  return { rows, total: rows.reduce((a, r) => a + r.v, 0) }
+}
+/** G16：上櫃三大法人依產業別（估算）：買超最多 5 類、賣超最多 5 類；墨色／鉛筆灰（法人用色，不是漲跌） */
+function g16(days: string[], title: string): AiChart {
+  const { rows, total } = otcFlows(days)
+  const buys = rows.filter((r) => r.v > 0).sort((a, b) => b.v - a.v).slice(0, 5)
+  const sells = rows.filter((r) => r.v < 0).sort((a, b) => a.v - b.v).slice(0, 5)
+  return chart({
+    id: "G16", kind: "bars", title, unit: "yi", x: "category", estimate: true,
+    bars: [...buys, ...sells.reverse()].map((r) => bar(r.name, r.v, signed(r.v, 1, " 億元"), r.v >= 0 ? "ink" : "pencil")),
+    reference: { label: "上櫃三大法人合計（估算）", display: `${total >= 0 ? "買超" : "賣超"} ${fmt(total, 1)} 億元` },
+    notes: ["估算：每檔買賣超股數 × 收盤價，依產業別加總；列買超最多與賣超最多各 5 類。上市個股的三大法人沒有開放資料，所以只有上櫃。"],
+    sources: [LIC.tpex, RULES],
+  })
+}
+
+/** 成交金額比重的基準（示範）與各類成交值最大的一檔、它占這一類的比例 */
+const TURN_BASE: Record<string, number> = { 半導體: 0.38, 電子零組件: 0.19, 電腦及週邊設備: 0.075, 光電: 0.05, 塑膠: 0.03, 其他電子: 0.045, 金融保險: 0.04, 通信網路: 0.032, 航運: 0.02, 電機機械: 0.02 }
+const TURN_TOP: Record<string, [code: string, name: string, share: number]> = {
+  半導體: ["2330", "台積電", 0.41], 電子零組件: ["2308", "台達電", 0.14], 電腦及週邊設備: ["2382", "廣達", 0.19], 光電: ["3008", "大立光", 0.28], 塑膠: ["1303", "南亞", 0.82],
+  其他電子: ["2317", "鴻海", 0.35], 金融保險: ["2881", "富邦金", 0.17], 通信網路: ["2345", "智邦", 0.29], 航運: ["2603", "長榮", 0.42], 電機機械: ["1519", "華城", 0.21],
+}
+function turnoverShares(d: string): Map<string, number> {
+  const r = rng(`g8:${d}`)
+  const raw = SECTOR_NAMES.map((n) => [n, (TURN_BASE[n] ?? sectorW(n) * 0.5 + 0.002) * (1 + between(r, -0.18, 0.18))] as const)
+  const total = raw.reduce((a, [, v]) => a + v, 0)
+  return new Map(raw.map(([n, v]) => [n, v / total]))
+}
+/** 一段期間的比重（依每天的成交金額加權）與成交金額合計（億元） */
+function periodShares(days: string[]): { shares: Map<string, number>; total: number } {
+  const total = days.reduce((a, t) => a + day(t).turnover, 0)
+  const shares = new Map<string, number>()
+  for (const t of days) for (const [n, s] of turnoverShares(t)) shares.set(n, (shares.get(n) ?? 0) + (s * day(t).turnover) / total)
+  return { shares, total }
+}
+/** G8：上市類股成交金額比重，前 8 類＋其餘；墨色（是比重，不是漲跌）；右側欄是較前一日（週）的百分點 */
+function g8(days: string[], before: string[], title: string, week = false): AiChart {
+  const now = periodShares(days)
+  const prev = periodShares(before)
+  const sorted = [...now.shares].sort((a, b) => b[1] - a[1])
+  const top = sorted.slice(0, 8)
+  const rest = sorted.slice(8)
+  const last = day(days[days.length - 1]!)
+  const sub = (name: string, share: number) => {
+    const t = TURN_TOP[name]
+    if (!t) return null
+    const [code, stock, c] = t
+    const inTop = last.top10.find((s) => s.code === code)
+    const move = week ? between(rng(`g8w:${code}:${days[0]}`), -0.06, 0.06) : (inTop?.pct ?? between(rng(`g8m:${code}:${days[0]}`), -0.04, 0.04))
+    return `成交值最大：${stock} ${fmt(share * now.total * c, 0)} 億元${c > 0.5 ? `，占這一類 ${Math.round(c * 100)}%` : ""}・${week ? "週" : ""}${pct(move)}`
+  }
+  const what = week ? "前一週" : "前一日"
+  const restShare = rest.reduce((a, [, v]) => a + v, 0)
+  const restBefore = rest.reduce((a, [n]) => a + (prev.shares.get(n) ?? 0), 0)
+  return chart({
+    id: "G8", kind: "bars", title, unit: "pct", x: "category", aside_label: `較${what}`,
+    bars: [
+      ...top.map(([n, v]) => bar(n, v, `${fmt(v * 100, 1)}%`, "ink", sub(n, v), { aside: ppText(v - (prev.shares.get(n) ?? 0)) })),
+      bar(`其餘 ${rest.length} 類`, restShare, `${fmt(restShare * 100, 1)}%`, "pencil", "合計", { aside: ppText(restShare - restBefore) }),
+    ],
+    notes: [
+      `分母是上市普通股的${week ? "全週" : ""}成交金額 ${fmt(now.total, 0)} 億元（${what} ${fmt(prev.total, 0)} 億元），不含 ETF 等。`,
+      `「較${what}」的單位是百分點。`,
+      "成交值最大的一檔只在市值前 200 名或 300 億元以上的範圍裡挑（同排行表）。",
+    ],
+    sources: [LIC.price, RULES],
+  })
+}
+
+/** 熱度格的門檻（1 日 1%／3%、近 1 週 2%／5%、近 1 月 4%／10%）；伺服器決定，前端只上色 */
+const HEAT_STEPS = { "1d": [0.01, 0.03], "1w": [0.02, 0.05], "1m": [0.04, 0.1] } as const
+type HeatPeriod = keyof typeof HEAT_STEPS
+const heatOf = (v: number, p: HeatPeriod): ReportHeat | null => {
+  const [lo, hi] = HEAT_STEPS[p]
+  const a = Math.abs(v)
+  return a < lo ? null : (`${v > 0 ? "rise" : "fall"}${a >= hi ? 2 : 1}` as ReportHeat)
+}
+/** 多期間的一格：漲跌、漲跌色與熱度；存檔不夠是「—」（不是 0） */
+const moveCell = (v: number | null, p: HeatPeriod) => (v === null ? { text: "—" } : { text: pct(v), tone: cellTone(v), heat: heatOf(v, p) })
+const TOP10_RULE = "上市普通股，依收盤市值；第一列是加權指數。近 1 週、近 1 月是每天對參考價的漲跌連乘（除權息不算成下跌），只用官方存檔"
+/** 熱度格各欄的門檻不同（同樣深的底色在各欄代表不同大小），規則寫出每一欄從哪裡起算（和伺服器的 `heat_rule` 同一句） */
+const heatRule = (cols: [label: string, p: HeatPeriod][]) =>
+  `底色只分兩階（${cols.map(([label, p]) => `${label}：${Math.round(HEAT_STEPS[p][0] * 100)}%、${Math.round(HEAT_STEPS[p][1] * 100)}%`).join("；")}）`
+/** T2_top10 v2：加權指數＋市值前 10 的 1 日｜近 1 週｜近 1 月（週報：週漲跌｜近 1 月），熱度格；個股存檔不夠的格子是「—」 */
+function t2Top10(d: string, title: string, week?: string[]): ReportTable {
+  const x = day(d)
+  const archived = archivedTo(d)
+  // 加權指數的近 1 週、近 1 月用證交所的歷史（FMTQIK）：不受個股存檔長度限制
+  const taiex = (n: number) => chain(tradingDays(d, n, "2025-01-01").map((t) => day(t).taiexPct))
+  const stock = (code: string, n: number) => (archived.length > n ? chain(archived.slice(-n).map((t) => day(t).top10.find((s) => s.code === code)!.pct)) : null)
+  const periods: [key: string, label: string, p: HeatPeriod, n: number][] = week
+    ? [["w1", "週漲跌", "1w", week.length], ["m1", "近 1 月", "1m", 22]]
+    : [["d1", "1 日", "1d", 1], ["w1", "近 1 週", "1w", 5], ["m1", "近 1 月", "1m", 22]]
+  const short = periods.filter(([, , , n]) => n > 1 && archived.length <= n)
+  return table({
+    id: "T2_top10", title, rule: `${week ? TOP10_RULE.replace("近 1 週、", "") : TOP10_RULE}；${heatRule(periods.map(([, label, p]) => [label, p]))}`,
+    columns: [col("stock", "股票", "left"), ...periods.map(([k, label]) => col(k, label))],
+    rows: [
+      { cells: { stock: { text: "加權指數", sub: fmt(x.taiex) }, ...Object.fromEntries(periods.map(([k, , p, n]) => [k, moveCell(n === 1 ? x.taiexPct : taiex(n), p)])) }, href: null },
+      ...x.top10.map((s) => ({
+        cells: { stock: { text: `${s.name}（${s.code}）`, sub: fmt(s.close, s.close >= 500 ? 0 : 2) }, ...Object.fromEntries(periods.map(([k, , p, n]) => [k, moveCell(n === 1 ? s.pct : stock(s.code, n), p)])) },
+        href: stockHref(s.code),
+      })),
+    ],
+    note: short.length ? `個股的${short.map(([, label, , n]) => `${label} ${md(readyFrom(n + 1))} 起才有`).join("、")}（存檔從 ${md(ARCHIVE_FROM)} 開始）。` : null,
+    source_labels: [LIC.price, RULES],
+  })
+}
+
+/** T3（週報）：9 個指數 × 1 週｜近 1 月（存檔不到一個月時是「10/26 起」），熱度格 */
+const WEEK_INDICES = ["加權指數", "報酬指數", "櫃買指數", "臺灣50", "中型100", "小型股300", "電子工業", "未含電子", "金融保險"]
+function indexMoves(d: string): number[] {
+  const x = day(d)
+  const m = styleMoves(d)
+  return [x.taiexPct, x.taiexPct, x.tpexPct, m[0]!, m[1]!, m[2]!, m[3]!, m[4]!, m[5]!]
+}
+function t3(end: string, week: string[]): ReportTable {
+  const archived = archivedTo(end)
+  const month = archived.length >= 23
+  const series = (days: string[]) => {
+    const per = days.map(indexMoves)
+    return WEEK_INDICES.map((_, i) => chain(per.map((p) => p[i]!)))
+  }
+  const w = series(week)
+  const m = series(month ? archived.slice(-22) : archived.slice(1))
+  return table({
+    id: "T3", title: `主要指數的大方向（至 ${md(end)}）`,
+    rule: "週漲跌是本週最後一個交易日對上週最後一個交易日；底色只分兩階（1 週：2%、5%；近 1 月：4%、10%）",
+    columns: [col("name", "指數", "left"), col("w1", "1 週"), col("m1", month ? "近 1 月" : `${md(archived[0]!)} 起`)],
+    rows: WEEK_INDICES.map((name, i) => ({ cells: { name: { text: name }, w1: moveCell(w[i]!, "1w"), m1: moveCell(m[i]!, "1m") } })),
+    note: month ? null : `近 1 月 ${md(readyFrom(23))} 起才有；在那之前是存檔起的漲跌`,
+    source_labels: [LIC.tpex, LIC.index],
+  })
+}
+
+/** T7：期貨三大法人台指期淨未平倉與較前一日 */
+function t7(x: Day, d: string): ReportTable {
+  return table({
+    id: "T7", title: `期貨三大法人（${md(d)}）`, columns: [col("who", "法人", "left"), col("oi", "台指期淨未平倉"), col("chg", "較前一日")],
+    rows: [
+      { cells: { who: { text: "外資及陸資" }, oi: { text: `${signed(x.oi)} 口` }, chg: { text: `${signed(x.oiChg)} 口` } } },
+      { cells: { who: { text: "投信" }, oi: { text: "+8,412 口" }, chg: { text: "+215 口" } } },
+      { cells: { who: { text: "自營商" }, oi: { text: "−2,106 口" }, chg: { text: "−388 口" } } },
+    ],
+    source_labels: [LIC.taifex],
+  })
+}
+
+/** T9（週報）：期貨三大法人本週最後一天的淨未平倉與週變化、P/C、上櫃三大法人全週合計（估算）。口數、金額不用紅綠 */
+function t9(start: string, end: string, week: string[]): ReportTable {
+  const last = day(end)
+  const before = day(prevTrading(week[0]!))
+  const r = rng(`t9:${end}`)
+  const futures: [string, number, number][] = [
+    ["外資及陸資", last.oi, last.oi - before.oi],
+    ["投信", Math.round(between(r, 4000, 12000, 0)), Math.round(between(r, -1500, 1500, 0))],
+    ["自營商", Math.round(between(r, -4000, 2000, 0)), Math.round(between(r, -900, 900, 0))],
+  ]
+  const otc = otcFlows(week).total
+  return table({
+    id: "T9", title: `籌碼一週（${md(start)}–${md(end)}）`,
+    rule: "期貨的週變化是本週最後一個交易日對上週最後一個交易日；上櫃法人是每天股數 × 收盤價的加總",
+    columns: [col("item", "項目", "left"), col("value", "本週收"), col("change", "週變化")],
+    rows: [
+      ...futures.map(([who, net, ch]) => ({ cells: { item: { text: `${who}台指期淨未平倉`, sub: md(end) }, value: { text: `${net >= 0 ? "淨多" : "淨空"} ${fmt(net, 0)} 口` }, change: { text: `${signed(ch, 0)} 口` } } })),
+      { cells: { item: { text: "台指選擇權 P/C 未平倉比", sub: md(end) }, value: { text: `${fmt(last.pc * 100)}%` }, change: { text: "—" } } },
+      { cells: { item: { text: "上櫃三大法人（估算金額）", sub: "全週合計" }, value: { text: `${otc >= 0 ? "買超" : "賣超"} ${fmt(otc, 1)} 億元` }, change: { text: "—" } } },
+    ],
+    source_labels: [LIC.taifex, LIC.tpex],
+  })
+}
+
+/** 上櫃的股票（示範：上櫃排行、融資增減的範圍） */
+const OTC_STOCKS: [string, string, number][] = [
+  ["3081", "聯亞", 1520], ["3324", "雙鴻", 980], ["6510", "精測", 2350], ["6147", "頎邦", 76.5], ["6488", "環球晶", 412], ["8299", "群聯", 1190],
+  ["5289", "宜鼎", 585], ["1815", "富喬", 68.2], ["3374", "精材", 226], ["3529", "力旺", 2650], ["5274", "信驊", 6120], ["6187", "萬潤", 735],
+]
+const otcHref = (code: string) => `/stock/${code}.TWO`
+/** T5：上櫃市值前 10、漲幅與跌幅（`otc_movers` 兩張一組） */
+function t5(d: string): ReportTable[] {
+  const r = rng(`t5:${d}`)
+  const qs = OTC_STOCKS.map(([code, name, close]) => ({ code, name, close, pct: between(r, -0.1, 0.1), contrib: 0, value: 0, mcap: between(r, 300, 6000, 0) }))
+  const sorted = [...qs].sort((a, b) => b.pct - a.pct)
+  const row = (s: (typeof qs)[number]) => ({ cells: stockCells(s), href: otcHref(s.code) })
   return [
     table({
-      id: "T2-top10", title: `市值前 10・${period}`, rule: "上市普通股，依收盤市值；點數貢獻是 Forliosa 估算", columns: [...STOCK_COLS, col("contrib", "點數貢獻")],
-      rows: x.top10.map((s) => ({ cells: { ...stockCells(s), contrib: { text: signed(s.contrib, 0, " 點"), sub: "估算" } }, href: stockHref(s.code) })),
-      fold_after: 5, source_labels: [LIC.price],
+      id: "T5_top10", title: `上櫃市值前 10（${md(d)}）`, rule: "上櫃普通股，依收盤市值（收盤 × 已發行股數）", columns: [...STOCK_COLS, col("mcap", "市值")],
+      rows: [...qs].sort((a, b) => b.mcap - a.mcap).slice(0, 10).map((s) => ({ ...row(s), cells: { ...stockCells(s), mcap: { text: `${fmt(s.mcap, 0)} 億元` } } })),
+      fold_after: 5, source_labels: [LIC.tpex, RULES],
     }),
-    table({ id: "T2-gainers", title: "漲幅前 5", rule: RULE_MOVERS, columns: STOCK_COLS, rows: x.gainers.map((s) => ({ cells: stockCells(s), href: stockHref(s.code) })), source_labels: [LIC.price] }),
-    table({ id: "T2-losers", title: "跌幅前 5", rule: RULE_MOVERS, columns: STOCK_COLS, rows: x.losers.map((s) => ({ cells: stockCells(s), href: stockHref(s.code) })), source_labels: [LIC.price] }),
-    table({
-      id: "T2-value", title: "成交值前 10", rule: "上市普通股，依成交金額", columns: [...STOCK_COLS, col("value", "成交值")],
-      rows: [...x.top10].sort((a, b) => b.value - a.value).map((s) => ({ cells: { ...stockCells(s), value: { text: `${fmt(s.value, 0)} 億元` } }, href: stockHref(s.code) })),
-      fold_after: 5, source_labels: [LIC.price],
-    }),
+    table({ id: "T5_gainers", title: `上櫃漲幅前 5（${md(d)}）`, rule: RULE_MOVERS, columns: STOCK_COLS, rows: sorted.slice(0, 5).map((s) => row({ ...s, pct: Math.abs(s.pct) })), source_labels: [LIC.tpex], tab_group: "otc_movers", tab_label: "漲幅" }),
+    table({ id: "T5_losers", title: `上櫃跌幅前 5（${md(d)}）`, rule: RULE_MOVERS, columns: STOCK_COLS, rows: sorted.slice(-5).reverse().map((s) => row({ ...s, pct: -Math.abs(s.pct) })), source_labels: [LIC.tpex], tab_group: "otc_movers", tab_label: "跌幅" }),
+  ]
+}
+
+/** T10：融資增加、減少前 5（上市＋上櫃的範圍；依張數變化 × 收盤排序；不放漲跌幅），`margin` 兩張一組 */
+const MARGIN_RULE = "範圍：上市與上櫃，市值前 200 名或 300 億元以上；排除創新板、全額交割（變更交易）、處置股。依融資張數變化 × 收盤價排序"
+function t10(d: string, period: string, week = false): ReportTable[] {
+  const r = rng(`t10:${d}:${week}`)
+  const pool = [
+    ...[...TOP10, ...MOVERS].map(([code, name, close]) => ({ code, name, close, href: stockHref(code) })),
+    ...OTC_STOCKS.map(([code, name, close]) => ({ code, name, close, href: otcHref(code) })),
+  ].map((s) => ({ ...s, balance: Math.round(between(r, 2000, 80000, 0)), change: Math.round(between(r, -6000, 6000, 0) * (week ? 2.4 : 1)) }))
+  const ups = pool.filter((s) => s.change > 0).sort((a, b) => b.change * b.close - a.change * a.close).slice(0, 5)
+  const downs = pool.filter((s) => s.change < 0).sort((a, b) => a.change * a.close - b.change * b.close).slice(0, 5)
+  const w = week ? "週" : ""
+  const columns = [col("stock", "股票", "left"), col("balance", "融資餘額（張）"), col("change", week ? "週增減（張）" : "較前一日（張）")]
+  const rows = (list: typeof pool) => list.map((s) => ({ cells: { stock: { text: `${s.name}（${s.code}）` }, balance: { text: fmt(s.balance, 0) }, change: { text: signed(s.change, 0) } }, href: s.href }))
+  const sources = [lic("臺灣證券交易所〈融資融券餘額〉"), lic("證券櫃檯買賣中心〈上櫃股票融資融券餘額〉")]
+  return [
+    table({ id: "T10_up", title: `融資${w}增加前 5（${period}）`, rule: MARGIN_RULE, columns, rows: rows(ups), empty_text: "範圍內沒有融資增加的股票。", source_labels: sources, tab_group: "margin", tab_label: "增加" }),
+    table({ id: "T10_down", title: `融資${w}減少前 5（${period}）`, rule: MARGIN_RULE, columns, rows: rows(downs), empty_text: "範圍內沒有融資減少的股票。", source_labels: sources, tab_group: "margin", tab_label: "減少" }),
   ]
 }
 
@@ -512,6 +890,7 @@ function premarket(b: Build): MarketReport {
   reg.set("F008", { kind: "data", group: `taifex:${prev}`, label: `期交所〈三大法人期貨部位〉${md(prev)}` })
   reg.set("F009", { kind: "data", group: `pc:${prev}`, label: `期交所〈選擇權 P/C 比〉${md(prev)}` })
   reg.set("F010", { kind: "data", group: `tpex:${prev}`, label: `櫃買中心〈櫃買指數〉${md(prev)}` })
+  reg.set("F011", { kind: "data", group: `price:${prev}`, label: `證交所〈上市個股日成交資訊〉${md(prev)}（Forliosa 依市值排序）` })
   reg.set("C001", { kind: "calendar", label: `聯發科法說會 ${mdw(D)} 14:00`, url: null, date_label: md(D) })
   reg.set("C002", { kind: "calendar", label: `中華電除息 ${mdw(D)}`, url: null, date_label: md(D) })
   reg.set("C005", { kind: "calendar", label: `美國勞工統計局〈消費者物價指數〉${mdw(nextTrading(D))} 公布`, url: "https://www.bls.gov/cpi/", date_label: md(nextTrading(D)) })
@@ -529,19 +908,19 @@ function premarket(b: Build): MarketReport {
   ]
   const g6c = g6(us, `美股 ETF 與台積電 ADR（${usLabel}）`)
   const g7c = g7(prev, "外資台指期淨未平倉（近 20 個交易日）")
-  const evening = table({
-    id: "T-evening", title: `昨晚才到的資料（${md(prev)}）`,
-    columns: [col("item", "項目", "left"), col("value", "數值")],
-    rows: [
-      { cells: { item: { text: "櫃買指數" }, value: { text: `${fmt(x.tpex)} ${pct(x.tpexPct)}`, tone: cellTone(x.tpexPct) } } },
-      { cells: { item: { text: "上櫃上漲／下跌家數" }, value: { text: `${Math.round(x.up * 0.6)} 家／${Math.round(x.down * 0.6)} 家` } } },
-      { cells: { item: { text: "外資台指期淨未平倉" }, value: { text: `${signed(x.oi)} 口`, sub: `較前一日 ${signed(x.oiChg, 0, " 口")}` } } },
-      { cells: { item: { text: "上櫃三大法人合計" }, value: { text: `${signed(x.otcInst, 1, " 億元")}`, sub: "估算金額（股數 × 收盤價）" } } },
-      { cells: { item: { text: "P/C 未平倉比" }, value: { text: `${fmt(x.pc * 100)}%` } } },
-      { cells: { item: { text: "美元兌新台幣" }, value: { text: fmt(x.usd, 3) } } },
-    ],
-    source_labels: [LIC.tpex, LIC.taifex, LIC.fx],
-  })
+  // 昨日台股全貌（v2：資料段；AI 文字不重述前一個交易日）：G17 → G15 → G2 v2（盤前寫上市寬度）→ G2_otc → G8
+  const yesterday: ReportBlock[] = [
+    { type: "note", text: `${mdw(prev)}收盤後的類股與大方向，依官方資料整理；標「估算」的是 Forliosa 自己算的。` },
+    ...[
+      g17([prev], `各類股對加權指數的點數貢獻（估算，${md(prev)}）`),
+      g15(prev, `規模與風格指數漲跌（${md(prev)}）`),
+      g2v2(prev, `上市類股指數漲跌（${md(prev)}）`, {
+        reference: { label: "上市普通股", display: `上漲 ${x.up}・下跌 ${x.down}・平盤 ${x.flat} 家；漲停 ${x.lu}・跌停 ${x.ld} 家` },
+      }),
+      g2Otc(prev, `上櫃類股漲跌（Forliosa 計算，${md(prev)}）`),
+      g8([prev], [prevTrading(prev)], `上市類股成交金額比重（${md(prev)}）`),
+    ].map((c) => ({ type: "chart" as const, chart: c, caption: null, chart_of_day: false })),
+  ]
   const calendar: ReportCalendar = {
     title: "今日行事曆",
     groups: [
@@ -591,17 +970,6 @@ function premarket(b: Build): MarketReport {
         : []),
       { type: "chart", chart: g6c, caption: null, chart_of_day: false },
     ]),
-    section("evening", "昨晚才到的資料", ai ? "ai" : "data", [
-      { type: "table", table: evening },
-      ...(ai
-        ? [{
-            type: "text" as const,
-            paragraphs: [
-              P(S(`櫃買指數 ${mdw(prev)} 收 ${fmt(x.tpex)} 點，${pct(x.tpexPct)}。`, "F010"), S(`外資台指期淨未平倉 ${md(prev)} 為 ${signed(x.oi, 0, " 口")}，較前一日 ${signed(x.oiChg, 0, " 口")}。`, "F007", "F008")),
-            ],
-          }]
-        : []),
-    ], true),
     ...(ai
       ? [section("watch", "今天市場在看什麼", "ai", [{
           type: "items",
@@ -610,19 +978,33 @@ function premarket(b: Build): MarketReport {
             { title: "美國 10 月消費者物價指數", meta: `台北 ${md(nextTrading(D))} 21:30・金融保險`, paragraphs: [P(S(`已排定：美國勞工統計局 ${mdw(nextTrading(D))} 公布 10 月消費者物價指數。`, "C005"), S("〔示範財經網〕報導市場關注通膨數字與利率的關係。", "X003"))] },
             ...(f === 2 ? [] : [{ title: "中華電除息", meta: "通信網路", paragraphs: [P(S(`已排定：中華電（2412）${mdw(D)} 除息，每股 1.2 元。`, "C002"))] } satisfies ReportItem]),
           ],
-        }], true)]
+        }])]
       : []),
-    section("charts", "圖", ai ? "ai" : "data", [
-      { type: "chart", chart: g7c, caption: null, chart_of_day: false },
+    section("yesterday", `昨日台股全貌（${md(prev)}）`, "data", yesterday),
+    // 昨日籌碼（晚間公布）：AI 的 evening_notes → G7 → T7 → G16 → T10（增加｜減少）；手機預設收合
+    section("chips", "昨日籌碼（晚間公布）", ai ? "ai" : "data", [
       ...(ai
         ? [{
-            type: "chart" as const,
-            chart: g2(x.sectors, `上市類股漲跌（${md(prev)}）`),
-            caption: P(S(`${mdw(prev)} 上市類股中，${x.sectors[0]!.name}類 ${pct(x.sectors[0]!.pct)} 最多。`, "F010")),
-            chart_of_day: true,
+            type: "text" as const,
+            paragraphs: [
+              P(S(`外資台指期淨未平倉 ${md(prev)} 為 ${signed(x.oi, 0, " 口")}，較前一日 ${signed(x.oiChg, 0, " 口")}。`, "F007", "F008")),
+            ],
           }]
         : []),
+      { type: "chart", chart: g7c, caption: null, chart_of_day: false },
+      { type: "table", table: t7(x, prev) },
+      { type: "chart", chart: g16([prev], `上櫃三大法人買賣超，依產業別（估算，${md(prev)}）`), caption: null, chart_of_day: false },
+      ...t10(prev, md(prev)).map((t) => ({ type: "table" as const, table: t })),
     ], true),
+    // 今日圖：AI 從選單挑一張（v2 只剩 G5），配 2–3 句說明
+    ...(ai
+      ? [section("chart_of_day", "今日圖", "ai", [{
+          type: "chart",
+          chart: g5(prev, x.top10),
+          caption: P(S(`權值前 5 檔是${x.top10.slice(0, 5).map((s) => s.name).join("、")}，依 ${md(prev)} 收盤市值。`, "F011")),
+          chart_of_day: true,
+        }], true)]
+      : []),
   ]
   return assemble(
     frame(b, {
@@ -630,7 +1012,7 @@ function premarket(b: Build): MarketReport {
       as_of: at(D, "06:55"), as_of_label: `資料截至 ${md(D)} 06:55`,
       title, title_origin: ai ? "ai" : "rules", highlights, highlights_origin: ai ? "ai" : "rules",
       numbers, sections, calendar,
-      sources: { data: [LIC.us, LIC.tpex, LIC.taifex, LIC.fx, LIC.filings], web: [], disagreements: [], manual: [MANUAL_LINE] },
+      sources: { data: [LIC.us, LIC.index, LIC.price, LIC.tpex, LIC.taifex, LIC.fx, LIC.margin, LIC.filings], web: [], disagreements: [], manual: [MANUAL_LINE] },
       notes: [],
     }),
     reg,
@@ -649,6 +1031,7 @@ function close(b: Build): MarketReport {
   reg.set("F007", { kind: "data", group: `price:${D}`, label: `證交所〈上市個股日成交資訊〉${md(D)}（Forliosa 加總）` })
   reg.set("F040", { kind: "data", group: `index:${D}`, label: `證交所〈每日收盤行情－大盤統計〉${md(D)}` })
   reg.set("F041", { kind: "data", group: `profile:${D}`, label: "公司基本資料（已發行股數）× 收盤價，Forliosa 計算" })
+  reg.set("F042", { kind: "data", group: `contrib:${D}`, label: `Forliosa 規則計算（各類股點數貢獻）${md(D)}` })
   reg.set("C001", { kind: "calendar", label: `美國勞工統計局〈消費者物價指數〉${mdw(nextTrading(D))} 公布`, url: "https://www.bls.gov/cpi/", date_label: md(nextTrading(D)) })
   reg.set("N001", { kind: "filing", label: `台積電重大訊息：董事會決議股利分派（${md(D)} 14:32）`, url: null, date_label: md(D) })
   reg.set("X001", { kind: "web", outlet: "示範通訊社", title: "台股收盤：權值股走勢分歧（示範報導）", url: "https://example.com/demo-news/tw-close", date_label: `${md(D)} 13:52` })
@@ -662,6 +1045,7 @@ function close(b: Build): MarketReport {
   const best = eligible.slice(0, 3)
   const worst = eligible.slice(-3).reverse()
   const semi = x.sectors.find((s) => s.name === "半導體")!
+  const semiPts = (x.taiex - x.taiexChg) * sectorW("半導體") * semi.pct
   const inst = Number((x.taiexPct * 9200).toFixed(2))
 
   const numbers: ReportNumberItem[] = [
@@ -722,39 +1106,44 @@ function close(b: Build): MarketReport {
         ? { type: "note" as const, text: "官方加權指數尚未取得，數字欄的上市市值變化是 Forliosa 估算。" }
         : { type: "chart" as const, chart: g1(D, "加權指數收盤"), caption: null, chart_of_day: false },
     ]),
+    // 類股（v2）：AI 2–4 句 → G17 → G15 → G2 v2 → G8（數字欄已有市場寬度，G2 不寫 reference）
     section("sectors", "類股", ai ? "ai" : "data", [
-      { type: "chart", chart: g2(x.sectors, `上市類股漲跌（${md(D)}）`), caption: null, chart_of_day: false },
       ...(ai
         ? [{
             type: "text" as const,
             paragraphs: [
               P(S(`漲幅前 3 類是${best.map((s) => `${s.name}類 ${pct(s.pct)}`).join("、")}。`, "F040"), S(`跌幅前 3 類是${worst.map((s) => `${s.name}類 ${pct(s.pct)}`).join("、")}。`, "F040")),
-              P(S(`半導體類 ${pct(semi.pct)}，主要由台積電構成（約 77%）。`, "F040", "F041")),
+              P(S(`半導體類 ${pct(semi.pct)}，主要由台積電構成（約 77%），對加權指數的點數貢獻約 ${signed(semiPts, 0)} 點（估算）。`, "F040", "F042")),
             ],
           }]
         : []),
-    ], true),
+      // 官方的指數檔（類股指數、規模與風格指數）沒進來時只有 Forliosa 自己算的 G17（沒有官方漲跌可對照）與 G8
+      ...(b.indexMissing
+        ? [g17([D], `各類股對加權指數的點數貢獻（估算，${md(D)}）`, false), g8([D], [prevTrading(D)], `上市類股成交金額比重（${md(D)}）`)]
+        : [
+            g17([D], `各類股對加權指數的點數貢獻（估算，${md(D)}）`),
+            g15(D, `規模與風格指數漲跌（${md(D)}）`),
+            g2v2(D, `上市類股指數漲跌（${md(D)}）`),
+            g8([D], [prevTrading(D)], `上市類股成交金額比重（${md(D)}）`),
+          ]
+      ).map((c) => ({ type: "chart" as const, chart: c, caption: null, chart_of_day: false })),
+    ]),
+    // 權值股與個股：AI 每檔一句 → G3 → T2_top10 v2（大方向、熱度格）→ 排行三張（漲幅｜跌幅｜成交值，窄的主欄一次一張）
     section("stocks", "權值股與個股", ai ? "ai" : "data", [
-      { type: "chart", chart: g3(x, `市值前 10 的點數貢獻（${md(D)}）`), caption: null, chart_of_day: false },
-      ...t2(x, md(D)).map((t) => ({ type: "table" as const, table: t })),
       ...(ai ? [{ type: "text" as const, paragraphs: stockParas }] : []),
+      { type: "chart", chart: g3(x, `市值前 10 的點數貢獻（${md(D)}）`), caption: null, chart_of_day: false },
+      { type: "table", table: t2Top10(D, `市值前 10 的大方向（${md(D)}）`) },
+      ...t2(x, md(D)).map((t) => ({ type: "table" as const, table: t })),
     ], true),
+    // 籌碼：23:45 起才有期交所與上櫃的官方數字（T7、G16）
     section("chips", "籌碼", ai ? "ai" : "data", [
       ...(ai ? [{ type: "text" as const, paragraphs: [P(S(`〔示範日報〕報導，上市三大法人 ${md(D)} 合計${inst >= 0 ? "買超" : "賣超"} ${fmt(Math.abs(inst))} 億元。`, "X002"))] }] : []),
       { type: "note" as const, text: "上市三大法人沒有開放資料，只能引用媒體報導。" },
       ...(b.tables
-        ? [{
-            type: "table" as const,
-            table: table({
-              id: "T7", title: `期貨三大法人（${md(D)}）`, columns: [col("who", "法人", "left"), col("oi", "台指期淨未平倉"), col("chg", "較前一日")],
-              rows: [
-                { cells: { who: { text: "外資及陸資" }, oi: { text: `${signed(x.oi)} 口` }, chg: { text: `${signed(x.oiChg)} 口` } } },
-                { cells: { who: { text: "投信" }, oi: { text: "+8,412 口" }, chg: { text: "+215 口" } } },
-                { cells: { who: { text: "自營商" }, oi: { text: "−2,106 口" }, chg: { text: "−388 口" } } },
-              ],
-              source_labels: [LIC.taifex],
-            }),
-          }]
+        ? [
+            { type: "table" as const, table: t7(x, D) },
+            { type: "chart" as const, chart: g16([D], `上櫃三大法人買賣超，依產業別（估算，${md(D)}）`), caption: null, chart_of_day: false },
+          ]
         : []),
     ], true),
     section("tonight", "盤後重大訊息與今晚要看的", ai ? "ai" : "data", [
@@ -768,25 +1157,20 @@ function close(b: Build): MarketReport {
           }]
         : [{ type: "note" as const, text: `${md(D)} 14:00 以後到資料截止，市值前 100 公司有 1 則重大訊息。` }]),
     ], true),
-    // 今日圖：AI 從選單挑一張（漲跌家數），配 2–3 句說明
+    // 今日圖：AI 從選單挑一張（v2 只剩 G5；漲跌家數 G4 和數字欄重複，拿掉），配 2–3 句說明
     ...(ai && f !== 2
       ? [section("chart_of_day", "今日圖", "ai", [{
           type: "chart",
-          chart: g4(x, `上市漲跌家數（${md(D)}）`),
-          caption: P(S(`${mdw(D)} 上市普通股下跌 ${x.down} 家，上漲 ${x.up} 家。`, "F006", "F007"), S(`跌停 ${x.ld} 家，漲停 ${x.lu} 家。`, "F007")),
+          chart: g5(D, x.top10),
+          caption: P(S(`權值前 5 檔是${x.top10.slice(0, 5).map((s) => s.name).join("、")}，依 ${md(D)} 收盤市值。`, "F041")),
           chart_of_day: true,
         }], true)]
       : []),
+    // 上櫃（23:45）：T5（市值前 10；漲幅｜跌幅一次一張）→ G2_otc（取代上櫃類股表 T6）
     ...(b.tables
       ? [section("otc", "上櫃", "data", [
-          {
-            type: "table",
-            table: table({
-              id: "T6", title: `上櫃類股（${md(D)}）`, rule: "Forliosa 依產業別計算，不是官方指數；2 家以下的產業不列", columns: [col("name", "產業", "left"), col("n", "家數"), col("pct", "漲跌幅")],
-              rows: x.sectors.slice(0, 8).map((s, i) => ({ cells: { name: { text: s.name }, n: { text: `${12 + i * 7}` }, pct: { text: pct(s.pct * 1.2), tone: cellTone(s.pct) } } })),
-              fold_after: 5, source_labels: [LIC.tpex],
-            }),
-          },
+          ...t5(D).map((t) => ({ type: "table" as const, table: t })),
+          { type: "chart", chart: g2Otc(D, `上櫃類股漲跌（Forliosa 計算，${md(D)}）`), caption: null, chart_of_day: false },
         ], true)]
       : []),
   ]
@@ -821,13 +1205,14 @@ function weekly(b: Build): MarketReport {
   const nStart = addDays(S0, 1)
   const nEnd = addDays(S0, 5)
   const days = tradingDays(end, 5, start)
-  const first = day(days[0]!)
   const last = day(end)
-  const weekPct = Number(((last.taiex - (first.taiex - first.taiexChg)) / (first.taiex - first.taiexChg)).toFixed(4))
-  const weekPts = Number((last.taiex - (first.taiex - first.taiexChg)).toFixed(2))
-  const tpexWeek = Number((days.reduce((a, t) => a + day(t).tpexPct, 0)).toFixed(4))
+  // 一週的漲跌是每天連乘（和類股圖的基準線、指數表同一個算法）；點數是每天漲跌點數的加總（和類股點數貢獻的官方漲跌一樣）
+  const weekPct = chain(days.map((t) => day(t).taiexPct))
+  const weekPts = Number(days.reduce((a, t) => a + day(t).taiexChg, 0).toFixed(2))
+  const tpexWeek = chain(days.map((t) => day(t).tpexPct))
   const turnover = days.reduce((a, t) => a + day(t).turnover, 0)
-  const weekSectors = SECTOR_NAMES.map((name) => ({ name, pct: Number(days.reduce((a, t) => a + day(t).sectors.find((s) => s.name === name)!.pct, 0).toFixed(4)) })).sort((a, b) => b.pct - a.pct)
+  const weekSectors = periodSectors(days).sectors
+  const period = `${md(start)}–${md(end)}`
   const eligible = weekSectors.filter((s) => !CONCENTRATED[s.name])
   const us = usDay(addDays(S0, -2))
   const usWeek: UsDay = { d: us.d, etfs: us.etfs.map((e, i) => ({ ...e, pct: Number((e.pct * 2.2 + (i - 2) * 0.003).toFixed(4)) })) }
@@ -857,26 +1242,6 @@ function weekly(b: Build): MarketReport {
     { key: "turnover_w", label: "全週成交金額", value: `${fmt(turnover, 0)} 億元`, change: null, tone: null, date_label: `${md(start)}–${md(end)}`, estimate: false, note: null },
     { key: "top_ind", label: "成交金額前三產業", value: "半導體・電腦及週邊・電子零組件", change: null, tone: null, date_label: `${md(start)}–${md(end)}`, estimate: false, note: "Forliosa 依個股成交金額加總" },
   ]
-  const nm = (s: string) => `${md(s)}`
-  const returnsRow = (name: string, w: number, oneMonth: number | null, since: number) => ({
-    cells: {
-      name: { text: name },
-      d1: { text: pct(w / 4), tone: cellTone(w) },
-      w1: { text: pct(w), tone: cellTone(w) },
-      m1: oneMonth === null ? { text: "—" } : { text: pct(oneMonth), tone: cellTone(oneMonth) },
-      since: { text: pct(since), tone: cellTone(since) },
-    },
-  })
-  const returns = table({
-    id: "T3", title: "多期間報酬", columns: [col("name", "項目", "left"), col("d1", "1 日"), col("w1", "1 週"), col("m1", "1 個月"), col("since", `${nm(ARCHIVE_FROM)} 起`)],
-    rows: [
-      returnsRow("加權指數", weekPct, null, weekPct * 1.6),
-      returnsRow("報酬指數", weekPct, null, weekPct * 1.65),
-      returnsRow("櫃買指數", tpexWeek, null, tpexWeek * 1.4),
-      ...weekSectors.map((s) => returnsRow(s.name, s.pct, null, s.pct * 1.5)),
-    ],
-    fold_after: 6, note: `1 個月的比較約 ${md(addDays(ARCHIVE_FROM, 31))} 以後才有`, source_labels: [LIC.index, LIC.tpex],
-  })
   const title = ai ? `加權指數一週 ${pct(weekPct)}，${eligible[0]!.name}類一週 ${pct(eligible[0]!.pct)} 最多` : `市場週報 ${md(start)}–${md(end)}：加權指數週 ${pct(weekPct)}`
   const highlights = ai
     ? [
@@ -898,24 +1263,33 @@ function weekly(b: Build): MarketReport {
       ...(ai ? [{ type: "text" as const, paragraphs: [P(S(`加權指數 ${md(end)} 收 ${fmt(last.taiex)} 點，一週 ${arrow(weekPts)} 點。`, "F001", "F002"), S("〔示範通訊社〕報導，這一週電子權值股與金融股走勢分歧。", "X001"))] }] : []),
       { type: "chart", chart: g1(end, "加權指數收盤"), caption: null, chart_of_day: false },
     ]),
-    section("returns", "多期間報酬", "data", [{ type: "table", table: returns }], true),
-    section("sectors_week", "類股一週", ai ? "ai" : "data", [
-      { type: "chart", chart: g2(weekSectors, `上市類股一週漲跌（${md(start)}–${md(end)}）`), caption: null, chart_of_day: false },
+    // 類股一週與大方向（v2：併入原本的「多期間報酬」）：AI → G17（一週加總）→ T3（9 個指數）→ G2（近 1 週｜近 1 月）→ G8（較前一週）
+    section("sectors_week", "類股一週與大方向", ai ? "ai" : "data", [
       ...(ai ? [{ type: "text" as const, paragraphs: [P(S(`一週漲幅前 3 類是${eligible.slice(0, 3).map((s) => `${s.name}類 ${pct(s.pct)}`).join("、")}。`, "F020")), P(S(`半導體類一週 ${pct(weekSectors.find((s) => s.name === "半導體")!.pct)}，主要由台積電構成（約 77%）。`, "F020"))] }] : []),
-    ], true),
+      { type: "chart", chart: g17(days, `各類股對加權指數的點數貢獻（估算，${period}）`), caption: null, chart_of_day: false },
+      { type: "table", table: t3(end, days) },
+      { type: "chart", chart: g2v2(end, `上市類股一週漲跌（${period}）`, { week: days }), caption: null, chart_of_day: false },
+      { type: "chart", chart: g8(days, tradingDays(prevTrading(days[0]!), 5, "2025-01-01"), `上市類股成交金額比重（${period}）`, true), caption: null, chart_of_day: false },
+    ]),
+    // 權值股與個股：AI 每檔一句 → G3 → T2_top10（週漲跌｜近 1 月）→ 週漲幅｜週跌幅｜週成交值（一次一張）；G5 改到「本週圖」的選單
+    // （週報的每一段都和盤後一樣 AI 文字在前：不用先捲過 1,700–2,000px 的表）
     section("stocks_week", "權值股與個股", ai ? "ai" : "data", [
-      { type: "chart", chart: g3(weekDay, `市值前 10 的週點數貢獻（${md(start)}–${md(end)}）`), caption: null, chart_of_day: false },
-      ...t2(weekDay, `${md(start)}–${md(end)}`).slice(0, 3).map((t) => ({ type: "table" as const, table: t })),
-      { type: "chart", chart: g5(end, weekDay.top10, "權值前 5 近 1 個月漲跌幅"), caption: null, chart_of_day: false },
       ...(ai ? [{ type: "text" as const, paragraphs: [P(S(`${weekDay.top10[0]!.name}（${weekDay.top10[0]!.code}）一週點數貢獻約 ${signed(weekDay.top10[0]!.contrib)} 點（估算）。`, "F020"))] }] : []),
+      { type: "chart", chart: g3(weekDay, `市值前 10 的週點數貢獻（${period}）`), caption: null, chart_of_day: false },
+      { type: "table", table: t2Top10(end, `市值前 10 的大方向（${period}）`, days) },
+      ...t2(weekDay, period, true).map((t) => ({ type: "table" as const, table: t })),
     ], true),
+    // 籌碼：AI → G7 → T9（期貨的週變化、P/C、上櫃法人週合計）→ G16（一週）→ T10（融資週增減）
     section("chips_week", "籌碼", ai ? "ai" : "data", [
-      { type: "chart", chart: g7(end, "外資台指期淨未平倉（近 20 個交易日）"), caption: null, chart_of_day: false },
       ...(ai ? [{ type: "text" as const, paragraphs: [P(S(`外資台指期淨未平倉 ${md(end)} 為 ${signed(last.oi, 0, " 口")}。`, "F031"), S(`〔示範日報〕報導，外資這一週在集中市場${instWeek >= 0 ? "買超" : "賣超"} ${fmt(Math.abs(instWeek))} 億元。`, "X002"))] }] : []),
+      { type: "chart", chart: g7(end, "外資台指期淨未平倉（近 20 個交易日）"), caption: null, chart_of_day: false },
+      { type: "table", table: t9(start, end, days) },
+      { type: "chart", chart: g16(days, `上櫃三大法人買賣超，依產業別（估算，${period}）`), caption: null, chart_of_day: false },
+      ...t10(end, period, true).map((t) => ({ type: "table" as const, table: t })),
     ], true),
     section("global_week", "國際", ai ? "ai" : "data", [
-      { type: "chart", chart: g6(usWeek, `美股 ETF 與台積電 ADR 一週（美股 ${md(addDays(start, -1))}–${md(us.d)}）`), caption: null, chart_of_day: false },
       ...(ai ? [{ type: "text" as const, paragraphs: [P(S(`SMH 美股 ${md(addDays(start, -1))}–${md(us.d)} ${pct(usWeek.etfs[3]!.pct)}，台積電 ADR ${pct(usWeek.etfs[4]!.pct)}。`, "F030"), S("〔Demo Wire〕報導，半導體股這一週漲跌互見。", "X004"))] }] : []),
+      { type: "chart", chart: g6(usWeek, `美股 ETF 與台積電 ADR 一週（美股 ${md(addDays(start, -1))}–${md(us.d)}）`), caption: null, chart_of_day: false },
     ], true),
     ...(ai
       ? [
@@ -932,6 +1306,13 @@ function weekly(b: Build): MarketReport {
             ],
           }], true),
           section("risks", "可能讓關注點改變的事", "ai", [{ type: "text", paragraphs: [P(S(`已排定：美國 10 月消費者物價指數 ${mdw(addDays(nStart, 3))} 公布。`, "C010"), S("〔示範財經網〕報導市場關注數據和利率的關係。", "X003"))] }], true),
+          // 本週圖：選單只剩 G5（v2：從固定的圖改成選單）
+          section("chart_of_day", "本週圖", "ai", [{
+            type: "chart",
+            chart: g5(end, last.top10),
+            caption: P(S(`權值前 5 檔是${last.top10.slice(0, 5).map((s) => s.name).join("、")}，依 ${md(end)} 收盤市值。`, "F020")),
+            chart_of_day: true,
+          }], true),
         ]
       : []),
   ]
@@ -951,7 +1332,7 @@ function weekly(b: Build): MarketReport {
         ],
         empty_text: null, source_labels: ["證交所重大訊息", "期交所規則（Forliosa 計算）", "美國勞工統計局（Forliosa 整理）", "經濟部（Forliosa 整理）"],
       },
-      sources: { data: [LIC.index, LIC.price, LIC.tpex, LIC.taifex, LIC.us], web: [], disagreements: [], manual: [MANUAL_LINE] },
+      sources: { data: [LIC.index, LIC.price, LIC.tpex, LIC.taifex, LIC.margin, LIC.us], web: [], disagreements: [], manual: [MANUAL_LINE] },
       notes: [],
     }),
     reg,

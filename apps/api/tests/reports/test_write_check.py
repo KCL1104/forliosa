@@ -40,8 +40,9 @@ def test_write_request_shape_and_parse(pk):
     body, headers = fake.requests[0]["body"], fake.requests[0]["headers"]
     assert body["stream"] is True and body["model"] == "claude-opus-5-5" and body["max_tokens"] == 64000
     assert body["output_config"]["effort"] == "high" and body["output_config"]["format"]["type"] == "json_schema"
+    # no G5 without the market data service, and G4 left the menus (v2): only none
     assert body["output_config"]["format"]["schema"]["properties"]["chart_of_day"]["properties"]["code"]["enum"] == \
-        ["G4", "none"]
+        ["none"]
     assert body["fallbacks"] == "default" and "server-side-fallback-2026-07-01" in headers["anthropic-beta"]
     assert "tools" not in body and "thinking" not in body
     assert body["system"][0]["cache_control"] == {"type": "ephemeral"} and "11/16" not in body["system"][0]["text"]

@@ -151,8 +151,8 @@ describe("報告頁", () => {
     const target = article.querySelector(cite.getAttribute("href")!)!
     expect(target.tagName).toBe("LI")
     expect(within(target as HTMLElement).getByRole("link", { name: /回到出處 \d+ 的原句/ })).toBeInTheDocument()
-    // 圖：類股是雙向橫條（集中度寫在名稱下面）；點數貢獻標「估算」與官方漲跌
-    expect(within(article).getByText("主要由台積電構成（約 77%）")).toBeInTheDocument()
+    // 圖：類股是雙向橫條（類股內的漲跌家數與集中度寫在名稱下面）；點數貢獻標「估算」與官方漲跌
+    expect(within(article).getByText(/^漲 \d+・跌 \d+・主要由台積電構成（約 77%）$/)).toBeInTheDocument()
     const g3 = within(article).getByText(/^市值前 10 的點數貢獻/).closest("figure")!
     expect(within(g3).getByText("估算")).toBeInTheDocument()
     expect(within(g3).getByText(/^官方漲跌/)).toBeInTheDocument()
@@ -165,15 +165,16 @@ describe("報告頁", () => {
     mount({ reports: "public" })
     renderApp("/market?tab=reports&kind=close")
     const article = await report()
-    const toggle = within(article).getByRole("button", { name: "類股" })
+    const toggle = within(article).getByRole("button", { name: "權值股與個股" })
     expect(toggle).toHaveAttribute("aria-expanded", "false")
     expect(document.getElementById(toggle.getAttribute("aria-controls")!)).not.toBeVisible()
     fireEvent.click(toggle)
     expect(toggle).toHaveAttribute("aria-expanded", "true")
     expect(document.getElementById(toggle.getAttribute("aria-controls")!)).toBeVisible()
-    // 「今天發生什麼」不收合：沒有按鈕
+    // 「今天發生什麼」「類股」不收合：沒有按鈕
     expect(within(article).queryByRole("button", { name: "今天發生什麼" })).toBeNull()
     expect(within(article).getByRole("heading", { level: 3, name: "今天發生什麼" })).toBeInTheDocument()
+    expect(within(article).queryByRole("button", { name: "類股" })).toBeNull()
   })
 
   it("AI 段落還在整理：只有資料的版本，寫一行狀態；沒有模型行", async () => {

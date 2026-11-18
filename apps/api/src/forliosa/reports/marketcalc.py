@@ -32,13 +32,14 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from forliosa.datapolicy import dataset_served
-from forliosa.marketdata.opendata import INDUSTRY_CODES, TAIEX_TR
+from forliosa.marketdata.opendata import INDUSTRY_CODES, TAIEX_TR, TPEX_INDEX
 from forliosa.models import (
     CompanyProfile,
     FxRate,
     IndexDaily,
     InstitutionalDaily,
     Instrument,
+    MarginDaily,
     MarketEvent,
     PriceDaily,
     ReferencePrice,
@@ -48,6 +49,7 @@ from forliosa.models import (
 from forliosa.reports.timing import usable
 from forliosa.services.instruments import security_class
 from forliosa.services.market_overview import MAX_MOVE, SECTOR_COMPOSITES, SECTOR_SUFFIX
+from forliosa.timeutil import tw_trading_days
 
 log = logging.getLogger(__name__)
 
@@ -75,6 +77,8 @@ SECTOR_CODES: dict[str, list[str]] = {
     "綠能環保": ["35"], "數位雲端": ["36"], "運動休閒": ["37"], "居家生活": ["38"], "其他": ["20"],
 }
 SECTOR_NAMES = tuple(SECTOR_CODES)
+SECTOR_OF_CODE: dict[str, str] = {c: s for s, codes in SECTOR_CODES.items() for c in codes}
+UNMAPPED = "（未分類）"  # a listed common whose industry code is in no sector (none on 2026-11-17)
 
 
 # -- small helpers ---------------------------------------------------------------------------------------------------
@@ -359,12 +363,21 @@ class Lists:
 SCOPE_RULE = "範圍：市值前 200 名或 300 億元以上；排除創新板、全額交割（變更交易）、處置股"
 
 
-def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
-    """The rule-made lists of a session (or of a synthetic week: ``limits=False``, no limit-move rewrite)."""
-    ranked = day.by_mcap()
-    top10 = ranked[:TOP_N]
-    altered = in_effect(db, "altered_trading", day.day)
-    disposed = in_effect(db, "disposition", day.day)
+@dataclass
+class Scope:
+    """The rankings' scope (:data:`SCOPE_RULE`) of a list of commons ranked by market cap."""
+
+    ranked: list[Quote]
+    scope: list[Quote]  # in range, not excluded, with a sane move: the movers' lists
+    in_range: list[Quote]  # the same before the move check: the turnover list's, the margin table's
+    excluded: dict[str, int]
+
+
+def rule_scope(db: Session, ranked: list[Quote], day: date) -> Scope:
+    """The 200 largest (or NT$30 billion and up) of ``ranked`` (commons, largest first) without the innovation board,
+    altered trading or disposition on ``day``."""
+    altered = in_effect(db, "altered_trading", day)
+    disposed = in_effect(db, "disposition", day)
     excluded: dict[str, int] = defaultdict(int)
     scope: list[Quote] = []
     in_range: list[Quote] = []  # the scope before the move check: the turnover list's (a move is not needed there)
@@ -383,6 +396,15 @@ def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
         else:
             scope.append(q)
             in_range.append(q)
+    return Scope(ranked, scope, in_range, dict(excluded))
+
+
+def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
+    """The rule-made lists of a session (or of a synthetic week: ``limits=False``, no limit-move rewrite)."""
+    ranked = day.by_mcap()
+    top10 = ranked[:TOP_N]
+    sc = rule_scope(db, ranked, day.day)
+    scope, in_range, excluded = sc.scope, sc.in_range, sc.excluded
     order = {q.symbol: i for i, q in enumerate(ranked)}  # market-cap rank breaks ties
     up = sorted((q for q in scope if q.pct > 0), key=lambda q: (-q.pct, order[q.symbol]))
     down = sorted((q for q in scope if q.pct < 0), key=lambda q: (q.pct, order[q.symbol]))
@@ -396,7 +418,7 @@ def rule_lists(db: Session, day: Day, limits: bool = True) -> Lists:
     by_value = sorted((q for q in in_range if getattr(q, col)), key=lambda q: (-(getattr(q, col) or 0),
                                                                                order.get(q.symbol, 10**6)))[:TOP_N]
     return Lists(top10, gainers, losers, by_value, col, len(ld) if len(ld) >= LIMIT_MANY else None,
-                 len(lu) if len(lu) >= LIMIT_MANY else None, SCOPE_RULE, dict(excluded))
+                 len(lu) if len(lu) >= LIMIT_MANY else None, SCOPE_RULE, excluded)
 
 
 def top_by_mcap(days: Iterable[Day | None], n: int = EVENT_RANK) -> list[str]:
@@ -567,6 +589,284 @@ def month_back(d: date) -> date:
     return date(y, m, 28)
 
 
+def index_move(points: list[IndexPoint], end: date, base: date) -> Decimal | None:
+    """The close on ``end`` against the close on ``base`` itself (``None`` when either is not archived: a missing
+    base close is never replaced by an earlier one, which would make 「近 1 週」 a longer period than its label)."""
+    last = next((p for p in points if p.day == end), None)
+    first = next((p for p in points if p.day == base), None)
+    if last is None or first is None or not first.close:
+        return None
+    return (last.close - first.close) / first.close
+
+
+def sessions_back(end: date, n: int) -> date:
+    """The Taiwan session ``n`` sessions before ``end`` (``n`` = 5: the close a week's move starts from)."""
+    days = [d for d in tw_trading_days(end - timedelta(days=14 + 2 * n), end) if d <= end]
+    if end not in days:
+        days.append(end)
+    return days[-n - 1]
+
+
+def month_base(end: date) -> date:
+    """The session a month's move starts from: the last Taiwan session on or before :func:`month_back` (``end``)."""
+    back = month_back(end)
+    days = tw_trading_days(back - timedelta(days=14), back)
+    return days[-1] if days else back
+
+
+def archive_ready(first: date, n_sessions: int = 5) -> tuple[date, date]:
+    """From an archive starting at ``first``: the first day a week's move (``n_sessions`` back) and a month's move can
+    be measured."""
+    days = tw_trading_days(first, first + timedelta(days=30))
+    week = days[n_sessions] if len(days) > n_sessions else first + timedelta(days=7)
+    y, m = (first.year + 1, 1) if first.month == 12 else (first.year, first.month + 1)
+    month = None
+    for d in (first.day, 30, 29, 28):
+        try:
+            month = date(y, m, d)
+            break
+        except ValueError:
+            continue
+    return week, month or first + timedelta(days=30)
+
+
+# -- v2: sectors in more depth (contributions, breadth, turnover, periods) --------------------------------------------
+def sector_of_code(code: str | None) -> str | None:
+    return SECTOR_OF_CODE.get(code or "")
+
+
+@dataclass(frozen=True)
+class SectorContrib:
+    name: str  # a sector of :data:`SECTOR_CODES`, or :data:`UNMAPPED`
+    points: Decimal  # estimated index points (sum of its members' :func:`contributions`)
+    weight: Decimal  # previous-day market-cap share among the listed commons that moved
+    members: int
+
+
+def sector_contributions(day: Day, taiex_prev: Decimal | None) -> list[SectorContrib]:
+    """Each sector's estimated index points: its members' contributions (previous TAIEX × previous weight × move)
+    summed, with its previous-day weight; largest drag first. Empty without a previous TAIEX or any move."""
+    per = contributions(day, taiex_prev)
+    if not per:
+        return []
+    commons = [q for q in day.commons() if q.symbol in per]
+    total = sum((q.mcap_prev for q in commons if q.mcap_prev is not None), Decimal(0))
+    pts: dict[str, Decimal] = defaultdict(Decimal)
+    wts: dict[str, Decimal] = defaultdict(Decimal)
+    cnt: dict[str, int] = defaultdict(int)
+    for q in commons:
+        s = sector_of_code(q.industry_code) or UNMAPPED
+        pts[s] += per[q.symbol]
+        wts[s] += (q.mcap_prev or Decimal(0)) / total if total else Decimal(0)
+        cnt[s] += 1
+    out = [SectorContrib(s, pts[s], wts[s], cnt[s]) for s in pts]
+    out.sort(key=lambda c: (c.points, c.name))
+    return out
+
+
+def add_contributions(days: Iterable[list[SectorContrib]]) -> list[SectorContrib]:
+    """A week's sector points: each session's summed (the weight and members of the first session)."""
+    pts: dict[str, Decimal] = defaultdict(Decimal)
+    first: dict[str, SectorContrib] = {}
+    for one in days:
+        for c in one:
+            pts[c.name] += c.points
+            first.setdefault(c.name, c)
+    out = [SectorContrib(n, pts[n], first[n].weight, first[n].members) for n in pts]
+    out.sort(key=lambda c: (c.points, c.name))
+    return out
+
+
+def sector_breadth(day: Day) -> dict[str, Breadth]:
+    """Advancers, decliners and limit moves of each sector's listed commons (moves from the day's reference price,
+    as :func:`breadth`): summed over the sectors they are the market's."""
+    groups: dict[str, list[Quote]] = defaultdict(list)
+    for q in day.commons():
+        groups[sector_of_code(q.industry_code) or UNMAPPED].append(q)
+    return {s: breadth(Day(day.market, day.day, day.prev_day, {q.symbol: q for q in qs})) for s, qs in groups.items()}
+
+
+@dataclass(frozen=True)
+class SectorTurnover:
+    name: str
+    value: int  # NT$ traded (its listed commons)
+    share: Decimal  # of all listed commons' value
+    change: Decimal | None  # share − the previous period's share (a fraction: ×100 = percentage points)
+    top: Quote | None  # the largest value in the rankings' scope
+    top_value: int | None
+    top_share: Decimal | None  # top_value ÷ value
+
+
+def sector_values(quotes: Iterable[Quote], values: dict[str, int] | None = None) -> dict[str, int]:
+    """NT$ traded per sector by listed commons (``values``: per-symbol sums of several sessions, e.g. a week)."""
+    out: dict[str, int] = defaultdict(int)
+    for q in quotes:
+        if not q.common:
+            continue
+        v = values.get(q.symbol) if values is not None else q.value
+        if v:
+            out[sector_of_code(q.industry_code) or UNMAPPED] += int(v)
+    return dict(out)
+
+
+def sector_turnover(now: dict[str, int], prev: dict[str, int] | None, in_range: Iterable[Quote],
+                    values: dict[str, int] | None = None) -> list[SectorTurnover]:
+    """Each sector's share of the listed commons' traded value, its change against ``prev`` (``None`` without one),
+    and the stock with the largest value inside the rankings' scope (``in_range``); largest share first."""
+    total = sum(now.values())
+    if not total:
+        return []
+    prev_total = sum(prev.values()) if prev else 0
+    tops: dict[str, tuple[Quote, int]] = {}
+    for q in in_range:
+        v = values.get(q.symbol) if values is not None else q.value
+        s = sector_of_code(q.industry_code)
+        if not v or s is None:
+            continue
+        if s not in tops or v > tops[s][1]:
+            tops[s] = (q, int(v))
+    out = []
+    for s, v in now.items():
+        share = Decimal(v) / Decimal(total)
+        change = share - Decimal(prev.get(s, 0)) / Decimal(prev_total) if prev and prev_total else None
+        top = tops.get(s)
+        out.append(SectorTurnover(s, v, share, change, top[0] if top else None, top[1] if top else None,
+                                  Decimal(top[1]) / Decimal(v) if top else None))
+    out.sort(key=lambda t: (-t.share, t.name))
+    return out
+
+
+# the size and style indices of TWSE's MI_INDEX file and the TPEx index (G15): (group, label, index name)
+STYLE_INDICES: tuple[tuple[str, str, str], ...] = (
+    ("大小型股", "臺灣50", "臺灣50指數"), ("大小型股", "中型100", "臺灣中型100指數"),
+    ("大小型股", "小型股300", "小型股300指數"),
+    ("電子與非電子", "電子工業", "電子工業類指數"), ("電子與非電子", "未含電子", "未含電子指數"),
+    ("電子與非電子", "金融保險", "金融保險類指數"),
+    ("高股息與上櫃", "臺灣高股息", "臺灣高股息指數"), ("高股息與上櫃", "櫃買指數", TPEX_INDEX),
+)
+
+
+@dataclass(frozen=True)
+class StyleMove:
+    group: str
+    label: str
+    point: IndexPoint
+
+
+def style_moves(db: Session, day: date, cutoff: datetime, policy: str = "commercial") -> list[StyleMove]:
+    """The size and style indices' moves on ``day`` (those usable at ``cutoff``; TPEx's from 14:30)."""
+    out = []
+    for group, label_, name in STYLE_INDICES:
+        p = index_on(db, name, day, cutoff, policy)
+        if p is not None and p.pct is not None:
+            out.append(StyleMove(group, label_, p))
+    return out
+
+
+@dataclass(frozen=True)
+class SectorView:
+    key: str  # "1d" | "1w" | "1m" | "since"
+    label: str
+    moves: dict[str, Decimal]  # sector -> move over the period
+    bench: Decimal | None  # TAIEX over the same period
+    base: date | None  # the close the move starts from (``None``: the day's own official move)
+
+
+def sector_views(db: Session, day: date, cutoff: datetime, taiex: list[tuple[date, Decimal]],
+                 one_day: dict[str, Decimal], taiex_day: Decimal | None, *, policy: str = "commercial",
+                 periods: Iterable[tuple[str, str, date]] = (), since: bool = True,
+                 first: tuple[str, str, date | None] = ("1d", "1 日", None)) -> list[SectorView]:
+    """The 32 sectors over several periods: ``one_day`` (the official moves of ``day``, ``taiex_day`` its bench; a
+    week's moves with ``first`` = ("1w", "本週", the base session)), then each of ``periods`` — (key, label, base
+    session) — whose base the sector archive reaches, and, when one of them does not, 「11/12 起」 (from the archive's
+    first close; only when that is earlier than the session before ``day``). ``taiex``: the TAIEX closes (MI_INDEX
+    and FMTQIK) for the benches."""
+    views = [SectorView(first[0], first[1], dict(one_day), taiex_day, first[2])] if one_day else []
+    periods = list(periods)
+    if not periods:
+        return views
+    oldest = min(b for _k, _l, b in periods)
+    series = {s: index_points(db, f"{s}{SECTOR_SUFFIX}", cutoff, upto=day, since=oldest - timedelta(days=10),
+                              policy=policy) for s in one_day}
+    tpts = [IndexPoint(TAIEX, d, c, None, None, "") for d, c in taiex if d <= day]
+    short = False
+    for key, label_, base in periods:
+        moves = {s: m for s, pts in series.items() if (m := index_move(pts, day, base)) is not None}
+        if len(moves) < max(2, len(one_day) // 2):
+            short = True
+            continue
+        views.append(SectorView(key, label_, moves, index_move(tpts, day, base), base))
+    if short and since:
+        firsts = [pts[0].day for pts in series.values() if pts]
+        first = min(firsts) if firsts else None
+        prev_sessions = [d for d in tw_trading_days(day - timedelta(days=14), day) if d < day]
+        if first is not None and prev_sessions and first < prev_sessions[-1] and not any(
+                v.base is not None and v.base <= first for v in views):
+            moves = {s: m for s, pts in series.items() if (m := index_move(pts, day, first)) is not None}
+            if len(moves) >= 2:
+                views.append(SectorView("since", f"{first.month}/{first.day} 起", moves,
+                                        index_move(tpts, day, first), first))
+    return views
+
+
+def chained_returns(db: Session, symbols: Iterable[str], end: date, cutoff: datetime, bases: dict[str, date],
+                    policy: str = "commercial") -> dict[str, dict[str, Decimal | None]]:
+    """Each symbol's move from the close of each ``bases`` session (key -> base session) to ``end``: every session's
+    close ÷ its reference price (else the previous archived close), chained — an ex-rights day is not a fall. Official
+    archive closes and reference prices only (never the history backfill). ``None`` where the archive does not reach
+    the base, misses ``end`` or misses any Taiwan session in between: the next day's reference price is the missing
+    day's close, so that day's move would silently drop out of the chain (a confident 0.00% instead of 「—」)."""
+    syms = list(dict.fromkeys(symbols))
+    out: dict[str, dict[str, Decimal | None]] = {s: dict.fromkeys(bases) for s in syms}
+    if not syms or not bases:
+        return out
+    start = min(bases.values())
+    closes: dict[str, dict[date, Decimal]] = defaultdict(dict)
+    for r in db.scalars(select(PriceDaily).where(PriceDaily.symbol.in_(syms), PriceDaily.date >= start,
+                                                 PriceDaily.date <= end)):
+        market = "TPEX" if r.symbol.endswith(".TWO") else "TWSE"
+        if r.source not in _sources(market, policy) or not usable(f"{r.source}/price", r.date, cutoff):
+            continue
+        closes[r.symbol].setdefault(r.date, r.close)
+    refs: dict[str, dict[date, Decimal]] = defaultdict(dict)
+    for r in db.scalars(select(ReferencePrice).where(ReferencePrice.symbol.in_(syms), ReferencePrice.date > start,
+                                                     ReferencePrice.date <= end)):
+        src = "tpex-openapi" if r.symbol.endswith(".TWO") else "twse-openapi"
+        if r.source == src and r.reference_price and usable(f"{src}/reference", r.date, cutoff):
+            refs[r.symbol][r.date] = r.reference_price
+    for sym in syms:
+        cl = closes.get(sym, {})
+        if end not in cl:
+            continue
+        days = sorted(cl)
+        for key, base in bases.items():
+            if base not in cl or any(d not in cl for d in tw_trading_days(base + timedelta(days=1), end)):
+                continue
+            ratio = Decimal(1)
+            ok = True
+            span_days = [d for d in days if base < d <= end]
+            prev_close = cl[base]
+            for d in span_days:
+                b = refs.get(sym, {}).get(d) or prev_close
+                if not b:
+                    ok = False
+                    break
+                ratio *= cl[d] / b
+                prev_close = cl[d]
+            out[sym][key] = ratio - 1 if ok and span_days else None
+    return out
+
+
+def week_values(days: Iterable[Day | None]) -> dict[str, int]:
+    """Per-symbol NT$ traded summed over ``days``."""
+    out: dict[str, int] = defaultdict(int)
+    for d in days:
+        for q in (d.quotes.values() if d else []):
+            if q.value:
+                out[q.symbol] += int(q.value)
+    return dict(out)
+
+
 # -- TPEx ------------------------------------------------------------------------------------------------------------
 @dataclass(frozen=True)
 class OtcSector:
@@ -623,6 +923,105 @@ def otc_institutional(db: Session, day: Day, cutoff: datetime) -> tuple[dict[str
             sums[k] += Decimal(v or 0) * q.close
         per.append(FlowAmount(r.symbol, q.name, Decimal(r.total_net or 0) * q.close))
     return sums, per
+
+
+@dataclass(frozen=True)
+class IndustryFlow:
+    code: str
+    name: str  # without the trailing 「業」 (通信網路)
+    amount: Decimal  # NT$ estimate: the members' net shares × close, summed
+    members: int
+
+
+def otc_flows_by_industry(per: Iterable[FlowAmount], industries: dict[str, str | None]) -> list[IndustryFlow]:
+    """The TPEx institutional estimates (:func:`otc_institutional`'s per-stock amounts, one session or several)
+    summed by industry code (``industries``: symbol -> code); largest net buy first."""
+    amt: dict[str, Decimal] = defaultdict(Decimal)
+    members: dict[str, set[str]] = defaultdict(set)
+    for fa in per:
+        code = industries.get(fa.symbol)
+        if not code:
+            continue
+        amt[code] += fa.amount
+        members[code].add(fa.symbol)
+    out = [IndustryFlow(c, INDUSTRY_CODES.get(c, c).removesuffix("業") or c, a, len(members[c]))
+           for c, a in amt.items()]
+    out.sort(key=lambda f: (-f.amount, f.code))
+    return out
+
+
+# -- margin (融資) -----------------------------------------------------------------------------------------------------
+MARGIN_SOURCES = {"TWSE": "twse-openapi", "TPEX": "tpex-openapi"}
+LOT = 1000  # shares in a lot (張)
+
+
+@dataclass(frozen=True)
+class MarginChange:
+    quote: Quote
+    balance: int  # lots at the end
+    change: int  # lots against the base date
+    amount: Decimal  # change × 1,000 × close: the order of the table (an estimate, never printed as a sum)
+
+
+@dataclass
+class MarginTable:
+    rows: list[MarginChange]  # every stock in scope with both balances
+    markets: list[str]  # the markets whose two dates were usable
+    end: dict[str, date]
+    base: dict[str, date]
+
+
+def margin_balances(db: Session, market: str, day: date, cutoff: datetime) -> dict[str, int]:
+    """Margin purchase balances (lots) of ``market`` on ``day``, when that file was out at ``cutoff``."""
+    src = MARGIN_SOURCES[market]
+    if not usable(f"{src}/margin", day, cutoff):
+        return {}
+    return {sym: int(bal) for sym, bal in db.execute(select(MarginDaily.symbol, MarginDaily.margin_balance).where(
+        MarginDaily.date == day, MarginDaily.source == src, MarginDaily.symbol.like(f"%{_suffix(market)}")))
+        if bal is not None}
+
+
+def margin_date(db: Session, market: str, before: date, cutoff: datetime, inclusive: bool = False) -> date | None:
+    """The newest margin date of ``market`` before ``before`` (or on it: ``inclusive``) usable at ``cutoff``."""
+    src = MARGIN_SOURCES[market]
+    stmt = select(MarginDaily.date).where(MarginDaily.source == src,
+                                          MarginDaily.date <= before if inclusive else MarginDaily.date < before)
+    for d in db.scalars(stmt.group_by(MarginDaily.date).order_by(MarginDaily.date.desc()).limit(5)):
+        if usable(f"{src}/margin", d, cutoff):
+            return d
+    return None
+
+
+def margin_changes(db: Session, in_range: Iterable[Quote], end: date, cutoff: datetime,
+                   since: date | None = None) -> MarginTable:
+    """Margin purchase balance changes of the stocks in ``in_range`` (each market's: TWSE and TPEx publish their own
+    files) from the previous margin date to ``end``; for a week (``since``), from the last date before ``since`` to
+    the market's newest file of the week that was out at ``cutoff`` (TWSE's Friday file comes the next trading
+    morning: a Sunday edition ends its listed side on Thursday, and says so)."""
+    quotes = list(in_range)
+    rows: list[MarginChange] = []
+    markets, ends, bases = [], {}, {}
+    for market in ("TWSE", "TPEX"):
+        mine = [q for q in quotes if q.market == market]
+        if not mine:
+            continue
+        end_m = margin_date(db, market, end, cutoff, inclusive=True)
+        if end_m is None or (end_m != end if since is None else end_m < since):
+            continue
+        now = margin_balances(db, market, end_m, cutoff)
+        base_day = margin_date(db, market, since or end_m, cutoff)
+        if not now or base_day is None:
+            continue
+        before = margin_balances(db, market, base_day, cutoff)
+        if not before:
+            continue
+        markets.append(market)
+        ends[market], bases[market] = end_m, base_day
+        for q in mine:
+            if q.symbol in now and q.symbol in before:
+                ch = now[q.symbol] - before[q.symbol]
+                rows.append(MarginChange(q, now[q.symbol], ch, Decimal(ch * LOT) * q.close))
+    return MarginTable(rows, markets, ends, bases)
 
 
 # -- TAIFEX, FX, US ----------------------------------------------------------------------------------------------

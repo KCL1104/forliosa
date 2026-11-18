@@ -46,7 +46,16 @@ def test_data_edition_premarket(market_db, us_on):
     assert texts[0].startswith("美股 ETF（美股 11/16 收盤）：SPY ▲0.50%")
     assert texts[1].startswith("今天：鴻海（2317）法說會；市值前 100 中 1 家除權息、1 家法說會")
     assert texts[2] == "外資台指期淨未平倉（11/16）：淨空 96,787 口，較前一日 ▼6,787 口"
-    assert [s["key"] for s in pay["sections"]][:2] == ["overnight", "evening"]
+    keys = [s["key"] for s in pay["sections"]]
+    assert keys == ["overnight", "yesterday", "chips"]  # no AI: no watch, no chart of the day
+    by = {s["key"]: s for s in pay["sections"]}
+    assert by["yesterday"]["title"] == "昨日台股全貌（11/16）" and not by["yesterday"]["collapsed_mobile"]
+    assert by["yesterday"]["blocks"][0] == {"type": "note", "text": assemble.yesterday_note(_pk)}
+    # (G2_otc needs an OTC industry of three commons: this market has none)
+    assert [b["chart"]["id"] for b in by["yesterday"]["blocks"][1:]] == ["G17", "G15", "G2", "G8"]
+    assert by["chips"]["title"] == "昨日籌碼（晚間公布）" and by["chips"]["collapsed_mobile"]
+    assert [(b["type"], (b.get("chart") or b.get("table"))["id"]) for b in by["chips"]["blocks"]] == \
+        [("chart", "G7"), ("table", "T7"), ("chart", "G16")]
     assert pay["calendar"]["title"].startswith("今日行事曆")
 
 
@@ -60,8 +69,7 @@ def test_ai_edition_footnotes_and_public_form(market_db):
     assert web[0]["outlet"] == "中央社" and web[0]["date_label"] == "11/16 15:32"
     assert pay["sources"]["web"] == [{"n": web[0]["n"], "outlet": "中央社", "title": "外資賣超千億",
                                       "url": INST_X["url"], "published_label": "11/16 15:32"}]
-    chart = next(sec for sec in pay["sections"] if sec["key"] == "chart_of_day")
-    assert chart["blocks"][0]["chart"]["id"] == "G4" and chart["blocks"][0]["chart_of_day"]
+    assert not any(sec["key"] == "chart_of_day" for sec in pay["sections"])  # none picked
     pub = assemble.public(pay)
     import json
 
@@ -73,10 +81,27 @@ def test_ai_edition_footnotes_and_public_form(market_db):
 def test_premarket_ai_sections(market_db, us_on):
     pay, _pk, _ = build(market_db, "premarket", TUE, output=premarket_output)
     keys = [s["key"] for s in pay["sections"]]
-    assert keys[:3] == ["overnight", "evening", "watch"]
+    assert keys == ["overnight", "watch", "yesterday", "chips"]
+    chips = next(s for s in pay["sections"] if s["key"] == "chips")
+    assert chips["blocks"][0]["type"] == "text"  # the evening notes first, then G7, T7, G16
     watch = next(s for s in pay["sections"] if s["key"] == "watch")
     item = watch["blocks"][0]["items"][0]
     assert item["title"] == "鴻海法說會" and item["meta"].startswith("11/17") and "其他電子" in item["meta"]
+
+
+def test_the_chart_of_day_is_g5_only(market_db):
+    """v2: the menus hold G5 (G2 is fixed, G4's breadth is the number strip's); a pick draws the server's chart."""
+    built = pack.build(market_db, "close", MON, cutoff=ts(MON, 15, 40), now=ts(MON, 16))
+    assert [m["code"] for m in built.pack["charts_menu"]] == ["G5"]
+    assert "G4" not in built.blocks["charts"]
+    g5 = {"id": "G5", "kind": "compare", "title": "權值前 5 檔一個月比較", "series": []}
+    blocks = {**built.blocks, "charts": {**built.blocks["charts"], "G5": g5}}
+    out = {"chart_of_day": {"code": "G5", "period": "day", "set": "top5_weight",
+                            "caption": {"sentences": [{"text": "權值股一個月比較。", "refs": []}]}}}
+    assert assemble.chart_of_day_block("close", out, blocks)["chart"] is g5
+    out["chart_of_day"]["code"] = "G4"
+    assert assemble.chart_of_day_block("close", out, blocks) is None
+    assert assemble.CHART_KEYS == {"premarket": {"G5": "G5"}, "close": {"G5": "G5"}, "weekly": {"G5": "G5"}}
 
 
 def test_mentions_anthropic_adds_the_line(market_db):

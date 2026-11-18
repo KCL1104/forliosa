@@ -47,16 +47,20 @@ NOTE_TEXT = {
 }
 ID_PATTERN = re.compile(r"\b[FXCNW]\d{3}\b")
 
-# (section key, title, output key or None, collapsed on phones)
+# (section key, title, output key or None, collapsed on phones). v2 (2026-11-18): the premarket has 「昨日台股全貌」
+# (data only, the previous session's sectors; :func:`section_title` adds its date) and 「昨日籌碼」 (the evening's
+# notes, the futures and TPEx institutions, margin); its single-chart 「圖」 section is gone; the weekly's
+# 「多期間報酬」 is part of 「類股一週與大方向」.
 SECTIONS: dict[str, list[tuple[str, str, str | None, bool]]] = {
-    "premarket": [("overnight", "隔夜要聞", "overnight", False), ("evening", "昨晚才到的資料", "evening_notes", True),
-                  ("watch", "今天市場在看什麼", "watch", False), ("charts", "圖", None, True)],
+    "premarket": [("overnight", "隔夜要聞", "overnight", False), ("watch", "今天市場在看什麼", "watch", False),
+                  ("yesterday", "昨日台股全貌", None, False),
+                  ("chips", "昨日籌碼（晚間公布）", "evening_notes", True), ("chart_of_day", "今日圖", None, True)],
     "close": [("what_happened", "今天發生什麼", "what_happened", False), ("sectors", "類股", "sectors", False),
               ("stocks", "權值股與個股", "stocks", True), ("chips", "籌碼", "chips", True),
               ("tonight", "盤後重大訊息與今晚要看的", "tonight", True), ("chart_of_day", "今日圖", None, True),
               ("otc", "上櫃", None, True)],
     "weekly": [("summary", "這一週", "summary", False), ("market_week", "上週大盤", "market_week", False),
-               ("returns", "多期間報酬", None, True), ("sectors_week", "類股一週", "sectors_week", False),
+               ("sectors_week", "類股一週與大方向", "sectors_week", False),
                ("stocks_week", "權值股與個股", "stocks_week", True), ("chips_week", "籌碼", "chips_week", True),
                ("global_week", "國際", "global_week", True),
                ("last_week_review", "上週行事曆回顧", "last_week_review", True),
@@ -64,8 +68,12 @@ SECTIONS: dict[str, list[tuple[str, str, str | None, bool]]] = {
                ("chart_of_day", "本週圖", None, True)],
 }
 OUTPUT_TO_SECTION = {k: {out: sec for sec, _t, out, _c in v if out} for k, v in SECTIONS.items()}
-CHART_KEYS = {"premarket": {"G2": "G2_prev", "G4": "G4_prev", "G5": "G5"}, "close": {"G4": "G4", "G5": "G5"},
-              "weekly": {"G4": "G4", "G5": "G5"}}
+# the chart of the day (the writer's pick) -> the server's chart; G2 and G4 left the menus in v2 (G2 is fixed, G4's
+# breadth is the number strip's or G2's reference line)
+CHART_KEYS = {"premarket": {"G5": "G5"}, "close": {"G5": "G5"}, "weekly": {"G5": "G5"}}
+# the server's blocks of each section, in order (charts by id, tables by id)
+YESTERDAY_CHARTS = ("G17", "G15", "G2", "G2_otc", "G8")
+CLOSE_SECTOR_CHARTS = ("G17", "G15", "G2", "G8")
 
 
 # -- small helpers -----------------------------------------------------------------------------------------------
@@ -97,6 +105,14 @@ def as_of_label(as_of: datetime) -> str:
     return f"資料截至 {t.month}/{t.day} {t:%H:%M}"
 
 
+def section_title(kind: str, key: str, title: str, pack: dict[str, Any]) -> str:
+    """A section's title; the premarket's 「昨日台股全貌」 says which session (「昨日台股全貌（11/17）」)."""
+    if kind == "premarket" and key == "yesterday":
+        prev = _d(next(iter((pack.get("dates") or {}).get("prev_session") or []), None))
+        return f"{title}（{md(prev)}）" if prev else title
+    return title
+
+
 def edition_label(kind: str, edition_date: date, period: tuple[date, date]) -> str:
     return f"{span(*period)} 回顧" if kind == "weekly" else md_wd(edition_date)
 
@@ -123,8 +139,10 @@ def data_title(kind: str, pack: dict[str, Any]) -> str:
         if any(c.get("date") == pack.get("edition_date") for c in pack.get("calendar") or []):
             parts.append("今日行事曆")
         if not parts:
-            evening = any(f.get("group") == "evening" for f in pack.get("facts") or [])
-            parts.append("昨晚才到的資料" if evening else "隔夜沒有新的資料")
+            facts = pack.get("facts") or []
+            prev = any(f.get("group") == "prev_session" for f in facts)
+            evening = any(f.get("group") == "evening" for f in facts)
+            parts.append("昨日台股全貌" if prev else "昨日籌碼" if evening else "隔夜沒有新的資料")
         return f"盤前重點 {md_wd(ed)}：" + "與".join(parts)
     if kind == "close":
         pct = _first(pack, "index_pct", "today", "加權指數")
@@ -260,6 +278,13 @@ def _cal_meta(pack: dict[str, Any], time_ref: str, sectors: list[str]) -> str | 
     return text or None
 
 
+def yesterday_note(pack: dict[str, Any]) -> str:
+    """The one line under 「昨日台股全貌」: what it is (data only; the writer never retells the previous session)."""
+    prev = _d(next(iter((pack.get("dates") or {}).get("prev_session") or []), None))
+    when = md_wd(prev) if prev else "前一個交易日"
+    return f"{when}收盤後的類股與大方向，依官方資料整理；標「估算」的是 Forliosa 自己算的。"
+
+
 def _ai_block(b: dict[str, Any]) -> bool:
     return b["type"] in ("text", "items") or (b["type"] == "chart" and bool(b.get("caption")))
 
@@ -329,47 +354,53 @@ def _blocks_for(kind: str, section: str, pack: dict[str, Any], blocks: dict[str,
             out += [_text(texts), _chart(blocks, "G6")]
             if output is not None and not pack.get("web") and texts:
                 out.append({"type": "note", "text": NO_WEB})
-        elif section == "evening":
-            out += [_table(blocks, "T_evening"), _text(paras("evening_notes"))]
         elif section == "watch":
             out.append(_items(items("watch")))
-        elif section == "charts":
-            out.append(_chart(blocks, "G7"))
+        elif section == "yesterday":
+            charts = [_chart(blocks, k) for k in YESTERDAY_CHARTS]
+            if any(c and c["type"] == "chart" for c in charts):
+                out.append({"type": "note", "text": yesterday_note(pack)})
+                out += charts
+        elif section == "chips":
+            out += [_text(paras("evening_notes")), _chart(blocks, "G7"), _table(blocks, "T7"), _chart(blocks, "G16"),
+                    _table(blocks, "T10_up"), _table(blocks, "T10_down")]
+        elif section == "chart_of_day":
             out.append(chart_of_day)
     elif kind == "close":
         if section == "what_happened":
             out += [_text(paras("what_happened")), _chart(blocks, "G1")]
         elif section == "sectors":
-            out += [_chart(blocks, "G2"), _text(paras("sectors"))]
+            out += [_text(paras("sectors")), *(_chart(blocks, k) for k in CLOSE_SECTOR_CHARTS)]
         elif section == "stocks":
-            out += [_chart(blocks, "G3"), *(_table(blocks, t) for t in ("T2_top10", "T2_gainers", "T2_losers",
-                                                                         "T2_value")),
-                    _text(stock_paras("stocks"))]
+            out += [_text(stock_paras("stocks")), _chart(blocks, "G3"),
+                    *(_table(blocks, t) for t in ("T2_top10", "T2_gainers", "T2_losers", "T2_value"))]
         elif section == "chips":
             out += [_text(paras("chips")), _table(blocks, "T7"), _table(blocks, "T8"), _table(blocks, "T8_buy"),
-                    _table(blocks, "T8_sell")]
+                    _table(blocks, "T8_sell"), _chart(blocks, "G16")]
         elif section == "tonight":
             out += [_filings_table(pack), _items(items("tonight"))]
         elif section == "chart_of_day":
             out.append(chart_of_day)
         elif section == "otc":
-            out += [_table(blocks, t) for t in ("T5_top10", "T5_gainers", "T5_losers", "T6")]
+            out += [*(_table(blocks, t) for t in ("T5_top10", "T5_gainers", "T5_losers")), _chart(blocks, "G2_otc")]
     else:
         if section == "summary":
             out.append(_text([p for p in [_para_from(o.get("summary"))] if p]))
         elif section == "market_week":
             out += [_text(paras("market_week")), _chart(blocks, "G1")]
-        elif section == "returns":
-            out.append(_table(blocks, "T3"))
         elif section == "sectors_week":
-            out += [_chart(blocks, "G2"), _text(paras("sectors_week"))]
+            out += [_text(paras("sectors_week")), _chart(blocks, "G17"), _table(blocks, "T3"), _chart(blocks, "G2"),
+                    _chart(blocks, "G8")]
+        # the AI text first, then the charts and tables (as the close's sections): the reader meets what it says
+        # before scrolling past 1,700–2,000px of tables
         elif section == "stocks_week":
-            out += [_chart(blocks, "G3"), *(_table(blocks, t) for t in ("T2_top10", "T2_gainers", "T2_losers")),
-                    _chart(blocks, "G5"), _text(stock_paras("stocks_week"))]
+            out += [_text(stock_paras("stocks_week")), _chart(blocks, "G3"),
+                    *(_table(blocks, t) for t in ("T2_top10", "T2_gainers", "T2_losers", "T2_value"))]
         elif section == "chips_week":
-            out += [_chart(blocks, "G7"), _text(paras("chips_week"))]
+            out += [_text(paras("chips_week")), _chart(blocks, "G7"), _table(blocks, "T9"), _chart(blocks, "G16"),
+                    _table(blocks, "T10_up"), _table(blocks, "T10_down")]
         elif section == "global_week":
-            out += [_chart(blocks, "G6"), _text(paras("global_week"))]
+            out += [_text(paras("global_week")), _chart(blocks, "G6")]
         elif section == "last_week_review":
             rows = []
             for it in o.get("last_week_review") or []:
@@ -548,7 +579,8 @@ def build(*, kind: str, report_id: str, edition_date: date, period: tuple[date, 
         if out_key and out_key in dropped:
             # the admin view keeps the dropped text (and the server's charts and tables, which members still see)
             blocks_ = _blocks_for(kind, key, pack, blocks, dropped_output or {}, None)
-            sections.append({"key": key, "title": stitle, "origin": "ai", "origin_label": origin_label("ai", blocks_),
+            sections.append({"key": key, "title": section_title(kind, key, stitle, pack), "origin": "ai",
+                             "origin_label": origin_label("ai", blocks_),
                              "collapsed_mobile": collapsed, "blocks": blocks_,
                              "dropped": {"reasons": list(dropped[out_key])}})
             continue
@@ -556,8 +588,8 @@ def build(*, kind: str, report_id: str, edition_date: date, period: tuple[date, 
         if not bl:
             continue
         origin = "ai" if any(_ai_block(b) for b in bl) else "data"
-        sections.append({"key": key, "title": stitle, "origin": origin, "origin_label": origin_label(origin, bl),
-                         "collapsed_mobile": collapsed, "blocks": bl})
+        sections.append({"key": key, "title": section_title(kind, key, stitle, pack), "origin": origin,
+                         "origin_label": origin_label(origin, bl), "collapsed_mobile": collapsed, "blocks": bl})
     ai_text_left = has_ai_text and (title_origin == "ai" or highlights_origin == "ai" or any(
         s["origin"] == "ai" and not s.get("dropped") for s in sections))
     cal = copy.deepcopy(blocks.get("calendar")) if blocks.get("calendar") else None
