@@ -1,6 +1,7 @@
-"""The state machine (contract §5, §17) on the conftest market, with the model faked behind the real SDK: a close
-edition from the data edition to the AI edition, the push, the close and the table version; the blind test; budget
-tiers; the alarm; refusals; revisions and dropped sections; stale runs; a closed day; retention."""
+"""The state machine (contract §5) on the conftest market, with the model faked behind the real SDK: a close edition
+from the data edition to the AI edition, the push, the close and the table version; one public edition written once
+(the blind test was removed on 2026-11-18); budget tiers; the alarm; refusals; revisions and dropped sections; stale
+runs; a closed day; retention."""
 
 from __future__ import annotations
 
@@ -173,40 +174,14 @@ def test_close_day_from_data_to_ai_to_tables(env):
     assert report(env).current_version_id == vs[-1].id
 
 
-def test_trial_writes_three_variants_for_admins_only(env, monkeypatch):
-    monkeypatch.setenv("MARKET_REPORTS_INITIAL_MODE", "trial")
-    get_settings.cache_clear()
-    fake = env["fake"]
-    tick(env, ts(MON, 14, 11))
-    r = report(env)
-    assert r.visibility == "admin" and r.trial
-    script_gather(fake)
-    tick(env, ts(MON, 15, 41))
-    out = close_output(with_web(pk_close(env)))
-    for _ in range(3):
-        fake.reply(json_text(out)).reply(json_text({"issues": []}))
-    tick(env, ts(MON, 15, 51))
-    rs_ = runs(env, r.id)
-    assert sorted(x.variant for x in rs_) == ["A", "B", "C"] and {x.purpose for x in rs_} == {"trial"}
-    assert {(x.writer["model"], x.writer["effort"]) for x in rs_} == set(pipeline.TRIAL_DAILY)
-    vs = versions(env, r.id)
-    assert sorted(v.variant for v in vs if v.variant) == ["A", "B", "C"]
-    r = report(env)
-    assert r.state == "data" and next(v for v in vs if v.id == r.current_version_id).edition == "data"
-    with Session(env["engine"]) as db:
-        assert {u.feature for u in db.scalars(select(AiUsage))} == {"mreport_trial"}
-        assert rs.config(db).trial_started_on == MON
-        assert accounting.month_spend(db) == 0 and accounting.trial_spend(db) > 0
-    tick(env, ts(MON, 16, 1))
-    assert report(env).pushed_at is None  # never pushed in the trial
-
-
-def test_trial_open_to_everyone_opens_the_vote_and_the_tick_pushes_it_once(env, monkeypatch):
-    """MREPORT_TRIAL_AUDIENCE=all (產品負責人 2026-11-17): the first variant written sets ``ai_published_at`` (the
-    members' unread dot and list time) while the data edition stays current; from the push time the tick queues one
-    push per channel whose switch for the kind is on (``push_edition`` trial), never again."""
+def test_one_public_edition_written_once_and_pushed_per_switch_even_with_leftover_trial_settings(env, monkeypatch):
+    """The blind test was removed (產品負責人 2026-11-18): a leftover MARKET_REPORTS_INITIAL_MODE=trial or
+    MREPORT_TRIAL_AUDIENCE=all (Railway) neither stops the start nor makes a blind-test edition. The edition is public,
+    written once with the default writer (Opus 5.5 at high), becomes current, and the normal push goes once at 16:00
+    to each channel whose 盤後 switch is on (``push_edition`` ai), booked as the live features."""
     monkeypatch.setenv("MARKET_REPORTS_INITIAL_MODE", "trial")
     monkeypatch.setenv("MREPORT_TRIAL_AUDIENCE", "all")
+    monkeypatch.setenv("AI_MREPORT_TRIAL_BUDGET_USD", "1")
     get_settings.cache_clear()
     with Session(env["engine"]) as db:
         db.add_all([Group(id="grp_on", name="開了"), Group(id="grp_off", name="沒開")])
@@ -217,39 +192,33 @@ def test_trial_open_to_everyone_opens_the_vote_and_the_tick_pushes_it_once(env, 
     fake = env["fake"]
     tick(env, ts(MON, 14, 11))
     r = report(env)
-    data_id = r.current_version_id
-    assert r.trial and data_id is not None and r.ai_published_at is None
+    assert r.visibility == "public" and not r.trial and r.state == "data"
+    with Session(env["engine"]) as db:
+        assert rs.mode(db) == "public" and rs.config(db).mode == "public"
     script_gather(fake)
     tick(env, ts(MON, 15, 41))
     out = close_output(with_web(pk_close(env)))
-    for _ in range(3):
-        fake.reply(json_text(out)).reply(json_text({"issues": []}))
+    fake.reply(json_text(out)).reply(json_text({"issues": []}))
     tick(env, ts(MON, 15, 51))
+    [run] = runs(env, r.id)
+    assert run.variant is None and run.purpose == "live"
+    assert run.writer == {"model": "claude-opus-5-5", "effort": "high"}
     r = report(env)
-    assert sorted(v.variant for v in versions(env, r.id) if v.variant) == ["A", "B", "C"]
-    assert r.ai_published_at == ts(MON, 15, 51)  # the first variant's time
-    assert r.current_version_id == data_id and r.state == "data"  # a variant never becomes current
+    vs = versions(env, r.id)
+    assert [v.variant for v in vs] == [None, None] and r.current_version_id == vs[-1].id and r.state == "ai"
+    with Session(env["engine"]) as db:
+        assert {u.feature for u in db.scalars(select(AiUsage))} == {"mreport_gather", "mreport_write", "mreport_check"}
     tick(env, ts(MON, 15, 59))
     assert report(env).pushed_at is None  # before the push time
     tick(env, ts(MON, 16, 1))
     r = report(env)
-    assert r.pushed_at == ts(MON, 16, 1) and r.push_edition == "trial"
+    assert r.pushed_at == ts(MON, 16, 1) and r.push_edition == "ai"
     tick(env, ts(MON, 16, 11))
     with Session(env["engine"]) as db:
         rows = list(db.scalars(select(NotificationOutbox).where(NotificationOutbox.kind == "mreport")))
         assert [(x.group_id, x.dedupe_key) for x in rows] == [("grp_on", f"mreport:{r.id}:grp_on:discord")]
         assert db.scalar(select(func.count()).select_from(NotificationOutbox)) == 1
-
-
-def test_trial_variants_beyond_the_cap_are_skipped(env, monkeypatch):
-    monkeypatch.setenv("MARKET_REPORTS_INITIAL_MODE", "trial")
-    get_settings.cache_clear()
-    tick(env, ts(MON, 14, 11))
-    assert report(env).trial
-    env["deps"].settings = Settings(market_reports_enabled=True, ai_mreport_trial_budget_usd=1.0)
-    tick(env, ts(MON, 15, 51))  # no gathering (it would not fit), then every variant skipped
-    assert {x.status for x in runs(env, report(env).id)} == {"skipped_budget"}
-    assert env["fake"].requests == []
+    assert len(runs(env, r.id)) == 1  # written once
 
 
 def test_budget_tiers_change_the_writer(env):
@@ -497,3 +466,55 @@ def test_correction_and_copy_are_independent(env):
     vs = versions(env, r.id)
     assert vs[-1].edition == "correction" and vs[-1].correction_note == "加權指數的漲跌點數寫錯"
     assert copy.deepcopy(vs[0].payload).get("corrections") == []
+
+
+def test_promoted_blind_test_close_gets_its_tables_rebuilt_once(env, monkeypatch, capsys):
+    """Migration 0028 made a blind-test close's kept variant current (an ``ai`` version of a ``trial`` run), while its
+    23:45 / 06:40 ``tables`` versions had been built from the data edition and are newer. ``promoted_closes`` lists
+    it; ``python -m forliosa.reports tables --promoted`` rebuilds the tables once from everything stored (the
+    variant's text kept, never pushed); afterwards nothing is listed and a second run changes nothing."""
+    from forliosa.reports import __main__ as cli
+
+    fake = env["fake"]
+    tick(env, ts(MON, 14, 11))
+    script_gather(fake)
+    tick(env, ts(MON, 15, 41))
+    fake.reply(json_text(close_output(with_web(pk_close(env))))).reply(json_text({"issues": []}))
+    tick(env, ts(MON, 15, 51))
+    r = report(env)
+    with Session(env["engine"]) as db:
+        # what the blind test left and the migration kept: the AI version came from a trial run (label A), the newer
+        # tables version was built from the data edition
+        kept = db.get(MarketReportVersion, r.current_version_id)
+        run = db.get(MarketReportRun, kept.run_id)
+        run.variant, run.purpose = "A", "trial"
+        data = db.scalar(select(MarketReportVersion).where(MarketReportVersion.report_id == r.id,
+                                                            MarketReportVersion.edition == "data"))
+        db.add(MarketReportVersion(id="mrv_old_tables", report_id=r.id, version=kept.version + 1, edition="tables",
+                                   payload=data.payload, based_on=data.id, created_at=ts(MON, 23, 45)))
+        row = db.get(MarketReport, r.id)
+        row.pushed_at, row.push_edition, row.closed_at = ts(MON, 16, 0), "trial", ts(MON, 17, 30)
+        db.commit()
+        kept_id, title = kept.id, kept.payload["title"]
+        assert [x.id for x in pipeline.promoted_closes(db)] == [r.id]
+
+    later = ts(TUE, 15, 0)
+    env["clock"].t = later
+    monkeypatch.setattr(cli, "session_factory", lambda: (lambda: Session(env["engine"])))
+    monkeypatch.setattr(pipeline, "default_deps", lambda: env["deps"])
+    assert cli.main(["tables", "--promoted"]) == 0
+    assert "表格更新" in capsys.readouterr().out
+    vs = versions(env, r.id)
+    new = vs[-1]
+    assert new.edition == "tables" and new.based_on == kept_id and new.version == len(vs)
+    assert new.payload["title"] == title and new.payload["has_ai"]  # the variant's text stays
+    r = report(env)
+    assert r.current_version_id == new.id and r.pushed_at == ts(MON, 16, 0)  # not pushed again
+    with Session(env["engine"]) as db:
+        assert pipeline.promoted_closes(db) == []
+        assert db.scalar(select(func.count()).select_from(NotificationOutbox)) == 0
+    assert cli.main(["tables", "--promoted"]) == 0
+    assert "沒有要重建表格的盤後重點" in capsys.readouterr().out
+    assert len(versions(env, r.id)) == len(vs)
+    assert cli.main(["tables", "--date", MON.isoformat()]) == 0  # by date: always rebuilds
+    assert len(versions(env, r.id)) == len(vs) + 1

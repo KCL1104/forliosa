@@ -16,7 +16,7 @@ vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 /**
  * 市場報告審查修正（2026-11-17）：資料版的完整免責不提 AI、更早的報告不重複日期、數字欄只在「、」後換行、
  * 觸控時相鄰的出處號碼不互相蓋住、跳回原句不改 Tab 順序、從報告頁用方向鍵換分頁焦點不掉、
- * 盲測並排只挑看得了的版本、頻道開關的說明照實際送法、群組頁的「昨日」用伺服器的前一個交易日、管理員可以更正。
+ * 頻道開關的說明照實際送法、群組頁的「昨日」用伺服器的前一個交易日、管理員可以更正。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -135,32 +135,6 @@ describe("分頁列", () => {
     fireEvent.keyDown(tab, { key: "ArrowLeft" })
     await waitFor(() => expect(router.state.location.pathname).toBe("/market"), T)
     await waitFor(() => expect(document.activeElement?.id).toBe("market-tab-quotes"), T)
-  })
-})
-
-describe("盲測並排", () => {
-  it("只發了資料版的版本不當成看得了：右邊挑看得了的；選到它時寫為什麼，不是錯誤", async () => {
-    wide = true
-    const { adapter } = mount()
-    const trial = await adapter.getAdminReportsTrial()
-    const row = trial.reports.find((r) => r.variants.some((v) => v.published === false && v.status === "data_only"))!
-    const none = row.variants.find((v) => v.published === false)!.label
-    const ok = row.variants.filter((v) => v.published !== false).map((v) => v.label)
-    renderApp(`/admin/reports/${row.report_id}?v=${ok[0]}`)
-    const groups = await screen.findAllByRole("radiogroup", {}, T)
-    expect(groups.map((g) => g.getAttribute("aria-label"))).toEqual(["左邊看哪一個版本", "右邊看哪一個版本"])
-    expect(within(groups[1]!).getByRole("radio", { name: ok[1]! })).toHaveAttribute("aria-checked", "true")
-    fireEvent.click(within(groups[1]!).getByRole("radio", { name: none }))
-    expect(await screen.findByText("這個版本沒有 AI 版（只發了資料版或沒有跑完）", {}, T)).toBeInTheDocument()
-    expect(screen.queryByRole("button", { name: /重新載入|重試/ })).toBeNull()
-  })
-
-  it("一欄的時候分頁的名稱不寫「左邊」", async () => {
-    const { adapter } = mount()
-    const trial = await adapter.getAdminReportsTrial()
-    renderApp(`/admin/reports/${trial.reports[0]!.report_id}`)
-    const [group] = await screen.findAllByRole("radiogroup", {}, T)
-    expect(group).toHaveAttribute("aria-label", "看哪一個版本")
   })
 })
 

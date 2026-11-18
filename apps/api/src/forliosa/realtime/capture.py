@@ -316,56 +316,12 @@ class ReportVersionFanout(Resolver):
 
     def resolve(self, conn: Connection) -> list[Event]:
         r = _models().MarketReport
-        row = conn.execute(select(r.kind, r.visibility, r.trial, r.current_version_id, r.first_published_at)
+        row = conn.execute(select(r.kind, r.visibility, r.current_version_id, r.first_published_at)
                            .where(r.id == self.report_id)).first()
         if row is None or row.current_version_id != self.version_id:
             return []
-        if row.visibility == "public" and row.first_published_at is not None:
-            aud: tuple[str, ...] = (ALL,)
-        else:
-            aud = (ALL,) if row.trial and trial_open(conn) else (ADMINS,)
+        aud = (ALL,) if row.visibility == "public" and row.first_published_at is not None else (ADMINS,)
         return [event("market.reports", {"report_id": self.report_id, "kind": row.kind}, aud)]
-
-
-def trial_open(conn: Connection) -> bool:
-    """The blind test is open to every signed-in user (``reports.settings.trial_open``, read on the writing
-    transaction's connection so a change committed with this one counts): its editions' events go to everyone."""
-    from forliosa.config import get_settings
-    from forliosa.reports.settings import AUDIENCES
-
-    s = get_settings()
-    if not s.market_reports_enabled:
-        return False
-    c = _models().MarketReportConfig
-    picked = conn.execute(select(c.trial_audience).where(c.id == 1)).scalar()
-    return (picked if picked in AUDIENCES else s.mreport_trial_audience) == "all"
-
-
-class TrialReport(Resolver):
-    """A blind-test edition changed (a variant became readable, the first one opened the vote, the vote or the reveal):
-    ``market.reports{report_id}`` to everyone while the blind test is open to all (2026-11-17: 盲測開給所有登入的人),
-    else to the site admins only — a trial report's id never reaches a member who cannot read it."""
-
-    def __init__(self, report_id: str | None, kind: str | None = None):
-        self.report_id = report_id
-        self.kind = kind
-        self.key = ("trial", report_id)
-
-    def merge(self, other: Resolver) -> None:
-        assert isinstance(other, TrialReport)
-        self.kind = self.kind or other.kind
-
-    def resolve(self, conn: Connection) -> list[Event]:
-        data: dict[str, Any] = {}
-        if self.report_id:
-            r = _models().MarketReport
-            row = conn.execute(select(r.kind, r.trial).where(r.id == self.report_id)).first()
-            if row is None:
-                return []
-            if not row.trial:  # a normal edition: its own handler decides
-                return []
-            data = {"report_id": self.report_id, "kind": self.kind or row.kind}
-        return [event("market.reports", data, (ALL,) if trial_open(conn) else (ADMINS,))]
 
 
 def topic_events(topic_id: str, scope: str, group_id: str | None, with_list: bool = True) -> list[Event]:
@@ -522,34 +478,25 @@ def _h_market_report(obj, kind, ch, add):
     if kind == "dirty" and ch & REPORT_PUBLIC_COLUMNS:
         if _v(obj, "visibility") == "public":
             add(event("market.reports", {"report_id": _v(obj, "id"), "kind": _v(obj, "kind")}, (ALL,)))
-        elif _v(obj, "trial"):  # a blind-test edition: everyone while the blind test is open to all
-            add(TrialReport(_v(obj, "id"), _v(obj, "kind")))
         else:
             add(event("market.reports", {"report_id": _v(obj, "id"), "kind": _v(obj, "kind")}, (ADMINS,)))
 
 
 def _h_report_vote(obj, kind, ch, add):
-    """A blind-test vote (admins in the back office, everyone while the blind test is open): the back office's counts,
-    and the voter's own other tabs and devices (「你選了」 on the edition). Nobody else: the votes stay hidden until
-    the reveal, and after it no vote changes."""
+    """A blind-test vote row (the blind test was removed on 2026-11-18: nothing writes one any more; a row deleted with
+    its edition only tells the back office)."""
     add(event("admin.reports", {}, (ADMINS,)))
-    if _v(obj, "user_id") and _v(obj, "report_id"):
-        add(event("market.reports", {"report_id": _v(obj, "report_id")}, user(_v(obj, "user_id"))))
 
 
 def _h_report_version(obj, kind, ch, add):
     add(event("admin.reports", {}, (ADMINS,)))
     if kind == "dirty" and "payload" in ch and _v(obj, "report_id"):
         add(ReportVersionFanout(_v(obj, "id"), _v(obj, "report_id")))
-    elif kind == "new" and _v(obj, "variant") and _v(obj, "report_id"):
-        add(TrialReport(_v(obj, "report_id")))  # one of A / B / C became readable
 
 
 def _h_report_config(obj, kind, ch, add):
-    if ch & {"mode", "trial_audience"}:  # a new mode, or who takes part in the blind test: every reader
+    if "mode" in ch:  # a new mode (public / paused): every reader
         add(event("market.reports", {}, (ALL,)))
-    elif "revealed_at" in ch or ("writers" in ch and _v(obj, "revealed_at") is not None):
-        add(TrialReport(None))  # the blind test's result (and the setting chosen after it) on every edition
     if kind != "dirty" or ch - {"key_state", "updated_at", "updated_by"}:
         add(event("admin.reports", {}, (ADMINS,)))
 

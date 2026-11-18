@@ -10,7 +10,7 @@ import { ReportSection } from "./ReportSection"
 import { ReportSources } from "./ReportSources"
 
 /**
- * 一份市場報告（讀的頁面；市場頁的「報告」分頁、`/market/reports/<id>`、管理後台的盲測都用它）。由上到下（memo §2.0）：
+ * 一份市場報告（讀的頁面；市場頁的「報告」分頁與 `/market/reports/<id>` 都用它；`admin`／`prefix` 是已拿掉的盲測比較頁留下的，之後再清）。由上到下（memo §2.0）：
  * 免責的一句與資料截至 → 名稱、一句話、3 個重點 → 數字欄 → 各段（資料／AI 依資料與報導整理；手機上可以收合）
  * → 行事曆 → 來源 → 完整的免責聲明與「由 Anthropic 的 Claude 模型撰寫」。
  * 整頁沒有卡片、陰影、圖示；紅綠只在漲跌的數字與橫條；字的閱讀寬度 46rem（類股的長圖可以到主欄寬）。

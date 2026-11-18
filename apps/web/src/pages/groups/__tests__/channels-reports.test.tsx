@@ -98,13 +98,24 @@ describe("頻道的四個開關（2026-11-18 產品負責人選 A）", () => {
     await waitFor(() => expect(within(discord).getByRole("switch", { name: "盤前（交易日 7:30）" })).toHaveAttribute("aria-checked", "true"), T)
   })
 
-  it("試跑期間（只有站方管理員看得到報告）：照樣四列，說明盤前、週報先只送群組的部分", async () => {
-    mount()
+  it("市場報告沒有開（關掉或暫停）：照樣四列，說明盤前、週報先只送群組的部分；不提盲測", async () => {
+    mount({ reports: "off" })
     renderApp("/groups/grp_family?tab=channels")
     const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
     await within(discord).findByRole("switch", { name: "交易動態" }, T)
     expect(switchNames(discord)).toEqual(SWITCH_NAMES)
     expect(within(discord).getByText("市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。")).toBeInTheDocument()
+    expect(within(discord).queryByText(/盲測|投票/)).toBeNull()
+  })
+
+  it("預設（市場報告對全站公開）：四列，說明推的是文字與連結；沒有盲測的投票連結", async () => {
+    mount()
+    renderApp("/groups/grp_family?tab=channels")
+    const discord = (await screen.findByRole("heading", { name: "Discord" }, T)).closest("section")!
+    await within(discord).findByRole("switch", { name: "交易動態" }, T)
+    expect(switchNames(discord)).toEqual(SWITCH_NAMES)
+    expect(within(discord).getByText("推到頻道的是文字與連結，報告本文人人相同。")).toBeInTheDocument()
+    expect(within(discord).queryByText(/盲測|投票/)).toBeNull()
   })
 
   it("免費群組也是同樣四列（沒有另外的「日報」）", async () => {

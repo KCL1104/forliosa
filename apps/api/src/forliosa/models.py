@@ -1090,7 +1090,7 @@ class GroupChannel(Base):
     # Four switches (產品負責人 2026-11-18, option A): 交易動態; 盤前 = 盤前重點 ＋「昨日你的群組」 (the group's
     # daily report, boosted groups) in one message, off; 盤後 = 盤後重點, off; 週報 = 市場週報 ＋ the group's weekly
     # digest, on.
-    # Without a market part (reports not public, no open blind test) 盤前 and 週報 send the group part alone.
+    # Without a market part (reports off or paused) 盤前 and 週報 send the group part alone.
     notify_trades: Mapped[bool] = mapped_column(Boolean, default=True)
     notify_premarket: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
     notify_close: Mapped[bool] = mapped_column(Boolean, default=False, server_default="0")
@@ -1545,9 +1545,10 @@ class DiscussionSuspensionCarryover(Base):
 # -- 市場報告 (盤前重點、盤後重點、市場週報; ``forliosa.reports``; 產品負責人 2026-11-17) --------------
 class MarketReport(Base):
     """One edition: a kind (``premarket`` | ``close`` | ``weekly``) and its date (the trading day; a weekly's Sunday).
-    ``visibility`` admin | public is fixed when the row is made (trial mode and CLI backfills: admin). ``state``
-    pending | data | ai | skipped. ``current_version_id`` is what non-admins read; blind-test variants never become
-    current. No user column: every signed-in user reads the same text."""
+    ``visibility`` admin | public is fixed when the row is made (public; CLI backfills: admin). ``state``
+    pending | data | ai | skipped. ``current_version_id`` is what non-admins read. ``trial``: a blind-test edition
+    (removed 2026-11-18; migration 0028 made every one a normal public edition, nothing sets it any more). No user
+    column: every signed-in user reads the same text."""
 
     __tablename__ = "market_reports"
     __table_args__ = (UniqueConstraint("kind", "edition_date", name="uq_market_report_edition"),
@@ -1577,8 +1578,8 @@ class MarketReport(Base):
 
 class MarketReportVersion(Base):
     """Every version of an edition (kept 2 years): the full report JSON in its admin form (each sentence's refs,
-    dropped sections). ``edition`` data | ai | tables | correction; ``variant`` A/B/C for the blind test (``writer``
-    is never returned before the reveal)."""
+    dropped sections). ``edition`` data | ai | tables | correction; ``variant`` A/B/C: the blind test's other versions
+    (removed 2026-11-18; history only, never read)."""
 
     __tablename__ = "market_report_versions"
     __table_args__ = (UniqueConstraint("report_id", "version", name="uq_market_report_version"),)
@@ -1599,8 +1600,8 @@ class MarketReportVersion(Base):
 
 
 class MarketReportGather(Base):
-    """One web-search gathering for an edition (the blind test's three variants share it). ``facts`` keep the verified
-    quotes for the admin side only; the API never returns a quote."""
+    """One web-search gathering for an edition. ``facts`` keep the verified quotes for the admin side only; the API
+    never returns a quote."""
 
     __tablename__ = "market_report_gathers"
 
@@ -1627,7 +1628,7 @@ class MarketReportRun(Base):
     id: Mapped[str] = mapped_column(String(32), primary_key=True)  # mrr_…
     report_id: Mapped[str] = mapped_column(ForeignKey("market_reports.id", ondelete="CASCADE"))
     variant: Mapped[str | None] = mapped_column(String(1), nullable=True)
-    purpose: Mapped[str] = mapped_column(String(8), default="live")  # live | trial
+    purpose: Mapped[str] = mapped_column(String(8), default="live")  # live (trial: the removed blind test's runs)
     attempt: Mapped[int] = mapped_column(Integer, default=1)
     status: Mapped[str] = mapped_column(String(12), default="running")
     step: Mapped[str] = mapped_column(String(12), default="write")
@@ -1646,9 +1647,8 @@ class MarketReportRun(Base):
 
 
 class MarketReportVote(Base):
-    """A blind-test pick for one edition (A/B/C): one per user and edition, changeable until the reveal. Site admins
-    always vote (with an optional note); every signed-in user does too while the blind test is open to all
-    (``MREPORT_TRIAL_AUDIENCE=all``)."""
+    """A blind-test pick for one edition (A/B/C). The blind test was removed on 2026-11-18: nothing writes a vote any
+    more; the rows stay as history (deleted with their edition)."""
 
     __tablename__ = "market_report_votes"
 
@@ -1663,17 +1663,18 @@ class MarketReportVote(Base):
 
 
 class MarketReportConfig(Base):
-    """The one runtime-settings row (``id`` = 1): ``mode`` trial | public | paused (the admin page switches it;
-    created from MARKET_REPORTS_INITIAL_MODE), the writer chosen per kind after the blind test (null = env default)."""
+    """The one runtime-settings row (``id`` = 1): ``mode`` public | paused (the admin page switches it; created from
+    MARKET_REPORTS_INITIAL_MODE; a ``trial`` from before 2026-11-18 reads as public), the writer chosen per kind (null
+    = env default). ``trial_started_on`` / ``revealed_at`` / ``trial_audience``: the removed blind test's, unused."""
 
     __tablename__ = "market_report_config"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    mode: Mapped[str] = mapped_column(String(8), default="trial")
+    mode: Mapped[str] = mapped_column(String(8), default="public")
     writers: Mapped[dict] = mapped_column(JSON, default=dict)  # {"premarket": {"model","effort"} | None, …}
     trial_started_on: Mapped[date | None] = mapped_column(Date, nullable=True)
     revealed_at: Mapped[datetime | None] = mapped_column(TZDateTime, nullable=True)
-    # who takes part in the blind test: admins | all; null = MREPORT_TRIAL_AUDIENCE
+    # who took part in the removed blind test (unused since 2026-11-18)
     trial_audience: Mapped[str | None] = mapped_column(String(8), nullable=True)
     # the reports' own key slot as the worker last saw it: {"slot", "status", "note", "checked_at"} (never a key)
     key_state: Mapped[dict | None] = mapped_column(JSON, nullable=True)

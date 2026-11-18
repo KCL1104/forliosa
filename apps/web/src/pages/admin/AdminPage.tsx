@@ -10,7 +10,7 @@ import { NotFoundPage } from "@/pages/NotFoundPage"
 /**
  * 管理後台每一頁的外框：只有站方管理員；其他人是「找不到這個頁面」，查看別人的資產時是擋頁。
  * `children` 是這一頁的內容元件——不是管理員時不會掛上去，也就不會打任何 `/admin` 的請求。
- * 和設定、討論同一個欄寬（816px，靠左）；`wide`：盲測並排比較兩份報告，用整個版心。
+ * 和設定、討論同一個欄寬（816px，靠左）；`wide`：用整個版心（原本給已拿掉的盲測並排比較，現在沒有頁面用）。
  */
 export function AdminPage({ title, actions, children, wide = false }: { title: string; actions?: React.ReactNode; children: React.ReactNode; wide?: boolean }) {
   const readOnly = useReadOnly()

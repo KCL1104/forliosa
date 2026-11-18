@@ -1,13 +1,12 @@
 """Review fixes of the state machine (2026-11-17): the push without a usable key and at the fallback time, a writing
 attempt kept alive by its heartbeat and never published once abandoned, the replies of a failed attempt booked, the
-blind test's cap across the variants of one edition, its progress when it starts at a close edition, the reports'
-own key slot as the worker sees it, corrections of the title and highlights."""
+reports' own key slot as the worker sees it, corrections of the title and highlights."""
 
 from __future__ import annotations
 
 import threading
 import time
-from datetime import date, timedelta
+from datetime import date
 from decimal import Decimal
 
 import pytest
@@ -16,8 +15,7 @@ from sqlalchemy.orm import Session
 
 from forliosa.ai.keypool import KeyPool
 from forliosa.api.errors import ApiError
-from forliosa.config import get_settings
-from forliosa.models import AiUsage, MarketReport, MarketReportRun, User
+from forliosa.models import MarketReport, MarketReportRun, User
 from forliosa.reports import accounting, assemble, calls, pipeline, service
 from forliosa.reports import settings as rs
 from tests.ai.fake_anthropic import text
@@ -165,52 +163,6 @@ def test_the_replies_of_a_failed_attempt_are_booked(env):
     assert run.status == "failed" and run.error == "OverloadedError"
     assert float(run.cost_usd) >= 1.28 and after - before >= Decimal("1.28")  # 64K Opus 5.5 output tokens
     assert [c["stop_reason"] for c in run.calls if "step" in c] == ["max_tokens"]
-
-
-# -- the blind test ------------------------------------------------------------------------------------------------
-def test_the_trial_cap_counts_the_variants_already_started(env, monkeypatch):
-    monkeypatch.setenv("MARKET_REPORTS_INITIAL_MODE", "trial")
-    get_settings.cache_clear()
-    tick(env, ts(MON, 14, 11))
-    assert report(env).trial
-    script_gather(env["fake"])
-    tick(env, ts(MON, 15, 41))
-    with Session(env["engine"]) as db:
-        db.add(AiUsage(user_id=None, thread_id="x", feature="mreport_trial", model="claude-opus-5-5",
-                       cost_usd=Decimal("40.5"), created_at=ts(MON, 9)))
-        db.commit()
-    jobs: list = []
-    env["deps"].submit = jobs.append  # the thread pool: nothing booked yet when the next variant is checked
-    tick(env, ts(MON, 15, 51))
-    statuses = sorted(x.status for x in runs(env, report(env).id))
-    assert statuses == ["running", "running", "skipped_budget"] and len(jobs) == 2  # 40.5 + 2 × 2.0 + 2.0 > 45
-    with Session(env["engine"]) as db:
-        assert accounting.trial_reserved(db) == Decimal("4.0")
-
-
-def _trial_report(db, kind, d, *, closed=True):
-    ed = pipeline.edition_on(kind, d)
-    r = pipeline.make_report(db, ed, ts(d, 6), visibility="admin", trial=True)
-    r.state = "data"
-    r.closed_at = ts(d, 21) if closed else None
-    db.commit()
-
-
-def test_a_blind_test_that_starts_at_a_close_edition_finishes(engine):
-    s = get_settings()
-    days = [MON + timedelta(days=i) for i in range(5)]
-    with Session(engine) as db:
-        _trial_report(db, "close", days[0])  # deployed at noon: the first edition is the close
-        for d in days[1:]:
-            _trial_report(db, "premarket", d)
-            _trial_report(db, "close", d)
-        _trial_report(db, "weekly", SUN)
-        prog = service.trial_progress(db, s)
-    assert prog["daily_total"] == 9 and prog["daily_done"] == 9 and prog["finished"] is True
-    with Session(engine) as db:
-        _trial_report(db, "premarket", MON)
-        prog = service.trial_progress(db, s)
-    assert prog["daily_total"] == 10 and prog["finished"] is True
 
 
 # -- the reports' own key slot, as the worker sees it --------------------------------------------------------------

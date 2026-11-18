@@ -94,20 +94,17 @@ ANNOUNCES: dict[str, frozenset[str]] = {
     "discussions.create_suspension": T("admin.discussions", "me"),
     "discussions.lift_suspension": T("admin.discussions", "me"),
     "imports.read_statement": T("ai.usage"),  # the import itself is transactions.create_batch
-    # batch 4 (2026-11-17 merge): 匯入庫存, 清除所有持倉, the blind test open to everyone
+    # batch 4 (2026-11-17 merge): 匯入庫存, 清除所有持倉 (the blind test's vote / reveal routes removed 2026-11-18)
     "imports.read_positions": T("ai.usage"),  # reads only; its AiUsage row
     "imports.commit_positions": T("ledger", "group.ledger"),  # buys (capture) + 以券商為準's bulk delete (explicit)
     "portfolio.clear_records": T("ledger", "group.ledger", "recurring"),  # bulk delete (explicit) + paused plans
-    "market_reports.vote": T("admin.reports", "market.reports"),  # market.reports: the voter's own tabs only
     "admin.grant_member": T("me"),
     "admin.revoke_member": T("me"),
     "admin.grant_group_pass": T("me"),
     "admin.patch_group_pass": T("group.meta", "me"),
     "admin.revoke_group_pass": T("group.meta", "me"),
     "admin_reports.put_config": T("admin.reports", "market.reports"),  # market.reports when the mode changes
-    "admin_reports.reveal": T("admin.reports", "market.reports"),  # market.reports: every reader of the open test
     "admin_reports.rebuild": T("market.reports", "admin.reports"),
-    "admin_reports.vote": T("admin.reports"),
     "admin_reports.correction": T("market.reports", "admin.reports"),
 }
 # Deliberately silent.
@@ -363,36 +360,6 @@ def s_commit_positions(w: W):
     assert {a[2:] for a in w.rt.one("group.ledger", group_id=w.g["id"]).to} == {w.a_id, w.b_id}
 
 
-def _blind_test(w: W) -> str:
-    """A blind-test close edition with A / B / C ready, the blind test open to every signed-in user."""
-    from tests.api.test_market_report_trial_open import make_trial
-    from tests.reports.conftest import seed_market
-
-    w.mp.setattr(get_settings(), "market_reports_enabled", True)
-    w.mp.setattr(get_settings(), "mreport_trial_audience", "all")
-    with session_factory()() as db:
-        seed_market(db)
-    return make_trial()
-
-
-def s_member_vote(w: W):
-    rid = _blind_test(w)
-    w.act(lambda: w.b.put(f"{API}/market/reports/{rid}/vote", json={"preferred": "A"}))
-    assert w.rt.one("market.reports").to == (f"u:{w.b_id}",)  # nobody else learns of a vote
-    assert all(e.to == ("admins",) for e in w.rt.find("admin.reports"))
-
-
-def s_admin_vote(w: W):
-    rid = _blind_test(w)
-    w.act(lambda: w.admin.put(f"{API}/admin/market-reports/{rid}/vote", json={"preferred": "B"}))
-
-
-def s_reveal(w: W):
-    _blind_test(w)
-    w.act(lambda: w.admin.post(f"{API}/admin/market-reports/trial/reveal", json={"force": True}))
-    assert w.rt.one("market.reports").to == ("all",)  # every reader of the open blind test sees the result
-
-
 SCENARIOS: dict[str, Callable[[W], None]] = {
     "users.logout": lambda w: w.act(lambda: w.b.post(f"{API}/auth/logout")),
     "users.patch_me": lambda w: w.act(lambda: w.a.patch(f"{API}/me", json={"display_name": "新名字"})),
@@ -498,12 +465,9 @@ SCENARIOS: dict[str, Callable[[W], None]] = {
         w.a.put(f"{API}/groups/{w.g['id']}/plan", json={"pass_id": p["id"]}),
         w.act(lambda: w.admin.delete(f"{API}/admin/group-passes/{p['id']}"))))(_group_pass(w)),
     "admin_reports.put_config": lambda w: w.act(lambda: w.admin.put(f"{API}/admin/market-reports/config",
-                                                                    json={"mode": "public"})),
-    "admin_reports.vote": s_admin_vote,
-    "admin_reports.reveal": s_reveal,
+                                                                    json={"mode": "paused"})),
     "portfolio.clear_records": s_clear_records,
     "imports.commit_positions": s_commit_positions,
-    "market_reports.vote": s_member_vote,
 }
 
 
@@ -538,13 +502,12 @@ def test_report_rows_reach_admins(client, rt):
     uid = me_id(client)
     with session_factory()() as db:
         rep = MarketReport(id=new_id("mrp"), kind="close", edition_date=date(2026, 11, 17),
-                           period_start=date(2026, 11, 17), period_end=date(2026, 11, 17), trial=True)
+                           period_start=date(2026, 11, 17), period_end=date(2026, 11, 17))
         db.add(rep)
         db.commit()
         rt.clear()
-        db.add(MarketReportVote(report_id=rep.id, user_id=uid, preferred="A"))
+        db.add(MarketReportVote(report_id=rep.id, user_id=uid, preferred="A"))  # an old blind-test row (history)
         db.commit()
-    assert rt.one("admin.reports").to == ("admins",)
-    # the voter's own other tabs (「你選了」); nobody else: the votes stay hidden until the reveal (2026-11-17 merge)
-    assert rt.one("market.reports").to == (f"u:{uid}",) and sorted(rt.topics()) == ["admin.reports", "market.reports"]
+    # the blind test was removed (2026-11-18): a vote row only tells the back office, never a member
+    assert rt.one("admin.reports").to == ("admins",) and sorted(rt.topics()) == ["admin.reports"]
 

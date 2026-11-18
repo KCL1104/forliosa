@@ -349,3 +349,119 @@ def test_channel_four_switches_keep_every_opt_in_both_ways(tmp_path):
             assert low[(f"grp_{i}", "telegram")] == (close, False, False, weekly or digest, digest)
     finally:
         engine.dispose()
+
+
+def test_remove_blind_test_makes_every_blind_test_edition_public_both_ways(tmp_path):
+    """0028_remove_blind_test (產品負責人 2026-11-18: 「盲測的部分就直接拔掉吧」): the mode ``trial`` becomes
+    ``public``; every blind-test edition becomes a normal public one whose current version is the variant written
+    with the default writer (Opus 5.5 at high), else A, else the alphabetically first label (each its newest
+    version), made a plain version (``variant`` null); ``state = ai`` and ``ai_published_at`` from that version. An
+    edition still open (not pushed, not closed) takes only the default writer's variant, else keeps its data edition
+    (the normal pipeline writes it); an edition whose current is already a plain AI version keeps it. An edition with
+    no variant keeps its data edition; a normal edition is untouched; votes, runs and the other variants stay. The
+    downgrade changes no data; a second upgrade finds nothing left to do; ``paused`` stays paused."""
+    from sqlalchemy import text
+
+    url = f"sqlite:///{tmp_path / 'remove_trial.db'}"
+    command.upgrade(_config(url), "0027_channel_four_switches")
+    engine = make_engine(url)
+    opus_high, opus_med, sonnet = ('{"model": "claude-opus-5-5", "effort": "high", "tier": "normal"}',
+                                   '{"model": "claude-opus-5-5", "effort": "medium", "tier": "normal"}',
+                                   '{"model": "claude-sonnet-5-5", "effort": "high", "tier": "normal"}')
+    try:
+        with engine.begin() as conn:
+            _insert(conn, "users", {"id": "usr_1", "email": "a@b.c"})
+            _insert(conn, "market_report_config", {"id": 1, "mode": "trial", "writers": "{}"})
+            # (id, kind, date, trial, visibility, state, current, pushed, closed): pushed or closed = a past edition
+            for rid, kind, d, trial, vis, state, cur, pushed, closed in (
+                    ("mrp_pre", "premarket", "2026-11-18", True, "admin", "data", "mrv_p1", True, False),  # takes B
+                    ("mrp_cl17", "close", "2026-11-17", True, "admin", "data", "mrv_c5", True, True),  # no opus high: A
+                    ("mrp_cl18", "close", "2026-11-18", True, "admin", "data", "mrv_d1", False, False),  # open, none
+                    ("mrp_bc", "premarket", "2026-11-17", True, "admin", "data", "mrv_e1", False, True),  # B and C: B
+                    ("mrp_pub", "close", "2026-11-16", False, "public", "ai", "mrv_f2", True, True),  # a normal one
+                    # still open (a late deploy): only the default writer's variant is taken, else the data edition
+                    ("mrp_open", "close", "2026-11-19", True, "admin", "data", "mrv_g1", False, False),  # A, C: data
+                    ("mrp_openb", "close", "2026-11-20", True, "admin", "data", "mrv_h1", False, False),  # B: opus high
+                    # a worker on the new code wrote a live version before the api migrated: it stays current
+                    ("mrp_live", "close", "2026-11-23", True, "admin", "ai", "mrv_i3", False, False)):
+                _insert(conn, "market_reports", {"id": rid, "kind": kind, "edition_date": d, "period_start": d,
+                                                 "period_end": d, "trial": trial, "visibility": vis, "state": state,
+                                                 "current_version_id": cur, "first_published_at": f"{d} 06:55:00",
+                                                 "ai_published_at": f"{d} 07:40:00" if trial else None,
+                                                 "pushed_at": f"{d} 07:45:00" if pushed else None,
+                                                 "push_edition": ("trial" if trial else "ai") if pushed else None,
+                                                 "closed_at": f"{d} 21:00:00" if closed else None,
+                                                 "notes": "[]"})
+            for vid, rid, n, variant, edition, writer, at in (
+                    ("mrv_p1", "mrp_pre", 1, None, "data", None, "2026-11-18 06:55:00"),
+                    ("mrv_p2", "mrp_pre", 2, "A", "ai", sonnet, "2026-11-18 07:10:00"),
+                    ("mrv_p3", "mrp_pre", 3, "B", "ai", opus_high, "2026-11-18 07:22:00"),
+                    ("mrv_p4", "mrp_pre", 4, "C", "ai", opus_med, "2026-11-18 07:15:00"),
+                    ("mrv_c1", "mrp_cl17", 1, None, "data", None, "2026-11-17 14:10:00"),
+                    ("mrv_c2", "mrp_cl17", 2, "A", "ai", sonnet, "2026-11-17 15:58:00"),
+                    ("mrv_c3", "mrp_cl17", 3, "C", "ai", opus_med, "2026-11-17 16:01:00"),
+                    ("mrv_c4", "mrp_cl17", 4, "A", "ai", sonnet, "2026-11-17 16:20:00"),  # A again: the newest
+                    ("mrv_c5", "mrp_cl17", 5, None, "tables", None, "2026-11-17 23:45:00"),
+                    ("mrv_d1", "mrp_cl18", 1, None, "data", None, "2026-11-18 14:10:00"),
+                    ("mrv_e1", "mrp_bc", 1, None, "data", None, "2026-11-17 06:55:00"),
+                    ("mrv_e2", "mrp_bc", 2, "C", "ai", opus_med, "2026-11-17 07:12:00"),
+                    ("mrv_e3", "mrp_bc", 3, "B", "ai", sonnet, "2026-11-17 07:14:00"),
+                    ("mrv_f1", "mrp_pub", 1, None, "data", None, "2026-11-16 14:10:00"),
+                    ("mrv_f2", "mrp_pub", 2, None, "ai", opus_high, "2026-11-16 15:55:00"),
+                    ("mrv_g1", "mrp_open", 1, None, "data", None, "2026-11-19 14:10:00"),
+                    ("mrv_g2", "mrp_open", 2, "A", "ai", sonnet, "2026-11-19 15:47:00"),
+                    ("mrv_g3", "mrp_open", 3, "C", "ai", opus_med, "2026-11-19 15:49:00"),
+                    ("mrv_h1", "mrp_openb", 1, None, "data", None, "2026-11-20 14:10:00"),
+                    ("mrv_h2", "mrp_openb", 2, "A", "ai", sonnet, "2026-11-20 15:47:00"),
+                    ("mrv_h3", "mrp_openb", 3, "B", "ai", opus_high, "2026-11-20 15:51:00"),
+                    ("mrv_i1", "mrp_live", 1, None, "data", None, "2026-11-23 14:10:00"),
+                    ("mrv_i2", "mrp_live", 2, "B", "ai", opus_high, "2026-11-23 15:50:00"),
+                    ("mrv_i3", "mrp_live", 3, None, "ai", opus_high, "2026-11-23 15:56:00")):
+                _insert(conn, "market_report_versions", {"id": vid, "report_id": rid, "version": n, "variant": variant,
+                                                         "edition": edition, "writer": writer, "payload": "{}",
+                                                         "validation": "{}", "created_at": at})
+            _insert(conn, "market_report_votes", {"report_id": "mrp_pre", "user_id": "usr_1", "preferred": "A"})
+            _insert(conn, "market_report_runs", {"id": "mrr_p3", "report_id": "mrp_pre", "variant": "B",
+                                                 "purpose": "trial", "writer": opus_high, "calls": "[]",
+                                                 "metrics": "{}"})
+        cols = ("id", "trial", "visibility", "state", "current_version_id", "ai_published_at", "pushed_at",
+                "push_edition")
+        select_reports = f"SELECT {', '.join(cols)} FROM market_reports ORDER BY id"
+
+        def reports(conn) -> dict[str, tuple]:
+            return {r[0]: (bool(r[1]), r[2], r[3], r[4], str(r[5])[:19] if r[5] else None, r[6] is not None, r[7])
+                    for r in conn.execute(text(select_reports))}
+
+        def labels(conn) -> dict[str, str | None]:
+            return dict(conn.execute(text("SELECT id, variant FROM market_report_versions")).all())
+
+        command.upgrade(_config(url), "0028_remove_blind_test")
+        with engine.begin() as conn:
+            assert conn.execute(text("SELECT mode FROM market_report_config")).scalar_one() == "public"
+            got = reports(conn)
+            assert got == {
+                "mrp_pre": (False, "public", "ai", "mrv_p3", "2026-11-18 07:22:00", True, "trial"),
+                "mrp_cl17": (False, "public", "ai", "mrv_c4", "2026-11-17 16:20:00", True, "trial"),
+                "mrp_cl18": (False, "public", "data", "mrv_d1", "2026-11-18 07:40:00", False, None),
+                "mrp_bc": (False, "public", "ai", "mrv_e3", "2026-11-17 07:14:00", False, None),
+                "mrp_pub": (False, "public", "ai", "mrv_f2", None, True, "ai"),
+                "mrp_open": (False, "public", "data", "mrv_g1", "2026-11-19 07:40:00", False, None),
+                "mrp_openb": (False, "public", "ai", "mrv_h3", "2026-11-20 15:51:00", False, None),
+                "mrp_live": (False, "public", "ai", "mrv_i3", "2026-11-23 07:40:00", False, None)}
+            vs = labels(conn)
+            assert all(vs[v] is None for v in ("mrv_p3", "mrv_c4", "mrv_e3", "mrv_h3", "mrv_i3"))  # kept: plain
+            assert (vs["mrv_p2"], vs["mrv_p4"], vs["mrv_c2"], vs["mrv_c3"], vs["mrv_e2"]) == ("A", "C", "A", "C", "C")
+            assert (vs["mrv_g2"], vs["mrv_g3"], vs["mrv_h2"], vs["mrv_i2"]) == ("A", "C", "A", "B")  # not taken
+            assert conn.execute(text("SELECT preferred FROM market_report_votes")).scalar_one() == "A"
+            assert conn.execute(text("SELECT variant, purpose FROM market_report_runs")).one() == ("B", "trial")
+        command.downgrade(_config(url), "0027_channel_four_switches")
+        with engine.begin() as conn:
+            assert reports(conn) == got and labels(conn) == vs  # no data change
+            assert conn.execute(text("SELECT mode FROM market_report_config")).scalar_one() == "public"
+            conn.execute(text("UPDATE market_report_config SET mode = 'paused'"))
+        command.upgrade(_config(url), "head")
+        with engine.begin() as conn:
+            assert reports(conn) == got and labels(conn) == vs  # nothing left to do
+            assert conn.execute(text("SELECT mode FROM market_report_config")).scalar_one() == "paused"
+    finally:
+        engine.dispose()

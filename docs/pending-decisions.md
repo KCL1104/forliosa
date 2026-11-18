@@ -518,12 +518,14 @@ FMP、Twelve Data 有沒有台股的評等資料；Brave「儲存權」的價格
 1. **2026-11-26 以前核對美股休市表**：管理後台「市場報告」的「美股休市表」，到 NYSE 官網（https://www.nyse.com/markets/hours-calendars）逐列核對、按「標記已核對」（沙盒打不開 NYSE，15 列都還沒核對）。
 2. **補總經行事曆與美股財報日**：同一頁，只放官方網站的連結（沙盒打不開官方頁，種子是空的）。
 3. **開 4 號金鑰（建議）**：另開一個 Anthropic workspace 給報告用，設 `CLAUDE_API_KEY_4`，在 Console 設硬上限，Railway 設 `AI_KEY_4_MONTHLY_BUDGET_USD=90`。沒有 4 號時報告和會員共用金鑰。
-4. **打開**：Railway 的 worker 設 `MARKET_REPORTS_ENABLED=true`（預設是試跑模式，只有站方管理員看得到）。
-5. **盲測做完後**：管理後台「盲測」投票、按「揭曉」、每種報告選撰寫設定，再把模式切到「對全站公開」。條款版本 `TERMS_VERSION` 在對全站公開時改（條款與隱私權政策的修改稿已寫好，請律師一起看）。
+4. **打開**：Railway 的 worker 設 `MARKET_REPORTS_ENABLED=true`。
+5. ~~**盲測做完後**~~：**負責人 2026-11-18 拿掉盲測**（「盲測的部分就直接拔掉吧」）：報告直接對全站公開、用 Opus 5.5 high 寫一次（migration `0028_remove_blind_test`）。
+   條款版本 `TERMS_VERSION` 原本說「對全站公開時改」：現在已經公開，請決定要不要改（條款與隱私權政策的修改稿已寫好，請律師一起看）。
+   Railway 上的 `MREPORT_TRIAL_AUDIENCE`、`AI_MREPORT_TRIAL_BUDGET_USD`、`AI_MREPORT_TRIAL_DAYS`、`MARKET_REPORTS_INITIAL_MODE=trial` 不再使用，可以刪掉（留著不影響）。
 6. **律師**：收費前要問的題目加了第 25–31 題（`docs/legal/README.md` (f)「市場報告」）。
 
 **還沒確認、由工程追蹤（不用你決定）**：Opus 5.5 的伺服器端備援和 structured output 能不能同時用、Haiku 5.5 支不支援 structured output（都已有退路，第一次真的呼叫時才知道）；
-晚上的融資與外資前 20 檔案是哪一天的（21:00 後跑 `python -m forliosa.reports probe-dates`）；費用與耗時（盲測會量到）。
+晚上的融資與外資前 20 檔案是哪一天的（21:00 後跑 `python -m forliosa.reports probe-dates`）；費用與耗時（管理後台的產生紀錄）。
 
 ---
 

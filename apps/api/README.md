@@ -83,7 +83,7 @@ uv run python -m forliosa.worker
 | 20:30 到隔天 02:00，每 15 分鐘（`SHIOAJI_EVENING_CLOSE`，預設開） | **晚上的暫時收盤價** `evening_closes`：shioaji-data 的 `daily.json`（多半 20:20–23:40 更新）先讀前 512 bytes 看 `as_of`，官方收盤還沒進來的市場才下載整個檔，存成只有收盤價的 `shioaji-data` 列（暫時資料），官方檔案進來後取代 |
 | 13:35 到下一個交易日 08:30，每 15 分鐘 | `close_watch`：問兩個 OpenAPI 的收盤檔換成那一天了沒（條件式請求前 1 KB）；換了就跑那個市場的存檔。櫃買約 23:30、證交所約隔天 05:20。週五的收盤一路看到週一 08:30（以前到週六 08:30 就停）；已經存進來的市場不再問。兩個市場的官方收盤都進來後馬上寫每日收盤簡報 |
 | 06:45（`MARKET_REPORT_PREMARKET_ARCHIVE`，預設開） | `premarket_archive`：證交所、櫃買、期交所再存一次（證交所 05:2x 的 OpenAPI 整批進來以後），讓 07:00 的盤前重點讀得到前一個交易日的官方收盤、FMTQIK 與加權指數開高低 |
-| 每分鐘，自己的迴圈（`MARKET_REPORTS_ENABLED`，預設關） | **市場報告** `market_reports`（`forliosa.reports.pipeline.tick`）：盤前重點（06:15 蒐集、06:55 資料版、07:00 撰寫、07:30 推播、08:15 改推資料版、08:40 截止）、盤後重點（14:10 資料版、15:40 蒐集、15:50 撰寫、16:00 推播、17:30 截止、23:45 與隔天 06:40 補表）、市場週報（週日 16:30 資料版與蒐集、16:50 撰寫、18:00 推播、21:00 截止）。模型呼叫在四個執行緒的池子裡跑，不卡排程；跑了 20 分鐘沒有動靜的視為放棄。試跑模式只給站方管理員看、不推播（`MREPORT_TRIAL_AUDIENCE=all` 時盲測的報告開給所有登入的人，並推投票連結）。狀態：`uv run python -m forliosa.reports status` |
+| 每分鐘，自己的迴圈（`MARKET_REPORTS_ENABLED`，預設關） | **市場報告** `market_reports`（`forliosa.reports.pipeline.tick`）：盤前重點（06:15 蒐集、06:55 資料版、07:00 撰寫、07:30 推播、08:15 改推資料版、08:40 截止）、盤後重點（14:10 資料版、15:40 蒐集、15:50 撰寫、16:00 推播、17:30 截止、23:45 與隔天 06:40 補表）、市場週報（週日 16:30 資料版與蒐集、16:50 撰寫、18:00 推播、21:00 截止）。模型呼叫在四個執行緒的池子裡跑，不卡排程；跑了 20 分鐘沒有動靜的視為放棄。每一份都對所有登入的人公開，照頻道的四個開關推播（盲測 2026-11-18 拿掉了）。狀態：`uv run python -m forliosa.reports status` |
 | 每天 04:40 | 市場報告保存 `MARKET_REPORT_RETENTION_DAYS`（730）天，依報告日期刪除（連同版本、產生紀錄、蒐集、投票與推播紀錄） |
 | 週六 10:00 | 集保股權分散表（只能下載當週，所以每週存）、期交所最後結算價與股票期貨／選擇權標的、停更端點檢查（`twtazu_od`、`t187ap09_L`） |
 | 每天 04:20 | 刪除最後活動超過 `AI_RETENTION_DAYS`（30）天的 AI 對話、訊息與草稿（見下方「AI」） |
@@ -131,17 +131,21 @@ uv run python -m forliosa.worker
 ### 市場報告（2026-11-17）
 
 盤前重點、盤後重點、市場週報（`forliosa.reports`；合約與差異見 `CONTRACT_NOTES.md`「2026-11-17 市場報告」）。`MARKET_REPORTS_ENABLED=true` 才排程；
-第一份報告建立後先盲測 5 個台股交易日（三組撰寫設定 A／B／C，只給站方管理員看，試跑上限 `AI_MREPORT_TRIAL_BUDGET_USD`＝US$45），
-管理後台「市場報告」揭曉、選好設定，再把模式切到「對全站公開」。`MREPORT_TRIAL_AUDIENCE=all`（預設 `admins`；管理後台「盲測對象」也可以切）把盲測開給所有登入的人：
-大家都能看 A／B／C、每人每份投一票（揭曉前可以改），有開推播的群組每份收到一則投票連結；揭曉仍只有站方管理員能按。站方月上限 `AI_MREPORT_MONTHLY_BUDGET_USD`（US$80；70%／90%／100% 依序降級，0＝只發資料版）。
+每一份報告對所有登入的人公開，用預設的撰寫設定寫一次（`AI_MREPORT_WRITE_MODEL`＝Opus 5.5、`AI_MREPORT_WRITE_EFFORT`／`_WEEKLY`＝high；
+管理後台可以每種報告另外選），照頻道的四個開關推一般的公開推播。**盲測拿掉了**（產品負責人 2026-11-18：「盲測的部分就直接拔掉吧」）：沒有試跑模式、
+A／B／C、投票、揭曉；`MARKET_REPORTS_INITIAL_MODE` 預設 `public`（`trial` 還接受，當成 public）；migration `0028_remove_blind_test` 把已經做的
+盲測報告改成一般公開的一份（留 Opus 5.5 high 寫的那個版本，沒有就留 A；還沒推播的只留 Opus 5.5 high 的，否則照一般流程寫），部署後跑一次
+`reports tables --promoted` 把盲測過的盤後重點表格重建成最新的。站方月上限 `AI_MREPORT_MONTHLY_BUDGET_USD`（US$80；70%／90%／100% 依序降級，0＝只發資料版）。
 有 `CLAUDE_API_KEY_4`（而且還有別把 key）時報告只用 4 號 key。
 
 ```bash
-uv run python -m forliosa.reports status                       # 模式、本月花費與層級、盲測進度、最近的產生紀錄（不印金鑰）
+uv run python -m forliosa.reports status                       # 模式、本月花費與層級、最近的產生紀錄（不印金鑰）
 uv run python -m forliosa.reports seed                         # 美股休市表等手動表的初始資料（worker 啟動時表是空的也會自動跑）
 uv run python -m forliosa.reports pack --kind close --date 2026-11-16      # 只建資料包，不呼叫模型
 uv run python -m forliosa.reports data --kind close --date 2026-11-16      # 建資料版（過去的日期是回補，只有管理員看得到）
 uv run python -m forliosa.reports run --kind close --date 2026-11-16 --writer sonnet-high --yes   # 一次完整的 AI 流程（沒有 --yes 只印預估）
+uv run python -m forliosa.reports tables --promoted            # 盲測過的盤後重點重建一次表格（拿掉盲測的部署後跑一次；不推播、不呼叫模型）
+uv run python -m forliosa.reports tables --date 2026-11-17     # 某一天的盤後重點重建表格（留 AI 的字）
 uv run python -m forliosa.reports probe-dates                  # 晚上的融資、外資前 20、期交所檔案是哪一天的
 ```
 
@@ -229,7 +233,7 @@ uv run python -m forliosa.ai.retention --dry-run   # 看看保存期限會刪掉
 | `AI_ADMIN_EMAILS` | 空 | 正式環境可看金鑰槽狀態的帳號（逗號分隔） |
 | `TWSE_OPENDATA_CLOSE` | `true` | worker 在交易日下午抓證交所的兩個下載網址，上市收盤當天約 14:00 進來（見排程）；證交所表示不同意就設 `false`。api 用它算 `market-status` 的預計時間（`tw.closes`），所以**api 與 worker 都要設** |
 | `SHIOAJI_EVENING_CLOSE` | `true` | worker 晚上用 shioaji-data 先放暫時收盤價（見排程）；同上，api 與 worker 都要設 |
-| `MREPORT_TRIAL_AUDIENCE` | `admins` | 市場報告的盲測給誰（產品負責人 2026-11-17）：`admins` 只有站方管理員；`all` 所有登入的人都能看 A／B／C、投票（揭曉前可以改，揭曉只有管理員），有開推播的群組每份收到一則投票連結。管理後台「盲測對象」切過以後以後台為準（存在資料庫）。api 讀它決定誰看得到、worker 讀它決定推不推，**api 與 worker 都要設** |
+| ~~`MREPORT_TRIAL_AUDIENCE`~~、~~`AI_MREPORT_TRIAL_BUDGET_USD`~~、~~`AI_MREPORT_TRIAL_DAYS`~~ | — | **已拿掉**（產品負責人 2026-11-18：拿掉盲測）。程式不再讀；Railway 上還留著也不會讓啟動失敗（未知的變數忽略），可以刪掉。`MARKET_REPORTS_INITIAL_MODE` 預設改成 `public`（`trial` 當成 public） |
 
 **範圍**：助理只協助投資理財、台股與美股、使用者自己的持股與交易，以及 Forliosa 的用法；寫程式、一般常識、作業、翻譯、寫作、角色扮演等要求，
 用一句繁體中文婉拒並把話題帶回投資。明顯的情況（例如「幫我寫 Python 爬蟲」）在伺服器端就婉拒、不花模型費用；只要提到任何財經字詞或股票代號就交給模型判斷。

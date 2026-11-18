@@ -327,7 +327,7 @@ def delete_user(db: Session, user: User) -> None:
         db.execute(delete(Delegation).where(or_(Delegation.owner_id == uid, Delegation.viewer_id == uid)))
         for model in (AiBriefing, AiDraft, AiMessage, AiQuestion, AiThread, AutoDividendSkip, RecurringPlan,
                       Transaction, WatchlistItem, BrokerAccount, UserSession, UserIdentity,
-                      MarketReportRead, MarketReportVote):  # 市場報告: when I last looked, an admin's blind-test votes
+                      MarketReportRead, MarketReportVote):  # 市場報告: when I last looked, old blind-test votes
             db.execute(delete(model).where(model.user_id == uid))
         # What is left pointing at the user is kept without an author (ON DELETE SET NULL): group comments, discussion
         # topics and replies, AI usage counts, who created an invite / configured a channel / suspended someone.

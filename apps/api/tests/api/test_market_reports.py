@@ -1,6 +1,7 @@
 """市場報告 API (contract §14, §16): signed-in only; admin-only editions stay hidden from members (404); the public form
 never shows ids, refs or quotes; the list pages; old versions; the unread dot; the view-as rules; switched off; the
-admin side (settings, the blind test, the reveal, corrections, the hand-kept tables)."""
+admin side (settings, corrections, the hand-kept tables). The blind test was removed on 2026-11-18: its member and
+admin endpoints are 404, every edition is public."""
 
 from __future__ import annotations
 
@@ -11,7 +12,6 @@ import pytest
 
 from forliosa.config import get_settings
 from forliosa.db import session_factory
-from forliosa.models import MarketReport, MarketReportRun, MarketReportVersion
 from forliosa.reports import assemble, pack, pipeline
 from forliosa.reports import settings as rs
 from forliosa.timeutil import TAIPEI, now_utc
@@ -30,12 +30,12 @@ def on(app, monkeypatch):
     get_settings.cache_clear()
 
 
-def make(kind="close", d=MON, visibility="public", ai=True, trial=False, published=None) -> str:
+def make(kind="close", d=MON, visibility="public", ai=True, published=None) -> str:
     """An edition with a data version and (``ai``) an AI version, published ``published`` (default: now)."""
     published = published or now_utc()
     with session_factory()() as db:
         ed = pipeline.edition_on(kind, d)
-        r = pipeline.make_report(db, ed, published, visibility=visibility, trial=trial)
+        r = pipeline.make_report(db, ed, published, visibility=visibility)
         built = pack.build(db, kind, d, cutoff=ts(d, 15, 40), now=ts(d, 16))
         pk = with_web(built.pack, INST_X)
         output = close_output(pk) if ai else None
@@ -56,7 +56,7 @@ def admin_on(monkeypatch, email="demo@forliosa.local"):
 
 def test_switched_off(app, client):
     assert client.get(f"{API}/market/reports/status").json() == {"available": False, "mode": None, "unread": False,
-                                                                 "latest": [], "trial_open": False}
+                                                                 "latest": []}
     assert client.get(f"{API}/market/reports").json() == {"items": [], "next_cursor": None}
     assert client.get(f"{API}/market/reports/latest").json() is None
 
@@ -70,7 +70,7 @@ def test_signed_in_only(app, on):
 
 
 def test_admin_editions_are_hidden_from_members(on, client, other_client, monkeypatch):
-    rid = make(visibility="admin", trial=True)
+    rid = make(visibility="admin")
     admin_on(monkeypatch)
     assert other_client.get(f"{API}/market/reports/{rid}").status_code == 404
     assert other_client.get(f"{API}/market/reports/{rid}").json()["error"]["message"] == "找不到這份報告"
@@ -79,7 +79,7 @@ def test_admin_editions_are_hidden_from_members(on, client, other_client, monkey
     assert other_client.get(f"{API}/market/reports").json()["items"] == []
     # the admin reads it (the current version: here the AI one)
     st = client.get(f"{API}/market/reports/status").json()
-    assert st["available"] and st["mode"] == "trial"
+    assert st["available"] and st["mode"] == "public"
     assert client.get(f"{API}/market/reports/{rid}").status_code == 200
 
 
@@ -141,18 +141,23 @@ def test_admin_endpoints_are_404_for_members_before_the_body(on, other_client):
 def test_config_and_overview(on, client, monkeypatch):
     admin_on(monkeypatch)
     ov = client.get(f"{API}/admin/market-reports/overview").json()
-    assert ov["enabled"] and ov["mode"] == "trial" and ov["month"]["budget_usd"] == 80.0
+    assert ov["enabled"] and ov["mode"] == "public" and ov["month"]["budget_usd"] == 80.0
     assert ov["month"]["tier"] == "normal" and ov["month"]["label"].endswith("月")
-    assert ov["trial"]["budget_usd"] == 45.0 and list(ov["writers"]) == ["premarket", "close", "weekly"]
-    assert all(w is None for w in ov["writers"].values())  # 盲測中: no model named
-    assert ov["trial_running"] and ov["trial"]["days_total"] == 5 and ov["trial"]["weekly_done"] is False
+    assert list(ov["writers"]) == ["premarket", "close", "weekly"]
+    # the blind test is gone: every kind names its writer, the env default Opus 5.5 at high
+    assert all({k: w[k] for k in ("model", "effort", "source")} ==
+               {"model": "claude-opus-5-5", "effort": "high", "source": "default"} for w in ov["writers"].values())
+    assert not {"trial", "trial_running", "trial_audience", "trial_audience_source"} & set(ov)
     assert ov["key"] == {"slot": None, "status": "ok", "note": None}
     assert set(ov["manual"]) >= {"nyse_next", "nyse_unverified", "macro_next_14d", "earnings_next_14d"}
+    for gone in ({"mode": "trial"}, {"trial_audience": "all"}):  # the blind test's settings are refused
+        assert client.put(f"{API}/admin/market-reports/config", json=gone).status_code == 422
+    assert client.put(f"{API}/admin/market-reports/config", json={"mode": "paused"}).json()["mode"] == "paused"
     r = client.put(f"{API}/admin/market-reports/config", json={"mode": "public"})
     assert r.status_code == 200 and r.json()["notice"].startswith("之後的新報告會對所有登入的人公開")
     r = client.put(f"{API}/admin/market-reports/config",
                    json={"writers": {"close": {"model": "claude-sonnet-5-5", "effort": "high"}}})
-    w = r.json()["writers"]  # public now: the writers are named
+    w = r.json()["writers"]
     assert {k: w["close"][k] for k in ("model", "effort", "source")} == \
         {"model": "claude-sonnet-5-5", "effort": "high", "source": "admin"}
     assert w["premarket"]["source"] == "default" and r.json()["notice"] is None
@@ -164,91 +169,24 @@ def test_config_and_overview(on, client, monkeypatch):
         assert rs.config(db).mode == "public"
 
 
-def _trial_runs(rid: str) -> None:
-    with session_factory()() as db:
-        r = db.get(MarketReport, rid)
-        for label, (model, effort) in zip("ABC", pipeline.TRIAL_DAILY, strict=True):
-            db.add(MarketReportRun(id=f"mrr_{rid[-6:]}{label}", report_id=rid, variant=label, purpose="trial",
-                                   attempt=1, status="ok", step="done", tier="normal",
-                                   writer={"model": model, "effort": effort}, calls=[], cost_usd=0.5,
-                                   metrics={"on_time": True, "cost_usd": 0.5 if model.endswith("sonnet-5-5") else 1.0,
-                                            "policy_violations": 0, "subject_mismatches": 0, "inferred_dates": 0,
-                                            "dropped_sections": 0, "data_only": False, "seconds": 300},
-                                   started_at=now_utc(), heartbeat_at=now_utc(), finished_at=now_utc()))
-            cur = db.get(MarketReportVersion, r.current_version_id)
-            db.add(MarketReportVersion(id=f"mrv_{rid[-6:]}{label}", report_id=rid, version=10 + "ABC".index(label),
-                                       variant=label, edition="ai", payload=cur.payload,
-                                       writer={"model": model, "effort": effort, "tier": "normal"},
-                                       run_id=f"mrr_{rid[-6:]}{label}",
-                                       validation={"first": [{"path": "title", "code": "style_word"}]},
-                                       created_at=now_utc()))
-        r.closed_at = now_utc()
-        db.commit()
-
-
-def test_blind_test_votes_and_reveal(on, client, other_client, monkeypatch):
+def test_the_blind_test_endpoints_are_gone(on, client, other_client, monkeypatch):
+    """產品負責人 2026-11-18: 「盲測的部分就直接拔掉吧」 — the member (A / B / C, vote) and admin (list, variants,
+    vote, reveal) routes answer 404 for everyone, admins included."""
     admin_on(monkeypatch)
-    rid = make(visibility="admin", trial=True)
-    _trial_runs(rid)
-    trial = client.get(f"{API}/admin/market-reports/trial").json()
-    assert trial["reveal"] is None and trial["days_done"] == 1 and trial["finished"] is False
-    [row] = trial["reports"]
-    assert [v["label"] for v in row["variants"]] == ["A", "B", "C"]
-    assert all("writer" not in v and "cost_usd" not in v["metrics"] for v in row["variants"])
-    assert all(v["metrics"]["revised"] is False and v["metrics"]["refusal_category"] is None for v in row["variants"])
-    ov = client.get(f"{API}/admin/market-reports/overview").json()
-    assert all(x["model"] is None and x["cost_usd"] is None for x in ov["runs"] if x["purpose"] == "trial")
-    v = client.get(f"{API}/admin/market-reports/{rid}/variants/B").json()
-    assert v["variant"] == "B" and v.get("writer") is None
-    assert v["validation"]["first_problems"] == [{"code": "style_word", "path": "title"}]
-    assert v["validation"]["dropped"] == [] and v["validation"]["revised"] is False
-    assert any(s.get("refs") for p in v["highlights"] for s in p["sentences"])
-    assert client.put(f"{API}/admin/market-reports/{rid}/vote", json={"preferred": "B", "note": "比較清楚"}).json() == \
-        {"report_id": rid, "preferred": "B", "note": "比較清楚"}
-    assert client.put(f"{API}/admin/market-reports/{rid}/vote", json={"preferred": "D"}).status_code == 422
-    r = client.post(f"{API}/admin/market-reports/trial/reveal", json={})
-    assert r.status_code == 409 and "盲測還沒做完（1/9 份日報、週報 0/1）" in r.json()["error"]["message"]
-    out = client.post(f"{API}/admin/market-reports/trial/reveal", json={"force": True}).json()
-    assert out["complete"] is False and [k["kind"] for k in out["kinds"]] == ["premarket", "close", "weekly"]
-    close = next(k for k in out["kinds"] if k["kind"] == "close")
-    assert close["kind_label"] == "盤後重點" and close["suggested"] == {"model": "claude-sonnet-5-5", "effort": "high"}
-    by = {(x["writer"]["model"], x["writer"]["effort"]): x for x in close["rows"]}
-    assert by[("claude-opus-5-5", "high")]["passed"] and by[pipeline.TRIAL_DAILY[1]]["avg_cost_usd"] == 1.0
-    assert sum(x["votes"] for x in close["rows"]) == 1 and all(x["reports"] == 1 for x in close["rows"])
-    pre = next(k for k in out["kinds"] if k["kind"] == "premarket")
-    assert pre["suggested"] is None and all(not x["passed"] and x["reports"] == 0 for x in pre["rows"])
-    trial = client.get(f"{API}/admin/market-reports/trial").json()
-    assert trial["reveal"]["kinds"] == out["kinds"]
-    assert trial["reports"][0]["variants"][0]["writer"]["model"].startswith("claude-")
-    # revealed: the models are named now
-    v = client.get(f"{API}/admin/market-reports/{rid}/variants/B").json()
-    assert v["writer"]["model"].startswith("claude-")
-    assert other_client.get(f"{API}/admin/market-reports/trial").status_code == 404
-
-
-def test_trial_variants_pending_running_and_missing(on, client, monkeypatch):
-    """A variant with no run yet is 「pending」; one still writing answers 409 ``variant_running``; one that ended
-    without an AI version (data only, skipped) is 404."""
-    admin_on(monkeypatch)
-    rid = make(visibility="admin", trial=True)
-    with session_factory()() as db:
-        for label, status in (("A", "running"), ("B", "data_only")):
-            db.add(MarketReportRun(id=f"mrr_{rid[-6:]}{label}", report_id=rid, variant=label, purpose="trial",
-                                   attempt=1, status=status, step="write" if status == "running" else "done",
-                                   tier="normal", writer={"model": "claude-opus-5-5", "effort": "high"}, calls=[],
-                                   cost_usd=0, metrics={} if status == "running" else {"data_only": True},
-                                   started_at=now_utc(), heartbeat_at=now_utc()))
-        db.commit()
-    [row] = client.get(f"{API}/admin/market-reports/trial").json()["reports"]
-    a, b, c = row["variants"]
-    assert a["status"] == "running" and a["on_time"] is None and a["metrics"] is None
-    assert b["status"] == "data_only" and b["metrics"]["data_only"] is True and b["metrics"]["dropped_sections"] == 0
-    assert c == {"label": "C", "status": "pending", "attempts": 0, "finished_at": None, "on_time": None,
-                 "published": False, "problems": None, "metrics": None}
-    r = client.get(f"{API}/admin/market-reports/{rid}/variants/A")
-    assert r.status_code == 409 and r.json()["error"]["code"] == "variant_running"
+    rid = make()
+    for c in (client, other_client):
+        assert c.get(f"{API}/market/reports/{rid}/trial").status_code == 404
+        assert c.get(f"{API}/market/reports/{rid}/variants/A").status_code == 404
+        assert c.put(f"{API}/market/reports/{rid}/vote", json={"preferred": "A"}).status_code in (404, 405)
+    assert client.get(f"{API}/admin/market-reports/trial").status_code == 404
+    assert client.post(f"{API}/admin/market-reports/trial/reveal", json={}).status_code in (404, 405)
     assert client.get(f"{API}/admin/market-reports/{rid}/variants/B").status_code == 404
-    assert client.get(f"{API}/admin/market-reports/{rid}/variants/C").status_code == 404
+    assert client.put(f"{API}/admin/market-reports/{rid}/vote", json={"preferred": "B"}).status_code in (404, 405)
+    body = other_client.get(f"{API}/market/reports/{rid}").json()
+    assert "trial" not in body and "variant" not in body
+    summary = other_client.get(f"{API}/market/reports").json()["items"][0]
+    assert "trial" not in summary and "my_vote" not in summary
+    assert "trial_open" not in other_client.get(f"{API}/market/reports/status").json()
 
 
 def test_corrections(on, client, other_client, monkeypatch):
@@ -338,12 +276,15 @@ def test_deleting_the_account_removes_seen_and_votes(on, client, monkeypatch, en
     from sqlalchemy import func, select
     from sqlalchemy.orm import Session
 
-    from forliosa.models import MarketReportRead, MarketReportVote
+    from forliosa.models import MarketReportRead, MarketReportVote, User
 
     admin_on(monkeypatch)
-    rid = make(visibility="admin", trial=True)
+    rid = make(visibility="admin")
     assert client.post(f"{API}/market/reports/seen").status_code == 204
-    assert client.put(f"{API}/admin/market-reports/{rid}/vote", json={"preferred": "A"}).status_code == 200
+    with Session(engine) as db:  # an old blind-test vote (history from before 2026-11-18)
+        uid = db.scalar(select(User.id).where(User.email == "demo@forliosa.local"))
+        db.add(MarketReportVote(report_id=rid, user_id=uid, preferred="A", note="", by_admin=True))
+        db.commit()
     from tests.api.test_account import CONFIRM
 
     r = client.request("DELETE", f"{API}/me", json=CONFIRM)

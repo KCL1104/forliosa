@@ -40,7 +40,7 @@ export function ChannelsTab({ group }: { group: Group }) {
         {c.discord.configured ? (
           <>
             {owner && c.discord.webhook_hint && <p className="num text-md text-ink-2">Webhook 網址結尾 {c.discord.webhook_hint}</p>}
-            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
+            <NotifyToggles groupId={group.id} kind="discord" value={c.discord} editable={owner} reports={!!c.market_reports_available} />
             {owner && (
               // 「換一個 webhook」和「解除 Discord」同一列、中間留 24px（原本兩個行內元素直接貼在一起；2026-11-15 產品負責人回報）。
               // 展開成表單時表單佔滿一列，「解除」換到下一列
@@ -70,7 +70,7 @@ export function ChannelsTab({ group }: { group: Group }) {
               </p>
             )}
             {c.telegram.configured && (
-              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} reports={!!c.market_reports_available} trial={!!c.market_reports_trial} />
+              <NotifyToggles groupId={group.id} kind="telegram" value={c.telegram} editable={owner} reports={!!c.market_reports_available} />
             )}
             {owner && (!c.telegram.configured || c.telegram.status === "disabled") && (
               <TelegramLink groupId={group.id} code={linked ? null : linking} onCode={setLinking} />
@@ -111,7 +111,6 @@ function NotifyToggles({
   value,
   editable,
   reports,
-  trial = false,
 }: {
   groupId: string
   kind: "discord" | "telegram"
@@ -119,16 +118,10 @@ function NotifyToggles({
   editable: boolean
   /** 市場報告對全站公開：盤前、盤後、週報有市場報告的部分 */
   reports: boolean
-  /** 盲測開給所有人：市場報告的部分是一則投票連結（後面照樣接群組的部分） */
-  trial?: boolean
 }) {
   const patch = usePatchChannel(groupId, kind)
-  // 報告還沒開放時，盤前、週報照樣在同一個時間送群組的部分（後端 reports/push.py），盤後沒有東西可送
-  const note = reports
-    ? "推到頻道的是文字與連結，報告本文人人相同。"
-    : trial
-      ? "盲測期間每份報告推一則投票連結：三種寫法，看完選一個。"
-      : "市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。"
+  // 報告暫停或沒開時，盤前、週報照樣在同一個時間送群組的部分（後端 reports/push.py），盤後沒有東西可送
+  const note = reports ? "推到頻道的是文字與連結，報告本文人人相同。" : "市場報告還沒開放：盤前、週報先只送群組的部分，盤後先不送。"
   return (
     <div className="mt-2 border-t border-rule" data-channel-switches="">
       {SWITCHES.map(({ key, label, detail, on }) => {

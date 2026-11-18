@@ -6,10 +6,10 @@
   entries). When iterations are present they are summed per model instead of the top-level counts (never both).
   One ``ai_usage`` row per model, priced at that model's rates (``pricing.charge``: an unknown model at the highest
   known price, never a cheaper guess).
-* Features: ``mreport_gather`` / ``mreport_write`` / ``mreport_check`` for live editions, ``mreport_trial`` for every
-  call of a blind-test edition (its gathering included). ``user_id`` is empty (site-paid); ``thread_id`` is the run id
-  (the gather id for a gathering).
-* The month (Taipei, like ``store.month_start``) counts the three live features; the blind test has its own cap.
+* Features: ``mreport_gather`` / ``mreport_write`` / ``mreport_check``. ``user_id`` is empty (site-paid);
+  ``thread_id`` is the run id (the gather id for a gathering). (``mreport_trial``: the blind test's calls, before it
+  was removed on 2026-11-18; history only, not in the month.)
+* The month (Taipei, like ``store.month_start``) counts the three features.
 * Tier (§4.5, live editions only): below 70 % of AI_MREPORT_MONTHLY_BUDGET_USD normal; 70–90 % medium effort; 90–100 %
   Sonnet 5.5 at high; from 100 % data only. Then one step further down while the month plus the attempt's upper
   estimate (:data:`EST_MAX_USD`) would pass the budget. A budget of 0 means data-only editions.
@@ -32,17 +32,15 @@ from forliosa.models import AiUsage
 from forliosa.reports.settings import TIERS
 
 LIVE_FEATURES = ("mreport_gather", "mreport_write", "mreport_check")
-TRIAL_FEATURE = "mreport_trial"
 FEATURE_OF_STEP = {"gather": "mreport_gather", "write": "mreport_write", "revise": "mreport_write",
                    "check": "mreport_check"}
 
-# One attempt incl. its gathering and check, upper bound (USD); tune after the blind test.
+# One attempt incl. its gathering and check, upper bound (USD).
 EST_MAX_USD: dict[str, dict[str, float]] = {
     "premarket": {"normal": 2.0, "medium": 1.6, "sonnet": 0.9},
     "close": {"normal": 2.0, "medium": 1.6, "sonnet": 0.9},
     "weekly": {"normal": 3.5, "medium": 2.8, "sonnet": 1.5},
 }
-XHIGH_FACTOR = 1.4  # a blind-test variant at xhigh is estimated this much above "normal"
 
 
 # -- one call ------------------------------------------------------------------------------------------------------
@@ -124,15 +122,9 @@ def cost_of(msg: Any, requested: str) -> Decimal:
 
 # -- totals --------------------------------------------------------------------------------------------------------
 def month_spend(db: Session, now: datetime | None = None) -> Decimal:
-    """This Taipei month's live report spending (the blind test is not in it)."""
+    """This Taipei month's report spending."""
     total = db.scalar(select(func.coalesce(func.sum(AiUsage.cost_usd), 0)).where(
         AiUsage.feature.in_(LIVE_FEATURES), AiUsage.created_at >= store.month_start(now)))
-    return Decimal(str(total or 0))
-
-
-def trial_spend(db: Session) -> Decimal:
-    """Everything the blind test has spent so far."""
-    total = db.scalar(select(func.coalesce(func.sum(AiUsage.cost_usd), 0)).where(AiUsage.feature == TRIAL_FEATURE))
     return Decimal(str(total or 0))
 
 
@@ -160,34 +152,3 @@ def tier(db: Session, kind: str, now: datetime | None = None, settings: Settings
     while t != "data_only" and spent + Decimal(str(EST_MAX_USD[kind][t])) > budget:
         t = TIERS[TIERS.index(t) + 1]
     return t
-
-
-def trial_estimate(kind: str, effort: str | None) -> Decimal:
-    """The upper estimate of one blind-test variant (xhigh / max: :data:`XHIGH_FACTOR` above)."""
-    est = Decimal(str(EST_MAX_USD[kind]["normal"]))
-    if effort in ("xhigh", "max"):
-        est *= Decimal(str(XHIGH_FACTOR))
-    return est
-
-
-def trial_reserved(db: Session) -> Decimal:
-    """What the blind-test variants still running may yet spend: each one's estimate less what it has booked (its
-    booked calls are already in :func:`trial_spend`)."""
-    from forliosa.models import MarketReport, MarketReportRun
-
-    rows = db.execute(select(MarketReport.kind, MarketReportRun.writer, MarketReportRun.cost_usd)
-                      .join(MarketReport, MarketReport.id == MarketReportRun.report_id)
-                      .where(MarketReportRun.purpose == "trial", MarketReportRun.status == "running"))
-    total = Decimal(0)
-    for kind, writer, cost in rows:
-        total += max(trial_estimate(kind, (writer or {}).get("effort")) - Decimal(str(cost or 0)), Decimal(0))
-    return total
-
-
-def trial_fits(db: Session, kind: str, effort: str, settings: Settings | None = None) -> bool:
-    """A blind-test variant may start while the trial's spending, what the running variants may yet spend and its own
-    estimate stay within the trial cap (the three variants of an edition start one after the other: each sees the
-    ones queued before it)."""
-    s = settings or get_settings()
-    return trial_spend(db) + trial_reserved(db) + trial_estimate(kind, effort) \
-        <= Decimal(str(s.ai_mreport_trial_budget_usd))

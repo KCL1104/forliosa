@@ -90,9 +90,8 @@ def test_month_spend_counts_live_features_only(db):
     add_usage(db, "mreport_trial", "7")
     add_usage(db, "chat", "1")
     add_usage(db, "mreport_check", "3", when=datetime(2026, 10, 20, tzinfo=UTC))  # last month
-    assert accounting.month_spend(db, NOW) == D("12.5")
-    assert accounting.trial_spend(db) == D("7")
-    assert set(accounting.LIVE_FEATURES) | {accounting.TRIAL_FEATURE} <= set(store.FEATURES)
+    assert accounting.month_spend(db, NOW) == D("12.5")  # the removed blind test's calls are not in the month
+    assert set(accounting.LIVE_FEATURES) | {"mreport_trial"} <= set(store.FEATURES)  # old rows stay readable
     assert all(len(f) <= 16 for f in store.FEATURES)  # ai_usage.feature is String(16)
 
 
@@ -114,18 +113,11 @@ def test_tier_steps_down_while_the_attempt_would_not_fit(db):
     assert accounting.tier(db, "weekly", NOW, s) == "data_only"
 
 
-def test_trial_cap(db):
-    s = Settings(ai_mreport_trial_budget_usd=45)
-    add_usage(db, "mreport_trial", "42")
-    assert accounting.trial_fits(db, "close", "high", s)  # 42 + 2.0 <= 45
-    assert not accounting.trial_fits(db, "weekly", "xhigh", s)  # 42 + 3.5 × 1.4 > 45
-
-
 def test_writer_resolution_and_tiers(db):
     s = Settings()
     assert rs.default_writer("close", s) == rs.Writer("claude-opus-5-5", "high")
     cfg = rs.config(db, s)
-    assert cfg.mode == "trial" and cfg.id == 1
+    assert cfg.mode == "public" and cfg.id == 1  # MARKET_REPORTS_INITIAL_MODE now defaults to public
     cfg.writers = {"close": {"model": "claude-sonnet-5-5", "effort": "medium"},
                    "weekly": {"model": "gpt", "effort": "x"}}
     db.commit()
@@ -135,3 +127,18 @@ def test_writer_resolution_and_tiers(db):
     assert rs.apply_tier(w, "normal") == w and rs.apply_tier(w, "medium") == rs.Writer("claude-opus-5-5", "medium")
     assert rs.apply_tier(w, "sonnet") == rs.Writer("claude-sonnet-5-5", "high")
     assert rs.apply_tier(w, "data_only") is None
+
+
+def test_a_leftover_trial_mode_reads_as_public(db, monkeypatch):
+    """The blind test was removed (2026-11-18): a leftover Railway variable neither stops the start nor makes the mode
+    trial; a ``trial`` left in the config row reads as public; paused stays paused."""
+    monkeypatch.setenv("MREPORT_TRIAL_AUDIENCE", "all")
+    monkeypatch.setenv("AI_MREPORT_TRIAL_BUDGET_USD", "45")
+    monkeypatch.setenv("AI_MREPORT_TRIAL_DAYS", "5")
+    s = Settings(market_reports_initial_mode="trial")
+    assert not hasattr(s, "mreport_trial_audience") and not hasattr(s, "ai_mreport_trial_budget_usd")
+    assert Settings().market_reports_initial_mode == "public"
+    assert rs.config(db, s).mode == "public" and rs.mode(db, s) == "public"
+    rs.config(db, s).mode = "trial"  # a row the migration did not see
+    db.commit()
+    assert rs.mode(db, s) == "public" and rs.mode_of("paused") == "paused" and rs.MODES == ("public", "paused")

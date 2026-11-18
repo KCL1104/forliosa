@@ -12,8 +12,8 @@ import { createAppRouter } from "@/router"
 vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
 /**
- * 管理後台「市場報告」（2026-11-17）：狀態與模式切換、盲測（A／B／C、投票、揭曉）、三張手動維護的表。
- * 揭曉前不顯示盲測用的模型與花費。
+ * 管理後台「市場報告」（2026-11-17）：狀態與模式切換、撰寫設定、三張手動維護的表。
+ * 盲測（A／B／C、投票、揭曉）2026-11-18 拿掉了：沒有盲測的段落與比較頁。
  */
 beforeAll(() => {
   window.scrollTo = () => {}
@@ -61,24 +61,51 @@ function renderApp(path = "/admin/reports") {
 const section = async (name: string) => (await screen.findByRole("heading", { level: 2, name }, T)).closest("section")!
 
 describe("狀態", () => {
-  it("試跑中：撰寫設定寫「盲測中」；切到對全站公開要再確認一次", async () => {
+  it("對全站公開：每種報告的撰寫設定（預設 Opus 5.5・high）；模式只有公開與暫停，沒有試跑、盲測；暫停後再公開要再確認一次", async () => {
     const user = userEvent.setup()
     mount()
     renderApp()
     const status = await section("狀態")
     const modeRow = within(status).getByText("模式").parentElement!
-    expect(within(modeRow).getByText("試跑")).toBeInTheDocument()
-    expect(within(status).getAllByText("盲測中")).toHaveLength(3)
-    expect(within(status).getByText(/^US\$\d+\.\d{2}／US\$45\.00・第 3／5 個交易日・週報未做$/)).toBeInTheDocument()
+    expect(within(modeRow).getByText("對全站公開")).toBeInTheDocument()
+    expect(within(status).getAllByText(/Opus 5\.5・high/)).toHaveLength(3)
+    expect(within(status).queryByText(/盲測|試跑/)).toBeNull()
+    expect(screen.queryByRole("heading", { level: 2, name: "盲測" })).toBeNull()
     expect(within(status).getByText("金鑰 4・正常")).toBeInTheDocument()
+    // 暫停
     await user.click(within(status).getByRole("button", { name: "切換" }))
-    const dialog = await screen.findByRole("dialog", {}, T)
+    let dialog = await screen.findByRole("dialog", {}, T)
+    expect(within(dialog).getAllByRole("radio").map((r) => r.closest("label")!.textContent)).toEqual([
+      expect.stringMatching(/^對全站公開/),
+      expect.stringMatching(/^暫停/),
+    ])
+    await user.click(within(dialog).getByRole("radio", { name: /暫停/ }))
+    await user.click(within(dialog).getByRole("button", { name: "切換" }))
+    await waitFor(() => expect(within(modeRow).getByText("暫停")).toBeInTheDocument(), T)
+    // 再公開：要再確認一次
+    await user.click(within(status).getByRole("button", { name: "切換" }))
+    dialog = await screen.findByRole("dialog", {}, T)
     await user.click(within(dialog).getByRole("radio", { name: /對全站公開/ }))
     await user.click(within(dialog).getByRole("button", { name: "切換" }))
     const confirm = await screen.findByRole("alertdialog", {}, T)
     expect(within(confirm).getByText("之後的新報告會對所有登入的人公開，並推播到有開的群組。")).toBeInTheDocument()
     await user.click(within(confirm).getByRole("button", { name: "對全站公開" }))
     await waitFor(() => expect(within(modeRow).getByText("對全站公開")).toBeInTheDocument(), T)
+  })
+
+  it("部署交接時舊的 API 還回 trial：當成對全站公開，模式對話框照常打開", async () => {
+    const user = userEvent.setup()
+    mount()
+    const other = createMockAdapter({ latency: [0, 0] })
+    vi.spyOn(api, "getAdminReportsOverview").mockImplementation(async () => ({ ...(await other.getAdminReportsOverview()), mode: "trial" as unknown as "public" }))
+    renderApp()
+    const status = await section("狀態")
+    const modeRow = within(status).getByText("模式").parentElement!
+    expect(within(modeRow).getByText("對全站公開")).toBeInTheDocument()
+    await user.click(within(status).getByRole("button", { name: "切換" }))
+    const dialog = await screen.findByRole("dialog", {}, T)
+    expect(within(dialog).getByText("現在是「對全站公開」。")).toBeInTheDocument()
+    expect(within(dialog).getByRole("radio", { name: /對全站公開/ })).toBeChecked()
   })
 
   it("不是站方管理員：找不到這個頁面", async () => {
@@ -91,56 +118,6 @@ describe("狀態", () => {
     mount({ reports: "off" })
     renderApp()
     expect(await screen.findByText("市場報告沒有開", {}, T)).toBeInTheDocument()
-  })
-})
-
-describe("盲測", () => {
-  it("每份一列 A／B／C（連到並排比較）、狀態與問題數；揭曉前沒有模型與花費；投票是選取語法 (b)；沒做完是「提前揭曉」", async () => {
-    const user = userEvent.setup()
-    mount()
-    const router = renderApp()
-    const trial = await section("盲測")
-    const rowsOf = () => [...trial.querySelectorAll<HTMLElement>("[data-trial-report]")]
-    await waitFor(() => expect(rowsOf()).toHaveLength(5), T)
-    const rows = rowsOf()
-    expect(trial.textContent).not.toMatch(/Opus|Sonnet|US\$/)
-    const first = rows.find((r) => r.textContent?.startsWith("盤前重點 11/11"))!
-    expect(within(first).getByText(/只有資料/)).toBeInTheDocument()
-    const vote = within(first).getByRole("group", { name: /投給哪一個/ })
-    await user.click(within(vote).getByRole("button", { name: "C" }))
-    await waitFor(() => expect(within(vote).getByRole("button", { name: "C" })).toHaveAttribute("aria-pressed", "true"), T)
-    expect(within(trial).queryByRole("button", { name: "揭曉" })).toBeNull()
-    await user.click(within(trial).getByRole("button", { name: "提前揭曉" }))
-    expect(await screen.findByRole("alertdialog", { name: "盲測還沒做完，要提前揭曉？" }, T)).toBeInTheDocument()
-    await user.click(screen.getByRole("button", { name: "取消" }))
-    // 打開一個版本：管理員形式（每句後面有 refs）
-    await user.click(within(first).getByRole("link", { name: "看 B 版" }))
-    await waitFor(() => expect(router.state.location.pathname).toBe("/admin/reports/mrp_premarket_20261111"), T)
-    expect(await screen.findByRole("heading", { level: 1, name: "盤前重點 11/11（三）・盲測" }, T)).toBeInTheDocument()
-    await waitFor(() => expect(document.querySelector("[data-refs]")).not.toBeNull(), T)
-    expect(document.querySelector("[data-refs]")!.textContent).toMatch(/^[FXCNW]\d{3}/)
-  })
-
-  it("揭曉後：每種報告每組設定的彙總、過關、建議（過關裡平均花費最低）；被拿掉的段在管理員檢視照樣顯示原因", async () => {
-    mount({ reports: "public" })
-    renderApp()
-    const trial = await section("盲測")
-    const suggested = await within(trial).findAllByText((_, el) => el?.tagName === "P" && /^建議：/.test(el.textContent ?? ""), {}, T)
-    expect(suggested).toHaveLength(3)
-    expect(within(trial).getAllByText("過關").length).toBeGreaterThan(0)
-    expect(trial.textContent).toMatch(/Opus 5\.5・high/)
-    cleanup()
-    // 被拿掉一段的版本（Sonnet）：段標題下一行「這一段被拿掉」
-    renderApp("/admin/reports/mrp_close_20261027?v=A")
-    const dropped = await screen.findAllByText(/^這一段被拿掉：/, {}, T).catch(() => [])
-    if (dropped.length === 0) {
-      // A 不一定是被拿掉段的那一個（每份重新打亂）：換 B、C 找
-      for (const v of ["B", "C"]) {
-        fireEvent.click(screen.getByRole("radio", { name: v }))
-        if ((await screen.findAllByText(/^這一段被拿掉：/, {}, { timeout: 1500 }).catch(() => [])).length) break
-      }
-    }
-    expect(screen.getAllByText(/^這一段被拿掉：數字和主體對不上/).length).toBeGreaterThan(0)
   })
 })
 

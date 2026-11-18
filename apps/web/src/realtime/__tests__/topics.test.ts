@@ -274,8 +274,7 @@ describe("batch 4 keys (2026-11-17 merge)", () => {
     ["transactions", "symbol-records", "2330.TW"], // 刪除這檔的確認框
     ["portfolio", "records"], // 清除所有持倉的確認框
     ["portfolio", "upcoming", 7, "recurring"], // AI 面板：只有定期定額扣款
-    ["market", "reports", "trial", "mrp_1"], // 盲測開給所有人：A／B／C 與我的票
-    ["market", "reports", "variant", "mrp_1", "A"],
+    ["market", "reports", "one", "mrp_1", "current"], // 一份報告（盲測 2026-11-18 拿掉了：沒有 A／B／C 與票）
     ["market", "reports", "list", "all"],
   ]
   const fresh = () => {
@@ -289,7 +288,7 @@ describe("batch 4 keys (2026-11-17 merge)", () => {
   it.each([
     ["ledger (刪除這檔、清除所有持倉、匯入庫存、匯入對帳單)", "ledger", { account_id: "acc_1" }, BATCH4.filter((k) => k[0] !== "market")],
     ["recurring (暫停的定期定額)", "recurring", {}, [["portfolio", "upcoming", 7, "recurring"]]],
-    ["market.reports (a variant ready, the reveal, my vote elsewhere)", "market.reports", { report_id: "mrp_1" }, BATCH4.filter((k) => k[0] === "market")],
+    ["market.reports (a new or rebuilt edition, a correction)", "market.reports", { report_id: "mrp_1" }, BATCH4.filter((k) => k[0] === "market")],
   ] as [string, string, Record<string, unknown>, QueryKey[]][])("%s", async (_name, topic, data, expected) => {
     const qc = fresh()
     await applyActions(qc, actionsFor(topic, data, { viewAs: null }), "none")

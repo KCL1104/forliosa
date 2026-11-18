@@ -14,7 +14,7 @@ vi.mock("@/pages/stock/PriceChart", () => ({ PriceChart: () => null }))
 
 /**
  * 市場報告（2026-11-17）：市場頁的「報告」分頁、報告頁、導覽的未讀圓點。
- * 試跑期間（mock 預設）只有站方管理員看得到；`reports: "public"` 是對全站公開、三種都有 AI 版。
+ * 每一份都對所有登入的人公開（盲測 2026-11-18 拿掉了；mock 預設 public，三種都有 AI 版）。
  */
 let desktop = false
 beforeAll(() => {
@@ -71,16 +71,23 @@ function renderApp(path = "/market") {
 const report = async () => (await screen.findByRole("heading", { level: 2, name: /^(盤前重點|盤後重點|市場週報) / }, T)).closest("article")!
 
 describe("市場頁的分頁「行情｜報告」", () => {
-  it("試跑期間不是站方管理員：沒有分頁列、報告頁是找不到", async () => {
+  it("不是站方管理員：有分頁列，報告分頁是同一份公開的報告（沒有 A／B／C、沒有投票）；報告頁看得到", async () => {
     mount({ discussion: { admin: false } })
-    renderApp("/market")
-    expect(await screen.findByRole("heading", { name: "類股" }, T)).toBeInTheDocument()
-    expect(screen.queryByRole("tablist", { name: "市場內容" })).toBeNull()
-    // 導覽的「市場」沒有未讀圓點
-    for (const nav of screen.getAllByRole("navigation", { name: "主要" })) expect(within(nav).getByRole("link", { name: "市場" })).toBeInTheDocument()
+    renderApp("/market?tab=reports&kind=premarket")
+    const tabs = await screen.findByRole("tablist", { name: "市場內容" }, T)
+    expect(within(tabs).getByRole("tab", { name: "報告" })).toHaveAttribute("aria-selected", "true")
+    const article = await report()
+    expect(within(article).getByText("這份報告的 AI 段落由 Anthropic 的 Claude 模型撰寫。")).toBeInTheDocument()
+    // 盲測拿掉了：一份報告、沒有版本切換與投票
+    expect(screen.queryByRole("radiogroup", { name: /版本|看哪一個/ })).toBeNull()
+    expect(screen.queryByRole("button", { name: /選 [ABC]|投票|選這一個/ })).toBeNull()
+    expect(screen.queryByText(/盲測/)).toBeNull()
+    expect(screen.getAllByRole("article")).toHaveLength(1)
     cleanup()
     renderApp("/market/reports/mrp_premarket_20261112")
-    expect(await screen.findByText("找不到這份報告", {}, T)).toBeInTheDocument()
+    expect(await report()).toBeInTheDocument()
+    expect(screen.queryByText("找不到這份報告")).toBeNull()
+    expect(screen.queryByText(/盲測/)).toBeNull()
   })
 
   it("伺服器沒有開：管理員也沒有分頁列", async () => {
@@ -90,7 +97,7 @@ describe("市場頁的分頁「行情｜報告」", () => {
     expect(screen.queryByRole("tablist", { name: "市場內容" })).toBeNull()
   })
 
-  it("站方管理員（試跑）：有分頁列；報告分頁預設是最新發布的那一種，選項記在網址；週報還沒有時寫什麼時候會有", async () => {
+  it("站方管理員：有分頁列；報告分頁預設是最新發布的那一種，選項記在網址；換成週報", async () => {
     mount()
     const router = renderApp("/market")
     const tabs = await screen.findByRole("tablist", { name: "市場內容" }, T)
@@ -98,14 +105,11 @@ describe("市場頁的分頁「行情｜報告」", () => {
     fireEvent.click(within(tabs).getByRole("tab", { name: "報告" }))
     await waitFor(() => expect(router.state.location.search).toMatchObject({ tab: "reports" }), T)
     const kinds = await screen.findByRole("radiogroup", { name: "報告種類" }, T)
-    expect(within(kinds).getByRole("radio", { name: "盤前" })).toHaveAttribute("aria-checked", "true")
-    // 試跑：目前那一版是只有資料的版本
-    const article = await report()
-    expect(within(article).getByText("盲測中：AI 段落的三個版本在管理後台比較。")).toBeInTheDocument()
+    expect(within(kinds).getAllByRole("radio").filter((r) => r.getAttribute("aria-checked") === "true")).toHaveLength(1)
+    expect(await report()).toBeInTheDocument()
     fireEvent.click(within(kinds).getByRole("radio", { name: "週報" }))
     await waitFor(() => expect(router.state.location.search).toMatchObject({ tab: "reports", kind: "weekly" }), T)
-    expect(await screen.findByText("還沒有市場週報", {}, T)).toBeInTheDocument()
-    expect(screen.getByText("週日 18:00 推出。")).toBeInTheDocument()
+    expect(await screen.findByRole("heading", { level: 2, name: /^市場週報 / }, T)).toBeInTheDocument()
   })
 })
 

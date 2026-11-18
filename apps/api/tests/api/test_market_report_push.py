@@ -163,14 +163,14 @@ def test_switch_off_or_pause_cancels(family, market, day, public):  # noqa: F811
         assert row.status == "cancelled" and row.last_error == "not_public"
 
 
-def test_trial_and_backfill_are_never_pushed(family, day, public):  # noqa: F811
+def test_admin_only_and_backfill_are_never_pushed(family, day, public):  # noqa: F811
     _channel(family, daily=False)
     rid = make("close", day)
     with session_factory()() as db:
         r = db.get(MarketReport, rid)
-        r.trial = True
+        r.visibility = "admin"
         db.commit()
         assert push.enqueue(db, r, datetime.combine(day, time(16), TAIPEI)) == 0
-        r.trial, r.backfill = False, True
+        r.visibility, r.backfill = "public", True
         db.commit()
         assert push.enqueue(db, r, datetime.combine(day, time(16), TAIPEI)) == 0

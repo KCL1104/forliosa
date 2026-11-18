@@ -10,10 +10,9 @@
 * **盤後** = 盤後重點 (no group part).
 * **週報** = 市場週報 ＋「你的群組上週」: the group's weekly digest of the reviewed week (:func:`weekly_group`), in one
   message. The group digest is written on Saturday evening and goes out (and shows on the group page) on Sunday 18:00.
-* **No market part** (reports switched off, paused or not public; or the blind test open to everyone but that
-  edition is not a blind-test one — only the first trading days and the first Sunday are): the switch still sends
-  the group part alone at the same time — 「昨日你的群組」 at 07:30 of the next trading day, the group digest on
-  Sunday 18:00 (``notifications._send_daily`` / ``_send_digest``, timed by :func:`daily_due` / :func:`digest_due`).
+* **No market part** (reports switched off or paused): the switch still sends the group part alone at the same
+  time — 「昨日你的群組」 at 07:30 of the next trading day, the group digest on Sunday 18:00
+  (``notifications._send_daily`` / ``_send_digest``, timed by :func:`daily_due` / :func:`digest_due`).
   At that time :func:`market_coming` asks about that one edition: only while its push may still come for the
   channel is the group push held (08:20 / 21:30, after the market push's fallback) so the market push can take it
   in; a market push that never comes (a skipped edition, the worker down) leaves it to go alone then. Non-trading
@@ -27,11 +26,12 @@
 
 The rest:
 
-* **Who**: only while the mode is ``public``, for a ``public`` report that is neither a backfill nor a blind-test
-  edition. Every group may switch the pushes on (no plan needed): ``notify_premarket`` (off by default),
-  ``notify_close`` (off), ``notify_weekly`` (on). One outbox row per channel (``kind="mreport"``), queued when the push
-  time comes (:func:`enqueue`); re-checked when it is sent (:func:`send`: the mode, the channel and its switch, the
-  report) — otherwise cancelled. The text is the report's current version at that moment.
+* **Who**: only while the mode is ``public`` (the blind test was removed on 2026-11-18: every edition is public), for
+  a ``public`` report that is not a backfill. Every group may switch the pushes on (no plan needed):
+  ``notify_premarket`` (off by default), ``notify_close`` (off), ``notify_weekly`` (on). One outbox row per channel
+  (``kind="mreport"``), queued when the push time comes (:func:`enqueue`); re-checked when it is sent (:func:`send`:
+  the mode, the channel and its switch, the report) — otherwise cancelled. The text is the report's current version
+  at that moment.
 * **Text**: the kind and date, the one-line disclaimer, the highlights (footnotes removed; a sentence that cites a
   report gets 「（出處見全文）」), a group section when there is one, the link, and the site's last line
   (``notifications.signed``: 「AI 整理的部分可能有錯。」＋``disclaimer.SHORT``, once — the group section's own last
@@ -39,13 +39,7 @@ The rest:
   then each highlight to 80 characters, then to two highlights.
 * The group sections keep the anonymity rules of the group pushes (only members who push; the AI line only while
   everyone whose numbers went into it still pushes …).
-* Never pushed: corrections, table refreshes, backfilled editions, anything personal; blind-test editions only as
-  below.
-* **盲測開給所有人** (``MREPORT_TRIAL_AUDIENCE=all``, mode ``trial``; 產品負責人 2026-11-17): a blind-test edition
-  is pushed once, when at least two of A / B / C can be read (:func:`pipeline.maybe_push`), to the channels whose
-  switch for the kind is on — one message (:func:`trial_text`): the kind and date with the disclaimer line, the data
-  edition's rule-made title (never a variant's text: quoting one of the three first would favour it), 「盲測中：三種
-  寫法，看完選一個。」, the link to the vote page, then the group section (盤前, 週報) like a public edition's.
+* Never pushed: corrections, table refreshes, backfilled editions, anything personal.
 """
 
 from __future__ import annotations
@@ -82,8 +76,6 @@ HIGHLIGHT_CUT = 80
 LINE_AI = "AI 依公開資料整理，報告本文人人相同，不是投資建議。"
 LINE_DATA = "依公開資料整理，這一版沒有 AI 段落，不是投資建議。"
 SOURCE_NOTE = "（出處見全文）"
-LINE_TRIAL = "盲測中：三種寫法，看完選一個。"
-TRIAL_TITLE_CUT = 120
 # The group parts (2026-11-18): 「昨日你的群組」 rides on 盤前 (trading days 07:30), the digest on 週報 (Sunday 18:00)
 DAILY_SLOT, DAILY_HOLD = time(7, 30), time(8, 20)  # held past the premarket push's fallback (08:15)
 DIGEST_HOLD = time(21, 30)  # held past the weekly push's close (21:00)
@@ -97,28 +89,15 @@ def pushing(db: Session, settings: Settings | None = None) -> bool:
 
 
 def may_push(db: Session, report: MarketReport, settings: Settings | None = None) -> bool:
-    return (pushing(db, settings) and report.visibility == "public" and not report.backfill and not report.trial
+    return (pushing(db, settings) and report.visibility == "public" and not report.backfill
             and report.state != "skipped" and report.current_version_id is not None)
 
 
-def trial_pushing(db: Session, settings: Settings | None = None) -> bool:
-    """Blind-test editions may be pushed: switched on, the mode is trial and the blind test is open to everyone."""
-    s = settings or get_settings()
-    return bool(s.market_reports_enabled) and rs.mode(db, s) == "trial" and rs.trial_audience(db, s) == "all"
-
-
-def may_push_trial(db: Session, report: MarketReport, settings: Settings | None = None) -> bool:
-    return (bool(report.trial) and not report.backfill and report.state != "skipped"
-            and report.current_version_id is not None and trial_pushing(db, settings))
-
-
 def _may_come(db: Session, report: MarketReport, s: Settings) -> bool:
-    """A made edition that may still be pushed (its version may come later): like :func:`may_push` /
-    :func:`may_push_trial` without the version."""
+    """A made edition that may still be pushed (its version may come later): like :func:`may_push` without the
+    version."""
     if report.backfill or report.state == "skipped":
         return False
-    if report.trial:
-        return trial_pushing(db, s)
     return report.visibility == "public" and pushing(db, s)
 
 
@@ -133,11 +112,7 @@ def _edition_verdict(db: Session, kind: str, edition_date: date, s: Settings) ->
         if report.pushed_at is not None:
             return "pushed", report.id
         return ("coming" if _may_come(db, report, s) else "no"), None
-    cfg = rs.config(db, s)
-    if cfg.mode == "public":
-        return "coming", None
-    if cfg.mode == "trial" and rs.trial_audience(db, s) == "all" \
-            and pipeline.is_trial_edition(db, cfg, kind, edition_date, s):
+    if rs.mode(db, s) == "public":
         return "coming", None
     return "no", None
 
@@ -148,15 +123,13 @@ def market_coming(db: Session, kind: str, edition_date: date, channel: GroupChan
     """The market push of this one edition (``premarket`` / ``weekly`` of ``edition_date``) may still come to take the
     group part in — judged by that edition, not by the mode alone:
 
-    * not made yet: reports public, or the blind test open to everyone and it would be a blind-test edition
-      (``pipeline.is_trial_edition``: the first ``ai_mreport_trial_days`` trading days and the first weekly only);
-    * made, not pushed yet: one that may be pushed (public, or a blind-test edition while the blind test is open to
-      everyone; not a backfill, not skipped);
+    * not made yet: reports public (not paused);
+    * made, not pushed yet: one that may be pushed (public; not a backfill, not skipped);
     * pushed already: only while the push queued for ``channel`` still waits (it takes the part in when it is sent).
 
-    Anything else — an admin-only edition once the blind-test ones are used up, the mode paused, reports off, a push
-    that already went — leaves the group part to go at its own time (07:30 / 18:00). ``cache``: the edition's
-    verdict, shared by the rows of one run."""
+    Anything else — an admin-only edition, the mode paused, reports off, a push that already went — leaves the
+    group part to go at its own time (07:30 / 18:00). ``cache``: the edition's verdict, shared by the rows of one
+    run."""
     s = settings or get_settings()
     key = (kind, edition_date)
     if cache is not None and key in cache:
@@ -173,23 +146,14 @@ def market_coming(db: Session, kind: str, edition_date: date, channel: GroupChan
     return verdict == "coming"
 
 
-def trial_editions_left(db: Session, settings: Settings | None = None) -> bool:
-    """The blind test open to everyone still has editions to push (its progress is not finished)."""
-    from forliosa.reports.service import trial_progress
-
-    s = settings or get_settings()
-    return trial_pushing(db, s) and not trial_progress(db, s)["finished"]
-
-
 def dedupe_key(report_id: str, group_id: str, kind: str) -> str:
     return f"mreport:{report_id}:{group_id}:{kind}"
 
 
 def enqueue(db: Session, report: MarketReport, now: datetime | None = None, settings: Settings | None = None) -> int:
-    """One outbox row per active channel whose switch for this kind is on (due now); a blind-test edition only while
-    the blind test is open to everyone."""
+    """One outbox row per active channel whose switch for this kind is on (due now)."""
     now = now or now_utc()
-    if not (may_push_trial(db, report, settings) if report.trial else may_push(db, report, settings)):
+    if not may_push(db, report, settings):
         return 0
     flag = getattr(GroupChannel, FLAG[report.kind])
     added = 0
@@ -279,41 +243,8 @@ def text(report: MarketReport, payload: dict[str, Any], kind: str, settings: Set
     return notifications.signed(_cut(body, limit).split("\n"), kind, ai=ai_of(group))
 
 
-def title_body(title: str, label: str) -> str:
-    """The title without its 「盤後重點 11/16（一）：」 head (the first line already says the kind and date)."""
-    t = " ".join(str(title or "").split())
-    if t.startswith(label) and "：" in t:
-        return t.split("：", 1)[1].strip()
-    return "" if t.startswith(label) else t
-
-
-def trial_text(report: MarketReport, payload: dict[str, Any], kind: str, settings: Settings,
-               group_lines: list[str] | None = None) -> str:
-    """The blind-test message: the kind and date with the disclaimer line, the rule-made title of the data edition
-    (an AI title — never the case for the data edition — is left out), the blind-test line, the vote link, then the
-    group section (盤前: 「昨日你的群組」, 週報: 「你的群組上週」). A long group section is cut first (the vote link
-    comes before it, so it always arrives)."""
-    label = KIND_LABELS[report.kind]
-    when = f"{span(report.period_start, report.period_end)} 回顧" if report.kind == "weekly" \
-        else md_wd(report.edition_date)
-    lines = [f"【{label} {when}】{LINE_AI}"]
-    title = title_body(payload.get("title") or "", label) if payload.get("title_origin") != "ai" else ""
-    if title:  # a rule-made title is one short line; cut a freak one so the vote link always fits
-        title = _t(title, kind)
-        lines.append(title if len(title) <= TRIAL_TITLE_CUT else title[:TRIAL_TITLE_CUT - 1] + "…")
-    lines.append(LINE_TRIAL)
-    url = link(report.id, settings)
-    lines.append(f"投票：{url}" if url else "到 Forliosa 的「市場 → 報告」投票。")
-    group = list(group_lines or [])
-    limit = LIMITS.get(kind, 1900) - len(disclaimer.AI_NOTE + disclaimer.SHORT) - 1
-    if len("\n".join([*lines, *group])) > limit and len(group) > 2:
-        group = group[:2]  # the group section's heading and its first line
-    ai = any(x.startswith(disclaimer.AI_LABEL) for x in group)
-    return notifications.signed(_cut("\n".join([*lines, *group]), limit).split("\n"), kind, ai=ai)
-
-
 def _cut(body: str, limit: int) -> str:
-    """The body within ``limit``: a last line cut short ends in 「…」 (the vote link and the highlights come first)."""
+    """The body within ``limit``: a last line cut short ends in 「…」 (the highlights come first)."""
     return body if len(body) <= limit else body[:limit - 1].rstrip() + "…"
 
 
@@ -424,8 +355,8 @@ def send(db: Session, settings: Settings, row: NotificationOutbox, now: datetime
     if report is None or group is None:
         _cancel([row], "gone")
         return
-    if not (may_push_trial(db, report, settings) if report.trial else may_push(db, report, settings)):
-        _cancel([row], "trial_closed" if report.trial else "not_public")
+    if not may_push(db, report, settings):
+        _cancel([row], "not_public")
         return
     if ch is None or not _channel_ok(ch, FLAG[report.kind]):
         _cancel([row], "channel_off")
@@ -436,8 +367,7 @@ def send(db: Session, settings: Settings, row: NotificationOutbox, now: datetime
         return
     lines, part = _group_part(db, group, ch, report, settings)
     payload = version.payload or {}
-    msg = (trial_text(report, payload, ch.kind, settings, lines) if report.trial
-           else text(report, payload, ch.kind, settings, lines))
+    msg = text(report, payload, ch.kind, settings, lines)
     result = _deliver(db, ch, msg, settings)
     _apply(db, ch, [row], result, now)
     if result.ok and part is not None:

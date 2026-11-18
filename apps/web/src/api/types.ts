@@ -1641,8 +1641,6 @@ export interface Channels {
   telegram_available: boolean
   /** 市場報告對全站公開（模式 public）：盤前、盤後、週報有市場報告的部分。選填：舊版後端沒有 */
   market_reports_available?: boolean
-  /** 盲測開給所有人（模式 trial）：市場報告的部分是一則投票連結，盤前、週報後面照樣接群組的部分 */
-  market_reports_trial?: boolean
 }
 
 /** 頻道的四個開關（2026-11-18） */
@@ -2238,11 +2236,12 @@ export const ACCOUNT_DELETE_CONFIRMATION = "刪除我的帳號"
 export type ReportKind = "premarket" | "close" | "weekly"
 export const REPORT_KINDS: readonly ReportKind[] = ["premarket", "close", "weekly"]
 export const REPORT_KIND_LABEL: Record<ReportKind, "盤前重點" | "盤後重點" | "市場週報"> = { premarket: "盤前重點", close: "盤後重點", weekly: "市場週報" }
-/** 站方的模式：試跑（只有管理員看得到）／對全站公開／暫停 */
-export type ReportsMode = "trial" | "public" | "paused"
+/** 站方的模式：對全站公開／暫停（盲測的 trial 2026-11-18 拿掉了） */
+export type ReportsMode = "public" | "paused"
 /** 一份報告的一版：只有資料、AI 版、補表（23:45 與隔天 06:40）、更正 */
 export type ReportEdition = "data" | "ai" | "tables" | "correction"
 export type ReportTone = "rise" | "fall" | "flat"
+/** 舊的盲測紀錄（產生紀錄裡的 A／B／C；盲測 2026-11-18 拿掉了） */
 export type ReportVariant = "A" | "B" | "C"
 
 /** 一句：`cites` 是畫面上的註腳號碼；`refs`（F001、X003）只在管理員檢視 */
@@ -2403,13 +2402,6 @@ export interface MarketReport {
   is_demo: boolean
   /** 只在管理員檢視 */
   validation?: ReportValidation | null
-  /**
-   * 盲測開給所有登入的人時的一份（2026-11-17）：頁面顯示 A／B／C 三種寫法與投票（`TrialEdition`），不是這一版（只有資料）。
-   * 選填：舊版後端沒有
-   */
-  trial?: boolean
-  /** 盲測的一個版本（`/market/reports/<id>/variants/<A|B|C>`） */
-  variant?: ReportVariant | null
 }
 export interface ReportSummary {
   id: string
@@ -2423,54 +2415,17 @@ export interface ReportSummary {
   corrected: boolean
   /** 盤前重點：前一個台股交易日（跳過休市日；推播「昨日你的群組」說的那一天）。其他種類是 null */
   prev_session?: string | null
-  /** 盲測（三種寫法，大家一起選）的一份；只在盲測開給所有人時 */
-  trial?: boolean
-  /** 盲測的一份：我投了哪一個（還沒投是 null） */
-  my_vote?: ReportVariant | null
 }
 /** `GET /market/reports/status` */
 export interface ReportsStatus {
-  /** 這個人有沒有報告可看（一般人：模式 public 且已有公開報告；管理員：試跑也算） */
+  /** 這個人有沒有報告可看（已有公開報告；管理員：只給管理員的補做也算） */
   available: boolean
   /** 只有管理員看得到值，其他人 null */
   mode: ReportsMode | null
   unread: boolean
   /** 每種最新一份（看得到的） */
   latest: ReportSummary[]
-  /** 盲測開給所有登入的人（伺服器 `MREPORT_TRIAL_AUDIENCE=all` 或管理後台切換）。選填：舊版後端沒有 */
-  trial_open?: boolean
 }
-
-/** 盲測的一個版本能不能看：ready 可以看；writing 還在寫；none 這個版本不會有（只發了資料版、預算不夠、截止了） */
-export type TrialVariantState = "ready" | "writing" | "none"
-/** 揭曉後：這一種報告每個設定的票數（管理員與會員合計）、票數最多的（同票不只一個）、之後用哪個（後台存了才有） */
-export interface MemberTrialResult {
-  kind: ReportKind
-  kind_label: string
-  rows: { writer: WriterSetting; votes: number }[]
-  top: WriterSetting[]
-  chosen: WriterSetting | null
-}
-/** `GET /market/reports/<id>/trial`：盲測的一份（所有登入的人；揭曉前不寫模型、花費與票數） */
-export interface MemberTrial {
-  report_id: string
-  kind: ReportKind
-  kind_label: string
-  edition_date: string
-  edition_label: string
-  /** A、B、C 的順序；`writer` 揭曉後才有 */
-  variants: { label: ReportVariant; state: TrialVariantState; writer?: WriterSetting | null }[]
-  my_vote: ReportVariant | null
-  /** 揭曉前、至少有一個版本可以看 */
-  can_vote: boolean
-  revealed: boolean
-  /** 揭曉後：這一份 A／B／C 各幾票 */
-  votes: Record<ReportVariant, number> | null
-  result: MemberTrialResult | null
-}
-/** 誰參加盲測：admins＝只有站方管理員；all＝所有登入的人（看、投票，有開推播的群組收到投票連結） */
-export type TrialAudience = "admins" | "all"
-export type TrialVoteCounts = Record<ReportVariant, number>
 
 // 管理後台「市場報告」
 export type ReportEffort = "low" | "medium" | "high" | "xhigh" | "max"
@@ -2486,6 +2441,7 @@ export interface AdminReportRun {
   report_id: string
   kind: ReportKind
   edition_label: string
+  /** 舊的盲測紀錄才有 A／B／C 與 trial（2026-11-18 以後都是 null、live） */
   variant: ReportVariant | null
   purpose: "live" | "trial"
   attempt: number
@@ -2496,12 +2452,11 @@ export interface AdminReportRun {
   stop_reason: string | null
   fallback_used: boolean
   problems: number
-  /** 揭曉前的盲測 run 是 null（不回花費與模型） */
   cost_usd: number | null
   model: string | null
   effort: string | null
   edition_date?: string | null
-  /** 預算層級（揭曉前的盲測 run 是 null） */
+  /** 預算層級 */
   tier?: ReportTier | null
   /** 失敗或放棄的原因（短標籤，例 `no_key`、`after_close`） */
   error?: string | null
@@ -2510,23 +2465,9 @@ export interface AdminReportsOverview {
   /** 伺服器的總開關 */
   enabled: boolean
   mode: ReportsMode
-  /** 誰參加盲測；`trial_audience_source`：admin＝後台切的、default＝伺服器的 MREPORT_TRIAL_AUDIENCE。選填：舊版後端沒有 */
-  trial_audience?: TrialAudience
-  trial_audience_source?: "admin" | "default"
-  /** 每種報告的撰寫設定；盲測中（揭曉前）是 null。`effective`／`tier`：套上預算層級之後的設定 */
+  /** 每種報告的撰寫設定。`effective`／`tier`：套上預算層級之後的設定 */
   writers: Record<ReportKind, (WriterSetting & { source: "admin" | "default"; effective?: WriterSetting | null; tier?: ReportTier }) | null>
-  trial_running: boolean
   month: { label: string; spend_usd: number; budget_usd: number; tier: ReportTier }
-  trial: {
-    spend_usd: number
-    budget_usd: number
-    days_done: number
-    days_total: number
-    weekly_done: boolean
-    started_on: string | null
-    revealed_at: string | null
-    finished: boolean
-  }
   /** 報告專用的金鑰 slot（`slot` 是 null：沒有專用的，用一般的 key） */
   key: { slot: number | null; status: "ok" | "cooldown" | "disabled" | "exhausted"; note: string | null }
   runs: AdminReportRun[]
@@ -2541,91 +2482,12 @@ export interface AdminReportsOverview {
 export interface ReportsConfigPatch {
   mode?: ReportsMode
   writers?: Partial<Record<ReportKind, WriterSetting | null>>
-  /** null：回到伺服器的設定（MREPORT_TRIAL_AUDIENCE） */
-  trial_audience?: TrialAudience | null
 }
 export interface ReportsConfigResult {
   mode: ReportsMode
   writers: Record<ReportKind, WriterSetting | null>
-  trial_audience?: TrialAudience
   /** 切到 public 時：「之後的新報告會對所有登入的人公開，並推播到有開的群組。」 */
   notice?: string | null
-}
-export interface TrialMetrics {
-  policy_violations: number
-  subject_mismatches: number
-  inferred_dates: number
-  dropped_sections: number
-  revised: boolean
-  data_only: boolean
-  on_time: boolean
-  seconds: number | null
-  fallback_used: boolean
-  refusal_category: string | null
-  /** 揭曉後才有 */
-  cost_usd?: number | null
-}
-export interface TrialVariant {
-  label: ReportVariant
-  status: ReportRunStatus | "pending"
-  finished_at: string | null
-  on_time: boolean | null
-  metrics: TrialMetrics | null
-  /** 揭曉後才有 */
-  writer?: WriterSetting | null
-  attempts?: number
-  /** 有沒有 AI 版（沒有：只發了資料版或沒跑，看不了） */
-  published?: boolean
-  problems?: number | null
-}
-export interface TrialReport {
-  report_id: string
-  kind: ReportKind
-  edition_date: string
-  edition_label: string
-  variants: TrialVariant[]
-  my_vote: { preferred: ReportVariant; note: string } | null
-  /** 大家的票：管理員、會員分開，與合計。選填：舊版後端沒有 */
-  votes?: { all: TrialVoteCounts; admins: TrialVoteCounts; members: TrialVoteCounts }
-}
-export interface TrialRevealRow {
-  writer: WriterSetting
-  reports: number
-  votes: number
-  policy_violations: number
-  subject_mismatches: number
-  inferred_dates: number
-  dropped_sections: number
-  on_time_rate: number
-  avg_cost_usd: number
-  avg_seconds: number
-  passed: boolean
-  /** 票數裡管理員、會員各幾票 */
-  votes_admins?: number
-  votes_members?: number
-  /** 退回資料版的份數 */
-  data_only?: number
-  fallbacks?: number
-}
-export interface TrialReveal {
-  revealed_at: string
-  kinds: { kind: ReportKind; kind_label: string; rows: TrialRevealRow[]; suggested: WriterSetting | null }[]
-  /** 盲測全部做完才揭曉的是 true（提前揭曉是 false） */
-  complete?: boolean
-  note?: string
-}
-/** `GET /admin/market-reports/trial` */
-export interface AdminTrial {
-  days_done: number
-  days_total: number
-  weekly_done: boolean
-  finished: boolean
-  reports: TrialReport[]
-  /** 揭曉後才有 */
-  reveal: TrialReveal | null
-  /** 誰參加盲測、投過票的人數（管理員、會員）。選填：舊版後端沒有 */
-  audience?: TrialAudience
-  voters?: { admins: number; members: number }
 }
 export interface NyseHoliday {
   date: string
@@ -2894,30 +2756,18 @@ export interface ForliosaApi {
   updateGroupPass(id: string, patch: GroupPassPatch): Promise<AdminGroupPass>
   /** 馬上停止（不踢人，群組回到免費的上限） */
   revokeGroupPass(id: string): Promise<void>
-  // ── 市場報告（登入才看得到；試跑期間只有站方管理員） ──
+  // ── 市場報告（登入的人都看得到；回補的只有站方管理員） ──
   getMarketReportStatus(): Promise<ReportsStatus>
   listMarketReports(query?: { kind?: ReportKind; limit?: number; cursor?: string | null }): Promise<Paged<ReportSummary>>
   /** `kind` 省略＝任一種最新的一份；沒有就是 null */
   getLatestMarketReport(kind?: ReportKind): Promise<MarketReport | null>
-  /** `version` 看舊版；看不到（試跑中的非管理員、找不到）→ 404 */
+  /** `version` 看舊版；看不到（只給管理員的補做、找不到）→ 404 */
   getMarketReport(id: string, version?: number): Promise<MarketReport>
   /** 看過了（未讀的小圓點消失）；查看別人的資產時 403 `read_only` */
   markMarketReportsSeen(): Promise<void>
-  /** 盲測的一份（盲測開給所有人時；否則 404） */
-  getMarketReportTrial(id: string): Promise<MemberTrial>
-  /** 盲測的一個版本（一般形式）；還在寫 409 `variant_running`；沒有寫成 404 */
-  getMarketReportVariant(id: string, label: ReportVariant): Promise<MarketReport>
-  /** 投票／改票（每人每份一票）；揭曉後 409 `trial_revealed`；那個版本還不能看 422 */
-  voteMarketReport(id: string, preferred: ReportVariant): Promise<MemberTrial>
   // 管理後台「市場報告」（不是管理員 → 404）
   getAdminReportsOverview(): Promise<AdminReportsOverview>
   putReportsConfig(body: ReportsConfigPatch): Promise<ReportsConfigResult>
-  getAdminReportsTrial(): Promise<AdminTrial>
-  /** 盲測一個 variant 的管理員形式（每句 refs、被拿掉的段、validation） */
-  getAdminReportVariant(reportId: string, label: ReportVariant): Promise<MarketReport>
-  voteReport(reportId: string, body: { preferred: ReportVariant; note?: string }): Promise<void>
-  /** 盲測沒做完且沒有 `force` → 409 `trial_unfinished` */
-  revealTrial(body?: { force?: boolean }): Promise<TrialReveal>
   /** 新版本 edition=correction，不推播 */
   addReportCorrection(reportId: string, body: { note: string; drop_sections?: string[] }): Promise<MarketReport>
   /** 重建資料版（快，不呼叫 AI） */

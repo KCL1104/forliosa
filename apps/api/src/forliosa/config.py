@@ -238,16 +238,14 @@ class Settings(BaseSettings):
     group_daily_enabled: bool = True
     ai_group_daily_monthly_budget_usd: float = Field(default=5.0, ge=0)
     # 市場報告 (盤前重點、盤後重點、市場週報; ``forliosa.reports``; 產品負責人 2026-11-17 照建議). One shared report
-    # per edition for signed-in users; a blind test with three writer settings for the first 5 trading days (site
-    # admins only). Off = the worker schedules nothing, the API says none is available, the admin page says it is off.
+    # per edition for every signed-in user, written once with the writer below (產品負責人 2026-11-18: the blind test
+    # is gone). Off = the worker schedules nothing, the API says none is available, the admin page says it is off.
     market_reports_enabled: bool = False
     # Only used when the ``market_report_config`` row is first created; afterwards the admin page switches the mode.
-    market_reports_initial_mode: Literal["trial", "public", "paused"] = "trial"
-    # Who takes part in the blind test (產品負責人 2026-11-17: 盲測開給所有登入的人一起選): ``admins`` = site admins
-    # only (read, vote, nothing pushed); ``all`` = every signed-in user reads the A / B / C editions and votes, and
-    # group channels with the kind's switch on get one message per edition with the vote link. The admin page can
-    # override it (``market_report_config.trial_audience``; null there = this value). The reveal stays admin-only.
-    mreport_trial_audience: Literal["admins", "all"] = "admins"
+    # ``trial`` (before 2026-11-18) is still accepted so a leftover variable does not stop the start: read as public.
+    market_reports_initial_mode: Literal["public", "paused", "trial"] = "public"
+    # MREPORT_TRIAL_AUDIENCE, AI_MREPORT_TRIAL_BUDGET_USD and AI_MREPORT_TRIAL_DAYS were removed with the blind test
+    # (2026-11-18); a leftover variable is ignored (``extra="ignore"``).
     # Models and effort (validated below: only these models, and each must have a price row).
     ai_mreport_gather_model: str = "claude-sonnet-5-5"  # sonnet-5-5 | haiku-5-5 (web search, one call per topic)
     ai_mreport_gather_effort: Literal["low", "medium", "high", "xhigh", "max"] = "low"
@@ -261,10 +259,8 @@ class Settings(BaseSettings):
     # The reports' own month (Taipei), charged to no member or group. NOTE: 0 here means "data-only editions, no model
     # call" — the opposite of the other budgets, where 0 means no limit.
     ai_mreport_monthly_budget_usd: float = Field(default=80.0, ge=0)
-    ai_mreport_trial_budget_usd: float = Field(default=45.0, ge=0)  # the whole blind test (every variant's calls)
-    ai_mreport_trial_days: int = Field(default=5, ge=1, le=20)  # Taiwan trading days of blind-test daily editions
     ai_mreport_run_alarm_usd: float = Field(default=3.0, gt=0)  # one attempt above this: no further calls
-    ai_mreport_max_attempts: int = Field(default=2, ge=1, le=3)  # per report, per variant, per day
+    ai_mreport_max_attempts: int = Field(default=2, ge=1, le=3)  # per report, per day
     # A key slot only for the reports (``CLAUDE_API_KEY_4``): used only when that key exists; members' chat, why and
     # group reports never use it, and the reports never borrow the shared slots while it exists.
     ai_mreport_key_slot: int | None = Field(default=4, ge=0)

@@ -187,12 +187,9 @@ def channels_out(db: Session, group: Group, me: GroupMember, settings: Settings 
             row["chat_title"] = ch.chat_title if ch else None
         out[kind] = row
     out["telegram_available"] = settings.telegram_available
-    from forliosa.reports.push import pushing, trial_editions_left
+    from forliosa.reports.push import pushing
 
     out["market_reports_available"] = pushing(db, settings)  # the market part of 盤前、盤後、週報 is sent
-    # …or the blind test open to everyone still has editions to push (their message has the vote link, then the
-    # group part); once they are used up, until the mode is public, the group parts go alone like reports off
-    out["market_reports_trial"] = not out["market_reports_available"] and trial_editions_left(db, settings)
     return out
 
 

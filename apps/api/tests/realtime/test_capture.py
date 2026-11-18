@@ -442,7 +442,7 @@ def test_a_version_rebuilt_in_place_reaches_its_readers(rt, engine):
     assert rt.topics() == ["admin.reports"]
 
 
-def test_trial_reports_stay_with_admins(rt, engine):
+def test_admin_only_reports_stay_with_admins(rt, engine):
     with session_factory()() as db:
         rep = MarketReport(id=new_id("mrp"), kind="close", edition_date=date(2026, 11, 18),
                            period_start=date(2026, 11, 18), period_end=date(2026, 11, 18), visibility="admin")

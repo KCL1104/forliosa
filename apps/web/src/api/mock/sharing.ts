@@ -75,8 +75,6 @@ export interface SharingDeps {
   origin(): string
   /** 市場報告對全站公開（頻道才有三個報告的推播開關） */
   marketReportsPublic?(): boolean
-  /** 盲測開給所有人（模式 trial）：也有三個推播開關 */
-  marketReportsTrial?(): boolean
 }
 
 interface MockMember {
@@ -1151,7 +1149,6 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
           : { configured: false, status: null, disabled_reason: null, chat_title: null, notify_trades: true, notify_premarket: false, notify_close: false, notify_weekly: true },
         telegram_available: true,
         market_reports_available: deps.marketReportsPublic?.() ?? false,
-        market_reports_trial: !(deps.marketReportsPublic?.() ?? false) && (deps.marketReportsTrial?.() ?? false),
       }
     },
     putDiscord(groupId: string, body: DiscordInput): void {

@@ -1,6 +1,6 @@
 """The market reports' settings: the environment (``config.Settings``, contract §3.1) and the one database row an admin
-changes at run time (``market_report_config``: the mode and the writer chosen per kind after the blind test, §3.2; who
-takes part in the blind test, :func:`trial_audience`).
+changes at run time (``market_report_config``: the mode and the writer chosen per kind, §3.2). The blind test is gone
+(產品負責人 2026-11-18): the mode is ``public`` or ``paused``; a ``trial`` left in the row reads as ``public``.
 
 Writer resolution (§3.2, §4.5): ``writers[kind]`` from the database → the environment default (``AI_MREPORT_WRITE_*``;
 the weekly has its own effort) → the month's budget tier (:func:`apply_tier`): ``medium`` lowers high / xhigh / max to
@@ -19,8 +19,7 @@ from forliosa.config import Settings, get_settings
 from forliosa.models import MarketReportConfig
 from forliosa.timeutil import now_utc
 
-MODES = ("trial", "public", "paused")
-AUDIENCES = ("admins", "all")  # who takes part in the blind test (2026-11-17)
+MODES = ("public", "paused")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
 WRITER_MODELS = ("claude-opus-5-5", "claude-sonnet-5-5")  # what an admin may pick per kind (§14.2)
 ADMIN_EFFORTS = ("low", "medium", "high", "xhigh")
@@ -52,7 +51,7 @@ def config(db: Session, settings: Settings | None = None) -> MarketReportConfig:
     if row is not None:
         return row
     settings = settings or get_settings()
-    row = MarketReportConfig(id=1, mode=settings.market_reports_initial_mode, writers={}, updated_at=now_utc())
+    row = MarketReportConfig(id=1, mode=mode_of(settings.market_reports_initial_mode), writers={}, updated_at=now_utc())
     db.add(row)
     try:
         db.commit()
@@ -63,21 +62,13 @@ def config(db: Session, settings: Settings | None = None) -> MarketReportConfig:
     return row
 
 
+def mode_of(raw: str | None) -> str:
+    """``paused`` stays paused; anything else (``public``, a ``trial`` left from before 2026-11-18) is public."""
+    return "paused" if raw == "paused" else "public"
+
+
 def mode(db: Session, settings: Settings | None = None) -> str:
-    return config(db, settings).mode
-
-
-def trial_audience(db: Session, settings: Settings | None = None) -> str:
-    """``admins`` | ``all``: the admin page's choice, else ``MREPORT_TRIAL_AUDIENCE``."""
-    s = settings or get_settings()
-    picked = config(db, s).trial_audience
-    return picked if picked in AUDIENCES else s.mreport_trial_audience
-
-
-def trial_open(db: Session, settings: Settings | None = None) -> bool:
-    """Every signed-in user reads and votes on the blind-test editions (reports switched on, audience ``all``)."""
-    s = settings or get_settings()
-    return bool(s.market_reports_enabled) and trial_audience(db, s) == "all"
+    return mode_of(config(db, settings).mode)
 
 
 def default_writer(kind: str, settings: Settings | None = None) -> Writer:
@@ -87,7 +78,7 @@ def default_writer(kind: str, settings: Settings | None = None) -> Writer:
 
 
 def chosen_writer(db: Session, kind: str, settings: Settings | None = None) -> Writer:
-    """The admin's pick for ``kind`` (after the blind test), else the environment default."""
+    """The admin's pick for ``kind``, else the environment default."""
     picked = Writer.parse((config(db, settings).writers or {}).get(kind))
     return picked or default_writer(kind, settings)
 

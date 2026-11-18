@@ -225,23 +225,11 @@ const adminMembersRoute = createRoute({
   validateSearch: (s: Record<string, unknown>): AdminMembersSearch => ({ kind: s.kind === "group" ? "group" : undefined }),
   component: lazyRouteComponent(() => import("@/pages/admin/AdminMembersPage"), "AdminMembersPage"),
 })
-// 管理後台「市場報告」：狀態、盲測、最近的產生紀錄、三張手動維護的表
+// 管理後台「市場報告」：狀態、撰寫設定、最近的產生紀錄、三張手動維護的表
 const adminReportsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/admin/reports",
   component: lazyRouteComponent(() => import("@/pages/admin/AdminReportsPage"), "AdminReportsPage"),
-})
-/** 盲測一份報告的 A／B／C：`v` 是左邊（或手機上）看的那一個，`vs` 是寬螢幕右邊並排的那一個 */
-export interface AdminTrialSearch {
-  v?: "A" | "B" | "C"
-  vs?: "A" | "B" | "C"
-}
-const variantLabel = (v: unknown) => (v === "A" || v === "B" || v === "C" ? v : undefined)
-const adminTrialRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/admin/reports/$reportId",
-  validateSearch: (s: Record<string, unknown>): AdminTrialSearch => ({ v: variantLabel(s.v), vs: variantLabel(s.vs) }),
-  component: lazyRouteComponent(() => import("@/pages/admin/AdminTrialComparePage"), "AdminTrialComparePage"),
 })
 const adminDiscussionsRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -308,7 +296,6 @@ const routeTree = rootRoute.addChildren([
   adminNewsRoute,
   adminMembersRoute,
   adminReportsRoute,
-  adminTrialRoute,
   settingsRoute,
   dataSourcesRoute,
   termsRoute,

@@ -232,6 +232,6 @@ def create_app() -> FastAPI:
         api.include_router(module.router)
     api.include_router(discussions.admin_router)
     api.include_router(admin.router)  # the back office: overview, news takedown blocklist
-    api.include_router(admin_reports.router)  # the back office: 市場報告 (blind test, settings, hand-kept tables)
+    api.include_router(admin_reports.router)  # the back office: 市場報告 (settings, hand-kept tables)
     app.include_router(api)
     return app

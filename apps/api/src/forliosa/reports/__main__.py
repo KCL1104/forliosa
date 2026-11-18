@@ -1,11 +1,14 @@
 """``python -m forliosa.reports``: the market reports from the command line (no model call in any of these).
 
     seed                                  NYSE holidays, macro calendar and US earnings seeds -> the three tables
-    status                                mode, this month's spending and tier, the blind test, the latest runs
+    status                                mode, this month's spending and tier, the latest runs
     pack --kind K --date YYYY-MM-DD       build a data pack only (prints counts and what is missing; --out writes it)
     data --kind K --date YYYY-MM-DD       the data edition (a past date: a backfill, admins only, never pushed)
     run --kind K --date D [--writer W] --yes   one full AI attempt (gathering, writing, checks); without --yes only
                                           the estimate is printed. W: opus-high | opus-medium | sonnet-high | opus-xhigh
+    tables --date YYYY-MM-DD | --promoted  a close edition's tables rebuilt from everything stored now (the AI text
+                                          kept, never pushed); --promoted: every former blind-test close whose newer
+                                          23:45 / 06:40 tables were left behind by migration 0028
     probe-dates                           when the evening files really change (MI_MARGN, foreign top 20, TAIFEX)
 
 Never prints a key or an environment value (key slots only as ``#4``). Only ``run --yes`` calls a model.
@@ -59,15 +62,13 @@ def cmd_status() -> int:
     with session_factory()() as db:
         cfg = rs.config(db, s)
         month = accounting.month_spend(db)
-        trial = accounting.trial_spend(db)
-        print(f"總開關 MARKET_REPORTS_ENABLED：{'開' if s.market_reports_enabled else '關'}；模式：{cfg.mode}")
+        on = "開" if s.market_reports_enabled else "關"
+        print(f"總開關 MARKET_REPORTS_ENABLED：{on}；模式：{rs.mode_of(cfg.mode)}")
         print(f"本月花費 US${month:.2f}／上限 US${s.ai_mreport_monthly_budget_usd:.2f}")
         for kind in ("premarket", "close", "weekly"):
             tier = accounting.tier(db, kind, settings=s)
             writer = rs.apply_tier(rs.chosen_writer(db, kind, s), tier)
             print(f"  {kind}：層級 {tier}，撰寫 {writer.model + ' ' + writer.effort if writer else '只發資料版'}")
-        print(f"試跑花費 US${trial:.2f}／上限 US${s.ai_mreport_trial_budget_usd:.2f}；"
-              f"開始日 {cfg.trial_started_on or '尚未開始'}；揭曉 {cfg.revealed_at or '尚未'}")
         pool = get_key_pool()
         slot = report_slot(pool)
         own = f"#{slot}" if slot is not None else "沒有（共用金鑰池）" if not pool.reserved else "不可用"
@@ -136,6 +137,30 @@ def cmd_run(kind: str, day: date, writer_key: str, yes: bool) -> int:
         run = pipeline.run_once(db, kind, day, rs.Writer(model, effort), deps)
         print(f"{run.id}：{run.status}/{run.step}，US${float(run.cost_usd or 0):.3f}，"
               f"slot {'#' + str(run.key_slot) if run.key_slot else '-'}{'，' + run.error if run.error else ''}")
+    return 0
+
+
+def cmd_tables(day: date | None, promoted: bool) -> int:
+    from forliosa.marketdata.service import get_market_data
+    from forliosa.reports import pipeline
+
+    deps = pipeline.default_deps()
+    deps.md = get_market_data()
+    with session_factory()() as db:
+        load_official_calendar(db)
+        if promoted:
+            todo = pipeline.promoted_closes(db)
+        else:
+            report = pipeline.report_of(db, "close", day) if day else None
+            if report is None or report.current_version_id is None:
+                print(f"沒有 {day} 的盤後重點")
+                return 1
+            todo = [report]
+        if not todo:
+            print("沒有要重建表格的盤後重點")
+        for report in todo:
+            v = pipeline.add_tables(db, report, deps.clock().astimezone(TAIPEI), deps)
+            print(f"{report.id}：盤後重點 {report.edition_date}，第 {v.version} 版（表格更新）")
     return 0
 
 
@@ -230,8 +255,14 @@ def main(argv: list[str] | None = None) -> int:
     rn.add_argument("--date", required=True, type=date.fromisoformat)
     rn.add_argument("--writer", default="opus-high", choices=tuple(WRITERS))
     rn.add_argument("--yes", action="store_true")
+    tb = sub.add_parser("tables", help="重建盤後重點的表格（不呼叫模型、不推播）")
+    which = tb.add_mutually_exclusive_group(required=True)
+    which.add_argument("--date", type=date.fromisoformat)
+    which.add_argument("--promoted", action="store_true", help="盲測拿掉時留下舊表格的盤後重點")
     sub.add_parser("probe-dates", help="量融資、外資前 20、期交所晚上檔案的日期")
     args = ap.parse_args(argv)
+    if args.cmd == "tables":
+        return cmd_tables(args.date, args.promoted)
     if args.cmd == "data":
         return cmd_data(args.kind, args.date)
     if args.cmd == "run":

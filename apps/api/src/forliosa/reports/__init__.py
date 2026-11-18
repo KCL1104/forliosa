@@ -16,7 +16,7 @@ builds from the archive and from named media reports the gathering found and che
 Content boundary A1: facts, scheduled events, named sources' statements, past sector and stock comparisons and
 rule-picked stocks only — no outlook of our own, no direction, target, support or advice. Dates, never 「明天」.
 
-Status: ``cd apps/api && uv run python -m forliosa.reports status``. The blind test (three writer settings, site admins
-only, US$45) comes first; nothing is visible to members until the owner switches the mode to public. Site-paid,
-US$80 a month with stepwise downgrades (:mod:`.accounting`); the reports' own key slot ``CLAUDE_API_KEY_4`` when set.
+Status: ``cd apps/api && uv run python -m forliosa.reports status``. Every edition is public for every signed-in user,
+written once with Opus 5.5 at high (the blind test was removed on 2026-11-18). Site-paid, US$80 a month with stepwise
+downgrades (:mod:`.accounting`); the reports' own key slot ``CLAUDE_API_KEY_4`` when set.
 """

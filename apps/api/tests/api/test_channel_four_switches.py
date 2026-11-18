@@ -1,8 +1,9 @@
 """Four push switches per channel (產品負責人 2026-11-18, option A): 交易動態, 盤前, 盤後, 週報 — the 盤前 side and the
 API.
 
-* 盤前 (trading days 07:30) = 盤前重點 ＋「昨日你的群組」 in one message: reports public, a blind test open to everyone,
-  or neither (then the group part alone at 07:30); a group that is not boosted gets just the market part (or nothing);
+* 盤前 (trading days 07:30) = 盤前重點 ＋「昨日你的群組」 in one message: reports public (also with a ``trial`` mode
+  left from the removed blind test), or not (then the group part alone at 07:30); a group that is not boosted gets
+  just the market part (or nothing);
   a market push that never comes leaves the group part to go alone at 08:20; nothing on non-trading days.
 * Outbox dedupe through the change: a daily report sent the evening before (the old times) is not taken in again; a
   row queued under the old times waits for the next 盤前 and is taken in; a group part taken in without a queued row
@@ -35,7 +36,6 @@ from tests.api.test_group_daily import _channel, day, evening, family, run  # no
 
 PAYLOAD = {"has_ai": True, "calendar": None, "highlights": [
     {"sentences": [{"text": "SPY 美股 11/16 漲 0.50%。", "refs": ["F001"]}]}]}
-TRIAL_PAYLOAD = {"has_ai": False, "title": "盤前重點 11/18（三）：美股小漲", "title_origin": "rules", "highlights": []}
 
 
 @pytest.fixture()
@@ -51,8 +51,9 @@ def public(app, monkeypatch):
 
 
 @pytest.fixture()
-def trial_all(app, monkeypatch):
-    """The blind test open to everyone (mode trial, audience all)."""
+def trial_left(app, monkeypatch):
+    """What the removed blind test may have left (2026-11-18): a ``trial`` mode in the config row (a database the
+    migration has not reached yet) and MREPORT_TRIAL_AUDIENCE=all on Railway. Both read as reports public."""
     monkeypatch.setenv("MARKET_REPORTS_ENABLED", "true")
     monkeypatch.setenv("MREPORT_TRIAL_AUDIENCE", "all")
     monkeypatch.setenv("FRONTEND_URL", "https://forliosa.trade")
@@ -68,14 +69,13 @@ def at(d: date, h: int, m: int = 0) -> datetime:
     return datetime.combine(d, time(h, m), TAIPEI)
 
 
-def premarket(d: date, trial: bool = False) -> str:
-    """A 盤前重點 edition of ``d`` ready to push: a public AI edition, or a blind-test edition (its data edition)."""
+def premarket(d: date) -> str:
+    """A 盤前重點 edition of ``d`` ready to push: a public AI edition."""
     with session_factory()() as db:
         ed = pipeline.edition_on("premarket", d)
-        r = pipeline.make_report(db, ed, ed.push_at, visibility="admin" if trial else "public", trial=trial)
-        v = pipeline.new_version(db, r, edition="data" if trial else "ai", payload=TRIAL_PAYLOAD if trial else PAYLOAD,
-                                 now=ed.push_at)
-        r.current_version_id, r.state = v.id, "data" if trial else "ai"
+        r = pipeline.make_report(db, ed, ed.push_at, visibility="public")
+        v = pipeline.new_version(db, r, edition="ai", payload=PAYLOAD, now=ed.push_at)
+        r.current_version_id, r.state = v.id, "ai"
         db.commit()
         return r.id
 
@@ -103,7 +103,7 @@ def queue(rid: str, now: datetime) -> int:
 
 # -- 盤前: each combination ----------------------------------------------------------------------------------------
 def test_reports_off_the_group_part_goes_alone_at_0730(family, market, day):  # noqa: F811
-    """Reports not public and no open blind test: 盤前 still sends 「昨日你的群組」, alone, at 07:30 of the next
+    """Reports switched off: 盤前 still sends 「昨日你的群組」, alone, at 07:30 of the next
     trading day — not the same evening, not before 07:30."""
     fake = _channel(family)
     nxt = next_tw_trading_day(day + timedelta(days=1))
@@ -141,25 +141,30 @@ def test_public_one_message_and_not_boosted_gets_the_market_part_only(family, ma
     assert len(fake.discord) == n + 2  # the daily report never goes on its own
 
 
-def test_open_blind_test_takes_the_group_part_into_the_vote_message(family, market, day, trial_all):  # noqa: F811
+def test_a_leftover_trial_mode_pushes_the_public_report_with_the_group_part(family, market, day, trial_left):  # noqa: F811
+    """No vote message any more: with a ``trial`` mode left in the row the 盤前 push is the normal public one (title
+    line, highlights, link) with 「昨日你的群組」 taken in — held at 07:30 for it, sent once."""
     fake = _channel(family)
     run(market, evening(day, time(23, 40)))
     nxt = next_tw_trading_day(day + timedelta(days=1))
     [daily] = rows("daily")
     assert daily.not_before == at(nxt, 7, 30)
-    rid = premarket(nxt, trial=True)
+    with session_factory()() as db:
+        assert push.market_coming(db, "premarket", nxt)  # not made yet: reports are public
+    send(market, at(nxt, 7, 30))  # the market push is not queued yet: the group part is held for it
+    assert rows("daily")[0].not_before == at(nxt, 8, 20)
+    rid = premarket(nxt)
     n = len(fake.discord)
-    send(market, at(nxt, 7, 30))  # the blind-test edition is not pushed yet: held for it
-    assert len(fake.discord) == n and rows("daily")[0].not_before == at(nxt, 8, 20)
-    assert queue(rid, at(nxt, 7, 45)) == 1
-    send(market, at(nxt, 7, 46))
+    assert queue(rid, at(nxt, 7, 30)) == 1
+    send(market, at(nxt, 7, 31))
     assert len(fake.discord) == n + 1
-    lines = fake.discord[-1].body["content"].split("\n")
+    text = fake.discord[-1].body["content"]
+    lines = text.split("\n")
     assert lines[0] == f"【盤前重點 {nxt.month}/{nxt.day}（{'一二三四五六日'[nxt.weekday()]}）】" + push.LINE_AI
-    assert lines[1] == "美股小漲" and lines[2] == push.LINE_TRIAL
-    assert lines[3] == f"投票：https://forliosa.trade/market/reports/{rid}"
-    assert lines[4] == f"昨日你的群組（{day.month}/{day.day}）" and any("小明" in x for x in lines[5:])
-    assert lines[-1] == disclaimer.SHORT
+    assert lines[1] == "・SPY 美股 11/16 漲 0.50%。"
+    assert f"昨日你的群組（{day.month}/{day.day}）" in lines and any("小明" in x for x in lines)
+    assert f"全文與圖表：https://forliosa.trade/market/reports/{rid}" in lines
+    assert "盲測" not in text and "投票" not in text and lines[-1].endswith(disclaimer.SHORT)
     [daily] = rows("daily")
     assert daily.status == "sent" and daily.last_error == "merged"
     send(market, at(nxt, 8, 30))
@@ -332,7 +337,7 @@ def test_switches_turned_off_lower_the_old_columns(family):  # noqa: F811
 def test_api_channels_say_whether_the_market_part_comes(family, public):  # noqa: F811
     a, g = family["a"], family["g"]
     out = a.get(f"{API}/groups/{g['id']}/channels").json()
-    assert out["market_reports_available"] is True and out["market_reports_trial"] is False
+    assert out["market_reports_available"] is True and "market_reports_trial" not in out  # no blind-test line
     assert set(out["discord"]) >= {"notify_trades", "notify_premarket", "notify_close", "notify_weekly"}
 
 

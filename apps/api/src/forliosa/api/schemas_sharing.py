@@ -550,10 +550,7 @@ class Channels(BaseModel):
     telegram_available: bool
     market_reports_available: bool = Field(
         default=False,
-        description="市場報告已對全站公開：盤前、盤後、週報有市場報告的部分（沒公開也沒開盲測時，盤前、週報只送群組的部分）")
-    market_reports_trial: bool = Field(
-        default=False,
-        description="盲測開給所有人（模式 trial）：盤前、盤後、週報送投票連結（盤前、週報後面接群組的部分）")
+        description="市場報告已對全站公開：盤前、盤後、週報有市場報告的部分（關掉或暫停時，盤前、週報只送群組的部分）")
 
 
 class TelegramLink(BaseModel):

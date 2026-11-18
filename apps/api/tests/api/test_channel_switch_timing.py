@@ -1,15 +1,14 @@
 """When the group part of 盤前 goes (產品負責人 2026-11-18, option A), judged by the one edition that may take it in:
 
-* A blind test open to everyone whose blind-test editions are used up (the 6th trading day, or an admin-only edition
-  that is not a blind-test one): no market push comes, so 「昨日你的群組」 goes alone at 07:30 — not 08:20 — and the
-  頻道 tab stops saying 「盲測期間每份報告推一則投票連結」.
+* Reports paused, or an admin-only edition (a CLI backfill): no market push comes, so 「昨日你的群組」 goes alone at
+  07:30 — not 08:20 — and the 頻道 tab says the market part does not come (the blind test, removed on 2026-11-18, no
+  longer has a line there).
 * Reports public, the 盤前重點 push already sent: a daily report written after it goes at once, not at 08:20.
 * Friday's report waits over the weekend for Monday 07:30 (``send_due`` from Friday evening to Monday).
 * Discord and Telegram both on: each channel's push takes in its own row (``daily:<id>:<kind>``); a channel whose
   market push keeps failing gets the group part alone at 08:20, and the market push's retry no longer carries it.
 * Setting a channel up again does not cancel the waiting group part (it still goes once).
-* The blind-test message with a long group section stays within the channel's limit: the vote link first, a cut line
-  ends in 「…」, the disclaimer last.
+* The 盤前 message with a long group section stays within the channel's limit, the disclaimer last.
 
 ``day`` here is a Friday session followed by a Monday session (found from the real calendar, so the weekend is always
 in between).
@@ -66,8 +65,8 @@ def public(app, monkeypatch):
 
 
 @pytest.fixture()
-def trial_all(app, monkeypatch):
-    _env(monkeypatch, "trial", MREPORT_TRIAL_AUDIENCE="all", AI_MREPORT_TRIAL_DAYS="1")
+def paused(app, monkeypatch):
+    _env(monkeypatch, "paused")
     yield
     get_settings.cache_clear()
 
@@ -76,24 +75,14 @@ def monday(day: date) -> date:
     return next_tw_trading_day(day + timedelta(days=1))
 
 
-# -- the blind test open to everyone, its editions used up ------------------------------------------------------------
-def started_long_ago(day: date) -> None:
-    """The blind test started a month before (its 1 trading day of editions is long over)."""
-    with session_factory()() as db:
-        rs.config(db).trial_started_on = day - timedelta(days=30)
-        db.commit()
-
-
-def test_trial_all_after_the_trial_editions_the_group_part_is_at_0730(family, market, day, trial_all):  # noqa: F811
-    """No edition made yet, and it will not be a blind-test one: nothing to wait for at 07:30."""
+# -- no market push for that edition ------------------------------------------------------------------------------
+def test_paused_the_group_part_is_at_0730(family, market, day, paused):  # noqa: F811
+    """Reports paused: no edition is made, nothing to wait for at 07:30."""
     fake = _channel(family)
-    started_long_ago(day)
     run(market, evening(day, time(19, 0)))
     mon = monday(day)
     with session_factory()() as db:
-        cfg = rs.config(db)
-        assert not pipeline.is_trial_edition(db, cfg, "premarket", mon, get_settings())
-        assert push.trial_pushing(db) and not push.market_coming(db, "premarket", mon)
+        assert not push.pushing(db) and not push.market_coming(db, "premarket", mon)
     n = len(fake.discord)
     send(market, at(mon, 7, 29))
     assert len(fake.discord) == n
@@ -103,36 +92,30 @@ def test_trial_all_after_the_trial_editions_the_group_part_is_at_0730(family, ma
     assert row.status == "sent" and row.last_error is None
 
 
-def test_trial_all_an_admin_only_edition_does_not_hold_the_group_part(family, market, day, trial_all):  # noqa: F811
-    """The edition was made, but admin-only and not a blind-test one (``may_push`` wants public): no push comes."""
+def test_an_admin_only_edition_does_not_hold_the_group_part(family, market, day, public):  # noqa: F811
+    """The edition was made admin-only (``may_push`` wants public): no push comes for it."""
     fake = _channel(family)
-    started_long_ago(day)
     run(market, evening(day, time(23, 40)))
     mon = monday(day)
     with session_factory()() as db:
         ed = pipeline.edition_on("premarket", mon)
-        r = pipeline.make_report(db, ed, ed.gather_at, visibility="admin", trial=False)
-        assert not push.may_push(db, r) and not push.may_push_trial(db, r)
+        r = pipeline.make_report(db, ed, ed.gather_at, visibility="admin")
+        assert not push.may_push(db, r) and not push.market_coming(db, "premarket", mon)
     n = len(fake.discord)
     send(market, at(mon, 7, 30))
     assert len(fake.discord) == n + 1 and "昨日你的群組" not in fake.discord[-1].body["content"]
     assert rows("daily")[0].status == "sent"
 
 
-def test_trial_all_the_tab_stops_promising_vote_links_when_done(family, day, trial_all):  # noqa: F811
+def test_the_tab_says_whether_the_market_part_comes(family, day, paused):  # noqa: F811
     a, g = family["a"], family["g"]
     url = f"{API}/groups/{g['id']}/channels"
-    assert a.get(url).json()["market_reports_trial"] is True  # nothing made yet: blind-test editions still come
-    mon = monday(day)
-    sunday = day + timedelta(days=2)
-    with session_factory()() as db:
-        for kind, d in (("premarket", mon), ("close", mon), ("weekly", sunday)):
-            ed = pipeline.edition_on(kind, d)
-            r = pipeline.make_report(db, ed, ed.gather_at, visibility="admin", trial=True)
-            r.closed_at = ed.close_at
-        db.commit()
     out = a.get(url).json()
-    assert out["market_reports_trial"] is False and out["market_reports_available"] is False
+    assert out["market_reports_available"] is False and "market_reports_trial" not in out
+    with session_factory()() as db:
+        rs.config(db).mode = "public"
+        db.commit()
+    assert a.get(url).json()["market_reports_available"] is True
 
 
 # -- reports public ----------------------------------------------------------------------------------------------------
@@ -240,20 +223,14 @@ def test_setting_the_channel_up_again_keeps_the_waiting_group_part(family, marke
     assert len(fake.discord) == n + 1 and fake.discord[-1].body["content"].startswith("Forliosa 群組「大學同學」日報")
 
 
-# -- the blind-test message within the limit ---------------------------------------------------------------------------
+# -- the 盤前 message within the limit --------------------------------------------------------------------------------
 @pytest.mark.parametrize("kind", ["discord", "telegram"])
-def test_trial_text_with_a_long_group_section_stays_within_the_limit(kind):
+def test_premarket_text_with_a_long_group_section_stays_within_the_limit(kind):
     report = MarketReport(id="mrp_x", kind="premarket", edition_date=date(2026, 11, 23),
                           period_start=date(2026, 11, 23), period_end=date(2026, 11, 23))
     settings = get_settings()
     long_line = "成員報酬：" + "小明 +1.23%、" * 600
-    url = push.link(report.id, settings)
     for group in (["昨日你的群組（11/20）", long_line, "第二行"], ["昨日你的群組（11/20）", long_line]):
-        msg = push.trial_text(report, PAYLOAD, kind, settings, group)
-        lines = msg.split("\n")
-        assert len(msg) <= push.LIMITS[kind]
-        assert lines[-1] == disclaimer.SHORT and msg.count(disclaimer.SHORT) == 1
-        assert push.LINE_TRIAL in lines and (f"投票：{url}" in lines if url else lines[2].startswith("到 Forliosa"))
-        assert lines[-2].endswith("…") and "第二行" not in msg  # the group section cut, the cut line marked
-    msg = push.text(report, PAYLOAD, kind, settings, ["昨日你的群組（11/20）", long_line])
-    assert len(msg) <= push.LIMITS[kind] and msg.endswith(disclaimer.SHORT)
+        msg = push.text(report, PAYLOAD, kind, settings, group)
+        assert len(msg) <= push.LIMITS[kind] and msg.endswith(disclaimer.SHORT)
+        assert msg.count(disclaimer.SHORT) == 1 and "盲測" not in msg and "投票" not in msg

@@ -1,16 +1,16 @@
-"""The back office's 「市場報告」 (contract §14.2, §17): status and spending, the mode and the writer per kind,
-the blind test (A / B / C, votes, the reveal), corrections, rebuilding a data edition, and the three hand-kept
-tables (NYSE closures, the macro calendar, US earnings dates).
+"""The back office's 「市場報告」 (contract §14.2): status and spending, the mode and the writer per kind, corrections,
+rebuilding a data edition, and the three hand-kept tables (NYSE closures, the macro calendar, US earnings dates).
+The blind test's endpoints (``/market-reports/trial``, ``/trial/reveal``, ``/{id}/variants/{label}``,
+``/{id}/vote``) were removed with it (產品負責人 2026-11-18): 404.
 
 Guarded like ``routes.admin``: signed in (401) and a site admin (``ADMIN_EMAILS``) or 404 — before the body is
-validated. Never under ``X-Forliosa-View-As`` (403). Before the reveal no response names a blind-test variant's model
-or cost.
+validated. Never under ``X-Forliosa-View-As`` (403).
 """
 
 from __future__ import annotations
 
 from datetime import date
-from typing import Any, Literal
+from typing import Any
 
 from fastapi import Depends, Path, Query, Response
 from sqlalchemy.orm import Session
@@ -25,8 +25,6 @@ from forliosa.api.schemas_reports import (
     NyseIn,
     RebuildIn,
     ReportsConfigIn,
-    RevealIn,
-    VoteIn,
 )
 from forliosa.db import get_db
 from forliosa.models import User
@@ -36,7 +34,7 @@ router = Router(prefix="/admin", tags=["admin"], dependencies=[Depends(site_admi
 
 
 @router.get("/market-reports/overview",
-            summary="市場報告：模式、撰寫設定、花費與層級、盲測進度、最近的產生紀錄、手動表")
+            summary="市場報告：模式、撰寫設定、花費與層級、最近的產生紀錄、手動表")
 def overview(db: Session = Depends(get_db)) -> dict[str, Any]:
     return svc.overview(db)
 
@@ -51,33 +49,9 @@ def put_config(body: ReportsConfigIn, user: User = Depends(site_admin), db: Sess
     return svc.put_config(db, user, raw)
 
 
-@router.get("/market-reports/trial",
-            summary="盲測：進度、每一份的 A／B／C 狀態與我的票；揭曉後附上彙總（reveal）")
-def trial(user: User = Depends(site_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
-    return svc.trial_list(db, user)
-
-
-@router.post("/market-reports/trial/reveal", summary="揭曉盲測：每種報告 × 每個設定的彙總與建議")
-def reveal(body: RevealIn, user: User = Depends(site_admin), db: Session = Depends(get_db)) -> dict[str, Any]:
-    return svc.reveal(db, user, body.force)
-
-
 @router.post("/market-reports/rebuild-data", summary="重建資料版（不呼叫 AI）")
 def rebuild(body: RebuildIn, db: Session = Depends(get_db)) -> dict[str, Any]:
     return svc.rebuild_data(db, body.kind, body.edition_date)
-
-
-@router.get("/market-reports/{report_id}/variants/{label}",
-            summary="盲測的一個版本（管理員形式：MarketReport 加上每句 refs、被刪的段 dropped、檢查結果 validation；"
-                    "揭曉後才有 writer）。還在寫時 409 variant_running")
-def variant(report_id: str, label: Literal["A", "B", "C"], db: Session = Depends(get_db)) -> dict[str, Any]:
-    return svc.variant(db, report_id, label)
-
-
-@router.put("/market-reports/{report_id}/vote", summary="盲測投票")
-def vote(report_id: str, body: VoteIn, user: User = Depends(site_admin), db: Session = Depends(get_db)) \
-        -> dict[str, Any]:
-    return svc.vote(db, user, report_id, body.preferred, body.note)
 
 
 @router.post("/market-reports/{report_id}/corrections", response_model=MarketReport,

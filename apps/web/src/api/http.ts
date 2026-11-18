@@ -71,15 +71,12 @@ import type { HoldingDeleted, RecordCounts, RecordsCleared, StatementImport, Tra
 import type { PositionsCommitCheck, PositionsCommitResult, PositionsImport } from "./types"
 import type {
   AdminReportsOverview,
-  AdminTrial,
   MacroEvent,
   MarketReport,
-  MemberTrial,
   NyseHoliday,
   ReportsConfigResult,
   ReportsStatus,
   ReportSummary,
-  TrialReveal,
   UsEarning,
 } from "./types"
 import { sendsViewAs, VIEW_AS_HEADER, viewAsId } from "./view-as"
@@ -334,15 +331,8 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getLatestMarketReport: (kind) => request<MarketReport | null>("GET", "/market/reports/latest", { query: { kind } }),
     getMarketReport: (id, version) => request<MarketReport>("GET", `/market/reports/${enc(id)}`, { query: { version } }),
     markMarketReportsSeen: () => request<void>("POST", "/market/reports/seen"),
-    getMarketReportTrial: (id) => request<MemberTrial>("GET", `/market/reports/${enc(id)}/trial`),
-    getMarketReportVariant: (id, label) => request<MarketReport>("GET", `/market/reports/${enc(id)}/variants/${enc(label)}`),
-    voteMarketReport: (id, preferred) => request<MemberTrial>("PUT", `/market/reports/${enc(id)}/vote`, { body: { preferred } }),
     getAdminReportsOverview: () => request<AdminReportsOverview>("GET", "/admin/market-reports/overview"),
     putReportsConfig: (body) => request<ReportsConfigResult>("PUT", "/admin/market-reports/config", { body }),
-    getAdminReportsTrial: () => request<AdminTrial>("GET", "/admin/market-reports/trial"),
-    getAdminReportVariant: (reportId, label) => request<MarketReport>("GET", `/admin/market-reports/${enc(reportId)}/variants/${enc(label)}`),
-    voteReport: (reportId, body) => request<void>("PUT", `/admin/market-reports/${enc(reportId)}/vote`, { body }),
-    revealTrial: (body = {}) => request<TrialReveal>("POST", "/admin/market-reports/trial/reveal", { body }),
     addReportCorrection: (reportId, body) => request<MarketReport>("POST", `/admin/market-reports/${enc(reportId)}/corrections`, { body }),
     rebuildReportData: (body) => request<void>("POST", "/admin/market-reports/rebuild-data", { body }),
     listNyseHolidays: () => request<NyseHoliday[]>("GET", "/admin/market-calendar/nyse"),

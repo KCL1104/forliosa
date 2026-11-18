@@ -1,9 +1,9 @@
 """The 週報 switch (產品負責人 2026-11-18, option A): 市場週報 ＋ the group's weekly digest in one message, Sunday
 18:00.
 
-* Reports off (not public, no open blind test): the digest goes alone on Sunday 18:00 — not on Saturday night.
-* An open blind test: the vote message takes the digest in (「你的群組上週」 after the vote link) — only on the Sunday
-  whose edition is a blind-test one; any other Sunday the digest goes alone at 18:00.
+* Reports off or paused: the digest goes alone on Sunday 18:00 — not on Saturday night.
+* A ``trial`` mode left in the row by the removed blind test (2026-11-18) reads as public: the normal 市場週報 push
+  takes the digest in; an admin-only edition does not hold it (alone at 18:00).
 * Setting the channel up again (or disabled and set up again) keeps the waiting digest: it goes once; a row cancelled
   that way by the code before the change is not taken in.
 * Through the change: a digest row queued for Saturday under the old times waits for Sunday (alone at 18:00, or taken
@@ -36,12 +36,10 @@ from tests.api.test_m5_digest import FakeClaude, create, family, run_ai  # noqa:
 
 PAYLOAD = {"has_ai": True, "calendar": {"groups": []}, "highlights": [
     {"sentences": [{"text": "加權指數週 ▲1.23%。", "refs": ["F001"]}]}]}
-TRIAL_PAYLOAD = {"has_ai": False, "title": "市場週報：加權指數週 ▲1.23%", "title_origin": "rules", "highlights": []}
 
 
-def _env(monkeypatch, mode: str, audience: str = "admins") -> None:
+def _env(monkeypatch, mode: str) -> None:
     monkeypatch.setenv("MARKET_REPORTS_ENABLED", "true")
-    monkeypatch.setenv("MREPORT_TRIAL_AUDIENCE", audience)
     monkeypatch.setenv("FRONTEND_URL", "https://forliosa.trade")
     get_settings.cache_clear()
     with session_factory()() as db:
@@ -57,8 +55,10 @@ def public(app, monkeypatch):
 
 
 @pytest.fixture()
-def trial_all(app, monkeypatch):
-    _env(monkeypatch, "trial", "all")
+def trial_left(app, monkeypatch):
+    """A ``trial`` mode left in the row (a database the migration has not reached) and MREPORT_TRIAL_AUDIENCE=all."""
+    monkeypatch.setenv("MREPORT_TRIAL_AUDIENCE", "all")
+    _env(monkeypatch, "trial")
     yield
     get_settings.cache_clear()
 
@@ -77,13 +77,12 @@ def setup(family, market) -> tuple[PushFake, date]:  # noqa: F811
     return fake, sat + timedelta(days=1)
 
 
-def weekly(sunday: date, trial: bool = False) -> str:
+def weekly(sunday: date) -> str:
     with session_factory()() as db:
         ed = pipeline.edition_on("weekly", sunday)
-        r = pipeline.make_report(db, ed, ed.push_at, visibility="admin" if trial else "public", trial=trial)
-        v = pipeline.new_version(db, r, edition="data" if trial else "ai", payload=TRIAL_PAYLOAD if trial else PAYLOAD,
-                                 now=ed.push_at)
-        r.current_version_id, r.state = v.id, "data" if trial else "ai"
+        r = pipeline.make_report(db, ed, ed.push_at, visibility="public")
+        v = pipeline.new_version(db, r, edition="ai", payload=PAYLOAD, now=ed.push_at)
+        r.current_version_id, r.state = v.id, "ai"
         db.commit()
         return r.id
 
@@ -120,22 +119,24 @@ def test_reports_off_the_digest_goes_alone_on_sunday_1800(family, market):  # no
     assert text.startswith("Forliosa 群組「家族投資」週報") and "小明" in text and "市場週報" not in text
 
 
-def test_open_blind_test_takes_the_digest_into_the_vote_message(family, market, trial_all):  # noqa: F811
+def test_a_leftover_trial_mode_takes_the_digest_into_the_public_weekly_push(family, market, trial_left):  # noqa: F811
+    """No vote message any more: the 市場週報 push is the normal public one with 「你的群組上週」 taken in."""
     fake, sunday = setup(family, market)
     [row] = digest_rows()
     assert row.not_before == at(sunday, 18)
-    rid = weekly(sunday, trial=True)
+    rid = weekly(sunday)
     n = len(fake.discord)
-    send(market, at(sunday, 18))  # the blind-test edition is not pushed yet: held for it
+    send(market, at(sunday, 18))  # the edition is not pushed yet: the digest is held for it
     assert len(fake.discord) == n and digest_rows()[0].not_before == at(sunday, 21, 30)
     assert queue(rid, at(sunday, 18)) == 1
     send(market, at(sunday, 18, 1))
     assert len(fake.discord) == n + 1
     text = fake.discord[-1].body["content"]
     lines = text.split("\n")
-    assert lines[0].startswith("【市場週報 ") and lines[2] == push.LINE_TRIAL
-    assert lines[3] == f"投票：https://forliosa.trade/market/reports/{rid}"
-    assert lines[4].startswith("你的群組上週（") and "小明" in text
+    assert lines[0].startswith("【市場週報 ") and lines[1] == "・加權指數週 ▲1.23%。"
+    assert f"全文與圖表：https://forliosa.trade/market/reports/{rid}" in lines
+    assert any(x.startswith("你的群組上週（") for x in lines) and "小明" in text
+    assert "盲測" not in text and "投票" not in text
     assert text.count(disclaimer.SHORT) == 1 and text.endswith(disclaimer.SHORT)
     [row] = digest_rows()
     assert row.status == "sent" and row.last_error == "merged"
@@ -212,17 +213,13 @@ def test_the_page_shows_a_digest_from_sunday_1800(family, market):  # noqa: F811
     assert r.status_code == 404
 
 
-def test_trial_all_a_sunday_without_a_blind_test_edition_sends_the_digest_at_1800(family, market,  # noqa: F811
-                                                                                  trial_all):
-    """The blind test open to everyone, but its one weekly edition was an earlier Sunday: this Sunday's 市場週報 is
-    admin-only, nothing takes the digest in — it goes alone at 18:00, not 21:30."""
+def test_an_admin_only_weekly_does_not_hold_the_digest(family, market, public):  # noqa: F811
+    """This Sunday's 市場週報 was made admin-only (a CLI run): nothing takes the digest in — it goes alone at 18:00,
+    not 21:30."""
     fake, sunday = setup(family, market)
     with session_factory()() as db:
-        rs.config(db).trial_started_on = sunday - timedelta(days=14)
-        earlier = pipeline.edition_on("weekly", sunday - timedelta(days=7))
-        pipeline.make_report(db, earlier, earlier.gather_at, visibility="admin", trial=True)
-        db.commit()
-        assert not pipeline.is_trial_edition(db, rs.config(db), "weekly", sunday, get_settings())
+        ed = pipeline.edition_on("weekly", sunday)
+        pipeline.make_report(db, ed, ed.gather_at, visibility="admin")
         assert not push.market_coming(db, "weekly", sunday)
     n = len(fake.discord)
     send(market, at(sunday, 17, 59))
@@ -230,10 +227,6 @@ def test_trial_all_a_sunday_without_a_blind_test_edition_sends_the_digest_at_180
     send(market, at(sunday, 18))
     assert len(fake.discord) == n + 1
     assert fake.discord[-1].body["content"].startswith("Forliosa 群組「家族投資」週報")
-    with session_factory()() as db:  # the same once that Sunday's edition is made (admin-only, not a blind-test one)
-        ed = pipeline.edition_on("weekly", sunday)
-        pipeline.make_report(db, ed, ed.gather_at, visibility="admin", trial=False)
-        assert not push.market_coming(db, "weekly", sunday)
 
 
 def test_the_webhook_set_again_on_saturday_keeps_the_digest_for_sunday(family, market):  # noqa: F811

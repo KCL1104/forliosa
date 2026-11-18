@@ -4542,3 +4542,54 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   前端 `channels-reports.test.tsx` 等。
 - **對外文件**（2026-11-18 審查後補）：隱私 §2.3、§6.2 與條款 §7.4、§7.9 改成四個開關（`/privacy`、`/terms` 直接讀這兩份）；特別寫出「只開盤前的頻道也會收到
   昨日你的群組，報告沒公開時也照樣送」。`docs/legal/README.md` P51 改對照新的程式。兩份仍是草稿、`TERMS_VERSION` 還沒設，這次不換版本（定稿時一起算；請負責人確認）。
+
+## 2026-11-18 拿掉盲測：市場報告直接對全站公開（產品負責人：「盲測的部分就直接拔掉吧」）
+
+盲測（A／B／C 三種寫法、投票、揭曉、盲測對象、盲測的推播與試跑上限）整個拿掉。上面 2026-11-17 的「盲測」「盲測開給所有登入的人」兩節、
+2026-11-18 四個開關一節裡和盲測有關的部分（投票訊息、`market_reports_trial`、`trial_editions_left`）都已不適用，留著當紀錄。
+
+- **報告**：每一份都是 `visibility="public"`，用預設的撰寫設定寫一次（`AI_MREPORT_WRITE_MODEL`＝`claude-opus-5-5`、`AI_MREPORT_WRITE_EFFORT`＝`high`，
+  週報 `AI_MREPORT_WRITE_EFFORT_WEEKLY`＝`high`；管理後台每種報告另外選的照舊優先），照頻道的四個開關推一般的公開推播（標題、重點、連結；盤前併
+  「昨日你的群組」、週報併群組週報，`push.text`／`push.send` 不變）。`pipeline` 不再做 `trial` 的報告與 variant（`is_trial_edition`、
+  `trial_settings`、`maybe_push_trial`、`readable_variants`、`TRIAL_DAILY`／`TRIAL_WEEKLY` 都拿掉）；寫的 run 一律 `purpose="live"`、`variant=None`，
+  記帳一律 `mreport_gather`／`mreport_write`／`mreport_check`（`ai_usage.feature="mreport_trial"` 的舊列留著，不算進月花費）。
+- **模式**：只有 `public`、`paused`（`reports.settings.MODES`）。`MARKET_REPORTS_INITIAL_MODE` 預設改成 `public`，`trial` 仍接受（Railway 留著不會
+  啟動失敗），和資料庫裡留下的 `trial` 一樣一律當 `public`（`settings.mode_of`）。`PUT /admin/market-reports/config` 的 `mode: "trial"`、
+  `trial_audience` 回 422。
+- **設定**：`MREPORT_TRIAL_AUDIENCE`、`AI_MREPORT_TRIAL_BUDGET_USD`、`AI_MREPORT_TRIAL_DAYS` 從 `Settings` 拿掉（`extra="ignore"`：還設著也不影響）；
+  `accounting.trial_spend`／`trial_fits`／`trial_reserved`／`trial_estimate` 拿掉。
+- **端點**：`GET /market/reports/{id}/trial`、`GET /market/reports/{id}/variants/{label}`、`PUT /market/reports/{id}/vote`、
+  `GET /admin/market-reports/trial`、`POST /admin/market-reports/trial/reveal`、`GET /admin/market-reports/{id}/variants/{label}`、
+  `PUT /admin/market-reports/{id}/vote` 拿掉（404）。`ReportsStatus.trial_open`、`ReportSummary.trial`／`my_vote`、`MarketReport.trial`／`variant`、
+  overview 的 `trial`／`trial_running`／`trial_audience`／`trial_audience_source`、`Channels.market_reports_trial` 都拿掉；overview 的 `writers` 每種都有值、
+  run 列一律寫模型與花費（舊盲測 run 的 `variant`／`purpose` 照實給）。`ViewAsMiddleware` 的兩條盲測讀取路徑拿掉。
+- **即時更新**：`capture.TrialReport`、`trial_open` 拿掉；`market_reports` 只看 `visibility`（public 給所有登入的人、admin 給站方）；
+  `ReportVersionFanout` 同樣；`market_report_votes` 的列（不會再寫）只送 `admin.reports`；模式改了送給所有人。
+- **Migration `0028_remove_blind_test`**（接 `0027_channel_four_switches`）：`market_report_config.mode` 的 `trial` 改 `public`；每一份
+  `market_reports.trial=true` 改成一般公開的一份——目前那一版換成用預設撰寫設定（Opus 5.5 high）寫的那個 variant，沒有就用 A，再沒有就用字母
+  最前面的標籤（B 在 C 前面；各取最新的那一版），那一版的 `variant` 改成 null（標籤留在它的 run：`run_id` → `market_report_runs.variant`），
+  `state="ai"`、`ai_published_at`＝那一版的時間。兩個例外：目前那一版已經是一般的 AI 版（`edition="ai"`、`variant` null：新程式的 worker 比 api
+  先跑 migration 時寫好的）就留著；還沒推播也還沒結束的（`pushed_at`、`closed_at` 都是 null，例如部署晚了的當天盤後重點）只拿 Opus 5.5 high 的
+  variant，沒有就留資料版，之後照一般流程用 Opus 5.5 high 寫一次再推。沒有任何 variant 的（例如 14:10 已經做好資料版的當天盤後重點）同樣留資料版；全部
+  `visibility="public"`、`trial=false`。`pushed_at` 不動（盲測推播已經送過的不再推；過去的那幾份推播截止時間也已經過了）。票、run、其他 variant 的版本、
+  config 的 `trial_audience`／`trial_started_on`／`revealed_at` 欄都留著（不刪欄、不刪資料）。Downgrade 不動資料。
+- **盲測過的盤後重點要重建一次表格**：盲測期間 23:45／隔天 06:40 的 `tables` 版是從資料版做的，migration 換成留下的 variant 之後，目前那一版是
+  15:55 左右寫的、帶 15:40 的表格（上櫃、融資融券、法人、外資前 20 是舊的），比它新的 `tables` 版不再是目前那一版；那些時段也已經過了，排程不會再做。
+  部署之後跑一次 `uv run python -m forliosa.reports tables --promoted`（`pipeline.promoted_closes`：目前那一版是盲測 run 寫的 `ai` 版、而且有比它新的
+  `tables` 版的盤後重點；每一份 `pipeline.add_tables`：留 AI 的字、用現在存著的資料重建表格，不推播、不呼叫模型；跑過之後目前那一版是 `tables`，
+  再跑沒有事做）。單一天：`tables --date YYYY-MM-DD`。
+- **部署時機**（2026-11-18 當天）：在 15:40（盤後重點蒐集）以前部署，盤後重點就是一般的公開報告：15:40 蒐集、15:50 用 Opus 5.5 high 寫、16:00
+  照「盤後」開關推。worker 先換新程式、api 還沒跑 migration 的那幾分鐘：模式 `trial` 當 `public`，舊的盲測報告還是 `admin`（不推、一般人看不到），
+  新程式也不會再寫 variant（這時寫好的一般 AI 版，migration 會留著）。先部署 api（Railway），再部署前端（Cloudflare）；開著 `/admin/reports` 的
+  站方管理員重新整理一次（舊的前端讀新 API 的 overview 會因為沒有 `trial` 出錯）。新的前端讀舊 API 時模式對話框對 `trial` 有防呆。
+- **前端**：`TrialEdition`、`AdminTrialComparePage`（`/admin/reports/$reportId`）、管理後台的「盲測」段、「盲測對象」與「試跑」列、模式對話框的「試跑」、
+  頻道分頁「盲測期間每份報告推一則投票連結」那一行、mock 的 `trial`／`trial-open` 情境（預設改成 `public`）都拿掉。
+- **測試**：`tests/test_migrations.py::test_remove_blind_test_makes_every_blind_test_edition_public_both_ways`（選 Opus high、沒有就 A、再沒有就字母
+  最前面的、同一個標籤取最新、還開著的只拿 Opus high 否則留資料版、已經是一般 AI 版的留著、沒有 variant 的留資料版、一般的不動、票與 run 留著、
+  downgrade 不動資料、再 upgrade 沒事做、paused 不變）、
+  `tests/reports/test_pipeline.py::test_promoted_blind_test_close_gets_its_tables_rebuilt_once`（`tables --promoted` 重建一次、留 AI 的字、不推播、再跑沒事做）、
+  `tests/reports/test_pipeline.py::test_one_public_edition_written_once_and_pushed_per_switch_even_with_leftover_trial_settings`、
+  `tests/api/test_market_reports.py::test_the_blind_test_endpoints_are_gone`、`tests/reports/test_accounting.py::test_a_leftover_trial_mode_reads_as_public`、
+  四個開關的盤前與週報在 `trial` 留在資料庫時照樣推公開的一則並併群組的部分（`test_channel_four_switches.py`、`test_channel_weekly_switch.py`）；
+  `tests/api/test_market_report_trial_open.py` 刪掉。前端 `reports.test.tsx`（一般帳號看到同一份、沒有 A／B／C 與投票）、`channels-reports.test.tsx`
+  （頻道沒有盲測那一行）、`admin-reports.test.tsx`（模式只有公開與暫停、撰寫設定都寫出來）；`reports-trial-open.test.tsx` 刪掉。

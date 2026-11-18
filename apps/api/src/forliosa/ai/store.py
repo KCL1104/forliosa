@@ -40,7 +40,7 @@ FEATURES = ("chat", "why", "import", "report", "analyst", "group_digest", "news"
             "briefing",  # 每日收盤簡報 (``ai.briefing``): charged to the user's month, not to the day's questions
             "news_tagging",  # 新聞標籤 (``news.tagging``): system-paid, NEWS_TAGGING_MONTHLY_BUDGET_USD
             # 市場報告 (``forliosa.reports``, 2026-11-17): site-paid (user_id NULL), counted against the reports' own
-            # monthly budget; every call of a blind-test edition is ``mreport_trial`` (the trial has its own cap)
+            # monthly budget; ``mreport_trial``: the blind test's calls (removed 2026-11-18; kept for the history)
             "mreport_gather", "mreport_write", "mreport_check", "mreport_trial")
 TITLE_MAX = 40
 BATCH_PRICE_FACTOR = Decimal("0.5")  # Message Batches bill half the standard token prices

@@ -29,15 +29,15 @@ start (like trade pushes), and the AI paragraph only while every member whose nu
 every trade it counted is still sent. Sent after the trading day it says 當日報酬／那天的買賣 instead of 今日／今天.
 
 Both are re-timed when they come due (rows queued before 2026-11-18 under the old times follow the new ones); whether
-to hold them is asked at 07:30 / 18:00 about that one edition, so an admin-only edition (the blind-test ones used up),
-a push that already went or reports off never hold them. A group part that a market push already took in (its row
+to hold them is asked at 07:30 / 18:00 about that one edition, so an admin-only edition, a push that already went,
+reports paused or off never hold them. A group part that a market push already took in (its row
 marked ``merged``) is never sent again. Setting a channel up again or a channel disabled does not cancel them (the
 pushing members are checked again when they go).
 
 **Market reports** (``kind="mreport"``, 市場報告 2026-11-17; ``forliosa.reports.push``): channels with
-``notify_premarket`` / ``notify_close`` / ``notify_weekly``, only while the reports' mode is public (or a blind test is
-open to everyone). Sent before the group's other rows of the same run: the 盤前 push takes in the group's daily report
-of the previous session, the 週報 push the weekly digest.
+``notify_premarket`` / ``notify_close`` / ``notify_weekly``, only while the reports' mode is public. Sent before the
+group's other rows of the same run: the 盤前 push takes in the group's daily report of the previous session, the 週報
+push the weekly digest.
 
 **Text**: every dynamic value (display names, the group name, instrument names, the AI summary) goes through
 :func:`pushers.user_text` — one line, Discord markdown escaped, Telegram ``@`` as ＠ — so a name can never add a line,

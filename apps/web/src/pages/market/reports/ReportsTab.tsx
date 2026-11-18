@@ -10,7 +10,6 @@ import { formatDateTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { titleBody } from "./report-context"
 import { ReportView } from "./ReportView"
-import { TrialEdition } from "./TrialEdition"
 import { useMarkReportsSeenOnOpen } from "./use-reports-unread"
 
 const KINDS = [
@@ -25,7 +24,7 @@ const WHEN: Record<ReportKind, string> = { premarket: "交易日 7:30 推出。"
  * 市場頁的「報告」分頁：上面一組選項「盤前｜盤後｜週報」（選取語法 (b)，記在網址 `kind`；沒選時是最新發布的那一種），
  * 下面是那一種最新一份的全文，再下面「更早的報告」（日期・標題，整列連到那一份；先 10 份，「再看 10 份」）。
  * 打開 1.2 秒後記成看過（導覽「市場」旁的小圓點消失）。首頁（帳本）不放報告的入口。
- * 盲測開給所有人時，盲測的一份（`trial`）顯示 A／B／C 與投票（`TrialEdition`），不是只有資料的那一版。
+ * 每一份都是對所有登入的人公開的同一份報告（盲測 2026-11-18 拿掉了）。
  */
 export function ReportsTab({ kind: picked }: { kind?: ReportKind }) {
   const navigate = useNavigate()
@@ -42,8 +41,6 @@ export function ReportsTab({ kind: picked }: { kind?: ReportKind }) {
         <ErrorState error={latest.error} onRetry={() => void latest.refetch()} />
       ) : latest.isPending ? (
         <SkeletonLines rows={8} />
-      ) : latest.data?.trial ? (
-        <TrialEdition key={latest.data.id} reportId={latest.data.id} report={latest.data} />
       ) : latest.data ? (
         <ReportView report={latest.data} />
       ) : (
@@ -76,10 +73,7 @@ function Earlier({ kind, exclude }: { kind: ReportKind; exclude?: string }) {
 }
 
 function EarlierRow({ r }: { r: ReportSummary }) {
-  // 盲測的一份：標出是盲測、我選了哪一個（還沒選也寫，提醒去選）
-  const tags = r.trial
-    ? ["盲測：三種寫法", r.my_vote ? `你選了 ${r.my_vote}` : "還沒選"]
-    : [r.has_ai ? null : "只有資料", r.corrected ? "已更正" : null].filter(Boolean)
+  const tags = [r.has_ai ? null : "只有資料", r.corrected ? "已更正" : null].filter(Boolean)
   return (
     <li className="ruled-row relative grid grid-cols-[7.25rem_minmax(0,1fr)] items-baseline gap-x-3 py-3 sm:grid-cols-[9rem_minmax(0,1fr)]">
       <span className="num text-sm text-ink-2">{r.edition_label}</span>

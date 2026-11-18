@@ -11,29 +11,26 @@ Per edition (times in :mod:`.schedule`):
 1. **Data edition** (``data``): built from the archive alone; the close edition's is rebuilt every 10 minutes until
    15:40 while no AI edition exists (in place: it is one version). A close edition with neither a listed close nor
    the OTC index at 15:00 is ``skipped`` (a typhoon day).
-2. **Gathering**: once per edition (the blind test's three variants share it), unless the month's tier is
-   ``data_only``, the mode is paused or the reports' own key slot is unusable.
-3. **Writing**: one live attempt at a time, at most AI_MREPORT_MAX_ATTEMPTS a day per variant, none after the push
-   fallback time. Write → rule checks → compliance read → one revision → drop the failing sections → else the data
-   edition. A run past AI_MREPORT_RUN_ALARM_USD makes no further call. A result after the edition closed is
-   ``abandoned``.
+2. **Gathering**: once per edition, unless the month's tier is ``data_only``, the mode is paused or the reports' own
+   key slot is unusable.
+3. **Writing**: one attempt at a time with the chosen writer (default Opus 5.5 at high), at most
+   AI_MREPORT_MAX_ATTEMPTS a day, none after the push fallback time. Write → rule checks → compliance read → one
+   revision → drop the failing sections → else the data edition. A run past AI_MREPORT_RUN_ALARM_USD makes no
+   further call. A result after the edition closed is ``abandoned``.
 4. **Push** (mode public, a public edition only): the AI edition at the push time, or as soon as it comes until the
-   fallback time, then the data edition (:mod:`.push`). A blind-test edition only while the blind test is open to
-   everyone: once, from the push time, when two of A / B / C can be read and none is still being written (or at
-   the fallback time with two).
+   fallback time, then the data edition (:mod:`.push`).
 5. **Close** at 08:40 / 17:30 / 21:00; the close edition gets table versions at 23:45 and 06:40 the next day (AI text
    unchanged, the server's blocks rebuilt from everything stored by then; never pushed).
 
-Blind test (§17): while the mode is ``trial``, from the first edition made, the premarket and close editions of 5
-Taiwan trading days and the first weekly are written three times (A / B / C, the settings shuffled per edition) for
-the site admins only, within the trial cap (US$45); a variant that would not fit is ``skipped_budget``.
+The blind test (A / B / C written three ways, votes, the reveal) was removed (產品負責人 2026-11-18): every edition is
+public, written once and pushed with the normal push. Migration ``0028_remove_blind_test`` turned the blind-test
+editions already made into normal public ones.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import secrets
 import threading
 import zlib
 from collections.abc import Callable, Iterator
@@ -66,7 +63,7 @@ from forliosa.reports import pack as packmod
 from forliosa.reports import settings as rs
 from forliosa.reports.prompts import PROMPT_VERSION
 from forliosa.reports.schedule import Edition, edition_on, md
-from forliosa.timeutil import TAIPEI, now_taipei, now_utc, tw_trading_days
+from forliosa.timeutil import TAIPEI, now_taipei, now_utc
 
 log = logging.getLogger(__name__)
 
@@ -75,9 +72,6 @@ HEARTBEAT_SECONDS = 60.0  # a writing attempt's heartbeat while a model call run
 PUSH_GRACE = timedelta(minutes=10)
 DATA_REBUILD = timedelta(minutes=10)
 TABLES_WINDOW = timedelta(hours=3)
-VARIANTS = ("A", "B", "C")
-TRIAL_DAILY = (("claude-sonnet-5-5", "high"), ("claude-opus-5-5", "medium"), ("claude-opus-5-5", "high"))
-TRIAL_WEEKLY = (("claude-opus-5-5", "medium"), ("claude-opus-5-5", "high"), ("claude-opus-5-5", "xhigh"))
 DONE_STATUSES = ("ok", "data_only", "skipped_budget")
 MAX_WORKERS = 4
 
@@ -216,32 +210,12 @@ def _next(report: MarketReport) -> tuple[date, date] | None:
     return (report.next_start, report.next_end) if report.next_start and report.next_end else None
 
 
-# -- the blind test ----------------------------------------------------------------------------------------------
-def is_trial_edition(db: Session, cfg: Any, kind: str, d: date, settings: Settings) -> bool:
-    if cfg.mode != "trial" or not accounting.trial_fits(db, kind, "high", settings):
-        return False
-    start = cfg.trial_started_on
-    if start is None:
-        return True
-    if d < start:
-        return False
-    if kind == "weekly":
-        return db.scalar(select(func.count()).select_from(MarketReport).where(
-            MarketReport.kind == "weekly", MarketReport.trial.is_(True), MarketReport.edition_date != d)) == 0
-    return len(tw_trading_days(start, d)) <= settings.ai_mreport_trial_days
-
-
-def trial_settings(kind: str) -> tuple[tuple[str, str], ...]:
-    return TRIAL_WEEKLY if kind == "weekly" else TRIAL_DAILY
-
-
 # -- creating the edition -----------------------------------------------------------------------------------------
-def make_report(db: Session, ed: Edition, now: datetime, *, visibility: str, trial: bool = False,
-                backfill: bool = False) -> MarketReport:
+def make_report(db: Session, ed: Edition, now: datetime, *, visibility: str, backfill: bool = False) -> MarketReport:
     r = MarketReport(id=new_id("mrp"), kind=ed.kind, edition_date=ed.edition_date, period_start=ed.period[0],
                      period_end=ed.period[1], next_start=ed.next_period[0] if ed.next_period else None,
                      next_end=ed.next_period[1] if ed.next_period else None, state="pending", visibility=visibility,
-                     trial=trial, backfill=backfill, notes=[], created_at=now, updated_at=now)
+                     trial=False, backfill=backfill, notes=[], created_at=now, updated_at=now)
     db.add(r)
     try:
         db.commit()
@@ -261,13 +235,8 @@ def ensure_report(db: Session, ed: Edition, now: datetime, cfg: Any, settings: S
         return None
     if now < min(ed.gather_at, ed.data_at) or now >= ed.close_at:
         return None
-    trial = is_trial_edition(db, cfg, ed.kind, ed.edition_date, settings)
-    r = make_report(db, ed, now, visibility="public" if cfg.mode == "public" else "admin", trial=trial)
-    if cfg.mode == "trial" and cfg.trial_started_on is None and r.trial:
-        cfg.trial_started_on = ed.edition_date
-        db.commit()
-    log.info("market report %s %s made (%s%s)", ed.kind, ed.edition_date, r.visibility, ", blind test" if r.trial
-             else "")
+    r = make_report(db, ed, now, visibility="public")
+    log.info("market report %s %s made (%s)", ed.kind, ed.edition_date, r.visibility)
     return r
 
 
@@ -303,7 +272,7 @@ def _corrections(db: Session, report: MarketReport) -> list[dict[str, str]]:
 def ai_expected(db: Session, report: MarketReport, ed: Edition, now: datetime, cfg: Any, settings: Settings,
                 deps: Deps | None = None) -> bool:
     """Whether an AI edition may still come (the data edition's status line says so; the push waits for it)."""
-    if report.trial or cfg.mode == "paused" or now >= ed.push_fallback_at or report.closed_at is not None:
+    if cfg.mode == "paused" or now >= ed.push_fallback_at or report.closed_at is not None:
         return False
     if deps is not None and not Caller(deps.key_pool(), settings).usable:
         return False  # no usable key (the reports' own slot disabled or out of credit): only the data edition
@@ -409,10 +378,7 @@ def start_gather(db: Session, report: MarketReport, ed: Edition, now: datetime, 
         return
     if gather_of(db, report.id) is not None:
         return
-    if report.trial:
-        if not accounting.trial_fits(db, report.kind, "high", s):
-            return
-    elif accounting.tier(db, report.kind, now, s) == "data_only":
+    if accounting.tier(db, report.kind, now, s) == "data_only":
         return
     if not Caller(deps.key_pool(), s).usable:
         return
@@ -452,7 +418,7 @@ def run_gather(db: Session, g: MarketReportGather, report: MarketReport, deps: D
     topics = gather.topics_for(report.kind, built.pack, long_holiday=ed.long_holiday)
     model, effort = rs.gather_model(s)
     caller = Caller(deps.key_pool(), s)
-    feature = accounting.TRIAL_FEATURE if report.trial else "mreport_gather"
+    feature = "mreport_gather"
 
     def call(kw: dict[str, Any], only: int | None) -> tuple[Any, int]:
         return caller.create(kw, timeout=gather.TIMEOUT, only=only)
@@ -486,58 +452,25 @@ def start_writes(db: Session, report: MarketReport, ed: Edition, now: datetime, 
     caller = Caller(deps.key_pool(), s)
     if not caller.usable:
         return
-    if not report.trial:
-        if report.state == "ai":
-            return
-        runs = runs_of(db, report.id)
-        if any(r.status == "running" for r in runs) or any(r.status in DONE_STATUSES for r in runs):
-            return
-        if len(runs) >= s.ai_mreport_max_attempts:
-            return
-        tier = accounting.tier(db, report.kind, now, s)
-        writer = rs.apply_tier(rs.chosen_writer(db, report.kind, s), tier)
-        if writer is None:
-            return
-        _queue_run(db, report, deps, variant=None, purpose="live", attempt=len(runs) + 1, writer=writer, tier=tier,
-                   gather_id=g.id if g else None, now=now)
-        res.add(report, f"writing (attempt {len(runs) + 1}, {writer.model} {writer.effort}, {tier})")
+    if report.state == "ai":
         return
-    all_runs = runs_of(db, report.id, any_variant=True)
-    if not all_runs:  # the first time: shuffle the three settings onto A / B / C
-        order = list(trial_settings(report.kind))
-        secrets.SystemRandom().shuffle(order)
-        assign = dict(zip(VARIANTS, order, strict=True))
-    else:
-        assign = {}
-        for r in all_runs:
-            if r.variant and r.variant not in assign:
-                assign[r.variant] = (r.writer.get("model"), r.writer.get("effort"))
-    for variant in VARIANTS:
-        if variant not in assign:
-            continue
-        model, effort = assign[variant]
-        writer = rs.Writer(model, effort)
-        mine = [r for r in all_runs if r.variant == variant]
-        if any(r.status == "running" for r in mine) or any(r.status in DONE_STATUSES for r in mine):
-            continue
-        if len(mine) >= s.ai_mreport_max_attempts:
-            continue
-        if not accounting.trial_fits(db, report.kind, effort, s):
-            db.add(MarketReportRun(id=new_id("mrr"), report_id=report.id, variant=variant, purpose="trial",
-                                   attempt=len(mine) + 1, status="skipped_budget", step="done", tier="normal",
-                                   writer=writer.as_dict(), calls=[], cost_usd=Decimal(0), metrics={},
-                                   started_at=now, heartbeat_at=now, finished_at=now))
-            db.commit()
-            res.add(report, f"variant {variant} skipped (trial budget)")
-            continue
-        _queue_run(db, report, deps, variant=variant, purpose="trial", attempt=len(mine) + 1, writer=writer,
-                   tier="normal", gather_id=g.id if g else None, now=now)
-        res.add(report, f"variant {variant} writing")
+    runs = runs_of(db, report.id)
+    if any(r.status == "running" for r in runs) or any(r.status in DONE_STATUSES for r in runs):
+        return
+    if len(runs) >= s.ai_mreport_max_attempts:
+        return
+    tier = accounting.tier(db, report.kind, now, s)
+    writer = rs.apply_tier(rs.chosen_writer(db, report.kind, s), tier)
+    if writer is None:
+        return
+    _queue_run(db, report, deps, attempt=len(runs) + 1, writer=writer, tier=tier, gather_id=g.id if g else None,
+               now=now)
+    res.add(report, f"writing (attempt {len(runs) + 1}, {writer.model} {writer.effort}, {tier})")
 
 
-def _queue_run(db: Session, report: MarketReport, deps: Deps, *, variant: str | None, purpose: str, attempt: int,
-               writer: rs.Writer, tier: str, gather_id: str | None, now: datetime) -> str:
-    run = MarketReportRun(id=new_id("mrr"), report_id=report.id, variant=variant, purpose=purpose, attempt=attempt,
+def _queue_run(db: Session, report: MarketReport, deps: Deps, *, attempt: int, writer: rs.Writer, tier: str,
+               gather_id: str | None, now: datetime) -> str:
+    run = MarketReportRun(id=new_id("mrr"), report_id=report.id, variant=None, purpose="live", attempt=attempt,
                           status="running", step="write", tier=tier, writer=writer.as_dict(), gather_id=gather_id,
                           calls=[], cost_usd=Decimal(0), metrics={}, started_at=now, heartbeat_at=now)
     db.add(run)
@@ -650,9 +583,7 @@ def attempt(db: Session, run: MarketReportRun, deps: Deps, deadline: bool = True
     ed = edition_on(report.kind, report.edition_date)
     assert ed is not None
     now = deps.clock()
-    trial = run.purpose == "trial"
-    ctx = _Run(db, run, report, deps, accounting.TRIAL_FEATURE if trial else "mreport_write",
-               accounting.TRIAL_FEATURE if trial else "mreport_check")
+    ctx = _Run(db, run, report, deps, "mreport_write", "mreport_check")
     writer = rs.Writer(run.writer["model"], run.writer["effort"])
     cutoff = min(ed.cutoff, now)
     built = packmod.build(db, report.kind, report.edition_date, cutoff=cutoff, now=now, md_=deps.md)
@@ -696,21 +627,18 @@ def attempt(db: Session, run: MarketReportRun, deps: Deps, deadline: bool = True
         dropped=final["dropped"], title_origin=final["title_origin"], highlights_origin=final["highlights_origin"],
         mentions_anthropic=final["mentions_anthropic"], corrections=_corrections(db, report), notes=built.notes,
         extra_charts=extra, dropped_output=final["draft"])
-    v = new_version(db, report, edition="ai", payload=payload, now=finished, variant=run.variant,
+    v = new_version(db, report, edition="ai", payload=payload, now=finished,
                     writer={**writer.as_dict(), "tier": run.tier}, run_id=run.id, validation=info)
-    if run.variant is None:
-        report.current_version_id, report.state = v.id, "ai"
-        report.ai_published_at = finished
-        report.first_published_at = report.first_published_at or finished
-        report.updated_at = finished
-    else:  # a blind-test variant never becomes current; the first one opens the vote (the members' unread dot)
-        report.ai_published_at = report.ai_published_at or finished
+    report.current_version_id, report.state = v.id, "ai"
+    report.ai_published_at = finished
+    report.first_published_at = report.first_published_at or finished
+    report.updated_at = finished
     metrics["on_time"] = finished <= ed.publish_target
     metrics["seconds"] = round((finished - now).total_seconds(), 1)
     _finish(ctx, "ok", None, metrics, started=now)
-    log.info("market report %s %s published (%s%s, US$%.3f)", report.kind, report.edition_date, writer.model,
-             f", variant {run.variant}" if run.variant else "", float(run.cost_usd or 0))
-    if run.variant is None and report.kind == "close" and not report.backfill:
+    log.info("market report %s %s published (%s, US$%.3f)", report.kind, report.edition_date, writer.model,
+             float(run.cost_usd or 0))
+    if report.kind == "close" and not report.backfill:
         _write_back(db, report, pk, deps)
 
 
@@ -892,9 +820,6 @@ def _write_back(db: Session, report: MarketReport, pk: dict[str, Any], deps: Dep
 # -- push, close, tables ------------------------------------------------------------------------------------------
 def maybe_push(db: Session, report: MarketReport, ed: Edition, now: datetime, deps: Deps, cfg: Any,
                res: TickResult) -> None:
-    if report.trial:
-        maybe_push_trial(db, report, ed, now, deps, res)
-        return
     if report.pushed_at is not None or now < ed.push_at or not push.may_push(db, report, deps.s):
         return
     if now >= push_deadline(ed):
@@ -910,31 +835,6 @@ def maybe_push(db: Session, report: MarketReport, ed: Edition, now: datetime, de
     report.pushed_at, report.push_edition, report.updated_at = now, edition, now
     db.commit()
     res.add(report, f"push queued ({edition}, {n} channels)")
-
-
-TRIAL_PUSH_MIN = 2  # variants that can be read before the blind-test push (a vote needs a choice)
-
-
-def readable_variants(db: Session, report: MarketReport) -> int:
-    return len(set(db.scalars(select(MarketReportVersion.variant).where(
-        MarketReportVersion.report_id == report.id, MarketReportVersion.variant.is_not(None)))))
-
-
-def maybe_push_trial(db: Session, report: MarketReport, ed: Edition, now: datetime, deps: Deps,
-                     res: TickResult) -> None:
-    """A blind-test edition open to everyone: one push with the vote link, from the push time, once two variants can be
-    read and none is still being written (from the fallback time: with two, whatever is still running)."""
-    if report.pushed_at is not None or now < ed.push_at or not push.may_push_trial(db, report, deps.s):
-        return
-    if now >= push_deadline(ed):
-        return
-    ready = readable_variants(db, report)
-    if ready < TRIAL_PUSH_MIN or (_running(db, report) and now < ed.push_fallback_at):
-        return
-    n = push.enqueue(db, report, now, deps.s)
-    report.pushed_at, report.push_edition, report.updated_at = now, "trial", now
-    db.commit()
-    res.add(report, f"blind-test push queued ({ready} variants, {n} channels)")
 
 
 def push_deadline(ed: Edition) -> datetime:
@@ -990,6 +890,29 @@ def add_tables(db: Session, report: MarketReport, now: datetime, deps: Deps) -> 
     report.current_version_id, report.notes, report.updated_at = v.id, built.notes, now
     db.commit()
     return v
+
+
+def promoted_closes(db: Session) -> list[MarketReport]:
+    """Close editions that were blind-test ones and still show the tables of the kept variant (15:40): migration 0028
+    made that variant (an ``ai`` version of a ``trial`` run) current, while the 23:45 / 06:40 ``tables`` versions had
+    been built from the data edition and are newer. ``python -m forliosa.reports tables --promoted`` rebuilds them once
+    with ``add_tables`` (the variant's text kept); afterwards the current is a ``tables`` version and nothing is
+    listed again."""
+    found = db.scalars(
+        select(MarketReport)
+        .join(MarketReportVersion, MarketReportVersion.id == MarketReport.current_version_id)
+        .join(MarketReportRun, MarketReportRun.id == MarketReportVersion.run_id)
+        .where(MarketReport.kind == "close", MarketReportVersion.edition == "ai", MarketReportRun.purpose == "trial")
+        .order_by(MarketReport.edition_date))
+    out = []
+    for report in found:
+        cur = current(db, report)
+        newer = db.scalar(select(MarketReportVersion.id).where(
+            MarketReportVersion.report_id == report.id, MarketReportVersion.edition == "tables",
+            MarketReportVersion.created_at > cur.created_at).limit(1)) if cur is not None else None
+        if newer:
+            out.append(report)
+    return out
 
 
 def abandon_stale(db: Session, now: datetime) -> int:
@@ -1113,8 +1036,8 @@ def backfill_data(db: Session, kind: str, d: date, deps: Deps, now: datetime | N
     past = d < now.date()
     if report is None:
         cfg = rs.config(db, deps.s)
-        report = make_report(db, ed, now, visibility="admin" if past or cfg.mode != "public" else "public",
-                             backfill=past)
+        report = make_report(db, ed, now, visibility="admin" if past or rs.mode_of(cfg.mode) == "paused"
+                             else "public", backfill=past)
     cutoff = min(ed.cutoff, now)
     payload, built = data_payload(db, report, ed, now, deps, cutoff=cutoff,
                                   status_line=assemble.STATUS_DATA_ONLY if past else None)

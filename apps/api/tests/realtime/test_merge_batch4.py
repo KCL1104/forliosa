@@ -1,12 +1,12 @@
 """Realtime × batch 4 (2026-11-17 merge): the write paths that came with batch 4 announce what the realtime branch's
-paths announce, the open blind test reaches its readers, and the speed work's pools and caches get along with the
+paths announce, a market report reaches its readers, and the speed work's pools and caches get along with the
 streams.
 
 * 刪除這檔 / 清除所有持倉 / 匯入庫存「以券商為準」 delete with one bulk ``DELETE`` (``services.transactions.
   delete_records``), which the ORM capture does not see: the same ``ledger`` / ``group.ledger`` / ``ledger.viewas``
   as a row-by-row delete, with the feed rule of a trades-only member; a dry run announces nothing.
-* 盲測開給所有人: a variant that became readable, the reveal and a change of who takes part reach every signed-in
-  user while the blind test is open, the site admins only otherwise; a vote reaches the voter's own tabs only.
+* Market reports: a public edition reaches every signed-in user, an admin-only one the site admins (the blind test and
+  its events were removed on 2026-11-18).
 * Silent by design: LangSearch's news rows (no news source announces anything), the Yahoo reference close (a read).
 * Pools: N open streams leave every request-pool and archive-pool connection free (5 + 10 each, the speed work's
   sizes); the slow-request log does not count open realtime streams as requests in flight (other streams it does);
@@ -44,7 +44,7 @@ from forliosa.ids import new_id
 from forliosa.marketdata.archive_provider import ArchiveProvider
 from forliosa.marketdata.demo import DemoProvider
 from forliosa.marketdata.service import MarketData, set_market_data
-from forliosa.models import DatasetStatus, GroupDailyReport, MarketReportConfig, NewsArticle, PriceDaily
+from forliosa.models import DatasetStatus, GroupDailyReport, NewsArticle, PriceDaily
 from forliosa.reports import pipeline
 from forliosa.timeutil import now_utc, today_taipei
 from tests.api.m5 import API, SHARE_ALL, SHARE_NONE, account, join, login, make_group, me_id, set_share, trade
@@ -142,75 +142,26 @@ def test_a_statement_import_and_its_undo(client, rt):
     assert [e.data for e in rt.find("ledger")] == [{"account_id": acc["id"]}]
 
 
-# -- the blind test open to everyone ------------------------------------------------------------------------------
-@pytest.fixture()
-def reports_on(app, monkeypatch):
+# -- market reports: one public edition (the blind test was removed on 2026-11-18) -------------------------------
+def test_a_public_edition_reaches_everyone_and_an_admin_only_one_the_admins(client, app, monkeypatch, rt):
     from tests.reports.conftest import seed_market
 
     monkeypatch.setattr(get_settings(), "market_reports_enabled", True)
     with session_factory()() as db:
         seed_market(db)
-    return monkeypatch
-
-
-def _trial(ready: str = "AB", running: str = "C") -> str:
-    """A blind-test close edition of the fixtures' market day (one per test: one edition per day)."""
-    from tests.api.test_market_report_trial_open import make_trial
-
-    return make_trial(ready=ready, running=running)
-
-
-def _finish_variant(rid: str, label: str) -> None:
-    """The worker's write when a variant is done (``pipeline`` → ``new_version`` with the label)."""
-    with session_factory()() as db:
         from forliosa.models import MarketReport
 
-        r = db.get(MarketReport, rid)
-        pipeline.new_version(db, r, edition="ai", payload={"title": "x"}, now=now_utc(), variant=label,
-                             writer={"model": "m", "effort": "low", "tier": "normal"})
-
-
-def test_a_readable_variant_reaches_everyone_only_while_the_test_is_open(client, reports_on, rt):
-    rid = _trial(ready="A", running="BC")
-    rt.clear()
-    _finish_variant(rid, "B")
-    assert rt.one("market.reports").to == ("admins",)  # MREPORT_TRIAL_AUDIENCE=admins (the default)
-    assert rt.one("market.reports").data == {"report_id": rid, "kind": "close"}
-    reports_on.setattr(get_settings(), "mreport_trial_audience", "all")
-    rt.clear()
-    _finish_variant(rid, "C")
-    assert rt.one("market.reports").to == ("all",) and rt.one("market.reports").data["report_id"] == rid
-
-
-def test_the_admin_pages_choice_of_audience_counts_in_the_same_commit(client, reports_on, rt):
-    """The admin page overrides the setting (``market_report_config.trial_audience``): switching it reaches everyone
-    (members gain or lose the blind test), and events after it follow it."""
-    rid = _trial()
-    admin = login(client.app, "boss@forliosa.local", "站長")
-    reports_on.setattr(get_settings(), "admin_emails", ["boss@forliosa.local"])
-    rt.clear()
-    r = admin.put(f"{API}/admin/market-reports/config", json={"trial_audience": "all"})
-    assert r.status_code == 200, r.text
-    assert any(e.to == ("all",) for e in rt.find("market.reports"))
-    with session_factory()() as db:
-        assert db.get(MarketReportConfig, 1).trial_audience == "all"
-    rt.clear()
-    _finish_variant(rid, "C")
-    assert rt.one("market.reports").to == ("all",)
-    rt.clear()
-    assert admin.put(f"{API}/admin/market-reports/config", json={"trial_audience": "admins"}).status_code == 200
-    assert any(e.to == ("all",) for e in rt.find("market.reports"))  # members' open blind-test pages: now 404
-
-
-def test_a_vote_reaches_only_the_voter_and_the_admins(client, b, reports_on, rt):
-    reports_on.setattr(get_settings(), "mreport_trial_audience", "all")
-    rid = _trial(ready="ABC", running="")
-    rt.clear()
-    r = b.put(f"{API}/market/reports/{rid}/vote", json={"preferred": "B"}, headers={"X-Forliosa-Tab": "t_vote12345"})
-    assert r.status_code == 200, r.text
-    mine = rt.one("market.reports")
-    assert mine.to == (f"u:{me_id(b)}",) and mine.o == "t_vote12345" and mine.data == {"report_id": rid}
-    assert all(e.to == ("admins",) for e in rt.find("admin.reports"))
+        for kind, visibility in (("close", "public"), ("premarket", "admin")):
+            ed = pipeline.edition_on(kind, date(2026, 11, 16))
+            r = pipeline.make_report(db, ed, now_utc(), visibility=visibility)
+            rt.clear()
+            v = pipeline.new_version(db, r, edition="ai", payload={"title": "x"}, now=now_utc())
+            r = db.get(MarketReport, r.id)
+            r.current_version_id, r.state, r.first_published_at = v.id, "ai", now_utc()
+            db.commit()
+            ev = rt.one("market.reports")
+            assert ev.to == (("all",) if visibility == "public" else ("admins",))
+            assert ev.data == {"report_id": r.id, "kind": kind}
 
 
 # -- silent by design ---------------------------------------------------------------------------------------------

@@ -12,7 +12,6 @@ import {
   type NyseHolidayInput,
   type ReportKind,
   type ReportsConfigPatch,
-  type ReportVariant,
   type UsEarningInput,
   type ModerationAction,
   type Paged,
@@ -337,12 +336,10 @@ export function useRevokeGroupPass() {
   return useMutation({ mutationFn: (id: string) => api.revokeGroupPass(id), onSuccess: invalidate })
 }
 
-// ── 管理後台：市場報告（2026-11-17；盲測、模式、手動維護的三張表） ─────────
+// ── 管理後台：市場報告（2026-11-17；模式、撰寫設定、手動維護的三張表） ─────────
 export const rk = {
   all: ["admin", "market-reports"] as const,
   overview: ["admin", "market-reports", "overview"] as const,
-  trial: ["admin", "market-reports", "trial"] as const,
-  variant: (id: string, label: ReportVariant) => ["admin", "market-reports", "variant", id, label] as const,
   nyse: ["admin", "market-reports", "nyse"] as const,
   macro: ["admin", "market-reports", "macro"] as const,
   earnings: ["admin", "market-reports", "earnings"] as const,
@@ -350,13 +347,6 @@ export const rk = {
 /** 狀態、花費、最近的產生紀錄：管理員自己按「重新載入」或換頁回來才重抓 */
 export function useAdminReportsOverview() {
   return useQuery({ queryKey: rk.overview, queryFn: () => api.getAdminReportsOverview(), staleTime: 60_000, retry: no4xxRetry })
-}
-export function useAdminReportsTrial() {
-  return useQuery({ queryKey: rk.trial, queryFn: () => api.getAdminReportsTrial(), staleTime: 60_000, retry: no4xxRetry })
-}
-/** 盲測一個版本（管理員形式）；還在寫是 409 */
-export function useAdminReportVariant(id: string, label: ReportVariant, enabled = true) {
-  return useQuery({ enabled, queryKey: rk.variant(id, label), queryFn: () => api.getAdminReportVariant(id, label), staleTime: 5 * 60_000, retry: no4xxRetry })
 }
 /** 改模式或撰寫設定：後台、報告（看得到的範圍變了）與群組頻道（三個推播開關）都重新讀 */
 export function usePutReportsConfig() {
@@ -368,23 +358,6 @@ export function usePutReportsConfig() {
       void qc.invalidateQueries({ queryKey: qk.reports })
       void qc.invalidateQueries({ queryKey: ["groups"] })
     },
-  })
-}
-export function useVoteReport() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: ({ id, preferred, note }: { id: string; preferred: ReportVariant; note?: string }) => api.voteReport(id, { preferred, note }),
-    onSuccess: (_r, { id }) => {
-      void qc.invalidateQueries({ queryKey: rk.trial })
-      void qc.invalidateQueries({ queryKey: qk.reportTrial(id) }) // 盲測開給所有人時，報告頁上「你選了」也跟著變
-    },
-  })
-}
-export function useRevealTrial() {
-  const qc = useQueryClient()
-  return useMutation({
-    mutationFn: (force: boolean) => api.revealTrial({ force }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: rk.all }),
   })
 }
 /** 更正：新的一版（不推播）；報告頁與清單重新讀 */
