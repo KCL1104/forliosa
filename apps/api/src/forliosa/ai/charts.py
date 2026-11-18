@@ -16,6 +16,7 @@ carries no amount, cost or share count in any mode.
 
 from __future__ import annotations
 
+from bisect import bisect_left
 from datetime import date
 from decimal import Decimal
 from typing import Any
@@ -23,9 +24,10 @@ from typing import Any
 from forliosa.datapolicy import labels, tagged
 from forliosa.ids import new_id
 from forliosa.marketdata.base import InstrumentInfo
+from forliosa.marketdata.catalog import KNOWN_REDUCTIONS
 from forliosa.marketdata.service import MarketData
 from forliosa.services.coverage import covers, series_notes, ymd
-from forliosa.services.instruments import split_how
+from forliosa.services.instruments import reduction_how, split_how
 from forliosa.timeutil import today_taipei
 
 KINDS = ["price", "compare", "revenue", "eps", "performance"]
@@ -72,7 +74,7 @@ def _closes(md: MarketData, info: InstrumentInfo, range_: str, today: date) -> d
     rows = [(c.t, c.c) for c in h.candles if c.c is not None]
     notes = series_notes(md, info.symbol, start, rows[0][0] if rows else None, backfill=True)
     return {"rows": rows, "notes": notes, "sources": ["demo"] if h.is_demo else tagged(h.source, "price"),
-            "is_demo": h.is_demo, "start": start, "backfill_until": md.backfill_until(info.symbol)}
+            "is_demo": h.is_demo, "start": start}
 
 
 def _adjustments(md: MarketData, symbol: str) -> dict[date, tuple[str, Decimal]]:
@@ -82,6 +84,17 @@ def _adjustments(md: MarketData, symbol: str) -> dict[date, tuple[str, Decimal]]
         if e.kind in ("split", "capital_reduction") and e.ratio and e.ratio > 0:
             out[e.date] = (e.kind, e.ratio)
     return out
+
+
+def _event_name(symbol: str, day: date, kind: str, ratio: Decimal, *, how: bool) -> str:
+    """「股票分割（1 股拆成 7 股）」 or 「減資（每 1,000 股換成 650 股）」 (``how``: with the ratio). A capital
+    reduction the catalogue lists by its share ratio (``KNOWN_REDUCTIONS``) is a "split" event to every calculation
+    here, but is never called a split."""
+    if kind == "split" and (symbol, day) not in KNOWN_REDUCTIONS:
+        return f"股票分割（{split_how(ratio)}）" if how else "股票分割"
+    if kind == "split" and how:
+        return f"減資（{reduction_how(ratio)}）"
+    return "減資"
 
 
 def _factor(kind: str, ratio: Decimal) -> Decimal:
@@ -138,11 +151,15 @@ def price_chart(md: MarketData, info: InstrumentInfo, range_: str) -> dict[str, 
     rows, notes = c["rows"], list(c["notes"])
     if len(rows) < 2:
         return notes or [f"{info.name} 的收盤價不到兩天，畫不出走勢"]
-    until = c["backfill_until"]  # days up to here come split-adjusted (the series note says so)
+    # A split inside the line is described only where the line really jumps on it: the archive's closes are as
+    # traded, the history backfill's come split-adjusted (its series note says so) — and a split the backfill's source
+    # had not applied yet, such as one on the archive's very first day for the symbol (00662, 2026-11-17), is still a
+    # jump. The same test as the compare chart's (:func:`_comparable`).
+    days = [t for t, _ in rows]
     for d, (kind, ratio) in sorted(_adjustments(md, info.symbol).items()):
-        if rows[0][0] < d <= rows[-1][0] and (until is None or d > until):
-            what = f"股票分割（{split_how(ratio)}）" if kind == "split" else "減資"
-            notes.append(f"{ymd(d)} {what}，之前是當時的價格")
+        i = bisect_left(days, d)
+        if 0 < i < len(rows) and _comparable(rows[i][1], rows[i - 1][1], kind, ratio) != rows[i][1]:
+            notes.append(f"{ymd(d)} {_event_name(info.symbol, d, kind, ratio, how=True)}，之前是當時的價格")
     notes.append("收盤價沒有還原權息，除權息日會有缺口")
     series = [{"name": info.name, "symbol": info.symbol, "points": [_point(t, _f(v)) for t, v in rows]}]
     return _card("price", f"{info.name} 收盤價（{RANGE_LABELS[range_]}）", "price", "date", series, notes,
@@ -187,7 +204,7 @@ def compare_chart(md: MarketData, infos: list[InstrumentInfo], range_: str, *,
                 kind, ratio = adj[t]
                 close_cmp = _comparable(close, prev, kind, ratio)
                 if close_cmp != close:
-                    what = "股票分割" if kind == "split" else "減資"
+                    what = _event_name(info.symbol, t, kind, ratio, how=False)
                     notes.append(f"{info.name} {ymd(t)} {what}，漲跌幅已調整")
             else:
                 close_cmp = close

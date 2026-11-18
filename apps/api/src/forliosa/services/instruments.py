@@ -165,8 +165,21 @@ def _whole(x: Decimal) -> str:
 
 
 def split_how(ratio: Decimal) -> str:
-    """「1 股拆成 10 股」 / 「6 股合成 1 股」 (a reverse split's ratio is 1/6: never 「1 股變 0.1666… 股」)."""
-    return f"1 股拆成 {_whole(ratio)} 股" if ratio > 1 else f"{_whole(1 / ratio)} 股合成 1 股"
+    """「1 股拆成 10 股」 / 「6 股合成 1 股」 (a reverse split's ratio is 1/6: never 「1 股變 0.1666… 股」). A capital
+    reduction listed by its share ratio (2363 矽統 2024: 0.65) is said per thousand shares, as its notice says it:
+    「每 1,000 股換成 650 股」, never 「1.538… 股合成 1 股」."""
+    if ratio > 1:
+        return f"1 股拆成 {_whole(ratio)} 股"
+    inverse = 1 / ratio
+    per_thousand = ratio * 1000
+    if abs(inverse - inverse.to_integral_value()) >= Decimal("0.0001") and per_thousand == per_thousand.to_integral():
+        return reduction_how(ratio)
+    return f"{_whole(inverse)} 股合成 1 股"
+
+
+def reduction_how(ratio: Decimal) -> str:
+    """A capital reduction's share ratio as its notice says it: 「每 1,000 股換成 650 股」 (4174 浩鼎 2026: 500)."""
+    return f"每 1,000 股換成 {_whole(ratio * 1000)} 股"
 
 
 def chart_candles(md: MarketData, symbol: str, candles: list[Candle], events: list[Any] | None = None) -> list[Candle]:

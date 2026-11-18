@@ -90,9 +90,118 @@ FALLBACK_TW_STOCKS: list[InstrumentInfo] = [
 ETF_CODES = frozenset(i.code for i in TW_ETFS)
 
 # Real corporate actions the ledger/benchmark must know about (reference data, not demo).
-# 0050 split 1-to-4: trading resumed on 2025-06-18 at a quarter of the old price.
+# symbol -> ((first trading day at the new price, new shares per old share), ...): a split's ratio is > 1, a reverse
+# split's is 1/n (D(1) / 7: 7 old units become 1). The day is the first one *at the new price* (the day trading
+# resumed), never the first halt day that data vendors date it by. Each entry was checked against at least two
+# independent public sources (product owner 2026-11-18; working notes in CONTRACT_NOTES.md, 2026-11-18 已知分割).
+# Capital reductions (減資) are listed by their share ratio, so every consumer applies them like a split; the cash
+# returned per old share is in KNOWN_REDUCTIONS below — see services.reference_close for why a reference close is
+# multiplied back only where the stored Yahoo rows really fold the ratio in.
 KNOWN_SPLITS: dict[str, tuple[tuple[date, D], ...]] = {
+    # -- ETFs --------------------------------------------------------------------------------------------------------
+    # 00632R 元大台灣50反1: reverse 7 -> 1 (0.14285714); halted 2024-12-04..12-10, resumed 2024-12-11 (ref 22.96).
+    # https://money.udn.com/money/story/5618/8416984 https://udn.com/news/story/123006/8400559
+    # https://ec.ltn.com.tw/article/breakingnews/4882439 https://www.ctee.com.tw/news/20241107700261-439901
+    # https://news.cnyes.com/news/id/5796991 https://www.pinview.com.tw/News/34604.html
+    # https://stockevents.app/en/stock/00632R.TW
+    "00632R.TW": ((date(2024, 12, 11), D(1) / 7),),
+    # 00676R 富邦臺灣加權反1: reverse 6 -> 1 (0.16666667); halted 2025-02-12..02-18, resumed 2025-02-19 (2.04 -> 12.23).
+    # https://www.cna.com.tw/news/afe/202412260204.aspx https://udn.com/news/story/123006/8556552
+    # https://www.ftvnews.com.tw/news/detail/2024C26W0433 https://stockevents.app/en/stock/00676R.TW
+    "00676R.TW": ((date(2025, 2, 19), D(1) / 6),),
+    # 00663L 國泰臺灣加權正2: 1 -> 7; last trade 2025-06-03 (170.15), resumed 2025-06-11 (ref 24.3).
+    # https://money.udn.com/money/story/5618/8800927 https://news.cnyes.com/news/id/5998105
+    # https://www.ctee.com.tw/news/20250617700229-430403 https://wantrich.chinatimes.com/news/20250528900388-420101
+    # https://news.cnyes.com/news/id/5946710
+    "00663L.TW": ((date(2025, 6, 11), D(7)),),
+    # 0050 元大台灣50: 1 -> 4; last trade 2025-06-10 (188.65), halted 06-11..06-17, resumed 2025-06-18 (ref 47.16).
+    # https://technews.tw/?p=1396416 https://finance.technews.tw/2025/06/17/net-value-reference-price/
+    # https://www.bnext.com.tw/article/82332/0050-etf-split https://news.tvbs.com.tw/money/2784131
+    # https://focustaiwan.tw/business/202506180028 https://wantrich.chinatimes.com/news/20250619900355-420101
+    # https://www.ctee.com.tw/news/20250424701166-430403
     "0050.TW": ((date(2025, 6, 18), D(4)),),
+    # 00673R 期元大S&P原油反1: reverse 4 -> 1 (0.25); last trade 2025-10-14 (7.02), resumed 2025-10-22 (ref 28.08).
+    # https://money.udn.com/money/story/5607/9010950 https://money.udn.com/money/story/5618/9085040
+    # https://www.ctee.com.tw/news/20250917700521-430201 https://wantrich.chinatimes.com/news/20251022900430-420401
+    # https://tw.stock.yahoo.com/news/00673r-00706l%E9%80%B2%E8%A1%8C%E5%8F%8D%E5%88%86%E5%89%B2-10-14%E6%9C%80%E5%BE%8C%E4%BA%A4%E6%98%93-10-070653429.html
+    # https://www.yuantafunds.com/active/ETF00706L/assets/pdf/%E3%80%90%E5%95%8F%E7%AD%94%E9%9B%86%E3%80%9100673R%E3%80%8100706L%E5%8F%8D%E5%88%86%E5%89%B2.pdf
+    "00673R.TW": ((date(2025, 10, 22), D(1) / 4),),
+    # 00706L 期元大S&P日圓正2: reverse 4 -> 1 (0.25); last trade 2025-10-14 (5.54), resumed 2025-10-22 (ref 22.16).
+    # https://money.udn.com/money/story/5618/9085040 https://money.udn.com/money/amp/story/5607/9010950
+    # https://wantrich.chinatimes.com/news/20251022900430-420401 https://www.peoplenews.tw/?p=28075
+    "00706L.TW": ((date(2025, 10, 22), D(1) / 4),),
+    # 0052 富邦科技: 1 -> 7; last trade 2025-11-18 (245.3), halted 11-19..11-25, resumed 2025-11-26 (ref 35.04).
+    # https://money.udn.com/money/amp/story/5607/9060299 https://finance.ettoday.net/news/3073341
+    # https://finance.ettoday.net/news/3069412 https://newtalk.tw/news/view/2025-11-25/1006440
+    # https://uanalyze.com.tw/articles/1679940008 https://news.cnyes.com/news/id/6237784
+    # https://wantrich.chinatimes.com/news/20250808900566-420101
+    "0052.TW": ((date(2025, 11, 26), D(7)),),
+    # 00715L 期街口布蘭特正2: reverse 2 -> 1 (0.5); last trade 2025-12-02, halted 12-03..12-09, relisted 2025-12-10.
+    # https://wantrich.chinatimes.com/news/20251106900731-420101 https://news.cnyes.com/news/id/6129589
+    # https://tw.stock.yahoo.com/news/00715l-12-2%E5%8F%8D%E5%88%86%E5%89%B2%E5%89%8D%E6%9C%80%E5%BE%8C%E4%BA%A4%E6%98%93-201000964.html
+    # https://udn.com/news/story/123006/8969932
+    "00715L.TW": ((date(2025, 12, 10), D(1) / 2),),
+    # 00685L 群益臺灣加權正2: 1 -> 24; last trade 2026-06-30 (306), halted 07-01..07-06, resumed 2026-07-07 (ref 12.75).
+    # https://www.businesstoday.com.tw/article/category/183013/post/202606300006/
+    # https://wantrich.chinatimes.com/news/20260701900193-420401 https://finance.ettoday.net/news/3196520
+    # https://www.storm.mg/article/11147479 https://money.udn.com/money/story/5607/9593785
+    "00685L.TW": ((date(2026, 7, 7), D(24)),),
+    # 00662 富邦NASDAQ: 1 -> 5; last trade 2026-11-10, halted 11-11..11-16, resumed 2026-11-17 (ref 23.56). Checked in
+    # two official open datasets: TWSE STOCK_DAY_ALL (open data, data.gov.tw 11549) has no 00662 row on 2026-11-16 and
+    # closes it at 23.10 (change -0.46) on 2026-11-17; SITCA's NAV file moves to the new units on 2026-11-11
+    # (116.77 -> 23.89 while Nasdaq-100 peers rose 2.2–2.3 %).
+    # https://www.twse.com.tw/exchangeReport/STOCK_DAY_ALL?response=open_data
+    # https://www.sitca.org.tw/MemberK0000/F/03/nav.csv
+    "00662.TW": ((date(2026, 11, 17), D(5)),),
+    # -- stocks: capital reductions ----------------------------------------------------------------------------------
+    # 2363 矽統: 35 % cash reduction, 650 new per 1,000 old, NT$3.5 back per old share; old shares last 2024-07-18,
+    # new shares from 2024-07-29.
+    # https://news.cnyes.com/news/id/5628900 https://www.ctee.com.tw/news/20240729700806-430201
+    # https://www.moneyweekly.com.tw/_Article?AID=149131 https://news.cnyes.com/news/id/5624523
+    # https://www.cna.com.tw/news/afe/202402260209.aspx
+    "2363.TW": ((date(2024, 7, 29), D("0.65")),),
+    # 2371 大同: 5 % cash reduction, 950 new per 1,000 old, NT$0.5 back per old share; old shares last 2025-06-11,
+    # new shares from 2025-06-23.
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=cebf459b-961a-46d4-bac8-da42cfb712d6
+    # https://www.ctee.com.tw/news/20250527701947-430503 https://news.cnyes.com/news/id/5981723
+    # https://finance.technews.tw/2025/01/21/datong-plans-to-reduce-its-capital-by-5-in-cash/
+    # https://www.moneyweekly.com.tw/ArticleData/Info/Article/184561/
+    "2371.TW": ((date(2025, 6, 23), D("0.95")),),
+    # 2323 中環: 10 % cash reduction, 900 new per 1,000 old, NT$1 back per old share; old shares last 2026-09-30,
+    # new shares from 2026-10-12. (Not its 2022 reduction: NT$0.6 back, new shares 2022-10-24.)
+    # https://ww2.money-link.com.tw/realtimenews/NewsContent.aspx?SN=2408366002
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=37c7e98d-e2e2-48fa-8165-e6171d6d1630
+    # https://tw.stock.yahoo.com/news/%E4%B8%AD%E7%92%B0-%E5%85%AC%E5%8F%B8%E8%88%8A%E8%82%A1%E6%9C%80%E5%BE%8C%E4%BA%A4%E6%98%93%E6%97%A59-30-%E7%8F%BE%E9%87%91%E6%B8%9B%E8%B3%87%E6%8F%9B%E7%99%BC%E6%96%B0%E8%82%A110-12%E8%B5%B7%E4%B8%8A%E5%B8%82%E8%B2%B7%E8%B3%A3-011700706.html
+    # https://finance.biggo.com.tw/news/twse_major_2323_1150813_182231 https://www.peoplenews.tw/?p=20938
+    "2323.TW": ((date(2026, 10, 12), D("0.9")),),
+    # 9945 潤泰新: 10 % cash reduction, 900 new per 1,000 old, NT$1 back per old share; old shares last 2023-09-13,
+    # new shares from 2023-09-25.
+    # https://news.cnyes.com/news/id/5308334 https://news.cnyes.com/news/id/5312613
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=d7fde9df-4771-433f-bd37-ad9d9e7efc4c
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=1a45fad6-ef0c-4333-af70-e9c787e9ea44
+    # https://www.ctee.com.tw/news/20230925701776-430606 https://www.ctee.com.tw/news/20230315700436-430298
+    "9945.TW": ((date(2023, 9, 25), D("0.9")),),
+    # 4174 浩鼎: 50 % reduction to offset losses (no cash), 500 new per 1,000 old; old shares last 2026-01-26, new
+    # shares from 2026-02-03 (the first schedule, new shares 2026-01-26, was withdrawn).
+    # https://news.cnyes.com/news/id/6327094
+    # https://tw.stock.yahoo.com/news/%E6%B5%A9%E9%BC%8E-%E5%85%AC%E5%8F%B8%E8%88%8A%E8%82%A1%E6%9C%80%E5%BE%8C%E4%BA%A4%E6%98%93%E6%97%A5%E8%AA%BF%E6%95%B4%E7%82%BA115-1-26-%E6%B8%9B%E8%B3%87%E6%8F%9B%E7%99%BC%E6%96%B0%E8%82%A1%E8%AA%BF%E6%95%B4%E7%82%BA115-074600263.html
+    # https://m.esunsec.com.tw/news/instant-detail.aspx?id=%7BAFC5C2EA-36A7-4B71-9601-34C59EF8A20F%7D
+    # https://tw.stock.yahoo.com/quote/4174.TWO/calendar https://udn.com/news/story/7254/8976720
+    # https://news.cnyes.com/news/id/6135764 https://wantrich.chinatimes.com/news/20251124900511-420101
+    # https://www.moneydj.com/kmdj/news/newsviewer.aspx?a=ea09d29b-17ff-4ac5-a869-8fa22bc8ef9a
+    "4174.TWO": ((date(2026, 2, 3), D("0.5")),),
+}
+
+# The capital reductions among KNOWN_SPLITS: (symbol, first day at the new price) -> cash returned per old share
+# (0 for a reduction to offset losses). The new shares' reference price is (last close − cash) / ratio, not
+# last close / ratio: near par the two barely differ, so a check of whether Yahoo scaled its rows by the ratio has to
+# know the cash (services.reference_close._folded_in), and a chart says 「減資」, not 「股票分割」 (2026-11-18 review).
+KNOWN_REDUCTIONS: dict[tuple[str, date], D] = {
+    ("2363.TW", date(2024, 7, 29)): D("3.5"),
+    ("2371.TW", date(2025, 6, 23)): D("0.5"),
+    ("2323.TW", date(2026, 10, 12)): D(1),
+    ("9945.TW", date(2023, 9, 25)): D(1),
+    ("4174.TWO", date(2026, 2, 3)): D(0),
 }
 
 _Q = (3, 6, 9, 12)
@@ -216,9 +325,12 @@ DEMO_SPECS: dict[str, DemoSpec] = {
 
 
 def default_spec(symbol: str, anchor: D, seed: int) -> DemoSpec:
-    """Parameters for any other Taiwan stock: mildly varied by a stable per-symbol seed."""
+    """Parameters for any other Taiwan stock: mildly varied by a stable per-symbol seed. A known split (KNOWN_SPLITS)
+    drops the synthetic prices on its day like the real ones (and 0050's own spec), so a demo price and the split a
+    benchmark or chart applies on that day agree (a ×7 benchmark jump otherwise, 2026-11-18)."""
     return DemoSpec(
         anchor=anchor,
+        splits=KNOWN_SPLITS.get(symbol, ()),
         drift=0.02 + (seed % 9) / 100,
         vol=0.25 + (seed % 15) / 100,
         div_months=(7,) if seed % 3 else (8,),
