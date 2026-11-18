@@ -2350,10 +2350,13 @@ export interface ReportItem {
   meta: string | null
   paragraphs: ReportParagraph[]
 }
+/** 熱度格（v2 2026-11-18，伺服器依期間決定階數）：漲跌色 6%（1 階）或 12%（2 階）的底 */
+export type ReportHeat = "rise1" | "rise2" | "fall1" | "fall2"
 export interface ReportTableCell {
   text: string
   tone?: "rise" | "fall" | null
   sub?: string | null
+  heat?: ReportHeat | null
 }
 export interface ReportTable {
   id: string
@@ -2367,6 +2370,12 @@ export interface ReportTable {
   empty_text: string | null
   note: string | null
   source_labels: string[]
+  /**
+   * v2：同一段裡 `tab_group` 相同（而且相鄰）的表收成一組，窄的主欄一次只顯示一張（`movers` 漲幅｜跌幅｜成交值、
+   * `otc_movers`、`margin` 增加｜減少）；`tab_label` 是分頁上的短名稱
+   */
+  tab_group?: string | null
+  tab_label?: string | null
 }
 export type ReportBlock =
   | { type: "text"; paragraphs: ReportParagraph[] }

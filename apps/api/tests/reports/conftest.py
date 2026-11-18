@@ -50,6 +50,9 @@ TPEX = {"6488": ("環球晶", "24", 478_000_000, "400", "380", 2_000_000_000),
 SECTORS_MON = {"半導體": "-0.0450", "玻璃陶瓷": "-0.0950", "水泥": "0.0200", "金融保險": "0.0110",
                "其他電子": "-0.0455", "電子零組件": "-0.0444", "電腦及週邊設備": "0.0333", "光電": "-0.0400",
                "通信網路": "0.0100", "電子工業": "-0.0420", "機電": "-0.0300"}
+# the size and style indices of MI_INDEX (G15; 電子工業 and 金融保險 are above)
+STYLE_MON = {"臺灣50指數": "-0.0580", "臺灣中型100指數": "-0.0400", "小型股300指數": "-0.0300",
+             "未含電子指數": "-0.0150", "臺灣高股息指數": "-0.0200"}
 
 
 def ts(d: date, hh: int, mm: int = 0) -> datetime:
@@ -96,6 +99,12 @@ def seed_market(db: Session) -> None:
                           change_pct=abs(p), source="twse-opendata"))
         db.add(IndexDaily(name=f"{name}類指數", date=FRI, market="TWSE", close=D("100"), change=D("0"),
                           change_pct=D("0"), source="twse-openapi"))
+    for name, pct in STYLE_MON.items():
+        p = D(pct)
+        db.add(IndexDaily(name=name, date=MON, market="TWSE", close=D("100") * (1 + p), change=D("100") * p,
+                          change_pct=abs(p), source="twse-opendata"))
+        db.add(IndexDaily(name=name, date=FRI, market="TWSE", close=D("100"), change=D("0"), change_pct=D("0"),
+                          source="twse-openapi"))
     db.add(IndexDaily(name="半導體類報酬指數", date=MON, market="TWSE", close=D("200"), change=D("-9"),
                       change_pct=D("0.045"), source="twse-opendata"))
     # TAIFEX positions, P/C, USD/TWD

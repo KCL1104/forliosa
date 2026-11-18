@@ -54,6 +54,36 @@ export interface ServerDraft {
   created_at: string
 }
 
+/**
+ * 雙向橫條的一條（市場報告）：值（和 unit 同一個尺度）、印出來的字、顏色（漲跌色／墨色／鉛筆灰）、名稱下面一行、站內連結。
+ * v2（2026-11-18）：`aside` 右邊第二個數字欄（成交比重的「+2.2」，欄名是圖的 `aside_label`）；`group` 換了就插一行分組小標（「大小型股」）
+ */
+export interface AiChartBar {
+  label: string
+  value: number
+  display: string
+  tone: "rise" | "fall" | "ink" | "pencil"
+  sub?: string | null
+  href?: string | null
+  aside?: string | null
+  group?: string | null
+}
+/** 橫條的基準虛線（「加權 ▼2.31%」）：值和 bars 同一個尺度 */
+export interface AiChartBench {
+  value: number
+  label: string
+}
+/** 期間切換的一組（「1 日｜近 1 週｜近 1 月」或「11/12 起」）：自己的標題（寫出這一期的起訖）、bars（依這一期排序）、基準與說明 */
+export interface AiChartView {
+  key: "1d" | "1w" | "1m" | "since"
+  label: string
+  /** 「上市類股指數漲跌（11/10 收盤至 11/17）」；第一組和圖的標題一樣。舊的資料沒有時沿用圖的標題 */
+  title?: string | null
+  bars: AiChartBar[]
+  bench?: AiChartBench | null
+  notes: string[]
+}
+
 /** `draw_chart` 畫出來的圖卡（SSE `chart` 事件、對話紀錄的 `charts`）：每個點都是伺服器讀的資料，不是模型寫的 */
 export interface AiChart {
   id: string
@@ -76,13 +106,21 @@ export interface AiChart {
   /** `hidden` 的線不畫，只出現在讀數（提示框、螢幕報讀） */
   series: { name: string; symbol: string | null; points: { t: string; v: number }[]; hidden?: boolean }[]
   /** bars：每一條的值（和 unit 同一個尺度）、印出來的字、顏色（漲跌色／墨色／鉛筆灰）、名稱下面一行、站內連結 */
-  bars?: { label: string; value: number; display: string; tone: "rise" | "fall" | "ink" | "pencil"; sub?: string | null; href?: string | null }[] | null
+  bars?: AiChartBar[] | null
   /** 圖下面一行（點數貢獻的「官方漲跌 −2,635.04 點」） */
   reference?: { label: string; display: string } | null
   /** 標題旁「估算」 */
   estimate?: boolean
   /** 標題旁「11/12 起」（存檔從哪一天開始） */
   since?: string | null
+  /** v2（2026-11-18，以下只有給了才有）：橫條的基準虛線（加權指數同一期間的漲跌） */
+  bench?: AiChartBench | null
+  /** 窄的主欄（< 768px，和兩欄排同一個門檻）先列前 `head`、`keep` 裡的名稱、後 `tail` 條，中間收成一行「⋯ 另 17 類」 */
+  fold?: { head: number; tail: number; keep: string[] } | null
+  /** 期間切換：第一組就是上面的 `bars`；只有一個期間時沒有 */
+  views?: AiChartView[] | null
+  /** 右邊第二個數字欄的欄名（「較前一日」），每一條的 `aside` 填這一欄 */
+  aside_label?: string | null
   notes: string[]
   sources: string[]
   is_demo: boolean

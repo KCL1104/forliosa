@@ -86,19 +86,22 @@ function renderInRouter(ui: React.ReactNode) {
 }
 
 describe("bars：以零為軸的雙向橫條", () => {
-  it("有正有負時軸在中間：漲往右、跌往左；長度依最大的絕對值；顏色跟 tone；名稱下面一行是 sub", async () => {
+  it("有正有負時零軸依兩邊最大值的比例放（各至少 25%）：漲往右、跌往左；長度依同一個比例；顏色跟 tone；名稱下面一行是 sub", async () => {
     renderInRouter(<ChartCard chart={sectors} />)
     const fig = (await screen.findByText("上市類股漲跌（11/11）")).closest("figure")!
     const rows = within(fig).getAllByRole("listitem")
     expect(rows).toHaveLength(3)
     const bar = (i: number) => rows[i]!.querySelector<HTMLElement>("[data-bar-tone]")!
+    // 跌最多 0.82%、漲最多 1.53%：零軸在 0.82 ÷ 2.35 ≈ 34.9% 的地方，兩邊用同一個比例、最長的那條碰到邊
+    const axis = (0.0082 / (0.0082 + 0.0153)) * 100
     expect(bar(0).dataset.barTone).toBe("rise")
     expect(bar(0).className).toContain("bg-rise/40")
-    expect(bar(0).style.left).toBe("50%")
-    expect(bar(0).style.width).toBe("50%")
+    expect(Number.parseFloat(bar(0).style.left)).toBeCloseTo(axis, 2)
+    expect(Number.parseFloat(bar(0).style.width)).toBeCloseTo(100 - axis, 2)
     expect(bar(1).className).toContain("bg-fall/40")
-    expect(bar(1).style.right).toBe("50%")
-    expect(Number.parseFloat(bar(1).style.width)).toBeCloseTo((0.0046 / 0.0153) * 50, 1)
+    expect(Number.parseFloat(bar(1).style.right)).toBeCloseTo(100 - axis, 2)
+    expect(Number.parseFloat(bar(1).style.width)).toBeCloseTo((0.0046 / 0.0153) * (100 - axis), 1)
+    expect(Number.parseFloat(bar(2).style.width)).toBeCloseTo(axis, 1)
     expect(within(rows[1]!).getByText("主要由台積電構成（約 77%）")).toHaveClass("text-ink-2")
     // 漲跌幅的數字用漲跌色；沒有提示框
     expect(within(rows[0]!).getByText("▲1.53%")).toHaveClass("text-rise")

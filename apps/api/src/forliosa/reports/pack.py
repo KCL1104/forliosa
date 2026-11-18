@@ -1,6 +1,6 @@
 """The data pack of a market report (contract §6): every number, calendar row, filing and shared-research source the
 writer may use, each with an id (F / C / N / W; X are the gathered reports, added by the gathering), plus the blocks
-the page shows (charts G1–G7, tables, the number strip, the calendar) — built by the server from the archive only.
+the page shows (charts G1–G17, tables, the number strip, the calendar) — built by the server from the archive only.
 
 Rules every builder here keeps:
 
@@ -40,7 +40,14 @@ from forliosa.reports import calendars as cal
 from forliosa.reports import marketcalc as mc
 from forliosa.reports.schedule import Edition, edition_on, md, md_wd, span
 from forliosa.reports.timing import usable
-from forliosa.timeutil import TAIPEI, iso_taipei, next_tw_trading_day, now_taipei, tw_trading_days
+from forliosa.timeutil import (
+    TAIPEI,
+    iso_taipei,
+    last_tw_trading_day,
+    next_tw_trading_day,
+    now_taipei,
+    tw_trading_days,
+)
 
 log = logging.getLogger(__name__)
 
@@ -53,7 +60,7 @@ METRICS = frozenset({
     "stock_mcap", "stock_value", "reference_pct", "us_close", "us_pct", "us_holiday", "fx_close", "fx_change",
     "pc_ratio_oi", "pc_ratio_vol", "futures_oi_net", "futures_oi_change", "large_traders", "otc_inst_total",
     "otc_inst_foreign", "otc_inst_trust", "otc_inst_dealer", "otc_adv_up", "otc_adv_down", "industry_value",
-    "week_pct", "week_points", "count",
+    "week_pct", "week_points", "count", "sector_contrib_est",
 })
 # Position-type numbers: never a reason why something is watched (validator §10.2 item 15)
 OPTION_METRICS = frozenset({"pc_ratio_oi", "pc_ratio_vol", "futures_oi_net", "futures_oi_change", "large_traders"})
@@ -418,7 +425,8 @@ def _sector_facts(p: Pack, secs: list[mc.Sector], day: date, group: str, period:
                           "concentration_fact": conc, "concentration_text": text})
     eligible = [s.name for s in secs if s.text_eligible]
     if eligible:
-        p.rules.append(f"類股文字只能談：{'、'.join(eligible)}（漲幅前 3、跌幅前 3，排除一檔占一半以上的類股；"
+        contrib = "、點數貢獻（估算）最大的 3 類與最小的 3 類" if any(s.rank == "contrib" for s in secs) else ""
+        p.rules.append(f"類股文字只能談：{'、'.join(eligible)}（漲幅前 3、跌幅前 3{contrib}，排除一檔占一半以上的類股；"
                        "半導體固定談，同一段要帶它的集中度）。其他類股只出現在圖上。")
 
 
@@ -574,6 +582,9 @@ def _menu(p: Pack, code: str, available: bool, periods: list[str], sets: list[st
     p.menu.append({"code": code, "available": available, "periods": periods, "sets": sets or []})
 
 
+G5_MONTH_POINTS = 10  # fewer sessions than this and G5's title names them instead of 「一個月」
+
+
 def g5_card(md_: Any, symbols: list[str], title: str, through: date) -> dict[str, Any] | None:
     """G5 through the chat's compare chart (archive closes, the history backfill only for the lines): a month up to
     ``through`` (the edition's data day, never a later close, so a rebuild of a past edition draws what it saw)."""
@@ -586,7 +597,12 @@ def g5_card(md_: Any, symbols: list[str], title: str, through: date) -> dict[str
     if not isinstance(card, dict):
         return None
     series = [{**s, "name": mc.clean_name(str(s.get("name") or ""))} for s in card.get("series") or []]
-    return clip_chart(dict(card, id="G5", title=title, series=series), through)
+    out = clip_chart(dict(card, id="G5", title=title, series=series), through)
+    if out is not None:
+        days = {str(pt.get("t"))[:10] for s in out["series"] if not s.get("hidden") for pt in s.get("points") or []}
+        if len(days) < G5_MONTH_POINTS:  # a short archive: the title says how many sessions (audit §2.5-3)
+            out = {**out, "title": out["title"].replace("一個月比較", f"近 {len(days)} 個交易日比較")}
+    return out
 
 
 def _g5(p: Pack, md_: Any, symbols: list[str], title: str) -> dict[str, Any] | None:
@@ -595,6 +611,395 @@ def _g5(p: Pack, md_: Any, symbols: list[str], title: str) -> dict[str, Any] | N
 
 def _top5_weight_symbols(day: mc.Day | None) -> list[str]:
     return [q.symbol for q in day.by_mcap()[:5]] if day else []
+
+
+# -- v2 (2026-11-18): sectors and stocks in more depth -------------------------------------------------------------
+# G17 sector points, G15 size and style, G2 v2 (baseline, in-sector breadth, periods), G8 turnover share, G2_otc,
+# G16 TPEx institutional by industry, T2_top10 v2 (1 day / 1 week / 1 month with heat), T7, T10 margin, T9 (weekly).
+CONTRIB_FACT_NOTE = "每檔前一日市值權重 × 前一日加權指數 × 漲跌幅，依產業別加總"
+TOP10_RULE = ("上市普通股，依收盤市值；第一列是加權指數。近 1 週、近 1 月是每天對參考價的漲跌連乘（除權息不算成"
+              "下跌），只用官方存檔")
+
+
+def heat_rule(cols: Iterable[tuple[str, str]]) -> str:
+    """「底色只分兩階（1 日：1%、3%；近 1 週：2%、5%；近 1 月：4%、10%）」 for a heat-tinted table's ``cols``
+    ((label, period) pairs): the same tint means a different size in each column, so the rule says where each starts."""
+    def pc(x: Decimal) -> str:
+        return f"{(x * 100).normalize():f}%"
+
+    return "底色只分兩階（" + "；".join(f"{lab}：{pc(B.HEAT_STEPS[per][0])}、{pc(B.HEAT_STEPS[per][1])}"
+                                      for lab, per in cols) + "）"
+MARGIN_RULE = ("範圍：{markets}，市值前 200 名或 300 億元以上；排除創新板、全額交割（變更交易）、處置股。"
+               "依融資張數變化 × 收盤價排序")
+MOVERS_TABS = (("T2_gainers", "漲幅"), ("T2_losers", "跌幅"), ("T2_value", "成交值"))
+G8_TOP = 8
+
+
+def _bench(pct: Decimal | None, prefix: str = "加權") -> dict[str, Any] | None:
+    return B.bench(pct, f"{prefix} {B.pct_text(pct)}") if pct is not None else None
+
+
+def _taiex_prev(p: Pack, taiex: mc.IndexPoint | None, day: mc.Day) -> Decimal | None:
+    """The TAIEX close the day's contributions are weighted on (the official change's base, else the archive's)."""
+    if taiex is not None and taiex.change is not None:
+        return taiex.close - taiex.change
+    if day.prev_day:
+        prev = mc.index_on(p.db, mc.TAIEX, day.prev_day, p.cutoff, p.policy)
+        return prev.close if prev else None
+    return None
+
+
+def _moves(day: mc.Day | None) -> bool:
+    return day is not None and any(q.pct is not None for q in day.commons())
+
+
+def _g17(p: Pack, contribs: list[mc.SectorContrib], secs: list[mc.Sector], official: Decimal | None, *, title: str,
+         sources: Iterable[str], week: bool = False) -> None:
+    """G17: the 5 sectors that pulled the TAIEX down most and the 5 that lifted it most (only those that moved it
+    by half a point or more), the others summed; the official change beside the estimate's sum."""
+    if not contribs:
+        return
+    by = {s.name: s for s in secs}
+    named = [c for c in contribs if c.name != mc.UNMAPPED]
+    drags = sorted((c for c in named if round(c.points) < 0), key=lambda c: (c.points, c.name))[:5]
+    lifts = sorted((c for c in named if round(c.points) > 0), key=lambda c: (-c.points, c.name))[:5]
+    total = sum((c.points for c in contribs), Decimal(0))
+    shown = drags + lifts if total < 0 else lifts + drags
+    rows = []
+    for c in shown:
+        s = by.get(c.name)
+        sub = f"權重約 {c.weight * 100:.1f}%"
+        if s is not None:
+            sub += f"・類股{'週' if week else ''} {B.pct_text(s.pct)}"
+        rows.append({"name": c.name, "points": c.points, "sub": sub})
+    others = [c for c in contribs if c not in shown]
+    rest = {"count": len(others), "points": sum((c.points for c in others), Decimal(0))} if others else None
+    p.chart(B.g17_sector_contrib_bars(rows, rest, official, total, len(named), title=title, sources=sources))
+
+
+def _contrib_facts(p: Pack, contribs: list[mc.SectorContrib], secs: list[mc.Sector], day: date, group: str,
+                   period: str) -> None:
+    """The 3 sectors that lifted the TAIEX most and the 3 that pulled it down most (estimates, for the sectors
+    text): they join the sectors the text may discuss (a sector one stock dominates stays out, 半導體 excepted)."""
+    by = {s.name: s for s in secs}
+
+    def ok(c: mc.SectorContrib) -> bool:
+        s = by.get(c.name)
+        return s is not None and (c.name == mc.SEMICONDUCTOR or not s.concentrated)
+
+    named = [c for c in contribs if c.name != mc.UNMAPPED and round(c.points) != 0 and ok(c)]
+    lifts = sorted((c for c in named if c.points > 0), key=lambda c: (-c.points, c.name))[:3]
+    drags = sorted((c for c in named if c.points < 0), key=lambda c: (c.points, c.name))[:3]
+    for c in [*lifts, *drags]:
+        p.fact(f"{c.name}類 {period} 對加權指數點數貢獻（估算）", c.name, "sector_contrib_est", group,
+               round(c.points, 1), B.signed_text(c.points, 0, " 點"), unit="點", precision=0, day=day,
+               dataset="rules:contribution", aliases=[f"{c.name}類", f"{c.name}股"], estimate=True,
+               note=CONTRIB_FACT_NOTE)
+        s = by[c.name]
+        if not s.text_eligible:
+            s.text_eligible, s.rank = True, "contrib"
+
+
+def _g15(p: Pack, d: date, taiex_pct: Decimal | None) -> None:
+    """G15: 臺灣50, 中型100, 小型股300 | 電子工業, 未含電子, 金融保險 | 臺灣高股息, 櫃買指數, on the TAIEX baseline."""
+    moves = mc.style_moves(p.db, d, p.cutoff, p.policy)
+    rows = [{"group": m.group, "label": m.label, "pct": m.point.pct} for m in moves]
+    p.chart(B.g15_style_bars(rows, _bench(taiex_pct), title=f"規模與風格指數漲跌（{md(d)}）",
+                             sources=p.labels(sorted({m.point.dataset for m in moves}))))
+
+
+def _view_rows(view: mc.SectorView, by: dict[str, mc.Sector], inner: dict[str, mc.Breadth] | None) \
+        -> list[dict[str, Any]]:
+    rows = []
+    for name, move in sorted(view.moves.items(), key=lambda kv: (-kv[1], kv[0])):
+        parts = []
+        br = (inner or {}).get(name)
+        if br is not None:
+            parts.append(f"漲 {br.up}・跌 {br.down}")
+        s = by.get(name)
+        if s is not None and (conc := mc.concentration_text(s)):
+            parts.append(conc)
+        rows.append({"name": name, "pct": move, "sub": "・".join(parts) or None})
+    return rows
+
+
+def _view_notes(view: mc.SectorView, breadth_line: bool) -> list[str]:
+    out = []
+    if view.bench is not None:
+        above = sum(1 for m in view.moves.values() if m > view.bench)
+        below = sum(1 for m in view.moves.values() if m < view.bench)
+        out.append(f"虛線是加權指數同一期間的漲跌：{above} 類高於加權指數、{below} 類低於。")
+    if breadth_line:
+        out.append("每列第二行是這一類上市普通股的上漲、下跌家數。")
+    return out
+
+
+def _g2(p: Pack, d: date, secs: list[mc.Sector], inner: dict[str, mc.Breadth] | None, taiex_pct: Decimal | None, *,
+        title: str, sources: Iterable[str], reference: dict[str, Any] | None = None,
+        first: tuple[str, str, date | None] = ("1d", "1 日", None),
+        periods: Iterable[tuple[str, str, date]] | None = None) -> None:
+    """G2 v2: the 32 sectors best first with the TAIEX baseline, each one's advancers and decliners on its second
+    line, the narrow-screen fold (5 best, 半導體, 5 worst) and the period chips (1 日｜近 1 週｜近 1 月, or 「11/12
+    起」 while the archive is short). Each chip carries its own title with the period (「上市類股指數漲跌（11/10 收盤至
+    11/17）」): the card swaps it, so a week's moves never sit under a one-day title."""
+    if not secs:
+        return
+    by = {s.name: s for s in secs}
+    if periods is None:
+        periods = [("1w", "近 1 週", mc.sessions_back(d, 5)), ("1m", "近 1 月", mc.month_base(d))]
+    periods = list(periods)
+    oldest = min([b for _k, _l, b in periods] + [first[2] or d])
+    closes = _taiex_closes(p, d, since=oldest - timedelta(days=10), limit=80)
+    taiex_pts = [(day_, c) for day_, (c, _ds) in sorted(closes.items())]
+    views = mc.sector_views(p.db, d, p.cutoff, taiex_pts, {s.name: s.pct for s in secs}, taiex_pct,
+                            policy=p.policy, periods=periods, first=first)
+    if not views:
+        return
+
+    def view_title(v: mc.SectorView) -> str:
+        return title if v is views[0] or v.base is None else f"上市類股指數漲跌（{md(v.base)} 收盤至 {md(d)}）"
+
+    chips = [B.sector_view(v.key, v.label, _view_rows(v, by, inner if v is views[0] else None), _bench(v.bench),
+                           _view_notes(v, bool(inner) and v is views[0]), title=view_title(v)) for v in views]
+    # the period chips' dashed lines: the TAIEX closes they were measured on (MI_INDEX, or FMTQIK where it is short)
+    bench_ds = {closes[x][1] for v in views[1:] if v.bench is not None and v.base is not None for x in (v.base, d)
+                if x in closes} if len(chips) > 1 else set()
+    p.datasets |= bench_ds
+    sources = [*sources, *p.labels(sorted(bench_ds))]
+    main = views[0]
+    p.chart(B.g2_sector_bars(_view_rows(main, by, inner), title=title, sources=sources,
+                             notes=_view_notes(main, bool(inner)), bench_=_bench(main.bench),
+                             views=chips if len(chips) > 1 else None, reference=reference, fold=B.SECTOR_FOLD))
+
+
+def _breadth_reference(br: mc.Breadth, prefix: str, limits: bool = True) -> dict[str, Any]:
+    text = f"上漲 {br.up:,}・下跌 {br.down:,}・平盤 {br.flat:,} 家"
+    if limits:
+        text += f"；漲停 {br.limit_up:,}・跌停 {br.limit_down:,} 家"
+    return {"label": prefix, "display": text}
+
+
+def _g8(p: Pack, now: dict[str, int], prev: dict[str, int] | None, in_range: list[mc.Quote], *, title: str,
+        sources: Iterable[str], week: bool = False, values: dict[str, int] | None = None,
+        pcts: dict[str, Decimal | None] | None = None) -> None:
+    """G8: the 8 sectors with the largest share of the listed commons' traded value and the rest; the change in
+    percentage points against the previous session (week); the largest value in the rankings' scope on the second
+    line (「占這一類」 only above half)."""
+    rows_all = mc.sector_turnover(now, prev, in_range, values)
+    if not rows_all:
+        return
+    named = [t for t in rows_all if t.name != mc.UNMAPPED]
+    top = named[:G8_TOP]
+    rows = []
+    for t in top:
+        sub = None
+        if t.top is not None and t.top_value:
+            sub = f"成交值最大：{t.top.name} {B.yi_text(t.top_value)}"
+            if t.top_share is not None and t.top_share > mc.CONCENTRATION:
+                sub += f"，占這一類 {int((t.top_share * 100).to_integral_value())}%"
+            move = (pcts or {}).get(t.top.symbol) if pcts is not None else t.top.pct
+            if move is not None:
+                sub += f"・{'週 ' if week else ''}{B.pct_text(move)}"
+        rows.append({"name": t.name, "share": t.share, "change": t.change, "sub": sub})
+    others = [t for t in rows_all if t not in top]
+    rest = None
+    if others:
+        ch = [t.change for t in others]
+        rest = {"count": len(others), "share": sum((t.share for t in others), Decimal(0)),
+                "change": sum((c for c in ch if c is not None), Decimal(0)) if all(c is not None for c in ch) else None}
+    total = sum(now.values())
+    prev_total = sum(prev.values()) if prev else None
+    what = "前一週" if week else "前一日"
+    notes = [f"分母是上市普通股的{'全週' if week else ''}成交金額 {B.yi_text(total)}"
+             + (f"（{what} {B.yi_text(prev_total)}）" if prev_total else "") + "，不含 ETF 等。"]
+    if prev:
+        notes.append(f"「較{what}」的單位是百分點。")
+    notes.append("成交值最大的一檔只在市值前 200 名或 300 億元以上的範圍裡挑（同排行表）。")
+    p.chart(B.g8_turnover_bars(rows, rest, title=title, notes=notes, aside_label=f"較{what}" if prev else None,
+                               sources=sources))
+
+
+def _g2_otc(p: Pack, tpex: mc.Day) -> None:
+    """G2_otc (was the table T6): TPEx industries, Forliosa's market-cap weighted moves, as bars."""
+    secs = mc.otc_sectors(tpex)
+    rows = [{"name": s.name.removesuffix("業") or s.name, "pct": s.pct, "sub": f"{s.members} 家"} for s in secs]
+    ref = _breadth_reference(mc.breadth(tpex), "上櫃普通股", limits=False) if _moves(tpex) else None
+    p.chart(B.g2_sector_bars(rows, title=f"上櫃類股漲跌（Forliosa 計算，{md(tpex.day)}）",
+                             sources=[*p.labels(tpex.datasets), label("rules")], cid="G2_otc", estimate=True,
+                             notes=["上櫃普通股依產業別分組，以前一日市值加權；2 家以下的產業不列。不是官方指數。"],
+                             reference=ref, fold=B.OTC_FOLD))
+
+
+def _g16(p: Pack, flows: list[mc.IndustryFlow], total: Decimal | None, *, title: str, sources: Iterable[str]) -> None:
+    """G16: the 5 industries TPEx's institutions bought most and the 5 they sold most (estimated NT$)."""
+    buys = [f for f in flows if f.amount > 0][:5]
+    sells = sorted((f for f in flows if f.amount < 0), key=lambda f: (f.amount, f.code))[:5]
+    rows = [{"name": f.name, "amount": f.amount} for f in [*buys, *reversed(sells)]]
+    p.chart(B.g16_otc_flow_bars(rows, total, title=title, sources=sources))
+
+
+def _t7(p: Pack, d: date) -> None:
+    """T7: the three investors' TAIEX futures net open interest on ``d`` and its change (ink: lots are not a price
+    move, as G7 and G16)."""
+    rows7 = []
+    for investor in mc.INVESTORS:
+        series = mc.futures_oi_series(p.db, d, p.cutoff, investor, limit=2)
+        if not series or series[-1][0] != d:
+            continue
+        net = series[-1][1]
+        ch = net - series[-2][1] if len(series) > 1 else None
+        rows7.append({"cells": {"who": B.cell(investor),
+                                "net": B.cell(f"{'淨多' if net > 0 else '淨空'} {abs(net):,} 口"),
+                                "change": B.cell(f"{ch:+,} 口" if ch is not None else "—")}})
+    if rows7 and p.ok("taifex-openapi/institutional_futures"):
+        p.datasets.add("taifex-openapi/institutional_futures")
+        p.table(B.table("T7", f"期貨三大法人：台指期淨未平倉（{md(d)}）",
+                        [("who", "法人", "left", False), ("net", "淨未平倉", "right", True),
+                         ("change", "較前一日", "right", True)], rows7,
+                        sources=p.labels(["taifex-openapi/institutional_futures"])))
+
+
+def _t10(p: Pack, days: list[mc.Day | None], end: date, *, since: date | None = None, title: str) -> None:
+    """T10: the 5 largest margin purchase increases and decreases (lots × close) among the 200 largest listed and
+    OTC commons (or NT$30 billion and up); two tabs, no price move."""
+    pool = [q for day in days if day is not None for q in day.commons() if q.mcap is not None]
+    if not pool:
+        return
+    pool = [q for q in pool if p.ok(f"{mc.MARGIN_SOURCES[q.market]}/margin")]
+    ranked = sorted(pool, key=lambda q: (-q.mcap, q.symbol))  # type: ignore[operator]
+    scope = mc.rule_scope(p.db, ranked, end)
+    table = mc.margin_changes(p.db, scope.in_range, end, p.cutoff, since=since)
+    if not table.markets:
+        return
+    for m in table.markets:
+        p.datasets.add(f"{mc.MARGIN_SOURCES[m]}/margin")
+    srcs = p.labels([f"{mc.MARGIN_SOURCES[m]}/margin" for m in table.markets])
+    markets = "與".join({"TWSE": "上市", "TPEX": "上櫃"}[m] for m in table.markets)
+    ups = sorted((r for r in table.rows if r.change > 0), key=lambda r: (-r.amount, r.quote.symbol))[:5]
+    downs = sorted((r for r in table.rows if r.change < 0), key=lambda r: (r.amount, r.quote.symbol))[:5]
+    change_label = "週增減（張）" if since else "較前一日（張）"
+    cols = [("stock", "股票", "left", False), ("balance", "融資餘額（張）", "right", True),
+            ("change", change_label, "right", True)]
+
+    def rows(items: list[mc.MarginChange]) -> list[dict[str, Any]]:
+        return [{"cells": {"stock": B.cell(B.stock_label(r.quote.name, r.quote.code)),
+                           "balance": B.cell(f"{r.balance:,}"), "change": B.cell(B.signed_text(r.change, 0))},
+                 "href": B.STOCK_HREF.format(symbol=r.quote.symbol)} for r in items]
+
+    rule = MARGIN_RULE.format(markets=markets)
+    short = [f"{'上市' if m == 'TWSE' else '上櫃'}到 {md(table.end[m])}" for m in table.markets if table.end[m] != end]
+    if short:  # a week whose TWSE Friday file was not out yet
+        rule += "；" + "、".join(short) + "（證交所的融資檔下一個交易日清晨才公布）"
+    week = "週" if since else ""
+    p.table(B.table("T10_up", f"融資{week}增加前 5（{title}）", cols, rows(ups), rule=rule,
+                    empty_text="範圍內沒有融資增加的股票。", sources=srcs, tab_group="margin", tab_label="增加"))
+    p.table(B.table("T10_down", f"融資{week}減少前 5（{title}）", cols, rows(downs), rule=rule,
+                    empty_text="範圍內沒有融資減少的股票。", sources=srcs, tab_group="margin", tab_label="減少"))
+
+
+def _taiex_moves(p: Pack, end: date, bases: dict[str, date]) -> tuple[dict[str, Decimal | None], set[str]]:
+    """The TAIEX from each base session's close to ``end`` (MI_INDEX, FMTQIK where the index archive is short), and
+    the datasets of the closes those moves used (the table's sources)."""
+    closes = _taiex_closes(p, end, since=min(bases.values()) - timedelta(days=10), limit=80)
+    ip = [mc.IndexPoint(mc.TAIEX, d, c, None, None, ds) for d, (c, ds) in sorted(closes.items())]
+    moves = {k: mc.index_move(ip, end, b) for k, b in bases.items()}
+    used = {closes[d][1] for k, b in bases.items() if moves[k] is not None for d in (b, end)}
+    return moves, used
+
+
+def _archive_note(p: Pack, end: date, short: set[str], labels_: dict[str, str],
+                  bases: dict[str, date] | None = None) -> str | None:
+    """「個股的近 1 週 11/19 起才有」: a short column says from when the listed closes' archive is long enough; a
+    session missing from the archive inside a short column's period says so too (those cells are 「—」, never a move
+    that skipped the day)."""
+    if not short:
+        return None
+    days = mc.session_dates(p.db, "TWSE", end, p.cutoff, p.policy, limit=60)
+    if not days:
+        return None
+    week_from, month_from = mc.archive_ready(days[0])
+    parts = []
+    if "1w" in short and week_from > end:
+        parts.append(f"{labels_['1w']} {md(week_from)} 起才有")
+    if "1m" in short and month_from > end:
+        parts.append(f"{labels_['1m']} {md(month_from)} 起才有")
+    out = [f"個股的{'、'.join(parts)}（存檔從 {md(days[0])} 開始）。"] if parts else []
+    spans = [b for k, b in (bases or {}).items() if k in short]
+    if spans:
+        archived = set(days)
+        gaps = [d for d in tw_trading_days(max(min(spans), days[0]) + timedelta(days=1), end) if d not in archived]
+        if gaps:
+            shown = "、".join(md(d) for d in gaps[:3]) + (" 等" if len(gaps) > 3 else "")
+            out.append(f"存檔缺 {shown} 的收盤，跨過這{'一天' if len(gaps) == 1 else '幾天'}的格子不算（「—」）。")
+    return "".join(out) or None
+
+
+def _t2_top10_v2(p: Pack, top10: list[mc.Quote], end: date, taiex: mc.IndexPoint | None, *, title: str,
+                 sources: list[str], week_base: date | None = None) -> None:
+    """T2_top10 v2: the TAIEX, then the 10 largest listed commons, over 1 day, about a week and about a month
+    (a week's edition: the week and about a month), each move chained from the official reference prices, heat-tinted
+    cells; 「—」 where the archive is short. No contribution column (G3 has it)."""
+    if not top10:
+        return
+    if week_base is None:
+        bases = {"1w": mc.sessions_back(end, 5), "1m": mc.month_base(end)}
+        cols = [("d1", "1 日", "1d"), ("w1", "近 1 週", "1w"), ("m1", "近 1 月", "1m")]
+    else:
+        bases = {"1w": week_base, "1m": mc.month_base(end)}
+        cols = [("w1", "週漲跌", "1w"), ("m1", "近 1 月", "1m")]
+    chained = mc.chained_returns(p.db, [q.symbol for q in top10], end, p.cutoff, bases, p.policy)
+    tx, tx_ds = _taiex_moves(p, end, bases)
+    taiex_ds = {*tx_ds, *([taiex.dataset] if taiex is not None and taiex.dataset else [])}
+    p.datasets |= taiex_ds
+    rows: list[dict[str, Any]] = []
+    if taiex is not None:
+        cells = {"stock": B.cell("加權指數", sub=B.number_text(taiex.close))}
+        for key, _lab, period in cols:
+            move = taiex.pct if period == "1d" else tx.get(period)
+            cells[key] = B.move_cell(move, period)
+        rows.append({"cells": cells, "href": None})
+    short: set[str] = set()
+    for q in top10:
+        cells = {"stock": B.cell(B.stock_label(q.name, q.code), sub=B.price_text(q.close))}
+        for key, _lab, period in cols:
+            move = q.pct if period == "1d" else chained.get(q.symbol, {}).get(period)
+            if move is None and period != "1d":
+                short.add(period)
+            cells[key] = B.move_cell(move, period)
+        rows.append({"cells": cells, "href": B.STOCK_HREF.format(symbol=q.symbol)})
+    note = _archive_note(p, end, short, {"1w": "近 1 週" if week_base is None else "週漲跌", "1m": "近 1 月"}, bases)
+    rule = TOP10_RULE if week_base is None else TOP10_RULE.replace("近 1 週、", "")
+    p.table(B.table("T2_top10", title, [("stock", "股票", "left", False),
+                                        *((k, lab, "right", True) for k, lab, _per in cols)], rows,
+                    rule=f"{rule}；{heat_rule((lab, per) for _k, lab, per in cols)}",
+                    note=note, sources=[*sources, *p.labels(sorted(taiex_ds)), label("rules")]))
+
+
+def _sector_blocks(p: Pack, d: date, twse: mc.Day | None, taiex: mc.IndexPoint | None, secs: list[mc.Sector],
+                   contribs: list[mc.SectorContrib], *, reference: dict[str, Any] | None = None) -> None:
+    """The listed session's sector charts (close: the sectors section; premarket: 「昨日台股全貌」): G17, G15, G2 v2,
+    G8 — each only from rows usable at the cut-off."""
+    sector_ds = sorted({s.dataset for s in secs})
+    if contribs and twse is not None:
+        _g17(p, contribs, secs, taiex.change if taiex else None,
+             title=f"各類股對加權指數的點數貢獻（估算，{md(d)}）",
+             sources=p.labels([*twse.datasets, *sector_ds, "rules:contribution"]))
+    _g15(p, d, taiex.pct if taiex else None)
+    inner = mc.sector_breadth(twse) if twse is not None and _moves(twse) else None
+    _g2(p, d, secs, inner, taiex.pct if taiex else None, title=f"上市類股指數漲跌（{md(d)}）",
+        sources=p.labels([*sector_ds, *([taiex.dataset] if taiex is not None and taiex.pct is not None else []),
+                          *(twse.datasets if inner and twse else [])]), reference=reference)
+    if twse is not None:
+        before = mc.load_day(p.db, "TWSE", twse.prev_day, p.cutoff, p.policy) if twse.prev_day else None
+        prev = mc.sector_values(before.quotes.values()) if before is not None else None
+        _g8(p, mc.sector_values(twse.quotes.values()), prev or None,
+            mc.rule_scope(p.db, twse.by_mcap(), d).in_range, title=f"上市類股成交金額比重（{md(d)}）",
+            sources=p.labels([*twse.datasets, "rules:turnover_sum"]))
+
+
+def _fixed(p: Pack, codes: Iterable[str]) -> list[str]:
+    """The fixed charts the writer is told about: those the page really has."""
+    return [c for c in codes if c in p.blocks["charts"]]
 
 
 # -- 盤後重點 ---------------------------------------------------------------------------------------------------
@@ -640,21 +1045,21 @@ def _close(p: Pack, md_: Any) -> None:
         if now_cap:
             p.fact(f"上市普通股總市值 {md(d)}（Forliosa 估算）", "上市總市值", "mcap_total", "structure", now_cap,
                    B.zhao_text(now_cap), unit="兆元", day=d, dataset="rules:market_cap", estimate=True)
-    # sectors
+    # sectors: G17 (its 3 best and 3 worst also join the text's sectors), G15, G2 v2, G8; the strip has the breadth
     secs = mc.sectors(p.db, d, p.cutoff, twse, p.policy)
+    contrib: dict[str, Decimal] = {}
+    contribs: list[mc.SectorContrib] = []
+    if twse is not None:
+        taiex_prev = _taiex_prev(p, taiex, twse)
+        contrib = mc.contributions(twse, taiex_prev)
+        contribs = mc.sector_contributions(twse, taiex_prev)
+    _contrib_facts(p, contribs, secs, d, "today", md(d))
     _sector_facts(p, secs, d, "today")
-    sector_ds = sorted({s.dataset for s in secs})
-    p.chart(B.g2_sector_bars(_sector_rows(secs), title=f"上市類股指數漲跌（{md(d)}）", sources=p.labels(sector_ds)))
+    _sector_blocks(p, d, twse, taiex, secs, contribs)
     # stocks
     top100: list[str] = []
     names: dict[str, str] = {}
-    contrib: dict[str, Decimal] = {}
     if twse is not None:
-        taiex_prev = (taiex.close - taiex.change) if taiex is not None and taiex.change is not None else None
-        if taiex_prev is None and twse.prev_day:
-            prev = mc.index_on(p.db, mc.TAIEX, twse.prev_day, p.cutoff, p.policy)
-            taiex_prev = prev.close if prev else None
-        contrib = mc.contributions(twse, taiex_prev)
         lists = mc.rule_lists(p.db, twse)
         for q in lists.top10:
             p.stock(q, "市值前 10", contrib=contrib.get(q.symbol), with_mcap=True, with_value=True)
@@ -672,7 +1077,7 @@ def _close(p: Pack, md_: Any) -> None:
         names = {q.symbol: q.name for day in (twse, tpex_latest) if day for q in day.quotes.values()}
         _event_stocks(p, [twse, tpex_latest], d, d, set(top100))
         p.rules.append(RULE_STOCKS)
-        _close_tables(p, twse, lists, contrib, d)
+        _close_tables(p, twse, lists, d, taiex)
         # G3 contributions
         rows = [{"label": q.name, "symbol": q.symbol, "points": contrib[q.symbol]} for q in lists.top10
                 if q.symbol in contrib]
@@ -680,10 +1085,6 @@ def _close(p: Pack, md_: Any) -> None:
         p.chart(B.g3_contribution_bars(rows, rest, taiex.change if taiex else None,
                                        title=f"市值前 10 大對加權指數的點數貢獻（估算，{md(d)}）",
                                        sources=p.labels([*twse.datasets, "rules:contribution"])))
-        if any(q.pct is not None for q in twse.commons()):
-            br = mc.breadth(twse)
-            p.chart(B.g4_breadth_bars(br.up, br.flat, br.down, br.limit_up, br.limit_down,
-                                      title=f"上市普通股漲跌家數（{md(d)}）", sources=p.labels(twse.datasets)))
         _research(p, list(p.stocks), d)
     # G1
     if taiex is not None:
@@ -693,9 +1094,9 @@ def _close(p: Pack, md_: Any) -> None:
         p.blocks["notes"]["G1"] = "官方加權指數尚未取得"
     g5 = _g5(p, md_, _top5_weight_symbols(twse), f"權值前 5 檔一個月比較（至 {md(d)}）")
     p.chart(g5)
-    _menu(p, "G4", twse is not None, ["day"])
+    # the chart of the day: G5 (G4's advancers and decliners are the number strip's; v2 took it out)
     _menu(p, "G5", g5 is not None, ["day"], ["top5_weight", "gainers", "losers"] if g5 is not None else [])
-    p.fixed = ["G1", "G2", "G3"]
+    p.fixed = _fixed(p, ("G1", "G17", "G15", "G2", "G8", "G3"))
     _filings(p, d, "14:00", set(top100), names)
     # tonight and the next session's scheduled events
     nxt = next_tw_trading_day(d + timedelta(days=1))
@@ -704,11 +1105,11 @@ def _close(p: Pack, md_: Any) -> None:
 
 
 def _close_evening(p: Pack, d: date) -> None:
-    """The tables the 23:45 and 06:40 runs add (contract §13.3): T5 上櫃排行, T6 上櫃類股 (Forliosa's own),
-    T7 期貨三大法人, T8 上櫃三大法人 (estimated amounts). Each only once its data existed at the cut-off (TPEx closes
-    about 23:30, TAIFEX about 21:45), so the 15:40 pack has none of them."""
+    """The blocks the 23:45 and 06:40 runs add (contract §13.3): T5 上櫃排行, G2_otc 上櫃類股 (Forliosa's own; was
+    the table T6), T7 期貨三大法人, T8 上櫃三大法人 and G16 by industry (estimated amounts). Each only once its data
+    existed at the cut-off (TPEx closes about 23:30, TAIFEX about 21:45), so the 15:40 pack has none of them."""
     tpex = mc.load_day(p.db, "TPEX", d, p.cutoff, p.policy)
-    if tpex is not None and tpex.day == d and any(q.pct is not None for q in tpex.commons()):
+    if tpex is not None and tpex.day == d and _moves(tpex):
         p.datasets |= tpex.datasets
         srcs = p.labels(tpex.datasets)
         lists = mc.rule_lists(p.db, tpex)
@@ -719,27 +1120,22 @@ def _close_evening(p: Pack, d: date) -> None:
         p.table(B.table("T5_gainers", f"上櫃漲幅前 5（{md(d)}）" if lists.limit_up_many is None
                         else f"上櫃{_many_title(lists.limit_up_many, '漲停')}（{md(d)}）", B.STOCK_COLUMNS,
                         [B.stock_row(q) for q in lists.gainers], rule=lists.scope_rule,
-                        empty_text="範圍內沒有上漲的股票。", sources=srcs))
+                        empty_text="範圍內沒有上漲的股票。", sources=srcs, tab_group="otc_movers", tab_label="漲幅"))
         p.table(B.table("T5_losers", f"上櫃跌幅前 5（{md(d)}）" if lists.limit_down_many is None
                         else f"上櫃{_many_title(lists.limit_down_many, '跌停')}（{md(d)}）", B.STOCK_COLUMNS,
                         [B.stock_row(q) for q in lists.losers], rule=lists.scope_rule,
-                        empty_text="範圍內沒有下跌的股票。", sources=srcs))
-        secs = mc.otc_sectors(tpex)
-        p.table(B.table("T6", f"上櫃類股（Forliosa 依產業別計算，不是官方指數，{md(d)}）",
-                        [("name", "產業", "left", False), ("pct", "漲跌幅", "right", True),
-                         ("members", "家數", "right", True)],
-                        [{"cells": {"name": B.cell(s.name), "pct": B.cell(B.pct_text(s.pct), B.tone(s.pct)),
-                                    "members": B.cell(f"{s.members}")}} for s in secs],
-                        rule="上櫃普通股依產業別分組，以前一日市值加權；2 家以下的產業不列", fold_after=10,
-                        empty_text="上櫃類股還算不出來。", sources=[*srcs, label("rules")]))
+                        empty_text="範圍內沒有下跌的股票。", sources=srcs, tab_group="otc_movers", tab_label="跌幅"))
+        _g2_otc(p, tpex)
+    if tpex is not None and tpex.day == d:
         inst = mc.otc_institutional(p.db, tpex, p.cutoff)
         if inst is not None:
             sums, per = inst
             ds = p.labels(["tpex-openapi/institutional", *tpex.datasets])
+            p.datasets |= tpex.datasets
             p.datasets.add("tpex-openapi/institutional")
 
-            def amount(v: Decimal) -> dict[str, Any]:
-                return B.cell(f"{'買超' if v >= 0 else '賣超'} {B.yi_text(abs(v), 1)}", B.tone(v))
+            def amount(v: Decimal) -> dict[str, Any]:  # ink: an institutional flow, not a price move (as G16)
+                return B.cell(f"{'買超' if v >= 0 else '賣超'} {B.yi_text(abs(v), 1)}")
 
             p.table(B.table("T8", f"上櫃三大法人買賣超（估算金額，{md(d)}）",
                             [("who", "法人", "left", False), ("amount", "估算金額", "right", True)],
@@ -757,28 +1153,24 @@ def _close_evening(p: Pack, d: date) -> None:
                                             "amount": amount(x.amount)},
                                   "href": B.STOCK_HREF.format(symbol=x.symbol)} for x in rows],
                                 rule="估算金額＝合計買賣超股數 × 收盤價", empty_text="沒有資料。", sources=ds))
-    rows7 = []
-    for investor in mc.INVESTORS:
-        series = mc.futures_oi_series(p.db, d, p.cutoff, investor, limit=2)
-        if not series or series[-1][0] != d:
-            continue
-        net = series[-1][1]
-        ch = net - series[-2][1] if len(series) > 1 else None
-        rows7.append({"cells": {"who": B.cell(investor),
-                                "net": B.cell(f"{'淨多' if net > 0 else '淨空'} {abs(net):,} 口", B.tone(net)),
-                                "change": B.cell(f"{ch:+,} 口" if ch is not None else "—", B.tone(ch))}})
-    if rows7 and p.ok("taifex-openapi/institutional_futures"):
-        p.datasets.add("taifex-openapi/institutional_futures")
-        p.table(B.table("T7", f"期貨三大法人：台指期淨未平倉（{md(d)}）",
-                        [("who", "法人", "left", False), ("net", "淨未平倉", "right", True),
-                         ("change", "較前一日", "right", True)], rows7,
-                        sources=p.labels(["taifex-openapi/institutional_futures"])))
+            flows = mc.otc_flows_by_industry(per, {q.symbol: q.industry_code for q in tpex.quotes.values()})
+            _g16(p, flows, sums["total"], title=f"上櫃三大法人買賣超，依產業別（估算，{md(d)}）",
+                 sources=[*ds, label("rules")])
+    _t7(p, d)
 
 
 def _taiex_series(p: Pack, upto: date, since: date | None = None,
                   limit: int = 60) -> tuple[list[tuple[date, Decimal]], set[str]]:
     """The TAIEX closes for G1: MI_INDEX rows, and FMTQIK's TAIEX column for the days the index archive lacks (the
     month FMTQIK carries; usable from its next-morning batch)."""
+    pts = _taiex_closes(p, upto, since, limit)
+    days = sorted(pts)
+    return [(d, pts[d][0]) for d in days], {pts[d][1] for d in days}
+
+
+def _taiex_closes(p: Pack, upto: date, since: date | None = None,
+                  limit: int = 60) -> dict[date, tuple[Decimal, str]]:
+    """:func:`_taiex_series` with each close's dataset (day -> (close, dataset)), the newest ``limit`` days."""
     pts = {x.day: (x.close, x.dataset) for x in mc.index_points(p.db, mc.TAIEX, p.cutoff, upto=upto, since=since,
                                                                  policy=p.policy, limit=limit)}
     stmt = select(MarketTurnoverDaily).where(MarketTurnoverDaily.market == "TWSE", MarketTurnoverDaily.date <= upto)
@@ -788,8 +1180,7 @@ def _taiex_series(p: Pack, upto: date, since: date | None = None,
         for r in p.db.scalars(stmt):
             if r.taiex and r.date not in pts and usable("twse-openapi/turnover", r.date, p.cutoff):
                 pts[r.date] = (r.taiex, "twse-openapi/turnover")
-    days = sorted(pts)[-limit:]
-    return [(d, pts[d][0]) for d in days], {pts[d][1] for d in days}
+    return {d: pts[d] for d in sorted(pts)[-limit:]}
 
 
 def _latest_day(p: Pack, market: str, upto: date) -> mc.Day | None:
@@ -832,16 +1223,10 @@ def _many_title(n: int, what: str) -> str:
     return f"範圍內{what} {n} 家，其中市值最大的 5 檔"
 
 
-def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, contrib: dict[str, Decimal], d: date) -> None:
+def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, d: date, taiex: mc.IndexPoint | None) -> None:
+    """T2_top10 v2 (the direction over 1 day, a week, a month) and the movers as three tabs (漲幅｜跌幅｜成交值)."""
     srcs = p.labels([*day.datasets])
-    top_rows = [B.stock_row(q, {"mcap": B.cell(B.zhao_text(q.mcap) if q.mcap else "—"),
-                                "contrib": B.cell(B.signed_text(contrib[q.symbol], 0, " 點")
-                                                  if q.symbol in contrib else "—", B.tone(contrib.get(q.symbol)))})
-                for q in lists.top10]
-    p.table(B.table("T2_top10", f"市值前 10（{md(d)}）",
-                    [*B.STOCK_COLUMNS, ("mcap", "市值", "right", True), ("contrib", "點數貢獻（估算）", "right", True)],
-                    top_rows, rule="上市普通股，依收盤市值（收盤 × 已發行股數）；點數貢獻是 Forliosa 估算",
-                    sources=[*srcs, label("rules")]))
+    _t2_top10_v2(p, lists.top10, d, taiex, title=f"市值前 10 的大方向（{md(d)}）", sources=srcs)
     up_title = f"漲幅前 5（{md(d)}）" if lists.limit_up_many is None else \
         f"{_many_title(lists.limit_up_many, '漲停')}（{md(d)}）"
     down_title = f"跌幅前 5（{md(d)}）" if lists.limit_down_many is None else \
@@ -851,10 +1236,13 @@ def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, contrib: dict[str, Deci
         for n in p.blocks["numbers"]:
             if n["key"] == "limits":
                 n["note"] = LIMITS_NOTE
+    tabs = dict(MOVERS_TABS)
     p.table(B.table("T2_gainers", up_title, B.STOCK_COLUMNS, [B.stock_row(q) for q in lists.gainers],
-                    rule=lists.scope_rule, empty_text="範圍內沒有上漲的股票。", sources=srcs))
+                    rule=lists.scope_rule, empty_text="範圍內沒有上漲的股票。", sources=srcs,
+                    tab_group="movers", tab_label=tabs["T2_gainers"]))
     p.table(B.table("T2_losers", down_title, B.STOCK_COLUMNS, [B.stock_row(q) for q in lists.losers],
-                    rule=lists.scope_rule, empty_text="範圍內沒有下跌的股票。", sources=srcs))
+                    rule=lists.scope_rule, empty_text="範圍內沒有下跌的股票。", sources=srcs,
+                    tab_group="movers", tab_label=tabs["T2_losers"]))
     col_label = "成交金額" if lists.value_column == "value" else "成交量（股）"
     value_rows = [B.stock_row(q, {"value": B.cell(B.yi_text(q.value, 1) if lists.value_column == "value" and q.value
                                                   else f"{q.volume or 0:,}")}) for q in lists.by_value]
@@ -862,7 +1250,8 @@ def _close_tables(p: Pack, day: mc.Day, lists: mc.Lists, contrib: dict[str, Deci
                     [*B.STOCK_COLUMNS, ("value", col_label, "right", True)], value_rows,
                     rule=lists.scope_rule + ("" if lists.value_column == "value"
                                              else "；這天的資料沒有成交金額，改依成交量"),
-                    sources=srcs))
+                    sources=srcs, tab_group="movers",
+                    tab_label=tabs["T2_value"] if lists.value_column == "value" else "成交量"))
 
 
 # -- 盤前重點 ---------------------------------------------------------------------------------------------------
@@ -913,6 +1302,7 @@ def _premarket(p: Pack, md_: Any) -> None:
                                change=f"{change:+,} 口" if change is not None else None, date_label=md(prev)))
     p.chart(B.g7_futures_columns(oi, title=f"外資台指期淨未平倉（至 {md(prev)}）",
                                  sources=p.labels(["taifex-openapi/institutional_futures"])))
+    _t7(p, prev)
     pc = mc.put_call(p.db, prev, p.cutoff)
     if pc is not None and pc.trade_date == prev and pc.oi_ratio is not None:
         fid = p.fact(f"台指選擇權 P/C 未平倉比 {md(prev)}", "P/C 比", "pc_ratio_oi", "evening", pc.oi_ratio,
@@ -922,7 +1312,6 @@ def _premarket(p: Pack, md_: Any) -> None:
     # the previous session's TPEx data (published the evening before). The TPEx index closes at 14:30 and was in the
     # previous close report: a previous-session number (never the headline), not one of the evening's
     tpex = mc.load_day(p.db, "TPEX", prev, p.cutoff, p.policy)
-    evening_rows: list[dict[str, Any]] = []
     o = mc.index_on(p.db, TPEX_INDEX, prev, p.cutoff, p.policy)
     if o is not None:
         p.fact(f"櫃買指數 {md(prev)} 收盤", "櫃買指數", "otc_close", "prev_session", o.close, B.number_text(o.close),
@@ -931,13 +1320,12 @@ def _premarket(p: Pack, md_: Any) -> None:
             p.fact(f"櫃買指數 {md(prev)} 漲跌幅", "櫃買指數", "otc_pct", "prev_session", o.pct, B.pct_text(o.pct),
                    unit="%", day=prev, dataset=o.dataset, aliases=OTC_ALIASES)
     if tpex is not None:
-        br = _breadth_facts(p, tpex, "evening", prefix="上櫃普通股")
-        if br is not None:
-            evening_rows.append({"cells": {"item": B.cell("上櫃漲跌家數"),
-                                           "value": B.cell(f"{br.up:,}／{br.down:,} 家"), "change": B.cell("")}})
+        p.datasets |= tpex.datasets
+        _breadth_facts(p, tpex, "evening", prefix="上櫃普通股")
         inst = mc.otc_institutional(p.db, tpex, p.cutoff)
         if inst is not None:
-            sums, _ = inst
+            sums, per = inst
+            p.datasets.add("tpex-openapi/institutional")
             for key, who, metric in (("total", "上櫃三大法人", "otc_inst_total"),
                                      ("foreign", "上櫃外資", "otc_inst_foreign"),
                                      ("trust", "上櫃投信", "otc_inst_trust"),
@@ -946,46 +1334,31 @@ def _premarket(p: Pack, md_: Any) -> None:
                 p.fact(f"{who}買賣超估算金額 {md(prev)}（股數 × 收盤價）", who, metric, "evening", v,
                        f"{'買超' if v >= 0 else '賣超'} {B.yi_text(abs(v), 1)}", unit="億元", precision=1, day=prev,
                        dataset="tpex-openapi/institutional", estimate=True, aliases=[who.removeprefix("上櫃")])
-            v = sums["total"]
-            evening_rows.append({"cells": {"item": B.cell("上櫃三大法人（估算金額）"),
-                                           "value": B.cell(f"{'買超' if v >= 0 else '賣超'} {B.yi_text(abs(v), 1)}"),
-                                           "change": B.cell("")}})
-    if oi and oi[-1][0] == prev:
-        evening_rows.append({"cells": {"item": B.cell("外資台指期淨未平倉"),
-                                       "value": B.cell(f"{'淨多' if oi[-1][1] > 0 else '淨空'} {abs(oi[-1][1]):,} 口"),
-                                       "change": B.cell(f"{oi[-1][1] - oi[-2][1]:+,} 口" if len(oi) > 1 else "")}})
-    if pc is not None and pc.trade_date == prev and pc.oi_ratio is not None:
-        evening_rows.append({"cells": {"item": B.cell("P/C 未平倉比"), "value": B.cell(f"{pc.oi_ratio * 100:.2f}%"),
-                                       "change": B.cell("")}})
-    if fx and fx[-1][0] == prev:
-        # the same change as the number strip's (the second dry run had it there and an empty cell here)
-        evening_rows.append({"cells": {"item": B.cell("美元兌新台幣（央行）"), "value": B.cell(f"{fx[-1][1]:.3f}"),
-                                       "change": B.cell(f"{fx[-1][1] - fx[-2][1]:+.3f}" if len(fx) > 1 else "")}})
-    p.table(B.table("T_evening", f"昨晚才到的資料（{md(prev)}）",
-                    [("item", "項目", "left", False), ("value", "數字", "right", True),
-                     ("change", "變化", "right", True)], evening_rows,
-                    empty_text="前一個交易日晚上的資料還沒有進來。",
-                    sources=p.labels(["tpex-openapi/price", "tpex-openapi/institutional",
-                                      "taifex-openapi/institutional_futures", "taifex-openapi/put_call_ratio",
-                                      "cbc-opendata/fx"])))
-    # the previous session's listed numbers: reference only (never the headline: validator §10.2 item 16)
-    _index_facts(p, prev, "prev_session", with_tr=False, with_otc=False)
+            flows = mc.otc_flows_by_industry(per, {q.symbol: q.industry_code for q in tpex.quotes.values()})
+            _g16(p, flows, sums["total"], title=f"上櫃三大法人買賣超，依產業別（估算，{md(prev)}）",
+                 sources=[*p.labels(["tpex-openapi/institutional", *tpex.datasets]), label("rules")])
+        if _moves(tpex):
+            _g2_otc(p, tpex)
+    # 昨日台股全貌 (data only: the AI text never retells the previous session; validator §10.2 item 16)
+    idx_prev = _index_facts(p, prev, "prev_session", with_tr=False, with_otc=False)
+    taiex_prev = idx_prev.get("taiex")
     twse_prev = mc.load_day(p.db, "TWSE", prev, p.cutoff, p.policy)
+    if twse_prev is not None:
+        p.datasets |= twse_prev.datasets
     secs = mc.sectors(p.db, prev, p.cutoff, twse_prev, p.policy)
+    contribs = mc.sector_contributions(twse_prev, _taiex_prev(p, taiex_prev, twse_prev)) \
+        if twse_prev is not None else []
+    _contrib_facts(p, contribs, secs, prev, "prev_session", md(prev))
     _sector_facts(p, [s for s in secs if s.text_eligible], prev, "prev_session")
-    p.chart(B.g2_sector_bars(_sector_rows(secs), title=f"上市類股指數漲跌（{md(prev)}）",
-                             sources=p.labels({s.dataset for s in secs})), "G2_prev")
-    if twse_prev is not None and any(q.pct is not None for q in twse_prev.commons()):
-        br = mc.breadth(twse_prev)
-        p.chart(B.g4_breadth_bars(br.up, br.flat, br.down, br.limit_up, br.limit_down,
-                                  title=f"上市普通股漲跌家數（{md(prev)}）", sources=p.labels(twse_prev.datasets)),
-                "G4_prev")
+    ref = _breadth_reference(mc.breadth(twse_prev), "上市普通股") if _moves(twse_prev) else None
+    _sector_blocks(p, prev, twse_prev, taiex_prev, secs, contribs, reference=ref)
+    # 昨日籌碼: the margin's largest changes (TWSE's file of the previous session is out by 05:45, TPEx's by 23:40)
+    _t10(p, [twse_prev, tpex], prev, title=md(prev))
     g5 = _g5(p, md_, _top5_weight_symbols(twse_prev), f"權值前 5 檔一個月比較（至 {md(prev)}）")
     p.chart(g5)
-    _menu(p, "G2", bool(secs), ["day"])
-    _menu(p, "G4", twse_prev is not None, ["day"])
+    # the chart of the day: G5 only (G2 is fixed now; G4's breadth is G2's reference line)
     _menu(p, "G5", g5 is not None, ["day"], ["top5_weight"] if g5 is not None else [])
-    p.fixed = ["G6", "G7"]
+    p.fixed = _fixed(p, ("G6", "G17", "G15", "G2", "G2_otc", "G8", "G7", "G16"))
     # today's calendar (until the next session), the filings since the previous session's close
     top100 = mc.top_by_mcap([twse_prev, tpex])
     names = {q.symbol: q.name for day in (twse_prev, tpex) if day for q in day.quotes.values()}
@@ -1050,14 +1423,14 @@ def _weekly(p: Pack, md_: Any) -> None:
         p.notes.append("week_closed")
         p.miss("week_closed", f"{span(start, end)} 台股整週休市，這份週報只有下週行事曆與國際段落。")
         _calendar(p, ed.next_period[0], ed.next_period[1], next_events_title)  # type: ignore[index]
-        p.fixed = ["G6"]
+        p.fixed = _fixed(p, ["G6"])
         return
     archived = [d for d in mc.session_dates(p.db, "TWSE", end, p.cutoff, p.policy, 10) if d >= start]
     if not archived:
         p.notes.append("week_not_archived")
         p.miss("week_not_archived", f"{span(start, end)} 的上市收盤還沒有存檔，這份週報只有下週行事曆與國際段落。")
         _calendar(p, ed.next_period[0], ed.next_period[1], next_events_title)  # type: ignore[index]
-        p.fixed = ["G6"]
+        p.fixed = _fixed(p, ["G6"])
         return
     first, last = days[0], archived[-1]
     twse_last = mc.load_day(p.db, "TWSE", last, p.cutoff, p.policy)
@@ -1065,6 +1438,7 @@ def _weekly(p: Pack, md_: Any) -> None:
     before = mc.session_dates(p.db, "TWSE", first - timedelta(days=1), p.cutoff, p.policy, 1)
     base_day = mc.load_day(p.db, "TWSE", before[-1], p.cutoff, p.policy) if before else None
     # indices: the week's change
+    week_moves: dict[str, Decimal] = {}
     for name, subject, aliases, key in ((mc.TAIEX, "加權指數", TAIEX_ALIASES, "taiex"),
                                         (TAIEX_TR, "報酬指數", ["加權報酬指數"], "tr"),
                                         (TPEX_INDEX, "櫃買指數", OTC_ALIASES, "otc")):
@@ -1075,6 +1449,7 @@ def _weekly(p: Pack, md_: Any) -> None:
             continue
         pts_chg = in_week[-1].close - pre[-1].close
         pct = pts_chg / pre[-1].close
+        week_moves[key] = pct
         p.fact(f"{subject} {span(start, end)} 週漲跌點數", subject, "week_points", "week", pts_chg,
                B.points_text(pts_chg), unit="點", day=in_week[-1].day, dataset=in_week[-1].dataset, aliases=aliases)
         fid = p.fact(f"{subject} {span(start, end)} 週漲跌幅", subject, "week_pct", "week", pct, B.pct_text(pct),
@@ -1127,15 +1502,55 @@ def _weekly(p: Pack, md_: Any) -> None:
                          now_cap, B.zhao_text(now_cap), unit="兆元", day=last, dataset="rules:market_cap",
                          estimate=True)
             p.number(fid, B.number("mcap", "上市總市值", B.zhao_text(now_cap), date_label=md(last), estimate=True))
-    # sectors over the week
+    # sectors over the week: G17 (each session's estimate summed), T3 (9 indices), G2 v2, G8
     secs = mc.sectors(p.db, last, p.cutoff, twse_last, p.policy, since=start)
+    sessions = [loaded.get(d) for d in archived]
+    daily: list[list[mc.SectorContrib]] = []
+    for day in sessions:
+        if day is None or not _moves(day):
+            daily = []
+            break
+        t = mc.index_on(p.db, mc.TAIEX, day.day, p.cutoff, p.policy)
+        one = mc.sector_contributions(day, _taiex_prev(p, t, day))
+        if not one:
+            daily = []
+            break
+        daily.append(one)
+    week_contribs = mc.add_contributions(daily) if daily and len(daily) == len(days) else []
+    _contrib_facts(p, week_contribs, secs, last, "week", span(start, end))
     _sector_facts(p, secs, last, "week", period=span(start, end))
-    p.chart(B.g2_sector_bars(_sector_rows(secs), title=f"上市類股指數週漲跌（{span(start, end)}）",
-                             sources=p.labels({s.dataset for s in secs})))
+    tpts = mc.index_points(p.db, mc.TAIEX, p.cutoff, upto=end, policy=p.policy)
+    tw, tb = [x for x in tpts if start <= x.day <= end], [x for x in tpts if x.day < start]
+    official_week = tw[-1].close - tb[-1].close if tw and tb else None
+    sector_ds = sorted({s.dataset for s in secs})
+    if week_contribs and twse_last is not None:
+        _g17(p, week_contribs, secs, official_week, week=True,
+             title=f"各類股對加權指數的週點數貢獻（估算，{span(start, end)}）",
+             sources=p.labels([*twse_last.datasets, *sector_ds, "rules:contribution"]))
+    _returns_table(p, last, start)
+    week = _week_day(twse_last, base_day) if twse_last is not None and base_day is not None else None
+    inner = mc.sector_breadth(week) if week is not None and _moves(week) else None
+    week_base = before[-1] if before else last_tw_trading_day(first - timedelta(days=1))
+    _g2(p, last, secs, inner, week_moves.get("taiex"), title=f"上市類股指數週漲跌（{span(start, end)}）",
+        sources=p.labels([*sector_ds, *(twse_last.datasets if inner and twse_last else [])]),
+        first=("1w", "近 1 週", week_base), periods=[("1m", "近 1 月", mc.month_base(last))])
+    values = mc.week_values(loaded.values()) if all(x is not None for x in loaded.values()) else None
+    if week is not None and values:
+        prev_days = tw_trading_days(start - timedelta(days=7), start - timedelta(days=1))
+        prev_loaded = [mc.load_day(p.db, "TWSE", d, p.cutoff, p.policy) for d in prev_days]
+        prev = None
+        if prev_days and all(x is not None for x in prev_loaded):
+            prev_values = mc.week_values(prev_loaded)
+            prev = mc.sector_values(prev_loaded[-1].quotes.values(), prev_values)  # type: ignore[union-attr]
+        scope = mc.rule_scope(p.db, week.by_mcap(), last)
+        _g8(p, mc.sector_values(week.quotes.values(), values), prev or None, scope.in_range, week=True,
+            values=values, pcts={q.symbol: q.pct for q in week.commons()},
+            title=f"上市類股成交金額比重（{span(start, end)}）",
+            sources=p.labels([*twse_last.datasets, "rules:turnover_sum"]))  # type: ignore[union-attr]
     # stocks over the week: weights from the session before the week
     contrib: dict[str, Decimal] = {}
-    if twse_last is not None and base_day is not None:
-        week = _week_day(twse_last, base_day)
+    tpex_last = _latest_day(p, "TPEX", last)
+    if week is not None and base_day is not None and twse_last is not None:
         taiex_base = mc.index_on(p.db, mc.TAIEX, base_day.day, p.cutoff, p.policy)
         contrib = mc.contributions(week, taiex_base.close if taiex_base else None)
         lists = mc.rule_lists(p.db, week, limits=False)
@@ -1149,36 +1564,25 @@ def _weekly(p: Pack, md_: Any) -> None:
         rows3 = [{"label": q.name, "symbol": q.symbol, "points": contrib[q.symbol]} for q in lists.top10
                  if q.symbol in contrib]
         rest = sum(contrib.values(), Decimal(0)) - sum((r["points"] for r in rows3), Decimal(0)) if contrib else None
-        official_week = None
-        tpts = mc.index_points(p.db, mc.TAIEX, p.cutoff, upto=end, policy=p.policy)
-        tw, tb = [x for x in tpts if start <= x.day <= end], [x for x in tpts if x.day < start]
-        if tw and tb:
-            official_week = tw[-1].close - tb[-1].close
         p.chart(B.g3_contribution_bars(rows3, rest, official_week,
                                        title=f"市值前 10 大對加權指數的週點數貢獻（估算，{span(start, end)}）",
                                        sources=p.labels([*twse_last.datasets, "rules:contribution"])))
-        _week_tables(p, lists, contrib, start, end, p.labels(twse_last.datasets))
-        tpex_last = _latest_day(p, "TPEX", last)
+        taiex_last = mc.index_on(p.db, mc.TAIEX, last, p.cutoff, p.policy)
+        _week_tables(p, lists, week, values, base_day.day, taiex_last, start, end, p.labels(twse_last.datasets))
         top100 = mc.top_by_mcap([twse_last, tpex_last])
         if ed.next_period:
             _event_stocks(p, [twse_last, tpex_last], ed.next_period[0], ed.next_period[1], set(top100))
         p.rules.append(RULE_STOCKS)
         g5 = _g5(p, md_, _top5_weight_symbols(twse_last), f"權值前 5 檔一個月比較（至 {md(last)}）")
         p.chart(g5)
-        _menu(p, "G5", g5 is not None, ["week"], ["gainers", "losers"] if g5 is not None else [])
+        # G5 is the week's chart of the day now (three lists), no longer fixed; G4's breadth is gone (v2)
+        _menu(p, "G5", g5 is not None, ["week"], ["top5_weight", "gainers", "losers"] if g5 is not None else [])
     else:
         top100 = []
-    br_week = None
-    if twse_last is not None and base_day is not None:
-        br_week = mc.breadth(_week_day(twse_last, base_day))
-        p.chart(B.g4_breadth_bars(br_week.up, br_week.flat, br_week.down, 0, 0,
-                                  title=f"上市普通股週漲跌家數（{span(start, end)}）",
-                                  sources=p.labels(twse_last.datasets)))
-    _menu(p, "G4", br_week is not None, ["week"])
     # G1: about a month of TAIEX closes
     pts, ds = _taiex_series(p, end, since=mc.month_back(end))
     p.chart(B.g1_index_line(pts, sources=p.labels(ds), title=f"加權指數收盤（至 {md(end)}）"))
-    # chips: foreign futures net OI over the week, P/C, TPEx institutional sums of the week
+    # chips: foreign futures net OI over the week, T9 (the three investors' week, P/C, TPEx institutions), G16, T10
     oi = mc.futures_oi_series(p.db, end, p.cutoff)
     wk, pre = [x for x in oi if start <= x[0] <= end], [x for x in oi if x[0] < start]
     if wk:
@@ -1199,21 +1603,32 @@ def _weekly(p: Pack, md_: Any) -> None:
                aliases=["P/C", "賣買權"])
     otc_sum = {"foreign": Decimal(0), "trust": Decimal(0), "dealer": Decimal(0), "total": Decimal(0)}
     otc_days = 0
+    per_week: list[mc.FlowAmount] = []
+    industries: dict[str, str | None] = {}
     for d in days:
         tp = mc.load_day(p.db, "TPEX", d, p.cutoff, p.policy)
         inst = mc.otc_institutional(p.db, tp, p.cutoff) if tp else None
-        if inst:
+        if inst and tp is not None:
             otc_days += 1
             for k in otc_sum:
                 otc_sum[k] += inst[0][k]
-    if otc_days == len(days):
-        v = otc_sum["total"]
+            per_week += inst[1]
+            industries.update({q.symbol: q.industry_code for q in tp.quotes.values()})
+    otc_week = otc_sum["total"] if otc_days == len(days) else None
+    if otc_week is not None:
+        v = otc_week
+        p.datasets.add("tpex-openapi/institutional")
         p.fact(f"上櫃三大法人 {span(start, end)} 買賣超估算金額（股數 × 收盤價）", "上櫃三大法人", "otc_inst_total",
                "week", v,
                f"{'買超' if v >= 0 else '賣超'} {B.yi_text(abs(v), 1)}", unit="億元", precision=1, day=last,
                dataset="tpex-openapi/institutional", estimate=True, aliases=["三大法人", "法人"])
-    # T3 multi-period returns
-    _returns_table(p, last, start, secs)
+    _t9(p, start, end, pc if pc is not None and pc.oi_ratio is not None and start <= pc.trade_date <= end else None,
+        otc_week)
+    if otc_week is not None:
+        _g16(p, mc.otc_flows_by_industry(per_week, industries), otc_week,
+             title=f"上櫃三大法人週買賣超，依產業別（估算，{span(start, end)}）",
+             sources=[*p.labels(["tpex-openapi/institutional", "tpex-openapi/price"]), label("rules")])
+    _t10(p, [twse_last, tpex_last], last, since=start, title=span(start, end))
     # calendar: the review week and the next week
     names = {q.symbol: q.name for q in (twse_last.quotes.values() if twse_last else [])}
     review = cal.events_between(p.db, start, end, cutoff=p.cutoff, policy=p.policy, top100=top100, names=names,
@@ -1229,53 +1644,112 @@ def _weekly(p: Pack, md_: Any) -> None:
     if ed.next_period:
         _calendar(p, ed.next_period[0], ed.next_period[1], next_events_title, top100=top100, names=names,
                   include_filings=False)
-    _menu(p, "G2", bool(secs), ["week"])
-    p.fixed = ["G1", "G2", "G3", "G5", "G6", "G7"]
+    p.fixed = _fixed(p, ("G1", "G17", "G2", "G8", "G3", "G16", "G7", "G6"))
 
 
-def _week_tables(p: Pack, lists: mc.Lists, contrib: dict[str, Decimal], start: date, end: date,
-                 srcs: list[str]) -> None:
+def _t9(p: Pack, start: date, end: date, pc: Any, otc_week: Decimal | None) -> None:
+    """T9: the week's chips in one table: the three investors' TAIEX futures net open interest at the week's end and
+    its change over the week, P/C at the week's end, TPEx institutions' week (an estimate)."""
+    rows: list[dict[str, Any]] = []
+    ds: list[str] = []
+    if p.ok("taifex-openapi/institutional_futures"):
+        for investor in mc.INVESTORS:
+            series = mc.futures_oi_series(p.db, end, p.cutoff, investor, limit=15)
+            wk = [x for x in series if start <= x[0] <= end]
+            pre = [x for x in series if x[0] < start]
+            if not wk:
+                continue
+            net = wk[-1][1]
+            ch = net - pre[-1][1] if pre else None
+            rows.append({"cells": {"item": B.cell(f"{investor}台指期淨未平倉", sub=md(wk[-1][0])),
+                                   "value": B.cell(f"{'淨多' if net > 0 else '淨空'} {abs(net):,} 口"),
+                                   "change": B.cell(f"{ch:+,} 口" if ch is not None else "—")}})
+            ds.append("taifex-openapi/institutional_futures")
+    if pc is not None:
+        rows.append({"cells": {"item": B.cell("台指選擇權 P/C 未平倉比", sub=md(pc.trade_date)),
+                               "value": B.cell(f"{pc.oi_ratio * 100:.2f}%"), "change": B.cell("—")}})
+        ds.append("taifex-openapi/put_call_ratio")
+    if otc_week is not None:
+        rows.append({"cells": {"item": B.cell("上櫃三大法人（估算金額）", sub="全週合計"),
+                               "value": B.cell(f"{'買超' if otc_week >= 0 else '賣超'} {B.yi_text(abs(otc_week), 1)}"),
+                               "change": B.cell("—")}})
+        ds.append("tpex-openapi/institutional")
+    if not rows:
+        return
+    p.datasets.update(ds)
+    p.table(B.table("T9", f"籌碼一週（{span(start, end)}）",
+                    [("item", "項目", "left", False), ("value", "本週收", "right", True),
+                     ("change", "週變化", "right", True)], rows,
+                    rule="期貨的週變化是本週最後一個交易日對上週最後一個交易日；上櫃法人是每天股數 × 收盤價的加總",
+                    sources=p.labels(ds)))
+
+
+def _week_tables(p: Pack, lists: mc.Lists, week: mc.Day, values: dict[str, int] | None, base: date,
+                 taiex: mc.IndexPoint | None, start: date, end: date, srcs: list[str]) -> None:
+    """T2_top10 v2 (the week and about a month), then three tabs: the week's gainers, losers and traded value."""
     title = span(start, end)
-    p.table(B.table("T2_top10", f"市值前 10（{title}）",
-                    [*B.STOCK_COLUMNS, ("contrib", "週點數貢獻（估算）", "right", True)],
-                    [B.stock_row(q, {"contrib": B.cell(B.signed_text(contrib[q.symbol], 0, " 點")
-                                                       if q.symbol in contrib else "—", B.tone(contrib.get(q.symbol)))})
-                     for q in lists.top10],
-                    rule="上市普通股，依週末收盤市值；漲跌幅是整週（上週五收盤到本週最後一個交易日）", sources=srcs))
+    _t2_top10_v2(p, lists.top10, week.day, taiex, title=f"市值前 10 的大方向（{title}）", sources=srcs,
+                 week_base=base)
     p.table(B.table("T2_gainers", f"週漲幅前 5（{title}）", B.STOCK_COLUMNS, [B.stock_row(q) for q in lists.gainers],
-                    rule=lists.scope_rule, empty_text="範圍內沒有上漲的股票。", sources=srcs))
+                    rule=lists.scope_rule, empty_text="範圍內沒有上漲的股票。", sources=srcs, tab_group="movers",
+                    tab_label="週漲幅"))
     p.table(B.table("T2_losers", f"週跌幅前 5（{title}）", B.STOCK_COLUMNS, [B.stock_row(q) for q in lists.losers],
-                    rule=lists.scope_rule, empty_text="範圍內沒有下跌的股票。", sources=srcs))
+                    rule=lists.scope_rule, empty_text="範圍內沒有下跌的股票。", sources=srcs, tab_group="movers",
+                    tab_label="週跌幅"))
+    if not values:
+        return
+    scope = mc.rule_scope(p.db, week.by_mcap(), week.day)
+    order = {q.symbol: i for i, q in enumerate(scope.ranked)}
+    top = sorted((q for q in scope.in_range if values.get(q.symbol)),
+                 key=lambda q: (-values[q.symbol], order.get(q.symbol, 10**6)))[:mc.TOP_N]
+    p.table(B.table("T2_value", f"週成交值前 10（{title}）", [*B.STOCK_COLUMNS, ("value", "週成交金額", "right", True)],
+                    [B.stock_row(q, {"value": B.cell(B.yi_text(values[q.symbol], 1))}) for q in top],
+                    rule=lists.scope_rule + "；漲跌幅是整週", sources=srcs, tab_group="movers", tab_label="週成交值"))
 
 
-def _returns_table(p: Pack, last: date, week_start: date, secs: list[mc.Sector]) -> None:
-    """T3: 1 day, 1 week, 1 month and since the archive began, for the indices and the 32 sectors."""
-    month_from = mc.month_back(last) + timedelta(days=1)
-    names = [(mc.TAIEX, "加權指數"), (TAIEX_TR, "報酬指數"), (TPEX_INDEX, "櫃買指數")] + \
-        [(f"{s.name}類指數", s.name) for s in secs]
-    rows, short = [], False
-    since_label = None
-    for name, show in names:
+# T3 v2: the 9 indices of 「大方向」 (the 32 sectors are G2's period chips now)
+WEEK_INDICES: tuple[tuple[str, str], ...] = (
+    (mc.TAIEX, "加權指數"), (TAIEX_TR, "報酬指數"), (TPEX_INDEX, "櫃買指數"), ("臺灣50指數", "臺灣50"),
+    ("臺灣中型100指數", "中型100"), ("小型股300指數", "小型股300"), ("電子工業類指數", "電子工業"),
+    ("未含電子指數", "未含電子"), ("金融保險類指數", "金融保險"),
+)
+
+
+T3_RULE = "週漲跌是本週最後一個交易日對上週最後一個交易日；底色只分兩階（1 週：2%、5%；近 1 月：4%、10%）"
+
+
+def _returns_table(p: Pack, last: date, week_start: date) -> None:
+    """T3: the week and about a month (「11/12 起」 until the archive reaches a month back) of the 9 indices, with
+    heat-tinted cells."""
+    month_base = mc.month_base(last)
+    rows: list[dict[str, Any]] = []
+    month_short = False
+    first_day: date | None = None
+    series = {}
+    for name, show in WEEK_INDICES:
         pts = mc.index_points(p.db, name, p.cutoff, upto=last, policy=p.policy)
-        if not pts or pts[-1].day != last:
-            continue
-        one = pts[-1].pct
-        wk = mc.period_return(pts, last, week_start)
-        mo = mc.period_return(pts, last, month_from)
-        since, first = mc.since_start_return(pts, last)
-        since_label = since_label or (f"{md(first)} 起" if first else None)
-        short |= mo is None
-
-        def c(v: Decimal | None) -> dict[str, Any]:
-            return B.cell(B.pct_text(v), B.tone(v)) if v is not None else B.cell("—")
-
-        rows.append({"cells": {"name": B.cell(show), "d1": c(one), "w1": c(wk), "m1": c(mo), "since": c(since)}})
-    p.table(B.table("T3", f"多期間報酬（至 {md(last)}）",
-                    [("name", "指數／類股", "left", False), ("d1", "1 日", "right", True),
-                     ("w1", "1 週", "right", True), ("m1", "1 個月", "right", True),
-                     ("since", since_label or "存檔起", "right", True)], rows,
-                    note="1 個月的比較約 12/9 以後才有" if short else None,
-                    empty_text="指數資料還不夠。", sources=p.labels(["twse-openapi/index", "tpex-openapi/index"])))
+        if pts and pts[-1].day == last:
+            series[name] = (show, pts)
+            month_short |= mc.index_move(pts, last, month_base) is None
+    datasets = sorted({pts[-1].dataset for _show, pts in series.values()})
+    if month_short:  # from the start of the TAIEX's MI_INDEX archive (the file every listed index comes in)
+        anchor = series.get(mc.TAIEX) or next(iter(series.values()), None)
+        first_day = anchor[1][0].day if anchor else None
+    week_base = last_tw_trading_day(week_start - timedelta(days=1))
+    for _name, (show, pts) in series.items():
+        wk = mc.index_move(pts, last, week_base)
+        if not month_short:
+            mo = mc.index_move(pts, last, month_base)
+        else:
+            mo = mc.index_move(pts, last, first_day) if first_day is not None and first_day < last else None
+        rows.append({"cells": {"name": B.cell(show), "w1": B.move_cell(wk, "1w"), "m1": B.move_cell(mo, "1m")}})
+    m_label = "近 1 月" if not month_short else (f"{md(first_day)} 起" if first_day else "近 1 月")
+    p.table(B.table("T3", f"主要指數的大方向（至 {md(last)}）",
+                    [("name", "指數", "left", False), ("w1", "1 週", "right", True), ("m1", m_label, "right", True)],
+                    rows, rule=T3_RULE,
+                    note=f"近 1 月 {md(mc.archive_ready(first_day)[1])} 起才有；在那之前是存檔起的漲跌"
+                    if month_short and first_day else None,
+                    empty_text="指數資料還不夠。", sources=p.labels(datasets or ["twse-openapi/index"])))
     p.rules.append("多期間報酬表的空格表示存檔還不夠長，不能自己推算。")
 
 

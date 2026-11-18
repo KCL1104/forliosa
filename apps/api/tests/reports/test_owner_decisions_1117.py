@@ -434,7 +434,10 @@ def test_the_premarket_data_headline_never_names_an_empty_calendar(market_db, us
     empty = dict(pk, calendar=[])
     assert assemble.data_title("premarket", empty) == "盤前重點 11/17（二）：美股 11/16 收盤"
     no_us = dict(empty, dates={**pk["dates"], "us_sessions": []})
-    assert assemble.data_title("premarket", no_us) == "盤前重點 11/17（二）：昨晚才到的資料"  # the dry run's case
+    # the dry run's case: v2's 「昨日台股全貌」 is there whenever the previous session is
+    assert assemble.data_title("premarket", no_us) == "盤前重點 11/17（二）：昨日台股全貌"
+    evening_only = dict(no_us, facts=[f for f in pk["facts"] if f.get("group") != "prev_session"])
+    assert assemble.data_title("premarket", evening_only) == "盤前重點 11/17（二）：昨日籌碼"
     nothing = dict(no_us, facts=[f for f in pk["facts"] if f.get("group") != "evening"])
     assert "行事曆" not in assemble.data_title("premarket", nothing)
     calendar_only = dict(no_us, calendar=pk["calendar"])

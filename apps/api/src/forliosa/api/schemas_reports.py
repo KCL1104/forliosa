@@ -49,6 +49,8 @@ class Cell(_Out):
     text: str
     tone: Literal["rise", "fall"] | None = None
     sub: str | None = None
+    heat: Literal["rise1", "rise2", "fall1", "fall2"] | None = Field(
+        default=None, description="熱度格（v2）：伺服器依漲跌大小決定的底色階，前端只上色")
 
 
 class TableColumn(_Out):
@@ -73,6 +75,8 @@ class TableSpec(_Out):
     empty_text: str | None = None
     note: str | None = None
     source_labels: list[str] = Field(default_factory=list)
+    tab_group: str | None = Field(default=None, description="同一段裡 tab_group 相同的表，窄螢幕一次只顯示一張（v2）")
+    tab_label: str | None = Field(default=None, description="分頁上的短名稱（「漲幅」）；有 tab_group 時才有")
 
 
 class TextBlock(_Out):

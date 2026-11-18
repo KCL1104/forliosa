@@ -68,8 +68,7 @@ def close_output(pk: dict[str, Any]) -> dict[str, Any]:
         "chips": [p(s("〔中央社〕報導，外資賣超 1,234.5 億元。", "X001"))],
         "tonight": [{"event": "鴻海法說會", "time_ref": cid(pk, "鴻海"), "sectors": ["其他電子"],
                      "para": p(s("已排定：鴻海（2317）11/17（二）法說會。", cid(pk, "鴻海")))}],
-        "chart_of_day": {"code": "G4", "period": "day", "set": "none",
-                         "caption": p(s("上市普通股上漲 6 家、下跌 6 家。", f("adv_up"), f("adv_down")))},
+        "chart_of_day": dict(NO_CHART),
     }
 
 

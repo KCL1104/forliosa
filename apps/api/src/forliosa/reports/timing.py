@@ -55,6 +55,11 @@ _RULES: dict[str, tuple[str, time | None]] = {
     "taifex-openapi/large_traders_futures": ("same", time(21, 45)),
     "taifex-openapi/large_traders_options": ("same", time(21, 45)),
     "cbc-opendata/fx": ("same", time(17, 0)),
+    # not measured yet (the reports do not read them): the next morning, as an unknown dataset, without the warning
+    "tpex-openapi/valuation": ("next", MORNING_BATCH),
+    "tpex-openapi/foreign_holding": ("next", MORNING_BATCH),
+    "taifex-openapi/fx": ("next", MORNING_BATCH),
+    "twse-openapi/company": ("next", MORNING_BATCH),
     "databento-equs/price": ("us", None),
 }
 # An OpenAPI row of D stands for the same-day download's row of D (see the module docstring).

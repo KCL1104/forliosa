@@ -1436,10 +1436,30 @@
 
 - `Block` 的 `type`：`text`（`paragraphs`）、`items`（`[{title, meta, paragraphs}]`，例如「今天市場在看什麼」）、`chart`（`AiChart`，多了 `line`／`columns`／`bars` 三種）、
   `table`（`TableSpec`）、`note`（空狀態或伺服器說明）。每一句只有 `text` 與 `cites`（註腳號碼）；畫面上不會出現資料包編號（F001、X003）、報導摘錄。
-- 段落順序：盤前 `overnight` 隔夜要聞、`evening` 昨晚才到的資料、`watch` 今天市場在看什麼、`charts` 圖；盤後 `what_happened`、`sectors`、`stocks`、`chips`、`tonight`、
-  `chart_of_day`、`otc`（23:45 起）；週報 `summary`、`market_week`、`returns`、`sectors_week`、`stocks_week`、`chips_week`、`global_week`、`last_week_review`、`themes`、`risks`、
-  `chart_of_day`。下週行事曆在最外層的 `calendar`。
+- 段落順序（v2，2026-11-18）：盤前 `overnight` 隔夜要聞、`watch` 今天市場在看什麼、`yesterday` 昨日台股全貌（資料段）、`chips` 昨日籌碼（晚間公布，手機收合）、
+  `chart_of_day`；盤後 `what_happened`、`sectors`、`stocks`、`chips`、`tonight`、`chart_of_day`、`otc`（23:45 起）；週報 `summary`、`market_week`、`sectors_week`
+  （類股一週與大方向，原本的 `returns` 併進來）、`stocks_week`、`chips_week`、`global_week`、`last_week_review`、`themes`、`risks`、`chart_of_day`。下週行事曆在最外層的 `calendar`。
+  盤前的 `evening`（T_evening 表）與只有一張圖的 `charts` 段拿掉了。有 AI 文字的段，AI 文字一律在最前面、圖表在後（盤後與週報一樣）。
 - 某一段的 AI 文字沒通過檢查時，一般使用者只看到那一段的圖與表（沒有就整段不出現）；`origin` 變 `data`。
+
+#### v2 的圖與表（2026-11-18，第一階段；後端 `apps/api/CONTRACT_NOTES.md`「2026-11-18 市場報告 v2 第一階段」）
+
+只用已存檔的官方資料（Yahoo 回補只畫 G5 的線）。下面的欄位沒給就不出現，舊的圖表不變。
+
+- **固定圖**（`pack.fixed_charts` 只列頁面上真的有的）：盤前 G6、G17、G15、G2、G2_otc、G8、G7、G16；盤後 G1、G17、G15、G2、G8、G3（23:45 起籌碼段多 G16、上櫃段多 G2_otc，不算固定圖）；
+  週報 G1、G17、G2、G8、G3、G16、G7、G6。今日圖選單只剩 G5（G4 漲跌家數、盤前選單的 G2 拿掉）。
+- **新圖**：G17 各類股點數貢獻（估算）、G15 規模與風格（`bars[].group` 分組小標）、G2 v2（`bench`、`fold`、`views`）、G8 類股成交金額比重（墨色，`aside_label`＋`bars[].aside`
+  ＝較前一日百分點）、G2_otc 上櫃類股（估算，取代 T6 表）、G16 上櫃三大法人依產業別（估算，`unit: "yi"`，墨色／鉛筆灰）。
+- **`AiChart` 多的欄位**：
+  - `bench: {value, label} | null`：橫條的基準虛線（「加權 ▼2.31%」），值和 `bars` 同一個尺度。
+  - `fold: {head, tail, keep} | null`：主欄 < 768px（和兩欄排同一個門檻）先列前 `head`、`keep`、後 `tail` 條。
+  - `views: [{key: "1d"|"1w"|"1m"|"since", label, title, bars, bench, notes}] | null`：期間切換，第一組就是圖本身；只有一個期間時不給。
+    `title` 是那一期的標題（「上市類股指數漲跌（11/10 收盤至 11/17）」），頁面切換時換掉圖的標題；沒有時沿用圖的標題。
+  - `aside_label: string | null`：右邊第二個數字欄的欄名；`bars[]` 多 `aside`（字串）、`group`（分組小標）。
+- **表**：`cell.heat`＝`rise1`｜`rise2`｜`fall1`｜`fall2`（伺服器決定；1 日 1%／3%、1 週 2%／5%、1 月 4%／10%，有熱度格的表 `rule` 寫出各欄的兩階）；
+  `tab_group`＋`tab_label`（`movers`、`otc_movers`、`margin`：窄的主欄一次一張）。T2_top10 v2：加權指數一列＋市值前 10，1 日｜近 1 週｜近 1 月（週報：週漲跌｜近 1 月），
+  每天收盤 ÷ 參考價連乘、只用官方存檔；存檔不到基準日或中間缺任何一個交易日的收盤是「—」（`note` 寫缺哪一天），不會是 0。新表 T10_up／T10_down（融資增減前 5）、
+  T9（週報籌碼一週）；T3 改成 9 個指數 × 1 週｜近 1 月。拿掉 T_evening、T6、T2_top10 的點數貢獻欄、T3 的 32 類。期貨口數與上櫃法人金額是墨色（`tone` 不給）。
 
 ### 管理員（`ADMIN_EMAILS`；其他人 404，在驗證 body 之前；授權查看時 403）
 

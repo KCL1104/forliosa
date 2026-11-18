@@ -6,13 +6,14 @@ soft ones are counted (and :func:`tidy` trims what can be trimmed: extra items, 
 
 The checks, in short: refs exist (F / C / N / W in the pack, X among the verified reports); every number matches a
 fact the sentence cites (display or value, rounded to the text's decimals; 億 / 兆 / 萬 scaled) **and** the fact's
-subject is named next to it (``number_subject_mismatch``: 外資 and 自營商 swapped); the direction (▲ / 漲 / 買超 …)
-agrees with a signed fact; dates come from the pack or the refs; a weekday matches its date and never stands alone;
-no forbidden or time word; only listed stocks and allowed sectors (半導體 with its concentration in the same
-paragraph); no fund flow and price move of a stock in one sentence; causes need a report (X / W); forward-looking
-sentences take one of the three shapes; position numbers are never a reason; the premarket's headline and its
-evening notes do not repeat the previous session; no index points; the chart of the day is on the menu; every watch /
-tonight item is an event of the calendar or a report (``item_not_event``); no sentence about what the edition lacks
+subject is named next to it (``number_subject_mismatch``: 外資 and 自營商 swapped); a point contribution (Forliosa's
+estimate) is marked as one, 「約」 before it or 「估算」 in the sentence (``estimate_unmarked``); the direction (▲ /
+漲 / 買超 …) agrees with a signed fact; dates come from the pack or the refs; a weekday matches its date and never
+stands alone; no forbidden or time word; only listed stocks and allowed sectors (半導體 with its concentration in the
+same paragraph); no fund flow and price move of a stock in one sentence; causes need a report (X / W); forward-looking
+sentences take one of the three shapes; position numbers are never a reason; the premarket's headline and its evening
+notes do not repeat the previous session; no index points; the chart of the day is on the menu; every watch / tonight
+item is an event of the calendar or a report (``item_not_event``); no sentence about what the edition lacks
 (``internal_gap``: the page shows missing data itself); no US local time left without its Taipei time; no private-life
 detail, whoever reported it (``private_life``); the chips hold institutional investors and fund flows only
 (``chips_off_topic``); the weekly uses a calendar row or a report once per section of highlights, this week, themes
@@ -151,8 +152,11 @@ WEEKDAYS = "一二三四五六日"
 SIGNED_METRICS = frozenset({
     "index_change", "index_pct", "tr_pct", "otc_change", "otc_pct", "sector_pct", "stock_pct", "stock_contrib",
     "us_pct", "futures_oi_change", "week_pct", "week_points", "mcap_change_est", "reference_pct", "otc_inst_total",
-    "otc_inst_foreign", "otc_inst_trust", "otc_inst_dealer",
+    "otc_inst_foreign", "otc_inst_trust", "otc_inst_dealer", "sector_contrib_est",
 })
+# Point contributions are Forliosa's estimates, never official numbers: a sentence citing one writes 「約」 before it or
+# 「估算」 somewhere in it (the prompts ask for 「約 −494 點（估算）」)
+ESTIMATE_MARKED_METRICS = frozenset({"sector_contrib_est", "stock_contrib"})
 # Sections whose every sentence must take one of the three shapes
 PATTERN_ONLY = ("watch", "tonight", "themes", "risks")
 STOCK_KEYS = ("stocks", "stocks_week")  # one item per stock (its first sentence names it)
@@ -543,6 +547,9 @@ def _check_numbers(c: Ctx, s: Sentence, text: str, out: list[Problem]) -> None:
                       and isinstance(f.get("value"), (int, float)) and f["value"] != 0]
             if n.sign and signed and all((1 if f["value"] > 0 else -1) != n.sign for f in signed):
                 out.append(Problem(s.path, "direction_mismatch", f"{_num_text(s.text, n)}"))
+            if not matched_x and not n.approx and "估算" not in s.text and all(
+                    f.get("estimate") and f.get("metric") in ESTIMATE_MARKED_METRICS for f in matched_f):
+                out.append(Problem(s.path, "estimate_unmarked", _num_text(s.text, n)))
         elif matched_x:
             # a report's own statement decides whose number it is (an article's passage often holds several)
             by_claim = [r for r in matched_x if r in c.web and any(

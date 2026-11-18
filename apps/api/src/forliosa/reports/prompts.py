@@ -14,7 +14,7 @@ import copy
 import json
 from typing import Any
 
-PROMPT_VERSION = "mr-2026-11-17e"
+PROMPT_VERSION = "mr-2026-11-18a"
 
 # When no stock item gives a reason, the page says so once for the whole section (owner 2026-11-17), not in every item
 STOCKS_NOT_FOUND = "個股的漲跌原因未找到報導。"
@@ -217,8 +217,12 @@ SPEC: dict[str, dict[str, Any]] = {
 - highlights：3 點，每點一段（1–2 句）。不能用前一個交易日上市的數字（group=prev_session 的 F）。
 - overnight：隔夜要聞 3–5 段，每段 1–3 句：美股 ETF 與台積電 ADR（F，寫美股日期）、半導體、總經與 Fed、和台股相關的海\
 外公司（X）。
-- evening_notes：前一晚才到的資料 0–3 段（上櫃漲跌家數、上櫃法人估算金額、外資台指期未平倉、P/C 比、匯率；F）。只寫數\
-字與比較，不寫方向。不能用前一個交易日的收盤數字（group=prev_session 的 F，例如櫃買指數、加權指數）。
+- evening_notes：「昨日籌碼（晚間公布）」0–3 段，只寫前一晚才到的資料（上櫃漲跌家數、上櫃法人估算金額、期貨三大法人台\
+指期未平倉、P/C 比、匯率；F）。只寫數字與比較，不寫方向。不能用前一個交易日的收盤數字（group=prev_session 的 F，例如櫃\
+買指數、加權指數、類股）。
+- 「昨日台股全貌」是伺服器的資料段（類股點數貢獻、規模與風格、上市與上櫃類股、成交比重的圖），不屬於任何 key：不要重述\
+前一個交易日上市的漲跌。watch 用句型 3 說一件事和某類股的關係時，可以引用那一類的點數貢獻（metric=sector_contrib_est，\
+group=prev_session），寫成「約 −494 點（估算）」。
 - watch：這一天市場在看什麼，2–4 項。每一項都要是行事曆（C）或報導（X）裡的事件，time_ref 或 refs 要有那個 C 或 X\
 （開盤、收盤、前一個交易日的漲跌都不是事件）。每項：event（事件名稱，只寫事件本身，例如「鴻海法說會」；和標題一樣會\
 檢查）、time_ref（C 編號，沒有就空字串）、sectors（相關類股，必須\
@@ -232,7 +236,8 @@ SPEC: dict[str, dict[str, Any]] = {
 - highlights：3 點，每點一段（1–2 句）。
 - what_happened：今天發生什麼，2–4 段、合計 300–500 字。原因一定要有 X 或 W；沒有報導就不寫原因。可以寫背離：漲跌家數\
 和指數方向、0050 和加權指數的差距。
-- sectors：類股 1–2 段，只談 rules 指定的類股。
+- sectors：類股 1–2 段，只談 rules 指定的類股（漲跌幅前 3、後 3，點數貢獻最大與最小的 3 類，半導體）。點數貢獻引用 \
+metric=sector_contrib_est 的 F，寫成「約 −494 點（估算）」；圖上其他類股的數字不要逐一重抄。
 - stocks：權值股與個股，最多 10 項，每項一檔：symbol（stocks 名單的 symbol）、para 的第一句以「名稱（代號）」開頭。寫\
 漲跌幅、（權值股）點數貢獻「約 ▼1,070 點（估算）」；有 X 或 W 就加一句原因，沒有就寫「未找到報導」。一檔都沒有 X 或 W \
 時，每一項都不寫「未找到報導」，伺服器會在這一段最後寫一句「個股的漲跌原因未找到報導。」。
@@ -249,7 +254,9 @@ SPEC: dict[str, dict[str, Any]] = {
 - summary：一段總結（1–3 句）。
 - highlights：3–5 點；同一個 C 或 X 只用在一點。
 - market_week：上週大盤 2–3 段：加權與櫃買的週漲跌、全週成交金額、報導寫的原因（X）。
-- sectors_week：類股一週 1–2 段，只談 rules 指定的類股。
+- sectors_week：「類股一週與大方向」1–2 段，只談 rules 指定的類股（週漲跌幅前 3、後 3，週點數貢獻最大與最小的 3 類，半\
+導體）。週點數貢獻引用 metric=sector_contrib_est 的 F，寫成「約 −494 點（估算）」。主要指數的多期間表在同一段，表上的數\
+字不要重抄。
 - stocks_week：權值股與個股，每項一檔（同盤後 stocks 的寫法），最多 10 項。
 - chips_week：籌碼 1–2 段，只寫法人與資金流向：上市法人只引用報導、上櫃法人估算金額、外資台指期淨未平倉的週變化；\
 不寫匯率、P/C 比、結算日。
@@ -358,6 +365,19 @@ def pack_json(pack: dict[str, Any]) -> str:
     return json.dumps({k: pack[k] for k in PACK_FOR_WRITER if k in pack}, ensure_ascii=False, separators=(",", ":"))
 
 
+# Short names of the server's charts (the writer only needs to know what the page shows next to its text)
+CHART_NAMES = {
+    "G1": "加權指數收盤", "G2": "上市類股漲跌（加權指數虛線、期間切換）", "G2_otc": "上櫃類股漲跌（估算）",
+    "G3": "市值前 10 點數貢獻（估算）", "G5": "權值股一個月比較", "G6": "美股 ETF 與台積電 ADR",
+    "G7": "外資台指期淨未平倉", "G8": "類股成交金額比重", "G15": "規模與風格指數",
+    "G16": "上櫃三大法人依產業別（估算）", "G17": "各類股點數貢獻（估算）",
+}
+
+
+def chart_list(codes: list[str]) -> str:
+    return "、".join(f"{c} {CHART_NAMES[c]}" if c in CHART_NAMES else c for c in codes)
+
+
 def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
     spec = SPEC[kind]
     menu = [m for m in pack.get("charts_menu") or [] if m.get("available")]
@@ -372,8 +392,8 @@ def kind_instructions(kind: str, pack: dict[str, Any]) -> str:
         f"# 長度：{spec['length']}；重點 {spec['highlights']}。",
         "",
         "# 今日圖",
-        f"伺服器已經放好固定圖（{'、'.join(pack.get('fixed_charts') or [])}），你不用處理。"
-        "可以從下面可用的選單另外挑 1 張；不需要就填 none：",
+        f"伺服器已經放好固定圖（{chart_list(list(pack.get('fixed_charts') or []))}），你不用處理；圖上的數字由伺服器"
+        "畫，段落不要逐一重抄，要寫數字就引用 F。可以從下面可用的選單另外挑 1 張；不需要就填 none：",
         json.dumps(menu, ensure_ascii=False) if menu else "（這份沒有可選的圖：code 填 none）",
         "",
         "# 數字欄已經列出（段落不要整串重抄）",
@@ -427,6 +447,8 @@ REVISE_HINTS = {
     "risk_not_ahead": "可能讓關注點改變的事只放還沒發生或還沒有結果的事（已排定的會議、數據公布、審議中的政策）；已經"
                       "公布的數字、已經發生的事拿掉，需要的話寫在國際或上週大盤。",
     "chips_off_topic": "籌碼只寫法人與資金流向：匯率移到國際（週報），P/C 比與結算日拿掉。",
+    "estimate_unmarked": "點數貢獻是 Forliosa 的估算，不是官方數字：寫成「約 −494 點（估算）」（數字前面加「約」，或"
+                         "同一句寫「估算」）。",
     "compliance:private_life": "只寫和公司經營有關的事實（例如「辭去執行長」）；刪掉感情、婚姻、外遇、健康、家庭這類"
                                "私生活細節，就算報導有寫也不寫。",
 }

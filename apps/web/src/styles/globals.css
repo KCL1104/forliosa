@@ -546,6 +546,23 @@
     white-space: nowrap;
   }
 
+  /*
+   * 市場報告的熱度格（v2 2026-11-18；`ReportTable` 的 `cell.heat`，階數由伺服器決定）：漲跌色 6%（1 階）、12%（2 階）的底。
+   * 淺色主題 12% 底上的漲跌字是 4.50:1／4.58:1，剛好過 AA，不要再深；深色主題用同一個比例。跟著紅漲綠跌／綠漲紅跌的設定。
+   */
+  .heat-rise-1 {
+    background-color: color-mix(in srgb, var(--rise) 6%, transparent);
+  }
+  .heat-rise-2 {
+    background-color: color-mix(in srgb, var(--rise) 12%, transparent);
+  }
+  .heat-fall-1 {
+    background-color: color-mix(in srgb, var(--fall) 6%, transparent);
+  }
+  .heat-fall-2 {
+    background-color: color-mix(in srgb, var(--fall) 12%, transparent);
+  }
+
   /* 格線列：整列可點、hover 是淡墨底 */
   .ruled-row {
     border-bottom: 1px solid var(--rule);
