@@ -106,9 +106,9 @@ def test_each_toggle_combination(client, other_client, sharer, bits):
     assert (uid in entries) == on["returns"]
     if on["returns"]:
         assert set(entries[uid]) == {"user_id", "display_name", "avatar_url", "return_pct", "total_return_pct",
-                                     "rank", "is_me", "excludes_unpriced"}
-        # what a member's period returns leave out is only said on their own row
-        assert entries[uid]["excludes_unpriced"] is False
+                                     "rank", "is_me", "excludes_unpriced", "own_start_date"}
+        # what a member's period returns leave out, or where they begin (2026-11-18), is only said on their own row
+        assert entries[uid]["excludes_unpriced"] is False and entries[uid]["own_start_date"] is None
 
     holders = {m["user_id"] for m in v["holdings"]["members"]}
     assert (uid in holders) == on["holdings"]

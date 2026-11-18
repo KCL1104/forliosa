@@ -26,6 +26,7 @@ const PERIODS: { value: LeaderboardPeriod; label: string }[] = [
  * （較大較粗；表頭墨色＋排序箭頭，桌面的表頭帶 aria-sort）；總報酬（含股利）是一般字級的一欄，不排名。兩個都有 ▲▼。
  * 只列出伺服器回來的人（沒開報酬率的人不在裡面，也不標「未分享」）；期間報酬算不出來是「—」，不說原因。
  * 沒有收盤價的持股（剛加入、還沒抓到收盤價的美股）不算進期間報酬，只在自己那一列標「不含沒有收盤價的持股」。
+ * 期間用到存檔開始以前的 Yahoo 參考價、而我有持股沒有參考價時，我的報酬從存檔開始那天起算，排行下面只對我說一句。
  * 表下面是當天排行的表情（和動態、週報同一個元件），再下面是當天排行的討論串。
  */
 export function RankingTab({ group }: { group: Group }) {
@@ -65,6 +66,7 @@ export function RankingTab({ group }: { group: Group }) {
               </>
             )}
             <MyNullNote entries={b.entries} />
+            <MyStartNote board={b} />
             <DataNotes notes={b.notes} />
             {/* 當天排行的表情：和動態、週報同一個元件；只有計數，不列出誰按的 */}
             {b.entries.length > 0 && <Reactions groupId={group.id} target={`leaderboard:${b.date}`} reactions={b.reactions} />}
@@ -252,6 +254,20 @@ function MyNullNote({ entries }: { entries: LeaderboardEntry[] }) {
   const me = entries.find((e) => e.is_me)
   if (!me || me.return_pct !== null) return null
   return <p className="text-base text-ink">這段期間算不出你的報酬：持股有幾天沒有收盤價。</p>
+}
+
+/**
+ * 只對我自己說明我的期間報酬從哪天起算：期間碰到存檔開始以前、而我有持股那時沒有 Yahoo 參考價時，
+ * 從存檔開始那天的收盤算（和帳本的績效一樣；2026-11-18）。別人的不說明
+ */
+function MyStartNote({ board }: { board: Leaderboard }) {
+  const me = board.entries.find((e) => e.is_me)
+  if (!me?.own_start_date || me.return_pct === null) return null
+  return (
+    <p className="text-base text-ink">
+      你的{PERIOD_LABEL[board.period]}報酬從 {formatDateShort(me.own_start_date, false)} 收盤起算：有持股在那之前沒有參考價。
+    </p>
+  )
 }
 
 /** 當天排行的討論串（`leaderboard:<date>`）；表情在排行表下面（排行的回應帶 `reactions`） */

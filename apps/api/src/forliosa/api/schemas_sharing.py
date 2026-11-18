@@ -218,6 +218,9 @@ class SharedReturns(BaseModel):
     month: float | None = None
     year: float | None = None
     total: float | None = None
+    # 產品負責人 2026-11-18: present only when 本月 or 今年 reach before the archive and were valued with the history
+    # backfill's closes up to this day (the board's date, the same for every member)
+    reference_until: date | None = None
 
 
 class SharedAmounts(BaseModel):
@@ -248,6 +251,9 @@ class LeaderboardEntry(UserRef):
     is_me: bool
     # only on my own row: the period returns leave out my holdings without a close (US stocks under commercial)
     excludes_unpriced: bool = False
+    # only on my own row (2026-11-18): the period reaches before the archive and a holding of mine has no Yahoo
+    # reference close then, so my return starts at this later close (the archive's first day, as my 績效 does)
+    own_start_date: date | None = None
 
 
 class BenchmarkReturn(BaseModel):
@@ -267,6 +273,9 @@ class Leaderboard(BaseModel):
     notes: list[str]
     sources: list[str]
     is_demo: bool
+    # 產品負責人 2026-11-18: the last day before the archive whose closes this period used, from the history backfill
+    # (Yahoo, not official; ``notes`` says so); null when the period is all official closes
+    reference_until: date | None = None
     # the day's thread ``leaderboard:<date>`` (the same for every period), like FeedItem / Digest
     comment_count: int
     reactions: list[ReactionCount]

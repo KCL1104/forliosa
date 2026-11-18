@@ -641,6 +641,9 @@ class Performance(BaseModel):
     realized_by_year: list[YearAmount]
     is_demo: bool
     notes: list[str] = []
+    # 產品負責人 2026-11-18: the last day of the window on which a holding was valued with the history backfill's close
+    # (Yahoo, as traded; days before the archive only). null: every day of the window is official closes
+    reference_until: date | None = None
 
 
 # -- stock page (redesign 2026-11-12) ---------------------------------------------------------------

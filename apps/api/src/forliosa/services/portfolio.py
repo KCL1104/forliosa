@@ -28,7 +28,9 @@ from forliosa.marketdata.base import InstrumentInfo, QuoteData, code_of_symbol, 
 from forliosa.marketdata.indices import is_index
 from forliosa.marketdata.service import MarketData
 from forliosa.models import User
+from forliosa.services.coverage import ymd
 from forliosa.services.ledger_io import FxBook, FxLoader, LedgerInput, load_ledger_input, preferences_of
+from forliosa.services.reference_close import price_only_note, reference_note, valuation_prices
 from forliosa.timeutil import iso_taipei, last_tw_trading_day, now_taipei, today_taipei, tw_trading_days
 
 MARKET_LABELS = {"TWSE": "上市", "TPEX": "上櫃", "US": "美股"}
@@ -341,20 +343,6 @@ def range_start(range_: str, end: date, inception: date) -> date:
     raise unprocessable(f"不支援的區間：{range_}")
 
 
-def _forward_filled(axis: list[date], closes: dict[date, Decimal]) -> dict[date, Decimal]:
-    out: dict[date, Decimal] = {}
-    known = sorted(closes)
-    j = 0
-    last: Decimal | None = None
-    for d in axis:
-        while j < len(known) and known[j] <= d:
-            last = closes[known[j]]
-            j += 1
-        if last is not None:
-            out[d] = last
-    return out
-
-
 def performance(db: Session, user: User, md: MarketData, range_: str, benchmark: str | None,
                 account_id: str | None) -> dict[str, Any]:
     if range_ not in PERFORMANCE_RANGES:
@@ -376,6 +364,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "volatility": None,
         "benchmark": {"symbol": bench_symbol, "name": bench_name, "twr": None},
         "series": [], "dividends_by_month": [], "realized_by_year": [], "is_demo": False, "notes": [],
+        "reference_until": None,
     }
     if inception is None or inception > today:
         return empty
@@ -387,23 +376,33 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     md.quotes([*symbols] if bench_is_index else [*symbols, bench_symbol])
     histories = md.histories(symbols, hist_start, today)
     bench_hist = (md.index_history if bench_is_index else md.history)(bench_symbol, hist_start, today)
+    # 產品負責人 2026-11-18 (選 A): a ledger older than the archive is valued, before the archive's first day, with the
+    # history backfill's closes as traded (one query for the holdings and the benchmark; nothing read when switched off,
+    # dropped, or the ledger begins within the archive)
+    refs = valuation_prices(db, md, histories if bench_is_index else {**histories, bench_symbol: bench_hist},
+                            hist_start, inception)
     is_demo = any(h.is_demo for h in histories.values())
 
     last_close_day = max((h.candles[-1].t for h in histories.values() if h.candles), default=None)
     end = min(today, last_close_day) if last_close_day else last_tw_trading_day(today)
     # Date axis = days on which any held instrument actually traded (from the price data itself),
     # so exchange holidays need no calendar; fall back to the built-in TW calendar without data.
-    axis = sorted({c.t for h in histories.values() for c in h.candles if inception <= c.t <= end})
+    axis = sorted({c.t for h in histories.values() for c in h.candles if inception <= c.t <= end}
+                  | refs.days(symbols, inception, end))
     if not axis:
         axis = tw_trading_days(inception, end)
     if not axis:
         return empty
 
-    prices = {s: _forward_filled(axis, {c.t: c.c for c in h.candles}) for s, h in histories.items()}
+    prices = {s: refs.filled(axis, s, h.candles) for s, h in histories.items()}
     fx = FxBook.load(md, inception, end)
+    referenced: set[date] = set()  # days on which a holding was valued with a reference close
 
     def price_fn(symbol: str, d: date) -> Decimal | None:
-        return prices.get(symbol, {}).get(d)
+        px = prices.get(symbol, {}).get(d)
+        if px is not None and refs.is_reference(symbol, d):
+            referenced.add(d)
+        return px
 
     def fx_fn(currency: str, d: date) -> Decimal:
         return fx.rate(currency, d)
@@ -449,7 +448,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
     notes: list[str] = []
     clipped = False
     if md.policy == "commercial":
-        from forliosa.services.coverage import US_NOTE, accumulating_note, ymd
+        from forliosa.services.coverage import US_NOTE, accumulating_note
 
         base = max((i for i, p in enumerate(points) if p.unpriced), default=-1) + 1
         if base >= ei:  # fewer than two fully priced closes: nothing honest to show yet
@@ -466,6 +465,10 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
             si, based, clipped = base, True, True
             notes.append(f"績效從 {ymd(points[si].t)} 收盤開始算，之前沒有資料")
     window = points[si:ei + 1]
+    # the last day of the window a holding was valued with a reference close. The base close counts (it is the
+    # denominator of the first return), and without one so does the day before the window (its value is)
+    lo = points[si - 1].t if not based and si > 0 else window[0].t
+    ref_until = max((d for d in referenced if lo <= d <= window[-1].t), default=None)
     returns = [p.daily_return for p in window]
     if based:
         returns[0] = 0.0
@@ -476,7 +479,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
 
     # Benchmark: total return (dividends reinvested on ex-date), aligned to the same axis. A total
     # return index (^TAIEXTR) already includes dividends: its plain daily change is the return.
-    b_closes = _forward_filled(axis, {c.t: c.c for c in bench_hist.candles})
+    b_closes = refs.filled(axis, bench_symbol, bench_hist.candles)
     if bench_is_index:
         b_divs: dict[date, Decimal] = {}
         b_splits: dict[date, Decimal] = {}
@@ -497,6 +500,17 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         b_window[0] = 0.0
     b_index = twr_index(b_window) if b_closes else []
     is_demo |= bench_hist.is_demo
+    b_ref = max((p.t for p in window if p.t in b_closes and refs.is_reference(bench_symbol, p.t)), default=None)
+    # A window reaching before the archive, for a benchmark with no close that far back (an index: the backfill has
+    # none): its line starts at its first close in the window, and the note says so (產品負責人 2026-11-18)
+    b_from = next((i for i, p in enumerate(window) if p.t in b_closes), 0) if ref_until is not None else 0
+    if ref_until is not None or b_ref is not None:
+        notes.append(reference_note(max(d for d in (ref_until, b_ref) if d is not None)))
+    if b_ref is not None:
+        # a stock benchmark (0050) before the archive: no ex-dividend dates there, so a price return (2026-11-18 review)
+        notes.append(price_only_note(bench_name, b_ref))
+    if b_from > 0:
+        notes.append(f"{bench_name}從 {ymd(window[b_from].t)} 收盤起算，之前沒有資料")
 
     series = [
         {
@@ -504,7 +518,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
             "market_value": ser.money(p.value),
             "net_invested": ser.money(p.net_invested),
             "twr_index": round(index[i], 6),
-            "benchmark_index": round(b_index[i], 6) if b_index else None,
+            "benchmark_index": round(b_index[i], 6) if b_index and i >= b_from else None,
         }
         for i, p in enumerate(window)
     ]
@@ -547,6 +561,7 @@ def performance(db: Session, user: User, md: MarketData, range_: str, benchmark:
         "realized_by_year": [{"year": k, "amount": ser.money(v)} for k, v in sorted(by_year.items())],
         "is_demo": is_demo,
         "notes": notes,
+        "reference_until": ref_until,
     }
 
 

@@ -393,7 +393,8 @@ def history_backfill_enabled() -> bool:
     """PRICE_HISTORY_SOURCE=yahoo: the product owner's decision (2026-11-13) to fill the years before our archive
     with Yahoo Finance's daily candles. Not a licensed source — the rows keep their own key so they can be removed in
     one statement, and only chart-like reads ask for them (``backfill=True``); since 2026-11-17 also the buy form's
-    and the statement import's reference close for days the archive lacks (``services.reference_close``)."""
+    and the statement import's reference close for days the archive lacks, and since 2026-11-18 performance and group
+    returns before the archive, converted to the prices as traded (``services.reference_close``)."""
     from forliosa.config import get_settings
 
     return get_settings().price_history_source == "yahoo"
@@ -592,7 +593,7 @@ def attributions(policy: Policy, confirmed: bool | None = None, status: dict[str
             "key": HISTORY_SOURCE, "agency": "Yahoo Finance", "dataset": "個股與 ETF 的歷史日線",
             "url": "https://finance.yahoo.com/",
             "used_for": "走勢圖、技術指標與走勢小圖裡，Forliosa 開始每天存檔以前的日線；"
-                        "記一筆和匯入對帳單時，舊日期的參考收盤",
+                        "記一筆和匯入對帳單時，舊日期的參考收盤；存檔開始以前的績效、報酬與群組排行（換算成當時的成交價）",
             "year": year, "license": "Yahoo 服務條款（非官方資料，沒有轉載授權）",
             "license_url": HISTORY_LICENSE_URL, "license_status": "non_commercial", "license_basis": None,
             "commercial": False, "served": True, "last_updated": hist.get("data_date"),

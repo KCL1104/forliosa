@@ -160,6 +160,17 @@ class ArchiveProvider(BaseProvider):
             stmt = select(func.min(PriceDaily.date)).where(cond)
             return db.scalar(self._filter(stmt, PriceDaily, backfill))
 
+    def reference_first_date(self) -> date | None:
+        """The history backfill's first day (``yahoo-history`` rows, any symbol); ``None`` without rows or switched
+        off. The oldest rows of ``prices_daily`` are the backfill's, so on the date index this stops at once."""
+        from forliosa.datapolicy import HISTORY_SOURCE, history_backfill_enabled
+        from forliosa.models import PriceDaily
+
+        if not history_backfill_enabled():
+            return None
+        with self.session_fn() as db:
+            return db.scalar(select(func.min(PriceDaily.date)).where(PriceDaily.source == HISTORY_SOURCE))
+
     def backfill_until(self, symbol: str) -> date | None:
         """The last day of ``symbol`` that comes from the history backfill (``None``: none is used)."""
         from forliosa.datapolicy import HISTORY_SOURCE, history_backfill_enabled

@@ -28,6 +28,7 @@ from forliosa.marketdata.catalog import KNOWN_REDUCTIONS
 from forliosa.marketdata.service import MarketData
 from forliosa.services.coverage import covers, series_notes, ymd
 from forliosa.services.instruments import reduction_how, split_how
+from forliosa.services.reference_close import PRICE_ONLY_TAIL
 from forliosa.timeutil import today_taipei
 
 KINDS = ["price", "compare", "revenue", "eps", "performance"]
@@ -293,8 +294,12 @@ def performance_chart(db: Any, md: MarketData, user: Any, range_: str, benchmark
                        "points": [_point(r["t"], round(r["benchmark_index"] - 1, 6)) for r in rows]})
     label = "全部期間" if range_ == "5Y" else RANGE_LABELS[range_]
     title = f"我的報酬率與{bench['name']}（{label}）" if len(series) > 1 else f"我的報酬率（{label}）"
-    notes.append("報酬率是時間加權報酬率；基準含股利")
-    return _card("performance", title, "pct", "date", series, notes, ["ledger"], bool(perf.get("is_demo")),
+    # a stock benchmark is a price return before the archive (its notes say so): not 「基準含股利」 then
+    price_only = any(n.endswith(PRICE_ONLY_TAIL) for n in notes)
+    notes.append("報酬率是時間加權報酬率" if price_only else "報酬率是時間加權報酬率；基準含股利")
+    # days before the archive valued with the history backfill's closes (產品負責人 2026-11-18): its notes say so too
+    sources = ["ledger", *(["yahoo-history"] if any("Yahoo 參考價" in n for n in notes) else [])]
+    return _card("performance", title, "pct", "date", series, notes, sources, bool(perf.get("is_demo")),
                  range_=range_)
 
 

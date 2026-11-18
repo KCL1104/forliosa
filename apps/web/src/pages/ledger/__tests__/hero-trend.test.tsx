@@ -87,7 +87,11 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     expect(useLedgerPrefs.getState().trendRange).toBe("3M")
   })
 
-  it("比資料長的區間（示範資料 6/1 起，選 1年）：畫全部的資料，標題照樣寫「近 1 年」，期間寫「只有 … 的資料」、不寫年份；報酬和「全部」一樣", async () => {
+  it("比資料長的區間（資料 6/1 起，選 1年）：畫全部的資料，標題照樣寫「近 1 年」，期間寫「只有 … 的資料」、不寫年份；報酬和「全部」一樣", async () => {
+    // 示範帳本有存檔開始以前的 Yahoo 參考價（回補開著）：只留 6/1 以後的收盤，當成一個比較新的帳本
+    const real = api.getPerformance.bind(api)
+    const since = (await real({ range: "ALL" })).series.filter((x) => x.t >= "2026-06-01").length
+    await withHistory(since)
     const all = await api.getPerformance({ range: "ALL" })
     const first = all.series[0]!.t
     const start = `${Number(first.slice(5, 7))}/${Number(first.slice(8, 10))}`
@@ -107,6 +111,20 @@ describe("主數字下方的總資產走勢", { timeout: 20_000 }, () => {
     await userEvent.click(within(chips).getByRole("radio", { name: "3月" }))
     expect(within(region).getByText("8/12 – 11/12")).toBeInTheDocument()
     expect(within(region).queryByText(/^只有 /)).toBeNull()
+  })
+
+  it("存檔開始以前用 Yahoo 參考價算（產品負責人 2026-11-18）：區間用到時按鈕下面寫一行（1 年寫年份），區間都在存檔以後就不寫", async () => {
+    renderApp("/")
+    const region = await trend()
+    const chips = within(region).getByRole("radiogroup", { name: "走勢區間" })
+    // 1 月（10/12 起）都是存檔以後的官方收盤
+    expect(within(region).queryByText(/以前用 Yahoo 參考價計算/)).toBeNull()
+    await userEvent.click(within(chips).getByRole("radio", { name: "1年" }))
+    expect(within(region).getByText("2026/5/29 以前用 Yahoo 參考價計算，不是官方資料")).toBeInTheDocument()
+    // 資料夠長了：不寫「只有 … 的資料」
+    expect(within(region).queryByText(/^只有 /)).toBeNull()
+    await userEvent.click(within(chips).getByRole("radio", { name: "6月" }))
+    expect(within(region).getByText("5/29 以前用 Yahoo 參考價計算，不是官方資料")).toBeInTheDocument()
   })
 
   it("鍵盤：End 到最後一個收盤、← 前一天、Esc 收起；讀數寫那一天的總資產、投入本金、報酬；大數字不變", async () => {
@@ -335,6 +353,20 @@ describe("和績效分段分工：整頁只有一排區間按鈕", { timeout: 20
     await vi.waitFor(() => expect(spy.mock.calls.some(([q]) => q.range === "3M")).toBe(true), T)
     await screen.findByText("2026/08/12 – 2026/11/12", undefined, T)
     expect(within(region).getByText("8/12 – 11/12")).toBeInTheDocument()
+  })
+
+  it("用到 Yahoo 參考價的區間：走勢下面寫了那一句，績效分段不再寫；走勢關掉時寫在績效分段（只寫一次）", async () => {
+    act(() => useLedgerPrefs.setState({ trendRange: "1Y" }))
+    renderApp("/?view=performance")
+    await screen.findByText("最大回撤", undefined, T)
+    const region = await trend()
+    await within(region).findByText("2026/5/29 以前用 Yahoo 參考價計算，不是官方資料", undefined, T)
+    expect(screen.getAllByText(/以前用 Yahoo 參考價計算/)).toHaveLength(1)
+    cleanup()
+    act(() => useLedgerPrefs.setState({ showTrend: false }))
+    renderApp("/?view=performance")
+    await screen.findByText("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料", undefined, T)
+    expect(screen.getAllByText(/以前用 Yahoo 參考價計算/)).toHaveLength(1)
   })
 
   it("「自訂」關掉走勢時：區間按鈕在績效分段的工具列（整頁還是只有一排）", async () => {

@@ -1,6 +1,7 @@
 import type { Performance } from "@/api/types"
 import { isCoverageNote } from "@/lib/data-notes"
-import { trendState } from "@/lib/trend-range"
+import { formatDateShort } from "@/lib/format"
+import { trendState, trendWindow, type TrendRange } from "@/lib/trend-range"
 
 /**
  * 後端 notes 說「有持股沒有收盤價，所以算不出來」的那一句：剛加入、還沒抓到收盤價的美股
@@ -29,4 +30,17 @@ export function trendMissingReason(notes: readonly string[]): string | null {
 export function trendClipNote(p: Pick<Performance, "series" | "notes"> | undefined): string | undefined {
   if (!p || trendState(p.series.length) !== "short") return undefined
   return (p.notes ?? []).find((n) => /^績效從 .+ 收盤開始算/.test(n))
+}
+
+/**
+ * 區間用到存檔開始以前的 Yahoo 參考價時（產品負責人 2026-11-18）走勢下面的一行：「11/11 以前用 Yahoo 參考價計算，不是官方資料」。
+ * 首頁走勢只拿一次「全部」、在前端切區間，所以看這個區間的第一點（基準收盤也算：區間報酬的分母）有沒有在
+ * 後端的 `reference_until` 之前或當天。沒用到時是 null。`withYear`：走勢的日期寫年份時（跨年、1 年），這裡也寫。
+ */
+export function trendReferenceLine(p: Pick<Performance, "series" | "reference_until"> | undefined, range: TrendRange, withYear = false): string | null {
+  const until = p?.reference_until
+  if (!p || !until || p.series.length === 0) return null
+  const first = trendWindow(p.series, range).points[0]
+  if (!first || first.t > until) return null
+  return `${withYear ? `${until.slice(0, 4)}/` : ""}${formatDateShort(until, false)} 以前用 Yahoo 參考價計算，不是官方資料`
 }

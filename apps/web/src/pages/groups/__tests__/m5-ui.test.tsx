@@ -130,6 +130,49 @@ describe("群組畫面不透露誰沒分享", () => {
     }
   })
 
+  it("今年排行用到存檔開始以前的 Yahoo 參考價：期間從去年最後一個收盤起，排行下面寫一行說明（今日沒有）", async () => {
+    const user = userEvent.setup()
+    renderInRouter(<RankingTab group={family} />)
+    await screen.findByRole("table", { name: "今日排行" }, T)
+    expect(screen.queryByText(/以前用 Yahoo 參考價計算/)).toBeNull()
+    await user.click(screen.getByRole("radio", { name: "今年" }))
+    await screen.findByRole("table", { name: "今年排行" }, T)
+    expect(await screen.findByText("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料", undefined, T)).toBeInTheDocument()
+    expect(screen.getByText(/12\/31 收盤 → 11\/12 收盤/)).toBeInTheDocument()
+  })
+
+  it("今年排行的 0050 在存檔開始以前只算價格：和 Yahoo 那句一起寫在排行下面", async () => {
+    const user = userEvent.setup()
+    renderInRouter(<RankingTab group={family} />)
+    await screen.findByRole("table", { name: "今日排行" }, T)
+    expect(screen.queryByText(/以前只算價格，不含股利/)).toBeNull()
+    await user.click(screen.getByRole("radio", { name: "今年" }))
+    expect(await screen.findByText("元大台灣50在 2026/05/29 以前只算價格，不含股利", undefined, T)).toBeInTheDocument()
+  })
+
+  it("我的期間報酬從存檔開始那天起算時（有持股在那之前沒有參考價）：只對我說一句，別人的不說", async () => {
+    const user = userEvent.setup()
+    const real = api.getLeaderboard.bind(api)
+    let mine = true
+    vi.spyOn(api, "getLeaderboard").mockImplementation(async (id, period) => {
+      const b = await real(id, period)
+      if (period !== "year") return b
+      return { ...b, entries: b.entries.map((e) => ((e.is_me && mine) ? { ...e, own_start_date: "2026-06-01" } : e)) }
+    })
+    renderInRouter(<RankingTab group={family} />)
+    await screen.findByRole("table", { name: "今日排行" }, T)
+    expect(screen.queryByText(/收盤起算：有持股在那之前沒有參考價/)).toBeNull()
+    await user.click(screen.getByRole("radio", { name: "今年" }))
+    expect(await screen.findByText("你的今年報酬從 6/1 收盤起算：有持股在那之前沒有參考價。", undefined, T)).toBeInTheDocument()
+    cleanup()
+    mine = false
+    renderInRouter(<RankingTab group={family} />)
+    await screen.findByRole("table", { name: "今日排行" }, T)
+    await user.click(screen.getByRole("radio", { name: "今年" }))
+    await screen.findByRole("table", { name: "今年排行" }, T)
+    expect(screen.queryByText(/收盤起算：有持股在那之前沒有參考價/)).toBeNull()
+  })
+
   it("排行下面有當天的表情（和動態、週報同一個元件）；按了以伺服器的計數為準，只有計數", async () => {
     const user = userEvent.setup()
     renderInRouter(<RankingTab group={family} />)
@@ -183,6 +226,12 @@ describe("群組畫面不透露誰沒分享", () => {
     expect(await screen.findByRole("heading", { name: "報酬率" }, T)).toBeInTheDocument()
     expect(screen.getByRole("heading", { name: /持股/ })).toBeInTheDocument()
     expect(screen.queryByRole("heading", { name: "金額" })).toBeNull()
+    // 今年用到存檔開始以前的 Yahoo 參考價：報酬率下面一行（和排行同一句）
+    expect(screen.getByText("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料")).toBeInTheDocument()
+    cleanup()
+    renderInRouter(<SharedPortfolioView p={{ ...mom, returns: { ...mom.returns!, reference_until: undefined } }} groupId="grp_family" isMe={false} />)
+    await screen.findByRole("heading", { name: "報酬率" }, T)
+    expect(screen.queryByText(/以前用 Yahoo 參考價計算/)).toBeNull()
   })
 
   it("金額在隱私模式下遮住，百分比照常", async () => {

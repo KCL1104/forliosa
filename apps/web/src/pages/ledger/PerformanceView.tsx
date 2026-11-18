@@ -23,7 +23,8 @@ import { niceTicks } from "@/ai/chart-geometry"
 import { inText } from "@/lib/cjk"
 import { useHowToRead } from "@/pages/stock/tabs/how-to-read"
 import { useReadOnly, useWho } from "@/api/view-as"
-import { isUnpricedNote, trendClipNote } from "./trend-reason"
+import { isReferenceNote } from "@/lib/data-notes"
+import { isUnpricedNote, trendClipNote, trendReferenceLine } from "./trend-reason"
 import { useTrendChipsShown, useTrendRange } from "./use-trend-range"
 
 /**
@@ -41,9 +42,11 @@ function isBlocked(p: Performance | undefined, isError: boolean): boolean {
  *   換分段時分段列不會上下跳。
  * - 走勢沒有按鈕時（「自訂」關掉走勢、主數字或走勢讀不到、不到 2 個收盤）才在這裡的工具列放「績效區間」：七顆一律放，
  *   這個帳戶算得出績效（「全部」的序列有 2 個收盤以上）或讀不到時才放（讀不到時不讓區間沒辦法換），沒有「1日」。
- * - 區間比資料長（存檔才開始、或這個帳戶比較新）：後端從第一個收盤算起（「績效從 … 收盤開始算」），數字和走勢的一樣；
- *   期間照實寫「只有 2026/11/12 – 2026/11/17 的資料」（看這個帳戶「全部」的序列，而且回應真的從它的第一個收盤開始：
- *   `responseExceedsData`）。
+ * - 區間比資料長（這個帳戶比較新，或存檔開始以前沒有 Yahoo 參考價）：後端從第一個收盤算起（「績效從 … 收盤開始算」），
+ *   數字和走勢的一樣；期間照實寫「只有 2026/11/12 – 2026/11/17 的資料」（看這個帳戶「全部」的序列，而且回應真的從它的
+ *   第一個收盤開始：`responseExceedsData`）。
+ * - 存檔開始以前的日子用 Yahoo 參考價算（產品負責人 2026-11-18）：後端的 notes 有一句「… 以前用 Yahoo 參考價計算，
+ *   不是官方資料」。走勢的區間按鈕下面已經寫了同一件事時（`trendReferenceLine`）這裡不再寫。
  */
 export function PerformanceView() {
   // undefined＝全部帳戶
@@ -73,6 +76,8 @@ export function PerformanceView() {
   // 歷史短時走勢的區間按鈕下面已經寫了後端那一句（「績效從 … 收盤開始算」，每個分段都寫）：這裡不再寫一次。
   // 走勢真的畫出來才算（`shared`：主數字讀不到時走勢不在，這一句就留在這裡）
   const trendNote = shared ? trendClipNote(home.data) : undefined
+  // 走勢下面已經說了這個區間用到 Yahoo 參考價：這裡不再寫一次（全部帳戶的走勢涵蓋任何一個帳戶用到的日子）
+  const heroSaysReference = shared && trendReferenceLine(home.data, range) !== null
   // 期間：看回應自己的區間（換區間時先留著上一個區間的數字，期間也跟著上一個）。回應真的從這個帳戶的第一個收盤開始才寫「只有」：
   // 切換帳戶時兩個查詢回來的先後不同，不會把新帳戶的「全部」和舊帳戶的區間湊在一起寫錯（`responseExceedsData`）
   const exceeds = !!p && responseExceedsData(p, ownSeries)
@@ -123,7 +128,7 @@ export function PerformanceView() {
         <NotEnough p={p} blocked={blocked} account={account} accounts={accountOptions} holdings={holdings.data} onAccount={setAccount} />
       ) : (
         <div className={cn("flex flex-col gap-4 transition-opacity", perf.isPlaceholderData && "opacity-60")}>
-          <DataNotes notes={p.notes?.filter((n) => n !== trendNote)} />
+          <DataNotes notes={p.notes?.filter((n) => n !== trendNote && !(heroSaysReference && isReferenceNote(n)))} />
           <Metrics p={p} />
           <Panel title="與基準比較" titleId="cmp-title">
             <Legend
@@ -195,7 +200,9 @@ function pricedAccount<A extends { id: string }>(accounts: A[], holdings?: Holdi
 
 function Metrics({ p }: { p: Performance }) {
   const you = useWho("你")
-  const excess = p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
+  // 基準比區間晚開始（存檔開始以前沒有資料的指數，從它的第一個收盤起算）：期間不同，不比多少
+  const benchLate = p.series[0]?.benchmark_index === null && p.series.some((x) => x.benchmark_index !== null)
+  const excess = !benchLate && p.twr !== null && p.benchmark?.twr != null ? p.twr - p.benchmark.twr : null
   const items: { label: string; help: string; value: React.ReactNode; sub?: React.ReactNode }[] = [
     {
       label: "時間加權報酬（TWR）",

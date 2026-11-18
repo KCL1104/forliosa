@@ -852,6 +852,20 @@ class MarketData:
         except Exception:  # the archive is optional (e.g. no database yet)
             return None
 
+    def reference_since(self) -> date | None:
+        """Where the history backfill's closes begin (PRICE_HISTORY_SOURCE=yahoo with rows stored), else ``None``:
+        before the archive's first day, performance and group returns may be valued with them
+        (``services.reference_close.valuation_prices``). Not remembered: after ``history_backfill drop`` the next
+        request is back to the archive alone."""
+        archive = next((p for p in self.providers if p.name == "archive"), None)
+        fn = getattr(archive, "reference_first_date", None)
+        if fn is None:
+            return None
+        try:
+            return fn()
+        except Exception:  # the archive is optional (e.g. no database yet)
+            return None
+
     def archive_since(self, symbol: str | None = None) -> date | None:
         """First archived trading day of ``symbol`` usable under the policy; without one (or a Taiwan symbol with no
         row yet), where the Taiwan archive begins. A US symbol with no row has none: its closes come from a separate

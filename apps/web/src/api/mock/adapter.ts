@@ -27,7 +27,9 @@ import {
   hasUsCloses,
   INDEX_NOTE,
   NO_DATA_NOTE,
+  priceOnlyNote,
   REFERENCE_NOTE,
+  referenceNote,
   US_ARCHIVE_START,
   US_AS_OF,
   US_SESSION,
@@ -46,6 +48,7 @@ import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
 import { createSharingStore, type MemberSource } from "./sharing"
 import { createDiscussionStore, type DiscussionOptions } from "./discussions"
 import { createAdminStore } from "./admin"
+import { isPriceOnlyNote, isReferenceNote } from "@/lib/data-notes"
 import { DISCLAIMER } from "@/lib/disclaimer"
 import { createMarketReportsStore, type MockReportsScenario } from "./market-reports"
 import { todayInTaipei } from "@/lib/format"
@@ -146,7 +149,9 @@ export function readMockHistory(): number | undefined {
 export function limitHistory(p: Performance, first: string): Performance {
   const series = p.series.filter((x) => x.t >= first)
   if (series.length === p.series.length) return p
-  const others = (p.notes ?? []).filter((n) => !n.startsWith("績效從 "))
+  // 留下的日子都在 Yahoo 參考價之後時，那一句（和股票基準只算價格那一句）與 reference_until 也拿掉
+  const reference = p.reference_until && first <= p.reference_until ? p.reference_until : null
+  const others = (p.notes ?? []).filter((n) => !n.startsWith("績效從 ") && (reference || (!isReferenceNote(n) && !isPriceOnlyNote(n))))
   if (series.length < 2) {
     return {
       ...p, start_date: null, end_date: null, twr: null, xirr: null, max_drawdown: null, volatility: null, series: [],
@@ -180,6 +185,7 @@ export function limitHistory(p: Performance, first: string): Performance {
     dividends_by_month: p.dividends_by_month.filter((d) => d.month >= first.slice(0, 7)),
     realized_by_year: p.realized_by_year.filter((r) => r.year >= Number(first.slice(0, 4))),
     notes: [`績效從 ${ymd(base.t)} 收盤開始算，之前沒有資料`, ...others],
+    reference_until: reference,
   }
 }
 
@@ -353,7 +359,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     // 沒有收盤價的持股（商用模式：還沒抓到收盤價的美股）不算進期間報酬，和帳本的「今日」同一條規則（2026-11-14）
     const unpriced = new Set(commercial ? holdings.filter((h) => h.price === null).map((h) => h.symbol) : [])
     const priced = unpriced.size ? list.filter((t) => !t.symbol || !unpriced.has(t.symbol)) : list
-    const opts = { isDemo: !commercial, ...(commercial ? { minStart: ARCHIVE_START } : {}) }
+    // 存檔開始以前：Yahoo 回補開著時用參考價算（產品負責人 2026-11-18），從回補的第一天起
+    const opts = { isDemo: !commercial, ...(commercial ? { minStart: backfill ? BACKFILL_START : ARCHIVE_START } : {}) }
     return {
       day: summary.day_change_pct,
       month: buildPerformance(priced, "MTD", undefined, "0050.TW", opts).twr,
@@ -392,6 +399,7 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
       me: () => ({ user_id: user.id, display_name: user.display_name, avatar_url: user.avatar_url ?? null }),
       signedIn: () => signedIn,
       commercial,
+      backfill,
       myAccounts: () => accounts,
       mine,
       dad,
@@ -549,15 +557,34 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   const clip = <T extends { t: string }>(rows: T[], from: string, since = ARCHIVE_START): { rows: T[]; notes: string[] } =>
     commercial && from < since ? { rows: rows.filter((r) => r.t >= since), notes: [accumulatingNote(since)] } : { rows, notes: [] }
   /**
-   * 商用模式的績效（和後端相同）：只算每一檔持股都有收盤價的日子。台股的收盤從存檔起點（ARCHIVE_START）開始、
-   * 美股從 2024-07-01（Databento）開始：持股期間早於這些日子時，從「每一檔都有收盤價」的第一天收盤開始算。
+   * 存檔開始以前的日子用 Yahoo 參考價算時（回補開著；產品負責人 2026-11-18），和後端一樣多一句說明與 `reference_until`：
+   * 區間裡最後一個用參考價估台股市值的日子（存檔開始前一天以前、當天有市值）。美股沒有回補。
+   */
+  const withReference = (p: Performance, mine: Transaction[], benchmark: string): Performance => {
+    const tw = backfill && mine.some((t) => t.trade_date < ARCHIVE_START && findInstrument(t.symbol!)?.market !== "US")
+    const until = tw ? (p.series.filter((x) => x.t < ARCHIVE_START && x.market_value > 0).at(-1)?.t ?? null) : null
+    // 股票基準（0050）存檔開始以前也用參考價，但沒有除息資料：那段只算價格，和後端一樣多一句（2026-11-18 審查）
+    const stock = backfill && !benchmark.startsWith("^") && findInstrument(benchmark)?.market !== "US" && p.benchmark?.twr != null
+    const benchUntil = stock ? (p.series.filter((x) => x.t < ARCHIVE_START).at(-1)?.t ?? null) : null
+    if (!until && !benchUntil) return { ...p, reference_until: null }
+    const notes = p.notes ?? []
+    const clip = notes.filter((n) => n.startsWith("績效從 "))
+    const last = [until, benchUntil].filter((d): d is string => !!d).sort().at(-1)!
+    const added = [referenceNote(last), ...(benchUntil ? [priceOnlyNote(p.benchmark!.name, benchUntil)] : [])]
+    return { ...p, reference_until: until, notes: [...clip, ...added, ...notes.filter((n) => !clip.includes(n))] }
+  }
+  /**
+   * 商用模式的績效（和後端相同）：只算每一檔持股都有收盤價的日子。台股的收盤從存檔起點（ARCHIVE_START）開始
+   * （Yahoo 回補開著時從回補的第一天 BACKFILL_START，存檔以前是參考價）、美股從 2024-07-01（Databento）開始：
+   * 持股期間早於這些日子時，從「每一檔都有收盤價」的第一天收盤開始算。
    * 現在還持有沒有收盤價的美股（剛加入、還沒抓到）就算不出來：「MSFT：還沒有收盤價，績效算不出來」。
    */
   const commercialPerformance = (txns: Transaction[], range: Parameters<typeof buildPerformance>[1], accountId: string | undefined, benchmark: string) => {
     const mine = txns.filter((t) => t.symbol && (!accountId || t.account_id === accountId))
     const symbols = [...new Set(mine.map((t) => t.symbol!))].sort()
     const firstTrade = (sym: string) => mine.find((t) => t.symbol === sym)!.trade_date
-    const startOf = (sym: string) => (findInstrument(sym)!.market === "US" ? US_ARCHIVE_START : ARCHIVE_START)
+    const twStart = backfill ? BACKFILL_START : ARCHIVE_START
+    const startOf = (sym: string) => (findInstrument(sym)!.market === "US" ? US_ARCHIVE_START : twStart)
     const unpriced = buildHoldings(txns, accountId, true).filter((h) => h.price === null).map((h) => h.symbol).sort()
     const priced = symbols.filter((sym) => !unpriced.includes(sym) && !noQuote(findInstrument(sym)!))
     // 日期軸從有收盤價的第一天開始（後端：持有過的商品實際有收盤的日子）；之前的交易都記在那一天
@@ -567,19 +594,20 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
     const empty = buildPerformance([], range, accountId, benchmark, { isDemo: false })
     if (unpriced.length > 0) {
       // 持股期間有幾天台股沒有收盤價（台股的存檔起點晚於日期軸的第一天）時，後端多一句「資料從 … 開始；…」
-      const twGap = !!axisStart && axisStart < ARCHIVE_START && priced.some((sym) => startOf(sym) === ARCHIVE_START && firstTrade(sym) < ARCHIVE_START)
+      const twGap = !!axisStart && axisStart < twStart && priced.some((sym) => startOf(sym) === twStart && firstTrade(sym) < twStart)
       return {
         ...empty, start_date: null, end_date: null, series: [],
         notes: [`${unpriced.join("、")}：還沒有收盤價，績效算不出來`, ...(twGap ? [`${accumulatingNote()}；持股期間有幾天沒有收盤價，績效算不出來`] : [])],
+        reference_until: null,
       }
     }
     // 每一檔都有收盤價的第一天：持有時還沒有收盤價的商品，從它的收盤開始那天起；日期軸本身的第一天也是
-    const minStart = [axisStart ?? ARCHIVE_START, ...priced.filter((sym) => firstTrade(sym) < startOf(sym)).map(startOf)].sort().at(-1)!
+    const minStart = [axisStart ?? twStart, ...priced.filter((sym) => firstTrade(sym) < startOf(sym)).map(startOf)].sort().at(-1)!
     const full = buildPerformance(txns, range, accountId, benchmark, { isDemo: false })
-    if (!full.start_date || full.start_date >= minStart) return { ...full, notes: [] }
+    if (!full.start_date || full.start_date >= minStart) return withReference({ ...full, notes: [] }, mine, benchmark)
     const clipped = buildPerformance(txns, range, accountId, benchmark, { isDemo: false, minStart })
     const bench = benchmark === "^TAIEXTR" ? { benchmark: clipped.benchmark ? { ...clipped.benchmark, twr: null } : null, series: clipped.series.map((p) => ({ ...p, benchmark_index: null })) } : {}
-    return { ...clipped, ...bench, notes: [`績效從 ${ymd(clipped.start_date!)} 收盤開始算，之前沒有資料`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }
+    return withReference({ ...clipped, ...bench, notes: [`績效從 ${ymd(clipped.start_date!)} 收盤開始算，之前沒有資料`, ...(benchmark === "^TAIEXTR" ? [INDEX_NOTE] : [])] }, mine, benchmark)
   }
   const sortTxns = () =>
     txns.sort((a, b) => (a.trade_date === b.trade_date ? a.id.localeCompare(b.id) : a.trade_date.localeCompare(b.trade_date)))

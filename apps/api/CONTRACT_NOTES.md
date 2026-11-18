@@ -4035,7 +4035,8 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   2025-06-10 的 188 → 47，和 2025-06-18 的 47.25 比，不會誤報）。訊息裡的數字仍是各自那天的成交價；交易那天沒有參考價、又隔著分割時不比
   （「前一個交易日參考收盤 188，這裡是 188」看不出問題在哪）。
 - **不讀的**（守門測試 `tests/api/test_yahoo_reference_guard.py`：回補開著、每一天都有 NT$1 的回補列）：持倉的價格與市值、`/portfolio/summary` 的市值與未實現損益、
-  `/portfolio/performance` 的序列（從第一筆官方收盤開始）、定期定額的扣款價（`recurring.close_on`）。群組排行、估值、股利照舊走 `source_clause(backfill=False)`。
+  定期定額的扣款價（`recurring.close_on`）。估值、股利照舊走 `source_clause(backfill=False)`。~~`/portfolio/performance` 的序列（從第一筆官方收盤開始）、群組排行~~
+  （2026-11-18 起存檔開始以前的日子可以，見〈2026-11-18 存檔開始以前的績效與報酬〉；守門測試改成檢查存檔開始以後的日子仍是官方收盤、關掉時和以前一樣）。
 - **資料來源頁**：`/meta/attributions` 的 `yahoo-history.used_for` 多「記一筆和匯入對帳單時，舊日期的參考收盤」；前端授權條款那一句同步。
 - **測試**：`tests/api/test_day_close.py`（關著不讀、開著給參考價、官方優先、刪掉之後沒有、0050 分割乘回去、美股照舊）、`tests/api/test_imports.py`
   （參考價的訊息、關著不核對、官方優先、前一個交易日的參考價、0050 分割前後與 2024 年的參考價四捨五入到分）、`tests/api/test_yahoo_reference_guard.py`。
@@ -4593,3 +4594,59 @@ smoke 多一個選項：只問這一題（給 `--symbol` 就當成在那檔的�
   四個開關的盤前與週報在 `trial` 留在資料庫時照樣推公開的一則並併群組的部分（`test_channel_four_switches.py`、`test_channel_weekly_switch.py`）；
   `tests/api/test_market_report_trial_open.py` 刪掉。前端 `reports.test.tsx`（一般帳號看到同一份、沒有 A／B／C 與投票）、`channels-reports.test.tsx`
   （頻道沒有盲測那一行）、`admin-reports.test.tsx`（模式只有公開與暫停、撰寫設定都寫出來）；`reports-trial-open.test.tsx` 刪掉。
+
+
+## 2026-11-18 存檔開始以前的績效與報酬（`services/reference_close.valuation_prices`；產品負責人選 A）
+
+負責人看到群組排行的本月、今年都寫「11/12 收盤 → 11/17 收盤」「資料從 2026/11/12 開始」後選 A：存檔開始（2026-11-12）以前的日子，績效、報酬與群組排行
+用 Yahoo 回補（`yahoo-history`）換算成當時成交價來算；存檔開始以後一律官方收盤、和以前一樣。持股市值（`compute_state` 的最新收盤）、股利、定期定額草稿、
+AI 工具給的價格不受影響。CLAUDE.md 的 Yahoo 例外多了一句。
+
+- **一個 helper**：`valuation_prices(db, md, histories, start, need_from) -> ValuationPrices`。輸入是已經讀好的官方序列（`md.histories(...)`，照舊一次
+  `IN` 查詢）；只有在回補開著、`md.archive_since()` 存在、`need_from`（要估值的第一天：帳本的第一筆交易、排行的最早起點）早於存檔開始、而且這一檔的官方序列
+  沒有涵蓋 `need_from` 時，才**再一次查詢**讀這些商品 `start` 以後的回補列（`source == "yahoo-history"`，每 500 檔一個 `IN`；股票基準和持股一起讀）。
+  換算和參考收盤同一套：`MarketData.corporate_events_many`（已知分割、存檔偵測到的美股分割）裡，比最舊的回補列晚、不晚於第一筆官方收盤、而且回補真的照它
+  換算過（`_folded_in`）的，乘回去。`_folded_in` 的兩個價格（分割前最後一筆有成交的回補收盤、分割日起第一筆有成交的收盤）從已經讀到的列判斷
+  （`_folded_in_rows`）；讀到的列判斷不了（`start` 以後分割前都沒成交、第一筆官方收盤的成交量是 0）才照舊查資料庫。決定本身抽成 `_fold_decision`，參考收盤也用它。
+- **每一檔每一天只有一種價格**：回補的收盤只用在 `cutoff = min(存檔開始, 這一檔第一筆官方收盤)` 以前（`ValuationPrices.filled`：官方序列照舊往前帶，
+  `cutoff` 以前的日子才用回補往前帶的值）。所以存檔開始以後還沒有官方收盤的商品（00662 停牌到 11/17）照舊沒有價格，回補不會被帶過存檔開始。
+- **帳本績效**（`portfolio.performance`）：日期軸多了回補的日子（帳本第一筆交易以後）；`price_fn` 記下哪些日子有持股用了回補（`simulate` 只問有持股的商品），
+  `reference_until` 是區間裡最後一個（不以基準收盤起算的區間，前一天也算：它是第一天報酬的分母）。`notes` 加一句
+  `reference_note(max(持股的, 基準的))`「2026/11/11 以前用 Yahoo 參考價計算，不是官方資料」（排在「績效從 … 收盤開始算」之後、基準與匯率的說明之前）。
+  商用模式的「每一檔都有收盤價的第一天」規則不變：回補也沒有的商品照舊把區間切到它有價格的那天（同時有參考價的日子照樣標）。
+  **基準**：股票基準（0050）同樣接上回補；指數沒有回補——區間用到參考價、而基準在區間開頭沒有收盤時，`benchmark_index` 在它的第一個收盤以前是 `null`、
+  `benchmark.twr` 從那天算，`notes` 寫「發行量加權股價報酬指數從 2026/11/12 收盤起算，之前沒有資料」。這個 `null` 只在用到參考價的區間出現（其他照舊）。
+  股票基準用到參考價時（`b_ref`），存檔開始以前沒有除息資料（`md.dividends` 在 commercial 下只有存檔以後存的除息預告與計算結果，回補只存收盤），那段只算價格：
+  `notes` 在參考價那一句後面加 `price_only_note(基準名稱, b_ref)`「元大台灣50在 2026/11/11 以前只算價格，不含股利」（2026-11-18 審查；0050 一年配兩次、
+  大約 1 月和 7 月，今年兩次都在存檔以前）。AI 圖卡（`ai/charts.performance_chart`）看到這句時不寫「基準含股利」，只寫「報酬率是時間加權報酬率」；
+  前端在本機組圖卡時（`ai/chart-intent.ts`）也一樣，`reference_until` 或參考價那一句在時來源多列 Yahoo。
+- **群組**（`sharing`）：`window_for` 只在 **commercial**、回補開著、有起點早於存檔開始時查 `md.reference_since()`（其他政策下別的來源本來就有那些年的收盤，
+  `valuation_prices` 一列也不會讀，排行不該寫參考價那一句：照以前不切也不標，2026-11-18 審查）（回補的第一天；`ArchiveProvider.reference_first_date`，
+  在日期索引上第一列就是回補的，不快取：`drop` 之後下一個請求就回到以前），有的話不再把起點切到存檔開始（只切到回補的第一天，幾乎不會），
+  `PeriodWindow.reference_until` = 存檔開始前一個交易日（全群組同一天：不洩漏誰什麼時候持有什麼）；`references(period)` 是這個期間有沒有碰到它。
+  `member_returns`（`member_period_returns_ex` 是它的舊介面）只在 `reference_until` 有值時接上回補；碰到沒有價格的日子時，原本的「全部 None／排除完全沒價格的商品」照舊，
+  兩者都不行時（只在用到參考價的視窗）改成**每個期間各自判斷**（`_priced_returns(per_period=True)`），還是不行的期間（成員持有回補沒有的股票：回補狀態
+  mismatch、not_found、no_overlap，或還沒回補）**照改之前的算法**算：`PeriodWindow.official()`（起點切到存檔開始、不用回補）＋同一批已經讀到的官方收盤，
+  所以數字和正式環境現在的排行一模一樣，也和他自己帳本的 MTD／YTD（`performance` 的 commercial 起點規則：從每一檔都有收盤的第一天起算）相同，照常排名
+  （2026-11-18 審查：之前這些成員本月、今年變成「—」、沒有名次，帳本和分享卡卻有數字）。`MemberReturns.starts` 記下這個較晚的起點，
+  `Leaderboard.entries[].own_start_date` 只在**自己那一列**給（和 `excludes_unpriced` 一樣，別人的一律 `null`），前端在排行下面只對他說一句。週報的週報酬同樣。
+  `_benchmark_period_returns(md, window, db, prices)`：0050 接上回補（`_price_only`：用到參考價的期間 → 說明「只算價格，不含股利」）；指數的基準收盤沒有、
+  而期間碰到參考價時從它在期間裡的第一個收盤起算（`_from`）。
+  `period_notes` 統一排行、週報、日報的說明順序：起點被切時的「資料從 …」（日報照舊不寫）→ 參考價那一句 → 0050 只算價格 → 晚開始的基準。用到參考價的期間 `sources`
+  多 `yahoo-history`；回應多 `Leaderboard.reference_until`、`SharedReturns.reference_until`（只在用到時才有這個鍵，`exclude_unset`）。
+  以前每個期間都會出現的「資料從 2026/11/12 開始，這段期間從 2026/11/16 收盤起算」（今日也有，因為整個視窗被切過）在回補開著時不再出現。
+- **AI 畫圖**（`ai/charts.performance_chart`）：績效的說明有參考價那一句時，`sources` 多列回補；有「只算價格」那一句時不寫「基準含股利」；基準有 `null` 的點時照舊不畫基準線。
+- **速度**：績效 11 → 12 個 SQL（多一次回補查詢）。排行、週報、日報用 `Projector.prime(成員, 股票基準)`：所有分享報酬的成員的持股加上 0050，
+  一次 `md.histories` 讀官方日線、一次 `valuation_prices` 讀回補列，每位成員（`member_returns(prices=...)`，`ValuationPrices.covers`）和 0050 再從裡面取用，
+  不再每人各讀一次（2026-11-18 審查：之前回補列是每位成員各讀一次，2330 有幾個人持有就讀幾次）。實測（`tests/test_api_speed.py`）：一位成員的今年排行
+  21 → 22；三位成員 27 → 26（合起來讀官方日線比每人各讀一次少）；回補的讀取從一位到三位都是 2 個（回補的第一天、合起來的回補列）。回補關掉時 `prime` 什麼都不做，
+  一個也不多。`ValuationPrices` 沒有把參考 K 線接到 `HistoryResult` 的方法（審查時刪掉沒人用的 `history()`：非官方價格不該有混進一般日線的入口）。
+- **不變的保證**（`tests/api/test_reference_valuation.py`）：完全在存檔開始以後的期間（存檔第一天才買的帳本的各區間、1D、今日排行與兩個基準），和改之前的程式
+  產生的快照（`tests/api/fixtures/reference_valuation_golden.json`；`UPDATE_GOLDEN=1` 重寫，只該在刻意改變數字時用）逐位元組相同，回補開著或關著都一樣；
+  回補關掉或整批刪除時本月排行與 ALL 績效和以前一樣切到存檔起點。0050 在 2025-06-18 的一拆四（帳本記了分割）與 2363 在 2024-07-29 的減資在序列上都是平的，
+  帳本記的股利算進 TWR 與每月股利，2024 年買的帳本 1 年／今年／本月／5 日都從原本的起點算並標明；本月、今年排行與帳本的 MTD、YTD 是同一個數字
+  （持有回補沒有的股票的成員也是：兩邊都從存檔開始那天算）。0050 基準今年的報酬是價格比、並有「只算價格」那一句；personal 政策下排行不寫參考價。
+- **已知限制**：存檔開始以前的除息資料我們沒有（除息預告與計算結果都是存檔以後才存），股票基準在那段期間只算價格、不含股利，成員自己的股利照帳本紀錄算，
+  所以「比 0050 多／少」在那段偏向成員；畫面用「元大台灣50在 … 以前只算價格，不含股利」說清楚。要補的話可以讓回補一起存 Yahoo 的除息事件、只用在存檔以前的基準，
+  但那是新的資料用途，待負責人決定。
+

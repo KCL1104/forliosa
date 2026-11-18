@@ -31,7 +31,7 @@ import binascii
 import bisect
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -42,8 +42,9 @@ from sqlalchemy.orm import Session
 from forliosa.api import serialize as ser
 from forliosa.api.errors import ApiError, unprocessable
 from forliosa.crypto import keyed_id
-from forliosa.datapolicy import labels, tagged
+from forliosa.datapolicy import HISTORY_SOURCE, history_backfill_enabled, labels, tagged
 from forliosa.domain.fees import ZERO
+from forliosa.domain.ledger import CostMethod
 from forliosa.domain.performance import benchmark_returns, simulate
 from forliosa.marketdata.service import MarketData
 from forliosa.models import (
@@ -61,6 +62,13 @@ from forliosa.models import (
 from forliosa.services.coverage import ymd
 from forliosa.services.ledger_io import FxBook, FxLoader, FxMemo, LedgerInput, load_ledger_input
 from forliosa.services.portfolio import PortfolioState, compute_state
+from forliosa.services.reference_close import (
+    ValuationPrices,
+    forward_filled,
+    price_only_note,
+    reference_note,
+    valuation_prices,
+)
 from forliosa.services.scope import ViewScope, set_view_scope
 from forliosa.timeutil import (
     MARKET_CLOSE,
@@ -167,8 +175,24 @@ def identity(user: User) -> dict[str, Any]:
 class PeriodWindow:
     end: date  # the latest close
     starts: dict[str, date]  # period -> base close (shared by every member and the benchmarks)
-    clipped: bool  # a start was moved to the first archived day
-    archive_since: date | None
+    clipped: bool  # a start was moved to the first day with data (``data_since``)
+    archive_since: date | None  # the archive's first day (commercial)
+    # 產品負責人 2026-11-18: the last day before the archive, when a start is earlier and the history backfill's closes
+    # value those days (as traded); ``None``: the window is all official closes, as before
+    reference_until: date | None = None
+    data_since: date | None = None  # where the window's data begins: starts before it are moved to it
+
+    def references(self, period: str) -> date | None:
+        """``reference_until`` when ``period`` reaches back to it (its base close or later days before the archive)."""
+        r = self.reference_until
+        return r if r is not None and self.starts[period] <= r else None
+
+    def official(self) -> PeriodWindow:
+        """The window as it was before the reference closes (and is with the backfill off): starts before the
+        archive's first day moved to it. A member whose holding the backfill cannot price is computed over it."""
+        since = self.archive_since
+        starts = {k: min(since, self.end) if since is not None and s < since else s for k, s in self.starts.items()}
+        return PeriodWindow(self.end, starts, self.clipped or starts != self.starts, since, None, since)
 
 
 def latest_close(md: MarketData, now: datetime | None = None) -> date:
@@ -186,16 +210,28 @@ def latest_close(md: MarketData, now: datetime | None = None) -> date:
 
 def window_for(md: MarketData, starts: dict[str, date], end: date) -> PeriodWindow:
     """A window ending at the close of ``end``; under commercial a start before the first archived day is moved to
-    that day (the archive is the only price source)."""
+    that day (the archive is the only price source) — unless the history backfill's closes reach back that far
+    (PRICE_HISTORY_SOURCE=yahoo with rows stored; 產品負責人 2026-11-18): then the days before the archive are valued
+    with them as traded (``services.reference_close.valuation_prices``), only a start before *their* first day is
+    moved, and ``reference_until`` names the last day before the archive, so the board and the digests say so.
+    Switched off or dropped, or not commercial (other sources already cover those days, nothing reads the backfill):
+    as before."""
     starts = dict(starts)
     since = md.archive_since() if md.policy == "commercial" else None
+    floor = since
+    reference_until = None
+    if since is not None and history_backfill_enabled() and any(s < since for s in starts.values()):
+        first = md.reference_since()
+        if first is not None and first < since:
+            reference_until = last_tw_trading_day(since - timedelta(days=1))
+            floor = first
     clipped = False
-    if since is not None:
+    if floor is not None:
         for k, s in starts.items():
-            if s < since:
-                starts[k] = min(since, end)
+            if s < floor:
+                starts[k] = min(floor, end)
                 clipped = True
-    return PeriodWindow(end, starts, clipped, since)
+    return PeriodWindow(end, starts, clipped, since, reference_until, floor)
 
 
 def period_window(md: MarketData, end: date | None = None) -> PeriodWindow:
@@ -205,20 +241,6 @@ def period_window(md: MarketData, end: date | None = None) -> PeriodWindow:
         "month": last_tw_trading_day(end.replace(day=1) - timedelta(days=1)),
         "year": last_tw_trading_day(date(end.year, 1, 1) - timedelta(days=1)),
     }, end)
-
-
-def _forward_filled(axis: list[date], closes: dict[date, Decimal]) -> dict[date, Decimal]:
-    out: dict[date, Decimal] = {}
-    known = sorted(closes)
-    j = 0
-    last: Decimal | None = None
-    for d in axis:
-        while j < len(known) and known[j] <= d:
-            last = closes[known[j]]
-            j += 1
-        if last is not None:
-            out[d] = last
-    return out
 
 
 def _axis(window: PeriodWindow) -> list[date]:
@@ -244,48 +266,123 @@ def _window_return(daily: list[float], active: list[bool], axis: list[date], sta
 
 
 def member_period_returns(db: Session, md: MarketData, user: User, window: PeriodWindow) -> dict[str, float | None]:
-    return member_period_returns_ex(db, md, user, window)[0]
+    return member_returns(db, md, user, window).returns
 
 
 def member_period_returns_ex(db: Session, md: MarketData, user: User, window: PeriodWindow,
                              inp: LedgerInput | None = None,
                              fx_loader: FxLoader | None = None) -> tuple[dict[str, float | None], bool]:
+    r = member_returns(db, md, user, window, inp, fx_loader)
+    return r.returns, r.excluded
+
+
+@dataclass
+class MemberReturns:
+    returns: dict[str, float | None]  # period -> TWR (None: nothing to show)
+    excluded: bool = False  # holdings with no close at all were left out
+    # period -> the later base close it was computed from: a holding the history backfill cannot price before the
+    # archive (產品負責人 2026-11-18 review) — said on the member's own row only, like ``excluded``
+    starts: dict[str, date] = field(default_factory=dict)
+
+
+def valued_symbols(inp: LedgerInput) -> list[str]:
+    """The symbols a member's returns need closes of."""
+    return sorted({t.symbol for t in inp.transactions if t.symbol and t.type in (
+        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")})
+
+
+def member_returns(db: Session, md: MarketData, user: User, window: PeriodWindow, inp: LedgerInput | None = None,
+                   fx_loader: FxLoader | None = None, prices: ValuationPrices | None = None) -> MemberReturns:
     """Time-weighted returns of all of ``user``'s accounts combined (TWD, closes) for every period of the window
     (leaderboard: day / month / year; weekly digest: week), from the window's common start dates. A member who starts
     holding during a period counts from the first day with holdings.
 
     Holdings with no close at all in the window (US stocks under commercial) are left out, the same rule as the
-    ledger's 今日 and the performance page: the second value says so (product owner 2026-11-14 — before this the
-    member's every period was None, so someone with a 複委託 account never got a rank). Any other gap → None."""
-    none = dict.fromkeys(window.starts)
+    ledger's 今日 and the performance page: ``excluded`` says so (product owner 2026-11-14 — before this the
+    member's every period was None, so someone with a 複委託 account never got a rank). Any other gap → None.
+
+    A window reaching before the archive (``window.reference_until``) values those days with the history backfill's
+    closes as traded (產品負責人 2026-11-18; ``prices``: a board's one read for every member, :meth:`Projector.prime`).
+    A period that reaches days the backfill cannot price (a holding it has no rows of) is computed as before the
+    change instead — from the archive's first day (:meth:`PeriodWindow.official`), the ledger's own rule (its 績效
+    starts at the first fully priced close) — and ``starts`` names that later base close."""
     inp = inp if inp is not None else load_ledger_input(db, user)
     if inp.first_date is None or inp.first_date > window.end:
-        return none, False
+        return MemberReturns(dict.fromkeys(window.starts))
     axis = _axis(window)
-    symbols = sorted({t.symbol for t in inp.transactions if t.symbol and t.type in (
-        "buy", "sell", "stock_dividend", "split", "capital_reduction", "cash_dividend")})
+    symbols = valued_symbols(inp)
     lookback = axis[0] - timedelta(days=14)
-    histories = md.histories(symbols, lookback, window.end)
-    closes = {s: _forward_filled(axis, {c.t: c.c for c in histories[s].candles}) for s in symbols}
+    if window.reference_until is not None and prices is not None and prices.covers(symbols):
+        refs = prices
+    else:
+        histories = md.histories(symbols, lookback, window.end)
+        refs = (valuation_prices(db, md, histories, lookback, axis[0]) if window.reference_until is not None
+                else ValuationPrices(histories))
+    closes = {s: refs.filled(axis, s, refs.official[s].candles) for s in symbols}
     fx = (fx_loader or FxBook.load)(md, inp.first_date, window.end)
     txns = inp.ledger_txns(fx)
+    out, excluded, missing = _priced_returns(txns, axis, closes, fx, inp.method, window,
+                                             per_period=window.reference_until is not None)
+    if not missing:
+        return MemberReturns(out, excluded)
+    # as before the reference closes: the official closes from the archive's first day (the same rows, read above)
+    off = window.official()
+    axis_o = _axis(off)
+    lb = axis_o[0] - timedelta(days=14)
+    closes_o = {s: forward_filled(axis_o, {c.t: c.c for c in refs.official[s].candles if c.t >= lb}) for s in symbols}
+    out_o, excluded_o, _ = _priced_returns(txns, axis_o, closes_o, fx, inp.method, off, per_period=False)
+    later: dict[str, date] = {}
+    for k in missing:
+        out[k] = out_o[k]
+        if out_o[k] is not None:
+            excluded |= excluded_o
+            if off.starts[k] != window.starts[k]:
+                later[k] = off.starts[k]
+    return MemberReturns(out, excluded, later)
 
+
+def _priced_returns(txns: list, axis: list[date], closes: dict[str, dict[date, Decimal]], fx: FxBook,
+                    method: CostMethod, window: PeriodWindow,
+                    per_period: bool) -> tuple[dict[str, float | None], bool, set[str]]:
+    """Each period's TWR over ``axis`` with ``closes``, the holdings without any close left out if that prices every
+    day (the second value). A period reaching a day still unpriced has no number: ``per_period`` decides per period
+    (the third value: those periods), otherwise every period is None (and none is reported)."""
     def run(skip: set[str]):
         return simulate([t for t in txns if t.symbol not in skip], axis, lambda s, d: closes.get(s, {}).get(d),
-                        lambda c, d: fx.rate(c, d), inp.method).points
+                        lambda c, d: fx.rate(c, d), method).points
 
     points = run(set())
+    if not any(p.unpriced for p in points):
+        return _period_returns(points, axis, window), False, set()
+    never = {s for s, c in closes.items() if not c}
+    alt = run(never) if never else None
+    if alt is not None and not any(p.unpriced for p in alt):
+        return _period_returns(alt, axis, window), True, set()
+    if not per_period:
+        return dict.fromkeys(window.starts), False, set()
+    out: dict[str, float | None] = {}
     excluded = False
-    if any(p.unpriced for p in points):
-        never = {s for s, c in closes.items() if not c}
-        if not never:
-            return none, False
-        points, excluded = run(never), True
-        if any(p.unpriced for p in points):
-            return none, False
+    missing: set[str] = set()
+    for k, start in window.starts.items():
+        s = bisect.bisect_right(axis, start) - 1
+        out[k] = None
+        for pts, ex in ((points, False), (alt, True)):
+            if pts is not None and s >= 0 and not any(p.unpriced for p in pts[s:]):
+                out[k] = _period_returns(pts, axis, window, k)[k]
+                excluded |= ex
+                break
+        else:
+            missing.add(k)
+    return out, excluded, missing
+
+
+def _period_returns(points: list, axis: list[date], window: PeriodWindow,
+                    only: str | None = None) -> dict[str, float | None]:
+    """Each period's TWR (``only``: just that one) from a simulation over ``axis``."""
     daily = [p.daily_return for p in points]
     active = [False] + [points[i - 1].value + points[i].inflow > 0 for i in range(1, len(points))]
-    return {k: _window_return(daily, active, axis, start, window.end) for k, start in window.starts.items()}, excluded
+    return {k: _window_return(daily, active, axis, start, window.end) for k, start in window.starts.items()
+            if only is None or k == only}
 
 
 @dataclass
@@ -329,7 +426,9 @@ class Projector:
         self._states: dict[str, PortfolioState] = {}
         self._returns: dict[str, dict[str, float | None]] = {}
         self._excluded: dict[str, bool] = {}
+        self._starts: dict[str, dict[str, date]] = {}
         self._window = window  # default: the leaderboard's day / month / year window
+        self.prices: ValuationPrices | None = None  # :meth:`prime`
         # each member's ledger is read once and the FX series once per range, for both of its uses (2026-11-17)
         self._inputs: dict[str, LedgerInput] = {}
         self._fx = FxMemo()
@@ -351,10 +450,29 @@ class Projector:
                                                   fx_loader=self._fx)
         return self._states[user.id]
 
+    def prime(self, users: Iterable[User], extra: Iterable[str] = ()) -> ValuationPrices | None:
+        """A board or a digest whose window reaches before the archive: every member's holdings (and ``extra``, the
+        stock benchmarks) are read together — their histories in one batch and their reference closes in one more —
+        instead of once per member (2026-11-18 review). A window within the archive: nothing (as before)."""
+        window = self.window
+        if window.reference_until is None:
+            return None
+        symbols = set(extra)
+        for u in users:
+            inp = self.ledger_input(u)
+            if inp.first_date is not None and inp.first_date <= window.end:
+                symbols.update(valued_symbols(inp))
+        axis = _axis(window)
+        lookback = axis[0] - timedelta(days=14)
+        histories = self.md.histories(sorted(symbols), lookback, window.end)
+        self.prices = valuation_prices(self.db, self.md, histories, lookback, axis[0])
+        return self.prices
+
     def period_returns(self, user: User) -> dict[str, float | None]:
         if user.id not in self._returns:
-            self._returns[user.id], self._excluded[user.id] = member_period_returns_ex(
-                self.db, self.md, user, self.window, inp=self.ledger_input(user), fx_loader=self._fx)
+            r = member_returns(self.db, self.md, user, self.window, inp=self.ledger_input(user), fx_loader=self._fx,
+                               prices=self.prices)
+            self._returns[user.id], self._excluded[user.id], self._starts[user.id] = r.returns, r.excluded, r.starts
         return self._returns[user.id]
 
     def excludes_unpriced(self, user: User) -> bool:
@@ -362,10 +480,23 @@ class Projector:
         self.period_returns(user)
         return self._excluded.get(user.id, False)
 
-    def returns_block(self, user: User) -> dict[str, float | None]:
+    def own_start(self, user: User, period: str) -> date | None:
+        """The later base close ``period`` was computed from for this member (a holding the history backfill cannot
+        price before the archive); ``None``: the window's."""
+        self.period_returns(user)
+        return self._starts.get(user.id, {}).get(period)
+
+    def returns_block(self, user: User) -> dict[str, Any]:
         r = self.period_returns(user)
-        return {"day": pct(r["day"]), "month": pct(r["month"]), "year": pct(r["year"]),
-                "total": pct(totals(self.state(user)).total_return)}
+        out: dict[str, Any] = {"day": pct(r["day"]), "month": pct(r["month"]), "year": pct(r["year"]),
+                               "total": pct(totals(self.state(user)).total_return)}
+        # a period reaching before the archive was valued with reference closes (產品負責人 2026-11-18): the member
+        # page says so. The date is the board's, the same for everyone (never when this member held what)
+        until = max((u for k in ("day", "month", "year") if k in self.window.starts
+                     and (u := self.window.references(k)) is not None), default=None)
+        if until is not None:
+            out["reference_until"] = until
+        return out
 
     def holdings_block(self, user: User) -> list[dict[str, Any]]:
         return [{k: v for k, v in h.items() if not k.startswith("_")} for h in holdings_list(self.state(user))]
@@ -422,8 +553,15 @@ def group_holdings(proj: Projector, members: list[Member]) -> dict[str, Any]:
     return {"members": rows, "common": common, "industries": inds, "is_demo": is_demo}
 
 
-def _benchmark_period_returns(md: MarketData, window: PeriodWindow) -> tuple[list[dict[str, Any]], list[str], bool,
-                                                                           list[str]]:
+def _benchmark_period_returns(md: MarketData, window: PeriodWindow, db: Session | None = None,
+                              prices: ValuationPrices | None = None
+                              ) -> tuple[list[dict[str, Any]], list[str], bool, list[str]]:
+    """Each benchmark's return per period (``_returns``). A window reaching before the archive values a stock
+    benchmark's days before it with the history backfill's closes as traded (``db``: where they are read; ``prices``:
+    already read with the members', :meth:`Projector.prime`). We have no ex-dividend dates before the archive, so
+    those days are a price return only (``_price_only``: period -> the last such day). An index has no backfill: a
+    period whose base close it lacks starts at its first close instead (``_from``: period -> that close). The notes
+    say both (:func:`period_notes`)."""
     axis = _axis(window)
     lookback = axis[0] - timedelta(days=14)
     rows: list[dict[str, Any]] = []
@@ -431,17 +569,26 @@ def _benchmark_period_returns(md: MarketData, window: PeriodWindow) -> tuple[lis
     notes: list[str] = []
     is_demo = False
     for sym in BENCHMARKS:
+        refs: ValuationPrices | None = None
         if sym.startswith("^"):
             hist = md.index_history(sym, lookback, window.end)
             kind = "index"
             divs: dict[date, Decimal] = {}
             splits: dict[date, Decimal] = {}
         else:
-            hist = md.history(sym, lookback, window.end)
             kind = "price"
+            reference = window.reference_until is not None
+            if reference and prices is not None and prices.covers([sym]):
+                refs, hist = prices, prices.official[sym]
+            else:
+                hist = md.history(sym, lookback, window.end)
+                if reference and db is not None:
+                    refs = valuation_prices(db, md, {sym: hist}, lookback, axis[0])
             divs = {e.ex_dividend_date: e.cash_dividend for e in md.dividends(sym).value if e.ex_dividend_date}
             splits = {e.date: e.ratio for e in md.corporate_events(sym) if e.kind == "split"}
-        closes = _forward_filled(axis, {c.t: c.c for c in hist.candles})
+        # (the board and the digests credit the backfill for the periods that reach back to it)
+        closes = (refs.filled(axis, sym, hist.candles) if refs is not None
+                  else forward_filled(axis, {c.t: c.c for c in hist.candles}))
         is_demo |= hist.is_demo
         if hist.source:
             sources.extend(tagged(hist.source, kind))
@@ -449,14 +596,46 @@ def _benchmark_period_returns(md: MarketData, window: PeriodWindow) -> tuple[lis
                                   lambda d, splits=splits: splits.get(d, Decimal(1)))
         priced = [d in closes for d in axis]
         out: dict[str, float | None] = {}
+        late: dict[str, date] = {}
+        price_only: dict[str, date] = {}
         for k, start in window.starts.items():
             s = bisect.bisect_right(axis, start) - 1
             ok = s >= 0 and priced[s] and priced[-1]
             out[k] = _window_return(daily, [True] * len(axis), axis, start, window.end) if ok else None
-        rows.append({"symbol": sym, "name": md.benchmark_name(sym), "_returns": out})
+            if not ok and window.references(k) is not None and priced[-1]:
+                # before the archive without a close of its own (an index): from its first close in the period
+                first = next((i for i in range(max(s, 0), len(axis)) if priced[i]), None)
+                if first is not None and axis[first] < window.end:
+                    out[k] = _window_return(daily, [True] * len(axis), axis, axis[first], window.end)
+                    late[k] = axis[first]
+            until = window.references(k)
+            if out[k] is not None and until is not None and refs is not None and sym in refs.reference:
+                price_only[k] = until  # no ex-dividend dates before the archive: a price return there
+        rows.append({"symbol": sym, "name": md.benchmark_name(sym), "_returns": out, "_from": late,
+                     "_price_only": price_only})
         if md.policy == "commercial" and not closes:
             notes.append(f"沒有 {md.benchmark_name(sym)} 的資料，不能比較")
     return rows, sources, is_demo, notes
+
+
+def period_notes(window: PeriodWindow, period: str, bench: list[dict[str, Any]], clip_note: str | None) -> list[str]:
+    """The notes a period of a board or digest opens with: where the data begins when a start was moved
+    (``clip_note``, filled with that day and the period's start; ``None``: not said), that days before the archive
+    were valued with reference closes, a stock benchmark that is a price return before the archive, and a benchmark
+    that starts later than the period (:func:`_benchmark_period_returns`)."""
+    notes: list[str] = []
+    if clip_note is not None and window.clipped and window.data_since is not None:
+        notes.append(clip_note.format(since=ymd(window.data_since), start=ymd(window.starts[period])))
+    until = window.references(period)
+    if until is not None:
+        notes.append(reference_note(until))
+    for b in bench:
+        if period in b.get("_price_only", {}):
+            notes.append(price_only_note(b["name"], b["_price_only"][period]))
+    for b in bench:
+        if period in b.get("_from", {}):
+            notes.append(f"{b['name']}從 {ymd(b['_from'][period])} 收盤起算，之前沒有資料")
+    return notes
 
 
 def rank_entries(entries: list[dict[str, Any]], ranked: bool) -> list[dict[str, Any]]:
@@ -478,19 +657,23 @@ def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str
     window = proj.window
     is_demo = False
     entries = []
-    for m in members:
-        if not m.shares("returns"):
-            continue
+    sharing = [m for m in members if m.shares("returns")]
+    prices = proj.prime([m.user for m in sharing], [b for b in BENCHMARKS if not b.startswith("^")])
+    for m in sharing:
         r = proj.period_returns(m.user)
         is_demo |= proj.is_demo(m.user)
         mine = m.user_id == me_id
-        # only my own row says what was left out: another member's US holdings are not for the group to see
+        # only my own row says what was left out (or where my period begins): another member's holdings are not for
+        # the group to see
         entries.append({**identity(m.user), "return_pct": pct(r[period]),
                         "total_return_pct": pct(totals(proj.state(m.user)).total_return), "is_me": mine,
-                        "excludes_unpriced": mine and proj.excludes_unpriced(m.user)})
-    bench, sources, bench_demo, notes = _benchmark_period_returns(proj.md, window)
-    if window.clipped and window.archive_since is not None:
-        notes.insert(0, f"資料從 {ymd(window.archive_since)} 開始，這段期間從 {ymd(window.starts[period])} 收盤起算")
+                        "excludes_unpriced": mine and proj.excludes_unpriced(m.user),
+                        "own_start_date": proj.own_start(m.user, period) if mine and r[period] is not None else None})
+    bench, sources, bench_demo, notes = _benchmark_period_returns(proj.md, window, proj.db, prices)
+    notes = [*period_notes(window, period, bench, "資料從 {since} 開始，這段期間從 {start} 收盤起算"), *notes]
+    until = window.references(period)
+    if until is not None:
+        sources = [*sources, HISTORY_SOURCE]  # members' days before the archive too, not only a benchmark's
     # the day's thread (``leaderboard:<date>``, the same for every period): a comment count and reaction tallies,
     # like feed items and digests — who reacted is not listed, and nothing counts the members who do not share
     target = f"leaderboard:{window.end.isoformat()}"
@@ -507,6 +690,7 @@ def leaderboard(proj: Projector, group: Group, members: list[Member], me_id: str
         "notes": notes,
         "sources": labels(["ledger", *sources]),
         "is_demo": is_demo or bench_demo,
+        "reference_until": until,
         "comment_count": counts.get(target, 0),
         "reactions": reactions.get(target, []),
     }
@@ -810,6 +994,8 @@ def digest_week_facts(db: Session, md: MarketData, members: list[Member], week_s
     base = last_tw_trading_day(week_start - timedelta(days=1))
     window = window_for(md, {"week": base}, days[-1])
     proj = Projector(db, md, window)
+    prices = proj.prime([m.user for m in members if m.shares("returns")],
+                        [b for b in BENCHMARKS if not b.startswith("^")])
     returns, holdings, trades = [], [], []
     symbols: dict[str, dict[str, Any]] = {}
     is_demo = False
@@ -833,9 +1019,10 @@ def digest_week_facts(db: Session, md: MarketData, members: list[Member], week_s
             if feed_eligible(t):
                 counts[t.user_id] += 1
         trades = [{"user_id": uid, "count": counts[uid]} for uid in sharing_trades]
-    bench, sources, bench_demo, notes = _benchmark_period_returns(md, window)
-    if window.clipped and window.archive_since is not None:
-        notes.insert(0, f"資料從 {ymd(window.archive_since)} 開始，本週從 {ymd(window.starts['week'])} 收盤起算")
+    bench, sources, bench_demo, notes = _benchmark_period_returns(md, window, db, prices)
+    notes = [*period_notes(window, "week", bench, "資料從 {since} 開始，本週從 {start} 收盤起算"), *notes]
+    if window.references("week") is not None:
+        sources = [*sources, HISTORY_SOURCE]
     facts = {
         "v": 1, "base_date": window.starts["week"].isoformat(), "end_date": window.end.isoformat(),
         "trading_days": len(days), "returns": returns, "holdings": holdings, "symbols": symbols, "trades": trades,
@@ -963,6 +1150,8 @@ def digest_day_facts(db: Session, md: MarketData, members: list[Member], day: da
     base = last_tw_trading_day(day - timedelta(days=1))
     window = window_for(md, {"day": base}, day)
     proj = Projector(db, md, window)
+    prices = proj.prime([m.user for m in members if m.shares("returns")],
+                        [b for b in BENCHMARKS if not b.startswith("^")])
     returns, holdings, trades = [], [], []
     symbols: dict[str, dict[str, Any]] = {}
     is_demo = False
@@ -991,7 +1180,10 @@ def digest_day_facts(db: Session, md: MarketData, members: list[Member], day: da
                     info = md.instrument(t.symbol)
                     symbols[t.symbol] = {"name": info.name if info else t.symbol}
         trades = [{"user_id": uid, "count": len(items[uid]), "items": items[uid]} for uid in sharing_trades]
-    bench, sources, bench_demo, notes = _benchmark_period_returns(md, window)
+    bench, sources, bench_demo, notes = _benchmark_period_returns(md, window, db, prices)
+    notes = [*period_notes(window, "day", bench, None), *notes]
+    if window.references("day") is not None:
+        sources = [*sources, HISTORY_SOURCE]
     benchmarks = []
     for b in bench:
         value = pct(b["_returns"]["day"])
