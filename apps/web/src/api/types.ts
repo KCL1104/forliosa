@@ -763,6 +763,11 @@ export interface Performance {
   is_demo: boolean
   /** 「資料累積中：自 … 起存檔」、「美股目前沒有可商用的行情來源…」 */
   notes?: string[]
+  /**
+   * 區間裡最後一個用 Yahoo 參考價（存檔開始以前的歷史日線，換算成當時成交價）估持股市值的日子；
+   * 都是官方收盤時為 null（產品負責人 2026-11-18）。舊版後端沒有這個欄位
+   */
+  reference_until?: string | null
 }
 
 
@@ -1432,6 +1437,11 @@ export interface LeaderboardEntry extends UserRef {
   is_me: boolean
   /** 只在我自己那一列：期間報酬沒有算進沒有收盤價的持股（商用模式的美股）。別人的一律 false */
   excludes_unpriced?: boolean
+  /**
+   * 只在我自己那一列（2026-11-18）：期間碰到存檔開始以前、而我有持股那時沒有 Yahoo 參考價，我的期間報酬從這天收盤起算
+   * （存檔開始那天，和帳本的績效一樣）。別人的、或從期間起點算的，一律 null
+   */
+  own_start_date?: string | null
 }
 
 export interface BenchmarkReturn {
@@ -1454,6 +1464,8 @@ export interface Leaderboard {
   notes: string[]
   sources: string[]
   is_demo: boolean
+  /** 這個期間用到存檔開始以前的 Yahoo 參考價時，最後一天（`notes` 也有一行）；都是官方收盤時為 null */
+  reference_until?: string | null
   /** 當天排行討論串（`leaderboard:<date>`，三個期間同一串）的留言數與表情；只有計數，不列出誰按的 */
   comment_count: number
   reactions: Reaction[]
@@ -1476,7 +1488,8 @@ export interface GroupHoldings {
 
 /** 一位成員分享給這個群組的內容：只出現對方開放的區塊（沒開放的鍵不存在） */
 export interface SharedPortfolio extends UserRef {
-  returns?: { day: number | null; month: number | null; year: number | null; total: number | null }
+  /** `reference_until`：本月或今年用到存檔開始以前的 Yahoo 參考價時才有（最後一天，全群組同一天） */
+  returns?: { day: number | null; month: number | null; year: number | null; total: number | null; reference_until?: string }
   holdings?: SharedHolding[]
   amounts?: { market_value: number; day_change: number; total_pnl: number }
   is_demo: boolean

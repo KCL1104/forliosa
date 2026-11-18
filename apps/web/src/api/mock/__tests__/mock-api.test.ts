@@ -219,17 +219,40 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect((await api.getUpcoming(60)).some((u) => u.symbol === "AAPL" || u.symbol === "VOO")).toBe(false)
   })
 
-  it("績效：美股也算得出來；全部帳戶從台股存檔起點、只有美股的帳戶從 2024/07/01 收盤開始算", async () => {
-    const all = await api.getPerformance({ range: "1Y" })
+  it("績效（Yahoo 回補關掉）：美股也算得出來；全部帳戶從台股存檔起點、只有美股的帳戶從 2024/07/01 收盤開始算", async () => {
+    const off = createMockAdapter({ latency: [0, 0], historyBackfill: false })
+    const all = await off.getPerformance({ range: "1Y" })
     expect(all.series.length).toBeGreaterThan(20)
     expect(all.notes?.join("")).not.toContain("美股")
     expect(all.series[0]!.twr_index).toBe(1)
     expect(all.notes?.[0]).toBe("績效從 2026/06/01 收盤開始算，之前沒有資料")
-    expect((await api.getPerformance({ range: "1M" })).notes).toEqual([])
-    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
-    const usAll = await api.getPerformance({ range: "ALL", account_id: us.id })
+    expect(all.reference_until).toBeNull()
+    expect((await off.getPerformance({ range: "1M" })).notes).toEqual([])
+    const us = (await off.listAccounts()).find((a) => a.currency === "USD")!
+    const usAll = await off.getPerformance({ range: "ALL", account_id: us.id })
     expect(usAll.series[0]!.t >= "2024-07-01").toBe(true)
     expect(usAll.notes?.[0]).toBe("績效從 2024/07/01 收盤開始算，之前沒有資料")
+  })
+
+  it("績效：存檔開始以前用 Yahoo 參考價算（回補開著，產品負責人 2026-11-18）：1 年不再從存檔起點切，多一句說明與 reference_until；0050 那段只算價格；美股沒有回補", async () => {
+    const all = await api.getPerformance({ range: "1Y" })
+    expect(all.series[0]!.t < "2026-06-01").toBe(true)
+    expect(all.notes).toEqual(["2026/05/29 以前用 Yahoo 參考價計算，不是官方資料", "元大台灣50在 2026/05/29 以前只算價格，不含股利"])
+    expect(all.reference_until).toBe("2026-05-29")
+    // 指數基準含息、沒有回補：不寫「只算價格」
+    expect((await api.getPerformance({ range: "1Y", benchmark: "^TAIEXTR" })).notes?.join("")).not.toContain("只算價格")
+    const month = await api.getPerformance({ range: "1M" })
+    expect(month.notes).toEqual([])
+    expect(month.reference_until).toBeNull()
+    // 美股帳戶：持股沒有用到參考價（reference_until 是 null），基準 0050 存檔以前用了，說明照寫（和後端一樣）
+    const us = (await api.listAccounts()).find((a) => a.currency === "USD")!
+    const usAll = await api.getPerformance({ range: "ALL", account_id: us.id })
+    expect(usAll.notes).toEqual([
+      "績效從 2024/07/01 收盤開始算，之前沒有資料",
+      "2026/05/29 以前用 Yahoo 參考價計算，不是官方資料",
+      "元大台灣50在 2026/05/29 以前只算價格，不含股利",
+    ])
+    expect(usAll.reference_until).toBeNull()
   })
 
   it("還沒有收盤價的美股（SEC 代號表才有的，模擬剛加入）：沒有報價、持股以成本計值、績效算不出來", async () => {
@@ -249,7 +272,12 @@ describe("商用模式（預設，與後端 DATA_POLICY=commercial 一致）", (
     expect(msft.market_value).toBe(msft.cost_basis)
     const all = await fresh.getPerformance({ range: "1Y" })
     expect(all.series).toEqual([])
-    expect(all.notes).toEqual(["MSFT：還沒有收盤價，績效算不出來", "資料從 2026/06/01 開始；持股期間有幾天沒有收盤價，績效算不出來"])
+    // 台股存檔開始以前有 Yahoo 參考價（回補開著）：說的只有美股；回補關掉時台股也有幾天沒有收盤價
+    expect(all.notes).toEqual(["MSFT：還沒有收盤價，績效算不出來"])
+    const off = createMockAdapter({ latency: [0, 0], historyBackfill: false })
+    const offUs = (await off.listAccounts()).find((a) => a.currency === "USD")!
+    await off.createTransaction({ account_id: offUs.id, symbol: "MSFT", type: "buy", trade_date: "2026-11-10", quantity: 2, price: 520 })
+    expect((await off.getPerformance({ range: "1Y" })).notes).toEqual(["MSFT：還沒有收盤價，績效算不出來", "資料從 2026/06/01 開始；持股期間有幾天沒有收盤價，績效算不出來"])
     // 只看新台幣帳戶就算得出來
     const tw = (await fresh.listAccounts()).find((a) => a.currency === "TWD")!
     expect((await fresh.getPerformance({ range: "1Y", account_id: tw.id })).series.length).toBeGreaterThan(20)

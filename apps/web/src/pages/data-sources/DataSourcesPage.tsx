@@ -101,8 +101,8 @@ export function DataSourcesPage() {
               {/* 跟著資料走：正式環境開了 Yahoo 的歷史日線回補時，不能說「都來自政府開放資料」（2026-11-14 第七次評分） */}
               <p className="max-w-prose text-base">
                 {usCloses ? "台股行情" : "行情"}、匯率、公司資料與公告來自政府開放資料，以及我們每天從這些資料存下來的紀錄。
-                {/* 2026-11-17 起也是記一筆、匯入對帳單時舊日期的參考收盤（只當參考，不進帳本） */}
-                {a.datasets.some((d) => d.key === "yahoo-history") && "走勢圖裡較早的日線，和記一筆、匯入對帳單時舊日期的參考收盤，來自 Yahoo Finance，不是官方資料，也沒有轉載授權。"}
+                {/* 2026-11-17 起也是記一筆、匯入對帳單時舊日期的參考收盤；2026-11-18 起也算存檔開始以前的績效與報酬（持股市值仍是官方收盤） */}
+                {a.datasets.some((d) => d.key === "yahoo-history") && "走勢圖裡較早的日線、記一筆和匯入對帳單時舊日期的參考收盤，以及存檔開始以前的績效與報酬，來自 Yahoo Finance，不是官方資料，也沒有轉載授權。"}
               </p>
               {usCloses && (
                 <p className="max-w-prose text-base">

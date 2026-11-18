@@ -24,14 +24,15 @@ import { cn } from "@/lib/utils"
 import type { LedgerView } from "@/router"
 import { usePrefs } from "@/stores/prefs"
 import { useLedgerPrefs } from "./ledger-prefs"
-import { trendClipNote, trendMissingReason } from "./trend-reason"
+import { trendClipNote, trendMissingReason, trendReferenceLine } from "./trend-reason"
 import { useTrendRange } from "./use-trend-range"
 
 /**
  * 總資產走勢（產品負責人 2026-11-17 選方案 B）：主數字正下方、和主欄一樣寬，手機與桌面同一個元件。
  * 由上到下：讀數（固定兩行）→ 圖（桌面 160px、手機 120px）→ 區間（靠左）→ 歷史短（2～6 個收盤）時的一行說明。
  * - 資料：一次 `usePerformance("ALL")`（不帶基準），區間在前端切（`lib/trend-range.ts`），換區間不再問伺服器。
- *   只用官方收盤價（存檔從 2026/11/12 起），不用 Yahoo 回補。
+ *   存檔（2026/11/12 起）以後是官方收盤價；以前的日子用 Yahoo 回補換算成當時成交價（產品負責人 2026-11-18），
+ *   區間用到那些日子時區間按鈕下面寫一行「11/11 以前用 Yahoo 參考價計算，不是官方資料」（後端的 `reference_until`）。
  * - 滑過、按住橫拖、方向鍵：讀數換成那一天的值；上面的大數字不變（永遠是最新收盤）。
  * - 自己畫 SVG（照 `ai/ChartCard.tsx`）：總資產 2px 墨色線、最後一點 8px 圓點＋2px 紙色外圈；
  *   投入本金 1.5px 鉛筆灰階梯線，縱軸只看總資產，投入本金不在範圍裡就不畫。
@@ -146,6 +147,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
   return (
     <TrendBand
       series={series}
+      referenceUntil={perf.data.reference_until ?? null}
       range={range}
       onRange={setRange}
       height={desktop ? 160 : 120}
@@ -158,6 +160,7 @@ export function HeroTrend({ view }: { view: LedgerView }) {
 
 function TrendBand({
   series,
+  referenceUntil,
   range,
   onRange,
   height,
@@ -166,6 +169,8 @@ function TrendBand({
   shortNote,
 }: {
   series: PerformancePoint[]
+  /** 後端的 `reference_until`：這一天（含）以前用 Yahoo 參考價估值 */
+  referenceUntil: string | null
   range: TrendRange
   onRange: (r: TrendRange) => void
   height: number
@@ -197,6 +202,8 @@ function TrendBand({
   const span = `${day(from.t)} – ${day(last.t)}`
   const period = win.exceeds ? `只有 ${span} 的資料` : span
   const total = rangeReturn(win)
+  // 區間用到存檔開始以前的 Yahoo 參考價：區間按鈕下面一行（和績效分段同一句，那邊就不再寫）
+  const referenceLine = trendReferenceLine({ series, reference_until: referenceUntil }, range, withYear)
 
   const model = useMemo(() => {
     const { ticks, min, max } = trendDomain(slice.map((p) => p.market_value))
@@ -384,6 +391,7 @@ function TrendBand({
       {/* 七顆一律放（比資料長的也可以選）；歷史短時說明在按鈕下面——按鈕的位置和歷史夠長以後一樣 */}
       <RangeChips className="mt-2" label="走勢區間" value={range} options={TREND_RANGES} onChange={onRange} />
       {shortNote && <p className="mt-1.5 text-sm text-ink-2">{shortNote}</p>}
+      {referenceLine && <p className="mt-1.5 text-sm text-ink-2">{referenceLine}</p>}
     </section>
   )
 }

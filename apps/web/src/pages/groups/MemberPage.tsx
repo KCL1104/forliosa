@@ -8,6 +8,7 @@ import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
 import { UserAvatar } from "@/components/avatar"
 import { Money, Pct } from "@/components/finance"
+import { DataNotes } from "@/components/data-notes"
 import { DemoTag, Section } from "@/components/section"
 import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
@@ -117,6 +118,10 @@ export function SharedPortfolioView({ p, groupId, role, isMe }: { p: SharedPortf
                     ] as const
                   ).map(([label, v]) => [label, v === null ? <span className="num font-normal text-ink-2">—</span> : <Pct value={v} />])}
                 />
+                {/* 本月、今年用到存檔開始以前的 Yahoo 參考價時（和排行同一句；產品負責人 2026-11-18） */}
+                {p.returns.reference_until && (
+                  <DataNotes className="mt-2" notes={[`${p.returns.reference_until.replaceAll("-", "/")} 以前用 Yahoo 參考價計算，不是官方資料`]} />
+                )}
               </Section>
             )}
             {p.amounts && (

@@ -1,9 +1,11 @@
 """Guard: the Yahoo Finance history backfill (``yahoo-history``) is a chart and *reference* source only.
 
 Product owner 2026-11-13 / 2026-11-17: its closes may draw charts and serve as the buy form's and the statement
-import's reference close for days the archive lacks — never the ledger. With the backfill switched on and rows for
-every day before the archive (at absurd prices, so any leak shows), the ledger's market value, P&L, performance and
-the recurring plan's debit price still come from the official closes alone."""
+import's reference close for days the archive lacks. 2026-11-18 (選 A): performance may also value the days *before
+the archive* with them, saying so — but never today's holdings. With the backfill switched on and rows for every day
+before the archive (at absurd prices, so any leak shows), the ledger's market value, P&L and the recurring plan's debit
+price still come from the official closes alone, and performance from the archive's first day on is the official
+closes exactly as before."""
 
 from __future__ import annotations
 
@@ -59,15 +61,28 @@ def test_the_rows_are_live_for_charts_and_the_reference_close(client, setup):
     assert chart["candles"][0]["t"] == setup["yahoo"][0].isoformat()
 
 
-def test_ledger_value_pnl_and_performance_ignore_the_backfill(client, setup):
+def test_ledger_value_and_pnl_ignore_the_backfill_and_performance_says_where_it_used_it(client, setup, monkeypatch):
     last = 1000 + 10 * (len(setup["official"]) - 1)
     holdings = client.get(f"{API}/portfolio/holdings").json()
     assert holdings[0]["price"] == float(last) and holdings[0]["market_value"] == 1000.0 * last
     p = client.get(f"{API}/portfolio/performance?range=6M").json()
-    # starts on the first official close: no day of the backfill, no NT$1 market value anywhere
-    assert p["start_date"] == setup["official"][0].isoformat()
-    assert [pt["t"] for pt in p["series"]] == [d.isoformat() for d in setup["official"]]
-    assert all(pt["market_value"] >= 1_000_000 for pt in p["series"])
+    # the days before the archive are the backfill's (NT$1 here, so they show), labelled; from the archive's first
+    # day on, the official closes alone
+    official = {d.isoformat() for d in setup["official"]}
+    assert p["start_date"] == setup["buy"].isoformat()
+    assert p["reference_until"] == setup["yahoo"][-1].isoformat()
+    assert f"{setup['yahoo'][-1]:%Y/%m/%d} 以前用 Yahoo 參考價計算，不是官方資料" in p["notes"]
+    assert all(pt["market_value"] == 1000.0 for pt in p["series"] if pt["t"] not in official)
+    assert [pt["market_value"] for pt in p["series"] if pt["t"] in official] == [
+        1000.0 * (1000 + 10 * i) for i in range(len(setup["official"]))]
+    # switched off: as before — no day of the backfill, no NT$1 market value anywhere
+    monkeypatch.setenv("PRICE_HISTORY_SOURCE", "")
+    get_settings.cache_clear()
+    off = client.get(f"{API}/portfolio/performance?range=6M").json()
+    assert off["start_date"] == setup["official"][0].isoformat() and off["reference_until"] is None
+    assert [pt["t"] for pt in off["series"]] == [d.isoformat() for d in setup["official"]]
+    assert all(pt["market_value"] >= 1_000_000 for pt in off["series"])
+    assert not any("Yahoo" in n for n in off["notes"])
     summary = client.get(f"{API}/portfolio/summary").json()
     assert summary["market_value"] == pytest.approx(1000.0 * last, rel=1e-6)
     assert summary["unrealized_pnl"] == pytest.approx(1000.0 * last - summary["cost_basis"], rel=1e-6)
@@ -83,7 +98,7 @@ def test_recurring_debit_price_ignores_the_backfill(setup):
 def test_a_day_stored_later_is_a_fresh_reference_and_still_not_the_ledger(client, setup, engine):
     """With the API speed work's caches warm (2026-11-17: they sit on the archive's official rows and versions, never on
     these): a day the backfill stores after the close and the ledger were read is a reference close at once, and the
-    ledger's numbers do not move."""
+    ledger's numbers do not move (the day is before the first buy: performance does not value it either)."""
     from forliosa.timeutil import last_tw_trading_day as last_day
 
     day = last_day(setup["yahoo"][0] - timedelta(days=1))

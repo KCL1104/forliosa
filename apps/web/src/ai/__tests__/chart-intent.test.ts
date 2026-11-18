@@ -122,6 +122,18 @@ describe("buildLocalChart：用 API 的資料組出和後端同樣形狀的圖�
     expect(short).toEqual({ chart: null, text: "美股沒有報價，含美股的績效算不出來。" })
   })
 
+  it("我的報酬率用到存檔開始以前的 Yahoo 參考價：來源列出 Yahoo；0050 那段只算價格時不寫「基準含股利」", async () => {
+    const plain = await buildLocalChart({ kind: "performance", targets: [], range: "6M" }, deps())
+    expect(plain.chart!.sources).toEqual(["帳本紀錄"])
+    expect(plain.chart!.notes).toEqual(["報酬率是時間加權報酬率；基準含股利"])
+    const real = fakeApi().getPerformance
+    const notes = ["2026/11/11 以前用 Yahoo 參考價計算，不是官方資料", "元大台灣50在 2026/11/11 以前只算價格，不含股利"]
+    const api = fakeApi({ getPerformance: async (q) => ({ ...(await real(q)), reference_until: "2026-11-11", notes }) })
+    const out = await buildLocalChart({ kind: "performance", targets: [], range: "1Y" }, deps(api))
+    expect(out.chart!.sources).toEqual(["帳本紀錄", "Yahoo Finance（歷史日線，非官方資料）"])
+    expect(out.chart!.notes).toEqual([...notes, "報酬率是時間加權報酬率"])
+  })
+
   it("找不到任何一檔：說明一句，不畫", async () => {
     expect(await buildLocalChart({ kind: "price", targets: ["不存在"], range: "6M" }, deps())).toEqual({ chart: null, text: "找不到「不存在」。換個代號試試，例如 0050、2330。" })
   })

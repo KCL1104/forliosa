@@ -173,6 +173,129 @@ def test_ledger_statements_do_not_grow_with_holdings(engine, client, archive, pa
     assert many <= 20, many
 
 
+def _group_board(client) -> str:
+    r = client.post(f"{API}/groups", json={"name": "家族投資"})
+    assert r.status_code == 201, r.text
+    return f"/groups/{r.json()['id']}/leaderboard?period=year"
+
+
+@pytest.mark.parametrize("path", ["/portfolio/performance?range=ALL", "/portfolio/performance?range=1Y&benchmark=0050",
+                                  "leaderboard"])
+def test_reference_closes_before_the_archive_do_not_grow_the_statements(engine, client, archive, monkeypatch, path):
+    """產品負責人 2026-11-18: a ledger older than the archive is valued before it with the history backfill's closes.
+    Bought before the archive's first day, with Yahoo rows for every Taiwan holding: the performance page stays
+    within the speed work's numbers above, and the group board adds a constant few statements (the backfill's first
+    day and one read of every member's and 0050's rows, ``sharing.Projector.prime``) whatever the number of
+    holdings."""
+    from forliosa.config import get_settings
+
+    before = tw_trading_days(DAYS[0] - timedelta(days=40), DAYS[0] - timedelta(days=1))
+    with Session(engine) as db:
+        for n, s in enumerate(TW):
+            if s not in ("2330.TW", "2317.TW"):  # (the fixture's two already have them)
+                db.add_all(_bars(s, before, "yahoo-history", 50 + 40 * n))
+        db.add_all(_bars("0050.TW", before, "yahoo-history", 60))
+        db.add_all(_bars("0050.TW", DAYS, "twse-openapi", 62))
+        db.commit()
+    account = client.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD"}).json()["id"]
+    us_account = client.post(f"{API}/accounts", json={"name": "複委託", "currency": "USD"}).json()["id"]
+
+    def buy(acc: str, symbols: list[str], day: date = before[5]) -> None:
+        rows = [{"symbol": s, "type": "buy", "trade_date": day.isoformat(), "quantity": 10, "price": 50}
+                for s in symbols]
+        r = client.post(f"{API}/transactions/batch", json={"account_id": acc, "dry_run": False, "rows": rows})
+        assert r.status_code == 201, r.text
+
+    buy(account, TW[:2])
+    url = _group_board(client) if path == "leaderboard" else path
+    counts: dict[bool, tuple[int, int]] = {}
+    for on in (False, True):
+        monkeypatch.setenv("PRICE_HISTORY_SOURCE", "yahoo" if on else "")
+        get_settings.cache_clear()
+        counter = Statements(engine)
+        try:
+            client.get(f"{API}{url}")  # caches warm (instrument master, quotes, the archive's start)
+            few = counter.measure(lambda: client.get(f"{API}{url}"))
+            if not on:
+                buy(account, TW[2:])
+                buy(us_account, US, DAYS[2])  # (no US closes before the archive: bought after it began)
+            client.get(f"{API}{url}")
+            many = counter.measure(lambda: client.get(f"{API}{url}"))
+        finally:
+            counter.close()
+        counts[on] = (few, many)
+    few, many = counts[True]
+    referenced = client.get(f"{API}{url}").json()
+    assert referenced["reference_until"] == before[-1].isoformat()  # the backfill was really used
+    assert many <= few + 3, counts
+    if path == "leaderboard":
+        assert many <= counts[False][1] + 3, counts  # the board: a constant few more, not one per holding
+    else:
+        assert many <= 20, counts
+
+
+def test_the_board_reads_every_member_s_reference_closes_at_once(engine, app, client, other_client, archive,
+                                                                 monkeypatch):
+    """2026-11-18 review: the board read each member's backfill rows on its own (2 + one per member, 2330 read once
+    per member holding it). Now every member's holdings and the stock benchmark are read together
+    (``sharing.Projector.prime``): the backfill reads stay the same from one member to three, and the board stays
+    within a constant few statements of the board with the backfill off."""
+    from forliosa.config import get_settings
+    from tests.api.m5 import SHARE_DEFAULT, join, login, make_group
+
+    before = tw_trading_days(DAYS[0] - timedelta(days=40), DAYS[0] - timedelta(days=1))
+    with Session(engine) as db:
+        for n, s in enumerate(TW):
+            if s not in ("2330.TW", "2317.TW"):  # (the fixture's two already have them)
+                db.add_all(_bars(s, before, "yahoo-history", 50 + 40 * n))
+        db.add_all(_bars("0050.TW", before, "yahoo-history", 60))
+        db.add_all(_bars("0050.TW", DAYS, "twse-openapi", 62))
+        db.commit()
+
+    def buy(who, symbols: list[str]) -> None:
+        acc = who.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD"}).json()["id"]
+        rows = [{"symbol": s, "type": "buy", "trade_date": before[5].isoformat(), "quantity": 10, "price": 50}
+                for s in symbols]
+        r = who.post(f"{API}/transactions/batch", json={"account_id": acc, "dry_run": False, "rows": rows})
+        assert r.status_code == 201, r.text
+
+    third = login(app, "third@forliosa.local", "老三")
+    buy(client, TW[:4])
+    buy(other_client, TW[2:6])
+    buy(third, ["2330.TW", *TW[6:9]])
+    gid = make_group(client)["id"]
+    url = f"{API}/groups/{gid}/leaderboard?period=year"
+
+    def measure(on: bool) -> tuple[int, int]:
+        monkeypatch.setenv("PRICE_HISTORY_SOURCE", "yahoo" if on else "")
+        get_settings.cache_clear()
+        backfill: list[str] = []
+
+        def count(_conn, _cursor, statement, parameters, *_a):
+            if "yahoo-history" in str(parameters):
+                backfill.append(statement)
+
+        client.get(url)  # caches warm (instrument master, quotes, the archive's start)
+        counter = Statements(engine)
+        event.listen(engine, "before_cursor_execute", count)
+        try:
+            total = counter.measure(lambda: client.get(url))
+        finally:
+            event.remove(engine, "before_cursor_execute", count)
+            counter.close()
+        return total, len(backfill)
+
+    one = measure(True)
+    join(client, other_client, gid, SHARE_DEFAULT)
+    join(client, third, gid, SHARE_DEFAULT)
+    off, three = measure(False), measure(True)
+    board = client.get(url).json()
+    assert board["reference_until"] == before[-1].isoformat() and len(board["entries"]) == 3
+    assert all(e["return_pct"] is not None for e in board["entries"])
+    assert three[1] == one[1], (one, three)  # the backfill reads do not grow with the members
+    assert three[0] <= off[0] + 3, (off, three)
+
+
 def test_upcoming_recurring_only_is_the_recurring_part_of_upcoming(client, archive):
     account = client.post(f"{API}/accounts", json={"name": "永豐", "currency": "TWD"}).json()["id"]
     _buy(client, account, TW[:3])

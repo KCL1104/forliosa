@@ -38,7 +38,7 @@ import {
   type UserRef,
 } from "../types"
 import { sourceOf } from "./attributions"
-import { ARCHIVE_START, ymd } from "./commercial"
+import { ARCHIVE_START, BACKFILL_START, priceOnlyNote, referenceNote, YAHOO_HISTORY_LABEL, ymd } from "./commercial"
 import { findInstrument } from "./instruments"
 import { addDays, closeOn, MOCK_TODAY, parseDay } from "./market"
 import { PEOPLE, STATIC_PROFILES, type PeriodReturns, type RawTrade } from "./members"
@@ -67,6 +67,8 @@ export interface SharingDeps {
   me(): UserRef
   signedIn(): boolean
   commercial: boolean
+  /** Yahoo 回補開著（後端 PRICE_HISTORY_SOURCE=yahoo）：存檔開始以前的期間用參考價算（產品負責人 2026-11-18） */
+  backfill?: boolean
   myAccounts(): Account[]
   mine: MemberSource
   dad: MemberSource
@@ -437,11 +439,16 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
     if (period === "day") start = prevTradingDay(date)
     else if (period === "month") start = lastTradingDayOnOrBefore(addDays(`${date.slice(0, 7)}-01`, -1))
     else start = lastTradingDayOnOrBefore(`${Number(date.slice(0, 4)) - 1}-12-31`)
-    const clipped = deps.commercial && start < ARCHIVE_START
-    return { date, start: clipped ? ARCHIVE_START : start, clipped }
+    // 商用模式：存檔開始以前沒有資料，期間從存檔起點算；Yahoo 回補開著時（和後端一樣）用參考價從原本的起點算，
+    // reference_until 是存檔開始前一個交易日
+    const since = deps.backfill ? BACKFILL_START : ARCHIVE_START
+    const clipped = deps.commercial && start < since
+    const referenceUntil = deps.commercial && deps.backfill && start < ARCHIVE_START ? prevTradingDay(ARCHIVE_START) : null
+    return { date, start: clipped ? since : start, clipped, since, referenceUntil }
   }
-  const benchmarkReturn = (symbol: string, start: string, end: string): number | null => {
-    if (symbol === "^TAIEXTR" && deps.commercial && start < INDEX_ARCHIVE_START) return null
+  const benchmarkReturn = (symbol: string, start: string, end: string, reference = false): number | null => {
+    // 期間用到參考價時，指數（回補沒有）從它的第一個收盤起算（和後端相同）
+    if (symbol === "^TAIEXTR" && deps.commercial && start < INDEX_ARCHIVE_START) return reference ? benchmarkReturn(symbol, INDEX_ARCHIVE_START, end) : null
     const spec = findInstrument("0050.TW")!
     const base = closeOn(spec, start)
     const r = closeOn(spec, end) / base - 1
@@ -905,7 +912,7 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
     getLeaderboard(groupId: string, period: LeaderboardPeriod): Leaderboard {
       const { g } = memberGroup(groupId)
       if (!["day", "month", "year"].includes(period)) throw new ApiError(422, "validation_error", "輸入資料格式錯誤：period")
-      const { date, start, clipped } = leaderboardDates(period)
+      const { date, start, clipped, since, referenceUntil } = leaderboardDates(period)
       const rows: LeaderboardEntry[] = g.members
         .filter((m) => m.share.returns)
         .map((m) => {
@@ -925,17 +932,24 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
         })
       }
       const benchmarks = [
-        { symbol: "^TAIEXTR", name: "發行量加權股價報酬指數", return_pct: benchmarkReturn("^TAIEXTR", start, date) },
+        { symbol: "^TAIEXTR", name: "發行量加權股價報酬指數", return_pct: benchmarkReturn("^TAIEXTR", start, date, !!referenceUntil) },
         { symbol: "0050.TW", name: "元大台灣50", return_pct: benchmarkReturn("0050.TW", start, date) },
       ]
       const notes: string[] = []
-      if (clipped) notes.push(`資料從 ${ymd(ARCHIVE_START)} 開始，這段期間從 ${ymd(ARCHIVE_START)} 收盤起算`)
+      if (clipped) notes.push(`資料從 ${ymd(since)} 開始，這段期間從 ${ymd(since)} 收盤起算`)
+      if (referenceUntil) {
+        notes.push(referenceNote(referenceUntil))
+        // 0050 存檔開始以前沒有除息資料，那段只算價格（和後端相同）
+        notes.push(priceOnlyNote("元大台灣50", referenceUntil))
+        if (start < INDEX_ARCHIVE_START) notes.push(`發行量加權股價報酬指數從 ${ymd(INDEX_ARCHIVE_START)} 收盤起算，之前沒有資料`)
+      }
       if (benchmarks[0]!.return_pct === null) notes.push("沒有 發行量加權股價報酬指數 的資料，不能比較")
       // 當天排行的討論串（三個期間同一串）：只有計數與 mine，不列出誰按的
       const thread = `leaderboard:${date}`
       return {
         period, date, start_date: start, as_of: "2026-11-12T13:30:00+08:00", ranked: g.ranking_enabled, entries, benchmarks, notes,
-        sources: [sourceOf("twse-openapi/price"), sourceOf("tpex-openapi/price")], is_demo: !deps.commercial,
+        sources: [sourceOf("twse-openapi/price"), sourceOf("tpex-openapi/price"), ...(referenceUntil ? [YAHOO_HISTORY_LABEL] : [])],
+        reference_until: referenceUntil, is_demo: !deps.commercial,
         comment_count: commentCount(g, thread), reactions: reactionsOf(g, thread),
       }
     },
@@ -953,7 +967,9 @@ export function createSharingStore(deps: SharingDeps, scenario: "default" | "emp
       const out: SharedPortfolio = { ...refOf(m), is_demo: !deps.commercial }
       if (src && m.share.returns) {
         const r = src.returns()
-        out.returns = { day: r4(r.day), month: r4(r.month), year: r4(r.year), total: r4(r.total) }
+        // 今年（最早的期間）用到參考價時才有 reference_until（和後端相同）
+        const ref = leaderboardDates("year").referenceUntil
+        out.returns = { day: r4(r.day), month: r4(r.month), year: r4(r.year), total: r4(r.total), ...(ref ? { reference_until: ref } : {}) }
       }
       if (src && m.share.holdings) out.holdings = holdingsOf(userId)
       if (src && m.share.amounts) {

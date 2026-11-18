@@ -15,9 +15,11 @@ are recorded in PRODUCT.md and docs/research/data-sources-licensing.md. Rules th
 * ``drop`` removes every row and the bookkeeping, e.g. when licensed history replaces it.
 
 Only chart-like reads ask for these rows (``backfill=True``): Yahoo's prices are split-adjusted, so ledger valuation
-and performance keep to official closes. Since 2026-11-17 (product owner) the buy form's 「那天收盤」 hint and the
-statement import's price check also read them as a *reference* close for days the archive lacks, with known splits
-multiplied back (``services.reference_close``); never anything stored or valued.
+keeps to official closes. Since 2026-11-17 (product owner) the buy form's 「那天收盤」 hint and the statement import's
+price check also read them as a *reference* close for days the archive lacks, with known splits multiplied back
+(``services.reference_close``); since 2026-11-18 performance, returns and group boards value the days *before the
+archive* with them the same way, labelled (``reference_close.valuation_prices``). Never stored as official, never
+today's holdings.
 
     uv run python -m forliosa.history_backfill run [--symbols 2330.TW,0050.TW] [--limit 50]
     uv run python -m forliosa.history_backfill status

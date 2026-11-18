@@ -67,6 +67,32 @@ describe("排行：只列開了報酬率的成員", () => {
   })
 })
 
+describe("存檔開始以前用 Yahoo 參考價（產品負責人 2026-11-18）", () => {
+  it("今年：起點不切到存檔起點，第一句說用了參考價、有 reference_until、來源多 Yahoo；指數從它的第一個收盤起算；本月都在存檔以後", async () => {
+    const api = fresh()
+    const year = await api.getLeaderboard("grp_family", "year")
+    expect(year.start_date).toBe("2025-12-31")
+    expect(year.reference_until).toBe("2026-05-29")
+    expect(year.notes[0]).toBe("2026/05/29 以前用 Yahoo 參考價計算，不是官方資料")
+    expect(year.notes).toContain("發行量加權股價報酬指數從 2026/11/02 收盤起算，之前沒有資料")
+    expect(year.benchmarks[0]!.return_pct).not.toBeNull()
+    expect(year.sources).toContain("Yahoo Finance（歷史日線，非官方資料）")
+    const month = await api.getLeaderboard("grp_family", "month")
+    expect(month.reference_until).toBeNull()
+    expect(month.notes.join("")).not.toContain("Yahoo")
+    // 成員頁的報酬率：今年用到參考價，多 reference_until
+    expect((await api.getSharedPortfolio("grp_family", "usr_dad")).returns?.reference_until).toBe("2026-05-29")
+  })
+  it("回補關掉：和以前一樣切到存檔起點、說資料從哪天開始，沒有 reference_until", async () => {
+    const off = createMockAdapter({ latency: [0, 0], historyBackfill: false })
+    const year = await off.getLeaderboard("grp_family", "year")
+    expect(year.start_date).toBe("2026-06-01")
+    expect(year.reference_until).toBeNull()
+    expect(year.notes[0]).toBe("資料從 2026/06/01 開始，這段期間從 2026/06/01 收盤起算")
+    expect((await off.getSharedPortfolio("grp_family", "usr_dad")).returns).not.toHaveProperty("reference_until")
+  })
+})
+
 describe("成員分享（SharedPortfolio）：沒開放的鍵不存在", () => {
   it("什麼都沒開的人只有身分欄位", async () => {
     const p = await fresh().getSharedPortfolio("grp_family", "usr_bro")

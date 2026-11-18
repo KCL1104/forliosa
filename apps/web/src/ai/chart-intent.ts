@@ -1,7 +1,8 @@
-import { readMockPolicy } from "@/api/mock/commercial"
+import { readMockPolicy, YAHOO_HISTORY_LABEL } from "@/api/mock/commercial"
 import type { ForliosaApi, HistoryRange, Instrument, PerformanceRange } from "@/api/types"
 import { formatPercent, formatRevenueThousands } from "@/lib/format"
 import { inText } from "@/lib/cjk"
+import { isPriceOnlyNote, isReferenceNote } from "@/lib/data-notes"
 import { normalize } from "./intent"
 import type { AiChart } from "./remote"
 
@@ -129,8 +130,12 @@ export async function buildLocalChart(
       series.push({ name: perf.benchmark.name, symbol: perf.benchmark.symbol, points: perf.series.map((p) => ({ t: p.t, v: Number((p.benchmark_index! - 1).toFixed(6)) })) })
     }
     const title = series.length > 1 ? `我的報酬率與${perf.benchmark!.name}（${label}）` : `我的報酬率（${label}）`
+    // 和後端的圖卡一樣：存檔開始以前用了 Yahoo 參考價時來源列出 Yahoo；股票基準那段只算價格時不寫「基準含股利」
+    const notes = perf.notes ?? []
+    const reference = !!perf.reference_until || notes.some(isReferenceNote)
+    const how = notes.some(isPriceOnlyNote) ? "報酬率是時間加權報酬率" : "報酬率是時間加權報酬率；基準含股利"
     return done(
-      { kind: "performance", title, unit: "pct", currency: null, x: "date", range: intent.range, series, notes: [...(perf.notes ?? []), "報酬率是時間加權報酬率；基準含股利"], sources: ["帳本紀錄"], is_demo: perf.is_demo },
+      { kind: "performance", title, unit: "pct", currency: null, x: "date", range: intent.range, series, notes: [...notes, how], sources: ["帳本紀錄", ...(reference ? [YAHOO_HISTORY_LABEL] : [])], is_demo: perf.is_demo },
       `${label}${series.map((s) => `${s.name === "我的報酬率" ? "我的報酬率" : s.name} ${formatPercent(s.points.at(-1)!.v)}`).join("、")}。`,
     )
   }

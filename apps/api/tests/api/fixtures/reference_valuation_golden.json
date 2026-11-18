@@ -1,0 +1,418 @@
+{
+ "A 1D": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.019417
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": 0.0,
+  "notes": [],
+  "range": "1D",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1013100.0,
+    "net_invested": 706010.0,
+    "t": "2026-11-16",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.019417,
+    "market_value": 1033030.0,
+    "net_invested": 706010.0,
+    "t": "2026-11-17",
+    "twr_index": 1.019672
+   }
+  ],
+  "start_date": "2026-11-16",
+  "twr": 0.019672,
+  "volatility": null,
+  "xirr": null
+ },
+ "A 1D 0050 account": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.019417
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": 0.0,
+  "notes": [],
+  "range": "1D",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 247200.0,
+    "net_invested": 150880.0,
+    "t": "2026-11-16",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.019417,
+    "market_value": 252000.0,
+    "net_invested": 150880.0,
+    "t": "2026-11-17",
+    "twr_index": 1.019417
+   }
+  ],
+  "start_date": "2026-11-16",
+  "twr": 0.019417,
+  "volatility": null,
+  "xirr": null
+ },
+ "B 1D": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.019417
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": 0.0,
+  "notes": [],
+  "range": "1D",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.019417,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.021127
+   }
+  ],
+  "start_date": "2026-11-16",
+  "twr": 0.021127,
+  "volatility": null,
+  "xirr": null
+ },
+ "B 1M": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.016129
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": -0.013889,
+  "notes": [],
+  "range": "1M",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1430000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-12",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.008065,
+    "market_value": 1440000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-13",
+    "twr_index": 1.006993
+   },
+   {
+    "benchmark_index": 0.996774,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 0.993007
+   },
+   {
+    "benchmark_index": 1.016129,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.013986
+   }
+  ],
+  "start_date": "2026-11-12",
+  "twr": 0.013986,
+  "volatility": 0.231411,
+  "xirr": 1.756344
+ },
+ "B 3M": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.016129
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": -0.013889,
+  "notes": [],
+  "range": "3M",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1430000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-12",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.008065,
+    "market_value": 1440000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-13",
+    "twr_index": 1.006993
+   },
+   {
+    "benchmark_index": 0.996774,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 0.993007
+   },
+   {
+    "benchmark_index": 1.016129,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.013986
+   }
+  ],
+  "start_date": "2026-11-12",
+  "twr": 0.013986,
+  "volatility": 0.231411,
+  "xirr": 1.756344
+ },
+ "B 5D": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.016129
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": -0.013889,
+  "notes": [],
+  "range": "5D",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1430000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-12",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.008065,
+    "market_value": 1440000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-13",
+    "twr_index": 1.006993
+   },
+   {
+    "benchmark_index": 0.996774,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 0.993007
+   },
+   {
+    "benchmark_index": 1.016129,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.013986
+   }
+  ],
+  "start_date": "2026-11-12",
+  "twr": 0.013986,
+  "volatility": 0.231411,
+  "xirr": null
+ },
+ "B ALL": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.016129
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": -0.013889,
+  "notes": [],
+  "range": "ALL",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1430000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-12",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.008065,
+    "market_value": 1440000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-13",
+    "twr_index": 1.006993
+   },
+   {
+    "benchmark_index": 0.996774,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 0.993007
+   },
+   {
+    "benchmark_index": 1.016129,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.013986
+   }
+  ],
+  "start_date": "2026-11-12",
+  "twr": 0.013986,
+  "volatility": 0.231411,
+  "xirr": 1.756344
+ },
+ "B MTD": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.016129
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": -0.013889,
+  "notes": [],
+  "range": "MTD",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1430000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-12",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.008065,
+    "market_value": 1440000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-13",
+    "twr_index": 1.006993
+   },
+   {
+    "benchmark_index": 0.996774,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 0.993007
+   },
+   {
+    "benchmark_index": 1.016129,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.013986
+   }
+  ],
+  "start_date": "2026-11-12",
+  "twr": 0.013986,
+  "volatility": 0.231411,
+  "xirr": 1.756344
+ },
+ "B YTD": {
+  "benchmark": {
+   "name": "元大台灣50",
+   "symbol": "0050.TW",
+   "twr": 0.016129
+  },
+  "dividends_by_month": [],
+  "end_date": "2026-11-17",
+  "is_demo": false,
+  "max_drawdown": -0.013889,
+  "notes": [],
+  "range": "YTD",
+  "realized_by_year": [],
+  "series": [
+   {
+    "benchmark_index": 1.0,
+    "market_value": 1430000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-12",
+    "twr_index": 1.0
+   },
+   {
+    "benchmark_index": 1.008065,
+    "market_value": 1440000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-13",
+    "twr_index": 1.006993
+   },
+   {
+    "benchmark_index": 0.996774,
+    "market_value": 1420000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-16",
+    "twr_index": 0.993007
+   },
+   {
+    "benchmark_index": 1.016129,
+    "market_value": 1450000.0,
+    "net_invested": 1430000.0,
+    "t": "2026-11-17",
+    "twr_index": 1.013986
+   }
+  ],
+  "start_date": "2026-11-12",
+  "twr": 0.013986,
+  "volatility": 0.231411,
+  "xirr": 1.756344
+ },
+ "day board": {
+  "benchmarks": [
+   {
+    "name": "發行量加權股價報酬指數",
+    "return_pct": 0.0134,
+    "symbol": "^TAIEXTR"
+   },
+   {
+    "name": "元大台灣50",
+    "return_pct": 0.0194,
+    "symbol": "0050.TW"
+   }
+  ],
+  "date": "2026-11-17",
+  "returns": {
+   "別人": 0.0211,
+   "示範使用者": 0.0197,
+   "老三": 0.0183
+  },
+  "start_date": "2026-11-16",
+  "totals": {
+   "別人": 0.014,
+   "示範使用者": 0.4689,
+   "老三": 0.1887
+  }
+ }
+}

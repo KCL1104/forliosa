@@ -9,6 +9,7 @@ import { ApiError, type GroupSummary } from "@/api/types"
 import { useReadOnly } from "@/api/view-as"
 import { PageFrame } from "@/app/PageFrame"
 import { ViewAsBlocked } from "@/app/ViewAsBanner"
+import { DataNotes } from "@/components/data-notes"
 import { PageHeader, Section } from "@/components/section"
 import { SourcesFooter } from "@/components/sources"
 import { EmptyState, ErrorState, SkeletonLines } from "@/components/states"
@@ -16,6 +17,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { direction, directionGlyph, formatDateShort, formatDateTime, formatPercent, toneClass } from "@/lib/format"
+import { isReferenceNote } from "@/lib/data-notes"
 import { cn } from "@/lib/utils"
 import { untilDay } from "@/lib/plan"
 import { ROLE_LABEL } from "./labels"
@@ -144,7 +146,10 @@ function CreateGroupDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-/** 分享卡：只有百分比（今日、本月、總報酬），可以複製文字貼到 LINE */
+/**
+ * 分享卡：只有百分比（今日、本月、總報酬），可以複製文字貼到 LINE。
+ * 本月用到存檔開始以前的 Yahoo 參考價時（產品負責人 2026-11-18），卡片下面寫後端那一句，分享文字的本月後面也標上
+ */
 function ShareCard() {
   const summary = useSummary()
   const mtd = usePerformance("MTD")
@@ -154,8 +159,13 @@ function ShareCard() {
   // 本月算不出來（有持股還沒有收盤價、資料還不夠）時，分享文字與卡片都不提本月：沒有的值不寫進句子（不出現「本月 —」）
   const monthKnown = month !== null && month !== undefined
   const noMonth = month === null
+  const until = monthKnown ? (mtd.data?.reference_until ?? null) : null
+  const referenceNote = until
+    ? ((mtd.data?.notes ?? []).find(isReferenceNote) ?? `${until.replaceAll("-", "/")} 以前用 Yahoo 參考價計算，不是官方資料`)
+    : null
+  const monthText = monthKnown ? `本月 ${glyphPct(month)}${until ? `（${formatDateShort(until, false)} 以前用 Yahoo 參考價）` : ""}，` : ""
   const line = s
-    ? `我今天 ${glyphPct(s.day_change_pct)}，${monthKnown ? `本月 ${glyphPct(month)}，` : ""}總報酬 ${glyphPct(s.total_return_pct)}（Forliosa ${formatDateShort(today, false)}）`
+    ? `我今天 ${glyphPct(s.day_change_pct)}，${monthText}總報酬 ${glyphPct(s.total_return_pct)}（Forliosa ${formatDateShort(today, false)}）`
     : ""
   const cells: { label: React.ReactNode; key: string; value: number | null | undefined }[] = [
     { key: "day", label: "今日", value: s?.day_change_pct },
@@ -181,6 +191,7 @@ function ShareCard() {
       </figure>
       {/* 後端的說明自己就有冒號（「MSFT：還沒有收盤價，…」），前面用一句話接，不再疊一個冒號 */}
       {noMonth && <p className="mt-2 max-w-md text-base text-ink">{monthMissing(mtd.data?.notes ?? [])}</p>}
+      {referenceNote && <DataNotes className="mt-2 max-w-md" notes={[referenceNote]} />}
       <Button
         variant="outline"
         className="mt-4"
