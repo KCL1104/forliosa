@@ -2,6 +2,7 @@ import {
   ACCOUNT_DELETE_CONFIRMATION,
   ApiError,
   type Account,
+  type AllocationLimits,
   type ForliosaApi,
   type History,
   type HistoryRange,
@@ -41,7 +42,8 @@ import {
 import { computePreview } from "./fees"
 import { createImportStore } from "./imports"
 import { findInstrument, INSTRUMENTS, STRESS_INSTRUMENT, type MockInstrumentSpec } from "./instruments"
-import { ACCOUNTS, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
+import { validLimit } from "./allocation"
+import { ACCOUNTS, buildAllocation, buildHoldings, buildPerformance, buildSummary, mockBenchmark, seedTransactions } from "./ledger"
 import { addDays, dailyCandles, dividendRecords, MOCK_AS_OF, MOCK_TODAY, monthlyRevenue, valuationSeries } from "./market"
 import { createRecurringStore, seedPlans } from "./recurring"
 import { DAD_ACCOUNTS, seedDadTransactions, type RawTrade } from "./members"
@@ -269,6 +271,27 @@ export interface MockOptions {
   historyBackfill?: boolean
   /** 匯入（匯入對帳單、匯入庫存）開給誰（`?import=`）；預設 all，和後端的 `IMPORT_STATEMENTS` 預設一樣 */
   importStatements?: MockImportStatements
+  /** 配置的上限（`?limits=30,50`：單一個股 30%、單一產業 50%）；預設都沒設，和後端一樣 */
+  allocationLimits?: AllocationLimits
+}
+
+/**
+ * mock 的配置上限：網址 `?limits=30,50`（單一個股 30%、單一產業 50%；只設一個時另一個寫 `-`，例如 `?limits=-,40`），
+ * `?limits=none` 清掉。記在 sessionStorage（截圖用）。
+ */
+export function readMockLimits(): AllocationLimits | undefined {
+  if (typeof window === "undefined") return undefined
+  try {
+    const fromUrl = new URLSearchParams(window.location.search).get("limits")
+    if (fromUrl === "none") window.sessionStorage.removeItem("forliosa:mock-limits")
+    else if (fromUrl && /^(\d+|-),(\d+|-)$/.test(fromUrl)) window.sessionStorage.setItem("forliosa:mock-limits", fromUrl)
+    const saved = window.sessionStorage.getItem("forliosa:mock-limits")
+    if (!saved) return undefined
+    const [h, i] = saved.split(",").map((x) => (x === "-" ? null : Number(x) / 100))
+    return { holding: h ?? null, industry: i ?? null }
+  } catch {
+    return undefined
+  }
 }
 
 /**
@@ -320,6 +343,8 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   }
   /** 匯出的次數（每小時 5 次；mock 不算時間，第 6 次起擋下） */
   let exports = 0
+  /** 配置的上限（使用者偏好裡的 `allocation_limits`；`GET /me` 不列出，只透過配置的端點讀寫） */
+  let allocationLimits: AllocationLimits = { holding: null, industry: null, ...options.allocationLimits }
   let signedIn = options.signedIn ?? true
   let accounts: Account[] = scenario === "empty" ? [] : ACCOUNTS.map((a) => ({ ...a }))
   let txns: Transaction[] = scenario === "empty" ? [] : seedTransactions()
@@ -1065,8 +1090,32 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
         }
       }),
 
-    getPortfolioSummary: (accountId) => wait(() => buildSummary(ledger(accountId).txns, accountId, commercial)),
+    getPortfolioSummary: (accountId) =>
+      wait(() => {
+        const l = ledger(accountId)
+        return buildSummary(l.txns, accountId, commercial, { limits: l.viewing ? VIEWED_LIMITS : allocationLimits, accounts: l.viewing ? l.accounts : accounts })
+      }),
     getHoldings: (accountId) => wait(() => holdingsNow(accountId)),
+    // 配置（2026-11-18）：和持股同一批；查看別人的資產時是授權者的上限、不能改
+    getAllocation: (accountId) =>
+      wait(() => {
+        const l = ledger(accountId)
+        return buildAllocation(l.txns, accountId, commercial, {
+          limits: l.viewing ? VIEWED_LIMITS : allocationLimits,
+          accounts: l.viewing ? l.accounts : accounts,
+          canEditLimits: !l.viewing,
+        })
+      }),
+    putAllocationLimits: (limits) =>
+      wait(() => {
+        const extra = Object.keys(limits).filter((k) => k !== "holding" && k !== "industry")
+        if (extra.length > 0 || !validLimit(limits.holding ?? null) || !validLimit(limits.industry ?? null)) {
+          throw new ApiError(422, "validation_error", "上限要在 1% 到 100% 之間")
+        }
+        const round = (v: number | null) => (v === null ? null : Math.round(v * 10000) / 10000)
+        allocationLimits = { holding: round(limits.holding ?? null), industry: round(limits.industry ?? null) }
+        return { ...allocationLimits }
+      }),
     // 查看模式：授權者沒有定期定額（示範），本週事項只有除息與入帳
     getUpcoming: (days = 7, opts) =>
       wait(() => {
@@ -1249,6 +1298,9 @@ export function createMockAdapter(options: MockOptions = {}): ForliosaApi {
   return guardViewAs(base, (id) => sharing.viewAsOwner(id), wait)
 }
 
+/** 查看別人的資產時，授權者（示範：爸爸）自己設的配置上限：只能看、不能改 */
+const VIEWED_LIMITS: AllocationLimits = { holding: 0.25, industry: null }
+
 // ── 授權查看的路由白名單（與後端相同，預設拒絕） ─────────────────
 type MethodName = Exclude<keyof ForliosaApi, "kind">
 /** 查看者自己的端點（不帶標頭）：`/me`、偏好、登入、讀自己收到的授權（`GET /delegations`，查看中更新橫幅的範圍） */
@@ -1264,14 +1316,14 @@ const IGNORES_VIEW_AS = new Set<MethodName>([
 ])
 /** 以授權者身分回應的唯讀端點 */
 export const VIEW_AS_READS = new Set<MethodName>([
-  "listAccounts", "getPortfolioSummary", "getHoldings", "getPerformance", "getClosedPositions", "getUpcoming", "listTransactions", "getTransactionCounts",
+  "listAccounts", "getPortfolioSummary", "getHoldings", "getAllocation", "getPerformance", "getClosedPositions", "getUpcoming", "listTransactions", "getTransactionCounts",
   "getPosition", "getPositionHistory", "getEvents",
 ])
 /** 非 GET 的方法（查看模式一律 read_only） */
 const WRITES = new Set<MethodName>([
   "deleteAiThreads",
   "createAccount", "updateAccount", "deleteAccount", "addWatch", "removeWatch", "createTransaction", "updateTransaction",
-  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "parsePositions", "checkPositions", "commitPositions", "deleteHolding", "clearRecords", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
+  "deleteTransaction", "previewTransaction", "parseStatement", "checkTransactionBatch", "createTransactionBatch", "deleteTransactionBatch", "parsePositions", "checkPositions", "commitPositions", "deleteHolding", "clearRecords", "putAllocationLimits", "createRecurring", "updateRecurring", "deleteRecurring", "draftRecurring", "requestAnalystViews",
   "createDelegation", "updateDelegation", "deleteDelegation", "createGroup", "updateGroup", "deleteGroup", "transferGroup", "setMemberRole",
   "removeMember", "createInvite", "revokeInvite", "acceptInvite", "putShare", "createComment", "deleteComment", "addReaction", "removeReaction",
   "putDiscord", "patchDiscord", "deleteDiscord", "linkTelegram", "patchTelegram", "deleteTelegram",

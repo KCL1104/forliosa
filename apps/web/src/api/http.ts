@@ -2,6 +2,7 @@ import {
   ApiError,
   type Account,
   type AccountInput,
+  type AllocationLimits,
   type ApiErrorBody,
   type DividendRecord,
   type ForliosaApi,
@@ -13,6 +14,7 @@ import {
   type MonthlyRevenue,
   type Page,
   type Performance,
+  type PortfolioAllocation,
   type PortfolioSummary,
   type Preferences,
   type Quote,
@@ -220,6 +222,9 @@ export function createHttpAdapter(baseUrl: string): ForliosaApi {
     getPortfolioSummary: (accountId) =>
       request<PortfolioSummary>("GET", "/portfolio/summary", { query: { account_id: accountId } }),
     getHoldings: (accountId) => request<Holding[]>("GET", "/portfolio/holdings", { query: { account_id: accountId } }),
+    getAllocation: (accountId) => request<PortfolioAllocation>("GET", "/portfolio/allocation", { query: { account_id: accountId } }),
+    // 兩個都送（整組取代）：沒設的送 null
+    putAllocationLimits: (limits) => request<AllocationLimits>("PUT", "/portfolio/allocation/limits", { body: { holding: limits.holding, industry: limits.industry } }),
     getUpcoming: (days = 7, opts) => request<UpcomingItem[]>("GET", "/portfolio/upcoming", { query: { days, types: opts?.types } }),
     getPerformance: (params) => request<Performance>("GET", "/portfolio/performance", { query: params }),
     getClosedPositions: (accountId) => request<ClosedRound[]>("GET", "/portfolio/closed", { query: { account_id: accountId } }),

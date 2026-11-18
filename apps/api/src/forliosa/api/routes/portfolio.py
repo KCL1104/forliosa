@@ -13,9 +13,12 @@ from forliosa.api.errors import unprocessable
 from forliosa.api.routes.accounts import get_owned_account
 from forliosa.api.routing import Router
 from forliosa.api.schemas import (
+    AllocationLimits,
+    AllocationLimitsIn,
     ClosedRound,
     Holding,
     Performance,
+    PortfolioAllocation,
     PortfolioSummary,
     RecordCounts,
     RecordsCleared,
@@ -24,9 +27,11 @@ from forliosa.api.schemas import (
 from forliosa.db import get_db
 from forliosa.marketdata.service import get_market_data
 from forliosa.models import User
+from forliosa.services import allocation as alloc_svc
 from forliosa.services import portfolio as svc
 from forliosa.services import recurring
 from forliosa.services import transactions as txn_svc
+from forliosa.services.scope import view_scope
 from forliosa.timeutil import today_taipei
 
 router = Router(prefix="/portfolio", tags=["portfolio"])
@@ -43,6 +48,26 @@ def portfolio_summary(account_id: str | None = None, user: User = Depends(curren
 def portfolio_holdings(account_id: str | None = None, user: User = Depends(current_user),
                        db: Session = Depends(get_db)):
     return svc.holdings(svc.compute_state(db, user, get_market_data(), account_id))
+
+
+@router.get("/allocation", response_model=PortfolioAllocation,
+            summary="持倉配置：每一檔、產業、市場、帳戶、幣別、類型六種分組，集中度與自己設的上限")
+def portfolio_allocation(account_id: str | None = None, user: User = Depends(current_user),
+                         db: Session = Depends(get_db)):
+    """The 配置 segment (lazy-loaded): the same rows, prices and FX as ``/portfolio/holdings`` for the same
+    ``account_id`` (``services.allocation``). Served while viewing someone's ledger (their limits, read only:
+    ``can_edit_limits`` false)."""
+    md = get_market_data()
+    state = svc.compute_state(db, user, md, account_id)
+    return alloc_svc.allocation(state, md, account_id, can_edit_limits=view_scope(db) is None)
+
+
+@router.put("/allocation/limits", response_model=AllocationLimits,
+            summary="設定自己的配置上限（單一個股、單一產業；null＝不設）")
+def put_allocation_limits(body: AllocationLimitsIn, user: User = Depends(current_user),
+                          db: Session = Depends(get_db)):
+    """Replaces both limits. 403 ``read_only`` while viewing someone's ledger (``api.middleware``)."""
+    return alloc_svc.set_limits(db, user, body.holding, body.industry)
 
 
 @router.get("/closed", response_model=list[ClosedRound], summary="出清紀錄：已全部賣出的持股回合（最近出清的在前）")

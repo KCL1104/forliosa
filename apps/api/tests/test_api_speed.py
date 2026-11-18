@@ -147,7 +147,7 @@ def _buy(client, account, symbols):
     assert r.status_code == 201, r.text
 
 
-@pytest.mark.parametrize("path", ["/portfolio/summary", "/portfolio/upcoming?days=30",
+@pytest.mark.parametrize("path", ["/portfolio/summary", "/portfolio/allocation", "/portfolio/upcoming?days=30",
                                   "/portfolio/performance?range=ALL", "/portfolio/performance?range=1M&benchmark=0050",
                                   "/watchlist", "/ai/suggestions?route=/"])
 def test_ledger_statements_do_not_grow_with_holdings(engine, client, archive, path):

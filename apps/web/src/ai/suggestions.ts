@@ -74,19 +74,47 @@ export function priceText(p: number, market: Market): string {
   return market === "US" ? `US$${formatPrice(p, market)}` : `${formatPrice(p, market)} 元`
 }
 
-/** 單一持股權重門檻、前三大合計門檻、單一產業門檻：任一超過就出現「會不會太集中」 */
+/**
+ * 「會不會太集中」的提示門檻（使用者沒有自己設上限時才用）：最大一檔、前三大合計、最大產業（不含 ETF 與未分類）任一到了就出現。
+ * 這只是決定要不要提出這個問題，回答只寫事實，不說太高或太低。
+ */
 export const CONCENTRATION = { single: 0.15, top3: 0.45, industry: 0.4 } as const
 
+/**
+ * 集中度的數字：和「配置」分段同一份（`summary.concentration`，2026-11-18）。舊的後端沒有這一份時用持股的權重算
+ * 最大一檔與前三大（沒有最大產業，也沒有上限）。
+ */
 export function concentrationStats(holdings: Holding[], summary?: PortfolioSummary) {
+  const c = summary?.concentration
+  if (c) {
+    return {
+      top: c.top_holding ? { name: c.top_holding.name, weight: c.top_holding.weight } : null,
+      top3: c.top3_weight,
+      top5: c.holdings_count > 5 ? c.top5_weight : null,
+      industry: c.top_industry ? { label: c.top_industry.label, weight: c.top_industry.weight } : null,
+      limits: c.limits,
+      over: c.over_limits,
+    }
+  }
   const sorted = [...holdings].sort((a, b) => b.weight - a.weight)
   const top = sorted[0]
-  const top3 = sorted.slice(0, 3).reduce((s, h) => s + h.weight, 0)
-  const industry = summary?.allocation.by_industry.filter((s) => s.key !== "ETF")[0] ?? null
-  return { top, top3, industry }
+  return {
+    top: top ? { name: top.name, weight: top.weight } : null,
+    top3: sorted.slice(0, 3).reduce((s, h) => s + h.weight, 0),
+    top5: null,
+    industry: null,
+    limits: { holding: null, industry: null },
+    over: [],
+  }
 }
 
+/**
+ * 要不要提出「我的持股會不會太集中？」（和後端 `ai/suggestions.concentrated` 同一個規則）：使用者自己設了上限，
+ * 就只看自己的上限——有超過的才提出；沒設時用上面的提示門檻。
+ */
 export function isConcentrated(holdings: Holding[], summary?: PortfolioSummary): boolean {
-  const { top, top3, industry } = concentrationStats(holdings, summary)
+  const { top, top3, industry, limits, over } = concentrationStats(holdings, summary)
+  if (limits.holding !== null || limits.industry !== null) return over.length > 0
   return (top?.weight ?? 0) >= CONCENTRATION.single || top3 >= CONCENTRATION.top3 || (industry?.weight ?? 0) >= CONCENTRATION.industry
 }
 
@@ -268,13 +296,25 @@ function ledgerAnswer(kind: SuggestionKind, { holdings, summary }: LedgerData, p
       }
     }
     case "concentration": {
-      const { top, top3, industry } = concentrationStats(holdings, summary)
+      // 只寫事實：和「配置」分段同一份數字；使用者設了上限才說超過了哪些（「超過你設定的 30%」），不說該怎麼做
+      const { top, top3, top5, industry, limits, over } = concentrationStats(holdings, summary)
       if (!top) return null
+      const p = (w: number) => formatPercent(w, { signed: false, decimals: 1 })
+      const facts =
+        `最大的一檔是${inText(top.name, "end")}，佔 ${p(top.weight)}；` +
+        (top5 !== null ? `前 5 大合計 ${p(top5)}` : `前 3 大合計 ${p(top3)}`) +
+        (industry ? `；最大的產業是${inText(industry.label, "end")}，佔 ${p(industry.weight)}（不含 ETF）。` : "。")
+      const limitText = (v: number) => formatPercent(v, { signed: false, decimals: Number.isInteger(Math.round(v * 1000) / 10) ? 0 : 1 })
+      const hasLimits = limits.holding !== null || limits.industry !== null
+      const verdict = !hasLimits
+        ? ""
+        : over.length === 0
+          ? "沒有超過你設定的上限。"
+          : `超過你設定的上限：${over.map((o) => `${o.label} ${p(o.weight)}（上限 ${limitText(o.limit)}）`).join("、")}。`
       return {
-        text:
-          `最大的一檔是${inText(top.name, "end")}，佔 ${formatPercent(top.weight, { signed: false, decimals: 1 })}；前三大合計 ${formatPercent(top3, { signed: false, decimals: 1 })}` +
-          (industry ? `；${industry.label}佔 ${formatPercent(industry.weight, { signed: false, decimals: 1 })}。` : "。"),
-        rows: [...holdings].sort((a, b) => b.weight - a.weight).slice(0, 3).map((h) => ({ label: h.name, value: formatPercent(h.weight, { signed: false, decimals: 1 }) })),
+        text: verdict ? `${facts}${verdict}` : facts,
+        rows: [...holdings].sort((a, b) => b.weight - a.weight).slice(0, 3).map((h) => ({ label: h.name, value: p(h.weight) })),
+        links: [{ label: "看配置", to: "/", search: { view: "allocation" } }],
         asOf,
       }
     }

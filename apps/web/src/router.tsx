@@ -8,7 +8,7 @@ import { LedgerPage } from "@/pages/ledger/LedgerPage"
 export const STOCK_TABS = ["overview", "valuation", "financials", "chips", "dividends", "events", "discussions"] as const
 export type StockTab = (typeof STOCK_TABS)[number]
 
-export const LEDGER_VIEWS = ["holdings", "transactions", "dividends", "performance"] as const
+export const LEDGER_VIEWS = ["holdings", "transactions", "dividends", "performance", "allocation"] as const
 export type LedgerView = (typeof LEDGER_VIEWS)[number]
 export interface LedgerSearch {
   view?: LedgerView

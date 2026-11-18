@@ -37,6 +37,7 @@ VIEW_AS_READ_PATHS = (
     "/accounts",
     "/portfolio/summary",
     "/portfolio/holdings",
+    "/portfolio/allocation",  # 配置 segment: the owner's limits, read only (PUT …/limits is a write: refused)
     "/portfolio/performance",
     "/portfolio/closed",
     "/portfolio/upcoming",

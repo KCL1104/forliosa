@@ -17,6 +17,8 @@
 | `DividendRecord` | `is_demo` | 陣列型回應沒有地方放整體的 `is_demo`，所以逐筆標示 |
 | `Valuation` | `notes: string[]` | 河流圖的說明，例如「EPS ≤ 0，本益比區間留白」、「ETF 沒有 EPS」、資料來源 |
 | `PortfolioSummary.allocation` | `by_account` | 依帳戶配置（規格 4.4 有列） |
+| `PortfolioSummary` | `concentration`（2026-11-18） | 集中度與自己設的上限，和 `GET /portfolio/allocation` 同一份（見下方「持倉配置」） |
+| `GET /portfolio/allocation`、`PUT /portfolio/allocation/limits` | 新端點（2026-11-18） | 帳本「配置」分段 |
 | ~~`GET /accounts/{id}/holdings`~~ | ~~新端點~~ | 2026-11-14 取消「只記持股」，連同 `PUT` 一起移除 |
 | `GET /transactions/{id}` | 新端點 | 讀單筆交易 |
 | `GET /health` | 新端點 | 部署健康檢查，含各資料源狀態 |
@@ -4649,4 +4651,62 @@ AI 工具給的價格不受影響。CLAUDE.md 的 Yahoo 例外多了一句。
 - **已知限制**：存檔開始以前的除息資料我們沒有（除息預告與計算結果都是存檔以後才存），股票基準在那段期間只算價格、不含股利，成員自己的股利照帳本紀錄算，
   所以「比 0050 多／少」在那段偏向成員；畫面用「元大台灣50在 … 以前只算價格，不含股利」說清楚。要補的話可以讓回補一起存 Yahoo 的除息事件、只用在存檔以前的基準，
   但那是新的資料用途，待負責人決定。
+
+## 2026-11-18 持倉配置（`services/allocation.py`；`GET /portfolio/allocation`、`PUT /portfolio/allocation/limits`）
+
+負責人 2026-11-18：持倉配置第一版，全部照建議（1A、2A、3A、4A、6A、7A、9A）。合約見〈持倉配置（2026-11-18）〉。
+
+- **同一批數字**：`/portfolio/summary` 的 `allocation.by_*` 與 `concentration`、`/portfolio/allocation`、AI 工具 `get_portfolio_summary`、
+  `GET /ai/suggestions` 的「會不會太集中」都從 `allocation.compute` 來。`PortfolioState` 多帶 `db` 與 `user`（`compute_state` 填入），
+  所以 `portfolio.summary(state, md)` 的呼叫端不用改；分類要讀存檔（基金類型、公司基本資料、SEC SIC），上限要讀擁有者的偏好。
+  `portfolio.py` 只改了 `summary` 的配置那一段（原本的 `_allocation`、`MARKET_LABELS`／`CURRENCY_LABELS`／`TYPE_LABELS` 搬到 `allocation.py`），
+  績效的程式沒動。
+- **合約的變動（不是新增）**：`allocation.by_industry` 的台股 ETF 不再是一塊 `ETF`，改成 `etf_*` 類別；沒有產業的從 `其他` 改成
+  `unclassified`／「未分類」（前端把小塊併成「其他」，不能撞名）；美股從內建 8 檔的中文產業（「科技硬體」「半導體」）改成新聞的 12 類
+  （`us_tech`「美股科技」、`us_semis`「美股半導體」…）。`by_type` 會把名稱看得出是 ETF 的美股算成 ETF。前端 `ai/suggestions.ts` 的
+  `concentrationStats` 原本用 `key !== "ETF"` 排除 ETF，要改讀 `summary.concentration`。
+- **ETF 類別比負責人的五類多兩類**：`etf_futures` 期貨 ETF（代號 …U：黃金、原油、黃豆、銅、VIX、美元指數）與 `etf_balanced` 平衡型 ETF
+  （…T，2025 起的股債平衡）。這兩種不是五類裡的任何一種，硬塞會說錯；`etf_other` ETF（未分類）留給真的看不出來的（沒有字尾、也沒有
+  基金基本資料的上櫃 ETF，例如 006201 元大富櫃50）。順序：槓桿／反向 → 期貨 → 債券（含 …D 主動債券：看它持有什麼）→ 平衡 → 主動 → 海外 → 國內。
+  2026-11-18 對過證交所 t187ap47_L 全部 278 檔：上市的債券 ETF（…B）被歸在「國外成分證券指數股票型基金」，所以先看字尾；00716R
+  華頓S&P布蘭特反1 是期貨信託基金，照字尾算槓桿／反向。
+- **上櫃 ETF**：t187ap47_L 只有上市。金管會 11109 的「類型代號」（AH11 國內股票、AH13 槓桿反向、AH21–25 海外、AL11／AL21 主動）可以補
+  沒有字尾的上櫃 ETF，但 `fund_nav.py` 沒有存這一欄（`COLUMNS` 只留 5 欄），這次沒加；上櫃 ETF 大多是 …B，影響很小。
+- **美股 ETF**：內建的 6 檔（`catalog.US_ETF_CODES`）都是股票指數基金，算「海外股票型 ETF」（台灣投資人的角度，和 00646 元大S&P500 同一類）。
+  SEC 的 `company_tickers.json` 只有自己申報的那些 ETF（商品、貨幣、加密資產信託、少數 UIT），而且一律標成股票；`looks_like_us_fund`
+  看名稱（`ETF`、`iShares`、`SPDR`、`ProShares`、`Direxion`、`CurrencyShares`、`Invesco DB`、`… Gold Trust`、`United States Oil Fund` …）。
+  2026-11-18 用本機存檔的 10,404 個代號對過：判斷成 ETF 的 131 個全都是 ETF／信託（商品、貨幣、加密資產、SPY、DIA、MDY）；
+  Northern Trust、Federal Realty Investment Trust、HomeTrust、GAMCO 與 PIMCO 的封閉式基金都不會被當成 ETF。
+  名稱看得出是 ETF、但看不出類別（SPDR Gold Trust、ProShares Trust II）就是 ETF（未分類）。持倉表的 `type` 不變。
+- **美股產業**：`news.taxonomy.us_sector`（新聞的對照表優先，否則 SIC 代碼）。SIC 來自 `sec_companies.profile`，每天的 SEC 工作只抓
+  `type == "stock"` 的持有／觀察代號，所以剛買的美股第一天可能是「未分類」。名稱判斷成 ETF 的不看 SIC（GLD 的 SIC 6221 會被算成金融）。
+- **SIC 6221 一律是基金**（審查修正，2026-11-18）：名稱沒被認出來的商品池、加密資產信託（Grayscale Solana／Litecoin／Chainlink／Stellar
+  Lumens Trust、Grayscale Digital Large Cap Fund、Volatility Shares Trust、Franklin Templeton Holdings Trust）原本走 SIC，6000–6799
+  會落到「美股金融」，被算成個股、進最大產業與兩種上限。現在 `classify` 讀到 SIC 6221（Commodity Contracts Brokers & Dealers，這些
+  信託都申報這個）就當成 ETF（`us_etf_class`，多半是 ETF（未分類））；`_US_FUND` 也多認加密資產名稱＋Trust／Fund、「Trust (SOL)」
+  這種括號代號（`(THE)` 不算）、Volatility Shares。沒有存檔（`db=None`）或 SIC 還沒抓到時，這種名稱看不出來的是「未分類」個股，
+  不會被猜成金融；所以「類型不受存檔影響」只剩這一個例外（測試寫明）。
+- **`fx`**（審查修正）：配置回應多了 `fx: {"USD": …}`（`allocation.fx_rates`，`FxBook.latest`，只列這個範圍有的外幣）。原本前端從
+  全部帳戶的持股反推匯率（四捨五入後的市值 ÷（股數 × 價格）），只看台股帳戶時也會印「美股依匯率」。
+- **上限存在哪裡**：`users.preferences["allocation_limits"] = {"holding": 0.3, "industry": null}`，沒有新的 migration（目前的 head 還是
+  `0027_channel_four_switches`）。`Preferences` schema 沒有這個欄位，`GET /me` 不列出、`PATCH /me/preferences` 不能改（StrictModel 會 422），
+  但改其他偏好時會保留（`{**preferences_of(user), **changes}`）。讀的時候範圍外或格式不對的值當作沒設（`limits_of`）。
+  為什麼不用 `/me/preferences`：查看別人的資產時 `GET /me` 回的是查看者自己的偏好，配置分段要的是擁有者的上限。
+- **單一個股上限不看 ETF**：負責人選的名稱是「單一個股上限」；0050 佔 70% 不該被說成超過個股上限。「最大一檔」照舊包含 ETF（事實）。
+  `over_limits` 比的是序列化後的比例（6 位小數）`> limit`，剛好等於不算超過。
+- **AI 面板「會不會太集中」**（`ai/suggestions.concentrated`）：有設上限時只看 `over_limits`（使用者自己的規則取代面板的門檻）；
+  沒設時照舊用 15%／45%／40%，數字改讀 `summary.concentration`（最大產業不含 ETF 類別與未分類）。回答本身在前端，前端要跟著改。
+- **即時更新**：`realtime/capture._h_user` 在 `allocation_limits` 改變時送自己的 `ledger`（沒有 `account_id`）和
+  `LedgerFanout(positions=False, feed=False)`（只有 `ledger.viewas`，群組不送）。`test_route_coverage` 加了 `portfolio.put_allocation_limits`。
+- **唯讀查看**：`/portfolio/allocation` 加進 `VIEW_AS_READ_PATHS`；`can_edit_limits` 看 `scope.view_scope(db)`。
+- **沒做**：現金（9A）、ETF 看穿（7A）、目標配置、配置歷史。帳本表頭那一行與圓環圖是前端。
+- **最大一檔是 ETF 時的「超過上限」**（審查修正，前端）：`top_holding` 含 ETF、`over_limits` 的 holding 不含 ETF，所以 0050 佔 45%、
+  台積電 32%、上限 30% 時，超過的是台積電。前端 `overNote` 多回 `onTop`（最大那一項本身在清單裡），不是的話「超過上限」不接在 ETF 後面：
+  表頭那一行另外寫「1 檔超過上限」，配置分段放在「你設定的上限」那一格／那一列。後端不用改。
+- **前端**（`apps/web/src/pages/ledger/AllocationView.tsx`、`lib/allocation.ts`）：查詢鍵放在 `["portfolio", "allocation", …]` 底下，
+  `ledger` 事件與記交易後的重抓都會帶到；改上限後重抓 `portfolio` 與 `ai/suggestions`。超過與否、「最大一檔」「最大產業」都照後端的
+  `concentration`／`over_limits`，前端不自己比；只做顯示上的整理：最多 5 塊有顏色、其餘併成「其他」（只多 1 塊不併），產業的 ETF 類別收在
+  一列「ETF」底下，前 5 大在持股 4–5 檔時改寫前 3 大、3 檔以下不放。美股的匯率照持倉算（市值 ÷ 股數 × 收盤價），回應裡沒有另外給。
+  AI 面板的回答（規則版，不經過模型）在 `ai/suggestions.ts`：設了上限才寫「超過你設定的上限：台積電 39.6%（上限 30%）」，沒有建議。
+  mock（`api/mock/allocation.ts`）照同一套規則，`?limits=30,50` 預設上限（截圖用）。
 

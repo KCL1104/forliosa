@@ -49,6 +49,7 @@ mock 預設模擬後端的 `DATA_POLICY=commercial`（只用可商用資料）�
 | `/discussions?discuss=suspended` | 討論：有公開暱稱，公開發言被站方暫停 7 天 |
 | `/discussions?discuss=member` | 討論：示範使用者不是站方管理員（預設是，頭像選單有「站方管理」）；`?discuss=default` 切回 |
 | `/?import=admins` | 匯入（匯入對帳單、匯入庫存）只開給站方管理員，和後端的 `IMPORT_STATEMENTS=admins` 一樣（配 `?discuss=member` 看一般帳號沒有入口）；`?import=off` 誰都沒有；`?import=all` 切回預設（所有登入的帳號） |
+| `/?view=allocation&limits=30,50` | 帳本「配置」分段，自己設了上限（單一個股 30%、單一產業 50%；只設一個寫 `-`，例如 `?limits=-,40`）；`?limits=none` 清掉（預設沒有上限，和後端一樣） |
 | `/settings?terms=updated` | 條款有新版本、這個帳號還沒確認：內容最上面一行「服務條款與隱私權政策已更新」；`?terms=default` 切回（預設沒有啟用版本） |
 
 mock 的討論資料在記憶體裡（重新載入就回到示範資料）：8 則公開主題、家族投資 3 則、大學同學 1 則，含一則被站方隱藏的回覆、兩則待處理的檢舉與一筆停權。

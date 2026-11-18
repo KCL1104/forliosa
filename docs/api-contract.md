@@ -255,6 +255,8 @@
 |---|---|---|
 | GET | `/portfolio/summary?account_id=` | `PortfolioSummary`（不帶 `account_id` 為全部帳戶） |
 | GET | `/portfolio/holdings?account_id=` | `Holding[]` |
+| GET | `/portfolio/allocation?account_id=` | `PortfolioAllocation`：帳本「配置」分段（2026-11-18，見下方「持倉配置」） |
+| PUT | `/portfolio/allocation/limits` | 自己設的上限 `{holding, industry}`（整組取代，null＝不設）→ `AllocationLimits` |
 | GET | `/portfolio/records` | 每個帳戶有幾筆紀錄（清除所有持倉的確認框；2026-11-17，見下方「清除所有持倉」） |
 | DELETE | `/portfolio/records?account_id=`｜`?all_accounts=true`＆`pause_plans=` | 清除所有持倉：一個帳戶或全部帳戶的**每一筆紀錄**（不能復原；帳戶留著） |
 | GET | `/portfolio/performance?range=1Y&benchmark=0050.TW&account_id=` | `Performance`；`range`：`1D`、`5D`、`MTD`、`1M`、`3M`、`6M`、`YTD`、`1Y`、`ALL`（`1D`／`5D` 以交易日計，第一點是基準收盤；`MTD` 從上月最後收盤起，M5 新增）；`benchmark` 省略時用使用者偏好，可為任何商品或 `^TAIEXTR` |
@@ -275,10 +277,13 @@
   "day_change_pct": 0.0124,
   "allocation": {
     "by_market":   [{"key": "TWSE", "label": "上市", "value": 2500000, "weight": 0.76}],
-    "by_industry": [{"key": "半導體業", "label": "半導體業", "value": 1800000, "weight": 0.55}],
+    "by_industry": [{"key": "半導體業", "label": "半導體業", "value": 1800000, "weight": 0.55},
+                    {"key": "etf_tw_equity", "label": "國內股票型 ETF", "value": 600000, "weight": 0.18}],
     "by_currency": [{"key": "TWD", "label": "新台幣", "value": 2900000, "weight": 0.88}],
-    "by_type":     [{"key": "etf", "label": "ETF", "value": 900000, "weight": 0.27}]
+    "by_type":     [{"key": "etf", "label": "ETF", "value": 900000, "weight": 0.27}],
+    "by_account":  [{"key": "acc_01J...", "label": "永豐－一般", "value": 2900000, "weight": 0.88}]
   },
+  "concentration": { ... },       // 2026-11-18：和 GET /portfolio/allocation 的 concentration 一模一樣（見「持倉配置」）
   "upcoming_dividends": [{"symbol": "0056.TW", "name": "元大高股息", "ex_dividend_date": "2026-11-20", "cash_dividend": 0.866, "estimated_amount": 8660}],
   "is_demo": true
 }
@@ -896,7 +901,7 @@
 **以唯讀身分查看**：前端在請求加上標頭 `X-Forliosa-View-As: <delegation_id>`（CORS `allow_headers` 包含它）。以路由白名單實作，預設拒絕：
 
 1. **使用者資料端點**只允許這些 `GET`：`/accounts`、`/portfolio/summary`、`/portfolio/holdings`、`/portfolio/performance`、
-   `/portfolio/closed`、`/portfolio/upcoming`、`/transactions`、`/transactions/{id}`、`/instruments/{symbol}/position`、
+   `/portfolio/allocation`（2026-11-18；上限是授權者的、只能看）、`/portfolio/closed`、`/portfolio/upcoming`、`/transactions`、`/transactions/{id}`、`/instruments/{symbol}/position`、
    `/instruments/{symbol}/position/history`、`/instruments/{symbol}/events`。回應以授權者身分計算，**而且授權者只有授權範圍內的帳戶**
    （`allocation.by_account`、`upcoming` 的定期定額、`events` 的 `mine`／`amount_estimate` 都只算範圍內）；`account_id` 參數超出範圍回 404。
 2. **不讀使用者資料的端點**忽略這個標頭：商品搜尋、`/instruments/{symbol}`、報價、K 線、某一天的收盤（`/instruments/{symbol}/close`）、估值、月營收、股利、總覽、盤中、籌碼、財務、
@@ -2231,8 +2236,8 @@ data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
 
 | 事件 | payload | 誰會收到 | 什麼時候 |
 |---|---|---|---|
-| `ledger` | `account_id?` | 自己 | 交易新增／修改／刪除（含匯入一批只送一次、整檔刪除、股利自動入帳；合併批次 4 後也含清除所有持倉、匯入庫存，每個帳戶一次）、帳戶新增／修改／刪除、成本法改變（沒有 `account_id`）。唯讀查看別人時忽略 |
-| `ledger.viewas` | `delegation_id` | 授權給我看的人改了帳本、而且範圍涵蓋那個帳戶 | 同上；只在正在查看這個授權時重抓 |
+| `ledger` | `account_id?` | 自己 | 交易新增／修改／刪除（含匯入一批只送一次、整檔刪除、股利自動入帳；合併批次 4 後也含清除所有持倉、匯入庫存，每個帳戶一次）、帳戶新增／修改／刪除、成本法改變、配置上限改變（2026-11-18；這兩個沒有 `account_id`）。唯讀查看別人時忽略 |
+| `ledger.viewas` | `delegation_id` | 授權給我看的人改了帳本、而且範圍涵蓋那個帳戶 | 同上（配置上限：每個授權都送，群組不送）；只在正在查看這個授權時重抓 |
 | `recurring` | — | 自己 | 定期定額新增／修改／刪除／暫停 |
 | `watchlist` | — | 自己 | 觀察清單 |
 | `me` | — | 自己 | 顯示名稱、頭像、偏好、公開暱稱、條款、會員方案、群組加值包（付款人）、討論停權 |
@@ -2286,3 +2291,100 @@ data: {"account_id":"acc_01J...","o":"t_x82kq1m9"}
 - **盲測**（2026-11-17 開給所有人的那幾期、投票、揭曉的事件）2026-11-18 拿掉了：每一份都是公開的，照一般的 `market.reports` 送。
 - **不送**：LangSearch 新聞、舊日期的參考收盤（唯讀）。
 - **前端**：同一批事件裡好幾個動作對到同一個查詢時只重抓一次；等待中的 `resync` 再來一個就併成一次（部署後不會一個分頁重抓兩輪）。
+
+## 持倉配置（2026-11-18）
+
+產品負責人 2026-11-18（全部照建議）：帳本加第 4 個分段「配置」（持倉・紀錄・績效・配置，延遲載入），一個圓環圖加百分比清單，
+分組可以切換每一檔／產業／市場／帳戶／幣別／類型（預設每一檔），可以只看一個帳戶；集中度只寫事實；使用者自己設上限才標示；
+ETF 拆類別、不看穿成分股；美股補 12 類產業；不算現金。後端：`services/allocation.py`。
+
+### `GET /portfolio/allocation?account_id=`
+
+和 `/portfolio/holdings?account_id=` 同一批持股、同一個價格、同一個匯率（還沒有收盤價的以成本計，代號列在 `valued_at_cost`）。
+不帶 `account_id` 是全部帳戶；帳戶不是自己的（或不在授權範圍）回 404。
+
+```json
+// PortfolioAllocation
+{
+  "as_of": "2026-11-18T13:30:00+08:00",
+  "account_id": null,
+  "market_value": 3284500,          // 每一種分組加起來都等於這個數（四捨五入到分）
+  "fx": {"USD": 32.47},             // 換成新台幣的匯率（和持倉同一個）；只列這個範圍裡有的外幣，只有台股時是 {}
+  "groups": {
+    "holding":  [{"key": "2330.TW", "label": "台積電", "value": 1050000, "weight": 0.3197, "is_etf": false, "symbols": ["2330.TW"]}],
+    "industry": [{"key": "半導體業", "label": "半導體業", "value": 1400000, "weight": 0.4262, "is_etf": false, "symbols": ["2330.TW", "2454.TW"]},
+                 {"key": "etf_tw_equity", "label": "國內股票型 ETF", "value": 900000, "weight": 0.274, "is_etf": true, "symbols": ["0050.TW"]},
+                 {"key": "us_semis", "label": "美股半導體", "value": 300000, "weight": 0.0913, "is_etf": false, "symbols": ["NVDA"]},
+                 {"key": "unclassified", "label": "未分類", "value": 20000, "weight": 0.0061, "is_etf": false, "symbols": ["XYZ"]}],
+    "market":   [{"key": "TWSE", "label": "上市", ...}],     // TWSE 上市、TPEX 上櫃、US 美股
+    "account":  [{"key": "acc_01J...", "label": "永豐－一般", ...}],
+    "currency": [{"key": "TWD", "label": "新台幣", ...}],    // TWD、USD
+    "type":     [{"key": "stock", "label": "股票", ...}, {"key": "etf", "label": "ETF", "is_etf": true, ...}]
+  },
+  "concentration": {
+    "holdings_count": 8,
+    "top_holding": {"symbol": "2330.TW", "name": "台積電", "weight": 0.3197, "is_etf": false},
+    "top3_weight": 0.62,
+    "top5_weight": 0.81,
+    "top_industry": {"key": "半導體業", "label": "半導體業", "weight": 0.4262},   // 不含 ETF 類別與「未分類」
+    "etf_weight": 0.274,
+    "limits": {"holding": 0.3, "industry": null},                                // 自己設的；null＝沒設
+    "over_limits": [{"kind": "holding", "key": "2330.TW", "label": "台積電", "weight": 0.3197, "limit": 0.3}]
+  },
+  "valued_at_cost": [],
+  "can_edit_limits": true,          // 查看別人的資產時 false
+  "is_demo": false
+}
+```
+
+- **每一塊**：`value` 新台幣、`weight` 佔總市值的比例；由大到小（一樣大時依 key）。`symbols` 是這一塊裡的持股，大的在前
+  （`account`：同一檔放在兩個帳戶會出現在兩塊）。前端最多 5 塊有顏色，第 6 塊以後併成「其他 N 檔／項」（只多出 1 塊時不併，那一塊用鉛筆灰），點開列出後面幾塊；產業的 ETF 類別收在一列「ETF」底下。這裡不併。
+- **產業**（`industry`）：
+  - 台股個股：官方產業別（商品主檔的產業，沒有時用 `company_profiles`），key 就是產業名稱（`半導體業`）。
+  - 美股個股：新聞標籤用的 12 類（`us_semis` 美股半導體、`us_tech` 美股科技、`us_comm` 美股通訊服務、`us_consumer_disc` 美股非必需消費、
+    `us_staples` 美股必需消費、`us_health` 美股醫療保健、`us_financials` 美股金融、`us_industrials` 美股工業、`us_energy` 美股能源、
+    `us_materials` 美股原物料、`us_utilities` 美股公用事業、`us_real_estate` 美股房地產）：大型公司照新聞的對照表，其他看 SEC 申報的
+    SIC 代碼（美國政府公開資料；每天的 SEC 工作會抓有人持有的美股）。還沒抓到 SIC 的是「未分類」。
+    SIC 6221（商品期貨／加密資產信託、波動率基金都申報這個）不算「美股金融」，算 ETF（見「類型」）。
+  - ETF：不看穿成分股，分類別（`is_etf: true`）：`etf_tw_equity` 國內股票型 ETF、`etf_foreign_equity` 海外股票型 ETF、`etf_bond` 債券 ETF、
+    `etf_leveraged` 槓桿／反向 ETF、`etf_active` 主動式 ETF、`etf_futures` 期貨 ETF、`etf_balanced` 平衡型 ETF、`etf_other` ETF（未分類）。
+    台股 ETF 先看代號字尾（L、R 槓桿反向；U 期貨；B、D 債券；T 平衡；A 主動），沒有字尾再看證交所 t187ap47_L 的「基金類型」
+    （國內成分→國內股票型；國外成分、境外、連結式→海外股票型；只有上市 ETF 有這份）。美股 ETF：內建的 VOO、QQQ、SPY、DIA、ONEQ、SMH 是
+    海外股票型；其他的名稱寫了槓桿／反向、債券、主動才分，否則 ETF（未分類）。
+  - 判斷不了的：`unclassified` 未分類（以前叫「其他」；改名是為了不和前端併起來的「其他」撞名）。
+- **類型**（`type`）：SEC 的代號清單把 GLD、IBIT、USO、ProShares Trust II 這類美股 ETF 列成公司；名稱看得出是 ETF／信託的算 ETF
+  （`PIMCO Dynamic Income Fund` 這類封閉式基金不算）。名稱看不出來、但 SEC 的 SIC 是 6221 的（Grayscale 各種加密資產信託、
+  Volatility Shares Trust、Franklin Templeton Holdings Trust…）也算 ETF，類別多半是 ETF（未分類）；還沒抓到 SIC 時是「未分類」的個股，
+  不會被猜成美股金融。所以這些商品不算進最大產業、單一產業上限，也不受單一個股上限檢查。`GET /portfolio/holdings` 的 `type` 不變。
+- **集中度**（`concentration`）只寫事實：最大一檔（含 ETF）、前 3／前 5 大合計、最大產業（不含 ETF 類別與「未分類」）、ETF 合計。
+  系統沒有預設門檻；使用者有設上限時，`over_limits` 列出超過的項目（`weight > limit`，比的是 6 位小數的比例）：
+  `holding`＝單一個股上限，**只看個股、不看 ETF**；`industry`＝單一產業上限（ETF 類別與未分類不算）。前端寫「超過你設定的 30%」，用墨色，不用紅綠。
+  `top_holding` 可能是 ETF（`is_etf`），這時超過單一個股上限的一定是別檔：前端不把「超過上限」接在最大一檔後面，另外寫「1 檔超過上限」。
+  `top_industry` 是 null 時：`etf_weight` 約等於 1 才是「都是 ETF」，否則是個股還沒有產業資料。
+- **匯率**（`fx`）：持倉換成新台幣用的那一個（`FxBook.latest`），前端「美股依匯率 32.47 換成新台幣」用它，不從持股反推；
+  這個範圍裡沒有美元持股（例如只看台股帳戶）時是 `{}`，前端不寫這一行。
+- **`/portfolio/summary`**：`allocation.by_*` 用同一套分類（`by_industry` 的 ETF 不再是一塊「ETF」，沒有產業的不再是「其他」），
+  另外多了 `concentration`（和這裡一模一樣），帳本表頭那一行（「最大一檔 台積電 32%・前 5 大 68%」）和 AI 面板用它。
+- **隱私模式**：前端遮 `value`、留 `weight`。
+
+### `PUT /portfolio/allocation/limits`
+
+```json
+// AllocationLimitsIn（兩個都送；沒送或 null＝不設）
+{"holding": 0.3, "industry": null}
+// → AllocationLimits
+{"holding": 0.3, "industry": null}
+```
+
+- 每個值 0.01–1（1%–100%），存到小數第 4 位；超出範圍、多送欄位 → 422 `validation_error`。
+- 存在使用者偏好（`users.preferences.allocation_limits`），`GET /me` 的 `preferences` 不列出；只透過這兩個端點讀寫。
+  `GET /me/export` 會帶出來。
+- 查看別人的資產時 403 `read_only`（中介層）；`GET /portfolio/allocation` 照常回授權者的上限，`can_edit_limits: false`。
+- 即時更新：送 `me`、自己的 `ledger`（沒有 `account_id`）和每個授權的 `ledger.viewas`；群組不送。
+
+### AI
+
+- `get_portfolio_summary` 工具多了 `concentration`（同上）。說明寫：上限只能說成「超過你設定的 30%」，不建議買賣。
+- 「我的持股會不會太集中？」（`GET /ai/suggestions`）：使用者有設上限時，只在 `over_limits` 不是空的才出現；沒設時照舊（最大一檔 ≥ 15%、
+  前三大 ≥ 45%、最大產業 ≥ 40%），數字改用 `summary.concentration`。前端的離線規則（`apps/web/src/ai/suggestions.ts`）要跟著改。
+

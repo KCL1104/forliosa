@@ -1,13 +1,15 @@
 import type {
   Account,
-  AllocationSlice,
+  AllocationLimits,
   Holding,
   Performance,
   PerformancePoint,
   PerformanceRange,
+  PortfolioAllocation,
   PortfolioSummary,
   Transaction,
 } from "../types"
+import { allocationOf, summaryAllocation } from "./allocation"
 import { syncAutoDividends } from "./auto-dividends"
 import { hasUsCloses, US_AS_OF, US_SESSION } from "./commercial"
 import { computePreview } from "./fees"
@@ -312,21 +314,64 @@ export function buildHoldings(txns: Transaction[], accountId?: string, commercia
   return rows.sort((a, b) => b.market_value - a.market_value)
 }
 
-const MARKET_LABEL: Record<string, string> = { TWSE: "上市", TPEX: "上櫃", US: "美股" }
-const CURRENCY_LABEL: Record<string, string> = { TWD: "新台幣", USD: "美元" }
-const TYPE_LABEL: Record<string, string> = { stock: "個股", etf: "ETF" }
-
-function groupBy(holdings: Holding[], key: (h: Holding) => string, label: (k: string) => string): AllocationSlice[] {
-  const total = holdings.reduce((s, h) => s + h.market_value, 0)
-  const map = new Map<string, number>()
-  for (const h of holdings) map.set(key(h), (map.get(key(h)) ?? 0) + h.market_value)
-  return [...map.entries()]
-    .map(([k, value]) => ({ key: k, label: label(k), value: r2(value), weight: total ? r4(value / total) : 0 }))
-    .sort((a, b) => b.value - a.value)
+/**
+ * 每一檔在每個帳戶的市值（配置的「帳戶」那一組）：照每個帳戶的股數分這一檔的市值，加起來剛好等於這一檔的市值
+ * （和後端 `HoldingRow.by_account_value` 一樣，同一個價格與匯率）
+ */
+function valueByAccount(txns: Transaction[], holdings: Holding[], accountId: string | undefined, commercial: boolean): Map<string, Map<string, number>> {
+  const ids = accountId ? [accountId] : [...new Set(txns.map((t) => t.account_id))]
+  const qty = new Map<string, Map<string, number>>()
+  for (const id of ids) {
+    for (const h of buildHoldings(txns, id, commercial)) {
+      const m = qty.get(h.symbol) ?? new Map<string, number>()
+      m.set(id, h.quantity)
+      qty.set(h.symbol, m)
+    }
+  }
+  const out = new Map<string, Map<string, number>>()
+  for (const h of holdings) {
+    const per = qty.get(h.symbol) ?? new Map<string, number>()
+    const totalQty = [...per.values()].reduce((a, b) => a + b, 0)
+    out.set(h.symbol, new Map([...per].map(([id, q]) => [id, totalQty ? (h.market_value * q) / totalQty : 0])))
+  }
+  return out
 }
 
-export function buildSummary(txns: Transaction[], accountId?: string, commercial = false): PortfolioSummary {
+export interface AllocationOptions {
+  /** 使用者自己設的上限（預設都沒設） */
+  limits?: AllocationLimits
+  /** 帳戶名稱（「帳戶」那一組；預設示範帳戶） */
+  accounts?: Account[]
+}
+
+const NO_LIMITS: AllocationLimits = { holding: null, industry: null }
+
+function allocationParts(txns: Transaction[], holdings: Holding[], accountId: string | undefined, commercial: boolean, opts: AllocationOptions) {
+  return allocationOf(holdings, valueByAccount(txns, holdings, accountId, commercial), opts.accounts ?? ACCOUNTS, opts.limits ?? NO_LIMITS)
+}
+
+/** `GET /portfolio/allocation`：和 `buildHoldings` 同一批持股、同一個價格與匯率 */
+export function buildAllocation(txns: Transaction[], accountId: string | undefined, commercial: boolean, opts: AllocationOptions & { canEditLimits: boolean }): PortfolioAllocation {
   const holdings = buildHoldings(txns, accountId, commercial)
+  const { groups, concentration, total } = allocationParts(txns, holdings, accountId, commercial, opts)
+  const onlyUs = commercial && holdings.some((h) => h.price !== null) && holdings.every((h) => h.price === null || h.market === "US")
+  return {
+    as_of: onlyUs ? US_AS_OF : MOCK_AS_OF,
+    account_id: accountId ?? null,
+    market_value: r2(total),
+    fx: holdings.some((h) => h.currency === "USD") ? { USD: FX_NOW } : {},
+    groups,
+    concentration,
+    valued_at_cost: holdings.filter((h) => h.price === null).map((h) => h.symbol),
+    can_edit_limits: opts.canEditLimits,
+    is_demo: !commercial,
+  }
+}
+
+export function buildSummary(txns: Transaction[], accountId?: string, commercial = false, opts: AllocationOptions = {}): PortfolioSummary {
+  const holdings = buildHoldings(txns, accountId, commercial)
+  // 配置與集中度：和 `GET /portfolio/allocation` 同一套分類（2026-11-18）
+  const { groups, concentration } = allocationParts(txns, holdings, accountId, commercial, opts)
   const state = replay(txns, MOCK_TODAY, accountId)
   const mv = holdings.reduce((s, h) => s + h.market_value, 0)
   const cost = holdings.reduce((s, h) => s + h.cost_basis, 0)
@@ -363,12 +408,8 @@ export function buildSummary(txns: Transaction[], accountId?: string, commercial
     total_return_pct: cost ? r4(total / cost) : 0,
     day_change: r2(day),
     day_change_pct: mv - day ? r4(day / (mv - day)) : 0,
-    allocation: {
-      by_market: groupBy(holdings, (h) => h.market, (k) => MARKET_LABEL[k] ?? k),
-      by_industry: groupBy(holdings, (h) => h.industry ?? "其他", (k) => k),
-      by_currency: groupBy(holdings, (h) => h.currency, (k) => CURRENCY_LABEL[k] ?? k),
-      by_type: groupBy(holdings, (h) => h.type, (k) => TYPE_LABEL[k] ?? k),
-    },
+    allocation: summaryAllocation(groups),
+    concentration,
     upcoming_dividends: upcoming,
     is_demo: !commercial,
   }

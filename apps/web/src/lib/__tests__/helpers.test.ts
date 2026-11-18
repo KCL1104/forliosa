@@ -3,7 +3,7 @@ import { computePreview } from "@/api/mock/fees"
 import { ACCOUNTS } from "@/api/mock/ledger"
 import { findInstrument } from "@/api/mock/instruments"
 import type { ValuationPoint } from "@/api/types"
-import { foldSlices } from "../allocation"
+import { foldRows, type AllocRow } from "../allocation"
 import { aggregate } from "../kline"
 import { buildRiver, invalidRuns } from "../valuation"
 
@@ -44,13 +44,14 @@ describe("K 線聚合", () => {
   })
 })
 
-describe("配置圖：超過 6 類合併為「其他」", () => {
+describe("配置圖：最多 5 塊有顏色，其餘合併為「其他」", () => {
   it("合併尾巴並保留權重總和", () => {
-    const slices = Array.from({ length: 8 }, (_, i) => ({ key: `k${i}`, label: `L${i}`, value: 10 - i, weight: 0.1 }))
-    const folded = foldSlices(slices)
+    const rows: AllocRow[] = Array.from({ length: 8 }, (_, i) => ({ key: `k${i}`, label: `L${i}`, sub: "", value: 10 - i, weight: 0.1, limit: null, over: false, tone: null }))
+    const folded = foldRows(rows, "industry")
     expect(folded).toHaveLength(6)
     expect(folded[5]!.label).toBe("其他 3 項")
     expect(folded[5]!.weight).toBeCloseTo(0.3)
+    expect(folded.map((r) => r.tone)).toEqual([0, 1, 2, 3, 4, "other"])
   })
 })
 

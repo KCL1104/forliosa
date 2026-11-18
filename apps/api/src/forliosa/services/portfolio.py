@@ -28,14 +28,12 @@ from forliosa.marketdata.base import InstrumentInfo, QuoteData, code_of_symbol, 
 from forliosa.marketdata.indices import is_index
 from forliosa.marketdata.service import MarketData
 from forliosa.models import User
+from forliosa.services.allocation import summary_parts
 from forliosa.services.coverage import ymd
 from forliosa.services.ledger_io import FxBook, FxLoader, LedgerInput, load_ledger_input, preferences_of
 from forliosa.services.reference_close import price_only_note, reference_note, valuation_prices
 from forliosa.timeutil import iso_taipei, last_tw_trading_day, now_taipei, today_taipei, tw_trading_days
 
-MARKET_LABELS = {"TWSE": "上市", "TPEX": "上櫃", "US": "美股"}
-CURRENCY_LABELS = {"TWD": "新台幣", "USD": "美元"}
-TYPE_LABELS = {"stock": "股票", "etf": "ETF"}
 UPCOMING_DAYS = 60
 
 
@@ -80,6 +78,10 @@ class PortfolioState:
     is_demo: bool
     as_of: datetime
     demo_data_allowed: bool = True  # personal: a holding without a quote is flagged is_demo (valued at cost)
+    # The request's session and the ledger's owner: the allocation reads archived profiles (ETF classes, SEC SIC codes)
+    # and the owner's own limits (``services.allocation``)
+    db: Session | None = None
+    user: User | None = None
 
 
 def _info(md: MarketData, symbol: str) -> InstrumentInfo | None:
@@ -145,7 +147,7 @@ def compute_state(db: Session, user: User, md: MarketData, account_id: str | Non
         is_demo = True
     rows = sorted(grouped.values(), key=lambda r: r.market_value, reverse=True)
     as_of = max(as_of_candidates or us_as_of) if (as_of_candidates or us_as_of) else now_taipei()
-    return PortfolioState(inp, led, rows, fx, is_demo, as_of, md.demo_data_allowed)
+    return PortfolioState(inp, led, rows, fx, is_demo, as_of, md.demo_data_allowed, db, user)
 
 
 def holdings(state: PortfolioState) -> list[dict[str, Any]]:
@@ -186,15 +188,6 @@ def holdings(state: PortfolioState) -> list[dict[str, Any]]:
     return out
 
 
-def _allocation(groups: dict[str, Decimal], labels: dict[str, str] | None, total: Decimal) -> list[dict]:
-    items = sorted(groups.items(), key=lambda kv: kv[1], reverse=True)
-    return [
-        {"key": k, "label": (labels or {}).get(k, k), "value": ser.money(v),
-         "weight": ser.ratio(v / total) if total else 0.0}
-        for k, v in items
-    ]
-
-
 def summary(state: PortfolioState, md: MarketData) -> dict[str, Any]:
     rows = state.rows
     mv = sum((r.market_value for r in rows), ZERO)
@@ -204,22 +197,7 @@ def summary(state: PortfolioState, md: MarketData) -> dict[str, Any]:
     dividends = sum((e.net_twd for e in state.ledger.income), ZERO)
     total_pnl = unreal + realized + dividends
     day = sum((r.day_change for r in rows), ZERO)
-
-    by_market: dict[str, Decimal] = defaultdict(Decimal)
-    by_industry: dict[str, Decimal] = defaultdict(Decimal)
-    by_currency: dict[str, Decimal] = defaultdict(Decimal)
-    by_type: dict[str, Decimal] = defaultdict(Decimal)
-    by_account: dict[str, Decimal] = defaultdict(Decimal)
-    for r in rows:
-        v = r.market_value
-        info = r.info
-        by_market[info.market if info else market_of_symbol(r.symbol)] += v
-        by_industry[(info.industry if info else None) or "其他"] += v
-        by_currency[r.currency] += v
-        by_type[info.type if info else "stock"] += v
-        for acc, av in r.by_account_value.items():
-            by_account[acc] += av
-    account_names = {a.id: a.name for a in state.inp.accounts}
+    allocation, concentration = summary_parts(state, md)  # 持倉配置: the same numbers as /portfolio/allocation
 
     upcoming = []
     today = today_taipei()
@@ -252,13 +230,8 @@ def summary(state: PortfolioState, md: MarketData) -> dict[str, Any]:
         "total_return_pct": ser.ratio(total_pnl / cost) if cost else None,
         "day_change": ser.money(day),
         "day_change_pct": ser.ratio(day / (mv - day)) if mv - day else None,
-        "allocation": {
-            "by_market": _allocation(by_market, MARKET_LABELS, mv),
-            "by_industry": _allocation(by_industry, None, mv),
-            "by_currency": _allocation(by_currency, CURRENCY_LABELS, mv),
-            "by_type": _allocation(by_type, TYPE_LABELS, mv),
-            "by_account": _allocation(by_account, account_names, mv),
-        },
+        "allocation": allocation,
+        "concentration": concentration,
         "upcoming_dividends": upcoming,
         "is_demo": is_demo,
     }

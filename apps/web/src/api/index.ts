@@ -1,5 +1,5 @@
 import { createHttpAdapter } from "./http"
-import { createMockAdapter, readMockDiscussion, readMockHistory, readMockImport, readMockScenario, readMockSignedIn, readMockTerms } from "./mock/adapter"
+import { createMockAdapter, readMockDiscussion, readMockHistory, readMockImport, readMockLimits, readMockScenario, readMockSignedIn, readMockTerms } from "./mock/adapter"
 import { readMockPolicy } from "./mock/commercial"
 import { readMockReports } from "./mock/market-reports"
 import { mockMarketNow, mockToday, readMockMarket } from "./mock/market-status"
@@ -22,7 +22,7 @@ const mockMarket = baseUrl ? undefined : readMockMarket()
 
 export const api: ForliosaApi = baseUrl
   ? createHttpAdapter(baseUrl)
-  : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn(), market: mockMarket, discussion: readMockDiscussion(), terms: readMockTerms(), history: readMockHistory(), reports: readMockReports(), importStatements: readMockImport() })
+  : createMockAdapter({ scenario: readMockScenario(), policy: readMockPolicy(), signedIn: readMockSignedIn(), market: mockMarket, discussion: readMockDiscussion(), terms: readMockTerms(), history: readMockHistory(), reports: readMockReports(), importStatements: readMockImport(), allocationLimits: readMockLimits() })
 
 /** 真實後端的 base URL（mock 模式為 undefined）；AI 對話的 SSE 串流直接用它 */
 export const apiBaseUrl: string | undefined = baseUrl
