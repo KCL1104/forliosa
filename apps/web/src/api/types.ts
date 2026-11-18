@@ -671,6 +671,70 @@ export interface AllocationSlice {
   weight: number
 }
 
+// ── 持倉配置（帳本「配置」分段；產品負責人 2026-11-18，見 docs/api-contract.md「持倉配置」） ──
+/** 六種分組：每一檔、產業、市場、帳戶、幣別、類型 */
+export type AllocationGrouping = "holding" | "industry" | "market" | "account" | "currency" | "type"
+
+/**
+ * `GET /portfolio/allocation` 的一塊：`value` 新台幣（和持倉同一個價格與匯率）、`weight` 佔總市值；由大到小。
+ * 產業的 key：台股是官方產業名稱（`半導體業`）；美股 12 類（`us_semis`…）；ETF 類別（`etf_tw_equity`…，`is_etf`）；`unclassified` 未分類。
+ */
+export interface AllocationGroupSlice extends AllocationSlice {
+  /** holding：這一檔是 ETF；industry：ETF 類別；type：ETF */
+  is_etf: boolean
+  /** 這一塊裡的持股代號，大的在前 */
+  symbols: string[]
+}
+
+/** 自己設的上限（0.3 = 30%）；null＝沒設。系統沒有預設門檻 */
+export interface AllocationLimits {
+  /** 單一個股上限：只看個股，ETF 不算 */
+  holding: number | null
+  /** 單一產業上限：ETF 類別與未分類不算產業 */
+  industry: number | null
+}
+
+export interface OverLimit {
+  kind: "holding" | "industry"
+  /** holding：代號（2330.TW）；industry：產業的 key */
+  key: string
+  label: string
+  weight: number
+  limit: number
+}
+
+/** 集中度（只有事實）：和 `/portfolio/summary` 的 `concentration` 一模一樣 */
+export interface Concentration {
+  holdings_count: number
+  /** 最大一檔（含 ETF） */
+  top_holding: { symbol: string; name: string; weight: number; is_etf: boolean } | null
+  top3_weight: number
+  top5_weight: number
+  /** 最大產業：不含 ETF 類別與「未分類」 */
+  top_industry: { key: string; label: string; weight: number } | null
+  etf_weight: number
+  limits: AllocationLimits
+  /** 超過自己設的上限的項目（`weight > limit`）；沒設上限就是空的 */
+  over_limits: OverLimit[]
+}
+
+/** `GET /portfolio/allocation?account_id=` */
+export interface PortfolioAllocation {
+  as_of: string
+  account_id: string | null
+  /** 每一種分組加起來都等於這個數 */
+  market_value: number
+  /** 換成新台幣的匯率（和持倉同一個）；只列這個範圍裡有的外幣（`{ USD: 32.47 }`），只有台股時是空的 */
+  fx: Record<string, number>
+  groups: Record<AllocationGrouping, AllocationGroupSlice[]>
+  concentration: Concentration
+  /** 還沒有收盤價、以成本計的持股代號 */
+  valued_at_cost: string[]
+  /** false：查看別人的資產（唯讀），上限只能看 */
+  can_edit_limits: boolean
+  is_demo: boolean
+}
+
 export interface UpcomingDividend {
   symbol: string
   name: string
@@ -699,6 +763,8 @@ export interface PortfolioSummary {
     by_type: AllocationSlice[]
     by_account?: AllocationSlice[]
   }
+  /** 集中度（2026-11-18）：和 `/portfolio/allocation` 的一模一樣（帳本表頭那一行、AI 面板用）；舊的後端沒有 */
+  concentration?: Concentration
   upcoming_dividends: UpcomingDividend[]
   is_demo: boolean
 }
@@ -2767,6 +2833,10 @@ export interface ForliosaApi {
   // 投資組合
   getPortfolioSummary(accountId?: string): Promise<PortfolioSummary>
   getHoldings(accountId?: string): Promise<Holding[]>
+  /** `GET /portfolio/allocation`：帳本「配置」分段（和 `getHoldings` 同一批持股、價格、匯率）；帳戶不在範圍內 404 */
+  getAllocation(accountId?: string): Promise<PortfolioAllocation>
+  /** `PUT /portfolio/allocation/limits`：整組取代（null＝不設）；查看別人的資產時 403 `read_only` */
+  putAllocationLimits(limits: AllocationLimits): Promise<AllocationLimits>
   /** `types: "recurring"`：只回定期定額扣款（不算持股與股利，AI 面板在每一頁都讀） */
   getUpcoming(days?: number, opts?: { types?: "recurring" }): Promise<UpcomingItem[]>
   getClosedPositions(accountId?: string): Promise<ClosedRound[]>

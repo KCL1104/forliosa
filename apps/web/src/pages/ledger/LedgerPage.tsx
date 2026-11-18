@@ -36,18 +36,19 @@ import { useLedgerPrefs } from "./ledger-prefs"
 const TransactionsView = lazy(() => import("./TransactionsView").then((m) => ({ default: m.TransactionsView })))
 const DividendsView = lazy(() => import("./DividendsView").then((m) => ({ default: m.DividendsView })))
 const PerformanceView = lazy(() => import("./PerformanceView").then((m) => ({ default: m.PerformanceView })))
+const AllocationView = lazy(() => import("./AllocationView").then((m) => ({ default: m.AllocationView })))
 
 /**
- * 分段只有三個：持倉・紀錄・績效（產品負責人 2026-11-14：只需要記買進，賣出與股利不用特別去記——交易和股利
- * 併成「紀錄」，想查才點）。網址的 `view` 不變：`transactions`、`dividends` 都屬於「紀錄」，在分段裡面用兩個小分頁切換。
- * 順序也是數字鍵 1–3 的對應。
+ * 分段：持倉・紀錄・績效・配置（產品負責人 2026-11-14：只需要記買進，賣出與股利不用特別去記——交易和股利
+ * 併成「紀錄」，想查才點；2026-11-18 加第 4 段「配置」，延遲載入，帳本首頁不會變重）。網址的 `view` 不變：
+ * `transactions`、`dividends` 都屬於「紀錄」，在分段裡面用兩個小分頁切換。順序也是數字鍵 1–4 的對應。
  */
-type Segment = "holdings" | "records" | "performance"
-const SEGMENT_KEYS: readonly Segment[] = ["holdings", "records", "performance"]
+type Segment = "holdings" | "records" | "performance" | "allocation"
+const SEGMENT_KEYS: readonly Segment[] = ["holdings", "records", "performance", "allocation"]
 const segmentOf = (view: LedgerView): Segment => (view === "transactions" || view === "dividends" ? "records" : view)
 const viewOf = (segment: Segment): LedgerView => (segment === "records" ? "transactions" : segment)
 
-/** 帳本（首頁）：主數字 → 總資產走勢 → 本週事項 → 分段（持倉・紀錄・績效）→ 清單 */
+/** 帳本（首頁）：主數字 → 總資產走勢 → 本週事項 → 分段（持倉・紀錄・績效・配置）→ 清單 */
 export function LedgerPage() {
   const search = useSearch({ from: "/" }) as LedgerSearch
   const navigate = useNavigate()
@@ -70,11 +71,11 @@ export function LedgerPage() {
 
   const setView = (v: LedgerView) => void navigate({ to: "/", search: (s: LedgerSearch) => ({ ...s, view: v === "holdings" ? undefined : v, symbol: v === "transactions" ? s.symbol : undefined }), replace: true })
 
-  // 數字鍵 1–3 切換分段（持倉・紀錄・績效）：焦點在輸入框、選單、對話框裡，或同時按著修飾鍵時不動作
+  // 數字鍵 1–4 切換分段（持倉・紀錄・績效・配置）：焦點在輸入框、選單、對話框裡，或同時按著修飾鍵時不動作
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.metaKey || e.ctrlKey || e.altKey || e.isComposing) return
-      const segment = SEGMENT_KEYS[["1", "2", "3"].indexOf(e.key)]
+      const segment = SEGMENT_KEYS[["1", "2", "3", "4"].indexOf(e.key)]
       if (!segment) return
       const next = viewOf(segment)
       const t = e.target instanceof Element ? e.target : null
@@ -110,6 +111,7 @@ export function LedgerPage() {
             { value: "holdings", label: "持倉", count: counts.holdings, shortcut: "1" },
             { value: "records", label: "紀錄", shortcut: "2" },
             { value: "performance", label: "績效", shortcut: "3" },
+            { value: "allocation", label: "配置", shortcut: "4" },
           ]}
         />
         {pending > 0 && !readOnly && (
@@ -138,8 +140,9 @@ export function LedgerPage() {
               記一筆
             </Button>
             <div className="flex shrink-0 gap-2 self-stretch lg:hidden">
+              {/* 400px 以下放不下四段＋匯入＋「＋」（360px 的分段會斷成直排），匯入改從記一筆裡的「匯入庫存或對帳單」進去 */}
               {canImport && (
-                <button type="button" onClick={() => openImport()} className="press grid place-items-center rounded-sm border border-ctl px-3 text-base text-ink hover:bg-hov">
+                <button type="button" onClick={() => openImport()} className="press grid place-items-center rounded-sm border border-ctl px-3 text-base text-ink hover:bg-hov max-[400px]:hidden">
                   匯入
                 </button>
               )}
@@ -201,6 +204,7 @@ export function LedgerPage() {
               </div>
             )}
             {view === "performance" && <PerformanceView />}
+            {view === "allocation" && <AllocationView />}
           </Suspense>
         )}
       </div>

@@ -130,16 +130,16 @@ describe("帳本主數字與分段", () => {
     expect(week.querySelector("svg")).toBeNull()
   })
 
-  it("數字鍵 1–3 切換分段（持倉・紀錄・績效）；焦點在輸入框裡、或按著修飾鍵時不動作", async () => {
+  it("數字鍵 1–4 切換分段（持倉・紀錄・績效・配置）；焦點在輸入框裡、或按著修飾鍵時不動作", async () => {
     const router = renderApp("/")
     const tabs = await screen.findByRole("tablist", { name: "帳本內容" }, T)
-    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+/g, "").trim())).toEqual(["持倉", "紀錄", "績效"])
+    expect(within(tabs).getAllByRole("tab").map((t) => t.textContent?.replace(/\d+/g, "").trim())).toEqual(["持倉", "紀錄", "績效", "配置"])
     const view = () => (router.state.location.search as { view?: string }).view
     fireEvent.keyDown(document.body, { key: "2" })
     await waitFor(() => expect(view()).toBe("transactions"))
     fireEvent.keyDown(document.body, { key: "3" })
     await waitFor(() => expect(view()).toBe("performance"))
-    fireEvent.keyDown(document.body, { key: "4" }) // 沒有第四段
+    fireEvent.keyDown(document.body, { key: "5" }) // 沒有第五段
     fireEvent.keyDown(document.body, { key: "2", metaKey: true })
     const input = document.createElement("input")
     document.body.append(input)

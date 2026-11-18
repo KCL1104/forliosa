@@ -100,13 +100,28 @@ def ledger_questions(holdings: list[dict], summary: dict | None, today: date) ->
             if (n := _days(today, d.get("ex_dividend_date"))) is not None and 0 <= n <= DIVIDEND_WINDOW_DAYS]
     if soon:
         out.append(_q("dividends_next", "下個月我能領多少股利？", "下個月", "能領多少股利？"))
-    weights = sorted((h.get("weight") or 0 for h in holdings), reverse=True)
-    industries = [i for i in ((summary or {}).get("allocation") or {}).get("by_industry", []) if i.get("key") != "ETF"]
-    top_industry = max((i.get("weight") or 0 for i in industries), default=0)
-    if (weights and weights[0] >= CONCENTRATION["single"]) or sum(weights[:3]) >= CONCENTRATION["top3"] \
-            or top_industry >= CONCENTRATION["industry"]:
+    if concentrated(holdings, summary):
         out.append(_q("concentration", "我的持股會不會太集中？", "我的持股", "會不會太集中？"))
     return out[:MAX_QUESTIONS]
+
+
+def concentrated(holdings: list[dict], summary: dict | None) -> bool:
+    """Whether 「會不會太集中」 is asked: the summary's ``concentration`` (the numbers of the 配置 segment). When the
+    user set limits of their own (2026-11-18, 4A), only those count: asked when something is above them. Otherwise
+    the panel's old cues: the largest holding ≥ 15%, the top three ≥ 45% or the largest industry (ETFs and 未分類 left
+    out) ≥ 40%. Without a summary, the holdings' weights alone."""
+    conc = (summary or {}).get("concentration") or {}
+    limits = conc.get("limits") or {}
+    if any(v is not None for v in limits.values()):
+        return bool(conc.get("over_limits"))
+    if conc:
+        top = (conc.get("top_holding") or {}).get("weight") or 0
+        top3 = conc.get("top3_weight") or 0
+        industry = (conc.get("top_industry") or {}).get("weight") or 0
+    else:
+        weights = sorted((h.get("weight") or 0 for h in holdings), reverse=True)
+        top, top3, industry = (weights[0] if weights else 0), sum(weights[:3]), 0
+    return top >= CONCENTRATION["single"] or top3 >= CONCENTRATION["top3"] or industry >= CONCENTRATION["industry"]
 
 
 def stock_questions(info: Any, quote: Any, overview: dict | None, position: dict | None, why: dict | None,

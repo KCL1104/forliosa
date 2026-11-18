@@ -98,6 +98,7 @@ ANNOUNCES: dict[str, frozenset[str]] = {
     "imports.read_positions": T("ai.usage"),  # reads only; its AiUsage row
     "imports.commit_positions": T("ledger", "group.ledger"),  # buys (capture) + 以券商為準's bulk delete (explicit)
     "portfolio.clear_records": T("ledger", "group.ledger", "recurring"),  # bulk delete (explicit) + paused plans
+    "portfolio.put_allocation_limits": T("me", "ledger", "ledger.viewas"),  # users.preferences; viewers see them
     "market_reports.vote": T("admin.reports", "market.reports"),  # market.reports: the voter's own tabs only
     "admin.grant_member": T("me"),
     "admin.revoke_member": T("me"),
@@ -393,6 +394,14 @@ def s_reveal(w: W):
     assert w.rt.one("market.reports").to == ("all",)  # every reader of the open blind test sees the result
 
 
+def s_allocation_limits(w: W):
+    r = w.a.post(f"{API}/delegations", json={"viewer_user_id": w.b_id, "scope": "all"})
+    assert r.status_code == 201, r.text
+    w.act(lambda: w.a.put(f"{API}/portfolio/allocation/limits", json={"holding": 0.3, "industry": None}))
+    assert w.rt.one("ledger.viewas").to == (f"u:{w.b_id}",)
+    assert "group.ledger" not in w.rt.topics()  # no group sees the limits
+
+
 SCENARIOS: dict[str, Callable[[W], None]] = {
     "users.logout": lambda w: w.act(lambda: w.b.post(f"{API}/auth/logout")),
     "users.patch_me": lambda w: w.act(lambda: w.a.patch(f"{API}/me", json={"display_name": "新名字"})),
@@ -502,6 +511,7 @@ SCENARIOS: dict[str, Callable[[W], None]] = {
     "admin_reports.vote": s_admin_vote,
     "admin_reports.reveal": s_reveal,
     "portfolio.clear_records": s_clear_records,
+    "portfolio.put_allocation_limits": s_allocation_limits,
     "imports.commit_positions": s_commit_positions,
     "market_reports.vote": s_member_vote,
 }

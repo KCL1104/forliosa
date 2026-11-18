@@ -52,8 +52,8 @@ export function RangeChips<T extends string>({
 }
 
 /**
- * 分段（帳本：持倉・交易・股利・績效）：1px 鉛筆灰外框，選取＝選取語法 (b)（`sel-chip`）。
- * role=tablist；方向鍵切換。觸控與手機版面每一段 44px 高。
+ * 分段（帳本：持倉・紀錄・績效・配置）：1px 鉛筆灰外框，選取＝選取語法 (b)（`sel-chip`）。
+ * role=tablist；方向鍵切換。觸控與手機版面每一段 44px 高；字不換行（320px 也是一行兩個字）。
  * `shortcut`：這一段的鍵盤快速鍵（由頁面自己處理按鍵；這裡只用 `aria-keyshortcuts` 告訴輔助科技）。
  */
 export function Segmented<T extends string>({
@@ -96,7 +96,7 @@ export function Segmented<T extends string>({
             tabIndex={active ? 0 : -1}
             onKeyDown={(e) => onKeyDown(e, i)}
             onClick={() => onChange(o.value)}
-            className="press sel-chip relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base text-ink-2 before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-11 max-lg:flex-1 max-lg:px-2 pointer-coarse:h-11"
+            className="press sel-chip relative flex h-[34px] items-center justify-center gap-1.5 rounded-sm px-4 text-base whitespace-nowrap text-ink-2 before:absolute before:inset-x-0 before:-inset-y-1 max-lg:h-11 max-lg:flex-1 max-lg:px-1 pointer-coarse:h-11"
           >
             {o.label}
             {o.count !== undefined && o.count !== null && <span className="num text-sm font-normal opacity-85 max-lg:hidden">{o.count}</span>}

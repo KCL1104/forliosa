@@ -278,6 +278,8 @@ def get_portfolio_summary(ctx: ToolContext, args: dict[str, Any]) -> Any:
                 "dividend_income", "total_pnl", "total_return_pct", "day_change", "day_change_pct", "is_demo"),
         "allocation": {k: [_pick(i, "label", "value", "weight") for i in (v or [])[:6]]
                        for k, v in alloc.items() if k in ("by_industry", "by_market", "by_type", "by_account")},
+        # 集中度 (the 配置 segment's numbers): the user's own limits and what is above them; null limits = none set
+        "concentration": s.get("concentration"),
         "upcoming_dividends": (s.get("upcoming_dividends") or [])[:6],
         "accounts": _account_list(ctx),
         "currency": "TWD",
@@ -1319,8 +1321,11 @@ def _search_news_label(a: dict[str, Any]) -> str:
 TOOLS: list[ToolSpec] = sorted([
     ToolSpec("get_portfolio_summary",
              "The signed-in user's portfolio totals: market value, cost, unrealized/realized P&L, dividends, today's "
-             "change, allocation by industry/market/type/account, upcoming dividends, and the list of accounts. Call "
-             "this for questions about overall performance, how much they made today, allocation or concentration.",
+             "change, allocation by industry/market/type/account (ETFs by class, never looked through), "
+             "concentration (largest holding, top 3 / top 5, largest industry, the limits the user set themselves "
+             "and what is above them), upcoming dividends, and the list of accounts. Call this for questions about "
+             "overall performance, how much they made today, allocation or concentration. Concentration is facts: "
+             "name a limit only as the user's own (「超過你設定的 30%」), never suggest trades.",
              {"account_id": _ACCOUNT}, (), get_portfolio_summary, lambda a: "查看投資組合"),
     ToolSpec("get_holdings",
              "The user's current holdings, one row per stock: shares, average cost, price, market value, today's "

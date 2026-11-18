@@ -551,6 +551,85 @@ class Allocation(BaseModel):
     by_account: list[AllocationItem] = []
 
 
+# -- 持倉配置（帳本「配置」分段；負責人 2026-11-18，forliosa.services.allocation） -------------------------------------
+class AllocationLimits(BaseModel):
+    holding: float | None = Field(default=None, description="單一個股上限（0.3 = 30%；只看個股，ETF 不算）；null＝沒設")
+    industry: float | None = Field(default=None, description="單一產業上限（ETF 與未分類不算產業）；null＝沒設")
+
+
+class AllocationLimitsIn(StrictModel):
+    """兩個都送（PUT 整組取代）：沒送或 null＝不設。1%–100%，存到小數第 4 位。"""
+
+    holding: float | None = Field(default=None, ge=0.01, le=1)
+    industry: float | None = Field(default=None, ge=0.01, le=1)
+
+
+class TopHolding(BaseModel):
+    symbol: str
+    name: str
+    weight: float
+    is_etf: bool
+
+
+class TopIndustry(BaseModel):
+    key: str
+    label: str
+    weight: float
+
+
+class OverLimit(BaseModel):
+    kind: Literal["holding", "industry"]
+    key: str = Field(description="holding：代號（2330.TW）；industry：產業的 key")
+    label: str
+    weight: float
+    limit: float
+
+
+class Concentration(BaseModel):
+    """集中度（只有事實）：最大一檔、前 3／前 5 大合計、最大產業（不含 ETF 與未分類）、ETF 合計，
+    以及超過自己設的上限的項目（沒設上限就是空的；系統沒有預設門檻）。"""
+
+    holdings_count: int
+    top_holding: TopHolding | None
+    top3_weight: float
+    top5_weight: float
+    top_industry: TopIndustry | None
+    etf_weight: float
+    limits: AllocationLimits
+    over_limits: list[OverLimit]
+
+
+class AllocationSlice(BaseModel):
+    key: str
+    label: str
+    value: float = Field(description="新台幣（和持倉同一個價格與匯率）")
+    weight: float
+    is_etf: bool = Field(description="holding：這一檔是 ETF；industry：ETF 類別；type：ETF")
+    symbols: list[str] = Field(description="這一塊裡的持股代號，大的在前")
+
+
+class AllocationGroups(BaseModel):
+    holding: list[AllocationSlice]
+    industry: list[AllocationSlice]
+    market: list[AllocationSlice]
+    account: list[AllocationSlice]
+    currency: list[AllocationSlice]
+    type: list[AllocationSlice]
+
+
+class PortfolioAllocation(BaseModel):
+    as_of: str
+    account_id: str | None
+    market_value: float
+    fx: dict[str, float] = Field(default_factory=dict,
+                                 description="換成新台幣的匯率（和持倉同一個）；只列這個範圍裡有的外幣，例如 USD")
+    groups: AllocationGroups
+    concentration: Concentration
+    valued_at_cost: list[str] = Field(description="還沒有收盤價、以成本計的持股代號")
+    can_edit_limits: bool = Field(description="false：查看別人的資產（唯讀），上限只能看")
+    is_demo: bool
+
+
 class UpcomingDividend(BaseModel):
     symbol: str
     name: str
@@ -572,6 +651,7 @@ class PortfolioSummary(BaseModel):
     day_change: float
     day_change_pct: float | None
     allocation: Allocation
+    concentration: Concentration
     upcoming_dividends: list[UpcomingDividend]
     is_demo: bool
 

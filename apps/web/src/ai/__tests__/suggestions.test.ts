@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import type { Holding, PortfolioSummary } from "@/api/types"
+import type { Concentration, Holding, PortfolioSummary } from "@/api/types"
 import { answerFor, classifyQuestion, fallbackAnswer, isConcentrated, ledgerSuggestions, stockSuggestions, type AiContext } from "@/ai/suggestions"
 import { MASK } from "@/lib/format"
 
@@ -29,6 +29,54 @@ describe("帳本的建議問題（依資料自動出現，最多 3 個）", () =
   it("集中門檻：單一持股 ≥ 15%、前三大 ≥ 45%、單一產業 ≥ 40%", () => {
     expect(isConcentrated([h({ weight: 0.16 })])).toBe(true)
     expect(isConcentrated([h({ weight: 0.14 }), h({ weight: 0.14 }), h({ weight: 0.14 })])).toBe(false)
+  })
+})
+
+describe("會不會太集中：和「配置」分段同一份數字（summary.concentration，2026-11-18）", () => {
+  const conc = (p: Partial<Concentration> = {}): Concentration => ({
+    holdings_count: 9,
+    top_holding: { symbol: "2330.TW", name: "台積電", weight: 0.396, is_etf: false },
+    top3_weight: 0.613,
+    top5_weight: 0.784,
+    top_industry: { key: "半導體業", label: "半導體業", weight: 0.563 },
+    etf_weight: 0.225,
+    limits: { holding: null, industry: null },
+    over_limits: [],
+    ...p,
+  })
+  const withConc = (c: Concentration) => ({ ...summary(), concentration: c }) as PortfolioSummary
+  const holdings = [h({ weight: 0.12 }), h({ symbol: "2317.TW", name: "鴻海", weight: 0.11 })]
+
+  it("沒設上限：用集中度的數字照舊的提示門檻（最大產業不含 ETF）", () => {
+    expect(isConcentrated(holdings, withConc(conc()))).toBe(true)
+    expect(isConcentrated(holdings, withConc(conc({ top_holding: { symbol: "x", name: "x", weight: 0.1, is_etf: false }, top3_weight: 0.3, top_industry: { key: "y", label: "y", weight: 0.2 } })))).toBe(false)
+  })
+  it("自己設了上限：只看自己的上限——有超過才問，沒超過就不問（就算數字很集中）", () => {
+    const limits = { holding: 0.5, industry: 0.6 }
+    expect(isConcentrated(holdings, withConc(conc({ limits })))).toBe(false)
+    const over = conc({ limits: { holding: 0.3, industry: null }, over_limits: [{ kind: "holding", key: "2330.TW", label: "台積電", weight: 0.396, limit: 0.3 }] })
+    expect(isConcentrated(holdings, withConc(over))).toBe(true)
+    expect(ledgerSuggestions({ holdings, summary: withConc(conc({ limits })) }, TODAY).map((x) => x.kind)).not.toContain("concentration")
+  })
+  it("回答只寫事實：最大一檔、前 5 大、最大產業（不含 ETF）；有上限時寫超過了哪些，不說該怎麼做；連到配置", () => {
+    const ctx = (c: Concentration): AiContext => ({ route: "ledger", ledger: { holdings, summary: withConc(c) } })
+    const plain = answerFor("concentration", { ctx: ctx(conc()), privacy: false, today: TODAY })!
+    expect(plain.text).toBe("最大的一檔是台積電，佔 39.6%；前 5 大合計 78.4%；最大的產業是半導體業，佔 56.3%（不含 ETF）。")
+    expect(plain.links).toEqual([{ label: "看配置", to: "/", search: { view: "allocation" } }])
+    const over = conc({
+      limits: { holding: 0.3, industry: 0.5 },
+      over_limits: [
+        { kind: "holding", key: "2330.TW", label: "台積電", weight: 0.396, limit: 0.3 },
+        { kind: "industry", key: "半導體業", label: "半導體業", weight: 0.563, limit: 0.5 },
+      ],
+    })
+    const a = answerFor("concentration", { ctx: ctx(over), privacy: true, today: TODAY })!
+    expect(a.text).toContain("超過你設定的上限：台積電 39.6%（上限 30%）、半導體業 56.3%（上限 50%）。")
+    expect(a.text).not.toMatch(/建議|應該|減碼|賣出/)
+    const under = answerFor("concentration", { ctx: ctx(conc({ limits: { holding: 0.5, industry: null } })), privacy: false, today: TODAY })!
+    expect(under.text).toContain("沒有超過你設定的上限。")
+    // 持股 5 檔以下：寫前 3 大
+    expect(answerFor("concentration", { ctx: ctx(conc({ holdings_count: 4 })), privacy: false, today: TODAY })!.text).toContain("前 3 大合計 61.3%")
   })
 })
 

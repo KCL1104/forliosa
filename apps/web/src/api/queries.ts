@@ -6,6 +6,7 @@ import {
 } from "./types"
 import type {
   AccountInput,
+  AllocationLimits,
   ReportKind,
   ReportsStatus,
   ReportVariant,
@@ -30,6 +31,8 @@ export const qk = {
   accounts: ["accounts"] as const,
   summary: (accountId?: string) => ["portfolio", "summary", accountId ?? "all"] as const,
   holdings: (accountId?: string) => ["portfolio", "holdings", accountId ?? "all"] as const,
+  /** 配置分段（2026-11-18）：放在 portfolio 底下，記了交易、改了上限（`ledger` 事件）就跟著重新讀 */
+  allocation: (accountId?: string) => ["portfolio", "allocation", accountId ?? "all"] as const,
   /** 「只記持股」帳戶的快照：放在 portfolio 底下，存了快照、刪了帳戶就跟著重新讀 */
   performance: (range: PerformanceRange, accountId?: string, benchmark?: string) =>
     ["portfolio", "performance", range, accountId ?? "all", benchmark ?? "default"] as const,
@@ -143,6 +146,24 @@ export function useSummary(accountId?: string) {
 }
 export function useHoldings(accountId?: string) {
   return useQuery(holdingsQuery(accountId))
+}
+/** 配置分段：換帳戶時先留著上一個帳戶的數字（不閃骨架） */
+export function useAllocation(accountId?: string) {
+  return useQuery({ queryKey: qk.allocation(accountId), queryFn: () => api.getAllocation(accountId), staleTime: 30_000, placeholderData: keepPreviousData })
+}
+/**
+ * 設定自己的上限（整組取代）：配置、總資產的集中度（帳本表頭那一行、AI 面板）都跟著重新讀；
+ * 連真實後端時 AI 的建議問題（「會不會太集中」照上限出現）也重新讀
+ */
+export function useUpdateAllocationLimits() {
+  const qc = useQueryClient()
+  return useMutation({
+    mutationFn: (limits: AllocationLimits) => api.putAllocationLimits(limits),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["portfolio"] })
+      void qc.invalidateQueries({ queryKey: ["ai", "suggestions"] })
+    },
+  })
 }
 export function usePerformance(range: PerformanceRange, accountId?: string, benchmark?: string) {
   return useQuery({

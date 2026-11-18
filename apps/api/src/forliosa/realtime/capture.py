@@ -432,6 +432,11 @@ def _h_user(obj, kind, ch, add):
             add(LedgerFanout(uid, feed=False))
         if old.get("daily_briefing") != new.get("daily_briefing"):
             add(event("ai.briefings", {}, user(uid)))
+        if old.get("allocation_limits") != new.get("allocation_limits"):
+            # 配置上限 (services.allocation): the owner's ledger pages and every viewer of a delegation show them;
+            # no group sees them
+            add(event("ledger", {}, user(uid)))
+            add(LedgerFanout(uid, positions=False, feed=False))
 
 
 def _h_member(obj, kind, ch, add):
